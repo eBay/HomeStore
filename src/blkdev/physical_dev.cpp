@@ -27,17 +27,17 @@ ssize_t pwritev(int fd, const struct iovec *iov, int iovcnt, off_t offset)
 }
 #endif
 
-PhysicalDev::PhysicalDev(string devName, int oflags)
+PhysicalDev::PhysicalDev(string devname, int oflags)
 {
 	uint64_t size;
 	struct stat statBuf;
 
-	stat(devName.c_str(), &statBuf);
+	stat(devname.c_str(), &statBuf);
 	size = (uint64_t) statBuf.st_size;
 
 	// Create a physical device chunk with full device
-	setDevName(devName);
-	setDevfd(open(devName.c_str(), oflags)); // TODO: Capture errors and throw exception
+	setDevName(devname);
+	set_devfd(open(devname.c_str(), oflags)); // TODO: Capture errors and throw exception
 
 	// TODO: Get the unique ID of the device (UUID) and stash in here.
 	// When persisting write that to the super block.
@@ -53,17 +53,17 @@ PhysicalDev::~PhysicalDev()
 	}
 }
 
-PhysicalDevChunk *PhysicalDev::allocChunk(uint64_t reqSize)
+PhysicalDevChunk *PhysicalDev::alloc_chunk(uint64_t reqSize)
 {
-	int ind = findFreeChunk(reqSize);
+	int ind = find_free_chunk(reqSize);
 	if (ind == -1) {
-		cout << "ERROR: No more free chunks on physical dev " << getDevName() << endl;
+		cout << "ERROR: No more free chunks on physical dev " << get_devname() << endl;
 		return NULL;
 	}
 
 	PhysicalDevChunk *chunk = m_chunks[ind];
 	assert(chunk->getSize() >= reqSize);
-	chunk->setBusy(true);
+    chunk->set_busy(true);
 
 	if (chunk->getSize() > reqSize) {
 		// Create a new chunk to put remaining size;
@@ -76,9 +76,9 @@ PhysicalDevChunk *PhysicalDev::allocChunk(uint64_t reqSize)
 	return chunk;
 }
 
-void PhysicalDev::freeChunk(PhysicalDevChunk *chunk)
+void PhysicalDev::free_chunk(PhysicalDevChunk *chunk)
 {
-	int ind = chunkToInd(chunk);
+	int ind = chunk_to_ind(chunk);
 
 	// Check if previous and next chunk are free, if so make it
 	// contiguous chunk
@@ -106,7 +106,7 @@ void PhysicalDev::freeChunk(PhysicalDevChunk *chunk)
 
 BlkOpStatus PhysicalDev::write(const char *data, uint32_t size, uint64_t offset)
 {
-	ssize_t writtenSize = pwrite(getDevfd(), data, (ssize_t) size, (off_t) offset);
+	ssize_t writtenSize = pwrite(get_devfd(), data, (ssize_t) size, (off_t) offset);
 	if (writtenSize != size) {
 		perror("PhysicalDev::write error");
 		cout << "Error trying to write offset " << offset << " size = " << size << endl;
@@ -118,7 +118,7 @@ BlkOpStatus PhysicalDev::write(const char *data, uint32_t size, uint64_t offset)
 
 BlkOpStatus PhysicalDev::writev(const struct iovec *iov, int iovcnt, uint32_t size, uint64_t offset)
 {
-	ssize_t writtenSize = pwritev(getDevfd(), iov, iovcnt, offset);
+	ssize_t writtenSize = pwritev(get_devfd(), iov, iovcnt, offset);
 	if (writtenSize != size) {
 		perror("PhysicalDev:writev error");
 		cout << "Error trying to write offset " << offset << " size to write = " << size << " size written = "
@@ -131,7 +131,7 @@ BlkOpStatus PhysicalDev::writev(const struct iovec *iov, int iovcnt, uint32_t si
 
 BlkOpStatus PhysicalDev::read(char *data, uint32_t size, uint64_t offset)
 {
-	ssize_t readSize = pread(getDevfd(), data, (ssize_t) size, (off_t) offset);
+	ssize_t readSize = pread(get_devfd(), data, (ssize_t) size, (off_t) offset);
 	if (readSize != size) {
 		perror("PhysicalDev::read error");
 		cout << "Error trying to read offset " << offset << " size = " << size << endl;
@@ -143,7 +143,7 @@ BlkOpStatus PhysicalDev::read(char *data, uint32_t size, uint64_t offset)
 
 BlkOpStatus PhysicalDev::readv(const struct iovec *iov, int iovcnt, uint32_t size, uint64_t offset)
 {
-	ssize_t readSize = preadv(getDevfd(), iov, iovcnt, (off_t) offset);
+	ssize_t readSize = preadv(get_devfd(), iov, iovcnt, (off_t) offset);
 	if (readSize != size) {
 		perror("PhysicalDev::read error");
 		cout << "Error trying to read offset " << offset << " size to read = " << size << " size read = " << readSize
@@ -154,7 +154,7 @@ BlkOpStatus PhysicalDev::readv(const struct iovec *iov, int iovcnt, uint32_t siz
 	return BLK_OP_SUCCESS;
 }
 
-int PhysicalDev::chunkToInd(PhysicalDevChunk *chunk)
+int PhysicalDev::chunk_to_ind(PhysicalDevChunk *chunk)
 {
 	int ind = 0;
 	for (auto it = m_chunks.begin(); it < m_chunks.end(); it++, ind++) {
@@ -166,7 +166,7 @@ int PhysicalDev::chunkToInd(PhysicalDevChunk *chunk)
 	return -1;
 }
 
-int PhysicalDev::findFreeChunk(uint64_t reqSize)
+int PhysicalDev::find_free_chunk(uint64_t reqSize)
 {
 	// Get the slot with closest size;
 	PhysicalDevChunk *closestChunk = NULL;

@@ -1,9 +1,10 @@
 cmake_minimum_required(VERSION 3.7)
-project(libutils)
+project(blkdev)
 
 set(CMAKE_CXX_STANDARD 14)
 
 include_directories(blkdev)
+include_directories(..)
 
 set(TEST_BLKDEV_SOURCE_FILES
         blkdev.h
@@ -13,4 +14,3 @@ set(TEST_BLKDEV_SOURCE_FILES
         virtual_dev.cpp)
 
 add_executable(test_blkdev ${TEST_BLKDEV_SOURCE_FILES})
-

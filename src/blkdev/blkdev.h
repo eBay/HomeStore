@@ -1,5 +1,5 @@
 /*
- * BlkDev.h
+ * blkdev.h
  *
  *  Created on: 05-Aug-2016
  *      Author: Hari Kadayam
@@ -9,10 +9,11 @@
 #define BLKDEV_BLKDEV_H_
 
 #include <vector>
-#include "BlkAllocator.h"
+#include "blkallocator.h"
 #include <sys/uio.h>
 #include <unistd.h>
 
+//namespace omstorage { name blkdev {
 class PhysicalDev;
 class VirtualDev;
 
@@ -50,11 +51,11 @@ public:
     }
 
 	void set_start_offset(uint64_t offset) {
-		m_startOffset = offset;
+		m_start_offset = offset;
 	}
 
 	uint64_t get_start_offset()	{
-		return m_startOffset;
+		return m_start_offset;
 	}
 
     void set_size(uint64_t size) {
@@ -65,7 +66,7 @@ public:
         return m_size;
     }
 
-    void setBusy(bool busy) {
+    void set_busy(bool busy) {
         m_busy = busy;
     }
 
@@ -73,49 +74,47 @@ public:
         return m_busy;
     }
 
-    void setBlkAllocator(BlkAllocator *ba) {
-        m_blkAllocator = ba;
+    void set_blk_allocator(BlkAllocator *ba) {
+        m_blk_allocator = ba;
     }
 
-    BlkAllocator *getBlkAllocator() {
-        return m_blkAllocator;
+    BlkAllocator *get_blk_allocator() {
+        return m_blk_allocator;
     }
 
 private:
 	PhysicalDev *m_pdev;
 	VirtualDev *m_vdev;
-	uint64_t m_startOffset;
+	uint64_t m_start_offset;
 	uint64_t m_size;
 	bool m_busy;
-	BlkAllocator *m_blkAllocator;
+	BlkAllocator *m_blk_allocator;
 };
 
 class PhysicalDev
 {
 public:
-	PhysicalDev(string devName, int oflags);
+	PhysicalDev(string devname, int oflags);
 	virtual ~PhysicalDev();
 
-	PhysicalDevChunk *allocChunk(uint64_t size);
-	void freeChunk(PhysicalDevChunk *pchunk);
+	PhysicalDevChunk *alloc_chunk(uint64_t size);
+	void free_chunk(PhysicalDevChunk *pchunk);
 
-	int getDevfd() const
-	{
-		return m_devfd;
-	}
-	void setDevfd(int devfd)
-	{
-		m_devfd = devfd;
-	}
+    int get_devfd() const {
+        return m_devfd;
+    }
 
-	string getDevName() const
-	{
-		return m_devName;
-	}
-	void setDevName(string devName)
-	{
-		m_devName = devName;
-	}
+    void set_devfd(int devfd) {
+        m_devfd = devfd;
+    }
+
+    string get_devname() const {
+        return m_devname;
+    }
+
+    void setDevName(string devname) {
+        m_devname = devname;
+    }
 
 	BlkOpStatus write(const char *data, uint32_t size, uint64_t offset);
 	BlkOpStatus writev(const struct iovec *iov, int iovcnt, uint32_t size, uint64_t offset);
@@ -124,14 +123,14 @@ public:
 	BlkOpStatus readv(const struct iovec *iov, int iovcnt, uint32_t size, uint64_t offset);
 
 private:
-	string m_devName;
+	std::string m_devname;
 	int m_devfd;
 	//uint64_t m_uniqueId; // Unique ID to the device.
 
-	vector<PhysicalDevChunk *> m_chunks;
+	std::vector<PhysicalDevChunk *> m_chunks;
 
-	int findFreeChunk(uint64_t reqSize);
-	int chunkToInd(PhysicalDevChunk *chunk);
+	int find_free_chunk(uint64_t req_size);
+	int chunk_to_ind(PhysicalDevChunk *chunk);
 };
 
 class BlkDevManager
@@ -139,22 +138,22 @@ class BlkDevManager
 public:
 	BlkDevManager();
 	virtual ~BlkDevManager();
-	void addDevice(string devName);
-	vector<PhysicalDev *> getAllDevices();
-	uint32_t getDevicesCount();
+	void add_device(string devName);
+	vector<PhysicalDev *> get_all_devices();
+	uint32_t get_devices_count();
 
-	static void startInstance();
-	static BlkDevManager *getInstance();
+	static void start_instance();
+	static BlkDevManager *get_instance();
 
 private:
-	int m_openFlags;
+	int m_open_flags;
 	vector<PhysicalDev *> m_devices;
 };
 
 struct vdev_hint
 {
-	uint32_t physDevId;
-	bool canLookForOtherDev;
+	uint32_t phys_devid;
+	bool can_look_for_other_dev;
 	uint32_t temperature;
 };
 
@@ -162,28 +161,28 @@ class VirtualDev
 {
 
 public:
-	VirtualDev(uint64_t size, uint32_t nMirror, bool dynamicAlloc, bool isStripe, uint32_t devBlkSize,
-	           vector<PhysicalDev *>& phyDevList);
+	VirtualDev(uint64_t size, uint32_t nmirror, bool dynamic_alloc, bool is_stripe, uint32_t dev_blk_size,
+	           vector<PhysicalDev *>& phys_dev_list);
 	virtual ~VirtualDev();
 
 	// Getters and Setters
-	void setSize(uint64_t size)
+	void set_size(uint64_t size)
 	{
 		m_size = size;
 	}
 
-	uint64_t getSize()
+	uint64_t get_size()
 	{
 		return m_size;
 	}
 
 #if 0
-	BlkAllocStatus alloc(uint32_t size, vdev_hint *pHint, BlkSeries *blkSeries);
+	BlkAllocStatus alloc(uint32_t size, vdev_hint *phint, BlkSeries *blkSeries);
 	BlkAllocStatus alloc(uint32_t size, vdev_hint *pHint, pageid64_t *outBlkNum);
 	void free(uint64_t blkNum, uint32_t size);
 #endif
 
-	BlkAllocStatus alloc(uint32_t size, vdev_hint *pHint, Blk *outBlk);
+	BlkAllocStatus alloc(uint32_t size, vdev_hint *phint, Blk *out_blk);
 	void free(Blk &b);
 
 	BlkOpStatus write(SSDBlk &b);
@@ -217,4 +216,5 @@ private:
 	vector<PhysicalDevChunk *> m_primaryChunks;
 	vector<PhysicalDevChunk *> *m_mirrorChunks;
 };
+
 #endif /* BLKDEV_BLKDEV_H_ */

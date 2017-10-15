@@ -17,20 +17,20 @@
 #define MAX_IO_THREAD_BUF_SIZE 65536
 static __thread char __buf[MAX_IO_THREAD_BUF_SIZE];
 
-VirtualDev::VirtualDev(uint64_t size, uint32_t nMirrors, bool isDynamicAlloc, bool isStripe, uint32_t devPageSize,
-                       vector<PhysicalDev *>& physDevList)
+VirtualDev::VirtualDev(uint64_t size, uint32_t nmirror, bool dynamic_alloc, bool is_stripe, uint32_t dev_blk_size,
+                       vector<PhysicalDev *>& phys_dev_list)
 {
 	m_size = size;
-	m_physDevList = physDevList;
-	m_nMirrors = nMirrors;
+	m_physDevList = phys_dev_list;
+	m_nMirrors = nmirror;
 	m_totalAllocations = 0;
-	m_devPageSize = devPageSize;
+	m_devPageSize = dev_blk_size;
 
-	assert(nMirrors < physDevList.size()); // Mirrors should be at least one less than device list.
-	m_mirrorChunks = new vector<PhysicalDevChunk *> [nMirrors];
+	assert(nmirror < phys_dev_list.size()); // Mirrors should be at least one less than device list.
+	m_mirrorChunks = new vector<PhysicalDevChunk *> [nmirror];
 	uint32_t nChunks;
 
-	if (isStripe) {
+	if (is_stripe) {
 		m_chunkSize = ( (m_size - 1) / m_physDevList.size()) + 1;
 		nChunks = m_physDevList.size();
 	} else {
@@ -39,11 +39,11 @@ VirtualDev::VirtualDev(uint64_t size, uint32_t nMirrors, bool isDynamicAlloc, bo
 	}
 
 	for (uint32_t i = 0; i < nChunks; i++) {
-		BlkAllocator *ba = createAllocator(m_chunkSize, isDynamicAlloc);
+		BlkAllocator *ba = createAllocator(m_chunkSize, dynamic_alloc);
 		m_primaryChunks.push_back(createDevChunk(i, m_chunkSize, ba));
 
 		uint32_t nextInd = i;
-		for (uint32_t j = 0; j < nMirrors; j++) {
+		for (uint32_t j = 0; j < nmirror; j++) {
 			if ( (++nextInd) == m_physDevList.size()) {
 				nextInd = 0;
 			}
@@ -58,8 +58,8 @@ VirtualDev::~VirtualDev()
 	for (auto it = m_primaryChunks.begin(); it != m_primaryChunks.end(); it++) {
 		// Free the allocator for this chunk
 		PhysicalDevChunk *c = *it;
-		delete (c->getBlkAllocator());
-		c->setBlkAllocator(NULL);
+		delete (c->get_blk_allocator());
+        c->set_blk_allocator(NULL);
 
 		// Free the chunk itself
 		delete (c);
@@ -101,10 +101,10 @@ BlkAllocator *VirtualDev::createAllocator(uint64_t size, bool isDynamicAlloc)
 PhysicalDevChunk *VirtualDev::createDevChunk(uint32_t physInd, uint64_t chunkSize, BlkAllocator *ba)
 {
 	PhysicalDev *pdev = m_physDevList[physInd];
-	PhysicalDevChunk *c = pdev->allocChunk(chunkSize);
+	PhysicalDevChunk *c = pdev->alloc_chunk(chunkSize);
 	assert(c != NULL);
 	c->setVirtualDev(this);
-	c->setBlkAllocator(ba);
+    c->set_blk_allocator(ba);
 	return c;
 }
 
@@ -168,20 +168,20 @@ BlkAllocStatus VirtualDev::alloc(uint32_t size, vdev_hint *pHint, pageid64_t *ou
 }
 #endif
 
-BlkAllocStatus VirtualDev::alloc(uint32_t size, vdev_hint *pHint, Blk *outBlk)
+BlkAllocStatus VirtualDev::alloc(uint32_t size, vdev_hint *phint, Blk *out_blk)
 {
 	uint32_t chunkNum, startChunkNum;
 	BlkAllocStatus status;
 
 	// Do a round robin on chunks for allocations
 	vdev_hint hint;
-	if (pHint == nullptr) {
+	if (phint == nullptr) {
 		uint32_t curPhysDev = m_totalAllocations % m_primaryChunks.size();
 		hint.physDevId = curPhysDev;
 		hint.temperature = 0;
 		hint.canLookForOtherDev = true;
-		pHint = &hint;
-	} else if (pHint->physDevId >= m_physDevList.size()) {
+		phint = &hint;
+	} else if (phint->physDevId >= m_physDevList.size()) {
 		return BLK_ALLOC_INVALID_DEV;
 	}
 
@@ -191,13 +191,13 @@ BlkAllocStatus VirtualDev::alloc(uint32_t size, vdev_hint *pHint, Blk *outBlk)
 	// TODO: Right now there is only one primary chunk per device in a virtualdev.
 	// Need to support multiple chunks. In that case just using physDevId as
 	// chunk number is not right strategy.
-	chunkNum = startChunkNum = pHint->physDevId;
+	chunkNum = startChunkNum = phint->physDevId;
 	PhysicalDevChunk *chunk = NULL;
 
 	do {
 		chunk = m_primaryChunks[chunkNum];
-		status = chunk->getBlkAllocator()->alloc(size, pHint->temperature, outBlk);
-		if ( (status == BLK_ALLOC_SUCCESS) || (!pHint->canLookForOtherDev)) {
+		status = chunk->get_blk_allocator()->alloc(size, phint->temperature, out_blk);
+		if ( (status == BLK_ALLOC_SUCCESS) || (!phint->canLookForOtherDev)) {
 			break;
 		}
 		chunkNum = ((++chunkNum) % m_primaryChunks.size());
@@ -208,10 +208,10 @@ BlkAllocStatus VirtualDev::alloc(uint32_t size, vdev_hint *pHint, Blk *outBlk)
 
 		// TOD: This loop could be avoided, if we have idOffset as part of the BlKAlloc
 		// itself, something like PageIdOffset for each PhysicalDevChunk.
-		for (auto i = 0; i < outBlk->getPieces(); i++) {
-			outBlk->setPageId(i, outBlk->getPageId(i) + idOffset);
+		for (auto i = 0; i < out_blk->getPieces(); i++) {
+			out_blk->setPageId(i, out_blk->getPageId(i) + idOffset);
 		}
-		pHint->physDevId = chunkNum;
+		phint->physDevId = chunkNum;
 	}
 	return status;
 }
@@ -225,7 +225,7 @@ void VirtualDev::free(Blk &b)
 	for (auto i = 0; i < b.getPieces(); i++) {
 		b.setPageId(i, b.getPageId(i) - idOffset);
 	}
-	chunk->getBlkAllocator()->free(b);
+	chunk->get_blk_allocator()->free(b);
 }
 
 #if 0
@@ -351,7 +351,7 @@ BlkOpStatus VirtualDev::write(SSDBlk &b)
 	}
 
 	// Finally commit all the blocks written into bitmap.
-	chunk->getBlkAllocator()->commit(b);
+	chunk->get_blk_allocator()->commit(b);
 
 done:
 	return retStatus;

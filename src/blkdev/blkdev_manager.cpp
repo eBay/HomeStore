@@ -5,14 +5,14 @@
  *      Author: hkadayam
  */
 
-#include "BlkDev.h"
+#include "blkdev.h"
 #include <fcntl.h>
 
-static BlkDevManager *devMgr = NULL;
+static BlkDevManager *devmgr = NULL;
 
 BlkDevManager::BlkDevManager()
 {
-	m_openFlags = O_RDWR;
+	m_open_flags = O_RDWR;
 }
 
 BlkDevManager::~BlkDevManager()
@@ -22,27 +22,27 @@ BlkDevManager::~BlkDevManager()
 	}
 }
 
-void BlkDevManager::addDevice(string devName)
+void BlkDevManager::add_device(string devName)
 {
-	m_devices.push_back(new PhysicalDev(devName, m_openFlags));
+	m_devices.push_back(new PhysicalDev(devName, m_open_flags));
 }
 
-vector<PhysicalDev *> BlkDevManager::getAllDevices()
+vector<PhysicalDev *> BlkDevManager::get_all_devices()
 {
 	return m_devices;
 }
 
-uint32_t BlkDevManager::getDevicesCount()
+uint32_t BlkDevManager::get_devices_count()
 {
 	return m_devices.size();
 }
 
 void BlkDevManager::startInstance()
 {
-	devMgr = new BlkDevManager();
+	devmgr = new BlkDevManager();
 }
 
 BlkDevManager *BlkDevManager::getInstance()
 {
-	return devMgr;
+	return devmgr;
 }

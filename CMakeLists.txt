@@ -5,3 +5,4 @@ set(CMAKE_CXX_STANDARD 14)
 
 add_subdirectory(src/libutils)
 add_subdirectory(src/blkdev)
+add_subdirectory(src/blkalloc)

@@ -1,0 +1,93 @@
+/*
+ * fixed_blk_allocator.cpp
+ *
+ *  Created on: Aug 09, 2016
+ *      Author: hkadayam
+ */
+#include "blk_allocator.h"
+#include <cassert>
+
+using namespace std;
+
+namespace omstorage {
+
+FixedBlkAllocator::FixedBlkAllocator(BlkAllocConfig &cfg) :
+        BlkAllocator(cfg) {
+    m_blk_nodes = new __fixed_blk_node[cfg.get_total_blks()];
+    blkid32_t last_blk_id = BLKID32_INVALID;
+
+    for (auto i = (uint32_t)cfg.get_total_blks(); i > 0; i--) {
+#ifndef NDEBUG
+        m_blk_nodes[i-1].this_blk_id = i-1;
+#endif
+        m_blk_nodes[i - 1].next_blk = last_blk_id;
+        last_blk_id = (blkid32_t)i - 1;
+    }
+
+    __top_blk tp(0, last_blk_id);
+    m_top_blk_id.store(tp.to_integer());
+}
+
+FixedBlkAllocator::~FixedBlkAllocator() {
+    delete (m_blk_nodes);
+}
+
+BlkAllocStatus FixedBlkAllocator::alloc(uint32_t size, uint32_t desired_temp, Blk *out_blk) {
+    uint64_t prev_val;
+    uint64_t cur_val;
+    blkid32_t blk_id;
+
+    assert(out_blk->get_npieces() == 0);
+
+    do {
+        prev_val = m_top_blk_id.load();
+        __top_blk tp(prev_val);
+
+        // Get the __top_blk blk and replace the __top_blk blk id with next id
+        blk_id = tp.get_top_blk_id();
+        __fixed_blk_node blknode = m_blk_nodes[blk_id];
+
+        tp.set_top_blk_id(blknode.next_blk);
+        tp.set_gen(tp.get_gen() + 1);
+        cur_val = tp.to_integer();
+
+    } while (!(m_top_blk_id.compare_exchange_weak(prev_val, cur_val)));
+
+    if (blk_id == BLKID32_INVALID) {
+        return BLK_ALLOC_SPACEFULL;
+    }
+
+    out_blk->emplace_piece(blk_id, m_cfg.get_blk_size());
+    return BLK_ALLOC_SUCCESS;
+}
+
+void FixedBlkAllocator::free(Blk &b) {
+    assert(b.get_npieces() == 1);
+    assert(b.get_piece(0).get_offset() == 0);
+    free_blk((blkid32_t)b.get_piece(0).get_blk_id());
+}
+
+void FixedBlkAllocator::free_blk(blkid32_t blk_id) {
+    uint64_t prev_val;
+    uint64_t cur_val;
+    __fixed_blk_node blknode = m_blk_nodes[blk_id];
+
+    do {
+        prev_val = m_top_blk_id.load();
+        __top_blk tp(prev_val);
+
+        blknode.next_blk = tp.get_top_blk_id();;
+
+        tp.set_gen(tp.get_gen() + 1);
+        tp.set_top_blk_id(blk_id);
+        cur_val = tp.to_integer();
+    } while (m_top_blk_id.compare_exchange_weak(prev_val, cur_val));
+}
+
+std::string FixedBlkAllocator::to_string() const {
+    ostringstream oss;
+    oss << "m_top_blk_id=" << m_top_blk_id << "\n";
+    return oss.str();
+}
+} // namespace omstorage
+
