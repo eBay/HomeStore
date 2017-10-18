@@ -156,7 +156,12 @@ private:
         }
     } __attribute__ ((__packed__));
 
-    atomic< uint64_t > m_top_blk_id;
+    std::atomic< uint64_t > m_top_blk_id;
+
+#ifndef NDEBUG
+    std::atomic< uint32_t > m_nfree_blks;
+#endif
+
     __fixed_blk_node *m_blk_nodes;
 
 public:

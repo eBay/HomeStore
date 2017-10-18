@@ -20,6 +20,7 @@ void thread_func(VarsizeBlkAllocator *b) {
 
 VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig &cfg) :
         BlkAllocator(cfg),
+        m_cfg(cfg),
         m_region_state(BLK_ALLOCATOR_DONE),
         m_wait_alloc_segment(nullptr),
         m_blk_portions(cfg.get_total_portions()),
@@ -136,11 +137,12 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint32_t size, uint32_t desired_temp, 
         }
 
         // Wait for cache to refill and then retry original request
-        LOG(ERROR) << "Attempt #" << attempt << " to allocate blk of size=" << size << " temperature=" << desired_temp
-                   << " failed. Waiting for cache to be filled";
         if (attempt > MAX_BLK_ALLOC_ATTEMPT) {
             LOG(ERROR) << "Exceeding max retries " << MAX_BLK_ALLOC_ATTEMPT << " to allocate. Failing the alloc";
             break;
+        } else {
+            LOG(WARNING) << "Attempt #" << attempt << " to allocate blk of size=" << size << " temperature=" << desired_temp
+                         << " failed. Waiting for cache to be filled";
         }
 
         request_more_blks_wait(nullptr);
@@ -175,6 +177,8 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint32_t size, uint32_t desired_temp, 
 
         omds::btree::EmptyClass dummy;
         m_blk_cache->insert(excess_entry, dummy);
+    } else {
+        out_blk->emplace_piece(actual_entry.get_blk_num(), nblks);
     }
 
     m_cache_n_entries.fetch_sub(nblks, std::memory_order_acq_rel);
@@ -186,19 +190,23 @@ void VarsizeBlkAllocator::free(Blk &b) {
         BlkPiece &p = b.get_piece(i);
         BlkAllocPortion *portion = blknum_to_portion(p.get_blk_id());
 
+        uint32_t nblks = (uint32_t)((p.get_size() - 1) / get_config().get_blk_size() + 1);
         // TODO: Ensure in debug mode, if the blknum is no longer in cache. Need to create a cachentry and search
 #ifndef NDEBUG
         VarsizeAllocCacheEntry entry;
         omds::btree::EmptyClass dummy;
 
-        gen_cache_entry(p.get_blk_id(), p.get_size(), &entry);
+        gen_cache_entry(p.get_blk_id(), nblks, &entry);
         assert(m_blk_cache->get(entry, &dummy) == false);
 #endif
 
         // Reset the bits
         portion->lock();
-        m_alloc_bm->reset_bits(p.get_blk_id(), p.get_size());
+        m_alloc_bm->reset_bits(p.get_blk_id(), nblks);
         portion->unlock();
+
+        //std::cout << "Resetting " << p.get_blk_id() << " for nblks = " << nblks << " Bitmap state= \n";
+        //m_alloc_bm->print();
    }
 }
 
@@ -225,6 +233,9 @@ void VarsizeBlkAllocator::fill_cache(BlkAllocSegment *seg) {
     }
     seg->set_free_blks(seg->get_free_blks() - nadded_blks);
     m_heap_segments.update(seg->get_segment_id(), seg);
+
+    m_cache_n_entries.fetch_add(nadded_blks, std::memory_order_acq_rel);
+    LOG(INFO) << "Bitset sweep thread added " << nadded_blks << " blks to blk cache";
 }
 
 uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t portion_num, BlkAllocSegment *seg) {
@@ -304,7 +315,8 @@ std::string VarsizeBlkAllocator::state_string(BlkAllocatorState state) const {
 
 std::string VarsizeBlkAllocator::to_string() const {
     ostringstream oss;
-    oss << "ThreadId=" << m_thread_id.get_id() << " RegionState=" << state_string(m_region_state) << endl;
+    oss << "ThreadId=" << m_thread_id.get_id() << " RegionState=" << state_string(m_region_state) <<
+            " Total cache entries = " << m_cache_n_entries.load(std::memory_order_relaxed);
     return oss.str();
 }
 
@@ -348,17 +360,17 @@ int VarsizeAllocCacheEntry::compare(omds::btree::BtreeKey *o) const {
     }
     auto *other = (VarsizeAllocCacheEntry *) o;
     if (get_blk_count() < other->get_blk_count()) {
-        return 1;
+        return -1;
     } else if (get_blk_count() > other->get_blk_count()) {
-        return -1;
+        return 1;
     } else if (get_temperature() < other->get_temperature()) {
-        return 1;
+        return -1;
     } else if (get_temperature() > other->get_temperature()) {
-        return -1;
-    } else if (get_page_id() < other->get_page_id()) {
         return 1;
-    } else if (get_page_id() > other->get_page_id()) {
+    } else if (get_page_id() < other->get_page_id()) {
         return -1;
+    } else if (get_page_id() > other->get_page_id()) {
+        return 1;
     } else {
         return 0;
     }

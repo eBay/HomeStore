@@ -39,7 +39,6 @@ private:
     uint32_t m_bufsize;
     omds::FlexArray< MemPiece, EXPECTED_MEM_PIECE_PER_BLK > m_bufs;
 
-    uint16_t m_offset; // Offset within the page
 public:
     BlkPiece(blkid64_t id, uint32_t size, uint8_t *mem) :
             m_blk_id(id),
@@ -61,17 +60,8 @@ public:
         m_blk_id = id;
     }
 
-    void set_blk_id(blkid64_t id, uint32_t offset) {
-        m_blk_id = id;
-        m_offset = offset;
-    }
-
     void set_size(uint32_t size) {
         m_size = size;
-    }
-
-    void set_offset(uint16_t off) {
-        m_offset = off;
     }
 
     void set_buf(const uint8_t *mem, uint32_t mem_size) {
@@ -95,10 +85,6 @@ public:
 
     blkid64_t get_blk_id() const {
         return m_blk_id;
-    }
-
-    uint16_t get_offset() const {
-        return m_offset;
     }
 
     uint32_t get_buf(uint8_t **mem) const {

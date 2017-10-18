@@ -125,6 +125,7 @@ public:
         set_total_blks(nblks);
         set_free_blks(nblks);
         set_seg_num(seg_num);
+        set_clock_hand(0);
     }
 
     virtual ~BlkAllocSegment() {
@@ -308,11 +309,11 @@ public:
     }
 
     uint32_t get_blob_size() const override {
-        return (sizeof(VarsizeAllocCacheEntry));
+        return (sizeof(blob_t));
     }
 
     static uint32_t get_fixed_size() {
-        return (sizeof(VarsizeAllocCacheEntry));
+        return (sizeof(blob_t));
     }
 
     void set_blob_size(uint32_t size) override {
@@ -383,6 +384,7 @@ public:
     void allocator_state_machine();
 
 private:
+    VarsizeBlkAllocConfig m_cfg; // Config for Varsize
     std::thread m_thread_id; // Thread pointer for this region
     std::mutex m_mutex;    // Mutex to protect regionstate & cb
     std::condition_variable m_cv; // CV to signal thread
