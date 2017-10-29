@@ -7,7 +7,7 @@
 #include <thread>
 
 using namespace std;
-using namespace omstorage;
+using namespace omstore;
 
 void allocate_blocks(BlkAllocator *allocator)
 {

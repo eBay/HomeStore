@@ -4,6 +4,7 @@
 #include "evictable_mem_alloc.h"
 
 namespace omstore {
+template <ssize_t MinAllocSize>
 EvictableMemAllocator::EvictableMemAllocator(uint64_t mem_size, CanEvictCallback &can_evict_cb,
                                              AllocEvictCallback &alloc_cb) :
         m_evict_cb(can_evict_cb),
@@ -16,7 +17,7 @@ EvictableMemAllocator::EvictableMemAllocator(uint64_t mem_size, CanEvictCallback
 
     // Allocate n EvictEntries with each entry of maximum size and add to the list.
     for (auto i = 0U; i < npieces; i++) {
-        EvictEntry *e = m_alloc_cb();
+        EvictRecord *e = m_alloc_cb();
         e->m_mem.set_piece(ptr, max_alloc_size());
         m_list.push_back(*e);
         ptr += max_alloc_size();
@@ -29,7 +30,8 @@ EvictableMemAllocator::EvictableMemAllocator(uint64_t mem_size, CanEvictCallback
 // incrementing the refcount.
 // Thread 2 is looking for memory and all the elements in the list is not evictable and it picked the entry allocated
 // for Thread 1, which means 2 thread gets the same reference.
-bool EvictableMemAllocator::alloc(uint32_t size, uint32_t max_pieces, EvictEntry *out_entry) {
+template <ssize_t MinAllocSize>
+bool EvictableMemAllocator::alloc(uint32_t size, uint32_t max_pieces, EvictRecord *out_entry) {
     bool found = false;
 
     {
@@ -51,17 +53,20 @@ bool EvictableMemAllocator::alloc(uint32_t size, uint32_t max_pieces, EvictEntry
     return found;
 }
 
-void EvictableMemAllocator::dealloc(EvictEntry &mem) {
+template <ssize_t MinAllocSize>
+void EvictableMemAllocator::dealloc(EvictRecord &mem) {
     downvote(mem);
 }
 
-void EvictableMemAllocator::upvote(EvictEntry &mem) {
+template <ssize_t MinAllocSize>
+void EvictableMemAllocator::upvote(EvictRecord &mem) {
     std::lock_guard< decltype(m_list_guard) > guard(m_list_guard);
     m_list.erase(m_list.iterator_to(mem));
     m_list.push_back(mem);
 }
 
-void EvictableMemAllocator::downvote(EvictEntry &mem) {
+template <ssize_t MinAllocSize>
+void EvictableMemAllocator::downvote(EvictRecord &mem) {
     std::lock_guard< decltype(m_list_guard) > guard(m_list_guard);
     m_list.erase(m_list.iterator_to(mem));
     m_list.push_front(mem);

@@ -12,7 +12,7 @@
 #include "omds/btree/mem_btree.hpp"
 #include <glog/logging.h>
 
-namespace omstorage {
+namespace omstore {
 
 void thread_func(VarsizeBlkAllocator *b) {
     b->allocator_state_machine();
@@ -375,4 +375,4 @@ int VarsizeAllocCacheEntry::compare(omds::btree::BtreeKey *o) const {
         return 0;
     }
 }
-} //namespace omstorage
+} //namespace omstore

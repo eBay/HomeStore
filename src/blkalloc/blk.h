@@ -12,7 +12,7 @@
 #include <assert.h>
 #include "omds/array/flexarray.hpp"
 
-namespace omstorage {
+namespace omstore {
 
 typedef uint32_t blkid32_t;
 typedef uint64_t blkid64_t;

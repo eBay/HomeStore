@@ -1,16 +1,16 @@
 //
-// Created by Kadayam, Hari on 19/10/17.
+// Created by Kadayam, Hari on 27/10/17.
 //
 
-#include "omds/memory/tagged_ptr.hpp"
-#include <boost/intrusive/list.hpp>
-#include <mutex>
+#ifndef OMSTORE_MEMPIECE_HPP
+#define OMSTORE_MEMPIECE_HPP
 
-#ifndef OMSTORAGE_EVICTABLEMEMALLOCATOR_HPP
-#define OMSTORAGE_EVICTABLEMEMALLOCATOR_HPP
+#include "tagged_ptr.hpp"
+#include "omds/utility/useful_defs.hpp"
+#include <vector>
+#include <cassert>
 
-namespace omstore {
-
+namespace omds {
 #define round_off(val, rnd) ((((val)-1)/(rnd)) + 1)
 
 template <int SizeMultiplier>
@@ -18,7 +18,7 @@ struct MemPiece {
     omds::tagged_ptr<uint8_t> m_mem;
 
     MemPiece(uint8_t *mem, uint32_t size) :
-        m_mem(mem, (uint16_t)round_off(size, SizeMultiplier)) {}
+            m_mem(mem, (uint16_t)round_off(size, SizeMultiplier)) {}
 
     MemPiece() : MemPiece(nullptr, 0) {}
 
@@ -83,6 +83,10 @@ public:
         m_u.m_piece.set(ptr, size);
     }
 
+    void set_piece(omds::blob &b) {
+        set_piece(b.bytes, b.size);
+    }
+
     void add_piece(uint8_t *ptr, uint32_t size) {
         if (m_u.m_piece.size() != 0) {
             // First move the current item to the list
@@ -114,62 +118,5 @@ private:
         (*m_u.m_list).emplace_back(ptr, size);
     }
 };
-
-
-// Min and Max of blocks on a single piece of memory
-#define EVICT_MEMALLOC_MIN_SIZE 8192
-class EvictRecord;
-
-typedef std::function< bool(EvictRecord *) > CanEvictCallback;
-typedef std::function< EvictRecord *(void) > AllocEvictCallback;
-
-template <ssize_t MinAllocSize>
-class EvictableMemAllocator {
-private:
-    static constexpr int64_t ipow(int64_t base, int exp, int64_t result = 1) {
-        return exp < 1 ? result : ipow(base*base, exp/2, (exp % 2) ? result*base : result);
-    }
-
-    static constexpr uint64_t max_alloc_size() {
-        return (uint64_t)(MinAllocSize * ipow(2, 16));
-    }
-
-public:
-    typedef MemPieces< MinAllocSize > EvictMemBlk;
-
-public:
-    EvictableMemAllocator(uint64_t mem_size, CanEvictCallback &can_evict_cb, AllocEvictCallback &alloc_cb);
-
-    /* Allocates the memory for requested size. The memory could be provided in multiple pieces upto max_pieces
-     * specified. In-order to allocate, it will evict less used pages. If it could not find any pages within
-     * the size, it will throw std::bad_alloc exception.
-     */
-    bool alloc(uint32_t size, uint32_t max_pieces, EvictRecord *out_entry);
-
-    /* Deallocates the memory and put the pages as top candidate for reuse */
-    void dealloc(EvictRecord &mem);
-
-    /* Upvote the allocated memory. This depends on the current rank will move up and thus reduce the chances of
-     * getting evicted. In case of LRU allocation, it moves to the tail end of the list */
-    void upvote(EvictRecord &mem);
-
-    /* Downvote the entry */
-    void downvote(EvictRecord &mem);
-
-private:
-    std::mutex m_list_guard;
-    boost::intrusive::list< EvictRecord > m_list;
-    CanEvictCallback m_evict_cb;
-    AllocEvictCallback m_alloc_cb;
-    std::unique_ptr< uint8_t[] > m_buf; // Buffer that covers all the size
-};
-
-// This structure represents each entry into the evictable location
-struct EvictRecord : public boost::intrusive::list_base_hook<> {
-    EvictableMemAllocator::EvictMemBlk m_mem;
-    // uint8_t m_rank; // In case we need rank, uncomment this line
-};
-
 }
-
-#endif //OMSTORAGE_EVICTABLEMEMALLOCATOR_HPP
+#endif //OMSTORE_MEMPIECE_HPP

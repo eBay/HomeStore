@@ -8,7 +8,7 @@
 #include "blk_allocator.h"
 #include <boost/heap/binomial_heap.hpp>
 
-namespace omstorage {
+namespace omstore {
 /****************** VarsizeBlkAllocator Section **********************/
 
 class VarsizeBlkAllocConfig : public BlkAllocConfig {
@@ -476,5 +476,5 @@ private:
 #define BLKCOUNT_RANGE_LAST  (uint32_t)-1
 #define TEMP_RANGE_LAST      (uint32_t)-1
 
-} // namespace omstorage
+} // namespace omstore
 #endif //OMSTORAGE_VARSIZE_BLK_ALLOCATOR_H

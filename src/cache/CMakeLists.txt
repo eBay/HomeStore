@@ -7,8 +7,9 @@ include_directories(cache)
 include_directories(..)
 
 set(TEST_CACHE_SOURCE_FILES
-        evictable_mem_alloc.cpp
-        evictable_mem_alloc.h
+        eviction.hpp
+        eviction.cpp
+        lru_eviction.hpp
         cache.cpp
         cache.h)
 

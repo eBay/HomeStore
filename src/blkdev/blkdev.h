@@ -13,7 +13,7 @@
 #include <sys/uio.h>
 #include <unistd.h>
 
-//namespace omstorage { name blkdev {
+//namespace omstore { name blkdev {
 class PhysicalDev;
 class VirtualDev;
 

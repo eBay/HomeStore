@@ -19,7 +19,7 @@
 
 using namespace std;
 
-namespace omstorage {
+namespace omstore {
 
 class BlkAllocConfig {
 private:
@@ -175,5 +175,5 @@ private:
     void free_blk(blkid32_t blk_id);
 };
 
-} // namespace omstorage
+} // namespace omstore
 #endif
