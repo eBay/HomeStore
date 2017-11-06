@@ -20,7 +20,7 @@ public:
 
     /* Initialize the evictor with maximum size it needs to keep it under, before it starts evictions. Caller also
      * need to provide a callback function to check if the current record could be evicted or not. */
-    Evictor(uint32_t max_size, CanEvictCallback &cb);
+    Evictor(uint32_t max_size, CanEvictCallback cb);
 
     /* Add the given record to the list. The given record is automatically upvoted. This record might be added
      * only after evicting a record (once it reaches max limits). In that case it returns the record it just

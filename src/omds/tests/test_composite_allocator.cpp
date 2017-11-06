@@ -5,10 +5,11 @@
  *      Author: hkadayam
  */
 
-#include "omds/memory/freelist_allocator.hpp"
+#include "omds/memory/generic_freelist_allocator.hpp"
 #include "omds/memory/composite_allocator.hpp"
 #include "omds/memory/chunk_allocator.hpp"
 #include "omds/memory/sys_allocator.hpp"
+#include "omds/memory/freelist_allocator.hpp"
 #include "omds/utility/useful_defs.hpp"
 #include <benchmark/benchmark.h>
 
@@ -19,8 +20,9 @@
 uint32_t glob_sizes[TOTAL_ALLOCS * THREADS];
 uint8_t *glob_ptr[TOTAL_ALLOCS * THREADS];
 
+#if 0
 omds::CompositeMemAllocator<
-        //omds::FreelistAllocator< 1000, 15, 40, 128, 256 >,
+        //omds::GenericFreelistAllocator< 1000, 15, 40, 128, 256 >,
         //omds::ChunkMemAllocator< 512,  102400 >,
         //omds::ChunkMemAllocator< 1024, 102400 >
         //omds::ChunkMemAllocator< 2048, 102400 >,
@@ -28,7 +30,7 @@ omds::CompositeMemAllocator<
 > glob_sys_only_allocator;
 
 omds::CompositeMemAllocator<
-        //omds::FreelistAllocator< 1000, 15, 40, 128, 256 >,
+        //omds::GenericFreelistAllocator< 1000, 15, 40, 128, 256 >,
         omds::ChunkMemAllocator< 512,  102400 >,
         omds::ChunkMemAllocator< 1024, 102400 >,
         omds::ChunkMemAllocator< 2048, 102400 >,
@@ -36,42 +38,130 @@ omds::CompositeMemAllocator<
 > glob_chunk_allocator;
 
 omds::CompositeMemAllocator<
-        omds::FreelistAllocator< 1000, 15, 40, 128, 256 >,
+        omds::GenericFreelistAllocator< 1000, 15, 40, 128, 256 >,
         omds::ChunkMemAllocator< 512,  102400 >,
         omds::ChunkMemAllocator< 1024, 102400 >,
         omds::ChunkMemAllocator< 2048, 102400 >,
         omds::SysMemAllocator
 > glob_free_and_chunk_allocator;
+#endif
+
+/*
+omds::CompositeMemAllocator<
+        omds::GenericFreelistAllocator< TOTAL_ALLOCS * THREADS, 2048 >,
+        omds::SysMemAllocator
+> glob_generic_free_and_sys_allocator;
+*/
+omds::ChunkMemAllocator< 2048, 2200 * TOTAL_ALLOCS * THREADS> glob_chunk_allocator;
+omds::GenericFreelistAllocator< TOTAL_ALLOCS * THREADS, 256 > glob_generic_free_and_sys_allocator;
+omds::FreeListAllocator< TOTAL_ALLOCS, 256 > glob_freelist_allocator;
 
 void setup(uint32_t count) {
     for (auto i = 0; i < count; i++) {
         if ((i % 16) == 0) {
-            glob_sizes[i] = 256;
+            glob_sizes[i] = 15;
         } else if ((i % 12) == 0) {
             glob_sizes[i] = 128;
         } else if ((i % 8) == 0) {
             glob_sizes[i] = 40;
         } else if ((i % 4) == 0) {
-            glob_sizes[i] = 15;
+            glob_sizes[i] = 256;
         } else {
-            glob_sizes[i] = rand() % 2000;
+            glob_sizes[i] = rand() % 32768;
         }
     }
 }
+
+extern void g() {}
+
 void test_malloc(benchmark::State& state) {
     // Actual test
     for (auto _ : state) { // Loops upto iteration count
         auto index = state.thread_index;
         for (auto i = index; i < state.range(0); i+=THREADS) { // Loops for provided ranges
             benchmark::DoNotOptimize(glob_ptr[i] = (uint8_t *)malloc(glob_sizes[i]));
+            glob_ptr[i][0] = 'a';
+            g();
+            //printf("glob_ptr[%d] = %p\n", i, glob_ptr[i]);
         }
 
         for (auto i = index; i < state.range(0); i+=THREADS) { // Loops for provided ranges
-            benchmark::DoNotOptimize(glob_ptr[i] = (uint8_t *)malloc(glob_sizes[i]));
+            free(glob_ptr[i]);
         }
     }
 }
 
+void test_chunk_allocator(benchmark::State& state) {
+    // Actual test
+    for (auto _ : state) { // Loops upto iteration count
+        auto index = state.thread_index;
+        for (auto i = index; i < state.range(0); i+=THREADS) { // Loops for provided ranges
+            benchmark::DoNotOptimize(glob_ptr[i] = glob_chunk_allocator.allocate(glob_sizes[i], nullptr, nullptr));
+            glob_ptr[i][0] = 'a';
+            g();
+        }
+
+        for (auto i = index; i < state.range(0); i+=THREADS) { // Loops for provided ranges
+            glob_chunk_allocator.deallocate(glob_ptr[i], glob_sizes[i]);
+        }
+    }
+}
+
+void test_generic_freelist_allocator(benchmark::State &state) {
+    // Actual test
+    for (auto _ : state) { // Loops upto iteration count
+        auto index = state.thread_index;
+        for (auto i = index; i < state.range(0); i+=THREADS) { // Loops for provided ranges
+            benchmark::DoNotOptimize(glob_ptr[i] = glob_generic_free_and_sys_allocator.allocate(256, nullptr, nullptr));
+            glob_ptr[i][0] = 'a';
+            g();
+        }
+
+        for (auto i = index; i < state.range(0); i+=THREADS) { // Loops for provided ranges
+            glob_generic_free_and_sys_allocator.deallocate(glob_ptr[i], 256);
+        }
+    }
+}
+
+void test_freelist_allocator(benchmark::State &state) {
+    // Actual test
+    for (auto _ : state) { // Loops upto iteration count
+        auto index = state.thread_index;
+        for (auto i = index; i < state.range(0); i+=THREADS) { // Loops for provided ranges
+            benchmark::DoNotOptimize(glob_ptr[i] = glob_freelist_allocator.allocate(256));
+            glob_ptr[i][0] = 'a';
+            g();
+        }
+
+        for (auto i = index; i < state.range(0); i+=THREADS) { // Loops for provided ranges
+            glob_freelist_allocator.deallocate(glob_ptr[i], 256);
+        }
+    }
+}
+
+void test_combo_allocator(benchmark::State& state) {
+    // Actual test
+    for (auto _ : state) { // Loops upto iteration count
+        auto index = state.thread_index;
+        for (auto i = index; i < state.range(0); i+=THREADS) { // Loops for provided ranges
+            if (glob_sizes[i] == 256) {
+                benchmark::DoNotOptimize(glob_ptr[i] = glob_freelist_allocator.allocate(256));
+            } else {
+                benchmark::DoNotOptimize(glob_ptr[i] = (uint8_t *)malloc(glob_sizes[i]));
+            }
+            glob_ptr[i][0] = 'a';
+            g();
+        }
+
+        for (auto i = index; i < state.range(0); i+=THREADS) { // Loops for provided ranges
+            if (glob_sizes[i] == 256) {
+                glob_freelist_allocator.deallocate(glob_ptr[i], 256);
+            } else {
+                free(glob_ptr[i]);
+            }
+        }
+    }
+}
 #if 0
 void test_free(benchmark::State& state) {
     // Actual test
@@ -100,7 +190,7 @@ int main(int argc, char *argv[]) {
 
 #if 0
     omds::CompositeMemAllocator<
-        //omds::FreelistAllocator< 1000, 15, 40, 128, 256 >,
+        //omds::GenericFreelistAllocator< 1000, 15, 40, 128, 256 >,
         //omds::ChunkMemAllocator< 512,  102400 >,
         //omds::ChunkMemAllocator< 1024, 102400 >
         //omds::ChunkMemAllocator< 2048, 102400 >,
@@ -162,8 +252,11 @@ int main(int argc, char *argv[]) {
 }
 #endif
 
+//BENCHMARK(test_chunk_allocator)->Range(TOTAL_ALLOCS, TOTAL_ALLOCS)->Iterations(ITERATIONS)->Threads(THREADS);
 BENCHMARK(test_malloc)->Range(TOTAL_ALLOCS, TOTAL_ALLOCS)->Iterations(ITERATIONS)->Threads(THREADS);
-//BENCHMARK(test_free)->Range(TOTAL_ALLOCS, TOTAL_ALLOCS)->Iterations(ITERATIONS)->Threads(THREADS);
+BENCHMARK(test_combo_allocator)->Range(TOTAL_ALLOCS, TOTAL_ALLOCS)->Iterations(ITERATIONS)->Threads(THREADS);
+BENCHMARK(test_freelist_allocator)->Range(TOTAL_ALLOCS, TOTAL_ALLOCS)->Iterations(ITERATIONS)->Threads(THREADS);
+//BENCHMARK(test_generic_freelist_allocator)->Range(TOTAL_ALLOCS, TOTAL_ALLOCS)->Iterations(ITERATIONS)->Threads(THREADS);
 
 int main(int argc, char** argv)
 {

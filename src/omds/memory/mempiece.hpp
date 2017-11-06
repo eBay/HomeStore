@@ -34,7 +34,7 @@ struct MemPiece {
         m_mem.set(ptr, size);
     }
 
-    int size() const {
+    uint32_t size() const {
         return m_mem.get_tag() * SizeMultiplier;
     }
 
@@ -42,7 +42,7 @@ struct MemPiece {
         return m_mem.get_ptr();
     }
 
-    uint8_t *get(int *psize) {
+    uint8_t *get(uint32_t *psize) {
         *psize = size();
         return ptr();
     }
@@ -83,8 +83,18 @@ public:
         m_u.m_piece.set(ptr, size);
     }
 
-    void set_piece(omds::blob &b) {
+    void set_piece(omds::blob b) {
         set_piece(b.bytes, b.size);
+    }
+
+    void get(omds::blob *outb, uint32_t piece_num = 0) {
+        if (m_u.m_piece.size() != 0) {
+            outb->bytes = m_u.m_piece.get(&outb->size);
+        } else if (m_u.m_piece.ptr() == nullptr) {
+            outb->bytes = nullptr; outb->size = 0;
+        } else {
+            outb->bytes = m_u.m_list->at(piece_num).get(&outb->size);
+        }
     }
 
     void add_piece(uint8_t *ptr, uint32_t size) {

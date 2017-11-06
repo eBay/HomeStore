@@ -9,7 +9,7 @@ namespace omstore {
 #define EvictRecord typename Evictor<EvictionPolicy>::EvictRecordType
 
 template <typename EvictionPolicy>
-Evictor<EvictionPolicy>::Evictor(uint32_t max_size, Evictor<EvictionPolicy>::CanEvictCallback &cb) :
+Evictor<EvictionPolicy>::Evictor(uint32_t max_size, Evictor<EvictionPolicy>::CanEvictCallback cb) :
         m_evict_policy(0),
         m_can_evict_cb(cb),
         m_cur_size(0),
@@ -44,7 +44,7 @@ EvictRecord *Evictor<EvictionPolicy>::do_evict(uint32_t needed_size) {
 
         // Check if next record has enough space and also see if it is safe to evict.
         EvictMemBlk &blk = m_evict_policy.get_mem_blk(*rec);
-        if ((blk.size() >= needed_size) && m_can_evict_cb(*rec)) {
+        if ((blk.size() >= needed_size) && m_can_evict_cb(rec)) {
             // Possible to evict, so, ask policy to remove the entry and reclaim the space.
             m_evict_policy.remove(*rec);
             m_cur_size.fetch_sub(needed_size, std::memory_order_acq_rel);

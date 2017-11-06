@@ -1,150 +1,104 @@
 //
-// Created by Kadayam, Hari on 21/09/17.
+// Created by Kadayam, Hari on 30/10/17.
 //
+#ifndef OMSTORE_CACHELISTALLOCATOR_HPP
+#define OMSTORE_CACHELISTALLOCATOR_HPP
 
-#ifndef LIBUTILS_FREELIST_ALLOCATOR_HPP
-#define LIBUTILS_FREELIST_ALLOCATOR_HPP
-
-#include <cstdint>
 #include <utility>
 #include <iostream>
-#include <array>
 #include <algorithm>
-#include "mem_allocator.hpp"
 #include <folly/ThreadLocal.h>
-#include "omds/memory/tagged_ptr.hpp"
 
 namespace omds {
 
-struct free_list_bucket {
-    std::size_t m_size;
-    uint16_t m_head_index;
+struct free_list_header {
+    free_list_header *next;
 };
 
-template <uint16_t MaxListCount, std::size_t... Ranges>
-class FreelistAllocatorImpl {
+template <uint16_t MaxListCount, std::size_t Size>
+class FreeListAllocatorImpl {
 private:
-    std::array<free_list_bucket, sizeof...(Ranges)> m_buckets;
-    omds::tagged_ptr< uint8_t> *m_slot_head;
-    omds::tagged_ptr<uint8_t> m_bufptr[MaxListCount];
+    free_list_header *m_head;
+    int64_t m_list_count;
 
 public:
-    FreelistAllocatorImpl() {
-        auto i = 0;
-        std::array<std::size_t, sizeof...(Ranges)> arr = {{Ranges...}};
-        std::sort(arr.begin(), arr.end());
-        for (auto s : arr) {
-            m_buckets[i].m_size = s;
-            m_buckets[i].m_head_index = (uint16_t)-1;
-            i++;
-        }
-
-        auto prev_index = (uint16_t)(-1);
-        for (auto s = MaxListCount-1; s >= 0; s--) {
-            m_bufptr[s].set(nullptr, prev_index);
-            prev_index = s;
-        }
-        m_slot_head = &m_bufptr[0];
+    FreeListAllocatorImpl() :
+            m_head(nullptr),
+            m_list_count(0) {
     }
 
-    free_list_bucket *find_bucket(uint32_t size) {
-        for (auto i = 0; i < m_buckets.size(); i++) {
-            if (size <= m_buckets[i].m_size) {
-                return &m_buckets[i];
-            }
+    ~FreeListAllocatorImpl() {
+        free_list_header *hdr = m_head;
+        while (hdr) {
+            free_list_header *next = hdr->next;
+            free((uint8_t *)hdr);
+            hdr = next;
         }
-        return nullptr;
     }
 
-    free_list_bucket *find_exact_bucket(uint32_t size) {
-        for (auto i = 0; i < m_buckets.size(); i++) {
-            if (size == m_buckets[i].m_size) {
-                return &m_buckets[i];
-            }
-        }
-        return nullptr;
-    }
-
-    omds::tagged_ptr< uint8_t > *alloc_new_slot() {
-        if (m_slot_head == nullptr) {
-            return nullptr;
+    uint8_t *allocate(uint32_t size_needed) {
+        uint8_t *ptr;
+        if (m_head == nullptr) {
+            ptr = (uint8_t *)malloc(size_needed);
+        } else {
+            ptr = (uint8_t *)m_head;
+            m_head = m_head->next;
         }
 
-        omds::tagged_ptr< uint8_t > *slot = m_slot_head;
-        uint16_t tag = m_slot_head->get_tag();
-        m_slot_head = (tag == (uint16_t)-1) ? nullptr : &m_bufptr[tag];
-        return slot;
+        m_list_count--;
+        return ptr;
     }
 
-    uint16_t get_index(omds::tagged_ptr< uint8_t > *pslot) const {
-        return (uint16_t)(pslot - m_bufptr);
-    }
+    bool deallocate(uint8_t *mem, uint32_t size_alloced) {
+        if ((size_alloced != Size) || (m_list_count == MaxListCount)) {
+            free(mem);
+            return true;
+        }
 
-    omds::tagged_ptr< uint8_t > *get_slot(uint16_t index) {
-        return &m_bufptr[index];
+        auto *hdr = (free_list_header *)mem;
+        hdr->next = m_head;
+        m_head = hdr;
+        m_list_count++;
+        return true;
     }
 };
 
-template <uint16_t MaxListCount, std::size_t... Ranges>
-class FreelistAllocator : public AbstractMemAllocator {
-
+template <uint16_t MaxListCount, std::size_t Size>
+class FreeListAllocator {
 private:
-    folly::ThreadLocalPtr< FreelistAllocatorImpl< MaxListCount, Ranges... > > m_impl;
+    folly::ThreadLocalPtr< FreeListAllocatorImpl< MaxListCount, Size > > m_impl;
 
 public:
-    FreelistAllocator() = default;
+    static_assert((Size >= sizeof(uint8_t *)), "Size requested should be atleast a pointer size");
 
-    uint8_t *allocate(uint32_t size_needed, uint8_t **meta_blk) override {
+    FreeListAllocator() {
+        m_impl.reset(nullptr);
+    }
+
+    ~FreeListAllocator() {
+        m_impl.reset(nullptr);
+    }
+
+    uint8_t *allocate(uint32_t size_needed)  {
         if (m_impl.get() == nullptr) {
-            m_impl.reset(new FreelistAllocatorImpl<MaxListCount, Ranges...>());
+            m_impl.reset(new FreeListAllocatorImpl< MaxListCount, Size >());
         }
 
-        free_list_bucket *b = m_impl->find_bucket(size_needed);
-        if ((b == nullptr) || (b->m_head_index == (uint16_t)-1)) {
-            return nullptr;
-        }
-
-        omds::tagged_ptr< uint8_t > *p = m_impl->get_slot(b->m_head_index);
-        b->m_head_index = p->get_tag();
-
-        //std::cout << "FreeListAllocator: Allocating " << size_needed << " sized mem from freelist bucket " << b << "\n";
-
-        if (meta_blk) {
-            *meta_blk = (uint8_t *)p;
-        }
-        return p->get_ptr();
+        return (m_impl->allocate(size_needed));
     }
 
-    bool deallocate(uint8_t *mem, uint32_t size_alloced) override {
-        if (size_alloced == 0) {
-            return false;
-        }
+    bool deallocate(uint8_t *mem, uint32_t size_alloced) {
+        return m_impl->deallocate(mem, size_alloced);
+    }
 
-        free_list_bucket *b = m_impl->find_exact_bucket(size_alloced);
-        if (b == nullptr) {
-            return false;
-        }
-
-        // Get a new slot and put the memory in it
-        omds::tagged_ptr< uint8_t > *slot = m_impl->alloc_new_slot();
-        if (slot == nullptr) {
-            // No room for any more
-            return false;
-        }
-
-        //std::cout << "FreeListAllocator: Adding " << size_alloced << " sized mem to freelist bucket " << b << "\n";
-        slot->set(mem, b->m_head_index);
-        b->m_head_index = m_impl->get_index(slot);
+    bool owns(uint8_t *mem) const {
         return true;
     }
 
-    bool owns(uint8_t *mem) const override {
-        return true;
-    }
-
-    bool is_thread_safe_allocator() const override {
+    bool is_thread_safe_allocator() const {
         return true;
     }
 };
 }
-#endif //LIBUTILS_FREELIST_ALLOCATOR_HPP
+
+#endif //OMSTORE_CACHELISTALLOCATOR_HPP

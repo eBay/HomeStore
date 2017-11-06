@@ -15,11 +15,12 @@ class SysMemAllocator : public AbstractMemAllocator
 public:
     virtual ~SysMemAllocator() {}
 
-    uint8_t *allocate(uint32_t size_needed, uint8_t **meta_blk = nullptr) override {
+    uint8_t *allocate(uint32_t size_needed, uint8_t **meta_blk, uint32_t *out_meta_size) override {
         uint8_t *ptr = nullptr;
-        if (meta_blk != nullptr) {
+        if (meta_blk && out_meta_size) {
             ptr = (uint8_t *)malloc(size_needed + sizeof(uint32_t));
             *meta_blk = (uint8_t *)(ptr + size_needed);
+            *out_meta_size = sizeof(uint32_t);
         } else {
             ptr = (uint8_t *)malloc(size_needed);
         }

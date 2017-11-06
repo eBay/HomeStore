@@ -25,7 +25,7 @@ namespace omds {
 #define write_lock()   lock(false)
 #define write_unlock() unlock(false)
 
-uint64_t compute_hash_code(omds::blob b) {
+static uint64_t compute_hash_code(omds::blob b) {
     return util::Hash64((const char *)b.bytes, (size_t)b.size);
 }
 
@@ -62,6 +62,8 @@ public:
 
         if (!found) {
             m_list.insert(it, v);
+            *outv = &v;
+            V::ref(**outv);
         }
         write_unlock();
         return !found;
@@ -72,7 +74,7 @@ public:
 
         read_lock();
         for (auto it(m_list.begin()), itend(m_list.end()); it != itend; ++it) {
-            int x = K::compare(*V::extract_key(*it), k);
+            int x = K::compare(*(V::extract_key(*it)), k);
             if (x == 0) {
                 found = true;
                 *outv = &*it;
@@ -93,7 +95,7 @@ public:
 
         write_lock();
         for (auto it(m_list.begin()), itend(m_list.end()); it != itend; ++it) {
-            int x = K::compare(V::extract(*it), k);
+            int x = K::compare(*(V::extract_key(*it)), k);
             if (x == 0) {
                 found = true;
                 if (V::deref_testz(*it)) {

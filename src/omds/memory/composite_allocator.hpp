@@ -118,10 +118,10 @@ public:
         //m_allocators[m_count++] = new T();
     }
 
-    uint8_t *allocate(uint32_t size_needed, uint8_t **meta_blk = nullptr) {
+    uint8_t *allocate(uint32_t size_needed, uint8_t **meta_blk = nullptr, uint32_t *out_meta_size = nullptr) {
         uint8_t *ret_mem;
         for (auto i = 0u; i < m_allocators.size(); i++) {
-            ret_mem = m_allocators[i]->allocate(size_needed, meta_blk);
+            ret_mem = m_allocators[i]->allocate(size_needed, meta_blk, out_meta_size);
             if (ret_mem != nullptr) {
                 break;
             }

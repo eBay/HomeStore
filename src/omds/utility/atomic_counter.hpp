@@ -45,6 +45,19 @@ public:
         return false;
     }
 
+    bool decrement_test_le(int32_t check, int32_t n=1) {
+        T count = m_count.fetch_sub(n, std::memory_order_release);
+        if (count <= (check+1)) {
+            // Fence the memory to prevent from any release (decrement) getting reordered
+            // before returning
+            std::atomic_thread_fence(std::memory_order_acquire);
+            return true;
+        } else {
+            assert(count > 0);
+        }
+        return false;
+    }
+
     // This is not the most optimized version of testing, since it has to
     bool testz() {
         if (get() == 0) {

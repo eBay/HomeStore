@@ -55,10 +55,13 @@ public:
         m_list.push_front(rec);
     }
 
-    EvictMemBlk &get_mem_blk(const LRUEvictRecord &rec) {
+    EvictMemBlk &get_mem_blk(LRUEvictRecord &rec) {
         return rec.m_mem;
     }
 
+    const EvictMemBlk &get_mem_blk_const(const LRUEvictRecord &rec) const {
+        return rec.m_mem;
+    }
 private:
     std::mutex m_list_guard;
     boost::intrusive::list < LRUEvictRecord > m_list;

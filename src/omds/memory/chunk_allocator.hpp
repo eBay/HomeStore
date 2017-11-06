@@ -34,25 +34,39 @@ inline uint32_t get_gen_from_topid(uint64_t top_id) {
 }
 
 inline uint32_t get_id_from_top_id(uint64_t top_id) {
-    return (uint32_t) (top_id);
+    return (uint32_t) (top_id & ((uint32_t)-1));
 }
 
-template<uint32_t ChunkSize, uint32_t MemSize>
+/*
+ * ChunkMemAllocator: A memory allocator for same size. It is a simple allocator where overall memory is chunked into
+ * the size requested and added to a stack like structure. The top of the stack is atomically protected and to avoid
+ * ABA it uses classic tagging. There is a 4 byte memory overhead for each chunk, to store the next in freelist.
+ *
+ * When it runs out of space, it increases the space based on one of the following policies
+ *
+ * NoIncreasePolicy
+ * SameSizePolicy
+ * ExponentialPolicy
+ *
+ * The memory can be increased only upto 64 times, beyond which it stops increasing and thus returning NO_SPACE for
+ * any subsequent allocations (without freeing of course)
+ */
+template<uint32_t ChunkSize, uint32_t InitialMemSize>
 class ChunkMemAllocator: public AbstractMemAllocator
 {
 private:
-    uint8_t *m_base_ptr; // Base Ptr of this chunk allocation
+    uint8_t *m_base_ptr;    // Base Ptr of this chunk allocation
     atomic<uint64_t> m_top; // Top Id which maintains the free entry
     atomic<uint32_t> m_gen; // This is tag approach to avoid ABA
     uint32_t m_mem_size;    // Size of memory
     uint32_t m_chunk_size;  // Size of the chunk
-    uint32_t m_nchunks; // Total number of chunks
+    uint32_t m_nchunks;     // Total number of chunks
 
 #define per_chunk_size() (m_chunk_size + sizeof(chunk_pool_header))
 #define CHUNKID_INVALID  ((uint32_t)-1)
 
 public:
-    ChunkMemAllocator() :ChunkMemAllocator(ChunkSize, MemSize) {}
+    ChunkMemAllocator() :ChunkMemAllocator(ChunkSize, InitialMemSize) {}
 
     ChunkMemAllocator(uint32_t chunk_size, uint32_t mem_size) :
             m_base_ptr(nullptr),
@@ -60,9 +74,12 @@ public:
             m_gen(0),
             m_mem_size(mem_size),
             m_chunk_size(chunk_size) {
-        //cout << "ChunkMemAllocator<" << m_chunk_size << ", " << m_mem_size << "> initialization\n";
+        cout << "ChunkMemAllocator<" << m_chunk_size << ", " << m_mem_size << "> initialization\n";
         uint32_t nentries = m_mem_size / per_chunk_size();
         m_base_ptr = new uint8_t[m_mem_size];
+        if (m_base_ptr == nullptr) {
+            throw std::bad_alloc();
+        }
         m_nchunks = nentries;
 
         uint8_t *ptr = m_base_ptr;
@@ -96,9 +113,8 @@ public:
      *
      * NOTE: Throws std::bad_alloc if there is no memory available.
      */
-    uint8_t *allocate(uint32_t size_needed, uint8_t **meta_blk = nullptr) override {
+    uint8_t *allocate(uint32_t size_needed, uint8_t **meta_blk, uint32_t *out_meta_size) override {
         if (size_needed > m_chunk_size) {
-            //cout << "Not right size for this allocator\n";
             return nullptr;
         }
 
@@ -114,8 +130,9 @@ public:
                 hdr->refcnt.load(), m_entrySize, m_top.load());
 #endif
 
-        if (meta_blk) {
+        if (meta_blk && out_meta_size) {
             *meta_blk = (uint8_t *) hdr;
+            *out_meta_size = sizeof(chunk_pool_header);
         }
         //cout << "ChunkMemAllocator<" << m_chunk_size << ", " << m_mem_size << "> allocate size_needed = "
         //     << size_needed << " Allocated mem=" << (void *)hdr_to_mem(hdr) << "\n";
@@ -152,11 +169,11 @@ private:
     }
 
     uint32_t hdr_to_id(chunk_pool_header *hdr) {
-        return ((((uint8_t *) hdr) - m_base_ptr) / m_chunk_size);
+        return ((((uint8_t *) hdr) - m_base_ptr) / per_chunk_size());
     }
 
     chunk_pool_header *id_to_hdr(uint32_t id) {
-        return ((chunk_pool_header *) (m_base_ptr + (m_chunk_size * id)));
+        return ((chunk_pool_header *) (m_base_ptr + (per_chunk_size() * id)));
     }
 
     chunk_pool_header *alloc_header() {
@@ -176,6 +193,7 @@ private:
             hdr = id_to_hdr(id);
             uint32_t gen = m_gen.fetch_add(1, std::memory_order_acq_rel);
             next_id = form_top_id(gen, hdr->next);
+            //printf("alloc: top_id=0x%llx id = 0x%x hdr = %p hdr->next = 0x%x next_id = 0x%llx\n", top_id, id, hdr, hdr->next, next_id);
         } while (!(m_top.compare_exchange_weak(top_id, next_id, std::memory_order_acq_rel)));
 
         return hdr;
@@ -193,6 +211,7 @@ private:
 
             uint32_t gen = m_gen.fetch_add(1, std::memory_order_acq_rel);
             new_top_id = form_top_id(gen, id);
+            //printf("free new_top_id = 0x%llx, id = 0x%x hdr = %p hdr->next = 0x%x\n", new_top_id, id, hdr, hdr->next);
         } while (!(m_top.compare_exchange_weak(top_id, new_top_id, std::memory_order_acq_rel)));
     }
 };
