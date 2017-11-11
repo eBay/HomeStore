@@ -117,13 +117,13 @@ void VarsizeBlkAllocator::allocator_state_machine() {
     }
 }
 
-BlkAllocStatus VarsizeBlkAllocator::alloc(uint32_t size, uint32_t desired_temp, Blk *out_blk) {
+BlkAllocStatus VarsizeBlkAllocator::alloc(uint32_t size, blk_alloc_hints &hints, SingleBlk *out_blk) {
     BlkAllocStatus ret = BLK_ALLOC_SUCCESS;
     bool found = false;
 
     // TODO: Instead of given value, try to have leeway like 10% of both sides as range for desired_temp or bkt.
     uint32_t nblks = (uint32_t)((size - 1) / m_cfg.get_blk_size() + 1);
-    VarsizeAllocCacheEntry start_entry(BLKID_RANGE_FIRST, PAGEID_RANGE_FIRST, nblks, desired_temp);
+    VarsizeAllocCacheEntry start_entry(BLKID_RANGE_FIRST, PAGEID_RANGE_FIRST, nblks, hints.desired_temp);
     VarsizeAllocCacheEntry end_entry(BLKID_RANGE_LAST, PAGEID_RANGE_LAST, BLKCOUNT_RANGE_LAST, TEMP_RANGE_LAST);
     VarsizeAllocCacheEntry actual_entry;
 
@@ -141,8 +141,8 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint32_t size, uint32_t desired_temp, 
             LOG(ERROR) << "Exceeding max retries " << MAX_BLK_ALLOC_ATTEMPT << " to allocate. Failing the alloc";
             break;
         } else {
-            LOG(WARNING) << "Attempt #" << attempt << " to allocate blk of size=" << size << " temperature=" << desired_temp
-                         << " failed. Waiting for cache to be filled";
+            LOG(WARNING) << "Attempt #" << attempt << " to allocate blk of size=" << size << " temperature=" <<
+                     hints.desired_temp << " failed. Waiting for cache to be filled";
         }
 
         request_more_blks_wait(nullptr);
@@ -168,46 +168,47 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint32_t size, uint32_t desired_temp, 
 
         VarsizeAllocCacheEntry excess_entry;
         if (leading_npages <= trailing_npages) {
-            out_blk->emplace_piece(blknum, nblks);
+            out_blk->set_id(blknum);
+            out_blk->set_size(nblks * m_cfg.get_blk_size());
             gen_cache_entry(blknum + nblks, (uint32_t)excess_nblks, &excess_entry);
         } else {
-            out_blk->emplace_piece(blknum + nblks, nblks);
+            out_blk->set_id(blknum + nblks);
+            out_blk->set_size(nblks * m_cfg.get_blk_size());
             gen_cache_entry(blknum, (uint32_t)excess_nblks, &excess_entry);
         }
 
         omds::btree::EmptyClass dummy;
         m_blk_cache->insert(excess_entry, dummy);
     } else {
-        out_blk->emplace_piece(actual_entry.get_blk_num(), nblks);
+        out_blk->set_id(actual_entry.get_blk_num());
+        out_blk->set_size(nblks * m_cfg.get_blk_size());
     }
 
     m_cache_n_entries.fetch_sub(nblks, std::memory_order_acq_rel);
     return ret;
 }
 
-void VarsizeBlkAllocator::free(Blk &b) {
-    for (auto i = 0; i < b.get_npieces(); i++) {
-        BlkPiece &p = b.get_piece(i);
-        BlkAllocPortion *portion = blknum_to_portion(p.get_blk_id());
+void VarsizeBlkAllocator::free(SingleBlk &b) {
+    BlkAllocPortion *portion = blknum_to_portion(b.get_id());
 
-        uint32_t nblks = (uint32_t)((p.get_size() - 1) / get_config().get_blk_size() + 1);
-        // TODO: Ensure in debug mode, if the blknum is no longer in cache. Need to create a cachentry and search
+    uint32_t nblks = (uint32_t)((b.get_size() - 1) / get_config().get_blk_size() + 1);
+
+    // TODO: Ensure in debug mode, if the blknum is no longer in cache. Need to create a cachentry and search
 #ifndef NDEBUG
-        VarsizeAllocCacheEntry entry;
-        omds::btree::EmptyClass dummy;
+    VarsizeAllocCacheEntry entry;
+    omds::btree::EmptyClass dummy;
 
-        gen_cache_entry(p.get_blk_id(), nblks, &entry);
-        assert(m_blk_cache->get(entry, &dummy) == false);
+    gen_cache_entry(b.get_id(), nblks, &entry);
+    assert(m_blk_cache->get(entry, &dummy) == false);
 #endif
 
-        // Reset the bits
-        portion->lock();
-        m_alloc_bm->reset_bits(p.get_blk_id(), nblks);
-        portion->unlock();
+    // Reset the bits
+    portion->lock();
+    m_alloc_bm->reset_bits(b.get_id(), nblks);
+    portion->unlock();
 
-        //std::cout << "Resetting " << p.get_blk_id() << " for nblks = " << nblks << " Bitmap state= \n";
-        //m_alloc_bm->print();
-   }
+    //std::cout << "Resetting " << p.get_blk_id() << " for nblks = " << nblks << " Bitmap state= \n";
+    //m_alloc_bm->print();
 }
 
 // This runs on per region thread and is at present single threaded.

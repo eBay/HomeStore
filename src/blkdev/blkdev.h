@@ -9,15 +9,18 @@
 #define BLKDEV_BLKDEV_H_
 
 #include <boost/intrusive/list.hpp>
-#include "blkalloc/blk_allocator.h"
 #include <sys/uio.h>
 #include <unistd.h>
+#include <exception>
 #include <string>
+#include <glog/logging.h>
+#include "blkalloc/blk_allocator.h"
 #include <boost/uuid/uuid.hpp>            // uuid class
 #include <boost/uuid/uuid_generators.hpp> // generators
 #include <boost/uuid/uuid_io.hpp>         // streaming operators etc.
 
 namespace omstore {
+
 class PhysicalDev;
 class VirtualDev;
 
@@ -30,7 +33,7 @@ public:
 
     template<typename ... Args>
     DeviceException(Args const&... args) {
-        using ::to_string;
+       // using ::to_string;
         using std::to_string;
         int unpack[]{0, (m_what += DeviceException::to_string(args), 0)...};
         static_cast<void>(unpack);
@@ -69,12 +72,11 @@ public:
     PhysicalDevChunk(PhysicalDev *pdev, uint64_t start_offset, uint64_t size, phys_chunk_header *hdr) :
             m_pdev(pdev),
             m_vdev(nullptr),
-            m_header(hdr),
-            m_blk_allocator(nullptr) {
+            m_header(hdr) {
         hdr->chunk_start_offset = start_offset;
         hdr->chunk_size = size;
         hdr->chunk_busy = true;
-        hdr->next_chunk_slot = INVALID_CHUNK_ID;
+        m_chunk_id = (uint16_t)(hdr - &pdev->m_pers_hdr_block.chunks[0]);
     }
 
     PhysicalDev *get_physical_dev() {
@@ -95,6 +97,18 @@ public:
 
     const VirtualDev *get_virtual_dev_const() const {
         return m_vdev;
+    }
+
+    void set_blk_allocator(std::shared_ptr< BlkAllocator > alloc) {
+        m_allocator = std::move(alloc);
+    }
+
+    BlkAllocator *get_blk_allocator() {
+        return m_allocator.get();
+    }
+
+    virtual BlkAllocator *get_blk_allocator_const() const {
+        return m_allocator.get();
     }
 
     void set_start_offset(uint64_t offset) {
@@ -129,28 +143,34 @@ public:
         return m_header->next_chunk_slot;
     }
 
+    uint16_t get_chunk_id() {
+        return m_chunk_id;
+    }
+
     void free_slot() {
         m_header->slot_allocated = false;
     }
 
-    void set_blk_allocator(BlkAllocator *ba) {
-        m_blk_allocator = ba;
-    }
-
-    BlkAllocator *get_blk_allocator() {
-        return m_blk_allocator;
+    std::string to_string() {
+        std::stringstream ss;
+        ss << "chunk_id = " << m_chunk_id << " start_offset = " << m_header->chunk_start_offset <<
+           " size = " << m_header->chunk_size << " next_chunk_slot = " << m_header->next_chunk_slot <<
+           " busy? = " << m_header->chunk_busy << " slot_allocated? = " << m_header->slot_allocated << "\n";
+        return ss.str();
     }
 
 private:
+    phys_chunk_header *m_header;
     PhysicalDev *m_pdev;
     VirtualDev  *m_vdev;
-    phys_chunk_header *m_header;
-    BlkAllocator *m_blk_allocator;
+    std::shared_ptr<BlkAllocator> m_allocator;
+    uint16_t m_chunk_id;
 };
 
 #define PHYS_DEV_PERSISTENT_HEADER_SIZE  2048
 #define MAGIC                            0xCEEDDEEB
 #define PRODUCT_NAME                     "OmStore"
+#define CURRENT_HEADER_VERSION           1
 
 // Header block format store in each physical device about the current size info
 struct phys_dev_header_block {
@@ -158,12 +178,13 @@ struct phys_dev_header_block {
     char               product_name[64];     // Product name
     uint32_t           version;              // Version Id of this structure
     boost::uuids::uuid uuid;                 // UUID for the physical device
-    uint32_t           num_chunks;           // Number of physical chunks including this header
     uint32_t           super_block_chunk_id; // Chunk number of the super block of product
+    uint32_t           num_chunks;           // Number of physical chunks including this header
     phys_chunk_header  chunks[0];            // Array of chunks
 } __attribute__((aligned(PHYS_DEV_PERSISTENT_HEADER_SIZE)));
 
-static_assert(sizeof(phys_dev_header_block) == PHYS_DEV_PERSISTENT_HEADER_SIZE);
+static_assert(sizeof(phys_dev_header_block) == PHYS_DEV_PERSISTENT_HEADER_SIZE,
+              "Size of phys_dev_header_block is not same as PHYS_DEV_PERSISTENT_HEADER_SIZE");
 
 class PhysicalDev {
     friend class PhysicalDevChunk;
@@ -190,6 +211,16 @@ public:
     boost::uuids::uuid get_uuid() const {
         return m_pers_hdr_block.uuid;
     }
+
+    uint64_t get_dev_offset() const {
+        return m_dev_offset;
+    }
+
+    uint32_t get_dev_num() const {
+        return m_dev_num;
+    }
+
+    std::string to_string();
 
     void write(const char *data, uint32_t size, uint64_t offset);
     void writev(const struct iovec *iov, int iovcnt, uint32_t size, uint64_t offset);
@@ -220,10 +251,51 @@ private:
         return ((PHYS_DEV_PERSISTENT_HEADER_SIZE - sizeof(phys_dev_header_block))/sizeof(phys_chunk_header));
     }
 
+    friend class ChunkCyclicIterator;
+    class ChunkCyclicIterator {
+    public:
+        ChunkCyclicIterator(PhysicalDev *pdev) :
+                m_pdev(pdev) {
+            m_iter = m_pdev->m_chunks.begin();
+        }
+
+        PhysicalDevChunk *&operator *() {
+            return *m_iter;
+        }
+
+        ChunkCyclicIterator &operator++() {
+            if (m_iter == m_pdev->m_chunks.end()) {
+                m_iter = m_pdev->m_chunks.begin();
+            } else {
+                ++m_iter;
+            }
+            return *this;
+        }
+
+        ChunkCyclicIterator operator++(int) {
+            if (m_iter == m_pdev->m_chunks.end()) {
+                m_iter = m_pdev->m_chunks.begin();
+            } else {
+                m_iter++;
+            }
+            return *this;
+        }
+
+    private:
+        PhysicalDev *m_pdev;
+        boost::intrusive::list< PhysicalDevChunk >::iterator m_iter;
+    };
+
+    ChunkCyclicIterator begin() {
+        return ChunkCyclicIterator(this);
+    }
+
 private:
     std::string m_devname;
     int m_devfd;
     uint64_t m_devsize;
+    uint64_t m_dev_offset;   // Start offset of the device in global offset
+    uint32_t m_dev_num;      // Physical device index for this application
     std::mutex m_chunk_mutex;
     phys_dev_header_block m_pers_hdr_block; // Persisent header block
     boost::intrusive::list< PhysicalDevChunk > m_chunks;
@@ -232,34 +304,25 @@ private:
 class BlkDevManager {
 public:
     BlkDevManager();
-
     virtual ~BlkDevManager();
 
-    void add_device(string devName);
+    void add_device(std::string dev_name);
+    const std::vector< std::unique_ptr< PhysicalDev > > &get_all_devices() const;
 
-    vector< PhysicalDev * > get_all_devices();
-
-    uint32_t get_devices_count();
-
-    static void start_instance();
-
-    static BlkDevManager *get_instance();
+    uint64_t get_devices_count();
 
 private:
     int m_open_flags;
-    vector< PhysicalDev * > m_devices;
+    std::vector< std::unique_ptr< PhysicalDev > > m_devices;
+    std::vector< PhysicalDevChunk * >
 };
 
-struct vdev_hint {
-    uint32_t phys_devid;
-    bool can_look_for_other_dev;
-    uint32_t temperature;
-};
-
+/*
+template <typename Allocator, typename DefaultSelectionPolicy>
 class VirtualDev {
 public:
-    VirtualDev(uint64_t size, uint32_t nmirror, bool dynamic_alloc, bool is_stripe, uint32_t dev_blk_size,
-               std::vector< PhysicalDev * > &phys_dev_list);
+    VirtualDev(uint64_t size, uint32_t nmirror, bool is_stripe, uint32_t dev_blk_size,
+               std::vector< std::unique_ptr< PhysicalDev > > &phys_dev_list);
 
     virtual ~VirtualDev();
 
@@ -268,7 +331,7 @@ public:
         m_size = size;
     }
 
-    uint64_t get_size() {
+    uint64_t get_size() const {
         return m_size;
     }
 
@@ -279,11 +342,8 @@ public:
 #endif
 
     BlkAllocStatus alloc(uint32_t size, vdev_hint *phint, Blk *out_blk);
-
     void free(Blk &b);
-
     BlkOpStatus write(SSDBlk &b);
-
     BlkOpStatus read(SSDBlk &b);
 
 #if 0
@@ -305,16 +365,16 @@ private:
     //int createIOVPerPage(Blk &b, uint32_t bpiece, MemBlk *mbList, struct iovec *iov, int *piovcnt);
 private:
     uint64_t m_size;
-    uint32_t m_nMirrors;
-    uint64_t m_chunkSize;
+    uint32_t m_nmirrors;
+    uint64_t m_chunk_size;
     std::atomic< uint64_t > m_total_allocations;
-    uint32_t m_devPageSize;
+    uint32_t m_dev_blk_size;
     BlkAllocConfig m_baCfg;
 
-    std::vector< PhysicalDev * > m_physDevList;
+    std::vector< std::unique_ptr< PhysicalDev > > m_phys_dev_list;
     std::vector< PhysicalDevChunk * > m_primaryChunks;
     std::vector< PhysicalDevChunk * > *m_mirrorChunks;
 };
-
+*/
 } // namespace omstore
 #endif /* BLKDEV_BLKDEV_H_ */

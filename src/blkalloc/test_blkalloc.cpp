@@ -17,11 +17,13 @@ void allocate_blocks(BlkAllocator *allocator)
     int iter = 0;
 
     while (++iter <= 2) {
-        Blk blks[4000];
+        SingleBlk blks[4000];
 
         for (i = 0, alloced = 0; i < 4000; i++, alloced++) {
-            Blk b;
-            BlkAllocStatus ret = allocator->alloc(8192, 0, &blks[i]);
+            SingleBlk b;
+            blk_alloc_hints hints;
+            hints.desired_temp = 0;
+            BlkAllocStatus ret = allocator->alloc(8192, hints, &blks[i]);
 
             if (ret == BLK_ALLOC_SUCCESS) {
                 //fprintf(stderr, "Allocated block num = %llu\n", blks[i].get_piece(0).get_blk_id());

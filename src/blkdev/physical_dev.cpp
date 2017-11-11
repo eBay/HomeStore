@@ -5,7 +5,7 @@
  *      Author: hkadayam
  */
 
-#include "BlkDev.h"
+#include "blkdev.h"
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -14,6 +14,7 @@
 #include <iostream>
 #include <folly/Exception.h>
 #include <boost/utility.hpp>
+#include "omds/utility/useful_defs.hpp"
 
 namespace omstore {
 
@@ -33,11 +34,16 @@ ssize_t pwritev(int fd, const struct iovec *iov, int iovcnt, off_t offset) {
 
 #endif
 
+static std::atomic< uint64_t > glob_phys_dev_offset(0);
+static std::atomic< uint32_t > glob_phys_dev_ids = 0;
+
 PhysicalDev::PhysicalDev(std::string devname, int oflags) :
         m_devname(devname) {
     struct stat stat_buf;
     stat(devname.c_str(), &stat_buf);
     m_devsize = (uint64_t) stat_buf.st_size;
+    m_dev_offset = glob_phys_dev_offset.fetch_add(m_devsize, std::memory_order_acq_rel);
+    m_dev_num    = glob_phys_dev_ids.fetch_add(1, std::memory_order_acq_rel);
 
     // open and load the header block and validate if its a valid device
     folly::checkUnixError(m_devfd = open(devname.c_str(), oflags));
@@ -48,9 +54,6 @@ PhysicalDev::PhysicalDev(std::string devname, int oflags) :
 }
 
 PhysicalDev::~PhysicalDev() {
-    for (auto it : m_chunks) {
-        delete(*it);
-    }
 }
 
 bool PhysicalDev::load(bool from_persistent_area) {
@@ -97,10 +100,10 @@ void PhysicalDev::format() {
     // Format the structure
     m_pers_hdr_block.magic = MAGIC;
     strcpy(m_pers_hdr_block.product_name, PRODUCT_NAME);
-    m_pers_hdr_block.version = 1;
+    m_pers_hdr_block.version = CURRENT_HEADER_VERSION;
     m_pers_hdr_block.uuid = generator();
+    m_pers_hdr_block.super_block_chunk_id = INVALID_CHUNK_ID; // Next chunk to this chunk.
     m_pers_hdr_block.num_chunks = 1;
-    m_pers_hdr_block.super_block_chunk_id = 1; // Next chunk to this chunk.
 
     // Initialize this header block chunk
     m_pers_hdr_block.chunks[0].chunk_start_offset = 0;
@@ -114,7 +117,8 @@ void PhysicalDev::format() {
         write_header_block();
     } catch (std::system_error &e) {
         load(false); // Reload the buffer from memory
-        throw DeviceException("Unable to format the device - write header block error for device " + get_devname());
+        throw DeviceException("Unable to format the device - write header block error for device " +
+                              get_devname() + " Exception info: " + e.what());
     }
 
     // Create the first chunk into the list
@@ -125,7 +129,15 @@ void PhysicalDev::format() {
     load(false);
 }
 
+bool PhysicalDev::validate_device() {
+    return ((m_pers_hdr_block.magic == MAGIC) &&
+            (strcmp(m_pers_hdr_block.product_name, "OmStore") == 0) &&
+            (m_pers_hdr_block.version == CURRENT_HEADER_VERSION));
+}
+
 PhysicalDevChunk *PhysicalDev::alloc_chunk(uint64_t req_size) {
+    std::lock_guard<decltype(m_chunk_mutex)> lock(m_chunk_mutex);
+
     PhysicalDevChunk *chunk = find_free_chunk(req_size);
     if (chunk == nullptr) {
         // There are no readily available free chunk which has the required space available. Try to create one
@@ -160,6 +172,7 @@ PhysicalDevChunk *PhysicalDev::alloc_chunk(uint64_t req_size) {
 }
 
 void PhysicalDev::free_chunk(PhysicalDevChunk *chunk) {
+    std::lock_guard<decltype(m_chunk_mutex)> lock(m_chunk_mutex);
     chunk->set_busy(false);
 
     // Check if previous and next chunk are free, if so make it contiguous chunk
@@ -192,8 +205,8 @@ void PhysicalDev::free_chunk(PhysicalDevChunk *chunk) {
 inline void PhysicalDev::write_header_block() {
     // Make a temp copy in case of failures
     memcpy(hdr_tmp_buf, &m_pers_hdr_block, PHYS_DEV_PERSISTENT_HEADER_SIZE);
-    ssize_t bytes = pwrite(m_devfd, &m_pers_hdr_block, m_pers_hdr_block.chunks[0].chunk_start_offset,
-                           m_pers_hdr_block.chunks[0].chunk_size);
+    ssize_t bytes = pwrite(m_devfd, &m_pers_hdr_block, m_pers_hdr_block.chunks[0].chunk_size,
+                           m_pers_hdr_block.chunks[0].chunk_start_offset);
     if (unlikely((bytes < 0) || (bytes != m_pers_hdr_block.chunks[0].chunk_size))) {
         memcpy(&m_pers_hdr_block, hdr_tmp_buf, PHYS_DEV_PERSISTENT_HEADER_SIZE);
         folly::throwSystemError("Header block write failed");
@@ -203,56 +216,50 @@ inline void PhysicalDev::write_header_block() {
 inline void PhysicalDev::read_header_block() {
     memset(&m_pers_hdr_block, 0, PHYS_DEV_PERSISTENT_HEADER_SIZE);
 
-    ssize_t bytes = pread(m_devfd, &m_pers_hdr_block, 0, PHYS_DEV_PERSISTENT_HEADER_SIZE);
-    if (unlikely((bytes < 0) || (bytes != m_pers_hdr_block.chunks[0].chunk_size))) {
+    ssize_t bytes = pread(m_devfd, &m_pers_hdr_block, PHYS_DEV_PERSISTENT_HEADER_SIZE, 0);
+    if (unlikely((bytes < 0) || (bytes != PHYS_DEV_PERSISTENT_HEADER_SIZE))) {
         folly::throwSystemError("Header block read failed");
     }
 }
 
-BlkOpStatus PhysicalDev::write(const char *data, uint32_t size, uint64_t offset) {
+void PhysicalDev::write(const char *data, uint32_t size, uint64_t offset) {
     ssize_t writtenSize = pwrite(get_devfd(), data, (ssize_t) size, (off_t) offset);
     if (writtenSize != size) {
-        perror("PhysicalDev::write error");
-        cout << "Error trying to write offset " << offset << " size = " << size << endl;
-        return BLK_OP_FAILED;
+        std::stringstream ss;
+        ss << "Error trying to write offset " << offset << " size to write = " << size << " size written = "
+           << writtenSize << "\n";
+        folly::throwSystemError(ss.str());
     }
-
-    return BLK_OP_SUCCESS;
 }
 
-BlkOpStatus PhysicalDev::writev(const struct iovec *iov, int iovcnt, uint32_t size, uint64_t offset) {
-    ssize_t writtenSize = pwritev(get_devfd(), iov, iovcnt, offset);
-    if (writtenSize != size) {
-        perror("PhysicalDev:writev error");
-        cout << "Error trying to write offset " << offset << " size to write = " << size << " size written = "
-             << writtenSize << endl;
-        return BLK_OP_FAILED;
+void PhysicalDev::writev(const struct iovec *iov, int iovcnt, uint32_t size, uint64_t offset) {
+    ssize_t written_size = pwritev(get_devfd(), iov, iovcnt, offset);
+    if (written_size != size) {
+        std::stringstream ss;
+        ss << "Error trying to write offset " << offset << " size to write = " << size << " size written = "
+           << written_size << "\n";
+        folly::throwSystemError(ss.str());
     }
-
-    return BLK_OP_SUCCESS;
 }
 
-BlkOpStatus PhysicalDev::read(char *data, uint32_t size, uint64_t offset) {
-    ssize_t readSize = pread(get_devfd(), data, (ssize_t) size, (off_t) offset);
-    if (readSize != size) {
-        perror("PhysicalDev::read error");
-        cout << "Error trying to read offset " << offset << " size = " << size << endl;
-        return BLK_OP_FAILED;
+void PhysicalDev::read(char *data, uint32_t size, uint64_t offset) {
+    ssize_t read_size = pread(get_devfd(), data, (ssize_t) size, (off_t) offset);
+    if (read_size != size) {
+        std::stringstream ss;
+        ss << "Error trying to read offset " << offset << " size to read = " << size << " size read = "
+           << read_size << "\n";
+        folly::throwSystemError(ss.str());
     }
-
-    return BLK_OP_SUCCESS;
 }
 
-BlkOpStatus PhysicalDev::readv(const struct iovec *iov, int iovcnt, uint32_t size, uint64_t offset) {
-    ssize_t readSize = preadv(get_devfd(), iov, iovcnt, (off_t) offset);
-    if (readSize != size) {
-        perror("PhysicalDev::read error");
-        cout << "Error trying to read offset " << offset << " size to read = " << size << " size read = " << readSize
-             << endl;
-        return BLK_OP_FAILED;
+void PhysicalDev::readv(const struct iovec *iov, int iovcnt, uint32_t size, uint64_t offset) {
+    ssize_t read_size = preadv(get_devfd(), iov, iovcnt, (off_t) offset);
+    if (read_size != size) {
+        std::stringstream ss;
+        ss << "Error trying to read offset " << offset << " size to read = " << size << " size read = "
+           << read_size << "\n";
+        folly::throwSystemError(ss.str());
     }
-
-    return BLK_OP_SUCCESS;
 }
 
 PhysicalDevChunk *PhysicalDev::find_free_chunk(uint64_t req_size) {
@@ -275,6 +282,8 @@ phys_chunk_header *PhysicalDev::alloc_new_slot(uint32_t *pslot_num) {
     uint32_t cur_slot = start_slot;
     do {
         if (!m_pers_hdr_block.chunks[cur_slot].slot_allocated) {
+            m_pers_hdr_block.chunks[cur_slot].slot_allocated = true;
+            *pslot_num = cur_slot;
             return &m_pers_hdr_block.chunks[cur_slot];
         }
         cur_slot++;
@@ -282,6 +291,26 @@ phys_chunk_header *PhysicalDev::alloc_new_slot(uint32_t *pslot_num) {
     } while (cur_slot != start_slot);
 
     throw DeviceException("No new slot available in the device allocated.");
+}
+
+std::string PhysicalDev::to_string() {
+    std::stringstream ss;
+    ss << "Device name = " << m_devname << "\n";
+    ss << "Device fd = " << m_devfd << "\n";
+    ss << "Device size = " << m_devsize << "\n";
+    ss << "Header:\n";
+    ss << "\tMagic = " << m_pers_hdr_block.magic << "\n";
+    ss << "\tProduct Name = " << m_pers_hdr_block.product_name << "\n";
+    ss << "\tHeader version = " << m_pers_hdr_block.version << "\n";
+    ss << "\tUUID = " << m_pers_hdr_block.uuid << "\n";
+    ss << "\tSuper block chunk id = " << m_pers_hdr_block.super_block_chunk_id << "\n";
+    ss << "\tNum of chunks = " << m_pers_hdr_block.num_chunks << "\n";
+
+    auto i = 0;
+    for (auto chunk : m_chunks) {
+        ss << "\tChunk " << i++ << " Info: \n\t\t" << chunk.to_string();
+    }
+    return ss.str();
 }
 
 PhysicalDevChunk *PhysicalDevChunk::create_new_chunk(PhysicalDev *pdev, uint64_t start_offset, uint64_t size,
@@ -294,8 +323,9 @@ PhysicalDevChunk *PhysicalDevChunk::create_new_chunk(PhysicalDev *pdev, uint64_t
         chunk->set_next_chunk_slot(prev_chunk->get_next_chunk_slot());
         prev_chunk->set_next_chunk_slot(slot);
         auto it = pdev->m_chunks.iterator_to(*prev_chunk);
-        pdev->m_chunks.insert(++it, chunk);
+        pdev->m_chunks.insert(++it, *chunk);
     }
+    pdev->m_pers_hdr_block.num_chunks++;
     return chunk;
 }
 
@@ -310,6 +340,7 @@ void PhysicalDevChunk::remove_chunk(PhysicalDevChunk *chunk) {
         assert(0); // We don't expect first chunk to be deleted.
     }
 
+    pdev->m_pers_hdr_block.num_chunks--;
     chunk->free_slot();
     pdev->m_chunks.erase(it);
     delete(chunk);

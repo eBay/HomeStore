@@ -16,6 +16,8 @@
 #include <sstream>
 #include "omds/bitmap/bitset.hpp"
 #include "omds/btree/mem_btree.hpp"
+#include <folly/ThreadLocal.h>
+#include <boost/range/irange.hpp>
 
 using namespace std;
 
@@ -82,25 +84,33 @@ typedef enum {
     BLK_ALLOCATOR_EXITING = 3,
 } BlkAllocatorState;
 
+/* Hints for various allocators */
+struct blk_alloc_hints {
+    uint32_t desired_temp;          // Temperature hint for the device
+    int      dev_id_hint;           // which physical device to pick (hint if any) -1 for don't care
+    bool     can_look_for_other_dev; // If alloc on device not available can I pick other device
+};
+
 class BlkAllocator
 {
-protected:
-    BlkAllocConfig m_cfg;
-
 public:
+
     explicit BlkAllocator(BlkAllocConfig &cfg) {
         m_cfg = cfg;
     }
 
     virtual ~BlkAllocator() = default;
 
-    virtual BlkAllocStatus alloc(uint32_t size, uint32_t desired_temp, Blk *outBlk) = 0;
-    virtual void free(Blk &b) = 0;
+    virtual BlkAllocStatus alloc(uint32_t size, blk_alloc_hints &hints, SingleBlk *out_blk) = 0;
+    virtual void free(SingleBlk &b) = 0;
     virtual std::string to_string() const = 0;
 
     virtual const BlkAllocConfig &get_config() const {
         return m_cfg;
     }
+
+protected:
+    BlkAllocConfig m_cfg;
 };
 
 /* FixedBlkAllocator is a fast allocator where it allocates only 1 size block and ALL free blocks are cached instead of
@@ -111,15 +121,15 @@ class FixedBlkAllocator : public BlkAllocator {
 private:
     struct __fixed_blk_node {
 #ifndef NDEBUG
-        blkid32_t this_blk_id;
+        uint32_t this_blk_id;
 #endif
-        blkid32_t next_blk;
+        uint32_t next_blk;
     } __attribute__ ((__packed__));
 
     struct __top_blk {
         struct blob {
             uint32_t gen;
-            blkid32_t top_blk_id;
+            uint32_t top_blk_id;
         } __attribute__ ((__packed__));
 
         blob b;
@@ -128,7 +138,7 @@ private:
             memcpy(&b, &id, sizeof(uint64_t));
         }
 
-        __top_blk(uint32_t gen, blkid32_t blk_id) {
+        __top_blk(uint32_t gen, uint32_t blk_id) {
             b.gen = gen;
             b.top_blk_id = blk_id;
         }
@@ -143,7 +153,7 @@ private:
             return b.gen;
         }
 
-        blkid32_t get_top_blk_id() const {
+        uint32_t get_top_blk_id() const {
             return b.top_blk_id;
         }
 
@@ -151,7 +161,7 @@ private:
             b.gen = gen;
         }
 
-        void set_top_blk_id(blkid32_t p) {
+        void set_top_blk_id(uint32_t p) {
             b.top_blk_id = p;
         }
     } __attribute__ ((__packed__));
@@ -168,11 +178,11 @@ public:
     explicit FixedBlkAllocator(BlkAllocConfig &cfg);
     ~FixedBlkAllocator() override;
 
-    BlkAllocStatus alloc(uint32_t size, uint32_t desired_temp, Blk *out_blk) override;
-    void free(Blk &b) override;
+    BlkAllocStatus alloc(uint32_t size, blk_alloc_hints &hints, SingleBlk *out_blk) override;
+    void free(SingleBlk &b) override;
     std::string to_string() const override;
 private:
-    void free_blk(blkid32_t blk_id);
+    void free_blk(uint32_t blk_id);
 };
 
 } // namespace omstore

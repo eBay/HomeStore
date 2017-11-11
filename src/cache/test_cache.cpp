@@ -103,7 +103,7 @@ void test_reads(benchmark::State& state) {
             omds::blob b;
             cbuf->get(&b);
             sscanf((const char *)b.bytes, "Content for blk id = %d\n", &id);
-            assert(id == glob_ids[i]->m_id);
+            assert(id == glob_ids[i]->m_internal_id);
 #endif
         }
     }

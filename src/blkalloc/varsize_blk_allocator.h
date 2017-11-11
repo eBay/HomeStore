@@ -377,8 +377,8 @@ public:
     VarsizeBlkAllocator(VarsizeBlkAllocConfig &cfg);
     virtual ~VarsizeBlkAllocator();
 
-    BlkAllocStatus alloc(uint32_t size, uint32_t desired_temp, Blk *out_blk) override;
-    void free(Blk &blk) override;
+    BlkAllocStatus alloc(uint32_t size, blk_alloc_hints &hints, SingleBlk *out_blk) override;
+    void free(SingleBlk &blk) override;
 
     std::string to_string() const override;
     void allocator_state_machine();
@@ -413,11 +413,8 @@ private:
 
     // Sweep and cache related functions
     void request_more_blks(BlkAllocSegment *seg = nullptr);
-
     void request_more_blks_wait(BlkAllocSegment *seg = nullptr);
-
     void fill_cache(BlkAllocSegment *seg);
-
     uint64_t fill_cache_in_portion(uint64_t portion_num, BlkAllocSegment *seg);
 
     // Convenience routines

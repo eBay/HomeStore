@@ -50,6 +50,11 @@ inline P *container_of(M *ptr, const M P::*member) {
     return (P *) ((char *) ptr - offset_of(member));
 }
 
+template<uint32_t bits>
+static uint64_t constexpr get_mask() {
+    return uint64_t(~((uint64_t)(-1)<<bits));
+}
+
 struct blob {
     uint8_t *bytes;
     uint32_t size;

@@ -4,11 +4,9 @@ project(blkalloc)
 set(CMAKE_CXX_STANDARD 14)
 
 include_directories(../blkalloc)
-include_directories(../libutils)
-include_directories(../blkdev)
+include_directories(..)
 
-set(DEPENDENT_LIBS
-        glog)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ../../cmake-build-debug/target)
 
 set(TEST_BLKALLOC_SOURCE_FILES
         blk.h
@@ -19,5 +17,5 @@ set(TEST_BLKALLOC_SOURCE_FILES
         test_blkalloc.cpp)
 
 add_executable(test_blkalloc ${TEST_BLKALLOC_SOURCE_FILES})
-target_link_libraries(test_blkalloc ${DEPENDENT_LIBS})
+target_link_libraries(test_blkalloc glog)
 

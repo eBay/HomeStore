@@ -9,16 +9,123 @@
 #define SRC_BLKALLOC_BLK_H_
 
 #include <iostream>
-#include <assert.h>
+#include <cassert>
 #include "omds/array/flexarray.hpp"
+#include "omds/memory/mempiece.hpp"
+#include "omds/utility/useful_defs.hpp"
+//#include "blkdev/blkdev.h"
 
 namespace omstore {
 
-typedef uint32_t blkid32_t;
-typedef uint64_t blkid64_t;
-#define BLKID32_INVALID ((blkid32_t)(-1))
-#define BLKID64_INVALID ((blkid64_t)(-1))
+struct blk_id {
 
+    static uint8_t constexpr id_bits() { return 48;}
+    static uint8_t constexpr chunk_bits() {return 64-id_bits();}
+
+    static uint64_t constexpr invalid_internal_id() {
+        return ((uint64_t)-1);
+    }
+
+    static omds::blob get_blob(const blk_id &id) {
+        omds::blob b;
+        b.bytes = (uint8_t *)&id.m_internal_id;
+        b.size = sizeof(uint64_t);
+
+        return b;
+    }
+
+    static int compare(const blk_id &one, const blk_id &two) {
+        if (one.m_internal_id == two.m_internal_id) {
+            return 0;
+        } else if (one.m_internal_id > two.m_internal_id) {
+            return -1;
+        } else {
+            return 1;
+        }
+    }
+
+    blk_id(uint64_t id, uint16_t chunk_num)  {
+        set(id, chunk_num);
+    }
+
+    blk_id() {
+        m_internal_id = invalid_internal_id();
+    }
+
+    blk_id(const blk_id &other) {
+        m_internal_id = other.m_internal_id;
+    }
+
+    blk_id &operator=(const blk_id &other) = default;
+
+    void set(uint64_t id, uint16_t chunk_num) {
+        m_internal_id = id | chunk_num<<chunk_bits();
+    }
+
+    uint64_t get_id() const {
+        return m_internal_id & omds::get_mask<chunk_bits()>();
+    }
+
+    uint16_t get_chunk_id() const {
+        return ((m_internal_id >> chunk_bits()) & omds::get_mask<id_bits()>());
+    }
+
+    uint64_t m_internal_id;
+};
+
+#define BLKID32_INVALID ((uint32_t)(-1))
+#define BLKID64_INVALID ((uint64_t)(-1))
+
+class PhysicalDevChunk;
+
+struct SingleBlk {
+    blk_id m_blk_id;
+    uint32_t  m_size;
+    omds::MemPieces < 1 > m_mem;
+
+    SingleBlk(uint64_t id, uint16_t chunk_num, uint32_t size) :
+            m_blk_id(id, chunk_num),
+            m_size(size) {}
+    explicit SingleBlk(blk_id bid) :
+            m_blk_id(bid),
+            m_size(0) {
+    }
+    SingleBlk() : SingleBlk((uint64_t)-1, (uint16_t)-1, 0) {}
+
+    blk_id get_id() const {
+        return m_blk_id;
+    }
+
+    void set_id(uint64_t id, uint16_t chunk_num) {
+        m_blk_id.set(id, chunk_num);
+    }
+
+    void set_id(const blk_id bid) {
+        m_blk_id.m_internal_id = bid.m_internal_id;
+    }
+
+    omds::MemPieces<1> &get_mem() {
+        return m_mem;
+    }
+
+    const omds::MemPieces<1> &get_mem_const() const {
+        return m_mem;
+    }
+
+    void set_mem(omds::blob b) {
+        m_mem.set_piece(b);
+    }
+
+    uint32_t get_size() const {
+        return m_size;
+    }
+
+    void set_size(uint32_t size) {
+        m_size = size;
+    }
+};
+
+#if 0
 #define EXPECTED_BLK_PIECES        1
 #define EXPECTED_MEM_PIECE_PER_BLK 2
 
@@ -148,5 +255,6 @@ public:
         return m_pieces[num];
     }
 };
+#endif
 }
 #endif /* SRC_BLKALLOC_BLK_H_ */

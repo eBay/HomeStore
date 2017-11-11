@@ -8,41 +8,25 @@
 #include "blkdev.h"
 #include <fcntl.h>
 
-static BlkDevManager *devmgr = NULL;
+namespace omstore {
 
-BlkDevManager::BlkDevManager()
-{
-	m_open_flags = O_RDWR;
+BlkDevManager::BlkDevManager() {
+    m_open_flags = O_RDWR;
 }
 
-BlkDevManager::~BlkDevManager()
-{
-	for (auto it = m_devices.begin(); it != m_devices.end(); it++) {
-		delete (*it);
-	}
+BlkDevManager::~BlkDevManager() {
 }
 
-void BlkDevManager::add_device(string devName)
-{
-	m_devices.push_back(new PhysicalDev(devName, m_open_flags));
+void BlkDevManager::add_device(std::string dev_name) {
+    m_devices.push_back(std::make_unique<PhysicalDev>(PhysicalDev(dev_name, m_open_flags));
 }
 
-vector<PhysicalDev *> BlkDevManager::get_all_devices()
-{
-	return m_devices;
+const std::vector< std::unique_ptr< PhysicalDev > > &BlkDevManager::get_all_devices() const {
+    return m_devices;
 }
 
-uint32_t BlkDevManager::get_devices_count()
-{
-	return m_devices.size();
+uint64_t BlkDevManager::get_devices_count() {
+    return m_devices.size();
 }
 
-void BlkDevManager::startInstance()
-{
-	devmgr = new BlkDevManager();
-}
-
-BlkDevManager *BlkDevManager::getInstance()
-{
-	return devmgr;
-}
+} // namespace omstore
