@@ -13,6 +13,7 @@ set(TEST_BLKDEV_SOURCE_FILES
         blkdev_manager.cpp
         physical_dev.cpp
         test_blkdev.cpp
+        chunk_selector.hpp
         virtual_dev.hpp)
 
 add_executable(test_blkdev ${TEST_BLKDEV_SOURCE_FILES})

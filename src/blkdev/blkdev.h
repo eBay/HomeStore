@@ -65,9 +65,13 @@ struct phys_chunk_header {
 
 class PhysicalDevChunk : public boost::intrusive::list_base_hook<> {
 public:
+    friend class BlkDevManager;
+
+#if 0
     static PhysicalDevChunk *create_new_chunk(PhysicalDev *pdev, uint64_t start_offset, uint64_t size,
                                          PhysicalDevChunk *prev_chunk);
     static void remove_chunk(PhysicalDevChunk *chunk);
+#endif
 
     PhysicalDevChunk(PhysicalDev *pdev, uint64_t start_offset, uint64_t size, phys_chunk_header *hdr) :
             m_pdev(pdev),
@@ -188,7 +192,7 @@ static_assert(sizeof(phys_dev_header_block) == PHYS_DEV_PERSISTENT_HEADER_SIZE,
 
 class PhysicalDev {
     friend class PhysicalDevChunk;
-
+    friend class BlkDevManager;
 public:
     PhysicalDev(std::string devname, int oflags);
     virtual ~PhysicalDev();
@@ -248,7 +252,7 @@ private:
     phys_chunk_header *alloc_new_slot(uint32_t *pslot_num);
 
     static constexpr uint32_t max_slots() {
-        return ((PHYS_DEV_PERSISTENT_HEADER_SIZE - sizeof(phys_dev_header_block))/sizeof(phys_chunk_header));
+        return ((sizeof(phys_dev_header_block) - offsetof(phys_dev_header_block, chunks))/sizeof(phys_chunk_header));
     }
 
     friend class ChunkCyclicIterator;
@@ -306,19 +310,69 @@ public:
     BlkDevManager();
     virtual ~BlkDevManager();
 
-    void add_device(std::string dev_name);
-    const std::vector< std::unique_ptr< PhysicalDev > > &get_all_devices() const;
+    void add_device(std::string dev_name) {
+        m_devices.push_back(std::make_unique<PhysicalDev>(dev_name, m_open_flags));
+    }
 
-    uint64_t get_devices_count();
+    const std::vector< std::unique_ptr< PhysicalDev > > &get_all_devices() const {
+        return m_devices;
+    }
+
+    uint64_t get_devices_count() {
+        return m_devices.size();
+    }
+
+    PhysicalDevChunk *create_new_chunk(PhysicalDev *pdev, uint64_t start_offset, uint64_t size,
+                                              PhysicalDevChunk *prev_chunk) {
+        uint32_t slot;
+        phys_chunk_header *h = pdev->alloc_new_slot(&slot);
+
+        auto chunk = new PhysicalDevChunk(pdev, start_offset, size, h);
+        if (prev_chunk) {
+            chunk->set_next_chunk_slot(prev_chunk->get_next_chunk_slot());
+            prev_chunk->set_next_chunk_slot(slot);
+            auto it = pdev->m_chunks.iterator_to(*prev_chunk);
+            pdev->m_chunks.insert(++it, *chunk);
+        }
+        m_all_chunks[chunk->get_chunk_id()] = chunk;
+        pdev->m_pers_hdr_block.num_chunks++;
+        return chunk;
+    }
+
+    void remove_chunk(PhysicalDevChunk *chunk) {
+        PhysicalDev *pdev = chunk->m_pdev;
+        auto it = pdev->m_chunks.iterator_to(*chunk);
+        if (it != pdev->m_chunks.begin()) {
+            auto prev_chunk = &*(--it);
+            prev_chunk->set_next_chunk_slot(chunk->get_next_chunk_slot());
+            ++it;
+        } else {
+            assert(0); // We don't expect first chunk to be deleted.
+        }
+
+        pdev->m_pers_hdr_block.num_chunks--;
+        chunk->free_slot();
+        pdev->m_chunks.erase(it);
+        m_all_chunks[chunk->get_chunk_id()] = nullptr;
+        delete(chunk);
+    }
+
+    const PhysicalDevChunk *get_chunk(uint16_t chunk_id) const {
+        return m_all_chunks[chunk_id];
+    }
+
+    PhysicalDevChunk *get_chunk_mutable(uint16_t chunk_id) {
+        return m_all_chunks[chunk_id];
+    }
 
 private:
     int m_open_flags;
     std::vector< std::unique_ptr< PhysicalDev > > m_devices;
-    std::vector< PhysicalDevChunk * >
+    std::array< PhysicalDevChunk *, PhysicalDev::max_slots() > m_all_chunks;
 };
 
 /*
-template <typename Allocator, typename DefaultSelectionPolicy>
+template <typename Allocator, typename DefaultDeviceSelector>
 class VirtualDev {
 public:
     VirtualDev(uint64_t size, uint32_t nmirror, bool is_stripe, uint32_t dev_blk_size,

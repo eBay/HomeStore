@@ -71,7 +71,7 @@ public:
             }
         }
     }
-    int npieces() const {
+    uint32_t npieces() const {
         if (m_u.m_piece.size() == 0) {
             return m_u.m_list ? m_u.m_list->size() : 0;
         } else {

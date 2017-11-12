@@ -15,6 +15,7 @@
 #include <folly/Exception.h>
 #include <boost/utility.hpp>
 #include "omds/utility/useful_defs.hpp"
+#include "main/omstore.hpp"
 
 namespace omstore {
 
@@ -148,15 +149,15 @@ PhysicalDevChunk *PhysicalDev::alloc_chunk(uint64_t req_size) {
         }
 
         // We do have some space available, try to get a new slot from persistent area and put the new chunk in the list
-        chunk = PhysicalDevChunk::create_new_chunk(this, next_offset, req_size, &prev_chunk);
+        chunk = BlkDevManagerInstance.create_new_chunk(this, next_offset, req_size, &prev_chunk);
     } else {
         assert(chunk->get_size() >= req_size);
         chunk->set_busy(true);
 
         if (chunk->get_size() > req_size) {
             // There is some left over space, create a new chunk and insert it after current chunk
-            PhysicalDevChunk::create_new_chunk(this, chunk->get_start_offset() + req_size,
-                                               chunk->get_size() - req_size, chunk);
+            BlkDevManagerInstance.create_new_chunk(this, chunk->get_start_offset() + req_size,
+                                                   chunk->get_size() - req_size, chunk);
             chunk->set_size(req_size);
         }
     }
@@ -181,7 +182,7 @@ void PhysicalDev::free_chunk(PhysicalDevChunk *chunk) {
     if (!prev_chunk->is_busy()) {
         // We can merge our space to prev_chunk and remove our current chunk.
         prev_chunk->set_size(prev_chunk->get_size() + chunk->get_size());
-        PhysicalDevChunk::remove_chunk(chunk);
+        BlkDevManagerInstance.remove_chunk(chunk);
         chunk = prev_chunk;
     }
 
@@ -190,7 +191,7 @@ void PhysicalDev::free_chunk(PhysicalDevChunk *chunk) {
     if (!next_chunk->is_busy()) {
         // Next chunk can merge with us and remove the next chunk
         chunk->set_size(chunk->get_size() + next_chunk->get_size());
-        PhysicalDevChunk::remove_chunk(next_chunk);
+        BlkDevManagerInstance.remove_chunk(next_chunk);
     }
 
     // Persist the header block
@@ -313,6 +314,7 @@ std::string PhysicalDev::to_string() {
     return ss.str();
 }
 
+#if 0
 PhysicalDevChunk *PhysicalDevChunk::create_new_chunk(PhysicalDev *pdev, uint64_t start_offset, uint64_t size,
                                      PhysicalDevChunk *prev_chunk) {
     uint32_t slot;
@@ -345,5 +347,5 @@ void PhysicalDevChunk::remove_chunk(PhysicalDevChunk *chunk) {
     pdev->m_chunks.erase(it);
     delete(chunk);
 }
-
+#endif
 } // namespace omstore
