@@ -187,8 +187,8 @@ void PhysicalDev::free_chunk(PhysicalDevChunk *chunk) {
     }
 
     it = m_chunks.iterator_to(*chunk);
-    PhysicalDevChunk *next_chunk = &*(++it);
-    if (!next_chunk->is_busy()) {
+    PhysicalDevChunk *next_chunk = (++it == m_chunks.end()) ? nullptr : &*it;
+    if (next_chunk && !next_chunk->is_busy()) {
         // Next chunk can merge with us and remove the next chunk
         chunk->set_size(chunk->get_size() + next_chunk->get_size());
         BlkDevManagerInstance.remove_chunk(next_chunk);
@@ -200,6 +200,35 @@ void PhysicalDev::free_chunk(PhysicalDevChunk *chunk) {
     } catch (std::system_error &e) {
         load(false); // Reload the buffer from memory
         throw DeviceException("Unable to commit write header block error for device " + get_devname());
+    }
+}
+
+bool PhysicalDev::try_expand_chunk(PhysicalDevChunk *chunk, uint32_t addln_size) {
+    std::lock_guard<decltype(m_chunk_mutex)> lock(m_chunk_mutex);
+
+    bool space_updated = false;
+    auto it = m_chunks.iterator_to(*chunk);
+    PhysicalDevChunk *next_chunk = (++it == m_chunks.end()) ? nullptr : &*it;
+
+    if (next_chunk == nullptr) {
+        // This is the last chunk, if we have space in the device, go for it
+        if ((chunk->get_start_offset() + chunk->get_size() + addln_size) <= m_devsize) {
+            chunk->set_size(chunk->get_size() + addln_size);
+            space_updated = true;
+        }
+    } else {
+        // TODO: We are not the last chunk, but if next chunks are free use it to merge and create one chunk itself
+    }
+
+    if (space_updated) {
+        try {
+            write_header_block();
+            return true;
+        } catch (std::system_error &e) {
+            return false;
+        }
+    } else {
+        return false;
     }
 }
 

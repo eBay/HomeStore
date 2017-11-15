@@ -117,7 +117,7 @@ void VarsizeBlkAllocator::allocator_state_machine() {
     }
 }
 
-BlkAllocStatus VarsizeBlkAllocator::alloc(uint32_t size, blk_alloc_hints &hints, SingleBlk *out_blk) {
+BlkAllocStatus VarsizeBlkAllocator::alloc(uint32_t size, blk_alloc_hints &hints, sized_blk_id *out_blkid) {
     BlkAllocStatus ret = BLK_ALLOC_SUCCESS;
     bool found = false;
 
@@ -168,27 +168,24 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint32_t size, blk_alloc_hints &hints,
 
         VarsizeAllocCacheEntry excess_entry;
         if (leading_npages <= trailing_npages) {
-            out_blk->set_id(blknum);
-            out_blk->set_size(nblks * m_cfg.get_blk_size());
+            out_blkid->set(blknum, 0, nblks * m_cfg.get_blk_size());
             gen_cache_entry(blknum + nblks, (uint32_t)excess_nblks, &excess_entry);
         } else {
-            out_blk->set_id(blknum + nblks);
-            out_blk->set_size(nblks * m_cfg.get_blk_size());
+            out_blkid->set(blknum + nblks, 0, nblks * m_cfg.get_blk_size());
             gen_cache_entry(blknum, (uint32_t)excess_nblks, &excess_entry);
         }
 
         omds::btree::EmptyClass dummy;
         m_blk_cache->insert(excess_entry, dummy);
     } else {
-        out_blk->set_id(actual_entry.get_blk_num());
-        out_blk->set_size(nblks * m_cfg.get_blk_size());
+        out_blkid->set(actual_entry.get_blk_num(), 0, nblks * m_cfg.get_blk_size());
     }
 
     m_cache_n_entries.fetch_sub(nblks, std::memory_order_acq_rel);
     return ret;
 }
 
-void VarsizeBlkAllocator::free(SingleBlk &b) {
+void VarsizeBlkAllocator::free(sized_blk_id &b) {
     BlkAllocPortion *portion = blknum_to_portion(b.get_id());
 
     uint32_t nblks = (uint32_t)((b.get_size() - 1) / get_config().get_blk_size() + 1);

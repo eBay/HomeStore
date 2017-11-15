@@ -8,6 +8,6 @@ if (CMAKE_BUILD_TYPE MATCHES Release)
 endif()
 
 add_subdirectory(src/omds)
-add_subdirectory(src/blkdev)
+add_subdirectory(src/device)
 add_subdirectory(src/blkalloc)
 add_subdirectory(src/cache)

@@ -13,12 +13,11 @@
 #include "omds/array/flexarray.hpp"
 #include "omds/memory/mempiece.hpp"
 #include "omds/utility/useful_defs.hpp"
-//#include "blkdev/blkdev.h"
+//#include "device/device.h"
 
 namespace omstore {
 
 struct blk_id {
-
     static uint8_t constexpr id_bits() { return 48;}
     static uint8_t constexpr chunk_bits() {return 64-id_bits();}
 
@@ -58,7 +57,7 @@ struct blk_id {
 
     blk_id &operator=(const blk_id &other) = default;
 
-    void set(uint64_t id, uint16_t chunk_num) {
+    void set(uint64_t id, uint16_t chunk_num = 0) {
         m_internal_id = id | chunk_num<<chunk_bits();
     }
 
@@ -73,11 +72,46 @@ struct blk_id {
     uint64_t m_internal_id;
 };
 
+struct sized_blk_id : public blk_id {
+    sized_blk_id(uint64_t id, uint16_t chunk_num, uint32_t size)  {
+        set(id, chunk_num, size);
+    }
+
+    sized_blk_id() :
+            blk_id(), m_size(0) {
+    }
+
+    sized_blk_id(const sized_blk_id &other) :
+            blk_id(other),
+            m_size(other.get_size()) {
+    }
+
+    sized_blk_id &operator=(const sized_blk_id &other) = default;
+
+    void set(uint64_t id, uint16_t chunk_num, uint32_t size) {
+        blk_id::set(id, chunk_num);
+        m_size = size;
+    }
+
+    blk_id id() {
+        return *this;
+    }
+
+    void set_size(uint32_t size) {
+        m_size = size;
+    }
+
+    uint32_t get_size() const {
+        return m_size;
+    }
+private:
+    uint32_t m_size;
+};
+
 #define BLKID32_INVALID ((uint32_t)(-1))
 #define BLKID64_INVALID ((uint64_t)(-1))
 
-class PhysicalDevChunk;
-
+#if 0
 struct SingleBlk {
     blk_id m_blk_id;
     uint32_t  m_size;
@@ -125,7 +159,6 @@ struct SingleBlk {
     }
 };
 
-#if 0
 #define EXPECTED_BLK_PIECES        1
 #define EXPECTED_MEM_PIECE_PER_BLK 2
 

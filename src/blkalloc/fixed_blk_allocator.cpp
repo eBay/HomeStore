@@ -35,22 +35,22 @@ FixedBlkAllocator::~FixedBlkAllocator() {
     delete (m_blk_nodes);
 }
 
-BlkAllocStatus FixedBlkAllocator::alloc(uint32_t size, blk_alloc_hints &hints, SingleBlk *out_blk) {
+BlkAllocStatus FixedBlkAllocator::alloc(uint32_t size, blk_alloc_hints &hints, sized_blk_id *out_blkid) {
     uint64_t prev_val;
     uint64_t cur_val;
-    uint32_t blk_id;
+    uint32_t id;
 
     do {
         prev_val = m_top_blk_id.load();
         __top_blk tp(prev_val);
 
         // Get the __top_blk blk and replace the __top_blk blk id with next id
-        blk_id = tp.get_top_blk_id();
-        if (blk_id == BLKID32_INVALID) {
+        id = tp.get_top_blk_id();
+        if (id == BLKID32_INVALID) {
             return BLK_ALLOC_SPACEFULL;
         }
 
-        __fixed_blk_node blknode = m_blk_nodes[blk_id];
+        __fixed_blk_node blknode = m_blk_nodes[id];
 
         tp.set_top_blk_id(blknode.next_blk);
         tp.set_gen(tp.get_gen() + 1);
@@ -58,8 +58,7 @@ BlkAllocStatus FixedBlkAllocator::alloc(uint32_t size, blk_alloc_hints &hints, S
 
     } while (!(m_top_blk_id.compare_exchange_weak(prev_val, cur_val)));
 
-    out_blk->set_id(blk_id);
-    out_blk->set_size(m_cfg.get_blk_size());
+    out_blkid->set(id, 0, m_cfg.get_blk_size());
 
 #ifndef NDEBUG
     m_nfree_blks.fetch_sub(1, std::memory_order_relaxed);
@@ -67,17 +66,17 @@ BlkAllocStatus FixedBlkAllocator::alloc(uint32_t size, blk_alloc_hints &hints, S
     return BLK_ALLOC_SUCCESS;
 }
 
-void FixedBlkAllocator::free(SingleBlk &b) {
+void FixedBlkAllocator::free(sized_blk_id &b) {
     free_blk((uint32_t)b.get_id());
 #ifndef NDEBUG
     m_nfree_blks.fetch_add(1, std::memory_order_relaxed);
 #endif
 }
 
-void FixedBlkAllocator::free_blk(uint32_t blk_id) {
+void FixedBlkAllocator::free_blk(uint32_t id) {
     uint64_t prev_val;
     uint64_t cur_val;
-    __fixed_blk_node *blknode = &m_blk_nodes[blk_id];
+    __fixed_blk_node *blknode = &m_blk_nodes[id];
 
     do {
         prev_val = m_top_blk_id.load();
@@ -86,7 +85,7 @@ void FixedBlkAllocator::free_blk(uint32_t blk_id) {
         blknode->next_blk = tp.get_top_blk_id();;
 
         tp.set_gen(tp.get_gen() + 1);
-        tp.set_top_blk_id(blk_id);
+        tp.set_top_blk_id(id);
         cur_val = tp.to_integer();
     } while (!(m_top_blk_id.compare_exchange_weak(prev_val, cur_val)));
 }

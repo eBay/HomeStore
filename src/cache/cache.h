@@ -37,18 +37,18 @@ public:
         blk.set_piece(bytes, size);
     }
 
-    void set(const omds::blob &b) {
-        set(b.bytes, b.size);
+    void set_mem(const omds::blob &b) {
+        set_mem(b.bytes, b.size);
     }
 
-    void set(uint8_t *bytes, uint32_t size) {
+    void set_mem(uint8_t *bytes, uint32_t size) {
         auto &blk = m_evict_record.m_mem;
         blk.set_piece(bytes, size);
     }
 
-    void get(omds::blob *out_b) {
+    void get_mem(omds::blob *out_b, uint32_t piece_num = 0) {
         auto &blk = m_evict_record.m_mem;
-        blk.get(out_b);
+        blk.get(out_b, piece_num);
     }
 
     typename CurrentEvictor::EvictRecordType &get_evict_record() {
@@ -167,6 +167,14 @@ public:
     }
 
     CacheBuffer(const K &key, omds::blob blob) : CacheBuffer(key, blob.bytes, blob.size) {}
+
+    K &get_key() {
+        return m_key;
+    }
+
+    void set_key(K &k) {
+        m_key = k;
+    }
 
     friend void intrusive_ptr_add_ref(CacheBuffer<K> *buf) {
         buf->m_refcount.increment();

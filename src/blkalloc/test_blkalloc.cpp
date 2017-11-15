@@ -17,10 +17,9 @@ void allocate_blocks(BlkAllocator *allocator)
     int iter = 0;
 
     while (++iter <= 2) {
-        SingleBlk blks[4000];
+        sized_blk_id blks[4000];
 
         for (i = 0, alloced = 0; i < 4000; i++, alloced++) {
-            SingleBlk b;
             blk_alloc_hints hints;
             hints.desired_temp = 0;
             BlkAllocStatus ret = allocator->alloc(8192, hints, &blks[i]);

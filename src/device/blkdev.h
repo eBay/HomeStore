@@ -197,8 +197,12 @@ public:
     PhysicalDev(std::string devname, int oflags);
     virtual ~PhysicalDev();
 
+    /* Allocate/Free a chunk. */
     PhysicalDevChunk *alloc_chunk(uint64_t req_size);
     void free_chunk(PhysicalDevChunk *chunk);
+
+    // Try to expand the chunk without creating a new one if possible. If not possible, return false
+    bool try_expand_chunk(PhysicalDevChunk *chunk, uint32_t addln_size);
 
     int get_devfd() const {
         return m_devfd;
