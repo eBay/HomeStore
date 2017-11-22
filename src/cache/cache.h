@@ -11,6 +11,7 @@
 #include "lru_eviction.hpp"
 #include <boost/intrusive_ptr.hpp>
 #include "omds/memory/obj_allocator.hpp"
+#include "main/store_limits.h"
 
 namespace omstore {
 
@@ -21,6 +22,180 @@ namespace omstore {
 #define LRUEvictor Evictor< LRUEvictionPolicy >
 #define CurrentEvictorRecord CurrentEvictor::EvictRecordType
 
+class CacheRecord : public omds::HashNode {
+public:
+    typename CurrentEvictor::EvictRecordType m_evict_record;  // Information about the eviction record itself.
+
+    const CurrentEvictor::EvictRecordType &get_evict_record() const {
+        return m_evict_record;
+    }
+
+    CurrentEvictor::EvictRecordType &get_evict_record_mutable() {
+        return m_evict_record;
+    }
+
+    static CacheRecord *evict_to_cache_record(const CurrentEvictor::EvictRecordType *p_erec) {
+        return omds::container_of(p_erec, &CacheRecord::m_evict_record);
+    }
+};
+
+/* Number of entries we ideally want to have per hash bucket. This number if small, will reduce contention and
+ * speed of read/writes, but at the cost of increased memory */
+#define ENTRIES_PER_BUCKET   2
+
+/* Number of eviction partitions. More the partitions better the parallelization of requests, but lesser the
+ * effectiveness of cache, since it could get evicted sooner than expected, if distribution of key hashing is not even.*/
+#define EVICTOR_PARTITIONS 32
+
+template <typename K, typename V>
+class IntrusiveCache {
+public:
+
+    static_assert(std::is_base_of<CacheRecord, V >::value,
+                  "IntrusiveCache Value must be derived from CacheRecord");
+
+    IntrusiveCache(uint32_t max_cache_size, uint32_t avg_size_per_entry);
+
+    /* Put the raw buffer into the cache. Returns false if insert is not successful and if the key already
+     * exists, it additionally fills up the out_ptr. If insert is successful, returns true and put the
+     * new V also into out_ptr. */
+    bool insert(V &v, V **out_ptr, const std::function<void(V *)> &found_cb = nullptr);
+
+    /* Update the value, if it already exists or insert if not exist. Returns true if operation is successful. In
+     * additon, it also populates if the out_key exists with true if key exists or false if key does not */
+    bool upsert(const V &v, bool *out_key_exists);
+
+    /* Returns the raw pointer of the data corresponding to the key */
+    V* get(const K &k);
+
+    /* Erase the key from the cache. Returns true if key exists and erased, false otherwise */
+    bool erase(V &v);
+
+    static bool is_safe_to_evict(CurrentEvictor::EvictRecordType *rec);
+
+protected:
+    std::unique_ptr< CurrentEvictor > m_evictors[EVICTOR_PARTITIONS];
+    omds::IntrusiveHashSet< K, V > m_hash_set;
+};
+
+template <typename K>
+class CacheBuffer;
+
+template <typename K>
+class Cache : protected IntrusiveCache< K, CacheBuffer< K > > {
+public:
+    Cache(uint32_t max_cache_size, uint32_t avg_size_per_entry);
+
+    /* Put the raw buffer into the cache with key k. It returns whether put is successful and if so provides
+     * the smart pointer of CacheBuffer. Upsert flag of false indicates if the data already exists, do not insert */
+    bool insert(const K &k, const omds::blob &b, uint32_t value_offset,
+                boost::intrusive_ptr< CacheBuffer< K > > *out_smart_buf,
+                const std::function<void(CacheBuffer< K > *)> &found_cb = nullptr);
+    bool insert(const K &k, const boost::intrusive_ptr< CacheBuffer< K > > in_buf,
+                boost::intrusive_ptr< CacheBuffer< K > > *out_smart_buf);
+
+    /* Update is a special operation, where, it searches for the key and
+     *  If found, appends the blob to the existing cached memory, new memory at specified offset.
+     *  If not found, insert a new blob-offset combo into the cached memory.
+     *
+     *  Returns a named tuple of bools - key_found_already and successfully inserted/updated
+     */
+    auto update(const K &k, const omds::blob &b, uint32_t value_offset,
+                boost::intrusive_ptr< CacheBuffer<K> > *out_smart_buf);
+    bool upsert(const K &k, const omds::blob &b, boost::intrusive_ptr< CacheBuffer< K > > *out_smart_buf);
+    bool get(const K &k, boost::intrusive_ptr< CacheBuffer< K > > *out_smart_buf);
+    bool erase(boost::intrusive_ptr< CacheBuffer< K > > buf);
+    bool erase(const K &k, boost::intrusive_ptr<CacheBuffer< K > > *removed_buf);
+};
+
+template <typename K>
+class CacheBuffer : public CacheRecord {
+private:
+    K m_key;                                      // Key to access this cache
+    omds::MemVector< BLKSTORE_BLK_SIZE > m_mem;   // Memory address which is what this buffer contained with
+    omds::atomic_counter< uint32_t > m_refcount;  // Refcount
+
+public:
+    typedef CacheBuffer<K> CacheBufferType;
+
+    CacheBuffer() : m_refcount(0) {}
+
+    CacheBuffer(const K &key, const omds::blob &blob, uint32_t offset = 0) :
+            m_refcount(0) {
+        m_mem.set(blob, offset);
+        m_key = key;
+    }
+
+    const K &get_key() const {
+        return m_key;
+    }
+
+    void set_key(K &k) {
+        m_key = k;
+    }
+
+    void set_memvec(const omds::MemVector< BLKSTORE_BLK_SIZE > &vec) {
+        m_mem = vec;
+    }
+
+    const omds::MemVector< BLKSTORE_BLK_SIZE > &get_memvec() const {
+        return m_mem;
+    }
+
+    omds::MemVector< BLKSTORE_BLK_SIZE > &get_memvec_mutable() {
+        return m_mem;
+    }
+
+    omds::blob at_offset(uint32_t offset) const {
+        omds::blob b;
+        get_memvec().get(&b, offset);
+        return b;
+    }
+
+    friend void intrusive_ptr_add_ref(CacheBuffer<K> *buf) {
+        buf->m_refcount.increment();
+    }
+
+    friend void intrusive_ptr_release(CacheBuffer<K> *buf) {
+        if (buf->m_refcount.decrement_testz()) {
+            // First free the bytes it covers
+            omds::blob blob;
+            buf->m_mem.get(&blob);
+            free((void *) blob.bytes);
+
+            // Then free the record itself
+            omds::ObjectAllocator< CacheBufferType >::deallocate(buf);
+        }
+    }
+
+    //////////// Mandatory IntrusiveHashSet definitions ////////////////
+    static void ref(CacheBuffer<K> &b) {
+        b.m_refcount.increment();
+    }
+
+    static void deref(CacheBuffer<K> &b) {
+        b.m_refcount.decrement();
+    }
+
+    static bool deref_testz(CacheBuffer<K> &b) {
+        return b.m_refcount.decrement_testz();
+    }
+
+    static bool deref_test_le(CacheBuffer<K> &b, int32_t check) {
+        return b.m_refcount.decrement_test_le(check);
+    }
+
+    static const K *extract_key(const CacheBuffer<K> &b) {
+        return &(b.m_key);
+    }
+
+    static uint32_t get_size(const CurrentEvictor::EvictRecordType *rec) {
+        const CacheBuffer<K> *cbuf = static_cast<const CacheBuffer<K> *>(CacheRecord::evict_to_cache_record(rec));
+        return cbuf->get_memvec().size();
+    }
+};
+
+#if 0
 template <typename K, typename V>
 class CacheRecord : public omds::HashNode {
 private:
@@ -51,7 +226,7 @@ public:
         blk.get(out_b, piece_num);
     }
 
-    typename CurrentEvictor::EvictRecordType &get_evict_record() {
+    typename CurrentEvictor::EvictRecordType &get_evict_record() const {
         return m_evict_record;
     }
 
@@ -76,10 +251,8 @@ public:
         return V::deref_test_le(r, 0);
     }
 
-    static omds::blob get_blob(CacheRecordType &r) {
-        omds::blob b;
-        r.get_evict_record().m_mem.get(&b);
-        return b;
+    static EvictMemBlk get_mem(CacheRecordType &r) {
+        return r.get_evict_record().m_mem;
     }
 };
 
@@ -139,11 +312,11 @@ public:
     /* Put the raw buffer into the cache with key k. It returns whether put is successful and if so provides
      * the smart pointer of CacheBuffer. Upsert flag of false indicates if the data already exists, do not insert */
     bool insert(K &k, const omds::blob &b, boost::intrusive_ptr< CacheBufferType > *out_smart_buf);
+    bool insert(K &k, const boost::intrusive_ptr< CacheBufferType > in_buf,
+                boost::intrusive_ptr< CacheBufferType > *out_smart_buf);
 
     bool upsert(K &k, const omds::blob &b, boost::intrusive_ptr< CacheBufferType > *out_smart_buf);
-
     bool get(K &k, boost::intrusive_ptr< CacheBufferType > *out_smart_buf);
-
     bool erase(boost::intrusive_ptr< CacheBufferType > buf);
 };
 
@@ -208,6 +381,6 @@ public:
         return &(b.m_key);
     }
 };
-
+#endif
 } // namespace omstore
 #endif //OMSTORAGE_CACHE_HPP

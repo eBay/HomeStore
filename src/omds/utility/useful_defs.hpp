@@ -46,19 +46,49 @@ inline size_t offset_of(const M P::*member) {
 }
 
 template< class P, class M >
-inline P *container_of(M *ptr, const M P::*member) {
+inline P *container_of(const M *ptr, const M P::*member) {
     return (P *) ((char *) ptr - offset_of(member));
 }
 
-template<uint32_t bits>
+template<uint32_t bits, uint32_t lshifts=0>
 static uint64_t constexpr get_mask() {
-    return uint64_t(~((uint64_t)(-1)<<bits));
+    return uint64_t(~((uint64_t)(-1)<<bits)<<lshifts);
 }
 
 struct blob {
     uint8_t *bytes;
     uint32_t size;
 };
+
+template <int S>
+struct LeftShifts {
+    constexpr LeftShifts() : values() {
+        for (auto i = 0; i != 256; ++i) {
+            values[i] = i<<S;
+        }
+    }
+
+    int values[256];
+};
+
+static constexpr int64_t pow(int base, uint32_t exp) {
+    int64_t val = 1;
+    for (auto i = 0; i < exp; i++) {
+        val *= base;
+    }
+    return val;
+}
+
+template <typename T>
+static int spaceship_oper(const T &left, const T& right) {
+    if (left == right) {
+        return 0;
+    } else if (left > right) {
+        return -1;
+    } else {
+        return 1;
+    }
+}
 
 } // namespace omds
 #endif //OMSTORAGE_USEFUL_DEFS_HPP

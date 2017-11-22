@@ -83,11 +83,11 @@ public:
         m_chunk_id = (uint16_t)(hdr - &pdev->m_pers_hdr_block.chunks[0]);
     }
 
-    PhysicalDev *get_physical_dev() {
+    const PhysicalDev *get_physical_dev() const {
         return m_pdev;
     }
 
-    const PhysicalDev *get_physical_dev_const() const {
+    PhysicalDev *get_physical_dev_mutable() {
         return m_pdev;
     };
 
@@ -95,11 +95,11 @@ public:
         m_vdev = vdev;
     }
 
-    VirtualDev *get_virtual_dev() {
+    const VirtualDev *get_virtual_dev() const {
         return m_vdev;
     }
 
-    const VirtualDev *get_virtual_dev_const() const {
+    VirtualDev *get_virtual_dev_mutable() {
         return m_vdev;
     }
 
@@ -386,11 +386,11 @@ public:
 
     // Getters and Setters
     void set_size(uint64_t size) {
-        m_size = size;
+        m_nblks = size;
     }
 
     uint64_t get_size() const {
-        return m_size;
+        return m_nblks;
     }
 
 #if 0
@@ -422,7 +422,7 @@ private:
     }
     //int createIOVPerPage(Blk &b, uint32_t bpiece, MemBlk *mbList, struct iovec *iov, int *piovcnt);
 private:
-    uint64_t m_size;
+    uint64_t m_nblks;
     uint32_t m_nmirrors;
     uint64_t m_chunk_size;
     std::atomic< uint64_t > m_total_allocations;

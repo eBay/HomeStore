@@ -17,8 +17,9 @@ using namespace std;
 
 #define TEST_COUNT         100000U
 #define ITERATIONS         100U
-#define THREADS            8U
-//#define THREADS            4U
+//#define THREADS            8U
+#define THREADS            4U
+//#define THREADS            1U
 
 #define MAX_CACHE_SIZE     2 * 1024 * 1024 * 1024
 
@@ -60,7 +61,7 @@ blk_id **glob_ids;
 
 #if 0
 void temp() {
-    omstore::CacheBuffer< blk_id > *buf;
+    omstore::CacheBuffer< BlkId > *buf;
     omstore::intrusive_ptr_release(buf);
 }
 #endif
@@ -85,7 +86,7 @@ void test_insert(benchmark::State& state) {
         auto index = state.thread_index;
         for (auto i = index; i < state.range(0); i+=state.threads) { // Loops for provided ranges
             boost::intrusive_ptr< omstore::CacheBuffer< blk_id> > cbuf;
-            glob_cache->insert(*glob_ids[i], {(uint8_t *)glob_bufs[i], 64}, &cbuf);
+            glob_cache->insert(*glob_ids[i], {(uint8_t *)glob_bufs[i], 64}, 0, &cbuf);
         }
     }
 }
@@ -97,6 +98,7 @@ void test_reads(benchmark::State& state) {
         for (auto i = index; i < state.range(0); i+=state.threads) { // Loops for provided ranges
             boost::intrusive_ptr< omstore::CacheBuffer< blk_id > > cbuf;
             bool found = glob_cache->get(*glob_ids[i], &cbuf);
+#if 0
 #ifndef NDEBUG
             assert(found);
             int id;
@@ -105,12 +107,37 @@ void test_reads(benchmark::State& state) {
             sscanf((const char *)b.bytes, "Content for blk id = %d\n", &id);
             assert(id == glob_ids[i]->m_internal_id);
 #endif
+#endif
+        }
+    }
+}
+
+void test_updates(benchmark::State& state) {
+    // Actual test
+    for (auto _ : state) { // Loops upto iteration count
+        auto index = state.thread_index;
+        for (auto i = index; i < state.range(0); i+=state.threads) { // Loops for provided ranges
+            boost::intrusive_ptr< omstore::CacheBuffer< blk_id > > cbuf;
+            glob_cache->update(*glob_ids[i], {(uint8_t *)glob_bufs[i], 64}, 16384, &cbuf);
+        }
+    }
+}
+
+void test_erase(benchmark::State& state) {
+    // Actual test
+    for (auto _ : state) { // Loops upto iteration count
+        auto index = state.thread_index;
+        for (auto i = index; i < state.range(0); i+=state.threads) { // Loops for provided ranges
+            boost::intrusive_ptr< omstore::CacheBuffer< blk_id > > cbuf;
+            glob_cache->erase(*glob_ids[i], &cbuf);
         }
     }
 }
 
 BENCHMARK(test_insert)->Range(TEST_COUNT, TEST_COUNT)->Iterations(ITERATIONS)->Threads(THREADS);
 BENCHMARK(test_reads)->Range(TEST_COUNT, TEST_COUNT)->Iterations(ITERATIONS)->Threads(THREADS);
+BENCHMARK(test_updates)->Range(TEST_COUNT, TEST_COUNT)->Iterations(ITERATIONS)->Threads(THREADS);
+BENCHMARK(test_erase)->Range(TEST_COUNT, TEST_COUNT)->Iterations(ITERATIONS)->Threads(THREADS);
 
 int main(int argc, char** argv)
 {

@@ -121,7 +121,7 @@ void test_reads(benchmark::State& state) {
 }
 
 #if 0
-void insert_thread(omds::IntrusiveHashSet<blk_id, blk_entry> *set, uint64_t start, uint64_t count)
+void insert_thread(omds::IntrusiveHashSet<BlkId, blk_entry> *set, uint64_t start, uint64_t count)
 {
     for (auto i = start; i < start + count; i++) {
         char contents[32];
@@ -133,7 +133,7 @@ void insert_thread(omds::IntrusiveHashSet<blk_id, blk_entry> *set, uint64_t star
         bool ret = set->insert(*be, &res_entry);
         assert(ret);
 
-        const blk_id *bid = blk_entry::extract_key(be);
+        const BlkId *bid = blk_entry::extract_key(be);
         ret = set->get(*bid, &res_entry);
         LOG(INFO) << "Inserted id=" << i << " Content read = " << res_entry->get_contents() << " \n";
     }
@@ -143,7 +143,7 @@ int main(int argc, char** argv)
 {
     std::thread *thrs[8];
 
-    omds::IntrusiveHashSet<blk_id, blk_entry> set(8000);
+    omds::IntrusiveHashSet<BlkId, blk_entry> set(8000);
 
     uint64_t count = 1000;
     int nthrs = 1;

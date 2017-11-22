@@ -9,17 +9,18 @@ namespace omstore {
 #define EvictRecord typename Evictor<EvictionPolicy>::EvictRecordType
 
 template <typename EvictionPolicy>
-Evictor<EvictionPolicy>::Evictor(uint32_t max_size, Evictor<EvictionPolicy>::CanEvictCallback cb) :
+Evictor<EvictionPolicy>::Evictor(uint32_t max_size, Evictor<EvictionPolicy>::CanEvictCallback cb,
+                                 Evictor<EvictionPolicy>::GetSizeCallback gs_cb) :
         m_evict_policy(0),
         m_can_evict_cb(cb),
+        m_get_size_cb(gs_cb),
         m_cur_size(0),
         m_max_size(max_size) {
 }
 
 template <typename EvictionPolicy>
 EvictRecord* Evictor<EvictionPolicy>::add_record(EvictRecord &r) {
-    EvictMemBlk &blk = m_evict_policy.get_mem_blk(r);
-    auto sz = blk.size();
+    auto sz = m_get_size_cb(&r);
 
     if ((m_cur_size.fetch_add(sz, std::memory_order_acq_rel) + sz) <= m_max_size) {
         // We didn't have any size restriction while it is being added, so add to the record as is
@@ -43,8 +44,7 @@ EvictRecord *Evictor<EvictionPolicy>::do_evict(uint32_t needed_size) {
         }
 
         // Check if next record has enough space and also see if it is safe to evict.
-        EvictMemBlk &blk = m_evict_policy.get_mem_blk(*rec);
-        if ((blk.size() >= needed_size) && m_can_evict_cb(rec)) {
+        if ((m_get_size_cb(rec) >= needed_size) && m_can_evict_cb(rec)) {
             // Possible to evict, so, ask policy to remove the entry and reclaim the space.
             m_evict_policy.remove(*rec);
             m_cur_size.fetch_sub(needed_size, std::memory_order_acq_rel);
@@ -67,9 +67,8 @@ void Evictor<EvictionPolicy>::downvote(EvictRecordType &rec) {
 
 template <typename EvictionPolicy>
 void Evictor<EvictionPolicy>::delete_record(EvictRecordType &rec) {
-    EvictMemBlk &blk = m_evict_policy.get_mem_blk(*rec);
-    m_evict_policy.remove(*rec);
-    m_cur_size.fetch_sub(blk.size(), std::memory_order_acq_rel);
+    m_evict_policy.remove(rec);
+    m_cur_size.fetch_sub(m_get_size_cb(&rec), std::memory_order_acq_rel);
 }
 
 } // namespace omstore

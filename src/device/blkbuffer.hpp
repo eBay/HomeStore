@@ -9,36 +9,22 @@
 #include "cache/cache.h"
 
 namespace omstore {
-class BlkBuffer : private CacheBuffer< blk_id > {
+
+class BlkBuffer : private CacheBuffer< BlkId > {
 public:
-    void set_id(blk_id &bid) {
-        this->set_key(bid);
-    }
-
-    void set_id(uint64_t id) {
-        blk_id bid(id, 0);
-        set_id(bid);
-    }
-
-    blk_id &get_id() const {
-        return get_key();
-    }
-
-    void set_buf(const omds::blob &b) {
-        set_mem(b);
-    }
-
-    void get_buf(omds::blob *out_b, uint32_t piece_num = 0) {
-        get_mem(out_b, piece_num);
-    }
-
-    uint32_t get_size() const {
-        return get_evict_record_const().m_mem.size();
-    }
-
-    uint32_t npieces() const {
-        return get_evict_record_const().m_mem.npieces();
+    /* Provides the offset gap between this and next offset available in cache */
+    uint32_t offset_gap(uint8_t ind) const {
+        auto b = get_key();
+        auto &mp = get_memvec().get_nth_piece(ind++);
+        auto prev_off = mp.offset() + mp.size();
+        if (ind == get_memvec().npieces()) {
+            return ((b.get_nblks() * BLKSTORE_BLK_SIZE) - prev_off);
+        } else {
+            mp = get_memvec().get_nth_piece(ind);
+            return (mp.offset() - prev_off);
+        }
     }
 };
+
 }
 #endif //OMSTORE_BLKBUFFER_HPP_HPP

@@ -35,11 +35,12 @@ FixedBlkAllocator::~FixedBlkAllocator() {
     delete (m_blk_nodes);
 }
 
-BlkAllocStatus FixedBlkAllocator::alloc(uint32_t size, blk_alloc_hints &hints, sized_blk_id *out_blkid) {
+BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, blk_alloc_hints &hints, BlkId *out_blkid) {
     uint64_t prev_val;
     uint64_t cur_val;
     uint32_t id;
 
+    assert(nblks == 1);
     do {
         prev_val = m_top_blk_id.load();
         __top_blk tp(prev_val);
@@ -58,7 +59,7 @@ BlkAllocStatus FixedBlkAllocator::alloc(uint32_t size, blk_alloc_hints &hints, s
 
     } while (!(m_top_blk_id.compare_exchange_weak(prev_val, cur_val)));
 
-    out_blkid->set(id, 0, m_cfg.get_blk_size());
+    out_blkid->set(id, 1, 0);
 
 #ifndef NDEBUG
     m_nfree_blks.fetch_sub(1, std::memory_order_relaxed);
@@ -66,8 +67,9 @@ BlkAllocStatus FixedBlkAllocator::alloc(uint32_t size, blk_alloc_hints &hints, s
     return BLK_ALLOC_SUCCESS;
 }
 
-void FixedBlkAllocator::free(sized_blk_id &b) {
+void FixedBlkAllocator::free(const BlkId &b) {
     free_blk((uint32_t)b.get_id());
+    assert(b.get_nblks() == 1);
 #ifndef NDEBUG
     m_nfree_blks.fetch_add(1, std::memory_order_relaxed);
 #endif

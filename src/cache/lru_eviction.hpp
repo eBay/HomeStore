@@ -11,7 +11,6 @@ namespace omstore {
 
 // This structure represents each entry into the evictable location
 struct LRUEvictRecord : public boost::intrusive::list_base_hook<> {
-    EvictMemBlk m_mem;
 };
 
 class LRUEvictionPolicy {
@@ -55,13 +54,6 @@ public:
         m_list.push_front(rec);
     }
 
-    EvictMemBlk &get_mem_blk(LRUEvictRecord &rec) {
-        return rec.m_mem;
-    }
-
-    const EvictMemBlk &get_mem_blk_const(const LRUEvictRecord &rec) const {
-        return rec.m_mem;
-    }
 private:
     std::mutex m_list_guard;
     boost::intrusive::list < LRUEvictRecord > m_list;

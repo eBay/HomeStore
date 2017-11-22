@@ -13,6 +13,7 @@
 #include <folly/SharedMutex.h>
 #include "omds/utility/useful_defs.hpp"
 #include <boost/intrusive/slist.hpp>
+#include <boost/optional.hpp>
 
 #ifdef GLOBAL_HASHSET_LOCK
 #include <mutex>
@@ -43,7 +44,7 @@ public:
     ~HashBucket() {
     }
 
-    bool insert(const K &k, V &v, V **outv) {
+    bool insert(const K &k, V &v, V **outv, const std::function<void(V *)> &found_cb = nullptr) {
         bool found = false;
 
         write_lock();
@@ -54,6 +55,9 @@ public:
                 *outv = &*it;
                 V::ref(**outv);
                 found = true;
+                if (found_cb) {
+                    found_cb(*outv);
+                }
                 break;
             } else if (x > 0) {
                 break;
@@ -89,19 +93,19 @@ public:
         return found;
     }
 
-    bool remove(const K &k, bool *removed) {
+    bool remove(const K &k, const std::function<void(V *)> &found_cb) {
         bool found = false;
-        *removed = false;
 
         write_lock();
         for (auto it(m_list.begin()), itend(m_list.end()); it != itend; ++it) {
             int x = K::compare(*(V::extract_key(*it)), k);
             if (x == 0) {
                 found = true;
-                if (V::deref_testz(*it)) {
-                    m_list.erase(it);
-                    *removed = true;
+                if (found_cb) {
+                    found_cb(&*it);
                 }
+                V::deref(*it);
+                m_list.erase(it);
                 break;
             } else if (x > 0) {
                 break;
@@ -113,12 +117,12 @@ public:
 
     bool release(const K &k) {
         bool removed;
-        return remove(k, &removed);
+        return remove(k, &removed, nullptr);
     }
 
     bool release(V *n) {
         bool removed;
-        return remove(*(V::extract_key(n)), &removed);
+        return remove(*(V::extract_key(n)), &removed, nullptr);
     }
 
     void lock(bool shared) {
@@ -162,23 +166,23 @@ public:
         delete[] m_buckets;
     }
 
-    bool insert(V &v, V **outv) {
+    bool insert(V &v, V **outv, const std::function<void(V *)> &found_cb = nullptr) {
 #ifdef GLOBAL_HASHSET_LOCK
         std::lock_guard<std::mutex> lk(m);
 #endif
 
         const K *pk = V::extract_key(v);
         HashBucket<K, V> *hb = get_bucket(*pk);
-        return (hb->insert(*pk, v, outv));
+        return (hb->insert(*pk, v, outv, found_cb));
     }
 
-    bool insert(const K &k, V &v, V **outv, uint64_t hash_code) {
+    bool insert(const K &k, V &v, V **outv, uint64_t hash_code, const std::function<void(V *)> &found_cb = nullptr) {
 #ifdef GLOBAL_HASHSET_LOCK
         std::lock_guard<std::mutex> lk(m);
 #endif
 
         HashBucket<K, V> *hb = get_bucket(hash_code);
-        return (hb->insert(k, v, outv));
+        return (hb->insert(k, v, outv, found_cb));
     }
 
     bool get(const K &k, V **outv) {
@@ -197,20 +201,20 @@ public:
         return (hb->get(k, outv));
     }
 
-    bool remove(const K &k, bool *removed) {
+    bool remove(const K &k, const std::function<void(V *)> &found_cb = nullptr) {
 #ifdef GLOBAL_HASHSET_LOCK
         std::lock_guard<std::mutex> lk(m);
 #endif
         HashBucket<K, V> *hb = get_bucket(k);
-        return (hb->remove(k, removed));
+        return (hb->remove(k, found_cb));
     }
 
-    bool remove(const K &k, bool *removed, uint64_t hash_code) {
+    bool remove(const K &k, uint64_t hash_code, const std::function<void(V *)> &found_cb = nullptr) {
 #ifdef GLOBAL_HASHSET_LOCK
         std::lock_guard<std::mutex> lk(m);
 #endif
         HashBucket<K, V> *hb = get_bucket(hash_code);
-        return (hb->remove(k, removed));
+        return (hb->remove(k, found_cb));
     }
 
 private:

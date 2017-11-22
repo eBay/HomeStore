@@ -13,99 +13,94 @@
 #include "omds/array/flexarray.hpp"
 #include "omds/memory/mempiece.hpp"
 #include "omds/utility/useful_defs.hpp"
+#include "main/store_limits.h"
+
 //#include "device/device.h"
 
 namespace omstore {
 
-struct blk_id {
-    static uint8_t constexpr id_bits() { return 48;}
-    static uint8_t constexpr chunk_bits() {return 64-id_bits();}
+#define ID_BITS        40
+#define NBLKS_BITS      8
+#define CHUNK_NUM_BITS 16
+
+struct BlkId {
+    uint64_t m_id:ID_BITS;
+    uint64_t m_nblks:NBLKS_BITS;
+    uint64_t m_chunk_num:CHUNK_NUM_BITS;
 
     static uint64_t constexpr invalid_internal_id() {
         return ((uint64_t)-1);
     }
 
-    static omds::blob get_blob(const blk_id &id) {
+    static uint64_t constexpr max_blks_in_op() {
+        return (uint64_t)(omds::pow(2, NBLKS_BITS));
+    }
+
+    static omds::blob get_blob(const BlkId &id) {
         omds::blob b;
-        b.bytes = (uint8_t *)&id.m_internal_id;
+        b.bytes = (uint8_t *)&id;
         b.size = sizeof(uint64_t);
 
         return b;
     }
 
-    static int compare(const blk_id &one, const blk_id &two) {
-        if (one.m_internal_id == two.m_internal_id) {
-            return 0;
-        } else if (one.m_internal_id > two.m_internal_id) {
+#define begin_of(b) (b.m_id)
+#define end_of(b) (b.m_id + b.m_nblks)
+
+    static int compare(const BlkId &one, const BlkId &two) {
+        if (one.m_chunk_num == two.m_chunk_num) {
+            if (begin_of(one) == begin_of(two)) {
+                return 0;
+            } else if (begin_of(one) < begin_of(two)) {
+                return (end_of(one) >= end_of(two)) ? 0 /* Overlaps */ : 1;
+            } else {
+                return (end_of(two) >= end_of(one)) ? 0 /* Overlaps */ : -1;
+            }
+        } else if (one.m_chunk_num > two.m_chunk_num) {
             return -1;
         } else {
             return 1;
         }
     }
 
-    blk_id(uint64_t id, uint16_t chunk_num)  {
-        set(id, chunk_num);
+    uint64_t to_integer() const {
+        uint64_t i;
+        memcpy(&i, (const uint64_t *)this, sizeof(uint64_t));
+        return i;
     }
 
-    blk_id() {
-        m_internal_id = invalid_internal_id();
+    BlkId(uint64_t id, uint8_t nblks, uint16_t chunk_num)  {
+        set(id, nblks, chunk_num);
     }
 
-    blk_id(const blk_id &other) {
-        m_internal_id = other.m_internal_id;
+    BlkId() {
+        set(UINT64_MAX, UINT8_MAX, UINT16_MAX);
     }
 
-    blk_id &operator=(const blk_id &other) = default;
+    BlkId(const BlkId &other) = default;
+    BlkId &operator=(const BlkId &other) = default;
 
-    void set(uint64_t id, uint16_t chunk_num = 0) {
-        m_internal_id = id | chunk_num<<chunk_bits();
+    void set(uint64_t id, uint8_t nblks, uint16_t chunk_num = 0) {
+        m_id = id;
+        m_nblks = nblks;
+        m_chunk_num = chunk_num;
     }
 
     uint64_t get_id() const {
-        return m_internal_id & omds::get_mask<chunk_bits()>();
+        return m_id;
     }
 
-    uint16_t get_chunk_id() const {
-        return ((m_internal_id >> chunk_bits()) & omds::get_mask<id_bits()>());
+    void set_nblks(uint8_t nblks) {
+        m_nblks = nblks;
     }
 
-    uint64_t m_internal_id;
-};
-
-struct sized_blk_id : public blk_id {
-    sized_blk_id(uint64_t id, uint16_t chunk_num, uint32_t size)  {
-        set(id, chunk_num, size);
+    uint8_t get_nblks() const {
+        return m_nblks;
     }
 
-    sized_blk_id() :
-            blk_id(), m_size(0) {
+    uint16_t get_chunk_num() const {
+        return m_chunk_num;
     }
-
-    sized_blk_id(const sized_blk_id &other) :
-            blk_id(other),
-            m_size(other.get_size()) {
-    }
-
-    sized_blk_id &operator=(const sized_blk_id &other) = default;
-
-    void set(uint64_t id, uint16_t chunk_num, uint32_t size) {
-        blk_id::set(id, chunk_num);
-        m_size = size;
-    }
-
-    blk_id id() {
-        return *this;
-    }
-
-    void set_size(uint32_t size) {
-        m_size = size;
-    }
-
-    uint32_t get_size() const {
-        return m_size;
-    }
-private:
-    uint32_t m_size;
 };
 
 #define BLKID32_INVALID ((uint32_t)(-1))
@@ -113,20 +108,20 @@ private:
 
 #if 0
 struct SingleBlk {
-    blk_id m_blk_id;
-    uint32_t  m_size;
-    omds::MemPieces < 1 > m_mem;
+    BlkId m_blk_id;
+    uint32_t  m_nblks;
+    omds::MemVector < 1 > m_mem;
 
     SingleBlk(uint64_t id, uint16_t chunk_num, uint32_t size) :
             m_blk_id(id, chunk_num),
-            m_size(size) {}
-    explicit SingleBlk(blk_id bid) :
+            m_nblks(size) {}
+    explicit SingleBlk(BlkId bid) :
             m_blk_id(bid),
-            m_size(0) {
+            m_nblks(0) {
     }
     SingleBlk() : SingleBlk((uint64_t)-1, (uint16_t)-1, 0) {}
 
-    blk_id get_id() const {
+    BlkId get_id() const {
         return m_blk_id;
     }
 
@@ -134,15 +129,15 @@ struct SingleBlk {
         m_blk_id.set(id, chunk_num);
     }
 
-    void set_id(const blk_id bid) {
+    void set_id(const BlkId bid) {
         m_blk_id.m_internal_id = bid.m_internal_id;
     }
 
-    omds::MemPieces<1> &get_mem() {
+    omds::MemVector<1> &get_mem() {
         return m_mem;
     }
 
-    const omds::MemPieces<1> &get_mem_const() const {
+    const omds::MemVector<1> &get_mem_const() const {
         return m_mem;
     }
 
@@ -151,11 +146,11 @@ struct SingleBlk {
     }
 
     uint32_t get_size() const {
-        return m_size;
+        return m_nblks;
     }
 
     void set_size(uint32_t size) {
-        m_size = size;
+        m_nblks = size;
     }
 };
 
@@ -164,17 +159,17 @@ struct SingleBlk {
 
 struct MemPiece {
     const uint8_t *m_mem;
-    uint32_t m_size;
+    uint32_t m_nblks;
 
     MemPiece(const uint8_t *mem, uint32_t sz) {
-        m_mem = mem; m_size = sz;
+        m_mem = mem; m_nblks = sz;
     }
 };
 
 class BlkPiece {
 private:
     blkid64_t m_blk_id;
-    uint32_t  m_size;   // Its actual size in this piece. Note: This can be more than pageSize
+    uint32_t  m_nblks;   // Its actual size in this piece. Note: This can be more than pageSize
 
     uint32_t m_bufsize;
     omds::FlexArray< MemPiece, EXPECTED_MEM_PIECE_PER_BLK > m_bufs;
@@ -182,7 +177,7 @@ private:
 public:
     BlkPiece(blkid64_t id, uint32_t size, uint8_t *mem) :
             m_blk_id(id),
-            m_size(size),
+            m_nblks(size),
             m_bufsize(size) {
         MemPiece m(mem, size);
         m_bufs.push_back(m);
@@ -190,7 +185,7 @@ public:
 
     BlkPiece(blkid64_t id, uint32_t size) :
             m_blk_id(id),
-            m_size(size) {
+            m_nblks(size) {
         m_bufsize = 0;
     }
 
@@ -201,11 +196,11 @@ public:
     }
 
     void set_size(uint32_t size) {
-        m_size = size;
+        m_nblks = size;
     }
 
     void set_buf(const uint8_t *mem, uint32_t mem_size) {
-        assert(mem_size == m_size);
+        assert(mem_size == m_nblks);
         assert(m_bufs.size() == 0);
 
         MemPiece m(mem, mem_size);
@@ -220,7 +215,7 @@ public:
     }
 
     uint32_t get_size() const {
-        return m_size;
+        return m_nblks;
     }
 
     blkid64_t get_blk_id() const {

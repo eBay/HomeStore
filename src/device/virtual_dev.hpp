@@ -13,7 +13,6 @@
 #include <boost/range/irange.hpp>
 #include <map>
 #include "main/omstore.hpp"
-#include "blkbuffer.hpp"
 
 namespace omstore {
 
@@ -148,10 +147,10 @@ public:
         }
     }
 
-    BlkAllocStatus alloc(uint32_t size, blk_alloc_hints &hints, sized_blk_id *out_blkid) {
+    BlkAllocStatus alloc_blk(uint8_t nblks, blk_alloc_hints &hints, BlkId *out_blkid) {
         uint32_t dev_id;
         uint32_t chunk_num, start_chunk_num;
-        BlkAllocStatus status;
+        BlkAllocStatus status = BLK_ALLOC_FAILED;
 
         // First select a device to allocate from
         if (hints.dev_id_hint == -1) {
@@ -170,7 +169,7 @@ public:
 
         do {
             for (auto chunk : m_primary_chunks_in_physdev[dev_id]) {
-                status = chunk->get_blk_allocator()->alloc(size, hints, out_blk);
+                status = chunk->get_blk_allocator()->alloc(nblks, hints, out_blkid);
                 if (status == BLK_ALLOC_SUCCESS) {
                     picked_chunk = chunk;
                     break;
@@ -185,33 +184,32 @@ public:
 
         if (status == BLK_ALLOC_SUCCESS) {
             // Set the id as globally unique id
-            out_blkid->set_size(size);
             *out_blkid = to_glob_uniq_blkid(*out_blkid, picked_chunk);
         }
         return status;
     }
 
-    void free(sized_blk_id &b) {
+    void free_blk(const BlkId &b) {
         PhysicalDevChunk *chunk;
 
         // Convert blk id to chunk specific id and call its allocator to free
-        b = to_chunk_specific_id(b, &chunk);
-        chunk->get_blk_allocator()->free(b);
+        BlkId cb = to_chunk_specific_id(b, &chunk);
+        chunk->get_blk_allocator()->free(cb);
     }
 
-    void write(BlkBuffer &bbuf) {
-        // From blkNum first find out the chunkNumber. Then from chunk, get its
-        // startblk number and find out the offset within the physical device
-        // and write to the device.
+    void write(const BlkId &bid, const omds::MemVector<BLKSTORE_BLK_SIZE> &buf) {
+
         BlkOpStatus ret_status = BLK_OP_SUCCESS;
-        uint32_t size = bbuf.get_size();
-        struct iovec iov[MAX_OBJS_IN_BLK];
+        uint32_t size = bid.get_nblks() * m_dev_blk_size;
+        struct iovec iov[BlkId::max_blks_in_op()];
         int iovcnt = 0;
 
+        assert(buf.size() == bid.get_nblks());
+
         uint32_t p = 0;
-        for (auto i : boost::irange<uint32_t>(0, bbuf.npieces())) {
+        for (auto i : boost::irange<uint32_t>(0, buf.npieces())) {
             omds::blob b;
-            bbuf.get_mem(&b, i);
+            buf.get(&b, i);
 
             // TODO: Also verify the sum of sizes are not greater than a page size.
             iov[iovcnt].iov_base = b.bytes;
@@ -220,9 +218,9 @@ public:
         }
 
         PhysicalDevChunk *chunk;
-        uint64_t dev_offset = to_dev_offset(bbuf.get_id(), &chunk);
+        uint64_t dev_offset = to_dev_offset(bid, &chunk);
         try {
-            chunk->get_physical_dev()->writev(iov, iovcnt, size, dev_offset);
+            chunk->get_physical_dev_mutable()->writev(iov, iovcnt, size, dev_offset);
         } catch (std::exception &e) {
             throw e;
         }
@@ -235,7 +233,7 @@ public:
                 for (auto mchunk : m_mirror_chunks.find(chunk)->second) {
                     dev_offset = mchunk->get_start_offset() + primary_chunk_offset;
                     try {
-                        mchunk->get_physical_dev()->writev(iov, iovcnt, size, dev_offset);
+                        mchunk->get_physical_dev_mutable()->writev(iov, iovcnt, size, dev_offset);
                     } catch (std::exception &e) {
                         throw e;
                     }
@@ -244,28 +242,18 @@ public:
         }
     }
 
-    void read(BlkBuffer &bbuf) {
-        // Convert the input memory to iovector
-        struct iovec iov[MAX_OBJS_IN_BLK];
-        int iovcnt = 0;
-        uint32_t size = blk.get_size();
-
-        for (auto i : boost::irange<uint32_t>(0, bbuf.npieces())) {
-            omds::blob b;
-            bbuf.get_buf(&b, i);
-
-            // TODO: Also verify the sum of sizes are not greater than a page size.
-            iov[iovcnt].iov_base = b.bytes;
-            iov[iovcnt].iov_len = b.size;
-            iovcnt++;
-        }
-
-        bool failed = false;
+    /* Read the data for a given BlkId. With this method signature, virtual dev can read only in block boundary
+     * and nothing in-between offsets (say if blk size is 8K it cannot read 4K only, rather as full 8K. It does not
+     * have offset as one of the parameter. Reason for that is its actually ok and make the interface and also
+     * buf (caller buf) simple and there is no use case. However, we need to keep the blk size to be small as possible
+     * to avoid read overhead */
+    void read(const BlkId &bid, const omds::MemPiece<BLKSTORE_BLK_SIZE> &mp) {
         PhysicalDevChunk *primary_chunk;
-        uint64_t primary_dev_offset = to_dev_offset(bbuf.get_id(), &primary_chunk);
+        bool failed = false;
 
+        uint64_t primary_dev_offset = to_dev_offset(bid, &primary_chunk);
         try {
-            primary_chunk->get_physical_dev()->readv(iov, iovcnt, size, primary_dev_offset);
+            primary_chunk->get_physical_dev_mutable()->read((char *)mp.ptr(), mp.size(), primary_dev_offset);
         } catch (std::exception &e) {
             failed = true;
         }
@@ -276,7 +264,52 @@ public:
             for (auto mchunk : m_mirror_chunks.find(primary_chunk)->second) {
                 uint64_t dev_offset = mchunk->get_start_offset() + primary_chunk_offset;
                 try {
-                    mchunk->get_physical_dev()->readv(iov, iovcnt, size, dev_offset);
+                    mchunk->get_physical_dev_mutable()->readv((char *)mp.ptr(), mp.size(), size, dev_offset);
+                } catch (std::exception &e) {
+                    failed = true;
+                }
+            }
+        }
+
+        if (unlikely(failed)) {
+            // TODO: Capture the exception e as exception pointer and rethrow that.
+            throw DeviceException("Unable to read");
+        }
+    }
+
+    void readv(const BlkId &bid, const omds::MemVector<BLKSTORE_BLK_SIZE> &buf) {
+        // Convert the input memory to iovector
+        struct iovec iov[BlkId::max_blks_in_op()];
+        int iovcnt = 0;
+        uint32_t size = buf.size();
+
+        assert(buf.size() == (bid.get_nblks() * m_dev_blk_size)); // Expected to be less than allocated blk originally.
+        for (auto i : boost::irange<uint32_t>(0, buf.npieces())) {
+            omds::blob b;
+            buf.get(&b, i);
+
+            iov[iovcnt].iov_base = b.bytes;
+            iov[iovcnt].iov_len = b.size;
+            iovcnt++;
+        }
+
+        bool failed = false;
+        PhysicalDevChunk *primary_chunk;
+        uint64_t primary_dev_offset = to_dev_offset(bid, &primary_chunk);
+
+        try {
+            primary_chunk->get_physical_dev_mutable()->readv(iov, iovcnt, size, primary_dev_offset);
+        } catch (std::exception &e) {
+            failed = true;
+        }
+
+        if (unlikely(failed && m_nmirrors)) {
+            // If failed and we have mirrors, we can read from any one of the mirrors as well
+            uint64_t primary_chunk_offset = primary_dev_offset - primary_chunk->get_start_offset();
+            for (auto mchunk : m_mirror_chunks.find(primary_chunk)->second) {
+                uint64_t dev_offset = mchunk->get_start_offset() + primary_chunk_offset;
+                try {
+                    mchunk->get_physical_dev_mutable()->readv(iov, iovcnt, size, dev_offset);
                 } catch (std::exception &e) {
                     failed = true;
                 }
@@ -314,15 +347,15 @@ private:
         return c;
     }
 
-    sized_blk_id to_glob_uniq_blkid(sized_blk_id chunk_local_blkid, PhysicalDevChunk *chunk) {
+    BlkId to_glob_uniq_blkid(const BlkId &chunk_local_blkid, PhysicalDevChunk *chunk) const {
         uint64_t glob_offset = ((chunk_local_blkid.get_id() * m_dev_blk_size) + chunk->get_start_offset() +
                                 chunk->get_physical_dev()->get_dev_offset());
-        return sized_blk_id(glob_offset/m_dev_blk_size, chunk->get_chunk_id(), chunk_local_blkid.get_size());
+        return BlkId(glob_offset/m_dev_blk_size, chunk_local_blkid.get_nblks(), chunk->get_chunk_id());
     }
 
-    sized_blk_id to_chunk_specific_id(sized_blk_id glob_uniq_id, PhysicalDevChunk **chunk) {
+    BlkId to_chunk_specific_id(const BlkId &glob_uniq_id, PhysicalDevChunk **chunk) const {
         // Extract the chunk id from glob_uniq_id
-        auto cid = glob_uniq_id.get_chunk_id();
+        auto cid = glob_uniq_id.get_chunk_num();
         *chunk = BlkDevManagerInstance.get_chunk(cid);
 
         // Offset within the physical device
@@ -330,21 +363,21 @@ private:
 
         // Offset within the chunk
         uint64_t chunk_offset = offset - (*chunk)->get_start_offset();
-        return sized_blk_id(chunk_offset/m_dev_blk_size, 0, glob_uniq_id.get_size());
+        return BlkId(chunk_offset/m_dev_blk_size, glob_uniq_id.get_nblks(), 0);
     }
 
-    uint64_t to_dev_offset(blk_id glob_uniq_id, PhysicalDevChunk **chunk) {
-        *chunk = BlkDevManagerInstance.get_chunk(glob_uniq_id.get_chunk_id());
+    uint64_t to_dev_offset(const BlkId &glob_uniq_id, PhysicalDevChunk **chunk) const {
+        *chunk = BlkDevManagerInstance.get_chunk(glob_uniq_id.get_chunk_num());
 
         // Offset within the physical device
         return (glob_uniq_id.get_id() * m_dev_blk_size) - (*chunk)->get_physical_dev()->get_dev_offset();
     }
 
-    uint64_t to_chunk_offset(blk_id glob_uniq_id, PhysicalDevChunk **chunk) {
+    uint64_t to_chunk_offset(const BlkId &glob_uniq_id, PhysicalDevChunk **chunk) const {
         return (to_dev_offset(glob_uniq_id, chunk) - (*chunk)->get_start_offset());
     }
 
-        uint32_t get_blks_per_chunk() const {
+    uint32_t get_blks_per_chunk() const {
         return m_chunk_size / m_dev_blk_size;
     }
 };

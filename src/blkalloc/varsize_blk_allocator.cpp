@@ -117,12 +117,11 @@ void VarsizeBlkAllocator::allocator_state_machine() {
     }
 }
 
-BlkAllocStatus VarsizeBlkAllocator::alloc(uint32_t size, blk_alloc_hints &hints, sized_blk_id *out_blkid) {
+BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, blk_alloc_hints &hints, BlkId *out_blkid) {
     BlkAllocStatus ret = BLK_ALLOC_SUCCESS;
     bool found = false;
 
     // TODO: Instead of given value, try to have leeway like 10% of both sides as range for desired_temp or bkt.
-    uint32_t nblks = (uint32_t)((size - 1) / m_cfg.get_blk_size() + 1);
     VarsizeAllocCacheEntry start_entry(BLKID_RANGE_FIRST, PAGEID_RANGE_FIRST, nblks, hints.desired_temp);
     VarsizeAllocCacheEntry end_entry(BLKID_RANGE_LAST, PAGEID_RANGE_LAST, BLKCOUNT_RANGE_LAST, TEMP_RANGE_LAST);
     VarsizeAllocCacheEntry actual_entry;
@@ -168,40 +167,38 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint32_t size, blk_alloc_hints &hints,
 
         VarsizeAllocCacheEntry excess_entry;
         if (leading_npages <= trailing_npages) {
-            out_blkid->set(blknum, 0, nblks * m_cfg.get_blk_size());
+            out_blkid->set(blknum, nblks);
             gen_cache_entry(blknum + nblks, (uint32_t)excess_nblks, &excess_entry);
         } else {
-            out_blkid->set(blknum + nblks, 0, nblks * m_cfg.get_blk_size());
+            out_blkid->set(blknum + excess_nblks, nblks);
             gen_cache_entry(blknum, (uint32_t)excess_nblks, &excess_entry);
         }
 
         omds::btree::EmptyClass dummy;
         m_blk_cache->insert(excess_entry, dummy);
     } else {
-        out_blkid->set(actual_entry.get_blk_num(), 0, nblks * m_cfg.get_blk_size());
+        out_blkid->set(actual_entry.get_blk_num(), nblks);
     }
 
     m_cache_n_entries.fetch_sub(nblks, std::memory_order_acq_rel);
     return ret;
 }
 
-void VarsizeBlkAllocator::free(sized_blk_id &b) {
+void VarsizeBlkAllocator::free(const BlkId &b) {
     BlkAllocPortion *portion = blknum_to_portion(b.get_id());
-
-    uint32_t nblks = (uint32_t)((b.get_size() - 1) / get_config().get_blk_size() + 1);
 
     // TODO: Ensure in debug mode, if the blknum is no longer in cache. Need to create a cachentry and search
 #ifndef NDEBUG
     VarsizeAllocCacheEntry entry;
     omds::btree::EmptyClass dummy;
 
-    gen_cache_entry(b.get_id(), nblks, &entry);
+    gen_cache_entry(b.get_id(), b.get_nblks(), &entry);
     assert(m_blk_cache->get(entry, &dummy) == false);
 #endif
 
     // Reset the bits
     portion->lock();
-    m_alloc_bm->reset_bits(b.get_id(), nblks);
+    m_alloc_bm->reset_bits(b.get_id(), b.get_nblks());
     portion->unlock();
 
     //std::cout << "Resetting " << p.get_blk_id() << " for nblks = " << nblks << " Bitmap state= \n";

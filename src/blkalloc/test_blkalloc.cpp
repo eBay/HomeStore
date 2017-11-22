@@ -17,7 +17,7 @@ void allocate_blocks(BlkAllocator *allocator)
     int iter = 0;
 
     while (++iter <= 2) {
-        sized_blk_id blks[4000];
+        BlkId blks[4000];
 
         for (i = 0, alloced = 0; i < 4000; i++, alloced++) {
             blk_alloc_hints hints;
@@ -25,7 +25,7 @@ void allocate_blocks(BlkAllocator *allocator)
             BlkAllocStatus ret = allocator->alloc(8192, hints, &blks[i]);
 
             if (ret == BLK_ALLOC_SUCCESS) {
-                //fprintf(stderr, "Allocated block num = %llu\n", blks[i].get_piece(0).get_blk_id());
+                fprintf(stderr, "Allocated block num = %llu size = %d chunk_num = %d\n", blks[i].get_id(), blks[i].get_nblks(), blks[i].get_chunk_num());
             } else {
                 LOG(ERROR) << "Block Alloc failed with space full after " << alloced << " allocations";
                 break;
