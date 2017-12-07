@@ -10,6 +10,7 @@
 
 #include <iostream>
 #include <cassert>
+#include <sstream>
 #include "omds/array/flexarray.hpp"
 #include "omds/memory/mempiece.hpp"
 #include "omds/utility/useful_defs.hpp"
@@ -100,6 +101,12 @@ struct BlkId {
 
     uint16_t get_chunk_num() const {
         return m_chunk_num;
+    }
+
+    std::string to_string() const {
+        std::stringstream ss;
+        ss << "id=" << m_id << " nblks=" << (uint32_t)m_nblks << " chunk_num=" << (uint32_t)m_chunk_num;
+        return ss.str();
     }
 };
 

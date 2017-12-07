@@ -248,8 +248,8 @@ void init_entries(uint32_t n_read_entries, uint32_t n_insert_entries) {
 #if 0
 void initDev(char *devName)
 {
-    BlkDevManager::startInstance();
-    BlkDevManager *devMgr = BlkDevManager::getInstance();
+    DeviceManager::startInstance();
+    DeviceManager *devMgr = DeviceManager::getInstance();
     devMgr->addDevice(devName);
 }
 #endif

@@ -101,7 +101,7 @@ public:
 
     virtual ~BlkAllocator() = default;
 
-    virtual BlkAllocStatus alloc(uint8_t nblks, blk_alloc_hints &hints, BlkId *out_blkid) = 0;
+    virtual BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid) = 0;
     virtual void free(const BlkId &id) = 0;
     virtual std::string to_string() const = 0;
 
@@ -178,7 +178,7 @@ public:
     explicit FixedBlkAllocator(BlkAllocConfig &cfg);
     ~FixedBlkAllocator() override;
 
-    BlkAllocStatus alloc(uint8_t nblks, blk_alloc_hints &hints, BlkId *out_blkid) override;
+    BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid) override;
     void free(const BlkId &b) override;
     std::string to_string() const override;
 private:

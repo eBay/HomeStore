@@ -5,8 +5,6 @@
 #ifndef OMSTORE_OMSTORE_HPP
 #define OMSTORE_OMSTORE_HPP
 
-#include "blkdev/blkdev.h"
-
 namespace omstore {
 
 class OmStore {
@@ -15,7 +13,7 @@ public:
         _instance = new OmStore();
     }
 
-    static Omstore *instance() {
+    static OmStore *instance() {
         return _instance;
     }
 
@@ -23,12 +21,9 @@ public:
     }
 
     static OmStore *_instance;
-    BlkDevManager mgr;
+    DeviceManager mgr;
 };
 
-OmStore::_instance = nullptr;
-
-#define BlkDevManagerInstance (OmStore::instance()->mgr)
-
+//#define DeviceManagerInstance (omstore::OmStore::instance()->mgr)
 }
 #endif //OMSTORE_OMSTORE_HPP

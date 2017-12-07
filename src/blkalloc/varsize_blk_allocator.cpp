@@ -117,7 +117,7 @@ void VarsizeBlkAllocator::allocator_state_machine() {
     }
 }
 
-BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, blk_alloc_hints &hints, BlkId *out_blkid) {
+BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid) {
     BlkAllocStatus ret = BLK_ALLOC_SUCCESS;
     bool found = false;
 
@@ -140,7 +140,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, blk_alloc_hints &hints,
             LOG(ERROR) << "Exceeding max retries " << MAX_BLK_ALLOC_ATTEMPT << " to allocate. Failing the alloc";
             break;
         } else {
-            LOG(WARNING) << "Attempt #" << attempt << " to allocate blk of size=" << size << " temperature=" <<
+            LOG(WARNING) << "Attempt #" << attempt << " to allocate nblks=" << (uint32_t)nblks << " temperature=" <<
                      hints.desired_temp << " failed. Waiting for cache to be filled";
         }
 

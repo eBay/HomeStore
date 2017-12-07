@@ -377,7 +377,7 @@ public:
     VarsizeBlkAllocator(VarsizeBlkAllocConfig &cfg);
     virtual ~VarsizeBlkAllocator();
 
-    BlkAllocStatus alloc(uint8_t nblks, blk_alloc_hints &hints, BlkId *out_blkid) override;
+    BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid) override;
     void free(const BlkId &b) override;
 
     std::string to_string() const override;

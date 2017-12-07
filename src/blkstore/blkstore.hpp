@@ -6,8 +6,8 @@
 #define OMSTORE_BLKSTORE_HPP
 
 #include "cache/cache.h"
-#include "device/chunk_selector.hpp"
-#include "device/blkdev.h"
+#include "device/device_selector.hpp"
+#include "device/device.h"
 #include "device/blkbuffer.hpp"
 #include "main/omstore.hpp"
 #include "main/store_limits.h"
@@ -48,7 +48,7 @@ public:
             m_cfg(cfg),
             m_cache(cache),
             m_vdev(cfg.m_initial_size, cfg.m_nmirrors, true,
-                   BLKSTORE_BLK_SIZE, BlkDevManagerInstance.get_dev_list()) {
+                   BLKSTORE_BLK_SIZE, DeviceManagerInstance.get_dev_list()) {
     }
 
     /* Allocate a new block of the size based on the hints provided */
@@ -383,7 +383,7 @@ private:
 private:
     BlkStoreConfig m_cfg;
     Cache< BlkId > *m_cache;
-    VirtualDev<BAllocator, RoundRobinChunkSelector> m_vdev;
+    VirtualDev<BAllocator, RoundRobinDeviceSelector> m_vdev;
 };
 
 }

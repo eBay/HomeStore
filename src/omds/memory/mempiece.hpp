@@ -38,7 +38,7 @@ struct MemPiece {
     omds::tagged_ptr<uint8_t> m_mem;
 
     MemPiece(uint8_t *mem, uint32_t size, uint32_t offset) :
-            m_mem(mem, (uint16_t)gen_new_tag(size, encode(offset))) {}
+            m_mem(mem, (uint16_t)gen_new_tag(encode(size), encode(offset))) {}
 
     MemPiece() : MemPiece(nullptr, 0, 0) {}
     MemPiece(const MemPiece &other) : m_mem(other.m_mem) {}

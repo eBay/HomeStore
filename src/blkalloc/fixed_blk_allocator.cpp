@@ -35,7 +35,7 @@ FixedBlkAllocator::~FixedBlkAllocator() {
     delete (m_blk_nodes);
 }
 
-BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, blk_alloc_hints &hints, BlkId *out_blkid) {
+BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid) {
     uint64_t prev_val;
     uint64_t cur_val;
     uint32_t id;

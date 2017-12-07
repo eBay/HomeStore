@@ -3,10 +3,10 @@ project(omds)
 
 set(CMAKE_CXX_STANDARD 14)
 
-#if (CMAKE_BUILD_TYPE MATCHES Release)
+if (CMAKE_BUILD_TYPE MATCHES Release)
     add_definitions(-DNDEBUG=1)
     add_definitions(-O2)
-#endif()
+endif()
 
 include_directories(..)
 
@@ -67,3 +67,8 @@ set(TEST_BITSET_SOURCE_FILES
         utility/useful_defs.hpp
         tests/test_bitset.cpp)
 add_executable(test_bitset ${TEST_BITSET_SOURCE_FILES})
+
+set(TEST_AVECTOR_SOURCE_FILES
+        array/avector.hpp
+        tests/test_avector.cpp)
+add_executable(test_avector ${TEST_AVECTOR_SOURCE_FILES})

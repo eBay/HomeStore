@@ -22,7 +22,7 @@ void allocate_blocks(BlkAllocator *allocator)
         for (i = 0, alloced = 0; i < 4000; i++, alloced++) {
             blk_alloc_hints hints;
             hints.desired_temp = 0;
-            BlkAllocStatus ret = allocator->alloc(8192, hints, &blks[i]);
+            BlkAllocStatus ret = allocator->alloc(1, hints, &blks[i]);
 
             if (ret == BLK_ALLOC_SUCCESS) {
                 fprintf(stderr, "Allocated block num = %llu size = %d chunk_num = %d\n", blks[i].get_id(), blks[i].get_nblks(), blks[i].get_chunk_num());
