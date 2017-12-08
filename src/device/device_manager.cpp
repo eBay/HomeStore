@@ -11,10 +11,9 @@
 
 namespace omstore {
 
-DeviceManager::DeviceManager(NewVDevCallback vcb, NewChunkCallback ccb, uint32_t vdev_metadata_size) :
+DeviceManager::DeviceManager(NewVDevCallback vcb, uint32_t vdev_metadata_size) :
         m_open_flags(O_RDWR),
-        m_new_vdev_cb(vcb),
-        m_new_chunk_cb(ccb) {
+        m_new_vdev_cb(vcb) {
     m_pdev_info.num_phys_devs = 0;
     m_last_vdevid = INVALID_VDEV_ID;
     m_vdev_metadata_size = vdev_metadata_size;
@@ -107,7 +106,8 @@ void DeviceManager::add_devices(std::vector< std::string > &dev_names) {
     uint32_t vid = m_vdev_info.first_vdev_id;
     while (vid != INVALID_VDEV_ID) {
         m_last_vdevid = vid;
-        m_new_vdev_cb(&m_vdev_info.vdevs[vid]);
+        auto vdev = m_new_vdev_cb(&m_vdev_info.vdevs[vid]);
+        m_vdevs[vid] = vdev;
         vid = m_vdev_info.vdevs[vid].next_vdev_id;
     }
 
@@ -115,10 +115,14 @@ void DeviceManager::add_devices(std::vector< std::string > &dev_names) {
     for (auto &pdev: m_pdevs) {
         uint32_t cid = pdev->get_super_block_header()->this_dev_info.first_chunk_id;
         while (cid != INVALID_CHUNK_ID) {
-            if (!m_chunks[cid] && (m_chunk_info.chunks[cid].vdev_id != INVALID_VDEV_ID)) {
+            if (!m_chunks[cid]) {
+                auto cinfo = &m_chunk_info.chunks[cid];
+
                 // Create new chunk if it does not exist and also inform to vdev thats a new chunk has come for you
-                m_chunks[cid] = std::make_unique< PhysicalDevChunk >(pdev.get(), &m_chunk_info.chunks[cid]);
-                m_new_chunk_cb(m_chunks[cid].get());
+                m_chunks[cid] = std::make_unique< PhysicalDevChunk >(pdev.get(), cinfo);
+                if (cinfo->vdev_id != INVALID_VDEV_ID) {
+                    m_vdevs[cinfo->vdev_id]->add_chunk(m_chunks[cid].get());
+                }
             }
             cid = m_chunk_info.chunks[cid].next_chunk_id;
         }
@@ -143,7 +147,10 @@ PhysicalDevChunk *DeviceManager::alloc_chunk(PhysicalDev *pdev, uint32_t vdev_id
     std::lock_guard<decltype(m_chunk_mutex)> lock(m_chunk_mutex);
 
     PhysicalDevChunk *chunk = pdev->find_free_chunk(req_size);
-    assert(chunk != nullptr);
+    if (chunk == nullptr) {
+        std::stringstream ss; ss << "No space available for chunk size = " << req_size << " in pdev id = " << pdev->get_dev_id();
+        throw DeviceException(ss.str());
+    }
     assert(chunk->get_size() >= req_size);
     chunk->set_vdev_id(vdev_id); // Set the chunk as busy or engaged to a vdev
 
@@ -154,7 +161,9 @@ PhysicalDevChunk *DeviceManager::alloc_chunk(PhysicalDev *pdev, uint32_t vdev_id
     }
 
     // Persist the allocation
-    pdev->write((char *)&m_chunk_info, sizeof(m_chunk_info), pdev->get_super_block_header()->chunks_block_offset);
+    for (auto &pd: m_pdevs) {
+        pd->write((char *) &m_chunk_info, sizeof(m_chunk_info), pd->get_super_block_header()->chunks_block_offset);
+    }
     return chunk;
 }
 
@@ -171,7 +180,9 @@ void DeviceManager::free_chunk(PhysicalDevChunk *chunk) {
     }
 
     // Persist the free_chunk
-    pdev->write((char *)&m_chunk_info, sizeof(m_chunk_info), pdev->get_super_block_header()->chunks_block_offset);
+    for (auto &pd: m_pdevs) {
+        pd->write((char *) &m_chunk_info, sizeof(m_chunk_info), pd->get_super_block_header()->chunks_block_offset);
+    }
 }
 
 vdev_info_block *DeviceManager::alloc_vdev(uint64_t req_size, uint32_t nmirrors, uint32_t blk_size) {
@@ -180,7 +191,6 @@ vdev_info_block *DeviceManager::alloc_vdev(uint64_t req_size, uint32_t nmirrors,
     vdev_info_block *vb = alloc_new_vdev_slot();
     vb->size = req_size;
     vb->num_mirrors = nmirrors;
-    vb->num_chunks = 0;
     vb->blk_size = blk_size;
 
     vb->prev_vdev_id = m_last_vdevid;
@@ -188,10 +198,15 @@ vdev_info_block *DeviceManager::alloc_vdev(uint64_t req_size, uint32_t nmirrors,
         // This is the first vdev being created.
         assert(m_vdev_info.first_vdev_id == INVALID_VDEV_ID);
         m_vdev_info.first_vdev_id = vb->vdev_id;
+    } else {
+        auto prev_vb = get_vdev_info_block(m_last_vdevid);
+        prev_vb->next_vdev_id = vb->vdev_id;
     }
     m_last_vdevid = vb->vdev_id;
     vb->next_vdev_id = INVALID_VDEV_ID;
 
+    LOG(INFO) << "Creating vdev id = " << vb->vdev_id << " size = " << vb->size;
+    m_vdev_info.num_vdevs++;
     for (auto &pdev: m_pdevs) {
         pdev->write((char *) &m_vdev_info, sizeof(m_vdev_info), pdev->get_super_block_header()->vdevs_block_offset);
     }
@@ -212,6 +227,11 @@ void DeviceManager::free_vdev(vdev_info_block *vb) {
 
     if (next_vb) next_vb->prev_vdev_id = vb->prev_vdev_id;
     vb->slot_allocated = false;
+
+    m_vdev_info.num_vdevs--;
+    for (auto &pdev: m_pdevs) {
+        pdev->write((char *) &m_vdev_info, sizeof(m_vdev_info), pdev->get_super_block_header()->vdevs_block_offset);
+    }
 }
 
 /* This method creates a new chunk for a given physical device and attaches the chunk to the physical device
@@ -228,6 +248,7 @@ PhysicalDevChunk *DeviceManager::create_new_chunk(PhysicalDev *pdev, uint64_t st
     PhysicalDevChunk *craw = chunk.get();
     pdev->attach_chunk(craw, prev_chunk);
 
+    LOG(INFO) << "Creating chunk: " << chunk->to_string();
     m_chunks[chunk->get_chunk_id()] = std::move(chunk);
     m_chunk_info.num_chunks++;
 

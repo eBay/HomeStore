@@ -276,7 +276,7 @@ public:
 
     bool find_index(uint32_t offset, boost::optional<uint8_t> ind_hint, int *out_ind) const {
         *out_ind = 0;
-        return (m_u.m_list) ?
+        return (!m_u.m_piece.size() && m_u.m_list) ?
                bsearch(offset, ind_hint.get_value_or(-1), out_ind) :
                ((offset >= m_u.m_piece.offset()) && (offset < m_u.m_piece.size()));
     }

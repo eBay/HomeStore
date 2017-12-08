@@ -8,7 +8,7 @@ set(CMAKE_CXX_STANDARD 14)
     add_definitions(-O2)
 #endif()
 
-include_directories(blkdev)
+include_directories(device)
 include_directories(..)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ../../cmake-build-debug/target)

@@ -4,29 +4,25 @@
 
 #include <iostream>
 #include <glog/logging.h>
-#include "device.h"
+#include "device/device.h"
 #include <fcntl.h>
+#include "blkstore.hpp"
 #include "device/virtual_dev.hpp"
-#include "device/device_selector.hpp"
 
 using namespace std;
 using namespace omstore;
 
 omstore::DeviceManager *dev_mgr = nullptr;
-omstore::VirtualDev< omstore::VdevFixedBlkAllocatorPolicy, omstore::RoundRobinDeviceSelector > *vdev;
+omstore::BlkStore< omstore::VdevFixedBlkAllocatorPolicy > *blk_store;
+omstore::Cache< BlkId > *glob_cache = nullptr;
+
+#define MAX_CACHE_SIZE     2 * 1024 * 1024 * 1024
 
 AbstractVirtualDev *new_vdev_found(omstore::vdev_info_block *vb) {
     LOG(INFO) << "New virtual device found id = " << vb->vdev_id << " size = " << vb->size;
-    vdev = new omstore::VirtualDev< omstore::VdevFixedBlkAllocatorPolicy, omstore::RoundRobinDeviceSelector >(dev_mgr, vb);
-    return vdev;
+    blk_store = new omstore::BlkStore< omstore::VdevFixedBlkAllocatorPolicy >(dev_mgr, glob_cache, vb, WRITETHRU_CACHE);
+    return blk_store->get_vdev();
 }
-
-#if 0
-void new_chunk_found(omstore::PhysicalDevChunk *chunk) {
-    LOG(INFO) << "New chunk found for vdev " << chunk->get_vdev_id() << " Chunk size = " << chunk->get_size();
-    vdev->add_chunk(chunk);
-}
-#endif
 
 int main(int argc, char** argv) {
     std::vector<std::string> dev_names;
@@ -36,6 +32,11 @@ int main(int argc, char** argv) {
         dev_names.emplace_back(argv[i]);
     }
 
+    /* Create the cache entry */
+    glob_cache = new omstore::Cache< BlkId >(MAX_CACHE_SIZE, 8192);
+    assert(glob_cache);
+
+    /* Create/Load the devices */
     dev_mgr = new omstore::DeviceManager(new_vdev_found, 0);
     try {
         dev_mgr->add_devices(dev_names);
@@ -45,11 +46,12 @@ int main(int argc, char** argv) {
     }
     auto devs = dev_mgr->get_all_devices();
 
+    /* Create a blkstore */
     if (create) {
-        LOG(INFO) << "Creating Virtual Dev\n";
-        uint32_t size = 512 * 1024 * 1024;
-        vdev = new omstore::VirtualDev< omstore::VdevFixedBlkAllocatorPolicy, omstore::RoundRobinDeviceSelector >
-                                                  (dev_mgr, size, 0, true, 8192, devs);
+        LOG(INFO) << "Creating BlkStore\n";
+        uint64_t size = 512 * 1024 * 1024;
+        blk_store = new omstore::BlkStore< omstore::VdevFixedBlkAllocatorPolicy >(dev_mgr, glob_cache, size,
+                                                                                  WRITETHRU_CACHE, 1);
     }
 
     omstore::BlkId bids[100];
@@ -57,31 +59,27 @@ int main(int argc, char** argv) {
     hints.desired_temp = 0;
     hints.dev_id_hint = -1;
 
-    for (auto i = 0; i < 4; i++) {
+    for (auto i = 0; i < 100; i++) {
         uint8_t nblks = 1;
-        auto status = vdev->alloc_blk(nblks, hints, &bids[i]);
-        assert(status == BLK_ALLOC_SUCCESS);
+        blk_store->alloc_blk(nblks, hints, &bids[i]);
 
         LOG(INFO) << "Requested nblks: " << (uint32_t)nblks << " Allocation info: " << bids[i].to_string();
     }
 
-    char buf[8192];
-    for (auto i = 0; i < 4; i++) {
-        memset(buf, i, 8192);
-        omds::MemVector<8192> mvector((uint8_t *)buf, 8192, 0);
-        vdev->write(bids[i], mvector);
+    char bufs[100][8192];
+    for (auto i = 0; i < 100; i++) {
+        memset(bufs[i], i, 8192);
+        omds::blob b = {(uint8_t *)&bufs[i], 8192};
 
+        boost::intrusive_ptr< BlkBuffer > bbuf = blk_store->write(bids[i], b);
         LOG(INFO) << "Written on " << bids[i].to_string() << " for 8192 bytes";
     }
 
-    for (auto i = 0; i < 4; i++) {
-        omds::MemVector<8192> mvector((uint8_t *)buf, 8192, 0);
-        vdev->readv(bids[i], mvector);
-
+    for (auto i = 0; i < 100; i++) {
         LOG(INFO) << "Read from " << bids[i].to_string() << " for 8192 bytes";
 
-        omds::blob b;
-        mvector.get(&b, 0);
+        boost::intrusive_ptr< BlkBuffer > bbuf = blk_store->read(bids[i], 0, 8192);
+        omds::blob b = bbuf->at_offset(0);
         assert(b.size == 8192);
         for (auto j = 0; j < b.size; j++) {
             assert(b.bytes[j] == i);

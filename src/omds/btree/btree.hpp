@@ -22,8 +22,10 @@ using namespace omds::thread;
 
 namespace omds { namespace btree {
 
+#if 0
 #define container_of(ptr, type, member) ({                      \
         (type *)( (char *)ptr - offsetof(type,member) );})
+#endif
 
 
 static __thread int btree_locked_count;

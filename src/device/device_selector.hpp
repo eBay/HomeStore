@@ -14,7 +14,7 @@ public:
         *m_last_dev_ind = 0;
     }
 
-    void add_pdev(PhysicalDev *pdev) {
+    void add_pdev(const PhysicalDev *pdev) {
         m_pdevs.push_back(pdev);
     }
 
@@ -29,7 +29,7 @@ public:
     }
 
 private:
-    std::vector< PhysicalDev * >  m_pdevs;
+    std::vector< const PhysicalDev * >  m_pdevs;
     folly::ThreadLocal< uint32_t > m_last_dev_ind;
 };
 

@@ -86,16 +86,16 @@ public:
        return !operator==(o);
     }
 
-    T *get_ptr() const volatile {
+    T *get_ptr() const {
         return (extract_ptr(m_value.ptr));
     }
 
-    void set_ptr(T *p) volatile {
+    void set_ptr(T *p) {
         tag_t t = get_tag();
         m_value = pack_value(p, t);
     }
 
-    tag_t get_tag() const volatile {
+    tag_t get_tag() const {
         return extract_tag(m_value.ptr);
     }
 

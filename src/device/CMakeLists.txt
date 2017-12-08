@@ -3,7 +3,7 @@ project(blkdev)
 
 set(CMAKE_CXX_STANDARD 14)
 
-include_directories(blkdev)
+include_directories(device)
 include_directories(..)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ../../cmake-build-debug/target)

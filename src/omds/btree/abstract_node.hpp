@@ -22,8 +22,10 @@ using namespace std;
 namespace omds {
 namespace btree {
 
+#if 0
 #define container_of(ptr, type, member) ({                      \
-        (type *)( (char *)ptr - offsetof(type,member) );})
+        (type *)( (char *)ptr - offsetof(type, member) );})
+#endif
 
 #define EDGE_ENTRY_INDEX    INVALID_POOL_NEXT
 

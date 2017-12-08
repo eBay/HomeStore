@@ -57,7 +57,7 @@ struct pdev_chunk_map {
  * DefaultDeviceSelector: Which device to select for allocation
  */
 template <typename Allocator, typename DefaultDeviceSelector>
-class VirtualDev
+class VirtualDev : public AbstractVirtualDev
 {
 private:
     vdev_info_block *m_vb; // This device block info
@@ -131,6 +131,9 @@ public:
         }
 
         m_selector = std::make_unique<DefaultDeviceSelector>();
+        for (auto &pdev : pdev_list) {
+            m_selector->add_pdev(pdev);
+        }
     }
 
     /* Load the virtual dev from vdev_info_block and create a Virtual Dev. */
@@ -146,7 +149,9 @@ public:
     /* This method adds chunk to the vdev. It is expected that this will happen at startup time and hence it only
      * takes lock for writing and not reading
      */
-    void add_chunk(PhysicalDevChunk *chunk) {
+    virtual void add_chunk(PhysicalDevChunk *chunk) override {
+        LOG(INFO) << "Adding chunk " << chunk->get_chunk_id() << " from vdev id " << chunk->get_vdev_id() <<
+                  " from pdev id = " << chunk->get_physical_dev()->get_dev_id();
         std::lock_guard< decltype(m_mgmt_mutex) > lock(m_mgmt_mutex);
         (chunk->get_primary_chunk()) ? add_mirror_chunk(chunk) : add_primary_chunk(chunk);
 
@@ -226,6 +231,7 @@ public:
         PhysicalDevChunk *chunk;
         uint64_t dev_offset = to_dev_offset(bid, &chunk);
         try {
+            LOG(INFO) << "Writing in device " << chunk->get_physical_dev()->get_dev_id() << " offset = " << dev_offset;
             chunk->get_physical_dev_mutable()->writev(iov, iovcnt, size, dev_offset);
         } catch (std::exception &e) {
             throw e;
@@ -412,6 +418,8 @@ private:
     PhysicalDevChunk *create_dev_chunk(uint32_t pdev_ind, std::shared_ptr< BlkAllocator > ba) {
         auto pdev = m_primary_pdev_chunks_list[pdev_ind].pdev;
         PhysicalDevChunk *chunk = m_mgr->alloc_chunk(pdev, m_vb->vdev_id, m_chunk_size);
+        LOG(INFO) << "Allocating new chunk for vdev_id = " << m_vb->vdev_id << " pdev_id = " << pdev->get_dev_id() <<
+                  " chunk: " << chunk->to_string();
         chunk->set_blk_allocator(ba);
 
         return chunk;
@@ -439,7 +447,7 @@ private:
     uint64_t to_dev_offset(const BlkId &glob_uniq_id, PhysicalDevChunk **chunk) const {
         *chunk = m_mgr->get_chunk_mutable(glob_uniq_id.get_chunk_num());
 
-        // Offset within the physical device
+        // Offset within the physical device for a given chunk
         return (glob_uniq_id.get_id() * get_blk_size()) - (*chunk)->get_physical_dev()->get_dev_offset();
     }
 

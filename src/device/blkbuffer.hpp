@@ -10,6 +10,7 @@
 
 namespace omstore {
 
+#if 0
 class BlkBuffer : private CacheBuffer< BlkId > {
 public:
     /* Provides the offset gap between this and next offset available in cache */
@@ -25,6 +26,8 @@ public:
         }
     }
 };
+#endif
+typedef CacheBuffer< BlkId > BlkBuffer;
 
 }
 #endif //OMSTORE_BLKBUFFER_HPP_HPP

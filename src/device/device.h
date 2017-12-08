@@ -87,7 +87,6 @@ struct vdev_info_block {
     uint32_t      vdev_id;            // Id for this vdev
     uint64_t      size;               // Size of the vdev
     uint32_t      num_mirrors;        // Total number of mirrors
-    uint32_t      num_chunks;         // Total number of chunks constitute this vdev
     uint32_t      blk_size;           // IO block size for this vdev
     uint32_t      prev_vdev_id;       // Prev pointer of vdevice list
     uint32_t      next_vdev_id;       // Next pointer of vdevice list
@@ -390,15 +389,20 @@ private:
     uint64_t           m_devsize;
 };
 
+class AbstractVirtualDev {
+public:
+    virtual void add_chunk(PhysicalDevChunk *chunk) = 0;
+};
+
 class DeviceManager {
-    typedef std::function< void(vdev_info_block *) > NewVDevCallback;
-    typedef std::function< void(PhysicalDevChunk *) > NewChunkCallback;
+    typedef std::function< AbstractVirtualDev *(vdev_info_block *) > NewVDevCallback;
+    //typedef std::function< void(PhysicalDevChunk *) > NewChunkCallback;
 
     friend class PhysicalDev;
     friend class PhysicalDevChunk;
 
 public:
-    DeviceManager(NewVDevCallback vcb, NewChunkCallback ccb, uint32_t vdev_metadata_size);
+    DeviceManager(NewVDevCallback vcb, uint32_t vdev_metadata_size);
     virtual ~DeviceManager() = default;
 
     /* Initial routine to call upon bootup or everytime new physical devices to be added dynamically */
@@ -480,6 +484,11 @@ private:
         }
         return (vdev_info_block *)(ptr);
     }
+
+    vdev_info_block *get_vdev_info_block(uint32_t vdev_id) {
+        return (vdev_info_block *)(((uint8_t *)&m_vdev_info.vdevs[0]) + (vdev_info_block_size() * vdev_id));
+    }
+
 #if 0
     const std::vector< std::unique_ptr< PhysicalDev > > &get_all_devices() const {
         return m_devices;
@@ -545,11 +554,11 @@ private:
 
     omds::avector< std::unique_ptr< PhysicalDev > > m_pdevs;
     omds::avector< std::unique_ptr< PhysicalDevChunk > > m_chunks;
+    omds::avector< AbstractVirtualDev * > m_vdevs;
     uint32_t m_last_vdevid;
     uint32_t m_vdev_metadata_size; // Appln metadata size for vdev
 
     NewVDevCallback  m_new_vdev_cb;
-    NewChunkCallback m_new_chunk_cb;
 };
 
 /*

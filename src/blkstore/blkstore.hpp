@@ -9,10 +9,10 @@
 #include "device/device_selector.hpp"
 #include "device/device.h"
 #include "device/blkbuffer.hpp"
-#include "main/omstore.hpp"
 #include "main/store_limits.h"
 #include <boost/optional.hpp>
 #include <omds/memory/mempiece.hpp>
+#include "cache/cache.cpp"
 
 namespace omstore {
 enum BlkStoreCacheType {
@@ -44,11 +44,17 @@ public:
 template <typename BAllocator>
 class BlkStore {
 public:
-    BlkStore(Cache< BlkId > *cache, BlkStoreConfig &cfg) :
-            m_cfg(cfg),
+    BlkStore(DeviceManager *mgr, Cache< BlkId > *cache, uint64_t initial_size, BlkStoreCacheType cache_type,
+             uint32_t mirrors) :
             m_cache(cache),
-            m_vdev(cfg.m_initial_size, cfg.m_nmirrors, true,
-                   BLKSTORE_BLK_SIZE, DeviceManagerInstance.get_dev_list()) {
+            m_cache_type(cache_type),
+            m_vdev(mgr, initial_size, mirrors, true, BLKSTORE_BLK_SIZE, mgr->get_all_devices()) {
+    }
+
+    BlkStore(DeviceManager *mgr, Cache< BlkId > *cache, vdev_info_block *vb, BlkStoreCacheType cache_type) :
+            m_cache(cache),
+            m_cache_type(cache_type),
+            m_vdev(mgr, vb) {
     }
 
     /* Allocate a new block of the size based on the hints provided */
@@ -76,7 +82,7 @@ public:
         if (m_cache->erase(bid, &erased_buf)) {
             // If number of blks we are freeing is more than 80% of the total buffer in cache, it does not make sense
             // to collect other buffers, creating a copy etc.. Just consider the entire entry is out of cache
-            if (nblks < (bid.get_nblks() * 0.8)) {
+            if (nblks.get() < (bid.get_nblks() * 0.8)) {
                 uint8_t from_blk = blkoffset.get_value_or(0);
                 uint8_t to_blk = from_blk + nblks.get_value_or(bid.get_nblks());
                 std::array< boost::intrusive_ptr< BlkBuffer >, 2> bbufs = free_partial_cache(erased_buf, from_blk, to_blk);
@@ -91,7 +97,7 @@ public:
             }
         }
 
-        BlkId tmp_bid(bid.get_id() + blkoffset, bid.get_nblks(), bid.get_chunk_num());
+        BlkId tmp_bid(bid.get_id() + blkoffset.get(), bid.get_nblks(), bid.get_chunk_num());
         m_vdev.free_blk(tmp_bid);
 
         return ret_arr;
@@ -176,7 +182,7 @@ public:
             if (ret != 0) {
                 throw std::bad_alloc();
             }
-            missing_mp->set_ptr(ptr);
+            missing_mp.get().set_ptr(ptr);
 
             // Read the missing piece from the device
             BlkId tmp_bid(bid.get_id() + missing_mp->offset()/BLKSTORE_BLK_SIZE,
@@ -196,6 +202,14 @@ public:
 
         return bbuf;
     }
+
+    uint64_t get_size() const {
+        return m_vdev.get_size();
+    }
+
+    VirtualDev<BAllocator, RoundRobinDeviceSelector> *get_vdev() {
+        return &m_vdev;
+    };
 
 private:
     std::array< boost::intrusive_ptr< BlkBuffer >, 2> free_partial_cache(const boost::intrusive_ptr< BlkBuffer > inbuf,
@@ -369,7 +383,6 @@ private:
         bbufs[0]->get_memvec_mutable().push_back()
 
     }
-#endif
 
     bool make_sense_to_retain(uint32_t total_sz, uint32_t overlap_sz) {
         uint32_t non_overlap_sz = total_sz - overlap_sz;
@@ -380,9 +393,10 @@ private:
     BlkId gen_offset_blkid(const BlkId &bid, uint8_t upto_blk) {
 
     }
+#endif
 private:
-    BlkStoreConfig m_cfg;
     Cache< BlkId > *m_cache;
+    BlkStoreCacheType m_cache_type;
     VirtualDev<BAllocator, RoundRobinDeviceSelector> m_vdev;
 };
 
