@@ -3,16 +3,13 @@ project(blkstore)
 
 set(CMAKE_CXX_STANDARD 14)
 
-if (CMAKE_BUILD_TYPE MATCHES Release)
-    add_definitions(-DNDEBUG=1)
-    add_definitions(-O2)
-endif()
-
 include_directories(..)
-include_directories(blkstore)
-include_directories(device)
+include_directories(../device)
+include_directories(../cache)
+include_directories(../../deps_prefix/${OS_TYPE}/include)
+link_directories(../../deps_prefix/${OS_TYPE}/lib)
 
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ../../cmake-build-debug/target)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ../../target/)
 set(TEST_BLKSTORE_SOURCE_FILES
         blkstore.hpp
         test_blkstore.cpp
@@ -25,4 +22,4 @@ set(TEST_BLKSTORE_SOURCE_FILES
         ../cache/cache.cpp)
 
 add_executable(test_blkstore ${TEST_BLKSTORE_SOURCE_FILES})
-target_link_libraries(test_blkstore folly glog farmhash tcmalloc benchmark)
+target_link_libraries(test_blkstore folly glog farmhash tcmalloc benchmark pthread)

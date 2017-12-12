@@ -3,14 +3,11 @@ project(omds)
 
 set(CMAKE_CXX_STANDARD 14)
 
-if (CMAKE_BUILD_TYPE MATCHES Release)
-    add_definitions(-DNDEBUG=1)
-    add_definitions(-O2)
-endif()
-
 include_directories(..)
+include_directories(../../deps_prefix/${OS_TYPE}/include)
+link_directories(../../deps_prefix/${OS_TYPE}/lib)
 
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ../../cmake-build-debug/target)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ../../target/)
 
 set(TEST_BTREE_SOURCE_FILES
         array/flexarray.hpp

@@ -2,16 +2,12 @@ cmake_minimum_required(VERSION 3.7)
 project(cache)
 
 set(CMAKE_CXX_STANDARD 14)
-
-#if (CMAKE_BUILD_TYPE MATCHES Release)
-    add_definitions(-DNDEBUG=1)
-    add_definitions(-O2)
-#endif()
-
 include_directories(device)
 include_directories(..)
+include_directories(../../deps_prefix/${OS_TYPE}/include)
+link_directories(../../deps_prefix/${OS_TYPE}/lib)
 
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ../../cmake-build-debug/target)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ../../target/)
 
 set(TEST_CACHE_SOURCE_FILES
         eviction.hpp
@@ -23,4 +19,4 @@ set(TEST_CACHE_SOURCE_FILES
         ../omds/memory/mempiece.hpp)
 
 add_executable(test_cache ${TEST_CACHE_SOURCE_FILES})
-target_link_libraries(test_cache folly glog farmhash tcmalloc benchmark)
+target_link_libraries(test_cache folly glog farmhash tcmalloc benchmark pthread)

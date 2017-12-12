@@ -87,7 +87,8 @@ public:
     }
 
     T *get_ptr() const {
-        return (extract_ptr(m_value.ptr));
+        auto p = m_value.ptr;
+        return (extract_ptr(p));
     }
 
     void set_ptr(T *p) {
@@ -96,7 +97,8 @@ public:
     }
 
     tag_t get_tag() const {
-        return extract_tag(m_value.ptr);
+        auto p = m_value.ptr;
+        return extract_tag(p);
     }
 
     void set_tag(tag_t t) {

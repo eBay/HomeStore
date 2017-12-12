@@ -134,7 +134,7 @@ public:
     Btree() : m_inited(false) {}
 
     void insert(BtreeKey &k, BtreeValue &v) {
-        omds::thread::locktype_t acq_lock = omds::thread::LOCK_READ;
+        omds::thread::locktype acq_lock = omds::thread::LOCKTYPE_READ;
         int ind;
 
         assert(btree_locked_count == 0);
@@ -157,18 +157,18 @@ public:
             // start from scratch.
             m_btree_lock.read_lock();
             goto retry;
-        } else if ((is_leaf) && (acq_lock != omds::thread::LOCK_WRITE)) {
+        } else if ((is_leaf) && (acq_lock != omds::thread::LOCKTYPE_WRITE)) {
             // Root is a leaf, need to take write lock, instead
             // of read, retry
             unlock_node(root, true);
-            acq_lock = omds::thread::LOCK_WRITE;
+            acq_lock = omds::thread::LOCKTYPE_WRITE;
             goto retry;
         } else {
             bool success = do_insert(root, acq_lock, k, v, ind);
             if (success == false) {
                 // Need to start from top down again, since
                 // there is a race between 2 inserts or deletes.
-                acq_lock = omds::thread::LOCK_READ;
+                acq_lock = omds::thread::LOCKTYPE_READ;
                 goto retry;
             }
         }
@@ -191,7 +191,7 @@ public:
 
         m_btree_lock.read_lock();
         AbstractNode *root = read_node(m_root_node);
-        lock_node(root, omds::thread::locktype_t::LOCK_READ);
+        lock_node(root, omds::thread::locktype::LOCKTYPE_READ);
 
         is_found = do_get(root, key, outval);
         m_btree_lock.unlock();
@@ -206,7 +206,7 @@ public:
     }
 
     bool remove(BtreeKey &key) {
-        omds::thread::locktype_t acq_lock = omds::thread::LOCK_READ;
+        omds::thread::locktype acq_lock = omds::thread::LOCKTYPE_READ;
         bool is_found = false;
 
         assert(btree_locked_count == 0);
@@ -238,18 +238,18 @@ public:
             // start from scratch.
             m_btree_lock.read_lock();
             goto retry;
-        } else if ((is_leaf) && (acq_lock != omds::thread::LOCK_WRITE)) {
+        } else if ((is_leaf) && (acq_lock != omds::thread::LOCKTYPE_WRITE)) {
             // Root is a leaf, need to take write lock, instead
             // of read, retry
             unlock_node(root, true);
-            acq_lock = omds::thread::LOCK_WRITE;
+            acq_lock = omds::thread::LOCKTYPE_WRITE;
             goto retry;
         } else {
             btree_status_t status = do_remove(root, acq_lock, key);
             if (status == BTREE_RETRY) {
                 // Need to start from top down again, since
                 // there is a race between 2 inserts or deletes.
-                acq_lock = omds::thread::LOCK_READ;
+                acq_lock = omds::thread::LOCKTYPE_READ;
                 goto retry;
             } else if (status == BTREE_ITEM_FOUND) {
                 is_found = true;
@@ -289,7 +289,7 @@ private:
         my_node->find(key, key.get_result_key(), &child_ptr, &ind);
         AbstractNode *child_node = read_node(child_ptr.get_node_id());
 
-        lock_node(child_node, omds::thread::LOCK_READ);
+        lock_node(child_node, omds::thread::LOCKTYPE_READ);
         unlock_node(my_node, true);
         return (do_get(child_node, key, outval));
     }
@@ -308,12 +308,12 @@ private:
      * it to be locked too. If it is able to successfully upgrade it continue to retain its
      * old lock. If failed to upgrade, will release all locks.
      */
-    bool upgrade_node(AbstractNode *my_node, AbstractNode *child_node, omds::thread::locktype_t &cur_lock,
-                      omds::thread::locktype_t child_cur_lock) {
+    bool upgrade_node(AbstractNode *my_node, AbstractNode *child_node, omds::thread::locktype &cur_lock,
+                      omds::thread::locktype child_cur_lock) {
         uint64_t prev_gen;
         bool ret = true;
 
-        if (cur_lock == omds::thread::LOCK_WRITE) {
+        if (cur_lock == omds::thread::LOCKTYPE_WRITE) {
             ret = true;
             goto done;
         }
@@ -356,7 +356,7 @@ private:
         }
 
         // The node was not changed by anyone else during upgrade.
-        cur_lock = omds::thread::LOCK_WRITE;
+        cur_lock = omds::thread::LOCKTYPE_WRITE;
         if (child_node) {
             lock_node(child_node, child_cur_lock);
         }
@@ -368,7 +368,7 @@ private:
         return ret; // We have successfully upgraded the node.
     }
 
-    AbstractNode *get_child_node(AbstractNode *int_node, omds::thread::locktype_t curlock, BtreeKey &key, int *out_ind) {
+    AbstractNode *get_child_node(AbstractNode *int_node, omds::thread::locktype curlock, BtreeKey &key, int *out_ind) {
         bool isfound;
         BNodeptr childptr;
 
@@ -385,7 +385,7 @@ private:
             childptr.set_node_id(int_node->get_edge_id());
 
             if (!childptr.is_valid_ptr()) {
-                if (upgrade_node(int_node, nullptr /* childNode */, curlock, omds::thread::LOCK_NONE) == false) {
+                if (upgrade_node(int_node, nullptr /* childNode */, curlock, omds::thread::LOCKTYPE_NONE) == false) {
                     return nullptr;
                 }
 
@@ -442,9 +442,9 @@ private:
      * k           = Key to insert
      * v           = Value to insert
      */
-    bool do_insert(AbstractNode *my_node, omds::thread::locktype_t curlock, BtreeKey &k, BtreeValue &v, int ind_hint) {
+    bool do_insert(AbstractNode *my_node, omds::thread::locktype curlock, BtreeKey &k, BtreeValue &v, int ind_hint) {
         if (my_node->is_leaf()) {
-            assert(curlock == LOCK_WRITE);
+            assert(curlock == LOCKTYPE_WRITE);
 
             my_node->insert(k, v);
             write_node(my_node);
@@ -457,7 +457,7 @@ private:
         }
 
         retry:
-        omds::thread::locktype_t child_cur_lock = omds::thread::LOCK_NONE;
+        omds::thread::locktype child_cur_lock = omds::thread::LOCKTYPE_NONE;
 
         // Get the childPtr for given key.
         int ind = ind_hint;
@@ -468,7 +468,7 @@ private:
         }
 
         // Directly get write lock for leaf, since its an insert.
-        child_cur_lock = (child_node->is_leaf()) ? LOCK_WRITE : LOCK_READ;
+        child_cur_lock = (child_node->is_leaf()) ? LOCKTYPE_WRITE : LOCKTYPE_READ;
         lock_node(child_node, child_cur_lock);
 
         // Check if child node is full and a hint on where would next child goes in.
@@ -480,7 +480,7 @@ private:
             }
 
             // We need to upgrade the child to WriteLock
-            if (upgrade_node(child_node, nullptr, child_cur_lock, LOCK_NONE) == false) {
+            if (upgrade_node(child_node, nullptr, child_cur_lock, LOCKTYPE_NONE) == false) {
                 // Since we have parent node write locked, child node should never have any issues upgrading.
                 assert(0);
                 unlock_node(my_node, true);
@@ -504,9 +504,9 @@ private:
         // have been unlocked by the recursive function and it could also been deleted.
     }
 
-    btree_status_t do_remove(AbstractNode *my_node, omds::thread::locktype_t curlock, BtreeKey &key) {
+    btree_status_t do_remove(AbstractNode *my_node, omds::thread::locktype curlock, BtreeKey &key) {
         if (my_node->is_leaf()) {
-            assert(curlock == LOCK_WRITE);
+            assert(curlock == LOCKTYPE_WRITE);
 
             bool isFound = my_node->remove(key);
             if (isFound) {
@@ -518,7 +518,7 @@ private:
         }
 
         retry:
-        locktype_t child_cur_lock = LOCK_NONE;
+        locktype child_cur_lock = LOCKTYPE_NONE;
 
         // Get the childPtr for given key.
         int ind;
@@ -531,7 +531,7 @@ private:
         }
 
         // Directly get write lock for leaf, since its a delete.
-        child_cur_lock = (child_node->is_leaf()) ? LOCK_WRITE : LOCK_READ;
+        child_cur_lock = (child_node->is_leaf()) ? LOCKTYPE_WRITE : LOCKTYPE_READ;
         lock_node(child_node, child_cur_lock);
 
         // Check if child node is minimal.
@@ -580,7 +580,7 @@ private:
 
         m_btree_lock.write_lock();
         AbstractNode *root = read_node(m_root_node);
-        lock_node(root, locktype_t::LOCK_WRITE);
+        lock_node(root, locktype::LOCKTYPE_WRITE);
 
         if (!root->is_split_needed(m_btree_cfg, k, v, &ind)) {
             unlock_node(root, true);
@@ -609,7 +609,7 @@ private:
 
         m_btree_lock.write_lock();
         AbstractNode *root = read_node(m_root_node);
-        lock_node(root, locktype_t::LOCK_WRITE);
+        lock_node(root, locktype::LOCKTYPE_WRITE);
 
         if (root->get_total_entries() != 0) {
             unlock_node(root, true);
@@ -684,7 +684,7 @@ private:
             parent_node->get(indices_list[i], &child_ptr);
 
             nodes[i] = read_node(child_ptr.get_node_id());
-            lock_node(nodes[i], locktype_t::LOCK_WRITE);
+            lock_node(nodes[i], locktype::LOCKTYPE_WRITE);
             ntotal_entries += nodes[i]->get_total_entries();
         }
 
@@ -853,7 +853,7 @@ private:
         return n;
     }
 
-    void lock_node(AbstractNode *node, omds::thread::locktype_t type) {
+    void lock_node(AbstractNode *node, omds::thread::locktype type) {
         node->lock(type);
         btree_locked_count++;
     }

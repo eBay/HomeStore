@@ -7,6 +7,7 @@
 
 #include "omds/memory/mempiece.hpp"
 #include <mutex>
+#include <atomic>
 #include <boost/intrusive/list.hpp>
 #include "main/store_limits.h"
 

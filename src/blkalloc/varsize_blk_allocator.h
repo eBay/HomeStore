@@ -7,6 +7,7 @@
 
 #include "blk_allocator.h"
 #include <boost/heap/binomial_heap.hpp>
+#include <condition_variable>
 
 namespace omstore {
 /****************** VarsizeBlkAllocator Section **********************/

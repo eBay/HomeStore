@@ -153,10 +153,10 @@ public:
         return &m_trans_header;
     }
 
-    void lock(omds::thread::locktype_t l) {
-        if (l == omds::thread::LOCK_NONE) {
+    void lock(omds::thread::locktype l) {
+        if (l == omds::thread::LOCKTYPE_NONE) {
             return;
-        } else if (l == omds::thread::LOCK_READ) {
+        } else if (l == omds::thread::LOCKTYPE_READ) {
             pthread_rwlock_rdlock(&get_transient_header()->lock);
         } else {
             pthread_rwlock_wrlock(&get_transient_header()->lock);
@@ -181,7 +181,7 @@ public:
     void lock_upgrade() {
         get_transient_header()->upgraders.increment(1);
         this->unlock(false);
-        this->lock(omds::thread::LOCK_WRITE);
+        this->lock(omds::thread::LOCKTYPE_WRITE);
     }
 
     void lock_acknowledge() {

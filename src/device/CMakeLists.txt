@@ -5,8 +5,10 @@ set(CMAKE_CXX_STANDARD 14)
 
 include_directories(device)
 include_directories(..)
+include_directories(../../deps_prefix/${OS_TYPE}/include)
+link_directories(../../deps_prefix/${OS_TYPE}/lib)
 
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ../../cmake-build-debug/target)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ../../target/)
 
 set(TEST_DEVICEMGR_SOURCE_FILES
         device.h
@@ -26,7 +28,7 @@ set(TEST_PHYSDEV_SOURCE_FILES
         test_physdev.cpp)
 
 add_executable(test_physdev ${TEST_PHYSDEV_SOURCE_FILES})
-target_link_libraries(test_physdev folly glog tcmalloc)
+target_link_libraries(test_physdev pthread folly glog tcmalloc pthread)
 
 set(TEST_VIRTUALDEV_SOURCE_FILES
         physical_dev.cpp
@@ -38,4 +40,4 @@ set(TEST_VIRTUALDEV_SOURCE_FILES
         test_virtualdev.cpp)
 
 add_executable(test_virtualdev ${TEST_VIRTUALDEV_SOURCE_FILES})
-target_link_libraries(test_virtualdev folly glog tcmalloc)
+target_link_libraries(test_virtualdev pthread folly glog tcmalloc pthread)

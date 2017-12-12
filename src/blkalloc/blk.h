@@ -11,6 +11,7 @@
 #include <iostream>
 #include <cassert>
 #include <sstream>
+#include <cstring>
 #include "omds/array/flexarray.hpp"
 #include "omds/memory/mempiece.hpp"
 #include "omds/utility/useful_defs.hpp"
@@ -66,7 +67,7 @@ struct BlkId {
 
     uint64_t to_integer() const {
         uint64_t i;
-        memcpy(&i, (const uint64_t *)this, sizeof(uint64_t));
+        std::memcpy(&i, (const uint64_t *)this, sizeof(uint64_t));
         return i;
     }
 

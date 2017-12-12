@@ -5,6 +5,14 @@ set(CMAKE_CXX_STANDARD 14)
 
 if (CMAKE_BUILD_TYPE MATCHES Release)
     add_definitions(-DNDEBUG=1)
+    add_definitions(-O2)
+endif()
+
+set(OS_TYPE unknown)
+if(APPLE)
+    set(OS_TYPE mac)
+elseif(CMAKE_SYSTEM_NAME STREQUAL Linux)
+    set(OS_TYPE linux)
 endif()
 
 add_subdirectory(src/omds)
