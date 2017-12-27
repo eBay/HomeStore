@@ -48,11 +48,12 @@ typedef struct __attribute__((__packed__)) {
     omds::atomic_counter< int16_t > refcount;
 } transient_hdr_t;
 
+template <typename K, typename V>
 class AbstractNode {
 protected:
     persistent_hdr_t m_pers_header;
     transient_hdr_t m_trans_header;
-    uint8_t m_nodespace[0];
+    uint8_t m_node_area[0];
 
     /*************** Class Definitions ******************
     ///////// Helper methods for CRUD on a node ////////////////////
@@ -78,42 +79,35 @@ protected:
 
 public:
     ////////// Top level functions (CRUD on a node) //////////////////
-    virtual void get(int ind, BtreeValue *outval) const = 0;
-
-    virtual void insert(int ind, BtreeKey &key, BtreeValue &val) = 0;
-
+    virtual void get(int ind, BtreeValue *outval, bool copy) const = 0;
+    virtual void insert(int ind, const BtreeKey &key, const BtreeValue &val) = 0;
     virtual void remove(int ind) = 0;
-
-    virtual void update(int ind, BtreeValue &val) = 0;
-
-    virtual void update(int ind, BtreeKey &key, BtreeValue &val) = 0;
+    virtual void update(int ind, const BtreeValue &val) = 0;
+    virtual void update(int ind, const BtreeKey &key, const BtreeValue &val) = 0;
 
 #ifndef NDEBUG
-
     virtual void print() = 0;
-
 #endif
 
+    /* Provides the occupied data size within the node */
+    virtual uint16_t get_available_size() const = 0;
+
     ///////////// Move and Delete related operations on a node //////////////
-    virtual bool is_split_needed(BtreeConfig &cfg, BtreeKey &k, BtreeValue &v, int *out_ind_hint) const = 0;
-
-    virtual void move_out_right(AbstractNode &other_node, uint32_t nentries) = 0;
-
-    virtual void move_in_right(AbstractNode &other_node, uint32_t nentries) = 0;
-
+    virtual bool is_split_needed(const BtreeConfig &cfg, const BtreeKey &k, const BtreeValue &v,
+                                 int *out_ind_hint) const = 0;
+    virtual void move_out_to_right_by_entries(AbstractNode &other_node, uint16_t nentries) = 0;
+    virtual void move_out_to_right_by_size(AbstractNode &other_node, uint32_t size) = 0;
+    virtual void move_in_from_right_by_entries(AbstractNode &other_node, uint16_t nentries) = 0;
+    virtual void move_in_from_right_by_size(AbstractNode &other_node, uint32_t size) = 0;
     virtual void get_adjacent_indicies(uint32_t cur_ind, vector< int > &indices_list, uint32_t max_indices) const = 0;
 
 protected:
-    virtual uint32_t get_nth_obj_size(int ind) const = 0;
-
-    virtual void set_nth_obj(int ind, BtreeKey &k, BtreeValue &v) = 0;
-
+    virtual uint16_t get_nth_obj_len(int ind) const = 0;
     virtual void get_nth_key(int ind, BtreeKey *outkey, bool copy) const = 0;
-
     virtual void get_nth_value(int ind, BtreeValue *outval, bool copy) const = 0;
 
     // Compares the nth key (n=ind) with given key (cmp_key) and returns -1, 0, 1 if cmp_key <=> nth_key respectively
-    virtual int compare_nth_key(BtreeKey &cmp_key, int ind) const = 0;
+    virtual int compare_nth_key(const BtreeKey &cmp_key, int ind) const = 0;
 
 public:
     AbstractNode(bnodeid_t id, bool init_pers, bool init_trans) {
@@ -216,18 +210,18 @@ public:
         get_persistent_header()->nentries -= subn;
     }
 
-    uint32_t get_max_entries(BtreeConfig &cfg) const {
+    uint32_t get_max_entries(const BtreeConfig &cfg) const {
         return (is_leaf() ? cfg.get_max_leaf_entries_per_node() : cfg.get_max_interior_entries_per_node());
     }
 
-    uint32_t available_slots(BtreeConfig &cfg) {
+    uint32_t available_slots(const BtreeConfig &cfg) {
         return (get_max_entries(cfg) - get_total_entries());
     }
 
 //#define MINIMAL_THRESHOLD_PCT    0.40   // Should be more than 40% of space
 #define MINIMAL_THRESHOLD_PCT    0.10   // Should be more than 40% of space
 
-    bool is_minimal(BtreeConfig &cfg) {
+    bool is_minimal(const BtreeConfig &cfg) {
         return is_minimal(available_slots(cfg));
     }
 
@@ -296,12 +290,20 @@ public:
         return (m_trans_header.refcount.get());
     }
 
-    uint8_t *get_node_space() {
-        return m_nodespace;
+    uint8_t *get_node_area() {
+        return m_node_area;
     }
 
-    const uint8_t *get_node_space_const() const {
-        return m_nodespace;
+    const uint8_t *get_node_area_const() const {
+        return m_node_area;
+    }
+
+    uint16_t get_node_area_size(const BtreeConfig &cfg) const {
+        return (uint16_t) (cfg.get_node_size() - (get_node_area_const() - (uint8_t *)this));
+    }
+
+    uint16_t get_occupied_size(const BtreeConfig &cfg) const {
+        return (uint16_t)(get_node_area_size(cfg) - get_available_size());
     }
 
     bnodeid_t get_next_bnode() const {
@@ -323,27 +325,26 @@ public:
     ////////// Top level functions (CRUD on a node) //////////////////
     // Find the slot where the key is present. If not present, return the closest location for the key.
     // Assumption: Node lock is already taken
-    bool find(BtreeKey &key, BtreeKey *outkey, BtreeValue *outval, int *outind) const {
-        bool isFound = false;
-        *outind = bsearch(-1, get_total_entries(), key, &isFound);
-        if (*outind == get_total_entries()) {
+    auto find(const BtreeSearchRange &range, BtreeKey *outkey, BtreeValue *outval) const {
+        auto result = bsearch(-1, get_total_entries(), range);
+        if (result.end_of_search_index == get_total_entries()) {
             if (has_valid_edge()) {
-                isFound = true;
+                result.found = true;
             } else {
-                assert(isFound == false);
-                return isFound;
+                assert(!result.found);
+                return result;
             }
         }
 
-        if (outval != nullptr) {
-            get(*outind, outval);
+        if (outval) {
+            get(result.end_of_search_index, outval, true /* copy */);
         }
 
-        if (key.is_regex_key() && outkey != nullptr) {
-            get_nth_key(*outind, outkey, true);
+        if (!range.is_simple_search() && outkey) {
+            get_nth_key(result.end_of_search_index, outkey, true /* copy */);
         }
 
-        return isFound;
+        return result;
     }
 
     virtual void get_last_key(BtreeKey *out_lastkey) {
@@ -354,36 +355,60 @@ public:
         return get_nth_key(0, out_firstkey, false);
     }
 
-    void insert(BtreeKey &key, BtreeValue &val) {
-        bool isFound = false;
+    bool put(const BtreeKey &key, const BtreeValue &val, PutType put_type) {
+        auto result = find(key, nullptr, nullptr);
+        bool ret = true;
 
-        int ind;
-        isFound = find(key, nullptr, nullptr, &ind);
-        assert(!is_leaf() || (isFound == false)); // We do not support duplicate keys yet
-
-        insert(ind, key, val);
-    }
-
-    bool remove(BtreeKey &key) {
-        bool isFound = false;
-        int ind;
-
-        isFound = find(key, key.get_result_key(), nullptr, &ind);
-        if (!isFound) {
+        if (put_type == INSERT_ONLY_IF_NOT_EXISTS) {
+            if (result.found) return false;
+            insert(result.end_of_search_index, key, val);
+        } else if (put_type == REPLACE_ONLY_IF_EXISTS) {
+            if (!result.found) return false;
+            update(result.end_of_search_index, key, val);
+        } else if (put_type == REPLACE_IF_EXISTS_ELSE_INSERT) {
+            (result.found) ? insert(result.end_of_search_index, key, val) : update(result.end_of_search_index, key, val);
+        } else if (put_type == APPEND_ONLY_IF_EXISTS) {
+            if (!result.found) return false;
+            append(result.end_of_search_index, key, val);
+        } else if (put_type == APPEND_IF_EXISTS_ELSE_INSERT) {
+            (result.found) ? insert(result.end_of_search_index, key, val) : append(result.end_of_search_index, key, val);
+        } else {
             return false;
         }
 
-        remove(ind);
+        return ret;
+    }
+
+    void insert(const BtreeKey &key, const BtreeValue &val) {
+        auto result = find(key, nullptr, nullptr);
+        assert(!is_leaf() || (!result.found)); // We do not support duplicate keys yet
+        insert(result.end_of_search_index, key, val);
+    }
+
+    bool remove_one(const BtreeSearchRange &range, BtreeKey *outkey, BtreeValue *outval) {
+        auto result = find(range, outkey, outval);
+        if (!result.found) {
+            return false;
+        }
+
+        remove(result.end_of_search_index);
         return true;
     }
 
-    void update(BtreeKey &key, BtreeValue &val) {
-        bool is_found = false;
-        int ind;
+    void append(uint32_t index, const BtreeKey &key, const BtreeValue &val) {
+        // Get the nth value and do a callback to update its blob with the new value, being passed
+        V nth_val;
+        get_nth_value(index, &nth_val, false);
+        nth_val.append_blob(val);
+        update(index, key, nth_val);
+    }
 
-        is_found = find(key, key.get_result_key(), nullptr, &ind);
-        assert(is_found == true);
-        update(ind, val);
+    /* Update the key and value pair and after update if outkey and outval are non-nullptr, it fills them with
+     * the key and value it just updated respectively */
+    void update(const BtreeKey &key, const BtreeValue &val, BtreeKey *outkey, BtreeValue *outval) {
+        auto result = find(key, outkey, outval);
+        assert(result.found);
+        update(result.end_of_search_index, val);
     }
 
     //////////// Edge Related Methods ///////////////
@@ -391,7 +416,7 @@ public:
         set_edge_id(INVALID_BNODEID);
     }
 
-    void set_edge_value(BtreeValue &v) {
+    void set_edge_value(const BtreeValue &v) {
         BNodeptr *p = (BNodeptr *) &v;
         set_edge_id(p->get_node_id());
     }
@@ -403,8 +428,7 @@ public:
 
         BNodeptr bnp(get_edge_id());
         uint32_t size;
-        uint8_t *blob = bnp.get_blob(&size);
-        v->set_blob(blob, size);
+        v->set_blob(bnp.get_blob());
     }
 
     bool has_valid_edge() const {
@@ -417,27 +441,29 @@ public:
     }
 
 protected:
-    uint32_t bsearch(int start, int end, BtreeKey &key, bool *is_found) const {
+    auto bsearch(int start, int end, const BtreeSearchRange &range) const {
         uint32_t mid = 0;
         uint32_t min_ind_found = end;
-        *is_found = false;
         BtreeKey *mid_key;
+
+        struct {
+            bool     found;
+            uint32_t end_of_search_index;
+        } ret{NO_MATCH, 0};
 
         while ((end - start) > 1) {
             mid = start + (end - start) / 2;
 
-            int x = compare_nth_key(key, mid);
-
+            int x = compare_nth_key(*range.get_start_key(), mid);
             if (x == 0) {
-                *is_found = true;
-
-                if (!key.is_regex_key()) {
-                    return mid;
+                if (range.is_simple_search()) {
+                    ret.end_of_search_index = mid;
+                    return ret;
                 }
 
-                BtreeRegExKey &rkey = static_cast<BtreeRegExKey &>(key);
-                if (!rkey.is_left_leaning()) {
-                    return mid;
+                 if (!range.is_left_leaning()) {
+                    ret.end_of_search_index = mid;
+                    return ret;
                 }
 
                 // If we are left leaning, keep looking for the lowest of
@@ -453,7 +479,8 @@ protected:
             }
         }
 
-        return ((*is_found) ? min_ind_found : end);
+        ret.end_of_search_index = ret.found ? min_ind_found : end;
+        return ret;
     }
 
 }__attribute__((packed));

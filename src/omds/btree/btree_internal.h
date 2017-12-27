@@ -10,6 +10,7 @@
 #define BTREE_KVSTORE_H_
 #include <vector>
 #include <iostream>
+#include "omds/utility/useful_defs.hpp"
 
 using namespace std;
 
@@ -59,7 +60,6 @@ struct uint48_t {
 namespace omds { namespace btree {
 
 typedef uint48_t bnodeid_t;
-#define INVALID_BNODEID    -1
 
 typedef enum {
     BTREE_SUCCESS = 0,
@@ -73,29 +73,41 @@ typedef enum {
 typedef enum {
     BTREE_NODETYPE_SIMPLE = 0,
     BTREE_NODETYPE_VAR_VALUE,
+    BTREE_NODETYPE_VAR_KEY,
+    BTREE_NODETYPE_VAR_OBJECT,
     BTREE_NODETYPE_PREFIX,
     BTREE_NODETYPE_COMPACT
 } btree_nodetype_t;
 
+enum MatchType {
+    NO_MATCH=0,
+    FULL_MATCH,
+    SUBSET_MATCH,
+    SUPERSET_MATCH,
+    PARTIAL_MATCH_LEFT,
+    PARTIAL_MATCH_RIGHT
+};
+
+enum PutType {
+    INSERT_ONLY_IF_NOT_EXISTS,     // Insert
+
+    REPLACE_ONLY_IF_EXISTS,        // Upsert
+    REPLACE_IF_EXISTS_ELSE_INSERT,
+
+    APPEND_ONLY_IF_EXISTS,         // Update
+    APPEND_IF_EXISTS_ELSE_INSERT
+};
+
 class BtreeKey
 {
 public:
-    BtreeKey() {}
-    virtual ~BtreeKey() {}
+    BtreeKey() = default;
+    virtual ~BtreeKey() = default;
 
-    virtual bool is_regex_key() const {
-        return false;
-    }
-
-    // Result Key is the same as our key, so lets return nullptr
-    virtual BtreeKey *get_result_key() {
-        return nullptr;
-    }
-
-    virtual int compare(BtreeKey *other) const = 0;
-    virtual uint8_t *get_blob(uint32_t *psize) const = 0;
-    virtual void set_blob(const uint8_t *blob, uint32_t size) = 0;
-    virtual void copy_blob(const uint8_t *blob, uint32_t size) = 0;
+    virtual int compare(const BtreeKey *other) const = 0;
+    virtual omds::blob get_blob() const = 0;
+    virtual void set_blob(const omds::blob &b) = 0;
+    virtual void copy_blob(const omds::blob &b) = 0;
 
     virtual uint32_t get_blob_size() const = 0;
     virtual void set_blob_size(uint32_t size) = 0;
@@ -105,7 +117,8 @@ public:
 #endif
 };
 
-class BtreeRangeKey : public BtreeKey {
+#if 0
+class BtreeRangeKey {
 private:
     BtreeKey *m_start_key;
     BtreeKey *m_end_key;
@@ -126,37 +139,49 @@ public:
         return m_end_key;
     }
 };
+#endif
 
-class BtreeRegExKey : public BtreeRangeKey
+class BtreeSearchRange
 {
 private:
+    const BtreeKey *m_start_key;
+    const BtreeKey *m_end_key;
+
     bool m_start_incl;
     bool m_end_incl;
-    BtreeKey *m_result_key;
     bool m_left_leaning;
 
 public:
-    BtreeRegExKey(BtreeKey& start_key) :
-            BtreeRegExKey(start_key, true, start_key, true) {}
+    BtreeSearchRange(const BtreeKey& start_key) :
+            BtreeSearchRange(start_key, true, start_key, true) {}
 
-    BtreeRegExKey(BtreeKey& start_key, BtreeKey& end_key) :
-            BtreeRegExKey(start_key, true, end_key, true) {}
+    BtreeSearchRange(const BtreeKey& start_key, const BtreeKey& end_key) :
+            BtreeSearchRange(start_key, true, end_key, true) {}
 
-    BtreeRegExKey(BtreeKey& start_key, bool start_incl, BtreeKey& end_key, bool end_incl) :
-            BtreeRegExKey(start_key, start_incl, end_key, end_incl, true, nullptr) {}
+    BtreeSearchRange(const BtreeKey& start_key, bool start_incl, const BtreeKey& end_key, bool end_incl) :
+            BtreeSearchRange(start_key, start_incl, end_key, end_incl, true) {}
 
-    BtreeRegExKey(BtreeKey& start_key, bool start_incl, BtreeKey& end_key, bool end_incl,
-                  bool left_leaning, BtreeKey *out_key) :
-            BtreeRangeKey(start_key, end_key),
+    BtreeSearchRange(const BtreeKey& start_key, bool start_incl, const BtreeKey& end_key, bool end_incl,
+                  bool left_leaning) :
+            m_start_key(&start_key),
+            m_end_key(&end_key),
             m_start_incl(start_incl),
             m_end_incl(end_incl),
-            m_result_key(out_key),
-            m_left_leaning(left_leaning) {}
+            m_left_leaning(left_leaning) {
+    }
+
+    const BtreeKey* get_start_key() const {
+        return m_start_key;
+    }
+
+    const BtreeKey* get_end_key() const {
+        return m_end_key;
+    }
 
     // Is the key provided and current key completely matches.
     // i.e If say a range = [8 to 12] and rkey is [9 - 11], then compare will return 0,
     // but this method will return false. It will return true only if range exactly matches.
-    virtual bool is_full_match(BtreeRangeKey *rkey) const = 0;
+    //virtual bool is_full_match(BtreeRangeKey *rkey) const = 0;
 
     virtual bool is_start_inclusive() const {
         return m_start_incl;
@@ -165,15 +190,12 @@ public:
         return m_end_incl;
     }
 
-    bool is_regex_key() const override {
-        return true;
+    bool is_simple_search() const {
+        return ((get_start_key() == get_end_key()) && (m_start_incl == m_end_incl));
     }
 
     virtual bool is_left_leaning() const {
         return m_left_leaning;
-    }
-    BtreeKey *get_result_key() override {
-        return m_result_key;
     }
 };
 
@@ -182,9 +204,10 @@ class BtreeValue
 public:
     BtreeValue() {}
 
-    virtual uint8_t *get_blob(uint32_t *pSize) const = 0;
-    virtual void set_blob(const uint8_t *blob, uint32_t size) = 0;
-    virtual void copy_blob(const uint8_t *blob, uint32_t size) = 0;
+    virtual omds::blob get_blob() const = 0;
+    virtual void set_blob(const omds::blob &b) = 0;
+    virtual void copy_blob(const omds::blob &b) = 0;
+    virtual void append_blob(const BtreeValue &new_val) = 0;
 
     virtual uint32_t get_blob_size() const = 0;
     virtual void set_blob_size(uint32_t size) = 0;
@@ -193,6 +216,8 @@ public:
     virtual void print() = 0;
 #endif
 };
+
+#define INVALID_BNODEID    -1
 
 class BNodeptr: public BtreeValue
 {
@@ -218,21 +243,27 @@ public:
         return (m_id != INVALID_BNODEID);
     }
 
-    uint8_t *get_blob(uint32_t *pSize) const {
-        *pSize = sizeof(bnodeid_t);
-        return (uint8_t *) &m_id;
+    omds::blob get_blob() const override {
+        omds::blob b;
+        b.size = sizeof(bnodeid_t);
+        b.bytes = (uint8_t *)&m_id;
+        return b;
     }
 
-    void set_blob(const uint8_t *blob, uint32_t size) {
-        assert(size == sizeof(bnodeid_t));
-        m_id = *(bnodeid_t *) blob;
+    void set_blob(const omds::blob &b) override {
+        assert(b.size == sizeof(bnodeid_t));
+        m_id = *(bnodeid_t *)b.bytes;
     }
 
-    void copy_blob(const uint8_t *blob, uint32_t size) {
-        set_blob(blob, size);
+    void copy_blob(const omds::blob &b) override {
+        set_blob(b);
     }
 
-    uint32_t get_blob_size() const {
+    void append_blob(const BtreeValue &new_val) override {
+        set_blob(new_val.get_blob());
+    }
+
+    uint32_t get_blob_size() const override {
         return sizeof(bnodeid_t);
     }
 
@@ -240,7 +271,7 @@ public:
         return sizeof(bnodeid_t);
     }
 
-    void set_blob_size(uint32_t size) {
+    void set_blob_size(uint32_t size) override {
     }
 
     BtreeValue& operator=(const BtreeValue& other) {
@@ -259,26 +290,31 @@ class EmptyClass: public BtreeValue
 public:
     EmptyClass() {}
 
-    uint8_t *get_blob(uint32_t *pSize) const {
-        *pSize = 0;
-        return (uint8_t *) this;
+    omds::blob get_blob() const override {
+        omds::blob b;
+        b.size = 0;
+        b.bytes = (uint8_t *)this;
+        return b;
     }
 
-    void set_blob(const uint8_t *blob, uint32_t size) {
+    void set_blob(const omds::blob &b) override {
     }
 
-    virtual void copy_blob(const uint8_t *blob, uint32_t size) {
+    void copy_blob(const omds::blob &b) override {
+    }
+
+    void append_blob(const BtreeValue &new_val) override {
     }
 
     static uint32_t get_fixed_size() {
         return 0;
     }
 
-    uint32_t get_blob_size() const {
+    uint32_t get_blob_size() const override {
         return 0;
     }
 
-    void set_blob_size(uint32_t size) {
+    void set_blob_size(uint32_t size) override {
     }
 
     EmptyClass& operator=(const EmptyClass& other) {

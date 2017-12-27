@@ -331,12 +331,12 @@ private:
                       bool end_incl) const;
 };
 
-class VarsizeAllocCacheSearch : public omds::btree::BtreeRegExKey {
+class VarsizeAllocCacheSearch : public omds::btree::BtreeSearchRange {
 public:
     VarsizeAllocCacheSearch(VarsizeAllocCacheEntry &start_entry, bool start_incl,
                             VarsizeAllocCacheEntry &end_entry, bool end_incl,
                             bool left_leaning, VarsizeAllocCacheEntry *out_entry) :
-            omds::btree::BtreeRegExKey(start_entry, start_incl, end_entry, end_incl, left_leaning, out_entry) {}
+            omds::btree::BtreeSearchRange(start_entry, start_incl, end_entry, end_incl, left_leaning, out_entry) {}
 
     bool is_full_match(omds::btree::BtreeRangeKey *rkey) const override {
         return true;
@@ -344,7 +344,7 @@ public:
 
     int compare(omds::btree::BtreeKey *other) const override {
         assert(0); // Comparision of 2 search keys is not required feature yet.
-        omds::btree::BtreeRegExKey *regex = (omds::btree::BtreeRegExKey *) other;
+        omds::btree::BtreeSearchRange *regex = (omds::btree::BtreeSearchRange *) other;
         return 0;
     }
 

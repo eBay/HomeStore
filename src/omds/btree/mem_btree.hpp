@@ -37,17 +37,17 @@ public:
 
 protected:
     virtual uint32_t get_node_header_size() const override {
-        return sizeof(AbstractNode);
+        return sizeof(AbstractNode<K, V>);
     }
 
-    AbstractNode *alloc_node(btree_nodetype_t btype, bool is_leaf) override {
-        AbstractNode *n;
+    AbstractNode<K, V> *alloc_node(btree_nodetype_t btype, bool is_leaf) override {
+        AbstractNode<K, V> *n;
         uint8_t *mem = m_allocators.allocate(this->get_config()->get_node_size());
 
         if (btype == BTREE_NODETYPE_SIMPLE) {
             // Initialize both perpetual and transient portion of the node
             SimpleNode <K, V> *sn = new (mem) SimpleNode< K, V >((bnodeid_t) mem, true, true);
-            n = (AbstractNode *) sn;
+            n = (AbstractNode<K, V> *) sn;
         } else {
             assert(0);
         }
@@ -58,22 +58,22 @@ protected:
         return n;
     }
 
-    AbstractNode *read_node(bnodeid_t id) override {
-        AbstractNode *n = (AbstractNode *)(uint8_t *)id.m_x;
+    AbstractNode<K, V> *read_node(bnodeid_t id) override {
+        AbstractNode<K, V> *n = (AbstractNode<K, V> *)(uint8_t *)id.m_x;
         n->ref_node();
         return n;
     }
 
-    void write_node(AbstractNode *n) override {
+    void write_node(AbstractNode<K, V> *n) override {
     }
 
-    void release_node(AbstractNode *n) override {
+    void release_node(AbstractNode<K, V> *n) override {
         if (n->deref_node()) {
             m_allocators.deallocate((uint8_t *) n);
         }
     }
 
-    void free_node(AbstractNode *n) override {
+    void free_node(AbstractNode<K, V> *n) override {
         if (n->deref_node()) {
             m_allocators.deallocate((uint8_t *) n);
         }

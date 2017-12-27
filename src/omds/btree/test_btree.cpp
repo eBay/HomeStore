@@ -66,7 +66,7 @@ public:
         m_blob->m_blk_num = blkNum;
     }
 
-    int compare(BtreeKey *o) const {
+    int compare(const BtreeKey *o) const override {
         TestEntry *other = (TestEntry *) o;
         if (get_count() < other->get_count()) {
             return 1;
@@ -121,20 +121,20 @@ public:
         return 0;
     }
 
-    virtual uint8_t *get_blob(uint32_t *pSize) const {
-        *pSize = sizeof(blob_t);
-        return (uint8_t *) m_blob;
+    virtual omds::blob get_blob() const override {
+        omds::blob b = {(uint8_t *) m_blob, sizeof(blob_t)};
+        return b;
     }
 
-    virtual void set_blob(const uint8_t *blob, uint32_t size) {
-        m_blob = (blob_t *) blob;
+    virtual void set_blob(const omds::blob &b) override {
+        m_blob = (blob_t *) b.bytes;
     }
 
-    virtual void copy_blob(const uint8_t *blob, uint32_t size) {
-        memcpy(m_blob, blob, size);
+    virtual void copy_blob(const omds::blob &b) override {
+        memcpy(m_blob, b.bytes, b.size);
     }
 
-    virtual uint32_t get_blob_size() const {
+    virtual uint32_t get_blob_size() const override {
         return (sizeof(blob_t));
     }
 
@@ -142,7 +142,7 @@ public:
         return (sizeof(blob_t));
     }
 
-    virtual void set_blob_size(uint32_t size) {
+    virtual void set_blob_size(uint32_t size) override {
     }
 
     void print() {
@@ -262,7 +262,7 @@ void *preloadThread(void *arg) {
         TestEntry *te = tst.readEntries[i];
 
         Clock::time_point startTime = Clock::now();
-        targ->bt->insert(*te, e);
+        targ->bt->put(*te, e, INSERT_ONLY_IF_NOT_EXISTS);
         targ->preloadInfo.time_us += get_elapsed_time(startTime);
 
         if (((i + 1) % 1000) == 0) {
@@ -287,7 +287,7 @@ void *readInsertThread(void *arg) {
             --(targ->insertInfo.count);
             TestEntry *te = tst.insertEntries[targ->insertInfo.start + targ->insertInfo.count];
             Clock::time_point startTime = Clock::now();
-            targ->bt->insert(*te, e);
+            targ->bt->put(*te, e, INSERT_ONLY_IF_NOT_EXISTS);
             targ->insertInfo.time_us += get_elapsed_time(startTime);
         } else {
             --(targ->readInfo.count);
@@ -317,7 +317,7 @@ void *readInsertThread(void *arg) {
         --(targ->insertInfo.count);
         TestEntry *te = tst.insertEntries[targ->insertInfo.start + targ->insertInfo.count];
         Clock::time_point startTime = Clock::now();
-        targ->bt->insert(*te, e);
+        targ->bt->put(*te, e, INSERT_ONLY_IF_NOT_EXISTS);
         targ->insertInfo.time_us += get_elapsed_time(startTime);
     }
 

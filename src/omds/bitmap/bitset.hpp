@@ -20,6 +20,11 @@ struct bitblock {
     uint32_t nbits;
 };
 
+struct serialized_bitset {
+    uint32_t serialized_size;
+    Bitword< uint64_t > words[0];
+} __attribute__((packed));
+
 class Bitset {
 private:
     uint64_t m_nbits;
@@ -31,8 +36,51 @@ public:
         m_nbits = nbits;
     }
 
+    explicit Bitset(std::vector< Bitword64 > &words) :
+            m_words(words) {
+        m_nbits = words.size() * Bitword64::size();
+    }
+
+    explicit Bitset(const omds::blob &b) {
+        auto sbitset = (serialized_bitset *)b.bytes;
+
+        uint32_t nwords = (sbitset->serialized_size - sizeof(serialized_bitset))/ sizeof(Bitword64);
+        m_words.reserve(nwords);
+
+        for (auto i = 0U; i < nwords; i++) {
+            m_words.emplace_back(sbitset->words[i]);
+        }
+        m_nbits = nwords * sizeof(Bitword64);
+    }
+
     uint64_t get_total_bits() const {
         return m_nbits;
+    }
+
+    /* Serialize the bitset into the blob provided upto blob bytes. Returns if it able completely serialize within
+     * the bytes specified.
+     */
+    bool serialize(const omds::blob &b) {
+        assert(b.size >= sizeof(serialized_bitset)); // We need to at least serialize size bytes
+
+        uint32_t slot = 0;
+        uint32_t max_slots = (b.size - sizeof(serialized_bitset))/sizeof(Bitword64);
+
+        auto sbitset = (serialized_bitset *)b.bytes;
+        sbitset->serialized_size = b.size;
+        for (auto w : m_words) {
+            if (slot >= max_slots) {
+                break;
+            }
+            sbitset->words[slot++] = w;
+        }
+
+        return (b.size >= size_serialized());
+    }
+
+    /* Returns how much bytes it will occupy when this bitset is serialized */
+    uint32_t size_serialized() const {
+        return sizeof(serialized_bitset) + (sizeof(Bitword64) * m_words.size());
     }
 
     void set_reset_bits(uint64_t b, int nbits, bool value) {
