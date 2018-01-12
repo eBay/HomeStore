@@ -10,3 +10,8 @@ SConscript*
 Debug/
 Release/
 .idea/
+deps_build/
+deps_prefix/
+*.xcodeproj/
+CMakeScripts/
+target/

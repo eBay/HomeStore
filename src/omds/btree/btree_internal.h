@@ -340,12 +340,18 @@ private:
 
     uint32_t m_max_leaf_entries_per_node;
     uint32_t m_max_int_entries_per_node;
+
+    uint8_t m_ideal_fill_pct;
+    uint8_t m_split_pct;
+
 public:
     BtreeConfig() {
         m_max_leaf_entries_per_node = m_max_int_entries_per_node = m_max_objs = 0;
         m_nodesize = 8192;
         m_max_key_size = m_max_value_size = 0;
         m_int_node_type = m_leaf_node_type = BTREE_NODETYPE_SIMPLE;
+        m_ideal_fill_pct = 90;
+        m_split_pct = 50;
     }
 
     btree_nodetype_t get_interior_node_type() const {
@@ -423,6 +429,18 @@ public:
             assert(0);
             break;
         }
+    }
+
+    uint32_t get_ideal_fill_size() const {
+        return (uint32_t) (get_node_size() * m_ideal_fill_pct)/100;
+    }
+
+    uint32_t get_merge_suggested_size() const {
+        return get_node_size() - get_ideal_fill_size();
+    }
+
+    uint32_t get_split_size() const {
+        return (uint32_t) (get_node_size() * m_split_pct)/100;
     }
 };
 

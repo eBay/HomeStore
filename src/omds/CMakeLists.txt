@@ -7,9 +7,10 @@ include_directories(..)
 include_directories(../../deps_prefix/${OS_TYPE}/include)
 link_directories(../../deps_prefix/${OS_TYPE}/lib)
 
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ../../target/)
+#set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ../../target/)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ../../target/${CMAKE_BUILD_TYPE}/${OS_TYPE})
 
-set(TEST_BTREE_SOURCE_FILES
+set(BTREE_SOURCE_FILES
         array/flexarray.hpp
         bitmap/Bitword.hpp
         btree/abstract_node.hpp
@@ -17,7 +18,6 @@ set(TEST_BTREE_SOURCE_FILES
         btree/btree_internal.h
         btree/mem_btree.hpp
         btree/simple_node.hpp
-        btree/test_btree.cpp
         btree/varlen_node.hpp
         hash/intrusive_hashset.hpp
         memory/generic_freelist_allocator.hpp
@@ -28,7 +28,16 @@ set(TEST_BTREE_SOURCE_FILES
         memory/tagged_ptr.hpp
         utility/atomic_counter.hpp
         thread/lock.hpp)
+set(TEST_BTREE_SOURCE_FILES
+        ${BTREE_SOURCE_FILES}
+        tests/test_btree.cpp)
 add_executable(test_btree ${TEST_BTREE_SOURCE_FILES})
+
+set(TEST_BTREE_CRUD_SOURCE_FILES
+        ${BTREE_SOURCE_FILES}
+        tests/test_btree_crud.cpp)
+add_executable(test_btree_crud ${TEST_BTREE_CRUD_SOURCE_FILES})
+target_link_libraries(test_btree_crud gtest)
 
 set(TEST_HASH_SOURCE_FILES
         hash/intrusive_hashset.hpp

@@ -164,8 +164,17 @@ public:
         this->inc_gen();
     }
 
-    void move_out_to_right_by_entries(AbstractNode<K, V> &othern, uint32_t nentries) override {
+    virtual uint32_t get_available_size(const BtreeConfig &cfg) const override {
+        return (this->get_node_area_size(cfg) - (this->get_total_entries() * get_nth_obj_size(0)));
+    }
+
+    uint32_t move_out_to_right_by_entries(const BtreeConfig &cfg, AbstractNode<K, V> &othern,
+                                          uint32_t nentries) override {
         SimpleNode< K, V > *other_node = (SimpleNode< K, V > *) &othern;
+
+        // Minimum of whats to be moved out and how many slots available in other node
+        nentries = std::min({nentries, this->get_total_entries(), other_node->get_available_entries(cfg)});
+
         uint32_t sz = nentries * get_nth_obj_size(0);
 
         if (sz != 0) {
@@ -186,12 +195,20 @@ public:
 
         other_node->inc_gen();
         this->inc_gen();
+
+        return nentries;
     }
 
-    void move_in_right(AbstractNode<K, V> &on, uint32_t nentries) override {
-        SimpleNode< K, V > *other_node = (SimpleNode< K, V > *) &on;
-        uint32_t sz = nentries * get_nth_obj_size(0);
+    uint32_t move_out_to_right_by_size(const BtreeConfig &cfg, AbstractNode<K, V> &other_node, uint32_t size) override {
+        return (get_nth_obj_size(0) * move_out_to_right_by_entries(cfg, other_node, size/get_nth_obj_size(0)));
+    }
 
+    uint32_t move_in_from_right_by_entries(const BtreeConfig &cfg, AbstractNode<K, V> &on, uint32_t nentries) override {
+        SimpleNode< K, V > *other_node = (SimpleNode< K, V > *) &on;
+
+        // Minimum of whats to be moved and how many slots available
+        nentries = std::min({nentries, other_node->get_total_entries(), get_available_entries(cfg)});
+        uint32_t sz = nentries * get_nth_obj_size(0);
         if (sz != 0) {
             uint32_t othersz = (other_node->get_total_entries() - nentries) * other_node->get_nth_obj_size(0);
             memmove(get_nth_obj(this->get_total_entries()), other_node->get_nth_obj(0), sz);
@@ -212,6 +229,12 @@ public:
 
         other_node->inc_gen();
         this->inc_gen();
+
+        return nentries;
+    }
+
+    uint32_t move_in_from_right_by_size(const BtreeConfig &cfg, AbstractNode<K, V> &other_node, uint32_t size) override {
+        return (get_nth_obj_size(0) * move_in_from_right_by_entries(cfg, other_node, size/get_nth_obj_size(0)));
     }
 
     bool is_split_needed(const BtreeConfig &cfg, const BtreeKey &key, const BtreeValue &value,
@@ -224,32 +247,7 @@ public:
             return false;
         }
 
-        return (this->get_total_entries() == this->get_max_entries(cfg));
-    }
-
-    void get_adjacent_indicies(uint32_t cur_ind, vector< int > &indices_list, uint32_t max_indices) const override {
-        int i = 0;
-        int start_ind;
-        int end_ind;
-        uint32_t nentries = this->get_total_entries();
-
-        start_ind = cur_ind - ((max_indices / 2) - 1 + (max_indices % 2));
-        end_ind = cur_ind + (max_indices / 2);
-        if (start_ind < 0) {
-            end_ind -= start_ind;
-            start_ind = 0;
-        }
-
-        for (i = start_ind; (i <= end_ind) && (indices_list.size() < max_indices); i++) {
-            if (i == nentries) {
-                if (this->has_valid_edge()) {
-                    indices_list.push_back(i);
-                }
-                break;
-            } else {
-                indices_list.push_back(i);
-            }
-        }
+        return (this->get_available_entries(cfg) == 0);
     }
 
 private:
@@ -258,24 +256,11 @@ private:
         return (get_obj_key_size(ind) + get_obj_value_size(ind));
     }
 
-    void set_nth_obj(int ind, const BtreeKey &k, const BtreeValue &v) override {
-        assert(ind <= this->get_total_entries());
-
-        uint8_t *entry = this->get_node_area() + (get_nth_obj_size(ind) * ind);
-        uint32_t key_size;
-        uint32_t val_size;
-        omds::blob key_blob = k.get_blob();
-        memcpy((void *) entry, key_blob.bytes, key_blob.size);
-
-        omds::blob val_blob = v.get_blob();
-        memcpy((void *) (entry + key_size), val_blob.bytes, val_blob.size);
-    }
-
     void get_nth_key(int ind, BtreeKey *outkey, bool copykey) const override {
         assert(ind < this->get_total_entries());
 
         omds::blob b;
-        b.bytes = (uint8_t *)(this->get_node_area_const() + (get_nth_obj_size(ind) * ind));
+        b.bytes = (uint8_t *)(this->get_node_area() + (get_nth_obj_size(ind) * ind));
         b.size  = get_obj_key_size(ind);
 
         (copykey) ? outkey->copy_blob(b) : outkey->set_blob(b);
@@ -286,7 +271,7 @@ private:
         uint32_t size = get_nth_obj_size(ind);
 
         omds::blob b;
-        b.bytes = (uint8_t *)(this->get_node_area_const() + (get_nth_obj_size(ind) * ind)) + get_obj_key_size(ind);
+        b.bytes = (uint8_t *)(this->get_node_area() + (get_nth_obj_size(ind) * ind)) + get_obj_key_size(ind);
         b.size = outval->get_blob_size();
 
         (copy) ? outval->copy_blob(b) : outval->set_blob(b);
@@ -299,6 +284,21 @@ private:
     }
 
     /////////////// Other Internal Methods /////////////
+    void set_nth_obj(int ind, const BtreeKey &k, const BtreeValue &v) {
+        assert(ind <= this->get_total_entries());
+
+        uint8_t *entry = this->get_node_area_mutable() + (get_nth_obj_size(ind) * ind);
+        omds::blob key_blob = k.get_blob();
+        memcpy((void *) entry, key_blob.bytes, key_blob.size);
+
+        omds::blob val_blob = v.get_blob();
+        memcpy((void *) (entry + key_blob.size), val_blob.bytes, val_blob.size);
+    }
+
+    uint32_t get_available_entries(const BtreeConfig &cfg) const {
+        return get_available_size(cfg)/get_nth_obj_size(0);
+    }
+
     inline uint32_t get_obj_key_size(int ind) const {
         return K::get_fixed_size();
     }
@@ -312,11 +312,11 @@ private:
     }
 
     uint8_t *get_nth_obj(int ind) {
-        return (this->get_node_area() + (get_nth_obj_size(ind) * ind));
+        return (this->get_node_area_mutable() + (get_nth_obj_size(ind) * ind));
     }
 
     void set_nth_key(int ind, const BtreeKey &k) {
-        uint8_t *entry = this->get_node_area() + (get_nth_obj_size(ind) * ind);
+        uint8_t *entry = this->get_node_area_mutable() + (get_nth_obj_size(ind) * ind);
         uint32_t keySize;
 
         omds::blob b = k.get_blob();
@@ -325,7 +325,7 @@ private:
 
     void set_nth_value(int ind, const BtreeValue &v) {
         assert(ind < this->get_total_entries());
-        uint8_t *entry = this->get_node_area() + (get_nth_obj_size(ind) * ind) + get_obj_key_size(ind);
+        uint8_t *entry = this->get_node_area_mutable() + (get_nth_obj_size(ind) * ind) + get_obj_key_size(ind);
         uint32_t valSize;
 
         omds::blob b = v.get_blob();

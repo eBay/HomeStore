@@ -13,7 +13,7 @@
 #include <sys/timeb.h>
 #include <cmath>
 
-#include "mem_btree.hpp"
+#include "omds/btree/mem_btree.hpp"
 
 using namespace std;
 using namespace omds::btree;
@@ -311,7 +311,7 @@ void *readInsertThread(void *arg) {
         bool isFound = targ->bt->get(*te, &e);
         targ->readInfo.time_us += get_elapsed_time(startTime);
         assert(isFound);
-    }
+}
 
     while (targ->insertInfo.count > 0) {
         --(targ->insertInfo.count);
@@ -430,8 +430,6 @@ int main(int argc, const char *argv[]) {
     btree_cfg.set_max_key_size(sizeof(TestEntry));
     btree_cfg.set_max_value_size(0);
     omds::btree::MemBtree< TestEntry, EmptyClass> bt(btree_cfg);
-    //SSDBtreeKVStore <TestEntry, EmptyClass> bt(btree_cfg);
-    //MemBtreeKVStore<TestEntry, EmptyClass> bt(btree_cfg);
 
     threadarg_t *targs = new threadarg_t[nThreads];
 
@@ -457,7 +455,6 @@ int main(int argc, const char *argv[]) {
 
     cout << "Completed " << nPreloadCount << " preloads in " << total_preload_time_us / nThreads << " microseconds"
          << endl;
-#if 0
     cout << "Starting Read/Insert test with insertCount = " << nInsertCount << " readCount = " << nReadCount << endl;
     uint32_t insert_start = 0;
     uint32_t read_start = 0;
@@ -510,7 +507,6 @@ int main(int argc, const char *argv[]) {
     tps = nReadCount / avgSecs;
     cout << "Read during insert TPS = " << tps << endl;
 
-#endif
 #if 0
     avgSecs = total_delete_time_us/nThreads/1000000;
     tps = nTotalCount/avgSecs;

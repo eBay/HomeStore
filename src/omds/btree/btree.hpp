@@ -99,9 +99,7 @@ private:
     bool upgrade_node(AbstractNode<K, V> *mynode, AbstractNode<K, V> *childnode, omds::thread::locktype_t &curlock,
                       omds::thread::locktype_t child_curlock);
     void split_node(AbstractNode<K, V> *parent_node, AbstractNode<K, V> *child_node, uint32_t parent_ind, BtreeKey **out_split_key);
-    bool merge_nodes(AbstractNode<K, V> *parent_node, vector<uint32_t> &indices_list);
-    void do_merge_nodes(vector<AbstractNode<K, V> *> &nodes, uint32_t node_start_ind, int prev_entry_count,
-                        uint32_t max_fill_entries);
+    bool merge_nodes(AbstractNode<K, V> *parent_node, std::vector<uint32_t> &indices_list);
 
     AbstractNode* get_child_node(AbstractNode<K, V> *int_node, omds::thread::locktype_t curlock, BtreeKey& key, uint32_t &outind);
     AbstractNode* get_child_node_range(AbstractNode<K, V> *int_node, KeyRegex& kr, uint32_t &outind, bool *isfound);
@@ -571,7 +569,7 @@ private:
         lock_node(child_node, child_cur_lock);
 
         // Check if child node is minimal.
-        if (child_node->is_minimal(m_btree_cfg)) {
+        if (child_node->is_merge_neeeded(m_btree_cfg)) {
             // If we are unable to upgrade the node, ask the caller to retry.
             if (upgrade_node(my_node, child_node, curlock, child_cur_lock) == false) {
                 return BTREE_RETRY;
@@ -591,8 +589,8 @@ private:
                 // this child might be a middle child in the list of indices, which means we might have to lock one in
                 // left against the direction of intended locking (which could cause deadlock).
                 unlock_node(child_node, false);
-                bool merged = merge_nodes(my_node, indices_list);
-                if (merged) {
+                auto result = merge_nodes(my_node, indices_list);
+                if (result.merged) {
                     // Retry only if we merge them.
                     release_node(child_node);
                     goto retry;
@@ -676,7 +674,7 @@ private:
 
         child_node2->set_next_bnode(child_node1->get_next_bnode());
         child_node1->set_next_bnode(child_node2->get_node_id());
-        child_node1->move_out_to_right_by_entries(*child_node2, child_node1->get_total_entries() / 2);
+        child_node1->move_out_to_right_by_size(m_btree_cfg, *child_node2, m_btree_cfg.get_split_size());
 
         // Update the existing parent node entry to point to second child ptr.
         nptr.set_node_id(child_node2->get_node_id());
@@ -792,7 +790,7 @@ private:
         cur_last_n->set_next_bnode(prev_last_n->get_next_bnode());
 
 #if 0
-        #ifdef DEBUG
+#ifdef DEBUG
         cout << "After Merge Nodes" << endl;
         cout << "#####################" << endl;
         cout << "Parent Node " << endl;
@@ -879,26 +877,110 @@ private:
     }
 #endif
 
-    bool merge_nodes(AbstractNode<K, V> *parent_node, vector< int > &indices_list) {
-        vector< AbstractNode<K, V> * > nodes(indices_list.size());
-        BNodeptr child_ptr;
-        uint32_t ntotal_size = 0;
-        int i;
-        int n = 0;
-        bool ret = true;
-        AbstractNode<K, V> *cur_last_n = nullptr;
-        AbstractNode<K, V> *prev_last_n = nullptr;
+    auto merge_nodes(AbstractNode<K, V> *parent_node, std::vector< int > &indices_list) {
+        struct merge_info {
+            AbstractNode<K, V> *node;
+            uint16_t  parent_index;
+            bool freed;
+            bool modified;
+        };
 
-        for (i = 0; i < indices_list.size(); i++) {
+        struct {
+            bool     merged;  // Have we merged at all
+            uint32_t nmerged; // If we merged, how many are the final result of nodes
+        } ret{false, 0};
+
+        std::vector< merge_info > minfo;
+        BNodeptr child_ptr;
+        uint32_t ndeleted_nodes = 0;
+
+        // Loop into all index and initialize list
+        minfo.reserve(indices_list.size());
+        for (auto i = 0; i < indices_list.size(); i++) {
             parent_node->get(indices_list[i], &child_ptr, false /* copy */);
 
-            nodes[i] = read_node(child_ptr.get_node_id());
-            lock_node(nodes[i], locktype::LOCKTYPE_WRITE);
-            ntotal_size += nodes[i]->get_occupied_size(m_btree_cfg);
+            minfo[i].node = read_node(child_ptr.get_node_id());
+            minfo[i].freed = false;
+            minfo[i].modified = false;
+            minfo[i].parent_index = indices_list[i];
+            lock_node(minfo[i].node, locktype::LOCKTYPE_WRITE);
+        }
+
+        // Rebalance entries for each of the node and mark any node to be removed, if empty.
+        auto i = 0U; auto j = 1U;
+        auto balanced_size = m_btree_cfg.get_ideal_fill_size();
+        while ((i < indices_list.size() - 1) && (j < indices_list.size())) {
+            minfo[j].parent_ind -= ndeleted_nodes; // Adjust the parent index for deleted nodes
+
+            if (minfo[i].node->get_occupied_size(m_btree_cfg) < balanced_size) {
+                // We have room to pull some from next node
+                uint32_t pull_size = balanced_size - minfo[i].node->get_occupied_size(m_btree_cfg);
+                if (minfo[i].node->move_in_from_right_by_size(*minfo[j].node, pull_size)) {
+                    minfo[i].modified = true;
+                    ret.merged = true;
+                }
+
+                if (minfo[j].node->get_total_entries() == 0) {
+                    // We have removed all the entries from the next node, remove the entry in parent and move on to
+                    // the next node.
+                    minfo[j].freed = true;
+                    parent_node->remove(minfo[j].parent_ind);
+                    minfo[i].node->set_next_bnode(minfo[j].node->get_next_bnode());
+                    ndeleted_nodes++; j++;
+                    continue;
+                }
+            } else if (minfo[i].modified) {
+                // We reached maximum amount which can be pulled in, if we have indeed modified, lets get the last
+                // key and put in the entry into parent node
+                BNodeptr nptr(minfo[i].node->get_node_id());
+                if (minfo[i].parent_ind == parent_node->get_total_entries()) {
+                    parent_node->update(minfo[i].parent_ind, nptr);
+                } else {
+                    K last_key;
+                    minfo[i].node->get_last_key(&last_key);
+                    parent_node->update(minfo[i].parent_ind, last_key, nptr);
+                }
+            }
+
+            // If we have reached the last node on second iterator and if that is minimal, we can relax the ideal size
+            // and get all in and try to avoid additional minimal node hanging around.
+            if ((j == minfo.size()-1) &&
+                    (minfo[j].node->get_occupied_size(m_btree_cfg) <= m_btree_cfg.get_merge_suggested_size()) &&
+                    balanced_size != m_btree_cfg.get_node_size()) {
+                balanced_size = m_btree_cfg.get_node_size();
+                continue;
+            }
+
+            i = j++;
+            minfo[i].parent_ind -= ndeleted_nodes; // Adjust the parent index for deleted nodes (i.e. removed entries)
+        }
+
+        // Its time to write the parent node and loop again to write all modified nodes and free freed nodes
+        write_node(parent_node);
+        assert(!minfo[0].freed); // If we merge it, we expect the left most one has at least 1 entry.
+        // TODO: Above assumption will not be valid if we are merging all empty nodes. Need to study that.
+        if (minfo[0].modified) write_node(minfo[0].node);
+        for (auto n = 1; n < minfo.size(); n++) {
+            if (minfo[n].freed) {
+                if (minfo[n]->any_upgrade_waiters()) {
+                    minfo[n].node->set_valid_node(false);
+                } else {
+                    free_node(minfo[n].node);
+                }
+            } else if (minfo[n].modified) {
+                write_node(minfo[n].node);
+            }
+        }
+
+        // Loop again in reverse order to unlock the nodes. Freed nodes need not be unlocked
+        for (auto n = minfo.size()-1; n >= 0; n--) {
+            if (!minfo[n].freed) {
+                unlock_node(minfo[n].node, true);
+            }
         }
 
 #if 0
-        #ifdef DEBUG
+#ifdef DEBUG
         cout << "Before Merge Nodes" << endl;
         cout << "#####################" << endl;
         cout << "Parent Node " << endl;
@@ -910,148 +992,8 @@ private:
 #endif
 #endif
 
-        // Fill only upto 90% of sizes, beyond which will cause subsequent insert to split again.
-#define FILL_PERCENT 0.9
-        uint32_t max_fill_size = (uint32_t) ((double)nodes[0]->get_node_area_size(m_btree_cfg)) * FILL_PERCENT);
-
-        uint32_t new_node_count = (ntotal_size - 1) / max_fill_size + 1;
-        if (new_node_count > indices_list.size()) {
-            // We don't need to do this merge, if we end up having more nodes than whats original.
-            assert(0); // As of now we are not doing any compression on nodes, so we don't expect this to happen
-            ret = false;
-            goto done;
-        } else if (new_node_count == indices_list.size()) {
-            // We can share equally across all available nodes - rebalance
-            max_fill_size = (ntotal_size - 1) / indices_list.size() + 1;
-            assert(max_fill_size <= nodes[0]->get_node_area_size(m_btree_cfg));
-
-            // We do share only if even after splitting, amount of entries remain is better than minimal nodes. Use the
-            // last node, since it will have least size
-            if (nodes[new_node_count - 1]->is_minimal_by_size(max_fill_size)) {
-                ret = false;
-                goto done;
-            }
-        }
-
-        do_merge_nodes(nodes, 0, 0, max_fill_size);
-
-        // Now that we merged the nodes, we will update the parent indices with corresponding nodes last key.
-        // Start from the last to first, to cover edge entries as well.
-        i = indices_list.size() - 1;
-        n = new_node_count - 1;
-
-        while ((i >= 0) && (n >= 0)) {
-            BNodeptr nptr(nodes[n]->get_node_id());
-            if (indices_list[i] == parent_node->get_total_entries()) {
-                parent_node->update(indices_list[i], nptr);
-            } else {
-                K last_key;
-                nodes[n]->get_last_key(&last_key);
-                parent_node->update(indices_list[i], last_key, nptr);
-            }
-            i--;
-            n--;
-        }
-        assert(n == -1);
-
-        // Remove the extra entries from parent node.
-        while (i >= 0) {
-            parent_node->remove(indices_list[i--]);
-        }
-
-        // Write parent node to store
-        write_node(parent_node);
-
-        // Point the remaining last node next to current last node next
-        cur_last_n = nodes[new_node_count - 1];
-        prev_last_n = nodes[nodes.size() - 1];
-        cur_last_n->set_next_bnode(prev_last_n->get_next_bnode());
-
-#if 0
-        #ifdef DEBUG
-        cout << "After Merge Nodes" << endl;
-        cout << "#####################" << endl;
-        cout << "Parent Node " << endl;
-        AbstractNode::castAndPrint(parent_node);
-        cout << "Child Node(s) " << endl;
-#endif
-#endif
-
-    done:
-        // Unlock all the nodes, so that caller can choose to restart.
-        for (n = 0; n < nodes.size(); n++) {
-            bool free_n = false;
-
-#if 0
-            #ifdef DEBUG
-            AbstractNode::castAndPrint(nodes[n]);
-#endif
-#endif
-            if (n >= new_node_count) {
-                // Free up remaining nodes only if nodes does not have upgrade waiters. Any upgrade waiters would just
-                // invalidate this node, which will be freed by last waiter.
-                if (nodes[n]->any_upgrade_waiters()) {
-                    nodes[n]->set_valid_node(false);
-                } else {
-                    free_n = true;
-                }
-            }
-
-            // If we have merged and not going to free the node we need to write it to store.
-            if (ret && !free_n) {
-                write_node(nodes[n]);
-            }
-
-            if (free_n) {
-                unlock_node(nodes[n], false);
-                assert(nodes[n]->get_total_entries() == 0);
-                free_node(nodes[n]);
-            } else {
-                unlock_node(nodes[n], true);
-            }
-        }
-
+        ret.nmerged = minfo.size() - ndeleted_nodes;
         return ret;
-    }
-
-    /*
-     * This function recursively merges with next node in-place. Each iteration accommodates
-     * what is left over from previous node and move over its right keys to next node (by
-     * recursing). In case current node has more room, pull in until we are full.
-     *
-     */
-    void do_merge_nodes(const std::vector< AbstractNode<K, V> * > &nodes, uint32_t node_start_ind, int prev_size,
-                        uint32_t max_fill_size) {
-        assert(prev_size >= 0);
-
-        if (node_start_ind == nodes.size()) {
-            return;
-        }
-
-        AbstractNode<K, V> *n = nodes[node_start_ind];
-
-        // We can only fill upto max fill size and out of which prev_size has to be accommodated.
-        int avail_size = max_fill_size - n->get_occupied_size(m_btree_cfg) - prev_size;
-
-        // If we have still more room, just pull in most from next nodes as much as possible.
-        uint32_t next_node_ind = node_start_ind + 1;
-        while ((avail_size > 0) && (next_node_ind < nodes.size())) {
-            AbstractNode<K, V> *nextn = nodes[next_node_ind++];
-            uint32_t pull_size = min(avail_size, (int) nextn->get_occupied_size(m_btree_cfg));
-            n->move_in_from_right_by_size(*nextn, pull_size);
-
-            avail_size -= pull_size;
-        }
-
-        uint32_t arrear_size = (avail_size < 0) ? (avail_size * (-1)) : 0;
-        do_merge_nodes(nodes, node_start_ind + 1, arrear_size, max_fill_size);
-
-        // Now we should have room to write all prev nodes arrear entries.
-        if (prev_size != 0) {
-            assert(node_start_ind != 0);
-            AbstractNode<K, V> *prevn = nodes[node_start_ind - 1];
-            prevn->move_out_to_right_by_size(*n, prev_size);
-        }
     }
 
     AbstractNode<K, V> *alloc_leaf_node() {

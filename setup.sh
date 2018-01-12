@@ -1,11 +1,12 @@
 CMAKE_VERSION=3.9.6
 BOOST_VERSION=1.65.1
-FOLLY_VERSION=2017.12.04.00
+FOLLY_VERSION=2017.12.25.00
 FARMHASH_COMMIT=2f0e005b81e296fa6963e395626137cf729b710c
 BENCHMARK_VERSION=1.3.0
 LIBGFLAGS_VERSION=2.2.0
 GLOG_RELEASE=0.3.5
-GPERF_RELEASE=2.6.2
+GPERF_RELEASE=2.6.3
+GTEST_VERSION=1.8.0
 
 # Determine the OS type
 rel=`uname -a | awk '{print $1}'`
@@ -31,9 +32,9 @@ function library() {
     name=$1 # - library name; becomes directory prefix
     version=$2 # - library version or commit or tag; becomes directory suffix
     url=$3 # - URL; must have the name and version already expanded
-    branch=${4:-master} #- parameter for git download method
+    dirname=${4:-$name-$version} # - output directory name
+    branch=${5:-master} #- parameter for git download method
 
-    dirname=$name-$version
     if [ ! -e $dirname -o ! -e $dirname/build_success ]; then
         rm -rf $dirname
         echo "Fetching $dirname"
@@ -66,6 +67,35 @@ function library() {
     fi
 }
 
+function is_installed_by_brew() {
+    name=$1
+    version=$2
+
+    fn_ret=""
+    installed_pkgs=`brew list --versions | grep $name 2>/dev/null`
+    if [ $? -eq 0 ] ; then
+        for v in `echo $installed_pkgs`; do
+            if [ $v == $version ] ; then
+                fn_ret=$v
+                break
+            fi
+        done
+    fi
+}
+
+function install_thru_brew() {
+    name=$1
+    version=${2-$name}
+
+    is_installed_by_brew $name $version
+    if [ -z "$fn_ret" ] ; then
+        brew install $name
+        brew link $name
+    else
+        echo "$name $version is already installed"
+    fi
+}
+
 ##################### CMake #########################
 install_cmake() {
 	ver=`cmake --version 2>/dev/null | grep version | awk '{print $3}'`
@@ -89,10 +119,10 @@ install_cmake() {
 
 ##################### BOOST #########################
 boost() {
-	cp -r $deps_build/boost $deps_prefix/lib/
+	cp -r boost $deps_prefix/include/
 }
 boost_ver=`echo ${BOOST_VERSION} | sed 's/\./_/g'`
-library boost ${BOOST_VERSION} https://dl.bintray.com/boostorg/release/${BOOST_VERSION}/source/boost_${boost_ver}.tar.gz
+library boost ${BOOST_VERSION} https://dl.bintray.com/boostorg/release/${BOOST_VERSION}/source/boost_${boost_ver}.tar.gz boost_${boost_ver}
 
 ##################### GFLAGS #########################
 gflags() {
@@ -146,7 +176,7 @@ folly() {
 	make install
 }
 if [ $os_type = "mac" ] ; then
-	brew install folly
+    install_thru_brew folly ${FOLLY_VERSION}
 else
 	library folly ${FOLLY_VERSION} https://github.com/facebook/folly/archive/v${FOLLY_VERSION}.tar.gz
 fi
@@ -170,14 +200,23 @@ benchmark() {
 	make -j$JOBS
 	make install
 }
-library benchmark $BENCHMARK_VERSION https://github.com/google/benchmark/archive/v1.3.0.tar.gz
+library benchmark $BENCHMARK_VERSION https://github.com/google/benchmark/archive/v${BENCHMARK_VERSION}.tar.gz
 
 ##################### GPERF #########################
 gperf() {
 if [ $os_type = "mac" ] ; then
-	brew install gperftools
+	install_thru_brew gperftools ${GPERF_RELEASE}
 else
 	apt-get install libgoogle-perftools-dev
 fi
 }
 gperf
+
+##################### Google Test #########################
+gtest() {
+    cd googletest
+    cmake -DCMAKE_INSTALL_PREFIX:PATH=$deps_prefix -DBUILD_SHARED_LIBS=ON .
+    make
+    make install
+}
+library gtest $GTEST_VERSION https://github.com/google/googletest/archive/release-${GTEST_VERSION}.tar.gz googletest-release-${GTEST_VERSION}

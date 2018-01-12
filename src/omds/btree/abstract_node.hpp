@@ -90,19 +90,26 @@ public:
 #endif
 
     /* Provides the occupied data size within the node */
-    virtual uint16_t get_available_size() const = 0;
+    virtual uint32_t get_available_size(const BtreeConfig &cfg) const = 0;
 
     ///////////// Move and Delete related operations on a node //////////////
     virtual bool is_split_needed(const BtreeConfig &cfg, const BtreeKey &k, const BtreeValue &v,
                                  int *out_ind_hint) const = 0;
-    virtual void move_out_to_right_by_entries(AbstractNode &other_node, uint16_t nentries) = 0;
-    virtual void move_out_to_right_by_size(AbstractNode &other_node, uint32_t size) = 0;
-    virtual void move_in_from_right_by_entries(AbstractNode &other_node, uint16_t nentries) = 0;
-    virtual void move_in_from_right_by_size(AbstractNode &other_node, uint32_t size) = 0;
-    virtual void get_adjacent_indicies(uint32_t cur_ind, vector< int > &indices_list, uint32_t max_indices) const = 0;
+
+    /* Following methods need to make best effort to move from other node upto provided entries or size. It should
+     * return how much it was able to move actually (either entries or size)
+     */
+    virtual uint32_t move_out_to_right_by_entries(const BtreeConfig &cfg, AbstractNode &other_node,
+                                                  uint32_t nentries) = 0;
+    virtual uint32_t move_out_to_right_by_size(const BtreeConfig &cfg, AbstractNode &other_node,
+                                               uint32_t size) = 0;
+    virtual uint32_t move_in_from_right_by_entries(const BtreeConfig &cfg, AbstractNode &other_node,
+                                                   uint32_t nentries) = 0;
+    virtual uint32_t move_in_from_right_by_size(const BtreeConfig &cfg, AbstractNode &other_node,
+                                                uint32_t size) = 0;
 
 protected:
-    virtual uint16_t get_nth_obj_len(int ind) const = 0;
+    virtual uint32_t get_nth_obj_size(int ind) const = 0;
     virtual void get_nth_key(int ind, BtreeKey *outkey, bool copy) const = 0;
     virtual void get_nth_value(int ind, BtreeValue *outval, bool copy) const = 0;
 
@@ -218,17 +225,6 @@ public:
         return (get_max_entries(cfg) - get_total_entries());
     }
 
-//#define MINIMAL_THRESHOLD_PCT    0.40   // Should be more than 40% of space
-#define MINIMAL_THRESHOLD_PCT    0.10   // Should be more than 40% of space
-
-    bool is_minimal(const BtreeConfig &cfg) {
-        return is_minimal(available_slots(cfg));
-    }
-
-    bool is_minimal(uint32_t availSlots) {
-        return (availSlots >= ((double) get_total_entries() * (1 - MINIMAL_THRESHOLD_PCT)));
-    }
-
     void set_node_id(bnodeid_t id) {
         get_persistent_header()->node_id = id;
     }
@@ -290,20 +286,28 @@ public:
         return (m_trans_header.refcount.get());
     }
 
-    uint8_t *get_node_area() {
+    uint8_t *get_node_area_mutable() {
         return m_node_area;
     }
 
-    const uint8_t *get_node_area_const() const {
+    const uint8_t *get_node_area() const {
         return m_node_area;
     }
 
-    uint16_t get_node_area_size(const BtreeConfig &cfg) const {
-        return (uint16_t) (cfg.get_node_size() - (get_node_area_const() - (uint8_t *)this));
+    uint32_t get_node_area_size(const BtreeConfig &cfg) const {
+        return (uint32_t) (cfg.get_node_size() - (get_node_area() - (uint8_t *)this));
     }
 
-    uint16_t get_occupied_size(const BtreeConfig &cfg) const {
-        return (uint16_t)(get_node_area_size(cfg) - get_available_size());
+    uint32_t get_occupied_size(const BtreeConfig &cfg) const {
+        return (get_node_area_size(cfg) - get_available_size(cfg));
+    }
+
+    uint32_t get_suggested_min_size(const BtreeConfig &cfg) const {
+        return cfg.get_max_key_size();
+    }
+
+    bool is_merge_needed(const BtreeConfig &cfg) const {
+        return (get_occupied_size(cfg) < get_suggested_min_size(cfg));
     }
 
     bnodeid_t get_next_bnode() const {
@@ -438,6 +442,31 @@ public:
 
         BNodeptr bnp(get_edge_id());
         return (bnp.is_valid_ptr());
+    }
+
+    void get_adjacent_indicies(uint32_t cur_ind, vector< int > &indices_list, uint32_t max_indices) const {
+        int i = 0;
+        int start_ind;
+        int end_ind;
+        uint32_t nentries = this->get_total_entries();
+
+        start_ind = cur_ind - ((max_indices / 2) - 1 + (max_indices % 2));
+        end_ind = cur_ind + (max_indices / 2);
+        if (start_ind < 0) {
+            end_ind -= start_ind;
+            start_ind = 0;
+        }
+
+        for (i = start_ind; (i <= end_ind) && (indices_list.size() < max_indices); i++) {
+            if (i == nentries) {
+                if (this->has_valid_edge()) {
+                    indices_list.push_back(i);
+                }
+                break;
+            } else {
+                indices_list.push_back(i);
+            }
+        }
     }
 
 protected:

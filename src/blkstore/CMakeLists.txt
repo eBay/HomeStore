@@ -7,6 +7,7 @@ include_directories(..)
 include_directories(../device)
 include_directories(../cache)
 include_directories(../../deps_prefix/${OS_TYPE}/include)
+include_directories(/usr/local/include/)
 link_directories(../../deps_prefix/${OS_TYPE}/lib)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ../../target/)

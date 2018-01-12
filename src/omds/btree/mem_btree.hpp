@@ -20,6 +20,7 @@
 #include "omds/memory/sys_allocator.hpp"
 #include "omds/utility/atomic_counter.hpp"
 #include "omds/btree/simple_node.hpp"
+#include "omds/btree/varlen_node.hpp"
 
 namespace omds { namespace btree {
 template< typename K, typename V >
@@ -44,12 +45,38 @@ protected:
         AbstractNode<K, V> *n;
         uint8_t *mem = m_allocators.allocate(this->get_config()->get_node_size());
 
-        if (btype == BTREE_NODETYPE_SIMPLE) {
+        switch (btype) {
+        case BTREE_NODETYPE_SIMPLE: {
             // Initialize both perpetual and transient portion of the node
-            SimpleNode <K, V> *sn = new (mem) SimpleNode< K, V >((bnodeid_t) mem, true, true);
-            n = (AbstractNode<K, V> *) sn;
-        } else {
+            auto sn = new(mem) SimpleNode< K, V >((bnodeid_t) mem, true, true);
+            n = (AbstractNode< K, V > *) sn;
+            break;
+        }
+
+        case BTREE_NODETYPE_VAR_KEY: {
+            auto vn = new(mem)
+                    VarObjectNode< K, V, BTREE_NODETYPE_VAR_KEY >(*this->get_config(), (bnodeid_t) mem, true, true);
+            n = (AbstractNode< K, V > *) vn;
+            break;
+        }
+
+        case BTREE_NODETYPE_VAR_VALUE: {
+            auto vn = new(mem)
+                    VarObjectNode< K, V, BTREE_NODETYPE_VAR_VALUE >(*this->get_config(), (bnodeid_t) mem, true, true);
+            n = (AbstractNode< K, V > *) vn;
+            break;
+        }
+
+        case BTREE_NODETYPE_VAR_OBJECT: {
+            auto vn = new(mem)
+                    VarObjectNode< K, V, BTREE_NODETYPE_VAR_OBJECT >(*this->get_config(), (bnodeid_t) mem, true, true);
+            n = (AbstractNode< K, V > *) vn;
+            break;
+        }
+
+        default:
             assert(0);
+            return nullptr;
         }
 
         // We are referencing twice, one for alloc and other for read - so that mem is not freed upon release
