@@ -2,13 +2,15 @@ cmake_minimum_required(VERSION 3.7)
 project(omds)
 
 set(CMAKE_CXX_STANDARD 14)
-
-include_directories(..)
-include_directories(../../deps_prefix/${OS_TYPE}/include)
-link_directories(../../deps_prefix/${OS_TYPE}/lib)
-
 #set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ../../target/)
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ../../target/${CMAKE_BUILD_TYPE}/${OS_TYPE})
+#set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ../../target/${CMAKE_BUILD_TYPE}/${OS_TYPE})
+#set(LIB_ROOT_DIR ${CMAKE_SOURCE_DIR}/deps_prefix/${OS_TYPE}/lib)
+#set(INCLUDE_ROOT_DIR ${CMAKE_SOURCE_DIR}/deps_prefix/${OS_TYPE}/include)
+
+include(${CMAKE_SOURCE_DIR}/CMakeScripts/utils.cmake)
+include_directories(..)
+#include_directories(${INCLUDE_ROOT_DIR})
+#link_directories(${LIB_ROOT_DIR})
 
 set(BTREE_SOURCE_FILES
         array/flexarray.hpp
@@ -37,13 +39,15 @@ set(TEST_BTREE_CRUD_SOURCE_FILES
         ${BTREE_SOURCE_FILES}
         tests/test_btree_crud.cpp)
 add_executable(test_btree_crud ${TEST_BTREE_CRUD_SOURCE_FILES})
+#AddStaticLibraries(test_btree_crud ${LIB_ROOT_DIR}
+#                                    gtest)
 target_link_libraries(test_btree_crud gtest)
 
 set(TEST_HASH_SOURCE_FILES
         hash/intrusive_hashset.hpp
         tests/test_hashset.cpp)
 add_executable(test_hash ${TEST_HASH_SOURCE_FILES})
-target_link_libraries(test_hash folly glog tcmalloc farmhash benchmark)
+target_link_libraries(test_hash folly tcmalloc farmhash benchmark)
 
 set(TEST_COMPOSITE_SOURCE_FILES
         memory/mem_allocator.hpp

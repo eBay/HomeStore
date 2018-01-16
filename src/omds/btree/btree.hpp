@@ -13,6 +13,7 @@
 #include <pthread.h>
 #include <vector>
 #include <atomic>
+#include <array>
 #include "omds/thread/lock.hpp"
 #include "btree_internal.h"
 #include "abstract_node.hpp"
@@ -28,7 +29,9 @@ namespace omds { namespace btree {
 #endif
 
 
-static __thread int btree_locked_count;
+#ifndef NDEBUG
+#define MAX_BTREE_DEPTH   100
+#endif
 
 template<typename K, typename V>
 class Btree
@@ -127,6 +130,11 @@ private:
     BtreeConfig m_btree_cfg;
     bool m_inited;
 
+#ifndef NDEBUG
+    static thread_local int locked_count;
+    static thread_local std::array<AbstractNode<K, V> *, MAX_BTREE_DEPTH> locked_nodes;
+#endif
+
     ////////////////// Implementation /////////////////////////
 public:
     Btree() : m_inited(false) {}
@@ -135,8 +143,10 @@ public:
         omds::thread::locktype acq_lock = omds::thread::LOCKTYPE_READ;
         int ind;
 
-        assert(btree_locked_count == 0);
+#ifndef NDEBUG
+        init_lock_debug();
         //assert(OmDB::getGlobalRefCount() == 0);
+#endif
 
         m_btree_lock.read_lock();
 
@@ -173,13 +183,10 @@ public:
 
         m_btree_lock.unlock();
 
-#ifdef DEBUG
-        if (btree_locked_count != 0) {
-            cout << "Locked count for insert = " << btree_locked_count << endl;
-        }
-        assert(btree_locked_count == 0);
-#endif
+#ifndef NDEBUG
+        check_lock_debug();
         //assert(OmDB::getGlobalRefCount() == 0);
+#endif
     }
 
     bool get(const BtreeKey &key, BtreeValue *outval) {
@@ -192,7 +199,9 @@ public:
 
     bool get_any(const BtreeSearchRange &range, BtreeKey *outkey, BtreeValue *outval) {
         bool is_found;
-        assert(btree_locked_count == 0);
+#ifndef NDEBUG
+        init_lock_debug();
+#endif
         //assert(OmDB::getGlobalRefCount() == 0);
 
         m_btree_lock.read_lock();
@@ -203,8 +212,11 @@ public:
         m_btree_lock.unlock();
 
         // TODO: Assert if key returned from do_get is same as key requested, incase of perfect match
-        assert(btree_locked_count == 0);
+
+#ifndef NDEBUG
+        check_lock_debug();
         //assert(OmDB::getGlobalRefCount() == 0);
+#endif
         return is_found;
     }
 
@@ -217,7 +229,10 @@ public:
         omds::thread::locktype acq_lock = omds::thread::locktype::LOCKTYPE_READ;
         bool is_found = false;
 
-        assert(btree_locked_count == 0);
+#ifndef NDEBUG
+        init_lock_debug();
+#endif
+
 #ifdef REFCOUNT_DEBUG
         assert(OmDBGlobals::getGlobalRefCount() == 0);
 #endif
@@ -267,7 +282,10 @@ public:
         }
 
         m_btree_lock.unlock();
-        assert(btree_locked_count == 0);
+#ifndef NDEBUG
+        check_lock_debug();
+#endif
+
 #ifdef REFCOUNT_DEBUG
         assert(OmDBGlobals::getGlobalRefCount() == 0);
 #endif
@@ -275,7 +293,7 @@ public:
     }
 
     bool remove(const BtreeKey &key, BtreeValue *outval) {
-        remove_any(BtreeSearchRange(key), nullptr, outval);
+        return remove_any(BtreeSearchRange(key), nullptr, outval);
     }
 
 private:
@@ -569,7 +587,7 @@ private:
         lock_node(child_node, child_cur_lock);
 
         // Check if child node is minimal.
-        if (child_node->is_merge_neeeded(m_btree_cfg)) {
+        if (child_node->is_merge_needed(m_btree_cfg)) {
             // If we are unable to upgrade the node, ask the caller to retry.
             if (upgrade_node(my_node, child_node, curlock, child_cur_lock) == false) {
                 return BTREE_RETRY;
@@ -899,23 +917,25 @@ private:
         for (auto i = 0; i < indices_list.size(); i++) {
             parent_node->get(indices_list[i], &child_ptr, false /* copy */);
 
-            minfo[i].node = read_node(child_ptr.get_node_id());
-            minfo[i].freed = false;
-            minfo[i].modified = false;
-            minfo[i].parent_index = indices_list[i];
-            lock_node(minfo[i].node, locktype::LOCKTYPE_WRITE);
+            merge_info m;
+            m.node = read_node(child_ptr.get_node_id());
+            m.freed = false;
+            m.modified = false;
+            m.parent_index = indices_list[i];
+            minfo.push_back(m);
+            lock_node(m.node, locktype::LOCKTYPE_WRITE);
         }
 
         // Rebalance entries for each of the node and mark any node to be removed, if empty.
         auto i = 0U; auto j = 1U;
         auto balanced_size = m_btree_cfg.get_ideal_fill_size();
         while ((i < indices_list.size() - 1) && (j < indices_list.size())) {
-            minfo[j].parent_ind -= ndeleted_nodes; // Adjust the parent index for deleted nodes
+            minfo[j].parent_index -= ndeleted_nodes; // Adjust the parent index for deleted nodes
 
             if (minfo[i].node->get_occupied_size(m_btree_cfg) < balanced_size) {
                 // We have room to pull some from next node
                 uint32_t pull_size = balanced_size - minfo[i].node->get_occupied_size(m_btree_cfg);
-                if (minfo[i].node->move_in_from_right_by_size(*minfo[j].node, pull_size)) {
+                if (minfo[i].node->move_in_from_right_by_size(m_btree_cfg, *minfo[j].node, pull_size)) {
                     minfo[i].modified = true;
                     ret.merged = true;
                 }
@@ -924,7 +944,7 @@ private:
                     // We have removed all the entries from the next node, remove the entry in parent and move on to
                     // the next node.
                     minfo[j].freed = true;
-                    parent_node->remove(minfo[j].parent_ind);
+                    parent_node->remove(minfo[j].parent_index);
                     minfo[i].node->set_next_bnode(minfo[j].node->get_next_bnode());
                     ndeleted_nodes++; j++;
                     continue;
@@ -933,12 +953,12 @@ private:
                 // We reached maximum amount which can be pulled in, if we have indeed modified, lets get the last
                 // key and put in the entry into parent node
                 BNodeptr nptr(minfo[i].node->get_node_id());
-                if (minfo[i].parent_ind == parent_node->get_total_entries()) {
-                    parent_node->update(minfo[i].parent_ind, nptr);
+                if (minfo[i].parent_index == parent_node->get_total_entries()) {
+                    parent_node->update(minfo[i].parent_index, nptr);
                 } else {
                     K last_key;
                     minfo[i].node->get_last_key(&last_key);
-                    parent_node->update(minfo[i].parent_ind, last_key, nptr);
+                    parent_node->update(minfo[i].parent_index, last_key, nptr);
                 }
             }
 
@@ -952,7 +972,7 @@ private:
             }
 
             i = j++;
-            minfo[i].parent_ind -= ndeleted_nodes; // Adjust the parent index for deleted nodes (i.e. removed entries)
+            minfo[i].parent_index -= ndeleted_nodes; // Adjust the parent index for deleted nodes (i.e. removed entries)
         }
 
         // Its time to write the parent node and loop again to write all modified nodes and free freed nodes
@@ -962,7 +982,7 @@ private:
         if (minfo[0].modified) write_node(minfo[0].node);
         for (auto n = 1; n < minfo.size(); n++) {
             if (minfo[n].freed) {
-                if (minfo[n]->any_upgrade_waiters()) {
+                if (minfo[n].node->any_upgrade_waiters()) {
                     minfo[n].node->set_valid_node(false);
                 } else {
                     free_node(minfo[n].node);
@@ -973,9 +993,14 @@ private:
         }
 
         // Loop again in reverse order to unlock the nodes. Freed nodes need not be unlocked
-        for (auto n = minfo.size()-1; n >= 0; n--) {
+        for (int n = minfo.size()-1; n >= 0; n--) {
             if (!minfo[n].freed) {
                 unlock_node(minfo[n].node, true);
+#ifndef DEBUG
+            } else {
+                // We need to explicitly removed the order, other it will cause false assert
+                dec_check_lock_debug(minfo[n].node);
+#endif
             }
         }
 
@@ -1010,16 +1035,58 @@ private:
 
     void lock_node(AbstractNode<K, V> *node, omds::thread::locktype type) {
         node->lock(type);
-        btree_locked_count++;
+#ifndef NDEBUG
+        inc_lock_debug(node);
+#endif
     }
 
     void unlock_node(AbstractNode<K, V> *node, bool release) {
         node->unlock();
-        btree_locked_count--;
+#ifndef NDEBUG
+        dec_check_lock_debug(node);
+#endif
         if (release) {
             release_node(node);
         }
     }
+
+#ifndef NDEBUG
+    static void init_lock_debug() {
+        locked_count = 0;
+    }
+
+    static void check_lock_debug() {
+        if (locked_count != 0) {
+            std::cout << "There are " << locked_count << " on the exit of API";
+            assert(0);
+        }
+    }
+
+    static void inc_lock_debug(AbstractNode<K, V> *node) {
+        locked_nodes[locked_count++] = node;
+//        std::cout << "lock_node: node = " << (void *)node << " Locked count = " << locked_count << std::endl;
+    }
+
+    static void dec_check_lock_debug(AbstractNode<K, V> *node) {
+        // std::cout << "unlock_node: node = " << (void *)node << " Locked count = " << locked_count << std::endl;
+        if (node == locked_nodes[locked_count - 1]) {
+            locked_count--;
+        } else if ((locked_count > 1) && (node == locked_nodes[locked_count-2])) {
+            locked_nodes[locked_count-2] = locked_nodes[locked_count-1];
+            locked_count--;
+        } else {
+            if (locked_count > 1) {
+                std::cout << "unlock_node: node = " << (void *) node << " Locked count = " << locked_count
+                          << " Expecting nodes = " << (void *) locked_nodes[locked_count - 1] << " or "
+                          << (void *) locked_nodes[locked_count - 2] << std::endl;
+            } else {
+                std::cout << "unlock_node: node = " << (void *) node << " Locked count = " << locked_count
+                          << " Expecting node = " << (void *) locked_nodes[locked_count - 1] << std::endl;
+            }
+            assert(0);
+        }
+    }
+#endif
 
 protected:
     void init_btree(const BtreeConfig &cfg) {
@@ -1046,9 +1113,6 @@ protected:
         m_root_node = INVALID_BNODEID;
 
         m_inited = true;
-#ifdef DEBUG
-        btree_locked_count = 0;
-#endif
     }
 
     void create_root_node() {
@@ -1077,6 +1141,14 @@ protected:
     }
 #endif
 };
+
+#ifndef NDEBUG
+template <typename K, typename V>
+thread_local int Btree<K, V>::locked_count = 0;
+
+template <typename K, typename V>
+thread_local std::array<AbstractNode<K, V> *, MAX_BTREE_DEPTH> Btree<K, V>::locked_nodes = {{}};
+#endif
 
 }}
 #endif

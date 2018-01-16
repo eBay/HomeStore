@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 CMAKE_VERSION=3.9.6
 BOOST_VERSION=1.65.1
 FOLLY_VERSION=2017.12.25.00
@@ -128,7 +129,8 @@ library boost ${BOOST_VERSION} https://dl.bintray.com/boostorg/release/${BOOST_V
 gflags() {
     mkdir cmake.build
     cd cmake.build
-    cmake  -DCMAKE_INSTALL_PREFIX:PATH=$deps_prefix -DBUILD_SHARED_LIBS=1 ..
+    #cmake  -DCMAKE_INSTALL_PREFIX:PATH=$deps_prefix -DBUILD_SHARED_LIBS=1 ..
+    cmake -DBUILD_SHARED_LIBS=1 ..
     make -j$JOBS install
 };
 library gflags ${LIBGFLAGS_VERSION} https://github.com/gflags/gflags/archive/v${LIBGFLAGS_VERSION}.tar.gz
@@ -141,7 +143,8 @@ glog () {
 
     aclocal
     automake --add-missing
-    ./configure --prefix=$deps_prefix
+    #./configure --prefix=$deps_prefix
+    ./configure
     make -j$JOBS install
 }
 library glog ${GLOG_RELEASE} https://github.com/google/glog/archive/v${GLOG_RELEASE}.tar.gz
@@ -170,7 +173,8 @@ folly() {
 
 	cd folly/
 	autoreconf -ivf
-	./configure --prefix=$deps_prefix
+	#./configure --prefix=$deps_prefix
+	./configure
 	make -j$JOBS
 	make check
 	make install
@@ -185,7 +189,8 @@ fi
 farmhash () {
     aclocal
     automake --add-missing
-    ./configure --prefix=$deps_prefix CXXFLAGS="-g -mavx -maes -O3"
+    #./configure --prefix=$deps_prefix CXXFLAGS="-g -mavx -maes -O3"
+    ./configure CXXFLAGS="-g -mavx -maes -O3"
     make -j$JOBS all
     make install
 }
@@ -215,7 +220,8 @@ gperf
 ##################### Google Test #########################
 gtest() {
     cd googletest
-    cmake -DCMAKE_INSTALL_PREFIX:PATH=$deps_prefix -DBUILD_SHARED_LIBS=ON .
+    #cmake -DCMAKE_INSTALL_PREFIX:PATH=$deps_prefix -DBUILD_SHARED_LIBS=ON .
+    cmake -DBUILD_SHARED_LIBS=ON .
     make
     make install
 }

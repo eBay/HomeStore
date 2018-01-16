@@ -190,7 +190,7 @@ public:
     }
 
     bool any_upgrade_waiters() {
-        return (get_transient_header()->upgraders.testz() != 0);
+        return (!get_transient_header()->upgraders.testz());
     }
 
     uint32_t get_total_entries() const {
@@ -485,12 +485,13 @@ protected:
 
             int x = compare_nth_key(*range.get_start_key(), mid);
             if (x == 0) {
+                ret.found = true;
                 if (range.is_simple_search()) {
                     ret.end_of_search_index = mid;
                     return ret;
                 }
 
-                 if (!range.is_left_leaning()) {
+                if (!range.is_left_leaning()) {
                     ret.end_of_search_index = mid;
                     return ret;
                 }

@@ -212,8 +212,8 @@ public:
     virtual uint32_t get_blob_size() const = 0;
     virtual void set_blob_size(uint32_t size) = 0;
 
-#ifdef DEBUG
-    virtual void print() = 0;
+#ifndef NDEBUG
+    virtual void print() const = 0;
 #endif
 };
 
@@ -280,7 +280,7 @@ public:
         return (*this);
     }
 
-    void print() const {
+    void print() const override {
         cout << m_id.m_x;
     }
 };
@@ -321,7 +321,7 @@ public:
         return (*this);
     }
 
-    void print() const {
+    void print() const override {
         cout << "<Empty>";
     }
 };
