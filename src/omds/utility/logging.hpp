@@ -6,7 +6,22 @@
 #define OMSTORE_LOGGING_HPP
 
 #include <glog/logging.h>
+#include <boost/preprocessor.hpp>
 
-#define VMODULE_REGISTER_MODULE_SET(setname, module) VLOG_REG_MODULE(setname##module);
+#define REG_VMOD(d1, d2, m)           VLOG_REG_MODULE(m);
+#define REGISTER_VMODULES(...)        BOOST_PP_SEQ_FOR_EACH(REG_VMOD, , BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__))
+
+#define INIT_VMOD(d1, d2, m)          VLOG_DECL_MODULE(m);
+#define INIT_VMODULES(...)            BOOST_PP_SEQ_FOR_EACH(INIT_VMOD, ,BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__))
+
+#define START_VMOD(d1, d2, m)        \
+        if (google::GetVLOGLevel(BOOST_PP_STRINGIZE(m)) == -1) { \
+            google::SetVLOGLevel(BOOST_PP_STRINGIZE(m), getenv("GLOG_v") ? atoi(getenv("GLOG_v")) : 0); \
+        }
+#define START_VMODULES(...)           BOOST_PP_SEQ_FOR_EACH(START_VMOD, ,BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__))
+
+#define InitOmdsLogging(progname, ...)  \
+            google::InitGoogleLogging(progname); \
+            START_VMODULES(__VA_ARGS__)
 
 #endif //OMSTORE_LOGGING_HPP

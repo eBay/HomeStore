@@ -21,6 +21,7 @@ set(BTREE_SOURCE_FILES
         btree/mem_btree.hpp
         btree/simple_node.hpp
         btree/varlen_node.hpp
+        btree/btree_stats.hpp
         hash/intrusive_hashset.hpp
         memory/generic_freelist_allocator.hpp
         memory/chunk_allocator.hpp
@@ -29,6 +30,7 @@ set(BTREE_SOURCE_FILES
         memory/mem_allocator.hpp
         memory/tagged_ptr.hpp
         utility/atomic_counter.hpp
+        utility/stats.hpp
         thread/lock.hpp)
 set(TEST_BTREE_SOURCE_FILES
         ${BTREE_SOURCE_FILES}
@@ -41,7 +43,7 @@ set(TEST_BTREE_CRUD_SOURCE_FILES
 add_executable(test_btree_crud ${TEST_BTREE_CRUD_SOURCE_FILES})
 #AddStaticLibraries(test_btree_crud ${LIB_ROOT_DIR}
 #                                    gtest)
-target_link_libraries(test_btree_crud gtest)
+target_link_libraries(test_btree_crud gtest glog)
 
 set(TEST_HASH_SOURCE_FILES
         hash/intrusive_hashset.hpp

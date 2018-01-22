@@ -81,10 +81,10 @@ index 3f4c4a3..b151770 100644
  
 +#if defined(__GNUC__)
 +#define VLOG_REG_MODULE(custom_module) VLOG_REG_MODULE_INTERNAL(custom_module)
-+#define VLOG_REG_MODULE_INTERNAL(custom_module) namespace google {static google::int32* vlocal__##custom_module = &google::kLogSiteUninitialized;}
++#define VLOG_REG_MODULE_INTERNAL(custom_module) namespace google {extern google::int32* vlocal__##custom_module;}
 +
 +#define VLOG_DECL_MODULE(custom_module) VLOG_DECL_MODULE_INTERNAL(custom_module)
-+#define VLOG_DECL_MODULE_INTERNAL(custom_module) namespace google {extern google::int32* vlocal__##custom_module;}
++#define VLOG_DECL_MODULE_INTERNAL(custom_module) namespace google {google::int32* vlocal__##custom_module = &google::kLogSiteUninitialized;}
 +
 +#define CVLOG_IS_ON_INTERNAL(custom_module, verboselevel)                                \
 +  __extension__  \

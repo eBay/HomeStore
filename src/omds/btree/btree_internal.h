@@ -59,6 +59,11 @@ struct uint48_t {
 
 namespace omds { namespace btree {
 
+#define BTREE_VMODULE_SET (     \
+        VMODULE_ADD(bt_insert), \
+        VMODULE_ADD(bt_delete), \
+    )
+
 typedef uint48_t bnodeid_t;
 
 typedef enum {

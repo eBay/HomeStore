@@ -16,21 +16,40 @@
 #include <array>
 #include "omds/thread/lock.hpp"
 #include "btree_internal.h"
+#include "btree_stats.hpp"
 #include "abstract_node.hpp"
+#include "omds/utility/logging.hpp"
 
 using namespace std;
 using namespace omds::thread;
+
+#ifndef NDEBUG
+#define MAX_BTREE_DEPTH   100
+#endif
+
+#ifndef BTREE_VMOD_NAME
+#define BTREE_VMOD_NAME    btree
+#endif
+
+#define VMOD_BTREE_INSERT    BOOST_PP_CAT(BOOST_PP_CAT(BTREE_VMOD_NAME, _), btinsert)
+#define VMOD_BTREE_DELETE    BOOST_PP_CAT(BOOST_PP_CAT(BTREE_VMOD_NAME, _), btdelete)
+#define VMOD_BTREE_SPLIT     BOOST_PP_CAT(BOOST_PP_CAT(BTREE_VMOD_NAME, _), btsplit)
+#define VMOD_BTREE_MERGE     BOOST_PP_CAT(BOOST_PP_CAT(BTREE_VMOD_NAME, _), btmerge)
+
+#define BTREE_VMODULES       \
+        VMOD_BTREE_INSERT,   \
+        VMOD_BTREE_DELETE,   \
+        VMOD_BTREE_SPLIT,    \
+        VMOD_BTREE_MERGE
+
+REGISTER_VMODULES(BTREE_VMODULES);
+#undef BTREE_VMOD_NAME
 
 namespace omds { namespace btree {
 
 #if 0
 #define container_of(ptr, type, member) ({                      \
         (type *)( (char *)ptr - offsetof(type,member) );})
-#endif
-
-
-#ifndef NDEBUG
-#define MAX_BTREE_DEPTH   100
 #endif
 
 template<typename K, typename V>
@@ -129,6 +148,7 @@ private:
     uint32_t m_max_nodes;
     BtreeConfig m_btree_cfg;
     bool m_inited;
+    BtreeStats m_stats;
 
 #ifndef NDEBUG
     static thread_local int locked_count;
@@ -137,7 +157,8 @@ private:
 
     ////////////////// Implementation /////////////////////////
 public:
-    Btree() : m_inited(false) {}
+    Btree() :
+            m_inited(false) {}
 
     void put(const BtreeKey &k, const BtreeValue &v, PutType put_type) {
         omds::thread::locktype acq_lock = omds::thread::LOCKTYPE_READ;
@@ -296,6 +317,10 @@ public:
         return remove_any(BtreeSearchRange(key), nullptr, outval);
     }
 
+    const BtreeStats &get_stats() const {
+        return m_stats;
+    }
+
 private:
     bool do_get(AbstractNode<K, V> *my_node, const BtreeSearchRange &range, BtreeKey *outkey, BtreeValue *outval) {
         if (my_node->is_leaf()) {
@@ -380,6 +405,7 @@ private:
                 // cut when the node is invalidated. So no one would have entered here
                 // after the chain is cut.
                 free_node(my_node);
+                m_stats.dec_count(my_node->is_leaf() ? BTREE_STATS_LEAF_NODE_COUNT : BTREE_STATS_INT_NODE_COUNT);
             }
             ret = false;
             goto done;
@@ -497,6 +523,7 @@ private:
             bool ret = my_node->put(k, v, put_type);
             if (ret) {
                 write_node(my_node);
+                m_stats.inc_count(BTREE_STATS_OBJ_COUNT);
             }
             unlock_node(my_node, true);
 
@@ -545,6 +572,7 @@ private:
 
             // After split, parentNode would have split, retry search and walk down.
             unlock_node(child_node, true);
+            m_stats.inc_count(BTREE_STATS_SPLIT_COUNT);
             goto retry;
         }
 
@@ -563,6 +591,12 @@ private:
             bool is_found = my_node->remove_one(range, outkey, outval);
             if (is_found) {
                 write_node(my_node);
+                m_stats.dec_count(BTREE_STATS_OBJ_COUNT);
+            } else {
+#ifndef NDEBUG
+                my_node->print();
+                assert(0);
+#endif
             }
 
             unlock_node(my_node, true);
@@ -611,6 +645,7 @@ private:
                 if (result.merged) {
                     // Retry only if we merge them.
                     release_node(child_node);
+                    m_stats.inc_count(BTREE_STATS_MERGE_COUNT);
                     goto retry;
                 } else {
                     lock_node(child_node, child_cur_lock);
@@ -675,10 +710,11 @@ private:
         // Elevate the edge child as root.
         unlock_node(root, false);
         free_node(root);
+        m_stats.dec_count(BTREE_STATS_INT_NODE_COUNT);
         m_root_node = child_node->get_node_id();
 
         release_node(child_node);
-        done:
+    done:
         m_btree_lock.unlock();
     }
 
@@ -986,6 +1022,7 @@ private:
                     minfo[n].node->set_valid_node(false);
                 } else {
                     free_node(minfo[n].node);
+                    m_stats.dec_count(minfo[n].node->is_leaf() ? BTREE_STATS_LEAF_NODE_COUNT : BTREE_STATS_INT_NODE_COUNT);
                 }
             } else if (minfo[n].modified) {
                 write_node(minfo[n].node);
@@ -1024,12 +1061,14 @@ private:
     AbstractNode<K, V> *alloc_leaf_node() {
         AbstractNode<K, V> *n = alloc_node(m_btree_cfg.get_leaf_node_type(), true /* isLeaf */);
         n->set_leaf(true);
+        m_stats.inc_count(BTREE_STATS_LEAF_NODE_COUNT);
         return n;
     }
 
     AbstractNode<K, V> *alloc_interior_node() {
         AbstractNode<K, V> *n = alloc_node(m_btree_cfg.get_interior_node_type(), false /* isLeaf */);
         n->set_leaf(false);
+        m_stats.inc_count(BTREE_STATS_INT_NODE_COUNT);
         return n;
     }
 

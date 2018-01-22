@@ -195,7 +195,7 @@ struct SimpleKeyComparator {
     }
 };
 
-#define TOTAL_ENTRIES          1000
+#define TOTAL_ENTRIES          10000
 #define TOTAL_OPERS_PER_TEST   500
 #define NTHREADS               1
 
@@ -267,6 +267,10 @@ public:
             // EXPECT_EQ(ret, true);
         }
 
+        //std::cout << "Btree Obj count = " << test->m_bt->get_stats().get_obj_count() << std::endl;
+        std::cout << "Btree Stats after preload" << "\n";
+        test->m_bt->get_stats().print();
+
         // Next read and insert based on the percentage of reads provided
         uint32_t nopers = 0;
         while (nopers++ < TOTAL_OPERS_PER_TEST) {
@@ -278,10 +282,17 @@ public:
             }
         }
 
+        std::cout << "Btree Stats after inserts" << "\n";
+        test->m_bt->get_stats().print();
+
         // Cleanup the btree
         for (auto i = start; i < start + readable_count; i++) {
             test->delete_nth_entry(i);
         }
+
+        //std::cout << "Btree Obj count = " << test->m_bt->get_stats().get_obj_count() << std::endl;
+        std::cout << "Btree Stats after cleanup" << "\n";
+        test->m_bt->get_stats().print();
     }
 };
 
@@ -312,7 +323,11 @@ TEST_F(BtreeCrudTest, SimpleInsert) {
     }
 }
 
+INIT_VMODULES(BTREE_VMODULES);
+
 int main(int argc, char *argv[]) {
+    InitOmdsLogging(argv[0], BTREE_VMODULES);
+
     testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
