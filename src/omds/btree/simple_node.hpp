@@ -40,10 +40,10 @@ public:
         // Not a great idea to downcast, but this is just for debugging
         if (n->is_leaf()) {
             SimpleNode< K, V > *leafn = static_cast<SimpleNode< K, V > *>(n);
-            leafn->print();
+            leafn->to_string();
         } else {
             SimpleNode< K, bnodeid_t > *intn = static_cast<SimpleNode< K, bnodeid_t > *>(n);
-            intn->print();
+            intn->to_string();
         }
     }
 
@@ -83,38 +83,38 @@ public:
 
 #ifndef NDEBUG
 
-    void print() override {
-        cout << "###################" << endl;
-        cout << "-------------------------------" << endl;
-        cout << "id=" << this->get_node_id().m_x << " nEntries=" << this->get_total_entries()
-             << " leaf?=" << this->is_leaf();
+    std::string to_string() const override {
+        std::stringstream ss;
+        ss << "###################" << endl;
+        ss << "-------------------------------" << endl;
+        ss << "id=" << this->get_node_id().m_x << " nEntries=" << this->get_total_entries() << " leaf?=" << this->is_leaf();
 
         if (!this->is_leaf()) {
             bnodeid_t edge_id;
             edge_id = this->get_edge_id();
-            cout << " edge_id=" << edge_id.m_x;
+            ss << " edge_id=" << edge_id.m_x;
         }
-        cout << "\n";
-        cout << "-------------------------------" << endl;
+        ss << "\n-------------------------------" << endl;
         for (uint32_t i = 0; i < this->get_total_entries(); i++) {
-            cout << "Key=";
+            ss << "Key=";
             K key;
             get_nth_key(i, &key, false);
-            key.print();
+            ss << key.to_string();
 
             // TODO: Override the << in ostream for Value
-            cout << " Val=";
+            ss << " Val=";
             if (this->is_leaf()) {
                 V val;
                 get(i, &val, false);
-                val.print();
+                ss << val.to_string();
             } else {
                 BNodeptr p;
                 get(i, &p, false);
-                p.print();
+                ss << p.to_string();
             }
-            cout << "\n";
+            ss << "\n";
         }
+        return ss.str();
     }
 
 #endif

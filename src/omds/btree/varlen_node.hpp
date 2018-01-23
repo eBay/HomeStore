@@ -170,8 +170,8 @@ public:
     }
 
 #ifndef NDEBUG
-    void print() override {
-
+    std::string to_string() const override {
+        return "";
     }
 #endif
 

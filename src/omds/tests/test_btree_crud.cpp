@@ -55,17 +55,17 @@ public:
     int compare(const BtreeKey *o) const override {
         TestSimpleKey *other = (TestSimpleKey *) o;
         if (get_count() < other->get_count()) {
-            return 1;
+            return -1;
         } else if (get_count() > other->get_count()) {
-            return -1;
+            return 1;
         } else if (get_rank() < other->get_rank()) {
-            return 1;
+            return -1;
         } else if (get_rank() > other->get_rank()) {
-            return -1;
-        } else if (get_blk_num() < other->get_blk_num()) {
             return 1;
-        } else if (get_blk_num() > other->get_blk_num()) {
+        } else if (get_blk_num() < other->get_blk_num()) {
             return -1;
+        } else if (get_blk_num() > other->get_blk_num()) {
+            return 1;
         } else {
             return 0;
         }
@@ -131,8 +131,10 @@ public:
     virtual void set_blob_size(uint32_t size) override {
     }
 
-    void print() {
-        cout << "count: " << get_count() << " rank: " << get_rank() << " blknum: " << get_blk_num();
+    std::string to_string() const override {
+        std::stringstream ss;
+        ss << "count: " << get_count() << " rank: " << get_rank() << " blknum: " << get_blk_num();
+        return ss.str();
     }
 
     bool operator<(const TestSimpleKey &o) const {
@@ -178,8 +180,8 @@ public:
         return sizeof(m_val);
     }
 
-    void print() const override {
-        std::cout << "val = " << m_val;
+    std::string to_string() const override {
+        std::stringstream ss; ss << "val = " << m_val; return ss.str();
     }
 
     // This is not mandatory overridden method for BtreeValue, but for testing comparision
@@ -197,7 +199,7 @@ struct SimpleKeyComparator {
 
 #define TOTAL_ENTRIES          10000
 #define TOTAL_OPERS_PER_TEST   500
-#define NTHREADS               1
+#define NTHREADS               4
 
 struct BtreeCrudTest : public testing::Test {
 protected:
@@ -321,6 +323,9 @@ TEST_F(BtreeCrudTest, SimpleInsert) {
         t->join();
         delete (t);
     }
+
+    EXPECT_EQ(m_bt->get_stats().get_obj_count(), 0);
+    EXPECT_EQ(m_bt->get_stats().get_interior_nodes_count(), 0);
 }
 
 INIT_VMODULES(BTREE_VMODULES);

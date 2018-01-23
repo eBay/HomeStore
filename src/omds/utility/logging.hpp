@@ -17,7 +17,13 @@
 #define START_VMOD(d1, d2, m)        \
         if (google::GetVLOGLevel(BOOST_PP_STRINGIZE(m)) == -1) { \
             google::SetVLOGLevel(BOOST_PP_STRINGIZE(m), getenv("GLOG_v") ? atoi(getenv("GLOG_v")) : 0); \
+            if (getenv("GLOG_v")) { \
+                std::cout << "Loglevel of " << BOOST_PP_STRINGIZE(m) << " set to " << atoi(getenv("GLOG_v")) << "\n"; \
+            } else { \
+                std::cout << "Loglevel of " << BOOST_PP_STRINGIZE(m) << " set to default 0\n"; \
+            } \
         }
+
 #define START_VMODULES(...)           BOOST_PP_SEQ_FOR_EACH(START_VMOD, ,BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__))
 
 #define InitOmdsLogging(progname, ...)  \

@@ -86,7 +86,7 @@ public:
     virtual void update(int ind, const BtreeKey &key, const BtreeValue &val) = 0;
 
 #ifndef NDEBUG
-    virtual void print() = 0;
+    virtual std::string to_string() const = 0;
 #endif
 
     /* Provides the occupied data size within the node */
@@ -229,8 +229,8 @@ public:
         get_persistent_header()->node_id = id;
     }
 
-    bnodeid_t get_node_id() {
-        return get_persistent_header()->node_id;
+    bnodeid_t get_node_id() const {
+        return m_pers_header.node_id;
     }
 
     bool is_leaf() const {

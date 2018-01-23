@@ -31,19 +31,20 @@ using namespace omds::thread;
 #define BTREE_VMOD_NAME    btree
 #endif
 
-#define VMOD_BTREE_INSERT    BOOST_PP_CAT(BOOST_PP_CAT(BTREE_VMOD_NAME, _), btinsert)
+#define VMOD_BTREE_WRITE     BOOST_PP_CAT(BOOST_PP_CAT(BTREE_VMOD_NAME, _), btwrite)
 #define VMOD_BTREE_DELETE    BOOST_PP_CAT(BOOST_PP_CAT(BTREE_VMOD_NAME, _), btdelete)
+#define VMOD_BTREE_GET       BOOST_PP_CAT(BOOST_PP_CAT(BTREE_VMOD_NAME, _), btget)
 #define VMOD_BTREE_SPLIT     BOOST_PP_CAT(BOOST_PP_CAT(BTREE_VMOD_NAME, _), btsplit)
 #define VMOD_BTREE_MERGE     BOOST_PP_CAT(BOOST_PP_CAT(BTREE_VMOD_NAME, _), btmerge)
 
 #define BTREE_VMODULES       \
-        VMOD_BTREE_INSERT,   \
+        VMOD_BTREE_WRITE,    \
         VMOD_BTREE_DELETE,   \
+        VMOD_BTREE_GET,      \
         VMOD_BTREE_SPLIT,    \
         VMOD_BTREE_MERGE
 
 REGISTER_VMODULES(BTREE_VMODULES);
-#undef BTREE_VMOD_NAME
 
 namespace omds { namespace btree {
 
@@ -594,7 +595,7 @@ private:
                 m_stats.dec_count(BTREE_STATS_OBJ_COUNT);
             } else {
 #ifndef NDEBUG
-                my_node->print();
+                my_node->to_string();
                 assert(0);
 #endif
             }
@@ -681,10 +682,7 @@ private:
 
         m_root_node = new_root_int_node->get_node_id();
 
-#ifndef NDEBUG
-        //cout << "New Root node " << endl;
-        //new_root_int_node->print();
-#endif
+        DCVLOG(VMOD_BTREE_SPLIT, 4) << "New Root Node: \n" << new_root_int_node->to_string();
 
         release_node(new_root_int_node);
         done:
@@ -744,14 +742,13 @@ private:
         write_node(parent_node);
         release_node(child_node2);
 
-#if 0
-        #ifndef NDEBUG
-        cout << "After split " << endl;
-        cout << "#####################" << endl;
-        parent_node->print();
-        child_node1->print();
-        child_node2->print();
-#endif
+#ifndef NDEBUG
+        if (CVLOG_IS_ON(VMOD_BTREE_SPLIT, 4)) {
+            LOG(INFO) << "After split\n#####################";
+            LOG(INFO) << "Parent node:\n" << parent_node->to_string();
+            LOG(INFO) << "Child node1:\n" << child_node1->to_string();
+            LOG(INFO) << "Child node2:\n" << child_node2->to_string();
+        }
 #endif
 
         // NOTE: Do not access parentInd after insert, since insert would have
@@ -962,6 +959,16 @@ private:
             lock_node(m.node, locktype::LOCKTYPE_WRITE);
         }
 
+
+#ifndef NDEBUG
+        if (CVLOG_IS_ON(VMOD_BTREE_MERGE, 4)) {
+            LOG(INFO) << "Before Merge Nodes:\nParent node:\n" << parent_node->to_string();
+            for (auto i = 0; i < minfo.size(); i++) {
+                LOG(INFO) << "Child node " << i + 1 << "\n" << minfo[i].node->to_string();
+            }
+        }
+#endif
+
         // Rebalance entries for each of the node and mark any node to be removed, if empty.
         auto i = 0U; auto j = 1U;
         auto balanced_size = m_btree_cfg.get_ideal_fill_size();
@@ -982,19 +989,9 @@ private:
                     minfo[j].freed = true;
                     parent_node->remove(minfo[j].parent_index);
                     minfo[i].node->set_next_bnode(minfo[j].node->get_next_bnode());
-                    ndeleted_nodes++; j++;
+                    ndeleted_nodes++;
+                    j++;
                     continue;
-                }
-            } else if (minfo[i].modified) {
-                // We reached maximum amount which can be pulled in, if we have indeed modified, lets get the last
-                // key and put in the entry into parent node
-                BNodeptr nptr(minfo[i].node->get_node_id());
-                if (minfo[i].parent_index == parent_node->get_total_entries()) {
-                    parent_node->update(minfo[i].parent_index, nptr);
-                } else {
-                    K last_key;
-                    minfo[i].node->get_last_key(&last_key);
-                    parent_node->update(minfo[i].parent_index, last_key, nptr);
                 }
             }
 
@@ -1012,12 +1009,16 @@ private:
         }
 
         // Its time to write the parent node and loop again to write all modified nodes and free freed nodes
+        DCVLOG(VMOD_BTREE_MERGE, 4) << "After merging node\n########################Parent Node: "
+                                    << parent_node->to_string();
         write_node(parent_node);
         assert(!minfo[0].freed); // If we merge it, we expect the left most one has at least 1 entry.
         // TODO: Above assumption will not be valid if we are merging all empty nodes. Need to study that.
-        if (minfo[0].modified) write_node(minfo[0].node);
-        for (auto n = 1; n < minfo.size(); n++) {
+
+        for (auto n = 0; n < minfo.size(); n++) {
             if (minfo[n].freed) {
+                DCVLOG(VMOD_BTREE_MERGE, 2) << "Child Node " << n << ": Freeing the node id = "
+                                            << minfo[n].node->get_node_id().to_integer();
                 if (minfo[n].node->any_upgrade_waiters()) {
                     minfo[n].node->set_valid_node(false);
                 } else {
@@ -1025,6 +1026,17 @@ private:
                     m_stats.dec_count(minfo[n].node->is_leaf() ? BTREE_STATS_LEAF_NODE_COUNT : BTREE_STATS_INT_NODE_COUNT);
                 }
             } else if (minfo[n].modified) {
+                // If we have indeed modified, lets get the last key and put in the entry into parent node
+                BNodeptr nptr(minfo[n].node->get_node_id());
+                if (minfo[n].parent_index == parent_node->get_total_entries()) {
+                    parent_node->update(minfo[n].parent_index, nptr);
+                } else {
+                    K last_key;
+                    minfo[n].node->get_last_key(&last_key);
+                    parent_node->update(minfo[n].parent_index, last_key, nptr);
+                }
+
+                DCVLOG(VMOD_BTREE_MERGE, 4) << "Child Node " << n << ":\n" << minfo[n].node->to_string();
                 write_node(minfo[n].node);
             }
         }
@@ -1040,19 +1052,6 @@ private:
 #endif
             }
         }
-
-#if 0
-#ifdef DEBUG
-        cout << "Before Merge Nodes" << endl;
-        cout << "#####################" << endl;
-        cout << "Parent Node " << endl;
-        AbstractNode::castAndPrint(parent_node);
-        cout << "Child Node(s) " << endl;
-        for (i = 0; i < indices_list.size(); i++) {
-            AbstractNode::castAndPrint(nodes[i]);
-        }
-#endif
-#endif
 
         ret.nmerged = minfo.size() - ndeleted_nodes;
         return ret;
@@ -1096,7 +1095,7 @@ private:
 
     static void check_lock_debug() {
         if (locked_count != 0) {
-            std::cout << "There are " << locked_count << " on the exit of API";
+            LOG(ERROR) << "There are " << locked_count << " on the exit of API";
             assert(0);
         }
     }
@@ -1115,12 +1114,12 @@ private:
             locked_count--;
         } else {
             if (locked_count > 1) {
-                std::cout << "unlock_node: node = " << (void *) node << " Locked count = " << locked_count
+                LOG(ERROR) << "unlock_node: node = " << (void *) node << " Locked count = " << locked_count
                           << " Expecting nodes = " << (void *) locked_nodes[locked_count - 1] << " or "
-                          << (void *) locked_nodes[locked_count - 2] << std::endl;
+                          << (void *) locked_nodes[locked_count - 2];
             } else {
-                std::cout << "unlock_node: node = " << (void *) node << " Locked count = " << locked_count
-                          << " Expecting node = " << (void *) locked_nodes[locked_count - 1] << std::endl;
+                LOG(ERROR) << "unlock_node: node = " << (void *) node << " Locked count = " << locked_count
+                          << " Expecting node = " << (void *) locked_nodes[locked_count - 1];
             }
             assert(0);
         }
@@ -1157,9 +1156,6 @@ protected:
     void create_root_node() {
         // Assign one node as root node and initially root is leaf
         AbstractNode<K, V> *root = alloc_leaf_node();
-        if (root == nullptr) {
-            cout << "allocLeafNode root is nullptr" << endl;
-        }
         m_root_node = root->get_node_id();
         write_node(root);
         release_node(root);

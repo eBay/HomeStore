@@ -55,6 +55,11 @@ struct uint48_t {
     bool operator!=(const uint48_t &other) const {
         return (m_x != other.m_x);
     }
+
+    uint64_t to_integer() {
+        return m_x;
+    }
+
 } __attribute__((packed));
 
 namespace omds { namespace btree {
@@ -117,8 +122,8 @@ public:
     virtual uint32_t get_blob_size() const = 0;
     virtual void set_blob_size(uint32_t size) = 0;
 
-#ifdef DEBUG
-    virtual void print() = 0;
+#ifndef NDEBUG
+    virtual std::string to_string() const = 0;
 #endif
 };
 
@@ -218,7 +223,7 @@ public:
     virtual void set_blob_size(uint32_t size) = 0;
 
 #ifndef NDEBUG
-    virtual void print() const = 0;
+    virtual std::string to_string() const = 0;
 #endif
 };
 
@@ -285,8 +290,8 @@ public:
         return (*this);
     }
 
-    void print() const override {
-        cout << m_id.m_x;
+    std::string to_string() const override {
+        std::stringstream ss; ss << m_id.m_x; return ss.str();
     }
 };
 
@@ -326,8 +331,8 @@ public:
         return (*this);
     }
 
-    void print() const override {
-        cout << "<Empty>";
+    std::string to_string() const override {
+        return "<Empty>";
     }
 };
 
