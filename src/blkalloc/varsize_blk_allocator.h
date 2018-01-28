@@ -291,21 +291,23 @@ public:
         return (uint32_t) (m_blob->m_page_id);
     }
 
-    int compare(omds::btree::BtreeKey *o) const override;
+    int compare(const omds::btree::BtreeKey *o) const override;
 
-    uint8_t *get_blob(uint32_t *psize) const override {
-        *psize = sizeof(blob_t);
-        return (uint8_t *) m_blob;
+    omds::blob get_blob() const override {
+        omds::blob b;
+        b.bytes = (uint8_t *)m_blob;
+        b.size = sizeof(blob_t);
+        return b;
     }
 
-    void set_blob(const uint8_t *blob, uint32_t size) override {
-        assert(size == sizeof(blob));
-        m_blob = (blob_t *) blob;
+    void set_blob(const omds::blob &b) override {
+        assert(b.size == sizeof(b));
+        m_blob = (blob_t *)b.bytes;
     }
 
-    void copy_blob(const uint8_t *blob, uint32_t size) override {
-        assert(size == sizeof(blob));
-        memcpy(&m_in_place_blob, blob, size);
+    void copy_blob(const omds::blob &b) override {
+        assert(b.size == sizeof(b));
+        memcpy(&m_in_place_blob, b.bytes, b.size);
         m_blob = &m_in_place_blob;
     }
 

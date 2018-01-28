@@ -347,7 +347,7 @@ int VarsizeAllocCacheEntry::compare_range(const VarsizeAllocCacheEntry *start, b
     return ret;
 }
 
-int VarsizeAllocCacheEntry::compare(omds::btree::BtreeKey *o) const {
+int VarsizeAllocCacheEntry::compare(const omds::btree::BtreeKey *o) const {
     if (o->is_regex_key()) {
         auto *other = (VarsizeAllocCacheSearch *) o;
         return compare_range((const VarsizeAllocCacheEntry *) other->get_start_key(), other->is_start_inclusive(),

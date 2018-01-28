@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 CMAKE_VERSION=3.9.6
 BOOST_VERSION=1.65.1
-FOLLY_VERSION=2017.12.25.00
+FOLLY_VERSION=2018.01.22.00
 FARMHASH_COMMIT=2f0e005b81e296fa6963e395626137cf729b710c
 BENCHMARK_VERSION=1.3.0
-LIBGFLAGS_VERSION=2.2.0
+LIBGFLAGS_VERSION=2.2.1
 GLOG_RELEASE=0.3.5
 GPERF_RELEASE=2.6.3
 GTEST_VERSION=1.8.0
@@ -19,7 +19,7 @@ else
 	os_type="unknown"
 fi
 
-JOBS=16
+JOBS=8
 
 proj_dir=`pwd`
 deps_build=$proj_dir/"deps_build/$os_type/"
@@ -134,6 +134,12 @@ gflags() {
     make -j$JOBS install
 };
 library gflags ${LIBGFLAGS_VERSION} https://github.com/gflags/gflags/archive/v${LIBGFLAGS_VERSION}.tar.gz
+#if [ $os_type = "mac" ] ; then
+#    install_thru_brew gflags ${LIBGFLAGS_VERSION}
+#else
+#	library gflags ${LIBGFLAGS_VERSION} https://github.com/gflags/gflags/archive/v${LIBGFLAGS_VERSION}.tar.gz
+#fi
+
 
 ##################### GLOG #########################
 glog () {
@@ -151,39 +157,50 @@ library glog ${GLOG_RELEASE} https://github.com/google/glog/archive/v${GLOG_RELE
 
 ##################### Folly #########################
 folly() {
-	apt-get install	-y automake \
-		autoconf \
-		autoconf-archive \
-		libtool \
-		libboost-all-dev \
-		libevent-dev \
-		libdouble-conversion-dev \
-		liblz4-dev \
-		liblzma-dev \
-		libsnappy-dev \
-		zlib1g-dev \
-		binutils-dev \
-		libjemalloc-dev \
-		libssl-dev \
-		pkg-config \
-		libunwind8-dev \
-		libelf-dev \
-		libdwarf-dev \
-		libiberty-dev
+	if [ $os_type = "mac" ] ; then
+		brew install \
+			autoconf \
+			automake \
+			libtool \
+			libevent \
+			openssl \
+			snappy	
+	else
+		apt-get install -y \
+			automake \
+			autoconf \
+			autoconf-archive \
+			libtool \
+			libevent-dev \
+			libdouble-conversion-dev \
+			liblz4-dev \
+			liblzma-dev \
+			libsnappy-dev \
+			zlib1g-dev \
+			binutils-dev \
+			libjemalloc-dev \
+			libssl-dev \
+			pkg-config \
+			libunwind8-dev \
+			libelf-dev \
+			libdwarf-dev \
+			libiberty-dev
+	fi
 
 	cd folly/
 	autoreconf -ivf
+
 	#./configure --prefix=$deps_prefix
-	./configure
+	if [ $os_type = "mac" ] ; then
+		./configure CPPFLAGS="-I/usr/local/opt/openssl/include" LDFLAGS="-L/usr/local/opt/openssl/lib"
+	else
+		./configure
+	fi
 	make -j$JOBS
 	make check
 	make install
 }
-if [ $os_type = "mac" ] ; then
-    install_thru_brew folly ${FOLLY_VERSION}
-else
-	library folly ${FOLLY_VERSION} https://github.com/facebook/folly/archive/v${FOLLY_VERSION}.tar.gz
-fi
+library folly ${FOLLY_VERSION} https://github.com/facebook/folly/archive/v${FOLLY_VERSION}.tar.gz
 
 ##################### FarmHash #########################
 farmhash () {

@@ -10,7 +10,9 @@
 #define BTREE_KVSTORE_H_
 #include <vector>
 #include <iostream>
+#include <cmath>
 #include "omds/utility/useful_defs.hpp"
+#include "omds/memory/freelist_allocator.hpp"
 
 using namespace std;
 
@@ -354,6 +356,7 @@ private:
     uint8_t m_ideal_fill_pct;
     uint8_t m_split_pct;
 
+    uint32_t m_node_header_size;
 public:
     BtreeConfig() {
         m_max_leaf_entries_per_node = m_max_int_entries_per_node = m_max_objs = 0;
@@ -362,6 +365,7 @@ public:
         m_int_node_type = m_leaf_node_type = BTREE_NODETYPE_SIMPLE;
         m_ideal_fill_pct = 90;
         m_split_pct = 50;
+        m_node_header_space = 0;
     }
 
     btree_nodetype_t get_interior_node_type() const {
@@ -385,6 +389,14 @@ public:
     }
     void set_max_key_size(uint32_t max_key_size) {
         m_max_key_size = max_key_size;
+    }
+
+    uint32_t get_node_header_size() const {
+        return m_node_header_size;
+    }
+
+    void set_node_header_size(uint32_t s) {
+        m_node_header_size = s;
     }
 
     uint64_t get_max_objs() const {
@@ -453,6 +465,136 @@ public:
         return (uint32_t) (get_node_size() * m_split_pct)/100;
     }
 };
+
+#define DEFAULT_FREELIST_CACHE_COUNT         10000
+template <size_t NodeSize, size_t CacheCount = DEFAULT_FREELIST_CACHE_COUNT>
+class BtreeNodeAllocator {
+public:
+    static BtreeNodeAllocator<NodeSize, CacheCount> *create() {
+        bool initialized = bt_node_allocator_initialized.load(std::memory_order_acquire);
+        if (!initialized) {
+            auto allocator = std::make_unique< BtreeNodeAllocator<NodeSize, CacheCount> >();
+            if (bt_node_allocator_initialized.compare_exchange_strong(initialized, true, std::memory_order_acq_rel)) {
+                bt_node_allocator = std::move(allocator);
+            }
+        }
+        return bt_node_allocator.get();
+    }
+
+    static uint8_t *allocate()  {
+        assert(bt_node_allocator_initialized);
+        return bt_node_allocator->get_allocator()->allocate(NodeSize);
+    }
+
+    static void deallocate(uint8_t *mem) {
+        LOG(INFO) << "Deallocating memory " << (void *)mem;
+        bt_node_allocator->get_allocator()->deallocate(mem, NodeSize);
+    }
+
+    static std::atomic< bool > bt_node_allocator_initialized;
+    static std::unique_ptr< BtreeNodeAllocator<NodeSize, CacheCount> > bt_node_allocator;
+
+    auto get_allocator() {
+        return &m_allocator;
+    }
+
+private:
+    omds::FreeListAllocator< CacheCount, NodeSize > m_allocator;
+};
+
+template <size_t NodeSize, size_t CacheCount>
+std::atomic< bool > BtreeNodeAllocator<NodeSize, CacheCount>::bt_node_allocator_initialized(false);
+
+template <size_t NodeSize, size_t CacheCount>
+std::unique_ptr< BtreeNodeAllocator<NodeSize, CacheCount> > BtreeNodeAllocator<NodeSize, CacheCount>::bt_node_allocator = nullptr;
+
+#if 0
+#define MIN_NODE_SIZE                8192
+#define MAX_NODE_SIZE                8192
+
+class BtreeNodeAllocator
+{
+public:
+    static constexpr uint32_t get_bucket_size(uint32_t count) {
+        uint32_t result = MIN_NODE_SIZE;
+        for (auto i = 0; i < count; i++) {
+            result *= MIN_NODE_SIZE;
+        }
+        return result;
+    }
+
+    static constexpr uint32_t get_nbuckets() {
+        return std::log2(MAX_NODE_SIZE) - std::log2(MIN_NODE_SIZE) + 1;
+    }
+
+    BtreeNodeAllocator() {
+        m_allocators.reserve(get_nbuckets());
+        for (auto i = 0U; i < get_nbuckets(); i++) {
+            auto *allocator = new omds::FreeListAllocator< FREELIST_CACHE_COUNT, get_bucket_size(i)>();
+            m_allocators.push_back((void *)allocator);
+        }
+        // Allocate a default tail allocator for non-confirming sizes
+        auto *allocator = new omds::FreeListAllocator< FREELIST_CACHE_COUNT, 0>();
+        m_allocators.push_back((void *)allocator);
+    }
+
+    ~BtreeNodeAllocator() {
+        for (auto i = 0U; i < get_nbuckets(); i++) {
+            auto *allocator = (omds::FreeListAllocator< FREELIST_CACHE_COUNT, get_bucket_size(i)> *)m_allocators[i];
+            delete(allocator);
+        }
+        // Allocate a default tail allocator for non-confirming sizes
+        auto *allocator = (omds::FreeListAllocator< FREELIST_CACHE_COUNT, 0> *)m_allocators[m_allocators.size()-1];
+        delete(allocator);
+    }
+
+    static BtreeNodeAllocator *create() {
+        bool initialized = bt_node_allocator_initialized.load(std::memory_order_acquire);
+        if (!initialized) {
+            std::unique_ptr< BtreeNodeAllocator > allocator = std::make_unique< BtreeNodeAllocator >();
+            if (bt_node_allocator_initialized.compare_exchange_strong(initialized, true, std::memory_order_acq_rel)) {
+                bt_node_allocator = std::move(allocator);
+            }
+        }
+        return bt_node_allocator.get();
+    }
+
+    static uint8_t *allocate(uint32_t size_needed)  {
+        uint32_t nbucket = (size_needed - 1)/MIN_NODE_SIZE + 1;
+        if (unlikely(m_impl.get() == nullptr)) {
+            m_impl.reset(new FreeListAllocatorImpl< MaxListCount, Size >());
+        }
+
+        return (m_impl->allocate(size_needed));
+    }
+
+    static void deallocate(T *mem) {
+        mem->~T();
+        get_obj_allocator()->m_allocator->deallocate((uint8_t *)mem, sizeof(T));
+    }
+
+    static std::atomic< bool > bt_node_allocator_initialized;
+    static std::unique_ptr< BtreeNodeAllocator > bt_node_allocator;
+
+private:
+    omds::FreeListAllocator< FREELIST_CACHE_COUNT, sizeof(T) > *get_freelist_allocator() {
+        return m_allocator.get();
+    }
+
+private:
+    std::vector< void * > m_allocators;
+
+    static ObjectAllocator< T, CacheCount > *get_obj_allocator() {
+        if (unlikely((obj_allocator == nullptr))) {
+            obj_allocator = std::make_unique< ObjectAllocator< T, CacheCount > >();
+        }
+        return obj_allocator.get();
+    }
+};
+
+std::atomic< bool > BtreeNodeAllocator::bt_node_allocator_initialized(false);
+std::unique_ptr< BtreeNodeAllocator > BtreeNodeAllocator::bt_node_allocator = nullptr;
+#endif
 
 }}
 #endif

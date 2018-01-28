@@ -1,5 +1,5 @@
 /*
- * MemAllocator.hpp
+ * ObjectAllocator.hpp
  *
  *  Created on: 16-May-2016
  *      Author: hkadayam

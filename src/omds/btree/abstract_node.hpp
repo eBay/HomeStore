@@ -48,7 +48,7 @@ typedef struct __attribute__((__packed__)) {
     omds::atomic_counter< int16_t > refcount;
 } transient_hdr_t;
 
-template <typename K, typename V>
+template <typename K, typename V, size_t NodeSize>
 class AbstractNode {
 protected:
     persistent_hdr_t m_pers_header;
@@ -295,7 +295,7 @@ public:
     }
 
     uint32_t get_node_area_size(const BtreeConfig &cfg) const {
-        return (uint32_t) (cfg.get_node_size() - (get_node_area() - (uint8_t *)this));
+        return (uint32_t) (cfg.get_node_size() - cfg.get_node_header_size() - (get_node_area() - (uint8_t *)this));
     }
 
     uint32_t get_occupied_size(const BtreeConfig &cfg) const {
@@ -324,6 +324,16 @@ public:
 
     void set_edge_id(bnodeid_t edge) {
         get_persistent_header()->edge_entry = edge;
+    }
+
+    friend void intrusive_ptr_add_ref(AbstractNode<K, V, NodeSize> *n) {
+        n->ref_node();
+    }
+
+    friend void intrusive_ptr_release(AbstractNode<K, V, NodeSize> *n) {
+        if (n->deref_node()) {
+            BtreeNodeAllocator<NodeSize>::deallocate((uint8_t *)n);
+        }
     }
 
     ////////// Top level functions (CRUD on a node) //////////////////

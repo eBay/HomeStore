@@ -23,11 +23,11 @@ namespace omds { namespace btree {
 
 static bnodeid_t invalidEdgePtr = INVALID_BNODEID;
 
-template< typename K, typename V >
-class SimpleNode : public AbstractNode<K, V> {
+template< typename K, typename V, size_t NodeSize >
+class SimpleNode : public AbstractNode<K, V, NodeSize> {
 public:
     SimpleNode(bnodeid_t id, bool init_pers, bool init_trans) :
-            AbstractNode<K, V>(id, init_pers, init_trans) {
+            AbstractNode<K, V, NodeSize>(id, init_pers, init_trans) {
         this->set_node_type(BTREE_NODETYPE_SIMPLE);
     }
 
@@ -36,13 +36,13 @@ public:
 public:
 #ifndef NDEBUG
 
-    static void cast_and_print(AbstractNode<K, V> *n) {
+    static void cast_and_print(AbstractNode<K, V, NodeSize> *n) {
         // Not a great idea to downcast, but this is just for debugging
         if (n->is_leaf()) {
-            SimpleNode< K, V > *leafn = static_cast<SimpleNode< K, V > *>(n);
+            SimpleNode< K, V, NodeSize > *leafn = static_cast<SimpleNode< K, V, NodeSize > *>(n);
             leafn->to_string();
         } else {
-            SimpleNode< K, bnodeid_t > *intn = static_cast<SimpleNode< K, bnodeid_t > *>(n);
+            SimpleNode< K, bnodeid_t, NodeSize > *intn = static_cast<SimpleNode< K, bnodeid_t, NodeSize > *>(n);
             intn->to_string();
         }
     }
@@ -168,9 +168,9 @@ public:
         return (this->get_node_area_size(cfg) - (this->get_total_entries() * get_nth_obj_size(0)));
     }
 
-    uint32_t move_out_to_right_by_entries(const BtreeConfig &cfg, AbstractNode<K, V> &othern,
+    uint32_t move_out_to_right_by_entries(const BtreeConfig &cfg, AbstractNode<K, V, NodeSize> &othern,
                                           uint32_t nentries) override {
-        SimpleNode< K, V > *other_node = (SimpleNode< K, V > *) &othern;
+        auto other_node = (SimpleNode< K, V, NodeSize > *) &othern;
 
         // Minimum of whats to be moved out and how many slots available in other node
         nentries = std::min({nentries, this->get_total_entries(), other_node->get_available_entries(cfg)});
@@ -199,12 +199,12 @@ public:
         return nentries;
     }
 
-    uint32_t move_out_to_right_by_size(const BtreeConfig &cfg, AbstractNode<K, V> &other_node, uint32_t size) override {
+    uint32_t move_out_to_right_by_size(const BtreeConfig &cfg, AbstractNode<K, V, NodeSize> &other_node, uint32_t size) override {
         return (get_nth_obj_size(0) * move_out_to_right_by_entries(cfg, other_node, size/get_nth_obj_size(0)));
     }
 
-    uint32_t move_in_from_right_by_entries(const BtreeConfig &cfg, AbstractNode<K, V> &on, uint32_t nentries) override {
-        SimpleNode< K, V > *other_node = (SimpleNode< K, V > *) &on;
+    uint32_t move_in_from_right_by_entries(const BtreeConfig &cfg, AbstractNode<K, V, NodeSize> &on, uint32_t nentries) override {
+        auto other_node = (SimpleNode< K, V, NodeSize > *) &on;
 
         // Minimum of whats to be moved and how many slots available
         nentries = std::min({nentries, other_node->get_total_entries(), get_available_entries(cfg)});
@@ -233,7 +233,7 @@ public:
         return nentries;
     }
 
-    uint32_t move_in_from_right_by_size(const BtreeConfig &cfg, AbstractNode<K, V> &other_node, uint32_t size) override {
+    uint32_t move_in_from_right_by_size(const BtreeConfig &cfg, AbstractNode<K, V, NodeSize> &other_node, uint32_t size) override {
         return (get_nth_obj_size(0) * move_in_from_right_by_entries(cfg, other_node, size/get_nth_obj_size(0)));
     }
 

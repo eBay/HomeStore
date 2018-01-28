@@ -19,6 +19,7 @@ set(BTREE_SOURCE_FILES
         btree/btree.hpp
         btree/btree_internal.h
         btree/mem_btree.hpp
+        btree/ssd_btree.hpp
         btree/simple_node.hpp
         btree/varlen_node.hpp
         btree/btree_stats.hpp
@@ -43,7 +44,7 @@ set(TEST_BTREE_CRUD_SOURCE_FILES
 add_executable(test_btree_crud ${TEST_BTREE_CRUD_SOURCE_FILES})
 #AddStaticLibraries(test_btree_crud ${LIB_ROOT_DIR}
 #                                    gtest)
-target_link_libraries(test_btree_crud gtest glog)
+target_link_libraries(test_btree_crud gtest glog folly)
 
 set(TEST_HASH_SOURCE_FILES
         hash/intrusive_hashset.hpp
