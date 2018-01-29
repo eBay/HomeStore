@@ -14,6 +14,7 @@
 #include <pthread.h>
 #include "btree_internal.h"
 #include <glog/logging.h>
+#include <folly/SharedMutex.h>
 #include "omds/thread/lock.hpp"
 #include "omds/utility/atomic_counter.hpp"
 
@@ -43,7 +44,7 @@ typedef struct __attribute__((__packed__)) {
 } persistent_hdr_t;
 
 typedef struct __attribute__((__packed__)) {
-    pthread_rwlock_t lock;
+    folly::SharedMutexReadPriority lock;
     omds::atomic_counter< uint16_t > upgraders;
     omds::atomic_counter< int16_t > refcount;
 } transient_hdr_t;
@@ -51,8 +52,8 @@ typedef struct __attribute__((__packed__)) {
 template <typename K, typename V, size_t NodeSize>
 class AbstractNode {
 protected:
-    persistent_hdr_t m_pers_header;
     transient_hdr_t m_trans_header;
+    persistent_hdr_t m_pers_header;
     uint8_t m_node_area[0];
 
     /*************** Class Definitions ******************
@@ -135,15 +136,10 @@ public:
             memset(get_transient_header(), 0, sizeof(transient_hdr_t));
             reset_reference();
             get_transient_header()->upgraders.set(0);
-            int ret = pthread_rwlock_init(&get_transient_header()->lock, nullptr);
-            if (ret != 0) {
-                //LOG(ERROR) << "Error in initializing pthread ret=" << ret;
-            }
         }
     }
 
     ~AbstractNode() {
-        pthread_rwlock_destroy(&get_transient_header()->lock);
     }
 
     persistent_hdr_t *get_persistent_header() {
@@ -158,30 +154,25 @@ public:
         if (l == omds::thread::LOCKTYPE_NONE) {
             return;
         } else if (l == omds::thread::LOCKTYPE_READ) {
-            pthread_rwlock_rdlock(&get_transient_header()->lock);
+            get_transient_header()->lock.lock_shared();
         } else {
-            pthread_rwlock_wrlock(&get_transient_header()->lock);
+            get_transient_header()->lock.lock();
         }
-
-#if 0
-#ifdef DEBUG
-        lockedCount++;
-#endif
-#endif
     }
 
-    void unlock(bool deref = true) {
-        pthread_rwlock_unlock(&get_transient_header()->lock);
-#if 0
-#ifdef DEBUG
-        lockedCount--;
-#endif
-#endif
+    void unlock(omds::thread::locktype l) {
+        if (l == omds::thread::LOCKTYPE_NONE) {
+            return;
+        } else if (l == omds::thread::LOCKTYPE_READ) {
+            get_transient_header()->lock.unlock_shared();
+        } else {
+            get_transient_header()->lock.unlock();
+        }
     }
 
     void lock_upgrade() {
         get_transient_header()->upgraders.increment(1);
-        this->unlock(false);
+        this->unlock(omds::thread::LOCKTYPE_READ);
         this->lock(omds::thread::LOCKTYPE_WRITE);
     }
 

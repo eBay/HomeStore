@@ -154,8 +154,11 @@ private:
     BtreeStats m_stats;
 
 #ifndef NDEBUG
-    static thread_local int locked_count;
-    static thread_local std::array<AbstractNode<K, V, NodeSize> *, MAX_BTREE_DEPTH> locked_nodes;
+    static thread_local int wr_locked_count;
+    static thread_local std::array<AbstractNode<K, V, NodeSize> *, MAX_BTREE_DEPTH> wr_locked_nodes;
+
+    static thread_local int rd_locked_count;
+    static thread_local std::array<AbstractNode<K, V, NodeSize> *, MAX_BTREE_DEPTH> rd_locked_nodes;
 #endif
 
     ////////////////// Implementation /////////////////////////
@@ -181,25 +184,22 @@ public:
 
         if (root->is_split_needed(m_btree_cfg, k, v, &ind)) {
             // Time to do the split of root.
-            unlock_node(root, true);
+            unlock_node(root, acq_lock);
             m_btree_lock.unlock();
             check_split_root(k, v);
 
-            // We must have gotten a new root, need to
-            // start from scratch.
+            // We must have gotten a new root, need to start from scratch.
             m_btree_lock.read_lock();
             goto retry;
         } else if ((is_leaf) && (acq_lock != omds::thread::LOCKTYPE_WRITE)) {
-            // Root is a leaf, need to take write lock, instead
-            // of read, retry
-            unlock_node(root, true);
+            // Root is a leaf, need to take write lock, instead of read, retry
+            unlock_node(root, acq_lock);
             acq_lock = omds::thread::LOCKTYPE_WRITE;
             goto retry;
         } else {
             bool success = do_put(root, acq_lock, k, v, ind, put_type);
             if (success == false) {
-                // Need to start from top down again, since
-                // there is a race between 2 inserts or deletes.
+                // Need to start from top down again, since there is a race between 2 inserts or deletes.
                 acq_lock = omds::thread::LOCKTYPE_READ;
                 goto retry;
             }
@@ -271,12 +271,12 @@ public:
         if (root->get_total_entries() == 0) {
             if (is_leaf) {
                 // There are no entries in btree.
-                unlock_node(root, true);
+                unlock_node(root, acq_lock);
                 m_btree_lock.unlock();
                 return false;
             }
             assert(root->get_edge_id() != INVALID_BNODEID);
-            unlock_node(root, true);
+            unlock_node(root, acq_lock);
             m_btree_lock.unlock();
 
             check_collapse_root();
@@ -288,7 +288,7 @@ public:
         } else if ((is_leaf) && (acq_lock != omds::thread::LOCKTYPE_WRITE)) {
             // Root is a leaf, need to take write lock, instead
             // of read, retry
-            unlock_node(root, true);
+            unlock_node(root, acq_lock);
             acq_lock = omds::thread::LOCKTYPE_WRITE;
             goto retry;
         } else {
@@ -328,7 +328,7 @@ private:
     bool do_get(AbstractNodePtr my_node, const BtreeSearchRange &range, BtreeKey *outkey, BtreeValue *outval) {
         if (my_node->is_leaf()) {
             auto result = my_node->find(range, outkey, outval);
-            unlock_node(my_node, true);
+            unlock_node(my_node, omds::thread::locktype::LOCKTYPE_READ);
             return (result.found);
         }
 
@@ -337,7 +337,7 @@ private:
         AbstractNodePtr child_node = read_node(child_ptr.get_node_id());
 
         lock_node(child_node, omds::thread::LOCKTYPE_READ);
-        unlock_node(my_node, true);
+        unlock_node(my_node, omds::thread::locktype::LOCKTYPE_READ);
         return (do_get(child_node, range, outkey, outval));
     }
 
@@ -386,27 +386,34 @@ private:
 
         prev_gen = my_node->get_gen();
         if (child_node) {
-            unlock_node(child_node, false);
+            unlock_node(child_node, child_cur_lock);
         }
+
+#ifndef NDEBUG
+        // Explicitly dec and incr, for upgrade, since it does not call top level functions to lock/unlock node
+        dec_check_lock_debug(my_node, LOCKTYPE_READ);
+#endif
+
         my_node->lock_upgrade();
         my_node->lock_acknowledge();
 
-        // If the node has been made invalid (probably by mergeNodes)
-        // ask caller to start over again, but before that cleanup or free
-        // this node if there is no one waiting.
+#ifndef NDEBUG
+        inc_lock_debug(my_node, LOCKTYPE_WRITE);
+#endif
+
+        // If the node has been made invalid (probably by mergeNodes) ask caller to start over again, but before that
+        // cleanup or free this node if there is no one waiting.
         if (!my_node->is_valid_node()) {
             if (my_node->any_upgrade_waiters()) {
                 // Still some one else is waiting, we are not the last.
-                unlock_node(my_node, true);
+                unlock_node(my_node, omds::thread::LOCKTYPE_WRITE);
             } else {
-                // No else is waiting for this node and this is an invalid
-                // node, free it up.
+                // No else is waiting for this node and this is an invalid node, free it up.
                 assert(my_node->get_total_entries() == 0);
-                unlock_node(my_node, false);
+                unlock_node(my_node, omds::thread::LOCKTYPE_WRITE);
 
-                // Its ok to free after unlock, because the chain has been already
-                // cut when the node is invalidated. So no one would have entered here
-                // after the chain is cut.
+                // Its ok to free after unlock, because the chain has been already cut when the node is invalidated.
+                // So no one would have entered here after the chain is cut.
                 free_node(my_node);
                 m_stats.dec_count(my_node->is_leaf() ? BTREE_STATS_LEAF_NODE_COUNT : BTREE_STATS_INT_NODE_COUNT);
             }
@@ -414,10 +421,9 @@ private:
             goto done;
         }
 
-        // If node has been updated, while we have upgraded, ask caller
-        // to start all over again.
+        // If node has been updated, while we have upgraded, ask caller to start all over again.
         if (prev_gen != my_node->get_gen()) {
-            unlock_node(my_node, true);
+            unlock_node(my_node, omds::thread::LOCKTYPE_WRITE);
             ret = false;
             goto done;
         }
@@ -528,7 +534,7 @@ private:
                 write_node(my_node);
                 m_stats.inc_count(BTREE_STATS_OBJ_COUNT);
             }
-            unlock_node(my_node, true);
+            unlock_node(my_node, curlock);
 
 #ifndef NDEBUG
             //my_node->print();
@@ -564,7 +570,7 @@ private:
             if (upgrade_node(child_node, nullptr, child_cur_lock, LOCKTYPE_NONE) == false) {
                 // Since we have parent node write locked, child node should never have any issues upgrading.
                 assert(0);
-                unlock_node(my_node, true);
+                unlock_node(my_node, omds::thread::LOCKTYPE_WRITE);
                 return (false);
             }
 
@@ -574,12 +580,12 @@ private:
             ind_hint = -1; // Since split is needed, hint is no longer valid
 
             // After split, parentNode would have split, retry search and walk down.
-            unlock_node(child_node, true);
+            unlock_node(child_node, omds::thread::LOCKTYPE_WRITE);
             m_stats.inc_count(BTREE_STATS_SPLIT_COUNT);
             goto retry;
         }
 
-        unlock_node(my_node, true);
+        unlock_node(my_node, curlock);
         return (do_put(child_node, child_cur_lock, k, v, ind_hint, put_type));
 
         // Warning: Do not access childNode or myNode beyond this point, since it would
@@ -602,7 +608,7 @@ private:
 #endif
             }
 
-            unlock_node(my_node, true);
+            unlock_node(my_node, curlock);
             return is_found ? BTREE_ITEM_FOUND : BTREE_NOT_FOUND;
         }
 
@@ -615,7 +621,7 @@ private:
         bool is_found = true;
         AbstractNodePtr child_node = get_child_node(my_node, range, &ind, &is_found);
         if (!is_found || (child_node == nullptr)) {
-            unlock_node(my_node, true);
+            unlock_node(my_node, curlock);
             return BTREE_NOT_FOUND;
         }
 
@@ -643,7 +649,7 @@ private:
                 // parent (myNode) is being write locked by this thread. In fact upgrading would be a problem, since
                 // this child might be a middle child in the list of indices, which means we might have to lock one in
                 // left against the direction of intended locking (which could cause deadlock).
-                unlock_node(child_node, false);
+                unlock_node(child_node, child_cur_lock);
                 auto result = merge_nodes(my_node, indices_list);
                 if (result.merged) {
                     // Retry only if we merge them.
@@ -656,7 +662,7 @@ private:
             }
         }
 
-        unlock_node(my_node, true);
+        unlock_node(my_node, curlock);
         return (do_remove(child_node, child_cur_lock, range, outkey, outval));
 
         // Warning: Do not access childNode or myNode beyond this point, since it would
@@ -673,14 +679,14 @@ private:
         lock_node(root, locktype::LOCKTYPE_WRITE);
 
         if (!root->is_split_needed(m_btree_cfg, k, v, &ind)) {
-            unlock_node(root, true);
+            unlock_node(root, omds::thread::LOCKTYPE_WRITE);
             goto done;
         }
 
         // Create a new root node and split them
         new_root_int_node = alloc_interior_node();
         split_node(new_root_int_node, root, new_root_int_node->get_total_entries(), &split_key);
-        unlock_node(root, true);
+        unlock_node(root, omds::thread::LOCKTYPE_WRITE);
 
         m_root_node = new_root_int_node->get_node_id();
 
@@ -699,7 +705,7 @@ private:
         lock_node(root, locktype::LOCKTYPE_WRITE);
 
         if (root->get_total_entries() != 0) {
-            unlock_node(root, true);
+            unlock_node(root, locktype::LOCKTYPE_WRITE);
             goto done;
         }
 
@@ -708,7 +714,7 @@ private:
         assert(child_node != nullptr);
 
         // Elevate the edge child as root.
-        unlock_node(root, false);
+        unlock_node(root, locktype::LOCKTYPE_WRITE);
         free_node(root);
         m_stats.dec_count(BTREE_STATS_INT_NODE_COUNT);
         m_root_node = child_node->get_node_id();
@@ -1046,11 +1052,11 @@ private:
         // Loop again in reverse order to unlock the nodes. Freed nodes need not be unlocked
         for (int n = minfo.size()-1; n >= 0; n--) {
             if (!minfo[n].freed) {
-                unlock_node(minfo[n].node, true);
+                unlock_node(minfo[n].node, locktype::LOCKTYPE_WRITE);
 #ifndef DEBUG
             } else {
                 // We need to explicitly removed the order, other it will cause false assert
-                dec_check_lock_debug(minfo[n].node);
+                dec_check_lock_debug(minfo[n].node, locktype::LOCKTYPE_WRITE);
 #endif
             }
         }
@@ -1076,14 +1082,14 @@ private:
     void lock_node(AbstractNodePtr node, omds::thread::locktype type) {
         node->lock(type);
 #ifndef NDEBUG
-        inc_lock_debug(node);
+        inc_lock_debug(node, type);
 #endif
     }
 
-    void unlock_node(AbstractNodePtr node, bool release) {
-        node->unlock();
+    void unlock_node(AbstractNodePtr node, omds::thread::locktype type) {
+        node->unlock(type);
 #ifndef NDEBUG
-        dec_check_lock_debug(node);
+        dec_check_lock_debug(node, type);
 #endif
 #if 0
         if (release) {
@@ -1094,36 +1100,56 @@ private:
 
 #ifndef NDEBUG
     static void init_lock_debug() {
-        locked_count = 0;
+        rd_locked_count = 0;
+        wr_locked_count = 0;
     }
 
     static void check_lock_debug() {
-        if (locked_count != 0) {
-            LOG(ERROR) << "There are " << locked_count << " on the exit of API";
+        if (wr_locked_count != 0) {
+            LOG(ERROR) << "There are " << wr_locked_count << " write locks held on the exit of API";
+            assert(0);
+        }
+
+        if (rd_locked_count != 0) {
+            LOG(ERROR) << "There are " << rd_locked_count << " read locks held on the exit of API";
             assert(0);
         }
     }
 
-    static void inc_lock_debug(AbstractNodePtr node) {
-        locked_nodes[locked_count++] = node.get();
+    static void inc_lock_debug(AbstractNodePtr node, locktype ltype) {
+        if (ltype == LOCKTYPE_WRITE) {
+            wr_locked_nodes[wr_locked_count++] = node.get();
+        } else if (ltype == LOCKTYPE_READ) {
+            rd_locked_nodes[rd_locked_count++] = node.get();
+        }
 //        std::cout << "lock_node: node = " << (void *)node << " Locked count = " << locked_count << std::endl;
     }
 
-    static void dec_check_lock_debug(AbstractNodePtr node) {
-        // std::cout << "unlock_node: node = " << (void *)node << " Locked count = " << locked_count << std::endl;
-        if (node == locked_nodes[locked_count - 1]) {
-            locked_count--;
-        } else if ((locked_count > 1) && (node == locked_nodes[locked_count-2])) {
-            locked_nodes[locked_count-2] = locked_nodes[locked_count-1];
-            locked_count--;
+    static void dec_check_lock_debug(AbstractNodePtr node, locktype ltype) {
+        std::array<AbstractNode<K, V, NodeSize> *, MAX_BTREE_DEPTH> *pnodes;
+        int *pcount;
+        if (ltype == LOCKTYPE_WRITE) {
+            pnodes = &wr_locked_nodes;
+            pcount = &wr_locked_count;
         } else {
-            if (locked_count > 1) {
-                LOG(ERROR) << "unlock_node: node = " << (void *) node.get() << " Locked count = " << locked_count
-                          << " Expecting nodes = " << (void *) locked_nodes[locked_count - 1] << " or "
-                          << (void *) locked_nodes[locked_count - 2];
+            pnodes = &rd_locked_nodes;
+            pcount = &rd_locked_count;
+        }
+
+        // std::cout << "unlock_node: node = " << (void *)node << " Locked count = " << locked_count << std::endl;
+        if (node == pnodes->at(*pcount - 1)) {
+            (*pcount)--;
+        } else if ((*pcount > 1) && (node == pnodes->at((*pcount)-2))) {
+            pnodes->at(*(pcount)-2) = pnodes->at((*pcount)-1);
+            (*pcount)--;
+        } else {
+            if (*pcount > 1) {
+                LOG(ERROR) << "unlock_node: node = " << (void *) node.get() << " Locked count = " << (*pcount)
+                          << " Expecting nodes = " << (void *) pnodes->at(*(pcount)-1) << " or "
+                          << (void *) pnodes->at(*(pcount)-2);
             } else {
-                LOG(ERROR) << "unlock_node: node = " << (void *) node.get() << " Locked count = " << locked_count
-                          << " Expecting node = " << (void *) locked_nodes[locked_count - 1];
+                LOG(ERROR) << "unlock_node: node = " << (void *) node.get() << " Locked count = " << (*pcount)
+                          << " Expecting node = " << (void *) pnodes->at(*(pcount)-1);
             }
             assert(0);
         }
@@ -1184,10 +1210,17 @@ protected:
 
 #ifndef NDEBUG
 template <typename K, typename V, size_t NodeSize>
-thread_local int Btree<K, V, NodeSize>::locked_count = 0;
+thread_local int Btree<K, V, NodeSize>::wr_locked_count = 0;
 
 template <typename K, typename V, size_t NodeSize>
-thread_local std::array<AbstractNode<K, V, NodeSize> *, MAX_BTREE_DEPTH> Btree<K, V, NodeSize>::locked_nodes = {{}};
+thread_local std::array<AbstractNode<K, V, NodeSize> *, MAX_BTREE_DEPTH> Btree<K, V, NodeSize>::wr_locked_nodes = {{}};
+
+template <typename K, typename V, size_t NodeSize>
+thread_local int Btree<K, V, NodeSize>::rd_locked_count = 0;
+
+template <typename K, typename V, size_t NodeSize>
+thread_local std::array<AbstractNode<K, V, NodeSize> *, MAX_BTREE_DEPTH> Btree<K, V, NodeSize>::rd_locked_nodes = {{}};
+
 #endif
 
 }}

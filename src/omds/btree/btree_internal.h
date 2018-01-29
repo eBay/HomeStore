@@ -365,7 +365,7 @@ public:
         m_int_node_type = m_leaf_node_type = BTREE_NODETYPE_SIMPLE;
         m_ideal_fill_pct = 90;
         m_split_pct = 50;
-        m_node_header_space = 0;
+        m_node_header_size = 0;
     }
 
     btree_nodetype_t get_interior_node_type() const {
