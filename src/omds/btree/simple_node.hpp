@@ -8,12 +8,11 @@
  */
 #pragma once
 
-#include "abstract_node.hpp"
+#include "physical_node.hpp"
 #include <iostream>
 #include <cassert>
 #include <pthread.h>
 #include <boost/compressed_pair.hpp>
-
 #include "btree_internal.h"
 
 using namespace std;
@@ -23,33 +22,18 @@ namespace omds { namespace btree {
 
 static bnodeid_t invalidEdgePtr = INVALID_BNODEID;
 
+#define SimpleNode              VariantNode<BTREE_NODETYPE_SIMPLE, K, V, NodeSize>
+
 template< typename K, typename V, size_t NodeSize >
-class SimpleNode : public AbstractNode<K, V, NodeSize> {
+class SimpleNode : public PhysicalNode<SimpleNode, K, V, NodeSize> {
 public:
-    SimpleNode(bnodeid_t id, bool init_pers, bool init_trans) :
-            AbstractNode<K, V, NodeSize>(id, init_pers, init_trans) {
+    SimpleNode(bnodeid_t id, bool init) :
+            PhysicalNode<SimpleNode, K, V, NodeSize>(id, init) {
         this->set_node_type(BTREE_NODETYPE_SIMPLE);
     }
 
-    virtual ~SimpleNode() {}
-
 public:
-#ifndef NDEBUG
-
-    static void cast_and_print(AbstractNode<K, V, NodeSize> *n) {
-        // Not a great idea to downcast, but this is just for debugging
-        if (n->is_leaf()) {
-            SimpleNode< K, V, NodeSize > *leafn = static_cast<SimpleNode< K, V, NodeSize > *>(n);
-            leafn->to_string();
-        } else {
-            SimpleNode< K, bnodeid_t, NodeSize > *intn = static_cast<SimpleNode< K, bnodeid_t, NodeSize > *>(n);
-            intn->to_string();
-        }
-    }
-
-#endif
-
-    void get(int ind, BtreeValue *outval, bool copy) const override {
+    void get(int ind, BtreeValue *outval, bool copy) const {
         // Need edge index
         if (ind == this->get_total_entries()) {
             assert(!this->is_leaf());
@@ -63,7 +47,7 @@ public:
 
     // Insert the key and value in provided index
     // Assumption: Node lock is already taken
-    void insert(int ind, const BtreeKey &key, const BtreeValue &val) override {
+    void insert(int ind, const BtreeKey &key, const BtreeValue &val) {
         //K& k = *(dynamic_cast<K *>(&key));
         //assert(get_total_entries() < getMaxEntries());
         uint32_t sz = (this->get_total_entries() - ind) * get_nth_obj_size(0);
@@ -83,7 +67,7 @@ public:
 
 #ifndef NDEBUG
 
-    std::string to_string() const override {
+    std::string to_string() const {
         std::stringstream ss;
         ss << "###################" << endl;
         ss << "-------------------------------" << endl;
@@ -119,7 +103,7 @@ public:
 
 #endif
 
-    void remove(int ind) override {
+    void remove(int ind) {
         uint32_t total_entries = this->get_total_entries();
         assert(total_entries >= ind);
 
@@ -140,7 +124,7 @@ public:
         this->dec_entries();
     }
 
-    void update(int ind, const BtreeValue &val) override {
+    void update(int ind, const BtreeValue &val) {
         if (ind == this->get_total_entries()) {
             assert(!this->is_leaf());
             this->set_edge_value(val);
@@ -153,7 +137,7 @@ public:
         this->inc_gen();
     }
 
-    void update(int ind, const BtreeKey &key, const BtreeValue &val) override {
+    void update(int ind, const BtreeKey &key, const BtreeValue &val) {
         if (ind == this->get_total_entries()) {
             assert(!this->is_leaf());
             this->set_edge_value(val);
@@ -164,13 +148,12 @@ public:
         this->inc_gen();
     }
 
-    virtual uint32_t get_available_size(const BtreeConfig &cfg) const override {
-        return (this->get_node_area_size(cfg) - (this->get_total_entries() * get_nth_obj_size(0)));
+    virtual uint32_t get_available_size(const BtreeConfig &cfg) const {
+        return (cfg.get_node_area_size() - (this->get_total_entries() * get_nth_obj_size(0)));
     }
 
-    uint32_t move_out_to_right_by_entries(const BtreeConfig &cfg, AbstractNode<K, V, NodeSize> &othern,
-                                          uint32_t nentries) override {
-        auto other_node = (SimpleNode< K, V, NodeSize > *) &othern;
+    uint32_t move_out_to_right_by_entries(const BtreeConfig &cfg, SimpleNode *other_node,
+                                          uint32_t nentries) {
 
         // Minimum of whats to be moved out and how many slots available in other node
         nentries = std::min({nentries, this->get_total_entries(), other_node->get_available_entries(cfg)});
@@ -199,13 +182,11 @@ public:
         return nentries;
     }
 
-    uint32_t move_out_to_right_by_size(const BtreeConfig &cfg, AbstractNode<K, V, NodeSize> &other_node, uint32_t size) override {
+    uint32_t move_out_to_right_by_size(const BtreeConfig &cfg, SimpleNode *other_node, uint32_t size) {
         return (get_nth_obj_size(0) * move_out_to_right_by_entries(cfg, other_node, size/get_nth_obj_size(0)));
     }
 
-    uint32_t move_in_from_right_by_entries(const BtreeConfig &cfg, AbstractNode<K, V, NodeSize> &on, uint32_t nentries) override {
-        auto other_node = (SimpleNode< K, V, NodeSize > *) &on;
-
+    uint32_t move_in_from_right_by_entries(const BtreeConfig &cfg, SimpleNode *other_node, uint32_t nentries) {
         // Minimum of whats to be moved and how many slots available
         nentries = std::min({nentries, other_node->get_total_entries(), get_available_entries(cfg)});
         uint32_t sz = nentries * get_nth_obj_size(0);
@@ -233,12 +214,12 @@ public:
         return nentries;
     }
 
-    uint32_t move_in_from_right_by_size(const BtreeConfig &cfg, AbstractNode<K, V, NodeSize> &other_node, uint32_t size) override {
+    uint32_t move_in_from_right_by_size(const BtreeConfig &cfg, SimpleNode *other_node, uint32_t size) {
         return (get_nth_obj_size(0) * move_in_from_right_by_entries(cfg, other_node, size/get_nth_obj_size(0)));
     }
 
     bool is_split_needed(const BtreeConfig &cfg, const BtreeKey &key, const BtreeValue &value,
-                         int *out_ind_hint) const override {
+                         int *out_ind_hint) const {
         int size_needed;
 
         auto result = this->find(BtreeSearchRange(key), nullptr, nullptr);
@@ -250,13 +231,12 @@ public:
         return (this->get_available_entries(cfg) == 0);
     }
 
-private:
     ////////// Overridden private methods //////////////
-    inline uint32_t get_nth_obj_size(int ind) const override {
+    inline uint32_t get_nth_obj_size(int ind) const {
         return (get_obj_key_size(ind) + get_obj_value_size(ind));
     }
 
-    void get_nth_key(int ind, BtreeKey *outkey, bool copykey) const override {
+    void get_nth_key(int ind, BtreeKey *outkey, bool copykey) const {
         assert(ind < this->get_total_entries());
 
         omds::blob b;
@@ -266,7 +246,7 @@ private:
         (copykey) ? outkey->copy_blob(b) : outkey->set_blob(b);
     }
 
-    void get_nth_value(int ind, BtreeValue *outval, bool copy) const override {
+    void get_nth_value(int ind, BtreeValue *outval, bool copy) const {
         assert(ind < this->get_total_entries());
         uint32_t size = get_nth_obj_size(ind);
 
@@ -277,7 +257,7 @@ private:
         (copy) ? outval->copy_blob(b) : outval->set_blob(b);
     }
 
-    int compare_nth_key(const BtreeKey &cmp_key, int ind) const override {
+    int compare_nth_key(const BtreeKey &cmp_key, int ind) const {
         K nth_key;
         get_nth_key(ind, &nth_key, false /* copyKey */);
         return nth_key.compare(&cmp_key);

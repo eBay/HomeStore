@@ -83,13 +83,18 @@ typedef enum {
 } btree_status_t;
 
 typedef enum {
+    MEM_BTREE=0,
+    SSD_BTREE=1
+} btree_type;
+
+typedef enum {
     BTREE_NODETYPE_SIMPLE = 0,
     BTREE_NODETYPE_VAR_VALUE,
     BTREE_NODETYPE_VAR_KEY,
     BTREE_NODETYPE_VAR_OBJECT,
     BTREE_NODETYPE_PREFIX,
     BTREE_NODETYPE_COMPACT
-} btree_nodetype_t;
+} btree_node_type;
 
 enum MatchType {
     NO_MATCH=0,
@@ -342,46 +347,20 @@ class BtreeConfig
 {
 private:
     uint64_t m_max_objs;
-    uint32_t m_nodesize;
-
-    btree_nodetype_t m_int_node_type;
-    btree_nodetype_t m_leaf_node_type;
-
     uint32_t m_max_key_size;
     uint32_t m_max_value_size;
 
-    uint32_t m_max_leaf_entries_per_node;
-    uint32_t m_max_int_entries_per_node;
+    uint32_t m_node_area_size;
 
     uint8_t m_ideal_fill_pct;
     uint8_t m_split_pct;
 
-    uint32_t m_node_header_size;
 public:
     BtreeConfig() {
-        m_max_leaf_entries_per_node = m_max_int_entries_per_node = m_max_objs = 0;
-        m_nodesize = 8192;
+        m_max_objs = 0;
         m_max_key_size = m_max_value_size = 0;
-        m_int_node_type = m_leaf_node_type = BTREE_NODETYPE_SIMPLE;
         m_ideal_fill_pct = 90;
         m_split_pct = 50;
-        m_node_header_size = 0;
-    }
-
-    btree_nodetype_t get_interior_node_type() const {
-        return m_int_node_type;
-    }
-
-    void set_interior_node_type(btree_nodetype_t intNodeType) {
-        m_int_node_type = intNodeType;
-    }
-
-    btree_nodetype_t get_leaf_node_type() const {
-        return m_leaf_node_type;
-    }
-
-    void set_leaf_node_type(btree_nodetype_t leaf_node_type) {
-        m_leaf_node_type = leaf_node_type;
     }
 
     uint32_t get_max_key_size() const {
@@ -389,14 +368,6 @@ public:
     }
     void set_max_key_size(uint32_t max_key_size) {
         m_max_key_size = max_key_size;
-    }
-
-    uint32_t get_node_header_size() const {
-        return m_node_header_size;
-    }
-
-    void set_node_header_size(uint32_t s) {
-        m_node_header_size = s;
     }
 
     uint64_t get_max_objs() const {
@@ -411,58 +382,28 @@ public:
         return m_max_value_size;
     }
 
+    uint32_t get_node_area_size() const {
+        return m_node_area_size;
+    }
+
+    void set_node_area_size(uint32_t size) {
+        m_node_area_size = size;
+    }
+
     void set_max_value_size(uint32_t max_value_size) {
         m_max_value_size = max_value_size;
     }
 
-    uint32_t get_node_size() const {
-        return m_nodesize;
-    }
-
-    void set_node_size(uint32_t node_size) {
-        m_nodesize = node_size;
-    }
-
-    uint32_t get_max_leaf_entries_per_node() const {
-        return m_max_leaf_entries_per_node;
-    }
-
-    uint32_t get_max_interior_entries_per_node() const {
-        return m_max_int_entries_per_node;
-    }
-
-    void calculate_max_leaf_entries_per_node() {
-        switch (m_leaf_node_type) {
-        case BTREE_NODETYPE_SIMPLE:
-            m_max_leaf_entries_per_node = m_nodesize / (m_max_key_size + m_max_value_size);
-            break;
-        default:
-            assert(0);
-            break;
-        }
-    }
-
-    void calculate_max_interior_entries_per_node() {
-        switch (m_int_node_type) {
-        case BTREE_NODETYPE_SIMPLE:
-            m_max_int_entries_per_node = m_nodesize / (m_max_key_size + sizeof(BNodeptr));
-            break;
-        default:
-            assert(0);
-            break;
-        }
-    }
-
     uint32_t get_ideal_fill_size() const {
-        return (uint32_t) (get_node_size() * m_ideal_fill_pct)/100;
+        return (uint32_t) (get_node_area_size() * m_ideal_fill_pct)/100;
     }
 
     uint32_t get_merge_suggested_size() const {
-        return get_node_size() - get_ideal_fill_size();
+        return get_node_area_size() - get_ideal_fill_size();
     }
 
     uint32_t get_split_size() const {
-        return (uint32_t) (get_node_size() * m_split_pct)/100;
+        return (uint32_t) (get_node_area_size() * m_split_pct)/100;
     }
 };
 

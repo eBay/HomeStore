@@ -9,6 +9,7 @@
 #include "omds/utility/useful_defs.hpp"
 #include <vector>
 #include <cassert>
+#include <cstdint>
 #include <boost/optional.hpp>
 
 namespace omds {

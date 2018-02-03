@@ -14,95 +14,79 @@
 #include <vector>
 #include <atomic>
 
-#include "btree.hpp"
 #include "omds/memory/composite_allocator.hpp"
 #include "omds/memory/chunk_allocator.hpp"
 #include "omds/memory/sys_allocator.hpp"
 #include "omds/utility/atomic_counter.hpp"
-#include "omds/btree/simple_node.hpp"
-#include "omds/btree/varlen_node.hpp"
+#include "btree_specific_impl.hpp"
+#include "btree_node.h"
+#include "physical_node.hpp"
 
 namespace omds { namespace btree {
-template< typename K, typename V, size_t NodeSize = 8192 >
-class MemBtree : public Btree< K, V, NodeSize > {
+
+struct mem_btree_node_header {
+    omds::atomic_counter<uint16_t> refcount;
+} __attribute__((__packed__));
+
+#define MemBtreeNodeDeclType BtreeNode<MEM_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize>
+
+template<
+        typename K,
+        typename V,
+        btree_node_type InteriorNodeType,
+        btree_node_type LeafNodeType,
+        size_t NodeSize
+        >
+class BtreeSpecificImpl<MEM_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize>
+{
 public:
-    MemBtree(BtreeConfig &cfg) :
-            Btree< K, V, NodeSize >() {
-        this->init_btree(cfg);
+    using HeaderType = mem_btree_node_header;
 
-        cfg.set_node_header_size(0); // No additional header for in-memory btree
-        BtreeNodeAllocator< NodeSize >::create();
-        this->create_root_node();
+    static uint8_t *get_physical(const MemBtreeNodeDeclType *bn) {
+        return (uint8_t *)((uint8_t *)bn + sizeof(MemBtreeNodeDeclType));
     }
 
-protected:
-    AbstractNodePtr alloc_node(btree_nodetype_t btype, bool is_leaf) override {
-        AbstractNode<K, V, NodeSize> *n;
+    static uint32_t get_node_area_size() {
+        return NodeSize - sizeof(MemBtreeNodeDeclType) - sizeof(LeafPhysicalNodeDeclType);
+    }
+
+    static boost::intrusive_ptr<MemBtreeNodeDeclType> alloc_node(bool is_leaf) {
         uint8_t *mem = BtreeNodeAllocator< NodeSize >::allocate();
+        auto bn = new (mem) MemBtreeNodeDeclType();
 
-        switch (btype) {
-        case BTREE_NODETYPE_SIMPLE: {
-            // Initialize both perpetual and transient portion of the node
-            auto sn = new(mem) SimpleNode< K, V, NodeSize >((bnodeid_t) mem, true, true);
-            n = (AbstractNode< K, V, NodeSize > *) sn;
-            break;
+        if (is_leaf) {
+            auto n = new(mem + sizeof(MemBtreeNodeDeclType)) VariantNode<LeafNodeType, K, V, NodeSize>((bnodeid_t)mem, true);
+        } else {
+            auto n = new(mem + sizeof(MemBtreeNodeDeclType)) VariantNode<InteriorNodeType, K, V, NodeSize>((bnodeid_t)mem, true);
         }
-
-        case BTREE_NODETYPE_VAR_KEY: {
-            auto vn = new(mem)
-                    VarObjectNode< K, V, BTREE_NODETYPE_VAR_KEY, NodeSize >(*this->get_config(), (bnodeid_t) mem, true, true);
-            n = (AbstractNode< K, V, NodeSize > *) vn;
-            break;
-        }
-
-        case BTREE_NODETYPE_VAR_VALUE: {
-            auto vn = new(mem)
-                    VarObjectNode< K, V, BTREE_NODETYPE_VAR_VALUE, NodeSize >(*this->get_config(), (bnodeid_t) mem, true, true);
-            n = (AbstractNode< K, V, NodeSize > *) vn;
-            break;
-        }
-
-        case BTREE_NODETYPE_VAR_OBJECT: {
-            auto vn = new(mem)
-                    VarObjectNode< K, V, BTREE_NODETYPE_VAR_OBJECT, NodeSize >(*this->get_config(), (bnodeid_t) mem, true, true);
-            n = (AbstractNode< K, V, NodeSize > *) vn;
-            break;
-        }
-
-        default:
-            assert(0);
-            return nullptr;
-        }
-
-        // We are referencing twice, one for alloc and other for read - so that mem is not freed upon release
-        n->ref_node();
-        //n->ref_node();
-        return AbstractNodePtr(n);
+        ref_node(bn);
+        return (boost::intrusive_ptr<MemBtreeNodeDeclType>((MemBtreeNodeDeclType *)mem));
     }
 
-    AbstractNodePtr read_node(bnodeid_t id) override {
-        AbstractNode<K, V, NodeSize> *n = (AbstractNode<K, V, NodeSize> *)(uint8_t *)id.m_x;
-        // n->ref_node();
-        return AbstractNodePtr(n);
+    static boost::intrusive_ptr<MemBtreeNodeDeclType> read_node(bnodeid_t id) {
+        auto bn = (MemBtreeNodeDeclType *)(uint8_t *)id.m_x;
+        return boost::intrusive_ptr<MemBtreeNodeDeclType>(bn);
     }
 
-    void write_node(AbstractNodePtr n) override {
+    static void write_node(boost::intrusive_ptr<MemBtreeNodeDeclType> bn) {
     }
 
-    void release_node(AbstractNodePtr n) override {
-        if (n->deref_node()) {
-            BtreeNodeAllocator<NodeSize>::deallocate((uint8_t *)n.get());
+    static void free_node(boost::intrusive_ptr<MemBtreeNodeDeclType> bn) {
+        if (deref_node(bn.get())) {
+            bn->~MemBtreeNodeDeclType();
+            BtreeNodeAllocator<NodeSize>::deallocate((uint8_t *)bn.get());
         }
     }
 
-    void free_node(AbstractNodePtr n) override {
-        if (n->deref_node()) {
-            BtreeNodeAllocator<NodeSize>::deallocate((uint8_t *)n.get());
-        }
+    static void ref_node(MemBtreeNodeDeclType *bn) {
+        auto mbh = (mem_btree_node_header *)bn->get_impl_node();
+        mbh->refcount.increment();
     }
 
-private:
-
+    static bool deref_node(MemBtreeNodeDeclType *bn) {
+        auto mbh = (mem_btree_node_header *)bn->get_impl_node();
+        return mbh->refcount.decrement_testz();
+    }
 };
 
 } }

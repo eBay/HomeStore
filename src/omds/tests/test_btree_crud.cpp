@@ -3,7 +3,7 @@
 //
 #include <gtest/gtest.h>
 #include <iostream>
-#include "omds/btree/mem_btree.hpp"
+#include "omds/btree/btree.hpp"
 #include <thread>
 
 class TestSimpleKey : public omds::btree::BtreeKey {
@@ -203,19 +203,23 @@ struct SimpleKeyComparator {
 
 struct BtreeCrudTest : public testing::Test {
 protected:
-    omds::btree::MemBtree< TestSimpleKey, TestSimpleValue > *m_bt;
+    omds::btree::Btree<
+            omds::btree::MEM_BTREE,
+            TestSimpleKey,
+            TestSimpleValue,
+            omds::btree::BTREE_NODETYPE_SIMPLE,
+            omds::btree::BTREE_NODETYPE_SIMPLE
+            > *m_bt;
     std::array<TestSimpleKey *, TOTAL_ENTRIES> m_entries;
     std::map<TestSimpleKey *, TestSimpleValue, SimpleKeyComparator> m_create_map;
 
 public:
     BtreeCrudTest() {
         omds::btree::BtreeConfig btree_cfg;
-        btree_cfg.set_leaf_node_type(omds::btree::BTREE_NODETYPE_SIMPLE);
-        btree_cfg.set_interior_node_type(omds::btree::BTREE_NODETYPE_SIMPLE);
         btree_cfg.set_max_objs(TOTAL_ENTRIES);
         btree_cfg.set_max_key_size(sizeof(TestSimpleKey));
         btree_cfg.set_max_value_size(0);
-        m_bt = new omds::btree::MemBtree<TestSimpleKey, TestSimpleValue >(btree_cfg);
+        m_bt = new omds::btree::Btree<omds::btree::MEM_BTREE, TestSimpleKey, TestSimpleValue, omds::btree::BTREE_NODETYPE_SIMPLE, omds::btree::BTREE_NODETYPE_SIMPLE>(btree_cfg);
         init_entries();
     }
 

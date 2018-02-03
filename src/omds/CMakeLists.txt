@@ -15,8 +15,11 @@ include_directories(..)
 set(BTREE_SOURCE_FILES
         array/flexarray.hpp
         bitmap/Bitword.hpp
-        btree/abstract_node.hpp
+        btree/physical_node.hpp
         btree/btree.hpp
+        btree/btree_node.h
+        btree/btree_node.cpp
+        btree/btree_specific_impl.hpp
         btree/btree_internal.h
         btree/mem_btree.hpp
         btree/ssd_btree.hpp
@@ -33,6 +36,7 @@ set(BTREE_SOURCE_FILES
         utility/atomic_counter.hpp
         utility/stats.hpp
         thread/lock.hpp)
+
 set(TEST_BTREE_SOURCE_FILES
         ${BTREE_SOURCE_FILES}
         tests/test_btree.cpp)

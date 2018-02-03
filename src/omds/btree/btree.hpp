@@ -17,7 +17,9 @@
 #include "omds/thread/lock.hpp"
 #include "btree_internal.h"
 #include "btree_stats.hpp"
-#include "abstract_node.hpp"
+#include "btree_node.cpp"
+#include "physical_node.hpp"
+#include "mem_btree.hpp"
 #include "omds/utility/logging.hpp"
 #include <boost/intrusive_ptr.hpp>
 
@@ -54,9 +56,16 @@ namespace omds { namespace btree {
         (type *)( (char *)ptr - offsetof(type,member) );})
 #endif
 
-#define AbstractNodePtr boost::intrusive_ptr< AbstractNode<K, V, NodeSize> >
+#define BtreeDeclType Btree<BtreeType, K, V, InteriorNodeType, LeafNodeType, NodeSize>
+#define BtreeNodePtr boost::intrusive_ptr< BtreeNodeDeclType >
 
-template<typename K, typename V, size_t NodeSize>
+template<
+        btree_type BtreeType,
+        typename K,
+        typename V,
+        btree_node_type InteriorNodeType,
+        btree_node_type LeafNodeType,
+        size_t NodeSize = 8192>
 class Btree
 {
 #ifdef CLASS_DEFINITIONS
@@ -104,38 +113,29 @@ public:
 
 #endif
 
-protected:
-    /* Method to allocate/read/write/refcount nodes. Overriding methods need to implement device specific
-     * way to do this operation */
-    virtual AbstractNodePtr alloc_node(btree_nodetype_t btype, bool is_leaf) = 0;
-    virtual AbstractNodePtr read_node(bnodeid_t node_ptr) = 0;
-    virtual void write_node(AbstractNodePtr node) = 0;
-    virtual void release_node(AbstractNodePtr node) = 0;
-    virtual void free_node(AbstractNodePtr node) = 0;
-
 private:
 #ifdef CLASS_DEFINITIONS
-    bool do_insert(AbstractNodePtr my_node, omds::thread::locktype_t curlock, BtreeKey& k, BtreeValue& v, int ind_hint);
+    bool do_insert(BtreeNodePtr my_node, omds::thread::locktype_t curlock, BtreeKey& k, BtreeValue& v, int ind_hint);
 
-    bool do_get(AbstractNodePtr mynode, BtreeKey &key, BtreeValue *outval);
+    bool do_get(BtreeNodePtr mynode, BtreeKey &key, BtreeValue *outval);
 
-    btree_status_t do_remove(AbstractNodePtr mynode, omds::thread::locktype_t curlock, BtreeKey &key);
+    btree_status_t do_remove(BtreeNodePtr mynode, omds::thread::locktype_t curlock, BtreeKey &key);
 
-    bool upgrade_node(AbstractNodePtr mynode, AbstractNodePtr childnode, omds::thread::locktype_t &curlock,
+    bool upgrade_node(BtreeNodePtr mynode, BtreeNodePtr childnode, omds::thread::locktype_t &curlock,
                       omds::thread::locktype_t child_curlock);
-    void split_node(AbstractNodePtr parent_node, AbstractNodePtr child_node, uint32_t parent_ind, BtreeKey **out_split_key);
-    bool merge_nodes(AbstractNodePtr parent_node, std::vector<uint32_t> &indices_list);
+    void split_node(BtreeNodePtr parent_node, BtreeNodePtr child_node, uint32_t parent_ind, BtreeKey **out_split_key);
+    bool merge_nodes(BtreeNodePtr parent_node, std::vector<uint32_t> &indices_list);
 
-    AbstractNode* get_child_node(AbstractNodePtr int_node, omds::thread::locktype_t curlock, BtreeKey& key, uint32_t &outind);
-    AbstractNode* get_child_node_range(AbstractNodePtr int_node, KeyRegex& kr, uint32_t &outind, bool *isfound);
+    PhysicalNode* get_child_node(BtreeNodePtr int_node, omds::thread::locktype_t curlock, BtreeKey& key, uint32_t &outind);
+    PhysicalNode* get_child_node_range(BtreeNodePtr int_node, KeyRegex& kr, uint32_t &outind, bool *isfound);
 
     void check_split_root();
     void check_collapse_root();
 
-    AbstractNodePtr alloc_leaf_node();
-    AbstractNodePtr alloc_interior_node();
-    void lock_node(AbstractNodePtr node, omds::thread::locktype_t type);
-    void unloc_node(AbstractNodePtr node, bool release);
+    BtreeNodePtr alloc_leaf_node();
+    BtreeNodePtr alloc_interior_node();
+    void lock_node(BtreeNodePtr node, omds::thread::locktype_t type);
+    void unlock_node(BtreeNodePtr node, bool release);
 
 protected:
     virtual uint32_t get_node_size() {return m_btree_cfg.get_node_size();};
@@ -150,21 +150,36 @@ private:
 
     uint32_t m_max_nodes;
     BtreeConfig m_btree_cfg;
-    bool m_inited;
     BtreeStats m_stats;
 
 #ifndef NDEBUG
     static thread_local int wr_locked_count;
-    static thread_local std::array<AbstractNode<K, V, NodeSize> *, MAX_BTREE_DEPTH> wr_locked_nodes;
+    static thread_local std::array<BtreeNodeDeclType *, MAX_BTREE_DEPTH> wr_locked_nodes;
 
     static thread_local int rd_locked_count;
-    static thread_local std::array<AbstractNode<K, V, NodeSize> *, MAX_BTREE_DEPTH> rd_locked_nodes;
+    static thread_local std::array<BtreeNodeDeclType *, MAX_BTREE_DEPTH> rd_locked_nodes;
 #endif
 
     ////////////////// Implementation /////////////////////////
 public:
-    Btree() :
-            m_inited(false) {}
+    Btree(BtreeConfig &cfg) :
+            m_btree_cfg(cfg) {
+
+        BtreeNodeAllocator< NodeSize >::create();
+
+        // TODO: Check if node_area_size need to include persistent header
+        uint32_t node_area_size = BtreeSpecificImplDeclType::get_node_area_size();
+        m_btree_cfg.set_node_area_size(node_area_size);
+
+        // calculate number of nodes
+        uint32_t max_leaf_nodes = (m_btree_cfg.get_max_objs() *
+                                   (m_btree_cfg.get_max_key_size() + m_btree_cfg.get_max_value_size()))
+                                  / node_area_size + 1;
+        max_leaf_nodes += (100 * max_leaf_nodes) / 60; // Assume 60% btree full
+
+        m_max_nodes = max_leaf_nodes + ((double) max_leaf_nodes * 0.05) + 1; // Assume 5% for interior nodes
+        create_root_node();
+    }
 
     void put(const BtreeKey &k, const BtreeValue &v, PutType put_type) {
         omds::thread::locktype acq_lock = omds::thread::LOCKTYPE_READ;
@@ -178,7 +193,7 @@ public:
         m_btree_lock.read_lock();
 
     retry:
-        AbstractNodePtr root = read_node(m_root_node);
+        BtreeNodePtr root = BtreeSpecificImplDeclType::read_node(m_root_node);
         lock_node(root, acq_lock);
         bool is_leaf = root->is_leaf();
 
@@ -229,7 +244,7 @@ public:
         //assert(OmDB::getGlobalRefCount() == 0);
 
         m_btree_lock.read_lock();
-        AbstractNodePtr root = read_node(m_root_node);
+        BtreeNodePtr root = BtreeSpecificImplDeclType::read_node(m_root_node);
         lock_node(root, omds::thread::locktype::LOCKTYPE_READ);
 
         is_found = do_get(root, range, outkey, outval);
@@ -264,7 +279,7 @@ public:
         m_btree_lock.read_lock();
 
     retry:
-        AbstractNodePtr root = read_node(m_root_node);
+        BtreeNodePtr root = BtreeSpecificImplDeclType::read_node(m_root_node);
         lock_node(root, acq_lock);
         bool is_leaf = root->is_leaf();
 
@@ -325,7 +340,7 @@ public:
     }
 
 private:
-    bool do_get(AbstractNodePtr my_node, const BtreeSearchRange &range, BtreeKey *outkey, BtreeValue *outval) {
+    bool do_get(BtreeNodePtr my_node, const BtreeSearchRange &range, BtreeKey *outkey, BtreeValue *outval) {
         if (my_node->is_leaf()) {
             auto result = my_node->find(range, outkey, outval);
             unlock_node(my_node, omds::thread::locktype::LOCKTYPE_READ);
@@ -334,7 +349,7 @@ private:
 
         BNodeptr child_ptr;
         auto result = my_node->find(range, nullptr, &child_ptr);
-        AbstractNodePtr child_node = read_node(child_ptr.get_node_id());
+        BtreeNodePtr child_node = BtreeSpecificImplDeclType::read_node(child_ptr.get_node_id());
 
         lock_node(child_node, omds::thread::LOCKTYPE_READ);
         unlock_node(my_node, omds::thread::locktype::LOCKTYPE_READ);
@@ -342,7 +357,7 @@ private:
     }
 
 #ifdef NEED_REWRITE
-    uint32_t do_multiget(AbstractNodePtr my_node, const BtreeRegExKey &rkey, uint32_t max_nvalues,
+    uint32_t do_multiget(BtreeNodePtr my_node, const BtreeRegExKey &rkey, uint32_t max_nvalues,
                          std::vector<std::pair<BtreeKey *, BtreeValue *>> &out_values) {
         if (my_node->is_leaf()) {
             auto result = my_node->find(key, outkey, outval);
@@ -352,7 +367,7 @@ private:
 
         BNodeptr child_ptr;
         auto result = my_node->find(rkey, nullptr, &child_ptr);
-        AbstractNodePtr child_node = read_node(child_ptr.get_node_id());
+        BtreeNodePtr child_node = read_node(child_ptr.get_node_id());
 
         lock_node(child_node, omds::thread::LOCKTYPE_READ);
         unlock_node(my_node, true);
@@ -374,7 +389,7 @@ private:
      * it to be locked too. If it is able to successfully upgrade it continue to retain its
      * old lock. If failed to upgrade, will release all locks.
      */
-    bool upgrade_node(AbstractNodePtr my_node, AbstractNodePtr child_node, omds::thread::locktype &cur_lock,
+    bool upgrade_node(BtreeNodePtr my_node, BtreeNodePtr child_node, omds::thread::locktype &cur_lock,
                       omds::thread::locktype child_cur_lock) {
         uint64_t prev_gen;
         bool ret = true;
@@ -414,7 +429,7 @@ private:
 
                 // Its ok to free after unlock, because the chain has been already cut when the node is invalidated.
                 // So no one would have entered here after the chain is cut.
-                free_node(my_node);
+                BtreeSpecificImplDeclType::free_node(my_node);
                 m_stats.dec_count(my_node->is_leaf() ? BTREE_STATS_LEAF_NODE_COUNT : BTREE_STATS_INT_NODE_COUNT);
             }
             ret = false;
@@ -445,7 +460,7 @@ private:
     /* This method tries to get the child node from an interior parent node, based on the key. It also provides the
      * index within the parent node, which is pointing to the child node. In case if the child node is an edge node,
      * instead of creating a new child node */
-    AbstractNodePtr get_child_node(AbstractNodePtr int_node, omds::thread::locktype curlock, const BtreeKey &key,
+    BtreeNodePtr get_child_node(BtreeNodePtr int_node, omds::thread::locktype curlock, const BtreeKey &key,
                                  int *out_ind) {
         BNodeptr childptr;
 
@@ -485,7 +500,7 @@ private:
     }
 #endif
 
-    AbstractNodePtr get_child_node(AbstractNodePtr int_node, const BtreeSearchRange &range,
+    BtreeNodePtr get_child_node(BtreeNodePtr int_node, const BtreeSearchRange &range,
                                        int *outind, bool *is_found) {
         BNodeptr child_ptr;
 
@@ -508,7 +523,7 @@ private:
             *is_found = true;
         }
 
-        return read_node(child_ptr.get_node_id());
+        return BtreeSpecificImplDeclType::read_node(child_ptr.get_node_id());
     }
 
     /* This function does the heavy lifiting of co-ordinating inserts. It is a recursive function which walks
@@ -524,14 +539,14 @@ private:
      * ind_hint    = If we already know which slot to insert to, if not -1
      * put_type    = Type of the put (refer to structure PutType)
      */
-    bool do_put(AbstractNodePtr my_node, omds::thread::locktype curlock, const BtreeKey &k, const BtreeValue &v,
+    bool do_put(BtreeNodePtr my_node, omds::thread::locktype curlock, const BtreeKey &k, const BtreeValue &v,
                 int ind_hint, PutType put_type) {
         if (my_node->is_leaf()) {
             assert(curlock == LOCKTYPE_WRITE);
 
             bool ret = my_node->put(k, v, put_type);
             if (ret) {
-                write_node(my_node);
+                BtreeSpecificImplDeclType::write_node(my_node);
                 m_stats.inc_count(BTREE_STATS_OBJ_COUNT);
             }
             unlock_node(my_node, curlock);
@@ -548,7 +563,7 @@ private:
         // Get the childPtr for given key.
         int ind = ind_hint;
         bool is_found;
-        AbstractNodePtr child_node = get_child_node(my_node, BtreeSearchRange(k), &ind, &is_found);
+        BtreeNodePtr child_node = get_child_node(my_node, BtreeSearchRange(k), &ind, &is_found);
         if (!is_found || (child_node == nullptr)) {
             // Either the node was updated or mynode is freed. Just proceed again from top.
             return false;
@@ -592,14 +607,14 @@ private:
         // have been unlocked by the recursive function and it could also been deleted.
     }
 
-    btree_status_t do_remove(AbstractNodePtr my_node, omds::thread::locktype curlock, const BtreeSearchRange &range,
+    btree_status_t do_remove(BtreeNodePtr my_node, omds::thread::locktype curlock, const BtreeSearchRange &range,
                              BtreeKey *outkey, BtreeValue *outval) {
         if (my_node->is_leaf()) {
             assert(curlock == LOCKTYPE_WRITE);
 
             bool is_found = my_node->remove_one(range, outkey, outval);
             if (is_found) {
-                write_node(my_node);
+                BtreeSpecificImplDeclType::write_node(my_node);
                 m_stats.dec_count(BTREE_STATS_OBJ_COUNT);
             } else {
 #ifndef NDEBUG
@@ -619,7 +634,7 @@ private:
         int ind;
 
         bool is_found = true;
-        AbstractNodePtr child_node = get_child_node(my_node, range, &ind, &is_found);
+        BtreeNodePtr child_node = get_child_node(my_node, range, &ind, &is_found);
         if (!is_found || (child_node == nullptr)) {
             unlock_node(my_node, curlock);
             return BTREE_NOT_FOUND;
@@ -672,10 +687,10 @@ private:
     void check_split_root(const BtreeKey &k, const BtreeValue &v) {
         int ind;
         K split_key;
-        AbstractNodePtr new_root_int_node = nullptr;
+        BtreeNodePtr new_root_int_node = nullptr;
 
         m_btree_lock.write_lock();
-        AbstractNodePtr root = read_node(m_root_node);
+        BtreeNodePtr root = BtreeSpecificImplDeclType::read_node(m_root_node);
         lock_node(root, locktype::LOCKTYPE_WRITE);
 
         if (!root->is_split_needed(m_btree_cfg, k, v, &ind)) {
@@ -698,10 +713,10 @@ private:
     }
 
     void check_collapse_root() {
-        AbstractNodePtr child_node = nullptr;
+        BtreeNodePtr child_node = nullptr;
 
         m_btree_lock.write_lock();
-        AbstractNodePtr root = read_node(m_root_node);
+        BtreeNodePtr root = BtreeSpecificImplDeclType::read_node(m_root_node);
         lock_node(root, locktype::LOCKTYPE_WRITE);
 
         if (root->get_total_entries() != 0) {
@@ -710,12 +725,12 @@ private:
         }
 
         assert(root->get_edge_id() != INVALID_BNODEID);
-        child_node = read_node(root->get_edge_id());
+        child_node = BtreeSpecificImplDeclType::read_node(root->get_edge_id());
         assert(child_node != nullptr);
 
         // Elevate the edge child as root.
         unlock_node(root, locktype::LOCKTYPE_WRITE);
-        free_node(root);
+        BtreeSpecificImplDeclType::free_node(root);
         m_stats.dec_count(BTREE_STATS_INT_NODE_COUNT);
         m_root_node = child_node->get_node_id();
 
@@ -724,17 +739,17 @@ private:
         m_btree_lock.unlock();
     }
 
-    void split_node(AbstractNodePtr parent_node, AbstractNodePtr child_node, uint32_t parent_ind,
+    void split_node(BtreeNodePtr parent_node, BtreeNodePtr child_node, uint32_t parent_ind,
                     BtreeKey *out_split_key) {
         BNodeptr nptr;
 
         // Create a new child node and split the keys by half.
-        AbstractNodePtr child_node1 = child_node;
-        AbstractNodePtr child_node2 = child_node->is_leaf() ? alloc_leaf_node() : alloc_interior_node();
+        BtreeNodePtr child_node1 = child_node;
+        BtreeNodePtr child_node2 = child_node->is_leaf() ? alloc_leaf_node() : alloc_interior_node();
 
         child_node2->set_next_bnode(child_node1->get_next_bnode());
         child_node1->set_next_bnode(child_node2->get_node_id());
-        child_node1->move_out_to_right_by_size(m_btree_cfg, *child_node2, m_btree_cfg.get_split_size());
+        child_node1->move_out_to_right_by_size(m_btree_cfg, child_node2, m_btree_cfg.get_split_size());
 
         // Update the existing parent node entry to point to second child ptr.
         nptr.set_node_id(child_node2->get_node_id());
@@ -745,9 +760,9 @@ private:
         nptr.set_node_id(child_node1->get_node_id());
         parent_node->insert(*out_split_key, nptr);
 
-        write_node(child_node1);
-        write_node(child_node2);
-        write_node(parent_node);
+        BtreeSpecificImplDeclType::write_node(child_node1);
+        BtreeSpecificImplDeclType::write_node(child_node2);
+        BtreeSpecificImplDeclType::write_node(parent_node);
         //release_node(child_node2);
 
 #ifndef NDEBUG
@@ -763,182 +778,9 @@ private:
         // shifted parentNode to the right.
     }
 
-#if 0
-    bool merge_nodes(AbstractNodePtr parent_node, vector< int > &indices_list) {
-        vector< AbstractNodePtr  > nodes(indices_list.size());
-        BNodeptr child_ptr;
-        uint32_t ntotal_entries = 0;
-        int i;
-        int n;
-        bool ret = true;
-        AbstractNodePtr cur_last_n = nullptr;
-        AbstractNodePtr prev_last_n = nullptr;
-
-        for (i = 0; i < indices_list.size(); i++) {
-            parent_node->get(indices_list[i], &child_ptr, false /* copy */);
-
-            nodes[i] = read_node(child_ptr.get_node_id());
-            lock_node(nodes[i], locktype::LOCKTYPE_WRITE);
-            ntotal_entries += nodes[i]->get_total_entries();
-        }
-
-#if 0
-        #ifdef DEBUG
-        cout << "Before Merge Nodes" << endl;
-        cout << "#####################" << endl;
-        cout << "Parent Node " << endl;
-        AbstractNode::castAndPrint(parent_node);
-        cout << "Child Node(s) " << endl;
-        for (i = 0; i < indices_list.size(); i++) {
-            AbstractNode::castAndPrint(nodes[i]);
-        }
-#endif
-#endif
-
-        // Fill only upto 90% of keys, beyond which will cause subsequent
-        // insert to split again.
-#define FILL_PERCENT 0.9
-        uint32_t max_fill_entries = (double) nodes[0]->get_max_entries(m_btree_cfg) * FILL_PERCENT;
-
-        uint32_t new_node_count = (ntotal_entries - 1) / max_fill_entries + 1;
-        if (new_node_count >= indices_list.size()) {
-            // We share equally across all available nodes
-            max_fill_entries = (ntotal_entries - 1) / indices_list.size() + 1;
-            assert(max_fill_entries <= nodes[0]->get_max_entries(m_btree_cfg));
-
-            // We do share only if even after splitting, amount of entries remain is better than minimal nodes. Use the
-            // last node, since it will have least entries
-            if (nodes[new_node_count - 1]->is_minimal(max_fill_entries)) {
-                ret = false;
-                goto done;
-            }
-        }
-
-        do_merge_nodes(nodes, 0, 0, max_fill_entries);
-
-        // Now that we merged the nodes, we will update the parent indices with corresponding nodes last key.
-        // Start from the last to first, to cover edge entries as well.
-        i = indices_list.size() - 1;
-        n = new_node_count - 1;
-
-        while ((i >= 0) && (n >= 0)) {
-            BNodeptr nptr(nodes[n]->get_node_id());
-            if (indices_list[i] == parent_node->get_total_entries()) {
-                parent_node->update(indices_list[i], nptr);
-            } else {
-                K last_key;
-                nodes[n]->get_last_key(&last_key);
-                parent_node->update(indices_list[i], last_key, nptr);
-            }
-            i--;
-            n--;
-        }
-        assert(n == -1);
-
-        // Remove the extra entries from parent node.
-        while (i >= 0) {
-            parent_node->remove(indices_list[i--]);
-        }
-
-        // Write parent node to store
-        write_node(parent_node);
-
-        // Point the remaining last node next to current last node next
-        cur_last_n = nodes[new_node_count - 1];
-        prev_last_n = nodes[nodes.size() - 1];
-        cur_last_n->set_next_bnode(prev_last_n->get_next_bnode());
-
-#if 0
-#ifdef DEBUG
-        cout << "After Merge Nodes" << endl;
-        cout << "#####################" << endl;
-        cout << "Parent Node " << endl;
-        AbstractNode::castAndPrint(parent_node);
-        cout << "Child Node(s) " << endl;
-#endif
-#endif
-
-        done:
-        // Unlock all the nodes, so that caller can choose to restart.
-        for (n = 0; n < nodes.size(); n++) {
-            bool free_n = false;
-
-#if 0
-            #ifdef DEBUG
-            AbstractNode::castAndPrint(nodes[n]);
-#endif
-#endif
-            if (n >= new_node_count) {
-                // Free up remaining nodes only if nodes does not have upgrade waiters. Any upgrade waiters would just
-                // invalidate this node, which will be freed by last waiter.
-                if (nodes[n]->any_upgrade_waiters()) {
-                    nodes[n]->set_valid_node(false);
-                } else {
-                    free_n = true;
-                }
-            }
-
-            // If we have merged and not going to free the node we need to write it to store.
-            if (ret && !free_n) {
-                write_node(nodes[n]);
-            }
-
-            if (free_n) {
-                unlock_node(nodes[n], false);
-                assert(nodes[n]->get_total_entries() == 0);
-                free_node(nodes[n]);
-            } else {
-                unlock_node(nodes[n], true);
-            }
-        }
-
-        return ret;
-    }
-
-    /*
-     * This function recursively merges with next node in-place. Each iteration accommodates
-     * what is left over from previous node and move over its right keys to next node (by
-     * recursing). In case current node has more room, pull in until we are full.
-     *
-     */
-    void do_merge_nodes(vector< AbstractNodePtr  > &nodes, uint32_t node_start_ind, int prev_entry_count,
-                        uint32_t max_fill_entries) {
-        assert(prev_entry_count >= 0);
-
-        if (node_start_ind == nodes.size()) {
-            return;
-        }
-
-        AbstractNodePtr n = nodes[node_start_ind];
-
-        // We can only fill maxFillEntries and out of which prevEntryCount has to be accommodated.
-        int avail_slots = max_fill_entries - n->get_total_entries() - prev_entry_count;
-
-        // If we have still more room, just pull in most from next nodes as much as possible.
-        uint32_t next_node_ind = node_start_ind + 1;
-        while ((avail_slots > 0) && (next_node_ind < nodes.size())) {
-            AbstractNodePtr nextn = nodes[next_node_ind++];
-            uint32_t pull_entries = min(avail_slots, (int) nextn->get_total_entries());
-            n->move_in_from_right_by_entries(*nextn, pull_entries);
-
-            avail_slots -= pull_entries;
-        }
-
-        uint32_t arrear_entry_count = (avail_slots < 0) ? (avail_slots * (-1)) : 0;
-        do_merge_nodes(nodes, node_start_ind + 1, arrear_entry_count, max_fill_entries);
-
-        // Now we should have room to write all prev nodes arrear entries.
-        if (prev_entry_count != 0) {
-            assert(node_start_ind != 0);
-            AbstractNodePtr prevn = nodes[node_start_ind - 1];
-            prevn->move_out_to_right_by_entries(*n, prev_entry_count);
-        }
-    }
-#endif
-
-    auto merge_nodes(AbstractNodePtr parent_node, std::vector< int > &indices_list) {
+    auto merge_nodes(BtreeNodePtr parent_node, std::vector< int > &indices_list) {
         struct merge_info {
-            AbstractNodePtr node;
+            BtreeNodePtr node;
             uint16_t  parent_index;
             bool freed;
             bool modified;
@@ -959,7 +801,7 @@ private:
             parent_node->get(indices_list[i], &child_ptr, false /* copy */);
 
             merge_info m;
-            m.node = read_node(child_ptr.get_node_id());
+            m.node = BtreeSpecificImplDeclType::read_node(child_ptr.get_node_id());
             m.freed = false;
             m.modified = false;
             m.parent_index = indices_list[i];
@@ -986,7 +828,7 @@ private:
             if (minfo[i].node->get_occupied_size(m_btree_cfg) < balanced_size) {
                 // We have room to pull some from next node
                 uint32_t pull_size = balanced_size - minfo[i].node->get_occupied_size(m_btree_cfg);
-                if (minfo[i].node->move_in_from_right_by_size(m_btree_cfg, *minfo[j].node, pull_size)) {
+                if (minfo[i].node->move_in_from_right_by_size(m_btree_cfg, minfo[j].node, pull_size)) {
                     minfo[i].modified = true;
                     ret.merged = true;
                 }
@@ -1007,8 +849,8 @@ private:
             // and get all in and try to avoid additional minimal node hanging around.
             if ((j == minfo.size()-1) &&
                     (minfo[j].node->get_occupied_size(m_btree_cfg) <= m_btree_cfg.get_merge_suggested_size()) &&
-                    balanced_size != m_btree_cfg.get_node_size()) {
-                balanced_size = m_btree_cfg.get_node_size();
+                    balanced_size != NodeSize) {
+                balanced_size = NodeSize;
                 continue;
             }
 
@@ -1019,21 +861,12 @@ private:
         // Its time to write the parent node and loop again to write all modified nodes and free freed nodes
         DCVLOG(VMOD_BTREE_MERGE, 4) << "After merging node\n########################Parent Node: "
                                     << parent_node->to_string();
-        write_node(parent_node);
+        BtreeSpecificImplDeclType::write_node(parent_node);
         assert(!minfo[0].freed); // If we merge it, we expect the left most one has at least 1 entry.
         // TODO: Above assumption will not be valid if we are merging all empty nodes. Need to study that.
 
         for (auto n = 0; n < minfo.size(); n++) {
-            if (minfo[n].freed) {
-                DCVLOG(VMOD_BTREE_MERGE, 2) << "Child Node " << n << ": Freeing the node id = "
-                                            << minfo[n].node->get_node_id().to_integer();
-                if (minfo[n].node->any_upgrade_waiters()) {
-                    minfo[n].node->set_valid_node(false);
-                } else {
-                    free_node(minfo[n].node);
-                    m_stats.dec_count(minfo[n].node->is_leaf() ? BTREE_STATS_LEAF_NODE_COUNT : BTREE_STATS_INT_NODE_COUNT);
-                }
-            } else if (minfo[n].modified) {
+            if (minfo[n].modified && !minfo[n].freed) {
                 // If we have indeed modified, lets get the last key and put in the entry into parent node
                 BNodeptr nptr(minfo[n].node->get_node_id());
                 if (minfo[n].parent_index == parent_node->get_total_entries()) {
@@ -1045,19 +878,25 @@ private:
                 }
 
                 DCVLOG(VMOD_BTREE_MERGE, 4) << "Child Node " << n << ":\n" << minfo[n].node->to_string();
-                write_node(minfo[n].node);
+                BtreeSpecificImplDeclType::write_node(minfo[n].node);
             }
         }
 
-        // Loop again in reverse order to unlock the nodes. Freed nodes need not be unlocked
+        // Loop again in reverse order to unlock the nodes. freeable nodes need to be unlocked and freed
         for (int n = minfo.size()-1; n >= 0; n--) {
-            if (!minfo[n].freed) {
-                unlock_node(minfo[n].node, locktype::LOCKTYPE_WRITE);
-#ifndef DEBUG
+            if (minfo[n].freed) {
+                DCVLOG(VMOD_BTREE_MERGE, 2) << "Child Node " << n << ": Freeing the node id = "
+                                            << minfo[n].node->get_node_id().to_integer();
+                if (minfo[n].node->any_upgrade_waiters()) {
+                    minfo[n].node->set_valid_node(false);
+                    unlock_node(minfo[n].node, locktype::LOCKTYPE_WRITE);
+                } else {
+                    unlock_node(minfo[n].node, locktype::LOCKTYPE_WRITE);
+                    BtreeSpecificImplDeclType::free_node(minfo[n].node);
+                    m_stats.dec_count(minfo[n].node->is_leaf() ? BTREE_STATS_LEAF_NODE_COUNT : BTREE_STATS_INT_NODE_COUNT);
+                }
             } else {
-                // We need to explicitly removed the order, other it will cause false assert
-                dec_check_lock_debug(minfo[n].node, locktype::LOCKTYPE_WRITE);
-#endif
+                unlock_node(minfo[n].node, locktype::LOCKTYPE_WRITE);
             }
         }
 
@@ -1065,28 +904,28 @@ private:
         return ret;
     }
 
-    AbstractNodePtr alloc_leaf_node() {
-        AbstractNodePtr n = alloc_node(m_btree_cfg.get_leaf_node_type(), true /* isLeaf */);
+    BtreeNodePtr alloc_leaf_node() {
+        BtreeNodePtr n = BtreeSpecificImplDeclType::alloc_node(true /* is_leaf */);
         n->set_leaf(true);
         m_stats.inc_count(BTREE_STATS_LEAF_NODE_COUNT);
         return n;
     }
 
-    AbstractNodePtr alloc_interior_node() {
-        AbstractNodePtr n = alloc_node(m_btree_cfg.get_interior_node_type(), false /* isLeaf */);
+    BtreeNodePtr alloc_interior_node() {
+        BtreeNodePtr n = BtreeSpecificImplDeclType::alloc_node(false /* isLeaf */);
         n->set_leaf(false);
         m_stats.inc_count(BTREE_STATS_INT_NODE_COUNT);
         return n;
     }
 
-    void lock_node(AbstractNodePtr node, omds::thread::locktype type) {
+    void lock_node(BtreeNodePtr node, omds::thread::locktype type) {
         node->lock(type);
 #ifndef NDEBUG
         inc_lock_debug(node, type);
 #endif
     }
 
-    void unlock_node(AbstractNodePtr node, omds::thread::locktype type) {
+    void unlock_node(BtreeNodePtr node, omds::thread::locktype type) {
         node->unlock(type);
 #ifndef NDEBUG
         dec_check_lock_debug(node, type);
@@ -1116,7 +955,7 @@ private:
         }
     }
 
-    static void inc_lock_debug(AbstractNodePtr node, locktype ltype) {
+    static void inc_lock_debug(BtreeNodePtr node, locktype ltype) {
         if (ltype == LOCKTYPE_WRITE) {
             wr_locked_nodes[wr_locked_count++] = node.get();
         } else if (ltype == LOCKTYPE_READ) {
@@ -1125,8 +964,8 @@ private:
 //        std::cout << "lock_node: node = " << (void *)node << " Locked count = " << locked_count << std::endl;
     }
 
-    static void dec_check_lock_debug(AbstractNodePtr node, locktype ltype) {
-        std::array<AbstractNode<K, V, NodeSize> *, MAX_BTREE_DEPTH> *pnodes;
+    static void dec_check_lock_debug(BtreeNodePtr node, locktype ltype) {
+        std::array<BtreeNodeDeclType *, MAX_BTREE_DEPTH> *pnodes;
         int *pcount;
         if (ltype == LOCKTYPE_WRITE) {
             pnodes = &wr_locked_nodes;
@@ -1157,39 +996,11 @@ private:
 #endif
 
 protected:
-    void init_btree(const BtreeConfig &cfg) {
-        m_btree_cfg = cfg;
-
-        // TODO: Raise Exception when maxObjs > 2 Billion
-        assert(m_btree_cfg.get_node_size() != 0);
-
-        // Give leeway for node header in node size.
-        uint32_t node_area_size = m_btree_cfg.get_node_size() - m_btree_cfg.get_node_header_size() -
-                sizeof(AbstractNode<K, V, NodeSize>);
-
-        // calculate number of nodes
-        uint32_t max_leaf_nodes = (m_btree_cfg.get_max_objs() *
-                                   (m_btree_cfg.get_max_key_size() + m_btree_cfg.get_max_value_size()))
-                                  / node_area_size + 1;
-        max_leaf_nodes += (100 * max_leaf_nodes) / 60; // Assume 60% btree full
-
-        // Assume 5% for interior nodes
-        m_max_nodes = max_leaf_nodes + ((double) max_leaf_nodes * 0.05) + 1;
-
-        m_btree_cfg.calculate_max_leaf_entries_per_node();
-        m_btree_cfg.calculate_max_interior_entries_per_node();
-
-        m_root_node = INVALID_BNODEID;
-
-        m_inited = true;
-    }
-
     void create_root_node() {
         // Assign one node as root node and initially root is leaf
-        AbstractNodePtr root = alloc_leaf_node();
+        BtreeNodePtr root = alloc_leaf_node();
         m_root_node = root->get_node_id();
-        write_node(root);
-        //release_node(root);
+        BtreeSpecificImplDeclType::write_node(root);
     }
 
     virtual uint32_t get_max_nodes() {
@@ -1201,7 +1012,7 @@ protected:
     }
 
 #if 0
-    void release_node(AbstractNodePtr node)
+    void release_node(BtreeNodePtr node)
     {
         node->derefNode();
     }
@@ -1209,17 +1020,21 @@ protected:
 };
 
 #ifndef NDEBUG
-template <typename K, typename V, size_t NodeSize>
-thread_local int Btree<K, V, NodeSize>::wr_locked_count = 0;
+template<btree_type BtreeType, typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType,
+        size_t NodeSize>
+thread_local int BtreeDeclType::wr_locked_count = 0;
 
-template <typename K, typename V, size_t NodeSize>
-thread_local std::array<AbstractNode<K, V, NodeSize> *, MAX_BTREE_DEPTH> Btree<K, V, NodeSize>::wr_locked_nodes = {{}};
+template<btree_type BtreeType, typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType,
+        size_t NodeSize>
+thread_local std::array<BtreeNodeDeclType *, MAX_BTREE_DEPTH> BtreeDeclType::wr_locked_nodes = {{}};
 
-template <typename K, typename V, size_t NodeSize>
-thread_local int Btree<K, V, NodeSize>::rd_locked_count = 0;
+template<btree_type BtreeType, typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType,
+        size_t NodeSize>
+thread_local int BtreeDeclType::rd_locked_count = 0;
 
-template <typename K, typename V, size_t NodeSize>
-thread_local std::array<AbstractNode<K, V, NodeSize> *, MAX_BTREE_DEPTH> Btree<K, V, NodeSize>::rd_locked_nodes = {{}};
+template<btree_type BtreeType, typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType,
+        size_t NodeSize>
+thread_local std::array<BtreeNodeDeclType *, MAX_BTREE_DEPTH> BtreeDeclType::rd_locked_nodes = {{}};
 
 #endif
 

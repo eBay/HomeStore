@@ -8,7 +8,7 @@
 #ifndef BTREE_VARLEN_NODE_HPP_
 #define BTREE_VARLEN_NODE_HPP_
 
-#include "abstract_node.hpp"
+#include "physical_node.hpp"
 #include <cassert>
 
 namespace omds { namespace btree {

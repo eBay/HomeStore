@@ -10,7 +10,7 @@
 #define BTREE_ABSTRACTNODE_HPP_
 
 #include <iostream>
-#include <assert.h>
+#include <cassert>
 #include <pthread.h>
 #include "btree_internal.h"
 #include <glog/logging.h>
@@ -20,8 +20,7 @@
 
 using namespace std;
 
-namespace omds {
-namespace btree {
+namespace omds { namespace btree {
 
 #if 0
 #define container_of(ptr, type, member) ({                      \
@@ -43,84 +42,16 @@ typedef struct __attribute__((__packed__)) {
     bnodeid_t edge_entry;
 } persistent_hdr_t;
 
-typedef struct __attribute__((__packed__)) {
-    folly::SharedMutexReadPriority lock;
-    omds::atomic_counter< uint16_t > upgraders;
-    omds::atomic_counter< int16_t > refcount;
-} transient_hdr_t;
-
-template <typename K, typename V, size_t NodeSize>
-class AbstractNode {
+#define PhysicalNodeDeclType  PhysicalNode<VNode, K, V, NodeSize>
+template <typename VNode, typename K, typename V, size_t NodeSize>
+class PhysicalNode {
 protected:
-    transient_hdr_t m_trans_header;
     persistent_hdr_t m_pers_header;
     uint8_t m_node_area[0];
 
-    /*************** Class Definitions ******************
-    ///////// Helper methods for CRUD on a node ////////////////////
-    void insert(BtreeKey& key, BtreeValue& val);
-    bool remove(BtreeKey &key);
-    void update(BtreeKey& key, BtreeValue& val);
-
-    // Find the slot where the key is present. If not present, return the closest location for the key.
-    // Assumption: Node lock is already taken
-    bool find(BtreeKey &key, BtreeKey *outkey, BtreeValue *outval, int *outind) const;
-
-    void get_last_key(BtreeKey *out_lastkey);
-    void get_first_key(BtreeKey *out_firstkey);
-
-    void lock(omds::thread::locktype_t l);
-    void unlock(bool deref = true);
-
-
-protected:
-    uint32_t bsearch(int start, int end, BtreeKey &key, bool *is_found) const;
-
-     ************** Class Definitions ******************/
-
-public:
-    ////////// Top level functions (CRUD on a node) //////////////////
-    virtual void get(int ind, BtreeValue *outval, bool copy) const = 0;
-    virtual void insert(int ind, const BtreeKey &key, const BtreeValue &val) = 0;
-    virtual void remove(int ind) = 0;
-    virtual void update(int ind, const BtreeValue &val) = 0;
-    virtual void update(int ind, const BtreeKey &key, const BtreeValue &val) = 0;
-
-#ifndef NDEBUG
-    virtual std::string to_string() const = 0;
-#endif
-
-    /* Provides the occupied data size within the node */
-    virtual uint32_t get_available_size(const BtreeConfig &cfg) const = 0;
-
-    ///////////// Move and Delete related operations on a node //////////////
-    virtual bool is_split_needed(const BtreeConfig &cfg, const BtreeKey &k, const BtreeValue &v,
-                                 int *out_ind_hint) const = 0;
-
-    /* Following methods need to make best effort to move from other node upto provided entries or size. It should
-     * return how much it was able to move actually (either entries or size)
-     */
-    virtual uint32_t move_out_to_right_by_entries(const BtreeConfig &cfg, AbstractNode &other_node,
-                                                  uint32_t nentries) = 0;
-    virtual uint32_t move_out_to_right_by_size(const BtreeConfig &cfg, AbstractNode &other_node,
-                                               uint32_t size) = 0;
-    virtual uint32_t move_in_from_right_by_entries(const BtreeConfig &cfg, AbstractNode &other_node,
-                                                   uint32_t nentries) = 0;
-    virtual uint32_t move_in_from_right_by_size(const BtreeConfig &cfg, AbstractNode &other_node,
-                                                uint32_t size) = 0;
-
-protected:
-    virtual uint32_t get_nth_obj_size(int ind) const = 0;
-    virtual void get_nth_key(int ind, BtreeKey *outkey, bool copy) const = 0;
-    virtual void get_nth_value(int ind, BtreeValue *outval, bool copy) const = 0;
-
-    // Compares the nth key (n=ind) with given key (cmp_key) and returns -1, 0, 1 if cmp_key <=> nth_key respectively
-    virtual int compare_nth_key(const BtreeKey &cmp_key, int ind) const = 0;
-
-public:
-    AbstractNode(bnodeid_t id, bool init_pers, bool init_trans) {
-        if (init_pers) {
-            set_node_type(BTREE_NODETYPE_SIMPLE);
+ public:
+    PhysicalNode(bnodeid_t id, bool init) {
+        if (init) {
             set_leaf(true);
             set_total_entries(0);
             set_next_bnode(INVALID_BNODEID);
@@ -131,57 +62,13 @@ public:
         } else {
             assert(get_node_id() == id);
         }
-
-        if (init_trans) {
-            memset(get_transient_header(), 0, sizeof(transient_hdr_t));
-            reset_reference();
-            get_transient_header()->upgraders.set(0);
-        }
     }
 
-    ~AbstractNode() {
+    ~PhysicalNode() {
     }
 
     persistent_hdr_t *get_persistent_header() {
         return &m_pers_header;
-    }
-
-    transient_hdr_t *get_transient_header() {
-        return &m_trans_header;
-    }
-
-    void lock(omds::thread::locktype l) {
-        if (l == omds::thread::LOCKTYPE_NONE) {
-            return;
-        } else if (l == omds::thread::LOCKTYPE_READ) {
-            get_transient_header()->lock.lock_shared();
-        } else {
-            get_transient_header()->lock.lock();
-        }
-    }
-
-    void unlock(omds::thread::locktype l) {
-        if (l == omds::thread::LOCKTYPE_NONE) {
-            return;
-        } else if (l == omds::thread::LOCKTYPE_READ) {
-            get_transient_header()->lock.unlock_shared();
-        } else {
-            get_transient_header()->lock.unlock();
-        }
-    }
-
-    void lock_upgrade() {
-        get_transient_header()->upgraders.increment(1);
-        this->unlock(omds::thread::LOCKTYPE_READ);
-        this->lock(omds::thread::LOCKTYPE_WRITE);
-    }
-
-    void lock_acknowledge() {
-        get_transient_header()->upgraders.decrement(1);
-    }
-
-    bool any_upgrade_waiters() {
-        return (!get_transient_header()->upgraders.testz());
     }
 
     uint32_t get_total_entries() const {
@@ -208,14 +95,6 @@ public:
         get_persistent_header()->nentries -= subn;
     }
 
-    uint32_t get_max_entries(const BtreeConfig &cfg) const {
-        return (is_leaf() ? cfg.get_max_leaf_entries_per_node() : cfg.get_max_interior_entries_per_node());
-    }
-
-    uint32_t available_slots(const BtreeConfig &cfg) {
-        return (get_max_entries(cfg) - get_total_entries());
-    }
-
     void set_node_id(bnodeid_t id) {
         get_persistent_header()->node_id = id;
     }
@@ -233,16 +112,16 @@ public:
         get_persistent_header()->leaf = leaf;
     }
 
-    btree_nodetype_t get_node_type() {
-        return (btree_nodetype_t) get_persistent_header()->node_type;
+    btree_node_type get_node_type() const {
+        return (btree_node_type) m_pers_header.node_type;
     }
 
-    void set_node_type(btree_nodetype_t t) {
+    void set_node_type(btree_node_type t) {
         get_persistent_header()->node_type = t;
     }
 
-    uint64_t get_gen() {
-        return get_persistent_header()->node_gen;
+    uint64_t get_gen() const {
+        return m_pers_header.node_gen;
     }
 
     void inc_gen() {
@@ -261,22 +140,6 @@ public:
         return m_pers_header.valid_node;
     }
 
-    void ref_node() {
-        get_transient_header()->refcount.increment();
-    }
-
-    bool deref_node() {
-        return get_transient_header()->refcount.decrement_testz();
-    }
-
-    void reset_reference() {
-        get_transient_header()->refcount.set(0);
-    }
-
-    int16_t get_reference() const {
-        return (m_trans_header.refcount.get());
-    }
-
     uint8_t *get_node_area_mutable() {
         return m_node_area;
     }
@@ -285,12 +148,8 @@ public:
         return m_node_area;
     }
 
-    uint32_t get_node_area_size(const BtreeConfig &cfg) const {
-        return (uint32_t) (cfg.get_node_size() - cfg.get_node_header_size() - (get_node_area() - (uint8_t *)this));
-    }
-
     uint32_t get_occupied_size(const BtreeConfig &cfg) const {
-        return (get_node_area_size(cfg) - get_available_size(cfg));
+        return (cfg.get_node_area_size() - to_variant_node_const()->get_available_size(cfg));
     }
 
     uint32_t get_suggested_min_size(const BtreeConfig &cfg) const {
@@ -317,16 +176,6 @@ public:
         get_persistent_header()->edge_entry = edge;
     }
 
-    friend void intrusive_ptr_add_ref(AbstractNode<K, V, NodeSize> *n) {
-        n->ref_node();
-    }
-
-    friend void intrusive_ptr_release(AbstractNode<K, V, NodeSize> *n) {
-        if (n->deref_node()) {
-            BtreeNodeAllocator<NodeSize>::deallocate((uint8_t *)n);
-        }
-    }
-
     ////////// Top level functions (CRUD on a node) //////////////////
     // Find the slot where the key is present. If not present, return the closest location for the key.
     // Assumption: Node lock is already taken
@@ -342,22 +191,22 @@ public:
         }
 
         if (outval) {
-            get(result.end_of_search_index, outval, true /* copy */);
+            to_variant_node_const()->get(result.end_of_search_index, outval, true /* copy */);
         }
 
         if (!range.is_simple_search() && outkey) {
-            get_nth_key(result.end_of_search_index, outkey, true /* copy */);
+            to_variant_node_const()->get_nth_key(result.end_of_search_index, outkey, true /* copy */);
         }
 
         return result;
     }
 
     virtual void get_last_key(BtreeKey *out_lastkey) {
-        return get_nth_key(get_total_entries() - 1, out_lastkey, false);
+        return to_variant_node()->get_nth_key(get_total_entries() - 1, out_lastkey, false);
     }
 
     virtual void get_first_key(BtreeKey *out_firstkey) {
-        return get_nth_key(0, out_firstkey, false);
+        return to_variant_node()->get_nth_key(0, out_firstkey, false);
     }
 
     bool put(const BtreeKey &key, const BtreeValue &val, PutType put_type) {
@@ -366,17 +215,19 @@ public:
 
         if (put_type == INSERT_ONLY_IF_NOT_EXISTS) {
             if (result.found) return false;
-            insert(result.end_of_search_index, key, val);
+            to_variant_node()->insert(result.end_of_search_index, key, val);
         } else if (put_type == REPLACE_ONLY_IF_EXISTS) {
             if (!result.found) return false;
-            update(result.end_of_search_index, key, val);
+            to_variant_node()->update(result.end_of_search_index, key, val);
         } else if (put_type == REPLACE_IF_EXISTS_ELSE_INSERT) {
-            (result.found) ? insert(result.end_of_search_index, key, val) : update(result.end_of_search_index, key, val);
+            (result.found) ? to_variant_node()->insert(result.end_of_search_index, key, val) :
+                             to_variant_node()->update(result.end_of_search_index, key, val);
         } else if (put_type == APPEND_ONLY_IF_EXISTS) {
             if (!result.found) return false;
             append(result.end_of_search_index, key, val);
         } else if (put_type == APPEND_IF_EXISTS_ELSE_INSERT) {
-            (result.found) ? insert(result.end_of_search_index, key, val) : append(result.end_of_search_index, key, val);
+            (result.found) ? to_variant_node()->insert(result.end_of_search_index, key, val) :
+                             append(result.end_of_search_index, key, val);
         } else {
             return false;
         }
@@ -387,7 +238,7 @@ public:
     void insert(const BtreeKey &key, const BtreeValue &val) {
         auto result = find(key, nullptr, nullptr);
         assert(!is_leaf() || (!result.found)); // We do not support duplicate keys yet
-        insert(result.end_of_search_index, key, val);
+        to_variant_node()->insert(result.end_of_search_index, key, val);
     }
 
     bool remove_one(const BtreeSearchRange &range, BtreeKey *outkey, BtreeValue *outval) {
@@ -396,16 +247,16 @@ public:
             return false;
         }
 
-        remove(result.end_of_search_index);
+        to_variant_node()->remove(result.end_of_search_index);
         return true;
     }
 
     void append(uint32_t index, const BtreeKey &key, const BtreeValue &val) {
         // Get the nth value and do a callback to update its blob with the new value, being passed
         V nth_val;
-        get_nth_value(index, &nth_val, false);
+        to_variant_node()->get_nth_value(index, &nth_val, false);
         nth_val.append_blob(val);
-        update(index, key, nth_val);
+        to_variant_node()->update(index, key, nth_val);
     }
 
     /* Update the key and value pair and after update if outkey and outval are non-nullptr, it fills them with
@@ -413,7 +264,7 @@ public:
     void update(const BtreeKey &key, const BtreeValue &val, BtreeKey *outkey, BtreeValue *outval) {
         auto result = find(key, outkey, outval);
         assert(result.found);
-        update(result.end_of_search_index, val);
+        to_variant_node()->update(result.end_of_search_index, val);
     }
 
     //////////// Edge Related Methods ///////////////
@@ -484,7 +335,7 @@ protected:
         while ((end - start) > 1) {
             mid = start + (end - start) / 2;
 
-            int x = compare_nth_key(*range.get_start_key(), mid);
+            int x = to_variant_node_const()->compare_nth_key(*range.get_start_key(), mid);
             if (x == 0) {
                 ret.found = true;
                 if (range.is_simple_search()) {
@@ -514,6 +365,13 @@ protected:
         return ret;
     }
 
+    VNode *to_variant_node() {
+        return static_cast<VNode *>(this);
+    }
+
+    const VNode *to_variant_node_const() const {
+        return static_cast<const VNode *>(this);
+    }
 }__attribute__((packed));
 
 }
