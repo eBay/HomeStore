@@ -15,7 +15,7 @@
 #include <thread>
 #include <sstream>
 #include "omds/bitmap/bitset.hpp"
-#include "omds/btree/mem_btree.hpp"
+#include "omds/btree/btree.hpp"
 #include <folly/ThreadLocal.h>
 #include <boost/range/irange.hpp>
 

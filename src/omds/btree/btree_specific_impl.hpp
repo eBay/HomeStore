@@ -27,7 +27,7 @@ template<
         size_t NodeSize>
 class BtreeSpecificImpl {
 public:
-    using HeaderType = uint8_t;
+    using HeaderType = omds::btree::EmptyClass;
 
 #if 0
 #define call_variant_method(bn, mname, ...) \

@@ -27,7 +27,12 @@ public:
     }
 };
 #endif
-typedef CacheBuffer< BlkId > BlkBuffer;
+
+class BlkBuffer : public CacheBuffer< BlkId > {
+    static BlkBuffer *make_object() {
+        return omds::ObjectAllocator< BlkBuffer >::make_object();
+    }
+};
 
 }
 #endif //OMSTORE_BLKBUFFER_HPP_HPP

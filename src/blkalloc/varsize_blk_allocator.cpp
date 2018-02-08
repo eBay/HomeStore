@@ -52,12 +52,10 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig &cfg) :
 
     // Create a btree to cache temperature, blks info (blk num, page id etc..)
     omds::btree::BtreeConfig btree_cfg;
-    btree_cfg.set_leaf_node_type(omds::btree::BTREE_NODETYPE_SIMPLE);
-    btree_cfg.set_interior_node_type(omds::btree::BTREE_NODETYPE_SIMPLE);
     btree_cfg.set_max_objs(cfg.get_max_cache_blks());
     btree_cfg.set_max_key_size(sizeof(VarsizeAllocCacheEntry));
     btree_cfg.set_max_value_size(0);
-    m_blk_cache = new omds::btree::MemBtree< VarsizeAllocCacheEntry, omds::btree::EmptyClass >(btree_cfg);
+    m_blk_cache = new VarsizeBlkAllocatorBtree(btree_cfg);
 
     // Start a thread which will do sweeping job of free segments
     m_thread_id = std::thread(thread_func, this);
@@ -126,11 +124,13 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
     VarsizeAllocCacheEntry end_entry(BLKID_RANGE_LAST, PAGEID_RANGE_LAST, BLKCOUNT_RANGE_LAST, TEMP_RANGE_LAST);
     VarsizeAllocCacheEntry actual_entry;
 
-    VarsizeAllocCacheSearch regex(start_entry, true /* start_inc */, end_entry, false /* end_incl */,
-                                     true /* lean_left */, &actual_entry);
+    omds::btree::BtreeSearchRange regex(start_entry, true, /* start_incl */
+                                        end_entry, false, /* end incl */
+                                        true /* lean_left */);
+    omds::btree::EmptyClass dummy_val;
     int attempt = 1;
     while (true) {
-        found = m_blk_cache->remove_any(regex);
+        found = m_blk_cache->remove_any(regex, &actual_entry, &dummy_val);
         if (found) {
             break;
         }
@@ -175,7 +175,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
         }
 
         omds::btree::EmptyClass dummy;
-        m_blk_cache->insert(excess_entry, dummy);
+        m_blk_cache->put(excess_entry, dummy, omds::btree::INSERT_ONLY_IF_NOT_EXISTS);
     } else {
         out_blkid->set(actual_entry.get_blk_num(), nblks);
     }
@@ -254,7 +254,7 @@ uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t portion_num, BlkAll
 
         VarsizeAllocCacheEntry entry;
         gen_cache_entry(b.start_bit, b.nbits, &entry);
-        m_blk_cache->insert(entry, dummy); // TODO: Trap the return status of insert
+        m_blk_cache->put(entry, dummy, omds::btree::INSERT_ONLY_IF_NOT_EXISTS); // TODO: Trap the return status of insert
         m_alloc_bm->set_bits(b.start_bit, b.nbits);
 
         // Update the counters
@@ -348,11 +348,6 @@ int VarsizeAllocCacheEntry::compare_range(const VarsizeAllocCacheEntry *start, b
 }
 
 int VarsizeAllocCacheEntry::compare(const omds::btree::BtreeKey *o) const {
-    if (o->is_regex_key()) {
-        auto *other = (VarsizeAllocCacheSearch *) o;
-        return compare_range((const VarsizeAllocCacheEntry *) other->get_start_key(), other->is_start_inclusive(),
-                             (const VarsizeAllocCacheEntry *) other->get_end_key(), other->is_end_inclusive());
-    }
     auto *other = (VarsizeAllocCacheEntry *) o;
     if (get_blk_count() < other->get_blk_count()) {
         return -1;

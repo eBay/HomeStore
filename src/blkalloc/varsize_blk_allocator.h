@@ -327,18 +327,25 @@ public:
              << get_blk_num();
     }
 
+    std::string to_string() const override {
+        std::stringstream ss;
+        ss << "free blk count: " << get_blk_count() << " temp: " << get_temperature() << " blknum: " << get_blk_num();
+        return ss.str();
+    }
+
 private:
     int is_in_range(uint64_t val, uint64_t start, bool start_incl, uint64_t end, bool end_incl) const;
     int compare_range(const VarsizeAllocCacheEntry *start, bool start_incl, const VarsizeAllocCacheEntry *end,
                       bool end_incl) const;
 };
 
+#if 0
 class VarsizeAllocCacheSearch : public omds::btree::BtreeSearchRange {
 public:
     VarsizeAllocCacheSearch(VarsizeAllocCacheEntry &start_entry, bool start_incl,
                             VarsizeAllocCacheEntry &end_entry, bool end_incl,
                             bool left_leaning, VarsizeAllocCacheEntry *out_entry) :
-            omds::btree::BtreeSearchRange(start_entry, start_incl, end_entry, end_incl, left_leaning, out_entry) {}
+            omds::btree::BtreeSearchRange(start_entry, start_incl, end_entry, end_incl, left_leaning) {}
 
     bool is_full_match(omds::btree::BtreeRangeKey *rkey) const override {
         return true;
@@ -367,6 +374,11 @@ public:
     void set_blob_size(uint32_t size) override {
     }
 };
+#endif
+
+#define VarsizeBlkAllocatorBtree omds::btree::Btree< omds::btree::MEM_BTREE, VarsizeAllocCacheEntry, \
+                                                     omds::btree::EmptyClass, omds::btree::BTREE_NODETYPE_SIMPLE, \
+                                                     omds::btree::BTREE_NODETYPE_SIMPLE>
 
 /* VarsizeBlkAllocator provides a flexibility in allocation. It provides following features:
  *
@@ -394,7 +406,7 @@ private:
     BlkAllocatorState m_region_state;
 
     omds::Bitset *m_alloc_bm;   // Bitset of all allocation
-    omds::btree::MemBtree< VarsizeAllocCacheEntry, omds::btree::EmptyClass > *m_blk_cache; // Blk Entry caches
+    VarsizeBlkAllocatorBtree *m_blk_cache; // Blk Entry caches
 
     BlkAllocSegment::SegQueue m_heap_segments;  // Heap of segments within a region.
     BlkAllocSegment *m_wait_alloc_segment; // A flag/hold variable, for caller thread

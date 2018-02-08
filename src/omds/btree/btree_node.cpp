@@ -26,9 +26,11 @@ BtreeNodeDeclType::BtreeNode() {
     init_btree_node();
 }
 
+#if 0
 DecBNodeType(typename BtreeSpecificImplDeclType::HeaderType *) get_impl_node() {
     return &m_node_impl_header;
 }
+#endif
 
 DecBNodeType(void) init_btree_node() {
     m_common_header.upgraders.set(0);

@@ -41,7 +41,7 @@ public:
     uint32_t m_nmirrors;
 };
 
-template <typename BAllocator>
+template <typename BAllocator, typename Buffer = BlkBuffer>
 class BlkStore {
 public:
     BlkStore(DeviceManager *mgr, Cache< BlkId > *cache, uint64_t initial_size, BlkStoreCacheType cache_type,
@@ -59,7 +59,40 @@ public:
 
     /* Allocate a new block of the size based on the hints provided */
     void alloc_blk(uint8_t nblks, blk_alloc_hints &hints, BlkId *out_blkid) {
+        // Allocate a block from the device manager
         m_vdev.alloc_blk(nblks, hints, out_blkid);
+    }
+
+    /* Allocate a new block and add entry to the cache. This method allows the caller to create its own
+     * buffer method, but the actual data is page aligned is created by this method and returns the smart pointer
+     * of the buffer, along with blkid. */
+    boost::intrusive_ptr< Buffer > alloc_blk_cached(uint8_t nblks, blk_alloc_hints &hints, BlkId *out_blkid) {
+        // Allocate a block from the device manager
+        alloc_blk(nblks, hints, out_blkid);
+
+        // Create an object for the buffer
+        auto buf = Buffer::make_object();
+        buf->set_key(*out_blkid);
+
+        // Create a new block of memory for the blocks requested and set the memvec pointer to that
+        uint8_t *ptr;
+        uint32_t size = nblks * BLKSTORE_BLK_SIZE;
+        int ret = posix_memalign((void **) &ptr, 4096, size); // TODO: Align based on hw needs instead of 4k
+        if (ret != 0) {
+            throw std::bad_alloc();
+        }
+        omds::MemVector< BLKSTORE_BLK_SIZE > &mvec = buf->get_memvec_mutable();
+        mvec.set(ptr, size, 0);
+
+        // Insert this buffer to the cache.
+        auto ibuf = boost::intrusive_ptr< Buffer > (buf);
+        boost::intrusive_ptr< Buffer > out_bbuf;
+        bool inserted = m_cache->insert(*out_blkid, (const boost::intrusive_ptr< CacheBuffer<BlkId> >)ibuf, &out_bbuf);
+
+        // TODO: Raise an exception if we are not able to insert - instead of assert
+        assert(inserted);
+
+        return ibuf;
     }
 
     /* Free the block previously allocated. Blkoffset refers to number of blks to skip in the BlkId and
@@ -67,7 +100,7 @@ public:
      * BlkIds - max of 2 in case complete BlkIds are not free. If it is single blk, it returns no value */
     boost::optional<std::array<BlkId, 2>> free_blk(const BlkId &bid, boost::optional<uint8_t> blkoffset,
                                                    boost::optional<uint8_t> nblks) {
-        boost::intrusive_ptr< BlkBuffer > erased_buf;
+        boost::intrusive_ptr< Buffer > erased_buf;
         boost::optional<std::array< BlkId, 2>> ret_arr;
 
         // Check if its a full element freed. In that case remove the element in the cache and free it up
@@ -85,12 +118,12 @@ public:
             if (nblks.get() < (bid.get_nblks() * 0.8)) {
                 uint8_t from_blk = blkoffset.get_value_or(0);
                 uint8_t to_blk = from_blk + nblks.get_value_or(bid.get_nblks());
-                std::array< boost::intrusive_ptr< BlkBuffer >, 2> bbufs = free_partial_cache(erased_buf, from_blk, to_blk);
+                std::array< boost::intrusive_ptr< Buffer >, 2> bbufs = free_partial_cache(erased_buf, from_blk, to_blk);
 
                 // Add the split entries to the cache.
                 for (auto i = 0U; i < bbufs.size(); i++) {
                     ret_arr->at(i) = bbufs[i]->get_key();
-                    boost::intrusive_ptr< BlkBuffer > out_buf;
+                    boost::intrusive_ptr< Buffer > out_buf;
                     bool inserted = m_cache->insert(ret_arr->at(i), bbufs[i], &out_buf);
                     assert(inserted);
                 }
@@ -124,7 +157,8 @@ public:
         // First try to create/insert a record for this blk id in the cache. If it already exists, it will simply
         // upvote the item.
         boost::intrusive_ptr< BlkBuffer > bbuf;
-        bool inserted = m_cache->insert(bid, blob, 0 /* value_offset */, &bbuf);
+        bool inserted = m_cache->insert(bid, blob, 0 /* value_offset */,
+                                        (boost::intrusive_ptr< CacheBuffer<BlkId> > *)&bbuf);
 
         // TODO: Raise an exception if we are not able to insert - instead of assert
         assert(inserted);
@@ -135,19 +169,13 @@ public:
     }
 
     /* If the user already has created a blkbuffer, then use this method to use it to write the block */
-    void write(BlkId &bid, boost::intrusive_ptr< BlkBuffer > in_buf) {
-        // First try to create/insert a record for this blk id in the cache. If it already exists, it will simply
-        // upvote the item.
-        bool inserted = m_cache->insert(bid, in_buf, &in_buf);
-
-        // TODO: Raise an exception if we are not able to insert - instead of assert
-        assert(inserted);
+    void write(BlkId &bid, boost::intrusive_ptr< Buffer > in_buf) {
         m_vdev.write(bid, in_buf->get_memvec());
     }
 
     /* Read the data for given blk id and size. This method allocates the required memory if not present in the cache
-     * and returns an smart ptr to the BlkBuffer */
-    boost::intrusive_ptr< BlkBuffer > read(BlkId &bid, uint32_t offset, uint32_t size) {
+     * and returns an smart ptr to the Buffer */
+    boost::intrusive_ptr< Buffer > read(BlkId &bid, uint32_t offset, uint32_t size) {
         // TODO: Convert this assert to exceptions
         assert((offset + size) <= 256 * BLKSTORE_BLK_SIZE);
         assert(offset < 256 * BLKSTORE_BLK_SIZE);
@@ -158,11 +186,11 @@ public:
         uint32_t cur_offset = offset;
 
         // Check if the entry exists in the cache.
-        boost::intrusive_ptr< BlkBuffer > bbuf;
-        bool cache_found = m_cache->get(bid, &bbuf);
+        boost::intrusive_ptr< Buffer > bbuf;
+        bool cache_found = m_cache->get(bid, (boost::intrusive_ptr< CacheBuffer<BlkId> > *)&bbuf);
         if (!cache_found) {
             // Not found in cache, create a new block buf and prepare it for insert to dev and cache.
-            bbuf = omds::ObjectAllocator< BlkBuffer >::make_object();
+            bbuf = omds::ObjectAllocator< Buffer >::make_object();
             bbuf->set_key(bid);
         }
 
@@ -191,8 +219,10 @@ public:
         } while (true);
 
         if (!cache_found) {
-            boost::intrusive_ptr< BlkBuffer > new_bbuf;
-            bool inserted = m_cache->insert(bbuf->get_key(), bbuf, &new_bbuf);
+            boost::intrusive_ptr< Buffer > new_bbuf;
+            bool inserted = m_cache->insert(bbuf->get_key(),
+                                            dynamic_pointer_cast<CacheBuffer<BlkId>>(bbuf),
+                                            (boost::intrusive_ptr< CacheBuffer<BlkId> > *)&new_bbuf);
             if (!inserted) {
                 // Between get and insert, other thread tried the same thing and inserted into the cache. Lets use
                 // that entry in cache and free up the memory
@@ -212,9 +242,9 @@ public:
     };
 
 private:
-    std::array< boost::intrusive_ptr< BlkBuffer >, 2> free_partial_cache(const boost::intrusive_ptr< BlkBuffer > inbuf,
+    std::array< boost::intrusive_ptr< Buffer >, 2> free_partial_cache(const boost::intrusive_ptr< Buffer > inbuf,
                                                                          uint8_t from_nblk, uint8_t to_nblk) {
-        std::array< boost::intrusive_ptr< BlkBuffer >, 2 > bbufs;
+        std::array< boost::intrusive_ptr< Buffer >, 2 > bbufs;
         int left_ind = 0, right_ind; // index within the vector the about to free blks cover
         uint32_t from_offset = from_nblk * BLKSTORE_BLK_SIZE;
         uint32_t to_offset = to_nblk * BLKSTORE_BLK_SIZE;
@@ -270,7 +300,7 @@ private:
             right_mvec.push_back(mp);
         }
 
-        // Finally form the new BlkBuffer with new blkid and left mvec pieces
+        // Finally form the new Buffer with new blkid and left mvec pieces
         uint32_t b = 0;
         if (from_nblk) {
             BlkId lb(orig_b.get_id(), from_nblk, orig_b.get_chunk_num());
@@ -283,7 +313,7 @@ private:
         // Similar to that to the right mvec pieces
         if (orig_b.get_nblks() - to_nblk) {
             BlkId rb(orig_b.get_id() + to_nblk, orig_b.get_nblks() - to_nblk, orig_b.get_chunk_num());
-            bbufs[b] = omds::ObjectAllocator< BlkBuffer >::make_object();
+            bbufs[b] = omds::ObjectAllocator< Buffer >::make_object();
             bbufs[b]->set_key(rb);
             bbufs[b]->set_memvec(right_mvec);
         }
@@ -306,9 +336,9 @@ private:
      * >30% of original buffer size or >16K, then it picks the one which needs least amount of copying and leaving the
      * other side to just adjust the size and not copy.
      */
-    std::array<boost::intrusive_ptr< BlkBuffer >, 2> free_partial_cache(boost::intrusive_ptr< BlkBuffer > buf,
+    std::array<boost::intrusive_ptr< Buffer >, 2> free_partial_cache(boost::intrusive_ptr< Buffer > buf,
                                                                         uint8_t from_blk, uint8_t end_blk) {
-        std::array< boost::intrusive_ptr< BlkBuffer >, 2 > bbufs;
+        std::array< boost::intrusive_ptr< Buffer >, 2 > bbufs;
         int left_ind, right_ind; // index within the vector the about to free blks cover
 
         auto &mvec = buf->get_memvec();

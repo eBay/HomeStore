@@ -109,13 +109,11 @@ template<
         btree_node_type LeafNodeType,
         size_t NodeSize
         >
-class BtreeNode {
+class BtreeNode : public BtreeSpecificImplDeclType::HeaderType {
 private:
-    typename BtreeSpecificImplDeclType::HeaderType m_node_impl_header;
     transient_hdr_t m_common_header;
 
 public:
-    typename BtreeSpecificImplDeclType::HeaderType *get_impl_node();
     BtreeNode();
     ~BtreeNode() = default;
     void init_btree_node();

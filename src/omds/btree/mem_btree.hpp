@@ -79,12 +79,12 @@ public:
     }
 
     static void ref_node(MemBtreeNodeDeclType *bn) {
-        auto mbh = (mem_btree_node_header *)bn->get_impl_node();
+        auto mbh = (mem_btree_node_header *)bn;
         mbh->refcount.increment();
     }
 
     static bool deref_node(MemBtreeNodeDeclType *bn) {
-        auto mbh = (mem_btree_node_header *)bn->get_impl_node();
+        auto mbh = (mem_btree_node_header *)bn;
         return mbh->refcount.decrement_testz();
     }
 };

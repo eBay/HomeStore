@@ -14,108 +14,51 @@
 #include <vector>
 #include <atomic>
 
-#include "btree.hpp"
 #include "omds/memory/composite_allocator.hpp"
 #include "omds/memory/chunk_allocator.hpp"
 #include "omds/memory/sys_allocator.hpp"
-#include "omds/utility/atomic_counter.hpp"
-#include "omds/btree/simple_node.hpp"
-#include "omds/btree/varlen_node.hpp"
 #include "blkstore/blkstore.hpp"
+#include "btree_specific_impl.hpp"
+#include "btree_node.h"
+#include "physical_node.hpp"
 
 namespace omds { namespace btree {
+#define SSDBtreeNodeDeclType BtreeNode<SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize>
 
-template <typename K, typename V, size_t NodeSize>
-class BtreeNodeBuffer : public omstore::CacheRecord {
-    PhysicalNode<K, V, NodeSize> m_bt_node;
+template<
+        typename K,
+        typename V,
+        btree_node_type InteriorNodeType,
+        btree_node_type LeafNodeType,
+        size_t NodeSize
+        >
+class BtreeSpecificImpl<SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize> {
+    using HeaderType = omstore::BlkBuffer;
 
-public:
-    BtreeNodeBuffer() {
-        m_bt_node.reset_reference();
-    }
-
-    const omstore::BlkId &get_key() const {
-        omstore::BlkId b(m_bt_node.get_node_id().to_integer(), 1);
-        return b;
-    }
-
-    void set_key(omstore::BlkId &b) {
-        m_bt_node.set_node_id(b.get_id());
-    }
-
-    void set_memvec(const omds::MemVector< BLKSTORE_BLK_SIZE > &vec) {
-#ifndef NDEBUG
-        omds::blob b;
-        vec.get(&b);
-        assert(b.bytes == (void *)this);
+    static uint8_t *get_physical(const SSDBtreeNodeDeclType *bn) {
+        omstore::BlkBuffer *bbuf = const_cast<>(bn)->get_impl_node();
+        omds::blob b = bbuf->at_offset(0);
         assert(b.size == NodeSize);
-#endif
+        return b.bytes;
     }
 
-    const omds::MemVector< BLKSTORE_BLK_SIZE > &get_memvec() const {
-        const omds::MemVector< BLKSTORE_BLK_SIZE > mvec((uint8_t *)this, (uint32_t)NodeSize, 0);
-        return mvec;
+    static uint32_t get_node_area_size() {
+        return NodeSize - sizeof(SSDBtreeNodeDeclType) - sizeof(LeafPhysicalNodeDeclType);
     }
 
-    omds::MemVector< BLKSTORE_BLK_SIZE > &get_memvec_mutable() {
-        const omds::MemVector< BLKSTORE_BLK_SIZE > mvec((uint8_t *)this, (uint32_t)NodeSize, 0);
-        return mvec;
-    }
+    static boost::intrusive_ptr<MemBtreeNodeDeclType> alloc_node(bool is_leaf) {
+        uint8_t *mem = BtreeNodeAllocator< NodeSize >::allocate();
+        auto bn = new (mem) MemBtreeNodeDeclType();
 
-    omds::blob at_offset(uint32_t offset) const {
-        omds::blob b;
-        get_memvec().get(&b, offset);
-        return b;
-    }
-
-    friend void intrusive_ptr_add_ref(BtreeNodeBuffer<K, V, NodeSize> *buf) {
-        buf->m_bt_node.ref_node();
-    }
-
-    friend void intrusive_ptr_release(BtreeNodeBuffer<K, V, NodeSize> *buf) {
-        if (buf->m_bt_node.deref_node()) {
-
+        if (is_leaf) {
+            auto n = new(mem + sizeof(MemBtreeNodeDeclType)) VariantNode<LeafNodeType, K, V, NodeSize>((bnodeid_t)mem, true);
+        } else {
+            auto n = new(mem + sizeof(MemBtreeNodeDeclType)) VariantNode<InteriorNodeType, K, V, NodeSize>((bnodeid_t)mem, true);
         }
-        if (buf->m_refcount.decrement_testz()) {
-            // First free the bytes it covers
-            omds::blob blob;
-            buf->m_mem.get(&blob);
-            free((void *) blob.bytes);
-
-            // Then free the record itself
-            omds::ObjectAllocator< CacheBufferType >::deallocate(buf);
-        }
+        ref_node(bn);
+        return (boost::intrusive_ptr<MemBtreeNodeDeclType>((MemBtreeNodeDeclType *)mem));
     }
 
-    static CacheBuffer<K> *make_object() {
-        return omds::ObjectAllocator< CacheBufferType >::make_object();
-    }
-
-    //////////// Mandatory IntrusiveHashSet definitions ////////////////
-    static void ref(BtreeNodeBuffer<K, V, NodeSize> &b) {
-        b.m_bt_node.ref_node();
-    }
-
-    static void deref(BtreeNodeBuffer<K, V, NodeSize> &b) {
-        b.m_bt_node.deref_node();
-    }
-
-    static bool deref_testz(BtreeNodeBuffer<K, V, NodeSize> &b) {
-        return b.m_refcount.decrement_testz();
-    }
-
-    static bool deref_test_le(BtreeNodeBuffer<K, V, NodeSize> &b, int32_t check) {
-        return b.m_refcount.decrement_test_le(check);
-    }
-
-    static const BlkId *extract_key(const BtreeNodeBuffer<K, V, NodeSize> &b) {
-        return &(b.m_key);
-    }
-
-    static uint32_t get_size(const CurrentEvictor::EvictRecordType *rec) {
-        const CacheBuffer<K> *cbuf = static_cast<const CacheBuffer<K> *>(CacheRecord::evict_to_cache_record(rec));
-        return cbuf->get_memvec().size();
-    }
 };
 
 template< typename K, typename V, size_t NodeSize = 8192 >
