@@ -87,7 +87,9 @@ public:
         // Insert this buffer to the cache.
         auto ibuf = boost::intrusive_ptr< Buffer > (buf);
         boost::intrusive_ptr< Buffer > out_bbuf;
-        bool inserted = m_cache->insert(*out_blkid, (const boost::intrusive_ptr< CacheBuffer<BlkId> >)ibuf, &out_bbuf);
+        bool inserted = m_cache->insert(*out_blkid, static_pointer_cast<CacheBuffer<BlkId>>(ibuf),
+                                        (boost::intrusive_ptr<CacheBuffer<BlkId>> *)&out_bbuf);
+                                        //(const boost::intrusive_ptr< CacheBuffer<BlkId> >)ibuf, &out_bbuf);
 
         // TODO: Raise an exception if we are not able to insert - instead of assert
         assert(inserted);
@@ -105,14 +107,14 @@ public:
 
         // Check if its a full element freed. In that case remove the element in the cache and free it up
         if ((blkoffset.get_value_or(0) == 0) && ((nblks == boost::none) || (nblks == bid.get_nblks()))) {
-            m_cache->erase(bid, &erased_buf);
+            m_cache->erase(bid, (boost::intrusive_ptr<CacheBuffer<BlkId>> *)&erased_buf);
             m_vdev.free_blk(bid);
             return boost::none;
         }
 
         // Not the entire block is freed. Remove the entire entry from cache and split into possibly 2 entries
         // and insert it.
-        if (m_cache->erase(bid, &erased_buf)) {
+        if (m_cache->erase(bid, (boost::intrusive_ptr<CacheBuffer<BlkId>> *)&erased_buf)) {
             // If number of blks we are freeing is more than 80% of the total buffer in cache, it does not make sense
             // to collect other buffers, creating a copy etc.. Just consider the entire entry is out of cache
             if (nblks.get() < (bid.get_nblks() * 0.8)) {
@@ -124,7 +126,8 @@ public:
                 for (auto i = 0U; i < bbufs.size(); i++) {
                     ret_arr->at(i) = bbufs[i]->get_key();
                     boost::intrusive_ptr< Buffer > out_buf;
-                    bool inserted = m_cache->insert(ret_arr->at(i), bbufs[i], &out_buf);
+                    bool inserted = m_cache->insert(ret_arr->at(i), bbufs[i],
+                                                    (boost::intrusive_ptr<CacheBuffer<BlkId>> *)&out_buf);
                     assert(inserted);
                 }
             }
@@ -194,10 +197,11 @@ public:
             bbuf->set_key(bid);
         }
 
+        uint32_t size_to_read = size;
         omds::MemVector<BLKSTORE_BLK_SIZE>::cursor_t c;
-        do {
+        while (size_to_read > 0) {
             boost::optional< omds::MemPiece<BLKSTORE_BLK_SIZE> &> missing_mp =
-                    bbuf->get_memvec_mutable().fill_next_missing_piece(c, cur_offset, size);
+                    bbuf->get_memvec_mutable().fill_next_missing_piece(c, size, cur_offset);
             if (!missing_mp) {
                 // We don't have any missing pieces, so we are done reading the contents
                 break;
@@ -216,7 +220,8 @@ public:
             BlkId tmp_bid(bid.get_id() + missing_mp->offset()/BLKSTORE_BLK_SIZE,
                           missing_mp->size()/BLKSTORE_BLK_SIZE, bid.get_chunk_num());
             m_vdev.read(tmp_bid, missing_mp.get());
-        } while (true);
+            size_to_read -= missing_mp->size();
+        }
 
         if (!cache_found) {
             boost::intrusive_ptr< Buffer > new_bbuf;

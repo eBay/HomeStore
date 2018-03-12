@@ -8,6 +8,7 @@
 #include <iostream>
 #include <algorithm>
 #include <folly/ThreadLocal.h>
+#include "omds/utility/useful_defs.hpp"
 
 namespace omds {
 

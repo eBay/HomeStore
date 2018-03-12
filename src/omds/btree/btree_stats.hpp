@@ -19,7 +19,7 @@ enum btree_stats_type : uint32_t {VALUES};
 #undef X
 
 #define X(ind, type, mean_of, desc) {ind, type, mean_of, desc},
-std::vector< omds::stats_key > btree_stats_keys = {VALUES};
+static std::vector< omds::stats_key > btree_stats_keys = {VALUES};
 
 class BtreeStats : public Stats {
 public:

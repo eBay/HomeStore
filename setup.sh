@@ -60,12 +60,16 @@ function library() {
         esac
 
         $name # invoke the build function
+	status=$?
 
         cd $deps_build
-        touch $dirname/build_success
-	else
-		echo "${name} ${version} is already installed"
+        if [ $status -eq 0 ] ; then
+            touch $dirname/build_success
+        fi
+    else
+        echo "${name} ${version} is already installed"
     fi
+    echo "--------------------------------------"    
 }
 
 function is_installed_by_brew() {
@@ -116,11 +120,13 @@ install_cmake() {
 
 	touch $src_dir/build_success
 }
-#install_cmake
+install_cmake
 
 ##################### BOOST #########################
 boost() {
-	cp -r boost $deps_prefix/include/
+    ./bootstrap.sh
+    ./b2 install
+    #cp -r boost $deps_prefix/include/
 }
 boost_ver=`echo ${BOOST_VERSION} | sed 's/\./_/g'`
 library boost ${BOOST_VERSION} https://dl.bintray.com/boostorg/release/${BOOST_VERSION}/source/boost_${boost_ver}.tar.gz boost_${boost_ver}
@@ -132,7 +138,7 @@ gflags() {
     #cmake  -DCMAKE_INSTALL_PREFIX:PATH=$deps_prefix -DBUILD_SHARED_LIBS=1 ..
     cmake -DBUILD_SHARED_LIBS=1 ..
     make -j$JOBS install
-};
+}
 library gflags ${LIBGFLAGS_VERSION} https://github.com/gflags/gflags/archive/v${LIBGFLAGS_VERSION}.tar.gz
 #if [ $os_type = "mac" ] ; then
 #    install_thru_brew gflags ${LIBGFLAGS_VERSION}

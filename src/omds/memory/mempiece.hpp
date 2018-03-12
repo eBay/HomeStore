@@ -287,7 +287,7 @@ public:
         int m_ind;
     };
 
-    boost::optional< MemPiece<SizeMultiplier> &> fill_next_missing_piece(cursor_t &c, uint32_t offset, uint32_t size) {
+    boost::optional< MemPiece<SizeMultiplier> &> fill_next_missing_piece(cursor_t &c, uint32_t size, uint32_t offset) {
         int new_ind;
         bool found = find_index(offset, (uint8_t)c.m_ind, &new_ind);
         c.m_ind = new_ind;
@@ -312,7 +312,7 @@ public:
             sz = size - offset;
         }
 
-        auto &mp = insert_at(new_ind, nullptr, offset, sz);
+        auto &mp = insert_at(new_ind, nullptr, sz, offset);
         return mp;
     }
 

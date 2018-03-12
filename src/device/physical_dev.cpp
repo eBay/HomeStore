@@ -270,7 +270,7 @@ PhysicalDevChunk::PhysicalDevChunk(PhysicalDev *pdev, chunk_info_block *cinfo) {
     m_pdev = pdev;
 #if 0
     const std::unique_ptr< PhysicalDev > &p =
-            (static_cast<const omds::avector< std::unique_ptr< PhysicalDev > > &>(device_manager()->m_pdevs))[cinfo->pdev_id];
+            (static_cast<const omds::sparse_vector< std::unique_ptr< PhysicalDev > > &>(device_manager()->m_pdevs))[cinfo->pdev_id];
     m_pdev = p.get();
 #endif
 }

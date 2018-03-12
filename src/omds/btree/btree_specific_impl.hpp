@@ -38,15 +38,17 @@ public:
         )
 #endif
 
+    static std::unique_ptr<BtreeSpecificImplDeclType> init_btree(BtreeConfig &cfg, void *btree_specific_context);
     static uint8_t *get_physical(const BtreeNodeDeclType *bn);
-    static uint32_t get_node_area_size();
+    static uint32_t get_node_area_size(BtreeSpecificImplDeclType *impl);
 
-    static boost::intrusive_ptr<BtreeNodeDeclType> alloc_node(bool is_leaf);
-    static boost::intrusive_ptr<BtreeNodeDeclType> read_node(bnodeid_t id);
+    static boost::intrusive_ptr<BtreeNodeDeclType> alloc_node(BtreeSpecificImplDeclType *impl, bool is_leaf);
+    static boost::intrusive_ptr<BtreeNodeDeclType> read_node(BtreeSpecificImplDeclType *impl, bnodeid_t id);
+    static void write_node(BtreeSpecificImplDeclType *impl, boost::intrusive_ptr<BtreeNodeDeclType> bn);
+    static void free_node(BtreeSpecificImplDeclType *impl, boost::intrusive_ptr<BtreeNodeDeclType> bn);
+
     static void ref_node(BtreeNodeDeclType *bn);
     static bool deref_node(BtreeNodeDeclType *bn);
-    static void write_node(boost::intrusive_ptr<BtreeNodeDeclType> bn);
-    static void free_node(boost::intrusive_ptr<BtreeNodeDeclType> bn);
 };
 } }
 #endif //OMSTORE_BACKING_BTREE_HPP

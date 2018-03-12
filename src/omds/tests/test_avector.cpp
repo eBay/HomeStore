@@ -3,16 +3,16 @@
 //
 
 #include <iostream>
-#include "omds/array/avector.hpp"
+#include "omds/array/sparse_vector.hpp"
 
-void func(const omds::avector<int> &cvec) {
+void func(const omds::sparse_vector<int> &cvec) {
     std::cout << "vec.at(1) = " << cvec.at(1) << "\n";
     std::cout << "vec.at(7) = " << cvec.at(7) << "\n";
     std::cout << "vec[7] = " << cvec[7] << " Vector size = " << cvec.size() << "\n";
 }
 
 int main(int argc, char *argv[]) {
-    omds::avector<int> vec;
+    omds::sparse_vector<int> vec;
     vec.reserve(10);
 
     vec.push_back(1);

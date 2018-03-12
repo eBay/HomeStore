@@ -18,7 +18,7 @@ typedef struct __attribute__((__packed__)) {
 template< btree_node_type NodeType, typename K, typename V, size_t NodeSize >
 class VariantNode {
 public:
-    VariantNode(bnodeid_t id, bool init_pers, bool init_trans);
+    VariantNode(bnodeid_t id, bool init);
     void get(int ind, BtreeValue *outval, bool copy) const;
 
     // Insert the key and value in provided index

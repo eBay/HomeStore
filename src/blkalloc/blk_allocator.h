@@ -86,6 +86,11 @@ typedef enum {
 
 /* Hints for various allocators */
 struct blk_alloc_hints {
+    blk_alloc_hints() :
+        desired_temp(0),
+        dev_id_hint(-1),
+        can_look_for_other_dev(true) {}
+
     uint32_t desired_temp;          // Temperature hint for the device
     int      dev_id_hint;           // which physical device to pick (hint if any) -1 for don't care
     bool     can_look_for_other_dev; // If alloc on device not available can I pick other device

@@ -48,7 +48,7 @@ set(TEST_BTREE_CRUD_SOURCE_FILES
 add_executable(test_btree_crud ${TEST_BTREE_CRUD_SOURCE_FILES})
 #AddStaticLibraries(test_btree_crud ${LIB_ROOT_DIR}
 #                                    gtest)
-target_link_libraries(test_btree_crud gtest glog folly)
+target_link_libraries(test_btree_crud gtest glog folly farmhash)
 
 set(TEST_HASH_SOURCE_FILES
         hash/intrusive_hashset.hpp
@@ -72,7 +72,7 @@ set(TEST_OBJALLOCATOR_SOURCE_FILES
         memory/freelist_allocator.hpp
         tests/test_obj_allocator.cpp)
 add_executable(test_obj_allocator ${TEST_OBJALLOCATOR_SOURCE_FILES})
-target_link_libraries(test_obj_allocator folly glog tcmalloc)
+target_link_libraries(test_obj_allocator folly glog tcmalloc pthread)
 
 set(TEST_BITWORD_SOURCE_FILES
         bitmap/Bitword.hpp
@@ -86,6 +86,6 @@ set(TEST_BITSET_SOURCE_FILES
 add_executable(test_bitset ${TEST_BITSET_SOURCE_FILES})
 
 set(TEST_AVECTOR_SOURCE_FILES
-        array/avector.hpp
+        array/sparse_vector.hpp
         tests/test_avector.cpp)
 add_executable(test_avector ${TEST_AVECTOR_SOURCE_FILES})

@@ -55,7 +55,7 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig &cfg) :
     btree_cfg.set_max_objs(cfg.get_max_cache_blks());
     btree_cfg.set_max_key_size(sizeof(VarsizeAllocCacheEntry));
     btree_cfg.set_max_value_size(0);
-    m_blk_cache = new VarsizeBlkAllocatorBtree(btree_cfg);
+    m_blk_cache = VarsizeBlkAllocatorBtree::create_btree(btree_cfg, nullptr);
 
     // Start a thread which will do sweeping job of free segments
     m_thread_id = std::thread(thread_func, this);

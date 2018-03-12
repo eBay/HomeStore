@@ -10,7 +10,7 @@
 namespace omds {
 
 template <typename T>
-class avector : public std::vector <T > {
+class sparse_vector : public std::vector <T > {
 public:
     T& operator[] (const int index) {
         fill_void(index);

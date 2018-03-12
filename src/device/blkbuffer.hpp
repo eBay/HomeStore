@@ -29,6 +29,7 @@ public:
 #endif
 
 class BlkBuffer : public CacheBuffer< BlkId > {
+public:
     static BlkBuffer *make_object() {
         return omds::ObjectAllocator< BlkBuffer >::make_object();
     }

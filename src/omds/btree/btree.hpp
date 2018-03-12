@@ -19,7 +19,6 @@
 #include "btree_stats.hpp"
 #include "btree_node.cpp"
 #include "physical_node.hpp"
-#include "mem_btree.hpp"
 #include "omds/utility/logging.hpp"
 #include <boost/intrusive_ptr.hpp>
 
@@ -152,6 +151,8 @@ private:
     BtreeConfig m_btree_cfg;
     BtreeStats m_stats;
 
+    std::unique_ptr<BtreeSpecificImplDeclType> m_btree_specific_impl;
+
 #ifndef NDEBUG
     static thread_local int wr_locked_count;
     static thread_local std::array<BtreeNodeDeclType *, MAX_BTREE_DEPTH> wr_locked_nodes;
@@ -162,13 +163,19 @@ private:
 
     ////////////////// Implementation /////////////////////////
 public:
-    Btree(BtreeConfig &cfg) :
-            m_btree_cfg(cfg) {
 
+    static BtreeDeclType *create_btree(BtreeConfig &cfg, void *btree_specific_context) {
+        auto impl_ptr = BtreeSpecificImplDeclType::init_btree(cfg, btree_specific_context);
+        return new Btree(cfg, std::move(impl_ptr));
+    }
+
+    Btree(BtreeConfig &cfg, std::unique_ptr<BtreeSpecificImplDeclType> btree_specific_impl) :
+            m_btree_cfg(cfg) {
+        m_btree_specific_impl = std::move(btree_specific_impl);
         BtreeNodeAllocator< NodeSize >::create();
 
         // TODO: Check if node_area_size need to include persistent header
-        uint32_t node_area_size = BtreeSpecificImplDeclType::get_node_area_size();
+        uint32_t node_area_size = BtreeSpecificImplDeclType::get_node_area_size(m_btree_specific_impl.get());
         m_btree_cfg.set_node_area_size(node_area_size);
 
         // calculate number of nodes
@@ -193,7 +200,7 @@ public:
         m_btree_lock.read_lock();
 
     retry:
-        BtreeNodePtr root = BtreeSpecificImplDeclType::read_node(m_root_node);
+        BtreeNodePtr root = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), m_root_node);
         lock_node(root, acq_lock);
         bool is_leaf = root->is_leaf();
 
@@ -244,7 +251,7 @@ public:
         //assert(OmDB::getGlobalRefCount() == 0);
 
         m_btree_lock.read_lock();
-        BtreeNodePtr root = BtreeSpecificImplDeclType::read_node(m_root_node);
+        BtreeNodePtr root = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), m_root_node);
         lock_node(root, omds::thread::locktype::LOCKTYPE_READ);
 
         is_found = do_get(root, range, outkey, outval);
@@ -279,7 +286,7 @@ public:
         m_btree_lock.read_lock();
 
     retry:
-        BtreeNodePtr root = BtreeSpecificImplDeclType::read_node(m_root_node);
+        BtreeNodePtr root = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), m_root_node);
         lock_node(root, acq_lock);
         bool is_leaf = root->is_leaf();
 
@@ -349,7 +356,7 @@ private:
 
         BNodeptr child_ptr;
         auto result = my_node->find(range, nullptr, &child_ptr);
-        BtreeNodePtr child_node = BtreeSpecificImplDeclType::read_node(child_ptr.get_node_id());
+        BtreeNodePtr child_node = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), child_ptr.get_node_id());
 
         lock_node(child_node, omds::thread::LOCKTYPE_READ);
         unlock_node(my_node, omds::thread::locktype::LOCKTYPE_READ);
@@ -429,7 +436,7 @@ private:
 
                 // Its ok to free after unlock, because the chain has been already cut when the node is invalidated.
                 // So no one would have entered here after the chain is cut.
-                BtreeSpecificImplDeclType::free_node(my_node);
+                BtreeSpecificImplDeclType::free_node(m_btree_specific_impl.get(), my_node);
                 m_stats.dec_count(my_node->is_leaf() ? BTREE_STATS_LEAF_NODE_COUNT : BTREE_STATS_INT_NODE_COUNT);
             }
             ret = false;
@@ -523,7 +530,7 @@ private:
             *is_found = true;
         }
 
-        return BtreeSpecificImplDeclType::read_node(child_ptr.get_node_id());
+        return BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), child_ptr.get_node_id());
     }
 
     /* This function does the heavy lifiting of co-ordinating inserts. It is a recursive function which walks
@@ -546,7 +553,7 @@ private:
 
             bool ret = my_node->put(k, v, put_type);
             if (ret) {
-                BtreeSpecificImplDeclType::write_node(my_node);
+                BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(), my_node);
                 m_stats.inc_count(BTREE_STATS_OBJ_COUNT);
             }
             unlock_node(my_node, curlock);
@@ -614,7 +621,7 @@ private:
 
             bool is_found = my_node->remove_one(range, outkey, outval);
             if (is_found) {
-                BtreeSpecificImplDeclType::write_node(my_node);
+                BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(), my_node);
                 m_stats.dec_count(BTREE_STATS_OBJ_COUNT);
             } else {
 #ifndef NDEBUG
@@ -690,7 +697,7 @@ private:
         BtreeNodePtr new_root_int_node = nullptr;
 
         m_btree_lock.write_lock();
-        BtreeNodePtr root = BtreeSpecificImplDeclType::read_node(m_root_node);
+        BtreeNodePtr root = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), m_root_node);
         lock_node(root, locktype::LOCKTYPE_WRITE);
 
         if (!root->is_split_needed(m_btree_cfg, k, v, &ind)) {
@@ -716,7 +723,7 @@ private:
         BtreeNodePtr child_node = nullptr;
 
         m_btree_lock.write_lock();
-        BtreeNodePtr root = BtreeSpecificImplDeclType::read_node(m_root_node);
+        BtreeNodePtr root = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), m_root_node);
         lock_node(root, locktype::LOCKTYPE_WRITE);
 
         if (root->get_total_entries() != 0) {
@@ -725,12 +732,12 @@ private:
         }
 
         assert(root->get_edge_id() != INVALID_BNODEID);
-        child_node = BtreeSpecificImplDeclType::read_node(root->get_edge_id());
+        child_node = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), root->get_edge_id());
         assert(child_node != nullptr);
 
         // Elevate the edge child as root.
         unlock_node(root, locktype::LOCKTYPE_WRITE);
-        BtreeSpecificImplDeclType::free_node(root);
+        BtreeSpecificImplDeclType::free_node(m_btree_specific_impl.get(), root);
         m_stats.dec_count(BTREE_STATS_INT_NODE_COUNT);
         m_root_node = child_node->get_node_id();
 
@@ -760,9 +767,9 @@ private:
         nptr.set_node_id(child_node1->get_node_id());
         parent_node->insert(*out_split_key, nptr);
 
-        BtreeSpecificImplDeclType::write_node(child_node1);
-        BtreeSpecificImplDeclType::write_node(child_node2);
-        BtreeSpecificImplDeclType::write_node(parent_node);
+        BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(), child_node1);
+        BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(), child_node2);
+        BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(), parent_node);
         //release_node(child_node2);
 
 #ifndef NDEBUG
@@ -801,7 +808,7 @@ private:
             parent_node->get(indices_list[i], &child_ptr, false /* copy */);
 
             merge_info m;
-            m.node = BtreeSpecificImplDeclType::read_node(child_ptr.get_node_id());
+            m.node = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), child_ptr.get_node_id());
             m.freed = false;
             m.modified = false;
             m.parent_index = indices_list[i];
@@ -861,7 +868,7 @@ private:
         // Its time to write the parent node and loop again to write all modified nodes and free freed nodes
         DCVLOG(VMOD_BTREE_MERGE, 4) << "After merging node\n########################Parent Node: "
                                     << parent_node->to_string();
-        BtreeSpecificImplDeclType::write_node(parent_node);
+        BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(), parent_node);
         assert(!minfo[0].freed); // If we merge it, we expect the left most one has at least 1 entry.
         // TODO: Above assumption will not be valid if we are merging all empty nodes. Need to study that.
 
@@ -878,7 +885,7 @@ private:
                 }
 
                 DCVLOG(VMOD_BTREE_MERGE, 4) << "Child Node " << n << ":\n" << minfo[n].node->to_string();
-                BtreeSpecificImplDeclType::write_node(minfo[n].node);
+                BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(), minfo[n].node);
             }
         }
 
@@ -892,7 +899,7 @@ private:
                     unlock_node(minfo[n].node, locktype::LOCKTYPE_WRITE);
                 } else {
                     unlock_node(minfo[n].node, locktype::LOCKTYPE_WRITE);
-                    BtreeSpecificImplDeclType::free_node(minfo[n].node);
+                    BtreeSpecificImplDeclType::free_node(m_btree_specific_impl.get(), minfo[n].node);
                     m_stats.dec_count(minfo[n].node->is_leaf() ? BTREE_STATS_LEAF_NODE_COUNT : BTREE_STATS_INT_NODE_COUNT);
                 }
             } else {
@@ -905,14 +912,14 @@ private:
     }
 
     BtreeNodePtr alloc_leaf_node() {
-        BtreeNodePtr n = BtreeSpecificImplDeclType::alloc_node(true /* is_leaf */);
+        BtreeNodePtr n = BtreeSpecificImplDeclType::alloc_node(m_btree_specific_impl.get(), true /* is_leaf */);
         n->set_leaf(true);
         m_stats.inc_count(BTREE_STATS_LEAF_NODE_COUNT);
         return n;
     }
 
     BtreeNodePtr alloc_interior_node() {
-        BtreeNodePtr n = BtreeSpecificImplDeclType::alloc_node(false /* isLeaf */);
+        BtreeNodePtr n = BtreeSpecificImplDeclType::alloc_node(m_btree_specific_impl.get(), false /* isLeaf */);
         n->set_leaf(false);
         m_stats.inc_count(BTREE_STATS_INT_NODE_COUNT);
         return n;
@@ -1000,7 +1007,7 @@ protected:
         // Assign one node as root node and initially root is leaf
         BtreeNodePtr root = alloc_leaf_node();
         m_root_node = root->get_node_id();
-        BtreeSpecificImplDeclType::write_node(root);
+        BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(), root);
     }
 
     virtual uint32_t get_max_nodes() {

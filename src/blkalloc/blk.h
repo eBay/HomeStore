@@ -25,10 +25,11 @@ namespace omstore {
 #define NBLKS_BITS      8
 #define CHUNK_NUM_BITS 16
 
+/* This structure represents the application wide unique block number. It also encomposses the number of blks. */
 struct BlkId {
-    uint64_t m_id:ID_BITS;
-    uint64_t m_nblks:NBLKS_BITS;
-    uint64_t m_chunk_num:CHUNK_NUM_BITS;
+    uint64_t m_id:ID_BITS;                // Block number which is unique within the chunk
+    uint64_t m_nblks:NBLKS_BITS;          // Total number of blocks starting from previous block number
+    uint64_t m_chunk_num:CHUNK_NUM_BITS;  // Chunk number - which is unique for the entire application
 
     static uint64_t constexpr invalid_internal_id() {
         return ((uint64_t)-1);
@@ -71,7 +72,7 @@ struct BlkId {
         return i;
     }
 
-    BlkId(uint64_t id, uint8_t nblks, uint16_t chunk_num)  {
+    explicit BlkId(uint64_t id, uint8_t nblks = 1, uint16_t chunk_num = 0)  {
         set(id, nblks, chunk_num);
     }
 

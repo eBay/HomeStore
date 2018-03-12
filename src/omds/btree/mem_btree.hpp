@@ -29,6 +29,7 @@ struct mem_btree_node_header {
 } __attribute__((__packed__));
 
 #define MemBtreeNodeDeclType BtreeNode<MEM_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize>
+#define MemBtreeImpl BtreeSpecificImpl<MEM_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize>
 
 template<
         typename K,
@@ -42,37 +43,44 @@ class BtreeSpecificImpl<MEM_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSiz
 public:
     using HeaderType = mem_btree_node_header;
 
+    static std::unique_ptr<MemBtreeImpl> init_btree(BtreeConfig &cfg, void *btree_specific_context) {
+        return nullptr;
+    }
+
     static uint8_t *get_physical(const MemBtreeNodeDeclType *bn) {
         return (uint8_t *)((uint8_t *)bn + sizeof(MemBtreeNodeDeclType));
     }
 
-    static uint32_t get_node_area_size() {
+    static uint32_t get_node_area_size(MemBtreeImpl *impl) {
         return NodeSize - sizeof(MemBtreeNodeDeclType) - sizeof(LeafPhysicalNodeDeclType);
     }
 
-    static boost::intrusive_ptr<MemBtreeNodeDeclType> alloc_node(bool is_leaf) {
+    static boost::intrusive_ptr<MemBtreeNodeDeclType> alloc_node(MemBtreeImpl *impl, bool is_leaf) {
         uint8_t *mem = BtreeNodeAllocator< NodeSize >::allocate();
-        auto bn = new (mem) MemBtreeNodeDeclType();
+        auto btree_node = new (mem) MemBtreeNodeDeclType();
 
         if (is_leaf) {
             auto n = new(mem + sizeof(MemBtreeNodeDeclType)) VariantNode<LeafNodeType, K, V, NodeSize>((bnodeid_t)mem, true);
         } else {
             auto n = new(mem + sizeof(MemBtreeNodeDeclType)) VariantNode<InteriorNodeType, K, V, NodeSize>((bnodeid_t)mem, true);
         }
-        ref_node(bn);
+        auto mbh = (mem_btree_node_header *)btree_node;
+        mbh->refcount.increment();
         return (boost::intrusive_ptr<MemBtreeNodeDeclType>((MemBtreeNodeDeclType *)mem));
     }
 
-    static boost::intrusive_ptr<MemBtreeNodeDeclType> read_node(bnodeid_t id) {
+    static boost::intrusive_ptr<MemBtreeNodeDeclType> read_node(MemBtreeImpl *impl, bnodeid_t id) {
         auto bn = (MemBtreeNodeDeclType *)(uint8_t *)id.m_x;
         return boost::intrusive_ptr<MemBtreeNodeDeclType>(bn);
     }
 
-    static void write_node(boost::intrusive_ptr<MemBtreeNodeDeclType> bn) {
+    static void write_node(MemBtreeImpl *impl, boost::intrusive_ptr<MemBtreeNodeDeclType> bn) {
     }
 
-    static void free_node(boost::intrusive_ptr<MemBtreeNodeDeclType> bn) {
-        if (deref_node(bn.get())) {
+    static void free_node(MemBtreeImpl *impl, boost::intrusive_ptr<MemBtreeNodeDeclType> bn) {
+        auto mbh = (mem_btree_node_header *)bn.get();
+        if (mbh->refcount.decrement_testz()) {
+            // TODO: Access the VariantNode area and call its destructor as well
             bn->~MemBtreeNodeDeclType();
             BtreeNodeAllocator<NodeSize>::deallocate((uint8_t *)bn.get());
         }

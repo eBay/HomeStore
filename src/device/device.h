@@ -19,7 +19,7 @@
 #include <boost/uuid/uuid.hpp>            // uuid class
 #include <boost/uuid/uuid_generators.hpp> // generators
 #include <boost/uuid/uuid_io.hpp>         // streaming operators etc.
-#include "omds/array/avector.hpp"
+#include "omds/array/sparse_vector.hpp"
 
 namespace omstore {
 
@@ -552,9 +552,9 @@ private:
     std::mutex   m_chunk_mutex;
     std::mutex   m_vdev_mutex;
 
-    omds::avector< std::unique_ptr< PhysicalDev > > m_pdevs;
-    omds::avector< std::unique_ptr< PhysicalDevChunk > > m_chunks;
-    omds::avector< AbstractVirtualDev * > m_vdevs;
+    omds::sparse_vector< std::unique_ptr< PhysicalDev > > m_pdevs;
+    omds::sparse_vector< std::unique_ptr< PhysicalDevChunk > > m_chunks;
+    omds::sparse_vector< AbstractVirtualDev * > m_vdevs;
     uint32_t m_last_vdevid;
     uint32_t m_vdev_metadata_size; // Appln metadata size for vdev
 

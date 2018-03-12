@@ -59,19 +59,23 @@ int main(int argc, char** argv) {
     hints.desired_temp = 0;
     hints.dev_id_hint = -1;
 
+    boost::intrusive_ptr<BlkBuffer> bbufs[100];
     for (auto i = 0; i < 100; i++) {
         uint8_t nblks = 1;
-        blk_store->alloc_blk(nblks, hints, &bids[i]);
+        //blk_store->alloc_blk(nblks, hints, &bids[i]);
 
+        bbufs[i] = blk_store->alloc_blk_cached(nblks, hints, &bids[i]);
         LOG(INFO) << "Requested nblks: " << (uint32_t)nblks << " Allocation info: " << bids[i].to_string();
+        memset(bbufs[i]->at_offset(0).bytes, i, bbufs[i]->at_offset(0).size);
     }
 
-    char bufs[100][8192];
+    //char bufs[100][8192];
     for (auto i = 0; i < 100; i++) {
-        memset(bufs[i], i, 8192);
-        omds::blob b = {(uint8_t *)&bufs[i], 8192};
+        //memset(bufs[i], i, 8192);
+        //omds::blob b = {(uint8_t *)&bufs[i], 8192};
 
-        boost::intrusive_ptr< BlkBuffer > bbuf = blk_store->write(bids[i], b);
+        //boost::intrusive_ptr< BlkBuffer > bbuf = blk_store->write(bids[i], b);
+        blk_store->write(bids[i], bbufs[i]);
         LOG(INFO) << "Written on " << bids[i].to_string() << " for 8192 bytes";
     }
 

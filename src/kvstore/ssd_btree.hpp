@@ -19,11 +19,14 @@
 #include "omds/memory/sys_allocator.hpp"
 #include "cache.h"
 #include "blkstore/blkstore.hpp"
-#include "btree_specific_impl.hpp"
-#include "btree_node.h"
-#include "physical_node.hpp"
+#include "omds/btree/btree_specific_impl.hpp"
+#include "omds/btree/btree_node.h"
+#include "omds/btree/physical_node.hpp"
+
+using namespace omstore;
 
 namespace omds { namespace btree {
+
 #define SSDBtreeNodeDeclType BtreeNode<SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize>
 #define SSDBtreeImpl BtreeSpecificImpl<SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize>
 #define BtreeBufferDeclType BtreeBuffer<K, V, InteriorNodeType, LeafNodeType, NodeSize>
@@ -53,7 +56,7 @@ template<
         btree_node_type LeafNodeType,
         size_t NodeSize
 >
-class BtreeBuffer : public omstore::CacheBuffer< omstore::BlkId > {
+class BtreeBuffer : public CacheBuffer< BlkId > {
 public:
     static BtreeBuffer *make_object() {
         return omds::ObjectAllocator< SSDBtreeNodeDeclType >::make_object();
@@ -61,9 +64,9 @@ public:
 };
 
 struct btree_device_info {
-    omstore::DeviceManager *dev_mgr;
-    omstore::Cache< omstore::BlkId > *cache;
-    omstore::vdev_info_block *vb;
+    DeviceManager *dev_mgr;
+    Cache< omstore::BlkId > *cache;
+    vdev_info_block *vb;
     uint64_t size;
     bool new_device;
 };
@@ -74,8 +77,8 @@ template<
         btree_node_type InteriorNodeType,
         btree_node_type LeafNodeType,
         size_t NodeSize
-        >
-class BtreeSpecificImpl<SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize> {
+>
+class omds::btree::BtreeSpecificImpl<SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize> {
 public:
     using HeaderType = BtreeBuffer<K, V, InteriorNodeType, LeafNodeType, NodeSize>;
 
@@ -88,11 +91,11 @@ public:
 
         // Create or load the Blkstore out of this info
         if (bt_dev_info->new_device) {
-            m_blkstore = new omstore::BlkStore<omstore::VdevFixedBlkAllocatorPolicy, BtreeBufferDeclType>(
-                bt_dev_info->dev_mgr, bt_dev_info->cache, bt_dev_info->size, omstore::BlkStoreCacheType::WRITETHRU_CACHE, 0);
+            m_blkstore = new BlkStore<VdevFixedBlkAllocatorPolicy, BtreeBufferDeclType>(
+                    bt_dev_info->dev_mgr, bt_dev_info->cache, bt_dev_info->size, BlkStoreCacheType::WRITETHRU_CACHE, 0);
         } else {
-            m_blkstore = new omstore::BlkStore<omstore::VdevFixedBlkAllocatorPolicy, BtreeBufferDeclType>
-                (bt_dev_info->dev_mgr, bt_dev_info->cache, bt_dev_info->vb, omstore::BlkStoreCacheType::WRITETHRU_CACHE);
+            m_blkstore = new BlkStore<VdevFixedBlkAllocatorPolicy, BtreeBufferDeclType>
+                    (bt_dev_info->dev_mgr, bt_dev_info->cache, bt_dev_info->vb, BlkStoreCacheType::WRITETHRU_CACHE);
         }
     }
 
@@ -108,8 +111,8 @@ public:
     }
 
     static boost::intrusive_ptr<SSDBtreeNodeDeclType> alloc_node(SSDBtreeImpl *impl, bool is_leaf) {
-        omstore::blk_alloc_hints hints;
-        omstore::BlkId blkid;
+        blk_alloc_hints hints;
+        BlkId blkid;
         auto safe_buf = impl->m_blkstore->alloc_blk_cached(1, hints, &blkid);
 
         // Access the physical node buffer and initialize it
@@ -126,32 +129,33 @@ public:
 
     static boost::intrusive_ptr<SSDBtreeNodeDeclType> read_node(SSDBtreeImpl *impl, bnodeid_t id) {
         // Read the data from the block store
-        omstore::BlkId blkid(id.to_integer());
+        BlkId blkid(id.to_integer());
         auto safe_buf = impl->m_blkstore->read(blkid, 0, NodeSize);
 
         return boost::static_pointer_cast<SSDBtreeNodeDeclType>(safe_buf);
     }
 
     static void write_node(SSDBtreeImpl *impl, boost::intrusive_ptr<SSDBtreeNodeDeclType> bn) {
-        omstore::BlkId blkid(bn->get_node_id().to_integer());
+        BlkId blkid(bn->get_node_id().to_integer());
         impl->m_blkstore->write(blkid, boost::dynamic_pointer_cast<BtreeBufferDeclType>(bn));
     }
 
     static void free_node(SSDBtreeImpl *impl, boost::intrusive_ptr<SSDBtreeNodeDeclType> bn) {
-        omstore::BlkId blkid(bn->get_node_id().to_integer());
+        BlkId blkid(bn->get_node_id().to_integer());
         impl->m_blkstore->free_blk(blkid, boost::none, boost::none);
     }
 
     static void ref_node(SSDBtreeNodeDeclType *bn) {
-        omstore::CacheBuffer< omstore::BlkId >::ref((omstore::CacheBuffer<omstore::BlkId> &)*bn);
+        CacheBuffer< BlkId >::ref((CacheBuffer<BlkId> &)*bn);
     }
 
     static bool deref_node(SSDBtreeNodeDeclType *bn) {
-        return omstore::CacheBuffer< omstore::BlkId >::deref_testz((omstore::CacheBuffer<omstore::BlkId> &)*bn);
+        return CacheBuffer< BlkId >::deref_testz((CacheBuffer<BlkId> &)*bn);
     }
 private:
-    omstore::BlkStore<omstore::VdevFixedBlkAllocatorPolicy, BtreeBufferDeclType> *m_blkstore;
+    BlkStore<VdevFixedBlkAllocatorPolicy, BtreeBufferDeclType> *m_blkstore;
 };
 } }
+
 
 
