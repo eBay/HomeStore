@@ -395,7 +395,7 @@ public:
 };
 
 class DeviceManager {
-    typedef std::function< AbstractVirtualDev *(vdev_info_block *) > NewVDevCallback;
+    typedef std::function< AbstractVirtualDev *(omstore::DeviceManager *, vdev_info_block *) > NewVDevCallback;
     //typedef std::function< void(PhysicalDevChunk *) > NewChunkCallback;
 
     friend class PhysicalDev;

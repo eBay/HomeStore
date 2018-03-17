@@ -106,7 +106,7 @@ void DeviceManager::add_devices(std::vector< std::string > &dev_names) {
     uint32_t vid = m_vdev_info.first_vdev_id;
     while (vid != INVALID_VDEV_ID) {
         m_last_vdevid = vid;
-        auto vdev = m_new_vdev_cb(&m_vdev_info.vdevs[vid]);
+        auto vdev = m_new_vdev_cb(this, &m_vdev_info.vdevs[vid]);
         m_vdevs[vid] = vdev;
         vid = m_vdev_info.vdevs[vid].next_vdev_id;
     }

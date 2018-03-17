@@ -130,7 +130,7 @@ public:
     virtual void set_blob_size(uint32_t size) = 0;
 
 #ifndef NDEBUG
-    virtual std::string to_string() const = 0;
+    virtual std::string to_string() const {};
 #endif
 };
 
@@ -230,7 +230,7 @@ public:
     virtual void set_blob_size(uint32_t size) = 0;
 
 #ifndef NDEBUG
-    virtual std::string to_string() const = 0;
+    virtual std::string to_string() {};
 #endif
 };
 
@@ -297,9 +297,11 @@ public:
         return (*this);
     }
 
+#ifdef DEBUG
     std::string to_string() const override {
         std::stringstream ss; ss << m_id.m_x; return ss.str();
     }
+#endif
 };
 
 class EmptyClass: public BtreeValue
@@ -338,9 +340,11 @@ public:
         return (*this);
     }
 
+#ifdef DEBUG
     std::string to_string() const override {
         return "<Empty>";
     }
+#endif
 };
 
 class BtreeConfig
