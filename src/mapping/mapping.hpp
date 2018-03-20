@@ -126,7 +126,7 @@ public:
 		while (nblks != 0) {
 			MappingValue value;
 			
-			key = get_key(lba).get_value;
+			key = get_key(lba).get_value();
 			m_bt->get(get_key(lba), &value);
 			struct BlkId blkid = value.get_val();
 			uint32_t maxBlkRead = KEY_RANGE - (lba - key);

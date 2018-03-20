@@ -21,6 +21,7 @@ int main(int argc, char** argv) {
 	}
 	
 	/* Create/Load the devices */
+	printf("creating devices\n");
 	dev_mgr = new omstore::DeviceManager(Volume::new_vdev_found, 0);
 	try {
 		dev_mgr->add_devices(dev_names);
@@ -32,8 +33,34 @@ int main(int argc, char** argv) {
 	
 	/* Create a volume */
 	if (create) {
+		printf("creating volume\n");
 		LOG(INFO) << "Creating volume\n";
-		uint64_t size = 512 * 1024 * 1024;
+		uint64_t size = 512 * 1024 * 1024 * 1024;
 		vol = new omstore::Volume(dev_mgr, size);
+		printf("created volume\n");
+	}
+
+	uint8_t *bufs[100];
+	for (auto i = 0; i < 100; i++) {
+//		bufs[i] = new uint8_t[8192*1000]();
+		bufs[i] = (uint8_t *)malloc(8192 * 1000);
+		for (auto j = 0; j < (8192 * 1000/8); j++) {
+			memset(bufs[i], i * j , 8);
+		}
+	}
+	
+	for (auto i = 0; i < 100; i++) {	
+		vol->write(i * 1000, bufs[i], 1000);
+	}
+
+	for (auto i = 0; i < 100; i++) {
+		std::vector<boost::intrusive_ptr< BlkBuffer >> buf_list;
+		vol->read(i * 1000, 1000, buf_list);
+		uint64_t size = 0;
+		for(auto buf:buf_list) {
+			 omds::blob b  = buf->at_offset(0);
+			assert(!memcmp(b.bytes, bufs[i] + size, b.size));
+			size += b.size;
+		}
 	}
 }

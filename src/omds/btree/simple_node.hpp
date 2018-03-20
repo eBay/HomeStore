@@ -76,7 +76,8 @@ public:
         if (!this->is_leaf()) {
             bnodeid_t edge_id;
             edge_id = this->get_edge_id();
-            ss << " edge_id=" << edge_id.m_x;
+            ss << " edge_id=";
+	    ss << static_cast<uint64_t>(edge_id.m_x);
         }
         ss << "\n-------------------------------" << endl;
         for (uint32_t i = 0; i < this->get_total_entries(); i++) {
