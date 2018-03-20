@@ -89,6 +89,9 @@ struct BlkId {
         m_chunk_num = chunk_num;
     }
 
+    uint64_t set_id(uint64_t id) {
+	m_id = id;
+    }
     uint64_t get_id() const {
         return m_id;
     }

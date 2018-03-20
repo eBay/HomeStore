@@ -44,6 +44,9 @@ public:
 	static uint32_t get_fixed_size() {
 		return sizeof(blob);
 	}
+	uint32_t get_value() {
+		return blob;
+	}
 };
 
 class MappingValue : public omds::btree::BtreeValue {
@@ -78,15 +81,15 @@ public:
 	static uint32_t get_fixed_size() {
 		return sizeof(val);
 	}
+	struct BlkId get_val() {
+		return val;
+	}
 };
 
 #define MappingBtreeDeclType     omds::btree::Btree<omds::btree::MEM_BTREE, MappingKey, MappingValue, \
                                     omds::btree::BTREE_NODETYPE_SIMPLE, omds::btree::BTREE_NODETYPE_SIMPLE>
-struct blkIdInfo {
-	omstore::BlkId bid;
-	uint32_t offset;
-	uint32_t lba;	
-};
+#define KEY_RANGE	1000
+#define BLOCK_SIZE	8192
 
 class mapping {
 private:
@@ -94,14 +97,14 @@ private:
 public:
 	mapping(uint32_t volsize) {
 		omds::btree::BtreeConfig btree_cfg;
-		btree_cfg.set_max_objs(volsize/8192);
+		btree_cfg.set_max_objs(volsize/(KEY_RANGE*BLOCK_SIZE));
 		btree_cfg.set_max_key_size(sizeof(MappingKey));
 		btree_cfg.set_max_value_size(sizeof(MappingValue));
 		m_bt = MappingBtreeDeclType::create_btree(btree_cfg, NULL); 
 	}
 
 	MappingKey get_key(uint32_t lba) {
-		MappingKey key(lba);
+		MappingKey key(lba/KEY_RANGE);
 		return key;
 	}
 
@@ -116,9 +119,31 @@ public:
 	}
 		
 	uint32_t get(uint32_t lba, uint32_t nblks, 
-			std::vector<struct blkIdInfo> &blkIdList) {
-		MappingValue value;
-		m_bt->get(get_key(lba), &value);
+			std::vector<struct omstore::BlkId> &blkIdList) {
+
+		uint32_t key;
+
+		while (nblks != 0) {
+			MappingValue value;
+			
+			key = get_key(lba).get_value;
+			m_bt->get(get_key(lba), &value);
+			struct BlkId blkid = value.get_val();
+			uint32_t maxBlkRead = KEY_RANGE - (lba - key);
+	
+			if (maxBlkRead >= nblks) {
+				blkid.set_nblks(nblks);
+				blkid.set_id(blkid.get_id() + lba - key);
+				blkIdList.push_back(blkid);
+				nblks = 0;
+			} else {
+				blkid.set_nblks(maxBlkRead);
+				blkid.set_id(blkid.get_id() + lba - key);
+				blkIdList.push_back(blkid);
+				nblks = nblks - maxBlkRead;
+				lba = lba + maxBlkRead;
+			}
+		}
 		return 0;
 	}
 };

@@ -3,6 +3,7 @@
 #include <fcntl.h>
 #include <cache/cache.h>
 #include "blkstore.hpp"
+#include <mapping/mapping.hpp>
 
 using namespace std;
 
@@ -10,6 +11,7 @@ namespace omstore {
 class Volume {
 
 	uint64_t size;
+	mapping *map;
 
 public:
 	omstore::BlkStore< omstore::VdevFixedBlkAllocatorPolicy > *blk_store;

@@ -1,11 +1,13 @@
 #include <iostream>
-#include <glog/logging.h> 
 #include "device/device.h"
 #include <fcntl.h>
 #include "volume.hpp"
 
 using namespace std; 
 using namespace omstore;
+
+
+INIT_VMODULES(BTREE_VMODULES);
 
 omstore::DeviceManager *dev_mgr = nullptr;
 omstore::Volume *vol;
