@@ -28,6 +28,7 @@ omstore::Volume::Volume(omstore::DeviceManager *dev_mgr, uint64_t size) {
     }
     blk_store = new omstore::BlkStore< omstore::VdevFixedBlkAllocatorPolicy >(dev_mgr, Volume::glob_cache, size,
                                                                                   WRITETHRU_CACHE, 1);
+    map = new mapping(size);
 }
 
 omstore::Volume::Volume(DeviceManager *dev_mgr, omstore::vdev_info_block *vb) {
@@ -35,7 +36,9 @@ omstore::Volume::Volume(DeviceManager *dev_mgr, omstore::vdev_info_block *vb) {
     if (Volume::glob_cache == NULL) {
 	new omstore::Cache< BlkId >(MAX_CACHE_SIZE, BLOCK_SIZE);
     }
-    blk_store = new omstore::BlkStore< omstore::VdevFixedBlkAllocatorPolicy >(dev_mgr, Volume::glob_cache, vb, WRITETHRU_CACHE);
+    blk_store = new omstore::BlkStore< omstore::VdevFixedBlkAllocatorPolicy >(dev_mgr, Volume::glob_cache, 
+										vb, WRITETHRU_CACHE);
+    map = new mapping(size);
 }
 
 int 
@@ -52,15 +55,26 @@ omstore::Volume::write(uint64_t lba, uint8_t *buf, int nblks) {
     omds::blob b = {buf, BLOCK_SIZE * nblks};
 
     boost::intrusive_ptr< BlkBuffer > bbuf = blk_store->write(bid, b);
+    map->put(lba, nblks, bid);
     LOG(INFO) << "Written on " << bid.to_string() << " for 8192 bytes";
     return 0;
 }
 
-boost::intrusive_ptr< BlkBuffer > 
-omstore::Volume::read(uint64_t lba, int nblks) {
-    	omstore::BlkId bid;
-        LOG(INFO) << "Read from " << bid.to_string() << " for 8192 bytes";
+int
+omstore::Volume::read(uint64_t lba, int nblks, std::vector<boost::intrusive_ptr< BlkBuffer >> &buf_list) {
 
-        boost::intrusive_ptr< BlkBuffer > bbuf = blk_store->read(bid, 0, nblks * BLOCK_SIZE);
-    	return bbuf;
+	/* TODO: pass a pointer */
+	std::vector<struct BlkId> blkIdList;
+	boost::intrusive_ptr< BlkBuffer > bbuf;
+	if (map->get(lba, nblks, blkIdList)) {
+		ASSERT(0);
+	}
+	
+	for (auto bInfo: blkIdList) {
+        	LOG(INFO) << "Read from " << bInfo.to_string() << " for 8192 bytes";
+        	bbuf = blk_store->read(bInfo, 0, BLOCK_SIZE * bInfo.get_nblks());
+		buf_list.push_back(bbuf);
+		/* TODO: we need to copy it in the buffer */		
+	}
+    	return 0;
 }

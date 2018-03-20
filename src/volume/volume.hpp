@@ -21,6 +21,6 @@ public:
 	Volume(DeviceManager *mgr, uint64_t size);
 	Volume(DeviceManager *dev_mgr, omstore::vdev_info_block *vb);
 	int write(uint64_t lba, uint8_t *buf, int nblks);
-	boost::intrusive_ptr< BlkBuffer > read(uint64_t lba, int nblks);
+	int read(uint64_t lba, int nblks, std::vector<boost::intrusive_ptr< BlkBuffer >> &buf_list);
 };
 }
