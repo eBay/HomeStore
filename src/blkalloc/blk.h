@@ -12,14 +12,14 @@
 #include <cassert>
 #include <sstream>
 #include <cstring>
-#include "omds/array/flexarray.hpp"
-#include "omds/memory/mempiece.hpp"
-#include "omds/utility/useful_defs.hpp"
+#include "homeds/array/flexarray.hpp"
+#include "homeds/memory/mempiece.hpp"
+#include "homeds/utility/useful_defs.hpp"
 #include "main/store_limits.h"
 
 //#include "device/device.h"
 
-namespace omstore {
+namespace homestore {
 
 #define ID_BITS        40
 #define NBLKS_BITS      8
@@ -36,11 +36,11 @@ struct BlkId {
     }
 
     static uint64_t constexpr max_blks_in_op() {
-        return (uint64_t)(omds::pow(2, NBLKS_BITS));
+        return (uint64_t)(homeds::pow(2, NBLKS_BITS));
     }
 
-    static omds::blob get_blob(const BlkId &id) {
-        omds::blob b;
+    static homeds::blob get_blob(const BlkId &id) {
+        homeds::blob b;
         b.bytes = (uint8_t *)&id;
         b.size = sizeof(uint64_t);
 
@@ -89,9 +89,10 @@ struct BlkId {
         m_chunk_num = chunk_num;
     }
 
-    uint64_t set_id(uint64_t id) {
-	m_id = id;
+    void set_id(uint64_t id) {
+	    m_id = id;
     }
+
     uint64_t get_id() const {
         return m_id;
     }
@@ -122,7 +123,7 @@ struct BlkId {
 struct SingleBlk {
     BlkId m_blk_id;
     uint32_t  m_nblks;
-    omds::MemVector < 1 > m_mem;
+    homeds::MemVector < 1 > m_mem;
 
     SingleBlk(uint64_t id, uint16_t chunk_num, uint32_t size) :
             m_blk_id(id, chunk_num),
@@ -145,15 +146,15 @@ struct SingleBlk {
         m_blk_id.m_internal_id = bid.m_internal_id;
     }
 
-    omds::MemVector<1> &get_mem() {
+    homeds::MemVector<1> &get_mem() {
         return m_mem;
     }
 
-    const omds::MemVector<1> &get_mem_const() const {
+    const homeds::MemVector<1> &get_mem_const() const {
         return m_mem;
     }
 
-    void set_mem(omds::blob b) {
+    void set_mem(homeds::blob b) {
         m_mem.set_piece(b);
     }
 
@@ -184,7 +185,7 @@ private:
     uint32_t  m_nblks;   // Its actual size in this piece. Note: This can be more than pageSize
 
     uint32_t m_bufsize;
-    omds::FlexArray< MemPiece, EXPECTED_MEM_PIECE_PER_BLK > m_bufs;
+    homeds::FlexArray< MemPiece, EXPECTED_MEM_PIECE_PER_BLK > m_bufs;
 
 public:
     BlkPiece(blkid64_t id, uint32_t size, uint8_t *mem) :
@@ -251,10 +252,10 @@ public:
  */
 class Blk {
 private:
-    omds::FlexArray< BlkPiece, EXPECTED_BLK_PIECES > m_pieces;
+    homeds::FlexArray< BlkPiece, EXPECTED_BLK_PIECES > m_pieces;
 
 protected:
-    omds::FlexArray< BlkPiece, EXPECTED_BLK_PIECES > &get_pieces() {
+    homeds::FlexArray< BlkPiece, EXPECTED_BLK_PIECES > &get_pieces() {
         return m_pieces;
     }
 

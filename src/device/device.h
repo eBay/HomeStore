@@ -19,9 +19,9 @@
 #include <boost/uuid/uuid.hpp>            // uuid class
 #include <boost/uuid/uuid_generators.hpp> // generators
 #include <boost/uuid/uuid_io.hpp>         // streaming operators etc.
-#include "omds/array/sparse_vector.hpp"
+#include "homeds/array/sparse_vector.hpp"
 
-namespace omstore {
+namespace homestore {
 
 #define MAGIC                            0xCEEDDEEB
 #define PRODUCT_NAME                     "OmStore"
@@ -377,7 +377,7 @@ private:
      * std::system_exception if there is any write errors */
     void format_super_block(uint32_t dev_id, uint64_t dev_offset);
 
-    /* Validate if this device is a omstore validated device. If there is any corrupted device, then it
+    /* Validate if this device is a homestore validated device. If there is any corrupted device, then it
      * throws std::system_exception */
     bool validate_device();
 
@@ -395,7 +395,7 @@ public:
 };
 
 class DeviceManager {
-    typedef std::function< AbstractVirtualDev *(omstore::DeviceManager *, vdev_info_block *) > NewVDevCallback;
+    typedef std::function< AbstractVirtualDev *(DeviceManager *, vdev_info_block *) > NewVDevCallback;
     //typedef std::function< void(PhysicalDevChunk *) > NewChunkCallback;
 
     friend class PhysicalDev;
@@ -552,9 +552,9 @@ private:
     std::mutex   m_chunk_mutex;
     std::mutex   m_vdev_mutex;
 
-    omds::sparse_vector< std::unique_ptr< PhysicalDev > > m_pdevs;
-    omds::sparse_vector< std::unique_ptr< PhysicalDevChunk > > m_chunks;
-    omds::sparse_vector< AbstractVirtualDev * > m_vdevs;
+    homeds::sparse_vector< std::unique_ptr< PhysicalDev > > m_pdevs;
+    homeds::sparse_vector< std::unique_ptr< PhysicalDevChunk > > m_chunks;
+    homeds::sparse_vector< AbstractVirtualDev * > m_vdevs;
     uint32_t m_last_vdevid;
     uint32_t m_vdev_metadata_size; // Appln metadata size for vdev
 
@@ -620,5 +620,5 @@ private:
     std::vector< PhysicalDevChunk * > *m_mirrorChunks;
 };
 */
-} // namespace omstore
+} // namespace homestore
 #endif /* BLKDEV_BLKDEV_H_ */

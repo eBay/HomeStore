@@ -9,10 +9,10 @@
 #include <iostream>
 #include <cassert>
 #include <thread>
-#include "omds/btree/mem_btree.hpp"
+#include "homeds/btree/mem_btree.hpp"
 #include <glog/logging.h>
 
-namespace omstore {
+namespace homestore {
 
 void thread_func(VarsizeBlkAllocator *b) {
     b->allocator_state_machine();
@@ -28,7 +28,7 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig &cfg) :
         m_cache_n_entries(0) {
 
     // TODO: Raise exception when blk_size > page_size or total blks is less than some number etc...
-    m_alloc_bm = new omds::Bitset(cfg.get_total_blks());
+    m_alloc_bm = new homeds::Bitset(cfg.get_total_blks());
 
 #ifndef NDEBUG
     for (auto i = 0U; i < cfg.get_total_temp_group(); i++) {
@@ -51,7 +51,7 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig &cfg) :
     }
 
     // Create a btree to cache temperature, blks info (blk num, page id etc..)
-    omds::btree::BtreeConfig btree_cfg;
+    homeds::btree::BtreeConfig btree_cfg;
     btree_cfg.set_max_objs(cfg.get_max_cache_blks());
     btree_cfg.set_max_key_size(sizeof(VarsizeAllocCacheEntry));
     btree_cfg.set_max_value_size(0);
@@ -124,10 +124,10 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
     VarsizeAllocCacheEntry end_entry(BLKID_RANGE_LAST, PAGEID_RANGE_LAST, BLKCOUNT_RANGE_LAST, TEMP_RANGE_LAST);
     VarsizeAllocCacheEntry actual_entry;
 
-    omds::btree::BtreeSearchRange regex(start_entry, true, /* start_incl */
+    homeds::btree::BtreeSearchRange regex(start_entry, true, /* start_incl */
                                         end_entry, false, /* end incl */
                                         true /* lean_left */);
-    omds::btree::EmptyClass dummy_val;
+    homeds::btree::EmptyClass dummy_val;
     int attempt = 1;
     while (true) {
         found = m_blk_cache->remove_any(regex, &actual_entry, &dummy_val);
@@ -174,8 +174,8 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
             gen_cache_entry(blknum, (uint32_t)excess_nblks, &excess_entry);
         }
 
-        omds::btree::EmptyClass dummy;
-        m_blk_cache->put(excess_entry, dummy, omds::btree::INSERT_ONLY_IF_NOT_EXISTS);
+        homeds::btree::EmptyClass dummy;
+        m_blk_cache->put(excess_entry, dummy, homeds::btree::INSERT_ONLY_IF_NOT_EXISTS);
     } else {
         out_blkid->set(actual_entry.get_blk_num(), nblks);
     }
@@ -190,7 +190,7 @@ void VarsizeBlkAllocator::free(const BlkId &b) {
     // TODO: Ensure in debug mode, if the blknum is no longer in cache. Need to create a cachentry and search
 #ifndef NDEBUG
     VarsizeAllocCacheEntry entry;
-    omds::btree::EmptyClass dummy;
+    homeds::btree::EmptyClass dummy;
 
     gen_cache_entry(b.get_id(), b.get_nblks(), &entry);
     assert(m_blk_cache->get(entry, &dummy) == false);
@@ -234,7 +234,7 @@ void VarsizeBlkAllocator::fill_cache(BlkAllocSegment *seg) {
 }
 
 uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t portion_num, BlkAllocSegment *seg) {
-    omds::btree::EmptyClass dummy;
+    homeds::btree::EmptyClass dummy;
     uint64_t n_added_blks = 0;
 
     BlkAllocPortion &portion = m_blk_portions[portion_num];
@@ -254,7 +254,7 @@ uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t portion_num, BlkAll
 
         VarsizeAllocCacheEntry entry;
         gen_cache_entry(b.start_bit, b.nbits, &entry);
-        m_blk_cache->put(entry, dummy, omds::btree::INSERT_ONLY_IF_NOT_EXISTS); // TODO: Trap the return status of insert
+        m_blk_cache->put(entry, dummy, homeds::btree::INSERT_ONLY_IF_NOT_EXISTS); // TODO: Trap the return status of insert
         m_alloc_bm->set_bits(b.start_bit, b.nbits);
 
         // Update the counters
@@ -347,7 +347,7 @@ int VarsizeAllocCacheEntry::compare_range(const VarsizeAllocCacheEntry *start, b
     return ret;
 }
 
-int VarsizeAllocCacheEntry::compare(const omds::btree::BtreeKey *o) const {
+int VarsizeAllocCacheEntry::compare(const homeds::btree::BtreeKey *o) const {
     auto *other = (VarsizeAllocCacheEntry *) o;
     if (get_blk_count() < other->get_blk_count()) {
         return -1;
@@ -365,4 +365,4 @@ int VarsizeAllocCacheEntry::compare(const omds::btree::BtreeKey *o) const {
         return 0;
     }
 }
-} //namespace omstore
+} //namespace homestore

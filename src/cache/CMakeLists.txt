@@ -16,7 +16,7 @@ set(TEST_CACHE_SOURCE_FILES
         cache.cpp
         cache.h
         test_cache.cpp
-        ../omds/memory/mempiece.hpp)
+        ../homeds/memory/mempiece.hpp)
 
 add_executable(test_cache ${TEST_CACHE_SOURCE_FILES})
 target_link_libraries(test_cache folly glog farmhash tcmalloc benchmark pthread)

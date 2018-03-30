@@ -14,9 +14,9 @@
 #include <iostream>
 #include <folly/Exception.h>
 #include <boost/utility.hpp>
-#include "omds/utility/useful_defs.hpp"
+#include "homeds/utility/useful_defs.hpp"
 
-namespace omstore {
+namespace homestore {
 
 static __thread char hdr_tmp_buf[SUPERBLOCK_MAX_HEADER_SIZE];
 
@@ -78,7 +78,7 @@ bool PhysicalDev::load_super_block() {
                               get_devname() + " Exception info: " + e.what());
     }
 
-    // Validate if its omstore formatted device
+    // Validate if its homestore formatted device
     bool is_omstore_dev = validate_device();
     if (!is_omstore_dev) {
         return false;
@@ -270,7 +270,7 @@ PhysicalDevChunk::PhysicalDevChunk(PhysicalDev *pdev, chunk_info_block *cinfo) {
     m_pdev = pdev;
 #if 0
     const std::unique_ptr< PhysicalDev > &p =
-            (static_cast<const omds::sparse_vector< std::unique_ptr< PhysicalDev > > &>(device_manager()->m_pdevs))[cinfo->pdev_id];
+            (static_cast<const homeds::sparse_vector< std::unique_ptr< PhysicalDev > > &>(device_manager()->m_pdevs))[cinfo->pdev_id];
     m_pdev = p.get();
 #endif
 }
@@ -306,4 +306,4 @@ PhysicalDevChunk* PhysicalDevChunk::get_primary_chunk() const {
 DeviceManager *PhysicalDevChunk::device_manager() const {
     return get_physical_dev()->device_manager();
 }
-} // namespace omstore
+} // namespace homestore

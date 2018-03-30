@@ -5,14 +5,14 @@
 #ifndef OMSTORE_EVICTION_HPP
 #define OMSTORE_EVICTION_HPP
 
-#include "omds/memory/mempiece.hpp"
+#include "homeds/memory/mempiece.hpp"
 #include <mutex>
 #include <atomic>
 #include <boost/intrusive/list.hpp>
 #include "main/store_limits.h"
 
-namespace omstore {
-typedef omds::MemVector< BLKSTORE_BLK_SIZE > EvictMemBlk;
+namespace homestore {
+typedef homeds::MemVector< BLKSTORE_BLK_SIZE > EvictMemBlk;
 
 template <typename EvictionPolicy>
 class Evictor {

@@ -6,7 +6,7 @@
 #include "virtual_dev.hpp"
 #include <folly/ThreadLocal.h>
 
-namespace omstore {
+namespace homestore {
 
 class RoundRobinDeviceSelector {
 public:

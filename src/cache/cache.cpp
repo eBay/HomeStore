@@ -3,10 +3,10 @@
 //
 
 #include "cache.h"
-#include "omds/memory/obj_allocator.hpp"
+#include "homeds/memory/obj_allocator.hpp"
 #include <memory>
 
-namespace omstore {
+namespace homestore {
 
 ////////////////////////////////// Intrusive Cache Section /////////////////////////////////
 template< typename K, typename V>
@@ -95,25 +95,25 @@ Cache<K>::Cache(uint32_t max_cache_size, uint32_t avg_size_per_entry) :
 }
 
 template <typename K>
-bool Cache<K>::upsert(const K &k, const omds::blob &b, boost::intrusive_ptr< CacheBuffer<K> > *out_smart_buf) {
+bool Cache<K>::upsert(const K &k, const homeds::blob &b, boost::intrusive_ptr< CacheBuffer<K> > *out_smart_buf) {
     // TODO: Not supported yet
     assert(0);
     return false;
 }
 
 template <typename K>
-bool Cache<K>::insert(const K &k, const omds::blob &b, uint32_t value_offset,
+bool Cache<K>::insert(const K &k, const homeds::blob &b, uint32_t value_offset,
                       boost::intrusive_ptr< CacheBuffer<K> > *out_smart_buf,
                       const std::function<void(CacheBuffer<K> *)> &found_cb) {
     // Allocate a new Cachebuffer and set the blob address to it.
-    auto cbuf = omds::ObjectAllocator< CacheBuffer<K> >::make_object(k, b, value_offset);
+    auto cbuf = homeds::ObjectAllocator< CacheBuffer<K> >::make_object(k, b, value_offset);
 
     CacheBuffer<K> *out_buf;
     bool inserted = IntrusiveCache< K, CacheBuffer<K> >::insert(*cbuf, &out_buf, found_cb);
     *out_smart_buf = boost::intrusive_ptr< CacheBuffer<K> >(out_buf, inserted);
 
     if (!inserted) {
-        omds::ObjectAllocator< CacheBuffer<K> >::deallocate(cbuf);
+        homeds::ObjectAllocator< CacheBuffer<K> >::deallocate(cbuf);
     }
     return inserted;
 }
@@ -129,7 +129,7 @@ bool Cache<K>::insert(const K &k, const boost::intrusive_ptr< CacheBuffer<K> > i
 }
 
 template <typename K>
-auto Cache<K>::update(const K &k, const omds::blob &b, uint32_t value_offset,
+auto Cache<K>::update(const K &k, const homeds::blob &b, uint32_t value_offset,
                       boost::intrusive_ptr< CacheBuffer<K> >*out_smart_buf) {
     struct {
         bool key_found_already;
@@ -282,16 +282,16 @@ Cache<K>::Cache(uint32_t max_cache_size, uint32_t avg_size_per_entry) :
 }
 
 template <typename K>
-bool Cache<K>::upsert(K &k, const omds::blob &b, boost::intrusive_ptr< CacheBufferType > *out_smart_buf) {
+bool Cache<K>::upsert(K &k, const homeds::blob &b, boost::intrusive_ptr< CacheBufferType > *out_smart_buf) {
     // TODO: Not supported yet
     assert(0);
     return false;
 }
 
 template <typename K>
-bool Cache<K>::insert(K &k, const omds::blob &b, boost::intrusive_ptr< CacheBufferType > *out_smart_buf) {
+bool Cache<K>::insert(K &k, const homeds::blob &b, boost::intrusive_ptr< CacheBufferType > *out_smart_buf) {
     // Allocate a new Cachebuffer and set the blob address to it.
-    auto cbuf = omds::ObjectAllocator< CacheBufferType >::make_object(k, b);
+    auto cbuf = homeds::ObjectAllocator< CacheBufferType >::make_object(k, b);
 
     CacheBufferType *out_buf;
     bool inserted = IntrusiveCache< K, CacheBufferType >::insert(*cbuf, &out_buf);
@@ -321,4 +321,4 @@ bool Cache<K>::erase(boost::intrusive_ptr< CacheBufferType > buf) {
     return (IntrusiveCache< K, CacheBufferType >::erase(*(buf.get())));
 }
 #endif
-} // namespace omstore
+} // namespace homestore

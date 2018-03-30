@@ -10,19 +10,19 @@
 #include "device/device_selector.hpp"
 
 using namespace std;
-using namespace omstore;
+using namespace homestore;
 
-omstore::DeviceManager *dev_mgr = nullptr;
-omstore::VirtualDev< omstore::VdevFixedBlkAllocatorPolicy, omstore::RoundRobinDeviceSelector > *vdev;
+homestore::DeviceManager *dev_mgr = nullptr;
+homestore::VirtualDev< homestore::VdevFixedBlkAllocatorPolicy, homestore::RoundRobinDeviceSelector > *vdev;
 
-AbstractVirtualDev *new_vdev_found(omstore::vdev_info_block *vb) {
+AbstractVirtualDev *new_vdev_found(homestore::DeviceManager *mgr, homestore::vdev_info_block *vb) {
     LOG(INFO) << "New virtual device found id = " << vb->vdev_id << " size = " << vb->size;
-    vdev = new omstore::VirtualDev< omstore::VdevFixedBlkAllocatorPolicy, omstore::RoundRobinDeviceSelector >(dev_mgr, vb);
+    vdev = new homestore::VirtualDev< homestore::VdevFixedBlkAllocatorPolicy, homestore::RoundRobinDeviceSelector >(dev_mgr, vb);
     return vdev;
 }
 
 #if 0
-void new_chunk_found(omstore::PhysicalDevChunk *chunk) {
+void new_chunk_found(homestore::PhysicalDevChunk *chunk) {
     LOG(INFO) << "New chunk found for vdev " << chunk->get_vdev_id() << " Chunk size = " << chunk->get_size();
     vdev->add_chunk(chunk);
 }
@@ -36,7 +36,7 @@ int main(int argc, char** argv) {
         dev_names.emplace_back(argv[i]);
     }
 
-    dev_mgr = new omstore::DeviceManager(new_vdev_found, 0);
+    dev_mgr = new homestore::DeviceManager(new_vdev_found, 0);
     try {
         dev_mgr->add_devices(dev_names);
     } catch (std::exception &e) {
@@ -48,12 +48,12 @@ int main(int argc, char** argv) {
     if (create) {
         LOG(INFO) << "Creating Virtual Dev\n";
         uint32_t size = 512 * 1024 * 1024;
-        vdev = new omstore::VirtualDev< omstore::VdevFixedBlkAllocatorPolicy, omstore::RoundRobinDeviceSelector >
+        vdev = new homestore::VirtualDev< homestore::VdevFixedBlkAllocatorPolicy, homestore::RoundRobinDeviceSelector >
                                                   (dev_mgr, size, 0, true, 8192, devs);
     }
 
-    omstore::BlkId bids[100];
-    omstore::blk_alloc_hints hints;
+    homestore::BlkId bids[100];
+    homestore::blk_alloc_hints hints;
     hints.desired_temp = 0;
     hints.dev_id_hint = -1;
 
@@ -68,19 +68,19 @@ int main(int argc, char** argv) {
     char buf[8192];
     for (auto i = 0; i < 4; i++) {
         memset(buf, i, 8192);
-        omds::MemVector<8192> mvector((uint8_t *)buf, 8192, 0);
+        homeds::MemVector<8192> mvector((uint8_t *)buf, 8192, 0);
         vdev->write(bids[i], mvector);
 
         LOG(INFO) << "Written on " << bids[i].to_string() << " for 8192 bytes";
     }
 
     for (auto i = 0; i < 4; i++) {
-        omds::MemVector<8192> mvector((uint8_t *)buf, 8192, 0);
+        homeds::MemVector<8192> mvector((uint8_t *)buf, 8192, 0);
         vdev->readv(bids[i], mvector);
 
         LOG(INFO) << "Read from " << bids[i].to_string() << " for 8192 bytes";
 
-        omds::blob b;
+        homeds::blob b;
         mvector.get(&b, 0);
         assert(b.size == 8192);
         for (auto j = 0; j < b.size; j++) {

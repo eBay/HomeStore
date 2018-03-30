@@ -7,7 +7,7 @@
 #include <device/blkbuffer.hpp>
 
 using namespace std;
-using namespace omstore;
+using namespace homestore;
 
 #define MAX_CACHE_SIZE     2 * 1024 * 1024 * 1024
 #define BLOCK_SIZE	   8 * 1024
@@ -15,36 +15,36 @@ using namespace omstore;
 Cache< BlkId > * Volume::glob_cache = NULL;
 
 AbstractVirtualDev *
-omstore::Volume::new_vdev_found(DeviceManager *dev_mgr, omstore::vdev_info_block *vb) {
+homestore::Volume::new_vdev_found(DeviceManager *dev_mgr, homestore::vdev_info_block *vb) {
     LOG(INFO) << "New virtual device found id = " << vb->vdev_id << " size = " << vb->size;
-    omstore::Volume *volume = new omstore::Volume(dev_mgr, vb);
+    homestore::Volume *volume = new homestore::Volume(dev_mgr, vb);
     return volume->blk_store->get_vdev();
 }
 
-omstore::Volume::Volume(omstore::DeviceManager *dev_mgr, uint64_t size) {
+homestore::Volume::Volume(homestore::DeviceManager *dev_mgr, uint64_t size) {
     size = size;
     if (Volume::glob_cache == NULL) {
-	new omstore::Cache< BlkId >(MAX_CACHE_SIZE, BLOCK_SIZE);
+	new homestore::Cache< BlkId >(MAX_CACHE_SIZE, BLOCK_SIZE);
     }
-    blk_store = new omstore::BlkStore< omstore::VdevFixedBlkAllocatorPolicy >(dev_mgr, Volume::glob_cache, size,
+    blk_store = new homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy >(dev_mgr, Volume::glob_cache, size,
                                                                                   WRITETHRU_CACHE, 1);
     map = new mapping(size);
 }
 
-omstore::Volume::Volume(DeviceManager *dev_mgr, omstore::vdev_info_block *vb) {
+homestore::Volume::Volume(DeviceManager *dev_mgr, homestore::vdev_info_block *vb) {
     size = vb->size; 
     if (Volume::glob_cache == NULL) {
-	new omstore::Cache< BlkId >(MAX_CACHE_SIZE, BLOCK_SIZE);
+	new homestore::Cache< BlkId >(MAX_CACHE_SIZE, BLOCK_SIZE);
     }
-    blk_store = new omstore::BlkStore< omstore::VdevFixedBlkAllocatorPolicy >(dev_mgr, Volume::glob_cache, 
+    blk_store = new homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy >(dev_mgr, Volume::glob_cache,
 										vb, WRITETHRU_CACHE);
     map = new mapping(size);
 }
 
 int 
-omstore::Volume::write(uint64_t lba, uint8_t *buf, int nblks) {
-    omstore::BlkId bid;
-    omstore::blk_alloc_hints hints;
+homestore::Volume::write(uint64_t lba, uint8_t *buf, int nblks) {
+    homestore::BlkId bid;
+    homestore::blk_alloc_hints hints;
     hints.desired_temp = 0;
     hints.dev_id_hint = -1;
 
@@ -52,7 +52,7 @@ omstore::Volume::write(uint64_t lba, uint8_t *buf, int nblks) {
 
     LOG(INFO) << "Requested nblks: " << (uint32_t)nblks << " Allocation info: " << bid.to_string();
 
-    omds::blob b = {buf, BLOCK_SIZE * nblks};
+    homeds::blob b = {buf, BLOCK_SIZE * nblks};
 
     boost::intrusive_ptr< BlkBuffer > bbuf = blk_store->write(bid, b);
     map->put(lba, nblks, bid);
@@ -61,7 +61,7 @@ omstore::Volume::write(uint64_t lba, uint8_t *buf, int nblks) {
 }
 
 int
-omstore::Volume::read(uint64_t lba, int nblks, std::vector<boost::intrusive_ptr< BlkBuffer >> &buf_list) {
+homestore::Volume::read(uint64_t lba, int nblks, std::vector<boost::intrusive_ptr< BlkBuffer >> &buf_list) {
 
 	/* TODO: pass a pointer */
 	std::vector<struct BlkId> blkIdList;

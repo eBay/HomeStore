@@ -14,18 +14,18 @@
 #include <vector>
 #include <atomic>
 
-#include "omds/memory/composite_allocator.hpp"
-#include "omds/memory/chunk_allocator.hpp"
-#include "omds/memory/sys_allocator.hpp"
+#include "homeds/memory/composite_allocator.hpp"
+#include "homeds/memory/chunk_allocator.hpp"
+#include "homeds/memory/sys_allocator.hpp"
 #include "cache.h"
 #include "blkstore/blkstore.hpp"
-#include "omds/btree/btree_specific_impl.hpp"
-#include "omds/btree/btree_node.h"
-#include "omds/btree/physical_node.hpp"
+#include "homeds/btree/btree_specific_impl.hpp"
+#include "homeds/btree/btree_node.h"
+#include "homeds/btree/physical_node.hpp"
 
-using namespace omstore;
+using namespace homestore;
 
-namespace omds { namespace btree {
+namespace homeds { namespace btree {
 
 #define SSDBtreeNodeDeclType BtreeNode<SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize>
 #define SSDBtreeImpl BtreeSpecificImpl<SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize>
@@ -59,13 +59,13 @@ template<
 class BtreeBuffer : public CacheBuffer< BlkId > {
 public:
     static BtreeBuffer *make_object() {
-        return omds::ObjectAllocator< SSDBtreeNodeDeclType >::make_object();
+        return homeds::ObjectAllocator< SSDBtreeNodeDeclType >::make_object();
     }
 };
 
 struct btree_device_info {
     DeviceManager *dev_mgr;
-    Cache< omstore::BlkId > *cache;
+    Cache< homestore::BlkId > *cache;
     vdev_info_block *vb;
     uint64_t size;
     bool new_device;
@@ -78,7 +78,7 @@ template<
         btree_node_type LeafNodeType,
         size_t NodeSize
 >
-class omds::btree::BtreeSpecificImpl<SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize> {
+class homeds::btree::BtreeSpecificImpl<SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize> {
 public:
     using HeaderType = BtreeBuffer<K, V, InteriorNodeType, LeafNodeType, NodeSize>;
 
@@ -101,7 +101,7 @@ public:
 
     static uint8_t *get_physical(const SSDBtreeNodeDeclType *bn) {
         BtreeBufferDeclType *bbuf = (BtreeBufferDeclType *)(bn);
-        omds::blob b = bbuf->at_offset(0);
+        homeds::blob b = bbuf->at_offset(0);
         assert(b.size == NodeSize);
         return b.bytes;
     }
@@ -116,7 +116,7 @@ public:
         auto safe_buf = impl->m_blkstore->alloc_blk_cached(1, hints, &blkid);
 
         // Access the physical node buffer and initialize it
-        omds::blob b = safe_buf->at_offset(0);
+        homeds::blob b = safe_buf->at_offset(0);
         assert(b.size == NodeSize);
         if (is_leaf) {
             auto n = new (b.bytes) VariantNode<LeafNodeType, K, V, NodeSize>((bnodeid_t)blkid.get_id(), true);

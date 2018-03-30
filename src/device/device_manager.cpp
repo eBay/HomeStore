@@ -9,7 +9,7 @@
 #include <fcntl.h>
 #include <boost/range.hpp>
 
-namespace omstore {
+namespace homestore {
 
 DeviceManager::DeviceManager(NewVDevCallback vcb, uint32_t vdev_metadata_size) :
         m_open_flags(O_RDWR),
@@ -497,4 +497,4 @@ friend class ChunkCyclicIterator;
         return ChunkCyclicIterator(this);
     }
 #endif
-} // namespace omstore
+} // namespace homestore

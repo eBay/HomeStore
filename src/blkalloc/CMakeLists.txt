@@ -18,5 +18,5 @@ set(TEST_BLKALLOC_SOURCE_FILES
         test_blkalloc.cpp)
 
 add_executable(test_blkalloc ${TEST_BLKALLOC_SOURCE_FILES})
-target_link_libraries(test_blkalloc glog pthread)
+target_link_libraries(test_blkalloc glog pthread folly gtest)
 

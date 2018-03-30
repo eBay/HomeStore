@@ -7,7 +7,7 @@
 
 #include "eviction.hpp"
 
-namespace omstore {
+namespace homestore {
 
 // This structure represents each entry into the evictable location
 struct LRUEvictRecord : public boost::intrusive::list_base_hook<> {

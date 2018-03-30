@@ -14,14 +14,14 @@
 #include <string>
 #include <thread>
 #include <sstream>
-#include "omds/bitmap/bitset.hpp"
-#include "omds/btree/btree.hpp"
+#include "homeds/bitmap/bitset.hpp"
+#include "homeds/btree/btree.hpp"
 #include <folly/ThreadLocal.h>
 #include <boost/range/irange.hpp>
 
 using namespace std;
 
-namespace omstore {
+namespace homestore {
 
 class BlkAllocConfig {
 private:
@@ -186,9 +186,16 @@ public:
     BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid) override;
     void free(const BlkId &b) override;
     std::string to_string() const override;
+
+#ifndef NDEBUG
+    uint32_t total_free_blks() const {
+        return m_nfree_blks.load(std::memory_order_relaxed);
+    }
+#endif
+
 private:
     void free_blk(uint32_t id);
 };
 
-} // namespace omstore
+} // namespace homestore
 #endif

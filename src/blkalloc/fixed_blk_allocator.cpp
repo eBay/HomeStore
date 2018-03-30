@@ -9,7 +9,7 @@
 
 using namespace std;
 
-namespace omstore {
+namespace homestore {
 
 FixedBlkAllocator::FixedBlkAllocator(BlkAllocConfig &cfg) :
         BlkAllocator(cfg) {
@@ -100,5 +100,5 @@ std::string FixedBlkAllocator::to_string() const {
     oss << "m_top_blk_id=" << m_top_blk_id << "\n";
     return oss.str();
 }
-} // namespace omstore
+} // namespace homestore
 

@@ -24,8 +24,8 @@ using namespace std;
 #define MAX_CACHE_SIZE     2 * 1024 * 1024 * 1024
 
 struct blk_id {
-    static omds::blob get_blob(const blk_id &id) {
-        omds::blob b;
+    static homeds::blob get_blob(const blk_id &id) {
+        homeds::blob b;
         b.bytes = (uint8_t *)&id.m_id;
         b.size = sizeof(uint64_t);
 
@@ -55,19 +55,19 @@ struct blk_id {
     uint64_t m_id;
 };
 
-omstore::Cache< blk_id > *glob_cache;
+homestore::Cache< blk_id > *glob_cache;
 char **glob_bufs;
 blk_id **glob_ids;
 
 #if 0
 void temp() {
-    omstore::CacheBuffer< BlkId > *buf;
-    omstore::intrusive_ptr_release(buf);
+    homestore::CacheBuffer< BlkId > *buf;
+    homestore::intrusive_ptr_release(buf);
 }
 #endif
 
 void setup(int count) {
-    glob_cache = new omstore::Cache< blk_id >(MAX_CACHE_SIZE, 8192);
+    glob_cache = new homestore::Cache< blk_id >(MAX_CACHE_SIZE, 8192);
     glob_ids =  new blk_id*[count];
     glob_bufs = new char*[count];
 
@@ -85,7 +85,7 @@ void test_insert(benchmark::State& state) {
     for (auto _ : state) { // Loops upto iteration count
         auto index = state.thread_index;
         for (auto i = index; i < state.range(0); i+=state.threads) { // Loops for provided ranges
-            boost::intrusive_ptr< omstore::CacheBuffer< blk_id> > cbuf;
+            boost::intrusive_ptr< homestore::CacheBuffer< blk_id> > cbuf;
             glob_cache->insert(*glob_ids[i], {(uint8_t *)glob_bufs[i], 64}, 0, &cbuf);
         }
     }
@@ -96,13 +96,13 @@ void test_reads(benchmark::State& state) {
     for (auto _ : state) { // Loops upto iteration count
         auto index = state.thread_index;
         for (auto i = index; i < state.range(0); i+=state.threads) { // Loops for provided ranges
-            boost::intrusive_ptr< omstore::CacheBuffer< blk_id > > cbuf;
+            boost::intrusive_ptr< homestore::CacheBuffer< blk_id > > cbuf;
             bool found = glob_cache->get(*glob_ids[i], &cbuf);
 #if 0
 #ifndef NDEBUG
             assert(found);
             int id;
-            omds::blob b;
+            homeds::blob b;
             cbuf->get(&b);
             sscanf((const char *)b.bytes, "Content for blk id = %d\n", &id);
             assert(id == glob_ids[i]->m_internal_id);
@@ -117,7 +117,7 @@ void test_updates(benchmark::State& state) {
     for (auto _ : state) { // Loops upto iteration count
         auto index = state.thread_index;
         for (auto i = index; i < state.range(0); i+=state.threads) { // Loops for provided ranges
-            boost::intrusive_ptr< omstore::CacheBuffer< blk_id > > cbuf;
+            boost::intrusive_ptr< homestore::CacheBuffer< blk_id > > cbuf;
             glob_cache->update(*glob_ids[i], {(uint8_t *)glob_bufs[i], 64}, 16384, &cbuf);
         }
     }
@@ -128,13 +128,13 @@ void test_erase(benchmark::State& state) {
     for (auto _ : state) { // Loops upto iteration count
         auto index = state.thread_index;
         for (auto i = index; i < state.range(0); i+=state.threads) { // Loops for provided ranges
-            boost::intrusive_ptr< omstore::CacheBuffer< blk_id > > cbuf;
+            boost::intrusive_ptr< homestore::CacheBuffer< blk_id > > cbuf;
             glob_cache->erase(*glob_ids[i], &cbuf);
         }
     }
 }
 
-BENCHMARK(test_insert)->Range(TEST_COUNT, TEST_COUNT)->Iterations(ITERATIONS)->Threads(THREADS);
+BENCHMARK(444)->Range(TEST_COUNT, TEST_COUNT)->Iterations(ITERATIONS)->Threads(THREADS);
 BENCHMARK(test_reads)->Range(TEST_COUNT, TEST_COUNT)->Iterations(ITERATIONS)->Threads(THREADS);
 BENCHMARK(test_updates)->Range(TEST_COUNT, TEST_COUNT)->Iterations(ITERATIONS)->Threads(THREADS);
 BENCHMARK(test_erase)->Range(TEST_COUNT, TEST_COUNT)->Iterations(ITERATIONS)->Threads(THREADS);

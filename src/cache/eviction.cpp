@@ -4,7 +4,7 @@
 
 #include "eviction.hpp"
 
-namespace omstore {
+namespace homestore {
 
 #define EvictRecord typename Evictor<EvictionPolicy>::EvictRecordType
 
@@ -71,4 +71,4 @@ void Evictor<EvictionPolicy>::delete_record(EvictRecordType &rec) {
     m_cur_size.fetch_sub(m_get_size_cb(&rec), std::memory_order_acq_rel);
 }
 
-} // namespace omstore
+} // namespace homestore

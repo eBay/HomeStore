@@ -58,7 +58,7 @@ int main(int argc, char** argv) {
 		vol->read(i * 1000, 1000, buf_list);
 		uint64_t size = 0;
 		for(auto buf:buf_list) {
-			 omds::blob b  = buf->at_offset(0);
+			 homeds::blob b  = buf->at_offset(0);
 			assert(!memcmp(b.bytes, bufs[i] + size, b.size));
 			size += b.size;
 		}

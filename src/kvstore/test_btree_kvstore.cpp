@@ -13,16 +13,16 @@
 
 #define MAX_CACHE_SIZE     2 * 1024 * 1024 * 1024
 using namespace std;
-using namespace omstore;
+using namespace homestore;
 
-omstore::DeviceManager *dev_mgr = nullptr;
-omstore::Cache< BlkId > *glob_cache = nullptr;
-omds::btree::btree_device_info bt_dev_info;
+homestore::DeviceManager *dev_mgr = nullptr;
+homestore::Cache< BlkId > *glob_cache = nullptr;
+homeds::btree::btree_device_info bt_dev_info;
 
-#define TestBtreeDeclType     omds::btree::Btree<omds::btree::SSD_BTREE, TestSimpleKey,TestSimpleValue, \
-                                    omds::btree::BTREE_NODETYPE_SIMPLE, omds::btree::BTREE_NODETYPE_SIMPLE>
+#define TestBtreeDeclType     homeds::btree::Btree<homeds::btree::SSD_BTREE, TestSimpleKey,TestSimpleValue, \
+                                    homeds::btree::BTREE_NODETYPE_SIMPLE, homeds::btree::BTREE_NODETYPE_SIMPLE>
 
-AbstractVirtualDev *new_vdev_found(omstore::vdev_info_block *vb) {
+AbstractVirtualDev *new_vdev_found(homestore::vdev_info_block *vb) {
     LOG(INFO) << "New virtual device found id = " << vb->vdev_id << " size = " << vb->size;
     assert(0); // This test at present does not support restoring the btree
     return nullptr;
@@ -45,12 +45,12 @@ void setup_devices(uint32_t ndevs) {
     }
 
     // Create a global cache entry
-    glob_cache = new omstore::Cache< omstore::BlkId >(MAX_CACHE_SIZE, 8192);
+    glob_cache = new homestore::Cache< homestore::BlkId >(MAX_CACHE_SIZE, 8192);
     assert(glob_cache);
 
     /* Create/Load the devices */
     LOG(INFO) << "Adding devices to DeviceManager";
-    dev_mgr = new omstore::DeviceManager(new_vdev_found, 0);
+    dev_mgr = new homestore::DeviceManager(new_vdev_found, 0);
     try {
         dev_mgr->add_devices(dev_names);
     } catch (std::exception &e) {
@@ -66,7 +66,7 @@ void setup_devices(uint32_t ndevs) {
     bt_dev_info.vb = nullptr;
 }
 
-class TestSimpleKey : public omds::btree::BtreeKey {
+class TestSimpleKey : public homeds::btree::BtreeKey {
 private:
     typedef struct __attribute__((packed)) {
         uint64_t m_count :16;
@@ -167,16 +167,16 @@ public:
         return 0;
     }
 
-    virtual omds::blob get_blob() const override {
-        omds::blob b = {(uint8_t *) m_blob, sizeof(blob_t)};
+    virtual homeds::blob get_blob() const override {
+        homeds::blob b = {(uint8_t *) m_blob, sizeof(blob_t)};
         return b;
     }
 
-    virtual void set_blob(const omds::blob &b) override {
+    virtual void set_blob(const homeds::blob &b) override {
         m_blob = (blob_t *) b.bytes;
     }
 
-    virtual void copy_blob(const omds::blob &b) override {
+    virtual void copy_blob(const homeds::blob &b) override {
         memcpy(m_blob, b.bytes, b.size);
     }
 
@@ -202,25 +202,25 @@ public:
     }
 };
 
-class TestSimpleValue : public omds::btree::BtreeValue {
+class TestSimpleValue : public homeds::btree::BtreeValue {
 public:
-    TestSimpleValue(uint32_t val) : omds::btree::BtreeValue() {
+    TestSimpleValue(uint32_t val) : homeds::btree::BtreeValue() {
         m_val = val;
     }
 
     TestSimpleValue() : TestSimpleValue((uint32_t)-1) {}
 
-    omds::blob get_blob() const override {
-        omds::blob b;
+    homeds::blob get_blob() const override {
+        homeds::blob b;
         b.bytes = (uint8_t *)&m_val; b.size = sizeof(m_val);
         return b;
     }
 
-    void set_blob(const omds::blob &b) override {
+    void set_blob(const homeds::blob &b) override {
         m_val = *((uint32_t *)b.bytes);
     }
 
-    void copy_blob(const omds::blob &b) override {
+    void copy_blob(const homeds::blob &b) override {
         m_val = *((uint32_t *)b.bytes);
     }
 
@@ -269,7 +269,7 @@ protected:
 
 public:
     BtreeCrudTest() {
-        omds::btree::BtreeConfig btree_cfg;
+        homeds::btree::BtreeConfig btree_cfg;
         btree_cfg.set_max_objs(TOTAL_ENTRIES);
         btree_cfg.set_max_key_size(sizeof(TestSimpleKey));
         btree_cfg.set_max_value_size(0);
@@ -302,7 +302,7 @@ public:
     void put_nth_entry(uint32_t i) {
         auto it = m_create_map.find(m_entries[i]);
         assert(it != m_create_map.end());
-        m_bt->put(*m_entries[i], it->second, omds::btree::INSERT_ONLY_IF_NOT_EXISTS);
+        m_bt->put(*m_entries[i], it->second, homeds::btree::INSERT_ONLY_IF_NOT_EXISTS);
     }
 
     void get_nth_entry(uint32_t i) {
@@ -361,7 +361,7 @@ TEST_F(BtreeCrudTest, SimpleInsert) {
     for (auto i = 0; i < TOTAL_ENTRIES; i++) {
         auto it = m_create_map.find(m_entries[i]);
         assert(it != m_create_map.end());
-        m_bt->put(*m_entries[i], it->second, omds::btree::INSERT_ONLY_IF_NOT_EXISTS);
+        m_bt->put(*m_entries[i], it->second, homeds::btree::INSERT_ONLY_IF_NOT_EXISTS);
     }
 
     for (auto i = 0; i < TOTAL_ENTRIES; i++) {

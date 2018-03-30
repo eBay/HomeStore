@@ -9,7 +9,7 @@
 #include <boost/heap/binomial_heap.hpp>
 #include <condition_variable>
 
-namespace omstore {
+namespace homestore {
 /****************** VarsizeBlkAllocator Section **********************/
 
 class VarsizeBlkAllocConfig : public BlkAllocConfig {
@@ -230,7 +230,7 @@ public:
     }
 }__attribute__((packed));
 
-class VarsizeAllocCacheEntry : public omds::btree::BtreeKey {
+class VarsizeAllocCacheEntry : public homeds::btree::BtreeKey {
 private:
     typedef struct __attribute__((packed)) {
         uint64_t m_page_id:36; // Page id and blk num inside page
@@ -291,21 +291,21 @@ public:
         return (uint32_t) (m_blob->m_page_id);
     }
 
-    int compare(const omds::btree::BtreeKey *o) const override;
+    int compare(const homeds::btree::BtreeKey *o) const override;
 
-    omds::blob get_blob() const override {
-        omds::blob b;
+    homeds::blob get_blob() const override {
+        homeds::blob b;
         b.bytes = (uint8_t *)m_blob;
         b.size = sizeof(blob_t);
         return b;
     }
 
-    void set_blob(const omds::blob &b) override {
+    void set_blob(const homeds::blob &b) override {
         assert(b.size == sizeof(b));
         m_blob = (blob_t *)b.bytes;
     }
 
-    void copy_blob(const omds::blob &b) override {
+    void copy_blob(const homeds::blob &b) override {
         assert(b.size == sizeof(b));
         memcpy(&m_in_place_blob, b.bytes, b.size);
         m_blob = &m_in_place_blob;
@@ -340,20 +340,20 @@ private:
 };
 
 #if 0
-class VarsizeAllocCacheSearch : public omds::btree::BtreeSearchRange {
+class VarsizeAllocCacheSearch : public homeds::btree::BtreeSearchRange {
 public:
     VarsizeAllocCacheSearch(VarsizeAllocCacheEntry &start_entry, bool start_incl,
                             VarsizeAllocCacheEntry &end_entry, bool end_incl,
                             bool left_leaning, VarsizeAllocCacheEntry *out_entry) :
-            omds::btree::BtreeSearchRange(start_entry, start_incl, end_entry, end_incl, left_leaning) {}
+            homeds::btree::BtreeSearchRange(start_entry, start_incl, end_entry, end_incl, left_leaning) {}
 
-    bool is_full_match(omds::btree::BtreeRangeKey *rkey) const override {
+    bool is_full_match(homeds::btree::BtreeRangeKey *rkey) const override {
         return true;
     }
 
-    int compare(omds::btree::BtreeKey *other) const override {
+    int compare(homeds::btree::BtreeKey *other) const override {
         assert(0); // Comparision of 2 search keys is not required feature yet.
-        omds::btree::BtreeSearchRange *regex = (omds::btree::BtreeSearchRange *) other;
+        homeds::btree::BtreeSearchRange *regex = (homeds::btree::BtreeSearchRange *) other;
         return 0;
     }
 
@@ -376,9 +376,9 @@ public:
 };
 #endif
 
-#define VarsizeBlkAllocatorBtree omds::btree::Btree< omds::btree::MEM_BTREE, VarsizeAllocCacheEntry, \
-                                                     omds::btree::EmptyClass, omds::btree::BTREE_NODETYPE_SIMPLE, \
-                                                     omds::btree::BTREE_NODETYPE_SIMPLE>
+#define VarsizeBlkAllocatorBtree homeds::btree::Btree< homeds::btree::MEM_BTREE, VarsizeAllocCacheEntry, \
+                                                     homeds::btree::EmptyClass, homeds::btree::BTREE_NODETYPE_SIMPLE, \
+                                                     homeds::btree::BTREE_NODETYPE_SIMPLE>
 
 /* VarsizeBlkAllocator provides a flexibility in allocation. It provides following features:
  *
@@ -405,7 +405,7 @@ private:
     std::condition_variable m_cv; // CV to signal thread
     BlkAllocatorState m_region_state;
 
-    omds::Bitset *m_alloc_bm;   // Bitset of all allocation
+    homeds::Bitset *m_alloc_bm;   // Bitset of all allocation
     VarsizeBlkAllocatorBtree *m_blk_cache; // Blk Entry caches
 
     BlkAllocSegment::SegQueue m_heap_segments;  // Heap of segments within a region.
@@ -488,5 +488,5 @@ private:
 #define BLKCOUNT_RANGE_LAST  (uint32_t)-1
 #define TEMP_RANGE_LAST      (uint32_t)-1
 
-} // namespace omstore
+} // namespace homestore
 #endif //OMSTORAGE_VARSIZE_BLK_ALLOCATOR_H

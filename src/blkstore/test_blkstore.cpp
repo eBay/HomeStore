@@ -10,17 +10,17 @@
 #include "device/virtual_dev.hpp"
 
 using namespace std;
-using namespace omstore;
+using namespace homestore;
 
-omstore::DeviceManager *dev_mgr = nullptr;
-omstore::BlkStore< omstore::VdevFixedBlkAllocatorPolicy > *blk_store;
-omstore::Cache< BlkId > *glob_cache = nullptr;
+homestore::DeviceManager *dev_mgr = nullptr;
+homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy > *blk_store;
+homestore::Cache< BlkId > *glob_cache = nullptr;
 
 #define MAX_CACHE_SIZE     2 * 1024 * 1024 * 1024
 
-AbstractVirtualDev *new_vdev_found(omstore::vdev_info_block *vb) {
+AbstractVirtualDev *new_vdev_found(homestore::vdev_info_block *vb) {
     LOG(INFO) << "New virtual device found id = " << vb->vdev_id << " size = " << vb->size;
-    blk_store = new omstore::BlkStore< omstore::VdevFixedBlkAllocatorPolicy >(dev_mgr, glob_cache, vb, WRITETHRU_CACHE);
+    blk_store = new homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy >(dev_mgr, glob_cache, vb, WRITETHRU_CACHE);
     return blk_store->get_vdev();
 }
 
@@ -33,11 +33,11 @@ int main(int argc, char** argv) {
     }
 
     /* Create the cache entry */
-    glob_cache = new omstore::Cache< BlkId >(MAX_CACHE_SIZE, 8192);
+    glob_cache = new homestore::Cache< BlkId >(MAX_CACHE_SIZE, 8192);
     assert(glob_cache);
 
     /* Create/Load the devices */
-    dev_mgr = new omstore::DeviceManager(new_vdev_found, 0);
+    dev_mgr = new homestore::DeviceManager(new_vdev_found, 0);
     try {
         dev_mgr->add_devices(dev_names);
     } catch (std::exception &e) {
@@ -50,12 +50,12 @@ int main(int argc, char** argv) {
     if (create) {
         LOG(INFO) << "Creating BlkStore\n";
         uint64_t size = 512 * 1024 * 1024;
-        blk_store = new omstore::BlkStore< omstore::VdevFixedBlkAllocatorPolicy >(dev_mgr, glob_cache, size,
+        blk_store = new homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy >(dev_mgr, glob_cache, size,
                                                                                   WRITETHRU_CACHE, 1);
     }
 
-    omstore::BlkId bids[100];
-    omstore::blk_alloc_hints hints;
+    homestore::BlkId bids[100];
+    homestore::blk_alloc_hints hints;
     hints.desired_temp = 0;
     hints.dev_id_hint = -1;
 
@@ -72,7 +72,7 @@ int main(int argc, char** argv) {
     //char bufs[100][8192];
     for (auto i = 0; i < 100; i++) {
         //memset(bufs[i], i, 8192);
-        //omds::blob b = {(uint8_t *)&bufs[i], 8192};
+        //homeds::blob b = {(uint8_t *)&bufs[i], 8192};
 
         //boost::intrusive_ptr< BlkBuffer > bbuf = blk_store->write(bids[i], b);
         blk_store->write(bids[i], bbufs[i]);

@@ -13,7 +13,7 @@
 #include <boost/range/irange.hpp>
 #include <map>
 
-namespace omstore {
+namespace homestore {
 
 class VdevFixedBlkAllocatorPolicy {
 public:
@@ -209,7 +209,7 @@ public:
         chunk->get_blk_allocator()->free(cb);
     }
 
-    void write(const BlkId &bid, const omds::MemVector<BLKSTORE_BLK_SIZE> &buf) {
+    void write(const BlkId &bid, const homeds::MemVector<BLKSTORE_BLK_SIZE> &buf) {
         BlkOpStatus ret_status = BLK_OP_SUCCESS;
         uint32_t size = bid.get_nblks() * get_blk_size();
         struct iovec iov[BlkId::max_blks_in_op()];
@@ -219,7 +219,7 @@ public:
 
         uint32_t p = 0;
         for (auto i : boost::irange<uint32_t>(0, buf.npieces())) {
-            omds::blob b;
+            homeds::blob b;
             buf.get(&b, i);
 
             // TODO: Also verify the sum of sizes are not greater than a page size.
@@ -259,7 +259,7 @@ public:
      * have offset as one of the parameter. Reason for that is its actually ok and make the interface and also
      * buf (caller buf) simple and there is no use case. However, we need to keep the blk size to be small as possible
      * to avoid read overhead */
-    void read(const BlkId &bid, const omds::MemPiece<BLKSTORE_BLK_SIZE> &mp) {
+    void read(const BlkId &bid, const homeds::MemPiece<BLKSTORE_BLK_SIZE> &mp) {
         PhysicalDevChunk *primary_chunk;
         bool failed = false;
 
@@ -289,7 +289,7 @@ public:
         }
     }
 
-    void readv(const BlkId &bid, const omds::MemVector<BLKSTORE_BLK_SIZE> &buf) {
+    void readv(const BlkId &bid, const homeds::MemVector<BLKSTORE_BLK_SIZE> &buf) {
         // Convert the input memory to iovector
         struct iovec iov[BlkId::max_blks_in_op()];
         int iovcnt = 0;
@@ -297,7 +297,7 @@ public:
 
         assert(buf.size() == (bid.get_nblks() * get_blk_size())); // Expected to be less than allocated blk originally.
         for (auto i : boost::irange<uint32_t>(0, buf.npieces())) {
-            omds::blob b;
+            homeds::blob b;
             buf.get(&b, i);
 
             iov[iovcnt].iov_base = b.bytes;
@@ -473,10 +473,10 @@ private:
 
 #if 0
 private:
-    omds::avector< PhysicalDev *> m_phys_dev_list;
+    homeds::avector< PhysicalDev *> m_phys_dev_list;
 
     // Array of physical devices each having multiple chunks that are relevant to this virtual device
-    omds::avector< std::vector< PhysicalDevChunk * > > m_primary_chunks_in_physdev;
+    homeds::avector< std::vector< PhysicalDevChunk * > > m_primary_chunks_in_physdev;
 
     uint64_t m_size;       // Size of this virtual device
     uint32_t m_nmirrors;   // Total number of mirrors need to be maintained
@@ -541,5 +541,5 @@ private:
 #endif
 };
 
-} //namespace omstore
+} //namespace homestore
 #endif //OMSTORE_VIRTUAL_DEV_HPP_HPP

@@ -1,12 +1,12 @@
-#include "omds/btree/mem_btree.hpp"
-#include "omds/btree/btree.hpp"
+#include "homeds/btree/mem_btree.hpp"
+#include "homeds/btree/btree.hpp"
 #include <blkalloc/blk.h>
 
 using namespace std;
 using namespace omstore;
-using namespace omds::btree;
+using namespace homeds::btree;
 
-class MappingKey : public omds::btree::BtreeKey {
+class MappingKey : public homeds::btree::BtreeKey {
 private:
 	uint32_t blob;
 	uint32_t *ptr_blob;
@@ -26,14 +26,14 @@ public:
 			return 0;
 		}
 	}
-	virtual omds::blob get_blob() const override {
-		omds::blob b = {(uint8_t *) ptr_blob, sizeof(blob)};
+	virtual homeds::blob get_blob() const override {
+		homeds::blob b = {(uint8_t *) ptr_blob, sizeof(blob)};
 		return b;
 	}
-	virtual void set_blob(const omds::blob &b) override {
+	virtual void set_blob(const homeds::blob &b) override {
 		ptr_blob = (uint32_t *)b.bytes;
 	}
-	virtual void copy_blob(const omds::blob &b) override {
+	virtual void copy_blob(const homeds::blob &b) override {
 		memcpy(ptr_blob, b.bytes, b.size);
 	}
 	virtual uint32_t get_blob_size() const override {
@@ -49,24 +49,24 @@ public:
 	}
 };
 
-class MappingValue : public omds::btree::BtreeValue {
+class MappingValue : public homeds::btree::BtreeValue {
 	struct BlkId val;
 	struct BlkId *pVal;
 public:
 	MappingValue() {};
-	MappingValue(struct BlkId _val) : omds::btree::BtreeValue() {
+	MappingValue(struct BlkId _val) : homeds::btree::BtreeValue() {
 		val = _val;
 		pVal = &val;
 	};
-	virtual omds::blob get_blob() const override {
-		omds::blob b;
+	virtual homeds::blob get_blob() const override {
+		homeds::blob b;
 		b.bytes = (uint8_t *)pVal; b.size = sizeof(pVal);
 		return b;
 	}
-	virtual void set_blob(const omds::blob &b) override {
+	virtual void set_blob(const homeds::blob &b) override {
 		pVal = (struct BlkId *) b.bytes;
 	}
-	virtual void copy_blob(const omds::blob &b) override {
+	virtual void copy_blob(const homeds::blob &b) override {
 		memcpy(pVal, b.bytes, b.size);
 	}
 	virtual void append_blob(const BtreeValue &new_val) override {
@@ -86,8 +86,8 @@ public:
 	}
 };
 
-#define MappingBtreeDeclType     omds::btree::Btree<omds::btree::MEM_BTREE, MappingKey, MappingValue, \
-                                    omds::btree::BTREE_NODETYPE_SIMPLE, omds::btree::BTREE_NODETYPE_SIMPLE>
+#define MappingBtreeDeclType     homeds::btree::Btree<homeds::btree::MEM_BTREE, MappingKey, MappingValue, \
+                                    homeds::btree::BTREE_NODETYPE_SIMPLE, homeds::btree::BTREE_NODETYPE_SIMPLE>
 #define KEY_RANGE	1000
 #define BLOCK_SIZE	8192
 
@@ -96,7 +96,7 @@ private:
 	MappingBtreeDeclType *m_bt;
 public:
 	mapping(uint32_t volsize) {
-		omds::btree::BtreeConfig btree_cfg;
+		homeds::btree::BtreeConfig btree_cfg;
 		btree_cfg.set_max_objs(volsize/(KEY_RANGE*BLOCK_SIZE));
 		btree_cfg.set_max_key_size(sizeof(MappingKey));
 		btree_cfg.set_max_value_size(sizeof(MappingValue));
@@ -114,7 +114,7 @@ public:
 	}
 
 	uint32_t put(uint32_t lba, uint32_t nblks, struct BlkId blkid) {
-		m_bt->put(get_key(lba), get_value(blkid), omds::btree::INSERT_ONLY_IF_NOT_EXISTS);
+		m_bt->put(get_key(lba), get_value(blkid), homeds::btree::INSERT_ONLY_IF_NOT_EXISTS);
 		return 0;
 	}
 		

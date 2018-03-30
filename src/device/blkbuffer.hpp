@@ -8,7 +8,7 @@
 #include "blkalloc/blk.h"
 #include "cache/cache.h"
 
-namespace omstore {
+namespace homestore {
 
 #if 0
 class BlkBuffer : private CacheBuffer< BlkId > {
@@ -31,7 +31,7 @@ public:
 class BlkBuffer : public CacheBuffer< BlkId > {
 public:
     static BlkBuffer *make_object() {
-        return omds::ObjectAllocator< BlkBuffer >::make_object();
+        return homeds::ObjectAllocator< BlkBuffer >::make_object();
     }
 };
 

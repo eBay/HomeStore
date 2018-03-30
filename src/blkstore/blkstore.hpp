@@ -11,10 +11,10 @@
 #include "device/blkbuffer.hpp"
 #include "main/store_limits.h"
 #include <boost/optional.hpp>
-#include <omds/memory/mempiece.hpp>
+#include "homeds/memory/mempiece.hpp"
 #include "cache/cache.cpp"
 
-namespace omstore {
+namespace homestore {
 enum BlkStoreCacheType {
     PASS_THRU       = 0,
     WRITEBACK_CACHE = 1,
@@ -81,7 +81,7 @@ public:
         if (ret != 0) {
             throw std::bad_alloc();
         }
-        omds::MemVector< BLKSTORE_BLK_SIZE > &mvec = buf->get_memvec_mutable();
+        homeds::MemVector< BLKSTORE_BLK_SIZE > &mvec = buf->get_memvec_mutable();
         mvec.set(ptr, size, 0);
 
         // Insert this buffer to the cache.
@@ -140,7 +140,7 @@ public:
     }
 
     /* Allocate a new block and write the contents to the allocated block and return the blkbuffer */
-    boost::intrusive_ptr< BlkBuffer > alloc_and_write(omds::blob &blob, blk_alloc_hints &hints) {
+    boost::intrusive_ptr< BlkBuffer > alloc_and_write(homeds::blob &blob, blk_alloc_hints &hints) {
         // First allocate the blk id based on the hints
         BlkId bid;
         m_vdev.alloc_blk(round_off(blob.size, BLKSTORE_BLK_SIZE), hints, &bid);
@@ -156,7 +156,7 @@ public:
      * create a new blkid and then write it on an offset from the blkid. So far there is no use case for that. To
      * avoid any confusion to the interface, the value_offset parameter is not provided for this write type. If
      * needed can be added later */
-    boost::intrusive_ptr< BlkBuffer > write(BlkId &bid, omds::blob &blob) {
+    boost::intrusive_ptr< BlkBuffer > write(BlkId &bid, homeds::blob &blob) {
         // First try to create/insert a record for this blk id in the cache. If it already exists, it will simply
         // upvote the item.
         boost::intrusive_ptr< BlkBuffer > bbuf;
@@ -193,14 +193,14 @@ public:
         bool cache_found = m_cache->get(bid, (boost::intrusive_ptr< CacheBuffer<BlkId> > *)&bbuf);
         if (!cache_found) {
             // Not found in cache, create a new block buf and prepare it for insert to dev and cache.
-            bbuf = omds::ObjectAllocator< Buffer >::make_object();
+            bbuf = homeds::ObjectAllocator< Buffer >::make_object();
             bbuf->set_key(bid);
         }
 
         uint32_t size_to_read = size;
-        omds::MemVector<BLKSTORE_BLK_SIZE>::cursor_t c;
+        homeds::MemVector<BLKSTORE_BLK_SIZE>::cursor_t c;
         while (size_to_read > 0) {
-            boost::optional< omds::MemPiece<BLKSTORE_BLK_SIZE> &> missing_mp =
+            boost::optional< homeds::MemPiece<BLKSTORE_BLK_SIZE> &> missing_mp =
                     bbuf->get_memvec_mutable().fill_next_missing_piece(c, size, cur_offset);
             if (!missing_mp) {
                 // We don't have any missing pieces, so we are done reading the contents
@@ -259,7 +259,7 @@ private:
 
         //////////////////// Do left hand side processing //////////////////////
         // Check if the from_blk in the cache is overlapping with previous blk for same BlkId range
-        omds::MemVector< BLKSTORE_BLK_SIZE > left_mvec;
+        homeds::MemVector< BLKSTORE_BLK_SIZE > left_mvec;
         if (from_offset) {
             bool is_left_overlap = mvec.find_index(from_offset, boost::none, &left_ind);
             for (auto i = 0; i < left_ind - 1; i++) { // Update upto the previous one.
@@ -281,7 +281,7 @@ private:
         //////////////////// Do right hand side processing //////////////////////
         // If the freed blks overlap and has some excess to the right of it, we will have to either copy the
         // remaining buffer into new buffer (so that it will be freed correctly) or simply discard them from cache
-        omds::MemVector< BLKSTORE_BLK_SIZE > right_mvec;
+        homeds::MemVector< BLKSTORE_BLK_SIZE > right_mvec;
         mvec.find_index(to_offset, boost::none, &right_ind);
         if (left_ind == right_ind) {
             auto right_mp = mvec.get_nth_piece((uint32_t)right_ind);
@@ -318,7 +318,7 @@ private:
         // Similar to that to the right mvec pieces
         if (orig_b.get_nblks() - to_nblk) {
             BlkId rb(orig_b.get_id() + to_nblk, orig_b.get_nblks() - to_nblk, orig_b.get_chunk_num());
-            bbufs[b] = omds::ObjectAllocator< Buffer >::make_object();
+            bbufs[b] = homeds::ObjectAllocator< Buffer >::make_object();
             bbufs[b]->set_key(rb);
             bbufs[b]->set_memvec(right_mvec);
         }
@@ -401,7 +401,7 @@ private:
             right_mp.set_size(non_overlap_sz);
         }
 
-        omds::MemPiece left_mp; omds::MemPiece right_mp;
+        homeds::MemPiece left_mp; homeds::MemPiece right_mp;
         if (left_overlap > right_overlap) {
             if (make_sense_to_retain(mp.size(), left_overlap)) {
                 left_mp.set_size(mp.size() - left_overlap);

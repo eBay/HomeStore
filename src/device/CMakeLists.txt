@@ -14,7 +14,7 @@ set(TEST_DEVICEMGR_SOURCE_FILES
         device.h
         device_manager.cpp
         physical_dev.cpp
-        ../main/omstore.hpp
+        ../main/homestore.hpp
         test_blkdev.cpp
         device_selector.hpp
         virtual_dev.hpp)

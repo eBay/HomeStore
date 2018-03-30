@@ -2,7 +2,7 @@
 // Created by Kadayam, Hari on 19/10/17.
 //
 
-#include "omds/memory/tagged_ptr.hpp"
+#include "homeds/memory/tagged_ptr.hpp"
 #include <boost/intrusive/list.hpp>
 #include <mutex>
 

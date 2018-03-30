@@ -13,7 +13,7 @@ link_directories(../../deps_prefix/${OS_TYPE}/lib)
 
 set(TEST_VOLUME_SOURCE_FILES
           volume.cpp
-	  vol_test.cpp
+	      vol_test.cpp
         ../device/virtual_dev.hpp
         ../device/device_manager.cpp
         ../device/physical_dev.cpp
