@@ -115,6 +115,7 @@ enum PutType {
     APPEND_IF_EXISTS_ELSE_INSERT
 };
 
+class BtreeSearchRange;
 class BtreeKey
 {
 public:
@@ -122,6 +123,7 @@ public:
     virtual ~BtreeKey() = default;
 
     virtual int compare(const BtreeKey *other) const = 0;
+    virtual int compare_range(const BtreeSearchRange &range) const = 0;
     virtual homeds::blob get_blob() const = 0;
     virtual void set_blob(const homeds::blob &b) = 0;
     virtual void copy_blob(const homeds::blob &b) = 0;

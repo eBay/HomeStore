@@ -264,6 +264,12 @@ public:
         return nth_key.compare(&cmp_key);
     }
 
+    int compare_nth_key_range(const BtreeSearchRange &range, int ind) const {
+        K nth_key;
+        get_nth_key(ind, &nth_key, false /* copyKey */);
+        return nth_key.compare_range(range);
+    }
+
     /////////////// Other Internal Methods /////////////
     void set_nth_obj(int ind, const BtreeKey &k, const BtreeValue &v) {
         assert(ind <= this->get_total_entries());

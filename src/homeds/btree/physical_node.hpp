@@ -335,7 +335,8 @@ protected:
         while ((end - start) > 1) {
             mid = start + (end - start) / 2;
 
-            int x = to_variant_node_const()->compare_nth_key(*range.get_start_key(), mid);
+            int x = range.is_simple_search() ? to_variant_node_const()->compare_nth_key(*range.get_start_key(), mid) :
+                    to_variant_node_const()->compare_nth_key_range(range, mid);
             if (x == 0) {
                 ret.found = true;
                 if (range.is_simple_search()) {

@@ -292,6 +292,7 @@ public:
     }
 
     int compare(const homeds::btree::BtreeKey *o) const override;
+    int compare_range(const homeds::btree::BtreeSearchRange &range) const override;
 
     homeds::blob get_blob() const override {
         homeds::blob b;
@@ -301,12 +302,12 @@ public:
     }
 
     void set_blob(const homeds::blob &b) override {
-        assert(b.size == sizeof(b));
+        assert(b.size == sizeof(blob_t));
         m_blob = (blob_t *)b.bytes;
     }
 
     void copy_blob(const homeds::blob &b) override {
-        assert(b.size == sizeof(b));
+        assert(b.size == sizeof(blob_t));
         memcpy(&m_in_place_blob, b.bytes, b.size);
         m_blob = &m_in_place_blob;
     }
@@ -335,8 +336,11 @@ public:
 
 private:
     int is_in_range(uint64_t val, uint64_t start, bool start_incl, uint64_t end, bool end_incl) const;
+
+#if 0
     int compare_range(const VarsizeAllocCacheEntry *start, bool start_incl, const VarsizeAllocCacheEntry *end,
                       bool end_incl) const;
+#endif
 };
 
 #if 0

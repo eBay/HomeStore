@@ -329,6 +329,28 @@ int VarsizeAllocCacheEntry::is_in_range(uint64_t val, uint64_t start, bool start
     }
 }
 
+int VarsizeAllocCacheEntry::compare_range(const homeds::btree::BtreeSearchRange &range) const {
+    auto start_entry = (VarsizeAllocCacheEntry *)range.get_start_key();
+    auto end_entry = (VarsizeAllocCacheEntry *)range.get_end_key();
+
+    int ret = is_in_range(this->get_blk_count(), start_entry->get_blk_count(), range.is_start_inclusive(),
+                          end_entry->get_blk_count(), range.is_end_inclusive());
+    if (ret != 0) {
+        return ret;
+    }
+
+    ret = is_in_range(this->get_temperature(), start_entry->get_temperature(), range.is_start_inclusive(),
+                      end_entry->get_temperature(), range.is_end_inclusive());
+    if (ret != 0) {
+        return ret;
+    }
+
+    ret = is_in_range(this->get_page_id(), start_entry->get_page_id(), range.is_start_inclusive(),
+                      end_entry->get_page_id(), range.is_end_inclusive());
+    return ret;
+}
+
+#if 0
 int VarsizeAllocCacheEntry::compare_range(const VarsizeAllocCacheEntry *start, bool start_incl,
                                           const VarsizeAllocCacheEntry *end, bool end_incl) const {
     int ret = is_in_range(this->get_blk_count(), start->get_blk_count(), start_incl, end->get_blk_count(),
@@ -346,6 +368,7 @@ int VarsizeAllocCacheEntry::compare_range(const VarsizeAllocCacheEntry *start, b
     ret = is_in_range(this->get_page_id(), start->get_page_id(), start_incl, end->get_page_id(), end_incl);
     return ret;
 }
+#endif
 
 int VarsizeAllocCacheEntry::compare(const homeds::btree::BtreeKey *o) const {
     auto *other = (VarsizeAllocCacheEntry *) o;

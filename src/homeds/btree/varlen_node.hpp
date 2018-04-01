@@ -413,6 +413,12 @@ private:
         return nth_key.compare(&cmp_key);
     }
 
+    int compare_nth_key_range(const BtreeSearchRange &range, int ind) const override {
+        K nth_key;
+        get_nth_key(ind, &nth_key, false /* copyKey */);
+        return nth_key.compare_range(&range);
+    }
+
 private:
     uint32_t insert(int ind, const homeds::blob &key_blob, const homeds::blob &val_blob)  {
         assert(ind <= this->get_total_entries());

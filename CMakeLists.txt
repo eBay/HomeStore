@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.7)
-project(OmStore)
+project(HomeStore)
 
 set(CMAKE_CXX_STANDARD 14)
 
@@ -24,9 +24,10 @@ set(INCLUDE_ROOT_DIR ${CMAKE_SOURCE_DIR}/deps_prefix/${OS_TYPE}/include)
 include_directories(${INCLUDE_ROOT_DIR})
 #link_directories(${LIB_ROOT_DIR})
 
-add_subdirectory(src/omds)
+add_subdirectory(src/homeds)
 add_subdirectory(src/device)
 add_subdirectory(src/blkalloc)
 add_subdirectory(src/cache)
 add_subdirectory(src/blkstore)
 add_subdirectory(src/kvstore)
+add_subdirectory(src/volume)

@@ -625,8 +625,7 @@ private:
                 m_stats.dec_count(BTREE_STATS_OBJ_COUNT);
             } else {
 #ifndef NDEBUG
-                my_node->to_string();
-                assert(0);
+                //my_node->to_string();
 #endif
             }
 

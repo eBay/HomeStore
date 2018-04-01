@@ -244,4 +244,8 @@ DecBNodeType(int) compare_nth_key(const BtreeKey &cmp_key, int ind) const {
     return call_variant_method_const(this, compare_nth_key, cmp_key, ind);
 }
 
+// Compares the nth key (n=ind) with given key (cmp_key) and returns -1, 0, 1 if cmp_key <=> nth_key respectively
+DecBNodeType(int) compare_nth_key_range(const BtreeSearchRange &range, int ind) const {
+    return call_variant_method_const(this, compare_nth_key_range, range, ind);
+}
 }}
