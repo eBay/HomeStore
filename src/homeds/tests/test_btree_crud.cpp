@@ -134,6 +134,14 @@ public:
         }
     }
 
+    int compare_range(const homeds::btree::BtreeSearchRange &range) const override {
+        auto other_start = (TestSimpleKey *)range.get_start_key();
+        auto other_end = (TestSimpleKey *)range.get_end_key();
+
+        assert(0); // Do not support it yet
+        return 0;
+    }
+
     int is_in_range(uint64_t val, uint64_t start, bool start_incl, uint64_t end, bool end_incl) {
         if (val < start) {
             return 1;
