@@ -28,7 +28,7 @@ void DeviceManager::add_devices(std::vector< std::string > &dev_names) {
     uint64_t max_dev_offset = 0;
     for (auto &d : dev_names) {
         std::unique_ptr< PhysicalDev > pdev = std::make_unique< PhysicalDev >(this, d, m_open_flags);
-        if (!pdev->load_super_block()) {
+        if (1 || !pdev->load_super_block()) {
             // Super block is not present, possibly a new device, will format the device later
             LOG(INFO) << "Device " << d << " appears to be not formatted. Will format it ";
             uninit_devs.push_back(std::move(pdev));
@@ -103,6 +103,7 @@ void DeviceManager::add_devices(std::vector< std::string > &dev_names) {
     }
 
     // Walk thru list of vdevs and inform about the newly identified vdev device.
+    //TODO: for now, don't add the vdev
     uint32_t vid = m_vdev_info.first_vdev_id;
     while (vid != INVALID_VDEV_ID) {
         m_last_vdevid = vid;

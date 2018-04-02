@@ -58,6 +58,7 @@ public:
     }
 
     /* Allocate a new block of the size based on the hints provided */
+    /* TODO: rishabh : we should have a return type here */ 
     void alloc_blk(uint8_t nblks, blk_alloc_hints &hints, BlkId *out_blkid) {
         // Allocate a block from the device manager
         m_vdev.alloc_blk(nblks, hints, out_blkid);

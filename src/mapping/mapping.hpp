@@ -3,7 +3,7 @@
 #include <blkalloc/blk.h>
 
 using namespace std;
-using namespace omstore;
+using namespace homestore;
 using namespace homeds::btree;
 
 class MappingKey : public homeds::btree::BtreeKey {
@@ -47,13 +47,21 @@ public:
 	uint32_t get_value() {
 		return blob;
 	}
+	int compare_range(const BtreeSearchRange &range) const override {
+		return 0;
+	}
+	std::string to_string() const override {
+		return ("abc");
+	}
 };
 
 class MappingValue : public homeds::btree::BtreeValue {
 	struct BlkId val;
 	struct BlkId *pVal;
 public:
-	MappingValue() {};
+	MappingValue() {
+		pVal = &val;
+	};
 	MappingValue(struct BlkId _val) : homeds::btree::BtreeValue() {
 		val = _val;
 		pVal = &val;
@@ -70,7 +78,7 @@ public:
 		memcpy(pVal, b.bytes, b.size);
 	}
 	virtual void append_blob(const BtreeValue &new_val) override {
-		memcpy(pVal, ((const MappingValue &)new_val).pVal, sizeof(pVal));
+		memcpy(pVal, ((const MappingValue &)new_val).pVal, sizeof(val));
 	}
 	virtual uint32_t get_blob_size() const override {
 		return sizeof(*pVal);
@@ -83,6 +91,9 @@ public:
 	}
 	struct BlkId get_val() {
 		return val;
+	}
+	struct BlkId *get_pVal() {
+		return pVal;
 	}
 };
 
@@ -114,12 +125,18 @@ public:
 	}
 
 	uint32_t put(uint32_t lba, uint32_t nblks, struct BlkId blkid) {
+		MappingValue value;
+		struct BlkId *temp_blkid;
+
 		m_bt->put(get_key(lba), get_value(blkid), homeds::btree::INSERT_ONLY_IF_NOT_EXISTS);
+		m_bt->get(get_key(lba), &value);
+		temp_blkid = value.get_pVal();
+		assert(temp_blkid->m_chunk_num == blkid.m_chunk_num);
 		return 0;
 	}
 		
 	uint32_t get(uint32_t lba, uint32_t nblks, 
-			std::vector<struct omstore::BlkId> &blkIdList) {
+			std::vector<struct homestore::BlkId> &blkIdList) {
 
 		uint32_t key;
 

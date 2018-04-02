@@ -289,6 +289,7 @@ void VarsizeBlkAllocator::request_more_blks_wait(BlkAllocSegment *seg) {
     request_more_blks(seg);
     {
         // Wait for notification that it is done
+	// TODO: rishabh, there can be bug here
         std::unique_lock< std::mutex > lk(m_mutex);
         m_cv.wait(lk);
     } // release lock

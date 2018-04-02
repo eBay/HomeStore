@@ -20,7 +20,7 @@ public:
 	static AbstractVirtualDev *new_vdev_found(DeviceManager *dev_mgr, homestore::vdev_info_block *vb);
 	Volume(DeviceManager *mgr, uint64_t size);
 	Volume(DeviceManager *dev_mgr, homestore::vdev_info_block *vb);
-	int write(uint64_t lba, uint8_t *buf, int nblks);
+	int write(uint64_t lba, uint8_t *buf, uint32_t nblks);
 	int read(uint64_t lba, int nblks, std::vector<boost::intrusive_ptr< BlkBuffer >> &buf_list);
 };
 }

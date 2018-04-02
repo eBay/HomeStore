@@ -1,16 +1,52 @@
 #include <iostream>
+		
 #include "device/device.h"
 #include <fcntl.h>
 #include "volume.hpp"
+#include <ctime>
+#include <sys/timeb.h>
 
 using namespace std; 
-using namespace omstore;
+using namespace homestore;
 
 
 INIT_VMODULES(BTREE_VMODULES);
 
-omstore::DeviceManager *dev_mgr = nullptr;
-omstore::Volume *vol;
+homestore::DeviceManager *dev_mgr = nullptr;
+homestore::Volume *vol;
+
+#define MAX_BUF 250000
+#define MAX_BUF_CACHE 1000
+uint8_t *bufs[MAX_BUF];
+#define BUF_SIZE 1
+
+#define MAX_READ 250000 // 1 million
+uint64_t read_cnt = 0;
+
+
+uint64_t get_elapsed_time(Clock::time_point startTime) 
+{
+	std::chrono::nanoseconds ns = std::chrono::duration_cast< std::chrono::nanoseconds >(Clock::now() - startTime);
+	return ns.count() / 1000; 
+}
+
+void *readThread(void *arg) 
+{
+	while (read_cnt < MAX_READ) {
+		std::vector<boost::intrusive_ptr< BlkBuffer >> buf_list;
+		vol->read(rand() % MAX_BUF, BUF_SIZE, buf_list);
+		read_cnt++;
+#if 0
+		uint64_t size = 0;
+		for(auto buf:buf_list) {
+			 omds::blob b  = buf->at_offset(0);
+			assert(!memcmp(b.bytes, bufs[i] + size, b.size));
+			printf("read verified\n");
+			size += b.size;
+		}
+#endif
+	}
+}
 
 int main(int argc, char** argv) {
 	std::vector<std::string> dev_names; 
@@ -22,7 +58,7 @@ int main(int argc, char** argv) {
 	
 	/* Create/Load the devices */
 	printf("creating devices\n");
-	dev_mgr = new omstore::DeviceManager(Volume::new_vdev_found, 0);
+	dev_mgr = new homestore::DeviceManager(Volume::new_vdev_found, 0);
 	try {
 		dev_mgr->add_devices(dev_names);
 	} catch (std::exception &e) {
@@ -35,32 +71,35 @@ int main(int argc, char** argv) {
 	if (create) {
 		printf("creating volume\n");
 		LOG(INFO) << "Creating volume\n";
-		uint64_t size = 512 * 1024 * 1024 * 1024;
-		vol = new omstore::Volume(dev_mgr, size);
+		uint64_t size = 10 * 1024 * 1024 * 1024;
+		vol = new homestore::Volume(dev_mgr, size);
 		printf("created volume\n");
 	}
-
-	uint8_t *bufs[100];
-	for (auto i = 0; i < 100; i++) {
+	for (auto i = 0; i < MAX_BUF_CACHE; i++) {
 //		bufs[i] = new uint8_t[8192*1000]();
-		bufs[i] = (uint8_t *)malloc(8192 * 1000);
-		for (auto j = 0; j < (8192 * 1000/8); j++) {
-			memset(bufs[i], i * j , 8);
+		bufs[i] = (uint8_t *)malloc(8192 * BUF_SIZE);
+		uint8_t *bufp = bufs[i];
+		for (auto j = 0; j < (8192 * BUF_SIZE/8); j++) {
+			memset(bufp, i + j + 1 , 8);
+			bufp = bufp + 8;
 		}
 	}
 	
-	for (auto i = 0; i < 100; i++) {	
-		vol->write(i * 1000, bufs[i], 1000);
+	for (auto i = 0; i < MAX_BUF; i++) {	
+		vol->write(i * BUF_SIZE, bufs[i % MAX_BUF_CACHE], BUF_SIZE);
 	}
 
-	for (auto i = 0; i < 100; i++) {
-		std::vector<boost::intrusive_ptr< BlkBuffer >> buf_list;
-		vol->read(i * 1000, 1000, buf_list);
-		uint64_t size = 0;
-		for(auto buf:buf_list) {
-			 homeds::blob b  = buf->at_offset(0);
-			assert(!memcmp(b.bytes, bufs[i] + size, b.size));
-			size += b.size;
-		}
+
+	// create threads for reading
+	pthread_t tid;
+	for (int i = 0; i < 15; i++) {
+		pthread_create(&tid, NULL, readThread, NULL);
+	}	
+	printf("reading\n");
+	
+	Clock::time_point startTime = Clock::now();
+	while (read_cnt < MAX_READ) {	
 	}
+	uint64_t time_us = get_elapsed_time(startTime);
+	printf("total time spent %lu", time_us);
 }

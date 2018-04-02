@@ -18,6 +18,7 @@ namespace homestore {
 class VdevFixedBlkAllocatorPolicy {
 public:
     typedef FixedBlkAllocator AllocatorType;
+    typedef BlkAllocConfig AllocatorConfig;
 
     static void get_config(uint64_t size, uint32_t blk_size, BlkAllocConfig *out_config) {
         out_config->set_blk_size(blk_size);
@@ -28,6 +29,8 @@ public:
 class VdevVarSizeBlkAllocatorPolicy {
 public:
     typedef VarsizeBlkAllocator AllocatorType;
+    typedef VarsizeBlkAllocConfig AllocatorConfig;
+
 
     static void get_config(uint64_t size, uint32_t blk_size, BlkAllocConfig *out_config) {
         VarsizeBlkAllocConfig *vconfig = (VarsizeBlkAllocConfig *)out_config;
@@ -408,7 +411,7 @@ private:
     }
 
     std::shared_ptr< BlkAllocator > create_allocator(uint64_t size) {
-        BlkAllocConfig cfg;
+	typename Allocator::AllocatorConfig cfg;
         Allocator::get_config(size, get_blk_size(), &cfg);
 
         std::shared_ptr< BlkAllocator > allocator = std::make_shared<typename Allocator::AllocatorType>(cfg);
