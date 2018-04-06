@@ -5,6 +5,8 @@
 #include "volume.hpp"
 #include <ctime>
 #include <sys/timeb.h>
+#include <cassert>
+#include <stdio.h>
 
 using namespace std; 
 using namespace homestore;
@@ -15,8 +17,9 @@ INIT_VMODULES(BTREE_VMODULES);
 homestore::DeviceManager *dev_mgr = nullptr;
 homestore::Volume *vol;
 
-#define MAX_BUF 250000
-#define MAX_BUF_CACHE 1000
+#define MAX_BUF 1 * 1024 * 1024
+#define MAX_BUF_CACHE 1 * 1024
+#define MAX_VOL_SIZE (100ul * 1024ul * 1024ul * 1024ul) 
 uint8_t *bufs[MAX_BUF];
 #define BUF_SIZE 1
 
@@ -34,17 +37,19 @@ void *readThread(void *arg)
 {
 	while (read_cnt < MAX_READ) {
 		std::vector<boost::intrusive_ptr< BlkBuffer >> buf_list;
+		int i = rand() % MAX_BUF;
 		vol->read(rand() % MAX_BUF, BUF_SIZE, buf_list);
 		read_cnt++;
-#if 0
 		uint64_t size = 0;
 		for(auto buf:buf_list) {
-			 omds::blob b  = buf->at_offset(0);
-			assert(!memcmp(b.bytes, bufs[i] + size, b.size));
+			homeds::blob b  = buf->at_offset(0);
+			assert(!std::memcmp(b.bytes, 
+				(void *)((uint32_t *)bufs[i % MAX_BUF_CACHE] + size), b.size));
 			printf("read verified\n");
 			size += b.size;
+			i++;
 		}
-#endif
+		assert(size == 8192);
 	}
 }
 
@@ -71,7 +76,7 @@ int main(int argc, char** argv) {
 	if (create) {
 		printf("creating volume\n");
 		LOG(INFO) << "Creating volume\n";
-		uint64_t size = 10 * 1024 * 1024 * 1024;
+		uint64_t size = MAX_VOL_SIZE;
 		vol = new homestore::Volume(dev_mgr, size);
 		printf("created volume\n");
 	}
@@ -90,6 +95,7 @@ int main(int argc, char** argv) {
 	}
 
 
+	printf("creating threads \n");
 	// create threads for reading
 	pthread_t tid;
 	for (int i = 0; i < 15; i++) {

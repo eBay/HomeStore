@@ -149,7 +149,7 @@ public:
         this->inc_gen();
     }
 
-    virtual uint32_t get_available_size(const BtreeConfig &cfg) const {
+    uint32_t get_available_size(const BtreeConfig &cfg) const {
         return (cfg.get_node_area_size() - (this->get_total_entries() * get_nth_obj_size(0)));
     }
 
@@ -225,10 +225,12 @@ public:
 
         auto result = this->find(BtreeSearchRange(key), nullptr, nullptr);
         *out_ind_hint = result.end_of_search_index;
-        if (result.found) {
+        if (this->is_leaf() && result.found) {
+	    /* we don't allow duplicate entries for leaf node */
             return false;
         }
 
+	 /* we always need to make that there is space in the node if it is not a leaf node */
         return (this->get_available_entries(cfg) == 0);
     }
 

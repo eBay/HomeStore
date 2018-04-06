@@ -318,6 +318,7 @@ public:
             if (status == BTREE_RETRY) {
                 // Need to start from top down again, since
                 // there is a race between 2 inserts or deletes.
+            	unlock_node(root, acq_lock);
                 acq_lock = homeds::thread::LOCKTYPE_READ;
                 goto retry;
             } else if (status == BTREE_ITEM_FOUND) {

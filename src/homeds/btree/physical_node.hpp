@@ -201,11 +201,11 @@ protected:
         return result;
     }
 
-    virtual void get_last_key(BtreeKey *out_lastkey) {
+    void get_last_key(BtreeKey *out_lastkey) {
         return to_variant_node()->get_nth_key(get_total_entries() - 1, out_lastkey, false);
     }
 
-    virtual void get_first_key(BtreeKey *out_firstkey) {
+    void get_first_key(BtreeKey *out_firstkey) {
         return to_variant_node()->get_nth_key(0, out_firstkey, false);
     }
 

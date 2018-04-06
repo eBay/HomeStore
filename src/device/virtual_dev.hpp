@@ -35,7 +35,7 @@ public:
     static void get_config(uint64_t size, uint32_t blk_size, BlkAllocConfig *out_config) {
         VarsizeBlkAllocConfig *vconfig = (VarsizeBlkAllocConfig *)out_config;
         vconfig->set_blk_size(blk_size);
-        vconfig->set_total_blks(((uint32_t)size-1)/blk_size + 1);
+        vconfig->set_total_blks(((uint64_t)size-1)/blk_size + 1);
 
         vconfig->set_page_size(8192); // SSD Page size, TODO: Get actual SSD page size and set this here
         vconfig->set_total_segments(8); // 8 Segments per chunk

@@ -23,7 +23,7 @@ public:
 
     /* Initialize the evictor with maximum size it needs to keep it under, before it starts evictions. Caller also
      * need to provide a callback function to check if the current record could be evicted or not. */
-    Evictor(uint32_t max_size, CanEvictCallback cb, GetSizeCallback gs_cb);
+    Evictor(uint64_t max_size, CanEvictCallback cb, GetSizeCallback gs_cb);
 
     /* Add the given record to the list. The given record is automatically upvoted. This record might be added
      * only after evicting a record (once it reaches max limits). In that case it returns the record it just
@@ -43,14 +43,14 @@ public:
     void delete_record(EvictRecordType &r);
 
 private:
-    EvictRecordType *do_evict(uint32_t needed_size);
+    EvictRecordType *do_evict(uint64_t needed_size);
 
 private:
     CanEvictCallback m_can_evict_cb;
     GetSizeCallback m_get_size_cb;
     EvictionPolicy m_evict_policy;
-    std::atomic<uint32_t> m_cur_size;
-    uint32_t m_max_size;
+    std::atomic<uint64_t> m_cur_size;
+    uint64_t m_max_size;
 };
 
 }

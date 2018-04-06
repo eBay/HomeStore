@@ -99,7 +99,7 @@ public:
 
 #define MappingBtreeDeclType     homeds::btree::Btree<homeds::btree::MEM_BTREE, MappingKey, MappingValue, \
                                     homeds::btree::BTREE_NODETYPE_SIMPLE, homeds::btree::BTREE_NODETYPE_SIMPLE>
-#define KEY_RANGE	1000
+#define KEY_RANGE	1
 #define BLOCK_SIZE	8192
 
 class mapping {

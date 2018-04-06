@@ -14,7 +14,7 @@ class Volume {
 	mapping *map;
 
 public:
-	homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy > *blk_store;
+	homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy > *blk_store;
 	static Cache< BlkId > *glob_cache;
 
 	static AbstractVirtualDev *new_vdev_found(DeviceManager *dev_mgr, homestore::vdev_info_block *vb);

@@ -15,6 +15,10 @@
 #include <folly/Exception.h>
 #include <boost/utility.hpp>
 #include "homeds/utility/useful_defs.hpp"
+#ifdef __linux__
+#include <linux/fs.h>
+#include <sys/ioctl.h> 
+#endif
 
 namespace homestore {
 
@@ -66,6 +70,13 @@ PhysicalDev::PhysicalDev(DeviceManager *mgr, std::string devname, int oflags) :
 
     // open and load the header block and validate if its a valid device
     folly::checkUnixError(m_devfd = open(devname.c_str(), oflags));
+#ifdef __linux__
+    if (ioctl(m_devfd,BLKGETSIZE64,&m_devsize) < 0) {
+	/* TODO: need better way to handle it */
+	assert(0);
+    }
+    assert(size > 0); 
+#endif
 }
 
 bool PhysicalDev::load_super_block() {

@@ -54,7 +54,7 @@ public:
     static_assert(std::is_base_of<CacheRecord, V >::value,
                   "IntrusiveCache Value must be derived from CacheRecord");
 
-    IntrusiveCache(uint32_t max_cache_size, uint32_t avg_size_per_entry);
+    IntrusiveCache(uint64_t max_cache_size, uint32_t avg_size_per_entry);
 
     /* Put the raw buffer into the cache. Returns false if insert is not successful and if the key already
      * exists, it additionally fills up the out_ptr. If insert is successful, returns true and put the
@@ -84,7 +84,7 @@ class CacheBuffer;
 template <typename K>
 class Cache : protected IntrusiveCache< K, CacheBuffer< K > > {
 public:
-    Cache(uint32_t max_cache_size, uint32_t avg_size_per_entry);
+    Cache(uint64_t max_cache_size, uint32_t avg_size_per_entry);
 
     /* Put the raw buffer into the cache with key k. It returns whether put is successful and if so provides
      * the smart pointer of CacheBuffer. Upsert flag of false indicates if the data already exists, do not insert */

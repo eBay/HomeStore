@@ -10,7 +10,7 @@ namespace homestore {
 
 ////////////////////////////////// Intrusive Cache Section /////////////////////////////////
 template< typename K, typename V>
-IntrusiveCache<K, V>::IntrusiveCache(uint32_t max_cache_size, uint32_t avg_size_per_entry) :
+IntrusiveCache<K, V>::IntrusiveCache(uint64_t max_cache_size, uint32_t avg_size_per_entry) :
         m_hash_set(max_cache_size/avg_size_per_entry/ENTRIES_PER_BUCKET) {
     for (auto i = 0; i < EVICTOR_PARTITIONS; i++) {
         m_evictors[i] = std::make_unique<CurrentEvictor>(max_cache_size, IntrusiveCache<K, V>::is_safe_to_evict,
@@ -90,7 +90,7 @@ bool IntrusiveCache<K, V>::is_safe_to_evict(CurrentEvictor::EvictRecordType *ere
 
 ////////////////////////////////// Cache Section /////////////////////////////////
 template <typename K>
-Cache<K>::Cache(uint32_t max_cache_size, uint32_t avg_size_per_entry) :
+Cache<K>::Cache(uint64_t max_cache_size, uint32_t avg_size_per_entry) :
         IntrusiveCache<K, CacheBuffer<K> >::IntrusiveCache(max_cache_size, avg_size_per_entry) {
 }
 

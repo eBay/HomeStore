@@ -16,9 +16,10 @@ set(TEST_VOLUME_SOURCE_FILES
 	      vol_test.cpp
         ../device/virtual_dev.hpp
         ../device/device_manager.cpp
-        ../device/physical_dev.cpp
-        ../blkalloc/fixed_blk_allocator.cpp
-#        ../blkalloc/varsize_blk_allocator.cpp
+	../device/physical_dev.cpp
+#        ../device/physical_dev.cpp
+        ../blkalloc/varsize_blk_allocator.cpp
+        ../blkalloc/varsize_blk_allocator.cpp
         ../cache/eviction.cpp
         ../cache/cache.cpp)
 

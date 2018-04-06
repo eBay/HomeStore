@@ -9,7 +9,7 @@
 using namespace std;
 using namespace homestore;
 
-#define MAX_CACHE_SIZE     10 * 1024 * 1024 * 1024
+#define MAX_CACHE_SIZE     16 * 1024ul * 1024ul * 1024ul /* it has to be a multiple of 16k */
 #define BLOCK_SIZE	   8 * 1024
 
 Cache< BlkId > * Volume::glob_cache = NULL;
@@ -32,7 +32,7 @@ homestore::Volume::Volume(homestore::DeviceManager *dev_mgr, uint64_t size) {
 	Volume::glob_cache = new homestore::Cache< BlkId >(MAX_CACHE_SIZE, BLOCK_SIZE);
 	cout << "cache created\n";
     }
-    blk_store = new homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy >(dev_mgr, Volume::glob_cache, size,
+    blk_store = new homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >(dev_mgr, Volume::glob_cache, size,
                                                                                   WRITETHRU_CACHE, 0);
     map = new mapping(size);
 }
@@ -43,7 +43,7 @@ homestore::Volume::Volume(DeviceManager *dev_mgr, homestore::vdev_info_block *vb
 	Volume::glob_cache = new homestore::Cache< BlkId >(MAX_CACHE_SIZE, BLOCK_SIZE);
 	cout << "cache created\n";
     }
-    blk_store = new homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy >(dev_mgr, Volume::glob_cache, 
+    blk_store = new homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >(dev_mgr, Volume::glob_cache, 
 										vb, WRITETHRU_CACHE);
     map = new mapping(size);
 }

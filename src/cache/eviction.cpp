@@ -9,7 +9,7 @@ namespace homestore {
 #define EvictRecord typename Evictor<EvictionPolicy>::EvictRecordType
 
 template <typename EvictionPolicy>
-Evictor<EvictionPolicy>::Evictor(uint32_t max_size, Evictor<EvictionPolicy>::CanEvictCallback cb,
+Evictor<EvictionPolicy>::Evictor(uint64_t max_size, Evictor<EvictionPolicy>::CanEvictCallback cb,
                                  Evictor<EvictionPolicy>::GetSizeCallback gs_cb) :
         m_evict_policy(0),
         m_can_evict_cb(cb),
@@ -33,7 +33,7 @@ EvictRecord* Evictor<EvictionPolicy>::add_record(EvictRecord &r) {
 }
 
 template <typename EvictionPolicy>
-EvictRecord *Evictor<EvictionPolicy>::do_evict(uint32_t needed_size) {
+EvictRecord *Evictor<EvictionPolicy>::do_evict(uint64_t needed_size) {
     typename EvictionPolicy::RecordType *rec = nullptr;
     do {
         rec = m_evict_policy.get_next_candidate(rec);
