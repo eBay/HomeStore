@@ -421,7 +421,7 @@ private:
     std::vector< BlkAllocPortion > m_blk_portions;
     std::vector< BlkAllocTemperatureGroup > m_temp_groups;
 
-    std::atomic< uint32_t > m_cache_n_entries; // Total number of page entries to cache
+    std::atomic< uint64_t > m_cache_n_entries; // Total number of page entries to cache
 
 private:
     const VarsizeBlkAllocConfig &get_config() const override {
@@ -435,7 +435,7 @@ private:
     void request_more_blks(BlkAllocSegment *seg = nullptr);
     void request_more_blks_wait(BlkAllocSegment *seg = nullptr);
     void fill_cache(BlkAllocSegment *seg);
-    uint64_t fill_cache_in_portion(uint64_t portion_num, BlkAllocSegment *seg);
+    uint64_t fill_cache_in_portion(uint64_t portion_num, BlkAllocSegment *seg, int64_t need_nblks);
 
     // Convenience routines
     uint64_t blknum_to_pageid(uint64_t blknum) const {
