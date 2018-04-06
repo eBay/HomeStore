@@ -212,15 +212,10 @@ void VarsizeBlkAllocator::fill_cache(BlkAllocSegment *seg) {
         seg = m_heap_segments.top();
     }
 
-    auto cur_nblks = m_cache_n_entries.load(std::memory_order_acquire);
-    auto max_nblks = get_config().get_max_cache_blks();
-    int64_t need_nblks =  (cur_nblks > max_nblks) ? 0 : max_nblks - cur_nblks;
-
     uint64_t start_portion_num = seg->get_clock_hand();
-    while (need_nblks > 0) {
+    while (m_cache_n_entries.load(std::memory_order_acquire) < get_config().get_max_cache_blks()) {
         uint64_t portion_num = seg->get_clock_hand();
-        nadded_blks += fill_cache_in_portion(portion_num, seg, need_nblks);
-        need_nblks -= nadded_blks;
+        nadded_blks += fill_cache_in_portion(portion_num, seg);
 
         // Goto next group within the segment.
         portion_num = (portion_num == (get_config().get_total_portions() - 1)) ? 0 : portion_num + 1;
@@ -238,7 +233,7 @@ void VarsizeBlkAllocator::fill_cache(BlkAllocSegment *seg) {
     LOG(INFO) << "Bitset sweep thread added " << nadded_blks << " blks to blk cache";
 }
 
-uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t portion_num, BlkAllocSegment *seg, int64_t need_nblks) {
+uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t portion_num, BlkAllocSegment *seg) {
     homeds::btree::EmptyClass dummy;
     uint64_t n_added_blks = 0;
 
@@ -247,7 +242,9 @@ uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t portion_num, BlkAll
     uint64_t end_blk_id = cur_blk_id + get_config().get_blks_per_portion();
 
     portion.lock();
-    while ((need_nblks > 0) && (cur_blk_id < end_blk_id)) {
+    // TODO: Consider caching the m_cache_n_entries and give some leeway to max cache blks and thus avoid atomic operations
+    while ((m_cache_n_entries.load(std::memory_order_acq_rel) < get_config().get_max_cache_blks()) &&
+            (cur_blk_id < end_blk_id)) {
 
         // Get next reset bits and insert to cache and then reset those bits
         auto b = m_alloc_bm->get_next_contiguous_reset_bits(cur_blk_id);
@@ -262,8 +259,6 @@ uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t portion_num, BlkAll
 
         // Update the counters
         n_added_blks += b.nbits;
-        need_nblks -= n_added_blks;
-
         cur_blk_id = b.start_bit + b.nbits;
     }
     portion.unlock();

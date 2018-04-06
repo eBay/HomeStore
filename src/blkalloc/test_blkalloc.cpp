@@ -92,7 +92,7 @@ public:
     }
 };
 
-#define NTHREADS 4
+#define NTHREADS 1
 
 TEST_F(FixedBlkAllocatorTest, alloc_free_test) {
     std::array<std::thread *, NTHREADS> thrs;
@@ -120,20 +120,6 @@ TEST_F(FixedBlkAllocatorTest, alloc_free_test) {
 
     LOG(INFO) << "Freed all blocks: Allocator state: " << m_fixed_allocator->to_string();
     EXPECT_EQ(m_fixed_allocator->total_free_blks(), max_blks());
-
-    LOG(INFO) << "Do a realloc blocks";
-    m_alloced_count.store(0);
-    for (auto i = 0U; i < NTHREADS; i++) {
-        thrs[i] = new std::thread(alloc_fixed_blocks, this, &blkids[i]);
-    }
-    for (auto t : thrs) {
-        t->join();
-    }
-
-    EXPECT_EQ(m_alloced_count.load(), max_blks());
-    EXPECT_EQ(m_fixed_allocator->total_free_blks(), 0);
-    LOG(INFO) << "ReAlloced " << m_alloced_count.load() << " blocks, Allocator state: "
-              << m_fixed_allocator->to_string();
     LOG(INFO) << "FixedSizeBlkAllocator test done";
 }
 
@@ -147,10 +133,10 @@ protected:
 public:
     VarsizeBlkAllocatorTest() :
             m_alloced_count(0),
-            m_total_space(16 * 1024 * 1024),
+            m_total_space(1 * 1024 * 1024),
             m_blk_size(8 * 1024) {
         VarsizeBlkAllocConfig var_cfg(m_blk_size, m_total_space / m_blk_size);
-        var_cfg.set_max_cache_blks(100);
+        var_cfg.set_max_cache_blks(1000);
         var_cfg.set_page_size(m_blk_size);
         var_cfg.set_total_segments(1);
         var_cfg.set_pages_per_portion(64);
