@@ -1,93 +1,33 @@
-cmake_minimum_required(VERSION 4.9)
+cmake_minimum_required(VERSION 3.7)
 project(HomeStore)
 
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
 
-add_executable(HomeStore
-        src/blkalloc/blk.h
-        src/blkalloc/blk_allocator.h
-        src/blkalloc/CMakeLists.txt
-        src/blkalloc/dynamic_blk_allocator.cpp
-        src/blkalloc/dynamic_blk_allocator.h
-        src/blkalloc/fixed_blk_allocator.cpp
-        src/blkalloc/test_blkalloc.cpp
-        src/blkalloc/varsize_blk_allocator.cpp
-        src/blkalloc/varsize_blk_allocator.h
-        src/blkstore/blkstore.hpp
-        src/blkstore/CMakeLists.txt
-        src/blkstore/test_blkstore.cpp
-        src/cache/cache.cpp
-        src/cache/cache.h
-        src/cache/CMakeLists.txt
-        src/cache/evictable_mem_alloc.cpp
-        src/cache/evictable_mem_alloc.h
-        src/cache/eviction.cpp
-        src/cache/eviction.hpp
-        src/cache/lru_eviction.hpp
-        src/cache/test_cache.cpp
-        src/device/blkbuffer.hpp
-        src/device/CMakeLists.txt
-        src/device/device.h
-        src/device/device_manager.cpp
-        src/device/device_selector.hpp
-        src/device/physical_dev.cpp
-        src/device/test_blkdev.cpp
-        src/device/test_physdev.cpp
-        src/device/test_virtualdev.cpp
-        src/device/virtual_dev.hpp
-        src/homeds/array/flexarray.hpp
-        src/homeds/array/sparse_vector.hpp
-        src/homeds/bitmap/bitset.hpp
-        src/homeds/bitmap/bitword.hpp
-        src/homeds/btree/btree.hpp
-        src/homeds/btree/btree_internal.h
-        src/homeds/btree/btree_node.cpp
-        src/homeds/btree/btree_node.h
-        src/homeds/btree/btree_specific_impl.hpp
-        src/homeds/btree/btree_stats.hpp
-        src/homeds/btree/mem_btree.hpp
-        src/homeds/btree/physical_node.hpp
-        src/homeds/btree/prefix_node.hpp
-        src/homeds/btree/simple_node.hpp
-        src/homeds/btree/ssd_btree.hpp
-        src/homeds/btree/varlen_node.hpp
-        src/homeds/btree/varlen_node_schema1.hpp
-        src/homeds/hash/intrusive_hashset.hpp
-        src/homeds/hash/lockfree_hashmap.hpp
-        src/homeds/memory/memory.old/chunk_allocator2.hpp
-        src/homeds/memory/memory.old/mem_allocator.hpp
-        src/homeds/memory/memory.old/smart_ptr.hpp
-        src/homeds/memory/chunk_allocator.hpp
-        src/homeds/memory/composite_allocator.hpp
-        src/homeds/memory/freelist_allocator.hpp
-        src/homeds/memory/generic_freelist_allocator.hpp
-        src/homeds/memory/mem_allocator.hpp
-        src/homeds/memory/mempiece.hpp
-        src/homeds/memory/obj_allocator.hpp
-        src/homeds/memory/sys_allocator.hpp
-        src/homeds/memory/tagged_ptr.hpp
-        src/homeds/tests/test_avector.cpp
-        src/homeds/tests/test_bitset.cpp
-        src/homeds/tests/test_bitword.cpp
-        src/homeds/tests/test_btree.cpp
-        src/homeds/tests/test_btree_crud.cpp
-        src/homeds/tests/test_composite_allocator.cpp
-        src/homeds/tests/test_hashset.cpp
-        src/homeds/tests/test_lockfree_hash.cpp
-        src/homeds/tests/test_obj_allocator.cpp
-        src/homeds/thread/lock.hpp
-        src/homeds/utility/atomic_counter.hpp
-        src/homeds/utility/logging.hpp
-        src/homeds/utility/stats.hpp
-        src/homeds/utility/stats_per_thread.hpp
-        src/homeds/utility/useful_defs.hpp
-        src/homeds/CMakeLists.txt
-        src/kvstore/CMakeLists.txt
-        src/kvstore/ssd_btree.hpp
-        src/kvstore/test_btree_kvstore.cpp
-        src/main/homestore.hpp
-        src/main/store_limits.h
-        src/mapping/mapping.hpp
-        src/volume/vol_test.cpp
-        src/volume/volume.cpp
-        src/volume/volume.hpp)
+if (CMAKE_BUILD_TYPE MATCHES Release)
+    add_definitions(-DNDEBUG=1)
+    add_definitions(-O2)
+endif()
+
+set(OS_TYPE unknown)
+if(APPLE)
+    set(OS_TYPE mac)
+elseif(CMAKE_SYSTEM_NAME STREQUAL Linux)
+    set(OS_TYPE linux)
+endif()
+
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/target/${CMAKE_BUILD_TYPE}/${OS_TYPE})
+set(LIB_ROOT_DIR ${CMAKE_SOURCE_DIR}/deps_prefix/${OS_TYPE}/lib)
+set(INCLUDE_ROOT_DIR ${CMAKE_SOURCE_DIR}/deps_prefix/${OS_TYPE}/include)
+
+#set(CMAKE_VERBOSE_MAKEFILE ON)
+
+include_directories(${INCLUDE_ROOT_DIR})
+#link_directories(${LIB_ROOT_DIR})
+
+add_subdirectory(src/homeds)
+add_subdirectory(src/device)
+add_subdirectory(src/blkalloc)
+add_subdirectory(src/cache)
+add_subdirectory(src/blkstore)
+add_subdirectory(src/kvstore)
+add_subdirectory(src/volume)
