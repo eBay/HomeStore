@@ -75,7 +75,7 @@ PhysicalDev::PhysicalDev(DeviceManager *mgr, std::string devname, int oflags) :
 	/* TODO: need better way to handle it */
 	assert(0);
     }
-    assert(size > 0); 
+    assert(m_devsize > 0); 
 #endif
 }
 

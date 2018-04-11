@@ -12,6 +12,10 @@ class Volume {
 
 	uint64_t size;
 	mapping *map;
+	uint64_t alloc_blk_time;
+	uint64_t write_time;
+	uint64_t map_time;
+	uint64_t write_cnt;
 
 public:
 	homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy > *blk_store;
@@ -22,5 +26,8 @@ public:
 	Volume(DeviceManager *dev_mgr, homestore::vdev_info_block *vb);
 	int write(uint64_t lba, uint8_t *buf, uint32_t nblks);
 	int read(uint64_t lba, int nblks, std::vector<boost::intrusive_ptr< BlkBuffer >> &buf_list);
+	void init_perf_cntrs();
+	void print_perf_cntrs();
+	uint64_t get_elapsed_time(Clock::time_point startTime);
 };
 }

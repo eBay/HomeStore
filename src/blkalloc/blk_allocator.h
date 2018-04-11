@@ -45,7 +45,7 @@ public:
         return m_blk_size;
     }
 
-    void set_total_blks(uint32_t nblks) {
+    void set_total_blks(uint64_t nblks) {
         m_nblks = nblks;
     }
 

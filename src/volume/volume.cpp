@@ -12,7 +12,15 @@ using namespace homestore;
 #define MAX_CACHE_SIZE     16 * 1024ul * 1024ul * 1024ul /* it has to be a multiple of 16k */
 #define BLOCK_SIZE	   8 * 1024
 
+
 Cache< BlkId > * Volume::glob_cache = NULL;
+
+uint64_t 
+homestore::Volume::get_elapsed_time(Clock::time_point startTime) {
+	std::chrono::nanoseconds ns = std::chrono::duration_cast
+					< std::chrono::nanoseconds >(Clock::now() - startTime);
+	return ns.count() / 1000;
+}
 
 AbstractVirtualDev *
 homestore::Volume::new_vdev_found(DeviceManager *dev_mgr, homestore::vdev_info_block *vb) {
@@ -28,6 +36,7 @@ homestore::Volume::new_vdev_found(DeviceManager *dev_mgr, homestore::vdev_info_b
 
 homestore::Volume::Volume(homestore::DeviceManager *dev_mgr, uint64_t size) {
     size = size;
+    fLI::FLAGS_minloglevel=3;
     if (Volume::glob_cache == NULL) {
 	Volume::glob_cache = new homestore::Cache< BlkId >(MAX_CACHE_SIZE, BLOCK_SIZE);
 	cout << "cache created\n";
@@ -48,6 +57,24 @@ homestore::Volume::Volume(DeviceManager *dev_mgr, homestore::vdev_info_block *vb
     map = new mapping(size);
 }
 
+void
+homestore::Volume::init_perf_cntrs() {
+    write_cnt = 0;
+    alloc_blk_time = 0;
+    write_time = 0;
+    map_time = 0;
+    blk_store->init_perf_cnts();
+}
+
+void
+homestore::Volume::print_perf_cntrs() {
+    printf("total writes %lu \n", write_cnt);
+    printf("avg time taken in alloc_blk %lu us\n", alloc_blk_time/write_cnt);
+    printf("avg time taken in write %lu us\n", write_time/write_cnt);
+    printf("avg time taken in map %lu us\n", map_time/write_cnt);
+    blk_store->print_perf_cnts();
+}
+
 int 
 homestore::Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks) {
     homestore::BlkId bid;
@@ -55,15 +82,28 @@ homestore::Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks) {
     hints.desired_temp = 0;
     hints.dev_id_hint = -1;
 
-    blk_store->alloc_blk(nblks, hints, &bid);
+    write_cnt++;
+    {
+    	Clock::time_point startTime = Clock::now();
+    	blk_store->alloc_blk(nblks, hints, &bid);
+    	alloc_blk_time += get_elapsed_time(startTime);
+    }
 
     LOG(INFO) << "Requested nblks: " << (uint32_t)nblks << " Allocation info: " << bid.to_string();
 
     homeds::blob b = {buf, BLOCK_SIZE * nblks};
 
-    boost::intrusive_ptr< BlkBuffer > bbuf = blk_store->write(bid, b);
-    cout << "written\n";
-    map->put(lba, nblks, bid);
+    {
+    	Clock::time_point startTime = Clock::now();
+  	boost::intrusive_ptr< BlkBuffer > bbuf = blk_store->write(bid, b);
+	write_time += get_elapsed_time(startTime);
+    }
+   // cout << "written\n";
+    {
+	Clock::time_point startTime = Clock::now();
+    	map->put(lba, nblks, bid);
+	map_time += get_elapsed_time(startTime);
+    }
     LOG(INFO) << "Written on " << bid.to_string() << " for 8192 bytes";
     return 0;
 }

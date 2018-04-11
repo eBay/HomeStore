@@ -17,19 +17,21 @@ INIT_VMODULES(BTREE_VMODULES);
 homestore::DeviceManager *dev_mgr = nullptr;
 homestore::Volume *vol;
 
-#define MAX_BUF 1 * 1024 * 1024
+#define MAX_BUF 1 * 1024ul * 1024ul
 #define MAX_BUF_CACHE 1 * 1024
 #define MAX_VOL_SIZE (100ul * 1024ul * 1024ul * 1024ul) 
 uint8_t *bufs[MAX_BUF];
-#define BUF_SIZE 1
+#define BUF_SIZE 8
 
-#define MAX_READ 250000 // 1 million
+#define MAX_READ 1000000ul // 1 million
 uint64_t read_cnt = 0;
+uint64_t write_cnt = 0;
 
 
 uint64_t get_elapsed_time(Clock::time_point startTime) 
 {
-	std::chrono::nanoseconds ns = std::chrono::duration_cast< std::chrono::nanoseconds >(Clock::now() - startTime);
+	std::chrono::nanoseconds ns = std::chrono::duration_cast
+					< std::chrono::nanoseconds >(Clock::now() - startTime);
 	return ns.count() / 1000; 
 }
 
@@ -37,20 +39,21 @@ void *readThread(void *arg)
 {
 	while (read_cnt < MAX_READ) {
 		std::vector<boost::intrusive_ptr< BlkBuffer >> buf_list;
-		int i = rand() % MAX_BUF;
-		vol->read(rand() % MAX_BUF, BUF_SIZE, buf_list);
+		uint64_t random = rand();
+		int i = random % MAX_BUF;
 		read_cnt++;
+		vol->read(i, BUF_SIZE, buf_list);
 		uint64_t size = 0;
 		for(auto buf:buf_list) {
 			homeds::blob b  = buf->at_offset(0);
 			assert(!std::memcmp(b.bytes, 
 				(void *)((uint32_t *)bufs[i % MAX_BUF_CACHE] + size), b.size));
-			printf("read verified\n");
 			size += b.size;
 			i++;
 		}
-		assert(size == 8192);
+		assert(size == BUF_SIZE * 8192);
 	}
+	printf("read verified\n");
 }
 
 int main(int argc, char** argv) {
@@ -89,23 +92,34 @@ int main(int argc, char** argv) {
 			bufp = bufp + 8;
 		}
 	}
-	
-	for (auto i = 0; i < MAX_BUF; i++) {	
+	printf("writing \n");
+
+	vol->init_perf_cntrs();	
+	Clock::time_point write_startTime = Clock::now();
+	for (int i = 0; i < MAX_BUF; i++) {
 		vol->write(i * BUF_SIZE, bufs[i % MAX_BUF_CACHE], BUF_SIZE);
+		write_cnt++;
 	}
-
-
+	uint64_t time_us = get_elapsed_time(write_startTime);
+	printf("write counters..........\n");
+	printf("total writes %lu\n", write_cnt);
+	printf("total time spent %lu us\n", time_us);
+	printf("total time spend per io %lu us\n", time_us/write_cnt);
+	printf("iops %lu\n",(write_cnt * 1000 * 1000)/time_us);
+	vol->print_perf_cntrs();
+	
 	printf("creating threads \n");
 	// create threads for reading
 	pthread_t tid;
-	for (int i = 0; i < 15; i++) {
+	for (int i = 0; i < 10; i++) {
 		pthread_create(&tid, NULL, readThread, NULL);
 	}	
 	printf("reading\n");
-	
-	Clock::time_point startTime = Clock::now();
-	while (read_cnt < MAX_READ) {	
+	Clock::time_point read_startTime = Clock::now();
+	while (read_cnt < (MAX_READ - 1)) {	
 	}
-	uint64_t time_us = get_elapsed_time(startTime);
-	printf("total time spent %lu", time_us);
+	time_us = get_elapsed_time(write_startTime);
+	printf("read counters..........\n");
+	printf("total time spent %lu us\n", time_us);
+	printf("total time spend per io %lu us\n", time_us/read_cnt);
 }

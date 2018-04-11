@@ -191,6 +191,9 @@ public:
                 }
             }
 
+	    if (status == BLK_ALLOC_SUCCESS) {
+		break;
+	    }
             if (!hints.can_look_for_other_dev) {
                 break;
             }

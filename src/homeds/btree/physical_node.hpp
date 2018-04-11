@@ -325,6 +325,8 @@ protected:
     auto bsearch(int start, int end, const BtreeSearchRange &range) const {
         uint32_t mid = 0;
         uint32_t min_ind_found = end;
+	uint32_t second_min = end;
+	uint32_t temp_end = end;
         BtreeKey *mid_key;
 
         struct {
@@ -352,6 +354,7 @@ protected:
                 // If we are left leaning, keep looking for the lowest of
                 // mid that matches within the range.
                 if (mid < min_ind_found) {
+		    second_min = min_ind_found;
                     min_ind_found = mid;
                 }
                 end = mid;
@@ -362,7 +365,11 @@ protected:
             }
         }
 
-        ret.end_of_search_index = ret.found ? min_ind_found : end;
+        if (range.is_second_min() && second_min != temp_end) {
+        	  ret.end_of_search_index = ret.found ? second_min : end;
+        } else {
+      		  ret.end_of_search_index = ret.found ? min_ind_found : end;
+	}
         return ret;
     }
 

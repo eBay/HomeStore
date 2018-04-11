@@ -150,6 +150,7 @@ public:
         return write(bid, blob);
     }
 
+     
     /* Write the buffer. The BlkStore write does not support write in place and so it does not also support
      * writing to an offset.
      *
@@ -157,19 +158,41 @@ public:
      * create a new blkid and then write it on an offset from the blkid. So far there is no use case for that. To
      * avoid any confusion to the interface, the value_offset parameter is not provided for this write type. If
      * needed can be added later */
+    uint64_t get_elapsed_time(Clock::time_point startTime) {
+	std::chrono::nanoseconds ns = std::chrono::duration_cast
+				< std::chrono::nanoseconds >(Clock::now() - startTime);
+	return ns.count();
+    }
+
     boost::intrusive_ptr< BlkBuffer > write(BlkId &bid, homeds::blob &blob) {
         // First try to create/insert a record for this blk id in the cache. If it already exists, it will simply
         // upvote the item.
         boost::intrusive_ptr< BlkBuffer > bbuf;
+	write_cnt++;
+	Clock::time_point cache_startTime = Clock::now();
         bool inserted = m_cache->insert(bid, blob, 0 /* value_offset */,
                                         (boost::intrusive_ptr< CacheBuffer<BlkId> > *)&bbuf);
+	cache_time += get_elapsed_time(cache_startTime);
 
         // TODO: Raise an exception if we are not able to insert - instead of assert
         assert(inserted);
 
         // Now write the data to the device
+	Clock::time_point write_startTime = Clock::now();
         m_vdev.write(bid, bbuf->get_memvec());
+	write_time += get_elapsed_time(write_startTime);
         return bbuf;
+    }
+
+    void print_perf_cnts() {
+	printf("cache time %lu ns\n", cache_time/write_cnt);
+	printf("physical device write time %lu ns\n", write_time/write_cnt);
+    }
+
+    void init_perf_cnts() {
+	cache_time = 0;
+	write_time = 0;
+	write_cnt = 0;
     }
 
     /* If the user already has created a blkbuffer, then use this method to use it to write the block */
@@ -434,6 +457,9 @@ private:
     Cache< BlkId > *m_cache;
     BlkStoreCacheType m_cache_type;
     VirtualDev<BAllocator, RoundRobinDeviceSelector> m_vdev;
+    uint64_t write_cnt;
+    uint64_t cache_time;
+    uint64_t write_time;
 };
 
 }
