@@ -442,6 +442,10 @@ private:
         return blknum / get_config().get_blks_per_page();
     }
 
+    uint32_t offset_within_page(uint64_t blknum) const {
+        blknum % get_config().get_blks_per_page()
+    }
+
     uint64_t blknum_to_portion_num(uint64_t blknum) const {
         return blknum / get_config().get_blks_per_portion();
     }
@@ -476,7 +480,7 @@ private:
 
     // This method generates a cache entry based on given blknumber and count.
     void gen_cache_entry(uint64_t blknum, uint32_t blk_count, VarsizeAllocCacheEntry *out_entry) {
-        out_entry->set_blk_num(blknum);
+        out_entry->set_blk_num(offset_within_page(blknum));
         out_entry->set_blk_count(blk_count);
         out_entry->set_page_id(blknum_to_pageid(blknum));
         out_entry->set_temperature(get_blk_temperature(blknum));
