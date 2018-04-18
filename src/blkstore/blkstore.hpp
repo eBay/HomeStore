@@ -187,12 +187,21 @@ public:
     void print_perf_cnts() {
 	printf("cache time %lu ns\n", cache_time/write_cnt);
 	printf("physical device write time %lu ns\n", write_time/write_cnt);
+	if (read_cnt != 0) {
+		printf("cache_hit %lu % \n",(cache_hit * 100)/read_cnt); 
+	}
+	printf("absolut cache_hit %lu \n",(cache_hit)); 
+	printf("read_cnt in blkstore %lu \n", read_cnt); 
+	m_vdev.print_cntrs();
     }
 
     void init_perf_cnts() {
 	cache_time = 0;
 	write_time = 0;
 	write_cnt = 0;
+	cache_hit = 0;
+	read_cnt = 0;
+	m_vdev.init_cntrs();
     }
 
     /* If the user already has created a blkbuffer, then use this method to use it to write the block */
@@ -219,7 +228,9 @@ public:
             // Not found in cache, create a new block buf and prepare it for insert to dev and cache.
             bbuf = homeds::ObjectAllocator< Buffer >::make_object();
             bbuf->set_key(bid);
-        }
+        } else {
+	    	cache_hit++;
+	}
 
         uint32_t size_to_read = size;
         homeds::MemVector<BLKSTORE_BLK_SIZE>::cursor_t c;
@@ -230,6 +241,7 @@ public:
                 // We don't have any missing pieces, so we are done reading the contents
                 break;
             }
+			    
             cur_offset = missing_mp->end_offset();
 
             // Create a new block of memory for the missing piece
@@ -244,6 +256,7 @@ public:
             BlkId tmp_bid(bid.get_id() + missing_mp->offset()/BLKSTORE_BLK_SIZE,
                           missing_mp->size()/BLKSTORE_BLK_SIZE, bid.get_chunk_num());
             m_vdev.read(tmp_bid, missing_mp.get());
+	    read_cnt++;
             size_to_read -= missing_mp->size();
         }
 
@@ -459,6 +472,8 @@ private:
     VirtualDev<BAllocator, RoundRobinDeviceSelector> m_vdev;
     uint64_t write_cnt;
     uint64_t cache_time;
+    uint64_t cache_hit;
+    uint64_t read_cnt;
     uint64_t write_time;
 };
 

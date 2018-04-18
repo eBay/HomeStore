@@ -77,6 +77,10 @@ private:
 
     // Instance of device selector
     std::unique_ptr< DefaultDeviceSelector > m_selector;
+    uint64_t write_time;
+    uint64_t physical_time;
+    uint64_t mirror_time;
+    uint64_t write_cnt;
 
 public:
     /* Create a new virtual dev for these parameters */
@@ -215,12 +219,25 @@ public:
         chunk->get_blk_allocator()->free(cb);
     }
 
+    void print_cntrs() {
+	printf("time taken in write %lu ns\n", write_time/write_cnt);
+	printf("time taken in write %lu ns\n", physical_time/write_cnt);
+	printf("time taken in write %lu ns\n", mirror_time/write_cnt);
+    }
+ 
+    void init_cntrs() {
+	write_time = 0;
+	write_cnt = 0;
+	physical_time = 0;
+	mirror_time = 0;
+    }
     void write(const BlkId &bid, const homeds::MemVector<BLKSTORE_BLK_SIZE> &buf) {
         BlkOpStatus ret_status = BLK_OP_SUCCESS;
         uint32_t size = bid.get_nblks() * get_blk_size();
         struct iovec iov[BlkId::max_blks_in_op()];
         int iovcnt = 0;
 
+	Clock::time_point startTime = Clock::now();
         assert(buf.size() == bid.get_nblks() * BLKSTORE_BLK_SIZE);
 
         uint32_t p = 0;
@@ -238,11 +255,17 @@ public:
         uint64_t dev_offset = to_dev_offset(bid, &chunk);
         try {
             LOG(INFO) << "Writing in device " << chunk->get_physical_dev()->get_dev_id() << " offset = " << dev_offset;
-            chunk->get_physical_dev_mutable()->writev(iov, iovcnt, size, dev_offset);
+	    write_time += 
+		    (std::chrono::duration_cast< std::chrono::nanoseconds >(Clock::now() - 
+									    startTime)).count();
+	    write_cnt++;
+	    chunk->get_physical_dev_mutable()->writev(iov, iovcnt, size, dev_offset);
         } catch (std::exception &e) {
             throw e;
         }
 
+	physical_time += (std::chrono::duration_cast< std::chrono::nanoseconds >(Clock::now() -
+										startTime)).count();
         if (get_nmirrors()) {
             uint64_t primary_chunk_offset = dev_offset - chunk->get_start_offset();
 
@@ -258,6 +281,8 @@ public:
                 }
             }
         }
+	mirror_time += (std::chrono::duration_cast< std::chrono::nanoseconds >(Clock::now() -
+										startTime)).count();
     }
 
     /* Read the data for a given BlkId. With this method signature, virtual dev can read only in block boundary
