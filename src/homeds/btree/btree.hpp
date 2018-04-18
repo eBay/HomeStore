@@ -631,7 +631,11 @@ private:
             }
 
             unlock_node(my_node, curlock);
-            return is_found ? BTREE_ITEM_FOUND : BTREE_NOT_FOUND;
+	    if (is_found == true) {
+			return BTREE_ITEM_FOUND;
+	    } else {
+			return BTREE_NOT_FOUND;
+	    }
         }
 
     retry:

@@ -109,8 +109,8 @@ void VarsizeBlkAllocator::allocator_state_machine() {
                 std::unique_lock< std::mutex > lk(m_mutex);
                 m_wait_alloc_segment = nullptr;
                 m_region_state = BLK_ALLOCATOR_DONE;
+            	m_cv.notify_all();
             }
-            m_cv.notify_all();
         }
     }
 }
@@ -126,7 +126,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
 
     homeds::btree::BtreeSearchRange regex(start_entry, true, /* start_incl */
                                         end_entry, false, /* end incl */
-                                        true /* lean_left */);
+                                        true /* lean_left */, true);
     homeds::btree::EmptyClass dummy_val;
     int attempt = 1;
     while (true) {
@@ -226,10 +226,11 @@ void VarsizeBlkAllocator::fill_cache(BlkAllocSegment *seg) {
             break;
         }
     }
+
+    assert(seg->get_free_blks() >= nadded_blks);
     seg->set_free_blks(seg->get_free_blks() - nadded_blks);
     m_heap_segments.update(seg->get_segment_id(), seg);
 
-    m_cache_n_entries.fetch_add(nadded_blks, std::memory_order_acq_rel);
     LOG(INFO) << "Bitset sweep thread added " << nadded_blks << " blks to blk cache";
 }
 
@@ -259,6 +260,7 @@ uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t portion_num, BlkAll
 
         // Update the counters
         n_added_blks += b.nbits;
+    	m_cache_n_entries.fetch_add(b.nbits, std::memory_order_acq_rel);
         cur_blk_id = b.start_bit + b.nbits;
     }
     portion.unlock();
@@ -286,13 +288,16 @@ void VarsizeBlkAllocator::request_more_blks(BlkAllocSegment *seg) {
 }
 
 void VarsizeBlkAllocator::request_more_blks_wait(BlkAllocSegment *seg) {
-    request_more_blks(seg);
-    {
-        // Wait for notification that it is done
-	// TODO: rishabh, there can be bug here
-        std::unique_lock< std::mutex > lk(m_mutex);
-        m_cv.wait(lk);
-    } // release lock
+    /* TODO: rishabh if segment is not NULL then this function won't work */ 
+    std::unique_lock< std::mutex > lk(m_mutex);
+    assert(seg == NULL);
+    if (m_region_state == BLK_ALLOCATOR_DONE) {
+	    m_wait_alloc_segment = seg;
+	    m_region_state = BLK_ALLOCATOR_WAIT_ALLOC;
+    	    m_cv.notify_all();
+    }
+    // Wait for notification that it is done
+    m_cv.wait(lk);
 }
 
 std::string VarsizeBlkAllocator::state_string(BlkAllocatorState state) const {

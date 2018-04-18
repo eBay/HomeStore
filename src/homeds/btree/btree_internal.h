@@ -169,6 +169,7 @@ private:
     bool m_start_incl;
     bool m_end_incl;
     bool m_left_leaning;
+    bool m_second_min;
 
 public:
     BtreeSearchRange(const BtreeKey& start_key) :
@@ -178,15 +179,16 @@ public:
             BtreeSearchRange(start_key, true, end_key, true) {}
 
     BtreeSearchRange(const BtreeKey& start_key, bool start_incl, const BtreeKey& end_key, bool end_incl) :
-            BtreeSearchRange(start_key, start_incl, end_key, end_incl, true) {}
+            BtreeSearchRange(start_key, start_incl, end_key, end_incl, true, false) {}
 
     BtreeSearchRange(const BtreeKey& start_key, bool start_incl, const BtreeKey& end_key, bool end_incl,
-                  bool left_leaning) :
+                  bool left_leaning, bool second_min) :
             m_start_key(&start_key),
             m_end_key(&end_key),
             m_start_incl(start_incl),
             m_end_incl(end_incl),
-            m_left_leaning(left_leaning) {
+            m_left_leaning(left_leaning) ,
+	    m_second_min(second_min) {
     }
 
     const BtreeKey* get_start_key() const {
@@ -215,6 +217,10 @@ public:
 
     virtual bool is_left_leaning() const {
         return m_left_leaning;
+    }
+    
+    virtual bool is_second_min() const {
+        return m_second_min;;
     }
 };
 

@@ -1,6 +1,7 @@
 #include "homeds/btree/mem_btree.hpp"
 #include "homeds/btree/btree.hpp"
 #include <blkalloc/blk.h>
+#include <csignal>
 
 using namespace std;
 using namespace homestore;
@@ -50,7 +51,7 @@ public:
 	int compare_range(const BtreeSearchRange &range) const override {
 		return 0;
 	}
-	std::string to_string() const override {
+	std::string to_string() const  {
 		return ("abc");
 	}
 };
@@ -99,7 +100,7 @@ public:
 
 #define MappingBtreeDeclType     homeds::btree::Btree<homeds::btree::MEM_BTREE, MappingKey, MappingValue, \
                                     homeds::btree::BTREE_NODETYPE_SIMPLE, homeds::btree::BTREE_NODETYPE_SIMPLE>
-#define KEY_RANGE	1
+#define KEY_RANGE	8
 #define BLOCK_SIZE	8192
 
 class mapping {
@@ -128,10 +129,14 @@ public:
 		MappingValue value;
 		struct BlkId *temp_blkid;
 
+
 		m_bt->put(get_key(lba), get_value(blkid), homeds::btree::INSERT_ONLY_IF_NOT_EXISTS);
 		m_bt->get(get_key(lba), &value);
 		temp_blkid = value.get_pVal();
+#ifdef DEBUG
 		assert(temp_blkid->m_chunk_num == blkid.m_chunk_num);
+#endif
+		
 		return 0;
 	}
 		
@@ -144,7 +149,8 @@ public:
 			MappingValue value;
 			
 			key = get_key(lba).get_value();
-			m_bt->get(get_key(lba), &value);
+			bool ret = m_bt->get(get_key(lba), &value);
+			assert(ret);
 			struct BlkId blkid = value.get_val();
 			uint32_t maxBlkRead = KEY_RANGE - (lba - key);
 	
