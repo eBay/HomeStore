@@ -329,7 +329,7 @@ public:
              << get_blk_num();
     }
 
-    std::string to_string() const override {
+    std::string to_string() const  {
         std::stringstream ss;
         ss << "free blk count: " << get_blk_count() << " temp: " << get_temperature() << " blknum: " << get_blk_num();
         return ss.str();

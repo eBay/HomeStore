@@ -9,19 +9,19 @@ using namespace homeds::btree;
 
 class MappingKey : public homeds::btree::BtreeKey {
 private:
-	uint32_t blob;
-	uint32_t *ptr_blob;
+	uint64_t blob;
+	uint64_t *ptr_blob;
 public:
 	MappingKey(){}
-	MappingKey(uint32_t _blob) {
+	MappingKey(uint64_t _blob) {
 		blob = _blob;
 		ptr_blob = &blob;
 	}
 	int compare(const BtreeKey *o) const override {
 		MappingKey *key = (MappingKey *)o;
-		if (*ptr_blob < key->blob) {
+		if (*ptr_blob < *key->ptr_blob) {
 			return -1;
-		} else if (*ptr_blob > key->blob) {
+		} else if (*ptr_blob > *key->ptr_blob) {
 			return 1;
 		} else {
 			return 0;
@@ -32,7 +32,7 @@ public:
 		return b;
 	}
 	virtual void set_blob(const homeds::blob &b) override {
-		ptr_blob = (uint32_t *)b.bytes;
+		ptr_blob = (uint64_t *)b.bytes;
 	}
 	virtual void copy_blob(const homeds::blob &b) override {
 		memcpy(ptr_blob, b.bytes, b.size);
@@ -45,14 +45,14 @@ public:
 	static uint32_t get_fixed_size() {
 		return sizeof(blob);
 	}
-	uint32_t get_value() {
+	uint64_t get_value() {
 		return blob;
 	}
 	int compare_range(const BtreeSearchRange &range) const override {
 		return 0;
 	}
 	std::string to_string() const  {
-		return ("abc");
+		return (std::to_string(*ptr_blob));
 	}
 };
 
@@ -96,11 +96,14 @@ public:
 	struct BlkId *get_pVal() {
 		return pVal;
 	}
+	std::string to_string() const  {
+		return (std::to_string(pVal->m_id));
+	}
 };
 
 #define MappingBtreeDeclType     homeds::btree::Btree<homeds::btree::MEM_BTREE, MappingKey, MappingValue, \
                                     homeds::btree::BTREE_NODETYPE_SIMPLE, homeds::btree::BTREE_NODETYPE_SIMPLE>
-#define KEY_RANGE	8
+#define KEY_RANGE	1
 #define BLOCK_SIZE	8192
 
 class mapping {
@@ -125,25 +128,25 @@ public:
 		return value;
 	}
 
-	uint32_t put(uint32_t lba, uint32_t nblks, struct BlkId blkid) {
+	uint32_t put(uint64_t lba, uint32_t nblks, struct BlkId blkid) {
 		MappingValue value;
 		struct BlkId *temp_blkid;
 
 
 		m_bt->put(get_key(lba), get_value(blkid), homeds::btree::INSERT_ONLY_IF_NOT_EXISTS);
-		m_bt->get(get_key(lba), &value);
-		temp_blkid = value.get_pVal();
 #ifdef DEBUG
-		assert(temp_blkid->m_chunk_num == blkid.m_chunk_num);
+//		m_bt->get(get_key(lba), &value);
+//		temp_blkid = value.get_pVal();
+//		assert(temp_blkid->m_chunk_num == blkid.m_chunk_num);
 #endif
 		
 		return 0;
 	}
 		
-	uint32_t get(uint32_t lba, uint32_t nblks, 
+	uint32_t get(uint64_t lba, uint32_t nblks, 
 			std::vector<struct homestore::BlkId> &blkIdList) {
 
-		uint32_t key;
+		uint64_t key;
 
 		while (nblks != 0) {
 			MappingValue value;
@@ -152,16 +155,16 @@ public:
 			bool ret = m_bt->get(get_key(lba), &value);
 			assert(ret);
 			struct BlkId blkid = value.get_val();
-			uint32_t maxBlkRead = KEY_RANGE - (lba - key);
+			uint32_t maxBlkRead = KEY_RANGE - (lba - (key * KEY_RANGE));
 	
 			if (maxBlkRead >= nblks) {
 				blkid.set_nblks(nblks);
-				blkid.set_id(blkid.get_id() + lba - key);
+				blkid.set_id(blkid.get_id() + lba - (key * KEY_RANGE));
 				blkIdList.push_back(blkid);
 				nblks = 0;
 			} else {
 				blkid.set_nblks(maxBlkRead);
-				blkid.set_id(blkid.get_id() + lba - key);
+				blkid.set_id(blkid.get_id() + lba - (key * KEY_RANGE));
 				blkIdList.push_back(blkid);
 				nblks = nblks - maxBlkRead;
 				lba = lba + maxBlkRead;

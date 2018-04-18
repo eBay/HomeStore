@@ -32,6 +32,7 @@ ssize_t preadv(int fd, const struct iovec *iov, int iovcnt, off_t offset) {
 }
 
 ssize_t pwritev(int fd, const struct iovec *iov, int iovcnt, off_t offset) {
+
     lseek(fd, offset, SEEK_SET);
     return ::writev(fd, iov, iovcnt);
 }
@@ -157,12 +158,12 @@ void PhysicalDev::write(const char *data, uint32_t size, uint64_t offset) {
 }
 
 void PhysicalDev::writev(const struct iovec *iov, int iovcnt, uint32_t size, uint64_t offset) {
-    ssize_t written_size = pwritev(get_devfd(), iov, iovcnt, offset);
+  ssize_t written_size = pwritev(get_devfd(), iov, iovcnt, offset);
     if (written_size != size) {
         std::stringstream ss;
         ss << "Error trying to write offset " << offset << " size to write = " << size << " size written = "
            << written_size << "\n";
-        folly::throwSystemError(ss.str());
+       folly::throwSystemError(ss.str());
     }
 }
 

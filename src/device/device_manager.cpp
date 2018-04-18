@@ -12,7 +12,7 @@
 namespace homestore {
 
 DeviceManager::DeviceManager(NewVDevCallback vcb, uint32_t vdev_metadata_size) :
-        m_open_flags(O_RDWR),
+        m_open_flags(O_RDWR || O_LARGEFILE || O_DIRECT),
         m_new_vdev_cb(vcb) {
     m_pdev_info.num_phys_devs = 0;
     m_last_vdevid = INVALID_VDEV_ID;
