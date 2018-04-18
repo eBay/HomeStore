@@ -4,7 +4,7 @@
 
 #include <gtest/gtest.h>
 #include <iostream>
-#include "omds/btree/btree.hpp"
+#include "homeds/btree/btree.hpp"
 #include <thread>
 
 #include "blkstore/blkstore.hpp"
@@ -22,7 +22,7 @@ homeds::btree::btree_device_info bt_dev_info;
 #define TestBtreeDeclType     homeds::btree::Btree<homeds::btree::SSD_BTREE, TestSimpleKey,TestSimpleValue, \
                                     homeds::btree::BTREE_NODETYPE_SIMPLE, homeds::btree::BTREE_NODETYPE_SIMPLE>
 
-AbstractVirtualDev *new_vdev_found(homestore::vdev_info_block *vb) {
+AbstractVirtualDev *new_vdev_found(homestore::DeviceManager *dev_mgr, homestore::vdev_info_block *vb) {
     LOG(INFO) << "New virtual device found id = " << vb->vdev_id << " size = " << vb->size;
     assert(0); // This test at present does not support restoring the btree
     return nullptr;
@@ -131,7 +131,28 @@ public:
         }
     }
 
-    int is_in_range(uint64_t val, uint64_t start, bool start_incl, uint64_t end, bool end_incl) {
+    virtual int compare_range(const homeds::btree::BtreeSearchRange &range) const override {
+        auto start_entry = (TestSimpleKey *)range.get_start_key();
+        auto end_entry = (TestSimpleKey *)range.get_end_key();
+
+        int ret = is_in_range(this->get_count(), start_entry->get_count(), range.is_start_inclusive(),
+                              end_entry->get_count(), range.is_end_inclusive());
+        if (ret != 0) {
+            return ret;
+        }
+
+        ret = is_in_range(this->get_rank(), start_entry->get_rank(), range.is_start_inclusive(),
+                          end_entry->get_rank(), range.is_end_inclusive());
+        if (ret != 0) {
+            return ret;
+        }
+
+        ret = is_in_range(this->get_blk_num(), start_entry->get_blk_num(), range.is_start_inclusive(),
+                          end_entry->get_blk_num(), range.is_end_inclusive());
+        return ret;
+    }
+
+    int is_in_range(uint64_t val, uint64_t start, bool start_incl, uint64_t end, bool end_incl) const {
         if (val < start) {
             return 1;
         } else if ((val == start) && (!start_incl)) {
@@ -145,6 +166,7 @@ public:
         }
     }
 
+#if 0
     int compare_range(BtreeKey *s, bool start_incl, BtreeKey *e, bool end_incl) {
         TestSimpleKey *start = (TestSimpleKey *) s;
         TestSimpleKey *end = (TestSimpleKey *) e;
@@ -166,6 +188,7 @@ public:
 
         return 0;
     }
+#endif
 
     virtual homeds::blob get_blob() const override {
         homeds::blob b = {(uint8_t *) m_blob, sizeof(blob_t)};
@@ -389,7 +412,7 @@ TEST_F(BtreeCrudTest, SimpleInsert) {
 INIT_VMODULES(BTREE_VMODULES);
 
 int main(int argc, char *argv[]) {
-    InitOmdsLogging(argv[0], BTREE_VMODULES);
+    InithomedsLogging(argv[0], BTREE_VMODULES);
 
     setup_devices(2);
     testing::InitGoogleTest(&argc, argv);
