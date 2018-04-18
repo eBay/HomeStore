@@ -442,6 +442,10 @@ private:
         return blknum / get_config().get_blks_per_page();
     }
 
+    uint32_t offset_within_page(uint64_t blknum) const {
+        blknum % get_config().get_blks_per_page()
+    }
+
     uint64_t blknum_to_portion_num(uint64_t blknum) const {
         return blknum / get_config().get_blks_per_portion();
     }
