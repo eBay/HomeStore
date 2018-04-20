@@ -220,9 +220,7 @@ public:
     }
 
     void print_cntrs() {
-	printf("time taken in write %lu ns\n", write_time/write_cnt);
 	printf("time taken in write %lu ns\n", physical_time/write_cnt);
-	printf("time taken in write %lu ns\n", mirror_time/write_cnt);
     }
  
     void init_cntrs() {

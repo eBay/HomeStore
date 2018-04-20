@@ -133,6 +133,7 @@ public:
 		struct BlkId *temp_blkid;
 
 
+		m_bt->remove(get_key(lba), &value);
 		m_bt->put(get_key(lba), get_value(blkid), homeds::btree::INSERT_ONLY_IF_NOT_EXISTS);
 #ifdef DEBUG
 //		m_bt->get(get_key(lba), &value);

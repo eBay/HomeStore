@@ -29,7 +29,9 @@ EvictRecord* Evictor<EvictionPolicy>::add_record(EvictRecord &r) {
     }
 
     // We were excess size earlier, so try evicting atleast this blk size
-    return do_evict(sz);
+   EvictRecord * ev_rec = do_evict(sz);
+   m_evict_policy.add(r);
+   return ev_rec;
 }
 
 template <typename EvictionPolicy>

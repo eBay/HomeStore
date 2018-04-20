@@ -18,15 +18,21 @@ INIT_VMODULES(BTREE_VMODULES);
 homestore::DeviceManager *dev_mgr = nullptr;
 homestore::Volume *vol;
 
-#define MAX_BUF 1024 * 1024ul
-#define MAX_BUF_CACHE 1 * 1024
+#define WRITE_SIZE (8 * 1024) /* should be multple of 8k */
+int is_random_read = false;
+int is_random_write = false;
+bool is_read = false;
+bool is_write = true;
+
+#define BUF_SIZE (WRITE_SIZE/8192) /* it will go away once mapping layer is fixed */
+#define MAX_BUF ((32 * 1024ul * 1024ul * 1024ul)/WRITE_SIZE)
+#define MAX_BUF_CACHE (1 * 1024ul)
 #define MAX_VOL_SIZE (100ul * 1024ul * 1024ul * 1024ul) 
 uint8_t *bufs[MAX_BUF_CACHE];
-#define BUF_SIZE 1
 #define NUM_READ_THREADS 1 /* it should be power of 2 */
-#define NUM_WRITE_THREADS 512 /* it should be power of 2 */
+#define NUM_WRITE_THREADS 1 /* it should be power of 2 */
 
-#define MAX_READ 1 * 1024ul * 1024ul // 1 million
+#define MAX_READ MAX_BUF 
 /* change it to atomic counters */
 uint64_t read_cnt = 0;
 uint64_t write_cnt = 0;
@@ -42,43 +48,60 @@ uint64_t get_elapsed_time(Clock::time_point startTime)
 
 void *readThread(void *arg) 
 {
+	if (!is_read) {
+		thread_exit++;
+		return NULL;
+	}
+	assert(is_write);
 	int id = *(int *)arg;
 	uint64_t temp_read_cnt = 0;
 //	printf("reading thread started %d\n", id);
-#if 0
-	while (temp_read_cnt < MAX_READ/NUM_READ_THREADS) {
-		std::vector<boost::intrusive_ptr< BlkBuffer >> buf_list;
-		uint64_t random = rand();
-		uint64_t i = random % MAX_BUF;
-		printf("%d\n", i);
-		vol->read(i, BUF_SIZE, buf_list);
-		uint64_t size = 0;
+	if (is_random_read) {
+		while (temp_read_cnt < MAX_READ/NUM_READ_THREADS) {
+			std::vector<boost::intrusive_ptr< BlkBuffer >> buf_list;
+			uint64_t random = rand();
+			uint64_t i = random % MAX_BUF;
+#ifdef DEBUG
+//			printf("%d\n", i);
+#endif
+			vol->read(i * BUF_SIZE, BUF_SIZE, buf_list);
+			uint64_t size = 0;
 
-		for(auto buf:buf_list) {
-			homeds::blob b  = buf->at_offset(0);
-			assert(!std::memcmp(b.bytes, 
-				(void *)((uint32_t *)bufs[i % MAX_BUF_CACHE] + size), b.size));
-			size += b.size;
+			uint64_t *tmp = (uint64_t *)bufs[i % MAX_BUF_CACHE];
+			*tmp = i; 
+#ifndef NDEBUG
+			for(auto buf:buf_list) {
+				homeds::blob b  = buf->at_offset(0);
+				assert(!std::memcmp(b.bytes, 
+							(void *)((uint32_t *)bufs[i % MAX_BUF_CACHE] + size), b.size));
+				size += b.size;
+				i++;
+			}
+#endif
+			temp_read_cnt++;
+			read_cnt++;
+			assert(size == BUF_SIZE * 8192);
+		}
+	} else {
+		uint64_t i = id * (MAX_BUF/NUM_READ_THREADS);
+		while (temp_read_cnt < MAX_BUF/NUM_READ_THREADS) {
+			std::vector<boost::intrusive_ptr< BlkBuffer >> buf_list;
+#ifdef DEBUG
+//			printf("%d\n", i);
+#endif
+			vol->read(i * BUF_SIZE, BUF_SIZE, buf_list);
+			temp_read_cnt++;
+			read_cnt++;
+			homeds::blob b  = buf_list[0]->at_offset(0);	
+			assert(b.size == BUF_SIZE * 8192);
+			uint64_t *tmp = (uint64_t *)bufs[i % MAX_BUF_CACHE];
+			*tmp = i * BUF_SIZE; 
+#ifndef NDEBUG
+			int j = memcmp((void *)b.bytes, (void *)(bufs[i % MAX_BUF_CACHE]), b.size);
+			assert(j == 0);
+#endif
 			i++;
 		}
-		temp_read_cnt++;
-		read_cnt++;
-		assert(size == BUF_SIZE * 8192);
-	}
-#endif
-
-	uint64_t i = id * (MAX_BUF/NUM_READ_THREADS);
-	while (temp_read_cnt < MAX_BUF/NUM_READ_THREADS) {
-		std::vector<boost::intrusive_ptr< BlkBuffer >> buf_list;
-		printf("%d\n", i);
-		vol->read(i * BUF_SIZE, BUF_SIZE, buf_list);
-		temp_read_cnt++;
-		read_cnt++;
-		homeds::blob b  = buf_list[0]->at_offset(0);	
-		assert(b.size == BUF_SIZE * 8192);
-		int j = memcmp(b.bytes, (void *)(bufs[i % MAX_BUF_CACHE]), b.size);
-		assert(j == 0);
-		i++;
 	}
 
 	thread_exit++;
@@ -88,14 +111,31 @@ void *writeThread(void *arg)
 {
 	int id = *(int *)arg;
 	uint64_t temp_write_cnt = 0;
-	uint64_t i = id * (MAX_BUF/NUM_WRITE_THREADS);
-//	printf("writing thread %d started from %d to %d\n", id, i, (i+(MAX_BUF/NUM_WRITE_THREADS)));
-	while (temp_write_cnt < MAX_BUF/NUM_WRITE_THREADS) {
-		std::vector<boost::intrusive_ptr< BlkBuffer >> buf_list;
-		vol->write(i * BUF_SIZE, bufs[i % MAX_BUF_CACHE], BUF_SIZE);
-		temp_write_cnt++;
-		write_cnt++;
-		i++;	
+	if (is_random_write) {
+		while (temp_write_cnt < MAX_BUF/NUM_WRITE_THREADS) {
+			assert(!is_read);
+			uint64_t random = rand();
+			uint64_t i = (id * (MAX_BUF/NUM_WRITE_THREADS)) + 
+						(random % (MAX_BUF/NUM_WRITE_THREADS));
+			uint64_t *tmp = (uint64_t *)bufs[i % MAX_BUF_CACHE];
+			*tmp = i * BUF_SIZE; 
+			vol->write(i * BUF_SIZE, bufs[i % MAX_BUF_CACHE], BUF_SIZE);
+			temp_write_cnt++;
+			write_cnt++;
+		}
+	} else {
+		uint64_t i = id * (MAX_BUF/NUM_WRITE_THREADS);
+		//	printf("writing thread %d started from %d to %d\n", id, i, (i+(MAX_BUF/NUM_WRITE_THREADS)));
+		while (temp_write_cnt < MAX_BUF/NUM_WRITE_THREADS) {
+			std::vector<boost::intrusive_ptr< BlkBuffer >> buf_list;
+			uint64_t *tmp = (uint64_t *)bufs[i % MAX_BUF_CACHE];
+			*tmp = i * BUF_SIZE; 
+			vol->write(i * BUF_SIZE, bufs[i % MAX_BUF_CACHE], BUF_SIZE);
+			temp_write_cnt++;
+			write_cnt++;
+			i++;	
+		//	printf("%d\n", i);
+		}
 	}
 	thread_exit++;
 }
@@ -161,7 +201,6 @@ int main(int argc, char** argv) {
 	int readarray[NUM_READ_THREADS];
 	Clock::time_point read_startTime = Clock::now();
 	atomic_store(&thread_exit, 0); 
-#if 0
 	for (int i = 0; i < NUM_READ_THREADS; i++) {
 		readarray[i] = i;
 		pthread_create(&tid, NULL, readThread, &readarray[i]);
@@ -172,9 +211,9 @@ int main(int argc, char** argv) {
 	printf("read counters..........\n");
 	printf("total reads %lu\n", read_cnt);
 	printf("total time spent %lu us\n", time_us);
-	printf("total time spend per io %lu us\n", time_us/read_cnt);
+	if (read_cnt) 
+		printf("total time spend per io %lu us\n", time_us/read_cnt);
 	printf("iops %lu \n", (read_cnt * 1000 * 1000)/time_us);
-#endif
 	printf("additional counters.........\n");	
 	vol->print_perf_cntrs();
 }

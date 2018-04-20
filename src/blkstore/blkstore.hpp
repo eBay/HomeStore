@@ -170,6 +170,16 @@ public:
         boost::intrusive_ptr< BlkBuffer > bbuf;
 	write_cnt++;
 	Clock::time_point cache_startTime = Clock::now();
+	uint8_t *ptr;
+#ifndef NDEBUG
+	/* TODO: rishabh,will remove it later */
+        int ret = posix_memalign((void **) &ptr, 4096, blob.size); // TODO: Align based on hw needs instead of 4k
+	if (ret != 0) {
+		assert(0);
+	}
+	memcpy(ptr, blob.bytes, blob.size);
+	blob.bytes = ptr;
+#endif
         bool inserted = m_cache->insert(bid, blob, 0 /* value_offset */,
                                         (boost::intrusive_ptr< CacheBuffer<BlkId> > *)&bbuf);
 	cache_time += get_elapsed_time(cache_startTime);

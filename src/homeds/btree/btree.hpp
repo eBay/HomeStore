@@ -21,6 +21,7 @@
 #include "physical_node.hpp"
 #include "homeds/utility/logging.hpp"
 #include <boost/intrusive_ptr.hpp>
+#include <csignal>
 
 using namespace std;
 using namespace homeds::thread;
@@ -199,17 +200,21 @@ public:
 
         m_btree_lock.read_lock();
 
+	int retry_cnt = 0;
     retry:
+	assert(rd_locked_count == 0 && wr_locked_count == 0);
         BtreeNodePtr root = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), m_root_node);
         lock_node(root, acq_lock);
         bool is_leaf = root->is_leaf();
 
+	retry_cnt++;
         if (root->is_split_needed(m_btree_cfg, k, v, &ind)) {
             // Time to do the split of root.
             unlock_node(root, acq_lock);
             m_btree_lock.unlock();
             check_split_root(k, v);
 
+	    assert(rd_locked_count == 0 && wr_locked_count == 0);
             // We must have gotten a new root, need to start from scratch.
             m_btree_lock.read_lock();
             goto retry;
@@ -223,6 +228,7 @@ public:
             if (success == false) {
                 // Need to start from top down again, since there is a race between 2 inserts or deletes.
                 acq_lock = homeds::thread::LOCKTYPE_READ;
+		assert(rd_locked_count == 0 && wr_locked_count == 0);
                 goto retry;
             }
         }
@@ -318,7 +324,6 @@ public:
             if (status == BTREE_RETRY) {
                 // Need to start from top down again, since
                 // there is a race between 2 inserts or deletes.
-            	unlock_node(root, acq_lock);
                 acq_lock = homeds::thread::LOCKTYPE_READ;
                 goto retry;
             } else if (status == BTREE_ITEM_FOUND) {
@@ -549,6 +554,20 @@ private:
      */
     bool do_put(BtreeNodePtr my_node, homeds::thread::locktype curlock, const BtreeKey &k, const BtreeValue &v,
                 int ind_hint, PutType put_type) {
+
+#ifndef NDEBUG
+	int temp_rd_locked_count = rd_locked_count;
+	int temp_wr_locked_count = wr_locked_count;
+
+	/* lets take into account the parent lock as it will be unlocked in this function */
+	if (curlock == LOCKTYPE_WRITE) {
+		temp_wr_locked_count--;
+	} else if(curlock == LOCKTYPE_READ) {
+		temp_rd_locked_count--;
+	} else {
+		assert(0);
+	}
+ #endif
         if (my_node->is_leaf()) {
             assert(curlock == LOCKTYPE_WRITE);
 
@@ -558,7 +577,10 @@ private:
                 m_stats.inc_count(BTREE_STATS_OBJ_COUNT);
             }
             unlock_node(my_node, curlock);
-
+#ifndef NDEBUG
+	    assert(rd_locked_count == temp_rd_locked_count 
+			&& wr_locked_count == temp_wr_locked_count);
+#endif
 #ifndef NDEBUG
             //my_node->print();
 #endif
@@ -574,7 +596,10 @@ private:
         BtreeNodePtr child_node = get_child_node(my_node, BtreeSearchRange(k), &ind, &is_found);
         if (!is_found || (child_node == nullptr)) {
             // Either the node was updated or mynode is freed. Just proceed again from top.
-            return false;
+                unlock_node(my_node, curlock);
+		assert(rd_locked_count == temp_rd_locked_count 
+				&& wr_locked_count == temp_wr_locked_count);
+		return false;
         }
 
         // Directly get write lock for leaf, since its an insert.
@@ -586,6 +611,8 @@ private:
         if (child_node->is_split_needed(m_btree_cfg, k, v, &ind_hint)) {
             // Time to split the child, but we need to convert ours to write lock
             if (upgrade_node(my_node, child_node, curlock, child_cur_lock) == false) {
+		assert(rd_locked_count == temp_rd_locked_count 
+			&& wr_locked_count == temp_wr_locked_count);
                 return (false);
             }
 
@@ -594,6 +621,8 @@ private:
                 // Since we have parent node write locked, child node should never have any issues upgrading.
                 assert(0);
                 unlock_node(my_node, homeds::thread::LOCKTYPE_WRITE);
+		assert(rd_locked_count == temp_rd_locked_count 
+			&& wr_locked_count == temp_wr_locked_count);
                 return (false);
             }
 
@@ -609,6 +638,19 @@ private:
         }
 
         unlock_node(my_node, curlock);
+
+#ifndef NDEBUG
+	/* lets take into account of child lock as it is locked in this function */
+	if (child_cur_lock == LOCKTYPE_WRITE) {
+		temp_wr_locked_count++;
+	} else if (child_cur_lock == LOCKTYPE_READ) {
+		temp_rd_locked_count++;
+	} else {
+		assert(0);
+	}
+	assert(rd_locked_count == temp_rd_locked_count 
+			&& wr_locked_count == temp_wr_locked_count);
+#endif
         return (do_put(child_node, child_cur_lock, k, v, ind_hint, put_type));
 
         // Warning: Do not access childNode or myNode beyond this point, since it would
@@ -716,7 +758,7 @@ private:
 
         m_root_node = new_root_int_node->get_node_id();
 
-        DCVLOG(VMOD_BTREE_SPLIT, 4) << "New Root Node: \n" << new_root_int_node->to_string();
+       // DCVLOG(VMOD_BTREE_SPLIT, 4) << "New Root Node: \n" << new_root_int_node->to_string();
 
         //release_node(new_root_int_node);
     done:
@@ -768,6 +810,7 @@ private:
 
         // Insert the last entry in first child to parent node
         child_node1->get_last_key(out_split_key);
+
         nptr.set_node_id(child_node1->get_node_id());
         parent_node->insert(*out_split_key, nptr);
 
@@ -870,8 +913,8 @@ private:
         }
 
         // Its time to write the parent node and loop again to write all modified nodes and free freed nodes
-        DCVLOG(VMOD_BTREE_MERGE, 4) << "After merging node\n########################Parent Node: "
-                                    << parent_node->to_string();
+//        DCVLOG(VMOD_BTREE_MERGE, 4) << "After merging node\n########################Parent Node: "
+  //                                  << parent_node->to_string();
         BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(), parent_node);
         assert(!minfo[0].freed); // If we merge it, we expect the left most one has at least 1 entry.
         // TODO: Above assumption will not be valid if we are merging all empty nodes. Need to study that.
@@ -888,7 +931,7 @@ private:
                     parent_node->update(minfo[n].parent_index, last_key, nptr);
                 }
 
-                DCVLOG(VMOD_BTREE_MERGE, 4) << "Child Node " << n << ":\n" << minfo[n].node->to_string();
+               // DCVLOG(VMOD_BTREE_MERGE, 4) << "Child Node " << n << ":\n" << minfo[n].node->to_string();
                 BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(), minfo[n].node);
             }
         }

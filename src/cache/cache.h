@@ -35,6 +35,9 @@ public:
     }
 
     static CacheRecord *evict_to_cache_record(const CurrentEvictor::EvictRecordType *p_erec) {
+	if (p_erec == NULL) {
+		return NULL;
+	}
         return homeds::container_of(p_erec, &CacheRecord::m_evict_record);
     }
 };
@@ -183,6 +186,10 @@ public:
 
     static bool deref_test_le(CacheBuffer<K> &b, int32_t check) {
         return b.m_refcount.decrement_test_le(check);
+    }
+    
+    static bool test_le(CacheBuffer<K> &b, int32_t check) {
+        return b.m_refcount.test_le(check);
     }
 
     static const K *extract_key(const CacheBuffer<K> &b) {
@@ -374,6 +381,11 @@ public:
     static bool deref_test_le(CacheRecordType &r, int32_t check) {
         auto &b = (CacheBufferType &)r;
         return b.m_refcount.decrement_test_le(check);
+    }
+
+    static bool test_le(CacheRecordType &r, int32_t check) { 
+	auto &b = (CacheBufferType &)r;
+	return b.m_refcount.test_le(check);
     }
 
     static const K *extract_key(const CacheRecordType &r) {

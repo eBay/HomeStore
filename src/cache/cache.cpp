@@ -5,6 +5,7 @@
 #include "cache.h"
 #include "homeds/memory/obj_allocator.hpp"
 #include <memory>
+#include <csignal>
 
 namespace homestore {
 
@@ -13,7 +14,7 @@ template< typename K, typename V>
 IntrusiveCache<K, V>::IntrusiveCache(uint64_t max_cache_size, uint32_t avg_size_per_entry) :
         m_hash_set(max_cache_size/avg_size_per_entry/ENTRIES_PER_BUCKET) {
     for (auto i = 0; i < EVICTOR_PARTITIONS; i++) {
-        m_evictors[i] = std::make_unique<CurrentEvictor>(max_cache_size, IntrusiveCache<K, V>::is_safe_to_evict,
+        m_evictors[i] = std::make_unique<CurrentEvictor>(max_cache_size/EVICTOR_PARTITIONS, IntrusiveCache<K, V>::is_safe_to_evict,
                                                          V::get_size);
     }
 };
@@ -34,8 +35,8 @@ bool IntrusiveCache<K, V>::insert(V &v, V **out_ptr, const std::function<void(V 
     }
 
     // If we successfully added to the hash set, inform the evictor to evict a block if needed.
-    CacheRecord *evicted_rec = (CacheRecord *)
-            m_evictors[hash_code % EVICTOR_PARTITIONS]->add_record(v.get_evict_record_mutable());
+    CacheRecord *evicted_rec = CacheRecord::evict_to_cache_record(
+            m_evictors[hash_code % EVICTOR_PARTITIONS]->add_record(v.get_evict_record_mutable()));
     if (evicted_rec) {
         // We indeed evicted an entry, lets remove the evicted entry from the hash set
         V *evicted_v = static_cast<V *>(evicted_rec);
@@ -85,7 +86,7 @@ bool IntrusiveCache<K, V>::erase(V &v) {
 template< typename K, typename V>
 bool IntrusiveCache<K, V>::is_safe_to_evict(CurrentEvictor::EvictRecordType *erec) {
     CacheRecord *crec = CacheRecord::evict_to_cache_record(erec);
-    return V::deref_test_le((V &)*crec, 1); // Ensure reference count is atmost one (one that is stored in hashset for)
+    return V::test_le((V &)*crec, 1); // Ensure reference count is atmost one (one that is stored in hashset for)
 }
 
 ////////////////////////////////// Cache Section /////////////////////////////////

@@ -58,6 +58,13 @@ public:
         return false;
     }
 
+    bool test_le(int32_t check) {
+	if (m_count.load(std::memory_order_relaxed) > check) {
+		return false;
+	}
+	return true;
+    }
+
     // This is not the most optimized version of testing, since it has to
     bool testz() {
         if (get() == 0) {

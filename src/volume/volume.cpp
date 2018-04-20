@@ -9,8 +9,8 @@
 using namespace std;
 using namespace homestore;
 
-#define MAX_CACHE_SIZE     16 * 1024ul * 1024ul * 1024ul /* it has to be a multiple of 16k */
-#define BLOCK_SIZE       8 * 1024
+#define MAX_CACHE_SIZE     (8 * 1024ul * 1024ul * 1024ul) /* it has to be a multiple of 16k */
+#define BLOCK_SIZE       (8 * 1024ul)
 
 Cache< BlkId > * Volume::glob_cache = NULL;
 uint64_t 
@@ -90,7 +90,7 @@ homestore::Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks) {
 
     LOG(INFO) << "Requested nblks: " << (uint32_t) nblks << " Allocation info: " << bid.to_string();
 
-    homeds::blob b = {buf, BLOCK_SIZE * nblks};
+    homeds::blob b = {buf, (uint32_t)(BLOCK_SIZE * nblks)};
 
     {
     	Clock::time_point startTime = Clock::now();
@@ -123,6 +123,7 @@ homestore::Volume::read(uint64_t lba, int nblks, std::vector< boost::intrusive_p
 
     for (auto bInfo: blkIdList) {
         //	LOG(INFO) << "Read from " << bInfo.to_string() << " for 8192 bytes";
+//	printf("blkid %d\n", bInfo.m_id);
         bbuf = blk_store->read(bInfo, 0, BLOCK_SIZE * bInfo.get_nblks());
         buf_list.push_back(bbuf);
         /* TODO: we need to copy it in the buffer */
