@@ -21,11 +21,11 @@ homestore::Volume *vol;
 #define WRITE_SIZE (8 * 1024) /* should be multple of 8k */
 int is_random_read = false;
 int is_random_write = false;
-bool is_read = false;
+bool is_read = true;
 bool is_write = true;
 
 #define BUF_SIZE (WRITE_SIZE/8192) /* it will go away once mapping layer is fixed */
-#define MAX_BUF ((32 * 1024ul * 1024ul * 1024ul)/WRITE_SIZE)
+#define MAX_BUF ((64 * 1024ul * 1024ul * 1024ul)/WRITE_SIZE)
 #define MAX_BUF_CACHE (1 * 1024ul)
 #define MAX_VOL_SIZE (100ul * 1024ul * 1024ul * 1024ul) 
 uint8_t *bufs[MAX_BUF_CACHE];
@@ -58,10 +58,11 @@ void *readThread(void *arg)
 //	printf("reading thread started %d\n", id);
 	if (is_random_read) {
 		while (temp_read_cnt < MAX_READ/NUM_READ_THREADS) {
+			{
 			std::vector<boost::intrusive_ptr< BlkBuffer >> buf_list;
 			uint64_t random = rand();
 			uint64_t i = random % MAX_BUF;
-#ifdef DEBUG
+#ifndef NDEBUG
 //			printf("%d\n", i);
 #endif
 			vol->read(i * BUF_SIZE, BUF_SIZE, buf_list);
@@ -81,13 +82,15 @@ void *readThread(void *arg)
 			temp_read_cnt++;
 			read_cnt++;
 			assert(size == BUF_SIZE * 8192);
+			}
 		}
 	} else {
 		uint64_t i = id * (MAX_BUF/NUM_READ_THREADS);
 		while (temp_read_cnt < MAX_BUF/NUM_READ_THREADS) {
+			{
 			std::vector<boost::intrusive_ptr< BlkBuffer >> buf_list;
-#ifdef DEBUG
-//			printf("%d\n", i);
+			printf("%d\n", i);
+#ifndef NDEBUG
 #endif
 			vol->read(i * BUF_SIZE, BUF_SIZE, buf_list);
 			temp_read_cnt++;
@@ -101,6 +104,7 @@ void *readThread(void *arg)
 			assert(j == 0);
 #endif
 			i++;
+			}
 		}
 	}
 

@@ -16,8 +16,12 @@ struct LRUEvictRecord : public boost::intrusive::list_base_hook<> {
 class LRUEvictionPolicy {
 public:
     typedef LRUEvictRecord RecordType;
+    typedef std::function< bool(RecordType *) > CanEvictCallback;
+    typedef std::function< uint32_t(RecordType *) > GetSizeCallback;
 
-    LRUEvictionPolicy(uint32_t estimated_entries) {
+    LRUEvictionPolicy(CanEvictCallback cb, GetSizeCallback gs_cb):
+        m_can_evict_cb(cb),
+        m_get_size_cb(gs_cb) {
     }
 
     void add(LRUEvictRecord &rec) {
@@ -29,6 +33,20 @@ public:
         std::lock_guard< decltype(m_list_guard) > guard(m_list_guard);
         auto it = m_list.iterator_to(rec);
         m_list.erase(it);
+    }
+
+    LRUEvictRecord *remove_candidate_ofsize(int needed_size) {
+        std::lock_guard< decltype(m_list_guard) > guard(m_list_guard);
+	auto it =  m_list.begin();
+	auto e = m_list.end();
+	for(it; it != e; ++it) {
+	     if ((m_get_size_cb(&*it) >= needed_size) && 
+		m_can_evict_cb(&*it)) {
+		m_list.erase(it);
+		return &*it;
+	     }
+        }
+	return NULL;
     }
 
     LRUEvictRecord *get_next_candidate(LRUEvictRecord *prev) {
@@ -57,6 +75,8 @@ public:
 private:
     std::mutex m_list_guard;
     boost::intrusive::list < LRUEvictRecord > m_list;
+    CanEvictCallback m_can_evict_cb;
+    GetSizeCallback m_get_size_cb;
 };
 
 }
