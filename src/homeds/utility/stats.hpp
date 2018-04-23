@@ -7,6 +7,7 @@
 #include "useful_defs.hpp"
 #include <cassert>
 #include <vector>
+#include <iostream>
 #include <folly/ThreadLocal.h>
 
 namespace homeds {
@@ -133,11 +134,17 @@ public:
         return it;
     }
 
+    std::string to_string() const {
+        std::stringstream ss;
+        for (auto it = begin(); it != end(); ++it) {
+            ss << (*it).first << " " << (*it).second << "\n";
+        }
+        return ss.str();
+    }
+
     void print() const {
         std::cout << "---------------------------------" << "\n";
-        for (auto it = begin(); it != end(); ++it) {
-            std::cout << (*it).first << " " << (*it).second << "\n";
-        }
+        std::cout << to_string();
         std::cout << "---------------------------------" << "\n";
     }
 

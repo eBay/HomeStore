@@ -11,6 +11,7 @@
 #include <cassert>
 #include <cstdint>
 #include <boost/optional.hpp>
+#include <sstream>
 
 namespace homeds {
 #define round_off(val, rnd) ((((val)-1)/(rnd)) + 1)
@@ -94,6 +95,10 @@ struct MemPiece {
         return ptr();
     }
 
+    std::string to_string() const {
+        std::stringstream ss; ss << "ptr = " << (void *)ptr() << " size = " << size() << " offset = " << offset();
+        return ss.str();
+    }
 private:
     uint16_t gen_new_tag(uint32_t size, uint8_t offset) const {
         __mempiece_tag t;
@@ -203,6 +208,18 @@ public:
         } else {
             return m_u.m_piece;
         }
+    }
+
+    std::string to_string() const {
+        auto n = npieces();
+        std::stringstream ss;
+
+        if (n > 1) ss << "Pieces = " << n << "\n";
+        for (auto i = 0U; i < n; i++) {
+            auto &p = get_nth_piece(i);
+            ss << "MemPiece[" << i << "]: " << p.to_string() << ((n > 1) ? "\n" : "");
+        }
+        return ss.str();
     }
 
     /* This method will try to set or append the offset to the memory piece. However, if there is already an entry
