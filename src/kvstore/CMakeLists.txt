@@ -20,7 +20,7 @@ set(TEST_KVSTORE_SOURCE_FILES
         ../device/physical_dev.cpp
         ../blkalloc/fixed_blk_allocator.cpp
         ../blkalloc/varsize_blk_allocator.cpp
-        ../cache/eviction.cpp
+        ../cache/eviction.hpp
         ../cache/cache.cpp)
 
 add_executable(test_kvstore ${TEST_KVSTORE_SOURCE_FILES})

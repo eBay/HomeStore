@@ -5,7 +5,8 @@
 #ifndef OMSTORE_LRU_EVICTION_HPP_HPP
 #define OMSTORE_LRU_EVICTION_HPP_HPP
 
-#include "eviction.hpp"
+#include <mutex>
+#include "cache_common.hpp"
 
 namespace homestore {
 
@@ -16,6 +17,7 @@ struct LRUEvictRecord : public boost::intrusive::list_base_hook<> {
 class LRUEvictionPolicy {
 public:
     typedef LRUEvictRecord RecordType;
+    typedef std::function< bool(const LRUEvictRecord &) > CanEjectCallback;
 
     LRUEvictionPolicy(uint32_t estimated_entries) {
     }
@@ -31,15 +33,24 @@ public:
         m_list.erase(it);
     }
 
-    LRUEvictRecord *get_next_candidate(LRUEvictRecord *prev) {
+    LRUEvictRecord *eject_next_candidate(const CanEjectCallback &cb) {
         std::lock_guard< decltype(m_list_guard) > guard(m_list_guard);
-        if (prev) {
-            auto it = m_list.iterator_to(*prev);
-            return &(*(++it));
-        } else {
-            auto it = m_list.begin();
-            return &*it;
+
+        auto count = 0U;
+        auto itend = m_list.end();
+        for (auto it = m_list.begin(); it != itend; ++it) {
+            if (cb(*it)) {
+                m_list.erase(it);
+                return &*it;
+            } else {
+                count++;
+            }
+            if (count) { CVLOG(cache_vmod_evict, 2) << " LRU ejection had to skip " << count << " entries"; }
         }
+
+        // No available candidate to evict
+        // TODO: Throw no space available exception.
+        return nullptr;
     }
 
     void upvote(LRUEvictRecord &rec) {

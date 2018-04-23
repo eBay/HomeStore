@@ -1,27 +1,13 @@
 //
-// Created by Kadayam, Hari on 28/10/17.
+// Created by Kadayam, Hari on 22/04/18.
 //
 
-//
-// Created by Kadayam, Hari on 24/10/17.
-//
-
-#include <iostream>
+#include <gtest/gtest.h>
 #include <glog/logging.h>
-#include <benchmark/benchmark.h>
 #include <boost/range/irange.hpp>
 #include <boost/intrusive_ptr.hpp>
+#include <cstring>
 #include "cache.cpp"
-
-using namespace std;
-
-#define TEST_COUNT         100000U
-#define ITERATIONS         100U
-//#define THREADS            8U
-#define THREADS            4U
-//#define THREADS            1U
-
-#define MAX_CACHE_SIZE     2 * 1024 * 1024 * 1024
 
 struct blk_id {
     static homeds::blob get_blob(const blk_id &id) {
@@ -52,96 +38,79 @@ struct blk_id {
         m_id = other.m_id;
         return *this;
     }
+
+    std::string to_string() const {
+        std::stringstream ss; ss << m_id;
+        return ss.str();
+    }
     uint64_t m_id;
 };
 
-homestore::Cache< blk_id > *glob_cache;
-char **glob_bufs;
-blk_id **glob_ids;
+#define MAX_CACHE_SIZE  2 * 1024 * 1024
+#define NTHREADS 4U
 
-#if 0
-void temp() {
-    homestore::CacheBuffer< BlkId > *buf;
-    homestore::intrusive_ptr_release(buf);
-}
-#endif
+struct CacheTest : public testing::Test {
+protected:
+    std::unique_ptr< homestore::Cache< blk_id> > m_cache;
 
-void setup(int count) {
-    glob_cache = new homestore::Cache< blk_id >(MAX_CACHE_SIZE, 8192);
-    glob_ids =  new blk_id*[count];
-    glob_bufs = new char*[count];
-
-    for (auto i : boost::irange(0, count)) {
-        glob_ids[i] = new blk_id(i);
-        glob_bufs[i] = new char[64];
-        sprintf(glob_bufs[i], "Content for blk id = %d\n", i);
+public:
+    CacheTest() {
+        m_cache = std::make_unique< homestore::Cache< blk_id > >(MAX_CACHE_SIZE, 8192);
     }
-}
 
-//template <class ...Args>
-//void benchmarked_insert(benchmark::State& state, Args&&... args) {
-void test_insert(benchmark::State& state) {
-    // Actual test
-    for (auto _ : state) { // Loops upto iteration count
-        auto index = state.thread_index;
-        for (auto i = index; i < state.range(0); i+=state.threads) { // Loops for provided ranges
-            boost::intrusive_ptr< homestore::CacheBuffer< blk_id> > cbuf;
-            glob_cache->insert(*glob_ids[i], {(uint8_t *)glob_bufs[i], 64}, 0, &cbuf);
+    void insert_one(uint64_t id, uint32_t size) {
+        boost::intrusive_ptr< homestore::CacheBuffer< blk_id > > cbuf;
+        auto raw_buf = new uint64_t[size/8];
+        for (auto b = 0U; b < size/8; b++) raw_buf[b] = id;
+        EXPECT_EQ(m_cache->insert(blk_id(id), {(uint8_t *) raw_buf, 64}, 0, &cbuf), true);
+    }
+
+    void read_one(uint64_t id, uint32_t size, bool expected = true) {
+        boost::intrusive_ptr< homestore::CacheBuffer< blk_id > > cbuf;
+        bool found = m_cache->get(blk_id(id), &cbuf);
+        EXPECT_EQ(found, expected);
+
+        if (found) {
+            auto blob = cbuf->at_offset(0);
+            auto b = 0U;
+            for (b = 0U; b < blob.size / 8; b++) if (((uint64_t *)blob.bytes)[b] != id) break;
+            EXPECT_EQ(b, blob.size/8);
         }
     }
-}
 
-void test_reads(benchmark::State& state) {
-    // Actual test
-    for (auto _ : state) { // Loops upto iteration count
-        auto index = state.thread_index;
-        for (auto i = index; i < state.range(0); i+=state.threads) { // Loops for provided ranges
-            boost::intrusive_ptr< homestore::CacheBuffer< blk_id > > cbuf;
-            bool found = glob_cache->get(*glob_ids[i], &cbuf);
-#if 0
-#ifndef NDEBUG
-            assert(found);
-            int id;
-            homeds::blob b;
-            cbuf->get(&b);
-            sscanf((const char *)b.bytes, "Content for blk id = %d\n", &id);
-            assert(id == glob_ids[i]->m_internal_id);
-#endif
-#endif
+    void fixed_insert_and_get(uint64_t start, uint32_t count, uint32_t size) {
+        for (auto i = start; i < start+count; i++) {
+            insert_one(i, size);
+            read_one(i, size);
         }
     }
-}
 
-void test_updates(benchmark::State& state) {
-    // Actual test
-    for (auto _ : state) { // Loops upto iteration count
-        auto index = state.thread_index;
-        for (auto i = index; i < state.range(0); i+=state.threads) { // Loops for provided ranges
-            boost::intrusive_ptr< homestore::CacheBuffer< blk_id > > cbuf;
-            glob_cache->update(*glob_ids[i], {(uint8_t *)glob_bufs[i], 64}, 16384, &cbuf);
-        }
+    uint32_t fixed_total_entries(uint32_t size) {
+        return (MAX_CACHE_SIZE * 3)/size;
     }
+};
+
+static void insert_and_get_thread(CacheTest *ctest, uint32_t tnum) {
+    auto total_entries = ctest->fixed_total_entries(8192);
+    ctest->fixed_insert_and_get(tnum * total_entries/NTHREADS, total_entries/NTHREADS, 8192);
 }
 
-void test_erase(benchmark::State& state) {
-    // Actual test
-    for (auto _ : state) { // Loops upto iteration count
-        auto index = state.thread_index;
-        for (auto i = index; i < state.range(0); i+=state.threads) { // Loops for provided ranges
-            boost::intrusive_ptr< homestore::CacheBuffer< blk_id > > cbuf;
-            glob_cache->erase(*glob_ids[i], &cbuf);
-        }
+TEST_F(CacheTest, InsertGet) {
+    std::array<std::thread *, NTHREADS> thrs;
+    for (auto i = 0; i < NTHREADS; i++) {
+        thrs[i] = new std::thread(insert_and_get_thread, this, i);
     }
+
+    for (auto i = 0; i < NTHREADS; i++) {
+        thrs[i]->join();
+    }
+    LOG(INFO) << "Cache Stats: \n" << this->m_cache->get_stats().to_string();
 }
 
-BENCHMARK(test_insert)->Range(TEST_COUNT, TEST_COUNT)->Iterations(ITERATIONS)->Threads(THREADS);
-BENCHMARK(test_reads)->Range(TEST_COUNT, TEST_COUNT)->Iterations(ITERATIONS)->Threads(THREADS);
-BENCHMARK(test_updates)->Range(TEST_COUNT, TEST_COUNT)->Iterations(ITERATIONS)->Threads(THREADS);
-BENCHMARK(test_erase)->Range(TEST_COUNT, TEST_COUNT)->Iterations(ITERATIONS)->Threads(THREADS);
+INIT_VMODULES(CACHE_VMODULES);
+int main(int argc, char *argv[]) {
+    InithomedsLogging(argv[0], CACHE_VMODULES);
 
-int main(int argc, char** argv)
-{
-    setup(TEST_COUNT * THREADS);
-    ::benchmark::Initialize(&argc, argv);
-    ::benchmark::RunSpecifiedBenchmarks();
+    testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
 }

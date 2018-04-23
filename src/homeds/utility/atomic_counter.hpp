@@ -35,8 +35,7 @@ public:
     bool decrement_testz(int32_t n=1) {
         T count = m_count.fetch_sub(n, std::memory_order_release);
         if (count == 1) {
-            // Fence the memory to prevent from any release (decrement) getting reordered
-            // before returning
+            // Fence the memory to prevent from any release (decrement) getting reordered before returning
             std::atomic_thread_fence(std::memory_order_acquire);
             return true;
         } else {
@@ -48,8 +47,7 @@ public:
     bool decrement_test_le(int32_t check, int32_t n=1) {
         T count = m_count.fetch_sub(n, std::memory_order_release);
         if (count <= (check+1)) {
-            // Fence the memory to prevent from any release (decrement) getting reordered
-            // before returning
+            // Fence the memory to prevent from any release (decrement) getting reordered before returning
             std::atomic_thread_fence(std::memory_order_acquire);
             return true;
         } else {
@@ -59,7 +57,7 @@ public:
     }
 
     // This is not the most optimized version of testing, since it has to
-    bool testz() {
+    bool testz() const {
         if (get() == 0) {
             std::atomic_thread_fence(std::memory_order_acquire);
             return true;
@@ -67,9 +65,8 @@ public:
         return false;
     }
 
-    // This is not guaranteed to be 100% thread safe if we are using it
-    // to check for 0. Use dec_testz for decrement and check or testz for
-    // just checking for 0
+    // This is not guaranteed to be 100% thread safe if we are using it to check for 0. Use dec_testz for decrement
+    // and check or testz for just checking for 0
     T get() const {
         return m_count.load(std::memory_order_relaxed);
     }
@@ -77,6 +74,16 @@ public:
     void set(int32_t n) {
         m_count.store(n, std::memory_order_release);
     }
+
+    bool test_le(int32_t check) const {
+        if (get() > check) {
+            return false;
+        }
+
+        std::atomic_thread_fence(std::memory_order_acquire);
+        return true;
+    }
+
 private:
     std::atomic<T> m_count;
 };
