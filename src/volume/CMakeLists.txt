@@ -16,11 +16,11 @@ set(TEST_VOLUME_SOURCE_FILES
 	      vol_test.cpp
         ../device/virtual_dev.hpp
         ../device/device_manager.cpp
-	../device/physical_dev.cpp
+        ../device/physical_dev.cpp
 #        ../device/physical_dev.cpp
         ../blkalloc/varsize_blk_allocator.cpp
         ../blkalloc/varsize_blk_allocator.cpp
-        ../cache/eviction.cpp
+        ../cache/eviction.hpp
         ../cache/cache.cpp)
 
 add_executable(test_volume ${TEST_VOLUME_SOURCE_FILES})

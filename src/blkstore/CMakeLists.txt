@@ -19,7 +19,7 @@ set(TEST_BLKSTORE_SOURCE_FILES
         ../device/physical_dev.cpp
         ../blkalloc/fixed_blk_allocator.cpp
         ../blkalloc/varsize_blk_allocator.cpp
-        ../cache/eviction.cpp
+        ../cache/eviction.hpp
         ../cache/cache.cpp)
 
 add_executable(test_blkstore ${TEST_BLKSTORE_SOURCE_FILES})
