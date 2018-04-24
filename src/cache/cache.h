@@ -173,11 +173,11 @@ public:
 
     //////////// Mandatory IntrusiveHashSet definitions ////////////////
     static void ref(CacheBuffer<K> &b) {
-        b.m_refcount.increment();
+        intrusive_ptr_add_ref(&b);
     }
 
     static void deref(CacheBuffer<K> &b) {
-        b.m_refcount.decrement();
+	intrusive_ptr_release(&b);
     }
 
     static bool deref_testz(CacheBuffer<K> &b) {

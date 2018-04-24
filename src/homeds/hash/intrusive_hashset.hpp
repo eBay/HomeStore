@@ -104,8 +104,8 @@ public:
                 if (found_cb) {
                     found_cb(&*it);
                 }
-                V::deref(*it);
                 m_list.erase(it);
+                V::deref(*it);
                 break;
             } else if (x > 0) {
                 break;

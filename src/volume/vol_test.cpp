@@ -25,7 +25,7 @@ homestore::Volume *vol;
 #define WRITE_SIZE (8 * 1024) /* should be multple of 8k */
 int is_random_read = false;
 int is_random_write = false;
-bool is_read = false;
+bool is_read = true;
 bool is_write = true;
 #define MAX_THREADS 8
 
@@ -48,7 +48,6 @@ uint64_t get_elapsed_time(Clock::time_point startTime)
 					< std::chrono::nanoseconds >(Clock::now() - startTime);
 	return ns.count() / 1000; 
 }
-
 
 #define MAX_OUTSTANDING_IOs 64
 #define MAX_CNT_THREAD 10

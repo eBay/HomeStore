@@ -11,7 +11,7 @@ namespace homestore {
 template <typename EvictionPolicy>
 Evictor<EvictionPolicy>::Evictor(uint64_t max_size, Evictor<EvictionPolicy>::CanEvictCallback cb,
                                  Evictor<EvictionPolicy>::GetSizeCallback gs_cb) :
-        m_evict_policy(0),
+        m_evict_policy(cb, gs_cb),
         m_can_evict_cb(cb),
         m_get_size_cb(gs_cb),
         m_cur_size(0),
@@ -37,22 +37,15 @@ EvictRecord* Evictor<EvictionPolicy>::add_record(EvictRecord &r) {
 template <typename EvictionPolicy>
 EvictRecord *Evictor<EvictionPolicy>::do_evict(uint64_t needed_size) {
     typename EvictionPolicy::RecordType *rec = nullptr;
-    do {
-        rec = m_evict_policy.get_next_candidate(rec);
-        if (rec == nullptr) {
-            assert(0);
-            // TODO: Throw no space available exception.
-            return nullptr;
-        }
+    
+    rec = m_evict_policy.remove_candidate_ofsize(needed_size);
+    if (rec == nullptr) {
+	    assert(0);
+	    // TODO: Throw no space available exception.
+	    return nullptr;
+    }
 
-        // Check if next record has enough space and also see if it is safe to evict.
-        if ((m_get_size_cb(rec) >= needed_size) && m_can_evict_cb(rec)) {
-            // Possible to evict, so, ask policy to remove the entry and reclaim the space.
-            m_evict_policy.remove(*rec);
-            m_cur_size.fetch_sub(needed_size, std::memory_order_acq_rel);
-            break;
-        } // else keep looking for next candidate
-    } while (true);
+    m_cur_size.fetch_sub(m_get_size_cb(rec), std::memory_order_acq_rel);
 
     return rec;
 }
