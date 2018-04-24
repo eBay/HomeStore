@@ -177,6 +177,7 @@ private:
 };
 
 class DeviceManager;
+typedef std::function< void (int status, uint8_t* cookie) > comp_callback;
 
 class PhysicalDevChunk {
 public:
@@ -302,7 +303,8 @@ class PhysicalDev {
     friend class PhysicalDevChunk;
     friend class DeviceManager;
 public:
-    static std::unique_ptr<PhysicalDev> load(DeviceManager *dev_mgr, std::string devname, int oflags, bool *is_new);
+    static std::unique_ptr<PhysicalDev> load(DeviceManager *dev_mgr, std::string devname, 
+					int oflags, bool *is_new, homeio::comp_callback cb);
 
     PhysicalDev(DeviceManager *mgr, std::string devname, int oflags);
     ~PhysicalDev() = default;
@@ -387,6 +389,9 @@ private:
     std::string        m_devname;
     super_block_header m_super_blk_header; // Persisent header block
     uint64_t           m_devsize;
+    ioMgr *iomgr;
+    static DriveEndPoint endpoint;
+    homeio::comp_callback comp_cb;
 };
 
 class AbstractVirtualDev {
@@ -544,6 +549,7 @@ private:
 
 private:
     int          m_open_flags;
+    homeio::comp_callback comp_cb;
 
     pdevs_block  m_pdev_info;
     chunks_block m_chunk_info;
@@ -566,7 +572,8 @@ template <typename Allocator, typename DefaultDeviceSelector>
 class VirtualDev {
 public:
     VirtualDev(uint64_t size, uint32_t nmirror, bool is_stripe, uint32_t dev_blk_size,
-               std::vector< std::unique_ptr< PhysicalDev > > &phys_dev_list);
+               std::vector< std::unique_ptr< PhysicalDev > > &phys_dev_list, 
+	       homeio::comp_callback cb);
 
     virtual ~VirtualDev();
 

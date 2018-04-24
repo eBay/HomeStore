@@ -18,6 +18,7 @@
 #ifdef __linux__
 #include <linux/fs.h>
 #include <sys/ioctl.h> 
+#include <iomgr/drive_endpoint.hpp>
 #endif
 
 namespace homestore {
@@ -62,15 +63,18 @@ std::unique_ptr<PhysicalDev> PhysicalDev::load(DeviceManager *dev_mgr, std::stri
     return std::move(pdev);
 }
 
-PhysicalDev::PhysicalDev(DeviceManager *mgr, std::string devname, int oflags) :
+PhysicalDev::PhysicalDev(DeviceManager *mgr, std::string devname, int oflags, 
+				ioMgr *iomgr, homestore::comp_callback cb) :
         m_mgr(mgr),
-        m_devname(devname) {
+        m_devname(devname),
+	comp_cb(cb),
+	,iomgr(iomgr), ep(iomgr, cb) {
     struct stat stat_buf;
     stat(devname.c_str(), &stat_buf);
     m_devsize = (uint64_t) stat_buf.st_size;
 
     // open and load the header block and validate if its a valid device
-    folly::checkUnixError(m_devfd = open(devname.c_str(), oflags));
+    folly::checkUnixError(m_devfd = ep.open(devname.c_str(), oflags));
 #ifdef __linux__
     if (ioctl(m_devfd,BLKGETSIZE64,&m_devsize) < 0) {
 	/* TODO: need better way to handle it */
@@ -147,43 +151,89 @@ inline void PhysicalDev::read_superblock_header() {
     }
 }
 
-void PhysicalDev::write(const char *data, uint32_t size, uint64_t offset) {
+void PhysicalDev::write(const char *data, uint32_t size, uint64_t offset, uint8_t *cookie) {
+#ifdef __LINUX__
+    ssize_t writtenSize = ep->pwrite(get_devfd(), data, (ssize_t) size, (off_t) offset, cookie);
+#elseif
     ssize_t writtenSize = pwrite(get_devfd(), data, (ssize_t) size, (off_t) offset);
+#endif
     if (writtenSize != size) {
         std::stringstream ss;
         ss << "Error trying to write offset " << offset << " size to write = " << size << " size written = "
            << writtenSize << "\n";
         folly::throwSystemError(ss.str());
+#ifndef __LINUX__
+	comp_cb(-1, req);
+#endif
+    } else {
+#ifndef __LINUX__
+	comp_cb(0, req);
+#endif
     }
 }
 
-void PhysicalDev::writev(const struct iovec *iov, int iovcnt, uint32_t size, uint64_t offset) {
+void PhysicalDev::writev(const struct iovec *iov, int iovcnt, uint32_t size, uint64_t offset, 
+								uint8_t *cookie) {
+#ifdef __LINUX__
+  ssize_t written_size = ep->pwritev(get_devfd(), iov, iovcnt, offset, cookie);
+#elseif
   ssize_t written_size = pwritev(get_devfd(), iov, iovcnt, offset);
+#endif
     if (written_size != size) {
         std::stringstream ss;
         ss << "Error trying to write offset " << offset << " size to write = " << size << " size written = "
            << written_size << "\n";
        folly::throwSystemError(ss.str());
+#ifndef __LINUX__
+	comp_cb(-1, req);
+#endif
+    } else {
+#ifndef __LINUX__
+	comp_cb(0, req);
+#endif
     }
 }
 
-void PhysicalDev::read(char *data, uint32_t size, uint64_t offset) {
-    ssize_t read_size = pread(get_devfd(), data, (ssize_t) size, (off_t) offset);
+void PhysicalDev::read(char *data, uint32_t size, uint64_t offset, uint8_t *cookie) {
+#ifdef __LINUX__
+    ssize_t read_size = ep->pread(get_devfd(), data, (ssize_t) size, (off_t) offset, cookie);
+#elseif
+    ssize_t read_size = ep->pread(get_devfd(), data, (ssize_t) size, (off_t) offset);
+#endif
     if (read_size != size) {
         std::stringstream ss;
         ss << "Error trying to read offset " << offset << " size to read = " << size << " size read = "
            << read_size << "\n";
         folly::throwSystemError(ss.str());
+#ifndef __LINUX__
+	comp_cb(-1, req);
+#endif
+    } else {
+#ifndef __LINUX__
+	comp_cb(0, req);
+#endif
     }
 }
 
-void PhysicalDev::readv(const struct iovec *iov, int iovcnt, uint32_t size, uint64_t offset) {
-    ssize_t read_size = preadv(get_devfd(), iov, iovcnt, (off_t) offset);
+void PhysicalDev::readv(const struct iovec *iov, int iovcnt, uint32_t size, uint64_t offset, 
+						uint8_t *cookie) {
+#ifdef __LINUX__
+    ssize_t read_size = ep->preadv(get_devfd(), iov, iovcnt, (off_t) offset, cookie);
+#elseif
+    ssize_t read_size = ep->preadv(get_devfd(), iov, iovcnt, (off_t) offset);
+#endif
     if (read_size != size) {
         std::stringstream ss;
         ss << "Error trying to read offset " << offset << " size to read = " << size << " size read = "
            << read_size << "\n";
         folly::throwSystemError(ss.str());
+#ifndef __LINUX__
+	comp_cb(-1, req);
+#endif
+    } else {
+#ifndef __LINUX__
+	comp_cb(0, req);
+#endif
     }
 }
 

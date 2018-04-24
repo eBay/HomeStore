@@ -249,3 +249,7 @@ gtest() {
     make install
 }
 library gtest $GTEST_VERSION https://github.com/google/googletest/archive/release-${GTEST_VERSION}.tar.gz googletest-release-${GTEST_VERSION}
+
+##################libaio ###################################
+
+apt-get install libaio1

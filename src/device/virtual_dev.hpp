@@ -59,9 +59,15 @@ struct pdev_chunk_map {
  * Allocator: The type of AllocatorPolicy to allocate blocks for writes.
  * DefaultDeviceSelector: Which device to select for allocation
  */
+struct virtualdev_req {
+	class VirtualDev* obj;
+	bool is_read;
+};
+
 template <typename Allocator, typename DefaultDeviceSelector>
 class VirtualDev : public AbstractVirtualDev
 {
+typedef std::function< void (int status, virtualDevIO_req* req) > comp_callback;
 private:
     vdev_info_block *m_vb; // This device block info
     DeviceManager *m_mgr;  // Device Manager back pointer
@@ -81,11 +87,13 @@ private:
     uint64_t physical_time;
     uint64_t mirror_time;
     uint64_t write_cnt;
+    comp_callback comp_cb;
 
 public:
     /* Create a new virtual dev for these parameters */
     VirtualDev(DeviceManager *mgr, uint64_t size, uint32_t nmirror, bool is_stripe, uint32_t dev_blk_size,
-               const std::vector< PhysicalDev *> &pdev_list) {
+               const std::vector< PhysicalDev *> &pdev_list, 
+	       homestore::comp_callback cb):comp_cb(comp_cb) {
         // Create a new vdev in persistent area and get the block of it
         m_vb = mgr->alloc_vdev(size, nmirror, dev_blk_size);
         m_mgr = mgr;
@@ -142,9 +150,17 @@ public:
             m_selector->add_pdev(pdev);
         }
     }
+    
+    static void process_completions(int status, uint8_t *cookie) {
+	virtualdev_req *req = static_cast< virtualdev_req * >(cookie);	
+	req->this->comp_cb(status, req);
+	/* XXX:we probably have to do something if a write/read is spread
+         * across the chunks from this layer.
+	 */
+    }
 
     /* Load the virtual dev from vdev_info_block and create a Virtual Dev. */
-    VirtualDev(DeviceManager *mgr, vdev_info_block *vb) :
+    VirtualDev(DeviceManager *mgr, vdev_info_block *vb, homeio::comp_callback cb) :
             m_vb(vb),
             m_mgr(mgr) {
         m_selector = std::make_unique<DefaultDeviceSelector>();
@@ -229,7 +245,8 @@ public:
 	physical_time = 0;
 	mirror_time = 0;
     }
-    void write(const BlkId &bid, const homeds::MemVector<BLKSTORE_BLK_SIZE> &buf) {
+    void write(const BlkId &bid, const homeds::MemVector<BLKSTORE_BLK_SIZE> &buf, 
+			struct virtualDevIO_req *req) {
         BlkOpStatus ret_status = BLK_OP_SUCCESS;
         uint32_t size = bid.get_nblks() * get_blk_size();
         struct iovec iov[BlkId::max_blks_in_op()];
@@ -250,6 +267,7 @@ public:
         }
 
         PhysicalDevChunk *chunk;
+	req->obj = this;
         uint64_t dev_offset = to_dev_offset(bid, &chunk);
         try {
             LOG(INFO) << "Writing in device " << chunk->get_physical_dev()->get_dev_id() << " offset = " << dev_offset;
@@ -257,7 +275,7 @@ public:
 		    (std::chrono::duration_cast< std::chrono::nanoseconds >(Clock::now() - 
 									    startTime)).count();
 	    write_cnt++;
-	    chunk->get_physical_dev_mutable()->writev(iov, iovcnt, size, dev_offset);
+	    chunk->get_physical_dev_mutable()->writev(iov, iovcnt, size, dev_offset, req);
         } catch (std::exception &e) {
             throw e;
         }
@@ -272,7 +290,7 @@ public:
                 for (auto mchunk : m_mirror_chunks.find(chunk)->second) {
                     dev_offset = mchunk->get_start_offset() + primary_chunk_offset;
                     try {
-                        mchunk->get_physical_dev_mutable()->writev(iov, iovcnt, size, dev_offset);
+                        mchunk->get_physical_dev_mutable()->writev(iov, iovcnt, size, dev_offset, req);
                     } catch (std::exception &e) {
                         throw e;
                     }
@@ -288,13 +306,16 @@ public:
      * have offset as one of the parameter. Reason for that is its actually ok and make the interface and also
      * buf (caller buf) simple and there is no use case. However, we need to keep the blk size to be small as possible
      * to avoid read overhead */
-    void read(const BlkId &bid, const homeds::MemPiece<BLKSTORE_BLK_SIZE> &mp) {
+    void read(const BlkId &bid, const homeds::MemPiece<BLKSTORE_BLK_SIZE> &mp, 
+							struct virtualDevIO_req *req) {
         PhysicalDevChunk *primary_chunk;
         bool failed = false;
 
         uint64_t primary_dev_offset = to_dev_offset(bid, &primary_chunk);
+	req->obj = this;
         try {
-            primary_chunk->get_physical_dev_mutable()->read((char *)mp.ptr(), mp.size(), primary_dev_offset);
+            primary_chunk->get_physical_dev_mutable()->read((char *)mp.ptr(), mp.size(), 
+							primary_dev_offset, req);
         } catch (std::exception &e) {
             failed = true;
         }
@@ -305,7 +326,8 @@ public:
             for (auto mchunk : m_mirror_chunks.find(primary_chunk)->second) {
                 uint64_t dev_offset = mchunk->get_start_offset() + primary_chunk_offset;
                 try {
-                    mchunk->get_physical_dev_mutable()->read((char *)mp.ptr(), mp.size(), dev_offset);
+                    mchunk->get_physical_dev_mutable()->read((char *)mp.ptr(), mp.size(), d
+							ev_offset, req);
                 } catch (std::exception &e) {
                     failed = true;
                 }
@@ -318,13 +340,15 @@ public:
         }
     }
 
-    void readv(const BlkId &bid, const homeds::MemVector<BLKSTORE_BLK_SIZE> &buf) {
+    void readv(const BlkId &bid, const homeds::MemVector<BLKSTORE_BLK_SIZE> &buf, 
+							struct virtualDevIO_req *req) {
         // Convert the input memory to iovector
         struct iovec iov[BlkId::max_blks_in_op()];
         int iovcnt = 0;
         uint32_t size = buf.size();
 
         assert(buf.size() == (bid.get_nblks() * get_blk_size())); // Expected to be less than allocated blk originally.
+	req->obj = this;
         for (auto i : boost::irange<uint32_t>(0, buf.npieces())) {
             homeds::blob b;
             buf.get(&b, i);
@@ -339,7 +363,7 @@ public:
         uint64_t primary_dev_offset = to_dev_offset(bid, &primary_chunk);
 
         try {
-            primary_chunk->get_physical_dev_mutable()->readv(iov, iovcnt, size, primary_dev_offset);
+            primary_chunk->get_physical_dev_mutable()->readv(iov, iovcnt, size, primary_dev_offset, req);
         } catch (std::exception &e) {
             failed = true;
         }
@@ -350,7 +374,7 @@ public:
             for (auto mchunk : m_mirror_chunks.find(primary_chunk)->second) {
                 uint64_t dev_offset = mchunk->get_start_offset() + primary_chunk_offset;
                 try {
-                    mchunk->get_physical_dev_mutable()->readv(iov, iovcnt, size, dev_offset);
+                    mchunk->get_physical_dev_mutable()->readv(iov, iovcnt, size, dev_offset, cookie);
                 } catch (std::exception &e) {
                     failed = true;
                 }

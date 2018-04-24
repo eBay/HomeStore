@@ -1,6 +1,7 @@
 //
 // Created by Kadayam, Hari on 02/04/18.
 //
+#if 0
 #include "endpoint.hpp"
 
 namespace homeio {
@@ -101,3 +102,4 @@ void NetEndPoint::create_tcp_connection(std::string server, int port) {
 }
 
 }
+#endif
