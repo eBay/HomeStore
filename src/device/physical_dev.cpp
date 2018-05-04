@@ -22,7 +22,9 @@
 #endif
 
 namespace homestore {
+using namespace homeio;
 
+DriveEndPoint *PhysicalDev::ep = NULL;
 static __thread char hdr_tmp_buf[SUPERBLOCK_MAX_HEADER_SIZE];
 
 #ifdef __APPLE__
@@ -46,8 +48,11 @@ static std::atomic< uint32_t > glob_phys_dev_ids(0);
 /* This method opens the device and tries to load the info from the device. If its unable to load
  * it, formats the device and sets formatted = true. It can throw DeviceException or system_error
  * or std::bad_alloc exception */
-std::unique_ptr<PhysicalDev> PhysicalDev::load(DeviceManager *dev_mgr, std::string devname, int oflags, bool *is_new) {
-    std::unique_ptr< PhysicalDev > pdev = std::make_unique< PhysicalDev >(dev_mgr, devname, oflags);
+std::unique_ptr<PhysicalDev> PhysicalDev::load(DeviceManager *dev_mgr, 
+					std::string devname, int oflags, bool *is_new, 
+					ioMgr *iomgr, homeio::comp_callback cb) {
+    std::unique_ptr< PhysicalDev > pdev = std::make_unique< PhysicalDev >(dev_mgr, 
+								devname, oflags, iomgr, cb);
 
     try {
         if (pdev->load_super_block()) {
@@ -64,17 +69,20 @@ std::unique_ptr<PhysicalDev> PhysicalDev::load(DeviceManager *dev_mgr, std::stri
 }
 
 PhysicalDev::PhysicalDev(DeviceManager *mgr, std::string devname, int oflags, 
-				ioMgr *iomgr, homestore::comp_callback cb) :
+				ioMgr *iomgr, homeio::comp_callback cb) :
         m_mgr(mgr),
         m_devname(devname),
 	comp_cb(cb),
-	,iomgr(iomgr), ep(iomgr, cb) {
+	iomgr(iomgr) {
     struct stat stat_buf;
     stat(devname.c_str(), &stat_buf);
     m_devsize = (uint64_t) stat_buf.st_size;
 
+    if (!ep) {
+	ep = new DriveEndPoint(iomgr, cb); 
+    }
     // open and load the header block and validate if its a valid device
-    folly::checkUnixError(m_devfd = ep.open(devname.c_str(), oflags));
+    folly::checkUnixError(m_devfd = ep->open_dev(devname.c_str(), oflags));
 #ifdef __linux__
     if (ioctl(m_devfd,BLKGETSIZE64,&m_devsize) < 0) {
 	/* TODO: need better way to handle it */
@@ -152,89 +160,130 @@ inline void PhysicalDev::read_superblock_header() {
 }
 
 void PhysicalDev::write(const char *data, uint32_t size, uint64_t offset, uint8_t *cookie) {
-#ifdef __LINUX__
-    ssize_t writtenSize = ep->pwrite(get_devfd(), data, (ssize_t) size, (off_t) offset, cookie);
-#elseif
-    ssize_t writtenSize = pwrite(get_devfd(), data, (ssize_t) size, (off_t) offset);
-#endif
+#ifdef linux
+    ep->async_write(get_devfd(), data, (ssize_t) size, (off_t) offset, cookie);
+#else
+    ssize_t writtenSize;
+    writtenSize = pwrite(get_devfd(), data, (ssize_t) size, (off_t) offset);
     if (writtenSize != size) {
         std::stringstream ss;
         ss << "Error trying to write offset " << offset << " size to write = " << size << " size written = "
            << writtenSize << "\n";
         folly::throwSystemError(ss.str());
-#ifndef __LINUX__
-	comp_cb(-1, req);
-#endif
-    } else {
-#ifndef __LINUX__
-	comp_cb(0, req);
-#endif
     }
+    comp_cb(size, cookie);
+#endif
 }
 
 void PhysicalDev::writev(const struct iovec *iov, int iovcnt, uint32_t size, uint64_t offset, 
 								uint8_t *cookie) {
-#ifdef __LINUX__
-  ssize_t written_size = ep->pwritev(get_devfd(), iov, iovcnt, offset, cookie);
-#elseif
-  ssize_t written_size = pwritev(get_devfd(), iov, iovcnt, offset);
-#endif
+#ifdef linux
+  ep->async_writev(get_devfd(), iov, iovcnt, size, offset, cookie);
+#else
+  ssize_t written_size;
+  written_size = pwritev(get_devfd(), iov, iovcnt, offset);
     if (written_size != size) {
         std::stringstream ss;
         ss << "Error trying to write offset " << offset << " size to write = " << size << " size written = "
            << written_size << "\n";
        folly::throwSystemError(ss.str());
-#ifndef __LINUX__
-	comp_cb(-1, req);
-#endif
-    } else {
-#ifndef __LINUX__
-	comp_cb(0, req);
-#endif
     }
+    comp_cb(size, cookie);
+#endif
 }
 
 void PhysicalDev::read(char *data, uint32_t size, uint64_t offset, uint8_t *cookie) {
-#ifdef __LINUX__
-    ssize_t read_size = ep->pread(get_devfd(), data, (ssize_t) size, (off_t) offset, cookie);
-#elseif
-    ssize_t read_size = ep->pread(get_devfd(), data, (ssize_t) size, (off_t) offset);
-#endif
+#ifdef linux
+    ep->async_read(get_devfd(), data, (ssize_t) size, (off_t) offset, cookie);
+#else
+    ssize_t read_size;
+    read_size = pread(get_devfd(), data, (ssize_t) size, (off_t) offset);
     if (read_size != size) {
         std::stringstream ss;
         ss << "Error trying to read offset " << offset << " size to read = " << size << " size read = "
            << read_size << "\n";
         folly::throwSystemError(ss.str());
-#ifndef __LINUX__
-	comp_cb(-1, req);
-#endif
-    } else {
-#ifndef __LINUX__
-	comp_cb(0, req);
-#endif
     }
+    comp_cb(size, cookie);
+#endif
 }
 
 void PhysicalDev::readv(const struct iovec *iov, int iovcnt, uint32_t size, uint64_t offset, 
 						uint8_t *cookie) {
-#ifdef __LINUX__
-    ssize_t read_size = ep->preadv(get_devfd(), iov, iovcnt, (off_t) offset, cookie);
-#elseif
-    ssize_t read_size = ep->preadv(get_devfd(), iov, iovcnt, (off_t) offset);
-#endif
+#ifdef linux
+    ep->async_readv(get_devfd(), iov, iovcnt, size, (off_t) offset, cookie);
+#else
+    ssize_t read_size;
+    read_size = preadv(get_devfd(), iov, iovcnt, (off_t) offset);
     if (read_size != size) {
         std::stringstream ss;
         ss << "Error trying to read offset " << offset << " size to read = " << size << " size read = "
            << read_size << "\n";
         folly::throwSystemError(ss.str());
-#ifndef __LINUX__
-	comp_cb(-1, req);
-#endif
-    } else {
-#ifndef __LINUX__
-	comp_cb(0, req);
-#endif
     }
+    comp_cb(size, cookie);
+#endif
+}
+
+void PhysicalDev::sync_write(const char *data, uint32_t size, uint64_t offset) {
+#ifdef linux
+    ep->sync_write(get_devfd(), data, size, (off_t) offset);
+#else
+    ssize_t read_size;
+    read_size = ep->write(get_devfd(), size, (off_t) offset);
+    if (read_size != size) {
+        std::stringstream ss;
+        ss << "Error trying to read offset " << offset << " size to read = " << size << " size read = "
+           << read_size << "\n";
+        folly::throwSystemError(ss.str());
+    } 
+#endif
+}
+
+void PhysicalDev::sync_writev(const struct iovec *iov, int iovcnt, 
+					uint32_t size, uint64_t offset) {
+#ifdef linux
+    ep->sync_writev(get_devfd(), iov, iovcnt, size, (off_t) offset);
+#else
+    ssize_t read_size;
+    read_size = writev(get_devfd(), iov, iovcnt, (off_t) offset);
+    if (read_size != size) {
+        std::stringstream ss;
+        ss << "Error trying to read offset " << offset << " size to read = " << size << " size read = "
+           << read_size << "\n";
+        folly::throwSystemError(ss.str());
+    } 
+#endif
+}
+
+void PhysicalDev::sync_read(char *data, uint32_t size, uint64_t offset) {
+#ifdef linux
+    ep->sync_read(get_devfd(), data, size, (off_t) offset);
+#else
+    ssize_t read_size;
+    read_size = pread(get_devfd(), data, (ssize_t) size, (off_t) offset);
+    if (read_size != size) {
+        std::stringstream ss;
+        ss << "Error trying to read offset " << offset << " size to read = " << size << " size read = "
+           << read_size << "\n";
+        folly::throwSystemError(ss.str());
+    }
+#endif
+}
+
+void PhysicalDev::sync_readv(const struct iovec *iov, int iovcnt, uint32_t size, uint64_t offset) {
+#ifdef linux
+    ep->sync_readv(get_devfd(), iov, iovcnt, size, (off_t) offset);
+#else
+    ssize_t read_size;
+    read_size = preadv(get_devfd(), iov, iovcnt, (off_t) offset);
+    if (read_size != size) {
+        std::stringstream ss;
+        ss << "Error trying to read offset " << offset << " size to read = " << size << " size read = "
+           << read_size << "\n";
+        folly::throwSystemError(ss.str());
+    } 
+#endif
 }
 
 void PhysicalDev::attach_chunk(PhysicalDevChunk *chunk, PhysicalDevChunk *after) {

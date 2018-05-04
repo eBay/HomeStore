@@ -40,8 +40,9 @@ public:
 	auto it =  m_list.begin();
 	auto e = m_list.end();
 	for(it; it != e; ++it) {
-	     if ((m_get_size_cb(&*it) >= needed_size) && 
-		m_can_evict_cb(&*it)) {
+	     if ((m_get_size_cb(&*it) >= needed_size)) {
+	//	&& 
+	//	m_can_evict_cb(&*it)) {
 		m_list.erase(it);
 		return &*it;
 	     }

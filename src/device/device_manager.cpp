@@ -8,12 +8,14 @@
 #include "device.h"
 #include <fcntl.h>
 #include <boost/range.hpp>
+#include <iomgr/iomgr.hpp>
 
+using namespace homeio;
 namespace homestore {
 
 DeviceManager::DeviceManager(NewVDevCallback vcb, uint32_t vdev_metadata_size, ioMgr* iomgr, 
-				homestore::comp_callback comp_cb) :
-        m_open_flags(O_RDWR || O_DIRECT),
+				homeio::comp_callback cb) :
+        m_open_flags(O_RDWR),// | O_DIRECT),
         m_new_vdev_cb(vcb), iomgr(iomgr), comp_cb(cb) {
     m_pdev_info.num_phys_devs = 0;
     m_last_vdevid = INVALID_VDEV_ID;
@@ -135,15 +137,15 @@ void DeviceManager::add_devices(std::vector< std::string > &dev_names) {
 }
 
 inline void DeviceManager::read_info_blocks(PhysicalDev *pdev) {
-    pdev->read((char *)&m_pdev_info, sizeof(m_pdev_info), pdev->get_super_block_header()->pdevs_block_offset);
-    pdev->read((char *)&m_chunk_info, sizeof(m_chunk_info), pdev->get_super_block_header()->chunks_block_offset);
-    pdev->read((char *)&m_vdev_info, sizeof(m_vdev_info), pdev->get_super_block_header()->vdevs_block_offset);
+    pdev->sync_read((char *)&m_pdev_info, sizeof(m_pdev_info), pdev->get_super_block_header()->pdevs_block_offset);
+    pdev->sync_read((char *)&m_chunk_info, sizeof(m_chunk_info), pdev->get_super_block_header()->chunks_block_offset);
+    pdev->sync_read((char *)&m_vdev_info, sizeof(m_vdev_info), pdev->get_super_block_header()->vdevs_block_offset);
 }
 
 inline void DeviceManager::write_info_blocks(PhysicalDev *pdev) {
-    pdev->write((char *)&m_pdev_info, sizeof(m_pdev_info), pdev->get_super_block_header()->pdevs_block_offset);
-    pdev->write((char *)&m_chunk_info, sizeof(m_chunk_info), pdev->get_super_block_header()->chunks_block_offset);
-    pdev->write((char *)&m_vdev_info, sizeof(m_vdev_info), pdev->get_super_block_header()->vdevs_block_offset);
+    pdev->sync_write((char *)&m_pdev_info, sizeof(m_pdev_info), pdev->get_super_block_header()->pdevs_block_offset);
+    pdev->sync_write((char *)&m_chunk_info, sizeof(m_chunk_info), pdev->get_super_block_header()->chunks_block_offset);
+    pdev->sync_write((char *)&m_vdev_info, sizeof(m_vdev_info), pdev->get_super_block_header()->vdevs_block_offset);
 }
 
 PhysicalDevChunk *DeviceManager::alloc_chunk(PhysicalDev *pdev, uint32_t vdev_id, uint64_t req_size) {
@@ -165,7 +167,7 @@ PhysicalDevChunk *DeviceManager::alloc_chunk(PhysicalDev *pdev, uint32_t vdev_id
 
     // Persist the allocation
     for (auto &pd: m_pdevs) {
-        pd->write((char *) &m_chunk_info, sizeof(m_chunk_info), pd->get_super_block_header()->chunks_block_offset);
+        pd->sync_write((char *) &m_chunk_info, sizeof(m_chunk_info), pd->get_super_block_header()->chunks_block_offset);
     }
     return chunk;
 }
@@ -184,7 +186,7 @@ void DeviceManager::free_chunk(PhysicalDevChunk *chunk) {
 
     // Persist the free_chunk
     for (auto &pd: m_pdevs) {
-        pd->write((char *) &m_chunk_info, sizeof(m_chunk_info), pd->get_super_block_header()->chunks_block_offset);
+        pd->sync_write((char *) &m_chunk_info, sizeof(m_chunk_info), pd->get_super_block_header()->chunks_block_offset);
     }
 }
 
@@ -211,7 +213,7 @@ vdev_info_block *DeviceManager::alloc_vdev(uint64_t req_size, uint32_t nmirrors,
     LOG(INFO) << "Creating vdev id = " << vb->vdev_id << " size = " << vb->size;
     m_vdev_info.num_vdevs++;
     for (auto &pdev: m_pdevs) {
-        pdev->write((char *) &m_vdev_info, sizeof(m_vdev_info), pdev->get_super_block_header()->vdevs_block_offset);
+        pdev->sync_write((char *) &m_vdev_info, sizeof(m_vdev_info), pdev->get_super_block_header()->vdevs_block_offset);
     }
     return vb;
 }
@@ -233,7 +235,7 @@ void DeviceManager::free_vdev(vdev_info_block *vb) {
 
     m_vdev_info.num_vdevs--;
     for (auto &pdev: m_pdevs) {
-        pdev->write((char *) &m_vdev_info, sizeof(m_vdev_info), pdev->get_super_block_header()->vdevs_block_offset);
+        pdev->sync_write((char *) &m_vdev_info, sizeof(m_vdev_info), pdev->get_super_block_header()->vdevs_block_offset);
     }
 }
 

@@ -45,7 +45,7 @@ struct blkstore_req:virtualdev_req {
 	BlkId bid;
 	uint64_t size;
 	boost::intrusive_ptr< BlkBuffer > write_bbuf;
-	boost::intrusive_ptr< Buffer > read_bbuf;
+	boost::intrusive_ptr< BlkBuffer > read_bbuf;
 	int missing_piece_cnt;
 	bool cache_found;
 };
@@ -54,20 +54,59 @@ template <typename BAllocator, typename Buffer = BlkBuffer>
 class BlkStore {
     typedef std::function< void (int status, blkstore_req* req) > comp_callback;
 public:
+    void process_completions(int status, virtualdev_req *v_req) {
+	struct blkstore_req * req = static_cast< struct blkstore_req* >(v_req);
+	
+	if (!req->is_read) {
+		m_comp_cb(status, req);
+		/* XXX: do we need to do anything for failure */
+		return;
+	}
+
+	homeds::blob b  = req->read_bbuf->at_offset(0);
+	if (!req->cache_found) {
+	    /* It is not there in the cache */
+            boost::intrusive_ptr< Buffer > new_bbuf;
+            boost::intrusive_ptr< Buffer > bbuf = req->read_bbuf;
+	    Clock::time_point cache_startTime = Clock::now();
+            bool inserted = m_cache->insert(bbuf->get_key(),
+                                            dynamic_pointer_cast<CacheBuffer<BlkId>>(bbuf),
+                                            (boost::intrusive_ptr< CacheBuffer<BlkId> > *)&new_bbuf);
+	    cache_read_time.fetch_add(get_elapsed_time(cache_startTime), memory_order_relaxed);
+            if (!inserted) {
+                // Between get and insert, other thread tried the same thing and inserted into the cache. Lets use
+                // that entry in cache and free up the memory
+            //    req->read_bbuf = new_bbuf;
+            }			
+	} else {
+	    req->missing_piece_cnt--;
+	    if (req->missing_piece_cnt) {
+		/* wait for other missing pieces to come */
+		return;
+	    }
+			
+	}
+	m_comp_cb(status, req);
+    }
+
     BlkStore(DeviceManager *mgr, Cache< BlkId > *cache, uint64_t initial_size, BlkStoreCacheType cache_type,
-             uint32_t mirrors, homestore::comp_callback comp_cb) :
+             uint32_t mirrors, comp_callback comp_cb) :
             m_cache(cache),
             m_cache_type(cache_type),
             m_vdev(mgr, initial_size, mirrors, true, BLKSTORE_BLK_SIZE,
 				mgr->get_all_devices(), 
-				(std::bind(process_completions, this)),
-	    comp_cb(comp_cb) {
+				(std::bind(&BlkStore::process_completions, this, 
+			         std::placeholders::_1, std::placeholders::_2))),
+	    m_comp_cb(comp_cb) {
     }
 
-    BlkStore(DeviceManager *mgr, Cache< BlkId > *cache, vdev_info_block *vb, BlkStoreCacheType cache_type) :
+    BlkStore(DeviceManager *mgr, Cache< BlkId > *cache, vdev_info_block *vb, 
+				BlkStoreCacheType cache_type, comp_callback comp_cb) :
             m_cache(cache),
             m_cache_type(cache_type),
-            m_vdev(mgr, vb, process_completions), comp_cb(comp_cb) {
+            m_vdev(mgr, vb, (std::bind(&BlkStore::process_completions, this, 
+			     std::placeholders::_1, std::placeholders::_2))), 
+	    m_comp_cb(comp_cb) {
     }
 
     /* Allocate a new block of the size based on the hints provided */
@@ -155,7 +194,7 @@ public:
 
     /* Allocate a new block and write the contents to the allocated block and return the blkbuffer */
     boost::intrusive_ptr< BlkBuffer > alloc_and_write(homeds::blob &blob, blk_alloc_hints &hints, 
-							struct blkStoreIO_req *req) {
+							struct blkstore_req *req) {
         // First allocate the blk id based on the hints
         BlkId bid;
         m_vdev.alloc_blk(round_off(blob.size, BLKSTORE_BLK_SIZE), hints, &bid);
@@ -178,16 +217,16 @@ public:
 	return ns.count();
     }
 
-    boost::intrusive_ptr< BlkBuffer > write(BlkId &bid, homeds::blob &blob, struct blkStoreIO_req *req) {
+    boost::intrusive_ptr< BlkBuffer > write(BlkId &bid, homeds::blob &blob, struct blkstore_req *req) {
         // First try to create/insert a record for this blk id in the cache. If it already exists, it will simply
         // upvote the item.
         boost::intrusive_ptr< BlkBuffer > bbuf;
-	write_cnt++;
+	write_cnt.fetch_add(1, memory_order_relaxed);
 	Clock::time_point cache_startTime = Clock::now();
 	uint8_t *ptr;
         bool inserted = m_cache->insert(bid, blob, 0 /* value_offset */,
                                         (boost::intrusive_ptr< CacheBuffer<BlkId> > *)&bbuf);
-	cache_time += get_elapsed_time(cache_startTime);
+	cache_write_time.fetch_add(get_elapsed_time(cache_startTime), memory_order_relaxed);
 
         // TODO: Raise an exception if we are not able to insert - instead of assert
         assert(inserted);
@@ -202,18 +241,19 @@ public:
     }
 
     void print_perf_cnts() {
-	printf("cache time %lu ns\n", cache_time/write_cnt);
+	printf("cache time %lu ns\n", cache_write_time/write_cnt);
 	printf("physical device write time %lu ns\n", write_time/write_cnt);
 	if (read_cnt != 0) {
 		printf("cache_hit %lu % \n",(cache_hit * 100)/read_cnt); 
+		printf("cache time while reading %lu ns\n", cache_read_time/read_cnt);
 	}
-	printf("absolut cache_hit %lu \n",(cache_hit)); 
-	printf("read_cnt in blkstore %lu \n", read_cnt); 
+	printf("absolut cache_hit %lu \n",atomic_load(&cache_hit)); 
+	printf("read_cnt in blkstore %lu \n", atomic_load(&read_cnt)); 
 	m_vdev.print_cntrs();
     }
 
     void init_perf_cnts() {
-	cache_time = 0;
+	cache_write_time = 0;
 	write_time = 0;
 	write_cnt = 0;
 	cache_hit = 0;
@@ -222,14 +262,14 @@ public:
     }
 
     /* If the user already has created a blkbuffer, then use this method to use it to write the block */
-    void write(BlkId &bid, boost::intrusive_ptr< Buffer > in_buf, struct blkStoreIO_req *req) {
+    void write(BlkId &bid, boost::intrusive_ptr< Buffer > in_buf, struct blkstore_req *req) {
         m_vdev.write(bid, in_buf->get_memvec(), req);
     }
 
     /* Read the data for given blk id and size. This method allocates the required memory if not present in the cache
      * and returns an smart ptr to the Buffer */
     boost::intrusive_ptr< Buffer > read(BlkId &bid, uint32_t offset, uint32_t size, 
-							struct blkStoreIO_req *req) {
+							struct blkstore_req *req) {
         // TODO: Convert this assert to exceptions
         assert((offset + size) <= 256 * BLKSTORE_BLK_SIZE);
         assert(offset < 256 * BLKSTORE_BLK_SIZE);
@@ -275,7 +315,7 @@ public:
             BlkId tmp_bid(bid.get_id() + missing_mp->offset()/BLKSTORE_BLK_SIZE,
                           missing_mp->size()/BLKSTORE_BLK_SIZE, bid.get_chunk_num());
             m_vdev.read(tmp_bid, missing_mp.get(), req);
-	    read_cnt++;
+	    read_cnt.fetch_add(1, memory_order_relaxed);
             size_to_read -= missing_mp->size();
 	    missing_piece_cnt++;
         }
@@ -285,39 +325,11 @@ public:
 	req->cache_found = cache_found;
 	if (missing_piece_cnt == 0) {
 		assert(cache_found);
-		comp_callback(0, dynamic_cast< struct blkstore_req* >(req));
+		m_comp_cb(0, dynamic_cast< struct blkstore_req* >(req));
 	}
+	return bbuf;
     }
     
-    void process_completions(int status, virtual_req *v_req) {
-	struct blkstore_req * req = dynamic_cast< struct blkstore_req* >(v_req);
-	if (!req->is_read) {
-		comp_cb(status, req);
-		/* XXX: do we need to do anything for failure */
-		return;
-	}
-	if (!req->cache_found) {
-	    /* It is not there in the cache */
-            boost::intrusive_ptr< Buffer > new_bbuf;
-            boost::intrusive_ptr< Buffer > bbuf = req->read_bbuf;
-            bool inserted = m_cache->insert(bbuf->get_key(),
-                                            dynamic_pointer_cast<CacheBuffer<BlkId>>(bbuf),
-                                            (boost::intrusive_ptr< CacheBuffer<BlkId> > *)&new_bbuf);
-            if (!inserted) {
-                // Between get and insert, other thread tried the same thing and inserted into the cache. Lets use
-                // that entry in cache and free up the memory
-                req->read_bbuf = new_bbuf;
-            }			
-	} else {
-	    req->missing_piece_cnt--;
-	    if (req->cache_missing_piece) {
-		/* wait for other missing pieces to come */
-		return;
-	    }
-			
-	}
-	comp_cb(status, req);
-    }
 
     uint64_t get_size() const {
         return m_vdev.get_size();
@@ -514,12 +526,13 @@ private:
     Cache< BlkId > *m_cache;
     BlkStoreCacheType m_cache_type;
     VirtualDev<BAllocator, RoundRobinDeviceSelector> m_vdev;
-    uint64_t write_cnt;
-    uint64_t cache_time;
-    uint64_t cache_hit;
-    uint64_t read_cnt;
-    uint64_t write_time;
-    comp_callback comp_cb;
+    atomic<uint64_t> write_cnt;
+    atomic<uint64_t> cache_write_time;
+    atomic<uint64_t> cache_read_time;
+    atomic<uint64_t> cache_hit;
+    atomic<uint64_t> read_cnt;
+    atomic<uint64_t> write_time;
+    comp_callback m_comp_cb;
 };
 
 }

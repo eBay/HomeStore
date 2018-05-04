@@ -20,6 +20,8 @@
 #include <boost/uuid/uuid_generators.hpp> // generators
 #include <boost/uuid/uuid_io.hpp>         // streaming operators etc.
 #include "homeds/array/sparse_vector.hpp"
+#include "iomgr/iomgr.hpp"
+#include "iomgr/drive_endpoint.hpp"
 
 namespace homestore {
 
@@ -304,9 +306,11 @@ class PhysicalDev {
     friend class DeviceManager;
 public:
     static std::unique_ptr<PhysicalDev> load(DeviceManager *dev_mgr, std::string devname, 
-					int oflags, bool *is_new, homeio::comp_callback cb);
+					int oflags, bool *is_new, 
+					homeio::ioMgr *iomgr, homeio::comp_callback cb); 
 
-    PhysicalDev(DeviceManager *mgr, std::string devname, int oflags);
+    PhysicalDev(DeviceManager *mgr, std::string devname, int oflags, homeio::ioMgr *iomgr, 
+							homeio::comp_callback cb);
     ~PhysicalDev() = default;
 
     int get_devfd() const {
@@ -361,12 +365,20 @@ public:
     /* Find a free chunk which closestly match for the required size */
     PhysicalDevChunk *find_free_chunk(uint64_t req_size);
 
-    void write(const char *data, uint32_t size, uint64_t offset);
-    void writev(const struct iovec *iov, int iovcnt, uint32_t size, uint64_t offset);
+    void write(const char *data, uint32_t size, uint64_t offset, uint8_t *cookie);
+    void writev(const struct iovec *iov, int iovcnt, uint32_t size, 
+						uint64_t offset, uint8_t *cookie);
 
-    void read(char *data, uint32_t size, uint64_t offset);
-    void readv(const struct iovec *iov, int iovcnt, uint32_t size, uint64_t offset);
+    void read(char *data, uint32_t size, uint64_t offset, uint8_t *cookie);
+    void readv(const struct iovec *iov, int iovcnt, uint32_t size, 
+						uint64_t offset, uint8_t *cookie);
 
+    void sync_write(const char *data, uint32_t size, uint64_t offset);
+    void sync_writev(const struct iovec *iov, int iovcnt, uint32_t size, 
+						uint64_t offset);
+
+    void sync_read(char *data, uint32_t size, uint64_t offset);
+    void sync_readv(const struct iovec *iov, int iovcnt, uint32_t size, uint64_t offset);
 private:
     inline void write_superblock_header();
     inline void read_superblock_header();
@@ -389,8 +401,8 @@ private:
     std::string        m_devname;
     super_block_header m_super_blk_header; // Persisent header block
     uint64_t           m_devsize;
-    ioMgr *iomgr;
-    static DriveEndPoint endpoint;
+    homeio::ioMgr *iomgr;
+    static homeio::DriveEndPoint *ep; // one instance for all physical devices
     homeio::comp_callback comp_cb;
 };
 
@@ -407,7 +419,8 @@ class DeviceManager {
     friend class PhysicalDevChunk;
 
 public:
-    DeviceManager(NewVDevCallback vcb, uint32_t vdev_metadata_size);
+    DeviceManager(NewVDevCallback vcb, uint32_t vdev_metadata_size, 
+			homeio::ioMgr* iomgr, homeio::comp_callback comp_cb);
     virtual ~DeviceManager() = default;
 
     /* Initial routine to call upon bootup or everytime new physical devices to be added dynamically */
@@ -565,6 +578,7 @@ private:
     uint32_t m_vdev_metadata_size; // Appln metadata size for vdev
 
     NewVDevCallback  m_new_vdev_cb;
+    homeio::ioMgr* iomgr;
 };
 
 /*

@@ -4,7 +4,6 @@
 //
 
 #include "volume.hpp"
-#include <device/blkbuffer.hpp>
 
 using namespace std;
 using namespace homestore;
@@ -21,7 +20,7 @@ homestore::Volume::get_elapsed_time(Clock::time_point startTime) {
 	return ns.count() / 1000;
 }
 
-static AbstractVirtualDev *
+AbstractVirtualDev *
 homestore::Volume::new_vdev_found(DeviceManager *dev_mgr, homestore::vdev_info_block *vb) {
     LOG(INFO) << "New virtual device found id = " << vb->vdev_id << " size = " << vb->size;
 
@@ -40,10 +39,12 @@ homestore::Volume::Volume(homestore::DeviceManager *dev_mgr, uint64_t size,
         Volume::glob_cache = new homestore::Cache< BlkId >(MAX_CACHE_SIZE, BLOCK_SIZE);
         cout << "cache created\n";
     }
-    comp_callback cb = std::bind(&Volume::process_completions, this);
     blk_store = new homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >
 							(dev_mgr, Volume::glob_cache, size,
-                                                         WRITETHRU_CACHE, 0, cb);
+                                                         WRITETHRU_CACHE, 0, 
+							 (std::bind(&Volume::process_completions, 
+							  this, std::placeholders::_1, 
+							  std::placeholders::_2)));
     map = new mapping(size);
 }
 
@@ -53,10 +54,11 @@ homestore::Volume::Volume(DeviceManager *dev_mgr, homestore::vdev_info_block *vb
         Volume::glob_cache = new homestore::Cache< BlkId >(MAX_CACHE_SIZE, BLOCK_SIZE);
         cout << "cache created\n";
     }
-    comp_callback cb = std::bind(&Volume::process_completions, this);
     blk_store = new homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >
 							(dev_mgr, Volume::glob_cache, vb, 
-							 WRITETHRU_CACHE, cb);
+							 WRITETHRU_CACHE, 
+							 (std::bind(&Volume::process_completions, this,
+							  std::placeholders::_1, std::placeholders::_2)));
     map = new mapping(size);
     /* TODO: rishabh, We need a attach function to register completion callback if layers
      * are called from bottomup.
@@ -64,31 +66,25 @@ homestore::Volume::Volume(DeviceManager *dev_mgr, homestore::vdev_info_block *vb
 }
 
 void 
-homestore::Volume::process_completions(int status, blockstore_req *bs_req) {
+homestore::Volume::process_completions(int status, blkstore_req *bs_req) {
 	
-   struct vol_req * req = dynamic_cast< vol_req * >(bs_req);
+   struct volume_req * req = static_cast< struct volume_req * >(bs_req);
    if (status) {
-	io_time += get_elapsed_time(req->startTime);
-	completion_cb(status, req);
+	comp_cb(status, req);
    }
 	
    if (!req->is_read) {
 	Clock::time_point startTime = Clock::now();
     	map->put(req->lba, req->nblks, req->bid);
 	map_time += get_elapsed_time(startTime);
+   	io_write_time.fetch_add(get_elapsed_time(req->startTime), memory_order_relaxed);
    } else {
-	/* TODO:assuming that reads are coming in order.
-	 * However it is not true because one read can 
-	 * split into two different reads from two different disks 
-	 * and it can come out of order. Need it fix it.
-	 */
 	req->read_cnt--;
-	req->buf_list.push_back(req->read_bbuf);
-	if (read_cnt != 0) {
+	if (req->read_cnt != 0) {
 		return;
 	}
+   	io_read_time.fetch_add(get_elapsed_time(req->startTime), memory_order_relaxed);
    }
-   io_time += get_elapsed_time(req->startTime);
    comp_cb(status, req);
 }
 
@@ -98,22 +94,29 @@ homestore::Volume::init_perf_cntrs() {
     alloc_blk_time = 0;
     write_time = 0;
     map_time = 0;
-    io_time = 0;
+    io_write_time = 0;
     blk_store->init_perf_cnts();
 }
 
 void
 homestore::Volume::print_perf_cntrs() {
-    printf("total writes %lu \n", write_cnt);
     printf("avg time taken in alloc_blk %lu us\n", alloc_blk_time/write_cnt);
-    printf("avg time taken in write %lu us\n", write_time/write_cnt);
-    printf("avg time taken in map %lu us\n", map_time/write_cnt);
-    printf("avg time taken in map %lu us\n", io_time/write_cnt);
+    printf("avg time taken in issuing write from volume layer %lu us\n", 
+							write_time/write_cnt);
+    printf("avg time taken in writing map %lu us\n", map_time/write_cnt);
+    printf("avg time taken in write %lu us\n", io_write_time/write_cnt);
+    if (atomic_load(&read_cnt) != 0) {
+    	printf("avg time taken in read %lu us\n", io_read_time/read_cnt);
+    	printf("avg time taken in reading map %lu us\n", 
+					map_read_time/read_cnt);
+    	printf("avg time taken in issuing read from volume layer %lu us\n", 
+							read_time/read_cnt);
+    }
     blk_store->print_perf_cnts();
 }
 
-int 
-homestore::Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks, volumeIO_req* req) {
+boost::intrusive_ptr< BlkBuffer > 
+homestore::Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks, volume_req* req) {
     homestore::BlkId bid;
     homestore::blk_alloc_hints hints;
     hints.desired_temp = 0;
@@ -122,58 +125,62 @@ homestore::Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks, volumeIO_re
     req->lba = lba;
     req->nblks = nblks;
     req->is_read = false;
-    req->send_cnt = 0;
+    req->read_cnt = 0;
     req->startTime = Clock::now();
 
-    write_cnt++;
+    write_cnt.fetch_add(1, memory_order_relaxed);
     {
     	Clock::time_point startTime = Clock::now();
     	blk_store->alloc_blk(nblks, hints, &bid);
-    	alloc_blk_time += get_elapsed_time(startTime);
+    	alloc_blk_time.fetch_add(get_elapsed_time(startTime), memory_order_relaxed);
     }
+    req->bid = bid;
 
     LOG(INFO) << "Requested nblks: " << (uint32_t) nblks << " Allocation info: " << bid.to_string();
 
     homeds::blob b = {buf, (uint32_t)(BLOCK_SIZE * nblks)};
 
-    {
-    	Clock::time_point startTime = Clock::now();
-  	boost::intrusive_ptr< BlkBuffer > bbuf = blk_store->write(bid, b, req);
-	/* TODO: should check the write status */
-	write_time += get_elapsed_time(startTime);
-    }
-   // cout << "written\n";
+    Clock::time_point startTime = Clock::now();
+    boost::intrusive_ptr< BlkBuffer > bbuf = blk_store->write(bid, b, req);
+    /* TODO: should check the write status */
+    write_time.fetch_add(get_elapsed_time(startTime), memory_order_relaxed);
+    // cout << "written\n";
+//    cout << "Written on " << bid.to_string() << " for 8192 bytes";
     LOG(INFO) << "Written on " << bid.to_string() << " for 8192 bytes";
-    return 0;
+    return bbuf;
 }
 
 int
-homestore::Volume::read(uint64_t lba, int nblks, 
-			std::vector< boost::intrusive_ptr< BlkBuffer >> &buf_list, 
-			volumeIO_req* req) {
+homestore::Volume::read(uint64_t lba, int nblks, volume_req* req) {
 
     /* TODO: pass a pointer */
     std::vector< struct BlkId > blkIdList;
-    boost::intrusive_ptr< BlkBuffer > bbuf;
 //	cout << "value in read";
 //	cout << lba;
 //	cout << "number of blocks";
 //	cout << nblks;
+    Clock::time_point startTime = Clock::now();
     if (map->get(lba, nblks, blkIdList)) {
         ASSERT(0);
     }
+    map_read_time.fetch_add(get_elapsed_time(startTime), memory_order_relaxed);
 
+    read_cnt.fetch_add(1, memory_order_relaxed);
     req->lba = lba;
     req->nblks = nblks;
     req->is_read = true;
-    req->send_cnt = 0;
+    req->read_cnt = 0;
     req->startTime = Clock::now();
     
+    startTime = Clock::now();
     for (auto bInfo: blkIdList) {
        // LOG(INFO) << "Read from " << bInfo.to_string() << " for 8192 bytes";
 //	printf("blkid %d\n", bInfo.m_id);
-        blk_store->read(bInfo, 0, BLOCK_SIZE * bInfo.get_nblks());
-	req->send_cnt++;
+        boost::intrusive_ptr< BlkBuffer > bbuf = blk_store->read(bInfo, 0, BLOCK_SIZE * bInfo.get_nblks(), req);
+	req->buf_list.push_back(bbuf);
+    	req->bid = bInfo;
+	req->read_cnt++;
     }
+    read_time.fetch_add(get_elapsed_time(startTime), memory_order_relaxed);
     return 0;
 }

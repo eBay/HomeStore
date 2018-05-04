@@ -252,4 +252,4 @@ library gtest $GTEST_VERSION https://github.com/google/googletest/archive/releas
 
 ##################libaio ###################################
 
-apt-get install libaio1
+apt-get install libaio-dev
