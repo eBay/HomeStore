@@ -19,9 +19,7 @@ public:
     typedef LRUEvictRecord RecordType;
     typedef std::function< bool(const LRUEvictRecord &) > CanEjectCallback;
 
-    LRUEvictionPolicy(CanEvictCallback cb, GetSizeCallback gs_cb):
-        m_can_evict_cb(cb),
-        m_get_size_cb(gs_cb) {
+    LRUEvictionPolicy() {
     }
 
     void add(LRUEvictRecord &rec) {
@@ -70,8 +68,6 @@ public:
 private:
     std::mutex m_list_guard;
     boost::intrusive::list < LRUEvictRecord > m_list;
-    CanEvictCallback m_can_evict_cb;
-    GetSizeCallback m_get_size_cb;
 };
 
 }

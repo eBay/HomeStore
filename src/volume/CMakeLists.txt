@@ -22,7 +22,7 @@ set(TEST_VOLUME_SOURCE_FILES
         ../blkalloc/varsize_blk_allocator.cpp
         ../iomgr/iomgr.cpp
         ../iomgr/drive_endpoint.cpp
-        ../cache/eviction.cpp
+        ../cache/eviction.hpp
         ../cache/cache.cpp)
 
 add_executable(test_volume ${TEST_VOLUME_SOURCE_FILES})
