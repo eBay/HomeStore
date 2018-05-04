@@ -16,7 +16,7 @@
 
 namespace homestore {
 enum BlkStoreCacheType {
-    PASS_THRU       = 0,
+    PASS_THRU = 0,
     WRITEBACK_CACHE = 1,
     WRITETHRU_CACHE = 2
 };
@@ -28,8 +28,7 @@ enum BlkStoreCacheType {
  */
 #define CACHE_DISCARD_THRESHOLD_SIZE  16384
 
-class BlkStoreConfig
-{
+class BlkStoreConfig {
 public:
     /* Total size of BlkStore inital, it could grow based on demand. */
     uint64_t m_initial_size;
@@ -110,7 +109,7 @@ public:
     }
 
     /* Allocate a new block of the size based on the hints provided */
-    /* TODO: rishabh : we should have a return type here */ 
+    /* TODO: rishabh : we should have a return type here */
     void alloc_blk(uint8_t nblks, blk_alloc_hints &hints, BlkId *out_blkid) {
         // Allocate a block from the device manager
         m_vdev.alloc_blk(nblks, hints, out_blkid);
@@ -138,11 +137,11 @@ public:
         mvec.set(ptr, size, 0);
 
         // Insert this buffer to the cache.
-        auto ibuf = boost::intrusive_ptr< Buffer > (buf);
+        auto ibuf = boost::intrusive_ptr< Buffer >(buf);
         boost::intrusive_ptr< Buffer > out_bbuf;
-        bool inserted = m_cache->insert(*out_blkid, static_pointer_cast<CacheBuffer<BlkId>>(ibuf),
-                                        (boost::intrusive_ptr<CacheBuffer<BlkId>> *)&out_bbuf);
-                                        //(const boost::intrusive_ptr< CacheBuffer<BlkId> >)ibuf, &out_bbuf);
+        bool inserted = m_cache->insert(*out_blkid, static_pointer_cast< CacheBuffer< BlkId>>(ibuf),
+                                        (boost::intrusive_ptr< CacheBuffer< BlkId>> *) &out_bbuf);
+        //(const boost::intrusive_ptr< CacheBuffer<BlkId> >)ibuf, &out_bbuf);
 
         // TODO: Raise an exception if we are not able to insert - instead of assert
         assert(inserted);
@@ -153,34 +152,35 @@ public:
     /* Free the block previously allocated. Blkoffset refers to number of blks to skip in the BlkId and
      * nblks refer to the total blks from offset to free. This method returns a optional array of new
      * BlkIds - max of 2 in case complete BlkIds are not free. If it is single blk, it returns no value */
-    boost::optional<std::array<BlkId, 2>> free_blk(const BlkId &bid, boost::optional<uint8_t> blkoffset,
-                                                   boost::optional<uint8_t> nblks) {
+    boost::optional< std::array< BlkId, 2>> free_blk(const BlkId &bid, boost::optional< uint8_t > blkoffset,
+                                                     boost::optional< uint8_t > nblks) {
         boost::intrusive_ptr< Buffer > erased_buf;
-        boost::optional<std::array< BlkId, 2>> ret_arr;
+        boost::optional< std::array< BlkId, 2>> ret_arr;
 
         // Check if its a full element freed. In that case remove the element in the cache and free it up
         if ((blkoffset.get_value_or(0) == 0) && ((nblks == boost::none) || (nblks == bid.get_nblks()))) {
-            m_cache->erase(bid, (boost::intrusive_ptr<CacheBuffer<BlkId>> *)&erased_buf);
+            m_cache->erase(bid, (boost::intrusive_ptr< CacheBuffer< BlkId>> *) &erased_buf);
             m_vdev.free_blk(bid);
             return boost::none;
         }
 
         // Not the entire block is freed. Remove the entire entry from cache and split into possibly 2 entries
         // and insert it.
-        if (m_cache->erase(bid, (boost::intrusive_ptr<CacheBuffer<BlkId>> *)&erased_buf)) {
+        if (m_cache->erase(bid, (boost::intrusive_ptr< CacheBuffer< BlkId>> *) &erased_buf)) {
             // If number of blks we are freeing is more than 80% of the total buffer in cache, it does not make sense
             // to collect other buffers, creating a copy etc.. Just consider the entire entry is out of cache
             if (nblks.get() < (bid.get_nblks() * 0.8)) {
                 uint8_t from_blk = blkoffset.get_value_or(0);
                 uint8_t to_blk = from_blk + nblks.get_value_or(bid.get_nblks());
-                std::array< boost::intrusive_ptr< Buffer >, 2> bbufs = free_partial_cache(erased_buf, from_blk, to_blk);
+                std::array< boost::intrusive_ptr< Buffer >, 2 > bbufs = free_partial_cache(erased_buf, from_blk,
+                                                                                           to_blk);
 
                 // Add the split entries to the cache.
                 for (auto i = 0U; i < bbufs.size(); i++) {
                     ret_arr->at(i) = bbufs[i]->get_key();
                     boost::intrusive_ptr< Buffer > out_buf;
                     bool inserted = m_cache->insert(ret_arr->at(i), bbufs[i],
-                                                    (boost::intrusive_ptr<CacheBuffer<BlkId>> *)&out_buf);
+                                                    (boost::intrusive_ptr< CacheBuffer< BlkId>> *) &out_buf);
                     assert(inserted);
                 }
             }
@@ -203,7 +203,7 @@ public:
         return write(bid, blob, req);
     }
 
-     
+
     /* Write the buffer. The BlkStore write does not support write in place and so it does not also support
      * writing to an offset.
      *
@@ -212,9 +212,9 @@ public:
      * avoid any confusion to the interface, the value_offset parameter is not provided for this write type. If
      * needed can be added later */
     uint64_t get_elapsed_time(Clock::time_point startTime) {
-	std::chrono::nanoseconds ns = std::chrono::duration_cast
-				< std::chrono::nanoseconds >(Clock::now() - startTime);
-	return ns.count();
+        std::chrono::nanoseconds ns = std::chrono::duration_cast
+                < std::chrono::nanoseconds >(Clock::now() - startTime);
+        return ns.count();
     }
 
     boost::intrusive_ptr< BlkBuffer > write(BlkId &bid, homeds::blob &blob, struct blkstore_req *req) {
@@ -281,31 +281,32 @@ public:
 
         // Check if the entry exists in the cache.
         boost::intrusive_ptr< Buffer > bbuf;
-        bool cache_found = m_cache->get(bid, (boost::intrusive_ptr< CacheBuffer<BlkId> > *)&bbuf);
+        bool cache_found = m_cache->get(bid, (boost::intrusive_ptr< CacheBuffer< BlkId > > *) &bbuf);
         if (!cache_found) {
             // Not found in cache, create a new block buf and prepare it for insert to dev and cache.
             bbuf = homeds::ObjectAllocator< Buffer >::make_object();
             bbuf->set_key(bid);
         } else {
-	    	cache_hit++;
-	}
+            cache_hit++;
+        }
 
         uint32_t size_to_read = size;
         homeds::MemVector<BLKSTORE_BLK_SIZE>::cursor_t c;
 	int missing_piece_cnt = 0;
         while (size_to_read > 0) {
-            boost::optional< homeds::MemPiece<BLKSTORE_BLK_SIZE> &> missing_mp =
+            boost::optional< homeds::MemPiece< BLKSTORE_BLK_SIZE > & > missing_mp =
                     bbuf->get_memvec_mutable().fill_next_missing_piece(c, size, cur_offset);
             if (!missing_mp) {
                 // We don't have any missing pieces, so we are done reading the contents
                 break;
             }
-			    
+
             cur_offset = missing_mp->end_offset();
 
             // Create a new block of memory for the missing piece
             uint8_t *ptr;
-            int ret = posix_memalign((void **) &ptr, 4096, missing_mp->size()); // TODO: Align based on hw needs instead of 4k
+            int ret = posix_memalign((void **) &ptr, 4096,
+                                     missing_mp->size()); // TODO: Align based on hw needs instead of 4k
             if (ret != 0) {
                 throw std::bad_alloc();
             }
@@ -335,13 +336,13 @@ public:
         return m_vdev.get_size();
     }
 
-    VirtualDev<BAllocator, RoundRobinDeviceSelector> *get_vdev() {
+    VirtualDev< BAllocator, RoundRobinDeviceSelector > *get_vdev() {
         return &m_vdev;
     };
 
 private:
-    std::array< boost::intrusive_ptr< Buffer >, 2> free_partial_cache(const boost::intrusive_ptr< Buffer > inbuf,
-                                                                         uint8_t from_nblk, uint8_t to_nblk) {
+    std::array< boost::intrusive_ptr< Buffer >, 2 > free_partial_cache(const boost::intrusive_ptr< Buffer > inbuf,
+                                                                       uint8_t from_nblk, uint8_t to_nblk) {
         std::array< boost::intrusive_ptr< Buffer >, 2 > bbufs;
         int left_ind = 0, right_ind; // index within the vector the about to free blks cover
         uint32_t from_offset = from_nblk * BLKSTORE_BLK_SIZE;
@@ -377,8 +378,8 @@ private:
         homeds::MemVector< BLKSTORE_BLK_SIZE > right_mvec;
         mvec.find_index(to_offset, boost::none, &right_ind);
         if (left_ind == right_ind) {
-            auto right_mp = mvec.get_nth_piece((uint32_t)right_ind);
-            uint32_t sz = (right_mp.offset()+right_mp.size()) - to_offset;
+            auto right_mp = mvec.get_nth_piece((uint32_t) right_ind);
+            uint32_t sz = (right_mp.offset() + right_mp.size()) - to_offset;
             if (sz && (sz <= CACHE_DISCARD_THRESHOLD_SIZE)) {
                 uint8_t *ptr;
                 int ret = posix_memalign((void **) &ptr, 4096, sz); // TODO: Align based on hw needs instead of 4k
@@ -394,7 +395,7 @@ private:
         }
 
         for (auto i = right_ind; i < mvec.npieces(); i++) { // Update upto the tailing ones.
-            auto mp = mvec.get_nth_piece((uint32_t)i);
+            auto mp = mvec.get_nth_piece((uint32_t) i);
             right_mvec.push_back(mp);
         }
 
