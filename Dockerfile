@@ -1,40 +1,30 @@
-FROM ubuntu:16.04
+# ##########   #######   ############
+FROM ecr.vip.ebayc3.com/sds/sds_cpp_base:0.9
+LABEL description="Automated compilation for SDS HomeStore"
 
-RUN apt-get update && \
-    apt-get install -y software-properties-common && \
-    add-apt-repository ppa:ubuntu-toolchain-r/test && \
-    apt-get update && \
-    apt-get install -yq \
-    g++-6 gdb valgrind \
-    autoconf libtool automake \
-    vim git patch \
-    pkg-config \
-    libssl-dev \
-    libjemalloc-dev \
-    libboost-all-dev \
-    wget \
-    curl && \
-    update-alternatives --install /usr/bin/cpp cpp /usr/bin/cpp-6 60 && \
-    update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++-6 60 && \
-    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-6 60 && \
-    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-6 60 && \
-    update-alternatives --install /usr/bin/gcc-ar gcc-ar /usr/bin/gcc-ar-6 60 && \
-    update-alternatives --install /usr/bin/gcc-nm gcc-nm /usr/bin/gcc-nm-6 60 && \
-    update-alternatives --install /usr/bin/gcc-ranlib gcc-ranlib /usr/bin/gcc-ranlib-6 60 && \
-    update-alternatives --install /usr/bin/gcov gcov /usr/bin/gcov-6 60
+ARG CONAN_CHANNEL
+ARG CONAN_USER
+ENV CONAN_USER=${CONAN_USER:-demo}
+ENV CONAN_CHANNEL=${CONAN_CHANNEL:-dev}
 
-# Create a new Rails app under /src/my-app
-RUN mkdir -p /src
-RUN cd /tmp && \
-	wget https://cmake.org/files/v3.9/cmake-3.9.6.tar.gz && \
-	tar -xzvf cmake-3.9.6.tar.gz && \
-	cd cmake-3.9.6 && \
-	./bootstrap && \
-	make -j 4 && \
-	make install \
-	
-WORKDIR /src/
+COPY conanfile.py /tmp/source/
 
-# Default command is to run a rails server on port 3000
-#CMD ["rails", "server", "--binding", "0.0.0.0", "--port", "3000"]
-ENTRYPOINT ["bash"]
+RUN set -eux; \
+    PKG_VERSION=$(grep 'version =' /tmp/source/conanfile.py | awk '{print $3}'); \
+    PKG_VERSION="${PKG_VERSION%\"}"; \
+    PKG_VERSION="${PKG_VERSION#\"}"; \
+    echo ${PKG_VERSION} > /tmp/VERSION;
+
+COPY CMakeLists.txt /tmp/source/
+COPY src/ /tmp/source/src
+
+RUN conan create /tmp/source homestore/${PKG_VERSION}@"${CONAN_USER}"/"${CONAN_CHANNEL}";
+RUN conan create -pr debug /tmp/source homestore/${PKG_VERSION}@"${CONAN_USER}"/"${CONAN_CHANNEL}";
+
+ARG CONAN_PASS=${CONAN_USER}
+RUN conan user -r origin -p "${CONAN_PASS}" sds;
+
+CMD set -eux; \
+    PKG_VERSION=$(cat /tmp/VERSION); \
+    conan upload homestore/${PKG_VERSION}@"${CONAN_USER}"/"${CONAN_CHANNEL}" --all -r origin;
+# ##########   #######   ############
