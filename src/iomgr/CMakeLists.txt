@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ../../target/)
 
 set(TEST_IOMGR_SOURCE_FILES
-        endpoint.hpp
+        drive_endpoint.hpp
         drive_endpoint.cpp
         net_endpoint.cpp
         test_iomgr.cpp)

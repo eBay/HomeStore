@@ -1,0 +1,10 @@
+include_directories(BEFORE iomgr)
+
+add_subdirectory(homeds)
+add_subdirectory(device)
+add_subdirectory(blkalloc)
+add_subdirectory(cache)
+add_subdirectory(blkstore)
+add_subdirectory(kvstore)
+add_subdirectory(volume)
+add_subdirectory(iomgr)
