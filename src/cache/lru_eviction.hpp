@@ -19,7 +19,7 @@ public:
     typedef LRUEvictRecord RecordType;
     typedef std::function< bool(const LRUEvictRecord &) > CanEjectCallback;
 
-    LRUEvictionPolicy() {
+    LRUEvictionPolicy(int num_entries) {
     }
 
     void add(LRUEvictRecord &rec) {
