@@ -1,6 +1,8 @@
 #include <glog/logging.h>
+#include <gtest/gtest.h>
 #include "device/device.h"
 #include <fcntl.h>
+#include <cache/cache_common.hpp>
 #include <cache/cache.h>
 #include "blkstore.hpp"
 #include <mapping/mapping.hpp>
@@ -20,7 +22,6 @@ struct volume_req:blkstore_req {
 	int nblks;
 	Clock::time_point startTime;
 	int read_cnt;
-	std::vector< boost::intrusive_ptr< BlkBuffer >> buf_list;
 };
 
 class Volume {

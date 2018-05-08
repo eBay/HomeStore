@@ -22,8 +22,16 @@ EndPoint::EndPoint(class ioMgr *iomgr):iomgr(iomgr) {
 
 ioMgr::ioMgr(int num_ep, int num_threads):num_ep(num_ep), 
 	num_threads(num_threads), threads(num_threads) {
-
+	ready = false;
 	global_fd.reserve(num_ep * 10);	
+	threads.resize(num_threads);
+	for (int i = 0; i < num_threads; i++) {
+		int rc = pthread_create(&(threads[i].tid), NULL, 
+				iothread, (void *)this);
+		threads[i].id = i;
+		threads[i].inited = false;
+		assert(!rc);
+	}
 }
 
 void 
@@ -36,7 +44,7 @@ ioMgr::local_init() {
 	
 	if (epollfd < 1) {
 		assert(0);
-		LOG(INFO) << "epoll_ctl failed " << errno << "line number" << __LINE__; 
+		LOG(ERROR) << "epoll_ctl failed " << errno << "line number" << __LINE__; 
 	}
 	
 	for (int i = 0; i < MAX_PRI; i++) {
@@ -46,7 +54,7 @@ ioMgr::local_init() {
 		if (epoll_ctl(epollfd, EPOLL_CTL_ADD,
 			epollfd_pri[i], &ev) == -1) {
 			assert(0);
-			LOG(INFO) << "epoll_ctl failed " << errno << "line number" << __LINE__; 
+			LOG(ERROR) << "epoll_ctl failed " << errno << "line number" << __LINE__; 
 		}
 	}
 	
@@ -55,13 +63,15 @@ ioMgr::local_init() {
 	info->epollfd_pri = epollfd_pri;
 
 	for(int i = 0; i < global_fd.size(); i++) {
-		/* XXX: we should try with adding EPOLLEXCLUSIVE flag here */
+		/* We cannot use EPOLLEXCLUSIVE flag here. otherwise
+                 * some events can be missed.
+		 */
 		ev.events = EPOLLET | global_fd[i]->ev;
 		ev.data.ptr = global_fd[i];
 		if (epoll_ctl(epollfd_pri[global_fd[i]->pri], EPOLL_CTL_ADD,
 			global_fd[i]->fd, &ev) == -1) {
 			assert(0);
-			LOG(INFO) << "epoll_ctl failed " << errno << "line number" << __LINE__; 
+			LOG(ERROR) << "epoll_ctl failed " << errno << "line number" << __LINE__; 
 		}
 
 		add_local_fd(global_fd[i]->ev_fd[info->id], 
@@ -69,7 +79,7 @@ ioMgr::local_init() {
 					  std::placeholders::_2, std::placeholders::_3),
 				EPOLLIN, 1, global_fd[i]);
 		
-		LOG(INFO) << "registered global fds";
+		LOG(ERROR) << "registered global fds";
 	}
 	
 	assert(num_ep == ep_list.size());
@@ -79,18 +89,20 @@ ioMgr::local_init() {
 	}
 }
 
+void
+ioMgr::wait_for_ready() {
+	std::unique_lock<std::mutex> lck(cv_mtx);
+	while(!ready) cv.wait(lck);
+}
+
 void 
 ioMgr::add_ep(class EndPoint *ep) {
 	ep_list.push_back(ep);
 	if (ep_list.size() == num_ep) {
-		/* create threads */
-		for (int i = 0; i < num_threads; i++) {
-			int rc = pthread_create(&(threads[i].tid), NULL, 
-					iothread, (void *)this);
-			threads[i].id = i;
-			threads[i].inited = false;
-			assert(!rc);
-		}
+		/* allow threads to run */
+		std::unique_lock<std::mutex> lck(cv_mtx);
+		ready = true;
+		cv.notify_all();
 	}
 }
 
@@ -107,10 +119,10 @@ ioMgr::add_fd(int fd, ev_callback cb, int iomgr_ev, int pri, void *cookie) {
 	info->is_global = true;
 	info->pri = pri;
 	info->cookie = cookie;
-	info->ev_fd.resize(threads.size());
-	info->event.resize(threads.size());
-	for (int i = 0; i < threads.size(); i++) {
-		info->ev_fd[i] = eventfd(0, EFD_NONBLOCK);;
+	info->ev_fd.resize(num_threads);
+	info->event.resize(num_threads);
+	for (int i = 0; i < num_threads; i++) {
+		info->ev_fd[i] = eventfd(0, EFD_NONBLOCK);
 		info->event[i] = 0;
 	}
 	
@@ -118,7 +130,7 @@ ioMgr::add_fd(int fd, ev_callback cb, int iomgr_ev, int pri, void *cookie) {
 	
 	struct epoll_event ev;
 	/* add it to all the threads */
-	for (int i = 0; i < threads.size(); i++) {
+	for (int i = 0; i < num_threads; i++) {
 		ev.events = EPOLLET | info->ev;
 		ev.data.ptr = info;
 		if (!threads[i].inited) {
@@ -149,6 +161,7 @@ ioMgr::add_fd_to_thread(int i, int fd, ev_callback cb,
 			      int iomgr_ev, int pri, void *cookie) {
 	struct epoll_event ev;
 	struct fd_info* info = new struct fd_info;
+	std::unique_lock<std::mutex> lck(map_mtx);
 	fd_info_map.insert(std::pair<int, fd_info*>(fd, info));	
 
 	info->cb = cb;
@@ -193,15 +206,19 @@ ioMgr::can_process(void *data, uint32_t ev) {
 		assert(0);
 	}
 	if (ret) {
-		LOG(INFO) << "running for fd" << info->fd;
+//		LOG(INFO) << "running for fd" << info->fd;
 	}else {
-		LOG(INFO) << "not allowed running for fd" << info->fd;
+//		LOG(INFO) << "not allowed running for fd" << info->fd;
 	}
 	return ret;
 }
 
 void
 ioMgr::fd_reschedule(int fd, uint32_t event) {
+	/* XXX: we might need to take a lock, if we 
+	 * support dynamic add/remove of FDs. To make  it lockless
+	 * we should consider fd_info in fd_reschedule.
+	 */
 	std::map<int, fd_info*>::iterator it;
 	it = fd_info_map.find(fd);
 	assert(it->first == fd);
@@ -210,7 +227,7 @@ ioMgr::fd_reschedule(int fd, uint32_t event) {
 	uint64_t min_cnt = UINTMAX_MAX;
 	int min_id = 0;
 	
-	for(int i = 0; i < threads.size(); i++) {
+	for(int i = 0; i < num_threads; i++) {
 		if (threads[i].count < min_cnt) {
 			min_id = i;
 			min_cnt = threads[i].count;
@@ -228,27 +245,31 @@ ioMgr::process_evfd(int fd, void *data, uint32_t event) {
 	pthread_t t = pthread_self();
 	thread_info *tinfo = get_tid_info(t);
 
-	if (info->event[tinfo->id] & EPOLLIN) {
-		info->is_running[READ].fetch_add(1, 
-				std::memory_order_acquire);
+	if (info->event[tinfo->id] & EPOLLIN && can_process(info, event)) {
 		info->cb(info->fd, info->cookie, EPOLLIN);
-		info->is_running[READ].fetch_sub(1, 
-				std::memory_order_acquire);
 	}
 	
-	if (info->event[tinfo->id] & EPOLLOUT) {
-		info->is_running[WRITE].fetch_add(1, 
-				std::memory_order_acquire);
+	if (info->event[tinfo->id] & EPOLLOUT && can_process(info, event)) {
 		info->cb(info->fd, info->cookie, EPOLLOUT);
-		info->is_running[WRITE].fetch_sub(1, 
-				std::memory_order_acquire);
 	}
 	info->event[tinfo->id] = 0;
+	process_done(fd, event);
 	read(fd, &temp, sizeof(uint64_t));
 }
 
+void
+ioMgr::process_done(int fd, int ev) {
+	std::map<int, fd_info*>::iterator it;
+	it = fd_info_map.find(fd);
+	assert(it->first == fd);
+
+	struct fd_info *info = it->second;
+	
+	process_done_impl(info, ev);
+}
+
 void 
-ioMgr::process_done(void *data, int ev) {
+ioMgr::process_done_impl(void *data, int ev) {
 	struct fd_info *info = (struct fd_info *)data;
 	if (ev == EPOLLIN) {
 		int count = info->is_running[READ].fetch_sub(1, 
@@ -288,37 +309,37 @@ void* homeio::iothread(void *obj) {
 	struct epoll_event events[MAX_EVENTS];
 	int num_fds;
 
+	iomgr->wait_for_ready();
 	/* initialize the variables local to a thread */
 	iomgr->local_init();
 
 	info->count = 0;
 	info->time_spent_ns = 0;
 	while (1) {
-		LOG(INFO) << "waiting " << info->id;
+	//	LOG(INFO) << "waiting " << info->id;
 		num_fds = epoll_wait(iomgr->epollfd, fd_events, MAX_PRI, -1);
 		for (int i = 0; i < MAX_PRI; i++) {
-			/* XXX: should it be little intelligent to go through
+			/* XXX: should it be  go through only
 			 * those fds which has the events.
 			 */
 			num_fds = epoll_wait(iomgr->epollfd_pri[i], events, 
 				MAX_EVENTS, 0);
 			if (num_fds < 1) {
-				LOG(ERROR) << "epoll wait failed" << errno;
+				LOG(ERROR) << "epoll wait failed " << errno;
 				continue;
 			}
-			LOG(INFO) << "waking" << info->id;
-			Clock::time_point write_startTime = Clock::now();
+//			LOG(INFO) << "waking" << info->id;
 			for (int i = 0; i < num_fds; i++) {
 				if (iomgr->can_process(events[i].data.ptr, events[i].events)) {
+					Clock::time_point write_startTime = Clock::now();
 					info->count++;
 					iomgr->callback(events[i].data.ptr, 
 							events[i].events);
-					iomgr->process_done(events[i].data.ptr, events[i].events);
+					info->time_spent_ns += get_elapsed_time_ns(write_startTime);
 				} else {
-					LOG(INFO) << "can not process in thread" << info->id;
+			//		LOG(INFO) << "can not process in thread" << info->id;
 				}
 			}
-			info->time_spent_ns += get_elapsed_time_ns(write_startTime);
 		}
 	}
 }

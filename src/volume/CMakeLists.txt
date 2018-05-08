@@ -2,6 +2,10 @@ cmake_minimum_required(VERSION 3.7)
 project(volume)
 
 set(CMAKE_CXX_STANDARD 14)
+if (CMAKE_BUILD_TYPE MATCHES Release)
+    add_definitions(-DNDEBUG=1)
+    add_definitions(-O2)
+endif()
 
 include_directories(..)
 include_directories(../iomgr)
@@ -17,12 +21,12 @@ set(TEST_VOLUME_SOURCE_FILES
           volume.cpp
           vol_test.cpp
         ../device/virtual_dev.hpp
+	../cache/eviction.hpp
         ../device/device_manager.cpp
         ../device/physical_dev.cpp
         ../blkalloc/varsize_blk_allocator.cpp
         ../iomgr/iomgr.cpp
         ../iomgr/drive_endpoint.cpp
-        ../cache/eviction.cpp
         ../cache/cache.cpp)
 
 add_executable(test_volume ${TEST_VOLUME_SOURCE_FILES})

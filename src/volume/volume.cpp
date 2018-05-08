@@ -8,7 +8,7 @@
 using namespace std;
 using namespace homestore;
 
-#define MAX_CACHE_SIZE     (8 * 1024ul * 1024ul * 1024ul) /* it has to be a multiple of 16k */
+#define MAX_CACHE_SIZE     (2 * 1024ul * 1024ul * 1024ul) /* it has to be a multiple of 16k */
 #define BLOCK_SIZE       (8 * 1024ul)
 
 
@@ -136,7 +136,7 @@ homestore::Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks, volume_req*
     }
     req->bid = bid;
 
-    LOG(INFO) << "Requested nblks: " << (uint32_t) nblks << " Allocation info: " << bid.to_string();
+   // LOG(INFO) << "Requested nblks: " << (uint32_t) nblks << " Allocation info: " << bid.to_string();
 
     homeds::blob b = {buf, (uint32_t)(BLOCK_SIZE * nblks)};
 
@@ -146,7 +146,7 @@ homestore::Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks, volume_req*
     write_time.fetch_add(get_elapsed_time(startTime), memory_order_relaxed);
     // cout << "written\n";
 //    cout << "Written on " << bid.to_string() << " for 8192 bytes";
-    LOG(INFO) << "Written on " << bid.to_string() << " for 8192 bytes";
+  //  LOG(INFO) << "Written on " << bid.to_string() << " for 8192 bytes";
     return bbuf;
 }
 
@@ -159,6 +159,8 @@ homestore::Volume::read(uint64_t lba, int nblks, volume_req* req) {
 //	cout << lba;
 //	cout << "number of blocks";
 //	cout << nblks;
+    
+    req->startTime = Clock::now();
     Clock::time_point startTime = Clock::now();
     if (map->get(lba, nblks, blkIdList)) {
         ASSERT(0);
@@ -170,16 +172,13 @@ homestore::Volume::read(uint64_t lba, int nblks, volume_req* req) {
     req->nblks = nblks;
     req->is_read = true;
     req->read_cnt = 0;
-    req->startTime = Clock::now();
+    req->read_cnt = blkIdList.size();
     
     startTime = Clock::now();
     for (auto bInfo: blkIdList) {
        // LOG(INFO) << "Read from " << bInfo.to_string() << " for 8192 bytes";
 //	printf("blkid %d\n", bInfo.m_id);
         boost::intrusive_ptr< BlkBuffer > bbuf = blk_store->read(bInfo, 0, BLOCK_SIZE * bInfo.get_nblks(), req);
-	req->buf_list.push_back(bbuf);
-    	req->bid = bInfo;
-	req->read_cnt++;
     }
     read_time.fetch_add(get_elapsed_time(startTime), memory_order_relaxed);
     return 0;

@@ -45,6 +45,7 @@ struct blkstore_req:virtualdev_req {
 	uint64_t size;
 	boost::intrusive_ptr< BlkBuffer > write_bbuf;
 	boost::intrusive_ptr< BlkBuffer > read_bbuf;
+	std::vector< boost::intrusive_ptr< BlkBuffer >> read_buf_list;
 	int missing_piece_cnt;
 	bool cache_found;
 };
@@ -62,7 +63,12 @@ public:
 		return;
 	}
 
-	homeds::blob b  = req->read_bbuf->at_offset(0);
+	/* TODO: read_bbuf will be overwritten if it is reading from multiple
+  	 * blocks because there is only one request for each IO. Need to
+	 * fix it by calling cache after all buffers are read from volume
+	 * layer.
+	 */
+	homeds::blob b = req->read_bbuf->at_offset(0);
 	if (!req->cache_found) {
 	    /* It is not there in the cache */
             boost::intrusive_ptr< Buffer > new_bbuf;
@@ -109,7 +115,7 @@ public:
     }
 
     /* Allocate a new block of the size based on the hints provided */
-    /* TODO: rishabh : we should have a return type here */
+    /* TODO: rishabh : we should have a return type here */ 
     void alloc_blk(uint8_t nblks, blk_alloc_hints &hints, BlkId *out_blkid) {
         // Allocate a block from the device manager
         m_vdev.alloc_blk(nblks, hints, out_blkid);
@@ -292,9 +298,13 @@ public:
 
         uint32_t size_to_read = size;
         homeds::MemVector<BLKSTORE_BLK_SIZE>::cursor_t c;
-	int missing_piece_cnt = 0;
-        while (size_to_read > 0) {
-            boost::optional< homeds::MemPiece< BLKSTORE_BLK_SIZE > & > missing_mp =
+	req->missing_piece_cnt = 0;
+	req->read_bbuf = bbuf;
+	req->cache_found = cache_found;
+	req->read_buf_list.push_back(bbuf);
+        
+	while (size_to_read > 0) {
+            boost::optional< homeds::MemPiece<BLKSTORE_BLK_SIZE> &> missing_mp =
                     bbuf->get_memvec_mutable().fill_next_missing_piece(c, size, cur_offset);
             if (!missing_mp) {
                 // We don't have any missing pieces, so we are done reading the contents
@@ -315,16 +325,16 @@ public:
             // Read the missing piece from the device
             BlkId tmp_bid(bid.get_id() + missing_mp->offset()/BLKSTORE_BLK_SIZE,
                           missing_mp->size()/BLKSTORE_BLK_SIZE, bid.get_chunk_num());
+	    /* TODO: we should first find number the missing pieces before calling read.
+	     * it can cause incomplete reads for sync IOs.
+	     */
+	    req->missing_piece_cnt++;
             m_vdev.read(tmp_bid, missing_mp.get(), req);
 	    read_cnt.fetch_add(1, memory_order_relaxed);
             size_to_read -= missing_mp->size();
-	    missing_piece_cnt++;
         }
 
-	req->missing_piece_cnt = missing_piece_cnt;
-	req->read_bbuf = bbuf;
-	req->cache_found = cache_found;
-	if (missing_piece_cnt == 0) {
+	if (req->missing_piece_cnt == 0) {
 		assert(cache_found);
 		m_comp_cb(0, dynamic_cast< struct blkstore_req* >(req));
 	}

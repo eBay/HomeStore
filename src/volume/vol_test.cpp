@@ -25,17 +25,17 @@ homestore::Volume *vol;
 
 #define MAX_OUTSTANDING_IOs 64
 #define MAX_CNT_THREAD 8
-#define MAX_THREADS 16
+#define MAX_THREADS 8
 
 #define WRITE_SIZE (8 * 1024) /* should be multple of 8k */
-int is_random_read = false;
+int is_random_read = true;
 int is_random_write = false;
 bool is_read = true;
 bool is_write = true;
 
 #define BUF_SIZE (WRITE_SIZE/8192) /* it will go away once mapping layer is fixed */
-#define MAX_BUF ((16 * 1024ul * 1024ul * 1024ul)/WRITE_SIZE)
-#define MAX_VOL_SIZE (20ul * 1024ul * 1024ul * 1024ul) 
+#define MAX_BUF ((24 * 1024ul * 1024ul * 1024ul)/WRITE_SIZE)
+#define MAX_VOL_SIZE (40ul * 1024ul * 1024ul * 1024ul) 
 uint8_t *bufs[MAX_BUF];
 boost::intrusive_ptr<homestore::BlkBuffer>boost_buf[MAX_BUF];
 
@@ -73,12 +73,14 @@ public:
 	}
 	
 	void process_ev_impl(int fd, void *cookie, int event) {
-		if ((atomic_load(&outstanding_ios) + MAX_CNT_THREAD - info.outstanding_ios_per_thread) < MAX_OUTSTANDING_IOs) {
+		iomgr->process_done(fd, event);
+		if ((atomic_load(&outstanding_ios) + MAX_CNT_THREAD) < MAX_OUTSTANDING_IOs) {
 			/* raise an event */
 			iomgr->fd_reschedule(fd, event);
 		}
+		int cnt = 0;
 		while (atomic_load(&outstanding_ios) < MAX_OUTSTANDING_IOs && 
-						info.outstanding_ios_per_thread < MAX_CNT_THREAD) {
+						cnt < MAX_CNT_THREAD) {
 			int temp;
 			outstanding_ios++;
 			if((temp = write_cnt.fetch_add(1, std::memory_order_relaxed)) < MAX_BUF) {
@@ -93,8 +95,8 @@ public:
 				}
 				readfunc(temp);
 			}
-			info.outstanding_ios_per_thread++;
-			assert(outstanding_ios > 0);
+			cnt++;
+			assert(outstanding_ios >= 0);
 		}
 	 }
 	 
@@ -123,7 +125,7 @@ public:
 			 assert(!is_read);
 			 uint64_t random = rand();
 			 uint64_t i = (random % (MAX_BUF));
-			 boost_buf[i] = vol->write(i * BUF_SIZE, bufs[i], BUF_SIZE, req);
+			 boost_buf[cnt] = vol->write(i * BUF_SIZE, bufs[i], BUF_SIZE, req);
 			/* store intrusive buffer pointer */
 		 } else {
 			 std::vector<boost::intrusive_ptr< BlkBuffer >> buf_list;
@@ -158,14 +160,15 @@ public:
 		uint64_t temp = 1;
 		outstanding_ios--;
 		assert(outstanding_ios >= 0);
-		info.outstanding_ios_per_thread--;
-		read(ev_fd, &temp, sizeof(uint64_t));
-		write(ev_fd, &temp, sizeof(uint64_t));
+		uint64_t size = write(ev_fd, &temp, sizeof(uint64_t));
+		if (size != sizeof(uint64_t)) {
+			assert(0);
+		}
 		if (req->is_read) {
 			/* memcmp */
-			homeds::blob b  = req->buf_list[0]->at_offset(0);	
-			assert(b.size == BUF_SIZE * 8192);
 #ifndef NDEBUG
+			homeds::blob b  = req->read_buf_list[0]->at_offset(0);	
+			assert(b.size == BUF_SIZE * 8192);
 			int j = memcmp((void *)b.bytes, (void *)bufs[req->indx], b.size);
 			assert(j == 0);
 #endif
@@ -181,7 +184,9 @@ public:
 
 thread_local test_ep::thread_info test_ep::info = {0};
 
+INIT_VMODULES(CACHE_VMODULES);
 int main(int argc, char** argv) {
+//        InithomedsLogging(0, CACHE_VMODULES);
 	std::vector<std::string> dev_names; 
 	bool create = ((argc > 1) && (!strcmp(argv[1], "-c")));
 

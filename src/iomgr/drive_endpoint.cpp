@@ -74,6 +74,13 @@ DriveEndPoint::process_completions(int fd, void *cookie, int event) {
 	assert(fd == ev_fd);
 	/* TODO need to handle the error events */
 	uint64_t temp = 0;
+	
+	/* we should read the event first so that we don't miss 
+	 * any completions. We might get spurious events but i
+	 * think thats fine.
+	 */
+	iomgr->process_done(fd, event);
+	read(ev_fd, &temp, sizeof(uint64_t));
 	int ret = io_getevents(ioctx, 0, MAX_COMPLETIONS, 
 			events, NULL);
 	if (ret == 0) {
@@ -97,13 +104,14 @@ DriveEndPoint::process_completions(int fd, void *cookie, int event) {
 		iocb_list.push(info);
 		comp_cb(events[i].res, (uint8_t *) events[i].data);
 	}
-	read(ev_fd, &temp, sizeof(uint64_t));
 }
 
 void
 DriveEndPoint::print_perf() {
 	printf("latency for write in aio %lu us\n", write_aio_lat.load()/(total_write_ios.load() * 1000));
-	printf("latency for read in aio %lu us\n", read_aio_lat.load()/(total_read_ios.load() * 1000));
+	if (total_read_ios.load() != 0) {
+		printf("latency for read in aio %lu us\n", read_aio_lat.load()/(total_read_ios.load() * 1000));
+	}
 	printf("spurious events %lu \n", spurious_events.load());
 	printf("completion errors %lu \n", cmp_err.load());
 }

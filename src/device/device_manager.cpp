@@ -15,7 +15,7 @@ namespace homestore {
 
 DeviceManager::DeviceManager(NewVDevCallback vcb, uint32_t vdev_metadata_size, ioMgr* iomgr, 
 				homeio::comp_callback cb) :
-        m_open_flags(O_RDWR),// | O_DIRECT),
+        m_open_flags(O_RDWR | O_DIRECT),
         m_new_vdev_cb(vcb), iomgr(iomgr), comp_cb(cb) {
     m_pdev_info.num_phys_devs = 0;
     m_last_vdevid = INVALID_VDEV_ID;
