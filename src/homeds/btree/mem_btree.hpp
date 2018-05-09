@@ -27,7 +27,7 @@ namespace homeds { namespace btree {
 struct mem_btree_node_header {
     /* TODO: do we need to have magic or version number */
     homeds::atomic_counter<uint16_t> refcount;
-} __attribute__((__packed__));
+};
 
 #define MemBtreeNodeDeclType BtreeNode<MEM_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize>
 #define MemBtreeImpl BtreeSpecificImpl<MEM_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize>

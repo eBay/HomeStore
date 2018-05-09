@@ -10,7 +10,7 @@
 
 namespace homeds { namespace btree {
 
-typedef struct __attribute__((__packed__)) {
+typedef struct {
     homeds::atomic_counter< uint16_t > upgraders;
     folly::SharedMutexReadPriority lock;
 } transient_hdr_t;

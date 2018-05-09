@@ -204,7 +204,7 @@ int main(int argc, char** argv) {
 	/* Create/Load the devices */
 	printf("creating devices\n");
 	dev_mgr = new homestore::DeviceManager(Volume::new_vdev_found,
-                                               0,
+                                               0, 
                                                &iomgr,
                                                virtual_dev_process_completions);
 	try {

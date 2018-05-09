@@ -1,10 +1,8 @@
 #include <glog/logging.h>
-#include <gtest/gtest.h>
 #include "device/device.h"
 #include <fcntl.h>
 #include <cache/cache_common.hpp>
 #include <cache/cache.h>
-#include "blkstore.hpp"
 #include <mapping/mapping.hpp>
 #include <device/blkbuffer.hpp>
 #include <blkstore/blkstore.hpp>
