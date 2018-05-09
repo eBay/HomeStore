@@ -26,7 +26,7 @@ namespace homeds {
 #define get_size_in_tag(tag)  (actual_size((tag) & 0xff))
 #endif
 
-struct __mempiece_tag {
+struct __attribute__((__may_alias__)) __mempiece_tag {
     uint16_t m_size:8;       /* Size shrinked by SizeMultipler */
     uint16_t m_offset:8;     /* Offset within the mem piece */
 
@@ -108,7 +108,7 @@ private:
 
     __mempiece_tag get_tag() const {
         uint16_t i = m_mem.get_tag();
-        return (*(__mempiece_tag *)&i);
+        return *reinterpret_cast<__mempiece_tag *>(&i);
     }
 
     void set_tag(__mempiece_tag t) {
