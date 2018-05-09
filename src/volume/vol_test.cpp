@@ -23,23 +23,27 @@ INIT_VMODULES(BTREE_VMODULES);
 homestore::DeviceManager *dev_mgr = nullptr;
 homestore::Volume *vol;
 
-#define MAX_OUTSTANDING_IOs 64
-#define MAX_CNT_THREAD 8
-#define MAX_THREADS 8
+constexpr auto MAX_OUTSTANDING_IOs = 64u;
+constexpr auto MAX_CNT_THREAD = 8u;
+constexpr auto MAX_THREADS = 8u;
 
-#define WRITE_SIZE (8 * 1024) /* should be multple of 8k */
+constexpr auto Ki = 1024ull;
+constexpr auto Mi = Ki * Ki;
+constexpr auto Gi = Ki * Mi;
+constexpr auto WRITE_SIZE = 8 * Ki;
+constexpr auto BUF_SIZE = WRITE_SIZE / (8 * Ki);
+constexpr auto MAX_BUF = (24 * Gi) / WRITE_SIZE;
+constexpr auto MAX_VOL_SIZE = (40 * Gi);
+constexpr auto MAX_READ = MAX_BUF ;
+
 int is_random_read = true;
 int is_random_write = false;
 bool is_read = true;
 bool is_write = true;
 
-#define BUF_SIZE (WRITE_SIZE/8192) /* it will go away once mapping layer is fixed */
-#define MAX_BUF ((24 * 1024ul * 1024ul * 1024ul)/WRITE_SIZE)
-#define MAX_VOL_SIZE (40ul * 1024ul * 1024ul * 1024ul) 
 uint8_t *bufs[MAX_BUF];
 boost::intrusive_ptr<homestore::BlkBuffer>boost_buf[MAX_BUF];
 
-#define MAX_READ MAX_BUF 
 /* change it to atomic counters */
 std::atomic<uint64_t> read_cnt(0);
 std::atomic<uint64_t> write_cnt(0);
@@ -54,7 +58,7 @@ uint64_t get_elapsed_time(homeio::Clock::time_point startTime)
 }
 
 
-std::atomic<int> outstanding_ios(0);
+std::atomic<size_t> outstanding_ios(0);
 class test_ep : homeio::EndPoint {
 	 struct req:volume_req {
 		int indx;
@@ -78,10 +82,10 @@ public:
 			/* raise an event */
 			iomgr->fd_reschedule(fd, event);
 		}
-		int cnt = 0;
+		size_t cnt = 0;
 		while (atomic_load(&outstanding_ios) < MAX_OUTSTANDING_IOs && 
 						cnt < MAX_CNT_THREAD) {
-			int temp;
+			size_t temp;
 			outstanding_ios++;
 			if((temp = write_cnt.fetch_add(1, std::memory_order_relaxed)) < MAX_BUF) {
 				if (temp == 1) {
@@ -96,7 +100,7 @@ public:
 				readfunc(temp);
 			}
 			cnt++;
-			assert(outstanding_ios >= 0);
+			assert(outstanding_ios != SIZE_MAX);
 		}
 	 }
 	 
@@ -159,7 +163,7 @@ public:
 		/* raise an event */
 		uint64_t temp = 1;
 		outstanding_ios--;
-		assert(outstanding_ios >= 0);
+		assert(outstanding_ios != SIZE_MAX);
 		uint64_t size = write(ev_fd, &temp, sizeof(uint64_t));
 		if (size != sizeof(uint64_t)) {
 			assert(0);
@@ -199,8 +203,10 @@ int main(int argc, char** argv) {
 
 	/* Create/Load the devices */
 	printf("creating devices\n");
-	dev_mgr = new homestore::DeviceManager(Volume::new_vdev_found, 0, 
-				&iomgr, virtual_dev_process_completions);
+	dev_mgr = new homestore::DeviceManager(Volume::new_vdev_found,
+                                               0,
+                                               &iomgr,
+                                               virtual_dev_process_completions);
 	try {
 		dev_mgr->add_devices(dev_names);
 	} catch (std::exception &e) {
@@ -215,11 +221,11 @@ int main(int argc, char** argv) {
 	/* create dataset */
 	auto devs = dev_mgr->get_all_devices(); 
 	printf("creating dataset \n");
-	for (auto i = 0; i < MAX_BUF; i++) {
+	for (auto i = 0u; i < MAX_BUF; i++) {
 //		bufs[i] = new uint8_t[8192*1000]();
 		bufs[i] = (uint8_t *)malloc(8192 * BUF_SIZE);
 		uint8_t *bufp = bufs[i];
-		for (auto j = 0; j < (8192 * BUF_SIZE/8); j++) {
+		for (auto j = 0u; j < (8192 * BUF_SIZE/8); j++) {
 			memset(bufp, i + j + 1 , 8);
 			bufp = bufp + 8;
 		}
