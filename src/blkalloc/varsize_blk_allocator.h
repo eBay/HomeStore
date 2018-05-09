@@ -1,9 +1,7 @@
 //
 // Created by Kadayam, Hari on 14/10/17.
 //
-
-#ifndef OMSTORAGE_VARSIZE_BLK_ALLOCATOR_H
-#define OMSTORAGE_VARSIZE_BLK_ALLOCATOR_H
+#pragma once
 
 #include "blk_allocator.h"
 #include <boost/heap/binomial_heap.hpp>
@@ -498,4 +496,3 @@ private:
 #define TEMP_RANGE_LAST      (uint32_t)-1
 
 } // namespace homestore
-#endif //OMSTORAGE_VARSIZE_BLK_ALLOCATOR_H

@@ -236,7 +236,7 @@ public:
             if (!hints.can_look_for_other_dev) {
                 break;
             }
-            dev_ind = (uint32_t)((++dev_ind) % m_primary_pdev_chunks_list.size());
+            dev_ind = (uint32_t)((dev_ind+1) % m_primary_pdev_chunks_list.size());
         } while (dev_ind != start_dev_ind);
 
         if (status == BLK_ALLOC_SUCCESS) {

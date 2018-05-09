@@ -1,9 +1,8 @@
 //
 // Created by Rishabh Mittal 04/20/2018
 //
+#pragma once
 
-#ifndef _DRIVE_ENDPOINT_HPP_
-#define _DRIVE_ENDPOINT_HPP_
 #include <unistd.h>
 #include <string>
 #include <iomgr.hpp>
@@ -79,4 +78,3 @@ public:
 }
 #endif
 }
-#endif //HOMESTORE_FD_HPP
