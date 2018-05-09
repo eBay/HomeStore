@@ -16,7 +16,7 @@ namespace homestore {
 DeviceManager::DeviceManager(NewVDevCallback vcb, uint32_t vdev_metadata_size, ioMgr* iomgr, 
 				homeio::comp_callback cb) :
         m_open_flags(O_RDWR | O_DIRECT),
-        m_new_vdev_cb(vcb), iomgr(iomgr), comp_cb(cb) {
+        comp_cb(cb), m_new_vdev_cb(vcb), iomgr(iomgr){
     m_pdev_info.num_phys_devs = 0;
     m_last_vdevid = INVALID_VDEV_ID;
     m_vdev_metadata_size = vdev_metadata_size;
@@ -72,7 +72,7 @@ void DeviceManager::add_devices(std::vector< std::string > &dev_names) {
         // Format the m_pdev_info
         m_pdev_info.version = CURRENT_PDEV_INFO_BLOCK_VERSION;
         m_pdev_info.num_phys_devs = (uint32_t)uninit_devs.size();
-        for (auto i = 0; i < uninit_devs.size(); i++) {
+        for (auto i = 0u; i < uninit_devs.size(); i++) {
             m_pdev_info.pdev_info_blks[i] = uninit_devs[i]->get_super_block_header()->this_dev_info;
         }
 
@@ -91,7 +91,7 @@ void DeviceManager::add_devices(std::vector< std::string > &dev_names) {
         m_vdev_info.first_vdev_id = INVALID_VDEV_ID;
     } else {
         // Add the newly initialized device to the pdev list
-        for (auto i = 0; i < uninit_devs.size(); i++) {
+        for (auto i = 0u; i < uninit_devs.size(); i++) {
             m_pdev_info.pdev_info_blks[m_pdev_info.num_phys_devs + i] =
                     uninit_devs[i]->get_super_block_header()->this_dev_info;
         }

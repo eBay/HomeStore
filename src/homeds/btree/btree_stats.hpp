@@ -7,7 +7,7 @@
 #include "homeds/utility/stats.hpp"
 
 namespace homeds { namespace btree {
-#define VALUES              \
+#define BVALUES              \
     X(BTREE_STATS_OBJ_COUNT,            COUNTER,    STATS_INVALID_INDEX, "Btree Object Count")    \
     X(BTREE_STATS_LEAF_NODE_COUNT,      COUNTER,    STATS_INVALID_INDEX, "Btree Leaf node Count") \
     X(BTREE_STATS_INT_NODE_COUNT,       COUNTER,    STATS_INVALID_INDEX, "Btree Interior node Count") \
@@ -15,16 +15,17 @@ namespace homeds { namespace btree {
     X(BTREE_STATS_MERGE_COUNT,          COUNTER,    STATS_INVALID_INDEX, "Btree Node merge Count")
 
 #define X(ind, type, mean_of, desc) ind,
-enum btree_stats_type : uint32_t {VALUES};
+enum btree_stats_type : uint32_t {BVALUES};
 #undef X
 
 #define X(ind, type, mean_of, desc) {ind, type, mean_of, desc},
-static std::vector< homeds::stats_key > btree_stats_keys = {VALUES};
+static std::vector< homeds::stats_key > btree_stats_keys = {BVALUES};
+#undef X
 
 class BtreeStats : public Stats {
 public:
     BtreeStats() :
-            //Stats({VALUES}) {}
+            //Stats({BVALUES}) {}
             Stats(btree_stats_keys) {}
 
     uint64_t get_obj_count() const {

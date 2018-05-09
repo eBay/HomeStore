@@ -104,7 +104,7 @@ public:
 #define MappingBtreeDeclType     homeds::btree::Btree<homeds::btree::MEM_BTREE, MappingKey, MappingValue, \
                                     homeds::btree::BTREE_NODETYPE_SIMPLE, homeds::btree::BTREE_NODETYPE_SIMPLE>
 #define KEY_RANGE	1
-#define BLOCK_SIZE	8192
+constexpr auto MAP_BLOCK_SIZE	= 8192;
 
 class mapping {
 private:
@@ -112,7 +112,7 @@ private:
 public:
 	mapping(uint32_t volsize) {
 		homeds::btree::BtreeConfig btree_cfg;
-		btree_cfg.set_max_objs(volsize/(KEY_RANGE*BLOCK_SIZE));
+		btree_cfg.set_max_objs(volsize/(KEY_RANGE*MAP_BLOCK_SIZE));
 		btree_cfg.set_max_key_size(sizeof(MappingKey));
 		btree_cfg.set_max_value_size(sizeof(MappingValue));
 		m_bt = MappingBtreeDeclType::create_btree(btree_cfg, NULL); 

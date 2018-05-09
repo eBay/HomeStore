@@ -12,27 +12,27 @@ namespace homeds {
 template <typename T>
 class sparse_vector : public std::vector <T > {
 public:
-    T& operator[] (const int index) {
+    T& operator[] (const size_t index) {
         fill_void(index);
         return std::vector<T>::operator[](index);
     }
 
-    T& at(const int index) {
+    T& at(const size_t index) {
         fill_void(index);
         return std::vector<T>::at(index);
     }
 
-    const T& operator[] (const int index) const {
+    const T& operator[] (const size_t index) const {
         assert(index < std::vector<T>::size());
         return std::vector<T>::operator[](index);
     }
 
-    const T& at(const int index) const {
+    const T& at(const size_t index) const {
         return std::vector<T>::at(index);
     }
 
 private:
-    void fill_void(const int index) {
+    void fill_void(const size_t index) {
         for (auto i = std::vector<T>::size(); i <= index; i++) {
             std::vector<T>::emplace_back();
         }

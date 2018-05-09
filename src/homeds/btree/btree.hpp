@@ -274,8 +274,8 @@ public:
 
     /* Given a regex key, tries to get all data that falls within the regex. Returns all the values
      * and also number of values that fall within the ranges */
-    uint32_t get_multi(const BtreeSearchRange &range, std::vector<std::pair<BtreeKey *, BtreeValue *>> outval) {
-    }
+//    uint32_t get_multi(const BtreeSearchRange &range, std::vector<std::pair<BtreeKey *, BtreeValue *>> outval) {
+//    }
 
     bool remove_any(const BtreeSearchRange &range, BtreeKey *outkey, BtreeValue *outval) {
         homeds::thread::locktype acq_lock = homeds::thread::locktype::LOCKTYPE_READ;
@@ -361,7 +361,7 @@ private:
         }
 
         BNodeptr child_ptr;
-        auto result = my_node->find(range, nullptr, &child_ptr);
+        my_node->find(range, nullptr, &child_ptr);
         BtreeNodePtr child_node = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), child_ptr.get_node_id());
 
         lock_node(child_node, homeds::thread::LOCKTYPE_READ);
@@ -514,7 +514,7 @@ private:
 #endif
 
     BtreeNodePtr get_child_node(BtreeNodePtr int_node, const BtreeSearchRange &range,
-                                       int *outind, bool *is_found) {
+                                       uint32_t *outind, bool *is_found) {
         BNodeptr child_ptr;
 
         auto result = int_node->find(range, nullptr, nullptr);
@@ -591,7 +591,7 @@ private:
         homeds::thread::locktype child_cur_lock = homeds::thread::LOCKTYPE_NONE;
 
         // Get the childPtr for given key.
-        int ind = ind_hint;
+        uint32_t ind = ind_hint;
         bool is_found;
         BtreeNodePtr child_node = get_child_node(my_node, BtreeSearchRange(k), &ind, &is_found);
         if (!is_found || (child_node == nullptr)) {
@@ -684,7 +684,7 @@ private:
         locktype child_cur_lock = LOCKTYPE_NONE;
 
         // Get the childPtr for given key.
-        int ind;
+        uint32_t ind;
 
         bool is_found = true;
         BtreeNodePtr child_node = get_child_node(my_node, range, &ind, &is_found);
@@ -851,7 +851,7 @@ private:
 
         // Loop into all index and initialize list
         minfo.reserve(indices_list.size());
-        for (auto i = 0; i < indices_list.size(); i++) {
+        for (auto i = 0u; i < indices_list.size(); i++) {
             parent_node->get(indices_list[i], &child_ptr, false /* copy */);
 
             merge_info m;
@@ -867,7 +867,7 @@ private:
 #ifndef NDEBUG
         if (CVLOG_IS_ON(VMOD_BTREE_MERGE, 4)) {
             LOG(INFO) << "Before Merge Nodes:\nParent node:\n" << parent_node->to_string();
-            for (auto i = 0; i < minfo.size(); i++) {
+            for (auto i = 0u; i < minfo.size(); i++) {
                 LOG(INFO) << "Child node " << i + 1 << "\n" << minfo[i].node->to_string();
             }
         }
@@ -919,7 +919,7 @@ private:
         assert(!minfo[0].freed); // If we merge it, we expect the left most one has at least 1 entry.
         // TODO: Above assumption will not be valid if we are merging all empty nodes. Need to study that.
 
-        for (auto n = 0; n < minfo.size(); n++) {
+        for (auto n = 0u; n < minfo.size(); n++) {
             if (minfo[n].modified && !minfo[n].freed) {
                 // If we have indeed modified, lets get the last key and put in the entry into parent node
                 BNodeptr nptr(minfo[n].node->get_node_id());

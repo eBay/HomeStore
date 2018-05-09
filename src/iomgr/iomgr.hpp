@@ -68,8 +68,8 @@ struct fd_info {
 class ioMgr {
 	private:
 
-        int num_ep;
-        int num_threads;
+        size_t num_ep;
+        size_t num_threads;
         vector<class EndPoint *> ep_list;
 	std::map<int, fd_info *> fd_info_map;
 	std::mutex map_mtx;
@@ -82,7 +82,7 @@ public:
         static thread_local int epollfd_pri[MAX_PRI];
         static thread_local int epollfd;
 	
-        ioMgr(int num_ep, int num_threads);
+        ioMgr(size_t num_ep, size_t num_threads);
 	void local_init();
 	void add_ep(class EndPoint *ep);
 	void add_fd(int fd, ev_callback cb, int ev, int pri, void *cookie);

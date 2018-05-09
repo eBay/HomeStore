@@ -20,12 +20,12 @@ thread_local int ioMgr::epollfd_pri[MAX_PRI] = {};
 EndPoint::EndPoint(class ioMgr *iomgr):iomgr(iomgr) {
 }
 
-ioMgr::ioMgr(int num_ep, int num_threads):num_ep(num_ep), 
+ioMgr::ioMgr(size_t num_ep, size_t num_threads):num_ep(num_ep), 
 	num_threads(num_threads), threads(num_threads) {
 	ready = false;
 	global_fd.reserve(num_ep * 10);	
 	threads.resize(num_threads);
-	for (int i = 0; i < num_threads; i++) {
+	for (auto i = 0u; i < num_threads; i++) {
 		int rc = pthread_create(&(threads[i].tid), NULL, 
 				iothread, (void *)this);
 		threads[i].id = i;
@@ -47,7 +47,7 @@ ioMgr::local_init() {
 		LOG(ERROR) << "epoll_ctl failed " << errno << "line number" << __LINE__; 
 	}
 	
-	for (int i = 0; i < MAX_PRI; i++) {
+	for (auto i = 0; i < MAX_PRI; i++) {
 		epollfd_pri[i] = epoll_create1(0);
 		ev.events = EPOLLET | EPOLLIN | EPOLLOUT;
 		ev.data.fd = epollfd_pri[i];
@@ -62,7 +62,7 @@ ioMgr::local_init() {
 	info->inited = true;
 	info->epollfd_pri = epollfd_pri;
 
-	for(int i = 0; i < global_fd.size(); i++) {
+	for(auto i = 0u; i < global_fd.size(); i++) {
 		/* We cannot use EPOLLEXCLUSIVE flag here. otherwise
                  * some events can be missed.
 		 */
@@ -84,7 +84,7 @@ ioMgr::local_init() {
 	
 	assert(num_ep == ep_list.size());
 	/* initialize all the thread local variables in end point */
-	for (int i = 0; i < num_ep; i++) {
+	for (auto i = 0u; i < num_ep; i++) {
 		ep_list[i]->init_local();
 	}
 }
@@ -121,7 +121,7 @@ ioMgr::add_fd(int fd, ev_callback cb, int iomgr_ev, int pri, void *cookie) {
 	info->cookie = cookie;
 	info->ev_fd.resize(num_threads);
 	info->event.resize(num_threads);
-	for (int i = 0; i < num_threads; i++) {
+	for (auto i = 0u; i < num_threads; i++) {
 		info->ev_fd[i] = eventfd(0, EFD_NONBLOCK);
 		info->event[i] = 0;
 	}
@@ -130,7 +130,7 @@ ioMgr::add_fd(int fd, ev_callback cb, int iomgr_ev, int pri, void *cookie) {
 	
 	struct epoll_event ev;
 	/* add it to all the threads */
-	for (int i = 0; i < num_threads; i++) {
+	for (auto i = 0u; i < num_threads; i++) {
 		ev.events = EPOLLET | info->ev;
 		ev.data.ptr = info;
 		if (!threads[i].inited) {
@@ -227,7 +227,7 @@ ioMgr::fd_reschedule(int fd, uint32_t event) {
 	uint64_t min_cnt = UINTMAX_MAX;
 	int min_id = 0;
 	
-	for(int i = 0; i < num_threads; i++) {
+	for(auto i = 0u; i < num_threads; i++) {
 		if (threads[i].count < min_cnt) {
 			min_id = i;
 			min_cnt = threads[i].count;
@@ -284,7 +284,7 @@ ioMgr::process_done_impl(void *data, int ev) {
 
 struct thread_info * 
 ioMgr::get_tid_info(pthread_t &tid) {
-	for (int i = 0; i < num_threads; i++) {
+	for (auto i = 0u; i < num_threads; i++) {
 		if (threads[i].tid == tid) {
 			return &threads[i];
 		}
@@ -318,7 +318,7 @@ void* homeio::iothread(void *obj) {
 	while (1) {
 	//	LOG(INFO) << "waiting " << info->id;
 		num_fds = epoll_wait(iomgr->epollfd, fd_events, MAX_PRI, -1);
-		for (int i = 0; i < MAX_PRI; i++) {
+		for (auto i = 0; i < MAX_PRI; i++) {
 			/* XXX: should it be  go through only
 			 * those fds which has the events.
 			 */
@@ -329,7 +329,7 @@ void* homeio::iothread(void *obj) {
 				continue;
 			}
 //			LOG(INFO) << "waking" << info->id;
-			for (int i = 0; i < num_fds; i++) {
+			for (auto i = 0; i < num_fds; i++) {
 				if (iomgr->can_process(events[i].data.ptr, events[i].events)) {
 					Clock::time_point write_startTime = Clock::now();
 					info->count++;
@@ -346,13 +346,13 @@ void* homeio::iothread(void *obj) {
 
 void
 ioMgr::print_perf_cntrs() {
-	for(int i = 0; i < num_threads; i++) {
+	for(auto i = 0u; i < num_threads; i++) {
 		printf("thread %d counters \n", i);
 		printf("\tnumber of times %lu it run\n", threads[i].count);
 		printf("\t total time spent %lu ms\n", 
 				(threads[i].time_spent_ns/(1000 * 1000)));
 	}
-	for (int i = 0; i < num_ep; i++) {
+	for (auto i = 0u; i < num_ep; i++) {
 		ep_list[i]->print_perf();
 	}
 }

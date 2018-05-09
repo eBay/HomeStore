@@ -174,7 +174,7 @@ public:
     void get(homeds::blob *outb, uint32_t offset = 0) const {
         uint32_t piece_size = m_u.m_piece.size();
         uint32_t piece_offset;
-        int ind;
+        uint32_t ind;
 
         outb->bytes = nullptr; outb->size = 0;
         if (piece_size != 0) {
@@ -292,7 +292,7 @@ public:
         return s;
     }
 
-    bool find_index(uint32_t offset, boost::optional<uint8_t> ind_hint, int *out_ind) const {
+    bool find_index(uint32_t offset, boost::optional<uint8_t> ind_hint, uint32_t *out_ind) const {
         *out_ind = 0;
         return (!m_u.m_piece.size() && m_u.m_list) ?
                bsearch(offset, ind_hint.get_value_or(-1), out_ind) :
@@ -305,7 +305,7 @@ public:
     };
 
     boost::optional< MemPiece<SizeMultiplier> &> fill_next_missing_piece(cursor_t &c, uint32_t size, uint32_t offset) {
-        int new_ind;
+        uint32_t new_ind;
         bool found = find_index(offset, (uint8_t)c.m_ind, &new_ind);
         c.m_ind = new_ind;
 
@@ -365,7 +365,7 @@ private:
         }
     }
 
-    bool bsearch(uint32_t offset, int start, int *out_ind) const {
+    bool bsearch(uint32_t offset, int start, uint32_t *out_ind) const {
         int end = m_u.m_list->size();
         uint32_t mid = 0;
 

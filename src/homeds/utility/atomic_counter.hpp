@@ -82,7 +82,7 @@ public:
         m_count.store(n, std::memory_order_release);
     }
 
-    bool test_le(int32_t check) const {
+    bool test_le(uint32_t check) const {
         if (get() > check) {
             return false;
         }

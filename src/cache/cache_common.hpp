@@ -16,7 +16,7 @@ REGISTER_VMODULES(CACHE_VMODULES);
 using namespace homeds;
 
 namespace homestore {
-#define VALUES              \
+#define CVALUES              \
     X(CACHE_STATS_OBJ_COUNT,            COUNTER,    STATS_INVALID_INDEX, "Cache Object Count")    \
     X(CACHE_STATS_HIT_COUNT,            COUNTER,    STATS_INVALID_INDEX, "Cache hit Count") \
     X(CACHE_STATS_MISS_COUNT,           COUNTER,    STATS_INVALID_INDEX, "Cache miss Count") \
@@ -25,17 +25,18 @@ namespace homestore {
 
 #define X(ind, type, mean_of, desc) ind,
 enum cache_stats_type : uint32_t {
-    VALUES
+    CVALUES
 };
 #undef X
 
 #define X(ind, type, mean_of, desc) {ind, type, mean_of, desc},
-static std::vector< homeds::stats_key > cache_stats_keys = {VALUES};
+static std::vector< homeds::stats_key > cache_stats_keys = {CVALUES};
+#undef X
 
 class CacheStats : public homeds::Stats {
 public:
     CacheStats() :
-    //Stats({VALUES}) {}
+    //Stats({CVALUES}) {}
             Stats(cache_stats_keys) {}
 
     int get_hit_ratio() const {

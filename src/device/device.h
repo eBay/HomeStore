@@ -401,9 +401,9 @@ private:
     std::string        m_devname;
     super_block_header m_super_blk_header; // Persisent header block
     uint64_t           m_devsize;
-    homeio::ioMgr *iomgr;
     static homeio::DriveEndPoint *ep; // one instance for all physical devices
     homeio::comp_callback comp_cb;
+    homeio::ioMgr *iomgr;
 };
 
 class AbstractVirtualDev {
