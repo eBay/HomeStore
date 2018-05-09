@@ -8,8 +8,9 @@ class HomestoreConan(ConanFile):
 
     settings = "os", "compiler", "build_type", "arch"
 
-    requires = (("folly/[>=0.58,<1.0]@demo/dev"),
-                ("boost/[>=1.67,<2.0]@demo/dev"))
+    requires = (("boost/[>=1.67,<2.0]@demo/dev"),
+                ("farmhash/[>=0.0,<1.0]@demo/dev"),
+                ("folly/[>=0.58,<1.0]@demo/dev"))
 
     generators = "cmake"
     exports_sources = "*"
