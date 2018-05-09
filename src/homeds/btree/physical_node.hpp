@@ -307,6 +307,8 @@ protected:
         if (cur_ind < max_ind) {
            end_ind += max_ind - cur_ind;
            start_ind = 0;
+        } else {
+           start_ind = cur_ind - max_ind;
         }
 
         for (i = start_ind; (i <= end_ind) && (indices_list.size() < max_indices); i++) {
