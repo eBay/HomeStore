@@ -68,8 +68,9 @@ struct virtualdev_req {
 	bool is_read;
 };
 
+[[maybe_unused]]
 static void
-virtual_dev_process_completions(int64_t num_bytes, uint8_t *cookie) {
+virtual_dev_process_completions(size_t num_bytes, uint8_t *cookie) {
 	virtualdev_req *req = (virtualdev_req *) cookie;
 	int ret = 0;
 	assert(req->version == 0xDEAD);
@@ -201,7 +202,7 @@ public:
     }
 
     BlkAllocStatus alloc_blk(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid) {
-        uint32_t dev_ind;
+        uint32_t dev_ind {0};
         uint32_t chunk_num, start_chunk_num;
         BlkAllocStatus status = BLK_ALLOC_FAILED;
 
@@ -443,8 +444,8 @@ public:
         m_mgr->free_vdev(m_vb);
     }
 
-    std::string to_string() {
-
+    auto to_string() {
+       return std::string();
     }
 
 private:

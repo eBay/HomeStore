@@ -68,7 +68,7 @@ public:
 	 * fix it by calling cache after all buffers are read from volume
 	 * layer.
 	 */
-	homeds::blob b = req->read_bbuf->at_offset(0);
+	[[maybe_unused]] homeds::blob b = req->read_bbuf->at_offset(0);
 	if (!req->cache_found) {
 	    /* It is not there in the cache */
             boost::intrusive_ptr< Buffer > new_bbuf;
@@ -250,7 +250,7 @@ public:
 	printf("cache time %lu ns\n", cache_write_time/write_cnt);
 	printf("physical device write time %lu ns\n", write_time/write_cnt);
 	if (read_cnt != 0) {
-		printf("cache_hit %lu % \n",(cache_hit * 100)/read_cnt); 
+		printf("cache_hit %lu %% \n",(cache_hit * 100)/read_cnt); 
 		printf("cache time while reading %lu ns\n", cache_read_time/read_cnt);
 	}
 	printf("absolut cache_hit %lu \n",atomic_load(&cache_hit)); 

@@ -297,16 +297,16 @@ protected:
     }
 
     void get_adjacent_indicies(uint32_t cur_ind, vector< int > &indices_list, uint32_t max_indices) const {
-        int i = 0;
-        int start_ind;
-        int end_ind;
+        uint32_t i = 0;
+        uint32_t start_ind;
+        uint32_t end_ind;
         uint32_t nentries = this->get_total_entries();
 
-        start_ind = cur_ind - ((max_indices / 2) - 1 + (max_indices % 2));
+        auto max_ind = ((max_indices / 2) - 1 + (max_indices % 2));
         end_ind = cur_ind + (max_indices / 2);
-        if (start_ind < 0) {
-            end_ind -= start_ind;
-            start_ind = 0;
+        if (cur_ind < max_ind) {
+           end_ind += max_ind - cur_ind;
+           start_ind = 0;
         }
 
         for (i = start_ind; (i <= end_ind) && (indices_list.size() < max_indices); i++) {

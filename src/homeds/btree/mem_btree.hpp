@@ -71,7 +71,7 @@ public:
     }
 
     static boost::intrusive_ptr<MemBtreeNodeDeclType> read_node(MemBtreeImpl *impl, bnodeid_t id) {
-        auto bn = (MemBtreeNodeDeclType *)(uint8_t *)id.m_x;
+        auto bn = reinterpret_cast<MemBtreeNodeDeclType*>(static_cast<uint64_t>(id.m_x));
         return boost::intrusive_ptr<MemBtreeNodeDeclType>(bn);
     }
 

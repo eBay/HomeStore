@@ -33,7 +33,7 @@ public:
     }
 
 public:
-    void get(int ind, BtreeValue *outval, bool copy) const {
+    void get(uint32_t ind, BtreeValue *outval, bool copy) const {
         // Need edge index
         if (ind == this->get_total_entries()) {
             assert(!this->is_leaf());
@@ -47,7 +47,7 @@ public:
 
     // Insert the key and value in provided index
     // Assumption: Node lock is already taken
-    void insert(int ind, const BtreeKey &key, const BtreeValue &val) {
+    void insert(uint32_t ind, const BtreeKey &key, const BtreeValue &val) {
         //K& k = *(dynamic_cast<K *>(&key));
         //assert(get_total_entries() < getMaxEntries());
         uint32_t sz = (this->get_total_entries() - ind) * get_nth_obj_size(0);
@@ -104,7 +104,7 @@ public:
 
 #endif
 
-    void remove(int ind) {
+    void remove(uint32_t ind) {
         uint32_t total_entries = this->get_total_entries();
         assert(total_entries >= ind);
 
@@ -125,7 +125,7 @@ public:
         this->dec_entries();
     }
 
-    void update(int ind, const BtreeValue &val) {
+    void update(uint32_t ind, const BtreeValue &val) {
         if (ind == this->get_total_entries()) {
             assert(!this->is_leaf());
             this->set_edge_value(val);
@@ -138,7 +138,7 @@ public:
         this->inc_gen();
     }
 
-    void update(int ind, const BtreeKey &key, const BtreeValue &val) {
+    void update(uint32_t ind, const BtreeKey &key, const BtreeValue &val) {
         if (ind == this->get_total_entries()) {
             assert(!this->is_leaf());
             this->set_edge_value(val);
@@ -221,8 +221,6 @@ public:
 
     bool is_split_needed(const BtreeConfig &cfg, const BtreeKey &key, const BtreeValue &value,
                          int *out_ind_hint) const {
-        int size_needed;
-
         auto result = this->find(BtreeSearchRange(key), nullptr, nullptr);
         *out_ind_hint = result.end_of_search_index;
         if (this->is_leaf() && result.found) {
@@ -235,11 +233,11 @@ public:
     }
 
     ////////// Overridden private methods //////////////
-    inline uint32_t get_nth_obj_size(int ind) const {
+    inline uint32_t get_nth_obj_size(uint32_t ind) const {
         return (get_obj_key_size(ind) + get_obj_value_size(ind));
     }
 
-    void get_nth_key(int ind, BtreeKey *outkey, bool copykey) const {
+    void get_nth_key(uint32_t ind, BtreeKey *outkey, bool copykey) const {
         assert(ind < this->get_total_entries());
 
         homeds::blob b;
@@ -249,7 +247,7 @@ public:
         (copykey) ? outkey->copy_blob(b) : outkey->set_blob(b);
     }
 
-    void get_nth_value(int ind, BtreeValue *outval, bool copy) const {
+    void get_nth_value(uint32_t ind, BtreeValue *outval, bool copy) const {
         assert(ind < this->get_total_entries());
         uint32_t size = get_nth_obj_size(ind);
 
@@ -273,7 +271,7 @@ public:
     }
 
     /////////////// Other Internal Methods /////////////
-    void set_nth_obj(int ind, const BtreeKey &k, const BtreeValue &v) {
+    void set_nth_obj(uint32_t ind, const BtreeKey &k, const BtreeValue &v) {
         assert(ind <= this->get_total_entries());
 
         uint8_t *entry = this->get_node_area_mutable() + (get_nth_obj_size(ind) * ind);
@@ -288,11 +286,11 @@ public:
         return get_available_size(cfg)/get_nth_obj_size(0);
     }
 
-    inline uint32_t get_obj_key_size(int ind) const {
+    inline uint32_t get_obj_key_size(uint32_t ind) const {
         return K::get_fixed_size();
     }
 
-    inline uint32_t get_obj_value_size(int ind) const {
+    inline uint32_t get_obj_value_size(uint32_t ind) const {
         if (this->is_leaf()) {
             return V::get_fixed_size();
         } else {
@@ -300,11 +298,11 @@ public:
         }
     }
 
-    uint8_t *get_nth_obj(int ind) {
+    uint8_t *get_nth_obj(uint32_t ind) {
         return (this->get_node_area_mutable() + (get_nth_obj_size(ind) * ind));
     }
 
-    void set_nth_key(int ind, const BtreeKey &k) {
+    void set_nth_key(uint32_t ind, const BtreeKey &k) {
         uint8_t *entry = this->get_node_area_mutable() + (get_nth_obj_size(ind) * ind);
         uint32_t keySize;
 
@@ -312,7 +310,7 @@ public:
         memcpy((void *) entry, (void *) b.bytes, b.size);
     }
 
-    void set_nth_value(int ind, const BtreeValue &v) {
+    void set_nth_value(uint32_t ind, const BtreeValue &v) {
         assert(ind < this->get_total_entries());
         uint8_t *entry = this->get_node_area_mutable() + (get_nth_obj_size(ind) * ind) + get_obj_key_size(ind);
         uint32_t valSize;

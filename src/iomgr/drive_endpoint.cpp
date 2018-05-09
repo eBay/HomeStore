@@ -163,7 +163,6 @@ void
 DriveEndPoint::async_writev(int m_sync_fd, const struct iovec *iov, 
 				int iovcnt, uint32_t size, 
 				uint64_t offset, uint8_t *cookie) {
-	Clock::time_point write_startTime = Clock::now();
 	struct iocb_info *info = iocb_list.top();
 	struct iocb *iocb = static_cast<struct iocb *>(info);
 	iocb_list.pop();

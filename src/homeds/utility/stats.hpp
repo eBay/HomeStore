@@ -33,7 +33,7 @@ public:
     Stats(std::vector<stats_key> &keys) :
             m_keys(keys) {
         m_values = new std::atomic<uint64_t>[keys.size()];
-        for (auto i = 0; i < keys.size(); i++) {
+        for (auto i = 0u; i < keys.size(); i++) {
             m_values[i].store(0, std::memory_order_relaxed);
         }
     }

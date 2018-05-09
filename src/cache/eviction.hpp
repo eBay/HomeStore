@@ -25,9 +25,9 @@ public:
      * need to provide a callback function to check if the current record could be evicted or not. */
     Evictor(uint32_t part_num, uint64_t max_size, CacheStats *stats, const CanEvictCallback &cb,
             const GetSizeCallback &gs_cb) :
-            m_evict_policy(0),
             m_can_evict_cb(cb),
             m_get_size_cb(gs_cb),
+            m_evict_policy(0),
             m_cur_size(0),
             m_max_size(max_size),
             m_stats(stats),

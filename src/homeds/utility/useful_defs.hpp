@@ -73,7 +73,7 @@ struct LeftShifts {
 
 static constexpr int64_t pow(int base, uint32_t exp) {
     int64_t val = 1;
-    for (auto i = 0; i < exp; i++) {
+    for (auto i = 0u; i < exp; i++) {
         val *= base;
     }
     return val;

@@ -99,7 +99,7 @@ static uint64_t logBase2(uint64_t v) {
 }
 
 template <typename T>
-class Bitword
+class __attribute__((__packed__)) Bitword
 {
 public:
 	static constexpr uint32_t size() {

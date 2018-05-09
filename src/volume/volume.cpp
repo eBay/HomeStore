@@ -9,7 +9,7 @@ using namespace std;
 using namespace homestore;
 
 #define MAX_CACHE_SIZE     (2 * 1024ul * 1024ul * 1024ul) /* it has to be a multiple of 16k */
-#define BLOCK_SIZE       (8 * 1024ul)
+constexpr auto BLOCK_SIZE = (8 * 1024ul);
 
 
 Cache< BlkId > * Volume::glob_cache = NULL;
