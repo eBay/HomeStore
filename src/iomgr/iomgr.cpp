@@ -235,7 +235,7 @@ ioMgr::fd_reschedule(int fd, uint32_t event) {
 	}
 	info->event[min_id] |= event;
 	uint64_t temp = 1;
-	while (0 > write(info->ev_fd[min_id], &temp, sizeof(uint64_t)) && errno == EAGAIN);
+	(void) write(info->ev_fd[min_id], &temp, sizeof(uint64_t));
 }
 
 void
@@ -254,7 +254,7 @@ ioMgr::process_evfd(int fd, void *data, uint32_t event) {
 	}
 	info->event[tinfo->id] = 0;
 	process_done(fd, event);
-	while (0 > read(fd, &temp, sizeof(uint64_t)) && errno == EAGAIN);
+	(void) read(fd, &temp, sizeof(uint64_t));
 }
 
 void

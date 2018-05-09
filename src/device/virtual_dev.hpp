@@ -74,12 +74,12 @@ virtual_dev_process_completions(size_t num_bytes, uint8_t *cookie) {
 	virtualdev_req *req = (virtualdev_req *) cookie;
 	int ret = 0;
 	assert(req->version == 0xDEAD);
-	if (req->size == num_bytes) {
-		ret = 0;
-	} else {
-		assert(0);
-		ret = -1;
-	}
+        if (0 > num_bytes || req->size != static_cast<uint64_t>(num_bytes)) {
+           assert(0);
+           ret = -1;
+        } else {
+           ret = 0;
+        }
 	req->cb(ret, req);
 }
 

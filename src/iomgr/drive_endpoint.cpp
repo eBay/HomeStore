@@ -80,9 +80,9 @@ DriveEndPoint::process_completions(int fd, void *cookie, int event) {
 	 * think thats fine.
 	 */
 	iomgr->process_done(fd, event);
-	while (0 < read(ev_fd, &temp, sizeof(uint64_t)) && errno == EAGAIN);
-	int ret = io_getevents(ioctx, 0, MAX_COMPLETIONS, 
-			events, NULL);
+        assert(events[0].res == 0);
+        read(ev_fd, &temp, sizeof(uint64_t));
+	int ret = io_getevents(ioctx, 0, MAX_COMPLETIONS, events, NULL);
 	if (ret == 0) {
 		spurious_events++;
 	}
@@ -90,8 +90,10 @@ DriveEndPoint::process_completions(int fd, void *cookie, int event) {
 		cmp_err++;
 	}
 	for (int i = 0; i < ret; i++) {
+                assert(0 <= static_cast<int64_t>(events[0].res));
 		struct iocb_info *info = static_cast<iocb_info *>(events[i].obj);
 		struct iocb *iocb = static_cast<struct iocb *>(info);
+                printf("Result for %p: %ld\n", iocb, events[i].res);
 		if (info->is_read) {
 			read_aio_lat.fetch_add(
 				get_elapsed_time_ns(info->start_time), 
@@ -129,6 +131,7 @@ DriveEndPoint::async_write(int m_sync_fd, const char *data,
 	iocb->data = cookie;
 	info->start_time = Clock::now();
 	info->is_read = false;
+        printf("Writing: %u\n", size);
 	if (io_submit(ioctx, 1, &iocb) != 1) {
 		std::stringstream ss;
 		ss << "error while writing " << errno;
@@ -150,6 +153,7 @@ DriveEndPoint::async_read(int m_sync_fd, char *data,
 	iocb->data = cookie;
 	info->is_read = true;
 	info->start_time = Clock::now();
+        printf("Reading: %u\n", size);
 	if (io_submit(ioctx, 1, &iocb) != 1) {
 		std::stringstream ss;
 		ss << "error while read " << errno;
@@ -172,6 +176,7 @@ DriveEndPoint::async_writev(int m_sync_fd, const struct iovec *iov,
 	iocb->data = cookie;
 	info->start_time = Clock::now();
 	info->is_read = false;
+        printf("Writing: %d %u vectors %p @ %lu|%lu\n", m_sync_fd, iovcnt, iocb, offset, iov->iov_len);
 	if (io_submit(ioctx, 1, &iocb) != 1) {
 		std::stringstream ss;
 		ss << "error while writing " << errno;
@@ -193,6 +198,7 @@ DriveEndPoint::async_readv(int m_sync_fd, const struct iovec *iov,
 	iocb->data = cookie;
 	info->is_read = true;
 	info->start_time = Clock::now();
+        printf("Reading: %u vectors\n", iovcnt);
 	if (io_submit(ioctx, 1, &iocb) != 1) {
 		std::stringstream ss;
 		ss << "error while reading " << errno;
