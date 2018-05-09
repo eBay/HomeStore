@@ -1,5 +1,5 @@
 set (CPP_FLAGS "-fPIC -faligned-new")
-set (CPP_WARNINGS "-Wall -Wextra -Werror -Wno-unused-parameter -Wno-unused-variable -Wno-empty-body")
+set (CPP_WARNINGS "-Wall -Wextra -Werror -Wno-unused-parameter -Wno-unused-variable -Wno-empty-body -Wno-array-bounds")
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CPP_FLAGS} ${CPP_WARNINGS}") 
 
 find_package(Boost 1.64 REQUIRED)
@@ -7,7 +7,7 @@ find_package (Threads REQUIRED)
 
 include_directories (BEFORE .)
 
-set(TEST_VOLUME_SOURCE_FILES
+set(HOMESTORE_SRC
         blkalloc/varsize_blk_allocator.cpp
 
         cache/cache.cpp
@@ -21,14 +21,15 @@ set(TEST_VOLUME_SOURCE_FILES
         iomgr/iomgr.cpp
 	iomgr/iomgr.hpp
 
-        volume/vol_test.cpp
         volume/volume.cpp)
 
-
-add_executable(test_volume ${TEST_VOLUME_SOURCE_FILES})
-target_link_libraries(test_volume
+add_library(homestore ${HOMESTORE_SRC})
+target_link_libraries(homestore
                       ${CONAN_LIBS} 
-                      double-conversion
                       aio
+                      double-conversion
                       ${CMAKE_DL_LIBS}
                       ${CMAKE_THREAD_LIBS_INIT})
+
+add_executable(test_volume volume/vol_test.cpp)
+target_link_libraries(test_volume homestore)

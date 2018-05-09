@@ -1,5 +1,5 @@
 # ##########   #######   ############
-FROM ecr.vip.ebayc3.com/sds/sds_cpp_base:0.9
+FROM ecr.vip.ebayc3.com/sds/sds_cpp_base:0.11
 LABEL description="Automated compilation for SDS HomeStore"
 
 ARG CONAN_CHANNEL
@@ -13,7 +13,8 @@ RUN set -eux; \
     PKG_VERSION=$(grep 'version =' /tmp/source/conanfile.py | awk '{print $3}'); \
     PKG_VERSION="${PKG_VERSION%\"}"; \
     PKG_VERSION="${PKG_VERSION#\"}"; \
-    echo ${PKG_VERSION} > /tmp/VERSION;
+    echo ${PKG_VERSION} > /tmp/VERSION; \
+    conan install -u /tmp/source
 
 COPY CMakeLists.txt /tmp/source/
 COPY src/ /tmp/source/src
