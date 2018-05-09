@@ -79,7 +79,7 @@ DriveEndPoint::process_completions(int fd, void *cookie, int event) {
 	 * think thats fine.
 	 */
 	iomgr->process_done(fd, event);
-	read(ev_fd, &temp, sizeof(uint64_t));
+	while (0 < read(ev_fd, &temp, sizeof(uint64_t)) && errno == EAGAIN);
 	int ret = io_getevents(ioctx, 0, MAX_COMPLETIONS, 
 			events, NULL);
 	if (ret == 0) {
