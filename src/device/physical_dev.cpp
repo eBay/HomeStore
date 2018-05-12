@@ -18,7 +18,7 @@
 #ifdef __linux__
 #include <linux/fs.h>
 #include <sys/ioctl.h> 
-#include <iomgr/drive_endpoint.hpp>
+#include <endpoint/drive_endpoint.hpp>
 #endif
 
 namespace homestore {

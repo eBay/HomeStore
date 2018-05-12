@@ -21,7 +21,7 @@
 #include <boost/uuid/uuid_io.hpp>         // streaming operators etc.
 #include "homeds/array/sparse_vector.hpp"
 #include "iomgr/iomgr.hpp"
-#include "iomgr/drive_endpoint.hpp"
+#include "endpoint/drive_endpoint.hpp"
 
 namespace homestore {
 

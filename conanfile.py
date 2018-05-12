@@ -10,7 +10,8 @@ class HomestoreConan(ConanFile):
     options = {"shared": [True, False]}
 
     requires = (("boost/[>=1.67,<2.0]@demo/dev"),
-                ("folly/[>=0.58,<1.0]@demo/dev"))
+                ("folly/[>=0.58,<1.0]@demo/dev"),
+                ("iomgr/[>=0.1,<1.0]@demo/dev"))
 
     build_requires = (("farmhash/[>=0.0,<1.0]@demo/dev"))
 

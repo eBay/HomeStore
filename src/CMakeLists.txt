@@ -17,9 +17,7 @@ set(HOMESTORE_SRC
         device/physical_dev.cpp
         device/virtual_dev.hpp
 
-        iomgr/drive_endpoint.cpp
-        iomgr/iomgr.cpp
-	iomgr/iomgr.hpp
+        endpoint/drive_endpoint.cpp
 
         volume/volume.cpp)
 
@@ -28,7 +26,6 @@ target_link_libraries(homestore
                       ${CONAN_LIBS} 
                       aio
                       double-conversion
-                      ${CMAKE_DL_LIBS}
                       ${CMAKE_THREAD_LIBS_INIT})
 
 add_executable(test_volume volume/vol_test.cpp)

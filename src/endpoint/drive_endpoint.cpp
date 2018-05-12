@@ -11,7 +11,7 @@
 #include <unistd.h>
 #include <sys/uio.h>
 #include <folly/Exception.h>
-#include <iomgr/drive_endpoint.hpp>
+#include <endpoint/drive_endpoint.hpp>
 #include <fstream>
 #include <sys/epoll.h>
 
