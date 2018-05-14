@@ -20,6 +20,8 @@ using namespace homeio;
 
 INIT_VMODULES(BTREE_VMODULES);
 
+static size_t const page_size = sysconf(_SC_PAGESIZE);
+
 homestore::DeviceManager *dev_mgr = nullptr;
 homestore::Volume *vol;
 
@@ -32,8 +34,8 @@ constexpr auto Mi = Ki * Ki;
 constexpr auto Gi = Ki * Mi;
 constexpr auto WRITE_SIZE = 8 * Ki;
 constexpr auto BUF_SIZE = WRITE_SIZE / (8 * Ki);
-constexpr auto MAX_BUF = (24 * Gi) / WRITE_SIZE;
-constexpr auto MAX_VOL_SIZE = (40 * Gi);
+constexpr auto MAX_BUF = (1 * Gi) / WRITE_SIZE;
+constexpr auto MAX_VOL_SIZE = (2 * Gi);
 constexpr auto MAX_READ = MAX_BUF ;
 
 int is_random_read = true;
@@ -72,7 +74,7 @@ public:
 	static thread_local thread_info info;
 	void process_ev_common(int fd, void *cookie, int event) {
 		uint64_t temp;
-		while (0 > read(ev_fd, &temp, sizeof(uint64_t)) && errno == EAGAIN);
+		(void) read(ev_fd, &temp, sizeof(uint64_t));
 		process_ev_impl(fd, cookie, event);
 	}
 	
@@ -223,7 +225,8 @@ int main(int argc, char** argv) {
 	printf("creating dataset \n");
 	for (auto i = 0u; i < MAX_BUF; i++) {
 //		bufs[i] = new uint8_t[8192*1000]();
-		bufs[i] = (uint8_t *)malloc(8192 * BUF_SIZE);
+               if (auto ec = posix_memalign((void**)&bufs[i], page_size, 8192 * BUF_SIZE))
+                 throw std::system_error(std::error_code(ec, std::generic_category()));
 		uint8_t *bufp = bufs[i];
 		for (auto j = 0u; j < (8192 * BUF_SIZE/8); j++) {
 			memset(bufp, i + j + 1 , 8);
@@ -236,7 +239,7 @@ int main(int argc, char** argv) {
 	
 	/* send an event */
 	uint64_t temp = 1;
-	while (0 > write(ep.ev_fd, &temp, sizeof(uint64_t)) && errno == EAGAIN);
+	(void) write(ep.ev_fd, &temp, sizeof(uint64_t));
 
 
 	while(atomic_load(&write_cnt) < MAX_BUF) {
