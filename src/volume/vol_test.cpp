@@ -87,7 +87,9 @@ public:
 	static thread_local thread_info info;
 	void process_ev_common(int fd, void *cookie, int event) {
 		uint64_t temp;
-		(void) read(ev_fd, &temp, sizeof(uint64_t));
+                 int ret {0};
+                 do { ret = read(ev_fd, &temp, sizeof(uint64_t));
+                 } while (0 > ret && EWOULDBLOCK == errno);
 		process_ev_impl(fd, cookie, event);
 	}
 	
@@ -256,8 +258,9 @@ int main(int argc, char** argv) {
 	
 	/* send an event */
 	uint64_t temp = 1;
-	(void) write(ep.ev_fd, &temp, sizeof(uint64_t));
-
+        int ret {0};
+        do { ret = write(ep.ev_fd, &temp, sizeof(uint64_t));
+        } while (0 > ret && EWOULDBLOCK == errno);
 
 	while(atomic_load(&write_cnt) < MAX_BUF) ;
 	

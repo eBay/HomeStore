@@ -8,9 +8,6 @@ ENV CONAN_USER=${CONAN_USER:-demo}
 ENV CONAN_CHANNEL=${CONAN_CHANNEL:-dev}
 
 COPY conanfile.py /tmp/source/
-
-RUN conan install -u /tmp/source
-
 COPY CMakeLists.txt /tmp/source/
 COPY src/ /tmp/source/src
 
