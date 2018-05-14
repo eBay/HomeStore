@@ -25,7 +25,7 @@ namespace homeio {
 
 typedef std::function< void (int64_t num_bytes, uint8_t* cookie) > comp_callback;
 #ifdef linux
-struct iocb_info:iocb {
+struct iocb_info : public iocb {
 	bool is_read;
 	Clock::time_point start_time;
 };

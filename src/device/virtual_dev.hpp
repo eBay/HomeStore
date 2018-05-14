@@ -1,9 +1,9 @@
 //
 // Created by Kadayam, Hari on 08/11/17.
 //
+#pragma once
 
-#ifndef OMSTORE_VIRTUAL_DEV_HPP_HPP
-#define OMSTORE_VIRTUAL_DEV_HPP_HPP
+#include <sds_logging/logging.h>
 
 #include "device.h"
 #include "blkalloc/blk_allocator.h"
@@ -70,7 +70,7 @@ struct virtualdev_req {
 
 [[maybe_unused]]
 static void
-virtual_dev_process_completions(size_t num_bytes, uint8_t *cookie) {
+virtual_dev_process_completions(int64_t num_bytes, uint8_t *cookie) {
 	virtualdev_req *req = (virtualdev_req *) cookie;
 	int ret = 0;
 	assert(req->version == 0xDEAD);
@@ -628,4 +628,3 @@ private:
 };
 
 } //namespace homestore
-#endif //OMSTORE_VIRTUAL_DEV_HPP_HPP

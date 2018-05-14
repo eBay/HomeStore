@@ -1,26 +1,39 @@
+#include <cassert>
+#include <cstdio>
+#include <ctime>
+extern "C" {
+#include <fcntl.h>
+#include <sys/epoll.h>
+#include <sys/eventfd.h>
+#include <sys/timeb.h>
+}
+#include <atomic>
 #include <iostream>
 		
+#include <iomgr/iomgr.hpp>
+#include <sds_logging/logging.h>
+
 #include "device/device.h"
-#include "iomgr/iomgr.hpp"
 #include "device/virtual_dev.hpp"
-#include <fcntl.h>
 #include "volume.hpp"
-#include <ctime>
-#include <sys/timeb.h>
-#include <cassert>
-#include <stdio.h>
-#include <atomic>
-#include <sys/eventfd.h>
-#include <stdio.h>
-#include <sys/epoll.h>
 
 using namespace std; 
 using namespace homestore;
 using namespace homeio;
 
+static size_t const page_size = sysconf(_SC_PAGESIZE);
+
 INIT_VMODULES(BTREE_VMODULES);
 
-static size_t const page_size = sysconf(_SC_PAGESIZE);
+using log_level = spdlog::level::level_enum;
+
+static std::shared_ptr<spdlog::logger> logger_;
+
+namespace sds_logging {
+std::shared_ptr<spdlog::logger> GetLogger() {
+   return logger_;
+}
+}
 
 homestore::DeviceManager *dev_mgr = nullptr;
 homestore::Volume *vol;
@@ -34,11 +47,11 @@ constexpr auto Mi = Ki * Ki;
 constexpr auto Gi = Ki * Mi;
 constexpr auto WRITE_SIZE = 8 * Ki;
 constexpr auto BUF_SIZE = WRITE_SIZE / (8 * Ki);
-constexpr auto MAX_BUF = (1 * Gi) / WRITE_SIZE;
-constexpr auto MAX_VOL_SIZE = (2 * Gi);
+constexpr auto MAX_BUF = (8 * Mi) / WRITE_SIZE;
+constexpr auto MAX_VOL_SIZE = (256 * Mi);
 constexpr auto MAX_READ = MAX_BUF ;
 
-int is_random_read = true;
+int is_random_read = false;
 int is_random_write = false;
 bool is_read = true;
 bool is_write = true;
@@ -199,6 +212,9 @@ int main(int argc, char** argv) {
 	for (auto i : boost::irange(create ? 2 : 1, argc)) {
 		dev_names.emplace_back(argv[i]);  
 	}
+
+        spdlog::set_level(log_level::trace);
+        logger_ = spdlog::stdout_color_mt("example");
 	
 	/* create iomgr */
 	ioMgr iomgr(2, MAX_THREADS);
@@ -218,6 +234,7 @@ int main(int argc, char** argv) {
 
 
 	/* create endpoint */
+        iomgr.start();
 	test_ep ep(&iomgr);
 
 	/* create dataset */
@@ -242,8 +259,7 @@ int main(int argc, char** argv) {
 	(void) write(ep.ev_fd, &temp, sizeof(uint64_t));
 
 
-	while(atomic_load(&write_cnt) < MAX_BUF) {
-	}	
+	while(atomic_load(&write_cnt) < MAX_BUF) ;
 	
 	uint64_t time_us = get_elapsed_time(write_startTime);
 	printf("write counters..........\n");

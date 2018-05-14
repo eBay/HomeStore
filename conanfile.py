@@ -13,7 +13,8 @@ class HomestoreConan(ConanFile):
                 ("folly/[>=0.58,<1.0]@demo/dev"),
                 ("iomgr/[>=0.1,<1.0]@demo/dev"))
 
-    build_requires = (("farmhash/[>=0.0,<1.0]@demo/dev"))
+    build_requires = (("farmhash/[>=0.0,<1.0]@demo/dev"),
+                      ("sds_logging/[>=0.1.2,<1.0]@demo/dev"))
 
     generators = "cmake"
     default_options = "shared=True"
