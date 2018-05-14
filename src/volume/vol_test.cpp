@@ -20,6 +20,8 @@ using namespace homeio;
 
 INIT_VMODULES(BTREE_VMODULES);
 
+static size_t const page_size = sysconf(_SC_PAGESIZE);
+
 homestore::DeviceManager *dev_mgr = nullptr;
 homestore::Volume *vol;
 
@@ -223,7 +225,8 @@ int main(int argc, char** argv) {
 	printf("creating dataset \n");
 	for (auto i = 0u; i < MAX_BUF; i++) {
 //		bufs[i] = new uint8_t[8192*1000]();
-		bufs[i] = (uint8_t *)malloc(8192 * BUF_SIZE);
+               if (auto ec = posix_memalign((void**)&bufs[i], page_size, 8192 * BUF_SIZE))
+                 throw std::system_error(std::error_code(ec, std::generic_category()));
 		uint8_t *bufp = bufs[i];
 		for (auto j = 0u; j < (8192 * BUF_SIZE/8); j++) {
 			memset(bufp, i + j + 1 , 8);
