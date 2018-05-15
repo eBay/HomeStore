@@ -2,7 +2,7 @@ from conans import ConanFile, CMake
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "0.1.1"
+    version = "0.1.3"
     license = "Proprietary"
     description = "HomeStore"
 
