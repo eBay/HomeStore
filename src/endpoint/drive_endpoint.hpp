@@ -23,15 +23,17 @@ namespace homeio {
 			       //  100 then io_submit will fail.
 #define MAX_COMPLETIONS (MAX_OUTSTANDING_IO)  // how many completions to process in one shot
 
+using Clock = std::chrono::steady_clock;
+
 typedef std::function< void (int64_t num_bytes, uint8_t* cookie) > comp_callback;
 #ifdef linux
 struct iocb_info : public iocb {
 	bool is_read;
 	Clock::time_point start_time;
 };
-class DriveEndPoint : public EndPoint {
+class DriveEndPoint : public iomgr::EndPoint {
 public:
-	DriveEndPoint(ioMgr *iomgr, comp_callback cb);
+	DriveEndPoint(iomgr::ioMgr *iomgr, comp_callback cb);
    
 	int open_dev(std::string devname, int oflags); 
 	void sync_write(int m_sync_fd, const char *data, uint32_t size, uint64_t offset);
@@ -72,9 +74,9 @@ private:
 	comp_callback comp_cb;
 };
 #else 
-class DriveEndPoint : public EndPoint {
+class DriveEndPoint : public iomgr::EndPoint {
 public:
-	DriveEndPoint(ioMgr *iomgr, comp_callback cb){};
+	DriveEndPoint(iomgr::ioMgr *iomgr, comp_callback cb){};
 }
 #endif
 }

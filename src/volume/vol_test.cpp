@@ -74,7 +74,7 @@ uint64_t get_elapsed_time(homeio::Clock::time_point startTime)
 
 
 std::atomic<size_t> outstanding_ios(0);
-class test_ep : homeio::EndPoint {
+class test_ep : iomgr::EndPoint {
 	 struct req:volume_req {
 		int indx;
 	 };
@@ -121,7 +121,7 @@ public:
 		}
 	 }
 	 
-	test_ep(ioMgr *iomgr):EndPoint(iomgr) {
+	test_ep(iomgr::ioMgr *iomgr):iomgr::EndPoint(iomgr) {
 		/* create a event fd */
 		ev_fd = eventfd(0, EFD_NONBLOCK);
 		iomgr->add_fd(ev_fd, std::bind(&test_ep::process_ev_common, this, 
@@ -129,13 +129,12 @@ public:
 	
 		iomgr->add_ep(this);
 		/* Create a volume */
-		printf("creating volume\n");
-		LOG(INFO) << "Creating volume\n";
 		uint64_t size = MAX_VOL_SIZE;
+                LOGINFO("Creating volume of size: {}", size);
 		vol = new homestore::Volume(dev_mgr, size, 
 					std::bind(&test_ep::process_completions, this, 
 					std::placeholders::_1, std::placeholders::_2));
-		printf("created volume\n");
+                LOGINFO("Created volume of size: {}", size);
 	 }
 
 	 void writefunc(int cnt) {
@@ -200,88 +199,93 @@ public:
 	 void init_local() override {
 	 }
 	 void print_perf() override {
-	 }
+         }
 };
 
 thread_local test_ep::thread_info test_ep::info = {0};
 
 INIT_VMODULES(CACHE_VMODULES);
 int main(int argc, char** argv) {
-//        InithomedsLogging(0, CACHE_VMODULES);
-	std::vector<std::string> dev_names; 
-	bool create = ((argc > 1) && (!strcmp(argv[1], "-c")));
+   //        InithomedsLogging(0, CACHE_VMODULES);
+   std::vector<std::string> dev_names;
+   bool create = ((argc > 1) && (!strcmp(argv[1], "-c")));
 
-	for (auto i : boost::irange(create ? 2 : 1, argc)) {
-		dev_names.emplace_back(argv[i]);  
-	}
+   for (auto i : boost::irange(create ? 2 : 1, argc)) {
+      dev_names.emplace_back(argv[i]);
+   }
 
-        spdlog::set_level(log_level::trace);
-        logger_ = spdlog::stdout_color_mt("example");
-	
-	/* create iomgr */
-	ioMgr iomgr(2, MAX_THREADS);
+   spdlog::set_pattern("[%D %H:%M:%S.%f] [%l] [%t] %v");
+   spdlog::set_level(log_level::info);
+   logger_ = spdlog::stdout_color_mt("example");
 
-	/* Create/Load the devices */
-	printf("creating devices\n");
-	dev_mgr = new homestore::DeviceManager(Volume::new_vdev_found,
-                                               0, 
-                                               &iomgr,
-                                               virtual_dev_process_completions);
-	try {
-		dev_mgr->add_devices(dev_names);
-	} catch (std::exception &e) {
-		LOG(INFO) << "Exception info " << e.what();
-		exit(1);
-	}
+   /* create iomgr */
+   iomgr::ioMgr iomgr(2, MAX_THREADS);
+
+   /* Create/Load the devices */
+   LOGINFO("Creating devices.");
+   dev_mgr = new homestore::DeviceManager(Volume::new_vdev_found,
+                                          0,
+                                          &iomgr,
+                                          virtual_dev_process_completions);
+   try {
+      dev_mgr->add_devices(dev_names);
+   } catch (std::exception &e) {
+      LOG(INFO) << "Exception info " << e.what();
+      exit(1);
+   }
 
 
-	/* create endpoint */
-        iomgr.start();
-	test_ep ep(&iomgr);
+   /* create endpoint */
+   iomgr.start();
+   test_ep ep(&iomgr);
 
-	/* create dataset */
-	auto devs = dev_mgr->get_all_devices(); 
-	printf("creating dataset \n");
-	for (auto i = 0u; i < MAX_BUF; i++) {
-//		bufs[i] = new uint8_t[8192*1000]();
-               if (auto ec = posix_memalign((void**)&bufs[i], page_size, 8192 * BUF_SIZE))
-                 throw std::system_error(std::error_code(ec, std::generic_category()));
-		uint8_t *bufp = bufs[i];
-		for (auto j = 0u; j < (8192 * BUF_SIZE/8); j++) {
-			memset(bufp, i + j + 1 , 8);
-			bufp = bufp + 8;
-		}
-	}
-	printf("created dataset \n");
+   /* create dataset */
+   auto devs = dev_mgr->get_all_devices();
+   LOGINFO("Creating dataset.");
+   for (auto i = 0u; i < MAX_BUF; i++) {
+      //		bufs[i] = new uint8_t[8192*1000]();
+      if (auto ec = posix_memalign((void**)&bufs[i], page_size, 8192 * BUF_SIZE))
+         throw std::system_error(std::error_code(ec, std::generic_category()));
+      uint8_t *bufp = bufs[i];
+      for (auto j = 0u; j < (8192 * BUF_SIZE/8); j++) {
+         memset(bufp, i + j + 1 , 8);
+         bufp = bufp + 8;
+      }
+   }
 
-	vol->init_perf_cntrs();	
-	
-	/* send an event */
-	uint64_t temp = 1;
-        int ret {0};
-        do { ret = write(ep.ev_fd, &temp, sizeof(uint64_t));
-        } while (0 > ret && EWOULDBLOCK == errno);
+   LOGINFO("Initializing performance counters.");
+   vol->init_perf_cntrs();
 
-	while(atomic_load(&write_cnt) < MAX_BUF) ;
-	
-	uint64_t time_us = get_elapsed_time(write_startTime);
-	printf("write counters..........\n");
-	printf("total writes %lu\n", atomic_load(&write_cnt));
-	printf("total time spent %lu us\n", time_us);
-	printf("total time spend per io %lu us\n", time_us/atomic_load(&write_cnt));
-	printf("iops %lu\n",(atomic_load(&write_cnt) * 1000 * 1000)/time_us);
-	
-	while(is_read && atomic_load(&read_cnt) < MAX_READ) {
-	}
-	
-	time_us = get_elapsed_time(read_startTime);
-	printf("read counters..........\n");
-	printf("total reads %lu\n", atomic_load(&read_cnt));
-	printf("total time spent %lu us\n", time_us);
-	if (read_cnt) 
-		printf("total time spend per io %lu us\n", time_us/read_cnt);
-	printf("iops %lu \n", (read_cnt * 1000 * 1000)/time_us);
-	printf("additional counters.........\n");	
-	vol->print_perf_cntrs();
-	iomgr.print_perf_cntrs();
+   /* send an event */
+   LOGINFO("Sending write event.");
+   uint64_t temp = 1;
+   int ret {0};
+   do { ret = write(ep.ev_fd, &temp, sizeof(uint64_t));
+   } while (0 > ret && EWOULDBLOCK == errno);
+
+   LOGINFO("Waiting for writes to finish.");
+   while(atomic_load(&write_cnt) < MAX_BUF) ;
+
+   uint64_t time_us = get_elapsed_time(write_startTime);
+   printf("write counters..........\n");
+   printf("total writes %lu\n", atomic_load(&write_cnt));
+   printf("total time spent %lu us\n", time_us);
+   printf("total time spend per io %lu us\n", time_us/atomic_load(&write_cnt));
+   printf("iops %lu\n",(atomic_load(&write_cnt) * 1000 * 1000)/time_us);
+
+   LOGINFO("Waiting for reads to finish.");
+   while(is_read && atomic_load(&read_cnt) < MAX_READ) {
+   }
+
+   time_us = get_elapsed_time(read_startTime);
+   printf("read counters..........\n");
+   printf("total reads %lu\n", atomic_load(&read_cnt));
+   printf("total time spent %lu us\n", time_us);
+   if (read_cnt)
+      printf("total time spend per io %lu us\n", time_us/read_cnt);
+   printf("iops %lu \n", (read_cnt * 1000 * 1000)/time_us);
+   printf("additional counters.........\n");	
+   vol->print_perf_cntrs();
+   iomgr.print_perf_cntrs();
+   LOGINFO("Complete");
 }

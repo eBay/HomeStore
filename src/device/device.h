@@ -307,9 +307,9 @@ class PhysicalDev {
 public:
     static std::unique_ptr<PhysicalDev> load(DeviceManager *dev_mgr, std::string devname, 
 					int oflags, bool *is_new, 
-					homeio::ioMgr *iomgr, homeio::comp_callback cb); 
+					iomgr::ioMgr *iomgr, homeio::comp_callback cb);
 
-    PhysicalDev(DeviceManager *mgr, std::string devname, int oflags, homeio::ioMgr *iomgr, 
+    PhysicalDev(DeviceManager *mgr, std::string devname, int oflags, iomgr::ioMgr *iomgr,
 							homeio::comp_callback cb);
     ~PhysicalDev() = default;
 
@@ -403,7 +403,7 @@ private:
     uint64_t           m_devsize;
     static homeio::DriveEndPoint *ep; // one instance for all physical devices
     homeio::comp_callback comp_cb;
-    homeio::ioMgr *iomgr;
+    iomgr::ioMgr *iomgr;
 };
 
 class AbstractVirtualDev {
@@ -420,7 +420,7 @@ class DeviceManager {
 
 public:
     DeviceManager(NewVDevCallback vcb, uint32_t vdev_metadata_size, 
-			homeio::ioMgr* iomgr, homeio::comp_callback comp_cb);
+			iomgr::ioMgr* iomgr, homeio::comp_callback comp_cb);
     virtual ~DeviceManager() = default;
 
     /* Initial routine to call upon bootup or everytime new physical devices to be added dynamically */
@@ -578,7 +578,7 @@ private:
     uint32_t m_vdev_metadata_size; // Appln metadata size for vdev
 
     NewVDevCallback  m_new_vdev_cb;
-    homeio::ioMgr* iomgr;
+    iomgr::ioMgr* iomgr;
 };
 
 /*

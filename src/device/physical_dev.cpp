@@ -50,7 +50,7 @@ static std::atomic< uint32_t > glob_phys_dev_ids(0);
  * or std::bad_alloc exception */
 std::unique_ptr<PhysicalDev> PhysicalDev::load(DeviceManager *dev_mgr, 
 					std::string devname, int oflags, bool *is_new, 
-					ioMgr *iomgr, homeio::comp_callback cb) {
+					iomgr::ioMgr *iomgr, homeio::comp_callback cb) {
     std::unique_ptr< PhysicalDev > pdev = std::make_unique< PhysicalDev >(dev_mgr, 
 								devname, oflags, iomgr, cb);
 
@@ -69,7 +69,7 @@ std::unique_ptr<PhysicalDev> PhysicalDev::load(DeviceManager *dev_mgr,
 }
 
 PhysicalDev::PhysicalDev(DeviceManager *mgr, std::string devname, int oflags, 
-				ioMgr *iomgr, homeio::comp_callback cb) :
+				iomgr::ioMgr *iomgr, homeio::comp_callback cb) :
         m_mgr(mgr),
         m_devname(devname),
 	comp_cb(cb),

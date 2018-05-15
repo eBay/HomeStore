@@ -13,7 +13,7 @@
 using namespace homeio;
 namespace homestore {
 
-DeviceManager::DeviceManager(NewVDevCallback vcb, uint32_t vdev_metadata_size, ioMgr* iomgr, 
+DeviceManager::DeviceManager(NewVDevCallback vcb, uint32_t vdev_metadata_size, iomgr::ioMgr* iomgr,
 				homeio::comp_callback cb) :
         m_open_flags(O_RDWR | O_DIRECT),
         comp_cb(cb), m_new_vdev_cb(vcb), iomgr(iomgr){
