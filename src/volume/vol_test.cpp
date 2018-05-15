@@ -87,7 +87,7 @@ class test_ep : iomgr::EndPoint {
    static thread_local thread_info info;
    void process_ev_common(int fd, void *cookie, int event) {
       uint64_t temp;
-      (void) read(ev_fd, &temp, sizeof(uint64_t));
+      [[maybe_unused]] auto rsize = read(ev_fd, &temp, sizeof(uint64_t));
 
       iomgr->process_done(fd, event);
       if ((atomic_load(&outstanding_ios) + MAX_CNT_THREAD) < MAX_OUTSTANDING_IOs) {
@@ -254,7 +254,7 @@ int main(int argc, char** argv) {
 
    /* send an event */
    uint64_t temp = 1;
-   (void) write(ep.ev_fd, &temp, sizeof(uint64_t));
+   [[maybe_unused]] auto wsize = write(ep.ev_fd, &temp, sizeof(uint64_t));
 
    LOGINFO("Waiting for writes to finish.");
    while(atomic_load(&write_cnt) < MAX_BUF) ;
