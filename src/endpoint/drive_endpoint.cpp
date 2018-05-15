@@ -79,34 +79,30 @@ DriveEndPoint::process_completions(int fd, void *cookie, int event) {
 	 * think thats fine.
 	 */
 	iomgr->process_done(fd, event);
-        auto ret = read(ev_fd, &temp, sizeof(uint64_t));
-	if (0 >= ret) {
-           ret = io_getevents(ioctx, 0, MAX_COMPLETIONS, events, NULL);
-           if (ret == 0) {
-                   spurious_events++;
-           }
-           if (ret < 0) {
-                   cmp_err++;
-           }
-           for (int i = 0; i < ret; i++) {
-                   assert(0 <= static_cast<int64_t>(events[0].res));
-                   struct iocb_info *info = static_cast<iocb_info *>(events[i].obj);
-                   struct iocb *iocb = static_cast<struct iocb *>(info);
-                   if (info->is_read) {
-                           read_aio_lat.fetch_add(
-                                   get_elapsed_time_ns(info->start_time),
-                                   memory_order_relaxed);
-                   } else {
-                           write_aio_lat.fetch_add(
-                                   get_elapsed_time_ns(info->start_time),
-                                   memory_order_relaxed);
-                   }
-                   iocb_list.push(info);
-                   comp_cb(events[i].res, (uint8_t *) events[i].data);
-           }
-        } else {
-           cmp_err++;
-        }
+        read(ev_fd, &temp, sizeof(uint64_t));
+	int ret = io_getevents(ioctx, 0, MAX_COMPLETIONS, events, NULL);
+	if (ret == 0) {
+		spurious_events++;
+	}
+	if (ret < 0) {
+		cmp_err++;
+	}
+	for (int i = 0; i < ret; i++) {
+                assert(0 <= static_cast<int64_t>(events[0].res));
+		struct iocb_info *info = static_cast<iocb_info *>(events[i].obj);
+		struct iocb *iocb = static_cast<struct iocb *>(info);
+		if (info->is_read) {
+			read_aio_lat.fetch_add(
+				get_elapsed_time_ns(info->start_time), 
+				memory_order_relaxed);
+		} else {
+			write_aio_lat.fetch_add(
+				get_elapsed_time_ns(info->start_time),
+				memory_order_relaxed);
+		}
+		iocb_list.push(info);
+		comp_cb(events[i].res, (uint8_t *) events[i].data);
+	}
 }
 
 void
