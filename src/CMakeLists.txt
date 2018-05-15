@@ -1,4 +1,4 @@
-set (CPP_FLAGS "-fPIC -faligned-new")
+set (CPP_FLAGS "-fPIC -faligned-new -Dlinux")
 set (CPP_WARNINGS "-Wall -Wextra -Werror -Wno-unused-parameter -Wno-unused-variable -Wno-empty-body -Wno-array-bounds")
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CPP_FLAGS} ${CPP_WARNINGS}") 
 
