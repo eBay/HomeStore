@@ -4,18 +4,32 @@ set(DEVICE_SOURCE
        )
 add_library(hs_device OBJECT ${DEVICE_SOURCE})
 
-#set(TEST_DEVICEMGR_SOURCE_FILES
-#        test_blkdev.cpp
-#        )
-#add_executable(test_devmgr ${TEST_DEVICEMGR_SOURCE_FILES})
-#target_link_libraries(test_devmgr hs_device ${CONAN_LIBS})
-#
+set(TEST_DEVICEMGR_SOURCE_FILES
+        test_blkdev.cpp
+        )
+add_executable(test_devmgr
+                  ${TEST_DEVICEMGR_SOURCE_FILES}
+                  $<TARGET_OBJECTS:hs_device>
+                  $<TARGET_OBJECTS:hs_endpoint>
+                )
+target_link_libraries(test_devmgr ${COMMON_LIB_DEPS} ${CONAN_LIBS_FOLLY})
+
+# XXX: Currently out of date with DeviceManager interface
 #set(TEST_PHYSDEV_SOURCE_FILES
 #        test_physdev.cpp)
-#add_executable(test_physdev ${TEST_PHYSDEV_SOURCE_FILES})
-#target_link_libraries(test_physdev hs_device ${CONAN_LIBS})
-#
+#add_executable(test_physdev
+#                  ${TEST_PHYSDEV_SOURCE_FILES}
+#                  $<TARGET_OBJECTS:hs_device>
+#                  $<TARGET_OBJECTS:hs_endpoint>
+#                )
+#target_link_libraries(test_physdev ${COMMON_LIB_DEPS})
+
+# XXX: Currently out of data with VirtualDev interface
 #set(TEST_VIRTUALDEV_SOURCE_FILES
 #        test_virtualdev.cpp)
-#add_executable(test_virtualdev ${TEST_VIRTUALDEV_SOURCE_FILES})
-#target_link_libraries(test_virtualdev hs_device ${CONAN_LIBS})
+#add_executable(test_virtualdev
+#                  ${TEST_VIRTUALDEV_SOURCE_FILES}
+#                  $<TARGET_OBJECTS:hs_device>
+#                  $<TARGET_OBJECTS:hs_endpoint>
+#                )
+#target_link_libraries(test_virtualdev ${COMMON_LIB_DEPS})
