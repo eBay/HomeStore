@@ -26,7 +26,7 @@ void allocate_blocks(BlkAllocator *allocator)
             BlkAllocStatus ret = allocator->alloc(1, hints, &blks[i]);
 
             if (ret == BLK_ALLOC_SUCCESS) {
-                fprintf(stderr, "Allocated block num = %llu size = %d chunk_num = %d\n", blks[i].get_id(), blks[i].get_nblks(), blks[i].get_chunk_num());
+                fprintf(stderr, "Allocated block num = %lu size = %d chunk_num = %d\n", blks[i].get_id(), blks[i].get_nblks(), blks[i].get_chunk_num());
             } else {
                 LOG(ERROR) << "Block Alloc failed with space full after " << alloced << " allocations";
                 break;
@@ -106,7 +106,7 @@ TEST_F(FixedBlkAllocatorTest, alloc_free_test) {
     }
 
     EXPECT_EQ(m_alloced_count.load(), max_blks());
-    EXPECT_EQ(m_fixed_allocator->total_free_blks(), 0);
+    EXPECT_EQ(m_fixed_allocator->total_free_blks(), 0u);
 
     LOG(INFO) << "Allocated " << m_alloced_count.load() << " blocks, Allocator state: "
               << m_fixed_allocator->to_string();
