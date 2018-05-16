@@ -2,7 +2,7 @@
 set(CACHE_SOURCE
         cache.cpp
         )
-add_library(hs_cache STATIC ${CACHE_SOURCE})
+add_library(hs_cache OBJECT ${CACHE_SOURCE})
 
 #set(PERF_CACHE_SOURCE_FILES
 #        perf_cache.cpp

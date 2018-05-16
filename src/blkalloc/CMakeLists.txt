@@ -3,7 +3,7 @@ set(BLKALLOC_SOURCE
         fixed_blk_allocator.cpp
         varsize_blk_allocator.cpp
        )
-add_library(hs_blkalloc STATIC ${BLKALLOC_SOURCE})
+add_library(hs_blkalloc OBJECT ${BLKALLOC_SOURCE})
 
 #set(TEST_BLKALLOC_SOURCE_FILES
 #        test_blkalloc.cpp

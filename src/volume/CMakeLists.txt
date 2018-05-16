@@ -1,7 +1,7 @@
 set(VOLUME_SOURCE_FILES
        volume.cpp
       )
-add_library(hs_volume STATIC ${VOLUME_SOURCE_FILES})
+add_library(hs_volume OBJECT ${VOLUME_SOURCE_FILES})
 
 #set(TEST_VOLUME_SOURCE_FILES
 #       vol_test.cpp

@@ -2,7 +2,7 @@ from conans import ConanFile, CMake, tools
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "0.1.6"
+    version = "0.1.7"
     license = "Proprietary"
     description = "HomeStore"
 
@@ -33,7 +33,10 @@ class HomestoreConan(ConanFile):
         self.copy("*.hpp", dst="include", src="src", keep_path=True)
         self.copy("*/btree_node.cpp", dst="include", src="src", keep_path=True)
         self.copy("*cache/cache.cpp", dst="include", src="src", keep_path=True)
-        self.copy("*.so", dst="lib", keep_path=False)
+        if self.options.shared:
+            self.copy("*.so", dst="lib", keep_path=False)
+        else:
+            self.copy("*.a", dst="lib", keep_path=False)
 
     def package_info(self):
         self.cpp_info.libs = tools.collect_libs(self)

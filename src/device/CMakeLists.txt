@@ -2,7 +2,7 @@ set(DEVICE_SOURCE
         physical_dev.cpp
         device_manager.cpp
        )
-add_library(hs_device STATIC ${DEVICE_SOURCE})
+add_library(hs_device OBJECT ${DEVICE_SOURCE})
 
 #set(TEST_DEVICEMGR_SOURCE_FILES
 #        test_blkdev.cpp
