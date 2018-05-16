@@ -17,7 +17,7 @@
 #include "homeds/memory/composite_allocator.hpp"
 #include "homeds/memory/chunk_allocator.hpp"
 #include "homeds/memory/sys_allocator.hpp"
-#include "cache.h"
+#include "cache/cache.h"
 #include "blkstore/blkstore.hpp"
 #include "homeds/btree/btree_specific_impl.hpp"
 #include "homeds/btree/btree_node.h"
@@ -78,7 +78,7 @@ template<
         btree_node_type LeafNodeType,
         size_t NodeSize
 >
-class homeds::btree::BtreeSpecificImpl<SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize> {
+class BtreeSpecificImpl<SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize> {
 public:
     using HeaderType = BtreeBuffer<K, V, InteriorNodeType, LeafNodeType, NodeSize>;
 

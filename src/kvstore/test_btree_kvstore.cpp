@@ -11,7 +11,11 @@
 #include "device/virtual_dev.hpp"
 #include "kvstore/ssd_btree.hpp"
 
-#define MAX_CACHE_SIZE     2 * 1024 * 1024 * 1024
+
+constexpr auto Ki = 1024ul;
+constexpr auto Mi = Ki * Ki;
+constexpr auto Gi = Ki * Mi;
+constexpr auto MAX_CACHE_SIZE = 2 * Gi;
 using namespace std;
 using namespace homestore;
 
@@ -32,7 +36,7 @@ void setup_devices(uint32_t ndevs) {
     std::vector<std::string> dev_names;
     dev_names.reserve(ndevs);
 
-    for (auto i = 0; i < ndevs; i++) {
+    for (auto i = 0u; i < ndevs; i++) {
         std::stringstream ss;
         ss << "/tmp/phys_dev" << i+1;
         dev_names.push_back(ss.str());
