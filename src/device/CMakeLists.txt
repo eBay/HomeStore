@@ -14,6 +14,7 @@ add_executable(test_devmgr
                 )
 target_link_libraries(test_devmgr ${COMMON_LIB_DEPS} ${CONAN_LIBS_FOLLY})
 
+message(WARNING "PhysicalDevice test disabled due to interface change.")
 # XXX: Currently out of date with DeviceManager interface
 #set(TEST_PHYSDEV_SOURCE_FILES
 #        test_physdev.cpp)
@@ -24,6 +25,7 @@ target_link_libraries(test_devmgr ${COMMON_LIB_DEPS} ${CONAN_LIBS_FOLLY})
 #                )
 #target_link_libraries(test_physdev ${COMMON_LIB_DEPS})
 
+message(WARNING "VirtualDevice test disabled due to interface change.")
 # XXX: Currently out of data with VirtualDev interface
 #set(TEST_VIRTUALDEV_SOURCE_FILES
 #        test_virtualdev.cpp)

@@ -16,6 +16,7 @@ set(COMMON_LIB_DEPS
 include_directories (BEFORE .)
 
 add_subdirectory(blkalloc)
+add_subdirectory(blkstore)
 add_subdirectory(cache)
 add_subdirectory(device)
 add_subdirectory(endpoint)
