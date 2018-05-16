@@ -12,6 +12,7 @@ COPY conanfile.py /tmp/source/
 RUN conan install -u /tmp/source
 
 COPY CMakeLists.txt /tmp/source/
+COPY cmake/ /tmp/source/cmake
 COPY src/ /tmp/source/src
 
 RUN conan create /tmp/source "${CONAN_USER}"/"${CONAN_CHANNEL}";
