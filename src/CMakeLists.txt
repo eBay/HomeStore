@@ -20,6 +20,7 @@ add_subdirectory(blkstore)
 add_subdirectory(cache)
 add_subdirectory(device)
 add_subdirectory(endpoint)
+add_subdirectory(homeds)
 add_subdirectory(kvstore)
 add_subdirectory(volume)
 
