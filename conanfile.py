@@ -15,9 +15,11 @@ class HomestoreConan(ConanFile):
     requires = (("boost/[>=1.67,<2.0]@demo/dev"),
                 ("farmhash/[>=0.0,<1.0]@demo/dev"),
                 ("folly/[>=0.58,<1.0]@demo/dev"),
-                ("iomgr/[>=1.0,<2.0]@demo/dev"))
+                ("iomgr/[>=1.0,<2.0]@demo/dev"),
+                ("benchmark/[>=1.4,<2.0]@demo/dev"))
 
-    build_requires = (("sds_logging/[>=0.1.2,<1.0]@demo/dev"))
+    build_requires = (("sds_logging/[>=0.1.2,<1.0]@demo/dev"),
+                      ("gtest/[>=1.8,<2.0]@demo/dev"))
 
     generators = "cmake"
     default_options = "shared=True", "fPIC=True"
