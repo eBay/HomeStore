@@ -7,6 +7,11 @@ find_package (Threads REQUIRED)
 
 find_library(LIB_AIO aio)
 find_library(LIB_DOUBLE_CONVERSION double-conversion)
+set(COMMON_LIB_DEPS
+      ${CONAN_LIBS}
+      ${LIB_DOUBLE_CONVERSION}
+      ${LIB_AIO}
+    )
 
 include_directories (BEFORE .)
 
@@ -24,10 +29,7 @@ add_library(homestore
                   $<TARGET_OBJECTS:hs_blkalloc>
                 )
 target_link_libraries(homestore
-                         ${CONAN_LIBS}
-                         ${LIB_DOUBLE_CONVERSION}
-                         ${LIB_AIO})
-
+                         ${COMMON_LIB_DEPS})
 
 add_executable(test_volume volume/vol_test.cpp)
 target_link_libraries(test_volume homestore)
