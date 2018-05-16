@@ -160,7 +160,7 @@ int64_t unformat_num(const char *str) {
     int64_t val;
     char unit = ' ';
 
-    sscanf(str, "%lld%c", &val, &unit);
+    sscanf(str, "%ld%c", &val, &unit);
 
     switch (unit) {
 
@@ -235,12 +235,12 @@ BtreePerfTest tst;
 
 void init_entries(uint32_t n_read_entries, uint32_t n_insert_entries) {
     tst.readEntries = new TestEntry *[n_read_entries];
-    for (auto i = 0; i < n_read_entries; i++) {
+    for (auto i = 0u; i < n_read_entries; i++) {
         tst.readEntries[i] = new TestEntry(rand() % 5000, i % 1000, i);
     }
 
     tst.insertEntries = new TestEntry *[n_insert_entries];
-    for (auto i = 0; i < n_insert_entries; i++) {
+    for (auto i = 0u; i < n_insert_entries; i++) {
         tst.insertEntries[i] = new TestEntry(rand() % 5000, i % 1000, i + n_read_entries);
     }
 }

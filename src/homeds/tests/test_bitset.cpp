@@ -29,7 +29,7 @@ typedef homeds::Bitword< uint64_t > Bitword64;
 
 void print_bitset(const char *msg, Bitword64 b) {
     uint64_t val = b.to_integer();
-    printf("%-40s 0x%016llx ", msg ? msg : "", val);
+    printf("%-40s 0x%016lx ", msg ? msg : "", val);
 
     uint64_t mask = 0x8000000000000000UL;
     for (auto i = 0; i < 64; i++) {
