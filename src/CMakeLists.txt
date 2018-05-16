@@ -30,6 +30,3 @@ add_library(homestore
                 )
 target_link_libraries(homestore
                          ${COMMON_LIB_DEPS})
-
-add_executable(test_volume volume/vol_test.cpp)
-target_link_libraries(test_volume homestore)
