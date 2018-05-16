@@ -8,6 +8,7 @@
 //  Copyright © 2016 Kadayam, Hari. All rights reserved.#pragma once
 #include <vector>
 #include <tuple>
+#include <memory>
 #include <array>
 #include "mem_allocator.hpp"
 #include "sys_allocator.hpp"

@@ -68,8 +68,8 @@ template<
         size_t NodeSize = 8192>
 class Btree
 {
-#ifdef CLASS_DEFINITIONS
 public:
+#ifdef CLASS_DEFINITIONS
     Btree(BtreeConfig &cfg);
 
     /*
@@ -112,6 +112,7 @@ public:
     bool find_and_modify(BtreeKey &key, BtreeValue &new_val, BtreeValue &old_val);
 
 #endif
+    virtual ~Btree() = default;
 
 private:
 #ifdef CLASS_DEFINITIONS

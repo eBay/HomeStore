@@ -394,8 +394,8 @@ TEST_F(BtreeCrudTest, SimpleInsert) {
         delete (t);
     }
 
-    EXPECT_EQ(m_bt->get_stats().get_obj_count(), 0);
-    EXPECT_EQ(m_bt->get_stats().get_interior_nodes_count(), 0);
+    EXPECT_EQ(m_bt->get_stats().get_obj_count(), 0u);
+    EXPECT_EQ(m_bt->get_stats().get_interior_nodes_count(), 0u);
 }
 
 INIT_VMODULES(BTREE_VMODULES);

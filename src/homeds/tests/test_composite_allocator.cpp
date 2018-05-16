@@ -57,7 +57,7 @@ homeds::GenericFreelistAllocator< TOTAL_ALLOCS * THREADS, 256 > glob_generic_fre
 homeds::FreeListAllocator< TOTAL_ALLOCS, 256 > glob_freelist_allocator;
 
 void setup(uint32_t count) {
-    for (auto i = 0; i < count; i++) {
+    for (auto i = 0u; i < count; i++) {
         if ((i % 16) == 0) {
             glob_sizes[i] = 15;
         } else if ((i % 12) == 0) {

@@ -48,7 +48,7 @@ public:
     }
 
     free_list_bucket *find_bucket(uint32_t size) {
-        for (auto i = 0; i < m_buckets.size(); i++) {
+        for (auto i = 0u; i < m_buckets.size(); i++) {
             if (size <= m_buckets[i].m_size) {
                 return &m_buckets[i];
             }
@@ -57,7 +57,7 @@ public:
     }
 
     free_list_bucket *find_exact_bucket(uint32_t size) {
-        for (auto i = 0; i < m_buckets.size(); i++) {
+        for (auto i = 0u; i < m_buckets.size(); i++) {
             if (size == m_buckets[i].m_size) {
                 return &m_buckets[i];
             }
