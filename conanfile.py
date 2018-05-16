@@ -33,7 +33,6 @@ class HomestoreConan(ConanFile):
         self.copy("*.hpp", dst="include", src="src", keep_path=True)
         self.copy("*/btree_node.cpp", dst="include", src="src", keep_path=True)
         self.copy("*cache/cache.cpp", dst="include", src="src", keep_path=True)
-        self.copy("*.a", dst="lib", keep_path=False)
         self.copy("*.so", dst="lib", keep_path=False)
 
     def package_info(self):
