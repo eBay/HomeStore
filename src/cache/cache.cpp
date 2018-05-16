@@ -65,7 +65,7 @@ bool IntrusiveCache<K, V>::upsert(const V &v, bool *out_key_exists) {
 
 template< typename K, typename V>
 V* IntrusiveCache<K, V>::get(const K &k) {
-    V *v;
+    V *v{nullptr};
     auto b = K::get_blob(k);
     uint64_t hash_code = util::Hash64((const char *)b.bytes, (size_t)b.size);
 

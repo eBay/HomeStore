@@ -202,7 +202,7 @@ public:
     virtual void set_blob_size(uint32_t size) override {
     }
 
-    std::string to_string() const override {
+    std::string to_string() const {
         std::stringstream ss;
         ss << "count: " << get_count() << " rank: " << get_rank() << " blknum: " << get_blk_num();
         return ss.str();
@@ -251,7 +251,7 @@ public:
         return sizeof(m_val);
     }
 
-    std::string to_string() const override {
+    std::string to_string() const {
         std::stringstream ss; ss << "val = " << m_val; return ss.str();
     }
 

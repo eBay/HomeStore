@@ -1,14 +1,8 @@
-set(CACHE_SOURCE
-        cache.cpp
-        )
-add_library(hs_cache OBJECT ${CACHE_SOURCE})
-
 set(PERF_CACHE_SOURCE_FILES
         perf_cache.cpp
         )
 add_executable(perf_cache
                   ${PERF_CACHE_SOURCE_FILES}
-                  $<TARGET_OBJECTS:hs_cache>
                 )
 target_link_libraries(perf_cache ${COMMON_LIB_DEPS})
 
@@ -19,6 +13,5 @@ set(TEST_CACHE_SOURCE_FILES
 
 add_executable(test_cache
                   ${TEST_CACHE_SOURCE_FILES}
-                  $<TARGET_OBJECTS:hs_cache>
                 )
 target_link_libraries(test_cache ${COMMON_LIB_DEPS})

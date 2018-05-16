@@ -28,7 +28,6 @@ add_library(homestore
                   $<TARGET_OBJECTS:hs_volume>
                   $<TARGET_OBJECTS:hs_device>
                   $<TARGET_OBJECTS:hs_endpoint>
-                  $<TARGET_OBJECTS:hs_cache>
                   $<TARGET_OBJECTS:hs_blkalloc>
                 )
 target_link_libraries(homestore
