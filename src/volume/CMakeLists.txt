@@ -1,30 +1,10 @@
-cmake_minimum_required(VERSION 3.7)
-project(volume)
+set(VOLUME_SOURCE_FILES
+       volume.cpp
+      )
+add_library(hs_volume STATIC ${VOLUME_SOURCE_FILES})
 
-set(CMAKE_CXX_STANDARD 14)
-if (CMAKE_BUILD_TYPE MATCHES Release)
-    add_definitions(-DNDEBUG=1)
-    add_definitions(-O2)
-endif()
-
-include_directories(..)
-include_directories(../device)
-include_directories(../cache)
-include_directories(../../deps_prefix/${OS_TYPE}/include)
-include_directories(/usr/local/include/)
-include_directories(../blkstore)
-link_directories(../../deps_prefix/${OS_TYPE}/lib)
-
-set(TEST_VOLUME_SOURCE_FILES
-          volume.cpp
-          vol_test.cpp
-        ../device/virtual_dev.hpp
-	../cache/eviction.hpp
-        ../device/device_manager.cpp
-        ../device/physical_dev.cpp
-        ../blkalloc/varsize_blk_allocator.cpp
-        ../endpoint/drive_endpoint.cpp
-        ../cache/cache.cpp)
-
-add_executable(test_volume ${TEST_VOLUME_SOURCE_FILES})
-target_link_libraries(test_volume folly glog farmhash tcmalloc benchmark pthread aio)
+#set(TEST_VOLUME_SOURCE_FILES
+#       vol_test.cpp
+#      )
+#add_executable(test_volume ${TEST_VOLUME_SOURCE_FILES})
+#target_link_libraries(test_volume hs_volume ${CONAN_LIBS})

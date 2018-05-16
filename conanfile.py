@@ -2,7 +2,7 @@ from conans import ConanFile, CMake, tools
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "0.1.5"
+    version = "0.1.6"
     license = "Proprietary"
     description = "HomeStore"
 
@@ -10,7 +10,7 @@ class HomestoreConan(ConanFile):
                 "compiler": None,
                 "build_type": None,
                 "arch": None}
-    options = {"shared": [True, False]}
+    options = {"shared": [True, False], "fPIC": [True]}
 
     requires = (("boost/[>=1.67,<2.0]@demo/dev"),
                 ("farmhash/[>=0.0,<1.0]@demo/dev"),
@@ -20,7 +20,7 @@ class HomestoreConan(ConanFile):
     build_requires = (("sds_logging/[>=0.1.2,<1.0]@demo/dev"))
 
     generators = "cmake"
-    default_options = "shared=True"
+    default_options = "shared=True", "fPIC=True"
     exports_sources = "*"
 
     def build(self):
