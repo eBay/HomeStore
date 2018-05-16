@@ -97,11 +97,11 @@ static void insert_and_get_thread(CacheTest *ctest, uint32_t tnum) {
 
 TEST_F(CacheTest, InsertGet) {
     std::array<std::thread *, NTHREADS> thrs;
-    for (auto i = 0; i < NTHREADS; i++) {
+    for (auto i = 0u; i < NTHREADS; i++) {
         thrs[i] = new std::thread(insert_and_get_thread, this, i);
     }
 
-    for (auto i = 0; i < NTHREADS; i++) {
+    for (auto i = 0u; i < NTHREADS; i++) {
         thrs[i]->join();
     }
     LOG(INFO) << "Cache Stats: \n" << this->m_cache->get_stats().to_string();

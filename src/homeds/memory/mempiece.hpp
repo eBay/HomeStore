@@ -339,7 +339,7 @@ private:
             m_u.m_list = new std::vector< MemPiece < SizeMultiplier > >();
         }
 
-        int ind;
+        uint32_t ind;
         // If we found an offset in search we got to fail the add
         if (bsearch(mp.offset(), -1, &ind)) {
             return false;
