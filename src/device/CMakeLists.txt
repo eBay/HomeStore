@@ -13,6 +13,7 @@ add_executable(test_devmgr
                   $<TARGET_OBJECTS:hs_endpoint>
                 )
 target_link_libraries(test_devmgr ${COMMON_LIB_DEPS} ${CONAN_LIBS_FOLLY})
+add_test(NAME DevMgr COMMAND test_devmgr)
 
 message(WARNING "PhysicalDevice test disabled due to interface change.")
 # XXX: Currently out of date with DeviceManager interface
@@ -24,6 +25,7 @@ message(WARNING "PhysicalDevice test disabled due to interface change.")
 #                  $<TARGET_OBJECTS:hs_endpoint>
 #                )
 #target_link_libraries(test_physdev ${COMMON_LIB_DEPS})
+#add_test(NAME PhysicalDev COMMAND test_physdev)
 
 message(WARNING "VirtualDevice test disabled due to interface change.")
 # XXX: Currently out of data with VirtualDev interface
@@ -35,3 +37,4 @@ message(WARNING "VirtualDevice test disabled due to interface change.")
 #                  $<TARGET_OBJECTS:hs_endpoint>
 #                )
 #target_link_libraries(test_virtualdev ${COMMON_LIB_DEPS})
+#add_test(NAME VirtualDev COMMAND test_virtualdev)

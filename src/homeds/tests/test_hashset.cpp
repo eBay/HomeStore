@@ -11,7 +11,7 @@
 
 using namespace std;
 
-#define TEST_COUNT         100000U
+#define TEST_COUNT         10000U
 #define ITERATIONS         100U
 #define THREADS            8U
 #define ENTRIES_PER_BUCKET 4

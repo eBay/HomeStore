@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.9)
 project(HomeStore)
 
 set(CMAKE_CXX_STANDARD 17)
+enable_testing()
 
 if(EXISTS ${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
     include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)

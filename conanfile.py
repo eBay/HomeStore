@@ -29,6 +29,7 @@ class HomestoreConan(ConanFile):
         cmake = CMake(self)
         cmake.configure()
         cmake.build()
+        cmake.test()
 
     def package(self):
         self.copy("*.h", dst="include", src="src", keep_path=True)

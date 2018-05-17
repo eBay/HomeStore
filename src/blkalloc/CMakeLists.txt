@@ -14,4 +14,7 @@ if(CMAKE_BUILD_TYPE STREQUAL Debug)
                     $<TARGET_OBJECTS:hs_blkalloc>
                   )
   target_link_libraries(test_blkalloc ${COMMON_LIB_DEPS})
+  add_test(NAME BlkAlloc COMMAND test_blkalloc)
+else()
+  message(WARNING "BlkAlloc test disabled in Release build! Fails to build.")
 endif()
