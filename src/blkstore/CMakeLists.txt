@@ -7,3 +7,4 @@ message(WARNING "BlkStore test disabled due to interface change.")
 #                  ${TEST_BLKSTORE_SOURCE_FILES}
 #                )
 #target_link_libraries(test_store ${COMMON_LIB_DEPS})
+#add_test(NAME BlkStore COMMAND test_store)
