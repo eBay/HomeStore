@@ -16,10 +16,14 @@ extern "C" {
 #include "device/device.h"
 #include "device/virtual_dev.hpp"
 #include "volume.hpp"
+#include "boost/program_options.hpp"
 
 using namespace std; 
 using namespace homestore;
 using namespace homeio;
+namespace po = boost::program_options;
+
+
 
 static size_t const page_size = sysconf(_SC_PAGESIZE);
 
@@ -51,10 +55,11 @@ constexpr auto MAX_BUF = (8 * Mi) / WRITE_SIZE;
 constexpr auto MAX_VOL_SIZE = (256 * Mi);
 constexpr auto MAX_READ = MAX_BUF ;
 
+uint64_t max_vol_size = MAX_VOL_SIZE;
 int is_random_read = false;
 int is_random_write = false;
-bool is_read = true;
-bool is_write = true;
+bool is_read = false;
+bool is_write = false;
 
 uint8_t *bufs[MAX_BUF];
 boost::intrusive_ptr<homestore::BlkBuffer>boost_buf[MAX_BUF];
@@ -130,9 +135,9 @@ class test_ep : iomgr::EndPoint {
 
       /* Create a volume */
       vol = new homestore::Volume(dev_mgr,
-                                  MAX_VOL_SIZE, 
+                                  max_vol_size,
                                   [this] (auto status, auto vol_req) { process_completions(status, vol_req); });
-      LOGINFO("Created volume of size: {}", MAX_VOL_SIZE);
+      LOGINFO("Created volume of size: {}", max_vol_size);
    }
 
    void writefunc(int const cnt) {
@@ -202,13 +207,40 @@ thread_local test_ep::thread_info test_ep::info = {0};
 
 INIT_VMODULES(CACHE_VMODULES);
 int main(int argc, char** argv) {
-   //        InithomedsLogging(0, CACHE_VMODULES);
    std::vector<std::string> dev_names;
-   bool create = ((argc > 1) && (!strcmp(argv[1], "-c")));
+    // Declare the supported options.
+    po::options_description desc("Allowed options");
+    desc.add_options()
+            ("is_random_read", "enable random read")
+            ("is_random_write", "enable random write")
+            ("is_read", "enable read")
+            ("is_write", "enable write")
+            ("c", po::value< vector<string> >(&dev_names)->required(), "device list")
+            ("max_vol_size", po::value< uint64_t >(&max_vol_size), "max volume size in bytes");
 
-   for (auto i : boost::irange(create ? 2 : 1, argc)) {
-      dev_names.emplace_back(argv[i]);
-   }
+    po::variables_map vm;
+    po::store(po::parse_command_line(argc, argv, desc), vm);
+    po::notify(vm);
+
+    if (vm.count("is_random_read")) {
+        is_random_read = true;
+    }
+    if (vm.count("is_random_write")) {
+        is_random_write = true;
+    }
+    if (vm.count("is_read")) {
+        is_read = true;
+    }
+    if (vm.count("is_write")) {
+        is_write = true;
+    }
+    if(is_random_read && is_random_write){
+        cout << "Random read supported only with sequential write!";
+        return 1;
+    }else if(is_read && is_random_write){
+        cout << "Read is not supported with random write!";
+        return 1;
+    }
 
    spdlog::set_async_mode(4096, spdlog::async_overflow_policy::block_retry, nullptr, std::chrono::seconds(2));
    spdlog::set_pattern("[%D %H:%M:%S.%f] [%l] [%t] %v");
