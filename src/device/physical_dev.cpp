@@ -86,7 +86,19 @@ PhysicalDev::PhysicalDev(DeviceManager *mgr, std::string devname, int oflags,
 #ifdef __linux__
     if (ioctl(m_devfd,BLKGETSIZE64,&m_devsize) < 0) {
 	/* TODO: need better way to handle it */
-	assert(0);
+	if (errno == ENOTTY) {
+#ifndef NDEBUG
+		/* fstat doesn't work on blk devices. It is used only to
+		 * test internally on files. In production we will always
+		 * be using block devices.
+		 */
+		struct stat buf;
+		fstat(m_devfd, &buf);
+		m_devsize = buf.st_size;
+#endif
+	} else {
+		assert(0);
+	}
     }
     assert(m_devsize > 0); 
 #endif

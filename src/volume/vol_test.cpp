@@ -17,6 +17,7 @@ extern "C" {
 #include "device/virtual_dev.hpp"
 #include "volume.hpp"
 #include "boost/program_options.hpp"
+#include <condition_variable>
 
 using namespace std; 
 using namespace homestore;
@@ -60,6 +61,10 @@ int is_random_read = false;
 int is_random_write = false;
 bool is_read = false;
 bool is_write = false;
+bool can_read = false;
+bool can_write = true;
+std::mutex cv_mtx;
+std::condition_variable cv;
 
 uint8_t *bufs[MAX_BUF];
 boost::intrusive_ptr<homestore::BlkBuffer>boost_buf[MAX_BUF];
@@ -103,17 +108,18 @@ class test_ep : iomgr::EndPoint {
       size_t cnt = 0;
       while (atomic_load(&outstanding_ios) < MAX_OUTSTANDING_IOs && cnt < MAX_CNT_THREAD) {
          size_t temp;
-         ++outstanding_ios;
          if((temp = write_cnt.fetch_add(1, std::memory_order_relaxed)) < MAX_BUF) {
-            if (temp == 1) {
+            if (temp == 0) {
                write_startTime = homeio::Clock::now();
             }
+            ++outstanding_ios;
             writefunc(temp);
-         } else if (is_read &&
+         } else if (can_read &&
                     (temp = read_cnt.fetch_add(1, std::memory_order_relaxed)) < MAX_READ) {
-            if (temp == 1) {
+            if (temp == 0) {
                read_startTime = homeio::Clock::now();
-            }
+	    }
+            ++outstanding_ios;
             readfunc(temp);
          }
          ++cnt;
@@ -160,7 +166,6 @@ class test_ep : iomgr::EndPoint {
          return;
       }
       assert(is_write);
-      //		 struct req *req = (struct req *)malloc(sizeof(struct req));
       struct req *req = new struct req();
       req->is_read = true;
       if (is_random_read) {
@@ -195,6 +200,22 @@ class test_ep : iomgr::EndPoint {
 #endif
       }
       delete(req);
+      if (outstanding_ios == 0 && write_cnt >= MAX_BUF && can_write) {
+	 /* signal main thread */
+	if (is_read) {
+	    can_read = true;
+            read(ev_fd, &temp, sizeof(uint64_t));
+	    temp = 1;
+            write(ev_fd, &temp, sizeof(uint64_t));
+	}
+	can_write = false;
+	std::unique_lock<std::mutex> lck(cv_mtx);
+	cv.notify_all();
+      }
+      if (outstanding_ios == 0 && read_cnt >= MAX_BUF && can_read) {
+	std::unique_lock<std::mutex> lck(cv_mtx);
+	cv.notify_all();
+      }
    }
 
    void init_local() override {
@@ -289,7 +310,10 @@ int main(int argc, char** argv) {
    [[maybe_unused]] auto wsize = write(ep.ev_fd, &temp, sizeof(uint64_t));
 
    LOGINFO("Waiting for writes to finish.");
-   while(atomic_load(&write_cnt) < MAX_BUF) ;
+   {
+   	std::unique_lock<std::mutex> lck(cv_mtx);
+   	cv.wait(lck);
+   }
 
    uint64_t time_us = get_elapsed_time(write_startTime);
    printf("write counters..........\n");
@@ -299,7 +323,9 @@ int main(int argc, char** argv) {
    printf("iops %lu\n",(atomic_load(&write_cnt) * 1000 * 1000)/time_us);
 
    LOGINFO("Waiting for reads to finish.");
-   while(is_read && atomic_load(&read_cnt) < MAX_READ) {
+   {
+   	std::unique_lock<std::mutex> lck(cv_mtx);
+   	cv.wait(lck);
    }
 
    time_us = get_elapsed_time(read_startTime);

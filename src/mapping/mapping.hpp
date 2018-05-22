@@ -7,6 +7,8 @@ using namespace std;
 using namespace homestore;
 using namespace homeds::btree;
 
+#define EMAP_NOTFOUND 0x1
+
 class MappingKey : public homeds::btree::BtreeKey {
 private:
 	uint64_t blob;
@@ -130,16 +132,18 @@ public:
 
 	uint32_t put(uint64_t lba, uint32_t nblks, struct BlkId blkid) {
 		MappingValue value;
-		struct BlkId *temp_blkid;
 
-
-		m_bt->remove(get_key(lba), &value);
-		m_bt->put(get_key(lba), get_value(blkid), homeds::btree::INSERT_ONLY_IF_NOT_EXISTS);
-#ifdef DEBUG
-//		m_bt->get(get_key(lba), &value);
-//		temp_blkid = value.get_pVal();
-//		assert(temp_blkid->m_chunk_num == blkid.m_chunk_num);
-#endif
+		/* TODO: It is very naive way of doing it and will definitely impact
+		 * the performance. We have a new design and will implement it with
+		 * snapshot.
+		 */
+		for (uint32_t i = 0; i < nblks; i++) {
+			blkid.set_nblks(1);
+			m_bt->put(get_key(lba), get_value(blkid), 
+				homeds::btree::INSERT_ONLY_IF_NOT_EXISTS);
+			lba++;
+			blkid.set_id(blkid.get_id() + 1);
+		}
 		
 		return 0;
 	}
@@ -154,7 +158,9 @@ public:
 			
 			key = get_key(lba).get_value();
 			bool ret = m_bt->get(get_key(lba), &value);
-			assert(ret);
+			if (!ret) {
+				return EMAP_NOTFOUND; 
+			}
 			struct BlkId blkid = value.get_val();
 			uint32_t maxBlkRead = KEY_RANGE - (lba - (key * KEY_RANGE));
 	

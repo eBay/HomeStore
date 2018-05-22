@@ -153,25 +153,28 @@ homestore::Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks, volume_req*
 int
 homestore::Volume::read(uint64_t lba, int nblks, volume_req* req) {
 
-    /* TODO: pass a pointer */
     std::vector< struct BlkId > blkIdList;
-//	cout << "value in read";
-//	cout << lba;
-//	cout << "number of blocks";
-//	cout << nblks;
-    
     req->startTime = Clock::now();
     Clock::time_point startTime = Clock::now();
-    if (map->get(lba, nblks, blkIdList)) {
-        ASSERT(0);
+    req->read_cnt = 0;
+    
+    int ret = map->get(lba, nblks, blkIdList);
+    /* TODO: map is also going to be async once persistent bree comes.
+     * This check will be removed later. 
+     */
+    if (ret == EMAP_NOTFOUND) {
+	process_completions(EMAP_NOTFOUND, req); 
+    	return 0;
+    } else {
+	assert(ret == 0);
     }
+
     map_read_time.fetch_add(get_elapsed_time(startTime), memory_order_relaxed);
 
     read_cnt.fetch_add(1, memory_order_relaxed);
     req->lba = lba;
     req->nblks = nblks;
     req->is_read = true;
-    req->read_cnt = 0;
     req->read_cnt = blkIdList.size();
     
     startTime = Clock::now();
