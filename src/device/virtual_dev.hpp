@@ -12,6 +12,7 @@
 #include <memory>
 #include <boost/range/irange.hpp>
 #include <map>
+#include <error/error.h>
 
 namespace homestore {
 
@@ -60,33 +61,33 @@ struct pdev_chunk_map {
  * DefaultDeviceSelector: Which device to select for allocation
  */
 struct virtualdev_req;
-typedef std::function< void (int status, virtualdev_req* req) > virtualdev_comp_callback;
+typedef std::function< void (virtualdev_req* req) > virtualdev_comp_callback;
 struct virtualdev_req {
 	uint64_t version;
 	virtualdev_comp_callback cb;
 	uint64_t size;
 	bool is_read;
+	std::error_condition err;
+	atomic<uint64_t> num_bytes;
 };
 
 [[maybe_unused]]
 static void
-virtual_dev_process_completions(int64_t num_bytes, uint8_t *cookie) {
+virtual_dev_process_completions(uint64_t num_bytes, uint8_t *cookie) {
 	virtualdev_req *req = (virtualdev_req *) cookie;
 	int ret = 0;
 	assert(req->version == 0xDEAD);
-        if (0 > num_bytes || req->size != static_cast<uint64_t>(num_bytes)) {
-           assert(0);
-           ret = -1;
-        } else {
-           ret = 0;
-        }
-	req->cb(ret, req);
+	/* TODO: should set the correct error condition  for system errorno*/
+//	req->err = std::make_error_condition
+				(error_code(errno, std::generic_category()));
+	req->num_bytes.fetch_add(num_bytes, memory_order_acquire);
+	req->cb(req);
 }
 
 template <typename Allocator, typename DefaultDeviceSelector>
 class VirtualDev : public AbstractVirtualDev
 {
-typedef std::function< void (int status, virtualdev_req* req) > comp_callback;
+typedef std::function< void (virtualdev_req* req) > comp_callback;
 private:
     vdev_info_block *m_vb; // This device block info
     DeviceManager *m_mgr;  // Device Manager back pointer
@@ -170,9 +171,9 @@ public:
         }
     }
     
-    void process_completions(int status, virtualdev_req* req) {
+    void process_completions(virtualdev_req* req) {
 	
-	comp_cb(status, req);
+	comp_cb(req);
 	/* XXX:we probably have to do something if a write/read is spread
          * across the chunks from this layer.
 	 */
@@ -289,7 +290,7 @@ public:
 	
 	req->version = 0xDEAD;
 	auto temp = std::bind(&VirtualDev::process_completions, this, 
-			    std::placeholders::_1, std::placeholders::_2);
+			    std::placeholders::_1);
 	req->cb = temp;
 	req->size = size;
         uint64_t dev_offset = to_dev_offset(bid, &chunk);
@@ -339,7 +340,7 @@ public:
         uint64_t primary_dev_offset = to_dev_offset(bid, &primary_chunk);
 	req->version = 0xDEAD;
 	req->cb = std::bind(&VirtualDev::process_completions, this, 
-			    std::placeholders::_1, std::placeholders::_2);
+			    std::placeholders::_1);
 	req->size = mp.size();
         try {
             primary_chunk->get_physical_dev_mutable()->read((char *)mp.ptr(), mp.size(), 
@@ -378,7 +379,7 @@ public:
         assert(buf.size() == (bid.get_nblks() * get_blk_size())); // Expected to be less than allocated blk originally.
 	req->version = 0xDEAD;
 	req->cb = std::bind(&VirtualDev::process_completions, this, 
-			    std::placeholders::_1, std::placeholders::_2);
+			    std::placeholders::_1);
         for (auto i : boost::irange<uint32_t>(0, buf.npieces())) {
             homeds::blob b;
             buf.get(&b, i);

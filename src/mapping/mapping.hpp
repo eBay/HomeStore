@@ -2,12 +2,11 @@
 #include "homeds/btree/btree.hpp"
 #include <blkalloc/blk.h>
 #include <csignal>
+#include <error/error.h>
 
 using namespace std;
 using namespace homestore;
 using namespace homeds::btree;
-
-#define EMAP_NOTFOUND 0x1
 
 class MappingKey : public homeds::btree::BtreeKey {
 private:
@@ -130,25 +129,25 @@ public:
 		return value;
 	}
 
-	uint32_t put(uint64_t lba, uint32_t nblks, struct BlkId blkid) {
+	std::error_condition put(uint64_t lba, uint32_t nblks, struct BlkId blkid) {
 		MappingValue value;
 
 		/* TODO: It is very naive way of doing it and will definitely impact
 		 * the performance. We have a new design and will implement it with
 		 * snapshot.
 		 */
-		for (uint32_t i = 0; i < nblks; i++) {
+		for (uint32_t i = 0; i < nblks; ++i) {
 			blkid.set_nblks(1);
 			m_bt->put(get_key(lba), get_value(blkid), 
 				homeds::btree::INSERT_ONLY_IF_NOT_EXISTS);
-			lba++;
+			++lba;
 			blkid.set_id(blkid.get_id() + 1);
 		}
 		
-		return 0;
+		return homestore::no_error;
 	}
 		
-	uint32_t get(uint64_t lba, uint32_t nblks, 
+	std::error_condition get(uint64_t lba, uint32_t nblks, 
 			std::vector<struct homestore::BlkId> &blkIdList) {
 
 		uint64_t key;
@@ -159,7 +158,8 @@ public:
 			key = get_key(lba).get_value();
 			bool ret = m_bt->get(get_key(lba), &value);
 			if (!ret) {
-				return EMAP_NOTFOUND; 
+				return homestore::make_error_condition(
+						homestore_error::lba_not_exist); 
 			}
 			struct BlkId blkid = value.get_val();
 			uint32_t maxBlkRead = KEY_RANGE - (lba - (key * KEY_RANGE));
@@ -177,6 +177,6 @@ public:
 				lba = lba + maxBlkRead;
 			}
 		}
-		return 0;
+		return no_error;
 	}
 };

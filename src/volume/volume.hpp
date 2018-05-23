@@ -24,7 +24,7 @@ struct volume_req:blkstore_req {
 
 class Volume {
 
-	typedef std::function< void (int status, volume_req* req) > comp_callback;
+	typedef std::function< void (volume_req* req) > comp_callback;
 	uint64_t size;
 	mapping *map;
 	atomic<uint64_t> alloc_blk_time;
@@ -50,6 +50,6 @@ public:
 	void init_perf_cntrs();
 	void print_perf_cntrs();
 	uint64_t get_elapsed_time(Clock::time_point startTime);
-	void process_completions(int status, blkstore_req *bs_req);
+	void process_completions(blkstore_req *bs_req);
 };
 }

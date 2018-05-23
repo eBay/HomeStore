@@ -142,7 +142,7 @@ class test_ep : iomgr::EndPoint {
       /* Create a volume */
       vol = new homestore::Volume(dev_mgr,
                                   max_vol_size,
-                                  [this] (auto status, auto vol_req) { process_completions(status, vol_req); });
+                                  [this] (auto vol_req) { process_completions(vol_req); });
       LOGINFO("Created volume of size: {}", max_vol_size);
    }
 
@@ -179,8 +179,7 @@ class test_ep : iomgr::EndPoint {
       }
    }
 
-   void process_completions(int status, volume_req *vol_req) {
-      assert(status == 0);
+   void process_completions(volume_req *vol_req) {
       struct req * req = static_cast< struct req* >(vol_req);
       /* raise an event */
       uint64_t temp = 1;
@@ -209,11 +208,9 @@ class test_ep : iomgr::EndPoint {
             write(ev_fd, &temp, sizeof(uint64_t));
 	}
 	can_write = false;
-	std::unique_lock<std::mutex> lck(cv_mtx);
 	cv.notify_all();
       }
       if (outstanding_ios == 0 && read_cnt >= MAX_BUF && can_read) {
-	std::unique_lock<std::mutex> lck(cv_mtx);
 	cv.notify_all();
       }
    }

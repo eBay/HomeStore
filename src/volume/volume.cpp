@@ -43,8 +43,7 @@ homestore::Volume::Volume(homestore::DeviceManager *dev_mgr, uint64_t size,
 							(dev_mgr, Volume::glob_cache, size,
                                                          WRITETHRU_CACHE, 0, 
 							 (std::bind(&Volume::process_completions, 
-							  this, std::placeholders::_1, 
-							  std::placeholders::_2)));
+							  this, std::placeholders::_1)));
     map = new mapping(size);
 }
 
@@ -58,7 +57,7 @@ homestore::Volume::Volume(DeviceManager *dev_mgr, homestore::vdev_info_block *vb
 							(dev_mgr, Volume::glob_cache, vb, 
 							 WRITETHRU_CACHE, 
 							 (std::bind(&Volume::process_completions, this,
-							  std::placeholders::_1, std::placeholders::_2)));
+							  std::placeholders::_1)));
     map = new mapping(size);
     /* TODO: rishabh, We need a attach function to register completion callback if layers
      * are called from bottomup.
@@ -66,11 +65,11 @@ homestore::Volume::Volume(DeviceManager *dev_mgr, homestore::vdev_info_block *vb
 }
 
 void 
-homestore::Volume::process_completions(int status, blkstore_req *bs_req) {
+homestore::Volume::process_completions(blkstore_req *bs_req) {
 	
    struct volume_req * req = static_cast< struct volume_req * >(bs_req);
-   if (status) {
-	comp_cb(status, req);
+   if (req->err != no_error) {
+	comp_cb(req);
    }
 	
    if (!req->is_read) {
@@ -85,7 +84,7 @@ homestore::Volume::process_completions(int status, blkstore_req *bs_req) {
 	}
    	io_read_time.fetch_add(get_elapsed_time(req->startTime), memory_order_relaxed);
    }
-   comp_cb(status, req);
+   comp_cb(req);
 }
 
 void
@@ -158,15 +157,14 @@ homestore::Volume::read(uint64_t lba, int nblks, volume_req* req) {
     Clock::time_point startTime = Clock::now();
     req->read_cnt = 0;
     
-    int ret = map->get(lba, nblks, blkIdList);
+    std::error_condition ret = map->get(lba, nblks, blkIdList);
     /* TODO: map is also going to be async once persistent bree comes.
      * This check will be removed later. 
      */
-    if (ret == EMAP_NOTFOUND) {
-	process_completions(EMAP_NOTFOUND, req); 
+    req->err = ret;
+    if (ret) {
+	process_completions(req); 
     	return 0;
-    } else {
-	assert(ret == 0);
     }
 
     map_read_time.fetch_add(get_elapsed_time(startTime), memory_order_relaxed);
