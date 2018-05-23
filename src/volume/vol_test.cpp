@@ -203,9 +203,9 @@ class test_ep : iomgr::EndPoint {
 	 /* signal main thread */
 	if (is_read) {
 	    can_read = true;
-            read(ev_fd, &temp, sizeof(uint64_t));
+            [[maybe_unused]] auto rsize = read(ev_fd, &temp, sizeof(uint64_t));
 	    temp = 1;
-            write(ev_fd, &temp, sizeof(uint64_t));
+            [[maybe_unused]] auto wsize = write(ev_fd, &temp, sizeof(uint64_t));
 	}
 	can_write = false;
 	cv.notify_all();
