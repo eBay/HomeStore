@@ -23,12 +23,14 @@ add_subdirectory(endpoint)
 add_subdirectory(homeds)
 add_subdirectory(kvstore)
 add_subdirectory(volume)
+add_subdirectory(error)
 
 add_library(homestore
                   $<TARGET_OBJECTS:hs_volume>
                   $<TARGET_OBJECTS:hs_device>
                   $<TARGET_OBJECTS:hs_endpoint>
                   $<TARGET_OBJECTS:hs_blkalloc>
+		  $<TARGET_OBJECTS:hs_error>
                 )
 target_link_libraries(homestore
                          ${COMMON_LIB_DEPS})

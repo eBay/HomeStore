@@ -13,6 +13,7 @@
 #include <boost/optional.hpp>
 #include "homeds/memory/mempiece.hpp"
 #include "cache/cache.cpp"
+#include <error/error.h>
 
 namespace homestore {
 enum BlkStoreCacheType {
@@ -52,13 +53,16 @@ struct blkstore_req:virtualdev_req {
 
 template <typename BAllocator, typename Buffer = BlkBuffer>
 class BlkStore {
-    typedef std::function< void (int status, blkstore_req* req) > comp_callback;
+    typedef std::function< void (blkstore_req* req) > comp_callback;
 public:
-    void process_completions(int status, virtualdev_req *v_req) {
+    void process_completions(virtualdev_req *v_req) {
 	struct blkstore_req * req = static_cast< struct blkstore_req* >(v_req);
-	
+
+	if (req->err != no_error) {
+		m_comp_cb(req);
+	}	
 	if (!req->is_read) {
-		m_comp_cb(status, req);
+		m_comp_cb(req);
 		/* XXX: do we need to do anything for failure */
 		return;
 	}
@@ -91,7 +95,7 @@ public:
 	    }
 			
 	}
-	m_comp_cb(status, req);
+	m_comp_cb(req);
     }
 
     BlkStore(DeviceManager *mgr, Cache< BlkId > *cache, uint64_t initial_size, BlkStoreCacheType cache_type,
@@ -101,7 +105,7 @@ public:
             m_vdev(mgr, initial_size, mirrors, true, BLKSTORE_BLK_SIZE,
 				mgr->get_all_devices(), 
 				(std::bind(&BlkStore::process_completions, this, 
-			         std::placeholders::_1, std::placeholders::_2))),
+			         std::placeholders::_1))),
 	    m_comp_cb(comp_cb) {
     }
 
@@ -110,7 +114,7 @@ public:
             m_cache(cache),
             m_cache_type(cache_type),
             m_vdev(mgr, vb, (std::bind(&BlkStore::process_completions, this, 
-			     std::placeholders::_1, std::placeholders::_2))), 
+			     std::placeholders::_1))), 
 	    m_comp_cb(comp_cb) {
     }
 
@@ -336,7 +340,7 @@ public:
 
 	if (req->missing_piece_cnt == 0) {
 		assert(cache_found);
-		m_comp_cb(0, dynamic_cast< struct blkstore_req* >(req));
+		m_comp_cb(dynamic_cast< struct blkstore_req* >(req));
 	}
 	return bbuf;
     }
