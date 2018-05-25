@@ -104,6 +104,7 @@ Volume::process_completions(blkstore_req *bs_req) {
    struct volume_req * req = static_cast< struct volume_req * >(bs_req);
    if (req->err != no_error) {
 	comp_cb(req);
+        return;
    }
 	
    if (!req->is_read) {
