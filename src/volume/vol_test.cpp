@@ -41,7 +41,7 @@ std::shared_ptr<spdlog::logger> GetLogger() {
 }
 
 homestore::DeviceManager *dev_mgr = nullptr;
-homestore::Volume *vol;
+std::shared_ptr<homestore::Volume> vol;
 
 constexpr auto MAX_OUTSTANDING_IOs = 64u;
 constexpr auto MAX_CNT_THREAD = 8u;
@@ -140,9 +140,10 @@ class test_ep : iomgr::EndPoint {
       iomgr->add_ep(this);
 
       /* Create a volume */
-      vol = new homestore::Volume(dev_mgr,
-                                  max_vol_size,
-                                  [this] (auto vol_req) { process_completions(vol_req); });
+      vol = homestore::Volume::createVolume("my_volume",
+                                            dev_mgr,
+                                            max_vol_size,
+                                            [this] (auto vol_req) { process_completions(vol_req); });
       LOGINFO("Created volume of size: {}", max_vol_size);
    }
 

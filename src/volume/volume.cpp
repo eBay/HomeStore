@@ -6,40 +6,74 @@
 #include "volume.hpp"
 
 using namespace std;
-using namespace homestore;
 
 #define MAX_CACHE_SIZE     (2 * 1024ul * 1024ul * 1024ul) /* it has to be a multiple of 16k */
 constexpr auto BLOCK_SIZE = (8 * 1024ul);
 
+static std::map<std::string, std::shared_ptr<homestore::Volume>> volume_map;
+static std::mutex map_lock;
+
+namespace homestore
+{
+
+std::shared_ptr<Volume>
+Volume::createVolume(std::string const& uuid,
+                     DeviceManager* mgr,
+                     uint64_t const size,
+                     comp_callback comp_cb) {
+   decltype(volume_map)::iterator it;
+   // Try to add an entry for this volume
+   {  std::lock_guard<std::mutex> lg (map_lock);
+      bool happened {false};
+      std::tie(it, happened) = volume_map.emplace(std::make_pair(uuid, nullptr));
+      if (!happened) {
+         if (volume_map.end() != it) return it->second;
+         throw std::runtime_error("Unknown bug");
+      }
+   }
+   // Okay, this is a new volume so let's create it
+   auto new_vol = new Volume(mgr, size, comp_cb);
+   it->second.reset(new_vol);
+   return it->second;
+}
+
+std::shared_ptr<Volume>
+Volume::lookupVolume(std::string const& uuid) {
+   {  std::lock_guard<std::mutex> lg (map_lock);
+      auto it = volume_map.find(uuid);
+      if (volume_map.end() != it) return it->second;
+   }
+   return nullptr;
+}
 
 Cache< BlkId > * Volume::glob_cache = NULL;
 uint64_t 
-homestore::Volume::get_elapsed_time(Clock::time_point startTime) {
+Volume::get_elapsed_time(Clock::time_point startTime) {
 	std::chrono::nanoseconds ns = std::chrono::duration_cast
 					< std::chrono::nanoseconds >(Clock::now() - startTime);
 	return ns.count() / 1000;
 }
 
 AbstractVirtualDev *
-homestore::Volume::new_vdev_found(DeviceManager *dev_mgr, homestore::vdev_info_block *vb) {
+Volume::new_vdev_found(DeviceManager *dev_mgr, vdev_info_block *vb) {
     LOG(INFO) << "New virtual device found id = " << vb->vdev_id << " size = " << vb->size;
 
     /* TODO: enable it after testing */
 #if 0
-    homestore::Volume *volume = new homestore::Volume(dev_mgr, vb);
+    Volume *volume = new Volume(dev_mgr, vb);
     return volume->blk_store->get_vdev();
 #endif
     return NULL;
 }
 
-homestore::Volume::Volume(homestore::DeviceManager *dev_mgr, uint64_t size, 
+Volume::Volume(DeviceManager *dev_mgr, uint64_t size,
 						comp_callback comp_cb):comp_cb(comp_cb) {
     fLI::FLAGS_minloglevel=3;
     if (Volume::glob_cache == NULL) {
-        Volume::glob_cache = new homestore::Cache< BlkId >(MAX_CACHE_SIZE, BLOCK_SIZE);
+        Volume::glob_cache = new Cache< BlkId >(MAX_CACHE_SIZE, BLOCK_SIZE);
         cout << "cache created\n";
     }
-    blk_store = new homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >
+    blk_store = new BlkStore< VdevVarSizeBlkAllocatorPolicy >
 							(dev_mgr, Volume::glob_cache, size,
                                                          WRITETHRU_CACHE, 0, 
 							 (std::bind(&Volume::process_completions, 
@@ -47,13 +81,13 @@ homestore::Volume::Volume(homestore::DeviceManager *dev_mgr, uint64_t size,
     map = new mapping(size);
 }
 
-homestore::Volume::Volume(DeviceManager *dev_mgr, homestore::vdev_info_block *vb) {
+Volume::Volume(DeviceManager *dev_mgr, vdev_info_block *vb) {
     size = vb->size;
     if (Volume::glob_cache == NULL) {
-        Volume::glob_cache = new homestore::Cache< BlkId >(MAX_CACHE_SIZE, BLOCK_SIZE);
+        Volume::glob_cache = new Cache< BlkId >(MAX_CACHE_SIZE, BLOCK_SIZE);
         cout << "cache created\n";
     }
-    blk_store = new homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >
+    blk_store = new BlkStore< VdevVarSizeBlkAllocatorPolicy >
 							(dev_mgr, Volume::glob_cache, vb, 
 							 WRITETHRU_CACHE, 
 							 (std::bind(&Volume::process_completions, this,
@@ -65,7 +99,7 @@ homestore::Volume::Volume(DeviceManager *dev_mgr, homestore::vdev_info_block *vb
 }
 
 void 
-homestore::Volume::process_completions(blkstore_req *bs_req) {
+Volume::process_completions(blkstore_req *bs_req) {
 	
    struct volume_req * req = static_cast< struct volume_req * >(bs_req);
    if (req->err != no_error) {
@@ -88,7 +122,7 @@ homestore::Volume::process_completions(blkstore_req *bs_req) {
 }
 
 void
-homestore::Volume::init_perf_cntrs() {
+Volume::init_perf_cntrs() {
     write_cnt = 0;
     alloc_blk_time = 0;
     write_time = 0;
@@ -98,7 +132,7 @@ homestore::Volume::init_perf_cntrs() {
 }
 
 void
-homestore::Volume::print_perf_cntrs() {
+Volume::print_perf_cntrs() {
     printf("avg time taken in alloc_blk %lu us\n", alloc_blk_time/write_cnt);
     printf("avg time taken in issuing write from volume layer %lu us\n", 
 							write_time/write_cnt);
@@ -115,9 +149,9 @@ homestore::Volume::print_perf_cntrs() {
 }
 
 boost::intrusive_ptr< BlkBuffer > 
-homestore::Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks, volume_req* req) {
-    homestore::BlkId bid;
-    homestore::blk_alloc_hints hints;
+Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks, volume_req* req) {
+    BlkId bid;
+    blk_alloc_hints hints;
     hints.desired_temp = 0;
     hints.dev_id_hint = -1;
     
@@ -150,7 +184,7 @@ homestore::Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks, volume_req*
 }
 
 int
-homestore::Volume::read(uint64_t lba, int nblks, volume_req* req) {
+Volume::read(uint64_t lba, int nblks, volume_req* req) {
 
     std::vector< struct BlkId > blkIdList;
     req->startTime = Clock::now();
@@ -184,3 +218,5 @@ homestore::Volume::read(uint64_t lba, int nblks, volume_req* req) {
     read_time.fetch_add(get_elapsed_time(startTime), memory_order_relaxed);
     return 0;
 }
+
+} /* homestore */
