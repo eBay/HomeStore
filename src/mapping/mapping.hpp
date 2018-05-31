@@ -105,7 +105,7 @@ public:
 #define MappingBtreeDeclType     homeds::btree::Btree<homeds::btree::MEM_BTREE, MappingKey, MappingValue, \
                                     homeds::btree::BTREE_NODETYPE_SIMPLE, homeds::btree::BTREE_NODETYPE_SIMPLE>
 #define KEY_RANGE	1
-constexpr auto MAP_BLOCK_SIZE	= 8192;
+constexpr auto MAP_BLOCK_SIZE	= 4096;
 
 class mapping {
 private:

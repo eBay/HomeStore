@@ -50,8 +50,8 @@ constexpr auto MAX_THREADS = 8u;
 constexpr auto Ki = 1024ull;
 constexpr auto Mi = Ki * Ki;
 constexpr auto Gi = Ki * Mi;
-constexpr auto WRITE_SIZE = 8 * Ki;
-constexpr auto BUF_SIZE = WRITE_SIZE / (8 * Ki);
+constexpr auto WRITE_SIZE = 4 * Ki;
+constexpr auto BUF_SIZE = WRITE_SIZE / (4 * Ki);
 constexpr auto MAX_BUF = (8 * Mi) / WRITE_SIZE;
 constexpr auto MAX_VOL_SIZE = (256 * Mi);
 constexpr auto MAX_READ = MAX_BUF ;
@@ -194,7 +194,7 @@ class test_ep : iomgr::EndPoint {
          /* memcmp */
 #ifndef NDEBUG
          homeds::blob b  = req->read_buf_list[0]->at_offset(0);	
-         assert(b.size == BUF_SIZE * 8192);
+         assert(b.size == BUF_SIZE * WRITE_SIZE);
          int j = memcmp((void *)b.bytes, (void *)bufs[req->indx], b.size);
          assert(j == 0);
 #endif
@@ -291,10 +291,10 @@ int main(int argc, char** argv) {
    LOGINFO("Creating dataset.");
    for (auto i = 0u; i < MAX_BUF; i++) {
       //		bufs[i] = new uint8_t[8192*1000]();
-      if (auto ec = posix_memalign((void**)&bufs[i], page_size, 8192 * BUF_SIZE))
+      if (auto ec = posix_memalign((void**)&bufs[i], page_size, WRITE_SIZE * BUF_SIZE))
          throw std::system_error(std::error_code(ec, std::generic_category()));
       uint8_t *bufp = bufs[i];
-      for (auto j = 0u; j < (8192 * BUF_SIZE/8); j++) {
+      for (auto j = 0u; j < (WRITE_SIZE * BUF_SIZE/8); j++) {
          memset(bufp, i + j + 1 , 8);
          bufp = bufp + 8;
       }
