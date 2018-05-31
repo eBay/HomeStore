@@ -108,10 +108,12 @@ public:
 constexpr auto MAP_BLOCK_SIZE	= 4096;
 
 class mapping {
+	typedef std::function< void (struct BlkId blkid) > free_blk_callback;
 private:
 	MappingBtreeDeclType *m_bt;
+	free_blk_callback free_blk_cb;
 public:
-	mapping(uint32_t volsize) {
+	mapping(uint32_t volsize, free_blk_callback cb) :  free_blk_cb(cb) {
 		homeds::btree::BtreeConfig btree_cfg;
 		btree_cfg.set_max_objs(volsize/(KEY_RANGE*MAP_BLOCK_SIZE));
 		btree_cfg.set_max_key_size(sizeof(MappingKey));
@@ -138,12 +140,19 @@ public:
 		 */
 		for (uint32_t i = 0; i < nblks; ++i) {
 			blkid.set_nblks(1);
+			/* TODO: don't need to call remove explicitly once
+			 * varsize btree is plugged in.
+			 */
+			bool ret = m_bt->remove(get_key(lba), &value);
+			if (ret) {
+				/* free this block */
+				free_blk_cb(value.get_val());
+			}
 			m_bt->put(get_key(lba), get_value(blkid), 
 				homeds::btree::INSERT_ONLY_IF_NOT_EXISTS);
 			++lba;
 			blkid.set_id(blkid.get_id() + 1);
 		}
-		
 		return homestore::no_error;
 	}
 		

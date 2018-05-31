@@ -53,7 +53,7 @@ constexpr auto Gi = Ki * Mi;
 constexpr auto WRITE_SIZE = 4 * Ki;
 constexpr auto BUF_SIZE = WRITE_SIZE / (4 * Ki);
 constexpr auto MAX_BUF = (8 * Mi) / WRITE_SIZE;
-constexpr auto MAX_VOL_SIZE = (256 * Mi);
+constexpr auto MAX_VOL_SIZE = (1 * Gi);
 constexpr auto MAX_READ = MAX_BUF ;
 
 uint64_t max_vol_size = MAX_VOL_SIZE;

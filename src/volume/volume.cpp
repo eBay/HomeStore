@@ -78,7 +78,8 @@ Volume::Volume(DeviceManager *dev_mgr, uint64_t size,
                                                          WRITETHRU_CACHE, 0, 
 							 (std::bind(&Volume::process_completions, 
 							  this, std::placeholders::_1)));
-    map = new mapping(size);
+    map = new mapping(size,
+		[this] (homestore::BlkId bid) { free_blk(bid); });
 }
 
 Volume::Volume(DeviceManager *dev_mgr, vdev_info_block *vb) {
@@ -92,7 +93,8 @@ Volume::Volume(DeviceManager *dev_mgr, vdev_info_block *vb) {
 							 WRITETHRU_CACHE, 
 							 (std::bind(&Volume::process_completions, this,
 							  std::placeholders::_1)));
-    map = new mapping(size);
+    map = new mapping(size, 
+		[this] (homestore::BlkId bid) { free_blk(bid); });
     /* TODO: rishabh, We need a attach function to register completion callback if layers
      * are called from bottomup.
      */
@@ -149,6 +151,11 @@ Volume::print_perf_cntrs() {
     blk_store->print_perf_cnts();
 }
 
+void
+homestore::Volume::free_blk(homestore::BlkId bid) {
+	blk_store->free_blk(bid, boost::none, boost::none);
+}
+
 boost::intrusive_ptr< BlkBuffer > 
 Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks, volume_req* req) {
     BlkId bid;
@@ -165,7 +172,10 @@ Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks, volume_req* req) {
     write_cnt.fetch_add(1, memory_order_relaxed);
     {
     	Clock::time_point startTime = Clock::now();
-    	blk_store->alloc_blk(nblks, hints, &bid);
+    	BlkAllocStatus status = blk_store->alloc_blk(nblks, hints, &bid);
+	if (status != BLK_ALLOC_SUCCESS) {
+		assert(0);
+	}
     	alloc_blk_time.fetch_add(get_elapsed_time(startTime), memory_order_relaxed);
     }
     req->bid = bid;
@@ -178,8 +188,6 @@ Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks, volume_req* req) {
     boost::intrusive_ptr< BlkBuffer > bbuf = blk_store->write(bid, b, req);
     /* TODO: should check the write status */
     write_time.fetch_add(get_elapsed_time(startTime), memory_order_relaxed);
-    // cout << "written\n";
-//    cout << "Written on " << bid.to_string() << " for 8192 bytes";
   //  LOG(INFO) << "Written on " << bid.to_string() << " for 8192 bytes";
     return bbuf;
 }

@@ -60,6 +60,8 @@ class Volume {
 	void print_perf_cntrs();
 	uint64_t get_elapsed_time(Clock::time_point startTime);
 	void process_completions(blkstore_req *bs_req);
-        void set_cb(comp_callback cb) { comp_cb = cb; }
+
+	void free_blk(homestore::BlkId bid);
+  void set_cb(comp_callback cb) { comp_cb = cb; };
 };
 }

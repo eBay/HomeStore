@@ -120,9 +120,9 @@ public:
 
     /* Allocate a new block of the size based on the hints provided */
     /* TODO: rishabh : we should have a return type here */ 
-    void alloc_blk(uint8_t nblks, blk_alloc_hints &hints, BlkId *out_blkid) {
+    BlkAllocStatus alloc_blk(uint8_t nblks, blk_alloc_hints &hints, BlkId *out_blkid) {
         // Allocate a block from the device manager
-        m_vdev.alloc_blk(nblks, hints, out_blkid);
+        return (m_vdev.alloc_blk(nblks, hints, out_blkid));
     }
 
     /* Allocate a new block and add entry to the cache. This method allows the caller to create its own
@@ -358,7 +358,7 @@ private:
     std::array< boost::intrusive_ptr< Buffer >, 2 > free_partial_cache(const boost::intrusive_ptr< Buffer > inbuf,
                                                                        uint8_t from_nblk, uint8_t to_nblk) {
         std::array< boost::intrusive_ptr< Buffer >, 2 > bbufs;
-        int left_ind = 0, right_ind; // index within the vector the about to free blks cover
+        uint32_t left_ind = 0, right_ind; // index within the vector the about to free blks cover
         uint32_t from_offset = from_nblk * BLKSTORE_BLK_SIZE;
         uint32_t to_offset = to_nblk * BLKSTORE_BLK_SIZE;
 
@@ -370,7 +370,7 @@ private:
         homeds::MemVector< BLKSTORE_BLK_SIZE > left_mvec;
         if (from_offset) {
             bool is_left_overlap = mvec.find_index(from_offset, boost::none, &left_ind);
-            for (auto i = 0; i < left_ind - 1; i++) { // Update upto the previous one.
+            for (auto i = 0u; i < left_ind - 1; i++) { // Update upto the previous one.
                 auto mp = mvec.get_nth_piece((uint32_t) i);
                 left_mvec.push_back(mp);
             }
