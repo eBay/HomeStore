@@ -8,7 +8,7 @@
 using namespace std;
 
 #define MAX_CACHE_SIZE     (2 * 1024ul * 1024ul * 1024ul) /* it has to be a multiple of 16k */
-constexpr auto BLOCK_SIZE = (8 * 1024ul);
+constexpr auto BLOCK_SIZE = (4 * 1024ul);
 
 static std::map<std::string, std::shared_ptr<homestore::Volume>> volume_map;
 static std::mutex map_lock;
