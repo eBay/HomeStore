@@ -6,8 +6,11 @@
 #include "homeds/hash/intrusive_hashset.hpp"
 #include "homeds/utility/atomic_counter.hpp"
 #include <glog/logging.h>
+#include <sds_logging/logging.h>
 #include <benchmark/benchmark.h>
 #include <boost/range/irange.hpp>
+
+SDS_LOGGING_INIT
 
 using namespace std;
 

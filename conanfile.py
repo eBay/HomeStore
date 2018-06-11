@@ -19,12 +19,12 @@ class HomestoreConan(ConanFile):
                 ("iomgr/[>=1.0.4,<2.0]@demo/dev"),
                 ("benchmark/[>=1.4,<2.0]@oss/stable"))
 
-    build_requires = (("sds_logging/[>=0.1.2,<1.0]@demo/dev"),
+    build_requires = (("sds_logging/[>=1.0.0,<2.0]@demo/dev"),
                       ("gtest/[>=1.8,<2.0]@oss/stable"))
 
     generators = "cmake"
     default_options = "shared=True", "fPIC=True"
-    exports_sources = "*"
+    exports_sources = "cmake/*", "src/*", "CMakeLists.txt"
 
     def build(self):
         cmake = CMake(self)

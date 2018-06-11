@@ -34,7 +34,7 @@ CMakeFiles
 CMakeCache.txt
 Makefile
 
-cmake-build-debug/*
+cmake-build-*
 
 ### Vi Swap Files
 *.swp
@@ -83,3 +83,5 @@ atlassian-ide-plugin.xml
 pids
 *.pid
 *.seed
+
+.idea

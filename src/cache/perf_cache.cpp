@@ -7,11 +7,14 @@
 //
 
 #include <iostream>
+#include <sds_logging/logging.h>
 #include "homeds/utility/logging.hpp"
 #include <benchmark/benchmark.h>
 #include <boost/range/irange.hpp>
 #include <boost/intrusive_ptr.hpp>
 #include "cache.cpp"
+
+SDS_LOGGING_INIT
 
 using namespace std;
 

@@ -11,9 +11,12 @@
 #include <ctime>
 #include <chrono>
 #include <sys/timeb.h>
+#include <sds_logging/logging.h>
 #include <cmath>
 
 #include "homeds/btree/mem_btree.hpp"
+
+SDS_LOGGING_INIT
 
 using namespace std;
 using namespace homeds::btree;

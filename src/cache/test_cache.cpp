@@ -4,10 +4,13 @@
 
 #include <gtest/gtest.h>
 #include <glog/logging.h>
+#include <sds_logging/logging.h>
 #include <boost/range/irange.hpp>
 #include <boost/intrusive_ptr.hpp>
 #include <cstring>
 #include "cache.cpp"
+
+SDS_LOGGING_INIT
 
 struct blk_id {
     static homeds::blob get_blob(const blk_id &id) {
