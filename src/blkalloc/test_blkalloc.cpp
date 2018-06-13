@@ -3,9 +3,12 @@
 #include <unistd.h>
 #include <glog/logging.h>
 #include <gtest/gtest.h>
+#include <sds_logging/logging.h>
 #include <thread>
 #include "blk_allocator.h"
 #include "varsize_blk_allocator.h"
+
+SDS_LOGGING_INIT
 
 using namespace std;
 using namespace homestore;

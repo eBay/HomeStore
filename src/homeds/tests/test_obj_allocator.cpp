@@ -1,4 +1,7 @@
 #include "homeds/memory/obj_allocator.hpp"
+#include <sds_logging/logging.h>
+
+SDS_LOGGING_INIT
 
 using namespace homeds;
 using namespace std;

@@ -3,7 +3,10 @@
 //
 
 #include <iostream>
+#include <sds_logging/logging.h>
 #include "homeds/array/sparse_vector.hpp"
+
+SDS_LOGGING_INIT
 
 void func(const homeds::sparse_vector<int> &cvec) {
     std::cout << "vec.at(1) = " << cvec.at(1) << "\n";

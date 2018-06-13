@@ -5,10 +5,13 @@
 #include <iostream>
 #include "homeds/btree/btree.hpp"
 #include <thread>
+#include <sds_logging/logging.h>
 
 #include "blkstore/blkstore.hpp"
 #include "device/virtual_dev.hpp"
 #include "homeds/btree/mem_btree.hpp"
+
+SDS_LOGGING_INIT
 
 #define MAX_CACHE_SIZE     2 * 1024 * 1024 * 1024
 using namespace std;

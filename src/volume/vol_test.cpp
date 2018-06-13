@@ -32,13 +32,7 @@ INIT_VMODULES(BTREE_VMODULES);
 
 using log_level = spdlog::level::level_enum;
 
-static std::shared_ptr<spdlog::logger> logger_;
-
-namespace sds_logging {
-std::shared_ptr<spdlog::logger> GetLogger() {
-   return logger_;
-}
-}
+SDS_LOGGING_INIT
 
 homestore::DeviceManager *dev_mgr = nullptr;
 std::shared_ptr<homestore::Volume> vol;
@@ -264,7 +258,7 @@ int main(int argc, char** argv) {
    spdlog::set_async_mode(4096, spdlog::async_overflow_policy::block_retry, nullptr, std::chrono::seconds(2));
    spdlog::set_pattern("[%D %H:%M:%S.%f] [%l] [%t] %v");
    spdlog::set_level(log_level::info);
-   logger_ = spdlog::stdout_color_mt("example");
+   sds_logging::SetLogger(spdlog::stdout_color_mt("example"));
 
    /* create iomgr */
    iomgr::ioMgr iomgr(2, MAX_THREADS);

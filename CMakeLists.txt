@@ -15,7 +15,6 @@ if(EXISTS ${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
   endif ()
 else()
     message(WARNING "The file conanbuildinfo.cmake doesn't exist, you have to run conan install first")
-    return()
 endif()
 
 find_program(CCACHE_FOUND ccache)
