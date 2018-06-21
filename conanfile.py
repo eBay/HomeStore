@@ -3,7 +3,7 @@ from conans.tools import os_info
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "0.3.2"
+    version = "0.3.3"
     license = "Proprietary"
     description = "HomeStore"
     url = "https://github.corp.ebay.com/SDS/Homestore"
@@ -11,17 +11,20 @@ class HomestoreConan(ConanFile):
     settings = "os", "compiler", "build_type", "arch"
     options = {"shared": [True, False], "fPIC": [True]}
 
-    requires = (("boost/1.67.0@oss/stable"),
+    requires = (("boost_heap/1.66.0@bincrafters/stable"),
+                ("boost_uuid/1.66.0@bincrafters/stable"),
+                ("double-conversion/3.0.0@bincrafters/stable"),
                 ("farmhash/0.0.2@oss/stable"),
-                ("folly/0.58.0@oss/stable"),
-                ("iomgr/[>=1.0.4,<2.0]@demo/dev"),
+                ("folly/0.58.0@bincrafters/testing"),
+                ("iomgr/1.0.5@sds/testing"),
+                ("gperftools/2.7.0@oss/stable"),
                 ("benchmark/1.4.1@oss/stable"))
 
     build_requires = (("sds_logging/1.0.0@sds/stable"),
-                      ("gtest/1.8.0@oss/stable"))
+                      ("gtest/1.8.0@bincrafters/stable"))
 
     generators = "cmake"
-    default_options = "shared=True", "fPIC=True"
+    default_options = "shared=False", "fPIC=True"
     exports_sources = "cmake/*", "src/*", "CMakeLists.txt"
 
     # These are not proper Conan dependencies, but support building
@@ -30,11 +33,7 @@ class HomestoreConan(ConanFile):
     def system_requirements(self):
         pkgs = list()
         if os_info.linux_distro == "ubuntu":
-            pkgs.extend(("libgoogle-perftools-dev",
-                         "libaio-dev",
-                         "libdouble-conversion-dev",
-                         "libevent-dev",
-                         "libgflags-dev"))
+            pkgs.append("libaio-dev")
             if os_info.os_version < "17":
                 pkgs.append("g++-5")
             elif os_info.os_version < "18":
@@ -66,4 +65,4 @@ class HomestoreConan(ConanFile):
 
     def package_info(self):
         self.cpp_info.libs = tools.collect_libs(self)
-        self.cpp_info.libs.extend(["aio", "double-conversion"])
+        self.cpp_info.libs.extend(["aio"])
