@@ -50,6 +50,20 @@ protected:
     uint8_t m_node_area[0];
 
  public:
+    PhysicalNode(bnodeid_t* id, bool init) {
+        if (init) {
+            set_leaf(true);
+            set_total_entries(0);
+            set_next_bnode(INVALID_BNODEID);
+            set_gen(0);
+            set_valid_node(true);
+            set_edge_id(INVALID_BNODEID);
+            set_node_id(*id);
+        } else {
+            assert(get_node_id() == *id);
+        }
+    }
+
     PhysicalNode(bnodeid_t id, bool init) {
         if (init) {
             set_leaf(true);

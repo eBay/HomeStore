@@ -22,7 +22,7 @@ template<btree_type BtreeType,
             btree_node_type InteriorNodeType,
             btree_node_type LeafNodeType,
             size_t NodeSize >
-BtreeNodeDeclType::BtreeNode() {
+BtreeNodeDeclType::BtreeNode() : m_common_header() {
     init_btree_node();
 }
 

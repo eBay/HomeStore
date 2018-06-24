@@ -79,7 +79,7 @@ Volume::Volume(DeviceManager *dev_mgr, uint64_t size,
 							 (std::bind(&Volume::process_completions, 
 							  this, std::placeholders::_1)));
     map = new mapping(size,
-		[this] (homestore::BlkId bid) { free_blk(bid); });
+		[this] (homestore::BlkId bid) { free_blk(bid); }, dev_mgr);
 }
 
 Volume::Volume(DeviceManager *dev_mgr, vdev_info_block *vb) {
@@ -94,14 +94,15 @@ Volume::Volume(DeviceManager *dev_mgr, vdev_info_block *vb) {
 							 (std::bind(&Volume::process_completions, this,
 							  std::placeholders::_1)));
     map = new mapping(size, 
-		[this] (homestore::BlkId bid) { free_blk(bid); });
+		[this] (homestore::BlkId bid) { free_blk(bid); }, dev_mgr);
+
     /* TODO: rishabh, We need a attach function to register completion callback if layers
      * are called from bottomup.
      */
 }
 
 void 
-Volume::process_completions(blkstore_req *bs_req) {
+homestore::Volume::process_completions(blkstore_req<BlkBuffer> *bs_req) {
 	
    struct volume_req * req = static_cast< struct volume_req * >(bs_req);
    if (req->err != no_error) {

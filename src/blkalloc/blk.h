@@ -8,6 +8,7 @@
 #ifndef SRC_BLKALLOC_BLK_H_
 #define SRC_BLKALLOC_BLK_H_
 
+
 #include <iostream>
 #include <cassert>
 #include <sstream>
@@ -21,9 +22,10 @@
 
 namespace homestore {
 
-#define ID_BITS        40
+#define ID_BITS        32
 #define NBLKS_BITS      8
-#define CHUNK_NUM_BITS 16
+#define CHUNK_NUM_BITS  8
+#define BLKID_SIZE (ID_BITS+NBLKS_BITS+CHUNK_NUM_BITS)/8
 
 /* This structure represents the application wide unique block number. It also encomposses the number of blks. */
 struct BlkId {
@@ -42,7 +44,7 @@ struct BlkId {
     static homeds::blob get_blob(const BlkId &id) {
         homeds::blob b;
         b.bytes = (uint8_t *)&id;
-        b.size = sizeof(uint64_t);
+        b.size = BLKID_SIZE;
 
         return b;
     }
@@ -72,7 +74,11 @@ struct BlkId {
         return i;
     }
 
-    explicit BlkId(uint64_t id, uint8_t nblks = 1, uint16_t chunk_num = 0)  {
+    explicit BlkId(uint64_t id)  {
+        set(id, id>>ID_BITS, id>>(ID_BITS+CHUNK_NUM_BITS));
+    }
+
+    BlkId(uint64_t id, uint8_t nblks, uint16_t chunk_num = 0)  {
         set(id, nblks, chunk_num);
     }
 

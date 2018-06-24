@@ -41,22 +41,23 @@ public:
     uint32_t m_nmirrors;
 };
 
+template <typename Buffer = BlkBuffer>
 struct blkstore_req:virtualdev_req {
 	BlkId bid;
 	uint64_t size;
-	boost::intrusive_ptr< BlkBuffer > write_bbuf;
-	boost::intrusive_ptr< BlkBuffer > read_bbuf;
-	std::vector< boost::intrusive_ptr< BlkBuffer >> read_buf_list;
+	boost::intrusive_ptr< Buffer > write_bbuf;
+	boost::intrusive_ptr< Buffer > read_bbuf;
+	std::vector< boost::intrusive_ptr< Buffer >> read_buf_list;
 	int missing_piece_cnt;
 	bool cache_found;
 };
 
 template <typename BAllocator, typename Buffer = BlkBuffer>
 class BlkStore {
-    typedef std::function< void (blkstore_req* req) > comp_callback;
+    typedef std::function< void (blkstore_req<Buffer>* req) > comp_callback;
 public:
     void process_completions(virtualdev_req *v_req) {
-	struct blkstore_req * req = static_cast< struct blkstore_req* >(v_req);
+	struct blkstore_req<Buffer> * req = static_cast< struct blkstore_req<Buffer>* >(v_req);
 
 	if (req->err != no_error) {
 		m_comp_cb(req);
@@ -204,7 +205,7 @@ public:
 
     /* Allocate a new block and write the contents to the allocated block and return the blkbuffer */
     boost::intrusive_ptr< BlkBuffer > alloc_and_write(homeds::blob &blob, blk_alloc_hints &hints, 
-							struct blkstore_req *req) {
+							struct blkstore_req<Buffer> *req) {
         // First allocate the blk id based on the hints
         BlkId bid;
         m_vdev.alloc_blk(round_off(blob.size, BLKSTORE_BLK_SIZE), hints, &bid);
@@ -227,7 +228,7 @@ public:
         return ns.count();
     }
 
-    boost::intrusive_ptr< BlkBuffer > write(BlkId &bid, homeds::blob &blob, struct blkstore_req *req) {
+    boost::intrusive_ptr< BlkBuffer > write(BlkId &bid, homeds::blob &blob, struct blkstore_req<Buffer> *req) {
         // First try to create/insert a record for this blk id in the cache. If it already exists, it will simply
         // upvote the item.
         boost::intrusive_ptr< BlkBuffer > bbuf;
@@ -272,14 +273,14 @@ public:
     }
 
     /* If the user already has created a blkbuffer, then use this method to use it to write the block */
-    void write(BlkId &bid, boost::intrusive_ptr< Buffer > in_buf, struct blkstore_req *req) {
+    void write(BlkId &bid, boost::intrusive_ptr< Buffer > in_buf, struct blkstore_req<Buffer> *req) {
         m_vdev.write(bid, in_buf->get_memvec(), req);
     }
 
     /* Read the data for given blk id and size. This method allocates the required memory if not present in the cache
      * and returns an smart ptr to the Buffer */
     boost::intrusive_ptr< Buffer > read(BlkId &bid, uint32_t offset, uint32_t size, 
-							struct blkstore_req *req) {
+							struct blkstore_req<Buffer> *req) {
         // TODO: Convert this assert to exceptions
         assert((offset + size) <= 256 * BLKSTORE_BLK_SIZE);
         assert(offset < 256 * BLKSTORE_BLK_SIZE);
@@ -338,11 +339,22 @@ public:
             size_to_read -= missing_mp->size();
         }
 
-	if (req->missing_piece_cnt == 0) {
-		assert(cache_found);
-		m_comp_cb(dynamic_cast< struct blkstore_req* >(req));
-	}
-	return bbuf;
+	    if (req->missing_piece_cnt == 0) {
+		    assert(cache_found);
+            m_comp_cb(dynamic_cast< struct blkstore_req<Buffer>* >(req));
+	    }
+        if (!cache_found && req->isSyncCall) {
+            boost::intrusive_ptr< Buffer > new_bbuf;
+            bool inserted = m_cache->insert(bbuf->get_key(),
+                    static_pointer_cast<CacheBuffer<BlkId>>(bbuf),
+                    (boost::intrusive_ptr< CacheBuffer<BlkId> > *)&new_bbuf);
+            if (!inserted) {
+                // Between get and insert, other thread tried the same thing and inserted into the cache. Lets use
+                // that entry in cache and free up the memory
+                bbuf = new_bbuf;
+            }			
+        }
+	    return bbuf;
     }
     
 

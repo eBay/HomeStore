@@ -1,4 +1,4 @@
-#include "homeds/btree/mem_btree.hpp"
+#include "homeds/btree/ssd_btree.hpp"
 #include "homeds/btree/btree.hpp"
 #include <blkalloc/blk.h>
 #include <csignal>
@@ -102,23 +102,45 @@ public:
 	}
 };
 
-#define MappingBtreeDeclType     homeds::btree::Btree<homeds::btree::MEM_BTREE, MappingKey, MappingValue, \
-                                    homeds::btree::BTREE_NODETYPE_SIMPLE, homeds::btree::BTREE_NODETYPE_SIMPLE>
+#define MappingBtreeDeclType     homeds::btree::Btree<homeds::btree::SSD_BTREE, MappingKey, MappingValue, \
+                                    homeds::btree::BTREE_NODETYPE_SIMPLE, homeds::btree::BTREE_NODETYPE_SIMPLE, 4096u>
 #define KEY_RANGE	1
-constexpr auto MAP_BLOCK_SIZE	= 4096;
+constexpr auto MAP_BLOCK_SIZE = (4 * 1024ul);
+
 
 class mapping {
 	typedef std::function< void (struct BlkId blkid) > free_blk_callback;
 private:
 	MappingBtreeDeclType *m_bt;
-	free_blk_callback free_blk_cb;
+
+	constexpr static auto Ki = 1024;
+	constexpr static auto Mi = Ki * Ki;
+	constexpr static auto Gi = Ki * Mi;
+	constexpr static auto MAX_CACHE_SIZE = 2ul * Gi;
+
+  free_blk_callback free_blk_cb;
 public:
-	mapping(uint32_t volsize, free_blk_callback cb) :  free_blk_cb(cb) {
+  mapping(uint32_t volsize, free_blk_callback cb, DeviceManager *mgr) :  free_blk_cb(cb) {
+
 		homeds::btree::BtreeConfig btree_cfg;
 		btree_cfg.set_max_objs(volsize/(KEY_RANGE*MAP_BLOCK_SIZE));
 		btree_cfg.set_max_key_size(sizeof(MappingKey));
 		btree_cfg.set_max_value_size(sizeof(MappingValue));
-		m_bt = MappingBtreeDeclType::create_btree(btree_cfg, NULL); 
+
+		//TODO: we want to initialize btree_device_info only in case of SSD tree
+
+		// Create a global cache entry
+		homestore::Cache< BlkId > *glob_cache = new homestore::Cache< homestore::BlkId >(MAX_CACHE_SIZE, MAP_BLOCK_SIZE);
+		assert(glob_cache);
+
+
+		homeds::btree::btree_device_info bt_dev_info;
+		bt_dev_info.new_device = true;
+		bt_dev_info.dev_mgr = mgr;
+		bt_dev_info.size= 512 * Mi;
+		bt_dev_info.cache = glob_cache;
+		bt_dev_info.vb = nullptr;
+        m_bt = MappingBtreeDeclType::create_btree(btree_cfg, &bt_dev_info);
 	}
 
 	MappingKey get_key(uint32_t lba) {

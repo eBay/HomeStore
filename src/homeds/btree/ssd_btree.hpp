@@ -17,7 +17,7 @@
 #include "homeds/memory/composite_allocator.hpp"
 #include "homeds/memory/chunk_allocator.hpp"
 #include "homeds/memory/sys_allocator.hpp"
-#include "cache.h"
+#include "cache/cache.h"
 #include "blkstore/blkstore.hpp"
 #include "btree_specific_impl.hpp"
 #include "btree_node.h"
@@ -89,11 +89,20 @@ public:
         // Create or load the Blkstore out of this info
         if (bt_dev_info->new_device) {
             m_blkstore = new homestore::BlkStore<homestore::VdevFixedBlkAllocatorPolicy, BtreeBufferDeclType>(
-                bt_dev_info->dev_mgr, bt_dev_info->cache, bt_dev_info->size, homestore::BlkStoreCacheType::WRITETHRU_CACHE, 0);
+                bt_dev_info->dev_mgr, bt_dev_info->cache, bt_dev_info->size, homestore::BlkStoreCacheType::WRITETHRU_CACHE, 0,
+                (std::bind(&BtreeSpecificImpl::process_completions,
+                           this, std::placeholders::_1)));
         } else {
             m_blkstore = new homestore::BlkStore<homestore::VdevFixedBlkAllocatorPolicy, BtreeBufferDeclType>
-                (bt_dev_info->dev_mgr, bt_dev_info->cache, bt_dev_info->vb, homestore::BlkStoreCacheType::WRITETHRU_CACHE);
+                (bt_dev_info->dev_mgr, bt_dev_info->cache, bt_dev_info->vb, homestore::BlkStoreCacheType::WRITETHRU_CACHE,
+                 (std::bind(&BtreeSpecificImpl::process_completions,
+                            this, std::placeholders::_1)));
         }
+    }
+
+    void
+    process_completions(void *bs_req) {
+        //do nothing
     }
 
     static uint8_t *get_physical(const SSDBtreeNodeDeclType *bn) {
@@ -116,9 +125,11 @@ public:
         homeds::blob b = safe_buf->at_offset(0);
         assert(b.size == NodeSize);
         if (is_leaf) {
-            auto n = new (b.bytes) VariantNode<LeafNodeType, K, V, NodeSize>((bnodeid_t)blkid.get_id(), true);
+            bnodeid_t bid(blkid.to_integer());
+            auto n = new (b.bytes) VariantNode<LeafNodeType, K, V, NodeSize>(&bid, true);
         } else {
-            auto n = new (b.bytes) VariantNode<InteriorNodeType, K, V, NodeSize>((bnodeid_t)blkid.get_id(), true);
+            bnodeid_t bid(blkid.to_integer());
+            auto n = new (b.bytes) VariantNode<InteriorNodeType, K, V, NodeSize>(&bid, true);
         }
 
         return boost::static_pointer_cast<SSDBtreeNodeDeclType>(safe_buf);
@@ -127,14 +138,20 @@ public:
     static boost::intrusive_ptr<SSDBtreeNodeDeclType> read_node(SSDBtreeImpl *impl, bnodeid_t id) {
         // Read the data from the block store
         homestore::BlkId blkid(id.to_integer());
-        auto safe_buf = impl->m_blkstore->read(blkid, 0, NodeSize);
+        struct homestore::blkstore_req<BtreeBufferDeclType> *req = new struct homestore::blkstore_req<BtreeBufferDeclType>();
+        req->isSyncCall=true;
+        req->is_read=true;
+        auto safe_buf = impl->m_blkstore->read(blkid, 0, NodeSize, req);
 
         return boost::static_pointer_cast<SSDBtreeNodeDeclType>(safe_buf);
     }
 
     static void write_node(SSDBtreeImpl *impl, boost::intrusive_ptr<SSDBtreeNodeDeclType> bn) {
         homestore::BlkId blkid(bn->get_node_id().to_integer());
-        impl->m_blkstore->write(blkid, boost::dynamic_pointer_cast<BtreeBufferDeclType>(bn));
+        struct homestore::blkstore_req<BtreeBufferDeclType> *req = new struct homestore::blkstore_req<BtreeBufferDeclType>();
+        req->isSyncCall=true;
+        req->is_read=false;
+        impl->m_blkstore->write(blkid, boost::dynamic_pointer_cast<BtreeBufferDeclType>(bn), req);
     }
 
     static void free_node(SSDBtreeImpl *impl, boost::intrusive_ptr<SSDBtreeNodeDeclType> bn) {

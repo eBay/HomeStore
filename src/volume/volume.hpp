@@ -15,7 +15,7 @@ namespace homestore {
  * now there is no use where we can access it in
  * multiple threads.
  */
-struct volume_req:blkstore_req {
+struct volume_req:blkstore_req<BlkBuffer> {
 	uint64_t lba;
 	int nblks;
 	Clock::time_point startTime;
@@ -59,7 +59,8 @@ class Volume {
 	void init_perf_cntrs();
 	void print_perf_cntrs();
 	uint64_t get_elapsed_time(Clock::time_point startTime);
-	void process_completions(blkstore_req *bs_req);
+
+	void process_completions(blkstore_req<BlkBuffer> *bs_req);
 
 	void free_blk(homestore::BlkId bid);
   void set_cb(comp_callback cb) { comp_cb = cb; };

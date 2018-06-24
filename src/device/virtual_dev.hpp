@@ -69,6 +69,7 @@ struct virtualdev_req {
 	bool is_read;
 	std::error_condition err;
 	atomic<uint64_t> num_bytes;
+	bool isSyncCall=false;
 };
 
 [[maybe_unused]]
@@ -293,17 +294,19 @@ public:
 			    std::placeholders::_1);
 	req->cb = temp;
 	req->size = size;
-        uint64_t dev_offset = to_dev_offset(bid, &chunk);
-        try {
-            LOG(INFO) << "Writing in device " << chunk->get_physical_dev()->get_dev_id() << " offset = " << dev_offset;
-	    write_time += 
-		    (std::chrono::duration_cast< std::chrono::nanoseconds >(Clock::now() - 
-									    startTime)).count();
-	    write_cnt++;
-	    chunk->get_physical_dev_mutable()->writev(iov, iovcnt, size, dev_offset, (uint8_t *)req);
-        } catch (std::exception &e) {
-            throw e;
-        }
+    uint64_t dev_offset = to_dev_offset(bid, &chunk);
+    
+    LOG(INFO) << "Writing in device " << chunk->get_physical_dev()->get_dev_id() << " offset = " << dev_offset;
+    write_time +=
+        (std::chrono::duration_cast< std::chrono::nanoseconds >(Clock::now() -
+                                    startTime)).count();
+    write_cnt++;
+    if(req->isSyncCall){
+        chunk->get_physical_dev_mutable()->sync_writev(iov, iovcnt, size, dev_offset);
+    } else {
+        chunk->get_physical_dev_mutable()->writev(iov, iovcnt, size, dev_offset, (uint8_t *) req);
+    }
+    
 
 	physical_time += (std::chrono::duration_cast< std::chrono::nanoseconds >(Clock::now() -
 										startTime)).count();
@@ -315,8 +318,13 @@ public:
                 for (auto mchunk : m_mirror_chunks.find(chunk)->second) {
                     dev_offset = mchunk->get_start_offset() + primary_chunk_offset;
                     try {
-                        mchunk->get_physical_dev_mutable()->writev(iov, iovcnt, size, 
-								dev_offset, (uint8_t *)req);
+                        if(req->isSyncCall){
+                            mchunk->get_physical_dev_mutable()->sync_writev(iov, iovcnt, size,
+                                                                       dev_offset);
+                        }else {
+                            mchunk->get_physical_dev_mutable()->writev(iov, iovcnt, size,
+                                                                       dev_offset, (uint8_t *) req);
+                        }
                     } catch (std::exception &e) {
                         throw e;
                     }
@@ -343,8 +351,13 @@ public:
 			    std::placeholders::_1);
 	req->size = mp.size();
         try {
-            primary_chunk->get_physical_dev_mutable()->read((char *)mp.ptr(), mp.size(), 
-							primary_dev_offset, (uint8_t *)req);
+            if(req->isSyncCall){
+                primary_chunk->get_physical_dev_mutable()->sync_read((char *) mp.ptr(), mp.size(),
+                                                                primary_dev_offset);
+            }else {
+                primary_chunk->get_physical_dev_mutable()->read((char *) mp.ptr(), mp.size(),
+                                                                primary_dev_offset, (uint8_t *) req);
+            }
         } catch (std::exception &e) {
             failed = true;
         }
@@ -355,8 +368,13 @@ public:
             for (auto mchunk : m_mirror_chunks.find(primary_chunk)->second) {
                 uint64_t dev_offset = mchunk->get_start_offset() + primary_chunk_offset;
                 try {
-                    mchunk->get_physical_dev_mutable()->read((char *)mp.ptr(), mp.size(), 
-							dev_offset, (uint8_t *)req);
+                    if(req->isSyncCall) {
+                        mchunk->get_physical_dev_mutable()->sync_read((char *) mp.ptr(), mp.size(),
+                                                                 dev_offset);
+                    }else{
+                        mchunk->get_physical_dev_mutable()->read((char *)mp.ptr(), mp.size(),
+                                                                 dev_offset, (uint8_t *)req);
+                    }
                 } catch (std::exception &e) {
                     failed = true;
                 }

@@ -31,7 +31,10 @@ public:
             PhysicalNode<SimpleNode, K, V, NodeSize>(id, init) {
         this->set_node_type(BTREE_NODETYPE_SIMPLE);
     }
-
+    SimpleNode(bnodeid_t* id, bool init) :
+            PhysicalNode<SimpleNode, K, V, NodeSize>(id, init) {
+        this->set_node_type(BTREE_NODETYPE_SIMPLE);
+    }
 public:
     void get(uint32_t ind, BtreeValue *outval, bool copy) const {
         // Need edge index

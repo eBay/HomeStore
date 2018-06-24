@@ -23,6 +23,10 @@ struct uint48_t {
         m_x = 0;
     }
 
+    uint48_t(uint64_t x) {
+        m_x = x;
+    }
+
     uint48_t(const int &x) {
         m_x = x;
     }
@@ -242,7 +246,7 @@ public:
 #endif
 };
 
-#define INVALID_BNODEID    -1
+#define INVALID_BNODEID   -1
 
 class BNodeptr: public BtreeValue
 {
