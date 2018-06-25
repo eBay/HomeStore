@@ -108,6 +108,7 @@ public:
 				(std::bind(&BlkStore::process_completions, this, 
 			         std::placeholders::_1))),
 	    m_comp_cb(comp_cb) {
+        alloc_single_block_in_mem();
     }
 
     BlkStore(DeviceManager *mgr, Cache< BlkId > *cache, vdev_info_block *vb, 
@@ -117,6 +118,7 @@ public:
             m_vdev(mgr, vb, (std::bind(&BlkStore::process_completions, this, 
 			     std::placeholders::_1))), 
 	    m_comp_cb(comp_cb) {
+        alloc_single_block_in_mem();
     }
 
     /* Allocate a new block of the size based on the hints provided */
@@ -124,6 +126,30 @@ public:
     BlkAllocStatus alloc_blk(uint8_t nblks, blk_alloc_hints &hints, BlkId *out_blkid) {
         // Allocate a block from the device manager
         return (m_vdev.alloc_blk(nblks, hints, out_blkid));
+    }
+
+    /* Just create single block in memory, not on physical device and not in cache */
+    void alloc_single_block_in_mem() {
+        BlkId *out_blkid = new BlkId(0);
+        // Create an object for the buffer
+        only_in_mem_buff = Buffer::make_object();
+        only_in_mem_buff->set_key(*out_blkid);
+
+        // Create a new block of memory for the blocks requested and set the memvec pointer to that
+        uint8_t *ptr;
+        uint32_t size = BLKSTORE_BLK_SIZE;
+        int ret = posix_memalign((void **) &ptr, 4096, size); // TODO: Align based on hw needs instead of 4k
+        if (ret != 0) {
+            throw std::bad_alloc();
+        }
+        memset(ptr, 0, size);
+        homeds::MemVector< BLKSTORE_BLK_SIZE > &mvec = only_in_mem_buff->get_memvec_mutable();
+        mvec.set(ptr, size, 0);
+    }
+
+
+    const intrusive_ptr<Buffer> &get_only_in_mem_buff() const {
+        return only_in_mem_buff;
     }
 
     /* Allocate a new block and add entry to the cache. This method allows the caller to create its own
@@ -560,6 +586,7 @@ private:
     atomic<uint64_t> read_cnt;
     atomic<uint64_t> write_time;
     comp_callback m_comp_cb;
+    boost::intrusive_ptr< Buffer > only_in_mem_buff;
 };
 
 }

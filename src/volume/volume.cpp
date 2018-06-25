@@ -196,18 +196,18 @@ Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks, volume_req* req) {
 int
 Volume::read(uint64_t lba, int nblks, volume_req* req) {
 
-    std::vector< struct BlkId > blkIdList;
+    std::vector< struct homestore::lba_BlkId_mapping > mappingList;
     req->startTime = Clock::now();
     Clock::time_point startTime = Clock::now();
     req->read_cnt = 0;
     
-    std::error_condition ret = map->get(lba, nblks, blkIdList);
+    std::error_condition ret = map->get(lba, nblks, mappingList);
     /* TODO: map is also going to be async once persistent bree comes.
      * This check will be removed later. 
      */
     req->err = ret;
-    if (ret) {
-	process_completions(req); 
+    if (ret && ret == homestore_error::lba_not_exist ) {
+	    process_completions(req); 
     	return 0;
     }
 
@@ -217,13 +217,16 @@ Volume::read(uint64_t lba, int nblks, volume_req* req) {
     req->lba = lba;
     req->nblks = nblks;
     req->is_read = true;
-    req->read_cnt = blkIdList.size();
+    req->read_cnt = mappingList.size();
     
     startTime = Clock::now();
-    for (auto bInfo: blkIdList) {
-       // LOG(INFO) << "Read from " << bInfo.to_string() << " for 8192 bytes";
-//	printf("blkid %d\n", bInfo.m_id);
-        boost::intrusive_ptr< BlkBuffer > bbuf = blk_store->read(bInfo, 0, BLOCK_SIZE * bInfo.get_nblks(), req);
+    for (auto bInfo: mappingList) {
+        if(!bInfo.blkid_found){
+            req->read_buf_list.push_back(blk_store->get_only_in_mem_buff());
+        }else {
+            boost::intrusive_ptr<BlkBuffer> bbuf = blk_store->read(bInfo.blkId, 0, BLOCK_SIZE * bInfo.blkId.get_nblks(),
+                                                                   req);
+        }
     }
     read_time.fetch_add(get_elapsed_time(startTime), memory_order_relaxed);
     return 0;

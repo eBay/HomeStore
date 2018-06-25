@@ -107,6 +107,14 @@ public:
 #define KEY_RANGE	1
 constexpr auto MAP_BLOCK_SIZE = (4 * 1024ul);
 
+namespace homestore {
+	struct lba_BlkId_mapping {
+		uint64_t lba;
+		BlkId blkId;
+		bool blkid_found;
+		lba_BlkId_mapping():lba(0),blkId(0),blkid_found(false){};
+	};
+}
 
 class mapping {
 	typedef std::function< void (struct BlkId blkid) > free_blk_callback;
@@ -177,37 +185,56 @@ public:
 		}
 		return homestore::no_error;
 	}
-		
-	std::error_condition get(uint64_t lba, uint32_t nblks, 
-			std::vector<struct homestore::BlkId> &blkIdList) {
 
+	std::error_condition get(uint64_t lba, uint32_t nblks,
+							 std::vector<struct homestore::lba_BlkId_mapping> &mappingList) {
+		std::error_condition error = no_error;
+		bool atleast_one_lba_found = false;
+		bool atleast_one_lba_not_found = false;
 		uint64_t key;
 
 		while (nblks != 0) {
+			homestore::lba_BlkId_mapping* mapping = new struct homestore::lba_BlkId_mapping();
+			mapping->lba = lba;
 			MappingValue value;
-			
+
 			key = get_key(lba).get_value();
 			bool ret = m_bt->get(get_key(lba), &value);
 			if (!ret) {
-				return homestore::make_error_condition(
-						homestore_error::lba_not_exist); 
+				mappingList.push_back(*mapping);
+				lba++;
+				nblks--;
+				atleast_one_lba_not_found = true;
+				continue;
 			}
-			struct BlkId blkid = value.get_val();
+			atleast_one_lba_found = true;
+			mapping->blkId = value.get_val();
+			mapping->blkid_found = true;
+
 			uint32_t maxBlkRead = KEY_RANGE - (lba - (key * KEY_RANGE));
-	
+
 			if (maxBlkRead >= nblks) {
-				blkid.set_nblks(nblks);
-				blkid.set_id(blkid.get_id() + lba - (key * KEY_RANGE));
-				blkIdList.push_back(blkid);
+				mapping->blkId.set_nblks(nblks);
+				mapping->blkId.set_id(mapping->blkId.get_id() + lba - (key * KEY_RANGE));
+				mappingList.push_back(*mapping);
 				nblks = 0;
 			} else {
-				blkid.set_nblks(maxBlkRead);
-				blkid.set_id(blkid.get_id() + lba - (key * KEY_RANGE));
-				blkIdList.push_back(blkid);
+				mapping->blkId.set_nblks(maxBlkRead);
+				mapping->blkId.set_id(mapping->blkId.get_id() + lba - (key * KEY_RANGE));
+				mappingList.push_back(*mapping);
 				nblks = nblks - maxBlkRead;
 				lba = lba + maxBlkRead;
 			}
 		}
-		return no_error;
+
+		if(!atleast_one_lba_found){
+			mappingList.empty();
+			error = homestore::make_error_condition(
+					homestore_error::lba_not_exist);
+		}else if(atleast_one_lba_not_found){
+			error = homestore::make_error_condition(
+					homestore_error::partial_lba_not_exist);
+		}
+		return error;
 	}
 };
