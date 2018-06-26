@@ -35,7 +35,7 @@ pipeline {
                 branch 'master'
             }
             steps {
-                sh "docker run ${ORG}/${PROJECT}:${TAG}"
+                sh "docker run ecr.vip.ebayc3.com/${ORG}/${PROJECT}:${TAG}"
             }
         }
     }
