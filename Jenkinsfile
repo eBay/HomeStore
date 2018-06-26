@@ -35,7 +35,7 @@ pipeline {
                 branch 'master'
             }
             steps {
-                sh "docker run ${ORG}/${PROJECT}:${TAG}_${CHANNEL}"
+                sh "docker run ${ORG}/${PROJECT}:${TAG}"
             }
         }
     }
