@@ -28,3 +28,4 @@ CMD set -eux; \
     PKG_VERSION="${PKG_VERSION#\"}"; \
     conan upload homestore/${PKG_VERSION}@"${CONAN_USER}"/"${CONAN_CHANNEL}" --all -r origin;
 # ##########   #######   ############
+
