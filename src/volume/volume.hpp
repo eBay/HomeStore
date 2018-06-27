@@ -37,7 +37,8 @@ class Volume {
 	atomic<uint64_t> write_cnt;
 	atomic<uint64_t> read_cnt;
 	comp_callback comp_cb;
-
+	boost::intrusive_ptr< BlkBuffer > only_in_mem_buff;
+	
 	Volume(DeviceManager *mgr, uint64_t size, comp_callback comp_cb);
 	Volume(DeviceManager *dev_mgr, homestore::vdev_info_block *vb);
 
@@ -63,6 +64,9 @@ class Volume {
 	void process_completions(blkstore_req<BlkBuffer> *bs_req);
 
 	void free_blk(homestore::BlkId bid);
-  void set_cb(comp_callback cb) { comp_cb = cb; };
+  	void set_cb(comp_callback cb) { comp_cb = cb; };
+  	
+private:
+	void alloc_single_block_in_mem();
 };
 }

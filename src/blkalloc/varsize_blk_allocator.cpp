@@ -187,15 +187,6 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
 void VarsizeBlkAllocator::free(const BlkId &b) {
     BlkAllocPortion *portion = blknum_to_portion(b.get_id());
 
-    // TODO: Ensure in debug mode, if the blknum is no longer in cache. Need to create a cachentry and search
-#ifndef NDEBUG
-    VarsizeAllocCacheEntry entry;
-    homeds::btree::EmptyClass dummy;
-
-    gen_cache_entry(b.get_id(), b.get_nblks(), &entry);
-    assert(m_blk_cache->get(entry, &dummy) == false);
-#endif
-
     // Reset the bits
     portion->lock();
     m_alloc_bm->reset_bits(b.get_id(), b.get_nblks());

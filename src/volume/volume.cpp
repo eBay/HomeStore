@@ -80,6 +80,7 @@ Volume::Volume(DeviceManager *dev_mgr, uint64_t size,
 							  this, std::placeholders::_1)));
     map = new mapping(size,
 		[this] (homestore::BlkId bid) { free_blk(bid); }, dev_mgr);
+    alloc_single_block_in_mem();
 }
 
 Volume::Volume(DeviceManager *dev_mgr, vdev_info_block *vb) {
@@ -95,7 +96,7 @@ Volume::Volume(DeviceManager *dev_mgr, vdev_info_block *vb) {
 							  std::placeholders::_1)));
     map = new mapping(size, 
 		[this] (homestore::BlkId bid) { free_blk(bid); }, dev_mgr);
-
+    alloc_single_block_in_mem();
     /* TODO: rishabh, We need a attach function to register completion callback if layers
      * are called from bottomup.
      */
@@ -222,7 +223,7 @@ Volume::read(uint64_t lba, int nblks, volume_req* req) {
     startTime = Clock::now();
     for (auto bInfo: mappingList) {
         if(!bInfo.blkid_found){
-            req->read_buf_list.push_back(blk_store->get_only_in_mem_buff());
+            req->read_buf_list.push_back(only_in_mem_buff);
         }else {
             boost::intrusive_ptr<BlkBuffer> bbuf = blk_store->read(bInfo.blkId, 0, BLOCK_SIZE * bInfo.blkId.get_nblks(),
                                                                    req);
@@ -232,4 +233,22 @@ Volume::read(uint64_t lba, int nblks, volume_req* req) {
     return 0;
 }
 
+    /* Just create single block in memory, not on physical device and not in cache */
+    void Volume::alloc_single_block_in_mem() {
+        BlkId *out_blkid = new BlkId(0);
+        // Create an object for the buffer
+        only_in_mem_buff = BlkBuffer::make_object();
+        only_in_mem_buff->set_key(*out_blkid);
+    
+        // Create a new block of memory for the blocks requested and set the memvec pointer to that
+        uint8_t *ptr;
+        uint32_t size = BLKSTORE_BLK_SIZE;
+        int ret = posix_memalign((void **) &ptr, 4096, size); // TODO: Align based on hw needs instead of 4k
+        if (ret != 0) {
+            throw std::bad_alloc();
+        }
+        memset(ptr, 0, size);
+        homeds::MemVector< BLKSTORE_BLK_SIZE > &mvec = only_in_mem_buff->get_memvec_mutable();
+        mvec.set(ptr, size, 0);
+    }
 } /* homestore */
