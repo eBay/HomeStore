@@ -15,7 +15,6 @@ COPY CMakeLists.txt /tmp/source/
 COPY cmake/ /tmp/source/cmake
 COPY src/ /tmp/source/src
 
-ENV CONAN_SYSREQUIRES_SUDO=False
 RUN conan create /tmp/source "${CONAN_USER}"/"${CONAN_CHANNEL}";
 RUN conan create -pr debug /tmp/source "${CONAN_USER}"/"${CONAN_CHANNEL}";
 
