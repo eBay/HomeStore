@@ -1,5 +1,5 @@
 # ##########   #######   ############
-FROM ecr.vip.ebayc3.com/sds/sds_cpp_base:1.3
+FROM ecr.vip.ebayc3.com/sds/sds_cpp_base:1.4
 LABEL description="Automated compilation for SDS HomeStore"
 
 ARG CONAN_CHANNEL
