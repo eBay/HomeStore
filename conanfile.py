@@ -14,7 +14,7 @@ class HomestoreConan(ConanFile):
                 ("boost_heap/1.66.0@bincrafters/stable"),
                 ("boost_uuid/1.66.0@bincrafters/stable"),
                 ("double-conversion/3.0.0@bincrafters/stable"),
-                ("farmhash/0.0.2@oss/stable"),
+                ("farmhash/1.0.0@oss/stable"),
                 ("folly/0.58.0@bincrafters/testing"),
                 ("gtest/1.8.0@bincrafters/stable"),
                 ("iomgr/1.0.6@sds/testing"),
