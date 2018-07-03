@@ -10,8 +10,8 @@ ENV CONAN_CHANNEL=${CONAN_CHANNEL:-testing}
 ENV CONAN_PASS=${CONAN_PASS:-password}
 
 COPY conanfile.py /tmp/source/
-COPY CMakeLists.txt /tmp/source/
 COPY cmake/ /tmp/source/cmake
+COPY CMakeLists.txt /tmp/source/
 COPY src/ /tmp/source/src
 
 RUN conan create /tmp/source "${CONAN_USER}"/"${CONAN_CHANNEL}"
