@@ -27,7 +27,7 @@ pipeline {
                 branch 'master'
             }
             steps {
-                sh "docker run ${PROJECT}"
+                sh "docker run --rm ${PROJECT}"
             }
         }
     }
