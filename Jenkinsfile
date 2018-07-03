@@ -10,17 +10,9 @@ pipeline {
     }
 
     stages {
-        stage('Get Version') {
-            steps {
-                script {
-                    TAG = sh(script: "grep version conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
-                }
-            }
-        }
-
         stage('Build') {
             steps {
-                sh "docker build --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_PASS=${CONAN_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} -t ecr.vip.ebayc3.com/${ORG}/${PROJECT}:${TAG} ."
+                sh "docker build --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_PASS=${CONAN_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} -t ${PROJECT} ."
             }
         }
 
@@ -35,8 +27,14 @@ pipeline {
                 branch 'master'
             }
             steps {
-                sh "docker run ecr.vip.ebayc3.com/${ORG}/${PROJECT}:${TAG}"
+                sh "docker run ${PROJECT}"
             }
+        }
+    }
+
+    post {
+        always {
+            sh "docker rmi ${PROJECT}"
         }
     }
 }
