@@ -103,7 +103,7 @@ public:
 };
 
 #define MappingBtreeDeclType     homeds::btree::Btree<homeds::btree::SSD_BTREE, MappingKey, MappingValue, \
-                                    homeds::btree::BTREE_NODETYPE_SIMPLE, homeds::btree::BTREE_NODETYPE_SIMPLE, 4096u>
+                                    homeds::btree::BTREE_NODETYPE_VAR_VALUE, homeds::btree::BTREE_NODETYPE_VAR_VALUE, 4096u>
 #define KEY_RANGE	1
 constexpr auto MAP_BLOCK_SIZE = (4 * 1024ul);
 
