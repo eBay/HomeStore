@@ -134,7 +134,7 @@ public:
 		btree_cfg.set_max_objs(volsize/(KEY_RANGE*MAP_BLOCK_SIZE));
 		btree_cfg.set_max_key_size(sizeof(MappingKey));
 		btree_cfg.set_max_value_size(sizeof(MappingValue));
-
+        
 		//TODO: we want to initialize btree_device_info only in case of SSD tree
 
 		// Create a global cache entry

@@ -80,10 +80,10 @@ public:
     using HeaderType = BtreeBuffer<K, V, InteriorNodeType, LeafNodeType, NodeSize>;
 
     static std::unique_ptr<SSDBtreeImpl> init_btree(BtreeConfig &cfg, void *btree_specific_context) {
-        return std::make_unique<SSDBtreeImpl>(btree_specific_context);
+        return std::make_unique<SSDBtreeImpl>(cfg, btree_specific_context);
     }
 
-    BtreeSpecificImpl(void *btree_specific_context) {
+    BtreeSpecificImpl(BtreeConfig &cfg, void *btree_specific_context) {
         auto bt_dev_info = (btree_device_info *)btree_specific_context;
 
         // Create or load the Blkstore out of this info
@@ -126,10 +126,10 @@ public:
         assert(b.size == NodeSize);
         if (is_leaf) {
             bnodeid_t bid(blkid.to_integer());
-            auto n = new (b.bytes) VariantNode<LeafNodeType, K, V, NodeSize>(&bid, true);
+            auto n = new (b.bytes) VariantNode<LeafNodeType, K, V, NodeSize>(get_node_area_size(impl), &bid, true);
         } else {
             bnodeid_t bid(blkid.to_integer());
-            auto n = new (b.bytes) VariantNode<InteriorNodeType, K, V, NodeSize>(&bid, true);
+            auto n = new (b.bytes) VariantNode<InteriorNodeType, K, V, NodeSize>(get_node_area_size(impl), &bid, true);
         }
 
         return boost::static_pointer_cast<SSDBtreeNodeDeclType>(safe_buf);

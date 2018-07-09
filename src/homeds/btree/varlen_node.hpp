@@ -64,40 +64,45 @@ class VariableNode : public PhysicalNode<VariableNode,K, V, NodeSize> {
 public:
     friend struct VarNodeSpecificImpl<NodeTypeImpl, K, V,  NodeSize>;
 
-    VariableNode( bnodeid_t id, bool init) :
+    VariableNode(int node_area_size,  bnodeid_t id, bool init) :
             PhysicalNode<VariableNode, K, V, NodeSize>(id, init) {
         this->set_node_type(NodeTypeImpl);
+        if (init) {
+            // Tail arena points to the edge of the node as data arena grows backwards. Entire space is now available
+            // except for the header itself
+            get_var_node_header()->m_tail_arena_offset = node_area_size;
+            get_var_node_header()->m_available_space = get_var_node_header()->m_tail_arena_offset - sizeof(var_node_header);
+        }
+        cout<<"Initialize:"<<get_var_node_header()->m_tail_arena_offset<<":"<<get_var_node_header()->m_available_space<<endl;
     }
 
-    VariableNode(bnodeid_t* id, bool init) :
+    VariableNode(int node_area_size,  bnodeid_t* id, bool init) :
             PhysicalNode<VariableNode, K, V, NodeSize>(id, init) {
         this->set_node_type(NodeTypeImpl);
+        if (init) {
+            // Tail arena points to the edge of the node as data arena grows backwards. Entire space is now available
+            // except for the header itself
+            get_var_node_header()->m_tail_arena_offset = node_area_size;
+            get_var_node_header()->m_available_space = get_var_node_header()->m_tail_arena_offset - sizeof(var_node_header);
+        }
+        cout<<"Initialize:"<<get_var_node_header()->m_tail_arena_offset<<":"<<get_var_node_header()->m_available_space<<endl;
+
     }
     
-//    VariableNode(const BtreeConfig &cfg, bnodeid_t id, bool init_pers, bool init_trans) :
-//            PhysicalNode<VariableNode,K, V, NodeSize>(id, init_pers, init_trans) {
-//        this->set_node_type(NodeTypeImpl);
-//        if (init_pers) {
-//            // Tail arena points to the edge of the node as data arena grows backwards. Entire space is now available
-//            // except for the header itself
-//            get_var_node_header()->m_tail_arena_offset = this->get_node_area_size(cfg);
-//            get_var_node_header()->m_available_space = get_var_node_header()->m_tail_arena_offset - sizeof(var_node_header);
-//        }
-//    }
-
     /* Insert the key and value in provided index
      * Assumption: Node lock is already taken */
     void insert(int ind, const BtreeKey &key, const BtreeValue &val) {
+        cout<<key.to_string()<<":"<<val.to_string()<<":";
         insert(ind, key.get_blob(), val.get_blob());
     }
 
     /* Update a value in a given index to the provided value. It will support change in size of the new value.
      * Assumption: Node lock is already taken, size check for the node to support new value is already done */
     void update(int ind, const BtreeValue &val)  {
-        assert((uint32_t )ind <= this->get_total_entries());
+        assert(ind <= (int)this->get_total_entries());
 
         // If we are updating the edge value, none of the other logic matter. Just update edge value and move on
-        if ((uint32_t )ind == this->get_total_entries()) {
+        if (ind == (int)this->get_total_entries()) {
             assert(!this->is_leaf());
             this->set_edge_value(val);
             this->inc_gen();
@@ -153,7 +158,7 @@ public:
     }
 
     void remove(int ind)  {
-        if ((uint32_t )ind == this->get_total_entries()) {
+        if (ind == (int)this->get_total_entries()) {
             assert(!this->is_leaf());
             this->invalidate_edge();
             this->inc_gen();
@@ -168,15 +173,14 @@ public:
     }
 
     void get(int ind, BtreeValue *outval, bool copy) const  {
-        uint32_t  in = (uint32_t)ind;
         // Need edge index
-        if (in == this->get_total_entries()) {
+        if (ind == (int)this->get_total_entries()) {
             assert(!this->is_leaf());
 
             assert(this->has_valid_edge());
             this->get_edge_value(outval);
         } else {
-            this->get_nth_value(in, outval, copy);
+            this->get_nth_value(ind, outval, copy);
         }
     }
 
@@ -353,7 +357,7 @@ public:
         auto other_gen = other.get_gen();
 
         int ind = 0;
-        while ((uint32_t )ind < this->get_total_entries()) {
+        while (ind < (int)this->get_total_entries()) {
             homeds::blob kb;
             kb.bytes = (uint8_t *)other.get_nth_obj(ind);
             kb.size = other.get_nth_key_len(ind);
@@ -395,7 +399,7 @@ public:
     }
 
     void get_nth_key(int ind, BtreeKey *outkey, bool copy) const  {
-        assert((uint32_t)ind < this->get_total_entries());
+        assert(ind < (int)this->get_total_entries());
 
         uint8_t *obj = (uint8_t *)get_nth_obj(ind);
         if (copy) {
@@ -406,7 +410,7 @@ public:
     }
 
     void get_nth_value(int ind, BtreeValue *outval, bool copy) const  {
-        assert((uint32_t )ind < this->get_total_entries());
+        assert(ind < (int)this->get_total_entries());
 
         uint8_t *obj = (uint8_t *)get_nth_obj(ind);
         if (copy) {
@@ -430,8 +434,8 @@ public:
 
 private:
     uint32_t insert(int ind, const homeds::blob &key_blob, const homeds::blob &val_blob)  {
-        assert((uint32_t )ind <= this->get_total_entries());
-
+        assert(ind <= (int)this->get_total_entries());
+        cout << ind <<":"<< get_arena_free_space() <<":"<<get_var_node_header()->m_available_space<<endl;
         uint16_t obj_size = key_blob.size + val_blob.size;
         uint16_t to_insert_size = obj_size + get_record_size();
         if (to_insert_size > get_var_node_header()->m_available_space) {
@@ -451,7 +455,7 @@ private:
 
         // Move up the tail area
         get_var_node_header()->m_tail_arena_offset -= obj_size;
-        get_var_node_header()->m_available_space -= obj_size;
+        get_var_node_header()->m_available_space -= obj_size+get_record_size();
 
         // Create a new record
         set_nth_key_len(rec_ptr, key_blob.size);
