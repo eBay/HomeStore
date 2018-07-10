@@ -1,4 +1,5 @@
-#include <glog/logging.h>
+#pragma once
+
 #include "device/device.h"
 #include <fcntl.h>
 #include <cache/cache_common.hpp>

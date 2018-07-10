@@ -3,14 +3,13 @@
 //
 
 #include <gtest/gtest.h>
-#include <glog/logging.h>
 #include <sds_logging/logging.h>
 #include <boost/range/irange.hpp>
 #include <boost/intrusive_ptr.hpp>
 #include <cstring>
 #include "cache.cpp"
 
-SDS_LOGGING_INIT
+SDS_LOGGING_INIT(base, cache_vmod_evict, cache_vmod_write);
 
 struct blk_id {
     static homeds::blob get_blob(const blk_id &id) {
@@ -107,13 +106,12 @@ TEST_F(CacheTest, InsertGet) {
     for (auto i = 0u; i < NTHREADS; i++) {
         thrs[i]->join();
     }
-    LOG(INFO) << "Cache Stats: \n" << this->m_cache->get_stats().to_string();
+    LOGINFO("Cache Stats: \n{}", this->m_cache->get_stats().to_string());
 }
 
-INIT_VMODULES(CACHE_VMODULES);
 int main(int argc, char *argv[]) {
-    InithomedsLogging(argv[0], CACHE_VMODULES);
-
     testing::InitGoogleTest(&argc, argv);
+    sds_logging::SetLogger(spdlog::stdout_color_mt("test_cache"), spdlog::level::debug);
+    spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
     return RUN_ALL_TESTS();
 }

@@ -11,7 +11,7 @@
 #include "device/virtual_dev.hpp"
 #include "homeds/btree/mem_btree.hpp"
 
-SDS_LOGGING_INIT
+SDS_LOGGING_INIT(base, VMOD_BTREE_MERGE, VMOD_BTREE_SPLIT)
 
 #define MAX_CACHE_SIZE     2 * 1024 * 1024 * 1024
 using namespace std;
@@ -28,7 +28,7 @@ homeds::btree::btree_device_info bt_dev_info;
 
 #if 0
 AbstractVirtualDev *new_vdev_found(homestore::DeviceManager *mgr, homestore::vdev_info_block *vb) {
-    LOG(INFO) << "New virtual device found id = " << vb->vdev_id << " size = " << vb->size;
+    LOGINFO("New virtual device found id = {} size = {}", vb->vdev_id, vb->size);
     assert(0); // This test at present does not support restoring the btree
     return nullptr;
 }
@@ -42,7 +42,7 @@ void setup_devices(uint32_t ndevs) {
         ss << "/tmp/phys_dev" << i+1;
         dev_names.push_back(ss.str());
 
-        LOG(INFO) << "Creating device: " << ss.str();
+        LOGINFO("Creating device: {}", ss.str());
 
         std::stringstream cmd;
         cmd << "dd if=/dev/zero of=" << ss.str() << " bs=64k count=32768";
@@ -54,12 +54,12 @@ void setup_devices(uint32_t ndevs) {
     assert(glob_cache);
 
     /* Create/Load the devices */
-    LOG(INFO) << "Adding devices to DeviceManager";
+    LOGINFO("Adding devices to DeviceManager");
     dev_mgr = new homestore::DeviceManager(new_vdev_found, 0);
     try {
         dev_mgr->add_devices(dev_names);
     } catch (std::exception &e) {
-        LOG(INFO) << "Exception info " << e.what();
+        LOGCRITICAL("Exception info {}", e.what());
         exit(1);
     }
 
@@ -401,10 +401,9 @@ TEST_F(BtreeCrudTest, SimpleInsert) {
     EXPECT_EQ(m_bt->get_stats().get_interior_nodes_count(), 0u);
 }
 
-INIT_VMODULES(BTREE_VMODULES);
-
 int main(int argc, char *argv[]) {
-    InithomedsLogging(argv[0], BTREE_VMODULES);
+    sds_logging::SetLogger(spdlog::stdout_color_mt("test_btree_crud"), spdlog::level::debug);
+    spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 
     //setup_devices(2);
     testing::InitGoogleTest(&argc, argv);

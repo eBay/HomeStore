@@ -1,13 +1,11 @@
 /*
- * btree.hpp
- *
  *  Created on: 14-May-2016
  *      Author: Hari Kadayam
  *
  *  Copyright © 2016 Kadayam, Hari. All rights reserved.
  */
-#ifndef BTREE_KVSTORE_CPP_
-#define BTREE_KVSTORE_CPP_
+#pragma once
+
 #include <iostream>
 #include <cassert>
 #include <pthread.h>
@@ -19,7 +17,7 @@
 #include "btree_stats.hpp"
 #include "btree_node.cpp"
 #include "physical_node.hpp"
-#include "homeds/utility/logging.hpp"
+#include <sds_logging/logging.h>
 #include <boost/intrusive_ptr.hpp>
 #include <csignal>
 
@@ -30,24 +28,7 @@ using namespace homeds::thread;
 #define MAX_BTREE_DEPTH   100
 #endif
 
-#ifndef BTREE_VMOD_NAME
-#define BTREE_VMOD_NAME    btree
-#endif
-
-#define VMOD_BTREE_WRITE     BOOST_PP_CAT(BOOST_PP_CAT(BTREE_VMOD_NAME, _), btwrite)
-#define VMOD_BTREE_DELETE    BOOST_PP_CAT(BOOST_PP_CAT(BTREE_VMOD_NAME, _), btdelete)
-#define VMOD_BTREE_GET       BOOST_PP_CAT(BOOST_PP_CAT(BTREE_VMOD_NAME, _), btget)
-#define VMOD_BTREE_SPLIT     BOOST_PP_CAT(BOOST_PP_CAT(BTREE_VMOD_NAME, _), btsplit)
-#define VMOD_BTREE_MERGE     BOOST_PP_CAT(BOOST_PP_CAT(BTREE_VMOD_NAME, _), btmerge)
-
-#define BTREE_VMODULES       \
-        VMOD_BTREE_WRITE,    \
-        VMOD_BTREE_DELETE,   \
-        VMOD_BTREE_GET,      \
-        VMOD_BTREE_SPLIT,    \
-        VMOD_BTREE_MERGE
-
-REGISTER_VMODULES(BTREE_VMODULES);
+SDS_LOGGING_DECL(VMOD_BTREE_MERGE, VMOD_BTREE_SPLIT)
 
 namespace homeds { namespace btree {
 
@@ -821,12 +802,11 @@ private:
         //release_node(child_node2);
 
 #ifndef NDEBUG
-        if (CVLOG_IS_ON(VMOD_BTREE_SPLIT, 4)) {
-            LOG(INFO) << "After split\n#####################";
-            LOG(INFO) << "Parent node:\n" << parent_node->to_string();
-            LOG(INFO) << "Child node1:\n" << child_node1->to_string();
-            LOG(INFO) << "Child node2:\n" << child_node2->to_string();
-        }
+         LOGERRORMOD(VMOD_BTREE_SPLIT,
+                     "After split\n#####################\nParent node:\n{}\nChild node1:\n{}\nChild node2:\n{}",
+                     parent_node->to_string(),
+                     child_node1->to_string(),
+                     child_node2->to_string());
 #endif
 
         // NOTE: Do not access parentInd after insert, since insert would have
@@ -866,10 +846,10 @@ private:
 
 
 #ifndef NDEBUG
-        if (CVLOG_IS_ON(VMOD_BTREE_MERGE, 4)) {
-            LOG(INFO) << "Before Merge Nodes:\nParent node:\n" << parent_node->to_string();
-            for (auto i = 0u; i < minfo.size(); i++) {
-                LOG(INFO) << "Child node " << i + 1 << "\n" << minfo[i].node->to_string();
+        if (sds_logging::module_level_VMOD_BTREE_MERGE <= spdlog::level::level_enum::err) {
+            LOGINFOMOD(VMOD_BTREE_MERGE, "Before Merge Nodes:\nParent node:\n{}", parent_node->to_string());
+            for (auto i = 0u; i < minfo.size(); ++i) {
+                LOGINFOMOD(VMOD_BTREE_MERGE, "Child node {}\n{}", i + 1, minfo[i].node->to_string());
             }
         }
 #endif
@@ -940,8 +920,7 @@ private:
         // Loop again in reverse order to unlock the nodes. freeable nodes need to be unlocked and freed
         for (int n = minfo.size()-1; n >= 0; n--) {
             if (minfo[n].freed) {
-                DCVLOG(VMOD_BTREE_MERGE, 2) << "Child Node " << n << ": Freeing the node id = "
-                                            << minfo[n].node->get_node_id().to_integer();
+                LOGDEBUGMOD(VMOD_BTREE_MERGE, "Child Node {}: Freeing the node id = {}", n, minfo[n].node->get_node_id().to_integer());
                 if (minfo[n].node->any_upgrade_waiters()) {
                     minfo[n].node->set_valid_node(false);
                     unlock_node(minfo[n].node, locktype::LOCKTYPE_WRITE);
@@ -1000,12 +979,12 @@ private:
 
     static void check_lock_debug() {
         if (wr_locked_count != 0) {
-            LOG(ERROR) << "There are " << wr_locked_count << " write locks held on the exit of API";
+            LOGERROR("There are {} write locks held on the exit of API", wr_locked_count);
             assert(0);
         }
 
         if (rd_locked_count != 0) {
-            LOG(ERROR) << "There are " << rd_locked_count << " read locks held on the exit of API";
+            LOGERROR("There are {} read locks held on the exit of API", rd_locked_count);
             assert(0);
         }
     }
@@ -1038,12 +1017,16 @@ private:
             (*pcount)--;
         } else {
             if (*pcount > 1) {
-                LOG(ERROR) << "unlock_node: node = " << (void *) node.get() << " Locked count = " << (*pcount)
-                          << " Expecting nodes = " << (void *) pnodes->at(*(pcount)-1) << " or "
-                          << (void *) pnodes->at(*(pcount)-2);
+                LOGERROR("unlock_node: node = {} Locked count = {} Expecting nodes = {} or {}",
+                         (void *) node.get(),
+                         (*pcount),
+                         (void *) pnodes->at(*(pcount)-1),
+                         (void *) pnodes->at(*(pcount)-2));
             } else {
-                LOG(ERROR) << "unlock_node: node = " << (void *) node.get() << " Locked count = " << (*pcount)
-                          << " Expecting node = " << (void *) pnodes->at(*(pcount)-1);
+                LOGERROR("unlock_node: node = {} Locked count = {} Expecting node = {}",
+                         (void *) node.get(),
+                         (*pcount),
+                         (void *) pnodes->at(*(pcount)-1));
             }
             assert(0);
         }
@@ -1094,4 +1077,3 @@ thread_local std::array<BtreeNodeDeclType *, MAX_BTREE_DEPTH> BtreeDeclType::rd_
 #endif
 
 }}
-#endif

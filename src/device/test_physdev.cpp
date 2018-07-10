@@ -3,7 +3,6 @@
 //
 
 #include <iostream>
-#include <glog/logging.h>
 #include "device.h"
 #include <fcntl.h>
 
@@ -32,21 +31,21 @@ int main(int argc, char** argv) {
     try {
         dev_mgr->add_devices(dev_names);
     } catch (std::exception &e) {
-        LOG(INFO) << "Exception info " << e.what();
+        LOGCRITICAL("Exception info {}", e.what());
         exit(1);
     }
     auto devs = dev_mgr->get_all_devices();
-    LOG(INFO) << "Initial Phys dev dump: " << devs[0]->to_string();
+    LOGINFO("Initial Phys dev dump: {}", devs[0]->to_string());
     auto chunk1 = dev_mgr->alloc_chunk(devs[0], 1, 102400);
     auto chunk2 = dev_mgr->alloc_chunk(devs[0], 1, 51200);
     auto chunk3 = dev_mgr->alloc_chunk(devs[0], 1, 204800);
     auto chunk4 = dev_mgr->alloc_chunk(devs[0], 1, 2097152);
-    LOG(INFO) << "After 100K, 50K, 200K, 2MB allocations - Phys dev dump: " << devs[0]->to_string();
+    LOGINFO("After 100K, 50K, 200K, 2MB allocations - Phys dev dump: {}", devs[0]->to_string());
 
     dev_mgr->free_chunk(chunk3);
-    LOG(INFO) << "After 200K free - Phys dev dump: " << devs[0]->to_string();
+    LOGINFO("After 200K free - Phys dev dump: {}", devs[0]->to_string());
     dev_mgr->free_chunk(chunk2);
-    LOG(INFO) << "After 50K free - Phys dev dump: " << devs[0]->to_string();
+    LOGINFO("After 50K free - Phys dev dump: {}", devs[0]->to_string());
 
     // TODO: We are not
 }

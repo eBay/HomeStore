@@ -2,7 +2,7 @@ from conans import ConanFile, CMake, tools
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "0.4.2"
+    version = "0.4.3"
     license = "Proprietary"
     description = "HomeStore"
     url = "https://github.corp.ebay.com/SDS/Homestore"
@@ -16,9 +16,9 @@ class HomestoreConan(ConanFile):
                 ("double-conversion/3.0.0@bincrafters/stable"),
                 ("farmhash/1.0.0@oss/stable"),
                 ("folly/0.58.0@bincrafters/testing"),
+                ("gperftools/2.7.0@oss/stable"),
                 ("gtest/1.8.0@bincrafters/stable"),
-                ("iomgr/1.0.6@sds/testing"),
-                ("gperftools/2.7.0@oss/stable"))
+                ("iomgr/1.1.0@sds/testing"))
 
     generators = "cmake"
     default_options = "shared=False", "fPIC=True"

@@ -28,11 +28,9 @@ namespace po = boost::program_options;
 
 static size_t const page_size = sysconf(_SC_PAGESIZE);
 
-INIT_VMODULES(BTREE_VMODULES);
-
 using log_level = spdlog::level::level_enum;
 
-SDS_LOGGING_INIT
+SDS_LOGGING_INIT(base, cache_vmod_evict, cache_vmod_write, iomgr, VMOD_BTREE_MERGE, VMOD_BTREE_SPLIT)
 
 homestore::DeviceManager *dev_mgr = nullptr;
 std::shared_ptr<homestore::Volume> vol;
@@ -218,7 +216,6 @@ class test_ep : iomgr::EndPoint {
 
 thread_local test_ep::thread_info test_ep::info = {0};
 
-INIT_VMODULES(CACHE_VMODULES);
 int main(int argc, char** argv) {
    std::vector<std::string> dev_names;
     // Declare the supported options.
@@ -256,9 +253,8 @@ int main(int argc, char** argv) {
     }
 
    spdlog::set_async_mode(4096, spdlog::async_overflow_policy::block_retry, nullptr, std::chrono::seconds(2));
-   spdlog::set_pattern("[%D %H:%M:%S.%f] [%l] [%t] %v");
-   spdlog::set_level(log_level::info);
-   sds_logging::SetLogger(spdlog::stdout_color_mt("example"));
+   sds_logging::SetLogger(spdlog::stdout_color_mt("test_volume"), log_level::debug);
+   spdlog::set_pattern("[%D %T.%f%z] [%^%l%$] [%t] %v");
 
    /* create iomgr */
    iomgr::ioMgr iomgr(2, MAX_THREADS);
@@ -272,7 +268,7 @@ int main(int argc, char** argv) {
    try {
       dev_mgr->add_devices(dev_names);
    } catch (std::exception &e) {
-      LOG(INFO) << "Exception info " << e.what();
+      LOGCRITICAL("Exception info {}", e.what());
       exit(1);
    }
 

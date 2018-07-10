@@ -6,14 +6,12 @@
  *
  *  Copyright © 2016 Kadayam, Hari. All rights reserved.
  */
-#ifndef BTREE_ABSTRACTNODE_HPP_
-#define BTREE_ABSTRACTNODE_HPP_
+#pragma once
 
 #include <iostream>
 #include <cassert>
 #include <pthread.h>
 #include "btree_internal.h"
-#include <glog/logging.h>
 #include <folly/SharedMutex.h>
 #include "homeds/thread/lock.hpp"
 #include "homeds/utility/atomic_counter.hpp"
@@ -400,4 +398,3 @@ protected:
 
 }
 } // namespace homeds::btree
-#endif

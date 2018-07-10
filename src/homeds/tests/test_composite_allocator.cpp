@@ -18,7 +18,7 @@
 #define ITERATIONS   100
 #define THREADS      4
 
-SDS_LOGGING_INIT
+SDS_LOGGING_INIT(base)
 
 uint32_t glob_sizes[TOTAL_ALLOCS * THREADS];
 uint8_t *glob_ptr[TOTAL_ALLOCS * THREADS];

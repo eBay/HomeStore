@@ -2,11 +2,9 @@
 // Created by Kadayam, Hari on 30/11/17.
 //
 
-#ifndef OMSTORE_AVECTOR_HPP_HPP
-#define OMSTORE_AVECTOR_HPP_HPP
+#pragma once
 
 #include <vector>
-#include <boost/optional.hpp>
 namespace homeds {
 
 template <typename T>
@@ -39,4 +37,3 @@ private:
     }
 };
 }
-#endif //OMSTORE_AVECTOR_HPP_HPP

@@ -1,14 +1,13 @@
 //#include "BitMap.h"
 #include <iostream>
 #include <unistd.h>
-#include <glog/logging.h>
 #include <gtest/gtest.h>
 #include <sds_logging/logging.h>
 #include <thread>
 #include "blk_allocator.h"
 #include "varsize_blk_allocator.h"
 
-SDS_LOGGING_INIT
+SDS_LOGGING_INIT(base, VMOD_BTREE_MERGE, VMOD_BTREE_SPLIT)
 
 using namespace std;
 using namespace homestore;
@@ -31,17 +30,17 @@ void allocate_blocks(BlkAllocator *allocator)
             if (ret == BLK_ALLOC_SUCCESS) {
                 fprintf(stderr, "Allocated block num = %lu size = %d chunk_num = %d\n", blks[i].get_id(), blks[i].get_nblks(), blks[i].get_chunk_num());
             } else {
-                LOG(ERROR) << "Block Alloc failed with space full after " << alloced << " allocations";
+                LOGERROR("Block Alloc failed with space full after {} allocations", alloced);
                 break;
             }
         }
 
-        LOG(INFO) << "Allocated " << alloced << " blocks, Allocator state: " << allocator->to_string();
+        LOGINFO("Allocated {} blocks, Allocator state: {}", alloced, allocator->to_string());
         for (i = 0; i < alloced; i++) {
             allocator->free(blks[i]);
         }
-        LOG(INFO) << "Freed " << alloced << " blocks: Allocator state: " << allocator->to_string();
-        LOG(INFO) << "Reallocating blocks";
+        LOGINFO("Freed {} blocks: Allocator state: {}", alloced, allocator->to_string());
+        LOGINFO("Reallocating blocks");
     }
 }
 
@@ -83,8 +82,10 @@ public:
             out_blist->push_back(bid);
             test->m_alloced_count.fetch_add(1);
 
-            //LOG(INFO) << "Allocated block num = " << bid.get_id() << " size = " << bid.get_nblks()
-            //          << " chunk num = " << bid.get_chunk_num();
+            //LOGINFO("Allocated block num = {} size = {} chunk num = {}",
+            //         bid.get_id(),
+            //         bid.get_nblks(),
+            //         bid.get_chunk_num());
         }
     }
 
@@ -111,8 +112,7 @@ TEST_F(FixedBlkAllocatorTest, alloc_free_test) {
     EXPECT_EQ(m_alloced_count.load(), max_blks());
     EXPECT_EQ(m_fixed_allocator->total_free_blks(), 0u);
 
-    LOG(INFO) << "Allocated " << m_alloced_count.load() << " blocks, Allocator state: "
-              << m_fixed_allocator->to_string();
+    LOGINFO("Allocated {} blocks, Allocator state: {}", m_alloced_count.load(), m_fixed_allocator->to_string());
 
     for (auto i = 0U; i < NTHREADS; i++) {
         thrs[i] = new std::thread(free_fixed_blocks, this, blkids[i]);
@@ -121,9 +121,9 @@ TEST_F(FixedBlkAllocatorTest, alloc_free_test) {
         t->join();
     }
 
-    LOG(INFO) << "Freed all blocks: Allocator state: " << m_fixed_allocator->to_string();
+    LOGINFO("Freed all blocks: Allocator state: {}", m_fixed_allocator->to_string());
     EXPECT_EQ(m_fixed_allocator->total_free_blks(), max_blks());
-    LOG(INFO) << "FixedSizeBlkAllocator test done";
+    LOGINFO("FixedSizeBlkAllocator test done");
 }
 
 struct VarsizeBlkAllocatorTest : public testing::Test {
@@ -169,8 +169,10 @@ public:
             out_blist->push_back(bid);
             test->m_alloced_count.fetch_add(1);
 
-            //LOG(INFO) << "Allocated block num = " << bid.get_id() << " size = " << bid.get_nblks()
-            //          << " chunk num = " << bid.get_chunk_num();
+            //LOGINFO("Allocated block num = {} size = {} chunk num = {}",
+            //         bid.get_id(),
+            //         bid.get_nblks(),
+            //         bid.get_chunk_num());
         }
     }
 
@@ -195,8 +197,7 @@ TEST_F(VarsizeBlkAllocatorTest, alloc_free_test) {
     EXPECT_EQ(m_alloced_count.load(), max_blks());
     //EXPECT_EQ(m_varsize_allocator->total_free_blks(), 0);
 
-    LOG(INFO) << "Allocated " << m_alloced_count.load() << " blocks, Allocator state: "
-              << m_varsize_allocator->to_string();
+    LOGINFO("Allocated {} blocks, Allocator state: {}", m_alloced_count.load(), m_varsize_allocator->to_string());
 
     for (auto i = 0U; i < NTHREADS; i++) {
         thrs[i] = new std::thread(free_var_blocks, this, blkids[i]);
@@ -205,16 +206,14 @@ TEST_F(VarsizeBlkAllocatorTest, alloc_free_test) {
         t->join();
     }
 
-    LOG(INFO) << "Freed all blocks: Allocator state: " << m_varsize_allocator->to_string();
+    LOGINFO("Freed all blocks: Allocator state: {}", m_varsize_allocator->to_string());
     //EXPECT_EQ(m_varsize_allocator->total_free_blks(), max_blks());
-    LOG(INFO) << "VarsizeBlkAllocator test done";
+    LOGINFO("VarsizeBlkAllocator test done");
 }
 
-INIT_VMODULES(BTREE_VMODULES);
-
 int main(int argc, char *argv[]) {
-    InithomedsLogging(argv[0], BTREE_VMODULES);
-
     testing::InitGoogleTest(&argc, argv);
+    sds_logging::SetLogger(spdlog::stdout_color_mt("test_blkalloc"), spdlog::level::debug);
+    spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
     return RUN_ALL_TESTS();
 }

@@ -56,7 +56,7 @@ Volume::get_elapsed_time(Clock::time_point startTime) {
 
 AbstractVirtualDev *
 Volume::new_vdev_found(DeviceManager *dev_mgr, vdev_info_block *vb) {
-    LOG(INFO) << "New virtual device found id = " << vb->vdev_id << " size = " << vb->size;
+    LOGINFO("New virtual device found id = {} size = {}", vb->vdev_id, vb->size);
 
     /* TODO: enable it after testing */
 #if 0

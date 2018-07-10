@@ -1,17 +1,12 @@
 //
 // Created by Kadayam, Hari on 22/04/18.
 //
-#include "homeds/utility/logging.hpp"
 #include "homeds/utility/stats.hpp"
+#include <sds_logging/logging.h>
 
 #pragma once
 
-#define CACHE_VMODULES            \
-        cache_vmod_write,         \
-        cache_vmod_read,          \
-        cache_vmod_evict
-
-REGISTER_VMODULES(CACHE_VMODULES);
+SDS_LOGGING_DECL(cache_vmod_evict, cache_vmod_read, cache_vmod_write)
 
 using namespace homeds;
 

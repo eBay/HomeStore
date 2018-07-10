@@ -5,15 +5,14 @@
  *      Author: Hari Kadayam
  */
 
-#ifndef BLKDEV_BLKDEV_H_
-#define BLKDEV_BLKDEV_H_
+#pragma once
 
 #include <boost/intrusive/list.hpp>
 #include <sys/uio.h>
 #include <unistd.h>
 #include <exception>
 #include <string>
-#include <glog/logging.h>
+#include <sds_logging/logging.h>
 #include <fcntl.h>
 #include "blkalloc/blk_allocator.h"
 #include <boost/uuid/uuid.hpp>            // uuid class
@@ -166,7 +165,7 @@ public:
     }
 
     virtual const char* what() const noexcept {
-        LOG(ERROR) << "Exception is " << m_what.c_str();
+        LOGERROR("Exception is {}", m_what.c_str());
         return m_what.c_str();
     }
 
@@ -642,4 +641,3 @@ private:
 };
 */
 } // namespace homestore
-#endif /* BLKDEV_BLKDEV_H_ */

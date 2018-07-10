@@ -4,17 +4,6 @@ set(DEVICE_SOURCE
        )
 add_library(hs_device OBJECT ${DEVICE_SOURCE})
 
-set(TEST_DEVICEMGR_SOURCE_FILES
-        test_blkdev.cpp
-        )
-add_executable(test_devmgr
-                  ${TEST_DEVICEMGR_SOURCE_FILES}
-                  $<TARGET_OBJECTS:hs_device>
-                  $<TARGET_OBJECTS:hs_endpoint>
-                )
-target_link_libraries(test_devmgr ${COMMON_LIB_DEPS} ${CONAN_LIBS_FOLLY})
-add_test(NAME DevMgr COMMAND test_devmgr)
-
 message(WARNING "PhysicalDevice test disabled due to interface change.")
 # XXX: Currently out of date with DeviceManager interface
 #set(TEST_PHYSDEV_SOURCE_FILES
