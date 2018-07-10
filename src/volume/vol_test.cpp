@@ -325,6 +325,12 @@ int main(int argc, char** argv) {
    printf("iops %lu \n", (read_cnt * 1000 * 1000)/time_us);
    printf("additional counters.........\n");	
    vol->print_perf_cntrs();
+   // Expect this to fail!!!
+   auto err = Volume::removeVolume("my_volume");
+   assert(err);
+   vol.reset();
+   err = Volume::removeVolume("my_volume");
+   assert(!err);
    iomgr.print_perf_cntrs();
    LOGINFO("Complete");
 }
