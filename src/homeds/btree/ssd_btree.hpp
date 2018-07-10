@@ -126,10 +126,10 @@ public:
         assert(b.size == NodeSize);
         if (is_leaf) {
             bnodeid_t bid(blkid.to_integer());
-            auto n = new (b.bytes) VariantNode<LeafNodeType, K, V, NodeSize>(get_node_area_size(impl), &bid, true);
+            auto n = new (b.bytes) VariantNode<LeafNodeType, K, V, NodeSize>( &bid, true);
         } else {
             bnodeid_t bid(blkid.to_integer());
-            auto n = new (b.bytes) VariantNode<InteriorNodeType, K, V, NodeSize>(get_node_area_size(impl), &bid, true);
+            auto n = new (b.bytes) VariantNode<InteriorNodeType, K, V, NodeSize>( &bid, true);
         }
 
         return boost::static_pointer_cast<SSDBtreeNodeDeclType>(safe_buf);

@@ -11,6 +11,7 @@
 #include "physical_node.hpp"
 #include <cassert>
 #include "boost/range/irange.hpp"
+#include <sds_logging/logging.h>
 
 namespace homeds { namespace btree {
 
@@ -64,35 +65,33 @@ class VariableNode : public PhysicalNode<VariableNode,K, V, NodeSize> {
 public:
     friend struct VarNodeSpecificImpl<NodeTypeImpl, K, V,  NodeSize>;
 
-    VariableNode(int node_area_size,  bnodeid_t id, bool init) :
+    VariableNode(bnodeid_t id, bool init) :
             PhysicalNode<VariableNode, K, V, NodeSize>(id, init) {
         this->set_node_type(NodeTypeImpl);
         if (init) {
             // Tail arena points to the edge of the node as data arena grows backwards. Entire space is now available
             // except for the header itself
-            get_var_node_header()->m_tail_arena_offset = node_area_size;
+            get_var_node_header()->m_tail_arena_offset = NodeSize;
             get_var_node_header()->m_available_space = get_var_node_header()->m_tail_arena_offset - sizeof(var_node_header);
         }
-        cout<<"Initialize:"<<get_var_node_header()->m_tail_arena_offset<<":"<<get_var_node_header()->m_available_space<<endl;
     }
 
-    VariableNode(int node_area_size,  bnodeid_t* id, bool init) :
+    VariableNode(bnodeid_t* id, bool init) :
             PhysicalNode<VariableNode, K, V, NodeSize>(id, init) {
         this->set_node_type(NodeTypeImpl);
         if (init) {
             // Tail arena points to the edge of the node as data arena grows backwards. Entire space is now available
             // except for the header itself
-            get_var_node_header()->m_tail_arena_offset = node_area_size;
+            get_var_node_header()->m_tail_arena_offset = NodeSize;
             get_var_node_header()->m_available_space = get_var_node_header()->m_tail_arena_offset - sizeof(var_node_header);
         }
-        cout<<"Initialize:"<<get_var_node_header()->m_tail_arena_offset<<":"<<get_var_node_header()->m_available_space<<endl;
 
     }
     
     /* Insert the key and value in provided index
      * Assumption: Node lock is already taken */
     void insert(int ind, const BtreeKey &key, const BtreeValue &val) {
-        cout<<key.to_string()<<":"<<val.to_string()<<":";
+        LOGINFO("{}:{}",key.to_string(),val.to_string());
         insert(ind, key.get_blob(), val.get_blob());
     }
 
@@ -185,8 +184,39 @@ public:
     }
 
 #ifndef NDEBUG
-    std::string to_string() const  {
-        return "";
+    std::string to_string() const {
+        std::stringstream ss;
+        ss << "###################" << endl;
+        ss << "-------------------------------" << endl;
+        ss << "id=" << this->get_node_id().m_x << " nEntries=" << this->get_total_entries() << " leaf?=" << this->is_leaf();
+
+        if (!this->is_leaf()) {
+            bnodeid_t edge_id;
+            edge_id = this->get_edge_id();
+            ss << " edge_id=";
+            ss << static_cast<uint64_t>(edge_id.m_x);
+        }
+        ss << "\n-------------------------------" << endl;
+        for (uint32_t i = 0; i < this->get_total_entries(); i++) {
+            ss << "Key=";
+            K key;
+            get_nth_key(i, &key, false);
+            ss << key.to_string();
+
+            // TODO: Override the << in ostream for Value
+            ss << " Val=";
+            if (this->is_leaf()) {
+                V val;
+                get(i, &val, false);
+                ss << val.to_string();
+            } else {
+                BNodeptr p;
+                get(i, &p, false);
+                ss << p.get_node_id().m_x;
+            }
+            ss << "\n";
+        }
+        return ss.str();
     }
 #endif
 
@@ -435,7 +465,7 @@ public:
 private:
     uint32_t insert(int ind, const homeds::blob &key_blob, const homeds::blob &val_blob)  {
         assert(ind <= (int)this->get_total_entries());
-        cout << ind <<":"<< get_arena_free_space() <<":"<<get_var_node_header()->m_available_space<<endl;
+        LOGINFO("{}:{}:{}",ind ,get_arena_free_space() ,get_var_node_header()->m_available_space);
         uint16_t obj_size = key_blob.size + val_blob.size;
         uint16_t to_insert_size = obj_size + get_record_size();
         if (to_insert_size > get_var_node_header()->m_available_space) {
@@ -494,19 +524,84 @@ private:
             this->inc_gen();
             return;
         }
-
+        
         int count = to_ind - from_ind + 1;
         uint8_t *rec_ptr = get_nth_record_mutable(from_ind);
         memmove(rec_ptr, rec_ptr + (get_record_size() * count), (this->get_total_entries() - to_ind) * get_record_size());
+
         this->sub_entries(count);
+
+        //claim available memory
+        int recSize = get_record_size();
+        int ind = from_ind;
+        while(ind<=to_ind){
+            homeds::blob kb;
+            get_var_node_header()->m_available_space += get_nth_key_len(ind);
+            get_var_node_header()->m_available_space += get_nth_value_len(ind);
+            get_var_node_header()->m_available_space += recSize;
+            ind++;
+        }
+        compact();
+        
         this->inc_gen();
     }
 
-    // This method compacts and provides contiguous tail arena space so that available space == tail arena space
+    /*
+     * This method compacts and provides contiguous tail arena space 
+     * so that available space == tail arena space
+     * */
     void compact() {
-        // First sort all the entries in the order of their record offset
+        LOGINFO("----Compaction begins----");
 
-        // From last to first, keep moving the records
+        // temp ds to sort records in stack space 
+        struct Record{
+            uint16_t m_obj_offset;
+            uint16_t orig_record_index;
+        };
+
+        uint32_t no_of_entries = this->get_total_entries();
+        Record rec[no_of_entries]; 
+
+        uint32_t ind = 0;
+        while (ind < no_of_entries) {
+            btree_obj_record *rec_ptr = (btree_obj_record*)(get_nth_record_mutable(ind));
+            rec[ind].m_obj_offset = rec_ptr->m_obj_offset;
+            rec[ind].orig_record_index = ind;
+            ind++;
+        }
+
+        //use comparator to sort based on m_obj_offset in desc order
+        std::sort(rec, rec + no_of_entries,
+                  [](Record const & a, Record const & b) -> bool
+                  { return b.m_obj_offset < a.m_obj_offset; } );
+
+        uint16_t last_offset= NodeSize;
+
+        ind=0;
+        //loop records 
+        while (ind < no_of_entries) {
+            uint16_t total_key_value_len = get_nth_key_len(rec[ind].orig_record_index)
+                                           + get_nth_value_len(rec[ind].orig_record_index);
+            uint16_t sparce_space = last_offset- (rec[ind].m_obj_offset+ total_key_value_len);
+            if(sparce_space>0){
+                //do compaction
+                uint8_t *old_key_ptr = (uint8_t *)get_nth_obj(rec[ind].orig_record_index);
+                uint8_t *raw_data_ptr = old_key_ptr+sparce_space;
+                memmove(raw_data_ptr, old_key_ptr, total_key_value_len);
+
+                //update original record
+                btree_obj_record *rec_ptr = (btree_obj_record*)(get_nth_record_mutable(rec[ind].orig_record_index));
+                rec_ptr->m_obj_offset+=sparce_space;
+
+                last_offset = rec_ptr->m_obj_offset;
+                LOGINFO("sparse space reclaimed:{}",sparce_space);
+            }else {
+                last_offset = rec[ind].m_obj_offset;
+            }
+            ind++;
+        }
+        get_var_node_header()->m_tail_arena_offset = last_offset;
+        LOGINFO("----Compaction finished----");
     }
 
     // See template specialization below for each nodetype

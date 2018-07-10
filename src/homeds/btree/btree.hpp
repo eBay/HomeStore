@@ -19,6 +19,7 @@
 #include "btree_stats.hpp"
 #include "btree_node.cpp"
 #include "physical_node.hpp"
+#include <sds_logging/logging.h>
 #include "homeds/utility/logging.hpp"
 #include <boost/intrusive_ptr.hpp>
 #include <csignal>
@@ -610,6 +611,14 @@ private:
         // Check if child node is full and a hint on where would next child goes in.
         // TODO: Do minimal check and merge nodes for optimization.
         if (child_node->is_split_needed(m_btree_cfg, k, v, &ind_hint)) {
+            
+#ifndef NDEBUG
+            std::stringstream ss;
+            ss << std::this_thread::get_id();
+            uint64_t id = std::stoull(ss.str());
+            LOGINFO("ThreadId:{}, Starting split.....",id);
+#endif
+           
             // Time to split the child, but we need to convert ours to write lock
             if (upgrade_node(my_node, child_node, curlock, child_cur_lock) == false) {
 		assert(rd_locked_count == temp_rd_locked_count 
@@ -635,6 +644,9 @@ private:
             // After split, parentNode would have split, retry search and walk down.
             unlock_node(child_node, homeds::thread::LOCKTYPE_WRITE);
             m_stats.inc_count(BTREE_STATS_SPLIT_COUNT);
+#ifndef NDEBUG
+            LOGINFO("ThreadId:{}, Ending split.....",id);
+#endif
             goto retry;
         }
 
@@ -795,6 +807,15 @@ private:
 
     void split_node(BtreeNodePtr parent_node, BtreeNodePtr child_node, uint32_t parent_ind,
                     BtreeKey *out_split_key) {
+#ifndef NDEBUG
+        std::stringstream ss;
+        ss << std::this_thread::get_id();
+        uint64_t id = std::stoull(ss.str());
+
+        LOGINFO("ThreadId:{}, Before split\n########Parent node:\n {}\n,Child node:\n {}\n" ,
+                id, parent_node->to_string(),child_node->to_string());
+#endif
+        
         BNodeptr nptr;
 
         // Create a new child node and split the keys by half.
@@ -821,12 +842,10 @@ private:
         //release_node(child_node2);
 
 #ifndef NDEBUG
-        if (CVLOG_IS_ON(VMOD_BTREE_SPLIT, 4)) {
-            LOG(INFO) << "After split\n#####################";
-            LOG(INFO) << "Parent node:\n" << parent_node->to_string();
-            LOG(INFO) << "Child node1:\n" << child_node1->to_string();
-            LOG(INFO) << "Child node2:\n" << child_node2->to_string();
-        }
+            
+        LOGINFO("ThreadId:{}, After split\n########Parent node:\n {}\n,Child node1:\n {}\n,Child node2:\n {}\n" ,
+                    id, parent_node->to_string(),child_node1->to_string(),child_node2->to_string());
+
 #endif
 
         // NOTE: Do not access parentInd after insert, since insert would have

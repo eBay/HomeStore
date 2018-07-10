@@ -182,7 +182,7 @@ class test_ep : iomgr::EndPoint {
       assert(outstanding_ios != SIZE_MAX);
       uint64_t size = write(ev_fd, &temp, sizeof(uint64_t));
       if (size != sizeof(uint64_t)) {
-         assert(0);
+         assert(0); 
       }
       if (req->is_read) {
          /* memcmp */
@@ -255,7 +255,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-   spdlog::set_async_mode(4096, spdlog::async_overflow_policy::block_retry, nullptr, std::chrono::seconds(2));
+   //spdlog::set_async_mode(4096, spdlog::async_overflow_policy::block_retry, nullptr, std::chrono::seconds(2));
    spdlog::set_pattern("[%D %H:%M:%S.%f] [%l] [%t] %v");
    spdlog::set_level(log_level::info);
    sds_logging::SetLogger(spdlog::stdout_color_mt("example"));
