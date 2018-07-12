@@ -37,6 +37,23 @@ Volume::createVolume(std::string const& uuid,
    return it->second;
 }
 
+std::error_condition
+Volume::removeVolume(std::string const& uuid) {
+   std::shared_ptr<Volume> volume;
+   // Locked Map
+   { std::lock_guard<std::mutex> lg(map_lock);
+      if (auto it = volume_map.find(uuid); volume_map.end() != it) {
+         if (2 <= it->second.use_count()) {
+            LOGERROR("Refusing to delete volume with outstanding references: {}", uuid);
+            return std::make_error_condition(std::errc::device_or_resource_busy);
+         }
+         volume = std::move(it->second);
+         volume_map.erase(it);
+      }
+   } // Unlock Map
+   return (volume ? volume->destroy() : std::make_error_condition(std::errc::no_such_device_or_address));
+}
+
 std::shared_ptr<Volume>
 Volume::lookupVolume(std::string const& uuid) {
    {  std::lock_guard<std::mutex> lg (map_lock);
@@ -56,7 +73,7 @@ Volume::get_elapsed_time(Clock::time_point startTime) {
 
 AbstractVirtualDev *
 Volume::new_vdev_found(DeviceManager *dev_mgr, vdev_info_block *vb) {
-    LOG(INFO) << "New virtual device found id = " << vb->vdev_id << " size = " << vb->size;
+    LOGINFO("New virtual device found id = {} size = {}", vb->vdev_id, vb->size);
 
     /* TODO: enable it after testing */
 #if 0
@@ -100,6 +117,12 @@ Volume::Volume(DeviceManager *dev_mgr, vdev_info_block *vb) {
     /* TODO: rishabh, We need a attach function to register completion callback if layers
      * are called from bottomup.
      */
+}
+
+std::error_condition
+Volume::destroy() {
+   LOGWARN("UnImplemented volume destruction!");
+   return std::error_condition();
 }
 
 void 

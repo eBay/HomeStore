@@ -69,4 +69,4 @@ add_executable(test_avector
                   ${TEST_AVECTOR_SOURCE_FILES}
                 )
 target_link_libraries(test_avector ${COMMON_LIB_DEPS} folly)
-#add_test(NAME Avector COMMAND test_avector)
+add_test(NAME Avector COMMAND test_avector)

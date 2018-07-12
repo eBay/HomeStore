@@ -57,7 +57,7 @@ std::unique_ptr<PhysicalDev> PhysicalDev::load(DeviceManager *dev_mgr,
     try {
         if (pdev->load_super_block()) {
             *is_new = false;
-            LOG(INFO) << "Successfully loaded the device " << devname.c_str() << ", it was already formatted";
+            LOGINFO("Successfully loaded the device {}, it was already formatted", devname);
             return std::move(pdev);
         }
     } catch (std::exception &e) {

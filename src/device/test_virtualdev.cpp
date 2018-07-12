@@ -3,7 +3,6 @@
 //
 
 #include <iostream>
-#include <glog/logging.h>
 #include "device.h"
 #include <fcntl.h>
 #include "device/virtual_dev.hpp"

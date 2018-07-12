@@ -3,7 +3,7 @@
 //
 
 #include <iostream>
-#include <glog/logging.h>
+#include <sds_logging/logging.h>
 #include "device/device.h"
 #include <fcntl.h>
 #include "blkstore.hpp"
@@ -12,6 +12,8 @@
 using namespace std;
 using namespace homestore;
 
+SDS_INIT_LOGGING
+
 homestore::DeviceManager *dev_mgr = nullptr;
 homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy > *blk_store;
 homestore::Cache< BlkId > *glob_cache = nullptr;
@@ -19,7 +21,7 @@ homestore::Cache< BlkId > *glob_cache = nullptr;
 #define MAX_CACHE_SIZE     2 * 1024 * 1024 * 1024
 
 AbstractVirtualDev *new_vdev_found(homestore::vdev_info_block *vb) {
-    LOG(INFO) << "New virtual device found id = " << vb->vdev_id << " size = " << vb->size;
+    LOGINFO("New virtual device found id = {} size = {}", vb->vdev_id, vb->size);
     blk_store = new homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy >(dev_mgr, glob_cache, vb, WRITETHRU_CACHE);
     return blk_store->get_vdev();
 }
@@ -41,14 +43,14 @@ int main(int argc, char** argv) {
     try {
         dev_mgr->add_devices(dev_names);
     } catch (std::exception &e) {
-        LOG(INFO) << "Exception info " << e.what();
+        LOGCRITICAL("Exception info {}", e.what());
         exit(1);
     }
     auto devs = dev_mgr->get_all_devices();
 
     /* Create a blkstore */
     if (create) {
-        LOG(INFO) << "Creating BlkStore\n";
+        LOGINFO("Creating BlkStore");
         uint64_t size = 512 * 1024 * 1024;
         blk_store = new homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy >(dev_mgr, glob_cache, size,
                                                                                   WRITETHRU_CACHE, 1);
@@ -65,7 +67,7 @@ int main(int argc, char** argv) {
         //blk_store->alloc_blk(nblks, hints, &bids[i]);
 
         bbufs[i] = blk_store->alloc_blk_cached(nblks, hints, &bids[i]);
-        LOG(INFO) << "Requested nblks: " << (uint32_t)nblks << " Allocation info: " << bids[i].to_string();
+        LOGINFO("Requested nblks: {} Allocation info: {}", (uint32_t)nblks, bids[i].to_string());
         memset(bbufs[i]->at_offset(0).bytes, i, bbufs[i]->at_offset(0).size);
     }
 
@@ -76,11 +78,11 @@ int main(int argc, char** argv) {
 
         //boost::intrusive_ptr< BlkBuffer > bbuf = blk_store->write(bids[i], b);
         blk_store->write(bids[i], bbufs[i]);
-        LOG(INFO) << "Written on " << bids[i].to_string() << " for 8192 bytes";
+        LOGINFO("Written on {} for 8192 bytes", bids[i].to_string());
     }
 
     for (auto i = 0; i < 100; i++) {
-        LOG(INFO) << "Read from " << bids[i].to_string() << " for 8192 bytes";
+        LOGINFO("Read from {} for 8192 bytes", bids[i].to_string());
 
         boost::intrusive_ptr< BlkBuffer > bbuf = blk_store->read(bids[i], 0, 8192);
         omds::blob b = bbuf->at_offset(0);

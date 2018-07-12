@@ -34,7 +34,7 @@ void DeviceManager::add_devices(std::vector< std::string > &dev_names) {
 								m_open_flags, iomgr, comp_cb);
         if (1 || !pdev->load_super_block()) {
             // Super block is not present, possibly a new device, will format the device later
-            LOG(INFO) << "Device " << d << " appears to be not formatted. Will format it ";
+            LOGINFO("Device {} appears to be not formatted. Will format it", d);
             uninit_devs.push_back(std::move(pdev));
             continue;
         }
@@ -45,7 +45,7 @@ void DeviceManager::add_devices(std::vector< std::string > &dev_names) {
         auto pdev_raw = pdev.get();
         m_pdevs[pdev->get_dev_id()] = std::move(pdev);
 
-        LOG(INFO) << "Device " << d << " is already formatted. Loading the format ";
+        LOGINFO("Device {} is already formatted. Loading the format ", d);
         // Load all pdev information, if its the first device loading
         if (m_pdev_info.num_phys_devs == 0) {
             read_info_blocks(pdev_raw);
@@ -210,7 +210,7 @@ vdev_info_block *DeviceManager::alloc_vdev(uint64_t req_size, uint32_t nmirrors,
     m_last_vdevid = vb->vdev_id;
     vb->next_vdev_id = INVALID_VDEV_ID;
 
-    LOG(INFO) << "Creating vdev id = " << vb->vdev_id << " size = " << vb->size;
+    LOGINFO("Creating vdev id = {} size = {}", vb->vdev_id, vb->size);
     m_vdev_info.num_vdevs++;
     for (auto &pdev: m_pdevs) {
         pdev->sync_write((char *) &m_vdev_info, sizeof(m_vdev_info), pdev->get_super_block_header()->vdevs_block_offset);
@@ -253,7 +253,7 @@ PhysicalDevChunk *DeviceManager::create_new_chunk(PhysicalDev *pdev, uint64_t st
     PhysicalDevChunk *craw = chunk.get();
     pdev->attach_chunk(craw, prev_chunk);
 
-    LOG(INFO) << "Creating chunk: " << chunk->to_string();
+    LOGINFO("Creating chunk: {}", chunk->to_string());
     m_chunks[chunk->get_chunk_id()] = std::move(chunk);
     m_chunk_info.num_chunks++;
 

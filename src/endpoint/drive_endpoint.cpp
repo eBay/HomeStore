@@ -14,6 +14,7 @@
 #include <endpoint/drive_endpoint.hpp>
 #include <fstream>
 #include <sys/epoll.h>
+#include <sds_logging/logging.h>
 
 namespace homeio {
 #ifdef __APPLE__
@@ -149,7 +150,7 @@ DriveEndPoint::async_read(int m_sync_fd, char *data,
 	iocb->data = cookie;
 	info->is_read = true;
 	info->start_time = Clock::now();
-        printf("Reading: %u\n", size);
+        LOGTRACE("Reading: {}", size);
 	if (io_submit(ioctx, 1, &iocb) != 1) {
 		std::stringstream ss;
 		ss << "error while read " << errno;
@@ -193,7 +194,7 @@ DriveEndPoint::async_readv(int m_sync_fd, const struct iovec *iov,
 	iocb->data = cookie;
 	info->is_read = true;
 	info->start_time = Clock::now();
-        printf("Reading: %u vectors\n", iovcnt);
+        LOGTRACE("Reading: {} vectors", iovcnt);
 	if (io_submit(ioctx, 1, &iocb) != 1) {
 		std::stringstream ss;
 		ss << "error while reading " << errno;

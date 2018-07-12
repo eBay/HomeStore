@@ -2,8 +2,7 @@
 // Created by Kadayam, Hari on 27/10/17.
 //
 
-#ifndef OMSTORE_LRU_EVICTION_HPP_HPP
-#define OMSTORE_LRU_EVICTION_HPP_HPP
+#pragma once
 
 #include <mutex>
 #include "cache_common.hpp"
@@ -45,7 +44,7 @@ public:
             } else {
                 count++;
             }
-            if (count) { CVLOG(cache_vmod_evict, 2) << " LRU ejection had to skip " << count << " entries"; }
+            if (count) { LOGINFOMOD(cache_vmod_evict, "LRU ejection had to skip {} entries", count); }
         }
 
         // No available candidate to evict
@@ -71,4 +70,3 @@ private:
 };
 
 }
-#endif //OMSTORE_LRU_EVICTION_HPP_HPP

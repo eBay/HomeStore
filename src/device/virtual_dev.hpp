@@ -194,8 +194,10 @@ public:
      * takes lock for writing and not reading
      */
     virtual void add_chunk(PhysicalDevChunk *chunk) override {
-        LOG(INFO) << "Adding chunk " << chunk->get_chunk_id() << " from vdev id " << chunk->get_vdev_id() <<
-                  " from pdev id = " << chunk->get_physical_dev()->get_dev_id();
+        LOGTRACE("Adding chunk {} from vdev id {} from pdev id = {}",
+                 chunk->get_chunk_id(),
+                 chunk->get_vdev_id(),
+                 chunk->get_physical_dev()->get_dev_id());
         std::lock_guard< decltype(m_mgmt_mutex) > lock(m_mgmt_mutex);
         (chunk->get_primary_chunk()) ? add_mirror_chunk(chunk) : add_primary_chunk(chunk);
 
@@ -296,7 +298,7 @@ public:
 	req->size = size;
     uint64_t dev_offset = to_dev_offset(bid, &chunk);
     
-    LOG(INFO) << "Writing in device " << chunk->get_physical_dev()->get_dev_id() << " offset = " << dev_offset;
+    LOGTRACE("Writing in device {} offset = {}", chunk->get_physical_dev()->get_dev_id(), dev_offset);
     write_time +=
         (std::chrono::duration_cast< std::chrono::nanoseconds >(Clock::now() -
                                     startTime)).count();
@@ -523,8 +525,10 @@ private:
     PhysicalDevChunk *create_dev_chunk(uint32_t pdev_ind, std::shared_ptr< BlkAllocator > ba) {
         auto pdev = m_primary_pdev_chunks_list[pdev_ind].pdev;
         PhysicalDevChunk *chunk = m_mgr->alloc_chunk(pdev, m_vb->vdev_id, m_chunk_size);
-        LOG(INFO) << "Allocating new chunk for vdev_id = " << m_vb->vdev_id << " pdev_id = " << pdev->get_dev_id() <<
-                  " chunk: " << chunk->to_string();
+        LOGTRACE("Allocating new chunk for vdev_id = {} pdev_id = {} chunk: {}",
+                 m_vb->vdev_id,
+                 pdev->get_dev_id(),
+                 chunk->to_string());
         chunk->set_blk_allocator(ba);
 
         return chunk;

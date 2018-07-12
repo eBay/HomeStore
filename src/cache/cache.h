@@ -2,8 +2,7 @@
 // Created by Kadayam, Hari on 19/10/17.
 //
 
-#ifndef OMSTORAGE_CACHE_HPP
-#define OMSTORAGE_CACHE_HPP
+#pragma once
 
 //#include "eviction.cpp"
 #include "eviction.hpp"
@@ -13,7 +12,6 @@
 #include <boost/intrusive_ptr.hpp>
 #include "homeds/memory/obj_allocator.hpp"
 #include "main/store_limits.h"
-#include "homeds/utility/logging.hpp"
 
 namespace homestore {
 
@@ -214,4 +212,3 @@ public:
     }
 };
 } // namespace homestore
-#endif //OMSTORAGE_CACHE_HPP

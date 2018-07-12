@@ -1,4 +1,5 @@
-#include <glog/logging.h>
+#pragma once
+
 #include "device/device.h"
 #include <fcntl.h>
 #include <cache/cache_common.hpp>
@@ -42,12 +43,19 @@ class Volume {
 	Volume(DeviceManager *mgr, uint64_t size, comp_callback comp_cb);
 	Volume(DeviceManager *dev_mgr, homestore::vdev_info_block *vb);
 
+	// !!! Permanent destroy the volume reclaiming all allocations !!!
+   // - Must be called with no remaining references to the volume and through
+	// - the Volume::removeVolume(uuid) call.
+	std::error_condition destroy();
+
  public:
 
         static std::shared_ptr<Volume> createVolume(std::string const& uuid,
                                                     DeviceManager* mgr,
                                                     uint64_t const size,
                                                     comp_callback comp_cb);
+
+        static std::error_condition removeVolume(std::string const& uuid);
 
         static std::shared_ptr<Volume> lookupVolume(std::string const& uuid);
 

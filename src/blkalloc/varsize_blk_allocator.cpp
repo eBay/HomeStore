@@ -10,7 +10,7 @@
 #include <cassert>
 #include <thread>
 #include "homeds/btree/mem_btree.hpp"
-#include <glog/logging.h>
+#include <sds_logging/logging.h>
 
 namespace homestore {
 
@@ -80,7 +80,7 @@ void VarsizeBlkAllocator::allocator_state_machine() {
     BlkAllocSegment *allocate_seg = nullptr;
     bool allocate;
 
-    LOG(INFO) << "Starting new blk sweeep thread";
+    LOGDEBUG("Starting new blk sweeep thread");
     while (true) {
         allocate_seg = nullptr;
         allocate = false;
@@ -137,11 +137,13 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
 
         // Wait for cache to refill and then retry original request
         if (attempt > MAX_BLK_ALLOC_ATTEMPT) {
-            LOG(ERROR) << "Exceeding max retries " << MAX_BLK_ALLOC_ATTEMPT << " to allocate. Failing the alloc";
+            LOGERROR("Exceeding max retries {} to allocate. Failing the alloc", MAX_BLK_ALLOC_ATTEMPT);
             break;
         } else {
-            LOG(WARNING) << "Attempt #" << attempt << " to allocate nblks=" << (uint32_t)nblks << " temperature=" <<
-                     hints.desired_temp << " failed. Waiting for cache to be filled";
+            LOGWARN("Attempt #{} to allocate nblks={} temperature={} failed. Waiting for cache to be filled",
+                    attempt,
+                    (uint32_t)nblks,
+                    hints.desired_temp);
         }
 
         request_more_blks_wait(nullptr);
@@ -222,7 +224,7 @@ void VarsizeBlkAllocator::fill_cache(BlkAllocSegment *seg) {
     seg->set_free_blks(seg->get_free_blks() - nadded_blks);
     m_heap_segments.update(seg->get_segment_id(), seg);
 
-    LOG(INFO) << "Bitset sweep thread added " << nadded_blks << " blks to blk cache";
+    LOGDEBUG("Bitset sweep thread added {} blks to blk cache", nadded_blks);
 }
 
 uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t portion_num, BlkAllocSegment *seg) {

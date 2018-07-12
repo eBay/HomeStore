@@ -13,7 +13,7 @@ namespace homestore {
 template< typename K, typename V>
 IntrusiveCache<K, V>::IntrusiveCache(uint64_t max_cache_size, uint32_t avg_size_per_entry) :
         m_hash_set(max_cache_size/avg_size_per_entry/ENTRIES_PER_BUCKET) {
-    LOG(INFO) << "Initializing cache with cache_size = " << max_cache_size << " with " << EVICTOR_PARTITIONS << " partitions";
+    LOGINFO("Initializing cache with cache_size = {} with {} partitions", max_cache_size, EVICTOR_PARTITIONS);
     for (auto i = 0; i < EVICTOR_PARTITIONS; i++) {
         m_evictors[i] = std::make_unique<CurrentEvictor>(i, max_cache_size/EVICTOR_PARTITIONS, &m_stats,
                                                          IntrusiveCache<K, V>::is_safe_to_evict,
@@ -28,14 +28,14 @@ bool IntrusiveCache<K, V>::insert(V &v, V **out_ptr, const std::function<void(V 
     auto b = K::get_blob(*pk);
     uint64_t hash_code = util::Hash64((const char *)b.bytes, (size_t)b.size);
 
-    DCVLOG(cache_vmod_write, 5) << "Attemping to insert in cache: " << v.to_string();
+    LOGCRITICALMOD(cache_vmod_write, "Attemping to insert in cache: {}", v.to_string());
 
     // Try adding the record into the hash set.
     bool inserted = m_hash_set.insert(*pk, v, out_ptr, hash_code, found_cb);
     if (!inserted) {
         // Entry is already inside the hash, just upvote this in eviction to simulate someone has read the blk
         m_evictors[hash_code % EVICTOR_PARTITIONS]->upvote((*out_ptr)->get_evict_record_mutable());
-        DCVLOG(cache_vmod_write, 3) << "Following entry exist in cache already: " << (*out_ptr)->to_string();
+        LOGWARNMOD(cache_vmod_write, "Following entry exist in cache already: {}", (*out_ptr)->to_string());
         return false;
     }
 
@@ -45,7 +45,7 @@ bool IntrusiveCache<K, V>::insert(V &v, V **out_ptr, const std::function<void(V 
     if (evicted_rec) {
         // We indeed evicted an entry, lets remove the evicted entry from the hash set
         V *evicted_v = static_cast<V *>(evicted_rec);
-        DCVLOG(cache_vmod_write, 3) << "Had to evict following entry from cache: " << evicted_v->to_string();
+        LOGWARNMOD(cache_vmod_write, "Had to evict following entry from cache: {}", evicted_v->to_string());
 
         m_stats.inc_count(CACHE_STATS_EVICT_COUNT);
         bool found = m_hash_set.remove(*(V::extract_key(*evicted_v)));
