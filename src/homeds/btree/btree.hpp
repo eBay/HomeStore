@@ -616,7 +616,6 @@ private:
             std::stringstream ss;
             ss << std::this_thread::get_id();
             uint64_t id = std::stoull(ss.str());
-            LOGINFO("ThreadId:{}, Starting split.....",id);
 #endif
            
             // Time to split the child, but we need to convert ours to write lock
@@ -645,7 +644,6 @@ private:
             unlock_node(child_node, homeds::thread::LOCKTYPE_WRITE);
             m_stats.inc_count(BTREE_STATS_SPLIT_COUNT);
 #ifndef NDEBUG
-            LOGINFO("ThreadId:{}, Ending split.....",id);
 #endif
             goto retry;
         }
@@ -812,7 +810,7 @@ private:
         ss << std::this_thread::get_id();
         uint64_t id = std::stoull(ss.str());
 
-        LOGINFO("ThreadId:{}, Before split\n########Parent node:\n {}\n,Child node:\n {}\n" ,
+        LOGTRACE("ThreadId:{}, Before split\n########Parent node:\n {}\n,Child node:\n {}\n" ,
                 id, parent_node->to_string(),child_node->to_string());
 #endif
         
@@ -843,7 +841,7 @@ private:
 
 #ifndef NDEBUG
             
-        LOGINFO("ThreadId:{}, After split\n########Parent node:\n {}\n,Child node1:\n {}\n,Child node2:\n {}\n" ,
+        LOGTRACE("ThreadId:{}, After split\n########Parent node:\n {}\n,Child node1:\n {}\n,Child node2:\n {}\n" ,
                     id, parent_node->to_string(),child_node1->to_string(),child_node2->to_string());
 
 #endif

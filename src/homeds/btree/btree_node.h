@@ -18,7 +18,8 @@ typedef struct {
 template< btree_node_type NodeType, typename K, typename V, size_t NodeSize >
 class VariantNode {
 public:
-    VariantNode(bnodeid_t id, bool init);
+    VariantNode( bnodeid_t id, bool init, const BtreeConfig &cfg);
+    VariantNode( bnodeid_t *id, bool init, const BtreeConfig &cfg);
     void get(int ind, BtreeValue *outval, bool copy) const;
 
     // Insert the key and value in provided index

@@ -84,6 +84,8 @@ public:
     }
 
     BtreeSpecificImpl(BtreeConfig &cfg, void *btree_specific_context) {
+        this->cfg = cfg;
+        this->cfg.set_node_area_size(NodeSize - sizeof(SSDBtreeNodeDeclType) - sizeof(LeafPhysicalNodeDeclType));
         auto bt_dev_info = (btree_device_info *)btree_specific_context;
 
         // Create or load the Blkstore out of this info
@@ -126,10 +128,10 @@ public:
         assert(b.size == NodeSize);
         if (is_leaf) {
             bnodeid_t bid(blkid.to_integer());
-            auto n = new (b.bytes) VariantNode<LeafNodeType, K, V, NodeSize>( &bid, true);
+            auto n = new (b.bytes) VariantNode<LeafNodeType, K, V, NodeSize>( &bid, true,impl->cfg);
         } else {
             bnodeid_t bid(blkid.to_integer());
-            auto n = new (b.bytes) VariantNode<InteriorNodeType, K, V, NodeSize>( &bid, true);
+            auto n = new (b.bytes) VariantNode<InteriorNodeType, K, V, NodeSize>( &bid, true,impl->cfg);
         }
 
         return boost::static_pointer_cast<SSDBtreeNodeDeclType>(safe_buf);
@@ -168,6 +170,7 @@ public:
     }
 private:
     homestore::BlkStore<homestore::VdevFixedBlkAllocatorPolicy, BtreeBufferDeclType> *m_blkstore;
+    BtreeConfig cfg;
 };
 } }
 

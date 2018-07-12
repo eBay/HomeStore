@@ -41,6 +41,10 @@ struct var_obj_record : public btree_obj_record {
 struct var_node_header {
     uint16_t m_tail_arena_offset;       // Tail side of the arena where new keys are inserted
     uint16_t m_available_space;
+    uint16_t m_init_available_space; // remember initial node area size to later use for compaction
+    //TODO: 
+    // We really dont require storing m_init_available_space in each node. 
+    // Instead add method in variant node to fetch config
 } __attribute((packed));
 
 #define memrshift(ptr, size) (memmove(ptr, ptr+size, size))
@@ -65,24 +69,26 @@ class VariableNode : public PhysicalNode<VariableNode,K, V, NodeSize> {
 public:
     friend struct VarNodeSpecificImpl<NodeTypeImpl, K, V,  NodeSize>;
 
-    VariableNode(bnodeid_t id, bool init) :
+    VariableNode( bnodeid_t id, bool init,const BtreeConfig &cfg) :
             PhysicalNode<VariableNode, K, V, NodeSize>(id, init) {
         this->set_node_type(NodeTypeImpl);
         if (init) {
             // Tail arena points to the edge of the node as data arena grows backwards. Entire space is now available
             // except for the header itself
-            get_var_node_header()->m_tail_arena_offset = NodeSize;
+            get_var_node_header()->m_init_available_space= cfg.get_node_area_size();
+            get_var_node_header()->m_tail_arena_offset = cfg.get_node_area_size();
             get_var_node_header()->m_available_space = get_var_node_header()->m_tail_arena_offset - sizeof(var_node_header);
         }
     }
 
-    VariableNode(bnodeid_t* id, bool init) :
+    VariableNode( bnodeid_t* id, bool init,const BtreeConfig &cfg) :
             PhysicalNode<VariableNode, K, V, NodeSize>(id, init) {
         this->set_node_type(NodeTypeImpl);
         if (init) {
             // Tail arena points to the edge of the node as data arena grows backwards. Entire space is now available
             // except for the header itself
-            get_var_node_header()->m_tail_arena_offset = NodeSize;
+            get_var_node_header()->m_init_available_space= cfg.get_node_area_size();
+            get_var_node_header()->m_tail_arena_offset = cfg.get_node_area_size();
             get_var_node_header()->m_available_space = get_var_node_header()->m_tail_arena_offset - sizeof(var_node_header);
         }
 
@@ -91,7 +97,7 @@ public:
     /* Insert the key and value in provided index
      * Assumption: Node lock is already taken */
     void insert(int ind, const BtreeKey &key, const BtreeValue &val) {
-        LOGINFO("{}:{}",key.to_string(),val.to_string());
+        LOGTRACE("{}:{}",key.to_string(),val.to_string());
         insert(ind, key.get_blob(), val.get_blob());
     }
 
@@ -465,7 +471,7 @@ public:
 private:
     uint32_t insert(int ind, const homeds::blob &key_blob, const homeds::blob &val_blob)  {
         assert(ind <= (int)this->get_total_entries());
-        LOGINFO("{}:{}:{}",ind ,get_arena_free_space() ,get_var_node_header()->m_available_space);
+        LOGTRACE("{}:{}:{}:{}",ind ,get_var_node_header()->m_tail_arena_offset,get_arena_free_space() ,get_var_node_header()->m_available_space);
         uint16_t obj_size = key_blob.size + val_blob.size;
         uint16_t to_insert_size = obj_size + get_record_size();
         if (to_insert_size > get_var_node_header()->m_available_space) {
@@ -485,7 +491,7 @@ private:
 
         // Move up the tail area
         get_var_node_header()->m_tail_arena_offset -= obj_size;
-        get_var_node_header()->m_available_space -= obj_size+get_record_size();
+        get_var_node_header()->m_available_space -= (obj_size+get_record_size());
 
         // Create a new record
         set_nth_key_len(rec_ptr, key_blob.size);
@@ -508,7 +514,7 @@ private:
         return to_insert_size;
     }
 
-    /* Remove entries from the index to end index */
+    /* Remove entries from the index to end index. From and to inclusive */
     void remove(int from_ind, int to_ind) {
         if (to_ind < from_ind) {
             return;
@@ -524,24 +530,23 @@ private:
             this->inc_gen();
             return;
         }
-        
-        int count = to_ind - from_ind + 1;
-        uint8_t *rec_ptr = get_nth_record_mutable(from_ind);
-        memmove(rec_ptr, rec_ptr + (get_record_size() * count), (this->get_total_entries() - to_ind) * get_record_size());
-
-        this->sub_entries(count);
 
         //claim available memory
         int recSize = get_record_size();
         int ind = from_ind;
+        int sizeToClaim=0;
         while(ind<=to_ind){
-            homeds::blob kb;
-            get_var_node_header()->m_available_space += get_nth_key_len(ind);
-            get_var_node_header()->m_available_space += get_nth_value_len(ind);
-            get_var_node_header()->m_available_space += recSize;
+            sizeToClaim += get_nth_key_len(ind)+ get_nth_value_len(ind)+ recSize;
             ind++;
         }
-        compact();
+        get_var_node_header()->m_available_space+=sizeToClaim;
+        LOGDEBUG("Available space claimed:{}",sizeToClaim);
+        
+        int count = to_ind - from_ind + 1;
+        uint8_t *rec_ptr = get_nth_record_mutable(from_ind);
+        memmove(rec_ptr, rec_ptr + (get_record_size() * count), (this->get_total_entries() - to_ind - 1) * get_record_size());
+
+        this->sub_entries(count);
         
         this->inc_gen();
     }
@@ -551,7 +556,6 @@ private:
      * so that available space == tail arena space
      * */
     void compact() {
-        LOGINFO("----Compaction begins----");
 
         // temp ds to sort records in stack space 
         struct Record{
@@ -575,14 +579,15 @@ private:
                   [](Record const & a, Record const & b) -> bool
                   { return b.m_obj_offset < a.m_obj_offset; } );
 
-        uint16_t last_offset= NodeSize;
+        uint16_t last_offset= get_var_node_header()->m_init_available_space;
 
         ind=0;
+        uint16_t sparce_space =0;
         //loop records 
         while (ind < no_of_entries) {
             uint16_t total_key_value_len = get_nth_key_len(rec[ind].orig_record_index)
                                            + get_nth_value_len(rec[ind].orig_record_index);
-            uint16_t sparce_space = last_offset- (rec[ind].m_obj_offset+ total_key_value_len);
+            sparce_space = last_offset- (rec[ind].m_obj_offset+ total_key_value_len);
             if(sparce_space>0){
                 //do compaction
                 uint8_t *old_key_ptr = (uint8_t *)get_nth_obj(rec[ind].orig_record_index);
@@ -594,14 +599,14 @@ private:
                 rec_ptr->m_obj_offset+=sparce_space;
 
                 last_offset = rec_ptr->m_obj_offset;
-                LOGINFO("sparse space reclaimed:{}",sparce_space);
+               
             }else {
                 last_offset = rec[ind].m_obj_offset;
             }
             ind++;
         }
         get_var_node_header()->m_tail_arena_offset = last_offset;
-        LOGINFO("----Compaction finished----");
+        LOGDEBUG("Sparse space reclaimed:{}",sparce_space);
     }
 
     // See template specialization below for each nodetype
