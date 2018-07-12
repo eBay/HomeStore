@@ -9,7 +9,7 @@
 #include <benchmark/benchmark.h>
 #include <boost/range/irange.hpp>
 
-SDS_LOGGING_INIT(base)
+SDS_LOGGING_INIT()
 
 using namespace std;
 
@@ -162,9 +162,11 @@ int main(int argc, char** argv)
 BENCHMARK(test_insert)->Range(TEST_COUNT, TEST_COUNT)->Iterations(ITERATIONS)->Threads(THREADS);
 BENCHMARK(test_reads)->Range(TEST_COUNT, TEST_COUNT)->Iterations(ITERATIONS)->Threads(THREADS);
 
+SDS_OPTIONS_ENABLE(logging)
 int main(int argc, char** argv)
 {
-    sds_logging::SetLogger(spdlog::stdout_color_mt("test_hashset"), spdlog::level::debug);
+    SDS_OPTIONS_LOAD(argc, argv, logging)
+    sds_logging::SetLogger(spdlog::stdout_color_mt("test_hashset"));
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
     setup(TEST_COUNT * THREADS);
     ::benchmark::Initialize(&argc, argv);

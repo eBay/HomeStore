@@ -11,7 +11,7 @@
 #include "device/virtual_dev.hpp"
 #include "homeds/btree/mem_btree.hpp"
 
-SDS_LOGGING_INIT(base, VMOD_BTREE_MERGE, VMOD_BTREE_SPLIT)
+SDS_LOGGING_INIT(VMOD_BTREE_MERGE, VMOD_BTREE_SPLIT)
 
 #define MAX_CACHE_SIZE     2 * 1024 * 1024 * 1024
 using namespace std;
@@ -401,8 +401,11 @@ TEST_F(BtreeCrudTest, SimpleInsert) {
     EXPECT_EQ(m_bt->get_stats().get_interior_nodes_count(), 0u);
 }
 
+SDS_OPTIONS_ENABLE(logging)
+
 int main(int argc, char *argv[]) {
-    sds_logging::SetLogger(spdlog::stdout_color_mt("test_btree_crud"), spdlog::level::debug);
+    SDS_OPTIONS_LOAD(argc, argv, logging)
+    sds_logging::SetLogger(spdlog::stdout_color_mt("test_btree_crud"));
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 
     //setup_devices(2);

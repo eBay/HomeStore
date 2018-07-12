@@ -13,7 +13,7 @@
 #include <boost/intrusive_ptr.hpp>
 #include "cache.cpp"
 
-SDS_LOGGING_INIT(base, cache_vmod_evict, cache_vmod_write);
+SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write);
 
 using namespace std;
 
@@ -149,9 +149,12 @@ BENCHMARK(test_reads)->Range(TEST_COUNT, TEST_COUNT)->Iterations(ITERATIONS)->Th
 BENCHMARK(test_updates)->Range(TEST_COUNT, TEST_COUNT)->Iterations(ITERATIONS)->Threads(THREADS);
 BENCHMARK(test_erase)->Range(TEST_COUNT, TEST_COUNT)->Iterations(ITERATIONS)->Threads(THREADS);
 
+SDS_OPTIONS_ENABLE(logging)
+
 int main(int argc, char** argv)
 {
-    sds_logging::SetLogger(spdlog::stdout_color_mt("perf_cache"), spdlog::level::debug);
+    SDS_OPTIONS_LOAD(argc, argv, logging)
+    sds_logging::SetLogger(spdlog::stdout_color_mt("perf_cache"));
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
     setup(TEST_COUNT * THREADS);
     ::benchmark::Initialize(&argc, argv);

@@ -9,6 +9,7 @@ extern "C" {
 }
 #include <atomic>
 #include <iostream>
+#include <vector>
 		
 #include <iomgr/iomgr.hpp>
 #include <sds_logging/logging.h>
@@ -16,21 +17,17 @@ extern "C" {
 #include "device/device.h"
 #include "device/virtual_dev.hpp"
 #include "volume.hpp"
-#include "boost/program_options.hpp"
 #include <condition_variable>
 
 using namespace std; 
 using namespace homestore;
 using namespace homeio;
-namespace po = boost::program_options;
-
-
 
 static size_t const page_size = sysconf(_SC_PAGESIZE);
 
 using log_level = spdlog::level::level_enum;
 
-SDS_LOGGING_INIT(base, cache_vmod_evict, cache_vmod_write, iomgr, VMOD_BTREE_MERGE, VMOD_BTREE_SPLIT)
+SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write, iomgr, VMOD_BTREE_MERGE, VMOD_BTREE_SPLIT)
 
 homestore::DeviceManager *dev_mgr = nullptr;
 std::shared_ptr<homestore::Volume> vol;
@@ -216,34 +213,45 @@ class test_ep : iomgr::EndPoint {
 
 thread_local test_ep::thread_info test_ep::info = {0};
 
+SDS_OPTION_GROUP(test_volume, (is_read, "", "is_read", "serial read", ::cxxopts::value<bool>(), ""), \
+                              (is_rand_read, "", "is_random_read", "random read", ::cxxopts::value<bool>(), ""), \
+                              (is_write, "", "is_write", "serial write", ::cxxopts::value<bool>(), ""), \
+                              (is_rand_write, "", "is_random_write", "random write", ::cxxopts::value<bool>(), ""), \
+                              (device_list, "c", "device_list", "List of device paths", ::cxxopts::value<std::vector<std::string>>(), "path [...]"), \
+                              (max_vol_size, "", "max_vol_size", "max volume size", ::cxxopts::value<uint64_t>()->default_value("1073741824"), "bytes"))
+SDS_OPTIONS_ENABLE(logging, test_volume)
+
+
 int main(int argc, char** argv) {
-   std::vector<std::string> dev_names;
-    // Declare the supported options.
-    po::options_description desc("Allowed options");
-    desc.add_options()
-            ("is_random_read", "enable random read")
-            ("is_random_write", "enable random write")
-            ("is_read", "enable read")
-            ("is_write", "enable write")
-            ("c", po::value< vector<string> >(&dev_names)->required(), "device list")
-            ("max_vol_size", po::value< uint64_t >(&max_vol_size), "max volume size in bytes");
+   spdlog::set_async_mode(4096, spdlog::async_overflow_policy::block_retry, nullptr, std::chrono::seconds(2));
+   SDS_OPTIONS_LOAD(argc, argv, logging, test_volume)
+   SDS_OPTIONS.parse_positional("device_list");
 
-    po::variables_map vm;
-    po::store(po::parse_command_line(argc, argv, desc), vm);
-    po::notify(vm);
+   sds_logging::SetLogger(spdlog::stdout_color_mt("test_volume"));
+   spdlog::set_pattern("[%D %T.%f%z] [%^%l%$] [%t] %v");
 
-    if (vm.count("is_random_read")) {
+   if (0 == SDS_OPTIONS.count("device_list")) {
+      LOGERROR("Need at least one device listed.");
+      exit(-1);
+   }
+   auto dev_names = SDS_OPTIONS["device_list"].as<std::vector<std::string>>();
+
+
+    if (SDS_OPTIONS.count("is_random_read")) {
         is_random_read = true;
     }
-    if (vm.count("is_random_write")) {
+    if (SDS_OPTIONS.count("is_random_write")) {
         is_random_write = true;
     }
-    if (vm.count("is_read")) {
+    if (SDS_OPTIONS.count("is_read")) {
         is_read = true;
     }
-    if (vm.count("is_write")) {
+    if (SDS_OPTIONS.count("is_write")) {
         is_write = true;
     }
+   if (SDS_OPTIONS.count("max_vol_size")) {
+      max_vol_size = SDS_OPTIONS["max_vol_size"].as<uint64_t>();
+   }
     if(is_random_read && is_random_write){
         cout << "Random read supported only with sequential write!";
         return 1;
@@ -251,10 +259,6 @@ int main(int argc, char** argv) {
         cout << "Read is not supported with random write!";
         return 1;
     }
-
-   spdlog::set_async_mode(4096, spdlog::async_overflow_policy::block_retry, nullptr, std::chrono::seconds(2));
-   sds_logging::SetLogger(spdlog::stdout_color_mt("test_volume"), log_level::debug);
-   spdlog::set_pattern("[%D %T.%f%z] [%^%l%$] [%t] %v");
 
    /* create iomgr */
    iomgr::ioMgr iomgr(2, MAX_THREADS);

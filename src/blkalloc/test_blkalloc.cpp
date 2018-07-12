@@ -7,7 +7,7 @@
 #include "blk_allocator.h"
 #include "varsize_blk_allocator.h"
 
-SDS_LOGGING_INIT(base, VMOD_BTREE_MERGE, VMOD_BTREE_SPLIT)
+SDS_LOGGING_INIT(VMOD_BTREE_MERGE, VMOD_BTREE_SPLIT)
 
 using namespace std;
 using namespace homestore;
@@ -211,9 +211,12 @@ TEST_F(VarsizeBlkAllocatorTest, alloc_free_test) {
     LOGINFO("VarsizeBlkAllocator test done");
 }
 
+SDS_OPTIONS_ENABLE(logging)
+
 int main(int argc, char *argv[]) {
+    SDS_OPTIONS_LOAD(argc, argv, logging)
     testing::InitGoogleTest(&argc, argv);
-    sds_logging::SetLogger(spdlog::stdout_color_mt("test_blkalloc"), spdlog::level::debug);
+    sds_logging::SetLogger(spdlog::stdout_color_mt("test_blkalloc"));
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
     return RUN_ALL_TESTS();
 }

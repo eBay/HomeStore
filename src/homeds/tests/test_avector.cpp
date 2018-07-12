@@ -6,7 +6,7 @@
 #include <sds_logging/logging.h>
 #include "homeds/array/sparse_vector.hpp"
 
-SDS_LOGGING_INIT(base, cache_vmod_evict, cache_vmod_write)
+SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write)
 
 void func(const homeds::sparse_vector<int> &cvec) {
     LOGINFO("vec.at(1) = {}", cvec.at(1));
@@ -18,8 +18,10 @@ void func(const homeds::sparse_vector<int> &cvec) {
     LOGINFO("vec[6] = {} Vector size = {}", cvec[6], cvec.size());
 }
 
+SDS_OPTIONS_ENABLE(logging)
 int main(int argc, char *argv[]) {
-    sds_logging::SetLogger(spdlog::stdout_color_mt("test_avector"), spdlog::level::debug);
+    SDS_OPTIONS_LOAD(argc, argv, logging)
+    sds_logging::SetLogger(spdlog::stdout_color_mt("test_avector"));
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 
     homeds::sparse_vector<int> vec;

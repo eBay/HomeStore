@@ -9,7 +9,7 @@
 #include <cstring>
 #include "cache.cpp"
 
-SDS_LOGGING_INIT(base, cache_vmod_evict, cache_vmod_write);
+SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write);
 
 struct blk_id {
     static homeds::blob get_blob(const blk_id &id) {
@@ -109,9 +109,12 @@ TEST_F(CacheTest, InsertGet) {
     LOGINFO("Cache Stats: \n{}", this->m_cache->get_stats().to_string());
 }
 
+SDS_OPTIONS_ENABLE(logging)
+
 int main(int argc, char *argv[]) {
+    SDS_OPTIONS_LOAD(argc, argv, logging)
     testing::InitGoogleTest(&argc, argv);
-    sds_logging::SetLogger(spdlog::stdout_color_mt("test_cache"), spdlog::level::debug);
+    sds_logging::SetLogger(spdlog::stdout_color_mt("test_cache"));
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
     return RUN_ALL_TESTS();
 }
