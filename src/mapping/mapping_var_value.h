@@ -10,19 +10,21 @@ using namespace homestore;
 using namespace homeds::btree;
 
 #define Sorted_Dynamic_Array_Impl Sorted_Dynamic_Array<BlkId,3, 80, 20>
-        
+
 class MappingKey : public homeds::btree::BtreeKey {
 private:
     uint64_t blob;
     uint64_t *ptr_blob;
 public:
-    MappingKey(){}
+    MappingKey() {}
+
     MappingKey(uint64_t _blob) {
         blob = _blob;
         ptr_blob = &blob;
     }
+
     int compare(const BtreeKey *o) const override {
-        MappingKey *key = (MappingKey *)o;
+        MappingKey *key = (MappingKey *) o;
         if (*ptr_blob < *key->ptr_blob) {
             return -1;
         } else if (*ptr_blob > *key->ptr_blob) {
@@ -31,31 +33,40 @@ public:
             return 0;
         }
     }
+
     virtual homeds::blob get_blob() const override {
         homeds::blob b = {(uint8_t *) ptr_blob, sizeof(blob)};
         return b;
     }
+
     virtual void set_blob(const homeds::blob &b) override {
-        ptr_blob = (uint64_t *)b.bytes;
+        ptr_blob = (uint64_t *) b.bytes;
     }
+
     virtual void copy_blob(const homeds::blob &b) override {
         memcpy(ptr_blob, b.bytes, b.size);
     }
+
     virtual uint32_t get_blob_size() const override {
         return (sizeof(*ptr_blob));
     }
+
     virtual void set_blob_size(uint32_t size) override {
     }
+
     static uint32_t get_fixed_size() {
         return sizeof(blob);
     }
+
     uint64_t get_value() {
         return blob;
     }
+
     int compare_range(const BtreeSearchRange &range) const override {
         return 0;
     }
-    std::string to_string() const  {
+
+    std::string to_string() const {
         return (std::to_string(*ptr_blob));
     }
 };
@@ -64,41 +75,50 @@ class MappingValue : public homeds::btree::BtreeValue {
     // grow 20% on 80% load with inital size as 3
     Sorted_Dynamic_Array_Impl dyna_arr;
 public:
-    MappingValue():dyna_arr() {
+    MappingValue() : dyna_arr() {
     };
+
     virtual homeds::blob get_blob() const override {
         homeds::blob b;
-        b.bytes = (uint8_t *)dyna_arr.get_mem(); b.size = dyna_arr.get_size();
+        b.bytes = (uint8_t *) dyna_arr.get_mem();
+        b.size = dyna_arr.get_size();
         return b;
     }
+
     virtual void set_blob(const homeds::blob &b) override {
-        dyna_arr.set_mem((void *)(b.bytes), b.size);
+        dyna_arr.set_mem((void *) (b.bytes), b.size);
     }
+
     virtual void copy_blob(const homeds::blob &b) override {
-        dyna_arr = Sorted_Dynamic_Array_Impl( b.bytes,b.size);
+        dyna_arr = Sorted_Dynamic_Array_Impl(b.bytes, b.size);
     }
+
     virtual void append_blob(const BtreeValue &new_val) override {
-       assert( ( (const Sorted_Dynamic_Array_Impl &)new_val).get_no_of_elements()==1);
-       dyna_arr.add ( ( (const Sorted_Dynamic_Array_Impl &)new_val)[0] );
+        assert(((const MappingValue &)new_val).dyna_arr.get_no_of_elements()==1);
+        dyna_arr.add(((const MappingValue &)new_val).dyna_arr[0]);
     }
+
     virtual uint32_t get_blob_size() const override {
         return dyna_arr.get_size();
     }
+
     virtual void set_blob_size(uint32_t size) override {
         assert(0);
     }
+
     struct BlkId get_val(uint64_t lba, uint32_t nblks,
                          std::vector<BlkId> &blkIdList) {
         return nullptr;
     }
-    std::string to_string() const  {
+
+    std::string to_string() const {
         return dyna_arr.get_string_representation();
     }
 };
 
 #define MappingBtreeDeclType     homeds::btree::Btree<homeds::btree::SSD_BTREE, MappingKey, MappingValue, \
                                     homeds::btree::BTREE_NODETYPE_VAR_VALUE, homeds::btree::BTREE_NODETYPE_VAR_VALUE, 4096u>
-#define KEY_RANGE	1
+#define KEY_RANGE    1
 constexpr auto MAP_BLOCK_SIZE = (4 * 1024ul);
 
 namespace homestore {
@@ -106,12 +126,13 @@ namespace homestore {
         uint64_t lba;
         BlkId blkId;
         bool blkid_found;
-        lba_BlkId_mapping():lba(0),blkId(0),blkid_found(false){};
+
+        lba_BlkId_mapping() : lba(0), blkId(0), blkid_found(false) {};
     };
 }
 
 class mapping {
-    typedef std::function< void (struct BlkId blkid) > free_blk_callback;
+    typedef std::function<void(struct BlkId blkid)> free_blk_callback;
 private:
     MappingBtreeDeclType *m_bt;
 
@@ -122,31 +143,31 @@ private:
 
     free_blk_callback free_blk_cb;
 public:
-    mapping(uint32_t volsize, free_blk_callback cb, DeviceManager *mgr) :  free_blk_cb(cb) {
+    mapping(uint32_t volsize, free_blk_callback cb, DeviceManager *mgr) : free_blk_cb(cb) {
 
         homeds::btree::BtreeConfig btree_cfg;
-        btree_cfg.set_max_objs(volsize/(KEY_RANGE*MAP_BLOCK_SIZE));
+        btree_cfg.set_max_objs(volsize / (KEY_RANGE * MAP_BLOCK_SIZE));
         btree_cfg.set_max_key_size(sizeof(MappingKey));
         btree_cfg.set_max_value_size(sizeof(MappingValue));
 
         //TODO: we want to initialize btree_device_info only in case of SSD tree
 
         // Create a global cache entry
-        homestore::Cache< BlkId > *glob_cache = new homestore::Cache< homestore::BlkId >(MAX_CACHE_SIZE, MAP_BLOCK_SIZE);
+        homestore::Cache<BlkId> *glob_cache = new homestore::Cache<homestore::BlkId>(MAX_CACHE_SIZE, MAP_BLOCK_SIZE);
         assert(glob_cache);
 
 
         homeds::btree::btree_device_info bt_dev_info;
         bt_dev_info.new_device = true;
         bt_dev_info.dev_mgr = mgr;
-        bt_dev_info.size= 512 * Mi;
+        bt_dev_info.size = 512 * Mi;
         bt_dev_info.cache = glob_cache;
         bt_dev_info.vb = nullptr;
         m_bt = MappingBtreeDeclType::create_btree(btree_cfg, &bt_dev_info);
     }
 
     MappingKey get_key(uint32_t lba) {
-        MappingKey key(lba/KEY_RANGE);
+        MappingKey key(lba / KEY_RANGE);
         return key;
     }
 
@@ -188,7 +209,7 @@ public:
         uint64_t key;
 
         while (nblks != 0) {
-            homestore::lba_BlkId_mapping* mapping = new struct homestore::lba_BlkId_mapping();
+            homestore::lba_BlkId_mapping *mapping = new struct homestore::lba_BlkId_mapping();
             mapping->lba = lba;
             MappingValue value;
 
@@ -221,11 +242,11 @@ public:
             }
         }
 
-        if(!atleast_one_lba_found){
+        if (!atleast_one_lba_found) {
             mappingList.empty();
             error = homestore::make_error_condition(
                     homestore_error::lba_not_exist);
-        }else if(atleast_one_lba_not_found){
+        } else if (atleast_one_lba_not_found) {
             error = homestore::make_error_condition(
                     homestore_error::partial_lba_not_exist);
         }
