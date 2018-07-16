@@ -3,16 +3,17 @@
 #include <blkalloc/blk.h>
 #include <csignal>
 #include <error/error.h>
-#include <homeds/array/dynamic_array.h>
+#include <homeds/array/sorted_dynamic_array.h>
 
 using namespace std;
 using namespace homestore;
 using namespace homeds::btree;
 
-#define Sorted_Dynamic_Array_Impl Sorted_Dynamic_Array<BlkId,3, 80, 20>
+#define Sorted_Dynamic_Array_Impl Sorted_Dynamic_Array<BlkId, 80, 20>
 
 class MappingKey : public homeds::btree::BtreeKey {
 private:
+    uint64_t lba_range;
     uint64_t blob;
     uint64_t *ptr_blob;
 public:
@@ -72,10 +73,11 @@ public:
 };
 
 class MappingValue : public homeds::btree::BtreeValue {
-    // grow 20% on 80% load with inital size as 3
+    // grow 20% on 80% load 
     Sorted_Dynamic_Array_Impl dyna_arr;
 public:
-    MappingValue() : dyna_arr() {
+    //initial size to 3
+    MappingValue() : dyna_arr(3) {
     };
 
     virtual homeds::blob get_blob() const override {
@@ -94,8 +96,8 @@ public:
     }
 
     virtual void append_blob(const BtreeValue &new_val) override {
-        assert(((const MappingValue &)new_val).dyna_arr.get_no_of_elements()==1);
-        dyna_arr.add(((const MappingValue &)new_val).dyna_arr[0]);
+        assert(((const MappingValue &)new_val).dyna_arr.get_no_of_elements_filled()==1);
+        dyna_arr.addOrUpdate(((const MappingValue &)new_val).dyna_arr[0]);
     }
 
     virtual uint32_t get_blob_size() const override {
@@ -106,9 +108,9 @@ public:
         assert(0);
     }
 
-    struct BlkId get_val(uint64_t lba, uint32_t nblks,
+    struct BlkId get(uint64_t lba, uint32_t nblks,
                          std::vector<BlkId> &blkIdList) {
-        return nullptr;
+        return dyna_arr.get;
     }
 
     std::string to_string() const {
@@ -203,6 +205,27 @@ public:
 
     std::error_condition get(uint64_t lba, uint32_t nblks,
                              std::vector<struct homestore::lba_BlkId_mapping> &mappingList) {
+
+        uint32_t key;
+
+        while (nblks != 0) {
+            MappingValue value;
+
+            key = get_key(lba).get_value();
+            m_bt->get(get_key(lba), &value);
+            uint32_t maxBlkRead = KEY_RANGE - (lba - key);
+
+            if (maxBlkRead >= nblks) {
+                value.get_val(lba, nblks, blkIdList);
+                nblks = 0;
+            } else {
+                value.get_val(lba, maxBlkRead, blkIdList);
+                nblks = nblks - maxBlkRead;
+                lba = lba + maxBlkRead;
+            }
+        }
+        return 0;
+        
         std::error_condition error = no_error;
         bool atleast_one_lba_found = false;
         bool atleast_one_lba_not_found = false;
@@ -223,7 +246,7 @@ public:
                 continue;
             }
             atleast_one_lba_found = true;
-            mapping->blkId = value.get_val();
+            mapping->blkId = value.get_val(lba,nblks,);
             mapping->blkid_found = true;
 
             uint32_t maxBlkRead = KEY_RANGE - (lba - (key * KEY_RANGE));

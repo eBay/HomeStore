@@ -70,3 +70,12 @@ add_executable(test_avector
                 )
 target_link_libraries(test_avector ${COMMON_LIB_DEPS} folly)
 add_test(NAME Avector COMMAND test_avector)
+
+set(TEST_SORTED_DYNAMIC_ARRAY_SOURCE_FILES
+        tests/test_sorted_dynamic_array.cpp
+        )
+add_executable(test_sorted_dynamic_array
+        ${TEST_SORTED_DYNAMIC_ARRAY_SOURCE_FILES}
+        )
+target_link_libraries(test_sorted_dynamic_array ${COMMON_LIB_DEPS} folly)
+add_test(NAME SortedDynamicArray COMMAND test_sorted_dynamic_array)

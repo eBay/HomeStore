@@ -5,7 +5,7 @@
 #ifndef SORTED_DYNAMIC_ARRAY_DS_H_
 #define SORTED_DYNAMIC_ARRAY_DS_H_
 
-#define SortedDynamicArrayType typename ElementType, int LOAD_PERCENT, int GROWTH_PERCENT
+#define SortedDynamicArrayType typename ElementType, uint8_t LOAD_PERCENT, uint8_t GROWTH_PERCENT
 #define SortedDynamicArrayTypeParams ElementType, LOAD_PERCENT, GROWTH_PERCENT
 
 #include <stdint.h>
@@ -31,31 +31,33 @@ namespace homeds {
 
     public:
         //allocates new memory for no_of elements
-        Sorted_Dynamic_Array(int no_of_elements_capacity);
+        Sorted_Dynamic_Array(uint32_t no_of_elements_capacity);
 
         //Copy constructor
         Sorted_Dynamic_Array(void *array, uint64_t size);
 
         ~Sorted_Dynamic_Array();
 
-        //add element into array
-        void addOrUpdate(ElementType &element);
+        ElementType* get(ElementType* element);
+
+        //add element into array - returns true if added, false if just updated
+        bool addOrUpdate(ElementType* element);
 
         //removes element into array
-        void removeIfPresent(ElementType &element);
+        void removeIfPresent(ElementType* element);
 
-        int get_size() const;
+        uint32_t get_size() const;
 
         //view only - index based access
-        ElementType operator[](int pos);
+        ElementType operator[](uint32_t pos);
 
         ElementType *get_mem(void) const;
 
         void set_mem(void *array, uint64_t size);
 
-        int get_no_of_elements_filled() const;
+        uint32_t get_no_of_elements_filled() const;
 
-        int get_no_of_elements_total() const;
+        uint32_t get_no_of_elements_total() const;
 
         enum exception {
             MEMFAIL
@@ -78,7 +80,7 @@ namespace homeds {
         uint64_t m_size; // total size(no of bytes) of array including non-filled elements
         header *m_header; // pointer to header
         ElementType *m_elements; // pointer to first element in array
-        int sizeOfElement = sizeof(ElementType);
+        uint32_t sizeOfElement = sizeof(ElementType);
         uint32_t m_no_of_elements_total;// total # of elements
 
         //----Transient derieved member - END   ----//
@@ -90,27 +92,27 @@ namespace homeds {
         bool is_resize_required();
 
         //right shifts all elements from pos to pos+1. And sets element at pos.
-        void insert_shift(int pos, ElementType element);
+        void insert_shift(uint32_t pos, ElementType* element);
 
         //removes element at pos and left shifts all succeding elements
-        void remove_shift(int pos);
+        void remove_shift(uint32_t pos);
 
         // if found - returns +ve index of element
         // if not found - returns -ve index where element should be inserted
-        int binary_search(ElementType &element);
+        uint32_t binary_search(ElementType* element);
 
         //update element in place
-        void update(int pos, ElementType element);
+        void update(uint32_t pos, ElementType* element);
 
     };
 
     template<SortedDynamicArrayType>
-    Sorted_Dynamic_Array<SortedDynamicArrayTypeParams>::Sorted_Dynamic_Array(int no_of_elements_capacity) {
+    Sorted_Dynamic_Array<SortedDynamicArrayTypeParams>::Sorted_Dynamic_Array(uint32_t no_of_elements_capacity) {
         m_size = sizeof(struct header) + no_of_elements_capacity * sizeOfElement;
         m_mem = malloc(m_size);
         m_header = static_cast<header *>(m_mem);
         m_header->m_no_of_elements_filled = 0;
-        m_elements = m_mem + sizeof(struct header);
+        m_elements = (ElementType *) ((uint8_t *) m_mem + sizeof(struct header));
         m_no_of_elements_total = no_of_elements_capacity;
     }
 
@@ -121,7 +123,7 @@ namespace homeds {
         memcpy(m_mem, mem, size);
         m_size = size;
         m_header = static_cast<header *>(m_mem);
-        m_elements = m_mem + sizeof(struct header);
+        m_elements = (ElementType *) ((uint8_t *) m_mem + sizeof(struct header));
         m_no_of_elements_total = (size - sizeof(struct header)) / sizeOfElement;
     }
 
@@ -131,7 +133,7 @@ namespace homeds {
         m_mem = mem;
         m_size = size;
         m_header = static_cast<header *>(m_mem);
-        m_elements = m_mem + sizeof(struct header);
+        m_elements = (ElementType *) ((uint8_t *) m_mem + sizeof(struct header));
         m_no_of_elements_total = (size - sizeof(struct header)) / sizeOfElement;
     }
 
@@ -139,53 +141,56 @@ namespace homeds {
     Sorted_Dynamic_Array<SortedDynamicArrayTypeParams>::~Sorted_Dynamic_Array() {
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
         if (m_mem) {
-            m_header = m_elements = NULL;
+            m_header = NULL;
+            m_elements = NULL;
             free(m_mem);
             m_mem = NULL;
         }
     }
 
     template<SortedDynamicArrayType>
-    int
+    uint32_t 
     Sorted_Dynamic_Array<SortedDynamicArrayTypeParams>::get_size() const {
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
         return m_size;
     }
 
     template<SortedDynamicArrayType>
-    int
+    uint32_t
     Sorted_Dynamic_Array<SortedDynamicArrayTypeParams>::get_no_of_elements_filled() const {
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
         return m_header->m_no_of_elements_filled;
     }
 
     template<SortedDynamicArrayType>
-    int
+    uint32_t
     Sorted_Dynamic_Array<SortedDynamicArrayTypeParams>::get_no_of_elements_total() const {
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
         return m_no_of_elements_total;
     }
 
     template<SortedDynamicArrayType>
-    void
-    Sorted_Dynamic_Array<SortedDynamicArrayTypeParams>::addOrUpdate(ElementType &element) {
+    bool
+    Sorted_Dynamic_Array<SortedDynamicArrayTypeParams>::addOrUpdate(ElementType* element) {
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
-        int pos = binary_search(element);
+        uint32_t pos = binary_search(element);
         pos < 0 ? insert_shift(-pos, element) : update(pos, element);
+        if (pos < 0)return true;
+        else return false;
     }
 
     template<SortedDynamicArrayType>
     void
-    Sorted_Dynamic_Array<SortedDynamicArrayTypeParams>::removeIfPresent(ElementType &element) {
+    Sorted_Dynamic_Array<SortedDynamicArrayTypeParams>::removeIfPresent(ElementType* element) {
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
-        int pos = binary_search(element);
+        uint32_t pos = binary_search(element);
         if (pos > 0)
             remove_shift(pos);
     }
 
     template<SortedDynamicArrayType>
     ElementType
-    Sorted_Dynamic_Array<SortedDynamicArrayTypeParams>::operator[](int pos) {
+    Sorted_Dynamic_Array<SortedDynamicArrayTypeParams>::operator[](uint32_t pos) {
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
         if (pos >= m_header->m_no_of_elements_filled || pos < 0) assert(0);
         return (ElementType) (m_mem + pos * sizeOfElement);//copy so read only
@@ -203,8 +208,8 @@ namespace homeds {
     void
     Sorted_Dynamic_Array<SortedDynamicArrayTypeParams>::resize_array() {
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
-        int no_of_new_elements = m_no_of_elements_total * GROWTH_PERCENT / 100;
-        int new_size = m_size + no_of_new_elements * sizeOfElement;
+        uint32_t no_of_new_elements = m_no_of_elements_total * GROWTH_PERCENT / 100;
+        uint32_t new_size = m_size + no_of_new_elements * sizeOfElement;
         ElementType *mem = (ElementType *) malloc(new_size);
         memcpy(mem, m_mem, m_size);
         free(m_mem);
@@ -214,16 +219,17 @@ namespace homeds {
     }
 
     template<SortedDynamicArrayType>
-    int
-    Sorted_Dynamic_Array<SortedDynamicArrayTypeParams>::binary_search(ElementType &element) {
+    uint32_t
+    Sorted_Dynamic_Array<SortedDynamicArrayTypeParams>::binary_search(ElementType* element) {
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
-        int s = 0, e = m_header->m_no_of_elements_filled;
+        if(m_header->m_no_of_elements_filled==0)return 0;
+        uint32_t s = 0, e = m_header->m_no_of_elements_filled-1;
         while (s <= e) {
-            int m = (s + e) >> 2;
+            uint32_t m = (s + e) >> 2;
             ElementType *middle = m_elements + m;
-            if (element < *middle) {
+            if (*element < *middle) {
                 e = m - 1;
-            } else if (element > *middle) {
+            } else if (*element > *middle) {
                 s = m + 1;
             } else {
                 return m;
@@ -234,7 +240,7 @@ namespace homeds {
 
     template<SortedDynamicArrayType>
     void
-    Sorted_Dynamic_Array<SortedDynamicArrayTypeParams>::remove_shift(int pos) {
+    Sorted_Dynamic_Array<SortedDynamicArrayTypeParams>::remove_shift(uint32_t pos) {
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
         if (pos >= m_header->m_no_of_elements_filled || pos < 0) assert(0);
         memmove(m_elements + pos, m_elements + pos + 1,
@@ -244,7 +250,7 @@ namespace homeds {
 
     template<SortedDynamicArrayType>
     void
-    Sorted_Dynamic_Array<SortedDynamicArrayTypeParams>::insert_shift(int pos, ElementType &element) {
+    Sorted_Dynamic_Array<SortedDynamicArrayTypeParams>::insert_shift(uint32_t pos, ElementType *element) {
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
         if (pos >= m_header->m_no_of_elements_filled || pos < 0) assert(0);
         if (is_resize_required()) {
@@ -253,14 +259,14 @@ namespace homeds {
         memmove(m_elements + pos + 1, m_elements + pos, m_header->m_no_of_elements_filled - pos);
         m_header->m_no_of_elements_filled++;
 
-        memcpy(m_elements + pos, element, sizeOfElement);
+        memcpy((void*)(m_elements + pos), (void*)element, sizeOfElement);
     }
 
     template<SortedDynamicArrayType>
     void
-    Sorted_Dynamic_Array<SortedDynamicArrayTypeParams>::update(int pos, ElementType &element) {
+    Sorted_Dynamic_Array<SortedDynamicArrayTypeParams>::update(uint32_t pos, ElementType *element) {
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
-        memcpy(m_elements + pos, element, sizeOfElement);
+        memcpy((void*)(m_elements + pos), (void*)element, sizeOfElement);
     }
 
     template<SortedDynamicArrayType>
@@ -273,7 +279,7 @@ namespace homeds {
     std::string
     Sorted_Dynamic_Array<SortedDynamicArrayTypeParams>::get_string_representation() const {
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
-        int i = 0;
+        uint32_t i = 0;
         std::stringstream ss;
         ss << "No of elements filled:" << m_header->m_no_of_elements_filled << " out of total "
            << m_no_of_elements_total << ",Elements:";
@@ -285,6 +291,13 @@ namespace homeds {
         }
 
         return ss.str();
+    }
+
+    template<SortedDynamicArrayType>
+    ElementType* Sorted_Dynamic_Array<SortedDynamicArrayTypeParams>::get(ElementType* element) {
+        uint32_t pos = binary_search(element);
+        if (pos < 0) return nullptr;
+        else return m_elements + pos;
     }
 }
 
