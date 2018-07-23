@@ -40,7 +40,7 @@ int main(int argc, char *argv[]) {
         if (taken[to_take]) { continue; }
         taken[to_take] = true;
 
-        assert(sda.addOrUpdate(&to_take));
+        sda.addOrUpdate(&to_take);
 
         elements[i] = to_take;
         i++;

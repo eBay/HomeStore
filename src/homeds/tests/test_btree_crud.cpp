@@ -262,6 +262,10 @@ public:
     bool operator==(const TestSimpleValue &other) const {
         return (m_val == other.m_val);
     }
+
+    uint32_t estimate_size_after_append(const BtreeValue &new_val) override {
+        return sizeof(m_val);
+    }
     uint32_t m_val;
 };
 

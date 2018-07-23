@@ -220,7 +220,7 @@ Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks, volume_req* req) {
 int
 Volume::read(uint64_t lba, int nblks, volume_req* req) {
 
-    std::vector< struct homestore::lba_BlkId_mapping > mappingList;
+    std::vector< struct lba_BlkId_mapping > mappingList;
     req->startTime = Clock::now();
     Clock::time_point startTime = Clock::now();
     req->read_cnt = 0;

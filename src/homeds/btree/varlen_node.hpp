@@ -120,6 +120,8 @@ public:
         uint16_t cur_obj_size = get_nth_obj_size(ind);
 
         if (cur_obj_size >= new_obj_size) {
+            //TODO - we can avoid memcpy if addresses of val_ptr and vblob.bytes is same. In place update
+            //TODO - we can reclaim space if new obj size is lower than cur obj size
             // Same or smaller size update, just copy the value blob
             uint8_t *val_ptr = (uint8_t *)get_nth_obj(ind) + nth_key_len;
             homeds::blob vblob = val.get_blob();
@@ -127,39 +129,18 @@ public:
             this->inc_gen();
             return;
         }
-
-        // Size is increasing, try to allocate in the last arena and move the data there.
-        if (new_obj_size > get_var_node_header()->m_available_space) {
-            // No available space, we shouldn't be here in first place, because split should have been triggered.
-            assert(0);
-            return;
-        }
-
-        // If we don't have enough space in the tail arena area, we need to compact and get the space.
-        if (new_obj_size > get_arena_free_space()) {
-            compact();
-            assert(new_obj_size <= get_arena_free_space()); // Expect after compaction to have available space to insert
-        }
-
-        get_var_node_header()->m_tail_arena_offset -= (new_obj_size);
-        get_var_node_header()->m_available_space -= (new_obj_size - cur_obj_size);
-
-        // Move the key to the new area and copy the value into the new arena.
-        uint8_t *old_key_ptr = (uint8_t *)get_nth_obj(ind);
-        uint8_t *raw_data_ptr = offset_to_ptr_mutable(get_var_node_header()->m_tail_arena_offset);
-        memmove(raw_data_ptr, old_key_ptr, nth_key_len);
-        raw_data_ptr += nth_key_len;
-
-        homeds::blob vblob = val.get_blob();
-        memcpy(raw_data_ptr, vblob.bytes, vblob.size);
-
-        // Finally set the pointer for the record to the where data is just written to.
-        set_record_data_offset(get_nth_record_mutable(ind), get_var_node_header()->m_tail_arena_offset);
-        this->inc_gen();
+        
+        //copy the key for later use
+        K key;
+        get_nth_key(ind,&key,false);
+        
+        remove(ind);
+        insert(ind, key, val);
     }
 
     void update(int ind, const BtreeKey &key, const BtreeValue &val)  {
-        assert(0); // Do we need to implement this at all?
+        update(ind, val);
+        //TODO - When var key comes, we need to implement update method for key also
     }
 
     void remove(int ind)  {
@@ -169,10 +150,13 @@ public:
             this->inc_gen();
             return;
         }
-
+        int recSize = get_record_size();
+        //claim available memory
+        get_var_node_header()->m_available_space += get_nth_key_len(ind)+ get_nth_value_len(ind)+ recSize;
+        
         uint8_t *rec_ptr = get_nth_record_mutable(ind);
-        memmove(rec_ptr, rec_ptr + get_record_size(), (this->get_total_entries() - ind - 1) * get_record_size());
-
+        memmove(rec_ptr, rec_ptr + recSize, (this->get_total_entries() - ind - 1) * recSize);
+        
         this->dec_entries();
         this->inc_gen();
     }
@@ -235,18 +219,23 @@ public:
         V curval;
         uint32_t size_needed;
 
-        auto result = this->find(key, nullptr, &curval);
+        // NOTE : size_needed is just an guess here. Actual implementation of Mapping key/value can have 
+        // specific logic which determines of size changes on insert or update.
+        auto result = this->find(key, nullptr, nullptr/*amdesai - Commented - &curval*/);
         if (!result.found) {
             // We need to insert, this newly. Find out if we have space for value.
             size_needed = key.get_blob_size() + val.get_blob_size() + get_record_size();
         } else {
-            // Its an update, so difference of new value and existing value size
-            size_needed = val.get_blob_size() - get_nth_value_len(result.end_of_search_index);
+            // Its an update, see how much additioanl space needed
+            V existingVal;
+            get(result.end_of_search_index, &existingVal, false);
+            size_needed = existingVal.estimate_size_after_append(val) - get_nth_value_len(result.end_of_search_index);
         }
 
         // TODO: This is the place to check if the free space arena does not have enough space and if available space
         // is less than certain percentage, its better not to compact and just respond to do split.
-        return (size_needed > get_available_size(cfg));
+        uint32_t availSpace = get_available_size(cfg);
+        return (size_needed > availSpace);
     }
 
     uint32_t move_out_to_right_by_entries(const BtreeConfig &cfg, VariableNode* o, uint32_t nentries)  {
@@ -476,7 +465,8 @@ private:
         uint16_t to_insert_size = obj_size + get_record_size();
         if (to_insert_size > get_var_node_header()->m_available_space) {
             // No space to insert.
-              return 0;
+            assert(0);//something went south
+            return 0;
         }
 
         // If we don't have enough space in the tail arena area, we need to compact and get the space.

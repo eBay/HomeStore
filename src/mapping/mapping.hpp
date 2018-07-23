@@ -4,16 +4,81 @@
 #include <csignal>
 #include <error/error.h>
 #include <homeds/array/sorted_dynamic_array.h>
+#include <math.h>
 
 using namespace std;
 using namespace homestore;
 using namespace homeds::btree;
 
-#define Sorted_Dynamic_Array_Impl Sorted_Dynamic_Array<struct value_internal_offset_to_blkid_type, 80, 20>
+#define MappingBtreeDeclType     homeds::btree::Btree<homeds::btree::SSD_BTREE, MappingKey, MappingValue, \
+                                    homeds::btree::BTREE_NODETYPE_VAR_VALUE, homeds::btree::BTREE_NODETYPE_VAR_VALUE, 4096u>
+#define Sorted_Dynamic_Array_Impl Sorted_Dynamic_Array<struct value_internal_offset_to_blkid_type, 80, 20 >
+// MAKE SURE BIT_TO_REPRESENT_MAX_ENTRIES IS SET CORRECTLY BELOW based on estimated MAX_NO_OF_VALUE_ENTRIES
+#define BIT_TO_REPRESENT_MAX_ENTRIES_DECLARE 16;
+
+struct value_internal_offset_to_blkid_type {
+    uint16_t m_offset:BIT_TO_REPRESENT_MAX_ENTRIES_DECLARE;
+    struct BlkId m_blkid;
+
+    value_internal_offset_to_blkid_type(uint64_t offset, struct BlkId blkid) : m_offset(offset), m_blkid(blkid) {}
+
+    bool operator<(struct value_internal_offset_to_blkid_type &other) {
+        if (m_offset < other.m_offset)return true;
+        else return false;
+    }
+
+    bool operator>(struct value_internal_offset_to_blkid_type &other) {
+        if (m_offset > other.m_offset)return true;
+        else return false;
+    }
+
+    bool operator==(struct value_internal_offset_to_blkid_type &other) {
+        if (m_offset == other.m_offset)return true;
+        else return false;
+    }
+
+    std::string to_string() {
+        std::stringstream ss;
+        ss << m_offset << ":" << m_blkid.to_string();
+        return ss.str();
+    };
+
+    operator std::string() { return to_string(); }
+};
+                                    
+constexpr static auto Ki = 1024;
+constexpr static auto Mi = Ki * Ki;
+constexpr static auto Gi = Ki * Mi;
+constexpr static auto MAX_CACHE_SIZE = 2ul * Gi;
+//TODO - templatize mapping and block size should come from template
+constexpr static int MAP_BLOCK_SIZE = (4 * Ki);
+constexpr static int LEAST_NO_OF_OBJECTS_IN_NODE = 3;
+constexpr static int RECORD_SIZE = sizeof(uint32_t);
+constexpr static int KEY_SIZE = sizeof(uint64_t);
+constexpr static int VALUE_HEADER_SIZE = sizeof(uint32_t);
+constexpr static int VALUE_ENTRY_SIZE = sizeof(struct value_internal_offset_to_blkid_type);
+constexpr static int MAX_NO_OF_VALUE_ENTRIES =
+        -1 + (MAP_BLOCK_SIZE - LEAST_NO_OF_OBJECTS_IN_NODE * RECORD_SIZE - LEAST_NO_OF_OBJECTS_IN_NODE * KEY_SIZE) /
+             (VALUE_HEADER_SIZE + LEAST_NO_OF_OBJECTS_IN_NODE * VALUE_ENTRY_SIZE);
+constexpr static int BIT_TO_REPRESENT_MAX_ENTRIES = BIT_TO_REPRESENT_MAX_ENTRIES_DECLARE;
+
+
+struct lba_BlkId_mapping {
+    uint64_t lba;
+    BlkId blkId;
+    bool blkid_found;
+
+    lba_BlkId_mapping() : lba(0), blkId(0), blkid_found(false) {};
+
+    lba_BlkId_mapping(uint64_t lba, BlkId blkId, bool blkid_found) : lba(lba), blkId(blkId),
+                                                                     blkid_found(blkid_found) {};
+};
+
 
 class MappingKey : public homeds::btree::BtreeKey {
 private:
-    //Actual value range for an key is (range_start_offset*KEY_RANGE, range_start_offset*KEY_RANGE + KEY_RANGE -1)
+    //Actual value range for an key is (range_start_offset*MAX_NO_OF_VALUE_ENTRIES, 
+    // range_start_offset*MAX_NO_OF_VALUE_ENTRIES + MAX_NO_OF_VALUE_ENTRIES -1)
     uint64_t range_start_offset; // TODO - compress further if we dont need such big lba numbers
     uint64_t *ptr_range_start_offset;
 public:
@@ -46,6 +111,7 @@ public:
 
     virtual void copy_blob(const homeds::blob &b) override {
         assert(b.size == sizeof(range_start_offset));
+        //TODO - BUG below I think, shoudl be like memcpy( b.bytes,ptr_range_start_offset, b.size);
         memcpy(ptr_range_start_offset, b.bytes, b.size);
     }
 
@@ -73,45 +139,16 @@ public:
     }
 };
 
-
-struct value_internal_offset_to_blkid_type {
-    uint16_t m_offset; // TODO - further compress, we just need 10 bits to represent 1024 entries
-    struct BlkId m_blkid;
-
-    value_internal_offset_to_blkid_type(uint64_t offset, struct BlkId blkid) : m_offset(offset), m_blkid(blkid) {}
-
-    bool operator<(struct lba_blkid &other) {
-        if (m_offset < other.m_offset)return true;
-        else return false;
-    }
-
-    bool operator>(struct m_lba_blkid &other) {
-        if (m_offset > other.m_offset)return true;
-        else return false;
-    }
-
-    bool operator==(struct m_lba_blkid &other) {
-        if (m_offset == other.m_offset)return true;
-        else return false;
-    }
-
-    std::string to_string() {
-        std::stringstream ss;
-        ss << m_offset << ":" << m_blkid.to_string();
-        return ss.str();
-    };
-};
-
 class MappingValue : public homeds::btree::BtreeValue {
     Sorted_Dynamic_Array_Impl *dyna_arr;
 public:
     MappingValue() {
-        dyna_arr = new Sorted_Dynamic_Array_Impl(3);
+        dyna_arr = new Sorted_Dynamic_Array_Impl(0, MAX_NO_OF_VALUE_ENTRIES);
     };
 
     MappingValue(uint16_t offset, struct BlkId _val) :
             homeds::btree::BtreeValue() {
-        dyna_arr = new Sorted_Dynamic_Array_Impl(3);
+        dyna_arr = new Sorted_Dynamic_Array_Impl(5, MAX_NO_OF_VALUE_ENTRIES);
         value_internal_offset_to_blkid_type offset_blkid(offset, _val);
         dyna_arr->addOrUpdate(&offset_blkid);
     };
@@ -129,18 +166,19 @@ public:
     }
 
     virtual void set_blob(const homeds::blob &b) override {
-        dyna_arr->set_mem((void *) (b.bytes), b.size);
+        dyna_arr->set_mem((void *) (b.bytes), b.size, MAX_NO_OF_VALUE_ENTRIES);
     }
 
     virtual void copy_blob(const homeds::blob &b) override {
         delete dyna_arr;
-        dyna_arr = new Sorted_Dynamic_Array_Impl((void *) b.bytes, b.size);
+        dyna_arr = new Sorted_Dynamic_Array_Impl((void *) b.bytes, b.size, MAX_NO_OF_VALUE_ENTRIES);
     }
 
     virtual void append_blob(const BtreeValue &new_val) override {
         //TODO - yet to implement value auto-merge
-        assert(((const MappingValue &) new_val).dyna_arr->get_no_of_elements_filled() == 1);
-        dyna_arr->addOrUpdate(((const MappingValue &) new_val).*dyna_arr[0]);
+        Sorted_Dynamic_Array_Impl *dyna_arr_ptr = ((const MappingValue &) new_val).dyna_arr;
+        assert(dyna_arr_ptr->get_no_of_elements_filled() == 1);
+        dyna_arr->addOrUpdate((*dyna_arr_ptr)[0]);
     }
 
     virtual uint32_t get_blob_size() const override {
@@ -149,6 +187,12 @@ public:
 
     virtual void set_blob_size(uint32_t size) override {
         assert(0);
+    }
+
+    virtual uint32_t estimate_size_after_append(const BtreeValue &new_val) override {
+        Sorted_Dynamic_Array_Impl *dyna_arr_ptr = ((const MappingValue &) new_val).dyna_arr;
+        assert(dyna_arr_ptr->get_no_of_elements_filled() == 1);
+        return dyna_arr->estimate_size_after_addOrUpdate(1);
     }
 
     void get(uint16_t offset, uint32_t nblks,
@@ -162,11 +206,11 @@ public:
         int end = dyna_arr->binary_search(&end_element);
 
         if (start < 0)start = -start + 1;
-        if (start == dyna_arr->get_no_of_elements_filled())start--;
+        if (start == (int) dyna_arr->get_no_of_elements_filled())start--;
         if (end < 0)end = -end + 1;
-        if (end == dyna_arr->get_no_of_elements_filled())end--;
+        if (end == (int) dyna_arr->get_no_of_elements_filled())end--;
         while (start <= end) {
-            offsetToBlkIdLst.push_back(dyna_arr->[start]);
+            offsetToBlkIdLst.push_back(*(*dyna_arr)[start]);
             start++;
         }
     }
@@ -176,42 +220,33 @@ public:
     }
 };
 
-#define MappingBtreeDeclType     homeds::btree::Btree<homeds::btree::SSD_BTREE, MappingKey, MappingValue, \
-                                    homeds::btree::BTREE_NODETYPE_VAR_VALUE, homeds::btree::BTREE_NODETYPE_VAR_VALUE, 4096u>
-#define KEY_RANGE    1000
-constexpr auto MAP_BLOCK_SIZE = (4 * 1024ul);
 
-namespace homestore {
-    struct lba_BlkId_mapping {
-        uint64_t lba;
-        BlkId blkId;
-        bool blkid_found;
-
-        lba_BlkId_mapping() : lba(0), blkId(0), blkid_found(false) {};
-
-        lba_BlkId_mapping(uint64_t lba, BlkId blkId, bool blkid_found) : lba(lba), blkId(blkId),
-                                                                         blkid_found(blkid_found) {};
-    };
-}
+/**
+Below is relational equation:
+ 
+              MAP_BLOCK_SIZE    
+----------------------------------------------------       >=  LEAST_NO_OF_OBJECTS_IN_NODE
+KEY_SIZE * (VALUE_ENTRY_SIZE*MAX_NO_OF_VALUE_ENTRIES)
+ 
+ 
+We would require derieving MAX_NO_OF_VALUE_ENTRIES value since all others are known at runtime.
+ 
+2 ^ BIT_TO_REPRESENT_MAX_ENTRIES >= MAX_NO_OF_VALUE_ENTRIES
+ */
 
 class mapping {
     typedef std::function<void(struct BlkId blkid)> free_blk_callback;
 private:
     MappingBtreeDeclType *m_bt;
 
-    constexpr static auto Ki = 1024;
-    constexpr static auto Mi = Ki * Ki;
-    constexpr static auto Gi = Ki * Mi;
-    constexpr static auto MAX_CACHE_SIZE = 2ul * Gi;
-
     free_blk_callback free_blk_cb;
 public:
     mapping(uint32_t volsize, free_blk_callback cb, DeviceManager *mgr) : free_blk_cb(cb) {
-
+        assert(BIT_TO_REPRESENT_MAX_ENTRIES > log2(MAX_NO_OF_VALUE_ENTRIES));
         homeds::btree::BtreeConfig btree_cfg;
-        btree_cfg.set_max_objs(volsize / (KEY_RANGE * MAP_BLOCK_SIZE));
+        btree_cfg.set_max_objs(volsize / (MAX_NO_OF_VALUE_ENTRIES * MAP_BLOCK_SIZE));
         btree_cfg.set_max_key_size(sizeof(uint32_t));
-        btree_cfg.set_max_value_size(KEY_RANGE * sizeof(value_internal_offset_to_blkid_type));
+        btree_cfg.set_max_value_size(MAX_NO_OF_VALUE_ENTRIES * sizeof(value_internal_offset_to_blkid_type));
 
         // Create a global cache entry
         homestore::Cache<BlkId> *glob_cache = new homestore::Cache<homestore::BlkId>(MAX_CACHE_SIZE, MAP_BLOCK_SIZE);
@@ -227,13 +262,13 @@ public:
     }
 
     void add_lba(uint64_t lba, BlkId blkId, bool found,
-                 std::vector<struct homestore::lba_BlkId_mapping> &mappingList) {
-        homestore::lba_BlkId_mapping *mapping = new struct homestore::lba_BlkId_mapping(lba, blkId, found);
+                 std::vector<struct lba_BlkId_mapping> &mappingList) {
+        lba_BlkId_mapping *mapping = new struct lba_BlkId_mapping(lba, blkId, found);
         mappingList.push_back(*mapping);
     }
 
     void add_dummy_for_missing_mappings(uint64_t start_lba, uint64_t end_lba,
-                                        std::vector<struct homestore::lba_BlkId_mapping> &mappingList) {
+                                        std::vector<struct lba_BlkId_mapping> &mappingList) {
         while (start_lba <= end_lba) {
             add_lba(start_lba, BlkId(0), false, mappingList);
             start_lba++;
@@ -241,16 +276,17 @@ public:
     }
 
     std::error_condition get(uint64_t lba, uint32_t nblks,
-                             std::vector<struct homestore::lba_BlkId_mapping> &mappingList) {
+                             std::vector<struct lba_BlkId_mapping> &mappingList) {
         std::error_condition error = no_error;
         bool atleast_one_lba_found = false;
         bool atleast_one_lba_not_found = false;
 
         //iterate till all blocks are readed
         while (nblks != 0) {
-            int range_offset = lba / KEY_RANGE; // key for btree
-            uint64_t start_lba_for_range = range_offset * KEY_RANGE; // start actual lba for this range
-            uint64_t end_lba_for_range = ((range_offset + 1) * KEY_RANGE) - 1; // end actual lba for this range
+            int range_offset = lba / MAX_NO_OF_VALUE_ENTRIES; // key for btree
+            uint64_t start_lba_for_range = range_offset * MAX_NO_OF_VALUE_ENTRIES; // start actual lba for this range
+            uint64_t end_lba_for_range =
+                    ((range_offset + 1) * MAX_NO_OF_VALUE_ENTRIES) - 1; // end actual lba for this range
             // offset inside the current lba range, this would always be zeor except for first window
             uint16_t value_internal_offset = lba - start_lba_for_range;
 
@@ -279,7 +315,7 @@ public:
                 int i = 0;
 
                 // iterate all values found and fill in the gaps
-                while (i < valueOffsetToBlkIdLst.size()) {
+                while (i < (int) valueOffsetToBlkIdLst.size()) {
                     uint64_t actual_lba = start_lba_for_range + valueOffsetToBlkIdLst[i].m_offset;
                     if (last_lba < actual_lba) {
                         add_dummy_for_missing_mappings(lba, actual_lba - 1, mappingList);
@@ -290,7 +326,7 @@ public:
             }
 
             lba = last_lba;
-            nblks -= (KEY_RANGE - value_internal_offset);
+            nblks -= (MAX_NO_OF_VALUE_ENTRIES - value_internal_offset);
         }
 
         if (!atleast_one_lba_found) {
@@ -306,21 +342,22 @@ public:
 
 
     std::error_condition put(uint64_t lba, uint32_t nblks, struct BlkId blkid) {
-        MappingValue value;
+        //MappingValue value;
         uint64_t last_blkid = blkid.get_id();
 
         //iterate till all blocks are written
         while (nblks != 0) {
-            int range_offset = lba / KEY_RANGE; // key for btree
-            uint64_t start_lba_for_range = range_offset * KEY_RANGE; // start actual lba for this range
-            uint64_t end_lba_for_range = ((range_offset + 1) * KEY_RANGE) - 1; // end actual lba for this range
+            uint64_t range_offset = lba / MAX_NO_OF_VALUE_ENTRIES; // key for btree
+            uint64_t start_lba_for_range = range_offset * MAX_NO_OF_VALUE_ENTRIES; // start actual lba for this range
+            uint64_t end_lba_for_range =
+                    ((range_offset + 1) * MAX_NO_OF_VALUE_ENTRIES) - 1; // end actual lba for this range
             // offset inside the current lba range, this would always be zeor except for first window
             uint16_t value_internal_offset = lba - start_lba_for_range;
 
             MappingKey key(range_offset);
             BlkId blk;
             blk.m_chunk_num = blkid.m_chunk_num;
-            blk.m_nblks = blkid.m_nblks > (end_lba_for_range - lba) ? (end_lba_for_range - lba) : blkid.m_nblks;
+            blk.m_nblks = blkid.m_nblks > (end_lba_for_range - lba + 1) ? (end_lba_for_range - lba + 1) : blkid.m_nblks;
             blk.m_id = last_blkid;
             MappingValue value(value_internal_offset, blkid);
 

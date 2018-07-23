@@ -33,8 +33,8 @@ homestore::DeviceManager *dev_mgr = nullptr;
 std::shared_ptr<homestore::Volume> vol;
 
 constexpr auto MAX_OUTSTANDING_IOs = 64u;
-constexpr auto MAX_CNT_THREAD = 8u;
-constexpr auto MAX_THREADS = 8u;
+constexpr auto MAX_CNT_THREAD = 1u;
+constexpr auto MAX_THREADS = 1u;
 
 constexpr auto Ki = 1024ull;
 constexpr auto Mi = Ki * Ki;
