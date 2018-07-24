@@ -22,6 +22,7 @@ class HomestoreConan(ConanFile):
 
     generators = "cmake"
     default_options = "shared=False", "fPIC=True"
+
     exports_sources = "cmake/*", "src/*", "CMakeLists.txt"
 
     def build(self):
