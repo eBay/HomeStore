@@ -201,7 +201,7 @@ namespace homeds {
     uint32_t
     Sorted_Dynamic_Array<SortedDynamicArrayTypeParams>::estimate_size_after_addOrUpdate(
             uint32_t noOfElements) {
-        if (m_header->m_no_of_elements_filled + noOfElements * 100 / m_no_of_elements_total >= LOAD_PERCENT) {
+        if ((m_header->m_no_of_elements_filled + noOfElements) * 100 / m_no_of_elements_total >= LOAD_PERCENT) {
             return get_size_to_grow_to();
         } else
             return m_size;

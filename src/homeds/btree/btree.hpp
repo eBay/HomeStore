@@ -190,7 +190,7 @@ public:
         bool is_leaf = root->is_leaf();
 
 	retry_cnt++;
-        if (root->is_split_needed(m_btree_cfg, k, v, &ind)) {
+        if (is_leaf && root->is_split_needed(m_btree_cfg, k, v, &ind)) {
             // Time to do the split of root.
             unlock_node(root, acq_lock);
             m_btree_lock.unlock();
@@ -729,8 +729,9 @@ private:
         m_btree_lock.write_lock();
         BtreeNodePtr root = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), m_root_node);
         lock_node(root, locktype::LOCKTYPE_WRITE);
+        bool is_leaf = root->is_leaf();
 
-        if (!root->is_split_needed(m_btree_cfg, k, v, &ind)) {
+        if (!is_leaf || !root->is_split_needed(m_btree_cfg, k, v, &ind)) {
             unlock_node(root, homeds::thread::LOCKTYPE_WRITE);
             goto done;
         }

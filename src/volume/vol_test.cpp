@@ -36,9 +36,6 @@ constexpr auto MAX_OUTSTANDING_IOs = 64u;
 constexpr auto MAX_CNT_THREAD = 1u;
 constexpr auto MAX_THREADS = 1u;
 
-constexpr auto Ki = 1024ull;
-constexpr auto Mi = Ki * Ki;
-constexpr auto Gi = Ki * Mi;
 constexpr auto WRITE_SIZE = 4 * Ki;
 constexpr auto BUF_SIZE = WRITE_SIZE / (4 * Ki);
 constexpr auto MAX_BUF = (8 * Mi) / WRITE_SIZE;

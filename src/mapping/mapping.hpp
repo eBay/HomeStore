@@ -45,7 +45,7 @@ struct value_internal_offset_to_blkid_type {
 
     operator std::string() { return to_string(); }
 };
-                                    
+
 constexpr static auto Ki = 1024;
 constexpr static auto Mi = Ki * Ki;
 constexpr static auto Gi = Ki * Mi;
@@ -200,16 +200,14 @@ public:
         if (dyna_arr->get_no_of_elements_filled() == 0)return;
         value_internal_offset_to_blkid_type start_element(offset, BlkId(0)), end_element(offset + nblks, BlkId(0));
 
-        int start = dyna_arr->binary_search(&start_element);
+        int st = dyna_arr->binary_search(&start_element);
+        uint32_t end_blk_id_offset = offset + nblks;
 
-        //TODO - could be faster to do linear scan from start instead of bs on end
-        int end = dyna_arr->binary_search(&end_element);
-
-        if (start < 0)start = -start + 1;
-        if (start == (int) dyna_arr->get_no_of_elements_filled())start--;
-        if (end < 0)end = -end + 1;
-        if (end == (int) dyna_arr->get_no_of_elements_filled())end--;
-        while (start <= end) {
+        if (st < 0)st = -st + 1;
+        uint32_t start = (uint32_t )st;
+        
+        while (start < dyna_arr->get_no_of_elements_filled()) {
+            if ((*dyna_arr)[start]->m_offset >= end_blk_id_offset)break;
             offsetToBlkIdLst.push_back(*(*dyna_arr)[start]);
             start++;
         }
@@ -300,7 +298,7 @@ public:
             if (ret) {
                 value.get(value_internal_offset, nblks, valueOffsetToBlkIdLst);
             }
-
+            uint32_t nblks_actually_read=0;
             uint64_t last_lba = lba;
             if (!ret || valueOffsetToBlkIdLst.size() == 0) {
                 // if key/value not found or values is empty
@@ -313,7 +311,7 @@ public:
                 atleast_one_lba_found = true;
 
                 int i = 0;
-
+                
                 // iterate all values found and fill in the gaps
                 while (i < (int) valueOffsetToBlkIdLst.size()) {
                     uint64_t actual_lba = start_lba_for_range + valueOffsetToBlkIdLst[i].m_offset;
@@ -321,12 +319,13 @@ public:
                         add_dummy_for_missing_mappings(lba, actual_lba - 1, mappingList);
                     }
                     add_lba(actual_lba, valueOffsetToBlkIdLst[i].m_blkid, true, mappingList);
-                    last_lba = actual_lba + valueOffsetToBlkIdLst[i].m_blkid.m_nblks + 1;
+                    last_lba = actual_lba + valueOffsetToBlkIdLst[i].m_blkid.m_nblks ;
+                    i++;
+                    
                 }
             }
-
+            nblks -= (last_lba-lba);
             lba = last_lba;
-            nblks -= (MAX_NO_OF_VALUE_ENTRIES - value_internal_offset);
         }
 
         if (!atleast_one_lba_found) {
