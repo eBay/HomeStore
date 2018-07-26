@@ -33,7 +33,6 @@ homestore::DeviceManager *dev_mgr = nullptr;
 std::shared_ptr<homestore::Volume> vol;
 
 constexpr auto MAX_OUTSTANDING_IOs = 64u;
-constexpr auto MAX_CNT_THREAD = 8u;
 constexpr auto MAX_THREADS = 8u;
 
 constexpr auto Ki = 1024ull;
@@ -89,13 +88,13 @@ class test_ep : iomgr::EndPoint {
       [[maybe_unused]] auto rsize = read(ev_fd, &temp, sizeof(uint64_t));
 
       iomgr->process_done(fd, event);
-      if ((atomic_load(&outstanding_ios) + MAX_CNT_THREAD) < MAX_OUTSTANDING_IOs) {
+      if ((atomic_load(&outstanding_ios) + MAX_THREADS) < MAX_OUTSTANDING_IOs) {
          /* raise an event */
          iomgr->fd_reschedule(fd, event);
       }
 
       size_t cnt = 0;
-      while (atomic_load(&outstanding_ios) < MAX_OUTSTANDING_IOs && cnt < MAX_CNT_THREAD) {
+      while (atomic_load(&outstanding_ios) < MAX_OUTSTANDING_IOs && cnt < MAX_THREADS) {
          size_t temp;
          if((temp = write_cnt.fetch_add(1, std::memory_order_relaxed)) < MAX_BUF) {
             if (temp == 0) {
@@ -218,6 +217,7 @@ SDS_OPTION_GROUP(test_volume, (is_read, "", "is_read", "serial read", ::cxxopts:
                               (is_write, "", "is_write", "serial write", ::cxxopts::value<bool>(), ""), \
                               (is_rand_write, "", "is_random_write", "random write", ::cxxopts::value<bool>(), ""), \
                               (device_list, "c", "device_list", "List of device paths", ::cxxopts::value<std::vector<std::string>>(), "path [...]"), \
+                              (thread_cnt, "", "threads", "Thread count", ::cxxopts::value<uint32_t>()->default_value("2"), "numthreads"), \
                               (max_vol_size, "", "max_vol_size", "max volume size", ::cxxopts::value<uint64_t>()->default_value("1073741824"), "bytes"))
 SDS_OPTIONS_ENABLE(logging, test_volume)
 
@@ -261,7 +261,7 @@ int main(int argc, char** argv) {
     }
 
    /* create iomgr */
-   iomgr::ioMgr iomgr(2, MAX_THREADS);
+   iomgr::ioMgr iomgr(2, SDS_OPTIONS["threads"].as<uint32_t>());
 
    /* Create/Load the devices */
    LOGINFO("Creating devices.");
