@@ -24,7 +24,7 @@ class HomestoreConan(ConanFile):
 
     exports_sources = "cmake/*", "src/*", "CMakeLists.txt"
 
-    def requirements(self):not
+    def requirements(self):
         if not self.settings.build_type == "Debug":
             self.requires("gperftools/2.7.0@oss/stable")
 
