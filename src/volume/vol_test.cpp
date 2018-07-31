@@ -38,24 +38,24 @@ constexpr auto MAX_THREADS = 8u;
 constexpr auto Ki = 1024ull;
 constexpr auto Mi = Ki * Ki;
 constexpr auto Gi = Ki * Mi;
-constexpr auto WRITE_SIZE = 4 * Ki;
-constexpr auto BUF_SIZE = WRITE_SIZE / (4 * Ki);
-constexpr auto MAX_BUF = (8 * Mi) / WRITE_SIZE;
 constexpr auto MAX_VOL_SIZE = (1 * Gi);
-constexpr auto MAX_READ = MAX_BUF ;
+
+static uint32_t buf_size;
+static uint32_t write_length;
+static uint32_t max_buf;
 
 uint64_t max_vol_size = MAX_VOL_SIZE;
 int is_random_read = false;
 int is_random_write = false;
 bool is_read = false;
 bool is_write = false;
-bool can_read = false;
-bool can_write = true;
+std::atomic_bool can_read = false;
+std::atomic_bool can_write = true;
 std::mutex cv_mtx;
 std::condition_variable cv;
 
-uint8_t *bufs[MAX_BUF];
-boost::intrusive_ptr<homestore::BlkBuffer>boost_buf[MAX_BUF];
+uint8_t **bufs;
+boost::intrusive_ptr<homestore::BlkBuffer> *boost_buf;
 
 /* change it to atomic counters */
 std::atomic<uint64_t> read_cnt(0);
@@ -95,27 +95,31 @@ class test_ep : iomgr::EndPoint {
 
       size_t cnt = 0;
       while (atomic_load(&outstanding_ios) < MAX_OUTSTANDING_IOs && cnt < MAX_THREADS) {
-         size_t temp;
-         if((temp = write_cnt.fetch_add(1, std::memory_order_relaxed)) < MAX_BUF) {
+         size_t temp = write_cnt.load(std::memory_order_relaxed);
+         if(can_write && temp < max_buf) {
+            write_cnt.fetch_add(1, std::memory_order_relaxed);
             if (temp == 0) {
                write_startTime = homeio::Clock::now();
             }
             ++outstanding_ios;
             writefunc(temp);
-         } else if (can_read &&
-                    (temp = read_cnt.fetch_add(1, std::memory_order_relaxed)) < MAX_READ) {
-            if (temp == 0) {
-               read_startTime = homeio::Clock::now();
-	    }
-            ++outstanding_ios;
-            readfunc(temp);
+         } else if (can_read) {
+             temp = read_cnt.load(std::memory_order_relaxed);
+             if (temp < write_cnt) {
+                read_cnt.fetch_add(1, std::memory_order_relaxed);
+                if (temp == 0) {
+                   read_startTime = homeio::Clock::now();
+                }
+                ++outstanding_ios;
+                readfunc(temp);
+             }
          }
          ++cnt;
          assert(outstanding_ios != SIZE_MAX);
       }
    }
 
-   test_ep(iomgr::ioMgr *iomgr) :
+   test_ep(std::shared_ptr<iomgr::ioMgr> iomgr) :
        iomgr::EndPoint(iomgr),
        ev_fd(eventfd(0, EFD_NONBLOCK))
    {
@@ -141,12 +145,12 @@ class test_ep : iomgr::EndPoint {
       if (is_random_write) {
          assert(!is_read);
          uint64_t random = rand();
-         uint64_t i = (random % (MAX_BUF));
-         boost_buf[cnt] = vol->write(i * BUF_SIZE, bufs[i], BUF_SIZE, req);
+         uint64_t i = (random % (max_buf));
+         boost_buf[cnt] = vol->write(i * write_length, bufs[i], write_length, req);
          /* store intrusive buffer pointer */
       } else {
          std::vector<boost::intrusive_ptr< BlkBuffer >> buf_list;
-         boost_buf[cnt] = vol->write(cnt * BUF_SIZE, bufs[cnt], BUF_SIZE, req);
+         boost_buf[cnt] = vol->write(cnt * write_length, bufs[cnt], write_length, req);
       }
    }
 
@@ -159,12 +163,12 @@ class test_ep : iomgr::EndPoint {
       req->is_read = true;
       if (is_random_read) {
          uint64_t random = rand();
-         uint64_t i = random % MAX_BUF;
+         uint64_t i = random % max_buf;
          req->indx = i;
-         vol->read(i * BUF_SIZE, BUF_SIZE, req);
+         vol->read(i * write_length, write_length, req);
       } else {
          req->indx = cnt;
-         vol->read(cnt * BUF_SIZE, BUF_SIZE, req);
+         vol->read(cnt * write_length, write_length, req);
       }
    }
 
@@ -178,29 +182,37 @@ class test_ep : iomgr::EndPoint {
       if (size != sizeof(uint64_t)) {
          assert(0);
       }
-      if (req->is_read) {
-         /* memcmp */
 #ifndef NDEBUG
-         homeds::blob b  = req->read_buf_list[0]->at_offset(0);	
-         assert(b.size == BUF_SIZE * WRITE_SIZE);
-         int j = memcmp((void *)b.bytes, (void *)bufs[req->indx], b.size);
-         assert(j == 0);
+      if (req->is_read && !req->read_buf_list.empty()) {
+         /* memcmp */
+         auto tot_size = 0u;
+         for (auto const& buf : req->read_buf_list) {
+            homeds::blob const &b = buf->at_offset(0);
+            tot_size += b.size;
+            int j = memcmp((void *) b.bytes, (void *) bufs[req->indx], b.size);
+            assert(j == 0);
+         }
+         assert(tot_size == buf_size);
+      }
 #endif
-      }
       delete(req);
-      if (outstanding_ios == 0 && write_cnt >= MAX_BUF && can_write) {
-	 /* signal main thread */
-	if (is_read) {
-	    can_read = true;
+      std::lock_guard<std::mutex> lg(cv_mtx);
+      if (outstanding_ios == 0 && write_cnt >= max_buf && can_write) {
+         /* signal main thread */
+         if (is_read) {
+            can_read = true;
             [[maybe_unused]] auto rsize = read(ev_fd, &temp, sizeof(uint64_t));
-	    temp = 1;
+            temp = 1;
             [[maybe_unused]] auto wsize = write(ev_fd, &temp, sizeof(uint64_t));
-	}
-	can_write = false;
-	cv.notify_all();
-      }
-      if (outstanding_ios == 0 && read_cnt >= MAX_BUF && can_read) {
-	cv.notify_all();
+         }
+         can_write = false;
+         LOGINFO("NOtify");
+         cv.notify_all();
+         return;
+      }  else if (can_read && read_cnt >= write_cnt) {
+         LOGINFO("NOtify {} {}", read_cnt, write_cnt);
+         cv.notify_all();
+         return;
       }
    }
 
@@ -212,13 +224,14 @@ class test_ep : iomgr::EndPoint {
 
 thread_local test_ep::thread_info test_ep::info = {0};
 
-SDS_OPTION_GROUP(test_volume, (is_read, "", "is_read", "serial read", ::cxxopts::value<bool>(), ""), \
+SDS_OPTION_GROUP(test_volume, (block_size, "", "block_size", "Block size for IO", ::cxxopts::value<uint32_t>()->default_value("4096"), "numbytes"), \
+                              (is_read, "", "is_read", "serial read", ::cxxopts::value<bool>(), ""), \
                               (is_rand_read, "", "is_random_read", "random read", ::cxxopts::value<bool>(), ""), \
                               (is_write, "", "is_write", "serial write", ::cxxopts::value<bool>(), ""), \
                               (is_rand_write, "", "is_random_write", "random write", ::cxxopts::value<bool>(), ""), \
                               (device_list, "c", "device_list", "List of device paths", ::cxxopts::value<std::vector<std::string>>(), "path [...]"), \
-                              (thread_cnt, "", "threads", "Thread count", ::cxxopts::value<uint32_t>()->default_value("2"), "numthreads"), \
-                              (max_vol_size, "", "max_vol_size", "max volume size", ::cxxopts::value<uint64_t>()->default_value("1073741824"), "bytes"))
+                              (max_vol_size, "", "max_vol_size", "max volume size", ::cxxopts::value<uint64_t>()->default_value("1073741824"), "bytes"), \
+                              (thread_cnt, "", "threads", "Thread count", ::cxxopts::value<uint32_t>()->default_value("2"), "numthreads"))
 SDS_OPTIONS_ENABLE(logging, test_volume)
 
 
@@ -260,14 +273,20 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    buf_size = SDS_OPTIONS["block_size"].as<uint32_t>();
+    write_length = buf_size / BLKSTORE_BLK_SIZE;
+    max_buf = (8 * Mi) / buf_size;
+    bufs = (uint8_t**)malloc(sizeof(uint8_t*) * max_buf);
+    boost_buf = (boost::intrusive_ptr<homestore::BlkBuffer>*)malloc(sizeof(boost::intrusive_ptr<homestore::BlkBuffer>) * max_buf);
+
    /* create iomgr */
-   iomgr::ioMgr iomgr(2, SDS_OPTIONS["threads"].as<uint32_t>());
+   auto iomgr = std::make_shared<iomgr::ioMgr>(2, SDS_OPTIONS["threads"].as<uint32_t>());
 
    /* Create/Load the devices */
    LOGINFO("Creating devices.");
    dev_mgr = new homestore::DeviceManager(Volume::new_vdev_found,
                                           0,
-                                          &iomgr,
+                                          iomgr,
                                           virtual_dev_process_completions);
    try {
       dev_mgr->add_devices(dev_names);
@@ -277,21 +296,17 @@ int main(int argc, char** argv) {
    }
 
    /* create endpoint */
-   iomgr.start();
-   test_ep ep(&iomgr);
+   iomgr->start();
+   test_ep ep(iomgr);
 
    /* create dataset */
    auto devs = dev_mgr->get_all_devices();
    LOGINFO("Creating dataset.");
-   for (auto i = 0u; i < MAX_BUF; i++) {
-      //		bufs[i] = new uint8_t[8192*1000]();
-      if (auto ec = posix_memalign((void**)&bufs[i], page_size, WRITE_SIZE * BUF_SIZE))
+   for (auto i = 0u; i < max_buf; i++) {
+      if (auto ec = posix_memalign((void**)&bufs[i], page_size, buf_size))
          throw std::system_error(std::error_code(ec, std::generic_category()));
       uint8_t *bufp = bufs[i];
-      for (auto j = 0u; j < (WRITE_SIZE * BUF_SIZE/8); j++) {
-         memset(bufp, i + j + 1 , 8);
-         bufp = bufp + 8;
-      }
+      memset(bufp, buf_size, 8);
    }
 
    LOGINFO("Initializing performance counters.");
@@ -304,7 +319,7 @@ int main(int argc, char** argv) {
    LOGINFO("Waiting for writes to finish.");
    {
    	std::unique_lock<std::mutex> lck(cv_mtx);
-   	cv.wait(lck);
+   	cv.wait(lck, [] { return (!can_write && 0 == outstanding_ios);});
    }
 
    uint64_t time_us = get_elapsed_time(write_startTime);
@@ -335,6 +350,6 @@ int main(int argc, char** argv) {
    vol.reset();
    err = Volume::removeVolume("my_volume");
    assert(!err);
-   iomgr.print_perf_cntrs();
+   iomgr->print_perf_cntrs();
    LOGINFO("Complete");
 }

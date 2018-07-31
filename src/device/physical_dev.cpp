@@ -48,9 +48,12 @@ static std::atomic< uint32_t > glob_phys_dev_ids(0);
 /* This method opens the device and tries to load the info from the device. If its unable to load
  * it, formats the device and sets formatted = true. It can throw DeviceException or system_error
  * or std::bad_alloc exception */
-std::unique_ptr<PhysicalDev> PhysicalDev::load(DeviceManager *dev_mgr, 
-					std::string devname, int oflags, bool *is_new, 
-					iomgr::ioMgr *iomgr, homeio::comp_callback cb) {
+std::unique_ptr<PhysicalDev> PhysicalDev::load(DeviceManager *dev_mgr,
+                                               std::string devname,
+                                               int oflags,
+                                               bool *is_new,
+                                               std::shared_ptr<iomgr::ioMgr> iomgr,
+                                               homeio::comp_callback cb) {
     std::unique_ptr< PhysicalDev > pdev = std::make_unique< PhysicalDev >(dev_mgr, 
 								devname, oflags, iomgr, cb);
 
@@ -68,8 +71,11 @@ std::unique_ptr<PhysicalDev> PhysicalDev::load(DeviceManager *dev_mgr,
     return std::move(pdev);
 }
 
-PhysicalDev::PhysicalDev(DeviceManager *mgr, std::string devname, int oflags, 
-				iomgr::ioMgr *iomgr, homeio::comp_callback cb) :
+PhysicalDev::PhysicalDev(DeviceManager *mgr,
+                         std::string devname,
+                         int const oflags,
+                         std::shared_ptr<iomgr::ioMgr> iomgr,
+                         homeio::comp_callback cb) :
         m_mgr(mgr),
         m_devname(devname),
 	comp_cb(cb),

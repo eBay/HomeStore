@@ -304,12 +304,18 @@ class PhysicalDev {
     friend class PhysicalDevChunk;
     friend class DeviceManager;
 public:
-    static std::unique_ptr<PhysicalDev> load(DeviceManager *dev_mgr, std::string devname, 
-					int oflags, bool *is_new, 
-					iomgr::ioMgr *iomgr, homeio::comp_callback cb);
+    static std::unique_ptr<PhysicalDev> load(DeviceManager *dev_mgr,
+                                             std::string devname,
+                                             int oflags,
+                                             bool *is_new,
+                                             std::shared_ptr<iomgr::ioMgr> iomgr,
+                                             homeio::comp_callback cb);
 
-    PhysicalDev(DeviceManager *mgr, std::string devname, int oflags, iomgr::ioMgr *iomgr,
-							homeio::comp_callback cb);
+    PhysicalDev(DeviceManager *mgr,
+                std::string devname,
+                int const oflags,
+                std::shared_ptr<iomgr::ioMgr> iomgr,
+                homeio::comp_callback cb);
     ~PhysicalDev() = default;
 
     int get_devfd() const {
@@ -402,7 +408,7 @@ private:
     uint64_t           m_devsize;
     static homeio::DriveEndPoint *ep; // one instance for all physical devices
     homeio::comp_callback comp_cb;
-    iomgr::ioMgr *iomgr;
+    std::shared_ptr<iomgr::ioMgr> iomgr;
 };
 
 class AbstractVirtualDev {
@@ -418,8 +424,10 @@ class DeviceManager {
     friend class PhysicalDevChunk;
 
 public:
-    DeviceManager(NewVDevCallback vcb, uint32_t vdev_metadata_size, 
-			iomgr::ioMgr* iomgr, homeio::comp_callback comp_cb);
+    DeviceManager(NewVDevCallback vcb,
+                  uint32_t const vdev_metadata_size,
+			         std::shared_ptr<iomgr::ioMgr> iomgr,
+			         homeio::comp_callback comp_cb);
     virtual ~DeviceManager() = default;
 
     /* Initial routine to call upon bootup or everytime new physical devices to be added dynamically */
@@ -577,7 +585,7 @@ private:
     uint32_t m_vdev_metadata_size; // Appln metadata size for vdev
 
     NewVDevCallback  m_new_vdev_cb;
-    iomgr::ioMgr* iomgr;
+    std::shared_ptr<iomgr::ioMgr> iomgr;
 };
 
 /*

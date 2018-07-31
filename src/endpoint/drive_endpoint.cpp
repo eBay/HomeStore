@@ -44,7 +44,7 @@ get_elapsed_time_ns(homeio::Clock::time_point startTime) {
 	return ns.count();
 }
 
-DriveEndPoint::DriveEndPoint(iomgr::ioMgr *iomgr, comp_callback cb)
+DriveEndPoint::DriveEndPoint(std::shared_ptr<iomgr::ioMgr> iomgr, comp_callback cb)
 				: EndPoint(iomgr), comp_cb(cb) {
 	iomgr->add_ep(this);
 }
