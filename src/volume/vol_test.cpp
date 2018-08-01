@@ -33,8 +33,8 @@ homestore::DeviceManager *dev_mgr = nullptr;
 std::shared_ptr<homestore::Volume> vol;
 
 constexpr auto MAX_OUTSTANDING_IOs = 64u;
-constexpr auto MAX_CNT_THREAD = 1u;
-constexpr auto MAX_THREADS = 1u;
+constexpr auto MAX_CNT_THREAD = 8u;
+constexpr auto MAX_THREADS = 8u;
 
 constexpr auto WRITE_SIZE = 4 * Ki;
 constexpr auto BUF_SIZE = WRITE_SIZE / (4 * Ki);
@@ -220,7 +220,7 @@ SDS_OPTIONS_ENABLE(logging, test_volume)
 
 
 int main(int argc, char** argv) {
-   spdlog::set_async_mode(4096, spdlog::async_overflow_policy::block_retry, nullptr, std::chrono::seconds(2));
+   //spdlog::set_async_mode(4096, spdlog::async_overflow_policy::block_retry, nullptr, std::chrono::seconds(2));
    SDS_OPTIONS_LOAD(argc, argv, logging, test_volume)
    SDS_OPTIONS.parse_positional("device_list");
 

@@ -5,6 +5,7 @@
 #include <error/error.h>
 #include <homeds/array/sorted_dynamic_array.h>
 #include <math.h>
+#include <sds_logging/logging.h>
 
 using namespace std;
 using namespace homestore;
@@ -204,8 +205,8 @@ public:
         uint32_t end_blk_id_offset = offset + nblks;
 
         if (st < 0)st = -st + 1;
-        uint32_t start = (uint32_t )st;
-        
+        uint32_t start = (uint32_t) st;
+
         while (start < dyna_arr->get_no_of_elements_filled()) {
             if ((*dyna_arr)[start]->m_offset >= end_blk_id_offset)break;
             offsetToBlkIdLst.push_back(*(*dyna_arr)[start]);
@@ -273,12 +274,13 @@ public:
         }
     }
 
-    std::error_condition get(uint64_t lba, uint32_t nblks,
+    std::error_condition get(uint64_t lba, uint32_t nblks_uint,
                              std::vector<struct lba_BlkId_mapping> &mappingList) {
         std::error_condition error = no_error;
         bool atleast_one_lba_found = false;
         bool atleast_one_lba_not_found = false;
 
+        int nblks = (int) nblks_uint;
         //iterate till all blocks are readed
         while (nblks != 0) {
             int range_offset = lba / MAX_NO_OF_VALUE_ENTRIES; // key for btree
@@ -298,20 +300,25 @@ public:
             if (ret) {
                 value.get(value_internal_offset, nblks, valueOffsetToBlkIdLst);
             }
-            uint32_t nblks_actually_read=0;
+            uint32_t nblks_actually_read = 0;
             uint64_t last_lba = lba;
             if (!ret || valueOffsetToBlkIdLst.size() == 0) {
+                m_bt->print_tree();
+                assert(0);//REMOVE THIS ASSERT
+                
                 // if key/value not found or values is empty
-                uint64_t start_lba = lba, end_lba = lba + end_lba_for_range;
+                uint64_t start_lba = lba, end_lba = lba + nblks -1 ;
+                if(end_lba >= end_lba_for_range)
+                    end_lba = end_lba_for_range-1;
                 add_dummy_for_missing_mappings(start_lba, end_lba, mappingList);
 
                 atleast_one_lba_not_found = true;
-                last_lba = end_lba_for_range + 1;
+                last_lba = end_lba + 1;
             } else {
                 atleast_one_lba_found = true;
 
                 int i = 0;
-                
+
                 // iterate all values found and fill in the gaps
                 while (i < (int) valueOffsetToBlkIdLst.size()) {
                     uint64_t actual_lba = start_lba_for_range + valueOffsetToBlkIdLst[i].m_offset;
@@ -319,12 +326,15 @@ public:
                         add_dummy_for_missing_mappings(lba, actual_lba - 1, mappingList);
                     }
                     add_lba(actual_lba, valueOffsetToBlkIdLst[i].m_blkid, true, mappingList);
-                    last_lba = actual_lba + valueOffsetToBlkIdLst[i].m_blkid.m_nblks ;
+                    last_lba = actual_lba + valueOffsetToBlkIdLst[i].m_blkid.m_nblks;
                     i++;
-                    
+
                 }
             }
-            nblks -= (last_lba-lba);
+            if ((int)(last_lba - lba) > nblks)
+                nblks = 0;
+            else
+                nblks -= (last_lba - lba);
             lba = last_lba;
         }
 

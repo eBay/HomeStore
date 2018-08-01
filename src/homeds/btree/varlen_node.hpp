@@ -99,11 +99,32 @@ public:
     void insert(int ind, const BtreeKey &key, const BtreeValue &val) {
         LOGTRACE("{}:{}",key.to_string(),val.to_string());
         insert(ind, key.get_blob(), val.get_blob());
+        validate_sanity();
+    }
+    
+    void validate_sanity(){
+        int i=0;
+        std::map<int, bool> mapOfWords;
+        
+        while(i<(int)this->get_total_entries()){
+            K keyPrev;
+            get_nth_key(i,&keyPrev,false);
+            uint8_t * kp = keyPrev.get_blob().bytes;
+            
+            std::pair<std::map<int, bool>::iterator, bool > result;
+            result = mapOfWords.insert(std::make_pair(*kp,true));
+            if(*kp>5000 || result.second==false){
+                LOGDEBUG("uhho ... {} ", this->to_string());
+                assert(0);
+            }
+            i++;
+        }
     }
 
     /* Update a value in a given index to the provided value. It will support change in size of the new value.
      * Assumption: Node lock is already taken, size check for the node to support new value is already done */
     void update(int ind, const BtreeValue &val)  {
+        LOGDEBUG("Node before dyna size increase:{}",this->to_string());
         assert(ind <= (int)this->get_total_entries());
 
         // If we are updating the edge value, none of the other logic matter. Just update edge value and move on
@@ -132,10 +153,11 @@ public:
         
         //copy the key for later use
         K key;
-        get_nth_key(ind,&key,false);
+        get_nth_key(ind,&key,true);
         
         remove(ind);
         insert(ind, key, val);
+        LOGDEBUG("Node after dyna size increase:{}",this->to_string());
     }
 
     void update(int ind, const BtreeKey &key, const BtreeValue &val)  {
@@ -217,7 +239,7 @@ public:
     bool is_split_needed(const BtreeConfig &cfg, const BtreeKey &key, const BtreeValue &val,
                          int *out_ind_hint) const  {
         V curval;
-        uint32_t size_needed;
+        uint32_t size_needed=0;
 
         // NOTE : size_needed is just an guess here. Actual implementation of Mapping key/value can have 
         // specific logic which determines of size changes on insert or update.
@@ -225,7 +247,8 @@ public:
         if (!result.found) {
             // We need to insert, this newly. Find out if we have space for value.
             size_needed = key.get_blob_size() + val.get_blob_size() + get_record_size();
-        } else {
+        } else if(this->is_leaf()){
+            //for internal nodes, size does not change on updates
             // Its an update, see how much additioanl space needed
             V existingVal;
             get(result.end_of_search_index, &existingVal, false);

@@ -190,7 +190,7 @@ public:
         bool is_leaf = root->is_leaf();
 
 	retry_cnt++;
-        if (is_leaf && root->is_split_needed(m_btree_cfg, k, v, &ind)) {
+        if (root->is_split_needed(m_btree_cfg, k, v, &ind)) {
             // Time to do the split of root.
             unlock_node(root, acq_lock);
             m_btree_lock.unlock();
@@ -334,7 +334,33 @@ public:
         return m_stats;
     }
 
+    void print_tree() {
+        m_btree_lock.read_lock();
+        std::stringstream ss;
+        get_string_representation_pre_order_traversal(m_root_node, ss);
+        LOGINFO("Pre order traversal of tree : <{}>", ss.str());
+        m_btree_lock.unlock();
+    }
+    
 private:
+    void get_string_representation_pre_order_traversal(bnodeid_t bnodeid, std::stringstream &ss) {
+        BtreeNodePtr node = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), bnodeid);
+        homeds::thread::locktype acq_lock = homeds::thread::locktype::LOCKTYPE_READ;
+        lock_node(node, acq_lock);
+
+        ss << "[" << node->to_string() << "]";
+
+        if(!node->is_leaf()) {
+            uint32_t i = 0;
+            while (i < node->get_total_entries()) {
+                BNodeptr p;
+                node->get(i, &p, false);
+                get_string_representation_pre_order_traversal(p.get_node_id(),ss);
+                i++;
+            }
+        }
+    }
+    
     bool do_get(BtreeNodePtr my_node, const BtreeSearchRange &range, BtreeKey *outkey, BtreeValue *outval) {
         if (my_node->is_leaf()) {
             auto result = my_node->find(range, outkey, outval);
@@ -729,9 +755,8 @@ private:
         m_btree_lock.write_lock();
         BtreeNodePtr root = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), m_root_node);
         lock_node(root, locktype::LOCKTYPE_WRITE);
-        bool is_leaf = root->is_leaf();
 
-        if (!is_leaf || !root->is_split_needed(m_btree_cfg, k, v, &ind)) {
+        if (!root->is_split_needed(m_btree_cfg, k, v, &ind)) {
             unlock_node(root, homeds::thread::LOCKTYPE_WRITE);
             goto done;
         }
@@ -810,7 +835,7 @@ private:
         BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(), parent_node);
         //release_node(child_node2);
 
-#ifndef NDEBUG            
+#ifndef NDEBUG   
         LOGTRACE("After split\n########Parent node:\n {}\n,Child node1:\n {}\n,Child node2:\n {}\n" ,
                      parent_node->to_string(),child_node1->to_string(),child_node2->to_string());
 #endif
