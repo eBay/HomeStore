@@ -802,11 +802,11 @@ private:
         //release_node(child_node2);
 
 #ifndef NDEBUG
-         LOGERRORMOD(VMOD_BTREE_SPLIT,
-                     "After split\n#####################\nParent node:\n{}\nChild node1:\n{}\nChild node2:\n{}",
-                     parent_node->to_string(),
-                     child_node1->to_string(),
-                     child_node2->to_string());
+         LOGINFOMOD(VMOD_BTREE_SPLIT,
+                    "After split\n#####################\nParent node:\n{}\nChild node1:\n{}\nChild node2:\n{}",
+                    parent_node->to_string(),
+                    child_node1->to_string(),
+                    child_node2->to_string());
 #endif
 
         // NOTE: Do not access parentInd after insert, since insert would have

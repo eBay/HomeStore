@@ -238,7 +238,7 @@ SDS_OPTIONS_ENABLE(logging, test_volume)
 int main(int argc, char** argv) {
    spdlog::set_async_mode(4096, spdlog::async_overflow_policy::block_retry, nullptr, std::chrono::seconds(2));
    SDS_OPTIONS_LOAD(argc, argv, logging, test_volume)
-   SDS_OPTIONS.parse_positional("device_list");
+   SDS_PARSER.parse_positional("device_list");
 
    sds_logging::SetLogger(spdlog::stdout_color_mt("test_volume"));
    spdlog::set_pattern("[%D %T.%f%z] [%^%l%$] [%t] %v");
