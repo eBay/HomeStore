@@ -2,7 +2,6 @@ pipeline {
     agent any
 
     environment {
-        ORG = 'sds'
         PROJECT = 'homestore'
         CONAN_CHANNEL = 'testing'
         CONAN_USER = 'sds'
