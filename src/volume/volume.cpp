@@ -230,10 +230,6 @@ Volume::read(uint64_t lba, int nblks, volume_req* req) {
      * This check will be removed later. 
      */
     req->err = ret;
-    if (ret && ret == homestore_error::lba_not_exist ) {
-	    process_completions(req); 
-    	return 0;
-    }
 
     map_read_time.fetch_add(get_elapsed_time(startTime), memory_order_relaxed);
 

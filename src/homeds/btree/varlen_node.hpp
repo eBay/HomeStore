@@ -64,6 +64,13 @@ struct VarNodeSpecificImpl {
     static void set_nth_value_len(const VariantNodeType *node, uint8_t *rec_ptr, uint16_t value_len) {assert(0);}
 };
 
+/**
+ * Internal format of variable node:
+ * [var node header][Record][Record].. ...  ... [key][value][key][value]
+ *  key and value both can be variying. However for now, we only support variable value. Key is fixed always.
+ *  
+ */
+ 
 template< typename K, typename V,  size_t NodeSize>
 class VariableNode : public PhysicalNode<VariableNode,K, V, NodeSize> {
 public:
@@ -99,32 +106,39 @@ public:
     void insert(int ind, const BtreeKey &key, const BtreeValue &val) {
         LOGTRACE("{}:{}",key.to_string(),val.to_string());
         insert(ind, key.get_blob(), val.get_blob());
+#ifndef NDEBUG
         validate_sanity();
+#endif
     }
-    
+#ifndef NDEBUG
     void validate_sanity(){
         int i=0;
         std::map<int, bool> mapOfWords;
-        
+        //validate if keys are in ascending orde
         while(i<(int)this->get_total_entries()){
             K keyPrev;
             get_nth_key(i,&keyPrev,false);
-            uint8_t * kp = keyPrev.get_blob().bytes;
-            
+            uint64_t * kp = (uint64_t*)keyPrev.get_blob().bytes;
+            if(*kp>100000){//TODO - remove this condition eventually
+                LOGDEBUG("Invalid entry : {} -> {} ", *kp, this->to_string());
+                assert(0);
+            }
             std::pair<std::map<int, bool>::iterator, bool > result;
             result = mapOfWords.insert(std::make_pair(*kp,true));
-            if(*kp>5000 || result.second==false){
-                LOGDEBUG("uhho ... {} ", this->to_string());
+            if(result.second==false){
+                LOGDEBUG("Duplicate entry : {} -> {} ", *kp, this->to_string());
                 assert(0);
             }
             i++;
         }
+        
     }
+#endif
 
     /* Update a value in a given index to the provided value. It will support change in size of the new value.
      * Assumption: Node lock is already taken, size check for the node to support new value is already done */
     void update(int ind, const BtreeValue &val)  {
-        LOGDEBUG("Node before dyna size increase:{}",this->to_string());
+        LOGTRACE("Update called:{}",this->to_string());
         assert(ind <= (int)this->get_total_entries());
 
         // If we are updating the edge value, none of the other logic matter. Just update edge value and move on
@@ -141,23 +155,30 @@ public:
         uint16_t cur_obj_size = get_nth_obj_size(ind);
 
         if (cur_obj_size >= new_obj_size) {
-            //TODO - we can avoid memcpy if addresses of val_ptr and vblob.bytes is same. In place update
-            //TODO - we can reclaim space if new obj size is lower than cur obj size
-            // Same or smaller size update, just copy the value blob
             uint8_t *val_ptr = (uint8_t *)get_nth_obj(ind) + nth_key_len;
             homeds::blob vblob = val.get_blob();
-            memcpy(val_ptr, vblob.bytes, vblob.size);
+            //we can avoid memcpy if addresses of val_ptr and vblob.bytes is same. In place update
+            if(val_ptr != vblob.bytes){
+                //TODO - we can reclaim space if new obj size is lower than cur obj size
+                // Same or smaller size update, just copy the value blob
+                LOGTRACE("Not an in-place update, have to copying data of size {}", vblob.size);
+                memcpy(val_ptr, vblob.bytes, vblob.size);
+            }else{
+                // do nothing
+                LOGTRACE("In place update, not copying data.");
+            }
             this->inc_gen();
             return;
         }
         
         //copy the key for later use
+        //K *key = new K();
         K key;
         get_nth_key(ind,&key,true);
-        
         remove(ind);
         insert(ind, key, val);
-        LOGDEBUG("Node after dyna size increase:{}",this->to_string());
+        //delete key;
+        LOGTRACE("Size changed for either key or value. Had to delete and insert :{}",this->to_string());
     }
 
     void update(int ind, const BtreeKey &key, const BtreeValue &val)  {
@@ -483,7 +504,7 @@ public:
 private:
     uint32_t insert(int ind, const homeds::blob &key_blob, const homeds::blob &val_blob)  {
         assert(ind <= (int)this->get_total_entries());
-        LOGTRACE("{}:{}:{}:{}",ind ,get_var_node_header()->m_tail_arena_offset,get_arena_free_space() ,get_var_node_header()->m_available_space);
+        LOGDEBUG("{}:{}:{}:{}",ind ,get_var_node_header()->m_tail_arena_offset,get_arena_free_space() ,get_var_node_header()->m_available_space);
         uint16_t obj_size = key_blob.size + val_blob.size;
         uint16_t to_insert_size = obj_size + get_record_size();
         if (to_insert_size > get_var_node_header()->m_available_space) {
@@ -510,17 +531,21 @@ private:
         set_nth_key_len(rec_ptr, key_blob.size);
         set_nth_value_len(rec_ptr, val_blob.size);
         set_record_data_offset(rec_ptr, get_var_node_header()->m_tail_arena_offset);
-
+        
         // Copy the contents of key and value in the offset
         uint8_t *raw_data_ptr = offset_to_ptr_mutable(get_var_node_header()->m_tail_arena_offset);
-        memcpy(raw_data_ptr, key_blob.bytes, key_blob.size);
+        memmove(raw_data_ptr, key_blob.bytes, key_blob.size);
         raw_data_ptr += key_blob.size;
-        memcpy(raw_data_ptr, val_blob.bytes, val_blob.size);
-
+        memmove(raw_data_ptr, val_blob.bytes, val_blob.size);
+        
         // Increment the entries and generation number
         this->inc_entries();
         this->inc_gen();
 
+#ifndef NDEBUG
+        validate_sanity();
+#endif
+        
 #ifdef DEBUG
         //print();
 #endif
@@ -569,7 +594,9 @@ private:
      * so that available space == tail arena space
      * */
     void compact() {
-
+#ifndef NDEBUG
+        validate_sanity();
+#endif
         // temp ds to sort records in stack space 
         struct Record{
             uint16_t m_obj_offset;
@@ -619,6 +646,9 @@ private:
             ind++;
         }
         get_var_node_header()->m_tail_arena_offset = last_offset;
+#ifndef NDEBUG
+        validate_sanity();
+#endif
         LOGDEBUG("Sparse space reclaimed:{}",sparce_space);
     }
 
@@ -683,29 +713,29 @@ private:
 };
 
 /***************** Template Specialization for variable key records ******************/
-//template< typename K, typename V, size_t NodeSize >
-//struct VarNodeSpecificImpl<BTREE_NODETYPE_VAR_KEY, K, V,  NodeSize> {
-//    static uint16_t get_nth_key_len(const VariantNode<BTREE_NODETYPE_VAR_KEY, K, V,  NodeSize> *node, int ind) {
-//        return ((const var_key_record *) node->get_nth_record(ind))->m_key_len;
-//    }
-//
-//    static uint16_t get_nth_value_len(const VariantNode< BTREE_NODETYPE_VAR_KEY, K, V,  NodeSize > *node, int ind) {
-//        return V::get_fixed_size();
-//    }
-//
-//    static uint16_t get_record_size(const VariantNode< BTREE_NODETYPE_VAR_KEY, K, V,  NodeSize > *node) {
-//        return sizeof(var_key_record);
-//    }
-//
-//    static void set_nth_key_len(const VariantNode< BTREE_NODETYPE_VAR_KEY, K, V,  NodeSize> *node, uint8_t *rec_ptr, uint16_t key_len) {
-//        ((var_key_record *)rec_ptr)->m_key_len = key_len;
-//    }
-//
-//    static void set_nth_value_len(const VariantNode< BTREE_NODETYPE_VAR_KEY, K, V,  NodeSize > *node, uint8_t *rec_ptr,
-//                                  uint16_t value_len) {
-//        assert(value_len == V::get_fixed_size());
-//    }
-//};
+template< typename K, typename V, size_t NodeSize >
+struct VarNodeSpecificImpl<BTREE_NODETYPE_VAR_KEY, K, V,  NodeSize> {
+    static uint16_t get_nth_key_len(const VariantNode<BTREE_NODETYPE_VAR_KEY, K, V,  NodeSize> *node, int ind) {
+        return ((const var_key_record *) node->get_nth_record(ind))->m_key_len;
+    }
+
+    static uint16_t get_nth_value_len(const VariantNode< BTREE_NODETYPE_VAR_KEY, K, V,  NodeSize > *node, int ind) {
+        return V::get_fixed_size();
+    }
+
+    static uint16_t get_record_size(const VariantNode< BTREE_NODETYPE_VAR_KEY, K, V,  NodeSize > *node) {
+        return sizeof(var_key_record);
+    }
+
+    static void set_nth_key_len(const VariantNode< BTREE_NODETYPE_VAR_KEY, K, V,  NodeSize> *node, uint8_t *rec_ptr, uint16_t key_len) {
+        ((var_key_record *)rec_ptr)->m_key_len = key_len;
+    }
+
+    static void set_nth_value_len(const VariantNode< BTREE_NODETYPE_VAR_KEY, K, V,  NodeSize > *node, uint8_t *rec_ptr,
+                                  uint16_t value_len) {
+        assert(value_len == V::get_fixed_size());
+    }
+};
 
 /***************** Template Specialization for variable value records ******************/
 template< typename K, typename V, size_t NodeSize >
@@ -734,30 +764,30 @@ struct VarNodeSpecificImpl<BTREE_NODETYPE_VAR_VALUE , K, V,  NodeSize> {
 };
 
 /***************** Template Specialization for variable object records ******************/
-//template< typename K, typename V, size_t NodeSize >
-//struct VarNodeSpecificImpl<BTREE_NODETYPE_VAR_OBJECT, K, V,  NodeSize> {
-//    static uint16_t get_nth_key_len(const VariantNode<BTREE_NODETYPE_VAR_OBJECT, K, V,  NodeSize> *node, int ind) {
-//        return ((const var_obj_record *)node->get_nth_record(ind))->m_key_len;
-//    }
-//
-//    static uint16_t get_nth_value_len(const VariantNode< BTREE_NODETYPE_VAR_OBJECT, K, V,  NodeSize > *node, int ind) {
-//        return ((const var_value_record *)node->get_nth_record(ind))->m_value_len;
-//    }
-//
-//    static uint16_t get_record_size(const VariantNode< BTREE_NODETYPE_VAR_OBJECT, K, V,  NodeSize > *node) {
-//        return sizeof(var_value_record);
-//    }
-//
-//    static void set_nth_key_len(const VariantNode< BTREE_NODETYPE_VAR_OBJECT, K, V,  NodeSize > *node, uint8_t *rec_ptr,
-//                                uint16_t key_len) {
-//        ((var_obj_record *)rec_ptr)->m_key_len = key_len;
-//    }
-//
-//    static void set_nth_value_len(const VariantNode< BTREE_NODETYPE_VAR_OBJECT, K, V,  NodeSize > *node, uint8_t *rec_ptr,
-//                                  uint16_t value_len) {
-//        ((var_obj_record *)rec_ptr)->m_value_len = value_len;
-//    }
-//};
+template< typename K, typename V, size_t NodeSize >
+struct VarNodeSpecificImpl<BTREE_NODETYPE_VAR_OBJECT, K, V,  NodeSize> {
+    static uint16_t get_nth_key_len(const VariantNode<BTREE_NODETYPE_VAR_OBJECT, K, V,  NodeSize> *node, int ind) {
+        return ((const var_obj_record *)node->get_nth_record(ind))->m_key_len;
+    }
+
+    static uint16_t get_nth_value_len(const VariantNode< BTREE_NODETYPE_VAR_OBJECT, K, V,  NodeSize > *node, int ind) {
+        return ((const var_value_record *)node->get_nth_record(ind))->m_value_len;
+    }
+
+    static uint16_t get_record_size(const VariantNode< BTREE_NODETYPE_VAR_OBJECT, K, V,  NodeSize > *node) {
+        return sizeof(var_value_record);
+    }
+
+    static void set_nth_key_len(const VariantNode< BTREE_NODETYPE_VAR_OBJECT, K, V,  NodeSize > *node, uint8_t *rec_ptr,
+                                uint16_t key_len) {
+        ((var_obj_record *)rec_ptr)->m_key_len = key_len;
+    }
+
+    static void set_nth_value_len(const VariantNode< BTREE_NODETYPE_VAR_OBJECT, K, V,  NodeSize > *node, uint8_t *rec_ptr,
+                                  uint16_t value_len) {
+        ((var_obj_record *)rec_ptr)->m_value_len = value_len;
+    }
+};
 
 #if 0
 template< typename K, typename V, btree_node_type NodeType >
