@@ -44,8 +44,9 @@ get_elapsed_time_ns(homeio::Clock::time_point startTime) {
 	return ns.count();
 }
 
+
 DriveEndPoint::DriveEndPoint(std::shared_ptr<iomgr::ioMgr> iomgr, comp_callback cb)
-				: EndPoint(iomgr), comp_cb(cb) {
+				: EndPoint(iomgr), write_aio_lat(0), total_write_ios(0), spurious_events(0), comp_cb(cb) {
 	iomgr->add_ep(this);
 }
 
@@ -86,10 +87,11 @@ DriveEndPoint::process_completions(int fd, void *cookie, int event) {
 		spurious_events++;
 	}
 	if (ret < 0) {
+        /* TODO how to handle it */
 		cmp_err++;
 	}
 	for (int i = 0; i < ret; i++) {
-                assert(0 <= static_cast<int64_t>(events[0].res));
+        assert(static_cast<int64_t>(events[i].res) >= 0);
 		struct iocb_info *info = static_cast<iocb_info *>(events[i].obj);
 		struct iocb *iocb = static_cast<struct iocb *>(info);
 		if (info->is_read) {
@@ -120,10 +122,11 @@ void
 DriveEndPoint::async_write(int m_sync_fd, const char *data, 
 			uint32_t size, uint64_t offset, 
 			uint8_t *cookie) {
+    
+    assert(!iocb_list.empty());
 	struct iocb_info *info = iocb_list.top();
 	struct iocb *iocb = static_cast<struct iocb *>(info);
 	iocb_list.pop();
-	assert(iocb != NULL);
 	io_prep_pwrite(iocb, m_sync_fd, (void *)data, size, offset);
 	io_set_eventfd(iocb, ev_fd);
 	iocb->data = cookie;
@@ -141,16 +144,17 @@ void
 DriveEndPoint::async_read(int m_sync_fd, char *data, 
 				uint32_t size, uint64_t offset, 
 				uint8_t *cookie) {
+    
+    assert(!iocb_list.empty());
 	struct iocb_info *info = iocb_list.top();
 	struct iocb *iocb = static_cast<struct iocb *>(info);
 	iocb_list.pop();
-	assert(iocb != NULL);
 	io_prep_pread(iocb, m_sync_fd, data, size, offset);
 	io_set_eventfd(iocb, ev_fd);
 	iocb->data = cookie;
 	info->is_read = true;
 	info->start_time = Clock::now();
-        LOGTRACE("Reading: {}", size);
+  LOGTRACE("Reading: {}", size);
 	if (io_submit(ioctx, 1, &iocb) != 1) {
 		std::stringstream ss;
 		ss << "error while read " << errno;
@@ -164,10 +168,11 @@ void
 DriveEndPoint::async_writev(int m_sync_fd, const struct iovec *iov, 
 				int iovcnt, uint32_t size, 
 				uint64_t offset, uint8_t *cookie) {
+    
+    assert(!iocb_list.empty());
 	struct iocb_info *info = iocb_list.top();
 	struct iocb *iocb = static_cast<struct iocb *>(info);
 	iocb_list.pop();
-	assert(iocb != NULL);
 	io_prep_pwritev(iocb, m_sync_fd, iov, iovcnt, offset);
 	io_set_eventfd(iocb, ev_fd);
 	iocb->data = cookie;
@@ -185,16 +190,17 @@ void
 DriveEndPoint::async_readv(int m_sync_fd, const struct iovec *iov, 
 				int iovcnt, uint32_t size, 
 				uint64_t offset, uint8_t *cookie) {
+    
+    assert(!iocb_list.empty());
 	struct iocb_info *info = iocb_list.top();
 	struct iocb *iocb = static_cast<struct iocb *>(info);
 	iocb_list.pop();
-	assert(iocb != NULL);
 	io_prep_preadv(iocb, m_sync_fd, iov, iovcnt, offset);
 	io_set_eventfd(iocb, ev_fd);
 	iocb->data = cookie;
 	info->is_read = true;
 	info->start_time = Clock::now();
-        LOGTRACE("Reading: {} vectors", iovcnt);
+  LOGTRACE("Reading: {} vectors", iovcnt);
 	if (io_submit(ioctx, 1, &iocb) != 1) {
 		std::stringstream ss;
 		ss << "error while reading " << errno;
@@ -235,10 +241,10 @@ DriveEndPoint::sync_read(int m_sync_fd, char *data,
     ssize_t read_size = pread(m_sync_fd, data, (ssize_t) size, (off_t) offset);
     if (read_size != size) {
         std::stringstream ss;
-	int i = errno;
+        int i = errno;
         ss << "Error trying to read offset " << offset << " size to read = " 
-	   << size << " size read = "
-           << read_size << "\n";
+            << size << " size read = "
+            << read_size << "\n";
         folly::throwSystemError(ss.str());
     }
 }

@@ -25,7 +25,7 @@ namespace homeio {
 
 using Clock = std::chrono::steady_clock;
 
-typedef std::function< void (int64_t num_bytes, uint8_t* cookie) > comp_callback;
+typedef std::function< void (int64_t res, uint8_t* cookie) > comp_callback;
 #ifdef linux
 struct iocb_info : public iocb {
 	bool is_read;

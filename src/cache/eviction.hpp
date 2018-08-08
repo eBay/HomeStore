@@ -75,7 +75,7 @@ private:
     EvictRecordType *do_evict(uint64_t needed_size) {
         EvictRecordType *rec = m_evict_policy.eject_next_candidate(
                 [this, needed_size](const EvictRecordType &rec) {
-                    if((m_get_size_cb(&rec) >= needed_size)) {
+                    if ((m_get_size_cb(&rec) >= needed_size) && m_can_evict_cb(&rec)) {
                         return true;
                     } else {
                         m_stats->inc_count(CACHE_STATS_FAILED_EVICT_COUNT);

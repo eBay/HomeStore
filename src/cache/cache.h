@@ -122,11 +122,14 @@ public:
 
     CacheBuffer() : m_refcount(0) {}
 
-    CacheBuffer(const K &key, const homeds::blob &blob, uint32_t offset = 0) :
+    CacheBuffer(const K &key, const homeds::blob &blob, 
+                Cache< K > *cache, uint32_t offset = 0) :
             m_refcount(0) {
         m_mem.set(blob, offset);
         m_key = key;
     }
+
+    virtual ~CacheBuffer(){};
 
     const K &get_key() const {
         return m_key;

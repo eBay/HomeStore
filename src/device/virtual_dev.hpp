@@ -61,34 +61,60 @@ struct pdev_chunk_map {
  * DefaultDeviceSelector: Which device to select for allocation
  */
 struct virtualdev_req;
-typedef std::function< void (virtualdev_req* req) > virtualdev_comp_callback;
+extern std::atomic<int> req_alloc;
+extern std::atomic<int> req_dealloc;
+typedef std::function< void (boost::intrusive_ptr<virtualdev_req> req) > virtualdev_comp_callback;
 struct virtualdev_req {
 	uint64_t version;
 	virtualdev_comp_callback cb;
 	uint64_t size;
 	bool is_read;
 	std::error_condition err;
-	atomic<uint64_t> num_bytes;
-	bool isSyncCall=false;
+	bool isSyncCall;
+    std::atomic<int> m_refcount;
+    virtualdev_req() : err(no_error), isSyncCall(false), m_refcount(0) {
+        req_alloc++;
+    }
+    friend void intrusive_ptr_add_ref(virtualdev_req *req) {
+        req->m_refcount.fetch_add(1, std::memory_order_acquire);
+    }
+    friend void intrusive_ptr_release(virtualdev_req *req) {
+        if (req->m_refcount.fetch_sub(1, std::memory_order_acquire) == 1) {
+            delete(req);
+        }
+    }
+    void inc_ref() {
+        intrusive_ptr_add_ref(this);
+    }
+    void dec_ref() {
+        intrusive_ptr_release(this);
+    }
+    virtual ~virtualdev_req() {
+        version = 0;
+        req_dealloc++;
+    }
 };
 
 [[maybe_unused]]
 static void
-virtual_dev_process_completions(uint64_t num_bytes, uint8_t *cookie) {
+virtual_dev_process_completions(int64_t res, uint8_t *cookie) {
 	virtualdev_req *req = (virtualdev_req *) cookie;
 	int ret = 0;
 	assert(req->version == 0xDEAD);
-	/* TODO: should set the correct error condition  for system errorno*/
-//	req->err = std::make_error_condition
-				(error_code(errno, std::generic_category()));
-	req->num_bytes.fetch_add(num_bytes, memory_order_acquire);
-	req->cb(req);
+    boost::intrusive_ptr< virtualdev_req > boost_req(req);
+    req->dec_ref();
+
+    if (req->err == no_error && res < 0) {
+        /* TODO: it should have more specific errors */
+    	req->err = std::make_error_condition(std::io_errc::stream);
+    }
+	req->cb(boost_req);
 }
 
 template <typename Allocator, typename DefaultDeviceSelector>
 class VirtualDev : public AbstractVirtualDev
 {
-typedef std::function< void (virtualdev_req* req) > comp_callback;
+typedef std::function< void (boost::intrusive_ptr<virtualdev_req> req) > comp_callback;
 private:
     vdev_info_block *m_vb; // This device block info
     DeviceManager *m_mgr;  // Device Manager back pointer
@@ -172,20 +198,20 @@ public:
         }
     }
     
-    void process_completions(virtualdev_req* req) {
-	
-	comp_cb(req);
-	/* XXX:we probably have to do something if a write/read is spread
+    void process_completions(boost::intrusive_ptr<virtualdev_req> req) {
+
+        comp_cb(req);
+        /* XXX:we probably have to do something if a write/read is spread
          * across the chunks from this layer.
-	 */
+         */
     }
 
     /* Load the virtual dev from vdev_info_block and create a Virtual Dev. */
     VirtualDev(DeviceManager *mgr, vdev_info_block *vb, comp_callback cb) :
-            m_vb(vb),
-            m_mgr(mgr) {
-        m_selector = std::make_unique<DefaultDeviceSelector>();
-        m_chunk_size = 0;
+        m_vb(vb),
+        m_mgr(mgr) {
+         m_selector = std::make_unique<DefaultDeviceSelector>();
+         m_chunk_size = 0;
     }
 
     ~VirtualDev() = default;
@@ -269,13 +295,13 @@ public:
 	mirror_time = 0;
     }
     void write(const BlkId &bid, const homeds::MemVector<BLKSTORE_BLK_SIZE> &buf, 
-			struct virtualdev_req *req) {
+			boost::intrusive_ptr <virtualdev_req> req) {
         BlkOpStatus ret_status = BLK_OP_SUCCESS;
         uint32_t size = bid.get_nblks() * get_blk_size();
         struct iovec iov[BlkId::max_blks_in_op()];
         int iovcnt = 0;
 
-	Clock::time_point startTime = Clock::now();
+        Clock::time_point startTime = Clock::now();
         assert(buf.size() == bid.get_nblks() * BLKSTORE_BLK_SIZE);
 
         uint32_t p = 0;
@@ -290,28 +316,31 @@ public:
         }
 
         PhysicalDevChunk *chunk;
-	
-	req->version = 0xDEAD;
-	auto temp = std::bind(&VirtualDev::process_completions, this, 
-			    std::placeholders::_1);
-	req->cb = temp;
-	req->size = size;
-    uint64_t dev_offset = to_dev_offset(bid, &chunk);
-    
-    LOGTRACE("Writing in device {} offset = {}", chunk->get_physical_dev()->get_dev_id(), dev_offset);
-    write_time +=
-        (std::chrono::duration_cast< std::chrono::nanoseconds >(Clock::now() -
-                                    startTime)).count();
-    write_cnt++;
-    if(req->isSyncCall){
-        chunk->get_physical_dev_mutable()->sync_writev(iov, iovcnt, size, dev_offset);
-    } else {
-        chunk->get_physical_dev_mutable()->writev(iov, iovcnt, size, dev_offset, (uint8_t *) req);
-    }
-    
+        
+        req->version = 0xDEAD;
+        auto temp = std::bind(&VirtualDev::process_completions, this, 
+                std::placeholders::_1);
+        req->cb = temp;
+        req->size = size;
+        uint64_t dev_offset = to_dev_offset(bid, &chunk);
 
-	physical_time += (std::chrono::duration_cast< std::chrono::nanoseconds >(Clock::now() -
-										startTime)).count();
+        LOG(INFO) << "Writing in device " << chunk->get_physical_dev()->get_dev_id() << " offset = " << dev_offset;
+        write_time +=
+            (std::chrono::duration_cast< std::chrono::nanoseconds >(Clock::now() -
+                                                                    startTime)).count();
+        write_cnt++;
+        if(req->isSyncCall){
+            chunk->get_physical_dev_mutable()->sync_writev(iov, iovcnt, size, dev_offset);
+        } else {
+            req->inc_ref();
+            chunk->get_physical_dev_mutable()->writev(iov, iovcnt, size, dev_offset,
+                    (uint8_t *) req.get());
+        }
+
+
+
+        physical_time += (std::chrono::duration_cast< std::chrono::nanoseconds >(Clock::now() -
+                    startTime)).count();
         if (get_nmirrors()) {
             uint64_t primary_chunk_offset = dev_offset - chunk->get_start_offset();
 
@@ -322,10 +351,11 @@ public:
                     try {
                         if(req->isSyncCall){
                             mchunk->get_physical_dev_mutable()->sync_writev(iov, iovcnt, size,
-                                                                       dev_offset);
+                                    dev_offset);
                         }else {
+                            req->inc_ref();
                             mchunk->get_physical_dev_mutable()->writev(iov, iovcnt, size,
-                                                                       dev_offset, (uint8_t *) req);
+                                    dev_offset, (uint8_t *) req.get());
                         }
                     } catch (std::exception &e) {
                         throw e;
@@ -333,8 +363,8 @@ public:
                 }
             }
         }
-	mirror_time += (std::chrono::duration_cast< std::chrono::nanoseconds >(Clock::now() -
-										startTime)).count();
+        mirror_time += (std::chrono::duration_cast< std::chrono::nanoseconds >(Clock::now() -
+                    startTime)).count();
     }
 
     /* Read the data for a given BlkId. With this method signature, virtual dev can read only in block boundary
@@ -343,22 +373,24 @@ public:
      * buf (caller buf) simple and there is no use case. However, we need to keep the blk size to be small as possible
      * to avoid read overhead */
     void read(const BlkId &bid, const homeds::MemPiece<BLKSTORE_BLK_SIZE> &mp, 
-							struct virtualdev_req *req) {
+            boost::intrusive_ptr<virtualdev_req> req) {
         PhysicalDevChunk *primary_chunk;
         bool failed = false;
 
         uint64_t primary_dev_offset = to_dev_offset(bid, &primary_chunk);
-	req->version = 0xDEAD;
-	req->cb = std::bind(&VirtualDev::process_completions, this, 
-			    std::placeholders::_1);
-	req->size = mp.size();
+        req->version = 0xDEAD;
+        req->cb = std::bind(&VirtualDev::process_completions, this, 
+                std::placeholders::_1);
+        req->size = mp.size();
         try {
             if(req->isSyncCall){
                 primary_chunk->get_physical_dev_mutable()->sync_read((char *) mp.ptr(), mp.size(),
-                                                                primary_dev_offset);
+                        primary_dev_offset);
             }else {
+                req->inc_ref();
                 primary_chunk->get_physical_dev_mutable()->read((char *) mp.ptr(), mp.size(),
-                                                                primary_dev_offset, (uint8_t *) req);
+                        primary_dev_offset, 
+                        (uint8_t *) req.get());
             }
         } catch (std::exception &e) {
             failed = true;
@@ -372,10 +404,12 @@ public:
                 try {
                     if(req->isSyncCall) {
                         mchunk->get_physical_dev_mutable()->sync_read((char *) mp.ptr(), mp.size(),
-                                                                 dev_offset);
-                    }else{
+                                dev_offset);
+                    }else {
+                        req->inc_ref();
                         mchunk->get_physical_dev_mutable()->read((char *)mp.ptr(), mp.size(),
-                                                                 dev_offset, (uint8_t *)req);
+                                dev_offset, 
+                                (uint8_t *)req.get());
                     }
                 } catch (std::exception &e) {
                     failed = true;
@@ -390,16 +424,16 @@ public:
     }
 
     void readv(const BlkId &bid, const homeds::MemVector<BLKSTORE_BLK_SIZE> &buf, 
-							struct virtualdev_req *req) {
+							boost::intrusive_ptr<virtualdev_req> req) {
         // Convert the input memory to iovector
         struct iovec iov[BlkId::max_blks_in_op()];
         int iovcnt = 0;
         uint32_t size = buf.size();
 
         assert(buf.size() == (bid.get_nblks() * get_blk_size())); // Expected to be less than allocated blk originally.
-	req->version = 0xDEAD;
-	req->cb = std::bind(&VirtualDev::process_completions, this, 
-			    std::placeholders::_1);
+        req->version = 0xDEAD;
+        req->cb = std::bind(&VirtualDev::process_completions, this, 
+                std::placeholders::_1);
         for (auto i : boost::irange<uint32_t>(0, buf.npieces())) {
             homeds::blob b;
             buf.get(&b, i);
@@ -413,10 +447,11 @@ public:
         PhysicalDevChunk *primary_chunk;
         uint64_t primary_dev_offset = to_dev_offset(bid, &primary_chunk);
 
-	req->size = size;
+        req->size = size;
         try {
+            req->inc_ref();
             primary_chunk->get_physical_dev_mutable()->readv(iov, iovcnt, size, 
-							primary_dev_offset, (uint8_t *)req);
+                    primary_dev_offset, (uint8_t *)req.get());
         } catch (std::exception &e) {
             failed = true;
         }
@@ -427,8 +462,9 @@ public:
             for (auto mchunk : m_mirror_chunks.find(primary_chunk)->second) {
                 uint64_t dev_offset = mchunk->get_start_offset() + primary_chunk_offset;
                 try {
+                req->inc_ref();
                     mchunk->get_physical_dev_mutable()->readv(iov, iovcnt, size, 
-								dev_offset, (uint8_t *)req);
+                            dev_offset, (uint8_t *)req.get());
                 } catch (std::exception &e) {
                     failed = true;
                 }

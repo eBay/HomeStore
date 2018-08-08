@@ -101,14 +101,15 @@ private:
 #define call_physical_method(bn, mname, ...)       (to_physical_node(bn)->mname(__VA_ARGS__))
 #define call_physical_method_const(bn, mname, ...) (to_physical_node_const(bn)->mname(__VA_ARGS__))
 
-#define BtreeNodeDeclType BtreeNode<BtreeType, K, V, InteriorNodeType, LeafNodeType, NodeSize>
+#define BtreeNodeDeclType BtreeNode<BtreeType, K, V, InteriorNodeType, LeafNodeType, NodeSize, btree_req_type>
 template<
         btree_type BtreeType,
         typename K,
         typename V,
         btree_node_type InteriorNodeType,
         btree_node_type LeafNodeType,
-        size_t NodeSize
+        size_t NodeSize,
+        typename btree_req_type
         >
 class BtreeNode : public BtreeSpecificImplDeclType::HeaderType {
 private:

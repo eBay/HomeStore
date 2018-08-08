@@ -69,6 +69,7 @@ V* IntrusiveCache<K, V>::get(const K &k) {
     auto b = K::get_blob(k);
     uint64_t hash_code = util::Hash64((const char *)b.bytes, (size_t)b.size);
 
+    /* TODO: rishabh, eviction and get can race with each other */
     bool found = m_hash_set.get(k, &v, hash_code);
     if (!found) {
         return nullptr;
@@ -97,6 +98,9 @@ bool IntrusiveCache<K, V>::erase(V &v) {
 
 template< typename K, typename V>
 bool IntrusiveCache<K, V>::is_safe_to_evict(const CurrentEvictor::EvictRecordType *erec) {
+    /* Should not evict the record if anyone is using it. It would break the btree locking logic 
+     * which depends on cache not freeing the object if it is using it.
+     */
     const CacheRecord *crec = CacheRecord::evict_to_cache_record(erec);
     return V::test_le((const V &)*crec, 1); // Ensure reference count is atmost one (one that is stored in hashset for)
 }
@@ -119,7 +123,7 @@ bool Cache<K>::insert(const K &k, const homeds::blob &b, uint32_t value_offset,
                       boost::intrusive_ptr< CacheBuffer<K> > *out_smart_buf,
                       const std::function<void(CacheBuffer<K> *)> &found_cb) {
     // Allocate a new Cachebuffer and set the blob address to it.
-    auto cbuf = homeds::ObjectAllocator< CacheBuffer<K> >::make_object(k, b, value_offset);
+    auto cbuf = homeds::ObjectAllocator< CacheBuffer<K> >::make_object(k, b, this, value_offset);
 
     CacheBuffer<K> *out_buf;
     bool inserted = IntrusiveCache< K, CacheBuffer<K> >::insert(*cbuf, &out_buf, found_cb);
@@ -188,6 +192,7 @@ bool Cache<K>::erase(const K &k, boost::intrusive_ptr< CacheBuffer<K> > *out_rem
     uint64_t hash_code = util::Hash64((const char *)b.bytes, (size_t)b.size);
 
     assert(out_removed_buf != nullptr);
+    /* TODO: erase and get can race with each other. Need to fix it */
     bool found = this->m_hash_set.remove(k, hash_code,
                                    [&out_removed_buf](CacheBuffer< K > *about_to_remove_ptr) {
                                        // Make a smart ptr of the buffer we are removing

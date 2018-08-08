@@ -32,7 +32,7 @@ SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write, iomgr, VMOD_BTREE_MERGE, VM
 homestore::DeviceManager *dev_mgr = nullptr;
 std::shared_ptr<homestore::Volume> vol;
 
-constexpr auto MAX_OUTSTANDING_IOs = 64u;
+constexpr auto MAX_OUTSTANDING_IOs = 128u;
 constexpr auto MAX_THREADS = 8u;
 
 constexpr auto Ki = 1024ull;
@@ -62,6 +62,7 @@ std::atomic<uint64_t> read_cnt(0);
 std::atomic<uint64_t> write_cnt(0);
 homeio::Clock::time_point read_startTime;
 homeio::Clock::time_point write_startTime;
+int free_req_cnt = 0;
 
 uint64_t get_elapsed_time(homeio::Clock::time_point startTime) 
 {
@@ -75,6 +76,9 @@ std::atomic<size_t> outstanding_ios(0);
 class test_ep : iomgr::EndPoint {
    struct req:volume_req {
       int indx;
+      ~req() {
+        free_req_cnt++;
+      }
    };
  public:
    int const ev_fd;
@@ -97,7 +101,7 @@ class test_ep : iomgr::EndPoint {
       while (atomic_load(&outstanding_ios) < MAX_OUTSTANDING_IOs && cnt < MAX_THREADS) {
          size_t temp = write_cnt.load(std::memory_order_relaxed);
          if(can_write && temp < max_buf) {
-            write_cnt.fetch_add(1, std::memory_order_relaxed);
+            temp = write_cnt.fetch_add(1, std::memory_order_relaxed);
             if (temp == 0) {
                write_startTime = homeio::Clock::now();
             }
@@ -140,17 +144,24 @@ class test_ep : iomgr::EndPoint {
    }
 
    void writefunc(int const cnt) {
-      struct req *req = new struct req();
+      boost::intrusive_ptr <req> req(new struct req());
       req->is_read = false;
       if (is_random_write) {
          assert(!is_read);
          uint64_t random = rand();
+
          uint64_t i = (random % (max_buf));
-         boost_buf[cnt] = vol->write(i * write_length, bufs[i], write_length, req);
+         void * write_buf;
+         posix_memalign((void**)&write_buf, page_size, buf_size);
+         memcpy(write_buf, bufs[i], buf_size);
+         vol->write(i * write_length, (uint8_t *)write_buf, write_length, req);
          /* store intrusive buffer pointer */
       } else {
          std::vector<boost::intrusive_ptr< BlkBuffer >> buf_list;
-         boost_buf[cnt] = vol->write(cnt * write_length, bufs[cnt], write_length, req);
+         void * write_buf;
+         posix_memalign((void**)&write_buf, page_size, buf_size);
+         memcpy(write_buf, bufs[cnt], buf_size);
+         vol->write(cnt * write_length, (uint8_t *)write_buf, write_length, req);
       }
    }
 
@@ -159,7 +170,7 @@ class test_ep : iomgr::EndPoint {
          return;
       }
       assert(is_write);
-      struct req *req = new struct req();
+      boost::intrusive_ptr <req> req(new struct req());
       req->is_read = true;
       if (is_random_read) {
          uint64_t random = rand();
@@ -172,48 +183,49 @@ class test_ep : iomgr::EndPoint {
       }
    }
 
-   void process_completions(volume_req *vol_req) {
-      struct req * req = static_cast< struct req* >(vol_req);
-      /* raise an event */
-      uint64_t temp = 1;
-      outstanding_ios--;
-      assert(outstanding_ios != SIZE_MAX);
-      uint64_t size = write(ev_fd, &temp, sizeof(uint64_t));
-      if (size != sizeof(uint64_t)) {
-         assert(0);
-      }
+
+   void process_completions(boost::intrusive_ptr<volume_req> vol_req) {
+       boost::intrusive_ptr <req>  req = boost::static_pointer_cast< struct req >(vol_req);
+       /* raise an event */
+       uint64_t temp = 1;
+       outstanding_ios--;
+       assert(outstanding_ios != SIZE_MAX);
+       uint64_t size = write(ev_fd, &temp, sizeof(uint64_t));
+       if (size != sizeof(uint64_t)) {
+           assert(0);
+       }
 #ifndef NDEBUG
-      if (req->is_read && !req->read_buf_list.empty()) {
-         /* memcmp */
-         auto tot_size = 0u;
-         for (auto const& buf : req->read_buf_list) {
-            homeds::blob const &b = buf->at_offset(0);
-            tot_size += b.size;
-            int j = memcmp((void *) b.bytes, (void *) bufs[req->indx], b.size);
-            assert(j == 0);
-         }
-         assert(tot_size == buf_size);
-      }
+       if (req->is_read && !req->read_buf_list.empty()) {
+           /* memcmp */
+           auto tot_size = 0u;
+           for (auto const& buf : req->read_buf_list) {
+               homeds::blob const &b = buf->at_offset(0);
+               tot_size += b.size;
+               int j = memcmp((void *) b.bytes, (void *) bufs[req->indx], b.size);
+               assert(j == 0);
+           }
+           assert(tot_size == buf_size);
+       }
 #endif
-      delete(req);
-      std::lock_guard<std::mutex> lg(cv_mtx);
-      if (outstanding_ios == 0 && write_cnt >= max_buf && can_write) {
-         /* signal main thread */
-         if (is_read) {
-            can_read = true;
-            [[maybe_unused]] auto rsize = read(ev_fd, &temp, sizeof(uint64_t));
-            temp = 1;
-            [[maybe_unused]] auto wsize = write(ev_fd, &temp, sizeof(uint64_t));
-         }
-         can_write = false;
-         LOGINFO("NOtify");
-         cv.notify_all();
-         return;
-      }  else if (can_read && read_cnt >= write_cnt) {
-         LOGINFO("NOtify {} {}", read_cnt, write_cnt);
-         cv.notify_all();
-         return;
-      }
+       std::lock_guard<std::mutex> lg(cv_mtx);
+       if (outstanding_ios == 0 && write_cnt >= max_buf && can_write) {
+           /* signal main thread */
+           if (is_read) {
+               can_read = true;
+               [[maybe_unused]] auto rsize = read(ev_fd, &temp, sizeof(uint64_t));
+               temp = 1;
+               [[maybe_unused]] auto wsize = write(ev_fd, &temp, sizeof(uint64_t));
+           }
+           can_write = false;
+           LOGINFO("NOtify");
+           cv.notify_all();
+           return;
+       }  else if (can_read && read_cnt >= write_cnt && outstanding_ios == 0) {
+           LOGINFO("NOtify {} {}", read_cnt, write_cnt);
+           can_read = false;
+           cv.notify_all();
+           return;
+       }
    }
 
    void init_local() override {
@@ -242,6 +254,7 @@ int main(int argc, char** argv) {
 
    sds_logging::SetLogger(spdlog::stdout_color_mt("test_volume"));
    spdlog::set_pattern("[%D %T.%f%z] [%^%l%$] [%t] %v");
+   vol_test_enable = true;
 
    if (0 == SDS_OPTIONS.count("device_list")) {
       LOGERROR("Need at least one device listed.");
@@ -306,7 +319,10 @@ int main(int argc, char** argv) {
       if (auto ec = posix_memalign((void**)&bufs[i], page_size, buf_size))
          throw std::system_error(std::error_code(ec, std::generic_category()));
       uint8_t *bufp = bufs[i];
-      memset(bufp, buf_size, 8);
+      for (auto j = 0u; j < (buf_size/8); j++) {
+        memset(bufp, i + j + 1 , 8);
+        bufp = bufp + 8;
+      }
    }
 
    LOGINFO("Initializing performance counters.");
@@ -332,7 +348,7 @@ int main(int argc, char** argv) {
    LOGINFO("Waiting for reads to finish.");
    {
    	std::unique_lock<std::mutex> lck(cv_mtx);
-   	cv.wait(lck);
+   	cv.wait(lck, [] { return (!can_read && 0 == outstanding_ios);});
    }
 
    time_us = get_elapsed_time(read_startTime);

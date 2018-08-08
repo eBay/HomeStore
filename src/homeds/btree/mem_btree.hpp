@@ -29,8 +29,8 @@ struct mem_btree_node_header {
     homeds::atomic_counter<uint16_t> refcount;
 };
 
-#define MemBtreeNodeDeclType BtreeNode<MEM_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize>
-#define MemBtreeImpl BtreeSpecificImpl<MEM_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize>
+#define MemBtreeNodeDeclType BtreeNode<MEM_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize, empty_writeback_req>
+#define MemBtreeImpl BtreeSpecificImpl<MEM_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize, empty_writeback_req>
 
 template<
         typename K,
@@ -39,12 +39,15 @@ template<
         btree_node_type LeafNodeType,
         size_t NodeSize
         >
-class BtreeSpecificImpl<MEM_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize>
+class BtreeSpecificImpl<MEM_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize, empty_writeback_req>
 {
+    typedef std::function< void (boost::intrusive_ptr<empty_writeback_req> cookie, 
+        std::error_condition status) > comp_callback;
 public:
     using HeaderType = mem_btree_node_header;
 
-    static std::unique_ptr<MemBtreeImpl> init_btree(BtreeConfig &cfg, void *btree_specific_context) {
+    static std::unique_ptr<MemBtreeImpl> init_btree(BtreeConfig &cfg, 
+                            void *btree_specific_context, comp_callback comp_cb) {
         return nullptr;
     }
 
@@ -75,16 +78,25 @@ public:
         return boost::intrusive_ptr<MemBtreeNodeDeclType>(bn);
     }
 
-    static void write_node(MemBtreeImpl *impl, boost::intrusive_ptr<MemBtreeNodeDeclType> bn) {
+    static void write_node(MemBtreeImpl *impl, boost::intrusive_ptr<MemBtreeNodeDeclType> bn,  
+                  std::deque<boost::intrusive_ptr<empty_writeback_req>> &dependent_req_q, 
+                  boost::intrusive_ptr<empty_writeback_req> cookie, bool is_sync) {
     }
 
-    static void free_node(MemBtreeImpl *impl, boost::intrusive_ptr<MemBtreeNodeDeclType> bn) {
+    static void free_node(MemBtreeImpl *impl, boost::intrusive_ptr<MemBtreeNodeDeclType> bn,  
+                  std::deque<boost::intrusive_ptr<empty_writeback_req>> &dependent_req_q) {
         auto mbh = (mem_btree_node_header *)bn.get();
         if (mbh->refcount.decrement_testz()) {
             // TODO: Access the VariantNode area and call its destructor as well
             bn->~MemBtreeNodeDeclType();
             BtreeNodeAllocator<NodeSize>::deallocate((uint8_t *)bn.get());
         }
+    }
+
+    static void read_node_lock(MemBtreeImpl *impl, 
+                               boost::intrusive_ptr<MemBtreeNodeDeclType> bn, 
+                               bool is_write_modifiable,  
+                               std::deque<boost::intrusive_ptr<empty_writeback_req>> *dependent_req_q) {
     }
 
     static void ref_node(MemBtreeNodeDeclType *bn) {

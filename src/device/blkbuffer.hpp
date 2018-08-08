@@ -28,7 +28,7 @@ public:
 };
 #endif
 
-class BlkBuffer : public CacheBuffer< BlkId > {
+class BlkBuffer : public WriteBackCacheBuffer< BlkId > {
 public:
     static BlkBuffer *make_object() {
         return homeds::ObjectAllocator< BlkBuffer >::make_object();

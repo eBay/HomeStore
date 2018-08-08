@@ -9,6 +9,7 @@ extern std::error_condition const no_error;
 enum homestore_error {
     lba_not_exist = 1,
     partial_lba_not_exist = 2,
+    dependent_req_failed = 3
 };
 
 class homstore_err_category :

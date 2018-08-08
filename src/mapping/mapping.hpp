@@ -1,3 +1,5 @@
+
+#include "blkstore/writeBack_cache.hpp"
 #include "homeds/btree/ssd_btree.hpp"
 #include "homeds/btree/btree.hpp"
 #include <blkalloc/blk.h>
@@ -5,9 +7,9 @@
 #include <error/error.h>
 
 using namespace std;
-using namespace homestore;
 using namespace homeds::btree;
 
+namespace homestore {
 class MappingKey : public homeds::btree::BtreeKey {
 private:
 	uint64_t blob;
@@ -103,21 +105,22 @@ public:
 };
 
 #define MappingBtreeDeclType     homeds::btree::Btree<homeds::btree::SSD_BTREE, MappingKey, MappingValue, \
-                                    homeds::btree::BTREE_NODETYPE_SIMPLE, homeds::btree::BTREE_NODETYPE_SIMPLE, 4096u>
+                                    homeds::btree::BTREE_NODETYPE_SIMPLE, homeds::btree::BTREE_NODETYPE_SIMPLE, 4096u, writeback_req>
 #define KEY_RANGE	1
 constexpr auto MAP_BLOCK_SIZE = (4 * 1024ul);
 
-namespace homestore {
-	struct lba_BlkId_mapping {
-		uint64_t lba;
-		BlkId blkId;
-		bool blkid_found;
-		lba_BlkId_mapping():lba(0),blkId(0),blkid_found(false){};
-	};
-}
+struct lba_BlkId_mapping {
+    uint64_t lba;
+    BlkId blkId;
+    bool blkid_found;
+    lba_BlkId_mapping():lba(0),blkId(0),blkid_found(false){};
+};
+
+struct volume_req;
 
 class mapping {
 	typedef std::function< void (struct BlkId blkid) > free_blk_callback;
+    typedef std::function< void (boost::intrusive_ptr<volume_req> cookie, std::error_condition status) > comp_callback;
 private:
 	MappingBtreeDeclType *m_bt;
 
@@ -126,9 +129,18 @@ private:
 	constexpr static auto Gi = Ki * Mi;
 	constexpr static auto MAX_CACHE_SIZE = 2ul * Gi;
 
-  free_blk_callback free_blk_cb;
+    free_blk_callback free_blk_cb;
+    comp_callback comp_cb;
 public:
-  mapping(uint32_t volsize, free_blk_callback cb, DeviceManager *mgr) :  free_blk_cb(cb) {
+
+  void process_completions(boost::intrusive_ptr<writeback_req> cookie, 
+                            std::error_condition status) {
+        boost::intrusive_ptr<volume_req> req = boost::static_pointer_cast<volume_req>(cookie);
+        comp_cb(req, status);
+  }
+
+  mapping(uint32_t volsize, free_blk_callback free_cb, comp_callback comp_cb, 
+            DeviceManager *mgr, Cache< BlkId > *cache) :  free_blk_cb(free_cb), comp_cb(comp_cb) {
 
 		homeds::btree::BtreeConfig btree_cfg;
 		btree_cfg.set_max_objs(volsize/(KEY_RANGE*MAP_BLOCK_SIZE));
@@ -137,18 +149,14 @@ public:
 
 		//TODO: we want to initialize btree_device_info only in case of SSD tree
 
-		// Create a global cache entry
-		homestore::Cache< BlkId > *glob_cache = new homestore::Cache< homestore::BlkId >(MAX_CACHE_SIZE, MAP_BLOCK_SIZE);
-		assert(glob_cache);
-
-
 		homeds::btree::btree_device_info bt_dev_info;
 		bt_dev_info.new_device = true;
 		bt_dev_info.dev_mgr = mgr;
 		bt_dev_info.size= 512 * Mi;
-		bt_dev_info.cache = glob_cache;
+		bt_dev_info.cache = cache;
 		bt_dev_info.vb = nullptr;
-        m_bt = MappingBtreeDeclType::create_btree(btree_cfg, &bt_dev_info);
+        m_bt = MappingBtreeDeclType::create_btree(btree_cfg, &bt_dev_info, 
+                    std::bind(&mapping::process_completions, this, std::placeholders::_1, std::placeholders::_2));
 	}
 
 	MappingKey get_key(uint32_t lba) {
@@ -161,7 +169,9 @@ public:
 		return value;
 	}
 
-	std::error_condition put(uint64_t lba, uint32_t nblks, struct BlkId blkid) {
+
+	std::error_condition put(boost::intrusive_ptr<volume_req >req, 
+                             uint64_t lba, uint32_t nblks, struct BlkId blkid) {
 		MappingValue value;
 
 		/* TODO: It is very naive way of doing it and will definitely impact
@@ -179,7 +189,9 @@ public:
 				free_blk_cb(value.get_val());
 			}
 			m_bt->put(get_key(lba), get_value(blkid), 
-				homeds::btree::INSERT_ONLY_IF_NOT_EXISTS);
+                      homeds::btree::INSERT_ONLY_IF_NOT_EXISTS, 
+                      boost::static_pointer_cast<writeback_req>(req), 
+                      boost::static_pointer_cast<writeback_req>(req));
 			++lba;
 			blkid.set_id(blkid.get_id() + 1);
 		}
@@ -238,3 +250,4 @@ public:
 		return error;
 	}
 };
+}

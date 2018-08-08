@@ -13,9 +13,22 @@
 #include <cmath>
 #include "homeds/utility/useful_defs.hpp"
 #include "homeds/memory/freelist_allocator.hpp"
+#include "error/error.h"
 
 using namespace std;
 
+struct empty_writeback_req {
+    /* shouldn't contain anything */
+    std::atomic<int> m_refcount;
+    friend void intrusive_ptr_add_ref(empty_writeback_req *req) {
+        req->m_refcount.fetch_add(1, std::memory_order_acquire);
+    }
+    friend void intrusive_ptr_release(empty_writeback_req *req) {
+        if (req->m_refcount.fetch_sub(1, std::memory_order_acquire) == 1) {
+            free(req);
+        }
+    }
+};
 struct uint48_t {
     uint64_t m_x:48;
 
@@ -548,6 +561,7 @@ private:
         return obj_allocator.get();
     }
 };
+
 
 std::atomic< bool > BtreeNodeAllocator::bt_node_allocator_initialized(false);
 std::unique_ptr< BtreeNodeAllocator > BtreeNodeAllocator::bt_node_allocator = nullptr;
