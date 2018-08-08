@@ -7,6 +7,7 @@
 #include <device/virtual_dev.hpp>
 
 extern bool vol_test_enable;
+
 namespace homestore {
 using namespace std;
 
@@ -202,7 +203,7 @@ public:
              req->memvec.get(&outb);
              free(outb.bytes);
         }
-#ifndef DEBUG
+#ifndef NDEBUG
         bool found = false;
         for (auto it = buf->pending_req_q.begin(); it < buf->pending_req_q.end(); ++it) {
             if (*it == req) {
@@ -282,12 +283,13 @@ public:
                  */
                 assert((buf->get_memvec()).npieces() == 1);
                 void *mem;
-                posix_memalign((void **) &mem, 4096, outb.size);
-                /* outb.bytes get freed when last_pending_req is completed */
-                memcpy(mem, outb.bytes, outb.size);
-                outb.bytes = (uint8_t *)mem;
-                (buf->get_memvec_mutable()).set(outb);
-                buf->gen_cnt++;
+                if (0 == posix_memalign((void **) &mem, 4096, outb.size)) {
+                   /* outb.bytes get freed when last_pending_req is completed */
+                   memcpy(mem, outb.bytes, outb.size);
+                   outb.bytes = (uint8_t *)mem;
+                   (buf->get_memvec_mutable()).set(outb);
+                   buf->gen_cnt++;
+                }
             }
         }
         buf_mtx.unlock();

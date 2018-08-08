@@ -23,7 +23,7 @@ pipeline {
 
         stage('Deploy') {
             when {
-                branch 'master'
+                branch "${CONAN_CHANNEL}/*"
             }
             steps {
                 sh "docker run --rm ${PROJECT}"

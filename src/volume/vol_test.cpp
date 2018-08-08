@@ -152,16 +152,22 @@ class test_ep : iomgr::EndPoint {
 
          uint64_t i = (random % (max_buf));
          void * write_buf;
-         posix_memalign((void**)&write_buf, page_size, buf_size);
-         memcpy(write_buf, bufs[i], buf_size);
-         vol->write(i * write_length, (uint8_t *)write_buf, write_length, req);
+         if (0 == posix_memalign((void**)&write_buf, page_size, buf_size)) {
+            memcpy(write_buf, bufs[i], buf_size);
+            vol->write(i * write_length, (uint8_t *)write_buf, write_length, req);
+         } else {
+            throw std::runtime_error("Out of Memory");
+         }
          /* store intrusive buffer pointer */
       } else {
          std::vector<boost::intrusive_ptr< BlkBuffer >> buf_list;
          void * write_buf;
-         posix_memalign((void**)&write_buf, page_size, buf_size);
-         memcpy(write_buf, bufs[cnt], buf_size);
-         vol->write(cnt * write_length, (uint8_t *)write_buf, write_length, req);
+         if (0 == posix_memalign((void**)&write_buf, page_size, buf_size)) {
+            memcpy(write_buf, bufs[cnt], buf_size);
+            vol->write(cnt * write_length, (uint8_t *)write_buf, write_length, req);
+         } else {
+            throw std::runtime_error("Out of Memory");
+         }
       }
    }
 
@@ -254,7 +260,9 @@ int main(int argc, char** argv) {
 
    sds_logging::SetLogger(spdlog::stdout_color_mt("test_volume"));
    spdlog::set_pattern("[%D %T.%f%z] [%^%l%$] [%t] %v");
+#ifndef NDEBUG
    vol_test_enable = true;
+#endif
 
    if (0 == SDS_OPTIONS.count("device_list")) {
       LOGERROR("Need at least one device listed.");

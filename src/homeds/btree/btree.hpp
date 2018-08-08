@@ -795,7 +795,9 @@ retry:
 
         m_root_node = new_root_int_node->get_node_id();
 
+#ifndef NDEBUG
         LOGDEBUGMOD(VMOD_BTREE_SPLIT, "New Root Node: {}", new_root_int_node->to_string());
+#endif
 
         //release_node(new_root_int_node);
     done:
@@ -970,15 +972,19 @@ retry:
                     parent_node->update(minfo[n].parent_index, last_key, nptr);
                 }
 
+#ifndef NDEBUG
                 LOGDEBUGMOD(VMOD_BTREE_MERGE, "Child Node {}", minfo[n].node->to_string());
+#endif
                 BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(), 
                                    minfo[n].node, dependent_req_q, NULL, false);
             }
         }
         
         // Its time to write the parent node and loop again to write all modified nodes and free freed nodes
+#ifndef NDEBUG
         LOGDEBUGMOD(VMOD_BTREE_MERGE,  "After merging node\n########################Parent Node:{} ",
                                      parent_node->to_string());
+#endif
         BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(), 
                                     parent_node, dependent_req_q, NULL, false);
 
