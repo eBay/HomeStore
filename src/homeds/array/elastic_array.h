@@ -255,11 +255,11 @@ namespace homeds {
     Elastic_Array<ElasticArrayTypeParams>::get_string_representation() const {
         uint32_t i = 0;
         std::stringstream ss;
-        ss << "No of elements filled:" << m_header->m_no_of_elements_filled << " out of total "
-           << m_no_of_elements_total << ",Elements:";
+        ss << "Filled(" << m_header->m_no_of_elements_filled << "), Total("
+           << m_no_of_elements_total << "),Elements:\n";
         ElementType *element = m_elements;
         while (i < m_header->m_no_of_elements_filled) {
-            ss << std::string(*element) << ",";
+            ss << std::string(*element) << ",\n";
             element += 1;
             i++;
         }

@@ -217,6 +217,10 @@ Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks, volume_req* req) {
     return bbuf;
 }
 
+void Volume::print_tree(){
+    map->print_tree();
+}
+
 int
 Volume::read(uint64_t lba, int nblks, volume_req* req) {
 
@@ -225,11 +229,10 @@ Volume::read(uint64_t lba, int nblks, volume_req* req) {
     Clock::time_point startTime = Clock::now();
     req->read_cnt = 0;
     
-    std::error_condition ret = map->get(lba, nblks, mappingList);
+    map->get(lba, nblks, mappingList);
     /* TODO: map is also going to be async once persistent bree comes.
      * This check will be removed later. 
      */
-    req->err = ret;
 
     map_read_time.fetch_add(get_elapsed_time(startTime), memory_order_relaxed);
 

@@ -74,6 +74,8 @@ class Volume {
 	void free_blk(homestore::BlkId bid);
   	void set_cb(comp_callback cb) { comp_cb = cb; };
   	
+  	void print_tree();
+  	
 private:
 	void alloc_single_block_in_mem();
 };

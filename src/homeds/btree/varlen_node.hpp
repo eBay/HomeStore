@@ -504,7 +504,7 @@ public:
 private:
     uint32_t insert(int ind, const homeds::blob &key_blob, const homeds::blob &val_blob)  {
         assert(ind <= (int)this->get_total_entries());
-        LOGDEBUG("{}:{}:{}:{}",ind ,get_var_node_header()->m_tail_arena_offset,get_arena_free_space() ,get_var_node_header()->m_available_space);
+        LOGTRACE("{}:{}:{}:{}",ind ,get_var_node_header()->m_tail_arena_offset,get_arena_free_space() ,get_var_node_header()->m_available_space);
         uint16_t obj_size = key_blob.size + val_blob.size;
         uint16_t to_insert_size = obj_size + get_record_size();
         if (to_insert_size > get_var_node_header()->m_available_space) {
@@ -578,7 +578,7 @@ private:
             ind++;
         }
         get_var_node_header()->m_available_space+=sizeToClaim;
-        LOGDEBUG("Available space claimed:{}",sizeToClaim);
+        LOGTRACE("Available space claimed:{}",sizeToClaim);
         
         int count = to_ind - from_ind + 1;
         uint8_t *rec_ptr = get_nth_record_mutable(from_ind);
@@ -649,7 +649,7 @@ private:
 #ifndef NDEBUG
         validate_sanity();
 #endif
-        LOGDEBUG("Sparse space reclaimed:{}",sparce_space);
+        LOGTRACE("Sparse space reclaimed:{}",sparce_space);
     }
 
     // See template specialization below for each nodetype
