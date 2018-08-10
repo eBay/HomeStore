@@ -166,7 +166,7 @@ public:
             vol->write(written_lba[cnt], temp_buff, written_nblks[cnt], req);
 
             //free temp buff
-            free(temp_buff);
+            //free(temp_buff);
 
         } else {
             LOGDEBUG("Writing -> {}:{}", cnt * BUF_SIZE, BUF_SIZE);
@@ -255,9 +255,10 @@ public:
                 int j = memcmp((void *) b.bytes, (void *) bufs[req->lba_to_check], b.size);
                 assert(j == 0);
             }
-            LOGDEBUG("Finished read for {}:{}", req->lba, req->nblks);
+            
 #endif
         }
+        LOGDEBUG("Finished {} for {}:{}", req->is_read?"read":"write",req->lba, req->nblks);
         delete (req);
         if (outstanding_ios == 0 && write_cnt >= MAX_BUF && can_write) {
             /* signal main thread */

@@ -654,6 +654,7 @@ public:
                       homeds::btree::APPEND_IF_EXISTS_ELSE_INSERT);
 
             lba = end_lba_for_range + 1;
+            assert(blk.m_nblks>0);
             total_blocks -= blk.m_nblks;
             last_blkid += blk.m_nblks;
             assert(total_blocks >= 0);

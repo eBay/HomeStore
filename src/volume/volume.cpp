@@ -211,6 +211,7 @@ Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks, volume_req* req) {
 
     Clock::time_point startTime = Clock::now();
     boost::intrusive_ptr< BlkBuffer > bbuf = blk_store->write(bid, b, req);
+    LOGDEBUG("Written lba - bid -> {} - {}",lba,bid.to_string());
     /* TODO: should check the write status */
     write_time.fetch_add(get_elapsed_time(startTime), memory_order_relaxed);
   //  LOG(INFO) << "Written on " << bid.to_string() << " for 8192 bytes";
