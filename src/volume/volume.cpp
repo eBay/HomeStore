@@ -144,6 +144,9 @@ Volume::destroy() {
    return std::error_condition();
 }
 
+atomic<uint64_t> total_read_finish_ios;
+atomic<uint64_t>   total_read_sent_ios;
+
 void 
 homestore::Volume::process_metadata_completions(boost::intrusive_ptr<volume_req> req) {
     assert(!req->is_read);
@@ -235,9 +238,11 @@ Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks,
     homeds::blob b = {buf, (uint32_t)(BLOCK_SIZE * nblks)};
 
     Clock::time_point startTime = Clock::now();
+
     std::deque<boost::intrusive_ptr<writeback_req>> req_q;
     boost::intrusive_ptr< BlkBuffer > bbuf = blk_store->write(bid, b, 
                                  boost::static_pointer_cast<blkstore_req<BlkBuffer>>(req), req_q);
+
     /* TODO: should check the write status */
     write_time.fetch_add(get_elapsed_time(startTime), memory_order_relaxed);
     //  LOG(INFO) << "Written on " << bid.to_string() << " for 8192 bytes";
@@ -245,10 +250,14 @@ Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks,
     return bbuf;
 }
 
+void Volume::print_tree(){
+    map->print_tree();
+}
+
 int
 Volume::read(uint64_t lba, int nblks, boost::intrusive_ptr<volume_req> req) {
 
-    std::vector< struct homestore::lba_BlkId_mapping > mappingList;
+    std::vector< struct lba_BlkId_mapping > mappingList;
     req->startTime = Clock::now();
     Clock::time_point startTime = Clock::now();
 
@@ -260,11 +269,13 @@ Volume::read(uint64_t lba, int nblks, boost::intrusive_ptr<volume_req> req) {
         return 0;
     }
 
+
     read_cnt.fetch_add(1, memory_order_relaxed);
     map_read_time.fetch_add(get_elapsed_time(startTime), memory_order_relaxed);
 
     req->lba = lba;
     req->nblks = nblks;
+
     req->blkstore_read_cnt = 1;
 
     startTime = Clock::now();
@@ -288,6 +299,7 @@ Volume::read(uint64_t lba, int nblks, boost::intrusive_ptr<volume_req> req) {
             info.size = bInfo.blkId.get_nblks() * BLOCK_SIZE;
             info.offset = bInfo.blkId.get_id() - bbuf->get_key().get_id();
             req->read_buf_list.push_back(info);
+
         }
     }
 

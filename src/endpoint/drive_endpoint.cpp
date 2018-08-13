@@ -98,6 +98,8 @@ DriveEndPoint::process_completions(int fd, void *cookie, int event) {
 			read_aio_lat.fetch_add(
 				get_elapsed_time_ns(info->start_time), 
 				memory_order_relaxed);
+			total_complete_read_ios++;
+			LOGINFO("DriveEndPoint-Read-Finish:{}",total_complete_read_ios);
 		} else {
 			write_aio_lat.fetch_add(
 				get_elapsed_time_ns(info->start_time),
@@ -106,6 +108,7 @@ DriveEndPoint::process_completions(int fd, void *cookie, int event) {
 		iocb_list.push(info);
 		comp_cb(events[i].res, (uint8_t *) events[i].data);
 	}
+	
 }
 
 void
@@ -162,6 +165,8 @@ DriveEndPoint::async_read(int m_sync_fd, char *data,
 		
 	}
 	total_read_ios++;
+
+	LOGINFO("DriveEndPoint-Read-Sent:{}",total_read_ios);
 }
 
 void 

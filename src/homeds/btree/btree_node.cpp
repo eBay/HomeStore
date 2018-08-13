@@ -4,6 +4,7 @@
 
 #include "btree_node.h"
 #include "simple_node.hpp"
+#include "varlen_node.hpp"
 
 namespace homeds { namespace btree {
 

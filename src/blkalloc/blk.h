@@ -28,6 +28,7 @@ namespace homestore {
 #define BLKID_SIZE (ID_BITS+NBLKS_BITS+CHUNK_NUM_BITS)/8
 
 /* This structure represents the application wide unique block number. It also encomposses the number of blks. */
+
 struct BlkId {
     uint64_t m_id:ID_BITS;                // Block number which is unique within the chunk
     uint64_t m_nblks:NBLKS_BITS;          // Total number of blocks starting from previous block number
@@ -120,7 +121,7 @@ struct BlkId {
         ss << "id=" << m_id << " nblks=" << (uint32_t)m_nblks << " chunk_num=" << (uint32_t)m_chunk_num;
         return ss.str();
     }
-};
+}__attribute__ ((__packed__)) ;
 
 #define BLKID32_INVALID ((uint32_t)(-1))
 #define BLKID64_INVALID ((uint64_t)(-1))

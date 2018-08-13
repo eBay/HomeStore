@@ -95,12 +95,18 @@ struct virtualdev_req {
     }
 };
 
+#ifndef TEMP_DELETE
+#define TEMP_DELETE
+    
+#endif
+    
 [[maybe_unused]]
 static void
 virtual_dev_process_completions(int64_t res, uint8_t *cookie) {
 	virtualdev_req *req = (virtualdev_req *) cookie;
 	int ret = 0;
 	assert(req->version == 0xDEAD);
+
     boost::intrusive_ptr< virtualdev_req > boost_req(req);
     req->dec_ref();
 
@@ -135,7 +141,8 @@ private:
     uint64_t mirror_time;
     uint64_t write_cnt;
     comp_callback comp_cb;
-
+    atomic<uint64_t> total_read_ios_vd;
+    atomic<uint64_t> total_read_complete_ios_vd;
 public:
     /* Create a new virtual dev for these parameters */
     VirtualDev(DeviceManager *mgr, uint64_t size, uint32_t nmirror, bool is_stripe, uint32_t dev_blk_size,
@@ -202,6 +209,7 @@ public:
 
         comp_cb(req);
         /* XXX:we probably have to do something if a write/read is spread
+
          * across the chunks from this layer.
          */
     }
@@ -389,8 +397,10 @@ public:
             }else {
                 req->inc_ref();
                 primary_chunk->get_physical_dev_mutable()->read((char *) mp.ptr(), mp.size(),
+
                         primary_dev_offset, 
                         (uint8_t *) req.get());
+
             }
         } catch (std::exception &e) {
             failed = true;

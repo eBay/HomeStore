@@ -105,12 +105,16 @@ class BtreeSpecificImpl<SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSiz
 public:
     using HeaderType = BtreeBuffer<K, V, InteriorNodeType, LeafNodeType, NodeSize>;
 
+
     static std::unique_ptr<SSDBtreeImpl> init_btree(BtreeConfig &cfg, 
                             void *btree_specific_context, comp_callback comp_cb) {
-        return std::make_unique<SSDBtreeImpl>(btree_specific_context, comp_cb);
+        return std::make_unique<SSDBtreeImpl>(cfg,btree_specific_context, comp_cb);
     }
 
-    BtreeSpecificImpl(void *btree_specific_context, comp_callback comp_cb) {
+    BtreeSpecificImpl(BtreeConfig &cfg, void *btree_specific_contex, comp_callback comp_cbt) {
+        this->cfg = cfg;
+        this->cfg.set_node_area_size(NodeSize - sizeof(SSDBtreeNodeDeclType) - sizeof(LeafPhysicalNodeDeclType));
+
         auto bt_dev_info = (btree_device_info *)btree_specific_context;
         m_comp_cb = comp_cb;
 
@@ -163,10 +167,10 @@ public:
         assert(b.size == NodeSize);
         if (is_leaf) {
             bnodeid_t bid(blkid.to_integer());
-            auto n = new (b.bytes) VariantNode<LeafNodeType, K, V, NodeSize>(&bid, true);
+            auto n = new (b.bytes) VariantNode<LeafNodeType, K, V, NodeSize>( &bid, true,impl->cfg);
         } else {
             bnodeid_t bid(blkid.to_integer());
-            auto n = new (b.bytes) VariantNode<InteriorNodeType, K, V, NodeSize>(&bid, true);
+            auto n = new (b.bytes) VariantNode<InteriorNodeType, K, V, NodeSize>( &bid, true,impl->cfg);
         }
 
         return boost::static_pointer_cast<SSDBtreeNodeDeclType>(safe_buf);
@@ -239,12 +243,15 @@ public:
     }
 private:
     homestore::BlkStore<homestore::VdevFixedBlkAllocatorPolicy, BtreeBufferDeclType> *m_blkstore;
+
     comp_callback m_comp_cb;
     /* TODO: cache has lot of bugs because of locking which become more prominent with btree
      * which has lot of reads/writes. For now, it is better to have separate cache
      * for btree and move it to global cache later after fixing all the bugs.
      */
     homestore::Cache <homestore::BlkId>* m_cache;
+
+    BtreeConfig cfg;
 };
 } }
 
