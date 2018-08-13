@@ -4,13 +4,21 @@
 #include <fcntl.h>
 #include <cache/cache_common.hpp>
 #include <cache/cache.h>
-#include <mapping/mapping.hpp>
+#include "blkstore/writeBack_cache.hpp" 
 #include <device/blkbuffer.hpp>
 #include <blkstore/blkstore.hpp>
 
 using namespace std;
 
 namespace homestore {
+
+struct buf_info {
+    uint64_t size;
+    int offset;
+    boost::intrusive_ptr< BlkBuffer > buf;
+};
+
+class mapping;
 
 /* this structure is not thread safe. But as of
  * now there is no use where we can access it in
@@ -21,7 +29,12 @@ struct volume_req:blkstore_req<BlkBuffer> {
 	int nblks;
 	Clock::time_point startTime;
 	int read_cnt;
-	std::vector< boost::intrusive_ptr< BlkBuffer >> read_buf_list;
+	std::vector< buf_info > read_buf_list;
+    
+    /* number of times mapping table need to be updated for this req. It can
+     * break the ios update in mapping btree depending on the key range.
+     */
+    std::atomic<int> num_mapping_update;
 
     volume_req():read_buf_list(0){};
 
@@ -46,6 +59,7 @@ class Volume {
     atomic<uint64_t> map_read_time;
     atomic<uint64_t> write_cnt;
     atomic<uint64_t> read_cnt;
+    atomic<uint64_t> outstanding_write_cnt;
     comp_callback comp_cb;
     boost::intrusive_ptr< BlkBuffer > only_in_mem_buff;
 
@@ -86,8 +100,7 @@ class Volume {
     uint64_t get_elapsed_time(Clock::time_point startTime);
 
     void process_data_completions(boost::intrusive_ptr<blkstore_req<BlkBuffer>> bs_req);
-    void process_metadata_completions(boost::intrusive_ptr<volume_req> wb_req, 
-            std::error_condition status);
+    void process_metadata_completions(boost::intrusive_ptr<volume_req> wb_req);
 
     void free_blk(homestore::BlkId bid);
     void set_cb(comp_callback cb) { comp_cb = cb; };

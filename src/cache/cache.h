@@ -71,7 +71,7 @@ public:
     /* Erase the key from the cache. Returns true if key exists and erased, false otherwise */
     bool erase(V &v);
 
-    static bool is_safe_to_evict(const CurrentEvictor::EvictRecordType *rec);
+    bool is_safe_to_evict(const CurrentEvictor::EvictRecordType *rec);
 
 protected:
     std::unique_ptr< CurrentEvictor > m_evictors[EVICTOR_PARTITIONS];

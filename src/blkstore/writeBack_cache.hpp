@@ -176,18 +176,6 @@ public:
         boost::intrusive_ptr<WriteBackCacheBuffer<Buffer>> buf = 
             boost::static_pointer_cast<WriteBackCacheBuffer<Buffer>>(cache_buf);
         
-        /* set status in the request */
-        std::unique_lock<std::mutex> req_mtx(req->mtx);
-        assert(req->state == WB_REQ_SENT);
-        req->state = WB_REQ_COMPL;
-        req->status = status;
-#ifndef NDEBUG
-        while (!req->dependent_req_q.empty()) {
-            req->dependent_req_q.pop_back();
-        }
-#endif
-        req_mtx.unlock();
- 
         /* invalidate the buffer if request is failed */
         std::unique_lock<std::mutex> buf_mtx(buf->mtx);
 
@@ -232,6 +220,18 @@ public:
         }
         buf_mtx.unlock();
        
+        /* set status in the request */
+        std::unique_lock<std::mutex> req_mtx(req->mtx);
+        assert(req->state == WB_REQ_SENT);
+        req->state = WB_REQ_COMPL;
+        req->status = status;
+#ifndef NDEBUG
+        while (!req->dependent_req_q.empty()) {
+            req->dependent_req_q.pop_back();
+        }
+#endif
+        req_mtx.unlock();
+        
         /* XXX: should we take a lock as no one should be adding in the queue once it is completed. */
         /* process the dependent requests */
         while (!req->req_q.empty()) {

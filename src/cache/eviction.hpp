@@ -35,21 +35,28 @@ public:
     }
 
     /* Add the given record to the list. The given record is automatically upvoted. This record might be added
-     * only after evicting a record (once it reaches max limits). In that case it returns the record it just
-     * evicted (This is the most probable case once we we reached steady state) */
-    EvictRecordType *add_record(EvictRecordType &r) {
+     * only after evicting a record (once it reaches max limits).
+     */
+    bool add_record(EvictRecordType &r) {
         auto sz = m_get_size_cb(&r);
 
         if ((m_cur_size.fetch_add(sz, std::memory_order_acq_rel) + sz) <= m_max_size) {
             // We didn't have any size restriction while it is being added, so add to the record as is
             m_evict_policy.add(r);
-            return nullptr;
+            return true;
         }
 
+        /* XXX there can be race when both threads try to evict it and there is only one entry in
+         * lru eviction. But it can not happen if we assume that one entry can not completely
+         * fill this evictor.
+         */
         // We were excess size earlier, so try evicting atleast this blk size
-        auto ev_rec = do_evict(sz);
-        m_evict_policy.add(r);
-        return ev_rec;
+        if (do_evict(sz)) {
+            m_evict_policy.add(r);
+            return true;
+        } else {
+            return false;
+        }
     }
 
     /* Upvote the entry. This depends on the current rank will move up and thus reduce the chances of getting evicted.
@@ -72,18 +79,33 @@ public:
     }
 
 private:
-    EvictRecordType *do_evict(uint64_t needed_size) {
-        EvictRecordType *rec = m_evict_policy.eject_next_candidate(
-                [this, needed_size](const EvictRecordType &rec) {
-                    if ((m_get_size_cb(&rec) >= needed_size) && m_can_evict_cb(&rec)) {
+    bool do_evict(uint64_t needed_size) {
+        uint64_t dealloc_size = 0;
+        m_evict_policy.eject_next_candidate(
+                [this, &needed_size, &dealloc_size](const EvictRecordType &rec, bool &stop) {
+                    stop = false;
+                    auto rec_size = m_get_size_cb(&rec);
+                    /* it delete the record if it can be evicted */
+                    if (m_can_evict_cb(&rec)) {
+                        if (needed_size > rec_size) {
+                            needed_size -= rec_size;
+                        } else {
+                            needed_size = 0;
+                        }
+                        dealloc_size += rec_size;
+                        if (needed_size == 0) {
+                            stop = true;
+                        }
                         return true;
                     } else {
                         m_stats->inc_count(CACHE_STATS_FAILED_EVICT_COUNT);
                         return false;
                     }
                 });
-        assert(rec);
-        return rec;
+        /* XXX: should we handle it */
+        assert(dealloc_size >= needed_size);
+        m_cur_size.fetch_sub(dealloc_size, std::memory_order_acq_rel);
+        return true;
     }
 
 private:

@@ -204,11 +204,26 @@ class test_ep : iomgr::EndPoint {
        if (req->is_read && !req->read_buf_list.empty()) {
            /* memcmp */
            auto tot_size = 0u;
-           for (auto const& buf : req->read_buf_list) {
-               homeds::blob const &b = buf->at_offset(0);
-               tot_size += b.size;
-               int j = memcmp((void *) b.bytes, (void *) bufs[req->indx], b.size);
-               assert(j == 0);
+           for (auto &info : req->read_buf_list) {
+               auto offset = info.offset;
+               auto size = info.size;
+               auto buf = info.buf;
+               while (size != 0) {
+                   uint32_t size_read = 0;
+                   homeds::blob b = buf->at_offset(offset);
+                   if (b.size > size) {
+                       size_read = size;
+                   } else {
+                       size_read = b.size;
+                   }   
+                   int j = memcmp((void *) b.bytes, 
+                            (void *) ((uint64_t) bufs[req->indx] + tot_size), 
+                            size_read);
+                   assert(j == 0);
+                   size -= size_read;
+                   offset += size_read;
+                   tot_size += size_read;
+               }   
            }
            assert(tot_size == buf_size);
        }

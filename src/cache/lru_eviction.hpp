@@ -16,7 +16,7 @@ struct LRUEvictRecord : public boost::intrusive::list_base_hook<> {
 class LRUEvictionPolicy {
 public:
     typedef LRUEvictRecord RecordType;
-    typedef std::function< bool(const LRUEvictRecord &) > CanEjectCallback;
+    typedef std::function< bool(const LRUEvictRecord &, bool &) > CanEjectCallback;
 
     LRUEvictionPolicy(int num_entries) {
     }
@@ -32,24 +32,35 @@ public:
         m_list.erase(it);
     }
 
-    LRUEvictRecord *eject_next_candidate(const CanEjectCallback &cb) {
+    void eject_next_candidate(const CanEjectCallback &cb) {
         std::lock_guard< decltype(m_list_guard) > guard(m_list_guard);
 
         auto count = 0U;
         auto itend = m_list.end();
+        bool stop = false;
         for (auto it = m_list.begin(); it != itend; ++it) {
-            if (cb(*it)) {
-                m_list.erase(it);
-                return &*it;
+            LRUEvictRecord *rec = &(*it);
+            /* return the next element */
+            it = m_list.erase(it);
+            if (cb(*rec, stop)) {
+                if (stop) {
+                    return;
+                }
+                /* point to the last element before delete */
+                --it;
             } else {
+                /* reinsert it at the same position */
+                it = m_list.insert(it, *rec);
                 count++;
             }
-            if (count) { LOGINFOMOD(cache_vmod_evict, "LRU ejection had to skip {} entries", count); }
+            if (count) { 
+                LOGINFOMOD(cache_vmod_evict, "LRU ejection had to skip {} entries", count); 
+            }
         }
 
         // No available candidate to evict
         // TODO: Throw no space available exception.
-        return nullptr;
+        return;
     }
 
     void upvote(LRUEvictRecord &rec) {

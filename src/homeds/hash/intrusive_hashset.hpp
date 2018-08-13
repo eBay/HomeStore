@@ -116,6 +116,30 @@ public:
         return found;
     }
 
+    /* It remove if ref_cnt is 1 */
+    bool check_and_remove(const K &k) {
+        bool ret = false;
+
+        write_lock();
+        for (auto it(m_list.begin()), itend(m_list.end()); it != itend; ++it) {
+            int x = K::compare(*(V::extract_key(*it)), k);
+            if (x == 0) {
+                if (V::test_le((const V &)*it, 1)) {
+                    m_list.erase(it);
+                    V::deref(*it);
+                    ret = true;
+                } else {
+                    ret = false;
+                }
+                break;
+            } else if (x > 0) {
+                break;
+            }
+        }
+        write_unlock();
+        return ret;   
+    }
+
     bool release(const K &k) {
         bool removed;
         return remove(k, &removed, nullptr);
@@ -216,6 +240,14 @@ public:
 #endif
         HashBucket<K, V> *hb = get_bucket(hash_code);
         return (hb->remove(k, found_cb));
+    }
+
+    bool check_and_remove(const K &k) {
+#ifdef GLOBAL_HASHSET_LOCK
+        std::lock_guard<std::mutex> lk(m);
+#endif
+        HashBucket<K, V> *hb = get_bucket(k);
+        return (hb->check_and_remove(k));
     }
 
 private:

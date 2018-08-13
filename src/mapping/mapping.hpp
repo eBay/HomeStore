@@ -5,6 +5,7 @@
 #include <blkalloc/blk.h>
 #include <csignal>
 #include <error/error.h>
+#include <volume/volume.hpp>
 
 using namespace std;
 using namespace homeds::btree;
@@ -116,11 +117,9 @@ struct lba_BlkId_mapping {
     lba_BlkId_mapping():lba(0),blkId(0),blkid_found(false){};
 };
 
-struct volume_req;
-
 class mapping {
 	typedef std::function< void (struct BlkId blkid) > free_blk_callback;
-    typedef std::function< void (boost::intrusive_ptr<volume_req> cookie, std::error_condition status) > comp_callback;
+    typedef std::function< void (boost::intrusive_ptr<volume_req> cookie) > comp_callback;
 private:
 	MappingBtreeDeclType *m_bt;
 
@@ -135,8 +134,15 @@ public:
 
   void process_completions(boost::intrusive_ptr<writeback_req> cookie, 
                             std::error_condition status) {
-        boost::intrusive_ptr<volume_req> req = boost::static_pointer_cast<volume_req>(cookie);
-        comp_cb(req, status);
+        boost::intrusive_ptr<volume_req> req = 
+                        boost::static_pointer_cast<volume_req>(cookie);
+        
+        if (req->status == no_error) {
+            req->status = status;
+        }
+        if (req->num_mapping_update.fetch_sub(1, std::memory_order_release) == 1) {
+            comp_cb(req);
+        }
   }
 
   mapping(uint32_t volsize, free_blk_callback free_cb, comp_callback comp_cb, 
@@ -178,6 +184,7 @@ public:
 		 * the performance. We have a new design and will implement it with
 		 * snapshot.
 		 */
+        req->num_mapping_update++;
 		for (uint32_t i = 0; i < nblks; ++i) {
 			blkid.set_nblks(1);
 			/* TODO: don't need to call remove explicitly once
@@ -188,6 +195,7 @@ public:
 				/* free this block */
 				free_blk_cb(value.get_val());
 			}
+            req->num_mapping_update++;
 			m_bt->put(get_key(lba), get_value(blkid), 
                       homeds::btree::INSERT_ONLY_IF_NOT_EXISTS, 
                       boost::static_pointer_cast<writeback_req>(req), 
@@ -195,6 +203,10 @@ public:
 			++lba;
 			blkid.set_id(blkid.get_id() + 1);
 		}
+
+        if (req->num_mapping_update.fetch_sub(1, std::memory_order_release) == 1) {
+            comp_cb(req);
+        }
 		return homestore::no_error;
 	}
 
@@ -208,6 +220,8 @@ public:
 		while (nblks != 0) {
 			homestore::lba_BlkId_mapping* mapping = new struct homestore::lba_BlkId_mapping();
 			mapping->lba = lba;
+            /* this code will change with varsize */
+            mapping->blkId.set_nblks(1);
 			MappingValue value;
 
 			key = get_key(lba).get_value();

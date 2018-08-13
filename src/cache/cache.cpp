@@ -16,8 +16,8 @@ IntrusiveCache<K, V>::IntrusiveCache(uint64_t max_cache_size, uint32_t avg_size_
     LOGINFO("Initializing cache with cache_size = {} with {} partitions", max_cache_size, EVICTOR_PARTITIONS);
     for (auto i = 0; i < EVICTOR_PARTITIONS; i++) {
         m_evictors[i] = std::make_unique<CurrentEvictor>(i, max_cache_size/EVICTOR_PARTITIONS, &m_stats,
-                                                         IntrusiveCache<K, V>::is_safe_to_evict,
-                                                         V::get_size);
+                                                         (std::bind(&IntrusiveCache<K, V>::is_safe_to_evict,
+                                                            this, std::placeholders::_1)), V::get_size);
     }
 };
 
@@ -40,20 +40,13 @@ bool IntrusiveCache<K, V>::insert(V &v, V **out_ptr, const std::function<void(V 
     }
 
     // If we successfully added to the hash set, inform the evictor to evict a block if needed.
-    CacheRecord *evicted_rec = CacheRecord::evict_to_cache_record(
-            m_evictors[hash_code % EVICTOR_PARTITIONS]->add_record(v.get_evict_record_mutable()));
-    if (evicted_rec) {
-        // We indeed evicted an entry, lets remove the evicted entry from the hash set
-        V *evicted_v = static_cast<V *>(evicted_rec);
-        LOGWARNMOD(cache_vmod_write, "Had to evict following entry from cache: {}", evicted_v->to_string());
-
-        m_stats.inc_count(CACHE_STATS_EVICT_COUNT);
-        bool found = m_hash_set.remove(*(V::extract_key(*evicted_v)));
-        assert(found);
-    } else {
+    if (m_evictors[hash_code % EVICTOR_PARTITIONS]->add_record(v.get_evict_record_mutable())) {
         m_stats.inc_count(CACHE_STATS_OBJ_COUNT);
+        return true;
+    } else {
+        assert(0);
+        return false;
     }
-    return true;
 }
 
 template< typename K, typename V>
@@ -102,7 +95,13 @@ bool IntrusiveCache<K, V>::is_safe_to_evict(const CurrentEvictor::EvictRecordTyp
      * which depends on cache not freeing the object if it is using it.
      */
     const CacheRecord *crec = CacheRecord::evict_to_cache_record(erec);
-    return V::test_le((const V &)*crec, 1); // Ensure reference count is atmost one (one that is stored in hashset for)
+    
+    if (V::test_le((const V &)*crec, 1)) { // Ensure reference count is atmost one (one that is stored in hashset for)
+        /* It remove the entry only if ref cnt is one */
+        return(m_hash_set.check_and_remove(*(V::extract_key((V &)*crec))));
+    } else {
+        return false;
+    }
 }
 
 ////////////////////////////////// Cache Section /////////////////////////////////
@@ -181,6 +180,9 @@ bool Cache<K>::get(const K &k, boost::intrusive_ptr< CacheBuffer<K>> *out_smart_
     return false;
 }
 
+/* Caller ensures that there is no reference to this buffer while calling erase or it is
+ * safe to evict from the cache even if there is reference to it.
+ */
 template <typename K>
 bool Cache<K>::erase(boost::intrusive_ptr< CacheBuffer<K> > buf) {
     return (IntrusiveCache< K, CacheBuffer<K> >::erase(*(buf.get())));
