@@ -114,7 +114,7 @@ SDS_OPTIONS_ENABLE(logging)
 int main(int argc, char *argv[]) {
     SDS_OPTIONS_LOAD(argc, argv, logging)
     testing::InitGoogleTest(&argc, argv);
-    sds_logging::SetLogger(spdlog::stdout_color_mt("test_cache"));
+    sds_logging::SetLogger("test_cache");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
     return RUN_ALL_TESTS();
 }

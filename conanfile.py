@@ -3,7 +3,7 @@ from conans import ConanFile, CMake, tools
 class HomestoreConan(ConanFile):
     name = "homestore"
 
-    version = "0.8.1"
+    version = "0.8.3"
 
     license = "Proprietary"
     description = "HomeStore"
@@ -18,7 +18,7 @@ class HomestoreConan(ConanFile):
                 ("double-conversion/3.0.0@bincrafters/stable"),
                 ("farmhash/1.0.0@oss/stable"),
                 ("folly/2018.08.06.00@bincrafters/stable"),
-                ("iomgr/2.0.1@sds/testing"))
+                ("iomgr/2.0.3@sds/testing"))
 
     generators = "cmake"
     default_options = "shared=False", "fPIC=True"

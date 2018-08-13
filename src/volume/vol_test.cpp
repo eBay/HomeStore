@@ -262,18 +262,17 @@ SDS_OPTION_GROUP(test_volume, (block_size, "", "block_size", "Block size for IO"
                               (is_rand_read, "", "is_random_read", "random read", ::cxxopts::value<bool>(), ""), \
                               (is_write, "", "is_write", "serial write", ::cxxopts::value<bool>(), ""), \
                               (is_rand_write, "", "is_random_write", "random write", ::cxxopts::value<bool>(), ""), \
-                              (device_list, "c", "device_list", "List of device paths", ::cxxopts::value<std::vector<std::string>>(), "path [...]"), \
+                              (device_list, "", "device_list", "List of device paths", ::cxxopts::value<std::vector<std::string>>(), "path [...]"), \
                               (max_vol_size, "", "max_vol_size", "max volume size", ::cxxopts::value<uint64_t>()->default_value("1073741824"), "bytes"), \
                               (thread_cnt, "", "threads", "Thread count", ::cxxopts::value<uint32_t>()->default_value("2"), "numthreads"))
 SDS_OPTIONS_ENABLE(logging, test_volume)
 
 
 int main(int argc, char** argv) {
-   spdlog::set_async_mode(4096, spdlog::async_overflow_policy::block_retry, nullptr, std::chrono::seconds(2));
    SDS_OPTIONS_LOAD(argc, argv, logging, test_volume)
    SDS_PARSER.parse_positional("device_list");
 
-   sds_logging::SetLogger(spdlog::stdout_color_mt("test_volume"));
+   sds_logging::SetLogger("test_volume");
    spdlog::set_pattern("[%D %T.%f%z] [%^%l%$] [%t] %v");
 #ifndef NDEBUG
    vol_test_enable = true;

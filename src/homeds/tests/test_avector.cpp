@@ -21,7 +21,7 @@ void func(const homeds::sparse_vector<int> &cvec) {
 SDS_OPTIONS_ENABLE(logging)
 int main(int argc, char *argv[]) {
     SDS_OPTIONS_LOAD(argc, argv, logging)
-    sds_logging::SetLogger(spdlog::stdout_color_mt("test_avector"));
+    sds_logging::SetLogger("test_avector");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 
     homeds::sparse_vector<int> vec;
