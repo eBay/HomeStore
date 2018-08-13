@@ -139,7 +139,10 @@ public:
 
     uint8_t *create_temp_buff(uint64_t lba, uint64_t nblks) {
         //create temp buffer based on lba/nblks from buf[x] array
-        uint8_t *temp_buff = (uint8_t *) malloc(WRITE_SIZE * nblks);
+        uint8_t *temp_buff;
+        if (auto ec = posix_memalign((void **) &temp_buff, page_size, WRITE_SIZE * nblks))
+            throw std::system_error(std::error_code(ec, std::generic_category()));
+        
         uint8_t *curr_location = temp_buff;
         uint64_t i = 0;
         while (i < nblks) {
@@ -199,7 +202,10 @@ public:
     }
 
     uint8_t *create_temp_buff(std::vector<boost::intrusive_ptr<BlkBuffer >> &read_buf_list) {
-        uint8_t *temp_buff = (uint8_t *) malloc(get_size(read_buf_list));
+        uint8_t *temp_buff;
+        if (auto ec = posix_memalign((void **) &temp_buff, page_size, get_size(read_buf_list)))
+            throw std::system_error(std::error_code(ec, std::generic_category()));
+        
         uint8_t *curr_buff = temp_buff;
         for (uint64_t i = 0; i < read_buf_list.size(); i++) {
             homeds::blob b = read_buf_list[i]->at_offset(0);

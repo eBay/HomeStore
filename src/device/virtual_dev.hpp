@@ -72,6 +72,11 @@ struct virtualdev_req {
 	bool isSyncCall=false;
 };
 
+#ifndef TEMP_DELETE
+#define TEMP_DELETE
+    
+#endif
+    
 [[maybe_unused]]
 static void
 virtual_dev_process_completions(uint64_t num_bytes, uint8_t *cookie) {
@@ -82,6 +87,7 @@ virtual_dev_process_completions(uint64_t num_bytes, uint8_t *cookie) {
 //	req->err = std::make_error_condition
 				(error_code(errno, std::generic_category()));
 	req->num_bytes.fetch_add(num_bytes, memory_order_acquire);
+    
 	req->cb(req);
 }
 
@@ -109,7 +115,8 @@ private:
     uint64_t mirror_time;
     uint64_t write_cnt;
     comp_callback comp_cb;
-
+    atomic<uint64_t> total_read_ios_vd;
+    atomic<uint64_t> total_read_complete_ios_vd;
 public:
     /* Create a new virtual dev for these parameters */
     VirtualDev(DeviceManager *mgr, uint64_t size, uint32_t nmirror, bool is_stripe, uint32_t dev_blk_size,
@@ -173,7 +180,10 @@ public:
     }
     
     void process_completions(virtualdev_req* req) {
-	
+        if(req->is_read) {
+            total_read_complete_ios_vd++;
+            LOGINFO("VDev-Read-Finish:{}", total_read_complete_ios_vd);
+        }
 	comp_cb(req);
 	/* XXX:we probably have to do something if a write/read is spread
          * across the chunks from this layer.
@@ -359,6 +369,8 @@ public:
             }else {
                 primary_chunk->get_physical_dev_mutable()->read((char *) mp.ptr(), mp.size(),
                                                                 primary_dev_offset, (uint8_t *) req);
+                total_read_ios_vd++;
+                LOGINFO("VDev-Read-Sent:{}",total_read_ios_vd);
             }
         } catch (std::exception &e) {
             failed = true;

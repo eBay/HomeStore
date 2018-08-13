@@ -96,6 +96,9 @@ public:
 	    }
 			
 	}
+	read_complete_cnt++;
+	LOGINFO("BlkStore-Read-Finish:{}",read_complete_cnt);
+	
 	m_comp_cb(req);
     }
 
@@ -362,6 +365,7 @@ public:
 	    req->missing_piece_cnt++;
             m_vdev.read(tmp_bid, missing_mp.get(), req);
 	    read_cnt.fetch_add(1, memory_order_relaxed);
+        LOGINFO("BlkStore-Read-Sent:{}",read_cnt);
             size_to_read -= missing_mp->size();
         }
 
@@ -584,6 +588,7 @@ private:
     atomic<uint64_t> cache_read_time;
     atomic<uint64_t> cache_hit;
     atomic<uint64_t> read_cnt;
+    atomic<uint64_t> read_complete_cnt;
     atomic<uint64_t> write_time;
     comp_callback m_comp_cb;
     boost::intrusive_ptr< Buffer > only_in_mem_buff;

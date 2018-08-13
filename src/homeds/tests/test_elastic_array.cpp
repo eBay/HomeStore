@@ -2,7 +2,7 @@
  * Copyright eBay Inc 2018
  */
 
-#include "homeds/array/sorted_dynamic_array.h"
+#include "homeds/array/elastic_array.h"
 #include "blkalloc/blk.h"
 #include <sds_logging/logging.h>
 
@@ -12,7 +12,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-SDS_LOGGING_INIT(sorted_dynamic_array)
+SDS_LOGGING_INIT(Elastic_Array)
 SDS_OPTIONS_ENABLE(logging)
 
 #define LOAD_PERCENT 90
@@ -26,10 +26,10 @@ static const int ELEMENT_RANGE = 100000;
 int main(int argc, char *argv[]) {
 
     SDS_OPTIONS_LOAD(argc, argv, logging)
-    sds_logging::SetLogger(spdlog::stdout_color_mt("test_Sorted_Dynamic_Array"));
+    sds_logging::SetLogger(spdlog::stdout_color_mt("test_Elastic_Array"));
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 
-    homeds::Sorted_Dynamic_Array<uint64_t, LOAD_PERCENT, GROWTH_PERCENT> sda(INITIAL_CAPACITY);
+    homeds::Elastic_Array<uint64_t, LOAD_PERCENT, GROWTH_PERCENT> sda(INITIAL_CAPACITY);
     bool taken[ELEMENT_RANGE] = {0};
     uint64_t elements[NO_OF_WRITES];
 
@@ -47,7 +47,7 @@ int main(int argc, char *argv[]) {
     }
     assert(sda.get_no_of_elements_filled() == 1000);
 
-    auto func = [](homeds::Sorted_Dynamic_Array<uint64_t, LOAD_PERCENT, GROWTH_PERCENT> &sda) {
+    auto func = [](homeds::Elastic_Array<uint64_t, LOAD_PERCENT, GROWTH_PERCENT> &sda) {
         //validate all elements are sorted
         int i = sda.get_no_of_elements_filled() - 1;
         while (i >= 1) {

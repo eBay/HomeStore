@@ -429,6 +429,7 @@ public:
 
     void get(uint16_t start_offset, uint16_t end_offset,
              std::vector<Offset_BlkId *> &offsetToBlkIdLst) {
+        LOGINFO("value.get called with :{}:{}",start_offset,end_offset);
         if (dyna_arr->get_no_of_elements_filled() == 0)return;
         Offset_BlkId start_element(start_offset, BlkId(0, 0, 0));
         int st = dyna_arr->binary_search(&start_element);
@@ -482,6 +483,7 @@ public:
             offsetToBlkIdLst.push_back(currentRange);
             start++;
         }
+        LOGINFO("value.get finished with :{}:{}",start_offset,end_offset);
     }
 
     std::string to_string() const {
@@ -539,6 +541,7 @@ public:
 
     void get(uint64_t start_lba, uint32_t nblks,
              std::vector<struct lba_BlkId_mapping> &mappingList) {
+        LOGINFO("mapping.get called with :{}:{}",start_lba,nblks);
         uint64_t curr_lba = start_lba;
         uint64_t end_lba = start_lba + nblks - 1;//inclusive
 
@@ -598,7 +601,7 @@ public:
                 curr_lba = end_lba_for_range + 1;
             }
         }
-
+        LOGINFO("mapping.get finished with :{}:{}",start_lba,nblks);
 #ifndef NDEBUG
         validate_get_response(start_lba,nblks,mappingList);
 #endif

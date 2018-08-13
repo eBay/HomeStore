@@ -125,6 +125,9 @@ Volume::destroy() {
    return std::error_condition();
 }
 
+atomic<uint64_t> total_read_finish_ios;
+atomic<uint64_t>   total_read_sent_ios;
+
 void 
 homestore::Volume::process_completions(blkstore_req<BlkBuffer> *bs_req) {
 	
@@ -139,7 +142,9 @@ homestore::Volume::process_completions(blkstore_req<BlkBuffer> *bs_req) {
     	map->put(req->lba, req->nblks, req->bid);
 	map_time += get_elapsed_time(startTime);
    	io_write_time.fetch_add(get_elapsed_time(req->startTime), memory_order_relaxed);
-   } else {
+   } else { 
+       total_read_finish_ios++;
+       LOGINFO("Volume-read-finish:{}", total_read_finish_ios);
 	req->read_cnt--;
 	if (req->read_cnt != 0) {
 		return;
@@ -241,15 +246,20 @@ Volume::read(uint64_t lba, int nblks, volume_req* req) {
     req->lba = lba;
     req->nblks = nblks;
     req->is_read = true;
-    req->read_cnt = mappingList.size();
+    req->read_cnt =  mappingList.size();
     
+    LOGINFO("Read mapping layer finished with readcnt:{}:{}:{}",read_cnt,lba, nblks);
     startTime = Clock::now();
     for (auto bInfo: mappingList) {
         if(!bInfo.blkid_found){
+            //TODO - Possible bug, mkae it atomic
             req->read_buf_list.push_back(only_in_mem_buff);
+            req->read_cnt--;
         }else {
             boost::intrusive_ptr<BlkBuffer> bbuf = blk_store->read(bInfo.blkId, 0, BLOCK_SIZE * bInfo.blkId.get_nblks(),
                                                                    req);
+            total_read_sent_ios++;
+            LOGINFO("Volume-read-sent:{}", total_read_sent_ios);
         }
     }
     read_time.fetch_add(get_elapsed_time(startTime), memory_order_relaxed);
