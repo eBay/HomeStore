@@ -154,7 +154,7 @@ SDS_OPTIONS_ENABLE(logging)
 int main(int argc, char** argv)
 {
     SDS_OPTIONS_LOAD(argc, argv, logging)
-    sds_logging::SetLogger(spdlog::stdout_color_mt("perf_cache"));
+    sds_logging::SetLogger("perf_cache");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
     setup(TEST_COUNT * THREADS);
     ::benchmark::Initialize(&argc, argv);
