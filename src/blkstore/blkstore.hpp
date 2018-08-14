@@ -93,7 +93,6 @@ class BlkStore {
         cache_read_time.fetch_add(get_elapsed_time(cache_startTime), 
                 std::memory_order_relaxed);
         return new_bbuf;
-
     }
 
     BlkStore(DeviceManager *mgr, Cache< BlkId > *cache, uint64_t initial_size, BlkStoreCacheType cache_type,
@@ -444,12 +443,10 @@ out:
 
             // Read the missing piece from the device
             BlkId tmp_bid(bid.get_id() + missing_mp->offset()/BLKSTORE_BLK_SIZE,
-
                     missing_mp->size()/BLKSTORE_BLK_SIZE, bid.get_chunk_num());
             req->blkstore_read_cnt.fetch_add(1, std::memory_order_acquire);
             m_vdev.read(tmp_bid, missing_mp.get(), 
                          boost::static_pointer_cast<virtualdev_req>(req));
-
             size_to_read -= missing_mp->size();
             
             read_cnt.fetch_add(1, memory_order_relaxed);
@@ -685,7 +682,6 @@ private:
         atomic<uint64_t> write_time;
         comp_callback m_comp_cb;
     };
-
 
 }
 #endif //OMSTORE_BLKSTORE_HPP

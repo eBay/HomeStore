@@ -72,7 +72,6 @@ private:
 	atomic<uint64_t> spurious_events;
 	atomic<uint64_t> cmp_err;
 	comp_callback comp_cb;
-	atomic<uint64_t> total_complete_read_ios;
 };
 #else 
 class DriveEndPoint : public iomgr::EndPoint {

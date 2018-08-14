@@ -2,7 +2,9 @@ from conans import ConanFile, CMake, tools
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "0.9.0"
+
+    version = "0.8.3"
+
     license = "Proprietary"
     description = "HomeStore"
     url = "https://github.corp.ebay.com/SDS/Homestore"
@@ -31,7 +33,7 @@ class HomestoreConan(ConanFile):
         cmake = CMake(self)
         cmake.configure()
         cmake.build()
-        #cmake.test()
+        cmake.test()
 
     def package(self):
         self.copy("*.h", dst="include", src="src", keep_path=True)

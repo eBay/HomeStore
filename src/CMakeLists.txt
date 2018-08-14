@@ -23,7 +23,6 @@ add_subdirectory(endpoint)
 add_subdirectory(homeds)
 add_subdirectory(volume)
 add_subdirectory(error)
-add_subdirectory(iomgr)
 
 add_library(homestore
                   $<TARGET_OBJECTS:hs_volume>

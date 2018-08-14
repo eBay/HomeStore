@@ -27,11 +27,11 @@ static bnodeid_t invalidEdgePtr = INVALID_BNODEID;
 template< typename K, typename V, size_t NodeSize >
 class SimpleNode : public PhysicalNode<SimpleNode, K, V, NodeSize> {
 public:
-    SimpleNode(bnodeid_t id, bool init,const BtreeConfig &cfg) :
+    SimpleNode(bnodeid_t id, bool init) :
             PhysicalNode<SimpleNode, K, V, NodeSize>(id, init) {
         this->set_node_type(BTREE_NODETYPE_SIMPLE);
     }
-    SimpleNode(bnodeid_t* id, bool init,const BtreeConfig &cfg) :
+    SimpleNode(bnodeid_t* id, bool init) :
             PhysicalNode<SimpleNode, K, V, NodeSize>(id, init) {
         this->set_node_type(BTREE_NODETYPE_SIMPLE);
     }

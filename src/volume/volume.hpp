@@ -107,7 +107,5 @@ class Volume {
 
  private:
     void alloc_single_block_in_mem();
-    void print_tree();
-
 };
 }

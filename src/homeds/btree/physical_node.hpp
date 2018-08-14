@@ -238,7 +238,7 @@ protected:
             if (!result.found) return false;
             append(result.end_of_search_index, key, val);
         } else if (put_type == APPEND_IF_EXISTS_ELSE_INSERT) {
-            (!result.found) ? to_variant_node()->insert(result.end_of_search_index, key, val) :
+            (result.found) ? to_variant_node()->insert(result.end_of_search_index, key, val) :
                              append(result.end_of_search_index, key, val);
         } else {
             return false;

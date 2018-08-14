@@ -259,10 +259,6 @@ public:
         return sizeof(m_val);
     }
 
-    uint32_t estimate_size_after_append(const BtreeValue &new_val) override {
-        return sizeof(m_val);
-    }
-
     void set_blob_size(uint32_t size) override {
         assert(size == sizeof(m_val));
     }

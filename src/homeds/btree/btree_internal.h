@@ -253,7 +253,6 @@ public:
 
     virtual uint32_t get_blob_size() const = 0;
     virtual void set_blob_size(uint32_t size) = 0;
-    virtual uint32_t estimate_size_after_append(const BtreeValue &new_val) = 0;
 
 #ifndef NDEBUG
     virtual std::string to_string() const {return "";}
@@ -323,10 +322,6 @@ public:
         return (*this);
     }
 
-    uint32_t estimate_size_after_append(const BtreeValue &new_val) override {
-        return sizeof(bnodeid_t);
-    }
-
 #ifdef DEBUG
     std::string to_string() const override {
         std::stringstream ss; ss << m_id.m_x; return ss.str();
@@ -368,10 +363,6 @@ public:
 
     EmptyClass& operator=(const EmptyClass& other) {
         return (*this);
-    }
-
-    uint32_t estimate_size_after_append(const BtreeValue &new_val) override {
-        return 0;
     }
 
 #ifdef DEBUG

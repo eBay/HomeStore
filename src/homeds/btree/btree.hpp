@@ -377,33 +377,7 @@ retry:
         return m_stats;
     }
 
-    void print_tree() {
-        m_btree_lock.read_lock();
-        std::stringstream ss;
-        get_string_representation_pre_order_traversal(m_root_node, ss);
-        LOGINFO("Pre order traversal of tree : <{}>", ss.str());
-        m_btree_lock.unlock();
-    }
-    
 private:
-    void get_string_representation_pre_order_traversal(bnodeid_t bnodeid, std::stringstream &ss) {
-        BtreeNodePtr node = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), bnodeid);
-        homeds::thread::locktype acq_lock = homeds::thread::locktype::LOCKTYPE_READ;
-        lock_node(node, acq_lock);
-
-        ss << "[" << node->to_string() << "]";
-
-        if(!node->is_leaf()) {
-            uint32_t i = 0;
-            while (i < node->get_total_entries()) {
-                BNodeptr p;
-                node->get(i, &p, false);
-                get_string_representation_pre_order_traversal(p.get_node_id(),ss);
-                i++;
-            }
-        }
-    }
-    
     bool do_get(BtreeNodePtr my_node, const BtreeSearchRange &range, BtreeKey *outkey, BtreeValue *outval) {
         if (my_node->is_leaf()) {
             auto result = my_node->find(range, outkey, outval);
@@ -664,7 +638,6 @@ retry:
         // Check if child node is full and a hint on where would next child goes in.
         // TODO: Do minimal check and merge nodes for optimization.
         if (child_node->is_split_needed(m_btree_cfg, k, v, &ind_hint)) {
-           
             // Time to split the child, but we need to convert ours to write lock
             if (upgrade_node(my_node, child_node, curlock, child_cur_lock, dependent_req_q) == false) {
                 assert(rd_locked_count == temp_rd_locked_count 
@@ -690,7 +663,6 @@ retry:
             // After split, parentNode would have split, retry search and walk down.
             unlock_node(child_node, homeds::thread::LOCKTYPE_WRITE);
             m_stats.inc_count(BTREE_STATS_SPLIT_COUNT);
-
             goto retry;
         }
 
@@ -861,17 +833,8 @@ retry:
     }
 
     void split_node(BtreeNodePtr parent_node, BtreeNodePtr child_node, uint32_t parent_ind,
-
-#ifndef NDEBUG
-
-        LOGTRACE("Before split\n########Parent node:\n {}\n,Child node:\n {}\n" ,
-                 parent_node->to_string(),child_node->to_string());
-#endif
-
-        BtreeKey *out_split_key, 
-        std::deque<boost::intrusive_ptr<btree_req_type>> &dependent_req_q) {
-
-
+                    BtreeKey *out_split_key, 
+                    std::deque<boost::intrusive_ptr<btree_req_type>> &dependent_req_q) {
         BNodeptr nptr;
 
         // Create a new child node and split the keys by half.
@@ -901,10 +864,12 @@ retry:
                                     parent_node, dependent_req_q, NULL, false);
         //release_node(child_node2);
 
-
-#ifndef NDEBUG   
-        LOGTRACE("After split\n########Parent node:\n {}\n,Child node1:\n {}\n,Child node2:\n {}\n" ,
-                     parent_node->to_string(),child_node1->to_string(),child_node2->to_string());
+#ifndef NDEBUG
+         LOGINFOMOD(VMOD_BTREE_SPLIT,
+                    "After split\n#####################\nParent node:\n{}\nChild node1:\n{}\nChild node2:\n{}",
+                    parent_node->to_string(),
+                    child_node1->to_string(),
+                    child_node2->to_string());
 #endif
 
         // NOTE: Do not access parentInd after insert, since insert would have
