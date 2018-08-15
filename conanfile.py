@@ -33,7 +33,10 @@ class HomestoreConan(ConanFile):
         cmake = CMake(self)
         cmake.configure()
         cmake.build()
-        cmake.test()
+        test_target = None
+        if self.settings.build_type == "Debug":
+            test_target = "coverage"
+        cmake.test(target=test_target)
 
     def package(self):
         self.copy("*.h", dst="include", src="src", keep_path=True)

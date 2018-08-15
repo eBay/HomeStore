@@ -1,5 +1,5 @@
 # ##########   #######   ############
-FROM ecr.vip.ebayc3.com/sds/sds_cpp_base:1.5
+FROM ecr.vip.ebayc3.com/sds/sds_cpp_base:1.7
 LABEL description="Automated SDS compilation"
 
 ARG CONAN_CHANNEL
@@ -14,8 +14,10 @@ COPY cmake/ /tmp/source/cmake
 COPY CMakeLists.txt /tmp/source/
 COPY src/ /tmp/source/src
 
+WORKDIR /output
 RUN conan create /tmp/source "${CONAN_USER}"/"${CONAN_CHANNEL}"
-RUN conan create -pr debug /tmp/source "${CONAN_USER}"/"${CONAN_CHANNEL}"
+RUN conan create -pr debug /tmp/source "${CONAN_USER}"/"${CONAN_CHANNEL}"; \
+    find ~/.conan/data -name 'coverage.xml' -exec mv -v {} . \;
 
 CMD set -eux; \
     PKG_NAME=$(grep ' name =' /tmp/source/conanfile.py | awk '{print $3}' | sed 's,",,g') \

@@ -58,3 +58,8 @@ set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-tree-vec
 set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-web"                            )# E&C.
 set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-tree-slp-vectorize"             )# E&C.
 set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fthreadsafe-statics"                )# Slightly smaller in code that doesn't need to be TS.
+
+include (cmake/CodeCoverage.cmake)
+APPEND_COVERAGE_COMPILER_FLAGS()
+set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${REALLY_NO_OPTIMIZATION_FLAGS}")
+SETUP_TARGET_FOR_COVERAGE_GCOVR_XML(NAME coverage EXECUTABLE ctest DEPENDENCIES )

@@ -17,7 +17,9 @@ pipeline {
 
         stage('Test') {
             steps {
-                echo "Tests go here"
+                sh "docker create --name ${PROJECT}_deploy ${PROJECT}"
+                sh "docker cp ${PROJECT}_deploy:/output/coverage.xml coverage.xml"
+                cobertura autoUpdateHealth: false, autoUpdateStability: false, coberturaReportFile: 'coverage.xml', conditionalCoverageTargets: '20, 0, 0', fileCoverageTargets: '65, 0, 0', lineCoverageTargets: '45, 0, 0', maxNumberOfBuilds: 0, sourceEncoding: 'ASCII', zoomCoverageChart: false
             }
         }
 
@@ -26,14 +28,15 @@ pipeline {
                 branch "${CONAN_CHANNEL}/*"
             }
             steps {
-                sh "docker run --rm ${PROJECT}"
+                sh "docker start ${PROJECT}_deploy"
             }
         }
     }
 
     post {
         always {
-            sh "docker rmi ${PROJECT}"
+            sh "docker rm -f ${PROJECT}_deploy"
+            sh "docker rmi -f ${PROJECT}"
         }
     }
 }
