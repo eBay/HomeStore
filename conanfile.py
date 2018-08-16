@@ -3,14 +3,17 @@ from conans import ConanFile, CMake, tools
 class HomestoreConan(ConanFile):
     name = "homestore"
 
-    version = "0.8.3"
+    version = "0.8.4"
 
     license = "Proprietary"
     description = "HomeStore"
     url = "https://github.corp.ebay.com/SDS/Homestore"
 
     settings = "os", "compiler", "build_type", "arch"
-    options = {"shared": [True, False], "fPIC": [True]}
+    options = {"shared": ['True', 'False'],
+               "fPIC": ['True', 'False'],
+               "coverage": ['True', 'False']}
+    default_options = 'shared=False', 'fPIC=True', 'coverage=False'
 
     requires = (("benchmark/1.4.1@oss/stable"),
                 ("boost_heap/1.66.0@bincrafters/stable"),
@@ -18,12 +21,15 @@ class HomestoreConan(ConanFile):
                 ("double-conversion/3.0.0@bincrafters/stable"),
                 ("farmhash/1.0.0@oss/stable"),
                 ("folly/2018.08.13.00@bincrafters/stable"),
-                ("iomgr/2.0.2@sds/testing"))
+                ("iomgr/2.0.3@sds/testing"))
 
     generators = "cmake"
-    default_options = "shared=False", "fPIC=True"
 
     exports_sources = "cmake/*", "src/*", "CMakeLists.txt"
+
+    def configure(self):
+        if not self.settings.compiler == "gcc":
+            del self.options.coverage
 
     def requirements(self):
         if not self.settings.build_type == "Debug":
@@ -31,11 +37,16 @@ class HomestoreConan(ConanFile):
 
     def build(self):
         cmake = CMake(self)
-        cmake.configure()
-        cmake.build()
+
+        definitions = {'CONAN_BUILD_COVERAGE': 'OFF'}
         test_target = None
-        if self.settings.build_type == "Debug":
-            test_target = "coverage"
+
+        if self.options.coverage == 'True':
+            definitions['CONAN_BUILD_COVERAGE'] = 'ON'
+            test_target = 'coverage'
+
+        cmake.configure(defs=definitions)
+        cmake.build()
         cmake.test(target=test_target)
 
     def package(self):
@@ -52,3 +63,5 @@ class HomestoreConan(ConanFile):
     def package_info(self):
         self.cpp_info.libs = tools.collect_libs(self)
         self.cpp_info.libs.extend(["aio"])
+        if self.options.coverage == 'True':
+            self.cpp_info.libs.append('gcov')

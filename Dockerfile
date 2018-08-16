@@ -8,22 +8,24 @@ ARG CONAN_PASS=${CONAN_USER}
 ENV CONAN_USER=${CONAN_USER:-sds}
 ENV CONAN_CHANNEL=${CONAN_CHANNEL:-testing}
 ENV CONAN_PASS=${CONAN_PASS:-password}
+ENV SOURCE_PATH=/tmp/source/
 
-COPY conanfile.py /tmp/source/
-COPY cmake/ /tmp/source/cmake
-COPY CMakeLists.txt /tmp/source/
-COPY src/ /tmp/source/src
+COPY conanfile.py ${SOURCE_PATH}
+COPY cmake/ ${SOURCE_PATH}cmake
+COPY CMakeLists.txt ${SOURCE_PATH}
+COPY src/ ${SOURCE_PATH}src
 
 WORKDIR /output
-RUN conan create /tmp/source "${CONAN_USER}"/"${CONAN_CHANNEL}"
-RUN conan create -pr debug /tmp/source "${CONAN_USER}"/"${CONAN_CHANNEL}"; \
-    find ~/.conan/data -name 'coverage.xml' -exec mv -v {} . \;
+RUN set -eux; \
+    eval $(grep 'name =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,name,PKG_NAME,'); \
+    conan create -o ${PKG_NAME}:coverage=True -pr debug ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"; \
+    find ~/.conan/data/${PKG_NAME} -name 'coverage.xml' -exec mv -v {} . \;
+RUN conan create -pr debug ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"
+RUN conan create ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"
 
 CMD set -eux; \
-    PKG_NAME=$(grep ' name =' /tmp/source/conanfile.py | awk '{print $3}' | sed 's,",,g') \
-    PKG_VERSION=$(grep 'version =' /tmp/source/conanfile.py | awk '{print $3}'); \
-    PKG_VERSION="${PKG_VERSION%\"}"; \
-    PKG_VERSION="${PKG_VERSION#\"}"; \
+    eval $(grep 'name =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,name,PKG_NAME,'); \
+    eval $(grep 'version =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,version,PKG_VERSION,'); \
     conan user -r origin -p "${CONAN_PASS}" sds; \
     conan upload ${PKG_NAME}/"${PKG_VERSION}"@"${CONAN_USER}"/"${CONAN_CHANNEL}" --all -r origin;
 # ##########   #######   ############
