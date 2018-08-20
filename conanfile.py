@@ -1,15 +1,16 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 from conans import ConanFile, CMake, tools
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-
     version = "0.8.4"
 
     license = "Proprietary"
-    description = "HomeStore"
     url = "https://github.corp.ebay.com/SDS/Homestore"
+    description = "HomeStore"
 
-    settings = "os", "compiler", "build_type", "arch"
+    settings = "arch", "os", "compiler", "build_type"
     options = {"shared": ['True', 'False'],
                "fPIC": ['True', 'False'],
                "coverage": ['True', 'False']}
@@ -20,11 +21,10 @@ class HomestoreConan(ConanFile):
                 ("boost_uuid/1.66.0@bincrafters/stable"),
                 ("double-conversion/3.0.0@bincrafters/stable"),
                 ("farmhash/1.0.0@oss/stable"),
-                ("folly/2018.08.13.00@bincrafters/stable"),
+                ("folly/2018.08.20.00@bincrafters/stable"),
                 ("iomgr/2.0.3@sds/testing"))
 
     generators = "cmake"
-
     exports_sources = "cmake/*", "src/*", "CMakeLists.txt"
 
     def configure(self):
@@ -38,7 +38,8 @@ class HomestoreConan(ConanFile):
     def build(self):
         cmake = CMake(self)
 
-        definitions = {'CONAN_BUILD_COVERAGE': 'OFF'}
+        definitions = {'CONAN_BUILD_COVERAGE': 'OFF',
+                       'CMAKE_EXPORT_COMPILE_COMMANDS': 'ON'}
         test_target = None
 
         if self.options.coverage == 'True':

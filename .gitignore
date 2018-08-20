@@ -49,6 +49,7 @@ cmake-build-*
 .idea/dictionaries
 .idea/vcs.xml
 .idea/jsLibraryMappings.xml
+compile_commands.json
 
 # Sensitive or high-churn files:
 .idea/dataSources.ids
