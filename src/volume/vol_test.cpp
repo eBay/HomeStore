@@ -348,7 +348,7 @@ int main(int argc, char** argv) {
    }
 
    LOGINFO("Initializing performance counters.");
-   vol->init_perf_cntrs();
+   vol->init_perf_report();
 
    /* send an event */
    uint64_t temp = 1;
@@ -381,7 +381,7 @@ int main(int argc, char** argv) {
       printf("total time spend per io %lu us\n", time_us/read_cnt);
    printf("iops %lu \n", (read_cnt * 1000 * 1000)/time_us);
    printf("additional counters.........\n");	
-   vol->print_perf_cntrs();
+   vol->print_perf_report();
    // Expect this to fail!!!
    auto err = Volume::removeVolume("my_volume");
    assert(err);

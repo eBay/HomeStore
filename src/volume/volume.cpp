@@ -5,6 +5,8 @@
 
 #include "volume.hpp"
 #include <mapping/mapping.hpp>
+#include "perf_metrics.hpp"
+#include <fstream>
 
 using namespace std;
 
@@ -25,7 +27,38 @@ int btree_buf_alloc;
 int btree_buf_free;
 int btree_buf_make_obj;
 
+/* Names of metrics */
+#define VOL_LABEL " for HomeStore Volume"
+
+/* Metrics - Histograms */
+enum e_vol_hist {
+    READ_H = 0,
+    WRITE_H,
+    MAP_READ_H,
+    IO_READ_H,
+    IO_WRITE_H,
+    BLK_ALLOC_H,
+    MAX_VOL_HIST_CNT
+};
+
+static std::string vol_hist[] = {
+    "Vol-Reads",
+    "Vol-Writes",
+    "Map-Reads",
+    "IO-Reads",
+    "IO-Writes",
+    "Blk-Allocs"
+};
+
 using namespace homestore;
+
+PerfMetrics* PerfMetrics::instance = 0;
+PerfMetrics* PerfMetrics::getInstance() {
+    if (!instance) {
+        instance = new PerfMetrics();
+    }
+    return instance;
+}
 
 std::shared_ptr<Volume>
 Volume::createVolume(std::string const& uuid,
@@ -112,7 +145,7 @@ Volume::Volume(DeviceManager *dev_mgr, uint64_t size,
                 std::placeholders::_1)), dev_mgr, 
                 Volume::glob_cache);
     alloc_single_block_in_mem();
-    init_perf_cntrs();
+    init_perf_report();
 }
 
 Volume::Volume(DeviceManager *dev_mgr, vdev_info_block *vb) {
@@ -135,7 +168,7 @@ Volume::Volume(DeviceManager *dev_mgr, vdev_info_block *vb) {
     /* TODO: rishabh, We need a attach function to register completion callback if layers
      * are called from bottomup.
      */
-    init_perf_cntrs();
+    init_perf_report();
 }
 
 std::error_condition
@@ -148,7 +181,8 @@ void
 homestore::Volume::process_metadata_completions(boost::intrusive_ptr<volume_req> req) {
     assert(!req->is_read);
     if (req->err == no_error) {
-        io_write_time.fetch_add(get_elapsed_time(req->startTime), memory_order_relaxed);
+        PerfMetrics *perf = PerfMetrics::getInstance();
+        assert(perf->updateHistogram(vol_hist[IO_WRITE_H], get_elapsed_time(req->startTime)));
     }
     comp_cb(req);
     outstanding_write_cnt.fetch_add(1, memory_order_relaxed);
@@ -167,37 +201,27 @@ homestore::Volume::process_data_completions(boost::intrusive_ptr<blkstore_req<Bl
         }
         blk_store->update_cache(req->read_buf_list[i].buf);
     }
-    io_read_time.fetch_add(get_elapsed_time(req->startTime), memory_order_relaxed);
+    PerfMetrics *perf = PerfMetrics::getInstance();
+    assert(perf->updateHistogram(vol_hist[IO_READ_H], get_elapsed_time(req->startTime)));
     comp_cb(req);
 }
 
 void
-Volume::init_perf_cntrs() {
-    read_cnt = 0;
-    write_cnt = 0;
-    alloc_blk_time = 0;
-    write_time = 0;
-    map_time = 0;
-    io_write_time = 0;
+Volume::init_perf_report() {
+    PerfMetrics *perf = PerfMetrics::getInstance();
+    /* Register histogram (if not present) */
+    for (auto i = 0U; i < MAX_VOL_HIST_CNT; i++) {
+        perf->registerHistogram(vol_hist[i], vol_hist[i]+VOL_LABEL, "");
+    }
     outstanding_write_cnt = 0;
-    blk_store->init_perf_cnts();
 }
 
 void
-Volume::print_perf_cntrs() {
-    printf("avg time taken in alloc_blk %lu us\n", alloc_blk_time/write_cnt);
-    printf("avg time taken in issuing write from volume layer %lu us\n", 
-            write_time/write_cnt);
-    printf("avg time taken in writing map %lu us\n", map_time/write_cnt);
-    printf("avg time taken in write %lu us\n", io_write_time/write_cnt);
-    if (atomic_load(&read_cnt) != 0) {
-        printf("avg time taken in read %lu us\n", io_read_time/read_cnt);
-        printf("avg time taken in reading map %lu us\n", 
-                map_read_time/read_cnt);
-        printf("avg time taken in issuing read from volume layer %lu us\n", 
-                read_time/read_cnt);
-    }
-    blk_store->print_perf_cnts();
+Volume::print_perf_report() {
+    PerfMetrics *perf = PerfMetrics::getInstance();
+    std::ofstream ofs ("result.json", std::ofstream::out);
+    ofs << perf->report() << std::endl;
+    ofs.close();
 }
 
 void
@@ -219,14 +243,14 @@ Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks,
     req->startTime = Clock::now();
     req->err = no_error;
 
-    write_cnt.fetch_add(1, memory_order_relaxed);
     {
         Clock::time_point startTime = Clock::now();
         BlkAllocStatus status = blk_store->alloc_blk(nblks, hints, &bid);
         if (status != BLK_ALLOC_SUCCESS) {
             assert(0);
         }
-        alloc_blk_time.fetch_add(get_elapsed_time(startTime), memory_order_relaxed);
+        PerfMetrics *perf = PerfMetrics::getInstance();
+        assert(perf->updateHistogram(vol_hist[BLK_ALLOC_H], get_elapsed_time(startTime)));
     }
     req->bid = bid;
 
@@ -239,7 +263,8 @@ Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks,
     boost::intrusive_ptr< BlkBuffer > bbuf = blk_store->write(bid, b, 
                                  boost::static_pointer_cast<blkstore_req<BlkBuffer>>(req), req_q);
     /* TODO: should check the write status */
-    write_time.fetch_add(get_elapsed_time(startTime), memory_order_relaxed);
+    PerfMetrics *perf = PerfMetrics::getInstance();
+    assert(perf->updateHistogram(vol_hist[WRITE_H], get_elapsed_time(startTime)));
     //  LOG(INFO) << "Written on " << bid.to_string() << " for 8192 bytes";
     map->put(req, req->lba, req->nblks, req->bid);
     return bbuf;
@@ -260,8 +285,8 @@ Volume::read(uint64_t lba, int nblks, boost::intrusive_ptr<volume_req> req) {
         return 0;
     }
 
-    read_cnt.fetch_add(1, memory_order_relaxed);
-    map_read_time.fetch_add(get_elapsed_time(startTime), memory_order_relaxed);
+    PerfMetrics *perf = PerfMetrics::getInstance();
+    assert(perf->updateHistogram(vol_hist[MAP_READ_H], get_elapsed_time(startTime)));
 
     req->lba = lba;
     req->nblks = nblks;
@@ -296,7 +321,7 @@ Volume::read(uint64_t lba, int nblks, boost::intrusive_ptr<volume_req> req) {
         process_data_completions(req);
     }
 
-    read_time.fetch_add(get_elapsed_time(startTime), memory_order_relaxed);
+    assert(perf->updateHistogram(vol_hist[READ_H], get_elapsed_time(startTime)));
     return 0;
 }
 

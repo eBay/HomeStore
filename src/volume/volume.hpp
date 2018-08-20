@@ -25,11 +25,11 @@ class mapping;
  * multiple threads.
  */
 struct volume_req:blkstore_req<BlkBuffer> {
-	uint64_t lba;
-	int nblks;
-	Clock::time_point startTime;
-	int read_cnt;
-	std::vector< buf_info > read_buf_list;
+    uint64_t lba;
+    int nblks;
+    Clock::time_point startTime;
+    int read_cnt;
+    std::vector< buf_info > read_buf_list;
     
     /* number of times mapping table need to be updated for this req. It can
      * break the ios update in mapping btree depending on the key range.
@@ -47,18 +47,9 @@ struct volume_req:blkstore_req<BlkBuffer> {
 
 class Volume {
 
-	typedef std::function< void (boost::intrusive_ptr<volume_req> req) > comp_callback;
+    typedef std::function< void (boost::intrusive_ptr<volume_req> req) > comp_callback;
     uint64_t size;
     mapping *map;
-    atomic<uint64_t> alloc_blk_time;
-    atomic<uint64_t> write_time;
-    atomic<uint64_t> read_time;
-    atomic<uint64_t> map_time;
-    atomic<uint64_t> io_write_time;
-    atomic<uint64_t> io_read_time;
-    atomic<uint64_t> map_read_time;
-    atomic<uint64_t> write_cnt;
-    atomic<uint64_t> read_cnt;
     atomic<uint64_t> outstanding_write_cnt;
     comp_callback comp_cb;
     boost::intrusive_ptr< BlkBuffer > only_in_mem_buff;
@@ -74,10 +65,10 @@ class Volume {
             uint64_t const size,
             comp_callback comp_cb);
 
-	// !!! Permanent destroy the volume reclaiming all allocations !!!
+    // !!! Permanent destroy the volume reclaiming all allocations !!!
    // - Must be called with no remaining references to the volume and through
-	// - the Volume::removeVolume(uuid) call.
-	std::error_condition destroy();
+    // - the Volume::removeVolume(uuid) call.
+    std::error_condition destroy();
 
  public:
 
@@ -95,8 +86,8 @@ class Volume {
             uint32_t nblks, 
             boost::intrusive_ptr<volume_req> req);
     int read(uint64_t lba, int nblks, boost::intrusive_ptr<volume_req> req);
-    void init_perf_cntrs();
-    void print_perf_cntrs();
+    void init_perf_report();
+    void print_perf_report();
     uint64_t get_elapsed_time(Clock::time_point startTime);
 
     void process_data_completions(boost::intrusive_ptr<blkstore_req<BlkBuffer>> bs_req);
@@ -108,4 +99,5 @@ class Volume {
  private:
     void alloc_single_block_in_mem();
 };
+
 }

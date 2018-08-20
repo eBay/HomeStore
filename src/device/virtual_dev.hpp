@@ -13,8 +13,12 @@
 #include <boost/range/irange.hpp>
 #include <map>
 #include <error/error.h>
+#include <volume/perf_metrics.hpp>
 
 namespace homestore {
+
+#define VDEV_LABEL     " for Homestore Virtual Device"
+#define PHYSICAL_HIST     "physical"
 
 class VdevFixedBlkAllocatorPolicy {
 public:
@@ -65,12 +69,12 @@ extern std::atomic<int> req_alloc;
 extern std::atomic<int> req_dealloc;
 typedef std::function< void (boost::intrusive_ptr<virtualdev_req> req) > virtualdev_comp_callback;
 struct virtualdev_req {
-	uint64_t version;
-	virtualdev_comp_callback cb;
-	uint64_t size;
-	bool is_read;
-	std::error_condition err;
-	bool isSyncCall;
+    uint64_t version;
+    virtualdev_comp_callback cb;
+    uint64_t size;
+    bool is_read;
+    std::error_condition err;
+    bool isSyncCall;
     std::atomic<int> m_refcount;
     virtualdev_req() : err(no_error), isSyncCall(false), m_refcount(0) {
         req_alloc++;
@@ -98,17 +102,17 @@ struct virtualdev_req {
 [[maybe_unused]]
 static void
 virtual_dev_process_completions(int64_t res, uint8_t *cookie) {
-	virtualdev_req *req = (virtualdev_req *) cookie;
-	int ret = 0;
-	assert(req->version == 0xDEAD);
+    virtualdev_req *req = (virtualdev_req *) cookie;
+    int ret = 0;
+    assert(req->version == 0xDEAD);
     boost::intrusive_ptr< virtualdev_req > boost_req(req);
     req->dec_ref();
 
     if (req->err == no_error && res < 0) {
         /* TODO: it should have more specific errors */
-    	req->err = std::make_error_condition(std::io_errc::stream);
+        req->err = std::make_error_condition(std::io_errc::stream);
     }
-	req->cb(boost_req);
+    req->cb(boost_req);
 }
 
 template <typename Allocator, typename DefaultDeviceSelector>
@@ -131,7 +135,6 @@ private:
     // Instance of device selector
     std::unique_ptr< DefaultDeviceSelector > m_selector;
     uint64_t write_time;
-    uint64_t physical_time;
     uint64_t mirror_time;
     uint64_t write_cnt;
     comp_callback comp_cb;
@@ -140,7 +143,7 @@ public:
     /* Create a new virtual dev for these parameters */
     VirtualDev(DeviceManager *mgr, uint64_t size, uint32_t nmirror, bool is_stripe, uint32_t dev_blk_size,
                const std::vector< PhysicalDev *> &pdev_list, 
-	       comp_callback cb):comp_cb(cb) {
+           comp_callback cb):comp_cb(cb) {
         // Create a new vdev in persistent area and get the block of it
         m_vb = mgr->alloc_vdev(size, nmirror, dev_blk_size);
         m_mgr = mgr;
@@ -196,6 +199,9 @@ public:
         for (auto &pdev : pdev_list) {
             m_selector->add_pdev(pdev);
         }
+
+        /* Initialize the performance metrics */
+        init_perf_metrics();
     }
     
     void process_completions(boost::intrusive_ptr<virtualdev_req> req) {
@@ -260,9 +266,9 @@ public:
                 }
             }
 
-	    if (status == BLK_ALLOC_SUCCESS) {
-		break;
-	    }
+        if (status == BLK_ALLOC_SUCCESS) {
+        break;
+        }
             if (!hints.can_look_for_other_dev) {
                 break;
             }
@@ -284,18 +290,16 @@ public:
         chunk->get_blk_allocator()->free(cb);
     }
 
-    void print_cntrs() {
-	printf("time taken in write %lu ns\n", physical_time/write_cnt);
+    void init_perf_metrics() {
+        PerfMetrics *perf = PerfMetrics::getInstance();
+        auto name = std::string(PHYSICAL_HIST);
+        perf->registerHistogram(name, name+VDEV_LABEL, "");
+        write_time = 0;
+        mirror_time = 0;
     }
- 
-    void init_cntrs() {
-	write_time = 0;
-	write_cnt = 0;
-	physical_time = 0;
-	mirror_time = 0;
-    }
+
     void write(const BlkId &bid, const homeds::MemVector<BLKSTORE_BLK_SIZE> &buf, 
-			boost::intrusive_ptr <virtualdev_req> req) {
+            boost::intrusive_ptr <virtualdev_req> req) {
         BlkOpStatus ret_status = BLK_OP_SUCCESS;
         uint32_t size = bid.get_nblks() * get_blk_size();
         struct iovec iov[BlkId::max_blks_in_op()];
@@ -337,10 +341,12 @@ public:
                     (uint8_t *) req.get());
         }
 
+        /* Update the performance metric */
+        PerfMetrics *perf = PerfMetrics::getInstance();
+        int64_t physical_time =
+            (std::chrono::duration_cast< std::chrono::nanoseconds >(Clock::now() - startTime)).count();
+        assert(perf->updateHistogram(PHYSICAL_HIST, physical_time));
 
-
-        physical_time += (std::chrono::duration_cast< std::chrono::nanoseconds >(Clock::now() -
-                    startTime)).count();
         if (get_nmirrors()) {
             uint64_t primary_chunk_offset = dev_offset - chunk->get_start_offset();
 
@@ -424,7 +430,7 @@ public:
     }
 
     void readv(const BlkId &bid, const homeds::MemVector<BLKSTORE_BLK_SIZE> &buf, 
-							boost::intrusive_ptr<virtualdev_req> req) {
+                            boost::intrusive_ptr<virtualdev_req> req) {
         // Convert the input memory to iovector
         struct iovec iov[BlkId::max_blks_in_op()];
         int iovcnt = 0;
@@ -551,7 +557,7 @@ private:
     }
 
     std::shared_ptr< BlkAllocator > create_allocator(uint64_t size) {
-	typename Allocator::AllocatorConfig cfg;
+    typename Allocator::AllocatorConfig cfg;
         Allocator::get_config(size, get_blk_size(), &cfg);
 
         std::shared_ptr< BlkAllocator > allocator = std::make_shared<typename Allocator::AllocatorType>(cfg);
