@@ -264,7 +264,8 @@ Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks,
                                  boost::static_pointer_cast<blkstore_req<BlkBuffer>>(req), req_q);
     /* TODO: should check the write status */
     PerfMetrics *perf = PerfMetrics::getInstance();
-    assert(perf->updateHistogram(vol_hist[WRITE_H], get_elapsed_time(startTime)));
+    auto updated = perf->updateHistogram(vol_hist[WRITE_H], get_elapsed_time(startTime));
+    assert(updated);
     //  LOG(INFO) << "Written on " << bid.to_string() << " for 8192 bytes";
     map->put(req, req->lba, req->nblks, req->bid);
     return bbuf;

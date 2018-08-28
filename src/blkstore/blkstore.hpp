@@ -124,8 +124,9 @@ class BlkStore {
                 dynamic_pointer_cast<CacheBuffer<BlkId>>(bbuf),
                 (boost::intrusive_ptr< CacheBuffer<BlkId> > *)&new_bbuf);
         PerfMetrics *perf = PerfMetrics::getInstance();
-        assert(perf->updateHistogram(blkstore_hist[CACHE_READS_H],
-                                get_elapsed_time(cache_startTime)));
+        auto updated = perf->updateHistogram(blkstore_hist[CACHE_READS_H],
+                                get_elapsed_time(cache_startTime));
+        assert(updated);
         return new_bbuf;
     }
 
@@ -364,8 +365,9 @@ out:
          * once offset field is stored in mapping.
          */
         //  assert(ibuf.get() == out_bbuf.get());
-        assert(perf->updateHistogram(blkstore_hist[CACHE_WRITES_H],
-                                    get_elapsed_time(cache_startTime)));
+        auto updated = perf->updateHistogram(blkstore_hist[CACHE_WRITES_H],
+                                    get_elapsed_time(cache_startTime));
+        assert(updated);
         // TODO: Raise an exception if we are not able to insert - instead of assert
 //        assert(inserted);
   //      if (!inserted) {
@@ -389,7 +391,8 @@ out:
         // TODO: rishabh, need to check the return status
         m_vdev.write(bid, ibuf->get_memvec(), 
                       boost::static_pointer_cast<virtualdev_req>(req));
-        assert(perf->updateHistogram(blkstore_hist[WRITES_H], get_elapsed_time(write_startTime)));
+        updated = perf->updateHistogram(blkstore_hist[WRITES_H], get_elapsed_time(write_startTime));
+        assert(updated);
         return ibuf;
     }
 
