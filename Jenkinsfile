@@ -11,13 +11,16 @@ pipeline {
     stages {
         stage('Build') {
             steps {
-                sh "docker build --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_PASS=${CONAN_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} -t ${PROJECT} ."
+                sh "docker build --rm --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_PASS=${CONAN_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} -t ${PROJECT} ."
             }
         }
 
         stage('Test') {
             steps {
-                echo "Tests go here"
+                sh "docker create --name ${PROJECT}_coverage ${PROJECT}"
+                sh "docker cp ${PROJECT}_coverage:/output/coverage.xml coverage.xml"
+                sh "docker rm -f ${PROJECT}_coverage"
+                cobertura autoUpdateHealth: false, autoUpdateStability: false, coberturaReportFile: 'coverage.xml', conditionalCoverageTargets: '0, 0, 0', fileCoverageTargets: '0, 0, 0', lineCoverageTargets: '0, 0, 0', maxNumberOfBuilds: 0, sourceEncoding: 'ASCII', zoomCoverageChart: false
             }
         }
 
@@ -33,7 +36,7 @@ pipeline {
 
     post {
         always {
-            sh "docker rmi ${PROJECT}"
+            sh "docker rmi -f ${PROJECT}"
         }
     }
 }
