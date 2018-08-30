@@ -3,7 +3,7 @@ from conans import ConanFile, CMake, tools
 class HomestoreConan(ConanFile):
     name = "homestore"
 
-    version = "0.8.3"
+    version = "0.8.6"
 
     license = "Proprietary"
     description = "HomeStore"
