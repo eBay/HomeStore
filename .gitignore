@@ -84,7 +84,6 @@ pids
 *.pid
 *.seed
 
-*.cmake
 *.cbp
 conanbuildinfo.txt
 conaninfo.txt
