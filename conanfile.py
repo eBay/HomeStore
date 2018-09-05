@@ -4,7 +4,7 @@ from conans import ConanFile, CMake, tools
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "0.8.5"
+    version = "0.8.8"
 
     license = "Proprietary"
     url = "https://github.corp.ebay.com/SDS/Homestore"
@@ -22,8 +22,9 @@ class HomestoreConan(ConanFile):
                 ("double-conversion/3.0.0@bincrafters/stable"),
                 ("farmhash/1.0.0@oss/stable"),
                 ("folly/2018.08.20.00@bincrafters/stable"),
-                ("iomgr/2.0.3@sds/testing"),
-                ("sds_metrics/0.2.0@sds/testing"))
+                ("iomgr/2.0.4@sds/testing"),
+                ("sds_metrics/0.2.0@sds/testing"),
+                ("sds_logging/3.2.1@sds/stable"))
 
     generators = "cmake"
     exports_sources = "cmake/*", "src/*", "CMakeLists.txt"
