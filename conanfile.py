@@ -19,7 +19,7 @@ class HomestoreConan(ConanFile):
                 ("double-conversion/3.0.0@bincrafters/stable"),
                 ("farmhash/1.0.0@oss/stable"),
                 ("folly/2018.08.20.00@bincrafters/stable"),
-                ("iomgr/2.0.4@sds/testing"))
+                ("iomgr/2.0.4@sds/stable"))
 
     generators = "cmake"
     exports_sources = "cmake/*", "src/*", "CMakeLists.txt"
