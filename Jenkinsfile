@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         PROJECT = 'homestore'
-        CONAN_CHANNEL = 'stable'
+        CONAN_CHANNEL = 'testing'
         CONAN_USER = 'sds'
         CONAN_PASS = credentials('CONAN_PASS')
     }
