@@ -910,7 +910,7 @@ retry:
 
 
 #ifndef NDEBUG
-        if (sds_logging::module_level_VMOD_BTREE_MERGE <= spdlog::level::level_enum::err) {
+        if (module_level_VMOD_BTREE_MERGE <= spdlog::level::level_enum::err) {
             LOGINFOMOD(VMOD_BTREE_MERGE, "Before Merge Nodes:\nParent node:\n{}", parent_node->to_string());
             for (auto i = 0u; i < minfo.size(); ++i) {
                 LOGINFOMOD(VMOD_BTREE_MERGE, "Child node {}\n{}", i + 1, minfo[i].node->to_string());
