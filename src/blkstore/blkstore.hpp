@@ -345,7 +345,7 @@ out:
          * of dependent writes a little complicated.
          */
         assert(bid.get_nblks() == 1 || dependent_req_q.empty());
-        Clock::time_point cache_startTime = Clock::now();
+        CURRENT_CLOCK(cache_startTime);
         uint8_t *ptr;
         // Create an object for the buffer
         auto buf = Buffer::make_object();
@@ -365,9 +365,8 @@ out:
          * once offset field is stored in mapping.
          */
         //  assert(ibuf.get() == out_bbuf.get());
-        auto updated = perf->updateHistogram(blkstore_hist[CACHE_WRITES_H],
-                                    get_elapsed_time(cache_startTime));
-        assert(updated);
+        assert(perf->updateHistogram(blkstore_hist[CACHE_WRITES_H],
+                                    get_elapsed_time(cache_startTime)));
         // TODO: Raise an exception if we are not able to insert - instead of assert
 //        assert(inserted);
   //      if (!inserted) {
@@ -387,12 +386,11 @@ out:
 
         assert(dependent_req_q.empty());
         // Now write data to the device
-        Clock::time_point write_startTime = Clock::now();
+        CURRENT_CLOCK(write_startTime);
         // TODO: rishabh, need to check the return status
         m_vdev.write(bid, ibuf->get_memvec(), 
                       boost::static_pointer_cast<virtualdev_req>(req));
-        updated = perf->updateHistogram(blkstore_hist[WRITES_H], get_elapsed_time(write_startTime));
-        assert(updated);
+        assert(perf->updateHistogram(blkstore_hist[WRITES_H], get_elapsed_time(write_startTime)));
         return ibuf;
     }
 

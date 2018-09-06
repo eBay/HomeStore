@@ -244,7 +244,7 @@ Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks,
     req->err = no_error;
 
     {
-        Clock::time_point startTime = Clock::now();
+        CURRENT_CLOCK(startTime)
         BlkAllocStatus status = blk_store->alloc_blk(nblks, hints, &bid);
         if (status != BLK_ALLOC_SUCCESS) {
             assert(0);
