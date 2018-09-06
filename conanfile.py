@@ -24,7 +24,7 @@ class HomestoreConan(ConanFile):
                 ("folly/2018.08.20.00@bincrafters/stable"),
                 ("iomgr/2.0.4@sds/stable"),
                 ("sds_metrics/0.2.0@sds/testing"),
-                ("sds_logging/3.2.2@sds/stable"))
+                ("sds_logging/3.2.4@sds/stable"))
 
     generators = "cmake"
     exports_sources = "cmake/*", "src/*", "CMakeLists.txt"
