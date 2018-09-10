@@ -22,7 +22,7 @@ class HomestoreConan(ConanFile):
                 ("double-conversion/3.0.0@bincrafters/stable"),
                 ("farmhash/1.0.0@oss/stable"),
                 ("folly/2018.09.10.00@bincrafters/stable"),
-                ("iomgr/2.0.4@sds/stable"),
+                ("iomgr/2.0.5@sds/stable"),
                 ("sds_metrics/0.2.0@sds/testing"),
                 ("sds_logging/3.2.4@sds/stable"))
 
