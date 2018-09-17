@@ -19,7 +19,8 @@ WORKDIR /output
 RUN set -eux; \
     eval $(grep 'name =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,name,PKG_NAME,'); \
     conan create -o ${PKG_NAME}:coverage=True -pr debug ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"; \
-    find ~/.conan/data/${PKG_NAME} -name 'coverage.xml' -exec mv -v {} . \;
+    find ~/.conan/data/${PKG_NAME} -name 'coverage.xml' -exec mv -v {} . \; ; \
+    conan remove -f "${PKG_NAME}*"
 RUN conan create -pr debug ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"
 RUN conan create ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"
 
