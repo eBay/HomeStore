@@ -68,6 +68,11 @@ public:
         if (!found) {
             m_list.insert(it, v);
             *outv = &v;
+            /* first reference is for the hash set and second for return value.
+             * it is caller responsibility to decrement the ref count if it does not
+             * intend to use.
+             */
+            V::ref(**outv);
             V::ref(**outv);
         }
         write_unlock();

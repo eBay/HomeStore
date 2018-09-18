@@ -4,7 +4,7 @@
 //
 
 #include "volume.hpp"
-#include <mapping/mapping.hpp>
+#include <mapping/mapping.cpp>
 #include "perf_metrics.hpp"
 #include <fstream>
 
@@ -15,6 +15,7 @@ constexpr auto BLOCK_SIZE = (4 * 1024ul);
 
 static std::map<std::string, std::shared_ptr<homestore::Volume>> volume_map;
 static std::mutex map_lock;
+std::atomic<int> vol_req_alloc;
 
 #ifndef NDEBUG
 /* only for testing */
@@ -61,14 +62,15 @@ PerfMetrics* PerfMetrics::getInstance() {
 }
 
 std::shared_ptr<Volume>
-Volume::createVolume(std::string const& uuid,
-        DeviceManager* mgr,
-        uint64_t const size,
-        comp_callback comp_cb) {
+Volume::createVolume(std::string const &uuid,
+                     DeviceManager *mgr,
+                     uint64_t const size,
+                     comp_callback comp_cb) {
     decltype(volume_map)::iterator it;
     // Try to add an entry for this volume
-    {  std::lock_guard<std::mutex> lg (map_lock);
-        bool happened {false};
+    {
+        std::lock_guard<std::mutex> lg(map_lock);
+        bool happened{false};
         std::tie(it, happened) = volume_map.emplace(std::make_pair(uuid, nullptr));
         if (!happened) {
             if (volume_map.end() != it) return it->second;
@@ -82,36 +84,39 @@ Volume::createVolume(std::string const& uuid,
 }
 
 std::error_condition
-Volume::removeVolume(std::string const& uuid) {
-   std::shared_ptr<Volume> volume;
-   // Locked Map
-   { std::lock_guard<std::mutex> lg(map_lock);
-      if (auto it = volume_map.find(uuid); volume_map.end() != it) {
-         if (2 <= it->second.use_count()) {
-            LOGERROR("Refusing to delete volume with outstanding references: {}", uuid);
-            return std::make_error_condition(std::errc::device_or_resource_busy);
-         }
-         volume = std::move(it->second);
-         volume_map.erase(it);
-      }
-   } // Unlock Map
-   return (volume ? volume->destroy() : std::make_error_condition(std::errc::no_such_device_or_address));
+Volume::removeVolume(std::string const &uuid) {
+    std::shared_ptr<Volume> volume;
+    // Locked Map
+    {
+        std::lock_guard<std::mutex> lg(map_lock);
+        if (auto it = volume_map.find(uuid); volume_map.end() != it) {
+            if (2 <= it->second.use_count()) {
+                LOGERROR("Refusing to delete volume with outstanding references: {}", uuid);
+                return std::make_error_condition(std::errc::device_or_resource_busy);
+            }
+            volume = std::move(it->second);
+            volume_map.erase(it);
+        }
+    } // Unlock Map
+    return (volume ? volume->destroy() : std::make_error_condition(std::errc::no_such_device_or_address));
 }
 
 std::shared_ptr<Volume>
-Volume::lookupVolume(std::string const& uuid) {
-    {  std::lock_guard<std::mutex> lg (map_lock);
+Volume::lookupVolume(std::string const &uuid) {
+    {
+        std::lock_guard<std::mutex> lg(map_lock);
         auto it = volume_map.find(uuid);
         if (volume_map.end() != it) return it->second;
     }
     return nullptr;
 }
 
-Cache< BlkId > * Volume::glob_cache = NULL;
-uint64_t 
+Cache<BlkId> *Volume::glob_cache = NULL;
+
+uint64_t
 Volume::get_elapsed_time(Clock::time_point startTime) {
     std::chrono::nanoseconds ns = std::chrono::duration_cast
-        < std::chrono::nanoseconds >(Clock::now() - startTime);
+            <std::chrono::nanoseconds>(Clock::now() - startTime);
     return ns.count() / 1000;
 }
 
@@ -128,22 +133,24 @@ Volume::new_vdev_found(DeviceManager *dev_mgr, vdev_info_block *vb) {
 }
 
 Volume::Volume(DeviceManager *dev_mgr, uint64_t size,
-        comp_callback comp_cb):comp_cb(comp_cb) {
-    fLI::FLAGS_minloglevel=3;
+               comp_callback comp_cb) : comp_cb(comp_cb) {
+    fLI::FLAGS_minloglevel = 3;
     if (Volume::glob_cache == NULL) {
-        Volume::glob_cache = new Cache< BlkId >(MAX_CACHE_SIZE, BLOCK_SIZE);
+        Volume::glob_cache = new Cache<BlkId>(MAX_CACHE_SIZE, BLOCK_SIZE);
         cout << "cache created\n";
     }
-    blk_store = new BlkStore< VdevVarSizeBlkAllocatorPolicy >
-        (dev_mgr, Volume::glob_cache, size,
-         WRITEBACK_CACHE, 0,
-         (std::bind(&Volume::process_data_completions, 
-                    this, std::placeholders::_1)));
-    map = new mapping(size, 
-            [this] (homestore::BlkId bid) { free_blk(bid); }, 
-            (std::bind(&Volume::process_metadata_completions, this, 
-                std::placeholders::_1)), dev_mgr, 
-                Volume::glob_cache);
+
+    /* TODO:create blkstore with 10% more space. This code will change later. */
+    blk_store = new BlkStore<VdevVarSizeBlkAllocatorPolicy>
+            (dev_mgr, Volume::glob_cache, size + (size * 40)/100,
+             WRITEBACK_CACHE, 0,
+             (std::bind(&Volume::process_data_completions,
+                        this, std::placeholders::_1)));
+    map = new mapping(size,
+                      [this](homestore::BlkId bid) { free_blk(bid); },
+                      (std::bind(&Volume::process_metadata_completions, this,
+                                 std::placeholders::_1)), dev_mgr,
+                      Volume::glob_cache);
     alloc_single_block_in_mem();
     init_perf_report();
 }
@@ -151,19 +158,19 @@ Volume::Volume(DeviceManager *dev_mgr, uint64_t size,
 Volume::Volume(DeviceManager *dev_mgr, vdev_info_block *vb) {
     size = vb->size;
     if (Volume::glob_cache == NULL) {
-        Volume::glob_cache = new Cache< BlkId >(MAX_CACHE_SIZE, BLOCK_SIZE);
+        Volume::glob_cache = new Cache<BlkId>(MAX_CACHE_SIZE, BLOCK_SIZE);
         cout << "cache created\n";
     }
-    blk_store = new BlkStore< VdevVarSizeBlkAllocatorPolicy >
-        (dev_mgr, Volume::glob_cache, vb, 
-         WRITEBACK_CACHE, 
-         (std::bind(&Volume::process_data_completions, this,
-                    std::placeholders::_1)));
-    map = new mapping(size, 
-            [this] (homestore::BlkId bid) { free_blk(bid); }, 
-            (std::bind(&Volume::process_metadata_completions, this, 
-                std::placeholders::_1)), dev_mgr, 
-                Volume::glob_cache);
+    blk_store = new BlkStore<VdevVarSizeBlkAllocatorPolicy>
+            (dev_mgr, Volume::glob_cache, vb,
+             WRITEBACK_CACHE,
+             (std::bind(&Volume::process_data_completions, this,
+                        std::placeholders::_1)));
+    map = new mapping(size,
+                      [this](homestore::BlkId bid) { free_blk(bid); },
+                      (std::bind(&Volume::process_metadata_completions, this,
+                                 std::placeholders::_1)), dev_mgr,
+                      Volume::glob_cache);
     alloc_single_block_in_mem();
     /* TODO: rishabh, We need a attach function to register completion callback if layers
      * are called from bottomup.
@@ -173,25 +180,29 @@ Volume::Volume(DeviceManager *dev_mgr, vdev_info_block *vb) {
 
 std::error_condition
 Volume::destroy() {
-   LOGWARN("UnImplemented volume destruction!");
-   return std::error_condition();
+    LOGWARN("UnImplemented volume destruction!");
+    return std::error_condition();
 }
 
-void 
+void
 homestore::Volume::process_metadata_completions(boost::intrusive_ptr<volume_req> req) {
     assert(!req->is_read);
     if (req->err == no_error) {
         PerfMetrics *perf = PerfMetrics::getInstance();
         assert(perf->updateHistogram(vol_hist[IO_WRITE_H], get_elapsed_time(req->startTime)));
     }
+    for (std::shared_ptr<Free_Blk_Entry> ptr : req->blkids_to_free_due_to_overwrite) {
+        LOGTRACE("Blocks to free {}", ptr.get()->to_string());
+        blk_store->free_blk(ptr->blkId, ptr->blkId_offset, ptr->nblks_to_free);
+    }
     comp_cb(req);
-    outstanding_write_cnt.fetch_add(1, memory_order_relaxed);
+    outstanding_write_cnt.fetch_sub(1, memory_order_relaxed);
 }
 
-void 
+void
 homestore::Volume::process_data_completions(boost::intrusive_ptr<blkstore_req<BlkBuffer>> bs_req) {
+    boost::intrusive_ptr<volume_req> req = boost::static_pointer_cast<volume_req>(bs_req);
 
-    boost::intrusive_ptr< volume_req > req = boost::static_pointer_cast< volume_req >(bs_req);
     if (!req->is_read) {
         return;
     }
@@ -204,6 +215,7 @@ homestore::Volume::process_data_completions(boost::intrusive_ptr<blkstore_req<Bl
     PerfMetrics *perf = PerfMetrics::getInstance();
     assert(perf->updateHistogram(vol_hist[IO_READ_H], get_elapsed_time(req->startTime)));
     comp_cb(req);
+    outstanding_write_cnt.fetch_sub(1, memory_order_relaxed);
 }
 
 void
@@ -229,9 +241,9 @@ homestore::Volume::free_blk(homestore::BlkId bid) {
     blk_store->free_blk(bid, boost::none, boost::none);
 }
 
-boost::intrusive_ptr< BlkBuffer > 
-Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks, 
-                                boost::intrusive_ptr<volume_req> req) {
+boost::intrusive_ptr<BlkBuffer>
+Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks,
+              boost::intrusive_ptr<volume_req> req) {
     BlkId bid;
     blk_alloc_hints hints;
     hints.desired_temp = 0;
@@ -242,6 +254,7 @@ Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks,
     req->is_read = false;
     req->startTime = Clock::now();
     req->err = no_error;
+    outstanding_write_cnt.fetch_add(1, memory_order_relaxed);
 
     {
         CURRENT_CLOCK(startTime)
@@ -256,12 +269,15 @@ Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks,
 
     // LOG(INFO) << "Requested nblks: " << (uint32_t) nblks << " Allocation info: " << bid.to_string();
 
-    homeds::blob b = {buf, (uint32_t)(BLOCK_SIZE * nblks)};
+    homeds::blob b = {buf, (uint32_t) (BLOCK_SIZE * nblks)};
 
     Clock::time_point startTime = Clock::now();
+
     std::deque<boost::intrusive_ptr<writeback_req>> req_q;
-    boost::intrusive_ptr< BlkBuffer > bbuf = blk_store->write(bid, b, 
-                                 boost::static_pointer_cast<blkstore_req<BlkBuffer>>(req), req_q);
+    boost::intrusive_ptr<BlkBuffer> bbuf = blk_store->write(bid, b,
+                                                            boost::static_pointer_cast<blkstore_req<BlkBuffer>>(req),
+                                                            req_q);
+
     /* TODO: should check the write status */
     PerfMetrics *perf = PerfMetrics::getInstance();
     auto updated = perf->updateHistogram(vol_hist[WRITE_H], get_elapsed_time(startTime));
@@ -271,18 +287,24 @@ Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks,
     return bbuf;
 }
 
+void Volume::print_tree() {
+    map->print_tree();
+}
+
 int
 Volume::read(uint64_t lba, int nblks, boost::intrusive_ptr<volume_req> req) {
 
-    std::vector< struct homestore::lba_BlkId_mapping > mappingList;
+    std::vector<std::shared_ptr<Lba_Block>> mappingList;
     req->startTime = Clock::now();
     Clock::time_point startTime = Clock::now();
 
     std::error_condition ret = map->get(lba, nblks, mappingList);
     req->err = ret;
     req->is_read = true;
+
+    outstanding_write_cnt.fetch_add(1, memory_order_relaxed);
     if (ret && ret == homestore_error::lba_not_exist) {
-        process_data_completions(req); 
+        process_data_completions(req);
         return 0;
     }
 
@@ -291,13 +313,14 @@ Volume::read(uint64_t lba, int nblks, boost::intrusive_ptr<volume_req> req) {
 
     req->lba = lba;
     req->nblks = nblks;
+
     req->blkstore_read_cnt = 1;
 
     startTime = Clock::now();
-    for (auto bInfo: mappingList) {
-        if (!bInfo.blkid_found) {
+    for (std::shared_ptr<Lba_Block> bInfo: mappingList) {
+        if (!bInfo->m_blkid_found) {
             uint8_t i = 0;
-            while (i < bInfo.blkId.get_nblks()) {
+            while (i < bInfo->m_value.m_blkid.get_nblks()) {
                 buf_info info;
                 info.buf = only_in_mem_buff;
                 info.size = BLOCK_SIZE;
@@ -306,14 +329,20 @@ Volume::read(uint64_t lba, int nblks, boost::intrusive_ptr<volume_req> req) {
                 i++;
             }
         } else {
-            boost::intrusive_ptr<BlkBuffer> bbuf = blk_store->read(bInfo.blkId, 
-                    0, BLOCK_SIZE * bInfo.blkId.get_nblks(), 
-                    boost::static_pointer_cast<blkstore_req<BlkBuffer>>(req));
+            LOGTRACE("Volume - Sending read to blkbuffer - {},{},{}->{}", bInfo->m_value.m_blkid.m_id,
+                    bInfo->m_interval_length, bInfo->m_value.m_blkid_offset, bInfo->m_value.m_blkid.to_string());
+
+            boost::intrusive_ptr<BlkBuffer> bbuf = blk_store->read(bInfo->m_value.m_blkid,
+                                                                   BLOCK_SIZE * bInfo->m_value.m_blkid_offset,
+                                                                   BLOCK_SIZE * bInfo->m_interval_length,
+                                                                   boost::static_pointer_cast<blkstore_req<BlkBuffer>>(
+                                                                           req));
             buf_info info;
             info.buf = bbuf;
-            info.size = bInfo.blkId.get_nblks() * BLOCK_SIZE;
-            info.offset = bInfo.blkId.get_id() - bbuf->get_key().get_id();
+            info.size = BLOCK_SIZE * bInfo->m_interval_length ;
+            info.offset = BLOCK_SIZE * bInfo->m_value.m_blkid_offset ;
             req->read_buf_list.push_back(info);
+
         }
     }
 
@@ -341,6 +370,7 @@ void Volume::alloc_single_block_in_mem() {
         throw std::bad_alloc();
     }
     memset(ptr, 0, size);
-    homeds::MemVector< BLKSTORE_BLK_SIZE > &mvec = only_in_mem_buff->get_memvec_mutable();
+    homeds::MemVector<BLKSTORE_BLK_SIZE> &mvec = only_in_mem_buff->get_memvec_mutable();
     mvec.set(ptr, size, 0);
 }
+

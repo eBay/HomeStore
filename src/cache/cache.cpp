@@ -126,7 +126,9 @@ bool Cache<K>::insert(const K &k, const homeds::blob &b, uint32_t value_offset,
 
     CacheBuffer<K> *out_buf;
     bool inserted = IntrusiveCache< K, CacheBuffer<K> >::insert(*cbuf, &out_buf, found_cb);
-    *out_smart_buf = boost::intrusive_ptr< CacheBuffer<K> >(out_buf, inserted);
+    if (out_buf != nullptr) {
+        *out_smart_buf = boost::intrusive_ptr< CacheBuffer<K> >(out_buf, false);
+    }
 
     if (!inserted) {
         homeds::ObjectAllocator< CacheBuffer<K> >::deallocate(cbuf);
@@ -139,7 +141,9 @@ bool Cache<K>::insert(const K &k, const boost::intrusive_ptr< CacheBuffer<K> > i
                       boost::intrusive_ptr< CacheBuffer<K> > *out_smart_buf) {
     CacheBuffer<K> *out_buf;
     bool inserted = IntrusiveCache< K, CacheBuffer<K> >::insert(*in_buf, &out_buf);
-    *out_smart_buf = boost::intrusive_ptr< CacheBuffer < K > > (out_buf, inserted);
+    if (out_buf != nullptr) {
+        *out_smart_buf = boost::intrusive_ptr< CacheBuffer < K > > (out_buf, false);
+    }
 
     return inserted;
 }

@@ -66,6 +66,9 @@ public:
     }
     BtreeBuffer() {
         btree_buf_alloc++;
+#ifndef NDEBUG
+        is_btree = true;
+#endif
         if (btree_buf_alloc > btree_buf_make_obj) {
             assert(0);
         }
@@ -105,14 +108,18 @@ class BtreeSpecificImpl<SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSiz
 public:
     using HeaderType = BtreeBuffer<K, V, InteriorNodeType, LeafNodeType, NodeSize>;
 
+
     static std::unique_ptr<SSDBtreeImpl> init_btree(BtreeConfig &cfg, 
                             void *btree_specific_context, comp_callback comp_cb) {
-        return std::make_unique<SSDBtreeImpl>(btree_specific_context, comp_cb);
+        return std::make_unique<SSDBtreeImpl>(cfg,btree_specific_context, comp_cb);
     }
 
-    BtreeSpecificImpl(void *btree_specific_context, comp_callback comp_cb) {
+    BtreeSpecificImpl(BtreeConfig &cfg, void *btree_specific_context, comp_callback comp_cbt) {
+        this->cfg = cfg;
+        this->cfg.set_node_area_size(NodeSize - sizeof(SSDBtreeNodeDeclType) - sizeof(LeafPhysicalNodeDeclType));
+
         auto bt_dev_info = (btree_device_info *)btree_specific_context;
-        m_comp_cb = comp_cb;
+        m_comp_cb = comp_cbt;
 
         m_cache = new homestore::Cache< homestore::BlkId >(100 * 1024 * 1024, 4096);
  
@@ -158,15 +165,18 @@ public:
         homestore::BlkId blkid;
         auto safe_buf = impl->m_blkstore->alloc_blk_cached(1, hints, &blkid);
 
+#ifndef NDEBUG
+        assert(safe_buf->is_btree);
+#endif
         // Access the physical node buffer and initialize it
         homeds::blob b = safe_buf->at_offset(0);
         assert(b.size == NodeSize);
         if (is_leaf) {
             bnodeid_t bid(blkid.to_integer());
-            auto n = new (b.bytes) VariantNode<LeafNodeType, K, V, NodeSize>(&bid, true);
+            auto n = new (b.bytes) VariantNode<LeafNodeType, K, V, NodeSize>( &bid, true,impl->cfg);
         } else {
             bnodeid_t bid(blkid.to_integer());
-            auto n = new (b.bytes) VariantNode<InteriorNodeType, K, V, NodeSize>(&bid, true);
+            auto n = new (b.bytes) VariantNode<InteriorNodeType, K, V, NodeSize>( &bid, true,impl->cfg);
         }
 
         return boost::static_pointer_cast<SSDBtreeNodeDeclType>(safe_buf);
@@ -181,6 +191,9 @@ public:
         auto safe_buf = impl->m_blkstore->read(blkid, 0, NodeSize, 
                         boost::static_pointer_cast<homestore::blkstore_req<BtreeBufferDeclType>>(req));
 
+#ifndef NDEBUG
+        assert(safe_buf->is_btree);
+#endif
         return boost::static_pointer_cast<SSDBtreeNodeDeclType>(safe_buf);
     }
 
@@ -197,6 +210,9 @@ public:
         } else {
             req->isSyncCall = false;
         }
+#ifndef NDEBUG
+        assert(bn->is_btree);
+#endif
         impl->m_blkstore->write(blkid, 
                     boost::dynamic_pointer_cast<BtreeBufferDeclType>(bn), 
                     boost::static_pointer_cast<homestore::blkstore_req<BtreeBufferDeclType>>(req), 
@@ -239,12 +255,15 @@ public:
     }
 private:
     homestore::BlkStore<homestore::VdevFixedBlkAllocatorPolicy, BtreeBufferDeclType> *m_blkstore;
+
     comp_callback m_comp_cb;
     /* TODO: cache has lot of bugs because of locking which become more prominent with btree
      * which has lot of reads/writes. For now, it is better to have separate cache
      * for btree and move it to global cache later after fixing all the bugs.
      */
     homestore::Cache <homestore::BlkId>* m_cache;
+
+    BtreeConfig cfg;
 };
 } }
 

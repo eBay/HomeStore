@@ -241,7 +241,7 @@ public:
         *pcount = (uint32_t)logBase2(x); // next bit number with 1 should be the count of 0s
 
     done:
-        return (uint32_t) first_0bit + start;
+        return (uint32_t) first_0bit;
     }
 
 #if 0

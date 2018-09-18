@@ -28,6 +28,7 @@ namespace homestore {
 #define BLKID_SIZE (ID_BITS+NBLKS_BITS+CHUNK_NUM_BITS)/8
 
 /* This structure represents the application wide unique block number. It also encomposses the number of blks. */
+
 struct BlkId {
     uint64_t m_id:ID_BITS;                // Block number which is unique within the chunk
     uint64_t m_nblks:NBLKS_BITS;          // Total number of blocks starting from previous block number
@@ -53,19 +54,25 @@ struct BlkId {
 #define end_of(b) (b.m_id + b.m_nblks)
 
     static int compare(const BlkId &one, const BlkId &two) {
-        if (one.m_chunk_num == two.m_chunk_num) {
-            if (begin_of(one) == begin_of(two)) {
-                return 0;
-            } else if (begin_of(one) < begin_of(two)) {
-                return (end_of(one) >= end_of(two)) ? 0 /* Overlaps */ : 1;
-            } else {
-                return (end_of(two) >= end_of(one)) ? 0 /* Overlaps */ : -1;
-            }
-        } else if (one.m_chunk_num > two.m_chunk_num) {
+        if (one.m_chunk_num > two.m_chunk_num) {
             return -1;
-        } else {
+        } else if(one.m_chunk_num < two.m_chunk_num) {
             return 1;
         }
+
+        if (one.m_id > two.m_id) {
+            return -1;
+        } else if (one.m_id < two.m_id) {
+            return 1;
+        }
+
+        if (one.m_nblks > two.m_nblks) {
+            return -1;
+        } else if (one.m_nblks < two.m_nblks) {
+            return 1;
+        }
+
+        return 0;
     }
 
     uint64_t to_integer() const {
@@ -120,7 +127,7 @@ struct BlkId {
         ss << "id=" << m_id << " nblks=" << (uint32_t)m_nblks << " chunk_num=" << (uint32_t)m_chunk_num;
         return ss.str();
     }
-};
+}__attribute__ ((__packed__)) ;
 
 #define BLKID32_INVALID ((uint32_t)(-1))
 #define BLKID64_INVALID ((uint64_t)(-1))

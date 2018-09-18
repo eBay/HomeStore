@@ -17,6 +17,8 @@ private:
     uint32_t m_pages_per_portion;
     uint32_t m_pages_per_temp_group;
     uint64_t m_max_cache_blks;
+    uint64_t m_max_chunk_blks;
+    uint32_t m_max_chunk_size;
 
 public:
     VarsizeBlkAllocConfig() : VarsizeBlkAllocConfig(0, 0) {
@@ -45,6 +47,14 @@ public:
 
     void set_max_cache_blks(uint64_t ncache_entries) {
         m_max_cache_blks = ncache_entries;
+    }
+    
+    void set_max_cache_chunks(uint64_t ncache_entries) {
+        m_max_chunk_blks = ncache_entries;
+    }
+
+    void set_chunk_size(uint32_t size) {
+        m_max_chunk_size = size;
     }
 
     void set_pages_per_temp_group(uint64_t npgs_per_temp_group) {
@@ -89,6 +99,14 @@ public:
 
     uint32_t get_total_temp_group() const {
         return (uint32_t) (get_total_pages() / get_pages_per_temp_group());
+    }
+    
+    uint64_t get_max_cache_chunks() const {
+        return(m_max_chunk_blks);
+    }
+
+    uint32_t get_chunk_size() const {
+        return(m_max_chunk_size);
     }
 
     std::string to_string() {
@@ -409,6 +427,11 @@ private:
     BlkAllocatorState m_region_state;
 
     homeds::Bitset *m_alloc_bm;   // Bitset of all allocation
+
+#ifndef DEBUG
+    homeds::Bitset *m_alloced_bm;   // Bitset of all allocation
+#endif
+
     VarsizeBlkAllocatorBtree *m_blk_cache; // Blk Entry caches
 
     BlkAllocSegment::SegQueue m_heap_segments;  // Heap of segments within a region.
@@ -420,6 +443,7 @@ private:
     std::vector< BlkAllocTemperatureGroup > m_temp_groups;
 
     std::atomic< uint32_t > m_cache_n_entries; // Total number of page entries to cache
+    std::atomic< uint32_t > m_cache_chunk_entries; // Total number of page entries to cache
 
 private:
     const VarsizeBlkAllocConfig &get_config() const override {

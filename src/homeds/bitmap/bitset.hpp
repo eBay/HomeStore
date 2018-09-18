@@ -159,7 +159,7 @@ public:
         return is_bits_set_reset(b, nbits, false);
     }
 
-    bitblock get_next_contiguous_reset_bits(uint64_t start_bit) {
+    bitblock get_next_contiguous_n_reset_bits(uint64_t start_bit, uint32_t n) {
         int offset = get_word_offset(start_bit);
         bitblock retb = {0, 0};
 
@@ -171,7 +171,7 @@ public:
 
             // Look for any free bits in the next iteration
             retb.start_bit = start_bit + word->get_next_reset_bits(offset, &retb.nbits);
-            if (retb.nbits != 0) {
+            if (retb.nbits >= n) {
                 break;
             }
 
@@ -180,6 +180,10 @@ public:
         }
 
         return retb;
+    }
+
+    bitblock get_next_contiguous_reset_bits(uint64_t start_bit) {
+        return(get_next_contiguous_n_reset_bits(start_bit, 1));
     }
 
     void print() {

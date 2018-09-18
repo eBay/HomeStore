@@ -11,6 +11,7 @@ namespace homestore {
 
 // This structure represents each entry into the evictable location
 struct LRUEvictRecord : public boost::intrusive::list_base_hook<> {
+    int inserted;
 };
 
 class LRUEvictionPolicy {
@@ -24,12 +25,15 @@ public:
     void add(LRUEvictRecord &rec) {
         std::lock_guard< decltype(m_list_guard) > guard(m_list_guard);
         m_list.push_back(rec);
+        rec.inserted = true;
     }
 
     void remove(LRUEvictRecord &rec) {
         std::lock_guard< decltype(m_list_guard) > guard(m_list_guard);
         auto it = m_list.iterator_to(rec);
+        assert(rec.inserted == true);
         m_list.erase(it);
+        rec.inserted = false;
     }
 
     void eject_next_candidate(const CanEjectCallback &cb) {
@@ -41,7 +45,9 @@ public:
         for (auto it = m_list.begin(); it != itend; ++it) {
             LRUEvictRecord *rec = &(*it);
             /* return the next element */
+            assert(rec->inserted == true);
             it = m_list.erase(it);
+            rec->inserted = false;
             if (cb(*rec, stop)) {
                 if (stop) {
                     return;
@@ -51,6 +57,7 @@ public:
             } else {
                 /* reinsert it at the same position */
                 it = m_list.insert(it, *rec);
+                rec->inserted = true;
                 count++;
             }
             if (count) { 
@@ -65,14 +72,18 @@ public:
 
     void upvote(LRUEvictRecord &rec) {
         std::lock_guard< decltype(m_list_guard) > guard(m_list_guard);
-        m_list.erase(m_list.iterator_to(rec));
-        m_list.push_back(rec);
+        if (rec.inserted) {
+            m_list.erase(m_list.iterator_to(rec));
+            m_list.push_back(rec);
+        }
     }
 
     void downvote(LRUEvictRecord &rec) {
         std::lock_guard< decltype(m_list_guard) > guard(m_list_guard);
-        m_list.erase(m_list.iterator_to(rec));
-        m_list.push_front(rec);
+        if (rec.inserted) {
+            m_list.erase(m_list.iterator_to(rec));
+            m_list.push_front(rec);
+         }
     }
 
 private:

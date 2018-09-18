@@ -249,10 +249,11 @@ public:
     virtual homeds::blob get_blob() const = 0;
     virtual void set_blob(const homeds::blob &b) = 0;
     virtual void copy_blob(const homeds::blob &b) = 0;
-    virtual void append_blob(const BtreeValue &new_val) = 0;
+    virtual void append_blob(const BtreeValue &new_val, std::shared_ptr<BtreeValue> &existing_val) = 0;
 
     virtual uint32_t get_blob_size() const = 0;
     virtual void set_blob_size(uint32_t size) = 0;
+    virtual uint32_t estimate_size_after_append(const BtreeValue &new_val) = 0;
 
 #ifndef NDEBUG
     virtual std::string to_string() const {return "";}
@@ -301,7 +302,7 @@ public:
         set_blob(b);
     }
 
-    void append_blob(const BtreeValue &new_val) override {
+    void append_blob(const BtreeValue &new_val, std::shared_ptr<BtreeValue> &existing_val) override {
         set_blob(new_val.get_blob());
     }
 
@@ -320,6 +321,10 @@ public:
         BNodeptr *otherp = (BNodeptr *) &other;
         m_id = otherp->m_id;
         return (*this);
+    }
+
+    uint32_t estimate_size_after_append(const BtreeValue &new_val) override {
+        return sizeof(bnodeid_t);
     }
 
 #ifdef DEBUG
@@ -347,7 +352,7 @@ public:
     void copy_blob(const homeds::blob &b) override {
     }
 
-    void append_blob(const BtreeValue &new_val) override {
+    void append_blob(const BtreeValue &new_val, std::shared_ptr<BtreeValue> &existing_val) override {
     }
 
     static uint32_t get_fixed_size() {
@@ -363,6 +368,10 @@ public:
 
     EmptyClass& operator=(const EmptyClass& other) {
         return (*this);
+    }
+
+    uint32_t estimate_size_after_append(const BtreeValue &new_val) override {
+        return 0;
     }
 
 #ifdef DEBUG

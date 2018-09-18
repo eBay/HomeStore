@@ -12,6 +12,10 @@
 #include "homeds/btree/mem_btree.hpp"
 #include <sds_logging/logging.h>
 
+#ifndef NDEBUG
+bool blk_alloc_test = false;
+#endif
+
 namespace homestore {
 
 void thread_func(VarsizeBlkAllocator *b) {
@@ -25,18 +29,18 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig &cfg) :
         m_wait_alloc_segment(nullptr),
         m_blk_portions(cfg.get_total_portions()),
         m_temp_groups(cfg.get_total_temp_group()),
-        m_cache_n_entries(0) {
+        m_cache_n_entries(0), m_cache_chunk_entries(0) {
 
     // TODO: Raise exception when blk_size > page_size or total blks is less than some number etc...
     m_alloc_bm = new homeds::Bitset(cfg.get_total_blks());
 
 #ifndef NDEBUG
+    m_alloced_bm = new homeds::Bitset(cfg.get_total_blks());
+    
     for (auto i = 0U; i < cfg.get_total_temp_group(); i++) {
         m_temp_groups[i].m_temp_group_id = i;
     }
-#endif
-
-#ifndef NDEBUG
+    
     for (auto i = 0U; i < cfg.get_total_portions(); i++) {
         m_blk_portions[i].m_blk_portion_id = i;
     }
@@ -137,6 +141,11 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
 
         // Wait for cache to refill and then retry original request
         if (attempt > MAX_BLK_ALLOC_ATTEMPT) {
+#ifndef DEBUG
+            if (!blk_alloc_test) {
+                assert(0);
+            }
+#endif
             LOGERROR("Exceeding max retries {} to allocate. Failing the alloc", MAX_BLK_ALLOC_ATTEMPT);
             break;
         } else {
@@ -156,6 +165,10 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
 
     int excess_nblks = actual_entry.get_blk_count() - nblks;
     assert(excess_nblks >= 0);
+
+    if (actual_entry.get_blk_count() == get_config().get_chunk_size()) {
+        m_cache_chunk_entries.fetch_sub(1, std::memory_order_acq_rel);
+    }
 
     if (excess_nblks) {
         uint64_t blknum = actual_entry.get_blk_num();
@@ -182,6 +195,13 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
         out_blkid->set(actual_entry.get_blk_num(), nblks);
     }
 
+#ifndef NDEBUG
+    BlkAllocPortion *portion = blknum_to_portion(out_blkid->get_id());
+    portion->lock();
+    m_alloced_bm->set_bits(out_blkid->get_id(), out_blkid->get_nblks());
+    portion->unlock();
+#endif
+
     m_cache_n_entries.fetch_sub(nblks, std::memory_order_acq_rel);
     return ret;
 }
@@ -191,6 +211,11 @@ void VarsizeBlkAllocator::free(const BlkId &b) {
 
     // Reset the bits
     portion->lock();
+    assert(m_alloc_bm->is_bits_set_reset(b.get_id(), b.get_nblks(), true));
+#ifndef NDEBUG
+    assert(m_alloced_bm->is_bits_set_reset(b.get_id(), b.get_nblks(), true));
+    m_alloced_bm->reset_bits(b.get_id(), b.get_nblks());
+#endif
     m_alloc_bm->reset_bits(b.get_id(), b.get_nblks());
     portion->unlock();
 
@@ -205,8 +230,18 @@ void VarsizeBlkAllocator::fill_cache(BlkAllocSegment *seg) {
         seg = m_heap_segments.top();
     }
 
+#ifndef NDEBUG
+    bool should_add = false;
+    if(m_cache_n_entries.load(std::memory_order_acq_rel) < get_config().get_max_cache_blks()) {
+        should_add = true;
+    }
+#endif
+
     uint64_t start_portion_num = seg->get_clock_hand();
-    while (m_cache_n_entries.load(std::memory_order_acquire) < get_config().get_max_cache_blks()) {
+    while ((m_cache_n_entries.load(std::memory_order_acquire) < 
+                get_config().get_max_cache_blks()) || 
+           (m_cache_chunk_entries.load(std::memory_order_acq_rel) < 
+                get_config().get_max_cache_chunks())) {
         uint64_t portion_num = seg->get_clock_hand();
         nadded_blks += fill_cache_in_portion(portion_num, seg);
 
@@ -219,6 +254,13 @@ void VarsizeBlkAllocator::fill_cache(BlkAllocSegment *seg) {
             break;
         }
     }
+
+#ifndef NDEBUG
+    if (!blk_alloc_test && should_add) {
+        assert(nadded_blks > 0);
+        /* if it can not add any block in this segment then system run out of space */
+    }
+#endif
 
     assert(seg->get_free_blks() >= nadded_blks);
     seg->set_free_blks(seg->get_free_blks() - nadded_blks);
@@ -237,6 +279,7 @@ uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t portion_num, BlkAll
 
     portion.lock();
     // TODO: Consider caching the m_cache_n_entries and give some leeway to max cache blks and thus avoid atomic operations
+
     while ((m_cache_n_entries.load(std::memory_order_acq_rel) < get_config().get_max_cache_blks()) &&
             (cur_blk_id < end_blk_id)) {
 
@@ -246,8 +289,25 @@ uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t portion_num, BlkAll
             break; // No more free blks
         }
 
+        if (b.nbits > get_config().get_chunk_size()) {
+            b.nbits = get_config().get_chunk_size();
+        }
+
+        if (b.start_bit >= end_blk_id) {
+            break;
+        }
+ 
+        if (b.start_bit + b.nbits > end_blk_id) {
+            b.nbits = end_blk_id - b.start_bit;
+        }
+
         VarsizeAllocCacheEntry entry;
         gen_cache_entry(b.start_bit, b.nbits, &entry);
+
+#ifndef NDEBUG
+        assert(m_alloc_bm->is_bits_set_reset(b.start_bit, b.nbits, false));
+        assert(m_alloced_bm->is_bits_set_reset(b.start_bit, b.nbits, false));
+#endif
         m_blk_cache->put(entry, dummy, homeds::btree::INSERT_ONLY_IF_NOT_EXISTS); // TODO: Trap the return status of insert
         m_alloc_bm->set_bits(b.start_bit, b.nbits);
 
@@ -255,9 +315,52 @@ uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t portion_num, BlkAll
         n_added_blks += b.nbits;
     	m_cache_n_entries.fetch_add(b.nbits, std::memory_order_acq_rel);
         cur_blk_id = b.start_bit + b.nbits;
+        if (b.nbits == get_config().get_chunk_size()) {
+            m_cache_chunk_entries.fetch_add(1, std::memory_order_acq_rel);
+        }
     }
-    portion.unlock();
 
+    /* populate chunks */
+    while ((m_cache_chunk_entries.load(std::memory_order_acq_rel) < 
+                get_config().get_max_cache_chunks()) &&
+           (cur_blk_id < end_blk_id)) {
+        // Get next reset bits and insert to cache and then reset those bits
+        auto b = m_alloc_bm->get_next_contiguous_n_reset_bits(cur_blk_id, 
+                                                get_config().get_chunk_size());
+        if (b.nbits == 0) {
+            break; // No more free blks
+        }
+
+        if (b.nbits > get_config().get_chunk_size()) {
+            b.nbits = get_config().get_chunk_size();
+        }
+        
+        if (b.start_bit >= end_blk_id) {
+            break;
+        }
+        
+        if (b.start_bit + b.nbits > end_blk_id) {
+            break;
+        }
+ 
+        VarsizeAllocCacheEntry entry;
+        gen_cache_entry(b.start_bit, b.nbits, &entry);
+
+#ifndef NDEBUG
+        assert(m_alloc_bm->is_bits_set_reset(b.start_bit, b.nbits, false));
+        assert(m_alloced_bm->is_bits_set_reset(b.start_bit, b.nbits, false));
+#endif
+        m_blk_cache->put(entry, dummy, homeds::btree::INSERT_ONLY_IF_NOT_EXISTS); // TODO: Trap the return status of insert
+        m_alloc_bm->set_bits(b.start_bit, b.nbits);
+
+        // Update the counters
+        n_added_blks += b.nbits;
+        m_cache_n_entries.fetch_add(b.nbits, std::memory_order_acq_rel);
+        m_cache_chunk_entries.fetch_add(1, std::memory_order_acq_rel);
+        cur_blk_id = b.start_bit + b.nbits;
+    }
+
+    portion.unlock();
     return n_added_blks;
 }
 
@@ -316,13 +419,13 @@ std::string VarsizeBlkAllocator::to_string() const {
 
 int VarsizeAllocCacheEntry::is_in_range(uint64_t val, uint64_t start, bool start_incl, uint64_t end, bool end_incl) const {
     if (val < start) {
-        return 1;
+        return -1;
     } else if ((val == start) && (!start_incl)) {
-        return 1;
+        return -1;
     } else if (val > end) {
-        return -1;
+        return 1;
     } else if ((val == end) && (!end_incl)) {
-        return -1;
+        return 1;
     } else {
         return 0;
     }
@@ -382,6 +485,10 @@ int VarsizeAllocCacheEntry::compare(const homeds::btree::BtreeKey *o) const {
     } else if (get_page_id() < other->get_page_id()) {
         return -1;
     } else if (get_page_id() > other->get_page_id()) {
+        return 1;
+    } else if (get_blk_num() < other->get_blk_num()) {
+        return -1;
+    } else if (get_blk_num() > other->get_blk_num()) {
         return 1;
     } else {
         return 0;

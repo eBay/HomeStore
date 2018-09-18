@@ -212,8 +212,11 @@ TEST_F(VarsizeBlkAllocatorTest, alloc_free_test) {
 }
 
 SDS_OPTIONS_ENABLE(logging)
-
+extern bool blk_alloc_test;
 int main(int argc, char *argv[]) {
+#ifndef NDEBUG
+    blk_alloc_test = true;
+#endif
     SDS_OPTIONS_LOAD(argc, argv, logging)
     testing::InitGoogleTest(&argc, argv);
     sds_logging::SetLogger("test_blkalloc");

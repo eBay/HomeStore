@@ -127,7 +127,7 @@ public:
          */
         std::unique_lock<std::mutex> buf_mtx(buf->mtx);
         req->mem_gen_cnt = buf->gen_cnt;
-        req->memvec = buf->get_memvec(); 
+        req->memvec.copy(buf->get_memvec());
         
         /* every write should have the different gen_cnt then the last write req sent */
         assert(!buf->last_pending_req || 

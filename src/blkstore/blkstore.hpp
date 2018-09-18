@@ -78,9 +78,9 @@ public:
 
 template <typename Buffer = BlkBuffer>
 struct blkstore_req : writeback_req {
-    boost::intrusive_ptr< Buffer > write_bbuf;
-    BlkId bid;
-    uint64_t size;
+	boost::intrusive_ptr< Buffer > write_bbuf;
+	BlkId bid;
+	uint64_t size;
     std::atomic<int> blkstore_read_cnt;
     bool is_read;
     virtual ~blkstore_req(){
@@ -128,6 +128,7 @@ class BlkStore {
                                 get_elapsed_time(cache_startTime));
         assert(updated);
         return new_bbuf;
+
     }
 
     BlkStore(DeviceManager *mgr, Cache< BlkId > *cache, uint64_t initial_size, BlkStoreCacheType cache_type,
@@ -141,10 +142,10 @@ class BlkStore {
                                 { this->writeback_free_blkid(req, status); })),
             m_cache_type(cache_type),
             m_vdev(mgr, initial_size, mirrors, true, BLKSTORE_BLK_SIZE,
-                mgr->get_all_devices(), 
-                (std::bind(&BlkStore::process_completions, this, 
-                     std::placeholders::_1))),
-        m_comp_cb(comp_cb) {
+				mgr->get_all_devices(), 
+				(std::bind(&BlkStore::process_completions, this, 
+			         std::placeholders::_1))),
+	    m_comp_cb(comp_cb) {
         init_perf_report();
     }
 
@@ -159,8 +160,8 @@ class BlkStore {
                                { this->writeback_free_blkid(req, status); })),
             m_cache_type(cache_type),
             m_vdev(mgr, vb, (std::bind(&BlkStore::process_completions, this, 
-                 std::placeholders::_1))), 
-        m_comp_cb(comp_cb) {
+			     std::placeholders::_1))), 
+	    m_comp_cb(comp_cb) {
         init_perf_report();
     }
 
@@ -221,13 +222,16 @@ class BlkStore {
         boost::optional< std::array< BlkId, 2>> ret_arr;
         bool found = false;
 
+        assert(bid.m_nblks >= (blkoffset.get_value_or(0) + nblks.get_value_or(0)));
         // Check if its a full element freed. In that case remove the element in the cache and free it up
-        if ((blkoffset.get_value_or(0) == 0) && ((nblks == boost::none) || (nblks == bid.get_nblks()))) {
+        if ((blkoffset.get_value_or(0) == 0) && ((nblks == boost::none) || (nblks == bid.get_nblks())) 
+            /* TODO: will remove this check later */
+                && bid.get_nblks() == 1) {
             found = m_cache->erase(bid, (boost::intrusive_ptr< CacheBuffer< BlkId>> *) &erased_buf);
             ret_arr = boost::none;
             goto out;
         }
-
+#if 0
         /* TODO: need to see what happen if read and erase happening in parallel of same blkid */
 
         // Not the entire block is freed. Remove the entire entry from cache and split into possibly 2 entries
@@ -241,17 +245,23 @@ class BlkStore {
                 std::array< boost::intrusive_ptr< Buffer >, 2 > bbufs = free_partial_cache(erased_buf, from_blk,
                                                                                            to_blk);
 
+                if(!ret_arr.is_initialized() && bbufs.size()>0)
+                    ret_arr = boost::make_optional(*(new std::array< BlkId, 2>()));
+                
                 // Add the split entries to the cache.
                 for (auto i = 0U; i < bbufs.size(); i++) {
-                    ret_arr->at(i) = bbufs[i]->get_key();
-                    boost::intrusive_ptr< Buffer > out_buf;
-                    bool inserted = m_cache->insert(ret_arr->at(i), bbufs[i],
-                                                    (boost::intrusive_ptr< CacheBuffer< BlkId>> *) &out_buf);
-                    assert(inserted);
+                    if(bbufs[i]) {
+                        ret_arr->at(i) = bbufs[i]->get_key();
+                        boost::intrusive_ptr<Buffer> out_buf;
+                        bool inserted = m_cache->insert(ret_arr->at(i), bbufs[i],
+                                                        (boost::intrusive_ptr<CacheBuffer<BlkId>> *) &out_buf);
+                        assert(inserted);
+                    }
                 }
             }
         }
         
+#endif
 out:
         uint8_t num_blks;
         if (nblks == boost::none) {
@@ -279,7 +289,7 @@ out:
     /* Allocate a new block and write the contents to the allocated block and return the blkbuffer */
     boost::intrusive_ptr< BlkBuffer > alloc_and_write(homeds::blob &blob, 
                             blk_alloc_hints &hints, 
-                            std::deque<boost::intrusive_ptr<writeback_req>> &dependent_req_q) {
+							std::deque<boost::intrusive_ptr<writeback_req>> &dependent_req_q) {
         // First allocate the blk id based on the hints
         BlkId bid;
         m_vdev.alloc_blk(round_off(blob.size, BLKSTORE_BLK_SIZE), hints, &bid);
@@ -369,9 +379,9 @@ out:
                                     get_elapsed_time(cache_startTime)));
         // TODO: Raise an exception if we are not able to insert - instead of assert
 //        assert(inserted);
-  //      if (!inserted) {
-    //        return NULL;
-      //  }
+//        if (!inserted) {
+//            return NULL;
+//        }
 
         req->write_bbuf = ibuf;
 
@@ -405,7 +415,7 @@ out:
         /* Register histogram (if not present) */
         for (auto i = 0U; i < MAX_BLKSTORE_HIST_CNT; i++) {
             perf->registerHistogram(blkstore_hist[i], blkstore_hist[i]+BLKSTORE_LABEL, "");
-        }
+    }
     }
 
     /* If the user already has created a blkbuffer, then use this method to use it to write the block */
@@ -453,11 +463,11 @@ out:
 
         uint32_t size_to_read = size;
         homeds::MemVector<BLKSTORE_BLK_SIZE>::cursor_t c;
-
-            uint8_t *ptr;
+        c.m_ind = -1;
+        uint8_t *ptr;
         while (size_to_read > 0) {
             boost::optional< homeds::MemPiece<BLKSTORE_BLK_SIZE> &> missing_mp =
-                bbuf->get_memvec_mutable().fill_next_missing_piece(c, size, cur_offset);
+                bbuf->get_memvec_mutable().fill_next_missing_piece(c, size_to_read, cur_offset);
             if (!missing_mp) {
                 // We don't have any missing pieces, so we are done reading the contents
                 break;
@@ -475,11 +485,14 @@ out:
 
             // Read the missing piece from the device
             BlkId tmp_bid(bid.get_id() + missing_mp->offset()/BLKSTORE_BLK_SIZE,
+
                     missing_mp->size()/BLKSTORE_BLK_SIZE, bid.get_chunk_num());
             req->blkstore_read_cnt.fetch_add(1, std::memory_order_acquire);
             m_vdev.read(tmp_bid, missing_mp.get(), 
                          boost::static_pointer_cast<virtualdev_req>(req));
-            size_to_read -= missing_mp->size();
+
+            //size_to_read -= missing_mp->size();
+            size_to_read = (offset + size - cur_offset);
             
             PerfMetrics *perf = PerfMetrics::getInstance();
             assert(perf->incrCounter(blkstore_cntr[READS_C], 1));
@@ -535,7 +548,7 @@ private:
         homeds::MemVector< BLKSTORE_BLK_SIZE > left_mvec;
         if (from_offset) {
             bool is_left_overlap = mvec.find_index(from_offset, boost::none, &left_ind);
-            for (auto i = 0u; i < left_ind - 1; i++) { // Update upto the previous one.
+            for (auto i = 0u; i < left_ind  ; i++) { // Update upto the previous one.
                 auto mp = mvec.get_nth_piece((uint32_t) i);
                 left_mvec.push_back(mp);
             }
@@ -709,6 +722,7 @@ private:
         VirtualDev<BAllocator, RoundRobinDeviceSelector> m_vdev;
         comp_callback m_comp_cb;
     };
+
 
 }
 #endif //OMSTORE_BLKSTORE_HPP

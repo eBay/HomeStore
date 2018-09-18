@@ -22,8 +22,8 @@ public:
             m_count(count) {}
 
     T increment(int32_t n=1) {
-        m_count.fetch_add(n, std::memory_order_relaxed);
-        return m_count + 1;
+        T count = m_count.fetch_add(n, std::memory_order_relaxed);
+        return count + 1;
     }
 
     T decrement(int32_t n=1) {
@@ -56,7 +56,7 @@ public:
         return false;
     }
 
-    bool test_le(int32_t check) {
+    bool test_le(T check) {
 	if (m_count.load(std::memory_order_relaxed) > check) {
 		return false;
 	}

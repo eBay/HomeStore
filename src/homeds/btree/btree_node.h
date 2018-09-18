@@ -18,7 +18,8 @@ typedef struct {
 template< btree_node_type NodeType, typename K, typename V, size_t NodeSize >
 class VariantNode {
 public:
-    VariantNode(bnodeid_t id, bool init);
+    VariantNode( bnodeid_t id, bool init, const BtreeConfig &cfg);
+    VariantNode( bnodeid_t *id, bool init, const BtreeConfig &cfg);
     void get(int ind, BtreeValue *outval, bool copy) const;
 
     // Insert the key and value in provided index
@@ -122,7 +123,7 @@ public:
 
     // All CRUD on a node
     // Base methods provided by PhysicalNodes
-    bool put(const BtreeKey &key, const BtreeValue &val, PutType put_type);
+    bool put(const BtreeKey &key, const BtreeValue &val, PutType put_type, std::shared_ptr<BtreeValue> &existing_val);
     auto find(const BtreeSearchRange &range, BtreeKey *outkey, BtreeValue *outval) const;
     bool remove_one(const BtreeSearchRange &range, BtreeKey *outkey, BtreeValue *outval);
 

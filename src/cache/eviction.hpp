@@ -23,7 +23,7 @@ public:
 
     /* Initialize the evictor with maximum size it needs to keep it under, before it starts evictions. Caller also
      * need to provide a callback function to check if the current record could be evicted or not. */
-    Evictor(uint32_t part_num, uint64_t max_size, CacheStats *stats, const CanEvictCallback &cb,
+    Evictor(uint32_t part_num, int64_t max_size, CacheStats *stats, const CanEvictCallback &cb,
             const GetSizeCallback &gs_cb) :
             m_can_evict_cb(cb),
             m_get_size_cb(gs_cb),
@@ -75,7 +75,10 @@ public:
      * in the eviction list */
     void delete_record(EvictRecordType &rec) {
         m_evict_policy.remove(rec);
-        m_cur_size.fetch_sub(m_get_size_cb(&rec), std::memory_order_acq_rel);
+        auto rec_size = m_get_size_cb(&rec);
+        assert(rec_size > 0);
+        int64_t size = m_cur_size.fetch_sub(rec_size, std::memory_order_acq_rel);
+        assert(size >= 0);
     }
 
 private:
@@ -104,7 +107,8 @@ private:
                 });
         /* XXX: should we handle it */
         assert(dealloc_size >= needed_size);
-        m_cur_size.fetch_sub(dealloc_size, std::memory_order_acq_rel);
+        int64_t size = m_cur_size.fetch_sub(dealloc_size, std::memory_order_acq_rel);
+        assert(size >= 0);
         return true;
     }
 
@@ -112,8 +116,8 @@ private:
     CanEvictCallback m_can_evict_cb;
     GetSizeCallback m_get_size_cb;
     EvictionPolicy m_evict_policy;
-    std::atomic< uint64_t > m_cur_size;
-    uint64_t m_max_size;
+    std::atomic< int64_t > m_cur_size;
+    int64_t m_max_size;
     CacheStats *m_stats;
     uint32_t m_part_num;
 };

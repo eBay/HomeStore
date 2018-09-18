@@ -221,7 +221,7 @@ protected:
         return to_variant_node()->get_nth_key(0, out_firstkey, false);
     }
 
-    bool put(const BtreeKey &key, const BtreeValue &val, PutType put_type) {
+    bool put(const BtreeKey &key, const BtreeValue &val, PutType put_type, std::shared_ptr<BtreeValue> &existing_val) {
         auto result = find(key, nullptr, nullptr);
         bool ret = true;
 
@@ -236,10 +236,10 @@ protected:
                              to_variant_node()->update(result.end_of_search_index, key, val);
         } else if (put_type == APPEND_ONLY_IF_EXISTS) {
             if (!result.found) return false;
-            append(result.end_of_search_index, key, val);
+            append(result.end_of_search_index, key, val, existing_val);
         } else if (put_type == APPEND_IF_EXISTS_ELSE_INSERT) {
-            (result.found) ? to_variant_node()->insert(result.end_of_search_index, key, val) :
-                             append(result.end_of_search_index, key, val);
+            (!result.found) ? to_variant_node()->insert(result.end_of_search_index, key, val) :
+                             append(result.end_of_search_index, key, val, existing_val);
         } else {
             return false;
         }
@@ -263,11 +263,11 @@ protected:
         return true;
     }
 
-    void append(uint32_t index, const BtreeKey &key, const BtreeValue &val) {
+    void append(uint32_t index, const BtreeKey &key, const BtreeValue &val, std::shared_ptr<BtreeValue> &existing_val) {
         // Get the nth value and do a callback to update its blob with the new value, being passed
         V nth_val;
         to_variant_node()->get_nth_value(index, &nth_val, false);
-        nth_val.append_blob(val);
+        nth_val.append_blob(val,existing_val);
         to_variant_node()->update(index, key, nth_val);
     }
 
@@ -379,11 +379,11 @@ protected:
             }
         }
 
-        if (range.is_second_min() && second_min != temp_end) {
+        if (range.is_second_min() && (has_valid_edge() || second_min != temp_end)) {
         	  ret.end_of_search_index = ret.found ? second_min : end;
         } else {
       		  ret.end_of_search_index = ret.found ? min_ind_found : end;
-	}
+	    }
         return ret;
     }
 

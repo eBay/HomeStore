@@ -4,6 +4,7 @@
 
 #include "btree_node.h"
 #include "simple_node.hpp"
+#include "varlen_node.hpp"
 
 namespace homeds { namespace btree {
 
@@ -37,8 +38,8 @@ DecBNodeType(void) init_btree_node() {
 }
 
 /************* CRUD on a node ************/
-DecBNodeType(bool) put(const BtreeKey &key, const BtreeValue &val, PutType put_type) {
-    return call_variant_method(this, put, key, val, put_type);
+DecBNodeType(bool) put(const BtreeKey &key, const BtreeValue &val, PutType put_type, std::shared_ptr<BtreeValue> &existing_val) {
+    return call_variant_method(this, put, key, val, put_type, existing_val);
 }
 
 DecBNodeType(bool) remove_one(const BtreeSearchRange &range, BtreeKey *outkey, BtreeValue *outval) {

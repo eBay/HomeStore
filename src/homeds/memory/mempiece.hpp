@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <boost/optional.hpp>
 #include <sstream>
+#include <mutex>
 
 namespace homeds {
 #define round_off(val, rnd) ((((val)-1)/(rnd)) + 1)
@@ -127,86 +128,80 @@ private:
 template <int SizeMultiplier = 8192>
 struct MemVector {
 private:
-    union u {
-        u(uint8_t *ptr, uint32_t size, uint32_t offset) : m_piece(ptr, size, offset) {}
-
-        MemPiece< SizeMultiplier > m_piece;
-        std::vector< MemPiece< SizeMultiplier > > *m_list;
-    } m_u;
+    std::vector< MemPiece< SizeMultiplier > > m_list;
+    mutable std::mutex m_mtx;
 
 public:
     MemVector(uint8_t *ptr, uint32_t size, uint32_t offset) :
-            m_u(ptr, size, offset) {
+            m_list(), m_mtx() {
+        MemPiece< SizeMultiplier > m(ptr, size, offset);
+        m_list.push_back(m);
         assert(size || (ptr == nullptr));
     }
 
-    MemVector() : m_u(nullptr, 0, 0) {}
+    MemVector() : m_list(), m_mtx() {}
 
     ~MemVector() {
-        if (m_u.m_piece.size() == 0) {
-            if (m_u.m_list) {
-                delete (m_u.m_list);
-            }
-        }
+            m_list.erase(m_list.begin(), m_list.end());
     }
 
+    std::vector< MemPiece< SizeMultiplier > > get_m_list() const {
+        return m_list;
+    }
+    void copy(const MemVector &other) {
+        m_list = other.get_m_list();
+    }
     uint32_t npieces() const {
-        if (m_u.m_piece.size() == 0) {
-            return m_u.m_list ? m_u.m_list->size() : 0;
-        } else {
-            return 1;
-        }
+        return (m_list.size());
     }
 
     void set(uint8_t *ptr, uint32_t size, uint32_t offset) {
-        if (m_u.m_piece.size() == 0) {
-            if (m_u.m_list) {
-                delete (m_u.m_list);
-            }
-        }
-        m_u.m_piece.set(ptr, size, offset);
+        std::unique_lock<std::mutex> mtx(m_mtx);
+        m_list.erase(m_list.begin(), m_list.end());
+        MemPiece< SizeMultiplier > m(ptr, size, offset);
+        m_list.push_back(m);
     }
 
     void set(const homeds::blob &b, uint32_t offset = 0) {
         set(b.bytes, b.size, offset);
     }
 
-    void get(homeds::blob *outb, uint32_t offset = 0) const {
-        uint32_t piece_size = m_u.m_piece.size();
-        uint32_t piece_offset;
-        uint32_t ind;
+    void free_all_mem_pieces() {
+        for (auto i = 0u; i < m_list.size(); i++) {
+            free(m_list[i].ptr());
+        }
+    }
 
-        outb->bytes = nullptr; outb->size = 0;
-        if (piece_size != 0) {
-            piece_offset = m_u.m_piece.offset();
-            if ((offset >= piece_offset) && (offset < (piece_offset + piece_size))) {
-                uint32_t delta = offset - piece_offset;
-                outb->bytes = m_u.m_piece.ptr() + delta;
-                outb->size  = piece_size - delta;
-            }
-        } else if ((m_u.m_list && bsearch(offset, -1, &ind))) {
-            piece_offset = m_u.m_list->at(ind).offset();
+    void get(homeds::blob *outb, uint32_t offset = 0) const {
+        uint32_t ind = 0;
+        std::unique_lock<std::mutex> mtx(m_mtx);
+        if ((m_list.size() && bsearch(offset, -1, &ind))) {
+            auto piece_offset = m_list.at(ind).offset();
+            assert(piece_offset <= offset);
             uint32_t delta = offset - piece_offset;
-            outb->bytes = m_u.m_list->at(ind).ptr() + delta;
-            outb->size  = m_u.m_list->at(ind).size() - delta;
+            assert(delta < m_list.at(ind).size());
+            outb->bytes = m_list.at(ind).ptr() + delta;
+            outb->size  = m_list.at(ind).size() - delta;
+        } else {
+            assert(0);
         }
     }
 
     const MemPiece<SizeMultiplier> &get_nth_piece(uint8_t nth) const {
-        if ((m_u.m_piece.size() == 0) && m_u.m_list) {
-            assert(nth < m_u.m_list->size());
-            return m_u.m_list->at(nth);
+        if (nth < m_list.size()) {
+            return m_list.at(nth);
         } else {
-            return m_u.m_piece;
+            assert(0);
+            return m_list.at(0);
         }
     }
 
     MemPiece<SizeMultiplier> &get_nth_piece_mutable(uint8_t nth) const {
-        if ((m_u.m_piece.size() == 0) && m_u.m_list) {
-            assert(nth < m_u.m_list->size());
-            return m_u.m_list->at(nth);
+        if (nth < m_list.size()) {
+            return m_list->at(nth);
         } else {
-            return m_u.m_piece;
+            assert(0);
+            return m_list.at(0);
         }
     }
 
@@ -225,53 +220,21 @@ public:
     /* This method will try to set or append the offset to the memory piece. However, if there is already an entry
      * within reach for given offset/size, it will reject the entry and return false. Else it sets or adds the entry */
     bool append(uint8_t *ptr, uint32_t offset, uint32_t size) {
+        std::unique_lock<std::mutex> mtx(m_mtx);
         bool added = false;
-        if (m_u.m_piece.size() != 0) {
-            if (compare(offset, m_u.m_piece) == 0) {
-                return added;
-            }
-
-            // First move the current item to the list
-            MemPiece<SizeMultiplier> mp(m_u.m_piece.ptr(), m_u.m_piece.size(), m_u.m_piece.offset());
-            m_u.m_piece.reset();
-            added = add_piece_to_list(mp);
-            assert(added);
-            m_u.m_piece.set_size(0);
-        }
-
         MemPiece<SizeMultiplier> mp(ptr, size, offset);
         added = add_piece_to_list(mp);
         return added;
     }
 
     void push_back(const MemPiece<SizeMultiplier> &piece) {
-        if ((m_u.m_piece.size() == 0) && (m_u.m_list == nullptr)) {
-            // First entry add to the in-core structure
-            m_u.m_piece = piece;
-        } else {
-            if (m_u.m_list == nullptr) {
-                auto mp = m_u.m_piece;
-                m_u.m_list = new std::vector< MemPiece< SizeMultiplier > >();
-                m_u.m_list->push_back(mp);
-            }
-            m_u.m_list->push_back(piece);
-        }
+            m_list.push_back(piece);
     }
 
     MemPiece<SizeMultiplier> &insert_at(uint32_t ind, const MemPiece<SizeMultiplier> &piece) {
-        if ((m_u.m_piece.size() == 0) && (m_u.m_list == nullptr)) {
-            assert(ind == 0);
-            m_u.m_piece = piece;
-            return m_u.m_piece;
-        } else {
-            if (m_u.m_list == nullptr) {
-                auto mp = m_u.m_piece;
-                m_u.m_list = new std::vector< MemPiece< SizeMultiplier > >();
-                m_u.m_list->push_back(mp);
-            }
-            auto it = m_u.m_list->emplace((m_u.m_list->begin() + ind), piece);
+            assert(ind <= m_list.size());
+            auto it = m_list.emplace((m_list.begin() + ind), piece);
             return *it;
-        }
     }
 
     MemPiece<SizeMultiplier> &insert_at(uint32_t ind, uint8_t *ptr, uint32_t size, uint32_t offset) {
@@ -280,23 +243,16 @@ public:
     }
 
     uint32_t size() const {
-        auto s = m_u.m_piece.size();
-
-        if (s == 0) {
-            if (m_u.m_list != nullptr) {
-                for (auto &p : *(m_u.m_list)) {
-                    s += p.size();
-                }
-            }
+        uint32_t s = 0;
+        for(auto it = m_list.begin(); it < m_list.end(); ++it) {
+                    s += (*it).size();
         }
         return s;
     }
 
-    bool find_index(uint32_t offset, boost::optional<uint8_t> ind_hint, uint32_t *out_ind) const {
+    bool find_index(uint32_t offset, boost::optional<int> ind_hint, uint32_t *out_ind) const {
         *out_ind = 0;
-        return (!m_u.m_piece.size() && m_u.m_list) ?
-               bsearch(offset, ind_hint.get_value_or(-1), out_ind) :
-               ((offset >= m_u.m_piece.offset()) && (offset < m_u.m_piece.size()));
+        return (bsearch(offset, ind_hint.get_value_or(-1), out_ind));
     }
 
     struct cursor_t {
@@ -304,29 +260,37 @@ public:
         int m_ind;
     };
 
+    /* TODO :- mempeices are not protected by lock. We might need to take a lock
+     * if there are multiple reads happening on a same blkid.
+     */
+
     boost::optional< MemPiece<SizeMultiplier> &> fill_next_missing_piece(cursor_t &c, uint32_t size, uint32_t offset) {
         uint32_t new_ind;
-        bool found = find_index(offset, (uint8_t)c.m_ind, &new_ind);
+        std::unique_lock<std::mutex> mtx(m_mtx);
+        bool found = find_index(offset, c.m_ind, &new_ind);
         c.m_ind = new_ind;
 
-        if (found) {
+        while (found) {
             // If we have already the offset in our piece, check if we really miss a piece.
             auto &mp = get_nth_piece(new_ind);
             if ((offset + size) <= mp.end_offset()) {
                 // No missing piece
                 return boost::none;
             }
+            size = size - (mp.end_offset() - offset);
             offset = mp.end_offset(); // Move the offset to the start of next mp.
+            found = find_index(offset, (uint8_t)c.m_ind, &new_ind);
+            c.m_ind = new_ind;
         }
 
         uint32_t sz;
-        if (new_ind+1 < npieces()) {
-            auto &mp = get_nth_piece(new_ind+1);
+        if (new_ind < npieces()) {
+            auto &mp = get_nth_piece(new_ind);
             sz = mp.offset() - offset;
-            assert(sz <= size);
+            //assert(sz <= size);
         } else {
             // This is the last item in the vector, just fill the size
-            sz = size - offset;
+            sz = size;
         }
 
         auto &mp = insert_at(new_ind, nullptr, sz, offset);
@@ -335,9 +299,6 @@ public:
 
 private:
     bool add_piece_to_list(const MemPiece<SizeMultiplier> &mp) {
-        if (m_u.m_list == nullptr) {
-            m_u.m_list = new std::vector< MemPiece < SizeMultiplier > >();
-        }
 
         uint32_t ind;
         // If we found an offset in search we got to fail the add
@@ -346,11 +307,11 @@ private:
         }
 
         // If we overlap with the next entry where it is to be inserted, fail the add
-        if ((ind < m_u.m_list->size()) && (mp.end_offset() > m_u.m_list->at(ind).offset())) {
+        if ((ind < m_list.size()) && (mp.end_offset() > m_list.at(ind).offset())) {
             return false;
         }
 
-        (*m_u.m_list).emplace((m_u.m_list->begin() + ind), mp);
+        m_list.emplace((m_list.begin() + ind), mp);
         return true;
     }
 
@@ -365,13 +326,18 @@ private:
         }
     }
 
+    /* it return the first index which is greater then or equal to offset. 
+     * If is more then the last element in m_list.size() then it 
+     * return m_list.size(). If it is smaller then first element, it return 
+     * zero.
+     */
     bool bsearch(uint32_t offset, int start, uint32_t *out_ind) const {
-        int end = m_u.m_list->size();
+        int end = m_list.size();
         uint32_t mid = 0;
 
         while ((end - start) > 1) {
             mid = start + (end - start) / 2;
-            int x = compare(offset, m_u.m_list->at(mid));
+            int x = compare(offset, m_list.at(mid));
             if (x == 0) {
                 *out_ind = mid;
                 return true;

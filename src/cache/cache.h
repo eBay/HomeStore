@@ -12,6 +12,7 @@
 #include <boost/intrusive_ptr.hpp>
 #include "homeds/memory/obj_allocator.hpp"
 #include "main/store_limits.h"
+#include <execinfo.h>
 
 namespace homestore {
 
@@ -116,20 +117,57 @@ private:
     K m_key;                                        // Key to access this cache
     homeds::MemVector< BLKSTORE_BLK_SIZE > m_mem;   // Memory address which is what this buffer contained with
     homeds::atomic_counter< uint32_t > m_refcount;  // Refcount
+#ifndef NDEBUG
+    homeds::atomic_counter< int32_t > m_indx;  // Refcount
+#define MAX_ENTRIES 50
+    void* arr_symbols[MAX_ENTRIES];
+    /* to see if it is data buf or btree buf */
+#endif
 
 public:
+#ifndef NDEBUG
+    bool is_btree = false;
+#endif
     typedef CacheBuffer<K> CacheBufferType;
 
-    CacheBuffer() : m_refcount(0) {}
+    CacheBuffer() : m_refcount(0)
+#ifndef NDEBUG
+        ,m_indx(-1)
+#endif
+    {
+#ifndef NDEBUG
+        for (int i = 0; i < MAX_ENTRIES; i++) {
+            arr_symbols[i] = malloc(sizeof(void *) * 10);
+        }
+#endif
+    }
 
     CacheBuffer(const K &key, const homeds::blob &blob, 
                 Cache< K > *cache, uint32_t offset = 0) :
-            m_refcount(0) {
+            m_refcount(0) 
+#ifndef NDEBUG
+            ,m_indx(-1)
+#endif
+    {
+#ifndef NDEBUG
+        for (int i = 0; i < MAX_ENTRIES; i++) {
+            arr_symbols[i] = malloc(sizeof(void *) * 10);
+            bzero(arr_symbols[i], sizeof(void *) * 10);
+        }
+#endif
         m_mem.set(blob, offset);
         m_key = key;
     }
 
-    virtual ~CacheBuffer(){};
+    virtual ~CacheBuffer() {
+#ifndef NDEBUG
+        for (int i = 0; i < MAX_ENTRIES; i++) {
+            if (arr_symbols[i] != NULL) {
+                free(arr_symbols[i]);
+            }
+        }
+#endif
+    };
 
     const K &get_key() const {
         return m_key;
@@ -140,7 +178,7 @@ public:
     }
 
     void set_memvec(const homeds::MemVector< BLKSTORE_BLK_SIZE > &vec) {
-        m_mem = vec;
+        m_mem.copy(vec);
     }
 
     const homeds::MemVector< BLKSTORE_BLK_SIZE > &get_memvec() const {
@@ -158,15 +196,17 @@ public:
     }
 
     friend void intrusive_ptr_add_ref(CacheBuffer<K> *buf) {
+#ifndef NDEBUG
+        int x = buf->m_indx.increment() % MAX_ENTRIES;
+        auto size = backtrace((void **)(buf->arr_symbols[x]), 10);
+#endif
         buf->m_refcount.increment();
     }
 
     friend void intrusive_ptr_release(CacheBuffer<K> *buf) {
         if (buf->m_refcount.decrement_testz()) {
             // First free the bytes it covers
-            homeds::blob blob;
-            buf->m_mem.get(&blob);
-            free((void *) blob.bytes);
+            buf->m_mem.free_all_mem_pieces();
 
             // Then free the record itself
             homeds::ObjectAllocator< CacheBufferType >::deallocate(buf);

@@ -5,263 +5,342 @@
 #include <blkalloc/blk.h>
 #include <csignal>
 #include <error/error.h>
+#include "homeds/array/interval_array.h"
+#include <math.h>
+#include <sds_logging/logging.h>
 #include <volume/volume.hpp>
 
 using namespace std;
 using namespace homeds::btree;
 
-namespace homestore {
-class MappingKey : public homeds::btree::BtreeKey {
-private:
-	uint64_t blob;
-	uint64_t *ptr_blob;
-public:
-	MappingKey(){}
-	MappingKey(uint64_t _blob) {
-		blob = _blob;
-		ptr_blob = &blob;
-	}
-	int compare(const BtreeKey *o) const override {
-		MappingKey *key = (MappingKey *)o;
-		if (*ptr_blob < *key->ptr_blob) {
-			return -1;
-		} else if (*ptr_blob > *key->ptr_blob) {
-			return 1;
-		} else {
-			return 0;
-		}
-	}
-	virtual homeds::blob get_blob() const override {
-		homeds::blob b = {(uint8_t *) ptr_blob, sizeof(blob)};
-		return b;
-	}
-	virtual void set_blob(const homeds::blob &b) override {
-		ptr_blob = (uint64_t *)b.bytes;
-	}
-	virtual void copy_blob(const homeds::blob &b) override {
-		memcpy(ptr_blob, b.bytes, b.size);
-	}
-	virtual uint32_t get_blob_size() const override {
-		return (sizeof(*ptr_blob));
-	}
-	virtual void set_blob_size(uint32_t size) override {
-	}
-	static uint32_t get_fixed_size() {
-		return sizeof(blob);
-	}
-	uint64_t get_value() {
-		return blob;
-	}
-	int compare_range(const BtreeSearchRange &range) const override {
-		return 0;
-	}
-	std::string to_string() const  {
-		return (std::to_string(*ptr_blob));
-	}
-};
 
-class MappingValue : public homeds::btree::BtreeValue {
-	struct BlkId val;
-	struct BlkId *pVal;
-public:
-	MappingValue() {
-		pVal = &val;
-	};
-	MappingValue(struct BlkId _val) : homeds::btree::BtreeValue() {
-		val = _val;
-		pVal = &val;
-	};
-	virtual homeds::blob get_blob() const override {
-		homeds::blob b;
-		b.bytes = (uint8_t *)pVal; b.size = sizeof(pVal);
-		return b;
-	}
-	virtual void set_blob(const homeds::blob &b) override {
-		pVal = (struct BlkId *) b.bytes;
-	}
-	virtual void copy_blob(const homeds::blob &b) override {
-		memcpy(pVal, b.bytes, b.size);
-	}
-	virtual void append_blob(const BtreeValue &new_val) override {
-		memcpy(pVal, ((const MappingValue &)new_val).pVal, sizeof(val));
-	}
-	virtual uint32_t get_blob_size() const override {
-		return sizeof(*pVal);
-	}
-	virtual void set_blob_size(uint32_t size) override {
-		assert(size == sizeof(*pVal));
-	}
-	static uint32_t get_fixed_size() {
-		return sizeof(val);
-	}
-	struct BlkId get_val() {
-		return val;
-	}
-	struct BlkId *get_pVal() {
-		return pVal;
-	}
-	std::string to_string() const  {
-		return (std::to_string(pVal->m_id));
-	}
-};
+namespace homestore {
 
 #define MappingBtreeDeclType     homeds::btree::Btree<homeds::btree::SSD_BTREE, MappingKey, MappingValue, \
-                                    homeds::btree::BTREE_NODETYPE_SIMPLE, homeds::btree::BTREE_NODETYPE_SIMPLE, 4096u, writeback_req>
-#define KEY_RANGE	1
-constexpr auto MAP_BLOCK_SIZE = (4 * 1024ul);
+                                    homeds::btree::BTREE_NODETYPE_VAR_VALUE, homeds::btree::BTREE_NODETYPE_VAR_VALUE,\
+                                    4096u,writeback_req>
+#define MAX_INTERVAL_LENGTH_IN_BITS 8
+#define Interval_Array_Impl Interval_Array<MappingInterval, 80, 20 >
 
-struct lba_BlkId_mapping {
-    uint64_t lba;
-    BlkId blkId;
-    bool blkid_found;
-    lba_BlkId_mapping():lba(0),blkId(0),blkid_found(false){};
-};
+    // MappingInterval represents single interval inside value interval array
+    struct MappingInterval : public Interval<MAX_INTERVAL_LENGTH_IN_BITS> {
 
-class mapping {
-	typedef std::function< void (struct BlkId blkid) > free_blk_callback;
-    typedef std::function< void (boost::intrusive_ptr<volume_req> cookie) > comp_callback;
-private:
-	MappingBtreeDeclType *m_bt;
+        struct Value {
+            uint16_t m_blkid_offset:MAX_INTERVAL_LENGTH_IN_BITS;
+            struct BlkId m_blkid;
 
-	constexpr static auto Ki = 1024;
-	constexpr static auto Mi = Ki * Ki;
-	constexpr static auto Gi = Ki * Mi;
-	constexpr static auto MAX_CACHE_SIZE = 2ul * Gi;
+            Value() : m_blkid_offset(0), m_blkid(BlkId(0)) {}
 
-    free_blk_callback free_blk_cb;
-    comp_callback comp_cb;
-public:
+            Value(const Value &other) {
+                m_blkid_offset = other.m_blkid_offset;
+                m_blkid = other.m_blkid;
+            }
 
-  void process_completions(boost::intrusive_ptr<writeback_req> cookie, 
-                            std::error_condition status) {
-        boost::intrusive_ptr<volume_req> req = 
-                        boost::static_pointer_cast<volume_req>(cookie);
-        
-        if (req->status == no_error) {
-            req->status = status;
+            Value(uint16_t m_blkid_offset, const BlkId &m_blkid) : m_blkid_offset(m_blkid_offset), m_blkid(m_blkid) {}
+
+            void add(uint64_t offset) {
+                this->m_blkid_offset += offset;
+            }
+        }__attribute__ ((__packed__));
+
+        Value m_value;
+
+        MappingInterval() : MappingInterval(0, 0, Value()) {
         }
-        if (req->num_mapping_update.fetch_sub(1, std::memory_order_release) == 1) {
-            comp_cb(req);
+
+        MappingInterval(const MappingInterval &other) :
+                MappingInterval(other.m_interval_start, other.m_interval_length,
+                                other.m_value) {
         }
-  }
 
-  mapping(uint32_t volsize, free_blk_callback free_cb, comp_callback comp_cb, 
-            DeviceManager *mgr, Cache< BlkId > *cache) :  free_blk_cb(free_cb), comp_cb(comp_cb) {
-
-		homeds::btree::BtreeConfig btree_cfg;
-		btree_cfg.set_max_objs(volsize/(KEY_RANGE*MAP_BLOCK_SIZE));
-		btree_cfg.set_max_key_size(sizeof(MappingKey));
-		btree_cfg.set_max_value_size(sizeof(MappingValue));
-
-		//TODO: we want to initialize btree_device_info only in case of SSD tree
-
-		homeds::btree::btree_device_info bt_dev_info;
-		bt_dev_info.new_device = true;
-		bt_dev_info.dev_mgr = mgr;
-		bt_dev_info.size= 512 * Mi;
-		bt_dev_info.cache = cache;
-		bt_dev_info.vb = nullptr;
-        m_bt = MappingBtreeDeclType::create_btree(btree_cfg, &bt_dev_info, 
-                    std::bind(&mapping::process_completions, this, std::placeholders::_1, std::placeholders::_2));
-	}
-
-	MappingKey get_key(uint32_t lba) {
-		MappingKey key(lba/KEY_RANGE);
-		return key;
-	}
-
-	MappingValue get_value(struct BlkId blkid) {
-		MappingValue value(blkid);
-		return value;
-	}
-
-
-	std::error_condition put(boost::intrusive_ptr<volume_req >req, 
-                             uint64_t lba, uint32_t nblks, struct BlkId blkid) {
-		MappingValue value;
-
-		/* TODO: It is very naive way of doing it and will definitely impact
-		 * the performance. We have a new design and will implement it with
-		 * snapshot.
-		 */
-        req->num_mapping_update++;
-		for (uint32_t i = 0; i < nblks; ++i) {
-			blkid.set_nblks(1);
-			/* TODO: don't need to call remove explicitly once
-			 * varsize btree is plugged in.
-			 */
-			bool ret = m_bt->remove(get_key(lba), &value);
-			if (ret) {
-				/* free this block */
-				free_blk_cb(value.get_val());
-			}
-            req->num_mapping_update++;
-			m_bt->put(get_key(lba), get_value(blkid), 
-                      homeds::btree::INSERT_ONLY_IF_NOT_EXISTS, 
-                      boost::static_pointer_cast<writeback_req>(req), 
-                      boost::static_pointer_cast<writeback_req>(req));
-			++lba;
-			blkid.set_id(blkid.get_id() + 1);
-		}
-
-        if (req->num_mapping_update.fetch_sub(1, std::memory_order_release) == 1) {
-            comp_cb(req);
+        MappingInterval(uint64_t interval_start,
+                        uint64_t interval_length,
+                        Value other) {
+            m_interval_start = interval_start;
+            m_interval_length = interval_length;
+            m_value.m_blkid_offset = other.m_blkid_offset;
+            m_value.m_blkid = other.m_blkid;
         }
-		return homestore::no_error;
-	}
 
-	std::error_condition get(uint64_t lba, uint32_t nblks,
-							 std::vector<struct homestore::lba_BlkId_mapping> &mappingList) {
-		std::error_condition error = no_error;
-		bool atleast_one_lba_found = false;
-		bool atleast_one_lba_not_found = false;
-		uint64_t key;
 
-		while (nblks != 0) {
-			homestore::lba_BlkId_mapping* mapping = new struct homestore::lba_BlkId_mapping();
-			mapping->lba = lba;
-            /* this code will change with varsize */
-            mapping->blkId.set_nblks(1);
-			MappingValue value;
+        void merge_compare(MappingInterval *&intervalFirst, MappingInterval *&intervalSecond,
+                           std::shared_ptr<MappingInterval> &merged_interval,
+                           bool &is_intervals_mergable) /*override*/ {
+            //DISABLING MERGE AS NOT COMPATIBLE WITH CACHE 
+            is_intervals_mergable = false;
+            merged_interval = nullptr;
+        }
 
-			key = get_key(lba).get_value();
-			bool ret = m_bt->get(get_key(lba), &value);
-			if (!ret) {
-				mappingList.push_back(*mapping);
-				lba++;
-				nblks--;
-				atleast_one_lba_not_found = true;
-				continue;
-			}
-			atleast_one_lba_found = true;
-			mapping->blkId = value.get_val();
-			mapping->blkid_found = true;
+        operator std::string() { return to_string(); }
 
-			uint32_t maxBlkRead = KEY_RANGE - (lba - (key * KEY_RANGE));
+        std::string to_string() {
+            std::stringstream ss;
+            ss << m_interval_start << "," << m_interval_length << "," << m_value.m_blkid_offset << "--->"
+               << m_value.m_blkid.to_string();
+            return ss.str();
+        };
 
-			if (maxBlkRead >= nblks) {
-				mapping->blkId.set_nblks(nblks);
-				mapping->blkId.set_id(mapping->blkId.get_id() + lba - (key * KEY_RANGE));
-				mappingList.push_back(*mapping);
-				nblks = 0;
-			} else {
-				mapping->blkId.set_nblks(maxBlkRead);
-				mapping->blkId.set_id(mapping->blkId.get_id() + lba - (key * KEY_RANGE));
-				mappingList.push_back(*mapping);
-				nblks = nblks - maxBlkRead;
-				lba = lba + maxBlkRead;
-			}
-		}
+    }__attribute__ ((__packed__));
 
-		if(!atleast_one_lba_found){
-			mappingList.empty();
-			error = homestore::make_error_condition(
-					homestore_error::lba_not_exist);
-		}else if(atleast_one_lba_not_found){
-			error = homestore::make_error_condition(
-					homestore_error::partial_lba_not_exist);
-		}
-		return error;
-	}
-};
+    // Purpose of lba_block structure is transfer of mapping from mapping layer to volume layer                                
+    struct Lba_Block : public MappingInterval {
+        uint64_t m_actual_lba;
+        bool m_blkid_found;
+
+        Lba_Block(const MappingInterval &mapping, uint64_t actual_lba, bool blkid_found) {
+            m_interval_start = mapping.m_interval_start;
+            m_interval_length = mapping.m_interval_length;
+            m_value.m_blkid_offset = mapping.m_value.m_blkid_offset;
+            m_value.m_blkid = mapping.m_value.m_blkid;
+            m_blkid_found = blkid_found;
+            m_actual_lba = actual_lba;
+        }
+
+        Lba_Block(uint16_t offset,
+                  uint16_t num_of_offset,
+                  uint16_t blkid_offset,
+                  struct BlkId blkid,
+                  uint64_t actual_lba,
+                  bool blkid_found) {
+            m_interval_start = offset;
+            m_interval_length = num_of_offset;
+            m_value.m_blkid_offset = blkid_offset;
+            m_value.m_blkid = blkid;
+            m_blkid_found = blkid_found;
+            m_actual_lba = actual_lba;
+        };
+
+    }__attribute__ ((__packed__));
+
+    constexpr static auto Ki = 1024;
+    constexpr static auto Mi = Ki * Ki;
+    constexpr static auto Gi = Ki * Mi;
+    constexpr static auto MAX_CACHE_SIZE = 2ul * Gi;
+    constexpr static int MAP_BLOCK_SIZE = (4 * Ki);
+    constexpr static int LEAST_NO_OF_OBJECTS_IN_NODE = 3;
+    constexpr static int RECORD_SIZE = sizeof(uint32_t);
+    constexpr static int KEY_SIZE = sizeof(uint64_t);
+    constexpr static int VALUE_HEADER_SIZE = sizeof(uint32_t);
+    constexpr static int VALUE_ENTRY_SIZE = sizeof(struct MappingInterval);
+    constexpr static int MAX_NO_OF_VALUE_ENTRIES =
+            -1 + (MAP_BLOCK_SIZE - LEAST_NO_OF_OBJECTS_IN_NODE * RECORD_SIZE - LEAST_NO_OF_OBJECTS_IN_NODE * KEY_SIZE) /
+                 (VALUE_HEADER_SIZE + LEAST_NO_OF_OBJECTS_IN_NODE * VALUE_ENTRY_SIZE);
+    constexpr static int BIT_TO_REPRESENT_MAX_ENTRIES = MAX_INTERVAL_LENGTH_IN_BITS;
+
+
+    class MappingKey : public homeds::btree::BtreeKey {
+
+    private:
+        //Actual value range for an key is (range_start_offset*MAX_NO_OF_VALUE_ENTRIES, 
+        // range_start_offset*MAX_NO_OF_VALUE_ENTRIES + MAX_NO_OF_VALUE_ENTRIES -1)
+        uint64_t range_start_offset;
+        uint64_t *ptr_range_start_offset;
+    public:
+        MappingKey() {
+            range_start_offset = 0;
+            ptr_range_start_offset = &range_start_offset;
+        }
+
+        MappingKey(uint64_t _blob) {
+            range_start_offset = _blob;
+            ptr_range_start_offset = &range_start_offset;
+        }
+
+        int compare(const BtreeKey *o) const override {
+            MappingKey *key = (MappingKey *) o;
+            if (*ptr_range_start_offset < *key->ptr_range_start_offset) {
+                return -1;
+            } else if (*ptr_range_start_offset > *key->ptr_range_start_offset) {
+                return 1;
+            } else {
+                return 0;
+            }
+        }
+
+        virtual homeds::blob get_blob() const override {
+            homeds::blob b = {(uint8_t *) ptr_range_start_offset, sizeof(range_start_offset)};
+            return b;
+        }
+
+        virtual void set_blob(const homeds::blob &b) override {
+            ptr_range_start_offset = (uint64_t *) b.bytes;
+        }
+
+        virtual void copy_blob(const homeds::blob &b) override {
+            assert(b.size == sizeof(range_start_offset));
+            memcpy(ptr_range_start_offset, b.bytes, b.size);
+        }
+
+        virtual uint32_t get_blob_size() const override {
+            return (sizeof(range_start_offset));
+        }
+
+        virtual void set_blob_size(uint32_t size) override {
+        }
+
+        static uint32_t get_fixed_size() {
+            return sizeof(range_start_offset);
+        }
+
+        uint64_t get_value() {
+            return range_start_offset;
+        }
+
+        int compare_range(const BtreeSearchRange &range) const override {
+            return 0;
+        }
+
+        std::string to_string() const override {
+            return (std::to_string(*ptr_range_start_offset));
+        }
+    };
+
+    class MappingValue : public homeds::btree::BtreeValue {
+        Interval_Array_Impl *dyna_arr;
+    public:
+        MappingValue() {
+            dyna_arr = new Interval_Array_Impl(5, MAX_NO_OF_VALUE_ENTRIES);
+        };
+
+        MappingValue(uint16_t offset, uint64_t no_of_offset, uint16_t block_offset, struct BlkId blockId) :
+                homeds::btree::BtreeValue() {
+            dyna_arr = new Interval_Array_Impl(5, MAX_NO_OF_VALUE_ENTRIES);
+            MappingInterval mappingInterval(offset, no_of_offset, MappingInterval::Value(block_offset, blockId));
+            std::vector<std::shared_ptr<MappingInterval> > existingIntervalOverlaps;
+            dyna_arr->addInterval(&mappingInterval, existingIntervalOverlaps);
+        };
+
+        ~MappingValue() {
+            delete dyna_arr;
+            dyna_arr = NULL;
+        };
+
+        virtual homeds::blob get_blob() const override {
+            homeds::blob b;
+            b.bytes = (uint8_t *) dyna_arr->get_mem();
+            b.size = dyna_arr->get_size();
+            return b;
+        }
+
+        virtual void set_blob(const homeds::blob &b) override {
+            dyna_arr->set_mem((void *) (b.bytes), b.size, MAX_NO_OF_VALUE_ENTRIES);
+        }
+
+        virtual void copy_blob(const homeds::blob &b) override {
+            delete dyna_arr;
+            dyna_arr = new Interval_Array_Impl((void *) b.bytes, b.size, MAX_NO_OF_VALUE_ENTRIES);
+        }
+
+        virtual uint32_t get_blob_size() const override {
+            return dyna_arr->get_size();
+        }
+
+        virtual void set_blob_size(uint32_t size) override {
+            assert(0);
+        }
+
+        virtual uint32_t estimate_size_after_append(const BtreeValue &new_val) override {
+            Interval_Array_Impl *dyna_arr_ptr = ((const MappingValue &) new_val).dyna_arr;
+            assert(dyna_arr_ptr->get_no_of_elements_filled() == 1);
+            return dyna_arr->estimate_size_after_addOrUpdate(1);
+        }
+
+        void get(uint16_t start_offset, uint16_t end_offset,
+                 std::vector<std::shared_ptr<MappingInterval>> &offsetToBlkIdLst) {
+            LOGTRACE("value.get called with :{}:{}", start_offset, end_offset);
+            int nblks = end_offset - start_offset + 1;
+            uint16_t startIndex=0, endIndex=0;
+            MappingInterval *findInterval = new MappingInterval(
+                    start_offset,
+                    nblks,
+                    MappingInterval::Value(0, BlkId(0, 0, 0)));
+            dyna_arr->getIntervals(findInterval, offsetToBlkIdLst,startIndex, endIndex);
+            delete findInterval;
+        }
+
+        void get_all(std::vector<std::shared_ptr<MappingInterval>> &offsetToBlkIdLst) {
+            dyna_arr->getAllIntervals(offsetToBlkIdLst);
+        }
+
+        std::string to_string() const override {
+            return dyna_arr->to_string();
+        }
+
+        virtual void append_blob(const BtreeValue &new_val, std::shared_ptr<BtreeValue> &existing_val) override {
+            LOGTRACE("Appending->{}", new_val.to_string());
+            Interval_Array_Impl *new_dyna_arr_ptr = ((const MappingValue &) new_val).dyna_arr;
+            assert(new_dyna_arr_ptr->get_no_of_elements_filled() == 1);
+            MappingInterval *newRange = (*new_dyna_arr_ptr)[0];
+#ifndef NDEBUG
+            uint64_t nblks_before = count_nblks();
+#endif
+            std::vector<std::shared_ptr<MappingInterval> > existingIntervalOverlaps;
+            dyna_arr->addInterval(newRange, existingIntervalOverlaps);
+
+            MappingValue *existingValue = (MappingValue *) existing_val.get();
+            for (std::shared_ptr<MappingInterval> ptr : existingIntervalOverlaps) {
+                existingValue->dyna_arr->addOrUpdate(ptr.get());
+            }
+
+#ifndef NDEBUG
+            validate_sanity_value_array(nblks_before);
+#endif
+
+        }
+
+#ifndef NDEBUG
+
+        uint64_t count_nblks() {
+            uint64_t nblks = 0;
+            for (uint32_t i = 0; i < dyna_arr->get_no_of_elements_filled(); i++) {
+                nblks += (*dyna_arr)[i]->m_interval_length;
+            }
+            return nblks;
+        }
+
+        void validate_sanity_value_array(uint64_t nblks_before) {
+            uint64_t nblks_after = count_nblks();
+            if (nblks_after < nblks_before) {
+                LOGERROR("Lost entry:{} -> {} :: {}", nblks_before, nblks_after, dyna_arr->to_string());
+                assert(0);
+            }
+
+            int i = 0;
+            std::map<int, bool> mapOfWords;
+            int prevsOffset = -1;
+            int preveOffset = -1;
+            //validate if keys are in ascending orde
+            while (i < (int) dyna_arr->get_no_of_elements_filled()) {
+                MappingInterval *currentInterval = (*dyna_arr)[i];
+                uint16_t soffset = currentInterval->m_interval_start;
+                uint16_t eoffset = currentInterval->m_interval_start + currentInterval->m_interval_length - 1;
+                std::pair<std::map<int, bool>::iterator, bool> result;
+                result = mapOfWords.insert(std::make_pair(soffset, true));
+                if (result.second == false) {
+                    //check uniqueness and sorted
+                    LOGERROR("Duplicate entry:{} -> {}", soffset, dyna_arr->to_string());
+                    assert(0);
+                }
+                if (soffset < prevsOffset) {
+                    LOGERROR("Not Sorted-> {},{} -> {}", prevsOffset, soffset, dyna_arr->to_string());
+                    assert(0);
+                }
+                if (soffset <= preveOffset) {
+                    LOGERROR("Overlapping-> {},{} -> {}", prevsOffset, soffset, dyna_arr->to_string());
+                    assert(0);
+                }
+                if (eoffset >= 145) {
+                    LOGERROR("Overflow-> {}-> {}", eoffset, dyna_arr->to_string());
+                    assert(0);
+                }
+                prevsOffset = soffset;
+                preveOffset = eoffset;
+                i++;
+            }
+        }
+
+#endif
+
+    };
 }
+

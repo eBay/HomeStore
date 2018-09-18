@@ -106,6 +106,7 @@ DriveEndPoint::process_completions(int fd, void *cookie, int event) {
 		iocb_list.push(info);
 		comp_cb(events[i].res, (uint8_t *) events[i].data);
 	}
+	
 }
 
 void

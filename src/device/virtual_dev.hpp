@@ -47,6 +47,8 @@ public:
         vconfig->set_pages_per_portion(1024); // Have locking etc for every 1024 pages
         vconfig->set_pages_per_temp_group(100); // TODO: Recalculate based on size set aside for temperature entries
         vconfig->set_max_cache_blks(vconfig->get_total_pages()/4); // Cache quarter of the blocks
+        vconfig->set_max_cache_chunks(vconfig->get_total_pages()/(16 * 64)); // quarter of Cache should have contiguous blocks
+        vconfig->set_chunk_size(64);
     }
 };
 

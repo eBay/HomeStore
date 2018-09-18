@@ -45,9 +45,15 @@ class BtreeSpecificImpl<MEM_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSiz
         std::error_condition status) > comp_callback;
 public:
     using HeaderType = mem_btree_node_header;
-
+  
+  BtreeSpecificImpl(BtreeConfig &cfg, void *btree_specific_context) {
+        this->cfg = cfg;
+        this->cfg.set_node_area_size(NodeSize - sizeof(MemBtreeNodeDeclType) - sizeof(LeafPhysicalNodeDeclType));
+    }
+    
     static std::unique_ptr<MemBtreeImpl> init_btree(BtreeConfig &cfg, 
                             void *btree_specific_context, comp_callback comp_cb) {
+
         return nullptr;
     }
 
@@ -64,9 +70,11 @@ public:
         auto btree_node = new (mem) MemBtreeNodeDeclType();
 
         if (is_leaf) {
-            auto n = new(mem + sizeof(MemBtreeNodeDeclType)) VariantNode<LeafNodeType, K, V, NodeSize>((bnodeid_t)mem, true);
+            auto n = new(mem + sizeof(MemBtreeNodeDeclType)) VariantNode<LeafNodeType, K, V, NodeSize>((bnodeid_t)mem, true,
+                                                                                                       impl->cfg);
         } else {
-            auto n = new(mem + sizeof(MemBtreeNodeDeclType)) VariantNode<InteriorNodeType, K, V, NodeSize>((bnodeid_t)mem, true);
+            auto n = new(mem + sizeof(MemBtreeNodeDeclType)) VariantNode<InteriorNodeType, K, V, NodeSize>((bnodeid_t)mem, true,
+                                                                                                           impl->cfg);
         }
         auto mbh = (mem_btree_node_header *)btree_node;
         mbh->refcount.increment();
@@ -108,6 +116,10 @@ public:
         auto mbh = (mem_btree_node_header *)bn;
         return mbh->refcount.decrement_testz();
     }
+    
+private:
+    BtreeConfig cfg;
+ 
 };
 
 } }
