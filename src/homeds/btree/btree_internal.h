@@ -252,10 +252,8 @@ public:
     virtual uint32_t get_blob_size() const = 0;
     virtual void set_blob_size(uint32_t size) = 0;
     virtual uint32_t estimate_size_after_append(const BtreeValue &new_val) = 0;
-
-#ifndef NDEBUG
+    
     virtual std::string to_string() const {return "";}
-#endif
 };
 
 #define INVALID_BNODEID   -1

@@ -141,7 +141,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
 
         // Wait for cache to refill and then retry original request
         if (attempt > MAX_BLK_ALLOC_ATTEMPT) {
-#ifndef DEBUG
+#ifndef NDEBUG
             if (!blk_alloc_test) {
                 assert(0);
             }

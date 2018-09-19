@@ -215,8 +215,7 @@ public:
             this->get_nth_value(ind, outval, copy);
         }
     }
-
-#ifndef NDEBUG
+    
     std::string to_string() const {
         std::stringstream ss;
         ss << "###################" << endl;
@@ -251,7 +250,6 @@ public:
         }
         return ss.str();
     }
-#endif
 
     uint32_t get_available_size(const BtreeConfig &cfg) const  {
         return get_var_node_header_const()->m_available_space;

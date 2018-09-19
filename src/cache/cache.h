@@ -191,6 +191,8 @@ public:
 
     homeds::blob at_offset(uint32_t offset) const {
         homeds::blob b;
+        b.bytes= nullptr;
+        b.size =0;
         get_memvec().get(&b, offset);
         return b;
     }
