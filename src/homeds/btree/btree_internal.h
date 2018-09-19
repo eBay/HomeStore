@@ -147,10 +147,8 @@ public:
 
     virtual uint32_t get_blob_size() const = 0;
     virtual void set_blob_size(uint32_t size) = 0;
-
-#ifndef NDEBUG
+    
     virtual std::string to_string() const = 0;
-#endif
 };
 
 #if 0
