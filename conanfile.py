@@ -13,8 +13,9 @@ class HomestoreConan(ConanFile):
     settings = "arch", "os", "compiler", "build_type"
     options = {"shared": ['True', 'False'],
                "fPIC": ['True', 'False'],
-               "coverage": ['True', 'False']}
-    default_options = 'shared=False', 'fPIC=True', 'coverage=False'
+               "coverage": ['True', 'False'],
+               "sanitize": ['True', 'False']}
+    default_options = 'shared=False', 'fPIC=True', 'coverage=False', 'sanitize=False'
 
     requires = (("benchmark/1.4.1@oss/stable"),
                 ("boost_heap/1.66.0@bincrafters/stable"),
@@ -41,12 +42,16 @@ class HomestoreConan(ConanFile):
         cmake = CMake(self)
 
         definitions = {'CONAN_BUILD_COVERAGE': 'OFF',
-                       'CMAKE_EXPORT_COMPILE_COMMANDS': 'ON'}
+                       'CMAKE_EXPORT_COMPILE_COMMANDS': 'ON',
+                       'MEMORY_SANITIZER_ON': 'OFF'}
         test_target = None
 
         if self.options.coverage == 'True':
             definitions['CONAN_BUILD_COVERAGE'] = 'ON'
             test_target = 'coverage'
+
+        if self.options.sanitize == 'True':
+            definitions['MEMORY_SANITIZER_ON'] = 'ON'
 
         cmake.configure(defs=definitions)
         cmake.build()

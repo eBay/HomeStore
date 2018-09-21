@@ -64,7 +64,7 @@ PerfMetrics* PerfMetrics::getInstance() {
 std::shared_ptr<Volume>
 Volume::createVolume(std::string const &uuid,
                      DeviceManager *mgr,
-                     uint64_t const size,
+                     uint64_t const size, /* size should always be multiple of 8M to avoid any wastage of space */
                      comp_callback comp_cb) {
     decltype(volume_map)::iterator it;
     // Try to add an entry for this volume

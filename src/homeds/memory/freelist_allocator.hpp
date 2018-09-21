@@ -51,16 +51,20 @@ public:
     }
 
     bool deallocate(uint8_t *mem, uint32_t size_alloced) {
-        if ((size_alloced != Size) || (m_list_count == MaxListCount)) {
+    /* TODO: it is not working correcly as we are freeing the buffer
+     * from cache even if the cache buffer is of different type.
+     */
+//        if ((size_alloced != Size) || (m_list_count == MaxListCount)) {
             free(mem);
             return true;
-        }
-
+  //      }
+#if 0
         auto *hdr = (free_list_header *)mem;
         hdr->next = m_head;
         m_head = hdr;
         m_list_count++;
         return true;
+#endif
     }
 };
 

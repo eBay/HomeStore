@@ -43,6 +43,12 @@ public:
     }
 
     ~HashBucket() {
+        auto it(m_list.begin());
+        while (it != m_list.end()) {
+            m_list.erase(it);
+            V::deref(*it);
+            it = m_list.begin();
+        }
     }
 
     bool insert(const K &k, V &v, V **outv, const std::function<void(V *)> &found_cb = nullptr) {

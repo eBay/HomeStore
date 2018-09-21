@@ -60,9 +60,13 @@ public:
         m_cache = std::make_unique< homestore::Cache< blk_id > >(MAX_CACHE_SIZE, 8192);
     }
 
+    ~CacheTest() {
+       m_cache.reset();
+    }
+
     void insert_one(uint64_t id, uint32_t size) {
         boost::intrusive_ptr< homestore::CacheBuffer< blk_id > > cbuf;
-        auto raw_buf = new uint64_t[size/8];
+        uint64_t * raw_buf = (uint64_t *)malloc(sizeof(uint64_t) * size/8);
         for (auto b = 0U; b < size/8; b++) raw_buf[b] = id;
         EXPECT_EQ(m_cache->insert(blk_id(id), {(uint8_t *) raw_buf, 64}, 0, &cbuf), true);
     }
@@ -105,6 +109,10 @@ TEST_F(CacheTest, InsertGet) {
 
     for (auto i = 0u; i < NTHREADS; i++) {
         thrs[i]->join();
+    }
+    
+    for (auto i = 0u; i < NTHREADS; i++) {
+        delete (thrs[i]);
     }
     LOGINFO("Cache Stats: \n{}", this->m_cache->get_stats().to_string());
 }

@@ -54,7 +54,7 @@ public:
     static std::unique_ptr<MemBtreeImpl> init_btree(BtreeConfig &cfg, 
                             void *btree_specific_context, comp_callback comp_cb) {
 
-        return nullptr;
+        return (std::make_unique<MemBtreeImpl>(cfg,btree_specific_context));
     }
 
     static uint8_t *get_physical(const MemBtreeNodeDeclType *bn) {

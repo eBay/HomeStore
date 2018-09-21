@@ -77,7 +77,7 @@ struct BlkId {
 
     uint64_t to_integer() const {
         uint64_t i;
-        std::memcpy(&i, (const uint64_t *)this, sizeof(uint64_t));
+        std::memcpy(&i, (const uint64_t *)this, sizeof(BlkId));
         return i;
     }
 

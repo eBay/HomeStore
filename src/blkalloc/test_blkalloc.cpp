@@ -60,6 +60,9 @@ public:
         m_fixed_allocator = new FixedBlkAllocator(fixed_cfg);
     }
 
+    ~FixedBlkAllocatorTest() {
+        delete(m_fixed_allocator);
+    }
     uint32_t max_blks() const {
         return m_total_space/m_blk_size;
     }
@@ -109,6 +112,10 @@ TEST_F(FixedBlkAllocatorTest, alloc_free_test) {
         t->join();
     }
 
+    for (auto i = 0U; i < NTHREADS; i++) {
+        delete (thrs[i]);
+    }
+
     EXPECT_EQ(m_alloced_count.load(), max_blks());
     EXPECT_EQ(m_fixed_allocator->total_free_blks(), 0u);
 
@@ -121,6 +128,9 @@ TEST_F(FixedBlkAllocatorTest, alloc_free_test) {
         t->join();
     }
 
+    for (auto i = 0U; i < NTHREADS; i++) {
+        delete (thrs[i]);
+    }
     LOGINFO("Freed all blocks: Allocator state: {}", m_fixed_allocator->to_string());
     EXPECT_EQ(m_fixed_allocator->total_free_blks(), max_blks());
     LOGINFO("FixedSizeBlkAllocator test done");
@@ -194,6 +204,9 @@ TEST_F(VarsizeBlkAllocatorTest, alloc_free_test) {
         t->join();
     }
 
+    for (auto i = 0U; i < NTHREADS; i++) {
+        delete (thrs[i]);
+    }
     EXPECT_EQ(m_alloced_count.load(), max_blks());
     //EXPECT_EQ(m_varsize_allocator->total_free_blks(), 0);
 
@@ -206,6 +219,9 @@ TEST_F(VarsizeBlkAllocatorTest, alloc_free_test) {
         t->join();
     }
 
+    for (auto i = 0U; i < NTHREADS; i++) {
+        delete (thrs[i]);
+    }
     LOGINFO("Freed all blocks: Allocator state: {}", m_varsize_allocator->to_string());
     //EXPECT_EQ(m_varsize_allocator->total_free_blks(), max_blks());
     LOGINFO("VarsizeBlkAllocator test done");

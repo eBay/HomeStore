@@ -40,11 +40,17 @@ public:
     static void get_config(uint64_t size, uint32_t blk_size, BlkAllocConfig *out_config) {
         VarsizeBlkAllocConfig *vconfig = (VarsizeBlkAllocConfig *)out_config;
         vconfig->set_blk_size(blk_size);
-        vconfig->set_total_blks(((uint64_t)size-1)/blk_size + 1);
-
-        vconfig->set_page_size(8192); // SSD Page size, TODO: Get actual SSD page size and set this here
-        vconfig->set_total_segments(8); // 8 Segments per chunk
+        /* TODO: as of now page size and block size is same */
+        vconfig->set_page_size(blk_size); // SSD Page size, TODO: Get actual SSD page size and set this here
         vconfig->set_pages_per_portion(1024); // Have locking etc for every 1024 pages
+        vconfig->set_total_segments(8); // 8 Segments per chunk
+        
+        size -= (size % (vconfig->get_page_size() * 
+                            vconfig->get_pages_per_portion() * 
+                            vconfig->get_total_segments()));
+
+        vconfig->set_total_blks(((uint64_t)size)/blk_size);
+
         vconfig->set_pages_per_temp_group(100); // TODO: Recalculate based on size set aside for temperature entries
         vconfig->set_max_cache_blks(vconfig->get_total_pages()/4); // Cache quarter of the blocks
         vconfig->set_max_cache_chunks(vconfig->get_total_pages()/(16 * 64)); // quarter of Cache should have contiguous blocks

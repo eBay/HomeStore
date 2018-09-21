@@ -522,6 +522,7 @@ private:
         memmove((void *)(rec_ptr + get_record_size()), rec_ptr, (this->get_total_entries() - ind) * get_record_size());
 
         // Move up the tail area
+        assert(get_var_node_header()->m_tail_arena_offset > obj_size);
         get_var_node_header()->m_tail_arena_offset -= obj_size;
         get_var_node_header()->m_available_space -= (obj_size+get_record_size());
 
@@ -602,6 +603,12 @@ private:
         };
 
         uint32_t no_of_entries = this->get_total_entries();
+        if (no_of_entries == 0) {
+            // this happens when  there is only entry and in update, we first remove and than insert
+            get_var_node_header()->m_tail_arena_offset = get_var_node_header()->m_init_available_space;
+            LOGTRACE("Full available size reclaimed");
+            return;
+        }
         Record rec[no_of_entries]; 
 
         uint32_t ind = 0;
@@ -626,7 +633,7 @@ private:
             uint16_t total_key_value_len = get_nth_key_len(rec[ind].orig_record_index)
                                            + get_nth_value_len(rec[ind].orig_record_index);
             sparce_space = last_offset- (rec[ind].m_obj_offset+ total_key_value_len);
-            if(sparce_space>0){
+            if (sparce_space > 0) {
                 //do compaction
                 uint8_t *old_key_ptr = (uint8_t *)get_nth_obj(rec[ind].orig_record_index);
                 uint8_t *raw_data_ptr = old_key_ptr+sparce_space;
@@ -638,7 +645,8 @@ private:
 
                 last_offset = rec_ptr->m_obj_offset;
                
-            }else {
+            } else {
+                assert(sparce_space == 0);
                 last_offset = rec[ind].m_obj_offset;
             }
             ind++;

@@ -22,6 +22,14 @@ public:
     LRUEvictionPolicy(int num_entries) {
     }
 
+    ~LRUEvictionPolicy() {
+        std::lock_guard< decltype(m_list_guard) > guard(m_list_guard);
+        auto it = m_list.begin();
+        while (it !=  m_list.end()) {
+            it = m_list.erase(it);
+        }
+    }
+ 
     void add(LRUEvictRecord &rec) {
         std::lock_guard< decltype(m_list_guard) > guard(m_list_guard);
         m_list.push_back(rec);

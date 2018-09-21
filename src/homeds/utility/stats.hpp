@@ -39,7 +39,7 @@ public:
     }
 
     ~Stats() {
-        delete(m_values);
+        delete [] (m_values);
     }
 
     void set_count(req_stats_index ind, uint64_t val) {

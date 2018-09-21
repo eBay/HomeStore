@@ -56,6 +56,7 @@ public:
                   "IntrusiveCache Value must be derived from CacheRecord");
 
     IntrusiveCache(uint64_t max_cache_size, uint32_t avg_size_per_entry);
+    ~IntrusiveCache() { for (auto i = 0; i < EVICTOR_PARTITIONS; i++) m_evictors[i].reset(); }
 
     /* Put the raw buffer into the cache. Returns false if insert is not successful and if the key already
      * exists, it additionally fills up the out_ptr. If insert is successful, returns true and put the

@@ -66,10 +66,13 @@ public:
     }
 
     uint64_t get_total_pages() const {
+        assert ((get_total_blks() * get_blk_size() % 
+                   (get_page_size() * get_pages_per_portion())) == 0);
         return get_total_blks() * get_blk_size() / get_page_size();
     }
 
     uint32_t get_blks_per_page() const {
+        assert(get_page_size() % get_blk_size() == 0);
         return (uint32_t) (get_page_size() / get_blk_size());
     }
 
@@ -86,7 +89,8 @@ public:
     }
 
     uint64_t get_total_portions() const {
-        return get_total_pages() / get_pages_per_portion();
+        assert(get_total_pages() % get_pages_per_portion() == 0);
+            return get_total_pages() / get_pages_per_portion();
     }
 
     uint64_t get_max_cache_blks() const {
@@ -98,7 +102,11 @@ public:
     }
 
     uint32_t get_total_temp_group() const {
-        return (uint32_t) (get_total_pages() / get_pages_per_temp_group());
+        if (get_total_pages() % get_pages_per_temp_group() == 0) {
+            return (uint32_t) (get_total_pages() / get_pages_per_temp_group());
+        } else {
+            return (uint32_t) ((get_total_pages() / get_pages_per_temp_group()) + 1);
+        }
     }
     
     uint64_t get_max_cache_chunks() const {

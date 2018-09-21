@@ -65,6 +65,10 @@ public:
         pe.m_ref.increment();
     }
 
+    static void deref(blk_entry &pe) {
+        pe.m_ref.decrement_testz();
+    }
+
     static bool deref_testz(blk_entry &pe) {
         return pe.m_ref.decrement_testz();
     }

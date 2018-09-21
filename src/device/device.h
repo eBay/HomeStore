@@ -78,7 +78,9 @@ struct chunks_block {
     uint32_t          version;
     uint32_t          num_chunks;     // Number of physical chunks for this block
     uint64_t          revision_num;   // Revision number of chunks_block, to load only if all devices has same revision
-    chunk_info_block  chunks[0];      // Array of chunks
+    /* TODO it is sum of size of above three variables. It should be moved to a structure */
+#define NUM_CHUNK_INFO_BLOCK  ((CHUNKS_BLOCK_MAX_SIZE - 16)/sizeof(chunk_info_block))
+    chunk_info_block  chunks[NUM_CHUNK_INFO_BLOCK];      // Array of chunks
 } __attribute__((aligned(CHUNKS_BLOCK_MAX_SIZE)));
 
 /************* Vdev Info Block definition ******************/

@@ -292,6 +292,10 @@ public:
         uint64_t count;
         *pmax_count = 0;
 
+        if (start == size()) {
+            return -1;
+        }
+ 
         T e = extract(start, size());
         while ( (e != 0)) {
             uint64_t x = e & (-e);
@@ -335,6 +339,7 @@ public:
 private:
 	T extract(int start, int nbits) const {
 		int wanted_bits = std::min((int) (size() - start), nbits);
+        assert(wanted_bits > 0);
 		uint64_t mask = (consecutive_bitmask[wanted_bits - 1] << start);
 		return ((m_bits & mask) >> start);
 	}
