@@ -96,7 +96,7 @@ void setup(int count) {
         char contents[32];
         sprintf(contents, "Contents for Blk %d", i);
         glob_entries[i] = new blk_entry((uint64_t)i, contents);
-        glob_ids[i] = blk_entry::extract_key((const blk_entry &)glob_entries[i]);
+        glob_ids[i] = blk_entry::extract_key(*glob_entries[i]);
     }
 }
 

@@ -98,7 +98,6 @@ public:
     bool find_and_modify(BtreeKey &key, BtreeValue &new_val, BtreeValue &old_val);
 
 #endif
-    virtual ~Btree() = default;
 
 private:
 #ifdef CLASS_DEFINITIONS
@@ -185,6 +184,46 @@ public:
 
         m_max_nodes = max_leaf_nodes + ((double) max_leaf_nodes * 0.05) + 1; // Assume 5% for interior nodes
         create_root_node();
+    }
+    
+    ~Btree(){
+        m_btree_lock.write_lock();
+        BtreeNodePtr root = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), m_root_node);
+        homeds::thread::locktype acq_lock = homeds::thread::LOCKTYPE_WRITE;
+        std::deque<boost::intrusive_ptr<btree_req_type>> dependent_req_q;
+        lock_node(root, acq_lock,&dependent_req_q);
+        free(root);
+        unlock_node(root,acq_lock);
+        m_btree_lock.unlock();
+    }
+    
+    // free nodes in post order traversal of tree
+    void free(BtreeNodePtr node) {
+        //TODO - this calls free node on mem_tree and ssd_tree.
+        // In ssd_tree we free actual block id, which is not correct behavior
+        // we shouldnt really free any blocks on free node, just reclaim any memory
+        // occupied by ssd_tree structure in memory. Ideally we should have sepearte
+        // api like deleteNode which should be called instead of freeNode
+        homeds::thread::locktype acq_lock = homeds::thread::LOCKTYPE_WRITE;
+        std::deque<boost::intrusive_ptr<btree_req_type>> dependent_req_q;
+        uint32_t i = 0;
+        if(!node->is_leaf()) {
+            BNodeptr child_ptr;
+            while (i < node->get_total_entries()) {
+                if (i == node->get_total_entries() - 1) {
+                    child_ptr.set_node_id(node->get_edge_id());
+                } else {
+                    node->get(i, &child_ptr, false /* copy */);
+                }
+                BtreeNodePtr child = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(),
+                                                                          child_ptr.get_node_id());
+                lock_node(child, acq_lock, &dependent_req_q);
+                free(child);
+                unlock_node(child, acq_lock);
+                i++;
+            }
+        }
+        BtreeSpecificImplDeclType::free_node(m_btree_specific_impl.get(), node,dependent_req_q);
     }
 
     void put(const BtreeKey &k, const BtreeValue &v, PutType put_type) {
@@ -1159,10 +1198,6 @@ protected:
         m_root_node = root->get_node_id();
         BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(), root,
                                                 dependent_req_q, NULL, true);
-    }
-
-    virtual uint32_t get_max_nodes() {
-        return m_max_nodes;
     }
 
     BtreeConfig *get_config() {
