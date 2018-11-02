@@ -51,8 +51,8 @@ namespace homestore {
         uint64_t lba;
         int nblks;
         Clock::time_point startTime;
-        int read_cnt;
         std::vector<buf_info> read_buf_list;
+        bool is_read;
 
         std::vector<std::shared_ptr<Free_Blk_Entry>> blkids_to_free_due_to_overwrite;
 
@@ -60,8 +60,11 @@ namespace homestore {
          * break the ios update in mapping btree depending on the key range.
          */
         std::atomic<int> num_mapping_update;
+        boost::intrusive_ptr<volume_req> parent_req;
+        std::atomic<int> ref_cnt; /* It is initialized to 1 if there is no child created */
 
-        volume_req() : read_buf_list(0) {
+        volume_req() : read_buf_list(0), is_read(false), 
+            num_mapping_update(0), parent_req(nullptr), ref_cnt(0) {
 #ifndef NDEBUG
             vol_req_alloc++;
 #endif
@@ -116,9 +119,8 @@ namespace homestore {
         static AbstractVirtualDev *new_vdev_found(DeviceManager *dev_mgr,
                                                   homestore::vdev_info_block *vb);
 
-        boost::intrusive_ptr<BlkBuffer> write(uint64_t lba, uint8_t *buf,
-                                              uint32_t nblks,
-                                              boost::intrusive_ptr<volume_req> req);
+        void write(uint64_t lba, uint8_t *buf, uint32_t nblks,
+                              boost::intrusive_ptr<volume_req> req);
 
         int read(uint64_t lba, int nblks, boost::intrusive_ptr<volume_req> req);
     void init_perf_report();

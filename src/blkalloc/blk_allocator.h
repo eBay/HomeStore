@@ -89,11 +89,12 @@ struct blk_alloc_hints {
     blk_alloc_hints() :
         desired_temp(0),
         dev_id_hint(-1),
-        can_look_for_other_dev(true) {}
+        can_look_for_other_dev(true), is_contiguous(false) {}
 
     uint32_t desired_temp;          // Temperature hint for the device
     int      dev_id_hint;           // which physical device to pick (hint if any) -1 for don't care
     bool     can_look_for_other_dev; // If alloc on device not available can I pick other device
+    bool     is_contiguous;
 };
 
 class BlkAllocator
@@ -106,7 +107,9 @@ public:
 
     virtual ~BlkAllocator() = default;
 
-    virtual BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid) = 0;
+    virtual BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints, 
+                                 std::vector<BlkId> &out_blkid) = 0;
+    virtual BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid, bool retry = true) = 0;
     virtual void free(const BlkId &id) = 0;
     virtual std::string to_string() const = 0;
 
@@ -183,9 +186,11 @@ public:
     explicit FixedBlkAllocator(BlkAllocConfig &cfg);
     ~FixedBlkAllocator() override;
 
-    BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid) override;
+    BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid, bool retry = true) override;
     void free(const BlkId &b) override;
     std::string to_string() const override;
+    BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints, 
+                                 std::vector<BlkId> &out_blkid) override;
 
 #ifndef NDEBUG
     uint32_t total_free_blks() const {

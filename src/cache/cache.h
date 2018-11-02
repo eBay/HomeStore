@@ -74,6 +74,7 @@ public:
     bool erase(V &v);
 
     bool is_safe_to_evict(const CurrentEvictor::EvictRecordType *rec);
+    bool modify_size(V &v, uint32_t size);
 
 protected:
     std::unique_ptr< CurrentEvictor > m_evictors[EVICTOR_PARTITIONS];
@@ -86,6 +87,8 @@ class CacheBuffer;
 
 template <typename K>
 class Cache : protected IntrusiveCache< K, CacheBuffer< K > > {
+    typedef std::function< void (boost::intrusive_ptr< CacheBuffer<K> > bbuf) > erase_comp_cb;
+
 public:
     Cache(uint64_t max_cache_size, uint32_t avg_size_per_entry);
 
@@ -108,16 +111,41 @@ public:
     bool upsert(const K &k, const homeds::blob &b, boost::intrusive_ptr< CacheBuffer< K > > *out_smart_buf);
     bool get(const K &k, boost::intrusive_ptr< CacheBuffer< K > > *out_smart_buf);
     bool erase(boost::intrusive_ptr< CacheBuffer< K > > buf);
-    bool erase(const K &k, boost::intrusive_ptr<CacheBuffer< K > > *removed_buf);
+    bool erase(const K &k, boost::intrusive_ptr< CacheBuffer<K> > *out_bbuf);
+    bool erase(const K &k, uint32_t offset, uint32_t size, boost::intrusive_ptr< CacheBuffer<K> > *ret_removed_buf);
+    void safe_erase(boost::intrusive_ptr< CacheBuffer< K > > buf, erase_comp_cb cb);
+    void safe_erase(const K &k, erase_comp_cb cb);
+    bool insert_missing_pieces(const boost::intrusive_ptr< CacheBuffer<K> > buf, 
+                        uint32_t offset, uint32_t  size_to_read,
+                        std::vector< std::pair<uint32_t, uint32_t> > &missing_mp);
     const CacheStats &get_stats() {return this->m_stats;}
+};
+
+enum cache_buf_state {
+    CACHE_NOT_INSERTED = 1,
+    CACHE_INSERTED = 2,
+    CACHE_EVICTED = 3
 };
 
 template <typename K>
 class CacheBuffer : public CacheRecord {
-private:
+    typedef std::function< void (boost::intrusive_ptr< CacheBuffer<K> > bbuf) > erase_comp_cb;
+public:
     K m_key;                                        // Key to access this cache
-    homeds::MemVector< BLKSTORE_BLK_SIZE > m_mem;   // Memory address which is what this buffer contained with
+    boost::intrusive_ptr<homeds::MemVector> m_mem;   // Memory address which is what this buffer contained with
     homeds::atomic_counter< uint32_t > m_refcount;  // Refcount
+    uint32_t m_data_offset; // offset in m_mem that it points to
+    std::atomic<uint32_t> m_cache_size; // size inserted in a cache
+    std::atomic<bool> m_can_free;
+    Cache<K> *m_cache;
+    erase_comp_cb m_cb;
+    /* this mutex prevent erase and insert to happen in parallel. It is taken in two cases 
+     *  1. Whenever something changes in eviction :- upvode, downvote, erase and size.
+     *  2. Whenever cache state is changed.
+     */
+    std::mutex m_mtx;
+    cache_buf_state m_state;
+
 #ifndef NDEBUG
     homeds::atomic_counter< int32_t > m_indx;  // Refcount
 #define MAX_ENTRIES 50
@@ -129,23 +157,27 @@ public:
 #ifndef NDEBUG
     bool is_btree = false;
 #endif
+ 
     typedef CacheBuffer<K> CacheBufferType;
 
-    CacheBuffer() : m_refcount(0)
+    CacheBuffer() : m_mem(nullptr), m_refcount(0), m_data_offset(-1), m_cache_size(0),
+        m_can_free(false), m_cache(nullptr), m_mtx(), m_state(CACHE_NOT_INSERTED)
 #ifndef NDEBUG
-        ,m_indx(-1)
+                    ,m_indx(-1) 
 #endif
-    {
+     {
 #ifndef NDEBUG
         for (int i = 0; i < MAX_ENTRIES; i++) {
             arr_symbols[i] = malloc(sizeof(void *) * 10);
+            bzero(arr_symbols[i], sizeof(void *) * 10);
         }
 #endif
-    }
+     }
 
     CacheBuffer(const K &key, const homeds::blob &blob, 
                 Cache< K > *cache, uint32_t offset = 0) :
-            m_refcount(0) 
+            m_mem(nullptr), m_refcount(0), m_data_offset(-1), m_cache_size(0), m_can_free(false),
+            m_cache(cache), m_mtx(), m_state(CACHE_NOT_INSERTED)
 #ifndef NDEBUG
             ,m_indx(-1)
 #endif
@@ -156,7 +188,10 @@ public:
             bzero(arr_symbols[i], sizeof(void *) * 10);
         }
 #endif
-        m_mem.set(blob, offset);
+        boost::intrusive_ptr<homeds::MemVector> mvec(new homeds::MemVector(), true);
+        mvec->set(blob.bytes, blob.size, offset);
+
+        set_memvec(mvec, 0, blob.size);
         m_key = key;
     }
 
@@ -178,23 +213,88 @@ public:
         m_key = k;
     }
 
-    void set_memvec(const homeds::MemVector< BLKSTORE_BLK_SIZE > &vec) {
-        m_mem.copy(vec);
+    void lock() {
+        m_mtx.lock();
     }
 
-    const homeds::MemVector< BLKSTORE_BLK_SIZE > &get_memvec() const {
-        return m_mem;
+    void unlock() {
+        m_mtx.unlock();
     }
 
-    homeds::MemVector< BLKSTORE_BLK_SIZE > &get_memvec_mutable() {
-        return m_mem;
+    bool try_lock() {
+        return(m_mtx.try_lock());
+    }
+
+    void cache_insert() {
+        m_state = CACHE_INSERTED;
+    }
+
+    void cache_evict() {
+        m_state = CACHE_EVICTED;
+    }
+
+    cache_buf_state get_cache_state() {
+        return m_state;
+    }
+
+    void set_cache(Cache<K> *cache) {
+        m_cache = cache;
+    }
+
+    uint32_t get_data_offset() const {
+        return m_data_offset;
+    }
+
+    bool update_missing_piece(uint32_t offset, uint32_t size, uint8_t *ptr) {
+         bool inserted = get_memvec().update_missing_piece(m_data_offset + offset, size, ptr);
+         return inserted;
+    }
+    
+    uint32_t insert_missing_pieces(uint32_t  offset, uint32_t  size_to_read,
+                            std::vector< std::pair<uint32_t, uint32_t> > &missing_mp) {
+         assert(get_key().data_size() >= (offset + size_to_read));
+         uint32_t inserted_size = get_memvec().insert_missing_pieces(m_data_offset + offset, size_to_read,
+                                                missing_mp);
+         /* it should return a relative offset */
+         for (uint32_t i = 0; i < missing_mp.size(); i++) {
+            assert(missing_mp[i].first >= m_data_offset);
+            missing_mp[i].first -= m_data_offset;
+         }
+
+         return inserted_size;
+    }
+
+    void set_cb(erase_comp_cb &cb) {
+        m_cb = cb;
+    }
+
+    erase_comp_cb get_cb() {
+        return m_cb;
+    }
+
+    void set_memvec(boost::intrusive_ptr<homeds::MemVector> vec, uint32_t offset, uint32_t size) {
+        assert(offset >= 0);
+        assert(m_mem == nullptr);
+        m_mem = vec;
+        m_data_offset = offset;
+        m_cache_size = size;
+    }
+
+    void modify_cache_size(uint32_t size) {
+        m_cache_size += size;
+    }
+
+    homeds::MemVector &get_memvec() const {
+        assert(m_mem != nullptr);
+        return ((*(m_mem.get())));
     }
 
     homeds::blob at_offset(uint32_t offset) const {
+        assert(m_data_offset >= 0);
         homeds::blob b;
         b.bytes= nullptr;
         b.size =0;
-        get_memvec().get(&b, offset);
+        get_memvec().get(&b, m_data_offset + offset);
         return b;
     }
 
@@ -207,18 +307,38 @@ public:
     }
 
     friend void intrusive_ptr_release(CacheBuffer<K> *buf) {
-        if (buf->m_refcount.decrement_testz()) {
-            // First free the bytes it covers
-            buf->m_mem.free_all_mem_pieces();
-
-            // Then free the record itself
+        const K k = *(extract_key(*buf));
+        auto cache = buf->m_cache;
+        bool can_free = buf->can_free();
+        int cnt = buf->m_refcount.decrement(); 
+        /* can not access the buffer after ref_Cnt is 
+         * decremented.
+         */
+        assert(cnt >= 0);
+        if (cnt == 0) {
+            // free the record
             homeds::ObjectAllocator< CacheBufferType >::deallocate(buf);
+        }
+
+        if (cnt == 1 && can_free) {
+            assert(cache != nullptr);
+            cache->safe_erase(k, nullptr);
         }
     }
 
+    void set_free_state() {
+        m_can_free = true;
+    }
+
+    void reset_free_state() {
+        m_can_free = false;
+    }
+    bool can_free() {
+        return(m_can_free);
+    }
     std::string to_string() const {
         std::stringstream ss;
-        ss << "Cache Key = " << m_key.to_string() << " Cache Mem = " << m_mem.to_string()
+        ss << "Cache Key = " << m_key.to_string() << " Cache Mem = " << m_mem->to_string()
             << " Cache refcount = " << m_refcount.get();
         return ss.str();
     }
@@ -228,8 +348,16 @@ public:
         intrusive_ptr_add_ref(&b);
     }
 
+    static void set_free_state(CacheBuffer<K> &b) {
+        b.set_free_state();
+    }
+
+    static void reset_free_state(CacheBuffer<K> &b) {
+        b.reset_free_state();
+    }
+
     static void deref(CacheBuffer<K> &b) {
-	intrusive_ptr_release(&b);
+        intrusive_ptr_release(&b);
     }
 
     static bool deref_testz(CacheBuffer<K> &b) {
@@ -254,7 +382,7 @@ public:
 
     static uint32_t get_size(const CurrentEvictor::EvictRecordType *rec) {
         const CacheBuffer<K> *cbuf = static_cast<const CacheBuffer<K> *>(CacheRecord::evict_to_cache_record(rec));
-        return cbuf->get_memvec().size();
+        return cbuf->m_cache_size;
     }
 };
 } // namespace homestore

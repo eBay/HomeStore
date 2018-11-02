@@ -43,7 +43,7 @@ struct writeback_req : virtualdev_req {
     int mem_gen_cnt;
     writeback_req_state state;
     std::error_condition status;
-    homeds::MemVector< BLKSTORE_BLK_SIZE > memvec;
+    homeds::MemVector memvec;
     
     writeback_req(): req_q(), dependent_cnt(0),
 #ifndef NDEBUG
@@ -62,7 +62,6 @@ struct WriteBackCacheBuffer : public CacheBuffer< Buffer > {
     mutex mtx;
     int gen_cnt;
     /* TODO, it will be removed, once safe_evict is implmented */
-    bool is_evicted;
 
     /* latest pending req on this buffer */
     boost::intrusive_ptr<writeback_req> last_pending_req;
@@ -74,7 +73,7 @@ struct WriteBackCacheBuffer : public CacheBuffer< Buffer > {
     std::deque<boost::intrusive_ptr<writeback_req>> pending_req_q;
 #endif
     
-    WriteBackCacheBuffer(): gen_cnt(0), is_evicted(false), last_pending_req(nullptr), error_req(nullptr) 
+    WriteBackCacheBuffer(): gen_cnt(0), last_pending_req(nullptr), error_req(nullptr) 
 #ifndef NDEBUG
     ,pending_req_q()
 #endif
@@ -207,16 +206,11 @@ public:
             buf->last_pending_req = nullptr;
         }
 
-        if (status != no_error && (!buf->is_evicted)) {
+        if (status != no_error) {
+            assert(buf->error_req == nullptr);
             buf->error_req = req;
-            buf->is_evicted = true;
-            /* evict it from the cache. New read will get the latest buf. Thread which
-             * have already read and is waiting on a lock will get the stale buffer. All
-             * subsequent writes will fail and also writes to its child will fail until
-             * it reload the node from a disk.
-             * TODO:it is better to fix cache and call safe_evict.
-             */
-            m_cache->erase(cache_buf);
+            /* evict it from the cache. */
+            m_cache->safe_erase(cache_buf, nullptr);
         }
         buf_mtx.unlock();
        
@@ -264,7 +258,10 @@ public:
             boost::static_pointer_cast<WriteBackCacheBuffer<Buffer>>(cache_buf);
         boost::intrusive_ptr<writeback_req> req;
         std::unique_lock<std::mutex> buf_mtx(buf->mtx);
-        if (buf->is_evicted) {
+        if (buf->error_req != nullptr) {
+            /* previous request on this buffer is failed. All subsequent writes
+             * need to be failed until it is evicted.
+             */
             req = buf->error_req;
         } else {
             req = buf->last_pending_req;
@@ -287,7 +284,7 @@ public:
                    /* outb.bytes get freed when last_pending_req is completed */
                    memcpy(mem, outb.bytes, outb.size);
                    outb.bytes = (uint8_t *)mem;
-                   (buf->get_memvec_mutable()).set(outb);
+                   (buf->get_memvec()).set(outb);
                    buf->gen_cnt++;
                 }
             }
@@ -324,7 +321,7 @@ public:
         writeBack_write_internal(cache_buf, req, dependent_req_q); 
     }
     
-    const homeds::MemVector< BLKSTORE_BLK_SIZE > 
+    const homeds::MemVector 
             &writeback_get_memvec(boost::intrusive_ptr<writeback_req> req) const {
         return req->memvec;
     }

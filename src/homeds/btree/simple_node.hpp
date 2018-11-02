@@ -53,7 +53,7 @@ public:
     void insert(uint32_t ind, const BtreeKey &key, const BtreeValue &val) {
         //K& k = *(dynamic_cast<K *>(&key));
         //assert(get_total_entries() < getMaxEntries());
-        uint32_t sz = (this->get_total_entries() - ind) * get_nth_obj_size(0);
+        uint32_t sz = (this->get_total_entries() - (ind + 1) + 1) * get_nth_obj_size(0);
 
         if (sz != 0) {
             memmove(get_nth_obj(ind + 1), get_nth_obj(ind), sz);
@@ -119,7 +119,7 @@ public:
             get_nth_value(total_entries - 1, &last_1_val, false);
             this->set_edge_value(last_1_val);
         } else {
-            uint32_t sz = (total_entries - ind) * get_nth_obj_size(0);
+            uint32_t sz = (total_entries - (ind + 1)) * get_nth_obj_size(0);
             if (sz != 0) {
                 memmove(get_nth_obj(ind), get_nth_obj(ind + 1), sz);
             }

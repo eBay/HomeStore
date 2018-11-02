@@ -64,9 +64,9 @@ int main(int argc, char** argv) {
     boost::intrusive_ptr<BlkBuffer> bbufs[100];
     for (auto i = 0; i < 100; i++) {
         uint8_t nblks = 1;
-        //blk_store->alloc_blk(nblks, hints, &bids[i]);
+        //blk_store->alloc_blk(nblks * BLKSTORE_BLK_SIZE, hints, &bids[i]);
 
-        bbufs[i] = blk_store->alloc_blk_cached(nblks, hints, &bids[i]);
+        bbufs[i] = blk_store->alloc_blk_cached(nblks * BLKSTORE_BLK_SIZE, hints, &bids[i]);
         LOGINFO("Requested nblks: {} Allocation info: {}", (uint32_t)nblks, bids[i].to_string());
         memset(bbufs[i]->at_offset(0).bytes, i, bbufs[i]->at_offset(0).size);
     }

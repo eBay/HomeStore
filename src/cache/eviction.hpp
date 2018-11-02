@@ -12,7 +12,6 @@
 #include "cache_common.hpp"
 
 namespace homestore {
-typedef homeds::MemVector< BLKSTORE_BLK_SIZE > EvictMemBlk;
 
 template< typename EvictionPolicy >
 class Evictor {
@@ -59,6 +58,18 @@ public:
         }
     }
 
+    bool modify_size(uint32_t sz) {
+        if ((m_cur_size.fetch_add(sz, std::memory_order_acq_rel) + sz) <= m_max_size) {
+            // We didn't have any size restriction while it is being added, so add to the record as is
+            return true;
+        }
+        if (do_evict(sz)) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
     /* Upvote the entry. This depends on the current rank will move up and thus reduce the chances of getting evicted.
      * In case of LRU allocation, it moves to the tail end of the list The entry is expected to be present in the
      * eviction list */
@@ -76,7 +87,7 @@ public:
     void delete_record(EvictRecordType &rec) {
         m_evict_policy.remove(rec);
         auto rec_size = m_get_size_cb(&rec);
-        assert(rec_size > 0);
+        assert(rec_size >= 0);
         int64_t size = m_cur_size.fetch_sub(rec_size, std::memory_order_acq_rel);
         assert(size >= 0);
     }

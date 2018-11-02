@@ -119,7 +119,51 @@ void VarsizeBlkAllocator::allocator_state_machine() {
     }
 }
 
-BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid) {
+#define MAX_RETRY_CNT 5
+
+BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, 
+                   const blk_alloc_hints &hints, std::vector<BlkId> &out_blkid) {
+    uint8_t blks_alloced = 0;
+    int retry_cnt = 0;
+
+    uint8_t blks_rqstd = nblks;
+
+#ifndef NDEBUG
+    if (nblks  != 1) {
+        blks_rqstd = nblks / 2;
+    }
+#endif
+
+    while (blks_alloced != nblks && retry_cnt < MAX_RETRY_CNT) {
+        BlkId blkid;
+        if (alloc(blks_rqstd, hints, &blkid, ((retry_cnt == MAX_RETRY_CNT -1) ? true:false)) != BLK_ALLOC_SUCCESS) {
+            if (blks_rqstd == 1 || hints.is_contiguous) {
+                break;
+            }
+            blks_rqstd = blks_rqstd/2;
+            retry_cnt++;
+            continue;
+        }
+        blks_alloced += blks_rqstd;
+        if (blks_rqstd > nblks - blks_alloced) {
+            blks_rqstd = nblks - blks_alloced;
+        }
+        out_blkid.push_back(blkid);
+    }
+
+    assert(blks_alloced == nblks);
+    if (blks_alloced != nblks) {
+        /* free blks */
+        for (auto it = out_blkid.begin(); it != out_blkid.end(); ++it) {
+            free(*it);
+            it = out_blkid.erase(it);
+        }
+        return BLK_ALLOC_SPACEFULL;
+    }
+    return BLK_ALLOC_SUCCESS;
+}
+
+BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid, bool retry) {
     BlkAllocStatus ret = BLK_ALLOC_SUCCESS;
     bool found = false;
 
@@ -141,11 +185,6 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
 
         // Wait for cache to refill and then retry original request
         if (attempt > MAX_BLK_ALLOC_ATTEMPT) {
-#ifndef NDEBUG
-            if (!blk_alloc_test) {
-                assert(0);
-            }
-#endif
             LOGERROR("Exceeding max retries {} to allocate. Failing the alloc", MAX_BLK_ALLOC_ATTEMPT);
             break;
         } else {
@@ -155,7 +194,12 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
                     hints.desired_temp);
         }
 
-        request_more_blks_wait(nullptr);
+        if (retry || m_cache_n_entries == 0) {
+            request_more_blks_wait(nullptr);
+        } else {
+            request_more_blks(nullptr);
+            break;
+        }
         attempt++;
     }
 

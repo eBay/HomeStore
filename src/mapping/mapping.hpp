@@ -18,7 +18,7 @@ namespace homestore {
 
 #define MappingBtreeDeclType     homeds::btree::Btree<homeds::btree::SSD_BTREE, MappingKey, MappingValue, \
                                     homeds::btree::BTREE_NODETYPE_VAR_VALUE, homeds::btree::BTREE_NODETYPE_VAR_VALUE,\
-                                    4096u,writeback_req>
+                                    BLKSTORE_PAGE_SIZE, writeback_req>
 #define MAX_INTERVAL_LENGTH_IN_BITS 8
 #define Interval_Array_Impl Interval_Array<MappingInterval, 80, 20 >
 

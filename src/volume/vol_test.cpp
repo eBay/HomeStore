@@ -204,7 +204,7 @@ public:
         req->is_read = true;
         if (is_random_read) {
             req->lba_to_check = written_lba[cnt];
-            req->nblks_to_check = written_nblks[cnt];
+            req->nblks_to_check = rand() % written_nblks[cnt];
             vol->read(req->lba_to_check, req->nblks_to_check, req);
         } else {
             req->indx = cnt;
@@ -309,6 +309,7 @@ public:
         LOGTRACE("Finished {} for {}:{}", req->is_read ? "read" : "write", req->lba, req->nblks);
         if (outstanding_ios == 0 && write_cnt >= max_writes && can_write) {
             /* signal main thread */
+            can_write = false;
             if (is_read) {
                 can_read = true;
                 [[maybe_unused]] auto rsize = read(ev_fd, &temp, sizeof(uint64_t));
@@ -316,8 +317,6 @@ public:
                 [[maybe_unused]] auto wsize = write(ev_fd, &temp, sizeof(uint64_t));
             }
             vol->print_tree();
-            can_read = true;
-            can_write = false;
             LOGDEBUG("NOtify");
             cv.notify_all();
             return;

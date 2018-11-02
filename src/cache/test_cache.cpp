@@ -66,9 +66,9 @@ public:
 
     void insert_one(uint64_t id, uint32_t size) {
         boost::intrusive_ptr< homestore::CacheBuffer< blk_id > > cbuf;
-        uint64_t * raw_buf = (uint64_t *)malloc(sizeof(uint64_t) * size/8);
-        for (auto b = 0U; b < size/8; b++) raw_buf[b] = id;
-        EXPECT_EQ(m_cache->insert(blk_id(id), {(uint8_t *) raw_buf, 64}, 0, &cbuf), true);
+        uint64_t * raw_buf = (uint64_t *)malloc(sizeof(uint64_t) * size);
+        for (auto b = 0U; b < size; b++) raw_buf[b] = id;
+        EXPECT_EQ(m_cache->insert(blk_id(id), {(uint8_t *) raw_buf, size}, 0, &cbuf), true);
     }
 
     void read_one(uint64_t id, uint32_t size, bool expected = true) {

@@ -187,16 +187,32 @@ Volume::destroy() {
 void
 homestore::Volume::process_metadata_completions(boost::intrusive_ptr<volume_req> req) {
     assert(!req->is_read);
+   
+    for (std::shared_ptr<Free_Blk_Entry> ptr : req->blkids_to_free_due_to_overwrite) {
+        LOGTRACE("Blocks to free {}", ptr.get()->to_string());
+        blk_store->free_blk(ptr->blkId, BLOCK_SIZE * ptr->blkId_offset, 
+                            BLOCK_SIZE * ptr->nblks_to_free);
+    }
+    
+    if (req->parent_req) {
+        if (req->err != no_error) {
+            req->parent_req->err = req->err;
+        }
+        req = req->parent_req;
+    }
+
+    auto ref_cnt = req->ref_cnt.fetch_sub(1, memory_order_relaxed);
+    if (ref_cnt != 1) {
+        return;
+    }
+    
     if (req->err == no_error) {
         PerfMetrics *perf = PerfMetrics::getInstance();
         assert(perf->updateHistogram(vol_hist[IO_WRITE_H], get_elapsed_time(req->startTime)));
     }
-    for (std::shared_ptr<Free_Blk_Entry> ptr : req->blkids_to_free_due_to_overwrite) {
-        LOGTRACE("Blocks to free {}", ptr.get()->to_string());
-        blk_store->free_blk(ptr->blkId, ptr->blkId_offset, ptr->nblks_to_free);
-    }
-    comp_cb(req);
+    
     outstanding_write_cnt.fetch_sub(1, memory_order_relaxed);
+    comp_cb(req);
 }
 
 void
@@ -204,13 +220,24 @@ homestore::Volume::process_data_completions(boost::intrusive_ptr<blkstore_req<Bl
     boost::intrusive_ptr<volume_req> req = boost::static_pointer_cast<volume_req>(bs_req);
 
     if (!req->is_read) {
+        if (req->err == no_error) {
+            map->put(req, req->lba, req->nblks, req->bid);
+        } else {
+            process_metadata_completions(req);
+        }
         return;
     }
-    for (unsigned int i = 0; i < req->read_buf_list.size(); i++) {
-        if (req->read_buf_list[i].buf == only_in_mem_buff) {
-            continue;
+    
+    if (req->parent_req) {
+        if (req->err != no_error) {
+            req->parent_req->err = req->err;
         }
-        blk_store->update_cache(req->read_buf_list[i].buf);
+        req = req->parent_req;
+    }
+
+    auto ref_cnt = req->ref_cnt.fetch_sub(1, memory_order_relaxed);
+    if (ref_cnt != 1) {
+        return;
     }
     PerfMetrics *perf = PerfMetrics::getInstance();
     assert(perf->updateHistogram(vol_hist[IO_READ_H], get_elapsed_time(req->startTime)));
@@ -241,50 +268,62 @@ homestore::Volume::free_blk(homestore::BlkId bid) {
     blk_store->free_blk(bid, boost::none, boost::none);
 }
 
-boost::intrusive_ptr<BlkBuffer>
+void
 Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks,
               boost::intrusive_ptr<volume_req> req) {
-    BlkId bid;
+    std::vector<BlkId> bid;
     blk_alloc_hints hints;
     hints.desired_temp = 0;
     hints.dev_id_hint = -1;
+    int child_cnt = 0;
 
-    req->lba = lba;
-    req->nblks = nblks;
-    req->is_read = false;
     req->startTime = Clock::now();
-    req->err = no_error;
     outstanding_write_cnt.fetch_add(1, memory_order_relaxed);
 
     {
         CURRENT_CLOCK(startTime)
-        BlkAllocStatus status = blk_store->alloc_blk(nblks, hints, &bid);
+        BlkAllocStatus status = blk_store->alloc_blk(nblks, hints, bid);
         if (status != BLK_ALLOC_SUCCESS) {
             assert(0);
         }
         PerfMetrics *perf = PerfMetrics::getInstance();
         assert(perf->updateHistogram(vol_hist[BLK_ALLOC_H], get_elapsed_time(startTime)));
     }
-    req->bid = bid;
-
-    // LOG(INFO) << "Requested nblks: " << (uint32_t) nblks << " Allocation info: " << bid.to_string();
-
-    homeds::blob b = {buf, (uint32_t) (BLOCK_SIZE * nblks)};
 
     Clock::time_point startTime = Clock::now();
-
-    std::deque<boost::intrusive_ptr<writeback_req>> req_q;
-    boost::intrusive_ptr<BlkBuffer> bbuf = blk_store->write(bid, b,
-                                                            boost::static_pointer_cast<blkstore_req<BlkBuffer>>(req),
+    boost::intrusive_ptr<homeds::MemVector> mvec(new homeds::MemVector());
+    mvec->set(buf, BLOCK_SIZE * nblks, 0);
+    req->ref_cnt++;
+    uint32_t offset = 0;
+    uint32_t blks_snt = 0;
+    uint32_t i = 0;
+    
+    for (i = 0; i < bid.size(); i++) {
+        std::deque<boost::intrusive_ptr<writeback_req>> req_q;
+        req->ref_cnt++;
+        boost::intrusive_ptr<volume_req> child_req(new volume_req());
+        
+        child_req->parent_req = req;
+        child_req->ref_cnt = 0;
+        
+        child_req->is_read = false;
+        child_req->bid = bid[i];
+        child_req->lba = lba + blks_snt;
+        child_req->nblks =  bid[i].data_size() / BLOCK_SIZE;
+        assert((bid[i].data_size() % BLOCK_SIZE) == 0);
+        boost::intrusive_ptr<BlkBuffer> bbuf = blk_store->write(bid[i], mvec, offset,
+                                                            boost::static_pointer_cast<blkstore_req<BlkBuffer>>(child_req),
                                                             req_q);
+        offset += bid[i].data_size();
+        blks_snt += bid[i].data_size() / BLOCK_SIZE;
+    }
 
-    /* TODO: should check the write status */
+    assert(blks_snt == nblks);
     PerfMetrics *perf = PerfMetrics::getInstance();
     auto updated = perf->updateHistogram(vol_hist[WRITE_H], get_elapsed_time(startTime));
     assert(updated);
-    //  LOG(INFO) << "Written on " << bid.to_string() << " for 8192 bytes";
-    map->put(req, req->lba, req->nblks, req->bid);
-    return bbuf;
+
+    process_metadata_completions(req);
 }
 
 void Volume::print_tree() {
@@ -295,6 +334,7 @@ int
 Volume::read(uint64_t lba, int nblks, boost::intrusive_ptr<volume_req> req) {
 
     std::vector<std::shared_ptr<Lba_Block>> mappingList;
+    int child_cnt = 0;
     req->startTime = Clock::now();
     Clock::time_point startTime = Clock::now();
 
@@ -302,6 +342,7 @@ Volume::read(uint64_t lba, int nblks, boost::intrusive_ptr<volume_req> req) {
     req->err = ret;
     req->is_read = true;
 
+    req->ref_cnt = 1;
     outstanding_write_cnt.fetch_add(1, memory_order_relaxed);
     if (ret && ret == homestore_error::lba_not_exist) {
         process_data_completions(req);
@@ -314,9 +355,9 @@ Volume::read(uint64_t lba, int nblks, boost::intrusive_ptr<volume_req> req) {
     req->lba = lba;
     req->nblks = nblks;
 
-    req->blkstore_read_cnt = 1;
 
     startTime = Clock::now();
+    req->ref_cnt = 1;
     for (std::shared_ptr<Lba_Block> bInfo: mappingList) {
         if (!bInfo->m_blkid_found) {
             uint8_t i = 0;
@@ -329,28 +370,33 @@ Volume::read(uint64_t lba, int nblks, boost::intrusive_ptr<volume_req> req) {
                 i++;
             }
         } else {
-            LOGTRACE("Volume - Sending read to blkbuffer - {},{},{}->{}", bInfo->m_value.m_blkid.m_id,
-                    bInfo->m_interval_length, bInfo->m_value.m_blkid_offset, bInfo->m_value.m_blkid.to_string());
+            LOGTRACE("Volume - Sending read to blkbuffer - {},{},{}->{}", 
+                      bInfo->m_value.m_blkid.m_id, bInfo->m_interval_length, 
+                      bInfo->m_value.m_blkid_offset, 
+                      bInfo->m_value.m_blkid.to_string());
 
-            boost::intrusive_ptr<BlkBuffer> bbuf = blk_store->read(bInfo->m_value.m_blkid,
-                                                                   BLOCK_SIZE * bInfo->m_value.m_blkid_offset,
-                                                                   BLOCK_SIZE * bInfo->m_interval_length,
-                                                                   boost::static_pointer_cast<blkstore_req<BlkBuffer>>(
-                                                                           req));
+            boost::intrusive_ptr<volume_req> child_req(new volume_req());
+            req->ref_cnt++;
+            child_req->is_read = true;
+            child_req->parent_req = req;
+            child_req->ref_cnt = 0;
+            boost::intrusive_ptr<BlkBuffer> bbuf = 
+                                blk_store->read(bInfo->m_value.m_blkid,
+                                     BLOCK_SIZE * bInfo->m_value.m_blkid_offset,
+                                     BLOCK_SIZE * bInfo->m_interval_length,
+                                     boost::static_pointer_cast<blkstore_req<BlkBuffer>>(
+                                                                           child_req));
             buf_info info;
             info.buf = bbuf;
             info.size = BLOCK_SIZE * bInfo->m_interval_length ;
             info.offset = BLOCK_SIZE * bInfo->m_value.m_blkid_offset ;
             req->read_buf_list.push_back(info);
-
+            child_cnt++;
         }
     }
 
-    int cnt = req->blkstore_read_cnt.fetch_sub(1, std::memory_order_acquire);
-    if (cnt == 1) {
-        process_data_completions(req);
-    }
-
+    /* it decrement the refcnt and see if it can do the completion upcall */
+    process_data_completions(req);
     assert(perf->updateHistogram(vol_hist[READ_H], get_elapsed_time(startTime)));
     return 0;
 }
@@ -370,7 +416,8 @@ void Volume::alloc_single_block_in_mem() {
         throw std::bad_alloc();
     }
     memset(ptr, 0, size);
-    homeds::MemVector<BLKSTORE_BLK_SIZE> &mvec = only_in_mem_buff->get_memvec_mutable();
-    mvec.set(ptr, size, 0);
+    boost::intrusive_ptr<homeds::MemVector> mvec(new homeds::MemVector());
+    mvec->set(ptr, size, 0);
+    only_in_mem_buff->set_memvec(mvec, 0, size);
 }
 

@@ -34,19 +34,37 @@ bool IntrusiveCache<K, V>::insert(V &v, V **out_ptr, const std::function<void(V 
     bool inserted = m_hash_set.insert(*pk, v, out_ptr, hash_code, found_cb);
     if (!inserted) {
         // Entry is already inside the hash, just upvote this in eviction to simulate someone has read the blk
-        m_evictors[hash_code % EVICTOR_PARTITIONS]->upvote((*out_ptr)->get_evict_record_mutable());
+        (*out_ptr)->lock();
+        if ((*out_ptr)->get_cache_state() == CACHE_INSERTED) {
+            m_evictors[hash_code % EVICTOR_PARTITIONS]->upvote((*out_ptr)->get_evict_record_mutable());
+        }
+        (*out_ptr)->unlock();
         LOGWARNMOD(cache_vmod_write, "Following entry exist in cache already: {}", (*out_ptr)->to_string());
         return false;
     }
 
     // If we successfully added to the hash set, inform the evictor to evict a block if needed.
-    if (m_evictors[hash_code % EVICTOR_PARTITIONS]->add_record(v.get_evict_record_mutable())) {
+    v.lock();
+    bool ret = true;
+    if (v.get_cache_state() == CACHE_NOT_INSERTED && m_evictors[hash_code % EVICTOR_PARTITIONS]->add_record(v.get_evict_record_mutable())) {
         m_stats.inc_count(CACHE_STATS_OBJ_COUNT);
-        return true;
+        v.cache_insert();
     } else {
-        assert(0);
-        return false;
+        /* remove from the hash table */
+        m_hash_set.remove(*pk, hash_code);
+        ret = false;
     }
+    v.unlock();
+    return ret;
+}
+
+/* This api is called when size of an existing entry is modified in hash */
+template< typename K, typename V>
+bool IntrusiveCache<K, V>::modify_size(V &v, uint32_t size) {
+    const K *pk = V::extract_key(v);
+    auto b = K::get_blob(*pk);
+    uint64_t hash_code = util::Hash64((const char *)b.bytes, (size_t)b.size);
+    return(m_evictors[hash_code % EVICTOR_PARTITIONS]->modify_size(size));
 }
 
 template< typename K, typename V>
@@ -62,15 +80,19 @@ V* IntrusiveCache<K, V>::get(const K &k) {
     auto b = K::get_blob(k);
     uint64_t hash_code = util::Hash64((const char *)b.bytes, (size_t)b.size);
 
-    /* TODO: rishabh, eviction and get can race with each other */
     bool found = m_hash_set.get(k, &v, hash_code);
     if (!found) {
         return nullptr;
     }
+    
+    v->lock();
+    if (v->get_cache_state() == CACHE_INSERTED) {
+        // We got the data from hash set, upvote the entry
+        m_stats.inc_count(CACHE_STATS_HIT_COUNT);
+        m_evictors[hash_code % EVICTOR_PARTITIONS]->upvote(v->get_evict_record_mutable());
+    }
 
-    // We got the data from hash set, upvote the entry
-    m_stats.inc_count(CACHE_STATS_HIT_COUNT);
-    m_evictors[hash_code % EVICTOR_PARTITIONS]->upvote(v->get_evict_record_mutable());
+    v->unlock();
     return v;
 }
 
@@ -82,9 +104,14 @@ bool IntrusiveCache<K, V>::erase(V &v) {
 
     bool found = m_hash_set.remove(*pk, hash_code);
     if (found) {
-        // We successfully removed the entry from hash set. So we can remove the record from eviction list as well.
-        m_evictors[hash_code % EVICTOR_PARTITIONS]->delete_record(v.get_evict_record_mutable());
-        m_stats.dec_count(CACHE_STATS_OBJ_COUNT);
+        v.lock();
+        if (v->get_cache_state() == CACHE_INSERTED) {
+            // We successfully removed the entry from hash set. So we can remove the record from eviction list as well.
+            m_evictors[hash_code % EVICTOR_PARTITIONS]->delete_record(v.get_evict_record_mutable());
+            m_stats.dec_count(CACHE_STATS_OBJ_COUNT);
+        }
+        v.cache_evict();
+        v.unlock();
     }
     return found;
 }
@@ -95,10 +122,35 @@ bool IntrusiveCache<K, V>::is_safe_to_evict(const CurrentEvictor::EvictRecordTyp
      * which depends on cache not freeing the object if it is using it.
      */
     const CacheRecord *crec = CacheRecord::evict_to_cache_record(erec);
-    
+    V *v = (V *)crec;
+
     if (V::test_le((const V &)*crec, 1)) { // Ensure reference count is atmost one (one that is stored in hashset for)
-        /* It remove the entry only if ref cnt is one */
-        return(m_hash_set.check_and_remove(*(V::extract_key((V &)*crec))));
+        /* we can not wait for the lock if there is contention as it can lead to
+         * deadlock. This API is called under the eviction lock. Normally, eviction
+         * lock is taken after taking this lock in case of insert and erase.
+         * Here we need to take the lock to set the cache state.
+         */
+        if (v->try_lock()) {
+            boost::intrusive_ptr< CacheBuffer<K> > out_removed_buf(nullptr);
+            assert(v->get_cache_state() == CACHE_INSERTED);
+            /* It remove the entry only if ref cnt is one */
+            const K *pk = V::extract_key((const V &)*crec);
+            auto b = K::get_blob(*pk);
+            uint64_t hash_code = util::Hash64((const char *)b.bytes, (size_t)b.size);
+            auto ret = m_hash_set.check_and_remove(*pk, hash_code,
+                                   [&out_removed_buf](CacheBuffer< K > *about_to_remove_ptr) {
+                                       // Make a smart ptr of the buffer we are removing
+                                       out_removed_buf = 
+                                                boost::intrusive_ptr< CacheBuffer<K>>(about_to_remove_ptr);
+                                   });
+            if (ret) {
+                v->cache_evict();
+            }
+            v->unlock();
+            return ret;
+        } else {
+            return false;
+        }
     } else {
         return false;
     }
@@ -130,6 +182,7 @@ bool Cache<K>::insert(const K &k, const homeds::blob &b, uint32_t value_offset,
         *out_smart_buf = boost::intrusive_ptr< CacheBuffer<K> >(out_buf, false);
     }
 
+    (*out_smart_buf)->set_cache(this);
     if (!inserted) {
         homeds::ObjectAllocator< CacheBuffer<K> >::deallocate(cbuf);
     }
@@ -145,6 +198,25 @@ bool Cache<K>::insert(const K &k, const boost::intrusive_ptr< CacheBuffer<K> > i
         *out_smart_buf = boost::intrusive_ptr< CacheBuffer < K > > (out_buf, false);
     }
 
+    (*out_smart_buf)->set_cache(this);
+    return inserted;
+}
+
+template <typename K>
+bool Cache<K>::insert_missing_pieces(const boost::intrusive_ptr< CacheBuffer<K> > buf, 
+                        uint32_t offset, uint32_t  size_to_read,
+                        std::vector< std::pair<uint32_t, uint32_t> > &missing_mp) {
+    bool inserted = false;
+    auto size = buf->insert_missing_pieces(offset, size_to_read, missing_mp);
+    /* check if buffer is still part of cache or not */
+    buf->lock();
+    if (buf->get_cache_state() == CACHE_INSERTED) {
+        inserted = IntrusiveCache< K, CacheBuffer<K> >::modify_size(*buf, size);
+        if (inserted) {
+            buf->modify_cache_size(size);
+        }
+    }
+    buf->unlock();
     return inserted;
 }
 
@@ -161,7 +233,7 @@ auto Cache<K>::update(const K &k, const homeds::blob &b, uint32_t value_offset,
     // atomically append the memory to the found buffer.
     bool inserted = insert(k, b, value_offset, out_smart_buf,
                            [&b, value_offset, &appended](CacheBuffer< K > *cbuf) {
-                               appended = cbuf->get_memvec_mutable().append(b.bytes, value_offset, b.size);
+                               appended = cbuf->get_memvec().append(b.bytes, value_offset, b.size);
                            });
     if (inserted) {
         // Key does not exists already and insertion at offset successful.
@@ -184,30 +256,101 @@ bool Cache<K>::get(const K &k, boost::intrusive_ptr< CacheBuffer<K>> *out_smart_
     return false;
 }
 
-/* Caller ensures that there is no reference to this buffer while calling erase or it is
- * safe to evict from the cache even if there is reference to it.
+/* While calling this API, Caller ensures that there is no reference to this buffer. We simply
+ * remove it without checking for the ref_cnt.
  */
 template <typename K>
 bool Cache<K>::erase(boost::intrusive_ptr< CacheBuffer<K> > buf) {
-    return (IntrusiveCache< K, CacheBuffer<K> >::erase(*(buf.get())));
+    const K *pk = CacheBuffer<K>::extract_key(*buf);
+    return (erase(*pk, 0, 0, nullptr));
 }
 
 template <typename K >
-bool Cache<K>::erase(const K &k, boost::intrusive_ptr< CacheBuffer<K> > *out_removed_buf) {
+bool Cache<K>::erase(const K &k, boost::intrusive_ptr< CacheBuffer<K> > *out_bbuf) {
+    return(erase(k, 0, 0, out_bbuf));
+}
+
+/* It remove the entry from the cache right away. It doesn't wait for ref_cnt to 
+ * be zero. Currently it doesn't support partial cache remove. It remove
+ * the full entry. But functionality can be easily extended later easily.
+ * if size is zero, it means it has to free the full entry.
+ */
+template <typename K >
+bool Cache<K>::erase(const K &k, uint32_t offset, uint32_t size, 
+                          boost::intrusive_ptr< CacheBuffer<K> > *ret_removed_buf) {
     auto b = K::get_blob(k);
     uint64_t hash_code = util::Hash64((const char *)b.bytes, (size_t)b.size);
+    boost::intrusive_ptr< CacheBuffer<K> > out_removed_buf(nullptr);
 
-    assert(out_removed_buf != nullptr);
-    /* TODO: erase and get can race with each other. Need to fix it */
-    bool found = this->m_hash_set.remove(k, hash_code,
+    bool found = this->m_hash_set.remove(k, hash_code, 
                                    [&out_removed_buf](CacheBuffer< K > *about_to_remove_ptr) {
                                        // Make a smart ptr of the buffer we are removing
-                                       *out_removed_buf = boost::intrusive_ptr< CacheBuffer<K>>(about_to_remove_ptr);
+                                       out_removed_buf = 
+                                                boost::intrusive_ptr< CacheBuffer<K>>(about_to_remove_ptr);
                                    });
     if (found) {
-        // We successfully removed the entry from hash set. So we can remove the record from eviction list as well.
-        this->m_evictors[hash_code % EVICTOR_PARTITIONS]->delete_record((*out_removed_buf)->get_evict_record_mutable());
+        out_removed_buf->lock();
+        if (out_removed_buf->get_cache_state() == CACHE_INSERTED) {
+            // We successfully removed the entry from hash set. So we can remove the record from eviction list as well.
+            this->m_evictors[hash_code % EVICTOR_PARTITIONS]->delete_record((out_removed_buf)->get_evict_record_mutable());
+        }
+        out_removed_buf->cache_evict();
+        out_removed_buf->unlock();
+    }
+
+    if (ret_removed_buf != nullptr && out_removed_buf != nullptr) {
+        *ret_removed_buf = out_removed_buf;
     }
     return found;
+};
+
+template <typename K>
+void Cache<K>::safe_erase(boost::intrusive_ptr< CacheBuffer<K> > buf, erase_comp_cb cb) {
+    const K *pk = CacheBuffer<K>::extract_key(*buf);
+    safe_erase(*pk, cb);
+}
+
+/* It remove the buffer only when ref_cnt becomes zero. If it is not zero, it set the state
+ * and delete it later when ref_count becomes zero. Until then, Caller can get the entry 
+ * from the cache if it asks for the entry. We don't support partial cache free in 
+ * case of safe_erase. Entry has to be fully removed.
+ */
+template <typename K >
+void Cache<K>::safe_erase(const K &k, erase_comp_cb cb) {
+    
+    /* we don't support partial cache entry for safe_erase. */
+    auto b = K::get_blob(k);
+    uint64_t hash_code = util::Hash64((const char *)b.bytes, (size_t)b.size);
+    boost::intrusive_ptr< CacheBuffer<K> > out_buf(nullptr);
+    bool can_remove = false;;
+
+    bool found = this->m_hash_set.safe_remove(k, hash_code, can_remove,
+                                   [&out_buf](CacheBuffer< K > *about_to_remove_ptr) {
+                                       // Make a smart ptr of the buffer we are removing
+                                       out_buf = 
+                                                boost::intrusive_ptr< CacheBuffer<K>>(about_to_remove_ptr);
+                                   });
+    if (found) {
+        if (cb != nullptr) {
+            out_buf->set_cb(cb);
+        }
+        if (can_remove) {
+            // We successfully removed the entry from hash set. So we can remove the record from eviction list as well.
+            out_buf->lock();
+            if (out_buf->get_cache_state() == CACHE_INSERTED) {
+                this->m_evictors[hash_code % EVICTOR_PARTITIONS]->delete_record((out_buf)->get_evict_record_mutable());
+            }
+            out_buf->cache_evict();
+            out_buf->unlock();
+ 
+            auto cb = out_buf->get_cb();
+            if (cb != nullptr) {
+                cb(out_buf);
+            }
+        }
+    } else {
+        assert(!can_remove);
+        cb(out_buf);
+    }
 };
 } // namespace homestore

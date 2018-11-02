@@ -214,6 +214,7 @@ public:
     
     void process_completions(boost::intrusive_ptr<virtualdev_req> req) {
 
+        assert(req->err == no_error);
         comp_cb(req);
         /* XXX:we probably have to do something if a write/read is spread
          * across the chunks from this layer.
@@ -245,7 +246,22 @@ public:
         chunk->set_blk_allocator(ba);
     }
 
-    BlkAllocStatus alloc_blk(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid) {
+    BlkAllocStatus alloc_blk(uint8_t nblks, const blk_alloc_hints &hints, 
+                             BlkId *out_blkid) {
+        std::vector<BlkId> blkid;
+        assert(hints.is_contiguous);
+        auto ret = alloc_blk(nblks, hints, blkid);
+        if (ret == BLK_ALLOC_SUCCESS) {
+            assert(blkid.size() == 1);
+            *out_blkid = blkid[0];
+        } else {
+            assert(blkid.size() == 0);
+        }
+        return ret;
+    }
+
+    BlkAllocStatus alloc_blk(uint8_t nblks, const blk_alloc_hints &hints, 
+                             std::vector<BlkId> &out_blkid) {
         uint32_t dev_ind {0};
         uint32_t chunk_num, start_chunk_num;
         BlkAllocStatus status = BLK_ALLOC_FAILED;
@@ -285,7 +301,9 @@ public:
 
         if (status == BLK_ALLOC_SUCCESS) {
             // Set the id as globally unique id
-            *out_blkid = to_glob_uniq_blkid(*out_blkid, picked_chunk);
+            for (uint32_t i = 0; i < out_blkid.size(); i++) {
+                out_blkid[i] = to_glob_uniq_blkid(out_blkid[i], picked_chunk);
+            }
         }
         return status;
     }
@@ -306,27 +324,31 @@ public:
         mirror_time = 0;
     }
 
-    void write(const BlkId &bid, const homeds::MemVector<BLKSTORE_BLK_SIZE> &buf, 
-            boost::intrusive_ptr <virtualdev_req> req) {
+    void write(const BlkId &bid, const homeds::MemVector &buf, 
+            boost::intrusive_ptr <virtualdev_req> req, uint32_t data_offset = 0) {
         BlkOpStatus ret_status = BLK_OP_SUCCESS;
         uint32_t size = bid.get_nblks() * get_blk_size();
         struct iovec iov[BlkId::max_blks_in_op()];
         int iovcnt = 0;
 
         Clock::time_point startTime = Clock::now();
-        assert(buf.size() == bid.get_nblks() * BLKSTORE_BLK_SIZE);
 
         uint32_t p = 0;
-        for (auto i : boost::irange<uint32_t>(0, buf.npieces())) {
+        uint32_t end_offset = bid.data_size() + data_offset;
+        while (data_offset != end_offset) {
             homeds::blob b;
-            buf.get(&b, i);
-
-            // TODO: Also verify the sum of sizes are not greater than a page size.
+            buf.get(&b, data_offset);
             iov[iovcnt].iov_base = b.bytes;
-            iov[iovcnt].iov_len = b.size;
+            if (data_offset + b.size > end_offset) {
+                iov[iovcnt].iov_len = end_offset - data_offset;
+            } else {
+                iov[iovcnt].iov_len = b.size;
+            }
+            data_offset += iov[iovcnt].iov_len;
             iovcnt++;
         }
 
+        assert(data_offset == end_offset);
         PhysicalDevChunk *chunk;
         
         req->version = 0xDEAD;
@@ -386,7 +408,7 @@ public:
      * have offset as one of the parameter. Reason for that is its actually ok and make the interface and also
      * buf (caller buf) simple and there is no use case. However, we need to keep the blk size to be small as possible
      * to avoid read overhead */
-    void read(const BlkId &bid, const homeds::MemPiece<BLKSTORE_BLK_SIZE> &mp, 
+    void read(const BlkId &bid, const homeds::MemPiece &mp, 
             boost::intrusive_ptr<virtualdev_req> req) {
         PhysicalDevChunk *primary_chunk;
         bool failed = false;
@@ -437,7 +459,7 @@ public:
         }
     }
 
-    void readv(const BlkId &bid, const homeds::MemVector<BLKSTORE_BLK_SIZE> &buf, 
+    void readv(const BlkId &bid, const homeds::MemVector &buf, 
                             boost::intrusive_ptr<virtualdev_req> req) {
         // Convert the input memory to iovector
         struct iovec iov[BlkId::max_blks_in_op()];

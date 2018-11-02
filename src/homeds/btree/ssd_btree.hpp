@@ -128,13 +128,13 @@ public:
             m_blkstore = new homestore::BlkStore<homestore::VdevFixedBlkAllocatorPolicy, 
                 BtreeBufferDeclType>(
                     bt_dev_info->dev_mgr, m_cache, bt_dev_info->size, 
-                    homestore::BlkStoreCacheType::WRITEBACK_CACHE, 0,
+                    homestore::BlkStoreCacheType::RD_MODIFY_WRITEBACK_CACHE, 0,
                     (std::bind(&BtreeSpecificImpl::process_completions,
                            this, std::placeholders::_1)));
         } else {
             m_blkstore = new homestore::BlkStore<homestore::VdevFixedBlkAllocatorPolicy, BtreeBufferDeclType>
                 (bt_dev_info->dev_mgr, m_cache, bt_dev_info->vb, 
-                 homestore::BlkStoreCacheType::WRITEBACK_CACHE,
+                 homestore::BlkStoreCacheType::RD_MODIFY_WRITEBACK_CACHE,
                  (std::bind(&BtreeSpecificImpl::process_completions,
                             this, std::placeholders::_1)));
         }
@@ -163,7 +163,7 @@ public:
     static boost::intrusive_ptr<SSDBtreeNodeDeclType> alloc_node(SSDBtreeImpl *impl, bool is_leaf) {
         homestore::blk_alloc_hints hints;
         homestore::BlkId blkid;
-        auto safe_buf = impl->m_blkstore->alloc_blk_cached(1, hints, &blkid);
+        auto safe_buf = impl->m_blkstore->alloc_blk_cached(1 * BLKSTORE_PAGE_SIZE, hints, &blkid);
 
 #ifndef NDEBUG
         assert(safe_buf->is_btree);
