@@ -284,6 +284,15 @@ public:
         set_temperature(temp);
     }
 
+    explicit VarsizeAllocCacheEntry(const VarsizeAllocCacheEntry& other) {
+        copy_blob(other.get_blob());
+    }
+
+    VarsizeAllocCacheEntry& operator=(const VarsizeAllocCacheEntry& other) {
+        copy_blob(other.get_blob());
+        return *this;
+    }
+
     void set_blk_num(uint64_t blknum) {
         m_blob->m_blk_num = blknum;
     }

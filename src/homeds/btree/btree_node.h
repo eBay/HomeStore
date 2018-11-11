@@ -6,7 +6,7 @@
 
 #include "physical_node.hpp"
 #include "btree_internal.h"
-#include "btree_specific_impl.hpp"
+#include "btree_store.hpp"
 
 namespace homeds { namespace btree {
 
@@ -64,37 +64,38 @@ private:
     void set_nth_value(int ind, const BtreeValue &v);
 };
 
-#define LeafVariantNodeDeclType           VariantNode< LeafNodeType, K, V, NodeSize >
-#define InteriorVariantNodeDeclType       VariantNode< InteriorNodeType, K, V, NodeSize >
-#define LeafPhysicalNodeDeclType          PhysicalNode< LeafVariantNodeDeclType, K, V, NodeSize >
-#define InteriorPhysicalNodeDeclType      PhysicalNode< InteriorVariantNodeDeclType, K, V, NodeSize >
+#define LeafVariantNode      VariantNode< LeafNodeType, K, V, NodeSize >
+#define InteriorVariantNode  VariantNode< InteriorNodeType, K, V, NodeSize >
+#define LeafPhysicalNode     PhysicalNode< LeafVariantNode, K, V, NodeSize >
+#define InteriorPhysicalNode PhysicalNode< InteriorVariantNode, K, V, NodeSize >
+#define BtreeNodePtr         boost::intrusive_ptr< btree_node_t >
 
 #define to_variant_node(bn)  \
         ( \
-            ((LeafVariantNodeDeclType *)BtreeSpecificImplDeclType::get_physical(bn))->is_leaf() ? \
-                (LeafVariantNodeDeclType *)BtreeSpecificImplDeclType::get_physical((bn)) :   \
-                (InteriorVariantNodeDeclType *)BtreeSpecificImplDeclType::get_physical((bn)) \
+            ((LeafVariantNode *)btree_store_t::get_physical(bn))->is_leaf() ? \
+                (LeafVariantNode *)btree_store_t::get_physical((bn)) :   \
+                (InteriorVariantNode *)btree_store_t::get_physical((bn)) \
         )
 
 #define to_variant_node_const(bn)  \
         ( \
-            ((const LeafVariantNodeDeclType *)BtreeSpecificImplDeclType::get_physical(bn))->is_leaf() ? \
-                (const LeafVariantNodeDeclType *)BtreeSpecificImplDeclType::get_physical((bn)) :        \
-                (const InteriorVariantNodeDeclType *)BtreeSpecificImplDeclType::get_physical((bn))      \
+            ((const LeafVariantNode *)btree_store_t::get_physical(bn))->is_leaf() ? \
+                (const LeafVariantNode *)btree_store_t::get_physical((bn)) :        \
+                (const InteriorVariantNode *)btree_store_t::get_physical((bn))      \
         )
 
 #define to_physical_node(bn) \
         ( \
-            ((LeafPhysicalNodeDeclType *)BtreeSpecificImplDeclType::get_physical(bn))->is_leaf() ? \
-                 (LeafPhysicalNodeDeclType *)BtreeSpecificImplDeclType::get_physical((bn)) :       \
-                 (InteriorPhysicalNodeDeclType *)BtreeSpecificImplDeclType::get_physical((bn))     \
+            ((LeafPhysicalNode *)btree_store_t::get_physical(bn))->is_leaf() ? \
+                 (LeafPhysicalNode *)btree_store_t::get_physical((bn)) :       \
+                 (InteriorPhysicalNode *)btree_store_t::get_physical((bn))     \
         )
 
 #define to_physical_node_const(bn) \
         ( \
-            ((const LeafPhysicalNodeDeclType *)BtreeSpecificImplDeclType::get_physical(bn))->is_leaf() ? \
-                 (const LeafPhysicalNodeDeclType *)BtreeSpecificImplDeclType::get_physical((bn)) :       \
-                 (const InteriorPhysicalNodeDeclType *)BtreeSpecificImplDeclType::get_physical((bn))     \
+            ((const LeafPhysicalNode *)btree_store_t::get_physical(bn))->is_leaf() ? \
+                 (const LeafPhysicalNode *)btree_store_t::get_physical((bn)) :       \
+                 (const InteriorPhysicalNode *)btree_store_t::get_physical((bn))     \
         )
 
 #define call_variant_method(bn, mname, ...)        (to_variant_node(bn)->mname(__VA_ARGS__))
@@ -102,9 +103,10 @@ private:
 #define call_physical_method(bn, mname, ...)       (to_physical_node(bn)->mname(__VA_ARGS__))
 #define call_physical_method_const(bn, mname, ...) (to_physical_node_const(bn)->mname(__VA_ARGS__))
 
-#define BtreeNodeDeclType BtreeNode<BtreeType, K, V, InteriorNodeType, LeafNodeType, NodeSize, btree_req_type>
+#define btree_node_t BtreeNode<BtreeStoreType, K, V, InteriorNodeType, LeafNodeType, NodeSize, btree_req_type>
+
 template<
-        btree_type BtreeType,
+        btree_store_type BtreeStoreType,
         typename K,
         typename V,
         btree_node_type InteriorNodeType,
@@ -112,7 +114,7 @@ template<
         size_t NodeSize,
         typename btree_req_type
         >
-class BtreeNode : public BtreeSpecificImplDeclType::HeaderType {
+class BtreeNode : public btree_store_t::HeaderType {
 private:
     transient_hdr_t m_common_header;
 
@@ -169,13 +171,13 @@ public:
     /* Following methods need to make best effort to move from other node upto provided entries or size. It should
      * return how much it was able to move actually (either entries or size)
      */
-    uint32_t move_out_to_right_by_entries(const BtreeConfig &cfg, boost::intrusive_ptr<BtreeNodeDeclType> &other_node,
+    uint32_t move_out_to_right_by_entries(const BtreeConfig &cfg, boost::intrusive_ptr<BtreeNode> &other_node,
                                           uint32_t nentries);
-    uint32_t move_out_to_right_by_size(const BtreeConfig &cfg, boost::intrusive_ptr<BtreeNodeDeclType> &other_node,
+    uint32_t move_out_to_right_by_size(const BtreeConfig &cfg, boost::intrusive_ptr<BtreeNode> &other_node,
                                        uint32_t size);
-    uint32_t move_in_from_right_by_entries(const BtreeConfig &cfg, boost::intrusive_ptr<BtreeNodeDeclType> &other_node,
+    uint32_t move_in_from_right_by_entries(const BtreeConfig &cfg, boost::intrusive_ptr<BtreeNode> &other_node,
                                            uint32_t nentries);
-    uint32_t move_in_from_right_by_size(const BtreeConfig &cfg, boost::intrusive_ptr<BtreeNodeDeclType> &other_node,
+    uint32_t move_in_from_right_by_size(const BtreeConfig &cfg, boost::intrusive_ptr<BtreeNode> &other_node,
                                         uint32_t size);
 
     void lock(homeds::thread::locktype l);
@@ -184,13 +186,11 @@ public:
     void lock_acknowledge();
     bool any_upgrade_waiters();
 
-    friend void intrusive_ptr_add_ref(BtreeNodeDeclType *n) {
-        BtreeSpecificImplDeclType::ref_node(n);
-    }
+    friend void intrusive_ptr_add_ref(btree_node_t *n) { btree_store_t::ref_node(n); }
 
-    friend void intrusive_ptr_release(BtreeNodeDeclType *n) {
-        if (BtreeSpecificImplDeclType::deref_node(n)) {
-            n->~BtreeNodeDeclType();
+    friend void intrusive_ptr_release(btree_node_t *n) {
+        if (btree_store_t::deref_node(n)) {
+            n->~BtreeNode();
             BtreeNodeAllocator<NodeSize>::deallocate((uint8_t *)n);
         }
     }

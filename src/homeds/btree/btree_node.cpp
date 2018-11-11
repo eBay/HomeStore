@@ -9,26 +9,27 @@
 namespace homeds { namespace btree {
 
 #define DecBNodeType(ret)                     \
-    template<btree_type BtreeType,            \
+    template<btree_store_type BtreeStoreType, \
             typename K,                       \
             typename V,                       \
             btree_node_type InteriorNodeType, \
             btree_node_type LeafNodeType,     \
-            size_t NodeSize, typename btree_req_type >                 \
-    ret BtreeNodeDeclType::
+            size_t NodeSize,                  \
+            typename btree_req_type >         \
+    ret btree_node_t::
 
-template<btree_type BtreeType,
+template<btree_store_type BtreeStoreType,
             typename K,
             typename V,
             btree_node_type InteriorNodeType,
             btree_node_type LeafNodeType,
             size_t NodeSize, typename btree_req_type >
-BtreeNodeDeclType::BtreeNode() : m_common_header() {
+btree_node_t::BtreeNode() : m_common_header() {
     init_btree_node();
 }
 
 #if 0
-DecBNodeType(typename BtreeSpecificImplDeclType::HeaderType *) get_impl_node() {
+DecBNodeType(typename btree_store_t::HeaderType *) get_impl_node() {
     return &m_node_impl_header;
 }
 #endif
@@ -147,24 +148,24 @@ DecBNodeType(void) get_adjacent_indicies(uint32_t cur_ind, vector< int > &indice
  * return how much it was able to move actually (either entries or size)
  */
 DecBNodeType(uint32_t) move_out_to_right_by_entries(const BtreeConfig &cfg,
-                                                    boost::intrusive_ptr<BtreeNodeDeclType> &other_node,
+                                                    boost::intrusive_ptr<BtreeNode> &other_node,
                                                     uint32_t nentries) {
     return call_variant_method(this, move_out_to_right_by_entries, cfg, to_variant_node(other_node.get()), nentries);
 }
 
 DecBNodeType(uint32_t) move_out_to_right_by_size(const BtreeConfig &cfg,
-                                                 boost::intrusive_ptr<BtreeNodeDeclType> &other_node,
+                                                 boost::intrusive_ptr<BtreeNode> &other_node,
                                                  uint32_t size) {
     return call_variant_method(this, move_out_to_right_by_size, cfg, to_variant_node(other_node.get()), size);
 }
 
 DecBNodeType(uint32_t) move_in_from_right_by_entries(const BtreeConfig &cfg,
-                                                     boost::intrusive_ptr<BtreeNodeDeclType> &other_node,
+                                                     boost::intrusive_ptr<BtreeNode> &other_node,
                                                      uint32_t nentries) {
     return call_variant_method(this, move_in_from_right_by_entries, cfg, to_variant_node(other_node.get()), nentries);
 }
 DecBNodeType(uint32_t) move_in_from_right_by_size(const BtreeConfig &cfg,
-                                                  boost::intrusive_ptr<BtreeNodeDeclType> &other_node,
+                                                  boost::intrusive_ptr<BtreeNode> &other_node,
                                                   uint32_t size) {
     return call_variant_method(this, move_in_from_right_by_size, cfg, to_variant_node(other_node.get()), size);
 }
@@ -204,25 +205,25 @@ DecBNodeType(bool) any_upgrade_waiters() {
 }
 
 #if 0
-template<btree_type BtreeType,
+template<btree_store_type BtreeStoreType,
         typename K,
         typename V,
         btree_node_type InteriorNodeType,
         btree_node_type LeafNodeType,
         size_t NodeSize >
-void intrusive_ptr_add_ref(BtreeNodeDeclType *n) {
-    BtreeSpecificImplDeclType::ref_node(n);
+void intrusive_ptr_add_ref(BtreeNode *n) {
+    btree_store_t::ref_node(n);
 }
 
-template<btree_type BtreeType,
+template<btree_store_type BtreeStoreType,
         typename K,
         typename V,
         btree_node_type InteriorNodeType,
         btree_node_type LeafNodeType,
         size_t NodeSize >
-void intrusive_ptr_release(BtreeNodeDeclType *n) {
-    if (BtreeSpecificImplDeclType::deref_node(n)) {
-        n->~BtreeNodeDeclType();
+void intrusive_ptr_release(BtreeNode *n) {
+    if (btree_store_t::deref_node(n)) {
+        n->~BtreeNode();
         BtreeNodeAllocator<NodeSize>::deallocate((uint8_t *)n);
     }
 }

@@ -128,9 +128,8 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
     VarsizeAllocCacheEntry end_entry(BLKID_RANGE_LAST, PAGEID_RANGE_LAST, BLKCOUNT_RANGE_LAST, TEMP_RANGE_LAST);
     VarsizeAllocCacheEntry actual_entry;
 
-    homeds::btree::BtreeSearchRange regex(start_entry, true, /* start_incl */
-                                        end_entry, false, /* end incl */
-                                        true /* lean_left */, true);
+    homeds::btree::BtreeSearchRange regex(start_entry, true, /* start_incl */ end_entry, false, /* end incl */
+                                        homeds::btree::_RangeSelectOption::SECOND_TO_THE_LEFT);
     homeds::btree::EmptyClass dummy_val;
     int attempt = 1;
     while (true) {

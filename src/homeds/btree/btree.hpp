@@ -37,11 +37,10 @@ namespace homeds { namespace btree {
         (type *)( (char *)ptr - offsetof(type,member) );})
 #endif
 
-#define BtreeDeclType Btree<BtreeType, K, V, InteriorNodeType, LeafNodeType, NodeSize, btree_req_type>
-#define BtreeNodePtr boost::intrusive_ptr< BtreeNodeDeclType >
+#define btree_t Btree<BtreeStoreType, K, V, InteriorNodeType, LeafNodeType, NodeSize, btree_req_type>
 
 template<
-        btree_type BtreeType,
+        btree_store_type BtreeStoreType,
         typename K,
         typename V,
         btree_node_type InteriorNodeType,
@@ -50,8 +49,8 @@ template<
         typename btree_req_type = struct empty_writeback_req>
 class Btree
 {
-    typedef std::function< void (boost::intrusive_ptr<btree_req_type> cookie, 
-        std::error_condition status) > comp_callback;
+    typedef std::function< void (boost::intrusive_ptr<btree_req_type> cookie, std::error_condition status) > comp_callback;
+
 public:
 #ifdef CLASS_DEFINITIONS
     Btree(BtreeConfig &cfg);
@@ -70,7 +69,14 @@ public:
     /*
      * Given a startKey and endKey, gets any key within the range
      */
-    bool get_any(BtreeRegExKey &rkey, BtreeValue *outval);
+    bool get_any(const BtreeSearchRange &range, BtreeKey *outkey, BtreeValue *outval);
+
+    /*
+     * Given a range and optional cursor, returns the next set of values for required count. If cursor is nullptr,
+     * will start the query from start, otherwise it uses range
+     */
+    bool get_range(const BtreeSearchRange &range, BtreeCursor* cursor, uint32_t reqd_count,
+            std::vector<BtreeValue> &out_values);
 
     /*
      * Remove the key from the btree. Returns true if found and removed
@@ -144,36 +150,36 @@ private:
     BtreeConfig m_btree_cfg;
     BtreeStats m_stats;
 
-    std::unique_ptr<BtreeSpecificImplDeclType> m_btree_specific_impl;
+    std::unique_ptr<btree_store_t> m_btree_store;
 
 #ifndef NDEBUG
     static thread_local int wr_locked_count;
-    static thread_local std::array<BtreeNodeDeclType *, MAX_BTREE_DEPTH> wr_locked_nodes;
+    static thread_local std::array<btree_node_t *, MAX_BTREE_DEPTH> wr_locked_nodes;
 
     static thread_local int rd_locked_count;
-    static thread_local std::array<BtreeNodeDeclType *, MAX_BTREE_DEPTH> rd_locked_nodes;
+    static thread_local std::array<btree_node_t *, MAX_BTREE_DEPTH> rd_locked_nodes;
 #endif
 
     ////////////////// Implementation /////////////////////////
 public:
 
-    static BtreeDeclType *create_btree(BtreeConfig &cfg, void *btree_specific_context, comp_callback comp_cb) {
-        auto impl_ptr = BtreeSpecificImplDeclType::init_btree(cfg, btree_specific_context, comp_cb);
+    static btree_t *create_btree(BtreeConfig &cfg, void *btree_specific_context, comp_callback comp_cb) {
+        auto impl_ptr = btree_store_t::init_btree(cfg, btree_specific_context, comp_cb);
         return new Btree(cfg, std::move(impl_ptr));
     }
 
-    static BtreeDeclType *create_btree(BtreeConfig &cfg, void *btree_specific_context) {
-        auto impl_ptr = BtreeSpecificImplDeclType::init_btree(cfg, btree_specific_context, nullptr);
+    static btree_t *create_btree(BtreeConfig &cfg, void *btree_specific_context) {
+        auto impl_ptr = btree_store_t::init_btree(cfg, btree_specific_context, nullptr);
         return new Btree(cfg, std::move(impl_ptr));
     }
 
-    Btree(BtreeConfig &cfg, std::unique_ptr<BtreeSpecificImplDeclType> btree_specific_impl) :
+    Btree(BtreeConfig &cfg, std::unique_ptr<btree_store_t> store) :
             m_btree_cfg(cfg) {
-        m_btree_specific_impl = std::move(btree_specific_impl);
+        m_btree_store = std::move(store);
         BtreeNodeAllocator< NodeSize >::create();
 
         // TODO: Check if node_area_size need to include persistent header
-        uint32_t node_area_size = BtreeSpecificImplDeclType::get_node_area_size(m_btree_specific_impl.get());
+        uint32_t node_area_size = btree_store_t::get_node_area_size(m_btree_store.get());
         m_btree_cfg.set_node_area_size(node_area_size);
 
         // calculate number of nodes
@@ -188,7 +194,7 @@ public:
     
     ~Btree(){
         m_btree_lock.write_lock();
-        BtreeNodePtr root = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), m_root_node);
+        BtreeNodePtr root = btree_store_t::read_node(m_btree_store.get(), m_root_node);
         homeds::thread::locktype acq_lock = homeds::thread::LOCKTYPE_WRITE;
         std::deque<boost::intrusive_ptr<btree_req_type>> dependent_req_q;
         lock_node(root, acq_lock,&dependent_req_q);
@@ -215,23 +221,21 @@ public:
                 } else {
                     node->get(i, &child_ptr, false /* copy */);
                 }
-                BtreeNodePtr child = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(),
-                                                                          child_ptr.get_node_id());
+                BtreeNodePtr child = btree_store_t::read_node(m_btree_store.get(), child_ptr.get_node_id());
                 lock_node(child, acq_lock, &dependent_req_q);
                 free(child);
                 unlock_node(child, acq_lock);
                 i++;
             }
         }
-        BtreeSpecificImplDeclType::free_node(m_btree_specific_impl.get(), node,dependent_req_q);
+        btree_store_t::free_node(m_btree_store.get(), node,dependent_req_q);
     }
 
     void put(const BtreeKey &k, const BtreeValue &v, PutType put_type) {
-        put(k, v, put_type, NULL, NULL, NULL);
+        put(k, v, put_type, nullptr, nullptr, nullptr);
     }
-    void put(const BtreeKey &k, const BtreeValue &v, PutType put_type, 
-            boost::intrusive_ptr<btree_req_type> dependent_req, 
-            boost::intrusive_ptr<btree_req_type> cookie, std::shared_ptr<BtreeValue> existing_val) {
+    void put(const BtreeKey &k, const BtreeValue &v, PutType put_type, boost::intrusive_ptr<btree_req_type> dependent_req,
+             boost::intrusive_ptr<btree_req_type> cookie, std::shared_ptr<BtreeValue> existing_val) {
         homeds::thread::locktype acq_lock = homeds::thread::LOCKTYPE_READ;
         int ind;
 
@@ -246,7 +250,7 @@ public:
 
 retry:
         assert(rd_locked_count == 0 && wr_locked_count == 0);
-        BtreeNodePtr root = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), m_root_node);
+        BtreeNodePtr root = btree_store_t::read_node(m_btree_store.get(), m_root_node);
         std::deque<boost::intrusive_ptr<btree_req_type>> dependent_req_q;
         if (dependent_req.get()) {
             dependent_req_q.push_back(dependent_req);
@@ -305,7 +309,7 @@ retry:
         //assert(OmDB::getGlobalRefCount() == 0);
 
         m_btree_lock.read_lock();
-        BtreeNodePtr root = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), m_root_node);
+        BtreeNodePtr root = btree_store_t::read_node(m_btree_store.get(), m_root_node);
         lock_node(root, homeds::thread::locktype::LOCKTYPE_READ, NULL);
 
         is_found = do_get(root, range, outkey, outval);
@@ -318,6 +322,34 @@ retry:
         //assert(OmDB::getGlobalRefCount() == 0);
 #endif
         return is_found;
+    }
+
+    bool query(BtreeQueryRequest& query_req, std::vector<std::pair<K, V>> &out_values) {
+#ifndef NDEBUG
+        init_lock_debug();
+#endif
+        //assert(OmDB::getGlobalRefCount() == 0);
+
+        CHECK_EQ(query_req.is_serializable() == false, "We do not support serializable isolation level query yet");
+        if (query_req.get_count_this_iter() == 0) { return false; }
+
+        BtreeSearchRange search_range = query_req.create_search_range();
+
+        m_btree_lock.read_lock();
+        BtreeNodePtr root = btree_store_t::read_node(m_btree_store.get(), m_root_node);
+        lock_node(root, homeds::thread::locktype::LOCKTYPE_READ, NULL);
+
+        bool has_more = do_query(root, query_req, search_range, out_values);
+        m_btree_lock.unlock();
+
+        // TODO: Assert if key returned from do_get is same as key requested, incase of perfect match
+
+#ifndef NDEBUG
+        check_lock_debug();
+        //assert(OmDB::getGlobalRefCount() == 0);
+#endif
+
+        return has_more;
     }
 
     /* Given a regex key, tries to get all data that falls within the regex. Returns all the values
@@ -349,7 +381,7 @@ retry:
         m_btree_lock.read_lock();
 
     retry:
-        BtreeNodePtr root = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), m_root_node);
+        BtreeNodePtr root = btree_store_t::read_node(m_btree_store.get(), m_root_node);
         lock_node(root, acq_lock, &dependent_req_q);
         bool is_leaf = root->is_leaf();
 
@@ -377,8 +409,7 @@ retry:
             acq_lock = homeds::thread::LOCKTYPE_WRITE;
             goto retry;
         } else {
-            btree_status_t status = do_remove(root, acq_lock, range, outkey, 
-                                              outval, dependent_req_q, cookie);
+            btree_status_t status = do_remove(root, acq_lock, range, outkey, outval, dependent_req_q, cookie);
             if (status == BTREE_RETRY) {
                 // Need to start from top down again, since
                 // there is a race between 2 inserts or deletes.
@@ -406,9 +437,8 @@ retry:
         return(remove(key, outval, NULL, NULL));
     }
 
-    bool remove(const BtreeKey &key, BtreeValue *outval, 
-                    boost::intrusive_ptr<btree_req_type> dependent_req, 
-                    boost::intrusive_ptr<btree_req_type> cookie) {
+    bool remove(const BtreeKey &key, BtreeValue *outval, boost::intrusive_ptr<btree_req_type> dependent_req,
+                boost::intrusive_ptr<btree_req_type> cookie) {
         return remove_any(BtreeSearchRange(key), nullptr, outval, dependent_req, cookie);
     }
 
@@ -426,7 +456,7 @@ retry:
     
 private:
     void get_string_representation_pre_order_traversal(bnodeid_t bnodeid, std::stringstream &ss) {
-        BtreeNodePtr node = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), bnodeid);
+        BtreeNodePtr node = btree_store_t::read_node(m_btree_store.get(), bnodeid);
         homeds::thread::locktype acq_lock = homeds::thread::locktype::LOCKTYPE_READ;
         lock_node(node, acq_lock, NULL);
 
@@ -454,11 +484,69 @@ private:
 
         BNodeptr child_ptr;
         my_node->find(range, nullptr, &child_ptr);
-        BtreeNodePtr child_node = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), child_ptr.get_node_id());
+        BtreeNodePtr child_node = btree_store_t::read_node(m_btree_store.get(), child_ptr.get_node_id());
 
         lock_node(child_node, homeds::thread::LOCKTYPE_READ, NULL);
         unlock_node(my_node, homeds::thread::locktype::LOCKTYPE_READ);
         return (do_get(child_node, range, outkey, outval));
+    }
+
+    bool do_query(BtreeNodePtr my_node, BtreeQueryRequest& query_req, BtreeSearchRange& search_range,
+            std::vector<std::pair<K, V>> &out_values) {
+        if (my_node->is_leaf()) {
+            assert(query_req.get_count_this_iter() > 0);
+
+            auto count = 0U;
+            BNodeptr next_node = nullptr;
+            query_req.m_cursor.m_last_key.reset();
+            do {
+                if (next_node) {
+                    lock_node(next_node, homeds::thread::locktype::LOCKTYPE_READ);
+                    unlock_node(my_node, homeds::thread::locktype::LOCKTYPE_READ);
+                    my_node = next_node;
+                }
+                // Get the start and end index within the range
+                search_range.set_selection_option(_RangeSelectOption::LEFT_MOST);
+                auto start_result = my_node->find(search_range, nullptr, nullptr);
+                auto start_ind = start_result.end_of_search_index;
+
+                search_range.set_selection_option(_RangeSelectOption::RIGHT_MOST);
+                auto end_result = my_node->find(search_range, nullptr, nullptr);
+                auto end_ind = end_result.end_of_search_index;
+
+                // We are reading upto the end of node
+                if (end_ind == my_node->get_total_entries()) { end_ind--; }
+
+                for (auto i = start_ind; ((i <= end_ind) && (count < query_req.get_count_this_iter())); i++) {
+                    K key; V value;
+                    my_node->get_nth_element(i, &key, &value, false);
+
+                    if (!query_req.m_match_item_cb || query_req.m_match_item_cb(key, value)) {
+                        out_values.emplace_back(std::make_pair<K, V>(key, value));
+                        count++;
+                    }
+                }
+
+                if (count < query_req.get_count_this_iter()) {
+                    next_node = btree_store_t::read_node(m_btree_store.get(), my_node->get_next_bnode());
+                } else {
+                    next_node = nullptr;
+                    query_req.m_cursor.m_last_key = std::make_unique<K>(out_values.back().first);
+                }
+            } while(next_node);
+            unlock_node(my_node, homeds::thread::locktype::LOCKTYPE_READ);
+            return (query_req.m_cursor.m_last_key == nullptr);
+        }
+
+        BtreeSearchRange start_range = query_req.create_start_search_range();
+        BNodeptr start_child_ptr;
+        auto start_ret = my_node->find(start_range, nullptr, &start_child_ptr);
+
+        BtreeNodePtr child_node = btree_store_t::read_node(m_btree_store.get(), start_child_ptr.get_node_id());
+
+        lock_node(child_node, homeds::thread::LOCKTYPE_READ, NULL);
+        unlock_node(my_node, homeds::thread::locktype::LOCKTYPE_READ);
+        return (do_query(child_node, query_req, search_range, out_values));
     }
 
 #ifdef NEED_REWRITE
@@ -534,7 +622,7 @@ private:
 
                 // Its ok to free after unlock, because the chain has been already cut when the node is invalidated.
                 // So no one would have entered here after the chain is cut.
-                BtreeSpecificImplDeclType::free_node(m_btree_specific_impl.get(), my_node, dependent_req_q);
+                btree_store_t::free_node(m_btree_store.get(), my_node, dependent_req_q);
                 m_stats.dec_count(my_node->is_leaf() ? BTREE_STATS_LEAF_NODE_COUNT : BTREE_STATS_INT_NODE_COUNT);
             }
             ret = false;
@@ -628,7 +716,7 @@ private:
             *is_found = true;
         }
 
-        return BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), child_ptr.get_node_id());
+        return btree_store_t::read_node(m_btree_store.get(), child_ptr.get_node_id());
     }
 
     /* This function does the heavy lifiting of co-ordinating inserts. It is a recursive function which walks
@@ -646,10 +734,8 @@ private:
      */
     bool do_put(BtreeNodePtr my_node, homeds::thread::locktype curlock, 
                 const BtreeKey &k, const BtreeValue &v, int ind_hint, 
-                PutType put_type, 
-                std::deque<boost::intrusive_ptr<btree_req_type>> &dependent_req_q, 
-                boost::intrusive_ptr<btree_req_type> cookie,
-                std::shared_ptr<BtreeValue> existing_val) {
+                PutType put_type, std::deque<boost::intrusive_ptr<btree_req_type>> &dependent_req_q,
+                boost::intrusive_ptr<btree_req_type> cookie, std::shared_ptr<BtreeValue> existing_val) {
 
 #ifndef NDEBUG
         int temp_rd_locked_count = rd_locked_count;
@@ -669,8 +755,7 @@ private:
 
             bool ret = my_node->put(k, v, put_type, existing_val);
             if (ret) {
-                BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(), 
-                                        my_node, dependent_req_q, cookie, false);
+                btree_store_t::write_node(m_btree_store.get(), my_node, dependent_req_q, cookie, false);
                 m_stats.inc_count(BTREE_STATS_OBJ_COUNT);
             }
             unlock_node(my_node, curlock);
@@ -750,25 +835,22 @@ retry:
         assert(rd_locked_count == temp_rd_locked_count 
                 && wr_locked_count == temp_wr_locked_count);
 #endif
-        return (do_put(child_node, child_cur_lock, k, v, ind_hint, 
-                       put_type, dependent_req_q, cookie,existing_val));
+        return (do_put(child_node, child_cur_lock, k, v, ind_hint, put_type, dependent_req_q, cookie,existing_val));
 
         // Warning: Do not access childNode or myNode beyond this point, since it would
         // have been unlocked by the recursive function and it could also been deleted.
     }
 
-    btree_status_t do_remove(BtreeNodePtr my_node, homeds::thread::locktype curlock, 
-                             const BtreeSearchRange &range,
-                             BtreeKey *outkey, BtreeValue *outval, 
-                             std::deque<boost::intrusive_ptr<btree_req_type>> &dependent_req_q, 
+    btree_status_t do_remove(BtreeNodePtr my_node, homeds::thread::locktype curlock, const BtreeSearchRange &range,
+                             BtreeKey *outkey, BtreeValue *outval,
+                             std::deque<boost::intrusive_ptr<btree_req_type>> &dependent_req_q,
                              boost::intrusive_ptr<btree_req_type> cookie) {
         if (my_node->is_leaf()) {
             assert(curlock == LOCKTYPE_WRITE);
 
             bool is_found = my_node->remove_one(range, outkey, outval);
             if (is_found) {
-                BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(), 
-                                              my_node, dependent_req_q, cookie, false);
+                btree_store_t::write_node(m_btree_store.get(), my_node, dependent_req_q, cookie, false);
                 m_stats.dec_count(BTREE_STATS_OBJ_COUNT);
             } else {
 #ifndef NDEBUG
@@ -777,11 +859,7 @@ retry:
             }
 
             unlock_node(my_node, curlock);
-	    if (is_found == true) {
-			return BTREE_ITEM_FOUND;
-	    } else {
-			return BTREE_NOT_FOUND;
-	    }
+            return is_found ? BTREE_ITEM_FOUND : BTREE_NOT_FOUND;
         }
 
     retry:
@@ -842,14 +920,14 @@ retry:
         // have been unlocked by the recursive function and it could also been deleted.
     }
 
-    void check_split_root(const BtreeKey &k, const BtreeValue &v, 
+    void check_split_root(const BtreeKey &k, const BtreeValue &v,
                           std::deque<boost::intrusive_ptr<btree_req_type>> &dependent_req_q) {
         int ind;
         K split_key;
         BtreeNodePtr new_root_int_node = nullptr;
 
         m_btree_lock.write_lock();
-        BtreeNodePtr root = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), m_root_node);
+        BtreeNodePtr root = btree_store_t::read_node(m_btree_store.get(), m_root_node);
         lock_node(root, locktype::LOCKTYPE_WRITE, &dependent_req_q);
 
         if (!root->is_split_needed(m_btree_cfg, k, v, &ind)) {
@@ -878,7 +956,7 @@ retry:
         BtreeNodePtr child_node = nullptr;
 
         m_btree_lock.write_lock();
-        BtreeNodePtr root = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), m_root_node);
+        BtreeNodePtr root = btree_store_t::read_node(m_btree_store.get(), m_root_node);
         lock_node(root, locktype::LOCKTYPE_WRITE, &dependent_req_q);
 
         if (root->get_total_entries() != 0) {
@@ -887,14 +965,14 @@ retry:
         }
 
         assert(root->get_edge_id() != INVALID_BNODEID);
-        child_node = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), root->get_edge_id());
+        child_node = btree_store_t::read_node(m_btree_store.get(), root->get_edge_id());
         assert(child_node != nullptr);
 
         // Elevate the edge child as root.
         unlock_node(root, locktype::LOCKTYPE_WRITE);
         m_root_node = child_node->get_node_id();
         /* TODO m_root_node has to be written to fixed location */
-        BtreeSpecificImplDeclType::free_node(m_btree_specific_impl.get(), root, dependent_req_q);
+        btree_store_t::free_node(m_btree_store.get(), root, dependent_req_q);
         m_stats.dec_count(BTREE_STATS_INT_NODE_COUNT);
 
         //release_node(child_node);
@@ -931,12 +1009,9 @@ retry:
         parent_node->insert(*out_split_key, nptr);
 
         /* We should write in the order of right node, left node and parent node */
-        BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(), 
-                                    child_node2, dependent_req_q, NULL, false);
-        BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(), 
-                                    child_node1, dependent_req_q, NULL, false);
-        BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(), 
-                                    parent_node, dependent_req_q, NULL, false);
+        btree_store_t::write_node(m_btree_store.get(), child_node2, dependent_req_q, NULL, false);
+        btree_store_t::write_node(m_btree_store.get(), child_node1, dependent_req_q, NULL, false);
+        btree_store_t::write_node(m_btree_store.get(), parent_node, dependent_req_q, NULL, false);
         //release_node(child_node2);
 
 
@@ -973,7 +1048,7 @@ retry:
             parent_node->get(indices_list[i], &child_ptr, false /* copy */);
 
             merge_info m;
-            m.node = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), child_ptr.get_node_id());
+            m.node = btree_store_t::read_node(m_btree_store.get(), child_ptr.get_node_id());
             m.freed = false;
             m.modified = false;
             m.parent_index = indices_list[i];
@@ -1048,8 +1123,7 @@ retry:
 #ifndef NDEBUG
                 LOGDEBUGMOD(VMOD_BTREE_MERGE, "Child Node {}", minfo[n].node->to_string());
 #endif
-                BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(), 
-                                   minfo[n].node, dependent_req_q, NULL, false);
+                btree_store_t::write_node(m_btree_store.get(), minfo[n].node, dependent_req_q, NULL, false);
             }
         }
         
@@ -1058,8 +1132,7 @@ retry:
         LOGDEBUGMOD(VMOD_BTREE_MERGE,  "After merging node\n########################Parent Node:{} ",
                                      parent_node->to_string());
 #endif
-        BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(), 
-                                    parent_node, dependent_req_q, NULL, false);
+        btree_store_t::write_node(m_btree_store.get(), parent_node, dependent_req_q, NULL, false);
 
         // Loop again in reverse order to unlock the nodes. freeable nodes need to be unlocked and freed
         for (int n = minfo.size()-1; n >= 0; n--) {
@@ -1070,7 +1143,7 @@ retry:
                     unlock_node(minfo[n].node, locktype::LOCKTYPE_WRITE);
                 } else {
                     unlock_node(minfo[n].node, locktype::LOCKTYPE_WRITE);
-                    BtreeSpecificImplDeclType::free_node(m_btree_specific_impl.get(), minfo[n].node, dependent_req_q);
+                    btree_store_t::free_node(m_btree_store.get(), minfo[n].node, dependent_req_q);
                     m_stats.dec_count(minfo[n].node->is_leaf() ? BTREE_STATS_LEAF_NODE_COUNT : BTREE_STATS_INT_NODE_COUNT);
                 }
             } else {
@@ -1083,14 +1156,14 @@ retry:
     }
 
     BtreeNodePtr alloc_leaf_node() {
-        BtreeNodePtr n = BtreeSpecificImplDeclType::alloc_node(m_btree_specific_impl.get(), true /* is_leaf */);
+        BtreeNodePtr n = btree_store_t::alloc_node(m_btree_store.get(), true /* is_leaf */);
         n->set_leaf(true);
         m_stats.inc_count(BTREE_STATS_LEAF_NODE_COUNT);
         return n;
     }
 
     BtreeNodePtr alloc_interior_node() {
-        BtreeNodePtr n = BtreeSpecificImplDeclType::alloc_node(m_btree_specific_impl.get(), false /* isLeaf */);
+        BtreeNodePtr n = btree_store_t::alloc_node(m_btree_store.get(), false /* isLeaf */);
         n->set_leaf(false);
         m_stats.inc_count(BTREE_STATS_INT_NODE_COUNT);
         return n;
@@ -1099,10 +1172,8 @@ retry:
     void lock_node(BtreeNodePtr node, homeds::thread::locktype type, 
                    std::deque<boost::intrusive_ptr<btree_req_type>> *dependent_req_q) {
         node->lock(type);
-        BtreeSpecificImplDeclType::read_node_lock(m_btree_specific_impl.get(), 
-                                            node, 
-                                            ((type == locktype::LOCKTYPE_WRITE) ? true:false), 
-                                            dependent_req_q);
+        btree_store_t::read_node_lock(m_btree_store.get(), node,
+                                            ((type == locktype::LOCKTYPE_WRITE) ? true:false), dependent_req_q);
 #ifndef NDEBUG
         inc_lock_debug(node, type);
 #endif
@@ -1111,8 +1182,7 @@ retry:
     void lock_node_upgrade(BtreeNodePtr node, 
                            std::deque<boost::intrusive_ptr<btree_req_type>> *dependent_req_q) {
         node->lock_upgrade();
-        BtreeSpecificImplDeclType::read_node_lock(m_btree_specific_impl.get(), 
-                                            node, true, dependent_req_q); 
+        btree_store_t::read_node_lock(m_btree_store.get(), node, true, dependent_req_q);
         node->lock_acknowledge();
     }
 
@@ -1156,7 +1226,7 @@ retry:
     }
 
     static void dec_check_lock_debug(BtreeNodePtr node, locktype ltype) {
-        std::array<BtreeNodeDeclType *, MAX_BTREE_DEPTH> *pnodes;
+        std::array<btree_node_t *, MAX_BTREE_DEPTH> *pnodes;
         int *pcount;
         if (ltype == LOCKTYPE_WRITE) {
             pnodes = &wr_locked_nodes;
@@ -1196,8 +1266,7 @@ protected:
         // Assign one node as root node and initially root is leaf
         BtreeNodePtr root = alloc_leaf_node();
         m_root_node = root->get_node_id();
-        BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(), root,
-                                                dependent_req_q, NULL, true);
+        btree_store_t::write_node(m_btree_store.get(), root, dependent_req_q, NULL, true);
     }
 
     BtreeConfig *get_config() {
@@ -1213,21 +1282,21 @@ protected:
 };
 
 #ifndef NDEBUG
-template<btree_type BtreeType, typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType,
+template<btree_store_type BtreeStoreType, typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType,
         size_t NodeSize, typename btree_req_type>
-thread_local int BtreeDeclType::wr_locked_count = 0;
+thread_local int btree_t::wr_locked_count = 0;
 
-template<btree_type BtreeType, typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType,
+template<btree_store_type BtreeStoreType, typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType,
         size_t NodeSize, typename btree_req_type>
-thread_local std::array<BtreeNodeDeclType *, MAX_BTREE_DEPTH> BtreeDeclType::wr_locked_nodes = {{}};
+thread_local std::array<btree_node_t *, MAX_BTREE_DEPTH> btree_t::wr_locked_nodes = {{}};
 
-template<btree_type BtreeType, typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType,
+template<btree_store_type BtreeStoreType, typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType,
         size_t NodeSize, typename btree_req_type>
-thread_local int BtreeDeclType::rd_locked_count = 0;
+thread_local int btree_t::rd_locked_count = 0;
 
-template<btree_type BtreeType, typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType,
+template<btree_store_type BtreeStoreType, typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType,
         size_t NodeSize, typename btree_req_type>
-thread_local std::array<BtreeNodeDeclType *, MAX_BTREE_DEPTH> BtreeDeclType::rd_locked_nodes = {{}};
+thread_local std::array<btree_node_t *, MAX_BTREE_DEPTH> btree_t::rd_locked_nodes = {{}};
 
 #endif
 
