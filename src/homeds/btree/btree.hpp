@@ -310,7 +310,7 @@ retry:
 
         m_btree_lock.read_lock();
         BtreeNodePtr root = btree_store_t::read_node(m_btree_store.get(), m_root_node);
-        lock_node(root, homeds::thread::locktype::LOCKTYPE_READ, NULL);
+        lock_node(root, homeds::thread::locktype::LOCKTYPE_READ, nullptr);
 
         is_found = do_get(root, range, outkey, outval);
         m_btree_lock.unlock();
@@ -337,7 +337,7 @@ retry:
 
         m_btree_lock.read_lock();
         BtreeNodePtr root = btree_store_t::read_node(m_btree_store.get(), m_root_node);
-        lock_node(root, homeds::thread::locktype::LOCKTYPE_READ, NULL);
+        lock_node(root, homeds::thread::locktype::LOCKTYPE_READ, nullptr);
 
         bool has_more = do_query(root, query_req, search_range, out_values);
         m_btree_lock.unlock();
@@ -434,7 +434,7 @@ retry:
     }
 
     bool remove(const BtreeKey &key, BtreeValue *outval) {
-        return(remove(key, outval, NULL, NULL));
+        return(remove(key, outval, nullptr, nullptr));
     }
 
     bool remove(const BtreeKey &key, BtreeValue *outval, boost::intrusive_ptr<btree_req_type> dependent_req,
@@ -458,7 +458,7 @@ private:
     void get_string_representation_pre_order_traversal(bnodeid_t bnodeid, std::stringstream &ss) {
         BtreeNodePtr node = btree_store_t::read_node(m_btree_store.get(), bnodeid);
         homeds::thread::locktype acq_lock = homeds::thread::locktype::LOCKTYPE_READ;
-        lock_node(node, acq_lock, NULL);
+        lock_node(node, acq_lock, nullptr);
 
         ss << "[" << node->to_string() << "]";
 
@@ -486,7 +486,7 @@ private:
         my_node->find(range, nullptr, &child_ptr);
         BtreeNodePtr child_node = btree_store_t::read_node(m_btree_store.get(), child_ptr.get_node_id());
 
-        lock_node(child_node, homeds::thread::LOCKTYPE_READ, NULL);
+        lock_node(child_node, homeds::thread::LOCKTYPE_READ, nullptr);
         unlock_node(my_node, homeds::thread::locktype::LOCKTYPE_READ);
         return (do_get(child_node, range, outkey, outval));
     }
@@ -544,7 +544,7 @@ private:
 
         BtreeNodePtr child_node = btree_store_t::read_node(m_btree_store.get(), start_child_ptr.get_node_id());
 
-        lock_node(child_node, homeds::thread::LOCKTYPE_READ, NULL);
+        lock_node(child_node, homeds::thread::LOCKTYPE_READ, nullptr);
         unlock_node(my_node, homeds::thread::locktype::LOCKTYPE_READ);
         return (do_query(child_node, query_req, search_range, out_values));
     }
@@ -562,7 +562,7 @@ private:
         auto result = my_node->find(rkey, nullptr, &child_ptr);
         BtreeNodePtr child_node = read_node(child_ptr.get_node_id());
 
-        lock_node(child_node, homeds::thread::LOCKTYPE_READ, NULL);
+        lock_node(child_node, homeds::thread::LOCKTYPE_READ, nullptr);
         unlock_node(my_node, true);
         return (do_multiget(child_node, rkey, max_nvalues, out_values));
     }
@@ -1009,9 +1009,9 @@ retry:
         parent_node->insert(*out_split_key, nptr);
 
         /* We should write in the order of right node, left node and parent node */
-        btree_store_t::write_node(m_btree_store.get(), child_node2, dependent_req_q, NULL, false);
-        btree_store_t::write_node(m_btree_store.get(), child_node1, dependent_req_q, NULL, false);
-        btree_store_t::write_node(m_btree_store.get(), parent_node, dependent_req_q, NULL, false);
+        btree_store_t::write_node(m_btree_store.get(), child_node2, dependent_req_q, nullptr, false);
+        btree_store_t::write_node(m_btree_store.get(), child_node1, dependent_req_q, nullptr, false);
+        btree_store_t::write_node(m_btree_store.get(), parent_node, dependent_req_q, nullptr, false);
         //release_node(child_node2);
 
 
@@ -1123,7 +1123,7 @@ retry:
 #ifndef NDEBUG
                 LOGDEBUGMOD(VMOD_BTREE_MERGE, "Child Node {}", minfo[n].node->to_string());
 #endif
-                btree_store_t::write_node(m_btree_store.get(), minfo[n].node, dependent_req_q, NULL, false);
+                btree_store_t::write_node(m_btree_store.get(), minfo[n].node, dependent_req_q, nullptr, false);
             }
         }
         
@@ -1132,7 +1132,7 @@ retry:
         LOGDEBUGMOD(VMOD_BTREE_MERGE,  "After merging node\n########################Parent Node:{} ",
                                      parent_node->to_string());
 #endif
-        btree_store_t::write_node(m_btree_store.get(), parent_node, dependent_req_q, NULL, false);
+        btree_store_t::write_node(m_btree_store.get(), parent_node, dependent_req_q, nullptr, false);
 
         // Loop again in reverse order to unlock the nodes. freeable nodes need to be unlocked and freed
         for (int n = minfo.size()-1; n >= 0; n--) {
@@ -1266,7 +1266,7 @@ protected:
         // Assign one node as root node and initially root is leaf
         BtreeNodePtr root = alloc_leaf_node();
         m_root_node = root->get_node_id();
-        btree_store_t::write_node(m_btree_store.get(), root, dependent_req_q, NULL, true);
+        btree_store_t::write_node(m_btree_store.get(), root, dependent_req_q, nullptr, true);
     }
 
     BtreeConfig *get_config() {
