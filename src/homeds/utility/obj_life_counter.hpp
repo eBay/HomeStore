@@ -1,0 +1,8 @@
+//
+// Created by Kadayam, Hari on 10/31/18.
+//
+
+#ifndef HOMESTORE_OBJ_LIFE_COUNTER_HPP
+#define HOMESTORE_OBJ_LIFE_COUNTER_HPP
+
+#endif //HOMESTORE_OBJ_LIFE_COUNTER_HPP
