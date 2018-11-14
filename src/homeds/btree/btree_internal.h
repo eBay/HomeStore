@@ -100,7 +100,7 @@ struct bnodeid{
 
     bnodeid(const bnodeid &other) {
         m_id = other.m_id;
-        m_pc_gen_flag = other.m_pc_gen_flag;
+        m_pc_gen_flag = other.get_pc_gen_flag()?1:0;
     }
     
     uint48_t get_id()  {
@@ -119,7 +119,7 @@ struct bnodeid{
         m_pc_gen_flag = pc_gen_flag?1:0;
     }
     
-    bool get_pc_gen_flag() {
+    bool get_pc_gen_flag() const{
         return m_pc_gen_flag;
     }
     

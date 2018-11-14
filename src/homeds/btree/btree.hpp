@@ -1286,14 +1286,16 @@ retry:
                 if(prev!=nullptr && prev->get_next_bnode().m_id.m_x != minfo[i].node->get_node_id().m_id.m_x ) {
                     cout<<"oops";
                 }
-
-                K last_key;
-                minfo[i].node->get_last_key(&last_key);
                 
-                if(minfo[i].parent_index !=  parent_node->get_total_entries()) {
-                    K parent_key;
-                    parent_node->get_nth_key(minfo[i].parent_index, &parent_key, false);
-                    assert(last_key.compare(&parent_key) == 0);
+                if(minfo[i].node->get_total_entries()!=0) {
+                    K last_key;
+                    minfo[i].node->get_last_key(&last_key);
+
+                    if (minfo[i].parent_index != parent_node->get_total_entries()) {
+                        K parent_key;
+                        parent_node->get_nth_key(minfo[i].parent_index, &parent_key, false);
+                        assert(last_key.compare(&parent_key) == 0);
+                    }
                 }
                 prev = minfo[i].node;
             }

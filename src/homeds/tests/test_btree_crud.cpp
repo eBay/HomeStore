@@ -340,8 +340,6 @@ public:
 
     static void insert_and_get_thread(BtreeCrudTest *test, uint32_t start, uint32_t count, int get_pct) {
         // First preload upto the get_pct
-        test->m_bt->simulate_split_crash=true;
-        test->m_bt->simulate_merge_crash=true;
         
         uint32_t readable_count = (count * get_pct)/100;
         for (auto i = start; i < start + readable_count; i++) {
@@ -409,38 +407,6 @@ TEST_F(BtreeCrudTest, SimpleInsert) {
 
     EXPECT_EQ(m_bt->get_stats().get_obj_count(), 0u);
     EXPECT_EQ(m_bt->get_stats().get_interior_nodes_count(), 0u);
-}
-
-TEST_F(BtreeCrudTest, SplitMergeCrash) {
-    
-    for (auto i = 0; i < 10000; i++) {
-        put_nth_entry(i);
-    }
-
-    m_bt->simulate_split_crash=true;
-   
-    for (auto i =10000; i < 20000; i++) {
-        put_nth_entry(i);
-    }
-    
-    for (auto i = 0; i < 20000; i++) {
-        get_nth_entry(i);
-    }
-    
-    m_bt->simulate_merge_crash=true;
-
-    for (auto i =1; i < 20000; i++) {
-        delete_nth_entry(i);
-    }
-    for (auto i = 0; i < 1; i++) {
-        get_nth_entry(i);
-    }
-    int crash = m_bt->split_merge_crash_count.load();
-    int fix = m_bt->split_merge_crash_fix_count.load();
-    std::cout << "Split merge crash induced:"<< crash << endl;
-    std::cout << "Split merge crash fixed:" << fix << endl;
-    m_bt->get_stats().print();
-    EXPECT_EQ(crash==fix, true);
 }
 
 SDS_OPTIONS_ENABLE(logging)
