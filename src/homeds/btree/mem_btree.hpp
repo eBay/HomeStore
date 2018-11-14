@@ -65,24 +65,37 @@ public:
         return NodeSize - sizeof(MemBtreeNodeDeclType) - sizeof(LeafPhysicalNodeDeclType);
     }
 
-    static boost::intrusive_ptr<MemBtreeNodeDeclType> alloc_node(MemBtreeImpl *impl, bool is_leaf) {
+    static boost::intrusive_ptr<MemBtreeNodeDeclType> alloc_node(MemBtreeImpl *impl, bool is_leaf,
+            bool &is_new_allocation,// indicates if allocated node is same as copy_from
+            boost::intrusive_ptr<MemBtreeNodeDeclType> copy_from = nullptr) {
+        if(copy_from!= nullptr) {
+            is_new_allocation =  false;
+            return boost::intrusive_ptr<MemBtreeNodeDeclType > (copy_from.get());
+        }
+        is_new_allocation =  true;
         uint8_t *mem = BtreeNodeAllocator< NodeSize >::allocate();
         auto btree_node = new (mem) MemBtreeNodeDeclType();
 
         if (is_leaf) {
-            auto n = new(mem + sizeof(MemBtreeNodeDeclType)) VariantNode<LeafNodeType, K, V, NodeSize>((bnodeid_t)mem, true,
+            bnodeid_t bid(reinterpret_cast<std::uintptr_t>(mem),0);
+            auto n = new(mem + sizeof(MemBtreeNodeDeclType)) VariantNode<LeafNodeType, K, V, NodeSize>(&bid, true,
                                                                                                        impl->cfg);
         } else {
-            auto n = new(mem + sizeof(MemBtreeNodeDeclType)) VariantNode<InteriorNodeType, K, V, NodeSize>((bnodeid_t)mem, true,
+            bnodeid_t bid(reinterpret_cast<std::uintptr_t>(mem),0);
+            auto n = new(mem + sizeof(MemBtreeNodeDeclType)) VariantNode<InteriorNodeType, K, V, NodeSize>(&bid, true,
                                                                                                            impl->cfg);
         }
         auto mbh = (mem_btree_node_header *)btree_node;
         mbh->refcount.increment();
-        return (boost::intrusive_ptr<MemBtreeNodeDeclType>((MemBtreeNodeDeclType *)mem));
+
+        boost::intrusive_ptr<MemBtreeNodeDeclType> new_node = 
+                (boost::intrusive_ptr<MemBtreeNodeDeclType>((MemBtreeNodeDeclType *)mem));
+        
+        return new_node;
     }
 
     static boost::intrusive_ptr<MemBtreeNodeDeclType> read_node(MemBtreeImpl *impl, bnodeid_t id) {
-        auto bn = reinterpret_cast<MemBtreeNodeDeclType*>(static_cast<uint64_t>(id.m_x));
+        auto bn = reinterpret_cast<MemBtreeNodeDeclType*>(static_cast<uint64_t>(id.m_id.m_x));
         return boost::intrusive_ptr<MemBtreeNodeDeclType>(bn);
     }
 
@@ -101,6 +114,18 @@ public:
         }
     }
 
+    static void copy_node(MemBtreeImpl *impl, boost::intrusive_ptr<MemBtreeNodeDeclType> copy_from,
+                boost::intrusive_ptr<MemBtreeNodeDeclType> copy_to) {
+        int sizeOfTransientHeaders = sizeof(MemBtreeNodeDeclType);
+        void* copy_to_ptr = (void*)((uint8_t*)copy_to.get()+ sizeOfTransientHeaders);
+        void* copy_from_ptr = (void*)((uint8_t*)copy_from.get()+ sizeOfTransientHeaders);
+        LeafPhysicalNodeDeclType* pheader_copy_to = reinterpret_cast<LeafPhysicalNodeDeclType*>(copy_to_ptr);
+        bnodeid_t original_id = pheader_copy_to->get_node_id();
+        memcpy(copy_to_ptr, copy_from_ptr, NodeSize - sizeOfTransientHeaders);
+        original_id.set_pc_gen_flag(pheader_copy_to->get_node_id().get_pc_gen_flag());
+        pheader_copy_to->set_node_id(original_id);
+    }
+  
     static void read_node_lock(MemBtreeImpl *impl, 
                                boost::intrusive_ptr<MemBtreeNodeDeclType> bn, 
                                bool is_write_modifiable,  

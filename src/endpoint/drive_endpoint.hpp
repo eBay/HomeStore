@@ -81,7 +81,7 @@ private:
 #else 
 class DriveEndPoint : public iomgr::EndPoint {
 public:
-	DriveEndPoint(iomgr::ioMgr *iomgr, comp_callback cb){};
+	DriveEndPoint(iomgr::ioMgr *iomgr, comp_callback cb) {};
 }
 #endif
 }

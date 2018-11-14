@@ -363,7 +363,7 @@ public:
             (std::chrono::duration_cast< std::chrono::nanoseconds >(Clock::now() -
                                                                     startTime)).count();
         write_cnt++;
-        if(req->isSyncCall){
+        if(req->isSyncCall) {
             chunk->get_physical_dev_mutable()->sync_writev(iov, iovcnt, size, dev_offset);
         } else {
             req->inc_ref();
@@ -385,7 +385,7 @@ public:
                 for (auto mchunk : m_mirror_chunks.find(chunk)->second) {
                     dev_offset = mchunk->get_start_offset() + primary_chunk_offset;
                     try {
-                        if(req->isSyncCall){
+                        if(req->isSyncCall) {
                             mchunk->get_physical_dev_mutable()->sync_writev(iov, iovcnt, size,
                                     dev_offset);
                         }else {
@@ -419,7 +419,7 @@ public:
                 std::placeholders::_1);
         req->size = mp.size();
         try {
-            if(req->isSyncCall){
+            if(req->isSyncCall) {
                 primary_chunk->get_physical_dev_mutable()->sync_read((char *) mp.ptr(), mp.size(),
                         primary_dev_offset);
             }else {

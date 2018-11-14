@@ -52,10 +52,10 @@ protected:
         if (init) {
             set_leaf(true);
             set_total_entries(0);
-            set_next_bnode(INVALID_BNODEID);
+            set_next_bnode(bnodeid_t(INVALID_BNODEID,0));
             set_gen(0);
             set_valid_node(true);
-            set_edge_id(INVALID_BNODEID);
+            set_edge_id(bnodeid_t(INVALID_BNODEID,0));
             set_node_id(*id);
         } else {
             assert(get_node_id() == *id);
@@ -66,10 +66,10 @@ protected:
         if (init) {
             set_leaf(true);
             set_total_entries(0);
-            set_next_bnode(INVALID_BNODEID);
+            set_next_bnode(bnodeid_t(INVALID_BNODEID,0));
             set_gen(0);
             set_valid_node(true);
-            set_edge_id(INVALID_BNODEID);
+            set_edge_id(bnodeid_t(INVALID_BNODEID,0));
             set_node_id(id);
         } else {
             assert(get_node_id() == id);
@@ -140,6 +140,10 @@ protected:
         get_persistent_header()->node_gen++;
     }
 
+    void flip_pc_gen_flag() {
+        get_persistent_header()->node_id.m_pc_gen_flag = get_persistent_header()->node_id.m_pc_gen_flag?0:1;
+    }
+    
     void set_gen(uint64_t g) {
         get_persistent_header()->node_gen = g;
     }
@@ -281,7 +285,7 @@ protected:
 
     //////////// Edge Related Methods ///////////////
     void invalidate_edge() {
-        set_edge_id(INVALID_BNODEID);
+        set_edge_id(bnodeid_t(INVALID_BNODEID,0));
     }
 
     void set_edge_value(const BtreeValue &v) {
@@ -307,7 +311,7 @@ protected:
         BNodeptr bnp(get_edge_id());
         return (bnp.is_valid_ptr());
     }
-
+    
     void get_adjacent_indicies(uint32_t cur_ind, vector< int > &indices_list, uint32_t max_indices) const {
         uint32_t i = 0;
         uint32_t start_ind;

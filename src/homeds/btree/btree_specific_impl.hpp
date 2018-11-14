@@ -51,7 +51,9 @@ public:
     static uint8_t *get_physical(const BtreeNodeDeclType *bn);
     static uint32_t get_node_area_size(BtreeSpecificImplDeclType *impl);
 
-    static boost::intrusive_ptr<BtreeNodeDeclType> alloc_node(BtreeSpecificImplDeclType *impl, bool is_leaf);
+    static boost::intrusive_ptr<BtreeNodeDeclType> alloc_node(BtreeSpecificImplDeclType *impl, bool is_leaf,
+            bool &is_new_allocation,// indicates if allocated node is same as copy_from
+            boost::intrusive_ptr<BtreeNodeDeclType> copy_from = nullptr);
     static boost::intrusive_ptr<BtreeNodeDeclType> read_node(BtreeSpecificImplDeclType *impl, bnodeid_t id);
     static void write_node(BtreeSpecificImplDeclType *impl, 
                            boost::intrusive_ptr<BtreeNodeDeclType> bn, 
@@ -64,6 +66,8 @@ public:
                                boost::intrusive_ptr<BtreeNodeDeclType> bn, bool is_write_modifiable,  
                                std::deque<boost::intrusive_ptr<btree_req_type>> *dependent_req_q);
 
+    static void copy_node(BtreeSpecificImplDeclType *impl, boost::intrusive_ptr<BtreeNodeDeclType> copy_from,
+                          boost::intrusive_ptr<BtreeNodeDeclType> copy_to);
     static void ref_node(BtreeNodeDeclType *bn);
     static bool deref_node(BtreeNodeDeclType *bn);
 };

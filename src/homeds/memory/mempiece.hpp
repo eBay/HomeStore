@@ -48,7 +48,7 @@ struct MemPiece {
 
     MemPiece() : MemPiece(nullptr, 0, 0) {}
     MemPiece(const MemPiece &other) : m_mem(other.m_mem) {}
-    ~MemPiece(){}
+    ~MemPiece() {}
 
     void set_ptr(uint8_t *ptr) {
         m_mem.set_ptr(ptr);

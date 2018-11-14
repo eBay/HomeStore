@@ -90,3 +90,6 @@ conanbuildinfo.txt
 conaninfo.txt
 .idea/**
 compile_commands.json
+
+bin/**
+Testing/**

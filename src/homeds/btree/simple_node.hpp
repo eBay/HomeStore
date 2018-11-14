@@ -20,7 +20,7 @@ using namespace boost;
 
 namespace homeds { namespace btree {
 
-static bnodeid_t invalidEdgePtr = INVALID_BNODEID;
+static bnodeid_t invalidEdgePtr( INVALID_BNODEID,0);
 
 #define SimpleNode              VariantNode<BTREE_NODETYPE_SIMPLE, K, V, NodeSize>
 
@@ -74,13 +74,13 @@ public:
         std::stringstream ss;
         ss << "###################" << endl;
         ss << "-------------------------------" << endl;
-        ss << "id=" << this->get_node_id().m_x << " nEntries=" << this->get_total_entries() << " leaf?=" << this->is_leaf();
+        ss << "id=" << this->get_node_id().to_string() << " nEntries=" << this->get_total_entries() << " leaf?=" << this->is_leaf();
 
         if (!this->is_leaf()) {
             bnodeid_t edge_id;
             edge_id = this->get_edge_id();
             ss << " edge_id=";
-	    ss << static_cast<uint64_t>(edge_id.m_x);
+	    ss << static_cast<uint64_t>(edge_id.m_id.m_x);
         }
         ss << "\n-------------------------------" << endl;
         for (uint32_t i = 0; i < this->get_total_entries(); i++) {
@@ -98,7 +98,7 @@ public:
             } else {
                 BNodeptr p;
                 get(i, &p, false);
-                ss << p.to_string();
+                ss << p.get_node_id().to_string();
             }
             ss << "\n";
         }
@@ -107,25 +107,34 @@ public:
 
 #endif
 
-    void remove(uint32_t ind) {
-        uint32_t total_entries = this->get_total_entries();
-        assert(total_entries >= ind);
+    void remove(int ind) {
+        remove(ind,ind);
+    }
 
-        if (ind == total_entries) {
+    //ind_s and ind_e are inclusive
+    void remove(int ind_s,int ind_e)  {
+        int total_entries = this->get_total_entries();
+        assert(total_entries >= ind_s);
+        assert(total_entries >=ind_e);
+
+        if (ind_e == total_entries) { //edge entry
             assert(!this->is_leaf() && this->has_valid_edge());
             BNodeptr last_1_val;
 
             // Set the last key/value as edge entry and by decrementing entry count automatically removed the last entry.
-            get_nth_value(total_entries - 1, &last_1_val, false);
+            get_nth_value(ind_s - 1, &last_1_val, false);
             this->set_edge_value(last_1_val);
+            this->sub_entries(total_entries-ind_s+1);
         } else {
-            uint32_t sz = (total_entries - (ind + 1)) * get_nth_obj_size(0);
+            uint32_t sz = (total_entries - ind_e -1) * get_nth_obj_size(0);
+
             if (sz != 0) {
-                memmove(get_nth_obj(ind), get_nth_obj(ind + 1), sz);
+                memmove(get_nth_obj(ind_s), get_nth_obj(ind_e + 1), sz);
             }
+            this->sub_entries(ind_e-ind_s+1);
         }
         this->inc_gen();
-        this->dec_entries();
+        
     }
 
     void update(uint32_t ind, const BtreeValue &val) {
@@ -221,7 +230,7 @@ public:
     uint32_t move_in_from_right_by_size(const BtreeConfig &cfg, SimpleNode *other_node, uint32_t size) {
         return (get_nth_obj_size(0) * move_in_from_right_by_entries(cfg, other_node, size/get_nth_obj_size(0)));
     }
-
+    
     bool is_split_needed(const BtreeConfig &cfg, const BtreeKey &key, const BtreeValue &value,
                          int *out_ind_hint) const {
         auto result = this->find(BtreeSearchRange(key), nullptr, nullptr);

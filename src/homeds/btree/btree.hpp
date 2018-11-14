@@ -99,6 +99,15 @@ public:
 
 #endif
 
+
+#ifndef NDEBUG
+    //flags to simulate split/merge crash in test case
+    volatile bool simulate_split_crash=false;
+    volatile bool simulate_merge_crash=false;
+    //counter indicating how many fixes made so far
+    std::atomic< int > split_merge_crash_fix_count=std::atomic<int>(0);
+    std::atomic< int > split_merge_crash_count=std::atomic<int>(0);
+#endif
 private:
 #ifdef CLASS_DEFINITIONS
     bool do_insert(BtreeNodePtr my_node, homeds::thread::locktype_t curlock, BtreeKey& k, BtreeValue& v, int ind_hint);
@@ -186,7 +195,7 @@ public:
         create_root_node();
     }
     
-    ~Btree(){
+    ~Btree() {
         m_btree_lock.write_lock();
         BtreeNodePtr root = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), m_root_node);
         homeds::thread::locktype acq_lock = homeds::thread::LOCKTYPE_WRITE;
@@ -360,7 +369,7 @@ retry:
                 m_btree_lock.unlock();
                 return false;
             }
-            assert(root->get_edge_id() != INVALID_BNODEID);
+            assert(root->get_edge_id().get_id() != INVALID_BNODEID);
             unlock_node(root, acq_lock);
             m_btree_lock.unlock();
 
@@ -444,7 +453,7 @@ private:
         }
         unlock_node(node, acq_lock);
     }
-    
+
     bool do_get(BtreeNodePtr my_node, const BtreeSearchRange &range, BtreeKey *outkey, BtreeValue *outval) {
         if (my_node->is_leaf()) {
             auto result = my_node->find(range, outkey, outval);
@@ -453,9 +462,15 @@ private:
         }
 
         BNodeptr child_ptr;
-        my_node->find(range, nullptr, &child_ptr);
-        BtreeNodePtr child_node = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), child_ptr.get_node_id());
+        auto result = my_node->find(range, nullptr, &child_ptr);
+        BtreeNodePtr child_node = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(),
+                                                                       child_ptr.get_node_id());
 
+        if (child_ptr.get_node_id().get_pc_gen_flag() != child_node->get_node_id().get_pc_gen_flag()) {
+            lock_node(child_node, homeds::thread::LOCKTYPE_WRITE, NULL);
+            fix_pc_gen_mistmatch(my_node, child_node, result.end_of_search_index, NULL);
+            unlock_node(child_node, homeds::thread::LOCKTYPE_WRITE);
+        }
         lock_node(child_node, homeds::thread::LOCKTYPE_READ, NULL);
         unlock_node(my_node, homeds::thread::locktype::LOCKTYPE_READ);
         return (do_get(child_node, range, outkey, outval));
@@ -606,8 +621,9 @@ private:
 #endif
 
     BtreeNodePtr get_child_node(BtreeNodePtr int_node, const BtreeSearchRange &range,
-                                       uint32_t *outind, bool *is_found) {
-        BNodeptr child_ptr;
+                                uint32_t *outind, bool *is_found, std::shared_ptr<BNodeptr> child_ptr = nullptr) {
+        if (child_ptr == nullptr)
+            child_ptr = std::make_shared<BNodeptr>();
 
         auto result = int_node->find(range, nullptr, nullptr);
         *is_found = result.found;
@@ -615,20 +631,20 @@ private:
 
         if (*outind == int_node->get_total_entries()) {
             //assert(!(*isFound));
-            child_ptr.set_node_id(int_node->get_edge_id());
+            child_ptr->set_node_id(int_node->get_edge_id());
 
             // If bsearch points to last index, it means the search has not found entry unless it is an edge value.
-            if (!child_ptr.is_valid_ptr()) {
+            if (!child_ptr->is_valid_ptr()) {
                 return nullptr;
             } else {
                 *is_found = true;
             }
         } else {
-            int_node->get(*outind, &child_ptr, false /* copy */);
+            int_node->get(*outind, child_ptr.get(), false /* copy */);
             *is_found = true;
         }
 
-        return BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), child_ptr.get_node_id());
+        return BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), child_ptr->get_node_id());
     }
 
     /* This function does the heavy lifiting of co-ordinating inserts. It is a recursive function which walks
@@ -690,7 +706,8 @@ retry:
         // Get the childPtr for given key.
         uint32_t ind = ind_hint;
         bool is_found;
-        BtreeNodePtr child_node = get_child_node(my_node, BtreeSearchRange(k), &ind, &is_found);
+        std::shared_ptr<BNodeptr> child_ptr = std::make_shared<BNodeptr>();
+        BtreeNodePtr child_node = get_child_node(my_node, BtreeSearchRange(k), &ind, &is_found, child_ptr);
         if (!is_found || (child_node == nullptr)) {
             // Either the node was updated or mynode is freed. Just proceed again from top.
             unlock_node(my_node, curlock);
@@ -703,10 +720,24 @@ retry:
         child_cur_lock = (child_node->is_leaf()) ? LOCKTYPE_WRITE : LOCKTYPE_READ;
         lock_node(child_node, child_cur_lock, &dependent_req_q);
 
+        if(child_ptr->get_node_id().get_pc_gen_flag() != child_node->get_node_id().get_pc_gen_flag()) {
+
+            if (upgrade_node(child_node, nullptr, child_cur_lock, LOCKTYPE_NONE, dependent_req_q) == false) {
+                unlock_node(my_node, curlock);
+                unlock_node(child_node, child_cur_lock);
+                return (false); //retry from root
+            }
+            fix_pc_gen_mistmatch(my_node,child_node, ind,&dependent_req_q);
+            unlock_node(child_node, homeds::thread::LOCKTYPE_WRITE);
+            goto retry;
+        }
+        
         // Check if child node is full and a hint on where would next child goes in.
         // TODO: Do minimal check and merge nodes for optimization.
         if (child_node->is_split_needed(m_btree_cfg, k, v, &ind_hint)) {
            
+            //TODO - possible bug, make sure we release even read locks on both child and my_node, seems missing
+            
             // Time to split the child, but we need to convert ours to write lock
             if (upgrade_node(my_node, child_node, curlock, child_cur_lock, dependent_req_q) == false) {
                 assert(rd_locked_count == temp_rd_locked_count 
@@ -791,7 +822,8 @@ retry:
         uint32_t ind;
 
         bool is_found = true;
-        BtreeNodePtr child_node = get_child_node(my_node, range, &ind, &is_found);
+        std::shared_ptr<BNodeptr> child_ptr = std::make_shared<BNodeptr>();
+        BtreeNodePtr child_node = get_child_node(my_node, range, &ind, &is_found, child_ptr);
         if (!is_found || (child_node == nullptr)) {
             unlock_node(my_node, curlock);
             return BTREE_NOT_FOUND;
@@ -801,6 +833,18 @@ retry:
         child_cur_lock = (child_node->is_leaf()) ? LOCKTYPE_WRITE : LOCKTYPE_READ;
         lock_node(child_node, child_cur_lock, &dependent_req_q);
 
+        if(child_ptr->get_node_id().get_pc_gen_flag() != child_node->get_node_id().get_pc_gen_flag()) {
+
+            if (upgrade_node(child_node, nullptr, child_cur_lock, LOCKTYPE_NONE, dependent_req_q) == false) {
+                unlock_node(child_node, child_cur_lock);
+                unlock_node(my_node, curlock);
+                return BTREE_RETRY;
+            }
+            fix_pc_gen_mistmatch(my_node,child_node, ind,&dependent_req_q);
+            unlock_node(child_node, homeds::thread::LOCKTYPE_WRITE);
+            goto retry;
+        }
+        
         // Check if child node is minimal.
         if (child_node->is_merge_needed(m_btree_cfg)) {
             // If we are unable to upgrade the node, ask the caller to retry.
@@ -808,11 +852,12 @@ retry:
                 return BTREE_RETRY;
             }
 
+
 #define MAX_ADJANCENT_INDEX   3
 
             // We do have the write lock and hence can remove entries. Get a list of entries around the minimal child
             // node. Use the list of child entries and merge/share the keys among them.
-            vector< int > indices_list;
+            vector<int> indices_list;
             my_node->get_adjacent_indicies(ind, indices_list, MAX_ADJANCENT_INDEX);
 
             // There has to be at least 2 nodes to merge or share. If not let the node be and proceed further down.
@@ -832,6 +877,7 @@ retry:
                     lock_node(child_node, child_cur_lock, &dependent_req_q);
                 }
             }
+            
         }
 
         unlock_node(my_node, curlock);
@@ -886,7 +932,7 @@ retry:
             goto done;
         }
 
-        assert(root->get_edge_id() != INVALID_BNODEID);
+        assert(root->get_edge_id().get_id() != INVALID_BNODEID);
         child_node = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), root->get_edge_id());
         assert(child_node != nullptr);
 
@@ -901,24 +947,139 @@ retry:
     done:
         m_btree_lock.unlock();
     }
+    
+    // requires read/write lock on parent_node and requires write lock on child_node1 before calling this func
+    void fix_pc_gen_mistmatch(BtreeNodePtr parent_node, BtreeNodePtr child_node1, uint32_t parent_ind,
+                              std::deque<boost::intrusive_ptr<btree_req_type>> *dependent_req_q) {
+#ifndef NDEBUG
+        std::stringstream ss;
+        ss<< "Before fix, parent:" << parent_node->get_node_id().to_string() << ", child:"<< child_node1->get_node_id().to_string();
+#endif
+        vector<BtreeNodePtr> nodes_to_free;
+        K parent_key;
+        BtreeNodePtr parent_sibbling = nullptr;
+        bnodeid_t sibbling;
+        if(parent_ind!=parent_node->get_total_entries()) {
+            parent_node->get_nth_key(parent_ind, &parent_key, false);
+            auto result = child_node1->find(BtreeSearchRange(parent_key), nullptr, nullptr);
+            if (result.found) {
+                //either do nothing or do trim
+                if (result.end_of_search_index != child_node1->get_total_entries()) {
+                    child_node1->invalidate_edge();//incase was valid edge
+                    child_node1->remove(result.end_of_search_index + 1, child_node1->get_total_entries() - 1);
+                }
+                //else its an edge entry, do nothing
+            } else {
+                bool borrowKeys = true;
+                BtreeNodePtr old_sibbling = nullptr;
+                do {
+                    //merge case, borrow entries
+                    if (old_sibbling == nullptr && !(child_node1->get_next_bnode().is_invalidate_id())) {
+                        old_sibbling = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(),
+                                                                            child_node1->get_next_bnode());
+                    } else if (old_sibbling->get_total_entries() == 0 &&
+                               !(old_sibbling->get_next_bnode().is_invalidate_id())) {
+                        old_sibbling = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(),
+                                                                            old_sibbling->get_next_bnode());
+                    } else
+                        assert(0);//something went wrong
+                    auto res = old_sibbling->find(BtreeSearchRange(parent_key), nullptr, nullptr);
+                    int no_of_keys = old_sibbling->get_total_entries();
+                    if (res.found) {
+                        no_of_keys = res.end_of_search_index + 1;
+                        borrowKeys = false;
+                    }
+                    uint32_t nentries = child_node1->move_in_from_right_by_entries(m_btree_cfg, old_sibbling,
+                                                                                   no_of_keys);
+                    assert(nentries > 0);
+                    nodes_to_free.push_back(old_sibbling);
+                } while (borrowKeys);
+            }
+
+            //update correct sibbling of child node1
+            if (parent_ind == parent_node->get_total_entries() - 1) {
+                if (!(parent_node->get_edge_id().is_invalidate_id()))
+                    sibbling = parent_node->get_edge_id();
+                else if (!(parent_node->get_next_bnode().is_invalidate_id())) {
+                    //edge entry, so get first parents sibbling and get its first child
+                    parent_sibbling =
+                            BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(),
+                                                                 parent_node->get_next_bnode());
+                    lock_node(parent_sibbling, locktype::LOCKTYPE_READ, dependent_req_q);
+                    BNodeptr sibbling_ptr;
+                    parent_sibbling->get(0, &sibbling_ptr, false);
+                    sibbling = sibbling_ptr.get_node_id();
+                }
+                else
+                    sibbling = bnodeid_t(INVALID_BNODEID,0);
+            } else {
+                BNodeptr sibbling_ptr;
+                parent_node->get(parent_ind + 1, &sibbling_ptr, false);
+                sibbling = sibbling_ptr.get_node_id();
+            }
+            child_node1->set_next_bnode(sibbling);
+        }else {
+            //parent ind is edge , so no key in parent to match against
+            // this is not valid in case of split crash
+            // for merge, we have borrow everything on right
+
+            BtreeNodePtr curr = nullptr;
+            bnodeid_t next = child_node1->get_next_bnode();
+            while(!(next.is_invalidate_id())) {
+                curr = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(),
+                                                            next);
+                child_node1->move_in_from_right_by_entries(m_btree_cfg, curr, curr->get_total_entries());
+                nodes_to_free.push_back(curr);
+                next = curr->get_next_bnode();
+            }
+            child_node1->set_next_bnode(bnodeid_t(INVALID_BNODEID,0));
+            
+        }
+        
+        //correct child version
+        child_node1->flip_pc_gen_flag();
+        BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(),
+                                              child_node1, *dependent_req_q, NULL, false);
+        if (parent_sibbling != nullptr)
+            unlock_node(parent_sibbling, locktype::LOCKTYPE_READ);
+        
+        for(int i=0;i<(int)nodes_to_free.size();i++)
+            BtreeSpecificImplDeclType::free_node(m_btree_specific_impl.get(), nodes_to_free[i], *dependent_req_q);
+        
+#ifndef NDEBUG
+        split_merge_crash_fix_count.fetch_add(1);
+        if(parent_ind!=parent_node->get_total_entries()) {
+            K child_node1_last_key;
+            child_node1->get_last_key(&child_node1_last_key);
+            assert(child_node1_last_key.compare(&parent_key) == 0);
+        }
+#endif
+    }
 
     void split_node(BtreeNodePtr parent_node, BtreeNodePtr child_node, uint32_t parent_ind,
                     BtreeKey *out_split_key,
                     std::deque<boost::intrusive_ptr<btree_req_type>> &dependent_req_q) {
         BNodeptr nptr;
-        
+        BtreeNodePtr child_node1 = nullptr;
 #ifndef NDEBUG
-
-        LOGTRACE("Before split\n########Parent node:\n {}\n,Child node:\n {}\n" ,
-                 parent_node->to_string(),child_node->to_string());
+        if(simulate_split_crash) {
+            bool is_new_allocation;
+            child_node1 = BtreeSpecificImplDeclType::alloc_node(m_btree_specific_impl.get(), child_node->is_leaf(),
+                    is_new_allocation,
+                    nullptr);
+            BtreeSpecificImplDeclType::copy_node(m_btree_specific_impl.get(),child_node,child_node1);
+        }else {
 #endif
-        // Create a new child node and split the keys by half.
-        BtreeNodePtr child_node1 = child_node;
-        BtreeNodePtr child_node2 = child_node->is_leaf() ? alloc_leaf_node() : alloc_interior_node();
+            child_node1 = child_node;
+#ifndef NDEBUG
+        }
+#endif
+        BtreeNodePtr child_node2 = child_node1->is_leaf() ? alloc_leaf_node() : alloc_interior_node();
 
         child_node2->set_next_bnode(child_node1->get_next_bnode());
         child_node1->set_next_bnode(child_node2->get_node_id());
         child_node1->move_out_to_right_by_size(m_btree_cfg, child_node2, m_btree_cfg.get_split_size());
+        child_node1->flip_pc_gen_flag();
 
         // Update the existing parent node entry to point to second child ptr.
         nptr.set_node_id(child_node2->get_node_id());
@@ -927,37 +1088,49 @@ retry:
         // Insert the last entry in first child to parent node
         child_node1->get_last_key(out_split_key);
 
-        nptr.set_node_id(child_node1->get_node_id());
+#ifndef NDEBUG
+        if(simulate_split_crash) {
+            //update old id in parent with new gen flag
+            bnodeid_t child_node_id = child_node->get_node_id();
+            child_node_id.set_pc_gen_flag(child_node1->get_node_id().get_pc_gen_flag());
+            nptr.set_node_id(child_node_id);
+        }else{
+#endif
+            nptr.set_node_id(child_node1->get_node_id());
+#ifndef NDEBUG
+        }
+#endif
         parent_node->insert(*out_split_key, nptr);
+        
+        // we write right child node, than parent and than left child
+        BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(),
+                                              child_node2, dependent_req_q, NULL, false);
+        BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(),
+                                              parent_node, dependent_req_q, NULL, false);
 
-        /* We should write in the order of right node, left node and parent node */
-        BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(), 
-                                    child_node2, dependent_req_q, NULL, false);
-        BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(), 
-                                    child_node1, dependent_req_q, NULL, false);
-        BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(), 
-                                    parent_node, dependent_req_q, NULL, false);
-        //release_node(child_node2);
-
-
-#ifndef NDEBUG   
-        LOGTRACE("After split\n########Parent node:\n {}\n,Child node1:\n {}\n,Child node2:\n {}\n" ,
-                     parent_node->to_string(),child_node1->to_string(),child_node2->to_string());
+#ifndef NDEBUG
+        if(!simulate_split_crash) {
+#endif
+            BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(),
+                                                  child_node1, dependent_req_q, NULL, false);
+#ifndef NDEBUG
+        } else
+            split_merge_crash_count.fetch_add(1);
 #endif
 
         // NOTE: Do not access parentInd after insert, since insert would have
         // shifted parentNode to the right.
     }
 
+    struct merge_info {
+        BtreeNodePtr node;
+        BtreeNodePtr node_orig;
+        uint16_t  parent_index;
+        bool freed;
+        bool is_new_allocation;
+    };
     auto merge_nodes(BtreeNodePtr parent_node, std::vector< int > &indices_list,
                      std::deque<boost::intrusive_ptr<btree_req_type>> &dependent_req_q) {
-        struct merge_info {
-            BtreeNodePtr node;
-            uint16_t  parent_index;
-            bool freed;
-            bool modified;
-        };
-
         struct {
             bool     merged;  // Have we merged at all
             uint32_t nmerged; // If we merged, how many are the final result of nodes
@@ -966,30 +1139,40 @@ retry:
         std::vector< merge_info > minfo;
         BNodeptr child_ptr;
         uint32_t ndeleted_nodes = 0;
-
+        
         // Loop into all index and initialize list
         minfo.reserve(indices_list.size());
         for (auto i = 0u; i < indices_list.size(); i++) {
             parent_node->get(indices_list[i], &child_ptr, false /* copy */);
-
             merge_info m;
-            m.node = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), child_ptr.get_node_id());
-            m.freed = false;
-            m.modified = false;
-            m.parent_index = indices_list[i];
-            minfo.push_back(m);
-            lock_node(m.node, locktype::LOCKTYPE_WRITE, &dependent_req_q);
-        }
-
+            m.node_orig = BtreeSpecificImplDeclType::read_node(m_btree_specific_impl.get(), child_ptr.get_node_id());
+            assert(m.node_orig->is_valid_node());
+            lock_node(m.node_orig, locktype::LOCKTYPE_WRITE, &dependent_req_q);
+            m.node =m.node_orig;
 
 #ifndef NDEBUG
-        if (module_level_VMOD_BTREE_MERGE <= spdlog::level::level_enum::err) {
-            LOGINFOMOD(VMOD_BTREE_MERGE, "Before Merge Nodes:\nParent node:\n{}", parent_node->to_string());
-            for (auto i = 0u; i < minfo.size(); ++i) {
-                LOGINFOMOD(VMOD_BTREE_MERGE, "Child node {}\n{}", i + 1, minfo[i].node->to_string());
+            if(simulate_merge_crash) {
+                if (i == 0) {
+                    m.node = BtreeSpecificImplDeclType::alloc_node(m_btree_specific_impl.get(), m.node_orig->is_leaf(),
+                            m.is_new_allocation,
+                            nullptr);
+                    BtreeSpecificImplDeclType::copy_node(m_btree_specific_impl.get(), m.node_orig, m.node);
+                }
             }
-        }
 #endif
+            if (i != 0) { // create replica childs except first child
+                m.node = BtreeSpecificImplDeclType::alloc_node(m_btree_specific_impl.get(), m.node_orig->is_leaf(),
+                                                               m.is_new_allocation,
+                                                               m.node_orig);
+                minfo[i - 1].node->set_next_bnode(m.node->get_node_id());//link them
+            }
+            m.node->flip_pc_gen_flag();
+            m.freed = false;
+            m.parent_index = indices_list[i];
+            minfo.push_back(m);
+        }
+
+        assert(indices_list.size()>1);
 
         // Rebalance entries for each of the node and mark any node to be removed, if empty.
         auto i = 0U; auto j = 1U;
@@ -1001,7 +1184,7 @@ retry:
                 // We have room to pull some from next node
                 uint32_t pull_size = balanced_size - minfo[i].node->get_occupied_size(m_btree_cfg);
                 if (minfo[i].node->move_in_from_right_by_size(m_btree_cfg, minfo[j].node, pull_size)) {
-                    minfo[i].modified = true;
+                    //move in internally updates edge if needed
                     ret.merged = true;
                 }
 
@@ -1009,35 +1192,33 @@ retry:
                     // We have removed all the entries from the next node, remove the entry in parent and move on to
                     // the next node.
                     minfo[j].freed = true;
-                    parent_node->remove(minfo[j].parent_index);
+                    parent_node->remove(minfo[j].parent_index);//remove interally updates parents edge if needed
                     minfo[i].node->set_next_bnode(minfo[j].node->get_next_bnode());
+                    
                     ndeleted_nodes++;
                     j++;
                     continue;
                 }
             }
 
-            // If we have reached the last node on second iterator and if that is minimal, we can relax the ideal size
-            // and get all in and try to avoid additional minimal node hanging around.
-            if ((j == minfo.size()-1) &&
-                    (minfo[j].node->get_occupied_size(m_btree_cfg) <= m_btree_cfg.get_merge_suggested_size()) &&
-                    balanced_size != NodeSize) {
-                balanced_size = NodeSize;
-                continue;
-            }
-
             i = j++;
-            minfo[i].parent_index -= ndeleted_nodes; // Adjust the parent index for deleted nodes (i.e. removed entries)
         }
 
         assert(!minfo[0].freed); // If we merge it, we expect the left most one has at least 1 entry.
-        // TODO: Above assumption will not be valid if we are merging all empty nodes. Need to study that.
 
         for (auto n = 0u; n < minfo.size(); n++) {
-            if (minfo[n].modified && !minfo[n].freed) {
-                // If we have indeed modified, lets get the last key and put in the entry into parent node
+            if (!minfo[n].freed) {
+                // lets get the last key and put in the entry into parent node
                 BNodeptr nptr(minfo[n].node->get_node_id());
-                if (minfo[n].parent_index == parent_node->get_total_entries()) {
+#ifndef NDEBUG
+                if(n==0u && simulate_merge_crash) {
+                    //update parent with original node id and new gen flag
+                    bnodeid_t orig_id=minfo[n].node_orig->get_node_id();
+                    orig_id.set_pc_gen_flag(minfo[n].node->get_node_id().get_pc_gen_flag());
+                    nptr.set_node_id(orig_id);
+                }
+#endif
+                if (minfo[n].parent_index == parent_node->get_total_entries()) { //edge entrys
                     parent_node->update(minfo[n].parent_index, nptr);
                 } else {
                     K last_key;
@@ -1045,52 +1226,108 @@ retry:
                     parent_node->update(minfo[n].parent_index, last_key, nptr);
                 }
 
-#ifndef NDEBUG
-                LOGDEBUGMOD(VMOD_BTREE_MERGE, "Child Node {}", minfo[n].node->to_string());
-#endif
-                BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(), 
-                                   minfo[n].node, dependent_req_q, NULL, false);
+                if(n==0) continue; // skip first child commit
+                BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(),
+                                                      minfo[n].node, dependent_req_q, NULL, false);
             }
         }
-        
-        // Its time to write the parent node and loop again to write all modified nodes and free freed nodes
-#ifndef NDEBUG
-        LOGDEBUGMOD(VMOD_BTREE_MERGE,  "After merging node\n########################Parent Node:{} ",
-                                     parent_node->to_string());
-#endif
-        BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(), 
-                                    parent_node, dependent_req_q, NULL, false);
 
+        // Its time to write the parent node and loop again to write all nodes and free freed nodes
+        BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(),
+                                              parent_node, dependent_req_q, NULL, false);
+
+        ret.nmerged = minfo.size() - ndeleted_nodes;
+#ifndef NDEBUG
+        if(!simulate_merge_crash) {
+#endif
+            BtreeSpecificImplDeclType::write_node(m_btree_specific_impl.get(),
+                                                  minfo[0].node, dependent_req_q, NULL, false);
+#ifndef NDEBUG
+            validate_sanity(minfo,parent_node,indices_list);
+        }else {
+            split_merge_crash_count.fetch_add(1);
+
+            for (int n = minfo.size()-1; n >= 0; n--) {
+                unlock_node(minfo[n].node_orig, locktype::LOCKTYPE_WRITE);
+            }
+            return ret;//skip freeing blocks
+        }
+#endif
         // Loop again in reverse order to unlock the nodes. freeable nodes need to be unlocked and freed
         for (int n = minfo.size()-1; n >= 0; n--) {
             if (minfo[n].freed) {
-                LOGDEBUGMOD(VMOD_BTREE_MERGE, "Child Node {}: Freeing the node id = {}", n, minfo[n].node->get_node_id().to_integer());
-                if (minfo[n].node->any_upgrade_waiters()) {
-                    minfo[n].node->set_valid_node(false);
-                    unlock_node(minfo[n].node, locktype::LOCKTYPE_WRITE);
-                } else {
-                    unlock_node(minfo[n].node, locktype::LOCKTYPE_WRITE);
-                    BtreeSpecificImplDeclType::free_node(m_btree_specific_impl.get(), minfo[n].node, dependent_req_q);
-                    m_stats.dec_count(minfo[n].node->is_leaf() ? BTREE_STATS_LEAF_NODE_COUNT : BTREE_STATS_INT_NODE_COUNT);
-                }
-            } else {
-                unlock_node(minfo[n].node, locktype::LOCKTYPE_WRITE);
+                //free copied node if it became empty
+                BtreeSpecificImplDeclType::free_node(m_btree_specific_impl.get(), minfo[n].node, dependent_req_q);
+            }
+            //free original node except first
+            if(n!=0 && minfo[n].is_new_allocation) {
+                node_free_safely(minfo[n].node_orig, dependent_req_q);
+            }
+            else {
+                unlock_node(minfo[n].node_orig, locktype::LOCKTYPE_WRITE);
             }
         }
-
-        ret.nmerged = minfo.size() - ndeleted_nodes;
+        
         return ret;
     }
 
+#ifndef NDEBUG
+    void validate_sanity(std::vector< merge_info > &minfo,
+                         BtreeNodePtr parent_node, std::vector< int > &indices_list) {
+        int index_sub=indices_list[0];
+        BtreeNodePtr prev = nullptr;
+        for(int i=0;i<(int)indices_list.size();i++) {
+            if(minfo[i].freed!=true) {
+                BNodeptr child_ptr;
+                assert(index_sub == minfo[i].parent_index);
+                parent_node->get(minfo[i].parent_index, &child_ptr, false);
+                assert(child_ptr.get_node_id()==minfo[i].node->get_node_id());
+                index_sub++;
+                if(prev!=nullptr && prev->get_next_bnode().m_id.m_x != minfo[i].node->get_node_id().m_id.m_x ) {
+                    cout<<"oops";
+                }
+
+                K last_key;
+                minfo[i].node->get_last_key(&last_key);
+                
+                if(minfo[i].parent_index !=  parent_node->get_total_entries()) {
+                    K parent_key;
+                    parent_node->get_nth_key(minfo[i].parent_index, &parent_key, false);
+                    assert(last_key.compare(&parent_key) == 0);
+                }
+                prev = minfo[i].node;
+            }
+        }
+    }
+
+#endif
+
+    void node_free_safely(BtreeNodePtr node, std::deque<boost::intrusive_ptr<btree_req_type>> &dependent_req_q) {
+        if (node->any_upgrade_waiters()) {
+            LOGTRACE("Marking invalid:{}",node->get_node_id().to_string());
+            node->set_valid_node(false);
+            unlock_node(node, locktype::LOCKTYPE_WRITE);
+        } else {
+            unlock_node(node, locktype::LOCKTYPE_WRITE);
+            BtreeSpecificImplDeclType::free_node(m_btree_specific_impl.get(), node, dependent_req_q);
+            LOGTRACE("Free node-{}",node->get_node_id().to_string());
+            m_stats.dec_count(node->is_leaf() ? BTREE_STATS_LEAF_NODE_COUNT : BTREE_STATS_INT_NODE_COUNT);
+        }
+    }
+
     BtreeNodePtr alloc_leaf_node() {
-        BtreeNodePtr n = BtreeSpecificImplDeclType::alloc_node(m_btree_specific_impl.get(), true /* is_leaf */);
+        bool is_new_allocation;
+        BtreeNodePtr n = BtreeSpecificImplDeclType::alloc_node(m_btree_specific_impl.get(), true /* is_leaf */,
+                is_new_allocation);
         n->set_leaf(true);
         m_stats.inc_count(BTREE_STATS_LEAF_NODE_COUNT);
         return n;
     }
 
     BtreeNodePtr alloc_interior_node() {
-        BtreeNodePtr n = BtreeSpecificImplDeclType::alloc_node(m_btree_specific_impl.get(), false /* isLeaf */);
+        bool is_new_allocation;
+        BtreeNodePtr n = BtreeSpecificImplDeclType::alloc_node(m_btree_specific_impl.get(), false /* isLeaf */,
+                is_new_allocation);
         n->set_leaf(false);
         m_stats.inc_count(BTREE_STATS_INT_NODE_COUNT);
         return n;

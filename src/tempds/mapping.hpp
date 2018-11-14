@@ -81,7 +81,7 @@ private:
         uint32_t blob;
         uint32_t *ptr_blob;
 public:
-        MappingKey(){}
+        MappingKey() {}
         MappingKey(uint32_t _blob) {
                 blob = _blob;
                 ptr_blob = &blob;

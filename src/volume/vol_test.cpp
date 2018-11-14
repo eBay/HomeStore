@@ -149,6 +149,9 @@ public:
                                               dev_mgr,
                                               max_vol_size,
                                               [this](auto vol_req) { process_completions(vol_req); });
+#ifndef NDEBUG
+        vol->enable_split_merge_crash_simulation();
+#endif
         LOGDEBUG("Created volume of size: {}", max_vol_size);
     }
 
@@ -262,7 +265,7 @@ public:
         if (req->is_read && !req->read_buf_list.empty()) {
             if (is_random_read) {
                 if (get_size(req->read_buf_list) != req->nblks_to_check * buf_size) {
-                    vol->print_tree();
+                    //vol->print_tree();
                     LOGERROR("Size not matching:{}:{}", get_size(req->read_buf_list), req->nblks_to_check * buf_size);
                     print_read_details(vol_req);
                     assert(0);
@@ -316,7 +319,9 @@ public:
                 temp = 1;
                 [[maybe_unused]] auto wsize = write(ev_fd, &temp, sizeof(uint64_t));
             }
-            vol->print_tree();
+
+            //vol->print_tree();
+
             LOGDEBUG("NOtify");
             cv.notify_all();
             return;

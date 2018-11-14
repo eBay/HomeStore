@@ -274,7 +274,6 @@ public:
 
     void set_memvec(boost::intrusive_ptr<homeds::MemVector> vec, uint32_t offset, uint32_t size) {
         assert(offset >= 0);
-        assert(m_mem == nullptr);
         m_mem = vec;
         m_data_offset = offset;
         m_cache_size = size;
@@ -283,10 +282,19 @@ public:
     void modify_cache_size(uint32_t size) {
         m_cache_size += size;
     }
+    
+    uint32_t get_cache_size() const{
+        return m_cache_size;
+    }
 
     homeds::MemVector &get_memvec() const {
         assert(m_mem != nullptr);
         return ((*(m_mem.get())));
+    }
+
+    boost::intrusive_ptr<homeds::MemVector> get_memvec_intrusive() const {
+        assert(m_mem != nullptr);
+        return m_mem;
     }
 
     homeds::blob at_offset(uint32_t offset) const {

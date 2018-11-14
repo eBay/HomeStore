@@ -111,21 +111,21 @@ public:
 #endif
     }
 #ifndef NDEBUG
-    void validate_sanity(){
+    void validate_sanity() {
         int i=0;
         std::map<int, bool> mapOfWords;
         //validate if keys are in ascending orde
-        while(i<(int)this->get_total_entries()){
+        while(i<(int)this->get_total_entries()) {
             K keyPrev;
             get_nth_key(i,&keyPrev,false);
             uint64_t * kp = (uint64_t*)keyPrev.get_blob().bytes;
-            if(*kp>100000){//TODO - remove this condition eventually
+            if(*kp>100000) {//TODO - remove this condition eventually
                 LOGDEBUG("Invalid entry : {} -> {} ", *kp, this->to_string());
                 assert(0);
             }
             std::pair<std::map<int, bool>::iterator, bool > result;
             result = mapOfWords.insert(std::make_pair(*kp,true));
-            if(result.second==false){
+            if(result.second==false) {
                 LOGDEBUG("Duplicate entry : {} -> {} ", *kp, this->to_string());
                 assert(0);
             }
@@ -138,6 +138,21 @@ public:
     /* Update a value in a given index to the provided value. It will support change in size of the new value.
      * Assumption: Node lock is already taken, size check for the node to support new value is already done */
     void update(int ind, const BtreeValue &val)  {
+        // If we are updating the edge value, none of the other logic matter. Just update edge value and move on
+        if (ind == (int)this->get_total_entries()) {
+            assert(!this->is_leaf());
+            this->set_edge_value(val);
+            this->inc_gen();
+            return;
+        }
+        
+        K key;
+        get_nth_key(ind,&key,true);
+        update(ind,key,val);
+    }
+
+    // TODO - currently we do not support variable size key
+    void update(int ind, const BtreeKey &key, const BtreeValue &val)  {
         LOGTRACE("Update called:{}",this->to_string());
         assert(ind <= (int)this->get_total_entries());
 
@@ -158,7 +173,7 @@ public:
             uint8_t *val_ptr = (uint8_t *)get_nth_obj(ind) + nth_key_len;
             homeds::blob vblob = val.get_blob();
             //we can avoid memcpy if addresses of val_ptr and vblob.bytes is same. In place update
-            if(val_ptr != vblob.bytes){
+            if(val_ptr != vblob.bytes) {
                 //TODO - we can reclaim space if new obj size is lower than cur obj size
                 // Same or smaller size update, just copy the value blob
                 LOGTRACE("Not an in-place update, have to copying data of size {}", vblob.size);
@@ -171,36 +186,46 @@ public:
             return;
         }
         
-        //copy the key for later use
-        //K *key = new K();
-        K key;
-        get_nth_key(ind,&key,true);
         remove(ind);
         insert(ind, key, val);
-        //delete key;
         LOGTRACE("Size changed for either key or value. Had to delete and insert :{}",this->to_string());
-    }
-
-    void update(int ind, const BtreeKey &key, const BtreeValue &val)  {
-        update(ind, val);
-        //TODO - When var key comes, we need to implement update method for key also
+       
     }
 
     void remove(int ind)  {
-        if (ind == (int)this->get_total_entries()) {
-            assert(!this->is_leaf());
-            this->invalidate_edge();
-            this->inc_gen();
-            return;
-        }
+        remove(ind,ind);
+    }
+
+    //ind_s and ind_e are inclusive
+    void remove(int ind_s,int ind_e)  {
+        int total_entries = this->get_total_entries();
+        assert(total_entries >= ind_s);
+        assert(total_entries >=ind_e);
         int recSize = get_record_size();
-        //claim available memory
-        get_var_node_header()->m_available_space += get_nth_key_len(ind)+ get_nth_value_len(ind)+ recSize;
-        
-        uint8_t *rec_ptr = get_nth_record_mutable(ind);
-        memmove(rec_ptr, rec_ptr + recSize, (this->get_total_entries() - ind - 1) * recSize);
-        
-        this->dec_entries();
+        int no_of_elem = ind_e-ind_s+1;
+        if (ind_e == (int)this->get_total_entries()) {
+            assert(!this->is_leaf() && this->has_valid_edge());
+
+            BNodeptr last_1_val;
+
+            // Set the last key/value as edge entry and by decrementing entry count automatically removed the last entry.
+            get_nth_value(ind_s - 1, &last_1_val, false);
+            this->set_edge_value(last_1_val);
+
+            for(int i=ind_s;i<total_entries;i++) {
+                get_var_node_header()->m_available_space += get_nth_key_len(i) + get_nth_value_len(i) + recSize;
+            }
+            this->sub_entries(total_entries-ind_s+1);
+        }else {
+            //claim available memory
+            for(int i=ind_s;i<=ind_e;i++) {
+                get_var_node_header()->m_available_space += get_nth_key_len(i) + get_nth_value_len(i) + recSize;
+            }
+            uint8_t *rec_ptr = get_nth_record_mutable(ind_s);
+            memmove(rec_ptr, rec_ptr + recSize*no_of_elem, (this->get_total_entries() - ind_e -1 ) * recSize);
+
+            this->sub_entries(no_of_elem);
+        }
         this->inc_gen();
     }
 
@@ -220,13 +245,13 @@ public:
         std::stringstream ss;
         ss << "###################" << endl;
         ss << "-------------------------------" << endl;
-        ss << "id=" << this->get_node_id().m_x << " nEntries=" << this->get_total_entries() << " leaf?=" << this->is_leaf();
+        ss << "id=" << this->get_node_id().to_string() << " nEntries=" << this->get_total_entries() << " leaf?=" << this->is_leaf();
 
         if (!this->is_leaf()) {
             bnodeid_t edge_id;
             edge_id = this->get_edge_id();
             ss << " edge_id=";
-            ss << static_cast<uint64_t>(edge_id.m_x);
+            ss << static_cast<uint64_t>(edge_id.m_id.m_x);
         }
         ss << "\n-------------------------------" << endl;
         for (uint32_t i = 0; i < this->get_total_entries(); i++) {
@@ -244,7 +269,7 @@ public:
             } else {
                 BNodeptr p;
                 get(i, &p, false);
-                ss << p.get_node_id().m_x;
+                ss << p.get_node_id().to_string();
             }
             ss << "\n";
         }
@@ -266,7 +291,7 @@ public:
         if (!result.found) {
             // We need to insert, this newly. Find out if we have space for value.
             size_needed = key.get_blob_size() + val.get_blob_size() + get_record_size();
-        } else if(this->is_leaf()){
+        } else if(this->is_leaf()) {
             //for internal nodes, size does not change on updates
             // Its an update, see how much additioanl space needed
             V existingVal;
@@ -333,7 +358,7 @@ public:
         auto other_gen = other.get_gen();
 
         int ind = this->get_total_entries() - 1;
-        while (ind >= 0){
+        while (ind >= 0) {
             homeds::blob kb;
             kb.bytes = (uint8_t *)get_nth_obj(ind);
             kb.size = get_nth_key_len(ind);
@@ -549,43 +574,6 @@ private:
         //print();
 #endif
         return to_insert_size;
-    }
-
-    /* Remove entries from the index to end index. From and to inclusive */
-    void remove(int from_ind, int to_ind) {
-        if (to_ind < from_ind) {
-            return;
-        }
-
-        if ((uint32_t )to_ind == this->get_total_entries()) {
-            assert(!this->is_leaf());
-            this->invalidate_edge();
-            to_ind--;
-        }
-
-        if ((uint32_t )from_ind == this->get_total_entries()) {
-            this->inc_gen();
-            return;
-        }
-
-        //claim available memory
-        int recSize = get_record_size();
-        int ind = from_ind;
-        int sizeToClaim=0;
-        while(ind<=to_ind){
-            sizeToClaim += get_nth_key_len(ind)+ get_nth_value_len(ind)+ recSize;
-            ind++;
-        }
-        get_var_node_header()->m_available_space+=sizeToClaim;
-        LOGTRACE("Available space claimed:{}",sizeToClaim);
-        
-        int count = to_ind - from_ind + 1;
-        uint8_t *rec_ptr = get_nth_record_mutable(from_ind);
-        memmove(rec_ptr, rec_ptr + (get_record_size() * count), (this->get_total_entries() - to_ind - 1) * get_record_size());
-
-        this->sub_entries(count);
-        
-        this->inc_gen();
     }
 
     /*

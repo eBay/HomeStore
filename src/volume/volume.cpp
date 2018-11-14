@@ -330,6 +330,12 @@ void Volume::print_tree() {
     map->print_tree();
 }
 
+#ifndef NDEBUG
+void Volume::enable_split_merge_crash_simulation() {
+    map->enable_split_merge_crash_simulation();
+}
+#endif
+
 int
 Volume::read(uint64_t lba, int nblks, boost::intrusive_ptr<volume_req> req) {
 

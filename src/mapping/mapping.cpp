@@ -44,6 +44,13 @@ namespace homestore {
                                                                 std::placeholders::_1, std::placeholders::_2));
         }
 
+#ifndef NDEBUG
+        void enable_split_merge_crash_simulation() {
+            m_bt->simulate_merge_crash=true;
+            m_bt->simulate_split_crash=true;
+        }
+#endif
+
         void add_lba(MappingInterval &offBlk, bool found, uint64_t actual_lba,
                      std::vector<std::shared_ptr<Lba_Block>> &mappingList) {
             mappingList.push_back(std::make_shared<Lba_Block>(offBlk, actual_lba, found));

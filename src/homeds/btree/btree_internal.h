@@ -87,8 +87,60 @@ namespace homeds { namespace btree {
         VMODULE_ADD(bt_insert), \
         VMODULE_ADD(bt_delete), \
     )
+    
+struct bnodeid{
+    uint48_t m_id;
+    uint8_t m_pc_gen_flag:1;//parent child gen flag used to recover from split and merge
+    
+    bnodeid() {m_id=0;m_pc_gen_flag=0;}
+    
+    bnodeid(const uint48_t &m_id, bool pc_gen_flag) : m_id(m_id), m_pc_gen_flag(pc_gen_flag?1:0) {}
 
-typedef uint48_t bnodeid_t;
+    bnodeid(uint64_t m_id, bool pc_gen_flag) : m_id(m_id), m_pc_gen_flag(pc_gen_flag?1:0) {}
+
+    bnodeid(const bnodeid &other) {
+        m_id = other.m_id;
+        m_pc_gen_flag = other.m_pc_gen_flag;
+    }
+    
+    uint48_t get_id()  {
+        return m_id;
+    }
+
+    bool operator==(const bnodeid &other) const {
+        return (m_id == other.m_id && m_pc_gen_flag == other.m_pc_gen_flag);
+    }
+
+    void set_id(const uint48_t &id) {
+        m_id = id;
+    }
+    
+    void set_pc_gen_flag(bool pc_gen_flag) {
+        m_pc_gen_flag = pc_gen_flag?1:0;
+    }
+    
+    bool get_pc_gen_flag() {
+        return m_pc_gen_flag;
+    }
+    
+    std::string to_string() {
+        std::stringstream ss;
+        std::string temp="0";
+        if(m_pc_gen_flag==1)
+            temp="1";
+        ss<< " Id:"<<m_id.m_x <<",pcgen:"<< temp;
+        return ss.str();
+    }
+    
+    bool is_invalidate_id() {
+        bnodeid temp(-1,0);
+        if(this->m_id.m_x == temp.m_id.m_x)return true;
+        else return false;
+    }
+    
+}__attribute__((packed));
+
+typedef bnodeid bnodeid_t;
 
 typedef enum {
     BTREE_SUCCESS = 0,
@@ -261,37 +313,37 @@ public:
 class BNodeptr: public BtreeValue
 {
 private:
-    bnodeid_t m_id;
+    bnodeid_t m_bnodeid;
 
 public:
     BNodeptr() {
-        m_id = INVALID_BNODEID;
+        m_bnodeid.set_id(INVALID_BNODEID);
     }
 
     BNodeptr(bnodeid_t ptr) {
-        m_id = ptr;
+        m_bnodeid = ptr;
     }
-
+    
     bnodeid_t get_node_id() const {
-        return m_id;
+        return m_bnodeid;
     }
     void set_node_id(bnodeid_t id) {
-        m_id = id;
+        m_bnodeid = id;
     }
     bool is_valid_ptr() const {
-        return (m_id != INVALID_BNODEID);
+        return (m_bnodeid.m_id != INVALID_BNODEID);
     }
 
     homeds::blob get_blob() const override {
         homeds::blob b;
         b.size = sizeof(bnodeid_t);
-        b.bytes = (uint8_t *)&m_id;
+        b.bytes = (uint8_t *)&m_bnodeid;
         return b;
     }
 
     void set_blob(const homeds::blob &b) override {
         assert(b.size == sizeof(bnodeid_t));
-        m_id = *(bnodeid_t *)b.bytes;
+        m_bnodeid = *(bnodeid_t *)b.bytes;
     }
 
     void copy_blob(const homeds::blob &b) override {
@@ -315,12 +367,19 @@ public:
 
     BtreeValue& operator=(const BtreeValue& other) {
         BNodeptr *otherp = (BNodeptr *) &other;
-        m_id = otherp->m_id;
+        m_bnodeid = otherp->m_bnodeid;
         return (*this);
     }
 
     uint32_t estimate_size_after_append(const BtreeValue &new_val) override {
         return sizeof(bnodeid_t);
+    }
+    
+    std::string to_string() const override{
+        std::stringstream ss;
+        std::string isValid = is_valid_ptr()?"1":"0";
+        ss<< get_node_id().to_string() << ",isValidPtr:" << isValid;
+        return ss.str();
     }
 
 #ifdef DEBUG
@@ -462,7 +521,7 @@ public:
     }
 
     static void deallocate(uint8_t *mem) {
-        LOG(INFO) << "Deallocating memory " << (void *)mem;
+        //LOG(INFO) << "Deallocating memory " << (void *)mem;
         bt_node_allocator->get_allocator()->deallocate(mem, NodeSize);
     }
 

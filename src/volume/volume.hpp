@@ -137,6 +137,10 @@ namespace homestore {
 
         void print_tree();
 
+#ifndef NDEBUG
+        void enable_split_merge_crash_simulation();
+
+#endif
     private:
         void alloc_single_block_in_mem();
 

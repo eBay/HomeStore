@@ -137,7 +137,9 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks,
     while (blks_alloced != nblks && retry_cnt < MAX_RETRY_CNT) {
         BlkId blkid;
         if (alloc(blks_rqstd, hints, &blkid, ((retry_cnt == MAX_RETRY_CNT -1) ? true:false)) != BLK_ALLOC_SUCCESS) {
-            if (blks_rqstd == 1 || hints.is_contiguous) {
+            if (blks_rqstd == 1 && retry_cnt == 0) {
+                continue;
+            } else if (blks_rqstd == 1 || hints.is_contiguous) {
                 break;
             }
             blks_rqstd = blks_rqstd/2;
@@ -150,7 +152,10 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks,
         }
         out_blkid.push_back(blkid);
     }
-
+#ifndef NDEBUG
+    if(blks_alloced != nblks)
+        LOGERROR("blks_alloced != nblks : {}  {}",blks_alloced, nblks);
+#endif
     assert(blks_alloced == nblks);
     if (blks_alloced != nblks) {
         /* free blks */
@@ -437,7 +442,9 @@ void VarsizeBlkAllocator::request_more_blks_wait(BlkAllocSegment *seg) {
     	    m_cv.notify_all();
     }
     // Wait for notification that it is done
-    m_cv.wait(lk);
+    while (m_region_state != BLK_ALLOCATOR_DONE) {
+        m_cv.wait(lk);
+    }
 }
 
 std::string VarsizeBlkAllocator::state_string(BlkAllocatorState state) const {
