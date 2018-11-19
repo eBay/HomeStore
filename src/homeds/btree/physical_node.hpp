@@ -226,10 +226,12 @@ protected:
         return to_variant_node()->get_nth_key(0, out_firstkey, false);
     }
 
+#if 0
     void get_nth_element(int n, BtreeKey *out_key, BtreeValue *out_val, bool is_copy) {
         if (out_key) { to_variant_node()->get_nth_key(n, out_key, is_copy); }
         if (out_val) { to_variant_node()->get_nth_value(n, out_val, is_copy); }
     }
+#endif
 
     bool put(const BtreeKey &key, const BtreeValue &val, PutType put_type, std::shared_ptr<BtreeValue> &existing_val) {
         auto result = find(key, nullptr, nullptr);

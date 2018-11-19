@@ -114,7 +114,7 @@ class BtreeKey {
     virtual std::string to_string() const = 0;
 };
 
-enum _RangeSelectOption {
+enum _MultiMatchSelector {
     DO_NOT_CARE,
     LEFT_MOST,
     SECOND_TO_THE_LEFT,
@@ -123,7 +123,7 @@ enum _RangeSelectOption {
 
 class BtreeSearchRange {
     friend struct BtreeQueryCursor;
-    friend class BtreeQueryRequest;
+    friend class  BtreeQueryRequest;
 
 private:
     const BtreeKey* m_start_key;
@@ -131,7 +131,7 @@ private:
 
     bool m_start_incl;
     bool m_end_incl;
-    _RangeSelectOption m_select_option;
+    _MultiMatchSelector m_multi_selector;
 
 public:
     BtreeSearchRange(const BtreeKey& start_key) : BtreeSearchRange(start_key, true, start_key, true) {}
@@ -139,22 +139,25 @@ public:
     BtreeSearchRange(const BtreeKey& start_key, const BtreeKey& end_key) :
             BtreeSearchRange(start_key, true, end_key, true) {}
 
-    BtreeSearchRange(const BtreeKey& start_key, bool start_incl, _RangeSelectOption option) :
+    BtreeSearchRange(const BtreeKey& start_key, bool start_incl, _MultiMatchSelector option) :
             BtreeSearchRange(start_key, start_incl, start_key, start_incl, option) {}
 
     BtreeSearchRange(const BtreeKey& start_key, bool start_incl, const BtreeKey& end_key, bool end_incl) :
             BtreeSearchRange(start_key, start_incl, end_key, end_incl, DO_NOT_CARE) {}
 
     BtreeSearchRange(const BtreeKey& start_key, bool start_incl, const BtreeKey& end_key, bool end_incl,
-                     _RangeSelectOption option) :
+                     _MultiMatchSelector option) :
             m_start_key(&start_key),
             m_end_key(&end_key),
             m_start_incl(start_incl),
             m_end_incl(end_incl),
-            m_select_option(option) {}
+            m_multi_selector(option) {}
 
     const BtreeKey* get_start_key() const { return m_start_key; }
     const BtreeKey* get_end_key() const { return m_end_key; }
+
+    BtreeSearchRange extract_start_of_range() const { return BtreeSearchRange(*m_start_key, m_start_incl, m_multi_selector); }
+    BtreeSearchRange extract_end_of_range() const { return BtreeSearchRange(*m_end_key, m_end_incl, m_multi_selector); }
 
     // Is the key provided and current key completely matches.
     // i.e If say a range = [8 to 12] and rkey is [9 - 11], then compare will return 0,
@@ -166,13 +169,8 @@ public:
 
     bool is_simple_search() const { return ((get_start_key() == get_end_key()) && (m_start_incl == m_end_incl)); }
 
-    _RangeSelectOption selection_option() const { return m_select_option; }
-    void set_selection_option(_RangeSelectOption o) { m_select_option = o; }
-};
-
-struct BtreeQueryCursor {
-    std::unique_ptr<BtreeKey> m_last_key;
-    //std::vector<void *> m_nodes;
+    _MultiMatchSelector selection_option() const { return m_multi_selector; }
+    void set_selection_option(_MultiMatchSelector o) { m_multi_selector = o; }
 };
 
 class BtreeValue {
@@ -192,79 +190,116 @@ class BtreeValue {
     virtual std::string to_string() const { return ""; }
 };
 
-using match_item_cb_t = std::function<bool(BtreeKey* key, BtreeValue* value)>;
+/* This class is a top level class to keep track of the locks that are held currently. It is used for serializabke
+ * query to unlock all nodes in right order at the end of the lock */
+class BtreeLockTracker {
+public:
+    virtual ~BtreeLockTracker() = default;
+};
+
+struct BtreeQueryCursor {
+    std::unique_ptr<BtreeKey> m_last_key;
+    std::unique_ptr<BtreeLockTracker> m_locked_nodes;
+};
+
+enum BtreeQueryType {
+    // This is default query which walks to first element in range, and then sweeps/walks across the leaf nodes. However,
+    // if upon pagination, it again walks down the query from the key it left off.
+    SWEEP_TRAVERSAL_ON_PAGINATION_QUERY,
+
+    // Similar to sweep query, except that it retains the node and its lock during pagination. This is more of intrusive
+    // query and if the caller is not careful, the read lock will never be unlocked and could cause deadlocks. Use this
+    // option carefully.
+    SWEEP_RETAIN_LOCK_ON_PAGINATION_QUERY,
+
+    // This is relatively inefficient query where every leaf node goes from its parent node instead of walking the
+    // leaf node across. This is useful only if we want to check and recover if parent and leaf node are in different
+    // generations or crash recovery cases.
+    TREE_TRAVERSAL_QUERY,
+
+    // This is both inefficient and quiet intrusive/unsafe query, where it locks the range that is being queried for
+    // and do not allow any insert or update within that range. It essentially create a serializable level of isolation.
+    SERIALIZABLE_QUERY
+};
+
+using match_item_cb_t = std::function<bool(const BtreeKey&, const BtreeValue&)>;
 class BtreeQueryRequest {
-    BtreeQueryRequest(const BtreeSearchRange &range, bool serializable_query, uint32_t iter_count,
+public:
+    BtreeQueryRequest(const BtreeSearchRange& search_range,
+                      BtreeQueryType query_type = BtreeQueryType::SWEEP_TRAVERSAL_ON_PAGINATION_QUERY,
+                      uint32_t batch_size = 1000,
                       const match_item_cb_t& match_item_cb = nullptr) :
             m_match_item_cb(match_item_cb),
-            m_range(range),
-            m_serializable(serializable_query),
-            m_next_iter_count(iter_count) {}
-    ~BtreeQueryRequest();
+            m_input_range(search_range),
+            m_batch_search_range(search_range),
+            m_start_range(search_range.extract_start_of_range()),
+            m_end_range(search_range.extract_end_of_range()),
+            m_query_type(query_type),
+            m_batch_size(batch_size) {}
 
-    const BtreeSearchRange& get_range() { return m_range; }
-    BtreeQueryCursor&      get_cursor() { return m_cursor; }
+    BtreeQueryRequest(const BtreeSearchRange& search_range, const match_item_cb_t& match_item_cb) :
+            BtreeQueryRequest(search_range, BtreeQueryType::SWEEP_TRAVERSAL_ON_PAGINATION_QUERY, 1000, match_item_cb) {}
 
-    BtreeSearchRange create_search_range() {
-        return (is_empty_cursor()) ? m_range : BtreeSearchRange(*m_cursor.m_last_key.get(), false, *m_range.get_end_key(),
-                                                                m_range.is_end_inclusive(), m_range.selection_option());
-    }
+    ~BtreeQueryRequest() = default;
 
-    BtreeSearchRange create_start_search_range() {
-        if (is_empty_cursor()) {
-            return BtreeSearchRange(*m_range.get_start_key(), m_range.is_start_inclusive(), m_range.selection_option());
-        } else {
-            return BtreeSearchRange(*m_cursor.m_last_key.get(), false, m_range.selection_option());
+    void init_batch_range() {
+        if (!is_empty_cursor()) {
+            m_batch_search_range = BtreeSearchRange(*m_cursor.m_last_key, false, *m_input_range.get_end_key(),
+                                         m_input_range.is_end_inclusive(), m_input_range.selection_option());
+            m_start_range = BtreeSearchRange(*m_cursor.m_last_key, false, m_input_range.selection_option());
         }
     }
 
-    bool is_empty_cursor() const { return (m_cursor.m_last_key == nullptr); }
-    bool is_serializable() const { return m_serializable; }
-    uint32_t get_count_this_iter() const { return m_next_iter_count; }
-    void set_next_iter_count(uint32_t count) { m_next_iter_count = count; }
+    BtreeSearchRange& get_batch_range() { return m_batch_search_range; }
+    BtreeQueryCursor& cursor() { return m_cursor; }
+    BtreeSearchRange& get_start_of_range() { return m_start_range; }
+    BtreeSearchRange& get_end_of_range() { return m_end_range; }
+
+    bool is_empty_cursor() const { return ((m_cursor.m_last_key == nullptr) && (m_cursor.m_locked_nodes == nullptr)); }
+    //virtual bool is_serializable() const = 0;
+    BtreeQueryType query_type() const { return m_query_type; }
+    uint32_t get_batch_size() const { return m_batch_size; }
+    void set_batch_size(uint32_t count) { m_batch_size = count; }
 
 public:
     match_item_cb_t m_match_item_cb; // Callback for every match
 
-private:
-    BtreeSearchRange m_range;    // Btree range search
-    BtreeQueryCursor m_cursor;   // An opaque cursor object for pagination
-    bool m_serializable;         // Is the query serializable isolation so that
-    uint32_t m_next_iter_count;  // Count of items needed in next iteration. This value can be changed on every iteration
+protected:
+    const BtreeSearchRange& get_input_range() { return m_input_range; }
+
+protected:
+    BtreeSearchRange m_input_range;         // Btree range filter originally provided
+    BtreeSearchRange m_batch_search_range;  // Adjusted filter for current batch
+    BtreeSearchRange m_start_range;         // Search Range contaning only start key
+    BtreeSearchRange m_end_range;           // Search Range containing only end key
+    BtreeQueryCursor m_cursor;              // An opaque cursor object for pagination
+    BtreeQueryType   m_query_type;          // Type of the query
+    uint32_t m_batch_size;   // Count of items needed in this batch. This value can be changed on every cursor iteration
 };
 
 #if 0
-class BtreeRegularQueryRequest : public BtreeQueryRequest {
-    BtreeRegularQueryRequest(const BtreeSearchRange &range, uint32_t iter_count = 1000,
+class BtreeSweepQueryRequest : public BtreeQueryRequest {
+public:
+    BtreeSweepQueryRequest(const BtreeSearchRange& criteria, uint32_t iter_count = 1000,
             const match_item_cb_t& match_item_cb = nullptr) :
-            BtreeQueryRequest(range, false, iter_count, match_item_cb) {}
+            BtreeQueryRequest(criteria, iter_count, match_item_cb) {}
 
-    BtreeRegularQueryRequest(const BtreeSearchRange &range, const match_item_cb_t& match_item_cb) :
-            BtreeQueryRequest(range, false, 1000, match_item_cb) {}
+    BtreeSweepQueryRequest(const BtreeSearchRange &criteria, const match_item_cb_t& match_item_cb) :
+            BtreeQueryRequest(criteria, 1000, match_item_cb) {}
 
-    const BtreeSearchRange& get_range() { return m_range; }
-    BtreeQueryCursor&      get_cursor() { return m_cursor; }
-
-    BtreeSearchRange create_search_range() {
-        return (is_empty_cursor()) ? m_range : BtreeSearchRange(*m_cursor.m_last_key.get(), false, *m_range.get_end_key(),
-                                                                m_range.is_end_inclusive(), m_range.selection_option());
-    }
-
-    BtreeSearchRange create_start_search_range() {
-        if (is_empty_cursor()) {
-            return BtreeSearchRange(*m_range.get_start_key(), m_range.is_start_inclusive(), m_range.selection_option());
-        } else {
-            return BtreeSearchRange(*m_cursor.m_last_key.get(), false, m_range.selection_option());
-        }
-    }
-
-    bool is_empty_cursor() const { return (m_cursor.m_last_key == nullptr); }
     bool is_serializable() const { return false; }
-    uint32_t get_count_this_iter() const { return m_next_iter_count; }
-    void set_next_iter_count(uint32_t count) { m_next_iter_count = count; }
+};
 
-private:
-    BtreeQueryCursor m_cursor;   // An opaque cursor object for pagination
+class BtreeSerializableQueryRequest : public BtreeQueryRequest {
+public:
+    BtreeSerializableQueryRequest(const BtreeSearchRange &range, uint32_t iter_count = 1000,
+                             const match_item_cb_t& match_item_cb = nullptr) :
+            BtreeQueryRequest(range, iter_count, match_item_cb) {}
+
+    BtreeSerializableQueryRequest(const BtreeSearchRange &criteria, const match_item_cb_t& match_item_cb) :
+            BtreeSerializableQueryRequest(criteria, 1000, match_item_cb) {}
+
+    bool is_serializable() const { return true; }
 };
 #endif
 
@@ -309,6 +344,8 @@ class BNodeptr : public BtreeValue {
     void set_blob_size(uint32_t size) override {}
 
     uint32_t estimate_size_after_append(const BtreeValue& new_val) override { return sizeof(bnodeid_t); }
+
+    bool operator==(const BNodeptr& other) const { return (m_id == other.m_id); }
 
 #ifdef DEBUG
     std::string to_string() const override {

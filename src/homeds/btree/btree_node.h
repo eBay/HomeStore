@@ -194,11 +194,13 @@ public:
             BtreeNodeAllocator<NodeSize>::deallocate((uint8_t *)n);
         }
     }
-protected:
+
     uint32_t get_nth_obj_size(int ind) const;
     void get_nth_key(int ind, BtreeKey *outkey, bool copy) const;
     void get_nth_value(int ind, BtreeValue *outval, bool copy) const;
+    void get_nth_element(int ind, BtreeKey *out_key, BtreeValue *out_val, bool is_copy) const;
 
+protected:
     // Compares the nth key (n=ind) with given key (cmp_key) and returns -1, 0, 1 if cmp_key <=> nth_key respectively
     int compare_nth_key(const BtreeKey &cmp_key, int ind) const;
     int compare_nth_key_range(const BtreeSearchRange &range, int ind) const;

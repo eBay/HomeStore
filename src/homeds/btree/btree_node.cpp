@@ -250,4 +250,9 @@ DecBNodeType(int) compare_nth_key(const BtreeKey &cmp_key, int ind) const {
 DecBNodeType(int) compare_nth_key_range(const BtreeSearchRange &range, int ind) const {
     return call_variant_method_const(this, compare_nth_key_range, range, ind);
 }
+
+DecBNodeType(void) get_nth_element(int n, BtreeKey *out_key, BtreeValue *out_val, bool is_copy) const {
+    if (out_key) { get_nth_key(n, out_key, is_copy); }
+    if (out_val) { get_nth_value(n, out_val, is_copy); }
+}
 }}
