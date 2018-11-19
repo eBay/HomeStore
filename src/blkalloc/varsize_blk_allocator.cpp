@@ -129,7 +129,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
     VarsizeAllocCacheEntry actual_entry;
 
     homeds::btree::BtreeSearchRange regex(start_entry, true, /* start_incl */ end_entry, false, /* end incl */
-                                        homeds::btree::_RangeSelectOption::SECOND_TO_THE_LEFT);
+                                        homeds::btree::_MultiMatchSelector::SECOND_TO_THE_LEFT);
     homeds::btree::EmptyClass dummy_val;
     int attempt = 1;
     while (true) {
