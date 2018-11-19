@@ -402,7 +402,10 @@ public:
     }
 
     static void query_thread(BtreeCrudTest *test, uint32_t start, uint32_t count, uint32_t query_batch_size) {
-        auto search_range = BtreeSearchRange(*test->m_entries[start], true, *test->m_entries[start+count-1], true);
+        auto start_it = test->m_create_map.find(test->m_entries[start]);
+        auto end_it   = test->m_create_map.find(test->m_entries[start+count-1]);
+
+        auto search_range = BtreeSearchRange(*start_it->first, true, *end_it->first, true);
         BtreeQueryRequest qreq(search_range, BtreeQueryType::SWEEP_TRAVERSAL_ON_PAGINATION_QUERY, query_batch_size);
 
         auto map_it = test->m_create_map.begin();
