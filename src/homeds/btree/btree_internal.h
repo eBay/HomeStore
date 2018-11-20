@@ -305,6 +305,8 @@ public:
 
 #define INVALID_BNODEID -1
 
+#define is_valid_btree_node_id(id) (id != (uint64_t)INVALID_BNODEID)
+
 class BNodeptr : public BtreeValue {
   private:
     bnodeid_t m_id;
@@ -444,7 +446,7 @@ template <size_t NodeSize, size_t CacheCount = DEFAULT_FREELIST_CACHE_COUNT> cla
     }
 
     static void deallocate(uint8_t* mem) {
-        LOG(INFO) << "Deallocating memory " << (void*)mem;
+        //LOG(INFO) << "Deallocating memory " << (void*)mem;
         bt_node_allocator->get_allocator()->deallocate(mem, NodeSize);
     }
 

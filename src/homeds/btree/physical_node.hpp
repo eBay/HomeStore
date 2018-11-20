@@ -192,9 +192,10 @@ protected:
     ////////// Top level functions (CRUD on a node) //////////////////
     // Find the slot where the key is present. If not present, return the closest location for the key.
     // Assumption: Node lock is already taken
-    auto find(const BtreeSearchRange &range, BtreeKey *outkey, BtreeValue *outval) const {
+    auto find(const BtreeSearchRange &range, BtreeKey *outkey, BtreeValue *outval, bool copy_key = true,
+            bool copy_val = true) const {
         auto result = bsearch(-1, get_total_entries(), range);
-        if (result.end_of_search_index == get_total_entries()) {
+        if (result.end_of_search_index == (int)get_total_entries()) {
             if (has_valid_edge()) {
                 result.found = true;
             } else {
@@ -204,18 +205,18 @@ protected:
         }
 
         if (outval) {
-            to_variant_node_const()->get(result.end_of_search_index, outval, true /* copy */);
+            to_variant_node_const()->get(result.end_of_search_index, outval, copy_val /* copy */);
         }
 
         if (!range.is_simple_search() && outkey) {
-            to_variant_node_const()->get_nth_key(result.end_of_search_index, outkey, true /* copy */);
+            to_variant_node_const()->get_nth_key(result.end_of_search_index, outkey, copy_key /* copy */);
         }
 
         return result;
     }
 
-    auto find(const BtreeKey& find_key, BtreeKey *outkey, BtreeValue *outval) const {
-        return find(BtreeSearchRange(find_key), outkey, outval);
+    auto find(const BtreeKey& find_key, BtreeValue *outval, bool copy_val = true) const {
+        return find(BtreeSearchRange(find_key), nullptr, outval, false, copy_val);
     }
 
     void get_last_key(BtreeKey *out_lastkey) {
@@ -349,16 +350,16 @@ protected:
 
 protected:
     auto bsearch(int start, int end, const BtreeSearchRange &range) const {
-        uint32_t mid = 0;
+        int mid = 0;
         int initial_end = end;
-        uint32_t min_ind_found = UINT32_MAX;
-        uint32_t second_min = UINT32_MAX;
-        uint32_t max_ind_found = 0;
+        int min_ind_found = INT32_MAX;
+        int second_min = INT32_MAX;
+        int max_ind_found = 0;
         BtreeKey *mid_key;
 
         struct {
-            bool     found;
-            uint32_t end_of_search_index;
+            bool found;
+            int  end_of_search_index;
         } ret{false, 0};
         auto selection = range.selection_option();
 
@@ -394,11 +395,11 @@ protected:
 
         if (ret.found) {
             if (selection == LEFT_MOST) {
-                assert(min_ind_found != UINT32_MAX);
+                assert(min_ind_found != INT32_MAX);
                 ret.end_of_search_index = min_ind_found;
             } else if (selection == SECOND_TO_THE_LEFT) {
-                assert(min_ind_found != UINT32_MAX);
-                if (second_min == UINT32_MAX) {
+                assert(min_ind_found != INT32_MAX);
+                if (second_min == INT32_MAX) {
                     if (((int)(min_ind_found + 1) < initial_end) &&
                         (to_variant_node_const()->compare_nth_key_range(range, min_ind_found+1) == 0)) {
                         // We have a min_ind_found, but not second min, so check if next is valid.
@@ -410,7 +411,7 @@ protected:
                     ret.end_of_search_index = second_min;
                 }
             } else if (selection == RIGHT_MOST) {
-                assert(max_ind_found != UINT32_MAX);
+                assert(max_ind_found != INT32_MAX);
                 ret.end_of_search_index = max_ind_found;
             }
         } else {

@@ -553,13 +553,16 @@ private:
 
             auto count = 0U;
             BtreeNodePtr next_node = nullptr;
-            query_req.cursor().m_last_key.reset();
             do {
                 if (next_node) {
                     lock_node(next_node, homeds::thread::locktype::LOCKTYPE_READ, nullptr);
                     unlock_node(my_node, homeds::thread::locktype::LOCKTYPE_READ);
                     my_node = next_node;
                 }
+
+                LOGTRACE("Query leaf node:\n {}", my_node->to_string());
+
+#if 0
                 // Get the start and end index within the range
                 auto start_result = my_node->find(query_req.get_start_of_range(), nullptr, nullptr);
                 auto start_ind = start_result.end_of_search_index;
@@ -577,16 +580,20 @@ private:
                         count++;
                     }
                 }
-
-                if (count < query_req.get_batch_size()) {
+#endif
+                count += my_node->get_all(query_req.get_batch_range(), query_req.get_batch_size() - count, out_values,
+                                          query_req.m_match_item_cb);
+                if ((count < query_req.get_batch_size()) && is_valid_btree_node_id(my_node->get_next_bnode())) {
                     next_node = btree_store_t::read_node(m_btree_store.get(), my_node->get_next_bnode());
                 } else {
-                    next_node = nullptr;
-                    query_req.cursor().m_last_key = std::make_unique<K>(out_values.back().first);
+                    // If we are here because our count is full, then setup the last key as cursor, otherwise, it would
+                    // mean count is 0, but this is the rightmost leaf node in the tree. So no more cursors.
+                    query_req.cursor().m_last_key = (count) ? std::make_unique<K>(out_values.back().first) : nullptr;
+                    break;
                 }
-            } while(next_node);
+            } while(true);
             unlock_node(my_node, homeds::thread::locktype::LOCKTYPE_READ);
-            return (query_req.cursor().m_last_key == nullptr);
+            return (query_req.cursor().m_last_key != nullptr);
         }
 
         BNodeptr start_child_ptr;
@@ -1152,11 +1159,9 @@ retry:
                     std::deque<boost::intrusive_ptr<btree_req_type>> &dependent_req_q) {
         BNodeptr nptr;
         
-#ifndef NDEBUG
+        LOGTRACE("Before split\n########Parent node:\n {}\n,Child node:\n {}\n",
+                 parent_node->to_string(), child_node->to_string());
 
-        LOGTRACE("Before split\n########Parent node:\n {}\n,Child node:\n {}\n" ,
-                 parent_node->to_string(),child_node->to_string());
-#endif
         // Create a new child node and split the keys by half.
         BtreeNodePtr child_node1 = child_node;
         BtreeNodePtr child_node2 = child_node->is_leaf() ? alloc_leaf_node() : alloc_interior_node();
@@ -1181,11 +1186,8 @@ retry:
         btree_store_t::write_node(m_btree_store.get(), parent_node, dependent_req_q, nullptr, false);
         //release_node(child_node2);
 
-
-#ifndef NDEBUG   
         LOGTRACE("After split\n########Parent node:\n {}\n,Child node1:\n {}\n,Child node2:\n {}\n" ,
                      parent_node->to_string(),child_node1->to_string(),child_node2->to_string());
-#endif
 
         // NOTE: Do not access parentInd after insert, since insert would have
         // shifted parentNode to the right.

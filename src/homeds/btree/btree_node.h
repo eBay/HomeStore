@@ -126,7 +126,10 @@ public:
     // All CRUD on a node
     // Base methods provided by PhysicalNodes
     bool put(const BtreeKey &key, const BtreeValue &val, PutType put_type, std::shared_ptr<BtreeValue> &existing_val);
-    auto find(const BtreeSearchRange &range, BtreeKey *outkey, BtreeValue *outval) const;
+    auto find(const BtreeKey& find_key, BtreeValue *outval, bool copy_val = true) const;
+    auto find(const BtreeSearchRange &range, BtreeKey *outkey, BtreeValue *outval, bool copy_key = true, bool copy_val = true) const;
+    uint32_t get_all(const BtreeSearchRange& range, uint32_t max_count, std::vector<std::pair<K, V>> &out_values,
+                     const match_item_cb_t& match_cb = nullptr) const;
     bool remove_one(const BtreeSearchRange &range, BtreeKey *outkey, BtreeValue *outval);
 
     // Methods the variant nodes need to override from

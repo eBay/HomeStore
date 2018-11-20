@@ -95,6 +95,10 @@ public:
     TestSimpleKey() : TestSimpleKey(0, 0, 0) {
     }
 
+    TestSimpleKey(const TestSimpleKey &other) : TestSimpleKey(other.get_count(), other.get_rank(), other.get_blk_num()) {
+    }
+    TestSimpleKey& operator=(const TestSimpleKey& other) { copy_blob(other.get_blob()); return *this;}
+
     inline uint32_t get_count() const {
         return (m_blob->m_count);
     }
@@ -212,6 +216,11 @@ public:
         return ss.str();
     }
 
+    friend ostream& operator<<(ostream& os, const TestSimpleKey& k) {
+        os << "count: " << k.get_count() << " rank: " << k.get_rank() << " blknum: " << k.get_blk_num();
+        return os;
+    }
+
     bool operator<(const TestSimpleKey &o) const {
         return (compare(&o) < 0);
     }
@@ -228,6 +237,9 @@ public:
     }
 
     TestSimpleValue() : TestSimpleValue((uint32_t)-1) {}
+
+    TestSimpleValue(const TestSimpleValue &other) { copy_blob(other.get_blob()); }
+    TestSimpleValue& operator=(const TestSimpleValue& other) { copy_blob(other.get_blob()); return *this;}
 
     homeds::blob get_blob() const override {
         homeds::blob b;
@@ -263,6 +275,11 @@ public:
         std::stringstream ss; ss << "val = " << m_val; return ss.str();
     }
 
+    friend ostream& operator<<(ostream& os, const TestSimpleValue& v) {
+        os << "val = " << v.m_val;
+        return os;
+    }
+
     // This is not mandatory overridden method for BtreeValue, but for testing comparision
     bool operator==(const TestSimpleValue &other) const {
         return (m_val == other.m_val);
@@ -276,18 +293,20 @@ public:
 
 struct SimpleKeyComparator {
     bool operator()(const TestSimpleKey* left, const TestSimpleKey* right) const {
-        return (left->compare(right) > 0);
+        return (left->compare(right) < 0);
     }
 };
 
 #define TOTAL_ENTRIES          100000
 #define TOTAL_OPERS_PER_TEST   500
 #define NTHREADS               4
+//#define NTHREADS               1
 
 struct BtreeCrudTest : public testing::Test {
 protected:
     TestBtreeDeclType *m_bt;
     std::array<TestSimpleKey *, TOTAL_ENTRIES> m_entries;
+    std::array<TestSimpleKey *, TOTAL_ENTRIES> m_sorted_entries;
     std::map<TestSimpleKey *, TestSimpleValue, SimpleKeyComparator> m_create_map;
 
 public:
@@ -402,34 +421,29 @@ public:
     }
 
     static void query_thread(BtreeCrudTest *test, uint32_t start, uint32_t count, uint32_t query_batch_size) {
-        auto start_it = test->m_create_map.find(test->m_entries[start]);
-        auto end_it   = test->m_create_map.find(test->m_entries[start+count-1]);
-
-        auto search_range = BtreeSearchRange(*start_it->first, true, *end_it->first, true);
+        auto search_range = BtreeSearchRange(*test->m_entries[start], true, *test->m_entries[start+count-1], true);
         BtreeQueryRequest qreq(search_range, BtreeQueryType::SWEEP_TRAVERSAL_ON_PAGINATION_QUERY, query_batch_size);
 
-        auto map_it = test->m_create_map.begin();
         auto result_count = 0U;
+        auto cmp_ind = start;
 
         std::vector<std::pair<TestSimpleKey, TestSimpleValue>> values;
         values.reserve(query_batch_size);
 
-        while(test->m_bt->query(qreq, values)) {
+        bool has_more = false;
+        do {
+            has_more = test->m_bt->query(qreq, values);
             for (auto &val : values) {
-                //auto expected = *map_it;
-                auto key_match = false; auto val_match = false;
-
-                if (val.first == *(map_it->first)) { key_match = true; }
-                if (val.second == map_it->second) { val_match = true; }
-                EXPECT_EQ(key_match, true);
-                EXPECT_EQ(val_match, true);
-                ++map_it;
+                auto kp = test->m_entries[cmp_ind];
+                ASSERT_EQ(val.first, *kp);
+                ASSERT_EQ(val.second, test->m_create_map.find(kp)->second);
+                ++cmp_ind;
                 ++result_count;
             }
             values.clear();
-        }
+        } while (has_more);
 
-        EXPECT_EQ(count, result_count);
+        ASSERT_EQ(count, result_count);
     }
 };
 
@@ -440,6 +454,10 @@ TEST_F(BtreeCrudTest, SimpleInsert) {
 }
 
 TEST_F(BtreeCrudTest, SimpleQuery) {
+    // Sort the entries before preload.
+    std::sort(m_entries.begin(), m_entries.end(), [](const auto& left, const auto& right) {
+        return (left->compare(right) < 0);
+    });
     run_in_parallel(NTHREADS, preload_thread, 0, TOTAL_ENTRIES);
     run_in_parallel(NTHREADS, query_thread, 0, TOTAL_ENTRIES, 1000);
 
