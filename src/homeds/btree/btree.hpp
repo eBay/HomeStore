@@ -333,7 +333,7 @@ retry:
         lock_node(root, homeds::thread::locktype::LOCKTYPE_READ, nullptr);
 
         switch (query_req.query_type() ) {
-        case BtreeQueryType::SWEEP_TRAVERSAL_ON_PAGINATION_QUERY:
+        case BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY:
             has_more = do_sweep_query(root, query_req, out_values);
             break;
 
@@ -562,26 +562,7 @@ private:
 
                 LOGTRACE("Query leaf node:\n {}", my_node->to_string());
 
-#if 0
-                // Get the start and end index within the range
-                auto start_result = my_node->find(query_req.get_start_of_range(), nullptr, nullptr);
-                auto start_ind = start_result.end_of_search_index;
-
-                auto end_result = my_node->find(query_req.get_end_of_range(), nullptr, nullptr);
-                auto end_ind = end_result.end_of_search_index;
-                if (!end_result.found) { end_ind--; } // not found entries will point to 1 ind after last in range.
-
-                for (auto i = start_ind; ((i <= end_ind) && (count < query_req.get_batch_size())); i++) {
-                    K key; V value;
-                    my_node->get_nth_element(i, &key, &value, false);
-
-                    if (!query_req.m_match_item_cb || query_req.m_match_item_cb(key, value)) {
-                        out_values.emplace_back(std::make_pair<>(key, value));
-                        count++;
-                    }
-                }
-#endif
-                count += my_node->get_all(query_req.get_batch_range(), query_req.get_batch_size() - count, out_values,
+                count += my_node->get_all(query_req.this_batch_range(), query_req.get_batch_size() - count, out_values,
                                           query_req.m_match_item_cb);
                 if ((count < query_req.get_batch_size()) && is_valid_btree_node_id(my_node->get_next_bnode())) {
                     next_node = btree_store_t::read_node(m_btree_store.get(), my_node->get_next_bnode());
@@ -611,6 +592,7 @@ private:
         if (my_node->is_leaf()) {
             assert(query_req.get_batch_size() > 0);
 
+#if 0
             // Get the start and end index within the range
             auto count = 0U;
             auto start_result = my_node->find(query_req.get_start_of_range(), nullptr, nullptr);
@@ -631,9 +613,13 @@ private:
                 }
                 ind++;
             }
+#endif
+
+            my_node->get_all(query_req.this_batch_range(), query_req.get_batch_size() - (uint32_t)out_values.size(),
+                             out_values, query_req.m_match_item_cb);
 
             unlock_node(my_node, homeds::thread::locktype::LOCKTYPE_READ);
-            if (count >= query_req.get_batch_size()) {
+            if (out_values.size() >= query_req.get_batch_size()) {
                 query_req.cursor().m_last_key = std::make_unique<K>(out_values.back().first);
                 return true;
             }
@@ -645,29 +631,30 @@ private:
         auto start_ret = my_node->find(query_req.get_start_of_range(), nullptr, &start_child_ptr);
         auto end_ret   = my_node->find(query_req.get_end_of_range(), nullptr, &end_child_ptr);
 
-        if (start_ret.end_of_search_index > end_ret.end_of_search_index) {
-            unlock_node(my_node, homeds::thread::locktype::LOCKTYPE_READ);
-        } else {
-            for (auto i = start_ret.end_of_search_index; i <= end_ret.end_of_search_index; i++) {
-                BNodeptr child_ptr;
-                my_node->get_nth_value(i, &child_ptr, false);
-                auto child_node = btree_store_t::read_node(m_btree_store.get(), child_ptr.get_node_id());
+        bool unlocked_already = false;
+        auto ind = start_ret.end_of_search_index;
+        while (ind <= end_ret.end_of_search_index) {
+            BNodeptr child_ptr;
+            my_node->get(ind, &child_ptr, false);
+            auto child_node = btree_store_t::read_node(m_btree_store.get(), child_ptr.get_node_id());
 
-                lock_node(child_node, homeds::thread::LOCKTYPE_READ, nullptr);
-                if (i == end_ret.end_of_search_index) {
-                    // If we have reached the last index, unlock before traversing down, because we no longer need
-                    // this lock. Holding this lock will impact performance unncessarily.
-                    unlock_node(my_node, homeds::thread::locktype::LOCKTYPE_READ);
-                }
-                pagination_done = do_traversal_query(child_node, query_req, out_values);
-                if (pagination_done) { break; }
+            lock_node(child_node, homeds::thread::LOCKTYPE_READ, nullptr);
+            if (ind == end_ret.end_of_search_index) {
+                // If we have reached the last index, unlock before traversing down, because we no longer need
+                // this lock. Holding this lock will impact performance unncessarily.
+                unlock_node(my_node, homeds::thread::locktype::LOCKTYPE_READ);
+                unlocked_already = true;
             }
+            pagination_done = do_traversal_query(child_node, query_req, out_values);
+            if (pagination_done) { break; }
+            ind++;
         }
 
+        if (!unlocked_already) { unlock_node(my_node, homeds::thread::locktype::LOCKTYPE_READ); }
         return (pagination_done);
     }
 
-#if 0
+#ifdef SERIALIZABLE_QUERY_IMPLEMENTATION
     bool do_serialzable_query(BtreeNodePtr my_node, BtreeSerializableQueryRequest& query_req,
             std::vector<std::pair<K, V>> &out_values) {
         if (my_node->is_leaf) {

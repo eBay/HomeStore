@@ -420,9 +420,10 @@ public:
         test->m_bt->get_stats().print();
     }
 
-    static void query_thread(BtreeCrudTest *test, uint32_t start, uint32_t count, uint32_t query_batch_size) {
+    static void query_thread(BtreeCrudTest *test, uint32_t start, uint32_t count, BtreeQueryType qtype,
+            uint32_t query_batch_size) {
         auto search_range = BtreeSearchRange(*test->m_entries[start], true, *test->m_entries[start+count-1], true);
-        BtreeQueryRequest qreq(search_range, BtreeQueryType::SWEEP_TRAVERSAL_ON_PAGINATION_QUERY, query_batch_size);
+        BtreeQueryRequest qreq(search_range, qtype, query_batch_size);
 
         auto result_count = 0U;
         auto cmp_ind = start;
@@ -459,7 +460,8 @@ TEST_F(BtreeCrudTest, SimpleQuery) {
         return (left->compare(right) < 0);
     });
     run_in_parallel(NTHREADS, preload_thread, 0, TOTAL_ENTRIES);
-    run_in_parallel(NTHREADS, query_thread, 0, TOTAL_ENTRIES, 1000);
+    run_in_parallel(NTHREADS, query_thread, 0, TOTAL_ENTRIES, BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, 1000);
+    run_in_parallel(NTHREADS, query_thread, 0, TOTAL_ENTRIES, BtreeQueryType::TREE_TRAVERSAL_QUERY, 1000);
 
     //EXPECT_EQ(m_bt->get_stats().get_obj_count(), 0u);
     //EXPECT_EQ(m_bt->get_stats().get_interior_nodes_count(), 0u);

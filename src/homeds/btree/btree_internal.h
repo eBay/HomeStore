@@ -205,12 +205,12 @@ struct BtreeQueryCursor {
 enum BtreeQueryType {
     // This is default query which walks to first element in range, and then sweeps/walks across the leaf nodes. However,
     // if upon pagination, it again walks down the query from the key it left off.
-    SWEEP_TRAVERSAL_ON_PAGINATION_QUERY,
+    SWEEP_NON_INTRUSIVE_PAGINATION_QUERY,
 
     // Similar to sweep query, except that it retains the node and its lock during pagination. This is more of intrusive
     // query and if the caller is not careful, the read lock will never be unlocked and could cause deadlocks. Use this
     // option carefully.
-    SWEEP_RETAIN_LOCK_ON_PAGINATION_QUERY,
+    SWEEP_INTRUSIVE_PAGINATION_QUERY,
 
     // This is relatively inefficient query where every leaf node goes from its parent node instead of walking the
     // leaf node across. This is useful only if we want to check and recover if parent and leaf node are in different
@@ -226,7 +226,7 @@ using match_item_cb_t = std::function<bool(const BtreeKey&, const BtreeValue&)>;
 class BtreeQueryRequest {
 public:
     BtreeQueryRequest(const BtreeSearchRange& search_range,
-                      BtreeQueryType query_type = BtreeQueryType::SWEEP_TRAVERSAL_ON_PAGINATION_QUERY,
+                      BtreeQueryType query_type = BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY,
                       uint32_t batch_size = 1000,
                       const match_item_cb_t& match_item_cb = nullptr) :
             m_match_item_cb(match_item_cb),
@@ -238,7 +238,7 @@ public:
             m_batch_size(batch_size) {}
 
     BtreeQueryRequest(const BtreeSearchRange& search_range, const match_item_cb_t& match_item_cb) :
-            BtreeQueryRequest(search_range, BtreeQueryType::SWEEP_TRAVERSAL_ON_PAGINATION_QUERY, 1000, match_item_cb) {}
+            BtreeQueryRequest(search_range, BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, 1000, match_item_cb) {}
 
     ~BtreeQueryRequest() = default;
 
@@ -250,7 +250,7 @@ public:
         }
     }
 
-    BtreeSearchRange& get_batch_range() { return m_batch_search_range; }
+    BtreeSearchRange& this_batch_range() { return m_batch_search_range; }
     BtreeQueryCursor& cursor() { return m_cursor; }
     BtreeSearchRange& get_start_of_range() { return m_start_range; }
     BtreeSearchRange& get_end_of_range() { return m_end_range; }
