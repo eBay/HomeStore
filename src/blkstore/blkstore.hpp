@@ -15,40 +15,9 @@
 #include <error/error.h>
 #include "writeBack_cache.hpp"
 #include "device/blkbuffer.hpp"
-#include "volume/perf_metrics.hpp"
+#include "metrics/perf_metrics.hpp"
 
 namespace homestore {
-
-/* Names of metrics */
-#define BLKSTORE_LABEL " for HomeStore BlkStore"
-
-/* Metrics - Counters */
-enum e_blkstore_cntr {
-    READS_C,
-    WRITES_C,
-    CACHE_HITS_C,
-    MAX_BLKSTORE_CNTR_CNT
-};
-
-static std::string blkstore_cntr[] = {
-    "Blk-Reads",
-    "Blk-Writes",
-    "Cache-Hits"
-};
-
-/* Metrics - Histograms */
-enum e_blkstore_hist {
-    CACHE_READS_H = 0,
-    CACHE_WRITES_H,
-    WRITES_H,
-    MAX_BLKSTORE_HIST_CNT
-};
-
-static std::string blkstore_hist[] = {
-    "Cache-Reads",
-    "Cache-Writes",
-    "Blk-Writes"
-};
 
 enum BlkStoreCacheType {
     PASS_THRU = 0,
@@ -108,6 +77,7 @@ struct blkstore_req : writeback_req {
 template <typename BAllocator, typename Buffer = BlkBuffer>
 class BlkStore {
     typedef std::function< void (boost::intrusive_ptr<blkstore_req<Buffer>> req) > comp_callback;
+
 public:
     BlkStore(DeviceManager *mgr, Cache< BlkId > *cache, uint64_t initial_size, BlkStoreCacheType cache_type,
              uint32_t mirrors, comp_callback comp_cb) :
@@ -123,9 +93,7 @@ public:
 				mgr->get_all_devices(), 
 				(std::bind(&BlkStore::process_completions, this, 
 			         std::placeholders::_1))),
-	    m_comp_cb(comp_cb) {
-        init_perf_report();
-    }
+	        m_comp_cb(comp_cb) {}
 
     BlkStore(DeviceManager *mgr, Cache< BlkId > *cache, 
             vdev_info_block *vb, BlkStoreCacheType cache_type, comp_callback comp_cb) :
@@ -139,9 +107,7 @@ public:
             m_cache_type(cache_type),
             m_vdev(mgr, vb, (std::bind(&BlkStore::process_completions, this, 
 			     std::placeholders::_1))), 
-	    m_comp_cb(comp_cb) {
-        init_perf_report();
-    }
+	    m_comp_cb(comp_cb) {}
 
     bool is_write_back_cache() {
         return (m_cache_type == WRITEBACK_CACHE || m_cache_type == RD_MODIFY_WRITEBACK_CACHE);
@@ -206,10 +172,8 @@ public:
                 free(req->missing_pieces[i].ptr);
             }
         }
-        PerfMetrics *perf = PerfMetrics::getInstance();
-        auto updated = perf->updateHistogram(blkstore_hist[CACHE_READS_H],
-                                get_elapsed_time(cache_startTime));
-        assert(updated);
+        PerfMetrics::getInstance()->updateHist(BLKSTR_CACHE_READS_H,
+                                    get_elapsed_time(cache_startTime));
     }
 
     /* Allocate a new block of the size based on the hints provided */
@@ -394,9 +358,8 @@ public:
          * First try to create/insert a record for this blk id in the cache. 
          * If it already exists, it will simply upvote the item.
          */
-        PerfMetrics *perf = PerfMetrics::getInstance();
-        assert(perf->incrCounter(blkstore_cntr[WRITES_C], 1));
-        
+        PerfMetrics::getInstance()->incrCntr(BLKSTR_WRITES_C, 1);
+
         /* we don't support any dependent writes on the bid have blocks more then 1.
          * It is implemented primarity for async btree in which write size is not
          * more then a page. If number of blocks are more then one then cache,
@@ -414,8 +377,8 @@ public:
                                         (boost::intrusive_ptr< CacheBuffer< BlkId>> *) &out_bbuf);
         /* While writing, we should not insert a blkid which already exist in the cache */
         assert(ibuf.get() == out_bbuf.get());
-        assert(perf->updateHistogram(blkstore_hist[CACHE_WRITES_H],
-                                    get_elapsed_time(cache_startTime)));
+        PerfMetrics::getInstance()->updateHist(BLKSTR_CACHE_WRITES_H,
+                                    get_elapsed_time(cache_startTime));
         assert(inserted);
 
         req->bbuf = ibuf;
@@ -436,22 +399,8 @@ public:
         // TODO: rishabh, need to check the return status
         m_vdev.write(bid, ibuf->get_memvec(), 
                       boost::static_pointer_cast<virtualdev_req>(req), data_offset);
-        assert(perf->updateHistogram(blkstore_hist[WRITES_H], get_elapsed_time(write_startTime)));
+        PerfMetrics::getInstance()->updateHist(BLKSTR_WRITES_H, get_elapsed_time(write_startTime));
         return ibuf;
-    }
-
-    void init_perf_report() {
-        PerfMetrics *perf = PerfMetrics::getInstance();
-
-        /* Register counter (if not present) */
-        for (auto i = 0U; i < MAX_BLKSTORE_CNTR_CNT; i++) {
-            perf->registerCounter(blkstore_cntr[i], blkstore_cntr[i]+BLKSTORE_LABEL, "");
-        }
-
-        /* Register histogram (if not present) */
-        for (auto i = 0U; i < MAX_BLKSTORE_HIST_CNT; i++) {
-            perf->registerHistogram(blkstore_hist[i], blkstore_hist[i]+BLKSTORE_LABEL, "");
-        }
     }
 
     /* If the user already has created a blkbuffer, then use this method to use it to write the block */
@@ -510,8 +459,7 @@ public:
                 bbuf = new_bbuf;
             }
         } else {
-            PerfMetrics *perf = PerfMetrics::getInstance();
-            assert(perf->incrCounter(blkstore_cntr[CACHE_HITS_C], 1));
+            PerfMetrics::getInstance()->incrCntr(BLKSTR_CACHE_HITS_C, 1);
         }
 
         req->bbuf = bbuf;
@@ -553,8 +501,7 @@ public:
                 req->blkstore_ref_cnt.fetch_sub(1, std::memory_order_acquire);
             }
 
-            PerfMetrics *perf = PerfMetrics::getInstance();
-            assert(perf->incrCounter(blkstore_cntr[READS_C], 1));
+            PerfMetrics::getInstance()->incrCntr(BLKSTR_READS_C, 1);
         }
 
         assert(req->err == no_error);

@@ -5,7 +5,7 @@
 
 #include "volume.hpp"
 #include <mapping/mapping.cpp>
-#include "perf_metrics.hpp"
+#include <metrics/perf_metrics.hpp>
 #include <fstream>
 
 using namespace std;
@@ -28,38 +28,7 @@ int btree_buf_alloc;
 int btree_buf_free;
 int btree_buf_make_obj;
 
-/* Names of metrics */
-#define VOL_LABEL " for HomeStore Volume"
-
-/* Metrics - Histograms */
-enum e_vol_hist {
-    READ_H = 0,
-    WRITE_H,
-    MAP_READ_H,
-    IO_READ_H,
-    IO_WRITE_H,
-    BLK_ALLOC_H,
-    MAX_VOL_HIST_CNT
-};
-
-static std::string vol_hist[] = {
-    "Vol-Reads",
-    "Vol-Writes",
-    "Map-Reads",
-    "IO-Reads",
-    "IO-Writes",
-    "Blk-Allocs"
-};
-
 using namespace homestore;
-
-PerfMetrics* PerfMetrics::instance = 0;
-PerfMetrics* PerfMetrics::getInstance() {
-    if (!instance) {
-        instance = new PerfMetrics();
-    }
-    return instance;
-}
 
 std::shared_ptr<Volume>
 Volume::createVolume(std::string const &uuid,
@@ -207,8 +176,7 @@ homestore::Volume::process_metadata_completions(boost::intrusive_ptr<volume_req>
     }
     
     if (req->err == no_error) {
-        PerfMetrics *perf = PerfMetrics::getInstance();
-        assert(perf->updateHistogram(vol_hist[IO_WRITE_H], get_elapsed_time(req->startTime)));
+        PerfMetrics::getInstance()->updateHist(VOL_IO_WRITE_H, get_elapsed_time(req->startTime));
     }
     
     outstanding_write_cnt.fetch_sub(1, memory_order_relaxed);
@@ -239,27 +207,20 @@ homestore::Volume::process_data_completions(boost::intrusive_ptr<blkstore_req<Bl
     if (ref_cnt != 1) {
         return;
     }
-    PerfMetrics *perf = PerfMetrics::getInstance();
-    assert(perf->updateHistogram(vol_hist[IO_READ_H], get_elapsed_time(req->startTime)));
+    PerfMetrics::getInstance()->updateHist(VOL_IO_READ_H, get_elapsed_time(req->startTime));
     comp_cb(req);
     outstanding_write_cnt.fetch_sub(1, memory_order_relaxed);
 }
 
 void
 Volume::init_perf_report() {
-    PerfMetrics *perf = PerfMetrics::getInstance();
-    /* Register histogram (if not present) */
-    for (auto i = 0U; i < MAX_VOL_HIST_CNT; i++) {
-        perf->registerHistogram(vol_hist[i], vol_hist[i]+VOL_LABEL, "");
-    }
     outstanding_write_cnt = 0;
 }
 
 void
 Volume::print_perf_report() {
-    PerfMetrics *perf = PerfMetrics::getInstance();
     std::ofstream ofs ("result.json", std::ofstream::out);
-    ofs << perf->report() << std::endl;
+    ofs << PerfMetrics::getInstance()->report() << std::endl;
     ofs.close();
 }
 
@@ -286,8 +247,7 @@ Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks,
         if (status != BLK_ALLOC_SUCCESS) {
             assert(0);
         }
-        PerfMetrics *perf = PerfMetrics::getInstance();
-        assert(perf->updateHistogram(vol_hist[BLK_ALLOC_H], get_elapsed_time(startTime)));
+        PerfMetrics::getInstance()->updateHist(VOL_BLK_ALLOC_H, get_elapsed_time(startTime));
     }
 
     Clock::time_point startTime = Clock::now();
@@ -319,10 +279,7 @@ Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks,
     }
 
     assert(blks_snt == nblks);
-    PerfMetrics *perf = PerfMetrics::getInstance();
-    auto updated = perf->updateHistogram(vol_hist[WRITE_H], get_elapsed_time(startTime));
-    assert(updated);
-
+    PerfMetrics::getInstance()->updateHist(VOL_WRITE_H, get_elapsed_time(startTime));
     process_metadata_completions(req);
 }
 
@@ -355,8 +312,7 @@ Volume::read(uint64_t lba, int nblks, boost::intrusive_ptr<volume_req> req) {
         return 0;
     }
 
-    PerfMetrics *perf = PerfMetrics::getInstance();
-    assert(perf->updateHistogram(vol_hist[MAP_READ_H], get_elapsed_time(startTime)));
+    PerfMetrics::getInstance()->updateHist(VOL_MAP_READ_H, get_elapsed_time(startTime));
 
     req->lba = lba;
     req->nblks = nblks;
@@ -403,7 +359,7 @@ Volume::read(uint64_t lba, int nblks, boost::intrusive_ptr<volume_req> req) {
 
     /* it decrement the refcnt and see if it can do the completion upcall */
     process_data_completions(req);
-    assert(perf->updateHistogram(vol_hist[READ_H], get_elapsed_time(startTime)));
+    PerfMetrics::getInstance()->updateHist(VOL_READ_H, get_elapsed_time(startTime));
     return 0;
 }
 

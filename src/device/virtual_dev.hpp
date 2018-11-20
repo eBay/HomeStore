@@ -13,12 +13,9 @@
 #include <boost/range/irange.hpp>
 #include <map>
 #include <error/error.h>
-#include <volume/perf_metrics.hpp>
+#include <metrics/perf_metrics.hpp>
 
 namespace homestore {
-
-#define VDEV_LABEL     " for Homestore Virtual Device"
-#define PHYSICAL_HIST     "physical"
 
 class VdevFixedBlkAllocatorPolicy {
 public:
@@ -52,9 +49,18 @@ public:
         vconfig->set_total_blks(((uint64_t)size)/blk_size);
 
         vconfig->set_pages_per_temp_group(100); // TODO: Recalculate based on size set aside for temperature entries
-        vconfig->set_max_cache_blks(vconfig->get_total_pages()/4); // Cache quarter of the blocks
-        vconfig->set_max_cache_chunks(vconfig->get_total_pages()/(16 * 64)); // quarter of Cache should have contiguous blocks
-        vconfig->set_chunk_size(64);
+        auto cache_blks = (vconfig->get_total_pages()*vconfig->get_blks_per_page()) / 4;
+        vconfig->set_max_cache_blks(cache_blks); // Cache quarter of the blocks
+
+        /* Blk sizes in slabs : size < 8k, 8k <= size < 16k,
+         * 16k <= size < 32k, 32k <= size < 64k, size >= 64k
+         */
+        std::vector<uint32_t> slab_limits(4, 0);
+        std::vector<float> slab_weights(5, 0.2);
+        for (auto i = 0U; i < slab_limits.size(); i++) {
+            slab_limits[i] = (8192*(1<<i))/vconfig->get_blk_size();
+        }
+        vconfig->set_slab(slab_limits, slab_weights);
     }
 };
 
@@ -317,9 +323,6 @@ public:
     }
 
     void init_perf_metrics() {
-        PerfMetrics *perf = PerfMetrics::getInstance();
-        auto name = std::string(PHYSICAL_HIST);
-        perf->registerHistogram(name, name+VDEV_LABEL, "");
         write_time = 0;
         mirror_time = 0;
     }
@@ -372,10 +375,9 @@ public:
         }
 
         /* Update the performance metric */
-        PerfMetrics *perf = PerfMetrics::getInstance();
         int64_t physical_time =
             (std::chrono::duration_cast< std::chrono::nanoseconds >(Clock::now() - startTime)).count();
-        assert(perf->updateHistogram(PHYSICAL_HIST, physical_time));
+        PerfMetrics::getInstance()->updateHist(VDEV_PHYSICAL_H, physical_time);
 
         if (get_nmirrors()) {
             uint64_t primary_chunk_offset = dev_offset - chunk->get_start_offset();
