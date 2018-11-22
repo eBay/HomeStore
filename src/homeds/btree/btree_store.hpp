@@ -38,8 +38,10 @@ public:
     static uint8_t *get_physical(const btree_node_t *bn);
     static uint32_t get_node_area_size(btree_store_t *store);
 
-    static boost::intrusive_ptr<btree_node_t> alloc_node(btree_store_t *store, bool is_leaf);
-    static boost::intrusive_ptr<btree_node_t> read_node(btree_store_t *store, bnodeid_t id);
+    static BtreeNodePtr alloc_node(btree_store_t *store, bool is_leaf,
+                                                bool &is_new_allocation,// indicates if allocated node is same as copy_from
+                                                BtreeNodePtr copy_from = nullptr);
+    static BtreeNodePtr read_node(btree_store_t *store, bnodeid_t id);
     static void write_node(btree_store_t *store, BtreeNodePtr bn,
                            std::deque<boost::intrusive_ptr<btree_req_type>> &dependent_req_q, 
                            boost::intrusive_ptr<btree_req_type> cookie, bool is_sync);
@@ -48,6 +50,7 @@ public:
     static void read_node_lock(btree_store_t *store, BtreeNodePtr bn, bool is_write_modifiable,
                                std::deque<boost::intrusive_ptr<btree_req_type>> *dependent_req_q);
 
+    static void copy_node(btree_store_t *store, BtreeNodePtr copy_from, BtreeNodePtr copy_to);
     static void ref_node(btree_node_t *bn);
     static bool deref_node(btree_node_t *bn);
 };

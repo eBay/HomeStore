@@ -328,7 +328,7 @@ namespace homeds {
 
             ci++;
         }
-        if(ci == this->get_no_of_elements_filled() && !siFound){
+        if(ci == this->get_no_of_elements_filled() && !siFound) {
             si=ei=ci;
         }
 

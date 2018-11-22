@@ -53,10 +53,10 @@ protected:
         if (init) {
             set_leaf(true);
             set_total_entries(0);
-            set_next_bnode(INVALID_BNODEID);
+            set_next_bnode(bnodeid_t::empty_bnodeid());
             set_gen(0);
             set_valid_node(true);
-            set_edge_id(INVALID_BNODEID);
+            set_edge_id(bnodeid_t::empty_bnodeid());
             set_node_id(*id);
         } else {
             assert(get_node_id() == *id);
@@ -67,10 +67,10 @@ protected:
         if (init) {
             set_leaf(true);
             set_total_entries(0);
-            set_next_bnode(INVALID_BNODEID);
+            set_next_bnode(bnodeid_t::empty_bnodeid());
             set_gen(0);
             set_valid_node(true);
-            set_edge_id(INVALID_BNODEID);
+            set_edge_id(bnodeid_t::empty_bnodeid());
             set_node_id(id);
         } else {
             assert(get_node_id() == id);
@@ -141,6 +141,10 @@ protected:
         get_persistent_header()->node_gen++;
     }
 
+    void flip_pc_gen_flag() {
+        get_persistent_header()->node_id.m_pc_gen_flag = get_persistent_header()->node_id.m_pc_gen_flag ? 0 : 1;
+    }
+    
     void set_gen(uint64_t g) {
         get_persistent_header()->node_gen = g;
     }
@@ -294,22 +298,19 @@ protected:
 
     //////////// Edge Related Methods ///////////////
     void invalidate_edge() {
-        set_edge_id(INVALID_BNODEID);
+        set_edge_id(bnodeid::empty_bnodeid());
     }
 
     void set_edge_value(const BtreeValue &v) {
-        BNodeptr *p = (BNodeptr *) &v;
-        set_edge_id(p->get_node_id());
+        BtreeNodeInfo *bni = (BtreeNodeInfo *) &v;
+        set_edge_id(bni->bnode_id());
     }
 
     void get_edge_value(BtreeValue *v) const {
         if (is_leaf()) {
             return;
         }
-
-        BNodeptr bnp(get_edge_id());
-        uint32_t size;
-        v->set_blob(bnp.get_blob());
+        v->set_blob(BtreeNodeInfo(get_edge_id()).get_blob());
     }
 
     bool has_valid_edge() const {
@@ -317,10 +318,9 @@ protected:
             return false;
         }
 
-        BNodeptr bnp(get_edge_id());
-        return (bnp.is_valid_ptr());
+        return (get_edge_id().is_valid());
     }
-
+    
     void get_adjacent_indicies(uint32_t cur_ind, vector< int > &indices_list, uint32_t max_indices) const {
         uint32_t i = 0;
         uint32_t start_ind;

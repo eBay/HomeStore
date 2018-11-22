@@ -18,7 +18,7 @@ DeviceManager::DeviceManager(NewVDevCallback vcb,
                              std::shared_ptr<iomgr::ioMgr> iomgr,
                              homeio::comp_callback cb) :
         m_open_flags(O_RDWR | O_DIRECT),
-        comp_cb(cb), m_new_vdev_cb(vcb), iomgr(iomgr){
+        comp_cb(cb), m_new_vdev_cb(vcb), iomgr(iomgr) {
     m_pdev_info.num_phys_devs = 0;
     m_last_vdevid = INVALID_VDEV_ID;
     m_vdev_metadata_size = vdev_metadata_size;

@@ -55,6 +55,7 @@ int main(int argc, char** argv) {
     homestore::blk_alloc_hints hints;
     hints.desired_temp = 0;
     hints.dev_id_hint = -1;
+    hints.is_contiguous = true;
 
     for (auto i = 0; i < 4; i++) {
         uint8_t nblks = 1;

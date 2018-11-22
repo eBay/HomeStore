@@ -62,7 +62,9 @@ DecBNodeType(void) insert(int ind, const BtreeKey &key, const BtreeValue &val) {
 DecBNodeType(void) remove(int ind) {
     call_variant_method(this, remove, ind);
 }
-
+DecBNodeType(void) remove(int ind_s, int ind_e) {
+    call_variant_method(this, remove, ind_s, ind_e);
+}
 DecBNodeType(void) update(int ind, const BtreeValue &val) {
     call_variant_method(this, update, ind, val);
 }
@@ -130,6 +132,9 @@ DecBNodeType(uint32_t) get_available_size(const BtreeConfig &cfg) const {
 DecBNodeType(bnodeid_t) get_node_id() const {
     return call_variant_method_const(this, get_node_id);
 }
+DecBNodeType(void) set_node_id(bnodeid_t id) {
+    call_variant_method(this, set_node_id,id);
+}
 DecBNodeType(bnodeid_t) get_next_bnode() const {
     return call_variant_method_const(this, get_next_bnode);
 }
@@ -138,6 +143,9 @@ DecBNodeType(void) set_next_bnode(bnodeid_t b) {
 }
 DecBNodeType(bnodeid_t) get_edge_id() const {
     return call_variant_method_const(this, get_edge_id);
+}
+DecBNodeType(void) invalidate_edge() {
+    call_variant_method(this, invalidate_edge);
 }
 DecBNodeType(void) set_edge_id(bnodeid_t edge) {
     call_variant_method(this, set_edge_id, edge);
@@ -153,6 +161,9 @@ DecBNodeType(uint64_t) get_gen() const {
 }
 DecBNodeType(void) inc_gen() {
     call_variant_method(this, inc_gen);
+}
+DecBNodeType(void) flip_pc_gen_flag() {
+    call_variant_method(this, flip_pc_gen_flag);
 }
 DecBNodeType(void) set_gen(uint64_t g) {
     call_variant_method(this, set_gen, g);

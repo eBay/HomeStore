@@ -93,6 +93,34 @@ struct BlkId {
         set(UINT64_MAX, UINT8_MAX, UINT16_MAX);
     }
 
+    BlkId(BlkId &other) {
+        m_id = other.m_id;
+        m_nblks = other.m_nblks;
+        m_chunk_num = other.m_chunk_num;
+    }
+
+    BlkId get_blkid_at(uint32_t offset) const {
+        assert(offset % BLKSTORE_BLK_SIZE == 0);
+        uint32_t remaining_size = ((m_nblks - (offset/BLKSTORE_BLK_SIZE)) * 
+                                  BLKSTORE_BLK_SIZE);
+        return(get_blkid_at(offset, remaining_size));
+    }
+
+    BlkId get_blkid_at(uint32_t offset, uint32_t size) const {
+        assert(size % BLKSTORE_BLK_SIZE == 0);
+        assert(offset % BLKSTORE_BLK_SIZE == 0);
+
+        BlkId other;
+
+        other.m_id = m_id + (offset/BLKSTORE_BLK_SIZE);
+        other.m_nblks = (size/BLKSTORE_BLK_SIZE);
+        other.m_chunk_num = m_chunk_num;
+
+        assert(other.m_id < m_id + m_nblks);
+        assert((other.m_id + other.m_nblks) <= (m_id + m_nblks));
+        return other;
+    }
+
     BlkId(const BlkId &other) = default;
     BlkId &operator=(const BlkId &other) = default;
 
@@ -120,6 +148,11 @@ struct BlkId {
 
     uint16_t get_chunk_num() const {
         return m_chunk_num;
+    }
+
+    uint32_t data_size() const {
+        /* TODO change this macro to function */
+        return (m_nblks * BLKSTORE_BLK_SIZE); 
     }
 
     std::string to_string() const {

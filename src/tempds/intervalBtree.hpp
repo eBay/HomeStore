@@ -10,7 +10,7 @@ namespace IntervalBtree {
 
         class baseClassBlob {
                 public: 
-                        baseClassBlob(){};
+                        baseClassBlob() {};
                         virtual baseClassBlob& operator|=(struct baseClassBlob& other) = 0;
                         virtual baseClassBlob& operator=(struct baseClassBlob& other) = 0;
                         virtual bool operator==(struct baseClassBlob& other) = 0;

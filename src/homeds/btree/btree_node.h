@@ -31,6 +31,7 @@ public:
 #endif
 
     void remove(int ind);
+    void remove(int ind_s,int ind_e);
     void update(int ind, const BtreeValue &val);
     void update(int ind, const BtreeKey &key, const BtreeValue &val);
 
@@ -42,7 +43,7 @@ public:
                                            uint32_t nentries);
     uint32_t move_in_from_right_by_size(const BtreeConfig &cfg, VariantNode<NodeType, K, V, NodeSize> *other_node,
                                         uint32_t size);
-
+    
     uint32_t get_available_size(const BtreeConfig &cfg) const;
     bool is_split_needed(const BtreeConfig &cfg, const BtreeKey &key, const BtreeValue &value, int *out_ind_hint) const;
 
@@ -137,6 +138,7 @@ public:
     void insert(const BtreeKey &key, const BtreeValue &val);
     void insert(int ind, const BtreeKey &key, const BtreeValue &val);
     void remove(int ind);
+    void remove(int ind_s, int ind_e);
     void update(int ind, const BtreeValue &val);
     void update(int ind, const BtreeKey &key, const BtreeValue &val);
 
@@ -150,9 +152,11 @@ public:
     uint32_t get_total_entries() const;
     uint32_t get_available_size(const BtreeConfig &cfg) const;
     bnodeid_t get_node_id() const;
+    void set_node_id(bnodeid_t id);
     bnodeid_t get_next_bnode() const;
     void set_next_bnode(bnodeid_t b);
     bnodeid_t get_edge_id() const;
+    void invalidate_edge();
     void set_edge_id(bnodeid_t edge);
 
     void set_valid_node(bool valid);
@@ -165,6 +169,7 @@ public:
 
     uint64_t get_gen() const;
     void inc_gen();
+    void flip_pc_gen_flag();
     void set_gen(uint64_t g);
 
     ///////////// Move and Delete related operations on a node //////////////
@@ -182,7 +187,7 @@ public:
                                            uint32_t nentries);
     uint32_t move_in_from_right_by_size(const BtreeConfig &cfg, boost::intrusive_ptr<BtreeNode> &other_node,
                                         uint32_t size);
-
+    
     void lock(homeds::thread::locktype l);
     void unlock(homeds::thread::locktype l);
     void lock_upgrade();
@@ -197,9 +202,10 @@ public:
             BtreeNodeAllocator<NodeSize>::deallocate((uint8_t *)n);
         }
     }
-
-    uint32_t get_nth_obj_size(int ind) const;
     void get_nth_key(int ind, BtreeKey *outkey, bool copy) const;
+
+protected:
+    uint32_t get_nth_obj_size(int ind) const;
     void get_nth_value(int ind, BtreeValue *outval, bool copy) const;
     void get_nth_element(int ind, BtreeKey *out_key, BtreeValue *out_val, bool is_copy) const;
 

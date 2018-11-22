@@ -6,9 +6,20 @@
 #include "blk_allocator.h"
 #include <boost/heap/binomial_heap.hpp>
 #include <condition_variable>
+#include <vector>
+#include <atomic>
 
 namespace homestore {
 /****************** VarsizeBlkAllocator Section **********************/
+
+template <typename T>
+struct atomwrapper {
+    std::atomic<T> _a;
+    atomwrapper(T val) : _a(val) {}
+    atomwrapper(const std::atomic<T> &a) : _a(a.load()) {}
+    atomwrapper(const atomwrapper &other) : _a(other._a.load()) {}
+    atomwrapper &operator=(const atomwrapper &other) { _a.store(other._a.load()); }
+};
 
 class VarsizeBlkAllocConfig : public BlkAllocConfig {
 private:
@@ -17,8 +28,8 @@ private:
     uint32_t m_pages_per_portion;
     uint32_t m_pages_per_temp_group;
     uint64_t m_max_cache_blks;
-    uint64_t m_max_chunk_blks;
-    uint32_t m_max_chunk_size;
+    std::vector<uint32_t> m_slab_nblks;
+    std::vector<uint32_t> m_slab_capacity;
 
 public:
     VarsizeBlkAllocConfig() : VarsizeBlkAllocConfig(0, 0) {
@@ -49,12 +60,13 @@ public:
         m_max_cache_blks = ncache_entries;
     }
     
-    void set_max_cache_chunks(uint64_t ncache_entries) {
-        m_max_chunk_blks = ncache_entries;
-    }
-
-    void set_chunk_size(uint32_t size) {
-        m_max_chunk_size = size;
+    void set_slab(  std::vector<uint32_t> nblks,
+                    std::vector<float> weights  ) {
+        assert(nblks.size()+1 == weights.size());
+        m_slab_nblks.swap(nblks);
+        for (auto i = 0U; i < weights.size(); i++) {
+            m_slab_capacity.push_back((uint32_t)(m_max_cache_blks*weights[i]));
+        }
     }
 
     void set_pages_per_temp_group(uint64_t npgs_per_temp_group) {
@@ -88,6 +100,10 @@ public:
         return get_pages_per_portion() * get_blks_per_page();
     }
 
+    uint64_t get_blks_per_segment() const {
+        return (uint64_t) (get_total_blks() / get_total_segments());
+    }
+
     uint64_t get_total_portions() const {
         assert(get_total_pages() % get_pages_per_portion() == 0);
             return get_total_pages() / get_pages_per_portion();
@@ -108,13 +124,20 @@ public:
             return (uint32_t) ((get_total_pages() / get_pages_per_temp_group()) + 1);
         }
     }
-    
-    uint64_t get_max_cache_chunks() const {
-        return(m_max_chunk_blks);
+
+    uint32_t get_slab_cnt() const {
+        return m_slab_capacity.size();
     }
 
-    uint32_t get_chunk_size() const {
-        return(m_max_chunk_size);
+    uint32_t get_slab_capacity(uint32_t index) const {
+        return m_slab_capacity[index];
+    }
+
+    // Return slab index and capacity
+    std::pair<uint32_t,uint32_t> get_slab(uint32_t nblks) const {
+        uint32_t i = m_slab_nblks.size();
+        for(; i > 0 && nblks < m_slab_nblks[i-1]; i--);
+        return std::make_pair(i, m_slab_capacity[i]);
     }
 
     std::string to_string() {
@@ -140,15 +163,16 @@ public:
 
 private:
     uint64_t m_alloc_clock_hand;
-    uint64_t m_free_blks;
+    std::atomic<uint64_t> m_free_blks;
     uint64_t m_total_blks;
+    uint64_t m_total_portions;
     uint32_t m_seg_num; // Segment sequence number
-    SegQueue::handle_type m_seg_id;   // Opaque segment Id.
 
 public:
-    BlkAllocSegment(uint64_t nblks, uint32_t seg_num) {
+    BlkAllocSegment(uint64_t nblks, uint32_t seg_num, uint64_t nportions) :
+                m_total_portions(nportions) {
         set_total_blks(nblks);
-        set_free_blks(nblks);
+        add_free_blks(nblks);
         set_seg_num(seg_num);
         set_clock_hand(0);
     }
@@ -165,7 +189,7 @@ public:
     }
 
     void inc_clock_hand() {
-        if (m_alloc_clock_hand == m_total_blks) {
+        if (m_alloc_clock_hand == m_total_portions) {
             m_alloc_clock_hand = 0;
         } else {
             m_alloc_clock_hand++;
@@ -176,12 +200,17 @@ public:
         return (this->get_free_blks() < other_seg.get_free_blks());
     }
 
-    void set_free_blks(uint64_t nblks) {
-        m_free_blks = nblks;
+    void add_free_blks(uint64_t nblks) {
+        m_free_blks.fetch_add(nblks, std::memory_order_acq_rel);
+    }
+
+    void remove_free_blks(uint64_t nblks) {
+        if (get_free_blks() < nblks) return;
+        m_free_blks.fetch_sub(nblks, std::memory_order_acq_rel);
     }
 
     uint64_t get_free_blks() const {
-        return m_free_blks;
+        return m_free_blks.load(std::memory_order_acq_rel);
     }
 
     void set_total_blks(uint64_t a) {
@@ -198,14 +227,6 @@ public:
 
     uint32_t get_seg_num() const {
         return m_seg_num;
-    }
-
-    void set_segment_id(SegQueue::handle_type &seg_id) {
-        m_seg_id = seg_id;
-    }
-
-    SegQueue::handle_type get_segment_id() const {
-        return m_seg_id;
     }
 };
 
@@ -261,7 +282,7 @@ private:
         uint64_t m_blk_num:36;
         uint64_t m_nblks:10;   // Total number of blocks
         uint64_t m_temp :10;   // Temperature of each page
-	uint64_t padd:28; // will be removed later
+        uint64_t padd:28; // will be removed later
     } blob_t;
 
     blob_t *m_blob;
@@ -430,7 +451,9 @@ public:
     VarsizeBlkAllocator(VarsizeBlkAllocConfig &cfg);
     virtual ~VarsizeBlkAllocator();
 
-    BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid) override;
+    BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid, bool retry = true) override;
+    BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints, 
+                                 std::vector<BlkId> &out_blkid) override;
     void free(const BlkId &b) override;
 
     std::string to_string() const override;
@@ -451,16 +474,16 @@ private:
 
     VarsizeBlkAllocatorBtree *m_blk_cache; // Blk Entry caches
 
-    BlkAllocSegment::SegQueue m_heap_segments;  // Heap of segments within a region.
-    BlkAllocSegment *m_wait_alloc_segment; // A flag/hold variable, for caller thread
+    std::vector<BlkAllocSegment*> m_segments; // Lookup map for segment id - segment
+    BlkAllocSegment *m_wait_alloc_segment = nullptr; // A flag/hold variable, for caller thread
     // to pass which segment to look for sweep
 
     // Overall page and page group tables
     std::vector< BlkAllocPortion > m_blk_portions;
     std::vector< BlkAllocTemperatureGroup > m_temp_groups;
 
-    std::atomic< uint32_t > m_cache_n_entries; // Total number of page entries to cache
-    std::atomic< uint32_t > m_cache_chunk_entries; // Total number of page entries to cache
+    std::atomic< uint32_t > m_cache_n_entries; // Total number of blk entries to cache
+    std::vector<atomwrapper<uint32_t>> m_slab_entries; // Blk cnt for each slab in cache
 
 private:
     const VarsizeBlkAllocConfig &get_config() const override {
@@ -495,6 +518,14 @@ private:
 
     const BlkAllocPortion *blknum_to_portion_const(uint64_t blknum) const {
         return &m_blk_portions[blknum_to_portion_num(blknum)];
+    }
+
+    uint64_t blknum_to_segment_num(uint64_t blknum) const {
+        return blknum / get_config().get_blks_per_segment();
+    }
+
+    BlkAllocSegment *blknum_to_segment(uint64_t blknum) const {
+        return m_segments[blknum_to_segment_num(blknum)];
     }
 
     uint32_t blknum_to_tempgroup_num(uint64_t blknum) const {

@@ -205,6 +205,8 @@ public:
     void allocator_state_machine();
 
     BlkAllocStatus alloc(uint32_t size, uint32_t desired_temp, Blk *out_blk);
+    BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints, 
+                                 std::vector<BlkId> &out_blkid, bool retry = true) override;
 
     void free(Blk &blk);
 

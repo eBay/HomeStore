@@ -12,5 +12,7 @@ namespace omstore {
  * What this means is Caching layer, BlkStore layer, VirtualDev layer works only in this increments.
  */
 #define BLKSTORE_BLK_SIZE    4096U
+#define BLKSTORE_PAGE_SIZE   4096U
+#define BLKSTORE_ALIGN_SIZE  4096U
 }
 #endif //OMSTORE_STORE_LIMITS_H

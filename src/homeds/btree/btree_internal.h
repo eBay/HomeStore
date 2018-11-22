@@ -26,6 +26,8 @@ struct empty_writeback_req {
         }
     }
 };
+
+#if 0
 struct uint48_t {
     uint64_t m_x : 48;
 
@@ -54,13 +56,99 @@ struct uint48_t {
     bool operator!=(const uint48_t& other) const { return (m_x != other.m_x); }
     uint64_t to_integer() { return m_x; }
 } __attribute__((packed));
+#endif
 
 namespace homeds {
 namespace btree {
 
-#define BTREE_VMODULE_SET (VMODULE_ADD(bt_insert), VMODULE_ADD(bt_delete), )
+#define BTREE_VMODULE_SET (     \
+        VMODULE_ADD(bt_insert), \
+        VMODULE_ADD(bt_delete), \
+    )
 
-typedef uint48_t bnodeid_t;
+
+template <uint8_t NBits>
+constexpr uint64_t set_bits() {
+    return (NBits == 64) ? -1ULL : ((static_cast<uint64_t>(1) << NBits)-1);
+}
+
+struct bnodeid {
+    uint64_t m_id:63;           // TODO: We can reduce this if needbe later.
+    uint64_t m_pc_gen_flag:1;
+
+    bnodeid() : bnodeid(set_bits<63>(), 0) {}
+    bnodeid(uint64_t id, uint8_t gen_flag = 0) : m_id(id), m_pc_gen_flag(gen_flag) {}
+    bnodeid(const bnodeid &other) = default;
+
+    bool operator==(const bnodeid &bid) const { return (m_id == bid.m_id) && (m_pc_gen_flag == bid.m_pc_gen_flag); }
+    std::string to_string() {
+        std::stringstream ss;
+        ss << " Id:" << m_id <<",pcgen:" << m_pc_gen_flag;
+        return ss.str();
+    }
+
+    friend std::ostream& operator<<(std::ostream& os, const bnodeid& id) {
+        os << " Id:" << id.m_id << ",pcgen:" << id.m_pc_gen_flag; return os;
+    }
+
+    bool is_valid() const { return(m_id != set_bits<63>()); }
+    static bnodeid empty_bnodeid() { return bnodeid(); }
+} __attribute__((packed));
+
+typedef bnodeid bnodeid_t;
+
+#if 0
+struct bnodeid {
+    uint48_t m_id;
+    uint8_t m_pc_gen_flag:1;//parent child gen flag used to recover from split and merge
+    
+    bnodeid() {m_id=0;m_pc_gen_flag=0;}
+    bnodeid(const uint48_t &m_id, bool pc_gen_flag) : m_id(m_id), m_pc_gen_flag(pc_gen_flag?1:0) {}
+    bnodeid(uint64_t m_id, bool pc_gen_flag) : m_id(m_id), m_pc_gen_flag(pc_gen_flag?1:0) {}
+
+    bnodeid(const bnodeid &other) {
+        m_id = other.m_id;
+        m_pc_gen_flag = other.get_pc_gen_flag()?1:0;
+    }
+    
+    uint48_t get_id()  {
+        return m_id;
+    }
+
+    bool operator==(const bnodeid &other) const {
+        return (m_id == other.m_id && m_pc_gen_flag == other.m_pc_gen_flag);
+    }
+
+    void set_id(const uint48_t &id) {
+        m_id = id;
+    }
+    
+    void set_pc_gen_flag(bool pc_gen_flag) {
+        m_pc_gen_flag = pc_gen_flag?1:0;
+    }
+    
+    bool get_pc_gen_flag() const{
+        return m_pc_gen_flag;
+    }
+    
+    std::string to_string() {
+        std::stringstream ss;
+        std::string temp="0";
+        if(m_pc_gen_flag==1)
+            temp="1";
+        ss<< " Id:"<<m_id.m_x <<",pcgen:"<< temp;
+        return ss.str();
+    }
+    
+    bool is_invalidate_id() {
+        bnodeid temp(-1,0);
+        if(this->m_id.m_x == temp.m_id.m_x)return true;
+        else return false;
+    }
+    
+}__attribute__((packed));
+
+#endif
 
 typedef enum {
     BTREE_SUCCESS = 0,
@@ -303,34 +391,30 @@ public:
 };
 #endif
 
-#define INVALID_BNODEID -1
-
-#define is_valid_btree_node_id(id) (id != (uint64_t)INVALID_BNODEID)
-
-class BNodeptr : public BtreeValue {
+class BtreeNodeInfo : public BtreeValue {
   private:
-    bnodeid_t m_id;
+    bnodeid m_bnodeid;
 
   public:
-    BNodeptr() { m_id = INVALID_BNODEID; }
+    BtreeNodeInfo() : m_bnodeid(bnodeid::empty_bnodeid()) {}
 
-    explicit BNodeptr(const bnodeid_t& ptr) { m_id = ptr; }
-    BNodeptr& operator=(const BNodeptr& other) = default;
+    explicit BtreeNodeInfo(const bnodeid& id): m_bnodeid(id) {}
+    BtreeNodeInfo& operator=(const BtreeNodeInfo& other) = default;
 
-    bnodeid_t get_node_id() const { return m_id; }
-    void set_node_id(bnodeid_t id) { m_id = id; }
-    bool is_valid_ptr() const { return (m_id != INVALID_BNODEID); }
+    bnodeid bnode_id() const { return m_bnodeid; }
+    void set_bnode_id(bnodeid bid) { m_bnodeid = bid; }
+    bool has_valid_bnode_id() const { return (m_bnodeid.is_valid()); }
 
     homeds::blob get_blob() const override {
         homeds::blob b;
         b.size = sizeof(bnodeid_t);
-        b.bytes = (uint8_t*)&m_id;
+        b.bytes = (uint8_t *)&m_bnodeid;
         return b;
     }
 
     void set_blob(const homeds::blob& b) override {
         assert(b.size == sizeof(bnodeid_t));
-        m_id = *(bnodeid_t*)b.bytes;
+        m_bnodeid = *(bnodeid_t *)b.bytes;
     }
 
     void copy_blob(const homeds::blob& b) override { set_blob(b); }
@@ -340,22 +424,19 @@ class BNodeptr : public BtreeValue {
     }
 
     uint32_t get_blob_size() const override { return sizeof(bnodeid_t); }
-
     static uint32_t get_fixed_size() { return sizeof(bnodeid_t); }
-
     void set_blob_size(uint32_t size) override {}
-
     uint32_t estimate_size_after_append(const BtreeValue& new_val) override { return sizeof(bnodeid_t); }
 
-    bool operator==(const BNodeptr& other) const { return (m_id == other.m_id); }
-
-#ifdef DEBUG
-    std::string to_string() const override {
+    std::string to_string() const override{
         std::stringstream ss;
-        ss << m_id.m_x;
+        ss << m_bnodeid << ", isValidId:" << has_valid_bnode_id();
         return ss.str();
     }
-#endif
+
+    friend std::ostream& operator<<(std::ostream &os, const BtreeNodeInfo &b) {
+        os << b.m_bnodeid << ", isValidPtr: " << b.has_valid_bnode_id(); return os;
+    }
 };
 
 class EmptyClass : public BtreeValue {
@@ -445,8 +526,8 @@ template <size_t NodeSize, size_t CacheCount = DEFAULT_FREELIST_CACHE_COUNT> cla
         return bt_node_allocator->get_allocator()->allocate(NodeSize);
     }
 
-    static void deallocate(uint8_t* mem) {
-        //LOG(INFO) << "Deallocating memory " << (void*)mem;
+    static void deallocate(uint8_t *mem) {
+        //LOG(INFO) << "Deallocating memory " << (void *)mem;
         bt_node_allocator->get_allocator()->deallocate(mem, NodeSize);
     }
 

@@ -101,7 +101,7 @@ class SSDBtreeStore {
     struct ssd_btree_req : homestore::blkstore_req<btree_buffer_t> {
            boost::intrusive_ptr<homestore::writeback_req> cookie;
            ssd_btree_req() {};
-           ~ssd_btree_req(){};
+           ~ssd_btree_req() {};
     };
 public:
     using HeaderType = BtreeBuffer<K, V, InteriorNodeType, LeafNodeType, NodeSize>;
@@ -112,8 +112,8 @@ public:
     }
 
     BtreeStore(BtreeConfig &cfg, void *btree_specific_context, comp_callback comp_cbt) {
-        this->cfg = cfg;
-        this->cfg.set_node_area_size(NodeSize - sizeof(SSDBtreeNode) - sizeof(LeafPhysicalNode));
+        m_cfg = cfg;
+        m_cfg.set_node_area_size(NodeSize - sizeof(SSDBtreeNode) - sizeof(LeafPhysicalNode));
 
         auto bt_dev_info = (btree_device_info *)btree_specific_context;
         m_comp_cb = comp_cbt;
@@ -123,12 +123,14 @@ public:
         // Create or load the Blkstore out of this info
         if (bt_dev_info->new_device) {
             m_blkstore = new homestore::BlkStore<homestore::VdevFixedBlkAllocatorPolicy, btree_buffer_t>(
-                    bt_dev_info->dev_mgr, m_cache, bt_dev_info->size, homestore::BlkStoreCacheType::WRITEBACK_CACHE, 0,
+                    bt_dev_info->dev_mgr, m_cache, bt_dev_info->size,
+                    homestore::BlkStoreCacheType::RD_MODIFY_WRITEBACK_CACHE, 0,
                     (std::bind(&SSDBtreeStore::process_completions, this, std::placeholders::_1)));
         } else {
-            m_blkstore = new homestore::BlkStore<homestore::VdevFixedBlkAllocatorPolicy, btree_buffer_t>
-                (bt_dev_info->dev_mgr, m_cache, bt_dev_info->vb, homestore::BlkStoreCacheType::WRITEBACK_CACHE,
-                 (std::bind(&SSDBtreeStore::process_completions, this, std::placeholders::_1)));
+            m_blkstore = new homestore::BlkStore<homestore::VdevFixedBlkAllocatorPolicy, btree_buffer_t>(
+                    bt_dev_info->dev_mgr, m_cache, bt_dev_info->vb,
+                    homestore::BlkStoreCacheType::RD_MODIFY_WRITEBACK_CACHE,
+                    (std::bind(&SSDBtreeStore::process_completions, this, std::placeholders::_1)));
         }
     }
 
@@ -151,10 +153,14 @@ public:
         return NodeSize - sizeof(SSDBtreeNode) - sizeof(LeafPhysicalNode);
     }
 
-    static boost::intrusive_ptr<SSDBtreeNode> alloc_node(SSDBtreeStore *store, bool is_leaf) {
+    static boost::intrusive_ptr<SSDBtreeNode> alloc_node(SSDBtreeStore *store, bool is_leaf,
+                                           bool &is_new_allocation,// indicates if allocated node is same as copy_from
+                                           boost::intrusive_ptr<SSDBtreeNode> copy_from = nullptr) {
+
+        is_new_allocation=true;
         homestore::blk_alloc_hints hints;
         homestore::BlkId blkid;
-        auto safe_buf = store->m_blkstore->alloc_blk_cached(1, hints, &blkid);
+        auto safe_buf = store->m_blkstore->alloc_blk_cached(1 * BLKSTORE_PAGE_SIZE, hints, &blkid);
 
 #ifndef NDEBUG
         assert(safe_buf->is_btree);
@@ -163,19 +169,21 @@ public:
         homeds::blob b = safe_buf->at_offset(0);
         assert(b.size == NodeSize);
         if (is_leaf) {
-            bnodeid_t bid(blkid.to_integer());
-            auto n = new (b.bytes) VariantNode<LeafNodeType, K, V, NodeSize>( &bid, true, store->cfg);
+            bnodeid_t bid(blkid.to_integer(),0);
+            auto n = new (b.bytes) VariantNode<LeafNodeType, K, V, NodeSize>( &bid, true, store->m_cfg);
         } else {
-            bnodeid_t bid(blkid.to_integer());
-            auto n = new (b.bytes) VariantNode<InteriorNodeType, K, V, NodeSize>( &bid, true, store->cfg);
+            bnodeid_t bid(blkid.to_integer(),0);
+            auto n = new (b.bytes) VariantNode<InteriorNodeType, K, V, NodeSize>( &bid, true, store->m_cfg);
         }
+        boost::intrusive_ptr<SSDBtreeNode> new_node = boost::static_pointer_cast<SSDBtreeNode>(safe_buf);
 
-        return boost::static_pointer_cast<SSDBtreeNode>(safe_buf);
+        if (copy_from != nullptr) { copy_node(store, copy_from, new_node); }
+        return new_node;
     }
 
     static boost::intrusive_ptr<SSDBtreeNode> read_node(SSDBtreeStore *store, bnodeid_t id) {
         // Read the data from the block store
-        homestore::BlkId blkid(id.to_integer());
+        homestore::BlkId blkid(id.m_id);
         boost::intrusive_ptr< ssd_btree_req >req(new ssd_btree_req());
         req->is_read = true;
         req->isSyncCall = true;
@@ -188,11 +196,21 @@ public:
         return boost::static_pointer_cast<SSDBtreeNode>(safe_buf);
     }
 
+    static void copy_node(SSDBtreeStore *store, boost::intrusive_ptr<SSDBtreeNode> copy_from,
+                        boost::intrusive_ptr<SSDBtreeNode> copy_to) {
+        bnodeid_t original_to_id = copy_to->get_node_id();
+        original_to_id.m_pc_gen_flag = copy_from->get_node_id().m_pc_gen_flag; //copy pc gen flag
+        boost::intrusive_ptr< btree_buffer_t > to_buff = boost::dynamic_pointer_cast< btree_buffer_t >(copy_to);
+        boost::intrusive_ptr< btree_buffer_t > frm_buff = boost::dynamic_pointer_cast< btree_buffer_t >(copy_from);
+        to_buff->set_memvec(frm_buff->get_memvec_intrusive(), frm_buff->get_data_offset(), frm_buff->get_cache_size());
+        copy_to->set_node_id(original_to_id);//restore original copy_to id
+    }
+    
     static void write_node(SSDBtreeStore *store, boost::intrusive_ptr<SSDBtreeNode> bn,
-                        std::deque<boost::intrusive_ptr<homestore::writeback_req>> &dependent_req_q, 
+                        std::deque<boost::intrusive_ptr<homestore::writeback_req>> &dependent_req_q,
                         boost::intrusive_ptr <homestore::writeback_req> cookie, 
                         bool is_sync) {
-        homestore::BlkId blkid(bn->get_node_id().to_integer());
+        homestore::BlkId blkid(bn->get_node_id().m_id);
         boost::intrusive_ptr< ssd_btree_req >req(new ssd_btree_req());
         req->is_read = false;
         req->cookie = cookie;
@@ -231,7 +249,7 @@ public:
 
     static void free_node(SSDBtreeStore *store, boost::intrusive_ptr<SSDBtreeNode> bn,
                     std::deque<boost::intrusive_ptr<homestore::writeback_req>> &dependent_req_q) {
-        homestore::BlkId blkid(bn->get_node_id().to_integer());
+        homestore::BlkId blkid(bn->get_node_id().m_id);
         store->m_blkstore->free_blk(blkid, boost::none, boost::none, dependent_req_q);
     }
 
@@ -253,7 +271,7 @@ private:
      */
     homestore::Cache <homestore::BlkId>* m_cache;
 
-    BtreeConfig cfg;
+    BtreeConfig m_cfg;
 };
 } }
 

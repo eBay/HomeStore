@@ -113,7 +113,7 @@ public:
     static boost::intrusive_ptr<SSDBtreeNode> alloc_node(SSDBtreeImpl *impl, bool is_leaf) {
         blk_alloc_hints hints;
         BlkId blkid;
-        auto safe_buf = impl->m_blkstore->alloc_blk_cached(1, hints, &blkid);
+        auto safe_buf = impl->m_blkstore->alloc_blk_cached(1 * BLKSTORE_PAGE_SIZE, hints, &blkid);
 
         // Access the physical node buffer and initialize it
         homeds::blob b = safe_buf->at_offset(0);

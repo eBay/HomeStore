@@ -24,11 +24,7 @@ namespace homeio {
 #define MAX_COMPLETIONS (MAX_OUTSTANDING_IO)  // how many completions to process in one shot
 
 using Clock = std::chrono::steady_clock;
-#ifndef NDEBUG
 #define CURRENT_CLOCK(name) Clock::time_point (name) = Clock::now();
-#else
-#define CURRENT_CLOCK(name)
-#endif
 
 typedef std::function< void (int64_t res, uint8_t* cookie) > comp_callback;
 #ifdef linux
@@ -81,7 +77,7 @@ private:
 #else 
 class DriveEndPoint : public iomgr::EndPoint {
 public:
-	DriveEndPoint(iomgr::ioMgr *iomgr, comp_callback cb){};
+	DriveEndPoint(iomgr::ioMgr *iomgr, comp_callback cb) {};
 }
 #endif
 }

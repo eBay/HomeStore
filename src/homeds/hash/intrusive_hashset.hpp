@@ -127,8 +127,44 @@ public:
         return found;
     }
 
-    /* It remove if ref_cnt is 1 */
-    bool check_and_remove(const K &k) {
+    bool safe_remove(const K &k, const std::function<void(V *)> &found_cb, 
+                        bool &can_remove) {
+        bool ret = false;
+
+        write_lock();
+        for (auto it(m_list.begin()), itend(m_list.end()); it != itend; ++it) {
+            int x = K::compare(*(V::extract_key(*it)), k);
+            if (x == 0) {
+
+                /* set the state. It doesn't free the buffer
+                 * right away if ref count is not 1. It set the
+                 * state and free it later when ref count becomes 1
+                 */
+                V::set_free_state(*it);
+                ret = true;
+                if (V::test_le((const V &)*it, 1)) {
+                    can_remove = true;
+                    m_list.erase(it);
+                    if (found_cb) {
+                        found_cb(&*it);
+                    }
+                    write_unlock();
+                    V::reset_free_state(*it);
+                    /* don't call deref while holding the lock */
+                    V::deref(*it);
+                    write_lock();
+                 }
+                 break;
+            } else if (x > 0) {
+                 break;
+            }
+        }
+        write_unlock();
+        return ret;   
+    }
+
+    /* It remove only if ref_cnt is 1 */
+    bool check_and_remove(const K &k, const std::function<void(V *)> &found_cb) {
         bool ret = false;
 
         write_lock();
@@ -137,6 +173,9 @@ public:
             if (x == 0) {
                 if (V::test_le((const V &)*it, 1)) {
                     m_list.erase(it);
+                    if (found_cb) {
+                        found_cb(&*it);
+                    }
                     V::deref(*it);
                     ret = true;
                 } else {
@@ -206,7 +245,6 @@ public:
 #ifdef GLOBAL_HASHSET_LOCK
         std::lock_guard<std::mutex> lk(m);
 #endif
-
         const K *pk = V::extract_key(v);
         HashBucket<K, V> *hb = get_bucket(*pk);
         return (hb->insert(*pk, v, outv, found_cb));
@@ -237,6 +275,15 @@ public:
         return (hb->get(k, outv));
     }
 
+    bool safe_remove(const K &k, uint64_t hash_code, bool &can_remove, 
+                     const std::function<void(V *)> &found_cb = nullptr) {
+#ifdef GLOBAL_HASHSET_LOCK
+        std::lock_guard<std::mutex> lk(m);
+#endif
+        HashBucket<K, V> *hb = get_bucket(hash_code);
+        return (hb->safe_remove(k, found_cb, can_remove));
+    }
+
     bool remove(const K &k, const std::function<void(V *)> &found_cb = nullptr) {
 #ifdef GLOBAL_HASHSET_LOCK
         std::lock_guard<std::mutex> lk(m);
@@ -253,12 +300,12 @@ public:
         return (hb->remove(k, found_cb));
     }
 
-    bool check_and_remove(const K &k) {
+    bool check_and_remove(const K &k, uint64_t hash_code, const std::function<void(V *)> &found_cb = nullptr) {
 #ifdef GLOBAL_HASHSET_LOCK
         std::lock_guard<std::mutex> lk(m);
 #endif
-        HashBucket<K, V> *hb = get_bucket(k);
-        return (hb->check_and_remove(k));
+        HashBucket<K, V> *hb = get_bucket(hash_code);
+        return (hb->check_and_remove(k, found_cb));
     }
 
 private:

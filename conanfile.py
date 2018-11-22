@@ -24,7 +24,8 @@ class HomestoreConan(ConanFile):
                 ("farmhash/1.0.0@oss/stable"),
                 ("folly/2018.09.10.00@bincrafters/stable"),
                 ("iomgr/2.0.5@sds/stable"),
-                ("sds_metrics/0.2.0@sds/testing"),
+                ("sds_metrics/0.2.2@sds/testing"),
+                ("OpenSSL/1.0.2p@conan/stable"),
                 ("sds_logging/3.2.4@sds/stable"))
 
     generators = "cmake"

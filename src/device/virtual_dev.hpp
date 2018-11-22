@@ -13,12 +13,9 @@
 #include <boost/range/irange.hpp>
 #include <map>
 #include <error/error.h>
-#include <volume/perf_metrics.hpp>
+#include <metrics/perf_metrics.hpp>
 
 namespace homestore {
-
-#define VDEV_LABEL     " for Homestore Virtual Device"
-#define PHYSICAL_HIST     "physical"
 
 class VdevFixedBlkAllocatorPolicy {
 public:
@@ -52,9 +49,18 @@ public:
         vconfig->set_total_blks(((uint64_t)size)/blk_size);
 
         vconfig->set_pages_per_temp_group(100); // TODO: Recalculate based on size set aside for temperature entries
-        vconfig->set_max_cache_blks(vconfig->get_total_pages()/4); // Cache quarter of the blocks
-        vconfig->set_max_cache_chunks(vconfig->get_total_pages()/(16 * 64)); // quarter of Cache should have contiguous blocks
-        vconfig->set_chunk_size(64);
+        auto cache_blks = (vconfig->get_total_pages()*vconfig->get_blks_per_page()) / 4;
+        vconfig->set_max_cache_blks(cache_blks); // Cache quarter of the blocks
+
+        /* Blk sizes in slabs : size < 8k, 8k <= size < 16k,
+         * 16k <= size < 32k, 32k <= size < 64k, size >= 64k
+         */
+        std::vector<uint32_t> slab_limits(4, 0);
+        std::vector<float> slab_weights(5, 0.2);
+        for (auto i = 0U; i < slab_limits.size(); i++) {
+            slab_limits[i] = (8192*(1<<i))/vconfig->get_blk_size();
+        }
+        vconfig->set_slab(slab_limits, slab_weights);
     }
 };
 
@@ -214,6 +220,7 @@ public:
     
     void process_completions(boost::intrusive_ptr<virtualdev_req> req) {
 
+        assert(req->err == no_error);
         comp_cb(req);
         /* XXX:we probably have to do something if a write/read is spread
          * across the chunks from this layer.
@@ -245,7 +252,22 @@ public:
         chunk->set_blk_allocator(ba);
     }
 
-    BlkAllocStatus alloc_blk(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid) {
+    BlkAllocStatus alloc_blk(uint8_t nblks, const blk_alloc_hints &hints, 
+                             BlkId *out_blkid) {
+        std::vector<BlkId> blkid;
+        assert(hints.is_contiguous);
+        auto ret = alloc_blk(nblks, hints, blkid);
+        if (ret == BLK_ALLOC_SUCCESS) {
+            assert(blkid.size() == 1);
+            *out_blkid = blkid[0];
+        } else {
+            assert(blkid.size() == 0);
+        }
+        return ret;
+    }
+
+    BlkAllocStatus alloc_blk(uint8_t nblks, const blk_alloc_hints &hints, 
+                             std::vector<BlkId> &out_blkid) {
         uint32_t dev_ind {0};
         uint32_t chunk_num, start_chunk_num;
         BlkAllocStatus status = BLK_ALLOC_FAILED;
@@ -285,7 +307,9 @@ public:
 
         if (status == BLK_ALLOC_SUCCESS) {
             // Set the id as globally unique id
-            *out_blkid = to_glob_uniq_blkid(*out_blkid, picked_chunk);
+            for (uint32_t i = 0; i < out_blkid.size(); i++) {
+                out_blkid[i] = to_glob_uniq_blkid(out_blkid[i], picked_chunk);
+            }
         }
         return status;
     }
@@ -299,34 +323,35 @@ public:
     }
 
     void init_perf_metrics() {
-        PerfMetrics *perf = PerfMetrics::getInstance();
-        auto name = std::string(PHYSICAL_HIST);
-        perf->registerHistogram(name, name+VDEV_LABEL, "");
         write_time = 0;
         mirror_time = 0;
     }
 
-    void write(const BlkId &bid, const homeds::MemVector<BLKSTORE_BLK_SIZE> &buf, 
-            boost::intrusive_ptr <virtualdev_req> req) {
+    void write(const BlkId &bid, const homeds::MemVector &buf, 
+            boost::intrusive_ptr <virtualdev_req> req, uint32_t data_offset = 0) {
         BlkOpStatus ret_status = BLK_OP_SUCCESS;
         uint32_t size = bid.get_nblks() * get_blk_size();
         struct iovec iov[BlkId::max_blks_in_op()];
         int iovcnt = 0;
 
         Clock::time_point startTime = Clock::now();
-        assert(buf.size() == bid.get_nblks() * BLKSTORE_BLK_SIZE);
 
         uint32_t p = 0;
-        for (auto i : boost::irange<uint32_t>(0, buf.npieces())) {
+        uint32_t end_offset = bid.data_size() + data_offset;
+        while (data_offset != end_offset) {
             homeds::blob b;
-            buf.get(&b, i);
-
-            // TODO: Also verify the sum of sizes are not greater than a page size.
+            buf.get(&b, data_offset);
             iov[iovcnt].iov_base = b.bytes;
-            iov[iovcnt].iov_len = b.size;
+            if (data_offset + b.size > end_offset) {
+                iov[iovcnt].iov_len = end_offset - data_offset;
+            } else {
+                iov[iovcnt].iov_len = b.size;
+            }
+            data_offset += iov[iovcnt].iov_len;
             iovcnt++;
         }
 
+        assert(data_offset == end_offset);
         PhysicalDevChunk *chunk;
         
         req->version = 0xDEAD;
@@ -341,7 +366,7 @@ public:
             (std::chrono::duration_cast< std::chrono::nanoseconds >(Clock::now() -
                                                                     startTime)).count();
         write_cnt++;
-        if(req->isSyncCall){
+        if(req->isSyncCall) {
             chunk->get_physical_dev_mutable()->sync_writev(iov, iovcnt, size, dev_offset);
         } else {
             req->inc_ref();
@@ -350,10 +375,9 @@ public:
         }
 
         /* Update the performance metric */
-        PerfMetrics *perf = PerfMetrics::getInstance();
         int64_t physical_time =
             (std::chrono::duration_cast< std::chrono::nanoseconds >(Clock::now() - startTime)).count();
-        assert(perf->updateHistogram(PHYSICAL_HIST, physical_time));
+        PerfMetrics::getInstance()->updateHist(VDEV_PHYSICAL_H, physical_time);
 
         if (get_nmirrors()) {
             uint64_t primary_chunk_offset = dev_offset - chunk->get_start_offset();
@@ -363,7 +387,7 @@ public:
                 for (auto mchunk : m_mirror_chunks.find(chunk)->second) {
                     dev_offset = mchunk->get_start_offset() + primary_chunk_offset;
                     try {
-                        if(req->isSyncCall){
+                        if(req->isSyncCall) {
                             mchunk->get_physical_dev_mutable()->sync_writev(iov, iovcnt, size,
                                     dev_offset);
                         }else {
@@ -386,7 +410,7 @@ public:
      * have offset as one of the parameter. Reason for that is its actually ok and make the interface and also
      * buf (caller buf) simple and there is no use case. However, we need to keep the blk size to be small as possible
      * to avoid read overhead */
-    void read(const BlkId &bid, const homeds::MemPiece<BLKSTORE_BLK_SIZE> &mp, 
+    void read(const BlkId &bid, const homeds::MemPiece &mp, 
             boost::intrusive_ptr<virtualdev_req> req) {
         PhysicalDevChunk *primary_chunk;
         bool failed = false;
@@ -397,7 +421,7 @@ public:
                 std::placeholders::_1);
         req->size = mp.size();
         try {
-            if(req->isSyncCall){
+            if(req->isSyncCall) {
                 primary_chunk->get_physical_dev_mutable()->sync_read((char *) mp.ptr(), mp.size(),
                         primary_dev_offset);
             }else {
@@ -437,7 +461,7 @@ public:
         }
     }
 
-    void readv(const BlkId &bid, const homeds::MemVector<BLKSTORE_BLK_SIZE> &buf, 
+    void readv(const BlkId &bid, const homeds::MemVector &buf, 
                             boost::intrusive_ptr<virtualdev_req> req) {
         // Convert the input memory to iovector
         struct iovec iov[BlkId::max_blks_in_op()];

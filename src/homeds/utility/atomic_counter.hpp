@@ -23,13 +23,13 @@ public:
 
     T increment(int32_t n=1) {
         T count = m_count.fetch_add(n, std::memory_order_relaxed);
-        return count + 1;
+        return count + n;
     }
 
     T decrement(int32_t n=1) {
         T count = m_count.fetch_sub(n, std::memory_order_release);
         assert(count > 0);
-        return count - 1;
+        return count - n;
     }
 
     bool decrement_testz(int32_t n=1) {

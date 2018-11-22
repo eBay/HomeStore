@@ -35,7 +35,18 @@ FixedBlkAllocator::~FixedBlkAllocator() {
     delete [] (m_blk_nodes);
 }
 
-BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid) {
+BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &hints, 
+                                 std::vector<BlkId> &out_blkid) {
+    BlkId blkid;
+    if (alloc(nblks, hints, &blkid) == BLK_ALLOC_SUCCESS) {
+        out_blkid.push_back(blkid);
+        return BLK_ALLOC_SUCCESS;
+    }
+    /* We don't support of vector of blkids in fixed blk allocator */
+    return BLK_ALLOC_SPACEFULL;
+}
+
+BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid, bool retry) {
     uint64_t prev_val;
     uint64_t cur_val;
     uint32_t id;

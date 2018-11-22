@@ -124,7 +124,14 @@ void DynamicBlkAllocator::allocator_state_machine() {
     }
 }
 
-BlkAllocStatus DynamicBlkAllocator::alloc(uint32_t size, uint32_t desired_temp, Blk *out_blk) {
+BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &hints, 
+                                 std::vector<BlkId> &out_blkid) {
+    /* TODO will implement it later */
+    assert(0);
+    return BLK_ALLOC_SPACEFULL;
+}
+
+BlkAllocStatus DynamicBlkAllocator::alloc(uint32_t size, uint32_t desired_temp, Blk *out_blk, bool retry) {
     uint32_t nAtoms = (size - 1) / m_cfg.getAtomSize() + 1;
     BlkAllocStatus ret = BLK_ALLOC_SUCCESS;
     bool found = false;

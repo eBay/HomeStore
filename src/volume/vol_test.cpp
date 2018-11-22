@@ -149,6 +149,9 @@ public:
                                               dev_mgr,
                                               max_vol_size,
                                               [this](auto vol_req) { process_completions(vol_req); });
+#ifndef NDEBUG
+        vol->enable_split_merge_crash_simulation();
+#endif
         LOGDEBUG("Created volume of size: {}", max_vol_size);
     }
 
@@ -204,7 +207,7 @@ public:
         req->is_read = true;
         if (is_random_read) {
             req->lba_to_check = written_lba[cnt];
-            req->nblks_to_check = written_nblks[cnt];
+            req->nblks_to_check = rand() % written_nblks[cnt];
             vol->read(req->lba_to_check, req->nblks_to_check, req);
         } else {
             req->indx = cnt;
@@ -262,7 +265,7 @@ public:
         if (req->is_read && !req->read_buf_list.empty()) {
             if (is_random_read) {
                 if (get_size(req->read_buf_list) != req->nblks_to_check * buf_size) {
-                    vol->print_tree();
+                    //vol->print_tree();
                     LOGERROR("Size not matching:{}:{}", get_size(req->read_buf_list), req->nblks_to_check * buf_size);
                     print_read_details(vol_req);
                     assert(0);
@@ -309,15 +312,16 @@ public:
         LOGTRACE("Finished {} for {}:{}", req->is_read ? "read" : "write", req->lba, req->nblks);
         if (outstanding_ios == 0 && write_cnt >= max_writes && can_write) {
             /* signal main thread */
+            can_write = false;
             if (is_read) {
                 can_read = true;
                 [[maybe_unused]] auto rsize = read(ev_fd, &temp, sizeof(uint64_t));
                 temp = 1;
                 [[maybe_unused]] auto wsize = write(ev_fd, &temp, sizeof(uint64_t));
             }
-            vol->print_tree();
-            can_read = true;
-            can_write = false;
+
+            //vol->print_tree();
+
             LOGDEBUG("NOtify");
             cv.notify_all();
             return;
