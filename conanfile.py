@@ -4,7 +4,7 @@ from conans import ConanFile, CMake, tools
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "0.10.0"
+    version = "0.10.1"
 
     license = "Proprietary"
     url = "https://github.corp.ebay.com/SDS/Homestore"
@@ -13,20 +13,21 @@ class HomestoreConan(ConanFile):
     settings = "arch", "os", "compiler", "build_type"
     options = {"shared": ['True', 'False'],
                "fPIC": ['True', 'False'],
-               "coverage": ['True', 'False'],
-               "sanitize": ['True', 'False']}
-    default_options = 'shared=False', 'fPIC=True', 'coverage=False', 'sanitize=False'
+               "coverage": ['True', 'False']}
+    default_options = 'shared=False', 'fPIC=True', 'coverage=False'
 
     requires = (("benchmark/1.4.1@oss/stable"),
-                ("boost_heap/1.66.0@bincrafters/stable"),
-                ("boost_uuid/1.66.0@bincrafters/stable"),
+                ("boost_dynamic_bitset/1.67.0@bincrafters/stable"),
+                ("boost_heap/1.67.0@bincrafters/stable"),
+                ("boost_uuid/1.67.0@bincrafters/stable"),
                 ("double-conversion/3.0.0@bincrafters/stable"),
                 ("farmhash/1.0.0@oss/stable"),
-                ("folly/2018.09.10.00@bincrafters/stable"),
+                ("folly/2018.12.10.00@bincrafters/testing"),
+                ("gtest/1.8.1@bincrafters/stable"),
                 ("iomgr/2.0.5@sds/stable"),
                 ("sds_metrics/0.2.2@sds/testing"),
-                ("OpenSSL/1.0.2p@conan/stable"),
-                ("sds_logging/3.2.4@sds/stable"))
+                ("OpenSSL/1.0.2q@conan/stable"),
+                ("sds_logging/3.4.2@sds/testing"))
 
     generators = "cmake"
     exports_sources = "cmake/*", "src/*", "CMakeLists.txt"
@@ -51,7 +52,7 @@ class HomestoreConan(ConanFile):
             definitions['CONAN_BUILD_COVERAGE'] = 'ON'
             test_target = 'coverage'
 
-        if self.options.sanitize == 'True':
+        if self.settings.build_type == "Debug" and self.options.coverage == 'False':
             definitions['MEMORY_SANITIZER_ON'] = 'ON'
 
         cmake.configure(defs=definitions)
@@ -71,6 +72,11 @@ class HomestoreConan(ConanFile):
 
     def package_info(self):
         self.cpp_info.libs = tools.collect_libs(self)
+        if self.settings.build_type == "Debug" and self.options.coverage == 'False':
+            self.cpp_info.sharedlinkflags.append("-fsanitize=address")
+            self.cpp_info.exelinkflags.append("-fsanitize=address")
+            self.cpp_info.sharedlinkflags.append("-fsanitize=undefined")
+            self.cpp_info.exelinkflags.append("-fsanitize=undefined")
         self.cpp_info.libs.extend(["aio"])
         if self.options.coverage == 'True':
             self.cpp_info.libs.append('gcov')
