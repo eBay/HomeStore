@@ -25,6 +25,7 @@ class HomestoreConan(ConanFile):
                 ("folly/2018.12.10.00@bincrafters/testing"),
                 ("gtest/1.8.1@bincrafters/stable"),
                 ("iomgr/2.0.5@sds/stable"),
+                ("lzma/5.2.4@bincrafters/stable"),
                 ("sds_metrics/0.2.2@sds/testing"),
                 ("OpenSSL/1.0.2q@conan/stable"),
                 ("sds_logging/3.4.2@sds/testing"))
