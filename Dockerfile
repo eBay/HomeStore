@@ -16,6 +16,7 @@ COPY CMakeLists.txt ${SOURCE_PATH}
 COPY src/ ${SOURCE_PATH}src
 
 WORKDIR /output
+ENV ASAN_OPTIONS=detect_leaks=0
 RUN set -eux; \
     eval $(grep 'name =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,name,PKG_NAME,'); \
     conan create -o ${PKG_NAME}:coverage=True -pr debug ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"; \
