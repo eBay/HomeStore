@@ -16,6 +16,7 @@ SDS_LOGGING_INIT(VMOD_BTREE_MERGE, VMOD_BTREE_SPLIT)
 #define MAX_CACHE_SIZE     2 * 1024 * 1024 * 1024
 using namespace std;
 using namespace homestore;
+using namespace homeds::btree;
 
 #if 0
 homestore::DeviceManager *dev_mgr = nullptr;
@@ -93,6 +94,10 @@ public:
 
     TestSimpleKey() : TestSimpleKey(0, 0, 0) {
     }
+
+    TestSimpleKey(const TestSimpleKey &other) : TestSimpleKey(other.get_count(), other.get_rank(), other.get_blk_num()) {
+    }
+    TestSimpleKey& operator=(const TestSimpleKey& other) { copy_blob(other.get_blob()); return *this;}
 
     inline uint32_t get_count() const {
         return (m_blob->m_count);
@@ -211,8 +216,17 @@ public:
         return ss.str();
     }
 
+    friend ostream& operator<<(ostream& os, const TestSimpleKey& k) {
+        os << "count: " << k.get_count() << " rank: " << k.get_rank() << " blknum: " << k.get_blk_num();
+        return os;
+    }
+
     bool operator<(const TestSimpleKey &o) const {
         return (compare(&o) < 0);
+    }
+
+    bool operator==(const TestSimpleKey &other) const {
+        return (compare(&other) == 0);
     }
 };
 
@@ -223,6 +237,9 @@ public:
     }
 
     TestSimpleValue() : TestSimpleValue((uint32_t)-1) {}
+
+    TestSimpleValue(const TestSimpleValue &other) { copy_blob(other.get_blob()); }
+    TestSimpleValue& operator=(const TestSimpleValue& other) { copy_blob(other.get_blob()); return *this;}
 
     homeds::blob get_blob() const override {
         homeds::blob b;
@@ -258,6 +275,11 @@ public:
         std::stringstream ss; ss << "val = " << m_val; return ss.str();
     }
 
+    friend ostream& operator<<(ostream& os, const TestSimpleValue& v) {
+        os << "val = " << v.m_val;
+        return os;
+    }
+
     // This is not mandatory overridden method for BtreeValue, but for testing comparision
     bool operator==(const TestSimpleValue &other) const {
         return (m_val == other.m_val);
@@ -271,18 +293,20 @@ public:
 
 struct SimpleKeyComparator {
     bool operator()(const TestSimpleKey* left, const TestSimpleKey* right) const {
-        return (left->compare(right) > 0);
+        return (left->compare(right) < 0);
     }
 };
 
 #define TOTAL_ENTRIES          100000
 #define TOTAL_OPERS_PER_TEST   500
 #define NTHREADS               4
+//#define NTHREADS               1
 
 struct BtreeCrudTest : public testing::Test {
 protected:
     TestBtreeDeclType *m_bt;
     std::array<TestSimpleKey *, TOTAL_ENTRIES> m_entries;
+    std::array<TestSimpleKey *, TOTAL_ENTRIES> m_sorted_entries;
     std::map<TestSimpleKey *, TestSimpleValue, SimpleKeyComparator> m_create_map;
 
 public:
@@ -338,11 +362,21 @@ public:
         EXPECT_EQ(m_create_map.find(m_entries[i])->second, v);
     }
 
-    static void insert_and_get_thread(BtreeCrudTest *test, uint32_t start, uint32_t count, int get_pct) {
-        // First preload upto the get_pct
-        
-        uint32_t readable_count = (count * get_pct)/100;
-        for (auto i = start; i < start + readable_count; i++) {
+    template< class Fn, class... Args >
+    void run_in_parallel(int nthreads, Fn&& fn, uint32_t start, uint32_t count, Args&&... args) {
+        std::vector<std::thread *> thrs;
+        for (auto i = 0; i < nthreads; i++) {
+            thrs.push_back(new std::thread(fn, this, start + (i * count/nthreads), count/nthreads, std::forward<Args>(args)...));
+        }
+
+        for (auto t : thrs) {
+            t->join();
+            delete(t);
+        }
+    }
+
+    static void preload_thread(BtreeCrudTest *test, uint32_t start, uint32_t count) {
+        for (auto i = start; i < start + count; i++) {
             test->put_nth_entry(i);
             // EXPECT_EQ(ret, true);
         }
@@ -350,7 +384,15 @@ public:
         //std::cout << "Btree Obj count = " << test->m_bt->get_stats().get_obj_count() << std::endl;
         std::cout << "Btree Stats after preload" << "\n";
         test->m_bt->get_stats().print();
-        
+    }
+
+    static void insert_and_get_thread(BtreeCrudTest *test, uint32_t start, uint32_t count, int get_pct) {
+        // First preload upto the get_pct
+        uint32_t readable_count = (count * get_pct)/100;
+
+        //test->preload_in_parallel(start, readable_count, 1);
+        test->run_in_parallel(1, preload_thread, start, readable_count);
+
         // Next read and insert based on the percentage of reads provided
         
         // BELOW code has some bug, hence commenting for now.
@@ -377,36 +419,52 @@ public:
         std::cout << "Btree Stats after cleanup" << "\n";
         test->m_bt->get_stats().print();
     }
+
+    static void query_thread(BtreeCrudTest *test, uint32_t start, uint32_t count, BtreeQueryType qtype,
+            uint32_t query_batch_size) {
+        auto search_range = BtreeSearchRange(*test->m_entries[start], true, *test->m_entries[start+count-1], true);
+        BtreeQueryRequest qreq(search_range, qtype, query_batch_size);
+
+        auto result_count = 0U;
+        auto cmp_ind = start;
+
+        std::vector<std::pair<TestSimpleKey, TestSimpleValue>> values;
+        values.reserve(query_batch_size);
+
+        bool has_more = false;
+        do {
+            has_more = test->m_bt->query(qreq, values);
+            for (auto &val : values) {
+                auto kp = test->m_entries[cmp_ind];
+                ASSERT_EQ(val.first, *kp);
+                ASSERT_EQ(val.second, test->m_create_map.find(kp)->second);
+                ++cmp_ind;
+                ++result_count;
+            }
+            values.clear();
+        } while (has_more);
+
+        ASSERT_EQ(count, result_count);
+    }
 };
 
 TEST_F(BtreeCrudTest, SimpleInsert) {
-#if 0
-    for (auto i = 0; i < TOTAL_ENTRIES; i++) {
-        auto it = m_create_map.find(m_entries[i]);
-        assert(it != m_create_map.end());
-        m_bt->put(*m_entries[i], it->second, homeds::btree::INSERT_ONLY_IF_NOT_EXISTS);
-    }
-
-    for (auto i = 0; i < TOTAL_ENTRIES; i++) {
-        TestSimpleValue v;
-        bool ret = m_bt->get(*m_entries[i], &v);
-        EXPECT_EQ(ret, true);
-        EXPECT_EQ(m_create_map.find(m_entries[i])->second, v);
-    }
-#endif
-
-    std::array<std::thread *, NTHREADS> thrs;
-    for (auto i = 0; i < NTHREADS; i++) {
-        thrs[i] = new std::thread(insert_and_get_thread, this, i * TOTAL_ENTRIES/NTHREADS, TOTAL_ENTRIES/NTHREADS, 50);
-    }
-
-    for (auto &t : thrs) {
-        t->join();
-        delete (t);
-    }
-
+    run_in_parallel(NTHREADS, insert_and_get_thread, 0, TOTAL_ENTRIES, 50 /* get_pct */);
     EXPECT_EQ(m_bt->get_stats().get_obj_count(), 0u);
     EXPECT_EQ(m_bt->get_stats().get_interior_nodes_count(), 0u);
+}
+
+TEST_F(BtreeCrudTest, SimpleQuery) {
+    // Sort the entries before preload.
+    std::sort(m_entries.begin(), m_entries.end(), [](const auto& left, const auto& right) {
+        return (left->compare(right) < 0);
+    });
+    run_in_parallel(NTHREADS, preload_thread, 0, TOTAL_ENTRIES);
+    run_in_parallel(NTHREADS, query_thread, 0, TOTAL_ENTRIES, BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, 1000);
+    run_in_parallel(NTHREADS, query_thread, 0, TOTAL_ENTRIES, BtreeQueryType::TREE_TRAVERSAL_QUERY, 1000);
+
+    //EXPECT_EQ(m_bt->get_stats().get_obj_count(), 0u);
+    //EXPECT_EQ(m_bt->get_stats().get_interior_nodes_count(), 0u);
 }
 
 SDS_OPTIONS_ENABLE(logging)

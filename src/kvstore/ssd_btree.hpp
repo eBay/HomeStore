@@ -27,7 +27,7 @@ using namespace homestore;
 
 namespace homeds { namespace btree {
 
-#define SSDBtreeNodeDeclType BtreeNode<SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize>
+using SSDBtreeNode = BtreeNode<SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize>
 #define SSDBtreeImpl BtreeSpecificImpl<SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize>
 #define BtreeBufferDeclType BtreeBuffer<K, V, InteriorNodeType, LeafNodeType, NodeSize>
 
@@ -59,7 +59,7 @@ template<
 class BtreeBuffer : public CacheBuffer< BlkId > {
 public:
     static BtreeBuffer *make_object() {
-        return homeds::ObjectAllocator< SSDBtreeNodeDeclType >::make_object();
+        return homeds::ObjectAllocator< SSDBtreeNode >::make_object();
     }
 };
 
@@ -99,7 +99,7 @@ public:
         }
     }
 
-    static uint8_t *get_physical(const SSDBtreeNodeDeclType *bn) {
+    static uint8_t *get_physical(const SSDBtreeNode *bn) {
         BtreeBufferDeclType *bbuf = (BtreeBufferDeclType *)(bn);
         homeds::blob b = bbuf->at_offset(0);
         assert(b.size == NodeSize);
@@ -107,10 +107,10 @@ public:
     }
 
     static uint32_t get_node_area_size(SSDBtreeImpl *impl) {
-        return NodeSize - sizeof(SSDBtreeNodeDeclType) - sizeof(LeafPhysicalNodeDeclType);
+        return NodeSize - sizeof(SSDBtreeNode) - sizeof(LeafPhysicalNodeDeclType);
     }
 
-    static boost::intrusive_ptr<SSDBtreeNodeDeclType> alloc_node(SSDBtreeImpl *impl, bool is_leaf) {
+    static boost::intrusive_ptr<SSDBtreeNode> alloc_node(SSDBtreeImpl *impl, bool is_leaf) {
         blk_alloc_hints hints;
         BlkId blkid;
         auto safe_buf = impl->m_blkstore->alloc_blk_cached(1 * BLKSTORE_PAGE_SIZE, hints, &blkid);
@@ -124,32 +124,32 @@ public:
             auto n = new (b.bytes) VariantNode<InteriorNodeType, K, V, NodeSize>((bnodeid_t)blkid.get_id(), true);
         }
 
-        return boost::static_pointer_cast<SSDBtreeNodeDeclType>(safe_buf);
+        return boost::static_pointer_cast<SSDBtreeNode>(safe_buf);
     }
 
-    static boost::intrusive_ptr<SSDBtreeNodeDeclType> read_node(SSDBtreeImpl *impl, bnodeid_t id) {
+    static boost::intrusive_ptr<SSDBtreeNode> read_node(SSDBtreeImpl *impl, bnodeid_t id) {
         // Read the data from the block store
         BlkId blkid(id.to_integer());
         auto safe_buf = impl->m_blkstore->read(blkid, 0, NodeSize);
 
-        return boost::static_pointer_cast<SSDBtreeNodeDeclType>(safe_buf);
+        return boost::static_pointer_cast<SSDBtreeNode>(safe_buf);
     }
 
-    static void write_node(SSDBtreeImpl *impl, boost::intrusive_ptr<SSDBtreeNodeDeclType> bn) {
+    static void write_node(SSDBtreeImpl *impl, boost::intrusive_ptr<SSDBtreeNode> bn) {
         BlkId blkid(bn->get_node_id().to_integer());
         impl->m_blkstore->write(blkid, boost::dynamic_pointer_cast<BtreeBufferDeclType>(bn));
     }
 
-    static void free_node(SSDBtreeImpl *impl, boost::intrusive_ptr<SSDBtreeNodeDeclType> bn) {
+    static void free_node(SSDBtreeImpl *impl, boost::intrusive_ptr<SSDBtreeNode> bn) {
         BlkId blkid(bn->get_node_id().to_integer());
         impl->m_blkstore->free_blk(blkid, boost::none, boost::none);
     }
 
-    static void ref_node(SSDBtreeNodeDeclType *bn) {
+    static void ref_node(SSDBtreeNode *bn) {
         CacheBuffer< BlkId >::ref((CacheBuffer<BlkId> &)*bn);
     }
 
-    static bool deref_node(SSDBtreeNodeDeclType *bn) {
+    static bool deref_node(SSDBtreeNode *bn) {
         return CacheBuffer< BlkId >::deref_testz((CacheBuffer<BlkId> &)*bn);
     }
 private:

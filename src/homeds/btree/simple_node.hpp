@@ -20,8 +20,6 @@ using namespace boost;
 
 namespace homeds { namespace btree {
 
-static bnodeid_t invalidEdgePtr( INVALID_BNODEID,0);
-
 #define SimpleNode              VariantNode<BTREE_NODETYPE_SIMPLE, K, V, NodeSize>
 
 template< typename K, typename V, size_t NodeSize >
@@ -68,8 +66,6 @@ public:
 #endif
     }
 
-#ifndef NDEBUG
-
     std::string to_string() const {
         std::stringstream ss;
         ss << "###################" << endl;
@@ -79,8 +75,7 @@ public:
         if (!this->is_leaf()) {
             bnodeid_t edge_id;
             edge_id = this->get_edge_id();
-            ss << " edge_id=";
-	    ss << static_cast<uint64_t>(edge_id.m_id.m_x);
+            ss << " edge_id=" << static_cast<uint64_t>(edge_id.m_id);
         }
         ss << "\n-------------------------------" << endl;
         for (uint32_t i = 0; i < this->get_total_entries(); i++) {
@@ -96,16 +91,14 @@ public:
                 get(i, &val, false);
                 ss << val.to_string();
             } else {
-                BNodeptr p;
-                get(i, &p, false);
-                ss << p.get_node_id().to_string();
+                BtreeNodeInfo bni;
+                get(i, &bni, false);
+                ss << bni;
             }
             ss << "\n";
         }
         return ss.str();
     }
-
-#endif
 
     void remove(int ind) {
         remove(ind,ind);
@@ -119,7 +112,7 @@ public:
 
         if (ind_e == total_entries) { //edge entry
             assert(!this->is_leaf() && this->has_valid_edge());
-            BNodeptr last_1_val;
+            BtreeNodeInfo last_1_val;
 
             // Set the last key/value as edge entry and by decrementing entry count automatically removed the last entry.
             get_nth_value(ind_s - 1, &last_1_val, false);
@@ -306,7 +299,7 @@ public:
         if (this->is_leaf()) {
             return V::get_fixed_size();
         } else {
-            return BNodeptr::get_fixed_size();
+            return BtreeNodeInfo::get_fixed_size();
         }
     }
 
@@ -316,7 +309,6 @@ public:
 
     void set_nth_key(uint32_t ind, const BtreeKey &k) {
         uint8_t *entry = this->get_node_area_mutable() + (get_nth_obj_size(ind) * ind);
-        uint32_t keySize;
 
         homeds::blob b = k.get_blob();
         memcpy((void *) entry, (void *) b.bytes, b.size);
@@ -325,7 +317,6 @@ public:
     void set_nth_value(uint32_t ind, const BtreeValue &v) {
         assert(ind < this->get_total_entries());
         uint8_t *entry = this->get_node_area_mutable() + (get_nth_obj_size(ind) * ind) + get_obj_key_size(ind);
-        uint32_t valSize;
 
         homeds::blob b = v.get_blob();
         memcpy((void *) entry, b.bytes, b.size);

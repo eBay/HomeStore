@@ -40,7 +40,8 @@ typedef struct __attribute__((__packed__)) {
     bnodeid_t edge_entry;
 } persistent_hdr_t;
 
-#define PhysicalNodeDeclType  PhysicalNode<VNode, K, V, NodeSize>
+#define physical_node_t  PhysicalNode<VNode, K, V, NodeSize>
+
 template <typename VNode, typename K, typename V, size_t NodeSize>
 class PhysicalNode {
 protected:
@@ -52,10 +53,10 @@ protected:
         if (init) {
             set_leaf(true);
             set_total_entries(0);
-            set_next_bnode(bnodeid_t(INVALID_BNODEID,0));
+            set_next_bnode(bnodeid_t::empty_bnodeid());
             set_gen(0);
             set_valid_node(true);
-            set_edge_id(bnodeid_t(INVALID_BNODEID,0));
+            set_edge_id(bnodeid_t::empty_bnodeid());
             set_node_id(*id);
         } else {
             assert(get_node_id() == *id);
@@ -66,10 +67,10 @@ protected:
         if (init) {
             set_leaf(true);
             set_total_entries(0);
-            set_next_bnode(bnodeid_t(INVALID_BNODEID,0));
+            set_next_bnode(bnodeid_t::empty_bnodeid());
             set_gen(0);
             set_valid_node(true);
-            set_edge_id(bnodeid_t(INVALID_BNODEID,0));
+            set_edge_id(bnodeid_t::empty_bnodeid());
             set_node_id(id);
         } else {
             assert(get_node_id() == id);
@@ -141,7 +142,7 @@ protected:
     }
 
     void flip_pc_gen_flag() {
-        get_persistent_header()->node_id.m_pc_gen_flag = get_persistent_header()->node_id.m_pc_gen_flag?0:1;
+        get_persistent_header()->node_id.m_pc_gen_flag = get_persistent_header()->node_id.m_pc_gen_flag ? 0 : 1;
     }
     
     void set_gen(uint64_t g) {
@@ -195,9 +196,10 @@ protected:
     ////////// Top level functions (CRUD on a node) //////////////////
     // Find the slot where the key is present. If not present, return the closest location for the key.
     // Assumption: Node lock is already taken
-    auto find(const BtreeSearchRange &range, BtreeKey *outkey, BtreeValue *outval) const {
+    auto find(const BtreeSearchRange &range, BtreeKey *outkey, BtreeValue *outval, bool copy_key = true,
+            bool copy_val = true) const {
         auto result = bsearch(-1, get_total_entries(), range);
-        if (result.end_of_search_index == get_total_entries()) {
+        if (result.end_of_search_index == (int)get_total_entries()) {
             if (has_valid_edge()) {
                 result.found = true;
             } else {
@@ -207,14 +209,18 @@ protected:
         }
 
         if (outval) {
-            to_variant_node_const()->get(result.end_of_search_index, outval, true /* copy */);
+            to_variant_node_const()->get(result.end_of_search_index, outval, copy_val /* copy */);
         }
 
         if (!range.is_simple_search() && outkey) {
-            to_variant_node_const()->get_nth_key(result.end_of_search_index, outkey, true /* copy */);
+            to_variant_node_const()->get_nth_key(result.end_of_search_index, outkey, copy_key /* copy */);
         }
 
         return result;
+    }
+
+    auto find(const BtreeKey& find_key, BtreeValue *outval, bool copy_val = true) const {
+        return find(BtreeSearchRange(find_key), nullptr, outval, false, copy_val);
     }
 
     void get_last_key(BtreeKey *out_lastkey) {
@@ -224,6 +230,13 @@ protected:
     void get_first_key(BtreeKey *out_firstkey) {
         return to_variant_node()->get_nth_key(0, out_firstkey, false);
     }
+
+#if 0
+    void get_nth_element(int n, BtreeKey *out_key, BtreeValue *out_val, bool is_copy) {
+        if (out_key) { to_variant_node()->get_nth_key(n, out_key, is_copy); }
+        if (out_val) { to_variant_node()->get_nth_value(n, out_val, is_copy); }
+    }
+#endif
 
     bool put(const BtreeKey &key, const BtreeValue &val, PutType put_type, std::shared_ptr<BtreeValue> &existing_val) {
         auto result = find(key, nullptr, nullptr);
@@ -285,22 +298,19 @@ protected:
 
     //////////// Edge Related Methods ///////////////
     void invalidate_edge() {
-        set_edge_id(bnodeid_t(INVALID_BNODEID,0));
+        set_edge_id(bnodeid::empty_bnodeid());
     }
 
     void set_edge_value(const BtreeValue &v) {
-        BNodeptr *p = (BNodeptr *) &v;
-        set_edge_id(p->get_node_id());
+        BtreeNodeInfo *bni = (BtreeNodeInfo *) &v;
+        set_edge_id(bni->bnode_id());
     }
 
     void get_edge_value(BtreeValue *v) const {
         if (is_leaf()) {
             return;
         }
-
-        BNodeptr bnp(get_edge_id());
-        uint32_t size;
-        v->set_blob(bnp.get_blob());
+        v->set_blob(BtreeNodeInfo(get_edge_id()).get_blob());
     }
 
     bool has_valid_edge() const {
@@ -308,8 +318,7 @@ protected:
             return false;
         }
 
-        BNodeptr bnp(get_edge_id());
-        return (bnp.is_valid_ptr());
+        return (get_edge_id().is_valid());
     }
     
     void get_adjacent_indicies(uint32_t cur_ind, vector< int > &indices_list, uint32_t max_indices) const {
@@ -341,41 +350,42 @@ protected:
 
 protected:
     auto bsearch(int start, int end, const BtreeSearchRange &range) const {
-        uint32_t mid = 0;
-        uint32_t min_ind_found = end;
-	uint32_t second_min = end;
-	uint32_t temp_end = end;
+        int mid = 0;
+        int initial_end = end;
+        int min_ind_found = INT32_MAX;
+        int second_min = INT32_MAX;
+        int max_ind_found = 0;
         BtreeKey *mid_key;
 
         struct {
-            bool     found;
-            uint32_t end_of_search_index;
-        } ret{NO_MATCH, 0};
+            bool found;
+            int  end_of_search_index;
+        } ret{false, 0};
+        auto selection = range.selection_option();
 
         while ((end - start) > 1) {
             mid = start + (end - start) / 2;
 
-            int x = range.is_simple_search() ? to_variant_node_const()->compare_nth_key(*range.get_start_key(), mid) :
+            int x = range.is_simple_search() ?
+                    to_variant_node_const()->compare_nth_key(*range.get_start_key(), mid) :
                     to_variant_node_const()->compare_nth_key_range(range, mid);
             if (x == 0) {
                 ret.found = true;
-                if (range.is_simple_search()) {
+                if ((range.is_simple_search() || (selection == DO_NOT_CARE))) {
                     ret.end_of_search_index = mid;
                     return ret;
+                } else if ((selection == LEFT_MOST) || (selection == SECOND_TO_THE_LEFT)) {
+                    if (mid < min_ind_found) {
+                        second_min = min_ind_found;
+                        min_ind_found = mid;
+                    }
+                    end = mid;
+                } else if (selection == RIGHT_MOST) {
+                    if (mid > max_ind_found) { max_ind_found = mid; }
+                    start = mid;
+                } else {
+                    assert(0);
                 }
-
-                if (!range.is_left_leaning()) {
-                    ret.end_of_search_index = mid;
-                    return ret;
-                }
-
-                // If we are left leaning, keep looking for the lowest of
-                // mid that matches within the range.
-                if (mid < min_ind_found) {
-		    second_min = min_ind_found;
-                    min_ind_found = mid;
-                }
-                end = mid;
             } else if (x > 0) {
                 end = mid;
             } else {
@@ -383,11 +393,30 @@ protected:
             }
         }
 
-        if (range.is_second_min() && (has_valid_edge() || second_min != temp_end)) {
-        	  ret.end_of_search_index = ret.found ? second_min : end;
+        if (ret.found) {
+            if (selection == LEFT_MOST) {
+                assert(min_ind_found != INT32_MAX);
+                ret.end_of_search_index = min_ind_found;
+            } else if (selection == SECOND_TO_THE_LEFT) {
+                assert(min_ind_found != INT32_MAX);
+                if (second_min == INT32_MAX) {
+                    if (((int)(min_ind_found + 1) < initial_end) &&
+                        (to_variant_node_const()->compare_nth_key_range(range, min_ind_found+1) == 0)) {
+                        // We have a min_ind_found, but not second min, so check if next is valid.
+                        ret.end_of_search_index = min_ind_found + 1;
+                    } else {
+                        ret.end_of_search_index = min_ind_found;
+                    }
+                } else {
+                    ret.end_of_search_index = second_min;
+                }
+            } else if (selection == RIGHT_MOST) {
+                assert(max_ind_found != INT32_MAX);
+                ret.end_of_search_index = max_ind_found;
+            }
         } else {
-      		  ret.end_of_search_index = ret.found ? min_ind_found : end;
-	    }
+            ret.end_of_search_index = end;
+        }
         return ret;
     }
 

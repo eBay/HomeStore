@@ -206,7 +206,7 @@ public:
         if (ind_e == (int)this->get_total_entries()) {
             assert(!this->is_leaf() && this->has_valid_edge());
 
-            BNodeptr last_1_val;
+            BtreeNodeInfo last_1_val;
 
             // Set the last key/value as edge entry and by decrementing entry count automatically removed the last entry.
             get_nth_value(ind_s - 1, &last_1_val, false);
@@ -250,8 +250,7 @@ public:
         if (!this->is_leaf()) {
             bnodeid_t edge_id;
             edge_id = this->get_edge_id();
-            ss << " edge_id=";
-            ss << static_cast<uint64_t>(edge_id.m_id.m_x);
+            ss << " edge_id=" << static_cast<uint64_t>(edge_id.m_id);
         }
         ss << "\n-------------------------------" << endl;
         for (uint32_t i = 0; i < this->get_total_entries(); i++) {
@@ -267,9 +266,9 @@ public:
                 get(i, &val, false);
                 ss << val.to_string();
             } else {
-                BNodeptr p;
+                BtreeNodeInfo p;
                 get(i, &p, false);
-                ss << p.get_node_id().to_string();
+                ss << p;
             }
             ss << "\n";
         }
@@ -335,9 +334,7 @@ public:
 
         if (!this->is_leaf() && (other.get_total_entries() != 0)) {
             // Incase this node is an edge node, move the stick to the right hand side node
-            BNodeptr edge_ptr;
-            this->get_edge_value(&edge_ptr);
-            other.set_edge_value(edge_ptr);
+            other.set_edge_id(this->get_edge_id());
             this->invalidate_edge();
         }
         remove(ind+1, start_ind); // Remove all entries in bulk
@@ -380,9 +377,7 @@ public:
 
         if (!this->is_leaf() && (other.get_total_entries() != 0)) {
             // Incase this node is an edge node, move the stick to the right hand side node
-            BNodeptr edge_ptr;
-            this->get_edge_value(&edge_ptr);
-            other.set_edge_value(edge_ptr);
+            other.set_edge_id(this->get_edge_id());
             this->invalidate_edge();
         }
 
@@ -427,9 +422,7 @@ public:
 
         if (!other.is_leaf() && (other.get_total_entries() == 0)) {
             // Incase other node is an edge node and we moved all the data into this node, move over the edge info as well.
-            BNodeptr edge_ptr;
-            other.get_edge_value(&edge_ptr);
-            this->set_edge_value(edge_ptr);
+            this->set_edge_id(other.get_edge_id());
             other.invalidate_edge();
         }
 
@@ -471,9 +464,7 @@ public:
 
         if (!other.is_leaf() && (other.get_total_entries() == 0)) {
             // Incase other node is an edge node and we moved all the data into this node, move over the edge info as well.
-            BNodeptr edge_ptr;
-            other.get_edge_value(&edge_ptr);
-            this->set_edge_value(edge_ptr);
+            this->set_edge_id(other.get_edge_id());
             other.invalidate_edge();
         }
 

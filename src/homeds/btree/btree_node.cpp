@@ -9,26 +9,27 @@
 namespace homeds { namespace btree {
 
 #define DecBNodeType(ret)                     \
-    template<btree_type BtreeType,            \
+    template<btree_store_type BtreeStoreType, \
             typename K,                       \
             typename V,                       \
             btree_node_type InteriorNodeType, \
             btree_node_type LeafNodeType,     \
-            size_t NodeSize, typename btree_req_type >                 \
-    ret BtreeNodeDeclType::
+            size_t NodeSize,                  \
+            typename btree_req_type >         \
+    ret btree_node_t::
 
-template<btree_type BtreeType,
+template<btree_store_type BtreeStoreType,
             typename K,
             typename V,
             btree_node_type InteriorNodeType,
             btree_node_type LeafNodeType,
             size_t NodeSize, typename btree_req_type >
-BtreeNodeDeclType::BtreeNode() : m_common_header() {
+btree_node_t::BtreeNode() : m_common_header() {
     init_btree_node();
 }
 
 #if 0
-DecBNodeType(typename BtreeSpecificImplDeclType::HeaderType *) get_impl_node() {
+DecBNodeType(typename btree_store_t::HeaderType *) get_impl_node() {
     return &m_node_impl_header;
 }
 #endif
@@ -72,15 +73,46 @@ DecBNodeType(void) update(int ind, const BtreeKey &key, const BtreeValue &val) {
     call_variant_method(this, update, ind, key, val);
 }
 
-DecBNodeType(auto) find(const BtreeSearchRange &range, BtreeKey *outkey, BtreeValue *outval) const {
-    return call_physical_method_const(this, find, range, outkey, outval);
+DecBNodeType(auto) find(const BtreeKey &key, BtreeValue *outval,bool copy_val) const {
+    return call_physical_method_const(this, find, key, outval, copy_val);
 }
 
-#ifndef NDEBUG
+DecBNodeType(auto) find(const BtreeSearchRange &range, BtreeKey *outkey, BtreeValue *outval, bool copy_key, bool copy_val) const {
+    return call_physical_method_const(this, find, range, outkey, outval, copy_key, copy_val);
+}
+
+DecBNodeType(uint32_t) get_all(const BtreeSearchRange& range, uint32_t max_count, std::vector<std::pair<K, V>> &out_values,
+                               const match_item_cb_t& match_cb) const {
+    assert(is_leaf()); // TODO: We do not support get_all for non-leaf because we need to add edge entry to the vector.
+
+    auto count = 0U;
+
+    // Get the start index of the search range.
+    auto start_result = find(range.extract_start_of_range(), nullptr, nullptr);
+    auto start_ind = start_result.end_of_search_index;
+    if (start_result.found && !range.is_start_inclusive()) { start_ind++; }
+
+    // Get the end index of the search range.
+    auto end_result = find(range.extract_end_of_range(), nullptr, nullptr);
+    auto end_ind = end_result.end_of_search_index;
+    if (!end_result.found || !range.is_end_inclusive()) { end_ind--; } // not found entries will point to 1 ind after last in range.
+
+    for (auto i = start_ind; ((i <= end_ind) && (count < max_count)); i++) {
+        K key; V value;
+
+        get_nth_element(i, &key, &value, false);
+        if (!match_cb || match_cb(key, value)) {
+            out_values.emplace_back(std::make_pair<>(key, value));
+            count++;
+        }
+    }
+
+    return count;
+}
+
 DecBNodeType(std::string) to_string() const {
     return call_variant_method_const(this, to_string);
 }
-#endif
 
 /* Provides the occupied data size within the node */
 DecBNodeType(bool) is_leaf() const {
@@ -158,24 +190,24 @@ DecBNodeType(void) get_adjacent_indicies(uint32_t cur_ind, vector< int > &indice
  * return how much it was able to move actually (either entries or size)
  */
 DecBNodeType(uint32_t) move_out_to_right_by_entries(const BtreeConfig &cfg,
-                                                    boost::intrusive_ptr<BtreeNodeDeclType> &other_node,
+                                                    boost::intrusive_ptr<BtreeNode> &other_node,
                                                     uint32_t nentries) {
     return call_variant_method(this, move_out_to_right_by_entries, cfg, to_variant_node(other_node.get()), nentries);
 }
 
 DecBNodeType(uint32_t) move_out_to_right_by_size(const BtreeConfig &cfg,
-                                                 boost::intrusive_ptr<BtreeNodeDeclType> &other_node,
+                                                 boost::intrusive_ptr<BtreeNode> &other_node,
                                                  uint32_t size) {
     return call_variant_method(this, move_out_to_right_by_size, cfg, to_variant_node(other_node.get()), size);
 }
 
 DecBNodeType(uint32_t) move_in_from_right_by_entries(const BtreeConfig &cfg,
-                                                     boost::intrusive_ptr<BtreeNodeDeclType> &other_node,
+                                                     boost::intrusive_ptr<BtreeNode> &other_node,
                                                      uint32_t nentries) {
     return call_variant_method(this, move_in_from_right_by_entries, cfg, to_variant_node(other_node.get()), nentries);
 }
 DecBNodeType(uint32_t) move_in_from_right_by_size(const BtreeConfig &cfg,
-                                                  boost::intrusive_ptr<BtreeNodeDeclType> &other_node,
+                                                  boost::intrusive_ptr<BtreeNode> &other_node,
                                                   uint32_t size) {
     return call_variant_method(this, move_in_from_right_by_size, cfg, to_variant_node(other_node.get()), size);
 }
@@ -215,25 +247,25 @@ DecBNodeType(bool) any_upgrade_waiters() {
 }
 
 #if 0
-template<btree_type BtreeType,
+template<btree_store_type BtreeStoreType,
         typename K,
         typename V,
         btree_node_type InteriorNodeType,
         btree_node_type LeafNodeType,
         size_t NodeSize >
-void intrusive_ptr_add_ref(BtreeNodeDeclType *n) {
-    BtreeSpecificImplDeclType::ref_node(n);
+void intrusive_ptr_add_ref(BtreeNode *n) {
+    btree_store_t::ref_node(n);
 }
 
-template<btree_type BtreeType,
+template<btree_store_type BtreeStoreType,
         typename K,
         typename V,
         btree_node_type InteriorNodeType,
         btree_node_type LeafNodeType,
         size_t NodeSize >
-void intrusive_ptr_release(BtreeNodeDeclType *n) {
-    if (BtreeSpecificImplDeclType::deref_node(n)) {
-        n->~BtreeNodeDeclType();
+void intrusive_ptr_release(BtreeNode *n) {
+    if (btree_store_t::deref_node(n)) {
+        n->~BtreeNode();
         BtreeNodeAllocator<NodeSize>::deallocate((uint8_t *)n);
     }
 }
@@ -259,5 +291,10 @@ DecBNodeType(int) compare_nth_key(const BtreeKey &cmp_key, int ind) const {
 // Compares the nth key (n=ind) with given key (cmp_key) and returns -1, 0, 1 if cmp_key <=> nth_key respectively
 DecBNodeType(int) compare_nth_key_range(const BtreeSearchRange &range, int ind) const {
     return call_variant_method_const(this, compare_nth_key_range, range, ind);
+}
+
+DecBNodeType(void) get_nth_element(int n, BtreeKey *out_key, BtreeValue *out_val, bool is_copy) const {
+    if (out_key) { get_nth_key(n, out_key, is_copy); }
+    if (out_val) { get_nth_value(n, out_val, is_copy); }
 }
 }}
