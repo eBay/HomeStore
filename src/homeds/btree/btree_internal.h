@@ -466,9 +466,7 @@ class EmptyClass : public BtreeValue {
 
     uint32_t estimate_size_after_append(const BtreeValue& new_val) override { return 0; }
 
-#ifdef DEBUG
     std::string to_string() const override { return "<Empty>"; }
-#endif
 };
 
 class BtreeConfig {

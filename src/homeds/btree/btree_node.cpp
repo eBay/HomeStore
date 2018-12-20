@@ -110,11 +110,9 @@ DecBNodeType(uint32_t) get_all(const BtreeSearchRange& range, uint32_t max_count
     return count;
 }
 
-#ifndef NDEBUG
 DecBNodeType(std::string) to_string() const {
     return call_variant_method_const(this, to_string);
 }
-#endif
 
 /* Provides the occupied data size within the node */
 DecBNodeType(bool) is_leaf() const {

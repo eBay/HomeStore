@@ -66,8 +66,6 @@ public:
 #endif
     }
 
-#ifndef NDEBUG
-
     std::string to_string() const {
         std::stringstream ss;
         ss << "###################" << endl;
@@ -101,8 +99,6 @@ public:
         }
         return ss.str();
     }
-
-#endif
 
     void remove(int ind) {
         remove(ind,ind);

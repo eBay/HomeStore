@@ -567,6 +567,7 @@ private:
 
             auto count = 0U;
             BtreeNodePtr next_node = nullptr;
+            bool has_more = true;
             do {
                 if (next_node) {
                     lock_node(next_node, homeds::thread::locktype::LOCKTYPE_READ, nullptr);
@@ -611,6 +612,7 @@ private:
 
             unlock_node(my_node, homeds::thread::locktype::LOCKTYPE_READ);
             if (out_values.size() >= query_req.get_batch_size()) {
+                assert(out_values.size() == query_req.get_batch_size());
                 query_req.cursor().m_last_key = std::make_unique<K>(out_values.back().first);
                 return true;
             }

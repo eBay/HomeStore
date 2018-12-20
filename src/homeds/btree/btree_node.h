@@ -141,10 +141,7 @@ public:
     void remove(int ind_s, int ind_e);
     void update(int ind, const BtreeValue &val);
     void update(int ind, const BtreeKey &key, const BtreeValue &val);
-
-#ifndef NDEBUG
     std::string to_string() const;
-#endif
 
     /* Provides the occupied data size within the node */
     bool is_leaf() const;
