@@ -7,6 +7,8 @@
 
 #pragma once
 
+#define BOOST_UUID_RANDOM_PROVIDER_FORCE_POSIX 1
+
 #include <boost/intrusive/list.hpp>
 #include <sys/uio.h>
 #include <unistd.h>
