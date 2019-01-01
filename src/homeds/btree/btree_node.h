@@ -193,11 +193,10 @@ public:
 
     friend void intrusive_ptr_add_ref(btree_node_t *n) { btree_store_t::ref_node(n); }
 
+
     friend void intrusive_ptr_release(btree_node_t *n) {
-        if (btree_store_t::deref_node(n)) {
-            n->~BtreeNode();
-            BtreeNodeAllocator<NodeSize>::deallocate((uint8_t *)n);
-        }
+        btree_store_t::deref_node(n);
+
     }
     void get_nth_key(int ind, BtreeKey *outkey, bool copy) const;
 

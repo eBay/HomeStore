@@ -8,14 +8,13 @@
 #include "cache/cache.h"
 #include "device/device_selector.hpp"
 #include "device/device.h"
-#include "main/store_limits.h"
 #include <boost/optional.hpp>
 #include "homeds/memory/mempiece.hpp"
 #include "cache/cache.cpp"
 #include <error/error.h>
 #include "writeBack_cache.hpp"
 #include "device/blkbuffer.hpp"
-#include "metrics/perf_metrics.hpp"
+#include "main/homestore_config.hpp"
 
 namespace homestore {
 
@@ -77,10 +76,10 @@ struct blkstore_req : writeback_req {
 template <typename BAllocator, typename Buffer = BlkBuffer>
 class BlkStore {
     typedef std::function< void (boost::intrusive_ptr<blkstore_req<Buffer>> req) > comp_callback;
-
 public:
-    BlkStore(DeviceManager *mgr, Cache< BlkId > *cache, uint64_t initial_size, BlkStoreCacheType cache_type,
-             uint32_t mirrors, comp_callback comp_cb) :
+    BlkStore(DeviceManager *mgr, Cache< BlkId > *cache, uint64_t size, BlkStoreCacheType cache_type,
+             uint32_t mirrors, comp_callback comp_cb, char *blob, uint64_t context_size, uint64_t page_size) :
+            m_pagesz(page_size),
             m_cache(cache),
             m_wb_cache(cache, ([this] (boost::intrusive_ptr<writeback_req> req, 
                                        std::error_condition status) 
@@ -89,14 +88,29 @@ public:
                                        std::error_condition status) 
                                 { this->writeback_free_blkid(req, status); })),
             m_cache_type(cache_type),
-            m_vdev(mgr, initial_size, mirrors, true, BLKSTORE_BLK_SIZE,
-				mgr->get_all_devices(), 
-				(std::bind(&BlkStore::process_completions, this, 
-			         std::placeholders::_1))),
-	        m_comp_cb(comp_cb) {}
+            m_vdev(mgr, context_size, mirrors, true, m_pagesz, mgr->get_all_devices(), 
+                    (std::bind(&BlkStore::process_completions, 
+                    this, std::placeholders::_1)), blob, size), m_comp_cb(comp_cb) {
+    }
+    
+    BlkStore(DeviceManager *mgr, Cache< BlkId > *cache, uint64_t size, BlkStoreCacheType cache_type,
+             uint32_t mirrors, char *blob, uint64_t context_size, uint64_t page_size) :
+            m_pagesz(page_size),
+            m_cache(cache),
+            m_wb_cache(cache, ([this] (boost::intrusive_ptr<writeback_req> req, 
+                                       std::error_condition status) 
+                                {this->writeback_persist_blkid(req, status); }),
+                       ([this] (boost::intrusive_ptr<writeback_req> req, 
+                                       std::error_condition status) 
+                                { this->writeback_free_blkid(req, status); })),
+            m_cache_type(cache_type),
+            m_vdev(mgr, context_size, mirrors, true, m_pagesz, mgr->get_all_devices(), (std::bind(&BlkStore::process_completions, 
+                    this, std::placeholders::_1)), blob, size) {
+    }
 
     BlkStore(DeviceManager *mgr, Cache< BlkId > *cache, 
-            vdev_info_block *vb, BlkStoreCacheType cache_type, comp_callback comp_cb) :
+            vdev_info_block *vb, BlkStoreCacheType cache_type, comp_callback comp_cb, uint64_t page_size) :
+            m_pagesz(page_size),
             m_cache(cache),
             m_wb_cache(cache, ([this] (boost::intrusive_ptr<writeback_req> req, 
                                 std::error_condition status) 
@@ -107,7 +121,27 @@ public:
             m_cache_type(cache_type),
             m_vdev(mgr, vb, (std::bind(&BlkStore::process_completions, this, 
 			     std::placeholders::_1))), 
-	    m_comp_cb(comp_cb) {}
+	    m_comp_cb(comp_cb) {
+    }
+    
+    BlkStore(DeviceManager *mgr, Cache< BlkId > *cache, 
+            vdev_info_block *vb, BlkStoreCacheType cache_type, uint64_t page_size) :
+            m_pagesz(page_size),
+            m_cache(cache),
+            m_wb_cache(cache, ([this] (boost::intrusive_ptr<writeback_req> req, 
+                                std::error_condition status) 
+                               { this->writeback_persist_blkid(req, status); }),
+                       ([this] (boost::intrusive_ptr<writeback_req> req, 
+                                std::error_condition status) 
+                               { this->writeback_free_blkid(req, status); })),
+            m_cache_type(cache_type),
+            m_vdev(mgr, vb, (std::bind(&BlkStore::process_completions, this, 
+			     std::placeholders::_1))) {
+    }
+
+    void attach_compl(comp_callback comp_cb) {
+        m_comp_cb = comp_cb;
+    }
 
     bool is_write_back_cache() {
         return (m_cache_type == WRITEBACK_CACHE || m_cache_type == RD_MODIFY_WRITEBACK_CACHE);
@@ -177,15 +211,23 @@ public:
     }
 
     /* Allocate a new block of the size based on the hints provided */
-    BlkAllocStatus alloc_blk(uint8_t nblks, blk_alloc_hints &hints, 
+    BlkAllocStatus alloc_blk(uint32_t size, blk_alloc_hints &hints, 
             std::vector<BlkId> &out_blkid) {
         // Allocate a block from the device manager
+        assert(size % m_pagesz == 0);
+        auto nblks = size/m_pagesz;
         return (m_vdev.alloc_blk(nblks, hints, out_blkid));
     }
 
-    BlkAllocStatus alloc_blk(uint8_t nblks, blk_alloc_hints &hints, 
+    BlkAllocStatus alloc_blk(BlkId &in_blkid) {
+        return(m_vdev.alloc_blk(in_blkid));
+    }
+
+    BlkAllocStatus alloc_blk(uint32_t size, blk_alloc_hints &hints, 
             BlkId *out_blkid) {
         // Allocate a block from the device manager
+        assert(size % m_pagesz == 0);
+        auto nblks = size/m_pagesz;
         hints.is_contiguous = true;
         return (m_vdev.alloc_blk(nblks, hints, out_blkid));
     }
@@ -197,8 +239,8 @@ public:
         
         // Allocate a block from the device manager
         hints.is_contiguous = true;
-        assert(size % BLKSTORE_BLK_SIZE == 0);
-        alloc_blk(size/BLKSTORE_BLK_SIZE, hints, out_blkid);
+        assert(size % m_pagesz == 0);
+        alloc_blk(size, hints, out_blkid);
 
         // Create an object for the buffer
         auto buf = Buffer::make_object();
@@ -206,7 +248,7 @@ public:
 
         // Create a new block of memory for the blocks requested and set the memvec pointer to that
         uint8_t *ptr;
-        int ret = posix_memalign((void **) &ptr, BLKSTORE_ALIGN_SIZE, size); // TODO: Align based on hw needs instead of 4k
+        int ret = posix_memalign((void **) &ptr, HomeStoreConfig::align_size, size);
         if (ret != 0) {
             throw std::bad_alloc();
         }
@@ -329,6 +371,11 @@ public:
         /* mark this req as completed in writeback_cache to do the clean up. */
         m_wb_cache.writeBack_completion(req->bbuf, 
                                         boost::static_pointer_cast<writeback_req>(req), status);
+    }
+
+    void write(BlkId &bid, homeds::MemVector &mvec) {
+        
+        m_vdev.write(bid, mvec, nullptr, 0);
     }
 
     /* Write the buffer. The BlkStore write does not support write in place and so it does not also support
@@ -472,7 +519,7 @@ public:
         for (uint32_t i = 0; i < missing_mp.size(); i++) {
 
             // Create a new block of memory for the missing piece
-            int ret = posix_memalign((void **) &ptr, BLKSTORE_ALIGN_SIZE, missing_mp[i].second);  // TODO: Align based on hw needs instead of 4k
+            int ret = posix_memalign((void **) &ptr, HomeStoreConfig::align_size, missing_mp[i].second);
             if (ret != 0) {
                 assert(0);
                 throw std::bad_alloc();
@@ -514,6 +561,34 @@ public:
         return bbuf;
     }
 
+    std::vector<boost::intrusive_ptr<BlkBuffer>> read_nmirror(BlkId &bid, int nmirrors) {
+        std::vector<boost::intrusive_ptr<BlkBuffer>> buf_list;
+        std::vector<boost::intrusive_ptr<homeds::MemVector>> mp;
+        uint8_t *mem_ptr = nullptr;
+        
+        for (int i = 0; i < (nmirrors + 1); i++) {
+            /* create the pointer */
+            auto ret = posix_memalign((void **) &mem_ptr, HomeStoreConfig::align_size, bid.data_size());
+            assert (ret == 0);
+            
+            /* set the memvec */
+            boost::intrusive_ptr<homeds::MemVector> mvec(new homeds::MemVector());
+            mvec->set(mem_ptr, bid.data_size(), 0);
+            
+            /* create the buffer */
+            auto bbuf = Buffer::make_object();
+            bbuf->set_memvec(mvec, 0, bid.data_size());
+            
+            buf_list.push_back(bbuf);
+            mp.push_back(mvec);
+        }
+        m_vdev.read_nmirror(bid, mp, bid.data_size(), nmirrors);
+        return buf_list;
+    }
+
+    void reset_vdev_failed_state() {
+        m_vdev.reset_failed_state();
+    }
     boost::intrusive_ptr<writeback_req> read_locked(boost::intrusive_ptr< Buffer > buf, 
                                                 bool is_write_modifiable) {
         assert(buf.get());
@@ -528,11 +603,16 @@ public:
         return m_vdev.get_size();
     }
 
+    void update_vb_context(uint8_t *blob) {
+        m_vdev.update_vb_context(blob);       
+    }
+
     VirtualDev< BAllocator, RoundRobinDeviceSelector > *get_vdev() {
         return &m_vdev;
     };
 
 private:
+        uint32_t m_pagesz;
         Cache< BlkId > *m_cache;
         WriteBackCache< BlkId > m_wb_cache;
         BlkStoreCacheType m_cache_type;

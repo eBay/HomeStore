@@ -20,6 +20,9 @@ extern "C" {
 #include "device/virtual_dev.hpp"
 #include "volume.hpp"
 #include <condition_variable>
+#include <main/vol_interface.hpp>
+#include <boost/uuid/uuid_generators.hpp>
+#include <boost/uuid/uuid_io.hpp>
 
 using namespace std;
 using namespace homestore;
@@ -34,6 +37,7 @@ SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write, iomgr, VMOD_BTREE_MERGE, VM
 
 homestore::DeviceManager *dev_mgr = nullptr;
 std::shared_ptr<homestore::Volume> vol;
+#define BLKSTORE_BLK_SIZE 8192
 
 constexpr auto MAX_OUTSTANDING_IOs = 128u;
 constexpr auto MAX_THREADS = 8u;
@@ -52,6 +56,7 @@ int is_random_read = false;
 int is_random_write = false;
 bool is_read = false;
 bool is_write = false;
+bool init = true;
 std::atomic_bool can_read = false;
 std::atomic_bool can_write = true;
 std::mutex cv_mtx;
@@ -61,6 +66,8 @@ uint8_t **bufs;
 uint64_t *written_lba;//lba written
 uint64_t *written_nblks;//nblks for each lba
 boost::intrusive_ptr<homestore::BlkBuffer> *boost_buf;
+class test_ep;
+test_ep *ep;
 
 /* change it to atomic counters */
 std::atomic<uint64_t> read_cnt(0);
@@ -144,11 +151,15 @@ public:
 
         iomgr->add_ep(this);
 
+        vol_params params;
+        params.page_size = 8192;
+        params.size = max_vol_size;
+        params.io_comp_cb = ([this](auto vol_req) { process_completions(vol_req); });
+        memcpy(params.vol_name, "vol1", sizeof("vol1"));
+
         /* Create a volume */
-        vol = homestore::Volume::createVolume("my_volume",
-                                              dev_mgr,
-                                              max_vol_size,
-                                              [this](auto vol_req) { process_completions(vol_req); });
+        vol = VolInterface::get_instance()->createVolume(params);
+         
 #ifndef NDEBUG
         vol->enable_split_merge_crash_simulation();
 #endif
@@ -183,7 +194,7 @@ public:
             uint8_t *temp_buff = create_temp_buff(written_lba[cnt], written_nblks[cnt]);
 
             //write temp buff
-            vol->write(written_lba[cnt], temp_buff, written_nblks[cnt], req);
+            VolInterface::get_instance()->write(vol, written_lba[cnt], temp_buff, written_nblks[cnt], req);
 
             //free temp buff
             //free(temp_buff);
@@ -195,7 +206,7 @@ public:
             if (0 == posix_memalign((void **) &write_buf, page_size, buf_size)) {
                 memcpy(write_buf, bufs[cnt], buf_size);
                 LOGDEBUG("Writing -> {}:{}", cnt * write_length, write_length);
-                vol->write(cnt * write_length, (uint8_t *) write_buf, write_length, req);
+                VolInterface::get_instance()->write(vol, cnt * write_length, (uint8_t *) write_buf, write_length, req);
             } else {
                 throw std::runtime_error("Out of Memory");
             }
@@ -208,10 +219,10 @@ public:
         if (is_random_read) {
             req->lba_to_check = written_lba[cnt];
             req->nblks_to_check = rand() % written_nblks[cnt];
-            vol->read(req->lba_to_check, req->nblks_to_check, req);
+            VolInterface::get_instance()->read(vol, req->lba_to_check, req->nblks_to_check, req);
         } else {
             req->indx = cnt;
-            vol->read(cnt * write_length, write_length, req);
+            VolInterface::get_instance()->read(vol, cnt * write_length, write_length, req);
         }
     }
 
@@ -350,10 +361,30 @@ SDS_OPTION_GROUP(test_volume, (num_of_writes, "", "num_of_writes", "Number of wr
                               (is_rand_write, "", "is_random_write", "random write", ::cxxopts::value<bool>(), ""), \
                               (device_list, "", "device_list", "List of device paths", ::cxxopts::value<std::vector<std::string>>(), "path [...]"), \
                               (max_vol_size, "", "max_vol_size", "max volume size", ::cxxopts::value<uint64_t>()->default_value("1073741824"), "bytes"), \
-                              (thread_cnt, "", "threads", "Thread count", ::cxxopts::value<uint32_t>()->default_value("2"), "numthreads"))
-SDS_OPTIONS_ENABLE(logging, test_volume
-)
+                              (thread_cnt, "", "threads", "Thread count", ::cxxopts::value<uint32_t>()->default_value("2"), "numthreads"),
+                              (max_capacity, "", "maximum capacity", "maximum capacity", ::cxxopts::value<uint64_t>()->default_value("0"), "bytes"))
+SDS_OPTIONS_ENABLE(logging, test_volume)
 
+std::shared_ptr<iomgr::ioMgr> iomgr_obj;
+
+void init_done_cb(std::error_condition err, struct out_params params) {
+    if (init) {
+        ep = new test_ep (iomgr_obj);
+        /* send an event */
+        uint64_t temp = 1;
+        [[maybe_unused]] auto wsize = write(ep->ev_fd, &temp, sizeof(uint64_t)); 
+    }
+}
+
+bool vol_found_cb (boost::uuids::uuid uuid) {
+    return true;
+}
+
+void vol_mounted_cb(std::shared_ptr<Volume> vol, vol_state state) {
+}
+
+void vol_state_change_cb(std::shared_ptr<Volume> vol, vol_state old_state, vol_state new_state) {
+}
 
 int main(int argc, char **argv) {
     SDS_OPTIONS_LOAD(argc, argv, logging, test_volume)
@@ -369,9 +400,27 @@ int main(int argc, char **argv) {
         LOGERROR("Need at least one device listed.");
         exit(-1);
     }
-    auto dev_names = SDS_OPTIONS["device_list"].as<std::vector<std::string>>();
 
+    if (0 == SDS_OPTIONS.count("max_capacity")) {
+        LOGERROR("Need max capacity.");
+//        exit(-1);
+    }
+   
+   auto dev_names = SDS_OPTIONS["device_list"].as<std::vector<std::string>>();
+  // auto max_capacity = SDS_OPTIONS["max_capacity"].as<uint64_t>();
 
+   std::vector<dev_info> device_info;
+   for (uint32_t i = 0; i < dev_names.size(); i++) {
+        dev_info temp_info;
+        boost::uuids::string_generator gen;
+        temp_info.dev_names = dev_names[0];
+        temp_info.uuid = gen("01970496-0262-11e9-8eb2-f2801f1b9fd1");
+        device_info.push_back(temp_info);
+   }
+
+    if (SDS_OPTIONS.count("max_capacity")) {
+        
+    }
     if (SDS_OPTIONS.count("is_random_read")) {
         is_random_read = true;
     }
@@ -401,30 +450,34 @@ int main(int argc, char **argv) {
     written_nblks = (uint64_t *) malloc(sizeof(uint64_t) * max_buf);
     boost_buf = (boost::intrusive_ptr<homestore::BlkBuffer> *) malloc(
             sizeof(boost::intrusive_ptr<homestore::BlkBuffer>) * max_buf);
-
+ 
     
     /* create iomgr */
-    auto iomgr = std::make_shared<iomgr::ioMgr>(2, SDS_OPTIONS["threads"].as<uint32_t>());
+    iomgr_obj = std::make_shared<iomgr::ioMgr>(2, SDS_OPTIONS["threads"].as<uint32_t>());
 
-    /* Create/Load the devices */
-    LOGDEBUG("Creating devices.");
-    dev_mgr = new homestore::DeviceManager(Volume::new_vdev_found,
-                                           0,
-                                           iomgr,
-                                           virtual_dev_process_completions);
-    try {
-        dev_mgr->add_devices(dev_names);
-    } catch (std::exception &e) {
-        LOGCRITICAL("Exception info {}", e.what());
-        exit(1);
-    }
+    /* start homestore */
+    init_params params;
+
+    params.min_virtual_page_size = 4096;
+    params.cache_size = 1 * 1024 * 1024 * 1024;
+    params.disk_init = init;
+    params.devices = device_info;
+    params.is_file = true;
+    params.max_cap = (5 * 1024 * 1024 * 1024ul) ;
+    params.physical_page_size = 8192;
+    params.disk_align_size = 4096;
+    params.atomic_page_size = 8192;
+    params.iomgr = iomgr_obj;
+    params.init_done_cb = init_done_cb;
+    params.vol_mounted_cb = vol_mounted_cb;
+    params.vol_state_change_cb = vol_state_change_cb;
+    params.vol_found_cb = vol_found_cb;
+    VolInterface::init(params);
 
     /* create endpoint */
-    iomgr->start();
-    test_ep ep(iomgr);
+    iomgr_obj->start();
 
     /* create dataset */
-    auto devs = dev_mgr->get_all_devices();
     LOGDEBUG("Creating dataset.");
     for (auto i = 0u; i < max_buf; i++) {
         if (auto ec = posix_memalign((void **) &bufs[i], page_size, buf_size))
@@ -437,11 +490,7 @@ int main(int argc, char **argv) {
     }
 
     LOGDEBUG("Initializing performance counters.");
-    vol->init_perf_report();
 
-    /* send an event */
-    uint64_t temp = 1;
-    [[maybe_unused]] auto wsize = write(ep.ev_fd, &temp, sizeof(uint64_t));
 
     LOGDEBUG("Waiting for writes to finish.");
     {
@@ -470,13 +519,7 @@ int main(int argc, char **argv) {
         printf("total time spend per io %lu us\n", time_us / read_cnt);
     printf("iops %lu \n", (read_cnt * 1000 * 1000) / time_us);
     printf("additional counters.........\n");
-   vol->print_perf_report();
-    // Expect this to fail!!!
-    auto err = Volume::removeVolume("my_volume");
-    assert(err);
-    vol.reset();
-    err = Volume::removeVolume("my_volume");
-    assert(!err);
-    iomgr->print_perf_cntrs();
+    vol->print_perf_report();
+    iomgr_obj->print_perf_cntrs();
     LOGDEBUG("Complete");
 }

@@ -66,10 +66,10 @@ public:
                                boost::intrusive_ptr<BtreeNodeDeclType> bn, bool is_write_modifiable,  
                                std::deque<boost::intrusive_ptr<btree_req_type>> *dependent_req_q);
 
-    static void copy_node(BtreeSpecificImplDeclType *impl, boost::intrusive_ptr<BtreeNodeDeclType> copy_from,
-                          boost::intrusive_ptr<BtreeNodeDeclType> copy_to);
+    static void copy_node(BtreeSpecificImplDeclType *impl, boost::intrusive_ptr<BtreeNodeDeclType> copy_from, boost::intrusive_ptr<BtreeNodeDeclType> copy_to);
+    static void swap_node(BtreeSpecificImplDeclType *impl, boost::intrusive_ptr<BtreeNodeDeclType> node1, boost::intrusive_ptr<BtreeNodeDeclType> node2);
     static void ref_node(BtreeNodeDeclType *bn);
-    static bool deref_node(BtreeNodeDeclType *bn);
+    static void deref_node(BtreeNodeDeclType *bn);
 };
 } }
 #endif //OMSTORE_BACKING_BTREE_HPP

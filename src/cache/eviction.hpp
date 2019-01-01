@@ -8,7 +8,7 @@
 #include <mutex>
 #include <atomic>
 #include <boost/intrusive/list.hpp>
-#include "main/store_limits.h"
+#include <main/homestore_config.hpp>
 #include "cache_common.hpp"
 
 namespace homestore {

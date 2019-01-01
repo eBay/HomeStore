@@ -1,5 +1,6 @@
 set(VOLUME_SOURCE_FILES
        volume.cpp
+       home_blks.cpp
       )
 add_library(hs_volume OBJECT ${VOLUME_SOURCE_FILES})
 

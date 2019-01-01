@@ -222,6 +222,8 @@ public:
         return BlkAllocator::get_config();
     }
 
+    void inited(); override
+    BlkAllocStatus alloc(BlkId &out_blkid); override
 private:
     std::thread m_thread_id; // Thread pointer for this region
     std::mutex m_mutex;    // Mutex to protect regionstate & cb

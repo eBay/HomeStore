@@ -3,8 +3,6 @@
  *
  *  Created on: Jun 17, 2015
  *      Author: Hari Kadayam
- *  Modified : Oct 2018
- *      Author: Sounak Gupta
  */
 
 #include "varsize_blk_allocator.h"
@@ -24,13 +22,13 @@ void thread_func(VarsizeBlkAllocator *b) {
     b->allocator_state_machine();
 }
 
-VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig &cfg) :
+VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig &cfg, bool init) :
         BlkAllocator(cfg),
         m_cfg(cfg),
         m_region_state(BLK_ALLOCATOR_DONE),
         m_blk_portions(cfg.get_total_portions()),
         m_temp_groups(cfg.get_total_temp_group()),
-        m_cache_n_entries(0) {
+        m_cache_n_entries(0), m_init(false) {
 
     // TODO: Raise exception when blk_size > page_size or total blks is less than some number etc...
     m_alloc_bm = new homeds::Bitset(cfg.get_total_blks());
@@ -70,7 +68,9 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig &cfg) :
     m_blk_cache = VarsizeBlkAllocatorBtree::create_btree(btree_cfg, nullptr);
 
     // Start a thread which will do sweeping job of free segments
-    m_thread_id = std::thread(thread_func, this);
+    if (init) {
+        inited();
+     }
 }
 
 VarsizeBlkAllocator::~VarsizeBlkAllocator() {
@@ -83,6 +83,12 @@ VarsizeBlkAllocator::~VarsizeBlkAllocator() {
 
     m_cv.notify_all();
     m_thread_id.join();
+    delete(m_blk_cache);
+    delete(m_alloc_bm);
+    delete(m_alloced_bm);
+    for (auto i = 0U; i < m_cfg.get_total_segments(); i++) {
+        delete(m_segments[0]);
+    }
 }
 
 #define MAX_BLK_ALLOC_ATTEMPT 3
@@ -129,6 +135,20 @@ void VarsizeBlkAllocator::allocator_state_machine() {
 
 #define MAX_RETRY_CNT 5
 
+BlkAllocStatus 
+VarsizeBlkAllocator::alloc(BlkId &in_bid) {
+    m_alloced_bm->set_bits(in_bid.get_id(), in_bid.get_nblks());
+    return BLK_ALLOC_SUCCESS;
+}
+
+void 
+VarsizeBlkAllocator::inited() {
+    if (!m_init) {
+        m_thread_id = std::thread(thread_func, this);
+    }
+    m_init = true;
+}
+
 BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, 
                    const blk_alloc_hints &hints, std::vector<BlkId> &out_blkid) {
     uint8_t blks_alloced = 0;
@@ -136,8 +156,10 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks,
 
     uint8_t blks_rqstd = nblks;
 
+    assert(m_init);
+
 #ifndef NDEBUG
-    if (nblks  != 1) {
+    if (!hints.is_contiguous && nblks  != 1) {
         blks_rqstd = nblks / 2;
     }
 #endif
@@ -228,9 +250,6 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
     auto slab_index = get_config().get_slab(actual_entry.get_blk_count()).first;
     m_slab_entries[slab_index]._a.fetch_sub(actual_entry.get_blk_count(),
                                                     std::memory_order_acq_rel);
-    LOGINFO("Allocated {} blocks from slab {}, remaining slab capacity = {}",
-            actual_entry.get_blk_count(), slab_index,
-            m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
 
     /* If we have more blks than what we need, insert the remaining blks to
        the bitmap. We can give either the leading blocks or trailing blocks.
@@ -240,10 +259,10 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
     if (excess_nblks) {
         uint64_t blknum = actual_entry.get_blk_num();
         int leading_npages =
-            (int)(blknum_to_pageid(blknum + nblks) - actual_entry.get_page_id());
+            (int)(blknum_to_phys_pageid(blknum + nblks) - actual_entry.get_phys_page_id());
         int trailing_npages =
-            (int)(blknum_to_pageid(blknum + actual_entry.get_blk_count()) -
-                                        blknum_to_pageid(blknum + excess_nblks));
+            (int)(blknum_to_phys_pageid(blknum + actual_entry.get_blk_count()) -
+                                        blknum_to_phys_pageid(blknum + excess_nblks));
 
         VarsizeAllocCacheEntry excess_entry;
         if (leading_npages <= trailing_npages) {
@@ -290,8 +309,6 @@ void VarsizeBlkAllocator::free(const BlkId &b) {
 
     //std::cout << "Resetting " << p.get_blk_id() << " for nblks = " << nblks << " Bitmap state= \n";
     //m_alloc_bm->print();
-
-    segment->add_free_blks(b.get_nblks());
 }
 
 // This runs on per region thread and is at present single threaded.
@@ -361,7 +378,7 @@ uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t portion_num, BlkAll
     auto num_blks_per_portion = get_config().get_blks_per_portion();
     auto cur_blk_id = portion_num * num_blks_per_portion;
     auto end_blk_id = cur_blk_id + num_blks_per_portion;
-    auto num_blks_per_page = get_config().get_blks_per_page();
+    uint32_t num_blks_per_phys_page = get_config().get_blks_per_phys_page();
 
     portion.lock();
     /* TODO: Consider caching the m_cache_n_entries and give some leeway
@@ -372,6 +389,7 @@ uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t portion_num, BlkAll
 
         // Get next reset bits and insert to cache and then reset those bits
         auto b = m_alloc_bm->get_next_contiguous_reset_bits(cur_blk_id);
+        assert(b.nbits <= MAX_NBLKS);
 
         /* If there are no free blocks are none within the assigned portion */
         if (!b.nbits || b.start_bit >= end_blk_id) {
@@ -388,9 +406,9 @@ uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t portion_num, BlkAll
            with a page boundary
          */
         uint64_t total_bits = 0;
-        unsigned int nbits = b.start_bit % num_blks_per_page;
+        unsigned int nbits = b.start_bit % num_blks_per_phys_page;
         if (nbits) {
-            nbits = std::min(num_blks_per_page - nbits, b.nbits);
+            nbits = std::min(num_blks_per_phys_page - nbits, b.nbits);
             auto slab_index = get_config().get_slab(nbits).first;
             if (m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel) <
                                         get_config().get_slab_capacity(slab_index)) {
@@ -421,12 +439,12 @@ uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t portion_num, BlkAll
            whichever occurs earlier
          */
         cur_blk_id = b.start_bit + b.nbits;
-        nbits = cur_blk_id % num_blks_per_page;
+        nbits = cur_blk_id % num_blks_per_phys_page;
         if (b.nbits && nbits) {
             /* If code enters this section, it means that start is aligned to a page
                boundary
              */
-            assert(b.start_bit % num_blks_per_page == 0);
+            assert(b.start_bit % num_blks_per_phys_page == 0);
             auto start = cur_blk_id - nbits;
             auto slab_index = get_config().get_slab(nbits).first;
             if (m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel) <
@@ -457,8 +475,8 @@ uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t portion_num, BlkAll
             /* If code enters this section, it means that start is aligned to a page
                boundary and nbits left is a multiple of page size
              */
-            assert(b.start_bit % num_blks_per_page == 0);
-            assert(b.nbits % num_blks_per_page == 0);
+            assert(b.start_bit % num_blks_per_phys_page == 0);
+            assert(b.nbits % num_blks_per_phys_page == 0);
             auto slab_index = get_config().get_slab(b.nbits).first;
             if (m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel) <
                                         get_config().get_slab_capacity(slab_index)) {
@@ -575,8 +593,8 @@ int VarsizeAllocCacheEntry::compare_range(const homeds::btree::BtreeSearchRange 
         return ret;
     }
 
-    ret = is_in_range(this->get_page_id(), start_entry->get_page_id(), range.is_start_inclusive(),
-                      end_entry->get_page_id(), range.is_end_inclusive());
+    ret = is_in_range(this->get_phys_page_id(), start_entry->get_phys_page_id(), range.is_start_inclusive(),
+                      end_entry->get_phys_page_id(), range.is_end_inclusive());
     return ret;
 }
 
@@ -610,9 +628,9 @@ int VarsizeAllocCacheEntry::compare(const homeds::btree::BtreeKey *o) const {
         return -1;
     } else if (get_temperature() > other->get_temperature()) {
         return 1;
-    } else if (get_page_id() < other->get_page_id()) {
+    } else if (get_phys_page_id() < other->get_phys_page_id()) {
         return -1;
-    } else if (get_page_id() > other->get_page_id()) {
+    } else if (get_phys_page_id() > other->get_phys_page_id()) {
         return 1;
     } else if (get_blk_num() < other->get_blk_num()) {
         return -1;

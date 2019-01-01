@@ -15,8 +15,10 @@
 #include <mutex>
 #include "homeds/utility/atomic_counter.hpp"
 #include <atomic>
+#include <main/homestore_config.hpp>
 
 namespace homeds {
+using namespace homestore;
 #define round_off(val, rnd) ((((val)-1)/(rnd)) + 1)
 
 #if 0
@@ -121,13 +123,13 @@ private:
     }
 
     uint32_t decode(uint8_t encoded_size) const {
-        return (encoded_size * SizeMultiplier);
+        return (encoded_size * HomeStoreConfig::hs_page_size);
     }
 
     uint8_t encode(uint32_t size) const {
-        assert((size % SizeMultiplier) == 0);
-        assert((size/SizeMultiplier >> 8) == 0);
-        return round_off(size, SizeMultiplier);
+        assert((size % HomeStoreConfig::hs_page_size) == 0);
+        assert((size/HomeStoreConfig::hs_page_size >> 8) == 0);
+        return round_off(size, HomeStoreConfig::hs_page_size);
     }
 } __attribute__((packed));
 

@@ -22,7 +22,7 @@ homestore::Cache< BlkId > *glob_cache = nullptr;
 
 AbstractVirtualDev *new_vdev_found(homestore::vdev_info_block *vb) {
     LOGINFO("New virtual device found id = {} size = {}", vb->vdev_id, vb->size);
-    blk_store = new homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy >(dev_mgr, glob_cache, vb, WRITETHRU_CACHE);
+    blk_store = new homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy >(dev_mgr, glob_cache, vb, WRITETHRU_CACHE, 8192);
     return blk_store->get_vdev();
 }
 
@@ -53,7 +53,7 @@ int main(int argc, char** argv) {
         LOGINFO("Creating BlkStore");
         uint64_t size = 512 * 1024 * 1024;
         blk_store = new homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy >(dev_mgr, glob_cache, size,
-                                                                                  WRITETHRU_CACHE, 1);
+                                                                                  WRITETHRU_CACHE, 1, 8192);
     }
 
     homestore::BlkId bids[100];

@@ -11,7 +11,7 @@
 #include "lru_eviction.hpp"
 #include <boost/intrusive_ptr.hpp>
 #include "homeds/memory/obj_allocator.hpp"
-#include "main/store_limits.h"
+#include "main/homestore_config.hpp"
 #include <execinfo.h>
 
 namespace homestore {

@@ -23,10 +23,10 @@ struct atomwrapper {
 
 class VarsizeBlkAllocConfig : public BlkAllocConfig {
 private:
-    uint32_t m_page_size;
+    uint32_t m_phys_page_size;
     uint32_t m_nsegments;
-    uint32_t m_pages_per_portion;
-    uint32_t m_pages_per_temp_group;
+    uint32_t m_blks_per_portion;
+    uint32_t m_blks_per_temp_group;
     uint64_t m_max_cache_blks;
     std::vector<uint32_t> m_slab_nblks;
     std::vector<uint32_t> m_slab_capacity;
@@ -37,23 +37,23 @@ public:
 
     VarsizeBlkAllocConfig(uint64_t blk_size, uint64_t n_blks) :
             BlkAllocConfig(blk_size, n_blks),
-            m_page_size(8192),
             m_nsegments(1),
-            m_pages_per_portion(n_blks),
-            m_pages_per_temp_group(n_blks),
+            m_blks_per_portion(n_blks),
+            m_blks_per_temp_group(n_blks),
             m_max_cache_blks(0) {
     }
 
-    void set_page_size(uint32_t page_size) {
-        m_page_size = page_size;
+    void set_phys_page_size(uint32_t page_size) {
+        m_phys_page_size = page_size;
     }
 
     void set_total_segments(uint32_t nsegments) {
         m_nsegments = nsegments;
     }
 
-    void set_pages_per_portion(uint32_t pg_per_portion) {
-        m_pages_per_portion = pg_per_portion;
+    void set_blks_per_portion(uint32_t pg_per_portion) {
+        assert(pg_per_portion % get_blks_per_phys_page() == 0);
+        m_blks_per_portion = pg_per_portion;
     }
 
     void set_max_cache_blks(uint64_t ncache_entries) {
@@ -69,35 +69,20 @@ public:
         }
     }
 
-    void set_pages_per_temp_group(uint64_t npgs_per_temp_group) {
-        m_pages_per_temp_group = npgs_per_temp_group;
+    void set_blks_per_temp_group(uint64_t npgs_per_temp_group) {
+        m_blks_per_temp_group = npgs_per_temp_group;
     }
 
-    uint32_t get_page_size() const {
-        return m_page_size;
-    }
-
-    uint64_t get_total_pages() const {
-        assert ((get_total_blks() * get_blk_size() % 
-                   (get_page_size() * get_pages_per_portion())) == 0);
-        return get_total_blks() * get_blk_size() / get_page_size();
-    }
-
-    uint32_t get_blks_per_page() const {
-        assert(get_page_size() % get_blk_size() == 0);
-        return (uint32_t) (get_page_size() / get_blk_size());
+    uint32_t get_phys_page_size() const {
+        return m_phys_page_size;
     }
 
     uint32_t get_total_segments() const {
         return m_nsegments;
     }
 
-    uint64_t get_pages_per_portion() const {
-        return m_pages_per_portion;
-    }
-
     uint64_t get_blks_per_portion() const {
-        return get_pages_per_portion() * get_blks_per_page();
+        return m_blks_per_portion;
     }
 
     uint64_t get_blks_per_segment() const {
@@ -105,23 +90,27 @@ public:
     }
 
     uint64_t get_total_portions() const {
-        assert(get_total_pages() % get_pages_per_portion() == 0);
-            return get_total_pages() / get_pages_per_portion();
+        assert(get_total_blks() % get_blks_per_portion() == 0);
+            return get_total_blks() / get_blks_per_portion();
     }
 
     uint64_t get_max_cache_blks() const {
         return m_max_cache_blks;
     }
 
-    uint64_t get_pages_per_temp_group() const {
-        return m_pages_per_temp_group;
+    uint64_t get_blks_per_temp_group() const {
+        return m_blks_per_temp_group;
+    }
+
+    uint32_t get_blks_per_phys_page() const {
+        return get_phys_page_size() / get_blk_size();
     }
 
     uint32_t get_total_temp_group() const {
-        if (get_total_pages() % get_pages_per_temp_group() == 0) {
-            return (uint32_t) (get_total_pages() / get_pages_per_temp_group());
+        if (get_total_blks() % get_blks_per_temp_group() == 0) {
+            return (uint32_t) (get_total_blks() / get_blks_per_temp_group());
         } else {
-            return (uint32_t) ((get_total_pages() / get_pages_per_temp_group()) + 1);
+            return (uint32_t) ((get_total_blks() / get_blks_per_temp_group()) + 1);
         }
     }
 
@@ -142,9 +131,9 @@ public:
 
     std::string to_string() {
         std::stringstream ss;
-        ss << BlkAllocConfig::to_string() << " Pagesize=" << get_page_size() << " Totalsegments="
+        ss << BlkAllocConfig::to_string() << " Pagesize=" << get_phys_page_size() << " Totalsegments="
            << get_total_segments()
-           << " PagesPerPortion=" << get_pages_per_portion() << " MaxCacheBlks=" << get_max_cache_blks();
+           << " BlksPerPortion=" << get_blks_per_portion() << " MaxCacheBlks=" << get_max_cache_blks();
         return ss.str();
     }
 };
@@ -278,7 +267,7 @@ public:
 class VarsizeAllocCacheEntry : public homeds::btree::BtreeKey {
 private:
     typedef struct __attribute__((packed)) {
-        uint64_t m_page_id:36; // Page id and blk num inside page
+        uint64_t m_phys_page_id:36; // Page id and blk num inside page
         uint64_t m_blk_num:36;
         uint64_t m_nblks:10;   // Total number of blocks
         uint64_t m_temp :10;   // Temperature of each page
@@ -291,7 +280,7 @@ private:
 public:
     VarsizeAllocCacheEntry() {
         m_blob = &m_in_place_blob;
-        set_page_id(0UL);
+        set_phys_page_id(0UL);
         set_blk_num(0UL);
         set_blk_count(0U);
         set_temperature(0U);
@@ -299,7 +288,7 @@ public:
 
     VarsizeAllocCacheEntry(uint64_t page_id, uint64_t blknum, uint32_t nblks, uint32_t temp) {
         m_blob = &m_in_place_blob;
-        set_page_id(page_id);
+        set_phys_page_id(page_id);
         set_blk_num(blknum);
         set_blk_count(nblks);
         set_temperature(temp);
@@ -326,8 +315,8 @@ public:
         m_blob->m_temp = temp;
     }
 
-    void set_page_id(uint64_t page_id) {
-        m_blob->m_page_id = page_id;
+    void set_phys_page_id(uint64_t page_id) {
+        m_blob->m_phys_page_id = page_id;
     }
 
     uint64_t get_blk_num() const {
@@ -342,8 +331,8 @@ public:
         return (uint32_t) (m_blob->m_temp);
     }
 
-    uint64_t get_page_id() const {
-        return (uint32_t) (m_blob->m_page_id);
+    uint64_t get_phys_page_id() const {
+        return (uint32_t) (m_blob->m_phys_page_id);
     }
 
     int compare(const homeds::btree::BtreeKey *o) const override;
@@ -448,7 +437,7 @@ public:
  */
 class VarsizeBlkAllocator : public BlkAllocator {
 public:
-    VarsizeBlkAllocator(VarsizeBlkAllocConfig &cfg);
+    VarsizeBlkAllocator(VarsizeBlkAllocConfig &cfg, bool init);
     virtual ~VarsizeBlkAllocator();
 
     BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid, bool retry = true) override;
@@ -459,6 +448,8 @@ public:
     std::string to_string() const override;
     void allocator_state_machine();
 
+    virtual BlkAllocStatus alloc(BlkId &out_blkid) override;
+    virtual void inited() override;
 private:
     VarsizeBlkAllocConfig m_cfg; // Config for Varsize
     std::thread m_thread_id; // Thread pointer for this region
@@ -484,6 +475,7 @@ private:
 
     std::atomic< uint32_t > m_cache_n_entries; // Total number of blk entries to cache
     std::vector<atomwrapper<uint32_t>> m_slab_entries; // Blk cnt for each slab in cache
+    bool m_init;
 
 private:
     const VarsizeBlkAllocConfig &get_config() const override {
@@ -500,12 +492,12 @@ private:
     uint64_t fill_cache_in_portion(uint64_t portion_num, BlkAllocSegment *seg);
 
     // Convenience routines
-    uint64_t blknum_to_pageid(uint64_t blknum) const {
-        return blknum / get_config().get_blks_per_page();
+    uint64_t blknum_to_phys_pageid(uint64_t blknum) const {
+        return blknum / get_config().get_blks_per_phys_page();
     }
 
-    uint32_t offset_within_page(uint64_t blknum) const {
-        return blknum % get_config().get_blks_per_page();
+    uint32_t offset_within_phys_page(uint64_t blknum) const {
+        return blknum % get_config().get_blks_per_phys_page();
     }
 
     uint64_t blknum_to_portion_num(uint64_t blknum) const {
@@ -529,7 +521,7 @@ private:
     }
 
     uint32_t blknum_to_tempgroup_num(uint64_t blknum) const {
-        return (uint32_t) (blknum_to_pageid(blknum) / get_config().get_pages_per_temp_group());
+        return ((uint32_t) blknum / get_config().get_blks_per_temp_group());
     }
 
     const BlkAllocTemperatureGroup *blknum_to_tempgroup_const(uint64_t blknum) const {
@@ -552,7 +544,7 @@ private:
     void gen_cache_entry(uint64_t blknum, uint32_t blk_count, VarsizeAllocCacheEntry *out_entry) {
         out_entry->set_blk_num(blknum);
         out_entry->set_blk_count(blk_count);
-        out_entry->set_page_id(blknum_to_pageid(blknum));
+        out_entry->set_phys_page_id(blknum_to_phys_pageid(blknum));
         out_entry->set_temperature(get_blk_temperature(blknum));
     }
 };

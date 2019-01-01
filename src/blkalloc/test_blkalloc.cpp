@@ -57,7 +57,7 @@ public:
             m_total_space(1 * 1024 * 1024),
             m_blk_size(8 * 1024) {
         BlkAllocConfig fixed_cfg(m_blk_size, m_total_space / m_blk_size);
-        m_fixed_allocator = new FixedBlkAllocator(fixed_cfg);
+        m_fixed_allocator = new FixedBlkAllocator(fixed_cfg, true);
     }
 
     ~FixedBlkAllocatorTest() {
@@ -150,17 +150,22 @@ public:
             m_blk_size(512) {
         VarsizeBlkAllocConfig var_cfg(m_blk_size, m_total_space / m_blk_size);
         var_cfg.set_max_cache_blks(1000);
-        var_cfg.set_page_size(m_blk_size);
+        var_cfg.set_blk_size(m_blk_size);
+        var_cfg.set_phys_page_size(m_blk_size);
         var_cfg.set_total_segments(1);
-        var_cfg.set_pages_per_portion(64);
-        var_cfg.set_pages_per_temp_group(10);
+        var_cfg.set_blks_per_portion(64);
+        var_cfg.set_blks_per_temp_group(10);
         std::vector<uint32_t> slab_limits(4, 0);
         std::vector<float> slab_weights(5, 0.2);
         for (auto i = 0U; i < slab_limits.size(); i++) {
             slab_limits[i] = (8192*(1<<i))/var_cfg.get_blk_size();
         }
         var_cfg.set_slab(slab_limits, slab_weights);
-        m_varsize_allocator = new VarsizeBlkAllocator(var_cfg);
+        m_varsize_allocator = new VarsizeBlkAllocator(var_cfg, true);
+    }
+
+    ~VarsizeBlkAllocatorTest() {
+        delete(m_varsize_allocator);
     }
 
     uint32_t max_blks() const {

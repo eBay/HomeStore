@@ -24,8 +24,10 @@ add_subdirectory(homeds)
 add_subdirectory(volume)
 add_subdirectory(error)
 add_subdirectory(metrics)
+add_subdirectory(main)
 
 add_library(homestore
+                  $<TARGET_OBJECTS:hs_main>
                   $<TARGET_OBJECTS:hs_volume>
                   $<TARGET_OBJECTS:hs_device>
                   $<TARGET_OBJECTS:hs_endpoint>

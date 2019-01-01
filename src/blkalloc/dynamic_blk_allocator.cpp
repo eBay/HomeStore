@@ -15,6 +15,9 @@ void thread_func(DynamicBlkAllocator *b) {
     b->allocator_state_machine();
 }
 
+void DynamicBlkAllocator::inited() {
+}
+
 DynamicBlkAllocator::DynamicBlkAllocator(BlkAllocConfig &cfg) :
         BlkAllocator(cfg) {
     // Initialize the state to done and start the thread
@@ -124,7 +127,12 @@ void DynamicBlkAllocator::allocator_state_machine() {
     }
 }
 
-BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &hints, 
+BlkAllocStatus DynamicBlkAllocator::alloc(BlkId &out_blkid) {
+    assert(0);
+    return BLK_ALLOC_SUCCESS;
+}
+
+BlkAllocStatus DynamicBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &hints, 
                                  std::vector<BlkId> &out_blkid) {
     /* TODO will implement it later */
     assert(0);

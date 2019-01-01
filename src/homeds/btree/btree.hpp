@@ -19,6 +19,7 @@
 #include "physical_node.hpp"
 #include <sds_logging/logging.h>
 #include <boost/intrusive_ptr.hpp>
+#include <error/error.h>
 #include <csignal>
 
 using namespace std;
@@ -38,6 +39,10 @@ namespace homeds { namespace btree {
 #endif
 
 #define btree_t Btree<BtreeStoreType, K, V, InteriorNodeType, LeafNodeType, NodeSize, btree_req_type>
+
+struct btree_super_block {
+    bnodeid root_node;
+} __attribute((packed));
 
 template<
         btree_store_type BtreeStoreType,
@@ -158,6 +163,7 @@ private:
     uint32_t m_max_nodes;
     BtreeConfig m_btree_cfg;
     BtreeStats m_stats;
+    btree_super_block m_sb;
 
     std::unique_ptr<btree_store_t> m_btree_store;
 
@@ -172,14 +178,24 @@ private:
     ////////////////// Implementation /////////////////////////
 public:
 
+    btree_super_block get_btree_sb() {
+        return m_sb;
+    }
+
     static btree_t *create_btree(BtreeConfig &cfg, void *btree_specific_context, comp_callback comp_cb) {
         auto impl_ptr = btree_store_t::init_btree(cfg, btree_specific_context, comp_cb);
+
         return new Btree(cfg, std::move(impl_ptr));
     }
 
     static btree_t *create_btree(BtreeConfig &cfg, void *btree_specific_context) {
         auto impl_ptr = btree_store_t::init_btree(cfg, btree_specific_context, nullptr);
         return new Btree(cfg, std::move(impl_ptr));
+    }
+    
+    static btree_t *create_btree(btree_super_block &btree_sb, BtreeConfig &cfg, void *btree_specific_context, comp_callback comp_cb) {
+        auto impl_ptr = btree_store_t::init_btree(cfg, btree_specific_context, nullptr);
+        return new Btree(btree_sb, cfg, std::move(impl_ptr));
     }
 
     Btree(BtreeConfig &cfg, std::unique_ptr<btree_store_t> store) :
@@ -199,6 +215,25 @@ public:
 
         m_max_nodes = max_leaf_nodes + ((double) max_leaf_nodes * 0.05) + 1; // Assume 5% for interior nodes
         create_root_node();
+    }
+    
+    Btree(btree_super_block btree_sb, BtreeConfig &cfg, std::unique_ptr<btree_store_t> store) :
+            m_btree_cfg(cfg), m_sb(btree_sb) {
+        m_btree_store = std::move(store);
+        BtreeNodeAllocator< NodeSize >::create();
+
+        // TODO: Check if node_area_size need to include persistent header
+        uint32_t node_area_size = btree_store_t::get_node_area_size(store.get());
+        m_btree_cfg.set_node_area_size(node_area_size);
+
+        // calculate number of nodes
+        uint32_t max_leaf_nodes = (m_btree_cfg.get_max_objs() *
+                                   (m_btree_cfg.get_max_key_size() + m_btree_cfg.get_max_value_size()))
+                                  / node_area_size + 1;
+        max_leaf_nodes += (100 * max_leaf_nodes) / 60; // Assume 60% btree full
+
+        m_max_nodes = max_leaf_nodes + ((double) max_leaf_nodes * 0.05) + 1; // Assume 5% for interior nodes
+        m_root_node = m_sb.root_node;
     }
     
     ~Btree() {
@@ -230,9 +265,22 @@ public:
                 } else {
                     node->get(i, &child_info, false /* copy */);
                 }
-                BtreeNodePtr child = btree_store_t::read_node(m_btree_store.get(), child_info.bnode_id());
+
+                BtreeNodePtr child = btree_store_t::read_node(m_btree_store.get(),
+                                                              child_info.bnode_id());
+
                 lock_node(child, acq_lock, &dependent_req_q);
-                free(child);
+                try {
+                    free(child);
+                } catch (const homestore::homestore_exception &e) {
+                    /* it can happen if read from the disk fails */
+                    unlock_node(child, acq_lock);
+                    throw e;
+                } catch (const std::exception &e) {
+                    unlock_node(child, acq_lock);
+                    assert(0);
+                    throw e;
+                }
                 unlock_node(child, acq_lock);
                 i++;
             }
@@ -553,7 +601,10 @@ private:
 
         if (child_info.bnode_id().m_pc_gen_flag != child_node->get_node_id().m_pc_gen_flag) {
             lock_node(child_node, homeds::thread::LOCKTYPE_WRITE, NULL);
-            fix_pc_gen_mistmatch(my_node, child_node, result.end_of_search_index, NULL);
+            /* check again in case somebody has already recovered this node */
+            if (child_info.bnode_id().m_pc_gen_flag != child_node->get_node_id().m_pc_gen_flag) {
+                fix_pc_gen_mistmatch(my_node, child_node, result.end_of_search_index, NULL);
+            }
             unlock_node(child_node, homeds::thread::LOCKTYPE_WRITE);
         }
         lock_node(child_node, homeds::thread::LOCKTYPE_READ, NULL);
@@ -1103,7 +1154,7 @@ retry:
                           std::deque<boost::intrusive_ptr<btree_req_type>> &dependent_req_q) {
         int ind;
         K split_key;
-        BtreeNodePtr new_root_int_node = nullptr;
+        BtreeNodePtr child_node = nullptr;
 
         m_btree_lock.write_lock();
         BtreeNodePtr root = btree_store_t::read_node(m_btree_store.get(), m_root_node);
@@ -1114,18 +1165,19 @@ retry:
             goto done;
         }
 
-        // Create a new root node and split them
-        new_root_int_node = alloc_interior_node();
-        split_node(new_root_int_node, root, new_root_int_node->get_total_entries(), &split_key, dependent_req_q);
+        // Create a new child node and split them
+        child_node = alloc_interior_node();
+
+        /* it swap the data while keeping the nodeid same */
+        btree_store_t::swap_node(m_btree_store.get(), root, child_node);
+        btree_store_t::write_node(m_btree_store.get(), child_node, dependent_req_q, NULL, false);
+
+        assert(root->get_total_entries() == 0);
+        split_node(root, child_node, root->get_total_entries(), &split_key, dependent_req_q);
+        /* unlock child node */
+        assert(m_root_node == root->get_node_id());
         unlock_node(root, homeds::thread::LOCKTYPE_WRITE);
 
-        m_root_node = new_root_int_node->get_node_id();
-
-#ifndef NDEBUG
-        LOGDEBUGMOD(VMOD_BTREE_SPLIT, "New Root Node: {}", new_root_int_node->to_string());
-#endif
-
-        //release_node(new_root_int_node);
     done:
         m_btree_lock.unlock();
     }
@@ -1146,11 +1198,13 @@ retry:
         child_node = btree_store_t::read_node(m_btree_store.get(), root->get_edge_id());
         assert(child_node != nullptr);
 
+        btree_store_t::swap_node(m_btree_store.get(), root, child_node);
+        btree_store_t::write_node(m_btree_store.get(), root, dependent_req_q, NULL, false);
         // Elevate the edge child as root.
         unlock_node(root, locktype::LOCKTYPE_WRITE);
-        m_root_node = child_node->get_node_id();
-        /* TODO m_root_node has to be written to fixed location */
-        btree_store_t::free_node(m_btree_store.get(), root, dependent_req_q);
+        assert(m_root_node == root->get_node_id());
+        btree_store_t::free_node(m_btree_store.get(), child_node, dependent_req_q);
+
         m_stats.dec_count(BTREE_STATS_INT_NODE_COUNT);
 
         //release_node(child_node);
@@ -1241,7 +1295,11 @@ retry:
         
         //correct child version
         child_node1->flip_pc_gen_flag();
-        btree_store_t::write_node(m_btree_store.get(), child_node1, *dependent_req_q, NULL, false);
+
+        /* we should synchronously try to recover this node. While recovery, if panic happen before
+         * it is commited then we would have lost this node.
+         */
+        btree_store_t::write_node(m_btree_store.get(), child_node1, *dependent_req_q, NULL, true);
         if (parent_sibbling != nullptr) { unlock_node(parent_sibbling, locktype::LOCKTYPE_READ); }
         
         for(int i=0;i<(int)nodes_to_free.size();i++) {
@@ -1535,6 +1593,7 @@ retry:
 #endif
     }
 
+
     void lock_node_upgrade(BtreeNodePtr node, 
                            std::deque<boost::intrusive_ptr<btree_req_type>> *dependent_req_q) {
         node->lock_upgrade();
@@ -1622,7 +1681,10 @@ protected:
         // Assign one node as root node and initially root is leaf
         BtreeNodePtr root = alloc_leaf_node();
         m_root_node = root->get_node_id();
-        btree_store_t::write_node(m_btree_store.get(), root, dependent_req_q, nullptr, true);
+
+        btree_store_t::write_node(m_btree_store.get(), root,
+                                                dependent_req_q, NULL, true);
+        m_sb.root_node = m_root_node;
     }
 
     BtreeConfig *get_config() {

@@ -11,28 +11,47 @@ using namespace std;
 
 namespace homestore {
 
-FixedBlkAllocator::FixedBlkAllocator(BlkAllocConfig &cfg) :
-        BlkAllocator(cfg) {
+FixedBlkAllocator::FixedBlkAllocator(BlkAllocConfig &cfg, bool init) :
+        BlkAllocator(cfg), m_init(init) {
     m_blk_nodes = new __fixed_blk_node[cfg.get_total_blks()];
-    uint32_t last_blk_id = BLKID32_INVALID;
 
-    for (auto i = (uint32_t)cfg.get_total_blks(); i > 0; i--) {
+    for (uint32_t i = 0; i < (uint32_t)cfg.get_total_blks() ; i++) {
 #ifndef NDEBUG
-        m_blk_nodes[i-1].this_blk_id = i-1;
+        m_blk_nodes[i].this_blk_id = i;
 #endif
-        m_blk_nodes[i - 1].next_blk = last_blk_id;
-        last_blk_id = (uint32_t)i - 1;
+        m_blk_nodes[i].next_blk = i + 1;
     }
-
-    __top_blk tp(0, last_blk_id);
-    m_top_blk_id.store(tp.to_integer());
-#ifndef NDEBUG
-    m_nfree_blks.store(cfg.get_total_blks(), std::memory_order_relaxed);
-#endif
+    m_blk_nodes[(uint32_t)cfg.get_total_blks() - 1].next_blk = BLKID32_INVALID;
+    m_first_blk_id = 0;
+    if (m_init) {
+        inited();
+    }
 }
 
 FixedBlkAllocator::~FixedBlkAllocator() {
     delete [] (m_blk_nodes);
+}
+
+BlkAllocStatus FixedBlkAllocator::alloc(BlkId &in_blkid) {
+    auto i = in_blkid.m_id;
+    if (i == m_first_blk_id) {
+        m_first_blk_id =  m_blk_nodes[i + 1].next_blk;
+    } else if (i == m_cfg.get_total_blks()) {
+        m_blk_nodes[i - 1].next_blk = BLKID32_INVALID;
+    } else {
+        m_blk_nodes[i - 1].next_blk = m_blk_nodes[i + 1].next_blk;
+    }
+    return BLK_ALLOC_SUCCESS;
+}
+
+void
+FixedBlkAllocator::inited() {
+    __top_blk tp(0, m_first_blk_id);
+    m_top_blk_id.store(tp.to_integer());
+#ifndef NDEBUG
+    m_nfree_blks.store(m_cfg.get_total_blks(), std::memory_order_relaxed);
+#endif
+    m_init = true;
 }
 
 BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &hints, 
@@ -42,7 +61,7 @@ BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &hi
         out_blkid.push_back(blkid);
         return BLK_ALLOC_SUCCESS;
     }
-    /* We don't support of vector of blkids in fixed blk allocator */
+    /* We don't support the vector of blkids in fixed blk allocator */
     return BLK_ALLOC_SPACEFULL;
 }
 
@@ -51,7 +70,7 @@ BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &hi
     uint64_t cur_val;
     uint32_t id;
 
-    assert(nblks == 1);
+    assert(m_init);
     do {
         prev_val = m_top_blk_id.load();
         __top_blk tp(prev_val);

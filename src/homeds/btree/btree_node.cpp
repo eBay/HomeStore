@@ -246,31 +246,6 @@ DecBNodeType(bool) any_upgrade_waiters() {
     return (!m_common_header.upgraders.testz());
 }
 
-#if 0
-template<btree_store_type BtreeStoreType,
-        typename K,
-        typename V,
-        btree_node_type InteriorNodeType,
-        btree_node_type LeafNodeType,
-        size_t NodeSize >
-void intrusive_ptr_add_ref(BtreeNode *n) {
-    btree_store_t::ref_node(n);
-}
-
-template<btree_store_type BtreeStoreType,
-        typename K,
-        typename V,
-        btree_node_type InteriorNodeType,
-        btree_node_type LeafNodeType,
-        size_t NodeSize >
-void intrusive_ptr_release(BtreeNode *n) {
-    if (btree_store_t::deref_node(n)) {
-        n->~BtreeNode();
-        BtreeNodeAllocator<NodeSize>::deallocate((uint8_t *)n);
-    }
-}
-#endif
-
 DecBNodeType(uint32_t) get_nth_obj_size(int ind) const {
     return call_variant_method_const(this, get_nth_obj_size, ind);
 }

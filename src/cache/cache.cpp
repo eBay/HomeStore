@@ -12,7 +12,7 @@ namespace homestore {
 ////////////////////////////////// Intrusive Cache Section /////////////////////////////////
 template< typename K, typename V>
 IntrusiveCache<K, V>::IntrusiveCache(uint64_t max_cache_size, uint32_t avg_size_per_entry) :
-        m_hash_set(max_cache_size/avg_size_per_entry/ENTRIES_PER_BUCKET) {
+        m_hash_set((max_cache_size/avg_size_per_entry)/ENTRIES_PER_BUCKET) {
     LOGINFO("Initializing cache with cache_size = {} with {} partitions", max_cache_size, EVICTOR_PARTITIONS);
     for (auto i = 0; i < EVICTOR_PARTITIONS; i++) {
         m_evictors[i] = std::make_unique<CurrentEvictor>(i, max_cache_size/EVICTOR_PARTITIONS, &m_stats,

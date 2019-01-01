@@ -25,8 +25,7 @@ namespace homestore {
             }
         }
 
-        mapping(uint32_t volsize, free_blk_callback free_cb, comp_callback comp_cb,
-                DeviceManager *mgr, Cache<BlkId> *cache) : free_blk_cb(free_cb), comp_cb(comp_cb) {
+        mapping(uint64_t volsize, uint32_t page_size, comp_callback comp_cb) : comp_cb(comp_cb) {
             assert(BIT_TO_REPRESENT_MAX_ENTRIES > log2(MAX_NO_OF_VALUE_ENTRIES));
             homeds::btree::BtreeConfig btree_cfg;
             btree_cfg.set_max_objs(volsize / (MAX_NO_OF_VALUE_ENTRIES * MAP_BLOCK_SIZE));
@@ -34,16 +33,31 @@ namespace homestore {
             btree_cfg.set_max_value_size(MAX_NO_OF_VALUE_ENTRIES * sizeof(MappingInterval));
 
             homeds::btree::btree_device_info bt_dev_info;
-            bt_dev_info.new_device = true;
-            bt_dev_info.dev_mgr = mgr;
-            bt_dev_info.size = 512 * Mi;
-            bt_dev_info.cache = cache;
-            bt_dev_info.vb = nullptr;
+            bt_dev_info.blkstore = (void *)HomeBlks::instance()->get_metadata_blkstore();
+            bt_dev_info.new_device = false;
             m_bt = MappingBtreeDeclType::create_btree(btree_cfg, &bt_dev_info,
                                                       std::bind(&mapping::process_completions, this,
                                                                 std::placeholders::_1, std::placeholders::_2));
         }
+        
+        mapping(uint64_t volsize, uint32_t page_size, btree_super_block &btree_sb, comp_callback comp_cb) : comp_cb(comp_cb) {
+            assert(BIT_TO_REPRESENT_MAX_ENTRIES > log2(MAX_NO_OF_VALUE_ENTRIES));
+            homeds::btree::BtreeConfig btree_cfg;
+            btree_cfg.set_max_objs(volsize / (MAX_NO_OF_VALUE_ENTRIES * MAP_BLOCK_SIZE));
+            btree_cfg.set_max_key_size(sizeof(uint32_t));
+            btree_cfg.set_max_value_size(MAX_NO_OF_VALUE_ENTRIES * sizeof(MappingInterval));
 
+            homeds::btree::btree_device_info bt_dev_info;
+            bt_dev_info.blkstore = HomeBlks::instance()->get_metadata_blkstore();
+            bt_dev_info.new_device = false;
+            m_bt = MappingBtreeDeclType::create_btree(btree_sb, btree_cfg, &bt_dev_info,
+                                                      std::bind(&mapping::process_completions, this,
+                                                                std::placeholders::_1, std::placeholders::_2));
+        }
+
+        btree_super_block get_btree_sb() {
+            return(m_bt->get_btree_sb());
+        }
 #ifndef NDEBUG
         void enable_split_merge_crash_simulation() {
             m_bt->simulate_merge_crash=true;

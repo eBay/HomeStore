@@ -25,7 +25,7 @@
 namespace homeds { namespace btree {
 
 struct mem_btree_node_header {
-    /* TODO: do we need to have magic or version number */
+    uint64_t magic;
     homeds::atomic_counter<uint16_t> refcount;
 };
 
@@ -64,11 +64,12 @@ public:
 
     static boost::intrusive_ptr<MemBtreeNode> alloc_node(MemBtreeStore *store, bool is_leaf,
             bool &is_new_allocation,// indicates if allocated node is same as copy_from
-            boost::intrusive_ptr<MemBtreeNode> copy_from = nullptr) {
 
+            boost::intrusive_ptr<MemBtreeNode> copy_from = nullptr) {
         if (copy_from!= nullptr) {
             is_new_allocation =  false;
-            return boost::intrusive_ptr<MemBtreeNode > (copy_from.get());
+            return copy_from;
+
         }
 
         is_new_allocation =  true;
@@ -83,10 +84,11 @@ public:
             auto n = new(mem + sizeof(MemBtreeNode)) VariantNode<InteriorNodeType, K, V, NodeSize>(&bid, true, store->m_cfg);
         }
         auto mbh = (mem_btree_node_header *)btree_node;
+        mbh->magic = 0xDEADBEEF;
         mbh->refcount.increment();
 
         boost::intrusive_ptr<MemBtreeNode> new_node = (boost::intrusive_ptr<MemBtreeNode>((MemBtreeNode *)mem));
-        
+       
         return new_node;
     }
 
@@ -123,21 +125,48 @@ public:
         original_id.m_pc_gen_flag = pheader_copy_to->get_node_id().m_pc_gen_flag;
         pheader_copy_to->set_node_id(original_id);
     }
-  
-    static void read_node_lock(MemBtreeStore *store,
-                               boost::intrusive_ptr<MemBtreeNode> bn,
-                               bool is_write_modifiable,
+
+    /* TODO: three copies huh.. ? it is not the most efficient way. We might need to change it later */ 
+    static void swap_node(MemBtreeStore *impl, boost::intrusive_ptr<MemBtreeNode> node1, boost::intrusive_ptr<MemBtreeNode> node2) {
+        /* copy the contents */
+        int sizeOfTransientHeaders = sizeof(MemBtreeNode);
+        uint32_t size = NodeSize - sizeOfTransientHeaders;
+        void *temp = malloc(size);
+        void *buf1 = (void *)((uint8_t *)node1.get() + sizeOfTransientHeaders);
+        void *buf2 = (void *)((uint8_t *)node2.get() + sizeOfTransientHeaders);
+        bnodeid_t id1 = node1->get_node_id();
+        bnodeid_t id2 = node2->get_node_id();
+        memcpy(temp, buf1, size);
+        memcpy(buf1, buf2, size);
+        memcpy(buf2, temp, size);
+
+        /* set the node ids */
+        node1->set_node_id(id1);
+        node2->set_node_id(id2);
+        free(temp);
+    }
+
+    static void read_node_lock(MemBtreeStore *impl, 
+                               boost::intrusive_ptr<MemBtreeNode> bn, 
+                               bool is_write_modifiable,  
                                std::deque<boost::intrusive_ptr<empty_writeback_req>> *dependent_req_q) {
     }
 
     static void ref_node(MemBtreeNode *bn) {
         auto mbh = (mem_btree_node_header *)bn;
+        assert(mbh->magic == 0xDEADBEEF);
         mbh->refcount.increment();
     }
 
-    static bool deref_node(MemBtreeNode *bn) {
+
+    static void deref_node(MemBtreeNode *bn) {
         auto mbh = (mem_btree_node_header *)bn;
-        return mbh->refcount.decrement_testz();
+        assert(mbh->magic == 0xDEADBEEF);
+        if (mbh->refcount.decrement_testz()) {
+            mbh->magic = 0;
+            bn->~MemBtreeNode();
+            BtreeNodeAllocator<NodeSize>::deallocate((uint8_t *)bn);
+        }
     }
     
 private:

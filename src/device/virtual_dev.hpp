@@ -17,14 +17,20 @@
 
 namespace homestore {
 
+#define VDEV_LABEL     " for Homestore Virtual Device"
+#define PHYSICAL_HIST     "physical"
+
 class VdevFixedBlkAllocatorPolicy {
 public:
     typedef FixedBlkAllocator AllocatorType;
     typedef BlkAllocConfig AllocatorConfig;
 
-    static void get_config(uint64_t size, uint32_t blk_size, BlkAllocConfig *out_config) {
-        out_config->set_blk_size(blk_size);
-        out_config->set_total_blks((uint32_t)size/blk_size);
+    static void get_config(uint64_t size, uint32_t vpage_size, BlkAllocConfig *out_config) {
+        /* for fixed block allocator page and block size is kept same as it doesn't make any
+         * difference.
+         */
+        out_config->set_blk_size(vpage_size);
+        out_config->set_total_blks((uint32_t)size/vpage_size);
     }
 };
 
@@ -34,32 +40,28 @@ public:
     typedef VarsizeBlkAllocConfig AllocatorConfig;
 
 
-    static void get_config(uint64_t size, uint32_t blk_size, BlkAllocConfig *out_config) {
+    static void get_config(uint64_t size, uint32_t vpage_size, BlkAllocConfig *out_config) {
         VarsizeBlkAllocConfig *vconfig = (VarsizeBlkAllocConfig *)out_config;
-        vconfig->set_blk_size(blk_size);
-        /* TODO: as of now page size and block size is same */
-        vconfig->set_page_size(blk_size); // SSD Page size, TODO: Get actual SSD page size and set this here
-        vconfig->set_pages_per_portion(1024); // Have locking etc for every 1024 pages
-        vconfig->set_total_segments(8); // 8 Segments per chunk
         
-        size -= (size % (vconfig->get_page_size() * 
-                            vconfig->get_pages_per_portion() * 
-                            vconfig->get_total_segments()));
+        vconfig->set_blk_size(vpage_size);
+        vconfig->set_phys_page_size(HomeStoreConfig::phys_page_size); // SSD Page size.
+        vconfig->set_blks_per_portion(BLKS_PER_PORTION); // Have locking etc for every 1024 pages
+        vconfig->set_total_segments(TOTAL_SEGMENTS); // 8 Segments per chunk
 
-        vconfig->set_total_blks(((uint64_t)size)/blk_size);
+        assert((size % MIN_CHUNK_SIZE) == 0);
+        vconfig->set_total_blks(((uint64_t)size)/vpage_size);
+        LOGINFO("added number of blocks {}", vconfig->get_total_blks());
 
-        vconfig->set_pages_per_temp_group(100); // TODO: Recalculate based on size set aside for temperature entries
-        auto cache_blks = (vconfig->get_total_pages()*vconfig->get_blks_per_page()) / 4;
-        vconfig->set_max_cache_blks(cache_blks); // Cache quarter of the blocks
-
-        /* Blk sizes in slabs : size < 8k, 8k <= size < 16k,
-         * 16k <= size < 32k, 32k <= size < 64k, size >= 64k
-         */
-        std::vector<uint32_t> slab_limits(4, 0);
-        std::vector<float> slab_weights(5, 0.2);
-        for (auto i = 0U; i < slab_limits.size(); i++) {
-            slab_limits[i] = (8192*(1<<i))/vconfig->get_blk_size();
-        }
+        vconfig->set_blks_per_temp_group(100); // TODO: Recalculate based on size set aside for temperature entries
+        vconfig->set_max_cache_blks(vconfig->get_total_blks()/4); // Cache quarter of the blocks
+        /* Blk sizes in slabs : size < 8k, 8k <= size < 16k,    
+         * 16k <= size < 32k, 32k <= size < 64k, size >= 64k   
+         */    
+        std::vector<uint32_t> slab_limits(4, 0);   
+        std::vector<float> slab_weights(5, 0.2);   
+        for (auto i = 0U; i < slab_limits.size(); i++) {   
+            slab_limits[i] = (8192*(1<<i))/vconfig->get_blk_size();  
+        }  
         vconfig->set_slab(slab_limits, slab_weights);
     }
 };
@@ -151,15 +153,13 @@ private:
     uint64_t write_time;
     uint64_t mirror_time;
     uint64_t write_cnt;
+    uint32_t m_num_chunks;
     comp_callback comp_cb;
 
 public:
     /* Create a new virtual dev for these parameters */
-    VirtualDev(DeviceManager *mgr, uint64_t size, uint32_t nmirror, bool is_stripe, uint32_t dev_blk_size,
-               const std::vector< PhysicalDev *> &pdev_list, 
-           comp_callback cb):comp_cb(cb) {
-        // Create a new vdev in persistent area and get the block of it
-        m_vb = mgr->alloc_vdev(size, nmirror, dev_blk_size);
+    VirtualDev(DeviceManager *mgr, uint64_t context_size, uint32_t nmirror, bool is_stripe, uint32_t page_size,
+               const std::vector< PhysicalDev *> &pdev_list, comp_callback cb, char *blob, uint64_t size) : comp_cb(cb) {
         m_mgr = mgr;
 
         // Now its time to allocate chunks as needed
@@ -174,6 +174,17 @@ public:
             nchunks = 1;
         }
 
+        if (m_chunk_size % MIN_CHUNK_SIZE) {
+            m_chunk_size = ALIGN_SIZE(m_chunk_size, MIN_CHUNK_SIZE);
+            LOGINFO("size of a chunk is resized to {}", m_chunk_size);
+        }
+
+        /* make size multiple of chunk size */
+        size = ALIGN_SIZE(size, m_chunk_size);
+
+        // Create a new vdev in persistent area and get the block of it
+        m_vb = mgr->alloc_vdev(context_size, nmirror, page_size, nchunks, blob, size);
+        
         // Prepare primary chunks in a physical device for future inserts.
         m_primary_pdev_chunks_list.reserve(pdev_list.size());
         for (auto pdev : pdev_list) {
@@ -185,11 +196,11 @@ public:
         }
 
         for (auto i : boost::irange<uint32_t>(0, nchunks)) {
-            std::shared_ptr< BlkAllocator > ba = create_allocator(m_chunk_size);
+            std::shared_ptr< BlkAllocator > ba = create_allocator(m_chunk_size, true);
             auto pdev_ind = i % pdev_list.size();
 
             // Create a chunk on selected physical device and add it to chunks in physdev list
-            auto chunk = create_dev_chunk(pdev_ind, ba);
+            auto chunk = create_dev_chunk(pdev_ind, ba, INVALID_CHUNK_ID);
             m_primary_pdev_chunks_list[pdev_ind].chunks_in_pdev.push_back(chunk);
 
             // If we have mirror, create a map between chunk and its mirrored chunks
@@ -201,8 +212,7 @@ public:
                     if ((++next_ind) == m_primary_pdev_chunks_list.size()) {
                         next_ind = 0;
                     }
-                    auto mchunk = create_dev_chunk(next_ind, ba);
-                    mchunk->set_primary_chunk(chunk);
+                    auto mchunk = create_dev_chunk(next_ind, ba, chunk->get_chunk_id());
                     vec.push_back(mchunk);
                 }
                 m_mirror_chunks.emplace(std::make_pair(chunk, vec));
@@ -217,6 +227,11 @@ public:
         /* Initialize the performance metrics */
         init_perf_metrics();
     }
+
+    void reset_failed_state() {
+        m_vb->failed = false;
+        m_mgr->write_info_blocks();
+    }
     
     void process_completions(boost::intrusive_ptr<virtualdev_req> req) {
 
@@ -230,9 +245,14 @@ public:
     /* Load the virtual dev from vdev_info_block and create a Virtual Dev. */
     VirtualDev(DeviceManager *mgr, vdev_info_block *vb, comp_callback cb) :
         m_vb(vb),
-        m_mgr(mgr) {
+        m_mgr(mgr), comp_cb(cb) {
          m_selector = std::make_unique<DefaultDeviceSelector>();
          m_chunk_size = 0;
+         m_num_chunks = 0;
+         m_mgr->add_chunks(vb->vdev_id, [this] (PhysicalDevChunk *chunk) { add_chunk(chunk); });
+
+         assert((vb->num_primary_chunks * (vb->num_mirrors + 1)) == m_num_chunks);
+         assert(vb->size == (vb->num_primary_chunks * m_chunk_size));
     }
 
     ~VirtualDev() = default;
@@ -241,77 +261,94 @@ public:
      * takes lock for writing and not reading
      */
     virtual void add_chunk(PhysicalDevChunk *chunk) override {
-        LOGTRACE("Adding chunk {} from vdev id {} from pdev id = {}",
+        LOGINFO("Adding chunk {} from vdev id {} from pdev id = {}",
                  chunk->get_chunk_id(),
                  chunk->get_vdev_id(),
                  chunk->get_physical_dev()->get_dev_id());
         std::lock_guard< decltype(m_mgmt_mutex) > lock(m_mgmt_mutex);
+        m_num_chunks++;
         (chunk->get_primary_chunk()) ? add_mirror_chunk(chunk) : add_primary_chunk(chunk);
+    }
 
-        std::shared_ptr< BlkAllocator > ba = create_allocator(m_chunk_size);
-        chunk->set_blk_allocator(ba);
+    BlkAllocStatus alloc_blk(BlkId &in_blkid) {
+        PhysicalDevChunk *primary_chunk;
+        uint64_t primary_dev_offset = to_dev_offset(in_blkid, &primary_chunk);
+        return(primary_chunk->get_blk_allocator()->alloc(in_blkid));
     }
 
     BlkAllocStatus alloc_blk(uint8_t nblks, const blk_alloc_hints &hints, 
                              BlkId *out_blkid) {
-        std::vector<BlkId> blkid;
-        assert(hints.is_contiguous);
-        auto ret = alloc_blk(nblks, hints, blkid);
-        if (ret == BLK_ALLOC_SUCCESS) {
-            assert(blkid.size() == 1);
-            *out_blkid = blkid[0];
-        } else {
-            assert(blkid.size() == 0);
+        BlkAllocStatus ret;
+        try {
+            std::vector<BlkId> blkid;
+            assert(hints.is_contiguous);
+            ret = alloc_blk(nblks, hints, blkid);
+            if (ret == BLK_ALLOC_SUCCESS) {
+                *out_blkid = blkid[0];
+                assert(blkid.size() <= HomeStoreConfig::atomic_phys_page_size);
+            } else {
+                assert(blkid.size() == 0);
+            }
+        } catch (const std::exception &e) {
+            ret = BLK_ALLOC_FAILED;
+            assert(0);
+            LOGERROR("{}", e.what());
         }
         return ret;
     }
 
     BlkAllocStatus alloc_blk(uint8_t nblks, const blk_alloc_hints &hints, 
                              std::vector<BlkId> &out_blkid) {
-        uint32_t dev_ind {0};
-        uint32_t chunk_num, start_chunk_num;
-        BlkAllocStatus status = BLK_ALLOC_FAILED;
+        try {
+            uint32_t dev_ind {0};
+            uint32_t chunk_num, start_chunk_num;
+            BlkAllocStatus status = BLK_ALLOC_FAILED;
 
-        // First select a device to allocate from
-        if (hints.dev_id_hint == -1) {
-            dev_ind = m_selector->select(hints);
-        } else {
-            dev_ind = (uint32_t)hints.dev_id_hint;
-        }
+            // First select a device to allocate from
+            if (hints.dev_id_hint == -1) {
+                dev_ind = m_selector->select(hints);
+            } else {
+                dev_ind = (uint32_t)hints.dev_id_hint;
+            }
 
-        //m_total_allocations++;
+            //m_total_allocations++;
 
-        // Pick a physical chunk based on physDevId.
-        // TODO: Right now there is only one primary chunk per device in a virtualdev. Need to support multiple chunks.
-        // In that case just using physDevId as chunk number is not right strategy.
-        uint32_t start_dev_ind = dev_ind;
-        PhysicalDevChunk *picked_chunk = nullptr;
+            // Pick a physical chunk based on physDevId.
+            // TODO: Right now there is only one primary chunk per device in a virtualdev. Need to support multiple chunks.
+            // In that case just using physDevId as chunk number is not right strategy.
+            uint32_t start_dev_ind = dev_ind;
+            PhysicalDevChunk *picked_chunk = nullptr;
 
-        do {
-            for (auto chunk : m_primary_pdev_chunks_list[dev_ind].chunks_in_pdev) {
-                status = chunk->get_blk_allocator()->alloc(nblks, hints, out_blkid);
+            do {
+                for (auto chunk : m_primary_pdev_chunks_list[dev_ind].chunks_in_pdev) {
+                    status = chunk->get_blk_allocator()->alloc(nblks, hints, out_blkid);
+                    if (status == BLK_ALLOC_SUCCESS) {
+                        picked_chunk = chunk;
+                        break;
+                    }
+                }
+
                 if (status == BLK_ALLOC_SUCCESS) {
-                    picked_chunk = chunk;
                     break;
                 }
-            }
+                if (!hints.can_look_for_other_dev) {
+                    break;
+                }
+                dev_ind = (uint32_t)((dev_ind+1) % m_primary_pdev_chunks_list.size());
+            } while (dev_ind != start_dev_ind);
 
-        if (status == BLK_ALLOC_SUCCESS) {
-        break;
-        }
-            if (!hints.can_look_for_other_dev) {
-                break;
+            if (status == BLK_ALLOC_SUCCESS) {
+                // Set the id as globally unique id
+                for (uint32_t i = 0; i < out_blkid.size(); i++) {
+                    out_blkid[i] = to_glob_uniq_blkid(out_blkid[i], picked_chunk);
+                }
             }
-            dev_ind = (uint32_t)((dev_ind+1) % m_primary_pdev_chunks_list.size());
-        } while (dev_ind != start_dev_ind);
-
-        if (status == BLK_ALLOC_SUCCESS) {
-            // Set the id as globally unique id
-            for (uint32_t i = 0; i < out_blkid.size(); i++) {
-                out_blkid[i] = to_glob_uniq_blkid(out_blkid[i], picked_chunk);
-            }
+            return status;
+        } catch (const std::exception &e) {
+            assert(0);
+            LOGERROR("{}", e.what());
+            return BLK_ALLOC_FAILED;
         }
-        return status;
     }
 
     void free_blk(const BlkId &b) {
@@ -330,14 +367,14 @@ public:
     void write(const BlkId &bid, const homeds::MemVector &buf, 
             boost::intrusive_ptr <virtualdev_req> req, uint32_t data_offset = 0) {
         BlkOpStatus ret_status = BLK_OP_SUCCESS;
-        uint32_t size = bid.get_nblks() * get_blk_size();
+        uint32_t size = bid.get_nblks() * get_page_size();
         struct iovec iov[BlkId::max_blks_in_op()];
         int iovcnt = 0;
 
         Clock::time_point startTime = Clock::now();
 
         uint32_t p = 0;
-        uint32_t end_offset = bid.data_size() + data_offset;
+        uint32_t end_offset = data_offset + bid.data_size();
         while (data_offset != end_offset) {
             homeds::blob b;
             buf.get(&b, data_offset);
@@ -353,12 +390,14 @@ public:
 
         assert(data_offset == end_offset);
         PhysicalDevChunk *chunk;
-        
-        req->version = 0xDEAD;
-        auto temp = std::bind(&VirtualDev::process_completions, this, 
-                std::placeholders::_1);
-        req->cb = temp;
-        req->size = size;
+       
+        if (req) {
+            req->version = 0xDEAD;
+            auto temp = std::bind(&VirtualDev::process_completions, this, 
+                    std::placeholders::_1);
+            req->cb = temp;
+            req->size = size;
+        }
         uint64_t dev_offset = to_dev_offset(bid, &chunk);
 
         LOG(INFO) << "Writing in device " << chunk->get_physical_dev()->get_dev_id() << " offset = " << dev_offset;
@@ -366,7 +405,7 @@ public:
             (std::chrono::duration_cast< std::chrono::nanoseconds >(Clock::now() -
                                                                     startTime)).count();
         write_cnt++;
-        if(req->isSyncCall) {
+        if(!req || req->isSyncCall) {
             chunk->get_physical_dev_mutable()->sync_writev(iov, iovcnt, size, dev_offset);
         } else {
             req->inc_ref();
@@ -386,17 +425,13 @@ public:
             for (auto i : boost::irange< uint32_t >(0, get_nmirrors())) {
                 for (auto mchunk : m_mirror_chunks.find(chunk)->second) {
                     dev_offset = mchunk->get_start_offset() + primary_chunk_offset;
-                    try {
-                        if(req->isSyncCall) {
-                            mchunk->get_physical_dev_mutable()->sync_writev(iov, iovcnt, size,
-                                    dev_offset);
-                        }else {
-                            req->inc_ref();
-                            mchunk->get_physical_dev_mutable()->writev(iov, iovcnt, size,
-                                    dev_offset, (uint8_t *) req.get());
-                        }
-                    } catch (std::exception &e) {
-                        throw e;
+                    if (!req || req->isSyncCall) {
+                        mchunk->get_physical_dev_mutable()->sync_writev(iov, iovcnt, size,
+                                dev_offset);
+                    } else {
+                        req->inc_ref();
+                        mchunk->get_physical_dev_mutable()->writev(iov, iovcnt, size,
+                                dev_offset, (uint8_t *) req.get());
                     }
                 }
             }
@@ -405,6 +440,35 @@ public:
                     startTime)).count();
     }
 
+    void read_nmirror(const BlkId &bid, std::vector<boost::intrusive_ptr<homeds::MemVector>> mp, uint64_t size, uint32_t nmirror) {
+        assert(nmirror <= get_nmirrors());
+        uint32_t cnt = 0;
+        PhysicalDevChunk *primary_chunk;
+        uint64_t primary_dev_offset = to_dev_offset(bid, &primary_chunk);
+        uint64_t primary_chunk_offset = primary_dev_offset - primary_chunk->get_start_offset();
+        
+        homeds::blob b;
+        mp[cnt]->get(&b, 0);
+        assert(b.size == bid.data_size());
+        primary_chunk->get_physical_dev_mutable()->sync_read((char *)b.bytes, b.size,
+                primary_dev_offset);
+        if (cnt == nmirror) {
+            return;
+        }
+        for (auto mchunk : m_mirror_chunks.find(primary_chunk)->second) {
+            uint64_t dev_offset = mchunk->get_start_offset() + primary_chunk_offset;
+           
+            mp[cnt]->get(&b, 0);
+            assert(b.size == bid.data_size());
+            mchunk->get_physical_dev_mutable()->sync_read((char *) b.bytes, b.size,
+                        dev_offset);
+            cnt++;
+            if (cnt == nmirror) {
+                break;
+            }
+        }
+    }
+        
     /* Read the data for a given BlkId. With this method signature, virtual dev can read only in block boundary
      * and nothing in-between offsets (say if blk size is 8K it cannot read 4K only, rather as full 8K. It does not
      * have offset as one of the parameter. Reason for that is its actually ok and make the interface and also
@@ -413,52 +477,38 @@ public:
     void read(const BlkId &bid, const homeds::MemPiece &mp, 
             boost::intrusive_ptr<virtualdev_req> req) {
         PhysicalDevChunk *primary_chunk;
-        bool failed = false;
 
         uint64_t primary_dev_offset = to_dev_offset(bid, &primary_chunk);
         req->version = 0xDEAD;
         req->cb = std::bind(&VirtualDev::process_completions, this, 
                 std::placeholders::_1);
         req->size = mp.size();
-        try {
-            if(req->isSyncCall) {
+            if (req->isSyncCall) {
                 primary_chunk->get_physical_dev_mutable()->sync_read((char *) mp.ptr(), mp.size(),
                         primary_dev_offset);
-            }else {
+            } else {
                 req->inc_ref();
                 primary_chunk->get_physical_dev_mutable()->read((char *) mp.ptr(), mp.size(),
                         primary_dev_offset, 
                         (uint8_t *) req.get());
             }
-        } catch (std::exception &e) {
-            failed = true;
-        }
 
-        if (unlikely(failed && get_nmirrors())) {
+        if (unlikely(get_nmirrors())) {
             // If failed and we have mirrors, we can read from any one of the mirrors as well
             uint64_t primary_chunk_offset = primary_dev_offset - primary_chunk->get_start_offset();
             for (auto mchunk : m_mirror_chunks.find(primary_chunk)->second) {
                 uint64_t dev_offset = mchunk->get_start_offset() + primary_chunk_offset;
-                try {
-                    if(req->isSyncCall) {
+                    if (req->isSyncCall) {
                         mchunk->get_physical_dev_mutable()->sync_read((char *) mp.ptr(), mp.size(),
                                 dev_offset);
-                    }else {
+                    } else {
                         req->inc_ref();
                         mchunk->get_physical_dev_mutable()->read((char *)mp.ptr(), mp.size(),
-                                dev_offset, 
-                                (uint8_t *)req.get());
+                                dev_offset,(uint8_t *)req.get());
                     }
-                } catch (std::exception &e) {
-                    failed = true;
-                }
             }
         }
 
-        if (unlikely(failed)) {
-            // TODO: Capture the exception e as exception pointer and rethrow that.
-            throw DeviceException("Unable to read");
-        }
     }
 
     void readv(const BlkId &bid, const homeds::MemVector &buf, 
@@ -468,7 +518,7 @@ public:
         int iovcnt = 0;
         uint32_t size = buf.size();
 
-        assert(buf.size() == (bid.get_nblks() * get_blk_size())); // Expected to be less than allocated blk originally.
+        assert(buf.size() == (bid.get_nblks() * get_page_size())); // Expected to be less than allocated blk originally.
         req->version = 0xDEAD;
         req->cb = std::bind(&VirtualDev::process_completions, this, 
                 std::placeholders::_1);
@@ -481,38 +531,28 @@ public:
             iovcnt++;
         }
 
-        bool failed = false;
         PhysicalDevChunk *primary_chunk;
         uint64_t primary_dev_offset = to_dev_offset(bid, &primary_chunk);
 
         req->size = size;
-        try {
             req->inc_ref();
             primary_chunk->get_physical_dev_mutable()->readv(iov, iovcnt, size, 
                     primary_dev_offset, (uint8_t *)req.get());
-        } catch (std::exception &e) {
-            failed = true;
-        }
 
-        if (unlikely(failed && get_nmirrors())) {
+        if (unlikely(get_nmirrors())) {
             // If failed and we have mirrors, we can read from any one of the mirrors as well
             uint64_t primary_chunk_offset = primary_dev_offset - primary_chunk->get_start_offset();
             for (auto mchunk : m_mirror_chunks.find(primary_chunk)->second) {
                 uint64_t dev_offset = mchunk->get_start_offset() + primary_chunk_offset;
-                try {
                 req->inc_ref();
-                    mchunk->get_physical_dev_mutable()->readv(iov, iovcnt, size, 
-                            dev_offset, (uint8_t *)req.get());
-                } catch (std::exception &e) {
-                    failed = true;
-                }
+                mchunk->get_physical_dev_mutable()->readv(iov, iovcnt, size, 
+                        dev_offset, (uint8_t *)req.get());
             }
         }
+    }
 
-        if (unlikely(failed)) {
-            // TODO: Capture the exception e as exception pointer and rethrow that.
-            throw DeviceException("Unable to read");
-        }
+    void update_vb_context(uint8_t *blob) {
+        m_mgr->update_vb_context(m_vb->vdev_id, blob);
     }
 
     uint64_t get_size() const {
@@ -548,8 +588,11 @@ private:
     void add_primary_chunk(PhysicalDevChunk *chunk) {
         auto pdev_id = chunk->get_physical_dev()->get_dev_id();
 
-        if (m_chunk_size == 0) m_chunk_size = chunk->get_size();
-        assert(m_chunk_size == chunk->get_size());
+        if (m_chunk_size == 0) {
+            m_chunk_size = chunk->get_size();
+        } else {
+            assert(m_chunk_size == chunk->get_size());
+        }
 
         pdev_chunk_map *found_pcm = nullptr;
         for (auto &pcm : m_primary_pdev_chunks_list) {
@@ -570,12 +613,29 @@ private:
             m_primary_pdev_chunks_list.push_back(pcm);
             m_selector->add_pdev(pcm.pdev);
         }
+        assert(m_chunk_size <= MAX_CHUNK_SIZE);
+        std::shared_ptr< BlkAllocator > ba = create_allocator(m_chunk_size, false);
+        chunk->set_blk_allocator(ba);
+        
+        /* set the same blk allocator to other mirror chunks */
+        auto it = m_mirror_chunks.find(chunk);
+        if (it != m_mirror_chunks.end()) {
+            for (uint32_t i = 0; i < it->second.size(); ++i) {
+                it->second[i]->set_blk_allocator(ba);
+            }
+        }
     }
 
     void add_mirror_chunk(PhysicalDevChunk *chunk) {
         auto pdev_id = chunk->get_physical_dev()->get_dev_id();
         auto pchunk = chunk->get_primary_chunk();
 
+        if (m_chunk_size == 0) {
+            m_chunk_size = chunk->get_size();
+        } else {
+            assert(m_chunk_size == chunk->get_size());
+        }
+    
         // Try to find the parent chunk in the map
         auto it = m_mirror_chunks.find(pchunk);
         if (it == m_mirror_chunks.end()) {
@@ -585,21 +645,22 @@ private:
             m_mirror_chunks.emplace(std::make_pair(pchunk, vec));
         } else {
             it->second.push_back(chunk);
+            chunk->set_blk_allocator(pchunk->get_blk_allocator());
         }
     }
 
-    std::shared_ptr< BlkAllocator > create_allocator(uint64_t size) {
+    std::shared_ptr< BlkAllocator > create_allocator(uint64_t size, bool init) {
     typename Allocator::AllocatorConfig cfg;
-        Allocator::get_config(size, get_blk_size(), &cfg);
+        Allocator::get_config(size, get_page_size(), &cfg);
 
-        std::shared_ptr< BlkAllocator > allocator = std::make_shared<typename Allocator::AllocatorType>(cfg);
+        std::shared_ptr< BlkAllocator > allocator = std::make_shared<typename Allocator::AllocatorType>(cfg, init);
         return allocator;
     }
 
-    PhysicalDevChunk *create_dev_chunk(uint32_t pdev_ind, std::shared_ptr< BlkAllocator > ba) {
+    PhysicalDevChunk *create_dev_chunk(uint32_t pdev_ind, std::shared_ptr< BlkAllocator > ba, uint32_t primary_id) {
         auto pdev = m_primary_pdev_chunks_list[pdev_ind].pdev;
-        PhysicalDevChunk *chunk = m_mgr->alloc_chunk(pdev, m_vb->vdev_id, m_chunk_size);
-        LOGTRACE("Allocating new chunk for vdev_id = {} pdev_id = {} chunk: {}",
+        PhysicalDevChunk *chunk = m_mgr->alloc_chunk(pdev, m_vb->vdev_id, m_chunk_size, primary_id);
+        LOGINFO("Allocating new chunk for vdev_id = {} pdev_id = {} chunk: {}",
                  m_vb->vdev_id,
                  pdev->get_dev_id(),
                  chunk->to_string());
@@ -609,9 +670,9 @@ private:
     }
 
     BlkId to_glob_uniq_blkid(const BlkId &chunk_local_blkid, PhysicalDevChunk *chunk) const {
-        uint64_t glob_offset = ((chunk_local_blkid.get_id() * get_blk_size()) + chunk->get_start_offset() +
+        uint64_t glob_offset = ((chunk_local_blkid.get_id() * get_page_size()) + chunk->get_start_offset() +
                                 chunk->get_physical_dev()->get_dev_offset());
-        return BlkId(glob_offset/get_blk_size(), chunk_local_blkid.get_nblks(), chunk->get_chunk_id());
+        return BlkId(glob_offset/get_page_size(), chunk_local_blkid.get_nblks(), chunk->get_chunk_id());
     }
 
     BlkId to_chunk_specific_id(const BlkId &glob_uniq_id, PhysicalDevChunk **chunk) const {
@@ -620,18 +681,18 @@ private:
         *chunk = m_mgr->get_chunk_mutable(cid);
 
         // Offset within the physical device
-        uint64_t offset = (glob_uniq_id.get_id() * get_blk_size()) - (*chunk)->get_physical_dev()->get_dev_offset();
+        uint64_t offset = (glob_uniq_id.get_id() * get_page_size()) - (*chunk)->get_physical_dev()->get_dev_offset();
 
         // Offset within the chunk
         uint64_t chunk_offset = offset - (*chunk)->get_start_offset();
-        return BlkId(chunk_offset/get_blk_size(), glob_uniq_id.get_nblks(), 0);
+        return BlkId(chunk_offset/get_page_size(), glob_uniq_id.get_nblks(), 0);
     }
 
     uint64_t to_dev_offset(const BlkId &glob_uniq_id, PhysicalDevChunk **chunk) const {
         *chunk = m_mgr->get_chunk_mutable(glob_uniq_id.get_chunk_num());
 
         // Offset within the physical device for a given chunk
-        return (glob_uniq_id.get_id() * get_blk_size()) - (*chunk)->get_physical_dev()->get_dev_offset();
+        return (glob_uniq_id.get_id() * get_page_size()) - (*chunk)->get_physical_dev()->get_dev_offset();
     }
 
     uint64_t to_chunk_offset(const BlkId &glob_uniq_id, PhysicalDevChunk **chunk) const {
@@ -639,11 +700,11 @@ private:
     }
 
     uint32_t get_blks_per_chunk() const {
-        return get_chunk_size() / get_blk_size();
+        return get_chunk_size() / get_page_size();
     }
 
-    uint32_t get_blk_size() const {
-        return m_vb->blk_size;
+    uint32_t get_page_size() const {
+        return m_vb->page_size;
     }
 
     uint64_t get_chunk_size() const {
@@ -653,75 +714,6 @@ private:
     uint32_t get_nmirrors() const {
         return m_vb->num_mirrors;
     }
-
-#if 0
-private:
-    homeds::avector< PhysicalDev *> m_phys_dev_list;
-
-    // Array of physical devices each having multiple chunks that are relevant to this virtual device
-    homeds::avector< std::vector< PhysicalDevChunk * > > m_primary_chunks_in_physdev;
-
-    uint64_t m_size;       // Size of this virtual device
-    uint32_t m_nmirrors;   // Total number of mirrors need to be maintained
-    bool m_is_striped;     // If volume is striped across all physical device
-
-    uint32_t m_dev_blk_size; // Block size used for this virtual device. Each vdev can have different block sizes
-
-    std::atomic< uint64_t > m_total_allocations; // Keep track of total allocations.
-
-    VirtualDev(uint64_t size, uint32_t nmirror, bool is_stripe, uint32_t dev_blk_size,
-                       const std::vector< std::unique_ptr< PhysicalDev > > &phys_dev_list) :
-            m_size(size),
-            m_nmirrors(nmirror),
-            m_is_striped(is_stripe),
-            m_total_allocations(0),
-            m_dev_blk_size(dev_blk_size),
-            m_phys_dev_list(phys_dev_list) {
-        assert(nmirror < phys_dev_list.size()); // Mirrors should be at least one less than device list.
-        uint32_t nchunks;
-
-        if (is_stripe) {
-            m_chunk_size = ((size - 1) / phys_dev_list.size()) + 1;
-            nchunks = (uint32_t)phys_dev_list.size();
-        } else {
-            m_chunk_size = size;
-            nchunks = 1;
-        }
-
-        // Prepare primary chunks in a physical device for future inserts.
-        m_primary_chunks_in_physdev.reserve(phys_dev_list.size());
-        for (auto &pdev : phys_dev_list) {
-            std::vector<PhysicalDevChunk *> v;
-            v.reserve(1); // We initially expect only one chunk per physical device.
-            m_primary_chunks_in_physdev.push_back(v);
-        }
-
-        for (auto i : boost::irange<uint32_t>(0, nchunks)) {
-            std::shared_ptr< BlkAllocator > ba = create_allocator(m_chunk_size);
-            auto phys_dev_id = i % phys_dev_list.size();
-
-            // Create a chunk on selected physical device and add it to both all chunk lists and chunk per
-            // physical device list.
-            auto chunk = create_dev_chunk((uint32_t)phys_dev_id, m_chunk_size, ba);
-            m_primary_chunks_in_physdev[phys_dev_id].push_back(chunk);
-
-            if (nmirror) {
-                uint32_t next_ind = i;
-                std::vector< PhysicalDevChunk * > vec;
-                vec.reserve(nmirror);
-                for (auto j : boost::irange<uint32_t>(0, nmirror)) {
-                    if ((++next_ind) == phys_dev_list.size()) {
-                        next_ind = 0;
-                    }
-                    vec.push_back(create_dev_chunk(next_ind, m_chunk_size, ba));
-                }
-                m_mirror_chunks.emplace(std::make_pair(chunk, vec));
-            }
-        }
-
-        m_selector = std::make_unique<DefaultDeviceSelector>();
-    }
-#endif
 };
 
 } //namespace homestore

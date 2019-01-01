@@ -1,3 +1,5 @@
+#ifndef _MAPPING_HPP_
+#define _MAPPING_HPP_
 
 #include "blkstore/writeBack_cache.hpp"
 #include "homeds/btree/ssd_btree.hpp"
@@ -15,9 +17,7 @@ using namespace homeds::btree;
 
 namespace homestore {
 
-#define MappingBtreeDeclType     homeds::btree::Btree<homeds::btree::SSD_BTREE, MappingKey, MappingValue, \
-                                    homeds::btree::BTREE_NODETYPE_VAR_VALUE, homeds::btree::BTREE_NODETYPE_VAR_VALUE,\
-                                    BLKSTORE_PAGE_SIZE, writeback_req>
+/* TODO: it will require some changes to create the btree for correct page size */
 #define MAX_INTERVAL_LENGTH_IN_BITS 8
 #define Interval_Array_Impl Interval_Array<MappingInterval, 80, 20 >
 
@@ -348,3 +348,4 @@ public:
 };
 }
 
+#endif

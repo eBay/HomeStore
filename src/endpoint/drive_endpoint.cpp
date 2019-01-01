@@ -134,9 +134,7 @@ DriveEndPoint::async_write(int m_sync_fd, const char *data,
 	info->start_time = Clock::now();
 	info->is_read = false;
 	if (io_submit(ioctx, 1, &iocb) != 1) {
-		std::stringstream ss;
-		ss << "error while writing " << errno;
-		folly::throwSystemError(ss.str());
+		comp_cb(errno, cookie);
 	}
 	total_write_ios++;
 }
@@ -155,12 +153,9 @@ DriveEndPoint::async_read(int m_sync_fd, char *data,
 	iocb->data = cookie;
 	info->is_read = true;
 	info->start_time = Clock::now();
-  LOGTRACE("Reading: {}", size);
+    LOGTRACE("Reading: {}", size);
 	if (io_submit(ioctx, 1, &iocb) != 1) {
-		std::stringstream ss;
-		ss << "error while read " << errno;
-		folly::throwSystemError(ss.str());
-		
+		comp_cb(errno, cookie);
 	}
 	total_read_ios++;
 }
@@ -180,9 +175,7 @@ DriveEndPoint::async_writev(int m_sync_fd, const struct iovec *iov,
 	info->start_time = Clock::now();
 	info->is_read = false;
 	if (io_submit(ioctx, 1, &iocb) != 1) {
-		std::stringstream ss;
-		ss << "error while writing " << errno;
-		folly::throwSystemError(ss.str());
+		comp_cb(errno, cookie);
 	}
 	total_write_ios++;
 }
@@ -201,11 +194,9 @@ DriveEndPoint::async_readv(int m_sync_fd, const struct iovec *iov,
 	iocb->data = cookie;
 	info->is_read = true;
 	info->start_time = Clock::now();
-  LOGTRACE("Reading: {} vectors", iovcnt);
+    LOGTRACE("Reading: {} vectors", iovcnt);
 	if (io_submit(ioctx, 1, &iocb) != 1) {
-		std::stringstream ss;
-		ss << "error while reading " << errno;
-		folly::throwSystemError(ss.str());
+		comp_cb(errno, cookie);
 	}
 	total_read_ios++;
 }

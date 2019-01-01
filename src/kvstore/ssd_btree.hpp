@@ -148,8 +148,8 @@ public:
     static void ref_node(SSDBtreeNode *bn) {
         CacheBuffer< BlkId >::ref((CacheBuffer<BlkId> &)*bn);
     }
-
-    static bool deref_node(SSDBtreeNode *bn) {
+ 
+    static void deref_node(SSDBtreeNode *bn) {
         return CacheBuffer< BlkId >::deref_testz((CacheBuffer<BlkId> &)*bn);
     }
 private:

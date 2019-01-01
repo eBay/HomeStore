@@ -16,16 +16,11 @@
 #include "homeds/array/flexarray.hpp"
 #include "homeds/memory/mempiece.hpp"
 #include "homeds/utility/useful_defs.hpp"
-#include "main/store_limits.h"
+#include "main/homestore_config.hpp"
 
 //#include "device/device.h"
 
 namespace homestore {
-
-#define ID_BITS        32
-#define NBLKS_BITS      8
-#define CHUNK_NUM_BITS  8
-#define BLKID_SIZE (ID_BITS+NBLKS_BITS+CHUNK_NUM_BITS)/8
 
 /* This structure represents the application wide unique block number. It also encomposses the number of blks. */
 
@@ -34,8 +29,8 @@ struct BlkId {
     uint64_t m_nblks:NBLKS_BITS;          // Total number of blocks starting from previous block number
     uint64_t m_chunk_num:CHUNK_NUM_BITS;  // Chunk number - which is unique for the entire application
 
-    static uint64_t constexpr invalid_internal_id() {
-        return ((uint64_t)-1);
+    static uint64_t invalid_internal_id() {
+        return ((1ul << (BLKID_SIZE_BITS)) - 1);
     }
 
     static uint64_t constexpr max_blks_in_op() {
@@ -100,20 +95,20 @@ struct BlkId {
     }
 
     BlkId get_blkid_at(uint32_t offset) const {
-        assert(offset % BLKSTORE_BLK_SIZE == 0);
-        uint32_t remaining_size = ((m_nblks - (offset/BLKSTORE_BLK_SIZE)) * 
-                                  BLKSTORE_BLK_SIZE);
+        assert(offset % HomeStoreConfig::hs_page_size == 0);
+        uint32_t remaining_size = ((m_nblks - (offset/HomeStoreConfig::hs_page_size)) * 
+                                  HomeStoreConfig::hs_page_size);
         return(get_blkid_at(offset, remaining_size));
     }
 
     BlkId get_blkid_at(uint32_t offset, uint32_t size) const {
-        assert(size % BLKSTORE_BLK_SIZE == 0);
-        assert(offset % BLKSTORE_BLK_SIZE == 0);
+        assert(size % HomeStoreConfig::hs_page_size == 0);
+        assert(offset % HomeStoreConfig::hs_page_size == 0);
 
         BlkId other;
 
-        other.m_id = m_id + (offset/BLKSTORE_BLK_SIZE);
-        other.m_nblks = (size/BLKSTORE_BLK_SIZE);
+        other.m_id = m_id + (offset/HomeStoreConfig::hs_page_size);
+        other.m_nblks = (size/HomeStoreConfig::hs_page_size);
         other.m_chunk_num = m_chunk_num;
 
         assert(other.m_id < m_id + m_nblks);
@@ -128,6 +123,14 @@ struct BlkId {
         m_id = id;
         m_nblks = nblks;
         m_chunk_num = chunk_num;
+    }
+
+    void set(BlkId &bid) {
+        set(bid.get_id(),  bid.get_nblks(), bid.get_chunk_num());
+    }
+
+    void set(uint64_t bid) {
+       set(bid, bid>>ID_BITS, bid>>(ID_BITS+CHUNK_NUM_BITS)); 
     }
 
     void set_id(uint64_t id) {
@@ -152,7 +155,7 @@ struct BlkId {
 
     uint32_t data_size() const {
         /* TODO change this macro to function */
-        return (m_nblks * BLKSTORE_BLK_SIZE); 
+        return (m_nblks * HomeStoreConfig::hs_page_size); 
     }
 
     std::string to_string() const {

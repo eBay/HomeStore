@@ -72,7 +72,7 @@ public:
             assert(0);
         }
     }
-    ~BtreeBuffer() {
+    virtual ~BtreeBuffer() {
         btree_buf_free++;
     }
 };
@@ -82,6 +82,7 @@ struct btree_device_info {
     homestore::DeviceManager *dev_mgr;
     homestore::Cache< homestore::BlkId > *cache;
     homestore::vdev_info_block *vb;
+    void *blkstore;
     uint64_t size;
     bool new_device;
     bool is_async;
@@ -100,6 +101,7 @@ class SSDBtreeStore {
 
     struct ssd_btree_req : homestore::blkstore_req<btree_buffer_t> {
            boost::intrusive_ptr<homestore::writeback_req> cookie;
+           BtreeStore<SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize, homestore::writeback_req> *btree_instance;
            ssd_btree_req() {};
            ~ssd_btree_req() {};
     };
@@ -118,23 +120,28 @@ public:
         auto bt_dev_info = (btree_device_info *)btree_specific_context;
         m_comp_cb = comp_cbt;
 
-        m_cache = new homestore::Cache< homestore::BlkId >(100 * 1024 * 1024, 4096);
  
         // Create or load the Blkstore out of this info
         if (bt_dev_info->new_device) {
-            m_blkstore = new homestore::BlkStore<homestore::VdevFixedBlkAllocatorPolicy, btree_buffer_t>(
-                    bt_dev_info->dev_mgr, m_cache, bt_dev_info->size,
+            m_cache = new homestore::Cache< homestore::BlkId >(100 * 1024 * 1024, 4096);
+            m_blkstore = new homestore::BlkStore<homestore::VdevFixedBlkAllocatorPolicy, 
+                btree_buffer_t>(bt_dev_info->dev_mgr, m_cache, 0, 
                     homestore::BlkStoreCacheType::RD_MODIFY_WRITEBACK_CACHE, 0,
-                    (std::bind(&SSDBtreeStore::process_completions, this, std::placeholders::_1)));
+                    (std::bind(&SSDBtreeStore::process_req_completions,
+                           this, std::placeholders::_1)), nullptr, bt_dev_info->size, HomeStoreConfig::hs_page_size);
         } else {
-            m_blkstore = new homestore::BlkStore<homestore::VdevFixedBlkAllocatorPolicy, btree_buffer_t>(
-                    bt_dev_info->dev_mgr, m_cache, bt_dev_info->vb,
-                    homestore::BlkStoreCacheType::RD_MODIFY_WRITEBACK_CACHE,
-                    (std::bind(&SSDBtreeStore::process_completions, this, std::placeholders::_1)));
+            m_blkstore = (homestore::BlkStore<homestore::VdevFixedBlkAllocatorPolicy, btree_buffer_t> *)bt_dev_info->blkstore;
+            m_blkstore->attach_compl(std::bind(&SSDBtreeStore::process_completions, std::placeholders::_1));
         }
     }
 
-    void process_completions(boost::intrusive_ptr<homestore::blkstore_req<btree_buffer_t>> bs_req) {
+    static void process_completions(boost::intrusive_ptr<homestore::blkstore_req<btree_buffer_t>> bs_req) {
+        boost::intrusive_ptr<ssd_btree_req> req = boost::static_pointer_cast<ssd_btree_req> (bs_req);
+        req->btree_instance->process_completions(bs_req);
+    }
+
+    void process_req_completions(boost::intrusive_ptr<homestore::blkstore_req<btree_buffer_t>> bs_req) {
+  
         boost::intrusive_ptr<ssd_btree_req> req = boost::static_pointer_cast<ssd_btree_req> (bs_req);
         assert(!req->isSyncCall);
         if (req->cookie) {
@@ -160,7 +167,8 @@ public:
         is_new_allocation=true;
         homestore::blk_alloc_hints hints;
         homestore::BlkId blkid;
-        auto safe_buf = store->m_blkstore->alloc_blk_cached(1 * BLKSTORE_PAGE_SIZE, hints, &blkid);
+        auto safe_buf = store->m_blkstore->alloc_blk_cached(1 * HomeStoreConfig::atomic_phys_page_size, hints, &blkid);
+
 
 #ifndef NDEBUG
         assert(safe_buf->is_btree);
@@ -205,9 +213,25 @@ public:
         to_buff->set_memvec(frm_buff->get_memvec_intrusive(), frm_buff->get_data_offset(), frm_buff->get_cache_size());
         copy_to->set_node_id(original_to_id);//restore original copy_to id
     }
-    
-    static void write_node(SSDBtreeStore *store, boost::intrusive_ptr<SSDBtreeNode> bn,
-                        std::deque<boost::intrusive_ptr<homestore::writeback_req>> &dependent_req_q,
+
+    static void swap_node(SSDBtreeStore *impl, boost::intrusive_ptr<SSDBtreeNode> node1, boost::intrusive_ptr<SSDBtreeNode> node2) {
+        bnodeid_t id1 = node1->get_node_id();
+        bnodeid_t id2 = node2->get_node_id();
+        auto mvec1 = node1->get_memvec_intrusive();
+        auto mvec2 = node2->get_memvec_intrusive();
+
+        assert(node1->get_data_offset() == node2->get_data_offset());
+        assert(node1->get_cache_size() == node2->get_cache_size());
+        /* move the underneath memory */
+        node1->set_memvec(mvec2, node1->get_data_offset(), node1->get_cache_size());
+        node2->set_memvec(mvec1, node2->get_data_offset(), node2->get_cache_size());
+        /* restore the node ids */
+        node1->set_node_id(id1);
+        node2->set_node_id(id2);
+    }
+
+    static void write_node(SSDBtreeStore *impl, boost::intrusive_ptr<SSDBtreeNode> bn, 
+                        std::deque<boost::intrusive_ptr<homestore::writeback_req>> &dependent_req_q, 
                         boost::intrusive_ptr <homestore::writeback_req> cookie, 
                         bool is_sync) {
         homestore::BlkId blkid(bn->get_node_id().m_id);
@@ -222,9 +246,10 @@ public:
 #ifndef NDEBUG
         assert(bn->is_btree);
 #endif
-        store->m_blkstore->write(blkid,
-                    boost::dynamic_pointer_cast<btree_buffer_t>(bn),
-                    boost::static_pointer_cast<homestore::blkstore_req<btree_buffer_t>>(req),
+        req->btree_instance = impl;
+        impl->m_blkstore->write(blkid, 
+                    boost::dynamic_pointer_cast<btree_buffer_t>(bn), 
+                    boost::static_pointer_cast<homestore::blkstore_req<btree_buffer_t>>(req), 
                     dependent_req_q);
         /* empty the queue and add this request to the dependent req q. Now any further
          * writes of this btree update should depend on this request. 
@@ -257,8 +282,9 @@ public:
         homestore::CacheBuffer< homestore::BlkId >::ref((homestore::CacheBuffer<homestore::BlkId> &)*bn);
     }
 
-    static bool deref_node(SSDBtreeNode *bn) {
-        return homestore::CacheBuffer< homestore::BlkId >::deref_testz((homestore::CacheBuffer<homestore::BlkId> &)*bn);
+
+    static void deref_node(SSDBtreeNode *bn) {
+        homestore::CacheBuffer< homestore::BlkId >::deref_testz((homestore::CacheBuffer<homestore::BlkId> &)*bn);
     }
 
 private:
