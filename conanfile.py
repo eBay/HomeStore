@@ -69,6 +69,7 @@ class HomestoreConan(ConanFile):
     def package(self):
         self.copy("homestore_header.hpp", dst="include/homestore", src="src/main", keep_path=False)
         self.copy("vol_interface.hpp", dst="include/homestore", src="src/main", keep_path=False)
+        self.copy("*error.h", dst="include/", src="src", keep_path=True)
         self.copy("*.so", dst="lib", keep_path=False)
         self.copy("*.dll", dst="lib", keep_path=False)
         self.copy("*.dylib", dst="lib", keep_path=False)
