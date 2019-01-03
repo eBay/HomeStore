@@ -1,5 +1,5 @@
 # ##########   #######   ############
-FROM ecr.vip.ebayc3.com/sds/sds_cpp_base:1.17
+FROM ecr.vip.ebayc3.com/sds/sds_cpp_base:1.18
 LABEL description="Automated SDS compilation"
 
 ARG CONAN_CHANNEL
@@ -19,16 +19,16 @@ WORKDIR /output
 ENV ASAN_OPTIONS=detect_leaks=0
 RUN set -eux; \
     eval $(grep 'name =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,name,PKG_NAME,'); \
-    conan create -o ${PKG_NAME}:coverage=True -pr debug ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"; \
-    find ~/.conan/data/${PKG_NAME} -name 'coverage.xml' -exec mv -v {} . \; ; \
+    conan install -o ${PKG_NAME}:coverage=True -pr bionic_nosanitize ${SOURCE_PATH}; \
+    conan build ${SOURCE_PATH}; \
     conan remove -f "${PKG_NAME}*"
 RUN conan create -pr debug ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"
 RUN conan create ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"
+RUN conan create -pr bionic_nosanitize ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"
 
 CMD set -eux; \
     eval $(grep 'name =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,name,PKG_NAME,'); \
     eval $(grep 'version =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,version,PKG_VERSION,'); \
-    conan user -r origin -p "${CONAN_PASS}" sds; \
-    conan upload ${PKG_NAME}/"${PKG_VERSION}"@"${CONAN_USER}"/"${CONAN_CHANNEL}" --all -r origin;
+    conan user -r ebay-sds -p "${CONAN_PASS}" sds; \
+    conan upload ${PKG_NAME}/"${PKG_VERSION}"@"${CONAN_USER}"/"${CONAN_CHANNEL}" --all -r ebay-sds;
 # ##########   #######   ############
-

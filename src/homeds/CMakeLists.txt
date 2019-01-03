@@ -24,7 +24,7 @@ set(TEST_HASH_SOURCE_FILES
 add_executable(test_hash
                   ${TEST_HASH_SOURCE_FILES}
                 )
-target_link_libraries(test_hash ${COMMON_LIB_DEPS})
+target_link_libraries(test_hash ${COMMON_LIB_DEPS} iberty)
 add_test(NAME Hash COMMAND test_hash)
 
 set(TEST_COMPOSITE_SOURCE_FILES
@@ -33,7 +33,7 @@ set(TEST_COMPOSITE_SOURCE_FILES
 add_executable(test_composite_allocator
                   ${TEST_COMPOSITE_SOURCE_FILES}
                 )
-target_link_libraries(test_composite_allocator ${COMMON_LIB_DEPS})
+target_link_libraries(test_composite_allocator ${COMMON_LIB_DEPS} iberty)
 
 set(TEST_OBJALLOCATOR_SOURCE_FILES
         tests/test_obj_allocator.cpp
