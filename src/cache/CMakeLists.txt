@@ -16,5 +16,5 @@ set(TEST_CACHE_SOURCE_FILES
 add_executable(test_cache
                   ${TEST_CACHE_SOURCE_FILES}
                 )
-target_link_libraries(test_cache ${COMMON_LIB_DEPS})
+target_link_libraries(test_cache ${COMMON_LIB_DEPS} iberty)
 add_test(NAME TestCache COMMAND test_cache)
