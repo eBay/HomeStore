@@ -252,7 +252,6 @@ public:
     
     uint32_t insert_missing_pieces(uint32_t  offset, uint32_t  size_to_read,
                             std::vector< std::pair<uint32_t, uint32_t> > &missing_mp) {
-         assert(get_key().data_size() >= (offset + size_to_read));
          uint32_t inserted_size = get_memvec().insert_missing_pieces(m_data_offset + offset, size_to_read,
                                                 missing_mp);
          /* it should return a relative offset */

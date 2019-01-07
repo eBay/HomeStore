@@ -11,6 +11,11 @@ namespace homestore {
 
 #define VOL_MAX_IO_SIZE MEMVEC_MAX_IO_SIZE
 
+/* 1 % of disk space is reserved for volume sb chunks. With 8k page it
+ * will come out to be around 7 GB.
+ */
+#define MIN_DISK_CAP_SUPPORTED  (MIN_CHUNK_SIZE * 100/99 + MIN_CHUNK_SIZE)
+
 class MappingKey;
 class MappingValue;
 
@@ -33,7 +38,12 @@ struct sb_blkstore_blob:blkstore_blob {
  */
 
 #define VOL_SB_SIZE  HomeStoreConfig::atomic_phys_page_size
+#define VOL_SB_MAGIC         0xCEEDDEEB
+/* Note: version is same for both vol config and vol sb */
+#define VOL_SB_VERSION       0x1
 struct vol_sb_header {
+    uint64_t magic;
+    uint64_t version;
     uint32_t gen_cnt;
     BlkId blkid;
 }__attribute((packed));
@@ -78,6 +88,7 @@ class HomeBlks:VolInterface {
     vol_sb *m_last_vol_sb;
     bool m_vdev_failed;
     uint64_t m_size_avail;
+    uint32_t m_data_pagesz;
     std::atomic<int> m_scan_cnt;
     std::atomic<bool> m_init_failed;
     out_params  m_out_params;
@@ -86,11 +97,18 @@ public:
     static VolInterface *init(init_params &cfg);
     HomeBlks(init_params &cfg);
     virtual std::error_condition write(std::shared_ptr<Volume> vol, uint64_t lba, uint8_t *buf, 
-                               uint32_t nblks, boost::intrusive_ptr<volume_req> req) override;
-    virtual std::error_condition read(std::shared_ptr<Volume> vol, uint64_t lba, int nblks, boost::intrusive_ptr<volume_req> req) override;
+                               uint32_t nblks, boost::intrusive_ptr<vol_interface_req> req) override;
+    virtual std::error_condition read(std::shared_ptr<Volume> vol, uint64_t lba, int nblks, 
+                                      boost::intrusive_ptr<vol_interface_req> req) override;
+    virtual std::error_condition sync_read(std::shared_ptr<Volume> vol, uint64_t lba, int nblks, 
+                                      boost::intrusive_ptr<vol_interface_req> req) override;
     virtual std::shared_ptr<Volume> createVolume(vol_params &params) override;
     virtual std::error_condition removeVolume(boost::uuids::uuid const &uuid) override;
     virtual std::shared_ptr<Volume> lookupVolume(boost::uuids::uuid const &uuid) override;
+    virtual char* get_name(std::shared_ptr<Volume> vol) override;
+    virtual uint64_t get_page_size(std::shared_ptr<Volume> vol) override;
+    virtual uint64_t get_size(std::shared_ptr<Volume> vol) override;
+    virtual homeds::blob at_offset(boost::intrusive_ptr<BlkBuffer> buf, uint32_t offset) override;
     static HomeBlks *instance();
     void vol_sb_write(vol_sb *sb);
     void vol_sb_write(vol_sb *sb, bool lock);
@@ -98,10 +116,11 @@ public:
     void config_super_block_init(BlkId &bid);
     void config_super_block_write(bool lock);
     void vol_scan_cmpltd(std::shared_ptr<Volume> vol, vol_state state);
-    virtual void attach_vol_completion_cb(std::shared_ptr<Volume> vol, io_comp_callback &cb) override;
+    virtual void attach_vol_completion_cb(std::shared_ptr<Volume> vol, io_comp_callback cb) override;
     homestore::BlkStore<homestore::VdevVarSizeBlkAllocatorPolicy> * get_data_blkstore();
     homestore::BlkStore<homestore::VdevFixedBlkAllocatorPolicy, BLKSTORE_BUFFER_TYPE> * get_metadata_blkstore();
     void vol_sb_remove(vol_sb *sb);
+    uint32_t get_data_pagesz() const;
 private:
     BlkId alloc_blk();
     static void new_vdev_found(DeviceManager *dev_mgr, vdev_info_block *vb);

@@ -13,6 +13,7 @@
 #include "homeds/utility/useful_defs.hpp"
 #include "homeds/memory/freelist_allocator.hpp"
 #include "error/error.h"
+#include "main/homestore_header.hpp"
 
 struct empty_writeback_req {
     /* shouldn't contain anything */

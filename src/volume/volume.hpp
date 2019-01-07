@@ -19,11 +19,6 @@ namespace homestore {
 class mapping;
 enum vol_state;
 
-struct buf_info {
-    uint64_t size;
-    int offset;
-    boost::intrusive_ptr<BlkBuffer> buf;
-};
 
 /* this structure is not thread safe. But as of
  * now there is no use where we can access it in
@@ -52,8 +47,6 @@ struct Free_Blk_Entry {
 struct volume_req : blkstore_req<BlkBuffer> {
     uint64_t lba;
     int nblks;
-    Clock::time_point startTime;
-    std::vector<buf_info> read_buf_list;
     bool is_read;
     std::shared_ptr<Volume> vol_instance;
 
@@ -63,10 +56,10 @@ struct volume_req : blkstore_req<BlkBuffer> {
      * break the ios update in mapping btree depending on the key range.
      */
     std::atomic<int> num_mapping_update;
-    boost::intrusive_ptr<volume_req> parent_req;
-    std::atomic<int> child_cnt; /* It is initialized to 1 if there is no child created */
+    boost::intrusive_ptr<vol_interface_req> parent_req;
+    bool done;
 
-    volume_req() : read_buf_list(0), is_read(false), num_mapping_update(0), parent_req(nullptr) {
+    volume_req() : is_read(false), num_mapping_update(0), parent_req(nullptr), done(false) {
 #ifndef NDEBUG
         vol_req_alloc++;
 #endif
@@ -104,9 +97,9 @@ class Volume {
     void process_data_completions(boost::intrusive_ptr<blkstore_req<BlkBuffer>> bs_req);
 
     std::error_condition write(uint64_t lba, uint8_t *buf, uint32_t nblks,
-            boost::intrusive_ptr<volume_req> req);
+            boost::intrusive_ptr<vol_interface_req> req);
 
-    std::error_condition read(uint64_t lba, int nblks, boost::intrusive_ptr<volume_req> req);
+    std::error_condition read(uint64_t lba, int nblks, boost::intrusive_ptr<vol_interface_req> req, bool sync);
     void init_perf_report();
     void print_perf_report();
     uint64_t get_elapsed_time(Clock::time_point startTime);
@@ -115,6 +108,9 @@ class Volume {
     void print_tree();
     struct vol_sb *get_sb() {return m_sb;};
     std::shared_ptr<Volume> get_shared_ptr() { return m_vol_ptr; };
+    char *get_name();
+    uint64_t get_page_size();
+    uint64_t get_size();
 
 #ifndef NDEBUG
     void enable_split_merge_crash_simulation();

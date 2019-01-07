@@ -3,6 +3,7 @@
 #include <device/device.h>
 #include <device/virtual_dev.hpp>
 #include <cassert>
+#include <device/blkbuffer.hpp>
 
 using namespace homestore;
 
@@ -24,18 +25,20 @@ HomeBlks::HomeBlks(init_params &cfg) : m_cfg(cfg), m_cache(nullptr), m_rdy(false
 
    /* set the homestore config parameters */
    HomeStoreConfig::phys_page_size = m_cfg.physical_page_size;
-   HomeStoreConfig::hs_page_size = m_cfg.min_virtual_page_size;
    HomeStoreConfig::align_size = m_cfg.disk_align_size;
    HomeStoreConfig::atomic_phys_page_size = m_cfg.atomic_page_size;
    /* If these parameters changes then we need to take care upgrade/revert in device manager */
    HomeStoreConfig::max_chunks = MAX_CHUNKS;
    HomeStoreConfig::max_vdevs = MAX_VDEVS;
    HomeStoreConfig::max_pdevs = MAX_PDEVS;
+   HomeStoreConfig::min_page_size = m_cfg.min_virtual_page_size;
+   m_data_pagesz = m_cfg.min_virtual_page_size;
 
    assert(VOL_SB_SIZE >= sizeof(vol_sb));
    assert(VOL_SB_SIZE >= sizeof(vol_config_sb));
 
    assert(m_cfg.atomic_page_size >= m_cfg.min_virtual_page_size);
+   assert(cfg.max_cap/cfg.devices.size() > MIN_DISK_CAP_SUPPORTED);
    m_out_params.max_io_size = VOL_MAX_IO_SIZE;
    int ret = posix_memalign((void **) &m_cfg_sb, HomeStoreConfig::align_size, VOL_SB_SIZE); 
    assert(!ret);
@@ -52,15 +55,22 @@ HomeBlks::HomeBlks(init_params &cfg) : m_cfg(cfg), m_cache(nullptr), m_rdy(false
 }
 
 std::error_condition 
-HomeBlks::write(std::shared_ptr<Volume> vol, uint64_t lba, uint8_t *buf, uint32_t nblks, boost::intrusive_ptr<volume_req> req) {
-    assert(m_rdy);
+HomeBlks::write(std::shared_ptr<Volume> vol, uint64_t lba, uint8_t *buf, uint32_t nblks, 
+                boost::intrusive_ptr<vol_interface_req> req) {
+    assert(m_rdy);  
     return(vol->write(lba, buf, nblks, req));
 }
 
 std::error_condition
-HomeBlks::read(std::shared_ptr<Volume> vol, uint64_t lba, int nblks, boost::intrusive_ptr<volume_req> req) {
+HomeBlks::read(std::shared_ptr<Volume> vol, uint64_t lba, int nblks, boost::intrusive_ptr<vol_interface_req> req) {
     assert(m_rdy);
-    return(vol->read(lba, nblks, req));
+    return(vol->read(lba, nblks, req, false));
+}
+
+std::error_condition
+HomeBlks::sync_read(std::shared_ptr<Volume> vol, uint64_t lba, int nblks, boost::intrusive_ptr<vol_interface_req> req) {
+    assert(m_rdy);
+    return(vol->read(lba, nblks, req, true));
 }
 
 std::shared_ptr<Volume>
@@ -151,6 +161,8 @@ HomeBlks::vol_sb_init(vol_sb *sb) {
     sb->prev_blkid.set(m_last_vol_sb ? m_last_vol_sb->blkid.to_integer() : BlkId::invalid_internal_id());
     sb->next_blkid.set(BlkId::invalid_internal_id());
     sb->blkid.set(bid);
+    sb->version = VOL_SB_VERSION;
+    sb->magic = VOL_SB_MAGIC;
     
     /* write the sb */
     vol_sb_write(sb, true);
@@ -183,6 +195,8 @@ void HomeBlks::config_super_block_init(BlkId &bid) {
     m_cfg_sb->vol_list_head.set(BlkId::invalid_internal_id());
     m_cfg_sb->num_vols = 0;
     m_cfg_sb->gen_cnt = 0;
+    m_cfg_sb->version = VOL_SB_VERSION;
+    m_cfg_sb->magic = VOL_SB_MAGIC;
     config_super_block_write(false);
 }
 
@@ -253,7 +267,7 @@ HomeBlks::create_blkstores() {
     create_sb_blkstore(nullptr);
 }
 
-void HomeBlks::attach_vol_completion_cb(std::shared_ptr<Volume> vol, io_comp_callback &cb) {
+void HomeBlks::attach_vol_completion_cb(std::shared_ptr<Volume> vol, io_comp_callback cb) {
     vol->attach_completion_cb(cb);
 }
 
@@ -289,6 +303,8 @@ HomeBlks::get_valid_buf(std::vector<boost::intrusive_ptr<BlkBuffer>> bbuf, bool 
     uint32_t gen_cnt = 0;
     for (uint32_t i = 0; i < bbuf.size(); i++) {
         vol_sb_header *hdr = (vol_sb_header *)(bbuf[i]->at_offset(0).bytes);
+        assert(hdr->magic == VOL_SB_MAGIC);
+        assert(hdr->version == VOL_SB_VERSION);
         if (hdr->gen_cnt > gen_cnt) {
             if (valid_buf != nullptr) {
                 /* superblock is not consistent across the disks */
@@ -402,15 +418,15 @@ HomeBlks::create_data_blkstore(vdev_info_block *vb) {
         /* change it to context */
         struct blkstore_blob blob;
         blob.type = blkstore_type::DATA_STORE;
-        uint64_t size = (98 * m_cfg.max_cap) / 100;
+        uint64_t size = (90 * m_cfg.max_cap) / 100;
         size = ALIGN_SIZE(size, HomeStoreConfig::phys_page_size);
         m_size_avail = size;
         LOGINFO("maximum capacity for data blocks is {}", m_size_avail);
         m_data_blk_store = new BlkStore<VdevVarSizeBlkAllocatorPolicy>(m_dev_mgr, m_cache, size, WRITEBACK_CACHE, 0,
-                Volume::process_vol_data_completions, (char *)&blob, sizeof(blkstore_blob), HomeStoreConfig::hs_page_size);
+                Volume::process_vol_data_completions, (char *)&blob, sizeof(blkstore_blob), m_data_pagesz);
     } else {
         m_data_blk_store = new BlkStore<VdevVarSizeBlkAllocatorPolicy>(m_dev_mgr, m_cache, vb, WRITEBACK_CACHE, 
-                                        Volume::process_vol_data_completions, HomeStoreConfig::hs_page_size);
+                                        Volume::process_vol_data_completions, m_data_pagesz);
         if (vb->failed) {
             m_vdev_failed = true;
             LOGINFO("data block store is in failed state");
@@ -423,18 +439,23 @@ HomeBlks::create_metadata_blkstore(vdev_info_block *vb) {
     if (vb == nullptr) {
         struct blkstore_blob blob;
         blob.type = blkstore_type::METADATA_STORE;
-        uint64_t size = (1 * m_cfg.max_cap) / 100;
+        uint64_t size = (2 * m_cfg.max_cap) / 100;
         size = ALIGN_SIZE(size, HomeStoreConfig::phys_page_size);
         m_metadata_blk_store = new BlkStore<VdevFixedBlkAllocatorPolicy, BLKSTORE_BUFFER_TYPE>(m_dev_mgr, m_cache, size,
-                WRITEBACK_CACHE, 0, (char *)&blob, sizeof(blkstore_blob), HomeStoreConfig::hs_page_size);
+                WRITEBACK_CACHE, 0, (char *)&blob, sizeof(blkstore_blob), HomeStoreConfig::atomic_phys_page_size);
     } else {
         m_metadata_blk_store = new BlkStore<VdevFixedBlkAllocatorPolicy, BLKSTORE_BUFFER_TYPE>(m_dev_mgr, m_cache, vb, WRITEBACK_CACHE, 
-                0, HomeStoreConfig::hs_page_size);
+                0, HomeStoreConfig::atomic_phys_page_size);
         if (vb->failed) {
             m_vdev_failed = true;
             LOGINFO("metadata block store is in failed state");
         }
     }
+}
+
+uint32_t
+HomeBlks::get_data_pagesz() const {
+    return m_data_pagesz;
 }
 
 void
@@ -448,7 +469,8 @@ HomeBlks::create_sb_blkstore(vdev_info_block *vb) {
         uint64_t size = (1 * m_cfg.max_cap) / 100;
         size = ALIGN_SIZE(size, HomeStoreConfig::phys_page_size);
         m_sb_blk_store = new BlkStore<VdevVarSizeBlkAllocatorPolicy>(m_dev_mgr, m_cache, size, PASS_THRU, 
-                m_cfg.devices.size() - 1, (char *) &blob, sizeof(sb_blkstore_blob), HomeStoreConfig::hs_page_size);
+                m_cfg.devices.size() - 1, (char *) &blob, sizeof(sb_blkstore_blob), 
+                HomeStoreConfig::atomic_phys_page_size);
         
         /* allocate a new blk id */
         BlkId bid = alloc_blk();
@@ -462,7 +484,8 @@ HomeBlks::create_sb_blkstore(vdev_info_block *vb) {
         m_sb_blk_store->update_vb_context((uint8_t *)&blob);
     } else {
         /* create a blkstore */
-        m_sb_blk_store = new BlkStore<VdevVarSizeBlkAllocatorPolicy>(m_dev_mgr, m_cache, vb, PASS_THRU, HomeStoreConfig::hs_page_size);
+        m_sb_blk_store = new BlkStore<VdevVarSizeBlkAllocatorPolicy>(m_dev_mgr, m_cache, vb, 
+                                                PASS_THRU, HomeStoreConfig::atomic_phys_page_size);
         if (vb->failed) {
             m_vdev_failed = true;
             LOGINFO("super block store is in failed state");
@@ -539,3 +562,22 @@ HomeBlks::vol_scan_cmpltd(std::shared_ptr<Volume> vol, vol_state state) {
     }
 }
 
+char* 
+HomeBlks::get_name(std::shared_ptr<Volume> vol) {
+    return vol->get_name();
+}
+
+uint64_t 
+HomeBlks::get_page_size(std::shared_ptr<Volume> vol) {
+    return vol->get_page_size();
+}
+
+uint64_t 
+HomeBlks::get_size(std::shared_ptr<Volume> vol) {
+    return vol->get_size();
+}
+
+homeds::blob 
+HomeBlks::at_offset(boost::intrusive_ptr<BlkBuffer> buf, uint32_t offset) {
+    return(buf->at_offset(offset));
+}

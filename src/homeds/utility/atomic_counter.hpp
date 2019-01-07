@@ -6,6 +6,7 @@
 #define LIBUTILS_ATOMIC_COUNTER_HPP
 
 #include <assert.h>
+#include <atomic>
 namespace homeds {
 
 template <typename T>

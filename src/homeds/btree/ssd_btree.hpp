@@ -128,16 +128,18 @@ public:
                 btree_buffer_t>(bt_dev_info->dev_mgr, m_cache, 0, 
                     homestore::BlkStoreCacheType::RD_MODIFY_WRITEBACK_CACHE, 0,
                     (std::bind(&SSDBtreeStore::process_req_completions,
-                           this, std::placeholders::_1)), nullptr, bt_dev_info->size, HomeStoreConfig::hs_page_size);
+                           this, std::placeholders::_1)), nullptr, bt_dev_info->size, 
+                           HomeStoreConfig::atomic_phys_page_size);
         } else {
-            m_blkstore = (homestore::BlkStore<homestore::VdevFixedBlkAllocatorPolicy, btree_buffer_t> *)bt_dev_info->blkstore;
+            m_blkstore = (homestore::BlkStore<homestore::VdevFixedBlkAllocatorPolicy, btree_buffer_t> *)
+                                    bt_dev_info->blkstore;
             m_blkstore->attach_compl(std::bind(&SSDBtreeStore::process_completions, std::placeholders::_1));
         }
     }
 
     static void process_completions(boost::intrusive_ptr<homestore::blkstore_req<btree_buffer_t>> bs_req) {
         boost::intrusive_ptr<ssd_btree_req> req = boost::static_pointer_cast<ssd_btree_req> (bs_req);
-        req->btree_instance->process_completions(bs_req);
+        req->btree_instance->process_req_completions(bs_req);
     }
 
     void process_req_completions(boost::intrusive_ptr<homestore::blkstore_req<btree_buffer_t>> bs_req) {

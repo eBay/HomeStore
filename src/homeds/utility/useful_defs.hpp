@@ -55,10 +55,6 @@ static uint64_t constexpr get_mask() {
     return uint64_t(~((uint64_t)(-1)<<bits)<<lshifts);
 }
 
-struct blob {
-    uint8_t *bytes;
-    uint32_t size;
-};
 
 template <int S>
 struct LeftShifts {

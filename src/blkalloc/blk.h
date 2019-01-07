@@ -94,21 +94,20 @@ struct BlkId {
         m_chunk_num = other.m_chunk_num;
     }
 
-    BlkId get_blkid_at(uint32_t offset) const {
-        assert(offset % HomeStoreConfig::hs_page_size == 0);
-        uint32_t remaining_size = ((m_nblks - (offset/HomeStoreConfig::hs_page_size)) * 
-                                  HomeStoreConfig::hs_page_size);
-        return(get_blkid_at(offset, remaining_size));
+    BlkId get_blkid_at(uint32_t offset, uint32_t pagesz) const {
+        assert(offset % pagesz == 0);
+        uint32_t remaining_size = ((m_nblks - (offset/pagesz)) * pagesz);
+        return(get_blkid_at(offset, remaining_size, pagesz));
     }
 
-    BlkId get_blkid_at(uint32_t offset, uint32_t size) const {
-        assert(size % HomeStoreConfig::hs_page_size == 0);
-        assert(offset % HomeStoreConfig::hs_page_size == 0);
+    BlkId get_blkid_at(uint32_t offset, uint32_t size, uint32_t pagesz) const {
+        assert(size % pagesz == 0);
+        assert(offset % pagesz == 0);
 
         BlkId other;
 
-        other.m_id = m_id + (offset/HomeStoreConfig::hs_page_size);
-        other.m_nblks = (size/HomeStoreConfig::hs_page_size);
+        other.m_id = m_id + (offset/pagesz);
+        other.m_nblks = (size/pagesz);
         other.m_chunk_num = m_chunk_num;
 
         assert(other.m_id < m_id + m_nblks);
@@ -153,9 +152,9 @@ struct BlkId {
         return m_chunk_num;
     }
 
-    uint32_t data_size() const {
-        /* TODO change this macro to function */
-        return (m_nblks * HomeStoreConfig::hs_page_size); 
+    /* A blkID represent a page size which is assigned to a blk allocator */
+    uint32_t data_size(uint32_t page_size) const {
+        return (m_nblks * page_size); 
     }
 
     std::string to_string() const {

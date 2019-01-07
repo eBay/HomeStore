@@ -16,6 +16,8 @@
 bool blk_alloc_test = false;
 #endif
 
+SDS_LOGGING_DECL(varsize_blk_alloc)
+
 namespace homestore {
 
 void thread_func(VarsizeBlkAllocator *b) {
@@ -49,7 +51,8 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig &cfg, bool init) 
     for (auto i = 0U; i < cfg.get_slab_cnt(); i++) {
         atomwrapper<uint32_t> a_i(0);
         m_slab_entries.push_back(a_i);
-        LOGINFO("Capacity of slab {} = {}", i, m_slab_entries[i]._a.load(std::memory_order_acq_rel));
+        LOGINFOMOD(varsize_blk_alloc, 
+                   "Capacity of slab {} = {}", i, m_slab_entries[i]._a.load(std::memory_order_acq_rel));
     }
 
     // Create segments with as many blk groups as configured.
@@ -95,7 +98,7 @@ VarsizeBlkAllocator::~VarsizeBlkAllocator() {
 
 // Runs only in per sweep thread. In other words, this is a single threaded state machine.
 void VarsizeBlkAllocator::allocator_state_machine() {
-    LOGINFO("Starting new blk sweep thread");
+    LOGINFOMOD(varsize_blk_alloc, "Starting new blk sweep thread");
     BlkAllocSegment *allocate_seg = nullptr;
     bool allocate = false;
 
@@ -119,7 +122,7 @@ void VarsizeBlkAllocator::allocator_state_machine() {
             }
         }
         if (allocate) {
-            LOGINFO("Fill cache for segment");
+            LOGTRACEMOD(varsize_blk_alloc, "Fill cache for segment");
             fill_cache(allocate_seg);
             {
                 // acquire lock
@@ -128,7 +131,7 @@ void VarsizeBlkAllocator::allocator_state_machine() {
                 m_region_state = BLK_ALLOCATOR_DONE;
                 m_cv.notify_all();
             }
-            LOGINFO("Done with fill cache for segment");
+           LOGTRACEMOD(varsize_blk_alloc, "Done with fill cache for segment");
         }
     }
 }
@@ -158,9 +161,11 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks,
 
     assert(m_init);
 
+    assert(nblks % hints.multiplier == 0);
+
 #ifndef NDEBUG
     if (!hints.is_contiguous && nblks  != 1) {
-        blks_rqstd = nblks / 2;
+        blks_rqstd = ALIGN_SIZE((nblks / 2), hints.multiplier);
     }
 #endif
 
@@ -169,25 +174,28 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks,
         if (alloc(blks_rqstd, hints, &blkid, ((retry_cnt == MAX_RETRY_CNT -1) ? true:false)) != BLK_ALLOC_SUCCESS) {
             if (blks_rqstd == 1 && retry_cnt == 0) {
                 continue;
-            } else if (blks_rqstd == 1 || hints.is_contiguous) {
+            } else if (blks_rqstd == hints.multiplier || hints.is_contiguous) {
                 break;
             }
-            blks_rqstd = blks_rqstd/2;
+            blks_rqstd = ALIGN_SIZE((blks_rqstd / 2), hints.multiplier);
             retry_cnt++;
             continue;
         }
         blks_alloced += blks_rqstd;
+        assert(blks_alloced % hints.multiplier == 0);
         if (blks_rqstd > nblks - blks_alloced) {
             blks_rqstd = nblks - blks_alloced;
         }
+        assert(blks_rqstd % hints.multiplier == 0);
         out_blkid.push_back(blkid);
     }
 #ifndef NDEBUG
     if(blks_alloced != nblks)
-        LOGERROR("blks_alloced != nblks : {}  {}",blks_alloced, nblks);
+        LOGERRORMOD(varsize_blk_alloc, "blks_alloced != nblks : {}  {}",blks_alloced, nblks);
 #endif
     assert(blks_alloced == nblks);
     if (blks_alloced != nblks) {
+        assert(blks_alloced < nblks);
         /* free blks */
         for (auto it = out_blkid.begin(); it != out_blkid.end(); ++it) {
             free(*it);
@@ -219,16 +227,17 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
 
         // Wait for cache to refill and then retry original request
         if (attempt > MAX_BLK_ALLOC_ATTEMPT) {
-            LOGERROR("Exceeding max retries {} to allocate. Failing the alloc", MAX_BLK_ALLOC_ATTEMPT);
+            LOGERRORMOD(varsize_blk_alloc, "Exceeding max retries {} to allocate. Failing the alloc", 
+                        MAX_BLK_ALLOC_ATTEMPT);
             for (auto i = 0U; i < m_slab_entries.size(); i++) {
-                LOGINFO("Capacity of slab {} = {}", i, m_slab_entries[i]._a.load(std::memory_order_acq_rel));
+                LOGERRORMOD(varsize_blk_alloc, "Capacity of slab {} = {}", i, 
+                            m_slab_entries[i]._a.load(std::memory_order_acq_rel));
             }
             break;
         } else {
-            LOGWARN("Attempt #{} to allocate nblks={} temperature={} failed. Waiting for cache to be filled",
-                    attempt,
-                    (uint32_t)nblks,
-                    hints.desired_temp);
+            LOGWARNMOD(varsize_blk_alloc, 
+                        "Attempt #{} to allocate nblks={} temperature={} failed. Waiting for cache to be filled",
+                    attempt, (uint32_t)nblks, hints.desired_temp);
         }
 
         if (retry || m_cache_n_entries == 0) {
@@ -324,7 +333,7 @@ void VarsizeBlkAllocator::fill_cache(BlkAllocSegment *seg) {
                 max_free_blks = free_blks;
             }
         }
-        LOGINFO("Seg was not allocated. So segment chosen");
+       LOGTRACEMOD(varsize_blk_alloc, "Seg was not allocated. So segment chosen");
     }
 
     /* While cache is not full */
@@ -339,7 +348,7 @@ void VarsizeBlkAllocator::fill_cache(BlkAllocSegment *seg) {
             auto count = m_slab_entries[i]._a.load(std::memory_order_acq_rel);
             sum += count;
             if (count && count <= get_config().get_slab_capacity(i)/2) {
-                LOGINFO("Hit low water mark for slab {} capacity = {}",
+                LOGTRACEMOD(varsize_blk_alloc, "Hit low water mark for slab {} capacity = {}",
                     i, m_slab_entries[i]._a.load(std::memory_order_acq_rel));
                 refill_needed = true;
                 break;
@@ -347,7 +356,7 @@ void VarsizeBlkAllocator::fill_cache(BlkAllocSegment *seg) {
         }
         if (!refill_needed && sum) break; // Atleast one slab has sufficient blocks
 
-        LOGINFO("Refill cache");
+        LOGTRACEMOD(varsize_blk_alloc, "Refill cache");
         uint64_t portion_num = seg->get_clock_hand();
         nadded_blks += fill_cache_in_portion(portion_num, seg);
 
@@ -364,9 +373,9 @@ void VarsizeBlkAllocator::fill_cache(BlkAllocSegment *seg) {
     if (nadded_blks) {
         assert(seg->get_free_blks() >= nadded_blks);
         seg->remove_free_blks(nadded_blks);
-        LOGINFO("Bitset sweep thread added {} blks to blk cache", nadded_blks);
+        LOGTRACEMOD(varsize_blk_alloc, "Bitset sweep thread added {} blks to blk cache", nadded_blks);
     } else {
-        LOGINFO("Bitset sweep failed to add any blocks to blk cache");
+        LOGTRACEMOD(varsize_blk_alloc, "Bitset sweep failed to add any blocks to blk cache");
     }
 }
 
@@ -423,11 +432,11 @@ uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t portion_num, BlkAll
                 m_alloc_bm->set_bits(b.start_bit, nbits);
                 total_bits += nbits;
                 m_slab_entries[slab_index]._a.fetch_add(nbits, std::memory_order_acq_rel);
-                LOGINFO("Freed {} blocks for slab {}, remaining slab capacity = {}",
+                LOGTRACEMOD(varsize_blk_alloc, "Freed {} blocks for slab {}, remaining slab capacity = {}",
                     nbits, slab_index,
                     m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
             } else {
-                LOGINFO("Slab {} is full, capacity = {}", slab_index,
+                LOGTRACEMOD(varsize_blk_alloc ,"Slab {} is full, capacity = {}", slab_index,
                     m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
             }
             b.nbits -= nbits;
@@ -460,11 +469,11 @@ uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t portion_num, BlkAll
                 m_alloc_bm->set_bits(start, nbits);
                 total_bits += nbits;
                 m_slab_entries[slab_index]._a.fetch_add(nbits, std::memory_order_acq_rel);
-                LOGINFO("Freed {} blocks for slab {}, remaining slab capacity = {}",
+                LOGTRACEMOD(varsize_blk_alloc, "Freed {} blocks for slab {}, remaining slab capacity = {}",
                     nbits, slab_index,
                     m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
             } else {
-                LOGINFO("Slab {} is full, capacity = {}", slab_index,
+                LOGTRACEMOD(varsize_blk_alloc, "Slab {} is full, capacity = {}", slab_index,
                     m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
             }
             b.nbits -= nbits;
@@ -491,11 +500,11 @@ uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t portion_num, BlkAll
                 m_alloc_bm->set_bits(b.start_bit, b.nbits);
                 total_bits += b.nbits;
                 m_slab_entries[slab_index]._a.fetch_add(b.nbits, std::memory_order_acq_rel);
-                LOGINFO("Freed {} blocks for slab {}, remaining slab capacity = {}",
+                LOGTRACEMOD(varsize_blk_alloc, "Freed {} blocks for slab {}, remaining slab capacity = {}",
                     b.nbits, slab_index,
                     m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
             } else {
-                LOGINFO("Slab {} is full, capacity = {}", slab_index,
+                LOGTRACEMOD(varsize_blk_alloc, "Slab {} is full, capacity = {}", slab_index,
                     m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
             }
         }

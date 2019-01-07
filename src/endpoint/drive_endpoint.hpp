@@ -19,8 +19,8 @@
 
 using namespace std;
 namespace homeio {
-#define MAX_OUTSTANDING_IO 200 // if max outstanding IO is
-			       //  100 then io_submit will fail.
+#define MAX_OUTSTANDING_IO 200 // if max outstanding IO is more then
+			                   //  200 then io_submit will fail.
 #define MAX_COMPLETIONS (MAX_OUTSTANDING_IO)  // how many completions to process in one shot
 
 using Clock = std::chrono::steady_clock;

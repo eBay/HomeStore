@@ -46,7 +46,8 @@ get_elapsed_time_ns(homeio::Clock::time_point startTime) {
 
 
 DriveEndPoint::DriveEndPoint(std::shared_ptr<iomgr::ioMgr> iomgr, comp_callback cb)
-				: EndPoint(iomgr), write_aio_lat(0), total_write_ios(0), spurious_events(0), comp_cb(cb) {
+				: EndPoint(iomgr), write_aio_lat(0), total_write_ios(0), total_read_ios(0), 
+                spurious_events(0), comp_cb(cb) {
 	iomgr->add_ep(this);
 }
 
@@ -124,7 +125,11 @@ DriveEndPoint::async_write(int m_sync_fd, const char *data,
 			uint32_t size, uint64_t offset, 
 			uint8_t *cookie) {
     
-    assert(!iocb_list.empty());
+    if (iocb_list.empty()) {
+        sync_write(m_sync_fd, data, size, offset);
+        comp_cb(0, cookie);
+        return;
+    }
 	struct iocb_info *info = iocb_list.top();
 	struct iocb *iocb = static_cast<struct iocb *>(info);
 	iocb_list.pop();
@@ -144,7 +149,11 @@ DriveEndPoint::async_read(int m_sync_fd, char *data,
 				uint32_t size, uint64_t offset, 
 				uint8_t *cookie) {
     
-    assert(!iocb_list.empty());
+    if (iocb_list.empty()) {
+        sync_read(m_sync_fd, data, size, offset);
+        comp_cb(0, cookie);
+        return;
+    }
 	struct iocb_info *info = iocb_list.top();
 	struct iocb *iocb = static_cast<struct iocb *>(info);
 	iocb_list.pop();
@@ -165,7 +174,11 @@ DriveEndPoint::async_writev(int m_sync_fd, const struct iovec *iov,
 				int iovcnt, uint32_t size, 
 				uint64_t offset, uint8_t *cookie) {
     
-    assert(!iocb_list.empty());
+    if (iocb_list.empty()) {
+        sync_writev(m_sync_fd, iov, iovcnt, size, offset);
+        comp_cb(0, cookie);
+        return;
+    }
 	struct iocb_info *info = iocb_list.top();
 	struct iocb *iocb = static_cast<struct iocb *>(info);
 	iocb_list.pop();
@@ -185,7 +198,11 @@ DriveEndPoint::async_readv(int m_sync_fd, const struct iovec *iov,
 				int iovcnt, uint32_t size, 
 				uint64_t offset, uint8_t *cookie) {
     
-    assert(!iocb_list.empty());
+    if (iocb_list.empty()) {
+        sync_readv(m_sync_fd, iov, iovcnt, size, offset);
+        comp_cb(0, cookie);
+        return;
+    }
 	struct iocb_info *info = iocb_list.top();
 	struct iocb *iocb = static_cast<struct iocb *>(info);
 	iocb_list.pop();

@@ -123,13 +123,13 @@ private:
     }
 
     uint32_t decode(uint8_t encoded_size) const {
-        return (encoded_size * HomeStoreConfig::hs_page_size);
+        return (encoded_size * HomeStoreConfig::min_page_size);
     }
 
     uint8_t encode(uint32_t size) const {
-        assert((size % HomeStoreConfig::hs_page_size) == 0);
-        assert((size/HomeStoreConfig::hs_page_size >> 8) == 0);
-        return round_off(size, HomeStoreConfig::hs_page_size);
+        assert((size % HomeStoreConfig::min_page_size) == 0);
+        assert((size/HomeStoreConfig::min_page_size >> 8) == 0);
+        return round_off(size, HomeStoreConfig::min_page_size);
     }
 } __attribute__((packed));
 

@@ -14,6 +14,7 @@
 #include "homeds/utility/useful_defs.hpp"
 #include <boost/intrusive/slist.hpp>
 #include <boost/optional.hpp>
+#include "main/homestore_header.hpp"
 
 #ifdef GLOBAL_HASHSET_LOCK
 #include <mutex>
@@ -21,10 +22,10 @@
 
 namespace homeds {
 
-#define read_lock()    lock(true)
-#define read_unlock()  unlock(true)
-#define write_lock()   lock(false)
-#define write_unlock() unlock(false)
+#define hash_read_lock()    lock(true)
+#define hash_read_unlock()  unlock(true)
+#define hash_write_lock()   lock(false)
+#define hash_write_unlock() unlock(false)
 
 [[maybe_unused]]
 static uint64_t compute_hash_code(homeds::blob b) {
@@ -54,7 +55,7 @@ public:
     bool insert(const K &k, V &v, V **outv, const std::function<void(V *)> &found_cb = nullptr) {
         bool found = false;
 
-        write_lock();
+        hash_write_lock();
         auto it(m_list.begin());
         for (auto itend(m_list.end()); it != itend; ++it) {
             int x = K::compare(*V::extract_key(*it), k);
@@ -81,14 +82,14 @@ public:
             V::ref(**outv);
             V::ref(**outv);
         }
-        write_unlock();
+        hash_write_unlock();
         return !found;
     }
 
     bool get(const K &k, V **outv) {
         bool found = false;
 
-        read_lock();
+        hash_read_lock();
         for (auto it(m_list.begin()), itend(m_list.end()); it != itend; ++it) {
             int x = K::compare(*(V::extract_key(*it)), k);
             if (x == 0) {
@@ -101,14 +102,14 @@ public:
                 break;
             }
         }
-        read_unlock();
+        hash_read_unlock();
         return found;
     }
 
     bool remove(const K &k, const std::function<void(V *)> &found_cb) {
         bool found = false;
 
-        write_lock();
+        hash_write_lock();
         for (auto it(m_list.begin()), itend(m_list.end()); it != itend; ++it) {
             int x = K::compare(*(V::extract_key(*it)), k);
             if (x == 0) {
@@ -123,7 +124,7 @@ public:
                 break;
             }
         }
-        write_unlock();
+        hash_write_unlock();
         return found;
     }
 
@@ -131,7 +132,7 @@ public:
                         bool &can_remove) {
         bool ret = false;
 
-        write_lock();
+        hash_write_lock();
         for (auto it(m_list.begin()), itend(m_list.end()); it != itend; ++it) {
             int x = K::compare(*(V::extract_key(*it)), k);
             if (x == 0) {
@@ -148,18 +149,18 @@ public:
                     if (found_cb) {
                         found_cb(&*it);
                     }
-                    write_unlock();
+                    hash_write_unlock();
                     V::reset_free_state(*it);
                     /* don't call deref while holding the lock */
                     V::deref(*it);
-                    write_lock();
+                    hash_write_lock();
                  }
                  break;
             } else if (x > 0) {
                  break;
             }
         }
-        write_unlock();
+        hash_write_unlock();
         return ret;   
     }
 
@@ -167,7 +168,7 @@ public:
     bool check_and_remove(const K &k, const std::function<void(V *)> &found_cb) {
         bool ret = false;
 
-        write_lock();
+        hash_write_lock();
         for (auto it(m_list.begin()), itend(m_list.end()); it != itend; ++it) {
             int x = K::compare(*(V::extract_key(*it)), k);
             if (x == 0) {
@@ -186,7 +187,7 @@ public:
                 break;
             }
         }
-        write_unlock();
+        hash_write_unlock();
         return ret;   
     }
 

@@ -215,7 +215,7 @@ public:
             std::vector<BlkId> &out_blkid) {
         // Allocate a block from the device manager
         assert(size % m_pagesz == 0);
-        auto nblks = size/m_pagesz;
+        auto nblks = size / m_pagesz;
         return (m_vdev.alloc_blk(nblks, hints, out_blkid));
     }
 
@@ -227,7 +227,7 @@ public:
             BlkId *out_blkid) {
         // Allocate a block from the device manager
         assert(size % m_pagesz == 0);
-        auto nblks = size/m_pagesz;
+        auto nblks = size / m_pagesz;
         hints.is_contiguous = true;
         return (m_vdev.alloc_blk(nblks, hints, out_blkid));
     }
@@ -255,7 +255,7 @@ public:
         boost::intrusive_ptr<homeds::MemVector> mvec(new homeds::MemVector(), true);
         mvec->set(ptr, size, 0);
 
-        buf->set_memvec(mvec, 0, out_blkid->data_size());
+        buf->set_memvec(mvec, 0, out_blkid->data_size(m_pagesz));
         // Insert this buffer to the cache.
         auto ibuf = boost::intrusive_ptr< Buffer >(buf);
         boost::intrusive_ptr< Buffer > out_bbuf;
@@ -300,17 +300,17 @@ public:
         boost::intrusive_ptr< Buffer > erased_buf(nullptr);
         bool found = false;
 
-        assert(bid.data_size() >= (size_offset.get_value_or(0) + size.get_value_or(0)));
+        assert(bid.data_size(m_pagesz) >= (size_offset.get_value_or(0) + size.get_value_or(0)));
         
         uint32_t free_size;
         if (size.get_value_or(0) != 0) {
             free_size = size.get_value_or(0);
         } else {
-            free_size = bid.data_size();
+            free_size = bid.data_size(m_pagesz);
         }
 
         if (is_read_modify_cache()) {
-            assert(size_offset.get_value_or(0) == 0 && size.get_value_or(0) == bid.data_size());
+            assert(size_offset.get_value_or(0) == 0 && size.get_value_or(0) == bid.data_size(m_pagesz));
             m_cache->safe_erase(bid, [this, bid, dependent_req_q](boost::intrusive_ptr< CacheBuffer<BlkId> > erased_buf) {
                                         this->cache_buf_erase_cb(
                                         boost::static_pointer_cast<Buffer>(erased_buf),
@@ -324,7 +324,7 @@ public:
         }
 
         uint32_t offset = size_offset.get_value_or(0); 
-        BlkId tmp_bid(bid.get_blkid_at(offset, free_size));
+        BlkId tmp_bid(bid.get_blkid_at(offset, free_size, m_pagesz));
         if (is_write_back_cache() && found) {
             boost::intrusive_ptr< blkstore_req<Buffer> >req(new blkstore_req<Buffer> ());
             req->bid = tmp_bid;
@@ -397,7 +397,7 @@ public:
         /* TODO: add try and catch exception */
         auto buf = Buffer::make_object();
         buf->set_key(bid);
-        buf->set_memvec(mvec, data_offset, bid.data_size());
+        buf->set_memvec(mvec, data_offset, bid.data_size(m_pagesz));
         auto ibuf = boost::intrusive_ptr< Buffer >(buf);
         req->bid = bid;
         
@@ -513,6 +513,7 @@ public:
         req->is_read = true;
         /* first is offset and second is size in a pair */
         vector< std::pair<uint32_t, uint32_t> > missing_mp;
+        assert(bid.data_size(m_pagesz) >= (offset + size));
         bool ret = m_cache->insert_missing_pieces(bbuf, offset, size, missing_mp);
 
         uint8_t *ptr;
@@ -526,7 +527,7 @@ public:
             }
 
             // Read the missing piece from the device
-            BlkId tmp_bid(bid.get_blkid_at(missing_mp[i].first, missing_mp[i].second));
+            BlkId tmp_bid(bid.get_blkid_at(missing_mp[i].first, missing_mp[i].second, m_pagesz));
 
             req->blkstore_ref_cnt.fetch_add(1, std::memory_order_acquire);
             homeds::MemPiece mp(ptr, missing_mp[i].second, 0);
@@ -568,21 +569,21 @@ public:
         
         for (int i = 0; i < (nmirrors + 1); i++) {
             /* create the pointer */
-            auto ret = posix_memalign((void **) &mem_ptr, HomeStoreConfig::align_size, bid.data_size());
+            auto ret = posix_memalign((void **) &mem_ptr, HomeStoreConfig::align_size, bid.data_size(m_pagesz));
             assert (ret == 0);
             
             /* set the memvec */
             boost::intrusive_ptr<homeds::MemVector> mvec(new homeds::MemVector());
-            mvec->set(mem_ptr, bid.data_size(), 0);
+            mvec->set(mem_ptr, bid.data_size(m_pagesz), 0);
             
             /* create the buffer */
             auto bbuf = Buffer::make_object();
-            bbuf->set_memvec(mvec, 0, bid.data_size());
+            bbuf->set_memvec(mvec, 0, bid.data_size(m_pagesz));
             
             buf_list.push_back(bbuf);
             mp.push_back(mvec);
         }
-        m_vdev.read_nmirror(bid, mp, bid.data_size(), nmirrors);
+        m_vdev.read_nmirror(bid, mp, bid.data_size(m_pagesz), nmirrors);
         return buf_list;
     }
 

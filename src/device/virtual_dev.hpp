@@ -155,12 +155,14 @@ private:
     uint64_t write_cnt;
     uint32_t m_num_chunks;
     comp_callback comp_cb;
+    uint32_t m_pagesz;
 
 public:
     /* Create a new virtual dev for these parameters */
     VirtualDev(DeviceManager *mgr, uint64_t context_size, uint32_t nmirror, bool is_stripe, uint32_t page_size,
                const std::vector< PhysicalDev *> &pdev_list, comp_callback cb, char *blob, uint64_t size) : comp_cb(cb) {
         m_mgr = mgr;
+        m_pagesz = page_size;
 
         // Now its time to allocate chunks as needed
         assert(nmirror < pdev_list.size()); // Mirrors should be at least one less than device list.
@@ -180,7 +182,7 @@ public:
         }
 
         /* make size multiple of chunk size */
-        size = ALIGN_SIZE(size, m_chunk_size);
+        size = m_chunk_size * nchunks;
 
         // Create a new vdev in persistent area and get the block of it
         m_vb = mgr->alloc_vdev(context_size, nmirror, page_size, nchunks, blob, size);
@@ -249,6 +251,7 @@ public:
          m_selector = std::make_unique<DefaultDeviceSelector>();
          m_chunk_size = 0;
          m_num_chunks = 0;
+         m_pagesz = vb->page_size;
          m_mgr->add_chunks(vb->vdev_id, [this] (PhysicalDevChunk *chunk) { add_chunk(chunk); });
 
          assert((vb->num_primary_chunks * (vb->num_mirrors + 1)) == m_num_chunks);
@@ -374,7 +377,7 @@ public:
         Clock::time_point startTime = Clock::now();
 
         uint32_t p = 0;
-        uint32_t end_offset = data_offset + bid.data_size();
+        uint32_t end_offset = data_offset + bid.data_size(m_pagesz);
         while (data_offset != end_offset) {
             homeds::blob b;
             buf.get(&b, data_offset);
@@ -449,20 +452,20 @@ public:
         
         homeds::blob b;
         mp[cnt]->get(&b, 0);
-        assert(b.size == bid.data_size());
+        assert(b.size == bid.data_size(m_pagesz));
         primary_chunk->get_physical_dev_mutable()->sync_read((char *)b.bytes, b.size,
                 primary_dev_offset);
         if (cnt == nmirror) {
             return;
         }
+        ++cnt;
         for (auto mchunk : m_mirror_chunks.find(primary_chunk)->second) {
             uint64_t dev_offset = mchunk->get_start_offset() + primary_chunk_offset;
            
             mp[cnt]->get(&b, 0);
-            assert(b.size == bid.data_size());
+            assert(b.size == bid.data_size(m_pagesz));
             mchunk->get_physical_dev_mutable()->sync_read((char *) b.bytes, b.size,
                         dev_offset);
-            cnt++;
             if (cnt == nmirror) {
                 break;
             }
@@ -623,6 +626,10 @@ private:
             for (uint32_t i = 0; i < it->second.size(); ++i) {
                 it->second[i]->set_blk_allocator(ba);
             }
+        } else {
+            // Not found, just create a new entry
+            std::vector< PhysicalDevChunk *> vec;
+            m_mirror_chunks.emplace(std::make_pair(chunk, vec));
         }
     }
 

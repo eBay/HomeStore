@@ -1,8 +1,10 @@
 #ifndef HOMESTORE_VOL_CONFIG_HPP
 #define HOMESTORE_VOL_CONFIG_HPP
 
+/* NOTE: This file exports interface required to access homeblocks. we should try to avoid including any 
+ * homestore/homeblocks related hpp file.
+ */
 #include "homestore_header.hpp"
-#include <mutex>
 #include <functional>
 #include <vector>
 #include <memory>
@@ -11,14 +13,42 @@
 #include <boost/intrusive_ptr.hpp>
 #include <cassert>
 #include <sds_logging/logging.h>
+#include <mutex>
 
 namespace homestore {
 class Volume;
-struct volume_req;
+class BlkBuffer;
+void intrusive_ptr_add_ref(BlkBuffer *buf);
+void intrusive_ptr_release(BlkBuffer *buf);
+
 class VolInterface;
 struct init_params;
 VolInterface *vol_homestore_init(init_params &cfg);
-#define VOL_NAME_SIZE 100
+typedef std::chrono::high_resolution_clock Clock;
+
+struct buf_info {
+    uint64_t size;
+    int offset;
+    boost::intrusive_ptr<BlkBuffer> buf;
+};
+
+struct vol_interface_req {
+    Clock::time_point startTime;
+    std::vector<buf_info> read_buf_list;
+    std::error_condition err;
+    std::atomic<int> io_cnt;
+    std::atomic<int> m_refcount;
+    friend void intrusive_ptr_add_ref(vol_interface_req *req) {
+        req->m_refcount.fetch_add(1, std::memory_order_acquire);
+    }
+    friend void intrusive_ptr_release(vol_interface_req *req) {
+        if (req->m_refcount.fetch_sub(1, std::memory_order_acquire) == 1) {
+            delete(req);
+        }
+    }
+    vol_interface_req() : err(no_error), io_cnt(0), m_refcount(0){};
+    virtual ~vol_interface_req() {};
+};
 
 enum vol_state {
     ONLINE = 0,  
@@ -28,12 +58,13 @@ enum vol_state {
     UNINITED = 4
 };
 
-typedef std::function<void(boost::intrusive_ptr<volume_req> req)> io_comp_callback;
+typedef std::function<void(boost::intrusive_ptr<vol_interface_req> req)> io_comp_callback;
 struct vol_params {
     uint64_t page_size;
     uint64_t size;
     boost::uuids::uuid uuid;
     io_comp_callback io_comp_cb;
+#define VOL_NAME_SIZE 100
     char vol_name[VOL_NAME_SIZE];
 };
 
@@ -89,14 +120,21 @@ public:
     }
 
     virtual std::error_condition write(std::shared_ptr<Volume> vol, uint64_t lba, uint8_t *buf, uint32_t nblks, 
-                                            boost::intrusive_ptr<volume_req> req) = 0;
-    virtual std::error_condition read(std::shared_ptr<Volume> vol, uint64_t lba, int nblks, boost::intrusive_ptr<volume_req> req) = 0;
+                                            boost::intrusive_ptr<vol_interface_req> req) = 0;
+    virtual std::error_condition read(std::shared_ptr<Volume> vol, uint64_t lba, int nblks, 
+                                        boost::intrusive_ptr<vol_interface_req> req) = 0;
+    virtual std::error_condition sync_read(std::shared_ptr<Volume> vol, uint64_t lba, int nblks, 
+                                        boost::intrusive_ptr<vol_interface_req> req) = 0;
+    virtual char* get_name(std::shared_ptr<Volume> vol) = 0;
+    virtual uint64_t get_page_size(std::shared_ptr<Volume> vol) = 0;
+    virtual uint64_t get_size(std::shared_ptr<Volume> vol) = 0;
+    virtual homeds::blob at_offset(boost::intrusive_ptr<BlkBuffer> buf, uint32_t offset) = 0;
     virtual std::shared_ptr<Volume> createVolume(vol_params &params) = 0;
     virtual std::error_condition removeVolume(boost::uuids::uuid const &uuid) = 0;
     virtual std::shared_ptr<Volume> lookupVolume(boost::uuids::uuid const &uuid) = 0;
 
     /* AM should call it in case of recovery or reboot when homestore try to mount the existing volume */
-    virtual void attach_vol_completion_cb(std::shared_ptr<Volume> vol, io_comp_callback &cb) = 0;
+    virtual void attach_vol_completion_cb(std::shared_ptr<Volume> vol, io_comp_callback cb) = 0;
 };
 }
 

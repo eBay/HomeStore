@@ -86,6 +86,13 @@ struct WriteBackCacheBuffer : public CacheBuffer< Buffer > {
         assert(pending_req_q.empty());
 #endif
     }
+    friend void intrusive_ptr_add_ref(WriteBackCacheBuffer<Buffer> *buf) {
+        intrusive_ptr_add_ref((CacheBuffer< Buffer > *) buf);
+    }
+
+    friend void intrusive_ptr_release(WriteBackCacheBuffer<Buffer> *buf) {
+        intrusive_ptr_release((CacheBuffer< Buffer > *) buf);
+    }
 };
 
 template <typename Buffer>

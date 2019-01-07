@@ -1172,6 +1172,15 @@ retry:
         btree_store_t::swap_node(m_btree_store.get(), root, child_node);
         btree_store_t::write_node(m_btree_store.get(), child_node, dependent_req_q, NULL, false);
 
+        /* Reading a node again to get the latest buffer from writeback cache. We are going
+         * to write this node again in split node. We can not have two consecutive writes on the
+         * same buffer without reading in between because we have to update the dependent
+         * req_q and underneath buffer from the writeback cache layer. Since it is a new node
+         * we can safely say that write lock is taking without actually taking it because no
+         * body can acccess this child node.
+         */
+        btree_store_t::read_node_lock(m_btree_store.get(), child_node, true, &dependent_req_q);
+
         assert(root->get_total_entries() == 0);
         split_node(root, child_node, root->get_total_entries(), &split_key, dependent_req_q);
         /* unlock child node */
