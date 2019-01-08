@@ -7,7 +7,6 @@ class HomestoreConan(ConanFile):
 
     version = "0.11.1"
 
-
     license = "Proprietary"
     url = "https://github.corp.ebay.com/SDS/Homestore"
     description = "HomeStore"
@@ -32,7 +31,7 @@ class HomestoreConan(ConanFile):
                 "lzma/5.2.4@bincrafters/stable",
                 "sds_metrics/0.2.2@sds/testing",
                 "OpenSSL/1.0.2q@conan/stable",
-                "sds_logging/3.5.1@sds/testing",
+                "sds_logging/3.5.2@sds/testing",
                 "sds_options/0.1.4@sds/testing",
                 )
 
@@ -67,9 +66,10 @@ class HomestoreConan(ConanFile):
         cmake.test(target=test_target)
 
     def package(self):
-        self.copy("homestore_header.hpp", dst="include/homestore", src="src/main", keep_path=False)
-        self.copy("vol_interface.hpp", dst="include/homestore", src="src/main", keep_path=False)
-        self.copy("*error.h", dst="include/", src="src", keep_path=True)
+        self.copy("*.h", dst="include", src="src", keep_path=True)
+        self.copy("*.hpp", dst="include", src="src", keep_path=True)
+        self.copy("*/btree_node.cpp", dst="include", src="src", keep_path=True)
+        self.copy("*cache/cache.cpp", dst="include", src="src", keep_path=True)
         self.copy("*.so", dst="lib", keep_path=False)
         self.copy("*.dll", dst="lib", keep_path=False)
         self.copy("*.dylib", dst="lib", keep_path=False)

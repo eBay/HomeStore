@@ -16,15 +16,18 @@ COPY CMakeLists.txt ${SOURCE_PATH}
 COPY src/ ${SOURCE_PATH}src
 
 WORKDIR /output
+
+# Build the variants we will publish
 ENV ASAN_OPTIONS=detect_leaks=0
-RUN set -eux; \
-    eval $(grep 'name =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,name,PKG_NAME,'); \
-    conan install -o ${PKG_NAME}:coverage=True -pr bionic_nosanitize ${SOURCE_PATH}; \
-    conan build ${SOURCE_PATH}; \
-    conan remove -f "${PKG_NAME}*"
 RUN conan create -pr debug ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"
 RUN conan create ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"
 RUN conan create -pr bionic_nosanitize ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"
+
+# Generates coverage reports
+RUN set -eux; \
+    eval $(grep 'name =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,name,PKG_NAME,'); \
+    conan install -o ${PKG_NAME}:coverage=True -pr bionic_nosanitize ${SOURCE_PATH}; \
+    conan build ${SOURCE_PATH};
 
 CMD set -eux; \
     eval $(grep 'name =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,name,PKG_NAME,'); \
