@@ -115,7 +115,7 @@ public:
 
     BtreeStore(BtreeConfig &cfg, void *btree_specific_context, comp_callback comp_cbt) {
         m_cfg = cfg;
-        m_cfg.set_node_area_size(NodeSize - sizeof(SSDBtreeNode) - sizeof(LeafPhysicalNode));
+        m_cfg.set_node_area_size(NodeSize - sizeof(LeafPhysicalNodeDeclType));
 
         auto bt_dev_info = (btree_device_info *)btree_specific_context;
         m_comp_cb = comp_cbt;
@@ -159,7 +159,7 @@ public:
     }
 
     static uint32_t get_node_area_size(SSDBtreeStore *store) {
-        return NodeSize - sizeof(SSDBtreeNode) - sizeof(LeafPhysicalNode);
+        return NodeSize - sizeof(LeafPhysicalNodeDeclType);
     }
 
     static boost::intrusive_ptr<SSDBtreeNode> alloc_node(SSDBtreeStore *store, bool is_leaf,
@@ -248,6 +248,12 @@ public:
 #ifndef NDEBUG
         assert(bn->is_btree);
 #endif
+
+#ifndef NO_CHECKSUM
+        auto physical_node = (LeafPhysicalNodeDeclType *) (bn->at_offset(0).bytes);
+        physical_node->set_checksum(get_node_area_size(impl));
+#endif
+
         req->btree_instance = impl;
         impl->m_blkstore->write(blkid, 
                     boost::dynamic_pointer_cast<btree_buffer_t>(bn), 
@@ -272,6 +278,13 @@ public:
             auto req = store->m_blkstore->read_locked(boost::static_pointer_cast<btree_buffer_t>(bn), is_write_modifiable);
             if (req) { dependent_req_q->push_back(req); }
         }
+#ifndef NO_CHECKSUM
+        auto physical_node = (LeafPhysicalNodeDeclType *)
+            ((boost::static_pointer_cast<SSDBtreeNodeDeclType>(bn))->at_offset(0).bytes);
+        if (! physical_node->verify_node(get_node_area_size(impl))) {
+            abort();
+        }
+#endif
     }
 
     static void free_node(SSDBtreeStore *store, boost::intrusive_ptr<SSDBtreeNode> bn,
