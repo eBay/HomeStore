@@ -34,7 +34,7 @@ constexpr auto Mi = Ki * Ki;
 constexpr auto Gi = Ki * Mi;
 constexpr auto max_io_size = 1 * Mi;
 uint64_t max_outstanding_ios = 64u;
-uint64_t max_disk_capacity = 1 * Gi;
+uint64_t max_disk_capacity = 10 * Gi;
 uint64_t match_cnt = 0;
 std::atomic<uint64_t> write_cnt;
 std::atomic<uint64_t> read_cnt;
@@ -109,8 +109,21 @@ public:
         verify_done = false;
 
     }
+
+    void remove_files() {
+        remove("file1");
+        remove("file2");
+        remove("file3");
+        remove("file4");
+        for (uint32_t i = 0; i < max_vols; i++) {
+            std::string name = "vol" + std::to_string(i);
+            remove(name.c_str());
+        }
+    }
+
     void print() {
     }
+
     void start_homestore() {
         /* start homestore */
             /* create files */
@@ -507,6 +520,7 @@ TEST_F(IOTest, normal_random_io_test) {
     this->wait_cmpl();
     LOGINFO("write_cnt {}", write_cnt);
     LOGINFO("read_cnt {}", read_cnt);
+    this->remove_files();
 }
 
 /* it bursts the IOs. max outstanding IOs are very high. In this testcase, it
@@ -521,6 +535,7 @@ TEST_F(IOTest, normal_burst_random_io_test) {
     this->wait_cmpl();
     LOGINFO("write_cnt {}", write_cnt);
     LOGINFO("read_cnt {}", read_cnt);
+    this->remove_files();
 }
 
 /************ Below tests init the systems. Exit with abort. ****************/ 
@@ -537,6 +552,7 @@ TEST_F(IOTest, recovery_random_io_test) {
     /* child process */
     this->start_homestore();
     this->wait_cmpl();
+    this->remove_files();
 }
 
 /************ Below tests recover the systems. Exit with abort. ***********/ 
