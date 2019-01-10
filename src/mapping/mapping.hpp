@@ -346,6 +346,84 @@ public:
 
 #endif
 };
+
+
+class mapping {
+typedef std::function<void(struct BlkId blkid)> free_blk_callback;
+typedef std::function<void(boost::intrusive_ptr<volume_req> cookie)> comp_callback;
+private:
+    MappingBtreeDeclType *m_bt;
+
+    free_blk_callback free_blk_cb;
+    comp_callback comp_cb;
+
+public:
+    MappingBtreeDeclType* get_bt_handle() const {
+        return m_bt;
+    }
+    void process_completions(boost::intrusive_ptr<writeback_req> cookie, std::error_condition status);
+
+    mapping(uint64_t volsize, uint32_t page_size, comp_callback comp_cb) : comp_cb(comp_cb) {
+        assert(BIT_TO_REPRESENT_MAX_ENTRIES > log2(MAX_NO_OF_VALUE_ENTRIES));
+        homeds::btree::BtreeConfig btree_cfg;
+        btree_cfg.set_max_objs(volsize / (MAX_NO_OF_VALUE_ENTRIES * MAP_BLOCK_SIZE));
+        btree_cfg.set_max_key_size(sizeof(uint32_t));
+        btree_cfg.set_max_value_size(MAX_NO_OF_VALUE_ENTRIES * sizeof(MappingInterval));
+
+        homeds::btree::btree_device_info bt_dev_info;
+        bt_dev_info.blkstore = (void *)HomeBlks::instance()->get_metadata_blkstore();
+        bt_dev_info.new_device = false;
+        m_bt = MappingBtreeDeclType::create_btree(btree_cfg, &bt_dev_info,
+                std::bind(&mapping::process_completions, this,
+                    std::placeholders::_1, std::placeholders::_2));
+    }
+
+    mapping(uint64_t volsize, uint32_t page_size, btree_super_block &btree_sb, comp_callback comp_cb) : comp_cb(comp_cb) {
+        assert(BIT_TO_REPRESENT_MAX_ENTRIES > log2(MAX_NO_OF_VALUE_ENTRIES));
+        homeds::btree::BtreeConfig btree_cfg;
+        btree_cfg.set_max_objs(volsize / (MAX_NO_OF_VALUE_ENTRIES * MAP_BLOCK_SIZE));
+        btree_cfg.set_max_key_size(sizeof(uint32_t));
+        btree_cfg.set_max_value_size(MAX_NO_OF_VALUE_ENTRIES * sizeof(MappingInterval));
+
+        homeds::btree::btree_device_info bt_dev_info;
+        bt_dev_info.blkstore = HomeBlks::instance()->get_metadata_blkstore();
+        bt_dev_info.new_device = false;
+        m_bt = MappingBtreeDeclType::create_btree(btree_sb, btree_cfg, &bt_dev_info,
+                std::bind(&mapping::process_completions, this,
+                    std::placeholders::_1, std::placeholders::_2));
+    }
+
+    btree_super_block get_btree_sb() {
+        return(m_bt->get_btree_sb());
+    }
+#ifndef NDEBUG
+    void enable_split_merge_crash_simulation() {
+        m_bt->simulate_merge_crash=true;
+        m_bt->simulate_split_crash=true;
+    }
+#endif
+
+    void add_lba(MappingInterval &offBlk, bool found, uint64_t actual_lba,
+            std::vector<std::shared_ptr<Lba_Block>> &mappingList) {
+        mappingList.push_back(std::make_shared<Lba_Block>(offBlk, actual_lba, found));
+    }
+
+    void add_dummy_for_missing_mappings(uint64_t start_lba, uint64_t end_lba,
+            std::vector<std::shared_ptr<Lba_Block>> &mappingList);
+
+    void print_tree() {
+        m_bt->print_tree();
+    }
+
+    std::error_condition get(uint64_t start_lba, uint32_t nblks, std::vector<std::shared_ptr<Lba_Block>> &mappingList);
+
+#ifndef NDEBUG
+    void validate_get_response(uint64_t start_lba, uint32_t num_lbas, std::vector<std::shared_ptr<Lba_Block>> &mappingList);
+#endif
+
+    std::error_condition put(boost::intrusive_ptr<volume_req> req, uint64_t lba_uint, uint32_t nblks, struct BlkId blkid);
+};
+
 }
 
 #endif

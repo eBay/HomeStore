@@ -115,7 +115,9 @@ HomeBlks::removeVolume(boost::uuids::uuid const &uuid) {
         std::lock_guard<std::mutex> lg(m_vol_lock);
         if (auto it = m_volume_map.find(uuid); m_volume_map.end() != it) {
             if (2 <= it->second.use_count()) {
-                LOGERROR("Refusing to delete volume with outstanding references: {}", to_string(uuid)); 
+                LOGERROR("Refusing to delete volume with outstanding references: {}, use_count: {}", 
+                        to_string(uuid), 
+                        it->second.use_count()); 
                 return std::make_error_condition(std::errc::device_or_resource_busy);
             }
             volume = std::move(it->second);

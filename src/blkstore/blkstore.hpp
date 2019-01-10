@@ -88,9 +88,10 @@ public:
                                        std::error_condition status) 
                                 { this->writeback_free_blkid(req, status); })),
             m_cache_type(cache_type),
+            m_comp_cb(comp_cb),
             m_vdev(mgr, context_size, mirrors, true, m_pagesz, mgr->get_all_devices(), 
                     (std::bind(&BlkStore::process_completions, 
-                    this, std::placeholders::_1)), blob, size), m_comp_cb(comp_cb) {
+                    this, std::placeholders::_1)), blob, size)  {
     }
     
     BlkStore(DeviceManager *mgr, Cache< BlkId > *cache, uint64_t size, BlkStoreCacheType cache_type,
@@ -119,9 +120,9 @@ public:
                                 std::error_condition status) 
                                { this->writeback_free_blkid(req, status); })),
             m_cache_type(cache_type),
+            m_comp_cb(comp_cb),
             m_vdev(mgr, vb, (std::bind(&BlkStore::process_completions, this, 
-			     std::placeholders::_1))), 
-	    m_comp_cb(comp_cb) {
+			     std::placeholders::_1))) {
     }
     
     BlkStore(DeviceManager *mgr, Cache< BlkId > *cache, 
@@ -612,13 +613,15 @@ public:
         return &m_vdev;
     };
 
+
 private:
         uint32_t m_pagesz;
         Cache< BlkId > *m_cache;
         WriteBackCache< BlkId > m_wb_cache;
         BlkStoreCacheType m_cache_type;
-        VirtualDev<BAllocator, RoundRobinDeviceSelector> m_vdev;
         comp_callback m_comp_cb;
+public:
+    VirtualDev<BAllocator, RoundRobinDeviceSelector> m_vdev;
     };
 
 

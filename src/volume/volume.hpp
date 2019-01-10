@@ -8,7 +8,8 @@
 #include <device/blkbuffer.hpp>
 #include <blkstore/blkstore.hpp>
 #include "home_blks.hpp"
-
+//#include "vol_alloc_recovery.h"
+#include "thread_pool.h"
 using namespace std;
 
 #ifndef NDEBUG
@@ -18,7 +19,6 @@ namespace homestore {
 
 class mapping;
 enum vol_state;
-
 
 /* this structure is not thread safe. But as of
  * now there is no use where we can access it in
@@ -79,19 +79,19 @@ class Volume {
     mapping *m_map;
     boost::intrusive_ptr<BlkBuffer> m_only_in_mem_buff;
     struct vol_sb *m_sb;
-    static homestore::BlkStore<homestore::VdevVarSizeBlkAllocatorPolicy> *m_data_blkstore;
     enum vol_state m_state;
     void alloc_single_block_in_mem();
     void vol_scan_alloc_blks();
     io_comp_callback m_comp_cb;
     std::shared_ptr<Volume> m_vol_ptr;
-    
+
  public:
     Volume(vol_params &params);
     Volume(vol_sb *sb);
     ~Volume() { free(m_sb); };
     std::error_condition destroy();
    
+    static homestore::BlkStore<homestore::VdevVarSizeBlkAllocatorPolicy> *m_data_blkstore;
     static void process_vol_data_completions(boost::intrusive_ptr<blkstore_req<BlkBuffer>> bs_req);
     void process_metadata_completions(boost::intrusive_ptr<volume_req> wb_req);
     void process_data_completions(boost::intrusive_ptr<blkstore_req<BlkBuffer>> bs_req);
@@ -108,12 +108,55 @@ class Volume {
     void print_tree();
     struct vol_sb *get_sb() {return m_sb;};
     std::shared_ptr<Volume> get_shared_ptr() { return m_vol_ptr; };
+    
+    void blk_recovery_process_completions(bool success);
+    void blk_recovery_callback(MappingValue& mv);
+
+    mapping* get_mapping_handle() {
+        return m_map;
+    }
+
+    uint64_t get_last_lba() {
+        assert(m_sb->size != 0);
+        // lba starts from 0, then 1, 2, ... 
+        if (m_sb->size % HomeStoreConfig::phys_page_size == 0)
+            return m_sb->size / HomeStoreConfig::phys_page_size - 1;
+        else 
+            return m_sb->size / HomeStoreConfig::phys_page_size;
+    }
+
     char *get_name();
     uint64_t get_page_size();
     uint64_t get_size();
+
 
 #ifndef NDEBUG
     void enable_split_merge_crash_simulation();
 #endif
 };
+
+#define BLKSTORE_BLK_SIZE_IN_BYTES          HomeStoreConfig::phys_page_size
+#define QUERY_RANGE_IN_BYTES                (64*1024*1024ull)
+#define NUM_BLKS_PER_THREAD_TO_QUERY        (QUERY_RANGE_IN_BYTES/BLKSTORE_BLK_SIZE_IN_BYTES)
+
+class BlkAllocBitmapBuilder {
+    typedef std::function< void (MappingValue& mv) > blk_recovery_callback;
+    typedef std::function< void (bool success) > comp_callback;
+  private:
+    homestore::Volume*                      m_vol_handle;
+    blk_recovery_callback                   m_blk_recovery_cb;
+    comp_callback                           m_comp_cb;
+
+  public:
+    BlkAllocBitmapBuilder(homestore::Volume* vol, blk_recovery_callback blk_rec_cb, comp_callback comp_cb): m_vol_handle(vol), m_blk_recovery_cb(blk_rec_cb), m_comp_cb(comp_cb) { }
+    ~BlkAllocBitmapBuilder();
+
+    // async call to start the multi-threaded work.
+    void get_allocated_blks();
+
+  private:
+    // do the real work of getting all allocated blks in multi-threaded manner
+    void do_work();
+};
+
 }

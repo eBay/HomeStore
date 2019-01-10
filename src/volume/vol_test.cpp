@@ -19,6 +19,7 @@ extern "C" {
 #include "device/device.h"
 #include "device/virtual_dev.hpp"
 #include "volume.hpp"
+#include "vol_alloc_recovery.h"
 #include <condition_variable>
 #include <main/vol_interface.hpp>
 #include <boost/uuid/uuid_generators.hpp>
@@ -42,9 +43,6 @@ std::shared_ptr<homestore::Volume> vol;
 constexpr auto MAX_OUTSTANDING_IOs = 128u;
 constexpr auto MAX_THREADS = 8u;
 
-constexpr auto Ki = 1024ull;
-constexpr auto Mi = Ki * Ki;
-constexpr auto Gi = Ki * Mi;
 constexpr auto MAX_VOL_SIZE = (1 * Gi);
 
 static uint32_t buf_size;
@@ -386,6 +384,14 @@ void vol_mounted_cb(std::shared_ptr<Volume> vol, vol_state state) {
 void vol_state_change_cb(std::shared_ptr<Volume> vol, vol_state old_state, vol_state new_state) {
 }
 
+void blk_recovery_callback(MappingValue& mv) {
+    std::cout << __FUNCTION__ << " called.\n";
+}
+
+void blk_recovery_comp_callback(bool success) {
+    std::cout << __FUNCTION__ << " called.\n";
+}
+
 int main(int argc, char **argv) {
     SDS_OPTIONS_LOAD(argc, argv, logging, test_volume)
     SDS_PARSER.parse_positional("device_list");
@@ -504,6 +510,12 @@ int main(int argc, char **argv) {
     printf("total time spent %lu us\n", time_us);
     printf("total time spend per io %lu us\n", time_us / atomic_load(&write_cnt));
     printf("iops %lu\n", (atomic_load(&write_cnt) * 1000 * 1000) / time_us);
+
+    vol->print_tree();
+ 
+    BlkAllocBitmapBuilder* b = new BlkAllocBitmapBuilder(vol.get(), blk_recovery_callback, blk_recovery_comp_callback);
+    b->get_allocated_blks();
+    delete b;
 
     LOGDEBUG("Waiting for reads to finish.");
     {

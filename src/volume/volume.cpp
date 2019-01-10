@@ -87,7 +87,8 @@ Volume::Volume(vol_sb *sb) : m_sb(sb) {
     m_data_blkstore = HomeBlks::instance()->get_data_blkstore();
     m_state = m_sb->state;
     m_vol_ptr = std::shared_ptr<Volume>(this);
-    vol_scan_alloc_blks();
+    //vol_scan_alloc_blks();
+    
 }
 
 char *
@@ -110,10 +111,36 @@ Volume::attach_completion_cb(io_comp_callback &cb) {
     m_comp_cb = cb;
 }
 
+
+void 
+Volume::blk_recovery_process_completions(bool success) {
+    LOGTRACE("block recovery completed with {}", success ? "success": "failure");
+}
+
+void Volume::blk_recovery_callback(MappingValue& mv) {
+    std::vector<std::shared_ptr<MappingInterval>> offset_to_blk_id_list; 
+    // MappingValue to MappingIntervals
+    mv.get_all(offset_to_blk_id_list);
+    // for each mapping interval
+    for (auto& interval : offset_to_blk_id_list) {
+        BlkId bid = interval->m_value.m_blkid;
+        for (std::uint32_t i = bid.m_id; i <= bid.m_id + bid.m_nblks; i++) {
+            // The lower bit stands for the lower BlkID
+            // FIXME: call to blkstore to mark the block allocated;
+        }
+    }
+}
+
 void 
 Volume::vol_scan_alloc_blks() {
     /* TODO: need to add method to scan btree */
     /* This call is asynchronous */
+    BlkAllocBitmapBuilder* b = new BlkAllocBitmapBuilder(
+            this, 
+            std::bind(&Volume::blk_recovery_callback, this, std::placeholders::_1), 
+            std::bind(&Volume::blk_recovery_process_completions, this, std::placeholders::_1));
+    b->get_allocated_blks();
+    delete b;
     HomeBlks::instance()->vol_scan_cmpltd(m_vol_ptr, m_sb->state);
 }
 
@@ -364,3 +391,81 @@ void Volume::alloc_single_block_in_mem() {
     m_only_in_mem_buff->set_memvec(mvec, 0, size);
 }
 
+BlkAllocBitmapBuilder::~BlkAllocBitmapBuilder() {
+
+}
+
+//
+// Say we have t threads in pool
+// round = 0;
+// T1: Range Query [64MB*0, 64MB*1),
+// T2: Range Query [64MB*1 ~ 64MB*2),
+// ...
+// Tt: Range Query [64MB*(t-1) ~ 64MB*t]
+//
+// When T[i] finishes, it should do Range Query to :
+// [64MB*(0+round), 64MB*(1+round)];
+//
+// When last thread in previous round finishes (need a in-memory bitmap to indicate
+// whether this is the last thread completing its task in current round):
+// round++;
+//
+// Repeat until "Range Query" returns false (nothing more left to query);
+//
+void
+BlkAllocBitmapBuilder::do_work() {
+    mapping* mp = m_vol_handle->get_mapping_handle();
+    MappingBtreeDeclType* bt = mp->get_bt_handle();
+
+    uint64_t max_lba = m_vol_handle->get_last_lba() + 1; 
+
+    uint64_t start_lba = 0, end_lba = 0;
+
+    std::vector<ThreadPool::TaskFuture<void>>   v;
+    
+    while (end_lba < max_lba) {
+        // if high watermark is hit, wait for a while so that we do not consuming too 
+        // much memory pushing new tasks. This is helpful when volume size is extreamly large.
+        if (get_thread_pool().high_watermark()) {
+            std::this_thread::yield();
+            continue;
+        }
+
+        start_lba = end_lba;
+        end_lba = std::min((unsigned long long)max_lba, end_lba + NUM_BLKS_PER_THREAD_TO_QUERY);
+
+        MappingKey start_key(start_lba), end_key(end_lba);
+        auto search_range = BtreeSearchRange(start_key, true, end_key, false);
+        v.push_back(submit_job([=]() {
+            BtreeQueryRequest    qreq(search_range);
+            std::vector<std::pair<MappingKey, MappingValue>>   values;
+            bool has_more = false;
+            do {
+                has_more = bt->query(qreq, values);
+                // for each Mapping Value 
+                for (auto& v : values) {
+                    // callback to caller with this MappingValue
+                    m_blk_recovery_cb(v.second);
+                }
+                values.clear();
+            } while (has_more);
+        } ));
+    }
+
+    for (auto& x : v) {
+        x.get();
+    }
+
+    // return completed with success to the caller 
+    m_comp_cb(true);
+}
+
+void BlkAllocBitmapBuilder::get_allocated_blks() {
+    std::vector<ThreadPool::TaskFuture<void>>   task_result;
+    task_result.push_back(submit_job([=](){
+                do_work();
+                }));
+
+    // if needed, we can return task_result[0] to caller, which for now seems not necessary;
+    return;
+}

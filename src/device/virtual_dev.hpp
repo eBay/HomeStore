@@ -166,14 +166,13 @@ public:
 
         // Now its time to allocate chunks as needed
         assert(nmirror < pdev_list.size()); // Mirrors should be at least one less than device list.
-        uint32_t nchunks;
 
         if (is_stripe) {
             m_chunk_size = ((size - 1) / pdev_list.size()) + 1;
-            nchunks = (uint32_t)pdev_list.size();
+            m_num_chunks = (uint32_t)pdev_list.size();
         } else {
             m_chunk_size = size;
-            nchunks = 1;
+            m_num_chunks = 1;
         }
 
         if (m_chunk_size % MIN_CHUNK_SIZE) {
@@ -182,10 +181,10 @@ public:
         }
 
         /* make size multiple of chunk size */
-        size = m_chunk_size * nchunks;
+        size = m_chunk_size * m_num_chunks;
 
         // Create a new vdev in persistent area and get the block of it
-        m_vb = mgr->alloc_vdev(context_size, nmirror, page_size, nchunks, blob, size);
+        m_vb = mgr->alloc_vdev(context_size, nmirror, page_size, m_num_chunks, blob, size);
         
         // Prepare primary chunks in a physical device for future inserts.
         m_primary_pdev_chunks_list.reserve(pdev_list.size());
@@ -197,7 +196,7 @@ public:
             m_primary_pdev_chunks_list.push_back(mp);
         }
 
-        for (auto i : boost::irange<uint32_t>(0, nchunks)) {
+        for (auto i : boost::irange<uint32_t>(0, m_num_chunks)) {
             std::shared_ptr< BlkAllocator > ba = create_allocator(m_chunk_size, true);
             auto pdev_ind = i % pdev_list.size();
 
@@ -585,6 +584,14 @@ public:
     auto to_string() {
        return std::string();
     }
+    
+    uint64_t get_num_chunks() const {
+        return m_num_chunks;
+    }
+    
+    uint64_t get_chunk_size() const {
+        return m_chunk_size;
+   }
 
 private:
     /* Adds a primary chunk to the chunk list in pdev */
@@ -712,10 +719,6 @@ private:
 
     uint32_t get_page_size() const {
         return m_vb->page_size;
-    }
-
-    uint64_t get_chunk_size() const {
-        return m_chunk_size;
     }
 
     uint32_t get_nmirrors() const {
