@@ -27,7 +27,7 @@ HomeBlks::HomeBlks(init_params &cfg) : m_cfg(cfg), m_cache(nullptr), m_rdy(false
    HomeStoreConfig::phys_page_size = m_cfg.physical_page_size;
    HomeStoreConfig::align_size = m_cfg.disk_align_size;
    HomeStoreConfig::atomic_phys_page_size = m_cfg.atomic_page_size;
-   /* If these parameters changes then we need to take care upgrade/revert in device manager */
+   /* If these parameters changes then we need to take care of upgrade/revert in device manager */
    HomeStoreConfig::max_chunks = MAX_CHUNKS;
    HomeStoreConfig::max_vdevs = MAX_VDEVS;
    HomeStoreConfig::max_pdevs = MAX_PDEVS;
@@ -39,6 +39,8 @@ HomeBlks::HomeBlks(init_params &cfg) : m_cfg(cfg), m_cache(nullptr), m_rdy(false
 
    assert(m_cfg.atomic_page_size >= m_cfg.min_virtual_page_size);
    assert(cfg.max_cap/cfg.devices.size() > MIN_DISK_CAP_SUPPORTED);
+   assert(cfg.max_cap < MAX_SUPPORTED_CAP);
+
    m_out_params.max_io_size = VOL_MAX_IO_SIZE;
    int ret = posix_memalign((void **) &m_cfg_sb, HomeStoreConfig::align_size, VOL_SB_SIZE); 
    assert(!ret);
@@ -48,7 +50,7 @@ HomeBlks::HomeBlks(init_params &cfg) : m_cfg(cfg), m_cache(nullptr), m_rdy(false
    
    /* create device manager */
    m_dev_mgr = new homestore::DeviceManager(new_vdev_found, sizeof(sb_blkstore_blob), cfg.iomgr,
-                                             virtual_dev_process_completions, m_cfg.is_file);
+                                             virtual_dev_process_completions, m_cfg.is_file, m_cfg.system_uuid);
 
    /* start thread */
    m_thread_id = std::thread(&HomeBlks::init_thread, this);
@@ -343,10 +345,11 @@ HomeBlks::scan_volumes() {
                 vol_sb_write(sb, false);
             }
 
-            if (!m_cfg.vol_found_cb(sb->uuid)) {
+            auto vol_uuid = sb->uuid;
+            if (!m_cfg.vol_found_cb(vol_uuid)) {
                 LOGINFO("vol delete after recovery {}", sb->vol_name);
                 /* don't need to mount this volume. Delete this volume. Its block will be recaimed automatically */
-                LOGINFO("volume is deleted {}", to_string(sb->uuid));
+                LOGINFO("volume is deleted {}", boost::uuids::to_string(vol_uuid));
                 if (m_last_vol_sb) {
                     m_last_vol_sb->next_blkid = sb->next_blkid;
                     /* write vdev superblocks */
@@ -367,7 +370,7 @@ HomeBlks::scan_volumes() {
                 num_vol++;
                 decltype(m_volume_map)::iterator it;
                 bool happened{false};
-                std::tie(it, happened) = m_volume_map.emplace(std::make_pair(sb->uuid, nullptr));
+                std::tie(it, happened) = m_volume_map.emplace(std::make_pair(vol_uuid, nullptr));
                 assert(happened);
                 m_scan_cnt++;
                 Volume *new_vol;

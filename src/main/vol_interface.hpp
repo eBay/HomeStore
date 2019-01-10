@@ -98,6 +98,7 @@ struct init_params {
     vol_found_callback vol_found_cb;
     vol_mounted_callback vol_mounted_cb;
     vol_state_change_callback vol_state_change_cb;
+    boost::uuids::uuid system_uuid;
 };
 
 class VolInterface {

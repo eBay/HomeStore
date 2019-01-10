@@ -23,8 +23,6 @@ using namespace homestore;
 
 #define MAX_DEVICES 2
 std::string names[4] = {"file1", "file2", "file3", "file4"};
-std::string uuid[4] = {"01970496-0262-11e9-8eb2-f2801f1b9fd1", "01970496-0262-11e9-8eb2-f2801f1b9fd1", 
-                  "5fe17890-030e-11e9-8eb2-f2801f1b9fd1", "5fe17b92-030e-11e9-8eb2-f2801f1b9fd1"};
 constexpr uint64_t max_vols = 50;
 uint64_t run_time;
 uint64_t num_threads;
@@ -101,13 +99,12 @@ protected:
     std::atomic<int> rdy_state;
 
 public:
-    IOTest() {
+    IOTest():device_info(0) {
         vol_cnt = 0;
         cur_vol = 0;
         max_vol_size = 0;
         max_capacity = 0;
         verify_done = false;
-
     }
 
     void remove_files() {
@@ -129,9 +126,7 @@ public:
             /* create files */
         for (uint32_t i = 0; i < MAX_DEVICES; i++) {
             dev_info temp_info;
-            boost::uuids::string_generator gen;
             temp_info.dev_names = names[i];
-            temp_info.uuid = gen(uuid[i]);
             device_info.push_back(temp_info);
             if (init) {
                 std::ofstream ofs(names[i].c_str(), std::ios::binary | std::ios::out);
@@ -161,6 +156,8 @@ public:
         params.vol_state_change_cb = std::bind(&IOTest::vol_state_change_cb, this, std::placeholders::_1, 
                                                 std::placeholders::_2, std::placeholders::_3);
         params.vol_found_cb = std::bind(&IOTest::vol_found_cb, this, std::placeholders::_1);
+        boost::uuids::string_generator gen;
+        params.system_uuid = gen("01970496-0262-11e9-8eb2-f2801f1b9fd1");
         VolInterface::init(params);
     }
     
@@ -541,6 +538,13 @@ TEST_F(IOTest, normal_burst_random_io_test) {
 /************ Below tests init the systems. Exit with abort. ****************/ 
 
 TEST_F(IOTest, abort_random_io_test) {
+    /* fork a new process */
+    this->init = true;
+    /* child process */
+    this->start_homestore();
+    this->wait_cmpl();
+    LOGINFO("write_cnt {}", write_cnt);
+    LOGINFO("read_cnt {}", read_cnt);
 }
 
 /************ Below tests recover the systems. Exit with clean shutdown. *********/ 

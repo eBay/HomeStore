@@ -6,6 +6,8 @@
 #include <homeds/btree/btree.hpp>
 #include <blkstore/blkstore.hpp>
 #include <homeds/btree/ssd_btree.hpp>
+#include <boost/uuid/uuid_generators.hpp>
+#include <boost/uuid/uuid_io.hpp>
 
 namespace homestore {
 

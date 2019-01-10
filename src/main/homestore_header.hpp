@@ -15,7 +15,6 @@ namespace homestore {
 
 struct dev_info {
     std::string dev_names;
-    boost::uuids::uuid uuid;
 };
 }
 

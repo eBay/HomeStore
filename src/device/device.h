@@ -23,6 +23,7 @@
 #include "homeds/array/sparse_vector.hpp"
 #include "iomgr/iomgr.hpp"
 #include "endpoint/drive_endpoint.hpp"
+#include <boost/uuid/uuid_generators.hpp>
 
 namespace homestore {
 
@@ -53,7 +54,6 @@ struct pdevs_block {
 } __attribute((packed));
 
 struct pdev_info_block {
-    boost::uuids::uuid uuid;                 // UUID for the physical device
     uint32_t           dev_num;              // Device ID for this store instance.
     uint32_t           first_chunk_id;       // First chunk id for this physical device
     uint64_t           dev_offset;           // Start offset of the device in global offset
@@ -118,6 +118,7 @@ struct super_block {
     int                 cur_indx;
     pdev_info_block     this_dev_info;        // Info about this device itself
     chunk_info_block    dm_chunk[2]; // chunk info blocks
+    boost::uuids::uuid   system_uuid;
 } __attribute((packed));
 #define SUPERBLOCK_SIZE (HomeStoreConfig::atomic_phys_page_size)
 
@@ -278,9 +279,9 @@ class PhysicalDev {
     friend class DeviceManager;
 public:
 
-    PhysicalDev(DeviceManager *mgr, std::string devname, int const oflags, std::shared_ptr<iomgr::ioMgr> iomgr,
-                homeio::comp_callback cb, boost::uuids::uuid uuid, uint32_t dev_num, 
-                uint64_t dev_offset, uint32_t is_file, bool is_init, uint64_t dm_info_size, bool &is_inited);
+    PhysicalDev(DeviceManager *mgr, std::string &devname, int const oflags, std::shared_ptr<iomgr::ioMgr> iomgr,
+                homeio::comp_callback &cb, boost::uuids::uuid &uuid, uint32_t dev_num, 
+                uint64_t dev_offset, uint32_t is_file, bool is_init, uint64_t dm_info_size, bool *is_inited);
     ~PhysicalDev() = default;
 
     void update(uint32_t dev_num, uint64_t dev_offset, uint32_t first_chunk_id);
@@ -297,10 +298,6 @@ public:
 
     uint64_t get_size() const {
         return m_devsize;
-    }
-
-    boost::uuids::uuid get_uuid() const {
-        return m_info_blk.uuid;
     }
 
     void set_dev_offset(uint64_t offset) {
@@ -381,11 +378,12 @@ private:
     uint64_t           m_devsize;
     static homeio::DriveEndPoint *ep; // one instance for all physical devices
     homeio::comp_callback comp_cb;
-    std::shared_ptr<iomgr::ioMgr> iomgr;
+    std::shared_ptr<iomgr::ioMgr> m_iomgr;
     struct pdev_info_block m_info_blk;
     int m_cur_indx;
     PhysicalDevChunk *m_dm_chunk[2];
     bool m_superblock_valid;
+    boost::uuids::uuid m_system_uuid;
 };
 
 class AbstractVirtualDev {
@@ -402,7 +400,7 @@ class DeviceManager {
 
 public:
     DeviceManager(NewVDevCallback vcb, uint32_t const vdev_metadata_size, std::shared_ptr<iomgr::ioMgr> iomgr, 
-                  homeio::comp_callback comp_cb, bool is_file);
+                  homeio::comp_callback comp_cb, bool is_file, boost::uuids::uuid system_uuid);
 
     virtual ~DeviceManager() = default;
 
@@ -470,7 +468,7 @@ private:
     int          m_open_flags;
     homeio::comp_callback comp_cb;
     NewVDevCallback  m_new_vdev_cb;
-    std::shared_ptr<iomgr::ioMgr> iomgr;
+    std::shared_ptr<iomgr::ioMgr> m_iomgr;
     std::atomic<uint64_t> m_gen_cnt;
     bool m_is_file;
 
@@ -497,6 +495,7 @@ private:
     uint32_t m_pdev_id;
     bool m_scan_cmpltd;
     uint64_t m_dm_info_size;
+    boost::uuids::uuid m_system_uuid;
 };
 
 } // namespace homestore

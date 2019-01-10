@@ -157,8 +157,8 @@ homestore::Volume::process_metadata_completions(boost::intrusive_ptr<volume_req>
    
     for (std::shared_ptr<Free_Blk_Entry> ptr : req->blkids_to_free_due_to_overwrite) {
         LOGTRACE("Blocks to free {}", ptr.get()->to_string());
-        m_data_blkstore->free_blk(ptr->blkId, BLOCK_SIZE * ptr->blkId_offset, 
-                            BLOCK_SIZE * ptr->nblks_to_free);
+        m_data_blkstore->free_blk(ptr->blkId, get_page_size() * ptr->blkId_offset, 
+                            get_page_size() * ptr->nblks_to_free);
     }
    
     req->done = true;

@@ -73,14 +73,14 @@ PhysicalDev::attach_superblock_chunk(PhysicalDevChunk *chunk) {
 }
 
 PhysicalDev::PhysicalDev(DeviceManager *mgr,
-                         std::string devname,
+                         std::string &devname,
                          int const oflags,
                          std::shared_ptr<iomgr::ioMgr> iomgr,
-                         homeio::comp_callback cb, boost::uuids::uuid uuid, 
+                         homeio::comp_callback &cb, boost::uuids::uuid &system_uuid, 
                          uint32_t dev_num, uint64_t dev_offset, uint32_t is_file, bool is_init, uint64_t dm_info_size, 
-                         bool &is_inited) :
-        m_mgr(mgr), m_devname(devname), comp_cb(cb), iomgr(iomgr) {
-
+                         bool *is_inited) :
+        m_mgr(mgr), m_devname(devname), comp_cb(cb), m_iomgr(iomgr) {
+ 
     struct stat stat_buf;
     stat(devname.c_str(), &stat_buf);
     m_devsize = (uint64_t) stat_buf.st_size;
@@ -94,7 +94,6 @@ PhysicalDev::PhysicalDev(DeviceManager *mgr,
     	ep = new DriveEndPoint(iomgr, cb); 
     }
     
-    m_info_blk.uuid = uuid;
     m_info_blk.dev_num = dev_num;
     m_info_blk.dev_offset = dev_offset;
     m_info_blk.first_chunk_id = INVALID_CHUNK_ID;
@@ -104,6 +103,7 @@ PhysicalDev::PhysicalDev(DeviceManager *mgr,
     m_devfd = ep->open_dev(devname.c_str(), oflags);
     if (m_devfd == -1) {
         throw std::system_error(errno, std::system_category(), "error while opening the device");
+        return;
     }
 
     if (is_file) {
@@ -119,6 +119,7 @@ PhysicalDev::PhysicalDev(DeviceManager *mgr,
             throw std::system_error(errno, std::system_category(), "error while getting size of the device");
         }
     }
+    m_system_uuid = system_uuid;
     assert(m_devsize > 0);
     m_dm_chunk[0] = m_dm_chunk[1] = nullptr;
     if (is_init) {
@@ -139,7 +140,7 @@ PhysicalDev::PhysicalDev(DeviceManager *mgr,
          * written.
          */
     } else {
-        is_inited = load_super_block();
+        *is_inited = load_super_block();
         /* If it is different then it mean it require upgrade/revert handling */
         assert(m_super_blk->dm_chunk[0].chunk_size == dm_info_size);
         assert(m_super_blk->dm_chunk[1].chunk_size == dm_info_size);
@@ -157,10 +158,12 @@ bool PhysicalDev::load_super_block() {
     if (!is_omstore_dev) {
         return false;
     }
-    if (m_super_blk->this_dev_info.uuid != m_info_blk.uuid) {
-        assert(0);
-        throw std::system_error(errno, std::system_category(), "uuid mismatch");
+   
+    
+    if (m_super_blk->system_uuid != m_system_uuid) {
+        return false;
     }
+
     m_info_blk.dev_num = m_super_blk->this_dev_info.dev_num;
     m_info_blk.dev_offset = m_super_blk->this_dev_info.dev_offset;
     m_info_blk.first_chunk_id = m_super_blk->this_dev_info.first_chunk_id;
@@ -195,8 +198,8 @@ void PhysicalDev::write_super_block(uint64_t gen_cnt) {
     
     assert(m_info_blk.dev_num != INVALID_DEV_ID);
     assert(m_info_blk.first_chunk_id != INVALID_CHUNK_ID);
-    
-    m_super_blk->this_dev_info.uuid = m_info_blk.uuid;
+
+    m_super_blk->system_uuid = m_system_uuid;
     m_super_blk->this_dev_info.dev_num = m_info_blk.dev_num;
     m_super_blk->this_dev_info.first_chunk_id = m_info_blk.first_chunk_id;
     m_super_blk->this_dev_info.dev_offset = m_info_blk.dev_offset;
@@ -377,7 +380,6 @@ std::string PhysicalDev::to_string() {
     ss << "\tMagic = " << m_super_blk->magic << "\n";
     ss << "\tProduct Name = " << m_super_blk->product_name << "\n";
     ss << "\tHeader version = " << m_super_blk->version << "\n";
-    ss << "\tUUID = " << m_info_blk.uuid << "\n";
     ss << "\tPdev Id = " << m_info_blk.dev_num << "\n";
     ss << "\tPdev Offset = " << m_info_blk.dev_offset << "\n";
     ss << "\tFirst chunk id = " << m_info_blk.first_chunk_id << "\n";
