@@ -227,15 +227,15 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
 
         // Wait for cache to refill and then retry original request
         if (attempt > MAX_BLK_ALLOC_ATTEMPT) {
-            LOGERRORMOD(varsize_blk_alloc, "Exceeding max retries {} to allocate. Failing the alloc", 
+            LOGTRACEMOD(varsize_blk_alloc, "Exceeding max retries {} to allocate. Failing the alloc", 
                         MAX_BLK_ALLOC_ATTEMPT);
             for (auto i = 0U; i < m_slab_entries.size(); i++) {
-                LOGERRORMOD(varsize_blk_alloc, "Capacity of slab {} = {}", i, 
+                LOGTRACEMOD(varsize_blk_alloc, "Capacity of slab {} = {}", i, 
                             m_slab_entries[i]._a.load(std::memory_order_acq_rel));
             }
             break;
         } else {
-            LOGWARNMOD(varsize_blk_alloc, 
+            LOGTRACEMOD(varsize_blk_alloc, 
                         "Attempt #{} to allocate nblks={} temperature={} failed. Waiting for cache to be filled",
                     attempt, (uint32_t)nblks, hints.desired_temp);
         }

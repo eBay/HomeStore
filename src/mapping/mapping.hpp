@@ -393,6 +393,10 @@ public:
                     std::placeholders::_1, std::placeholders::_2));
     }
 
+    void recovery_cmpltd() {
+        m_bt->recovery_cmpltd();
+    }
+
     btree_super_block get_btree_sb() {
         return(m_bt->get_btree_sb());
     }

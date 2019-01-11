@@ -32,6 +32,7 @@ HomeBlks::HomeBlks(init_params &cfg) : m_cfg(cfg), m_cache(nullptr), m_rdy(false
    HomeStoreConfig::max_vdevs = MAX_VDEVS;
    HomeStoreConfig::max_pdevs = MAX_PDEVS;
    HomeStoreConfig::min_page_size = m_cfg.min_virtual_page_size;
+   HomeStoreConfig::open_flag = m_cfg.flag;
    m_data_pagesz = m_cfg.min_virtual_page_size;
 
    assert(VOL_SB_SIZE >= sizeof(vol_sb));
