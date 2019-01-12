@@ -141,6 +141,7 @@ void VarsizeBlkAllocator::allocator_state_machine() {
 BlkAllocStatus 
 VarsizeBlkAllocator::alloc(BlkId &in_bid) {
     m_alloced_bm->set_bits(in_bid.get_id(), in_bid.get_nblks());
+    m_alloc_bm->set_bits(in_bid.get_id(), in_bid.get_nblks());
     return BLK_ALLOC_SUCCESS;
 }
 

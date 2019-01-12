@@ -438,9 +438,9 @@ BlkAllocBitmapBuilder::do_work() {
         start_lba = end_lba;
         end_lba = std::min((unsigned long long)max_lba, end_lba + NUM_BLKS_PER_THREAD_TO_QUERY);
 
-        MappingKey start_key(start_lba), end_key(end_lba);
-        auto search_range = BtreeSearchRange(start_key, true, end_key, false);
-        v.push_back(submit_job([=]() {
+        v.push_back(submit_job([this, start_lba, end_lba, bt]() {
+            MappingKey start_key(start_lba), end_key(end_lba);
+            auto search_range = BtreeSearchRange(start_key, true, end_key, false);
             BtreeQueryRequest    qreq(search_range);
             std::vector<std::pair<MappingKey, MappingValue>>   values;
             bool has_more = false;

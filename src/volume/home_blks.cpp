@@ -23,6 +23,7 @@ HomeBlks::init(init_params &cfg) {
 HomeBlks::HomeBlks(init_params &cfg) : m_cfg(cfg), m_cache(nullptr), m_rdy(false), m_last_vol_sb(nullptr), 
                                 m_vdev_failed(false), m_size_avail(0), m_scan_cnt(0), m_init_failed(false) {
 
+   _instance = this;
    /* set the homestore config parameters */
    HomeStoreConfig::phys_page_size = m_cfg.physical_page_size;
    HomeStoreConfig::align_size = m_cfg.disk_align_size;
@@ -558,9 +559,11 @@ HomeBlks::vol_scan_cmpltd(std::shared_ptr<Volume> vol, vol_state state) {
     int cnt = m_scan_cnt.fetch_sub(1, std::memory_order_relaxed);
     if (cnt == 1) {
         if (m_init_failed) {
+            LOGERROR("init failed");
             auto error = std::make_error_condition(std::errc::io_error);
             m_cfg.init_done_cb(error, m_out_params);
         } else {
+            LOGINFO("scan completed");
             m_rdy = true;
             m_dev_mgr->inited();
             m_cfg.init_done_cb(no_error, m_out_params);

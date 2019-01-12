@@ -50,7 +50,6 @@ public:
 
         assert((size % MIN_CHUNK_SIZE) == 0);
         vconfig->set_total_blks(((uint64_t)size)/vpage_size);
-        LOGINFO("added number of blocks {}", vconfig->get_total_blks());
 
         vconfig->set_blks_per_temp_group(100); // TODO: Recalculate based on size set aside for temperature entries
         vconfig->set_max_cache_blks(vconfig->get_total_blks()/4); // Cache quarter of the blocks

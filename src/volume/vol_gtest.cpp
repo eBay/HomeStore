@@ -97,6 +97,7 @@ protected:
     uint64_t max_vol_size;
     bool verify_done;
     std::atomic<int> rdy_state;
+    bool is_abort;
 
 public:
     IOTest():device_info(0) {
@@ -226,7 +227,8 @@ public:
             startTime = Clock::now();
         } else {
             assert(vol_cnt == max_vols);
-            verify_done = false;
+           // verify_done = false;
+            verify_done = true;
         }
         auto ret = posix_memalign((void **) &init_buf, 4096, max_io_size);
         assert(!ret);
@@ -477,6 +479,9 @@ public:
         }
         
         if (verify_done && get_elapsed_time(startTime) > run_time) {
+            if (is_abort) {
+                abort();
+            }
             std::unique_lock< std::mutex > lk(m_mutex);
             rdy_state = 0;
             if (outstanding_ios == 0) {
@@ -541,6 +546,7 @@ TEST_F(IOTest, normal_burst_random_io_test) {
 TEST_F(IOTest, abort_random_io_test) {
     /* fork a new process */
     this->init = true;
+    this->is_abort = true;
     /* child process */
     this->start_homestore();
     this->wait_cmpl();

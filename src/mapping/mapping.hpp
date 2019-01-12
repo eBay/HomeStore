@@ -217,8 +217,15 @@ public:
         dyna_arr = nullptr;
     };
 
-    explicit MappingValue(const MappingValue& other) = default;
-    MappingValue& operator=(const MappingValue& other) = default;
+    MappingValue(const MappingValue& other) {
+        auto b = other.get_blob();
+        dyna_arr = new Interval_Array_Impl((void *) b.bytes, b.size, MAX_NO_OF_VALUE_ENTRIES);
+    }
+
+    void operator=(const MappingValue& other) {
+        auto b = other.get_blob();
+        dyna_arr = new Interval_Array_Impl((void *) b.bytes, b.size, MAX_NO_OF_VALUE_ENTRIES);
+    }
 
     virtual homeds::blob get_blob() const override {
         homeds::blob b;
