@@ -115,20 +115,22 @@ public:
         int i=0;
         std::map<int, bool> mapOfWords;
         //validate if keys are in ascending orde
+        K prevKey;
         while(i<(int)this->get_total_entries()) {
-            K keyPrev;
-            get_nth_key(i,&keyPrev,false);
-            uint64_t * kp = (uint64_t*)keyPrev.get_blob().bytes;
-            if(*kp>100000) {//TODO - remove this condition eventually
-                LOGDEBUG("Invalid entry : {} -> {} ", *kp, this->to_string());
+            K key;
+            get_nth_key(i,&key,false);
+            uint64_t kp = *(uint64_t*)key.get_blob().bytes;
+            if(i>0 && prevKey.compare(&key)>=0){
+                LOGDEBUG("non sorted entry : {} -> {} ", kp, this->to_string());
                 assert(0);
             }
             std::pair<std::map<int, bool>::iterator, bool > result;
-            result = mapOfWords.insert(std::make_pair(*kp,true));
+            result = mapOfWords.insert(std::make_pair(kp,true));
             if(result.second==false) {
-                LOGDEBUG("Duplicate entry : {} -> {} ", *kp, this->to_string());
+                LOGDEBUG("Duplicate entry : {} -> {} ", kp, this->to_string());
                 assert(0);
             }
+            prevKey = key;
             i++;
         }
         
@@ -280,26 +282,47 @@ public:
     }
 
     bool is_split_needed(const BtreeConfig &cfg, const BtreeKey &key, const BtreeValue &val,
-                         int *out_ind_hint) const  {
-        V curval;
+                         int *out_ind_hint, PutType &putType, BtreeUpdateRequest<K,V> *ureq = nullptr) const  {
         uint32_t size_needed=0;
+        if(!this->is_leaf())// if internal node, size is atmost one additional entry, size of K/V
+            size_needed = key.get_blob_size() + val.get_blob_size() + get_record_size();
+        else {
+            //leaf node,
+            if (ureq) {
+                //TODO - determine size needed for non-callback based range updates in future
+                assert(ureq->callback() != nullptr);
+                int start_ind = 0, end_ind = 0;
+                uint32_t new_size = 0, existing_size = 0;
+                std::vector<std::pair<K, V>> match, replace_kv;
+                const_cast<VariableNode *>(this)->get_all(ureq->get_cb_param()->get_input_range(), 
+                        UINT32_MAX, start_ind, end_ind, &match);
+                for (auto &pair : match) 
+                    existing_size += pair.first.get_blob_size() + pair.second.get_blob_size() + get_record_size();
 
+                ureq->get_cb_param()->set_state_modifiable(false);
+                ureq->callback()(match, replace_kv,ureq->get_cb_param());
+                ureq->get_cb_param()->set_state_modifiable(true);
+                
+                for (auto &pair : replace_kv) 
+                    new_size += pair.first.get_blob_size() + pair.second.get_blob_size() + get_record_size();
+                if (new_size > existing_size)
+                    size_needed = new_size - existing_size;
+            } else {
         // NOTE : size_needed is just an guess here. Actual implementation of Mapping key/value can have 
         // specific logic which determines of size changes on insert or update.
         auto result = this->find(key, nullptr, nullptr/*amdesai - Commented - &curval*/);
-        if (!result.found) {
-            // We need to insert, this newly. Find out if we have space for value.
+                if (!result.found) // We need to insert, this newly. Find out if we have space for value.
             size_needed = key.get_blob_size() + val.get_blob_size() + get_record_size();
-        } else if(this->is_leaf()) {
+                else if (this->is_leaf()) {
             //for internal nodes, size does not change on updates
             // Its an update, see how much additioanl space needed
             V existingVal;
             get(result.end_of_search_index, &existingVal, false);
-            size_needed = existingVal.estimate_size_after_append(val) - get_nth_value_len(result.end_of_search_index);
+                    size_needed =
+                            existingVal.estimate_size_after_append(val) - get_nth_value_len(result.end_of_search_index);
+                }
         }
-
-        // TODO: This is the place to check if the free space arena does not have enough space and if available space
-        // is less than certain percentage, its better not to compact and just respond to do split.
+        }
         uint32_t alreadyFilledSize = cfg.get_node_area_size() - get_available_size(cfg);
         return alreadyFilledSize + size_needed >= cfg.get_ideal_fill_size();
     }

@@ -251,7 +251,7 @@ public:
         m_val = *((uint32_t *)b.bytes);
     }
 
-    void append_blob(const BtreeValue &new_val, std::shared_ptr<BtreeValue> &existing_val) override {
+    void append_blob(const BtreeValue &new_val,BtreeValue &existing_val) override {
         m_val = ((const TestSimpleValue &)new_val).m_val;
     }
 

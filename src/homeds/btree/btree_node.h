@@ -45,14 +45,15 @@ public:
                                         uint32_t size);
     
     uint32_t get_available_size(const BtreeConfig &cfg) const;
-    bool is_split_needed(const BtreeConfig &cfg, const BtreeKey &key, const BtreeValue &value, int *out_ind_hint) const;
+    bool is_split_needed(const BtreeConfig &cfg, const BtreeKey &key, const BtreeValue &value, int *out_ind_hint,
+                         PutType &putType, BtreeUpdateRequest<K,V> *bur = nullptr ) const;
 
     uint32_t get_nth_obj_size(int ind) const;
     void get_nth_key(int ind, BtreeKey *outkey, bool copykey) const;
     void get_nth_value(int ind, BtreeValue *outval, bool copy) const;
     int compare_nth_key(const BtreeKey &cmp_key, int ind) const;
     int compare_nth_key_range(const BtreeSearchRange &range, int ind) const;
-
+    void get_edge_value(BtreeValue *outval) const;
 private:
     /////////////// Other Internal Methods /////////////
     void set_nth_obj(int ind, const BtreeKey &k, const BtreeValue &v);
@@ -126,11 +127,12 @@ public:
 
     // All CRUD on a node
     // Base methods provided by PhysicalNodes
-    bool put(const BtreeKey &key, const BtreeValue &val, PutType put_type, std::shared_ptr<BtreeValue> &existing_val);
+    bool put(const BtreeKey &key, const BtreeValue &val, PutType put_type, BtreeValue &existing_val);
     auto find(const BtreeKey& find_key, BtreeValue *outval, bool copy_val = true) const;
     auto find(const BtreeSearchRange &range, BtreeKey *outkey, BtreeValue *outval, bool copy_key = true, bool copy_val = true) const;
-    uint32_t get_all(const BtreeSearchRange& range, uint32_t max_count, std::vector<std::pair<K, V>> &out_values,
-                     const match_item_cb_t& match_cb = nullptr) const;
+    uint32_t get_all(const BtreeSearchRange &range, uint32_t max_count,
+                    int &start_ind, int &end_ind,
+                    std::vector<std::pair<K, V>> *out_values = nullptr);
     bool remove_one(const BtreeSearchRange &range, BtreeKey *outkey, BtreeValue *outval);
 
     // Methods the variant nodes need to override from
@@ -170,7 +172,8 @@ public:
     void set_gen(uint64_t g);
 
     ///////////// Move and Delete related operations on a node //////////////
-    bool is_split_needed(const BtreeConfig &cfg, const BtreeKey &k, const BtreeValue &v, int *out_ind_hint) const;
+    bool is_split_needed(const BtreeConfig &cfg, const BtreeKey &k, const BtreeValue &v, int *out_ind_hint,
+                         PutType &putType, BtreeUpdateRequest<K,V> *bur = nullptr) const;
     bool is_merge_needed(const BtreeConfig &cfg) const;
 
     /* Following methods need to make best effort to move from other node upto provided entries or size. It should
@@ -209,5 +212,6 @@ protected:
     // Compares the nth key (n=ind) with given key (cmp_key) and returns -1, 0, 1 if cmp_key <=> nth_key respectively
     int compare_nth_key(const BtreeKey &cmp_key, int ind) const;
     int compare_nth_key_range(const BtreeSearchRange &range, int ind) const;
+    void get_edge_value(BtreeValue *outval) const;
 };
 }}

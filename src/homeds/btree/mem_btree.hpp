@@ -99,7 +99,8 @@ public:
 
     static void write_node(MemBtreeStore *store, boost::intrusive_ptr<MemBtreeNode> bn,
                     std::deque<boost::intrusive_ptr<empty_writeback_req>> &dependent_req_q,
-                    boost::intrusive_ptr<empty_writeback_req> cookie, bool is_sync) {
+                    boost::intrusive_ptr<empty_writeback_req> cookie, bool is_sync,
+            boost::intrusive_ptr<btree_multinode_req> op = nullptr) {
     }
 
     static void free_node(MemBtreeStore *store, boost::intrusive_ptr<MemBtreeNode> bn,

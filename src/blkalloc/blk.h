@@ -159,8 +159,12 @@ struct BlkId {
 
     std::string to_string() const {
         std::stringstream ss;
-        ss << "id=" << m_id << " nblks=" << (uint32_t)m_nblks << " chunk_num=" << (uint32_t)m_chunk_num;
+        ss << "Bid=" << m_id << " nblks=" << (uint32_t)m_nblks << " chunk=" << (uint32_t)m_chunk_num;
         return ss.str();
+    }
+    friend std::ostream &operator<<(std::ostream &os, const BlkId &ve) {
+        os << ve.to_string();
+        return os;
     }
 }__attribute__ ((__packed__)) ;
 

@@ -225,15 +225,12 @@ public:
     }
     
     bool is_split_needed(const BtreeConfig &cfg, const BtreeKey &key, const BtreeValue &value,
-                         int *out_ind_hint) const {
-        auto result = this->find(BtreeSearchRange(key), nullptr, nullptr);
-        *out_ind_hint = result.end_of_search_index;
-        if (this->is_leaf() && result.found) {
-	    /* we don't allow duplicate entries for leaf node */
-            return false;
-        }
-
-	 /* we always need to make that there is space in the node if it is not a leaf node */
+                         int *out_ind_hint, PutType &putType, BtreeUpdateRequest<K,V> *bur = nullptr) const {
+        // TODO - its better to split early before no space left, make use of cfg parameters here
+        // there is always atmost one entry thats added for internal nodes, even if range.
+        // for leaf nodes, append is not valid scenario. Only replace is possible which will not change count and
+        // insert will at most add one entry.
+        // TODO -for leaf nodes, if *bur has valid callback, we call it and find # of entries returned
         return (this->get_available_entries(cfg) == 0);
     }
 

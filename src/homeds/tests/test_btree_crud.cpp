@@ -264,7 +264,7 @@ public:
         m_val = *((uint32_t *)b.bytes);
     }
 
-    void append_blob(const BtreeValue &new_val, std::shared_ptr<BtreeValue> &existing_val) override {
+    void append_blob(const BtreeValue &new_val,BtreeValue &existing_val) override {
         m_val = ((const TestSimpleValue &)new_val).m_val;
     }
 
@@ -432,7 +432,7 @@ public:
     static void query_thread(BtreeCrudTest *test, uint32_t start, uint32_t count, BtreeQueryType qtype,
             uint32_t query_batch_size) {
         auto search_range = BtreeSearchRange(*test->m_entries[start], true, *test->m_entries[start+count-1], true);
-        BtreeQueryRequest qreq(search_range, qtype, query_batch_size);
+        BtreeQueryRequest<TestSimpleKey,TestSimpleValue> qreq(search_range, qtype, query_batch_size);
 
         auto result_count = 0U;
         auto cmp_ind = start;

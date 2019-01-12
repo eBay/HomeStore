@@ -55,7 +55,6 @@ static uint64_t constexpr get_mask() {
     return uint64_t(~((uint64_t)(-1)<<bits)<<lshifts);
 }
 
-
 template <int S>
 struct LeftShifts {
     constexpr LeftShifts() : values() {

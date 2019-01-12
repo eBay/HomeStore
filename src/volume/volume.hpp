@@ -20,37 +20,23 @@ namespace homestore {
 class mapping;
 enum vol_state;
 
-/* this structure is not thread safe. But as of
- * now there is no use where we can access it in
- * multiple threads.
- */
 struct Free_Blk_Entry {
-    BlkId blkId;
-    uint16_t blkId_offset;
-    uint16_t nblks_to_free;
+        BlkId m_blkId;
+        uint8_t m_blk_offset:NBLKS_BITS;
+        uint8_t m_nblks_to_free:NBLKS_BITS;
 
-    Free_Blk_Entry(const BlkId &blkId,
-            uint16_t blkId_offset,
-            int nblks_to_free) : blkId(blkId),
-    blkId_offset(
-            blkId_offset),
-    nblks_to_free(
-            nblks_to_free) {}
-
-    std::string to_string() {
-        std::stringstream ss;
-        ss << nblks_to_free << "," << blkId_offset << "--->" << blkId.to_string();
-        return ss.str();
-    }
+        Free_Blk_Entry(const BlkId &m_blkId, uint8_t m_blk_offset, uint8_t m_nblks_to_free) :
+                m_blkId(m_blkId),m_blk_offset(m_blk_offset),m_nblks_to_free(m_nblks_to_free){}
 };
 
 struct volume_req : blkstore_req<BlkBuffer> {
     uint64_t lba;
-    int nblks;
+    int nlbas;
     bool is_read;
     std::shared_ptr<Volume> vol_instance;
-
-    std::vector<std::shared_ptr<Free_Blk_Entry>> blkids_to_free_due_to_overwrite;
+    std::vector<Free_Blk_Entry> blkIds_to_free;
+    uint64_t seqId;
+    uint64_t lastCommited_seqId;
 
     /* number of times mapping table need to be updated for this req. It can
      * break the ios update in mapping btree depending on the key range.
@@ -84,7 +70,9 @@ class Volume {
     void vol_scan_alloc_blks();
     io_comp_callback m_comp_cb;
     std::shared_ptr<Volume> m_vol_ptr;
-
+#ifndef NDEBUG
+        atomic<uint64_t> seq_Id;
+#endif
  public:
     Volume(vol_params &params);
     Volume(vol_sb *sb);

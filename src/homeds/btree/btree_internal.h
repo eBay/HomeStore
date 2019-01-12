@@ -15,6 +15,20 @@
 #include "error/error.h"
 #include "main/homestore_header.hpp"
 
+//structure to track btree multinode operations on different nodes
+struct btree_multinode_req{
+    //when pending writes becomes zero and is_done is true, we can callback to upper layer
+    std::atomic<int> writes_pending;
+    std::atomic<int> m_refcount;
+    friend void intrusive_ptr_add_ref(btree_multinode_req *req) {
+        req->m_refcount.fetch_add(1, std::memory_order_acquire);
+    }
+    friend void intrusive_ptr_release(btree_multinode_req *req) {
+        if (req->m_refcount.fetch_sub(1, std::memory_order_acquire) == 1) {
+            delete(req);
+        }
+    }
+};
 struct empty_writeback_req {
     /* shouldn't contain anything */
     std::atomic<int> m_refcount;
@@ -180,7 +194,7 @@ enum PutType {
     REPLACE_IF_EXISTS_ELSE_INSERT,
 
     APPEND_ONLY_IF_EXISTS, // Update
-    APPEND_IF_EXISTS_ELSE_INSERT
+    APPEND_IF_EXISTS_ELSE_INSERT,
 };
 
 class BtreeSearchRange;
@@ -212,17 +226,19 @@ enum _MultiMatchSelector {
 
 class BtreeSearchRange {
     friend struct BtreeQueryCursor;
-    friend class  BtreeQueryRequest;
+    //friend class  BtreeQueryRequest;
 
 private:
-    const BtreeKey* m_start_key;
-    const BtreeKey* m_end_key;
+    const BtreeKey* m_start_key=nullptr;
+    const BtreeKey* m_end_key = nullptr;
 
-    bool m_start_incl;
-    bool m_end_incl;
+    bool m_start_incl=false;
+    bool m_end_incl=false;
     _MultiMatchSelector m_multi_selector;
 
 public:
+    BtreeSearchRange(){}
+    
     BtreeSearchRange(const BtreeKey& start_key) : BtreeSearchRange(start_key, true, start_key, true) {}
 
     BtreeSearchRange(const BtreeKey& start_key, const BtreeKey& end_key) :
@@ -242,6 +258,12 @@ public:
             m_end_incl(end_incl),
             m_multi_selector(option) {}
 
+    void set(const BtreeKey &start_key, bool start_incl, const BtreeKey &end_key, bool end_incl) {
+        m_start_key = &start_key;
+        m_end_key = &end_key;
+        m_start_incl = start_incl;
+        m_end_incl = end_incl;
+    }
     const BtreeKey* get_start_key() const { return m_start_key; }
     const BtreeKey* get_end_key() const { return m_end_key; }
 
@@ -270,7 +292,7 @@ class BtreeValue {
     virtual homeds::blob get_blob() const = 0;
     virtual void set_blob(const homeds::blob& b) = 0;
     virtual void copy_blob(const homeds::blob& b) = 0;
-    virtual void append_blob(const BtreeValue& new_val, std::shared_ptr<BtreeValue>& existing_val) = 0;
+    virtual void append_blob(const BtreeValue& new_val, BtreeValue& existing_val) = 0;
 
     virtual uint32_t get_blob_size() const = 0;
     virtual void set_blob_size(uint32_t size) = 0;
@@ -311,23 +333,80 @@ enum BtreeQueryType {
     SERIALIZABLE_QUERY
 };
 
-using match_item_cb_t = std::function<bool(const BtreeKey&, const BtreeValue&)>;
-class BtreeQueryRequest {
+//Base class for range callback params
+class BRangeCBParam{
+
 public:
-    BtreeQueryRequest(const BtreeSearchRange& search_range,
+    BRangeCBParam(){}
+    BtreeSearchRange &get_input_range()  { return m_input_range; }
+    BtreeSearchRange &get_sub_range()  { return m_sub_range; }
+    //TODO - make setters private and make Query/Update req as friends to access these
+    void set_sub_range(const BtreeSearchRange &sub_range) { m_sub_range = sub_range; }
+    void set_input_range(const BtreeSearchRange &sub_range) { m_input_range = sub_range; }
+private:
+    BtreeSearchRange m_input_range;                 // Btree range filter originally provided
+    BtreeSearchRange m_sub_range; // Btree sub range used during callbacks. start non-inclusive, but end inclusive.
+};
+
+//class for range query callback param
+template<typename K, typename V>
+class BRangeQueryCBParam: public BRangeCBParam{
+public:
+    BRangeQueryCBParam(){}
+};
+
+//class for range update callback param
+template<typename K, typename V>
+class BRangeUpdateCBParam: public BRangeCBParam{
+public:
+    BRangeUpdateCBParam(K &key, V &value):m_new_key(key),m_new_value(value),m_state_modifiable(true){}
+    K& get_new_key()  { return m_new_key; }
+    V& get_new_value()  { return m_new_value; }
+    bool is_state_modifiable() const { return m_state_modifiable; }
+    void set_state_modifiable(bool state_modifiable) { BRangeUpdateCBParam::m_state_modifiable = state_modifiable; }
+private:
+    K m_new_key;
+    V m_new_value;
+    bool m_state_modifiable;
+};
+
+//Base class for range requests 
+class BRangeRequest{
+public:
+    const BtreeSearchRange &get_input_range() const { return m_input_range; }
+
+protected:
+    BRangeRequest(BRangeCBParam* cb_param,BtreeSearchRange& search_range): 
+    m_cb_param(cb_param), m_input_range(search_range){
+        if(m_cb_param!= nullptr) {
+            m_cb_param->set_input_range(search_range);
+            m_cb_param->set_sub_range(search_range);
+        }
+    }
+    
+    BRangeCBParam *m_cb_param;    // additional parameters that is passed to callback
+    BtreeSearchRange m_input_range;                 // Btree range filter originally provided
+};
+
+template<typename K, typename V>
+using match_item_cb_get_t = std::function<void(std::vector<std::pair<K, V>>&,
+                                           std::vector<std::pair<K, V>>&,
+                                               BRangeQueryCBParam<K,V>*)>;
+template<typename K, typename V>
+class BtreeQueryRequest: public BRangeRequest {
+public:
+    BtreeQueryRequest(BtreeSearchRange& search_range,
                       BtreeQueryType query_type = BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY,
                       uint32_t batch_size = 1000,
-                      const match_item_cb_t& match_item_cb = nullptr) :
-            m_match_item_cb(match_item_cb),
-            m_input_range(search_range),
+                      match_item_cb_get_t<K,V> cb = nullptr,
+                      BRangeQueryCBParam<K,V>* cb_param = nullptr) : 
+                      BRangeRequest(cb_param, search_range),
             m_batch_search_range(search_range),
             m_start_range(search_range.extract_start_of_range()),
             m_end_range(search_range.extract_end_of_range()),
             m_query_type(query_type),
-            m_batch_size(batch_size) {}
-
-    BtreeQueryRequest(const BtreeSearchRange& search_range, const match_item_cb_t& match_item_cb) :
-            BtreeQueryRequest(search_range, BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, 1000, match_item_cb) {}
+            m_batch_size(batch_size),
+            m_cb(cb){}
 
     ~BtreeQueryRequest() = default;
 
@@ -350,20 +429,33 @@ public:
     uint32_t get_batch_size() const { return m_batch_size; }
     void set_batch_size(uint32_t count) { m_batch_size = count; }
 
-public:
-    match_item_cb_t m_match_item_cb; // Callback for every match
-
+    match_item_cb_get_t<K,V> callback() const { return m_cb; }
+    BRangeQueryCBParam<K,V> *get_cb_param() const { return (BRangeQueryCBParam<K,V> *)m_cb_param; }
 protected:
-    const BtreeSearchRange& get_input_range() { return m_input_range; }
-
-protected:
-    BtreeSearchRange m_input_range;         // Btree range filter originally provided
     BtreeSearchRange m_batch_search_range;  // Adjusted filter for current batch
     BtreeSearchRange m_start_range;         // Search Range contaning only start key
     BtreeSearchRange m_end_range;           // Search Range containing only end key
     BtreeQueryCursor m_cursor;              // An opaque cursor object for pagination
     BtreeQueryType   m_query_type;          // Type of the query
     uint32_t m_batch_size;   // Count of items needed in this batch. This value can be changed on every cursor iteration
+    const match_item_cb_get_t<K,V> m_cb;
+};
+template<typename K, typename V>
+using match_item_cb_update_t = std::function<void(std::vector<std::pair<K, V>> &,
+                                                  std::vector<std::pair<K, V>> &,
+                                                  BRangeUpdateCBParam<K,V>*)>;
+template<typename K, typename V>
+class BtreeUpdateRequest: public BRangeRequest {
+public:
+    BtreeUpdateRequest(BtreeSearchRange &search_range,
+                       match_item_cb_update_t<K,V> cb = nullptr,
+                       BRangeUpdateCBParam<K,V> *cb_param = nullptr) :
+                       BRangeRequest(cb_param, search_range), m_cb(cb){}
+
+    match_item_cb_update_t<K,V> callback() const { return m_cb; }
+    BRangeUpdateCBParam<K,V> *get_cb_param() const { return (BRangeUpdateCBParam<K,V> *)m_cb_param; }
+protected:
+    const match_item_cb_update_t<K,V> m_cb;
 };
 
 #if 0
@@ -420,7 +512,7 @@ class BtreeNodeInfo : public BtreeValue {
 
     void copy_blob(const homeds::blob& b) override { set_blob(b); }
 
-    void append_blob(const BtreeValue& new_val, std::shared_ptr<BtreeValue>& existing_val) override {
+    void append_blob(const BtreeValue &new_val, BtreeValue &existing_val) override {
         set_blob(new_val.get_blob());
     }
 
@@ -455,7 +547,8 @@ class EmptyClass : public BtreeValue {
 
     void copy_blob(const homeds::blob& b) override {}
 
-    void append_blob(const BtreeValue& new_val, std::shared_ptr<BtreeValue>& existing_val) override {}
+    void append_blob(const BtreeValue &new_val, BtreeValue &existing_val) override {
+    }
 
     static uint32_t get_fixed_size() { return 0; }
 

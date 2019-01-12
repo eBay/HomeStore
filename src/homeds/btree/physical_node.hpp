@@ -231,6 +231,41 @@ protected:
         return to_variant_node()->get_nth_key(0, out_firstkey, false);
     }
 
+    uint32_t get_all(const BtreeSearchRange &range, uint32_t max_count,
+                                int &start_ind, int &end_ind,
+                     std::vector<std::pair<K, V>> *out_values = nullptr) {
+        auto count = 0U;
+        // Get the start index of the search range.
+        auto start_result = find(range.extract_start_of_range(), nullptr, nullptr);
+        start_ind = start_result.end_of_search_index;
+        if (start_result.found && !range.is_start_inclusive()) { start_ind++; }
+
+        // Get the end index of the search range.
+        auto end_result = find(range.extract_end_of_range(), nullptr, nullptr);
+        end_ind = end_result.end_of_search_index;
+        if (!end_result.found || !range.is_end_inclusive()) { end_ind--; }
+        if(!is_leaf() && end_ind<start_ind) end_ind = start_ind;
+        assert(is_leaf() || (!is_leaf() && start_ind<=end_ind));
+        if(out_values==nullptr){
+            int total = end_ind-start_ind+1;
+            if(total<0)total=0;
+            if(total>(int)max_count)total=max_count;
+            return total;
+        }
+        for (auto i = start_ind; ((i <= end_ind) && (count < max_count)); i++) {
+            K key;V value;
+            if(i==(int)get_total_entries() && !is_leaf())
+                get_edge_value(&value);//invalid key in case of edge entry for internal node
+            else {
+                to_variant_node()->get_nth_key(i, &key, true);
+                to_variant_node()->get_nth_value(i, &value, true);
+            }
+            out_values->emplace_back(std::make_pair<>(key, value));
+            count++;
+        }
+        return count;
+    }
+    
 #if 0
     void get_nth_element(int n, BtreeKey *out_key, BtreeValue *out_val, bool is_copy) {
         if (out_key) { to_variant_node()->get_nth_key(n, out_key, is_copy); }
@@ -238,7 +273,7 @@ protected:
     }
 #endif
 
-    bool put(const BtreeKey &key, const BtreeValue &val, PutType put_type, std::shared_ptr<BtreeValue> &existing_val) {
+    bool put(const BtreeKey &key, const BtreeValue &val, PutType put_type, BtreeValue &existing_val) {
         auto result = find(key, nullptr, nullptr);
         bool ret = true;
 
@@ -258,7 +293,7 @@ protected:
             (!result.found) ? to_variant_node()->insert(result.end_of_search_index, key, val) :
                              append(result.end_of_search_index, key, val, existing_val);
         } else {
-            return false;
+            assert(0);
         }
 
         return ret;
@@ -280,7 +315,7 @@ protected:
         return true;
     }
 
-    void append(uint32_t index, const BtreeKey &key, const BtreeValue &val, std::shared_ptr<BtreeValue> &existing_val) {
+    void append(uint32_t index, const BtreeKey &key, const BtreeValue &val, BtreeValue &existing_val) {
         // Get the nth value and do a callback to update its blob with the new value, being passed
         V nth_val;
         to_variant_node()->get_nth_value(index, &nth_val, false);

@@ -44,7 +44,8 @@ public:
     static BtreeNodePtr read_node(btree_store_t *store, bnodeid_t id);
     static void write_node(btree_store_t *store, BtreeNodePtr bn,
                            std::deque<boost::intrusive_ptr<btree_req_type>> &dependent_req_q, 
-                           boost::intrusive_ptr<btree_req_type> cookie, bool is_sync);
+                           boost::intrusive_ptr<btree_req_type> cookie, bool is_sync,
+                           boost::intrusive_ptr<btree_multinode_req> op = nullptr);
     static void free_node(btree_store_t *store, BtreeNodePtr bn,
                           std::deque<boost::intrusive_ptr<btree_req_type>> &dependent_req_q);
     static void read_node_lock(btree_store_t *store, BtreeNodePtr bn, bool is_write_modifiable,

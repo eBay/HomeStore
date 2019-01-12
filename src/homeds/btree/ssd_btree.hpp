@@ -101,6 +101,7 @@ class SSDBtreeStore {
 
     struct ssd_btree_req : homestore::blkstore_req<btree_buffer_t> {
            boost::intrusive_ptr<homestore::writeback_req> cookie;
+           boost::intrusive_ptr<btree_multinode_req> multinode_req;
            BtreeStore<SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize, homestore::writeback_req> *btree_instance;
            ssd_btree_req() {};
            ~ssd_btree_req() {};
@@ -147,7 +148,13 @@ public:
         boost::intrusive_ptr<ssd_btree_req> req = boost::static_pointer_cast<ssd_btree_req> (bs_req);
         assert(!req->isSyncCall);
         if (req->cookie) {
+            if(req->multinode_req== nullptr)
             m_comp_cb(req->cookie, req->err);
+            else{
+                int cnt = req->multinode_req->writes_pending.fetch_sub(1, std::memory_order_acquire);
+                if (cnt == 1)
+                    m_comp_cb(req->cookie, req->err);
+            }
         }
     }
 
@@ -235,11 +242,13 @@ public:
     static void write_node(SSDBtreeStore *impl, boost::intrusive_ptr<SSDBtreeNode> bn, 
                         std::deque<boost::intrusive_ptr<homestore::writeback_req>> &dependent_req_q, 
                         boost::intrusive_ptr <homestore::writeback_req> cookie, 
-                        bool is_sync) {
+                        bool is_sync,
+                        boost::intrusive_ptr<btree_multinode_req> multinode_req = nullptr) {
         homestore::BlkId blkid(bn->get_node_id().m_id);
         boost::intrusive_ptr< ssd_btree_req >req(new ssd_btree_req());
         req->is_read = false;
         req->cookie = cookie;
+        req->multinode_req = multinode_req;
         if (is_sync) {
             req->isSyncCall = true;
         } else {

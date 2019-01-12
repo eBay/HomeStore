@@ -1,429 +1,655 @@
-#ifndef _MAPPING_HPP_
-#define _MAPPING_HPP_
-
 #include "blkstore/writeBack_cache.hpp"
 #include "homeds/btree/ssd_btree.hpp"
 #include "homeds/btree/btree.hpp"
 #include <blkalloc/blk.h>
 #include <csignal>
 #include <error/error.h>
-#include "homeds/array/interval_array.h"
+#include "homeds/array/blob_array.h"
 #include <math.h>
 #include <sds_logging/logging.h>
 #include <volume/volume.hpp>
 
 using namespace std;
 using namespace homeds::btree;
-
+#define LBA_BITS 56
+#define N_LBA_BITS 8
+#define LBA_MASK 0xFFFFFFFFFFFF
+#define CS_ARRAY_STACK_SIZE 256 //equals 2^N_LBA_BITS //TODO - put static assert
 namespace homestore {
 
-/* TODO: it will require some changes to create the btree for correct page size */
-#define MAX_INTERVAL_LENGTH_IN_BITS 8
-#define Interval_Array_Impl Interval_Array<MappingInterval, 80, 20 >
+    struct LbaId {
+        //size of lba start and num of lba can be reduced for future use
+        uint64_t m_lba_start:LBA_BITS;//start of lba range
+        uint16_t m_n_lba:N_LBA_BITS;// number of lba's from start(inclusive)
 
-    // MappingInterval represents single interval inside value interval array
-struct MappingInterval : public Interval<MAX_INTERVAL_LENGTH_IN_BITS> {
+        LbaId() : m_lba_start(0), m_n_lba(0) {}
 
-    struct Value {
-        uint16_t m_blkid_offset:MAX_INTERVAL_LENGTH_IN_BITS;
-        struct BlkId m_blkid;
+        LbaId(uint64_t lbaId) { LbaId(lbaId & LBA_MASK, lbaId >> LBA_BITS); }
 
-        Value() : m_blkid_offset(0), m_blkid(BlkId(0)) {}
+        LbaId(uint64_t lba_start, uint16_t n_lba) : m_lba_start(lba_start), m_n_lba(n_lba) {}
 
-        Value(const Value &other) {
-            m_blkid_offset = other.m_blkid_offset;
-            m_blkid = other.m_blkid;
+    }__attribute__ ((__packed__));
+
+    //MappingKey is fixed size
+    class MappingKey : public homeds::btree::BtreeKey {
+        LbaId m_lbaId;
+        LbaId *m_lbaId_ptr;
+    public:
+        MappingKey() : m_lbaId_ptr(&m_lbaId) {}
+
+        MappingKey(const MappingKey &other) : BtreeKey(), m_lbaId(other.get_lbaId()), m_lbaId_ptr(&m_lbaId) {}
+
+        MappingKey(uint64_t lba_start, uint16_t n_lba) : m_lbaId(lba_start, n_lba), m_lbaId_ptr(&m_lbaId) {}
+
+        LbaId get_lbaId() const { return *m_lbaId_ptr; }
+
+        uint64_t start() const { return m_lbaId_ptr->m_lba_start; }
+
+        uint64_t end() const { return start() + get_n_lba() - 1; }
+
+        uint16_t get_n_lba() const { return m_lbaId_ptr->m_n_lba; }
+
+        // used by btree to ensure inserted keys are sorted
+        virtual int compare(const BtreeKey *input) const override {
+            MappingKey *o = (MappingKey *) input;
+            if (o->end() < start()) return 1;// no overlap - go left
+            else if (end() < o->start()) return -1;// no overlap - go right
+            else return 0;//overlap
         }
 
-        Value(uint16_t m_blkid_offset, const BlkId &m_blkid) : m_blkid_offset(m_blkid_offset), m_blkid(m_blkid) {}
+        // used by btree range queries to find overlaps with existing keys in inner/leaf nodes
+        virtual int compare_range(const BtreeSearchRange &input) const override {
+            //check if any overlap in lba range - return 0 if the case
+            MappingKey *o_start = (MappingKey *) input.get_start_key();
+            MappingKey *o_end = (MappingKey *) input.get_end_key();
+            if (o_end->end() < start()) return 1;//no overlap - go left
+            else if (end() < o_start->start()) return -1; // no overlap- go right
+            else return 0; //overlap
+        }
 
-        void add(uint64_t offset) {
-            this->m_blkid_offset += offset;
+        virtual homeds::blob get_blob() const override { return {(uint8_t *) m_lbaId_ptr, get_fixed_size()}; }
+
+        virtual void set_blob(const homeds::blob &b) override {
+            assert(b.size == get_fixed_size());
+            m_lbaId_ptr = (LbaId *) b.bytes;
+        }
+
+        virtual void copy_blob(const homeds::blob &b) override {
+            assert(b.size == get_fixed_size());
+            LbaId *other = (LbaId *) b.bytes;
+            set(other->m_lba_start, other->m_n_lba);
+        }
+
+        void set(uint64_t lba_start, uint8_t n_lba) {
+            m_lbaId.m_lba_start = lba_start;
+            m_lbaId.m_n_lba = n_lba;
+            m_lbaId_ptr = &m_lbaId;
+        }
+
+        virtual uint32_t get_blob_size() const override { return get_fixed_size(); }
+
+        virtual void set_blob_size(uint32_t size) override { assert(0); }
+
+        virtual string to_string() const override {
+            stringstream ss;
+            ss << "lba_st=" << start() << ",nlba=" << get_n_lba();
+            return ss.str();
+        }
+
+        void get_overlap(MappingKey &other, MappingKey &overlap) {
+            auto start_lba = std::max(start(), other.start());
+            auto end_lba = std::min(end(), other.end());
+            overlap.set(start_lba, end_lba - start_lba + 1);
+        }
+
+        //returns difference in start lba
+        uint64_t get_start_offset(MappingKey &other) { return start() - other.start(); }
+
+        static uint32_t get_fixed_size() { return sizeof(LbaId); }
+
+        friend ostream &operator<<(ostream &os, const MappingKey &k) {
+            os << k.to_string();
+            return os;
+        }
+
+    }__attribute__ ((__packed__));
+
+    struct ValueEntry {
+    private:
+        uint64_t m_seqId;
+        BlkId m_blkId;
+        uint8_t m_blk_offset:NBLKS_BITS;//offset based on blk store not based on vol page size
+
+        //this allocates 2^NBLKS_BITS size array for checksum on stack, however actual memory used is less on bnode
+        //as we call get_blob_size which takes into account actual nblks to determine exact size of checksum array
+        //TODO - can be replaced by thread local buffer in future
+        std::array<uint16_t, CS_ARRAY_STACK_SIZE> m_carr;
+
+        ValueEntry *m_ptr;
+
+    public:
+        ValueEntry() : m_seqId(0), m_blkId(0), m_blk_offset(0), m_carr() { m_ptr = (ValueEntry *) &m_seqId; }
+
+        //deep copy
+        ValueEntry(uint64_t seqId, const BlkId &blkId, uint8_t blk_offset,
+                   const array<uint16_t, CS_ARRAY_STACK_SIZE> &carr)
+                : m_seqId(seqId), m_blkId(blkId), m_blk_offset(blk_offset),
+                  m_carr(carr) { m_ptr = (ValueEntry *) &m_seqId; }
+
+        ValueEntry(const ValueEntry &ve) {
+            copy_from(ve);
+        }
+
+        ValueEntry(uint8_t *ptr) : m_ptr((ValueEntry *) ptr) {}
+
+        uint32_t get_blob_size() {
+            return sizeof(uint64_t) + sizeof(BlkId) + sizeof(uint8_t) + sizeof(uint16_t) * get_actual_nblks();
+        }
+
+        homeds::blob get_blob() { return {(uint8_t *) m_ptr, get_blob_size()}; }
+
+        void set_blob(homeds::blob b) {
+            m_ptr = (ValueEntry *) b.bytes;
+            assert(b.size == get_blob_size());
+        }
+
+        void copy_blob(homeds::blob b) {
+            ValueEntry ve(b.bytes);
+            copy_from(ve);
+        }
+
+        void copy_from(const ValueEntry &ve) {
+            m_seqId = ve.get_seqId();
+            m_blkId = ve.get_blkId();
+            m_blk_offset = ve.get_blk_offset();
+            for (auto i = 0; i < ve.get_actual_nblks(); i++) {
+                m_carr[i] = ve.get_checksum_at(i);
+            }
+            m_ptr = (ValueEntry *) &m_seqId;
+        }
+
+        //TODO- blk offset should not be used for checksum array, instead use nlba/lbaoffset
+        void add_offset(uint8_t lba_offset, uint8_t nlba, uint32_t vol_page_size, uint32_t blkalloc_page_size) {
+            assert(get_actual_nblks() - lba_offset > 0);
+            //move checksum array elements to start from offset position
+            memmove((void *) &(m_ptr->m_carr[0]), (void *) (&(m_ptr->m_carr[lba_offset])),
+                    sizeof(uint16_t) * (get_actual_nblks() - lba_offset));
+            uint8_t blk_offset = lba_offset * vol_page_size / blkalloc_page_size;
+            m_ptr->m_blk_offset += blk_offset;
+            //TODO - use nlba to trip checksum array
+#ifndef NDEBUG
+            auto nblks = nlba * vol_page_size / blkalloc_page_size;
+            assert(blk_offset + nblks <= get_blkId().get_nblks());
+            assert(blk_offset < get_blkId().get_nblks());
+#endif
+        }
+
+        uint8_t get_actual_nblks() const { return get_blkId().get_nblks() - get_blk_offset(); }
+
+        uint64_t get_seqId() const { return m_ptr->m_seqId; }
+
+        BlkId &get_blkId() const { return m_ptr->m_blkId; }
+
+        uint8_t get_blk_offset() const { return (uint8_t) m_ptr->m_blk_offset; }
+
+        uint16_t &get_checksum_at(uint8_t index) const {
+            assert(index < get_actual_nblks());
+            return m_ptr->m_carr[index];
+        }
+
+        const std::string get_checksums_string() const {
+            std::stringstream ss;
+            for (auto i = 0u; i < get_actual_nblks(); i++) {
+                ss << get_checksum_at(i) << ",";
+            }
+            return ss.str();
+        }
+
+        friend ostream &operator<<(ostream &os, const ValueEntry &ve) {
+            os << "Seq=" << ve.get_seqId() << ","
+               << ve.get_blkId() << ",Boff=" << unsigned(ve.get_blk_offset())
+               << ",CSArr=" << ve.get_checksums_string();
+            return os;
         }
     }__attribute__ ((__packed__));
 
-    Value m_value;
+    class MappingValue : public homeds::btree::BtreeValue {
+        Blob_Array <ValueEntry> m_earr;
+    public:
+        //creates empty array
+        MappingValue() {};
 
-    MappingInterval() : MappingInterval(0, 0, Value()) {
-    }
+        //creates array with one value entry - on heap - bcopy
+        MappingValue(ValueEntry &ve) { m_earr.set_element(ve); }
 
-    MappingInterval(const MappingInterval &other) :
-            MappingInterval(other.m_interval_start, other.m_interval_length,
-                            other.m_value) {
-    }
+        //performs deep copy from other - on heap
+        MappingValue(const MappingValue &other) { m_earr.set_elements(other.m_earr); }
 
-    MappingInterval(uint64_t interval_start,
-                    uint64_t interval_length,
-                    Value other) {
-        m_interval_start = interval_start;
-        m_interval_length = interval_length;
-        m_value.m_blkid_offset = other.m_blkid_offset;
-        m_value.m_blkid = other.m_blkid;
-    }
+        //creates array with  value entrys - on heap -bcopy
+        MappingValue(vector<ValueEntry> &elements) { m_earr.set_elements(elements); }
 
-
-    void merge_compare(MappingInterval *&intervalFirst, MappingInterval *&intervalSecond,
-                       std::shared_ptr<MappingInterval> &merged_interval,
-                       bool &is_intervals_mergable) /*override*/ {
-        //DISABLING MERGE AS NOT COMPATIBLE WITH CACHE
-        is_intervals_mergable = false;
-        merged_interval = nullptr;
-    }
-
-    operator std::string() { return to_string(); }
-
-    std::string to_string() {
-        std::stringstream ss;
-        ss << m_interval_start << "," << m_interval_length << "," << m_value.m_blkid_offset << "--->"
-           << m_value.m_blkid.to_string();
-        return ss.str();
-    };
-
-}__attribute__ ((__packed__));
-
-    // Purpose of lba_block structure is transfer of mapping from mapping layer to volume layer                                
-struct Lba_Block : public MappingInterval {
-    uint64_t m_actual_lba;
-    bool m_blkid_found;
-
-    Lba_Block(const MappingInterval &mapping, uint64_t actual_lba, bool blkid_found) {
-        m_interval_start = mapping.m_interval_start;
-        m_interval_length = mapping.m_interval_length;
-        m_value.m_blkid_offset = mapping.m_value.m_blkid_offset;
-        m_value.m_blkid = mapping.m_value.m_blkid;
-        m_blkid_found = blkid_found;
-        m_actual_lba = actual_lba;
-    }
-
-    Lba_Block(uint16_t offset,
-              uint16_t num_of_offset,
-              uint16_t blkid_offset,
-              struct BlkId blkid,
-              uint64_t actual_lba,
-              bool blkid_found) {
-        m_interval_start = offset;
-        m_interval_length = num_of_offset;
-        m_value.m_blkid_offset = blkid_offset;
-        m_value.m_blkid = blkid;
-        m_blkid_found = blkid_found;
-        m_actual_lba = actual_lba;
-    };
-
-}__attribute__ ((__packed__));
-
-constexpr static auto Ki = 1024;
-constexpr static auto Mi = Ki * Ki;
-constexpr static auto Gi = Ki * Mi;
-constexpr static auto MAX_CACHE_SIZE = 2ul * Gi;
-constexpr static int MAP_BLOCK_SIZE = (4 * Ki);
-constexpr static int LEAST_NO_OF_OBJECTS_IN_NODE = 3;
-constexpr static int RECORD_SIZE = sizeof(uint32_t);
-constexpr static int KEY_SIZE = sizeof(uint64_t);
-constexpr static int VALUE_HEADER_SIZE = sizeof(uint32_t);
-constexpr static int VALUE_ENTRY_SIZE = sizeof(struct MappingInterval);
-constexpr static int MAX_NO_OF_VALUE_ENTRIES =
-        -1 + (MAP_BLOCK_SIZE - LEAST_NO_OF_OBJECTS_IN_NODE * RECORD_SIZE - LEAST_NO_OF_OBJECTS_IN_NODE * KEY_SIZE) /
-             (VALUE_HEADER_SIZE + LEAST_NO_OF_OBJECTS_IN_NODE * VALUE_ENTRY_SIZE);
-constexpr static int BIT_TO_REPRESENT_MAX_ENTRIES = MAX_INTERVAL_LENGTH_IN_BITS;
-
-
-class MappingKey : public homeds::btree::BtreeKey {
-
-private:
-    //Actual value range for an key is (range_start_offset*MAX_NO_OF_VALUE_ENTRIES,
-    // range_start_offset*MAX_NO_OF_VALUE_ENTRIES + MAX_NO_OF_VALUE_ENTRIES -1)
-    uint64_t range_start_offset;
-    uint64_t *ptr_range_start_offset;
-public:
-    MappingKey() {
-        range_start_offset = 0;
-        ptr_range_start_offset = &range_start_offset;
-    }
-
-    MappingKey(uint64_t _blob) {
-        range_start_offset = _blob;
-        ptr_range_start_offset = &range_start_offset;
-    }
-
-    explicit MappingKey(const MappingKey& other) = default;
-    MappingKey& operator=(const MappingKey& other) = default;
-
-    int compare(const BtreeKey *o) const override {
-        MappingKey *key = (MappingKey *) o;
-        if (*ptr_range_start_offset < *key->ptr_range_start_offset) {
-            return -1;
-        } else if (*ptr_range_start_offset > *key->ptr_range_start_offset) {
-            return 1;
-        } else {
-            return 0;
-        }
-    }
-
-    virtual homeds::blob get_blob() const override {
-        homeds::blob b = {(uint8_t *) ptr_range_start_offset, sizeof(range_start_offset)};
-        return b;
-    }
-
-    virtual void set_blob(const homeds::blob &b) override {
-        ptr_range_start_offset = (uint64_t *) b.bytes;
-    }
-
-    virtual void copy_blob(const homeds::blob &b) override {
-        assert(b.size == sizeof(range_start_offset));
-        memcpy(ptr_range_start_offset, b.bytes, b.size);
-    }
-
-    virtual uint32_t get_blob_size() const override {
-        return (sizeof(range_start_offset));
-    }
-
-    virtual void set_blob_size(uint32_t size) override {
-    }
-
-    static uint32_t get_fixed_size() {
-        return sizeof(range_start_offset);
-    }
-
-    uint64_t get_value() {
-        return range_start_offset;
-    }
-
-    int compare_range(const BtreeSearchRange &range) const override {
-        return 0;
-    }
-
-    std::string to_string() const override {
-        return (std::to_string(*ptr_range_start_offset));
-    }
-};
-
-class MappingValue : public homeds::btree::BtreeValue {
-    Interval_Array_Impl *dyna_arr;
-public:
-    MappingValue() {
-        dyna_arr = new Interval_Array_Impl(5, MAX_NO_OF_VALUE_ENTRIES);
-    };
-
-    MappingValue(uint16_t offset, uint64_t no_of_offset, uint16_t block_offset, struct BlkId blockId) :
-            homeds::btree::BtreeValue() {
-        dyna_arr = new Interval_Array_Impl(5, MAX_NO_OF_VALUE_ENTRIES);
-        MappingInterval mappingInterval(offset, no_of_offset, MappingInterval::Value(block_offset, blockId));
-        std::vector<std::shared_ptr<MappingInterval> > existingIntervalOverlaps;
-        dyna_arr->addInterval(&mappingInterval, existingIntervalOverlaps);
-    };
-
-    ~MappingValue() {
-        delete dyna_arr;
-        dyna_arr = nullptr;
-    };
-
-    explicit MappingValue(const MappingValue& other) = default;
-    MappingValue& operator=(const MappingValue& other) = default;
-
-    virtual homeds::blob get_blob() const override {
-        homeds::blob b;
-        b.bytes = (uint8_t *) dyna_arr->get_mem();
-        b.size = dyna_arr->get_size();
-        return b;
-    }
-
-    virtual void set_blob(const homeds::blob &b) override {
-        dyna_arr->set_mem((void *) (b.bytes), b.size, MAX_NO_OF_VALUE_ENTRIES);
-    }
-
-    virtual void copy_blob(const homeds::blob &b) override {
-        delete dyna_arr;
-        dyna_arr = new Interval_Array_Impl((void *) b.bytes, b.size, MAX_NO_OF_VALUE_ENTRIES);
-    }
-
-    virtual uint32_t get_blob_size() const override {
-        return dyna_arr->get_size();
-    }
-
-    virtual void set_blob_size(uint32_t size) override {
-        assert(0);
-    }
-
-    virtual uint32_t estimate_size_after_append(const BtreeValue &new_val) override {
-        Interval_Array_Impl *dyna_arr_ptr = ((const MappingValue &) new_val).dyna_arr;
-        assert(dyna_arr_ptr->get_no_of_elements_filled() == 1);
-        return dyna_arr->estimate_size_after_addOrUpdate(1);
-    }
-
-    void get(uint16_t start_offset, uint16_t end_offset,
-             std::vector<std::shared_ptr<MappingInterval>> &offsetToBlkIdLst) {
-        LOGTRACE("value.get called with :{}:{}", start_offset, end_offset);
-        int nblks = end_offset - start_offset + 1;
-        uint16_t startIndex=0, endIndex=0;
-        MappingInterval *findInterval = new MappingInterval(
-                start_offset,
-                nblks,
-                MappingInterval::Value(0, BlkId(0, 0, 0)));
-        dyna_arr->getIntervals(findInterval, offsetToBlkIdLst,startIndex, endIndex);
-        delete findInterval;
-    }
-
-    void get_all(std::vector<std::shared_ptr<MappingInterval>> &offsetToBlkIdLst) {
-        dyna_arr->getAllIntervals(offsetToBlkIdLst);
-    }
-
-    std::string to_string() const override {
-        return dyna_arr->to_string();
-    }
-
-    virtual void append_blob(const BtreeValue &new_val, std::shared_ptr<BtreeValue> &existing_val) override {
-        LOGTRACE("Appending->{}", new_val.to_string());
-        Interval_Array_Impl *new_dyna_arr_ptr = ((const MappingValue &) new_val).dyna_arr;
-        assert(new_dyna_arr_ptr->get_no_of_elements_filled() == 1);
-        MappingInterval *newRange = (*new_dyna_arr_ptr)[0];
-#ifndef NDEBUG
-        uint64_t nblks_before = count_nblks();
-#endif
-        std::vector<std::shared_ptr<MappingInterval> > existingIntervalOverlaps;
-        dyna_arr->addInterval(newRange, existingIntervalOverlaps);
-
-        MappingValue *existingValue = (MappingValue *) existing_val.get();
-        for (std::shared_ptr<MappingInterval> ptr : existingIntervalOverlaps) {
-            existingValue->dyna_arr->addOrUpdate(ptr.get());
+        virtual homeds::blob get_blob() const override {
+            homeds::blob b;
+            b.bytes = (uint8_t *) m_earr.get_mem();
+            b.size = m_earr.get_size();
+            return b;
         }
 
-#ifndef NDEBUG
-        validate_sanity_value_array(nblks_before);
-#endif
-
-    }
-
-#ifndef NDEBUG
-
-    uint64_t count_nblks() {
-        uint64_t nblks = 0;
-        for (uint32_t i = 0; i < dyna_arr->get_no_of_elements_filled(); i++) {
-            nblks += (*dyna_arr)[i]->m_interval_length;
-        }
-        return nblks;
-    }
-
-    void validate_sanity_value_array(uint64_t nblks_before) {
-        uint64_t nblks_after = count_nblks();
-        if (nblks_after < nblks_before) {
-            LOGERROR("Lost entry:{} -> {} :: {}", nblks_before, nblks_after, dyna_arr->to_string());
-            assert(0);
+        virtual void set_blob(const homeds::blob &b) override {
+            m_earr.set_mem((void *) (b.bytes), b.size);
         }
 
-        int i = 0;
-        std::map<int, bool> mapOfWords;
-        int prevsOffset = -1;
-        int preveOffset = -1;
-        //validate if keys are in ascending orde
-        while (i < (int) dyna_arr->get_no_of_elements_filled()) {
-            MappingInterval *currentInterval = (*dyna_arr)[i];
-            uint16_t soffset = currentInterval->m_interval_start;
-            uint16_t eoffset = currentInterval->m_interval_start + currentInterval->m_interval_length - 1;
-            std::pair<std::map<int, bool>::iterator, bool> result;
-            result = mapOfWords.insert(std::make_pair(soffset, true));
-            if (result.second == false) {
-                //check uniqueness and sorted
-                LOGERROR("Duplicate entry:{} -> {}", soffset, dyna_arr->to_string());
-                assert(0);
+        virtual void copy_blob(const homeds::blob &b) override {
+            Blob_Array <ValueEntry> other;
+            other.set_mem((void *) b.bytes, b.size);
+            m_earr.set_elements(other);//deep copy
+        }
+
+        virtual uint32_t get_blob_size() const override { return m_earr.get_size(); }
+
+        virtual void set_blob_size(uint32_t size) override { assert(0); }
+
+        virtual uint32_t estimate_size_after_append(const BtreeValue &new_val) override { assert(0); }
+
+        virtual void append_blob(const BtreeValue &new_val, BtreeValue &existing_val) override { assert(0); }
+
+        virtual string to_string() const override { return m_earr.to_string(); }
+
+        Blob_Array <ValueEntry> &get_array() { return m_earr; }
+
+        bool is_valid() {
+            if (m_earr.get_total_elements() == 0) return false;
+            return true;
+        }
+
+        //return deep copied MappingValue and add offset to all entries in copy
+        void
+        add_offset(uint8_t lba_offset, uint8_t nlba, uint32_t vol_page_size, uint32_t blkalloc_page_size,
+                   MappingValue &out) {
+            vector<ValueEntry> v_array;
+            auto j = 0u;
+            while (j < get_array().get_total_elements()) {
+                ValueEntry ve;
+                get_array().get(j, ve, true);
+                ve.add_offset(lba_offset, nlba, vol_page_size, blkalloc_page_size);
+                v_array.emplace_back(ve);
+                j++;
             }
-            if (soffset < prevsOffset) {
-                LOGERROR("Not Sorted-> {},{} -> {}", prevsOffset, soffset, dyna_arr->to_string());
-                assert(0);
-            }
-            if (soffset <= preveOffset) {
-                LOGERROR("Overlapping-> {},{} -> {}", prevsOffset, soffset, dyna_arr->to_string());
-                assert(0);
-            }
-            if (eoffset >= 145) {
-                LOGERROR("Overflow-> {}-> {}", eoffset, dyna_arr->to_string());
-                assert(0);
-            }
-            prevsOffset = soffset;
-            preveOffset = eoffset;
-            i++;
+            out.get_array().set_elements(v_array);
         }
-    }
 
-#endif
-};
+        //append entry to this mapping value, it return new Mapping Value - deep copy
+        void add(ValueEntry &ve, MappingValue &out) {
+            vector<ValueEntry> v_array;
+            get_array().get_all(v_array, true);
+            v_array.emplace_back(ve);
+            out.get_array().set_elements(v_array);
+        }
+    };
 
+    class mapping {
+        typedef function<void(struct BlkId blkid)> free_blk_callback;
+        typedef function<void(boost::intrusive_ptr<volume_req> cookie)> comp_callback;
+    private:
+        MappingBtreeDeclType *m_bt;
+        free_blk_callback free_blk_cb;
+        comp_callback comp_cb;
+        uint32_t m_vol_page_size;
+        uint32_t m_blkalloc_page_size;
+        const MappingValue EMPTY_MAPPING_VALUE;
+    public:
+        void process_completions(boost::intrusive_ptr<writeback_req> cookie,
+                                 error_condition status) {
+            boost::intrusive_ptr<volume_req> req =
+                    boost::static_pointer_cast<volume_req>(cookie);
+            if (req->status == no_error) {
+                req->status = status;
+            }
 
-class mapping {
-typedef std::function<void(struct BlkId blkid)> free_blk_callback;
-typedef std::function<void(boost::intrusive_ptr<volume_req> cookie)> comp_callback;
-private:
-    MappingBtreeDeclType *m_bt;
+            comp_cb(req);
+        }
 
-    free_blk_callback free_blk_cb;
-    comp_callback comp_cb;
+        mapping(uint64_t volsize, uint32_t page_size, comp_callback comp_cb) : comp_cb(comp_cb) {
+            homeds::btree::BtreeConfig btree_cfg;
+            btree_cfg.set_max_objs(volsize / page_size);
+            btree_cfg.set_max_key_size(sizeof(uint32_t));
+            btree_cfg.set_max_value_size(page_size);
 
-public:
-    MappingBtreeDeclType* get_bt_handle() const {
-        return m_bt;
-    }
-    void process_completions(boost::intrusive_ptr<writeback_req> cookie, std::error_condition status);
+            homeds::btree::btree_device_info bt_dev_info;
+            bt_dev_info.blkstore = (void *)HomeBlks::instance()->get_metadata_blkstore();
+            bt_dev_info.new_device = false;
+            m_bt = MappingBtreeDeclType::create_btree(btree_cfg, &bt_dev_info,
+                                                      std::bind(&mapping::process_completions, this,
+                                                                std::placeholders::_1, std::placeholders::_2));
+        }
 
-    mapping(uint64_t volsize, uint32_t page_size, comp_callback comp_cb) : comp_cb(comp_cb) {
-        assert(BIT_TO_REPRESENT_MAX_ENTRIES > log2(MAX_NO_OF_VALUE_ENTRIES));
-        homeds::btree::BtreeConfig btree_cfg;
-        btree_cfg.set_max_objs(volsize / (MAX_NO_OF_VALUE_ENTRIES * MAP_BLOCK_SIZE));
-        btree_cfg.set_max_key_size(sizeof(uint32_t));
-        btree_cfg.set_max_value_size(MAX_NO_OF_VALUE_ENTRIES * sizeof(MappingInterval));
+        mapping(uint64_t volsize, uint32_t page_size, btree_super_block &btree_sb, comp_callback comp_cb) : comp_cb(comp_cb) {
+            homeds::btree::BtreeConfig btree_cfg;
+            btree_cfg.set_max_objs(volsize / page_size);
+            btree_cfg.set_max_key_size(sizeof(uint32_t));
+            btree_cfg.set_max_value_size(page_size);
 
-        homeds::btree::btree_device_info bt_dev_info;
-        bt_dev_info.blkstore = (void *)HomeBlks::instance()->get_metadata_blkstore();
-        bt_dev_info.new_device = false;
-        m_bt = MappingBtreeDeclType::create_btree(btree_cfg, &bt_dev_info,
-                std::bind(&mapping::process_completions, this,
-                    std::placeholders::_1, std::placeholders::_2));
-    }
+            homeds::btree::btree_device_info bt_dev_info;
+            bt_dev_info.blkstore = HomeBlks::instance()->get_metadata_blkstore();
+            bt_dev_info.new_device = false;
+            m_bt = MappingBtreeDeclType::create_btree(btree_sb, btree_cfg, &bt_dev_info,
+                                                      std::bind(&mapping::process_completions, this,
+                                                                std::placeholders::_1, std::placeholders::_2));
+        }
 
-    mapping(uint64_t volsize, uint32_t page_size, btree_super_block &btree_sb, comp_callback comp_cb) : comp_cb(comp_cb) {
-        assert(BIT_TO_REPRESENT_MAX_ENTRIES > log2(MAX_NO_OF_VALUE_ENTRIES));
-        homeds::btree::BtreeConfig btree_cfg;
-        btree_cfg.set_max_objs(volsize / (MAX_NO_OF_VALUE_ENTRIES * MAP_BLOCK_SIZE));
-        btree_cfg.set_max_key_size(sizeof(uint32_t));
-        btree_cfg.set_max_value_size(MAX_NO_OF_VALUE_ENTRIES * sizeof(MappingInterval));
+        btree_super_block get_btree_sb() {
+            return(m_bt->get_btree_sb());
+        }
+        
+        error_condition get(boost::intrusive_ptr<volume_req> req, MappingKey &key,
+                            vector<pair<MappingKey, MappingValue>> &values) {
+            MappingKey start_key(key.start(), 1);
+            MappingKey end_key(key.end(), 1);
+            auto search_range = BtreeSearchRange(start_key, true, end_key, true);
+            GetCBParam param(req);
+            vector<pair<MappingKey, MappingValue>> result_kv;
+            BtreeQueryRequest<MappingKey, MappingValue>
+                    qreq(search_range,
+                         BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY,
+                         key.get_n_lba(),
+                         std::bind(&mapping::match_item_cb_get, this,
+                                   placeholders::_1, placeholders::_2,
+                                   placeholders::_3),
+                         (BRangeQueryCBParam<MappingKey, MappingValue> *) &param);
+            m_bt->query(qreq, result_kv);
 
-        homeds::btree::btree_device_info bt_dev_info;
-        bt_dev_info.blkstore = HomeBlks::instance()->get_metadata_blkstore();
-        bt_dev_info.new_device = false;
-        m_bt = MappingBtreeDeclType::create_btree(btree_sb, btree_cfg, &bt_dev_info,
-                std::bind(&mapping::process_completions, this,
-                    std::placeholders::_1, std::placeholders::_2));
-    }
+            //fill the gaps
+            auto last_lba = key.start();
+            for (auto i = 0u; i < values.size(); i++) {
+                int nl = values[i].first.start() - last_lba;
+                while (nl-- > 0) {
+                    values.emplace_back(make_pair(MappingKey(last_lba, 1), EMPTY_MAPPING_VALUE));
+                    last_lba++;
+                }
+                values.emplace_back(result_kv[i]);
+                last_lba = result_kv[i].first.end() + 1;
+            }
+            while (last_lba <= key.end()) {
+                values.emplace_back(make_pair(MappingKey(last_lba, 1), EMPTY_MAPPING_VALUE));
+                last_lba++;
+            }
 
-    btree_super_block get_btree_sb() {
-        return(m_bt->get_btree_sb());
-    }
 #ifndef NDEBUG
-    void enable_split_merge_crash_simulation() {
-        m_bt->simulate_merge_crash=true;
-        m_bt->simulate_split_crash=true;
-    }
+            validate_get_response(key.start(), key.get_n_lba(), values);
 #endif
+            return no_error;
+        }
 
-    void add_lba(MappingInterval &offBlk, bool found, uint64_t actual_lba,
-            std::vector<std::shared_ptr<Lba_Block>> &mappingList) {
-        mappingList.push_back(std::make_shared<Lba_Block>(offBlk, actual_lba, found));
-    }
+        error_condition put(boost::intrusive_ptr<volume_req> req,
+                            MappingKey &key, MappingValue &value) {
+            LOGINFO("Mapping.PUT called {} {}", key.to_string(), value.to_string());
+            assert(value.get_array().get_total_elements() == 1);
+            UpdateCBParam param(req, key, value);
+            MappingKey start(key.start(), 1);
+            MappingKey end(key.end(), 1);
 
-    void add_dummy_for_missing_mappings(uint64_t start_lba, uint64_t end_lba,
-            std::vector<std::shared_ptr<Lba_Block>> &mappingList);
+            auto search_range = BtreeSearchRange(start, true, end, true);
+            BtreeUpdateRequest<MappingKey, MappingValue>
+                    ureq(search_range,
+                         bind(&mapping::match_item_cb_put, this,
+                              placeholders::_1, placeholders::_2,
+                              placeholders::_3),
+                         (BRangeUpdateCBParam<MappingKey, MappingValue> *) &param);
+            m_bt->range_put(key, value, PutType::APPEND_IF_EXISTS_ELSE_INSERT,
+                            boost::static_pointer_cast<writeback_req>(req),
+                            boost::static_pointer_cast<writeback_req>(req),
+                            ureq);
 
-    void print_tree() {
-        m_bt->print_tree();
-    }
+            return no_error;
+        }
 
-    std::error_condition get(uint64_t start_lba, uint32_t nblks, std::vector<std::shared_ptr<Lba_Block>> &mappingList);
+        void print_tree() {
+            m_bt->print_tree();
+        }
+
+    private:
+        /**
+         * Callback called once for each bnode
+         * @param match_kv  - list of all match K/V for bnode (based on key.compare/compare_range)
+         * @param result_kv - All KV which are passed backed to mapping.get by btree. Btree dosent use this.
+         * @param cb_param -  All parameteres provided by mapping.get can be accessed from this
+         */
+        void match_item_cb_get(vector<pair<MappingKey, MappingValue>> &match_kv,
+                               vector<pair<MappingKey, MappingValue>> &result_kv,
+                               BRangeQueryCBParam<MappingKey, MappingValue> *cb_param) {
+            uint64_t start_lba = 0, end_lba = 0;
+            get_start_end_lba(cb_param, start_lba, end_lba);
+            MappingKey eff_range(start_lba, end_lba - start_lba + 1);
+            GetCBParam *param = (GetCBParam *) cb_param;
+            assert(param->m_req->lastCommited_seqId <= param->m_req->seqId);
+            ValueEntry new_ve;//empty
+
+            for (auto i = 0u; i < match_kv.size(); i++) {
+                auto &existing = match_kv[i];
+                MappingKey *e_key = &existing.first;
+                Blob_Array <ValueEntry> array = (&existing.second)->get_array();
+                assert(array.get_total_elements() > 0);
+
+                for (int i = array.get_total_elements() - 1; i >= 0; i--) {
+                    // seqId use to filter out KVs with higher seqIds and put only latest seqid entry in result_kv
+                    ValueEntry ve;
+                    array.get((uint32_t) i, ve, true);
+                    if (ve.get_seqId() <= param->m_req->lastCommited_seqId) {
+                        if (i == 0) {
+                            MappingKey overlap;
+                            e_key->get_overlap(eff_range, overlap);
+
+                            auto lba_offset = overlap.get_start_offset(*e_key);
+                            if (lba_offset != 0) //partial overlap for first entry
+                                ve.add_offset(lba_offset, overlap.get_n_lba(), m_vol_page_size, m_blkalloc_page_size);
+
+                            result_kv.emplace_back(make_pair(overlap, MappingValue(ve)));
+                        } else
+                            result_kv.emplace_back(make_pair(MappingKey(*e_key), MappingValue(ve)));
+                        break;
+                    }
+                }
+            }
+        }
+
+        /**
+         * Callback called onces for each eligible bnode
+         * @param match_kv - list of all match K/V for bnode (based on key.compare/compare_range)
+         * @param replace_kv - btree replaces all K/V in match_kv with replace_kv
+         * @param cb_param - All parameteres provided by mapping.put can be accessed from this
+         * 
+         * We piggyback on put to delete old commited seq Id.
+         */
+        void match_item_cb_put(vector<pair<MappingKey, MappingValue>> &match_kv,
+                               vector<pair<MappingKey, MappingValue>> &replace_kv,
+                               BRangeUpdateCBParam<MappingKey, MappingValue> *cb_param) {
+
+            uint64_t start_lba = 0, end_lba = 0;
+            get_start_end_lba(cb_param, start_lba, end_lba);
+
+            UpdateCBParam *param = (UpdateCBParam *) cb_param;
+            assert(param->m_req->lastCommited_seqId <= param->m_req->seqId);
 
 #ifndef NDEBUG
-    void validate_get_response(uint64_t start_lba, uint32_t num_lbas, std::vector<std::shared_ptr<Lba_Block>> &mappingList);
+            stringstream ss;
+            ss << "Lba:"<<param->m_req->lba << ",nlbas:" << param->m_req->nlbas
+               << ",seqId:" << param->m_req->seqId << ",is_mod:" <<param->is_state_modifiable();
+            ss << ",is:"<<((MappingKey*)param->get_input_range().get_start_key())->to_string();
+            ss << ",ie:"<<((MappingKey*)param->get_input_range().get_end_key())->to_string();
+            ss << ",ss:"<<((MappingKey*)param->get_sub_range().get_start_key())->to_string();
+            ss << ",se:"<<((MappingKey*)param->get_sub_range().get_end_key())->to_string();
+            ss << ",match_kv:" ;
+            for(auto &ptr : match_kv) ss << ptr.first.to_string() << "==>" << ptr.second.to_string();
+#endif
+            ValueEntry new_ve;
+            param->get_new_value().get_array().get(0, new_ve, false);
+
+            MappingKey *s_in_range = (MappingKey *) param->get_input_range().get_start_key();
+            auto last_lba = start_lba;
+            for (auto i = 0u; i < match_kv.size(); i++) {
+                auto &existing = match_kv[i];
+                MappingKey *e_key = &existing.first;
+                MappingValue *e_value = &existing.second;
+                Blob_Array <ValueEntry> &array = e_value->get_array();
+
+                if (e_key->start() > last_lba) //gap found 
+                    add_missing_interval(last_lba, e_key->start() - 1, new_ve,
+                                         last_lba - s_in_range->start(), replace_kv);
+                auto j = 0u;
+                while (j < array.get_total_elements()) {
+                    //iterate array and remove elements<lastcommitedid, but still maintain one latest value entry
+                    ValueEntry ve;
+                    array.get(j, ve, false);
+                    if (ve.get_seqId() < param->m_req->lastCommited_seqId) {
+                        if(param->is_state_modifiable()) {
+                            Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(), e_key->get_n_lba());
+                            param->m_req->blkIds_to_free.emplace_back(fbe);
+                        }
+                        array.remove(j);
+                    } else break;
+                }
+
+                add_overlaps(e_key, e_value, &(param->get_new_key()), &(param->get_new_value()), replace_kv);
+                last_lba = e_key->end() + 1;
+            }
+            if (end_lba >= last_lba)//gap found 
+                add_missing_interval(last_lba, end_lba, new_ve, last_lba - s_in_range->start(), replace_kv);
+            // TODO merge entries - when neighbours lba/blk are consecutive and have only 1 value entry each
+
+#ifndef NDEBUG
+            ss << ", replace_kv:";
+            for(auto &ptr : replace_kv) ss << ptr.first.to_string() << "==>" << ptr.second.to_string();
+            LOGINFO("Put CB completed: {} ", ss.str());
+#endif
+        }
+
+        /** derieves current range of lba's based on input/sub range
+            subrange means current bnodes start/end boundaries
+            input_range is original client provided start/end, its always inclusive for mapping layer 
+            Resulting start/end lba is always inclusive
+            **/
+        void get_start_end_lba(BRangeCBParam *param, uint64_t &start_lba, uint64_t &end_lba) {
+
+            //pick higher start of subrange/inputrange
+            MappingKey *s_subrange = (MappingKey *) param->get_sub_range().get_start_key();
+            MappingKey *s_in_range = (MappingKey *) param->get_input_range().get_start_key();
+
+            if (param->get_sub_range().is_start_inclusive())
+                start_lba = max(s_subrange->end(), s_in_range->start());
+            else
+                start_lba = max(s_subrange->end() + 1, s_in_range->start());
+
+            //pick lower end of subrange/inputrange
+            MappingKey *e_subrange = (MappingKey *) param->get_sub_range().get_end_key();//end is always inclusive
+            MappingKey *e_in_range = (MappingKey *) param->get_input_range().get_end_key();//inclusive
+
+            if (param->get_sub_range().is_end_inclusive())
+                end_lba = min(e_subrange->end(), e_in_range->end());
+            else
+                end_lba = min(e_subrange->end() - 1, e_in_range->end());
+
+        }
+
+        /** result of overlap of k1/k2 is added to replace_kv **/
+        void add_overlaps(MappingKey *k1, MappingValue *v1, MappingKey *k2, MappingValue *v2,
+                          vector<pair<MappingKey, MappingValue>> &replace_kv) {
+            assert(v2->get_array().get_total_elements() == 1);
+
+            auto start = k1->start();
+            auto end = k1->end();
+            if (k2->start() > start ) { //non overlaping start
+                if(v1->get_array().get_total_elements() > 0)
+                    replace_kv.emplace_back(make_pair(MappingKey(start, k2->start() - start), MappingValue(*v1)));
+                start = k2->start();
+            }
+            if (k2->end() < k1->end()) { // non overlaping end
+                auto lba_offset = k2->end() - k1->start();
+                MappingKey key(k2->end() + 1, k1->end() - k2->end());
+                if(v1->get_array().get_total_elements() > 0) {
+                    MappingValue value;
+                    v1->add_offset(lba_offset, key.get_n_lba(), m_vol_page_size, m_blkalloc_page_size, value);
+                    replace_kv.emplace_back(make_pair(key, value));
+                }
+                end = k2->end();
+            }
+            assert(start >= k2->start() && start >= k1->start());
+            assert(end <= k2->end() && end <= k1->end());
+
+            //get entris from both v1/v2 and offset is needed for both of them
+            MappingKey key3(start, end - start + 1);
+            auto k1_offset = start - k1->start();
+            auto k2_offset = start - k2->start();
+            MappingValue temp_mv;
+            if (v1->get_array().get_total_elements() > 0)
+                v1->add_offset(k1_offset, k1->get_n_lba() - k1_offset, m_vol_page_size, m_blkalloc_page_size, temp_mv);
+            ValueEntry new_ve;
+            v2->get_array().get(0, new_ve, true);
+            new_ve.add_offset(k2_offset, k2->get_n_lba() - k2_offset, m_vol_page_size, m_blkalloc_page_size);
+            MappingValue value3;
+            temp_mv.add(new_ve, value3);
+            replace_kv.emplace_back(make_pair(key3, value3));
+
+        }
+
+        /**add missing interval to replace kv**/
+        void add_missing_interval(uint64_t s_lba, uint64_t e_lba, ValueEntry &ve, uint16_t lba_offset,
+                                  vector<pair<MappingKey, MappingValue>> &replace_kv) {
+            ValueEntry gap_entry(ve);
+            auto nlba = e_lba - s_lba + 1;
+            gap_entry.add_offset(lba_offset, nlba, m_vol_page_size, m_blkalloc_page_size);
+            replace_kv.emplace_back(make_pair(MappingKey(s_lba, nlba), MappingValue(gap_entry)));
+        }
+
+        class GetCBParam : public BRangeQueryCBParam<MappingKey, MappingValue> {
+        public:
+            boost::intrusive_ptr<volume_req> m_req;
+
+            GetCBParam(boost::intrusive_ptr<volume_req> req)
+                    : m_req(req) {}
+        };
+
+        class UpdateCBParam : public BRangeUpdateCBParam<MappingKey, MappingValue> {
+        public:
+            boost::intrusive_ptr<volume_req> m_req;
+
+            UpdateCBParam(boost::intrusive_ptr<volume_req> req, MappingKey &new_key, MappingValue &new_value) :
+                    BRangeUpdateCBParam(new_key, new_value), m_req(req) {}
+        };
+
+#ifndef NDEBUG
+
+        void validate_get_response(uint64_t lba_start, uint32_t n_lba,
+                                   vector<pair<MappingKey, MappingValue>> &values) {
+            uint32_t fetch_no_lbas = 0;
+            uint32_t i = 0;
+            uint64_t last_slba = lba_start;
+            std::stringstream ss;
+            while (i < values.size()) {
+                uint64_t curr_slba = values[i].first.start();
+                uint64_t curr_elba = values[i].first.end();
+                fetch_no_lbas += values[i].first.get_n_lba();
+                if (curr_slba != last_slba) {
+                    //gaps found
+                    assert(0);
+                }
+
+                if (values[i].second.is_valid()) {
+                    ValueEntry ve;
+                    values[i].second.get_array().get(0, ve, false);
+
+                    ss << "Start:" << values[i].first.start() << ",nlba:" << values[i].first.get_n_lba()
+                       << ",BlkId:" << ve.get_blkId() << " && ";
+                } else {
+                    ss << "Invalid ";
+                }
+                last_slba = curr_elba + 1;
+                i++;
+            }
+            assert(fetch_no_lbas == n_lba);
+        }
+
 #endif
 
-    std::error_condition put(boost::intrusive_ptr<volume_req> req, uint64_t lba_uint, uint32_t nblks, struct BlkId blkid);
-};
-
+    };
 }
 
-#endif

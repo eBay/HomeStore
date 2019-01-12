@@ -4,7 +4,7 @@
 //
 
 #include "home_blks.hpp"
-#include <mapping/mapping.cpp>
+#include <mapping/mapping.hpp>
 #include <fstream>
 #include <atomic>
 
@@ -50,7 +50,7 @@ Volume::Volume(vol_params &params) : m_comp_cb(params.io_comp_cb) {
     m_state = vol_state::UNINITED;
     m_map = new mapping(params.size, params.page_size, (std::bind(&Volume::process_metadata_completions, this,
                                  std::placeholders::_1)));
-    auto ret = posix_memalign((void **) &m_sb, HomeStoreConfig::align_size, VOL_SB_SIZE); 
+    posix_memalign((void **) &m_sb, HomeStoreConfig::align_size, VOL_SB_SIZE); 
     assert(m_sb != nullptr);
     m_sb->btree_sb = m_map->get_btree_sb();
     m_sb->state = vol_state::ONLINE;
@@ -59,7 +59,7 @@ Volume::Volume(vol_params &params) : m_comp_cb(params.io_comp_cb) {
     m_sb->uuid = params.uuid;
     memcpy(m_sb->vol_name, params.vol_name, VOL_NAME_SIZE);
     HomeBlks::instance()->vol_sb_init(m_sb);
-    
+    seq_Id=3;
     alloc_single_block_in_mem();
     init_perf_report();
     m_data_blkstore = HomeBlks::instance()->get_data_blkstore();
@@ -81,7 +81,7 @@ Volume::Volume(vol_sb *sb) : m_sb(sb) {
                       (std::bind(&Volume::process_metadata_completions, this,
                                  std::placeholders::_1)));
     }
-
+    seq_Id=3;
     alloc_single_block_in_mem();
     init_perf_report();
     m_data_blkstore = HomeBlks::instance()->get_data_blkstore();
@@ -118,17 +118,17 @@ Volume::blk_recovery_process_completions(bool success) {
 }
 
 void Volume::blk_recovery_callback(MappingValue& mv) {
-    std::vector<std::shared_ptr<MappingInterval>> offset_to_blk_id_list; 
-    // MappingValue to MappingIntervals
-    mv.get_all(offset_to_blk_id_list);
-    // for each mapping interval
-    for (auto& interval : offset_to_blk_id_list) {
-        BlkId bid = interval->m_value.m_blkid;
-        for (std::uint32_t i = bid.m_id; i <= bid.m_id + bid.m_nblks; i++) {
-            // The lower bit stands for the lower BlkID
-            // FIXME: call to blkstore to mark the block allocated;
-        }
-    }
+//    std::vector<std::shared_ptr<MappingInterval>> offset_to_blk_id_list; 
+//    // MappingValue to MappingIntervals
+//    mv.get_all(offset_to_blk_id_list);
+//    // for each mapping interval
+//    for (auto& interval : offset_to_blk_id_list) {
+//        BlkId bid = interval->m_value.m_blkid;
+//        for (std::uint32_t i = bid.m_id; i <= bid.m_id + bid.m_nblks; i++) {
+//            // The lower bit stands for the lower BlkID
+//            // FIXME: call to blkstore to mark the block allocated;
+//        }
+//    }
 }
 
 void 
@@ -154,11 +154,11 @@ void
 homestore::Volume::process_metadata_completions(boost::intrusive_ptr<volume_req> req) {
     assert(!req->is_read);
     assert(!req->isSyncCall);
-   
-    for (std::shared_ptr<Free_Blk_Entry> ptr : req->blkids_to_free_due_to_overwrite) {
-        LOGTRACE("Blocks to free {}", ptr.get()->to_string());
-        m_data_blkstore->free_blk(ptr->blkId, get_page_size() * ptr->blkId_offset, 
-                            get_page_size() * ptr->nblks_to_free);
+
+    for (auto &ptr : req->blkIds_to_free) {
+        LOGINFO("Freeing Blk: {} {} {}",ptr.m_blkId.to_string(), ptr.m_blk_offset, ptr.m_nblks_to_free);
+        m_data_blkstore->free_blk(ptr.m_blkId, BLOCK_SIZE * ptr.m_blk_offset, BLOCK_SIZE * ptr.m_nblks_to_free);
+        LOGINFO("Freed Blk: {} {} {}",ptr.m_blkId.to_string(), ptr.m_blk_offset, ptr.m_nblks_to_free);
     }
    
     req->done = true;
@@ -190,7 +190,13 @@ Volume::process_data_completions(boost::intrusive_ptr<blkstore_req<BlkBuffer>> b
     assert(!req->isSyncCall);
     if (!req->is_read) {
         if (req->err == no_error) {
-            m_map->put(req, req->lba, req->nblks, req->bid);
+            MappingKey key(req->lba, req->nlbas);
+            std::array<uint16_t, CS_ARRAY_STACK_SIZE> carr;
+            //TODO - put actual checksum here @sounak
+            for(auto i =0ul,j= req->lba;j < req->lba+req->nlbas;i++,j++) carr[i] = j%65000;
+            ValueEntry ve(req->seqId,req->bid,0,carr);
+            MappingValue value(ve);
+            m_map->put(req, key,value);
         } else {
             process_metadata_completions(req);
         }
@@ -221,7 +227,7 @@ Volume::print_perf_report() {
 }
 
 std::error_condition
-Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks,
+Volume::write(uint64_t lba, uint8_t *buf, uint32_t nlbas,
         boost::intrusive_ptr<vol_interface_req> req) {
     try {
         assert(m_sb->state == vol_state::ONLINE);
@@ -233,11 +239,11 @@ Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks,
         hints.multiplier = (m_sb->page_size / HomeBlks::instance()->get_data_pagesz());
 
         req->startTime = Clock::now();
-
-        assert((m_sb->page_size * nblks) <= VOL_MAX_IO_SIZE);
+        
+        assert((m_sb->page_size * nlbas) <= VOL_MAX_IO_SIZE);
         {
             CURRENT_CLOCK(startTime)
-                BlkAllocStatus status = m_data_blkstore->alloc_blk(nblks * m_sb->page_size, hints, bid);
+                BlkAllocStatus status = m_data_blkstore->alloc_blk(nlbas * m_sb->page_size, hints, bid);
             if (status != BLK_ALLOC_SUCCESS) {
                 assert(0);
             }
@@ -246,9 +252,9 @@ Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks,
 
         Clock::time_point startTime = Clock::now();
         boost::intrusive_ptr<homeds::MemVector> mvec(new homeds::MemVector());
-        mvec->set(buf, m_sb->page_size * nblks, 0);
+        mvec->set(buf, m_sb->page_size * nlbas, 0);
         uint32_t offset = 0;
-        uint32_t blks_snt = 0;
+        uint32_t lbas_snt = 0;
         uint32_t i = 0;
 
         req->io_cnt = 1;
@@ -261,18 +267,22 @@ Volume::write(uint64_t lba, uint8_t *buf, uint32_t nblks,
 
             child_req->is_read = false;
             child_req->bid = bid[i];
-            child_req->lba = lba + blks_snt;
+            child_req->lba = lba + lbas_snt;
+            //TODO - actual seqId/lastCommit seq id should be comming from vol interface req
+            child_req->seqId = seq_Id.fetch_add(1, memory_order_acquire);
+            child_req->lastCommited_seqId=child_req->seqId-3;//keeping last 3 versions of mapping value
+            
             child_req->vol_instance = m_vol_ptr;
             assert((bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) % m_sb->page_size) == 0);
-            child_req->nblks =  bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) / m_sb->page_size;
+            child_req->nlbas =  bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) / m_sb->page_size;
             boost::intrusive_ptr<BlkBuffer> bbuf = m_data_blkstore->write(bid[i], mvec, offset,
                                 boost::static_pointer_cast<blkstore_req<BlkBuffer>>(child_req),
                                 req_q);
             offset += bid[i].data_size(HomeBlks::instance()->get_data_pagesz());
-            blks_snt += child_req->nblks;
+            lbas_snt += child_req->nlbas;
         }
 
-        assert(blks_snt == nblks);
+        assert(lbas_snt == nlbas);
         
         PerfMetrics::getInstance()->updateHist(VOL_WRITE_H, get_elapsed_time(startTime));
         if (req->io_cnt.fetch_sub(1, std::memory_order_acquire) == 1) {
@@ -292,22 +302,20 @@ void Volume::print_tree() {
     m_map->print_tree();
 }
 
-#ifndef NDEBUG
-void Volume::enable_split_merge_crash_simulation() {
-    m_map->enable_split_merge_crash_simulation();
-}
-#endif
-
 std::error_condition
-Volume::read(uint64_t lba, int nblks, boost::intrusive_ptr<vol_interface_req> req, bool sync) {
+Volume::read(uint64_t lba, int nlbas, boost::intrusive_ptr<vol_interface_req> req, bool sync) {
     try {
         assert(m_sb->state == vol_state::ONLINE);
-        std::vector<std::shared_ptr<Lba_Block>> mappingList;
         Clock::time_point startTime = Clock::now();
 
-        std::error_condition ret = m_map->get(lba, nblks, mappingList);
-
-
+        //seqId shoudl be passed from vol interface req and passed to mapping layer
+        boost::intrusive_ptr<volume_req> volreq(new volume_req());
+        volreq->seqId = seq_Id.fetch_add(1,memory_order_acquire);
+        volreq->lastCommited_seqId = volreq->seqId;//read your writes
+        MappingKey key(lba,nlbas);
+        std::vector<std::pair<MappingKey, MappingValue>> values;
+        std::error_condition ret = m_map->get(volreq, key, values);
+        
         if (ret && ret == homestore_error::lba_not_exist) {
             return ret;
         }
@@ -317,40 +325,45 @@ Volume::read(uint64_t lba, int nblks, boost::intrusive_ptr<vol_interface_req> re
         req->startTime = Clock::now();
         PerfMetrics::getInstance()->updateHist(VOL_MAP_READ_H, get_elapsed_time(startTime));
         startTime = Clock::now();
-
-        for (std::shared_ptr<Lba_Block> bInfo: mappingList) {
-            if (!bInfo->m_blkid_found) {
-                uint8_t i = 0;
-                while (i < bInfo->m_value.m_blkid.get_nblks()) {
-                    buf_info info;
-                    info.buf = m_only_in_mem_buff;
-                    info.size = m_sb->page_size;
-                    info.offset = 0;
-                    req->read_buf_list.push_back(info);
-                    i++;
-                }
+#ifndef NDEBUG
+        auto cur_lba=lba;
+#endif
+        for (auto &value: values) {
+            if (!(value.second.is_valid())) {
+                buf_info info;
+                info.buf = m_only_in_mem_buff;
+                info.size = m_sb->page_size;
+                info.offset = 0;
+                req->read_buf_list.push_back(info);
+#ifndef NDEBUG
+                cur_lba++;
+#endif
             } else {
-                LOGTRACE("Volume - Sending read to blkbuffer - {},{},{}->{}", 
-                        bInfo->m_value.m_blkid.m_id, bInfo->m_interval_length, 
-                        bInfo->m_value.m_blkid_offset, 
-                        bInfo->m_value.m_blkid.to_string());
-
                 boost::intrusive_ptr<volume_req> child_req(new volume_req());
                 req->io_cnt++;
                 child_req->is_read = true;
                 child_req->parent_req = req;
                 child_req->vol_instance = m_vol_ptr;
                 child_req->isSyncCall = sync;
+
+                assert(value.second.get_array().get_total_elements() == 1);
+                ValueEntry ve;
+                (value.second.get_array()).get(0,ve,false);
+
+#ifndef NDEBUG
+                //TODO - at this point, ve has checksum array to verify against later @sounak
+                for(auto i=0ul;i<value.first.get_n_lba();i++,cur_lba++) assert(ve.get_checksum_at(i)==cur_lba%65000);
+#endif
                 boost::intrusive_ptr<BlkBuffer> bbuf = 
-                    m_data_blkstore->read(bInfo->m_value.m_blkid,
-                            m_sb->page_size * bInfo->m_value.m_blkid_offset,
-                            m_sb->page_size * bInfo->m_interval_length,
+                    m_data_blkstore->read(ve.get_blkId(),
+                            m_sb->page_size * ve.get_blk_offset(),
+                            m_sb->page_size * value.first.get_n_lba(),
                             boost::static_pointer_cast<blkstore_req<BlkBuffer>>(
                                 child_req));
                 buf_info info;
                 info.buf = bbuf;
-                info.size = m_sb->page_size * bInfo->m_interval_length ;
-                info.offset = m_sb->page_size * bInfo->m_value.m_blkid_offset ;
+                info.size = m_sb->page_size * value.first.get_n_lba() ;
+                info.offset = m_sb->page_size * ve.get_blk_offset() ;
                 req->read_buf_list.push_back(info);
             }
         }
@@ -414,47 +427,47 @@ BlkAllocBitmapBuilder::~BlkAllocBitmapBuilder() {
 //
 void
 BlkAllocBitmapBuilder::do_work() {
-    mapping* mp = m_vol_handle->get_mapping_handle();
-    MappingBtreeDeclType* bt = mp->get_bt_handle();
-
-    uint64_t max_lba = m_vol_handle->get_last_lba() + 1; 
-
-    uint64_t start_lba = 0, end_lba = 0;
-
-    std::vector<ThreadPool::TaskFuture<void>>   v;
-    
-    while (end_lba < max_lba) {
-        // if high watermark is hit, wait for a while so that we do not consuming too 
-        // much memory pushing new tasks. This is helpful when volume size is extreamly large.
-        if (get_thread_pool().high_watermark()) {
-            std::this_thread::yield();
-            continue;
-        }
-
-        start_lba = end_lba;
-        end_lba = std::min((unsigned long long)max_lba, end_lba + NUM_BLKS_PER_THREAD_TO_QUERY);
-
-        MappingKey start_key(start_lba), end_key(end_lba);
-        auto search_range = BtreeSearchRange(start_key, true, end_key, false);
-        v.push_back(submit_job([=]() {
-            BtreeQueryRequest    qreq(search_range);
-            std::vector<std::pair<MappingKey, MappingValue>>   values;
-            bool has_more = false;
-            do {
-                has_more = bt->query(qreq, values);
-                // for each Mapping Value 
-                for (auto& v : values) {
-                    // callback to caller with this MappingValue
-                    m_blk_recovery_cb(v.second);
-                }
-                values.clear();
-            } while (has_more);
-        } ));
-    }
-
-    for (auto& x : v) {
-        x.get();
-    }
+//    mapping* mp = m_vol_handle->get_mapping_handle();
+//    MappingBtreeDeclType* bt = mp->get_bt_handle();
+//
+//    uint64_t max_lba = m_vol_handle->get_last_lba() + 1; 
+//
+//    uint64_t start_lba = 0, end_lba = 0;
+//
+//    std::vector<ThreadPool::TaskFuture<void>>   v;
+//    
+//    while (end_lba < max_lba) {
+//        // if high watermark is hit, wait for a while so that we do not consuming too 
+//        // much memory pushing new tasks. This is helpful when volume size is extreamly large.
+//        if (get_thread_pool().high_watermark()) {
+//            std::this_thread::yield();
+//            continue;
+//        }
+//
+//        start_lba = end_lba;
+//        end_lba = std::min((unsigned long long)max_lba, end_lba + NUM_BLKS_PER_THREAD_TO_QUERY);
+//
+//        MappingKey start_key(start_lba), end_key(end_lba);
+//        auto search_range = BtreeSearchRange(start_key, true, end_key, false);
+//        v.push_back(submit_job([=]() {
+//            BtreeQueryRequest    qreq(search_range);
+//            std::vector<std::pair<MappingKey, MappingValue>>   values;
+//            bool has_more = false;
+//            do {
+//                has_more = bt->query(qreq, values);
+//                // for each Mapping Value 
+//                for (auto& v : values) {
+//                    // callback to caller with this MappingValue
+//                    m_blk_recovery_cb(v.second);
+//                }
+//                values.clear();
+//            } while (has_more);
+//        } ));
+//    }
+//
+//    for (auto& x : v) {
+//        x.get();
+//    }
 
     // return completed with success to the caller 
     m_comp_cb(true);

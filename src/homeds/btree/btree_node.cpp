@@ -39,7 +39,7 @@ DecBNodeType(void) init_btree_node() {
 }
 
 /************* CRUD on a node ************/
-DecBNodeType(bool) put(const BtreeKey &key, const BtreeValue &val, PutType put_type, std::shared_ptr<BtreeValue> &existing_val) {
+DecBNodeType(bool) put(const BtreeKey &key, const BtreeValue &val, PutType put_type, BtreeValue &existing_val) {
     return call_variant_method(this, put, key, val, put_type, existing_val);
 }
 
@@ -81,33 +81,10 @@ DecBNodeType(auto) find(const BtreeSearchRange &range, BtreeKey *outkey, BtreeVa
     return call_physical_method_const(this, find, range, outkey, outval, copy_key, copy_val);
 }
 
-DecBNodeType(uint32_t) get_all(const BtreeSearchRange& range, uint32_t max_count, std::vector<std::pair<K, V>> &out_values,
-                               const match_item_cb_t& match_cb) const {
-    assert(is_leaf()); // TODO: We do not support get_all for non-leaf because we need to add edge entry to the vector.
-
-    auto count = 0U;
-
-    // Get the start index of the search range.
-    auto start_result = find(range.extract_start_of_range(), nullptr, nullptr);
-    auto start_ind = start_result.end_of_search_index;
-    if (start_result.found && !range.is_start_inclusive()) { start_ind++; }
-
-    // Get the end index of the search range.
-    auto end_result = find(range.extract_end_of_range(), nullptr, nullptr);
-    auto end_ind = end_result.end_of_search_index;
-    if (!end_result.found || !range.is_end_inclusive()) { end_ind--; } // not found entries will point to 1 ind after last in range.
-
-    for (auto i = start_ind; ((i <= end_ind) && (count < max_count)); i++) {
-        K key; V value;
-
-        get_nth_element(i, &key, &value, false);
-        if (!match_cb || match_cb(key, value)) {
-            out_values.emplace_back(std::make_pair<>(key, value));
-            count++;
-        }
-    }
-
-    return count;
+DecBNodeType(uint32_t)get_all(const BtreeSearchRange &range, uint32_t max_count,
+                            int &start_ind, int &end_ind,
+                            std::vector<std::pair<K, V>> *out_values) {
+    return call_physical_method(this, get_all, range, max_count, start_ind, end_ind, out_values);
 }
 
 DecBNodeType(std::string) to_string() const {
@@ -173,8 +150,9 @@ DecBNodeType(bool) is_valid_node() const {
     return call_variant_method_const(this, is_valid_node);
 }
 ///////////// Move and Delete related operations on a node //////////////
-DecBNodeType(bool) is_split_needed(const BtreeConfig &cfg, const BtreeKey &k, const BtreeValue &v, int *out_ind_hint) const {
-    return call_variant_method_const(this, is_split_needed, cfg, k, v, out_ind_hint);
+DecBNodeType(bool) is_split_needed(const BtreeConfig &cfg, const BtreeKey &k, const BtreeValue &v, int *out_ind_hint,
+                                   PutType &putType, BtreeUpdateRequest<K,V> *bur ) const {
+    return call_variant_method_const(this, is_split_needed, cfg, k, v, out_ind_hint, putType, bur);
 }
 DecBNodeType(bool) is_merge_needed(const BtreeConfig &cfg) const {
     return call_variant_method_const(this, is_merge_needed, cfg);
@@ -268,6 +246,9 @@ DecBNodeType(int) compare_nth_key_range(const BtreeSearchRange &range, int ind) 
     return call_variant_method_const(this, compare_nth_key_range, range, ind);
 }
 
+DecBNodeType(void) get_edge_value(BtreeValue *outval) const{
+    call_physical_method_const(this, get_edge_value, outval);
+}
 DecBNodeType(void) get_nth_element(int n, BtreeKey *out_key, BtreeValue *out_val, bool is_copy) const {
     if (out_key) { get_nth_key(n, out_key, is_copy); }
     if (out_val) { get_nth_value(n, out_val, is_copy); }

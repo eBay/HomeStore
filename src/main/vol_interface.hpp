@@ -38,6 +38,7 @@ struct vol_interface_req {
     std::error_condition err;
     std::atomic<int> io_cnt;
     std::atomic<int> m_refcount;
+
     friend void intrusive_ptr_add_ref(vol_interface_req *req) {
         req->m_refcount.fetch_add(1, std::memory_order_acquire);
     }
