@@ -23,6 +23,7 @@
 #include "homeds/array/sparse_vector.hpp"
 #include "iomgr/iomgr.hpp"
 #include "endpoint/drive_endpoint.hpp"
+#include "homeds/utility/useful_defs.hpp"
 
 namespace homestore {
 
@@ -273,12 +274,32 @@ private:
     uint64_t m_vdev_metadata_size;
 };
 
+class PhysicalDevMetrics : public sisl::MetricsGroupWrapper {
+public:
+    explicit PhysicalDevMetrics(const std::string& devname) : sisl::MetricsGroupWrapper(devname) {
+        REGISTER_COUNTER(drive_sync_write_count, "Drive sync write count");
+        REGISTER_COUNTER(drive_sync_read_count, "Drive sync read count");
+        REGISTER_COUNTER(drive_async_write_count, "Drive async write count");
+        REGISTER_COUNTER(drive_async_read_count, "Drive async read count");
+        REGISTER_COUNTER(drive_write_vector_count, "Total Count of buffer provided for write");
+        REGISTER_COUNTER(drive_read_vector_count, "Total Count of buffer provided for read");
+        REGISTER_COUNTER(drive_read_errors, "Total drive read errors");
+        REGISTER_COUNTER(drive_write_errors, "Total drive write errors");
+        REGISTER_COUNTER(drive_spurios_events, "Total number of spurious events per drive");
+
+        REGISTER_HISTOGRAM(drive_write_latency, "BlkStore drive write latency in us");
+        REGISTER_HISTOGRAM(drive_read_latency, "BlkStore drive read latency in us");
+
+        register_me_to_farm();
+    }
+};
+
 class PhysicalDev {
     friend class PhysicalDevChunk;
     friend class DeviceManager;
 public:
 
-    PhysicalDev(DeviceManager *mgr, std::string devname, int const oflags, std::shared_ptr<iomgr::ioMgr> iomgr,
+    PhysicalDev(DeviceManager *mgr, const std::string& devname, int const oflags, std::shared_ptr<iomgr::ioMgr> iomgr,
                 homeio::comp_callback cb, boost::uuids::uuid uuid, uint32_t dev_num, 
                 uint64_t dev_offset, uint32_t is_file, bool is_init, uint64_t dm_info_size, bool &is_inited);
     ~PhysicalDev() = default;
@@ -287,45 +308,19 @@ public:
     void attach_superblock_chunk(PhysicalDevChunk *chunk);
     uint64_t sb_gen_cnt();
     
-    int get_devfd() const {
-        return m_devfd;
-    }
+    int get_devfd() const { return m_devfd; }
+    std::string get_devname() const { return m_devname; }
+    uint64_t get_size() const { return m_devsize; }
+    boost::uuids::uuid get_uuid() const { return m_info_blk.uuid; }
+    uint32_t get_first_chunk_id() const { return m_info_blk.first_chunk_id; }
+    uint64_t get_dev_offset() const { return m_info_blk.dev_offset; }
+    uint32_t get_dev_id() const { return m_info_blk.dev_num; }
+    PhysicalDevMetrics& get_metrics() { return m_metrics; }
 
-    std::string get_devname() const {
-        return m_devname;
-    }
+    void set_dev_offset(uint64_t offset) { m_info_blk.dev_offset = offset; }
+    void set_dev_id(uint32_t id) { m_info_blk.dev_num = id; }
 
-    uint64_t get_size() const {
-        return m_devsize;
-    }
-
-    boost::uuids::uuid get_uuid() const {
-        return m_info_blk.uuid;
-    }
-
-    void set_dev_offset(uint64_t offset) {
-        m_info_blk.dev_offset = offset;
-    }
-
-    uint32_t get_first_chunk_id() {
-        return m_info_blk.first_chunk_id;
-    }
-
-    uint64_t get_dev_offset() const {
-        return m_info_blk.dev_offset;
-    }
-
-    void set_dev_id(uint32_t id) {
-        m_info_blk.dev_num = id;
-    }
-
-    uint32_t get_dev_id() const {
-        return m_info_blk.dev_num;
-    }
-
-    DeviceManager *device_manager() const {
-        return m_mgr;
-    }
+    DeviceManager *device_manager() const { return m_mgr; }
 
     std::string to_string();
     /* Attach the given chunk to the list of chunks in the physical device. Parameter after provides the position
@@ -374,18 +369,20 @@ private:
     bool validate_device();
 
 private:
-    DeviceManager     *m_mgr;              // Back pointer to physical device
-    int                m_devfd;
-    std::string        m_devname;
-    super_block        *m_super_blk; // Persisent header block
-    uint64_t           m_devsize;
-    static homeio::DriveEndPoint *ep; // one instance for all physical devices
-    homeio::comp_callback comp_cb;
-    std::shared_ptr<iomgr::ioMgr> iomgr;
-    struct pdev_info_block m_info_blk;
-    int m_cur_indx;
-    PhysicalDevChunk *m_dm_chunk[2];
-    bool m_superblock_valid;
+    static homeio::DriveEndPoint*   ep;          // one instance for all physical devices
+
+    DeviceManager*                  m_mgr;       // Back pointer to physical device
+    int                             m_devfd;
+    std::string                     m_devname;
+    super_block*                    m_super_blk; // Persisent header block
+    uint64_t                        m_devsize;
+    homeio::comp_callback           m_comp_cb;
+    std::shared_ptr<iomgr::ioMgr>   m_iomgr;
+    struct pdev_info_block          m_info_blk;
+    PhysicalDevChunk *              m_dm_chunk[2];
+    PhysicalDevMetrics              m_metrics;      // Metrics instance per physical device
+    int                             m_cur_indx;
+    bool                            m_superblock_valid;
 };
 
 class AbstractVirtualDev {

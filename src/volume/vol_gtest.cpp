@@ -10,6 +10,7 @@
 #include <homeds/bitmap/bitset.hpp>
 #include <atomic>
 #include <string>
+#include <utility/thread_buffer.hpp>
 extern "C" {
 #include <fcntl.h>
 #include <sys/epoll.h>
@@ -18,6 +19,8 @@ extern "C" {
 }
 
 using namespace homestore;
+
+THREAD_BUFFER_INIT;
 
 /************************** GLOBAL VARIABLES ***********************/
 

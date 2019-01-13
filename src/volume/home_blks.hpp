@@ -64,6 +64,8 @@ struct vol_sb : vol_sb_header {
     boost::uuids::uuid uuid;
     char vol_name[VOL_NAME_SIZE];
     homeds::btree::btree_super_block btree_sb;
+
+    uint64_t get_page_size() const { return page_size; }
 }__attribute((packed));
 
 #define BLKSTORE_BUFFER_TYPE homeds::btree::BtreeBuffer<MappingKey, MappingValue,homeds::btree::BTREE_NODETYPE_VAR_VALUE, \
@@ -71,7 +73,7 @@ struct vol_sb : vol_sb_header {
 #define MappingBtreeDeclType     homeds::btree::Btree<homeds::btree::SSD_BTREE, MappingKey, MappingValue, \
                                     homeds::btree::BTREE_NODETYPE_VAR_VALUE, homeds::btree::BTREE_NODETYPE_VAR_VALUE,\
                                     8192, writeback_req>
-class HomeBlks:VolInterface {
+class HomeBlks : public VolInterface {
     static HomeBlks *_instance;
     
     init_params m_cfg;
@@ -102,10 +104,11 @@ public:
                                       boost::intrusive_ptr<vol_interface_req> req) override;
     virtual std::error_condition sync_read(std::shared_ptr<Volume> vol, uint64_t lba, int nblks, 
                                       boost::intrusive_ptr<vol_interface_req> req) override;
-    virtual std::shared_ptr<Volume> createVolume(vol_params &params) override;
+    virtual std::shared_ptr<Volume> createVolume(const vol_params &params) override;
+
     virtual std::error_condition removeVolume(boost::uuids::uuid const &uuid) override;
     virtual std::shared_ptr<Volume> lookupVolume(boost::uuids::uuid const &uuid) override;
-    virtual char* get_name(std::shared_ptr<Volume> vol) override;
+    virtual const char* get_name(std::shared_ptr<Volume> vol) override;
     virtual uint64_t get_page_size(std::shared_ptr<Volume> vol) override;
     virtual uint64_t get_size(std::shared_ptr<Volume> vol) override;
     virtual homeds::blob at_offset(boost::intrusive_ptr<BlkBuffer> buf, uint32_t offset) override;

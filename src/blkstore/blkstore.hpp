@@ -73,9 +73,29 @@ struct blkstore_req : writeback_req {
     };
 };
 
+class BlkStoreMetrics : public sisl::MetricsGroupWrapper {
+public:
+    explicit BlkStoreMetrics(const char *grp_name) : sisl::MetricsGroupWrapper(grp_name) {
+        REGISTER_COUNTER(blkstore_reads_count, "BlkStore total reads");
+        REGISTER_COUNTER(blkstore_writes_count, "BlkStore total writes");
+        REGISTER_COUNTER(blkstore_cache_hits_count, "BlkStore Cache hits");
+        REGISTER_COUNTER(blkstore_outstanding_reads, "Outstanding Read IOs at a given point", "",
+                         sisl::_publish_as::publish_as_gauge);
+        REGISTER_COUNTER(blkstore_outstanding_writes, "Outstanding Write IOs at a given point", "",
+                         sisl::_publish_as::publish_as_gauge);
+
+        REGISTER_HISTOGRAM(blkstore_cache_read_latency, "BlkStore cache read latency");
+        REGISTER_HISTOGRAM(blkstore_cache_write_latency, "BlkStore cache write latency");
+        REGISTER_HISTOGRAM(blkstore_drive_write_latency, "BlkStore driver write latency");
+
+        register_me_to_farm();
+    }
+};
+
 template <typename BAllocator, typename Buffer = BlkBuffer>
 class BlkStore {
     typedef std::function< void (boost::intrusive_ptr<blkstore_req<Buffer>> req) > comp_callback;
+
 public:
     BlkStore(DeviceManager *mgr, Cache< BlkId > *cache, uint64_t size, BlkStoreCacheType cache_type,
              uint32_t mirrors, comp_callback comp_cb, char *blob, uint64_t context_size, uint64_t page_size) :
@@ -90,8 +110,8 @@ public:
             m_cache_type(cache_type),
             m_vdev(mgr, context_size, mirrors, true, m_pagesz, mgr->get_all_devices(), 
                     (std::bind(&BlkStore::process_completions, 
-                    this, std::placeholders::_1)), blob, size), m_comp_cb(comp_cb) {
-    }
+                    this, std::placeholders::_1)), blob, size), m_comp_cb(comp_cb),
+            m_metrics("BlkStore") {}
     
     BlkStore(DeviceManager *mgr, Cache< BlkId > *cache, uint64_t size, BlkStoreCacheType cache_type,
              uint32_t mirrors, char *blob, uint64_t context_size, uint64_t page_size) :
@@ -105,7 +125,8 @@ public:
                                 { this->writeback_free_blkid(req, status); })),
             m_cache_type(cache_type),
             m_vdev(mgr, context_size, mirrors, true, m_pagesz, mgr->get_all_devices(), (std::bind(&BlkStore::process_completions, 
-                    this, std::placeholders::_1)), blob, size) {
+                    this, std::placeholders::_1)), blob, size),
+            m_metrics("BlkStore"){
     }
 
     BlkStore(DeviceManager *mgr, Cache< BlkId > *cache, 
@@ -121,7 +142,8 @@ public:
             m_cache_type(cache_type),
             m_vdev(mgr, vb, (std::bind(&BlkStore::process_completions, this, 
 			     std::placeholders::_1))), 
-	    m_comp_cb(comp_cb) {
+	    m_comp_cb(comp_cb),
+        m_metrics("BlkStore") {
     }
     
     BlkStore(DeviceManager *mgr, Cache< BlkId > *cache, 
@@ -136,7 +158,8 @@ public:
                                { this->writeback_free_blkid(req, status); })),
             m_cache_type(cache_type),
             m_vdev(mgr, vb, (std::bind(&BlkStore::process_completions, this, 
-			     std::placeholders::_1))) {
+			     std::placeholders::_1))),
+            m_metrics("BlkStore") {
     }
 
     void attach_compl(comp_callback comp_cb) {
@@ -152,8 +175,7 @@ public:
     }
 
     void process_completions(boost::intrusive_ptr<virtualdev_req> v_req) {
-        boost::intrusive_ptr<blkstore_req<Buffer>> req = 
-            boost::static_pointer_cast< blkstore_req<Buffer> >(v_req);
+        boost::intrusive_ptr<blkstore_req<Buffer>> req = boost::static_pointer_cast< blkstore_req<Buffer> >(v_req);
 
         assert(req->err == no_error);
         if (!req->is_read) {
@@ -168,8 +190,7 @@ public:
             return;
         }
 
-        int cnt = req->blkstore_ref_cnt.fetch_sub(1, 
-                std::memory_order_relaxed);
+        int cnt = req->blkstore_ref_cnt.fetch_sub(1, std::memory_order_relaxed);
         if (cnt != 1) {
             return;
         }
@@ -187,27 +208,24 @@ public:
             }
         }
 
-        req->missing_pieces.erase(req->missing_pieces.begin(), 
-                                  req->missing_pieces.end());
+        req->missing_pieces.erase(req->missing_pieces.begin(), req->missing_pieces.end());
         m_comp_cb(req);
     }
 
     void update_cache(boost::intrusive_ptr<blkstore_req<Buffer>> req) {
-        Clock::time_point cache_startTime = Clock::now();
+        Clock::time_point start_time = Clock::now();
         
         for (uint32_t i = 0; i < req->missing_pieces.size(); i++) {
             boost::intrusive_ptr< Buffer >bbuf = req->bbuf;
 
             bool inserted = bbuf->update_missing_piece(req->missing_pieces[i].offset, 
-                                                 req->missing_pieces[i].size, 
-                                                 req->missing_pieces[i].ptr);
+                                                 req->missing_pieces[i].size, req->missing_pieces[i].ptr);
             if (!inserted) {
                 /* someone else has inserted it */
                 free(req->missing_pieces[i].ptr);
             }
         }
-        PerfMetrics::getInstance()->updateHist(BLKSTR_CACHE_READS_H,
-                                    get_elapsed_time(cache_startTime));
+        HISTOGRAM_OBSERVE(m_metrics, blkstore_cache_read_latency, get_elapsed_time(start_time));
     }
 
     /* Allocate a new block of the size based on the hints provided */
@@ -223,8 +241,7 @@ public:
         return(m_vdev.alloc_blk(in_blkid));
     }
 
-    BlkAllocStatus alloc_blk(uint32_t size, blk_alloc_hints &hints, 
-            BlkId *out_blkid) {
+    BlkAllocStatus alloc_blk(uint32_t size, blk_alloc_hints &hints, BlkId *out_blkid) {
         // Allocate a block from the device manager
         assert(size % m_pagesz == 0);
         auto nblks = size / m_pagesz;
@@ -273,17 +290,14 @@ public:
     }
 
     void cache_buf_erase_cb(boost::intrusive_ptr< Buffer > erased_buf,
-                                    std::deque<boost::intrusive_ptr<homestore::writeback_req>> 
-                                                     dependent_req_q, const BlkId bid) {
+            std::deque<boost::intrusive_ptr<homestore::writeback_req>>& dependent_req_q, const BlkId bid) {
         assert(is_read_modify_cache());
         if (is_write_back_cache()) {
             boost::intrusive_ptr< blkstore_req<Buffer> >req(new blkstore_req<Buffer> ());
             req->bid = bid;
             req->bbuf = erased_buf;
             
-            m_wb_cache.free_blk(req->bbuf,
-                                boost::static_pointer_cast<writeback_req>(req), 
-                                dependent_req_q);
+            m_wb_cache.free_blk(req->bbuf, boost::static_pointer_cast<writeback_req>(req), dependent_req_q);
         } else {
             m_vdev.free_blk(bid);
         }
@@ -293,10 +307,8 @@ public:
     /* Free the block previously allocated. Blkoffset refers to number of blks to skip in the BlkId and
      * nblks refer to the total blks from offset to free. 
      */
-    void free_blk(const BlkId &bid, boost::optional< uint32_t > size_offset,
-                                    boost::optional< uint32_t > size, 
-                                    std::deque<boost::intrusive_ptr<homestore::writeback_req>> 
-                                                     &dependent_req_q) {
+    void free_blk(const BlkId &bid, boost::optional< uint32_t > size_offset, boost::optional< uint32_t > size,
+                  std::deque<boost::intrusive_ptr<homestore::writeback_req>> &dependent_req_q) {
         boost::intrusive_ptr< Buffer > erased_buf(nullptr);
         bool found = false;
 
@@ -311,10 +323,9 @@ public:
 
         if (is_read_modify_cache()) {
             assert(size_offset.get_value_or(0) == 0 && size.get_value_or(0) == bid.data_size(m_pagesz));
-            m_cache->safe_erase(bid, [this, bid, dependent_req_q](boost::intrusive_ptr< CacheBuffer<BlkId> > erased_buf) {
-                                        this->cache_buf_erase_cb(
-                                        boost::static_pointer_cast<Buffer>(erased_buf),
-                                        dependent_req_q, bid);
+            m_cache->safe_erase(bid, [this, bid, &dependent_req_q](boost::intrusive_ptr< CacheBuffer<BlkId> > erased_buf) {
+                                        this->cache_buf_erase_cb(boost::static_pointer_cast<Buffer>(erased_buf),
+                                                dependent_req_q, bid);
                                     });
             /* cache will raise callback when ref_cnt becomes zero */
             return;
@@ -330,9 +341,7 @@ public:
             req->bid = tmp_bid;
             req->bbuf = erased_buf;
             
-            m_wb_cache.free_blk(erased_buf,
-                                boost::static_pointer_cast<writeback_req>(req), 
-                                dependent_req_q);
+            m_wb_cache.free_blk(erased_buf, boost::static_pointer_cast<writeback_req>(req), dependent_req_q);
         } else {
             assert(dependent_req_q.empty());
             m_vdev.free_blk(tmp_bid);
@@ -350,14 +359,13 @@ public:
     void writeback_persist_blkid(boost::intrusive_ptr<writeback_req> wb_req, 
                                  std::error_condition status) {
             
-        boost::intrusive_ptr<blkstore_req<Buffer>> req = 
-            boost::static_pointer_cast< blkstore_req<Buffer> >(wb_req);
+        boost::intrusive_ptr<blkstore_req<Buffer>> req = boost::static_pointer_cast< blkstore_req<Buffer> >(wb_req);
         if (status != no_error) {
             req->err = status;
             process_completions(boost::static_pointer_cast<virtualdev_req>(req));
         } else {
-            m_vdev.write(req->bid, m_wb_cache.writeback_get_memvec(req), 
-                boost::static_pointer_cast<virtualdev_req>(req));
+            m_vdev.write(req->bid, m_wb_cache.writeback_get_memvec(req),
+                    boost::static_pointer_cast<virtualdev_req>(req));
         }
     }
 
@@ -374,7 +382,6 @@ public:
     }
 
     void write(BlkId &bid, homeds::MemVector &mvec) {
-        
         m_vdev.write(bid, mvec, nullptr, 0);
     }
 
@@ -389,11 +396,10 @@ public:
      * same buffer but different offsets.
      */
     boost::intrusive_ptr< Buffer > write(BlkId &bid, 
-            boost::intrusive_ptr<homeds::MemVector> mvec,
-            int data_offset,
-            boost::intrusive_ptr<blkstore_req<Buffer>> req, 
-            std::deque<boost::intrusive_ptr<writeback_req>> &dependent_req_q) {
-       
+                                         boost::intrusive_ptr<homeds::MemVector> mvec,
+                                         int data_offset,
+                                         boost::intrusive_ptr<blkstore_req<Buffer>> req,
+                                         std::deque<boost::intrusive_ptr<writeback_req>> &dependent_req_q) {
         /* TODO: add try and catch exception */
         auto buf = Buffer::make_object();
         buf->set_key(bid);
@@ -405,7 +411,7 @@ public:
          * First try to create/insert a record for this blk id in the cache. 
          * If it already exists, it will simply upvote the item.
          */
-        PerfMetrics::getInstance()->incrCntr(BLKSTR_WRITES_C, 1);
+        COUNTER_INCREMENT(m_metrics, blkstore_writes_count, 1);
 
         /* we don't support any dependent writes on the bid have blocks more then 1.
          * It is implemented primarity for async btree in which write size is not
@@ -414,7 +420,7 @@ public:
          * of dependent writes a little complicated.
          */
         assert(bid.get_nblks() == 1 || dependent_req_q.empty());
-        CURRENT_CLOCK(cache_startTime);
+        CURRENT_CLOCK(cache_start_time);
         uint8_t *ptr;
         
         // Insert this buffer to the cache.
@@ -424,9 +430,8 @@ public:
                                         (boost::intrusive_ptr< CacheBuffer< BlkId>> *) &out_bbuf);
         /* While writing, we should not insert a blkid which already exist in the cache */
         assert(ibuf.get() == out_bbuf.get());
-        PerfMetrics::getInstance()->updateHist(BLKSTR_CACHE_WRITES_H,
-                                    get_elapsed_time(cache_startTime));
         assert(inserted);
+        HISTOGRAM_OBSERVE(m_metrics, blkstore_cache_write_latency, get_elapsed_time(cache_start_time));
 
         req->bbuf = ibuf;
 
@@ -434,19 +439,16 @@ public:
         if (is_write_back_cache() && !req->isSyncCall) {
             req->bid = bid;
             req->data_offset = data_offset;
-            m_wb_cache.write_blk(ibuf, 
-                                 boost::static_pointer_cast<writeback_req>(req),
-                                 dependent_req_q);
+            m_wb_cache.write_blk(ibuf, boost::static_pointer_cast<writeback_req>(req), dependent_req_q);
             return ibuf;
         }
 
         assert(dependent_req_q.empty());
         // Now write data to the device
-        CURRENT_CLOCK(write_startTime);
+        CURRENT_CLOCK(write_start_time);
         // TODO: rishabh, need to check the return status
-        m_vdev.write(bid, ibuf->get_memvec(), 
-                      boost::static_pointer_cast<virtualdev_req>(req), data_offset);
-        PerfMetrics::getInstance()->updateHist(BLKSTR_WRITES_H, get_elapsed_time(write_startTime));
+        m_vdev.write(bid, ibuf->get_memvec(), boost::static_pointer_cast<virtualdev_req>(req), data_offset);
+        HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_write_latency, get_elapsed_time(write_start_time));
         return ibuf;
     }
 
@@ -458,21 +460,17 @@ public:
         if (is_write_back_cache() && !req->isSyncCall) {
             req->bid = bid;
             req->bbuf = in_buf;
-            m_wb_cache.write_blk(in_buf, 
-                                 boost::static_pointer_cast<writeback_req>(req),
-                                 dependent_req_q);
+            m_wb_cache.write_blk(in_buf, boost::static_pointer_cast<writeback_req>(req), dependent_req_q);
             return;
         }
         assert(dependent_req_q.empty());
-        m_vdev.write(bid, in_buf->get_memvec(), 
-                        boost::static_pointer_cast<virtualdev_req>(req), req->data_offset);
+        m_vdev.write(bid, in_buf->get_memvec(), boost::static_pointer_cast<virtualdev_req>(req), req->data_offset);
     }
 
     /* Read the data for given blk id and size. This method allocates the required memory if not present in the cache
      * and returns an smart ptr to the Buffer */
-    boost::intrusive_ptr< Buffer > read(BlkId &bid, uint32_t offset, 
-                                        uint32_t size, 
-                                        boost::intrusive_ptr<blkstore_req<Buffer>> req) {
+    boost::intrusive_ptr< Buffer > read(BlkId &bid, uint32_t offset, uint32_t size,
+            boost::intrusive_ptr<blkstore_req<Buffer>> req) {
                                         
         int cur_ind = 0;
         uint32_t cur_offset = offset;
@@ -495,8 +493,7 @@ public:
 
             /* insert it into cache */
             boost::intrusive_ptr< Buffer > new_bbuf;
-            bool inserted = m_cache->insert(bbuf->get_key(),
-                    boost::static_pointer_cast<CacheBuffer<BlkId>>(bbuf),
+            bool inserted = m_cache->insert(bbuf->get_key(), boost::static_pointer_cast<CacheBuffer<BlkId>>(bbuf),
                     (boost::intrusive_ptr< CacheBuffer<BlkId> > *)&new_bbuf);
             if (!inserted) {
                 /* Between get and insert, other thread tried the same thing and
@@ -506,7 +503,7 @@ public:
                 bbuf = new_bbuf;
             }
         } else {
-            PerfMetrics::getInstance()->incrCntr(BLKSTR_CACHE_HITS_C, 1);
+            COUNTER_INCREMENT(m_metrics, blkstore_cache_hits_count, 1);
         }
 
         req->bbuf = bbuf;
@@ -549,7 +546,7 @@ public:
                 req->blkstore_ref_cnt.fetch_sub(1, std::memory_order_acquire);
             }
 
-            PerfMetrics::getInstance()->incrCntr(BLKSTR_READS_C, 1);
+            COUNTER_INCREMENT(m_metrics, blkstore_reads_count, 1);
         }
 
         assert(req->err == no_error);
@@ -590,8 +587,7 @@ public:
     void reset_vdev_failed_state() {
         m_vdev.reset_failed_state();
     }
-    boost::intrusive_ptr<writeback_req> read_locked(boost::intrusive_ptr< Buffer > buf, 
-                                                bool is_write_modifiable) {
+    boost::intrusive_ptr<writeback_req> read_locked(boost::intrusive_ptr< Buffer > buf, bool is_write_modifiable) {
         assert(buf.get());
         if (is_write_back_cache()) {
             return(m_wb_cache.writeBack_cache_read(buf, is_write_modifiable));
@@ -613,14 +609,13 @@ public:
     };
 
 private:
-        uint32_t m_pagesz;
-        Cache< BlkId > *m_cache;
-        WriteBackCache< BlkId > m_wb_cache;
-        BlkStoreCacheType m_cache_type;
-        VirtualDev<BAllocator, RoundRobinDeviceSelector> m_vdev;
-        comp_callback m_comp_cb;
-    };
-
-
+    uint32_t m_pagesz;
+    Cache< BlkId > *m_cache;
+    WriteBackCache< BlkId > m_wb_cache;
+    BlkStoreCacheType m_cache_type;
+    VirtualDev<BAllocator, RoundRobinDeviceSelector> m_vdev;
+    comp_callback m_comp_cb;
+    BlkStoreMetrics m_metrics;
+};
 }
 #endif //OMSTORE_BLKSTORE_HPP

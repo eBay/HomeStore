@@ -34,7 +34,8 @@ struct writeback_req : virtualdev_req {
     std::deque<boost::intrusive_ptr<writeback_req>> req_q;
 
     /* issue this request when the cnt become zero */
-    atomic<int> dependent_cnt;
+    std::atomic<int> dependent_cnt;
+
 #ifndef NDEBUG
     /* Queue of the requests which should be written before this req is written */
     std::vector<boost::intrusive_ptr<writeback_req>> dependent_req_q;
@@ -57,8 +58,8 @@ struct writeback_req : virtualdev_req {
     }
 };
 
-template <typename Buffer>
-struct WriteBackCacheBuffer : public CacheBuffer< Buffer > {
+template <typename K>
+struct WriteBackCacheBuffer : public CacheBuffer< K > {
     mutex mtx;
     int gen_cnt;
     /* TODO, it will be removed, once safe_evict is implmented */
@@ -86,12 +87,12 @@ struct WriteBackCacheBuffer : public CacheBuffer< Buffer > {
         assert(pending_req_q.empty());
 #endif
     }
-    friend void intrusive_ptr_add_ref(WriteBackCacheBuffer<Buffer> *buf) {
-        intrusive_ptr_add_ref((CacheBuffer< Buffer > *) buf);
+    friend void intrusive_ptr_add_ref(WriteBackCacheBuffer< K > *buf) {
+        intrusive_ptr_add_ref((CacheBuffer< K > *) buf);
     }
 
-    friend void intrusive_ptr_release(WriteBackCacheBuffer<Buffer> *buf) {
-        intrusive_ptr_release((CacheBuffer< Buffer > *) buf);
+    friend void intrusive_ptr_release(WriteBackCacheBuffer< K > *buf) {
+        intrusive_ptr_release((CacheBuffer< K > *) buf);
     }
 };
 
@@ -110,8 +111,8 @@ public:
                     m_cache(cache) {};
     
     void writeBack_write_internal(boost::intrusive_ptr<CacheBuffer<Buffer>> cache_buf,
-              boost::intrusive_ptr<writeback_req> req, 
-              std::deque<boost::intrusive_ptr<writeback_req>> &dependent_req_q) {
+                                  boost::intrusive_ptr<writeback_req> req,
+                                  std::deque<boost::intrusive_ptr<writeback_req>> &dependent_req_q) {
     
         boost::intrusive_ptr<WriteBackCacheBuffer<Buffer>> buf = 
             boost::static_pointer_cast<WriteBackCacheBuffer<Buffer>>(cache_buf);
@@ -136,8 +137,7 @@ public:
         req->memvec.copy(buf->get_memvec());
         
         /* every write should have the different gen_cnt then the last write req sent */
-        assert(!buf->last_pending_req || 
-               req->mem_gen_cnt > buf->last_pending_req->mem_gen_cnt);
+        assert(!buf->last_pending_req || (req->mem_gen_cnt > buf->last_pending_req->mem_gen_cnt));
         buf->last_pending_req = req;
 #ifndef NDEBUG
         buf->pending_req_q.push_back(req);
@@ -243,14 +243,12 @@ public:
             depend_req->dependent_cnt--;
             assert(depend_req->dependent_cnt >= 0);
             if (depend_req->state != WB_REQ_PENDING) {
-                assert(depend_req->state == WB_REQ_SCANNING || 
-                        depend_req->status != no_error);
+                assert(depend_req->state == WB_REQ_SCANNING || depend_req->status != no_error);
                 continue;
             }
             if (depend_req->dependent_cnt == 0 || status != no_error) {
                 depend_req->state = WB_REQ_SENT;
-                depend_req->status = ((status == no_error) ? no_error : 
-                                         homestore_error::dependent_req_failed);
+                depend_req->status = ((status == no_error) ? no_error : homestore_error::dependent_req_failed);
                 mtx.unlock();
                 (*(depend_req->blkstore_cb))(depend_req, depend_req->status);
             }
@@ -328,8 +326,7 @@ public:
         writeBack_write_internal(cache_buf, req, dependent_req_q); 
     }
     
-    const homeds::MemVector 
-            &writeback_get_memvec(boost::intrusive_ptr<writeback_req> req) const {
+    const homeds::MemVector &writeback_get_memvec(boost::intrusive_ptr<writeback_req> req) const {
         return req->memvec;
     }
 };

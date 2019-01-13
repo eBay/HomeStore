@@ -7,13 +7,16 @@
 #include "physical_node.hpp"
 #include "btree_internal.h"
 #include "btree_store.hpp"
+#include <utility/atomic_counter.hpp>
+#include <cstdint>
 
 namespace homeds { namespace btree {
 
-typedef struct {
-    homeds::atomic_counter< uint16_t > upgraders;
+//using namespace sisl;
+struct transient_hdr_t {
+    sisl::atomic_counter< uint16_t > upgraders;
     folly::SharedMutexReadPriority lock;
-} transient_hdr_t;
+};
 
 template< btree_node_type NodeType, typename K, typename V, size_t NodeSize >
 class VariantNode {

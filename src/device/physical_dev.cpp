@@ -14,7 +14,6 @@
 #include <iostream>
 #include <folly/Exception.h>
 #include <boost/utility.hpp>
-#include "homeds/utility/useful_defs.hpp"
 #ifdef __linux__
 #include <linux/fs.h>
 #include <sys/ioctl.h> 
@@ -73,13 +72,18 @@ PhysicalDev::attach_superblock_chunk(PhysicalDevChunk *chunk) {
 }
 
 PhysicalDev::PhysicalDev(DeviceManager *mgr,
-                         std::string devname,
+                         const std::string& devname,
                          int const oflags,
                          std::shared_ptr<iomgr::ioMgr> iomgr,
-                         homeio::comp_callback cb, boost::uuids::uuid uuid, 
+                         homeio::comp_callback cb,
+                         boost::uuids::uuid uuid,
                          uint32_t dev_num, uint64_t dev_offset, uint32_t is_file, bool is_init, uint64_t dm_info_size, 
                          bool &is_inited) :
-        m_mgr(mgr), m_devname(devname), comp_cb(cb), iomgr(iomgr) {
+        m_mgr(mgr),
+        m_devname(devname),
+        m_comp_cb(cb),
+        m_iomgr(iomgr),
+        m_metrics("Physical_Device_" + devname) {
 
     struct stat stat_buf;
     stat(devname.c_str(), &stat_buf);

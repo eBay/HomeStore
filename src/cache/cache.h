@@ -6,7 +6,7 @@
 
 //#include "eviction.cpp"
 #include "eviction.hpp"
-#include "homeds/utility/atomic_counter.hpp"
+#include <utility/atomic_counter.hpp>
 #include "homeds/hash/intrusive_hashset.hpp"
 #include "lru_eviction.hpp"
 #include <boost/intrusive_ptr.hpp>
@@ -133,7 +133,7 @@ class CacheBuffer : public CacheRecord {
 public:
     K m_key;                                        // Key to access this cache
     boost::intrusive_ptr<homeds::MemVector> m_mem;   // Memory address which is what this buffer contained with
-    homeds::atomic_counter< uint32_t > m_refcount;  // Refcount
+    sisl::atomic_counter< uint32_t > m_refcount;  // Refcount
     uint32_t m_data_offset; // offset in m_mem that it points to
     std::atomic<uint32_t> m_cache_size; // size inserted in a cache
     std::atomic<bool> m_can_free;
@@ -147,7 +147,7 @@ public:
     cache_buf_state m_state;
 
 #ifndef NDEBUG
-    homeds::atomic_counter< int32_t > m_indx;  // Refcount
+    sisl::atomic_counter< int32_t > m_indx;  // Refcount
 #define MAX_ENTRIES 50
     void* arr_symbols[MAX_ENTRIES];
     /* to see if it is data buf or btree buf */

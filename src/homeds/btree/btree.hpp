@@ -165,6 +165,7 @@ private:
     BtreeStats m_stats;
     btree_super_block m_sb;
 
+    BtreeMetrics m_metrics;
     std::unique_ptr<btree_store_t> m_btree_store;
 
 #ifndef NDEBUG
@@ -199,7 +200,8 @@ public:
     }
 
     Btree(BtreeConfig &cfg, std::unique_ptr<btree_store_t> store) :
-            m_btree_cfg(cfg) {
+            m_btree_cfg(cfg),
+            m_metrics(cfg.get_name().c_str()) {
         m_btree_store = std::move(store);
         BtreeNodeAllocator< NodeSize >::create();
 
@@ -217,8 +219,8 @@ public:
         create_root_node();
     }
     
-    Btree(btree_super_block btree_sb, BtreeConfig &cfg, std::unique_ptr<btree_store_t> store) :
-            m_btree_cfg(cfg), m_sb(btree_sb) {
+    Btree(const btree_super_block& btree_sb, BtreeConfig& cfg, std::unique_ptr<btree_store_t> store) :
+            m_btree_cfg(cfg), m_sb(btree_sb), m_metrics(cfg.get_name().c_str()) {
         m_btree_store = std::move(store);
         BtreeNodeAllocator< NodeSize >::create();
 
@@ -829,7 +831,8 @@ private:
                 // Its ok to free after unlock, because the chain has been already cut when the node is invalidated.
                 // So no one would have entered here after the chain is cut.
                 btree_store_t::free_node(m_btree_store.get(), my_node, dependent_req_q);
-                m_stats.dec_count(my_node->is_leaf() ? BTREE_STATS_LEAF_NODE_COUNT : BTREE_STATS_INT_NODE_COUNT);
+                my_node->is_leaf() ?  COUNTER_DECREMENT(m_metrics, btree_leaf_node_count, 1) :
+                                      COUNTER_DECREMENT(m_metrics, btree_int_node_count, 1);
             }
             ret = false;
             goto done;
@@ -960,7 +963,7 @@ private:
             bool ret = my_node->put(k, v, put_type, existing_val);
             if (ret) {
                 btree_store_t::write_node(m_btree_store.get(), my_node, dependent_req_q, cookie, false);
-                m_stats.inc_count(BTREE_STATS_OBJ_COUNT);
+                COUNTER_INCREMENT(m_metrics, btree_obj_count, 1);
             }
             unlock_node(my_node, curlock);
 #ifndef NDEBUG
@@ -1032,7 +1035,7 @@ retry:
 
             // After split, parentNode would have split, retry search and walk down.
             unlock_node(child_node, homeds::thread::LOCKTYPE_WRITE);
-            m_stats.inc_count(BTREE_STATS_SPLIT_COUNT);
+            COUNTER_INCREMENT(m_metrics, btree_split_count, 1);
 
             goto retry;
         }
@@ -1067,7 +1070,7 @@ retry:
             bool is_found = my_node->remove_one(range, outkey, outval);
             if (is_found) {
                 btree_store_t::write_node(m_btree_store.get(), my_node, dependent_req_q, cookie, false);
-                m_stats.dec_count(BTREE_STATS_OBJ_COUNT);
+                COUNTER_DECREMENT(m_metrics, btree_obj_count, 1);
             } else {
 #ifndef NDEBUG
                 //my_node->to_string();
@@ -1134,7 +1137,7 @@ retry:
                 if (result.merged) {
                     // Retry only if we merge them.
                     //release_node(child_node);
-                    m_stats.inc_count(BTREE_STATS_MERGE_COUNT);
+                    COUNTER_INCREMENT(m_metrics, btree_merge_count, 1);
                     goto retry;
                 } else {
                     lock_node(child_node, child_cur_lock, &dependent_req_q);
@@ -1214,7 +1217,7 @@ retry:
         assert(m_root_node == root->get_node_id());
         btree_store_t::free_node(m_btree_store.get(), child_node, dependent_req_q);
 
-        m_stats.dec_count(BTREE_STATS_INT_NODE_COUNT);
+        COUNTER_DECREMENT(m_metrics, btree_int_node_count, 1);
 
         //release_node(child_node);
     done:
@@ -1580,7 +1583,7 @@ retry:
         bool is_new_allocation;
         BtreeNodePtr n = btree_store_t::alloc_node(m_btree_store.get(), true /* is_leaf */, is_new_allocation);
         n->set_leaf(true);
-        m_stats.inc_count(BTREE_STATS_LEAF_NODE_COUNT);
+        COUNTER_INCREMENT(m_metrics, btree_leaf_node_count, 1);
         return n;
     }
 
@@ -1588,7 +1591,7 @@ retry:
         bool is_new_allocation;
         BtreeNodePtr n = btree_store_t::alloc_node(m_btree_store.get(), false /* isLeaf */, is_new_allocation);
         n->set_leaf(false);
-        m_stats.inc_count(BTREE_STATS_INT_NODE_COUNT);
+        COUNTER_INCREMENT(m_metrics, btree_int_node_count, 1);
         return n;
     }
 

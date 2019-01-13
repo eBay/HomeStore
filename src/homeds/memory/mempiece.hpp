@@ -13,7 +13,7 @@
 #include <boost/optional.hpp>
 #include <sstream>
 #include <mutex>
-#include "homeds/utility/atomic_counter.hpp"
+#include <utility/atomic_counter.hpp>
 #include <atomic>
 #include <main/homestore_config.hpp>
 

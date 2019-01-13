@@ -17,7 +17,7 @@
 #include "homeds/memory/composite_allocator.hpp"
 #include "homeds/memory/chunk_allocator.hpp"
 #include "homeds/memory/sys_allocator.hpp"
-#include "homeds/utility/atomic_counter.hpp"
+#include <utility/atomic_counter.hpp>
 #include "btree_store.hpp"
 #include "btree_node.h"
 #include "physical_node.hpp"
@@ -26,7 +26,7 @@ namespace homeds { namespace btree {
 
 struct mem_btree_node_header {
     uint64_t magic;
-    homeds::atomic_counter<uint16_t> refcount;
+    sisl::atomic_counter<uint16_t> refcount;
 };
 
 #define MemBtreeNode  BtreeNode<MEM_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize, empty_writeback_req>

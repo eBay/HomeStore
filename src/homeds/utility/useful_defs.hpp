@@ -14,8 +14,8 @@
 #define unlikely(x) (x)
 #endif
 
-typedef std::chrono::high_resolution_clock Clock;
-namespace homeds {
+using Clock = std::chrono::steady_clock;
+#define CURRENT_CLOCK(name) Clock::time_point (name) = Clock::now()
 
 inline uint64_t get_elapsed_time_ns(Clock::time_point t) {
     std::chrono::nanoseconds ns = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - t);
@@ -40,6 +40,23 @@ inline uint64_t get_time_since_epoch_ms() {
 
 inline uint64_t get_elapsed_time_ms(uint64_t t) { return get_time_since_epoch_ms() - t; }
 
+template <typename T>
+void atomic_update_max(std::atomic<T>& max_value, T const& value,
+                       std::memory_order order = std::memory_order_acq_rel) noexcept {
+    T prev_value = max_value.load(order);
+    while (prev_value < value && !max_value.compare_exchange_weak(prev_value, value, order))
+        ;
+}
+
+template <typename T>
+void atomic_update_min(std::atomic<T>& min_value, T const& value,
+                       std::memory_order order = std::memory_order_acq_rel) noexcept {
+    T prev_value = min_value.load(order);
+    while (prev_value > value && !min_value.compare_exchange_weak(prev_value, value, order))
+        ;
+}
+
+namespace homeds {
 template< class P, class M >
 inline size_t offset_of(const M P::*member) {
     return (size_t) &(reinterpret_cast<P*>(0)->*member);

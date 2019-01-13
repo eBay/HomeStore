@@ -14,7 +14,7 @@
 #include "btree_internal.h"
 #include <folly/SharedMutex.h>
 #include "homeds/thread/lock.hpp"
-#include "homeds/utility/atomic_counter.hpp"
+#include <utility/atomic_counter.hpp>
 
 using namespace std;
 
