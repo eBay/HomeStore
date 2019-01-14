@@ -205,19 +205,19 @@ public:
         homestore::BlkId blkid(id.m_id);
         boost::intrusive_ptr< ssd_btree_req >req(new ssd_btree_req());
         req->is_read = true;
+        if (store->m_is_in_recovery) {
+            store->m_blkstore->alloc_blk(blkid);
+        }
         req->isSyncCall = true;
         auto safe_buf = store->m_blkstore->read(blkid, 0, NodeSize,
                         boost::static_pointer_cast<homestore::blkstore_req<btree_buffer_t>>(req));
 
 #ifndef NDEBUG
+       if (store->m_is_in_recovery) {
+            safe_buf->recovered = true;
+        }
         assert(safe_buf->is_btree);
 #endif
-        if (store->m_is_in_recovery) {
-#ifndef NDEBUG
-            safe_buf->recovered = true;
-#endif
-            store->m_blkstore->alloc_blk(blkid);
-        }
         return boost::static_pointer_cast<SSDBtreeNode>(safe_buf);
     }
 

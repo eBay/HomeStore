@@ -271,6 +271,13 @@ public:
         (chunk->get_primary_chunk()) ? add_mirror_chunk(chunk) : add_primary_chunk(chunk);
     }
 
+    bool is_blk_alloced(BlkId &in_blkid) {
+        PhysicalDevChunk *primary_chunk;
+        uint64_t primary_dev_offset = to_dev_offset(in_blkid, &primary_chunk);
+        auto blkid = to_chunk_specific_id(in_blkid, &primary_chunk);
+        return(primary_chunk->get_blk_allocator()->is_blk_alloced(blkid));
+    }
+ 
     BlkAllocStatus alloc_blk(BlkId &in_blkid) {
         PhysicalDevChunk *primary_chunk;
         uint64_t primary_dev_offset = to_dev_offset(in_blkid, &primary_chunk);

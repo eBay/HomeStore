@@ -67,11 +67,27 @@ FixedBlkAllocator::inited() {
     m_init = true;
 }
 
+
+bool
+FixedBlkAllocator::is_blk_alloced(BlkId &b) {
+    /* We need to take lock so we can check in non debug builds */
+#ifndef NDEBUG
+    std::unique_lock< std::mutex > lk(m_bm_mutex);
+    return(m_alloc_bm->is_bits_set_reset(b.get_id(), b.get_nblks(), true));
+#else
+    return true;
+#endif
+}
+
 BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &hints, 
                                  std::vector<BlkId> &out_blkid) {
     BlkId blkid;
     assert(nblks == 1);
     if (alloc(nblks, hints, &blkid) == BLK_ALLOC_SUCCESS) {
+#ifndef NDEBUG
+        std::unique_lock< std::mutex > lk(m_bm_mutex);
+        m_alloc_bm->set_bits(blkid.get_id(), blkid.get_nblks());
+#endif
         out_blkid.push_back(blkid);
         return BLK_ALLOC_SUCCESS;
     }
@@ -108,6 +124,8 @@ BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &hi
 
 #ifndef NDEBUG
     m_nfree_blks.fetch_sub(1, std::memory_order_relaxed);
+    std::unique_lock< std::mutex > lk(m_bm_mutex);
+    m_alloc_bm->set_bits(out_blkid->get_id(), out_blkid->get_nblks());
 #endif
     return BLK_ALLOC_SUCCESS;
 }
@@ -117,6 +135,8 @@ void FixedBlkAllocator::free(const BlkId &b) {
     assert(b.get_nblks() == 1);
 #ifndef NDEBUG
     m_nfree_blks.fetch_add(1, std::memory_order_relaxed);
+    std::unique_lock< std::mutex > lk(m_bm_mutex);
+    m_alloc_bm->set_bits(b.get_id(), b.get_nblks());
 #endif
 }
 

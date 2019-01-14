@@ -127,6 +127,12 @@ void DynamicBlkAllocator::allocator_state_machine() {
     }
 }
 
+bool
+DynamicBlkAllocator::is_blk_alloced(BlkId &in_bid) {
+    assert(0);
+    return false;
+}
+
 BlkAllocStatus DynamicBlkAllocator::alloc(BlkId &out_blkid) {
     assert(0);
     return BLK_ALLOC_SUCCESS;

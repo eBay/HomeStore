@@ -138,6 +138,11 @@ void VarsizeBlkAllocator::allocator_state_machine() {
 
 #define MAX_RETRY_CNT 5
 
+bool
+VarsizeBlkAllocator::is_blk_alloced(BlkId &b) {
+    return(m_alloced_bm->is_bits_set_reset(b.get_id(), b.get_nblks(), true));
+}
+
 BlkAllocStatus 
 VarsizeBlkAllocator::alloc(BlkId &in_bid) {
     m_alloced_bm->set_bits(in_bid.get_id(), in_bid.get_nblks());

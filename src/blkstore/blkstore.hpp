@@ -516,6 +516,12 @@ public:
         vector< std::pair<uint32_t, uint32_t> > missing_mp;
         assert(bid.data_size(m_pagesz) >= (offset + size));
         bool ret = m_cache->insert_missing_pieces(bbuf, offset, size, missing_mp);
+        BlkId read_blkid(bid.get_blkid_at(offset, size, m_pagesz));
+        /* It might be a false assert if there is a race between read and write but keeping
+         * it for now as it can be good check to see that we have recovered all the blocks
+         * after boot.
+         */
+        assert(m_vdev.is_blk_alloced(read_blkid));
 
         uint8_t *ptr;
         for (uint32_t i = 0; i < missing_mp.size(); i++) {
