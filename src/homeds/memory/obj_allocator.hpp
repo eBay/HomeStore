@@ -45,13 +45,9 @@ private:
     std::unique_ptr< homeds::FreeListAllocator< FREELIST_CACHE_COUNT, sizeof(T) > > m_allocator;
 
     static ObjectAllocator< T, CacheCount > *get_obj_allocator() {
-        if (unlikely((obj_allocator == nullptr))) {
-            obj_allocator = std::make_unique< ObjectAllocator< T, CacheCount > >();
-        }
-        return obj_allocator.get();
+        static ObjectAllocator< T, CacheCount >  obj_allocator;
+        return &obj_allocator;
     }
 };
 
-template <typename T, size_t CacheCount >
-std::unique_ptr< ObjectAllocator< T, CacheCount > > ObjectAllocator<T, CacheCount>::obj_allocator = nullptr;
 } // namespace homeds

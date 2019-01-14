@@ -14,15 +14,8 @@ namespace homestore {
 FixedBlkAllocator::FixedBlkAllocator(BlkAllocConfig &cfg, bool init) :
         BlkAllocator(cfg), m_init(init) {
     m_blk_nodes = new __fixed_blk_node[cfg.get_total_blks()];
+    m_alloc_bm = new homeds::Bitset(cfg.get_total_blks());
 
-    for (uint32_t i = 0; i < (uint32_t)cfg.get_total_blks() ; i++) {
-#ifndef NDEBUG
-        m_blk_nodes[i].this_blk_id = i;
-#endif
-        m_blk_nodes[i].next_blk = i + 1;
-    }
-    m_blk_nodes[(uint32_t)cfg.get_total_blks() - 1].next_blk = BLKID32_INVALID;
-    m_first_blk_id = 0;
     if (m_init) {
         inited();
     }
@@ -30,22 +23,42 @@ FixedBlkAllocator::FixedBlkAllocator(BlkAllocConfig &cfg, bool init) :
 
 FixedBlkAllocator::~FixedBlkAllocator() {
     delete [] (m_blk_nodes);
+    delete m_alloc_bm;
 }
 
-BlkAllocStatus FixedBlkAllocator::alloc(BlkId &in_blkid) {
-    auto i = in_blkid.m_id;
-    if (i == m_first_blk_id) {
-        m_first_blk_id =  m_blk_nodes[i + 1].next_blk;
-    } else if (i == m_cfg.get_total_blks()) {
-        m_blk_nodes[i - 1].next_blk = BLKID32_INVALID;
-    } else {
-        m_blk_nodes[i - 1].next_blk = m_blk_nodes[i + 1].next_blk;
-    }
+BlkAllocStatus FixedBlkAllocator::alloc(BlkId &in_bid) {
+    std::unique_lock< std::mutex > lk(m_bm_mutex);
+    assert(in_bid.get_nblks() == 1);
+    m_alloc_bm->set_bits(in_bid.get_id(), in_bid.get_nblks());
     return BLK_ALLOC_SUCCESS;
 }
 
 void
 FixedBlkAllocator::inited() {
+
+    m_first_blk_id = BLKID32_INVALID;
+    /* create the blkid chain */
+    uint32_t prev_blkid = BLKID32_INVALID;
+    for (uint32_t i = 0; i < (uint32_t)m_cfg.get_total_blks() ; i++) {
+#ifndef NDEBUG
+        m_blk_nodes[i].this_blk_id = i;
+#endif
+        std::unique_lock< std::mutex > lk(m_bm_mutex);
+        if (m_alloc_bm->is_bits_set_reset(i, 1, true)) {
+            continue;
+        }
+        if (m_first_blk_id == BLKID32_INVALID) {
+            m_first_blk_id = i;           
+        }
+        if (prev_blkid != BLKID32_INVALID) {
+            m_blk_nodes[prev_blkid].next_blk = i;
+        }
+        prev_blkid = i;
+    }
+    assert(prev_blkid != BLKID32_INVALID);
+    m_blk_nodes[prev_blkid].next_blk = BLKID32_INVALID;
+
+    assert(m_first_blk_id != BLKID32_INVALID);
     __top_blk tp(0, m_first_blk_id);
     m_top_blk_id.store(tp.to_integer());
 #ifndef NDEBUG
@@ -57,6 +70,7 @@ FixedBlkAllocator::inited() {
 BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &hints, 
                                  std::vector<BlkId> &out_blkid) {
     BlkId blkid;
+    assert(nblks == 1);
     if (alloc(nblks, hints, &blkid) == BLK_ALLOC_SUCCESS) {
         out_blkid.push_back(blkid);
         return BLK_ALLOC_SUCCESS;
@@ -70,6 +84,7 @@ BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &hi
     uint64_t cur_val;
     uint32_t id;
 
+    assert(nblks == 1);
     assert(m_init);
     do {
         prev_val = m_top_blk_id.load();

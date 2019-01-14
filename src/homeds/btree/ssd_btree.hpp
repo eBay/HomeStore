@@ -69,6 +69,7 @@ public:
         btree_buf_alloc++;
 #ifndef NDEBUG
         is_btree = true;
+        recovered = false;
 #endif
         if (btree_buf_alloc > btree_buf_make_obj) {
             assert(0);
@@ -112,17 +113,18 @@ public:
 
     static std::unique_ptr<SSDBtreeStore> init_btree(BtreeConfig &cfg, void *btree_specific_context,
             comp_callback comp_cb, bool is_in_recovery = false) {
-        return std::make_unique<SSDBtreeStore>(cfg,btree_specific_context, comp_cb, is_in_recovery);
+        return std::unique_ptr<SSDBtreeStore>(new SSDBtreeStore(cfg,btree_specific_context, comp_cb, is_in_recovery));
     }
 
     BtreeStore(BtreeConfig &cfg, void *btree_specific_context, comp_callback comp_cbt, bool is_in_recovery) {
+        m_comp_cb = comp_cbt;
+        assert(comp_cbt);
+        assert(m_comp_cb);
         m_is_in_recovery = is_in_recovery;
         m_cfg = cfg;
         m_cfg.set_node_area_size(NodeSize - sizeof(SSDBtreeNode) - sizeof(LeafPhysicalNode));
 
         auto bt_dev_info = (btree_device_info *)btree_specific_context;
-        m_comp_cb = comp_cbt;
-
  
         // Create or load the Blkstore out of this info
         if (bt_dev_info->new_device) {
@@ -211,6 +213,9 @@ public:
         assert(safe_buf->is_btree);
 #endif
         if (store->m_is_in_recovery) {
+#ifndef NDEBUG
+            safe_buf->recovered = true;
+#endif
             store->m_blkstore->alloc_blk(blkid);
         }
         return boost::static_pointer_cast<SSDBtreeNode>(safe_buf);

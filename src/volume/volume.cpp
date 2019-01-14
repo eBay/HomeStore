@@ -466,11 +466,15 @@ BlkAllocBitmapBuilder::do_work() {
 }
 
 void BlkAllocBitmapBuilder::get_allocated_blks() {
+/* TODO: will enable it once bug in matrix is fixed */
+#if 0
     std::vector<ThreadPool::TaskFuture<void>>   task_result;
     task_result.push_back(submit_job([=](){
                 do_work();
                 }));
+#endif
 
+    do_work();
     // if needed, we can return task_result[0] to caller, which for now seems not necessary;
     return;
 }

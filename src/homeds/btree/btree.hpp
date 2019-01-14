@@ -195,7 +195,7 @@ public:
     
     static btree_t *create_btree(btree_super_block &btree_sb, BtreeConfig &cfg, 
                                     void *btree_specific_context, comp_callback comp_cb) {
-        auto impl_ptr = btree_store_t::init_btree(cfg, btree_specific_context, nullptr, true);
+        auto impl_ptr = btree_store_t::init_btree(cfg, btree_specific_context, comp_cb, true);
         return new Btree(btree_sb, cfg, std::move(impl_ptr));
     }
 

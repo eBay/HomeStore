@@ -274,7 +274,8 @@ public:
     BlkAllocStatus alloc_blk(BlkId &in_blkid) {
         PhysicalDevChunk *primary_chunk;
         uint64_t primary_dev_offset = to_dev_offset(in_blkid, &primary_chunk);
-        return(primary_chunk->get_blk_allocator()->alloc(in_blkid));
+        auto blkid = to_chunk_specific_id(in_blkid, &primary_chunk);
+        return(primary_chunk->get_blk_allocator()->alloc(blkid));
     }
 
     BlkAllocStatus alloc_blk(uint8_t nblks, const blk_alloc_hints &hints, 

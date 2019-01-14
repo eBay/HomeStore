@@ -471,7 +471,7 @@ public:
 
     /* Read the data for given blk id and size. This method allocates the required memory if not present in the cache
      * and returns an smart ptr to the Buffer */
-    boost::intrusive_ptr< Buffer > read(BlkId &bid, uint32_t offset, 
+    boost::intrusive_ptr< Buffer > read(BlkId bid, uint32_t offset, 
                                         uint32_t size, 
                                         boost::intrusive_ptr<blkstore_req<Buffer>> req) {
                                         

@@ -207,6 +207,8 @@ private:
     void free_blk(uint32_t id);
     bool m_init;
     uint32_t m_first_blk_id;
+    homeds::Bitset *m_alloc_bm;
+    std::mutex m_bm_mutex;
 };
 
 } // namespace homestore
