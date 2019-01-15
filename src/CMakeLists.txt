@@ -25,6 +25,7 @@ add_subdirectory(volume)
 add_subdirectory(error)
 add_subdirectory(metrics)
 add_subdirectory(main)
+add_subdirectory(threadpool)
 
 add_library(homestore
                   $<TARGET_OBJECTS:hs_main>

@@ -8,8 +8,8 @@
 #include <device/blkbuffer.hpp>
 #include <blkstore/blkstore.hpp>
 #include "home_blks.hpp"
-//#include "vol_alloc_recovery.h"
-#include "thread_pool.h"
+
+#include "threadpool/thread_pool.h"
 using namespace std;
 
 #ifndef NDEBUG

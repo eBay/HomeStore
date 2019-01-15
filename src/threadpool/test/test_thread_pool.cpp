@@ -36,8 +36,7 @@ TEST(THREAD_POOL, TEST1) {
     std::cout << "Elapsed time in seconds : "
               << num_seconds_actaully_run << " sec\n";
 
-    // not using EXPECT_EQ to allow some level of torralence
-    ASSERT_NEAR(num_seconds_actaully_run, num_seconds_expected_to_run, 1);
+    EXPECT_EQ(num_seconds_actaully_run, num_seconds_expected_to_run);
 }
 
 int main(int argc, char *argv[]) {
