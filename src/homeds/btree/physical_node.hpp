@@ -17,9 +17,7 @@
 #include "homeds/utility/atomic_counter.hpp"
 #include <isa-l/crc.h>
 
-#ifndef NO_CHECKSUM
 const uint16_t init_crc_16 = 0x8005;
-#endif
 
 #define MAGICAL_VALUE 0xab
 
@@ -36,9 +34,8 @@ namespace homeds { namespace btree {
 
 typedef struct __attribute__((__packed__)) {
     uint8_t magic;
-#ifndef NO_CHECKSUM
     uint16_t checksum;
-#endif
+
     bnodeid_t node_id;
     bnodeid_t next_node;
 
@@ -63,9 +60,7 @@ protected:
     PhysicalNode(bnodeid_t* id, bool init) {
         if (init) {
             set_magic();
-#ifndef NO_CHECKSUM
             init_checksum();
-#endif
             set_leaf(true);
             set_total_entries(0);
             set_next_bnode(bnodeid_t::empty_bnodeid());
@@ -81,9 +76,7 @@ protected:
     PhysicalNode(bnodeid_t id, bool init) {
         if (init) {
             set_magic();
-#ifndef NO_CHECKSUM
             init_checksum();
-#endif
             set_leaf(true);
             set_total_entries(0);
             set_next_bnode(bnodeid_t::empty_bnodeid());
@@ -111,7 +104,6 @@ protected:
         get_persistent_header()->magic = MAGICAL_VALUE;
     }
 
-#ifndef NO_CHECKSUM
     uint16_t get_checksum() const {
         return m_pers_header.checksum;
     }
@@ -120,6 +112,7 @@ protected:
         get_persistent_header()->checksum = 0;
     }
 
+#ifndef NO_CHECKSUM
     void set_checksum(size_t size) {
         get_persistent_header()->checksum =
             crc16_t10dif(init_crc_16, m_node_area, size);
