@@ -85,10 +85,9 @@ Volume::Volume(vol_sb *sb) : m_sb(sb) {
     alloc_single_block_in_mem();
     init_perf_report();
     m_data_blkstore = HomeBlks::instance()->get_data_blkstore();
-    m_state = m_sb->state;
+    m_state = vol_state::MOUNTING;
     m_vol_ptr = std::shared_ptr<Volume>(this);
-    //vol_scan_alloc_blks();
-    
+    vol_scan_alloc_blks();
 }
 
 char *
@@ -111,37 +110,42 @@ Volume::attach_completion_cb(io_comp_callback &cb) {
     m_comp_cb = cb;
 }
 
-
 void 
 Volume::blk_recovery_process_completions(bool success) {
-    LOGTRACE("block recovery completed with {}", success ? "success": "failure");
+    LOGINFO("block recovery of volume {} completed with {}", get_name(), success ? "success": "failure");
+    assert(m_state == vol_state::MOUNTING);
+    m_state = m_sb->state;
+    m_map->recovery_cmpltd();
+    HomeBlks::instance()->vol_scan_cmpltd(m_vol_ptr, m_sb->state);
 }
 
+
+/* TODO: This part of the code should be moved to mapping layer. Ideally
+ * we only need to have a callback for a blkid, offset and end  from the mapping layer
+ */
 void Volume::blk_recovery_callback(MappingValue& mv) {
+    assert(m_state == vol_state::MOUNTING);
     std::vector<std::shared_ptr<MappingInterval>> offset_to_blk_id_list; 
     // MappingValue to MappingIntervals
     mv.get_all(offset_to_blk_id_list);
     // for each mapping interval
     for (auto& interval : offset_to_blk_id_list) {
         BlkId bid = interval->m_value.m_blkid;
-        for (std::uint32_t i = bid.m_id; i <= bid.m_id + bid.m_nblks; i++) {
-            // The lower bit stands for the lower BlkID
-            // FIXME: call to blkstore to mark the block allocated;
-        }
+        BlkId free_bid(bid.get_blkid_at(interval->m_value.m_blkid_offset * get_page_size(),
+                        interval->m_interval_length * get_page_size(),
+                        HomeBlks::instance()->get_data_pagesz()));
+
+        m_data_blkstore->alloc_blk(free_bid);
     }
 }
 
 void 
 Volume::vol_scan_alloc_blks() {
-    /* TODO: need to add method to scan btree */
-    /* This call is asynchronous */
     BlkAllocBitmapBuilder* b = new BlkAllocBitmapBuilder(
             this, 
             std::bind(&Volume::blk_recovery_callback, this, std::placeholders::_1), 
             std::bind(&Volume::blk_recovery_process_completions, this, std::placeholders::_1));
     b->get_allocated_blks();
-    delete b;
-    HomeBlks::instance()->vol_scan_cmpltd(m_vol_ptr, m_sb->state);
 }
 
 std::error_condition
@@ -434,9 +438,9 @@ BlkAllocBitmapBuilder::do_work() {
         start_lba = end_lba;
         end_lba = std::min((unsigned long long)max_lba, end_lba + NUM_BLKS_PER_THREAD_TO_QUERY);
 
-        MappingKey start_key(start_lba), end_key(end_lba);
-        auto search_range = BtreeSearchRange(start_key, true, end_key, false);
-        v.push_back(submit_job([=]() {
+        v.push_back(submit_job([this, start_lba, end_lba, bt]() {
+            MappingKey start_key(start_lba), end_key(end_lba);
+            auto search_range = BtreeSearchRange(start_key, true, end_key, false);
             BtreeQueryRequest    qreq(search_range);
             std::vector<std::pair<MappingKey, MappingValue>>   values;
             bool has_more = false;
@@ -458,14 +462,19 @@ BlkAllocBitmapBuilder::do_work() {
 
     // return completed with success to the caller 
     m_comp_cb(true);
+    delete(this);
 }
 
 void BlkAllocBitmapBuilder::get_allocated_blks() {
+/* TODO: will enable it once bug in matrix is fixed */
+#if 0
     std::vector<ThreadPool::TaskFuture<void>>   task_result;
     task_result.push_back(submit_job([=](){
                 do_work();
                 }));
+#endif
 
+    do_work();
     // if needed, we can return task_result[0] to caller, which for now seems not necessary;
     return;
 }

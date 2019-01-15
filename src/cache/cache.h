@@ -131,6 +131,9 @@ template <typename K>
 class CacheBuffer : public CacheRecord {
     typedef std::function< void (boost::intrusive_ptr< CacheBuffer<K> > bbuf) > erase_comp_cb;
 public:
+#ifndef NDEBUG
+    bool recovered;
+#endif
     K m_key;                                        // Key to access this cache
     boost::intrusive_ptr<homeds::MemVector> m_mem;   // Memory address which is what this buffer contained with
     homeds::atomic_counter< uint32_t > m_refcount;  // Refcount

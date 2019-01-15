@@ -207,6 +207,7 @@ public:
     BlkAllocStatus alloc(uint32_t size, uint32_t desired_temp, Blk *out_blk);
     BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints, 
                                  std::vector<BlkId> &out_blkid, bool retry = true) override;
+    virtual bool is_blk_alloced(BlkId &in_bid) override;
 
     void free(Blk &blk);
 

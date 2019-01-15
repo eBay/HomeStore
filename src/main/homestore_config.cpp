@@ -6,3 +6,4 @@ size_t homestore::HomeStoreConfig::min_page_size = 8192;
 uint64_t homestore::HomeStoreConfig::max_chunks = MAX_CHUNKS;
 uint64_t homestore::HomeStoreConfig::max_vdevs = MAX_VDEVS;
 uint64_t homestore::HomeStoreConfig::max_pdevs = MAX_PDEVS;
+homestore::io_flag homestore::HomeStoreConfig::open_flag = DIRECT_IO;

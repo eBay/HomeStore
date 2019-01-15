@@ -217,8 +217,15 @@ public:
         dyna_arr = nullptr;
     };
 
-    explicit MappingValue(const MappingValue& other) = default;
-    MappingValue& operator=(const MappingValue& other) = default;
+    MappingValue(const MappingValue& other) {
+        auto b = other.get_blob();
+        dyna_arr = new Interval_Array_Impl((void *) b.bytes, b.size, MAX_NO_OF_VALUE_ENTRIES);
+    }
+
+    void operator=(const MappingValue& other) {
+        auto b = other.get_blob();
+        dyna_arr = new Interval_Array_Impl((void *) b.bytes, b.size, MAX_NO_OF_VALUE_ENTRIES);
+    }
 
     virtual homeds::blob get_blob() const override {
         homeds::blob b;
@@ -391,6 +398,10 @@ public:
         m_bt = MappingBtreeDeclType::create_btree(btree_sb, btree_cfg, &bt_dev_info,
                 std::bind(&mapping::process_completions, this,
                     std::placeholders::_1, std::placeholders::_2));
+    }
+
+    void recovery_cmpltd() {
+        m_bt->recovery_cmpltd();
     }
 
     btree_super_block get_btree_sb() {

@@ -50,9 +50,11 @@ public:
         m_cfg.set_node_area_size(NodeSize - sizeof(MemBtreeNode) - sizeof(LeafPhysicalNode));
     }
     
-    static std::unique_ptr<MemBtreeStore> init_btree(BtreeConfig &cfg, void *btree_specific_context, comp_callback comp_cb) {
+    static std::unique_ptr<MemBtreeStore> init_btree(BtreeConfig &cfg, void *btree_specific_context, 
+                                            comp_callback comp_cb, bool is_in_recovery = false) {
         return (std::make_unique<BtreeStore>(cfg, btree_specific_context));
     }
+    static void recovery_cmpltd(MemBtreeStore *store) {};
 
     static uint8_t *get_physical(const MemBtreeNode *bn) {
         return (uint8_t *)((uint8_t *)bn + sizeof(MemBtreeNode));
