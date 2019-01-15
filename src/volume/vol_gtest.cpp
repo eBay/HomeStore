@@ -142,8 +142,11 @@ public:
 
         iomgr_obj = std::make_shared<iomgr::ioMgr>(2, num_threads);
         init_params params;
-
-        params.flag = homestore::BUFFERED_IO;
+#ifndef NDEBUG
+        params.flag = homestore::io_flag::BUFFERED_IO;
+#else
+        params.flag = homestore::io_flag::DIRECT_IO;
+#endif
         params.min_virtual_page_size = 4096;
         params.cache_size = 4 * 1024 * 1024 * 1024ul;
         params.disk_init = init;
