@@ -33,6 +33,7 @@ class HomestoreConan(ConanFile):
                 "OpenSSL/1.0.2q@conan/stable",
                 "sds_logging/3.5.2@sds/testing",
                 "sds_options/0.1.4@sds/testing",
+                "isa-l/2.21.0@oss/stable",
                 )
 
     generators = "cmake"

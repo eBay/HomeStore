@@ -15,6 +15,11 @@
 #include <folly/SharedMutex.h>
 #include "homeds/thread/lock.hpp"
 #include "homeds/utility/atomic_counter.hpp"
+#include <isa-l/crc.h>
+
+const uint16_t init_crc_16 = 0x8005;
+
+#define MAGICAL_VALUE 0xab
 
 using namespace std;
 
@@ -28,6 +33,9 @@ namespace homeds { namespace btree {
 #define EDGE_ENTRY_INDEX    INVALID_POOL_NEXT
 
 typedef struct __attribute__((__packed__)) {
+    uint8_t magic;
+    uint16_t checksum;
+
     bnodeid_t node_id;
     bnodeid_t next_node;
 
@@ -51,6 +59,8 @@ protected:
  public:
     PhysicalNode(bnodeid_t* id, bool init) {
         if (init) {
+            set_magic();
+            init_checksum();
             set_leaf(true);
             set_total_entries(0);
             set_next_bnode(bnodeid_t::empty_bnodeid());
@@ -65,6 +75,8 @@ protected:
 
     PhysicalNode(bnodeid_t id, bool init) {
         if (init) {
+            set_magic();
+            init_checksum();
             set_leaf(true);
             set_total_entries(0);
             set_next_bnode(bnodeid_t::empty_bnodeid());
@@ -83,6 +95,35 @@ protected:
     persistent_hdr_t *get_persistent_header() {
         return &m_pers_header;
     }
+
+    uint8_t get_magic() const {
+        return m_pers_header.magic;
+    }
+
+    void set_magic() {
+        get_persistent_header()->magic = MAGICAL_VALUE;
+    }
+
+    uint16_t get_checksum() const {
+        return m_pers_header.checksum;
+    }
+
+    void init_checksum() {
+        get_persistent_header()->checksum = 0;
+    }
+
+#ifndef NO_CHECKSUM
+    void set_checksum(size_t size) {
+        get_persistent_header()->checksum =
+            crc16_t10dif(init_crc_16, m_node_area, size);
+    }
+
+    bool verify_node(size_t size) {
+        return (get_magic() == MAGICAL_VALUE && get_checksum() ==
+                crc16_t10dif(init_crc_16, m_node_area, size))?
+            true : false;
+    }
+#endif
 
     uint32_t get_total_entries() const {
         return m_pers_header.nentries;
