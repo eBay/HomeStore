@@ -450,6 +450,7 @@ public:
 
     virtual BlkAllocStatus alloc(BlkId &out_blkid) override;
     virtual void inited() override;
+    virtual bool is_blk_alloced(BlkId &in_bid) override;
 private:
     VarsizeBlkAllocConfig m_cfg; // Config for Varsize
     std::thread m_thread_id; // Thread pointer for this region

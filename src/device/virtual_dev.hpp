@@ -50,7 +50,6 @@ public:
 
         assert((size % MIN_CHUNK_SIZE) == 0);
         vconfig->set_total_blks(((uint64_t)size)/vpage_size);
-        LOGINFO("added number of blocks {}", vconfig->get_total_blks());
 
         vconfig->set_blks_per_temp_group(100); // TODO: Recalculate based on size set aside for temperature entries
         vconfig->set_max_cache_blks(vconfig->get_total_blks()/4); // Cache quarter of the blocks
@@ -272,10 +271,18 @@ public:
         (chunk->get_primary_chunk()) ? add_mirror_chunk(chunk) : add_primary_chunk(chunk);
     }
 
+    bool is_blk_alloced(BlkId &in_blkid) {
+        PhysicalDevChunk *primary_chunk;
+        uint64_t primary_dev_offset = to_dev_offset(in_blkid, &primary_chunk);
+        auto blkid = to_chunk_specific_id(in_blkid, &primary_chunk);
+        return(primary_chunk->get_blk_allocator()->is_blk_alloced(blkid));
+    }
+ 
     BlkAllocStatus alloc_blk(BlkId &in_blkid) {
         PhysicalDevChunk *primary_chunk;
         uint64_t primary_dev_offset = to_dev_offset(in_blkid, &primary_chunk);
-        return(primary_chunk->get_blk_allocator()->alloc(in_blkid));
+        auto blkid = to_chunk_specific_id(in_blkid, &primary_chunk);
+        return(primary_chunk->get_blk_allocator()->alloc(blkid));
     }
 
     BlkAllocStatus alloc_blk(uint8_t nblks, const blk_alloc_hints &hints, 

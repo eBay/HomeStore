@@ -47,7 +47,8 @@ public:
 #endif
 
     static std::unique_ptr<BtreeSpecificImplDeclType> init_btree(BtreeConfig &cfg, 
-                    void *btree_specific_context, comp_callback comp_cb);
+                    void *btree_specific_context, comp_callback comp_cb, bool is_in_recovery = false);
+    static void recovery_cmpltd(BtreeSpecificImplDeclType *impl);
     static uint8_t *get_physical(const BtreeNodeDeclType *bn);
     static uint32_t get_node_area_size(BtreeSpecificImplDeclType *impl);
 
