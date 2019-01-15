@@ -136,7 +136,7 @@ void FixedBlkAllocator::free(const BlkId &b) {
 #ifndef NDEBUG
     m_nfree_blks.fetch_add(1, std::memory_order_relaxed);
     std::unique_lock< std::mutex > lk(m_bm_mutex);
-    m_alloc_bm->set_bits(b.get_id(), b.get_nblks());
+    m_alloc_bm->reset_bits(b.get_id(), b.get_nblks());
 #endif
 }
 
