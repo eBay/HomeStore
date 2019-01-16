@@ -147,7 +147,6 @@ namespace homestore {
         }
 
         homeds::blob get_blob() { return {(uint8_t *) m_ptr, get_blob_size()}; }
-
         void set_blob(homeds::blob b) {
             m_ptr = (ValueEntry *) b.bytes;
             assert(b.size == get_blob_size());

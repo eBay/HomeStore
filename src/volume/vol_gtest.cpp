@@ -182,7 +182,7 @@ public:
 
     void vol_init(int cnt, std::shared_ptr<homestore::Volume> vol_obj) {
         vol[cnt] = vol_obj;
-        fd[cnt] = open(VolInterface::get_instance()->get_name(vol_obj), O_RDWR );
+        fd[cnt] = open(VolInterface::get_instance()->get_name(vol_obj), O_RDWR);
         max_vol_blks[cnt] = VolInterface::get_instance()->get_size(vol_obj) / 
                                            VolInterface::get_instance()->get_page_size(vol_obj);
         m_vol_bm[cnt] = new homeds::Bitset(max_vol_blks[cnt]);

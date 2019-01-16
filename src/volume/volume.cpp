@@ -132,6 +132,7 @@ void Volume::blk_recovery_callback(MappingValue& mv) {
     auto value_arr = mv.get_blob();
 
     
+    assert(m_state == vol_state::MOUNTING);
     std::vector<std::shared_ptr<MappingInterval>> offset_to_blk_id_list; 
     // MappingValue to MappingIntervals
     mv.get_all(offset_to_blk_id_list);

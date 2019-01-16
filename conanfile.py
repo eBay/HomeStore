@@ -27,12 +27,12 @@ class HomestoreConan(ConanFile):
                 "folly/2018.12.10.00@bincrafters/testing",
                 "gtest/1.8.1@bincrafters/stable",
                 "iomgr/2.1.0@sds/testing",
-                "libunwind/1.2.1@oss/stable",
                 "lzma/5.2.4@bincrafters/stable",
                 "sds_metrics/0.2.2@sds/testing",
                 "OpenSSL/1.0.2q@conan/stable",
                 "sds_logging/3.5.2@sds/testing",
                 "sds_options/0.1.4@sds/testing",
+                "isa-l/2.21.0@oss/stable",
                 )
 
     generators = "cmake"
