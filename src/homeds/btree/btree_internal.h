@@ -19,7 +19,11 @@
 struct btree_multinode_req{
     //when pending writes becomes zero and is_done is true, we can callback to upper layer
     std::atomic<int> writes_pending;
+    bool is_done;
     std::atomic<int> m_refcount;
+
+    btree_multinode_req(): writes_pending(0), is_done(false), m_refcount(0) {}
+
     friend void intrusive_ptr_add_ref(btree_multinode_req *req) {
         req->m_refcount.fetch_add(1, std::memory_order_acquire);
     }

@@ -174,7 +174,7 @@ namespace homestore {
             //move checksum array elements to start from offset position
             memmove((void *) &(m_ptr->m_carr[0]), (void *) (&(m_ptr->m_carr[lba_offset])),
                     sizeof(uint16_t) * (get_actual_nblks() - lba_offset));
-            uint8_t blk_offset = lba_offset * vol_page_size / blkalloc_page_size;
+            uint8_t blk_offset = (vol_page_size / blkalloc_page_size)*lba_offset;
             m_ptr->m_blk_offset += blk_offset;
             //TODO - use nlba to trip checksum array
 #ifndef NDEBUG
@@ -360,8 +360,8 @@ namespace homestore {
 
             //fill the gaps
             auto last_lba = key.start();
-            for (auto i = 0u; i < values.size(); i++) {
-                int nl = values[i].first.start() - last_lba;
+            for (auto i = 0u; i < result_kv.size(); i++) {
+                int nl = result_kv[i].first.start() - last_lba;
                 while (nl-- > 0) {
                     values.emplace_back(make_pair(MappingKey(last_lba, 1), EMPTY_MAPPING_VALUE));
                     last_lba++;
@@ -519,7 +519,8 @@ namespace homestore {
 #ifndef NDEBUG
             ss << ", replace_kv:";
             for(auto &ptr : replace_kv) ss << ptr.first.to_string() << "==>" << ptr.second.to_string();
-            LOGINFO("Put CB completed: {} ", ss.str());
+            if(param->is_state_modifiable())
+             LOGINFO("Put CB completed: {} ", ss.str());
 #endif
         }
 
@@ -617,7 +618,6 @@ namespace homestore {
         };
 
 #ifndef NDEBUG
-
         void validate_get_response(uint64_t lba_start, uint32_t n_lba,
                                    vector<pair<MappingKey, MappingValue>> &values) {
             uint32_t fetch_no_lbas = 0;

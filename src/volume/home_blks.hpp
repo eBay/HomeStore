@@ -123,6 +123,10 @@ public:
     homestore::BlkStore<homestore::VdevFixedBlkAllocatorPolicy, BLKSTORE_BUFFER_TYPE> * get_metadata_blkstore();
     void vol_sb_remove(vol_sb *sb);
     uint32_t get_data_pagesz() const;
+
+#ifndef NDEBUG
+    void print_tree(std::shared_ptr<Volume> vol);
+#endif
 private:
     BlkId alloc_blk();
     static void new_vdev_found(DeviceManager *dev_mgr, vdev_info_block *vb);

@@ -18,7 +18,7 @@ DeviceManager::DeviceManager(NewVDevCallback vcb,
                              uint32_t const vdev_metadata_size,
                              std::shared_ptr<iomgr::ioMgr> iomgr,
                              homeio::comp_callback cb, bool is_file, boost::uuids::uuid system_uuid) :
-        m_open_flags(O_RDWR | O_DIRECT),
+        m_open_flags(O_RDWR),
         comp_cb(cb), m_new_vdev_cb(vcb), m_iomgr(iomgr), m_gen_cnt(0), m_is_file(is_file), m_system_uuid(system_uuid) {
     m_last_vdevid = INVALID_VDEV_ID;
     m_vdev_metadata_size = vdev_metadata_size;

@@ -994,8 +994,8 @@ private:
      * is_end_path = set to true only for last path from root to tree, for range put
      * op          = tracks multi node io.
      */
-    bool do_put(BtreeNodePtr my_node, homeds::thread::locktype curlock, 
-                const BtreeKey &k, const BtreeValue &v, int ind_hint, 
+    bool do_put(BtreeNodePtr my_node, homeds::thread::locktype curlock,
+                const BtreeKey &k, const BtreeValue &v, int ind_hint,
                 PutType put_type, std::deque<boost::intrusive_ptr<btree_req_type>> &dependent_req_q,
                 boost::intrusive_ptr<btree_req_type> cookie,
                 BtreeValue &existing_val,
@@ -1005,11 +1005,11 @@ private:
 
         if (my_node->is_leaf()) {
             assert(curlock == LOCKTYPE_WRITE);
-            if(bur!=nullptr){
-                assert(bur->callback()!=nullptr);//TODO - range req without callback implementation
-                std::vector<std::pair<K,V>> match;
-                int start_ind=0,end_ind=0;
-                my_node->get_all(bur->get_input_range(),UINT32_MAX , start_ind, end_ind, &match);
+            if (bur != nullptr) {
+                assert(bur->callback() != nullptr);//TODO - range req without callback implementation
+                std::vector<std::pair<K, V>> match;
+                int start_ind = 0, end_ind = 0;
+                my_node->get_all(bur->get_input_range(), UINT32_MAX, start_ind, end_ind, &match);
 
                 vector<pair<K, V>> replace_kv;
                 bur->callback()(match, replace_kv, bur->get_cb_param());
@@ -1017,131 +1017,138 @@ private:
                     my_node->remove(start_ind, end_ind);
                 for (auto pair : replace_kv) //insert is based on compare() of BtreeKey
                     my_node->insert(pair.first, pair.second);
-                multinode_req->writes_pending.fetch_add(1, std::memory_order_acquire);
-            }else
+                multinode_req->writes_pending.fetch_add(1, std::memory_order_acq_rel);
+                if(is_end_path) multinode_req->is_done=true;
+            } else
                 my_node->put(k, v, put_type, existing_val);
-            
+
             btree_store_t::write_node(m_btree_store.get(), my_node, dependent_req_q, cookie, false, multinode_req);
-                m_stats.inc_count(BTREE_STATS_OBJ_COUNT);
-            
+            m_stats.inc_count(BTREE_STATS_OBJ_COUNT);
+
             unlock_node(my_node, curlock);
             return true;
         }
-        
+
         int start_ind = 0, end_ind = -1;
-        if(bur!=nullptr) //just get start/end index from get_all
+        if (bur != nullptr) //just get start/end index from get_all
             my_node->get_all(bur->get_cb_param()->get_input_range(), UINT32_MAX, start_ind, end_ind);
-        else{
-            bool is_found=false;
+        else {
+            bool is_found = false;
             BtreeNodeInfo child_info;
-            uint32_t index=0;
+            uint32_t index = 0;
             get_child_node(my_node, BtreeSearchRange(k), &index, &is_found, &child_info);
-            if(is_found) {
-                start_ind =index;
+            if (is_found) {
+                start_ind = index;
                 end_ind = index;
+            }
         }
-        }
-        if (start_ind>end_ind) {
+        if (start_ind > end_ind) {
             // Either the node was updated or mynode is freed. Just proceed again from top.
             unlock_node(my_node, curlock);
             return false;
         }
-        
+
         bool unlocked_already = false;
         int curr_ind = start_ind;
-        while (curr_ind<=end_ind) { //iterate all matched childrens
+        while (curr_ind <= end_ind) { //iterate all matched childrens
 
-retry:
-        homeds::thread::locktype child_cur_lock = homeds::thread::LOCKTYPE_NONE;
+            retry:
+            homeds::thread::locktype child_cur_lock = homeds::thread::LOCKTYPE_NONE;
 
-        // Get the childPtr for given key.
-        BtreeNodeInfo child_info;
-            BtreeNodePtr child_node = get_child_node(my_node,curr_ind, &child_info);
+            // Get the childPtr for given key.
+            BtreeNodeInfo child_info;
+            BtreeNodePtr child_node = get_child_node(my_node, curr_ind, &child_info);
             if (child_node == nullptr) {
-            // Either the node was updated or mynode is freed. Just proceed again from top.
-            unlock_node(my_node, curlock);
-            return false;
-        }
-
-        // Directly get write lock for leaf, since its an insert.
-        child_cur_lock = (child_node->is_leaf()) ? LOCKTYPE_WRITE : LOCKTYPE_READ;
-        lock_node(child_node, child_cur_lock, &dependent_req_q);
-
-        if(child_info.bnode_id().m_pc_gen_flag != child_node->get_node_id().m_pc_gen_flag) {
-            if (upgrade_node(child_node, nullptr, child_cur_lock, LOCKTYPE_NONE, dependent_req_q) == false) {
+                // Either the node was updated or mynode is freed. Just proceed again from top.
                 unlock_node(my_node, curlock);
-                unlock_node(child_node, child_cur_lock);
-                return (false); //retry from root
+                return false;
             }
+
+            // Directly get write lock for leaf, since its an insert.
+            child_cur_lock = (child_node->is_leaf()) ? LOCKTYPE_WRITE : LOCKTYPE_READ;
+            lock_node(child_node, child_cur_lock, &dependent_req_q);
+
+            if (child_info.bnode_id().m_pc_gen_flag != child_node->get_node_id().m_pc_gen_flag) {
+                if (upgrade_node(child_node, nullptr, child_cur_lock, LOCKTYPE_NONE, dependent_req_q) == false) {
+                    unlock_node(my_node, curlock);
+                    unlock_node(child_node, child_cur_lock);
+                    return (false); //retry from root
+                }
                 fix_pc_gen_mistmatch(my_node, child_node, curr_ind, &dependent_req_q);
-            unlock_node(child_node, homeds::thread::LOCKTYPE_WRITE);
-            goto retry;
-        }
-        
+                unlock_node(child_node, homeds::thread::LOCKTYPE_WRITE);
+                goto retry;
+            }
+            K prev_key, curr_key, *prevkey_ptr = &prev_key, *currkey_ptr = &curr_key;
             //calculate subrange
-            K prev_key, curr_key, *prevkey_ptr=&prev_key, *currkey_ptr=&curr_key;
-            if(bur!=nullptr){ //calculate subrange
-                bool prev_inc=false, curr_inc=false;
-                if(curr_ind>0) my_node->get_nth_key(curr_ind - 1, &prev_key, true);
+            if (bur != nullptr) { //calculate subrange
+                bool prev_inc = false, curr_inc = true;
+                if (curr_ind > 0) my_node->get_nth_key(curr_ind - 1, &prev_key, true);
                 else {//leftmost, input range is boundary
-                    prevkey_ptr = (K*)bur->get_input_range().get_start_key();
-                    prev_inc =bur->get_input_range().is_start_inclusive();
+                    prevkey_ptr = (K *) bur->get_input_range().get_start_key();
+                    prev_inc = bur->get_input_range().is_start_inclusive();
                 }
-                if(curr_ind< (int)my_node->get_total_entries())  my_node->get_nth_key(curr_ind, &curr_key, true);
+                if (curr_ind < (int) my_node->get_total_entries()) my_node->get_nth_key(curr_ind, &curr_key, true);
                 else {//edge, input range is boundary
-                    currkey_ptr = (K*)bur->get_input_range().get_end_key();
-                    curr_inc =bur->get_input_range().is_end_inclusive();
+                    currkey_ptr = (K *) bur->get_input_range().get_end_key();
+                    curr_inc = bur->get_input_range().is_end_inclusive();
                 }
+#ifndef NDEBUG
+                LOGINFO("Subrange set:{} {} {} {}", prevkey_ptr->to_string(),
+                        prev_inc, currkey_ptr->to_string(), curr_inc);
+                LOGINFO("start end current nodeid isvalidedge {} {} {} {} {}", 
+                        start_ind,end_ind,curr_ind,my_node->get_node_id().to_string(), 
+                        my_node->get_edge_id().is_valid());
+#endif
                 bur->get_cb_param()->get_sub_range().set(*prevkey_ptr, prev_inc, *currkey_ptr, curr_inc);
             }
-            
+
             if (child_node->is_split_needed(m_btree_cfg, k, v, &ind_hint, put_type, bur)) {
-            
-            // Time to split the child, but we need to convert ours to write lock
-            if (upgrade_node(my_node, child_node, curlock, child_cur_lock, dependent_req_q) == false) {
-                return (false);
-            }
 
-            // We need to upgrade the child to WriteLock
-            if (upgrade_node(child_node, nullptr, child_cur_lock, LOCKTYPE_NONE, dependent_req_q) == false) {
-                // Since we have parent node write locked, child node should never have any issues upgrading.
-                assert(0);
-                unlock_node(my_node, homeds::thread::LOCKTYPE_WRITE);
-                return (false);
-            }
+                // Time to split the child, but we need to convert ours to write lock
+                if (upgrade_node(my_node, child_node, curlock, child_cur_lock, dependent_req_q) == false) {
+                    return (false);
+                }
 
-            // Real time to split the node and get point at which it was split
-            K split_key;
+                // We need to upgrade the child to WriteLock
+                if (upgrade_node(child_node, nullptr, child_cur_lock, LOCKTYPE_NONE, dependent_req_q) == false) {
+                    // Since we have parent node write locked, child node should never have any issues upgrading.
+                    assert(0);
+                    unlock_node(my_node, homeds::thread::LOCKTYPE_WRITE);
+                    return (false);
+                }
+
+                // Real time to split the node and get point at which it was split
+                K split_key;
                 split_node(my_node, child_node, curr_ind, &split_key, dependent_req_q);
-            ind_hint = -1; // Since split is needed, hint is no longer valid
+                ind_hint = -1; // Since split is needed, hint is no longer valid
 
-                if(split_key.compare(&k) < 0)//skip processing of left node after split
+                if (split_key.compare(&k) < 0)//skip processing of left node after split
                     curr_ind++;
 
-            // After split, parentNode would have split, retry search and walk down.
-            unlock_node(child_node, homeds::thread::LOCKTYPE_WRITE);
-            m_stats.inc_count(BTREE_STATS_SPLIT_COUNT);
+                // After split, parentNode would have split, retry search and walk down.
+                unlock_node(child_node, homeds::thread::LOCKTYPE_WRITE);
+                m_stats.inc_count(BTREE_STATS_SPLIT_COUNT);
 
-            goto retry;
-        }
+                goto retry;
+            }
 
-            if (curr_ind==end_ind) {
+            if (curr_ind == end_ind) {
                 // If we have reached the last index, unlock before traversing down, because we no longer need
                 // this lock. Holding this lock will impact performance unncessarily.
-        unlock_node(my_node, curlock);
+                unlock_node(my_node, curlock);
                 unlocked_already = true;
-            }else
-                is_end_path=false;
+            } else
+                is_end_path = false;
 
-            bool success= do_put(child_node, child_cur_lock, k, v, ind_hint, put_type,
-                    dependent_req_q, cookie,existing_val,multinode_req, is_end_path, bur);
-            if(success==false){
-                if(!unlocked_already) unlock_node(my_node, curlock);
+            bool success = do_put(child_node, child_cur_lock, k, v, ind_hint, put_type,
+                                  dependent_req_q, cookie, existing_val, multinode_req, is_end_path, bur);
+            if (success == false) {
+                if (!unlocked_already) unlock_node(my_node, curlock);
                 return false;
-        }
+            }
             curr_ind++;
         }
-        if(!unlocked_already) unlock_node(my_node, curlock);
+        if (!unlocked_already) unlock_node(my_node, curlock);
         return true;
         // Warning: Do not access childNode or myNode beyond this point, since it would
         // have been unlocked by the recursive function and it could also been deleted.

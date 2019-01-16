@@ -137,6 +137,10 @@ public:
 
     /* AM should call it in case of recovery or reboot when homestore try to mount the existing volume */
     virtual void attach_vol_completion_cb(std::shared_ptr<Volume> vol, io_comp_callback cb) = 0;
+
+#ifndef NDEBUG
+    virtual void print_tree(std::shared_ptr<Volume> vol)=0;
+#endif
 };
 }
 

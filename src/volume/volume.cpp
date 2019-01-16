@@ -154,11 +154,10 @@ void
 homestore::Volume::process_metadata_completions(boost::intrusive_ptr<volume_req> req) {
     assert(!req->is_read);
     assert(!req->isSyncCall);
-
+    
     for (auto &ptr : req->blkIds_to_free) {
         LOGINFO("Freeing Blk: {} {} {}",ptr.m_blkId.to_string(), ptr.m_blk_offset, ptr.m_nblks_to_free);
         m_data_blkstore->free_blk(ptr.m_blkId, BLOCK_SIZE * ptr.m_blk_offset, BLOCK_SIZE * ptr.m_nblks_to_free);
-        LOGINFO("Freed Blk: {} {} {}",ptr.m_blkId.to_string(), ptr.m_blk_offset, ptr.m_nblks_to_free);
     }
    
     req->done = true;

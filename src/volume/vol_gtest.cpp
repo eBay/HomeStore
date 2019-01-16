@@ -176,7 +176,7 @@ public:
 
     void vol_init(int cnt, std::shared_ptr<homestore::Volume> vol_obj) {
         vol[cnt] = vol_obj;
-        fd[cnt] = open(VolInterface::get_instance()->get_name(vol_obj), O_RDWR | O_DIRECT);
+        fd[cnt] = open(VolInterface::get_instance()->get_name(vol_obj), O_RDWR );
         max_vol_blks[cnt] = VolInterface::get_instance()->get_size(vol_obj) / 
                                            VolInterface::get_instance()->get_page_size(vol_obj);
         m_vol_bm[cnt] = new homeds::Bitset(max_vol_blks[cnt]);
@@ -194,7 +194,7 @@ public:
         /* Create a volume */
         for (uint32_t i = 0; i < max_vols; i++) {
             vol_params params;
-            params.page_size = ((i > (max_vols/2)) ? 4096 : 8192);
+            params.page_size = 4096;//((i > (max_vols/2)) ? 4096 : 8192);
             params.size = max_vol_size;
             params.io_comp_cb = ([this](boost::intrusive_ptr<vol_interface_req> vol_req) 
                                  { process_completions(vol_req); });
@@ -298,9 +298,9 @@ public:
         uint64_t lba;
         uint64_t nblks;
     start:
-        lba = rand() % max_vol_blks[cur];
         /* we won't be writing more then 128 blocks in one io */
         uint64_t max_blks = max_io_size/VolInterface::get_instance()->get_page_size(vol[cur]);
+        lba = rand() % (max_vol_blks[cur] - max_blks);
         nblks = rand() % max_blks;
         {
             std::unique_lock< std::mutex > lk(vol_mutex[cur]);
@@ -359,9 +359,9 @@ public:
         uint64_t lba;
         uint64_t nblks;
     start:
-        lba = rand() % max_vol_blks[cur % max_vols];
         /* we won't be writing more then 128 blocks in one io */
         uint64_t max_blks = max_io_size/VolInterface::get_instance()->get_page_size(vol[cur]);
+        lba = rand() % (max_vol_blks[cur] - max_blks);
         nblks = rand() % max_blks;
         {
             std::unique_lock< std::mutex > lk(vol_mutex[cur]);
@@ -402,7 +402,7 @@ public:
         }
     }
 
-    void verify(boost::intrusive_ptr<req> req) {
+    void verify(std::shared_ptr<homestore::Volume> vol,boost::intrusive_ptr<req> req) {
         int64_t tot_size = 0;
         for (auto &info : req->read_buf_list) {
             auto offset = info.offset;
@@ -421,6 +421,9 @@ public:
                 match_cnt++;
                 if (j) {
                     LOGINFO("mismatch found offset {} size {}", tot_size, size_read);
+                    VolInterface::get_instance()->print_tree(vol);
+                    std::this_thread::sleep_for (std::chrono::seconds(5));
+                    assert(0);
                 }
                 size -= size_read;
                 offset += size_read;
@@ -451,7 +454,7 @@ public:
         boost::intrusive_ptr<req> req = boost::static_pointer_cast<struct req>(vol_req);
         uint64_t temp = 1;
         --outstanding_ios;
-
+        
         if (!req->is_read && req->err == no_error) {
             /* write to a file */
             auto ret = pwrite(req->fd, req->buf, req->size, req->offset);
@@ -459,15 +462,21 @@ public:
         }
 
         bool verify_io = false;
+        
         if (!req->is_read && req->err == no_error) {
+            LOGINFO("process_completions sync read start {} {}",req->lba,req->nblks);
             (void)VolInterface::get_instance()->sync_read(vol[req->cur_vol], req->lba, req->nblks, req);
+            LOGINFO("process_completions sync read finish {} {}",req->lba,req->nblks);
             verify_io = true;
         }
         if ((req->is_read && req->err == no_error) || verify_io) {
             /* read from the file and verify it */
             auto ret = pread(req->fd, req->buf, req->size, req->offset);
-            assert(ret == req->size);
-            verify(req);
+            if(ret != req->size){
+                VolInterface::get_instance()->print_tree(vol[req->cur_vol]);
+                assert(0);
+            }
+            verify(vol[req->cur_vol],req);
         }
        
         {

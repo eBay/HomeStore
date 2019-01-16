@@ -586,3 +586,10 @@ homeds::blob
 HomeBlks::at_offset(boost::intrusive_ptr<BlkBuffer> buf, uint32_t offset) {
     return(buf->at_offset(offset));
 }
+
+#ifndef NDEBUG
+void 
+HomeBlks::print_tree(std::shared_ptr<Volume> vol){
+    vol->print_tree();
+}
+#endif

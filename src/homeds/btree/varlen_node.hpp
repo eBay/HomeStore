@@ -301,6 +301,12 @@ public:
 
                 ureq->get_cb_param()->set_state_modifiable(false);
                 ureq->callback()(match, replace_kv,ureq->get_cb_param());
+#ifndef NDEBUG
+                if(replace_kv.size()>0){
+                    std::pair<K, V> &pair2 =replace_kv[replace_kv.size()-1];
+                    assert(pair2.first.compare(ureq->get_cb_param()->get_sub_range().get_end_key()) <= 0);
+                }
+#endif 
                 ureq->get_cb_param()->set_state_modifiable(true);
                 
                 for (auto &pair : replace_kv) 
