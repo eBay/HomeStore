@@ -118,7 +118,7 @@ namespace homestore {
     private:
         uint64_t m_seqId;
         BlkId m_blkId;
-        uint8_t m_blk_offset:NBLKS_BITS;//offset based on blk store not based on vol page size
+        uint64_t m_blk_offset:NBLKS_BITS;//offset based on blk store not based on vol page size
 
         //this allocates 2^NBLKS_BITS size array for checksum on stack, however actual memory used is less on bnode
         //as we call get_blob_size which takes into account actual nblks to determine exact size of checksum array
@@ -249,7 +249,7 @@ namespace homestore {
 
         virtual void set_blob_size(uint32_t size) override { assert(0); }
 
-        virtual uint32_t estimate_size_after_append(const BtreeValue &new_val) override { assert(0); }
+        virtual uint32_t estimate_size_after_append(const BtreeValue &new_val) override { assert(0); return 0; }
 
         virtual void append_blob(const BtreeValue &new_val, BtreeValue &existing_val) override { assert(0); }
 
@@ -298,6 +298,9 @@ namespace homestore {
         uint32_t m_blkalloc_page_size;
         const MappingValue EMPTY_MAPPING_VALUE;
     public:
+        MappingBtreeDeclType* get_bt_handle() const {
+            return m_bt;
+        }
         void process_completions(boost::intrusive_ptr<writeback_req> cookie,
                                  error_condition status) {
             boost::intrusive_ptr<volume_req> req =

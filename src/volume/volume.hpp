@@ -70,9 +70,7 @@ class Volume {
     void vol_scan_alloc_blks();
     io_comp_callback m_comp_cb;
     std::shared_ptr<Volume> m_vol_ptr;
-#ifndef NDEBUG
-        atomic<uint64_t> seq_Id;
-#endif
+    std::atomic<uint64_t> seq_Id;
  public:
     Volume(vol_params &params);
     Volume(vol_sb *sb);

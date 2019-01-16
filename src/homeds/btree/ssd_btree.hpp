@@ -59,6 +59,8 @@ template<
 >
 class BtreeBuffer : public homestore::WriteBackCacheBuffer< homestore::BlkId > {
 public:
+#ifndef NDEBUG
+#endif
     static BtreeBuffer *make_object() {
         btree_buf_make_obj++;
         return homeds::ObjectAllocator< SSDBtreeNode >::make_object();
@@ -67,6 +69,7 @@ public:
         btree_buf_alloc++;
 #ifndef NDEBUG
         is_btree = true;
+        recovered = false;
 #endif
         if (btree_buf_alloc > btree_buf_make_obj) {
             assert(0);
@@ -110,17 +113,19 @@ public:
     using HeaderType = BtreeBuffer<K, V, InteriorNodeType, LeafNodeType, NodeSize>;
 
     static std::unique_ptr<SSDBtreeStore> init_btree(BtreeConfig &cfg, void *btree_specific_context,
-            comp_callback comp_cb) {
-        return std::make_unique<SSDBtreeStore>(cfg,btree_specific_context, comp_cb);
+            comp_callback comp_cb, bool is_in_recovery = false) {
+        return std::unique_ptr<SSDBtreeStore>(new SSDBtreeStore(cfg,btree_specific_context, comp_cb, is_in_recovery));
     }
 
-    BtreeStore(BtreeConfig &cfg, void *btree_specific_context, comp_callback comp_cbt) {
+    BtreeStore(BtreeConfig &cfg, void *btree_specific_context, comp_callback comp_cbt, bool is_in_recovery) {
+        m_comp_cb = comp_cbt;
+        assert(comp_cbt);
+        assert(m_comp_cb);
+        m_is_in_recovery = is_in_recovery;
         m_cfg = cfg;
         m_cfg.set_node_area_size(NodeSize - sizeof(SSDBtreeNode) - sizeof(LeafPhysicalNode));
 
         auto bt_dev_info = (btree_device_info *)btree_specific_context;
-        m_comp_cb = comp_cbt;
-
  
         // Create or load the Blkstore out of this info
         if (bt_dev_info->new_device) {
@@ -136,6 +141,10 @@ public:
                                     bt_dev_info->blkstore;
             m_blkstore->attach_compl(std::bind(&SSDBtreeStore::process_completions, std::placeholders::_1));
         }
+    }
+
+    static void recovery_cmpltd(SSDBtreeStore *store) {
+        store->m_is_in_recovery = false;  
     }
 
     static void process_completions(boost::intrusive_ptr<homestore::blkstore_req<btree_buffer_t>> bs_req) {
@@ -206,11 +215,17 @@ public:
         homestore::BlkId blkid(id.m_id);
         boost::intrusive_ptr< ssd_btree_req >req(new ssd_btree_req());
         req->is_read = true;
+        if (store->m_is_in_recovery) {
+            store->m_blkstore->alloc_blk(blkid);
+        }
         req->isSyncCall = true;
         auto safe_buf = store->m_blkstore->read(blkid, 0, NodeSize,
                         boost::static_pointer_cast<homestore::blkstore_req<btree_buffer_t>>(req));
 
 #ifndef NDEBUG
+       if (store->m_is_in_recovery) {
+            safe_buf->recovered = true;
+        }
         assert(safe_buf->is_btree);
 #endif
         return boost::static_pointer_cast<SSDBtreeNode>(safe_buf);
@@ -226,7 +241,8 @@ public:
         copy_to->set_node_id(original_to_id);//restore original copy_to id
     }
 
-    static void swap_node(SSDBtreeStore *impl, boost::intrusive_ptr<SSDBtreeNode> node1, boost::intrusive_ptr<SSDBtreeNode> node2) {
+    static void swap_node(SSDBtreeStore *impl, boost::intrusive_ptr<SSDBtreeNode> node1, 
+                            boost::intrusive_ptr<SSDBtreeNode> node2) {
         bnodeid_t id1 = node1->get_node_id();
         bnodeid_t id2 = node2->get_node_id();
         auto mvec1 = node1->get_memvec_intrusive();
@@ -278,7 +294,7 @@ public:
             boost::intrusive_ptr<SSDBtreeNode> bn,
             bool is_write_modifiable, 
             std::deque<boost::intrusive_ptr<homestore::writeback_req>> *dependent_req_q) {
-   
+  
         /* add the latest request pending on this node */
         if (dependent_req_q) {
             auto req = store->m_blkstore->read_locked(boost::static_pointer_cast<btree_buffer_t>(bn), is_write_modifiable);
@@ -312,6 +328,7 @@ private:
     homestore::Cache <homestore::BlkId>* m_cache;
 
     BtreeConfig m_cfg;
+    bool m_is_in_recovery;
 };
 } }
 

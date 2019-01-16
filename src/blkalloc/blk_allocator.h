@@ -113,6 +113,7 @@ public:
     virtual BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints, 
                                  std::vector<BlkId> &out_blkid) = 0;
     virtual BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid, bool retry = true) = 0;
+    virtual bool is_blk_alloced(BlkId &in_bid) = 0;
     virtual void free(const BlkId &id) = 0;
     virtual std::string to_string() const = 0;
 
@@ -196,6 +197,7 @@ public:
                                  std::vector<BlkId> &out_blkid) override;
     virtual void inited() override;
     virtual BlkAllocStatus alloc(BlkId &out_blkid) override;
+    virtual bool is_blk_alloced(BlkId &in_bid) override;
 
 #ifndef NDEBUG
     uint32_t total_free_blks() const {
@@ -207,6 +209,8 @@ private:
     void free_blk(uint32_t id);
     bool m_init;
     uint32_t m_first_blk_id;
+    homeds::Bitset *m_alloc_bm;
+    std::mutex m_bm_mutex;
 };
 
 } // namespace homestore

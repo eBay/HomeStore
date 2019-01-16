@@ -193,8 +193,9 @@ public:
         return new Btree(cfg, std::move(impl_ptr));
     }
     
-    static btree_t *create_btree(btree_super_block &btree_sb, BtreeConfig &cfg, void *btree_specific_context, comp_callback comp_cb) {
-        auto impl_ptr = btree_store_t::init_btree(cfg, btree_specific_context, nullptr);
+    static btree_t *create_btree(btree_super_block &btree_sb, BtreeConfig &cfg, 
+                                    void *btree_specific_context, comp_callback comp_cb) {
+        auto impl_ptr = btree_store_t::init_btree(cfg, btree_specific_context, comp_cb, true);
         return new Btree(btree_sb, cfg, std::move(impl_ptr));
     }
 
@@ -246,7 +247,11 @@ public:
         unlock_node(root, acq_lock);
         m_btree_lock.unlock();
     }
-    
+   
+    void recovery_cmpltd() {
+        btree_store_t::recovery_cmpltd(m_btree_store.get());
+    }
+
     // free nodes in post order traversal of tree
     void free(BtreeNodePtr node) {
         //TODO - this calls free node on mem_tree and ssd_tree.
@@ -301,7 +306,7 @@ public:
             boost::intrusive_ptr<btree_req_type> cookie, BtreeValue *existing_val = nullptr, 
             BtreeUpdateRequest<K,V> *bur = nullptr) {
         homeds::thread::locktype acq_lock = homeds::thread::LOCKTYPE_READ;
-        int ind;
+        int ind = -1;
 
 #ifndef NDEBUG
         init_lock_debug();

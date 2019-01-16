@@ -23,7 +23,7 @@ using namespace homestore;
 
 #define MAX_DEVICES 2
 std::string names[4] = {"file1", "file2", "file3", "file4"};
-constexpr uint64_t max_vols = 50;
+uint64_t max_vols = 50;
 uint64_t run_time;
 uint64_t num_threads;
 bool read_enable;
@@ -78,13 +78,13 @@ class IOTest :  public ::testing::Test {
 protected:
     std::shared_ptr<iomgr::ioMgr> iomgr_obj;
     bool init;
-    std::shared_ptr<homestore::Volume> vol[max_vols];
-    int fd[max_vols];
-    std::mutex vol_mutex[max_vols];
-    homeds::Bitset *m_vol_bm[max_vols];
-    uint64_t max_vol_blks[max_vols];
-    uint64_t cur_checkpoint[max_vols];
-    std::atomic<int> vol_cnt;
+    std::vector<std::shared_ptr<homestore::Volume>> vol;
+    std::vector<int> fd;
+    std::vector<std::mutex> vol_mutex;
+    std::vector<homeds::Bitset *> m_vol_bm;
+    std::vector<uint64_t> max_vol_blks;
+    std::vector<uint64_t> cur_checkpoint;
+    std::atomic<uint64_t> vol_cnt;
     test_ep *ep;
     int ev_fd;
     std::condition_variable m_cv;
@@ -97,9 +97,11 @@ protected:
     uint64_t max_vol_size;
     bool verify_done;
     std::atomic<int> rdy_state;
+    bool is_abort;
 
 public:
-    IOTest():device_info(0) {
+    IOTest():vol(max_vols), fd(max_vols), vol_mutex(max_vols), m_vol_bm(max_vols), 
+              max_vol_blks(max_vols), cur_checkpoint(max_vols), device_info(0) {
         vol_cnt = 0;
         cur_vol = 0;
         max_vol_size = 0;
@@ -136,11 +138,15 @@ public:
             max_capacity += max_disk_capacity;
         }
         /* Don't populate the whole disks. Only 80 % of it */
-        max_vol_size = (80 * max_capacity)/ (100 * max_vols);
+        max_vol_size = (60 * max_capacity)/ (100 * max_vols);
 
         iomgr_obj = std::make_shared<iomgr::ioMgr>(2, num_threads);
         init_params params;
-
+#ifndef NDEBUG
+        params.flag = homestore::io_flag::BUFFERED_IO;
+#else
+        params.flag = homestore::io_flag::DIRECT_IO;
+#endif
         params.min_virtual_page_size = 4096;
         params.cache_size = 4 * 1024 * 1024 * 1024ul;
         params.disk_init = init;
@@ -361,8 +367,9 @@ public:
     start:
         /* we won't be writing more then 128 blocks in one io */
         uint64_t max_blks = max_io_size/VolInterface::get_instance()->get_page_size(vol[cur]);
-        lba = rand() % (max_vol_blks[cur] - max_blks);
-        nblks = rand() % max_blks;
+
+        lba = rand() % (max_vol_blks[cur % max_vols] - max_blks);
+       nblks = rand() % max_blks;
         {
             std::unique_lock< std::mutex > lk(vol_mutex[cur]);
             /* check if someone is already doing writes/reads */ 
@@ -421,8 +428,10 @@ public:
                 match_cnt++;
                 if (j) {
                     LOGINFO("mismatch found offset {} size {}", tot_size, size_read);
+#ifndef NDEBUG
                     VolInterface::get_instance()->print_tree(vol);
                     std::this_thread::sleep_for (std::chrono::seconds(5));
+#endif
                     assert(0);
                 }
                 size -= size_read;
@@ -434,6 +443,7 @@ public:
     }
 
     void verify_vols() {
+    #if 0
         for (uint32_t cur = 0; cur < max_vols; ++cur) {
             for (uint64_t lba = cur_checkpoint[cur]; lba < max_vol_blks[cur]; ++lba) {
                 read_vol(cur, lba, (max_io_size / VolInterface::get_instance()->get_page_size(vol[cur])));
@@ -443,6 +453,7 @@ public:
                 }
             }
         }
+     #endif
         verify_done = true;
         uint64_t temp = 1;
         [[maybe_unused]] auto wsize = write(ev_fd, &temp, sizeof(uint64_t));
@@ -473,7 +484,6 @@ public:
             /* read from the file and verify it */
             auto ret = pread(req->fd, req->buf, req->size, req->offset);
             if(ret != req->size){
-                VolInterface::get_instance()->print_tree(vol[req->cur_vol]);
                 assert(0);
             }
             verify(vol[req->cur_vol],req);
@@ -485,6 +495,9 @@ public:
         }
         
         if (verify_done && get_elapsed_time(startTime) > run_time) {
+            if (is_abort) {
+                abort();
+            }
             std::unique_lock< std::mutex > lk(m_mutex);
             rdy_state = 0;
             if (outstanding_ios == 0) {
@@ -549,6 +562,7 @@ TEST_F(IOTest, normal_burst_random_io_test) {
 TEST_F(IOTest, abort_random_io_test) {
     /* fork a new process */
     this->init = true;
+    this->is_abort = true;
     /* child process */
     this->start_homestore();
     this->wait_cmpl();
@@ -578,7 +592,8 @@ SDS_OPTION_GROUP(test_volume,
 (run_time, "", "run_time", "run time for io", ::cxxopts::value<uint32_t>()->default_value("30"), "seconds"),
 (num_threads, "", "num_threads", "num threads for io", ::cxxopts::value<uint32_t>()->default_value("8"), "number"),
 (read_enable, "", "read_enable", "read enable 0 or 1", ::cxxopts::value<uint32_t>()->default_value("1"), "flag"),
-(max_disk_capacity, "", "max_disk_capacity", "max disk capacity", ::cxxopts::value<uint64_t>()->default_value("7"), "GB"))
+(max_disk_capacity, "", "max_disk_capacity", "max disk capacity", ::cxxopts::value<uint64_t>()->default_value("7"), "GB"),
+(max_volume, "", "max_volume", "max volume", ::cxxopts::value<uint64_t>()->default_value("50"), "number"))
 SDS_OPTIONS_ENABLE(logging, test_volume)
 
 /* it will go away once shutdown is implemented correctly */
@@ -593,8 +608,8 @@ const char* __asan_default_options() {
 /* We can run this target either by using default options which run the normal io tests or by setting different options.
  * Format is
  *   1. ./test_volume
- *   2. ./test_volume --gtest_filter=*recovery* --run_time=120 --num_threads=16 --max_disk_capacity=10
- * Above command run all tests having a recovery keyword for 120 seconds with 16 threads and 10g disk capacity.
+ *   2. ./test_volume --gtest_filter=*recovery* --run_time=120 --num_threads=16 --max_disk_capacity=10 --max_volume=50
+ * Above command run all tests having a recovery keyword for 120 seconds with 16 threads , 10g disk capacity and 50 volumes
  */
 int main(int argc, char *argv[]) {
     ::testing::GTEST_FLAG(filter) = "*normal_random*";
@@ -607,5 +622,6 @@ int main(int argc, char *argv[]) {
     num_threads = SDS_OPTIONS["num_threads"].as<uint32_t>();
     read_enable = SDS_OPTIONS["read_enable"].as<uint32_t>();
     max_disk_capacity = ((SDS_OPTIONS["max_disk_capacity"].as<uint64_t>())  * (1ul<< 30));
+    max_vols = SDS_OPTIONS["max_volume"].as<uint64_t>();
     return RUN_ALL_TESTS();
 }

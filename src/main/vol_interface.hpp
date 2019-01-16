@@ -56,7 +56,8 @@ enum vol_state {
     FAILED = 1,
     OFFLINE = 2,
     DEGRADED = 3,
-    UNINITED = 4
+    MOUNTING = 4,
+    UNINITED = 5
 };
 
 typedef std::function<void(boost::intrusive_ptr<vol_interface_req> req)> io_comp_callback;
@@ -100,6 +101,8 @@ struct init_params {
     vol_mounted_callback vol_mounted_cb;
     vol_state_change_callback vol_state_change_cb;
     boost::uuids::uuid system_uuid;
+    io_flag flag;
+    init_params():flag(DIRECT_IO){};
 };
 
 class VolInterface {

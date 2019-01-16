@@ -50,7 +50,8 @@ Volume::Volume(vol_params &params) : m_comp_cb(params.io_comp_cb) {
     m_state = vol_state::UNINITED;
     m_map = new mapping(params.size, params.page_size, (std::bind(&Volume::process_metadata_completions, this,
                                  std::placeholders::_1)));
-    posix_memalign((void **) &m_sb, HomeStoreConfig::align_size, VOL_SB_SIZE); 
+    int ret = posix_memalign((void **) &m_sb, HomeStoreConfig::align_size, VOL_SB_SIZE); 
+    assert(!ret);
     assert(m_sb != nullptr);
     m_sb->btree_sb = m_map->get_btree_sb();
     m_sb->state = vol_state::ONLINE;
@@ -85,10 +86,9 @@ Volume::Volume(vol_sb *sb) : m_sb(sb) {
     alloc_single_block_in_mem();
     init_perf_report();
     m_data_blkstore = HomeBlks::instance()->get_data_blkstore();
-    m_state = m_sb->state;
+    m_state = vol_state::MOUNTING;
     m_vol_ptr = std::shared_ptr<Volume>(this);
-    //vol_scan_alloc_blks();
-    
+    vol_scan_alloc_blks();
 }
 
 char *
@@ -111,37 +111,49 @@ Volume::attach_completion_cb(io_comp_callback &cb) {
     m_comp_cb = cb;
 }
 
-
 void 
 Volume::blk_recovery_process_completions(bool success) {
-    LOGTRACE("block recovery completed with {}", success ? "success": "failure");
+#if 0
+    LOGINFO("block recovery of volume {} completed with {}", get_name(), success ? "success": "failure");
+    assert(m_state == vol_state::MOUNTING);
+    m_state = m_sb->state;
+    m_map->recovery_cmpltd();
+    HomeBlks::instance()->vol_scan_cmpltd(m_vol_ptr, m_sb->state);
+#endif
 }
 
+
+/* TODO: This part of the code should be moved to mapping layer. Ideally
+ * we only need to have a callback for a blkid, offset and end  from the mapping layer
+ */
 void Volume::blk_recovery_callback(MappingValue& mv) {
-//    std::vector<std::shared_ptr<MappingInterval>> offset_to_blk_id_list; 
-//    // MappingValue to MappingIntervals
-//    mv.get_all(offset_to_blk_id_list);
-//    // for each mapping interval
-//    for (auto& interval : offset_to_blk_id_list) {
-//        BlkId bid = interval->m_value.m_blkid;
-//        for (std::uint32_t i = bid.m_id; i <= bid.m_id + bid.m_nblks; i++) {
-//            // The lower bit stands for the lower BlkID
-//            // FIXME: call to blkstore to mark the block allocated;
-//        }
-//    }
+#if 0
+    assert(m_state == vol_state::MOUNTING);
+    auto value_arr = mv.get_blob();
+
+    
+    std::vector<std::shared_ptr<MappingInterval>> offset_to_blk_id_list; 
+    // MappingValue to MappingIntervals
+    mv.get_all(offset_to_blk_id_list);
+    // for each mapping interval
+    for (auto& interval : offset_to_blk_id_list) {
+        BlkId bid = interval->m_value.m_blkid;
+        BlkId free_bid(bid.get_blkid_at(interval->m_value.m_blkid_offset * get_page_size(),
+                        interval->m_interval_length * get_page_size(),
+                        HomeBlks::instance()->get_data_pagesz()));
+
+        m_data_blkstore->alloc_blk(free_bid);
+    }
+    #endif
 }
 
 void 
 Volume::vol_scan_alloc_blks() {
-    /* TODO: need to add method to scan btree */
-    /* This call is asynchronous */
     BlkAllocBitmapBuilder* b = new BlkAllocBitmapBuilder(
             this, 
             std::bind(&Volume::blk_recovery_callback, this, std::placeholders::_1), 
             std::bind(&Volume::blk_recovery_process_completions, this, std::placeholders::_1));
     b->get_allocated_blks();
-    delete b;
-    HomeBlks::instance()->vol_scan_cmpltd(m_vol_ptr, m_sb->state);
 }
 
 std::error_condition
@@ -426,58 +438,65 @@ BlkAllocBitmapBuilder::~BlkAllocBitmapBuilder() {
 //
 void
 BlkAllocBitmapBuilder::do_work() {
-//    mapping* mp = m_vol_handle->get_mapping_handle();
-//    MappingBtreeDeclType* bt = mp->get_bt_handle();
-//
-//    uint64_t max_lba = m_vol_handle->get_last_lba() + 1; 
-//
-//    uint64_t start_lba = 0, end_lba = 0;
-//
-//    std::vector<ThreadPool::TaskFuture<void>>   v;
-//    
-//    while (end_lba < max_lba) {
-//        // if high watermark is hit, wait for a while so that we do not consuming too 
-//        // much memory pushing new tasks. This is helpful when volume size is extreamly large.
-//        if (get_thread_pool().high_watermark()) {
-//            std::this_thread::yield();
-//            continue;
-//        }
-//
-//        start_lba = end_lba;
-//        end_lba = std::min((unsigned long long)max_lba, end_lba + NUM_BLKS_PER_THREAD_TO_QUERY);
-//
-//        MappingKey start_key(start_lba), end_key(end_lba);
-//        auto search_range = BtreeSearchRange(start_key, true, end_key, false);
-//        v.push_back(submit_job([=]() {
-//            BtreeQueryRequest    qreq(search_range);
-//            std::vector<std::pair<MappingKey, MappingValue>>   values;
-//            bool has_more = false;
-//            do {
-//                has_more = bt->query(qreq, values);
-//                // for each Mapping Value 
-//                for (auto& v : values) {
-//                    // callback to caller with this MappingValue
-//                    m_blk_recovery_cb(v.second);
-//                }
-//                values.clear();
-//            } while (has_more);
-//        } ));
-//    }
-//
-//    for (auto& x : v) {
-//        x.get();
-//    }
+    
+#if 0    
+    mapping* mp = m_vol_handle->get_mapping_handle();
+    MappingBtreeDeclType* bt = mp->get_bt_handle();
+
+    uint64_t max_lba = m_vol_handle->get_last_lba() + 1; 
+
+    uint64_t start_lba = 0, end_lba = 0;
+
+    std::vector<ThreadPool::TaskFuture<void>>   v;
+    while (end_lba < max_lba) {
+        // if high watermark is hit, wait for a while so that we do not consuming too 
+        // much memory pushing new tasks. This is helpful when volume size is extreamly large.
+        if (get_thread_pool().high_watermark()) {
+            std::this_thread::yield();
+            continue;
+        }
+
+        start_lba = end_lba;
+        end_lba = std::min((unsigned long long)max_lba, end_lba + NUM_BLKS_PER_THREAD_TO_QUERY);
+
+        v.push_back(submit_job([this, start_lba, end_lba, bt]() {
+            MappingKey start_key(start_lba), end_key(end_lba);
+            auto search_range = BtreeSearchRange(start_key, true, end_key, false);
+            BtreeQueryRequest    qreq(search_range);
+            std::vector<std::pair<MappingKey, MappingValue>>   values;
+            bool has_more = false;
+            do {
+                has_more = bt->query(qreq, values);
+                // for each Mapping Value 
+                for (auto& v : values) {
+                    // callback to caller with this MappingValue
+                    m_blk_recovery_cb(v.second);
+                }
+                values.clear();
+            } while (has_more);
+        } ));
+    }
+
+    for (auto& x : v) {
+        x.get();
+    }
 
     // return completed with success to the caller 
     m_comp_cb(true);
+    #endif
+    delete(this);
 }
 
 void BlkAllocBitmapBuilder::get_allocated_blks() {
+/* TODO: will enable it once bug in matrix is fixed */
+#if 0
     std::vector<ThreadPool::TaskFuture<void>>   task_result;
     task_result.push_back(submit_job([=](){
                 do_work();
                 }));
+#endif
 
+    do_work();
     // if needed, we can return task_result[0] to caller, which for now seems not necessary;
     return;
 }
