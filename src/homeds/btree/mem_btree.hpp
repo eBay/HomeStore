@@ -63,8 +63,7 @@ public:
     }
 
     static boost::intrusive_ptr<MemBtreeNode> alloc_node(MemBtreeStore *store, bool is_leaf,
-            bool &is_new_allocation,// indicates if allocated node is same as copy_from
-
+            bool &is_new_allocation, // indicates if allocated node is same as copy_from
             boost::intrusive_ptr<MemBtreeNode> copy_from = nullptr) {
         if (copy_from!= nullptr) {
             is_new_allocation =  false;
@@ -85,7 +84,7 @@ public:
         }
         auto mbh = (mem_btree_node_header *)btree_node;
         mbh->magic = 0xDEADBEEF;
-        mbh->refcount.increment();
+        mbh->refcount.set(1);
 
         boost::intrusive_ptr<MemBtreeNode> new_node = (boost::intrusive_ptr<MemBtreeNode>((MemBtreeNode *)mem));
        
@@ -173,5 +172,4 @@ private:
     BtreeConfig m_cfg;
  
 };
-
 } }

@@ -8,6 +8,7 @@
 #include "btree_internal.h"
 #include "btree_store.hpp"
 #include <utility/atomic_counter.hpp>
+#include <utility/obj_life_counter.hpp>
 #include <cstdint>
 
 namespace homeds { namespace btree {
@@ -107,8 +108,6 @@ private:
 #define call_physical_method(bn, mname, ...)       (to_physical_node(bn)->mname(__VA_ARGS__))
 #define call_physical_method_const(bn, mname, ...) (to_physical_node_const(bn)->mname(__VA_ARGS__))
 
-#define btree_node_t BtreeNode<BtreeStoreType, K, V, InteriorNodeType, LeafNodeType, NodeSize, btree_req_type>
-
 template<
         btree_store_type BtreeStoreType,
         typename K,
@@ -118,7 +117,8 @@ template<
         size_t NodeSize,
         typename btree_req_type
         >
-class BtreeNode : public btree_store_t::HeaderType {
+class BtreeNode : public btree_store_t::HeaderType,
+        sisl::ObjLifeCounter< BtreeNode<BtreeStoreType, K, V, InteriorNodeType, LeafNodeType, NodeSize, btree_req_type > > {
 private:
     transient_hdr_t m_common_header;
 
@@ -195,7 +195,6 @@ public:
     bool any_upgrade_waiters();
 
     friend void intrusive_ptr_add_ref(btree_node_t *n) { btree_store_t::ref_node(n); }
-
 
     friend void intrusive_ptr_release(btree_node_t *n) {
         btree_store_t::deref_node(n);

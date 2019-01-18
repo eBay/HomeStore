@@ -114,7 +114,7 @@ void Volume::process_data_completions(boost::intrusive_ptr< blkstore_req< BlkBuf
     boost::intrusive_ptr< volume_req > req = boost::static_pointer_cast< volume_req >(bs_req);
     assert(!req->isSyncCall);
 
-    HISTOGRAM_OBSERVE(m_metrics, req->is_read ? volume_data_read_latency : volume_data_write_latency,
+    HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, req->is_read, volume_data_read_latency, volume_data_write_latency,
                       get_elapsed_time_us(req->op_start_time));
     if (!req->is_read) {
         if (req->err == no_error) {
@@ -200,10 +200,10 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nblks,
 
 void Volume::check_and_complete_io(boost::intrusive_ptr< vol_interface_req >& req, bool call_completion) {
     if (req->io_cnt.decrement_testz()) {
-        HISTOGRAM_OBSERVE(m_metrics, req->is_read ? volume_read_latency : volume_write_latency,
+        HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, req->is_read, volume_read_latency, volume_write_latency,
                           get_elapsed_time_us(req->io_start_time));
         if (req->err != no_error) {
-            COUNTER_INCREMENT(m_metrics, req->is_read ? volume_write_error_count : volume_read_error_count, 1);
+            COUNTER_INCREMENT_IF_ELSE(m_metrics, req->is_read, volume_write_error_count, volume_read_error_count, 1);
         }
         if (call_completion) {
             m_comp_cb(req);

@@ -25,6 +25,14 @@ add_subdirectory(volume)
 add_subdirectory(error)
 add_subdirectory(main)
 
+if(${CMAKE_BUILD_TYPE} STREQUAL Debug)
+    message("Debug build")
+    add_compile_options(-D_DEBUG=1 -O0 -DDEBUG_RCU -D_PRERELEASE=1)
+else()
+    message("Release build")
+    add_compile_options(-DNDEBUG=1 -O3)
+endif()
+
 add_library(homestore
                   $<TARGET_OBJECTS:hs_main>
                   $<TARGET_OBJECTS:hs_volume>

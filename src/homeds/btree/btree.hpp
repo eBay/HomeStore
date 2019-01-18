@@ -14,7 +14,6 @@
 #include <array>
 #include "homeds/thread/lock.hpp"
 #include "btree_internal.h"
-#include "btree_stats.hpp"
 #include "btree_node.cpp"
 #include "physical_node.hpp"
 #include <sds_logging/logging.h>
@@ -162,7 +161,6 @@ private:
 
     uint32_t m_max_nodes;
     BtreeConfig m_btree_cfg;
-    BtreeStats m_stats;
     btree_super_block m_sb;
 
     BtreeMetrics m_metrics;
@@ -287,7 +285,7 @@ public:
                 i++;
             }
         }
-        btree_store_t::free_node(m_btree_store.get(), node,dependent_req_q);
+        free_node(node, dependent_req_q);
     }
 
     void put(const BtreeKey &k, const BtreeValue &v, PutType put_type) {
@@ -557,10 +555,6 @@ retry:
         return remove_any(BtreeSearchRange(key), nullptr, outval, dependent_req, cookie);
     }
 
-    const BtreeStats &get_stats() const {
-        return m_stats;
-    }
-
     void print_tree() {
         m_btree_lock.read_lock();
         std::stringstream ss;
@@ -568,7 +562,9 @@ retry:
         LOGINFO("Pre order traversal of tree : <{}>", ss.str());
         m_btree_lock.unlock();
     }
-    
+
+    nlohmann::json get_metrics_in_json(bool updated = true) { return m_metrics->get_result_in_json(updated); }
+
 private:
     void get_string_representation_pre_order_traversal(bnodeid_t bnodeid, std::stringstream &ss) {
         BtreeNodePtr node = btree_store_t::read_node(m_btree_store.get(), bnodeid);
@@ -830,9 +826,7 @@ private:
 
                 // Its ok to free after unlock, because the chain has been already cut when the node is invalidated.
                 // So no one would have entered here after the chain is cut.
-                btree_store_t::free_node(m_btree_store.get(), my_node, dependent_req_q);
-                my_node->is_leaf() ?  COUNTER_DECREMENT(m_metrics, btree_leaf_node_count, 1) :
-                                      COUNTER_DECREMENT(m_metrics, btree_int_node_count, 1);
+                free_node(my_node, dependent_req_q);
             }
             ret = false;
             goto done;
@@ -967,10 +961,7 @@ private:
             }
             unlock_node(my_node, curlock);
 #ifndef NDEBUG
-            assert(rd_locked_count == temp_rd_locked_count 
-                    && wr_locked_count == temp_wr_locked_count);
-#endif
-#ifndef NDEBUG
+            assert(rd_locked_count == temp_rd_locked_count && wr_locked_count == temp_wr_locked_count);
             //my_node->print();
 #endif
             return ret;
@@ -1215,9 +1206,7 @@ retry:
         // Elevate the edge child as root.
         unlock_node(root, locktype::LOCKTYPE_WRITE);
         assert(m_root_node == root->get_node_id());
-        btree_store_t::free_node(m_btree_store.get(), child_node, dependent_req_q);
-
-        COUNTER_DECREMENT(m_metrics, btree_int_node_count, 1);
+        free_node(child_node, dependent_req_q);
 
         //release_node(child_node);
     done:
@@ -1315,7 +1304,7 @@ retry:
         if (parent_sibbling != nullptr) { unlock_node(parent_sibbling, locktype::LOCKTYPE_READ); }
         
         for(int i=0;i<(int)nodes_to_free.size();i++) {
-            btree_store_t::free_node(m_btree_store.get(), nodes_to_free[i], *dependent_req_q);
+            free_node(nodes_to_free[i], *dependent_req_q);
         }
         
 #ifndef NDEBUG
@@ -1520,7 +1509,7 @@ retry:
         for (int n = minfo.size()-1; n >= 0; n--) {
             if (minfo[n].freed) {
                 //free copied node if it became empty
-                btree_store_t::free_node(m_btree_store.get(), minfo[n].node, dependent_req_q);
+                free_node(minfo[n].node, dependent_req_q);
             }
             //free original node except first
             if (n!=0 && minfo[n].is_new_allocation) {
@@ -1573,9 +1562,7 @@ retry:
             unlock_node(node, locktype::LOCKTYPE_WRITE);
         } else {
             unlock_node(node, locktype::LOCKTYPE_WRITE);
-            btree_store_t::free_node(m_btree_store.get(), node, dependent_req_q);
-            LOGTRACE("Free node-{}",node->get_node_id().to_string());
-            m_stats.dec_count(node->is_leaf() ? BTREE_STATS_LEAF_NODE_COUNT : BTREE_STATS_INT_NODE_COUNT);
+            free_node(node, dependent_req_q);
         }
     }
 
@@ -1593,6 +1580,12 @@ retry:
         n->set_leaf(false);
         COUNTER_INCREMENT(m_metrics, btree_int_node_count, 1);
         return n;
+    }
+
+    void free_node(BtreeNodePtr& node, std::deque< boost::intrusive_ptr< btree_req_type > >& dependent_req_q) {
+        LOGTRACE("Free node-{}",node->get_node_id().to_string());
+        COUNTER_DECREMENT_IF_ELSE(m_metrics, node->is_leaf(), btree_leaf_node_count, btree_int_node_count, 1);
+        btree_store_t::free_node(m_btree_store.get(), node, dependent_req_q);
     }
 
     void lock_node(BtreeNodePtr node, homeds::thread::locktype type, 
@@ -1694,8 +1687,7 @@ protected:
         BtreeNodePtr root = alloc_leaf_node();
         m_root_node = root->get_node_id();
 
-        btree_store_t::write_node(m_btree_store.get(), root,
-                                                dependent_req_q, NULL, true);
+        btree_store_t::write_node(m_btree_store.get(), root, dependent_req_q, NULL, true);
         m_sb.root_node = m_root_node;
     }
 
