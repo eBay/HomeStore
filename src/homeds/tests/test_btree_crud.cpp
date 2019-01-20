@@ -11,7 +11,7 @@
 #include "device/virtual_dev.hpp"
 #include "homeds/btree/mem_btree.hpp"
 
-SDS_LOGGING_INIT(VMOD_BTREE_MERGE, VMOD_BTREE_SPLIT)
+SDS_LOGGING_INIT(VMOD_BTREE_MERGE, VMOD_BTREE_SPLIT,VMOD_BTREE)
 
 #define MAX_CACHE_SIZE     2 * 1024 * 1024 * 1024
 using namespace std;
@@ -367,6 +367,10 @@ public:
     void delete_nth_entry(uint32_t i) {
         TestSimpleValue v;
         bool ret = m_bt->remove(*m_entries[i], &v);
+        if(ret==false){
+            m_bt->print_tree();
+            assert(0);
+        }
         EXPECT_EQ(ret, true);
         EXPECT_EQ(m_create_map.find(m_entries[i])->second, v);
     }

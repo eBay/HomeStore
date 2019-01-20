@@ -162,9 +162,7 @@ public:
             else{
                 int cnt = req->multinode_req->writes_pending.fetch_sub(1, std::memory_order_acq_rel);
                 if (req->multinode_req->is_done && cnt == 1) {
-                    LOGINFO("calling callback");
                     m_comp_cb(req->cookie, req->err);
-                    LOGINFO("callback done");
                 }
             }
         }

@@ -45,6 +45,9 @@ struct volume_req : blkstore_req<BlkBuffer> {
     boost::intrusive_ptr<vol_interface_req> parent_req;
     bool done;
 
+#ifndef NDEBUG
+    boost::uuids::uuid vol_uuid;
+#endif
     volume_req() : is_read(false), num_mapping_update(0), parent_req(nullptr), done(false) {
 #ifndef NDEBUG
         vol_req_alloc++;
@@ -114,11 +117,7 @@ class Volume {
     char *get_name();
     uint64_t get_page_size();
     uint64_t get_size();
-
-
-#ifndef NDEBUG
-    void enable_split_merge_crash_simulation();
-#endif
+    
 };
 
 #define BLKSTORE_BLK_SIZE_IN_BYTES          HomeStoreConfig::phys_page_size

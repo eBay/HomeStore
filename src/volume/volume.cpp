@@ -168,11 +168,6 @@ homestore::Volume::process_metadata_completions(boost::intrusive_ptr<volume_req>
     assert(!req->is_read);
     assert(!req->isSyncCall);
     
-    for (auto &ptr : req->blkIds_to_free) {
-        LOGINFO("Freeing Blk: {} {} {}",ptr.m_blkId.to_string(), ptr.m_blk_offset, ptr.m_nblks_to_free);
-        m_data_blkstore->free_blk(ptr.m_blkId, BLOCK_SIZE * ptr.m_blk_offset, BLOCK_SIZE * ptr.m_nblks_to_free);
-    }
-   
     req->done = true;
     auto parent_req = req->parent_req;
     assert(parent_req != nullptr);
@@ -184,6 +179,10 @@ homestore::Volume::process_metadata_completions(boost::intrusive_ptr<volume_req>
     if (parent_req->io_cnt.fetch_sub(1, memory_order_acquire) == 1) {
         if (req->err == no_error) {
             PerfMetrics::getInstance()->updateHist(VOL_IO_WRITE_H, get_elapsed_time(parent_req->startTime));
+        }
+        for (auto &ptr : req->blkIds_to_free) {
+            LOGDEBUG("Freeing Blk: {} {} {}",ptr.m_blkId.to_string(), ptr.m_blk_offset, ptr.m_nblks_to_free);
+            m_data_blkstore->free_blk(ptr.m_blkId, BLOCK_SIZE * ptr.m_blk_offset, BLOCK_SIZE * ptr.m_nblks_to_free);
         }
         m_comp_cb(parent_req);
     }
@@ -202,12 +201,18 @@ Volume::process_data_completions(boost::intrusive_ptr<blkstore_req<BlkBuffer>> b
     assert(!req->isSyncCall);
     if (!req->is_read) {
         if (req->err == no_error) {
+            assert(req->nlbas < 256 && req->bid.get_nblks() < 256);
             MappingKey key(req->lba, req->nlbas);
             std::array<uint16_t, CS_ARRAY_STACK_SIZE> carr;
             //TODO - put actual checksum here @sounak
             for(auto i =0ul,j= req->lba;j < req->lba+req->nlbas;i++,j++) carr[i] = j%65000;
-            ValueEntry ve(req->seqId,req->bid,0,carr);
+            ValueEntry ve(req->seqId,req->bid,0,req->nlbas,carr);
             MappingValue value(ve);
+#ifndef NDEBUG
+            req->vol_uuid = m_sb->uuid;
+            LOGDEBUG("Mapping.PUT ,vol_uuid:{},Key:{},Value:{}",
+                    boost::uuids::to_string(req->vol_uuid), key.to_string(), value.to_string());
+#endif
             m_map->put(req, key,value);
         } else {
             process_metadata_completions(req);
@@ -269,6 +274,7 @@ Volume::write(uint64_t lba, uint8_t *buf, uint32_t nlbas,
         uint32_t lbas_snt = 0;
         uint32_t i = 0;
 
+        auto sid= seq_Id.fetch_add(1, memory_order_seq_cst);
         req->io_cnt = 1;
         for (i = 0; i < bid.size(); ++i) {
             std::deque<boost::intrusive_ptr<writeback_req>> req_q;
@@ -281,8 +287,8 @@ Volume::write(uint64_t lba, uint8_t *buf, uint32_t nlbas,
             child_req->bid = bid[i];
             child_req->lba = lba + lbas_snt;
             //TODO - actual seqId/lastCommit seq id should be comming from vol interface req
-            child_req->seqId = seq_Id.fetch_add(1, memory_order_acquire);
-            child_req->lastCommited_seqId=child_req->seqId-3;//keeping last 3 versions of mapping value
+            child_req->seqId = sid;
+            child_req->lastCommited_seqId=sid;//keeping only latest version always
             
             child_req->vol_instance = m_vol_ptr;
             assert((bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) % m_sb->page_size) == 0);
@@ -322,11 +328,19 @@ Volume::read(uint64_t lba, int nlbas, boost::intrusive_ptr<vol_interface_req> re
 
         //seqId shoudl be passed from vol interface req and passed to mapping layer
         boost::intrusive_ptr<volume_req> volreq(new volume_req());
-        volreq->seqId = seq_Id.fetch_add(1,memory_order_acquire);
-        volreq->lastCommited_seqId = volreq->seqId;//read your writes
+        volreq->lba = lba;
+        volreq->nlbas = nlbas;
+        auto sid = seq_Id.fetch_add(1,memory_order_seq_cst);
+        volreq->seqId = sid;
+        volreq->lastCommited_seqId = sid;//read only latest value
         MappingKey key(lba,nlbas);
-        std::vector<std::pair<MappingKey, MappingValue>> values;
-        std::error_condition ret = m_map->get(volreq, key, values);
+        std::vector<std::pair<MappingKey, MappingValue>> kvs;
+#ifndef NDEBUG
+        volreq->vol_uuid = m_sb->uuid;
+        LOGDEBUG("Mapping.GET vol_uuid:{} ,key:{} last_seqId: {}",
+                boost::uuids::to_string(volreq->vol_uuid), key.to_string(), volreq->lastCommited_seqId);
+#endif
+        std::error_condition ret = m_map->get(volreq, key, kvs);
         
         if (ret && ret == homestore_error::lba_not_exist) {
             return ret;
@@ -340,8 +354,8 @@ Volume::read(uint64_t lba, int nlbas, boost::intrusive_ptr<vol_interface_req> re
 #ifndef NDEBUG
         auto cur_lba=lba;
 #endif
-        for (auto &value: values) {
-            if (!(value.second.is_valid())) {
+        for (auto &kv: kvs) {
+            if (!(kv.second.is_valid())) {
                 buf_info info;
                 info.buf = m_only_in_mem_buff;
                 info.size = m_sb->page_size;
@@ -353,29 +367,31 @@ Volume::read(uint64_t lba, int nlbas, boost::intrusive_ptr<vol_interface_req> re
             } else {
                 boost::intrusive_ptr<volume_req> child_req(new volume_req());
                 req->io_cnt++;
+                child_req->lba=kv.first.start();
+                child_req->nlbas=kv.first.get_n_lba();
                 child_req->is_read = true;
                 child_req->parent_req = req;
                 child_req->vol_instance = m_vol_ptr;
                 child_req->isSyncCall = sync;
 
-                assert(value.second.get_array().get_total_elements() == 1);
+                assert(kv.second.get_array().get_total_elements() == 1);
                 ValueEntry ve;
-                (value.second.get_array()).get(0,ve,false);
+                (kv.second.get_array()).get(0,ve,false);
 
 #ifndef NDEBUG
                 //TODO - at this point, ve has checksum array to verify against later @sounak
-                for(auto i=0ul;i<value.first.get_n_lba();i++,cur_lba++) assert(ve.get_checksum_at(i)==cur_lba%65000);
-#endif
-                boost::intrusive_ptr<BlkBuffer> bbuf = 
-                    m_data_blkstore->read(ve.get_blkId(),
-                            m_sb->page_size * ve.get_blk_offset(),
-                            m_sb->page_size * value.first.get_n_lba(),
-                            boost::static_pointer_cast<blkstore_req<BlkBuffer>>(
-                                child_req));
+                for(auto i=0ul;i<kv.first.get_n_lba();i++,cur_lba++) {
+                    if(ve.get_checksum_at(i)!=cur_lba%65000)
+                        LOGDEBUG("Checksum mismatch ,{},{}", kv.first.to_string(), kv.second.to_string());
+                }
+#endif 
                 buf_info info;
+                info.size = get_page_size()*kv.first.get_n_lba();
+                info.offset = HomeBlks::instance()->get_data_pagesz() * ve.get_blk_offset();
+                boost::intrusive_ptr<BlkBuffer> bbuf = 
+                    m_data_blkstore->read(ve.get_blkId(),info.offset,info.size,
+                            boost::static_pointer_cast<blkstore_req<BlkBuffer>>(child_req));
                 info.buf = bbuf;
-                info.size = m_sb->page_size * value.first.get_n_lba() ;
-                info.offset = m_sb->page_size * ve.get_blk_offset() ;
                 req->read_buf_list.push_back(info);
             }
         }
