@@ -9,51 +9,49 @@
 #include <boost/intrusive_ptr.hpp>
 #include <queue>
 
-namespace homeds { namespace btree {
+namespace homeds {
+namespace btree {
 
 #define btree_store_t BtreeStore< BtreeStoreType, K, V, InteriorNodeType, LeafNodeType, NodeSize, btree_req_type >
 
-template< btree_store_type BtreeStoreType, typename K, typename V, btree_node_type InteriorNodeType,
-          btree_node_type LeafNodeType, size_t NodeSize , typename btree_req_type >
+template < btree_store_type BtreeStoreType, typename K, typename V, btree_node_type InteriorNodeType,
+           btree_node_type LeafNodeType, size_t NodeSize, typename btree_req_type >
 class BtreeNode;
 
-#define btree_node_t BtreeNode<BtreeStoreType, K, V, InteriorNodeType, LeafNodeType, NodeSize, btree_req_type>
+#define btree_node_t BtreeNode< BtreeStoreType, K, V, InteriorNodeType, LeafNodeType, NodeSize, btree_req_type >
 #define BtreeNodePtr boost::intrusive_ptr< btree_node_t >
 
-template<
-        btree_store_type BtreeStoreType,
-        typename K,
-        typename V,
-        btree_node_type InteriorNodeType,
-        btree_node_type LeafNodeType,
-        size_t NodeSize,
-        typename btree_req_type >
+template < btree_store_type BtreeStoreType, typename K, typename V, btree_node_type InteriorNodeType,
+           btree_node_type LeafNodeType, size_t NodeSize, typename btree_req_type >
 class BtreeStore {
-    typedef std::function< void (boost::intrusive_ptr<btree_req_type> cookie, std::error_condition status) > comp_callback;
+    typedef std::function< void(boost::intrusive_ptr< btree_req_type > cookie, std::error_condition status) >
+        comp_callback;
 
 public:
     using HeaderType = homeds::btree::EmptyClass;
 
-    static std::unique_ptr<btree_store_t> init_btree(BtreeConfig &cfg, void *btree_specific_context, comp_callback comp_cb);
-    static uint8_t *get_physical(const btree_node_t *bn);
-    static uint32_t get_node_area_size(btree_store_t *store);
+    static std::unique_ptr< btree_store_t > init_btree(BtreeConfig& cfg, void* btree_specific_context,
+                                                       comp_callback comp_cb);
+    static uint8_t*                         get_physical(const btree_node_t* bn);
+    static uint32_t                         get_node_area_size(btree_store_t* store);
 
-    static BtreeNodePtr alloc_node(btree_store_t *store, bool is_leaf,
-                                                bool &is_new_allocation,// indicates if allocated node is same as copy_from
-                                                BtreeNodePtr copy_from = nullptr);
-    static BtreeNodePtr read_node(btree_store_t *store, bnodeid_t id);
-    static void write_node(btree_store_t *store, BtreeNodePtr bn,
-                           std::deque<boost::intrusive_ptr<btree_req_type>> &dependent_req_q, 
-                           boost::intrusive_ptr<btree_req_type> cookie, bool is_sync,
-                           boost::intrusive_ptr<btree_multinode_req> op = nullptr);
-    static void free_node(btree_store_t *store, BtreeNodePtr bn,
-                          std::deque<boost::intrusive_ptr<btree_req_type>> &dependent_req_q);
-    static void read_node_lock(btree_store_t *store, BtreeNodePtr bn, bool is_write_modifiable,
-                               std::deque<boost::intrusive_ptr<btree_req_type>> *dependent_req_q);
-
-    static void copy_node(btree_store_t *store, BtreeNodePtr copy_from, BtreeNodePtr copy_to);
-    static void ref_node(btree_node_t *bn);
-    static bool deref_node(btree_node_t *bn);
+    static BtreeNodePtr alloc_node(btree_store_t* store, bool is_leaf,
+                                   bool&        is_new_allocation, // indicates if allocated node is same as copy_from
+                                   BtreeNodePtr copy_from = nullptr);
+    static BtreeNodePtr read_node(btree_store_t* store, bnodeid_t id);
+    static void         write_node(btree_store_t* store, BtreeNodePtr bn,
+                                   std::deque< boost::intrusive_ptr< btree_req_type > >& dependent_req_q,
+                                   boost::intrusive_ptr< btree_req_type > cookie, bool is_sync,
+                                   boost::intrusive_ptr< btree_multinode_req > op = nullptr);
+    static void         free_node(btree_store_t* store, BtreeNodePtr bn,
+                                  std::deque< boost::intrusive_ptr< btree_req_type > >& dependent_req_q);
+    static void         read_node_lock(btree_store_t* store, BtreeNodePtr bn, bool is_write_modifiable,
+                                       std::deque< boost::intrusive_ptr< btree_req_type > >* dependent_req_q);
+    static void         swap_node(btree_store_t* store, BtreeNodePtr node1, BtreeNodePtr node2);
+    static void         copy_node(btree_store_t* store, BtreeNodePtr copy_from, BtreeNodePtr copy_to);
+    static void         ref_node(btree_node_t* bn);
+    static bool         deref_node(btree_node_t* bn);
 };
-} }
-#endif //OMSTORE_BACKING_BTREE_HPP
+} // namespace btree
+} // namespace homeds
+#endif // OMSTORE_BACKING_BTREE_HPP

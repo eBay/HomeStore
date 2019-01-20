@@ -1,6 +1,6 @@
 set (CPP_FLAGS "-faligned-new -Dlinux")
 set (CPP_WARNINGS "-Wall -Wextra -Werror -Wno-unused-parameter -Wno-unused-variable -Wno-empty-body -Wno-array-bounds")
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CPP_FLAGS} ${CPP_WARNINGS}") 
+set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CPP_FLAGS} ${CPP_WARNINGS} -DRCU_SIGNAL")
 
 find_package(Boost 1.64 REQUIRED)
 find_package (Threads REQUIRED)
@@ -25,9 +25,16 @@ add_subdirectory(endpoint)
 add_subdirectory(homeds)
 add_subdirectory(volume)
 add_subdirectory(error)
-add_subdirectory(metrics)
 add_subdirectory(main)
 add_subdirectory(threadpool)
+
+if(${CMAKE_BUILD_TYPE} STREQUAL Debug)
+    message("Debug build")
+    add_compile_options(-D_DEBUG=1 -O0 -DDEBUG_RCU -D_PRERELEASE=1)
+else()
+    message("Release build")
+    add_compile_options(-DNDEBUG=1 -O3)
+endif()
 
 add_library(homestore
                   $<TARGET_OBJECTS:hs_main>
@@ -36,7 +43,6 @@ add_library(homestore
                   $<TARGET_OBJECTS:hs_endpoint>
                   $<TARGET_OBJECTS:hs_blkalloc>
                   $<TARGET_OBJECTS:hs_error>
-                  $<TARGET_OBJECTS:hs_metrics>
                 )
 target_link_libraries(homestore
                          ${COMMON_LIB_DEPS})

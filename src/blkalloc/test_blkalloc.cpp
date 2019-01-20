@@ -8,6 +8,7 @@
 #include "varsize_blk_allocator.h"
 
 SDS_LOGGING_INIT(VMOD_BTREE_MERGE, VMOD_BTREE_SPLIT, varsize_blk_alloc)
+THREAD_BUFFER_INIT;
 
 using namespace std;
 using namespace homestore;

@@ -9,6 +9,14 @@ message(WARNING "BTree test disabled due to interface change.")
 #target_link_libraries(test_btree ${COMMON_LIB_DEPS})
 #add_test(NAME BTree COMMAND test_btree)
 
+if(${CMAKE_BUILD_TYPE} STREQUAL Debug)
+    message("Debug build")
+    add_compile_options(-D_DEBUG=1 -O0 -DDEBUG_RCU -D_PRERELEASE=1)
+else()
+    message("Release build")
+    add_compile_options(-DNDEBUG=1 -O3)
+endif()
+
 set(TEST_BTREE_CRUD_SOURCE_FILES
         tests/test_btree_crud.cpp
         )
