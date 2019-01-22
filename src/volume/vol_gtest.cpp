@@ -312,10 +312,10 @@ public:
         {
             std::unique_lock< std::mutex > lk(vol_mutex[cur]);
             /* check if someone is already doing writes/reads */ 
-            if (m_vol_bm[cur]->is_bits_set(lba, nblks)) {
+            if (m_vol_bm[cur]->is_bits_reset(lba, nblks))
+                m_vol_bm[cur]->set_bits(lba, nblks);
+            else
                 goto start;
-            }
-            m_vol_bm[cur]->set_bits(lba, nblks);
         }
         uint8_t *buf = nullptr;
         uint8_t *buf1 = nullptr;
@@ -374,10 +374,10 @@ public:
         {
             std::unique_lock< std::mutex > lk(vol_mutex[cur]);
             /* check if someone is already doing writes/reads */ 
-            if (m_vol_bm[cur]->is_bits_set(lba, nblks)) {
+            if (m_vol_bm[cur]->is_bits_reset(lba, nblks))
+                m_vol_bm[cur]->set_bits(lba, nblks);
+            else
                 goto start;
-            }
-            m_vol_bm[cur]->set_bits(lba, nblks);
         }
         read_vol(cur, lba, nblks);
     }
@@ -431,7 +431,6 @@ public:
                     LOGINFO("mismatch found offset {} size {}", tot_size, size_read);
 #ifndef NDEBUG
                     VolInterface::get_instance()->print_tree(vol);
-                    std::this_thread::sleep_for (std::chrono::seconds(5));
 #endif
                     assert(0);
                 }

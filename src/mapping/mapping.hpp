@@ -1,3 +1,5 @@
+#pragma once
+
 #include "blkstore/writeBack_cache.hpp"
 #include "homeds/btree/ssd_btree.hpp"
 #include "homeds/btree/btree.hpp"
@@ -289,8 +291,6 @@ namespace homestore {
             out.get_array().set_elements(v_array);
         }
     };
-
-    std::atomic<int> mapping_io_cnt;
     
     class mapping {
         typedef function<void(struct BlkId blkid)> free_blk_callback;
@@ -312,7 +312,6 @@ namespace homestore {
             if (req->status == no_error) {
                 req->status = status;
             }
-            mapping_io_cnt--;
             comp_cb(req);
         }
 
@@ -391,7 +390,6 @@ namespace homestore {
 
         error_condition put(boost::intrusive_ptr<volume_req> req,
                             MappingKey &key, MappingValue &value) {
-            mapping_io_cnt++;
             assert(value.get_array().get_total_elements() == 1);
             UpdateCBParam param(req, key, value);
             MappingKey start(key.start(), 1);
@@ -408,6 +406,7 @@ namespace homestore {
                             boost::static_pointer_cast<writeback_req>(req),
                             boost::static_pointer_cast<writeback_req>(req),
                             ureq);
+
 
 #ifndef NDEBUG
             vector<pair<MappingKey, MappingValue>> values;
@@ -472,7 +471,7 @@ namespace homestore {
 
                             auto lba_offset = overlap.get_start_offset(*e_key);
                             ve.add_offset(lba_offset, overlap.get_n_lba(), m_vol_page_size);
-                            assert(ve.get_checksum_at(0)==overlap.start());//TODO -remove this when real checksum is implemented
+                            assert(ve.get_checksum_at(0)==overlap.start()%65000);//TODO -remove this when real checksum is implemented
                             result_kv.emplace_back(make_pair(overlap, MappingValue(ve)));
                         } else
                             result_kv.emplace_back(make_pair(MappingKey(*e_key), MappingValue(ve)));
@@ -628,7 +627,7 @@ namespace homestore {
 #ifndef NDEBUG
                     ValueEntry vx;
                     value.get_array().get(0,vx,false);
-                    assert(vx.get_checksum_at(0)==key.start());
+                    assert(vx.get_checksum_at(0)==key.start()%65000);
 #endif
                     replace_kv.emplace_back(make_pair(key, value));
                 }
@@ -647,7 +646,7 @@ namespace homestore {
 #ifndef NDEBUG
                 ValueEntry temp_ve;
                 temp_mv.get_array().get(0,temp_ve,false);
-                assert(temp_ve.get_checksum_at(0)==key3.start());
+                assert(temp_ve.get_checksum_at(0)==key3.start()%65000);
 #endif
             }
             ValueEntry new_ve;
@@ -655,7 +654,7 @@ namespace homestore {
             new_ve.add_offset(k2_offset, k2->get_n_lba() - k2_offset, m_vol_page_size);
 
 #ifndef NDEBUG
-            assert(new_ve.get_checksum_at(0)==key3.start());
+            assert(new_ve.get_checksum_at(0)==key3.start()%65000);
 #endif
             MappingValue value3;
             temp_mv.add(new_ve, value3);
@@ -670,7 +669,7 @@ namespace homestore {
             auto nlba = e_lba - s_lba + 1;
             gap_entry.add_offset(lba_offset, nlba, m_vol_page_size);
 #ifndef NDEBUG
-            assert(gap_entry.get_checksum_at(0)==s_lba);
+            assert(gap_entry.get_checksum_at(0)==s_lba%65000);
 #endif
             replace_kv.emplace_back(make_pair(MappingKey(s_lba, nlba), MappingValue(gap_entry)));
         }
