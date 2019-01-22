@@ -260,7 +260,7 @@ class PhysicalDev {
 
 public:
     PhysicalDev(DeviceManager* mgr, const std::string& devname, int const oflags, std::shared_ptr< iomgr::ioMgr > iomgr,
-                homeio::comp_callback& cb, boost::uuids::uuid uuid, uint32_t dev_num, uint64_t dev_offset,
+                homeio::comp_callback& cb, boost::uuids::uuid& uuid, uint32_t dev_num, uint64_t dev_offset,
                 uint32_t is_file, bool is_init, uint64_t dm_info_size, bool* is_inited);
     ~PhysicalDev() = default;
 
@@ -271,7 +271,6 @@ public:
     int                 get_devfd() const { return m_devfd; }
     std::string         get_devname() const { return m_devname; }
     uint64_t            get_size() const { return m_devsize; }
-    boost::uuids::uuid  get_uuid() const { return m_info_blk.uuid; }
     uint32_t            get_first_chunk_id() const { return m_info_blk.first_chunk_id; }
     uint64_t            get_dev_offset() const { return m_info_blk.dev_offset; }
     uint32_t            get_dev_id() const { return m_info_blk.dev_num; }
@@ -333,7 +332,7 @@ private:
     std::string                     m_devname;
     super_block*                    m_super_blk; // Persisent header block
     uint64_t                        m_devsize;
-    homeio::comp_callback           comp_cb;
+    homeio::comp_callback           m_comp_cb;
     std::shared_ptr< iomgr::ioMgr > m_iomgr;
     struct pdev_info_block          m_info_blk;
     PhysicalDevChunk*               m_dm_chunk[2];
@@ -425,7 +424,7 @@ private:
 
 private:
     int                             m_open_flags;
-    homeio::comp_callback           comp_cb;
+    homeio::comp_callback           m_comp_cb;
     NewVDevCallback                 m_new_vdev_cb;
     std::shared_ptr< iomgr::ioMgr > m_iomgr;
     std::atomic< uint64_t >         m_gen_cnt;

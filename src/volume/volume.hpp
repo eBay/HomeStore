@@ -10,6 +10,7 @@
 #include "home_blks.hpp"
 #include <metrics/metrics.hpp>
 #include <utility/atomic_counter.hpp>
+#include <memory>
 
 #include "threadpool/thread_pool.h"
 using namespace std;
@@ -41,6 +42,7 @@ struct volume_req : blkstore_req< BlkBuffer > {
     std::vector< Free_Blk_Entry > blkIds_to_free;
     uint64_t                      seqId;
     uint64_t                      lastCommited_seqId;
+    Clock::time_point             op_start_time;
 
     /* number of times mapping table need to be updated for this req. It can
      * break the ios update in mapping btree depending on the key range.
@@ -83,13 +85,13 @@ public:
         REGISTER_HISTOGRAM(volume_map_write_latency, "Volume mapping write latency");
         REGISTER_HISTOGRAM(volume_blkalloc_latency, "Volume block allocation latency");
         REGISTER_HISTOGRAM(volume_pieces_per_write, "Number of individual pieces per write",
-                           sisl::HistogramBucketsType(LinearUpto64Buckets));
+                           HistogramBucketsType(LinearUpto64Buckets));
 
         register_me_to_farm();
     }
 };
 
-class Volume : public std::enabled_shared_from_this< Volume > {
+class Volume : public std::enable_shared_from_this< Volume > {
 private:
     mapping*                          m_map;
     boost::intrusive_ptr< BlkBuffer > m_only_in_mem_buff;
@@ -102,8 +104,9 @@ private:
     VolumeMetrics                     m_metrics;
 
 private:
-    Volume(vol_params& params);
+    Volume(const vol_params& params);
     Volume(vol_sb* sb);
+    void check_and_complete_io(boost::intrusive_ptr< vol_interface_req >& req, bool call_completion = true);
 
 public:
     template < typename... Args >
@@ -115,25 +118,20 @@ public:
     static void process_vol_data_completions(boost::intrusive_ptr< blkstore_req< BlkBuffer > > bs_req);
 
     ~Volume() { free(m_sb); };
-    std::error_condition destroy();
-    void                 process_metadata_completions(boost::intrusive_ptr< volume_req > wb_req);
-    void                 process_data_completions(boost::intrusive_ptr< blkstore_req< BlkBuffer > > bs_req);
 
+    std::error_condition destroy();
     std::error_condition write(uint64_t lba, uint8_t* buf, uint32_t nblks,
                                boost::intrusive_ptr< vol_interface_req > req);
-
     std::error_condition read(uint64_t lba, int nblks, boost::intrusive_ptr< vol_interface_req > req, bool sync);
 
-    void process_metadata_completions(boost::intrusive_ptr< volume_req > req);
+    void process_metadata_completions(boost::intrusive_ptr< volume_req > wb_req);
     void process_data_completions(boost::intrusive_ptr< blkstore_req< BlkBuffer > > bs_req);
 
     uint64_t get_elapsed_time(Clock::time_point startTime);
     void     attach_completion_cb(io_comp_callback& cb);
-
-    void                      print_tree();
-
-    void blk_recovery_process_completions(bool success);
-    void blk_recovery_callback(MappingValue& mv);
+    void     print_tree();
+    void     blk_recovery_process_completions(bool success);
+    void     blk_recovery_callback(MappingValue& mv);
 
     mapping* get_mapping_handle() { return m_map; }
 
@@ -151,10 +149,6 @@ public:
     const char* get_name() const { return (m_sb->vol_name); }
     uint64_t    get_page_size() const { return m_sb->page_size; }
     uint64_t    get_size() const { return m_sb->size; }
-
-#ifndef NDEBUG
-    void enable_split_merge_crash_simulation();
-#endif
 };
 
 #define BLKSTORE_BLK_SIZE_IN_BYTES HomeStoreConfig::phys_page_size

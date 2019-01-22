@@ -49,13 +49,8 @@ public:
         vconfig->set_total_segments(TOTAL_SEGMENTS);                  // 8 Segments per chunk
 
         assert((size % MIN_CHUNK_SIZE) == 0);
-<<<<<<< HEAD
-        vconfig->set_total_blks(((uint64_t)size) / vpage_size);
-=======
-        vconfig->set_total_blks(((uint64_t)size) / vpage_size);
-        LOGINFO("added number of blocks {}", vconfig->get_total_blks());
->>>>>>> with_metrics
 
+        vconfig->set_total_blks(((uint64_t)size) / vpage_size);
         vconfig->set_blks_per_temp_group(100); // TODO: Recalculate based on size set aside for temperature entries
         vconfig->set_max_cache_blks(vconfig->get_total_blks() / 4); // Cache quarter of the blocks
         /* Blk sizes in slabs : size < 8k, 8k <= size < 16k,
@@ -597,7 +592,6 @@ public:
     auto to_string() { return std::string(); }
 
     uint64_t get_num_chunks() const { return m_num_chunks; }
-
     uint64_t get_chunk_size() const { return m_chunk_size; }
 
 private:
@@ -720,7 +714,6 @@ private:
 
     uint32_t get_blks_per_chunk() const { return get_chunk_size() / get_page_size(); }
     uint32_t get_page_size() const { return m_vb->page_size; }
-    uint64_t get_chunk_size() const { return m_chunk_size; }
     uint32_t get_nmirrors() const { return m_vb->num_mirrors; }
 };
 

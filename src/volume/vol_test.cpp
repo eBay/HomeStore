@@ -157,10 +157,6 @@ public:
 
         /* Create a volume */
         vol = VolInterface::get_instance()->createVolume(params);
-         
-#ifndef NDEBUG
-        vol->enable_split_merge_crash_simulation();
-#endif
         LOGDEBUG("Created volume of size: {}", max_vol_size);
     }
 

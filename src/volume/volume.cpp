@@ -182,7 +182,7 @@ void Volume::process_data_completions(boost::intrusive_ptr< blkstore_req< BlkBuf
     check_and_complete_io(parent_req);
 }
 
-std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nblks,
+std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas,
                                    boost::intrusive_ptr< vol_interface_req > req) {
     try {
         assert(m_sb->state == vol_state::ONLINE);
@@ -193,20 +193,19 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nblks,
         hints.dev_id_hint = -1;
 
         assert(m_sb->page_size % HomeBlks::instance()->get_data_pagesz() == 0);
-        assert((m_sb->page_size * nblks) <= VOL_MAX_IO_SIZE);
+        assert((m_sb->page_size * nlbas) <= VOL_MAX_IO_SIZE);
         hints.multiplier = (m_sb->page_size / HomeBlks::instance()->get_data_pagesz());
 
-        assert((m_sb->page_size * nlbas) <= VOL_MAX_IO_SIZE);
-
+        req->is_read = false;
         COUNTER_INCREMENT(m_metrics, volume_write_count, 1);
-
         req->io_start_time = Clock::now();
-        BlkAllocStatus status = m_data_blkstore->alloc_blk(nblks * m_sb->page_size, hints, bid);
+
+        BlkAllocStatus status = m_data_blkstore->alloc_blk(nlbas * m_sb->page_size, hints, bid);
         assert(status == BLK_ALLOC_SUCCESS);
         HISTOGRAM_OBSERVE(m_metrics, volume_blkalloc_latency, get_elapsed_time_us(req->io_start_time));
 
         boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector());
-        mvec->set(buf, m_sb->page_size * nblks, 0);
+        mvec->set(buf, m_sb->page_size * nlbas, 0);
 
         uint32_t offset = 0;
         uint32_t lbas_snt = 0;
@@ -222,7 +221,7 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nblks,
             child_req->parent_req = req;
             child_req->is_read = false;
             child_req->bid = bid[i];
-            child_req->lba = lba + blks_snt;
+            child_req->lba = lba + lbas_snt;
             // TODO - actual seqId/lastCommit seq id should be comming from vol interface req
             child_req->seqId = seq_Id.fetch_add(1, memory_order_acquire);
             child_req->lastCommited_seqId = child_req->seqId - 3; // keeping last 3 versions of mapping value
@@ -231,7 +230,7 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nblks,
             child_req->op_start_time = data_io_start_time;
 
             assert((bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) % m_sb->page_size) == 0);
-            child_req->nblks = bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) / m_sb->page_size;
+            child_req->nlbas = bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) / m_sb->page_size;
 
             boost::intrusive_ptr< BlkBuffer > bbuf = m_data_blkstore->write(
                 bid[i], mvec, offset, boost::static_pointer_cast< blkstore_req< BlkBuffer > >(child_req), req_q);
@@ -267,14 +266,11 @@ void Volume::check_and_complete_io(boost::intrusive_ptr< vol_interface_req >& re
 
 void Volume::print_tree() { m_map->print_tree(); }
 
-#ifndef NDEBUG
-void Volume::enable_split_merge_crash_simulation() { m_map->enable_split_merge_crash_simulation(); }
-#endif
-
 std::error_condition Volume::read(uint64_t lba, int nlbas, boost::intrusive_ptr< vol_interface_req > req, bool sync) {
     try {
         assert(m_sb->state == vol_state::ONLINE);
         req->io_start_time = Clock::now();
+        req->is_read = true;
 
         // seqId shoudl be passed from vol interface req and passed to mapping layer
         boost::intrusive_ptr< volume_req > volreq(new volume_req());
@@ -302,11 +298,7 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, boost::intrusive_ptr<
 #endif
         for (auto& value : values) {
             if (!(value.second.is_valid())) {
-                buf_info info;
-                info.buf = m_only_in_mem_buff;
-                info.size = m_sb->page_size;
-                info.offset = 0;
-                req->read_buf_list.push_back(info);
+                req->read_buf_list.emplace_back(m_sb->get_page_size(), 0, m_only_in_mem_buff);
 #ifndef NDEBUG
                 cur_lba++;
 #endif

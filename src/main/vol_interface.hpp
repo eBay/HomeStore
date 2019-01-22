@@ -41,6 +41,7 @@ struct vol_interface_req {
     sisl::atomic_counter< int > io_cnt;
     sisl::atomic_counter< int > refcount;
     Clock::time_point           io_start_time;
+    bool                        is_read;
 
     friend void intrusive_ptr_add_ref(vol_interface_req* req) { req->refcount.increment(1); }
 
@@ -147,7 +148,6 @@ public:
 #ifndef NDEBUG
     virtual void print_tree(std::shared_ptr< Volume > vol) = 0;
 #endif
-    virtual void attach_vol_completion_cb(std::shared_ptr< Volume > vol, io_comp_callback cb) = 0;
 };
 } // namespace homestore
 

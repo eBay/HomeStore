@@ -18,7 +18,7 @@ DeviceManager::DeviceManager(NewVDevCallback vcb,
                              uint32_t const vdev_metadata_size,
                              std::shared_ptr<iomgr::ioMgr> iomgr,
                              homeio::comp_callback cb, bool is_file, boost::uuids::uuid system_uuid) :
-        comp_cb(cb), m_new_vdev_cb(vcb), m_iomgr(iomgr), m_gen_cnt(0), m_is_file(is_file), m_system_uuid(system_uuid) {
+        m_comp_cb(cb), m_new_vdev_cb(vcb), m_iomgr(iomgr), m_gen_cnt(0), m_is_file(is_file), m_system_uuid(system_uuid) {
 #ifndef NDEBUG
     if (HomeStoreConfig::open_flag == BUFFERED_IO) {
         m_open_flags = O_RDWR;
@@ -79,7 +79,7 @@ void DeviceManager::init_devices(std::vector< dev_info > &devices) {
     for (auto &d : devices) {
         bool is_inited;
         std::unique_ptr< PhysicalDev > pdev = std::make_unique< PhysicalDev >(this, d.dev_names, 
-                m_open_flags, m_iomgr, comp_cb, m_system_uuid, m_pdev_id++, max_dev_offset, m_is_file, true, 
+                m_open_flags, m_iomgr, m_comp_cb, m_system_uuid, m_pdev_id++, max_dev_offset, m_is_file, true,
                 m_dm_info_size, &is_inited);
 
         max_dev_offset += pdev->get_size();
@@ -107,7 +107,7 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info > &devices) {
     for (auto &d : devices) {
         bool is_inited;
         std::unique_ptr< PhysicalDev > pdev = std::make_unique< PhysicalDev >(this, d.dev_names, 
-								m_open_flags, m_iomgr, comp_cb, m_system_uuid, INVALID_DEV_ID, 0, m_is_file, false, 
+								m_open_flags, m_iomgr, m_comp_cb, m_system_uuid, INVALID_DEV_ID, 0, m_is_file, false,
                                 m_dm_info_size, &is_inited);
         if (!is_inited) {
             // Super block is not present, possibly a new device, will format the device later
