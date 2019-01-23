@@ -79,6 +79,9 @@ void DeviceManager::init_devices(std::vector< dev_info > &devices) {
 
     for (auto &d : devices) {
         bool is_inited;
+        if (!strcmp(d.dev_names.c_str(), "/dev/rbd0")) {
+            continue;
+        }
         std::unique_ptr< PhysicalDev > pdev = std::make_unique< PhysicalDev >(this, d.dev_names, 
                 m_open_flags, m_iomgr, comp_cb, m_system_uuid, m_pdev_id++, max_dev_offset, m_is_file, true, 
                 m_dm_info_size, &is_inited);
@@ -107,6 +110,9 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info > &devices) {
     
     for (auto &d : devices) {
         bool is_inited;
+        if (!strcmp(d.dev_names.c_str(), "/dev/rbd0")) {
+            continue;
+        }
         std::unique_ptr< PhysicalDev > pdev = std::make_unique< PhysicalDev >(this, d.dev_names, 
 								m_open_flags, m_iomgr, comp_cb, m_system_uuid, INVALID_DEV_ID, 0, m_is_file, false, 
                                 m_dm_info_size, &is_inited);
