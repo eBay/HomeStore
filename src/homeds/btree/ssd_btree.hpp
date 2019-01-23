@@ -100,7 +100,7 @@ template<
         >
 class SSDBtreeStore {
     typedef std::function< void (boost::intrusive_ptr<homestore::writeback_req> cookie,
-           std::error_condition status) > comp_callback;
+           std::error_condition status, boost::intrusive_ptr<btree_multinode_req> multinode_req) > comp_callback;
 
     struct ssd_btree_req : homestore::blkstore_req<btree_buffer_t> {
            boost::intrusive_ptr<homestore::writeback_req> cookie;
@@ -153,19 +153,9 @@ public:
     }
 
     void process_req_completions(boost::intrusive_ptr<homestore::blkstore_req<btree_buffer_t>> bs_req) {
-  
         boost::intrusive_ptr<ssd_btree_req> req = boost::static_pointer_cast<ssd_btree_req> (bs_req);
         assert(!req->isSyncCall);
-        if (req->cookie) {
-            if(req->multinode_req== nullptr)
-                m_comp_cb(req->cookie, req->err);
-            else{
-                int cnt = req->multinode_req->writes_pending.fetch_sub(1, std::memory_order_acq_rel);
-                if (req->multinode_req->is_done && cnt == 1) {
-                    m_comp_cb(req->cookie, req->err);
-                }
-            }
-        }
+        m_comp_cb(req->cookie, req->err, req->multinode_req);
     }
 
     static uint8_t *get_physical(const SSDBtreeNode *bn) {

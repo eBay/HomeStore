@@ -176,13 +176,14 @@ homestore::Volume::process_metadata_completions(boost::intrusive_ptr<volume_req>
         parent_req->err = req->err;
     }
 
+    for (auto &ptr : req->blkIds_to_free) {
+        LOGDEBUG("Freeing Blk: {} {} {}",ptr.m_blkId.to_string(), ptr.m_blk_offset, ptr.m_nblks_to_free);
+        m_data_blkstore->free_blk(ptr.m_blkId, BLOCK_SIZE * ptr.m_blk_offset, BLOCK_SIZE * ptr.m_nblks_to_free);
+    }
+    
     if (parent_req->io_cnt.fetch_sub(1, memory_order_acquire) == 1) {
         if (req->err == no_error) {
             PerfMetrics::getInstance()->updateHist(VOL_IO_WRITE_H, get_elapsed_time(parent_req->startTime));
-        }
-        for (auto &ptr : req->blkIds_to_free) {
-            LOGDEBUG("Freeing Blk: {} {} {}",ptr.m_blkId.to_string(), ptr.m_blk_offset, ptr.m_nblks_to_free);
-            m_data_blkstore->free_blk(ptr.m_blkId, BLOCK_SIZE * ptr.m_blk_offset, BLOCK_SIZE * ptr.m_nblks_to_free);
         }
         m_comp_cb(parent_req);
     }

@@ -1,11 +1,12 @@
 #include <gtest/gtest.h>
+#include <fstream>
 #include <iostream>
 #include <thread>
 #include <sds_logging/logging.h>
 #include "mapping.hpp"
 
 SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write, iomgr, VMOD_BTREE_MERGE, VMOD_BTREE_SPLIT, varsize_blk_alloc,
-        VMOD_VOL_MAPPING, VMOD_BTREE
+                 VMOD_VOL_MAPPING, VMOD_BTREE
 )
 
 using namespace std;
@@ -20,7 +21,7 @@ const char *__asan_default_options() {
 #define MAX_LBA            65535
 #define MAX_NLBA             128
 #define MAX_BLK       4294967295
-
+#define MAX_SIZE          7 * Gi
 uint64_t num_ios;
 uint64_t num_threads;
 
@@ -36,9 +37,9 @@ protected:
     uint64_t Mi = Ki * Ki;
     uint64_t Gi = Ki * Mi;
 
-    std::shared_ptr <iomgr::ioMgr> iomgr_obj;
-    std::vector <dev_info> device_info;
-    std::atomic <uint64_t> seq_Id;
+    std::shared_ptr<iomgr::ioMgr> iomgr_obj;
+    std::vector<dev_info> device_info;
+    std::atomic<uint64_t> seq_Id;
     bool start = false;
     boost::uuids::uuid uuid;
 public:
@@ -53,6 +54,7 @@ public:
     }
 
     void process_metadata_completions(boost::intrusive_ptr<volume_req> req) {
+        LOGINFO("process meta compl");
         for (auto &ptr : req->blkIds_to_free) {
             LOGINFO("Freeing Blk: {} {} {}", ptr.m_blkId.to_string(), ptr.m_blk_offset, ptr.m_nblks_to_free);
             release_blkId_lock(ptr.m_blkId, ptr.m_blk_offset, ptr.m_nblks_to_free);
@@ -60,7 +62,7 @@ public:
     }
 
     void process_completions(boost::intrusive_ptr<vol_interface_req> vol_req) {
-
+        LOGINFO("process compl");
     }
 
     void start_homestore() {
@@ -68,9 +70,12 @@ public:
         /* create files */
 
         dev_info temp_info;
-        temp_info.dev_names = "file1";
+        temp_info.dev_names = "file101";
         device_info.push_back(temp_info);
-
+        std::ofstream ofs(temp_info.dev_names.c_str(), std::ios::binary | std::ios::out);
+        ofs.seekp(MAX_SIZE - 1);
+        ofs.write("", 1);
+        
         iomgr_obj = std::make_shared<iomgr::ioMgr>(2, num_threads);
         init_params params;
 #ifndef NDEBUG
@@ -83,7 +88,7 @@ public:
         params.disk_init = true;
         params.devices = device_info;
         params.is_file = true;
-        params.max_cap = 7 * Gi;
+        params.max_cap = MAX_SIZE;
         params.physical_page_size = 8192;
         params.disk_align_size = 4096;
         params.atomic_page_size = 8192;
@@ -103,17 +108,17 @@ public:
         return true;
     }
 
-    void vol_mounted_cb(std::shared_ptr <Volume> vol_obj, vol_state state) {
+    void vol_mounted_cb(std::shared_ptr<Volume> vol_obj, vol_state state) {
         vol_init(vol_obj);
         auto cb = [this](boost::intrusive_ptr<vol_interface_req> vol_req) { process_completions(vol_req); };
         VolInterface::get_instance()->attach_vol_completion_cb(vol_obj, cb);
     }
 
-    void vol_init(std::shared_ptr <homestore::Volume> vol_obj) {
+    void vol_init(std::shared_ptr<homestore::Volume> vol_obj) {
         open(VolInterface::get_instance()->get_name(vol_obj), O_RDWR);
     }
 
-    void vol_state_change_cb(std::shared_ptr <Volume> vol, vol_state old_state, vol_state new_state) {
+    void vol_state_change_cb(std::shared_ptr<Volume> vol, vol_state old_state, vol_state new_state) {
         assert(0);
     }
 
@@ -122,22 +127,22 @@ public:
         /* create volume */
         vol_params params;
         params.page_size = 4096;
-        params.size = 7 * Gi;
+        params.size = MAX_SIZE;
         params.uuid = boost::uuids::random_generator()();
         std::string name = "vol1";
         memcpy(params.vol_name, name.c_str(), (name.length() + 1));
-        m_map = new mapping(params.size, params.page_size, (std::bind(&MapTest::process_metadata_completions, this,
-                                                                      std::placeholders::_1)));
+        m_map = new mapping(params.size, params.page_size,
+                            (std::bind(&MapTest::process_metadata_completions, this, std::placeholders::_1)));
         start = true;
     }
 
     void release_lba_range_lock(uint64_t &lba, uint64_t &nlbas) {
-        std::unique_lock <std::mutex> lk(mutex);
+        std::unique_lock<std::mutex> lk(mutex);
         m_lba_bm->reset_bits(lba, nlbas);
     }
 
     void release_blkId_lock(BlkId &blkId, uint8_t offset, uint8_t nblks_to_free) {
-        std::unique_lock <std::mutex> lk(mutex);
+        std::unique_lock<std::mutex> lk(mutex);
         m_blk_bm->reset_bits(blkId.get_id() + offset, nblks_to_free);
     }
 
@@ -149,7 +154,7 @@ public:
         /* we won't be writing more then 128 blocks in one io */
         uint64_t id = rand() % (MAX_BLK - MAX_NLBA);
         {
-            std::unique_lock <std::mutex> lk(mutex);
+            std::unique_lock<std::mutex> lk(mutex);
             /* check if someone is already doing writes/reads */
             if (m_blk_bm->is_bits_reset(id, nblks))
                 m_blk_bm->set_bits(id, nblks);
@@ -170,7 +175,7 @@ public:
         lba = rand() % (MAX_LBA - MAX_NLBA);
         nlbas = (rand() % (MAX_NLBA - 1)) + 1;
         {
-            std::unique_lock <std::mutex> lk(mutex);
+            std::unique_lock<std::mutex> lk(mutex);
             /* check if someone is already doing writes/reads */
             if (m_lba_bm->is_bits_reset(lba, nlbas))
                 m_lba_bm->set_bits(lba, nlbas);
@@ -181,8 +186,8 @@ public:
         }
     }
 
-    void read(uint64_t lba, uint64_t nlbas, std::vector <std::pair<MappingKey, MappingValue>> &kvs) {
-        LOGDEBUG("Reading -> lba:{},nlbas:{}",lba, nlbas);
+    void read(uint64_t lba, uint64_t nlbas, std::vector<std::pair<MappingKey, MappingValue>> &kvs) {
+        LOGDEBUG("Reading -> lba:{},nlbas:{}", lba, nlbas);
         boost::intrusive_ptr<volume_req> volreq(new volume_req());
         volreq->lba = lba;
         volreq->nlbas = nlbas;
@@ -202,7 +207,7 @@ public:
         auto i = 0u;
         auto batch = 100u;
         while (i < MAX_LBA) {
-            std::vector <std::pair<MappingKey, MappingValue>> kvs;
+            std::vector<std::pair<MappingKey, MappingValue>> kvs;
             read(i, batch, kvs);
             verify(kvs);
             i += batch;
@@ -210,7 +215,7 @@ public:
         }
     }
 
-    void verify(std::vector <std::pair<MappingKey, MappingValue>> &kvs) {
+    void verify(std::vector<std::pair<MappingKey, MappingValue>> &kvs) {
         for (auto &kv: kvs) {
             auto st = kv.first.start();
             ValueEntry ve;
@@ -236,7 +241,7 @@ public:
     void random_read() {
         uint64_t lba = 0, nlbas = 0;
         generate_random_lba_nlbas(lba, nlbas);
-        std::vector <std::pair<MappingKey, MappingValue>> kvs;
+        std::vector<std::pair<MappingKey, MappingValue>> kvs;
         read(lba, nlbas, kvs);
         verify(kvs);
         release_lba_range_lock(lba, nlbas);
@@ -252,7 +257,7 @@ public:
         req->lba = lba;
         req->nlbas = nlbas;
         MappingKey key(lba, nlbas);
-        std::array <uint16_t, CS_ARRAY_STACK_SIZE> carr;
+        std::array<uint16_t, CS_ARRAY_STACK_SIZE> carr;
 
         for (auto i = 0ul, j = lba; j < lba + nlbas; i++, j++) carr[i] = j % 65000;
         ValueEntry ve(sid, bid, 0, nlbas, carr);
@@ -281,7 +286,7 @@ public:
 
 
         //do sync read
-        std::vector <std::pair<MappingKey, MappingValue>> kvs;
+        std::vector<std::pair<MappingKey, MappingValue>> kvs;
         read(lba, nlbas, kvs);
 
         verify(kvs);
@@ -290,7 +295,7 @@ public:
 
     template<class Fn, class... Args>
     void run_in_parallel(int nthreads, Fn &&fn) {
-        std::vector < std::thread * > thrs;
+        std::vector<std::thread *> thrs;
         for (auto i = 0; i < nthreads; i++) {
             thrs.push_back(new std::thread(fn, this));
         }
@@ -308,25 +313,26 @@ public:
         i = 0u;
         while (i++ < num_ios)test->random_read();
     }
+    void remove_files() {
+        remove("file101");
+    }
 };
 
 TEST_F(MapTest, RandomTest
 ) {
-this->
+    this->start_homestore();
 
-start_homestore();
-
-while (!start)continue;
-run_in_parallel(num_threads, insert_and_get_thread
-);
+    while (!start)continue;
+    run_in_parallel(num_threads, insert_and_get_thread);
+    this->remove_files();
 }
 
 SDS_OPTION_GROUP(test_mapping,
-(num_ios,
-"", "num_ios", "number of ios", ::cxxopts::value<uint64_t>()->default_value(
-"10000"), "number"),
-(num_threads, "", "num_threads", "num threads for io", ::cxxopts::value<uint64_t>()->default_value(
-"8"), "number"))
+                 (num_ios,
+                         "", "num_ios", "number of ios", ::cxxopts::value<uint64_t>()->default_value(
+                         "200"), "number"),
+                 (num_threads, "", "num_threads", "num threads for io", ::cxxopts::value<uint64_t>()->default_value(
+                         "8"), "number"))
 SDS_OPTIONS_ENABLE(logging, test_mapping
 )
 
