@@ -80,6 +80,7 @@ void DeviceManager::init_devices(std::vector< dev_info > &devices) {
     for (auto &d : devices) {
         bool is_inited;
         if (!strcmp(d.dev_names.c_str(), "/dev/rbd0")) {
+            --m_pdev_hdr->num_phys_devs;
             continue;
         }
         std::unique_ptr< PhysicalDev > pdev = std::make_unique< PhysicalDev >(this, d.dev_names, 
