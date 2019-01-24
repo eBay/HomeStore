@@ -355,6 +355,7 @@ public:
             std::unique_lock< std::mutex > lk(vol_mutex[cur]);
             m_vol_bm[cur]->reset_bits(lba, nblks);
         }
+        LOGDEBUG("Wrote {} {} ",lba,nblks);
     }
    
     void populate_buf(uint8_t *buf, uint64_t size) {
@@ -383,6 +384,7 @@ public:
                 goto start;
         }
         read_vol(cur, lba, nblks);
+        LOGDEBUG("Read {} {} ",lba,nblks);
     }
 
     void read_vol(uint32_t cur, uint64_t lba, uint64_t nblks) {

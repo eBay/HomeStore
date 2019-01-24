@@ -150,6 +150,7 @@ private:
 
     BtreeMetrics                     m_metrics;
     std::unique_ptr< btree_store_t > m_btree_store;
+    comp_callback m_comp_cb;
 
 #ifndef NDEBUG
     static thread_local int                                          wr_locked_count;
@@ -161,29 +162,56 @@ private:
 
     ////////////////// Implementation /////////////////////////
 public:
-    btree_super_block get_btree_sb() { return m_sb; }
+    btree_super_block get_btree_sb() {
+        return m_sb;
+    }
+    
+    void process_completions(boost::intrusive_ptr<btree_req_type> cookie,
+                             error_condition status,
+                             boost::intrusive_ptr<btree_multinode_req> multinode_req) {
+        if(cookie) {
+            if (multinode_req == nullptr)
+                m_comp_cb(cookie, status);
+            else {
+                int cnt = multinode_req->writes_pending.fetch_sub(1, std::memory_order_acq_rel);
+                if (cnt == 1) 
+                    m_comp_cb(cookie, status);
+            }
+        }
+    }
 
-    static btree_t* create_btree(BtreeConfig& cfg, void* btree_specific_context, comp_callback comp_cb) {
-        auto impl_ptr = btree_store_t::init_btree(cfg, btree_specific_context, comp_cb);
-
-        return new Btree(cfg, std::move(impl_ptr));
+    static btree_t *create_btree(BtreeConfig &cfg, void *btree_specific_context, comp_callback comp_cb) {
+        Btree *bt = new Btree(cfg);
+        bt->m_comp_cb = comp_cb;
+        auto impl_ptr = btree_store_t::init_btree(cfg, btree_specific_context, 
+                std::bind(&Btree::process_completions, bt, std::placeholders::_1, std::placeholders::_2,
+                        std::placeholders::_3));
+        bt->m_btree_store = std::move(impl_ptr);
+        bt->init();
+        return bt;
     }
 
     static btree_t* create_btree(BtreeConfig& cfg, void* btree_specific_context) {
         auto impl_ptr = btree_store_t::init_btree(cfg, btree_specific_context, nullptr);
-        return new Btree(cfg, std::move(impl_ptr));
+        Btree *bt = new Btree(cfg);
+        bt->m_btree_store = std::move(impl_ptr);
+        bt->init();
+        return bt;
     }
 
-    static btree_t* create_btree(btree_super_block& btree_sb, BtreeConfig& cfg, void* btree_specific_context,
-                                 comp_callback comp_cb) {
-        auto impl_ptr = btree_store_t::init_btree(cfg, btree_specific_context, comp_cb, true);
-        return new Btree(btree_sb, cfg, std::move(impl_ptr));
+    static btree_t *create_btree(btree_super_block &btree_sb, BtreeConfig& cfg,
+                                    void *btree_specific_context, comp_callback comp_cb) {
+        Btree *bt = new Btree(cfg);
+        bt->m_comp_cb = comp_cb;
+        auto impl_ptr = btree_store_t::init_btree(cfg, btree_specific_context,
+                std::bind(&Btree::process_completions, bt, std::placeholders::_1, std::placeholders::_2,
+                          std::placeholders::_3), true);
+        bt->m_btree_store = std::move(impl_ptr);
+        bt->init_recovery(btree_sb);
+        return bt;
     }
 
-    Btree(BtreeConfig& cfg, std::unique_ptr< btree_store_t > store) :
-            m_btree_cfg(cfg),
-            m_metrics(cfg.get_name().c_str()) {
-        m_btree_store = std::move(store);
+    void do_common_init(){
         BtreeNodeAllocator< NodeSize >::create();
 
         // TODO: Check if node_area_size need to include persistent header
@@ -193,36 +221,27 @@ public:
         // calculate number of nodes
         uint32_t max_leaf_nodes =
             (m_btree_cfg.get_max_objs() * (m_btree_cfg.get_max_key_size() + m_btree_cfg.get_max_value_size())) /
-                node_area_size +
-            1;
+                node_area_size + 1;
         max_leaf_nodes += (100 * max_leaf_nodes) / 60; // Assume 60% btree full
 
-        m_max_nodes = max_leaf_nodes + ((double)max_leaf_nodes * 0.05) + 1; // Assume 5% for interior nodes
+        m_max_nodes = max_leaf_nodes + ((double) max_leaf_nodes * 0.05) + 1; // Assume 5% for interior nodes
+    }
+    
+    void init(){
+        do_common_init();
         create_root_node();
     }
-
-    Btree(const btree_super_block& btree_sb, BtreeConfig& cfg, std::unique_ptr< btree_store_t > store) :
-            m_btree_cfg(cfg),
-            m_sb(btree_sb),
-            m_metrics(cfg.get_name().c_str()) {
-        m_btree_store = std::move(store);
-        BtreeNodeAllocator< NodeSize >::create();
-
-        // TODO: Check if node_area_size need to include persistent header
-        uint32_t node_area_size = btree_store_t::get_node_area_size(store.get());
-        m_btree_cfg.set_node_area_size(node_area_size);
-
-        // calculate number of nodes
-        uint32_t max_leaf_nodes =
-            (m_btree_cfg.get_max_objs() * (m_btree_cfg.get_max_key_size() + m_btree_cfg.get_max_value_size())) /
-                node_area_size +
-            1;
-        max_leaf_nodes += (100 * max_leaf_nodes) / 60; // Assume 60% btree full
-
-        m_max_nodes = max_leaf_nodes + ((double)max_leaf_nodes * 0.05) + 1; // Assume 5% for interior nodes
+    
+    void init_recovery(btree_super_block btree_sb){
+        m_sb = btree_sb;
+        do_common_init();
         m_root_node = m_sb.root_node;
     }
-
+    
+    Btree(BtreeConfig &cfg) :
+            m_btree_cfg(cfg),
+            m_metrics(cfg.get_name().c_str()) {}
+    
     ~Btree() {
         m_btree_lock.write_lock();
         BtreeNodePtr             root = btree_store_t::read_node(m_btree_store.get(), m_root_node);
@@ -331,17 +350,22 @@ retry:
             acq_lock = homeds::thread::LOCKTYPE_WRITE;
             goto retry;
         } else {
-            boost::intrusive_ptr< btree_multinode_req > multinode_req;
-            if (bur != nullptr)
+            boost::intrusive_ptr<btree_multinode_req> multinode_req;
+            if(bur){
                 multinode_req = new btree_multinode_req();
-            bool success = do_put(root, acq_lock, k, v, ind, put_type, dependent_req_q, cookie, *existing_val,
-                                  multinode_req, true, bur);
+                multinode_req->writes_pending.fetch_add(1, std::memory_order_acq_rel);
+            }
+
+            bool success = do_put(root, acq_lock, k, v, ind, put_type, 
+                        dependent_req_q, cookie, *existing_val,multinode_req, bur);
             if (success == false) {
                 // Need to start from top down again, since there is a race between 2 inserts or deletes.
                 acq_lock = homeds::thread::LOCKTYPE_READ;
                 assert(rd_locked_count == 0 && wr_locked_count == 0);
                 goto retry;
             }
+            if(bur)
+                process_completions(cookie,homestore::no_error,multinode_req);
         }
 
         m_btree_lock.unlock();
@@ -983,11 +1007,13 @@ private:
      * is_end_path = set to true only for last path from root to tree, for range put
      * op          = tracks multi node io.
      */
-    bool do_put(BtreeNodePtr my_node, homeds::thread::locktype curlock, const BtreeKey& k, const BtreeValue& v,
-                int ind_hint, PutType put_type, std::deque< boost::intrusive_ptr< btree_req_type > >& dependent_req_q,
-                boost::intrusive_ptr< btree_req_type > cookie, BtreeValue& existing_val,
-                boost::intrusive_ptr< btree_multinode_req > multinode_req, bool is_end_path,
-                BtreeUpdateRequest< K, V >* bur = nullptr) {
+    bool do_put(BtreeNodePtr my_node, homeds::thread::locktype curlock,
+                const BtreeKey &k, const BtreeValue &v, int ind_hint,
+                PutType put_type, std::deque<boost::intrusive_ptr<btree_req_type>> &dependent_req_q,
+                boost::intrusive_ptr<btree_req_type> cookie,
+                BtreeValue &existing_val,
+                boost::intrusive_ptr<btree_multinode_req> multinode_req,
+                BtreeUpdateRequest<K, V> *bur = nullptr) {
 
         if (my_node->is_leaf()) {
             assert(curlock == LOCKTYPE_WRITE);
@@ -1004,8 +1030,6 @@ private:
                 for (auto pair : replace_kv) // insert is based on compare() of BtreeKey
                     my_node->insert(pair.first, pair.second);
                 multinode_req->writes_pending.fetch_add(1, std::memory_order_acq_rel);
-                if (is_end_path)
-                    multinode_req->is_done = true;
             } else {
                 my_node->put(k, v, put_type, existing_val);
             }
@@ -1139,11 +1163,11 @@ private:
                 // this lock. Holding this lock will impact performance unncessarily.
                 unlock_node(my_node, curlock);
                 unlocked_already = true;
-            } else
-                is_end_path = false;
+            }
 
-            bool success = do_put(child_node, child_cur_lock, k, v, ind_hint, put_type, dependent_req_q, cookie,
-                                  existing_val, multinode_req, is_end_path, bur);
+            bool success = do_put(child_node, child_cur_lock, k, v, ind_hint, put_type,
+                                  dependent_req_q, cookie, existing_val, multinode_req, bur);
+
             if (success == false) {
                 if (!unlocked_already)
                     unlock_node(my_node, curlock);
