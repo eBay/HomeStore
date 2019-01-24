@@ -88,7 +88,7 @@ struct virtualdev_req {
     PhysicalDevChunk*           chunk;
     Clock::time_point           io_start_time;
 
-    virtualdev_req() : err(no_error), isSyncCall(false), refcount(0) { req_alloc++; }
+    virtualdev_req() : err(no_error), is_read(false), isSyncCall(false), refcount(0) { req_alloc++; }
 
     friend void intrusive_ptr_add_ref(virtualdev_req* req) { req->refcount.increment(1); }
     friend void intrusive_ptr_release(virtualdev_req* req) {
@@ -106,26 +106,27 @@ struct virtualdev_req {
 };
 
 [[maybe_unused]] static void virtual_dev_process_completions(int64_t res, uint8_t* cookie) {
-    virtualdev_req* req = (virtualdev_req*)cookie;
-    int             ret = 0;
-    assert(req->version == 0xDEAD);
-    boost::intrusive_ptr< virtualdev_req > boost_req(req);
-    req->dec_ref();
+    int ret = 0;
 
-    if (req->err == no_error && res < 0) {
+    boost::intrusive_ptr< virtualdev_req > vd_req((virtualdev_req*)cookie, false);
+    assert(vd_req->version == 0xDEAD);
+
+    if (vd_req->err == no_error && res < 0) {
         /* TODO: it should have more specific errors */
-        req->err = std::make_error_condition(std::io_errc::stream);
+        vd_req->err = std::make_error_condition(std::io_errc::stream);
     }
 
-    auto pdev = req->chunk->get_physical_dev_mutable();
-    if (req->err) {
-        COUNTER_INCREMENT_IF_ELSE(pdev->get_metrics(), req->is_read, drive_read_errors, drive_write_errors, 1);
+    auto pdev = vd_req->chunk->get_physical_dev_mutable();
+    if (vd_req->err) {
+        COUNTER_INCREMENT_IF_ELSE(pdev->get_metrics(), vd_req->is_read, drive_read_errors, drive_write_errors, 1);
     } else {
-        HISTOGRAM_OBSERVE_IF_ELSE(pdev->get_metrics(), req->is_read, drive_read_latency, drive_write_latency,
-                                  get_elapsed_time_us(req->io_start_time));
+        HISTOGRAM_OBSERVE_IF_ELSE(pdev->get_metrics(), vd_req->is_read, drive_read_latency, drive_write_latency,
+                                  get_elapsed_time_us(vd_req->io_start_time));
     }
 
-    req->cb(boost_req);
+    vd_req->cb(vd_req);
+    // NOTE: Beyond this point vd_req could be freed by the callback. So once callback is made,
+    // DO NOT ACCESS vd_req beyond this point.
 }
 
 #if 0

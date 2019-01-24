@@ -327,8 +327,7 @@ void Cache<K>::safe_erase(const K &k, erase_comp_cb cb) {
     bool found = this->m_hash_set.safe_remove(k, hash_code, can_remove,
                                    [&out_buf](CacheBuffer< K > *about_to_remove_ptr) {
                                        // Make a smart ptr of the buffer we are removing
-                                       out_buf = 
-                                                boost::intrusive_ptr< CacheBuffer<K>>(about_to_remove_ptr);
+                                       out_buf = boost::intrusive_ptr< CacheBuffer<K>>(about_to_remove_ptr);
                                    });
     if (found) {
         if (cb != nullptr) {

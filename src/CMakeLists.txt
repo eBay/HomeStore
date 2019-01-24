@@ -27,6 +27,7 @@ add_subdirectory(volume)
 add_subdirectory(error)
 add_subdirectory(main)
 add_subdirectory(threadpool)
+add_subdirectory(mapping)
 
 if(${CMAKE_BUILD_TYPE} STREQUAL Debug)
     message("Debug build")

@@ -272,6 +272,10 @@ protected:
         return to_variant_node()->get_nth_key(0, out_firstkey, false);
     }
 
+    void get_var_nth_key(int i, BtreeKey *out_firstkey) {
+        return to_variant_node()->get_nth_key(i, out_firstkey, false);
+    }
+
     uint32_t get_all(const BtreeSearchRange &range, uint32_t max_count,
                                 int &start_ind, int &end_ind,
                      std::vector<std::pair<K, V>> *out_values = nullptr) {
@@ -284,9 +288,19 @@ protected:
         // Get the end index of the search range.
         auto end_result = find(range.extract_end_of_range(), nullptr, nullptr);
         end_ind = end_result.end_of_search_index;
-        if (!end_result.found || !range.is_end_inclusive()) { end_ind--; }
+        if ((!end_result.found && is_leaf()) || !range.is_end_inclusive()) { end_ind--; }
         if(!is_leaf() && end_ind<start_ind) end_ind = start_ind;
         assert(is_leaf() || (!is_leaf() && start_ind<=end_ind));
+
+#ifndef NDEBUG
+        if(end_ind > 0 && end_ind>start_ind){
+            K second_last_key;
+            get_var_nth_key(end_ind-1,&second_last_key);
+            assert(second_last_key.compare(range.extract_end_of_range().get_start_key())<0);
+        }
+        
+#endif
+        
         if(out_values==nullptr){
             int total = end_ind-start_ind+1;
             if(total<0)total=0;
@@ -468,6 +482,7 @@ protected:
                 start = mid;
             }
         }
+        
 
         if (ret.found) {
             if (selection == LEFT_MOST) {

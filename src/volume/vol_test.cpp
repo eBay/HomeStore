@@ -33,7 +33,7 @@ static size_t const page_size = sysconf(_SC_PAGESIZE);
 
 using log_level = spdlog::level::level_enum;
 
-SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write, iomgr, VMOD_BTREE_MERGE, VMOD_BTREE_SPLIT
+SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write, iomgr, VMOD_BTREE_MERGE, VMOD_BTREE_SPLIT, VMOD_BTREE
 )
 
 homestore::DeviceManager *dev_mgr = nullptr;
@@ -156,7 +156,8 @@ public:
         memcpy(params.vol_name, "vol1", sizeof("vol1"));
 
         /* Create a volume */
-        vol = VolInterface::get_instance()->createVolume(params);
+        vol = VolInterface::get_instance()->create_volume(params);
+
         LOGDEBUG("Created volume of size: {}", max_vol_size);
     }
 

@@ -8,7 +8,7 @@
 #include <homeds/btree/ssd_btree.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
-#include <async_http/http_server.hpp>
+//#include <async_http/http_server.hpp>
 
 namespace homestore {
 
@@ -22,7 +22,7 @@ namespace homestore {
 class MappingKey;
 class MappingValue;
 
-enum blkstore_type { DATA_STORE = 1, METADATA_STORE = 2, SB_STORE = 3 };
+enum blkstore_type { DATA_STORE = 1, METADATA_STORE = 2, SB_STORE = 3, };
 
 struct blkstore_blob {
     enum blkstore_type type;
@@ -96,48 +96,51 @@ class HomeBlks : public VolInterface {
     out_params                                                                           m_out_params;
 
 public:
-    static VolInterface* init(init_params& cfg);
-    HomeBlks(init_params& cfg);
-    virtual std::error_condition      write(std::shared_ptr< Volume > vol, uint64_t lba, uint8_t* buf, uint32_t nblks,
-                                            boost::intrusive_ptr< vol_interface_req > req) override;
-    virtual std::error_condition      read(std::shared_ptr< Volume > vol, uint64_t lba, int nblks,
-                                           boost::intrusive_ptr< vol_interface_req > req) override;
-    virtual std::error_condition      sync_read(std::shared_ptr< Volume > vol, uint64_t lba, int nblks,
-                                                boost::intrusive_ptr< vol_interface_req > req) override;
-    virtual std::shared_ptr< Volume > createVolume(const vol_params& params) override;
+    static VolInterface* init(const init_params& cfg);
+    static HomeBlks*     instance();
 
-    virtual std::error_condition      removeVolume(boost::uuids::uuid const& uuid) override;
-    virtual std::shared_ptr< Volume > lookupVolume(boost::uuids::uuid const& uuid) override;
-    virtual const char*               get_name(std::shared_ptr< Volume > vol) override;
-    virtual uint64_t                  get_page_size(std::shared_ptr< Volume > vol) override;
-    virtual uint64_t                  get_size(std::shared_ptr< Volume > vol) override;
-    virtual homeds::blob              at_offset(boost::intrusive_ptr< BlkBuffer > buf, uint32_t offset) override;
-    static HomeBlks*                  instance();
-    void                              vol_sb_write(vol_sb* sb);
-    void                              vol_sb_write(vol_sb* sb, bool lock);
-    void                              vol_sb_init(vol_sb* sb);
-    void                              config_super_block_init(BlkId& bid);
-    void                              config_super_block_write(bool lock);
-    void                              vol_scan_cmpltd(std::shared_ptr< Volume > vol, vol_state state);
-    virtual void attach_vol_completion_cb(std::shared_ptr< Volume > vol, io_comp_callback cb) override;
+    HomeBlks(const init_params& cfg);
+    virtual std::error_condition write(const VolumePtr& vol, uint64_t lba, uint8_t* buf, uint32_t nblks,
+                                       const vol_interface_req_ptr& req) override;
+    virtual std::error_condition read(const VolumePtr& vol, uint64_t lba, int nblks,
+                                      const vol_interface_req_ptr& req) override;
+    virtual std::error_condition sync_read(const VolumePtr& vol, uint64_t lba, int nblks,
+                                           const vol_interface_req_ptr& req) override;
+    virtual VolumePtr            create_volume(const vol_params& params) override;
+
+    virtual std::error_condition remove_volume(const boost::uuids::uuid& uuid) override;
+    virtual VolumePtr            lookup_volume(const boost::uuids::uuid& uuid) override;
+    virtual const char*          get_name(const VolumePtr& vol) override;
+    virtual uint64_t             get_page_size(const VolumePtr& vol) override;
+    virtual uint64_t             get_size(const VolumePtr& vol) override;
+    virtual homeds::blob         at_offset(const boost::intrusive_ptr< BlkBuffer >& buf, uint32_t offset) override;
+    void                         vol_sb_write(vol_sb* sb);
+    void                         vol_sb_write(vol_sb* sb, bool lock);
+    void                         vol_sb_init(vol_sb* sb);
+    void                         config_super_block_init(BlkId& bid);
+    void                         config_super_block_write(bool lock);
+    void                         vol_scan_cmpltd(const VolumePtr& vol, vol_state state);
+    virtual void attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback cb) override;
+
     homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >*                     get_data_blkstore();
     homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy, BLKSTORE_BUFFER_TYPE >* get_metadata_blkstore();
     void                                                                                 vol_sb_remove(vol_sb* sb);
     uint32_t                                                                             get_data_pagesz() const;
 
 #ifndef NDEBUG
-    void print_tree(std::shared_ptr< Volume > vol);
+    void print_tree(const VolumePtr& vol);
 #endif
+
 private:
     BlkId       alloc_blk();
     static void new_vdev_found(DeviceManager* dev_mgr, vdev_info_block* vb);
     void        create_blkstores();
     void        add_devices();
-    void        vol_mounted(std::shared_ptr< Volume > vol, vol_state state);
-    void        vol_state_change(std::shared_ptr< Volume > vol, vol_state old_state, vol_state new_state);
-    boost::intrusive_ptr< BlkBuffer > get_valid_buf(std::vector< boost::intrusive_ptr< BlkBuffer > > bbuf,
-                                                    bool&                                            rewrite);
-    void construct_vol_config_sb(std::vector< boost::intrusive_ptr< BlkBuffer > > bbuf, bool& rewrite);
+    void        vol_mounted(const VolumePtr& vol, vol_state state);
+    void        vol_state_change(const VolumePtr& vol, vol_state old_state, vol_state new_state);
+    boost::intrusive_ptr< BlkBuffer > get_valid_buf(const std::vector< boost::intrusive_ptr< BlkBuffer > >& bbuf,
+                                                    bool&                                                   rewrite);
+    void construct_vol_config_sb(std::vector< boost::intrusive_ptr< BlkBuffer > >& bbuf, bool& rewrite);
     void scan_volumes();
     void create_data_blkstore(vdev_info_block* vb);
     void create_metadata_blkstore(vdev_info_block* vb);

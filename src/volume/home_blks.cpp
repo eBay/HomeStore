@@ -9,15 +9,15 @@ using namespace homestore;
 
 HomeBlks* HomeBlks::_instance = nullptr;
 
-VolInterface* homestore::vol_homestore_init(init_params& cfg) { return (HomeBlks::init(cfg)); }
+VolInterface* homestore::vol_homestore_init(const init_params& cfg) { return (HomeBlks::init(cfg)); }
 
-VolInterface* HomeBlks::init(init_params& cfg) {
+VolInterface* HomeBlks::init(const init_params& cfg) {
     fLI::FLAGS_minloglevel = 3;
     _instance = new HomeBlks(cfg);
     return ((VolInterface*)(_instance));
 }
 
-HomeBlks::HomeBlks(init_params& cfg) :
+HomeBlks::HomeBlks(const init_params& cfg) :
         m_cfg(cfg),
         m_cache(nullptr),
         m_rdy(false),
@@ -62,25 +62,24 @@ HomeBlks::HomeBlks(init_params& cfg) :
     m_thread_id = std::thread(&HomeBlks::init_thread, this);
 }
 
-std::error_condition HomeBlks::write(std::shared_ptr< Volume > vol, uint64_t lba, uint8_t* buf, uint32_t nblks,
-                                     boost::intrusive_ptr< vol_interface_req > req) {
+std::error_condition HomeBlks::write(const VolumePtr& vol, uint64_t lba, uint8_t* buf, uint32_t nblks,
+                                     const vol_interface_req_ptr& req) {
     assert(m_rdy);
     return (vol->write(lba, buf, nblks, req));
 }
 
-std::error_condition HomeBlks::read(std::shared_ptr< Volume > vol, uint64_t lba, int nblks,
-                                    boost::intrusive_ptr< vol_interface_req > req) {
+std::error_condition HomeBlks::read(const VolumePtr& vol, uint64_t lba, int nblks, const vol_interface_req_ptr& req) {
     assert(m_rdy);
     return (vol->read(lba, nblks, req, false));
 }
 
-std::error_condition HomeBlks::sync_read(std::shared_ptr< Volume > vol, uint64_t lba, int nblks,
-                                         boost::intrusive_ptr< vol_interface_req > req) {
+std::error_condition HomeBlks::sync_read(const VolumePtr& vol, uint64_t lba, int nblks,
+                                         const vol_interface_req_ptr& req) {
     assert(m_rdy);
     return (vol->read(lba, nblks, req, true));
 }
 
-std::shared_ptr< Volume > HomeBlks::createVolume(const vol_params& params) {
+VolumePtr HomeBlks::create_volume(const vol_params& params) {
     if (params.size >= m_size_avail) {
         LOGINFO("there is a possibility of running out of space as total size of the volumes"
                 "created are more then maximum capacity");
@@ -112,8 +111,8 @@ std::shared_ptr< Volume > HomeBlks::createVolume(const vol_params& params) {
     return nullptr;
 }
 
-std::error_condition HomeBlks::removeVolume(boost::uuids::uuid const& uuid) {
-    std::shared_ptr< Volume > volume;
+std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
+    VolumePtr volume;
     // Locked Map
     {
         std::lock_guard< std::mutex > lg(m_vol_lock);
@@ -130,12 +129,13 @@ std::error_condition HomeBlks::removeVolume(boost::uuids::uuid const& uuid) {
     return (volume ? volume->destroy() : std::make_error_condition(std::errc::no_such_device_or_address));
 }
 
-std::shared_ptr< Volume > HomeBlks::lookupVolume(boost::uuids::uuid const& uuid) {
+VolumePtr HomeBlks::lookup_volume(const boost::uuids::uuid& uuid) {
 
     std::lock_guard< std::mutex > lg(m_vol_lock);
     auto                          it = m_volume_map.find(uuid);
-    if (m_volume_map.end() != it)
+    if (m_volume_map.end() != it) {
         return it->second;
+    }
     return nullptr;
 }
 
@@ -260,18 +260,16 @@ void HomeBlks::create_blkstores() {
     create_sb_blkstore(nullptr);
 }
 
-void HomeBlks::attach_vol_completion_cb(std::shared_ptr< Volume > vol, io_comp_callback cb) {
-    vol->attach_completion_cb(cb);
-}
+void HomeBlks::attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback cb) { vol->attach_completion_cb(cb); }
 
 void HomeBlks::add_devices() { m_dev_mgr->add_devices(m_cfg.devices, m_cfg.disk_init); }
 
-void HomeBlks::vol_mounted(std::shared_ptr< Volume > vol, vol_state state) {
+void HomeBlks::vol_mounted(const VolumePtr& vol, vol_state state) {
     m_cfg.vol_mounted_cb(vol, state);
     LOGINFO("vol mounted name {} state {}", vol->get_sb()->vol_name, state);
 }
 
-void HomeBlks::vol_state_change(std::shared_ptr< Volume > vol, vol_state old_state, vol_state new_state) {
+void HomeBlks::vol_state_change(const VolumePtr& vol, vol_state old_state, vol_state new_state) {
     m_cfg.vol_state_change_cb(vol, old_state, new_state);
 }
 
@@ -283,8 +281,8 @@ homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy, BLKSTORE_BUFFER_TYP
     return m_metadata_blk_store;
 }
 
-boost::intrusive_ptr< BlkBuffer > HomeBlks::get_valid_buf(std::vector< boost::intrusive_ptr< BlkBuffer > > bbuf,
-                                                          bool&                                            rewrite) {
+boost::intrusive_ptr< BlkBuffer > HomeBlks::get_valid_buf(const std::vector< boost::intrusive_ptr< BlkBuffer > >& bbuf,
+                                                          bool& rewrite) {
     boost::intrusive_ptr< BlkBuffer > valid_buf = nullptr;
     uint32_t                          gen_cnt = 0;
     for (uint32_t i = 0; i < bbuf.size(); i++) {
@@ -356,7 +354,7 @@ void HomeBlks::scan_volumes() {
                 assert(happened);
                 m_scan_cnt++;
 
-                std::shared_ptr< Volume > new_vol;
+                VolumePtr new_vol;
                 try {
                     new_vol = Volume::make_volume(sb);
                 } catch (const std::exception& e) {
@@ -526,7 +524,7 @@ void HomeBlks::init_thread() {
     m_cfg.init_done_cb(error, m_out_params);
 }
 
-void HomeBlks::vol_scan_cmpltd(std::shared_ptr< Volume > vol, vol_state state) {
+void HomeBlks::vol_scan_cmpltd(const VolumePtr& vol, vol_state state) {
 
     vol_mounted(vol, state);
 
@@ -545,16 +543,14 @@ void HomeBlks::vol_scan_cmpltd(std::shared_ptr< Volume > vol, vol_state state) {
     }
 }
 
-const char* HomeBlks::get_name(std::shared_ptr< Volume > vol) { return vol->get_name(); }
+const char* HomeBlks::get_name(const VolumePtr& vol) { return vol->get_name(); }
+uint64_t    HomeBlks::get_page_size(const VolumePtr& vol) { return vol->get_page_size(); }
+uint64_t    HomeBlks::get_size(const VolumePtr& vol) { return vol->get_size(); }
 
-uint64_t HomeBlks::get_page_size(std::shared_ptr< Volume > vol) { return vol->get_page_size(); }
-
-uint64_t HomeBlks::get_size(std::shared_ptr< Volume > vol) { return vol->get_size(); }
-
-homeds::blob HomeBlks::at_offset(boost::intrusive_ptr< BlkBuffer > buf, uint32_t offset) {
+homeds::blob HomeBlks::at_offset(const boost::intrusive_ptr< BlkBuffer >& buf, uint32_t offset) {
     return (buf->at_offset(offset));
 }
 
 #ifndef NDEBUG
-void HomeBlks::print_tree(std::shared_ptr< Volume > vol) { vol->print_tree(); }
+void HomeBlks::print_tree(const VolumePtr& vol) { vol->print_tree(); }
 #endif

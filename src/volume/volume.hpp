@@ -34,6 +34,9 @@ struct Free_Blk_Entry {
             m_nblks_to_free(m_nblks_to_free) {}
 };
 
+struct volume_req;
+typedef boost::intrusive_ptr< volume_req > volume_req_ptr;
+
 struct volume_req : blkstore_req< BlkBuffer > {
     uint64_t                      lba;
     int                           nlbas;
@@ -49,21 +52,32 @@ struct volume_req : blkstore_req< BlkBuffer > {
      */
     std::atomic< int >                        num_mapping_update;
     boost::intrusive_ptr< vol_interface_req > parent_req;
-    bool                                      done;
+
+#ifndef NDEBUG
+    bool               done;
+    boost::uuids::uuid vol_uuid;
+#endif
 
 public:
-    volume_req() : is_read(false), num_mapping_update(0), parent_req(nullptr), done(false) {
-#ifndef NDEBUG
-        vol_req_alloc++;
-#endif
-    }
-
     /* any derived class should have the virtual destructor to prevent
      * memory leak because pointer can be free with the base class.
      */
     virtual ~volume_req() {
 #ifndef NDEBUG
         vol_req_alloc--;
+#endif
+    }
+
+    static volume_req_ptr cast(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req) {
+        return boost::static_pointer_cast< volume_req >(bs_req);
+    }
+
+    friend class Volume;
+
+    // Volume req should always be created from Volume::create_vol_req()
+    volume_req() : is_read(false), num_mapping_update(0), parent_req(nullptr), done(false) {
+#ifndef NDEBUG
+        vol_req_alloc++;
 #endif
     }
 };
@@ -106,7 +120,8 @@ private:
 private:
     Volume(const vol_params& params);
     Volume(vol_sb* sb);
-    void check_and_complete_io(boost::intrusive_ptr< vol_interface_req >& req, bool call_completion = true);
+    void check_and_complete_req(const vol_interface_req_ptr& hb_req, const std::error_condition& err,
+                                uint32_t nasync_ios_completed, uint32_t nsync_ios_completed);
 
 public:
     template < typename... Args >
@@ -115,23 +130,23 @@ public:
     }
 
     static homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >* m_data_blkstore;
-    static void process_vol_data_completions(boost::intrusive_ptr< blkstore_req< BlkBuffer > > bs_req);
+    static void           process_vol_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
+    static volume_req_ptr create_vol_req(Volume* vol, const vol_interface_req_ptr& hb_req);
 
     ~Volume() { free(m_sb); };
 
     std::error_condition destroy();
-    std::error_condition write(uint64_t lba, uint8_t* buf, uint32_t nblks,
-                               boost::intrusive_ptr< vol_interface_req > req);
-    std::error_condition read(uint64_t lba, int nblks, boost::intrusive_ptr< vol_interface_req > req, bool sync);
+    std::error_condition write(uint64_t lba, uint8_t* buf, uint32_t nblks, const vol_interface_req_ptr& hb_req);
+    std::error_condition read(uint64_t lba, int nblks, const vol_interface_req_ptr& hb_req, bool sync);
 
-    void process_metadata_completions(boost::intrusive_ptr< volume_req > wb_req);
-    void process_data_completions(boost::intrusive_ptr< blkstore_req< BlkBuffer > > bs_req);
+    void process_metadata_completions(const volume_req_ptr& wb_req);
+    void process_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
 
     uint64_t get_elapsed_time(Clock::time_point startTime);
-    void     attach_completion_cb(io_comp_callback& cb);
+    void     attach_completion_cb(const io_comp_callback& cb);
     void     print_tree();
     void     blk_recovery_process_completions(bool success);
-    void     blk_recovery_callback(MappingValue& mv);
+    void     blk_recovery_callback(const MappingValue& mv);
 
     mapping* get_mapping_handle() { return m_map; }
 
@@ -156,8 +171,8 @@ public:
 #define NUM_BLKS_PER_THREAD_TO_QUERY (QUERY_RANGE_IN_BYTES / BLKSTORE_BLK_SIZE_IN_BYTES)
 
 class BlkAllocBitmapBuilder {
-    typedef std::function< void(MappingValue& mv) > blk_recovery_callback;
-    typedef std::function< void(bool success) >     comp_callback;
+    typedef std::function< void(const MappingValue& mv) > blk_recovery_callback;
+    typedef std::function< void(bool success) >           comp_callback;
 
 private:
     homestore::Volume*    m_vol_handle;
@@ -169,7 +184,7 @@ public:
             m_vol_handle(vol),
             m_blk_recovery_cb(blk_rec_cb),
             m_comp_cb(comp_cb) {}
-    ~BlkAllocBitmapBuilder();
+    ~BlkAllocBitmapBuilder() = default;
 
     // async call to start the multi-threaded work.
     void get_allocated_blks();

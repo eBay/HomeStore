@@ -25,7 +25,7 @@ THREAD_BUFFER_INIT;
 /************************** GLOBAL VARIABLES ***********************/
 
 #define MAX_DEVICES 2
-std::string names[4] = {"file1", "file2", "file3", "file4"};
+std::string names[4] = {"/tmp/file1", "/tmp/file2", "/tmp/file3", "/tmp/file4"};
 uint64_t max_vols = 50;
 uint64_t run_time;
 uint64_t num_threads;
@@ -42,7 +42,8 @@ std::atomic<uint64_t> read_cnt;
 std::atomic<uint64_t> read_err_cnt;
 std::atomic<size_t> outstanding_ios;
 using log_level = spdlog::level::level_enum;
-SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write, iomgr, VMOD_BTREE_MERGE, VMOD_BTREE_SPLIT, varsize_blk_alloc)
+SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write, iomgr, VMOD_BTREE_MERGE, VMOD_BTREE_SPLIT, varsize_blk_alloc,
+                 VMOD_VOL_MAPPING,VMOD_BTREE)
 
 /**************** Common class created for all tests ***************/
 
@@ -81,7 +82,7 @@ class IOTest :  public ::testing::Test {
 protected:
     std::shared_ptr<iomgr::ioMgr> iomgr_obj;
     bool init;
-    std::vector<std::shared_ptr<homestore::Volume>> vol;
+    std::vector<VolumePtr> vol;
     std::vector<int> fd;
     std::vector<std::mutex> vol_mutex;
     std::vector<homeds::Bitset *> m_vol_bm;
@@ -170,12 +171,12 @@ public:
         VolInterface::init(params);
     }
     
-    bool vol_found_cb (boost::uuids::uuid uuid) {
+    bool vol_found_cb(boost::uuids::uuid uuid) {
         assert(!init);
         return true;
     }
 
-    void vol_mounted_cb(std::shared_ptr<Volume> vol_obj, vol_state state) {
+    void vol_mounted_cb(const VolumePtr& vol_obj, vol_state state) {
        assert(!init);
        int cnt = vol_cnt.fetch_add(1, std::memory_order_relaxed);
        vol_init(cnt, vol_obj);
@@ -183,7 +184,7 @@ public:
        VolInterface::get_instance()->attach_vol_completion_cb(vol_obj, cb);
     }
 
-    void vol_init(int cnt, std::shared_ptr<homestore::Volume> vol_obj) {
+    void vol_init(int cnt, const VolumePtr& vol_obj) {
         vol[cnt] = vol_obj;
         fd[cnt] = open(VolInterface::get_instance()->get_name(vol_obj), O_RDWR);
         max_vol_blks[cnt] = VolInterface::get_instance()->get_size(vol_obj) / 
@@ -194,7 +195,7 @@ public:
         assert(VolInterface::get_instance()->get_size(vol_obj) == max_vol_size);
     }
 
-    void vol_state_change_cb(std::shared_ptr<Volume> vol, vol_state old_state, vol_state new_state) {
+    void vol_state_change_cb(const VolumePtr& vol, vol_state old_state, vol_state new_state) {
         assert(0);
     }
 
@@ -205,13 +206,13 @@ public:
             vol_params params;
             params.page_size = 4096;//((i > (max_vols/2)) ? 4096 : 8192);
             params.size = max_vol_size;
-            params.io_comp_cb = ([this](boost::intrusive_ptr<vol_interface_req> vol_req) 
+            params.io_comp_cb = ([this](const vol_interface_req_ptr& vol_req)
                                  { process_completions(vol_req); });
             params.uuid = boost::uuids::random_generator()();
-            std::string name = "vol" + std::to_string(i);
+            std::string name = "/tmp/vol" + std::to_string(i);
             memcpy(params.vol_name, name.c_str(), (name.length() + 1));
 
-            auto vol_obj = VolInterface::get_instance()->createVolume(params); 
+            auto vol_obj = VolInterface::get_instance()->create_volume(params);
             /* create file */
             std::ofstream ofs(name, std::ios::binary | std::ios::out);
             ofs.seekp(max_vol_size);
@@ -225,7 +226,7 @@ public:
         init_files();
     }
 
-    void init_done_cb(std::error_condition err, struct out_params params) {
+    void init_done_cb(std::error_condition err, const out_params& params) {
         /* create volume */
         rdy_state = 1;
         if (init) {
@@ -314,10 +315,10 @@ public:
         {
             std::unique_lock< std::mutex > lk(vol_mutex[cur]);
             /* check if someone is already doing writes/reads */ 
-            if (m_vol_bm[cur]->is_bits_set(lba, nblks)) {
+            if (m_vol_bm[cur]->is_bits_reset(lba, nblks))
+                m_vol_bm[cur]->set_bits(lba, nblks);
+            else
                 goto start;
-            }
-            m_vol_bm[cur]->set_bits(lba, nblks);
         }
         uint8_t *buf = nullptr;
         uint8_t *buf1 = nullptr;
@@ -376,10 +377,10 @@ public:
         {
             std::unique_lock< std::mutex > lk(vol_mutex[cur]);
             /* check if someone is already doing writes/reads */ 
-            if (m_vol_bm[cur]->is_bits_set(lba, nblks)) {
+            if (m_vol_bm[cur]->is_bits_reset(lba, nblks))
+                m_vol_bm[cur]->set_bits(lba, nblks);
+            else
                 goto start;
-            }
-            m_vol_bm[cur]->set_bits(lba, nblks);
         }
         read_vol(cur, lba, nblks);
     }
@@ -412,7 +413,7 @@ public:
         }
     }
 
-    void verify(std::shared_ptr<homestore::Volume> vol,boost::intrusive_ptr<req> req) {
+    void verify(const VolumePtr& vol, boost::intrusive_ptr<req> req) {
         int64_t tot_size = 0;
         for (auto &info : req->read_buf_list) {
             auto offset = info.offset;
@@ -433,7 +434,6 @@ public:
                     LOGINFO("mismatch found offset {} size {}", tot_size, size_read);
 #ifndef NDEBUG
                     VolInterface::get_instance()->print_tree(vol);
-                    std::this_thread::sleep_for (std::chrono::seconds(5));
 #endif
                     assert(0);
                 }
@@ -463,12 +463,13 @@ public:
         startTime = Clock::now();
     }
 
-    void process_completions(boost::intrusive_ptr<vol_interface_req> vol_req) {
+    void process_completions(const vol_interface_req_ptr& vol_req) {
         /* raise an event */
         boost::intrusive_ptr<req> req = boost::static_pointer_cast<struct req>(vol_req);
         uint64_t temp = 1;
         --outstanding_ios;
-        
+
+        LOGINFO("IO DONE, req_id={}, outstanding_ios={}", vol_req->request_id, outstanding_ios.load());
         if (!req->is_read && req->err == no_error) {
             /* write to a file */
             auto ret = pwrite(req->fd, req->buf, req->size, req->offset);
@@ -478,9 +479,7 @@ public:
         bool verify_io = false;
         
         if (!req->is_read && req->err == no_error) {
-            LOGINFO("process_completions sync read start {} {}",req->lba,req->nblks);
             (void)VolInterface::get_instance()->sync_read(vol[req->cur_vol], req->lba, req->nblks, req);
-            LOGINFO("process_completions sync read finish {} {}",req->lba,req->nblks);
             verify_io = true;
         }
         if ((req->is_read && req->err == no_error) || verify_io) {
