@@ -175,8 +175,7 @@ public:
             return;
         }
 
-        int cnt = req->blkstore_ref_cnt.decrement(1);
-        if (cnt != 1) {
+        if (!req->blkstore_ref_cnt.decrement_testz(1)) {
             return;
         }
 
@@ -450,6 +449,7 @@ public:
         uint32_t cur_offset = offset;
 
         assert(req->err == no_error);
+
         // Check if the entry exists in the cache.
         boost::intrusive_ptr< Buffer > bbuf;
         bool cache_found = m_cache->get(bid, (boost::intrusive_ptr< CacheBuffer< BlkId > >*)&bbuf);
@@ -482,11 +482,13 @@ public:
 
         req->bbuf = bbuf;
         req->is_read = true;
+
         /* first is offset and second is size in a pair */
         vector< std::pair< uint32_t, uint32_t > > missing_mp;
         assert(bid.data_size(m_pagesz) >= (offset + size));
         bool  ret = m_cache->insert_missing_pieces(bbuf, offset, size, missing_mp);
         BlkId read_blkid(bid.get_blkid_at(offset, size, m_pagesz));
+
         /* It might be a false assert if there is a race between read and write but keeping
          * it for now as it can be good check to see that we have recovered all the blocks
          * after boot.
