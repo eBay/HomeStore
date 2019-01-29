@@ -14,8 +14,8 @@
 #include "btree_internal.h"
 #include <folly/SharedMutex.h>
 #include "homeds/thread/lock.hpp"
-#include "homeds/utility/atomic_counter.hpp"
 #include <isa-l/crc.h>
+#include <utility/atomic_counter.hpp>
 
 const uint16_t init_crc_16 = 0x8005;
 

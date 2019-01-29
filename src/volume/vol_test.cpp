@@ -156,8 +156,8 @@ public:
         memcpy(params.vol_name, "vol1", sizeof("vol1"));
 
         /* Create a volume */
-        vol = VolInterface::get_instance()->createVolume(params);
-        
+        vol = VolInterface::get_instance()->create_volume(params);
+
         LOGDEBUG("Created volume of size: {}", max_vol_size);
     }
 

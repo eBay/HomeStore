@@ -1,0 +1,513 @@
+[2018-11-09 00:00:22.249] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/09/18 00:00:22+00:00] [info] [test_cache] [001049] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/09/18 00:00:22+00:00] [info] [test_cache] [001049] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-11 02:50:01.896] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/11/18 02:50:01+00:00] [info] [test_cache] [004928] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/11/18 02:50:01+00:00] [info] [test_cache] [004928] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-11 04:47:32.770] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/11/18 04:47:32+00:00] [info] [test_cache] [004972] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/11/18 04:47:32+00:00] [info] [test_cache] [004972] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[11/11/18 13:21:19+00:00] [info] [test_cache] [005260] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/11/18 13:21:19+00:00] [info] [test_cache] [005260] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/11/18 13:21:19+00:00] [info] [test_cache] [005260] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[11/11/18 13:31:28+00:00] [info] [test_cache] [005540] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/11/18 13:31:28+00:00] [info] [test_cache] [005540] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/11/18 13:31:29+00:00] [info] [test_cache] [005540] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-11 13:38:06.278] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/11/18 13:38:06+00:00] [info] [test_cache] [005718] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/11/18 13:38:06+00:00] [info] [test_cache] [005718] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[11/11/18 13:58:47+00:00] [info] [test_cache] [006010] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/11/18 13:58:47+00:00] [info] [test_cache] [006010] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/11/18 13:58:47+00:00] [info] [test_cache] [006010] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-11 14:07:58.129] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/11/18 14:07:58+00:00] [info] [test_cache] [006274] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/11/18 14:07:58+00:00] [info] [test_cache] [006274] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-11 17:33:15.368] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/11/18 17:33:15+00:00] [info] [test_cache] [006662] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/11/18 17:33:15+00:00] [info] [test_cache] [006662] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-16 23:03:37.474] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/16/18 23:03:37+00:00] [info] [test_cache] [000830] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/16/18 23:03:37+00:00] [info] [test_cache] [000830] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-16 23:33:41.082] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/16/18 23:33:41+00:00] [info] [test_cache] [000849] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/16/18 23:33:41+00:00] [info] [test_cache] [000849] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[11/17/18 01:33:43+00:00] [info] [test_cache] [001042] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/17/18 01:33:43+00:00] [info] [test_cache] [001042] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/17/18 01:33:43+00:00] [info] [test_cache] [001042] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-17 01:39:37.564] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/17/18 01:39:37+00:00] [info] [test_cache] [001243] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/17/18 01:39:37+00:00] [info] [test_cache] [001243] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[11/17/18 01:43:25+00:00] [info] [test_cache] [001419] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/17/18 01:43:25+00:00] [info] [test_cache] [001419] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/17/18 01:43:25+00:00] [info] [test_cache] [001419] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-17 01:45:14.453] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/17/18 01:45:14+00:00] [info] [test_cache] [001625] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/17/18 01:45:14+00:00] [info] [test_cache] [001625] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-17 02:29:07.762] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/17/18 02:29:07+00:00] [info] [test_cache] [001807] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/17/18 02:29:07+00:00] [info] [test_cache] [001807] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-17 18:42:57.878] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/17/18 18:42:57+00:00] [info] [test_cache] [002479] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/17/18 18:42:57+00:00] [info] [test_cache] [002479] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[11/17/18 18:50:16+00:00] [info] [test_cache] [002686] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/17/18 18:50:16+00:00] [info] [test_cache] [002686] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/17/18 18:50:16+00:00] [info] [test_cache] [002686] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-17 18:54:45.650] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/17/18 18:54:45+00:00] [info] [test_cache] [002869] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/17/18 18:54:45+00:00] [info] [test_cache] [002869] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[11/17/18 18:58:55+00:00] [info] [test_cache] [003173] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/17/18 18:58:55+00:00] [info] [test_cache] [003173] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/17/18 18:58:55+00:00] [info] [test_cache] [003173] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-19 11:33:32.929] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/19/18 11:33:32+00:00] [info] [test_cache] [006186] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/19/18 11:33:33+00:00] [info] [test_cache] [006186] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-19 11:55:38.621] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/19/18 11:55:38+00:00] [info] [test_cache] [006781] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/19/18 11:55:38+00:00] [info] [test_cache] [006781] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[11/19/18 16:05:44+00:00] [info] [test_cache] [006995] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/19/18 16:05:44+00:00] [info] [test_cache] [006995] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/19/18 16:05:44+00:00] [info] [test_cache] [006995] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-19 16:12:35.052] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/19/18 16:12:35+00:00] [info] [test_cache] [007207] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/19/18 16:12:35+00:00] [info] [test_cache] [007207] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[11/19/18 16:29:01+00:00] [info] [test_cache] [007562] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/19/18 16:29:01+00:00] [info] [test_cache] [007562] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/19/18 16:29:01+00:00] [info] [test_cache] [007562] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-19 16:40:47.419] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/19/18 16:40:47+00:00] [info] [test_cache] [007878] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/19/18 16:40:47+00:00] [info] [test_cache] [007878] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-19 16:53:46.762] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/19/18 16:53:46+00:00] [info] [test_cache] [008183] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/19/18 16:53:46+00:00] [info] [test_cache] [008183] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[11/19/18 16:56:31+00:00] [info] [test_cache] [008396] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/19/18 16:56:31+00:00] [info] [test_cache] [008396] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/19/18 16:56:31+00:00] [info] [test_cache] [008396] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-19 17:27:07.011] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/19/18 17:27:07+00:00] [info] [test_cache] [008585] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/19/18 17:27:07+00:00] [info] [test_cache] [008585] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[11/19/18 17:33:00+00:00] [info] [test_cache] [008859] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/19/18 17:33:00+00:00] [info] [test_cache] [008859] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/19/18 17:33:00+00:00] [info] [test_cache] [008859] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-19 17:44:25.736] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/19/18 17:44:25+00:00] [info] [test_cache] [009062] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/19/18 17:44:25+00:00] [info] [test_cache] [009062] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-19 17:46:26.506] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/19/18 17:46:26+00:00] [info] [test_cache] [009242] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/19/18 17:46:26+00:00] [info] [test_cache] [009242] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[11/19/18 18:10:17+00:00] [info] [test_cache] [009552] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/19/18 18:10:17+00:00] [info] [test_cache] [009552] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/19/18 18:10:17+00:00] [info] [test_cache] [009552] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-19 18:17:00.567] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/19/18 18:17:00+00:00] [info] [test_cache] [009741] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/19/18 18:17:00+00:00] [info] [test_cache] [009741] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-19 21:20:46.280] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/19/18 21:20:46+00:00] [info] [test_cache] [010021] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/19/18 21:20:46+00:00] [info] [test_cache] [010021] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-19 23:22:51.317] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/19/18 23:22:51+00:00] [info] [test_cache] [010411] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/19/18 23:22:51+00:00] [info] [test_cache] [010411] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[11/19/18 23:29:49+00:00] [info] [test_cache] [010600] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/19/18 23:29:49+00:00] [info] [test_cache] [010600] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/19/18 23:29:49+00:00] [info] [test_cache] [010600] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-19 23:58:51.725] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/19/18 23:58:51+00:00] [info] [test_cache] [011005] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/19/18 23:58:51+00:00] [info] [test_cache] [011005] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-20 00:01:24.226] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/20/18 00:01:24+00:00] [info] [test_cache] [011174] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/20/18 00:01:24+00:00] [info] [test_cache] [011174] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-20 00:19:50.722] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/20/18 00:19:50+00:00] [info] [test_cache] [011665] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/20/18 00:19:50+00:00] [info] [test_cache] [011665] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[11/20/18 00:37:41+00:00] [info] [test_cache] [011827] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/20/18 00:37:41+00:00] [info] [test_cache] [011827] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/20/18 00:37:41+00:00] [info] [test_cache] [011827] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-20 15:49:14.147] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/20/18 15:49:14+00:00] [info] [test_cache] [012101] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/20/18 15:49:14+00:00] [info] [test_cache] [012101] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-20 16:09:29.411] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/20/18 16:09:29+00:00] [info] [test_cache] [000600] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/20/18 16:09:29+00:00] [info] [test_cache] [000600] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-20 16:10:54.123] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/20/18 16:10:54+00:00] [info] [test_cache] [000790] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/20/18 16:10:54+00:00] [info] [test_cache] [000790] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[11/20/18 16:54:14+00:00] [info] [test_cache] [001125] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/20/18 16:54:14+00:00] [info] [test_cache] [001125] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/20/18 16:54:14+00:00] [info] [test_cache] [001125] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[11/20/18 16:58:33+00:00] [info] [test_cache] [001423] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/20/18 16:58:33+00:00] [info] [test_cache] [001423] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/20/18 16:58:33+00:00] [info] [test_cache] [001423] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[11/20/18 17:09:48+00:00] [info] [test_cache] [001757] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/20/18 17:09:48+00:00] [info] [test_cache] [001757] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/20/18 17:09:49+00:00] [info] [test_cache] [001757] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-20 17:33:24.699] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/20/18 17:33:24+00:00] [info] [test_cache] [002312] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/20/18 17:33:24+00:00] [info] [test_cache] [002312] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-20 17:40:11.856] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/20/18 17:40:11+00:00] [info] [test_cache] [002502] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/20/18 17:40:11+00:00] [info] [test_cache] [002502] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[11/20/18 18:03:47+00:00] [info] [test_cache] [002801] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/20/18 18:03:47+00:00] [info] [test_cache] [002801] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/20/18 18:03:47+00:00] [info] [test_cache] [002801] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-20 18:12:37.801] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/20/18 18:12:37+00:00] [info] [test_cache] [002992] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/20/18 18:12:37+00:00] [info] [test_cache] [002992] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[11/20/18 19:02:24+00:00] [info] [test_cache] [003468] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/20/18 19:02:24+00:00] [info] [test_cache] [003468] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/20/18 19:02:24+00:00] [info] [test_cache] [003468] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-20 22:04:29.087] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/20/18 22:04:29+00:00] [info] [test_cache] [003895] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/20/18 22:04:29+00:00] [info] [test_cache] [003895] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-20 22:27:44.826] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/20/18 22:27:44+00:00] [info] [test_cache] [004193] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/20/18 22:27:44+00:00] [info] [test_cache] [004193] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-20 22:36:52.310] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/20/18 22:36:52+00:00] [info] [test_cache] [004491] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/20/18 22:36:52+00:00] [info] [test_cache] [004491] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-22 01:21:35.922] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/22/18 01:21:35+00:00] [info] [test_cache] [007891] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/22/18 01:21:35+00:00] [info] [test_cache] [007891] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+
+[2018-11-22 17:12:57.553] [test_cache] [info] [test_cache.cpp:12:SetLogger] Logging initialized [info]: unknown/unknown
+[11/22/18 17:12:57+00:00] [info] [test_cache] [009036] [cache.cpp:16:IntrusiveCache] Initializing cache with cache_size = 2097152 with 32 partitions
+[11/22/18 17:12:57+00:00] [info] [test_cache] [009036] [test_cache.cpp:117:TestBody] Cache Stats: 
+Cache Object Count 768
+Cache hit Count 768
+Cache miss Count 0
+Cache evict Count 0
+Cache unable to evict countt 0
+

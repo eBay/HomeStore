@@ -4,7 +4,7 @@
 
 #include <iostream>
 #include "homeds/hash/intrusive_hashset.hpp"
-#include "homeds/utility/atomic_counter.hpp"
+#include <utility/atomic_counter.hpp>
 #include <sds_logging/logging.h>
 #include <benchmark/benchmark.h>
 #include <boost/range/irange.hpp>
@@ -79,7 +79,7 @@ public:
 
 private:
     blk_id m_blk_id;
-    homeds::atomic_counter< uint32_t > m_ref;
+    sisl::atomic_counter< uint32_t > m_ref;
     char m_blk_contents[32];
 };
 

@@ -8,29 +8,39 @@ Language: Cpp
 DerivePointerAlignment: false
 PointerAlignment: Left
 ColumnLimit: 120
+
+AccessModifierOffset: -4
+AlignAfterOpenBracket: Align
 AlignConsecutiveAssignments: false
-AlignConsecutiveDeclarations: false
+AlignConsecutiveDeclarations: true
 AlignEscapedNewlines: Right
 AlignOperands:   false
 AlignTrailingComments: true
 AllowShortBlocksOnASingleLine: true
 AllowShortIfStatementsOnASingleLine: false
-AllowShortBlocksOnASingleLine: false
-AllowShortCaseLabelsOnASingleLine: false
+AllowShortBlocksOnASingleLine: true
+AllowShortCaseLabelsOnASingleLine: true
 # AllowShortFunctionsOnASingleLine: InlineOnly
 # AllowShortLoopsOnASingleLine: false
+AlwaysBreakAfterReturnType: None
+AlwaysBreakTemplateDeclarations: true
+
 BinPackArguments: true
 BinPackParameters: true
+BreakConstructorInitializersBeforeComma: true
+BreakConstructorInitializers: AfterColon
+
+ConstructorInitializerAllOnOneLineOrOnePerLine: true
+ConstructorInitializerIndentWidth: 8
+
 IndentCaseLabels: false
 SortIncludes: false
 #IndentWrappedFunctionNames: true
 #SpaceAfterTemplateKeyword: true
 #SpaceBeforeAssignmentOperators: true
 SpaceBeforeParens: ControlStatements
-BreakConstructorInitializersBeforeComma: true
-BreakConstructorInitializers: AfterColon
-ConstructorInitializerAllOnOneLineOrOnePerLine: true
-ConstructorInitializerIndentWidth: 8
+SpacesInAngles : true
+
 ---
 Language: JavaScript
 # Use 140 columns for JS.
