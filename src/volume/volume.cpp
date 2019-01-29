@@ -305,10 +305,12 @@ void Volume::check_and_complete_req(const vol_interface_req_ptr& hb_req, const s
                 hb_req->outstanding_io_cnt.decrement_testz(nasync_ios_completed + nsync_ios_completed) :
                 hb_req->outstanding_io_cnt.testz();
         if (completed) {
-            LOGINFO("complete_io: req_id={} DONE\n", hb_req->request_id);
             HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, hb_req->is_read, volume_read_latency, volume_write_latency,
                     get_elapsed_time_us(hb_req->io_start_time));
-            if (nasync_ios_completed) { m_comp_cb(hb_req); }
+            if (nasync_ios_completed) {
+                LOGINFO("complete_io: req_id={} DONE\n", hb_req->request_id);
+                m_comp_cb(hb_req);
+            }
         }
     }
 }

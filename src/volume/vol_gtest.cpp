@@ -43,7 +43,7 @@ std::atomic<uint64_t> read_err_cnt;
 std::atomic<size_t> outstanding_ios;
 using log_level = spdlog::level::level_enum;
 SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write, iomgr, VMOD_BTREE_MERGE, VMOD_BTREE_SPLIT, varsize_blk_alloc,
-                 VMOD_VOL_MAPPING,VMOD_BTREE)
+                 VMOD_VOL_MAPPING, VMOD_BTREE)
 
 /**************** Common class created for all tests ***************/
 
@@ -275,7 +275,6 @@ public:
                 if (!rdy_state) {
                     return;
                 }
-                ++outstanding_ios;
             }
             ++write_cnt;
             random_write();
@@ -312,6 +311,7 @@ public:
         uint64_t max_blks = max_io_size/VolInterface::get_instance()->get_page_size(vol[cur]);
         lba = rand() % (max_vol_blks[cur] - max_blks);
         nblks = rand() % max_blks;
+        if (nblks == 0) { nblks = 1; }
         {
             std::unique_lock< std::mutex > lk(vol_mutex[cur]);
             /* check if someone is already doing writes/reads */ 
@@ -347,11 +347,13 @@ public:
         req->fd = fd[cur];
         req->is_read = false;
         req->cur_vol = cur;
+        outstanding_ios++;
+
         auto ret_io = VolInterface::get_instance()->write(vol[cur], lba, buf, nblks, req);
         if (ret_io != no_error) {
             assert(0);
             free(buf);
-            --outstanding_ios;
+            outstanding_ios--;
             std::unique_lock< std::mutex > lk(vol_mutex[cur]);
             m_vol_bm[cur]->reset_bits(lba, nblks);
         }
@@ -404,12 +406,12 @@ public:
         req->offset = lba * VolInterface::get_instance()->get_page_size(vol[cur]);
         req->buf = buf;
         req->cur_vol = cur;
-        ++outstanding_ios;
-        ++read_cnt;
+        outstanding_ios++;
+        read_cnt++;
         auto ret_io = VolInterface::get_instance()->read(vol[cur], lba, nblks, req);
         if (ret_io != no_error) {
-            --outstanding_ios;
-            ++read_err_cnt;
+            outstanding_ios--;
+            read_err_cnt++;
             std::unique_lock< std::mutex > lk(vol_mutex[cur]);
             m_vol_bm[cur]->reset_bits(lba, nblks);
         }
@@ -469,7 +471,7 @@ public:
         /* raise an event */
         boost::intrusive_ptr<req> req = boost::static_pointer_cast<struct req>(vol_req);
         uint64_t temp = 1;
-        --outstanding_ios;
+        outstanding_ios--;
 
         LOGINFO("IO DONE, req_id={}, outstanding_ios={}", vol_req->request_id, outstanding_ios.load());
         if (!req->is_read && req->err == no_error) {
@@ -482,6 +484,7 @@ public:
         
         if (!req->is_read && req->err == no_error) {
             (void)VolInterface::get_instance()->sync_read(vol[req->cur_vol], req->lba, req->nblks, req);
+            LOGINFO("IO DONE, req_id={}, outstanding_ios={}", req->request_id, outstanding_ios.load());
             verify_io = true;
         }
         if ((req->is_read && req->err == no_error) || verify_io) {
@@ -504,7 +507,7 @@ public:
             }
             std::unique_lock< std::mutex > lk(m_mutex);
             rdy_state = 0;
-            if (outstanding_ios == 0) {
+            if (outstanding_ios.load() == 0) {
                 notify_cmpl();
             }
         } else {
