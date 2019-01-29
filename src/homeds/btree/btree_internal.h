@@ -269,6 +269,12 @@ public:
         m_start_incl = start_incl;
         m_end_incl = end_incl;
     }
+
+    void set_start_key(BtreeKey *m_start_key) { BtreeSearchRange::m_start_key = m_start_key;}
+    void set_start_incl(bool m_start_incl) { BtreeSearchRange::m_start_incl = m_start_incl;}
+    void set_end_key(const BtreeKey *m_end_key) { BtreeSearchRange::m_end_key = m_end_key;}
+    void set_end_incl(bool m_end_incl) {BtreeSearchRange::m_end_incl = m_end_incl;}
+
     const BtreeKey* get_start_key() const { return m_start_key; }
     const BtreeKey* get_end_key() const { return m_end_key; }
 
@@ -378,14 +384,13 @@ private:
 //Base class for range requests 
 class BRangeRequest{
 public:
-    const BtreeSearchRange &get_input_range() const { return m_input_range; }
+    BtreeSearchRange &get_input_range() { return m_input_range; }
 
 protected:
     BRangeRequest(BRangeCBParam* cb_param,BtreeSearchRange& search_range): 
     m_cb_param(cb_param), m_input_range(search_range){
         if(m_cb_param!= nullptr) {
             m_cb_param->set_input_range(search_range);
-            m_cb_param->set_sub_range(search_range);
         }
     }
     
@@ -604,8 +609,7 @@ class BtreeConfig {
 
     uint32_t get_ideal_fill_size() const { return (uint32_t)(get_node_area_size() * m_ideal_fill_pct) / 100; }
     uint32_t get_merge_suggested_size() const { return get_node_area_size() - get_ideal_fill_size(); }
-    uint32_t get_split_size() const { return (uint32_t)(get_node_area_size() * m_split_pct) / 100; }
-
+    uint32_t get_split_size(uint32_t filled_size) const { return (uint32_t)(filled_size * m_split_pct) / 100; }
     const std::string& get_name() const { return m_btree_name; }
 };
 

@@ -58,6 +58,7 @@ public:
     int compare_nth_key(const BtreeKey &cmp_key, int ind) const;
     int compare_nth_key_range(const BtreeSearchRange &range, int ind) const;
     void get_edge_value(BtreeValue *outval) const;
+    void set_nth_key(uint32_t ind, BtreeKey *key);
 private:
     /////////////// Other Internal Methods /////////////
     void set_nth_obj(int ind, const BtreeKey &k, const BtreeValue &v);
@@ -65,8 +66,6 @@ private:
     inline uint32_t get_obj_key_size(int ind) const;
     inline uint32_t get_obj_value_size(int ind) const;
     uint8_t *get_nth_obj(int ind);
-
-    void set_nth_key(int ind, const BtreeKey &k);
     void set_nth_value(int ind, const BtreeValue &v);
 };
 
@@ -204,7 +203,7 @@ public:
 
     }
     void get_nth_key(int ind, BtreeKey *outkey, bool copy) const;
-
+    void set_nth_key(uint32_t ind, BtreeKey *key);
 protected:
     uint32_t get_nth_obj_size(int ind) const;
     void get_nth_value(int ind, BtreeValue *outval, bool copy) const;

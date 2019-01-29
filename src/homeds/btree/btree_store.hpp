@@ -45,7 +45,7 @@ public:
                                    boost::intrusive_ptr< btree_multinode_req > op = nullptr);
     static void         free_node(btree_store_t* store, BtreeNodePtr bn,
                                   std::deque< boost::intrusive_ptr< btree_req_type > >& dependent_req_q);
-    static void         read_node_lock(btree_store_t* store, BtreeNodePtr bn, bool is_write_modifiable,
+    static void refresh_node(btree_store_t *store, BtreeNodePtr bn, bool is_write_modifiable,
                                        std::deque< boost::intrusive_ptr< btree_req_type > >* dependent_req_q);
     static void         swap_node(btree_store_t* store, BtreeNodePtr node1, BtreeNodePtr node2);
     static void         copy_node(btree_store_t* store, BtreeNodePtr copy_from, BtreeNodePtr copy_to);

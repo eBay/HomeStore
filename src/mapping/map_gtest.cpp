@@ -285,11 +285,13 @@ public:
             m_blk_id_arr[st] = bst;
 
 
-        //do sync read
-        std::vector<std::pair<MappingKey, MappingValue>> kvs;
-        read(lba, nlbas, kvs);
 
-        verify(kvs);
+//        //do sync read
+//        std::vector<std::pair<MappingKey, MappingValue>> kvs;
+//        read(lba, nlbas, kvs);
+//
+//        verify(kvs);
+
         release_lba_range_lock(lba, nlbas);
     }
 
@@ -345,5 +347,8 @@ int main(int argc, char *argv[]) {
 
     num_ios = SDS_OPTIONS["num_ios"].as<uint64_t>();
     num_threads = SDS_OPTIONS["num_threads"].as<uint64_t>();
+
+    num_ios/=num_threads;//distribute work equally
+    num_ios/=2;//half read/write
     return RUN_ALL_TESTS();
 }

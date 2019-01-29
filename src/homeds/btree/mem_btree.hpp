@@ -148,7 +148,7 @@ public:
         free(temp);
     }
 
-    static void read_node_lock(MemBtreeStore *impl, 
+    static void refresh_node(MemBtreeStore *impl, 
                                boost::intrusive_ptr<MemBtreeNode> bn, 
                                bool is_write_modifiable,  
                                std::deque<boost::intrusive_ptr<empty_writeback_req>> *dependent_req_q) {

@@ -284,7 +284,7 @@ public:
         dependent_req_q.push_back(boost::static_pointer_cast<homestore::writeback_req>(req));
     }
 
-    static void read_node_lock(SSDBtreeStore *store,
+    static void refresh_node(SSDBtreeStore *store,
             boost::intrusive_ptr<SSDBtreeNode> bn,
             bool is_write_modifiable, 
             std::deque<boost::intrusive_ptr<homestore::writeback_req>> *dependent_req_q) {
