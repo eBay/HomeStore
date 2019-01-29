@@ -34,14 +34,6 @@ public:
     static BlkBuffer *make_object() {
         return homeds::ObjectAllocator< BlkBuffer >::make_object();
     }
-
-    friend void intrusive_ptr_add_ref(BlkBuffer *buf) {
-        intrusive_ptr_add_ref((WriteBackCacheBuffer< BlkId >*) buf);
-    }
-
-    friend void intrusive_ptr_release(BlkBuffer *buf) {
-        intrusive_ptr_release((WriteBackCacheBuffer< BlkId > *) buf);
-    }
 };
 
 }

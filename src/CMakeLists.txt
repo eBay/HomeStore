@@ -29,7 +29,7 @@ add_subdirectory(main)
 add_subdirectory(threadpool)
 add_subdirectory(mapping)
 
-if(${CMAKE_BUILD_TYPE} STREQUAL Debug)
+if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
     message("Debug build")
     add_compile_options(-D_DEBUG=1 -O0 -DDEBUG_RCU -D_PRERELEASE=1)
 else()

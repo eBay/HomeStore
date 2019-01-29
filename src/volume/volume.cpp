@@ -26,6 +26,14 @@ int                btree_buf_alloc;
 int                btree_buf_free;
 int                btree_buf_make_obj;
 
+void intrusive_ptr_add_ref(BlkBuffer *buf) {
+    intrusive_ptr_add_ref((WriteBackCacheBuffer< BlkId >*) buf);
+}
+
+void intrusive_ptr_release(BlkBuffer *buf) {
+    intrusive_ptr_release((WriteBackCacheBuffer< BlkId > *) buf);
+}
+
 VolInterface*                                                    VolInterface::_instance = nullptr;
 homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >* Volume::m_data_blkstore = nullptr;
 
