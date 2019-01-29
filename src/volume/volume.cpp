@@ -74,7 +74,10 @@ Volume::Volume(vol_sb* sb) : m_sb(sb), m_metrics(sb->vol_name) {
         HomeBlks::instance()->vol_sb_write(m_sb);
     } else {
         m_map = new mapping(m_sb->size, m_sb->page_size, m_sb->btree_sb,
-                            (std::bind(&Volume::process_metadata_completions, this, std::placeholders::_1)));
+                      (std::bind(&Volume::process_metadata_completions, this,
+                                 std::placeholders::_1)),
+                      (std::bind(&Volume::alloc_blk_callback, this, std::placeholders::_1, 
+                                std::placeholders::_2, std::placeholders::_3))); 
     }
     seq_Id = 3;
     alloc_single_block_in_mem();
@@ -88,44 +91,37 @@ Volume::Volume(vol_sb* sb) : m_sb(sb), m_metrics(sb->vol_name) {
 
 void Volume::attach_completion_cb(const io_comp_callback& cb) { m_comp_cb = cb; }
 
-void Volume::blk_recovery_process_completions(bool success) {
-#if 0
+void 
+Volume::blk_recovery_process_completions(bool success) {
     LOGINFO("block recovery of volume {} completed with {}", get_name(), success ? "success": "failure");
     assert(m_state == vol_state::MOUNTING);
     m_state = m_sb->state;
     m_map->recovery_cmpltd();
-    HomeBlks::instance()->vol_scan_cmpltd(m_vol_ptr, m_sb->state);
-#endif
+    HomeBlks::instance()->vol_scan_cmpltd(shared_from_this(), m_sb->state);
 }
 
 /* TODO: This part of the code should be moved to mapping layer. Ideally
  * we only need to have a callback for a blkid, offset and end  from the mapping layer
  */
-void Volume::blk_recovery_callback(const MappingValue& mv) {
-#if 0
+void Volume::alloc_blk_callback(struct BlkId bid, size_t offset_size, size_t size) {
     assert(m_state == vol_state::MOUNTING);
-    auto value_arr = mv.get_blob();
-    std::vector<std::shared_ptr<MappingInterval>> offset_to_blk_id_list;
-
-    // MappingValue to MappingIntervals
-    mv.get_all(offset_to_blk_id_list);
-    // for each mapping interval
-    for (auto& interval : offset_to_blk_id_list) {
-        BlkId bid = interval->m_value.m_blkid;
-        BlkId free_bid(bid.get_blkid_at(interval->m_value.m_blkid_offset * get_page_size(),
-                        interval->m_interval_length * get_page_size(),
-                        HomeBlks::instance()->get_data_pagesz()));
-
-        m_data_blkstore->alloc_blk(free_bid);
-    }
-#endif
+    BlkId free_bid(bid.get_blkid_at(offset_size, size, HomeBlks::instance()->get_data_pagesz()));
+    m_data_blkstore->alloc_blk(free_bid);
 }
 
-void Volume::vol_scan_alloc_blks() {
-    BlkAllocBitmapBuilder* b =
-        new BlkAllocBitmapBuilder(this, std::bind(&Volume::blk_recovery_callback, this, std::placeholders::_1),
-                                  std::bind(&Volume::blk_recovery_process_completions, this, std::placeholders::_1));
-    b->get_allocated_blks();
+void 
+Volume::vol_scan_alloc_blks() {
+/* TODO: will enable it once bug in matrix is fixed */
+#if 0
+    std::vector<ThreadPool::TaskFuture<void>>   task_result;
+    task_result.push_back(submit_job([=](){
+                do_work();
+                }));
+#endif
+
+    get_allocated_blks();
+    // if needed, we can return task_result[0] to caller, which for now seems not necessary;
+    return;
 }
 
 std::error_condition Volume::destroy() {
@@ -144,7 +140,7 @@ void Volume::process_metadata_completions(const volume_req_ptr& vreq) {
     auto& parent_req = vreq->parent_req;
     assert(parent_req != nullptr);
 
-    LOGINFO("metadata_complete: req_id={}, err={}", parent_req->request_id, vreq->err.message());
+    LOGTRACE("metadata_complete: req_id={}, err={}", parent_req->request_id, vreq->err.message());
 
     if (!vreq->err) {
         for (auto& ptr : vreq->blkIds_to_free) {
@@ -178,7 +174,7 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
     assert(parent_req != nullptr);
     assert(!vreq->isSyncCall);
 
-    LOGINFO("data_complete: req_id={}, err={}", parent_req->request_id, vreq->err.message());
+    LOGTRACE("data_complete: req_id={}, err={}", parent_req->request_id, vreq->err.message());
 
     // Shortcut to error completion
     if (vreq->err) {
@@ -227,7 +223,7 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
     hb_req->io_start_time = Clock::now();
     hb_req->is_read = false;
 
-    LOGINFO("write: lba={}, nlbas={}, buf={}, req_id={}", lba, nlbas, (void *)buf, hb_req->request_id);
+    LOGTRACE("write: lba={}, nlbas={}, buf={}, req_id={}", lba, nlbas, (void *)buf, hb_req->request_id);
     try {
         BlkAllocStatus status = m_data_blkstore->alloc_blk(nlbas * m_sb->page_size, hints, bid);
         assert(status == BLK_ALLOC_SUCCESS);
@@ -250,6 +246,7 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
     Clock::time_point data_io_start_time = Clock::now();
     auto sid = seq_Id.fetch_add(1, memory_order_seq_cst);
 
+    hb_req->outstanding_io_cnt.set(1);
     try {
         for (i = 0; i < bid.size(); ++i) {
             std::deque< writeback_req_ptr > req_q;
@@ -272,6 +269,7 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
         }
 
         HISTOGRAM_OBSERVE(m_metrics, volume_pieces_per_write, bid.size());
+        check_and_complete_req(hb_req, no_error, 0, 1);
         assert(lbas_snt == nlbas);
     } catch (const std::exception& e) {
         assert(0);
@@ -297,7 +295,7 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
 void Volume::check_and_complete_req(const vol_interface_req_ptr& hb_req, const std::error_condition& err,
         uint32_t nasync_ios_completed, uint32_t nsync_ios_completed) {
     // If there is error and request is not completed yet, we need to complete it now.
-    LOGINFO("complete_io: req_id={}, err={}, async={}, sync={}, outstanding_io_cnt={}", hb_req->request_id, err.message(),
+    LOGTRACE("complete_io: req_id={}, err={}, async={}, sync={}, outstanding_io_cnt={}", hb_req->request_id, err.message(),
             nasync_ios_completed, nsync_ios_completed, hb_req->outstanding_io_cnt.get());
 
     if (err) {
@@ -318,7 +316,7 @@ void Volume::check_and_complete_req(const vol_interface_req_ptr& hb_req, const s
             HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, hb_req->is_read, volume_read_latency, volume_write_latency,
                     get_elapsed_time_us(hb_req->io_start_time));
             if (nasync_ios_completed) {
-                LOGINFO("complete_io: req_id={} DONE\n", hb_req->request_id);
+                LOGTRACE("complete_io: req_id={} DONE\n", hb_req->request_id);
                 m_comp_cb(hb_req);
             }
         }
@@ -359,7 +357,7 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
         hb_req->io_start_time = Clock::now();
         hb_req->is_read = true;
 
-        LOGINFO("read: lba={}, nlbas={}, sync={}, req_id={}", lba, nlbas, sync, hb_req->request_id);
+        LOGTRACE("read: lba={}, nlbas={}, sync={}, req_id={}", lba, nlbas, sync, hb_req->request_id);
 
         // seqId shoudl be passed from vol interface req and passed to mapping layer
         auto sid = seq_Id.fetch_add(1, memory_order_seq_cst);
@@ -370,16 +368,15 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
         vreq->seqId = sid;
         vreq->lastCommited_seqId = sid; // read only latest value
 
-        MappingKey                                           key(lba, nlbas);
         std::vector< std::pair< MappingKey, MappingValue > > kvs;
 
  #ifndef NDEBUG
         vreq->vol_uuid = m_sb->uuid;
-        LOGDEBUG("Mapping.GET vol_uuid:{} ,key:{} last_seqId: {}", boost::uuids::to_string(vreq->vol_uuid),
-                 key.to_string(), vreq->lastCommited_seqId);
+        LOGDEBUG("Mapping.GET vol_uuid:{} ,last_seqId: {}", boost::uuids::to_string(vreq->vol_uuid),
+                vreq->lastCommited_seqId);
 #endif
 
-        auto err = m_map->get(vreq, key, kvs);
+        auto err = m_map->get(vreq, kvs);
         if (err) {
             if (err != homestore_error::lba_not_exist) {
                 COUNTER_INCREMENT(m_metrics, volume_read_error_count, 1);
@@ -479,13 +476,12 @@ void Volume::alloc_single_block_in_mem() {
 //
 // Repeat until "Range Query" returns false (nothing more left to query);
 //
-void BlkAllocBitmapBuilder::do_work() {
+void
+Volume::get_allocated_blks() {
+    
+    mapping* mp = get_mapping_handle();
 
-#if 0    
-    mapping* mp = m_vol_handle->get_mapping_handle();
-    MappingBtreeDeclType* bt = mp->get_bt_handle();
-
-    uint64_t max_lba = m_vol_handle->get_last_lba() + 1; 
+    uint64_t max_lba = get_last_lba() + 1; 
 
     uint64_t start_lba = 0, end_lba = 0;
 
@@ -501,21 +497,8 @@ void BlkAllocBitmapBuilder::do_work() {
         start_lba = end_lba;
         end_lba = std::min((unsigned long long)max_lba, end_lba + NUM_BLKS_PER_THREAD_TO_QUERY);
 
-        v.push_back(submit_job([this, start_lba, end_lba, bt]() {
-            MappingKey start_key(start_lba), end_key(end_lba);
-            auto search_range = BtreeSearchRange(start_key, true, end_key, false);
-            BtreeQueryRequest    qreq(search_range);
-            std::vector<std::pair<MappingKey, MappingValue>>   values;
-            bool has_more = false;
-            do {
-                has_more = bt->query(qreq, values);
-                // for each Mapping Value 
-                for (auto& v : values) {
-                    // callback to caller with this MappingValue
-                    m_blk_recovery_cb(v.second);
-                }
-                values.clear();
-            } while (has_more);
+        v.push_back(submit_job([this, start_lba, end_lba, mp]() {
+            mp->sweep_alloc_blks(start_lba, end_lba);
         } ));
     }
 
@@ -524,21 +507,5 @@ void BlkAllocBitmapBuilder::do_work() {
     }
 
     // return completed with success to the caller 
-    m_comp_cb(true);
-#endif
-    delete (this);
-}
-
-void BlkAllocBitmapBuilder::get_allocated_blks() {
-/* TODO: will enable it once bug in matrix is fixed */
-#if 0
-    std::vector<ThreadPool::TaskFuture<void>>   task_result;
-    task_result.push_back(submit_job([=](){
-                do_work();
-                }));
-#endif
-
-    do_work();
-    // if needed, we can return task_result[0] to caller, which for now seems not necessary;
-    return;
+    blk_recovery_process_completions(true);
 }

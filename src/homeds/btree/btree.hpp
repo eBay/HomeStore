@@ -1436,9 +1436,11 @@ private:
         child_node1->flip_pc_gen_flag();
 
         /* we should synchronously try to recover this node. While recovery, if panic happen before
-         * it is commited then we would have lost this node.
+         * it is commited then we would have lost this node. Sync write should not depend on any dependent
+         * requests.
          */
-        btree_store_t::write_node(m_btree_store.get(), child_node1, *dependent_req_q, NULL, true);
+        std::deque<boost::intrusive_ptr<btree_req_type>> temp_dependent_req_q(0);
+        btree_store_t::write_node(m_btree_store.get(), child_node1, temp_dependent_req_q, NULL, true);
         if (parent_sibbling != nullptr) {
             unlock_node(parent_sibbling, locktype::LOCKTYPE_READ);
         }

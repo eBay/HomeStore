@@ -20,6 +20,7 @@ extern std::atomic< int > vol_req_alloc;
 #endif
 namespace homestore {
 
+#define INVALID_SEQ_ID UINT64_MAX
 class mapping;
 enum vol_state;
 
@@ -140,59 +141,34 @@ public:
     std::error_condition write(uint64_t lba, uint8_t* buf, uint32_t nblks, const vol_interface_req_ptr& hb_req);
     std::error_condition read(uint64_t lba, int nblks, const vol_interface_req_ptr& hb_req, bool sync);
 
+    struct vol_sb *get_sb() {return m_sb;};
+    
+    void blk_recovery_process_completions(bool success);
+    void alloc_blk_callback(struct BlkId bid, size_t offset_size, size_t size);
+    void blk_recovery_callback(MappingValue& mv);
+    // async call to start the multi-threaded work.
+    void get_allocated_blks();
     void process_metadata_completions(const volume_req_ptr& wb_req);
     void process_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
 
     uint64_t get_elapsed_time(Clock::time_point startTime);
     void     attach_completion_cb(const io_comp_callback& cb);
     void     print_tree();
-    void     blk_recovery_process_completions(bool success);
     void     blk_recovery_callback(const MappingValue& mv);
 
     mapping* get_mapping_handle() { return m_map; }
 
     uint64_t get_last_lba() {
         assert(m_sb->size != 0);
-        // lba starts from 0, then 1, 2, ...
-        if (m_sb->size % HomeStoreConfig::phys_page_size == 0)
-            return m_sb->size / HomeStoreConfig::phys_page_size - 1;
-        else
-            return m_sb->size / HomeStoreConfig::phys_page_size;
+        // lba starts from 0, then 1, 2, ... 
+        return (get_size() / get_page_size()) - 1;
     }
 
-    vol_sb* get_sb() { return m_sb; };
 
     const char* get_name() const { return (m_sb->vol_name); }
     uint64_t    get_page_size() const { return m_sb->page_size; }
     uint64_t    get_size() const { return m_sb->size; }
 };
 
-#define BLKSTORE_BLK_SIZE_IN_BYTES HomeStoreConfig::phys_page_size
-#define QUERY_RANGE_IN_BYTES (64 * 1024 * 1024ull)
-#define NUM_BLKS_PER_THREAD_TO_QUERY (QUERY_RANGE_IN_BYTES / BLKSTORE_BLK_SIZE_IN_BYTES)
-
-class BlkAllocBitmapBuilder {
-    typedef std::function< void(const MappingValue& mv) > blk_recovery_callback;
-    typedef std::function< void(bool success) >           comp_callback;
-
-private:
-    homestore::Volume*    m_vol_handle;
-    blk_recovery_callback m_blk_recovery_cb;
-    comp_callback         m_comp_cb;
-
-public:
-    BlkAllocBitmapBuilder(homestore::Volume* vol, blk_recovery_callback blk_rec_cb, comp_callback comp_cb) :
-            m_vol_handle(vol),
-            m_blk_recovery_cb(blk_rec_cb),
-            m_comp_cb(comp_cb) {}
-    ~BlkAllocBitmapBuilder() = default;
-
-    // async call to start the multi-threaded work.
-    void get_allocated_blks();
-
-private:
-    // do the real work of getting all allocated blks in multi-threaded manner
-    void do_work();
-};
-
-} // namespace homestore
+#define NUM_BLKS_PER_THREAD_TO_QUERY        10000ull
+}

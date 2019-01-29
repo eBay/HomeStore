@@ -34,7 +34,7 @@ bool read_enable;
 constexpr auto Ki = 1024ull;
 constexpr auto Mi = Ki * Ki;
 constexpr auto Gi = Ki * Mi;
-constexpr auto max_io_size = 1 * Mi;
+constexpr uint64_t max_io_size = 1 * Mi;
 uint64_t max_outstanding_ios = 64u;
 uint64_t max_disk_capacity = 10 * Gi;
 uint64_t match_cnt = 0;
@@ -103,15 +103,17 @@ protected:
     bool verify_done;
     std::atomic<int> rdy_state;
     bool is_abort;
+    Clock::time_point print_startTime;
 
 public:
     IOTest():vol(max_vols), fd(max_vols), vol_mutex(max_vols), m_vol_bm(max_vols), 
-              max_vol_blks(max_vols), cur_checkpoint(max_vols), device_info(0) {
+              max_vol_blks(max_vols), cur_checkpoint(max_vols), device_info(0), is_abort(false) {
         vol_cnt = 0;
         cur_vol = 0;
         max_vol_size = 0;
         max_capacity = 0;
         verify_done = false;
+        print_startTime = Clock::now();
     }
 
     void remove_files() {
@@ -205,7 +207,7 @@ public:
         /* Create a volume */
         for (uint32_t i = 0; i < max_vols; i++) {
             vol_params params;
-            params.page_size = 4096;//((i > (max_vols/2)) ? 4096 : 8192);
+            params.page_size = 4096 ;//((i > (max_vols/2)) ? 4096 : 8192);
             params.size = max_vol_size;
             params.io_comp_cb = ([this](const vol_interface_req_ptr& vol_req)
                                  { process_completions(vol_req); });
@@ -237,6 +239,7 @@ public:
         } else {
             assert(vol_cnt == max_vols);
             verify_done = false;
+            LOGINFO("init completed, verify started");
         }
         auto ret = posix_memalign((void **) &init_buf, 4096, max_io_size);
         assert(!ret);
@@ -277,7 +280,6 @@ public:
                     return;
                 }
             }
-            ++write_cnt;
             random_write();
             if (read_enable) {
                 random_read();
@@ -316,10 +318,11 @@ public:
         {
             std::unique_lock< std::mutex > lk(vol_mutex[cur]);
             /* check if someone is already doing writes/reads */ 
-            if (m_vol_bm[cur]->is_bits_reset(lba, nblks))
+            if (nblks && m_vol_bm[cur]->is_bits_reset(lba, nblks)) {
                 m_vol_bm[cur]->set_bits(lba, nblks);
-            else
+            } else {
                 goto start;
+            }
         }
         uint8_t *buf = nullptr;
         uint8_t *buf1 = nullptr;
@@ -348,8 +351,8 @@ public:
         req->fd = fd[cur];
         req->is_read = false;
         req->cur_vol = cur;
-        outstanding_ios++;
-
+        ++outstanding_ios;
+        ++write_cnt;
         auto ret_io = VolInterface::get_instance()->write(vol[cur], lba, buf, nblks, req);
         if (ret_io != no_error) {
             assert(0);
@@ -419,6 +422,7 @@ public:
     }
 
     void verify(const VolumePtr& vol, boost::intrusive_ptr<req> req) {
+#if 0
         int64_t tot_size = 0;
         for (auto &info : req->read_buf_list) {
             auto offset = info.offset;
@@ -448,21 +452,36 @@ public:
             }
         }
         assert(tot_size == req->size);
+#endif
     }
 
     void verify_vols() {
-    #if 0
+        static uint64_t print_time = 30;
+        auto elapsed_time = get_elapsed_time(print_startTime);
+        if (elapsed_time > print_time) {
+            LOGINFO("verifying vols");
+            print_startTime = Clock::now();
+       } 
+
         for (uint32_t cur = 0; cur < max_vols; ++cur) {
-            for (uint64_t lba = cur_checkpoint[cur]; lba < max_vol_blks[cur]; ++lba) {
-                read_vol(cur, lba, (max_io_size / VolInterface::get_instance()->get_page_size(vol[cur])));
+            uint64_t max_blks = (max_io_size / VolInterface::get_instance()->get_page_size(vol[cur]));
+            for (uint64_t lba = cur_checkpoint[cur]; lba < max_vol_blks[cur];) {
+                uint64_t io_size = 0;
+                if (lba + max_blks > max_vol_blks[cur]) {
+                    io_size = max_vol_blks[cur] - lba;
+                } else {
+                    io_size = max_blks;
+                }
+                read_vol(cur, lba, io_size);
                 cur_checkpoint[cur] = lba;
                 if (outstanding_ios > max_outstanding_ios) {
                     return;
                 }
+                lba = lba + io_size;
             }
         }
-     #endif
         verify_done = true;
+        LOGINFO("verify done");
         uint64_t temp = 1;
         [[maybe_unused]] auto wsize = write(ev_fd, &temp, sizeof(uint64_t));
         startTime = Clock::now();
@@ -471,10 +490,18 @@ public:
     void process_completions(const vol_interface_req_ptr& vol_req) {
         /* raise an event */
         boost::intrusive_ptr<req> req = boost::static_pointer_cast<struct req>(vol_req);
+        static uint64_t print_time = 30;
         uint64_t temp = 1;
-        outstanding_ios--;
+        --outstanding_ios;
+        auto elapsed_time = get_elapsed_time(print_startTime);
+        if (elapsed_time > print_time) {
+            LOGINFO("write ios cmpled {}", write_cnt.load());
+            LOGINFO("read ios cmpled {}", read_cnt.load());
+            print_startTime = Clock::now();
+        }
+        
 
-        LOGINFO("IO DONE, req_id={}, outstanding_ios={}", vol_req->request_id, outstanding_ios.load());
+        LOGTRACE("IO DONE, req_id={}, outstanding_ios={}", vol_req->request_id, outstanding_ios.load());
         if (!req->is_read && req->err == no_error) {
             /* write to a file */
             auto ret = pwrite(req->fd, req->buf, req->size, req->offset);
@@ -485,7 +512,7 @@ public:
         
         if (!req->is_read && req->err == no_error) {
             (void)VolInterface::get_instance()->sync_read(vol[req->cur_vol], req->lba, req->nblks, req);
-            LOGINFO("IO DONE, req_id={}, outstanding_ios={}", req->request_id, outstanding_ios.load());
+            LOGTRACE("IO DONE, req_id={}, outstanding_ios={}", req->request_id, outstanding_ios.load());
             verify_io = true;
         }
         if ((req->is_read && req->err == no_error) || verify_io) {
@@ -503,6 +530,7 @@ public:
         }
         
         if (verify_done && get_elapsed_time(startTime) > run_time) {
+            LOGINFO("ios cmpled {}. waiting for outstanding ios to be completed", write_cnt.load());
             if (is_abort) {
                 abort();
             }

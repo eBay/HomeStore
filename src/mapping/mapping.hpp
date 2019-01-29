@@ -15,22 +15,24 @@ SDS_LOGGING_DECL(VMOD_VOL_MAPPING)
 
 using namespace std;
 using namespace homeds::btree;
-#define LBA_BITS 56
-#define N_LBA_BITS 8
+
 #define LBA_MASK 0xFFFFFFFFFFFF
 #define CS_ARRAY_STACK_SIZE 256 //equals 2^N_LBA_BITS //TODO - put static assert
+#define MAX_NUM_LBA ((1 << NBLKS_BITS) - 1)
 namespace homestore {
 
     struct LbaId {
         //size of lba start and num of lba can be reduced for future use
         uint64_t m_lba_start:LBA_BITS;//start of lba range
-        uint64_t m_n_lba:N_LBA_BITS;// number of lba's from start(inclusive)
+        uint64_t m_n_lba:NBLKS_BITS;// number of lba's from start(inclusive)
 
         LbaId() : m_lba_start(0), m_n_lba(0) {}
 
         LbaId(uint64_t lbaId) { LbaId(lbaId & LBA_MASK, lbaId >> LBA_BITS); }
 
-        LbaId(uint64_t lba_start, uint16_t n_lba) : m_lba_start(lba_start), m_n_lba(n_lba) {}
+        LbaId(uint64_t lba_start, uint64_t n_lba) : m_lba_start(lba_start), m_n_lba(n_lba) {
+            assert(n_lba < MAX_NUM_LBA);
+        }
 
     }__attribute__ ((__packed__));
 
@@ -43,7 +45,7 @@ namespace homestore {
 
         MappingKey(const MappingKey &other) : BtreeKey(), m_lbaId(other.get_lbaId()), m_lbaId_ptr(&m_lbaId) {}
 
-        MappingKey(uint64_t lba_start, uint16_t n_lba) : m_lbaId(lba_start, n_lba), m_lbaId_ptr(&m_lbaId) {}
+        MappingKey(uint64_t lba_start, uint64_t n_lba) : m_lbaId(lba_start, n_lba), m_lbaId_ptr(&m_lbaId) {}
 
         LbaId get_lbaId() const { return *m_lbaId_ptr; }
 
@@ -100,9 +102,9 @@ namespace homestore {
             return ss.str();
         }
 
-        void get_overlap(MappingKey &other, MappingKey &overlap) {
-            auto start_lba = std::max(start(), other.start());
-            auto end_lba = std::min(end(), other.end());
+        void get_overlap(uint64_t lba_start, uint64_t lba_end, MappingKey &overlap) {
+            auto start_lba = std::max(start(), lba_start);
+            auto end_lba = std::min(end(), lba_end);
             overlap.set(start_lba, end_lba - start_lba + 1);
         }
 
@@ -284,7 +286,12 @@ namespace homestore {
             get_array().get_all(v_array, true);
             auto i=0u;
             if(v_array.size()>0) {
-                while (i < v_array.size() && v_array[i].compare(&ve) > 0) i++;
+                while (i < v_array.size() && v_array[i].compare(&ve) > 0) ++i;
+                if (v_array[i].compare(&ve) == 0) {
+                    /* every sequence ID is invalid until jorunaling comes */
+                    ++i;
+                    assert(ve.get_seqId() == INVALID_SEQ_ID);
+                }
                 assert(v_array[i].compare(&ve) != 0);//duplicate event
             }
             v_array.insert(v_array.begin()+i, ve);
@@ -293,18 +300,68 @@ namespace homestore {
     };
     
     class mapping {
-        typedef function<void(struct BlkId blkid)> free_blk_callback;
+        typedef function<void(struct BlkId blkid, size_t offset_size, size_t size)> alloc_blk_callback;
         typedef function<void(boost::intrusive_ptr<volume_req> cookie)> comp_callback;
     private:
         MappingBtreeDeclType *m_bt;
-        free_blk_callback free_blk_cb;
+        alloc_blk_callback m_alloc_blk_cb;
         comp_callback comp_cb;
         uint32_t m_vol_page_size;
         const MappingValue EMPTY_MAPPING_VALUE;
     public:
-        MappingBtreeDeclType* get_bt_handle() const {
-            return m_bt;
+
+        void get_alloc_blks_cb(vector<pair<MappingKey, MappingValue>> &match_kv, 
+                vector<pair<MappingKey, MappingValue>> &result_kv,
+                BRangeQueryCBParam<MappingKey, MappingValue> *cb_param) {
+            uint64_t start_lba = 0, end_lba = 0;
+            get_start_end_lba(cb_param, start_lba, end_lba);
+            GetCBParam *param = (GetCBParam *) cb_param;
+            ValueEntry new_ve;//empty
+
+            for (auto i = 0u; i < match_kv.size(); ++i) {
+                auto &existing = match_kv[i];
+                MappingKey *e_key = &existing.first;
+                Blob_Array <ValueEntry> array = (&existing.second)->get_array();
+                assert(array.get_total_elements() > 0); 
+
+                for (uint32_t j = 0; j < array.get_total_elements(); ++j) {
+                    ValueEntry ve; 
+                    array.get((uint32_t) j, ve, true);
+                    MappingKey overlap;
+                    e_key->get_overlap(start_lba, end_lba, overlap);
+                    if (i == 0 || i == match_kv.size() - 1) {
+                        auto lba_offset = overlap.get_start_offset(*e_key);
+                        ve.add_offset(lba_offset, overlap.get_n_lba(), m_vol_page_size); 
+                    } else {
+                        assert(!overlap.get_start_offset(*e_key));
+                    }   
+                    m_alloc_blk_cb(ve.get_blkId(), (ve.get_blk_offset() * HomeBlks::instance()->get_data_pagesz()), 
+                            (overlap.get_n_lba() * m_vol_page_size));
+                } 
+            }   
         }
+
+        void recovery_cmpltd() {
+            m_bt->recovery_cmpltd();
+        }
+
+        void sweep_alloc_blks(uint64_t start_lba, uint64_t end_lba) {
+            MappingKey start_key(start_lba, 1), end_key(end_lba, 1);
+            auto search_range = BtreeSearchRange(start_key, true, end_key, true);
+            GetCBParam param(nullptr);
+            vector<pair<MappingKey, MappingValue>> result_kv;
+
+            BtreeQueryRequest<MappingKey, MappingValue>
+                qreq(search_range,
+                        BtreeQueryType::TREE_TRAVERSAL_QUERY,
+                        (end_lba - start_lba + 1),
+                        std::bind(&mapping::get_alloc_blks_cb, this,
+                            placeholders::_1, placeholders::_2,
+                            placeholders::_3),
+                        (BRangeQueryCBParam<MappingKey, MappingValue> *) &param);
+            m_bt->query(qreq, result_kv);
+        }
+
         void process_completions(boost::intrusive_ptr<writeback_req> cookie,
                                  error_condition status) {
             boost::intrusive_ptr<volume_req> req =
@@ -316,7 +373,7 @@ namespace homestore {
         }
 
         mapping(uint64_t volsize, uint32_t page_size, comp_callback comp_cb) 
-        : comp_cb(comp_cb),m_vol_page_size(page_size) {
+        : comp_cb(comp_cb), m_vol_page_size(page_size) {
             homeds::btree::BtreeConfig btree_cfg;
             btree_cfg.set_max_objs(volsize / page_size);
             btree_cfg.set_max_key_size(sizeof(uint32_t));
@@ -330,8 +387,9 @@ namespace homestore {
                                                                 std::placeholders::_1, std::placeholders::_2));
         }
 
-        mapping(uint64_t volsize, uint32_t page_size, btree_super_block &btree_sb, comp_callback comp_cb) 
-        : comp_cb(comp_cb),m_vol_page_size(page_size)  {
+        mapping(uint64_t volsize, uint32_t page_size, btree_super_block &btree_sb, comp_callback comp_cb, 
+                alloc_blk_callback alloc_blk_cb) 
+        : m_alloc_blk_cb(alloc_blk_cb), comp_cb(comp_cb), m_vol_page_size(page_size) {
             homeds::btree::BtreeConfig btree_cfg;
             btree_cfg.set_max_objs(volsize / page_size);
             btree_cfg.set_max_key_size(sizeof(uint32_t));
@@ -349,17 +407,20 @@ namespace homestore {
             return(m_bt->get_btree_sb());
         }
         
-        error_condition get(boost::intrusive_ptr<volume_req> req, MappingKey &key,
-                            vector<pair<MappingKey, MappingValue>> &values) {
-            MappingKey start_key(key.start(), 1);
-            MappingKey end_key(key.end(), 1);
+        error_condition get(boost::intrusive_ptr<volume_req> req, vector<pair<MappingKey, MappingValue>> &values) {
+
+            uint64_t start_lba = req->lba;
+            uint64_t num_lba = req->nlbas;
+            uint64_t end_lba = start_lba + req->nlbas - 1;
+            MappingKey start_key(start_lba, 1);
+            MappingKey end_key(end_lba, 1);
             auto search_range = BtreeSearchRange(start_key, true, end_key, true);
             GetCBParam param(req);
             vector<pair<MappingKey, MappingValue>> result_kv;
             BtreeQueryRequest<MappingKey, MappingValue>
                     qreq(search_range,
                          BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY,
-                         key.get_n_lba(),
+                         num_lba,
                          std::bind(&mapping::match_item_cb_get, this,
                                    placeholders::_1, placeholders::_2,
                                    placeholders::_3),
@@ -367,7 +428,7 @@ namespace homestore {
             m_bt->query(qreq, result_kv);
 
             //fill the gaps
-            auto last_lba = key.start();
+            auto last_lba = start_lba;
             for (auto i = 0u; i < result_kv.size(); i++) {
                 int nl = result_kv[i].first.start() - last_lba;
                 while (nl-- > 0) {
@@ -377,13 +438,13 @@ namespace homestore {
                 values.emplace_back(result_kv[i]);
                 last_lba = result_kv[i].first.end() + 1;
             }
-            while (last_lba <= key.end()) {
+            while (last_lba <= end_lba) {
                 values.emplace_back(make_pair(MappingKey(last_lba, 1), EMPTY_MAPPING_VALUE));
                 last_lba++;
             }
 
 #ifndef NDEBUG
-            validate_get_response(key.start(), key.get_n_lba(), values);
+            validate_get_response(start_lba, num_lba, values);
 #endif
             return no_error;
         }
@@ -412,7 +473,7 @@ namespace homestore {
             vector<pair<MappingKey, MappingValue>> values;
             auto temp = req->lastCommited_seqId;
             req->lastCommited_seqId = req->seqId;
-            get(req,key,values);
+            get(req, values);
             req->lastCommited_seqId = temp;
             validate_get_response(key.start(), key.get_n_lba(), values, &value);
 #endif
@@ -435,9 +496,9 @@ namespace homestore {
                                BRangeQueryCBParam<MappingKey, MappingValue> *cb_param) {
             uint64_t start_lba = 0, end_lba = 0;
             get_start_end_lba(cb_param, start_lba, end_lba);
-            MappingKey eff_range(start_lba, end_lba - start_lba + 1);
             GetCBParam *param = (GetCBParam *) cb_param;
-            assert(param->m_req->lastCommited_seqId <= param->m_req->seqId);
+            assert((param->m_req->lastCommited_seqId == INVALID_SEQ_ID) || 
+                    (param->m_req->lastCommited_seqId <= param->m_req->seqId));
             ValueEntry new_ve;//empty
 
             assert(param->m_req->nlbas > 0);
@@ -464,10 +525,10 @@ namespace homestore {
                     // seqId use to filter out KVs with higher seqIds and put only latest seqid entry in result_kv
                     ValueEntry ve;
                     array.get((uint32_t) j, ve, true);
-                    if (ve.get_seqId() <= param->m_req->lastCommited_seqId) {
+                    if (ve.get_seqId() <= param->m_req->lastCommited_seqId || ve.get_seqId() == INVALID_SEQ_ID) {
                         if (i == 0 || i==match_kv.size()-1) {
                             MappingKey overlap;
-                            e_key->get_overlap(eff_range, overlap);
+                            e_key->get_overlap(start_lba, end_lba, overlap);
 
                             auto lba_offset = overlap.get_start_offset(*e_key);
                             ve.add_offset(lba_offset, overlap.get_n_lba(), m_vol_page_size);
@@ -476,8 +537,9 @@ namespace homestore {
                         } else
                             result_kv.emplace_back(make_pair(MappingKey(*e_key), MappingValue(ve)));
                         break;
-                    } else
+                    } else {
                         assert(0);// for now, we are always returning latest write
+                    }
                 }
             }
 #ifndef NDEBUG
@@ -538,7 +600,7 @@ namespace homestore {
                 add_missing_interval(last_lba, end_lba, new_ve, last_lba - s_in_range->start(), replace_kv);
             
             //remove older versions
-            for(auto &pair : replace_kv){
+            for (auto &pair : replace_kv) {
                 Blob_Array <ValueEntry> &array = pair.second.get_array();
                 
 #ifndef NDEBUG
@@ -557,8 +619,9 @@ namespace homestore {
                     //iterate array and remove elements<lastcommitedid, but still maintain one latest value entry
                     ValueEntry ve;
                     array.get(j, ve, false);
-                    if (ve.get_seqId() < param->m_req->lastCommited_seqId) {
-                        if(param->is_state_modifiable()) {
+                    if (param->m_req->lastCommited_seqId == INVALID_SEQ_ID || 
+                        ve.get_seqId() < param->m_req->lastCommited_seqId) {
+                        if (param->is_state_modifiable()) {
                             Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(), pair.first.get_n_lba());
                             param->m_req->blkIds_to_free.emplace_back(fbe);
                         }

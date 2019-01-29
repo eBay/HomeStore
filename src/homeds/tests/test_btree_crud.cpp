@@ -89,6 +89,11 @@ const char* __asan_default_options() {
 }
 #endif
 
+extern "C" 
+__attribute__((no_sanitize_address))
+const char* __asan_default_options() { 
+    return "detect_leaks=0"; 
+}
 class TestSimpleKey : public homeds::btree::BtreeKey {
 private:
     typedef struct __attribute__((packed)) {

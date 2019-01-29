@@ -199,7 +199,7 @@ public:
 #ifndef NDEBUG
         volreq->vol_uuid = uuid;
 #endif
-        m_map->get(volreq, key, kvs);
+        m_map->get(volreq, kvs);
     }
 
     void verify_all() {
