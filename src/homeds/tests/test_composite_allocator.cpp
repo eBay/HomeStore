@@ -13,6 +13,7 @@
 #include "homeds/utility/useful_defs.hpp"
 #include <benchmark/benchmark.h>
 #include <sds_logging/logging.h>
+#include <sds_options/options.h>
 
 #define TOTAL_ALLOCS 10000
 #define ITERATIONS   100

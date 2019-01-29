@@ -6,6 +6,7 @@
 #include "homeds/btree/btree.hpp"
 #include <thread>
 #include <sds_logging/logging.h>
+#include <sds_options/options.h>
 #include <utility/thread_buffer.hpp>
 #include <utility/obj_life_counter.hpp>
 
