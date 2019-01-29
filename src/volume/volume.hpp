@@ -75,8 +75,9 @@ public:
     friend class Volume;
 
     // Volume req should always be created from Volume::create_vol_req()
-    volume_req() : is_read(false), num_mapping_update(0), parent_req(nullptr), done(false) {
+    volume_req() : is_read(false), num_mapping_update(0), parent_req(nullptr) {
 #ifndef NDEBUG
+        done = false;
         vol_req_alloc++;
 #endif
     }
