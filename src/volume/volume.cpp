@@ -7,52 +7,47 @@
 #include <mapping/mapping.hpp>
 #include <fstream>
 #include <atomic>
+#include "homeds/utility/useful_defs.hpp"
 
 using namespace std;
 using namespace homestore;
 
-#define MAX_CACHE_SIZE     (100 * 1024ul * 1024ul) /* it has to be a multiple of 16k */
-constexpr auto BLOCK_SIZE = (4 * 1024ul);
-
-std::atomic<int> vol_req_alloc;
+std::atomic< int > vol_req_alloc;
 
 #ifndef NDEBUG
 /* only for testing */
 bool vol_test_enable = false;
 #endif
+
 /* TODO: it will be more cleaner once statisitcs is integrated */
-std::atomic<int> homestore::req_alloc(0);
-std::atomic<int> homestore::req_dealloc(0);
-int btree_buf_alloc;
-int btree_buf_free;
-int btree_buf_make_obj;
+std::atomic< int > homestore::req_alloc(0);
+std::atomic< int > homestore::req_dealloc(0);
+int                btree_buf_alloc;
+int                btree_buf_free;
+int                btree_buf_make_obj;
 
-/* TODO: adding it here as there is no .c file in blkstore. we will create it later */
-void homestore::intrusive_ptr_add_ref(BlkBuffer *buf) {
-    intrusive_ptr_add_ref((WriteBackCacheBuffer<BlkId> *)buf);
-}
-    
-void homestore::intrusive_ptr_release(BlkBuffer *buf) {
-    intrusive_ptr_release((WriteBackCacheBuffer<BlkId> *)buf);
-}
+namespace homestore {
+    void intrusive_ptr_add_ref(homestore::BlkBuffer *buf) {
+        intrusive_ptr_add_ref((homestore::WriteBackCacheBuffer <BlkId> *) buf);
+    }
 
-VolInterface *VolInterface::_instance = nullptr;
-homestore::BlkStore<homestore::VdevVarSizeBlkAllocatorPolicy> *Volume::m_data_blkstore = nullptr;
-
-uint64_t
-Volume::get_elapsed_time(Clock::time_point startTime) {
-    std::chrono::nanoseconds ns = std::chrono::duration_cast
-            <std::chrono::nanoseconds>(Clock::now() - startTime);
-    return ns.count() / 1000;
+    void intrusive_ptr_release(homestore::BlkBuffer *buf) {
+        intrusive_ptr_release((homestore::WriteBackCacheBuffer <BlkId> *) buf);
+    }
 }
 
-Volume::Volume(vol_params &params) : m_comp_cb(params.io_comp_cb) {
+VolInterface*                                                    VolInterface::_instance = nullptr;
+homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >* Volume::m_data_blkstore = nullptr;
+
+Volume::Volume(const vol_params& params) : m_comp_cb(params.io_comp_cb), m_metrics(params.vol_name) {
     m_state = vol_state::UNINITED;
-    m_map = new mapping(params.size, params.page_size, (std::bind(&Volume::process_metadata_completions, this,
-                                 std::placeholders::_1)));
-    int ret = posix_memalign((void **) &m_sb, HomeStoreConfig::align_size, VOL_SB_SIZE); 
+    m_map = new mapping(params.size, params.page_size,
+                        (std::bind(&Volume::process_metadata_completions, this, std::placeholders::_1)));
+
+    auto ret = posix_memalign((void**)&m_sb, HomeStoreConfig::align_size, VOL_SB_SIZE);
     assert(!ret);
     assert(m_sb != nullptr);
+
     m_sb->btree_sb = m_map->get_btree_sb();
     m_sb->state = vol_state::ONLINE;
     m_sb->page_size = params.page_size;
@@ -60,59 +55,40 @@ Volume::Volume(vol_params &params) : m_comp_cb(params.io_comp_cb) {
     m_sb->uuid = params.uuid;
     memcpy(m_sb->vol_name, params.vol_name, VOL_NAME_SIZE);
     HomeBlks::instance()->vol_sb_init(m_sb);
-    seq_Id=3;
+
+    seq_Id = 3;
     alloc_single_block_in_mem();
-    init_perf_report();
+
     m_data_blkstore = HomeBlks::instance()->get_data_blkstore();
     m_state = vol_state::ONLINE;
-    m_vol_ptr = std::shared_ptr<Volume>(this);
 }
 
-Volume::Volume(vol_sb *sb) : m_sb(sb) {
+Volume::Volume(vol_sb* sb) : m_sb(sb), m_metrics(sb->vol_name) {
     m_state = vol_state::UNINITED;
     if (m_sb->state == vol_state::FAILED) {
-        m_map = new mapping(m_sb->size, m_sb->page_size, (std::bind(&Volume::process_metadata_completions, this,
-                                 std::placeholders::_1)));
+        m_map = new mapping(m_sb->size, m_sb->page_size,
+                            (std::bind(&Volume::process_metadata_completions, this, std::placeholders::_1)));
         m_sb->btree_sb = m_map->get_btree_sb();
         m_state = vol_state::DEGRADED;
         m_sb->state = m_state;
         HomeBlks::instance()->vol_sb_write(m_sb);
     } else {
         m_map = new mapping(m_sb->size, m_sb->page_size, m_sb->btree_sb,
-                      (std::bind(&Volume::process_metadata_completions, this,
-                                 std::placeholders::_1)));
+                            (std::bind(&Volume::process_metadata_completions, this, std::placeholders::_1)));
     }
-    seq_Id=3;
+    seq_Id = 3;
     alloc_single_block_in_mem();
-    init_perf_report();
+
     m_data_blkstore = HomeBlks::instance()->get_data_blkstore();
     m_state = vol_state::MOUNTING;
-    m_vol_ptr = std::shared_ptr<Volume>(this);
+    m_state = m_sb->state;
+
     vol_scan_alloc_blks();
 }
 
-char *
-Volume::get_name() {
-    return(get_sb()->vol_name);
-}
+void Volume::attach_completion_cb(const io_comp_callback& cb) { m_comp_cb = cb; }
 
-uint64_t
-Volume::get_page_size() {
-    return(get_sb()->page_size);
-}
-
-uint64_t
-Volume::get_size() {
-    return(get_sb()->size);
-}
-
-void
-Volume::attach_completion_cb(io_comp_callback &cb) {
-    m_comp_cb = cb;
-}
-
-void 
-Volume::blk_recovery_process_completions(bool success) {
+void Volume::blk_recovery_process_completions(bool success) {
 #if 0
     LOGINFO("block recovery of volume {} completed with {}", get_name(), success ? "success": "failure");
     assert(m_state == vol_state::MOUNTING);
@@ -122,18 +98,15 @@ Volume::blk_recovery_process_completions(bool success) {
 #endif
 }
 
-
 /* TODO: This part of the code should be moved to mapping layer. Ideally
  * we only need to have a callback for a blkid, offset and end  from the mapping layer
  */
-void Volume::blk_recovery_callback(MappingValue& mv) {
+void Volume::blk_recovery_callback(const MappingValue& mv) {
 #if 0
     assert(m_state == vol_state::MOUNTING);
     auto value_arr = mv.get_blob();
+    std::vector<std::shared_ptr<MappingInterval>> offset_to_blk_id_list;
 
-    
-    assert(m_state == vol_state::MOUNTING);
-    std::vector<std::shared_ptr<MappingInterval>> offset_to_blk_id_list; 
     // MappingValue to MappingIntervals
     mv.get_all(offset_to_blk_id_list);
     // for each mapping interval
@@ -145,296 +118,348 @@ void Volume::blk_recovery_callback(MappingValue& mv) {
 
         m_data_blkstore->alloc_blk(free_bid);
     }
-    #endif
+#endif
 }
 
-void 
-Volume::vol_scan_alloc_blks() {
-    BlkAllocBitmapBuilder* b = new BlkAllocBitmapBuilder(
-            this, 
-            std::bind(&Volume::blk_recovery_callback, this, std::placeholders::_1), 
-            std::bind(&Volume::blk_recovery_process_completions, this, std::placeholders::_1));
+void Volume::vol_scan_alloc_blks() {
+    BlkAllocBitmapBuilder* b =
+        new BlkAllocBitmapBuilder(this, std::bind(&Volume::blk_recovery_callback, this, std::placeholders::_1),
+                                  std::bind(&Volume::blk_recovery_process_completions, this, std::placeholders::_1));
     b->get_allocated_blks();
 }
 
-std::error_condition
-Volume::destroy() {
+std::error_condition Volume::destroy() {
     LOGWARN("UnImplemented volume destruction!");
     return std::error_condition();
 }
 
-void
-homestore::Volume::process_metadata_completions(boost::intrusive_ptr<volume_req> req) {
-    assert(!req->is_read);
-    assert(!req->isSyncCall);
-    
-    req->done = true;
-    auto parent_req = req->parent_req;
-    assert(parent_req != nullptr);
-    
-    if (req->err != no_error) {
-        parent_req->err = req->err;
-    }
+void Volume::process_metadata_completions(const volume_req_ptr& vreq) {
+    assert(!vreq->is_read);
+    assert(!vreq->isSyncCall);
 
-    for (auto &ptr : req->blkIds_to_free) {
-        LOGDEBUG("Freeing Blk: {} {} {}",ptr.m_blkId.to_string(), ptr.m_blk_offset, ptr.m_nblks_to_free);
-        m_data_blkstore->free_blk(ptr.m_blkId, BLOCK_SIZE * ptr.m_blk_offset, BLOCK_SIZE * ptr.m_nblks_to_free);
-    }
-    
-    if (parent_req->io_cnt.fetch_sub(1, memory_order_acquire) == 1) {
-        if (req->err == no_error) {
-            PerfMetrics::getInstance()->updateHist(VOL_IO_WRITE_H, get_elapsed_time(parent_req->startTime));
-        }
-        m_comp_cb(parent_req);
-    }
-}
-
-void
-Volume::process_vol_data_completions(boost::intrusive_ptr<blkstore_req<BlkBuffer>> bs_req) {
-    boost::intrusive_ptr<volume_req> req = boost::static_pointer_cast<volume_req>(bs_req);
-    req->vol_instance->process_data_completions(bs_req);
-}
-
-void
-Volume::process_data_completions(boost::intrusive_ptr<blkstore_req<BlkBuffer>> bs_req) {
-    boost::intrusive_ptr<volume_req> req = boost::static_pointer_cast<volume_req>(bs_req);
-
-    assert(!req->isSyncCall);
-    if (!req->is_read) {
-        if (req->err == no_error) {
-            assert(req->nlbas < 256 && req->bid.get_nblks() < 256);
-            MappingKey key(req->lba, req->nlbas);
-            std::array<uint16_t, CS_ARRAY_STACK_SIZE> carr;
-            //TODO - put actual checksum here @sounak
-            for(auto i =0ul,j= req->lba;j < req->lba+req->nlbas;i++,j++) carr[i] = j%65000;
-            ValueEntry ve(req->seqId,req->bid,0,req->nlbas,carr);
-            MappingValue value(ve);
 #ifndef NDEBUG
-            req->vol_uuid = m_sb->uuid;
-            LOGDEBUG("Mapping.PUT ,vol_uuid:{},Key:{},Value:{}",
-                    boost::uuids::to_string(req->vol_uuid), key.to_string(), value.to_string());
+    vreq->done = true;
 #endif
-            m_map->put(req, key,value);
-        } else {
-            process_metadata_completions(req);
-        }
-        return;
-    }
-   
-    auto parent_req = req->parent_req;
+
+    auto& parent_req = vreq->parent_req;
     assert(parent_req != nullptr);
-    if (req->err != no_error) {
-        parent_req->err = req->err;
+
+    LOGINFO("metadata_complete: req_id={}, err={}", parent_req->request_id, vreq->err.message());
+
+    if (!vreq->err) {
+        for (auto& ptr : vreq->blkIds_to_free) {
+            LOGDEBUG("Freeing Blk: {} {} {}", ptr.m_blkId.to_string(), ptr.m_blk_offset, ptr.m_nblks_to_free);
+            m_data_blkstore->free_blk(ptr.m_blkId, get_page_size() * ptr.m_blk_offset,
+                                      get_page_size() * ptr.m_nblks_to_free);
+        }
     }
 
-    if (parent_req->io_cnt.fetch_sub(1, memory_order_acquire) == 1) {
-        PerfMetrics::getInstance()->updateHist(VOL_IO_READ_H, get_elapsed_time(parent_req->startTime));
-        m_comp_cb(parent_req);
+    check_and_complete_req(parent_req, vreq->err, 1, 0);
+}
+
+void Volume::process_vol_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req) {
+    volume_req::cast(bs_req)->vol_instance->process_data_completions(bs_req);
+}
+
+volume_req_ptr Volume::create_vol_req(Volume* vol, const vol_interface_req_ptr& hb_req) {
+    volume_req_ptr vreq(new volume_req());
+    vreq->parent_req = hb_req;
+    vreq->is_read = hb_req->is_read;
+    vreq->vol_instance = vol->shared_from_this();
+
+    hb_req->outstanding_io_cnt.increment();
+    return vreq;
+}
+
+void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req) {
+    auto vreq = volume_req::cast(bs_req);
+    auto& parent_req = vreq->parent_req;
+
+    assert(parent_req != nullptr);
+    assert(!vreq->isSyncCall);
+
+    LOGINFO("data_complete: req_id={}, err={}", parent_req->request_id, vreq->err.message());
+
+    // Shortcut to error completion
+    if (vreq->err) {
+        return check_and_complete_req(parent_req, vreq->err, 1, 0);
+    }
+
+    HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, vreq->is_read, volume_data_read_latency, volume_data_write_latency,
+                              get_elapsed_time_us(vreq->op_start_time));
+    if (!vreq->is_read) {
+        assert(vreq->nlbas < 256 && vreq->bid.get_nblks() < 256);
+
+        MappingKey                                  key(vreq->lba, vreq->nlbas);
+        std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;
+
+        // TODO - put actual checksum here @sounak
+        for (auto i = 0ul, j = vreq->lba; j < vreq->lba + vreq->nlbas; i++, j++) {
+            carr[i] = j % 65000;
+        }
+
+        ValueEntry   ve(vreq->seqId, vreq->bid, 0, vreq->nlbas, carr);
+        MappingValue value(ve);
+#ifndef NDEBUG
+        vreq->vol_uuid = m_sb->uuid;
+        LOGDEBUG("Mapping.PUT ,vol_uuid:{},Key:{},Value:{}", boost::uuids::to_string(vreq->vol_uuid),
+                 key.to_string(), value.to_string());
+#endif
+        m_map->put(vreq, key, value);
+    } else {
+        check_and_complete_req(parent_req, no_error, 1, 0);
     }
 }
 
-void
-Volume::init_perf_report() {
-}
+std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, const vol_interface_req_ptr& hb_req) {
+    assert(m_sb->state == vol_state::ONLINE);
+    assert(m_sb->page_size % HomeBlks::instance()->get_data_pagesz() == 0);
+    assert((m_sb->page_size * nlbas) <= VOL_MAX_IO_SIZE);
 
-void
-Volume::print_perf_report() {
-    std::ofstream ofs ("result.json", std::ofstream::out);
-    ofs << PerfMetrics::getInstance()->report() << std::endl;
-    ofs.close();
-}
+    std::vector< BlkId > bid;
+    blk_alloc_hints      hints;
+    hints.desired_temp = 0;
+    hints.dev_id_hint = -1;
+    hints.multiplier = (m_sb->page_size / HomeBlks::instance()->get_data_pagesz());
 
-std::error_condition
-Volume::write(uint64_t lba, uint8_t *buf, uint32_t nlbas,
-        boost::intrusive_ptr<vol_interface_req> req) {
+    // TODO: @hkadayam Remove the init() call and fix the tests to always use fresh vol_interface_req on every call
+    hb_req->init();
+    hb_req->io_start_time = Clock::now();
+    hb_req->is_read = false;
+
+    LOGINFO("write: lba={}, nlbas={}, buf={}, req_id={}", lba, nlbas, (void *)buf, hb_req->request_id);
     try {
-        assert(m_sb->state == vol_state::ONLINE);
-        std::vector<BlkId> bid;
-        blk_alloc_hints hints;
-        hints.desired_temp = 0;
-        hints.dev_id_hint = -1;
-        assert(m_sb->page_size % HomeBlks::instance()->get_data_pagesz() == 0);
-        hints.multiplier = (m_sb->page_size / HomeBlks::instance()->get_data_pagesz());
-
-        req->startTime = Clock::now();
-        
-        assert((m_sb->page_size * nlbas) <= VOL_MAX_IO_SIZE);
-        {
-            CURRENT_CLOCK(startTime)
-                BlkAllocStatus status = m_data_blkstore->alloc_blk(nlbas * m_sb->page_size, hints, bid);
-            if (status != BLK_ALLOC_SUCCESS) {
-                assert(0);
-            }
-            PerfMetrics::getInstance()->updateHist(VOL_BLK_ALLOC_H, get_elapsed_time(startTime));
-        }
-
-        Clock::time_point startTime = Clock::now();
-        boost::intrusive_ptr<homeds::MemVector> mvec(new homeds::MemVector());
-        mvec->set(buf, m_sb->page_size * nlbas, 0);
-        uint32_t offset = 0;
-        uint32_t lbas_snt = 0;
-        uint32_t i = 0;
-
-        auto sid= seq_Id.fetch_add(1, memory_order_seq_cst);
-        req->io_cnt = 1;
-        for (i = 0; i < bid.size(); ++i) {
-            std::deque<boost::intrusive_ptr<writeback_req>> req_q;
-            ++req->io_cnt;
-            boost::intrusive_ptr<volume_req> child_req(new volume_req());
-
-            child_req->parent_req = req;
-
-            child_req->is_read = false;
-            child_req->bid = bid[i];
-            child_req->lba = lba + lbas_snt;
-            //TODO - actual seqId/lastCommit seq id should be comming from vol interface req
-            child_req->seqId = sid;
-            child_req->lastCommited_seqId=sid;//keeping only latest version always
-            
-            child_req->vol_instance = m_vol_ptr;
-            assert((bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) % m_sb->page_size) == 0);
-            child_req->nlbas =  bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) / m_sb->page_size;
-            boost::intrusive_ptr<BlkBuffer> bbuf = m_data_blkstore->write(bid[i], mvec, offset,
-                                boost::static_pointer_cast<blkstore_req<BlkBuffer>>(child_req),
-                                req_q);
-            offset += bid[i].data_size(HomeBlks::instance()->get_data_pagesz());
-            lbas_snt += child_req->nlbas;
-        }
-
-        assert(lbas_snt == nlbas);
-        
-        PerfMetrics::getInstance()->updateHist(VOL_WRITE_H, get_elapsed_time(startTime));
-        if (req->io_cnt.fetch_sub(1, std::memory_order_acquire) == 1) {
-            /* all completions are completed */
-            PerfMetrics::getInstance()->updateHist(VOL_IO_WRITE_H, get_elapsed_time(req->startTime));
-            m_comp_cb(req);
-         }
-    } catch (const std::exception &e) {
+        BlkAllocStatus status = m_data_blkstore->alloc_blk(nlbas * m_sb->page_size, hints, bid);
+        assert(status == BLK_ALLOC_SUCCESS);
+        HISTOGRAM_OBSERVE(m_metrics, volume_blkalloc_latency, get_elapsed_time_us(hb_req->io_start_time));
+        COUNTER_INCREMENT(m_metrics, volume_write_count, 1);
+    } catch (const std::exception& e) {
         assert(0);
         LOGERROR("{}", e.what());
-        return std::make_error_condition(std::errc::device_or_resource_busy);
+        check_and_complete_req(hb_req, std::make_error_condition(std::errc::device_or_resource_busy), 0, 1);
+        return hb_req->err;
+    }
+
+    boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector());
+    mvec->set(buf, m_sb->page_size * nlbas, 0);
+
+    uint32_t offset = 0;
+    uint32_t lbas_snt = 0;
+    uint32_t i = 0;
+
+    Clock::time_point data_io_start_time = Clock::now();
+    auto sid = seq_Id.fetch_add(1, memory_order_seq_cst);
+
+    try {
+        for (i = 0; i < bid.size(); ++i) {
+            std::deque< writeback_req_ptr > req_q;
+
+            volume_req_ptr vreq = Volume::create_vol_req(this, hb_req);
+            vreq->bid = bid[i];
+            vreq->lba = lba + lbas_snt;
+            vreq->seqId = sid;              // TODO - actual seqId/lastCommit seq id should be from vol interface req
+            vreq->lastCommited_seqId = sid; // keeping only latest version always
+            vreq->op_start_time = data_io_start_time;
+
+            assert((bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) % m_sb->page_size) == 0);
+            vreq->nlbas = bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) / m_sb->page_size;
+
+            boost::intrusive_ptr< BlkBuffer > bbuf = m_data_blkstore->write(
+                bid[i], mvec, offset, boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vreq), req_q);
+
+            offset += bid[i].data_size(HomeBlks::instance()->get_data_pagesz());
+            lbas_snt += vreq->nlbas;
+        }
+
+        HISTOGRAM_OBSERVE(m_metrics, volume_pieces_per_write, bid.size());
+        assert(lbas_snt == nlbas);
+    } catch (const std::exception& e) {
+        assert(0);
+        LOGERROR("{}", e.what());
+
+        check_and_complete_req(hb_req, std::make_error_condition(std::errc::io_error), 0, 1);
+        return hb_req->err;
     }
     return no_error;
 }
 
-void Volume::print_tree() {
-    m_map->print_tree();
+/* This methods check if we can complete the req and if we can do so. This is the exit point of all async volume
+ * read/write operations. All read/writes must call this if it is sync or async.
+ *
+ * If all ios for request is completed or any one io is errored out, it will call completion if its an async completion
+ *
+ * Parameters are:
+ * 1) hb_req: Request which is to be checked and completed
+ * 2) Error: Any IO error condition. Note if there is an error, the request is immediately completed.
+ * 3) nasync_ios_completion: Number of IOs completed asynchronously
+ * 4) nsync_ios_completion: Number of sync io calls completed
+ */
+void Volume::check_and_complete_req(const vol_interface_req_ptr& hb_req, const std::error_condition& err,
+        uint32_t nasync_ios_completed, uint32_t nsync_ios_completed) {
+    // If there is error and request is not completed yet, we need to complete it now.
+    LOGINFO("complete_io: req_id={}, err={}, async={}, sync={}, outstanding_io_cnt={}", hb_req->request_id, err.message(),
+            nasync_ios_completed, nsync_ios_completed, hb_req->outstanding_io_cnt.get());
+
+    if (err) {
+        // NOTE: We do not decrement the outstanding_io_cnt here, so that if there is any partial success,
+        // the else if part does not get executed. This way we avoid an atomic operation on success cases.
+        if (hb_req->set_error(err)) {
+            // Was not completed earlier, so complete the io
+            COUNTER_INCREMENT_IF_ELSE(m_metrics, hb_req->is_read, volume_write_error_count, volume_read_error_count, 1);
+            if (nasync_ios_completed) { m_comp_cb(hb_req); }
+        } else {
+            LOGINFO("Receiving completion on already completed request id={}", hb_req->request_id);
+        }
+    } else {
+        bool completed = (nasync_ios_completed || nsync_ios_completed) ?
+                hb_req->outstanding_io_cnt.decrement_testz(nasync_ios_completed + nsync_ios_completed) :
+                hb_req->outstanding_io_cnt.testz();
+        if (completed) {
+            HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, hb_req->is_read, volume_read_latency, volume_write_latency,
+                    get_elapsed_time_us(hb_req->io_start_time));
+            if (nasync_ios_completed) {
+                LOGINFO("complete_io: req_id={} DONE\n", hb_req->request_id);
+                m_comp_cb(hb_req);
+            }
+        }
+    }
 }
 
-std::error_condition
-Volume::read(uint64_t lba, int nlbas, boost::intrusive_ptr<vol_interface_req> req, bool sync) {
+void Volume::print_tree() { m_map->print_tree(); }
+
+#if 0
+std::error_condition Volume::read_metadata(const vol_req_ptr& vreq) {
+    MappingKey                                           key(vreq->lba, vreq->nlbas);
+    std::vector< std::pair< MappingKey, MappingValue > > kvs;
+
+#ifndef NDEBUG
+    vreq->vol_uuid = m_sb->uuid;
+    LOGDEBUG("Mapping.GET vol_uuid:{} ,key:{} last_seqId: {}", boost::uuids::to_string(vreq->vol_uuid),
+             key.to_string(), vreq->lastCommited_seqId);
+#endif
+
+    auto err = m_map->get(vreq, key, kvs);
+    if (err) {
+        if (err != homestore_error::lba_not_exist) {
+            COUNTER_INCREMENT(m_metrics, volume_read_error_count, 1);
+        }
+        check_and_complete_req(hb_req, err, 0, 1);
+        return err;
+    }
+    HISTOGRAM_OBSERVE(m_metrics, volume_map_read_latency, get_elapsed_time_us(vreq->parant_req->io_start_time));
+
+    return no_error;
+}
+#endif
+
+std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_req_ptr& hb_req, bool sync) {
     try {
         assert(m_sb->state == vol_state::ONLINE);
-        Clock::time_point startTime = Clock::now();
+        hb_req->init();
+        hb_req->io_start_time = Clock::now();
+        hb_req->is_read = true;
 
-        //seqId shoudl be passed from vol interface req and passed to mapping layer
-        boost::intrusive_ptr<volume_req> volreq(new volume_req());
-        volreq->lba = lba;
-        volreq->nlbas = nlbas;
-        auto sid = seq_Id.fetch_add(1,memory_order_seq_cst);
-        volreq->seqId = sid;
-        volreq->lastCommited_seqId = sid;//read only latest value
-        MappingKey key(lba,nlbas);
-        std::vector<std::pair<MappingKey, MappingValue>> kvs;
-#ifndef NDEBUG
-        volreq->vol_uuid = m_sb->uuid;
-        LOGDEBUG("Mapping.GET vol_uuid:{} ,key:{} last_seqId: {}",
-                boost::uuids::to_string(volreq->vol_uuid), key.to_string(), volreq->lastCommited_seqId);
+        LOGINFO("read: lba={}, nlbas={}, sync={}, req_id={}", lba, nlbas, sync, hb_req->request_id);
+
+        // seqId shoudl be passed from vol interface req and passed to mapping layer
+        auto sid = seq_Id.fetch_add(1, memory_order_seq_cst);
+
+        volume_req_ptr vreq = Volume::create_vol_req(this, hb_req);
+        vreq->lba = lba;
+        vreq->nlbas = nlbas;
+        vreq->seqId = sid;
+        vreq->lastCommited_seqId = sid; // read only latest value
+
+        MappingKey                                           key(lba, nlbas);
+        std::vector< std::pair< MappingKey, MappingValue > > kvs;
+
+ #ifndef NDEBUG
+        vreq->vol_uuid = m_sb->uuid;
+        LOGDEBUG("Mapping.GET vol_uuid:{} ,key:{} last_seqId: {}", boost::uuids::to_string(vreq->vol_uuid),
+                 key.to_string(), vreq->lastCommited_seqId);
 #endif
-        std::error_condition ret = m_map->get(volreq, key, kvs);
-        
-        if (ret && ret == homestore_error::lba_not_exist) {
-            return ret;
+
+        auto err = m_map->get(vreq, key, kvs);
+        if (err) {
+            if (err != homestore_error::lba_not_exist) {
+                COUNTER_INCREMENT(m_metrics, volume_read_error_count, 1);
+            }
+            check_and_complete_req(hb_req, err, 0, 1);
+            return err;
         }
+        HISTOGRAM_OBSERVE(m_metrics, volume_map_read_latency, get_elapsed_time_us(hb_req->io_start_time));
 
-        req->err = ret;
-        req->io_cnt = 1;
-        req->startTime = Clock::now();
-        PerfMetrics::getInstance()->updateHist(VOL_MAP_READ_H, get_elapsed_time(startTime));
-        startTime = Clock::now();
+        Clock::time_point data_io_start_time = Clock::now();
+
+        hb_req->read_buf_list.reserve(kvs.size());
 #ifndef NDEBUG
-        auto cur_lba=lba;
+        auto cur_lba = lba;
 #endif
-        for (auto &kv: kvs) {
+        for (auto& kv : kvs) {
             if (!(kv.second.is_valid())) {
-                buf_info info;
-                info.buf = m_only_in_mem_buff;
-                info.size = m_sb->page_size;
-                info.offset = 0;
-                req->read_buf_list.push_back(info);
+                hb_req->read_buf_list.emplace_back(m_sb->get_page_size(), 0, m_only_in_mem_buff);
 #ifndef NDEBUG
                 cur_lba++;
 #endif
             } else {
-                boost::intrusive_ptr<volume_req> child_req(new volume_req());
-                req->io_cnt++;
-                child_req->lba=kv.first.start();
-                child_req->nlbas=kv.first.get_n_lba();
-                child_req->is_read = true;
-                child_req->parent_req = req;
-                child_req->vol_instance = m_vol_ptr;
-                child_req->isSyncCall = sync;
+                volume_req_ptr child_vreq = Volume::create_vol_req(this, hb_req);
+                child_vreq->lba = kv.first.start();
+                child_vreq->nlbas = kv.first.get_n_lba();
+                child_vreq->is_read = true;
+                child_vreq->isSyncCall = sync;
+                child_vreq->op_start_time = data_io_start_time;
 
                 assert(kv.second.get_array().get_total_elements() == 1);
                 ValueEntry ve;
-                (kv.second.get_array()).get(0,ve,false);
+                (kv.second.get_array()).get(0, ve, false);
 
 #ifndef NDEBUG
-                //TODO - at this point, ve has checksum array to verify against later @sounak
-                for(auto i=0ul;i<kv.first.get_n_lba();i++,cur_lba++) {
-                    if(ve.get_checksum_at(i)!=cur_lba%65000)
+                // TODO - at this point, ve has checksum array to verify against later @sounak
+                for (auto i = 0ul; i < kv.first.get_n_lba(); i++, cur_lba++) {
+                    if (ve.get_checksum_at(i) != cur_lba % 65000)
                         LOGDEBUG("Checksum mismatch ,{},{}", kv.first.to_string(), kv.second.to_string());
                 }
-#endif 
-                buf_info info;
-                info.size = get_page_size()*kv.first.get_n_lba();
-                info.offset = HomeBlks::instance()->get_data_pagesz() * ve.get_blk_offset();
-                boost::intrusive_ptr<BlkBuffer> bbuf = 
-                    m_data_blkstore->read(ve.get_blkId(),info.offset,info.size,
-                            boost::static_pointer_cast<blkstore_req<BlkBuffer>>(child_req));
-                info.buf = bbuf;
-                req->read_buf_list.push_back(info);
-            }
-        }
+#endif
 
-        PerfMetrics::getInstance()->updateHist(VOL_READ_H, get_elapsed_time(startTime));
-        if (req->io_cnt.fetch_sub(1, std::memory_order_acquire) == 1) {
-            /* all completions are completed */
-            PerfMetrics::getInstance()->updateHist(VOL_IO_READ_H, get_elapsed_time(req->startTime));
-            if (!sync) {
-                m_comp_cb(req);
+                auto sz = get_page_size() * kv.first.get_n_lba();
+                auto offset = HomeBlks::instance()->get_data_pagesz() * ve.get_blk_offset();
+                boost::intrusive_ptr< BlkBuffer > bbuf =
+                    m_data_blkstore->read(ve.get_blkId(), offset, sz,
+                                          boost::static_pointer_cast< blkstore_req< BlkBuffer > >(child_vreq));
+
+                // TODO: @hkadayam There is a potential for race of read_buf_list getting emplaced after completion
+                hb_req->read_buf_list.emplace_back(sz, offset, bbuf);
             }
         }
-    } catch (const std::exception &e) {
+        check_and_complete_req(hb_req, no_error, !sync, sync); // Atleast 1 metadata io is completed.
+    } catch (const std::exception& e) {
         assert(0);
         LOGERROR("{}", e.what());
-        return std::make_error_condition(std::errc::device_or_resource_busy);
+        check_and_complete_req(hb_req, std::make_error_condition(std::errc::device_or_resource_busy), 0, 1);
+        return hb_req->err;
     }
     return no_error;
 }
 
 /* Just create single block in memory, not on physical device and not in cache */
 void Volume::alloc_single_block_in_mem() {
-    BlkId *out_blkid = new BlkId(0);
+    BlkId* out_blkid = new BlkId(0);
     // Create an object for the buffer
     m_only_in_mem_buff = BlkBuffer::make_object();
     m_only_in_mem_buff->set_key(*out_blkid);
 
     // Create a new block of memory for the blocks requested and set the memvec pointer to that
-    uint8_t *ptr;
+    uint8_t* ptr;
     uint32_t size = m_sb->page_size;
-    ptr = (uint8_t *)malloc(size);
+    ptr = (uint8_t*)malloc(size);
     if (ptr == nullptr) {
         throw std::bad_alloc();
     }
     memset(ptr, 0, size);
-    boost::intrusive_ptr<homeds::MemVector> mvec(new homeds::MemVector());
+
+    boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector());
     mvec->set(ptr, size, 0);
     m_only_in_mem_buff->set_memvec(mvec, 0, size);
-}
-
-BlkAllocBitmapBuilder::~BlkAllocBitmapBuilder() {
-
 }
 
 //
@@ -454,9 +479,8 @@ BlkAllocBitmapBuilder::~BlkAllocBitmapBuilder() {
 //
 // Repeat until "Range Query" returns false (nothing more left to query);
 //
-void
-BlkAllocBitmapBuilder::do_work() {
-    
+void BlkAllocBitmapBuilder::do_work() {
+
 #if 0    
     mapping* mp = m_vol_handle->get_mapping_handle();
     MappingBtreeDeclType* bt = mp->get_bt_handle();
@@ -501,8 +525,8 @@ BlkAllocBitmapBuilder::do_work() {
 
     // return completed with success to the caller 
     m_comp_cb(true);
-    #endif
-    delete(this);
+#endif
+    delete (this);
 }
 
 void BlkAllocBitmapBuilder::get_allocated_blks() {

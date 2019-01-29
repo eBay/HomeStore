@@ -9,6 +9,7 @@
 SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write, iomgr, VMOD_BTREE_MERGE, VMOD_BTREE_SPLIT, varsize_blk_alloc,
                  VMOD_VOL_MAPPING, VMOD_BTREE
 )
+THREAD_BUFFER_INIT;
 
 using namespace std;
 using namespace homestore;
@@ -54,16 +55,14 @@ public:
     virtual ~MapTest() {
     }
 
-    void process_metadata_completions(boost::intrusive_ptr<volume_req> req) {
-        LOGINFO("process meta compl");
+    void process_metadata_completions(const volume_req_ptr& req) {
         for (auto &ptr : req->blkIds_to_free) {
             LOGINFO("Freeing Blk: {} {} {}", ptr.m_blkId.to_string(), ptr.m_blk_offset, ptr.m_nblks_to_free);
             release_blkId_lock(ptr.m_blkId, ptr.m_blk_offset, ptr.m_nblks_to_free);
         }
     }
 
-    void process_completions(boost::intrusive_ptr<vol_interface_req> vol_req) {
-        LOGINFO("process compl");
+    void process_completions(const vol_interface_req_ptr& hb_req) {
     }
 
     void start_homestore() {
@@ -109,22 +108,22 @@ public:
         return true;
     }
 
-    void vol_mounted_cb(std::shared_ptr<Volume> vol_obj, vol_state state) {
+    void vol_mounted_cb(const VolumePtr& vol_obj, vol_state state) {
         vol_init(vol_obj);
-        auto cb = [this](boost::intrusive_ptr<vol_interface_req> vol_req) { process_completions(vol_req); };
+        auto cb = [this](const vol_interface_req_ptr& vol_req) { process_completions(vol_req); };
         VolInterface::get_instance()->attach_vol_completion_cb(vol_obj, cb);
     }
 
-    void vol_init(std::shared_ptr<homestore::Volume> vol_obj) {
+    void vol_init(const VolumePtr& vol_obj) {
         open(VolInterface::get_instance()->get_name(vol_obj), O_RDWR);
     }
 
-    void vol_state_change_cb(std::shared_ptr<Volume> vol, vol_state old_state, vol_state new_state) {
+    void vol_state_change_cb(const VolumePtr& vol, vol_state old_state, vol_state new_state) {
         assert(0);
     }
 
 
-    void init_done_cb(std::error_condition err, struct out_params params1) {
+    void init_done_cb(std::error_condition err, const out_params& params1) {
         /* create volume */
         vol_params params;
         params.page_size = 4096;

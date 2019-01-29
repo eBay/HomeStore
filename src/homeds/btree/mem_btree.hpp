@@ -17,7 +17,7 @@
 #include "homeds/memory/composite_allocator.hpp"
 #include "homeds/memory/chunk_allocator.hpp"
 #include "homeds/memory/sys_allocator.hpp"
-#include "homeds/utility/atomic_counter.hpp"
+#include <utility/atomic_counter.hpp>
 #include "btree_store.hpp"
 #include "btree_node.h"
 #include "physical_node.hpp"
@@ -26,7 +26,7 @@ namespace homeds { namespace btree {
 
 struct mem_btree_node_header {
     uint64_t magic;
-    homeds::atomic_counter<uint16_t> refcount;
+    sisl::atomic_counter<uint16_t> refcount;
 };
 
 #define MemBtreeNode  BtreeNode<MEM_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize, empty_writeback_req>
@@ -65,8 +65,7 @@ public:
     }
 
     static boost::intrusive_ptr<MemBtreeNode> alloc_node(MemBtreeStore *store, bool is_leaf,
-            bool &is_new_allocation,// indicates if allocated node is same as copy_from
-
+            bool &is_new_allocation, // indicates if allocated node is same as copy_from
             boost::intrusive_ptr<MemBtreeNode> copy_from = nullptr) {
         if (copy_from!= nullptr) {
             is_new_allocation =  false;
@@ -87,7 +86,7 @@ public:
         }
         auto mbh = (mem_btree_node_header *)btree_node;
         mbh->magic = 0xDEADBEEF;
-        mbh->refcount.increment();
+        mbh->refcount.set(1);
 
         boost::intrusive_ptr<MemBtreeNode> new_node = (boost::intrusive_ptr<MemBtreeNode>((MemBtreeNode *)mem));
        
@@ -176,5 +175,4 @@ private:
     BtreeConfig m_cfg;
  
 };
-
 } }

@@ -7,12 +7,16 @@
 #include <thread>
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
+#include <utility/thread_buffer.hpp>
+#include <utility/obj_life_counter.hpp>
 
 #include "blkstore/blkstore.hpp"
 #include "device/virtual_dev.hpp"
 #include "homeds/btree/mem_btree.hpp"
+#include <metrics/metrics.hpp>
 
-SDS_LOGGING_INIT(VMOD_BTREE_MERGE, VMOD_BTREE_SPLIT,VMOD_BTREE)
+SDS_LOGGING_INIT(VMOD_BTREE_MERGE, VMOD_BTREE_SPLIT, VMOD_BTREE)
+THREAD_BUFFER_INIT;
 
 #define MAX_CACHE_SIZE     2 * 1024 * 1024 * 1024
 using namespace std;
@@ -74,6 +78,7 @@ void setup_devices(uint32_t ndevs) {
 }
 #endif
 
+#if 0
 /* There is a memory leak in btree crud. We should enable it again
  * once that is fixed.
  */
@@ -82,6 +87,7 @@ __attribute__((no_sanitize_address))
 const char* __asan_default_options() { 
     return "detect_leaks=false"; 
 }
+#endif
 
 class TestSimpleKey : public homeds::btree::BtreeKey {
 private:
@@ -394,44 +400,33 @@ public:
             test->put_nth_entry(i);
             // EXPECT_EQ(ret, true);
         }
-
-        //std::cout << "Btree Obj count = " << test->m_bt->get_stats().get_obj_count() << std::endl;
-        std::cout << "Btree Stats after preload" << "\n";
-        test->m_bt->get_stats().print();
     }
 
     static void insert_and_get_thread(BtreeCrudTest *test, uint32_t start, uint32_t count, int get_pct) {
         // First preload upto the get_pct
         uint32_t readable_count = (count * get_pct)/100;
 
-        //test->preload_in_parallel(start, readable_count, 1);
         test->run_in_parallel(1, preload_thread, start, readable_count);
 
         // Next read and insert based on the percentage of reads provided
         
         // BELOW code has some bug, hence commenting for now.
         // bug surfaces when we run memory sanitizer only.
-//        uint32_t nopers = 0;
-//        while (nopers++ < TOTAL_OPERS_PER_TEST) {
-//            if (((rand() % 100) > get_pct) && (readable_count < count)) {
-//                // Its an insert, do a put
-//                test->put_nth_entry(start + readable_count++);
-//            } else {
-//                test->get_nth_entry((rand() % readable_count) + start);
-//            }
-//        }
-
-        std::cout << "Btree Stats after inserts" << "\n";
-        test->m_bt->get_stats().print();
+          uint32_t nopers = 0;
+          while (nopers++ < TOTAL_OPERS_PER_TEST) {
+            if (((rand() % 100) > get_pct) && (readable_count < count)) {
+                // Its an insert, do a put
+                test->put_nth_entry(start + readable_count++);
+            } else {
+                test->get_nth_entry((rand() % readable_count) + start);
+            }
+        }
+        std::cout << "Btree Stats after insert: " << test->m_bt->get_metrics_in_json().dump() << "\n";
 
         // Cleanup the btree
         for (auto i = start; i < start + readable_count; i++) {
             test->delete_nth_entry(i);
         }
-
-        //std::cout << "Btree Obj count = " << test->m_bt->get_stats().get_obj_count() << std::endl;
-        std::cout << "Btree Stats after cleanup" << "\n";
-        test->m_bt->get_stats().print();
     }
 
     static void query_thread(BtreeCrudTest *test, uint32_t start, uint32_t count, BtreeQueryType qtype,
@@ -464,8 +459,15 @@ public:
 
 TEST_F(BtreeCrudTest, SimpleInsert) {
     run_in_parallel(NTHREADS, insert_and_get_thread, 0, TOTAL_ENTRIES, 50 /* get_pct */);
-    EXPECT_EQ(m_bt->get_stats().get_obj_count(), 0u);
-    EXPECT_EQ(m_bt->get_stats().get_interior_nodes_count(), 0u);
+    
+#ifndef NDEBUG
+    std::cout << "Final test metrics result = " << m_bt->get_metrics_in_json().dump() << "\n";
+    sisl::ObjCounterRegistry::foreach([](const std::string& name, int64_t created, int64_t alive) {
+        std::cout << "ObjLife " << name << " created " << created << " alive " << alive << "\n";
+    });
+#endif
+    //EXPECT_EQ(metrics, 0u);
+    //EXPECT_EQ(m_bt->get_stats().get_interior_nodes_count(), 0u);
 }
 
 TEST_F(BtreeCrudTest, SimpleQuery) {
@@ -474,9 +476,12 @@ TEST_F(BtreeCrudTest, SimpleQuery) {
         return (left->compare(right) < 0);
     });
     run_in_parallel(NTHREADS, preload_thread, 0, TOTAL_ENTRIES);
+    std::cout << "Btree Stats after preload: " << m_bt->get_metrics_in_json().dump() << "\n";
+
     run_in_parallel(NTHREADS, query_thread, 0, TOTAL_ENTRIES, BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, 1000);
     run_in_parallel(NTHREADS, query_thread, 0, TOTAL_ENTRIES, BtreeQueryType::TREE_TRAVERSAL_QUERY, 1000);
 
+    std::cout << "Final test metrics result = " << m_bt->get_metrics_in_json().dump() << "\n";
     //EXPECT_EQ(m_bt->get_stats().get_obj_count(), 0u);
     //EXPECT_EQ(m_bt->get_stats().get_interior_nodes_count(), 0u);
 }

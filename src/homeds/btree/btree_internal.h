@@ -14,6 +14,7 @@
 #include "homeds/memory/freelist_allocator.hpp"
 #include "error/error.h"
 #include "main/homestore_header.hpp"
+#include <metrics/metrics.hpp>
 
 //structure to track btree multinode operations on different nodes
 struct btree_multinode_req{
@@ -578,12 +579,15 @@ class BtreeConfig {
     uint8_t m_ideal_fill_pct;
     uint8_t m_split_pct;
 
+    std::string m_btree_name;     // Unique name for the btree
+
   public:
-    BtreeConfig() {
+    BtreeConfig(const char *btree_name = nullptr) {
         m_max_objs = 0;
         m_max_key_size = m_max_value_size = 0;
         m_ideal_fill_pct = 90;
         m_split_pct = 50;
+        m_btree_name = btree_name ? btree_name : std::string("btree");
     }
 
     uint32_t get_max_key_size() const { return m_max_key_size; }
@@ -601,6 +605,8 @@ class BtreeConfig {
     uint32_t get_ideal_fill_size() const { return (uint32_t)(get_node_area_size() * m_ideal_fill_pct) / 100; }
     uint32_t get_merge_suggested_size() const { return get_node_area_size() - get_ideal_fill_size(); }
     uint32_t get_split_size() const { return (uint32_t)(get_node_area_size() * m_split_pct) / 100; }
+
+    const std::string& get_name() const { return m_btree_name; }
 };
 
 #define DEFAULT_FREELIST_CACHE_COUNT 10000
@@ -634,6 +640,19 @@ template <size_t NodeSize, size_t CacheCount = DEFAULT_FREELIST_CACHE_COUNT> cla
 
   private:
     homeds::FreeListAllocator<CacheCount, NodeSize> m_allocator;
+};
+
+class BtreeMetrics : public sisl::MetricsGroupWrapper {
+public:
+    explicit BtreeMetrics(const char *grp_name) : sisl::MetricsGroupWrapper(grp_name) {
+        REGISTER_COUNTER(btree_obj_count, "Btree object count", "");
+        REGISTER_COUNTER(btree_leaf_node_count, "Btree Leaf node count", "");
+        REGISTER_COUNTER(btree_int_node_count, "Btree Interior node count", "");
+        REGISTER_COUNTER(btree_split_count, "Total number of btree node splits", "");
+        REGISTER_COUNTER(btree_merge_count, "Total number of btree node merges", "");
+
+        register_me_to_farm();
+    }
 };
 
 template <size_t NodeSize, size_t CacheCount>
