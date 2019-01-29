@@ -8,6 +8,7 @@
 
 #include <iostream>
 #include <sds_logging/logging.h>
+#include <sds_options/options.h>
 #include <benchmark/benchmark.h>
 #include <boost/range/irange.hpp>
 #include <boost/intrusive_ptr.hpp>

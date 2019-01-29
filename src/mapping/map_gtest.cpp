@@ -3,6 +3,7 @@
 #include <iostream>
 #include <thread>
 #include <sds_logging/logging.h>
+#include <sds_options/options.h>
 #include "mapping.hpp"
 
 SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write, iomgr, VMOD_BTREE_MERGE, VMOD_BTREE_SPLIT, varsize_blk_alloc,
