@@ -43,7 +43,7 @@ struct _counter_generator {
     }
 
     _counter_generator() : request_id_counter(0) {}
-    uint64_t next_request_id() { return request_id_counter.fetch_add(1, std::memory_order_seq_cst); }
+    uint64_t next_request_id() { return request_id_counter.fetch_add(1, std::memory_order_relaxed); }
     std::atomic< uint64_t > request_id_counter;
 };
 #define counter_generator _counter_generator::instance()
@@ -56,9 +56,7 @@ struct vol_interface_req {
     std::error_condition        err;
     std::atomic< bool >         is_fail_completed;
     bool                        is_read;
-#ifndef NDEBUG
     uint64_t                    request_id;
-#endif
 
     friend void intrusive_ptr_add_ref(vol_interface_req* req) { req->refcount.increment(1); }
 
@@ -87,9 +85,6 @@ struct vol_interface_req {
 
 public:
     vol_interface_req() : outstanding_io_cnt(0), refcount(0), is_fail_completed(false)
-#ifndef NDEBUG
-    //, request_id(counter_generator.next_request_id())
-#endif
     {}
     virtual ~vol_interface_req() = default;
 
