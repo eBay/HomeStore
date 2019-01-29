@@ -26,12 +26,14 @@ int                btree_buf_alloc;
 int                btree_buf_free;
 int                btree_buf_make_obj;
 
-void intrusive_ptr_add_ref(BlkBuffer *buf) {
-    intrusive_ptr_add_ref((WriteBackCacheBuffer< BlkId >*) buf);
-}
+namespace homestore {
+    void intrusive_ptr_add_ref(homestore::BlkBuffer *buf) {
+        intrusive_ptr_add_ref((homestore::WriteBackCacheBuffer <BlkId> *) buf);
+    }
 
-void intrusive_ptr_release(BlkBuffer *buf) {
-    intrusive_ptr_release((WriteBackCacheBuffer< BlkId > *) buf);
+    void intrusive_ptr_release(homestore::BlkBuffer *buf) {
+        intrusive_ptr_release((homestore::WriteBackCacheBuffer <BlkId> *) buf);
+    }
 }
 
 VolInterface*                                                    VolInterface::_instance = nullptr;
