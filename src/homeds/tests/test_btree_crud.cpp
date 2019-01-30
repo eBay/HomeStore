@@ -458,7 +458,7 @@ public:
 
 TEST_F(BtreeCrudTest, SimpleInsert) {
     run_in_parallel(NTHREADS, insert_and_get_thread, 0, TOTAL_ENTRIES, 50 /* get_pct */);
-    
+
 #ifndef NDEBUG
     std::cout << "Final test metrics result = " << m_bt->get_metrics_in_json().dump() << "\n";
     sisl::ObjCounterRegistry::foreach([](const std::string& name, int64_t created, int64_t alive) {

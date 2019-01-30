@@ -1,13 +1,12 @@
+#include "mapping.hpp"
 #include <gtest/gtest.h>
 #include <fstream>
 #include <iostream>
 #include <thread>
 #include <sds_logging/logging.h>
-#include "mapping.hpp"
 
 SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write, iomgr, VMOD_BTREE_MERGE, VMOD_BTREE_SPLIT, varsize_blk_alloc,
-                 VMOD_VOL_MAPPING, VMOD_BTREE
-)
+                 VMOD_VOL_MAPPING, VMOD_BTREE, httpserver_lmod)
 THREAD_BUFFER_INIT;
 
 using namespace std;

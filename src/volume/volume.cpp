@@ -145,6 +145,7 @@ void Volume::process_metadata_completions(const volume_req_ptr& vreq) {
     assert(parent_req != nullptr);
 
     LOGINFO("metadata_complete: req_id={}, err={}", parent_req->request_id, vreq->err.message());
+    HISTOGRAM_OBSERVE(m_metrics, volume_map_write_latency, get_elapsed_time_us(vreq->op_start_time));
 
     if (!vreq->err) {
         for (auto& ptr : vreq->blkIds_to_free) {
@@ -198,6 +199,7 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
             carr[i] = j % 65000;
         }
 
+        vreq->op_start_time = Clock::now();
         ValueEntry   ve(vreq->seqId, vreq->bid, 0, vreq->nlbas, carr);
         MappingValue value(ve);
 #ifndef NDEBUG
@@ -379,6 +381,7 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
                  key.to_string(), vreq->lastCommited_seqId);
 #endif
 
+        COUNTER_INCREMENT(m_metrics, volume_read_count, 1);
         auto err = m_map->get(vreq, key, kvs);
         if (err) {
             if (err != homestore_error::lba_not_exist) {
