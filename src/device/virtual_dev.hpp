@@ -70,14 +70,10 @@ struct pdev_chunk_map {
     std::vector< PhysicalDevChunk* > chunks_in_pdev;
 };
 
-// TODO: Remove req_alloc and req_dealloc with ObjLifeCounter
-extern std::atomic< int > req_alloc;
-extern std::atomic< int > req_dealloc;
-
 struct virtualdev_req;
 
 typedef std::function< void(boost::intrusive_ptr< virtualdev_req > req) > virtualdev_comp_callback;
-struct virtualdev_req {
+struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req >{
     uint64_t                    version;
     virtualdev_comp_callback    cb;
     uint64_t                    size;
@@ -88,7 +84,7 @@ struct virtualdev_req {
     PhysicalDevChunk*           chunk;
     Clock::time_point           io_start_time;
 
-    virtualdev_req() : err(no_error), is_read(false), isSyncCall(false), refcount(0) { req_alloc++; }
+    virtualdev_req() : err(no_error), is_read(false), isSyncCall(false), refcount(0) {}
 
     friend void intrusive_ptr_add_ref(virtualdev_req* req) { req->refcount.increment(1); }
     friend void intrusive_ptr_release(virtualdev_req* req) {
@@ -99,10 +95,7 @@ struct virtualdev_req {
 
     void inc_ref() { intrusive_ptr_add_ref(this); }
     void dec_ref() { intrusive_ptr_release(this); }
-    virtual ~virtualdev_req() {
-        version = 0;
-        req_dealloc++;
-    }
+    virtual ~virtualdev_req() { version = 0; }
 };
 
 [[maybe_unused]] static void virtual_dev_process_completions(int64_t res, uint8_t* cookie) {

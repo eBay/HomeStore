@@ -2,12 +2,21 @@ set (CPP_FLAGS "-faligned-new -Dlinux")
 set (CPP_WARNINGS "-Wall -Wextra -Werror -Wno-unused-parameter -Wno-unused-variable -Wno-empty-body -Wno-array-bounds")
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CPP_FLAGS} ${CPP_WARNINGS} -DRCU_SIGNAL")
 
+
+if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
+    message("Homestore Debug build")
+    add_compile_options(-D_DEBUG=1 -O0 -DDEBUG_RCU -D_PRERELEASE)
+else()
+    message("Release build")
+    add_compile_options(-DNDEBUG=1 -O3)
+endif()
+
 find_package(Boost 1.64 REQUIRED)
 find_package (Threads REQUIRED)
-
 find_library(LIB_AIO aio)
 find_library(LIB_DOUBLE_CONVERSION double-conversion)
 find_library(LIB_ISAL isal)
+
 set(COMMON_LIB_DEPS
       ${CONAN_LIBS}
       ${LIB_DOUBLE_CONVERSION}
@@ -28,14 +37,6 @@ add_subdirectory(error)
 add_subdirectory(main)
 add_subdirectory(threadpool)
 add_subdirectory(mapping)
-
-if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
-    message("Debug build")
-    add_compile_options(-D_DEBUG=1 -O0 -DDEBUG_RCU -D_PRERELEASE=1)
-else()
-    message("Release build")
-    add_compile_options(-DNDEBUG=1 -O3)
-endif()
 
 add_library(homestore
                   $<TARGET_OBJECTS:hs_main>

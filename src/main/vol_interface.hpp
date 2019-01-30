@@ -16,6 +16,7 @@
 #include <mutex>
 #include <utility/atomic_counter.hpp>
 #include "homeds/utility/useful_defs.hpp"
+#include <utility/obj_life_counter.hpp>
 #include <atomic>
 
 namespace homestore {
@@ -48,7 +49,7 @@ struct _counter_generator {
 };
 #define counter_generator _counter_generator::instance()
 
-struct vol_interface_req {
+struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
     std::vector< buf_info >     read_buf_list;
     sisl::atomic_counter< int > outstanding_io_cnt;
     sisl::atomic_counter< int > refcount;

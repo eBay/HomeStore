@@ -50,7 +50,7 @@ std::atomic<uint64_t> read_err_cnt;
 std::atomic<size_t> outstanding_ios;
 using log_level = spdlog::level::level_enum;
 SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write, iomgr, VMOD_BTREE_MERGE, VMOD_BTREE_SPLIT, varsize_blk_alloc,
-                 VMOD_VOL_MAPPING, VMOD_BTREE)
+                 VMOD_VOL_MAPPING, VMOD_BTREE, httpserver_lmod)
 
 /**************** Common class created for all tests ***************/
 

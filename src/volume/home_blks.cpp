@@ -511,6 +511,19 @@ void HomeBlks::init_thread() {
             create_blkstores();
         }
 
+        sisl::HttpServerConfig cfg;
+        cfg.is_tls_enabled = false;
+        cfg.bind_address = "0.0.0.0";
+        cfg.server_port = 5000;
+        cfg.read_write_timeout_secs = 10;
+
+        m_http_server = std::unique_ptr< sisl::HttpServer >(new sisl::HttpServer(cfg, {{
+                handler_info("/api/v1/version", HomeBlks::get_version, (void *)this),
+                handler_info("/api/v1/getMetrics", HomeBlks::get_metrics, (void *)this),
+                handler_info("/api/v1/getObjLife", HomeBlks::get_obj_life, (void *)this)
+        }}));
+        m_http_server->start();
+
         /* scan volumes */
         scan_volumes();
         return;
@@ -554,3 +567,24 @@ homeds::blob HomeBlks::at_offset(const boost::intrusive_ptr< BlkBuffer >& buf, u
 #ifndef NDEBUG
 void HomeBlks::print_tree(const VolumePtr& vol) { vol->print_tree(); }
 #endif
+
+void HomeBlks::get_version(sisl::HttpCallData cd) {
+    HomeBlks *hb = (HomeBlks *)(cd->cookie());
+    hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, "HomeBlks version: 1.0");
+}
+
+void HomeBlks::get_metrics(sisl::HttpCallData cd) {
+    HomeBlks *hb = (HomeBlks *)(cd->cookie());
+    std::string msg = sisl::MetricsFarm::getInstance().get_result_in_json_string();
+    hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, msg);
+}
+
+void HomeBlks::get_obj_life(sisl::HttpCallData cd) {
+    HomeBlks *hb = (HomeBlks *)(cd->cookie());
+    nlohmann::json j;
+    sisl::ObjCounterRegistry::foreach([&j](const std::string& name, int64_t created, int64_t alive) {
+        std::stringstream ss; ss << "created=" << created << " alive=" << alive;
+        j[name] = ss.str();
+    });
+    hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, j.dump());
+}

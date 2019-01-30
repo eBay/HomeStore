@@ -5,6 +5,7 @@
 #define OMSTORAGE_USEFUL_DEFS_HPP
 
 #include <chrono>
+#include <atomic>
 
 #if defined __GNUC__ || defined __llvm__
 #define likely(x) __builtin_expect(!!(x), 1)

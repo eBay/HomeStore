@@ -10,14 +10,12 @@
 #include "home_blks.hpp"
 #include <metrics/metrics.hpp>
 #include <utility/atomic_counter.hpp>
+#include <utility/obj_life_counter.hpp>
 #include <memory>
 
 #include "threadpool/thread_pool.h"
 using namespace std;
 
-#ifndef NDEBUG
-extern std::atomic< int > vol_req_alloc;
-#endif
 namespace homestore {
 
 #define INVALID_SEQ_ID UINT64_MAX
@@ -63,11 +61,7 @@ public:
     /* any derived class should have the virtual destructor to prevent
      * memory leak because pointer can be free with the base class.
      */
-    virtual ~volume_req() {
-#ifndef NDEBUG
-        vol_req_alloc--;
-#endif
-    }
+    virtual ~volume_req() = default;
 
     static volume_req_ptr cast(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req) {
         return boost::static_pointer_cast< volume_req >(bs_req);
@@ -79,7 +73,6 @@ public:
     volume_req() : is_read(false), num_mapping_update(0), parent_req(nullptr) {
 #ifndef NDEBUG
         done = false;
-        vol_req_alloc++;
 #endif
     }
 };
@@ -123,7 +116,7 @@ private:
     Volume(const vol_params& params);
     Volume(vol_sb* sb);
     void check_and_complete_req(const vol_interface_req_ptr& hb_req, const std::error_condition& err,
-                                uint32_t nasync_ios_completed, uint32_t nsync_ios_completed);
+                                bool call_completion_cb);
 
 public:
     template < typename... Args >
