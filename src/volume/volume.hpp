@@ -16,9 +16,6 @@
 #include "threadpool/thread_pool.h"
 using namespace std;
 
-#ifndef NDEBUG
-extern std::atomic< int > vol_req_alloc;
-#endif
 namespace homestore {
 
 #define INVALID_SEQ_ID UINT64_MAX
@@ -39,7 +36,7 @@ struct Free_Blk_Entry {
 struct volume_req;
 typedef boost::intrusive_ptr< volume_req > volume_req_ptr;
 
-struct volume_req : blkstore_req< BlkBuffer >, sisl::ObjLifeCounter< volume_req > {
+struct volume_req : blkstore_req< BlkBuffer > {
     uint64_t                      lba;
     int                           nlbas;
     bool                          is_read;
@@ -64,11 +61,7 @@ public:
     /* any derived class should have the virtual destructor to prevent
      * memory leak because pointer can be free with the base class.
      */
-    virtual ~volume_req() {
-#ifndef NDEBUG
-        vol_req_alloc--;
-#endif
-    }
+    virtual ~volume_req() = default;
 
     static volume_req_ptr cast(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req) {
         return boost::static_pointer_cast< volume_req >(bs_req);
@@ -80,7 +73,6 @@ public:
     volume_req() : is_read(false), num_mapping_update(0), parent_req(nullptr) {
 #ifndef NDEBUG
         done = false;
-        vol_req_alloc++;
 #endif
     }
 };

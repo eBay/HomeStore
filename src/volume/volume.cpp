@@ -12,16 +12,12 @@
 using namespace std;
 using namespace homestore;
 
-std::atomic< int > vol_req_alloc;
-
 #ifndef NDEBUG
 /* only for testing */
 bool vol_test_enable = false;
 #endif
 
 /* TODO: it will be more cleaner once statisitcs is integrated */
-std::atomic< int > homestore::req_alloc(0);
-std::atomic< int > homestore::req_dealloc(0);
 int                btree_buf_alloc;
 int                btree_buf_free;
 int                btree_buf_make_obj;
