@@ -123,7 +123,7 @@ private:
     Volume(const vol_params& params);
     Volume(vol_sb* sb);
     void check_and_complete_req(const vol_interface_req_ptr& hb_req, const std::error_condition& err,
-                                uint32_t nasync_ios_completed, uint32_t nsync_ios_completed);
+                                bool call_completion_cb);
 
 public:
     template < typename... Args >

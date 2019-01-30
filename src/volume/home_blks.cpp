@@ -575,6 +575,5 @@ void HomeBlks::get_version(sisl::HttpCallData cd) {
 void HomeBlks::get_metrics(sisl::HttpCallData cd) {
     HomeBlks *hb = (HomeBlks *)(cd->cookie());
     std::string msg = sisl::MetricsFarm::getInstance().get_result_in_json_string();
-    LOGINFO("Responding to get_metrics with message: {}", msg);
     hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, msg);
 }

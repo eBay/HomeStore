@@ -151,7 +151,7 @@ void Volume::process_metadata_completions(const volume_req_ptr& vreq) {
         }
     }
 
-    check_and_complete_req(parent_req, vreq->err, 1, 0);
+    check_and_complete_req(parent_req, vreq->err, true /* call_completion_cb */);
 }
 
 void Volume::process_vol_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req) {
@@ -164,7 +164,7 @@ volume_req_ptr Volume::create_vol_req(Volume* vol, const vol_interface_req_ptr& 
     vreq->is_read = hb_req->is_read;
     vreq->vol_instance = vol->shared_from_this();
 
-    hb_req->outstanding_io_cnt.increment();
+    hb_req->outstanding_io_cnt.increment(1);
     return vreq;
 }
 
@@ -179,7 +179,7 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
 
     // Shortcut to error completion
     if (vreq->err) {
-        return check_and_complete_req(parent_req, vreq->err, 1, 0);
+        return check_and_complete_req(parent_req, vreq->err, true /* call_completion_cb */);
     }
 
     HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, vreq->is_read, volume_data_read_latency, volume_data_write_latency,
@@ -205,7 +205,7 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
 #endif
         m_map->put(vreq, key, value);
     } else {
-        check_and_complete_req(parent_req, no_error, 1, 0);
+        check_and_complete_req(parent_req, no_error, true /* call_completion_cb */);
     }
 }
 
@@ -234,7 +234,7 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
     } catch (const std::exception& e) {
         assert(0);
         LOGERROR("{}", e.what());
-        check_and_complete_req(hb_req, std::make_error_condition(std::errc::device_or_resource_busy), 0, 1);
+        check_and_complete_req(hb_req, std::make_error_condition(std::errc::device_or_resource_busy), false);
         return hb_req->err;
     }
 
@@ -248,7 +248,10 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
     Clock::time_point data_io_start_time = Clock::now();
     auto sid = seq_Id.fetch_add(1, memory_order_seq_cst);
 
+    // An outside cover to ensure that all vol reqs are issued before any one vol request completion triggering
+    // vol_interface_req completion.
     hb_req->outstanding_io_cnt.set(1);
+
     try {
         for (i = 0; i < bid.size(); ++i) {
             std::deque< writeback_req_ptr > req_q;
@@ -271,13 +274,13 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
         }
 
         HISTOGRAM_OBSERVE(m_metrics, volume_pieces_per_write, bid.size());
-        check_and_complete_req(hb_req, no_error, 0, 1);
+        check_and_complete_req(hb_req, no_error, true /* call_completion_cb */);
         assert(lbas_snt == nlbas);
     } catch (const std::exception& e) {
         assert(0);
         LOGERROR("{}", e.what());
 
-        check_and_complete_req(hb_req, std::make_error_condition(std::errc::io_error), 0, 1);
+        check_and_complete_req(hb_req, std::make_error_condition(std::errc::io_error), false);
         return hb_req->err;
     }
     return no_error;
@@ -291,14 +294,13 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
  * Parameters are:
  * 1) hb_req: Request which is to be checked and completed
  * 2) Error: Any IO error condition. Note if there is an error, the request is immediately completed.
- * 3) nasync_ios_completion: Number of IOs completed asynchronously
- * 4) nsync_ios_completion: Number of sync io calls completed
+ * 3) call_completion_cb: Should we call the inbuilt completion as part of the complete_io
  */
 void Volume::check_and_complete_req(const vol_interface_req_ptr& hb_req, const std::error_condition& err,
-        uint32_t nasync_ios_completed, uint32_t nsync_ios_completed) {
+        bool call_completion) {
     // If there is error and request is not completed yet, we need to complete it now.
-    LOGTRACE("complete_io: req_id={}, err={}, async={}, sync={}, outstanding_io_cnt={}", hb_req->request_id, err.message(),
-            nasync_ios_completed, nsync_ios_completed, hb_req->outstanding_io_cnt.get());
+    LOGTRACE("complete_io: req_id={}, err={}, call_completion={}, outstanding_io_cnt={}", hb_req->request_id,
+            err.message(), call_completion, hb_req->outstanding_io_cnt.get());
 
     if (err) {
         // NOTE: We do not decrement the outstanding_io_cnt here, so that if there is any partial success,
@@ -306,18 +308,15 @@ void Volume::check_and_complete_req(const vol_interface_req_ptr& hb_req, const s
         if (hb_req->set_error(err)) {
             // Was not completed earlier, so complete the io
             COUNTER_INCREMENT_IF_ELSE(m_metrics, hb_req->is_read, volume_write_error_count, volume_read_error_count, 1);
-            if (nasync_ios_completed) { m_comp_cb(hb_req); }
+            if (call_completion) { m_comp_cb(hb_req); }
         } else {
             LOGINFO("Receiving completion on already completed request id={}", hb_req->request_id);
         }
     } else {
-        bool completed = (nasync_ios_completed || nsync_ios_completed) ?
-                hb_req->outstanding_io_cnt.decrement_testz(nasync_ios_completed + nsync_ios_completed) :
-                hb_req->outstanding_io_cnt.testz();
-        if (completed) {
+        if (hb_req->outstanding_io_cnt.decrement_testz(1)) {
             HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, hb_req->is_read, volume_read_latency, volume_write_latency,
                     get_elapsed_time_us(hb_req->io_start_time));
-            if (nasync_ios_completed) {
+            if (call_completion) {
                 LOGTRACE("complete_io: req_id={} DONE\n", hb_req->request_id);
                 m_comp_cb(hb_req);
             }
@@ -343,7 +342,7 @@ std::error_condition Volume::read_metadata(const vol_req_ptr& vreq) {
         if (err != homestore_error::lba_not_exist) {
             COUNTER_INCREMENT(m_metrics, volume_read_error_count, 1);
         }
-        check_and_complete_req(hb_req, err, 0, 1);
+        check_and_complete_req(hb_req, err, false /* call_completion_cb */);
         return err;
     }
     HISTOGRAM_OBSERVE(m_metrics, volume_map_read_latency, get_elapsed_time_us(vreq->parant_req->io_start_time));
@@ -384,11 +383,10 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
             if (err != homestore_error::lba_not_exist) {
                 COUNTER_INCREMENT(m_metrics, volume_read_error_count, 1);
             }
-            check_and_complete_req(hb_req, err, 0, 1);
+            check_and_complete_req(hb_req, err, false /* call_completion_cb */);
             return err;
         }
         HISTOGRAM_OBSERVE(m_metrics, volume_map_read_latency, get_elapsed_time_us(hb_req->io_start_time));
-
         Clock::time_point data_io_start_time = Clock::now();
 
         hb_req->read_buf_list.reserve(kvs.size());
@@ -431,11 +429,11 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
                 hb_req->read_buf_list.emplace_back(sz, offset, bbuf);
             }
         }
-        check_and_complete_req(hb_req, no_error, !sync, sync); // Atleast 1 metadata io is completed.
+        check_and_complete_req(hb_req, no_error, !sync /* call_completion_cb */); // Atleast 1 metadata io is completed.
     } catch (const std::exception& e) {
         assert(0);
         LOGERROR("{}", e.what());
-        check_and_complete_req(hb_req, std::make_error_condition(std::errc::device_or_resource_busy), 0, 1);
+        check_and_complete_req(hb_req, std::make_error_condition(std::errc::device_or_resource_busy), false);
         return hb_req->err;
     }
     return no_error;
