@@ -356,6 +356,12 @@ public:
     }
 
     virtual ~BtreeCrudTest() {
+#ifdef _PRERELEASE
+        LOGINFO("Final test metrics result = {}", m_bt->get_metrics_in_json().dump());
+        sisl::ObjCounterRegistry::foreach([](const std::string& name, int64_t created, int64_t alive) {
+            LOGINFO("ObjLife {}: created={} alive={}", name, created, alive);
+        });
+#endif
         delete(m_bt);
 
         for (auto e : m_entries) {
@@ -417,8 +423,8 @@ public:
         
         // BELOW code has some bug, hence commenting for now.
         // bug surfaces when we run memory sanitizer only.
-          uint32_t nopers = 0;
-          while (nopers++ < TOTAL_OPERS_PER_TEST) {
+        uint32_t nopers = 0;
+        while (nopers++ < TOTAL_OPERS_PER_TEST) {
             if (((rand() % 100) > get_pct) && (readable_count < count)) {
                 // Its an insert, do a put
                 test->put_nth_entry(start + readable_count++);
@@ -426,7 +432,6 @@ public:
                 test->get_nth_entry((rand() % readable_count) + start);
             }
         }
-        std::cout << "Btree Stats after insert: " << test->m_bt->get_metrics_in_json().dump() << "\n";
 
         // Cleanup the btree
         for (auto i = start; i < start + readable_count; i++) {
@@ -465,14 +470,9 @@ public:
 TEST_F(BtreeCrudTest, SimpleInsert) {
     run_in_parallel(NTHREADS, insert_and_get_thread, 0, TOTAL_ENTRIES, 50 /* get_pct */);
 
-#ifndef NDEBUG
-    std::cout << "Final test metrics result = " << m_bt->get_metrics_in_json().dump() << "\n";
-    sisl::ObjCounterRegistry::foreach([](const std::string& name, int64_t created, int64_t alive) {
-        std::cout << "ObjLife " << name << " created " << created << " alive " << alive << "\n";
-    });
-#endif
-    //EXPECT_EQ(metrics, 0u);
-    //EXPECT_EQ(m_bt->get_stats().get_interior_nodes_count(), 0u);
+    auto json = m_bt->get_metrics_in_json();
+    EXPECT_EQ(json["Counters"]["Btree object count"], 0u);
+    EXPECT_EQ(json["Counters"]["Btree Interior node count"], 0u);
 }
 
 TEST_F(BtreeCrudTest, SimpleQuery) {
@@ -481,14 +481,11 @@ TEST_F(BtreeCrudTest, SimpleQuery) {
         return (left->compare(right) < 0);
     });
     run_in_parallel(NTHREADS, preload_thread, 0, TOTAL_ENTRIES);
-    std::cout << "Btree Stats after preload: " << m_bt->get_metrics_in_json().dump() << "\n";
+    auto json = m_bt->get_metrics_in_json();
+    EXPECT_EQ(json["Counters"]["Btree object count"], TOTAL_ENTRIES);
 
     run_in_parallel(NTHREADS, query_thread, 0, TOTAL_ENTRIES, BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, 1000);
     run_in_parallel(NTHREADS, query_thread, 0, TOTAL_ENTRIES, BtreeQueryType::TREE_TRAVERSAL_QUERY, 1000);
-
-    std::cout << "Final test metrics result = " << m_bt->get_metrics_in_json().dump() << "\n";
-    //EXPECT_EQ(m_bt->get_stats().get_obj_count(), 0u);
-    //EXPECT_EQ(m_bt->get_stats().get_interior_nodes_count(), 0u);
 }
 
 SDS_OPTIONS_ENABLE(logging)
