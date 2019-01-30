@@ -1,5 +1,6 @@
 #include "homeds/memory/obj_allocator.hpp"
 #include <sds_logging/logging.h>
+#include <sds_options/options.h>
 
 SDS_LOGGING_INIT()
 

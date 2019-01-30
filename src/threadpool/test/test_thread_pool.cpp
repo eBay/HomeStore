@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 #include <sds_logging/logging.h>
+#include <sds_options/options.h>
 #include <chrono>
 #include <iostream>
 #include "../thread_pool.h"

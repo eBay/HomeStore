@@ -232,6 +232,10 @@ DecBNodeType(void) get_nth_key(int ind, BtreeKey *outkey, bool copy) const {
     return call_variant_method_const(this, get_nth_key, ind, outkey, copy);
 }
 
+DecBNodeType(void) set_nth_key(uint32_t ind, BtreeKey *key) {
+    call_variant_method(this, set_nth_key, ind, key);
+}
+
 DecBNodeType(void) get_nth_value(int ind, BtreeValue *outval, bool copy) const {
     return call_variant_method_const(this, get_nth_value, ind, outval, copy);
 }

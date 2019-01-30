@@ -288,7 +288,11 @@ protected:
         // Get the end index of the search range.
         auto end_result = find(range.extract_end_of_range(), nullptr, nullptr);
         end_ind = end_result.end_of_search_index;
-        if ((!end_result.found && is_leaf()) || !range.is_end_inclusive()) { end_ind--; }
+
+        if ((!end_result.found && is_leaf())//end range not found in leaf
+            || !range.is_end_inclusive() // end not inclusive
+            || (!is_leaf() && end_ind==(int)get_total_entries() && !has_valid_edge()))// end not found coz of invalid edge for internal node
+            end_ind--; 
         if(!is_leaf() && end_ind<start_ind) end_ind = start_ind;
         assert(is_leaf() || (!is_leaf() && start_ind<=end_ind));
 
@@ -455,7 +459,7 @@ protected:
 
         while ((end - start) > 1) {
             mid = start + (end - start) / 2;
-
+            assert(mid >=0 && mid < (int)get_total_entries());
             int x = range.is_simple_search() ?
                     to_variant_node_const()->compare_nth_key(*range.get_start_key(), mid) :
                     to_variant_node_const()->compare_nth_key_range(range, mid);

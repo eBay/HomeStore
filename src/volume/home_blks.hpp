@@ -13,6 +13,7 @@
 namespace homestore {
 
 #define VOL_MAX_IO_SIZE MEMVEC_MAX_IO_SIZE
+#define LBA_BITS 56
 
 /* 1 % of disk space is reserved for volume sb chunks. With 8k page it
  * will come out to be around 7 GB.

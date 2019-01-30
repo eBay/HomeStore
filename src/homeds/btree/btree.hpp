@@ -299,6 +299,9 @@ public:
                    boost::intrusive_ptr<btree_req_type> dependent_req, boost::intrusive_ptr<btree_req_type> cookie,
                    BtreeUpdateRequest<K, V> &bur) {
         V temp_v;
+        K sub_st(*(K*)bur.get_input_range().get_start_key()), sub_en(*(K*)bur.get_input_range().get_end_key());//cpy
+        bur.get_cb_param()->get_sub_range().set(sub_st, bur.get_input_range().is_start_inclusive(),
+                                                sub_en, bur.get_input_range().is_end_inclusive());
         put(k, v, put_type, dependent_req, cookie, &temp_v, &bur);
     }
     
@@ -328,11 +331,6 @@ retry:
         lock_node(root, acq_lock, &dependent_req_q);
         bool is_leaf = root->is_leaf();
 
-        if (bur != nullptr)
-            bur->get_cb_param()->get_sub_range().set(
-                *(bur->get_input_range().get_start_key()), bur->get_input_range().is_start_inclusive(),
-                *(bur->get_input_range().get_end_key()), bur->get_input_range().is_end_inclusive());
-
         retry_cnt++;
         if (root->is_split_needed(m_btree_cfg, k, v, &ind, put_type, bur)) {
             // Time to do the split of root.
@@ -352,6 +350,7 @@ retry:
         } else {
             boost::intrusive_ptr<btree_multinode_req> multinode_req;
             if(bur){
+                assert(bur->callback() && bur->get_cb_param());//TODO- support BUR without callback
                 multinode_req = new btree_multinode_req();
                 multinode_req->writes_pending.fetch_add(1, std::memory_order_acq_rel);
             }
@@ -579,7 +578,7 @@ retry:
     void print_tree() {
         m_btree_lock.read_lock();
         std::stringstream ss;
-        get_string_representation_pre_order_traversal(m_root_node, ss);
+        to_string(m_root_node, ss);
         LOGINFO("Pre order traversal of tree : <{}>", ss.str());
         m_btree_lock.unlock();
     }
@@ -587,7 +586,7 @@ retry:
     nlohmann::json get_metrics_in_json(bool updated = true) { return m_metrics->get_result_in_json(updated); }
 
 private:
-    void get_string_representation_pre_order_traversal(bnodeid_t bnodeid, std::stringstream& ss) {
+    void to_string(bnodeid_t bnodeid, std::stringstream &ss) {
         BtreeNodePtr             node = btree_store_t::read_node(m_btree_store.get(), bnodeid);
         homeds::thread::locktype acq_lock = homeds::thread::locktype::LOCKTYPE_READ;
         lock_node(node, acq_lock, nullptr);
@@ -599,10 +598,11 @@ private:
             while (i < node->get_total_entries()) {
                 BtreeNodeInfo p;
                 node->get(i, &p, false);
-                get_string_representation_pre_order_traversal(p.bnode_id(), ss);
+                to_string(p.bnode_id(),ss);
                 i++;
             }
-            get_string_representation_pre_order_traversal(node->get_edge_id(), ss);
+            if(node->get_edge_id().is_valid())
+                to_string(node->get_edge_id(),ss);
         }
         unlock_node(node, acq_lock);
     }
@@ -644,6 +644,14 @@ private:
                     lock_node(next_node, homeds::thread::locktype::LOCKTYPE_READ, nullptr);
                     unlock_node(my_node, homeds::thread::locktype::LOCKTYPE_READ);
                     my_node = next_node;
+                    if(my_node->get_total_entries()>0){
+                        K ekey;
+                        next_node->get_nth_key(0,&ekey,false);
+                        if(query_req.get_input_range().get_end_key()->compare(&ekey) < 0) {//early lookup end
+                            query_req.cursor().m_last_key = nullptr;
+                            break;
+                        }
+                    }
                 }
 
                 LOGTRACE("Query leaf node:\n {}", my_node->to_string());
@@ -704,8 +712,15 @@ private:
             my_node->get_all(query_req.this_batch_range(), query_req.get_batch_size() - (uint32_t)out_values.size(),
                              start_ind, end_ind, &match_kv);
 
-            if (query_req.callback())
-                assert(0); // TODO -support in future
+            if(query_req.callback()){
+                //TODO - support accurate sub ranges in future instead of setting input range
+                query_req.get_cb_param()->set_sub_range(query_req.get_input_range());
+                std::vector<std::pair<K, V>> result_kv;
+                query_req.callback()(match_kv, result_kv, query_req.get_cb_param());
+                auto ele_to_add =result_kv.size();
+                if(ele_to_add>0)
+                    out_values.insert(out_values.end(), result_kv.begin(), result_kv.begin()+ele_to_add);
+            }
             out_values.insert(std::end(out_values), std::begin(match_kv), std::end(match_kv));
 
             unlock_node(my_node, homeds::thread::locktype::LOCKTYPE_READ);
@@ -728,7 +743,22 @@ private:
             my_node->get(ind, &child_info, false);
             auto child_node = btree_store_t::read_node(m_btree_store.get(), child_info.bnode_id());
 
-            lock_node(child_node, homeds::thread::LOCKTYPE_READ, nullptr);
+            homeds::thread::locktype child_cur_lock = homeds::thread::LOCKTYPE_READ;
+            lock_node(child_node, child_cur_lock, nullptr);
+
+            if (child_info.bnode_id().m_pc_gen_flag != child_node->get_node_id().m_pc_gen_flag) {
+                std::deque<boost::intrusive_ptr<btree_req_type>> dependent_req_q;
+                if (upgrade_node(child_node, nullptr, child_cur_lock, LOCKTYPE_NONE, dependent_req_q) == false) {
+                    unlock_node(my_node, homeds::thread::LOCKTYPE_READ);
+                    unlock_node(child_node, child_cur_lock);
+                    return (false); //retry from root
+                }
+                if (child_info.bnode_id().m_pc_gen_flag != child_node->get_node_id().m_pc_gen_flag) //check again
+                    fix_pc_gen_mistmatch(my_node, child_node, ind, &dependent_req_q);
+                unlock_node(child_node, homeds::thread::LOCKTYPE_WRITE);
+                continue;
+            }
+
             if (ind == end_ret.end_of_search_index) {
                 // If we have reached the last index, unlock before traversing down, because we no longer need
                 // this lock. Holding this lock will impact performance unncessarily.
@@ -1021,7 +1051,7 @@ private:
                 assert(bur->callback() != nullptr); // TODO - range req without callback implementation
                 std::vector< std::pair< K, V > > match;
                 int                              start_ind = 0, end_ind = 0;
-                my_node->get_all(bur->get_input_range(), UINT32_MAX, start_ind, end_ind, &match);
+                my_node->get_all(bur->get_cb_param()->get_input_range(), UINT32_MAX, start_ind, end_ind, &match);
 
                 vector< pair< K, V > > replace_kv;
                 bur->callback()(match, replace_kv, bur->get_cb_param());
@@ -1030,11 +1060,11 @@ private:
                 for (auto pair : replace_kv) // insert is based on compare() of BtreeKey
                     my_node->insert(pair.first, pair.second);
                 multinode_req->writes_pending.fetch_add(1, std::memory_order_acq_rel);
-            } else {
+            } else
                 my_node->put(k, v, put_type, existing_val);
-            }
 
 #ifndef NDEBUG
+            //sorted check
             for(auto i=1u;i<my_node->get_total_entries();i++){
                 K curKey, prevKey;
                 my_node->get_nth_key(i-1,&prevKey,false);
@@ -1069,6 +1099,7 @@ private:
 
         bool unlocked_already = false;
         int  curr_ind = start_ind;
+        bool is_any_child_splitted = false;
         while (curr_ind <= end_ind) { // iterate all matched childrens
 
         //retry:
@@ -1093,38 +1124,65 @@ private:
                     unlock_node(child_node, child_cur_lock);
                     return (false); // retry from root
                 }
+                if (child_info.bnode_id().m_pc_gen_flag != child_node->get_node_id().m_pc_gen_flag) {//check again
                 fix_pc_gen_mistmatch(my_node, child_node, curr_ind, &dependent_req_q);
+                }
                 unlock_node(child_node, homeds::thread::LOCKTYPE_WRITE);
                 continue;
             }
-            K prev_key, curr_key, *prevkey_ptr = &prev_key, *currkey_ptr = &curr_key;
-            // calculate subrange
+
             if (bur != nullptr) { // calculate subrange
-                bool prev_inc = false, curr_inc = true;
-                if (curr_ind > 0)
-                    my_node->get_nth_key(curr_ind - 1, &prev_key, true);
-                else { // leftmost, input range is boundary
-                    prevkey_ptr = (K*)bur->get_input_range().get_start_key();
-                    prev_inc = bur->get_input_range().is_start_inclusive();
-                }
-                if (curr_ind < (int)my_node->get_total_entries())
-                    my_node->get_nth_key(curr_ind, &curr_key, true);
-                else { // edge, input range is boundary
-                    currkey_ptr = (K*)bur->get_input_range().get_end_key();
-                    curr_inc = bur->get_input_range().is_end_inclusive();
-                }
+                //find end of subrange
+                bool end_inc = true;
+                K end_key;
+                BtreeKey *end_key_ptr = &end_key;
+                if (curr_ind == (int) my_node->get_total_entries() && my_node->get_edge_id().is_valid()) {//edge
+                    end_key_ptr = const_cast<BtreeKey *>(bur->get_cb_param()->get_input_range().get_end_key());
+                    end_inc = bur->get_cb_param()->get_input_range().is_end_inclusive();
+                } else
+                    my_node->get_nth_key(curr_ind, end_key_ptr, false);
+
+                const_cast<BtreeKey *>(bur->get_cb_param()->get_sub_range().get_end_key())->copy_blob(
+                        end_key_ptr->get_blob());//copy
+                bur->get_cb_param()->get_sub_range().set_end_incl(end_inc);
+
+                //find start of subrange
+                if (curr_ind > 0) {
+                    K start_key;
+                    my_node->get_nth_key(curr_ind - 1, &start_key, true);
+                    const_cast<BtreeKey *>(bur->get_cb_param()->get_sub_range().get_start_key())->copy_blob(
+                            start_key.get_blob());//copy
+                    bur->get_cb_param()->get_sub_range().set_start_incl(false);
+                }//else no need to update, we carry fwd with start value from parent
+
 #ifndef NDEBUG
-                LOGDEBUG("Subrange set:{} {} {} {}", prevkey_ptr->to_string(),
-                        prev_inc, currkey_ptr->to_string(), curr_inc);
-                LOGDEBUG("start end current nodeid isvalidedge {} {} {} {} {}", 
-                        start_ind,end_ind,curr_ind,my_node->get_node_id().to_string(), 
-                        my_node->get_edge_id().is_valid());
+                LOGDEBUG("Subrange:s:{},e:{},c:{},nid:{},eidvalid?:{},sk:{},ek:{}", start_ind, end_ind, curr_ind,
+                         my_node->get_node_id().to_string(), my_node->get_edge_id().is_valid(),
+                         bur->get_cb_param()->get_sub_range().get_start_key()->to_string(),
+                         bur->get_cb_param()->get_sub_range().get_end_key()->to_string());
 #endif
-                bur->get_cb_param()->get_sub_range().set(*prevkey_ptr, prev_inc, *currkey_ptr, curr_inc);
             }
 
             if (child_node->is_split_needed(m_btree_cfg, k, v, &ind_hint, put_type, bur)) {
 
+                if(bur && is_any_child_splitted){ //spliting another child
+                    if(my_node->is_split_needed(m_btree_cfg, k, v, &ind_hint, put_type, bur)){
+                        if(curr_ind!=0){
+                            //update start key in cbparm.inp_range ,as its used throughout for put op, not bur.inp_range
+                            K resume_range_st_key;
+                            my_node->get_nth_key(curr_ind-1,&resume_range_st_key, true);//get prev key
+                            const_cast<BtreeKey *>(bur->get_cb_param()->get_input_range().get_start_key())->copy_blob(
+                                    resume_range_st_key.get_blob());
+                            bur->get_cb_param()->get_input_range().set_start_incl(false);
+                        }// in case curr_ind==0, and my node wants to split, we contine with inherited start
+
+                        //restart from root
+                        unlock_node(child_node, child_cur_lock);
+                        unlock_node(my_node, curlock);
+                        return (false);
+                    }
+                    btree_store_t::refresh_node(m_btree_store.get(), my_node, true, &dependent_req_q);
+                }
                 // Time to split the child, but we need to convert ours to write lock
                 if (upgrade_node(my_node, child_node, curlock, child_cur_lock, dependent_req_q) == false) {
                     return (false);
@@ -1144,7 +1202,6 @@ private:
                 ind_hint = -1; // Since split is needed, hint is no longer valid
 
                 if (split_key.compare(&k) < 0){//skip processing of left node after split
-                    LOGDEBUG("##########Skipping processing of current node after split {} {}", curr_ind, end_ind);
                     assert(curr_ind==start_ind);//only possible for start of range
                     curr_ind++;
                 }
@@ -1155,6 +1212,7 @@ private:
                 unlock_node(child_node, homeds::thread::LOCKTYPE_WRITE);
                 COUNTER_INCREMENT(m_metrics, btree_split_count, 1);
 
+                is_any_child_splitted=true;
                 continue;
             }
 
@@ -1311,7 +1369,7 @@ private:
          * we can safely say that write lock is taking without actually taking it because no
          * body can acccess this child node.
          */
-        btree_store_t::read_node_lock(m_btree_store.get(), child_node, true, &dependent_req_q);
+        btree_store_t::refresh_node(m_btree_store.get(), child_node, true, &dependent_req_q);
 
         assert(root->get_total_entries() == 0);
         split_node(root, child_node, root->get_total_entries(), &split_key, dependent_req_q);
@@ -1436,9 +1494,11 @@ private:
         child_node1->flip_pc_gen_flag();
 
         /* we should synchronously try to recover this node. While recovery, if panic happen before
-         * it is commited then we would have lost this node.
+         * it is commited then we would have lost this node. Sync write should not depend on any dependent
+         * requests.
          */
-        btree_store_t::write_node(m_btree_store.get(), child_node1, *dependent_req_q, NULL, true);
+        std::deque<boost::intrusive_ptr<btree_req_type>> temp_dependent_req_q(0);
+        btree_store_t::write_node(m_btree_store.get(), child_node1, temp_dependent_req_q, NULL, true);
         if (parent_sibbling != nullptr) {
             unlock_node(parent_sibbling, locktype::LOCKTYPE_READ);
         }
@@ -1464,12 +1524,23 @@ private:
 
         child_node2->set_next_bnode(child_node1->get_next_bnode());
         child_node1->set_next_bnode(child_node2->get_node_id());
-        child_node1->move_out_to_right_by_size(m_btree_cfg, child_node2, m_btree_cfg.get_split_size());
+        uint32_t child1_filled_size = m_btree_cfg.get_node_area_size() - child_node1->get_available_size(m_btree_cfg);
+        uint32_t res =child_node1->move_out_to_right_by_size(m_btree_cfg, child_node2,
+                        m_btree_cfg.get_split_size(child1_filled_size));
+        assert(res>0);//means cannot split entries
+        assert(child_node1->get_total_entries()>0);
         child_node1->flip_pc_gen_flag();
 
         // Update the existing parent node entry to point to second child ptr.
         ninfo.set_bnode_id(child_node2->get_node_id());
         parent_node->update(parent_ind, ninfo);
+
+        if(parent_node->get_total_entries()!=0 && parent_ind!=parent_node->get_total_entries()) {
+            //update child2 last key as parent key when parent has some entries(non-root) or split point is not edge
+            K child2_last_key;
+            child_node2->get_last_key(&child2_last_key);
+            parent_node->set_nth_key(parent_ind, &child2_last_key);
+        }
 
         // Insert the last entry in first child to parent node
         child_node1->get_last_key(out_split_key);
@@ -1675,8 +1746,8 @@ private:
     void lock_node(BtreeNodePtr node, homeds::thread::locktype type,
                    std::deque< boost::intrusive_ptr< btree_req_type > >* dependent_req_q) {
         node->lock(type);
-        btree_store_t::read_node_lock(m_btree_store.get(), node, ((type == locktype::LOCKTYPE_WRITE) ? true : false),
-                                      dependent_req_q);
+        btree_store_t::refresh_node(m_btree_store.get(), node,
+                                            ((type == locktype::LOCKTYPE_WRITE) ? true:false), dependent_req_q);
 #ifndef NDEBUG
         inc_lock_debug(node, type);
 #endif
@@ -1684,7 +1755,7 @@ private:
 
     void lock_node_upgrade(BtreeNodePtr node, std::deque< boost::intrusive_ptr< btree_req_type > >* dependent_req_q) {
         node->lock_upgrade();
-        btree_store_t::read_node_lock(m_btree_store.get(), node, true, dependent_req_q);
+        btree_store_t::refresh_node(m_btree_store.get(), node, true, dependent_req_q);
         node->lock_acknowledge();
     }
 

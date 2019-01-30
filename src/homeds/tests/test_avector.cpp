@@ -3,6 +3,7 @@
 //
 
 #include <iostream>
+#include <sds_options/options.h>
 #include <sds_logging/logging.h>
 #include "homeds/array/sparse_vector.hpp"
 

@@ -15,6 +15,7 @@ extern "C" {
 
 #include <iomgr/iomgr.hpp>
 #include <sds_logging/logging.h>
+#include <sds_options/options.h>
 
 #include "device/device.h"
 #include "device/virtual_dev.hpp"

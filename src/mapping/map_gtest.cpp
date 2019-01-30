@@ -1,9 +1,10 @@
-#include "mapping.hpp"
 #include <gtest/gtest.h>
 #include <fstream>
 #include <iostream>
 #include <thread>
 #include <sds_logging/logging.h>
+#include <sds_options/options.h>
+#include "mapping.hpp"
 
 SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write, iomgr, VMOD_BTREE_MERGE, VMOD_BTREE_SPLIT, varsize_blk_alloc,
                  VMOD_VOL_MAPPING, VMOD_BTREE, httpserver_lmod)
@@ -197,7 +198,7 @@ public:
 #ifndef NDEBUG
         volreq->vol_uuid = uuid;
 #endif
-        m_map->get(volreq, key, kvs);
+        m_map->get(volreq, kvs);
     }
 
     void verify_all() {
@@ -283,11 +284,13 @@ public:
             m_blk_id_arr[st] = bst;
 
 
-        //do sync read
-        std::vector<std::pair<MappingKey, MappingValue>> kvs;
-        read(lba, nlbas, kvs);
 
-        verify(kvs);
+//        //do sync read
+//        std::vector<std::pair<MappingKey, MappingValue>> kvs;
+//        read(lba, nlbas, kvs);
+//
+//        verify(kvs);
+
         release_lba_range_lock(lba, nlbas);
     }
 
@@ -343,5 +346,8 @@ int main(int argc, char *argv[]) {
 
     num_ios = SDS_OPTIONS["num_ios"].as<uint64_t>();
     num_threads = SDS_OPTIONS["num_threads"].as<uint64_t>();
+
+    num_ios/=num_threads;//distribute work equally
+    num_ios/=2;//half read/write
     return RUN_ALL_TESTS();
 }

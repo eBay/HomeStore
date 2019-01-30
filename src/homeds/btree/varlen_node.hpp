@@ -208,6 +208,7 @@ public:
         if (ind_e == (int)this->get_total_entries()) {
             assert(!this->is_leaf() && this->has_valid_edge());
 
+            //TODO-we should not use BtreeNodeINfo instead use abstract type
             BtreeNodeInfo last_1_val;
 
             // Set the last key/value as edge entry and by decrementing entry count automatically removed the last entry.
@@ -510,6 +511,14 @@ public:
         return get_nth_key_len(ind) + get_nth_value_len(ind);
     }
 
+    void set_nth_key(uint32_t ind, BtreeKey *key){
+        assert(ind < this->get_total_entries());
+        assert(key->get_blob().size == get_nth_key_len(ind));
+        V value;
+        uint8_t *obj = (uint8_t *)get_nth_obj(ind);
+        memcpy(obj,key->get_blob().bytes,key->get_blob().size);
+    }
+    
     void get_nth_key(int ind, BtreeKey *outkey, bool copy) const  {
         assert(ind < (int)this->get_total_entries());
 

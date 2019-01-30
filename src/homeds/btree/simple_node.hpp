@@ -228,6 +228,8 @@ public:
                          int *out_ind_hint, PutType &putType, BtreeUpdateRequest<K,V> *bur = nullptr) const {
         // TODO - add support for callback based internal/leaf nodes
         uint32_t alreadyFilledSize = cfg.get_node_area_size() - get_available_size(cfg);
+
+        // TODO - we should have sperate ideal fill/merge size configurations for internal nodes and leaf node
         return alreadyFilledSize + key.get_blob_size() + value.get_blob_size() >= cfg.get_ideal_fill_size();
     }
 
@@ -248,7 +250,6 @@ public:
 
     void get_nth_value(uint32_t ind, BtreeValue *outval, bool copy) const {
         assert(ind < this->get_total_entries());
-        uint32_t size = get_nth_obj_size(ind);
 
         homeds::blob b;
         b.bytes = (uint8_t *)(this->get_node_area() + (get_nth_obj_size(ind) * ind)) + get_obj_key_size(ind);
@@ -301,10 +302,10 @@ public:
         return (this->get_node_area_mutable() + (get_nth_obj_size(ind) * ind));
     }
 
-    void set_nth_key(uint32_t ind, const BtreeKey &k) {
+    void set_nth_key(uint32_t ind, BtreeKey *key) {
         uint8_t *entry = this->get_node_area_mutable() + (get_nth_obj_size(ind) * ind);
 
-        homeds::blob b = k.get_blob();
+        homeds::blob b = key->get_blob();
         memcpy((void *) entry, (void *) b.bytes, b.size);
     }
 
