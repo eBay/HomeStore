@@ -141,6 +141,7 @@ public:
     // All http handlers, TODO: Consider moving this to separate class
     static void get_version(sisl::HttpCallData cd);
     static void get_metrics(sisl::HttpCallData cd);
+    static void get_obj_life(sisl::HttpCallData cd);
 
 private:
     BlkId                             alloc_blk();

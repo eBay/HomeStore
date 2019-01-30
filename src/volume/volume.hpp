@@ -10,6 +10,7 @@
 #include "home_blks.hpp"
 #include <metrics/metrics.hpp>
 #include <utility/atomic_counter.hpp>
+#include <utility/obj_life_counter.hpp>
 #include <memory>
 
 #include "threadpool/thread_pool.h"
@@ -38,7 +39,7 @@ struct Free_Blk_Entry {
 struct volume_req;
 typedef boost::intrusive_ptr< volume_req > volume_req_ptr;
 
-struct volume_req : blkstore_req< BlkBuffer > {
+struct volume_req : blkstore_req< BlkBuffer >, sisl::ObjLifeCounter< volume_req > {
     uint64_t                      lba;
     int                           nlbas;
     bool                          is_read;
