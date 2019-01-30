@@ -73,15 +73,12 @@ class IOTest :  public ::testing::Test {
         uint64_t lba;
         uint32_t nblks;
         int fd;
-        uint8_t *buf;
         bool is_read;
         uint64_t cur_vol;
         req() {
-            buf = nullptr;
             req_cnt++;
         }
         virtual ~req() {
-            free(buf);
             req_free_cnt++;
         }   
     };  
@@ -256,14 +253,11 @@ public:
         lba = rand() % (max_vol_blks[cur % max_vols] - nblks);
         
         uint8_t *buf = nullptr;
-        uint8_t *buf1 = nullptr;
         uint64_t size = nblks * VolInterface::get_instance()->get_page_size(vol[cur]);
         auto ret = posix_memalign((void **) &buf, 4096, size);
         if (ret) {
             assert(0);
         }
-        ret = posix_memalign((void **) &buf1, 4096, size);
-        assert(!ret);
         /* buf will be owned by homestore after sending the IO. so we need to allocate buf1 which will be used to
          * write to a file after ios are completed.
          */
@@ -274,7 +268,6 @@ public:
         req->nblks = nblks;
         req->size = size;
         req->offset = lba * VolInterface::get_instance()->get_page_size(vol[cur]);
-        req->buf = buf;
         req->is_read = false;
         req->cur_vol = cur;
         ++outstanding_ios;
@@ -313,7 +306,6 @@ public:
         req->is_read = true;
         req->size = size;
         req->offset = lba * VolInterface::get_instance()->get_page_size(vol[cur]);
-        req->buf = buf;
         req->cur_vol = cur;
         outstanding_ios++;
         read_cnt++;
