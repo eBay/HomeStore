@@ -118,8 +118,7 @@ public:
 
     void start_homestore() {
         /* start homestore */
-            /* create files */
-        for (uint32_t i = 0; i < MAX_DEVICES; i++) {
+        for (uint32_t i = 0; i < dev_names.size(); i++) {
             dev_info temp_info;
             temp_info.dev_names = dev_names[i];
             device_info.push_back(temp_info);
@@ -229,6 +228,7 @@ public:
         }
 
         if (write_cnt == 0 && read_cnt == 0) {
+            LOGINFO("io started");
             start_time = Clock::now();
         }
         while (outstanding_ios < max_outstanding_ios) {
