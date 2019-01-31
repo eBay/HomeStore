@@ -85,6 +85,8 @@ public:
         REGISTER_COUNTER(volume_read_error_count, "Total Volume read error count");
         REGISTER_COUNTER(volume_write_error_count, "Total Volume write error count");
         REGISTER_COUNTER(volume_write_error_count, "Total Volume write error count");
+        REGISTER_COUNTER(volume_write_size_total, "Total Volume data size written");
+        REGISTER_COUNTER(volume_read_size_total, "Total Volume data size read");
 
         REGISTER_HISTOGRAM(volume_read_latency, "Volume overall read latency");
         REGISTER_HISTOGRAM(volume_write_latency, "Volume overall write latency");
@@ -94,6 +96,10 @@ public:
         REGISTER_HISTOGRAM(volume_map_write_latency, "Volume mapping write latency");
         REGISTER_HISTOGRAM(volume_blkalloc_latency, "Volume block allocation latency");
         REGISTER_HISTOGRAM(volume_pieces_per_write, "Number of individual pieces per write",
+                           HistogramBucketsType(LinearUpto64Buckets));
+        REGISTER_HISTOGRAM(volume_write_size_distribution, "Distribution of volume write sizes",
+                           HistogramBucketsType(ExponentialOfTwoBuckets));
+        REGISTER_HISTOGRAM(volume_read_size_distribution, "Distribution of volume read sizes",
                            HistogramBucketsType(LinearUpto64Buckets));
 
         register_me_to_farm();

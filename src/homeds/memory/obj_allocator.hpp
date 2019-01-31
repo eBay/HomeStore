@@ -10,6 +10,7 @@
 
 #include "homeds/memory/freelist_allocator.hpp"
 #include "homeds/utility/useful_defs.hpp"
+#include "homeds/utility/has_member.hpp"
 
 namespace homeds {
 
@@ -30,12 +31,13 @@ public:
         return ptr;
     }
 
-    static void deallocate(T *mem) {
+    static void deallocate(T *mem, size_t obj_size = sizeof(T)) {
         mem->~T();
-        get_obj_allocator()->m_allocator->deallocate((uint8_t *)mem, sizeof(T));
+        get_obj_allocator()->m_allocator->deallocate((uint8_t *)mem, obj_size);
     }
 
     static std::unique_ptr< ObjectAllocator< T, CacheCount > > obj_allocator;
+
 private:
     homeds::FreeListAllocator< FREELIST_CACHE_COUNT, sizeof(T) > *get_freelist_allocator() {
         return m_allocator.get();

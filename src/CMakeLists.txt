@@ -4,7 +4,7 @@ set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CPP_FLAGS} ${CPP_WARNINGS} -DRCU_SIGN
 
 
 if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
-    message("Homestore Debug build")
+    message("Debug build")
     add_compile_options(-D_DEBUG=1 -O0 -DDEBUG_RCU -D_PRERELEASE)
 else()
     message("Release build")

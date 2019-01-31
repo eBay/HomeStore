@@ -279,6 +279,11 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
         check_and_complete_req(hb_req, std::make_error_condition(std::errc::io_error), false);
         return hb_req->err;
     }
+
+    auto wr_size = m_sb->page_size * nlbas;
+    HISTOGRAM_OBSERVE(m_metrics, volume_write_size_distribution, wr_size);
+    COUNTER_INCREMENT(m_metrics, volume_write_size_total, wr_size);
+
     return no_error;
 }
 
@@ -425,6 +430,10 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
                 hb_req->read_buf_list.emplace_back(sz, offset, bbuf);
             }
         }
+        auto rd_size = m_sb->page_size * nlbas;
+        HISTOGRAM_OBSERVE(m_metrics, volume_read_size_distribution, rd_size);
+        COUNTER_INCREMENT(m_metrics, volume_read_size_total, rd_size);
+
         check_and_complete_req(hb_req, no_error, !sync /* call_completion_cb */); // Atleast 1 metadata io is completed.
     } catch (const std::exception& e) {
         assert(0);

@@ -78,6 +78,8 @@ public:
     virtual ~BtreeBuffer() {
         btree_buf_free++;
     }
+
+    virtual size_t get_your_size() const override { return sizeof(SSDBtreeNode); }
 };
 
 

@@ -34,6 +34,8 @@ public:
     static BlkBuffer *make_object() {
         return homeds::ObjectAllocator< BlkBuffer >::make_object();
     }
+
+    virtual size_t get_your_size() const override { return sizeof(BlkBuffer); }
 };
 
 }

@@ -15,6 +15,7 @@
 #include "cache.cpp"
 
 SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write);
+THREAD_BUFFER_INIT;
 
 using namespace std;
 
