@@ -128,7 +128,7 @@ public:
         pheader_copy_to->set_node_id(original_id);
     }
 
-    /* TODO: three copies huh.. ? it is not the most efficient way. We might need to change it later */ 
+    /* TODO: three copies huh.. ? it is not the most efficient way. We might need to change it later */
     static void swap_node(MemBtreeStore *impl, boost::intrusive_ptr<MemBtreeNode> node1, boost::intrusive_ptr<MemBtreeNode> node2) {
         /* copy the contents */
         int sizeOfTransientHeaders = sizeof(MemBtreeNode);

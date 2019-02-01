@@ -8,7 +8,7 @@
 #include "blk_allocator.h"
 #include "varsize_blk_allocator.h"
 
-SDS_LOGGING_INIT(VMOD_BTREE_MERGE, VMOD_BTREE_SPLIT, VMOD_BTREE, varsize_blk_alloc)
+SDS_LOGGING_INIT(btree_structures, btree_nodes, btree_generics, varsize_blk_alloc)
 THREAD_BUFFER_INIT;
 
 using namespace std;

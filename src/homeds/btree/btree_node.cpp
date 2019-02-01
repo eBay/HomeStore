@@ -107,6 +107,9 @@ DecBNodeType(uint32_t) get_available_size(const BtreeConfig &cfg) const {
 DecBNodeType(bnodeid_t) get_node_id() const {
     return call_variant_method_const(this, get_node_id);
 }
+DecBNodeType(uint64_t) get_node_id_int() const {
+    return call_variant_method_const(this, get_node_id_int);
+}
 DecBNodeType(void) set_node_id(bnodeid_t id) {
     call_variant_method(this, set_node_id,id);
 }

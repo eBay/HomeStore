@@ -157,6 +157,10 @@ protected:
         return m_pers_header.node_id;
     }
 
+    uint64_t get_node_id_int() const {
+        return m_pers_header.node_id.m_id;
+    }
+
     bool is_leaf() const {
         return m_pers_header.leaf;
         //return get_persistent_header()->leaf;

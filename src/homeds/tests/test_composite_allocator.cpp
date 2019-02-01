@@ -20,6 +20,7 @@
 #define THREADS      4
 
 SDS_LOGGING_INIT()
+THREAD_BUFFER_INIT;
 
 uint32_t glob_sizes[TOTAL_ALLOCS * THREADS];
 uint8_t *glob_ptr[TOTAL_ALLOCS * THREADS];
