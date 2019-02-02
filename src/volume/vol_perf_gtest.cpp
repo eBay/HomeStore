@@ -81,7 +81,7 @@ class IOTest :  public ::testing::Test {
         virtual ~req() {
             req_free_cnt++;
         }   
-    };  
+    }; 
 
 protected:
     std::shared_ptr<iomgr::ioMgr> iomgr_obj;

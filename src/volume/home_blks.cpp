@@ -427,11 +427,11 @@ void HomeBlks::create_metadata_blkstore(vdev_info_block* vb) {
         uint64_t size = (2 * m_cfg.max_cap) / 100;
         size = ALIGN_SIZE(size, HomeStoreConfig::phys_page_size);
         m_metadata_blk_store = new BlkStore< VdevFixedBlkAllocatorPolicy, BLKSTORE_BUFFER_TYPE >(
-            m_dev_mgr, m_cache, size, WRITEBACK_CACHE, 0, (char*)&blob, sizeof(blkstore_blob),
+            m_dev_mgr, m_cache, size, RD_MODIFY_WRITEBACK_CACHE, 0, (char*)&blob, sizeof(blkstore_blob),
             HomeStoreConfig::atomic_phys_page_size);
     } else {
         m_metadata_blk_store = new BlkStore< VdevFixedBlkAllocatorPolicy, BLKSTORE_BUFFER_TYPE >(
-            m_dev_mgr, m_cache, vb, WRITEBACK_CACHE, 0, HomeStoreConfig::atomic_phys_page_size);
+            m_dev_mgr, m_cache, vb, RD_MODIFY_WRITEBACK_CACHE, 0, HomeStoreConfig::atomic_phys_page_size);
         if (vb->failed) {
             m_vdev_failed = true;
             LOGINFO("metadata block store is in failed state");

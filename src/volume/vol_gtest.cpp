@@ -207,7 +207,7 @@ public:
         /* Create a volume */
         for (uint32_t i = 0; i < max_vols; i++) {
             vol_params params;
-            params.page_size = 4096 ;//((i > (max_vols/2)) ? 4096 : 8192);
+            params.page_size = ((i > (max_vols/2)) ? 4096 : 8192);
             params.size = max_vol_size;
             params.io_comp_cb = ([this](const vol_interface_req_ptr& vol_req)
                                  { process_completions(vol_req); });
@@ -338,7 +338,7 @@ public:
          */
         assert(buf != nullptr);
         assert(buf1 != nullptr);
-        populate_buf(buf, size);
+        populate_buf(buf, size, lba, cur);
        
         memcpy(buf1, buf, size);
         
@@ -364,9 +364,13 @@ public:
         LOGDEBUG("Wrote {} {} ",lba,nblks);
     }
    
-    void populate_buf(uint8_t *buf, uint64_t size) {
+    void populate_buf(uint8_t *buf, uint64_t size, uint64_t lba, int cur) {
         for (uint64_t write_sz = 0; (write_sz + sizeof(uint64_t)) < size; write_sz = write_sz + sizeof(uint64_t)) {
             *((uint64_t *)(buf + write_sz)) = random();
+            if (!(write_sz % VolInterface::get_instance()->get_page_size(vol[cur]))) {
+                *((uint64_t *)(buf + write_sz)) = lba;
+                ++lba;
+            }
         }
     }
 
@@ -380,7 +384,7 @@ public:
         uint64_t max_blks = max_io_size/VolInterface::get_instance()->get_page_size(vol[cur]);
 
         lba = rand() % (max_vol_blks[cur % max_vols] - max_blks);
-       nblks = rand() % max_blks;
+        nblks = rand() % max_blks;
         {
             std::unique_lock< std::mutex > lk(vol_mutex[cur]);
             /* check if someone is already doing writes/reads */ 
@@ -422,7 +426,6 @@ public:
     }
 
     void verify(const VolumePtr& vol, boost::intrusive_ptr<req> req) {
-#if 0
         int64_t tot_size = 0;
         for (auto &info : req->read_buf_list) {
             auto offset = info.offset;
@@ -452,7 +455,6 @@ public:
             }
         }
         assert(tot_size == req->size);
-#endif
     }
 
     void verify_vols() {
@@ -507,6 +509,7 @@ public:
             auto ret = pwrite(req->fd, req->buf, req->size, req->offset);
             assert(ret == req->size);
         }
+        assert(req->err == no_error);
 
         bool verify_io = false;
         
@@ -518,7 +521,7 @@ public:
         if ((req->is_read && req->err == no_error) || verify_io) {
             /* read from the file and verify it */
             auto ret = pread(req->fd, req->buf, req->size, req->offset);
-            if(ret != req->size){
+            if (ret != req->size) {
                 assert(0);
             }
             verify(vol[req->cur_vol],req);

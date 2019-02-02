@@ -440,7 +440,7 @@ public:
     VarsizeBlkAllocator(VarsizeBlkAllocConfig &cfg, bool init);
     virtual ~VarsizeBlkAllocator();
 
-    BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid, bool retry = true) override;
+    BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid, bool best_fit = false) override;
     BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints, 
                                  std::vector<BlkId> &out_blkid) override;
     void free(const BlkId &b) override;

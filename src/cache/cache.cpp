@@ -39,7 +39,7 @@ bool IntrusiveCache<K, V>::insert(V &v, V **out_ptr, const std::function<void(V 
             m_evictors[hash_code % EVICTOR_PARTITIONS]->upvote((*out_ptr)->get_evict_record_mutable());
         }
         (*out_ptr)->unlock();
-        LOGWARNMOD(cache_vmod_write, "Following entry exist in cache already: {}", (*out_ptr)->to_string());
+        LOGDEBUGMOD(cache_vmod_write, "Following entry exist in cache already: {}", (*out_ptr)->to_string());
         return false;
     }
 

@@ -136,7 +136,7 @@ void VarsizeBlkAllocator::allocator_state_machine() {
     }
 }
 
-#define MAX_RETRY_CNT 5
+#define MAX_RETRY_CNT 1000
 
 bool
 VarsizeBlkAllocator::is_blk_alloced(BlkId &b) {
@@ -177,23 +177,17 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks,
 
     while (blks_alloced != nblks && retry_cnt < MAX_RETRY_CNT) {
         BlkId blkid;
-        if (alloc(blks_rqstd, hints, &blkid, ((retry_cnt == MAX_RETRY_CNT -1) ? true:false)) != BLK_ALLOC_SUCCESS) {
-            if (blks_rqstd == 1 && retry_cnt == 0) {
-                continue;
-            } else if (blks_rqstd == hints.multiplier || hints.is_contiguous) {
-                break;
-            }
-            blks_rqstd = ALIGN_SIZE((blks_rqstd / 2), hints.multiplier);
-            retry_cnt++;
-            continue;
+        
+        if (alloc(blks_rqstd, hints, &blkid, true) != BLK_ALLOC_SUCCESS) {
+            /* It should never happen. It means we are running out of space */
+            assert(0);
         }
-        blks_alloced += blks_rqstd;
+        blks_alloced += blkid.get_nblks();
         assert(blks_alloced % hints.multiplier == 0);
-        if (blks_rqstd > nblks - blks_alloced) {
-            blks_rqstd = nblks - blks_alloced;
-        }
-        assert(blks_rqstd % hints.multiplier == 0);
+
+        blks_rqstd = nblks - blks_alloced;
         out_blkid.push_back(blkid);
+        retry_cnt++;
     }
 #ifndef NDEBUG
     if(blks_alloced != nblks)
@@ -212,7 +206,8 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks,
     return BLK_ALLOC_SUCCESS;
 }
 
-BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid, bool retry) {
+BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid, 
+                                            bool best_fit) {
     BlkAllocStatus ret = BLK_ALLOC_SUCCESS;
     bool found = false;
 
@@ -222,13 +217,33 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
     VarsizeAllocCacheEntry actual_entry;
 
     homeds::btree::BtreeSearchRange regex(start_entry, true, /* start_incl */ end_entry, false, /* end incl */
-                                        homeds::btree::_MultiMatchSelector::SECOND_TO_THE_LEFT);
+                                        (best_fit ? 
+                                         homeds::btree::_MultiMatchSelector::BEST_FIT_TO_CLOSEST :
+                                         homeds::btree::_MultiMatchSelector::SECOND_TO_THE_LEFT));
+    
     homeds::btree::EmptyClass dummy_val;
     int attempt = 1;
     while (true) {
         found = m_blk_cache->remove_any(regex, &actual_entry, &dummy_val);
         if (found) {
-            break;
+            if (best_fit) {
+                if (actual_entry.get_blk_count() < hints.multiplier) {
+                    /* it should be atleast equal to hints multiplier. If not then wait for cache to populate */
+                    VarsizeAllocCacheEntry excess_entry;
+                    homeds::btree::EmptyClass dummy;
+                    uint64_t blknum = actual_entry.get_blk_num();
+                    gen_cache_entry(blknum, actual_entry.get_blk_count(), &excess_entry);
+                    m_blk_cache->put(excess_entry, dummy, homeds::btree::INSERT_ONLY_IF_NOT_EXISTS);
+                } else {
+                    /* trigger blk allocator to populate cache */
+                    if (actual_entry.get_blk_count() != nblks) {
+                        request_more_blks(nullptr);
+                    }
+                    break;
+                }
+            } else {
+                break;
+            }
         }
 
         // Wait for cache to refill and then retry original request
@@ -246,12 +261,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
                     attempt, (uint32_t)nblks, hints.desired_temp);
         }
 
-        if (retry || m_cache_n_entries == 0) {
-            request_more_blks_wait(nullptr);
-        } else {
-            request_more_blks(nullptr);
-            break;
-        }
+        request_more_blks_wait(nullptr);
         attempt++;
     }
 
@@ -259,7 +269,13 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
         return BLK_ALLOC_SPACEFULL;
     }
 
+    /* get excess blks */
     int excess_nblks = actual_entry.get_blk_count() - nblks;
+    if (excess_nblks < 0) {
+        assert(best_fit);
+        /* it has to be multiplier of hints */
+        excess_nblks = actual_entry.get_blk_count() % hints.multiplier;
+    }
     assert(excess_nblks >= 0);
 
     auto slab_index = get_config().get_slab(actual_entry.get_blk_count()).first;
@@ -271,20 +287,21 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
        In case one of them is part of less number of pages than others, it
        is better to pick the lesser ones.
      */
-    if (excess_nblks) {
+    uint64_t alloc_blks = actual_entry.get_blk_count() - excess_nblks;
+    if (excess_nblks > 0) {
         uint64_t blknum = actual_entry.get_blk_num();
         int leading_npages =
-            (int)(blknum_to_phys_pageid(blknum + nblks) - actual_entry.get_phys_page_id());
+            (int)(blknum_to_phys_pageid(blknum + alloc_blks) - actual_entry.get_phys_page_id());
         int trailing_npages =
             (int)(blknum_to_phys_pageid(blknum + actual_entry.get_blk_count()) -
                                         blknum_to_phys_pageid(blknum + excess_nblks));
 
         VarsizeAllocCacheEntry excess_entry;
         if (leading_npages <= trailing_npages) {
-            out_blkid->set(blknum, nblks);
-            gen_cache_entry(blknum + nblks, (uint32_t)excess_nblks, &excess_entry);
+            out_blkid->set(blknum, alloc_blks);
+            gen_cache_entry(blknum + alloc_blks, (uint32_t)excess_nblks, &excess_entry);
         } else {
-            out_blkid->set(blknum + excess_nblks, nblks);
+            out_blkid->set(blknum + excess_nblks, alloc_blks);
             gen_cache_entry(blknum, (uint32_t)excess_nblks, &excess_entry);
         }
         homeds::btree::EmptyClass dummy;
@@ -294,7 +311,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
         m_slab_entries[slab_index]._a.fetch_add(excess_nblks, std::memory_order_acq_rel);
 
     } else {
-        out_blkid->set(actual_entry.get_blk_num(), nblks);
+        out_blkid->set(actual_entry.get_blk_num(), alloc_blks);
     }
 
 #ifndef NDEBUG
@@ -304,7 +321,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
     portion->unlock();
 #endif
 
-    m_cache_n_entries.fetch_sub(nblks, std::memory_order_acq_rel);
+    m_cache_n_entries.fetch_sub(alloc_blks, std::memory_order_acq_rel);
     return ret;
 }
 
@@ -333,6 +350,7 @@ void VarsizeBlkAllocator::fill_cache(BlkAllocSegment *seg) {
         auto max_free_blks = m_segments[0]->get_free_blks();
         seg = m_segments[0];
         for (auto i = 1U; i < m_segments.size(); i++) {
+    std::atomic<uint8_t> m_refcnt; 
             auto free_blks = m_segments[i]->get_free_blks();
             if (free_blks > max_free_blks) {
                 seg = m_segments[i];

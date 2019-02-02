@@ -18,7 +18,6 @@ using namespace homeds::btree;
 
 #define LBA_MASK 0xFFFFFFFFFFFF
 #define CS_ARRAY_STACK_SIZE 256 //equals 2^N_LBA_BITS //TODO - put static assert
-#define MAX_NUM_LBA ((1 << NBLKS_BITS) - 1)
 namespace homestore {
 
     struct LbaId {
@@ -787,7 +786,8 @@ namespace homestore {
                         std::this_thread::sleep_for(std::chrono::seconds(10));
                         assert(0);
                     }
-                    last_bid_offset += values[i].first.get_n_lba();
+                    last_bid_offset += values[i].first.get_n_lba() * 
+                                        (m_vol_page_size / HomeBlks::instance()->get_data_pagesz());
                 }
                 last_slba = values[i].first.end() + 1;
                 i++;

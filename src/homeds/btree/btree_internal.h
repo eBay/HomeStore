@@ -227,6 +227,7 @@ enum _MultiMatchSelector {
     LEFT_MOST,
     SECOND_TO_THE_LEFT,
     RIGHT_MOST,
+    BEST_FIT_TO_CLOSEST
 };
 
 class BtreeSearchRange {

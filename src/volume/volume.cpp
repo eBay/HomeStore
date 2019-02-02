@@ -185,10 +185,11 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
 
         MappingKey                                  key(vreq->lba, vreq->nlbas);
         std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;
+        uint64_t offset = 0;
 
-        // TODO - put actual checksum here @sounak
-        for (auto i = 0ul, j = vreq->lba; j < vreq->lba + vreq->nlbas; i++, j++) {
-            carr[i] = j % 65000;
+        for (int i = 0; i < vreq->nlbas; i++) {
+            carr[i] = crc16_t10dif(init_crc_16, vreq->bbuf->at_offset(offset).bytes, get_page_size());
+            offset += get_page_size();
         }
 
         vreq->op_start_time = Clock::now();
@@ -201,6 +202,15 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
 #endif
         m_map->put(vreq, key, value);
     } else {
+        std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;
+        uint64_t offset = 0;
+        for (int i = 0; i < vreq->nlbas; i++) {
+            carr[i] = crc16_t10dif(init_crc_16, vreq->bbuf->at_offset(vreq->read_buf_offset + offset).bytes, 
+                                   get_page_size());
+            offset += get_page_size();
+            assert(vreq->checksum[i] == carr[i]);
+        }
+        
         check_and_complete_req(parent_req, no_error, true /* call_completion_cb */);
     }
 }
@@ -409,20 +419,31 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
 
 #ifndef NDEBUG
                 // TODO - at this point, ve has checksum array to verify against later @sounak
-                for (auto i = 0ul; i < kv.first.get_n_lba(); i++, cur_lba++) {
-                    if (ve.get_checksum_at(i) != cur_lba % 65000)
-                        LOGDEBUG("Checksum mismatch ,{},{}", kv.first.to_string(), kv.second.to_string());
+                for (auto i = 0ul; i < kv.first.get_n_lba(); i++) {
+                    child_vreq->checksum[i] = ve.get_checksum_at(i);
                 }
 #endif
 
                 auto sz = get_page_size() * kv.first.get_n_lba();
                 auto offset = HomeBlks::instance()->get_data_pagesz() * ve.get_blk_offset();
+                child_vreq->read_buf_offset = offset;
                 boost::intrusive_ptr< BlkBuffer > bbuf =
                     m_data_blkstore->read(ve.get_blkId(), offset, sz,
                                           boost::static_pointer_cast< blkstore_req< BlkBuffer > >(child_vreq));
 
                 // TODO: @hkadayam There is a potential for race of read_buf_list getting emplaced after completion
                 hb_req->read_buf_list.emplace_back(sz, offset, bbuf);
+                if (sync) {
+                    std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;
+                    uint64_t offset = 0;
+                    for (int i = 0; i < child_vreq->nlbas; i++) {
+                        carr[i] = crc16_t10dif(init_crc_16, 
+                                    child_vreq->bbuf->at_offset(child_vreq->read_buf_offset + offset).bytes,
+                                    get_page_size());
+                        offset += get_page_size();
+                        assert(child_vreq->checksum[i] == carr[i]);
+                    }
+                }
             }
         }
         check_and_complete_req(hb_req, no_error, !sync /* call_completion_cb */); // Atleast 1 metadata io is completed.

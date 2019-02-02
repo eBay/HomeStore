@@ -112,7 +112,7 @@ public:
     virtual BlkAllocStatus alloc(BlkId &out_blkid) = 0;
     virtual BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints, 
                                  std::vector<BlkId> &out_blkid) = 0;
-    virtual BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid, bool retry = true) = 0;
+    virtual BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid, bool best_fit = false) = 0;
     virtual bool is_blk_alloced(BlkId &in_bid) = 0;
     virtual void free(const BlkId &id) = 0;
     virtual std::string to_string() const = 0;
@@ -190,7 +190,7 @@ public:
     explicit FixedBlkAllocator(BlkAllocConfig &cfg, bool init);
     ~FixedBlkAllocator() override;
 
-    BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid, bool retry = true) override;
+    BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid, bool best_fit = false) override;
     void free(const BlkId &b) override;
     std::string to_string() const override;
     BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints, 

@@ -18,6 +18,7 @@ using namespace std;
 
 namespace homestore {
 
+#define MAX_NUM_LBA ((1 << NBLKS_BITS) - 1)
 #define INVALID_SEQ_ID UINT64_MAX
 class mapping;
 enum vol_state;
@@ -45,6 +46,8 @@ struct volume_req : blkstore_req< BlkBuffer > {
     uint64_t                      seqId;
     uint64_t                      lastCommited_seqId;
     Clock::time_point             op_start_time;
+    uint16_t                      checksum[MAX_NUM_LBA];
+    uint64_t                      read_buf_offset;
 
     /* number of times mapping table need to be updated for this req. It can
      * break the ios update in mapping btree depending on the key range.
