@@ -271,7 +271,16 @@ void DeviceManager::add_devices(std::vector< dev_info > &devices, bool is_init) 
 /* Note: Whosoever is calling this function should take the mutex. We don't allow multiple reads */
 void DeviceManager::read_info_blocks(uint32_t dev_id) {
     m_pdevs[dev_id]->read_dm_chunk(m_chunk_memory, m_dm_info_size);
-    
+
+    auto dm = (dm_info *) m_chunk_memory;
+    assert( dm->magic == MAGIC );
+#ifndef NO_CHECKSUM
+    assert( dm->checksum ==
+            crc16_t10dif (  init_crc_16,
+                            (const unsigned char *)(m_chunk_memory + DM_PAYLOAD_OFFSET),
+                            m_dm_info_size - DM_PAYLOAD_OFFSET ));
+#endif
+
     assert(m_vdev_hdr->magic == MAGIC);
     assert(m_chunk_hdr->magic == MAGIC);
     assert(m_pdev_hdr->magic == MAGIC);
@@ -290,6 +299,14 @@ void DeviceManager::write_info_blocks() {
         return;
     }
     m_gen_cnt++;
+
+#ifndef NO_CHECKSUM
+    m_dm_info->checksum = crc16_t10dif (
+                            init_crc_16,
+                            (const unsigned char *)(m_chunk_memory + DM_PAYLOAD_OFFSET),
+                            m_dm_info_size - DM_PAYLOAD_OFFSET );
+#endif
+
     for(uint32_t i = 0; i < m_pdev_hdr->num_phys_devs; i++) {
         m_pdevs[i]->write_dm_chunk(m_gen_cnt, m_chunk_memory, m_dm_info_size);
     }

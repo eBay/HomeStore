@@ -33,6 +33,7 @@ std::vector<std::string> dev_names;
 uint64_t max_vols = 1;
 uint64_t run_time;
 uint64_t num_threads;
+uint64_t queue_depth;
 uint32_t read_p;
 uint32_t io_size;
 bool is_file = false;
@@ -40,7 +41,7 @@ constexpr auto Ki = 1024ull;
 constexpr auto Mi = Ki * Ki;
 constexpr auto Gi = Ki * Mi;
 constexpr uint64_t max_io_size = 1 * Mi;
-uint64_t max_outstanding_ios = 64u;
+uint64_t max_outstanding_ios;
 uint64_t max_disk_capacity;
 uint64_t match_cnt = 0;
 uint64_t cache_size = 0;
@@ -389,6 +390,7 @@ TEST_F(IOTest, normal_random_io_test) {
 SDS_OPTION_GROUP(perf_test_volume, 
 (run_time, "", "run_time", "run time for io", ::cxxopts::value<uint32_t>()->default_value("30"), "seconds"),
 (num_threads, "", "num_threads", "num threads for io", ::cxxopts::value<uint32_t>()->default_value("8"), "number"),
+(queue_depth, "", "queue_depth", "io queue depth per thread", ::cxxopts::value<uint32_t>()->default_value("8"), "number"),
 (read_percent, "", "read_percent", "read in percentage", ::cxxopts::value<uint32_t>()->default_value("0"), "percentage"),
 (device_list, "", "device_list", "List of device paths", ::cxxopts::value<std::vector<std::string>>(), "path [...]"),
 (io_size, "", "io_size", "size of io in KB", ::cxxopts::value<uint32_t>()->default_value("8"), "size of io in KB"),
@@ -408,7 +410,8 @@ const char* __asan_default_options() {
 
 /* We can run this target either by using default options which run the normal io tests or by setting different options.
  * Format is
- *   1. ./perf_test_volume --gtest_filter=*random* --run_time=120 --num_threads=16, --device_list=file1 --device_list=file2 --io_size=8
+ *   1. ./perf_test_volume --gtest_filter=*random* --run_time=120 --num_threads=16 --queue_depth 8
+ *                         --device_list=file1 --device_list=file2 --io_size=8
  */
 int main(int argc, char *argv[]) {
     ::testing::GTEST_FLAG(filter) = "*normal_random*";
@@ -419,6 +422,8 @@ int main(int argc, char *argv[]) {
 
     run_time = SDS_OPTIONS["run_time"].as<uint32_t>();
     num_threads = SDS_OPTIONS["num_threads"].as<uint32_t>();
+    queue_depth = SDS_OPTIONS["queue_depth"].as<uint32_t>();
+    max_outstanding_ios = num_threads * queue_depth;
     read_p = SDS_OPTIONS["read_percent"].as<uint32_t>();
     io_size = SDS_OPTIONS["io_size"].as<uint32_t>();
     dev_names = SDS_OPTIONS["device_list"].as<std::vector<std::string>>();

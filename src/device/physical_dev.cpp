@@ -224,7 +224,6 @@ inline void PhysicalDev::write_superblock() {
 
 inline void PhysicalDev::read_superblock() {
     memset(m_super_blk, 0, SUPERBLOCK_SIZE);
-
     ssize_t bytes = pread(m_devfd, m_super_blk, SUPERBLOCK_SIZE, 0);
     if (unlikely((bytes < 0) || ((size_t)bytes != SUPERBLOCK_SIZE))) {
         throw std::system_error(errno, std::system_category(), "error while reading a superblock" + get_devname());
