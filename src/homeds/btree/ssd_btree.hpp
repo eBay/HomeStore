@@ -23,9 +23,6 @@
 #include "btree_node.h"
 #include "physical_node.hpp"
 
-extern int btree_buf_alloc;
-extern int btree_buf_free;
-extern int btree_buf_make_obj;
 namespace homeds { namespace btree {
 
 #define SSDBtreeNode  BtreeNode<SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize, homestore::writeback_req>
@@ -62,21 +59,15 @@ public:
 #ifndef NDEBUG
 #endif
     static BtreeBuffer *make_object() {
-        btree_buf_make_obj++;
         return homeds::ObjectAllocator< SSDBtreeNode >::make_object();
     }
     BtreeBuffer() {
-        btree_buf_alloc++;
 #ifndef NDEBUG
         is_btree = true;
         recovered = false;
 #endif
-        if (btree_buf_alloc > btree_buf_make_obj) {
-            assert(0);
-        }
     }
     virtual ~BtreeBuffer() {
-        btree_buf_free++;
     }
 };
 

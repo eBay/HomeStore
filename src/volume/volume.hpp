@@ -146,6 +146,7 @@ public:
     void get_allocated_blks();
     void process_metadata_completions(const volume_req_ptr& wb_req);
     void process_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
+    void recovery_start();
 
     uint64_t get_elapsed_time(Clock::time_point startTime);
     void     attach_completion_cb(const io_comp_callback& cb);

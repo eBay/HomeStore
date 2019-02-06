@@ -15,7 +15,7 @@
 namespace homestore {
 class ThreadPool {
 /* TODO will change it to 8 when matrix bug is fixed */
-#define MAX_NUM_CONCURRENT_THREADS                     1    // TODO: Make this value configurable
+#define MAX_NUM_CONCURRENT_THREADS                     8    // TODO: Make this value configurable
 #define HIGH_WATERMARK_FACTOR                          4 
   private:
     class ThrdTaskBase {

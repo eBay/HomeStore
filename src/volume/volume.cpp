@@ -17,11 +17,6 @@ using namespace homestore;
 bool vol_test_enable = false;
 #endif
 
-/* TODO: it will be more cleaner once statisitcs is integrated */
-int                btree_buf_alloc;
-int                btree_buf_free;
-int                btree_buf_make_obj;
-
 namespace homestore {
     void intrusive_ptr_add_ref(homestore::BlkBuffer *buf) {
         intrusive_ptr_add_ref((homestore::WriteBackCacheBuffer <BlkId> *) buf);
@@ -65,8 +60,7 @@ Volume::Volume(vol_sb* sb) : m_sb(sb), m_metrics(sb->vol_name) {
         m_map = new mapping(m_sb->size, m_sb->page_size,
                             (std::bind(&Volume::process_metadata_completions, this, std::placeholders::_1)));
         m_sb->btree_sb = m_map->get_btree_sb();
-        m_state = vol_state::DEGRADED;
-        m_sb->state = m_state;
+        m_sb->state = vol_state::DEGRADED;;
         HomeBlks::instance()->vol_sb_write(m_sb);
     } else {
         m_map = new mapping(m_sb->size, m_sb->page_size, m_sb->btree_sb,
@@ -74,14 +68,17 @@ Volume::Volume(vol_sb* sb) : m_sb(sb), m_metrics(sb->vol_name) {
                                  std::placeholders::_1)),
                       (std::bind(&Volume::alloc_blk_callback, this, std::placeholders::_1, 
                                 std::placeholders::_2, std::placeholders::_3))); 
+        m_sb->state = vol_state::ONLINE;
     }
     seq_Id = 3;
     alloc_single_block_in_mem();
 
     m_data_blkstore = HomeBlks::instance()->get_data_blkstore();
     m_state = vol_state::MOUNTING;
-    m_state = m_sb->state;
+}
 
+/* it should be called during recovery */
+void Volume::recovery_start() {
     vol_scan_alloc_blks();
 }
 
@@ -107,16 +104,10 @@ void Volume::alloc_blk_callback(struct BlkId bid, size_t offset_size, size_t siz
 
 void 
 Volume::vol_scan_alloc_blks() {
-/* TODO: will enable it once bug in matrix is fixed */
-#if 0
     std::vector<ThreadPool::TaskFuture<void>>   task_result;
-    task_result.push_back(submit_job([=](){
-                do_work();
+    task_result.push_back(submit_job([this](){
+                this->get_allocated_blks();
                 }));
-#endif
-
-    get_allocated_blks();
-    // if needed, we can return task_result[0] to caller, which for now seems not necessary;
     return;
 }
 
@@ -265,8 +256,8 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
             volume_req_ptr vreq = Volume::create_vol_req(this, hb_req);
             vreq->bid = bid[i];
             vreq->lba = lba + lbas_snt;
-            vreq->seqId = sid;              // TODO - actual seqId/lastCommit seq id should be from vol interface req
-            vreq->lastCommited_seqId = sid; // keeping only latest version always
+            vreq->seqId = INVALID_SEQ_ID; // TODO - actual seqId/lastCommit seq id should be from vol interface req
+            vreq->lastCommited_seqId = INVALID_SEQ_ID; // keeping only latest version always
             vreq->op_start_time = data_io_start_time;
 
             assert((bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) % m_sb->page_size) == 0);
@@ -372,8 +363,8 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
         volume_req_ptr vreq = Volume::create_vol_req(this, hb_req);
         vreq->lba = lba;
         vreq->nlbas = nlbas;
-        vreq->seqId = sid;
-        vreq->lastCommited_seqId = sid; // read only latest value
+        vreq->seqId = INVALID_SEQ_ID;
+        vreq->lastCommited_seqId = INVALID_SEQ_ID; // read only latest value
 
         std::vector< std::pair< MappingKey, MappingValue > > kvs;
 

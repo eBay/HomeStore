@@ -25,6 +25,7 @@ TARGET_LINK_LIBRARIES(test_volume ${Boost_LIBRARIES})
 TARGET_LINK_LIBRARIES(perf_test_volume ${Boost_LIBRARIES})
 
 file(COPY vol_test.py DESTINATION ${CMAKE_BINARY_DIR}/bin)
-#add_test(NAME TestVol COMMAND test_volume)
+add_test(NAME TestVol COMMAND test_volume)
+#add_test(NAME RecoveryVol COMMAND python vol_test.py)
 
 

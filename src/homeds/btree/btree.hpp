@@ -1435,10 +1435,10 @@ private:
                 BtreeNodePtr old_sibbling = nullptr;
                 do {
                     // merge case, borrow entries
-                    if ((old_sibbling == nullptr) && (!child_node1->get_next_bnode().is_valid())) {
+                    if ((old_sibbling == nullptr) && (child_node1->get_next_bnode().is_valid())) {
                         old_sibbling = btree_store_t::read_node(m_btree_store.get(), child_node1->get_next_bnode());
                     } else if ((old_sibbling->get_total_entries() == 0) &&
-                               !(old_sibbling->get_next_bnode().is_valid())) {
+                               (old_sibbling->get_next_bnode().is_valid())) {
                         old_sibbling = btree_store_t::read_node(m_btree_store.get(), old_sibbling->get_next_bnode());
                     } else {
                         assert(0); // something went wrong
@@ -1458,9 +1458,9 @@ private:
 
             // update correct sibbling of child node1
             if (parent_ind == parent_node->get_total_entries() - 1) {
-                if (!parent_node->get_edge_id().is_valid()) {
+                if (parent_node->get_edge_id().is_valid()) {
                     sibbling_id = parent_node->get_edge_id();
-                } else if (!parent_node->get_next_bnode().is_valid()) {
+                } else if (parent_node->get_next_bnode().is_valid()) {
                     // edge entry, so get first parents sibbling and get its first child
                     parent_sibbling = btree_store_t::read_node(m_btree_store.get(), parent_node->get_next_bnode());
                     lock_node(parent_sibbling, locktype::LOCKTYPE_READ, dependent_req_q);
@@ -1481,7 +1481,7 @@ private:
             // for merge, we have borrow everything on right
             BtreeNodePtr curr = nullptr;
             bnodeid_t    next = child_node1->get_next_bnode();
-            while (!(next.is_valid())) {
+            while ((next.is_valid())) {
                 curr = btree_store_t::read_node(m_btree_store.get(), next);
                 child_node1->move_in_from_right_by_entries(m_btree_cfg, curr, curr->get_total_entries());
                 nodes_to_free.push_back(curr);
