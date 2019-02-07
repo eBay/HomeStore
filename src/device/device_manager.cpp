@@ -275,10 +275,10 @@ void DeviceManager::read_info_blocks(uint32_t dev_id) {
     auto dm = (dm_info *) m_chunk_memory;
     assert( dm->magic == MAGIC );
 #ifndef NO_CHECKSUM
-    assert( dm->checksum ==
-            crc16_t10dif (  init_crc_16,
+    auto crc = crc16_t10dif (  init_crc_16,
                             (const unsigned char *)(m_chunk_memory + DM_PAYLOAD_OFFSET),
-                            m_dm_info_size - DM_PAYLOAD_OFFSET ));
+                            m_dm_info_size - DM_PAYLOAD_OFFSET );
+    assert(dm->checksum == crc);
 #endif
 
     assert(m_vdev_hdr->magic == MAGIC);

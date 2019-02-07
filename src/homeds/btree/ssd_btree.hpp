@@ -288,7 +288,8 @@ public:
 #ifndef NO_CHECKSUM
         auto physical_node = (LeafPhysicalNode *)
             ((boost::static_pointer_cast<SSDBtreeNode>(bn))->at_offset(0).bytes);
-        assert(physical_node->verify_node(get_node_area_size(store)));
+        auto is_match = physical_node->verify_node(get_node_area_size(store));
+        assert(is_match);
 #endif
     }
 

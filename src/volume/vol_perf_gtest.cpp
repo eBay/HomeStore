@@ -88,6 +88,7 @@ protected:
     std::shared_ptr<iomgr::ioMgr> iomgr_obj;
     bool init;
     std::vector<VolumePtr> vol;
+    std::vector<homeds::Bitset *> m_vol_bm;
     std::vector<uint64_t> max_vol_blks;
     std::atomic<uint64_t> vol_cnt;
     test_ep *ep;
@@ -104,7 +105,8 @@ protected:
     Clock::time_point print_startTime;
 
 public:
-    IOTest():vol(max_vols), max_vol_blks(max_vols), device_info(0), is_abort(false) {
+    IOTest() :  vol(max_vols), m_vol_bm(max_vols),
+                max_vol_blks(max_vols), device_info(0), is_abort(false) {
         vol_cnt = 0;
         cur_vol = 0;
         max_vol_size = 0;
@@ -164,6 +166,7 @@ public:
         vol[cnt] = vol_obj;
         max_vol_blks[cnt] = VolInterface::get_instance()->get_size(vol_obj) / 
                                            VolInterface::get_instance()->get_page_size(vol_obj);
+        m_vol_bm[cnt] = new homeds::Bitset(max_vol_blks[cnt]);
         assert(VolInterface::get_instance()->get_size(vol_obj) == max_vol_size);
     }
 
@@ -246,13 +249,12 @@ public:
     void random_write() {
         /* XXX: does it really matter if it is atomic or not */
         int cur = ++cur_vol % max_vols;
-        uint64_t lba;
-        uint64_t nblks;
-        
-        
+        uint64_t lba = 0;
+        uint64_t nblks = 0;
         nblks = (io_size * 1024) / (VolInterface::get_instance()->get_page_size(vol[cur]));
         lba = rand() % (max_vol_blks[cur % max_vols] - nblks);
-        
+        if (nblks == 0) { nblks = 1; }
+        m_vol_bm[cur]->set_bits(lba, nblks);
         uint8_t *buf = nullptr;
         uint64_t size = nblks * VolInterface::get_instance()->get_page_size(vol[cur]);
         auto ret = posix_memalign((void **) &buf, 4096, size);
@@ -278,6 +280,8 @@ public:
             assert(0);
             free(buf);
             outstanding_ios--;
+            LOGINFO("write io failure");
+            m_vol_bm[cur]->reset_bits(lba, nblks);
         }
         LOGDEBUG("Wrote {} {} ",lba,nblks);
     }
@@ -285,10 +289,18 @@ public:
     void random_read() {
         /* XXX: does it really matter if it is atomic or not */
         int cur = ++cur_vol % max_vols;
-        uint64_t lba;
-        uint64_t nblks;
+        uint64_t lba = 0;
+        uint64_t nblks = 0;
+    start:
         nblks = (io_size * 1024) / (VolInterface::get_instance()->get_page_size(vol[cur]));
         lba = rand() % (max_vol_blks[cur % max_vols] - nblks);
+        if (nblks == 0) { nblks = 1; }
+        {
+            /* check if someone is already doing writes/reads */
+            if (m_vol_bm[cur]->is_bits_reset(lba, nblks)) {
+                goto start;
+            }
+        }
         read_vol(cur, lba, nblks);
         LOGDEBUG("Read {} {} ",lba,nblks);
     }
@@ -314,6 +326,7 @@ public:
         if (ret_io != no_error) {
             outstanding_ios--;
             read_err_cnt++;
+            LOGINFO("read io failure");
         }
     }
 
