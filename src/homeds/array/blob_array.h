@@ -38,13 +38,13 @@ namespace homeds {
             uint16_t m_size;//size of content
             uint16_t m_offset;//offset from m_blobs
         }__attribute__((packed));
-
-        void *m_arr;//ptr of blob_array structure
+        
         header *m_header;//ptr to header
         record *m_records;//ptr to start of records
         uint8_t *m_data;//actual content
         bool is_initialized = false;
         bool is_mallocated = false;
+        void *m_arr;//ptr of blob_array structure
         
         //if we allocated temporary heap memory, it frees that.
         void free_mem_if_needed() {
@@ -63,16 +63,17 @@ namespace homeds {
             return (record *) ((uint8_t *) (curr_rec) + next_rec_offset);
         }
 
+        //get record ptr
         record *get_record(uint16_t index) const{
             record *currec = m_records;
-            currec = currec + sizeof(currec) * index;
+            currec = currec + index;
             return currec;
         }
 
-        void init_ptr() {
+        void init_ptr(uint16_t total_elements) {
             m_header = static_cast<header *>(m_arr);
             m_records = static_cast<record *>((void *) (((uint8_t *) m_arr) + sizeof(header)));
-            m_data = static_cast<uint8_t *>((void *) (((uint8_t *) m_records) + sizeof(record)));
+            m_data = static_cast<uint8_t *>((void *) (((uint8_t *) m_records) + total_elements * sizeof(record)));
             is_initialized = true;
         }
 
@@ -111,7 +112,7 @@ namespace homeds {
             if(size==0)return;
             m_arr = allocate(size);
             memcpy(m_arr, other.get_mem(), size);
-            init_ptr();
+            init_ptr(other.get_total_elements());
         }
 
         //creates temporary heap memory and copies element to it.
@@ -120,7 +121,7 @@ namespace homeds {
             //calculate size of heap to allocate
             uint32_t size = e.get_blob().size + sizeof(record) + sizeof(header);
             m_arr = allocate(size);
-            init_ptr();
+            init_ptr(1);
             m_header->m_total_elements = 1;
             //copy element to heap
             record *curr_rec = m_records;
@@ -138,7 +139,7 @@ namespace homeds {
                 size += e.get_blob().size;
             }
             m_arr = allocate(size);
-            init_ptr();
+            init_ptr(elements.size());
             m_header->m_total_elements = elements.size();
             //copy all elements to heap
             uint16_t i = 0;
@@ -156,7 +157,8 @@ namespace homeds {
         void set_mem(void *arr, const uint32_t &expected_size) {
             free_mem_if_needed();
             m_arr = arr;
-            init_ptr();
+            m_header = static_cast<header *>(m_arr);
+            init_ptr(m_header->m_total_elements);
             assert(m_header->m_total_elements < 1000);//for now we dont expect huge array
 #ifndef NDEBUG
             assert(get_size() == expected_size);
@@ -204,24 +206,44 @@ namespace homeds {
 
         void get_all(std::vector<ElementType> &vector, bool copy) {
             if(!is_initialized)return;
-            for (auto i = 0u; i < vector.size(); i++) {
+            for (auto i = 0u; i < get_total_elements(); i++) {
                 ElementType e;
                 get(i, e, copy);
                 vector.emplace_back(e);
             }
         }
 
+        //in-place remove
         void remove(uint32_t index) {
             assert(is_initialized);
             assert(index < get_total_elements());
-            //move all records left
-            if (index == get_total_elements() - 1)
-                m_header->m_total_elements--;
-            else {
-                void *del_rec = get_record(index);
-                void *next_rec = get_record(index + 1);
-                memmove(del_rec, next_rec, sizeof(record) * (get_total_elements() - index - 1));
-            }
+
+            record *rec = get_record(index);
+            uint16_t orig_offset = rec->m_offset;
+            uint8_t *data = get_data_ptr(rec->m_offset);
+            uint32_t total_size = get_size();
+
+            uint8_t *move_to = nullptr, *move_from  = nullptr;
+            uint32_t size_to_move=0;
+            //move data
+            move_to = data;
+            move_from = data + rec->m_size;
+            size_to_move = total_size - (get_meta_size() + rec->m_offset + rec->m_size);
+            memmove((void*)move_to, (void*)move_from, size_to_move);
+            //move record
+            move_to = (uint8_t *) rec;
+            move_from = move_to + sizeof(record);
+            size_to_move = total_size - (sizeof(header) + sizeof(record) * (index + 1));
+            memmove((void*)move_to, (void*)move_from, size_to_move);
+            rec = get_record(index);
+            rec->m_offset = orig_offset;
+            
+            m_header->m_total_elements--;
+            init_ptr(m_header->m_total_elements);
+            
+#ifndef NDEBUG
+            to_string();
+#endif
         }
 
         std::string to_string() const {

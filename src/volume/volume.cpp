@@ -130,11 +130,12 @@ void Volume::process_metadata_completions(const volume_req_ptr& vreq) {
     LOGTRACE("metadata_complete: req_id={}, err={}", parent_req->request_id, vreq->err.message());
     HISTOGRAM_OBSERVE(m_metrics, volume_map_write_latency, get_elapsed_time_us(vreq->op_start_time));
 
-    if (!vreq->err) {
+    if (vreq->err == no_error) {
         for (auto& ptr : vreq->blkIds_to_free) {
             LOGDEBUG("Freeing Blk: {} {} {}", ptr.m_blkId.to_string(), ptr.m_blk_offset, ptr.m_nblks_to_free);
-            m_data_blkstore->free_blk(ptr.m_blkId, get_page_size() * ptr.m_blk_offset,
-                                      get_page_size() * ptr.m_nblks_to_free);
+            uint64_t free_size = HomeBlks::instance()->get_data_pagesz() * ptr.m_nblks_to_free;
+            m_data_blkstore->free_blk(ptr.m_blkId, HomeBlks::instance()->get_data_pagesz() * ptr.m_blk_offset,
+                                      free_size);
         }
     }
 
@@ -256,8 +257,8 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
             volume_req_ptr vreq = Volume::create_vol_req(this, hb_req);
             vreq->bid = bid[i];
             vreq->lba = lba + lbas_snt;
-            vreq->seqId = INVALID_SEQ_ID; // TODO - actual seqId/lastCommit seq id should be from vol interface req
-            vreq->lastCommited_seqId = INVALID_SEQ_ID; // keeping only latest version always
+            vreq->seqId = sid; // TODO - actual seqId/lastCommit seq id should be from vol interface req
+            vreq->lastCommited_seqId = sid; // keeping only latest version always
             vreq->op_start_time = data_io_start_time;
 
             assert((bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) % m_sb->page_size) == 0);
@@ -363,8 +364,8 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
         volume_req_ptr vreq = Volume::create_vol_req(this, hb_req);
         vreq->lba = lba;
         vreq->nlbas = nlbas;
-        vreq->seqId = INVALID_SEQ_ID;
-        vreq->lastCommited_seqId = INVALID_SEQ_ID; // read only latest value
+        vreq->seqId = sid;
+        vreq->lastCommited_seqId = sid; // read only latest value
 
         std::vector< std::pair< MappingKey, MappingValue > > kvs;
 

@@ -389,11 +389,7 @@ public:
 
 protected:
     BRangeRequest(BRangeCBParam* cb_param,BtreeSearchRange& search_range): 
-    m_cb_param(cb_param), m_input_range(search_range){
-        if(m_cb_param!= nullptr) {
-            m_cb_param->set_input_range(search_range);
-        }
-    }
+    m_cb_param(cb_param), m_input_range(search_range){}
     
     BRangeCBParam *m_cb_param;    // additional parameters that is passed to callback
     BtreeSearchRange m_input_range;                 // Btree range filter originally provided
