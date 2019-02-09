@@ -179,8 +179,17 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks,
         BlkId blkid;
         
         if (alloc(blks_rqstd, hints, &blkid, true) != BLK_ALLOC_SUCCESS) {
-            /* It should never happen. It means we are running out of space */
-            assert(0);
+            /* check the cache to see what blocks are available and get those
+             * blocks from the btree cache.
+             */
+            blks_rqstd = get_best_fit_cache(blks_rqstd);
+            assert(blks_rqstd != 0);
+            if (blks_rqstd == 0) {
+                /* It should never happen. It means we are running out of space */
+                break;
+            }
+            retry_cnt++;
+            continue;
         }
         blks_alloced += blkid.get_nblks();
         assert(blks_alloced % hints.multiplier == 0);
@@ -204,6 +213,19 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks,
         return BLK_ALLOC_SPACEFULL;
     }
     return BLK_ALLOC_SUCCESS;
+}
+
+/* Check cache to see what blks are available */
+uint64_t VarsizeBlkAllocator::get_best_fit_cache(uint64_t blks_rqstd) {
+    
+    auto slab_index = get_config().get_slab(blks_rqstd).first;
+    while (slab_index > 0) {
+        if (m_slab_entries[slab_index]._a.load()) {
+            return(get_config().get_slab_lower_bound(slab_index));
+        }
+        slab_index--;
+    }
+    return 0;
 }
 
 BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid, 

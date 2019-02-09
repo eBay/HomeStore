@@ -200,7 +200,10 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
             carr[i] = crc16_t10dif(init_crc_16, vreq->bbuf->at_offset(vreq->read_buf_offset + offset).bytes, 
                                    get_page_size());
             offset += get_page_size();
-            assert(vreq->checksum[i] == carr[i]);
+            if (vreq->checksum[i] != carr[i]) {
+                LOGINFO("checksum mismatch");
+                assert(0);
+            }
         }
         
         check_and_complete_req(parent_req, no_error, true /* call_completion_cb */);
@@ -257,8 +260,8 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
             volume_req_ptr vreq = Volume::create_vol_req(this, hb_req);
             vreq->bid = bid[i];
             vreq->lba = lba + lbas_snt;
-            vreq->seqId = sid; // TODO - actual seqId/lastCommit seq id should be from vol interface req
-            vreq->lastCommited_seqId = sid; // keeping only latest version always
+            vreq->seqId = GET_IO_SEQ_ID(sid); // TODO - actual seqId/lastCommit seq id should be from vol interface req
+            vreq->lastCommited_seqId = vreq->seqId; // keeping only latest version always
             vreq->op_start_time = data_io_start_time;
 
             assert((bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) % m_sb->page_size) == 0);
@@ -364,8 +367,8 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
         volume_req_ptr vreq = Volume::create_vol_req(this, hb_req);
         vreq->lba = lba;
         vreq->nlbas = nlbas;
-        vreq->seqId = sid;
-        vreq->lastCommited_seqId = sid; // read only latest value
+        vreq->seqId = GET_IO_SEQ_ID(sid);
+        vreq->lastCommited_seqId = vreq->seqId; // read only latest value
 
         std::vector< std::pair< MappingKey, MappingValue > > kvs;
 
@@ -409,12 +412,10 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
                 ValueEntry ve;
                 (kv.second.get_array()).get(0, ve, false);
 
-#ifndef NDEBUG
-                // TODO - at this point, ve has checksum array to verify against later @sounak
+                /* Get checksum also */
                 for (auto i = 0ul; i < kv.first.get_n_lba(); i++) {
                     child_vreq->checksum[i] = ve.get_checksum_at(i);
                 }
-#endif
 
                 auto sz = get_page_size() * kv.first.get_n_lba();
                 auto offset = HomeBlks::instance()->get_data_pagesz() * ve.get_blk_offset();
@@ -433,7 +434,11 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
                                     child_vreq->bbuf->at_offset(child_vreq->read_buf_offset + offset).bytes,
                                     get_page_size());
                         offset += get_page_size();
-                        assert(child_vreq->checksum[i] == carr[i]);
+                        if (child_vreq->checksum[i] != carr[i]) {
+                            LOGINFO("checksum mismatch");
+                            assert(0);
+                            abort();
+                        }
                     }
                 }
             }

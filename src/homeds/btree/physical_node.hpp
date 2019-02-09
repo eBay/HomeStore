@@ -443,6 +443,8 @@ protected:
     }
 
 protected:
+    
+    /* Note: Both start and end are not included in search */
     auto bsearch(int start, int end, const BtreeSearchRange &range) const {
         int mid = 0;
         int initial_end = end;
@@ -455,6 +457,11 @@ protected:
             bool found;
             int  end_of_search_index;
         } ret{false, 0};
+        
+        if ((end - start) <= 1) {
+            return ret;
+        }
+        
         auto selection = range.selection_option();
 
         while ((end - start) > 1) {
@@ -489,6 +496,9 @@ protected:
         }
         
 
+        /* TODO: this logic should be in the caller of bsearch. It will be going to make
+         * bsearch interface more simpler.
+         */
         if (ret.found) {
             if (selection == LEFT_MOST) {
                 assert(min_ind_found != INT32_MAX);

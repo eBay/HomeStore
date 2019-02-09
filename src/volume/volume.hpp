@@ -37,6 +37,11 @@ struct Free_Blk_Entry {
 struct volume_req;
 typedef boost::intrusive_ptr< volume_req > volume_req_ptr;
 
+/* first 48 bits are actual sequence ID and last 16 bits are boot cnt */
+#define SEQ_ID_BIT_CNT 48ul
+#define BOOT_CNT_MASK 0x0000fffffffffffful
+#define GET_IO_SEQ_ID(sid) ((HomeBlks::instance()->get_boot_cnt() << SEQ_ID_BIT_CNT) | (sid & BOOT_CNT_MASK))
+
 struct volume_req : blkstore_req< BlkBuffer > {
     uint64_t                      lba;
     int                           nlbas;
