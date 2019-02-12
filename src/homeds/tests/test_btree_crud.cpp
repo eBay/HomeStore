@@ -15,7 +15,7 @@
 #include "homeds/btree/mem_btree.hpp"
 #include <metrics/metrics.hpp>
 
-SDS_LOGGING_INIT(VMOD_BTREE_MERGE, VMOD_BTREE_SPLIT, VMOD_BTREE)
+SDS_LOGGING_INIT(btree_structures, btree_nodes, btree_generics, varsize_blk_alloc)
 THREAD_BUFFER_INIT;
 
 #define MAX_CACHE_SIZE     2 * 1024 * 1024 * 1024
@@ -87,13 +87,14 @@ __attribute__((no_sanitize_address))
 const char* __asan_default_options() { 
     return "detect_leaks=false"; 
 }
-#endif
 
 extern "C" 
 __attribute__((no_sanitize_address))
 const char* __asan_default_options() { 
     return "detect_leaks=0"; 
 }
+#endif
+
 class TestSimpleKey : public homeds::btree::BtreeKey {
 private:
     typedef struct __attribute__((packed)) {

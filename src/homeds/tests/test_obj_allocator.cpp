@@ -3,6 +3,7 @@
 #include <sds_options/options.h>
 
 SDS_LOGGING_INIT()
+THREAD_BUFFER_INIT;
 
 using namespace homeds;
 using namespace std;

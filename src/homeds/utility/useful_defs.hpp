@@ -6,6 +6,8 @@
 
 #include <chrono>
 #include <atomic>
+#include <iostream>
+#include <array>
 
 #if defined __GNUC__ || defined __llvm__
 #define likely(x) __builtin_expect(!!(x), 1)
@@ -58,6 +60,25 @@ void atomic_update_min(std::atomic<T>& min_value, T const& value,
 }
 
 namespace homeds {
+
+template<unsigned... Is> struct seq{};
+template<unsigned N, unsigned... Is>
+struct gen_seq : gen_seq<N-1, N-1, Is...>{};
+template<unsigned... Is>
+struct gen_seq<0, Is...> : seq<Is...>{};
+
+template<unsigned N1, unsigned... I1, unsigned N2, unsigned... I2>
+constexpr std::array<char const, N1+N2-1> const_concat(char const (&a1)[N1], char const (&a2)[N2], seq<I1...>, seq<I2...>){
+    return {{ a1[I1]..., a2[I2]... }};
+}
+
+template<unsigned N1, unsigned N2>
+constexpr std::array<char const, N1+N2-1> const_concat(char const (&a1)[N1], char const (&a2)[N2]){
+    return const_concat(a1, a2, gen_seq<N1-1>{}, gen_seq<N2>{});
+}
+
+#define const_concat_string(s1, s2) (&(const_concat(s1, s2)[0]))
+
 template< class P, class M >
 inline size_t offset_of(const M P::*member) {
     return (size_t) &(reinterpret_cast<P*>(0)->*member);

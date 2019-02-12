@@ -13,6 +13,7 @@
 #include "homeds/memory/obj_allocator.hpp"
 #include "main/homestore_config.hpp"
 #include <execinfo.h>
+#include <utility/obj_life_counter.hpp>
 
 namespace homestore {
 
@@ -23,7 +24,7 @@ namespace homestore {
 #define LRUEvictor Evictor< LRUEvictionPolicy >
 #define CurrentEvictorRecord CurrentEvictor::EvictRecordType
 
-class CacheRecord : public homeds::HashNode {
+class CacheRecord : public homeds::HashNode, sisl::ObjLifeCounter< CacheRecord > {
 public:
     typename CurrentEvictor::EvictRecordType m_evict_record; // Information about the eviction record itself.
 
@@ -311,7 +312,7 @@ public:
         assert(cnt >= 0);
         if (cnt == 0) {
             // free the record
-            homeds::ObjectAllocator< CacheBufferType >::deallocate(buf);
+            homeds::ObjectAllocator< CacheBufferType >::deallocate(buf, buf->get_your_size());
         }
 
         if (cnt == 1 && can_free) {
@@ -330,6 +331,8 @@ public:
            << " Cache refcount = " << m_refcount.get();
         return ss.str();
     }
+
+    virtual size_t get_your_size() const { return sizeof(CacheBuffer< K >); }
 
     //////////// Mandatory IntrusiveHashSet definitions ////////////////
     static void ref(CacheBuffer< K >& b) { intrusive_ptr_add_ref(&b); }

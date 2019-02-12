@@ -153,6 +153,7 @@ public:
     uint32_t get_total_entries() const;
     uint32_t get_available_size(const BtreeConfig &cfg) const;
     bnodeid_t get_node_id() const;
+    uint64_t  get_node_id_int() const;
     void set_node_id(bnodeid_t id);
     bnodeid_t get_next_bnode() const;
     void set_next_bnode(bnodeid_t b);
@@ -204,6 +205,7 @@ public:
     }
     void get_nth_key(int ind, BtreeKey *outkey, bool copy) const;
     void set_nth_key(uint32_t ind, BtreeKey *key);
+
 protected:
     uint32_t get_nth_obj_size(int ind) const;
     void get_nth_value(int ind, BtreeValue *outval, bool copy) const;

@@ -20,6 +20,7 @@
 #include <boost/intrusive_ptr.hpp>
 #include <error/error.h>
 #include <csignal>
+#include "homeds/utility/useful_defs.hpp"
 
 using namespace std;
 using namespace homeds::thread;
@@ -28,7 +29,46 @@ using namespace homeds::thread;
 #define MAX_BTREE_DEPTH 100
 #endif
 
-SDS_LOGGING_DECL(VMOD_BTREE_MERGE, VMOD_BTREE_SPLIT, VMOD_BTREE)
+SDS_LOGGING_DECL(btree_structures, btree_nodes, btree_generics)
+
+/* TODO: Temporary till we move this to sds_logging for general consumption */
+#ifndef NDEBUG
+#define DLOGCRITICAL(...) LOGCRITICAL(__VA_ARGS__)
+#define DLOGERROR(...)    LOGERROR(__VA_ARGS__)
+#define DLOGWARN(...)     LOGWARN(__VA_ARGS__)
+#define DLOGINFO(...)     LOGINFO(__VA_ARGS__)
+#define DLOGDEBUG(...)    LOGDEBUG(__VA_ARGS__)
+#define DLOGTRACE(...)    LOGTRACE(__VA_ARGS__)
+
+#define DLOGCRITICALMOD(...) LOGCRITICALMOD(__VA_ARGS__)
+#define DLOGERRORMOD(...)    LOGERRORMOD(__VA_ARGS__)
+#define DLOGWARNMOD(...)     LOGWARNMOD(__VA_ARGS__)
+#define DLOGINFOMOD(...)     LOGINFOMOD(__VA_ARGS__)
+#define DLOGDEBUGMOD(...)    LOGDEBUGMOD(__VA_ARGS__)
+#define DLOGTRACEMOD(...)    LOGTRACEMOD(__VA_ARGS__)
+#else
+#define DLOGCRITICAL(...) 
+#define DLOGERROR(...)    
+#define DLOGWARN(...)     
+#define DLOGINFO(...)     
+#define DLOGDEBUG(...)    
+#define DLOGTRACE(...)    
+
+#define DLOGCRITICALMOD(...) 
+#define DLOGERRORMOD(...)    
+#define DLOGWARNMOD(...)     
+#define DLOGINFOMOD(...)     
+#define DLOGDEBUGMOD(...)    
+#define DLOGTRACEMOD(...)    
+#endif
+
+//#define _BTREE_LOG_MSG(node, msg, ...)  (const_concat_string(" Node {} ", msg), node->get_node_id(), __VA_ARGS__)
+//#define BTREE_LOG_MSG(node, msg, ...)   _BTREE_LOG_MSG(node, msg, __VA_ARGS__)
+
+#define _const_concat_string(s1, s2) const_concat_string(s1, s2)
+
+#define BLOGINFOMOD(mod, node, msg, ...)     \
+        LOGINFOMOD(mod, _const_concat_string(" Node {} ", msg), node->get_node_id(), __VA_ARGS__)
 
 namespace homeds {
 namespace btree {
@@ -48,97 +88,6 @@ template < btree_store_type BtreeStoreType, typename K, typename V, btree_node_t
 class Btree {
     typedef std::function< void(boost::intrusive_ptr< btree_req_type > cookie, std::error_condition status) >
         comp_callback;
-
-public:
-#ifdef CLASS_DEFINITIONS
-    Btree(BtreeConfig& cfg);
-
-    /*
-     * This function inserts the key/value pair into btree. The BtreeKey and BtreeValue must be overridden by the
-     * caller. If key already present will return false.
-     */
-    bool insert(BtreeKey& k, BtreeValue& v);
-
-    /*
-     * Given a key, returns the value. Returns if object found or not
-     */
-    bool get(BtreeKey& key, BtreeValue* outval);
-
-    /*
-     * Given a startKey and endKey, gets any key within the range
-     */
-    bool get_any(const BtreeSearchRange& range, BtreeKey* outkey, BtreeValue* outval);
-
-    /*
-     * Given a range and optional cursor, returns the next set of values for required count. If cursor is nullptr,
-     * will start the query from start, otherwise it uses range
-     */
-    bool get_range(const BtreeSearchRange& range, BtreeCursor* cursor, uint32_t reqd_count,
-                   std::vector< BtreeValue >& out_values);
-
-    /*
-     * Remove the key from the btree. Returns true if found and removed
-     */
-    bool remove(BtreeKey& key, boost::intrusive_ptr< btree_req_type >* dependent_req,
-                boost::intrusive_ptr< btree_req_type > cookie);
-
-    /*
-     * Remove any one key between start key to end key. Returns true if found and removed. Second version has
-     * additional parameter left_leaning, which means while removing, try to give preference to left.
-     */
-    bool remove_any(BtreeRegExKey& rkey, boost::intrusive_ptr< btree_req_type >* dependent_req,
-                    boost::intrusive_ptr< btree_req_type > cookie);
-
-    /*
-     * Update the key with new value. If upsert is false, will fail if key does not exist. If upsert is true, will do
-     * insert if key does not exist.
-     */
-    bool update(BtreeKey& key, BtreeValue& val, bool upsert = true);
-
-    /*
-     * Update the key with new_val if the cur_val is equal to old_val. Following operation is done atomically.
-     * Returns true if successful, else false.
-     */
-    bool find_and_modify(BtreeKey& key, BtreeValue& new_val, BtreeValue& old_val);
-
-#endif
-
-private:
-#ifdef CLASS_DEFINITIONS
-    bool do_insert(BtreeNodePtr my_node, homeds::thread::locktype_t curlock, BtreeKey& k, BtreeValue& v, int ind_hint);
-
-    bool do_get(BtreeNodePtr mynode, BtreeKey& key, BtreeValue* outval);
-
-    btree_status_t do_remove(BtreeNodePtr mynode, homeds::thread::locktype_t curlock, BtreeKey& key,
-                             std::deque< boost::intrusive_ptr< btree_req_type > >& dependent_req_q,
-                             boost::intrusive_ptr< btree_req_type >                cookie);
-
-    bool upgrade_node(BtreeNodePtr mynode, BtreeNodePtr childnode, homeds::thread::locktype_t& curlock,
-                      homeds::thread::locktype_t                            child_curlock,
-                      std::deque< boost::intrusive_ptr< btree_req_type > >& dependent_req_q);
-    void split_node(BtreeNodePtr parent_node, BtreeNodePtr child_node, uint32_t parent_ind, BtreeKey** out_split_key);
-    bool merge_nodes(BtreeNodePtr parent_node, std::vector< uint32_t >& indices_list);
-
-    PhysicalNode* get_child_node(BtreeNodePtr int_node, homeds::thread::locktype_t curlock, BtreeKey& key,
-                                 uint32_t& outind);
-    PhysicalNode* get_child_node_range(BtreeNodePtr int_node, KeyRegex& kr, uint32_t& outind, bool* isfound);
-
-    void check_split_root(const BtreeKey& k, const BtreeValue& v,
-                          std::deque< boost::intrusive_ptr< btree_req_type > >& dependent_req_q);
-    void check_collapse_root(std::deque< boost::intrusive_ptr< btree_req_type > >& dependent_req_q);
-
-    BtreeNodePtr alloc_leaf_node();
-    BtreeNodePtr alloc_interior_node();
-    void         lock_node(BtreeNodePtr node, homeds::thread::locktype_t type,
-                           std::deque< boost::intrusive_ptr< btree_req_type > >* dependent_req_q);
-    void         unlock_node(BtreeNodePtr node, bool release);
-
-protected:
-    virtual uint32_t get_node_size() { return m_btree_cfg.get_node_size(); };
-    virtual uint32_t get_max_objs() { return m_btree_cfg.get_max_objs(); };
-    virtual uint32_t get_max_nodes() { return m_max_nodes; };
-    virtual void     create_root_node();
-#endif
 
 private:
     bnodeid_t              m_root_node;
@@ -267,8 +216,8 @@ public:
         uint32_t                                             i = 0;
         if (!node->is_leaf()) {
             BtreeNodeInfo child_info;
-            while (i < node->get_total_entries()) {
-                if (i == node->get_total_entries() - 1) {
+            while (i <= node->get_total_entries()) {
+                if (i == node->get_total_entries()) {
                     child_info.set_bnode_id(node->get_edge_id());
                 } else {
                     node->get(i, &child_info, false /* copy */);
@@ -1166,17 +1115,15 @@ private:
                     bur->get_cb_param()->get_sub_range().set_start_incl(false);
                 }//else no need to update, we carry fwd with start value from parent
 
-#ifndef NDEBUG
-                LOGDEBUG("Subrange:s:{},e:{},c:{},nid:{},eidvalid?:{},sk:{},ek:{}", start_ind, end_ind, curr_ind,
-                         my_node->get_node_id().to_string(), my_node->get_edge_id().is_valid(),
-                         bur->get_cb_param()->get_sub_range().get_start_key()->to_string(),
-                         bur->get_cb_param()->get_sub_range().get_end_key()->to_string());
-#endif
+                DLOGDEBUGMOD(btree_structures,
+                         "Subrange:s:{},e:{},c:{},nid:{},eidvalid?:{},sk:{},ek:{}", start_ind, end_ind, curr_ind,
+                          my_node->get_node_id().to_string(), my_node->get_edge_id().is_valid(),
+                          bur->get_cb_param()->get_sub_range().get_start_key()->to_string(),
+                          bur->get_cb_param()->get_sub_range().get_end_key()->to_string());
             }
 
             if (child_node->is_split_needed(m_btree_cfg, k, v, &ind_hint, put_type, bur)) {
-
-                if(bur && is_any_child_splitted){ //spliting another child
+                if(bur && is_any_child_splitted) { // spliting another child
                     if(my_node->is_split_needed(m_btree_cfg, k, v, &ind_hint, put_type, bur)){
 #if 0
                         if(curr_ind!=0){
@@ -1196,13 +1143,16 @@ private:
                 }
                 // Time to split the child, but we need to convert ours to write lock
                 if (upgrade_node(my_node, child_node, curlock, child_cur_lock, dependent_req_q) == false) {
+                    LOGDEBUGMOD(btree_structures, "Upgrade of lock for node {} failed, retrying from root",
+                            my_node->get_node_id_int());
                     return (false);
                 }
 
                 // We need to upgrade the child to WriteLock
                 if (upgrade_node(child_node, nullptr, child_cur_lock, LOCKTYPE_NONE, dependent_req_q) == false) {
                     // Since we have parent node write locked, child node should never have any issues upgrading.
-                    assert(0);
+                    LOGDFATAL_IF(true, "Upgrade of lock for childnode {} failed, which is not expected, will retry "
+                                       "from root", child_node->get_node_id_int());
                     unlock_node(my_node, homeds::thread::LOCKTYPE_WRITE);
                     return (false);
                 }
@@ -1216,9 +1166,9 @@ private:
                     assert(curr_ind==start_ind);//only possible for start of range
                     curr_ind++;
                 }
-                if(bur) end_ind++;//range update - we update endind regardless on split
-                else end_ind=curr_ind; // regular update - end moves with curr
-                
+                if(bur) { end_ind++; }     // range update - we update endind regardless on split
+                else { end_ind=curr_ind; } // regular update - end moves with curr
+
                 // After split, parentNode would have split, retry search and walk down.
                 unlock_node(child_node, homeds::thread::LOCKTYPE_WRITE);
                 COUNTER_INCREMENT(m_metrics, btree_split_count, 1);
@@ -1251,8 +1201,9 @@ private:
             }
             curr_ind++;
         }
-        if (!unlocked_already)
+        if (!unlocked_already) {
             unlock_node(my_node, curlock);
+        }
         return true;
         // Warning: Do not access childNode or myNode beyond this point, since it would
         // have been unlocked by the recursive function and it could also been deleted.
@@ -1438,10 +1389,10 @@ private:
     // requires read/write lock on parent_node and requires write lock on child_node1 before calling this func
     void fix_pc_gen_mistmatch(BtreeNodePtr parent_node, BtreeNodePtr child_node1, uint32_t parent_ind,
                               std::deque< boost::intrusive_ptr< btree_req_type > >* dependent_req_q) {
-#ifndef NDEBUG
-        std::stringstream ss;
-        ss << "Before fix, parent:" << parent_node->get_node_id() << ", child:" << child_node1->get_node_id();
-#endif
+
+        DLOGTRACEMOD(btree_generics, "Before fix, parent: {}, child: {}", parent_node->get_node_id_int(),
+                child_node1->get_node_id_int());
+
         vector< BtreeNodePtr > nodes_to_free;
         K                      parent_key;
         BtreeNodePtr           parent_sibbling = nullptr;
@@ -1572,6 +1523,10 @@ private:
         child_node1->get_last_key(out_split_key);
         ninfo.set_bnode_id(child_node1->get_node_id());
         parent_node->insert(*out_split_key, ninfo);
+
+        LOGDEBUGMOD(btree_structures, "Split child_node={} with new_child_node={}, parent_node={}, split_key={}",
+                child_node1->get_node_id_int(), child_node2->get_node_id_int(), parent_node->get_node_id_int(),
+                out_split_key->to_string());
 
         // we write right child node, than parent and than left child
         btree_store_t::write_node(m_btree_store.get(), child_node2, dependent_req_q, NULL, false);
@@ -1764,7 +1719,8 @@ private:
     }
 
     void free_node(BtreeNodePtr& node, std::deque< boost::intrusive_ptr< btree_req_type > >& dependent_req_q) {
-        LOGTRACE("Free node-{}", node->get_node_id().to_string());
+        LOGDEBUGMOD(btree_generics, "Free node-{}", node->get_node_id_int());
+
         COUNTER_DECREMENT_IF_ELSE(m_metrics, node->is_leaf(), btree_leaf_node_count, btree_int_node_count, 1);
         btree_store_t::free_node(m_btree_store.get(), node, dependent_req_q);
     }

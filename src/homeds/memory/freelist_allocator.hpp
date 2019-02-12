@@ -9,11 +9,23 @@
 #include <algorithm>
 #include <folly/ThreadLocal.h>
 #include "homeds/utility/useful_defs.hpp"
+#include <metrics/metrics.hpp>
 
 namespace homeds {
 
 struct free_list_header {
     free_list_header *next;
+};
+
+class FreeListAllocatorMetrics : public sisl::MetricsGroupWrapper {
+public:
+    explicit FreeListAllocatorMetrics() : sisl::MetricsGroupWrapper("FreeListAllocator") {
+        REGISTER_COUNTER(freelist_alloc_hit, "Number of allocs from cache");
+        REGISTER_COUNTER(freelist_alloc_miss, "Number of allocs from system");
+        REGISTER_COUNTER(freelist_dealloc_passthru, "Number of dealloc not cached because of size mismatch");
+
+        register_me_to_farm();
+    }
 };
 
 template <uint16_t MaxListCount, std::size_t Size>
@@ -37,12 +49,14 @@ public:
         }
     }
 
-    uint8_t *allocate(uint32_t size_needed) {
+    uint8_t *allocate(uint32_t size_needed, FreeListAllocatorMetrics& metrics) {
         uint8_t *ptr;
         if (m_head == nullptr) {
             ptr = (uint8_t *)malloc(size_needed);
+            COUNTER_INCREMENT(metrics, freelist_alloc_miss, 1);
         } else {
             ptr = (uint8_t *)m_head;
+            COUNTER_INCREMENT(metrics, freelist_alloc_hit, 1);
             m_head = m_head->next;
         }
 
@@ -50,21 +64,17 @@ public:
         return ptr;
     }
 
-    bool deallocate(uint8_t *mem, uint32_t size_alloced) {
-    /* TODO: it is not working correcly as we are freeing the buffer
-     * from cache even if the cache buffer is of different type.
-     */
-//        if ((size_alloced != Size) || (m_list_count == MaxListCount)) {
+    bool deallocate(uint8_t *mem, uint32_t size_alloced, FreeListAllocatorMetrics& metrics) {
+        if ((size_alloced != Size) || (m_list_count == MaxListCount)) {
+            if (size_alloced != Size) { COUNTER_INCREMENT(metrics, freelist_dealloc_passthru, 1); }
             free(mem);
             return true;
-  //      }
-#if 0
+        }
         auto *hdr = (free_list_header *)mem;
         hdr->next = m_head;
         m_head = hdr;
         m_list_count++;
         return true;
-#endif
     }
 };
 
@@ -72,6 +82,7 @@ template <uint16_t MaxListCount, std::size_t Size>
 class FreeListAllocator {
 private:
     folly::ThreadLocalPtr< FreeListAllocatorImpl< MaxListCount, Size > > m_impl;
+    FreeListAllocatorMetrics m_metrics;
 
 public:
     static_assert((Size >= sizeof(uint8_t *)), "Size requested should be atleast a pointer size");
@@ -89,7 +100,7 @@ public:
             m_impl.reset(new FreeListAllocatorImpl< MaxListCount, Size >());
         }
 
-        return (m_impl->allocate(size_needed));
+        return (m_impl->allocate(size_needed, m_metrics));
     }
 
     bool deallocate(uint8_t *mem, uint32_t size_alloced) {
@@ -97,7 +108,7 @@ public:
             m_impl.reset(new FreeListAllocatorImpl< MaxListCount, Size >());
         }
 
-        return m_impl->deallocate(mem, size_alloced);
+        return m_impl->deallocate(mem, size_alloced, m_metrics);
     }
 
     bool owns(uint8_t *mem) const {

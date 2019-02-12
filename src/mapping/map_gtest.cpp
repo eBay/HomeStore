@@ -13,8 +13,10 @@ extern "C" {
 #include <sys/timeb.h>
 }
 
-SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write, iomgr, VMOD_BTREE_MERGE, VMOD_BTREE_SPLIT, varsize_blk_alloc,
-                 VMOD_VOL_MAPPING, VMOD_BTREE, httpserver_lmod)
+SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write, iomgr,
+                 btree_structures, btree_nodes, btree_generics,
+                 varsize_blk_alloc,
+                 VMOD_VOL_MAPPING, httpserver_lmod)
 THREAD_BUFFER_INIT;
 
 using namespace std;
