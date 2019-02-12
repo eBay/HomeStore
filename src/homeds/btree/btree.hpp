@@ -1265,6 +1265,14 @@ private:
         if (my_node->is_leaf()) {
             assert(curlock == LOCKTYPE_WRITE);
 
+#ifndef NDEBUG
+            for(auto i=1u;i<my_node->get_total_entries();i++){
+                K curKey, prevKey;
+                my_node->get_nth_key(i-1,&prevKey,false);
+                my_node->get_nth_key(i,&curKey,false);
+                assert(prevKey.compare(&curKey)<=0);
+            }
+#endif
             bool is_found = my_node->remove_one(range, outkey, outval);
 #ifndef NDEBUG
             for(auto i=1u;i<my_node->get_total_entries();i++){

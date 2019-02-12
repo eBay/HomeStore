@@ -292,6 +292,7 @@ public:
         if (!is_match) {
             LOGINFO("mismatch node");
             assert(0);
+            abort();
         }
 #endif
     }

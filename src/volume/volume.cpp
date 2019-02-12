@@ -203,6 +203,7 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
             if (vreq->checksum[i] != carr[i]) {
                 LOGINFO("checksum mismatch");
                 assert(0);
+                abort();
             }
         }
         
