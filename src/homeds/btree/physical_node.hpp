@@ -447,6 +447,8 @@ protected:
     }
 
 protected:
+    
+    /* Note: Both start and end are not included in search */
     auto bsearch(int start, int end, const BtreeSearchRange &range) const {
         int mid = 0;
         int initial_end = end;
@@ -459,6 +461,11 @@ protected:
             bool found;
             int  end_of_search_index;
         } ret{false, 0};
+        
+        if ((end - start) <= 1) {
+            return ret;
+        }
+        
         auto selection = range.selection_option();
 
         while ((end - start) > 1) {
@@ -472,7 +479,8 @@ protected:
                 if ((range.is_simple_search() || (selection == DO_NOT_CARE))) {
                     ret.end_of_search_index = mid;
                     return ret;
-                } else if ((selection == LEFT_MOST) || (selection == SECOND_TO_THE_LEFT)) {
+                } else if ((selection == LEFT_MOST) || (selection == SECOND_TO_THE_LEFT) || 
+                            selection == BEST_FIT_TO_CLOSEST) {
                     if (mid < min_ind_found) {
                         second_min = min_ind_found;
                         min_ind_found = mid;
@@ -492,11 +500,14 @@ protected:
         }
         
 
+        /* TODO: this logic should be in the caller of bsearch. It will be going to make
+         * bsearch interface more simpler.
+         */
         if (ret.found) {
             if (selection == LEFT_MOST) {
                 assert(min_ind_found != INT32_MAX);
                 ret.end_of_search_index = min_ind_found;
-            } else if (selection == SECOND_TO_THE_LEFT) {
+            } else if (selection == SECOND_TO_THE_LEFT || selection == BEST_FIT_TO_CLOSEST) {
                 assert(min_ind_found != INT32_MAX);
                 if (second_min == INT32_MAX) {
                     if (((int)(min_ind_found + 1) < initial_end) &&
@@ -512,6 +523,13 @@ protected:
             } else if (selection == RIGHT_MOST) {
                 assert(max_ind_found != INT32_MAX);
                 ret.end_of_search_index = max_ind_found;
+            }
+        } else if (selection == BEST_FIT_TO_CLOSEST) {
+            ret.found = true;
+            if (has_valid_edge()) {
+                ret.end_of_search_index = end;
+            } else {
+                ret.end_of_search_index = end - 1;
             }
         } else {
             ret.end_of_search_index = end;

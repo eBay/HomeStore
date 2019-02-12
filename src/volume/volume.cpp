@@ -17,11 +17,6 @@ using namespace homestore;
 bool vol_test_enable = false;
 #endif
 
-/* TODO: it will be more cleaner once statisitcs is integrated */
-int                btree_buf_alloc;
-int                btree_buf_free;
-int                btree_buf_make_obj;
-
 namespace homestore {
     void intrusive_ptr_add_ref(homestore::BlkBuffer *buf) {
         intrusive_ptr_add_ref((homestore::WriteBackCacheBuffer <BlkId> *) buf);
@@ -65,8 +60,7 @@ Volume::Volume(vol_sb* sb) : m_sb(sb), m_metrics(sb->vol_name) {
         m_map = new mapping(m_sb->size, m_sb->page_size,
                             (std::bind(&Volume::process_metadata_completions, this, std::placeholders::_1)));
         m_sb->btree_sb = m_map->get_btree_sb();
-        m_state = vol_state::DEGRADED;
-        m_sb->state = m_state;
+        m_sb->state = vol_state::DEGRADED;;
         HomeBlks::instance()->vol_sb_write(m_sb);
     } else {
         m_map = new mapping(m_sb->size, m_sb->page_size, m_sb->btree_sb,
@@ -74,14 +68,17 @@ Volume::Volume(vol_sb* sb) : m_sb(sb), m_metrics(sb->vol_name) {
                                  std::placeholders::_1)),
                       (std::bind(&Volume::alloc_blk_callback, this, std::placeholders::_1, 
                                 std::placeholders::_2, std::placeholders::_3))); 
+        m_sb->state = vol_state::ONLINE;
     }
     seq_Id = 3;
     alloc_single_block_in_mem();
 
     m_data_blkstore = HomeBlks::instance()->get_data_blkstore();
     m_state = vol_state::MOUNTING;
-    m_state = m_sb->state;
+}
 
+/* it should be called during recovery */
+void Volume::recovery_start() {
     vol_scan_alloc_blks();
 }
 
@@ -107,16 +104,10 @@ void Volume::alloc_blk_callback(struct BlkId bid, size_t offset_size, size_t siz
 
 void 
 Volume::vol_scan_alloc_blks() {
-/* TODO: will enable it once bug in matrix is fixed */
-#if 0
     std::vector<ThreadPool::TaskFuture<void>>   task_result;
-    task_result.push_back(submit_job([=](){
-                do_work();
+    task_result.push_back(submit_job([this](){
+                this->get_allocated_blks();
                 }));
-#endif
-
-    get_allocated_blks();
-    // if needed, we can return task_result[0] to caller, which for now seems not necessary;
     return;
 }
 
@@ -139,11 +130,12 @@ void Volume::process_metadata_completions(const volume_req_ptr& vreq) {
     LOGTRACE("metadata_complete: req_id={}, err={}", parent_req->request_id, vreq->err.message());
     HISTOGRAM_OBSERVE(m_metrics, volume_map_write_latency, get_elapsed_time_us(vreq->op_start_time));
 
-    if (!vreq->err) {
+    if (vreq->err == no_error) {
         for (auto& ptr : vreq->blkIds_to_free) {
             LOGDEBUG("Freeing Blk: {} {} {}", ptr.m_blkId.to_string(), ptr.m_blk_offset, ptr.m_nblks_to_free);
-            m_data_blkstore->free_blk(ptr.m_blkId, get_page_size() * ptr.m_blk_offset,
-                                      get_page_size() * ptr.m_nblks_to_free);
+            uint64_t free_size = HomeBlks::instance()->get_data_pagesz() * ptr.m_nblks_to_free;
+            m_data_blkstore->free_blk(ptr.m_blkId, HomeBlks::instance()->get_data_pagesz() * ptr.m_blk_offset,
+                                      free_size);
         }
     }
 
@@ -185,10 +177,11 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
 
         MappingKey                                  key(vreq->lba, vreq->nlbas);
         std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;
+        uint64_t offset = 0;
 
-        // TODO - put actual checksum here @sounak
-        for (auto i = 0ul, j = vreq->lba; j < vreq->lba + vreq->nlbas; i++, j++) {
-            carr[i] = j % 65000;
+        for (int i = 0; i < vreq->nlbas; i++) {
+            carr[i] = crc16_t10dif(init_crc_16, vreq->bbuf->at_offset(offset).bytes, get_page_size());
+            offset += get_page_size();
         }
 
         vreq->op_start_time = Clock::now();
@@ -201,6 +194,19 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
 #endif
         m_map->put(vreq, key, value);
     } else {
+        std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;
+        uint64_t offset = 0;
+        for (int i = 0; i < vreq->nlbas; i++) {
+            carr[i] = crc16_t10dif(init_crc_16, vreq->bbuf->at_offset(vreq->read_buf_offset + offset).bytes, 
+                                   get_page_size());
+            offset += get_page_size();
+            if (vreq->checksum[i] != carr[i]) {
+                LOGINFO("checksum mismatch");
+                assert(0);
+                abort();
+            }
+        }
+        
         check_and_complete_req(parent_req, no_error, true /* call_completion_cb */);
     }
 }
@@ -255,8 +261,8 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
             volume_req_ptr vreq = Volume::create_vol_req(this, hb_req);
             vreq->bid = bid[i];
             vreq->lba = lba + lbas_snt;
-            vreq->seqId = sid;              // TODO - actual seqId/lastCommit seq id should be from vol interface req
-            vreq->lastCommited_seqId = sid; // keeping only latest version always
+            vreq->seqId = GET_IO_SEQ_ID(sid); // TODO - actual seqId/lastCommit seq id should be from vol interface req
+            vreq->lastCommited_seqId = vreq->seqId; // keeping only latest version always
             vreq->op_start_time = data_io_start_time;
 
             assert((bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) % m_sb->page_size) == 0);
@@ -367,8 +373,8 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
         volume_req_ptr vreq = Volume::create_vol_req(this, hb_req);
         vreq->lba = lba;
         vreq->nlbas = nlbas;
-        vreq->seqId = sid;
-        vreq->lastCommited_seqId = sid; // read only latest value
+        vreq->seqId = GET_IO_SEQ_ID(sid);
+        vreq->lastCommited_seqId = vreq->seqId; // read only latest value
 
         std::vector< std::pair< MappingKey, MappingValue > > kvs;
 
@@ -412,22 +418,35 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
                 ValueEntry ve;
                 (kv.second.get_array()).get(0, ve, false);
 
-#ifndef NDEBUG
-                // TODO - at this point, ve has checksum array to verify against later @sounak
-                for (auto i = 0ul; i < kv.first.get_n_lba(); i++, cur_lba++) {
-                    if (ve.get_checksum_at(i) != cur_lba % 65000)
-                        LOGDEBUG("Checksum mismatch ,{},{}", kv.first.to_string(), kv.second.to_string());
+                /* Get checksum also */
+                for (auto i = 0ul; i < kv.first.get_n_lba(); i++) {
+                    child_vreq->checksum[i] = ve.get_checksum_at(i);
                 }
-#endif
 
                 auto sz = get_page_size() * kv.first.get_n_lba();
                 auto offset = HomeBlks::instance()->get_data_pagesz() * ve.get_blk_offset();
+                child_vreq->read_buf_offset = offset;
                 boost::intrusive_ptr< BlkBuffer > bbuf =
                     m_data_blkstore->read(ve.get_blkId(), offset, sz,
                                           boost::static_pointer_cast< blkstore_req< BlkBuffer > >(child_vreq));
 
                 // TODO: @hkadayam There is a potential for race of read_buf_list getting emplaced after completion
                 hb_req->read_buf_list.emplace_back(sz, offset, bbuf);
+                if (sync) {
+                    std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;
+                    uint64_t offset = 0;
+                    for (int i = 0; i < child_vreq->nlbas; i++) {
+                        carr[i] = crc16_t10dif(init_crc_16, 
+                                    child_vreq->bbuf->at_offset(child_vreq->read_buf_offset + offset).bytes,
+                                    get_page_size());
+                        offset += get_page_size();
+                        if (child_vreq->checksum[i] != carr[i]) {
+                            LOGINFO("checksum mismatch");
+                            assert(0);
+                            abort();
+                        }
+                    }
+                }
             }
         }
         auto rd_size = m_sb->page_size * nlbas;

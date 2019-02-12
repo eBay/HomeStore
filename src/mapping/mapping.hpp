@@ -18,7 +18,6 @@ using namespace homeds::btree;
 
 #define LBA_MASK 0xFFFFFFFFFFFF
 #define CS_ARRAY_STACK_SIZE 256 //equals 2^N_LBA_BITS //TODO - put static assert
-#define MAX_NUM_LBA ((1 << NBLKS_BITS) - 1)
 namespace homestore {
 
     struct LbaId {
@@ -35,6 +34,8 @@ namespace homestore {
         LbaId(uint64_t lba_start, uint64_t n_lba) : m_lba_start(lba_start), m_n_lba(n_lba) {
             assert(n_lba < MAX_NUM_LBA);
         }
+        
+        bool is_invalid(){ return m_lba_start==0 && m_n_lba==0;}
 
     }__attribute__ ((__packed__));
 
@@ -211,7 +212,8 @@ namespace homestore {
         string to_string() const{
             stringstream ss;
             ss << "Seq:" << get_seqId() << "," << get_blkId() << ",Boff:" << unsigned(get_blk_offset());
-            ss << ",v_nlba:" << get_nlba();
+            ss << ",v_nlba:" << unsigned(get_nlba());
+            ss << ",cs:" << get_checksums_string();
             return ss.str();
         }
         friend ostream &operator<<(ostream &os, const ValueEntry &ve) {
@@ -294,12 +296,11 @@ namespace homestore {
             auto i=0u;
             if(v_array.size()>0) {
                 while (i < v_array.size() && v_array[i].compare(&ve) > 0) ++i;
-                if (v_array[i].compare(&ve) == 0) {
+                if (i < v_array.size() && v_array[i].compare(&ve) == 0) {
                     /* every sequence ID is invalid until jorunaling comes */
-                    ++i;
                     assert(ve.get_seqId() == INVALID_SEQ_ID);
+                    ++i;
                 }
-                assert(v_array[i].compare(&ve) != 0);//duplicate event
             }
             v_array.insert(v_array.begin() + i, ve);
             out.get_array().set_elements(v_array);
@@ -613,18 +614,7 @@ namespace homestore {
             //remove older versions
             for (auto &pair : replace_kv) {
                 Blob_Array <ValueEntry> &array = pair.second.get_array();
-#ifndef NDEBUG
-                //sorted check
-                auto i = 1u;
-                while (array.get_total_elements() > 1 && i < array.get_total_elements()) {
-                    ValueEntry preve;
-                    array.get(i - 1, preve, false);
-                    ValueEntry curve;
-                    array.get(i, curve, false);
-                    assert(preve.compare(&curve) > 1);
-                    i++;
-                }
-#endif
+
                 auto j = 0u;
                 while (j < array.get_total_elements() - 1) {
                     //iterate array and remove elements<lastcommitedid, but still maintain one latest value entry
@@ -634,13 +624,27 @@ namespace homestore {
                     if (param->m_req->lastCommited_seqId == INVALID_SEQ_ID || 
                         ve.get_seqId() < param->m_req->lastCommited_seqId) {
                         if (param->is_state_modifiable()) {
-                            Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(), pair.first.get_n_lba());
+                            Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(), 
+                                    (m_vol_page_size/HomeBlks::instance()->get_data_pagesz())*pair.first.get_n_lba());
                             param->m_req->blkIds_to_free.emplace_back(fbe);
                         }
                         array.remove(j);
                     } else break;
                     j++;
                 }
+
+#ifndef NDEBUG
+                //sorted check
+                auto i = 1u;
+                while (array.get_total_elements() > 1 && i < array.get_total_elements()) {
+                    ValueEntry preve;
+                    array.get(i - 1, preve, false);
+                    ValueEntry curve;
+                    array.get(i, curve, false);
+                    assert(preve.compare(&curve) > 0);
+                    i++;
+                }
+#endif
             }
             // TODO merge entries - when neighbours lba/blk are consecutive and have only 1 value entry each
 
@@ -691,13 +695,13 @@ namespace homestore {
                     replace_kv.emplace_back(make_pair(MappingKey(start, k2->start() - start), MappingValue(*v1)));
                 start = k2->start();
             }
+            MappingKey key_end;
+            MappingValue val_end;
             if (k2->end() < k1->end()) { // non overlaping end
-                MappingKey key(k2->end() + 1, k1->end() - k2->end());
+                key_end.set(k2->end() + 1, k1->end() - k2->end());
                 if (v1->get_array().get_total_elements() > 0) {
-                    MappingValue value;
                     auto lba_offset = k2->end() - k1->start() + 1;
-                    v1->add_offset_copy(lba_offset, key.get_n_lba(), m_vol_page_size, value);
-                    replace_kv.emplace_back(make_pair(key, value));
+                    v1->add_offset_copy(lba_offset, key_end.get_n_lba(), m_vol_page_size, val_end);
                 }
                 end = k2->end();
             }
@@ -705,19 +709,23 @@ namespace homestore {
             assert(end <= k2->end() && end <= k1->end());
 
             //get entris from both v1/v2 and offset is needed for both of them
-            MappingKey key3(start, end - start + 1);
+            auto overlap_nlba = end - start + 1;
+            MappingKey key3(start, overlap_nlba);
             auto k1_offset = start - k1->start();
             auto k2_offset = start - k2->start();
             MappingValue temp_mv;
             if (v1->get_array().get_total_elements() > 0)
-                v1->add_offset_copy(k1_offset, k1->get_n_lba() - k1_offset, m_vol_page_size, temp_mv);
+                v1->add_offset_copy(k1_offset, overlap_nlba, m_vol_page_size, temp_mv);
             ValueEntry new_ve;
             v2->get_array().get(0, new_ve, true);
-            new_ve.add_offset(k2_offset, k2->get_n_lba() - k2_offset, m_vol_page_size);
+            new_ve.add_offset(k2_offset, overlap_nlba, m_vol_page_size);
             MappingValue value3;
             temp_mv.add_copy(new_ve, value3);
             replace_kv.emplace_back(make_pair(key3, value3));
 
+            if(!(key_end.get_lbaId().is_invalid())){
+                replace_kv.emplace_back(make_pair(key_end, val_end));
+            }
         }
 
         /**add missing interval to replace kv**/
@@ -787,7 +795,8 @@ namespace homestore {
                         std::this_thread::sleep_for(std::chrono::seconds(10));
                         assert(0);
                     }
-                    last_bid_offset += values[i].first.get_n_lba();
+                    last_bid_offset += values[i].first.get_n_lba() * 
+                                        (m_vol_page_size / HomeBlks::instance()->get_data_pagesz());
                 }
                 last_slba = values[i].first.end() + 1;
                 i++;

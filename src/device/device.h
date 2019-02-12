@@ -25,8 +25,11 @@
 #include "endpoint/drive_endpoint.hpp"
 #include <boost/uuid/uuid_generators.hpp>
 #include "homeds/utility/useful_defs.hpp"
+#include <isa-l/crc.h>
 
 namespace homestore {
+
+const uint16_t init_crc_16 = 0x8005;
 
 #define MAGIC 0xCEEDDEEB
 #define PRODUCT_NAME "OmStore"
@@ -120,10 +123,12 @@ struct super_block {
     boost::uuids::uuid system_uuid;
 } __attribute((packed));
 #define SUPERBLOCK_SIZE (HomeStoreConfig::atomic_phys_page_size)
+#define SUPERBLOCK_PAYLOAD_OFFSET 10
 
 struct dm_info {
     /* header of pdev, chunk and vdev */
     uint64_t     magic; // Header magic expected to be at the top of block
+    uint16_t     checksum; // Payload Checksum
     uint32_t     version;
     uint64_t     size;
     pdevs_block  pdev_hdr;
@@ -138,6 +143,8 @@ struct dm_info {
 #define DM_INFO_BLK_SIZE                                                                                               \
     (sizeof(dm_info) + PDEV_INFO_BLK_OFFSET + CHUNK_INFO_BLK_OFFSET +                                                  \
      HomeStoreConfig::max_vdevs * sizeof(vdev_info_block))
+
+#define DM_PAYLOAD_OFFSET 10
 
 #define INVALID_PDEV_ID UINT32_MAX
 #define INVALID_VDEV_ID UINT32_MAX

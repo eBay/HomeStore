@@ -345,7 +345,7 @@ public:
             process_completions(boost::static_pointer_cast< virtualdev_req >(req));
         } else {
             m_vdev.write(req->bid, m_wb_cache.writeback_get_memvec(req),
-                         boost::static_pointer_cast< virtualdev_req >(req));
+                         boost::static_pointer_cast< virtualdev_req >(req), req->data_offset);
         }
     }
 

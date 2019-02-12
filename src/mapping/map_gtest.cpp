@@ -6,6 +6,13 @@
 #include <sds_options/options.h>
 #include "mapping.hpp"
 
+extern "C" {
+#include <fcntl.h>
+#include <sys/epoll.h>
+#include <sys/eventfd.h>
+#include <sys/timeb.h>
+}
+
 SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write, iomgr,
                  btree_structures, btree_nodes, btree_generics,
                  varsize_blk_alloc,
@@ -28,8 +35,20 @@ const char *__asan_default_options() {
 uint64_t num_ios;
 uint64_t num_threads;
 
+class test_ep : public iomgr::EndPoint {
+    public:
+        test_ep(std::shared_ptr<iomgr::ioMgr> iomgr) :iomgr::EndPoint(iomgr) {
+        }   
+        void init_local() override {
+        }   
+        void print_perf() override {
+        }   
+};
+
 struct MapTest : public testing::Test {
 protected:
+    std::condition_variable m_cv;
+    std::mutex m_cv_mtx;
     std::mutex mutex;
     homeds::Bitset *m_lba_bm;
     homeds::Bitset *m_blk_bm;
@@ -45,6 +64,10 @@ protected:
     std::atomic<uint64_t> seq_Id;
     bool start = false;
     boost::uuids::uuid uuid;
+    int fd;
+    test_ep *ep;
+    int ev_fd;
+
 public:
     MapTest() {
         m_lba_bm = new homeds::Bitset(MAX_LBA);
@@ -135,6 +158,26 @@ public:
         m_map = new mapping(params.size, params.page_size,
                             (std::bind(&MapTest::process_metadata_completions, this, std::placeholders::_1)));
         start = true;
+        ev_fd = eventfd(0, EFD_NONBLOCK);
+        iomgr_obj->add_fd(ev_fd, [this](auto fd, auto cookie, auto event) { process_ev_common(fd, cookie, event); }, 
+            EPOLLIN, 9, nullptr);
+        ep = new test_ep(iomgr_obj);
+        iomgr_obj->add_ep(ep);
+        iomgr_obj->start();
+        uint64_t temp = 1;
+        [[maybe_unused]] auto rsize = read(ev_fd, &temp, sizeof(uint64_t));
+        uint64_t size = write(ev_fd, &temp, sizeof(uint64_t));
+        if (size != sizeof(uint64_t)) {
+            assert(0);
+        }
+    }
+
+    void process_ev_common(int fd, void *cookie, int event) { 
+        uint64_t temp;
+        [[maybe_unused]] auto rsize = read(ev_fd, &temp, sizeof(uint64_t));
+        iomgr_obj->process_done(fd, event);
+        iomgr_obj->fd_reschedule(fd, event);
+        // TODO add IO code
     }
 
     void release_lba_range_lock(uint64_t &lba, uint64_t &nlbas) {
@@ -187,7 +230,7 @@ public:
         }
     }
 
-    void read(uint64_t lba, uint64_t nlbas, std::vector<std::pair<MappingKey, MappingValue>> &kvs) {
+    void read_lba(uint64_t lba, uint64_t nlbas, std::vector<std::pair<MappingKey, MappingValue>> &kvs) {
         LOGDEBUG("Reading -> lba:{},nlbas:{}", lba, nlbas);
         boost::intrusive_ptr<volume_req> volreq(new volume_req());
         volreq->lba = lba;
@@ -209,7 +252,7 @@ public:
         auto batch = 100u;
         while (i < MAX_LBA) {
             std::vector<std::pair<MappingKey, MappingValue>> kvs;
-            read(i, batch, kvs);
+            read_lba(i, batch, kvs);
             verify(kvs);
             i += batch;
             if (i + batch > MAX_LBA) batch = MAX_LBA - i;
@@ -243,12 +286,12 @@ public:
         uint64_t lba = 0, nlbas = 0;
         generate_random_lba_nlbas(lba, nlbas);
         std::vector<std::pair<MappingKey, MappingValue>> kvs;
-        read(lba, nlbas, kvs);
+        read_lba(lba, nlbas, kvs);
         verify(kvs);
         release_lba_range_lock(lba, nlbas);
     }
 
-    void write(uint64_t lba, uint64_t nlbas, BlkId bid) {
+    void write_lba(uint64_t lba, uint64_t nlbas, BlkId bid) {
         boost::intrusive_ptr<volume_req> req(new volume_req());
 
         auto sid = seq_Id.fetch_add(1, memory_order_seq_cst);
@@ -280,7 +323,7 @@ public:
 
         generate_random_blkId(bid, nlbas);
 
-        write(lba, nlbas, bid);
+        write_lba(lba, nlbas, bid);
 
         for (auto st = lba, bst = bid.get_id(); st < lba + nlbas; st++, bst++)
             m_blk_id_arr[st] = bst;
@@ -289,24 +332,11 @@ public:
 
 //        //do sync read
 //        std::vector<std::pair<MappingKey, MappingValue>> kvs;
-//        read(lba, nlbas, kvs);
+//        read_lba(lba, nlbas, kvs);
 //
 //        verify(kvs);
 
         release_lba_range_lock(lba, nlbas);
-    }
-
-    template<class Fn, class... Args>
-    void run_in_parallel(int nthreads, Fn &&fn) {
-        std::vector<std::thread *> thrs;
-        for (auto i = 0; i < nthreads; i++) {
-            thrs.push_back(new std::thread(fn, this));
-        }
-        for (auto t : thrs) {
-            t->join();
-            delete (t);
-        }
-        verify_all();
     }
 
     static void insert_and_get_thread(MapTest *test) {
@@ -319,14 +349,18 @@ public:
     void remove_files() {
         remove("file101");
     }
+
+    void wait_cmpl() {
+        std::unique_lock< std::mutex > lk(m_cv_mtx);
+        m_cv.wait(lk);
+    }   
 };
 
 TEST_F(MapTest, RandomTest
 ) {
     this->start_homestore();
 
-    while (!start)continue;
-    run_in_parallel(num_threads, insert_and_get_thread);
+    this->wait_cmpl();
     this->remove_files();
 }
 

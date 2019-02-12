@@ -23,9 +23,6 @@
 #include "btree_node.h"
 #include "physical_node.hpp"
 
-extern int btree_buf_alloc;
-extern int btree_buf_free;
-extern int btree_buf_make_obj;
 namespace homeds { namespace btree {
 
 #define SSDBtreeNode  BtreeNode<SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize, homestore::writeback_req>
@@ -62,21 +59,15 @@ public:
 #ifndef NDEBUG
 #endif
     static BtreeBuffer *make_object() {
-        btree_buf_make_obj++;
         return homeds::ObjectAllocator< SSDBtreeNode >::make_object();
     }
     BtreeBuffer() {
-        btree_buf_alloc++;
 #ifndef NDEBUG
         is_btree = true;
         recovered = false;
 #endif
-        if (btree_buf_alloc > btree_buf_make_obj) {
-            assert(0);
-        }
     }
     virtual ~BtreeBuffer() {
-        btree_buf_free++;
     }
 
     virtual size_t get_your_size() const override { return sizeof(SSDBtreeNode); }
@@ -299,7 +290,12 @@ public:
 #ifndef NO_CHECKSUM
         auto physical_node = (LeafPhysicalNode *)
             ((boost::static_pointer_cast<SSDBtreeNode>(bn))->at_offset(0).bytes);
-        assert(physical_node->verify_node(get_node_area_size(store)));
+        auto is_match = physical_node->verify_node(get_node_area_size(store));
+        if (!is_match) {
+            LOGINFO("mismatch node");
+            assert(0);
+            abort();
+        }
 #endif
     }
 

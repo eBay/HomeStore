@@ -34,6 +34,26 @@ public:
         this->set_node_type(BTREE_NODETYPE_SIMPLE);
     }
 public:
+
+#ifndef NDEBUG
+    void validate_sanity() {
+        int i = 1;
+        std::map<int, bool> mapOfWords;
+        //validate if keys are in ascending orde
+        K prevKey;
+        while (i < (int)this->get_total_entries()) {
+            K key;
+            get_nth_key(i,&key,false);
+            uint64_t kp = *(uint64_t*)key.get_blob().bytes;
+            if (i > 0 && prevKey.compare(&key) >= 0) {
+                LOGDEBUG("non sorted entry : {} -> {} ", kp, this->to_string());
+                assert(0);
+            }
+            ++i;
+        }
+    } 
+#endif
+
     void get(uint32_t ind, BtreeValue *outval, bool copy) const {
         // Need edge index
         if (ind == this->get_total_entries()) {
@@ -62,7 +82,7 @@ public:
         this->inc_gen();
 
 #ifndef NDEBUG
-        //print();
+        validate_sanity();
 #endif
     }
 
@@ -127,6 +147,9 @@ public:
             this->sub_entries(ind_e-ind_s+1);
         }
         this->inc_gen();
+#ifndef NDEBUG
+        validate_sanity();
+#endif
         
     }
 
@@ -141,6 +164,9 @@ public:
         // TODO: Check if we need to upgrade the gen and impact of doing  so with performance. It is especially
         // needed for non similar key/value pairs
         this->inc_gen();
+#ifndef NDEBUG
+        validate_sanity();
+#endif
     }
 
     void update(uint32_t ind, const BtreeKey &key, const BtreeValue &val) {
@@ -152,6 +178,9 @@ public:
         }
 
         this->inc_gen();
+#ifndef NDEBUG
+        validate_sanity();
+#endif
     }
 
     uint32_t get_available_size(const BtreeConfig &cfg) const {
@@ -185,6 +214,9 @@ public:
         other_node->inc_gen();
         this->inc_gen();
 
+#ifndef NDEBUG
+        validate_sanity();
+#endif
         return nentries;
     }
 
@@ -217,6 +249,9 @@ public:
         other_node->inc_gen();
         this->inc_gen();
 
+#ifndef NDEBUG
+        validate_sanity();
+#endif
         return nentries;
     }
 
