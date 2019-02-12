@@ -50,6 +50,7 @@ struct vol_sb_header {
     uint64_t version;
     uint32_t gen_cnt;
     BlkId    blkid;
+    uint64_t boot_cnt;
 } __attribute((packed));
 
 struct vol_config_sb : vol_sb_header {
@@ -132,6 +133,7 @@ public:
     homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy, BLKSTORE_BUFFER_TYPE >* get_metadata_blkstore();
     void                                                                                 vol_sb_remove(vol_sb* sb);
     uint32_t                                                                             get_data_pagesz() const;
+    uint64_t get_boot_cnt();
 
 #ifndef NDEBUG
     void print_tree(const VolumePtr& vol);

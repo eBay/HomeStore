@@ -19,6 +19,7 @@ using namespace std;
 
 namespace homestore {
 
+#define MAX_NUM_LBA ((1 << NBLKS_BITS) - 1)
 #define INVALID_SEQ_ID UINT64_MAX
 class mapping;
 enum vol_state;
@@ -37,6 +38,11 @@ struct Free_Blk_Entry {
 struct volume_req;
 typedef boost::intrusive_ptr< volume_req > volume_req_ptr;
 
+/* first 48 bits are actual sequence ID and last 16 bits are boot cnt */
+#define SEQ_ID_BIT_CNT 48ul
+#define BOOT_CNT_MASK 0x0000fffffffffffful
+#define GET_IO_SEQ_ID(sid) ((HomeBlks::instance()->get_boot_cnt() << SEQ_ID_BIT_CNT) | (sid & BOOT_CNT_MASK))
+
 struct volume_req : public blkstore_req< BlkBuffer > {
     uint64_t                      lba;
     int                           nlbas;
@@ -46,6 +52,8 @@ struct volume_req : public blkstore_req< BlkBuffer > {
     uint64_t                      seqId;
     uint64_t                      lastCommited_seqId;
     Clock::time_point             op_start_time;
+    uint16_t                      checksum[MAX_NUM_LBA];
+    uint64_t                      read_buf_offset;
 
     /* number of times mapping table need to be updated for this req. It can
      * break the ios update in mapping btree depending on the key range.
@@ -158,6 +166,7 @@ public:
     void get_allocated_blks();
     void process_metadata_completions(const volume_req_ptr& wb_req);
     void process_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
+    void recovery_start();
 
     uint64_t get_elapsed_time(Clock::time_point startTime);
     void     attach_completion_cb(const io_comp_callback& cb);

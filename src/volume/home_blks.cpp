@@ -195,6 +195,7 @@ void HomeBlks::config_super_block_init(BlkId& bid) {
     m_cfg_sb->gen_cnt = 0;
     m_cfg_sb->version = VOL_SB_VERSION;
     m_cfg_sb->magic = VOL_SB_MAGIC;
+    m_cfg_sb->boot_cnt = 0;
     config_super_block_write(false);
 }
 
@@ -357,6 +358,7 @@ void HomeBlks::scan_volumes() {
                 VolumePtr new_vol;
                 try {
                     new_vol = Volume::make_volume(sb);
+                    new_vol->recovery_start();
                 } catch (const std::exception& e) {
                     m_scan_cnt--;
                     throw e;
@@ -427,11 +429,11 @@ void HomeBlks::create_metadata_blkstore(vdev_info_block* vb) {
         uint64_t size = (2 * m_cfg.max_cap) / 100;
         size = ALIGN_SIZE(size, HomeStoreConfig::phys_page_size);
         m_metadata_blk_store = new BlkStore< VdevFixedBlkAllocatorPolicy, BLKSTORE_BUFFER_TYPE >(
-            m_dev_mgr, m_cache, size, WRITEBACK_CACHE, 0, (char*)&blob, sizeof(blkstore_blob),
+            m_dev_mgr, m_cache, size, RD_MODIFY_WRITEBACK_CACHE, 0, (char*)&blob, sizeof(blkstore_blob),
             HomeStoreConfig::atomic_phys_page_size);
     } else {
         m_metadata_blk_store = new BlkStore< VdevFixedBlkAllocatorPolicy, BLKSTORE_BUFFER_TYPE >(
-            m_dev_mgr, m_cache, vb, WRITEBACK_CACHE, 0, HomeStoreConfig::atomic_phys_page_size);
+            m_dev_mgr, m_cache, vb, RD_MODIFY_WRITEBACK_CACHE, 0, HomeStoreConfig::atomic_phys_page_size);
         if (vb->failed) {
             m_vdev_failed = true;
             LOGINFO("metadata block store is in failed state");
@@ -489,14 +491,19 @@ void HomeBlks::create_sb_blkstore(vdev_info_block* vb) {
         memcpy(m_cfg_sb, valid_buf->at_offset(0).bytes, sizeof(*m_cfg_sb));
         assert(m_cfg_sb->gen_cnt > 0);
         assert(m_cfg_sb->blkid.to_integer() == blob->blkid.to_integer());
-        if (rewrite) {
-            /* update the config super block */
-            config_super_block_write(false);
-        }
+        m_cfg_sb->boot_cnt++;
+        /* update the config super block */
+        config_super_block_write(false);
     }
 }
 
 bool HomeBlks::is_ready() { return (m_rdy); }
+
+uint64_t HomeBlks::get_boot_cnt() {
+    
+    assert(m_cfg_sb->boot_cnt < UINT16_MAX);
+    return (uint16_t) m_cfg_sb->boot_cnt; 
+}
 
 void HomeBlks::init_thread() {
     std::error_condition error = no_error;

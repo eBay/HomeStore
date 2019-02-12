@@ -60,11 +60,11 @@ public:
                 /* reinsert it at the same position */
                 it = m_list.insert(it, *rec);
                 count++;
-                LOGINFO("reinserting it"); 
+                LOGDEBUG("reinserting it"); 
             }
             
             if (count) { 
-                LOGINFO("LRU ejection had to skip {} entries", count); 
+                LOGDEBUG("LRU ejection had to skip {} entries", count); 
             }
         }
 

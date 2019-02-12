@@ -128,6 +128,11 @@ public:
         for(; i > 0 && nblks < m_slab_nblks[i-1]; i--);
         return std::make_pair(i, m_slab_capacity[i]);
     }
+    
+    uint32_t get_slab_lower_bound(uint32_t indx) const {
+        /* m_slab_nblks[i] has the blocks from m_slab_nblks[i - 1] to m_slab_nblks[i] */
+        return(m_slab_nblks[indx - 1]);
+    }
 
     std::string to_string() {
         std::stringstream ss;
@@ -440,7 +445,7 @@ public:
     VarsizeBlkAllocator(VarsizeBlkAllocConfig &cfg, bool init);
     virtual ~VarsizeBlkAllocator();
 
-    BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid, bool retry = true) override;
+    BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid, bool best_fit = false) override;
     BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints, 
                                  std::vector<BlkId> &out_blkid) override;
     void free(const BlkId &b) override;
@@ -548,6 +553,7 @@ private:
         out_entry->set_phys_page_id(blknum_to_phys_pageid(blknum));
         out_entry->set_temperature(get_blk_temperature(blknum));
     }
+    uint64_t get_best_fit_cache(uint64_t blks_rqstd);
 };
 
 #define BLKID_RANGE_FIRST    0UL

@@ -33,6 +33,7 @@ std::vector<std::string> dev_names;
 uint64_t max_vols = 1;
 uint64_t run_time;
 uint64_t num_threads;
+uint64_t queue_depth;
 uint32_t read_p;
 uint32_t io_size;
 bool is_file = false;
@@ -40,7 +41,7 @@ constexpr auto Ki = 1024ull;
 constexpr auto Mi = Ki * Ki;
 constexpr auto Gi = Ki * Mi;
 constexpr uint64_t max_io_size = 1 * Mi;
-uint64_t max_outstanding_ios = 64u;
+uint64_t max_outstanding_ios;
 uint64_t max_disk_capacity;
 uint64_t match_cnt = 0;
 uint64_t cache_size = 0;
@@ -83,12 +84,13 @@ class IOTest :  public ::testing::Test {
         virtual ~req() {
             req_free_cnt++;
         }   
-    };  
+    }; 
 
 protected:
     std::shared_ptr<iomgr::ioMgr> iomgr_obj;
     bool init;
     std::vector<VolumePtr> vol;
+    std::vector<homeds::Bitset *> m_vol_bm;
     std::vector<uint64_t> max_vol_blks;
     std::atomic<uint64_t> vol_cnt;
     test_ep *ep;
@@ -105,7 +107,8 @@ protected:
     Clock::time_point print_startTime;
 
 public:
-    IOTest():vol(max_vols), max_vol_blks(max_vols), device_info(0), is_abort(false) {
+    IOTest() :  vol(max_vols), m_vol_bm(max_vols),
+                max_vol_blks(max_vols), device_info(0), is_abort(false) {
         vol_cnt = 0;
         cur_vol = 0;
         max_vol_size = 0;
@@ -165,6 +168,7 @@ public:
         vol[cnt] = vol_obj;
         max_vol_blks[cnt] = VolInterface::get_instance()->get_size(vol_obj) / 
                                            VolInterface::get_instance()->get_page_size(vol_obj);
+        m_vol_bm[cnt] = new homeds::Bitset(max_vol_blks[cnt]);
         assert(VolInterface::get_instance()->get_size(vol_obj) == max_vol_size);
     }
 
@@ -247,13 +251,12 @@ public:
     void random_write() {
         /* XXX: does it really matter if it is atomic or not */
         int cur = ++cur_vol % max_vols;
-        uint64_t lba;
-        uint64_t nblks;
-        
-        
+        uint64_t lba = 0;
+        uint64_t nblks = 0;
         nblks = (io_size * 1024) / (VolInterface::get_instance()->get_page_size(vol[cur]));
         lba = rand() % (max_vol_blks[cur % max_vols] - nblks);
-        
+        if (nblks == 0) { nblks = 1; }
+        m_vol_bm[cur]->set_bits(lba, nblks);
         uint8_t *buf = nullptr;
         uint64_t size = nblks * VolInterface::get_instance()->get_page_size(vol[cur]);
         auto ret = posix_memalign((void **) &buf, 4096, size);
@@ -279,6 +282,8 @@ public:
             assert(0);
             free(buf);
             outstanding_ios--;
+            LOGINFO("write io failure");
+            m_vol_bm[cur]->reset_bits(lba, nblks);
         }
         LOGDEBUG("Wrote {} {} ",lba,nblks);
     }
@@ -286,10 +291,18 @@ public:
     void random_read() {
         /* XXX: does it really matter if it is atomic or not */
         int cur = ++cur_vol % max_vols;
-        uint64_t lba;
-        uint64_t nblks;
+        uint64_t lba = 0;
+        uint64_t nblks = 0;
+    start:
         nblks = (io_size * 1024) / (VolInterface::get_instance()->get_page_size(vol[cur]));
         lba = rand() % (max_vol_blks[cur % max_vols] - nblks);
+        if (nblks == 0) { nblks = 1; }
+        {
+            /* check if someone is already doing writes/reads */
+            if (m_vol_bm[cur]->is_bits_reset(lba, nblks)) {
+                goto start;
+            }
+        }
         read_vol(cur, lba, nblks);
         LOGDEBUG("Read {} {} ",lba,nblks);
     }
@@ -315,6 +328,7 @@ public:
         if (ret_io != no_error) {
             outstanding_ios--;
             read_err_cnt++;
+            LOGINFO("read io failure");
         }
     }
 
@@ -391,6 +405,7 @@ TEST_F(IOTest, normal_random_io_test) {
 SDS_OPTION_GROUP(perf_test_volume, 
 (run_time, "", "run_time", "run time for io", ::cxxopts::value<uint32_t>()->default_value("30"), "seconds"),
 (num_threads, "", "num_threads", "num threads for io", ::cxxopts::value<uint32_t>()->default_value("8"), "number"),
+(queue_depth, "", "queue_depth", "io queue depth per thread", ::cxxopts::value<uint32_t>()->default_value("8"), "number"),
 (read_percent, "", "read_percent", "read in percentage", ::cxxopts::value<uint32_t>()->default_value("0"), "percentage"),
 (device_list, "", "device_list", "List of device paths", ::cxxopts::value<std::vector<std::string>>(), "path [...]"),
 (io_size, "", "io_size", "size of io in KB", ::cxxopts::value<uint32_t>()->default_value("8"), "size of io in KB"),
@@ -410,7 +425,8 @@ const char* __asan_default_options() {
 
 /* We can run this target either by using default options which run the normal io tests or by setting different options.
  * Format is
- *   1. ./perf_test_volume --gtest_filter=*random* --run_time=120 --num_threads=16, --device_list=file1 --device_list=file2 --io_size=8
+ *   1. ./perf_test_volume --gtest_filter=*random* --run_time=120 --num_threads=16 --queue_depth 8
+ *                         --device_list=file1 --device_list=file2 --io_size=8
  */
 int main(int argc, char *argv[]) {
     ::testing::GTEST_FLAG(filter) = "*normal_random*";
@@ -421,6 +437,8 @@ int main(int argc, char *argv[]) {
 
     run_time = SDS_OPTIONS["run_time"].as<uint32_t>();
     num_threads = SDS_OPTIONS["num_threads"].as<uint32_t>();
+    queue_depth = SDS_OPTIONS["queue_depth"].as<uint32_t>();
+    max_outstanding_ios = num_threads * queue_depth;
     read_p = SDS_OPTIONS["read_percent"].as<uint32_t>();
     io_size = SDS_OPTIONS["io_size"].as<uint32_t>();
     dev_names = SDS_OPTIONS["device_list"].as<std::vector<std::string>>();

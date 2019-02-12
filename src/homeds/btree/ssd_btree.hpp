@@ -66,7 +66,6 @@ public:
         is_btree = true;
         recovered = false;
 #endif
-    }
     virtual ~BtreeBuffer() = default;
     virtual void free_yourself() override { ObjectAllocator< SSDBtreeNode >::deallocate((SSDBtreeNode *)this); }
     //virtual size_t get_your_size() const override { return sizeof(SSDBtreeNode); }
@@ -294,7 +293,12 @@ public:
 #ifndef NO_CHECKSUM
         auto physical_node = (LeafPhysicalNode *)
             ((boost::static_pointer_cast<SSDBtreeNode>(bn))->at_offset(0).bytes);
-        assert(physical_node->verify_node(get_node_area_size(store)));
+        auto is_match = physical_node->verify_node(get_node_area_size(store));
+        if (!is_match) {
+            LOGINFO("mismatch node");
+            assert(0);
+            abort();
+        }
 #endif
     }
 

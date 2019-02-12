@@ -295,15 +295,15 @@ public:
                 int start_ind = 0, end_ind = 0;
                 uint32_t new_size = 0, existing_size = 0;
                 std::vector<std::pair<K, V>> match, replace_kv;
-                const_cast<VariableNode *>(this)->get_all(ureq->get_cb_param()->get_input_range(), 
+                const_cast<VariableNode *>(this)->get_all(ureq->get_input_range(), 
                         UINT32_MAX, start_ind, end_ind, &match);
                 for (auto &pair : match) 
                     existing_size += pair.first.get_blob_size() + pair.second.get_blob_size() + get_record_size();
 
                 ureq->get_cb_param()->set_state_modifiable(false);
                 ureq->callback()(match, replace_kv,ureq->get_cb_param());
-#ifndef NDEBUG
-                if(replace_kv.size()>0){
+#if 0
+                if(replace_kv.size()>0 && !(this->get_edge_id().is_valid())){
                     std::pair<K, V> &pair2 =replace_kv[replace_kv.size()-1];
                     assert(pair2.first.compare(ureq->get_cb_param()->get_sub_range().get_end_key()) <= 0);
                 }

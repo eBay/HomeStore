@@ -47,19 +47,19 @@ SDS_LOGGING_DECL(btree_structures, btree_nodes, btree_generics)
 #define DLOGDEBUGMOD(...)    LOGDEBUGMOD(__VA_ARGS__)
 #define DLOGTRACEMOD(...)    LOGTRACEMOD(__VA_ARGS__)
 #else
-#define DLOGCRITICAL(...) (void)
-#define DLOGERROR(...)    (void)
-#define DLOGWARN(...)     (void)
-#define DLOGINFO(...)     (void)
-#define DLOGDEBUG(...)    (void)
-#define DLOGTRACE(...)    (void)
+#define DLOGCRITICAL(...) 
+#define DLOGERROR(...)    
+#define DLOGWARN(...)     
+#define DLOGINFO(...)     
+#define DLOGDEBUG(...)    
+#define DLOGTRACE(...)    
 
-#define DLOGCRITICALMOD(...) (void)
-#define DLOGERRORMOD(...)    (void)
-#define DLOGWARNMOD(...)     (void)
-#define DLOGINFOMOD(...)     (void)
-#define DLOGDEBUGMOD(...)    (void)
-#define DLOGTRACEMOD(...)    (void)
+#define DLOGCRITICALMOD(...) 
+#define DLOGERRORMOD(...)    
+#define DLOGWARNMOD(...)     
+#define DLOGINFOMOD(...)     
+#define DLOGDEBUGMOD(...)    
+#define DLOGTRACEMOD(...)    
 #endif
 
 namespace homeds {
@@ -240,7 +240,11 @@ public:
                    boost::intrusive_ptr<btree_req_type> dependent_req, boost::intrusive_ptr<btree_req_type> cookie,
                    BtreeUpdateRequest<K, V> &bur) {
         V temp_v;
+        //initialize cb param
         K sub_st(*(K*)bur.get_input_range().get_start_key()), sub_en(*(K*)bur.get_input_range().get_end_key());//cpy
+        K in_st(*(K*)bur.get_input_range().get_start_key()), in_en(*(K*)bur.get_input_range().get_end_key());//cpy
+        bur.get_cb_param()->get_input_range().set(in_st, bur.get_input_range().is_start_inclusive(),
+                                                in_en, bur.get_input_range().is_end_inclusive());
         bur.get_cb_param()->get_sub_range().set(sub_st, bur.get_input_range().is_start_inclusive(),
                                                 sub_en, bur.get_input_range().is_end_inclusive());
         put(k, v, put_type, dependent_req, cookie, &temp_v, &bur);
@@ -343,6 +347,13 @@ retry:
     }
 
     bool query(BtreeQueryRequest< K, V >& query_req, std::vector< std::pair< K, V > >& out_values) {
+        //initialize cb param
+        K in_st(*(K*)query_req.get_input_range().get_start_key());
+        K in_en(*(K*)query_req.get_input_range().get_end_key());//cpy
+        if(query_req.get_cb_param())
+            query_req.get_cb_param()->get_input_range().set(in_st, query_req.get_input_range().is_start_inclusive(),
+                                                  in_en, query_req.get_input_range().is_end_inclusive());
+        
         bool has_more = false;
         if (query_req.get_batch_size() == 0) {
             return false;
@@ -992,13 +1003,13 @@ private:
                 assert(bur->callback() != nullptr); // TODO - range req without callback implementation
                 std::vector< std::pair< K, V > > match;
                 int                              start_ind = 0, end_ind = 0;
-                my_node->get_all(bur->get_cb_param()->get_input_range(), UINT32_MAX, start_ind, end_ind, &match);
+                my_node->get_all(bur->get_input_range(), UINT32_MAX, start_ind, end_ind, &match);
 
                 vector< pair< K, V > > replace_kv;
                 bur->callback()(match, replace_kv, bur->get_cb_param());
                 if (match.size() > 0 && start_ind <= end_ind)
                     my_node->remove(start_ind, end_ind);
-                for (auto pair : replace_kv) // insert is based on compare() of BtreeKey
+                for (auto &pair : replace_kv) // insert is based on compare() of BtreeKey
                     my_node->insert(pair.first, pair.second);
                 multinode_req->writes_pending.fetch_add(1, std::memory_order_acq_rel);
             } else
@@ -1021,7 +1032,7 @@ private:
 
         int start_ind = 0, end_ind = -1;
         if (bur != nullptr) // just get start/end index from get_all
-            my_node->get_all(bur->get_cb_param()->get_input_range(), UINT32_MAX, start_ind, end_ind);
+            my_node->get_all(bur->get_input_range(), UINT32_MAX, start_ind, end_ind);
         else {
             bool          is_found = false;
             BtreeNodeInfo child_info;
@@ -1078,8 +1089,8 @@ private:
                 K end_key;
                 BtreeKey *end_key_ptr = &end_key;
                 if (curr_ind == (int) my_node->get_total_entries() && my_node->get_edge_id().is_valid()) {//edge
-                    end_key_ptr = const_cast<BtreeKey *>(bur->get_cb_param()->get_input_range().get_end_key());
-                    end_inc = bur->get_cb_param()->get_input_range().is_end_inclusive();
+                    end_key_ptr = const_cast<BtreeKey *>(bur->get_input_range().get_end_key());
+                    end_inc = bur->get_input_range().is_end_inclusive();
                 } else
                     my_node->get_nth_key(curr_ind, end_key_ptr, false);
 
@@ -1106,15 +1117,15 @@ private:
             if (child_node->is_split_needed(m_btree_cfg, k, v, &ind_hint, put_type, bur)) {
                 if(bur && is_any_child_splitted) { // spliting another child
                     if(my_node->is_split_needed(m_btree_cfg, k, v, &ind_hint, put_type, bur)){
+#if 0
                         if(curr_ind!=0){
-                            //update start key in cbparm.inp_range ,as its used throughout for put op, not bur.inp_range
                             K resume_range_st_key;
                             my_node->get_nth_key(curr_ind-1,&resume_range_st_key, true);//get prev key
-                            const_cast<BtreeKey *>(bur->get_cb_param()->get_input_range().get_start_key())->copy_blob(
+                            const_cast<BtreeKey *>(bur->get_input_range().get_start_key())->copy_blob(
                                     resume_range_st_key.get_blob());
-                            bur->get_cb_param()->get_input_range().set_start_incl(false);
+                            bur->get_input_range().set_start_incl(false);
                         }// in case curr_ind==0, and my node wants to split, we contine with inherited start
-
+#endif
                         //restart from root
                         unlock_node(child_node, child_cur_lock);
                         unlock_node(my_node, curlock);
@@ -1173,6 +1184,13 @@ private:
                     unlock_node(my_node, curlock);
                 return false;
             }
+            if(bur){//savepoint of range
+                // update original input range
+                // cb gets cb->input range for manipulation
+                const_cast<BtreeKey *>(bur->get_input_range().get_start_key())->copy_blob(
+                        const_cast<BtreeKey *>(bur->get_cb_param()->get_sub_range().get_end_key())->get_blob());//copy
+                bur->get_input_range().set_start_incl(false);
+            }
             curr_ind++;
         }
         if (!unlocked_already) {
@@ -1190,6 +1208,14 @@ private:
         if (my_node->is_leaf()) {
             assert(curlock == LOCKTYPE_WRITE);
 
+#ifndef NDEBUG
+            for(auto i=1u;i<my_node->get_total_entries();i++){
+                K curKey, prevKey;
+                my_node->get_nth_key(i-1,&prevKey,false);
+                my_node->get_nth_key(i,&curKey,false);
+                assert(prevKey.compare(&curKey)<=0);
+            }
+#endif
             bool is_found = my_node->remove_one(range, outkey, outval);
 #ifndef NDEBUG
             for(auto i=1u;i<my_node->get_total_entries();i++){
@@ -1381,10 +1407,10 @@ private:
                 BtreeNodePtr old_sibbling = nullptr;
                 do {
                     // merge case, borrow entries
-                    if ((old_sibbling == nullptr) && (!child_node1->get_next_bnode().is_valid())) {
+                    if ((old_sibbling == nullptr) && (child_node1->get_next_bnode().is_valid())) {
                         old_sibbling = btree_store_t::read_node(m_btree_store.get(), child_node1->get_next_bnode());
                     } else if ((old_sibbling->get_total_entries() == 0) &&
-                               !(old_sibbling->get_next_bnode().is_valid())) {
+                               (old_sibbling->get_next_bnode().is_valid())) {
                         old_sibbling = btree_store_t::read_node(m_btree_store.get(), old_sibbling->get_next_bnode());
                     } else {
                         assert(0); // something went wrong
@@ -1404,9 +1430,9 @@ private:
 
             // update correct sibbling of child node1
             if (parent_ind == parent_node->get_total_entries() - 1) {
-                if (!parent_node->get_edge_id().is_valid()) {
+                if (parent_node->get_edge_id().is_valid()) {
                     sibbling_id = parent_node->get_edge_id();
-                } else if (!parent_node->get_next_bnode().is_valid()) {
+                } else if (parent_node->get_next_bnode().is_valid()) {
                     // edge entry, so get first parents sibbling and get its first child
                     parent_sibbling = btree_store_t::read_node(m_btree_store.get(), parent_node->get_next_bnode());
                     lock_node(parent_sibbling, locktype::LOCKTYPE_READ, dependent_req_q);
@@ -1427,7 +1453,7 @@ private:
             // for merge, we have borrow everything on right
             BtreeNodePtr curr = nullptr;
             bnodeid_t    next = child_node1->get_next_bnode();
-            while (!(next.is_valid())) {
+            while ((next.is_valid())) {
                 curr = btree_store_t::read_node(m_btree_store.get(), next);
                 child_node1->move_in_from_right_by_entries(m_btree_cfg, curr, curr->get_total_entries());
                 nodes_to_free.push_back(curr);

@@ -137,9 +137,9 @@ struct MemVector {
 private:
     std::vector< MemPiece > m_list;
     mutable std::mutex m_mtx;
-    std::atomic<uint8_t> m_refcnt; 
 
 public:
+    std::atomic<uint8_t> m_refcnt; 
     MemVector(uint8_t *ptr, uint32_t size, uint32_t offset) :
             m_list(), m_mtx(),  m_refcnt(0) {
         MemPiece m(ptr, size, offset);
@@ -175,6 +175,7 @@ public:
         return m_list;
     }
     void copy(const MemVector &other) {
+        assert(other.m_refcnt > 0);
         m_list = other.get_m_list();
     }
     uint32_t npieces() const {
