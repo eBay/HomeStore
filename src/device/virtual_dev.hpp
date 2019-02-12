@@ -73,7 +73,7 @@ struct pdev_chunk_map {
 struct virtualdev_req;
 
 typedef std::function< void(boost::intrusive_ptr< virtualdev_req > req) > virtualdev_comp_callback;
-struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req >{
+struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
     uint64_t                    version;
     virtualdev_comp_callback    cb;
     uint64_t                    size;
@@ -86,15 +86,23 @@ struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req >{
 
     virtualdev_req() : err(no_error), is_read(false), isSyncCall(false), refcount(0) {}
 
+    void inc_ref() { intrusive_ptr_add_ref(this); }
+    void dec_ref() { intrusive_ptr_release(this); }
+
+    // virtual size_t get_your_size() const { return sizeof(virtualdev_req); }
+    static boost::intrusive_ptr< virtualdev_req > make_object() {
+        return boost::intrusive_ptr< virtualdev_req >(homeds::ObjectAllocator< virtualdev_req >::make_object());
+    }
+    virtual void free_yourself() { homeds::ObjectAllocator< virtualdev_req >::deallocate(this); }
+
     friend void intrusive_ptr_add_ref(virtualdev_req* req) { req->refcount.increment(1); }
     friend void intrusive_ptr_release(virtualdev_req* req) {
         if (req->refcount.decrement_testz()) {
-            delete (req);
+            req->free_yourself();
+            //homeds::ObjectAllocator< virtualdev_req >::deallocate(req, req->get_your_size());
+            //delete (req);
         }
     }
-
-    void inc_ref() { intrusive_ptr_add_ref(this); }
-    void dec_ref() { intrusive_ptr_release(this); }
     virtual ~virtualdev_req() { version = 0; }
 };
 

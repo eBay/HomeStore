@@ -12,6 +12,7 @@
 #include <utility/atomic_counter.hpp>
 #include <utility/obj_life_counter.hpp>
 #include <memory>
+#include "homeds/memory/obj_allocator.hpp"
 
 #include "threadpool/thread_pool.h"
 using namespace std;
@@ -36,7 +37,7 @@ struct Free_Blk_Entry {
 struct volume_req;
 typedef boost::intrusive_ptr< volume_req > volume_req_ptr;
 
-struct volume_req : blkstore_req< BlkBuffer > {
+struct volume_req : public blkstore_req< BlkBuffer > {
     uint64_t                      lba;
     int                           nlbas;
     bool                          is_read;
@@ -58,10 +59,18 @@ struct volume_req : blkstore_req< BlkBuffer > {
 #endif
 
 public:
+    static boost::intrusive_ptr< volume_req > make_object() {
+        return boost::intrusive_ptr< volume_req >(homeds::ObjectAllocator< volume_req >::make_object());
+    }
+
+    virtual void free_yourself() override { homeds::ObjectAllocator< volume_req >::deallocate(this); }
+
     /* any derived class should have the virtual destructor to prevent
      * memory leak because pointer can be free with the base class.
      */
     virtual ~volume_req() = default;
+
+    // virtual size_t get_your_size() const override { return sizeof(volume_req); }
 
     static volume_req_ptr cast(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req) {
         return boost::static_pointer_cast< volume_req >(bs_req);

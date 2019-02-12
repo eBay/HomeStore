@@ -312,7 +312,7 @@ public:
         assert(cnt >= 0);
         if (cnt == 0) {
             // free the record
-            homeds::ObjectAllocator< CacheBufferType >::deallocate(buf, buf->get_your_size());
+            buf->free_yourself();
         }
 
         if (cnt == 1 && can_free) {
@@ -332,7 +332,8 @@ public:
         return ss.str();
     }
 
-    virtual size_t get_your_size() const { return sizeof(CacheBuffer< K >); }
+    virtual void free_yourself() { homeds::ObjectAllocator< CacheBufferType >::deallocate(this); }
+    //virtual size_t get_your_size() const { return sizeof(CacheBuffer< K >); }
 
     //////////// Mandatory IntrusiveHashSet definitions ////////////////
     static void ref(CacheBuffer< K >& b) { intrusive_ptr_add_ref(&b); }

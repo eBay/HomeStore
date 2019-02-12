@@ -23,9 +23,6 @@
 #include "btree_node.h"
 #include "physical_node.hpp"
 
-extern int btree_buf_alloc;
-extern int btree_buf_free;
-extern int btree_buf_make_obj;
 namespace homeds { namespace btree {
 
 #define SSDBtreeNode  BtreeNode<SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize, homestore::writeback_req>
@@ -62,24 +59,17 @@ public:
 #ifndef NDEBUG
 #endif
     static BtreeBuffer *make_object() {
-        btree_buf_make_obj++;
         return homeds::ObjectAllocator< SSDBtreeNode >::make_object();
     }
     BtreeBuffer() {
-        btree_buf_alloc++;
 #ifndef NDEBUG
         is_btree = true;
         recovered = false;
 #endif
-        if (btree_buf_alloc > btree_buf_make_obj) {
-            assert(0);
-        }
     }
-    virtual ~BtreeBuffer() {
-        btree_buf_free++;
-    }
-
-    virtual size_t get_your_size() const override { return sizeof(SSDBtreeNode); }
+    virtual ~BtreeBuffer() = default;
+    virtual void free_yourself() override { ObjectAllocator< SSDBtreeNode >::deallocate((SSDBtreeNode *)this); }
+    //virtual size_t get_your_size() const override { return sizeof(SSDBtreeNode); }
 };
 
 
@@ -110,6 +100,11 @@ class SSDBtreeStore {
            BtreeStore<SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize, homestore::writeback_req> *btree_instance;
            ssd_btree_req() {};
            ~ssd_btree_req() {};
+           //virtual size_t get_your_size() const override { return sizeof(ssd_btree_req); }
+           static boost::intrusive_ptr< ssd_btree_req > make_object() {
+               return boost::intrusive_ptr< ssd_btree_req >(homeds::ObjectAllocator< ssd_btree_req >::make_object());
+           }
+           virtual void free_yourself() override { homeds::ObjectAllocator< ssd_btree_req >::deallocate(this); }
     };
 public:
     using HeaderType = BtreeBuffer<K, V, InteriorNodeType, LeafNodeType, NodeSize>;
@@ -203,7 +198,7 @@ public:
     static boost::intrusive_ptr<SSDBtreeNode> read_node(SSDBtreeStore *store, bnodeid_t id) {
         // Read the data from the block store
         homestore::BlkId blkid(id.m_id);
-        boost::intrusive_ptr< ssd_btree_req >req(new ssd_btree_req());
+        auto req = ssd_btree_req::make_object();
         req->is_read = true;
         if (store->m_is_in_recovery) {
             store->m_blkstore->alloc_blk(blkid);
@@ -254,7 +249,7 @@ public:
                         bool is_sync,
                         boost::intrusive_ptr<btree_multinode_req> multinode_req = nullptr) {
         homestore::BlkId blkid(bn->get_node_id().m_id);
-        boost::intrusive_ptr< ssd_btree_req >req(new ssd_btree_req());
+        boost::intrusive_ptr< ssd_btree_req >req(homeds::ObjectAllocator< ssd_btree_req >::make_object());
         req->is_read = false;
         req->cookie = cookie;
         req->multinode_req = multinode_req;

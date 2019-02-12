@@ -78,3 +78,10 @@ add_executable(test_avector
                 )
 target_link_libraries(test_avector ${COMMON_LIB_DEPS} folly)
 add_test(NAME Avector COMMAND test_avector)
+
+set(OBJ_ALLOCATOR_BENCHMARK_FILES tests/obj_allocator_benchmark.cpp)
+add_executable(obj_allocator_benchmark
+        ${OBJ_ALLOCATOR_BENCHMARK_FILES}
+        )
+target_link_libraries(obj_allocator_benchmark ${COMMON_LIB_DEPS})
+add_test(NAME ObjAllocatorBenchmark COMMAND obj_allocator_benchmark)

@@ -17,11 +17,6 @@ using namespace homestore;
 bool vol_test_enable = false;
 #endif
 
-/* TODO: it will be more cleaner once statisitcs is integrated */
-int                btree_buf_alloc;
-int                btree_buf_free;
-int                btree_buf_make_obj;
-
 namespace homestore {
     void intrusive_ptr_add_ref(homestore::BlkBuffer *buf) {
         intrusive_ptr_add_ref((homestore::WriteBackCacheBuffer <BlkId> *) buf);
@@ -155,7 +150,7 @@ void Volume::process_vol_data_completions(const boost::intrusive_ptr< blkstore_r
 }
 
 volume_req_ptr Volume::create_vol_req(Volume* vol, const vol_interface_req_ptr& hb_req) {
-    volume_req_ptr vreq(new volume_req());
+    volume_req_ptr vreq(homeds::ObjectAllocator< volume_req >::make_object());
     vreq->parent_req = hb_req;
     vreq->is_read = hb_req->is_read;
     vreq->vol_instance = vol->shared_from_this();

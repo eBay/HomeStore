@@ -24,7 +24,7 @@ typedef boost::intrusive_ptr< writeback_req > writeback_req_ptr;
 
 typedef std::function< void(const writeback_req_ptr& req, std::error_condition status) > blkstore_callback;
 
-struct writeback_req : virtualdev_req {
+struct writeback_req : public virtualdev_req {
     mutex              mtx;
     blkstore_callback* blkstore_cb;
 

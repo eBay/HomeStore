@@ -49,7 +49,7 @@ struct bufferInfo {
 };
 
 template < typename Buffer = BlkBuffer >
-struct blkstore_req : writeback_req {
+struct blkstore_req : public writeback_req {
     boost::intrusive_ptr< Buffer > bbuf;
     BlkId                          bid;
     sisl::atomic_counter<int>      blkstore_ref_cnt; /* It is used for reads to see how many
