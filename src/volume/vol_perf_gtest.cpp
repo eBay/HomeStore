@@ -28,8 +28,10 @@ THREAD_BUFFER_INIT;
 
 /************************** GLOBAL VARIABLES ***********************/
 
+uint64_t max_disk_capacity;
 #define MAX_DEVICES 2
 std::vector<std::string> dev_names;
+std::string names[4] = {"/tmp/file1", "/tmp/file2", "/tmp/file3", "/tmp/file4"};
 uint64_t max_vols = 1;
 uint64_t run_time;
 uint64_t num_threads;
@@ -42,7 +44,6 @@ constexpr auto Mi = Ki * Ki;
 constexpr auto Gi = Ki * Mi;
 constexpr uint64_t max_io_size = 1 * Mi;
 uint64_t max_outstanding_ios;
-uint64_t max_disk_capacity;
 uint64_t match_cnt = 0;
 uint64_t cache_size = 0;
 std::atomic<uint64_t> write_cnt;
@@ -116,6 +117,13 @@ public:
     }
 
     void print() {
+    }
+
+    void remove_files() {
+        remove("/tmp/file1");
+        remove("/tmp/file2");
+        remove("/tmp/file3");
+        remove("tmp/file4");
     }
 
     void start_homestore() {
@@ -292,17 +300,15 @@ public:
         /* XXX: does it really matter if it is atomic or not */
         int cur = ++cur_vol % max_vols;
         uint64_t lba = 0;
-        uint64_t nblks = 0;
-    start:
+        uint32_t nblks = 0;
         nblks = (io_size * 1024) / (VolInterface::get_instance()->get_page_size(vol[cur]));
         lba = rand() % (max_vol_blks[cur % max_vols] - nblks);
-        if (nblks == 0) { nblks = 1; }
-        {
-            /* check if someone is already doing writes/reads */
-            if (m_vol_bm[cur]->is_bits_reset(lba, nblks)) {
-                goto start;
-            }
+        auto b = m_vol_bm[cur]->get_next_contiguous_n_reset_bits(lba, nblks);
+        if (b.nbits == 0) {
+            return;
         }
+
+        lba = b.start_bit;
         read_vol(cur, lba, nblks);
         LOGDEBUG("Read {} {} ",lba,nblks);
     }
@@ -392,6 +398,7 @@ TEST_F(IOTest, normal_random_io_test) {
     /* child process */
     this->start_homestore();
     this->wait_cmpl();
+    this->remove_files();
     LOGINFO("write_cnt {}", write_cnt);
     LOGINFO("read_cnt {}", read_cnt);
     uint64_t time_dur = (std::chrono::duration_cast< std::chrono::seconds >(end_time - start_time)).count();
@@ -441,9 +448,23 @@ int main(int argc, char *argv[]) {
     max_outstanding_ios = num_threads * queue_depth;
     read_p = SDS_OPTIONS["read_percent"].as<uint32_t>();
     io_size = SDS_OPTIONS["io_size"].as<uint32_t>();
-    dev_names = SDS_OPTIONS["device_list"].as<std::vector<std::string>>();
+    if (SDS_OPTIONS.count("device_list")) {
+        dev_names = SDS_OPTIONS["device_list"].as<std::vector<std::string>>();
+    }
     cache_size = SDS_OPTIONS["cache_size"].as<uint32_t>();
     is_file = SDS_OPTIONS["is_file"].as<uint32_t>();
+
+    if (dev_names.size() == 0) {
+        LOGINFO("creating files");
+        for (uint32_t i = 0; i < MAX_DEVICES; i++) {
+            std::ofstream ofs(names[i].c_str(), std::ios::binary | std::ios::out);
+            ofs.seekp(10 * Gi - 1); 
+            ofs.write("", 1); 
+            ofs.close();
+            dev_names.push_back(names[i]);
+        }
+        is_file = 1;
+    }
 
     for (uint32_t i = 0; i < dev_names.size(); ++i) {
         auto fd = open(dev_names[0].c_str(), O_RDWR);

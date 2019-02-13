@@ -1524,6 +1524,11 @@ private:
         ninfo.set_bnode_id(child_node1->get_node_id());
         parent_node->insert(*out_split_key, ninfo);
 
+#ifndef NDEBUG
+        K split_key;
+        child_node2->get_first_key(&split_key);
+        assert(split_key.compare(out_split_key) > 0);
+#endif
         LOGDEBUGMOD(btree_structures, "Split child_node={} with new_child_node={}, parent_node={}, split_key={}",
                 child_node1->get_node_id_int(), child_node2->get_node_id_int(), parent_node->get_node_id_int(),
                 out_split_key->to_string());
