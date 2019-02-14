@@ -218,32 +218,32 @@ namespace homeds {
             assert(is_initialized);
             assert(index < get_total_elements());
 
-            record *rec = get_record(index);
-            uint16_t orig_offset = rec->m_offset;
-            uint8_t *data = get_data_ptr(rec->m_offset);
-            uint32_t total_size = get_size();
-
-            uint8_t *move_to = nullptr, *move_from  = nullptr;
-            uint32_t size_to_move=0;
-            //move data
-            move_to = data;
-            move_from = data + rec->m_size;
-            size_to_move = total_size - (get_meta_size() + rec->m_offset + rec->m_size);
-            memmove((void*)move_to, (void*)move_from, size_to_move);
-            //move record
-            move_to = (uint8_t *) rec;
-            move_from = move_to + sizeof(record);
-            size_to_move = total_size - (sizeof(header) + sizeof(record) * (index + 1));
-            memmove((void*)move_to, (void*)move_from, size_to_move);
-            rec = get_record(index);
-            rec->m_offset = orig_offset;
+            if(index != get_total_elements()-1){ //move record, not data
+                record *rec = get_record(index);
+                uint8_t *move_to = (uint8_t *) rec;
+                uint8_t *move_from  = move_to + sizeof(record);
+                uint32_t size_to_move= sizeof(record)*(get_total_elements()-index-1);
+                memmove((void*)move_to, (void*)move_from, size_to_move);
+            }
             
             m_header->m_total_elements--;
-            init_ptr(m_header->m_total_elements);
-            
 #ifndef NDEBUG
             to_string();
 #endif
+        }
+        
+        //lays out in contigious memory
+        void mem_align(){
+            uint32_t data_offset=0;
+            uint8_t* m_new_data = static_cast<uint8_t *>((void *) (((uint8_t *) m_records) + get_total_elements() * sizeof(record)));
+            for(auto i=0u;i<get_total_elements();i++){
+                record* rec = get_record(i);
+                memmove(m_new_data,get_data_ptr(rec->m_offset),rec->m_size);
+                m_new_data+=rec->m_size;
+                rec->m_offset=data_offset;
+                data_offset+=rec->m_size;
+            }
+            init_ptr(get_total_elements());
         }
 
         std::string to_string() const {

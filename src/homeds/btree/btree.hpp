@@ -976,7 +976,7 @@ private:
             int_node->get(*outind, child_info, false /* copy */);
             *is_found = true;
         }
-        if (load_child)
+        if (*is_found && load_child)
             return btree_store_t::read_node(m_btree_store.get(), child_info->bnode_id());
         else
             return nullptr;
@@ -1252,7 +1252,7 @@ private:
         // Get the childPtr for given key.
         uint32_t ind;
 
-        bool          is_found = true;
+        bool          is_found = false;
         BtreeNodeInfo child_info;
         BtreeNodePtr  child_node = get_child_node(my_node, range, &ind, &is_found, &child_info, true);
         if (!is_found || (child_node == nullptr)) {
