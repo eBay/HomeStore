@@ -326,8 +326,7 @@ public:
         uint32_t offset = size_offset.get_value_or(0);
         BlkId    tmp_bid(bid.get_blkid_at(offset, free_size, m_pagesz));
         if (is_write_back_cache() && found) {
-            boost::intrusive_ptr< blkstore_req< Buffer > > req(
-                    homeds::ObjectAllocator< blkstore_req< Buffer > >::make_object());
+            auto req = blkstore_req< Buffer >::make_request();
             req->bid = tmp_bid;
             req->bbuf = erased_buf;
 
