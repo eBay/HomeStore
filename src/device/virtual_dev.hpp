@@ -84,13 +84,11 @@ struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
     PhysicalDevChunk*           chunk;
     Clock::time_point           io_start_time;
 
-    virtualdev_req() : err(no_error), is_read(false), isSyncCall(false), refcount(0) {}
-
     void inc_ref() { intrusive_ptr_add_ref(this); }
     void dec_ref() { intrusive_ptr_release(this); }
 
     // virtual size_t get_your_size() const { return sizeof(virtualdev_req); }
-    static boost::intrusive_ptr< virtualdev_req > make_object() {
+    static boost::intrusive_ptr< virtualdev_req > make_request() {
         return boost::intrusive_ptr< virtualdev_req >(homeds::ObjectAllocator< virtualdev_req >::make_object());
     }
     virtual void free_yourself() { homeds::ObjectAllocator< virtualdev_req >::deallocate(this); }
@@ -104,6 +102,10 @@ struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
         }
     }
     virtual ~virtualdev_req() { version = 0; }
+
+protected:
+    friend class homeds::ObjectAllocator< virtualdev_req >;
+    virtualdev_req() : err(no_error), is_read(false), isSyncCall(false), refcount(0) {}
 };
 
 [[maybe_unused]] static void virtual_dev_process_completions(int64_t res, uint8_t* cookie) {

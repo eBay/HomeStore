@@ -61,11 +61,19 @@ struct blkstore_req : public writeback_req {
     uint32_t                  data_offset;
 
 public:
-    blkstore_req() : bbuf(nullptr), blkstore_ref_cnt(0), missing_pieces(0), data_offset(0){};
     virtual ~blkstore_req() {
         assert(missing_pieces.size() == 0);
         assert(blkstore_ref_cnt.testz());
     };
+
+    static boost::intrusive_ptr< blkstore_req< Buffer > > make_request() {
+        return boost::intrusive_ptr< blkstore_req< Buffer > >(
+                homeds::ObjectAllocator< blkstore_req< Buffer > >::make_object());
+    }
+
+protected:
+    friend class homeds::ObjectAllocator< blkstore_req< Buffer > >;
+    blkstore_req() : bbuf(nullptr), blkstore_ref_cnt(0), missing_pieces(0), data_offset(0){};
 };
 
 class BlkStoreMetrics : public sisl::MetricsGroupWrapper {
@@ -274,7 +282,7 @@ public:
                             const BlkId                                                     bid) {
         assert(is_read_modify_cache());
         if (is_write_back_cache()) {
-            boost::intrusive_ptr< blkstore_req< Buffer > > req(new blkstore_req< Buffer >());
+            auto req = blkstore_req< Buffer >::make_request();
             req->bid = bid;
             req->bbuf = erased_buf;
 
@@ -318,7 +326,8 @@ public:
         uint32_t offset = size_offset.get_value_or(0);
         BlkId    tmp_bid(bid.get_blkid_at(offset, free_size, m_pagesz));
         if (is_write_back_cache() && found) {
-            boost::intrusive_ptr< blkstore_req< Buffer > > req(new blkstore_req< Buffer >());
+            boost::intrusive_ptr< blkstore_req< Buffer > > req(
+                    homeds::ObjectAllocator< blkstore_req< Buffer > >::make_object());
             req->bid = tmp_bid;
             req->bbuf = erased_buf;
 

@@ -47,6 +47,17 @@ struct writeback_req : public virtualdev_req {
     std::error_condition status;
     homeds::MemVector    memvec;
 
+    static boost::intrusive_ptr< writeback_req > make_request() {
+        return boost::intrusive_ptr< writeback_req >(homeds::ObjectAllocator< writeback_req >::make_object());
+    }
+
+    virtual ~writeback_req() {
+        assert(dependent_req_q.empty());
+        assert(state == WB_REQ_COMPL || state == WB_REQ_INIT);
+    }
+
+protected:
+    friend class homeds::ObjectAllocator< writeback_req >;
     writeback_req() :
             req_q(),
             dependent_cnt(0),
@@ -55,11 +66,6 @@ struct writeback_req : public virtualdev_req {
 #endif
             state(WB_REQ_INIT),
             status(no_error){};
-
-    virtual ~writeback_req() {
-        assert(dependent_req_q.empty());
-        assert(state == WB_REQ_COMPL || state == WB_REQ_INIT);
-    }
 };
 
 template < typename K >

@@ -28,7 +28,7 @@ class HomestoreConan(ConanFile):
                 "gtest/1.8.1@bincrafters/stable",
                 "iomgr/2.1.1@sds/testing",
                 "lzma/5.2.4@bincrafters/stable",
-                "sisl/0.2.2@sisl/testing",
+                "sisl/0.2.1@sisl/testing",
                 "OpenSSL/1.0.2q@conan/stable",
                 "sds_logging/3.8.1@sds/testing",
                 "sds_options/0.1.4@sds/testing",
@@ -61,9 +61,12 @@ class HomestoreConan(ConanFile):
         if self.settings.sanitize != None:
             definitions['MEMORY_SANITIZER_ON'] = 'ON'
 
+        if self.settings.build_type == 'Debug':
+            definitions['CMAKE_BUILD_TYPE'] = 'Debug'
+
         cmake.configure(defs=definitions)
         cmake.build()
-        cmake.test(target=test_target)
+        cmake.test(target=test_target, output_on_failure=True)
 
     def package(self):
         self.copy("*.h", dst="include", src="src", keep_path=True)

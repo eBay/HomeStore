@@ -67,7 +67,7 @@ struct volume_req : public blkstore_req< BlkBuffer > {
 #endif
 
 public:
-    static boost::intrusive_ptr< volume_req > make_object() {
+    static boost::intrusive_ptr< volume_req > make_request() {
         return boost::intrusive_ptr< volume_req >(homeds::ObjectAllocator< volume_req >::make_object());
     }
 
@@ -85,6 +85,9 @@ public:
     }
 
     friend class Volume;
+
+protected:
+    friend class homeds::ObjectAllocator< volume_req >;
 
     // Volume req should always be created from Volume::create_vol_req()
     volume_req() : is_read(false), num_mapping_update(0), parent_req(nullptr) {

@@ -66,6 +66,7 @@ public:
         is_btree = true;
         recovered = false;
 #endif
+    }
     virtual ~BtreeBuffer() = default;
     virtual void free_yourself() override { ObjectAllocator< SSDBtreeNode >::deallocate((SSDBtreeNode *)this); }
     //virtual size_t get_your_size() const override { return sizeof(SSDBtreeNode); }
