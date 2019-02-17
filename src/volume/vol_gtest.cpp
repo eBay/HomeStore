@@ -728,6 +728,7 @@ const char* __asan_default_options() {
  * Above command run all tests having a recovery keyword for 120 seconds with 16 threads , 10g disk capacity and 50 volumes
  */
 int main(int argc, char *argv[]) {
+    srand(time(0));
     ::testing::GTEST_FLAG(filter) = "*normal_random*";
     testing::InitGoogleTest(&argc, argv);
     SDS_OPTIONS_LOAD(argc, argv, logging, test_volume)

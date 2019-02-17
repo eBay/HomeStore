@@ -28,9 +28,9 @@ const char *__asan_default_options() {
     return "detect_leaks=false";
 }
 
-#define MAX_LBA            65535
+#define MAX_LBA           131072
 #define MAX_NLBA             128
-#define MAX_BLK       4294967295
+#define MAX_BLK         94967295
 #define MAX_SIZE          7 * Gi
 uint64_t num_ios;
 uint64_t num_threads;
@@ -71,6 +71,7 @@ protected:
     uint64_t max_outstanding_ios = 64u;
     std::atomic<size_t> issued_ios;
     uint64_t max_issue_ios = 0u;
+    std::atomic<size_t> unreturned_lbas;
 public:
     MapTest() {
         m_lba_bm = new homeds::Bitset(MAX_LBA);
@@ -83,7 +84,7 @@ public:
     }
 
     void process_metadata_completions(const volume_req_ptr& req) {
-
+        assert(!req->is_read);
         //verify old blks
         auto index=0u;
         auto st = req->lba;
@@ -96,11 +97,11 @@ public:
                 m_map->print_tree();std::this_thread::sleep_for(std::chrono::seconds(5));
                 assert(0); // less blks freed than expected
             }
-            auto bst =req->blkIds_to_free[index].m_blkId.get_id() + req->blkIds_to_free[index].m_blk_offset;
-            auto ben = bst + req->blkIds_to_free[index].m_nblks_to_free-1;
+            int bst =req->blkIds_to_free[index].m_blkId.get_id() + req->blkIds_to_free[index].m_blk_offset;
+            int ben = bst + (int)(req->blkIds_to_free[index].m_nblks_to_free)-1;
             while(bst<=ben){
                 if(st>et) assert(0);//more blks freeed than expected
-                if(m_blk_id_arr[st] != bst) assert(0); //blks mistmach
+                if((int)m_blk_id_arr[st] != bst) assert(0); //blks mistmach
                 bst++;
                 st++;
             }
@@ -111,17 +112,12 @@ public:
         for (auto st = req->lba, bst = req->blkId.get_id(); st < req->lba + req->nlbas; st++, bst++)
             m_blk_id_arr[st] = bst;
         
-        //do sync read
-        std::vector<std::pair<MappingKey, MappingValue>> kvs;
-        read_lba(req->lba, req->nlbas, kvs);
-        verify(kvs);
+        //release lbas
+        release_lba_range_lock(req->lba, req->nlbas);
 
         //release blkids
         for (auto &ptr : req->blkIds_to_free)
             release_blkId_lock(ptr.m_blkId, ptr.m_blk_offset, ptr.m_nblks_to_free);
-        
-        //release lbas
-        release_lba_range_lock(req->lba, req->nlbas);
         
         auto outstanding = outstanding_ios.fetch_sub(1);
         if (issued_ios.load() == max_issue_ios && outstanding == 1) {
@@ -199,6 +195,7 @@ public:
         outstanding_ios = 0;
         max_issue_ios = num_ios;
         issued_ios =0;
+        unreturned_lbas=0;
         vol_params params;
         params.page_size = 4096;
         params.size = MAX_SIZE;
@@ -233,6 +230,8 @@ public:
         if(issued_ios.load()==max_issue_ios)return;
         outstanding_ios++;
         issued_ios++;
+        if(issued_ios%10000==0)
+            LOGINFO("Writes issued:{}",issued_ios.load());
         random_read();
         random_write();
     }
@@ -240,6 +239,8 @@ public:
     void release_lba_range_lock(uint64_t &lba, uint64_t nlbas) {
         std::unique_lock<std::mutex> lk(mutex);
         assert(m_lba_bm->is_bits_set(lba, nlbas));
+        assert(nlbas<=128);
+        unreturned_lbas.fetch_sub(nlbas);
         m_lba_bm->reset_bits(lba, nlbas);
     }
 
@@ -273,16 +274,23 @@ public:
     void generate_random_lba_nlbas(uint64_t &lba, uint64_t &nlbas) {
         int retry = 0;
         start:
-        if (retry == MAX_LBA) assert(0);//cant allocated lba range anymore
+        if (retry == 10000) {
+            LOGINFO("Outstanding:{},issued:{}",outstanding_ios.load() ,issued_ios.load());
+            LOGINFO("unreturned_lbas:{}",unreturned_lbas.load());
+            std::this_thread::sleep_for(std::chrono::seconds(5));
+            assert(0);//cant allocated lba range anymore
+        }
 
         lba = rand() % (MAX_LBA - MAX_NLBA);
         nlbas = (rand() % (MAX_NLBA - 1)) + 1;
         {
+            assert(nlbas<=128);
             std::unique_lock<std::mutex> lk(mutex);
             /* check if someone is already doing writes/reads */
-            if (m_lba_bm->is_bits_reset(lba, nlbas))
+            if (m_lba_bm->is_bits_reset(lba, nlbas)){
+                unreturned_lbas.fetch_add(nlbas);
                 m_lba_bm->set_bits(lba, nlbas);
-            else {
+            }else {
                 retry++;
                 goto start;
             }
@@ -347,6 +355,7 @@ public:
         std::vector<std::pair<MappingKey, MappingValue>> kvs;
         read_lba(lba, nlbas, kvs);
         verify(kvs);
+        release_lba_range_lock(lba,nlbas);
     }
 
     void write_lba(uint64_t lba, uint64_t nlbas, BlkId bid) {

@@ -31,7 +31,7 @@ THREAD_BUFFER_INIT;
 uint64_t max_disk_capacity;
 #define MAX_DEVICES 2
 std::vector<std::string> dev_names;
-std::string names[4] = {"/tmp/file1", "/tmp/file2", "/tmp/file3", "/tmp/file4"};
+std::string names[4] = {"/tmp/file201", "/tmp/file202", "/tmp/file203", "/tmp/file204"};
 uint64_t max_vols = 1;
 uint64_t run_time;
 uint64_t num_threads;
@@ -120,10 +120,10 @@ public:
     }
 
     void remove_files() {
-        remove("/tmp/file1");
-        remove("/tmp/file2");
-        remove("/tmp/file3");
-        remove("tmp/file4");
+        remove("/tmp/file201");
+        remove("/tmp/file202");
+        remove("/tmp/file203");
+        remove("tmp/file204");
     }
 
     void start_homestore() {
@@ -436,6 +436,7 @@ const char* __asan_default_options() {
  *                         --device_list=file1 --device_list=file2 --io_size=8
  */
 int main(int argc, char *argv[]) {
+    srand(time(0));
     ::testing::GTEST_FLAG(filter) = "*normal_random*";
     testing::InitGoogleTest(&argc, argv);
     SDS_OPTIONS_LOAD(argc, argv, logging, perf_test_volume)
