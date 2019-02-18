@@ -31,7 +31,8 @@ THREAD_BUFFER_INIT;
 uint64_t max_disk_capacity;
 #define MAX_DEVICES 2
 std::vector<std::string> dev_names;
-std::string names[4] = {"/tmp/file201", "/tmp/file202", "/tmp/file203", "/tmp/file204"};
+std::string names[4] = {"/tmp/perf_file1", "/tmp/perf_file2", "/tmp/perf_file3", "/tmp/perf_file4"};
+
 uint64_t max_vols = 1;
 uint64_t run_time;
 uint64_t num_threads;
@@ -120,10 +121,11 @@ public:
     }
 
     void remove_files() {
-        remove("/tmp/file201");
-        remove("/tmp/file202");
-        remove("/tmp/file203");
-        remove("tmp/file204");
+        remove("/tmp/perf_file1");
+        remove("/tmp/perf_file2");
+        remove("/tmp/perf_file3");
+        remove("tmp/perf_file4");
+
     }
 
     void start_homestore() {

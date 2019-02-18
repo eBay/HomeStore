@@ -151,7 +151,7 @@ public:
     cache_buf_state m_state;
 
 #ifndef NDEBUG
-    sisl::atomic_counter< int32_t > m_indx; // Refcount
+    sisl::atomic_counter< int64_t > m_indx; // Refcount
 #define MAX_ENTRIES 50
     void* arr_symbols[MAX_ENTRIES];
     /* to see if it is data buf or btree buf */
