@@ -365,7 +365,13 @@ public:
         }
 
         LOGTRACE("IO DONE, req_id={}, outstanding_ios={}", vol_req->request_id, outstanding_ios.load());
-
+#if 0
+        if (write_cnt.load()%100000 == 0) {
+            sisl::ObjCounterRegistry::foreach([](const std::string& name, int64_t created, int64_t alive) {
+                LOGINFO("ObjLife {}: created={} alive={}", name, created, alive);
+            });
+        }
+#endif
         if (get_elapsed_time(start_time) > run_time) {
             LOGINFO("ios cmpled {}. waiting for outstanding ios to be completed", write_cnt.load());
             if (is_abort) {

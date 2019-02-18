@@ -10,6 +10,7 @@
 #include <math.h>
 #include <sds_logging/logging.h>
 #include <volume/volume.hpp>
+#include <utility/obj_life_counter.hpp>
 
 SDS_LOGGING_DECL(VMOD_VOL_MAPPING)
 
@@ -40,15 +41,15 @@ namespace homestore {
     }__attribute__ ((__packed__));
 
     //MappingKey is fixed size
-    class MappingKey : public homeds::btree::BtreeKey {
+    class MappingKey : public homeds::btree::BtreeKey, public sisl::ObjLifeCounter< MappingKey > {
         LbaId m_lbaId;
         LbaId *m_lbaId_ptr;
     public:
-        MappingKey() : m_lbaId_ptr(&m_lbaId) {}
+        MappingKey() : ObjLifeCounter(), m_lbaId_ptr(&m_lbaId) {}
 
-        MappingKey(const MappingKey &other) : BtreeKey(), m_lbaId(other.get_lbaId()), m_lbaId_ptr(&m_lbaId) {}
+        MappingKey(const MappingKey &other) : BtreeKey(), ObjLifeCounter(), m_lbaId(other.get_lbaId()), m_lbaId_ptr(&m_lbaId) {}
 
-        MappingKey(uint64_t lba_start, uint64_t n_lba) : m_lbaId(lba_start, n_lba), m_lbaId_ptr(&m_lbaId) {}
+        MappingKey(uint64_t lba_start, uint64_t n_lba) : ObjLifeCounter(), m_lbaId(lba_start, n_lba), m_lbaId_ptr(&m_lbaId) {}
 
         LbaId get_lbaId() const { return *m_lbaId_ptr; }
 
@@ -222,20 +223,23 @@ namespace homestore {
         }
     }__attribute__ ((__packed__));
 
-    class MappingValue : public homeds::btree::BtreeValue {
+    class MappingValue : public homeds::btree::BtreeValue, public sisl::ObjLifeCounter< MappingValue > {
         Blob_Array<ValueEntry> m_earr;
     public:
         //creates empty array
-        MappingValue() {};
+        MappingValue() : ObjLifeCounter() {};
 
         //creates array with one value entry - on heap - bcopy
-        MappingValue(ValueEntry &ve) { m_earr.set_element(ve); }
+        MappingValue(ValueEntry &ve) :
+            ObjLifeCounter() { m_earr.set_element(ve); }
 
         //performs deep copy from other - on heap
-        MappingValue(const MappingValue &other) { m_earr.set_elements(other.m_earr); }
+        MappingValue(const MappingValue &other) :
+            ObjLifeCounter() { m_earr.set_elements(other.m_earr); }
 
         //creates array with  value entrys - on heap -bcopy
-        MappingValue(vector<ValueEntry> &elements) { m_earr.set_elements(elements); }
+        MappingValue(vector<ValueEntry> &elements) :
+            ObjLifeCounter() { m_earr.set_elements(elements); }
 
         virtual homeds::blob get_blob() const override {
             homeds::blob b;

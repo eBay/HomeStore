@@ -12,6 +12,7 @@
 #include "assert.h"
 #include <iostream>
 #include <sstream>
+#include <utility/obj_life_counter.hpp>
 
 namespace homeds {
     /**
@@ -97,11 +98,9 @@ namespace homeds {
         }
 
         //creates empty array
-        Blob_Array() {
-        }
+        Blob_Array() {}
 
         Blob_Array(const Blob_Array &other) {
-            //optimized copy
             set_elements(other);
         }
 

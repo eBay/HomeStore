@@ -16,6 +16,7 @@
 #include <utility/atomic_counter.hpp>
 #include <atomic>
 #include <main/homestore_config.hpp>
+#include <utility/obj_life_counter.hpp>
 
 namespace homeds {
 using namespace homestore;
@@ -42,14 +43,14 @@ struct __attribute__((__may_alias__)) __mempiece_tag {
 
 constexpr int SizeMultiplier = 4096;
 
-struct MemPiece {
+struct MemPiece : public sisl::ObjLifeCounter< MemPiece > {
     homeds::tagged_ptr<uint8_t> m_mem;
 
     MemPiece(uint8_t *mem, uint32_t size, uint32_t offset) :
-            m_mem(mem, (uint16_t)gen_new_tag(encode(size), encode(offset))) {}
+            ObjLifeCounter(), m_mem(mem, (uint16_t)gen_new_tag(encode(size), encode(offset))) {}
 
     MemPiece() : MemPiece(nullptr, 0, 0) {}
-    MemPiece(const MemPiece &other) : m_mem(other.m_mem) {}
+    MemPiece(const MemPiece &other) : ObjLifeCounter(), m_mem(other.m_mem) {}
     ~MemPiece() {}
 
     void set_ptr(uint8_t *ptr) {
@@ -133,7 +134,7 @@ private:
     }
 } __attribute__((packed));
 
-struct MemVector {
+struct MemVector : public sisl::ObjLifeCounter< MemVector > {
 private:
     std::vector< MemPiece > m_list;
     mutable std::mutex m_mtx;
@@ -141,13 +142,13 @@ private:
 public:
     std::atomic<uint8_t> m_refcnt; 
     MemVector(uint8_t *ptr, uint32_t size, uint32_t offset) :
-            m_list(), m_mtx(),  m_refcnt(0) {
+            ObjLifeCounter(), m_list(), m_mtx(),  m_refcnt(0) {
         MemPiece m(ptr, size, offset);
         m_list.push_back(m);
         assert(size || (ptr == nullptr));
     }
 
-    MemVector() : m_list(), m_mtx(), m_refcnt(0) {}
+    MemVector() : ObjLifeCounter(), m_list(), m_mtx(), m_refcnt(0) {}
 
     ~MemVector() {
             m_list.erase(m_list.begin(), m_list.end());

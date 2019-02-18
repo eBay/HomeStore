@@ -8,7 +8,7 @@ if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
     add_compile_options(-D_DEBUG=1 -O0 -DDEBUG_RCU -D_PRERELEASE)
 else()
     message("Release build")
-    add_compile_options(-DNDEBUG=1 -O3)
+    add_compile_options(-DNDEBUG=1 -O3 -D_PRERELEASE)
 endif()
 
 find_package(Boost 1.64 REQUIRED)
