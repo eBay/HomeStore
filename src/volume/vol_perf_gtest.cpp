@@ -263,9 +263,14 @@ public:
         int cur = ++cur_vol % max_vols;
         uint64_t lba = 0;
         uint64_t nblks = 0;
-        nblks = (io_size * 1024) / (VolInterface::get_instance()->get_page_size(vol[cur]));
+        if (!io_size) {
+            uint64_t max_blks = max_io_size/VolInterface::get_instance()->get_page_size(vol[cur]);
+            nblks = rand() % max_blks;
+            if (nblks == 0) { nblks = 1; }
+        } else {
+            nblks = (io_size * 1024) / (VolInterface::get_instance()->get_page_size(vol[cur]));
+        }
         lba = rand() % (max_vol_blks[cur % max_vols] - nblks);
-        if (nblks == 0) { nblks = 1; }
         m_vol_bm[cur]->set_bits(lba, nblks);
         uint8_t *buf = nullptr;
         uint64_t size = nblks * VolInterface::get_instance()->get_page_size(vol[cur]);
@@ -303,7 +308,13 @@ public:
         int cur = ++cur_vol % max_vols;
         uint64_t lba = 0;
         uint32_t nblks = 0;
-        nblks = (io_size * 1024) / (VolInterface::get_instance()->get_page_size(vol[cur]));
+        if (!io_size) {
+            uint64_t max_blks = max_io_size/VolInterface::get_instance()->get_page_size(vol[cur]);
+            nblks = rand() % max_blks;
+            if (nblks == 0) { nblks = 1; }
+        } else {
+            nblks = (io_size * 1024) / (VolInterface::get_instance()->get_page_size(vol[cur]));
+        }
         lba = rand() % (max_vol_blks[cur % max_vols] - nblks);
         auto b = m_vol_bm[cur]->get_next_contiguous_n_reset_bits(lba, nblks);
         if (b.nbits == 0) {
@@ -414,11 +425,11 @@ TEST_F(IOTest, normal_random_io_test) {
 SDS_OPTION_GROUP(perf_test_volume, 
 (run_time, "", "run_time", "run time for io", ::cxxopts::value<uint32_t>()->default_value("30"), "seconds"),
 (num_threads, "", "num_threads", "num threads for io", ::cxxopts::value<uint32_t>()->default_value("8"), "number"),
-(queue_depth, "", "queue_depth", "io queue depth per thread", ::cxxopts::value<uint32_t>()->default_value("8"), "number"),
-(read_percent, "", "read_percent", "read in percentage", ::cxxopts::value<uint32_t>()->default_value("0"), "percentage"),
+(queue_depth, "", "queue_depth", "io queue depth per thread", ::cxxopts::value<uint32_t>()->default_value("1024"), "number"),
+(read_percent, "", "read_percent", "read in percentage", ::cxxopts::value<uint32_t>()->default_value("50"), "percentage"),
 (device_list, "", "device_list", "List of device paths", ::cxxopts::value<std::vector<std::string>>(), "path [...]"),
-(io_size, "", "io_size", "size of io in KB", ::cxxopts::value<uint32_t>()->default_value("8"), "size of io in KB"),
-(cache_size, "", "cache_size", "size of cache in GB", ::cxxopts::value<uint32_t>()->default_value("8"), "size of cache in GB"),
+(io_size, "", "io_size", "size of io in KB", ::cxxopts::value<uint32_t>()->default_value("0"), "size of io in KB"),
+(cache_size, "", "cache_size", "size of cache in GB", ::cxxopts::value<uint32_t>()->default_value("4"), "size of cache in GB"),
 (is_file, "", "is_file", "is_it file", ::cxxopts::value<uint32_t>()->default_value("0"), "is it file"))
 
 SDS_OPTIONS_ENABLE(logging, perf_test_volume)

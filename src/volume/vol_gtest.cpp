@@ -422,6 +422,7 @@ public:
 
         lba = rand() % (max_vol_blks[cur % max_vols] - max_blks);
         nblks = rand() % max_blks;
+        if (nblks == 0) { nblks = 1; }
         {
             std::unique_lock< std::mutex > lk(vol_mutex[cur]);
             /* check if someone is already doing writes/reads */ 
