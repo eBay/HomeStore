@@ -76,6 +76,7 @@ public:
             homeds::ObjectAllocator< blkstore_req< Buffer > >::make_object());
     }
 
+    virtual void free_yourself() { homeds::ObjectAllocator< blkstore_req< Buffer > >::deallocate(this); }
 protected:
     friend class homeds::ObjectAllocator< blkstore_req< Buffer > >;
     blkstore_req() : bbuf(nullptr), blkstore_ref_cnt(0), missing_pieces(0), data_offset(0){};
@@ -324,8 +325,7 @@ public:
         uint32_t offset = size_offset.get_value_or(0);
         BlkId    tmp_bid(bid.get_blkid_at(offset, free_size, m_pagesz));
         if (is_write_back_cache() && found) {
-            boost::intrusive_ptr< blkstore_req< Buffer > > req(
-                homeds::ObjectAllocator< blkstore_req< Buffer > >::make_object());
+            auto req = blkstore_req< Buffer >::make_request();
             req->bid = tmp_bid;
             req->bbuf = erased_buf;
 

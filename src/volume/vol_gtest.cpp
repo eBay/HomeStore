@@ -26,6 +26,10 @@ THREAD_BUFFER_INIT;
 /************************** GLOBAL VARIABLES ***********************/
 
 #define MAX_DEVICES 2
+
+#define STAGING_VOL_PREFIX "staging"
+#define VOL_PREFIX "/tmp/vol"
+
 std::array< std::string, 4 > names = {"/tmp/file1", "/tmp/file2", "/tmp/file3", "/tmp/file4"};
 uint64_t max_vols = 50;
 uint64_t run_time;
@@ -126,10 +130,11 @@ public:
         for (auto &n : names) {
             remove(n.c_str());
         }
+
         for (uint32_t i = 0; i < max_vols; i++) {
-            std::string name = "vol" + std::to_string(i);
+            std::string name = VOL_PREFIX + std::to_string(i);
             remove(name.c_str());
-            name = "staging" + name;
+            name = name + STAGING_VOL_PREFIX;
             remove(name.c_str());
         }
     }
@@ -197,7 +202,7 @@ public:
 
     void vol_init(int cnt, const VolumePtr& vol_obj) {
         std::string file_name = std::string(VolInterface::get_instance()->get_name(vol_obj));
-        std::string staging_file_name = "staging" + file_name;
+        std::string staging_file_name = file_name + STAGING_VOL_PREFIX;
 
         vol[cnt] = vol_obj;
         fd[cnt] = open(file_name.c_str(), O_RDWR | O_DIRECT);
@@ -224,7 +229,7 @@ public:
             params.io_comp_cb = ([this](const vol_interface_req_ptr& vol_req)
                                  { process_completions(vol_req); });
             params.uuid = boost::uuids::random_generator()();
-            std::string name = "vol" + std::to_string(i);
+            std::string name = VOL_PREFIX + std::to_string(i);
             memcpy(params.vol_name, name.c_str(), (name.length() + 1));
 
             auto vol_obj = VolInterface::get_instance()->create_volume(params);
@@ -237,7 +242,7 @@ public:
             /* create staging file for the outstanding IOs. we compare it from staging file
              * if mismatch fails from main file.
              */
-            std::string staging_name = "staging" + name;
+            std::string staging_name = name + STAGING_VOL_PREFIX;
             std::ofstream staging_ofs(staging_name, std::ios::binary | std::ios::out);
             staging_ofs.seekp(max_vol_size);
             staging_ofs.write("", 1);
@@ -418,6 +423,7 @@ public:
 
         lba = rand() % (max_vol_blks[cur % max_vols] - max_blks);
         nblks = rand() % max_blks;
+        if (nblks == 0) { nblks = 1; }
         {
             std::unique_lock< std::mutex > lk(vol_mutex[cur]);
             /* check if someone is already doing writes/reads */ 
@@ -489,8 +495,8 @@ public:
                         assert(j == 0);
                         /* update the data in primary file */
                         ret = pwrite(fd[req->cur_vol], (uint8_t *)((uint64_t)req->buf + tot_size_read), size_read, 
-                                req->offset + tot_size_read);
-                        if (ret != 0) {
+                                    req->offset + tot_size_read);
+                        if (ret != size_read) {
                             assert(0);
                             return;
                         }
@@ -663,7 +669,7 @@ TEST_F(IOTest, normal_burst_random_io_test) {
 
 /************ Below tests init the systems. Exit with abort. ****************/ 
 
-TEST_F(IOTest, abort_random_io_test) {
+TEST_F(IOTest, normal_abort_random_io_test) {
     /* fork a new process */
     this->init = true;
     this->is_abort = true;
@@ -687,6 +693,16 @@ TEST_F(IOTest, recovery_random_io_test) {
 }
 
 /************ Below tests recover the systems. Exit with abort. ***********/ 
+
+TEST_F(IOTest, recovery_abort_random_io_test) {
+    /* fork a new process */
+    this->init = false;
+    this->is_abort = true;
+    /* child process */
+    this->start_homestore();
+    this->wait_cmpl();
+    this->remove_files();
+}
 
 /************************* CLI options ***************************/
 
@@ -714,6 +730,7 @@ const char* __asan_default_options() {
  * Above command run all tests having a recovery keyword for 120 seconds with 16 threads , 10g disk capacity and 50 volumes
  */
 int main(int argc, char *argv[]) {
+    srand(time(0));
     ::testing::GTEST_FLAG(filter) = "*normal_random*";
     testing::InitGoogleTest(&argc, argv);
     SDS_OPTIONS_LOAD(argc, argv, logging, test_volume)

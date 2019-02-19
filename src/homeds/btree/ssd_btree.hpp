@@ -234,8 +234,8 @@ public:
                            std::deque< boost::intrusive_ptr< homestore::writeback_req > >& dependent_req_q,
                            boost::intrusive_ptr< homestore::writeback_req > cookie, bool is_sync,
                            boost::intrusive_ptr< btree_multinode_req > multinode_req = nullptr) {
-        homestore::BlkId                      blkid(bn->get_node_id().m_id);
-        boost::intrusive_ptr< ssd_btree_req > req(homeds::ObjectAllocator< ssd_btree_req >::make_object());
+        homestore::BlkId = blkid(bn->get_node_id().m_id);
+        auto req = ssd_btree_req::make_object();
         req->is_read = false;
         req->cookie = cookie;
         req->multinode_req = multinode_req;

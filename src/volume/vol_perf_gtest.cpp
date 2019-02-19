@@ -28,8 +28,11 @@ THREAD_BUFFER_INIT;
 
 /************************** GLOBAL VARIABLES ***********************/
 
+uint64_t max_disk_capacity;
 #define MAX_DEVICES 2
 std::vector<std::string> dev_names;
+std::string names[4] = {"/tmp/perf_file1", "/tmp/perf_file2", "/tmp/perf_file3", "/tmp/perf_file4"};
+
 uint64_t max_vols = 1;
 uint64_t run_time;
 uint64_t num_threads;
@@ -42,7 +45,6 @@ constexpr auto Mi = Ki * Ki;
 constexpr auto Gi = Ki * Mi;
 constexpr uint64_t max_io_size = 1 * Mi;
 uint64_t max_outstanding_ios;
-uint64_t max_disk_capacity;
 uint64_t match_cnt = 0;
 uint64_t cache_size = 0;
 std::atomic<uint64_t> write_cnt;
@@ -116,6 +118,14 @@ public:
     }
 
     void print() {
+    }
+
+    void remove_files() {
+        remove("/tmp/perf_file1");
+        remove("/tmp/perf_file2");
+        remove("/tmp/perf_file3");
+        remove("tmp/perf_file4");
+
     }
 
     void start_homestore() {
@@ -253,9 +263,14 @@ public:
         int cur = ++cur_vol % max_vols;
         uint64_t lba = 0;
         uint64_t nblks = 0;
-        nblks = (io_size * 1024) / (VolInterface::get_instance()->get_page_size(vol[cur]));
+        if (!io_size) {
+            uint64_t max_blks = max_io_size/VolInterface::get_instance()->get_page_size(vol[cur]);
+            nblks = rand() % max_blks;
+            if (nblks == 0) { nblks = 1; }
+        } else {
+            nblks = (io_size * 1024) / (VolInterface::get_instance()->get_page_size(vol[cur]));
+        }
         lba = rand() % (max_vol_blks[cur % max_vols] - nblks);
-        if (nblks == 0) { nblks = 1; }
         m_vol_bm[cur]->set_bits(lba, nblks);
         uint8_t *buf = nullptr;
         uint64_t size = nblks * VolInterface::get_instance()->get_page_size(vol[cur]);
@@ -292,17 +307,21 @@ public:
         /* XXX: does it really matter if it is atomic or not */
         int cur = ++cur_vol % max_vols;
         uint64_t lba = 0;
-        uint64_t nblks = 0;
-    start:
-        nblks = (io_size * 1024) / (VolInterface::get_instance()->get_page_size(vol[cur]));
-        lba = rand() % (max_vol_blks[cur % max_vols] - nblks);
-        if (nblks == 0) { nblks = 1; }
-        {
-            /* check if someone is already doing writes/reads */
-            if (m_vol_bm[cur]->is_bits_reset(lba, nblks)) {
-                goto start;
-            }
+        uint32_t nblks = 0;
+        if (!io_size) {
+            uint64_t max_blks = max_io_size/VolInterface::get_instance()->get_page_size(vol[cur]);
+            nblks = rand() % max_blks;
+            if (nblks == 0) { nblks = 1; }
+        } else {
+            nblks = (io_size * 1024) / (VolInterface::get_instance()->get_page_size(vol[cur]));
         }
+        lba = rand() % (max_vol_blks[cur % max_vols] - nblks);
+        auto b = m_vol_bm[cur]->get_next_contiguous_n_reset_bits(lba, nblks);
+        if (b.nbits == 0) {
+            return;
+        }
+
+        lba = b.start_bit;
         read_vol(cur, lba, nblks);
         LOGDEBUG("Read {} {} ",lba,nblks);
     }
@@ -346,7 +365,13 @@ public:
         }
 
         LOGTRACE("IO DONE, req_id={}, outstanding_ios={}", vol_req->request_id, outstanding_ios.load());
-
+#if 0
+        if (write_cnt.load()%100000 == 0) {
+            sisl::ObjCounterRegistry::foreach([](const std::string& name, int64_t created, int64_t alive) {
+                LOGINFO("ObjLife {}: created={} alive={}", name, created, alive);
+            });
+        }
+#endif
         if (get_elapsed_time(start_time) > run_time) {
             LOGINFO("ios cmpled {}. waiting for outstanding ios to be completed", write_cnt.load());
             if (is_abort) {
@@ -392,6 +417,7 @@ TEST_F(IOTest, normal_random_io_test) {
     /* child process */
     this->start_homestore();
     this->wait_cmpl();
+    this->remove_files();
     LOGINFO("write_cnt {}", write_cnt);
     LOGINFO("read_cnt {}", read_cnt);
     uint64_t time_dur = (std::chrono::duration_cast< std::chrono::seconds >(end_time - start_time)).count();
@@ -405,11 +431,11 @@ TEST_F(IOTest, normal_random_io_test) {
 SDS_OPTION_GROUP(perf_test_volume, 
 (run_time, "", "run_time", "run time for io", ::cxxopts::value<uint32_t>()->default_value("30"), "seconds"),
 (num_threads, "", "num_threads", "num threads for io", ::cxxopts::value<uint32_t>()->default_value("8"), "number"),
-(queue_depth, "", "queue_depth", "io queue depth per thread", ::cxxopts::value<uint32_t>()->default_value("8"), "number"),
-(read_percent, "", "read_percent", "read in percentage", ::cxxopts::value<uint32_t>()->default_value("0"), "percentage"),
+(queue_depth, "", "queue_depth", "io queue depth per thread", ::cxxopts::value<uint32_t>()->default_value("1024"), "number"),
+(read_percent, "", "read_percent", "read in percentage", ::cxxopts::value<uint32_t>()->default_value("50"), "percentage"),
 (device_list, "", "device_list", "List of device paths", ::cxxopts::value<std::vector<std::string>>(), "path [...]"),
-(io_size, "", "io_size", "size of io in KB", ::cxxopts::value<uint32_t>()->default_value("8"), "size of io in KB"),
-(cache_size, "", "cache_size", "size of cache in GB", ::cxxopts::value<uint32_t>()->default_value("8"), "size of cache in GB"),
+(io_size, "", "io_size", "size of io in KB", ::cxxopts::value<uint32_t>()->default_value("0"), "size of io in KB"),
+(cache_size, "", "cache_size", "size of cache in GB", ::cxxopts::value<uint32_t>()->default_value("4"), "size of cache in GB"),
 (is_file, "", "is_file", "is_it file", ::cxxopts::value<uint32_t>()->default_value("0"), "is it file"))
 
 SDS_OPTIONS_ENABLE(logging, perf_test_volume)
@@ -429,6 +455,7 @@ const char* __asan_default_options() {
  *                         --device_list=file1 --device_list=file2 --io_size=8
  */
 int main(int argc, char *argv[]) {
+    srand(time(0));
     ::testing::GTEST_FLAG(filter) = "*normal_random*";
     testing::InitGoogleTest(&argc, argv);
     SDS_OPTIONS_LOAD(argc, argv, logging, perf_test_volume)
@@ -441,9 +468,23 @@ int main(int argc, char *argv[]) {
     max_outstanding_ios = num_threads * queue_depth;
     read_p = SDS_OPTIONS["read_percent"].as<uint32_t>();
     io_size = SDS_OPTIONS["io_size"].as<uint32_t>();
-    dev_names = SDS_OPTIONS["device_list"].as<std::vector<std::string>>();
+    if (SDS_OPTIONS.count("device_list")) {
+        dev_names = SDS_OPTIONS["device_list"].as<std::vector<std::string>>();
+    }
     cache_size = SDS_OPTIONS["cache_size"].as<uint32_t>();
     is_file = SDS_OPTIONS["is_file"].as<uint32_t>();
+
+    if (dev_names.size() == 0) {
+        LOGINFO("creating files");
+        for (uint32_t i = 0; i < MAX_DEVICES; i++) {
+            std::ofstream ofs(names[i].c_str(), std::ios::binary | std::ios::out);
+            ofs.seekp(10 * Gi - 1); 
+            ofs.write("", 1); 
+            ofs.close();
+            dev_names.push_back(names[i]);
+        }
+        is_file = 1;
+    }
 
     for (uint32_t i = 0; i < dev_names.size(); ++i) {
         auto fd = open(dev_names[0].c_str(), O_RDWR);

@@ -28,9 +28,9 @@ const char *__asan_default_options() {
     return "detect_leaks=false";
 }
 
-#define MAX_LBA            65535
+#define MAX_LBA           131072
 #define MAX_NLBA             128
-#define MAX_BLK       4294967295
+#define MAX_BLK         94967295
 #define MAX_SIZE          7 * Gi
 uint64_t num_ios;
 uint64_t num_threads;
@@ -67,7 +67,11 @@ protected:
     int fd;
     test_ep *ep;
     int ev_fd;
-
+    std::atomic<size_t> outstanding_ios;
+    uint64_t max_outstanding_ios = 64u;
+    std::atomic<size_t> issued_ios;
+    uint64_t max_issue_ios = 0u;
+    std::atomic<size_t> unreturned_lbas;
 public:
     MapTest() {
         m_lba_bm = new homeds::Bitset(MAX_LBA);
@@ -80,9 +84,48 @@ public:
     }
 
     void process_metadata_completions(const volume_req_ptr& req) {
-        for (auto &ptr : req->blkIds_to_free) {
-            LOGINFO("Freeing Blk: {} {} {}", ptr.m_blkId.to_string(), ptr.m_blk_offset, ptr.m_nblks_to_free);
+        assert(!req->is_read);
+        //verify old blks
+        auto index=0u;
+        auto st = req->lba;
+        auto et = st + req->nlbas-1;
+        while(st < req->lba + req->nlbas){
+            if(m_blk_id_arr[st]==0){
+                st++; continue;
+            }
+            if(index==req->blkIds_to_free.size()){
+                m_map->print_tree();std::this_thread::sleep_for(std::chrono::seconds(5));
+                assert(0); // less blks freed than expected
+            }
+            int bst =req->blkIds_to_free[index].m_blkId.get_id() + req->blkIds_to_free[index].m_blk_offset;
+            int ben = bst + (int)(req->blkIds_to_free[index].m_nblks_to_free)-1;
+            while(bst<=ben){
+                if(st>et) assert(0);//more blks freeed than expected
+                if((int)m_blk_id_arr[st] != bst) assert(0); //blks mistmach
+                bst++;
+                st++;
+            }
+            index++;//move to next free blk
+        }
+        
+        //update new blks
+        for (auto st = req->lba, bst = req->blkId.get_id(); st < req->lba + req->nlbas; st++, bst++)
+            m_blk_id_arr[st] = bst;
+        
+        //release lbas
+        release_lba_range_lock(req->lba, req->nlbas);
+
+        //release blkids
+        for (auto &ptr : req->blkIds_to_free)
             release_blkId_lock(ptr.m_blkId, ptr.m_blk_offset, ptr.m_nblks_to_free);
+        
+        auto outstanding = outstanding_ios.fetch_sub(1);
+        if (issued_ios.load() == max_issue_ios && outstanding == 1) {
+            notify_cmpl();
+        }else if( issued_ios.load() < max_issue_ios){
+            uint64_t temp = 1;
+            [[maybe_unused]] auto rsize = read(ev_fd, &temp, sizeof(uint64_t));
+            uint64_t size = write(ev_fd, &temp, sizeof(uint64_t));
         }
     }
 
@@ -149,6 +192,10 @@ public:
 
     void init_done_cb(std::error_condition err, const out_params& params1) {
         /* create volume */
+        outstanding_ios = 0;
+        max_issue_ios = num_ios;
+        issued_ios =0;
+        unreturned_lbas=0;
         vol_params params;
         params.page_size = 4096;
         params.size = MAX_SIZE;
@@ -176,17 +223,30 @@ public:
         uint64_t temp;
         [[maybe_unused]] auto rsize = read(ev_fd, &temp, sizeof(uint64_t));
         iomgr_obj->process_done(fd, event);
-        iomgr_obj->fd_reschedule(fd, event);
-        // TODO add IO code
+        if (outstanding_ios.load() < max_outstanding_ios && issued_ios.load() < max_issue_ios) {
+            /* raise an event */
+            iomgr_obj->fd_reschedule(fd, event);
+        }
+        if(issued_ios.load()==max_issue_ios)return;
+        outstanding_ios++;
+        issued_ios++;
+        if(issued_ios%10000==0)
+            LOGINFO("Writes issued:{}",issued_ios.load());
+        random_read();
+        random_write();
     }
 
-    void release_lba_range_lock(uint64_t &lba, uint64_t &nlbas) {
+    void release_lba_range_lock(uint64_t &lba, uint64_t nlbas) {
         std::unique_lock<std::mutex> lk(mutex);
+        assert(m_lba_bm->is_bits_set(lba, nlbas));
+        assert(nlbas<=128);
+        unreturned_lbas.fetch_sub(nlbas);
         m_lba_bm->reset_bits(lba, nlbas);
     }
 
     void release_blkId_lock(BlkId &blkId, uint8_t offset, uint8_t nblks_to_free) {
         std::unique_lock<std::mutex> lk(mutex);
+        assert(m_blk_bm->is_bits_set(blkId.get_id() + offset, nblks_to_free));
         m_blk_bm->reset_bits(blkId.get_id() + offset, nblks_to_free);
     }
 
@@ -214,16 +274,23 @@ public:
     void generate_random_lba_nlbas(uint64_t &lba, uint64_t &nlbas) {
         int retry = 0;
         start:
-        if (retry == MAX_LBA) assert(0);//cant allocated lba range anymore
+        if (retry == 10000) {
+            LOGINFO("Outstanding:{},issued:{}",outstanding_ios.load() ,issued_ios.load());
+            LOGINFO("unreturned_lbas:{}",unreturned_lbas.load());
+            std::this_thread::sleep_for(std::chrono::seconds(5));
+            assert(0);//cant allocated lba range anymore
+        }
 
         lba = rand() % (MAX_LBA - MAX_NLBA);
         nlbas = (rand() % (MAX_NLBA - 1)) + 1;
         {
+            assert(nlbas<=128);
             std::unique_lock<std::mutex> lk(mutex);
             /* check if someone is already doing writes/reads */
-            if (m_lba_bm->is_bits_reset(lba, nlbas))
+            if (m_lba_bm->is_bits_reset(lba, nlbas)){
+                unreturned_lbas.fetch_add(nlbas);
                 m_lba_bm->set_bits(lba, nlbas);
-            else {
+            }else {
                 retry++;
                 goto start;
             }
@@ -288,7 +355,7 @@ public:
         std::vector<std::pair<MappingKey, MappingValue>> kvs;
         read_lba(lba, nlbas, kvs);
         verify(kvs);
-        release_lba_range_lock(lba, nlbas);
+        release_lba_range_lock(lba,nlbas);
     }
 
     void write_lba(uint64_t lba, uint64_t nlbas, BlkId bid) {
@@ -300,6 +367,7 @@ public:
         req->lastCommited_seqId = sid;//keeping only latest version always
         req->lba = lba;
         req->nlbas = nlbas;
+        req->blkId =bid;
         MappingKey key(lba, nlbas);
         std::array<uint16_t, CS_ARRAY_STACK_SIZE> carr;
 
@@ -311,57 +379,40 @@ public:
 #endif
 
         LOGDEBUG("Writing -> seqId:{} lba:{},nlbas:{},blk:{}", sid, lba, nlbas, bid.to_string());
+        req->state=writeback_req_state::WB_REQ_COMPL;
         m_map->put(req, key, value);
 
+        
     }
 
     void random_write() {
         uint64_t lba = 0, nlbas = 0;
         BlkId bid;
         generate_random_lba_nlbas(lba, nlbas);
-
-
         generate_random_blkId(bid, nlbas);
-
         write_lba(lba, nlbas, bid);
-
-        for (auto st = lba, bst = bid.get_id(); st < lba + nlbas; st++, bst++)
-            m_blk_id_arr[st] = bst;
-
-
-
-//        //do sync read
-//        std::vector<std::pair<MappingKey, MappingValue>> kvs;
-//        read_lba(lba, nlbas, kvs);
-//
-//        verify(kvs);
-
-        release_lba_range_lock(lba, nlbas);
     }
 
-    static void insert_and_get_thread(MapTest *test) {
-        auto i = 0u;
-        while (i++ < num_ios)test->random_write();
-
-        i = 0u;
-        while (i++ < num_ios)test->random_read();
-    }
     void remove_files() {
         remove("file101");
+    }
+
+    void notify_cmpl() {
+        m_cv.notify_all();
     }
 
     void wait_cmpl() {
         std::unique_lock< std::mutex > lk(m_cv_mtx);
         m_cv.wait(lk);
-    }   
+    }
 };
 
 TEST_F(MapTest, RandomTest
 ) {
-    this->start_homestore();
+this->start_homestore();
 
-    this->wait_cmpl();
-    this->remove_files();
+this->wait_cmpl();
+this->remove_files();
 }
 
 SDS_OPTION_GROUP(test_mapping,
@@ -381,9 +432,8 @@ int main(int argc, char *argv[]) {
     testing::InitGoogleTest(&argc, argv);
 
     num_ios = SDS_OPTIONS["num_ios"].as<uint64_t>();
+    num_ios/=2; //half read half write
     num_threads = SDS_OPTIONS["num_threads"].as<uint64_t>();
 
-    num_ios/=num_threads;//distribute work equally
-    num_ios/=2;//half read/write
     return RUN_ALL_TESTS();
 }

@@ -60,7 +60,7 @@ struct volume_req : public blkstore_req< BlkBuffer > {
      */
     std::atomic< int >                        num_mapping_update;
     boost::intrusive_ptr< vol_interface_req > parent_req;
-
+    BlkId blkId; //used only for debugging purpose
 #ifndef NDEBUG
     bool               done;
     boost::uuids::uuid vol_uuid;

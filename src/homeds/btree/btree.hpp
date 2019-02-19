@@ -210,6 +210,7 @@ public:
             BtreeNodeInfo child_info;
             while (i <= node->get_total_entries()) {
                 if (i == node->get_total_entries()) {
+                    if(!(node->get_edge_id().is_valid()))break;
                     child_info.set_bnode_id(node->get_edge_id());
                 } else {
                     node->get(i, &child_info, false /* copy */);
@@ -687,9 +688,16 @@ private:
 
         auto start_ret = my_node->find(query_req.get_start_of_range(), nullptr, nullptr);
         auto end_ret = my_node->find(query_req.get_end_of_range(), nullptr, nullptr);
-
         bool unlocked_already = false;
-        auto ind = start_ret.end_of_search_index;
+        int ind = -1;
+        
+        if(start_ret.end_of_search_index==(int)my_node->get_total_entries() && !(my_node->get_edge_id().is_valid()))
+            goto done;//no results found
+        else if(end_ret.end_of_search_index==(int)my_node->get_total_entries() && !(my_node->get_edge_id().is_valid()))
+            end_ret.end_of_search_index--;//end is not valid
+        assert(start_ret.end_of_search_index <=  end_ret.end_of_search_index);
+        ind=start_ret.end_of_search_index;
+        
         while (ind <= end_ret.end_of_search_index) {
             BtreeNodeInfo child_info;
             my_node->get(ind, &child_info, false);
@@ -724,7 +732,7 @@ private:
             }
             ind++;
         }
-
+done:
         if (!unlocked_already) {
             unlock_node(my_node, homeds::thread::locktype::LOCKTYPE_READ);
         }
@@ -953,7 +961,6 @@ private:
     BtreeNodePtr get_child_node(BtreeNodePtr int_node, const BtreeSearchRange& range, uint32_t* outind, bool* is_found,
                                 BtreeNodeInfo* child_info, bool load_child = false) {
         auto result = int_node->find(range, nullptr, nullptr);
-        *is_found = result.found;
         *outind = result.end_of_search_index;
 
         if (*outind == int_node->get_total_entries()) {
@@ -968,7 +975,7 @@ private:
             int_node->get(*outind, child_info, false /* copy */);
             *is_found = true;
         }
-        if (load_child)
+        if (*is_found && load_child)
             return btree_store_t::read_node(m_btree_store.get(), child_info->bnode_id());
         else
             return nullptr;
@@ -1029,7 +1036,10 @@ private:
             COUNTER_INCREMENT(m_metrics, btree_obj_count, 1);
             return true;
         }
-
+        
+        bool is_any_child_splitted = false;
+        
+        retry:
         int start_ind = 0, end_ind = -1;
         if (bur != nullptr) // just get start/end index from get_all
             my_node->get_all(bur->get_input_range(), UINT32_MAX, start_ind, end_ind);
@@ -1038,12 +1048,12 @@ private:
             BtreeNodeInfo child_info;
             uint32_t      index = 0;
             get_child_node(my_node, BtreeSearchRange(k), &index, &is_found, &child_info);
-            if (is_found) {
-                start_ind = index;
-                end_ind = index;
-            }
+            start_ind = index;
+            end_ind = index;
+            assert(is_found);//we must always find higher thatn key or edge in internal nodes
         }
         if (start_ind > end_ind) {
+            assert(0);//dont expect this to happen
             // Either the node was updated or mynode is freed. Just proceed again from top.
             unlock_node(my_node, curlock);
             return false;
@@ -1051,7 +1061,6 @@ private:
 
         bool unlocked_already = false;
         int  curr_ind = start_ind;
-        bool is_any_child_splitted = false;
         while (curr_ind <= end_ind) { // iterate all matched childrens
 
         //retry:
@@ -1154,21 +1163,33 @@ private:
                 split_node(my_node, child_node, curr_ind, &split_key, dependent_req_q);
                 ind_hint = -1; // Since split is needed, hint is no longer valid
 
-                if (split_key.compare(&k) < 0){//skip processing of left node after split
-                    assert(curr_ind==start_ind);//only possible for start of range
-                    curr_ind++;
-                }
-                if(bur) { end_ind++; }     // range update - we update endind regardless on split
-                else { end_ind=curr_ind; } // regular update - end moves with curr
-
                 // After split, parentNode would have split, retry search and walk down.
                 unlock_node(child_node, homeds::thread::LOCKTYPE_WRITE);
                 COUNTER_INCREMENT(m_metrics, btree_split_count, 1);
 
                 is_any_child_splitted=true;
-                continue;
+                goto retry;//restart by searching node again as split occured
             }
 
+#ifndef NDEBUG
+            K ckey,pkey;
+            if(curr_ind!=(int)my_node->get_total_entries()) { //not edge
+                my_node->get_nth_key(curr_ind, &pkey, true);
+                if(child_node->get_total_entries()!=0){
+                    child_node->get_last_key(&ckey);
+                    assert(ckey.compare(&pkey) <= 0);
+                }
+                assert(k.compare(&pkey)<=0);
+            }
+            if(curr_ind>0){//not first child
+                my_node->get_nth_key(curr_ind-1, &pkey, true);
+                if(child_node->get_total_entries()!=0){
+                    child_node->get_first_key(&ckey);
+                    assert(pkey.compare(&ckey) < 0);
+                }
+                assert(k.compare(&pkey)>=0);
+            }
+#endif
             if (curr_ind == end_ind) {
                 // If we have reached the last index, unlock before traversing down, because we no longer need
                 // this lock. Holding this lock will impact performance unncessarily.
@@ -1228,11 +1249,10 @@ private:
             if (is_found) {
                 btree_store_t::write_node(m_btree_store.get(), my_node, dependent_req_q, cookie, false);
                 COUNTER_DECREMENT(m_metrics, btree_obj_count, 1);
-            } else {
-#ifndef NDEBUG
-                // my_node->to_string();
-#endif
-            }
+            } 
+            // else {
+            //     LOGINFO("{}",my_node->to_string());
+            // }
 
             unlock_node(my_node, curlock);
             return is_found ? BTREE_ITEM_FOUND : BTREE_NOT_FOUND;
@@ -1244,7 +1264,7 @@ private:
         // Get the childPtr for given key.
         uint32_t ind;
 
-        bool          is_found = true;
+        bool          is_found = false;
         BtreeNodeInfo child_info;
         BtreeNodePtr  child_node = get_child_node(my_node, range, &ind, &is_found, &child_info, true);
         if (!is_found || (child_node == nullptr)) {
@@ -1300,6 +1320,20 @@ private:
                 }
             }
         }
+
+#ifndef NDEBUG
+        K ckey,pkey;
+        if(ind!=my_node->get_total_entries()) { //not edge
+            child_node->get_last_key(&ckey);
+            my_node->get_nth_key(ind, &pkey, true);
+            assert(ckey.compare(&pkey) <= 0);
+        }
+        if(ind>0){//not first child
+            child_node->get_first_key(&ckey);
+            my_node->get_nth_key(ind-1, &pkey, true);
+            assert(pkey.compare(&ckey) < 0);
+        }
+#endif
 
         unlock_node(my_node, curlock);
         return (do_remove(child_node, child_cur_lock, range, outkey, outval, dependent_req_q, cookie));
@@ -1511,7 +1545,13 @@ private:
             //update child2 last key as parent key when parent has some entries(non-root) or split point is not edge
             K child2_last_key;
             child_node2->get_last_key(&child2_last_key);
+            K parent_key;
+            parent_node->get_nth_key(parent_ind, &parent_key, false);
+            assert(parent_key.compare(&child2_last_key) >= 0);
             parent_node->set_nth_key(parent_ind, &child2_last_key);
+#ifndef NDEBUG
+            validate_sanity_next_child(parent_node, (uint32_t)parent_ind);
+#endif
         }
 
         // Insert the last entry in first child to parent node
@@ -1519,6 +1559,11 @@ private:
         ninfo.set_bnode_id(child_node1->get_node_id());
         parent_node->insert(*out_split_key, ninfo);
 
+#ifndef NDEBUG
+        K split_key;
+        child_node2->get_first_key(&split_key);
+        assert(split_key.compare(out_split_key) > 0);
+#endif
         LOGDEBUGMOD(btree_structures, "Split child_node={} with new_child_node={}, parent_node={}, split_key={}",
                 child_node1->get_node_id_int(), child_node2->get_node_id_int(), parent_node->get_node_id_int(),
                 out_split_key->to_string());
@@ -1540,7 +1585,8 @@ private:
     };
 
     auto merge_nodes(BtreeNodePtr parent_node, std::vector< int >& indices_list,
-                     std::deque< boost::intrusive_ptr< btree_req_type > >& dependent_req_q) {
+     
+     std::deque< boost::intrusive_ptr< btree_req_type > >& dependent_req_q) {
         struct {
             bool     merged;  // Have we merged at all
             uint32_t nmerged; // If we merged, how many are the final result of nodes
@@ -1598,6 +1644,7 @@ private:
 
                     ndeleted_nodes++;
                     j++;
+                    ret.merged = true;//case when no entries moved but node is still empty
                     continue;
                 }
             }
@@ -1607,6 +1654,7 @@ private:
 
         assert(!minfo[0].freed); // If we merge it, we expect the left most one has at least 1 entry.
 
+        int last_indx = -1;
         for (auto n = 0u; n < minfo.size(); n++) {
             if (!minfo[n].freed) {
                 // lets get the last key and put in the entry into parent node
@@ -1614,10 +1662,12 @@ private:
 
                 if (minfo[n].parent_index == parent_node->get_total_entries()) { //edge entrys
                     parent_node->update(minfo[n].parent_index, ninfo);
+                    last_indx = minfo[n].parent_index;
                 } else {
                     K last_key;
                     minfo[n].node->get_last_key(&last_key);
                     parent_node->update(minfo[n].parent_index, last_key, ninfo);
+                    last_indx = minfo[n].parent_index;
                 }
 
                 if (n == 0) {
@@ -1627,6 +1677,12 @@ private:
             }
         }
 
+        if (last_indx < 0) {
+            assert(0);
+        }
+#ifndef NDEBUG
+        validate_sanity_next_child(parent_node, (uint32_t)last_indx);
+#endif
         // Its time to write the parent node and loop again to write all nodes and free freed nodes
         btree_store_t::write_node(m_btree_store.get(), parent_node, dependent_req_q, NULL, false);
 
@@ -1655,6 +1711,30 @@ private:
     }
 
 #ifndef NDEBUG
+    void validate_sanity_next_child(BtreeNodePtr parent_node, uint32_t ind) {
+        BtreeNodeInfo             child_info;
+        std::deque< boost::intrusive_ptr< btree_req_type > > dependent_req_q;
+        K child_key;
+        K parent_key;
+
+        if (parent_node->get_edge_id().is_valid()) {
+            if (ind == parent_node->get_total_entries()) {
+                return;
+            }
+        } else {
+            if (ind == parent_node->get_total_entries() - 1) {
+                return;
+            }
+        }
+        parent_node->get(ind+1, &child_info, false /* copy */);
+        auto child_node = btree_store_t::read_node(m_btree_store.get(), child_info.bnode_id());
+        lock_node(child_node, locktype::LOCKTYPE_READ, &dependent_req_q);
+        child_node->get_first_key(&child_key);
+        parent_node->get_nth_key(ind, &parent_key, false);
+        assert(child_key.compare(&parent_key) > 0);
+        unlock_node(child_node, locktype::LOCKTYPE_READ);
+    }
+
     void validate_sanity(std::vector< merge_info >& minfo, BtreeNodePtr parent_node, std::vector< int >& indices_list) {
         int          index_sub = indices_list[0];
         BtreeNodePtr prev = nullptr;
@@ -1669,15 +1749,22 @@ private:
                     cout << "oops";
                 }
 
-                if (minfo[i].node->get_total_entries() != 0) {
-                    K last_key;
-                    minfo[i].node->get_last_key(&last_key);
+                assert(minfo[i].node->get_total_entries() != 0);
+                K last_key;
+                minfo[i].node->get_last_key(&last_key);
+                K first_key;
+                minfo[i].node->get_first_key(&first_key);
 
-                    if (minfo[i].parent_index != parent_node->get_total_entries()) {
-                        K parent_key;
-                        parent_node->get_nth_key(minfo[i].parent_index, &parent_key, false);
-                        assert(last_key.compare(&parent_key) == 0);
-                    }
+                if (minfo[i].parent_index != 0) {
+                    K parent_key;
+                    parent_node->get_nth_key(minfo[i].parent_index - 1, &parent_key, false);
+                    assert(first_key.compare(&parent_key) > 0);
+                }
+
+                if (minfo[i].parent_index != parent_node->get_total_entries()) {
+                    K parent_key;
+                    parent_node->get_nth_key(minfo[i].parent_index, &parent_key, false);
+                    assert(last_key.compare(&parent_key) == 0);
                 }
                 prev = minfo[i].node;
             }

@@ -50,6 +50,7 @@ public:
                 assert(0);
             }
             ++i;
+            prevKey = key;
         }
     } 
 #endif

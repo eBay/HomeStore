@@ -10,6 +10,7 @@
 #include <math.h>
 #include <sds_logging/logging.h>
 #include <volume/volume.hpp>
+#include <utility/obj_life_counter.hpp>
 
 SDS_LOGGING_DECL(VMOD_VOL_MAPPING)
 
@@ -40,15 +41,15 @@ namespace homestore {
     }__attribute__ ((__packed__));
 
     //MappingKey is fixed size
-    class MappingKey : public homeds::btree::BtreeKey {
+    class MappingKey : public homeds::btree::BtreeKey, public sisl::ObjLifeCounter< MappingKey > {
         LbaId m_lbaId;
         LbaId *m_lbaId_ptr;
     public:
-        MappingKey() : m_lbaId_ptr(&m_lbaId) {}
+        MappingKey() : ObjLifeCounter(), m_lbaId_ptr(&m_lbaId) {}
 
-        MappingKey(const MappingKey &other) : BtreeKey(), m_lbaId(other.get_lbaId()), m_lbaId_ptr(&m_lbaId) {}
+        MappingKey(const MappingKey &other) : BtreeKey(), ObjLifeCounter(), m_lbaId(other.get_lbaId()), m_lbaId_ptr(&m_lbaId) {}
 
-        MappingKey(uint64_t lba_start, uint64_t n_lba) : m_lbaId(lba_start, n_lba), m_lbaId_ptr(&m_lbaId) {}
+        MappingKey(uint64_t lba_start, uint64_t n_lba) : ObjLifeCounter(), m_lbaId(lba_start, n_lba), m_lbaId_ptr(&m_lbaId) {}
 
         LbaId get_lbaId() const { return *m_lbaId_ptr; }
 
@@ -213,7 +214,7 @@ namespace homestore {
             stringstream ss;
             ss << "Seq:" << get_seqId() << "," << get_blkId() << ",Boff:" << unsigned(get_blk_offset());
             ss << ",v_nlba:" << unsigned(get_nlba());
-            ss << ",cs:" << get_checksums_string();
+            //ss << ",cs:" << get_checksums_string();
             return ss.str();
         }
         friend ostream &operator<<(ostream &os, const ValueEntry &ve) {
@@ -222,20 +223,23 @@ namespace homestore {
         }
     }__attribute__ ((__packed__));
 
-    class MappingValue : public homeds::btree::BtreeValue {
+    class MappingValue : public homeds::btree::BtreeValue, public sisl::ObjLifeCounter< MappingValue > {
         Blob_Array<ValueEntry> m_earr;
     public:
         //creates empty array
-        MappingValue() {};
+        MappingValue() : ObjLifeCounter() {};
 
         //creates array with one value entry - on heap - bcopy
-        MappingValue(ValueEntry &ve) { m_earr.set_element(ve); }
+        MappingValue(ValueEntry &ve) :
+            ObjLifeCounter() { m_earr.set_element(ve); }
 
         //performs deep copy from other - on heap
-        MappingValue(const MappingValue &other) { m_earr.set_elements(other.m_earr); }
+        MappingValue(const MappingValue &other) :
+            ObjLifeCounter() { m_earr.set_elements(other.m_earr); }
 
         //creates array with  value entrys - on heap -bcopy
-        MappingValue(vector<ValueEntry> &elements) { m_earr.set_elements(elements); }
+        MappingValue(vector<ValueEntry> &elements) :
+            ObjLifeCounter() { m_earr.set_elements(elements); }
 
         virtual homeds::blob get_blob() const override {
             homeds::blob b;
@@ -274,19 +278,16 @@ namespace homestore {
             return true;
         }
 
-        //return deep copied MappingValue and add offset to all entries in copy
+        //add offset to all entries - no copy , in place
         void
-        add_offset_copy(uint8_t lba_offset, uint8_t nlba, uint32_t vol_page_size, MappingValue &out) {
-            vector<ValueEntry> v_array;
+        add_offset(uint8_t lba_offset, uint8_t nlba, uint32_t vol_page_size) {
             auto j = 0u;
             while (j < get_array().get_total_elements()) {
                 ValueEntry ve;
-                get_array().get(j, ve, true);
+                get_array().get(j, ve, false);
                 ve.add_offset(lba_offset, nlba, vol_page_size);
-                v_array.emplace_back(ve);
                 j++;
             }
-            out.get_array().set_elements(v_array);
         }
 
         //insert entry to this mapping value, maintaing it sorted by seqId - deep copy
@@ -326,6 +327,24 @@ namespace homestore {
         comp_callback comp_cb;
         uint32_t m_vol_page_size;
         const MappingValue EMPTY_MAPPING_VALUE;
+
+
+        class GetCBParam : public BRangeQueryCBParam<MappingKey, MappingValue> {
+        public:
+            boost::intrusive_ptr<volume_req> m_req;
+
+            GetCBParam(boost::intrusive_ptr<volume_req> req)
+                    : m_req(req) {}
+        };
+
+        class UpdateCBParam : public BRangeUpdateCBParam<MappingKey, MappingValue> {
+        public:
+            boost::intrusive_ptr<volume_req> m_req;
+
+            UpdateCBParam(boost::intrusive_ptr<volume_req> req, MappingKey &new_key, MappingValue &new_value) :
+                    BRangeUpdateCBParam(new_key, new_value), m_req(req) {}
+        };
+        
     public:
         void get_alloc_blks_cb(vector<pair<MappingKey, MappingValue>> &match_kv, 
                 vector<pair<MappingKey, MappingValue>> &result_kv,
@@ -484,12 +503,12 @@ namespace homestore {
                             ureq);
             
 #ifndef NDEBUG
-            vector<pair<MappingKey, MappingValue>> values;
-            auto temp = req->lastCommited_seqId;
-            req->lastCommited_seqId = req->seqId;
-            get(req, values);
-            req->lastCommited_seqId = temp;
-            validate_get_response(key.start(), key.get_n_lba(), values, &value, req);
+            // vector<pair<MappingKey, MappingValue>> values;
+            // auto temp = req->lastCommited_seqId;
+            // req->lastCommited_seqId = req->seqId;
+            // get(req, values);
+            // req->lastCommited_seqId = temp;
+            // validate_get_response(key.start(), key.get_n_lba(), values, &value, req);
 #endif
             return no_error;
         }
@@ -551,9 +570,10 @@ namespace homestore {
                             result_kv.emplace_back(make_pair(MappingKey(*e_key), MappingValue(ve)));
                         break;
 
-                    } else {
-                        assert(0);// for now, we are always returning latest write
-                    }
+                    } 
+                    // else {
+                    //     assert(0);// for now, we are always returning latest write
+                    // }
 
                 }
             }
@@ -595,59 +615,82 @@ namespace homestore {
             ValueEntry new_ve;
             param->get_new_value().get_array().get(0, new_ve, false);
             MappingKey *s_in_range = (MappingKey *) param->get_input_range().get_start_key();
-            auto last_lba = start_lba;
+            auto curr_lbarange_st = start_lba;
             for (auto &existing : match_kv) {
                 MappingKey *e_key = &existing.first;
                 MappingValue *e_value = &existing.second;
+                Blob_Array<ValueEntry> &e_varray = e_value->get_array();
+                
+                //iterate and remove all entries except latest one
+                //for latest one, if key fully overlaps, we can remove that too
+                for (int i = e_varray.get_total_elements() - 1; i >= 0; i--) {
+                    ValueEntry ve;
+                    e_varray.get(i, ve, false);
+                    uint32_t total = e_varray.get_total_elements();
+                    if (i != (int)total - 1 ||
+                        (e_key->start() >= start_lba && e_key->end() <= end_lba)/*last element full overlap*/) {
 
-                if (e_key->start() > last_lba) //gap found 
-                    add_missing_interval(last_lba, e_key->start() - 1, new_ve,
-                            last_lba - s_in_range->start(), replace_kv);
-
-                add_overlaps(e_key, e_value, &(param->get_new_key()), &(param->get_new_value()), replace_kv);
-                last_lba = e_key->end() + 1;
+                        if (param->m_req->lastCommited_seqId == INVALID_SEQ_ID ||
+                            ve.get_seqId() < param->m_req->lastCommited_seqId) {//eligible for removal
+                            
+                            if (param->is_state_modifiable()) {//actual put cb, not is_split cb
+                                LOGDEBUG("Free entry:{} nblks {}",ve.to_string(),
+                                         (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) *e_key->get_n_lba());
+                                Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(),
+                                        (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) *e_key->get_n_lba());
+                                param->m_req->blkIds_to_free.emplace_back(fbe);
+                            }
+                            e_varray.remove(i);
+                        }
+                    }
+                }
+                
+                if(e_varray.get_total_elements()!=0) { 
+                    e_varray.mem_align();
+                    if(curr_lbarange_st < e_key->start()) //add last running range
+                        add_missing_interval(curr_lbarange_st, e_key->start()-1, new_ve, 
+                                curr_lbarange_st - s_in_range->start(), replace_kv);
+                    
+                    add_overlaps(e_key, e_value, param, replace_kv);
+                    curr_lbarange_st = e_key->end() + 1;//restart running range
+                }
             }
-            if (end_lba >= last_lba)//gap found 
-                add_missing_interval(last_lba, end_lba, new_ve, last_lba - s_in_range->start(), replace_kv);
+            
+            if (curr_lbarange_st <=end_lba) //add new range
+                add_missing_interval(curr_lbarange_st, end_lba, new_ve, 
+                        curr_lbarange_st - s_in_range->start(), replace_kv);
 
-            //remove older versions
+            //TODO - merge kv which have contigous lba and BlkIds - may be not that useful for performance
+#ifndef NDEBUG
             for (auto &pair : replace_kv) {
                 Blob_Array <ValueEntry> &array = pair.second.get_array();
-
-                auto j = 0u;
-                while (j < array.get_total_elements() - 1) {
-                    //iterate array and remove elements<lastcommitedid, but still maintain one latest value entry
-                    ValueEntry ve;
-                    array.get(j, ve, false);
-
-                    if (param->m_req->lastCommited_seqId == INVALID_SEQ_ID || 
-                        ve.get_seqId() < param->m_req->lastCommited_seqId) {
-                        if (param->is_state_modifiable()) {
-                            Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(), 
-                                    (m_vol_page_size/HomeBlks::instance()->get_data_pagesz())*pair.first.get_n_lba());
-                            param->m_req->blkIds_to_free.emplace_back(fbe);
-                        }
-                        array.remove(j);
-                    } else break;
-                    j++;
-                }
-
-#ifndef NDEBUG
-                //sorted check
-                auto i = 1u;
-                while (array.get_total_elements() > 1 && i < array.get_total_elements()) {
-                    ValueEntry preve;
-                    array.get(i - 1, preve, false);
+                
+                auto i = 0u;
+                while (i < array.get_total_elements()) {
                     ValueEntry curve;
                     array.get(i, curve, false);
-                    assert(preve.compare(&curve) > 0);
+                    if(i!=0) {//sorted ve check
+                        ValueEntry preve;
+                        array.get(i - 1, preve, false);
+                        assert(preve.compare(&curve) > 0);
+                    }
+                    assert(curve.get_nlba()==pair.first.get_n_lba());
+                    //check if replace entries dont overlap free entries
+                    auto blk_start = curve.get_blkId().get_id()+curve.get_blk_offset();
+                    auto blk_end = blk_start + (m_vol_page_size/HomeBlks::instance()->get_data_pagesz())*curve.get_nlba() - 1;
+                    for(Free_Blk_Entry &fbe: param->m_req->blkIds_to_free){
+			if(fbe.m_blkId.get_chunk_num()!=curve.get_blkId().get_chunk_num())continue;                        
+			auto fblk_start = fbe.m_blkId.get_id()+fbe.m_blk_offset;
+                        auto fblk_end = fblk_start+ fbe.m_nblks_to_free-1;
+                        if(blk_end<fblk_start || fblk_end<blk_start){}//non overlapping
+                        else {
+                            LOGERROR("Error::Put_CB:,{} ", ss.str());
+                            assert(0);
+                        }
+                    }
                     i++;
                 }
-#endif
             }
-            // TODO merge entries - when neighbours lba/blk are consecutive and have only 1 value entry each
-
-#ifndef NDEBUG
             ss << ",replace_kv:";
             for (auto &ptr : replace_kv) ss << ptr.first.to_string() << "," << ptr.second.to_string();
             if (param->is_state_modifiable())
@@ -683,43 +726,69 @@ namespace homestore {
         }
 
         /** result of overlap of k1/k2 is added to replace_kv **/
-        void add_overlaps(MappingKey *k1, MappingValue *v1, MappingKey *k2, MappingValue *v2,
+        void add_overlaps(MappingKey *k1, MappingValue *v1, UpdateCBParam *param,
                           vector<pair<MappingKey, MappingValue>> &replace_kv) {
+            
+            MappingKey *k2 = &(param->get_new_key());
+            MappingValue *v2 = &(param->get_new_value());
             assert(v2->get_array().get_total_elements() == 1);
 
             auto start = k1->start();
             auto end = k1->end();
             if (k2->start() > start) { //non overlaping start 
-                if (v1->get_array().get_total_elements() > 0)
-                    replace_kv.emplace_back(make_pair(MappingKey(start, k2->start() - start), MappingValue(*v1)));
+                auto nlba = k2->start() - start;
+                MappingValue val_start(*v1);
+                val_start.add_offset(0, nlba, m_vol_page_size);
+                replace_kv.emplace_back(make_pair(MappingKey(start, nlba), val_start));
                 start = k2->start();
             }
             MappingKey key_end;
-            MappingValue val_end;
+            MappingValue val_end(*v1);
             if (k2->end() < k1->end()) { // non overlaping end
                 key_end.set(k2->end() + 1, k1->end() - k2->end());
-                if (v1->get_array().get_total_elements() > 0) {
-                    auto lba_offset = k2->end() - k1->start() + 1;
-                    v1->add_offset_copy(lba_offset, key_end.get_n_lba(), m_vol_page_size, val_end);
-                }
+                auto lba_offset = k2->end() - k1->start() + 1;
+                val_end.add_offset(lba_offset, key_end.get_n_lba(), m_vol_page_size);
                 end = k2->end();
             }
             assert(start >= k2->start() && start >= k1->start());
             assert(end <= k2->end() && end <= k1->end());
-
+            
             //get entris from both v1/v2 and offset is needed for both of them
             auto overlap_nlba = end - start + 1;
             MappingKey key3(start, overlap_nlba);
             auto k1_offset = start - k1->start();
             auto k2_offset = start - k2->start();
-            MappingValue temp_mv;
-            if (v1->get_array().get_total_elements() > 0)
-                v1->add_offset_copy(k1_offset, overlap_nlba, m_vol_page_size, temp_mv);
+            //add offset to v1
+            v1->add_offset(k1_offset, overlap_nlba, m_vol_page_size);//modify original in place
+
+            //remove older version
+            Blob_Array<ValueEntry> &e_varray = v1->get_array();
+            for (int i = e_varray.get_total_elements()-1; i >= 0; i--) {
+                ValueEntry ve;
+                e_varray.get(i, ve, false);
+                if (param->m_req->lastCommited_seqId == INVALID_SEQ_ID ||
+                    ve.get_seqId() < param->m_req->lastCommited_seqId) {//eligible for removal
+
+                    if (param->is_state_modifiable()) {//actual put cb, not is_split cb
+                        LOGDEBUG("Free entry:{} nblks {}",ve.to_string(),
+                                 (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) *k1->get_n_lba());
+                        Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(),
+                                           (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * ve.get_nlba());
+                        param->m_req->blkIds_to_free.emplace_back(fbe);
+                    }
+                    e_varray.remove(i);
+                }
+            }
+            e_varray.mem_align();
+            
             ValueEntry new_ve;
+            //add offset to v2
             v2->get_array().get(0, new_ve, true);
             new_ve.add_offset(k2_offset, overlap_nlba, m_vol_page_size);
+            
+            //combine v1 and v2
             MappingValue value3;
-            temp_mv.add_copy(new_ve, value3);
+            v1->add_copy(new_ve, value3);
             replace_kv.emplace_back(make_pair(key3, value3));
 
             if(!(key_end.get_lbaId().is_invalid())){
@@ -736,21 +805,6 @@ namespace homestore {
             replace_kv.emplace_back(make_pair(MappingKey(s_lba, nlba), MappingValue(gap_entry)));
         }
 
-        class GetCBParam : public BRangeQueryCBParam<MappingKey, MappingValue> {
-        public:
-            boost::intrusive_ptr<volume_req> m_req;
-
-            GetCBParam(boost::intrusive_ptr<volume_req> req)
-                    : m_req(req) {}
-        };
-
-        class UpdateCBParam : public BRangeUpdateCBParam<MappingKey, MappingValue> {
-        public:
-            boost::intrusive_ptr<volume_req> m_req;
-
-            UpdateCBParam(boost::intrusive_ptr<volume_req> req, MappingKey &new_key, MappingValue &new_value) :
-                    BRangeUpdateCBParam(new_key, new_value), m_req(req) {}
-        };
 
 #ifndef NDEBUG
 

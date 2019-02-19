@@ -53,6 +53,8 @@ struct writeback_req : public virtualdev_req {
         return boost::intrusive_ptr< writeback_req >(homeds::ObjectAllocator< writeback_req >::make_object());
     }
 
+    virtual void free_yourself() override { homeds::ObjectAllocator< writeback_req >::deallocate(this); }
+    
     virtual ~writeback_req() {
         assert(dependent_req_q.empty());
         assert(state == WB_REQ_COMPL || state == WB_REQ_INIT);
