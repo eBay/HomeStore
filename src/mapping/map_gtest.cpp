@@ -299,7 +299,7 @@ public:
 
     void read_lba(uint64_t lba, uint64_t nlbas, std::vector<std::pair<MappingKey, MappingValue>> &kvs) {
         LOGDEBUG("Reading -> lba:{},nlbas:{}", lba, nlbas);
-        boost::intrusive_ptr<volume_req> volreq(new volume_req());
+        boost::intrusive_ptr<volume_req> volreq = volume_req::make_request();
         volreq->lba = lba;
         volreq->nlbas = nlbas;
         auto sid = seq_Id.fetch_add(1, memory_order_seq_cst);
@@ -359,7 +359,7 @@ public:
     }
 
     void write_lba(uint64_t lba, uint64_t nlbas, BlkId bid) {
-        boost::intrusive_ptr<volume_req> req(new volume_req());
+        boost::intrusive_ptr<volume_req> req = volume_req::make_request();
 
         auto sid = seq_Id.fetch_add(1, memory_order_seq_cst);
 

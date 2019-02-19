@@ -147,7 +147,7 @@ void Volume::process_vol_data_completions(const boost::intrusive_ptr< blkstore_r
 }
 
 volume_req_ptr Volume::create_vol_req(Volume* vol, const vol_interface_req_ptr& hb_req) {
-    volume_req_ptr vreq(new volume_req());
+    volume_req_ptr vreq = volume_req::make_request();
     vreq->parent_req = hb_req;
     vreq->is_read = hb_req->is_read;
     vreq->vol_instance = vol->shared_from_this();

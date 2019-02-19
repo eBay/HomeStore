@@ -62,14 +62,6 @@ SDS_LOGGING_DECL(btree_structures, btree_nodes, btree_generics)
 #define DLOGTRACEMOD(...)    
 #endif
 
-//#define _BTREE_LOG_MSG(node, msg, ...)  (const_concat_string(" Node {} ", msg), node->get_node_id(), __VA_ARGS__)
-//#define BTREE_LOG_MSG(node, msg, ...)   _BTREE_LOG_MSG(node, msg, __VA_ARGS__)
-
-#define _const_concat_string(s1, s2) const_concat_string(s1, s2)
-
-#define BLOGINFOMOD(mod, node, msg, ...)     \
-        LOGINFOMOD(mod, _const_concat_string(" Node {} ", msg), node->get_node_id(), __VA_ARGS__)
-
 namespace homeds {
 namespace btree {
 
@@ -186,7 +178,7 @@ public:
         do_common_init();
         m_root_node = m_sb.root_node;
     }
-    
+
     Btree(BtreeConfig &cfg) :
             m_btree_cfg(cfg),
             m_metrics(cfg.get_name().c_str()) {}
@@ -1372,6 +1364,9 @@ done:
         /* it swap the data while keeping the nodeid same */
         btree_store_t::swap_node(m_btree_store.get(), root, child_node);
         btree_store_t::write_node(m_btree_store.get(), child_node, dependent_req_q, NULL, false);
+
+        LOGDEBUGMOD(btree_structures, "Root node: {} is full, swapping contents to child_node {} and split that",
+                root->get_node_id_int(), child_node->get_node_id_int());
 
         /* Reading a node again to get the latest buffer from writeback cache. We are going
          * to write this node again in split node. We can not have two consecutive writes on the

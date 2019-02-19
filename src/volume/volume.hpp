@@ -12,6 +12,7 @@
 #include <utility/atomic_counter.hpp>
 #include <utility/obj_life_counter.hpp>
 #include <memory>
+#include "homeds/memory/obj_allocator.hpp"
 
 #include "threadpool/thread_pool.h"
 using namespace std;
@@ -42,7 +43,7 @@ typedef boost::intrusive_ptr< volume_req > volume_req_ptr;
 #define BOOT_CNT_MASK 0x0000fffffffffffful
 #define GET_IO_SEQ_ID(sid) ((HomeBlks::instance()->get_boot_cnt() << SEQ_ID_BIT_CNT) | (sid & BOOT_CNT_MASK))
 
-struct volume_req : blkstore_req< BlkBuffer > {
+struct volume_req : public blkstore_req< BlkBuffer > {
     uint64_t                      lba;
     int                           nlbas;
     bool                          is_read;
@@ -66,16 +67,27 @@ struct volume_req : blkstore_req< BlkBuffer > {
 #endif
 
 public:
+    static boost::intrusive_ptr< volume_req > make_request() {
+        return boost::intrusive_ptr< volume_req >(homeds::ObjectAllocator< volume_req >::make_object());
+    }
+
+    virtual void free_yourself() override { homeds::ObjectAllocator< volume_req >::deallocate(this); }
+
     /* any derived class should have the virtual destructor to prevent
      * memory leak because pointer can be free with the base class.
      */
     virtual ~volume_req() = default;
+
+    // virtual size_t get_your_size() const override { return sizeof(volume_req); }
 
     static volume_req_ptr cast(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req) {
         return boost::static_pointer_cast< volume_req >(bs_req);
     }
 
     friend class Volume;
+
+protected:
+    friend class homeds::ObjectAllocator< volume_req >;
 
     // Volume req should always be created from Volume::create_vol_req()
     volume_req() : is_read(false), num_mapping_update(0), parent_req(nullptr) {

@@ -61,9 +61,12 @@ class HomestoreConan(ConanFile):
         if self.settings.sanitize != None:
             definitions['MEMORY_SANITIZER_ON'] = 'ON'
 
+        if self.settings.build_type == 'Debug':
+            definitions['CMAKE_BUILD_TYPE'] = 'Debug'
+
         cmake.configure(defs=definitions)
         cmake.build()
-        cmake.test(target=test_target)
+        cmake.test(target=test_target, output_on_failure=True)
 
     def package(self):
         self.copy("*.h", dst="include", src="src", keep_path=True)

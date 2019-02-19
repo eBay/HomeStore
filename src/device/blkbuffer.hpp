@@ -35,7 +35,11 @@ public:
         return homeds::ObjectAllocator< BlkBuffer >::make_object();
     }
 
-    virtual size_t get_your_size() const override { return sizeof(BlkBuffer); }
+    virtual void free_yourself() override {
+        homeds::ObjectAllocator< BlkBuffer >::deallocate(this);
+    }
+
+    // virtual size_t get_your_size() const override { return sizeof(BlkBuffer); }
 };
 
 }

@@ -26,6 +26,11 @@ public:
 
         register_me_to_farm();
     }
+
+    static FreeListAllocatorMetrics& instance() {
+        static FreeListAllocatorMetrics inst;
+        return inst;
+    }
 };
 
 template <uint16_t MaxListCount, std::size_t Size>
@@ -49,14 +54,16 @@ public:
         }
     }
 
-    uint8_t *allocate(uint32_t size_needed, FreeListAllocatorMetrics& metrics) {
+    uint8_t *allocate(uint32_t size_needed) {
         uint8_t *ptr;
+        //auto &metrics = FreeListAllocatorMetrics::instance();
+
         if (m_head == nullptr) {
             ptr = (uint8_t *)malloc(size_needed);
-            COUNTER_INCREMENT(metrics, freelist_alloc_miss, 1);
+            //COUNTER_INCREMENT(metrics, freelist_alloc_miss, 1);
         } else {
             ptr = (uint8_t *)m_head;
-            COUNTER_INCREMENT(metrics, freelist_alloc_hit, 1);
+            //COUNTER_INCREMENT(metrics, freelist_alloc_hit, 1);
             m_head = m_head->next;
         }
 
@@ -64,9 +71,13 @@ public:
         return ptr;
     }
 
-    bool deallocate(uint8_t *mem, uint32_t size_alloced, FreeListAllocatorMetrics& metrics) {
+    bool deallocate(uint8_t *mem, uint32_t size_alloced) {
+        //auto &metrics = FreeListAllocatorMetrics::instance();
+
         if ((size_alloced != Size) || (m_list_count == MaxListCount)) {
-            if (size_alloced != Size) { COUNTER_INCREMENT(metrics, freelist_dealloc_passthru, 1); }
+            if (size_alloced != Size) {
+                //COUNTER_INCREMENT(metrics, freelist_dealloc_passthru, 1);
+            }
             free(mem);
             return true;
         }
@@ -82,7 +93,6 @@ template <uint16_t MaxListCount, std::size_t Size>
 class FreeListAllocator {
 private:
     folly::ThreadLocalPtr< FreeListAllocatorImpl< MaxListCount, Size > > m_impl;
-    FreeListAllocatorMetrics m_metrics;
 
 public:
     static_assert((Size >= sizeof(uint8_t *)), "Size requested should be atleast a pointer size");
@@ -100,7 +110,7 @@ public:
             m_impl.reset(new FreeListAllocatorImpl< MaxListCount, Size >());
         }
 
-        return (m_impl->allocate(size_needed, m_metrics));
+        return (m_impl->allocate(size_needed));
     }
 
     bool deallocate(uint8_t *mem, uint32_t size_alloced) {
@@ -108,7 +118,7 @@ public:
             m_impl.reset(new FreeListAllocatorImpl< MaxListCount, Size >());
         }
 
-        return m_impl->deallocate(mem, size_alloced, m_metrics);
+        return m_impl->deallocate(mem, size_alloced);
     }
 
     bool owns(uint8_t *mem) const {
