@@ -19,7 +19,7 @@ struct free_list_header {
 
 class FreeListAllocatorMetrics : public sisl::MetricsGroupWrapper {
 public:
-    explicit FreeListAllocatorMetrics() : sisl::MetricsGroupWrapper("FreeListAllocator") {
+    explicit FreeListAllocatorMetrics() : sisl::MetricsGroupWrapper("FreeListAllocator", "Singleton") {
         REGISTER_COUNTER(freelist_alloc_hit, "Number of allocs from cache");
         REGISTER_COUNTER(freelist_alloc_miss, "Number of allocs from system");
         REGISTER_COUNTER(freelist_dealloc_passthru, "Number of dealloc not cached because of size mismatch");

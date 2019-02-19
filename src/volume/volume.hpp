@@ -99,21 +99,24 @@ protected:
 
 class VolumeMetrics : public sisl::MetricsGroupWrapper {
 public:
-    explicit VolumeMetrics(const char* vol_name) : sisl::MetricsGroupWrapper(vol_name) {
-        REGISTER_COUNTER(volume_read_count, "Total Volume read operations");
-        REGISTER_COUNTER(volume_write_count, "Total Volume write operations");
-        REGISTER_COUNTER(volume_read_error_count, "Total Volume read error count");
-        REGISTER_COUNTER(volume_write_error_count, "Total Volume write error count");
-        REGISTER_COUNTER(volume_write_error_count, "Total Volume write error count");
-        REGISTER_COUNTER(volume_write_size_total, "Total Volume data size written");
-        REGISTER_COUNTER(volume_read_size_total, "Total Volume data size read");
+    explicit VolumeMetrics(const char* vol_name) : sisl::MetricsGroupWrapper("Volume", vol_name) {
+        REGISTER_COUNTER(volume_read_count, "Total Volume read operations", "volume_op_count", {"op", "read"});
+        REGISTER_COUNTER(volume_write_count, "Total Volume write operations", "volume_op_count", {"op", "write"});
+        REGISTER_COUNTER(volume_read_error_count, "Total Volume read error count", "volume_error_count", {"op", "read"});
+        REGISTER_COUNTER(volume_write_error_count, "Total Volume write error count", "volume_error_count", {"op", "write"});
+        REGISTER_COUNTER(volume_write_size_total, "Total Volume data size written", "volume_data_size", {"op", "write"});
+        REGISTER_COUNTER(volume_read_size_total, "Total Volume data size read", "volume_data_size", {"op", "read"});
 
-        REGISTER_HISTOGRAM(volume_read_latency, "Volume overall read latency");
-        REGISTER_HISTOGRAM(volume_write_latency, "Volume overall write latency");
-        REGISTER_HISTOGRAM(volume_data_read_latency, "Volume data blocks read latency");
-        REGISTER_HISTOGRAM(volume_data_write_latency, "Volume data blocks write latency");
-        REGISTER_HISTOGRAM(volume_map_read_latency, "Volume mapping read latency");
-        REGISTER_HISTOGRAM(volume_map_write_latency, "Volume mapping write latency");
+        REGISTER_HISTOGRAM(volume_read_latency, "Volume overall read latency", "volume_op_latency", {"op", "read"});
+        REGISTER_HISTOGRAM(volume_write_latency, "Volume overall write latency", "volume_op_latency", {"op", "write"});
+        REGISTER_HISTOGRAM(volume_data_read_latency, "Volume data blocks read latency",
+                "volume_data_op_latency", {"op", "read"});
+        REGISTER_HISTOGRAM(volume_data_write_latency, "Volume data blocks write latency",
+                "volume_data_op_latency", {"op", "write"});
+        REGISTER_HISTOGRAM(volume_map_read_latency, "Volume mapping read latency",
+                           "volume_map_op_latency", {"op", "read"});
+        REGISTER_HISTOGRAM(volume_map_write_latency, "Volume mapping write latency",
+                           "volume_map_op_latency", {"op", "write"});
         REGISTER_HISTOGRAM(volume_blkalloc_latency, "Volume block allocation latency");
         REGISTER_HISTOGRAM(volume_pieces_per_write, "Number of individual pieces per write",
                            HistogramBucketsType(LinearUpto64Buckets));

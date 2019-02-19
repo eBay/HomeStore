@@ -23,6 +23,7 @@ struct writeback_req;
 typedef boost::intrusive_ptr< writeback_req > writeback_req_ptr;
 
 typedef std::function< void(const writeback_req_ptr& req, std::error_condition status) > blkstore_callback;
+#define to_wb_req(req) boost::static_pointer_cast< writeback_req >(req)
 
 struct writeback_req : public virtualdev_req {
     mutex              mtx;
@@ -46,6 +47,7 @@ struct writeback_req : public virtualdev_req {
     writeback_req_state  state;
     std::error_condition status;
     homeds::MemVector    memvec;
+    Clock::time_point    cache_start_time; // Start time to put the wb cache to the request
 
     static boost::intrusive_ptr< writeback_req > make_request() {
         return boost::intrusive_ptr< writeback_req >(homeds::ObjectAllocator< writeback_req >::make_object());

@@ -480,8 +480,7 @@ namespace homestore {
                               placeholders::_3),
                          (BRangeUpdateCBParam<MappingKey, MappingValue> *) &param);
             m_bt->range_put(key, value, PutType::APPEND_IF_EXISTS_ELSE_INSERT,
-                            boost::static_pointer_cast<writeback_req>(req),
-                            boost::static_pointer_cast<writeback_req>(req),
+                            to_wb_req(req), to_wb_req(req),
                             ureq);
             
 #ifndef NDEBUG

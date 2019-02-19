@@ -410,11 +410,11 @@ void HomeBlks::create_data_blkstore(vdev_info_block* vb) {
         m_size_avail = size;
         LOGINFO("maximum capacity for data blocks is {}", m_size_avail);
         m_data_blk_store = new BlkStore< VdevVarSizeBlkAllocatorPolicy >(
-            m_dev_mgr, m_cache, size, WRITEBACK_CACHE, 0, Volume::process_vol_data_completions, (char*)&blob,
-            sizeof(blkstore_blob), m_data_pagesz);
+            m_dev_mgr, m_cache, size, WRITEBACK_CACHE, 0, (char*)&blob, sizeof(blkstore_blob), m_data_pagesz,
+            "data", Volume::process_vol_data_completions);
     } else {
         m_data_blk_store = new BlkStore< VdevVarSizeBlkAllocatorPolicy >(
-            m_dev_mgr, m_cache, vb, WRITEBACK_CACHE, Volume::process_vol_data_completions, m_data_pagesz);
+            m_dev_mgr, m_cache, vb, WRITEBACK_CACHE, m_data_pagesz, "data", Volume::process_vol_data_completions);
         if (vb->failed) {
             m_vdev_failed = true;
             LOGINFO("data block store is in failed state");
@@ -430,10 +430,10 @@ void HomeBlks::create_metadata_blkstore(vdev_info_block* vb) {
         size = ALIGN_SIZE(size, HomeStoreConfig::phys_page_size);
         m_metadata_blk_store = new BlkStore< VdevFixedBlkAllocatorPolicy, BLKSTORE_BUFFER_TYPE >(
             m_dev_mgr, m_cache, size, RD_MODIFY_WRITEBACK_CACHE, 0, (char*)&blob, sizeof(blkstore_blob),
-            HomeStoreConfig::atomic_phys_page_size);
+            HomeStoreConfig::atomic_phys_page_size, "metadata");
     } else {
         m_metadata_blk_store = new BlkStore< VdevFixedBlkAllocatorPolicy, BLKSTORE_BUFFER_TYPE >(
-            m_dev_mgr, m_cache, vb, RD_MODIFY_WRITEBACK_CACHE, 0, HomeStoreConfig::atomic_phys_page_size);
+            m_dev_mgr, m_cache, vb, RD_MODIFY_WRITEBACK_CACHE, HomeStoreConfig::atomic_phys_page_size, "metadata");
         if (vb->failed) {
             m_vdev_failed = true;
             LOGINFO("metadata block store is in failed state");
@@ -454,7 +454,7 @@ void HomeBlks::create_sb_blkstore(vdev_info_block* vb) {
         size = ALIGN_SIZE(size, HomeStoreConfig::phys_page_size);
         m_sb_blk_store = new BlkStore< VdevVarSizeBlkAllocatorPolicy >(
             m_dev_mgr, m_cache, size, PASS_THRU, m_cfg.devices.size() - 1, (char*)&blob, sizeof(sb_blkstore_blob),
-            HomeStoreConfig::atomic_phys_page_size);
+            HomeStoreConfig::atomic_phys_page_size, "superblock");
 
         /* allocate a new blk id */
         BlkId bid = alloc_blk();
@@ -469,7 +469,8 @@ void HomeBlks::create_sb_blkstore(vdev_info_block* vb) {
     } else {
         /* create a blkstore */
         m_sb_blk_store = new BlkStore< VdevVarSizeBlkAllocatorPolicy >(m_dev_mgr, m_cache, vb, PASS_THRU,
-                                                                       HomeStoreConfig::atomic_phys_page_size);
+                                                                       HomeStoreConfig::atomic_phys_page_size,
+                                                                       "superblock");
         if (vb->failed) {
             m_vdev_failed = true;
             LOGINFO("super block store is in failed state");

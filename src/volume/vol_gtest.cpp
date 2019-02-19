@@ -26,7 +26,7 @@ THREAD_BUFFER_INIT;
 /************************** GLOBAL VARIABLES ***********************/
 
 #define MAX_DEVICES 2
-std::string names[4] = {"file1", "file2", "file3", "file4"};
+std::array< std::string, 4 > names = {"/tmp/file1", "/tmp/file2", "/tmp/file3", "/tmp/file4"};
 uint64_t max_vols = 50;
 uint64_t run_time;
 uint64_t num_threads;
@@ -123,10 +123,9 @@ public:
     }
 
     void remove_files() {
-        remove("file1");
-        remove("file2");
-        remove("file3");
-        remove("file4");
+        for (auto &n : names) {
+            remove(n.c_str());
+        }
         for (uint32_t i = 0; i < max_vols; i++) {
             std::string name = "vol" + std::to_string(i);
             remove(name.c_str());

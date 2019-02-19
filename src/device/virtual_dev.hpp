@@ -73,6 +73,8 @@ struct pdev_chunk_map {
 struct virtualdev_req;
 
 typedef std::function< void(boost::intrusive_ptr< virtualdev_req > req) > virtualdev_comp_callback;
+#define to_vdev_req(req) boost::static_pointer_cast< virtualdev_req >(req)
+
 struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
     uint64_t                    version;
     virtualdev_comp_callback    cb;
@@ -87,7 +89,6 @@ struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
     void inc_ref() { intrusive_ptr_add_ref(this); }
     void dec_ref() { intrusive_ptr_release(this); }
 
-    // virtual size_t get_your_size() const { return sizeof(virtualdev_req); }
     static boost::intrusive_ptr< virtualdev_req > make_request() {
         return boost::intrusive_ptr< virtualdev_req >(homeds::ObjectAllocator< virtualdev_req >::make_object());
     }
@@ -97,8 +98,6 @@ struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
     friend void intrusive_ptr_release(virtualdev_req* req) {
         if (req->refcount.decrement_testz()) {
             req->free_yourself();
-            //homeds::ObjectAllocator< virtualdev_req >::deallocate(req, req->get_your_size());
-            //delete (req);
         }
     }
     virtual ~virtualdev_req() { version = 0; }
@@ -135,7 +134,7 @@ protected:
 #if 0
 class VirtualDevMetrics : public sisl::MetricsGroupWrapper {
 public:
-    explicit VirtualDevMetrics(const char *grp_name) : sisl::MetricsGroupWrapper(grp_name) {
+    explicit VirtualDevMetrics(const char *inst_name) : sisl::MetricsGroupWrapper("VirtualDev", inst_name) {
         REGISTER_COUNTER(blkstore_reads_count, "BlkStore total reads");
         REGISTER_COUNTER(blkstore_writes_count, "BlkStore total writes");
         REGISTER_COUNTER(blkstore_cache_hits_count, "BlkStore Cache hits");

@@ -243,7 +243,7 @@ private:
 
 class PhysicalDevMetrics : public sisl::MetricsGroupWrapper {
 public:
-    explicit PhysicalDevMetrics(const std::string& devname) : sisl::MetricsGroupWrapper(devname) {
+    explicit PhysicalDevMetrics(const std::string& devname) : sisl::MetricsGroupWrapper("PhysicalDev", devname) {
         REGISTER_COUNTER(drive_sync_write_count, "Drive sync write count");
         REGISTER_COUNTER(drive_sync_read_count, "Drive sync read count");
         REGISTER_COUNTER(drive_async_write_count, "Drive async write count");
