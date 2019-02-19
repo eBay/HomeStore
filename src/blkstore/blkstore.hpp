@@ -71,6 +71,7 @@ public:
                 homeds::ObjectAllocator< blkstore_req< Buffer > >::make_object());
     }
 
+    virtual void free_yourself() { homeds::ObjectAllocator< blkstore_req< Buffer > >::deallocate(this); }
 protected:
     friend class homeds::ObjectAllocator< blkstore_req< Buffer > >;
     blkstore_req() : bbuf(nullptr), blkstore_ref_cnt(0), missing_pieces(0), data_offset(0){};
