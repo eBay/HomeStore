@@ -19,7 +19,7 @@
 #define ITERATIONS   100
 #define THREADS      4
 
-SDS_LOGGING_INIT()
+SDS_LOGGING_INIT(iomgr)
 THREAD_BUFFER_INIT;
 
 uint32_t glob_sizes[TOTAL_ALLOCS * THREADS];
