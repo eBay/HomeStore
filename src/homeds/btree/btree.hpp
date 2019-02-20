@@ -536,7 +536,7 @@ retry:
         m_btree_lock.unlock();
     }
 
-    nlohmann::json get_metrics_in_json(bool updated = true) { return m_metrics->get_result_in_json(updated); }
+    nlohmann::json get_metrics_in_json(bool updated = true) { return m_metrics.get_result_in_json(updated); }
 
 private:
     void to_string(bnodeid_t bnodeid, std::stringstream &ss) {

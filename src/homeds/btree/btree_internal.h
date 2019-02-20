@@ -645,12 +645,12 @@ template <size_t NodeSize, size_t CacheCount = DEFAULT_FREELIST_CACHE_COUNT> cla
 
 class BtreeMetrics : public sisl::MetricsGroupWrapper {
 public:
-    explicit BtreeMetrics(const char *grp_name) : sisl::MetricsGroupWrapper(grp_name) {
-        REGISTER_COUNTER(btree_obj_count, "Btree object count", "");
-        REGISTER_COUNTER(btree_leaf_node_count, "Btree Leaf node count", "");
-        REGISTER_COUNTER(btree_int_node_count, "Btree Interior node count", "");
-        REGISTER_COUNTER(btree_split_count, "Total number of btree node splits", "");
-        REGISTER_COUNTER(btree_merge_count, "Total number of btree node merges", "");
+    explicit BtreeMetrics(const char *grp_name) : sisl::MetricsGroupWrapper("Btree", grp_name) {
+        REGISTER_COUNTER(btree_obj_count, "Btree object count");
+        REGISTER_COUNTER(btree_leaf_node_count, "Btree Leaf node count", "btree_node_count", {"node_type", "leaf"});
+        REGISTER_COUNTER(btree_int_node_count, "Btree Interior node count", "btree_node_count", {"node_type", "interior"});
+        REGISTER_COUNTER(btree_split_count, "Total number of btree node splits");
+        REGISTER_COUNTER(btree_merge_count, "Total number of btree node merges");
 
         register_me_to_farm();
     }

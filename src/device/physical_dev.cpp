@@ -77,7 +77,7 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
         m_devname(devname),
         m_comp_cb(cb),
         m_iomgr(iomgr),
-        m_metrics("Physical_Device_" + devname) {
+        m_metrics(devname) {
 
     struct stat stat_buf;
     stat(devname.c_str(), &stat_buf);
