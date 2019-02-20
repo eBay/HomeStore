@@ -2,7 +2,6 @@ set (CPP_FLAGS "-faligned-new -Dlinux")
 set (CPP_WARNINGS "-Wall -Wextra -Werror -Wno-unused-parameter -Wno-unused-variable -Wno-empty-body -Wno-array-bounds")
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CPP_FLAGS} ${CPP_WARNINGS} -DRCU_SIGNAL")
 
-
 if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
     message("Debug build")
     add_compile_options(-D_DEBUG=1 -O0 -DDEBUG_RCU -D_PRERELEASE)
@@ -38,13 +37,17 @@ add_subdirectory(main)
 add_subdirectory(threadpool)
 add_subdirectory(mapping)
 
-add_library(homestore
-                  $<TARGET_OBJECTS:hs_main>
-                  $<TARGET_OBJECTS:hs_volume>
-                  $<TARGET_OBJECTS:hs_device>
-                  $<TARGET_OBJECTS:hs_endpoint>
-                  $<TARGET_OBJECTS:hs_blkalloc>
-                  $<TARGET_OBJECTS:hs_error>
-                )
-target_link_libraries(homestore
-                         ${COMMON_LIB_DEPS})
+set(HOMESTORE_OBJECTS
+        $<TARGET_OBJECTS:hs_main>
+        $<TARGET_OBJECTS:hs_device>
+        $<TARGET_OBJECTS:hs_endpoint>
+        $<TARGET_OBJECTS:hs_blkalloc>
+        $<TARGET_OBJECTS:hs_error>
+        )
+add_library(homestore STATIC ${HOMESTORE_OBJECTS})
+target_link_libraries(homestore ${COMMON_LIB_DEPS})
+
+add_library(homeblks STATIC
+                 ${HOMESTORE_OBJECTS}
+                 $<TARGET_OBJECTS:hs_volume>)
+target_link_libraries(homeblks ${COMMON_LIB_DEPS})
