@@ -4,6 +4,7 @@
 
 #include <iostream>
 #include <sds_logging/logging.h>
+#include <sds_options/options.h>
 #include "homeds/array/sparse_vector.hpp"
 
 SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write)

@@ -6,6 +6,7 @@
 #include "homeds/hash/intrusive_hashset.hpp"
 #include "homeds/utility/atomic_counter.hpp"
 #include <sds_logging/logging.h>
+#include <sds_options/options.h>
 #include <benchmark/benchmark.h>
 #include <boost/range/irange.hpp>
 

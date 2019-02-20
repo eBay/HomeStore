@@ -6,6 +6,7 @@
 #include "homeds/btree/btree.hpp"
 #include <thread>
 #include <sds_logging/logging.h>
+#include <sds_options/options.h>
 
 #include "blkstore/blkstore.hpp"
 #include "device/virtual_dev.hpp"

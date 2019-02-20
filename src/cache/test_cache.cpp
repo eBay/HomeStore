@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 #include <sds_logging/logging.h>
+#include <sds_options/options.h>
 #include <boost/range/irange.hpp>
 #include <boost/intrusive_ptr.hpp>
 #include <cstring>

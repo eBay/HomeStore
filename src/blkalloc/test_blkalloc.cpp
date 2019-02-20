@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <gtest/gtest.h>
 #include <sds_logging/logging.h>
+#include <sds_options/options.h>
 #include <thread>
 #include "blk_allocator.h"
 #include "varsize_blk_allocator.h"
