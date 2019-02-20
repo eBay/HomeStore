@@ -40,6 +40,7 @@ uint64_t queue_depth;
 uint32_t read_p;
 uint32_t io_size;
 bool is_file = false;
+bool ref_cnt = false;
 constexpr auto Ki = 1024ull;
 constexpr auto Mi = Ki * Ki;
 constexpr auto Gi = Ki * Mi;
@@ -327,13 +328,7 @@ public:
     }
 
     void read_vol(uint32_t cur, uint64_t lba, uint64_t nblks) {
-        uint8_t *buf = nullptr;
         uint64_t size = nblks * VolInterface::get_instance()->get_page_size(vol[cur]);
-        auto ret = posix_memalign((void **) &buf, 4096, size);
-        if (ret) {
-            assert(0);
-        }
-        assert(buf != nullptr);
         boost::intrusive_ptr<req> req(new struct req());
         req->lba = lba;
         req->nblks = nblks;
@@ -365,13 +360,11 @@ public:
         }
 
         LOGTRACE("IO DONE, req_id={}, outstanding_ios={}", vol_req->request_id, outstanding_ios.load());
-#if 0
-        if (write_cnt.load()%100000 == 0) {
+        if (write_cnt.load()%100000 == 0 && ref_cnt) {
             sisl::ObjCounterRegistry::foreach([](const std::string& name, int64_t created, int64_t alive) {
                 LOGINFO("ObjLife {}: created={} alive={}", name, created, alive);
             });
         }
-#endif
         if (get_elapsed_time(start_time) > run_time) {
             LOGINFO("ios cmpled {}. waiting for outstanding ios to be completed", write_cnt.load());
             if (is_abort) {
@@ -436,7 +429,9 @@ SDS_OPTION_GROUP(perf_test_volume,
 (device_list, "", "device_list", "List of device paths", ::cxxopts::value<std::vector<std::string>>(), "path [...]"),
 (io_size, "", "io_size", "size of io in KB", ::cxxopts::value<uint32_t>()->default_value("0"), "size of io in KB"),
 (cache_size, "", "cache_size", "size of cache in GB", ::cxxopts::value<uint32_t>()->default_value("4"), "size of cache in GB"),
-(is_file, "", "is_file", "is_it file", ::cxxopts::value<uint32_t>()->default_value("0"), "is it file"))
+(is_file, "", "is_file", "is_it file", ::cxxopts::value<uint32_t>()->default_value("0"), "is it file"),
+(ref_cnt, "", "ref_count", "display object life counters", ::cxxopts::value<uint32_t>()->default_value("0"),
+                                                                                "display object life counters"))
 
 SDS_OPTIONS_ENABLE(logging, perf_test_volume)
 
@@ -473,6 +468,7 @@ int main(int argc, char *argv[]) {
     }
     cache_size = SDS_OPTIONS["cache_size"].as<uint32_t>();
     is_file = SDS_OPTIONS["is_file"].as<uint32_t>();
+    ref_cnt = SDS_OPTIONS["ref_count"].as<uint32_t>();
 
     if (dev_names.size() == 0) {
         LOGINFO("creating files");
