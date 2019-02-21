@@ -17,8 +17,8 @@ add_executable(test_volume
 add_executable(perf_test_volume
                   ${PERF_TEST_VOLUME_SOURCE_FILES}
                 )
-target_link_libraries(test_volume homestore ${COMMON_LIB_DEPS})
-target_link_libraries(perf_test_volume homestore ${COMMON_LIB_DEPS})
+target_link_libraries(test_volume homeblks ${COMMON_LIB_DEPS})
+target_link_libraries(perf_test_volume homeblks ${COMMON_LIB_DEPS})
 
 FIND_PACKAGE(Boost COMPONENTS program_options REQUIRED)
 TARGET_LINK_LIBRARIES(test_volume ${Boost_LIBRARIES})
