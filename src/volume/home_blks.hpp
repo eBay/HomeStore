@@ -144,6 +144,7 @@ public:
     static void get_version(sisl::HttpCallData cd);
     static void get_metrics(sisl::HttpCallData cd);
     static void get_obj_life(sisl::HttpCallData cd);
+    static void get_prometheus_metrics(sisl::HttpCallData cd);
 
 private:
     BlkId                             alloc_blk();

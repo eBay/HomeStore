@@ -528,7 +528,8 @@ void HomeBlks::init_thread() {
         m_http_server = std::unique_ptr< sisl::HttpServer >(new sisl::HttpServer(cfg, {{
                 handler_info("/api/v1/version", HomeBlks::get_version, (void *)this),
                 handler_info("/api/v1/getMetrics", HomeBlks::get_metrics, (void *)this),
-                handler_info("/api/v1/getObjLife", HomeBlks::get_obj_life, (void *)this)
+                handler_info("/api/v1/getObjLife", HomeBlks::get_obj_life, (void *)this),
+                handler_info("/metrics", HomeBlks::get_prometheus_metrics, (void *)this)
         }}));
         m_http_server->start();
 
@@ -584,6 +585,12 @@ void HomeBlks::get_version(sisl::HttpCallData cd) {
 void HomeBlks::get_metrics(sisl::HttpCallData cd) {
     HomeBlks *hb = (HomeBlks *)(cd->cookie());
     std::string msg = sisl::MetricsFarm::getInstance().get_result_in_json_string();
+    hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, msg);
+}
+
+void HomeBlks::get_prometheus_metrics(sisl::HttpCallData cd) {
+    HomeBlks *hb = (HomeBlks *)(cd->cookie());
+    std::string msg = sisl::MetricsFarm::getInstance().report(sisl::ReportFormat::kTextFormat);
     hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, msg);
 }
 
