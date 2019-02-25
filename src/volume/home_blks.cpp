@@ -445,6 +445,7 @@ void HomeBlks::scan_volumes() {
                 }
             } else {
                 /* create the volume */
+                assert(sb->state != DESTROYING);
                 if (m_last_vol_sb && BlkId::compare(sb->prev_blkid, m_last_vol_sb->blkid)) {
                     /* prev volume is deleted. update the prev blkid */
                     LOGINFO("updating the previous volume blkid");
