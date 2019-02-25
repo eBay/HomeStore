@@ -9,6 +9,7 @@
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <async_http/http_server.hpp>
+#include <threadpool/thread_pool.h>
 
 namespace homestore {
 
@@ -105,6 +106,11 @@ class HomeBlks : public VolInterface {
 public:
     static VolInterface* init(const init_params& cfg);
     static HomeBlks*     instance();
+    // Sanity check for sb;
+    bool vol_sb_sanity(vol_sb* sb);
+    
+    // Read volume super block based on blkid
+    vol_sb* vol_sb_read(BlkId bid);
 
     HomeBlks(const init_params& cfg);
     virtual std::error_condition write(const VolumePtr& vol, uint64_t lba, uint8_t* buf, uint32_t nblks,
@@ -120,6 +126,7 @@ public:
     virtual const char*          get_name(const VolumePtr& vol) override;
     virtual uint64_t             get_page_size(const VolumePtr& vol) override;
     virtual uint64_t             get_size(const VolumePtr& vol) override;
+    virtual boost::uuids::uuid   get_uuid(VolumePtr vol) override;
     virtual homeds::blob         at_offset(const boost::intrusive_ptr< BlkBuffer >& buf, uint32_t offset) override;
     void                         vol_sb_write(vol_sb* sb);
     void                         vol_sb_write(vol_sb* sb, bool lock);
@@ -162,6 +169,7 @@ private:
     void create_sb_blkstore(vdev_info_block* vb);
     bool is_ready();
     void init_thread();
+    void volume_destroy();
 };
 } // namespace homestore
 #endif // OMSTORE_OMSTORE_HPP

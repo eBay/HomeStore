@@ -111,22 +111,36 @@ VolumePtr HomeBlks::create_volume(const vol_params& params) {
     return nullptr;
 }
 
+
+// 
+// Each volume will have use_count set to 2 here in this function:
+// 1. HomeBlks::m_volume_map;
+// 2. This function's it->second hold another use_count
+// 3. IOTest::vol will hold another use_count but we will release use_count 
+// in IOTest before this function so it will be same use_count both with production or test.
+// 
+#define VOLUME_CLEAN_USE_CNT 2
+
 std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
-    VolumePtr volume;
-    // Locked Map
+    LOGINFO("entering {}", __FUNCTION__);
     {
-        std::lock_guard< std::mutex > lg(m_vol_lock);
-        if (auto it = m_volume_map.find(uuid); m_volume_map.end() != it) {
-            if (2 <= it->second.use_count()) {
-                LOGERROR("Refusing to delete volume with outstanding references: {}, use_count: {}", to_string(uuid),
-                         it->second.use_count());
-                return std::make_error_condition(std::errc::device_or_resource_busy);
-            }
-            volume = std::move(it->second);
-            m_volume_map.erase(it);
-        }
-    } // Unlock Map
-    return (volume ? volume->destroy() : std::make_error_condition(std::errc::no_such_device_or_address));
+    std::lock_guard<std::mutex> lg(m_vol_lock);
+    auto it = m_volume_map.find(uuid);
+    if (it == m_volume_map.end())
+        return std::make_error_condition(std::errc::no_such_device_or_address);
+
+    it->second->set_state(DESTROYING);
+
+    // remove it from the map;
+    m_volume_map.erase(it);
+    //LOGINFO("OK3 {}, use_cnt: {}", __FUNCTION__, it->second.use_count());
+    }
+    // vol sb should be removed after all blks(data blk and btree blk) have been freed.
+    
+    // volume destructor will be called since the user_count of share_ptr 
+    // will drop to zero while going out of this scope;
+    std::error_condition no_err;
+    return no_err;
 }
 
 VolumePtr HomeBlks::lookup_volume(const boost::uuids::uuid& uuid) {
@@ -157,6 +171,7 @@ void HomeBlks::vol_sb_init(vol_sb* sb) {
 
     BlkId                         bid = alloc_blk();
     std::lock_guard< std::mutex > lg(m_vol_lock);
+    // No need to hold vol's sb update lock here since it is being initiated and not added to m_volume_map yet;
     sb->gen_cnt = 0;
     sb->prev_blkid.set(m_last_vol_sb ? m_last_vol_sb->blkid.to_integer() : BlkId::invalid_internal_id());
     sb->next_blkid.set(BlkId::invalid_internal_id());
@@ -169,10 +184,14 @@ void HomeBlks::vol_sb_init(vol_sb* sb) {
 
     /* update the previous pointers */
     if (m_last_vol_sb != nullptr) {
+        auto last_vol = m_volume_map[m_last_vol_sb->uuid];
+        assert(last_vol);
+        last_vol->lock_sb_for_update();
         assert(m_cfg_sb->vol_list_head.to_integer() != BlkId::invalid_internal_id());
         assert(m_last_vol_sb->next_blkid.to_integer() == BlkId::invalid_internal_id());
         m_last_vol_sb->next_blkid.set(bid);
         vol_sb_write(m_last_vol_sb, true);
+        last_vol->unlock_sb_for_update();
     } else {
         assert(m_cfg_sb->vol_list_head.to_integer() == BlkId::invalid_internal_id());
         m_cfg_sb->vol_list_head.set(bid);
@@ -184,7 +203,95 @@ void HomeBlks::vol_sb_init(vol_sb* sb) {
     m_last_vol_sb = sb;
 }
 
-void HomeBlks::vol_sb_remove(vol_sb* sb) { /* TODO need to implement it when vol delete comes in */
+bool 
+HomeBlks::vol_sb_sanity(vol_sb* sb) {
+    return ((sb->magic == VOL_SB_MAGIC) && 
+            (sb->version == VOL_SB_VERSION));
+}
+
+vol_sb* 
+HomeBlks::vol_sb_read(BlkId bid) {
+    bool rewrite = false;
+    if (bid.to_integer() == BlkId::invalid_internal_id()) return nullptr;
+    std::vector<boost::intrusive_ptr<BlkBuffer>> bbuf = m_sb_blk_store->read_nmirror(bid, m_cfg.devices.size() - 1);
+    boost::intrusive_ptr<BlkBuffer> valid_buf = get_valid_buf(bbuf, rewrite);
+
+    vol_sb *sb = nullptr;
+    int ret = posix_memalign((void **) &sb, HomeStoreConfig::align_size, VOL_SB_SIZE); 
+    assert(!ret);
+    memcpy(sb, valid_buf->at_offset(0).bytes, sizeof(*sb));
+    
+    // TODO: how do we recover this if it fails in release mode?
+    assert(sb->blkid.to_integer() == bid.to_integer());
+
+    if (!vol_sb_sanity(sb)) {
+        LOGERROR("Sanity check failure for vol sb: name: {}", sb->vol_name);
+        return nullptr;
+    }
+
+    if (rewrite) {
+        /* update the super block */
+        vol_sb_write(sb, false);
+    }
+
+    return sb;
+}
+
+// 
+// Steps:
+// 1. Read the super block based on BlkId.
+// 2. Get prev_blkid/next_blkid.
+// 3. Read previous super block into memory and point its next_blkid to next_blkid;
+// 4. Read next super block into memory and point its prev_blkid to prev_blkid;
+// 5. Persiste the previous/nxt super block.
+// 6. Free the vol_sb's blk_id
+//
+void 
+HomeBlks::vol_sb_remove(vol_sb *sb) {
+    LOGINFO("Removing sb of vol: {}", sb->vol_name);
+    m_vol_lock.lock();
+
+    vol_sb* prev_sb = nullptr;
+    if (sb->prev_blkid.to_integer() != BlkId::invalid_internal_id()) {
+        prev_sb = vol_sb_read(sb->prev_blkid);
+        assert (prev_sb);
+        // we do have a valid prev_sb, update it. 
+        auto it = m_volume_map.find(prev_sb->uuid);
+        assert(it != m_volume_map.end());
+        
+        auto vol = it->second;
+        // need to update the in-memory copy of sb then persist this copy to disk;
+        vol->lock_sb_for_update();
+        vol->get_sb()->next_blkid = sb->next_blkid;
+        vol_sb_write(vol->get_sb(), true);
+        vol->unlock_sb_for_update();
+    } else {
+        // no prev_sb, this is the first sb being removed. 
+        // we need to update m_cfg_sb to sb->nextblkid;
+        assert(m_cfg_sb);
+        // if there is next sb, sb->next_blkid will be invalid interal blkid, which is good;
+        m_cfg_sb->vol_list_head.set(sb->next_blkid);
+        // persist m_cfg_sb 
+        config_super_block_write(true); // false since we already hold m_vol_lock
+    }
+
+    vol_sb* next_sb = nullptr;
+    if (sb->next_blkid.to_integer() != BlkId::invalid_internal_id()) {
+        next_sb = vol_sb_read(sb->next_blkid);
+        assert(next_sb);
+        auto it = m_volume_map.find(next_sb->uuid);
+        assert(it != m_volume_map.end());
+        auto vol = it->second;
+        
+        // need to update the in-memory copy of sb then persist this copy to disk;
+        vol->lock_sb_for_update();
+        vol->get_sb()->prev_blkid = sb->prev_blkid;
+        vol_sb_write(vol->get_sb(), true);
+        vol->unlock_sb_for_update();
+    } 
+    
+    m_vol_lock.unlock();
+    m_sb_blk_store->free_blk(sb->blkid, boost::none, boost::none);
 }
 
 void HomeBlks::config_super_block_init(BlkId& bid) {
@@ -197,6 +304,11 @@ void HomeBlks::config_super_block_init(BlkId& bid) {
     m_cfg_sb->magic = VOL_SB_MAGIC;
     m_cfg_sb->boot_cnt = 0;
     config_super_block_write(false);
+}
+
+boost::uuids::uuid 
+HomeBlks::get_uuid(VolumePtr vol) {
+    return vol->get_uuid();
 }
 
 void HomeBlks::config_super_block_write(bool lock) {
@@ -311,21 +423,13 @@ void HomeBlks::scan_volumes() {
     int num_vol = 0;
     try {
         while (blkid.to_integer() != BlkId::invalid_internal_id()) {
-            std::vector< boost::intrusive_ptr< BlkBuffer > > bbuf =
-                m_sb_blk_store->read_nmirror(blkid, m_cfg.devices.size() - 1);
-            boost::intrusive_ptr< BlkBuffer > valid_buf = get_valid_buf(bbuf, rewrite);
-
-            vol_sb* sb = nullptr;
-            int     ret = posix_memalign((void**)&sb, HomeStoreConfig::align_size, VOL_SB_SIZE);
-            assert(!ret);
-            memcpy(sb, valid_buf->at_offset(0).bytes, sizeof(*sb));
-            assert(sb->blkid.to_integer() == blkid.to_integer());
-            if (rewrite) {
-                /* update the super block */
-                vol_sb_write(sb, false);
+            vol_sb *sb = vol_sb_read(blkid);
+            if (sb == nullptr) {
+                // TODO: Error handling here...
             }
 
             auto vol_uuid = sb->uuid;
+
             if (!m_cfg.vol_found_cb(vol_uuid)) {
                 LOGINFO("vol delete after recovery {}", sb->vol_name);
                 /* don't need to mount this volume. Delete this volume. Its block will be recaimed automatically */

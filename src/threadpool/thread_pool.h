@@ -11,6 +11,7 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+#include <chrono>
 
 namespace homestore {
 class ThreadPool {

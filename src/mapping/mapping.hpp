@@ -11,6 +11,7 @@
 #include <sds_logging/logging.h>
 #include <volume/volume.hpp>
 #include <utility/obj_life_counter.hpp>
+#include "volume/home_blks.hpp"
 
 SDS_LOGGING_DECL(VMOD_VOL_MAPPING)
 
@@ -321,10 +322,14 @@ namespace homestore {
     class mapping {
         typedef function<void(struct BlkId blkid, size_t offset_size, size_t size)> alloc_blk_callback;
         typedef function<void(boost::intrusive_ptr<volume_req> cookie)> comp_callback;
+        typedef std::function<void(Free_Blk_Entry fbe)> free_blk_callback;
+        typedef std::function<void()>  destroy_btree_comp_callback;
     private:
-        MappingBtreeDeclType *m_bt;
-        alloc_blk_callback m_alloc_blk_cb;
-        comp_callback comp_cb;
+        MappingBtreeDeclType   *m_bt;
+        alloc_blk_callback      m_alloc_blk_cb;
+        free_blk_callback       m_free_blk_cb;
+        destroy_btree_comp_callback  m_destroy_btree_comp_cb;
+        comp_callback           m_comp_cb;
         uint32_t m_vol_page_size;
         const MappingValue EMPTY_MAPPING_VALUE;
 
@@ -376,6 +381,12 @@ namespace homestore {
             }   
         }
 
+        void destroy() {
+            m_bt->destroy(
+            std::bind(&mapping::process_free_blk_callback, this, std::placeholders::_1),
+            std::bind(&mapping::process_destroy_btree_comp_callback, this));
+        }
+
         void recovery_cmpltd() {
             m_bt->recovery_cmpltd();
         }
@@ -404,11 +415,31 @@ namespace homestore {
             if (req->status == no_error) {
                 req->status = status;
             }
-            comp_cb(req);
+            m_comp_cb(req);
         }
 
-        mapping(uint64_t volsize, uint32_t page_size, comp_callback comp_cb) 
-        : comp_cb(comp_cb), m_vol_page_size(page_size) {
+
+        void process_destroy_btree_comp_callback() {
+            m_destroy_btree_comp_cb();
+        }
+
+        void process_free_blk_callback(MappingValue& mv) {
+            Blob_Array <ValueEntry> array = mv.get_array();
+            for (uint32_t i = 0; i < array.get_total_elements(); ++i) {
+                ValueEntry ve; 
+                array.get((uint32_t) i, ve, true);
+                LOGDEBUG("{}: vol_page: {}, data_page: {}, n_lba: {}", __FUNCTION__, m_vol_page_size, HomeBlks::instance()->get_data_pagesz(), ve.get_nlba());
+                // FIXME: (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * ve.get_nlba()
+                Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(), ve.get_nlba());
+                m_free_blk_cb(fbe);
+            }
+        }
+
+        mapping(uint64_t volsize, uint32_t page_size, comp_callback comp_cb, free_blk_callback free_blk_cb, destroy_btree_comp_callback destroy_btree_comp_cb) :
+            m_free_blk_cb(free_blk_cb), 
+            m_destroy_btree_comp_cb(destroy_btree_comp_cb), 
+            m_comp_cb(comp_cb), 
+            m_vol_page_size(page_size) {
             homeds::btree::BtreeConfig btree_cfg;
             btree_cfg.set_max_objs(volsize / page_size);
             btree_cfg.set_max_key_size(sizeof(uint32_t));
@@ -422,9 +453,12 @@ namespace homestore {
                                                                 std::placeholders::_1, std::placeholders::_2));
         }
 
-        mapping(uint64_t volsize, uint32_t page_size, btree_super_block &btree_sb, comp_callback comp_cb, 
-                alloc_blk_callback alloc_blk_cb) 
-        : m_alloc_blk_cb(alloc_blk_cb), comp_cb(comp_cb), m_vol_page_size(page_size) {
+        mapping(uint64_t volsize, uint32_t page_size, btree_super_block &btree_sb, comp_callback comp_cb, alloc_blk_callback alloc_blk_cb, free_blk_callback free_blk_cb, destroy_btree_comp_callback destroy_btree_comp_cb) : 
+            m_alloc_blk_cb(alloc_blk_cb), 
+            m_free_blk_cb(free_blk_cb), 
+            m_destroy_btree_comp_cb(destroy_btree_comp_cb), 
+            m_comp_cb(comp_cb), 
+            m_vol_page_size(page_size) {
             homeds::btree::BtreeConfig btree_cfg;
             btree_cfg.set_max_objs(volsize / page_size);
             btree_cfg.set_max_key_size(sizeof(uint32_t));

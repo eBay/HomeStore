@@ -331,6 +331,7 @@ void Cache<K>::safe_erase(const K &k, erase_comp_cb cb) {
                                    });
     if (found) {
         if (cb != nullptr) {
+            assert(out_buf);
             out_buf->set_cb(cb);
         }
         if (can_remove) {

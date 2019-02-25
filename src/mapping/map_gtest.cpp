@@ -83,6 +83,16 @@ public:
     virtual ~MapTest() {
     }
 
+    void process_free_blk_comp_callback() {
+        // remove this assert if someone is actually calling this funciton
+        assert(0);
+    }
+    
+    void process_free_blk_callback(Free_Blk_Entry fbe) {
+        // remove this assert if someone is actually calling this funciton
+        assert(0);
+    }
+
     void process_metadata_completions(const volume_req_ptr& req) {
         assert(!req->is_read);
         //verify old blks
@@ -202,8 +212,13 @@ public:
         params.uuid = boost::uuids::random_generator()();
         std::string name = "vol1";
         memcpy(params.vol_name, name.c_str(), (name.length() + 1));
-        m_map = new mapping(params.size, params.page_size,
-                            (std::bind(&MapTest::process_metadata_completions, this, std::placeholders::_1)));
+        m_map = new mapping(
+                params.size, 
+                params.page_size,
+                std::bind(&MapTest::process_metadata_completions, this, std::placeholders::_1),
+                std::bind(&MapTest::process_free_blk_callback, this, std::placeholders::_1),
+                std::bind(&MapTest::process_free_blk_comp_callback, this));
+            
         start = true;
         ev_fd = eventfd(0, EFD_NONBLOCK);
         iomgr_obj->add_fd(ev_fd, [this](auto fd, auto cookie, auto event) { process_ev_common(fd, cookie, event); }, 

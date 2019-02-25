@@ -104,7 +104,8 @@ enum vol_state {
     OFFLINE = 2,
     DEGRADED = 3,
     MOUNTING = 4,
-    UNINITED = 5,
+    DESTROYING = 5,
+    UNINITED = 6,
 };
 
 typedef std::function< void(const vol_interface_req_ptr& req) > io_comp_callback;
@@ -184,6 +185,7 @@ public:
     virtual const char*          get_name(const VolumePtr& vol) = 0;
     virtual uint64_t             get_page_size(const VolumePtr& vol) = 0;
     virtual uint64_t             get_size(const VolumePtr& vol) = 0;
+    virtual boost::uuids::uuid   get_uuid(std::shared_ptr<Volume> vol) = 0;
     virtual homeds::blob         at_offset(const boost::intrusive_ptr< BlkBuffer >& buf, uint32_t offset) = 0;
     virtual VolumePtr            create_volume(const vol_params& params) = 0;
     virtual std::error_condition remove_volume(const boost::uuids::uuid& uuid) = 0;

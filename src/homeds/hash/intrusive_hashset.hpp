@@ -145,17 +145,21 @@ public:
                 ret = true;
                 if (V::test_le((const V &)*it, 1)) {
                     can_remove = true;
-                    m_list.erase(it);
                     if (found_cb) {
                         found_cb(&*it);
                     }
+                    m_list.erase(it);
                     hash_write_unlock();
                     V::reset_free_state(*it);
                     /* don't call deref while holding the lock */
                     V::deref(*it);
                     hash_write_lock();
-                 }
-                 break;
+                } else {
+                    if (found_cb) {
+                        found_cb(&*it);
+                    }
+                }
+                break;
             } else if (x > 0) {
                  break;
             }
@@ -173,10 +177,10 @@ public:
             int x = K::compare(*(V::extract_key(*it)), k);
             if (x == 0) {
                 if (V::test_le((const V &)*it, 1)) {
-                    m_list.erase(it);
                     if (found_cb) {
                         found_cb(&*it);
                     }
+                    m_list.erase(it);
                     V::deref(*it);
                     ret = true;
                 } else {

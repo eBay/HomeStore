@@ -310,7 +310,7 @@ public:
         }
 
         if (is_read_modify_cache()) {
-            assert(size_offset.get_value_or(0) == 0 && size.get_value_or(0) == bid.data_size(m_pagesz));
+            assert(size_offset.get_value_or(0) == 0 && free_size == bid.data_size(m_pagesz));
             m_cache->safe_erase(
                 bid, [this, bid, &dependent_req_q](boost::intrusive_ptr< CacheBuffer< BlkId > > erased_buf) {
                     this->cache_buf_erase_cb(boost::static_pointer_cast< Buffer >(erased_buf), dependent_req_q, bid);

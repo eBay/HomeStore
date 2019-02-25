@@ -136,10 +136,10 @@ private:
     struct vol_sb*                    m_sb;
     enum vol_state                    m_state;
     void                              alloc_single_block_in_mem();
-    void                              vol_scan_alloc_blks();
     io_comp_callback                  m_comp_cb;
     std::atomic< uint64_t >           seq_Id;
     VolumeMetrics                     m_metrics;
+    std::mutex                        m_sb_lock; // lock for updating vol's sb
 
 private:
     Volume(const vol_params& params);
@@ -157,14 +157,17 @@ public:
     static void           process_vol_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
     static volume_req_ptr create_vol_req(Volume* vol, const vol_interface_req_ptr& hb_req);
 
-    ~Volume() { free(m_sb); };
+    ~Volume();
 
     std::error_condition destroy();
     std::error_condition write(uint64_t lba, uint8_t* buf, uint32_t nblks, const vol_interface_req_ptr& hb_req);
     std::error_condition read(uint64_t lba, int nblks, const vol_interface_req_ptr& hb_req, bool sync);
 
+    void lock_sb_for_update() { m_sb_lock.lock(); }
+    void unlock_sb_for_update() { m_sb_lock.unlock();}
     struct vol_sb *get_sb() {return m_sb;};
     
+    void vol_scan_alloc_blks();
     void blk_recovery_process_completions(bool success);
     void alloc_blk_callback(struct BlkId bid, size_t offset_size, size_t size);
     void blk_recovery_callback(MappingValue& mv);
@@ -174,6 +177,10 @@ public:
     void process_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
     void recovery_start();
 
+    // callback from mapping layer for free leaf node(data blks) so that volume layer could do blk free.
+    void process_free_blk_callback(Free_Blk_Entry fbe);
+    void process_destroy_btree_comp_callback();
+    
     uint64_t get_elapsed_time(Clock::time_point startTime);
     void     attach_completion_cb(const io_comp_callback& cb);
     void     print_tree();
@@ -191,6 +198,10 @@ public:
     const char* get_name() const { return (m_sb->vol_name); }
     uint64_t    get_page_size() const { return m_sb->page_size; }
     uint64_t    get_size() const { return m_sb->size; }
+    boost::uuids::uuid get_uuid();
+    vol_state get_state();
+    void set_state(vol_state state, bool persist = true);
+    bool is_offline();
 };
 
 #define NUM_BLKS_PER_THREAD_TO_QUERY        10000ull

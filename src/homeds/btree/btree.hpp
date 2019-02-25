@@ -80,6 +80,8 @@ template < btree_store_type BtreeStoreType, typename K, typename V, btree_node_t
 class Btree {
     typedef std::function< void(boost::intrusive_ptr< btree_req_type > cookie, std::error_condition status) >
         comp_callback;
+    typedef std::function< void (V& mv) >      free_blk_callback;
+    typedef std::function< void () >           destroy_btree_comp_callback;
 
 private:
     bnodeid_t              m_root_node;
@@ -184,20 +186,31 @@ public:
             m_metrics(cfg.get_name().c_str()) {}
     
     ~Btree() {
+        destroy();
+    }
+        
+    void destroy(free_blk_callback free_blk_cb = nullptr, destroy_btree_comp_callback destroy_btree_comp_cb = nullptr) {
         m_btree_lock.write_lock();
         BtreeNodePtr             root = btree_store_t::read_node(m_btree_store.get(), m_root_node);
         homeds::thread::locktype acq_lock = homeds::thread::LOCKTYPE_WRITE;
         std::deque< boost::intrusive_ptr< btree_req_type > > dependent_req_q;
         lock_node(root, acq_lock, &dependent_req_q);
-        free(root);
+        free(root, free_blk_cb);
         unlock_node(root, acq_lock);
         m_btree_lock.unlock();
+        // if this is a delete vol call, send the comp callback to caller;
+        if (destroy_btree_comp_cb) {
+            destroy_btree_comp_cb();
+        }
     }
 
     void recovery_cmpltd() { btree_store_t::recovery_cmpltd(m_btree_store.get()); }
 
-    // free nodes in post order traversal of tree
-    void free(BtreeNodePtr node) {
+    // 
+    // 1. free nodes in post order traversal of tree to free non-leaf node
+    // 2. If free_blk_cb is not null, callback to caller for leaf node's blk_id;
+    // 
+    void free(BtreeNodePtr node, free_blk_callback free_blk_cb) {
         // TODO - this calls free node on mem_tree and ssd_tree.
         // In ssd_tree we free actual block id, which is not correct behavior
         // we shouldnt really free any blocks on free node, just reclaim any memory
@@ -220,7 +233,7 @@ public:
 
                 lock_node(child, acq_lock, &dependent_req_q);
                 try {
-                    free(child);
+                    free(child, free_blk_cb);
                 } catch (const homestore::homestore_exception& e) {
                     /* it can happen if read from the disk fails */
                     unlock_node(child, acq_lock);
@@ -233,7 +246,18 @@ public:
                 unlock_node(child, acq_lock);
                 i++;
             }
+        } else if (free_blk_cb) {
+            // get value from leaf node and return to caller via callback;
+            for (uint32_t i = 0; i < node->get_total_entries(); i++) {
+                V val;
+                node->get(i, &val, false);
+                // Caller will free the blk in blkstore in sync mode, which is fine since it is in-memory operation;
+                free_blk_cb(val);
+            }
         }
+    
+        // TODO: need to distinguish shutdown and vol delete
+        // Currently shutdown will also free the node which is not correct;
         free_node(node, dependent_req_q);
     }
 

@@ -32,6 +32,7 @@ THREAD_BUFFER_INIT;
 
 std::array< std::string, 4 > names = {"/tmp/file1", "/tmp/file2", "/tmp/file3", "/tmp/file4"};
 uint64_t max_vols = 50;
+uint64_t max_num_writes = 100000;
 uint64_t run_time;
 uint64_t num_threads;
 bool read_enable;
@@ -290,7 +291,7 @@ public:
         [[maybe_unused]] auto rsize = read(ev_fd, &temp, sizeof(uint64_t));
 
         iomgr_obj->process_done(fd, event);
-        if (outstanding_ios.load() < max_outstanding_ios && get_elapsed_time(startTime) < run_time) { 
+        if ((write_cnt < max_num_writes) || (outstanding_ios.load() < max_outstanding_ios && get_elapsed_time(startTime) < run_time)) {
             /* raise an event */
             iomgr_obj->fd_reschedule(fd, event);
         }
@@ -603,7 +604,7 @@ public:
             }
         }
 
-        if (verify_done && get_elapsed_time(startTime) > run_time) {
+        if (verify_done && ((write_cnt >= max_num_writes) || (get_elapsed_time(startTime) > run_time))) {
             LOGINFO("ios cmpled {}. waiting for outstanding ios to be completed", write_cnt.load());
             if (is_abort) {
                 abort();
@@ -634,6 +635,13 @@ public:
     void wait_cmpl() {
         std::unique_lock< std::mutex > lk(m_mutex);
         m_cv.wait(lk);
+    }
+
+       
+    void delete_volumes() {
+        for (uint32_t i = 0; i < vol.size(); i++) {
+            VolInterface::get_instance()->remove_volume(VolInterface::get_instance()->get_uuid(std::move(vol[i])));   
+        }
     }
 };
 
@@ -704,6 +712,23 @@ TEST_F(IOTest, recovery_abort_random_io_test) {
     this->remove_files();
 }
 
+/************ Below tests delete volumes. Should exit with clean shutdown. ***********/ 
+TEST_F(IOTest, single_vol_del_single_io_test) {
+    // Do single io and coompare with the blks allocated during write and blks freed during delete
+}
+
+TEST_F(IOTest, normal_vol_del_random_io_test) {
+    /* fork a new process */
+    this->init = true;
+    /* child process */
+    this->start_homestore();
+    this->wait_cmpl();
+    LOGINFO("write_cnt {}", write_cnt);
+    LOGINFO("read_cnt {}", read_cnt);
+    this->delete_volumes();
+    this->remove_files();
+}
+    
 /************************* CLI options ***************************/
 
 SDS_OPTION_GROUP(test_volume, 
@@ -711,7 +736,8 @@ SDS_OPTION_GROUP(test_volume,
 (num_threads, "", "num_threads", "num threads for io", ::cxxopts::value<uint32_t>()->default_value("8"), "number"),
 (read_enable, "", "read_enable", "read enable 0 or 1", ::cxxopts::value<uint32_t>()->default_value("1"), "flag"),
 (max_disk_capacity, "", "max_disk_capacity", "max disk capacity", ::cxxopts::value<uint64_t>()->default_value("7"), "GB"),
-(max_volume, "", "max_volume", "max volume", ::cxxopts::value<uint64_t>()->default_value("50"), "number"))
+(max_volume, "", "max_volume", "max volume", ::cxxopts::value<uint64_t>()->default_value("50"), "number"),
+(max_num_writes, "", "max_num_writes", "max num of writes", ::cxxopts::value<uint64_t>()->default_value("100000"), "number"))
 SDS_OPTIONS_ENABLE(logging, test_volume)
 
 /* it will go away once shutdown is implemented correctly */
@@ -742,5 +768,6 @@ int main(int argc, char *argv[]) {
     read_enable = SDS_OPTIONS["read_enable"].as<uint32_t>();
     max_disk_capacity = ((SDS_OPTIONS["max_disk_capacity"].as<uint64_t>())  * (1ul<< 30));
     max_vols = SDS_OPTIONS["max_volume"].as<uint64_t>();
+    max_num_writes= SDS_OPTIONS["max_num_writes"].as<uint64_t>();
     return RUN_ALL_TESTS();
 }
