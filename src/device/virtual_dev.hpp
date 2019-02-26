@@ -31,7 +31,7 @@ public:
          * difference.
          */
         out_config->set_blk_size(vpage_size);
-        out_config->set_total_blks((uint32_t)size / vpage_size);
+        out_config->set_total_blks(size / vpage_size);
     }
 };
 
