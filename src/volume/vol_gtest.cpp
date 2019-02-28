@@ -39,7 +39,7 @@ bool read_enable;
 constexpr auto Ki = 1024ull;
 constexpr auto Mi = Ki * Ki;
 constexpr auto Gi = Ki * Mi;
-constexpr uint64_t max_io_size = 1 * Mi;
+uint64_t max_io_size = 1 * Mi;
 uint64_t max_outstanding_ios = 64u;
 uint64_t max_disk_capacity = 10 * Gi;
 uint64_t match_cnt = 0;
@@ -168,15 +168,15 @@ public:
 #else
         params.flag = homestore::io_flag::DIRECT_IO;
 #endif
-        params.min_virtual_page_size = 4096;
+        params.min_virtual_page_size = 2048;
         params.cache_size = 4 * 1024 * 1024 * 1024ul;
         params.disk_init = init;
         params.devices = device_info;
         params.is_file = true;
         params.max_cap = max_capacity ;
-        params.physical_page_size = 8192;
+        params.physical_page_size = 4096;
         params.disk_align_size = 4096;
-        params.atomic_page_size = 8192;
+        params.atomic_page_size = 4096;
         params.iomgr = iomgr_obj;
         params.init_done_cb = std::bind(&IOTest::init_done_cb, this, std::placeholders::_1, std::placeholders::_2);
         params.vol_mounted_cb = std::bind(&IOTest::vol_mounted_cb, this, std::placeholders::_1, std::placeholders::_2);
@@ -225,7 +225,7 @@ public:
         /* Create a volume */
         for (uint32_t i = 0; i < max_vols; i++) {
             vol_params params;
-            params.page_size = ((i > (max_vols/2)) ? 4096 : 8192);
+            params.page_size = ((i > (max_vols/2)) ? 4096 : 2048);
             params.size = max_vol_size;
             params.io_comp_cb = ([this](const vol_interface_req_ptr& vol_req)
                                  { process_completions(vol_req); });
@@ -270,6 +270,7 @@ public:
             verify_done = false;
             LOGINFO("init completed, verify started");
         }
+        max_io_size = params.max_io_size;
         auto ret = posix_memalign((void **) &init_buf, 4096, max_io_size);
         assert(!ret);
         bzero(init_buf, max_io_size);
@@ -479,7 +480,7 @@ public:
                 } else {
                     size_read = b.size;
                 }
-                size_read = 4096;
+                size_read = 2048;
                 int j = memcmp((void *) b.bytes, (uint8_t *)((uint64_t)req->buf + tot_size_read), size_read);
                 match_cnt++;
                 if (j) {

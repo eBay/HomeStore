@@ -78,10 +78,10 @@ using namespace homeds::btree;
 
 #define BLKSTORE_BUFFER_TYPE                                                                                           \
     BtreeBuffer< MappingKey, MappingValue, btree_node_type::VAR_VALUE,                     \
-                                btree_node_type::VAR_VALUE, 8192 >
+                                btree_node_type::VAR_VALUE, 4096>
 #define MappingBtreeDeclType                                                                                           \
     Btree< btree_store_type::SSD_BTREE, MappingKey, MappingValue, btree_node_type::VAR_VALUE, \
-                          btree_node_type::VAR_VALUE, 8192, writeback_req >
+                          btree_node_type::VAR_VALUE, 4096, writeback_req >
 class HomeBlks : public VolInterface {
     static HomeBlks* _instance;
 
