@@ -76,10 +76,10 @@ struct vol_sb : vol_sb_header {
 
 #define BLKSTORE_BUFFER_TYPE                                                                                           \
     homeds::btree::BtreeBuffer< MappingKey, MappingValue, homeds::btree::BTREE_NODETYPE_VAR_VALUE,                     \
-                                homeds::btree::BTREE_NODETYPE_VAR_VALUE, 8192 >
+                                homeds::btree::BTREE_NODETYPE_VAR_VALUE, 4096 >
 #define MappingBtreeDeclType                                                                                           \
     homeds::btree::Btree< homeds::btree::SSD_BTREE, MappingKey, MappingValue, homeds::btree::BTREE_NODETYPE_VAR_VALUE, \
-                          homeds::btree::BTREE_NODETYPE_VAR_VALUE, 8192, writeback_req >
+                          homeds::btree::BTREE_NODETYPE_VAR_VALUE, 4096, writeback_req >
 class HomeBlks : public VolInterface {
     static HomeBlks* _instance;
 

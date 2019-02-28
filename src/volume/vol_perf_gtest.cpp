@@ -28,6 +28,8 @@ THREAD_BUFFER_INIT;
 
 /************************** GLOBAL VARIABLES ***********************/
 
+#define PRELOAD_WRITES 100000000  // with 4k write it is 400 G insertion
+
 uint64_t max_disk_capacity;
 #define MAX_DEVICES 2
 std::vector<std::string> dev_names;
@@ -48,10 +50,10 @@ constexpr uint64_t max_io_size = 1 * Mi;
 uint64_t max_outstanding_ios;
 uint64_t match_cnt = 0;
 uint64_t cache_size = 0;
-std::atomic<uint64_t> write_cnt;
-std::atomic<uint64_t> read_cnt;
-std::atomic<uint64_t> read_err_cnt;
-std::atomic<size_t> outstanding_ios;
+std::atomic<uint64_t> write_cnt(0);
+std::atomic<uint64_t> read_cnt(0);
+std::atomic<uint64_t> read_err_cnt(0);
+std::atomic<size_t> outstanding_ios(0);
 using log_level = spdlog::level::level_enum;
 SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write, iomgr,
                  btree_structures, btree_nodes, btree_generics,
@@ -107,6 +109,7 @@ protected:
     uint64_t max_vol_size;
     std::atomic<int> rdy_state;
     bool is_abort;
+    bool preload_done;
     Clock::time_point print_startTime;
 
 public:
@@ -116,6 +119,7 @@ public:
         cur_vol = 0;
         max_vol_size = 0;
         print_startTime = Clock::now();
+        preload_done = false;
     }
 
     void print() {
@@ -142,15 +146,15 @@ public:
         iomgr_obj = std::make_shared<iomgr::ioMgr>(2, num_threads);
         init_params params;
         params.flag = homestore::io_flag::DIRECT_IO;
-        params.min_virtual_page_size = 8192;
+        params.min_virtual_page_size = 4096;
         params.cache_size = cache_size * 1024 * 1024 * 1024ul;
         params.disk_init = init;
         params.devices = device_info;
         params.is_file = is_file ? true : false;
         params.max_cap = max_disk_capacity ;
-        params.physical_page_size = 8192;
+        params.physical_page_size = 4096;
         params.disk_align_size = 4096;
-        params.atomic_page_size = 8192;
+        params.atomic_page_size = 4096;
         params.iomgr = iomgr_obj;
         params.init_done_cb = std::bind(&IOTest::init_done_cb, this, std::placeholders::_1, std::placeholders::_2);
         params.vol_mounted_cb = std::bind(&IOTest::vol_mounted_cb, this, std::placeholders::_1, std::placeholders::_2);
@@ -192,7 +196,7 @@ public:
         /* Create a volume */
         for (uint32_t i = 0; i < max_vols; i++) {
             vol_params params;
-            params.page_size = 8192;
+            params.page_size = 4096;
             params.size = max_vol_size;
             params.io_comp_cb = ([this](const vol_interface_req_ptr& vol_req)
                                  { process_completions(vol_req); });
@@ -241,10 +245,21 @@ public:
             iomgr_obj->fd_reschedule(fd, event);
         }
 
-        if (write_cnt == 0 && read_cnt == 0) {
-            LOGINFO("io started");
-            start_time = Clock::now();
+        if (!write_cnt) {
+            LOGINFO("preload started");
         }
+        if (!preload_done && read_p > 50 && write_cnt < PRELOAD_WRITES) {
+            while (outstanding_ios < max_outstanding_ios) {
+                random_write();
+            }
+            return;
+        } else if (!preload_done){
+            preload_done = true;
+            start_time = Clock::now();
+            LOGINFO("io started");
+            write_cnt = 1;
+        }
+        
         while (outstanding_ios < max_outstanding_ios) {
             {
                 std::unique_lock< std::mutex > lk(m_mutex);
@@ -252,9 +267,11 @@ public:
                     return;
                 }
             }
-            random_write();
+            
             if (((read_cnt * 100)/(write_cnt + read_cnt)) < read_p) {
                 random_read();
+            } else {
+                random_write();
             }
         }
     }
@@ -354,8 +371,10 @@ public:
         --outstanding_ios;
         auto elapsed_time = get_elapsed_time(print_startTime);
         if (elapsed_time > print_time) {
-            LOGINFO("write ios cmpled {}", write_cnt.load());
-            LOGINFO("read ios cmpled {}", read_cnt.load());
+            auto temp_write = write_cnt.load();
+            auto temp_read = read_cnt.load();
+            LOGINFO("write ios cmpled {}", temp_write);
+            LOGINFO("read ios cmpled {}", temp_read);
             print_startTime = Clock::now();
         }
 
@@ -365,7 +384,7 @@ public:
                 LOGINFO("ObjLife {}: created={} alive={}", name, created, alive);
             });
         }
-        if (get_elapsed_time(start_time) > run_time) {
+        if (preload_done && get_elapsed_time(start_time) > run_time) {
             LOGINFO("ios cmpled {}. waiting for outstanding ios to be completed", write_cnt.load());
             if (is_abort) {
                 abort();
