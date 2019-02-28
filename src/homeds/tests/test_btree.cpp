@@ -23,7 +23,7 @@ using namespace homeds::btree;
 
 typedef std::chrono::high_resolution_clock Clock;
 
-class TestEntry : public homeds::btree::BtreeKey {
+class TestEntry : public BtreeKey {
 private:
     typedef struct __attribute__((packed)) {
         uint64_t m_count :16;
@@ -219,7 +219,7 @@ struct WorkloadInfo {
 };
 
 typedef struct {
-    homeds::btree::Btree< TestEntry, homeds::btree::EmptyClass > *bt;
+    Btree< TestEntry, EmptyClass > *bt;
     WorkloadInfo preloadInfo;
     WorkloadInfo insertInfo;
     WorkloadInfo readInfo;
@@ -259,13 +259,13 @@ void initDev(char *devName)
 
 void *preloadThread(void *arg) {
     threadarg_t *targ = (threadarg_t *) arg;
-    homeds::btree::EmptyClass e;
+    EmptyClass e;
 
     for (auto i = targ->preloadInfo.start; i < (targ->preloadInfo.start + targ->preloadInfo.count); i++) {
         TestEntry *te = tst.readEntries[i];
 
         Clock::time_point startTime = Clock::now();
-        targ->bt->put(*te, e, INSERT_ONLY_IF_NOT_EXISTS);
+        targ->bt->put(*te, e, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
         targ->preloadInfo.time_us += get_elapsed_time(startTime);
 
         if (((i + 1) % 1000) == 0) {
@@ -279,7 +279,7 @@ void *preloadThread(void *arg) {
 
 void *readInsertThread(void *arg) {
     threadarg_t *targ = (threadarg_t *) arg;
-    homeds::btree::EmptyClass e;
+    EmptyClass e;
     uint32_t iter = 0;
 
     printf("Thread %u does readCount=%u insertCount=%u\n", targ->myid, targ->readInfo.count, targ->insertInfo.count);
@@ -290,7 +290,7 @@ void *readInsertThread(void *arg) {
             --(targ->insertInfo.count);
             TestEntry *te = tst.insertEntries[targ->insertInfo.start + targ->insertInfo.count];
             Clock::time_point startTime = Clock::now();
-            targ->bt->put(*te, e, INSERT_ONLY_IF_NOT_EXISTS);
+            targ->bt->put(*te, e, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
             targ->insertInfo.time_us += get_elapsed_time(startTime);
         } else {
             --(targ->readInfo.count);
@@ -320,7 +320,7 @@ void *readInsertThread(void *arg) {
         --(targ->insertInfo.count);
         TestEntry *te = tst.insertEntries[targ->insertInfo.start + targ->insertInfo.count];
         Clock::time_point startTime = Clock::now();
-        targ->bt->put(*te, e, INSERT_ONLY_IF_NOT_EXISTS);
+        targ->bt->put(*te, e, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
         targ->insertInfo.time_us += get_elapsed_time(startTime);
     }
 
@@ -426,13 +426,13 @@ int main(int argc, const char *argv[]) {
 #endif
 
     // Initialize btree
-    homeds::btree::BtreeConfig btree_cfg;
-    btree_cfg.set_leaf_node_type(homeds::btree::BTREE_NODETYPE_SIMPLE);
-    btree_cfg.set_interior_node_type(homeds::btree::BTREE_NODETYPE_SIMPLE);
+    BtreeConfig btree_cfg;
+    btree_cfg.set_leaf_node_type(btree_node_type::SIMPLE);
+    btree_cfg.set_interior_node_type(btree_node_type::SIMPLE);
     btree_cfg.set_max_objs(nTotalCount);
     btree_cfg.set_max_key_size(sizeof(TestEntry));
     btree_cfg.set_max_value_size(0);
-    homeds::btree::MemBtree< TestEntry, EmptyClass> bt(btree_cfg);
+    MemBtree< TestEntry, EmptyClass> bt(btree_cfg);
 
     threadarg_t *targs = new threadarg_t[nThreads];
 

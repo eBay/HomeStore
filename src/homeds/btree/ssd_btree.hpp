@@ -26,8 +26,8 @@
 namespace homeds {
 namespace btree {
 
-#define SSDBtreeNode BtreeNode< SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize, homestore::writeback_req >
-#define SSDBtreeStore BtreeStore< SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize, homestore::writeback_req >
+#define SSDBtreeNode BtreeNode< btree_store_type::SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize, homestore::writeback_req >
+#define SSDBtreeStore BtreeStore< btree_store_type::SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize, homestore::writeback_req >
 #define btree_buffer_t BtreeBuffer< K, V, InteriorNodeType, LeafNodeType, NodeSize >
 
 /* The class BtreeBuffer represents the buffer type that is used to interact with the BlkStore. It will have
@@ -84,7 +84,7 @@ class SSDBtreeStore {
     struct ssd_btree_req : homestore::blkstore_req< btree_buffer_t > {
         boost::intrusive_ptr< homestore::writeback_req > cookie;
         boost::intrusive_ptr< btree_multinode_req >      multinode_req;
-        BtreeStore< SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize, homestore::writeback_req >*
+        BtreeStore< btree_store_type::SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize, homestore::writeback_req >*
             btree_instance;
         ssd_btree_req(){};
         ~ssd_btree_req(){};

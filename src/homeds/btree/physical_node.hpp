@@ -175,7 +175,7 @@ protected:
     }
 
     void set_node_type(btree_node_type t) {
-        get_persistent_header()->node_type = t;
+        get_persistent_header()->node_type = (uint32_t)t;
     }
 
     uint64_t get_gen() const {
@@ -336,23 +336,23 @@ protected:
     }
 #endif
 
-    bool put(const BtreeKey &key, const BtreeValue &val, PutType put_type, BtreeValue &existing_val) {
+    bool put(const BtreeKey &key, const BtreeValue &val, btree_put_type put_type, BtreeValue &existing_val) {
         auto result = find(key, nullptr, nullptr);
         bool ret = true;
 
-        if (put_type == INSERT_ONLY_IF_NOT_EXISTS) {
+        if (put_type == btree_put_type::INSERT_ONLY_IF_NOT_EXISTS) {
             if (result.found) return false;
             to_variant_node()->insert(result.end_of_search_index, key, val);
-        } else if (put_type == REPLACE_ONLY_IF_EXISTS) {
+        } else if (put_type == btree_put_type::REPLACE_ONLY_IF_EXISTS) {
             if (!result.found) return false;
             to_variant_node()->update(result.end_of_search_index, key, val);
-        } else if (put_type == REPLACE_IF_EXISTS_ELSE_INSERT) {
+        } else if (put_type == btree_put_type::REPLACE_IF_EXISTS_ELSE_INSERT) {
             (result.found) ? to_variant_node()->insert(result.end_of_search_index, key, val) :
                              to_variant_node()->update(result.end_of_search_index, key, val);
-        } else if (put_type == APPEND_ONLY_IF_EXISTS) {
+        } else if (put_type == btree_put_type::APPEND_ONLY_IF_EXISTS) {
             if (!result.found) return false;
             append(result.end_of_search_index, key, val, existing_val);
-        } else if (put_type == APPEND_IF_EXISTS_ELSE_INSERT) {
+        } else if (put_type == btree_put_type::APPEND_IF_EXISTS_ELSE_INSERT) {
             (!result.found) ? to_variant_node()->insert(result.end_of_search_index, key, val) :
                              append(result.end_of_search_index, key, val, existing_val);
         } else {
@@ -476,17 +476,17 @@ protected:
                     to_variant_node_const()->compare_nth_key_range(range, mid);
             if (x == 0) {
                 ret.found = true;
-                if ((range.is_simple_search() || (selection == DO_NOT_CARE))) {
+                if ((range.is_simple_search() || (selection == _MultiMatchSelector::DO_NOT_CARE))) {
                     ret.end_of_search_index = mid;
                     return ret;
-                } else if ((selection == LEFT_MOST) || (selection == SECOND_TO_THE_LEFT) || 
-                            selection == BEST_FIT_TO_CLOSEST) {
+                } else if ((selection == _MultiMatchSelector::LEFT_MOST) || (selection == _MultiMatchSelector::SECOND_TO_THE_LEFT) ||
+                            selection == _MultiMatchSelector::BEST_FIT_TO_CLOSEST) {
                     if (mid < min_ind_found) {
                         second_min = min_ind_found;
                         min_ind_found = mid;
                     }
                     end = mid;
-                } else if (selection == RIGHT_MOST) {
+                } else if (selection == _MultiMatchSelector::RIGHT_MOST) {
                     if (mid > max_ind_found) { max_ind_found = mid; }
                     start = mid;
                 } else {
@@ -504,10 +504,10 @@ protected:
          * bsearch interface more simpler.
          */
         if (ret.found) {
-            if (selection == LEFT_MOST) {
+            if (selection == _MultiMatchSelector::LEFT_MOST) {
                 assert(min_ind_found != INT32_MAX);
                 ret.end_of_search_index = min_ind_found;
-            } else if (selection == SECOND_TO_THE_LEFT || selection == BEST_FIT_TO_CLOSEST) {
+            } else if (selection == _MultiMatchSelector::SECOND_TO_THE_LEFT || selection == _MultiMatchSelector::BEST_FIT_TO_CLOSEST) {
                 assert(min_ind_found != INT32_MAX);
                 if (second_min == INT32_MAX) {
                     if (((int)(min_ind_found + 1) < initial_end) &&
@@ -520,11 +520,11 @@ protected:
                 } else {
                     ret.end_of_search_index = second_min;
                 }
-            } else if (selection == RIGHT_MOST) {
+            } else if (selection == _MultiMatchSelector::RIGHT_MOST) {
                 assert(max_ind_found != INT32_MAX);
                 ret.end_of_search_index = max_ind_found;
             }
-        } else if (selection == BEST_FIT_TO_CLOSEST) {
+        } else if (selection == _MultiMatchSelector::BEST_FIT_TO_CLOSEST) {
             ret.found = true;
             if (has_valid_edge()) {
                 ret.end_of_search_index = end;

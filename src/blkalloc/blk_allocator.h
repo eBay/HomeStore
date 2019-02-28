@@ -27,14 +27,16 @@ class BlkAllocConfig {
 private:
     uint32_t m_blk_size;
     uint64_t m_nblks;
+    std::string m_unique_name;
 
 public:
-    explicit BlkAllocConfig() : BlkAllocConfig(8192, 0) {}
-    explicit BlkAllocConfig(uint64_t nblks) : BlkAllocConfig(8192, nblks) {}
+    explicit BlkAllocConfig(const std::string& name) : BlkAllocConfig(8192, 0, name) {}
+    explicit BlkAllocConfig(uint64_t nblks) : BlkAllocConfig(8192, nblks, "") {}
 
-    BlkAllocConfig(uint32_t blk_size, uint64_t nblks) :
+    BlkAllocConfig(uint32_t blk_size = 8192, uint64_t nblks = 0, const std::string& name = "") :
             m_blk_size(blk_size),
-            m_nblks(nblks) {
+            m_nblks(nblks),
+            m_unique_name(name) {
     }
 
     void set_blk_size(uint64_t blk_size) {
@@ -52,6 +54,8 @@ public:
     uint64_t get_total_blks() const {
         return m_nblks;
     }
+
+    const std::string& get_name() const { return m_unique_name; }
 
     virtual std::string to_string() const {
         std::stringstream ss;

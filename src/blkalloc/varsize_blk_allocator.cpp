@@ -64,7 +64,7 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig &cfg, bool init) 
     }
 
     // Create a btree to cache temperature, blks info (blk num, page id etc..)
-    homeds::btree::BtreeConfig btree_cfg;
+    BtreeConfig btree_cfg(cfg.get_name().c_str());
     btree_cfg.set_max_objs(cfg.get_max_cache_blks());
     btree_cfg.set_max_key_size(sizeof(VarsizeAllocCacheEntry));
     btree_cfg.set_max_value_size(0);
@@ -238,12 +238,12 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
     VarsizeAllocCacheEntry end_entry(BLKID_RANGE_LAST, PAGEID_RANGE_LAST, BLKCOUNT_RANGE_LAST, TEMP_RANGE_LAST);
     VarsizeAllocCacheEntry actual_entry;
 
-    homeds::btree::BtreeSearchRange regex(start_entry, true, /* start_incl */ end_entry, false, /* end incl */
+    BtreeSearchRange regex(start_entry, true, /* start_incl */ end_entry, false, /* end incl */
                                         (best_fit ? 
-                                         homeds::btree::_MultiMatchSelector::BEST_FIT_TO_CLOSEST :
-                                         homeds::btree::_MultiMatchSelector::SECOND_TO_THE_LEFT));
+                                         _MultiMatchSelector::BEST_FIT_TO_CLOSEST :
+                                         _MultiMatchSelector::SECOND_TO_THE_LEFT));
     
-    homeds::btree::EmptyClass dummy_val;
+    EmptyClass dummy_val;
     int attempt = 1;
     while (true) {
         found = m_blk_cache->remove_any(regex, &actual_entry, &dummy_val);
@@ -252,10 +252,10 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
                 if (actual_entry.get_blk_count() < hints.multiplier) {
                     /* it should be atleast equal to hints multiplier. If not then wait for cache to populate */
                     VarsizeAllocCacheEntry excess_entry;
-                    homeds::btree::EmptyClass dummy;
+                    EmptyClass dummy;
                     uint64_t blknum = actual_entry.get_blk_num();
                     gen_cache_entry(blknum, actual_entry.get_blk_count(), &excess_entry);
-                    m_blk_cache->put(excess_entry, dummy, homeds::btree::INSERT_ONLY_IF_NOT_EXISTS);
+                    m_blk_cache->put(excess_entry, dummy, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
                 } else {
                     /* trigger blk allocator to populate cache */
                     if (actual_entry.get_blk_count() != nblks) {
@@ -326,8 +326,8 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
             out_blkid->set(blknum + excess_nblks, alloc_blks);
             gen_cache_entry(blknum, (uint32_t)excess_nblks, &excess_entry);
         }
-        homeds::btree::EmptyClass dummy;
-        m_blk_cache->put(excess_entry, dummy, homeds::btree::INSERT_ONLY_IF_NOT_EXISTS);
+        EmptyClass dummy;
+        m_blk_cache->put(excess_entry, dummy, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
 
         auto slab_index = get_config().get_slab(excess_nblks).first;
         m_slab_entries[slab_index]._a.fetch_add(excess_nblks, std::memory_order_acq_rel);
@@ -426,7 +426,7 @@ void VarsizeBlkAllocator::fill_cache(BlkAllocSegment *seg) {
 }
 
 uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t portion_num, BlkAllocSegment *seg) {
-    homeds::btree::EmptyClass dummy;
+    EmptyClass dummy;
     uint64_t n_added_blks = 0;
 
     BlkAllocPortion &portion = m_blk_portions[portion_num];
@@ -473,7 +473,7 @@ uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t portion_num, BlkAll
                 assert(m_alloc_bm->is_bits_set_reset(b.start_bit, nbits, false));
                 assert(m_alloced_bm->is_bits_set_reset(b.start_bit, nbits,false));
 #endif
-                m_blk_cache->put(entry, dummy, homeds::btree::INSERT_ONLY_IF_NOT_EXISTS);
+                m_blk_cache->put(entry, dummy, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
                 // TODO: Trap the return status of insert
                 m_alloc_bm->set_bits(b.start_bit, nbits);
                 total_bits += nbits;
@@ -510,7 +510,7 @@ uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t portion_num, BlkAll
                 assert(m_alloc_bm->is_bits_set_reset(start, nbits, false));
                 assert(m_alloced_bm->is_bits_set_reset(start, nbits,false));
 #endif
-                m_blk_cache->put(entry, dummy, homeds::btree::INSERT_ONLY_IF_NOT_EXISTS);
+                m_blk_cache->put(entry, dummy, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
                 // TODO: Trap the return status of insert
                 m_alloc_bm->set_bits(start, nbits);
                 total_bits += nbits;
@@ -541,7 +541,7 @@ uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t portion_num, BlkAll
                 assert(m_alloc_bm->is_bits_set_reset(b.start_bit, b.nbits, false));
                 assert(m_alloced_bm->is_bits_set_reset(b.start_bit, b.nbits,false));
 #endif
-                m_blk_cache->put(entry, dummy, homeds::btree::INSERT_ONLY_IF_NOT_EXISTS);
+                m_blk_cache->put(entry, dummy, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
                 // TODO: Trap the return status of insert
                 m_alloc_bm->set_bits(b.start_bit, b.nbits);
                 total_bits += b.nbits;
@@ -632,7 +632,7 @@ int VarsizeAllocCacheEntry::is_in_range(uint64_t val, uint64_t start, bool start
     }
 }
 
-int VarsizeAllocCacheEntry::compare_range(const homeds::btree::BtreeSearchRange &range) const {
+int VarsizeAllocCacheEntry::compare_range(const BtreeSearchRange &range) const {
     auto start_entry = (VarsizeAllocCacheEntry *)range.get_start_key();
     auto end_entry = (VarsizeAllocCacheEntry *)range.get_end_key();
 
@@ -673,7 +673,7 @@ int VarsizeAllocCacheEntry::compare_range(const VarsizeAllocCacheEntry *start, b
 }
 #endif
 
-int VarsizeAllocCacheEntry::compare(const homeds::btree::BtreeKey *o) const {
+int VarsizeAllocCacheEntry::compare(const BtreeKey *o) const {
     auto *other = (VarsizeAllocCacheEntry *) o;
     if (get_blk_count() < other->get_blk_count()) {
         return -1;

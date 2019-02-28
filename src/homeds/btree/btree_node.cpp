@@ -39,7 +39,7 @@ DecBNodeType(void) init_btree_node() {
 }
 
 /************* CRUD on a node ************/
-DecBNodeType(bool) put(const BtreeKey &key, const BtreeValue &val, PutType put_type, BtreeValue &existing_val) {
+DecBNodeType(bool) put(const BtreeKey &key, const BtreeValue &val, btree_put_type put_type, BtreeValue &existing_val) {
     return call_variant_method(this, put, key, val, put_type, existing_val);
 }
 
@@ -154,7 +154,7 @@ DecBNodeType(bool) is_valid_node() const {
 }
 ///////////// Move and Delete related operations on a node //////////////
 DecBNodeType(bool) is_split_needed(const BtreeConfig &cfg, const BtreeKey &k, const BtreeValue &v, int *out_ind_hint,
-                                   PutType &putType, BtreeUpdateRequest<K,V> *bur ) const {
+                                   btree_put_type &putType, BtreeUpdateRequest<K,V> *bur ) const {
     return call_variant_method_const(this, is_split_needed, cfg, k, v, out_ind_hint, putType, bur);
 }
 DecBNodeType(bool) is_merge_needed(const BtreeConfig &cfg) const {

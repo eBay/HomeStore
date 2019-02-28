@@ -20,18 +20,18 @@ using namespace boost;
 
 namespace homeds { namespace btree {
 
-#define SimpleNode              VariantNode<BTREE_NODETYPE_SIMPLE, K, V, NodeSize>
+#define SimpleNode              VariantNode<btree_node_type::SIMPLE, K, V, NodeSize>
 
 template< typename K, typename V, size_t NodeSize >
 class SimpleNode : public PhysicalNode<SimpleNode, K, V, NodeSize> {
 public:
     SimpleNode(bnodeid_t id, bool init,const BtreeConfig &cfg) :
             PhysicalNode<SimpleNode, K, V, NodeSize>(id, init) {
-        this->set_node_type(BTREE_NODETYPE_SIMPLE);
+        this->set_node_type(btree_node_type::SIMPLE);
     }
     SimpleNode(bnodeid_t* id, bool init,const BtreeConfig &cfg) :
             PhysicalNode<SimpleNode, K, V, NodeSize>(id, init) {
-        this->set_node_type(BTREE_NODETYPE_SIMPLE);
+        this->set_node_type(btree_node_type::SIMPLE);
     }
 public:
 
@@ -261,7 +261,7 @@ public:
     }
     
     bool is_split_needed(const BtreeConfig &cfg, const BtreeKey &key, const BtreeValue &value,
-                         int *out_ind_hint, PutType &putType, BtreeUpdateRequest<K,V> *bur = nullptr) const {
+                         int *out_ind_hint, btree_put_type &putType, BtreeUpdateRequest<K,V> *bur = nullptr) const {
         // TODO - add support for callback based internal/leaf nodes
         uint32_t alreadyFilledSize = cfg.get_node_area_size() - get_available_size(cfg);
 

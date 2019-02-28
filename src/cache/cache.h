@@ -14,6 +14,7 @@
 #include "main/homestore_config.hpp"
 #include <execinfo.h>
 #include <utility/obj_life_counter.hpp>
+#include <metrics/metrics.hpp>
 
 namespace homestore {
 
@@ -45,6 +46,23 @@ public:
  * effectiveness of cache, since it could get evicted sooner than expected, if distribution of key hashing is not
  * even.*/
 #define EVICTOR_PARTITIONS 32
+
+class CacheMetrics : public sisl::MetricsGroupWrapper {
+public:
+    explicit CacheMetrics() : sisl::MetricsGroupWrapper("Cache") {
+        REGISTER_COUNTER(cache_insert_count, "Total number of inserts to cache", "cache_op_count", {"op", "insert"});
+        REGISTER_COUNTER(cache_read_count, "Total number of reads to cache", "cache_op_count", {"op", "read"});
+        REGISTER_COUNTER(cache_erase_count, "Total number of erases from cache", "cache_op_count", {"op", "erase"});
+        REGISTER_COUNTER(cache_update_count, "Total number of updates to a cache entry", "cache_op_count", {"op", "update"});
+        REGISTER_COUNTER(cache_object_count, "Total number of cache entries", sisl::_publish_as::publish_as_gauge);
+        REGISTER_COUNTER(cache_add_error_count, "Num cache entries unable to insert");
+        REGISTER_COUNTER(cache_num_evictions, "Total number of evictions");
+        REGISTER_COUNTER(cache_num_evictions_punt, "Total number of evictions punted because of busy");
+        REGISTER_COUNTER(cache_num_duplicate_inserts, "Total number of inserts whose entry already exists");
+
+        register_me_to_farm();
+    }
+};
 
 template < typename K, typename V >
 class IntrusiveCache {
@@ -78,7 +96,7 @@ public:
 protected:
     std::unique_ptr< CurrentEvictor > m_evictors[EVICTOR_PARTITIONS];
     homeds::IntrusiveHashSet< K, V >  m_hash_set;
-    CacheStats                        m_stats;
+    CacheMetrics                      m_metrics;
 };
 
 template < typename K >
@@ -116,7 +134,6 @@ public:
     void safe_erase(const K& k, erase_comp_cb cb);
     bool insert_missing_pieces(const boost::intrusive_ptr< CacheBuffer< K > > buf, uint32_t offset,
                                uint32_t size_to_read, std::vector< std::pair< uint32_t, uint32_t > >& missing_mp);
-    const CacheStats& get_stats() { return this->m_stats; }
 };
 
 enum cache_buf_state {
@@ -232,9 +249,9 @@ public:
 
     bool try_lock() { return (m_mtx.try_lock()); }
 
-    void cache_insert() { m_state = CACHE_INSERTED; }
+    void on_cache_insert() { m_state = CACHE_INSERTED; }
 
-    void cache_evict() { m_state = CACHE_EVICTED; }
+    void on_cache_evict() { m_state = CACHE_EVICTED; }
 
     cache_buf_state get_cache_state() { return m_state; }
 

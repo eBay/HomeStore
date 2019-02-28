@@ -215,6 +215,7 @@ public:
         m_map = new mapping(
                 params.size, 
                 params.page_size,
+                name,
                 std::bind(&MapTest::process_metadata_completions, this, std::placeholders::_1),
                 std::bind(&MapTest::process_free_blk_callback, this, std::placeholders::_1),
                 std::bind(&MapTest::process_free_blk_comp_callback, this));

@@ -34,7 +34,8 @@ Volume::Volume(const vol_params& params) : m_comp_cb(params.io_comp_cb), m_metri
     m_state = vol_state::UNINITED;
     m_map = new mapping(
             params.size, 
-            params.page_size, 
+            params.page_size,
+            params.vol_name,
             std::bind(&Volume::process_metadata_completions, this, std::placeholders::_1),
             std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1),
             std::bind(&Volume::process_destroy_btree_comp_callback, this));
@@ -63,7 +64,8 @@ Volume::Volume(vol_sb* sb) : m_sb(sb), m_metrics(sb->vol_name) {
     if (m_sb->state == vol_state::FAILED) {
         m_map = new mapping(
                 m_sb->size, 
-                m_sb->page_size, 
+                m_sb->page_size,
+                m_sb->vol_name,
                 std::bind(&Volume::process_metadata_completions, this, std::placeholders::_1), 
                 std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1),
                 std::bind(&Volume::process_destroy_btree_comp_callback, this));
@@ -73,7 +75,8 @@ Volume::Volume(vol_sb* sb) : m_sb(sb), m_metrics(sb->vol_name) {
     } else {
          m_map = new mapping(
                  m_sb->size, 
-                 m_sb->page_size, 
+                 m_sb->page_size,
+                 m_sb->vol_name,
                  m_sb->btree_sb,
                  std::bind(&Volume::process_metadata_completions, this, std::placeholders::_1),
                  std::bind(&Volume::alloc_blk_callback, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3),
@@ -298,7 +301,7 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
     try {
         BlkAllocStatus status = m_data_blkstore->alloc_blk(nlbas * m_sb->page_size, hints, bid);
         assert(status == BLK_ALLOC_SUCCESS);
-        HISTOGRAM_OBSERVE(m_metrics, volume_blkalloc_latency, get_elapsed_time_us(hb_req->io_start_time));
+        HISTOGRAM_OBSERVE(m_metrics, volume_blkalloc_latency, get_elapsed_time_ns(hb_req->io_start_time));
         COUNTER_INCREMENT(m_metrics, volume_write_count, 1);
     } catch (const std::exception& e) {
         assert(0);

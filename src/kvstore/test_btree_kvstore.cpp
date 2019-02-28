@@ -23,8 +23,8 @@ homestore::DeviceManager *dev_mgr = nullptr;
 homestore::Cache< BlkId > *glob_cache = nullptr;
 homeds::btree::btree_device_info bt_dev_info;
 
-#define TestBtreeDeclType     homeds::btree::Btree<homeds::btree::SSD_BTREE, TestSimpleKey,TestSimpleValue, \
-                                    homeds::btree::BTREE_NODETYPE_SIMPLE, homeds::btree::BTREE_NODETYPE_SIMPLE>
+#define TestBtreeDeclType     homeds::btree::Btree<homeds::btree::btree_store_type::SSD_BTREE, TestSimpleKey,TestSimpleValue, \
+                                    homeds::btree::btree_node_type::SIMPLE, homeds::btree::btree_node_type::SIMPLE>
 
 AbstractVirtualDev *new_vdev_found(homestore::DeviceManager *dev_mgr, homestore::vdev_info_block *vb) {
     LOG(INFO) << "New virtual device found id = " << vb->vdev_id << " size = " << vb->size;
@@ -333,7 +333,7 @@ public:
     void put_nth_entry(uint32_t i) {
         auto it = m_create_map.find(m_entries[i]);
         assert(it != m_create_map.end());
-        m_bt->put(*m_entries[i], it->second, homeds::btree::INSERT_ONLY_IF_NOT_EXISTS);
+        m_bt->put(*m_entries[i], it->second, homeds::btree::btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
     }
 
     void get_nth_entry(uint32_t i) {
@@ -392,7 +392,7 @@ TEST_F(BtreeCrudTest, SimpleInsert) {
     for (auto i = 0; i < TOTAL_ENTRIES; i++) {
         auto it = m_create_map.find(m_entries[i]);
         assert(it != m_create_map.end());
-        m_bt->put(*m_entries[i], it->second, homeds::btree::INSERT_ONLY_IF_NOT_EXISTS);
+        m_bt->put(*m_entries[i], it->second, homeds::btree::btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
     }
 
     for (auto i = 0; i < TOTAL_ENTRIES; i++) {

@@ -22,14 +22,13 @@ public:
 
     /* Initialize the evictor with maximum size it needs to keep it under, before it starts evictions. Caller also
      * need to provide a callback function to check if the current record could be evicted or not. */
-    Evictor(uint32_t part_num, int64_t max_size, CacheStats *stats, const CanEvictCallback &cb,
+    Evictor(uint32_t part_num, int64_t max_size, const CanEvictCallback &cb,
             const GetSizeCallback &gs_cb) :
             m_can_evict_cb(cb),
             m_get_size_cb(gs_cb),
             m_evict_policy(0),
             m_cur_size(0),
             m_max_size(max_size),
-            m_stats(stats),
             m_part_num(part_num) {
     }
 
@@ -112,7 +111,6 @@ private:
                         }
                         return true;
                     } else {
-                        m_stats->inc_count(CACHE_STATS_FAILED_EVICT_COUNT);
                         return false;
                     }
                 });
@@ -129,7 +127,6 @@ private:
     EvictionPolicy m_evict_policy;
     std::atomic< int64_t > m_cur_size;
     int64_t m_max_size;
-    CacheStats *m_stats;
     uint32_t m_part_num;
 };
 
