@@ -9,6 +9,8 @@
 #include <vector>
 #include <atomic>
 
+using namespace homeds::btree;
+
 namespace homestore {
 /****************** VarsizeBlkAllocator Section **********************/
 
@@ -32,11 +34,11 @@ private:
     std::vector<uint32_t> m_slab_capacity;
 
 public:
-    VarsizeBlkAllocConfig() : VarsizeBlkAllocConfig(0, 0) {
-    }
+    VarsizeBlkAllocConfig() : VarsizeBlkAllocConfig(0, 0, "") {}
+    VarsizeBlkAllocConfig(const std::string& name) : VarsizeBlkAllocConfig(0, 0, name) {}
 
-    VarsizeBlkAllocConfig(uint64_t blk_size, uint64_t n_blks) :
-            BlkAllocConfig(blk_size, n_blks),
+    VarsizeBlkAllocConfig(uint64_t blk_size, uint64_t n_blks, const std::string& name) :
+            BlkAllocConfig(blk_size, n_blks, name),
             m_nsegments(1),
             m_blks_per_portion(n_blks),
             m_blks_per_temp_group(n_blks),
@@ -269,7 +271,7 @@ public:
     }
 }__attribute__((packed));
 
-class VarsizeAllocCacheEntry : public homeds::btree::BtreeKey {
+class VarsizeAllocCacheEntry : public BtreeKey {
 private:
     typedef struct __attribute__((packed)) {
         uint64_t m_phys_page_id:36; // Page id and blk num inside page
@@ -340,8 +342,8 @@ public:
         return (uint32_t) (m_blob->m_phys_page_id);
     }
 
-    int compare(const homeds::btree::BtreeKey *o) const override;
-    int compare_range(const homeds::btree::BtreeSearchRange &range) const override;
+    int compare(const BtreeKey *o) const override;
+    int compare_range(const BtreeSearchRange &range) const override;
 
     homeds::blob get_blob() const override {
         homeds::blob b;
@@ -393,20 +395,20 @@ private:
 };
 
 #if 0
-class VarsizeAllocCacheSearch : public homeds::btree::BtreeSearchRange {
+class VarsizeAllocCacheSearch : public BtreeSearchRange {
 public:
     VarsizeAllocCacheSearch(VarsizeAllocCacheEntry &start_entry, bool start_incl,
                             VarsizeAllocCacheEntry &end_entry, bool end_incl,
                             bool left_leaning, VarsizeAllocCacheEntry *out_entry) :
-            homeds::btree::BtreeSearchRange(start_entry, start_incl, end_entry, end_incl, left_leaning) {}
+            BtreeSearchRange(start_entry, start_incl, end_entry, end_incl, left_leaning) {}
 
-    bool is_full_match(homeds::btree::BtreeRangeKey *rkey) const override {
+    bool is_full_match(BtreeRangeKey *rkey) const override {
         return true;
     }
 
-    int compare(homeds::btree::BtreeKey *other) const override {
+    int compare(BtreeKey *other) const override {
         assert(0); // Comparision of 2 search keys is not required feature yet.
-        homeds::btree::BtreeSearchRange *regex = (homeds::btree::BtreeSearchRange *) other;
+        BtreeSearchRange *regex = (BtreeSearchRange *) other;
         return 0;
     }
 
@@ -429,9 +431,9 @@ public:
 };
 #endif
 
-#define VarsizeBlkAllocatorBtree homeds::btree::Btree< homeds::btree::MEM_BTREE, VarsizeAllocCacheEntry, \
-                                                     homeds::btree::EmptyClass, homeds::btree::BTREE_NODETYPE_SIMPLE, \
-                                                     homeds::btree::BTREE_NODETYPE_SIMPLE>
+#define VarsizeBlkAllocatorBtree Btree< btree_store_type::MEM_BTREE, VarsizeAllocCacheEntry, \
+                                                     EmptyClass, btree_node_type::SIMPLE, \
+                                                     btree_node_type::SIMPLE>
 
 /* VarsizeBlkAllocator provides a flexibility in allocation. It provides following features:
  *

@@ -117,7 +117,7 @@ public:
                            "volume_map_op_latency", {"op", "read"});
         REGISTER_HISTOGRAM(volume_map_write_latency, "Volume mapping write latency",
                            "volume_map_op_latency", {"op", "write"});
-        REGISTER_HISTOGRAM(volume_blkalloc_latency, "Volume block allocation latency");
+        REGISTER_HISTOGRAM(volume_blkalloc_latency, "Volume block allocation latency (in ns)");
         REGISTER_HISTOGRAM(volume_pieces_per_write, "Number of individual pieces per write",
                            HistogramBucketsType(LinearUpto64Buckets));
         REGISTER_HISTOGRAM(volume_write_size_distribution, "Distribution of volume write sizes",

@@ -116,7 +116,6 @@ TEST_F(CacheTest, InsertGet) {
     for (auto i = 0u; i < NTHREADS; i++) {
         delete (thrs[i]);
     }
-    LOGINFO("Cache Stats: \n{}", this->m_cache->get_stats().to_string());
 }
 
 SDS_OPTIONS_ENABLE(logging)

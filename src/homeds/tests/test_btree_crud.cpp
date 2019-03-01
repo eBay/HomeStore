@@ -26,11 +26,11 @@ using namespace homeds::btree;
 #if 0
 homestore::DeviceManager *dev_mgr = nullptr;
 homestore::Cache< BlkId > *glob_cache = nullptr;
-homeds::btree::btree_device_info bt_dev_info;
+btree_device_info bt_dev_info;
 #endif
 
-#define TestBtreeDeclType     homeds::btree::Btree<homeds::btree::MEM_BTREE, TestSimpleKey,TestSimpleValue, \
-                                    homeds::btree::BTREE_NODETYPE_SIMPLE, homeds::btree::BTREE_NODETYPE_SIMPLE>
+#define TestBtreeDeclType     Btree<btree_store_type::MEM_BTREE, TestSimpleKey,TestSimpleValue, \
+                                    btree_node_type::SIMPLE, btree_node_type::SIMPLE>
 
 #if 0
 AbstractVirtualDev *new_vdev_found(homestore::DeviceManager *mgr, homestore::vdev_info_block *vb) {
@@ -95,7 +95,7 @@ const char* __asan_default_options() {
 }
 #endif
 
-class TestSimpleKey : public homeds::btree::BtreeKey {
+class TestSimpleKey : public BtreeKey {
 private:
     typedef struct __attribute__((packed)) {
         uint64_t m_count :16;
@@ -164,7 +164,7 @@ public:
         }
     }
 
-    int compare_range(const homeds::btree::BtreeSearchRange &range) const override {
+    int compare_range(const BtreeSearchRange &range) const override {
         auto other_start = (TestSimpleKey *)range.get_start_key();
         auto other_end = (TestSimpleKey *)range.get_end_key();
 
@@ -252,9 +252,9 @@ public:
     }
 };
 
-class TestSimpleValue : public homeds::btree::BtreeValue {
+class TestSimpleValue : public BtreeValue {
 public:
-    TestSimpleValue(uint32_t val) : homeds::btree::BtreeValue() {
+    TestSimpleValue(uint32_t val) : BtreeValue() {
         m_val = val;
     }
 
@@ -333,7 +333,7 @@ protected:
 
 public:
     BtreeCrudTest() {
-        homeds::btree::BtreeConfig btree_cfg;
+        BtreeConfig btree_cfg;
         btree_cfg.set_max_objs(TOTAL_ENTRIES);
         btree_cfg.set_max_key_size(sizeof(TestSimpleKey));
         btree_cfg.set_max_value_size(0);
@@ -373,7 +373,7 @@ public:
     void put_nth_entry(uint32_t i) {
         auto it = m_create_map.find(m_entries[i]);
         assert(it != m_create_map.end());
-        m_bt->put(*m_entries[i], it->second, homeds::btree::INSERT_ONLY_IF_NOT_EXISTS);
+        m_bt->put(*m_entries[i], it->second, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
     }
 
     void get_nth_entry(uint32_t i) {

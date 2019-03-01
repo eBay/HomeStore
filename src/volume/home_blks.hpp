@@ -74,12 +74,14 @@ struct vol_sb : vol_sb_header {
     uint64_t get_page_size() const { return page_size; }
 } __attribute((packed));
 
+using namespace homeds::btree;
+
 #define BLKSTORE_BUFFER_TYPE                                                                                           \
-    homeds::btree::BtreeBuffer< MappingKey, MappingValue, homeds::btree::BTREE_NODETYPE_VAR_VALUE,                     \
-                                homeds::btree::BTREE_NODETYPE_VAR_VALUE, 4096 >
+    BtreeBuffer< MappingKey, MappingValue, btree_node_type::VAR_VALUE,                     \
+                                btree_node_type::VAR_VALUE, 4096>
 #define MappingBtreeDeclType                                                                                           \
-    homeds::btree::Btree< homeds::btree::SSD_BTREE, MappingKey, MappingValue, homeds::btree::BTREE_NODETYPE_VAR_VALUE, \
-                          homeds::btree::BTREE_NODETYPE_VAR_VALUE, 4096, writeback_req >
+    Btree< btree_store_type::SSD_BTREE, MappingKey, MappingValue, btree_node_type::VAR_VALUE, \
+                          btree_node_type::VAR_VALUE, 4096, writeback_req >
 class HomeBlks : public VolInterface {
     static HomeBlks* _instance;
 

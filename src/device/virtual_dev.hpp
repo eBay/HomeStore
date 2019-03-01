@@ -222,7 +222,7 @@ public:
         }
 
         for (auto i : boost::irange< uint32_t >(0, m_num_chunks)) {
-            std::shared_ptr< BlkAllocator > ba = create_allocator(m_chunk_size, true);
+            std::shared_ptr< BlkAllocator > ba = create_allocator(m_chunk_size, i, true);
             auto                            pdev_ind = i % pdev_list.size();
 
             // Create a chunk on selected physical device and add it to chunks in physdev list
@@ -628,7 +628,7 @@ private:
             m_selector->add_pdev(pcm.pdev);
         }
         assert(m_chunk_size <= MAX_CHUNK_SIZE);
-        std::shared_ptr< BlkAllocator > ba = create_allocator(m_chunk_size, false);
+        std::shared_ptr< BlkAllocator > ba = create_allocator(m_chunk_size, chunk->get_chunk_id(), false);
         chunk->set_blk_allocator(ba);
 
         /* set the same blk allocator to other mirror chunks */
@@ -667,8 +667,8 @@ private:
         }
     }
 
-    std::shared_ptr< BlkAllocator > create_allocator(uint64_t size, bool init) {
-        typename Allocator::AllocatorConfig cfg;
+    std::shared_ptr< BlkAllocator > create_allocator(uint64_t size, uint32_t unique_id, bool init) {
+        typename Allocator::AllocatorConfig cfg(std::string("chunk_") + std::to_string(unique_id));
         Allocator::get_config(size, get_page_size(), &cfg);
 
         std::shared_ptr< BlkAllocator > allocator = std::make_shared< typename Allocator::AllocatorType >(cfg, init);

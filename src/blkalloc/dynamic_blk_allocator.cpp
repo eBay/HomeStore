@@ -58,8 +58,8 @@ DynamicBlkAllocator::DynamicBlkAllocator(BlkAllocConfig &cfg) :
 
     // Create the store to cache temperature, freeblks within page etc.
     BtreeConfig btreeCfg;
-    btreeCfg.setLeafNodeType(BTREE_NODETYPE_SIMPLE);
-    btreeCfg.setInteriorNodeType(BTREE_NODETYPE_SIMPLE);
+    btreeCfg.setLeafNodeType(btree_node_type::SIMPLE);
+    btreeCfg.setInteriorNodeType(btree_node_type::SIMPLE);
     btreeCfg.setMaxObjs(cfg.getMaxCachePages());
     btreeCfg.setMaxKeySize(sizeof(DynamicPageAllocCacheEntry));
     btreeCfg.setMaxValueSize(0);

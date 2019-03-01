@@ -15,7 +15,7 @@ public:
 	BtreePrefixNode(bnodeid_t id, bool initPerp, bool initTrans) :
 					BtreeAbstractNode(id, initPerp, initTrans)
 	{
-		this->setNodeType(BTREE_NODETYPE_PREFIX);
+		this->setNodeType(btree_node_type::PREFIX);
 	}
 
 	void insert(uint32_t ind, BtreeKey& key, BtreeValue& val)

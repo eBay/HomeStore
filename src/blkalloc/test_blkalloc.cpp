@@ -58,7 +58,7 @@ public:
             m_alloced_count(0),
             m_total_space(1 * 1024 * 1024),
             m_blk_size(8 * 1024) {
-        BlkAllocConfig fixed_cfg(m_blk_size, m_total_space / m_blk_size);
+        BlkAllocConfig fixed_cfg(m_blk_size, m_total_space / m_blk_size, "");
         m_fixed_allocator = new FixedBlkAllocator(fixed_cfg, true);
     }
 
@@ -150,7 +150,7 @@ public:
             m_alloced_count(0),
             m_total_space(1 * 1024 * 1024),
             m_blk_size(512) {
-        VarsizeBlkAllocConfig var_cfg(m_blk_size, m_total_space / m_blk_size);
+        VarsizeBlkAllocConfig var_cfg(m_blk_size, m_total_space / m_blk_size, "");
         var_cfg.set_max_cache_blks(1000);
         var_cfg.set_blk_size(m_blk_size);
         var_cfg.set_phys_page_size(m_blk_size);

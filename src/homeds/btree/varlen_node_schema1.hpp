@@ -46,7 +46,7 @@ template< typename K, typename V >
 class VarValueNode : public AbstractNode<K, V> {
     VarValueNode(const BtreeConfig &cfg, bnodeid_t id, bool init_pers, bool init_trans) :
             AbstractNode(id, init_pers, init_trans) {
-        this->set_node_type(BTREE_NODETYPE_VAR_VALUE);
+        this->set_node_type(btree_node_type::VAR_VALUE);
         if (init_pers) {
             get_node_header()->m_last_offset = (uint16_t) (this->get_node_space() + cfg.get_node_size() -
                                                            (uint8_t *) this);

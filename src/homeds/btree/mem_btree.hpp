@@ -29,8 +29,8 @@ struct mem_btree_node_header {
     sisl::atomic_counter<uint16_t> refcount;
 };
 
-#define MemBtreeNode  BtreeNode<MEM_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize, empty_writeback_req>
-#define MemBtreeStore BtreeStore<MEM_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize, empty_writeback_req>
+#define MemBtreeNode  BtreeNode<btree_store_type::MEM_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize, empty_writeback_req>
+#define MemBtreeStore BtreeStore<btree_store_type::MEM_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize, empty_writeback_req>
 
 template<
         typename K,

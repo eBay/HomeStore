@@ -15,6 +15,7 @@
 #include "error/error.h"
 #include "main/homestore_header.hpp"
 #include <metrics/metrics.hpp>
+#include "homeds/utility/enum.hpp"
 
 //structure to track btree multinode operations on different nodes
 struct btree_multinode_req{
@@ -170,37 +171,40 @@ struct bnodeid {
 
 #endif
 
-typedef enum {
-    BTREE_SUCCESS = 0,
-    BTREE_NOT_FOUND,
-    BTREE_ITEM_FOUND,
-    BTREE_CLOSEST_FOUND,
-    BTREE_CLOSEST_REMOVED,
-    BTREE_RETRY
-} btree_status_t;
+ENUM(btree_status_t, uint32_t,
+    success,
+    not_found,
+    item_found,
+    closest_found,
+    closest_removed,
+    retry
+)
 
-typedef enum { MEM_BTREE = 0, SSD_BTREE = 1 } btree_store_type;
+ENUM(btree_store_type, uint32_t,
+    MEM_BTREE,
+    SSD_BTREE
+)
 
-typedef enum {
-    BTREE_NODETYPE_SIMPLE = 0,
-    BTREE_NODETYPE_VAR_VALUE,
-    BTREE_NODETYPE_VAR_KEY,
-    BTREE_NODETYPE_VAR_OBJECT,
-    BTREE_NODETYPE_PREFIX,
-    BTREE_NODETYPE_COMPACT
-} btree_node_type;
+ENUM(btree_node_type, uint32_t,
+    SIMPLE,
+    VAR_VALUE,
+    VAR_KEY,
+    VAR_OBJECT,
+    PREFIX,
+    COMPACT
+)
 
+#if 0
 enum MatchType { NO_MATCH = 0, FULL_MATCH, SUBSET_MATCH, SUPERSET_MATCH, PARTIAL_MATCH_LEFT, PARTIAL_MATCH_RIGHT };
+#endif
 
-enum PutType {
-    INSERT_ONLY_IF_NOT_EXISTS, // Insert
-
-    REPLACE_ONLY_IF_EXISTS, // Upsert
+ENUM(btree_put_type, uint16_t,
+    INSERT_ONLY_IF_NOT_EXISTS,     // Insert
+    REPLACE_ONLY_IF_EXISTS,        // Upsert
     REPLACE_IF_EXISTS_ELSE_INSERT,
-
-    APPEND_ONLY_IF_EXISTS, // Update
-    APPEND_IF_EXISTS_ELSE_INSERT,
-};
+    APPEND_ONLY_IF_EXISTS,         // Update
+    APPEND_IF_EXISTS_ELSE_INSERT
+)
 
 class BtreeSearchRange;
 class BtreeKey {
@@ -222,13 +226,13 @@ class BtreeKey {
     virtual std::string to_string() const = 0;
 };
 
-enum _MultiMatchSelector {
+ENUM(_MultiMatchSelector, uint16_t,
     DO_NOT_CARE,
     LEFT_MOST,
     SECOND_TO_THE_LEFT,
     RIGHT_MOST,
     BEST_FIT_TO_CLOSEST
-};
+)
 
 class BtreeSearchRange {
     friend struct BtreeQueryCursor;
@@ -254,7 +258,7 @@ public:
             BtreeSearchRange(start_key, start_incl, start_key, start_incl, option) {}
 
     BtreeSearchRange(const BtreeKey& start_key, bool start_incl, const BtreeKey& end_key, bool end_incl) :
-            BtreeSearchRange(start_key, start_incl, end_key, end_incl, DO_NOT_CARE) {}
+            BtreeSearchRange(start_key, start_incl, end_key, end_incl, _MultiMatchSelector::DO_NOT_CARE) {}
 
     BtreeSearchRange(const BtreeKey& start_key, bool start_incl, const BtreeKey& end_key, bool end_incl,
                      _MultiMatchSelector option) :
@@ -325,7 +329,7 @@ struct BtreeQueryCursor {
     std::unique_ptr<BtreeLockTracker> m_locked_nodes;
 };
 
-enum BtreeQueryType {
+ENUM(BtreeQueryType, uint8_t,
     // This is default query which walks to first element in range, and then sweeps/walks across the leaf nodes. However,
     // if upon pagination, it again walks down the query from the key it left off.
     SWEEP_NON_INTRUSIVE_PAGINATION_QUERY,
@@ -343,7 +347,7 @@ enum BtreeQueryType {
     // This is both inefficient and quiet intrusive/unsafe query, where it locks the range that is being queried for
     // and do not allow any insert or update within that range. It essentially create a serializable level of isolation.
     SERIALIZABLE_QUERY
-};
+)
 
 //Base class for range callback params
 class BRangeCBParam{
@@ -645,12 +649,27 @@ template <size_t NodeSize, size_t CacheCount = DEFAULT_FREELIST_CACHE_COUNT> cla
 
 class BtreeMetrics : public sisl::MetricsGroupWrapper {
 public:
-    explicit BtreeMetrics(const char *grp_name) : sisl::MetricsGroupWrapper("Btree", grp_name) {
+    explicit BtreeMetrics(btree_store_type store_type, const char *inst_name) :
+            sisl::MetricsGroupWrapper(enum_name(store_type), inst_name) {
         REGISTER_COUNTER(btree_obj_count, "Btree object count");
-        REGISTER_COUNTER(btree_leaf_node_count, "Btree Leaf node count", "btree_node_count", {"node_type", "leaf"});
-        REGISTER_COUNTER(btree_int_node_count, "Btree Interior node count", "btree_node_count", {"node_type", "interior"});
+        REGISTER_COUNTER(btree_leaf_node_count, "Btree Leaf node count",
+                "btree_node_count", {"node_type", "leaf"}, sisl::_publish_as::publish_as_gauge);
+        REGISTER_COUNTER(btree_int_node_count, "Btree Interior node count",
+                "btree_node_count", {"node_type", "interior"}, sisl::_publish_as::publish_as_gauge);
         REGISTER_COUNTER(btree_split_count, "Total number of btree node splits");
         REGISTER_COUNTER(btree_merge_count, "Total number of btree node merges");
+        REGISTER_COUNTER(btree_depth, "Depth of btree", sisl::_publish_as::publish_as_gauge);
+
+        REGISTER_COUNTER(btree_int_node_writes, "Total number of btree interior node writes",
+                         "btree_node_writes", {"node_type", "interior"});
+        REGISTER_COUNTER(btree_leaf_node_writes, "Total number of btree leaf node writes",
+                         "btree_node_writes", {"node_type", "leaf"});
+        REGISTER_COUNTER(btree_num_pc_gen_mismatch, "Number of gen mismatches to recover");
+
+        REGISTER_HISTOGRAM(btree_int_node_occupancy, "Interior node occupancy", "btree_node_occupancy",
+                {"node_type", "interior"}, HistogramBucketsType(ExponentialOfTwoBuckets));
+        REGISTER_HISTOGRAM(btree_leaf_node_occupancy, "Leaf node occupancy", "btree_node_occupancy",
+                           {"node_type", "leaf"}, HistogramBucketsType(ExponentialOfTwoBuckets));
 
         register_me_to_farm();
     }
