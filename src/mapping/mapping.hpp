@@ -689,8 +689,9 @@ private:
             }
         }
 
-        if (curr_lbarange_st <= end_lba) // add new range
+        if (curr_lbarange_st <= end_lba) { // add new range
             add_missing_interval(curr_lbarange_st, end_lba, new_ve, curr_lbarange_st - s_in_range->start(), replace_kv);
+        }
 
             // TODO - merge kv which have contigous lba and BlkIds - may be not that useful for performance
 #ifndef NDEBUG
@@ -727,10 +728,8 @@ private:
             }
         }
         ss << ",replace_kv:";
-        for (auto& ptr : replace_kv)
-            ss << ptr.first.to_string() << "," << ptr.second.to_string();
-        if (param->is_state_modifiable())
-            LOGDEBUG("Put_CB:,{} ", ss.str());
+        for (auto& ptr : replace_kv) { ss << ptr.first.to_string() << "," << ptr.second.to_string(); }
+        if (param->is_state_modifiable()) { LOGDEBUG("Put_CB:,{} ", ss.str()); }
 #endif
     }
 
