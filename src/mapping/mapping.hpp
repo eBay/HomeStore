@@ -744,7 +744,7 @@ namespace homestore {
             MappingKey *s_in_range = (MappingKey *) param->get_input_range().get_start_key();
 
             if (param->get_sub_range().is_start_inclusive())
-                start_lba = max(s_subrange->end(), s_in_range->start());
+                start_lba = max(s_subrange->start(), s_in_range->start());
             else
                 start_lba = max(s_subrange->end() + 1, s_in_range->start());
 
@@ -755,7 +755,7 @@ namespace homestore {
             if (param->get_sub_range().is_end_inclusive())
                 end_lba = min(e_subrange->end(), e_in_range->end());
             else
-                end_lba = min(e_subrange->end() - 1, e_in_range->end());
+                end_lba = min(e_subrange->start() - 1, e_in_range->end());
 
         }
 

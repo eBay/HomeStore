@@ -28,9 +28,9 @@ const char *__asan_default_options() {
     return "detect_leaks=false";
 }
 
-#define MAX_LBA           131072
+#define MAX_LBA          1000000
 #define MAX_NLBA             128
-#define MAX_BLK         94967295
+#define MAX_BLK         10000000
 #define MAX_SIZE          7 * Gi
 uint64_t num_ios;
 uint64_t num_threads;
@@ -52,7 +52,7 @@ protected:
     std::mutex mutex;
     homeds::Bitset *m_lba_bm;
     homeds::Bitset *m_blk_bm;
-    uint64_t m_blk_id_arr[MAX_LBA];
+    long long int m_blk_id_arr[MAX_LBA];
     mapping *m_map;
 
     uint64_t Ki = 1024ull;
@@ -76,7 +76,7 @@ public:
     MapTest() {
         m_lba_bm = new homeds::Bitset(MAX_LBA);
         m_blk_bm = new homeds::Bitset(MAX_BLK);
-        for (auto i = 0u; i < MAX_LBA; i++) m_blk_id_arr[i] = 0;
+        for (auto i = 0u; i < MAX_LBA; i++) m_blk_id_arr[i] = -1;
         srand(time(0));
     }
 
@@ -100,23 +100,24 @@ public:
         auto st = req->lba;
         auto et = st + req->nlbas-1;
         while(st < req->lba + req->nlbas){
-            if(m_blk_id_arr[st]==0){
+            if(m_blk_id_arr[st]==-1){//unused blkid
                 st++; continue;
             }
             if(index==req->blkIds_to_free.size()){
                 m_map->print_tree();std::this_thread::sleep_for(std::chrono::seconds(5));
                 assert(0); // less blks freed than expected
             }
-            int bst =req->blkIds_to_free[index].m_blkId.get_id() + req->blkIds_to_free[index].m_blk_offset;
-            int ben = bst + (int)(req->blkIds_to_free[index].m_nblks_to_free)-1;
+            long long int bst =req->blkIds_to_free[index].m_blkId.get_id() + req->blkIds_to_free[index].m_blk_offset;
+            long long int ben = bst + (int)(req->blkIds_to_free[index].m_nblks_to_free)-1;
             while(bst<=ben){
                 if(st>et) assert(0);//more blks freeed than expected
-                if((int)m_blk_id_arr[st] != bst) assert(0); //blks mistmach
+                if(m_blk_id_arr[st] != bst) assert(0); //blks mistmach
                 bst++;
                 st++;
             }
             index++;//move to next free blk
         }
+        assert(index==req->blkIds_to_free.size());//check if more blks freed
         
         //update new blks
         for (auto st = req->lba, bst = req->blkId.get_id(); st < req->lba + req->nlbas; st++, bst++)
@@ -166,9 +167,9 @@ public:
         params.devices = device_info;
         params.is_file = true;
         params.max_cap = MAX_SIZE;
-        params.physical_page_size = 8192;
+        params.physical_page_size = 4096;
         params.disk_align_size = 4096;
-        params.atomic_page_size = 8192;
+        params.atomic_page_size = 4096;
         params.iomgr = iomgr_obj;
         params.init_done_cb = std::bind(&MapTest::init_done_cb, this, std::placeholders::_1, std::placeholders::_2);
         params.vol_mounted_cb = std::bind(&MapTest::vol_mounted_cb, this, std::placeholders::_1, std::placeholders::_2);
@@ -345,14 +346,14 @@ public:
         for (auto &kv: kvs) {
             auto st = kv.first.start();
             ValueEntry ve;
-            uint64_t bst = 0;
+            long long int bst = 0;
             bool is_invalid = false;
             if (kv.second.is_valid()) {
                 kv.second.get_array().get(0, ve, false);
                 bst = ve.get_blkId().get_id() + ve.get_blk_offset();
             } else
                 is_invalid = true;
-            while (st <= kv.first.end() && m_blk_id_arr[st] != 0) {
+            while (st <= kv.first.end() && m_blk_id_arr[st] != -1) {
                 if (is_invalid || bst != m_blk_id_arr[st]) {
                     m_map->print_tree();
                     std::this_thread::sleep_for(std::chrono::seconds(5));
@@ -433,7 +434,7 @@ this->remove_files();
 SDS_OPTION_GROUP(test_mapping,
                  (num_ios,
                          "", "num_ios", "number of ios", ::cxxopts::value<uint64_t>()->default_value(
-                         "200"), "number"),
+                         "30000"), "number"),
                  (num_threads, "", "num_threads", "num threads for io", ::cxxopts::value<uint64_t>()->default_value(
                          "8"), "number"))
 SDS_OPTIONS_ENABLE(logging, test_mapping

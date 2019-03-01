@@ -285,35 +285,50 @@ protected:
                      std::vector<std::pair<K, V>> *out_values = nullptr) {
         auto count = 0U;
         // Get the start index of the search range.
-        auto start_result = find(range.extract_start_of_range(), nullptr, nullptr);
-        start_ind = start_result.end_of_search_index;
-        if (start_result.found && !range.is_start_inclusive()) { start_ind++; }
+        BtreeSearchRange sr = range.extract_start_of_range();
+        sr.set_selection_option(_MultiMatchSelector::LEFT_MOST);
+        auto result = bsearch(-1, get_total_entries(), sr);//doing bsearch only based on start key
+        start_ind = result.end_of_search_index;
+        //at this point start index will point to exact found or element after that
+        
+        if (!range.is_start_inclusive()) { //start found but not inclusive
+            while(start_ind < (int)get_total_entries()){
+                int x = to_variant_node_const()->compare_nth_key(*range.get_start_key(), start_ind);
+                if(x!=0)break;//stop at first non matchking key
+                start_ind++;
 
-        // Get the end index of the search range.
-        auto end_result = find(range.extract_end_of_range(), nullptr, nullptr);
-        end_ind = end_result.end_of_search_index;
-
-        if ((!end_result.found && is_leaf())//end range not found in leaf
-            || !range.is_end_inclusive() // end not inclusive
-            || (!is_leaf() && end_ind==(int)get_total_entries() && !has_valid_edge()))// end not found coz of invalid edge for internal node
-            end_ind--; 
-        if(!is_leaf() && end_ind<start_ind) end_ind = start_ind;
-        assert(is_leaf() || (!is_leaf() && start_ind<=end_ind));
-
-#ifndef NDEBUG
-        if(end_ind > 0 && end_ind>start_ind){
-            K second_last_key;
-            get_var_nth_key(end_ind-1,&second_last_key);
-            assert(second_last_key.compare(range.extract_end_of_range().get_start_key())<0);
+                //for now mapping only searches with one lba start and one lba end. This check ensures that.
+                // in future when that changes, remove this assert
+                assert(start_ind<=result.end_of_search_index+1);
+            }
         }
         
-#endif
+        if(start_ind==(int)get_total_entries() && !has_valid_edge()){
+            if(is_leaf())return 0;
+            assert(0);
+        }
+        
+        end_ind=start_ind;
+        while(end_ind < (int) get_total_entries()){
+            int x = to_variant_node_const()->compare_nth_key(*range.get_end_key(), end_ind);
+            if(x>0)break;//stop at first higher key than end
+            else if(x==0 && !range.is_end_inclusive())break; //stop at first matching key if not inclusive
+            end_ind++;
+        }
+        
+        if(is_leaf()) {
+            end_ind--;
+        }else if(!is_leaf() && end_ind==(int)get_total_entries() && !has_valid_edge()) {
+            end_ind--; //non valid edge
+            assert(start_ind<=end_ind);//we shoudl always find someting in inner nodes
+        }
         
         if(out_values==nullptr){
-            int total = end_ind-start_ind+1;
-            if(total<0)total=0;
-            if(total>(int)max_count)total=max_count;
-            return total;
+            if(start_ind>end_ind)
+                return count;//no result found
+            count = end_ind-start_ind+1;
+            if(count>max_count)count=max_count;
+            return count;
         }
         for (auto i = start_ind; ((i <= end_ind) && (count < max_count)); i++) {
             K key;V value;
@@ -455,7 +470,6 @@ protected:
         int min_ind_found = INT32_MAX;
         int second_min = INT32_MAX;
         int max_ind_found = 0;
-        BtreeKey *mid_key;
 
         struct {
             bool found;
@@ -467,7 +481,7 @@ protected:
         }
         
         auto selection = range.selection_option();
-
+  
         while ((end - start) > 1) {
             mid = start + (end - start) / 2;
             assert(mid >=0 && mid < (int)get_total_entries());

@@ -1076,18 +1076,11 @@ done:
             end_ind = index;
             assert(is_found);//we must always find higher thatn key or edge in internal nodes
         }
-        if (start_ind > end_ind) {
-            assert(0);//dont expect this to happen
-            // Either the node was updated or mynode is freed. Just proceed again from top.
-            unlock_node(my_node, curlock);
-            return false;
-        }
+        assert(start_ind<=end_ind);
 
         bool unlocked_already = false;
         int  curr_ind = start_ind;
         while (curr_ind <= end_ind) { // iterate all matched childrens
-
-        //retry:
             homeds::thread::locktype child_cur_lock = homeds::thread::LOCKTYPE_NONE;
 
             // Get the childPtr for given key.
@@ -1150,15 +1143,6 @@ done:
             if (child_node->is_split_needed(m_btree_cfg, k, v, &ind_hint, put_type, bur)) {
                 if(bur && is_any_child_splitted) { // spliting another child
                     if(my_node->is_split_needed(m_btree_cfg, k, v, &ind_hint, put_type, bur)){
-#if 0
-                        if(curr_ind!=0){
-                            K resume_range_st_key;
-                            my_node->get_nth_key(curr_ind-1,&resume_range_st_key, true);//get prev key
-                            const_cast<BtreeKey *>(bur->get_input_range().get_start_key())->copy_blob(
-                                    resume_range_st_key.get_blob());
-                            bur->get_input_range().set_start_incl(false);
-                        }// in case curr_ind==0, and my node wants to split, we contine with inherited start
-#endif
                         //restart from root
                         unlock_node(child_node, child_cur_lock);
                         unlock_node(my_node, curlock);
@@ -1175,9 +1159,6 @@ done:
 
                 // We need to upgrade the child to WriteLock
                 if (upgrade_node(child_node, nullptr, child_cur_lock, LOCKTYPE_NONE, dependent_req_q) == false) {
-                    // Since we have parent node write locked, child node should never have any issues upgrading.
-                    LOGDFATAL_IF(true, "Upgrade of lock for childnode {} failed, which is not expected, will retry "
-                                       "from root", child_node->get_node_id_int());
                     unlock_node(my_node, homeds::thread::LOCKTYPE_WRITE);
                     return (false);
                 }
@@ -1209,7 +1190,7 @@ done:
                 my_node->get_nth_key(curr_ind-1, &pkey, true);
                 if(child_node->get_total_entries()!=0){
                     child_node->get_first_key(&ckey);
-                    assert(pkey.compare(&ckey) < 0);
+                    assert(pkey.compare(&ckey) <= 0);
                 }
                 assert(k.compare(&pkey)>=0);
             }
@@ -1565,19 +1546,6 @@ done:
         ninfo.set_bnode_id(child_node2->get_node_id());
         parent_node->update(parent_ind, ninfo);
 
-        if(parent_node->get_total_entries()!=0 && parent_ind!=parent_node->get_total_entries()) {
-            //update child2 last key as parent key when parent has some entries(non-root) or split point is not edge
-            K child2_last_key;
-            child_node2->get_last_key(&child2_last_key);
-            K parent_key;
-            parent_node->get_nth_key(parent_ind, &parent_key, false);
-            assert(parent_key.compare(&child2_last_key) >= 0);
-            parent_node->set_nth_key(parent_ind, &child2_last_key);
-#ifndef NDEBUG
-            validate_sanity_next_child(parent_node, (uint32_t)parent_ind);
-#endif
-        }
-
         // Insert the last entry in first child to parent node
         child_node1->get_last_key(out_split_key);
         ninfo.set_bnode_id(child_node1->get_node_id());
@@ -1606,6 +1574,7 @@ done:
         uint16_t  parent_index=0xFFFF;
         bool freed=false;
         bool is_new_allocation=false;
+        bool is_last_key=false;
     };
 
     auto merge_nodes(BtreeNodePtr parent_node, std::vector< int >& indices_list,
@@ -1622,7 +1591,12 @@ done:
 
         // Loop into all index and initialize list
         minfo.reserve(indices_list.size());
+        
         for (auto i = 0u; i < indices_list.size(); i++) {
+            
+            if(indices_list[i] == (int)parent_node->get_total_entries())
+                assert(parent_node->get_edge_id().is_valid());//ensure its valid edge
+                
             parent_node->get(indices_list[i], &child_info, false /* copy */);
             merge_info m;
 
@@ -1648,6 +1622,7 @@ done:
         auto i = 0U;
         auto j = 1U;
         auto balanced_size = m_btree_cfg.get_ideal_fill_size();
+        K last_pkey;//last key of parent node
         while ((i < indices_list.size() - 1) && (j < indices_list.size())) {
             minfo[j].parent_index -= ndeleted_nodes; // Adjust the parent index for deleted nodes
 
@@ -1661,24 +1636,28 @@ done:
 
                 if (minfo[j].node->get_total_entries() == 0) {
                     // We have removed all the entries from the next node, remove the entry in parent and move on to
-                    // the next node.
+                    // the next node. 
+
+                    //copy last key if it got deleted, not the edge but
+                    if(minfo[j].parent_index == parent_node->get_total_entries()-1) {
+                        parent_node->get_nth_key(minfo[j].parent_index, &last_pkey, true);
+                        minfo[j].is_last_key=true;
+                    }
+                    
                     minfo[j].freed = true;
                     parent_node->remove(minfo[j].parent_index); // remove interally updates parents edge if needed
                     minfo[i].node->set_next_bnode(minfo[j].node->get_next_bnode());
-
                     ndeleted_nodes++;
                     j++;
                     ret.merged = true;//case when no entries moved but node is still empty
                     continue;
                 }
             }
-
             i = j++;
         }
 
         assert(!minfo[0].freed); // If we merge it, we expect the left most one has at least 1 entry.
-
-        int last_indx = -1;
+        int last_indx = -1;//last seen index in parent whos child was not freed
         for (auto n = 0u; n < minfo.size(); n++) {
             if (!minfo[n].freed) {
                 // lets get the last key and put in the entry into parent node
@@ -1686,25 +1665,28 @@ done:
 
                 if (minfo[n].parent_index == parent_node->get_total_entries()) { //edge entrys
                     parent_node->update(minfo[n].parent_index, ninfo);
-                    last_indx = minfo[n].parent_index;
                 } else {
-                    K last_key;
-                    minfo[n].node->get_last_key(&last_key);
-                    parent_node->update(minfo[n].parent_index, last_key, ninfo);
-                    last_indx = minfo[n].parent_index;
+                    K last_ckey;//last key in child
+                    minfo[n].node->get_last_key(&last_ckey);
+                    parent_node->update(minfo[n].parent_index, last_ckey, ninfo);
                 }
+                last_indx = minfo[n].parent_index;
 
                 if (n == 0) {
                     continue;
                 } // skip first child commit
                 btree_store_t::write_node(m_btree_store.get(), minfo[n].node, dependent_req_q, NULL, false);
+            } else {
+                if (minfo[n].is_last_key
+                    && !(parent_node->get_edge_id().is_valid())) {//last key got freed, no edges
+                    V temp_value;
+                    parent_node->get(last_indx, &temp_value, true);//save value
+                    parent_node->update(last_indx, last_pkey, temp_value);//update key keeping same value
+                }// if edge got freed, remove() from parent would have taken care of adjusting edge
             }
         }
-
-        if (last_indx < 0) {
-            assert(0);
-        }
 #ifndef NDEBUG
+        assert(last_indx>=0);
         validate_sanity_next_child(parent_node, (uint32_t)last_indx);
 #endif
         // Its time to write the parent node and loop again to write all nodes and free freed nodes
