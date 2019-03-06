@@ -47,7 +47,7 @@ public:
         auto it(m_list.begin());
         while (it != m_list.end()) {
             m_list.erase(it);
-            V::deref(*it);
+            V::deref(*it);   // <<< Dobule free which will decrease CacheBuffer::m_refcount to -1 during shutdown
             it = m_list.begin();
         }
     }

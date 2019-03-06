@@ -399,6 +399,10 @@ public:
         }
     }
 
+    ~mapping() {
+        delete m_bt;
+    }
+
     void destroy() {
         m_bt->destroy(std::bind(&mapping::process_free_blk_callback, this, std::placeholders::_1),
                       std::bind(&mapping::process_destroy_btree_comp_callback, this));

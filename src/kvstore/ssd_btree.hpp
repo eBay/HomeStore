@@ -150,7 +150,8 @@ public:
     }
  
     static void deref_node(SSDBtreeNode *bn) {
-        return CacheBuffer< BlkId >::deref_testz((CacheBuffer<BlkId> &)*bn);
+        //return CacheBuffer< BlkId >::deref_testz((CacheBuffer<BlkId> &)*bn);
+        return CacheBuffer< BlkId >::deref((CacheBuffer<BlkId> &)*bn);
     }
 private:
     BlkStore<VdevFixedBlkAllocatorPolicy, BtreeBufferDeclType> *m_blkstore;

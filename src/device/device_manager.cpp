@@ -91,6 +91,18 @@ void DeviceManager::init_devices(std::vector< dev_info > &devices) {
     write_info_blocks();
 }
 
+DeviceManager::~DeviceManager() {
+    free(m_chunk_memory);
+    m_dm_info = nullptr;
+    m_pdev_hdr = nullptr;
+    m_chunk_hdr = nullptr;
+    m_vdev_hdr = nullptr;
+    m_pdev_info = nullptr;
+    m_chunk_info = nullptr;
+    m_vdev_info = nullptr;
+    m_iomgr.reset();
+}
+
 void DeviceManager::update_vb_context(uint32_t vdev_id, uint8_t *blob) {
     std::lock_guard<decltype(m_dev_mutex)> lock(m_dev_mutex);
     memcpy(m_vdev_info[vdev_id].context_data, blob, m_vdev_hdr->context_data_size);

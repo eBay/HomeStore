@@ -289,9 +289,9 @@ public:
     }
 
     static void free_node(SSDBtreeStore* store, boost::intrusive_ptr< SSDBtreeNode > bn,
-                          std::deque< boost::intrusive_ptr< homestore::writeback_req > >& dependent_req_q) {
+                          std::deque< boost::intrusive_ptr< homestore::writeback_req > >& dependent_req_q, bool mem_only = false) {
         homestore::BlkId blkid(bn->get_node_id().m_id);
-        store->m_blkstore->free_blk(blkid, boost::none, boost::none, dependent_req_q);
+        store->m_blkstore->free_blk(blkid, boost::none, boost::none, dependent_req_q, mem_only);
     }
 
     static void ref_node(SSDBtreeNode* bn) {

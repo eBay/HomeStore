@@ -365,7 +365,7 @@ public:
     DeviceManager(NewVDevCallback vcb, uint32_t const vdev_metadata_size, std::shared_ptr< iomgr::ioMgr > iomgr,
                   homeio::comp_callback comp_cb, bool is_file, boost::uuids::uuid system_uuid);
 
-    virtual ~DeviceManager() = default;
+    ~DeviceManager(); 
 
     /* Initial routine to call upon bootup or everytime new physical devices to be added dynamically */
     void add_devices(std::vector< dev_info >& devices, bool is_init);

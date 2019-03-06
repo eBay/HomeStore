@@ -124,10 +124,11 @@ class ThreadPool {
     }
     
     bool high_watermark() {
-        if (m_work_queue.size() >= HIGH_WATERMARK_FACTOR * MAX_NUM_CONCURRENT_THREADS)   
+        if (m_work_queue.size() >= HIGH_WATERMARK_FACTOR * MAX_NUM_CONCURRENT_THREADS) {
             return true;
-        else
+        } else {
             return false;
+        }
     }
 
   private:

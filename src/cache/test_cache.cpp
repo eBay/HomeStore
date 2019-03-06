@@ -63,7 +63,7 @@ public:
     }
 
     ~CacheTest() {
-       m_cache.reset();
+        m_cache.reset();
     }
 
     void insert_one(uint64_t id, uint32_t size) {
@@ -86,10 +86,20 @@ public:
         }
     }
 
+    // Fix Sanitizer reported memory leak.
+    void erase_one(uint64_t id, uint32_t size) {
+        boost::intrusive_ptr< homestore::CacheBuffer< blk_id > > cbuf;
+        m_cache->erase(blk_id(id), &cbuf);
+    }
+
     void fixed_insert_and_get(uint64_t start, uint32_t count, uint32_t size) {
         for (auto i = start; i < start+count; i++) {
             insert_one(i, size);
             read_one(i, size);
+        }
+
+        for (auto i = start; i < start+count; i++) {
+            erase_one(i, size);
         }
     }
 

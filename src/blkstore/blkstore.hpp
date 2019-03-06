@@ -159,6 +159,10 @@ public:
             m_comp_cb(comp_cb),
             m_metrics(name) {}
 
+    ~BlkStore() {
+    
+    }
+
     void attach_compl(comp_callback comp_cb) { m_comp_cb = comp_cb; }
 
     bool is_write_back_cache() {
@@ -296,7 +300,7 @@ public:
      * nblks refer to the total blks from offset to free.
      */
     void free_blk(const BlkId& bid, boost::optional< uint32_t > size_offset, boost::optional< uint32_t > size,
-                  std::deque< boost::intrusive_ptr< homestore::writeback_req > >& dependent_req_q) {
+                  std::deque< boost::intrusive_ptr< homestore::writeback_req > >& dependent_req_q, bool mem_only = false) {
         boost::intrusive_ptr< Buffer > erased_buf(nullptr);
         bool                           found = false;
 
@@ -320,6 +324,10 @@ public:
         } else {
             found = m_cache->erase(bid, size_offset.get_value_or(0), free_size,
                                    (boost::intrusive_ptr< CacheBuffer< BlkId > >*)&erased_buf);
+        }
+
+        if (mem_only) {
+            return;
         }
 
         uint32_t offset = size_offset.get_value_or(0);

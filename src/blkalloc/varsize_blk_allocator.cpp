@@ -83,14 +83,16 @@ VarsizeBlkAllocator::~VarsizeBlkAllocator() {
             m_region_state = BLK_ALLOCATOR_EXITING;
         }
     }
-
+    
     m_cv.notify_all();
-    m_thread_id.join();
+    if (m_thread_id.joinable()) {
+        m_thread_id.join();
+    }
     delete(m_blk_cache);
     delete(m_alloc_bm);
     delete(m_alloced_bm);
     for (auto i = 0U; i < m_cfg.get_total_segments(); i++) {
-        delete(m_segments[0]);
+        delete(m_segments[i]);
     }
 }
 
@@ -101,8 +103,8 @@ void VarsizeBlkAllocator::allocator_state_machine() {
     LOGINFOMOD(varsize_blk_alloc, "Starting new blk sweep thread");
     BlkAllocSegment *allocate_seg = nullptr;
     bool allocate = false;
-
-    while (true) {
+    
+    while(m_region_state != BLK_ALLOCATOR_EXITING) {
         allocate_seg = nullptr;
         allocate = false;
         {
@@ -128,10 +130,19 @@ void VarsizeBlkAllocator::allocator_state_machine() {
                 // acquire lock
                 std::unique_lock< std::mutex > lk(m_mutex);
                 m_wait_alloc_segment = nullptr;
-                m_region_state = BLK_ALLOCATOR_DONE;
+                // This check is to fix a race: 
+                // 1. if m_region_state is set to EXITING at another thread, we will overwrite it which is not correct;
+                // 2. and we will enter while loop again and have m_cv.wait forever since m_cv.notify_all is already called in destructor;
+                // 3. no one will call notfify_all again since this is a shutdown procedure and all incoming I/Os are rejected;
+                if (m_region_state == BLK_ALLOCATOR_EXITING) {
+                    break;
+                } else {
+                    m_region_state = BLK_ALLOCATOR_DONE;
+                }
                 m_cv.notify_all();
             }
-           LOGTRACEMOD(varsize_blk_alloc, "Done with fill cache for segment");
+           
+            LOGTRACEMOD(varsize_blk_alloc, "Done with fill cache for segment");
         }
     }
 }
