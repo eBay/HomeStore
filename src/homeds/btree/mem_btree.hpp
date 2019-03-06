@@ -107,7 +107,6 @@ public:
 
     static void free_node(MemBtreeStore *store, boost::intrusive_ptr<MemBtreeNode> bn, 
                             membtree_multinode_req_ptr op, bool mem_only = false) {
-    
         auto mbh = (mem_btree_node_header *)bn.get();
         if (mbh->refcount.decrement_testz()) {
             // TODO: Access the VariantNode area and call its destructor as well
