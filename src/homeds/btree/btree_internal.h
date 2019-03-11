@@ -670,6 +670,14 @@ public:
                 {"node_type", "interior"}, HistogramBucketsType(ExponentialOfTwoBuckets));
         REGISTER_HISTOGRAM(btree_leaf_node_occupancy, "Leaf node occupancy", "btree_node_occupancy",
                            {"node_type", "leaf"}, HistogramBucketsType(ExponentialOfTwoBuckets));
+        REGISTER_HISTOGRAM(btree_exclusive_time_in_int_node, "Exclusive time spent (Write locked) on interior node (ns)",
+                "btree_exclusive_time_in_node", {"node_type", "interior"});
+        REGISTER_HISTOGRAM(btree_exclusive_time_in_leaf_node, "Exclusive time spent (Write locked) on leaf node (ns)",
+                "btree_exclusive_time_in_node", {"node_type", "leaf"});
+        REGISTER_HISTOGRAM(btree_inclusive_time_in_int_node, "Inclusive time spent (Read locked) on interior node (ns)",
+                           "btree_inclusive_time_in_node", {"node_type", "interior"});
+        REGISTER_HISTOGRAM(btree_inclusive_time_in_leaf_node, "Inclusive time spent (Read locked) on leaf node (ns)",
+                           "btree_inclusive_time_in_node", {"node_type", "leaf"});
 
         register_me_to_farm();
     }

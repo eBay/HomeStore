@@ -52,11 +52,11 @@ struct EnumSupportBase {
     struct EnumName##Support : EnumSupportBase {                                                                       \
         static inline const std::vector< std::string > _token_names = split(#__VA_ARGS__ /*, ','*/);                   \
         static inline const std::string&               get_name(const EnumName enum_value) {                           \
-            int index = (int)enum_value;                                                                 \
-            if (index >= (int)EnumName::_count || index < 0)                                             \
-                return EnumSupportBase::UNKNOWN;                                                         \
-            else                                                                                         \
-                return _token_names[index];                                                              \
+            int index = (int)enum_value;                                                                               \
+            if (index >= (int)EnumName::_count || index < 0)                                                           \
+                return EnumSupportBase::UNKNOWN;                                                                       \
+            else                                                                                                       \
+                return _token_names[index];                                                                            \
         }                                                                                                              \
     };                                                                                                                 \
     inline std::ostream& operator<<(std::ostream& os, const EnumName& es) {                                            \
