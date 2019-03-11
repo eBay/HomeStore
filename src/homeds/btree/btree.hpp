@@ -1978,7 +1978,6 @@ protected:
 #endif
 };
 
-#ifndef NDEBUG
 template < btree_store_type BtreeStoreType, typename K, typename V, btree_node_type InteriorNodeType,
            btree_node_type LeafNodeType, size_t NodeSize, typename btree_req_type >
 thread_local homeds::reserve_vector< btree_locked_node_info, 5 > btree_t::wr_locked_nodes;
@@ -1986,7 +1985,6 @@ thread_local homeds::reserve_vector< btree_locked_node_info, 5 > btree_t::wr_loc
 template < btree_store_type BtreeStoreType, typename K, typename V, btree_node_type InteriorNodeType,
            btree_node_type LeafNodeType, size_t NodeSize, typename btree_req_type >
 thread_local homeds::reserve_vector< btree_locked_node_info, 5 > btree_t::rd_locked_nodes;
-#endif
 
 
 #ifdef SERIALIZABLE_QUERY_IMPLEMENTATION
