@@ -358,7 +358,9 @@ SDS_OPTION_GROUP(test_volume, (num_of_writes, "", "num_of_writes", "Number of wr
                               (max_vol_size, "", "max_vol_size", "max volume size", ::cxxopts::value<uint64_t>()->default_value("1073741824"), "bytes"), \
                               (thread_cnt, "", "threads", "Thread count", ::cxxopts::value<uint32_t>()->default_value("2"), "numthreads"),
                               (max_capacity, "", "maximum capacity", "maximum capacity", ::cxxopts::value<uint64_t>()->default_value("0"), "bytes"))
-SDS_OPTIONS_ENABLE(logging, test_volume)
+
+#define ENABLED_OPTIONS logging, home_blks, test_volume
+SDS_OPTIONS_ENABLE(logging, ENABLED_OPTIONS)
 
 std::shared_ptr<iomgr::ioMgr> iomgr_obj;
 
@@ -390,7 +392,7 @@ void blk_recovery_comp_callback(bool success) {
 }
 
 int main(int argc, char **argv) {
-    SDS_OPTIONS_LOAD(argc, argv, logging, test_volume)
+    SDS_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
     SDS_PARSER.parse_positional("device_list");
 
     sds_logging::SetLogger("test_volume");
