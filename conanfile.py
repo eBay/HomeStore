@@ -33,6 +33,7 @@ class HomestoreConan(ConanFile):
                 "sds_logging/4.0.0@sds/testing",
                 "sds_options/0.1.4@sds/testing",
                 "isa-l/2.21.0@oss/stable",
+                "flip/0.0.2@sds/testing", 
                 )
 
     generators = "cmake"
