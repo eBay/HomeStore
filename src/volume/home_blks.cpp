@@ -5,6 +5,8 @@
 #include <cassert>
 #include <device/blkbuffer.hpp>
 
+SDS_OPTION_GROUP(home_blks, (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service", cxxopts::value<int32_t>()->default_value("5000"), "port"))
+
 using namespace homestore;
 
 HomeBlks* HomeBlks::_instance = nullptr;
@@ -627,7 +629,7 @@ void HomeBlks::init_thread() {
         sisl::HttpServerConfig cfg;
         cfg.is_tls_enabled = false;
         cfg.bind_address = "0.0.0.0";
-        cfg.server_port = 5000;
+        cfg.server_port = SDS_OPTIONS["hb_stats_port"].as<int32_t>();
         cfg.read_write_timeout_secs = 10;
 
         m_http_server = std::unique_ptr< sisl::HttpServer >(new sisl::HttpServer(cfg, {{
