@@ -739,7 +739,10 @@ SDS_OPTION_GROUP(test_volume,
 (max_disk_capacity, "", "max_disk_capacity", "max disk capacity", ::cxxopts::value<uint64_t>()->default_value("7"), "GB"),
 (max_volume, "", "max_volume", "max volume", ::cxxopts::value<uint64_t>()->default_value("50"), "number"),
 (max_num_writes, "", "max_num_writes", "max num of writes", ::cxxopts::value<uint64_t>()->default_value("100000"), "number"))
-SDS_OPTIONS_ENABLE(logging, test_volume)
+
+
+#define ENABLED_OPTIONS logging, home_blks, test_volume
+SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
 
 /* it will go away once shutdown is implemented correctly */
 extern "C" 
@@ -760,7 +763,7 @@ int main(int argc, char *argv[]) {
     srand(time(0));
     ::testing::GTEST_FLAG(filter) = "*normal_random*";
     testing::InitGoogleTest(&argc, argv);
-    SDS_OPTIONS_LOAD(argc, argv, logging, test_volume)
+    SDS_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
     sds_logging::SetLogger("test_volume");
     spdlog::set_pattern("[%D %T.%f%z] [%^%l%$] [%t] %v");
 
