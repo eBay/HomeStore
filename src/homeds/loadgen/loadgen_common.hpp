@@ -10,7 +10,12 @@ enum KeyPattern {
     SEQUENTIAL,
     UNI_RANDOM,
     PSEUDO_RANDOM,
-    OVERLAP
+    OVERLAP,
+    LAST
+};
+
+enum ValuePattern {
+    RANDOM_BYTES
 };
 } } // namespace homeds::loadgen
 #endif //HOMESTORE_LOADGEN_COMMON_HPP

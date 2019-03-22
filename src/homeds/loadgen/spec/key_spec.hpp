@@ -4,10 +4,28 @@
 #ifndef HOMESTORE_WORKLOAD_GENERATOR_HPP
 #define HOMESTORE_WORKLOAD_GENERATOR_HPP
 
-#include "loadgen_common.hpp"
+#include "../loadgen_common.hpp"
 #include "homeds/btree/btree.hpp"
+#include <spdlog/fmt/bundled/ostream.h>
 
 namespace homeds { namespace loadgen {
+
+template< typename K >
+struct compare_keys {
+public:
+    bool operator()(const K &key1, const K &key2) const {
+        return key1.compare(&key2) == 0;
+    }
+};
+
+template< typename K >
+struct key_hash {
+    size_t operator()(const K &key) const {
+        auto b = key.get_blob();
+        return util::Hash32((const char *)b.bytes, (size_t)b.size);
+    }
+};
+
 class SimpleNumberKey : public homeds::btree::BtreeKey {
 private:
     uint64_t m_num;
@@ -21,6 +39,9 @@ public:
         case KeyPattern::UNI_RANDOM:
             return SimpleNumberKey(rand());
 
+        case KeyPattern::LAST:
+            return SimpleNumberKey((uint64_t)-1);
+
         default:
             // We do not support other gen spec yet
             assert(0);
@@ -28,10 +49,14 @@ public:
         }
     }
 
+    static constexpr bool is_fixed_size() { return true; }
+    static constexpr uint32_t get_max_size() { return sizeof(uint64_t); }
+
     explicit SimpleNumberKey(uint64_t num = 0) : m_num(num) {}
     SimpleNumberKey(const SimpleNumberKey& other) = default;
     SimpleNumberKey& operator=(const SimpleNumberKey& other) = default;
 
+    static constexpr size_t get_fixed_size() { return sizeof(uint64_t); }
     uint64_t to_integer() const { return m_num; }
 
     int compare(const BtreeKey* o) const override {
@@ -63,6 +88,11 @@ public:
     virtual uint32_t get_blob_size() const { return sizeof(uint64_t); }
     virtual void set_blob_size(uint32_t size) {}
     virtual std::string to_string() const { return std::to_string(m_num); }
+
+    friend ostream& operator<<(ostream& os, const SimpleNumberKey& k) {
+        os << std::to_string(k.m_num);
+        return os;
+    }
 };
 
 class CompositeNumberKey : public homeds::btree::BtreeKey {
@@ -71,10 +101,10 @@ private:
         uint64_t m_count : 16;
         uint64_t m_rank : 10;
         uint64_t m_blk_num : 38;
-    } blob_t;
+    } attr_t;
 
-    blob_t* m_blob;
-    blob_t  m_inplace_blob;
+    attr_t* m_attr;
+    attr_t m_inplace_attr;
 
 public:
     static CompositeNumberKey gen_key(KeyPattern spec, CompositeNumberKey *ref_key = nullptr) {
@@ -86,6 +116,9 @@ public:
         case KeyPattern::UNI_RANDOM:
             return CompositeNumberKey(rand());
 
+        case KeyPattern::LAST:
+            return CompositeNumberKey((uint64_t)-1);
+
         default:
             // We do not support other gen spec yet
             assert(0);
@@ -93,8 +126,11 @@ public:
         }
     }
 
+    static constexpr bool is_fixed_size() { return true; }
+    static constexpr uint32_t get_max_size() { return sizeof(attr_t); }
+
     CompositeNumberKey(uint32_t count, uint16_t rank, uint64_t blk_num) {
-        m_blob = &m_inplace_blob;
+        m_attr = &m_inplace_attr;
         set_count(count);
         set_rank(rank);
         set_blk_num(blk_num);
@@ -111,19 +147,19 @@ public:
     }
 
     explicit CompositeNumberKey(uint64_t num) {
-        m_blob = &m_inplace_blob;
-        memcpy(&m_inplace_blob, &num, sizeof(uint64_t));
+        m_attr = &m_inplace_attr;
+        memcpy(&m_inplace_attr, &num, sizeof(uint64_t));
     }
 
-    uint32_t get_count() const { return (m_blob->m_count); }
-    uint16_t get_rank() const { return (m_blob->m_rank); }
-    uint64_t get_blk_num() const { return (m_blob->m_blk_num); }
-    void set_count(uint32_t count) { m_blob->m_count = count; }
-    void set_rank(uint32_t rank) { m_blob->m_rank = rank; }
-    void set_blk_num(uint32_t blkNum) { m_blob->m_blk_num = blkNum; }
+    uint32_t get_count() const { return (m_attr->m_count); }
+    uint16_t get_rank() const { return (m_attr->m_rank); }
+    uint64_t get_blk_num() const { return (m_attr->m_blk_num); }
+    void set_count(uint32_t count) { m_attr->m_count = count; }
+    void set_rank(uint32_t rank) { m_attr->m_rank = rank; }
+    void set_blk_num(uint32_t blkNum) { m_attr->m_blk_num = blkNum; }
     uint64_t to_integer() const {
         uint64_t n;
-        memcpy(&n, m_blob, sizeof(uint64_t));
+        memcpy(&n, m_attr, sizeof(uint64_t));
         return n;
     }
 
@@ -191,15 +227,15 @@ public:
     }
 
     virtual homeds::blob get_blob() const override {
-        homeds::blob b = {(uint8_t*)m_blob, sizeof(blob_t)};
+        homeds::blob b = {(uint8_t*)m_attr, sizeof(attr_t)};
         return b;
     }
 
-    virtual void set_blob(const homeds::blob& b) override { m_blob = (blob_t*)b.bytes; }
-    virtual void copy_blob(const homeds::blob& b) override { memcpy(m_blob, b.bytes, b.size); }
-    virtual uint32_t get_blob_size() const override { return (sizeof(blob_t)); }
+    virtual void set_blob(const homeds::blob& b) override { m_attr = (attr_t*)b.bytes; }
+    virtual void copy_blob(const homeds::blob& b) override { memcpy(m_attr, b.bytes, b.size); }
+    virtual uint32_t get_blob_size() const override { return (sizeof(attr_t)); }
 
-    static uint32_t get_fixed_size() { return (sizeof(blob_t)); }
+    static uint32_t get_fixed_size() { return (sizeof(attr_t)); }
     virtual void set_blob_size(uint32_t size) override {}
 
     std::string to_string() const {
