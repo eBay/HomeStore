@@ -20,6 +20,7 @@ class HomestoreConan(ConanFile):
     requires = (
                 "benchmark/1.4.1@oss/stable",
                 "boost_dynamic_bitset/1.67.0@bincrafters/stable",
+                "boost_circular_buffer/1.67.0@bincrafters/stable",
                 "boost_heap/1.67.0@bincrafters/stable",
                 "boost_uuid/1.67.0@bincrafters/stable",
                 "double-conversion/3.1.1@bincrafters/stable",

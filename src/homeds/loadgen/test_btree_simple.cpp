@@ -30,19 +30,15 @@ using namespace homeds::loadgen;
 void simple_insert_test() {
     KVGenerator<SimpleNumberKey, FixedBytesValue<64>, simple_mem_btree_store_t > kvg;
 
-    // Step 1: First create a store and register to kv generator
+    // First create a store and register to kv generator
     kvg.register_store(std::make_shared<simple_mem_btree_store_t>());
 
-    // Step 2: Create a keyset of specific pattern and register to the kv generator
-    auto seq_keyset = std::make_shared<KeySet<SimpleNumberKey>>(KeyPattern::SEQUENTIAL);
-    kvg.register_keyset(seq_keyset);
-
     // Start the test.
-    kvg.preload(seq_keyset, ValuePattern::RANDOM_BYTES, 500);
+    kvg.preload(KeyPattern::SEQUENTIAL, ValuePattern::RANDOM_BYTES, 500u);
 
     // Insert new 100 documents
     for (auto i = 0u; i < 100; i++) {
-        kvg.insert_new(seq_keyset, ValuePattern::RANDOM_BYTES);
+        kvg.insert_new(KeyPattern::SEQUENTIAL, ValuePattern::RANDOM_BYTES);
     }
 
 #if 0
@@ -54,12 +50,12 @@ void simple_insert_test() {
 
     // Get first 100 documents again and check for failure
     for (auto i = 0u; i < 100; i++) {
-        kvg.get(seq_keyset, KeyPattern::SEQUENTIAL);
+        kvg.get(KeyPattern::UNI_RANDOM, false /* mutating_key_ok */);
     }
 
     // Try reading nonexisting document
     for (auto i = 0u; i < 100; i++) {
-        kvg.get_non_existing(seq_keyset, false /* expected_success */);
+        kvg.get_non_existing(KeyPattern::SEQUENTIAL, false /* expected_success */);
     }
 
     kvg.wait_for_test();

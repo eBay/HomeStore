@@ -17,10 +17,12 @@ class StoreSpec {
 public:
     virtual bool insert(K& k, V& v) = 0;
     virtual bool upsert(K& k, V& v) = 0;
+    virtual bool update(K& k, V& v) = 0;
     virtual bool get(K& k, V* out_v) = 0;
     virtual bool remove(K& k, V* removed_v = nullptr) = 0;
     virtual bool remove_any(K& start_key, bool start_incl, K& end_key, bool end_incl, K *out_key, V* out_val) = 0;
-    virtual std::vector< V > query(K& start_key, bool start_incl, K& end_key, bool end_incl) = 0;
+    virtual uint32_t query(K& start_key, bool start_incl, K& end_key, bool end_incl, uint32_t batch_size,
+                           void *cb_context, std::function<bool(K&, V&, void *)> foreach_cb) = 0;
     virtual std::vector< V > range_update(K& start_key, bool start_incl, K& end_key, bool end_incl) = 0;
 };
 
@@ -67,6 +69,10 @@ public:
         return true;
     }
 
+    virtual bool update(K& k, V& v) override {
+        return upsert(k, v);
+    }
+
     virtual bool get(K& k, V* out_v) override {
         return m_bt->get(k, out_v);
     }
@@ -75,15 +81,35 @@ public:
         return m_bt->remove(k, removed_v);
     }
 
-    virtual bool remove_any(K& start_key, bool start_incl, K& end_key, bool end_incl, K *out_key, V* out_val) {
+    virtual bool remove_any(K& start_key, bool start_incl, K& end_key, bool end_incl, K *out_key, V* out_val) override {
         BtreeSearchRange range(start_key, start_incl, end_key, end_incl);
         return m_bt->remove_any(range, out_key, out_val);
     }
 
-    virtual std::vector< V > query(K& start_key, bool start_incl, K& end_key, bool end_incl) {
-        assert(0); // not supported yet
-        return {};
+    virtual uint32_t query(K& start_key, bool start_incl, K& end_key, bool end_incl, uint32_t batch_size,
+                           void *cb_context, std::function<bool(K&, V&, void *)> foreach_cb) override {
+        auto search_range = BtreeSearchRange(start_key, start_incl, end_key, end_incl);
+        BtreeQueryRequest<K, V> qreq(search_range, BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, batch_size);
+
+        auto result_count = 0U;
+
+        std::vector<std::pair<K, V>> values;
+        values.reserve(batch_size);
+
+        bool has_more = false;
+        do {
+            has_more = m_bt->query(qreq, values);
+            for (auto &val : values) {
+                bool need_more = foreach_cb(val.first, val.second, cb_context);
+                if (!need_more) { return result_count; }
+                ++result_count;
+            }
+            values.clear();
+        } while (has_more);
+
+        return result_count;
     }
+
     virtual std::vector< V > range_update(K& start_key, bool start_incl, K& end_key, bool end_incl) {
         assert(0); // not supported yet
         return {};

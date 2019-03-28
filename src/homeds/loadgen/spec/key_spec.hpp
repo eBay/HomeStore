@@ -39,7 +39,7 @@ public:
         case KeyPattern::UNI_RANDOM:
             return SimpleNumberKey(rand());
 
-        case KeyPattern::LAST:
+        case KeyPattern::OUT_OF_BOUND:
             return SimpleNumberKey((uint64_t)-1);
 
         default:
@@ -116,7 +116,7 @@ public:
         case KeyPattern::UNI_RANDOM:
             return CompositeNumberKey(rand());
 
-        case KeyPattern::LAST:
+        case KeyPattern::OUT_OF_BOUND:
             return CompositeNumberKey((uint64_t)-1);
 
         default:
@@ -142,6 +142,7 @@ public:
             CompositeNumberKey(other.get_count(), other.get_rank(), other.get_blk_num()) {}
 
     CompositeNumberKey& operator=(const CompositeNumberKey& other) {
+        m_attr = &m_inplace_attr;
         copy_blob(other.get_blob());
         return *this;
     }
