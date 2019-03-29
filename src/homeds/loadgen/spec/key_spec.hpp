@@ -26,5 +26,10 @@ struct key_hash {
     }
 };
 
+class KeySpec {
+public:
+    virtual bool operator==(const KeySpec& rhs) const = 0;
+    virtual bool operator!=(const KeySpec& rhs) const { return !(operator==(rhs));}
+};
 } } // namespace homeds::loadgen
 #endif // HOMESTORE_WORKLOAD_GENERATOR_HPP

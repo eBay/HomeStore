@@ -32,31 +32,35 @@ void simple_insert_test() {
     kvg.register_store(std::make_shared<simple_mem_btree_store_t>());
 
     // Start the test.
-    kvg.preload(KeyPattern::SEQUENTIAL, ValuePattern::RANDOM_BYTES, 500u);
+    kvg.preload(KeyPattern::UNI_RANDOM, ValuePattern::RANDOM_BYTES, 500u);
 
-    // Insert new 100 documents
-    for (auto i = 0u; i < 100; i++) {
-        kvg.insert_new(KeyPattern::SEQUENTIAL, ValuePattern::RANDOM_BYTES);
-    }
+    kvg.run_parallel([&]() {
+        // Insert new 100 documents
+        for (auto i = 0u; i < 100; i++) {
+            kvg.insert_new(KeyPattern::UNI_RANDOM, ValuePattern::RANDOM_BYTES);
+        }
+    });
+
+    kvg.run_parallel([&](){
+        // Get first 100 documents again and check for failure
+        for (auto i = 0u; i < 100; i++) {
+            kvg.get(KeyPattern::SEQUENTIAL, true /* mutating_key_ok */);
+        }
+
+        // Try reading nonexisting document
+        for (auto i = 0u; i < 100; i++) {
+            kvg.get_non_existing(false /* expected_success */);
+        }
+    });
 
 #if 0
-    // Insert first 100 documents again and check for failure
-    for (auto i = 0u; i < 100; i++) {
-        kvg.insert_existing(seq_keyset, ValuePattern::RANDOM_BYTES, false /* expected_success */);
-    }
+    kvg.run_parallel([&](){
+        // Get first 100 documents again and check for failure
+        for (auto i = 0u; i < 5; i++) {
+            kvg.range_query(KeyPattern::SEQUENTIAL, 10, true, true);
+        }
+    });
 #endif
-
-    // Get first 100 documents again and check for failure
-    for (auto i = 0u; i < 100; i++) {
-        kvg.get(KeyPattern::UNI_RANDOM, false /* mutating_key_ok */);
-    }
-
-    // Try reading nonexisting document
-    for (auto i = 0u; i < 100; i++) {
-        kvg.get_non_existing(KeyPattern::SEQUENTIAL, false /* expected_success */);
-    }
-
-    kvg.wait_for_test();
 }
 
 SDS_OPTIONS_ENABLE(logging)

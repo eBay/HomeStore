@@ -6,11 +6,12 @@
 #define HOMESTORE_BTREE_KEY_SPEC_HPP
 
 #include "homeds/loadgen/loadgen_common.hpp"
+#include "homeds/loadgen/spec/key_spec.hpp"
 #include "homeds/btree/btree.hpp"
 #include <spdlog/fmt/bundled/ostream.h>
 
 namespace homeds { namespace loadgen {
-class SimpleNumberKey : public homeds::btree::BtreeKey {
+class SimpleNumberKey : public homeds::btree::BtreeKey, public KeySpec {
 private:
     uint64_t m_num;
 
@@ -42,6 +43,10 @@ public:
 
     static constexpr size_t get_fixed_size() { return sizeof(uint64_t); }
     uint64_t to_integer() const { return m_num; }
+
+    virtual bool operator==(const KeySpec& other) const override {
+        return (compare((const BtreeKey *)&(SimpleNumberKey&)other) == 0);
+    }
 
     int compare(const BtreeKey* o) const override {
         SimpleNumberKey* other = (SimpleNumberKey*)o;
@@ -79,7 +84,7 @@ public:
     }
 };
 
-class CompositeNumberKey : public homeds::btree::BtreeKey {
+class CompositeNumberKey : public homeds::btree::BtreeKey, public KeySpec {
 private:
     typedef struct __attribute__((packed)) {
         uint64_t m_count : 16;
@@ -146,6 +151,10 @@ public:
         uint64_t n;
         memcpy(&n, m_attr, sizeof(uint64_t));
         return n;
+    }
+
+    virtual bool operator==(const KeySpec& rhs) const override {
+        return (compare((const BtreeKey *)&(CompositeNumberKey&)rhs) == 0);
     }
 
     int compare(const BtreeKey* o) const override {

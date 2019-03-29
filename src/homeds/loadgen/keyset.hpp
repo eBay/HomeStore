@@ -10,6 +10,7 @@
 #include <farmhash.h>
 #include <shared_mutex>
 #include <folly/RWSpinLock.h>
+#include <iostream>
 
 #define MAX_HASH_CODE_ENTRIES 10 // Max hash codes to store in each keyinfo structure
 
@@ -71,13 +72,29 @@ struct key_info {
 
         return false;
     }
+
+    uint64_t get_last_hash_code() const {
+        folly::RWSpinLock::ReadHolder guard(const_cast< folly::RWSpinLock& >(m_lock));
+        return (m_val_hash_codes->back());
+    }
+
+    friend std::ostream& operator<<(std::ostream& os, const key_info< K >& ki) {
+        os << "KeyInfo: [Key=" << ki.m_key
+           << " last_hash_code=" << ki.get_last_hash_code()
+           << " slot_num=" << ki.m_slot_num
+           << " mutating_count=" << ki.m_mutate_count
+           << " just_created?=" << ki.m_just_created
+           << "]";
+        return os;
+    }
 };
 
 template < typename K >
 struct compare_key_info {
 public:
     bool operator()(key_info< K >* const& ki1, key_info< K >* const& ki2) const {
-        return ki1->m_key.compare(&ki2->m_key) == 0;
+        //LOGINFO("Comparing k1 => {} k2 => {}, compare = {}", *ki1, *ki2, ki1->m_key.compare(&ki2->m_key));
+        return (ki1->m_key.compare(&ki2->m_key) < 0);
     }
 };
 
@@ -95,9 +112,9 @@ public:
     KeyRegistry() : m_invalid_ki(K::gen_key(KeyPattern::OUT_OF_BOUND, nullptr)) {
         for (auto i = 0u; i < KEY_PATTERN_SENTINEL; i++) {
             m_last_gen_slots[i].store(-1);
-            m_last_read_slots[i].store(-1);
+            m_last_read_slots[i].store(0);
         }
-        _generate_key(KeyPattern::SEQUENTIAL); // Atleast generate 1 key for us to be ready for read
+        //_generate_key(KeyPattern::SEQUENTIAL); // Atleast generate 1 key for us to be ready for read
     }
 
     virtual ~KeyRegistry() = default;
@@ -132,7 +149,7 @@ public:
         kis.reserve(n);
 
         std::shared_lock l(m_rwlock);
-        for (auto i = 0; i < n; i++) {
+        for (auto i = 0u; i < n; i++) {
             kis.emplace_back(_get_key(pattern, mutating_key_ok));
         }
         return kis;
@@ -156,7 +173,7 @@ public:
         }
     }
 
-    auto find_key(const key_info< K >* ki) {
+    auto find_key(key_info< K >* const& ki) {
         std::shared_lock l(m_rwlock);
         return m_data_set.find(ki);
     }

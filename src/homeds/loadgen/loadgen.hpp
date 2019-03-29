@@ -36,12 +36,11 @@ public:
 
     void preload(KeyPattern key_pattern, ValuePattern value_pattern, uint32_t count,
             store_error_cb_t error_cb = handle_generic_error) {
-        for (auto i = 0u; i < count; i++) {
-            insert_new(key_pattern, value_pattern, error_cb);
-        }
-        wait_for_test();
-        m_test_baton.reset();
-        m_outstanding.increment(1); // Increment to indicate new test will follow
+        run_parallel([&](){
+            for (auto i = 0u; i < count; i++) {
+                insert_new(key_pattern, value_pattern, error_cb);
+            }
+        });
     }
 
     void insert_new(KeyPattern key_pattern, ValuePattern value_pattern,
@@ -67,13 +66,12 @@ public:
         });
     }
 
-    void get_non_existing(KeyPattern pattern, bool expected_success) {
-        get_non_existing(pattern, handle_generic_error, expected_success);
+    void get_non_existing(bool expected_success) {
+        get_non_existing(handle_generic_error, expected_success);
     }
 
-    void get_non_existing(KeyPattern pattern, store_error_cb_t error_cb = handle_generic_error,
-                          bool expected_success = false) {
-        get(pattern, true, error_cb, expected_success, false /* valid_key */);
+    void get_non_existing(store_error_cb_t error_cb = handle_generic_error, bool expected_success = false) {
+        get(KeyPattern::SEQUENTIAL, true, error_cb, expected_success, false /* valid_key */);
     }
 
     void get(KeyPattern pattern, bool mutating_key_ok = false, store_error_cb_t error_cb = handle_generic_error,
@@ -102,7 +100,7 @@ public:
                      store_error_cb_t error_cb = handle_generic_error) {
         this->m_outstanding.increment(1);
         m_executor.add([=] {
-            this->_range_query(pattern, num_keys_in_range, start_incl, end_incl, error_cb);
+            this->_range_query(pattern, num_keys_in_range, true, start_incl, end_incl, error_cb);
             this->op_done();
         });
     }
@@ -110,14 +108,17 @@ public:
     void range_query_nonexisting(store_error_cb_t error_cb = handle_generic_error) {
         this->m_outstanding.increment(1);
         m_executor.add([=] {
-            this->_range_query(KeyPattern::SEQUENTIAL, 1, true, true, error_cb);
+            this->_range_query(KeyPattern::SEQUENTIAL, 1, false, true, error_cb);
             this->op_done();
         });
     }
 
-    void wait_for_test() {
+    void run_parallel(std::function<void()> test_fn) {
+        m_outstanding.set(1);
+        test_fn();
         op_done();
         m_test_baton.wait();
+        m_test_baton.reset();
     }
 
 private:
@@ -147,6 +148,8 @@ private:
             ki->add_hash_code(V::hash_code(value));
             m_key_registry.put_key(ki);
         }
+
+        LOGTRACE("Insert {}", *ki);
     done:
         ki->mutation_completed(); // Make the key visible for reads, queries, removes and updates
     }
@@ -173,6 +176,8 @@ private:
             assert(0);
             return;
         }
+
+        LOGTRACE("Get {}", *ki);
     }
 
     void _remove(KeyPattern pattern, bool mutating_key_ok, store_error_cb_t error_cb, bool expected_success,
@@ -200,7 +205,8 @@ private:
             return;
         }
 
-         m_key_registry.free_key(ki);
+        LOGTRACE("Remove {}", *ki);
+        m_key_registry.free_key(ki);
     }
 
     void _update(KeyPattern key_pattern, bool mutating_key_ok, ValuePattern value_pattern, store_error_cb_t error_cb,
@@ -221,6 +227,8 @@ private:
         }
 
         ki->add_hash_code(V::hash_code(value));
+        LOGTRACE("Update {}", *ki);
+
     done:
         ki->mutation_completed();
     }
@@ -240,10 +248,10 @@ private:
         }
 
         //const auto it = m_data_set.rlock()->find(start_incl ? kis[0] : kis[1]);
-        const auto it = m_key_registry.find_key(start_incl ? kis[0] : kis[1]);
+        auto it = m_key_registry.find_key(start_incl ? kis[0] : kis[1]);
 
         auto count = m_store->query(kis[0]->m_key, start_incl, kis.back()->m_key, end_incl, 1000, nullptr,
-                                    [&](K& k, V& v, void* context) {
+                                    [&](const K& k, const V& v, void* context) {
                                         const key_info< K >* expected_ki = *it;
                                         ++it;
 
@@ -262,6 +270,7 @@ private:
                                             return false;
                                         }
 
+                                        LOGTRACE("RangeQuery {}", *expected_ki);
                                         return true;
                                     });
 
@@ -275,7 +284,7 @@ private:
     folly::Synchronized< std::set< key_info< K >*, compare_key_info< K > > > m_data_set;
     std::shared_ptr< Store >                                                 m_store;
     folly::CPUThreadPoolExecutor                                             m_executor;
-    sisl::atomic_counter< int64_t >                                          m_outstanding = 1;
+    sisl::atomic_counter< int64_t >                                          m_outstanding = 0;
     folly::Baton<>                                                           m_test_baton;
 };
 } // namespace loadgen
