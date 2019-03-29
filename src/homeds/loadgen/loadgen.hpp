@@ -144,8 +144,8 @@ private:
         }
 
         if (success) {
-            m_data_set.wlock()->insert(ki);
             ki->add_hash_code(V::hash_code(value));
+            m_key_registry.put_key(ki);
         }
     done:
         ki->mutation_completed(); // Make the key visible for reads, queries, removes and updates
@@ -200,8 +200,7 @@ private:
             return;
         }
 
-        m_data_set.wlock()->erase(ki);
-        m_key_registry.free_key(ki);
+         m_key_registry.free_key(ki);
     }
 
     void _update(KeyPattern key_pattern, bool mutating_key_ok, ValuePattern value_pattern, store_error_cb_t error_cb,
@@ -240,7 +239,8 @@ private:
             expected_count = 0;
         }
 
-        const auto it = m_data_set.rlock()->find(start_incl ? kis[0] : kis[1]);
+        //const auto it = m_data_set.rlock()->find(start_incl ? kis[0] : kis[1]);
+        const auto it = m_key_registry.find_key(start_incl ? kis[0] : kis[1]);
 
         auto count = m_store->query(kis[0]->m_key, start_incl, kis.back()->m_key, end_incl, 1000, nullptr,
                                     [&](K& k, V& v, void* context) {

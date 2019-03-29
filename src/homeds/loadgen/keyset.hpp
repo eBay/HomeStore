@@ -7,6 +7,7 @@
 
 #include "loadgen_common.hpp"
 #include <boost/circular_buffer.hpp>
+#include <farmhash.h>
 #include <shared_mutex>
 #include <folly/RWSpinLock.h>
 
@@ -14,75 +15,6 @@
 
 namespace homeds {
 namespace loadgen {
-#if 0
-template < typename K >
-class KeySet {
-public:
-    KeySet(KeyPattern gen_pattern) : m_last_read_slot(0), m_default_gen_pattern(gen_pattern) {
-        generate_keys(); // Atleast generate 1 key for us to be ready for read
-    }
-
-    virtual ~KeySet() = default;
-
-    std::vector< K > generate_keys(uint32_t n = 1) { return generate_keys(m_default_gen_pattern, n); }
-
-    std::vector< K > generate_keys(KeyPattern gen_pattern, uint32_t n) {
-        std::vector< K > gen_keys;
-        gen_keys.reserve(n);
-
-        std::unique_lock l(m_rwlock);
-        for (auto i = 0u; i < n; i++) {
-            m_keys.emplace_back(new K::gen_key(gen_pattern, m_keys.size() ? &m_keys.back() : nullptr));
-            gen_keys.push_back(m_keys.back());
-        }
-        return gen_keys;
-    }
-
-    // Assume last key as invalid key always. NOTE: This will no longer be invalid in case it is actually
-    // inserted into the store.
-    K generate_invalid_key() { return K::gen_key(KeyPattern::OUT_OF_BOUND, nullptr); }
-
-    std::vector< K > get_keys(KeyPattern pattern, uint32_t n = 1) {
-        assert((pattern == SEQUENTIAL) || (pattern == UNI_RANDOM) || (pattern == PSEUDO_RANDOM));
-        std::vector< K > out_keys;
-        out_keys.reserve(n);
-
-        std::shared_lock l(m_rwlock);
-        int32_t          start_slot = 0;
-
-        if (pattern == SEQUENTIAL) {
-            start_slot = m_last_read_slots[pattern].load(std::memory_order_acquire);
-        } else if (pattern == UNI_RANDOM) {
-            start_slot = rand() % m_keys.size();
-        }
-        auto cur_slot = start_slot;
-
-        for (auto i = 0u; i < n; i++) {
-            cur_slot++;
-            if (cur_slot == (int32_t)m_keys.size()) {
-                cur_slot = 0;
-            }
-            if (cur_slot == start_slot) { // We came one full circle, gen partial
-                goto done;
-            }
-            out_keys.push_back(m_keys[cur_slot]);
-        }
-
-    done:
-        m_last_read_slots[pattern].store(cur_slot, std::memory_order_release);
-        return out_keys;
-    }
-
-    KeyPattern default_pattern() const { return m_default_gen_pattern; }
-
-private:
-    std::shared_mutex      m_rwlock;
-    std::vector< K >       m_keys;
-    std::atomic< int32_t > m_last_read_slot;
-    KeyPattern             m_default_gen_pattern; // Default Keypattern to use
-};
-#endif
-
 template < typename K >
 struct key_info {
     folly::RWSpinLock                                     m_lock;
@@ -114,7 +46,7 @@ struct key_info {
     }
 
     bool is_mutation_ongoing() const {
-        folly::RWSpinLock::ReadHolder guard(const_cast<folly::RWSpinLock&>(m_lock));
+        folly::RWSpinLock::ReadHolder guard(const_cast< folly::RWSpinLock& >(m_lock));
         return (m_mutate_count != 0);
     }
 
@@ -127,7 +59,7 @@ struct key_info {
     }
 
     bool validate_hash_code(uint64_t hash_code, bool only_last) const {
-        folly::RWSpinLock::ReadHolder guard(const_cast<folly::RWSpinLock&>(m_lock));
+        folly::RWSpinLock::ReadHolder guard(const_cast< folly::RWSpinLock& >(m_lock));
         if (only_last) {
             return (m_val_hash_codes->back() == hash_code);
         }
@@ -144,7 +76,9 @@ struct key_info {
 template < typename K >
 struct compare_key_info {
 public:
-    bool operator()(key_info< K >* const& ki1, key_info< K >* const& ki2) const { return ki1->m_key.compare(&ki2->m_key) == 0; }
+    bool operator()(key_info< K >* const& ki1, key_info< K >* const& ki2) const {
+        return ki1->m_key.compare(&ki2->m_key) == 0;
+    }
 };
 
 template < typename K >
@@ -186,9 +120,7 @@ public:
 
     // Assume last key as invalid key always. NOTE: This will no longer be invalid in case it is actually
     // inserted into the store.
-    key_info< K >* generate_invalid_key() {
-        return &m_invalid_ki;
-    }
+    key_info< K >* generate_invalid_key() { return &m_invalid_ki; }
 
     key_info< K >* get_key(KeyPattern pattern, bool mutating_key_ok) {
         std::shared_lock l(m_rwlock);
@@ -206,8 +138,15 @@ public:
         return kis;
     }
 
+    void put_key(key_info< K >* ki) {
+        std::unique_lock l(m_rwlock);
+        m_data_set.insert(ki);
+    }
+
     void free_key(key_info< K >* ki) {
         std::unique_lock l(m_rwlock);
+        m_data_set.erase(ki);
+
         assert(m_used_slots[ki->m_slot_num]);
         ki->mutation_completed();
 
@@ -215,6 +154,11 @@ public:
         if (++m_ndirty >= compact_trigger_limit()) {
             _compact();
         }
+    }
+
+    auto find_key(const key_info< K >* ki) {
+        std::shared_lock l(m_rwlock);
+        return m_data_set.find(ki);
     }
 
 private:
@@ -232,18 +176,44 @@ private:
     key_info< K >* _get_key(KeyPattern pattern, bool mutating_key_ok) {
         assert((pattern == SEQUENTIAL) || (pattern == UNI_RANDOM) || (pattern == PSEUDO_RANDOM));
 
-        int32_t   start_slot = 0;
+        int32_t        start_slot = 0;
         key_info< K >* ki = nullptr;
 
+#if 0
         if (pattern == SEQUENTIAL) {
             start_slot = m_last_read_slots[pattern].load(std::memory_order_acquire);
         } else if (pattern == UNI_RANDOM) {
             start_slot = rand() % m_keys.size();
         }
+#endif
+
+        typename std::set< key_info< K >*, compare_key_info< K > >::iterator it;
+        if (pattern == SEQUENTIAL) {
+            start_slot = m_last_read_slots[pattern].load(std::memory_order_acquire);
+            it = m_data_set.find(m_keys[start_slot].get());
+            assert(it != m_data_set.end());
+        } else if (pattern == UNI_RANDOM) {
+            start_slot = rand() % m_keys.size();
+        }
+        auto cur_slot = start_slot;
+
+        do {
+            cur_slot = _get_next_slot(cur_slot, pattern, it);
+
+            if (_can_use_for_get(cur_slot, mutating_key_ok)) {
+                ki = m_keys[cur_slot].get();
+                m_last_read_slots[pattern].store(cur_slot, std::memory_order_release);
+                break;
+            }
+        } while (cur_slot != start_slot);
+
+        return ki;
+
+#if 0
         auto cur_slot = start_slot + 1;
         auto i = 0;
 
-retry:
+    retry:
         if (cur_slot == start_slot) { // We came one full circle and no default key
             return ki;
         }
@@ -262,6 +232,7 @@ retry:
 
         m_last_read_slots[pattern].store(cur_slot, std::memory_order_release);
         return ki;
+#endif
     }
 
     K* _get_last_gen_key(KeyPattern pattern) {
@@ -274,6 +245,27 @@ retry:
 
     void _set_last_gen_slot(KeyPattern pattern, size_t slot) {
         m_last_gen_slots[pattern].store(slot, std::memory_order_relaxed);
+    }
+
+    int32_t _get_next_slot(int32_t cur_slot, KeyPattern pattern, auto& it) {
+        if (pattern == SEQUENTIAL) {
+            ++it;
+            if (it == m_data_set.end()) {
+                it = m_data_set.begin();
+            }
+            return (*it)->m_slot_num;
+        } else {
+            cur_slot = m_used_slots.find_next(cur_slot);
+            if (cur_slot == (int32_t)boost::dynamic_bitset<>::npos) {
+                cur_slot = m_used_slots.find_first();
+            }
+            return cur_slot;
+        }
+    }
+
+    bool _can_use_for_get(int32_t slot, bool mutating_key_ok) {
+        return (m_used_slots[slot] && !m_keys[slot]->m_just_created &&
+                (!m_keys[slot]->is_mutation_ongoing() || mutating_key_ok));
     }
 
     uint32_t _compact() {
@@ -315,39 +307,16 @@ retry:
         }
     }
 
-#if 0
-    void compact() {
-        auto m_inverse_slots = ~m_valid_slots;
-        auto pos = m_inverse_slots.find_first();
-        while (pos != boost::dynamic_bitset<>::npos) {
-            // Adjust all last gen slots and read slots to indicate that they are removed
-            for (auto i = 0; i < KEY_PATTERN_SENTINEL; i++) {
-                auto cur_marker = m_last_gen_slots[i].load(std::memory_order_relaxed);
-                if (cur_marker > pos) {
-                    cur_marker--;
-                    m_last_gen_slots[i].store(cur_marker);
-                }
-
-                cur_marker = m_last_read_slots[i].load(std::memory_order_relaxed);
-                if (cur_marker > pos) {
-                    cur_marker--;
-                    m_last_read_slots[i].store(cur_marker);
-                }
-            }
-            pos = m_inverse_slots.find_next(pos);
-        }
-    }
-#endif
-
     static constexpr uint32_t compact_trigger_limit() { return 100000; }
 
 private:
-    std::shared_mutex                               m_rwlock;
-    std::vector< std::unique_ptr< key_info< K > > > m_keys;
-    boost::dynamic_bitset<>                         m_used_slots;
-    int32_t                                         m_ndirty = 0;
+    std::shared_mutex                                 m_rwlock;
+    std::vector< std::unique_ptr< key_info< K > > >   m_keys;
+    boost::dynamic_bitset<>                           m_used_slots;
+    std::set< key_info< K >*, compare_key_info< K > > m_data_set;
+    int32_t                                           m_ndirty = 0;
 
-    key_info< K >                                   m_invalid_ki;
+    key_info< K >                                              m_invalid_ki;
     std::array< std::atomic< int32_t >, KEY_PATTERN_SENTINEL > m_last_gen_slots;
     std::array< std::atomic< int32_t >, KEY_PATTERN_SENTINEL > m_last_read_slots;
 };

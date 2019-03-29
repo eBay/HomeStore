@@ -10,15 +10,13 @@
 #include <utility/thread_buffer.hpp>
 #include <utility/obj_life_counter.hpp>
 
-#include "blkstore/blkstore.hpp"
 #include <metrics/metrics.hpp>
-#include "spec/key_spec.hpp"
-#include "spec/value_spec.hpp"
-#include "spec/store_spec.hpp"
 #include "loadgen.hpp"
 #include "keyset.hpp"
 #include "loadgen_common.hpp"
-#include "device/virtual_dev.hpp"
+#include "spec/btree/btree_key_spec.hpp"
+#include "spec/btree/btree_value_spec.hpp"
+#include "spec/btree/btree_store_spec.hpp"
 
 SDS_LOGGING_INIT(btree_structures, btree_nodes, btree_generics, varsize_blk_alloc, iomgr)
 THREAD_BUFFER_INIT;
