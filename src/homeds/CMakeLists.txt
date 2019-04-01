@@ -57,6 +57,6 @@ target_link_libraries(obj_allocator_benchmark ${COMMON_LIB_DEPS})
 add_test(NAME ObjAllocatorBenchmark COMMAND obj_allocator_benchmark)
 
 set(TEST_BTREE_SIMPLE_FILES loadgen/test_btree_simple.cpp)
-#add_executable(test_btree_simple ${TEST_BTREE_SIMPLE_FILES})
-#target_link_libraries(test_btree_simple homestore ${COMMON_LIB_DEPS})
+add_executable(test_btree_simple ${TEST_BTREE_SIMPLE_FILES})
+target_link_libraries(test_btree_simple homestore ${COMMON_LIB_DEPS})
 #add_test(NAME TestBtreeSimple COMMAND test_btree_simple)

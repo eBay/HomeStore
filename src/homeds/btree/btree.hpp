@@ -622,7 +622,7 @@ private:
                     }
                 }
 
-                LOGTRACE("Query leaf node:\n {}", my_node->to_string());
+                LOGTRACEMOD(btree_nodes, "Query leaf node:\n {}", my_node->to_string());
 
                 int                              start_ind = 0, end_ind = 0;
                 std::vector< std::pair< K, V > > match_kv;
@@ -1776,7 +1776,7 @@ done:
 
     void node_free_safely(BtreeNodePtr node, std::deque< boost::intrusive_ptr< btree_req_type > >& dependent_req_q) {
         if (node->any_upgrade_waiters()) {
-            LOGTRACE("Marking invalid:{}", node->get_node_id().to_string());
+            LOGTRACEMOD(btree_nodes, "Marking invalid:{}", node->get_node_id().to_string());
             node->set_valid_node(false);
             unlock_node(node, locktype::LOCKTYPE_WRITE);
         } else {

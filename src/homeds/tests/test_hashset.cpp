@@ -9,8 +9,10 @@
 #include <sds_options/options.h>
 #include <benchmark/benchmark.h>
 #include <boost/range/irange.hpp>
+#include <utility/thread_buffer.hpp>
 
 SDS_LOGGING_INIT()
+THREAD_BUFFER_INIT;
 
 using namespace std;
 
