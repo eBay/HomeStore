@@ -31,7 +31,7 @@ void simple_insert_test() {
     // First create a store and register to kv generator
     kvg.register_store(std::make_shared<simple_mem_btree_store_t>());
 
-    // Start the test.
+    // Start the test by preloading some entries randomly.
     kvg.preload(KeyPattern::UNI_RANDOM, ValuePattern::RANDOM_BYTES, 500u);
 
     kvg.run_parallel([&]() {
@@ -44,7 +44,7 @@ void simple_insert_test() {
     kvg.run_parallel([&](){
         // Get first 100 documents again and check for failure
         for (auto i = 0u; i < 100; i++) {
-            kvg.get(KeyPattern::SEQUENTIAL, true /* mutating_key_ok */);
+            kvg.get(KeyPattern::SEQUENTIAL, false /* exclusive_access */);
         }
 
         // Try reading nonexisting document
@@ -53,14 +53,12 @@ void simple_insert_test() {
         }
     });
 
-#if 0
     kvg.run_parallel([&](){
-        // Get first 100 documents again and check for failure
-        for (auto i = 0u; i < 5; i++) {
-            kvg.range_query(KeyPattern::SEQUENTIAL, 10, true, true);
+        // Do range query on different pattern
+        for (auto i = 0u; i < 1000; i++) {
+            kvg.range_query(KeyPattern::SEQUENTIAL, 28, true /* exclusive_access */, true, true);
         }
     });
-#endif
 }
 
 SDS_OPTIONS_ENABLE(logging)

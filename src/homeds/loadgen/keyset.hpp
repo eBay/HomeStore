@@ -20,25 +20,19 @@ template < typename K >
 struct key_info {
     folly::RWSpinLock                                     m_lock;
     K                                                     m_key;
-    bool                                                  m_just_created;
-    uint32_t                                              m_mutate_count;
+    bool                                                  m_exclusive_access = true;
+    bool                                                  m_free_pending  = false;
+    uint32_t                                              m_mutate_count = 0;
+    uint32_t                                              m_read_count;
     int32_t                                               m_slot_num;
     std::unique_ptr< boost::circular_buffer< uint64_t > > m_val_hash_codes;
 
     key_info(const K& key, int32_t slot_num = -1) :
             m_key(key),
-            m_just_created(true),
-            m_mutate_count(0),
             m_slot_num(slot_num) {}
 
     key_info(const K& key, int32_t slot_num, uint64_t val_hash_code) : key_info(key, slot_num) {
         add_hash_code(val_hash_code);
-    }
-
-    void mutation_completed() {
-        folly::RWSpinLock::WriteHolder guard(m_lock);
-        m_just_created = false;
-        m_mutate_count--;
     }
 
     void mutation_started() {
@@ -46,9 +40,48 @@ struct key_info {
         m_mutate_count++;
     }
 
+    void read_started() {
+        folly::RWSpinLock::WriteHolder guard(m_lock);
+        m_read_count++;
+    }
+
+    bool mutation_completed() {
+        folly::RWSpinLock::WriteHolder guard(m_lock);
+        m_exclusive_access = false;
+        m_mutate_count--;
+        return _should_free();
+    }
+
+    bool read_completed() {
+        folly::RWSpinLock::WriteHolder guard(m_lock);
+        m_exclusive_access = false;
+        m_read_count--;
+        return _should_free();
+    }
+
     bool is_mutation_ongoing() const {
         folly::RWSpinLock::ReadHolder guard(const_cast< folly::RWSpinLock& >(m_lock));
         return (m_mutate_count != 0);
+    }
+
+    bool is_read_ongoing() const {
+        folly::RWSpinLock::ReadHolder guard(const_cast< folly::RWSpinLock& >(m_lock));
+        return (m_read_count != 0);
+    }
+
+    void mark_freed() {
+        folly::RWSpinLock::WriteHolder guard(m_lock);
+        m_free_pending = true;
+    }
+
+    void mark_exclusive() {
+        folly::RWSpinLock::WriteHolder guard(m_lock);
+        m_exclusive_access = true;
+    }
+
+    bool is_exclusive() const {
+        folly::RWSpinLock::ReadHolder guard(const_cast< folly::RWSpinLock& >(m_lock));
+        return (m_exclusive_access);
     }
 
     void add_hash_code(uint64_t hash_code) {
@@ -83,10 +116,14 @@ struct key_info {
            << " last_hash_code=" << ki.get_last_hash_code()
            << " slot_num=" << ki.m_slot_num
            << " mutating_count=" << ki.m_mutate_count
-           << " just_created?=" << ki.m_just_created
+           << " read_count=" << ki.m_read_count
+           << " exclusive_access?=" << ki.m_exclusive_access
            << "]";
         return os;
     }
+
+private:
+    bool _should_free() const { return (m_free_pending && !m_mutate_count && !m_read_count); }
 };
 
 template < typename K >
@@ -107,6 +144,28 @@ struct key_info_hash {
 };
 
 template < typename K >
+class KeyRegistry;
+
+template< typename K >
+struct key_info_ptr {
+    key_info_ptr(KeyRegistry< K > *reg, key_info< K > *ki, bool is_mutate) :
+        m_registry(reg),
+        m_ki(ki),
+        m_is_mutate(is_mutate) {
+        is_mutate ? ki->mutation_started() : ki->read_started();
+    }
+    ~key_info_ptr();
+
+    key_info< K >& operator*() const { return *m_ki; }
+    key_info< K >* operator->() const { return m_ki; }
+    operator bool(void) const { return (m_ki == nullptr); }
+
+    KeyRegistry< K > *m_registry;
+    key_info< K > *m_ki;
+    bool m_is_mutate;
+};
+
+template < typename K >
 class KeyRegistry {
 public:
     KeyRegistry() : m_invalid_ki(K::gen_key(KeyPattern::OUT_OF_BOUND, nullptr)) {
@@ -119,66 +178,72 @@ public:
 
     virtual ~KeyRegistry() = default;
 
-    key_info< K >* generate_key(KeyPattern gen_pattern) {
+    key_info_ptr< K > generate_key(KeyPattern gen_pattern) {
         std::unique_lock l(m_rwlock);
-        return _generate_key(gen_pattern);
+        return key_info_ptr(this, _generate_key(gen_pattern), true);
     }
 
-    std::vector< key_info< K >* > generate_keys(KeyPattern gen_pattern, uint32_t n) {
-        std::vector< key_info< K >* > gen_keys;
+    std::vector< key_info_ptr< K > > generate_keys(KeyPattern gen_pattern, uint32_t n) {
+        std::vector< key_info_ptr< K > > gen_keys;
         gen_keys.reserve(n);
 
         std::unique_lock l(m_rwlock);
         for (auto i = 0u; i < n; i++) {
-            gen_keys.emplace_back(_generate_key(gen_pattern));
+            gen_keys.emplace_back(key_info_ptr(this, _generate_key(gen_pattern), true));
         }
         return gen_keys;
     }
 
     // Assume last key as invalid key always. NOTE: This will no longer be invalid in case it is actually
     // inserted into the store.
-    key_info< K >* generate_invalid_key() { return &m_invalid_ki; }
+    key_info_ptr< K > generate_invalid_key() { return key_info_ptr(this, &m_invalid_ki, true); }
 
-    key_info< K >* get_key(KeyPattern pattern, bool mutating_key_ok) {
+    key_info_ptr< K > get_key(KeyPattern pattern, bool is_mutate, bool exclusive_access) {
         std::shared_lock l(m_rwlock);
-        return _get_key(pattern, mutating_key_ok);
+        return key_info_ptr(this, _get_key(pattern, is_mutate, exclusive_access), is_mutate);
     }
 
-    std::vector< key_info< K >* > get_keys(KeyPattern pattern, uint32_t n, bool mutating_key_ok) {
-        std::vector< key_info< K >* > kis;
+    std::vector< key_info_ptr< K > > get_contiguous_keys(KeyPattern pattern, bool exclusive_access, bool is_mutate,
+                                                         uint32_t num_needed) {
+        std::shared_lock l(m_rwlock);
+        return _get_contigoous_keys(pattern, exclusive_access, is_mutate, num_needed);
+    }
+
+    std::vector< key_info_ptr< K > > get_keys(KeyPattern pattern, uint32_t n, bool is_mutate, bool exclusive_access) {
+        std::vector< key_info_ptr< K > > kis;
         kis.reserve(n);
 
         std::shared_lock l(m_rwlock);
         for (auto i = 0u; i < n; i++) {
-            kis.emplace_back(_get_key(pattern, mutating_key_ok));
+            kis.emplace_back(key_info_ptr(_get_key(pattern, exclusive_access), is_mutate));
         }
         return kis;
     }
 
-    void put_key(key_info< K >* ki) {
+    void put_key(key_info_ptr< K >& kip) {
         std::unique_lock l(m_rwlock);
-        m_data_set.insert(ki);
+        m_data_set.insert(kip.m_ki);
     }
 
-    void free_key(key_info< K >* ki) {
+    void remove_key(key_info_ptr< K >& kip) {
         std::unique_lock l(m_rwlock);
-        m_data_set.erase(ki);
-
-        assert(m_used_slots[ki->m_slot_num]);
-        ki->mutation_completed();
-
-        m_used_slots[ki->m_slot_num] = false;
-        if (++m_ndirty >= compact_trigger_limit()) {
-            _compact();
-        }
+        m_data_set.erase(kip.m_ki);
+        kip->mark_freed();
     }
 
-    auto find_key(key_info< K >* const& ki) {
+    auto find_key(const key_info_ptr< K >& kip) {
         std::shared_lock l(m_rwlock);
-        return m_data_set.find(ki);
+        return m_data_set.find(kip.m_ki);
     }
+
+    friend struct key_info_ptr< K >;
 
 private:
+    void free_key(key_info< K >* ki) {
+        std::unique_lock l(m_rwlock);
+        _free_key(ki);
+    }
+
     key_info< K >* _generate_key(KeyPattern gen_pattern) {
         auto slot_num = m_keys.size();
 
@@ -190,19 +255,11 @@ private:
         return m_keys.back().get();
     }
 
-    key_info< K >* _get_key(KeyPattern pattern, bool mutating_key_ok) {
+    key_info< K >* _get_key(KeyPattern pattern, bool is_mutate, bool exclusive_access) {
         assert((pattern == SEQUENTIAL) || (pattern == UNI_RANDOM) || (pattern == PSEUDO_RANDOM));
 
         int32_t        start_slot = 0;
         key_info< K >* ki = nullptr;
-
-#if 0
-        if (pattern == SEQUENTIAL) {
-            start_slot = m_last_read_slots[pattern].load(std::memory_order_acquire);
-        } else if (pattern == UNI_RANDOM) {
-            start_slot = rand() % m_keys.size();
-        }
-#endif
 
         typename std::set< key_info< K >*, compare_key_info< K > >::iterator it;
         if (pattern == SEQUENTIAL) {
@@ -215,41 +272,51 @@ private:
         auto cur_slot = start_slot;
 
         do {
-            cur_slot = _get_next_slot(cur_slot, pattern, it);
+            bool rotated;
+            cur_slot = _get_next_slot(cur_slot, pattern, it, &rotated);
 
-            if (_can_use_for_get(cur_slot, mutating_key_ok)) {
+            if (_can_use_for_get(cur_slot)) {
                 ki = m_keys[cur_slot].get();
+                if (exclusive_access) { ki->mark_exclusive(); }
                 m_last_read_slots[pattern].store(cur_slot, std::memory_order_release);
                 break;
             }
         } while (cur_slot != start_slot);
 
         return ki;
+    }
 
-#if 0
-        auto cur_slot = start_slot + 1;
-        auto i = 0;
+    std::vector< key_info_ptr< K > > _get_contigoous_keys(KeyPattern first_key_pattern, bool exclusive_access,
+                                                          bool is_mutate, uint32_t num_needed) {
+        assert((first_key_pattern == SEQUENTIAL) || (first_key_pattern == UNI_RANDOM) ||
+               (first_key_pattern == PSEUDO_RANDOM));
 
-    retry:
-        if (cur_slot == start_slot) { // We came one full circle and no default key
-            return ki;
-        }
+        std::vector< key_info_ptr < K > > kis;
+        kis.reserve(num_needed);
 
-        // If the slot is freed or if we are not ok in picking a mutating key, move on to next one.
-        if ((!m_used_slots[cur_slot]) || m_keys[cur_slot]->m_just_created ||
-            (!mutating_key_ok && m_keys[cur_slot]->is_mutation_ongoing())) {
-            cur_slot = m_used_slots.find_next(cur_slot);
-            if (cur_slot == (int32_t)boost::dynamic_bitset<>::npos) {
-                cur_slot = 0;
-                goto retry;
+        // Get the first key based on the pattern
+        auto ki = _get_key(first_key_pattern, is_mutate, exclusive_access);
+        if (ki == nullptr) { return kis; }
+        kis.push_back(key_info_ptr(this, ki, is_mutate));
+
+        // Subsequent keys cannot use given pattern, but stricly based on hte data_map sorted order
+        auto it = m_data_set.find(ki);
+        assert(it != m_data_set.end());
+        ++it;
+
+        while ((it != m_data_set.end()) && (num_needed < kis.size())) {
+            ki = *it;
+            if (_can_use_for_get(ki->m_slot_num)) {
+                if (exclusive_access) { ki->mark_exclusive(); }
+                kis.push_back(key_info_ptr(this, ki, is_mutate));
+            } else {
+                // Unable to use for get, so it breaks contiguity.
+                break;
             }
         }
 
-        ki = m_keys[cur_slot].get();
-
-        m_last_read_slots[pattern].store(cur_slot, std::memory_order_release);
-        return ki;
-#endif
+        m_last_read_slots[first_key_pattern].store(ki->m_slot_num, std::memory_order_release);
+        return kis;
     }
 
     K* _get_last_gen_key(KeyPattern pattern) {
@@ -264,25 +331,36 @@ private:
         m_last_gen_slots[pattern].store(slot, std::memory_order_relaxed);
     }
 
-    int32_t _get_next_slot(int32_t cur_slot, KeyPattern pattern, auto& it) {
+    int32_t _get_next_slot(int32_t cur_slot, KeyPattern pattern, auto& it, bool *rotated) {
+        *rotated = false;
         if (pattern == SEQUENTIAL) {
             ++it;
             if (it == m_data_set.end()) {
                 it = m_data_set.begin();
+                *rotated = true;
             }
             return (*it)->m_slot_num;
         } else {
             cur_slot = m_used_slots.find_next(cur_slot);
             if (cur_slot == (int32_t)boost::dynamic_bitset<>::npos) {
                 cur_slot = m_used_slots.find_first();
+                *rotated = true;
             }
             return cur_slot;
         }
     }
 
-    bool _can_use_for_get(int32_t slot, bool mutating_key_ok) {
-        return (m_used_slots[slot] && !m_keys[slot]->m_just_created &&
-                (!m_keys[slot]->is_mutation_ongoing() || mutating_key_ok));
+    bool _can_use_for_get(int32_t slot) {
+        return (m_used_slots[slot] && !m_keys[slot]->is_exclusive());
+    }
+
+    void _free_key(key_info< K >* ki) {
+        assert(m_used_slots[ki->m_slot_num]);
+
+        m_used_slots[ki->m_slot_num] = false;
+        if (++m_ndirty >= (int32_t)compact_trigger_limit()) {
+            _compact();
+        }
     }
 
     uint32_t _compact() {
@@ -309,7 +387,7 @@ private:
             m_used_slots.resize(left_ind);
             m_keys.resize(left_ind);
 
-            assert(m_ndirty >= n_gcd);
+            assert(m_ndirty >= (int32_t)n_gcd);
             m_ndirty -= n_gcd;
         }
 
@@ -337,6 +415,13 @@ private:
     std::array< std::atomic< int32_t >, KEY_PATTERN_SENTINEL > m_last_gen_slots;
     std::array< std::atomic< int32_t >, KEY_PATTERN_SENTINEL > m_last_read_slots;
 };
+
+template< typename K>
+key_info_ptr< K >::~key_info_ptr() {
+    bool need_to_free = (m_is_mutate ? m_ki->mutation_completed() : m_ki->read_completed());
+    if (need_to_free) { m_registry->free_key(m_ki); }
+}
+
 } // namespace loadgen
 } // namespace homeds
 #endif // HOMESTORE_KEYSET_HPP
