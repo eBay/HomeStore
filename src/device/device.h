@@ -269,7 +269,7 @@ public:
     PhysicalDev(DeviceManager* mgr, const std::string& devname, int const oflags, std::shared_ptr< iomgr::ioMgr > iomgr,
                 homeio::comp_callback& cb, boost::uuids::uuid& uuid, uint32_t dev_num, uint64_t dev_offset,
                 uint32_t is_file, bool is_init, uint64_t dm_info_size, bool* is_inited);
-    ~PhysicalDev() = default;
+    ~PhysicalDev(); 
 
     void     update(uint32_t dev_num, uint64_t dev_offset, uint32_t first_chunk_id);
     void     attach_superblock_chunk(PhysicalDevChunk* chunk);

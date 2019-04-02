@@ -43,6 +43,9 @@ ssize_t pwritev(int fd, const struct iovec* iov, int iovcnt, off_t offset) {
 static std::atomic< uint64_t > glob_phys_dev_offset(0);
 static std::atomic< uint32_t > glob_phys_dev_ids(0);
 
+PhysicalDev::~PhysicalDev() {
+    free(m_super_blk);  
+}
 void PhysicalDev::update(uint32_t dev_num, uint64_t dev_offset, uint32_t first_chunk_id) {
 
     assert(m_info_blk.dev_num == INVALID_DEV_ID);

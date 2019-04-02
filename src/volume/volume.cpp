@@ -542,10 +542,10 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
 
 /* Just create single block in memory, not on physical device and not in cache */
 void Volume::alloc_single_block_in_mem() {
-    BlkId* out_blkid = new BlkId(0);
+    BlkId out_blkid(0);
     // Create an object for the buffer
     m_only_in_mem_buff = BlkBuffer::make_object();
-    m_only_in_mem_buff->set_key(*out_blkid);
+    m_only_in_mem_buff->set_key(out_blkid);
 
     // Create a new block of memory for the blocks requested and set the memvec pointer to that
     uint8_t* ptr;
