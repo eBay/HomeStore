@@ -168,7 +168,7 @@ public:
 
 private:
     void init_if_needed() {
-        if (unlikely(m_thr_stats.get() == nullptr)) {
+        if (hs_unlikely(m_thr_stats.get() == nullptr)) {
             m_thr_stats.reset(new per_thread_stats(m_keys));
         }
     }

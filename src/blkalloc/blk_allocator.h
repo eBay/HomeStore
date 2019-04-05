@@ -64,29 +64,29 @@ public:
     }
 };
 
-typedef enum {
+enum BlkAllocStatus {
     BLK_ALLOC_NONE = 0,
     BLK_ALLOC_SUCCESS = 1 << 0,   // Success
     BLK_ALLOC_FAILED = 1 << 1,   // Failed
     BLK_ALLOC_REQMORE = 1 << 2,   // Indicate that we need more
     BLK_ALLOC_SPACEFULL = 1 << 3,
-    BLK_ALLOC_INVALID_DEV = 1 << 4,
-} BlkAllocStatus;
+    BLK_ALLOC_INVALID_DEV = 1 << 4
+};
 
-typedef enum {
+enum BlkOpStatus {
     BLK_OP_NONE = 0,
     BLK_OP_SUCCESS = 1 << 0,   // Success
     BLK_OP_FAILED = 1 << 1,   // Failed
     BLK_OP_SPACEFULL = 1 << 2,
-    BLK_OP_PARTIAL_FAILED = 1 << 3,
-} BlkOpStatus;
+    BLK_OP_PARTIAL_FAILED = 1 << 3
+};
 
-typedef enum {
+enum BlkAllocatorState {
     BLK_ALLOCATOR_DONE = 0,
     BLK_ALLOCATOR_WAIT_ALLOC = 1,
     BLK_ALLOCATOR_ALLOCATING = 2,
-    BLK_ALLOCATOR_EXITING = 3,
-} BlkAllocatorState;
+    BLK_ALLOCATOR_EXITING = 3
+};
 
 /* Hints for various allocators */
 struct blk_alloc_hints {

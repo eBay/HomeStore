@@ -106,7 +106,7 @@ public:
     }
 
     uint8_t *allocate(uint32_t size_needed)  {
-        if (unlikely(m_impl.get() == nullptr)) {
+        if (hs_unlikely(m_impl.get() == nullptr)) {
             m_impl.reset(new FreeListAllocatorImpl< MaxListCount, Size >());
         }
 
@@ -114,7 +114,7 @@ public:
     }
 
     bool deallocate(uint8_t *mem, uint32_t size_alloced) {
-        if (unlikely(m_impl.get() == nullptr)) {
+        if (hs_unlikely(m_impl.get() == nullptr)) {
             m_impl.reset(new FreeListAllocatorImpl< MaxListCount, Size >());
         }
 

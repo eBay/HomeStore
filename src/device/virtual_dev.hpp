@@ -15,6 +15,7 @@
 #include <error/error.h>
 #include <metrics/metrics.hpp>
 #include <utility/atomic_counter.hpp>
+#include "main/homestore_header.hpp"
 
 namespace homestore {
 
@@ -347,7 +348,15 @@ public:
 
             do {
                 for (auto chunk : m_primary_pdev_chunks_list[dev_ind].chunks_in_pdev) {
+#ifdef _PRERELEASE
+                    if (auto fake_status = homestore_flip->get_test_flip<uint32_t>(
+                                                                "blk_allocation_flip", nblks, chunk->get_vdev_id())) {
+                            return (BlkAllocStatus)fake_status.get();
+                    }
+#endif
+
                     status = chunk->get_blk_allocator()->alloc(nblks, hints, out_blkid);
+
                     if (status == BLK_ALLOC_SUCCESS) {
                         picked_chunk = chunk;
                         break;
@@ -512,7 +521,7 @@ public:
             pdev->read((char*)mp.ptr(), mp.size(), primary_dev_offset, (uint8_t*)req.get());
         }
 
-        if (unlikely(get_nmirrors())) {
+        if (hs_unlikely(get_nmirrors())) {
             // If failed and we have mirrors, we can read from any one of the mirrors as well
             uint64_t primary_chunk_offset = primary_dev_offset - primary_chunk->get_start_offset();
             for (auto mchunk : m_mirror_chunks.find(primary_chunk)->second) {
@@ -559,7 +568,7 @@ public:
         req->io_start_time = Clock::now();
         pdev->readv(iov, iovcnt, size, primary_dev_offset, (uint8_t*)req.get());
 
-        if (unlikely(get_nmirrors())) {
+        if (hs_unlikely(get_nmirrors())) {
             // If failed and we have mirrors, we can read from any one of the mirrors as well
             uint64_t primary_chunk_offset = primary_dev_offset - primary_chunk->get_start_offset();
             for (auto mchunk : m_mirror_chunks.find(primary_chunk)->second) {

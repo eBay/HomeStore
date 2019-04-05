@@ -743,7 +743,7 @@ public:
 
     static uint8_t *allocate(uint32_t size_needed)  {
         uint32_t nbucket = (size_needed - 1)/MIN_NODE_SIZE + 1;
-        if (unlikely(m_impl.get() == nullptr)) {
+        if (hs_unlikely(m_impl.get() == nullptr)) {
             m_impl.reset(new FreeListAllocatorImpl< MaxListCount, Size >());
         }
 
@@ -767,7 +767,7 @@ private:
     std::vector< void * > m_allocators;
 
     static ObjectAllocator< T, CacheCount > *get_obj_allocator() {
-        if (unlikely((obj_allocator == nullptr))) {
+        if (hs_unlikely((obj_allocator == nullptr))) {
             obj_allocator = std::make_unique< ObjectAllocator< T, CacheCount > >();
         }
         return obj_allocator.get();
