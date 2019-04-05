@@ -1970,10 +1970,6 @@ protected:
     }
 
     BtreeConfig* get_config() { return &m_btree_cfg; }
-
-    void release_node(BtreeNodePtr node) {
-        intrusive_ptr_release(node.get());
-    }
 };
 
 template < btree_store_type BtreeStoreType, typename K, typename V, btree_node_type InteriorNodeType,
