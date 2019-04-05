@@ -15,7 +15,6 @@
 
 SDS_LOGGING_DECL(VMOD_VOL_MAPPING)
 
-using namespace std;
 using namespace homeds::btree;
 
 #define LBA_MASK 0xFFFFFFFFFFFF
@@ -155,7 +154,7 @@ public:
 
     // deep copy
     ValueEntry(uint64_t seqId, const BlkId& blkId, uint8_t blk_offset, uint8_t nlba,
-               const array< uint16_t, CS_ARRAY_STACK_SIZE >& carr) :
+               const std::array< uint16_t, CS_ARRAY_STACK_SIZE >& carr) :
             m_seqId(seqId),
             m_blkId(blkId),
             m_nlba(nlba),

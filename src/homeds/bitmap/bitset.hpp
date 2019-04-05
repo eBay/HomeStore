@@ -194,11 +194,11 @@ public:
 
 private:
     Bitword64 *get_word(uint64_t b) {
-        return (unlikely(b >= m_nbits)) ? nullptr : &m_words[b / Bitword64::size()];
+        return (hs_unlikely(b >= m_nbits)) ? nullptr : &m_words[b / Bitword64::size()];
     }
 
     const Bitword64 *get_word_const(uint64_t b) const {
-        return (unlikely(b >= m_nbits)) ? nullptr : &m_words[b / Bitword64::size()];
+        return (hs_unlikely(b >= m_nbits)) ? nullptr : &m_words[b / Bitword64::size()];
     }
 
     int get_word_offset(uint64_t b) const {

@@ -1,0 +1,15 @@
+{
+  "keyspecs": {
+    "64bitNumberKey": {
+      "DataType": "uint64"
+    },
+    "StringKey": {
+      "DataType" : "string",
+      "SizeRange": [1, 64]
+    },
+
+    "RangeNumberKey": {
+      "DataType": "uint64",
+    },
+  }
+}

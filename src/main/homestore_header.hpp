@@ -4,6 +4,10 @@
 #include <boost/uuid/uuid.hpp>
 #include <string>
 
+#ifdef _PRERELEASE
+#include <flip/flip.hpp>
+#endif
+
 namespace homeds {
 struct blob {
     uint8_t *bytes;
@@ -24,6 +28,18 @@ enum io_flag {
 struct dev_info {
     std::string dev_names;
 };
+
+#ifdef _PRERELEASE
+class HomeStoreFlip {
+public:
+    static flip::Flip *instance() {
+        static flip::Flip inst;
+        return &inst;
+    }
+};
+
+#define homestore_flip HomeStoreFlip::instance()
+#endif
 }
 
 #endif
