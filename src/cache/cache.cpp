@@ -169,6 +169,11 @@ Cache<K>::Cache(uint64_t max_cache_size, uint32_t avg_size_per_entry) :
         IntrusiveCache<K, CacheBuffer<K> >::IntrusiveCache(max_cache_size, avg_size_per_entry) {
 }
 
+template <typename K> 
+Cache<K>::~Cache() {
+
+}
+
 template <typename K>
 bool Cache<K>::upsert(const K &k, const homeds::blob &b, boost::intrusive_ptr< CacheBuffer<K> > *out_smart_buf) {
     // TODO: Not supported yet

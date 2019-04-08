@@ -27,7 +27,10 @@ HomeBlks::HomeBlks(const init_params& cfg) :
         m_vdev_failed(false),
         m_size_avail(0),
         m_scan_cnt(0),
-        m_init_failed(false) {
+        m_init_failed(false),
+        m_shutdown(false),
+        m_devices_added(false),
+        m_init_finished(false) {
 
     _instance = this;
     /* set the homestore config parameters */
@@ -51,6 +54,7 @@ HomeBlks::HomeBlks(const init_params& cfg) :
 
     m_out_params.max_io_size = VOL_MAX_IO_SIZE;
     int ret = posix_memalign((void**)&m_cfg_sb, HomeStoreConfig::align_size, VOL_SB_SIZE);
+    m_cfg_sb->flags = 0;
     assert(!ret);
 
     /* create cache */
@@ -67,17 +71,26 @@ HomeBlks::HomeBlks(const init_params& cfg) :
 std::error_condition HomeBlks::write(const VolumePtr& vol, uint64_t lba, uint8_t* buf, uint32_t nblks,
                                      const vol_interface_req_ptr& req) {
     assert(m_rdy);
+    if (is_shutdown()) {
+        return std::make_error_condition(std::errc::device_or_resource_busy);
+    }
     return (vol->write(lba, buf, nblks, req));
 }
 
 std::error_condition HomeBlks::read(const VolumePtr& vol, uint64_t lba, int nblks, const vol_interface_req_ptr& req) {
     assert(m_rdy);
+    if (is_shutdown()) {
+        return std::make_error_condition(std::errc::device_or_resource_busy);
+    }
     return (vol->read(lba, nblks, req, false));
 }
 
 std::error_condition HomeBlks::sync_read(const VolumePtr& vol, uint64_t lba, int nblks,
                                          const vol_interface_req_ptr& req) {
     assert(m_rdy);
+    if (is_shutdown()) {
+        return std::make_error_condition(std::errc::device_or_resource_busy);
+    }
     return (vol->read(lba, nblks, req, true));
 }
 
@@ -135,7 +148,6 @@ std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
 
     // remove it from the map;
     m_volume_map.erase(it);
-    //LOGINFO("OK3 {}, use_cnt: {}", __FUNCTION__, it->second.use_count());
     }
     // vol sb should be removed after all blks(data blk and btree blk) have been freed.
     
@@ -305,6 +317,7 @@ void HomeBlks::config_super_block_init(BlkId& bid) {
     m_cfg_sb->version = VOL_SB_VERSION;
     m_cfg_sb->magic = VOL_SB_MAGIC;
     m_cfg_sb->boot_cnt = 0;
+    m_cfg_sb->flags = 0;
     config_super_block_write(false);
 }
 
@@ -613,14 +626,49 @@ uint64_t HomeBlks::get_boot_cnt() {
     return (uint16_t) m_cfg_sb->boot_cnt; 
 }
 
+// 
+// Handle the race between shutdown therad and init thread;
+// 1. HomeStore starts init
+// 2. AM send shutdown request immediately
+// 3. Init switched out after is_shutdown() return false;
+// 4. Shutdown thread set m_shutdown to true;
+//    and found nothing needs to be freed since init thread hasn't finished yet so shutdown thread completes;
+// 5. Init thread comes back and init things out with all the memory leaked since shutdown thread has already finished;
+//
 void HomeBlks::init_thread() {
     std::error_condition error = no_error;
     try {
         bool init = m_cfg.disk_init;
-
         /* attach physical devices */
         add_devices();
+        m_devices_added = true;
+        m_cv.notify_all();
 
+        // check m_cfg_sb.flags and set m_shutdown if necessary
+        m_vol_lock.lock();
+        if ((m_cfg_sb->flags & HOMEBLKS_SB_FLAGS_SHUTDOWN)) {
+            m_shutdown = true;
+        }
+        m_vol_lock.unlock();
+
+        // 
+        // If shutdown is set:
+        // 1. kick off shutdown procedure
+        // 2. log an alert
+        //
+        if (is_shutdown()) {
+            // no need to any init further, so mark it as true;
+            m_init_finished = true;
+            // shutdown thread could be waiting on this; 
+            m_cv.notify_all();
+
+            LOGCRITICAL("Shutdown flag detected in vol config sb!");
+
+            // trigger shutdown without callback;
+            shutdown(nullptr);
+            return;
+        }
+        
         /* create blkstore if it is a first time boot */
         if (init) {
             create_blkstores();
@@ -642,7 +690,10 @@ void HomeBlks::init_thread() {
 
         /* scan volumes */
         scan_volumes();
+        m_init_finished = true;
+        m_cv.notify_all();
         return;
+        
     } catch (homestore::homestore_exception& e) {
         auto error = e.get_err();
         LOGERROR("get exception {}", error.message());
@@ -709,4 +760,154 @@ void HomeBlks::get_obj_life(sisl::HttpCallData cd) {
         j[name] = ss.str();
     });
     hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, j.dump());
+}
+
+// 
+// free resources shared accross volumes
+//
+void HomeBlks::shutdown_process(shutdown_comp_callback shutdown_comp_cb, bool force) {
+    auto start = std::chrono::steady_clock::now();
+    m_vol_lock.lock();
+    while (m_volume_map.size()) {
+        for (auto & x : m_volume_map) {
+            if (x.second.use_count() == 1) {
+                LOGINFO("vol: {} ref_count successfully drops to 1. Trigger normal shutdown. ", x.second->get_name());
+                m_volume_map.erase(x.first);
+            }
+        }
+
+        if (m_volume_map.size() != 0) {
+            auto end = std::chrono::steady_clock::now();
+            auto num_seconds = std::chrono::duration_cast<std::chrono::seconds>(end - start).count();
+
+            // triger force shutdown if timeout
+            if (force || (num_seconds > SHUTDOWN_TIMEOUT_NUM_SECS)) {
+                if (force) {
+                    LOGINFO("FORCE shutdown requested!");
+                } else {
+                    LOGERROR("Shutdown timeout for {} seconds, trigger force shutdown. ", SHUTDOWN_TIMEOUT_NUM_SECS);
+                }
+                // trigger dump on debug mode
+                assert(0);
+
+                // in release mode, just forcely free 
+                // Force trigger every Volume's destructor when there 
+                // is ref_count leak for this volume instance.
+                for (auto& x : m_volume_map) {
+                    LOGERROR("Force Shutdown vol: {}, ref_cnt: {}", x.second->get_name(), x.second.use_count());
+                    x.second.get()->~Volume();       
+                }
+                
+                m_volume_map.clear();
+
+                // break the while loop to continue force shutdown
+                break;
+            }
+
+            // unlock before we go sleep
+            m_vol_lock.unlock();
+
+            // sleep for a while before we make another check;
+            std::this_thread::sleep_for(2s);
+
+            // take look before we make another check;
+            m_vol_lock.lock();
+        }
+    }
+
+    m_vol_lock.unlock();
+
+    assert(m_volume_map.size() == 0);
+ 
+    // m_cfg_sb needs to to be freed in the last, because we need to clear the shutdown flag after 
+    // shutdown is succesfully complted;
+    m_vol_lock.lock();
+    // clear the shutdown bit on disk;
+    m_cfg_sb->flags &= ~HOMEBLKS_SB_FLAGS_SHUTDOWN;
+    config_super_block_write(true);
+    // free the in-memory copy 
+    free(m_cfg_sb);
+    m_vol_lock.unlock();
+   
+    // All of volume's destructors have been called, now release shared resoruces.
+    delete m_sb_blk_store;
+    delete m_data_blk_store;
+    delete m_metadata_blk_store;
+
+    // BlkStore ::m_cache/m_wb_cache points to HomeBlks::m_cache;
+    delete m_cache;
+
+    delete m_dev_mgr; 
+
+    // Waiting for http server thread to join
+    m_http_server->stop();   
+    m_http_server.reset();
+
+    shutdown_comp_cb(true);
+}
+
+// 
+// Shutdown:
+// 1. Set persistent state of shutdown
+// 2. Start a thread to do shutdown routines;
+//
+std::error_condition HomeBlks::shutdown(shutdown_comp_callback shutdown_comp_cb, bool force) {
+    // shutdown thread should be only started once;
+    static bool started = false;
+
+    if (started) {
+        LOGINFO("shutdown thread already started;");
+        return no_error;
+    }
+    started = true;
+    
+    // Wait m_cfg_sb to be created;
+    // Otherwise there is a small window that m_cfg_sb could be null when shutdown is being triggered
+    {
+        std::unique_lock<std::mutex>   lk(m_cv_mtx);
+        if (!m_devices_added.load()) {
+            m_cv.wait(lk);
+        }
+    }
+
+    m_shutdown = true;
+    m_vol_lock.lock();
+    if (!is_shutdown()) {
+        m_cfg_sb->flags |= HOMEBLKS_SHUTDOWN;
+        config_super_block_write(true);
+    }
+    m_vol_lock.unlock();
+    
+    // 
+    // Need to wait m_init_finished to be true before we create shutdown thread because:
+    // 1. if init thread is running slower than shutdown thread, 
+    // 2. it is possible that shutdown thread compled but init thread 
+    //    is still creating resources, which would be resource leak 
+    //    after shutdown thread exits;
+    //
+    {
+        std::unique_lock<std::mutex>   lk(m_cv_mtx);
+        if (!m_init_finished.load()) {
+            m_cv.wait(lk);
+        }
+    }
+
+    // The volume destructor should be triggered automatcially when ref_cnt drops to zero;
+
+    // Sart a thread to monitor the shutdown progress, if timeout, trigger force shutdown
+    std::vector<ThreadPool::TaskFuture<void>>   task_result;
+    task_result.push_back(submit_job([this, &shutdown_comp_cb, force](){
+                this->shutdown_process(shutdown_comp_cb, force);
+                }));
+
+    for (auto& x : task_result) {
+        x.get();
+    }
+
+    return no_error;
+}
+
+// m_shutdown is used for I/O threads to check is_shutdown() without holding m_vol_lock;
+bool HomeBlks::is_shutdown() {
+    return m_shutdown.load();
 }

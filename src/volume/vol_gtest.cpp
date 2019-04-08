@@ -12,6 +12,8 @@
 #include <atomic>
 #include <string>
 #include <utility/thread_buffer.hpp>
+#include <chrono>
+#include <thread>
 extern "C" {
 #include <fcntl.h>
 #include <sys/epoll.h>
@@ -641,8 +643,29 @@ public:
        
     void delete_volumes() {
         for (uint32_t i = 0; i < vol.size(); i++) {
+            // std::move will release the ref_count in IOTest::vol and pass to HomeBlks::remove_volume
             VolInterface::get_instance()->remove_volume(VolInterface::get_instance()->get_uuid(std::move(vol[i])));   
         }
+    }
+
+    void shutdown_callback(bool success) {
+        assert(success);
+    }
+    
+    void shutdown_force(bool timeout) {
+        bool force = false;
+        // release the ref_count to volumes;
+        if (!timeout) {
+            vol.clear();
+            force = true;
+        }
+        VolInterface::get_instance()->shutdown(std::bind(&IOTest::shutdown_callback, this, std::placeholders::_1), force);
+    }
+
+    void shutdown() {
+        // release the ref_count to volumes;
+        vol.clear();
+        VolInterface::get_instance()->shutdown(std::bind(&IOTest::shutdown_callback, this, std::placeholders::_1));
     }
 };
 
@@ -658,6 +681,7 @@ TEST_F(IOTest, normal_random_io_test) {
     this->wait_cmpl();
     LOGINFO("write_cnt {}", write_cnt);
     LOGINFO("read_cnt {}", read_cnt);
+   this->shutdown();
    this->remove_files();
 }
 
@@ -729,7 +753,62 @@ TEST_F(IOTest, normal_vol_del_random_io_test) {
     this->delete_volumes();
     this->remove_files();
 }
-    
+ 
+/************ Below tests shutdown homestore. Should exit with clean shutdown. ***********/ 
+TEST_F(IOTest, force_shutdown_by_timeout_homeblks_test) {
+    /* fork a new process */
+    this->init = true;
+    /* child process */
+    this->start_homestore();
+    this->wait_cmpl();
+    LOGINFO("write_cnt {}", write_cnt);
+    LOGINFO("read_cnt {}", read_cnt);
+  
+    this->shutdown_force(true);
+    this->remove_files();
+}
+
+TEST_F(IOTest, force_shutdown_by_api_homeblks_test) {
+    /* fork a new process */
+    this->init = true;
+    /* child process */
+    this->start_homestore();
+    this->wait_cmpl();
+    LOGINFO("write_cnt {}", write_cnt);
+    LOGINFO("read_cnt {}", read_cnt);
+  
+    this->shutdown_force(false);
+    this->remove_files();
+}
+
+TEST_F(IOTest, shutdown_on_reboot_homeblks_test) {
+    /* fork a new process */
+    this->init = true;
+    /* child process */
+    // TODO: add fault injection to simulate reboot with m_cfg_sb flags set w/ shutdown bit 
+    this->start_homestore();
+    this->wait_cmpl();
+    LOGINFO("write_cnt {}", write_cnt);
+    LOGINFO("read_cnt {}", read_cnt);
+    this->remove_files();
+}
+
+TEST_F(IOTest, normal_shutdown_homeblks_test) {
+    /* fork a new process */
+    this->init = true;
+    /* child process */
+    this->start_homestore();
+    this->wait_cmpl();
+    LOGINFO("write_cnt {}", write_cnt);
+    LOGINFO("read_cnt {}", read_cnt);
+    this->shutdown();
+    this->remove_files();
+}
+
+TEST_F(IOTest, normal_shutdown_homeblks_with_incoming_io_test) {
+ 
+}
+   
 /************************* CLI options ***************************/
 
 SDS_OPTION_GROUP(test_volume, 
@@ -745,6 +824,7 @@ SDS_OPTION_GROUP(test_volume,
 SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
 
 /* it will go away once shutdown is implemented correctly */
+
 extern "C" 
 __attribute__((no_sanitize_address))
 const char* __asan_default_options() { 

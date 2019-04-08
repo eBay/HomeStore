@@ -105,7 +105,7 @@ public:
     }
 
     static void free_node(MemBtreeStore *store, boost::intrusive_ptr<MemBtreeNode> bn,
-                   std::deque<boost::intrusive_ptr<empty_writeback_req>> &dependent_req_q) {
+                   std::deque<boost::intrusive_ptr<empty_writeback_req>> &dependent_req_q, bool mem_only = false) {
         auto mbh = (mem_btree_node_header *)bn.get();
         if (mbh->refcount.decrement_testz()) {
             // TODO: Access the VariantNode area and call its destructor as well

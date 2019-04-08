@@ -63,7 +63,6 @@ SDS_LOGGING_DECL(btree_structures, btree_nodes, btree_generics)
 #define DLOGDEBUGMOD(...)    
 #define DLOGTRACEMOD(...)    
 #endif
-
 namespace homeds {
 namespace btree {
 
@@ -263,10 +262,12 @@ public:
                 free_blk_cb(val);
             }
         }
-    
-        // TODO: need to distinguish shutdown and vol delete
-        // Currently shutdown will also free the node which is not correct;
-        free_node(node, dependent_req_q);
+            
+        if (free_blk_cb) { 
+            free_node(node, dependent_req_q);
+        } else  {
+            free_node(node, dependent_req_q, true);
+        }
     }
 
     void range_put(const BtreeKey &k, const BtreeValue &v, btree_put_type put_type,
@@ -1801,11 +1802,11 @@ done:
         return n;
     }
 
-    void free_node(BtreeNodePtr& node, std::deque< boost::intrusive_ptr< btree_req_type > >& dependent_req_q) {
+    void free_node(BtreeNodePtr& node, std::deque< boost::intrusive_ptr< btree_req_type > >& dependent_req_q, bool mem_only = false) {
         LOGDEBUGMOD(btree_generics, "Free node-{}", node->get_node_id_int());
 
         COUNTER_DECREMENT_IF_ELSE(m_metrics, node->is_leaf(), btree_leaf_node_count, btree_int_node_count, 1);
-        btree_store_t::free_node(m_btree_store.get(), node, dependent_req_q);
+        btree_store_t::free_node(m_btree_store.get(), node, dependent_req_q, mem_only);
     }
 
     void write_node(BtreeNodePtr& node,
@@ -1969,13 +1970,6 @@ protected:
     }
 
     BtreeConfig* get_config() { return &m_btree_cfg; }
-
-#if 0
-    void release_node(BtreeNodePtr node)
-    {
-        node->derefNode();
-    }
-#endif
 };
 
 template < btree_store_type BtreeStoreType, typename K, typename V, btree_node_type InteriorNodeType,

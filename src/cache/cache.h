@@ -108,7 +108,7 @@ class Cache : protected IntrusiveCache< K, CacheBuffer< K > > {
 
 public:
     Cache(uint64_t max_cache_size, uint32_t avg_size_per_entry);
-
+    ~Cache();
     /* Put the raw buffer into the cache with key k. It returns whether put is successful and if so provides
      * the smart pointer of CacheBuffer. Upsert flag of false indicates if the data already exists, do not insert */
     bool insert(const K& k, const homeds::blob& b, uint32_t value_offset,

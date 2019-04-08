@@ -45,7 +45,10 @@ struct sb_blkstore_blob : blkstore_blob {
 #define VOL_SB_SIZE HomeStoreConfig::atomic_phys_page_size
 #define VOL_SB_MAGIC 0xCEEDDEEB
 /* Note: version is same for both vol config and vol sb */
-#define VOL_SB_VERSION 0x1
+#define VOL_SB_VERSION    0x1
+
+#define HOMEBLKS_SB_FLAGS_SHUTDOWN 0x00000001UL
+
 struct vol_sb_header {
     uint64_t magic;
     uint64_t version;
@@ -55,8 +58,9 @@ struct vol_sb_header {
 } __attribute((packed));
 
 struct vol_config_sb : vol_sb_header {
-    BlkId vol_list_head;
-    int   num_vols;
+    BlkId       vol_list_head;
+    int         num_vols;
+    uint32_t    flags;
 } __attribute((packed));
 
 /* If it exceeds 8k then we need to use two buffer to keep the data consistent */
@@ -75,6 +79,9 @@ struct vol_sb : vol_sb_header {
 } __attribute((packed));
 
 using namespace homeds::btree;
+#define HOMEBLKS_SHUTDOWN (HomeBlks::instance()->is_shutdown())
+
+#define SHUTDOWN_TIMEOUT_NUM_SECS              300
 
 #define BLKSTORE_BUFFER_TYPE                                                                                           \
     BtreeBuffer< MappingKey, MappingValue, btree_node_type::VAR_VALUE,                     \
@@ -104,6 +111,11 @@ class HomeBlks : public VolInterface {
     std::atomic< bool >                                                                  m_init_failed;
     out_params                                                                           m_out_params;
     std::unique_ptr< sisl::HttpServer >                                                  m_http_server;
+    std::atomic< bool >                                                                  m_shutdown;
+    std::atomic< bool >                                                                  m_devices_added;
+    std::atomic< bool >                                                                  m_init_finished;
+    std::condition_variable                                                              m_cv;
+    std::mutex                                                                           m_cv_mtx;
 
 public:
     static VolInterface* init(const init_params& cfg);
@@ -137,6 +149,8 @@ public:
     void                         config_super_block_write(bool lock);
     void                         vol_scan_cmpltd(const VolumePtr& vol, vol_state state);
     virtual void                 attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback cb) override;
+
+    virtual std::error_condition shutdown(shutdown_comp_callback shutdown_comp_cb, bool force = false) override;
 
     homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >*                     get_data_blkstore();
     homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy, BLKSTORE_BUFFER_TYPE >* get_metadata_blkstore();
@@ -172,6 +186,9 @@ private:
     bool is_ready();
     void init_thread();
     void volume_destroy();
+    bool is_shutdown();
+    void shutdown_process(shutdown_comp_callback shutdown_comp_cb, bool force);
+
 };
 } // namespace homestore
 #endif // OMSTORE_OMSTORE_HPP

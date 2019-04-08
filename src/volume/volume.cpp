@@ -166,8 +166,10 @@ Volume::vol_scan_alloc_blks() {
 }
 
 Volume::~Volume() {
+    LOGINFO("Destroying volume: {}", get_name());
     if (get_state() != DESTROYING) {
         free(m_sb);
+        delete m_map;
     } else  {
         // 
         // 1. Traverse mapping btree in post order:
@@ -176,8 +178,6 @@ Volume::~Volume() {
         // 2. Delete in-memory m_map and m_data_blkstore;
         // 3. Clean on-disk volume super block related data?
         //
-        LOGINFO("Destroying volume: {}", get_name());
-
         m_map->destroy();
     }
 }

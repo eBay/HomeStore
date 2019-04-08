@@ -44,7 +44,7 @@ public:
                                    boost::intrusive_ptr< btree_req_type > cookie, bool is_sync,
                                    boost::intrusive_ptr< btree_multinode_req > op = nullptr);
     static void         free_node(btree_store_t* store, BtreeNodePtr bn,
-                                  std::deque< boost::intrusive_ptr< btree_req_type > >& dependent_req_q);
+                                  std::deque< boost::intrusive_ptr< btree_req_type > >& dependent_req_q, bool mem_only = false);
     static void refresh_node(btree_store_t *store, BtreeNodePtr bn, bool is_write_modifiable,
                                        std::deque< boost::intrusive_ptr< btree_req_type > >* dependent_req_q);
     static void         swap_node(btree_store_t* store, BtreeNodePtr node1, BtreeNodePtr node2);

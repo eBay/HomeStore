@@ -109,6 +109,7 @@ enum vol_state {
 };
 
 typedef std::function< void(const vol_interface_req_ptr& req) > io_comp_callback;
+typedef std::function< void(bool success) > shutdown_comp_callback;
 
 struct vol_params {
     uint64_t           page_size;
@@ -193,6 +194,8 @@ public:
 
     /* AM should call it in case of recovery or reboot when homestore try to mount the existing volume */
     virtual void attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback cb) = 0;
+    
+    virtual std::error_condition shutdown(shutdown_comp_callback shutdown_comp_cb, bool force = false) = 0;
 
 #ifndef NDEBUG
     virtual void print_tree(const VolumePtr& vol) = 0;
