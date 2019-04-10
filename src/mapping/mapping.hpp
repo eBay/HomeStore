@@ -69,9 +69,9 @@ public:
     virtual int compare(const BtreeKey* input) const override {
         MappingKey* o = (MappingKey*)input;
         if (o->end() < start())
-            return 1; // no overlap - go left
+            return 1; // go left
         else if (end() < o->start())
-            return -1; // no overlap - go right
+            return -1; // go right
         else
             return 0; // overlap
     }
@@ -423,10 +423,10 @@ public:
         m_bt->query(qreq, result_kv);
     }
 
-    void process_completions(boost::intrusive_ptr< writeback_req > cookie, error_condition status) {
+    void process_completions(boost::intrusive_ptr< writeback_req > cookie, bool status) {
         boost::intrusive_ptr< volume_req > req = boost::static_pointer_cast< volume_req >(cookie);
         if (req->status == no_error) {
-            req->status = status;
+            req->status = status ? no_error : btree_write_failed;
         }
         m_comp_cb(req);
     }
@@ -748,7 +748,7 @@ private:
         MappingKey* s_in_range = (MappingKey*)param->get_input_range().get_start_key();
 
         if (param->get_sub_range().is_start_inclusive())
-            start_lba = max(s_subrange->end(), s_in_range->start());
+            start_lba = max(s_subrange->start(), s_in_range->start());
         else
             start_lba = max(s_subrange->end() + 1, s_in_range->start());
 
@@ -759,7 +759,7 @@ private:
         if (param->get_sub_range().is_end_inclusive())
             end_lba = min(e_subrange->end(), e_in_range->end());
         else
-            end_lba = min(e_subrange->end() - 1, e_in_range->end());
+            end_lba = min(e_subrange->start() - 1, e_in_range->end());
     }
 
     /** result of overlap of k1/k2 is added to replace_kv **/

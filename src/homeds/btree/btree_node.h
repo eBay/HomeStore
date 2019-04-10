@@ -17,6 +17,14 @@ namespace homeds { namespace btree {
 struct transient_hdr_t {
     sisl::atomic_counter< uint16_t > upgraders;
     folly::SharedMutexReadPriority lock;
+#ifndef NDEBUG
+    int is_lock;
+#endif
+    transient_hdr_t()
+#ifndef NDEBUG
+        : is_lock(-1)
+#endif
+        {};
 };
 
 template< btree_node_type NodeType, typename K, typename V, size_t NodeSize >
@@ -57,6 +65,7 @@ public:
     void get_nth_value(int ind, BtreeValue *outval, bool copy) const;
     int compare_nth_key(const BtreeKey &cmp_key, int ind) const;
     int compare_nth_key_range(const BtreeSearchRange &range, int ind) const;
+    bool overlap_nth_key_range(const BtreeSearchRange &range, int ind) const;
     void get_edge_value(BtreeValue *outval) const;
     void set_nth_key(uint32_t ind, BtreeKey *key);
 private:
@@ -119,7 +128,7 @@ template<
         >
 class BtreeNode : public btree_store_t::HeaderType,
         sisl::ObjLifeCounter< BtreeNode<BtreeStoreType, K, V, InteriorNodeType, LeafNodeType, NodeSize, btree_req_type > > {
-private:
+public:
     transient_hdr_t m_common_header;
 
 public:
@@ -215,6 +224,7 @@ protected:
     // Compares the nth key (n=ind) with given key (cmp_key) and returns -1, 0, 1 if cmp_key <=> nth_key respectively
     int compare_nth_key(const BtreeKey &cmp_key, int ind) const;
     int compare_nth_key_range(const BtreeSearchRange &range, int ind) const;
+    bool overlap_nth_key_range(const BtreeSearchRange &range, int ind) const;
     void get_edge_value(BtreeValue *outval) const;
 };
 }}

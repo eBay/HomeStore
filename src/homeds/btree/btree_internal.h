@@ -16,25 +16,85 @@
 #include "main/homestore_header.hpp"
 #include <metrics/metrics.hpp>
 #include "homeds/utility/enum.hpp"
+#include <boost/intrusive_ptr.hpp>
+#include "homeds/utility/useful_defs.hpp"
+#include "homeds/memory/obj_allocator.hpp"
+#include <utility/atomic_counter.hpp>
+
+ENUM(btree_status_t, uint32_t, 
+    success,
+    not_found,
+    item_found,
+    closest_found,
+    closest_removed,
+    retry,
+    has_more,
+    read_failed,
+    write_failed,
+    stale_buf,
+    refresh_failed,
+    put_failed
+);
 
 //structure to track btree multinode operations on different nodes
-struct btree_multinode_req{
+#define btree_multinode_req_ptr boost::intrusive_ptr < btree_multinode_req < btree_req_type > >
+
+template <typename btree_req_type>
+struct btree_multinode_req {
     //when pending writes becomes zero and is_done is true, we can callback to upper layer
-    std::atomic<int> writes_pending;
-    bool is_done;
-    std::atomic<int> m_refcount;
+    sisl::atomic_counter<int> writes_pending;
+    sisl::atomic_counter<int> m_refcount;
+    btree_status_t status;
+    boost::intrusive_ptr< btree_req_type > cookie;
+    std::deque< boost::intrusive_ptr< btree_req_type > >dependent_req_q;
+    bool is_write_modifiable;
+    bool is_sync;
 
-    btree_multinode_req(): writes_pending(0), is_done(false), m_refcount(0) {}
+    btree_multinode_req() : writes_pending(0), m_refcount(0), status(btree_status_t::success), 
+                            cookie(nullptr), dependent_req_q(0), is_write_modifiable(false), is_sync(false) {};
 
-    friend void intrusive_ptr_add_ref(btree_multinode_req *req) {
-        req->m_refcount.fetch_add(1, std::memory_order_acquire);
-    }
-    friend void intrusive_ptr_release(btree_multinode_req *req) {
-        if (req->m_refcount.fetch_sub(1, std::memory_order_acquire) == 1) {
-            delete(req);
+    btree_multinode_req(bool is_write_modifiable, bool is_sync) : writes_pending(0), m_refcount(0), 
+                                status(btree_status_t::success), cookie(nullptr), dependent_req_q(0), 
+                                is_write_modifiable(is_write_modifiable), is_sync(is_sync) {};
+
+    btree_multinode_req(boost::intrusive_ptr< btree_req_type > cookie, 
+                        boost::intrusive_ptr< btree_req_type > req, bool is_write_modifiable, bool is_sync): 
+                         writes_pending(0), m_refcount(0), status(btree_status_t::success), 
+                         cookie(cookie), dependent_req_q(0), 
+                        is_write_modifiable(is_write_modifiable), is_sync(is_sync) {
+        if (!req.get()) {
+            dependent_req_q.push_back(req);
         }
     }
+
+    template <class... Args>
+    static btree_multinode_req_ptr make_request(Args &&... args) {
+        return (btree_multinode_req_ptr
+         (homeds::ObjectAllocator< btree_multinode_req < btree_req_type > >::make_object(std::forward<Args>(args)...)));
+    }
+
+    ~btree_multinode_req() {
+    }
+
+    void cmpltd() {
+        while (!dependent_req_q.empty()) {
+            dependent_req_q.pop_back();
+        }
+    }
+
+    friend void intrusive_ptr_add_ref(btree_multinode_req *req) {
+        req->m_refcount.increment(1);
+    }
+    
+    friend void intrusive_ptr_release(btree_multinode_req *req) {
+        if (req->m_refcount.decrement_testz()) {
+            homeds::ObjectAllocator< btree_multinode_req < btree_req_type > >::deallocate(req);
+        }
+    }
+    
+    friend class homeds::ObjectAllocator< btree_req_type >;
 };
+
 struct empty_writeback_req {
     /* shouldn't contain anything */
     std::atomic<int> m_refcount;
@@ -171,14 +231,6 @@ struct bnodeid {
 
 #endif
 
-ENUM(btree_status_t, uint32_t,
-    success,
-    not_found,
-    item_found,
-    closest_found,
-    closest_removed,
-    retry
-)
 
 ENUM(btree_store_type, uint32_t,
     MEM_BTREE,
@@ -670,6 +722,10 @@ public:
                 {"node_type", "interior"}, HistogramBucketsType(ExponentialOfTwoBuckets));
         REGISTER_HISTOGRAM(btree_leaf_node_occupancy, "Leaf node occupancy", "btree_node_occupancy",
                            {"node_type", "leaf"}, HistogramBucketsType(ExponentialOfTwoBuckets));
+        REGISTER_COUNTER(btree_retry_count, "number of retries");
+        REGISTER_COUNTER(btree_write_ops_count, "number of btree operations");
+        REGISTER_COUNTER(btree_read_ops_count, "number of btree operations");
+        REGISTER_COUNTER(btree_remove_ops_count, "number of btree operations");
         REGISTER_HISTOGRAM(btree_exclusive_time_in_int_node, "Exclusive time spent (Write locked) on interior node (ns)",
                 "btree_exclusive_time_in_node", {"node_type", "interior"});
         REGISTER_HISTOGRAM(btree_exclusive_time_in_leaf_node, "Exclusive time spent (Write locked) on leaf node (ns)",

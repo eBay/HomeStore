@@ -15,7 +15,8 @@ enum homestore_error {
     no_valid_device_found = 4,
     no_spare_disk = 5,
     no_space_avail = 6,
-    init_failed = 7
+    init_failed = 7,
+    btree_write_failed = 8
 };
 
 class homstore_err_category : public std::error_category {

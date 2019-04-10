@@ -253,6 +253,7 @@ protected:
             }
         }
 
+        result.best_match = true;
         if (outval) {
             to_variant_node_const()->get(result.end_of_search_index, outval, copy_val /* copy */);
         }
@@ -356,7 +357,9 @@ protected:
         bool ret = true;
 
         if (put_type == btree_put_type::INSERT_ONLY_IF_NOT_EXISTS) {
-            if (result.found) return false;
+            if (result.found) { 
+                return false;
+            }
             to_variant_node()->insert(result.end_of_search_index, key, val);
         } else if (put_type == btree_put_type::REPLACE_ONLY_IF_EXISTS) {
             if (!result.found) return false;
@@ -473,8 +476,9 @@ protected:
 
         struct {
             bool found;
+            bool best_match;
             int  end_of_search_index;
-        } ret{false, 0};
+        } ret{false, false, 0};
         
         if ((end - start) <= 1) {
             return ret;
@@ -493,8 +497,8 @@ protected:
                 if ((range.is_simple_search() || (selection == _MultiMatchSelector::DO_NOT_CARE))) {
                     ret.end_of_search_index = mid;
                     return ret;
-                } else if ((selection == _MultiMatchSelector::LEFT_MOST) || (selection == _MultiMatchSelector::SECOND_TO_THE_LEFT) ||
-                            selection == _MultiMatchSelector::BEST_FIT_TO_CLOSEST) {
+                } else if ((selection == _MultiMatchSelector::LEFT_MOST) || (selection == _MultiMatchSelector::SECOND_TO_THE_LEFT) 
+                            || selection == _MultiMatchSelector::BEST_FIT_TO_CLOSEST) {
                     if (mid < min_ind_found) {
                         second_min = min_ind_found;
                         min_ind_found = mid;

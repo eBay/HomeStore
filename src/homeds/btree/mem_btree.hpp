@@ -31,6 +31,7 @@ struct mem_btree_node_header {
 
 #define MemBtreeNode  BtreeNode<btree_store_type::MEM_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize, empty_writeback_req>
 #define MemBtreeStore BtreeStore<btree_store_type::MEM_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize, empty_writeback_req>
+#define membtree_multinode_req_ptr boost::intrusive_ptr < btree_multinode_req < empty_writeback_req > > 
 
 template<
         typename K,
@@ -98,14 +99,15 @@ public:
         return boost::intrusive_ptr<MemBtreeNode>(bn);
     }
 
-    static void write_node(MemBtreeStore *store, boost::intrusive_ptr<MemBtreeNode> bn,
-                    std::deque<boost::intrusive_ptr<empty_writeback_req>> &dependent_req_q,
-                    boost::intrusive_ptr<empty_writeback_req> cookie, bool is_sync,
-            boost::intrusive_ptr<btree_multinode_req> op = nullptr) {
+    static btree_status_t write_node(MemBtreeStore *store, boost::intrusive_ptr<MemBtreeNode> bn,
+                                        membtree_multinode_req_ptr op) {
+        return btree_status_t::success;
     }
 
-    static void free_node(MemBtreeStore *store, boost::intrusive_ptr<MemBtreeNode> bn,
-                   std::deque<boost::intrusive_ptr<empty_writeback_req>> &dependent_req_q, bool mem_only = false) {
+
+    static void free_node(MemBtreeStore *store, boost::intrusive_ptr<MemBtreeNode> bn, 
+                            membtree_multinode_req_ptr op, bool mem_only = false) {
+    
         auto mbh = (mem_btree_node_header *)bn.get();
         if (mbh->refcount.decrement_testz()) {
             // TODO: Access the VariantNode area and call its destructor as well
@@ -148,10 +150,9 @@ public:
         free(temp);
     }
 
-    static void refresh_node(MemBtreeStore *impl, 
-                               boost::intrusive_ptr<MemBtreeNode> bn, 
-                               bool is_write_modifiable,  
-                               std::deque<boost::intrusive_ptr<empty_writeback_req>> *dependent_req_q) {
+    static btree_status_t refresh_node(MemBtreeStore *impl, boost::intrusive_ptr<MemBtreeNode> bn, 
+                    membtree_multinode_req_ptr op, bool is_write_modifiable) {
+        return btree_status_t::success;
     }
 
     static void ref_node(MemBtreeNode *bn) {

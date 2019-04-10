@@ -24,7 +24,7 @@ class BtreeNode;
 template < btree_store_type BtreeStoreType, typename K, typename V, btree_node_type InteriorNodeType,
            btree_node_type LeafNodeType, size_t NodeSize, typename btree_req_type >
 class BtreeStore {
-    typedef std::function< void(boost::intrusive_ptr< btree_req_type > cookie, std::error_condition status) >
+    typedef std::function< void(boost::intrusive_ptr< btree_req_type > cookie, btree_status_t status) >
         comp_callback;
 
 public:
@@ -39,14 +39,12 @@ public:
                                    bool&        is_new_allocation, // indicates if allocated node is same as copy_from
                                    BtreeNodePtr copy_from = nullptr);
     static BtreeNodePtr read_node(btree_store_t* store, bnodeid_t id);
-    static void         write_node(btree_store_t* store, BtreeNodePtr bn,
-                                   std::deque< boost::intrusive_ptr< btree_req_type > >& dependent_req_q,
-                                   boost::intrusive_ptr< btree_req_type > cookie, bool is_sync,
-                                   boost::intrusive_ptr< btree_multinode_req > op = nullptr);
-    static void         free_node(btree_store_t* store, BtreeNodePtr bn,
-                                  std::deque< boost::intrusive_ptr< btree_req_type > >& dependent_req_q, bool mem_only = false);
-    static void refresh_node(btree_store_t *store, BtreeNodePtr bn, bool is_write_modifiable,
-                                       std::deque< boost::intrusive_ptr< btree_req_type > >* dependent_req_q);
+
+    static btree_status_t         write_node(btree_store_t* store, BtreeNodePtr bn, btree_multinode_req_ptr op);
+    static void         free_node(btree_store_t* store, BtreeNodePtr bn, btree_multinode_req_ptr op, bool mem_only = false);
+    static btree_status_t refresh_node(btree_store_t *store, BtreeNodePtr bn, 
+                btree_multinode_req_ptr op, bool is_write_modifiable);
+
     static void         swap_node(btree_store_t* store, BtreeNodePtr node1, BtreeNodePtr node2);
     static void         copy_node(btree_store_t* store, BtreeNodePtr copy_from, BtreeNodePtr copy_to);
     static void         ref_node(btree_node_t* bn);

@@ -255,7 +255,9 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
     EmptyClass dummy_val;
     int attempt = 1;
     while (true) {
-        found = m_blk_cache->remove_any(regex, &actual_entry, &dummy_val);
+        auto status = m_blk_cache->remove_any(regex, &actual_entry, &dummy_val);
+        found = (status == btree_status_t::success);
+        
         if (found) {
             if (best_fit) {
                 if (actual_entry.get_blk_count() < hints.multiplier) {
@@ -265,6 +267,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
                     uint64_t blknum = actual_entry.get_blk_num();
                     gen_cache_entry(blknum, actual_entry.get_blk_count(), &excess_entry);
                     m_blk_cache->put(excess_entry, dummy, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
+                    found = false;
                 } else {
                     /* trigger blk allocator to populate cache */
                     if (actual_entry.get_blk_count() != nblks) {

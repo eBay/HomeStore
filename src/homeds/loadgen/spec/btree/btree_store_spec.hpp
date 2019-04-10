@@ -62,16 +62,31 @@ public:
     }
 
     virtual bool get(K& k, V* out_v) override {
-        return m_bt->get(k, out_v);
+        auto status = m_bt->get(k, out_v);
+        if (status == btree_status_t::success) {
+            return true;
+        } else {
+            return false;
+        }
     }
 
     virtual bool remove(K& k, V* removed_v = nullptr) override {
-        return m_bt->remove(k, removed_v);
+        auto status = m_bt->remove(k, removed_v);
+        if (status == btree_status_t::success) {
+            return true;
+        } else {
+            return false;
+        }
     }
 
     virtual bool remove_any(K& start_key, bool start_incl, K& end_key, bool end_incl, K *out_key, V* out_val) override {
         BtreeSearchRange range(start_key, start_incl, end_key, end_incl);
-        return m_bt->remove_any(range, out_key, out_val);
+        auto status = m_bt->remove_any(range, out_key, out_val);
+        if (status == btree_status_t::success) {
+            return true;
+        } else {
+            return false;
+        }
     }
 
     virtual uint32_t query(K& start_key, bool start_incl, K& end_key, bool end_incl, uint32_t batch_size,
@@ -86,7 +101,14 @@ public:
 
         bool has_more = false;
         do {
-            has_more = m_bt->query(qreq, values);
+            auto status = m_bt->query(qreq, values);
+            
+            if (status == btree_status_t::success) {
+                has_more = true;
+            } else {
+                has_more = false;
+            }
+
             for (auto &val : values) {
                 bool need_more = foreach_cb(val.first, val.second, cb_context);
                 if (!need_more) { return result_count; }

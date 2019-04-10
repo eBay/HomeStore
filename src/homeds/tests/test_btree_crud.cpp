@@ -373,24 +373,25 @@ public:
     void put_nth_entry(uint32_t i) {
         auto it = m_create_map.find(m_entries[i]);
         assert(it != m_create_map.end());
-        m_bt->put(*m_entries[i], it->second, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
+        auto ret = m_bt->put(*m_entries[i], it->second, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
+        assert(ret == btree_status_t::success);
     }
 
     void get_nth_entry(uint32_t i) {
         TestSimpleValue v;
-        bool ret = m_bt->get(*m_entries[i], &v);
-        EXPECT_EQ(ret, true);
+        auto ret = m_bt->get(*m_entries[i], &v);
+        EXPECT_EQ(ret, btree_status_t::success);
         EXPECT_EQ(m_create_map.find(m_entries[i])->second, v);
     }
 
     void delete_nth_entry(uint32_t i) {
         TestSimpleValue v;
-        bool ret = m_bt->remove(*m_entries[i], &v);
-        if(ret==false){
+        auto ret = m_bt->remove(*m_entries[i], &v);
+        if(ret != btree_status_t::success) {
             m_bt->print_tree();
             assert(0);
         }
-        EXPECT_EQ(ret, true);
+        EXPECT_EQ(ret, btree_status_t::success);
         EXPECT_EQ(m_create_map.find(m_entries[i])->second, v);
     }
 
@@ -453,7 +454,12 @@ public:
 
         bool has_more = false;
         do {
-            has_more = test->m_bt->query(qreq, values);
+            auto status = test->m_bt->query(qreq, values);
+            if (status == btree_status_t::has_more) {
+                has_more = true;
+            } else {
+                has_more = false;
+            }
             for (auto &val : values) {
                 auto kp = test->m_entries[cmp_ind];
                 ASSERT_EQ(val.first, *kp);

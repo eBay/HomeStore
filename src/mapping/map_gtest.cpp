@@ -352,8 +352,9 @@ public:
             if (kv.second.is_valid()) {
                 kv.second.get_array().get(0, ve, false);
                 bst = ve.get_blkId().get_id() + ve.get_blk_offset();
-            } else
+            } else {
                 is_invalid = true;
+            }
             while (st <= kv.first.end() && m_blk_id_arr[st] != -1) {
                 if (is_invalid || bst != m_blk_id_arr[st]) {
                     m_map->print_tree();
