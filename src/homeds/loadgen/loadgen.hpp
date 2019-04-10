@@ -44,6 +44,9 @@ public:
         });
     }
 
+    void reset_pattern(KeyPattern key_pattern, int index=0){
+        _reset_pattern(key_pattern,index);
+    }
     void insert_new(KeyPattern key_pattern, ValuePattern value_pattern,
                     store_error_cb_t error_cb = handle_generic_error, bool expected_success = true) {
         insert(key_pattern, value_pattern, error_cb, expected_success, true);
@@ -67,6 +70,15 @@ public:
         });
     }
 
+    void update(KeyPattern key_pattern, ValuePattern value_pattern, bool exclusive_access = true, 
+                bool expected_success = true, bool valid_key = true, store_error_cb_t error_cb = handle_generic_error) {
+        this->m_outstanding.increment(1);
+        m_executor.add([=] {
+            this->_update(key_pattern, exclusive_access, value_pattern, error_cb, expected_success,valid_key);
+            this->op_done();
+        });
+    }
+
     void get_non_existing(bool expected_success) {
         get_non_existing(handle_generic_error, expected_success);
     }
@@ -84,13 +96,15 @@ public:
         });
     }
 
-    void remove(KeyPattern pattern, bool exclusive_access = true, store_error_cb_t error_cb = handle_generic_error,
-                bool expected_success = true, bool valid_key = true) {
-        this->m_outstanding.increment(1);
-        m_executor.add([=] {
-            this->_remove(pattern, exclusive_access, error_cb, expected_success, valid_key);
-            this->op_done();
-        });
+    void remove(KeyPattern pattern, bool exclusive_access = true,
+                bool expected_success = true, bool valid_key = true,
+                store_error_cb_t error_cb = handle_generic_error) {
+        this->_remove(pattern, exclusive_access, error_cb, expected_success, valid_key);
+//        this->m_outstanding.increment(1);
+//        m_executor.add([=] {
+//            this->_remove(pattern, exclusive_access, error_cb, expected_success, valid_key);
+//            this->op_done();
+//        });
     }
 
     void remove_non_existing(store_error_cb_t error_cb = handle_generic_error) {
@@ -218,7 +232,7 @@ private:
         auto value = V::gen_value(value_pattern, nullptr);
         bool success = m_store->update(kip->m_key, value);
         if (success != expected_success) {
-            error_cb(generator_op_error::store_failed, kip.m_ki, 0, nullptr,
+            error_cb(generator_op_error::store_failed, kip.m_ki, nullptr,
                      fmt::format("Update status expected {} got {}", expected_success, success));
             return;
         }
@@ -275,6 +289,10 @@ private:
             error_cb(generator_op_error::data_missing, kis[0].m_ki, nullptr,
                      fmt::format("Expecting {} keys, got {}", expected_count, actual_count));
         }
+    }
+    
+    void _reset_pattern(KeyPattern key_pattern, int index=0){
+        m_key_registry.reset_pattern(key_pattern,index);
     }
 
 private:

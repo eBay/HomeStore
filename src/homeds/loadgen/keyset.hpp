@@ -171,7 +171,7 @@ public:
     KeyRegistry() : m_invalid_ki(K::gen_key(KeyPattern::OUT_OF_BOUND, nullptr)) {
         for (auto i = 0u; i < KEY_PATTERN_SENTINEL; i++) {
             m_last_gen_slots[i].store(-1);
-            m_last_read_slots[i].store(0);
+            m_next_read_slots[i].store(0);
         }
         //_generate_key(KeyPattern::SEQUENTIAL); // Atleast generate 1 key for us to be ready for read
     }
@@ -228,7 +228,7 @@ public:
     void remove_key(key_info_ptr< K >& kip) {
         std::unique_lock l(m_rwlock);
         m_data_set.erase(kip.m_ki);
-        kip->mark_freed();
+//        kip->mark_freed();
     }
 
     auto find_key(const key_info_ptr< K >& kip) {
@@ -238,6 +238,9 @@ public:
 
     friend struct key_info_ptr< K >;
 
+    void reset_pattern(KeyPattern pattern, int index=0){
+        m_next_read_slots[pattern].store(index, std::memory_order_relaxed);
+    }
 private:
     void free_key(key_info< K >* ki) {
         std::unique_lock l(m_rwlock);
@@ -263,25 +266,24 @@ private:
 
         typename std::set< key_info< K >*, compare_key_info< K > >::iterator it;
         if (pattern == SEQUENTIAL) {
-            start_slot = m_last_read_slots[pattern].load(std::memory_order_acquire);
+            start_slot = m_next_read_slots[pattern].load(std::memory_order_acquire);
             it = m_data_set.find(m_keys[start_slot].get());
             assert(it != m_data_set.end());
         } else if (pattern == UNI_RANDOM) {
             start_slot = rand() % m_keys.size();
         }
         auto cur_slot = start_slot;
-
-        do {
-            bool rotated;
-            cur_slot = _get_next_slot(cur_slot, pattern, it, &rotated);
-
+        bool rotated=false;
+        while(rotated==false || cur_slot != start_slot) {
+            auto next_slot = _get_next_slot(cur_slot, pattern, it, &rotated);
             if (_can_use_for_get(cur_slot)) {
                 ki = m_keys[cur_slot].get();
                 if (exclusive_access) { ki->mark_exclusive(); }
-                m_last_read_slots[pattern].store(cur_slot, std::memory_order_release);
+                m_next_read_slots[pattern].store(next_slot, std::memory_order_release);
                 break;
             }
-        } while (cur_slot != start_slot);
+            cur_slot=next_slot;
+        } 
 
         return ki;
     }
@@ -315,7 +317,9 @@ private:
             }
         }
 
-        m_last_read_slots[first_key_pattern].store(ki->m_slot_num, std::memory_order_release);
+        bool rotated=false;
+        auto next_slot = _get_next_slot(ki->m_slot_num, first_key_pattern, it, &rotated);
+        m_next_read_slots[first_key_pattern].store(next_slot, std::memory_order_release);
         return kis;
     }
 
@@ -398,7 +402,7 @@ private:
     void _adjust_slot_num(int32_t old_slot, int32_t new_slot) {
         for (auto i = 0; i < KEY_PATTERN_SENTINEL; i++) {
             m_last_gen_slots[i].compare_exchange_strong(old_slot, new_slot, std::memory_order_relaxed);
-            m_last_read_slots[i].compare_exchange_strong(old_slot, new_slot, std::memory_order_relaxed);
+            m_next_read_slots[i].compare_exchange_strong(old_slot, new_slot, std::memory_order_relaxed);
         }
     }
 
@@ -413,7 +417,7 @@ private:
 
     key_info< K >                                              m_invalid_ki;
     std::array< std::atomic< int32_t >, KEY_PATTERN_SENTINEL > m_last_gen_slots;
-    std::array< std::atomic< int32_t >, KEY_PATTERN_SENTINEL > m_last_read_slots;
+    std::array< std::atomic< int32_t >, KEY_PATTERN_SENTINEL > m_next_read_slots;
 };
 
 template< typename K>

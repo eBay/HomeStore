@@ -41,7 +41,16 @@ void simple_insert_test() {
         }
     });
 
+    kvg.run_parallel([&]() {
+        // update existing first 100 documents
+        for (auto i = 0u; i < 100; i++) {
+            kvg.update(KeyPattern::SEQUENTIAL, ValuePattern::RANDOM_BYTES,false);
+        }
+    });
+
+//    kvg.reset_pattern(KeyPattern::SEQUENTIAL,0);
     kvg.run_parallel([&](){
+        
         // Get first 100 documents again and check for failure
         for (auto i = 0u; i < 100; i++) {
             kvg.get(KeyPattern::SEQUENTIAL, false /* exclusive_access */);
@@ -50,6 +59,21 @@ void simple_insert_test() {
         // Try reading nonexisting document
         for (auto i = 0u; i < 100; i++) {
             kvg.get_non_existing(false /* expected_success */);
+        }
+    });
+
+//    kvg.reset_pattern(KeyPattern::SEQUENTIAL,0);
+    kvg.run_parallel([&]() {
+        // update existing first 100 documents
+        for (auto i = 0u; i < 100; i++) {
+            kvg.remove(KeyPattern::SEQUENTIAL, true);
+        }
+    });
+
+    kvg.run_parallel([&]() {
+        // Get first 100 documents again and check for failure
+        for (auto i = 0u; i < 100; i++) {
+            kvg.get(KeyPattern::SEQUENTIAL, false /* exclusive_access */);
         }
     });
 
