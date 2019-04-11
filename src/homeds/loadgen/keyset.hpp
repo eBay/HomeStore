@@ -313,12 +313,18 @@ private:
                 kis.push_back(key_info_ptr(this, ki, is_mutate));
             } else {
                 // Unable to use for get, so it breaks contiguity.
-                break;
+                m_next_read_slots[first_key_pattern].store(ki->m_slot_num, std::memory_order_release);
+                return kis;
             }
         }
-
-        bool rotated=false;
-        auto next_slot = _get_next_slot(ki->m_slot_num, first_key_pattern, it, &rotated);
+        auto next_slot=-1;
+        if (it == m_data_set.end()) {
+            it = m_data_set.begin();
+            next_slot= (*it)->m_slot_num;
+        }else{
+            bool rotated=false;
+            next_slot = _get_next_slot(ki->m_slot_num, first_key_pattern, it, &rotated);
+        }
         m_next_read_slots[first_key_pattern].store(next_slot, std::memory_order_release);
         return kis;
     }

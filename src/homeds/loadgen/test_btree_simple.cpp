@@ -63,12 +63,12 @@ void simple_insert_test() {
     });
 
 //    kvg.reset_pattern(KeyPattern::SEQUENTIAL,0);
-    kvg.run_parallel([&]() {
-        // update existing first 100 documents
-        for (auto i = 0u; i < 100; i++) {
-            kvg.remove(KeyPattern::SEQUENTIAL, true);
-        }
-    });
+//    kvg.run_parallel([&]() {
+//        // update existing first 100 documents
+//        for (auto i = 0u; i < 100; i++) {
+//            kvg.remove(KeyPattern::SEQUENTIAL, true);
+//        }
+//    });
 
     kvg.run_parallel([&]() {
         // Get first 100 documents again and check for failure

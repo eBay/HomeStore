@@ -113,11 +113,12 @@ public:
 
     void range_query(KeyPattern pattern, uint32_t num_keys_in_range, bool exclusive_access, bool start_incl, bool end_incl,
                      store_error_cb_t error_cb = handle_generic_error) {
-        this->m_outstanding.increment(1);
-        m_executor.add([=] {
-            this->_range_query(pattern, num_keys_in_range, true, exclusive_access, start_incl, end_incl, error_cb);
-            this->op_done();
-        });
+        this->_range_query(pattern, num_keys_in_range, true, exclusive_access, start_incl, end_incl, error_cb);
+//        this->m_outstanding.increment(1);
+//        m_executor.add([=] {
+//            this->_range_query(pattern, num_keys_in_range, true, exclusive_access, start_incl, end_incl, error_cb);
+//            this->op_done();
+//        });
     }
 
     void range_query_nonexisting(store_error_cb_t error_cb = handle_generic_error) {
