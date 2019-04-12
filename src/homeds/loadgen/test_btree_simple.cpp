@@ -41,26 +41,33 @@ void simple_insert_test() {
         }
     });
 
-    kvg.run_parallel([&]() {
-        // update existing first 100 documents
-        for (auto i = 0u; i < 100; i++) {
-            kvg.update(KeyPattern::SEQUENTIAL, ValuePattern::RANDOM_BYTES,false);
+    kvg.run_parallel([&](){
+        // Do range query on different pattern
+        for (auto i = 0u; i < 1000; i++) {
+            kvg.range_query(KeyPattern::SEQUENTIAL, 28, true /* exclusive_access */, true, true);
         }
     });
+    
+//     kvg.run_parallel([&]() {
+//         // update existing first 100 documents
+//         for (auto i = 0u; i < 100; i++) {
+//             kvg.update(KeyPattern::SEQUENTIAL, ValuePattern::RANDOM_BYTES,false);
+//         }
+//     });
 
 //    kvg.reset_pattern(KeyPattern::SEQUENTIAL,0);
-    kvg.run_parallel([&](){
+//     kvg.run_parallel([&](){
         
-        // Get first 100 documents again and check for failure
-        for (auto i = 0u; i < 100; i++) {
-            kvg.get(KeyPattern::SEQUENTIAL, false /* exclusive_access */);
-        }
+//         // Get first 100 documents again and check for failure
+//         for (auto i = 0u; i < 100; i++) {
+//             kvg.get(KeyPattern::SEQUENTIAL, false /* exclusive_access */);
+//         }
 
-        // Try reading nonexisting document
-        for (auto i = 0u; i < 100; i++) {
-            kvg.get_non_existing(false /* expected_success */);
-        }
-    });
+//         // Try reading nonexisting document
+//         for (auto i = 0u; i < 100; i++) {
+//             kvg.get_non_existing(false /* expected_success */);
+//         }
+//     });
 
 //    kvg.reset_pattern(KeyPattern::SEQUENTIAL,0);
 //    kvg.run_parallel([&]() {
@@ -70,19 +77,14 @@ void simple_insert_test() {
 //        }
 //    });
 
-    kvg.run_parallel([&]() {
-        // Get first 100 documents again and check for failure
-        for (auto i = 0u; i < 100; i++) {
-            kvg.get(KeyPattern::SEQUENTIAL, false /* exclusive_access */);
-        }
-    });
+//     kvg.run_parallel([&]() {
+//         // Get first 100 documents again and check for failure
+//         for (auto i = 0u; i < 100; i++) {
+//             kvg.get(KeyPattern::SEQUENTIAL, false /* exclusive_access */);
+//         }
+//     });
 
-    kvg.run_parallel([&](){
-        // Do range query on different pattern
-        for (auto i = 0u; i < 1000; i++) {
-            kvg.range_query(KeyPattern::SEQUENTIAL, 28, true /* exclusive_access */, true, true);
-        }
-    });
+    
 }
 
 SDS_OPTIONS_ENABLE(logging)
