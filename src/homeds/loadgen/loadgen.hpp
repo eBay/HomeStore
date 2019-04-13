@@ -263,9 +263,15 @@ private:
         auto it = m_key_registry.find_key(start_incl ? kis[0] : kis[1]);
 
         auto count = m_store->query(kis[0]->m_key, start_incl, kis.back()->m_key, end_incl, 1000, nullptr,
-                                [&](const K& k, const V& v, void* context) {
+                                [&](const K& k, const V& v, bool is_success, void *context) {
                                     const key_info< K >* expected_ki = *it;
                                     ++it;
+
+                                    if (!is_success) {
+                                        error_cb(generator_op_error::store_failed, expected_ki, nullptr,
+                                                "Store reported query error");
+                                        return false;
+                                    }
 
                                     if (actual_count++ > expected_count) {
                                         error_cb(generator_op_error::order_validation_failed, expected_ki, nullptr, "");

@@ -301,12 +301,12 @@ private:
         if (ki == nullptr) { return kis; }
         kis.push_back(key_info_ptr(this, ki, is_mutate));
 
-        // Subsequent keys cannot use given pattern, but stricly based on hte data_map sorted order
+        // Subsequent keys cannot use given pattern, but stricly based on the data_map sorted order
         auto it = m_data_set.find(ki);
         assert(it != m_data_set.end());
         ++it;
 
-        while ((it != m_data_set.end()) && (num_needed < kis.size())) {
+        while ((it != m_data_set.end()) && (num_needed > kis.size())) {
             ki = *it;
             if (_can_use_for_get(ki->m_slot_num)) {
                 if (exclusive_access) { ki->mark_exclusive(); }
@@ -316,6 +316,7 @@ private:
                 m_next_read_slots[first_key_pattern].store(ki->m_slot_num, std::memory_order_release);
                 return kis;
             }
+            ++it;
         }
         auto next_slot=-1;
         if (it == m_data_set.end()) {
