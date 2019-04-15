@@ -24,11 +24,12 @@ ENUM(generator_op_error, uint32_t, no_error, store_failed, store_timeout, data_v
 template < typename K, typename V, typename Store >
 class KVGenerator {
 public:
-    KVGenerator() : m_executor(4 /* threads */, 1 /* priorities */, 20000 /* maxQueueSize */) {}
+    KVGenerator() : m_executor(4 /* threads */, 1 /* priorities */, 20000 /* maxQueueSize */) {
+        srand(time(0));
+        m_store = std::make_shared<Store >();
+    }
 
     typedef std::function< void(generator_op_error, const key_info< K >*, void*, const std::string&) > store_error_cb_t;
-
-    void register_store(const std::shared_ptr< Store >& store) { m_store = store; }
 
     static void handle_generic_error(generator_op_error err, const key_info< K >* ki, void* store_error,
                                      const std::string& err_text = "") {
@@ -63,7 +64,7 @@ public:
 
     void insert(KeyPattern key_pattern, ValuePattern value_pattern, store_error_cb_t error_cb, bool expected_success,
                 bool new_key) {
-        this->m_outstanding.increment(1);
+        this->op_start();
         m_executor.add([=] {
             this->_insert(key_pattern, value_pattern, error_cb, expected_success, new_key);
             this->op_done();
@@ -72,7 +73,7 @@ public:
 
     void update(KeyPattern key_pattern, ValuePattern value_pattern, bool exclusive_access = true, 
                 bool expected_success = true, bool valid_key = true, store_error_cb_t error_cb = handle_generic_error) {
-        this->m_outstanding.increment(1);
+        this->op_start();
         m_executor.add([=] {
             this->_update(key_pattern, exclusive_access, value_pattern, error_cb, expected_success,valid_key);
             this->op_done();
@@ -89,7 +90,7 @@ public:
 
     void get(KeyPattern pattern, bool exclusive_access = true, store_error_cb_t error_cb = handle_generic_error,
              bool expected_success = true, bool valid_key = true) {
-        this->m_outstanding.increment(1);
+        this->op_start();
         m_executor.add([=] {
             this->_get(pattern, exclusive_access, error_cb, expected_success, valid_key);
             this->op_done();
@@ -99,12 +100,11 @@ public:
     void remove(KeyPattern pattern, bool exclusive_access = true,
                 bool expected_success = true, bool valid_key = true,
                 store_error_cb_t error_cb = handle_generic_error) {
-        this->_remove(pattern, exclusive_access, error_cb, expected_success, valid_key);
-//        this->m_outstanding.increment(1);
-//        m_executor.add([=] {
-//            this->_remove(pattern, exclusive_access, error_cb, expected_success, valid_key);
-//            this->op_done();
-//        });
+        this->op_start();
+        m_executor.add([=] {
+            this->_remove(pattern, exclusive_access, error_cb, expected_success, valid_key);
+            this->op_done();
+        });
     }
 
     void remove_non_existing(store_error_cb_t error_cb = handle_generic_error) {
@@ -113,16 +113,15 @@ public:
 
     void range_query(KeyPattern pattern, uint32_t num_keys_in_range, bool exclusive_access, bool start_incl, bool end_incl,
                      store_error_cb_t error_cb = handle_generic_error) {
-        this->_range_query(pattern, num_keys_in_range, true, exclusive_access, start_incl, end_incl, error_cb);
-//        this->m_outstanding.increment(1);
-//        m_executor.add([=] {
-//            this->_range_query(pattern, num_keys_in_range, true, exclusive_access, start_incl, end_incl, error_cb);
-//            this->op_done();
-//        });
+        this->op_start();
+        m_executor.add([=] {
+            this->_range_query(pattern, num_keys_in_range, true, exclusive_access, start_incl, end_incl, error_cb);
+            this->op_done();
+        });
     }
 
     void range_query_nonexisting(store_error_cb_t error_cb = handle_generic_error) {
-        this->m_outstanding.increment(1);
+        this->op_start();
         m_executor.add([=] {
             this->_range_query(KeyPattern::SEQUENTIAL, 1, false, true, error_cb);
             this->op_done();
@@ -138,9 +137,25 @@ public:
     }
 
 private:
+    static constexpr auto QUEUE_DEPTH = 64;
+    std::condition_variable m_cv;
+    std::mutex m_mutex;
+
+    void op_start() {
+        std::unique_lock< std::mutex > lk(m_mutex);
+        if(m_outstanding.test_le(QUEUE_DEPTH)) {
+            m_outstanding.increment(1);
+        }else {
+            m_cv.wait(lk);
+            m_outstanding.increment(1);
+        }
+    }
+    
     void op_done() {
         if (m_outstanding.decrement_testz()) {
             m_test_baton.post();
+        }else {
+            m_cv.notify_one();
         }
     }
 

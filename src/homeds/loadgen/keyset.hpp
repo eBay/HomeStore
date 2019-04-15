@@ -228,12 +228,20 @@ public:
     void remove_key(key_info_ptr< K >& kip) {
         std::unique_lock l(m_rwlock);
         m_data_set.erase(kip.m_ki);
-//        kip->mark_freed();
     }
 
     auto find_key(const key_info_ptr< K >& kip) {
         std::shared_lock l(m_rwlock);
         return m_data_set.find(kip.m_ki);
+    }
+    
+    //no locking done here, client is expected to get lock
+    bool has_key(key_info< K >* ki ) {
+        auto it=m_data_set.find(ki);
+        if(it==m_data_set.end())return false;
+        const key_info< K >* expected_ki = *it;
+        if(expected_ki->m_key.compare(&ki->m_key)!=0)return false;
+        return true;
     }
 
     friend struct key_info_ptr< K >;
@@ -249,9 +257,14 @@ private:
 
     key_info< K >* _generate_key(KeyPattern gen_pattern) {
         auto slot_num = m_keys.size();
-
+        key_info< K >* newKi=nullptr;
+        do{
+            if(newKi)delete newKi;
+            newKi=new key_info< K >(K::gen_key(gen_pattern, _get_last_gen_key(gen_pattern)),slot_num);
+        }while(has_key(newKi));
+        
         // Generate a key and put in the key list and mark that slot as valid.
-        m_keys.emplace_back(new key_info< K >(K::gen_key(gen_pattern, _get_last_gen_key(gen_pattern)), slot_num));
+        m_keys.emplace_back(newKi);
         m_used_slots.push_back(true);
         m_last_gen_slots[gen_pattern].store(slot_num, std::memory_order_relaxed);
 
