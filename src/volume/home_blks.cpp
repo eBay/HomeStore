@@ -54,7 +54,6 @@ HomeBlks::HomeBlks(const init_params& cfg) :
 
     m_out_params.max_io_size = VOL_MAX_IO_SIZE;
     int ret = posix_memalign((void**)&m_cfg_sb, HomeStoreConfig::align_size, VOL_SB_SIZE);
-    m_cfg_sb->flags = 0;
     assert(!ret);
 
     /* create cache */
@@ -317,7 +316,7 @@ void HomeBlks::config_super_block_init(BlkId& bid) {
     m_cfg_sb->version = VOL_SB_VERSION;
     m_cfg_sb->magic = VOL_SB_MAGIC;
     m_cfg_sb->boot_cnt = 0;
-    m_cfg_sb->flags = 0;
+    m_cfg_sb->init_flag(0);
     config_super_block_write(false);
 }
 
@@ -431,6 +430,12 @@ boost::intrusive_ptr< BlkBuffer > HomeBlks::get_valid_buf(const std::vector< boo
     return valid_buf;
 }
 
+// 
+// TODO: Do we need to handle shutdown request during scan_volumes since it may take a long to 
+// time to finish scan all the volumes? 
+//
+// Does it make sense to let consumer wait until a shutdown request can be served by HomeStore after scan_volumes?
+//
 void HomeBlks::scan_volumes() {
     auto blkid = m_cfg_sb->vol_list_head;
     bool rewrite = false;
@@ -643,36 +648,25 @@ void HomeBlks::init_thread() {
         add_devices();
         m_devices_added = true;
         m_cv.notify_all();
-
-        // check m_cfg_sb.flags and set m_shutdown if necessary
-        m_vol_lock.lock();
-        if ((m_cfg_sb->flags & HOMEBLKS_SB_FLAGS_SHUTDOWN)) {
-            m_shutdown = true;
-        }
-        m_vol_lock.unlock();
-
-        // 
-        // If shutdown is set:
-        // 1. kick off shutdown procedure
-        // 2. log an alert
-        //
-        if (is_shutdown()) {
-            // no need to any init further, so mark it as true;
-            m_init_finished = true;
-            // shutdown thread could be waiting on this; 
-            m_cv.notify_all();
-
-            LOGCRITICAL("Shutdown flag detected in vol config sb!");
-
-            // trigger shutdown without callback;
-            shutdown(nullptr);
-            return;
-        }
-        
+                
         /* create blkstore if it is a first time boot */
         if (init) {
             create_blkstores();
         }
+
+        // 
+        // Will not resume shutdown if we reboot from an un-finished shutdown procedure. 
+        //
+        {
+            std::lock_guard<std::mutex>  lg(m_vol_lock);
+            if (m_cfg_sb->test_flag(HOMEBLKS_SB_FLAGS_SHUTDOWN)) {
+                LOGCRITICAL("Shutdown flag detected in vol config sb!");
+                // clear the flag and persist to disk so that we don't log alert on next reboot;
+                m_cfg_sb->clear_flag(HOMEBLKS_SB_FLAGS_SHUTDOWN);
+                config_super_block_write(true);
+            }    
+        }
+   
 
         sisl::HttpServerConfig cfg;
         cfg.is_tls_enabled = false;
@@ -821,13 +815,15 @@ void HomeBlks::shutdown_process(shutdown_comp_callback shutdown_comp_cb, bool fo
  
     // m_cfg_sb needs to to be freed in the last, because we need to clear the shutdown flag after 
     // shutdown is succesfully complted;
-    m_vol_lock.lock();
-    // clear the shutdown bit on disk;
-    m_cfg_sb->flags &= ~HOMEBLKS_SB_FLAGS_SHUTDOWN;
-    config_super_block_write(true);
-    // free the in-memory copy 
-    free(m_cfg_sb);
-    m_vol_lock.unlock();
+    
+    { 
+        std::lock_guard<std::mutex>  lg(m_vol_lock);
+        // clear the shutdown bit on disk;
+        m_cfg_sb->clear_flag(HOMEBLKS_SB_FLAGS_SHUTDOWN);
+        config_super_block_write(true);
+        // free the in-memory copy 
+        free(m_cfg_sb);
+    }
    
     // All of volume's destructors have been called, now release shared resoruces.
     delete m_sb_blk_store;
@@ -871,12 +867,14 @@ std::error_condition HomeBlks::shutdown(shutdown_comp_callback shutdown_comp_cb,
     }
 
     m_shutdown = true;
-    m_vol_lock.lock();
-    if (!is_shutdown()) {
-        m_cfg_sb->flags |= HOMEBLKS_SHUTDOWN;
-        config_super_block_write(true);
+
+    {
+        std::lock_guard<std::mutex>  lg(m_vol_lock);
+        if (!is_shutdown()) {
+            m_cfg_sb->set_flag(HOMEBLKS_SB_FLAGS_SHUTDOWN);
+            config_super_block_write(true);
+        }
     }
-    m_vol_lock.unlock();
     
     // 
     // Need to wait m_init_finished to be true before we create shutdown thread because:
