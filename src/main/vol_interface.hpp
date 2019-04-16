@@ -163,6 +163,7 @@ class VolInterface {
     static VolInterface* _instance;
 
 public:
+    virtual ~VolInterface() {}
     static bool init(const init_params& cfg) {
         static std::once_flag flag1;
         try {
@@ -176,6 +177,7 @@ public:
     }
 
     static VolInterface* get_instance() { return _instance; }
+    static void del_instance() { delete _instance;}
 
     virtual std::error_condition write(const VolumePtr& vol, uint64_t lba, uint8_t* buf, uint32_t nblks,
                                        const vol_interface_req_ptr& req) = 0;

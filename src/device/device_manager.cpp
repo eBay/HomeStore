@@ -44,6 +44,7 @@ DeviceManager::DeviceManager(NewVDevCallback vcb,
     
     assert(m_chunk_memory != nullptr);
     assert(m_vdev_metadata_size <= MAX_CONTEXT_DATA_SZ);
+    LOGERROR("{} iomgr use_count: {}", __FUNCTION__, m_iomgr.use_count());
 }
 
 void DeviceManager::init_devices(std::vector< dev_info > &devices) {
@@ -76,11 +77,13 @@ void DeviceManager::init_devices(std::vector< dev_info > &devices) {
     m_pdev_hdr->info_offset = PDEV_INFO_BLK_OFFSET;
     m_pdev_info = (pdev_info_block *)(m_chunk_memory + m_pdev_hdr->info_offset);
 
+    LOGERROR("{} iomgr use_count: {}", __FUNCTION__, m_iomgr.use_count());
     for (auto &d : devices) {
         bool is_inited;
         std::unique_ptr< PhysicalDev > pdev = std::make_unique< PhysicalDev >(this, d.dev_names, 
                 m_open_flags, m_iomgr, m_comp_cb, m_system_uuid, m_pdev_id++, max_dev_offset, m_is_file, true,
                 m_dm_info_size, &is_inited);
+        LOGERROR("{} iomgr use_count: {}", __FUNCTION__, m_iomgr.use_count());
 
         max_dev_offset += pdev->get_size();
         auto id = pdev->get_dev_id();
@@ -100,7 +103,10 @@ DeviceManager::~DeviceManager() {
     m_pdev_info = nullptr;
     m_chunk_info = nullptr;
     m_vdev_info = nullptr;
-    m_iomgr.reset();
+    LOGERROR("{}, m_iomgr use_count {}", __FUNCTION__, m_iomgr.use_count());
+    for (auto & x : m_pdevs) {
+        //x.reset();
+    }
 }
 
 void DeviceManager::update_vb_context(uint32_t vdev_id, uint8_t *blob) {

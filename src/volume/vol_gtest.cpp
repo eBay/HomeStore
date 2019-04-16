@@ -57,7 +57,7 @@ SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write, iomgr,
 
 /**************** Common class created for all tests ***************/
 
-class test_ep : public iomgr::EndPoint {
+class test_ep : public iomgr::EndPoint { 
 public:
     test_ep(std::shared_ptr<iomgr::ioMgr> iomgr) :iomgr::EndPoint(iomgr) {
     }
@@ -129,6 +129,11 @@ public:
         print_startTime = Clock::now();
     }
     ~IOTest() {
+        delete ep;
+        LOGINFO("iomgr use_count: {}", iomgr_obj.use_count()); 
+        iomgr_obj->stop(); 
+        iomgr_obj.reset();
+        LOGINFO("1 iomgr use_count: {}", iomgr_obj.use_count());
         for (auto& x : m_vol_bm) {
             delete x;
         }
@@ -168,8 +173,9 @@ public:
         /* Don't populate the whole disks. Only 80 % of it */
         max_vol_size = (60 * max_capacity)/ (100 * max_vols);
 
-        iomgr_obj = std::make_shared<iomgr::ioMgr>(2, num_threads);
-        init_params params;
+        iomgr_obj = std::make_shared<iomgr::ioMgr>(2, num_threads); 
+        LOGINFO("OK1 iomgr_obj use_count: {}", iomgr_obj.use_count()); 
+        init_params params; 
 #if 0
         params.flag = homestore::io_flag::BUFFERED_IO;
 #else
@@ -185,6 +191,7 @@ public:
         params.disk_align_size = 4096;
         params.atomic_page_size = 4096;
         params.iomgr = iomgr_obj;
+        LOGINFO("OK2 iomgr_obj use_count: {}", iomgr_obj.use_count());
         params.init_done_cb = std::bind(&IOTest::init_done_cb, this, std::placeholders::_1, std::placeholders::_2);
         params.vol_mounted_cb = std::bind(&IOTest::vol_mounted_cb, this, std::placeholders::_1, std::placeholders::_2);
         params.vol_state_change_cb = std::bind(&IOTest::vol_state_change_cb, this, std::placeholders::_1, 
@@ -288,6 +295,7 @@ public:
         ep = new test_ep(iomgr_obj);
         iomgr_obj->add_ep(ep);
         iomgr_obj->start();
+        LOGINFO("OK4 iomgr_obj use_count: {}", iomgr_obj.use_count());
         outstanding_ios = 0;
         uint64_t temp = 1;
         [[maybe_unused]] auto wsize = write(ev_fd, &temp, sizeof(uint64_t));
@@ -304,6 +312,7 @@ public:
             iomgr_obj->fd_reschedule(fd, event);
         }
 
+        LOGINFO("OK3 iomgr_obj use_count: {}", iomgr_obj.use_count());   
         if (!verify_done) {
             verify_vols();
             return;
@@ -654,6 +663,7 @@ public:
     }
 
     void shutdown_callback(bool success) {
+        VolInterface::del_instance();
         assert(success);
     }
     

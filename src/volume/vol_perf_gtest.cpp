@@ -455,12 +455,13 @@ SDS_OPTION_GROUP(perf_test_volume,
 SDS_OPTIONS_ENABLE(logging, perf_test_volume)
 
 /* it will go away once shutdown is implemented correctly */
+#if 0
 extern "C" 
 __attribute__((no_sanitize_address))
 const char* __asan_default_options() { 
     return "detect_leaks=0"; 
 }
-
+#endif
 /************************** MAIN ********************************/
 
 /* We can run this target either by using default options which run the normal io tests or by setting different options.

@@ -44,7 +44,13 @@ static std::atomic< uint64_t > glob_phys_dev_offset(0);
 static std::atomic< uint32_t > glob_phys_dev_ids(0);
 
 PhysicalDev::~PhysicalDev() {
-    free(m_super_blk);  
+    free(m_super_blk);        
+    if (ep) {
+        delete ep;
+        ep = nullptr;
+    }
+    LOGERROR("{}, m_iomgr use_count {}", __FUNCTION__, m_iomgr.use_count());
+    //m_iomgr.reset();
 }
 void PhysicalDev::update(uint32_t dev_num, uint64_t dev_offset, uint32_t first_chunk_id) {
 

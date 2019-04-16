@@ -61,8 +61,12 @@ HomeBlks::HomeBlks(const init_params& cfg) :
     m_cache = new Cache< BlkId >(m_cfg.cache_size, m_cfg.physical_page_size);
 
     /* create device manager */
-    m_dev_mgr = new homestore::DeviceManager(new_vdev_found, sizeof(sb_blkstore_blob), cfg.iomgr,
+    LOGERROR("{}: 1a iomgr use_count: {}", __FUNCTION__, cfg.iomgr.use_count());
+    LOGERROR("{}: 1b iomgr use_count: {}", __FUNCTION__, m_cfg.iomgr.use_count());
+    m_dev_mgr = new homestore::DeviceManager(new_vdev_found, sizeof(sb_blkstore_blob), m_cfg.iomgr,
                                              virtual_dev_process_completions, m_cfg.is_file, m_cfg.system_uuid);
+    LOGERROR("{}: 2a iomgr use_count: {}", __FUNCTION__, cfg.iomgr.use_count());
+    LOGERROR("{}: 2b iomgr use_count: {}", __FUNCTION__, m_cfg.iomgr.use_count());
 
     /* start thread */
     m_thread_id = std::thread(&HomeBlks::init_thread, this);

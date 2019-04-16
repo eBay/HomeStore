@@ -46,6 +46,15 @@ DriveEndPoint::DriveEndPoint(std::shared_ptr< iomgr::ioMgr > iomgr, comp_callbac
     iomgr->add_ep(this);
 }
 
+DriveEndPoint::~DriveEndPoint() {
+    LOGINFO("entering {}", __FUNCTION__);
+    while(!iocb_list.empty()) {
+        auto t = iocb_list.top();
+        free(t);
+        iocb_list.pop();
+    }
+}
+
 int DriveEndPoint::open_dev(std::string devname, int oflags) {
     /* it doesn't need to keep track of any fds */
     return (open(devname.c_str(), oflags));
