@@ -675,7 +675,8 @@ private:
 
         BtreeNodeInfo child_info;
         auto          result = my_node->find(range, nullptr, &child_info);
-        assert(result.found || result.best_match);
+        assert(IS_VALID_INTERIOR_CHILD_INDX(result, my_node));
+        
         BtreeNodePtr  child_node;
         child_locktype = homeds::thread::LOCKTYPE_READ;
         ret = read_and_lock_child(child_info.bnode_id(), child_node, my_node, result.end_of_search_index, 
@@ -768,7 +769,7 @@ out:
 
         BtreeNodeInfo start_child_info;
         auto result = my_node->find(query_req.get_start_of_range(), nullptr, &start_child_info);
-        assert(result.found || result.best_match);
+        assert(IS_VALID_INTERIOR_CHILD_INDX(result, my_node));
 
         BtreeNodePtr child_node;
         ret = read_and_lock_child(start_child_info.bnode_id(), child_node, my_node, result.end_of_search_index, 
@@ -816,7 +817,9 @@ out:
         }
 
         auto start_ret = my_node->find(query_req.get_start_of_range(), nullptr, nullptr);
+        assert(IS_VALID_INTERIOR_CHILD_INDX(start_ret, my_node));
         auto end_ret = my_node->find(query_req.get_end_of_range(), nullptr, nullptr);
+        assert(IS_VALID_INTERIOR_CHILD_INDX(end_ret, my_node));
         bool unlocked_already = false;
         int ind = -1;
         
@@ -901,7 +904,9 @@ done:
 
         BtreeNodeId start_child_ptr, end_child_ptr;
         auto        start_ret = my_node->find(query_req.get_start_of_range(), nullptr, &start_child_ptr);
+        assert(IS_VALID_INTERIOR_CHILD_INDX(start_ret, my_node));
         auto        end_ret = my_node->find(query_req.get_end_of_range(), nullptr, &end_child_ptr);
+        assert(IS_VALID_INTERIOR_CHILD_INDX(end_ret, my_node));
 
         BtreeNodePtr child_node;
         if (start_ret.end_of_search_index == end_ret.end_of_search_index) {
@@ -1097,13 +1102,7 @@ retry:
         } else {
             auto result = my_node->find(k, nullptr, nullptr);
             end_ind = start_ind = result.end_of_search_index;
-            assert(result.found || result.best_match);//we must always find higher than key or edge in internal nodes
-
-            if (!result.found && !result.best_match) {
-                LOGERROR("item not found");
-                ret = btree_status_t::not_found;
-                goto out;
-            }
+            assert(IS_VALID_INTERIOR_CHILD_INDX(result, my_node));
         }
 
         if (start_ind > end_ind) {
@@ -1309,11 +1308,8 @@ out:
         /* range delete is not supported yet */
         // Get the childPtr for given key.
         auto result = my_node->find(range, nullptr, nullptr);
+        assert(IS_VALID_INTERIOR_CHILD_INDX(result, my_node));
         uint32_t ind = result.end_of_search_index;
-        if (!result.found && !result.best_match) {
-            unlock_node(my_node, curlock);
-            return btree_status_t::not_found;
-        }
 
         BtreeNodeInfo child_info;
         BtreeNodePtr child_node;
@@ -1702,8 +1698,9 @@ out:
         
         for (auto i = 0u; i < indices_list.size(); i++) {
             
-            if(indices_list[i] == (int)parent_node->get_total_entries())
+            if (indices_list[i] == (int)parent_node->get_total_entries()) {
                 assert(parent_node->get_edge_id().is_valid());//ensure its valid edge
+            }
                 
             parent_node->get(indices_list[i], &child_info, false /* copy */);
             merge_info m;
@@ -1728,12 +1725,19 @@ out:
         }
 
         assert(indices_list.size() > 1);
+        
+        assert(indices_list.size() == minfo.size());
+        K last_pkey;//last key of parent node
+        if (minfo[indices_list.size() - 1].parent_index != parent_node->get_total_entries()) {
+            /* If it is not edge we always preserve the last key in a given merge group of nodes.*/
+            parent_node->get_nth_key(minfo[indices_list.size() - 1].parent_index, &last_pkey, true);
+        }
 
         // Rebalance entries for each of the node and mark any node to be removed, if empty.
         auto i = 0U;
         auto j = 1U;
         auto balanced_size = m_btree_cfg.get_ideal_fill_size();
-        K last_pkey;//last key of parent node
+        int last_indx = minfo[0].parent_index;//last seen index in parent whos child was not freed
         while ((i < indices_list.size() - 1) && (j < indices_list.size())) {
             minfo[j].parent_index -= ndeleted_nodes; // Adjust the parent index for deleted nodes
 
@@ -1744,31 +1748,28 @@ out:
                     // move in internally updates edge if needed
                     ret.merged = true;
                 }
-
+                
                 if (minfo[j].node->get_total_entries() == 0) {
                     // We have removed all the entries from the next node, remove the entry in parent and move on to
                     // the next node. 
 
-                    //copy last key if it got deleted, not the edge but
-                    if(minfo[j].parent_index == parent_node->get_total_entries()-1) {
-                        parent_node->get_nth_key(minfo[j].parent_index, &last_pkey, true);
-                        minfo[j].is_last_key=true;
-                    }
-                    
                     minfo[j].freed = true;
                     parent_node->remove(minfo[j].parent_index); // remove interally updates parents edge if needed
                     minfo[i].node->set_next_bnode(minfo[j].node->get_next_bnode());
                     ndeleted_nodes++;
-                    j++;
                     ret.merged = true;//case when no entries moved but node is still empty
-                    continue;
                 }
             }
-            i = j++;
+
+            if (!minfo[j].freed) {
+                last_indx = minfo[j].parent_index;
+                /* update the sibling index */
+                i = j;
+            }
+            j++;
         }
 
         assert(!minfo[0].freed); // If we merge it, we expect the left most one has at least 1 entry.
-        int last_indx = -1;//last seen index in parent whos child was not freed
         for (auto n = 0u; n < minfo.size(); n++) {
             if (!minfo[n].freed) {
                 // lets get the last key and put in the entry into parent node
@@ -1781,22 +1782,22 @@ out:
                     minfo[n].node->get_last_key(&last_ckey);
                     parent_node->update(minfo[n].parent_index, last_ckey, ninfo);
                 }
-                last_indx = minfo[n].parent_index;
 
                 if (n == 0) {
                     continue;
-                } // skip first child commit
+                } // skip first child commit.
+
                 write_node_async(minfo[n].node, multinode_req);
-            } else {
-                if (minfo[n].is_last_key && !(parent_node->get_edge_id().is_valid())) { //last key got freed, no edges
-                    V temp_value;
-                    parent_node->get(last_indx, &temp_value, true); //save value
-                    parent_node->update(last_indx, last_pkey, temp_value); //update key keeping same value
-                } // if edge got freed, remove() from parent would have taken care of adjusting edge
             }
         }
+
+        if (last_indx != (int)parent_node->get_total_entries()) {
+            /* preserve the last key if it is not the edge */
+            V temp_value;
+            parent_node->get(last_indx, &temp_value, true);//save value
+            parent_node->update(last_indx, last_pkey, temp_value);//update key keeping same value
+        }
 #ifndef NDEBUG
-        assert(last_indx>=0);
         validate_sanity_next_child(parent_node, (uint32_t)last_indx);
 #endif
         // Its time to write the parent node and loop again to write all nodes and free freed nodes
@@ -1854,6 +1855,14 @@ out:
     void validate_sanity(std::vector< merge_info >& minfo, BtreeNodePtr parent_node, std::vector< int >& indices_list) {
         int          index_sub = indices_list[0];
         BtreeNodePtr prev = nullptr;
+        int last_indx = -1;
+
+        for (int i = 0; i < (int)indices_list.size(); i++) {
+            if (minfo[i].freed != true) {
+                last_indx = i;
+            }
+        }
+
         for (int i = 0; i < (int)indices_list.size(); i++) {
             if (minfo[i].freed != true) {
                 BtreeNodeInfo child_info;
@@ -1874,13 +1883,18 @@ out:
                 if (minfo[i].parent_index != 0) {
                     K parent_key;
                     parent_node->get_nth_key(minfo[i].parent_index - 1, &parent_key, false);
-                    assert(first_key.compare(&parent_key) > 0);
+                    assert(first_key.compare(&parent_key) >= 0);
                 }
 
                 if (minfo[i].parent_index != parent_node->get_total_entries()) {
                     K parent_key;
                     parent_node->get_nth_key(minfo[i].parent_index, &parent_key, false);
-                    assert(last_key.compare(&parent_key) == 0);
+                    if (i == last_indx) {
+                        /* we always preserve the last key */
+                        assert(last_key.compare(&parent_key) <= 0);
+                    } else {
+                        assert(last_key.compare(&parent_key) == 0);
+                    }
                 }
                 prev = minfo[i].node;
             }

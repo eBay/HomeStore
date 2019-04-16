@@ -243,17 +243,8 @@ protected:
     // Assumption: Node lock is already taken
     auto find(const BtreeSearchRange &range, BtreeKey *outkey, BtreeValue *outval, bool copy_key = true,
             bool copy_val = true) const {
-        auto result = bsearch(-1, get_total_entries(), range);
-        if (result.end_of_search_index == (int)get_total_entries()) {
-            if (has_valid_edge()) {
-                result.found = true;
-            } else {
-                assert(!result.found);
-                return result;
-            }
-        }
+        auto result = bsearch_node(range);
 
-        result.best_match = true;
         if (outval) {
             to_variant_node_const()->get(result.end_of_search_index, outval, copy_val /* copy */);
         }
@@ -288,7 +279,7 @@ protected:
         // Get the start index of the search range.
         BtreeSearchRange sr = range.extract_start_of_range();
         sr.set_selection_option(_MultiMatchSelector::LEFT_MOST);
-        auto result = bsearch(-1, get_total_entries(), sr);//doing bsearch only based on start key
+        auto result = bsearch_node(sr);//doing bsearch only based on start key
         start_ind = result.end_of_search_index;
         //at this point start index will point to exact found or element after that
         
@@ -358,6 +349,7 @@ protected:
 
         if (put_type == btree_put_type::INSERT_ONLY_IF_NOT_EXISTS) {
             if (result.found) { 
+                LOGINFO("entry already exist");
                 return false;
             }
             to_variant_node()->insert(result.end_of_search_index, key, val);
@@ -466,7 +458,70 @@ protected:
 
 protected:
     
-    /* Note: Both start and end are not included in search */
+    auto bsearch_node(const BtreeSearchRange &range) const {
+        auto ret = bsearch(-1, get_total_entries(), range);
+        auto selection = range.selection_option();
+       
+        if (ret.found) {
+            assert(ret.end_of_search_index < (int)get_total_entries() && ret.end_of_search_index > -1);
+        }
+
+        /* BEST_FIT_TO_CLOSEST is used by remove only. Remove doesn't support range_remove. Until
+         * then we have the special logic :
+         */
+        if (selection == _MultiMatchSelector::BEST_FIT_TO_CLOSEST || 
+                selection == _MultiMatchSelector::BEST_FIT_TO_CLOSEST_FOR_REMOVE) {
+            if (!ret.found) {
+                ret.found = true;
+                if (ret.end_of_search_index == (int)get_total_entries()) {
+                    if (has_valid_edge()) {
+                        ret.end_of_search_index = get_total_entries();
+                    } else {
+                        ret.end_of_search_index = get_total_entries() - 1;
+                    }
+                }
+            }
+
+            /* TODO: This code gets the second min for the interior nodes only for remove. It will be
+             * removed once we have the range_query for remove.
+             */
+             if (!is_leaf() && (selection == _MultiMatchSelector::BEST_FIT_TO_CLOSEST_FOR_REMOVE)) {
+                if (ret.end_of_search_index < (int)get_total_entries()) {
+                    if (ret.end_of_search_index == (int)(get_total_entries() - 1)) {
+                        if (has_valid_edge()) {
+                            ret.end_of_search_index = (int)get_total_entries();
+                        }
+                    } else {
+                        ++ret.end_of_search_index;
+                    }
+                }
+             }
+        }
+
+        return ret;
+    }
+
+    auto is_bsearch_left_or_right_most(const BtreeSearchRange &range) const {
+        auto selection = range.selection_option();
+        if (range.is_simple_search()) {
+            return(_MultiMatchSelector::DO_NOT_CARE);       
+        }
+        if (selection == _MultiMatchSelector::LEFT_MOST) {
+            return(_MultiMatchSelector::LEFT_MOST);
+        } else if (selection == _MultiMatchSelector::RIGHT_MOST) {
+            return(_MultiMatchSelector::RIGHT_MOST);
+        } else if (selection == _MultiMatchSelector::BEST_FIT_TO_CLOSEST) {
+            return(_MultiMatchSelector::LEFT_MOST);
+        } else if (selection == _MultiMatchSelector::BEST_FIT_TO_CLOSEST_FOR_REMOVE) {
+            return(_MultiMatchSelector::DO_NOT_CARE);
+        }
+        return(_MultiMatchSelector::DO_NOT_CARE);
+    }
+
+    /* This function does bseach between start and end where start and end are not included.
+     * It either gives left most, right most or the first found entry based on the range selection policy.
+     * If entry doesn't found then it gives the closest found entry.
+     */
     auto bsearch(int start, int end, const BtreeSearchRange &range) const {
         int mid = 0;
         int initial_end = end;
@@ -476,15 +531,14 @@ protected:
 
         struct {
             bool found;
-            bool best_match;
             int  end_of_search_index;
-        } ret{false, false, 0};
+        } ret{false, 0};
         
         if ((end - start) <= 1) {
             return ret;
         }
         
-        auto selection = range.selection_option();
+        auto selection = is_bsearch_left_or_right_most(range);
   
         while ((end - start) > 1) {
             mid = start + (end - start) / 2;
@@ -494,13 +548,11 @@ protected:
                     to_variant_node_const()->compare_nth_key_range(range, mid);
             if (x == 0) {
                 ret.found = true;
-                if ((range.is_simple_search() || (selection == _MultiMatchSelector::DO_NOT_CARE))) {
-                    ret.end_of_search_index = mid;
-                    return ret;
-                } else if ((selection == _MultiMatchSelector::LEFT_MOST) || (selection == _MultiMatchSelector::SECOND_TO_THE_LEFT) 
-                            || selection == _MultiMatchSelector::BEST_FIT_TO_CLOSEST) {
+                if (selection == _MultiMatchSelector::DO_NOT_CARE) {
+                    end = mid;
+                    break;
+                } else if (selection == _MultiMatchSelector::LEFT_MOST) {
                     if (mid < min_ind_found) {
-                        second_min = min_ind_found;
                         min_ind_found = mid;
                     }
                     end = mid;
@@ -518,36 +570,15 @@ protected:
         }
         
 
-        /* TODO: this logic should be in the caller of bsearch. It will be going to make
-         * bsearch interface more simpler.
-         */
         if (ret.found) {
             if (selection == _MultiMatchSelector::LEFT_MOST) {
                 assert(min_ind_found != INT32_MAX);
                 ret.end_of_search_index = min_ind_found;
-            } else if (selection == _MultiMatchSelector::SECOND_TO_THE_LEFT || selection == _MultiMatchSelector::BEST_FIT_TO_CLOSEST) {
-                assert(min_ind_found != INT32_MAX);
-                if (second_min == INT32_MAX) {
-                    if (((int)(min_ind_found + 1) < initial_end) &&
-                        (to_variant_node_const()->compare_nth_key_range(range, min_ind_found+1) == 0)) {
-                        // We have a min_ind_found, but not second min, so check if next is valid.
-                        ret.end_of_search_index = min_ind_found + 1;
-                    } else {
-                        ret.end_of_search_index = min_ind_found;
-                    }
-                } else {
-                    ret.end_of_search_index = second_min;
-                }
             } else if (selection == _MultiMatchSelector::RIGHT_MOST) {
                 assert(max_ind_found != INT32_MAX);
                 ret.end_of_search_index = max_ind_found;
-            }
-        } else if (selection == _MultiMatchSelector::BEST_FIT_TO_CLOSEST) {
-            ret.found = true;
-            if (has_valid_edge()) {
-                ret.end_of_search_index = end;
             } else {
-                ret.end_of_search_index = end - 1;
+                ret.end_of_search_index = end;
             }
         } else {
             ret.end_of_search_index = end;

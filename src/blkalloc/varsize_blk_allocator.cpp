@@ -103,8 +103,8 @@ void VarsizeBlkAllocator::allocator_state_machine() {
     LOGINFOMOD(varsize_blk_alloc, "Starting new blk sweep thread");
     BlkAllocSegment *allocate_seg = nullptr;
     bool allocate = false;
-    
-    while(m_region_state != BLK_ALLOCATOR_EXITING) {
+
+    while (true) {
         allocate_seg = nullptr;
         allocate = false;
         {
@@ -130,30 +130,25 @@ void VarsizeBlkAllocator::allocator_state_machine() {
                 // acquire lock
                 std::unique_lock< std::mutex > lk(m_mutex);
                 m_wait_alloc_segment = nullptr;
-                // This check is to fix a race: 
-                // 1. if m_region_state is set to EXITING at another thread, we will overwrite it which is not correct;
-                // 2. and we will enter while loop again and have m_cv.wait forever since m_cv.notify_all is already called in destructor;
-                // 3. no one will call notfify_all again since this is a shutdown procedure and all incoming I/Os are rejected;
-                if (m_region_state == BLK_ALLOCATOR_EXITING) {
-                    break;
-                } else {
+                if (m_region_state != BLK_ALLOCATOR_EXITING) {
                     m_region_state = BLK_ALLOCATOR_DONE;
                 }
                 m_cv.notify_all();
             }
-           
-            LOGTRACEMOD(varsize_blk_alloc, "Done with fill cache for segment");
+           LOGTRACEMOD(varsize_blk_alloc, "Done with fill cache for segment");
         }
     }
 }
 
 #define MAX_RETRY_CNT 1000
 
-bool VarsizeBlkAllocator::is_blk_alloced(BlkId &b) {
+bool
+VarsizeBlkAllocator::is_blk_alloced(BlkId &b) {
     return(m_alloced_bm->is_bits_set_reset(b.get_id(), b.get_nblks(), true));
 }
 
-BlkAllocStatus VarsizeBlkAllocator::alloc(BlkId &in_bid) {
+BlkAllocStatus 
+VarsizeBlkAllocator::alloc(BlkId &in_bid) {
     m_alloced_bm->set_bits(in_bid.get_id(), in_bid.get_nblks());
     m_alloc_bm->set_bits(in_bid.get_id(), in_bid.get_nblks());
     return BLK_ALLOC_SUCCESS;
@@ -192,10 +187,9 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks,
              * blocks from the btree cache.
              */
             blks_rqstd = get_best_fit_cache(blks_rqstd);
-            assert(blks_rqstd != 0);
             if (blks_rqstd == 0) {
                 /* It should never happen. It means we are running out of space */
-                break;
+                blks_rqstd = nblks - blks_alloced;
             }
             retry_cnt++;
             continue;
@@ -234,6 +228,7 @@ uint64_t VarsizeBlkAllocator::get_best_fit_cache(uint64_t blks_rqstd) {
         }
         slab_index--;
     }
+
     return 0;
 }
 
@@ -248,9 +243,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
     VarsizeAllocCacheEntry actual_entry;
 
     BtreeSearchRange regex(start_entry, true, /* start_incl */ end_entry, false, /* end incl */
-                                        (best_fit ? 
-                                         _MultiMatchSelector::BEST_FIT_TO_CLOSEST :
-                                         _MultiMatchSelector::SECOND_TO_THE_LEFT));
+                                         _MultiMatchSelector::BEST_FIT_TO_CLOSEST_FOR_REMOVE);
     
     EmptyClass dummy_val;
     int attempt = 1;
@@ -262,11 +255,8 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
             if (best_fit) {
                 if (actual_entry.get_blk_count() < hints.multiplier) {
                     /* it should be atleast equal to hints multiplier. If not then wait for cache to populate */
-                    VarsizeAllocCacheEntry excess_entry;
                     EmptyClass dummy;
-                    uint64_t blknum = actual_entry.get_blk_num();
-                    gen_cache_entry(blknum, actual_entry.get_blk_count(), &excess_entry);
-                    m_blk_cache->put(excess_entry, dummy, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
+                    m_blk_cache->put(actual_entry, dummy, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
                     found = false;
                 } else {
                     /* trigger blk allocator to populate cache */
@@ -276,7 +266,13 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
                     break;
                 }
             } else {
-                break;
+                if (actual_entry.get_blk_count() < nblks) {
+                    found = false;
+                    EmptyClass dummy;
+                    m_blk_cache->put(actual_entry, dummy, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
+                } else {
+                    break;
+                }
             }
         }
 
@@ -604,7 +600,7 @@ void VarsizeBlkAllocator::request_more_blks_wait(BlkAllocSegment *seg) {
             m_cv.notify_all();
     }
     // Wait for notification that it is done
-    while (m_region_state != BLK_ALLOCATOR_DONE) {
+    while (m_region_state != BLK_ALLOCATOR_DONE && m_region_state != BLK_ALLOCATOR_EXITING) {
         m_cv.wait(lk);
     }
 }
