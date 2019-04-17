@@ -5,6 +5,7 @@
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
 #include <thread>
+#include <random>
 #include "blk_allocator.h"
 #include "varsize_blk_allocator.h"
 
@@ -174,34 +175,26 @@ public:
         return m_total_space/m_blk_size;
     }
 
-    static void alloc_var_blocks(VarsizeBlkAllocatorTest *test, std::vector<BlkId> *out_blist) {
-        int i;
-        int alloced;
-        int iter = 0;
-
+    static void alloc_var_blocks(VarsizeBlkAllocatorTest *test,
+                    uint8_t nblks, std::vector<BlkId> *out_blist) {
         while (true) {
             BlkId bid;
             blk_alloc_hints hints;
             hints.desired_temp = 0;
 
-            BlkAllocStatus ret = test->m_varsize_allocator->alloc(1, hints, &bid);
+            BlkAllocStatus ret = test->m_varsize_allocator->alloc(nblks, hints, &bid);
             EXPECT_TRUE((ret == BLK_ALLOC_SUCCESS) || (ret == BLK_ALLOC_SPACEFULL));
             if (ret == BLK_ALLOC_SPACEFULL) {
                 break;
             }
             out_blist->push_back(bid);
-            test->m_alloced_count.fetch_add(1);
-
-            //LOGINFO("Allocated block num = {} size = {} chunk num = {}",
-            //         bid.get_id(),
-            //         bid.get_nblks(),
-            //         bid.get_chunk_num());
+            test->m_alloced_count.fetch_add(nblks);
         }
     }
 
     static void free_var_blocks(VarsizeBlkAllocatorTest *test, const std::vector<BlkId> &blist) {
         for (auto &bid : blist) {
-            test->m_varsize_allocator->free(bid);
+            ASSERT_DEATH(test->m_varsize_allocator->free(bid); , ".*Assertion.*");
         }
     }
 };
@@ -211,7 +204,7 @@ TEST_F(VarsizeBlkAllocatorTest, alloc_free_test) {
     std::vector<BlkId> blkids[NTHREADS];
 
     for (auto i = 0U; i < NTHREADS; i++) {
-        thrs[i] = new std::thread(alloc_var_blocks, this, &blkids[i]);
+        thrs[i] = new std::thread(alloc_var_blocks, this, 1, &blkids[i]);
     }
     for (auto t : thrs) {
         t->join();
@@ -223,7 +216,61 @@ TEST_F(VarsizeBlkAllocatorTest, alloc_free_test) {
     EXPECT_EQ(m_alloced_count.load(), max_blks());
     //EXPECT_EQ(m_varsize_allocator->total_free_blks(), 0);
 
-    LOGINFO("Allocated {} blocks, Allocator state: {}", m_alloced_count.load(), m_varsize_allocator->to_string());
+    LOGINFO("Allocated {} blocks, Allocator state: {}",
+            m_alloced_count.load(), m_varsize_allocator->to_string());
+
+    flip::FlipClient fclient(m_varsize_allocator->get_flip());
+    flip::FlipFrequency freq;
+    freq.set_count(1);
+    freq.set_percent(100);
+    /* Inject a no return action flip */
+    fclient.inject_noreturn_flip("modify_bitmap", {}, freq);
+
+    for (auto i = 0U; i < NTHREADS; i++) {
+        thrs[i] = new std::thread(free_var_blocks, this, blkids[i]);
+    }
+    for (auto t : thrs) {
+        t->join();
+    }
+
+    for (auto i = 0U; i < NTHREADS; i++) {
+        delete (thrs[i]);
+    }
+    LOGINFO("Freed all blocks: Allocator state: {}", m_varsize_allocator->to_string());
+    //EXPECT_EQ(m_varsize_allocator->total_free_blks(), max_blks());
+    LOGINFO("VarsizeBlkAllocator test done");
+}
+
+TEST_F(VarsizeBlkAllocatorTest, alloc_free_nblks_test) {
+    std::array<std::thread *, NTHREADS> thrs;
+    std::vector<BlkId> blkids[NTHREADS];
+
+    std::default_random_engine generator;
+    std::uniform_int_distribution<int> distribution(7, 10);
+
+    for (auto i = 0U; i < NTHREADS; i++) {
+        auto nblks = (uint8_t) distribution(generator);
+        thrs[i] = new std::thread(alloc_var_blocks, this, nblks, &blkids[i]);
+    }
+    for (auto t : thrs) {
+        t->join();
+    }
+
+    for (auto i = 0U; i < NTHREADS; i++) {
+        delete (thrs[i]);
+    }
+    EXPECT_EQ(m_alloced_count.load(), max_blks());
+    //EXPECT_EQ(m_varsize_allocator->total_free_blks(), 0);
+
+    LOGINFO("Allocated {} blocks, Allocator state: {}",
+            m_alloced_count.load(), m_varsize_allocator->to_string());
+
+    flip::FlipClient fclient(m_varsize_allocator->get_flip());
+    flip::FlipFrequency freq;
+    freq.set_count(1);
+    freq.set_percent(100);
+    /* Inject a no return action flip */
+    fclient.inject_noreturn_flip("modify_bitmap", {}, freq);
 
     for (auto i = 0U; i < NTHREADS; i++) {
         thrs[i] = new std::thread(free_var_blocks, this, blkids[i]);

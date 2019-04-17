@@ -35,6 +35,8 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig &cfg, bool init) 
     // TODO: Raise exception when blk_size > page_size or total blks is less than some number etc...
     m_alloc_bm = new homeds::Bitset(cfg.get_total_blks());
 
+    m_flip = std::make_unique<flip::Flip>();
+
 #ifndef NDEBUG
     m_alloced_bm = new homeds::Bitset(cfg.get_total_blks());
     
@@ -359,8 +361,13 @@ void VarsizeBlkAllocator::free(const BlkId &b) {
     BlkAllocPortion *portion = blknum_to_portion(b.get_id());
     BlkAllocSegment *segment = blknum_to_segment(b.get_id());
 
-    // Reset the bits
     portion->lock();
+    if (m_flip->test_flip("modify_bitmap")) {
+        LOGTRACEMOD(varsize_blk_alloc, "Flip hit in free(). Won't free blocks.");
+        m_alloc_bm->reset_bits(b.get_id(), b.get_nblks());
+    }
+
+    // Reset the bits
     assert(m_alloc_bm->is_bits_set_reset(b.get_id(), b.get_nblks(), true));
 #ifndef NDEBUG
     assert(m_alloced_bm->is_bits_set_reset(b.get_id(), b.get_nblks(), true));
