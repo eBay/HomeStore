@@ -11,6 +11,7 @@
 #include <shared_mutex>
 #include <folly/RWSpinLock.h>
 #include <iostream>
+#include <boost/dynamic_bitset.hpp>
 
 #define MAX_HASH_CODE_ENTRIES 10 // Max hash codes to store in each keyinfo structure
 

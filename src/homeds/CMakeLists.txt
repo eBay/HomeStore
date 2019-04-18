@@ -11,7 +11,7 @@ message(WARNING "BTree test disabled due to interface change.")
 
 if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
     message("Debug build")
-    add_compile_options(-D_DEBUG=1 -O0 -DDEBUG_RCU -D_PRERELEASE=1)
+    add_compile_options(-D_DEBUG=1 -O0 -DDEBUG_RCU )#-D_PRERELEASE=1
 else()
     message("Release build")
     add_compile_options(-DNDEBUG=1 -O3)

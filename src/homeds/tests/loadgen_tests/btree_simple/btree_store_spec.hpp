@@ -7,6 +7,7 @@
 
 #include "homeds/loadgen/spec/store_spec.hpp"
 #include "homeds/btree/btree.hpp"
+#include "homeds/btree/mem_btree.hpp"
 
 using namespace homeds::btree;
 

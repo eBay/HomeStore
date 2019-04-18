@@ -1,15 +1,11 @@
-#include "homeds/loadgen/loadgen.hpp"
-#include "homeds/loadgen/keyset.hpp"
-#include "homeds/loadgen/loadgen_common.hpp"
-
-using namespace homeds::loadgen;
 static uint64_t N=0;//total number of keys
 
 static uint64_t get_io_count(int percent){
     return percent*N/100;
 }
+KVG kvg;
 
-template<typename KVG>
+//template<typename KVG>
 struct BtreeTestLoadGen : public ::testing::Test {
     KVG kvg;
     
