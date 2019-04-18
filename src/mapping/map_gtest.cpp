@@ -39,6 +39,8 @@ class test_ep : public iomgr::EndPoint {
     public:
         test_ep(std::shared_ptr<iomgr::ioMgr> iomgr) :iomgr::EndPoint(iomgr) {
         }   
+        void shutdown_local() override {
+        }
         void init_local() override {
         }   
         void print_perf() override {

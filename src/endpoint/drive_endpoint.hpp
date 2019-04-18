@@ -47,6 +47,7 @@ public:
 	void async_readv(int m_sync_fd, const struct iovec *iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t *cookie);
 	void process_completions(int fd, void *cookie, int event);
 	void init_local() override;
+	void shutdown_local() override;
 	void print_perf() override {}
 
 private:

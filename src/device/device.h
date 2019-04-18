@@ -332,7 +332,7 @@ private:
     bool validate_device();
 
 private:
-    static homeio::DriveEndPoint* ep; // one instance for all physical devices
+    static homeio::DriveEndPoint*   m_ep; // one instance for all physical devices
 
     DeviceManager*                  m_mgr; // Back pointer to physical device
     int                             m_devfd;

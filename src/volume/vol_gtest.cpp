@@ -61,6 +61,8 @@ class test_ep : public iomgr::EndPoint {
 public:
     test_ep(std::shared_ptr<iomgr::ioMgr> iomgr) :iomgr::EndPoint(iomgr) {
     }
+    void shutdown_local() override {
+    }
     void init_local() override {
     }
     void print_perf() override {
@@ -129,11 +131,8 @@ public:
         print_startTime = Clock::now();
     }
     ~IOTest() {
-        delete ep;
-        LOGINFO("iomgr use_count: {}", iomgr_obj.use_count()); 
         iomgr_obj->stop(); 
         iomgr_obj.reset();
-        LOGINFO("1 iomgr use_count: {}", iomgr_obj.use_count());
         for (auto& x : m_vol_bm) {
             delete x;
         }
@@ -191,7 +190,6 @@ public:
         params.disk_align_size = 4096;
         params.atomic_page_size = 4096;
         params.iomgr = iomgr_obj;
-        LOGINFO("OK2 iomgr_obj use_count: {}", iomgr_obj.use_count());
         params.init_done_cb = std::bind(&IOTest::init_done_cb, this, std::placeholders::_1, std::placeholders::_2);
         params.vol_mounted_cb = std::bind(&IOTest::vol_mounted_cb, this, std::placeholders::_1, std::placeholders::_2);
         params.vol_state_change_cb = std::bind(&IOTest::vol_state_change_cb, this, std::placeholders::_1, 
@@ -295,7 +293,6 @@ public:
         ep = new test_ep(iomgr_obj);
         iomgr_obj->add_ep(ep);
         iomgr_obj->start();
-        LOGINFO("OK4 iomgr_obj use_count: {}", iomgr_obj.use_count());
         outstanding_ios = 0;
         uint64_t temp = 1;
         [[maybe_unused]] auto wsize = write(ev_fd, &temp, sizeof(uint64_t));
@@ -312,7 +309,6 @@ public:
             iomgr_obj->fd_reschedule(fd, event);
         }
 
-        LOGINFO("OK3 iomgr_obj use_count: {}", iomgr_obj.use_count());   
         if (!verify_done) {
             verify_vols();
             return;

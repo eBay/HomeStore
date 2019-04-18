@@ -103,10 +103,6 @@ DeviceManager::~DeviceManager() {
     m_pdev_info = nullptr;
     m_chunk_info = nullptr;
     m_vdev_info = nullptr;
-    LOGERROR("{}, m_iomgr use_count {}", __FUNCTION__, m_iomgr.use_count());
-    for (auto & x : m_pdevs) {
-        //x.reset();
-    }
 }
 
 void DeviceManager::update_vb_context(uint32_t vdev_id, uint8_t *blob) {

@@ -68,6 +68,8 @@ public:
     }
     void init_local() override {
     }
+    void shutdown_local() override {
+    }
     void print_perf() override {
     }
 };
