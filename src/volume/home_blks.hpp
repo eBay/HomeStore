@@ -48,7 +48,7 @@ struct sb_blkstore_blob : blkstore_blob {
 #define VOL_SB_VERSION    0x1
 typedef uint32_t vol_cfg_sb_flag_t;
 
-#define HOMEBLKS_SB_FLAGS_SHUTDOWN 0x00000001UL
+#define HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN 0x00000001UL
 struct vol_sb_header {
     uint64_t magic;
     uint64_t version;

@@ -659,14 +659,16 @@ void HomeBlks::init_thread() {
         //
         {
             std::lock_guard<std::mutex>  lg(m_vol_lock);
-            if (m_cfg_sb->test_flag(HOMEBLKS_SB_FLAGS_SHUTDOWN)) {
-                LOGCRITICAL("Shutdown flag detected in vol config sb!");
-                // clear the flag and persist to disk so that we don't log alert on next reboot;
-                m_cfg_sb->clear_flag(HOMEBLKS_SB_FLAGS_SHUTDOWN);
+            if (m_cfg_sb->test_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN)) {
+                LOGDEBUG("System was shutdown cleanly.");
+                // clear the flag and persist to disk, if we received a new shutdown and completed successfully, 
+                // the flag should be set again; 
+                m_cfg_sb->clear_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
                 config_super_block_write(true);
-            }    
+            } else {
+                LOGCRITICAL("System experienced sudden panic since last boot!");
+            }
         }
-   
 
         sisl::HttpServerConfig cfg;
         cfg.is_tls_enabled = false;
@@ -819,7 +821,7 @@ void HomeBlks::shutdown_process(shutdown_comp_callback shutdown_comp_cb, bool fo
     { 
         std::lock_guard<std::mutex>  lg(m_vol_lock);
         // clear the shutdown bit on disk;
-        m_cfg_sb->clear_flag(HOMEBLKS_SB_FLAGS_SHUTDOWN);
+        m_cfg_sb->set_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
         config_super_block_write(true);
         // free the in-memory copy 
         free(m_cfg_sb);
@@ -868,14 +870,6 @@ std::error_condition HomeBlks::shutdown(shutdown_comp_callback shutdown_comp_cb,
 
     m_shutdown = true;
 
-    {
-        std::lock_guard<std::mutex>  lg(m_vol_lock);
-        if (!is_shutdown()) {
-            m_cfg_sb->set_flag(HOMEBLKS_SB_FLAGS_SHUTDOWN);
-            config_super_block_write(true);
-        }
-    }
-    
     // 
     // Need to wait m_init_finished to be true before we create shutdown thread because:
     // 1. if init thread is running slower than shutdown thread, 
