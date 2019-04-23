@@ -245,6 +245,11 @@ protected:
             bool copy_val = true) const {
         auto result = bsearch_node(range);
 
+        if (result.end_of_search_index == (int)get_total_entries() && !has_valid_edge()) {
+            assert(!result.found);
+            return result;
+        }
+
         if (outval) {
             to_variant_node_const()->get(result.end_of_search_index, outval, copy_val /* copy */);
         }

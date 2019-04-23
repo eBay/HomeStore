@@ -993,18 +993,7 @@ done:
         // If the node has been made invalid (probably by mergeNodes) ask caller to start over again, but before that
         // cleanup or free this node if there is no one waiting.
         if (!my_node->is_valid_node()) {
-            if (my_node->any_upgrade_waiters()) {
-                // Still some one else is waiting, we are not the last.
-                unlock_node(my_node, homeds::thread::LOCKTYPE_WRITE);
-            } else {
-                // No else is waiting for this node and this is an invalid node, free it up.
-                assert(my_node->get_total_entries() == 0);
-                unlock_node(my_node, homeds::thread::LOCKTYPE_WRITE);
-
-                // Its ok to free after unlock, because the chain has been already cut when the node is invalidated.
-                // So no one would have entered here after the chain is cut.
-                free_node(my_node, multinode_req);
-            }
+            unlock_node(my_node, homeds::thread::LOCKTYPE_WRITE);
             ret = btree_status_t::retry;
             goto done;
         }
@@ -1777,10 +1766,12 @@ out:
 
                 if (minfo[n].parent_index == parent_node->get_total_entries()) { //edge entrys
                     parent_node->update(minfo[n].parent_index, ninfo);
-                } else {
+                } else if (minfo[n].node->get_total_entries() != 0) {
                     K last_ckey;//last key in child
                     minfo[n].node->get_last_key(&last_ckey);
                     parent_node->update(minfo[n].parent_index, last_ckey, ninfo);
+                } else {
+                    parent_node->update(minfo[n].parent_index, ninfo);
                 }
 
                 if (n == 0) {
@@ -1818,10 +1809,9 @@ out:
             }
             // free original node except first
             if (n != 0 && minfo[n].is_new_allocation) {
-                node_free_safely(minfo[n].node_orig, multinode_req);
-            } else {
-                unlock_node(minfo[n].node_orig, locktype::LOCKTYPE_WRITE);
+                free_node(minfo[n].node_orig, multinode_req);
             }
+            unlock_node(minfo[n].node_orig, locktype::LOCKTYPE_WRITE);
         }
 
         return ret;
@@ -1846,6 +1836,10 @@ out:
         parent_node->get(ind+1, &child_info, false /* copy */);
         auto child_node = read_node(child_info.bnode_id(), nullptr);
         lock_and_refresh_node(child_node, locktype::LOCKTYPE_READ, nullptr);
+        if (child_node->get_total_entries() == 0) {
+            unlock_node(child_node, locktype::LOCKTYPE_READ);
+            return;
+        }
         child_node->get_first_key(&child_key);
         parent_node->get_nth_key(ind, &parent_key, false);
         assert(child_key.compare(&parent_key) > 0);
@@ -1873,8 +1867,10 @@ out:
                 if (prev != nullptr && prev->get_next_bnode().m_id != minfo[i].node->get_node_id().m_id) {
                     cout << "oops";
                 }
-
-                assert(minfo[i].node->get_total_entries() != 0);
+                
+                if (minfo[i].node->get_total_entries() == 0) {
+                    continue;
+                }
                 K last_key;
                 minfo[i].node->get_last_key(&last_key);
                 K first_key;
@@ -1903,17 +1899,6 @@ out:
 
 #endif
 
-    void node_free_safely(BtreeNodePtr node, btree_multinode_req_ptr multinode_req) {
-        if (node->any_upgrade_waiters()) {
-            LOGTRACEMOD(btree_nodes, "Marking invalid:{}", node->get_node_id().to_string());
-            node->set_valid_node(false);
-            unlock_node(node, locktype::LOCKTYPE_WRITE);
-        } else {
-            unlock_node(node, locktype::LOCKTYPE_WRITE);
-            free_node(node, multinode_req);
-        }
-    }
-
     BtreeNodePtr alloc_leaf_node() {
         bool         is_new_allocation;
         BtreeNodePtr n = btree_store_t::alloc_node(m_btree_store.get(), true /* is_leaf */, is_new_allocation);
@@ -1930,10 +1915,13 @@ out:
         return n;
     }
 
+    /* Note:- This function assumes that access of this node is thread safe. */
     void free_node(BtreeNodePtr& node, btree_multinode_req_ptr multinode_req, bool mem_only = false) {
         LOGDEBUGMOD(btree_generics, "Free node-{}", node->get_node_id_int());
 
         COUNTER_DECREMENT_IF_ELSE(m_metrics, node->is_leaf(), btree_leaf_node_count, btree_int_node_count, 1);
+        assert(node->is_valid_node());
+        node->set_valid_node(false);
         btree_store_t::free_node(m_btree_store.get(), node, multinode_req, mem_only);
     }
 
@@ -1977,6 +1965,7 @@ out:
         
         auto acq_lock = (child_node->is_leaf()) ? leaf_lock_type : int_lock_type;
         btree_status_t ret = lock_and_refresh_node(child_node, acq_lock, multinode_req);
+        assert(child_node->is_valid_node());
         return ret;
     }
 
