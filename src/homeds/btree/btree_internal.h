@@ -20,6 +20,7 @@
 #include "homeds/utility/useful_defs.hpp"
 #include "homeds/memory/obj_allocator.hpp"
 #include <utility/atomic_counter.hpp>
+#include <utility/obj_life_counter.hpp>
 
 ENUM(btree_status_t, uint32_t, 
     success,
@@ -36,11 +37,14 @@ ENUM(btree_status_t, uint32_t,
     put_failed
 );
 
+/* We should always find the child smaller or equal then  search key in the interior nodes. */
+#define IS_VALID_INTERIOR_CHILD_INDX(ret, node) ((ret.end_of_search_index < (int)node->get_total_entries()) || \
+                                                    node->get_edge_id().is_valid())
 //structure to track btree multinode operations on different nodes
 #define btree_multinode_req_ptr boost::intrusive_ptr < btree_multinode_req < btree_req_type > >
 
 template <typename btree_req_type>
-struct btree_multinode_req {
+struct btree_multinode_req : public sisl::ObjLifeCounter< struct btree_multinode_req <btree_req_type> > {
     //when pending writes becomes zero and is_done is true, we can callback to upper layer
     sisl::atomic_counter<int> writes_pending;
     sisl::atomic_counter<int> m_refcount;
@@ -281,9 +285,11 @@ class BtreeKey {
 ENUM(_MultiMatchSelector, uint16_t,
     DO_NOT_CARE,
     LEFT_MOST,
-    SECOND_TO_THE_LEFT,
     RIGHT_MOST,
-    BEST_FIT_TO_CLOSEST
+    BEST_FIT_TO_CLOSEST, // Return the entry either same or more then the search key. If nothing is available
+                         // then return the entry just smaller then the search key.
+    BEST_FIT_TO_CLOSEST_FOR_REMOVE // It is similar as BEST_FIT_TO_CLOSEST but have special handling for remove
+                                   // This code will be removed once range query is supported in remove
 )
 
 class BtreeSearchRange {

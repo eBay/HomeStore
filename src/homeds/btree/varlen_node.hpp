@@ -120,7 +120,7 @@ public:
             K key;
             get_nth_key(i,&key,false);
             uint64_t kp = *(uint64_t*)key.get_blob().bytes;
-            if(i>0 && prevKey.compare(&key)>=0){
+            if(i>0 && prevKey.compare(&key)>0){
                 LOGDEBUG("non sorted entry : {} -> {} ", kp, this->to_string());
                 assert(0);
             }

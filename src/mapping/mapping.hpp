@@ -756,10 +756,11 @@ private:
         MappingKey* e_subrange = (MappingKey*)param->get_sub_range().get_end_key();   // end is always inclusive
         MappingKey* e_in_range = (MappingKey*)param->get_input_range().get_end_key(); // inclusive
 
-        if (param->get_sub_range().is_end_inclusive())
+        if (param->get_sub_range().is_end_inclusive()) {
             end_lba = min(e_subrange->end(), e_in_range->end());
-        else
+        } else {
             end_lba = min(e_subrange->start() - 1, e_in_range->end());
+        }
     }
 
     /** result of overlap of k1/k2 is added to replace_kv **/

@@ -453,8 +453,8 @@ SDS_OPTION_GROUP(perf_test_volume,
 (is_file, "", "is_file", "is_it file", ::cxxopts::value<uint32_t>()->default_value("0"), "is it file"),
 (ref_cnt, "", "ref_count", "display object life counters", ::cxxopts::value<uint32_t>()->default_value("0"),
                                                                                 "display object life counters"))
-
-SDS_OPTIONS_ENABLE(logging, perf_test_volume)
+#define ENABLED_OPTIONS logging, home_blks, perf_test_volume
+SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
 
 /* it will go away once shutdown is implemented correctly */
 
@@ -475,7 +475,7 @@ int main(int argc, char *argv[]) {
     srand(time(0));
     ::testing::GTEST_FLAG(filter) = "*normal_random*";
     testing::InitGoogleTest(&argc, argv);
-    SDS_OPTIONS_LOAD(argc, argv, logging, perf_test_volume)
+    SDS_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
     sds_logging::SetLogger("perf_test_volume");
     spdlog::set_pattern("[%D %T.%f%z] [%^%l%$] [%t] %v");
 
