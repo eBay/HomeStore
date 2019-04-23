@@ -57,9 +57,11 @@ SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write, iomgr,
 
 /**************** Common class created for all tests ***************/
 
-class test_ep : public iomgr::EndPoint {
+class test_ep : public iomgr::EndPoint { 
 public:
     test_ep(std::shared_ptr<iomgr::ioMgr> iomgr) :iomgr::EndPoint(iomgr) {
+    }
+    void shutdown_local() override {
     }
     void init_local() override {
     }
@@ -128,7 +130,14 @@ public:
         move_verify_to_done = false;
         print_startTime = Clock::now();
     }
-
+    ~IOTest() {
+        iomgr_obj->stop(); 
+        iomgr_obj.reset();
+        for (auto& x : m_vol_bm) {
+            delete x;
+        }
+        free(init_buf);
+    }
     void remove_files() {
         for (auto &n : names) {
             remove(n.c_str());
@@ -163,8 +172,9 @@ public:
         /* Don't populate the whole disks. Only 80 % of it */
         max_vol_size = (60 * max_capacity)/ (100 * max_vols);
 
-        iomgr_obj = std::make_shared<iomgr::ioMgr>(2, num_threads);
-        init_params params;
+        iomgr_obj = std::make_shared<iomgr::ioMgr>(2, num_threads); 
+        LOGINFO("OK1 iomgr_obj use_count: {}", iomgr_obj.use_count()); 
+        init_params params; 
 #if 0
         params.flag = homestore::io_flag::BUFFERED_IO;
 #else
@@ -649,6 +659,7 @@ public:
     }
 
     void shutdown_callback(bool success) {
+        VolInterface::del_instance();
         assert(success);
     }
     
@@ -822,14 +833,6 @@ SDS_OPTION_GROUP(test_volume,
 
 #define ENABLED_OPTIONS logging, home_blks, test_volume
 SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
-
-/* it will go away once shutdown is implemented correctly */
-
-extern "C" 
-__attribute__((no_sanitize_address))
-const char* __asan_default_options() { 
-    return "detect_leaks=0"; 
-}
 
 /************************** MAIN ********************************/
 

@@ -78,23 +78,6 @@ void setup_devices(uint32_t ndevs) {
 }
 #endif
 
-#if 0
-/* There is a memory leak in btree crud. We should enable it again
- * once that is fixed.
- */
-extern "C" 
-__attribute__((no_sanitize_address))
-const char* __asan_default_options() { 
-    return "detect_leaks=false"; 
-}
-
-extern "C" 
-__attribute__((no_sanitize_address))
-const char* __asan_default_options() { 
-    return "detect_leaks=0"; 
-}
-#endif
-
 class TestSimpleKey : public BtreeKey {
 private:
     typedef struct __attribute__((packed)) {

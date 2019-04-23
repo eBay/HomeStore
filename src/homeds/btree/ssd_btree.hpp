@@ -335,7 +335,6 @@ public:
 
     static void free_node(SSDBtreeStore* store, boost::intrusive_ptr< SSDBtreeNode > bn,
                             ssdbtree_multinode_req_ptr multinode_req, bool mem_only = false) {
- 
         homestore::BlkId blkid(bn->get_node_id().m_id);
         if (multinode_req) {
             store->m_blkstore->free_blk(blkid, boost::none, boost::none, multinode_req->dependent_req_q, mem_only);

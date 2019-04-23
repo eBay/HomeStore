@@ -61,7 +61,7 @@ HomeBlks::HomeBlks(const init_params& cfg) :
     m_cache = new Cache< BlkId >(m_cfg.cache_size, m_cfg.physical_page_size);
 
     /* create device manager */
-    m_dev_mgr = new homestore::DeviceManager(new_vdev_found, sizeof(sb_blkstore_blob), cfg.iomgr,
+    m_dev_mgr = new homestore::DeviceManager(new_vdev_found, sizeof(sb_blkstore_blob), m_cfg.iomgr,
                                              virtual_dev_process_completions, m_cfg.is_file, m_cfg.system_uuid);
 
     /* start thread */
