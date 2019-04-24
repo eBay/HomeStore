@@ -647,7 +647,6 @@ void HomeBlks::init_thread() {
         /* attach physical devices */
         add_devices();
         m_devices_added = true;
-        m_cv.notify_all();
                 
         /* create blkstore if it is a first time boot */
         if (init) {
@@ -815,8 +814,8 @@ void HomeBlks::shutdown_process(shutdown_comp_callback shutdown_comp_cb, bool fo
 
     assert(m_volume_map.size() == 0);
  
-    // m_cfg_sb needs to to be freed in the last, because we need to clear the shutdown flag after 
-    // shutdown is succesfully complted;
+    // m_cfg_sb needs to to be freed in the last, because we need to set the clean shutdown flag
+    // after shutdown is succesfully completed;
     
     { 
         std::lock_guard<std::mutex>  lg(m_vol_lock);
@@ -859,21 +858,12 @@ std::error_condition HomeBlks::shutdown(shutdown_comp_callback shutdown_comp_cb,
     }
     started = true;
     
-    // Wait m_cfg_sb to be created;
-    // Otherwise there is a small window that m_cfg_sb could be null when shutdown is being triggered
-    {
-        std::unique_lock<std::mutex>   lk(m_cv_mtx);
-        if (!m_devices_added.load()) {
-            m_cv.wait(lk);
-        }
-    }
-
     m_shutdown = true;
 
     // 
     // Need to wait m_init_finished to be true before we create shutdown thread because:
     // 1. if init thread is running slower than shutdown thread, 
-    // 2. it is possible that shutdown thread compled but init thread 
+    // 2. it is possible that shutdown thread completed but init thread 
     //    is still creating resources, which would be resource leak 
     //    after shutdown thread exits;
     //
