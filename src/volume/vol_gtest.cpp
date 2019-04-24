@@ -3,6 +3,7 @@
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
 #include <main/vol_interface.hpp>
+//#include <volume/home_blks.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <fstream>
@@ -28,6 +29,7 @@ THREAD_BUFFER_INIT;
 /************************** GLOBAL VARIABLES ***********************/
 
 #define MAX_DEVICES 2
+#define HOMEBLKS_SB_FLAGS_SHUTDOWN 0x00000001UL
 
 #define STAGING_VOL_PREFIX "staging"
 #define VOL_PREFIX "/tmp/vol"
@@ -116,6 +118,7 @@ protected:
     bool move_verify_to_done;
     std::atomic<int> rdy_state;
     bool is_abort;
+    bool shutdown_on_reboot;
     Clock::time_point print_startTime;
     std::atomic<uint64_t> staging_match_cnt;
 
@@ -792,15 +795,14 @@ TEST_F(IOTest, force_shutdown_by_api_homeblks_test) {
     this->remove_files();
 }
 
+// simulate reboot with m_cfg_sb flags set w/ shutdown bit 
 TEST_F(IOTest, shutdown_on_reboot_homeblks_test) {
     /* fork a new process */
-    this->init = true;
+    this->init = false;
+    this->shutdown_on_reboot = true;
     /* child process */
-    // TODO: add fault injection to simulate reboot with m_cfg_sb flags set w/ shutdown bit 
     this->start_homestore();
     this->wait_cmpl();
-    LOGINFO("write_cnt {}", write_cnt);
-    LOGINFO("read_cnt {}", read_cnt);
     this->remove_files();
 }
 
