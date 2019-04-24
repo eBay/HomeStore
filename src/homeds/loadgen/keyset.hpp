@@ -11,6 +11,7 @@
 #include <shared_mutex>
 #include <folly/RWSpinLock.h>
 #include <iostream>
+#include <boost/dynamic_bitset.hpp>
 
 #define MAX_HASH_CODE_ENTRIES 10 // Max hash codes to store in each keyinfo structure
 
@@ -171,7 +172,7 @@ public:
     KeyRegistry() : m_invalid_ki(K::gen_key(KeyPattern::OUT_OF_BOUND, nullptr)) {
         for (auto i = 0u; i < KEY_PATTERN_SENTINEL; i++) {
             m_last_gen_slots[i].store(-1);
-            m_last_read_slots[i].store(0);
+            m_next_read_slots[i].store(0);
         }
         //_generate_key(KeyPattern::SEQUENTIAL); // Atleast generate 1 key for us to be ready for read
     }
@@ -228,16 +229,27 @@ public:
     void remove_key(key_info_ptr< K >& kip) {
         std::unique_lock l(m_rwlock);
         m_data_set.erase(kip.m_ki);
-        kip->mark_freed();
     }
 
     auto find_key(const key_info_ptr< K >& kip) {
         std::shared_lock l(m_rwlock);
         return m_data_set.find(kip.m_ki);
     }
+    
+    //no locking done here, client is expected to get lock
+    bool has_key(key_info< K >* ki ) {
+        auto it=m_data_set.find(ki);
+        if(it==m_data_set.end())return false;
+        const key_info< K >* expected_ki = *it;
+        if(expected_ki->m_key.compare(&ki->m_key)!=0)return false;
+        return true;
+    }
 
     friend struct key_info_ptr< K >;
 
+    void reset_pattern(KeyPattern pattern, int index=0){
+        m_next_read_slots[pattern].store(index, std::memory_order_relaxed);
+    }
 private:
     void free_key(key_info< K >* ki) {
         std::unique_lock l(m_rwlock);
@@ -246,9 +258,14 @@ private:
 
     key_info< K >* _generate_key(KeyPattern gen_pattern) {
         auto slot_num = m_keys.size();
-
+        key_info< K >* newKi=nullptr;
+        do{
+            if(newKi)delete newKi;
+            newKi=new key_info< K >(K::gen_key(gen_pattern, _get_last_gen_key(gen_pattern)),slot_num);
+        }while(has_key(newKi));
+        
         // Generate a key and put in the key list and mark that slot as valid.
-        m_keys.emplace_back(new key_info< K >(K::gen_key(gen_pattern, _get_last_gen_key(gen_pattern)), slot_num));
+        m_keys.emplace_back(newKi);
         m_used_slots.push_back(true);
         m_last_gen_slots[gen_pattern].store(slot_num, std::memory_order_relaxed);
 
@@ -263,25 +280,24 @@ private:
 
         typename std::set< key_info< K >*, compare_key_info< K > >::iterator it;
         if (pattern == SEQUENTIAL) {
-            start_slot = m_last_read_slots[pattern].load(std::memory_order_acquire);
+            start_slot = m_next_read_slots[pattern].load(std::memory_order_acquire);
             it = m_data_set.find(m_keys[start_slot].get());
             assert(it != m_data_set.end());
         } else if (pattern == UNI_RANDOM) {
             start_slot = rand() % m_keys.size();
         }
         auto cur_slot = start_slot;
-
-        do {
-            bool rotated;
-            cur_slot = _get_next_slot(cur_slot, pattern, it, &rotated);
-
+        bool rotated=false;
+        while(rotated==false || cur_slot != start_slot) {
+            auto next_slot = _get_next_slot(cur_slot, pattern, it, &rotated);
             if (_can_use_for_get(cur_slot)) {
                 ki = m_keys[cur_slot].get();
                 if (exclusive_access) { ki->mark_exclusive(); }
-                m_last_read_slots[pattern].store(cur_slot, std::memory_order_release);
+                m_next_read_slots[pattern].store(next_slot, std::memory_order_release);
                 break;
             }
-        } while (cur_slot != start_slot);
+            cur_slot=next_slot;
+        } 
 
         return ki;
     }
@@ -299,23 +315,32 @@ private:
         if (ki == nullptr) { return kis; }
         kis.push_back(key_info_ptr(this, ki, is_mutate));
 
-        // Subsequent keys cannot use given pattern, but stricly based on hte data_map sorted order
+        // Subsequent keys cannot use given pattern, but stricly based on the data_map sorted order
         auto it = m_data_set.find(ki);
         assert(it != m_data_set.end());
         ++it;
 
-        while ((it != m_data_set.end()) && (num_needed < kis.size())) {
+        while ((it != m_data_set.end()) && (num_needed > kis.size())) {
             ki = *it;
             if (_can_use_for_get(ki->m_slot_num)) {
                 if (exclusive_access) { ki->mark_exclusive(); }
                 kis.push_back(key_info_ptr(this, ki, is_mutate));
             } else {
                 // Unable to use for get, so it breaks contiguity.
-                break;
+                m_next_read_slots[first_key_pattern].store(ki->m_slot_num, std::memory_order_release);
+                return kis;
             }
+            ++it;
         }
-
-        m_last_read_slots[first_key_pattern].store(ki->m_slot_num, std::memory_order_release);
+        auto next_slot=-1;
+        if (it == m_data_set.end()) {
+            it = m_data_set.begin();
+            next_slot= (*it)->m_slot_num;
+        }else{
+            bool rotated=false;
+            next_slot = _get_next_slot(ki->m_slot_num, first_key_pattern, it, &rotated);
+        }
+        m_next_read_slots[first_key_pattern].store(next_slot, std::memory_order_release);
         return kis;
     }
 
@@ -398,7 +423,7 @@ private:
     void _adjust_slot_num(int32_t old_slot, int32_t new_slot) {
         for (auto i = 0; i < KEY_PATTERN_SENTINEL; i++) {
             m_last_gen_slots[i].compare_exchange_strong(old_slot, new_slot, std::memory_order_relaxed);
-            m_last_read_slots[i].compare_exchange_strong(old_slot, new_slot, std::memory_order_relaxed);
+            m_next_read_slots[i].compare_exchange_strong(old_slot, new_slot, std::memory_order_relaxed);
         }
     }
 
@@ -413,7 +438,7 @@ private:
 
     key_info< K >                                              m_invalid_ki;
     std::array< std::atomic< int32_t >, KEY_PATTERN_SENTINEL > m_last_gen_slots;
-    std::array< std::atomic< int32_t >, KEY_PATTERN_SENTINEL > m_last_read_slots;
+    std::array< std::atomic< int32_t >, KEY_PATTERN_SENTINEL > m_next_read_slots;
 };
 
 template< typename K>

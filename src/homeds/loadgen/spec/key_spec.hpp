@@ -5,8 +5,8 @@
 #define HOMESTORE_WORKLOAD_GENERATOR_HPP
 
 #include "homeds/loadgen/loadgen_common.hpp"
-#include "homeds/btree/btree.hpp"
 #include <spdlog/fmt/bundled/ostream.h>
+#include <farmhash.h>
 
 namespace homeds { namespace loadgen {
 

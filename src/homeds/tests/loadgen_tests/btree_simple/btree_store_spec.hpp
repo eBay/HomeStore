@@ -90,7 +90,7 @@ public:
     }
 
     virtual uint32_t query(K& start_key, bool start_incl, K& end_key, bool end_incl, uint32_t batch_size,
-                           void *cb_context, std::function<bool(K&, V&, void *)> foreach_cb) override {
+                           void *cb_context, std::function<bool(K&, V&, bool, void *)> foreach_cb) override {
         auto search_range = BtreeSearchRange(start_key, start_incl, end_key, end_incl);
         BtreeQueryRequest<K, V> qreq(search_range, BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, batch_size);
 
@@ -103,14 +103,10 @@ public:
         do {
             auto status = m_bt->query(qreq, values);
             
-            if (status == btree_status_t::success) {
-                has_more = true;
-            } else {
-                has_more = false;
-            }
-
+            has_more = (status == btree_status_t::has_more);
+            auto is_success = (status == btree_status_t::has_more) || (status == btree_status_t::success);
             for (auto &val : values) {
-                bool need_more = foreach_cb(val.first, val.second, cb_context);
+                bool need_more = foreach_cb(val.first, val.second, is_success, cb_context);
                 if (!need_more) { return result_count; }
                 ++result_count;
             }

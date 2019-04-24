@@ -1255,7 +1255,7 @@ out:
         
 retry:
         int start_ind = 0, end_ind = -1;
-        
+
         /* Get the start and end ind in a parent node for the range updates. For 
          * non range updates, start ind and end ind are same.
          */

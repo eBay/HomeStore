@@ -17,7 +17,7 @@ public:
     virtual bool remove(K& k, V* removed_v = nullptr) = 0;
     virtual bool remove_any(K& start_key, bool start_incl, K& end_key, bool end_incl, K *out_key, V* out_val) = 0;
     virtual uint32_t query(K& start_key, bool start_incl, K& end_key, bool end_incl, uint32_t batch_size,
-                           void *cb_context, std::function<bool(K&, V&, void *)> foreach_cb) = 0;
+                           void *cb_context, std::function<bool(K&, V&, bool, void *)> foreach_cb) = 0;
     virtual std::vector< V > range_update(K& start_key, bool start_incl, K& end_key, bool end_incl) = 0;
 };
 
