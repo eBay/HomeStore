@@ -75,9 +75,16 @@ struct key_info {
         m_free_pending = true;
     }
 
-    void mark_exclusive() {
+    bool is_marked_free() const {
+        folly::RWSpinLock::ReadHolder guard(const_cast< folly::RWSpinLock& >(m_lock));
+        return (m_free_pending);
+    }
+
+    bool mark_exclusive() {
         folly::RWSpinLock::WriteHolder guard(m_lock);
+        if(m_exclusive_access==true)return false;//someone marked it exclusive already
         m_exclusive_access = true;
+        return true;
     }
 
     bool is_exclusive() const {
@@ -200,13 +207,13 @@ public:
     key_info_ptr< K > generate_invalid_key() { return key_info_ptr(this, &m_invalid_ki, true); }
 
     key_info_ptr< K > get_key(KeyPattern pattern, bool is_mutate, bool exclusive_access) {
-        std::shared_lock l(m_rwlock);
+        std::unique_lock l(m_rwlock);//uniq lock needed since multiple threads can aquire next slot
         return key_info_ptr(this, _get_key(pattern, is_mutate, exclusive_access), is_mutate);
     }
 
     std::vector< key_info_ptr< K > > get_contiguous_keys(KeyPattern pattern, bool exclusive_access, bool is_mutate,
                                                          uint32_t num_needed) {
-        std::shared_lock l(m_rwlock);
+        std::unique_lock l(m_rwlock);//uniq lock needed since multiple threads can aquire next slot
         return _get_contigoous_keys(pattern, exclusive_access, is_mutate, num_needed);
     }
 
@@ -229,6 +236,7 @@ public:
     void remove_key(key_info_ptr< K >& kip) {
         std::unique_lock l(m_rwlock);
         m_data_set.erase(kip.m_ki);
+        kip->mark_freed();
     }
 
     auto find_key(const key_info_ptr< K >& kip) {
@@ -248,6 +256,7 @@ public:
     friend struct key_info_ptr< K >;
 
     void reset_pattern(KeyPattern pattern, int index=0){
+        std::unique_lock l(m_rwlock);
         m_next_read_slots[pattern].store(index, std::memory_order_relaxed);
     }
 private:
@@ -277,12 +286,17 @@ private:
 
         int32_t        start_slot = 0;
         key_info< K >* ki = nullptr;
-
+        if(m_data_set.size()==0) {//no keys
+            return ki;
+        }
+        
         typename std::set< key_info< K >*, compare_key_info< K > >::iterator it;
         if (pattern == SEQUENTIAL) {
             start_slot = m_next_read_slots[pattern].load(std::memory_order_acquire);
             it = m_data_set.find(m_keys[start_slot].get());
-            assert(it != m_data_set.end());
+            
+            //remove punches holes, if it was last slot being punched, we have to start over
+            if(it == m_data_set.end()) it=m_data_set.begin();
         } else if (pattern == UNI_RANDOM) {
             start_slot = rand() % m_keys.size();
         }
@@ -291,8 +305,12 @@ private:
         while(rotated==false || cur_slot != start_slot) {
             auto next_slot = _get_next_slot(cur_slot, pattern, it, &rotated);
             if (_can_use_for_get(cur_slot)) {
-                ki = m_keys[cur_slot].get();
-                if (exclusive_access) { ki->mark_exclusive(); }
+                auto temp = m_keys[cur_slot].get();
+                if (exclusive_access && !temp->mark_exclusive()){
+                    cur_slot=next_slot;//try next as someone else took exclusive lock 
+                    continue;
+                }
+                ki=temp;
                 m_next_read_slots[pattern].store(next_slot, std::memory_order_release);
                 break;
             }
@@ -323,7 +341,12 @@ private:
         while ((it != m_data_set.end()) && (num_needed > kis.size())) {
             ki = *it;
             if (_can_use_for_get(ki->m_slot_num)) {
-                if (exclusive_access) { ki->mark_exclusive(); }
+                if (exclusive_access) {
+                    if(!ki->mark_exclusive()){//contiquity broken due to non-exclsuive exceess
+                        m_next_read_slots[first_key_pattern].store(ki->m_slot_num, std::memory_order_release);
+                        return kis;
+                    }
+                }
                 kis.push_back(key_info_ptr(this, ki, is_mutate));
             } else {
                 // Unable to use for get, so it breaks contiguity.
@@ -376,7 +399,7 @@ private:
     }
 
     bool _can_use_for_get(int32_t slot) {
-        return (m_used_slots[slot] && !m_keys[slot]->is_exclusive());
+        return (m_used_slots[slot] && !m_keys[slot]->is_exclusive() && !m_keys[slot]->is_marked_free());
     }
 
     void _free_key(key_info< K >* ki) {

@@ -379,7 +379,7 @@ out:
         check_lock_debug();
 #endif
         if (ret != btree_status_t::success) {
-            LOGINFO("btree put failed {}", ret);
+            LOGTRACE("btree put failed {}", ret);
         }
         process_completions(ret, multinode_req);
         
@@ -1563,7 +1563,7 @@ out:
             goto done;
         }
 
-        if (root->get_total_entries() != 0) {
+        if (root->get_total_entries() != 0 || root->is_leaf()/*some other thread collapsed root already*/) {
             unlock_node(root, locktype::LOCKTYPE_WRITE);
             goto done;
         }

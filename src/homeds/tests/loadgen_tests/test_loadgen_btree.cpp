@@ -135,18 +135,18 @@ struct BtreeTestLoadGen : public ::testing::Test {
             }
         });
 
-        //remove random 30%
-        kvg.run_parallel([&]() {
-            for (auto i = 0u; i < get_io_count(30); i++) {
-                kvg.remove(KeyPattern::UNI_RANDOM, true, true);
-            }
-        });
-
         //remove trailing 10%
         kvg.reset_pattern(KeyPattern::SEQUENTIAL, get_io_count(90));
         kvg.run_parallel([&]() {
             for (auto i = 0u; i < get_io_count(10); i++) {
                 kvg.remove(KeyPattern::SEQUENTIAL, true, true);
+            }
+        });
+        
+        //remove random 30%
+        kvg.run_parallel([&]() {
+            for (auto i = 0u; i < get_io_count(30); i++) {
+                kvg.remove(KeyPattern::UNI_RANDOM, true, true);
             }
         });
 
@@ -164,7 +164,7 @@ struct BtreeTestLoadGen : public ::testing::Test {
         //remove from empty set, 5% random
         kvg.run_parallel([&]() {
             for (auto i = 0u; i < get_io_count(5); i++) {
-                kvg.remove(KeyPattern::UNI_RANDOM, false, false);
+                kvg.remove(KeyPattern::UNI_RANDOM, false, false, false);
             }
         });
 
@@ -172,7 +172,7 @@ struct BtreeTestLoadGen : public ::testing::Test {
         kvg.run_parallel([&]() {
             for (auto i = 0u; i < get_io_count(5); i++) {
                 kvg.update(KeyPattern::UNI_RANDOM,
-                           ValuePattern::RANDOM_BYTES, false, false);
+                           ValuePattern::RANDOM_BYTES, false, false, false);
             }
         });
     }

@@ -48,45 +48,34 @@ public:
     }
 
     virtual bool insert(K& k, V& v) override {
-        m_bt->put(k, v, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
-        return true;
+        auto status = m_bt->put(k, v, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
+        return status==btree_status_t::success;
     }
 
     virtual bool upsert(K& k, V& v) override {
-        m_bt->put(k, v, btree_put_type::REPLACE_IF_EXISTS_ELSE_INSERT);
-        return true;
+        auto status = m_bt->put(k, v, btree_put_type::REPLACE_IF_EXISTS_ELSE_INSERT);
+        return status==btree_status_t::success;
     }
 
     virtual bool update(K& k, V& v) override {
-        return upsert(k, v);
+        auto status = m_bt->put(k, v, btree_put_type::REPLACE_ONLY_IF_EXISTS);
+        return status==btree_status_t::success;
     }
 
     virtual bool get(K& k, V* out_v) override {
         auto status = m_bt->get(k, out_v);
-        if (status == btree_status_t::success) {
-            return true;
-        } else {
-            return false;
-        }
+        return status==btree_status_t::success;
     }
 
     virtual bool remove(K& k, V* removed_v = nullptr) override {
         auto status = m_bt->remove(k, removed_v);
-        if (status == btree_status_t::success) {
-            return true;
-        } else {
-            return false;
-        }
+        return status==btree_status_t::success;
     }
 
     virtual bool remove_any(K& start_key, bool start_incl, K& end_key, bool end_incl, K *out_key, V* out_val) override {
         BtreeSearchRange range(start_key, start_incl, end_key, end_incl);
         auto status = m_bt->remove_any(range, out_key, out_val);
-        if (status == btree_status_t::success) {
-            return true;
-        } else {
-            return false;
-        }
+        return status==btree_status_t::success;
     }
 
     virtual uint32_t query(K& start_key, bool start_incl, K& end_key, bool end_incl, uint32_t batch_size,
