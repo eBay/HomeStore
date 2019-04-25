@@ -62,6 +62,7 @@ using namespace homeds::loadgen;
 #define KVG KVGenerator<SimpleNumberKey, FixedBytesValue<64>, simple_mem_btree_store_t >
 
 static uint64_t N=0;//total number of keys
+static int RANGE_BATCH_SIZE=50;
 
 static uint64_t get_io_count(int percent){
     return percent*N/100;
@@ -72,30 +73,31 @@ struct BtreeTestLoadGen : public ::testing::Test {
 
     void do_checkpoint() {
         kvg.run_parallel([&]() {
-            int batch = 50;
-            for (auto i = 0u; i < get_io_count(100); i += batch) {
+            for (auto i = 0u; i < get_io_count(100); i += RANGE_BATCH_SIZE) {
                 kvg.range_query(KeyPattern::SEQUENTIAL,
-                                batch, true /* exclusive_access */, true, true);
+                                RANGE_BATCH_SIZE, true /* exclusive_access */, true, true);
             }
         });
     }
 
+    // Do 15% IOs as inserts
     void do_inserts() {
-        // preload random 50%
+        // preload random 5%
         kvg.preload(KeyPattern::UNI_RANDOM,
-                    ValuePattern::RANDOM_BYTES, get_io_count(50));
+                    ValuePattern::RANDOM_BYTES, get_io_count(10));
 
-        //insert sequential 50%
+        //insert sequential 5%
         kvg.run_parallel([&]() {
-            for (auto i = 0u; i < get_io_count(50); i++) {
+            for (auto i = 0u; i < get_io_count(5); i++) {
                 kvg.insert_new(KeyPattern::SEQUENTIAL,
                                ValuePattern::RANDOM_BYTES);
             }
         });
     }
 
+    // Do 15% IOs as updates
     void do_updates() {
-        //update sequential 10%, from start
+        //update sequential 5%, from start
         kvg.reset_pattern(KeyPattern::SEQUENTIAL, 0);
         kvg.run_parallel([&]() {
             for (auto i = 0u; i < get_io_count(10); i++) {
@@ -104,17 +106,7 @@ struct BtreeTestLoadGen : public ::testing::Test {
             }
         });
 
-        //update random 50%
-        kvg.run_parallel([&]() {
-            for (auto i = 0u; i < get_io_count(50); i++) {
-                kvg.update(KeyPattern::UNI_RANDOM,
-                           ValuePattern::RANDOM_BYTES, true, true);
-            }
-        });
-
-        do_checkpoint();
-
-        //update sequential 10%, trailing
+        //update sequential 5%, trailing
         kvg.reset_pattern(KeyPattern::SEQUENTIAL, get_io_count(90));
         kvg.run_parallel([&]() {
             for (auto i = 0u; i < get_io_count(10); i++) {
@@ -122,8 +114,14 @@ struct BtreeTestLoadGen : public ::testing::Test {
                            ValuePattern::RANDOM_BYTES, true, true);
             }
         });
-
-        do_checkpoint();
+        
+        //update random 5%
+        kvg.run_parallel([&]() {
+            for (auto i = 0u; i < get_io_count(50); i++) {
+                kvg.update(KeyPattern::UNI_RANDOM,
+                           ValuePattern::RANDOM_BYTES, true, true);
+            }
+        });
     }
 
     void do_removes() {
@@ -176,20 +174,37 @@ struct BtreeTestLoadGen : public ::testing::Test {
             }
         });
     }
+    
+    void regression(){
+        //60% random modification load
+        kvg.run_parallel([&]() {
+            for (auto i = 0u; i < get_io_count(20); i++) {
+                kvg.insert_new(KeyPattern::UNI_RANDOM,
+                               ValuePattern::RANDOM_BYTES);
+            }
+            for (auto i = 0u; i < get_io_count(20); i++) {
+                kvg.update(KeyPattern::UNI_RANDOM,
+                           ValuePattern::RANDOM_BYTES, true, true);
+            }
+            for (auto i = 0u; i < get_io_count(20); i++) {
+                kvg.remove(KeyPattern::UNI_RANDOM, true, true);
+            }
+        });
+        do_checkpoint();
+    }
 
-    void execute(){
+    void basic_test(){
         //basic serialized tests
         do_inserts();
         do_updates();
         do_removes();
         do_negative_tests();
-
-        //TODO - add parallel tests
     }
 };
 
 TEST_F(BtreeTestLoadGen, SimpleMemBtreeTest) {
-    this->execute();
+    this->basic_test();
+    this->regression();
 }
 
 
