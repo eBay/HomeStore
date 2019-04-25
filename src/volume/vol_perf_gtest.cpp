@@ -68,6 +68,8 @@ public:
     }
     void init_local() override {
     }
+    void shutdown_local() override {
+    }
     void print_perf() override {
     }
 };
@@ -455,6 +457,7 @@ SDS_OPTION_GROUP(perf_test_volume,
 SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
 
 /* it will go away once shutdown is implemented correctly */
+
 extern "C" 
 __attribute__((no_sanitize_address))
 const char* __asan_default_options() { 

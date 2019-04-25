@@ -971,9 +971,10 @@ done:
      * old lock. If failed to upgrade, will release all locks.
      */
      btree_status_t upgrade_node(BtreeNodePtr my_node, BtreeNodePtr child_node, homeds::thread::locktype& cur_lock,
-                      homeds::thread::locktype child_cur_lock, btree_multinode_req_ptr multinode_req) {
+                      homeds::thread::locktype &child_cur_lock, btree_multinode_req_ptr multinode_req) {
         uint64_t prev_gen;
         btree_status_t ret = btree_status_t::success;
+        homeds::thread::locktype child_lock_type = child_cur_lock;
 
         if (cur_lock == homeds::thread::LOCKTYPE_WRITE) {
             goto done;
@@ -982,48 +983,45 @@ done:
         prev_gen = my_node->get_gen();
         if (child_node) {
             unlock_node(child_node, child_cur_lock);
+            child_cur_lock = locktype::LOCKTYPE_NONE;
         }
 
 
         ret = lock_node_upgrade(my_node, multinode_req);
         if (ret != btree_status_t::success) {
+            cur_lock = locktype::LOCKTYPE_NONE;
             return ret;
         }
+        
+        // The node was not changed by anyone else during upgrade.
+        cur_lock = homeds::thread::LOCKTYPE_WRITE;
 
         // If the node has been made invalid (probably by mergeNodes) ask caller to start over again, but before that
         // cleanup or free this node if there is no one waiting.
         if (!my_node->is_valid_node()) {
-            if (my_node->any_upgrade_waiters()) {
-                // Still some one else is waiting, we are not the last.
-                unlock_node(my_node, homeds::thread::LOCKTYPE_WRITE);
-            } else {
-                // No else is waiting for this node and this is an invalid node, free it up.
-                assert(my_node->get_total_entries() == 0);
-                unlock_node(my_node, homeds::thread::LOCKTYPE_WRITE);
-
-                // Its ok to free after unlock, because the chain has been already cut when the node is invalidated.
-                // So no one would have entered here after the chain is cut.
-                free_node(my_node, multinode_req);
-            }
+            unlock_node(my_node, homeds::thread::LOCKTYPE_WRITE);
+            cur_lock = locktype::LOCKTYPE_NONE;
             ret = btree_status_t::retry;
             goto done;
         }
 
         // If node has been updated, while we have upgraded, ask caller to start all over again.
         if (prev_gen != my_node->get_gen()) {
-            unlock_node(my_node, homeds::thread::LOCKTYPE_WRITE);
+            unlock_node(my_node, cur_lock);
+            cur_lock = locktype::LOCKTYPE_NONE;
             ret = btree_status_t::retry;
             goto done;
         }
 
-        // The node was not changed by anyone else during upgrade.
-        cur_lock = homeds::thread::LOCKTYPE_WRITE;
         if (child_node) {
-            ret = lock_and_refresh_node(child_node, child_cur_lock, multinode_req);
+            ret = lock_and_refresh_node(child_node, child_lock_type, multinode_req);
             if (ret != btree_status_t::success) {
-                unlock_node(my_node, homeds::thread::LOCKTYPE_WRITE);
+                unlock_node(my_node, cur_lock);
+                cur_lock = locktype::LOCKTYPE_NONE;
+                child_cur_lock = locktype::LOCKTYPE_NONE;
                 goto done;
             }
+            child_cur_lock = child_lock_type;
         }
 
        assert(my_node->m_common_header.is_lock);
@@ -1031,6 +1029,194 @@ done:
         return ret;
     }
 
+    btree_status_t update_leaf_node(BtreeNodePtr my_node, const BtreeKey &k, const BtreeValue &v, 
+                                    btree_put_type put_type, BtreeValue &existing_val, btree_multinode_req_ptr multinode_req,
+                                    BtreeUpdateRequest<K, V> *bur) {
+
+        btree_status_t ret = btree_status_t::success;
+        if (bur != nullptr) {
+            assert(bur->callback() != nullptr); // TODO - range req without callback implementation
+            std::vector< std::pair< K, V > > match;
+            int                              start_ind = 0, end_ind = 0;
+            my_node->get_all(bur->get_input_range(), UINT32_MAX, start_ind, end_ind, &match);
+
+            vector< pair< K, V > > replace_kv;
+            bur->callback()(match, replace_kv, bur->get_cb_param());
+            if (match.size() > 0 && start_ind <= end_ind) {
+                my_node->remove(start_ind, end_ind);
+            }
+            for (auto &pair : replace_kv) { // insert is based on compare() of BtreeKey
+                my_node->insert(pair.first, pair.second);
+            }
+        } else {
+            if (!my_node->put(k, v, put_type, existing_val)) {
+                ret = btree_status_t::put_failed;
+            }
+        }
+
+#ifndef NDEBUG
+        //sorted check
+        for(auto i=1u;i<my_node->get_total_entries();i++){
+            K curKey, prevKey;
+            my_node->get_nth_key(i-1,&prevKey,false);
+            my_node->get_nth_key(i,&curKey,false);
+            assert(prevKey.compare(&curKey)<=0);
+        }
+#endif
+        write_node_async(my_node, multinode_req);
+        COUNTER_INCREMENT(m_metrics, btree_obj_count, 1);
+        return ret;
+    }
+
+    btree_status_t get_start_and_end_ind(BtreeNodePtr my_node, BtreeUpdateRequest<K, V> *bur, const BtreeKey &k, 
+                                         int &start_ind, int &end_ind) {
+
+        btree_status_t ret = btree_status_t::success;
+        if (bur != nullptr) { 
+            /* just get start/end index from get_all. We don't release the parent lock until this
+             * key range is not inserted from start_ind to end_ind.
+             */
+            my_node->get_all(bur->get_input_range(), UINT32_MAX, start_ind, end_ind);
+        } else {
+            auto result = my_node->find(k, nullptr, nullptr);
+            end_ind = start_ind = result.end_of_search_index;
+            assert(IS_VALID_INTERIOR_CHILD_INDX(result, my_node));
+        }
+
+        if (start_ind > end_ind) {
+            assert(0);//dont expect this to happen
+            // Either the node was updated or mynode is freed. Just proceed again from top.
+            ret = btree_status_t::retry;
+        }
+        return ret;
+    }
+
+    /* It split the child if a split is required. It releases lock on parent and child_node in case of failure */
+    btree_status_t check_and_split_node(BtreeNodePtr my_node, BtreeUpdateRequest<K, V> *bur, const BtreeKey &k,
+                                        const BtreeValue &v, int ind_hint, btree_put_type put_type, 
+                                        btree_multinode_req_ptr multinode_req, BtreeNodePtr  child_node,
+                                        homeds::thread::locktype &curlock, homeds::thread::locktype &child_curlock,
+                                        int child_ind, bool &split_occured) {
+
+        split_occured = false;
+        K split_key;
+        btree_status_t ret = btree_status_t::success;
+        auto child_lock_type = child_curlock;
+        auto none_lock_type = LOCKTYPE_NONE;
+        
+        if (!child_node->is_split_needed(m_btree_cfg, k, v, &ind_hint, put_type, bur)) {
+            return ret;
+        }
+       
+        /* Split needed */
+        if (bur) {
+
+            /* In case of range update we might split multiple childs of a parent in a single
+             * iteration which result into less space in the parent node.
+             */
+            if (my_node->is_split_needed(m_btree_cfg, k, v, &ind_hint, put_type, bur)) {
+                //restart from root
+                ret = btree_status_t::retry;
+                goto out;
+            }
+            /* refresh node is needed wherever we are writing to a node multiple times
+             * in a single lock iteration.
+             */
+            btree_store_t::refresh_node(m_btree_store.get(), my_node, multinode_req, true);
+        }
+
+        // Time to split the child, but we need to convert parent to write lock
+        ret = upgrade_node(my_node, child_node, curlock, child_curlock, multinode_req);
+        if (ret != btree_status_t::success) {
+            LOGDEBUGMOD(btree_structures, "Upgrade of lock for node {} failed, retrying from root",
+                    my_node->get_node_id_int());
+            assert(curlock == homeds::thread::LOCKTYPE_NONE);
+            goto out;
+        }
+        assert(child_curlock == child_lock_type);
+        assert(curlock == homeds::thread::LOCKTYPE_WRITE);
+
+        // We need to upgrade the child to WriteLock
+        ret = upgrade_node(child_node, nullptr, child_curlock, none_lock_type, multinode_req);
+        if (ret != btree_status_t::success) {
+            LOGDEBUGMOD(btree_structures, "Upgrade of lock for node {} failed, retrying from root",
+                    child_node->get_node_id_int());
+            assert(child_curlock == homeds::thread::LOCKTYPE_NONE);
+            goto out;
+        }
+        assert(none_lock_type == homeds::thread::LOCKTYPE_NONE);
+        assert(child_curlock == homeds::thread::LOCKTYPE_WRITE);
+
+        // Real time to split the node and get point at which it was split
+        ret = split_node(my_node, child_node, child_ind, &split_key, multinode_req);
+        if (ret != btree_status_t::success) {
+            goto out;
+        }
+        
+        // After split, parentNode would have split, retry search and walk down.
+        unlock_node(child_node, homeds::thread::LOCKTYPE_WRITE);
+        child_curlock = LOCKTYPE_NONE;
+        COUNTER_INCREMENT(m_metrics, btree_split_count, 1);
+        split_occured = true;
+out:
+        if (ret != btree_status_t::success) {
+            if (curlock != LOCKTYPE_NONE) {
+                unlock_node(my_node, curlock);
+                curlock = LOCKTYPE_NONE;
+            }
+
+            if (child_curlock != LOCKTYPE_NONE) {
+                unlock_node(child_node, child_curlock);
+                child_curlock = LOCKTYPE_NONE;
+            }
+        }
+        return ret;
+    }
+
+    void get_subrange(BtreeNodePtr my_node, BtreeUpdateRequest<K, V> *bur, int curr_ind) {
+        if (!bur) {
+            return;
+        }
+
+        //find start of subrange
+        bool start_inc;
+        K start_key;
+        BtreeKey *start_key_ptr = &start_key;
+        
+        if (curr_ind > 0) {
+            /* start of subrange will be more then the key in curr_ind - 1 */
+            my_node->get_nth_key(curr_ind - 1, start_key_ptr, false);
+            start_inc = false;
+        } else {
+            /* start key is the start key of the input range */
+            start_key_ptr = const_cast<BtreeKey *>(bur->get_input_range().get_start_key());
+            start_inc = bur->get_input_range().is_start_inclusive();
+        }
+        
+        const_cast<BtreeKey *>(bur->get_cb_param()->get_sub_range().get_start_key())->copy_blob(
+                start_key_ptr->get_blob());//copy
+        bur->get_cb_param()->get_sub_range().set_start_incl(start_inc);
+
+        
+        //find end of subrange
+        bool end_inc = true;
+        K end_key;
+        BtreeKey *end_key_ptr = &end_key;
+        
+        if (curr_ind < (int) my_node->get_total_entries()) {
+            my_node->get_nth_key(curr_ind, end_key_ptr, false);
+            end_inc = true;
+        } else {
+            /* it is the edge node. end key is the end of input range */
+            assert(my_node->get_edge_id().is_valid());
+            end_key_ptr = const_cast<BtreeKey *>(bur->get_input_range().get_end_key());
+            end_inc = bur->get_input_range().is_end_inclusive();
+        }
+        
+        const_cast<BtreeKey *>(bur->get_cb_param()->get_sub_range().get_end_key())->copy_blob(
+                end_key_ptr->get_blob());//copy
+        bur->get_cb_param()->get_sub_range().set_end_incl(end_inc);
+    }
 
     /* This function does the heavy lifiting of co-ordinating inserts. It is a recursive function which walks
      * down the tree.
@@ -1056,40 +1242,12 @@ done:
         btree_status_t ret = btree_status_t::success;
         bool unlocked_already = false;
         int  curr_ind = -1;
+        
         if (my_node->is_leaf()) {
+            /* update the leaf node */
             assert(curlock == LOCKTYPE_WRITE);
-            if (bur != nullptr) {
-                assert(bur->callback() != nullptr); // TODO - range req without callback implementation
-                std::vector< std::pair< K, V > > match;
-                int                              start_ind = 0, end_ind = 0;
-                my_node->get_all(bur->get_input_range(), UINT32_MAX, start_ind, end_ind, &match);
-
-                vector< pair< K, V > > replace_kv;
-                bur->callback()(match, replace_kv, bur->get_cb_param());
-                if (match.size() > 0 && start_ind <= end_ind) {
-                    my_node->remove(start_ind, end_ind);
-                }
-                for (auto &pair : replace_kv) { // insert is based on compare() of BtreeKey
-                    my_node->insert(pair.first, pair.second);
-                }
-            } else {
-                if (!my_node->put(k, v, put_type, existing_val)) {
-                    ret = btree_status_t::put_failed;
-                }
-            }
-
-#ifndef NDEBUG
-            //sorted check
-            for(auto i=1u;i<my_node->get_total_entries();i++){
-                K curKey, prevKey;
-                my_node->get_nth_key(i-1,&prevKey,false);
-                my_node->get_nth_key(i,&curKey,false);
-                assert(prevKey.compare(&curKey)<=0);
-            }
-#endif
-            write_node_async(my_node, multinode_req);
+            ret = update_leaf_node(my_node, k, v, put_type, existing_val, multinode_req, bur);
             unlock_node(my_node, curlock);
-            COUNTER_INCREMENT(m_metrics, btree_obj_count, 1);
             return ret;
         }
         
@@ -1097,22 +1255,16 @@ done:
         
 retry:
         int start_ind = 0, end_ind = -1;
-        if (bur != nullptr) { // just get start/end index from get_all
-            my_node->get_all(bur->get_input_range(), UINT32_MAX, start_ind, end_ind);
-        } else {
-            auto result = my_node->find(k, nullptr, nullptr);
-            end_ind = start_ind = result.end_of_search_index;
-            assert(IS_VALID_INTERIOR_CHILD_INDX(result, my_node));
-        }
 
-        if (start_ind > end_ind) {
-            assert(0);//dont expect this to happen
-            // Either the node was updated or mynode is freed. Just proceed again from top.
-            ret = btree_status_t::retry;
+        /* Get the start and end ind in a parent node for the range updates. For 
+         * non range updates, start ind and end ind are same.
+         */
+        ret = get_start_and_end_ind(my_node, bur, k, start_ind, end_ind);
+        if (ret != btree_status_t::success) {
             goto out;
         }
 
-        assert(!unlocked_already);
+        assert(curlock == LOCKTYPE_READ || curlock == LOCKTYPE_WRITE);
         curr_ind = start_ind;
         while (curr_ind <= end_ind) { // iterate all matched childrens
             homeds::thread::locktype child_cur_lock = homeds::thread::LOCKTYPE_NONE;
@@ -1126,6 +1278,9 @@ retry:
             if (ret != btree_status_t::success) {
                if (ret == btree_status_t::not_found) {
                     // Either the node was updated or mynode is freed. Just proceed again from top.
+                    /* XXX: Is this case really possible as we always take the parent lock and never
+                     * release it.
+                     */
                     ret = btree_status_t::retry;
                }
                goto out; 
@@ -1133,84 +1288,26 @@ retry:
 
             // Directly get write lock for leaf, since its an insert.
             child_cur_lock = (child_node->is_leaf()) ? LOCKTYPE_WRITE : LOCKTYPE_READ;
-
-            if (bur != nullptr) { // calculate subrange
-                //find end of subrange
-                bool end_inc = true;
-                K end_key;
-                BtreeKey *end_key_ptr = &end_key;
-                /* we don't need to adjust the end index for the last found entry */
-                /* TODO: there is a bug which Rishabh is going to fix in 
-                 * different jira.
-                 */
-           //     if (curr_ind < end_ind) {
-                    if ((curr_ind == (int) my_node->get_total_entries() && my_node->get_edge_id().is_valid())) { //edge
-                        end_key_ptr = const_cast<BtreeKey *>(bur->get_input_range().get_end_key());
-                        end_inc = bur->get_input_range().is_end_inclusive();
-                    } else {
-                        my_node->get_nth_key(curr_ind, end_key_ptr, false);
-                    }
-
-                    const_cast<BtreeKey *>(bur->get_cb_param()->get_sub_range().get_end_key())->copy_blob(
-                            end_key_ptr->get_blob());//copy
-                    bur->get_cb_param()->get_sub_range().set_end_incl(end_inc);
-             //   }
-
-                //find start of subrange. We don't adjust the start index in the sub range for the first entry
-                if (curr_ind > 0) {
-                    K start_key;
-                    my_node->get_nth_key(curr_ind - 1, &start_key, true);
-                    const_cast<BtreeKey *>(bur->get_cb_param()->get_sub_range().get_start_key())->copy_blob(
-                            start_key.get_blob());//copy
-                    bur->get_cb_param()->get_sub_range().set_start_incl(false);
-                }//else no need to update, we carry fwd with start value from parent
-
-                DLOGDEBUGMOD(btree_structures,
-                         "Subrange:s:{},e:{},c:{},nid:{},eidvalid?:{},sk:{},ek:{}", start_ind, end_ind, curr_ind,
-                          my_node->get_node_id().to_string(), my_node->get_edge_id().is_valid(),
-                          bur->get_cb_param()->get_sub_range().get_start_key()->to_string(),
-                          bur->get_cb_param()->get_sub_range().get_end_key()->to_string());
+            
+            /* check if child node is needed to split */
+            bool split_occured = false;
+            ret = check_and_split_node(my_node, bur, k, v, ind_hint, put_type, multinode_req, child_node, 
+                                       curlock, child_cur_lock, curr_ind, split_occured);
+            if (ret != btree_status_t::success) {
+                goto out;
+            }
+            if (split_occured) {
+                ind_hint = -1; // Since split is needed, hint is no longer valid
+                goto retry;
             }
 
-            if (child_node->is_split_needed(m_btree_cfg, k, v, &ind_hint, put_type, bur)) {
-                if(bur && is_any_child_splitted) { // spliting another child
-                    if(my_node->is_split_needed(m_btree_cfg, k, v, &ind_hint, put_type, bur)){
-                        //restart from root
-                        unlock_node(child_node, child_cur_lock);
-                        ret = btree_status_t::retry;
-                        goto out;
-                    }
-                    btree_store_t::refresh_node(m_btree_store.get(), my_node, multinode_req, true);
-                }
-                // Time to split the child, but we need to convert ours to write lock
-                ret = upgrade_node(my_node, child_node, curlock, child_cur_lock, multinode_req);
-                if (ret != btree_status_t::success) {
-                    LOGDEBUGMOD(btree_structures, "Upgrade of lock for node {} failed, retrying from root",
-                            my_node->get_node_id_int());
-                    unlocked_already = true;
-                    goto out;;
-                }
-
-                // We need to upgrade the child to WriteLock
-                ret = upgrade_node(child_node, nullptr, child_cur_lock, LOCKTYPE_NONE, multinode_req);
-                if (ret != btree_status_t::success) {
-                    goto out;
-                }
-
-                // Real time to split the node and get point at which it was split
-                K split_key;
-                ret = split_node(my_node, child_node, curr_ind, &split_key, multinode_req);
-                ind_hint = -1; // Since split is needed, hint is no longer valid
-
-                // After split, parentNode would have split, retry search and walk down.
-                unlock_node(child_node, homeds::thread::LOCKTYPE_WRITE);
-                COUNTER_INCREMENT(m_metrics, btree_split_count, 1);
-
-                is_any_child_splitted = true;
-                if (ret != btree_status_t::success) {
-                    goto out;
-                }
-                goto retry;//restart by searching node again as split occured
+            /* Get subrange if it is a range update */
+            if (bur) {
+                get_subrange(my_node, bur, curr_ind);
+                DLOGDEBUGMOD(btree_structures, "Subrange:s:{},e:{},c:{},nid:{},eidvalid?:{},sk:{},ek:{}", start_ind, end_ind, curr_ind,
+                        my_node->get_node_id().to_string(), my_node->get_edge_id().is_valid(),
+                        bur->get_cb_param()->get_sub_range().get_start_key()->to_string(),
+                        bur->get_cb_param()->get_sub_range().get_end_key()->to_string());
             }
 
 #ifndef NDEBUG
@@ -1236,7 +1333,7 @@ retry:
                 // If we have reached the last index, unlock before traversing down, because we no longer need
                 // this lock. Holding this lock will impact performance unncessarily.
                 unlock_node(my_node, curlock);
-                unlocked_already = true;
+                curlock = LOCKTYPE_NONE;
             }
 
 #ifndef NDEBUG
@@ -1260,7 +1357,7 @@ retry:
             curr_ind++;
         }
 out:
-        if (!unlocked_already) {
+        if (curlock != LOCKTYPE_NONE) {
             unlock_node(my_node, curlock);
         }
         return ret;
@@ -1332,8 +1429,10 @@ out:
             // If we are unable to upgrade the node, ask the caller to retry.
             ret = upgrade_node(my_node, child_node, curlock, child_cur_lock, multinode_req);
             if (ret != btree_status_t::success) {
+                assert(curlock == homeds::thread::LOCKTYPE_NONE);
                 return ret;
             }
+            assert(curlock == homeds::thread::LOCKTYPE_WRITE);
 
 #define MAX_ADJANCENT_INDEX 3
 
@@ -1777,10 +1876,12 @@ out:
 
                 if (minfo[n].parent_index == parent_node->get_total_entries()) { //edge entrys
                     parent_node->update(minfo[n].parent_index, ninfo);
-                } else {
+                } else if (minfo[n].node->get_total_entries() != 0) {
                     K last_ckey;//last key in child
                     minfo[n].node->get_last_key(&last_ckey);
                     parent_node->update(minfo[n].parent_index, last_ckey, ninfo);
+                } else {
+                    parent_node->update(minfo[n].parent_index, ninfo);
                 }
 
                 if (n == 0) {
@@ -1818,10 +1919,9 @@ out:
             }
             // free original node except first
             if (n != 0 && minfo[n].is_new_allocation) {
-                node_free_safely(minfo[n].node_orig, multinode_req);
-            } else {
-                unlock_node(minfo[n].node_orig, locktype::LOCKTYPE_WRITE);
+                free_node(minfo[n].node_orig, multinode_req);
             }
+            unlock_node(minfo[n].node_orig, locktype::LOCKTYPE_WRITE);
         }
 
         return ret;
@@ -1846,6 +1946,10 @@ out:
         parent_node->get(ind+1, &child_info, false /* copy */);
         auto child_node = read_node(child_info.bnode_id(), nullptr);
         lock_and_refresh_node(child_node, locktype::LOCKTYPE_READ, nullptr);
+        if (child_node->get_total_entries() == 0) {
+            unlock_node(child_node, locktype::LOCKTYPE_READ);
+            return;
+        }
         child_node->get_first_key(&child_key);
         parent_node->get_nth_key(ind, &parent_key, false);
         assert(child_key.compare(&parent_key) > 0);
@@ -1873,8 +1977,10 @@ out:
                 if (prev != nullptr && prev->get_next_bnode().m_id != minfo[i].node->get_node_id().m_id) {
                     cout << "oops";
                 }
-
-                assert(minfo[i].node->get_total_entries() != 0);
+                
+                if (minfo[i].node->get_total_entries() == 0) {
+                    continue;
+                }
                 K last_key;
                 minfo[i].node->get_last_key(&last_key);
                 K first_key;
@@ -1903,17 +2009,6 @@ out:
 
 #endif
 
-    void node_free_safely(BtreeNodePtr node, btree_multinode_req_ptr multinode_req) {
-        if (node->any_upgrade_waiters()) {
-            LOGTRACEMOD(btree_nodes, "Marking invalid:{}", node->get_node_id().to_string());
-            node->set_valid_node(false);
-            unlock_node(node, locktype::LOCKTYPE_WRITE);
-        } else {
-            unlock_node(node, locktype::LOCKTYPE_WRITE);
-            free_node(node, multinode_req);
-        }
-    }
-
     BtreeNodePtr alloc_leaf_node() {
         bool         is_new_allocation;
         BtreeNodePtr n = btree_store_t::alloc_node(m_btree_store.get(), true /* is_leaf */, is_new_allocation);
@@ -1930,10 +2025,13 @@ out:
         return n;
     }
 
+    /* Note:- This function assumes that access of this node is thread safe. */
     void free_node(BtreeNodePtr& node, btree_multinode_req_ptr multinode_req, bool mem_only = false) {
         LOGDEBUGMOD(btree_generics, "Free node-{}", node->get_node_id_int());
 
         COUNTER_DECREMENT_IF_ELSE(m_metrics, node->is_leaf(), btree_leaf_node_count, btree_int_node_count, 1);
+        assert(node->is_valid_node());
+        node->set_valid_node(false);
         btree_store_t::free_node(m_btree_store.get(), node, multinode_req, mem_only);
     }
 
@@ -1977,6 +2075,7 @@ out:
         
         auto acq_lock = (child_node->is_leaf()) ? leaf_lock_type : int_lock_type;
         btree_status_t ret = lock_and_refresh_node(child_node, acq_lock, multinode_req);
+        assert(child_node->is_valid_node());
         return ret;
     }
 

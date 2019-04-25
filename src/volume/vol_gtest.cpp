@@ -3,6 +3,7 @@
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
 #include <main/vol_interface.hpp>
+//#include <volume/home_blks.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <fstream>
@@ -28,6 +29,7 @@ THREAD_BUFFER_INIT;
 /************************** GLOBAL VARIABLES ***********************/
 
 #define MAX_DEVICES 2
+#define HOMEBLKS_SB_FLAGS_SHUTDOWN 0x00000001UL
 
 #define STAGING_VOL_PREFIX "staging"
 #define VOL_PREFIX "/tmp/vol"
@@ -57,9 +59,11 @@ SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write, iomgr,
 
 /**************** Common class created for all tests ***************/
 
-class test_ep : public iomgr::EndPoint {
+class test_ep : public iomgr::EndPoint { 
 public:
     test_ep(std::shared_ptr<iomgr::ioMgr> iomgr) :iomgr::EndPoint(iomgr) {
+    }
+    void shutdown_local() override {
     }
     void init_local() override {
     }
@@ -114,6 +118,7 @@ protected:
     bool move_verify_to_done;
     std::atomic<int> rdy_state;
     bool is_abort;
+    bool shutdown_on_reboot;
     Clock::time_point print_startTime;
     std::atomic<uint64_t> staging_match_cnt;
 
@@ -128,7 +133,14 @@ public:
         move_verify_to_done = false;
         print_startTime = Clock::now();
     }
-
+    ~IOTest() {
+        iomgr_obj->stop(); 
+        iomgr_obj.reset();
+        for (auto& x : m_vol_bm) {
+            delete x;
+        }
+        free(init_buf);
+    }
     void remove_files() {
         for (auto &n : names) {
             remove(n.c_str());
@@ -163,8 +175,9 @@ public:
         /* Don't populate the whole disks. Only 80 % of it */
         max_vol_size = (60 * max_capacity)/ (100 * max_vols);
 
-        iomgr_obj = std::make_shared<iomgr::ioMgr>(2, num_threads);
-        init_params params;
+        iomgr_obj = std::make_shared<iomgr::ioMgr>(2, num_threads); 
+        LOGINFO("OK1 iomgr_obj use_count: {}", iomgr_obj.use_count()); 
+        init_params params; 
 #if 0
         params.flag = homestore::io_flag::BUFFERED_IO;
 #else
@@ -649,6 +662,7 @@ public:
     }
 
     void shutdown_callback(bool success) {
+        VolInterface::del_instance();
         assert(success);
     }
     
@@ -781,15 +795,14 @@ TEST_F(IOTest, force_shutdown_by_api_homeblks_test) {
     this->remove_files();
 }
 
+// simulate reboot with m_cfg_sb flags set w/ shutdown bit 
 TEST_F(IOTest, shutdown_on_reboot_homeblks_test) {
     /* fork a new process */
-    this->init = true;
+    this->init = false;
+    this->shutdown_on_reboot = true;
     /* child process */
-    // TODO: add fault injection to simulate reboot with m_cfg_sb flags set w/ shutdown bit 
     this->start_homestore();
     this->wait_cmpl();
-    LOGINFO("write_cnt {}", write_cnt);
-    LOGINFO("read_cnt {}", read_cnt);
     this->remove_files();
 }
 
@@ -822,14 +835,6 @@ SDS_OPTION_GROUP(test_volume,
 
 #define ENABLED_OPTIONS logging, home_blks, test_volume
 SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
-
-/* it will go away once shutdown is implemented correctly */
-
-extern "C" 
-__attribute__((no_sanitize_address))
-const char* __asan_default_options() { 
-    return "detect_leaks=0"; 
-}
 
 /************************** MAIN ********************************/
 

@@ -34,6 +34,7 @@ struct iocb_info : public iocb {
 class DriveEndPoint : public iomgr::EndPoint {
 public:
 	DriveEndPoint(std::shared_ptr<iomgr::ioMgr> iomgr, comp_callback cb);
+    ~DriveEndPoint();
    
 	int open_dev(std::string devname, int oflags); 
 	void sync_write(int m_sync_fd, const char *data, uint32_t size, uint64_t offset);
@@ -46,6 +47,7 @@ public:
 	void async_readv(int m_sync_fd, const struct iovec *iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t *cookie);
 	void process_completions(int fd, void *cookie, int event);
 	void init_local() override;
+	void shutdown_local() override;
 	void print_perf() override {}
 
 private:

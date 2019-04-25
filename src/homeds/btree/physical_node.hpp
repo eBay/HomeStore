@@ -245,6 +245,11 @@ protected:
             bool copy_val = true) const {
         auto result = bsearch_node(range);
 
+        if (result.end_of_search_index == (int)get_total_entries() && !has_valid_edge()) {
+            assert(!result.found);
+            return result;
+        }
+
         if (outval) {
             to_variant_node_const()->get(result.end_of_search_index, outval, copy_val /* copy */);
         }
@@ -357,7 +362,7 @@ protected:
             if (!result.found) return false;
             to_variant_node()->update(result.end_of_search_index, key, val);
         } else if (put_type == btree_put_type::REPLACE_IF_EXISTS_ELSE_INSERT) {
-            (result.found) ? to_variant_node()->insert(result.end_of_search_index, key, val) :
+            !(result.found) ? to_variant_node()->insert(result.end_of_search_index, key, val) :
                              to_variant_node()->update(result.end_of_search_index, key, val);
         } else if (put_type == btree_put_type::APPEND_ONLY_IF_EXISTS) {
             if (!result.found) return false;

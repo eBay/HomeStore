@@ -24,11 +24,12 @@ ENUM(generator_op_error, uint32_t, no_error, store_failed, store_timeout, data_v
 template < typename K, typename V, typename Store >
 class KVGenerator {
 public:
-    KVGenerator() : m_executor(4 /* threads */, 1 /* priorities */, 20000 /* maxQueueSize */) {}
+    KVGenerator() : m_executor(4 /* threads */, 1 /* priorities */, 20000 /* maxQueueSize */) {
+        srand(time(0));
+        m_store = std::make_shared<Store >();
+    }
 
     typedef std::function< void(generator_op_error, const key_info< K >*, void*, const std::string&) > store_error_cb_t;
-
-    void register_store(const std::shared_ptr< Store >& store) { m_store = store; }
 
     static void handle_generic_error(generator_op_error err, const key_info< K >* ki, void* store_error,
                                      const std::string& err_text = "") {
@@ -44,6 +45,9 @@ public:
         });
     }
 
+    void reset_pattern(KeyPattern key_pattern, int index=0){
+        _reset_pattern(key_pattern,index);
+    }
     void insert_new(KeyPattern key_pattern, ValuePattern value_pattern,
                     store_error_cb_t error_cb = handle_generic_error, bool expected_success = true) {
         insert(key_pattern, value_pattern, error_cb, expected_success, true);
@@ -60,9 +64,18 @@ public:
 
     void insert(KeyPattern key_pattern, ValuePattern value_pattern, store_error_cb_t error_cb, bool expected_success,
                 bool new_key) {
-        this->m_outstanding.increment(1);
+        this->op_start();
         m_executor.add([=] {
             this->_insert(key_pattern, value_pattern, error_cb, expected_success, new_key);
+            this->op_done();
+        });
+    }
+
+    void update(KeyPattern key_pattern, ValuePattern value_pattern, bool exclusive_access = true, 
+                bool expected_success = true, bool valid_key = true, store_error_cb_t error_cb = handle_generic_error) {
+        this->op_start();
+        m_executor.add([=] {
+            this->_update(key_pattern, exclusive_access, value_pattern, error_cb, expected_success,valid_key);
             this->op_done();
         });
     }
@@ -77,16 +90,17 @@ public:
 
     void get(KeyPattern pattern, bool exclusive_access = true, store_error_cb_t error_cb = handle_generic_error,
              bool expected_success = true, bool valid_key = true) {
-        this->m_outstanding.increment(1);
+        this->op_start();
         m_executor.add([=] {
             this->_get(pattern, exclusive_access, error_cb, expected_success, valid_key);
             this->op_done();
         });
     }
 
-    void remove(KeyPattern pattern, bool exclusive_access = true, store_error_cb_t error_cb = handle_generic_error,
-                bool expected_success = true, bool valid_key = true) {
-        this->m_outstanding.increment(1);
+    void remove(KeyPattern pattern, bool exclusive_access = true,
+                bool expected_success = true, bool valid_key = true,
+                store_error_cb_t error_cb = handle_generic_error) {
+        this->op_start();
         m_executor.add([=] {
             this->_remove(pattern, exclusive_access, error_cb, expected_success, valid_key);
             this->op_done();
@@ -99,7 +113,7 @@ public:
 
     void range_query(KeyPattern pattern, uint32_t num_keys_in_range, bool exclusive_access, bool start_incl, bool end_incl,
                      store_error_cb_t error_cb = handle_generic_error) {
-        this->m_outstanding.increment(1);
+        this->op_start();
         m_executor.add([=] {
             this->_range_query(pattern, num_keys_in_range, true, exclusive_access, start_incl, end_incl, error_cb);
             this->op_done();
@@ -107,7 +121,7 @@ public:
     }
 
     void range_query_nonexisting(store_error_cb_t error_cb = handle_generic_error) {
-        this->m_outstanding.increment(1);
+        this->op_start();
         m_executor.add([=] {
             this->_range_query(KeyPattern::SEQUENTIAL, 1, false, true, error_cb);
             this->op_done();
@@ -123,9 +137,25 @@ public:
     }
 
 private:
+    static constexpr auto QUEUE_DEPTH = 64;
+    std::condition_variable m_cv;
+    std::mutex m_mutex;
+
+    void op_start() {
+        std::unique_lock< std::mutex > lk(m_mutex);
+        if(m_outstanding.test_le(QUEUE_DEPTH)) {
+            m_outstanding.increment(1);
+        }else {
+            m_cv.wait(lk);
+            m_outstanding.increment(1);
+        }
+    }
+    
     void op_done() {
         if (m_outstanding.decrement_testz()) {
             m_test_baton.post();
+        }else {
+            m_cv.notify_one();
         }
     }
 
@@ -218,7 +248,7 @@ private:
         auto value = V::gen_value(value_pattern, nullptr);
         bool success = m_store->update(kip->m_key, value);
         if (success != expected_success) {
-            error_cb(generator_op_error::store_failed, kip.m_ki, 0, nullptr,
+            error_cb(generator_op_error::store_failed, kip.m_ki, nullptr,
                      fmt::format("Update status expected {} got {}", expected_success, success));
             return;
         }
@@ -248,9 +278,15 @@ private:
         auto it = m_key_registry.find_key(start_incl ? kis[0] : kis[1]);
 
         auto count = m_store->query(kis[0]->m_key, start_incl, kis.back()->m_key, end_incl, 1000, nullptr,
-                                [&](const K& k, const V& v, void* context) {
+                                [&](const K& k, const V& v, bool is_success, void *context) {
                                     const key_info< K >* expected_ki = *it;
                                     ++it;
+
+                                    if (!is_success) {
+                                        error_cb(generator_op_error::store_failed, expected_ki, nullptr,
+                                                "Store reported query error");
+                                        return false;
+                                    }
 
                                     if (actual_count++ > expected_count) {
                                         error_cb(generator_op_error::order_validation_failed, expected_ki, nullptr, "");
@@ -275,6 +311,10 @@ private:
             error_cb(generator_op_error::data_missing, kis[0].m_ki, nullptr,
                      fmt::format("Expecting {} keys, got {}", expected_count, actual_count));
         }
+    }
+    
+    void _reset_pattern(KeyPattern key_pattern, int index=0){
+        m_key_registry.reset_pattern(key_pattern,index);
     }
 
 private:

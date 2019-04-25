@@ -23,7 +23,7 @@
 namespace homestore {
 using namespace homeio;
 
-DriveEndPoint* PhysicalDev::ep = NULL;
+DriveEndPoint* PhysicalDev::m_ep = NULL;
 
 #ifdef __APPLE__
 
@@ -42,6 +42,11 @@ ssize_t pwritev(int fd, const struct iovec* iov, int iovcnt, off_t offset) {
 
 static std::atomic< uint64_t > glob_phys_dev_offset(0);
 static std::atomic< uint32_t > glob_phys_dev_ids(0);
+
+PhysicalDev::~PhysicalDev() {
+    free(m_super_blk);        
+    // m_ep will be deleted in iomgr::stop 
+}
 
 void PhysicalDev::update(uint32_t dev_num, uint64_t dev_offset, uint32_t first_chunk_id) {
 
@@ -88,8 +93,8 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
     assert(m_super_blk != nullptr);
     assert(sizeof(super_block) <= HomeStoreConfig::atomic_phys_page_size);
 
-    if (!ep) {
-        ep = new DriveEndPoint(iomgr, cb);
+    if (!m_ep) {
+        m_ep = new DriveEndPoint(iomgr, cb);
     }
 
     m_info_blk.dev_num = dev_num;
@@ -98,7 +103,7 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
     m_cur_indx = 0;
     m_superblock_valid = false;
 
-    m_devfd = ep->open_dev(devname.c_str(), oflags);
+    m_devfd = m_ep->open_dev(devname.c_str(), oflags);
     if (m_devfd == -1) {
         throw std::system_error(errno, std::system_category(), "error while opening the device");
         return;
@@ -173,12 +178,12 @@ bool PhysicalDev::load_super_block() {
 void PhysicalDev::read_dm_chunk(char* mem, uint64_t size) {
     assert(m_super_blk->dm_chunk[m_cur_indx % 2].chunk_size == size);
     auto offset = m_super_blk->dm_chunk[m_cur_indx % 2].chunk_start_offset;
-    ep->sync_read(get_devfd(), mem, size, (off_t)offset);
+    m_ep->sync_read(get_devfd(), mem, size, (off_t)offset);
 }
 
 void PhysicalDev::write_dm_chunk(uint64_t gen_cnt, char* mem, uint64_t size) {
     auto offset = m_dm_chunk[(++m_cur_indx) % 2]->get_start_offset();
-    ep->sync_write(get_devfd(), mem, size, (off_t)offset);
+    m_ep->sync_write(get_devfd(), mem, size, (off_t)offset);
     write_super_block(gen_cnt);
 }
 
@@ -231,24 +236,24 @@ inline void PhysicalDev::read_superblock() {
 }
 
 void PhysicalDev::write(const char* data, uint32_t size, uint64_t offset, uint8_t* cookie) {
-    ep->async_write(get_devfd(), data, size, (off_t)offset, cookie);
+    m_ep->async_write(get_devfd(), data, size, (off_t)offset, cookie);
 }
 
 void PhysicalDev::writev(const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie) {
-    ep->async_writev(get_devfd(), iov, iovcnt, size, offset, cookie);
+    m_ep->async_writev(get_devfd(), iov, iovcnt, size, offset, cookie);
 }
 
 void PhysicalDev::read(char* data, uint32_t size, uint64_t offset, uint8_t* cookie) {
-    ep->async_read(get_devfd(), data, size, (off_t)offset, cookie);
+    m_ep->async_read(get_devfd(), data, size, (off_t)offset, cookie);
 }
 
 void PhysicalDev::readv(const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie) {
-    ep->async_readv(get_devfd(), iov, iovcnt, size, (off_t)offset, cookie);
+    m_ep->async_readv(get_devfd(), iov, iovcnt, size, (off_t)offset, cookie);
 }
 
 void PhysicalDev::sync_write(const char* data, uint32_t size, uint64_t offset) {
     try {
-        ep->sync_write(get_devfd(), data, size, (off_t)offset);
+        m_ep->sync_write(get_devfd(), data, size, (off_t)offset);
     } catch (const std::system_error& e) {
         std::stringstream ss;
         ss << "dev_name " << get_devname() << ":" << e.what() << "\n";
@@ -259,7 +264,7 @@ void PhysicalDev::sync_write(const char* data, uint32_t size, uint64_t offset) {
 
 void PhysicalDev::sync_writev(const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset) {
     try {
-        ep->sync_writev(get_devfd(), iov, iovcnt, size, (off_t)offset);
+        m_ep->sync_writev(get_devfd(), iov, iovcnt, size, (off_t)offset);
     } catch (const std::system_error& e) {
         std::stringstream ss;
         ss << "dev_name " << get_devname() << e.what() << "\n";
@@ -270,7 +275,7 @@ void PhysicalDev::sync_writev(const struct iovec* iov, int iovcnt, uint32_t size
 
 void PhysicalDev::sync_read(char* data, uint32_t size, uint64_t offset) {
     try {
-        ep->sync_read(get_devfd(), data, size, (off_t)offset);
+        m_ep->sync_read(get_devfd(), data, size, (off_t)offset);
     } catch (const std::system_error& e) {
         std::stringstream ss;
         ss << "dev_name " << get_devname() << e.what() << "\n";
@@ -281,7 +286,7 @@ void PhysicalDev::sync_read(char* data, uint32_t size, uint64_t offset) {
 
 void PhysicalDev::sync_readv(const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset) {
     try {
-        ep->sync_readv(get_devfd(), iov, iovcnt, size, (off_t)offset);
+        m_ep->sync_readv(get_devfd(), iov, iovcnt, size, (off_t)offset);
     } catch (const std::system_error& e) {
         std::stringstream ss;
         ss << "dev_name " << get_devname() << e.what() << "\n";

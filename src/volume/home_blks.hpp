@@ -46,9 +46,9 @@ struct sb_blkstore_blob : blkstore_blob {
 #define VOL_SB_MAGIC 0xCEEDDEEB
 /* Note: version is same for both vol config and vol sb */
 #define VOL_SB_VERSION    0x1
+typedef uint32_t vol_cfg_sb_flag_t;
 
-#define HOMEBLKS_SB_FLAGS_SHUTDOWN 0x00000001UL
-
+#define HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN 0x00000001UL
 struct vol_sb_header {
     uint64_t magic;
     uint64_t version;
@@ -58,9 +58,14 @@ struct vol_sb_header {
 } __attribute((packed));
 
 struct vol_config_sb : vol_sb_header {
-    BlkId       vol_list_head;
-    int         num_vols;
-    uint32_t    flags;
+    BlkId               vol_list_head;
+    int                 num_vols;
+    vol_cfg_sb_flag_t   flags;
+
+    void     init_flag(vol_cfg_sb_flag_t f) { flags = f; }
+    void     set_flag(vol_cfg_sb_flag_t bit) { flags |= bit; }
+    void     clear_flag(vol_cfg_sb_flag_t bit) { flags &= ~bit; }
+    bool     test_flag(vol_cfg_sb_flag_t bit) { return flags & bit; }
 } __attribute((packed));
 
 /* If it exceeds 8k then we need to use two buffer to keep the data consistent */
@@ -127,6 +132,9 @@ public:
     vol_sb* vol_sb_read(BlkId bid);
 
     HomeBlks(const init_params& cfg);
+    ~HomeBlks() {  
+        m_thread_id.join();
+    }
     virtual std::error_condition write(const VolumePtr& vol, uint64_t lba, uint8_t* buf, uint32_t nblks,
                                        const vol_interface_req_ptr& req) override;
     virtual std::error_condition read(const VolumePtr& vol, uint64_t lba, int nblks,
