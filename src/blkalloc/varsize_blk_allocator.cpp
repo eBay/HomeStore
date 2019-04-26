@@ -358,15 +358,14 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
 }
 
 void VarsizeBlkAllocator::free(const BlkId &b) {
+    if (m_flip->test_flip("modify_bitmap")) {
+        LOGTRACEMOD(varsize_blk_alloc, "Flip hit in free(). Won't free blocks.");
+        return;
+    }
     BlkAllocPortion *portion = blknum_to_portion(b.get_id());
     BlkAllocSegment *segment = blknum_to_segment(b.get_id());
 
     portion->lock();
-    if (m_flip->test_flip("modify_bitmap")) {
-        LOGTRACEMOD(varsize_blk_alloc, "Flip hit in free(). Won't free blocks.");
-        m_alloc_bm->reset_bits(b.get_id(), b.get_nblks());
-    }
-
     // Reset the bits
     assert(m_alloc_bm->is_bits_set_reset(b.get_id(), b.get_nblks(), true));
 #ifndef NDEBUG

@@ -194,7 +194,9 @@ public:
 
     static void free_var_blocks(VarsizeBlkAllocatorTest *test, const std::vector<BlkId> &blist) {
         for (auto &bid : blist) {
-            ASSERT_DEATH(test->m_varsize_allocator->free(bid); , ".*Assertion.*");
+            //testing::FLAGS_gtest_death_test_style = "threadsafe";
+            //ASSERT_DEATH(test->m_varsize_allocator->free(bid); , ".*Assertion.*");
+            test->m_varsize_allocator->free(bid);
         }
     }
 };
@@ -246,7 +248,7 @@ TEST_F(VarsizeBlkAllocatorTest, alloc_free_nblks_test) {
     std::vector<BlkId> blkids[NTHREADS];
 
     std::default_random_engine generator;
-    std::uniform_int_distribution<int> distribution(7, 10);
+    std::uniform_int_distribution<int> distribution(8, 64);
 
     for (auto i = 0U; i < NTHREADS; i++) {
         auto nblks = (uint8_t) distribution(generator);
