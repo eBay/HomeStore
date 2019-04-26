@@ -61,9 +61,9 @@ add_executable(test_btree_simple ${TEST_BTREE_SIMPLE_FILES})
 target_link_libraries(test_btree_simple homestore ${COMMON_LIB_DEPS})
 #add_test(NAME TestBtreeSimple COMMAND test_btree_simple)
 
-set(TEST_LOADGEN_FILES 
-    loadgen/test_loadgen.cpp
+set(TEST_IOMGR_EXEC_FILES 
+    loadgen/test_iomgr_executor.cpp
     loadgen/iomgr_executor.cpp
     )
-add_executable(test_loadgen ${TEST_LOADGEN_FILES})
-target_link_libraries(test_loadgen homestore ${COMMON_LIB_DEPS})
+add_executable(test_iomgr_exec ${TEST_IOMGR_EXEC_FILES})
+target_link_libraries(test_iomgr_exec homestore ${COMMON_LIB_DEPS})
