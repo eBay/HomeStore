@@ -28,6 +28,7 @@ public:
     void add(callback_t done_cb);
     void start();
     void stop(bool wait_io_complete =  false);
+    bool is_empty();
 
 private:
     void process_ev_callback(const int fd, const void* cookie, const int event);

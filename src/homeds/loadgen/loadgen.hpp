@@ -14,6 +14,7 @@
 #include <folly/Synchronized.h>
 #include <utility/atomic_counter.hpp>
 #include <spdlog/fmt/fmt.h>
+#include "iomgr_executor.hpp"
 
 namespace homeds {
 namespace loadgen {
@@ -27,8 +28,11 @@ public:
     KVGenerator() : m_executor(4 /* threads */, 1 /* priorities */, 20000 /* maxQueueSize */) {
         srand(time(0));
         m_store = std::make_shared<Store >();
+        m_executor.start();
     }
-
+    ~KVGenerator() {
+        m_executor.stop();
+    }
     typedef std::function< void(generator_op_error, const key_info< K >*, void*, const std::string&) > store_error_cb_t;
 
     static void handle_generic_error(generator_op_error err, const key_info< K >* ki, void* store_error,
@@ -321,7 +325,8 @@ private:
     KeyRegistry< K >                                                         m_key_registry;
     folly::Synchronized< std::set< key_info< K >*, compare_key_info< K > > > m_data_set;
     std::shared_ptr< Store >                                                 m_store;
-    folly::CPUThreadPoolExecutor                                             m_executor;
+    //folly::CPUThreadPoolExecutor                                             m_executor;
+    IOMgrExecutor                                                            m_executor;
     sisl::atomic_counter< int64_t >                                          m_outstanding = 0;
     folly::Baton<>                                                           m_test_baton;
 };
