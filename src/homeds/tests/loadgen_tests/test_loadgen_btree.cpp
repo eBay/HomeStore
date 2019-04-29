@@ -61,16 +61,18 @@ using namespace homeds::loadgen;
 #define simple_mem_btree_store_t MemBtreeStoreSpec<SimpleNumberKey, FixedBytesValue<64>, 8192 >
 #define KVG KVGenerator<SimpleNumberKey, FixedBytesValue<64>, simple_mem_btree_store_t >
 
-static uint64_t NIO=0,NC=0,NR=0,NU=0,ND=0;//individual op counts
-static int WARM_UP_KEYS=1000;
-static int CHECKPOINT_RANGE_BATCH_SIZE=50;
+static uint64_t NIO=0,NC=0,NR=0,NU=0,ND=0,NK=0,CURR_NC=0,CURR_NR=0,CURR_NU=0,CURR_ND=0;
 
-uint64_t get_io_count(int percent){
+static uint64_t get_io_count(int percent){
     return percent*NIO/100;
 }
 
 struct BtreeTestLoadGen : public ::testing::Test {
     KVG kvg;
+    std::atomic<uint64_t> stored_keys=0, outstanding_create=0, outstanding_remove=0, outstanding_others=0;
+    int WARM_UP_KEYS=1000;
+    int CHECKPOINT_RANGE_BATCH_SIZE=50;
+    std::mutex m_cv_mtx;
     
     uint64_t get_warmup_key_count(int percent){
         return percent*WARM_UP_KEYS/100;
@@ -163,12 +165,12 @@ struct BtreeTestLoadGen : public ::testing::Test {
     void do_negative_tests() {
         //remove from empty set
         kvg.run_parallel([&]() {
-            kvg.remove(KeyPattern::UNI_RANDOM, false, false, false);
+            kvg.remove(KeyPattern::UNI_RANDOM, false, false, nullptr, false);
             kvg.update(KeyPattern::UNI_RANDOM, ValuePattern::RANDOM_BYTES, false, false, false);
         });
     }
 
-    void warmup_test(){
+    void warmup(){
         //basic serialized tests
         do_inserts();
         do_updates();
@@ -176,23 +178,51 @@ struct BtreeTestLoadGen : public ::testing::Test {
         do_negative_tests();
     }
     
+    void insert_success_cb() {
+        std::unique_lock<std::mutex> lk(mutex);
+        stored_keys++;
+        outstanding_create--;
+    }
+    void remove_success_cb() {
+        std::unique_lock<std::mutex> lk(mutex);
+        stored_keys--;
+        outstanding_others--;
+    }
+    void read_update_success_cb() {
+        std::unique_lock<std::mutex> lk(mutex);
+        outstanding_others--;
+    }
+    
     void regression(){
         kvg.run_parallel([&]() {
-            for (auto i = 0u; i < NC; i++) {
-                kvg.insert_new(KeyPattern::UNI_RANDOM, ValuePattern::RANDOM_BYTES);
-            }
-            for (auto i = 0u; i < NR; i++) {
-                kvg.get(KeyPattern::UNI_RANDOM, true, true);
-            }
-            for (auto i = 0u; i < NU; i++) {
-                kvg.update(KeyPattern::UNI_RANDOM, ValuePattern::RANDOM_BYTES, true, true);
-            }
-        });
-        assert(NR<=get_existing_key_count(100));
-        
-        kvg.run_parallel([&]() {
-            for (auto i = 0u; i < ND; i++) {
-                kvg.remove(KeyPattern::UNI_RANDOM, true, true);
+            while(CURR_NC<NC || CURR_NR<NR || CURR_NU<NU || CURR_ND<ND){
+                std::unique_lock<std::mutex> lk(mutex);
+                //allow create only if stored keys + issued creates are less than max number of keys
+                while (CURR_NC<NC && stored_keys+outstanding_create<NK) {
+                    CURR_NC++;
+                    outstanding_create++;
+                    kvg.insert_new(KeyPattern::UNI_RANDOM, ValuePattern::RANDOM_BYTES,
+                                   std::bind(&BtreeTestLoadGen::insert_success_cb, this));
+                }
+                if(CURR_NR<NR && stored_keys-outstanding_others>0 ) {
+                    CURR_NR++;
+                    outstanding_others++;
+                    kvg.get(KeyPattern::UNI_RANDOM, true, true,true,
+                            std::bind(&BtreeTestLoadGen::remove_success_cb, this));
+                }
+                if (CURR_NU<NU && stored_keys-outstanding_others>0) {
+                    CURR_NU++;
+                    outstanding_others++;
+                    kvg.update(KeyPattern::UNI_RANDOM, ValuePattern::RANDOM_BYTES, true, true,true,
+                               std::bind(&BtreeTestLoadGen::remove_success_cb, this));
+                }
+                //allow remove only if there are any stored keys on which other operations are not being worked on
+                if (CURR_ND<ND && stored_keys-outstanding_others>0) {
+                    CURR_ND++;
+                    outstanding_others++;
+                    kvg.remove(KeyPattern::UNI_RANDOM, true, true, 
+                            std::bind(&BtreeTestLoadGen::remove_success_cb, this));
+                }
             }
         });
         
@@ -202,12 +232,13 @@ struct BtreeTestLoadGen : public ::testing::Test {
 };
 
 TEST_F(BtreeTestLoadGen, SimpleMemBtreeTest) {
-    this->warmup_test();
+    this->warmup();
     this->regression();
 }
 
 SDS_OPTION_GROUP(test_mem_btree,
-                 (num_io, "", "num_io", "num of io", ::cxxopts::value<uint64_t>()->default_value("1000"), "number"),
+                 (num_io, "", "num_io", "num of io", ::cxxopts::value<uint64_t>()->default_value("10000"), "number"),
+                 (num_keys, "", "num_keys", "num of keys", ::cxxopts::value<uint64_t>()->default_value("1000"), "number"),
                  (percent_create, "", "percent_create", "percentage of io that are creates", ::cxxopts::value<uint64_t>()->default_value("80"), "number"),
                  (percent_read, "", "percent_read", "percentage of io that are reads", ::cxxopts::value<uint64_t>()->default_value("10"), "number"),
                  (percent_update, "", "percent_update", "percentage of io that are updates", ::cxxopts::value<uint64_t>()->default_value("50"), "number"),
@@ -223,7 +254,7 @@ int main(int argc, char *argv[]) {
     testing::InitGoogleTest(&argc, argv);
 
     NIO = SDS_OPTIONS["num_io"].as<uint64_t>();
-
+    NK = SDS_OPTIONS["num_keys"].as<uint64_t>();
     NC = get_io_count(SDS_OPTIONS["percent_create"].as<uint64_t>());
     NR = get_io_count(SDS_OPTIONS["percent_read"].as<uint64_t>());
     NU = get_io_count(SDS_OPTIONS["percent_update"].as<uint64_t>());

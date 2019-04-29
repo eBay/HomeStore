@@ -30,17 +30,19 @@ public:
     }
 
     typedef std::function< void(generator_op_error, const key_info< K >*, void*, const std::string&) > store_error_cb_t;
-
+    typedef std::function< void() > loadgen_success_cb_t;
+    
     static void handle_generic_error(generator_op_error err, const key_info< K >* ki, void* store_error,
                                      const std::string& err_text = "") {
         LOGDFATAL_IF(true, "Store reported error {}, failed key = {} error_text = {}", err, ki->m_key, err_text);
     }
 
     void preload(KeyPattern key_pattern, ValuePattern value_pattern, uint32_t count,
+            loadgen_success_cb_t success_cb = nullptr,
             store_error_cb_t error_cb = handle_generic_error) {
         run_parallel([&](){
             for (auto i = 0u; i < count; i++) {
-                insert_new(key_pattern, value_pattern, error_cb);
+                insert_new(key_pattern, value_pattern, success_cb, true, error_cb);
             }
         });
     }
@@ -48,35 +50,39 @@ public:
     void reset_pattern(KeyPattern key_pattern, int index=0){
         _reset_pattern(key_pattern,index);
     }
-    void insert_new(KeyPattern key_pattern, ValuePattern value_pattern,
-                    store_error_cb_t error_cb = handle_generic_error, bool expected_success = true) {
-        insert(key_pattern, value_pattern, error_cb, expected_success, true);
+    void insert_new(KeyPattern key_pattern, ValuePattern value_pattern,loadgen_success_cb_t success_cb = nullptr,
+                    bool expected_success = true,
+                    store_error_cb_t error_cb = handle_generic_error) {
+        insert(key_pattern, value_pattern, error_cb, expected_success, true, success_cb);
     }
 
-    void insert_existing(KeyPattern key_pattern, ValuePattern value_pattern, bool expected_success) {
-        insert(key_pattern, value_pattern, handle_generic_error, expected_success, false /* new_key */);
+    void insert_existing(KeyPattern key_pattern, ValuePattern value_pattern, bool expected_success,
+                         loadgen_success_cb_t success_cb = nullptr) {
+        insert(key_pattern, value_pattern, handle_generic_error, expected_success, false /* new_key */, success_cb);
     }
 
     void insert_existing(KeyPattern key_pattern, ValuePattern value_pattern,
-                         store_error_cb_t error_cb = handle_generic_error, bool expected_success = false) {
-        insert(key_pattern, value_pattern, error_cb, expected_success, false /* new_key */);
+                         store_error_cb_t error_cb = handle_generic_error, bool expected_success = false,
+                         loadgen_success_cb_t success_cb = nullptr) {
+        insert(key_pattern, value_pattern, error_cb, expected_success, false /* new_key */, success_cb);
     }
 
     void insert(KeyPattern key_pattern, ValuePattern value_pattern, store_error_cb_t error_cb, bool expected_success,
-                bool new_key) {
+                bool new_key, loadgen_success_cb_t success_cb = nullptr) {
         this->op_start();
         m_executor.add([=] {
             this->_insert(key_pattern, value_pattern, error_cb, expected_success, new_key);
-            this->op_done();
+            this->op_done(success_cb);
         });
     }
 
     void update(KeyPattern key_pattern, ValuePattern value_pattern, bool exclusive_access = true, 
-                bool expected_success = true, bool valid_key = true, store_error_cb_t error_cb = handle_generic_error) {
+                bool expected_success = true, bool valid_key = true, loadgen_success_cb_t success_cb = nullptr,
+                store_error_cb_t error_cb = handle_generic_error) {
         this->op_start();
         m_executor.add([=] {
             this->_update(key_pattern, exclusive_access, value_pattern, error_cb, expected_success,valid_key);
-            this->op_done();
+            this->op_done(success_cb);
         });
     }
 
@@ -89,21 +95,22 @@ public:
     }
 
     void get(KeyPattern pattern, bool exclusive_access = true,
-             bool expected_success = true, bool valid_key = true, store_error_cb_t error_cb = handle_generic_error) {
+             bool expected_success = true, bool valid_key = true, loadgen_success_cb_t success_cb = nullptr,
+             store_error_cb_t error_cb = handle_generic_error) {
         this->op_start();
         m_executor.add([=] {
             this->_get(pattern, exclusive_access, error_cb, expected_success, valid_key);
-            this->op_done();
+            this->op_done(success_cb);
         });
     }
 
     void remove(KeyPattern pattern, bool exclusive_access = true,
-                bool expected_success = true, bool valid_key = true,
+                bool expected_success = true, loadgen_success_cb_t success_cb = nullptr, bool valid_key = true,
                 store_error_cb_t error_cb = handle_generic_error) {
         this->op_start();
         m_executor.add([=] {
             this->_remove(pattern, exclusive_access, error_cb, expected_success, valid_key);
-            this->op_done();
+            this->op_done(success_cb);
         });
     }
     
@@ -164,12 +171,13 @@ private:
         }
     }
     
-    void op_done() {
+    void op_done(loadgen_success_cb_t success_cb = nullptr) {
         if (m_outstanding.decrement_testz()) {
             m_test_baton.post();
         }else {
             m_cv.notify_one();
         }
+        if(success_cb) success_cb();
     }
 
     uint64_t _get_keys_count(){
