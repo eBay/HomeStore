@@ -186,6 +186,10 @@ public:
 
     virtual ~KeyRegistry() = default;
 
+    uint64_t get_keys_count(){
+        return m_data_set.size();
+    }
+    
     key_info_ptr< K > generate_key(KeyPattern gen_pattern) {
         std::unique_lock l(m_rwlock);
         return key_info_ptr(this, _generate_key(gen_pattern), true);
@@ -296,7 +300,10 @@ private:
             it = m_data_set.find(m_keys[start_slot].get());
             
             //remove punches holes, if it was last slot being punched, we have to start over
-            if(it == m_data_set.end()) it=m_data_set.begin();
+            if(it == m_data_set.end()){
+                bool rotated=false;
+                start_slot = _get_next_slot(start_slot, pattern, it, &rotated);//auto increments *it
+            }
         } else if (pattern == UNI_RANDOM) {
             start_slot = rand() % m_keys.size();
         }

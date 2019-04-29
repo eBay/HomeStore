@@ -88,8 +88,8 @@ public:
         get(KeyPattern::SEQUENTIAL, true, error_cb, expected_success, false /* valid_key */);
     }
 
-    void get(KeyPattern pattern, bool exclusive_access = true, store_error_cb_t error_cb = handle_generic_error,
-             bool expected_success = true, bool valid_key = true) {
+    void get(KeyPattern pattern, bool exclusive_access = true,
+             bool expected_success = true, bool valid_key = true, store_error_cb_t error_cb = handle_generic_error) {
         this->op_start();
         m_executor.add([=] {
             this->_get(pattern, exclusive_access, error_cb, expected_success, valid_key);
@@ -105,6 +105,19 @@ public:
             this->_remove(pattern, exclusive_access, error_cb, expected_success, valid_key);
             this->op_done();
         });
+    }
+    
+    uint64_t get_keys_count(){
+        return this->_get_keys_count();
+    }
+    
+    void remove_all_keys(KeyPattern pattern=KeyPattern::SEQUENTIAL, store_error_cb_t error_cb = handle_generic_error){
+        reset_pattern(pattern);
+        auto kc = get_keys_count();
+        for(auto i=0u;i<kc;i++){
+            this->_remove(pattern, true, error_cb,true,true);
+        }
+        assert(get_keys_count()==0);
     }
 
     void remove_non_existing(store_error_cb_t error_cb = handle_generic_error) {
@@ -159,6 +172,10 @@ private:
         }
     }
 
+    uint64_t _get_keys_count(){
+        return m_key_registry.get_keys_count();
+    }
+    
     void _insert(KeyPattern key_pattern, ValuePattern value_pattern, store_error_cb_t error_cb, bool expected_success,
                  bool new_key) {
         // Generate or read existing a new key from keyset.
@@ -216,7 +233,7 @@ private:
         // Generate a new key from keyset.
         auto kip = valid_key ? m_key_registry.get_key(pattern, true /* for_mutate */, exclusive_access) :
                                m_key_registry.generate_invalid_key();
-
+        assert(kip.m_ki->m_free_pending==false);
         V    value;
         bool success = m_store->remove(kip->m_key, &value);
         if (success != expected_success) {
