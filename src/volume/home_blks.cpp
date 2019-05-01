@@ -136,24 +136,28 @@ VolumePtr HomeBlks::create_volume(const vol_params& params) {
 #define VOLUME_CLEAN_USE_CNT 2
 
 std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
-    LOGINFO("entering {}", __FUNCTION__);
-    {
-    std::lock_guard<std::mutex> lg(m_vol_lock);
-    auto it = m_volume_map.find(uuid);
-    if (it == m_volume_map.end())
-        return std::make_error_condition(std::errc::no_such_device_or_address);
+    try {
+        std::lock_guard<std::mutex> lg(m_vol_lock);
+        auto it = m_volume_map.find(uuid);
+        if (it == m_volume_map.end()) {
+            return std::make_error_condition(std::errc::no_such_device_or_address);
+        }
 
-    it->second->set_state(DESTROYING);
+        it->second->set_state(DESTROYING);
 
-    // remove it from the map;
-    m_volume_map.erase(it);
+        // remove it from the map;
+        m_volume_map.erase(it);
+        // vol sb should be removed after all blks(data blk and btree blk) have been freed.
+
+        // volume destructor will be called since the user_count of share_ptr 
+        // will drop to zero while going out of this scope;
+        std::error_condition no_err;
+        return no_err;
+    } catch (std::exception& e) {
+        LOGERROR("{}", e.what());
+        auto error = std::make_error_condition(std::errc::io_error);
+        return error;
     }
-    // vol sb should be removed after all blks(data blk and btree blk) have been freed.
-    
-    // volume destructor will be called since the user_count of share_ptr 
-    // will drop to zero while going out of this scope;
-    std::error_condition no_err;
-    return no_err;
 }
 
 VolumePtr HomeBlks::lookup_volume(const boost::uuids::uuid& uuid) {
@@ -689,9 +693,6 @@ void HomeBlks::init_thread() {
         m_cv.notify_all();
         return;
         
-    } catch (homestore::homestore_exception& e) {
-        auto error = e.get_err();
-        LOGERROR("get exception {}", error.message());
     } catch (const std::exception& e) {
         LOGERROR("{}", e.what());
         error = std::make_error_condition(std::errc::io_error);
@@ -761,86 +762,91 @@ void HomeBlks::get_obj_life(sisl::HttpCallData cd) {
 // free resources shared accross volumes
 //
 void HomeBlks::shutdown_process(shutdown_comp_callback shutdown_comp_cb, bool force) {
-    auto start = std::chrono::steady_clock::now();
-    m_vol_lock.lock();
-    while (m_volume_map.size()) {
-        for (auto & x : m_volume_map) {
-            if (x.second.use_count() == 1) {
-                LOGINFO("vol: {} ref_count successfully drops to 1. Trigger normal shutdown. ", x.second->get_name());
-                m_volume_map.erase(x.first);
+    try {
+        auto start = std::chrono::steady_clock::now();
+        m_vol_lock.lock();
+        while (m_volume_map.size()) {
+            for (auto & x : m_volume_map) {
+                if (x.second.use_count() == 1) {
+                    LOGINFO("vol: {} ref_count successfully drops to 1. Trigger normal shutdown. ", x.second->get_name());
+                    m_volume_map.erase(x.first);
+                }
+            }
+
+            if (m_volume_map.size() != 0) {
+                auto end = std::chrono::steady_clock::now();
+                auto num_seconds = std::chrono::duration_cast<std::chrono::seconds>(end - start).count();
+
+                // triger force shutdown if timeout
+                if (force || (num_seconds > SHUTDOWN_TIMEOUT_NUM_SECS)) {
+                    if (force) {
+                        LOGINFO("FORCE shutdown requested!");
+                    } else {
+                        LOGERROR("Shutdown timeout for {} seconds, trigger force shutdown. ", SHUTDOWN_TIMEOUT_NUM_SECS);
+                    }
+                    // trigger dump on debug mode
+                    assert(0);
+
+                    // in release mode, just forcely free 
+                    // Force trigger every Volume's destructor when there 
+                    // is ref_count leak for this volume instance.
+                    for (auto& x : m_volume_map) {
+                        LOGERROR("Force Shutdown vol: {}, ref_cnt: {}", x.second->get_name(), x.second.use_count());
+                        x.second.get()->~Volume();       
+                    }
+
+                    m_volume_map.clear();
+
+                    // break the while loop to continue force shutdown
+                    break;
+                }
+
+                // unlock before we go sleep
+                m_vol_lock.unlock();
+
+                // sleep for a while before we make another check;
+                std::this_thread::sleep_for(2s);
+
+                // take look before we make another check;
+                m_vol_lock.lock();
             }
         }
 
-        if (m_volume_map.size() != 0) {
-            auto end = std::chrono::steady_clock::now();
-            auto num_seconds = std::chrono::duration_cast<std::chrono::seconds>(end - start).count();
+        m_vol_lock.unlock();
 
-            // triger force shutdown if timeout
-            if (force || (num_seconds > SHUTDOWN_TIMEOUT_NUM_SECS)) {
-                if (force) {
-                    LOGINFO("FORCE shutdown requested!");
-                } else {
-                    LOGERROR("Shutdown timeout for {} seconds, trigger force shutdown. ", SHUTDOWN_TIMEOUT_NUM_SECS);
-                }
-                // trigger dump on debug mode
-                assert(0);
+        assert(m_volume_map.size() == 0);
 
-                // in release mode, just forcely free 
-                // Force trigger every Volume's destructor when there 
-                // is ref_count leak for this volume instance.
-                for (auto& x : m_volume_map) {
-                    LOGERROR("Force Shutdown vol: {}, ref_cnt: {}", x.second->get_name(), x.second.use_count());
-                    x.second.get()->~Volume();       
-                }
-                
-                m_volume_map.clear();
+        // m_cfg_sb needs to to be freed in the last, because we need to set the clean shutdown flag
+        // after shutdown is succesfully completed;
 
-                // break the while loop to continue force shutdown
-                break;
-            }
-
-            // unlock before we go sleep
-            m_vol_lock.unlock();
-
-            // sleep for a while before we make another check;
-            std::this_thread::sleep_for(2s);
-
-            // take look before we make another check;
-            m_vol_lock.lock();
+        { 
+            std::lock_guard<std::mutex>  lg(m_vol_lock);
+            // clear the shutdown bit on disk;
+            m_cfg_sb->set_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
+            config_super_block_write(true);
+            // free the in-memory copy 
+            free(m_cfg_sb);
         }
+
+        // All of volume's destructors have been called, now release shared resoruces.
+        delete m_sb_blk_store;
+        delete m_data_blk_store;
+        delete m_metadata_blk_store;
+
+        // BlkStore ::m_cache/m_wb_cache points to HomeBlks::m_cache;
+        delete m_cache;
+
+        delete m_dev_mgr; 
+
+        // Waiting for http server thread to join
+        m_http_server->stop();   
+        m_http_server.reset();
+
+        shutdown_comp_cb(true);
+    } catch (const std::exception& e) {
+        LOGERROR("{}", e.what());
+        shutdown_comp_cb(false);
     }
-
-    m_vol_lock.unlock();
-
-    assert(m_volume_map.size() == 0);
- 
-    // m_cfg_sb needs to to be freed in the last, because we need to set the clean shutdown flag
-    // after shutdown is succesfully completed;
-    
-    { 
-        std::lock_guard<std::mutex>  lg(m_vol_lock);
-        // clear the shutdown bit on disk;
-        m_cfg_sb->set_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
-        config_super_block_write(true);
-        // free the in-memory copy 
-        free(m_cfg_sb);
-    }
-   
-    // All of volume's destructors have been called, now release shared resoruces.
-    delete m_sb_blk_store;
-    delete m_data_blk_store;
-    delete m_metadata_blk_store;
-
-    // BlkStore ::m_cache/m_wb_cache points to HomeBlks::m_cache;
-    delete m_cache;
-
-    delete m_dev_mgr; 
-
-    // Waiting for http server thread to join
-    m_http_server->stop();   
-    m_http_server.reset();
-
-    shutdown_comp_cb(true);
 }
 
 // 

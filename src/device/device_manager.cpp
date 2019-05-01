@@ -77,15 +77,22 @@ void DeviceManager::init_devices(std::vector< dev_info > &devices) {
     m_pdev_hdr->info_offset = PDEV_INFO_BLK_OFFSET;
     m_pdev_info = (pdev_info_block *)(m_chunk_memory + m_pdev_hdr->info_offset);
 
-    LOGERROR("{} iomgr use_count: {}", __FUNCTION__, m_iomgr.use_count());
+    size_t pdev_size = 0;
     for (auto &d : devices) {
         bool is_inited;
         std::unique_ptr< PhysicalDev > pdev = std::make_unique< PhysicalDev >(this, d.dev_names, 
                 m_open_flags, m_iomgr, m_comp_cb, m_system_uuid, m_pdev_id++, max_dev_offset, m_is_file, true,
                 m_dm_info_size, &is_inited);
-        LOGERROR("{} iomgr use_count: {}", __FUNCTION__, m_iomgr.use_count());
 
         max_dev_offset += pdev->get_size();
+        if (!pdev_size) {
+            pdev_size = pdev->get_size();
+        } else if (pdev_size != pdev->get_size()) {
+            std::stringstream ss; ss << "heterogenous disks expected size = " << pdev_size << " found size " 
+                << pdev->get_size() << "disk name: " << pdev->get_devname();
+            const std::string s = ss.str();
+            throw homestore::homestore_exception(s, homestore_error::hetrogenous_disks);
+        }
         auto id = pdev->get_dev_id();
         m_pdevs[id] = std::move(pdev);
         m_pdev_info[id] = m_pdevs[id]->get_info_blk();
@@ -117,7 +124,8 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info > &devices) {
     uninit_devs.reserve(devices.size());
     uint64_t device_id = INVALID_DEV_ID;
     bool rewrite = false;
-    
+
+    size_t pdev_size = 0;
     for (auto &d : devices) {
         bool is_inited;
         std::unique_ptr< PhysicalDev > pdev = std::make_unique< PhysicalDev >(this, d.dev_names, 
@@ -130,6 +138,10 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info > &devices) {
             continue;
         }
 
+        if (!pdev_size) {
+            pdev_size = pdev->get_size();
+        }
+        assert(pdev_size == pdev->get_size());
         if (m_gen_cnt.load() < pdev->sb_gen_cnt()) {
             m_gen_cnt = pdev->sb_gen_cnt();
             device_id = pdev->get_dev_id();
@@ -150,7 +162,7 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info > &devices) {
     /* load the info blocks */
     read_info_blocks(device_id);
  
-    /* If it is different then existing chunk in pdev superblock has to be deleted and new has to be created */
+    /* TODO : If it is different then existing chunk in pdev superblock has to be deleted and new has to be created */
     assert(m_dm_info_size == m_dm_info->size);
     assert(m_dm_info->version == CURRENT_DM_INFO_VERSION);
     /* find the devices which has to be replaced */
@@ -167,6 +179,12 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info > &devices) {
                 return;
             }
             uninit_devs.pop_back();
+            if (pdev_size != pdev->get_size()) {
+                std::stringstream ss; ss << "heterogenous disks expected size = " << pdev_size << " found size " 
+                    << pdev->get_size() << "disk name" << pdev->get_devname();
+                const std::string s = ss.str();
+                throw homestore::homestore_exception(s, homestore_error::hetrogenous_disks);
+            }
             pdev->update(dev_id, m_pdev_info[dev_id].dev_offset, 
                                     m_pdev_info[dev_id].first_chunk_id);
             /* replace this disk with new uuid */

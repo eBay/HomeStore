@@ -53,6 +53,8 @@ struct btree_multinode_req : public sisl::ObjLifeCounter< struct btree_multinode
     std::deque< boost::intrusive_ptr< btree_req_type > >dependent_req_q;
     bool is_write_modifiable;
     bool is_sync;
+    int retry_cnt = 0;
+    int node_read_cnt = 0;
 
     btree_multinode_req() : writes_pending(0), m_refcount(0), status(btree_status_t::success), 
                             cookie(nullptr), dependent_req_q(0), is_write_modifiable(false), is_sync(false) {};
@@ -729,8 +731,12 @@ public:
         REGISTER_HISTOGRAM(btree_leaf_node_occupancy, "Leaf node occupancy", "btree_node_occupancy",
                            {"node_type", "leaf"}, HistogramBucketsType(ExponentialOfTwoBuckets));
         REGISTER_COUNTER(btree_retry_count, "number of retries");
+        REGISTER_COUNTER(write_err_cnt, "number of errors in write");
+        REGISTER_COUNTER(query_err_cnt, "number of errors in query");
+        REGISTER_COUNTER(read_node_count_in_write_ops, "number of nodes read in write_op");
+        REGISTER_COUNTER(read_node_count_in_query_ops, "number of nodes read in query_op");
         REGISTER_COUNTER(btree_write_ops_count, "number of btree operations");
-        REGISTER_COUNTER(btree_read_ops_count, "number of btree operations");
+        REGISTER_COUNTER(btree_query_ops_count, "number of btree operations");
         REGISTER_COUNTER(btree_remove_ops_count, "number of btree operations");
         REGISTER_HISTOGRAM(btree_exclusive_time_in_int_node, "Exclusive time spent (Write locked) on interior node (ns)",
                 "btree_exclusive_time_in_node", {"node_type", "interior"});

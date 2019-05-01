@@ -105,6 +105,7 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
 
     m_devfd = m_ep->open_dev(devname.c_str(), oflags);
     if (m_devfd == -1) {
+        LOGERROR("device open failed errno {} dev_name {}", errno, devname.c_str());
         throw std::system_error(errno, std::system_category(), "error while opening the device");
         return;
     }
@@ -112,12 +113,14 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
     if (is_file) {
         struct stat buf;
         if (fstat(m_devfd, &buf) < 0) {
+            LOGERROR("device stat failed errno {} dev_name {}", errno, devname.c_str());
             assert(0);
             throw std::system_error(errno, std::system_category(), "error while getting size of the device");
         }
         m_devsize = buf.st_size;
     } else {
         if (ioctl(m_devfd, BLKGETSIZE64, &m_devsize) < 0) {
+            LOGERROR("device stat failed errno {} dev_name {}", errno, devname.c_str());
             assert(0);
             throw std::system_error(errno, std::system_category(), "error while getting size of the device");
         }
