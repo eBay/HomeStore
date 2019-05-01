@@ -241,6 +241,7 @@ public:
         std::unique_lock l(m_rwlock);
         m_data_set.erase(kip.m_ki);
         kip->mark_freed();
+        m_alive_slots[kip.m_ki->m_slot_num]=false;//declare dead slot so as get_key do not pick it up
     }
 
     auto find_key(const key_info_ptr< K >& kip) {
@@ -280,6 +281,7 @@ private:
         // Generate a key and put in the key list and mark that slot as valid.
         m_keys.emplace_back(newKi);
         m_used_slots.push_back(true);
+        m_alive_slots.push_back(true);
         m_last_gen_slots[gen_pattern].store(slot_num, std::memory_order_relaxed);
 
         return m_keys.back().get();
@@ -293,7 +295,7 @@ private:
         if(m_data_set.size()==0) {//no keys
             return ki;
         }
-        
+        bool rotated=false, temprotate=false;
         typename std::set< key_info< K >*, compare_key_info< K > >::iterator it;
         if (pattern == SEQUENTIAL) {
             start_slot = m_next_read_slots[pattern].load(std::memory_order_acquire);
@@ -301,14 +303,15 @@ private:
             
             //remove punches holes, if it was last slot being punched, we have to start over
             if(it == m_data_set.end()){
-                bool rotated=false;
-                start_slot = _get_next_slot(start_slot, pattern, it, &rotated);//auto increments *it
+                start_slot = _get_next_slot(start_slot, pattern, it, &temprotate);//auto increments *it
             }
         } else if (pattern == UNI_RANDOM) {
             start_slot = rand() % m_keys.size();
+            if (!_can_use_for_get(start_slot)) {
+                start_slot = _get_next_slot(start_slot, pattern, it, &temprotate);
+            }
         }
         auto cur_slot = start_slot;
-        bool rotated=false;
         while(rotated==false || cur_slot != start_slot) {
             auto next_slot = _get_next_slot(cur_slot, pattern, it, &rotated);
             if (_can_use_for_get(cur_slot)) {
@@ -396,9 +399,9 @@ private:
             }
             return (*it)->m_slot_num;
         } else {
-            cur_slot = m_used_slots.find_next(cur_slot);
+            cur_slot = m_alive_slots.find_next(cur_slot);
             if (cur_slot == (int32_t)boost::dynamic_bitset<>::npos) {
-                cur_slot = m_used_slots.find_first();
+                cur_slot = m_alive_slots.find_first();
                 *rotated = true;
             }
             return cur_slot;
@@ -406,13 +409,14 @@ private:
     }
 
     bool _can_use_for_get(int32_t slot) {
-        return (m_used_slots[slot] && !m_keys[slot]->is_exclusive() && !m_keys[slot]->is_marked_free());
+        return (m_alive_slots[slot] && !m_keys[slot]->is_exclusive());
     }
 
     void _free_key(key_info< K >* ki) {
         assert(m_used_slots[ki->m_slot_num]);
-
+        assert(m_alive_slots[ki->m_slot_num] == false);//must have been declared dead before hand
         m_used_slots[ki->m_slot_num] = false;
+        
         if (++m_ndirty >= (int32_t)compact_trigger_limit()) {
             _compact();
         }
@@ -433,13 +437,22 @@ private:
             m_keys[left_ind] = std::move(m_keys[right_ind]);
             _adjust_slot_num(right_ind, left_ind);
 
+            //while moving state of slots used/alive must be same
+            assert( m_used_slots[right_ind] ==  m_alive_slots[right_ind]);
+            assert( m_used_slots[left_ind] ==  m_alive_slots[left_ind]);
             m_used_slots[right_ind] = false;
-            m_used_slots[left_ind++] = true;
+            m_used_slots[left_ind] = true;
+            m_alive_slots[right_ind] = false;
+            m_alive_slots[left_ind] = true;
+            
+            left_ind++;
         }
 
         n_gcd = m_keys.size() - left_ind;
         if (n_gcd > 0) {
+            //trim start for both slot vectors
             m_used_slots.resize(left_ind);
+            m_alive_slots.resize(left_ind);
             m_keys.resize(left_ind);
 
             assert(m_ndirty >= (int32_t)n_gcd);
@@ -462,7 +475,8 @@ private:
 private:
     std::shared_mutex                                 m_rwlock;
     std::vector< std::unique_ptr< key_info< K > > >   m_keys;
-    boost::dynamic_bitset<>                           m_used_slots;
+    boost::dynamic_bitset<>                           m_used_slots;//can have slots mark freed but eventually freed 
+    boost::dynamic_bitset<>                           m_alive_slots;//will only have slots which are not mark freed
     std::set< key_info< K >*, compare_key_info< K > > m_data_set;
     int32_t                                           m_ndirty = 0;
 

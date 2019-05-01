@@ -61,18 +61,19 @@ using namespace homeds::loadgen;
 #define simple_mem_btree_store_t MemBtreeStoreSpec<SimpleNumberKey, FixedBytesValue<64>, 8192 >
 #define KVG KVGenerator<SimpleNumberKey, FixedBytesValue<64>, simple_mem_btree_store_t >
 
-static uint64_t NIO=0,NC=0,NR=0,NU=0,ND=0,NK=0,CURR_NC=0,CURR_NR=0,CURR_NU=0,CURR_ND=0;
+static uint64_t NIO=0,NK=0;//total ios and total keys
+static int PC=0,PR=0,PU=0,PD=0;//total % for op 
+static uint64_t PRINT_INTERVAL=0;
+static uint64_t WARM_UP_KEYS=0;
 
-static uint64_t get_io_count(int percent){
-    return percent*NIO/100;
-}
 
 struct BtreeTestLoadGen : public ::testing::Test {
     KVG kvg;
-    std::atomic<uint64_t> stored_keys=0, outstanding_create=0, outstanding_remove=0, outstanding_others=0;
-    int WARM_UP_KEYS=1000;
+    std::atomic<uint64_t> stored_keys=0, outstanding_create=0, outstanding_others=0;
     int CHECKPOINT_RANGE_BATCH_SIZE=50;
+    std::condition_variable m_cv;
     std::mutex m_cv_mtx;
+    uint64_t C_NC=0,C_NR=0,C_NU=0,C_ND=0,C_IO;//current op issued counter
     
     uint64_t get_warmup_key_count(int percent){
         return percent*WARM_UP_KEYS/100;
@@ -193,57 +194,106 @@ struct BtreeTestLoadGen : public ::testing::Test {
         outstanding_others--;
     }
     
+    uint64_t get_issued_ios(){
+        return C_NC+C_NR+C_NU+C_ND;
+    }
+    
+    void try_create(){
+        if((stored_keys+outstanding_create)>=NK)return ;//cant accomodate more 
+        kvg.insert_new(KeyPattern::UNI_RANDOM, ValuePattern::RANDOM_BYTES,
+                       std::bind(&BtreeTestLoadGen::insert_success_cb, this));
+        C_NC++;
+        outstanding_create++;
+    }
+    
+    void try_read(){
+        if(stored_keys-outstanding_others==0)return ;//cannot accomodate more 
+        kvg.get(KeyPattern::UNI_RANDOM, true, true,true,
+                std::bind(&BtreeTestLoadGen::read_update_success_cb, this));
+        C_NR++;
+        outstanding_others++;
+    }
+    
+    void try_update(){
+        if(stored_keys-outstanding_others==0)return ;//cannot accomodate more 
+        kvg.update(KeyPattern::UNI_RANDOM, ValuePattern::RANDOM_BYTES, true, true,true,
+                   std::bind(&BtreeTestLoadGen::read_update_success_cb, this));
+        C_NU++;
+        outstanding_others++;
+    }
+    
+    void try_delete(){
+        if(stored_keys-outstanding_others==0)return ;//cannot accomodate more 
+        kvg.remove(KeyPattern::UNI_RANDOM, true, true,
+                   std::bind(&BtreeTestLoadGen::remove_success_cb, this));
+        C_ND++;
+        outstanding_others++;
+    }
+    
+    void preload(){
+        // preload 10% of target PC
+        kvg.preload(KeyPattern::UNI_RANDOM, ValuePattern::RANDOM_BYTES, PC*NIO/1000);
+    }
+
     void regression(){
         kvg.run_parallel([&]() {
-            while(CURR_NC<NC || CURR_NR<NR || CURR_NU<NU || CURR_ND<ND){
+            preload();
+            
+            while(true){
                 std::unique_lock<std::mutex> lk(mutex);
-                //allow create only if stored keys + issued creates are less than max number of keys
-                while (CURR_NC<NC && stored_keys+outstanding_create<NK) {
-                    CURR_NC++;
-                    outstanding_create++;
-                    kvg.insert_new(KeyPattern::UNI_RANDOM, ValuePattern::RANDOM_BYTES,
-                                   std::bind(&BtreeTestLoadGen::insert_success_cb, this));
+                auto op = select_io();
+
+                if(op==1)
+                    try_create();
+                else if(op==2)
+                    try_read();
+                else if(op==3)
+                    try_update();
+                else if(op==4)
+                    try_delete();
+                else
+                    assert(0);
+
+                if (get_issued_ios() % PRINT_INTERVAL == 0) {
+                    LOGDEBUG(
+                            "stored_keys:{}, outstanding_create:{}, outstanding_others:{}, creates:{}, reads:{}, updates:{}, deletes:{}",
+                            stored_keys, outstanding_create, outstanding_others, C_NC, C_NR, C_NU, C_ND);
                 }
-                if(CURR_NR<NR && stored_keys-outstanding_others>0 ) {
-                    CURR_NR++;
-                    outstanding_others++;
-                    kvg.get(KeyPattern::UNI_RANDOM, true, true,true,
-                            std::bind(&BtreeTestLoadGen::remove_success_cb, this));
-                }
-                if (CURR_NU<NU && stored_keys-outstanding_others>0) {
-                    CURR_NU++;
-                    outstanding_others++;
-                    kvg.update(KeyPattern::UNI_RANDOM, ValuePattern::RANDOM_BYTES, true, true,true,
-                               std::bind(&BtreeTestLoadGen::remove_success_cb, this));
-                }
-                //allow remove only if there are any stored keys on which other operations are not being worked on
-                if (CURR_ND<ND && stored_keys-outstanding_others>0) {
-                    CURR_ND++;
-                    outstanding_others++;
-                    kvg.remove(KeyPattern::UNI_RANDOM, true, true, 
-                            std::bind(&BtreeTestLoadGen::remove_success_cb, this));
-                }
+                if (get_issued_ios() > NIO)
+                    break;
             }
         });
-        
+
         do_checkpoint();
         kvg.remove_all_keys();
     }
+    
+    uint8_t select_io(){
+        int ran = rand() % 100;
+        if(ran<PC)return 1;
+        else if(ran<PR)return 2;
+        else if(ran<PU)return 3;
+        else if(ran<PD)return 4;
+        else assert(0);
+    }
+    
 };
 
 TEST_F(BtreeTestLoadGen, SimpleMemBtreeTest) {
     this->warmup();
+    LOGDEBUG("Warm up completed");
     this->regression();
 }
 
 SDS_OPTION_GROUP(test_mem_btree,
-                 (num_io, "", "num_io", "num of io", ::cxxopts::value<uint64_t>()->default_value("10000"), "number"),
-                 (num_keys, "", "num_keys", "num of keys", ::cxxopts::value<uint64_t>()->default_value("1000"), "number"),
-                 (percent_create, "", "percent_create", "percentage of io that are creates", ::cxxopts::value<uint64_t>()->default_value("80"), "number"),
-                 (percent_read, "", "percent_read", "percentage of io that are reads", ::cxxopts::value<uint64_t>()->default_value("10"), "number"),
-                 (percent_update, "", "percent_update", "percentage of io that are updates", ::cxxopts::value<uint64_t>()->default_value("50"), "number"),
-                 (percent_delete, "", "percent_delete", "percentage of io that are deletes", ::cxxopts::value<uint64_t>()->default_value("30"), "number"))
-                 /* Percent above are not cummulative to 100. They can happen in any order*/
+        (num_io, "", "num_io", "num of io", ::cxxopts::value<uint64_t>()->default_value("10000"), "number"),
+        (num_keys, "", "num_keys", "num of keys", ::cxxopts::value<uint64_t>()->default_value("1000"), "number"),
+        (per_create, "", "per_create", "percentage of io that are creates", ::cxxopts::value<uint64_t>()->default_value("1000"), "number"),
+        (per_read, "", "per_read", "percentage of io that are reads", ::cxxopts::value<uint64_t>()->default_value("20"), "number"),
+        (per_update, "", "per_update", "percentage of io that are updates", ::cxxopts::value<uint64_t>()->default_value("30"), "number"),
+        (per_delete, "", "per_delete", "percentage of io that are deletes", ::cxxopts::value<uint64_t>()->default_value("40"), "number"),
+        (print_interval, "", "print_interval", "print interval for each op", ::cxxopts::value<uint64_t>()->default_value("1000"), "number"),
+        (warm_up_keys, "", "warm_up_keys", "num of warm up keys", ::cxxopts::value<uint64_t>()->default_value("1000"), "number"))
 SDS_OPTIONS_ENABLE(logging, test_mem_btree)
 
 int main(int argc, char *argv[]) {
@@ -255,12 +305,22 @@ int main(int argc, char *argv[]) {
 
     NIO = SDS_OPTIONS["num_io"].as<uint64_t>();
     NK = SDS_OPTIONS["num_keys"].as<uint64_t>();
-    NC = get_io_count(SDS_OPTIONS["percent_create"].as<uint64_t>());
-    NR = get_io_count(SDS_OPTIONS["percent_read"].as<uint64_t>());
-    NU = get_io_count(SDS_OPTIONS["percent_update"].as<uint64_t>());
-    ND = get_io_count(SDS_OPTIONS["percent_delete"].as<uint64_t>());
+    PC = SDS_OPTIONS["per_create"].as<uint64_t>();
+    PR = SDS_OPTIONS["per_read"].as<uint64_t>();
+    PU = SDS_OPTIONS["per_update"].as<uint64_t>();
+    PD = SDS_OPTIONS["per_delete"].as<uint64_t>();
+    PRINT_INTERVAL = SDS_OPTIONS["print_interval"].as<uint64_t>();
+    WARM_UP_KEYS = SDS_OPTIONS["warm_up_keys"].as<uint64_t>();
     
-    assert(ND<=NC);
+    if(PC+PR+PU+PD!=100){
+        LOGERROR("CRUD percent should total to 100");
+        return 1;
+    }
+    PR+=PC;
+    PU+=PR;
+    PD=100;
+    srand(time(0));
+    
     return RUN_ALL_TESTS();
 }
 
