@@ -204,6 +204,7 @@ struct BtreeTestLoadGen : public ::testing::Test {
                        std::bind(&BtreeTestLoadGen::insert_success_cb, this));
         C_NC++;
         outstanding_create++;
+        try_print();
     }
     
     void try_read(){
@@ -212,6 +213,7 @@ struct BtreeTestLoadGen : public ::testing::Test {
                 std::bind(&BtreeTestLoadGen::read_update_success_cb, this));
         C_NR++;
         outstanding_others++;
+        try_print();
     }
     
     void try_update(){
@@ -220,6 +222,7 @@ struct BtreeTestLoadGen : public ::testing::Test {
                    std::bind(&BtreeTestLoadGen::read_update_success_cb, this));
         C_NU++;
         outstanding_others++;
+        try_print();
     }
     
     void try_delete(){
@@ -228,17 +231,19 @@ struct BtreeTestLoadGen : public ::testing::Test {
                    std::bind(&BtreeTestLoadGen::remove_success_cb, this));
         C_ND++;
         outstanding_others++;
-    }
-    
-    void preload(){
-        // preload 10% of target PC
-        kvg.preload(KeyPattern::UNI_RANDOM, ValuePattern::RANDOM_BYTES, PC*NIO/1000);
+        try_print();
     }
 
+    void try_print(){
+        if (get_issued_ios() % PRINT_INTERVAL == 0) {
+            LOGDEBUG(
+                    "stored_keys:{}, outstanding_create:{}, outstanding_others:{}, creates:{}, reads:{}, updates:{}, deletes:{}, total_io:{}",
+                    stored_keys, outstanding_create, outstanding_others, C_NC, C_NR, C_NU, C_ND, get_issued_ios());
+        }
+    }
+    
     void regression(){
         kvg.run_parallel([&]() {
-            preload();
-            
             while(true){
                 std::unique_lock<std::mutex> lk(mutex);
                 auto op = select_io();
@@ -254,16 +259,11 @@ struct BtreeTestLoadGen : public ::testing::Test {
                 else
                     assert(0);
 
-                if (get_issued_ios() % PRINT_INTERVAL == 0) {
-                    LOGDEBUG(
-                            "stored_keys:{}, outstanding_create:{}, outstanding_others:{}, creates:{}, reads:{}, updates:{}, deletes:{}",
-                            stored_keys, outstanding_create, outstanding_others, C_NC, C_NR, C_NU, C_ND);
-                }
                 if (get_issued_ios() > NIO)
                     break;
             }
         });
-
+        
         do_checkpoint();
         kvg.remove_all_keys();
     }
