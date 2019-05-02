@@ -318,6 +318,7 @@ public:
             boost::intrusive_ptr<btree_req_type> cookie, BtreeValue *existing_val = nullptr, 
             BtreeUpdateRequest<K,V> *bur = nullptr) {
 
+        COUNTER_INCREMENT(m_metrics, btree_write_ops_count, 1);
         homeds::thread::locktype acq_lock = homeds::thread::LOCKTYPE_READ;
         int ind = -1;
         bool is_leaf = false;
@@ -329,6 +330,8 @@ public:
         multinode_req->writes_pending.increment(1);
         btree_status_t ret = btree_status_t::success;
 retry:
+        multinode_req->retry_cnt++;
+        multinode_req->node_read_cnt = 0;
         assert(rd_locked_nodes.size() == 0 && wr_locked_nodes.size() == 0);
        
         BtreeNodePtr root;
@@ -380,6 +383,10 @@ out:
 #endif
         if (ret != btree_status_t::success) {
             LOGINFO("btree put failed {}", ret);
+            COUNTER_INCREMENT(m_metrics, write_err_cnt, 1);
+        } else {
+            COUNTER_INCREMENT(m_metrics, btree_retry_count, multinode_req->retry_cnt);
+            COUNTER_INCREMENT(m_metrics, read_node_count_in_write_ops, multinode_req->node_read_cnt);
         }
         process_completions(ret, multinode_req);
         
@@ -421,6 +428,7 @@ out:
         //initialize cb param
         K in_st(*(K*)query_req.get_input_range().get_start_key());
         K in_en(*(K*)query_req.get_input_range().get_end_key());//cpy
+        COUNTER_INCREMENT(m_metrics, btree_query_ops_count, 1);
         if (query_req.get_cb_param()) {
             query_req.get_cb_param()->get_input_range().set(in_st, query_req.get_input_range().is_start_inclusive(),
                                                   in_en, query_req.get_input_range().is_end_inclusive());
@@ -462,6 +470,11 @@ out:
 #ifndef NDEBUG
         check_lock_debug();
 #endif
+        if (ret == btree_status_t::success) {
+            COUNTER_INCREMENT(m_metrics, read_node_count_in_query_ops, multinode_req->node_read_cnt);
+        } else {
+            COUNTER_INCREMENT(m_metrics, query_err_cnt, 1);
+        }
         return ret;
     }
 
@@ -494,7 +507,6 @@ out:
                                       std::vector< std::pair< K, V > >& out_values) {
         query_req.init_batch_range();
 
-        COUNTER_INCREMENT(m_metrics, btree_read_ops_count, 1);
         m_btree_lock.read_lock();
         BtreeNodePtr node;
         btree_status_t ret;
@@ -661,6 +673,7 @@ private:
         btree_status_t ret = btree_status_t::success;
         bool is_child_lock = false;
         homeds::thread::locktype child_locktype;
+        multinode_req->node_read_cnt++;
 
         if (my_node->is_leaf()) {
             auto result = my_node->find(range, outkey, outval);
@@ -696,6 +709,7 @@ out:
     btree_status_t do_sweep_query(BtreeNodePtr my_node, BtreeQueryRequest< K, V >& query_req,
                         std::vector< std::pair< K, V > >& out_values, btree_multinode_req_ptr multinode_req) {
         btree_status_t ret = btree_status_t::success;
+        multinode_req->node_read_cnt++;
         if (my_node->is_leaf()) {
             assert(query_req.get_batch_size() > 0);
 
@@ -786,6 +800,7 @@ out:
                             btree_multinode_req_ptr multinode_req) {
         btree_status_t ret = btree_status_t::success;
 
+        multinode_req->node_read_cnt++;
         if (my_node->is_leaf()) {
             assert(query_req.get_batch_size() > 0);
 
@@ -1253,6 +1268,7 @@ out:
         
         bool is_any_child_splitted = false;
         
+        multinode_req->node_read_cnt++;
 retry:
         int start_ind = 0, end_ind = -1;
 

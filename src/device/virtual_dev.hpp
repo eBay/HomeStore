@@ -54,13 +54,14 @@ public:
         vconfig->set_total_blks(((uint64_t)size) / vpage_size);
         vconfig->set_blks_per_temp_group(100); // TODO: Recalculate based on size set aside for temperature entries
         vconfig->set_max_cache_blks(vconfig->get_total_blks() / 4); // Cache quarter of the blocks
-        /* Blk sizes in slabs : size < 8k, 8k <= size < 16k,
-         * 16k <= size < 32k, 32k <= size < 64k, size >= 64k
+        /* Blk sizes in slabs : nblks < 1, nblks < 2, 2 <= nblks < 4,
+         * 4 <= nblks < 8, 8 <= nblks < 16, nblks >= 16
          */
-        std::vector< uint32_t > slab_limits(4, 0);
-        std::vector< float >    slab_weights(5, 0.2);
+        int num_slabs = 10;
+        std::vector< uint32_t > slab_limits(num_slabs - 1, 0);
+        std::vector< float >    slab_weights(num_slabs, 0.1); // (1 / num_slabs) = 0.1
         for (auto i = 0U; i < slab_limits.size(); i++) {
-            slab_limits[i] = (8192 * (1 << i)) / vconfig->get_blk_size();
+            slab_limits[i] = (1 << i);
         }
         vconfig->set_slab(slab_limits, slab_weights);
     }
