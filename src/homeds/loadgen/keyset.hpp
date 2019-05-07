@@ -404,12 +404,12 @@ private:
             }
             return (*it)->m_slot_num;
         } else {
-            cur_slot = m_alive_slots.find_next(cur_slot);
-            if (cur_slot == (int32_t)boost::dynamic_bitset<>::npos) {
-                cur_slot = m_alive_slots.find_first();
+            int32_t next_slot = m_alive_slots.find_next(cur_slot);
+            if (next_slot == (int32_t)boost::dynamic_bitset<>::npos || next_slot==cur_slot) {
+                next_slot = m_alive_slots.find_first();
                 *rotated = true;
             }
-            return cur_slot;
+            return next_slot;
         }
     }
 
