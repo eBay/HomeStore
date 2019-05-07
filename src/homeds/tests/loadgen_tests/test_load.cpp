@@ -35,7 +35,9 @@ struct BtreeTest : public testing::Test{
 TEST_F(BtreeTest, SimpleKVMemTest) {
     G_SimpleKV_Mem loadgen;
     loadgen.setParam(PC,PR,PU,PD,NIO,NK,PRINT_INTERVAL,WARM_UP_KEYS);
+    LOGINFO("WarmUp Started");
     loadgen.warmup();
+    LOGINFO("Regression Started");
     loadgen.regression();
 }
 
