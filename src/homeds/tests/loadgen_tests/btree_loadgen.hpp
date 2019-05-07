@@ -4,22 +4,21 @@ namespace homeds {
         template < typename K, typename V, typename Store >
         struct BtreeLoadGen {
             KVGenerator<K,V,Store> kvg;
-            std::atomic<uint64_t> stored_keys = 0, outstanding_create = 0, outstanding_others = 0;
+            std::atomic<int64_t> stored_keys = 0, outstanding_create = 0, outstanding_others = 0;
             int CHECKPOINT_RANGE_BATCH_SIZE = 50;
-            std::condition_variable m_cv;
-            std::mutex m_cv_mtx;
-            uint64_t NIO = 0, NK = 0;//total ios and total keys
+            std::mutex m_mtx;
+            int64_t NIO = 0, NK = 0;//total ios and total keys
             int PC = 0, PR = 0, PU = 0, PD = 0;//total % for op 
-            uint64_t PRINT_INTERVAL = 0;
-            uint64_t WARM_UP_KEYS = 0;
+            int64_t PRINT_INTERVAL = 0;
+            int64_t WARM_UP_KEYS = 0;
 
-            uint64_t C_NC = 0, C_NR = 0, C_NU = 0, C_ND = 0, C_IO;//current op issued counter
+            std::atomic<int64_t> C_NC = 0, C_NR = 0, C_NU = 0, C_ND = 0, C_IO;//current op issued counter
 
-            uint64_t get_warmup_key_count(int percent) {
+            int64_t get_warmup_key_count(int percent) {
                 return percent * WARM_UP_KEYS / 100;
             }
 
-            uint64_t get_existing_key_count(int percent) {
+            int64_t get_existing_key_count(int percent) {
                 return percent * kvg.get_keys_count() / 100;
             }
 
@@ -111,7 +110,7 @@ namespace homeds {
                 });
             }
 
-            void setParam(int pC, int pR, int pU, int pD, uint64_t nIO, uint64_t nK, uint64_t pI, uint64_t wUK) {
+            void setParam(int pC, int pR, int pU, int pD, int64_t nIO, int64_t nK, int64_t pI, int64_t wUK) {
                 this->PC = pC;
                 this->PR = pR;
                 this->PU = pU;
@@ -131,60 +130,66 @@ namespace homeds {
             }
 
             void insert_success_cb() {
-                std::unique_lock<std::mutex> lk(mutex);
+                std::unique_lock<std::mutex> lk(m_mtx);
                 stored_keys++;
                 outstanding_create--;
             }
 
             void remove_success_cb() {
-                std::unique_lock<std::mutex> lk(mutex);
+                std::unique_lock<std::mutex> lk(m_mtx);
                 stored_keys--;
                 outstanding_others--;
             }
 
             void read_update_success_cb() {
-                std::unique_lock<std::mutex> lk(mutex);
+                std::unique_lock<std::mutex> lk(m_mtx);
                 outstanding_others--;
             }
 
-            uint64_t get_issued_ios() {
+            bool increment_create(){
+                std::unique_lock<std::mutex> lk(m_mtx);
+                if ((stored_keys + outstanding_create) >= NK)return false;//cant accomodate more
+                outstanding_create++;
+                return true;
+            }
+
+            bool increment_other(){
+                std::unique_lock<std::mutex> lk(m_mtx);
+                if (stored_keys - outstanding_others <= 0)return false;//cannot accomodate more
+                outstanding_others++;
+                return true;
+            }
+
+            int64_t get_issued_ios() {
                 return C_NC + C_NR + C_NU + C_ND;
             }
 
             void try_create() {
-                if ((stored_keys + outstanding_create) >= NK)return;//cant accomodate more 
+                if (!increment_create())return;
                 kvg.insert_new(KeyPattern::UNI_RANDOM, ValuePattern::RANDOM_BYTES,
                                std::bind(&BtreeLoadGen::insert_success_cb, this));
                 C_NC++;
-                outstanding_create++;
-                try_print();
             }
 
             void try_read() {
-                if (stored_keys - outstanding_others == 0)return;//cannot accomodate more 
+                if (!increment_other())return;
                 kvg.get(KeyPattern::UNI_RANDOM, true, true, true,
                         std::bind(&BtreeLoadGen::read_update_success_cb, this));
                 C_NR++;
-                outstanding_others++;
-                try_print();
             }
 
             void try_update() {
-                if (stored_keys - outstanding_others == 0)return;//cannot accomodate more 
+                if (!increment_other())return;
                 kvg.update(KeyPattern::UNI_RANDOM, ValuePattern::RANDOM_BYTES, true, true, true,
                            std::bind(&BtreeLoadGen::read_update_success_cb, this));
                 C_NU++;
-                outstanding_others++;
-                try_print();
             }
 
             void try_delete() {
-                if (stored_keys - outstanding_others == 0)return;//cannot accomodate more 
+                if (!increment_other())return;
                 kvg.remove(KeyPattern::UNI_RANDOM, true, true,
                            std::bind(&BtreeLoadGen::remove_success_cb, this));
                 C_ND++;
-                outstanding_others++;
-                try_print();
             }
 
             void try_print() {
@@ -199,7 +204,6 @@ namespace homeds {
             void regression() {
                 kvg.run_parallel([&]() {
                     while (true) {
-                        std::unique_lock<std::mutex> lk(mutex);
                         auto op = select_io();
 
                         if (op == 1)
@@ -213,6 +217,7 @@ namespace homeds {
                         else
                             assert(0);
 
+                        try_print();
                         if (get_issued_ios() > NIO)
                             break;
                     }
@@ -222,7 +227,7 @@ namespace homeds {
                 kvg.remove_all_keys();
             }
 
-            uint8_t select_io() {
+            int8_t select_io() {
                 int ran = rand() % 100;
                 if (ran < PC)return 1;
                 else if (ran < PR)return 2;
@@ -230,6 +235,7 @@ namespace homeds {
                 else if (ran < PD)return 4;
                 else
                     assert(0);
+                return -1;
             }
 
         };

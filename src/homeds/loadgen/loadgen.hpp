@@ -24,7 +24,9 @@ ENUM(generator_op_error, uint32_t, no_error, store_failed, store_timeout, data_v
 template < typename K, typename V, typename Store >
 class KVGenerator {
 public:
-    KVGenerator() : m_executor(4 /* threads */, 1 /* priorities */, 20000 /* maxQueueSize */) {
+    KVGenerator() : m_executor(4 /* threads */, std::make_unique<folly::LifoSemMPMCQueue<
+                                                                           folly::CPUThreadPoolExecutor::CPUTask,
+            folly::QueueBehaviorIfFull::BLOCK>>(20000)) {
         srand(time(0));
         m_store = std::make_shared<Store >();
     }
@@ -157,25 +159,14 @@ public:
     }
 
 private:
-    static constexpr auto QUEUE_DEPTH = 64;
-    std::condition_variable m_cv;
-    std::mutex m_mutex;
 
     void op_start() {
-        std::unique_lock< std::mutex > lk(m_mutex);
-        if(m_outstanding.test_le(QUEUE_DEPTH)) {
-            m_outstanding.increment(1);
-        }else {
-            m_cv.wait(lk);
-            m_outstanding.increment(1);
-        }
+        m_outstanding.increment(1);
     }
     
     void op_done(loadgen_success_cb_t success_cb = nullptr) {
         if (m_outstanding.decrement_testz()) {
             m_test_baton.post();
-        }else {
-            m_cv.notify_one();
         }
         if(success_cb) success_cb();
     }
@@ -259,7 +250,7 @@ private:
             assert(0);
             return;
         }
-
+        //LOGDEBUG("Remove {}", kip->m_key);
         LOGTRACE("Remove {}", *kip);
         m_key_registry.remove_key(kip);
     }

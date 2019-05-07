@@ -211,8 +211,13 @@ public:
     key_info_ptr< K > generate_invalid_key() { return key_info_ptr(this, &m_invalid_ki, true); }
 
     key_info_ptr< K > get_key(KeyPattern pattern, bool is_mutate, bool exclusive_access) {
-        std::unique_lock l(m_rwlock);//uniq lock needed since multiple threads can aquire next slot
-        return key_info_ptr(this, _get_key(pattern, is_mutate, exclusive_access), is_mutate);
+        
+        key_info< K >* ki = nullptr;
+        while(ki==nullptr){//relase locks and retry
+            std::unique_lock l(m_rwlock);//uniq lock needed since multiple threads can aquire next slot
+            ki=_get_key(pattern, is_mutate, exclusive_access);
+        }
+        return key_info_ptr(this, ki, is_mutate);
     }
 
     std::vector< key_info_ptr< K > > get_contiguous_keys(KeyPattern pattern, bool exclusive_access, bool is_mutate,
@@ -241,11 +246,13 @@ public:
         std::unique_lock l(m_rwlock);
         m_data_set.erase(kip.m_ki);
         kip->mark_freed();
+        assert(m_alive_slots[kip.m_ki->m_slot_num]==true);
+        //LOGDEBUG("Removed key {} , marked dead slot: {}",kip.m_ki->m_key,kip.m_ki->m_slot_num);
         m_alive_slots[kip.m_ki->m_slot_num]=false;//declare dead slot so as get_key do not pick it up
     }
 
     auto find_key(const key_info_ptr< K >& kip) {
-        std::shared_lock l(m_rwlock);
+        std::unique_lock l(m_rwlock);
         return m_data_set.find(kip.m_ki);
     }
     
@@ -292,9 +299,7 @@ private:
 
         int32_t        start_slot = 0;
         key_info< K >* ki = nullptr;
-        if(m_data_set.size()==0) {//no keys
-            return ki;
-        }
+        assert(m_data_set.size()!=0);
         bool rotated=false, temprotate=false;
         typename std::set< key_info< K >*, compare_key_info< K > >::iterator it;
         if (pattern == SEQUENTIAL) {
@@ -435,16 +440,17 @@ private:
         auto right_ind = left_ind;
         while ((right_ind = m_used_slots.find_next(right_ind)) != boost::dynamic_bitset<>::npos) {
             m_keys[left_ind] = std::move(m_keys[right_ind]);
+            m_keys[left_ind]->m_slot_num=left_ind;//update slot in key info
             _adjust_slot_num(right_ind, left_ind);
 
             //while moving state of slots used/alive must be same
-            assert( m_used_slots[right_ind] ==  m_alive_slots[right_ind]);
             assert( m_used_slots[left_ind] ==  m_alive_slots[left_ind]);
             m_used_slots[right_ind] = false;
             m_used_slots[left_ind] = true;
+            //moving alive state, right ind state could be dead or alive in reality
+            m_alive_slots[left_ind] = m_alive_slots[right_ind];
             m_alive_slots[right_ind] = false;
-            m_alive_slots[left_ind] = true;
-            
+            //LOGDEBUG("Marked dead slot: {}, moved to {}", right_ind, left_ind);
             left_ind++;
         }
 
