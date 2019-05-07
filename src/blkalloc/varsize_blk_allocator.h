@@ -8,6 +8,7 @@
 #include <condition_variable>
 #include <vector>
 #include <atomic>
+#include <flip/flip.hpp>
 
 using namespace homeds::btree;
 
@@ -34,9 +35,24 @@ private:
     std::vector<uint32_t> m_slab_capacity;
 
 public:
+    //! VarsizeBlkAllocConfig constructor type 1
+    /*!
+      Default constructor
+    */
     VarsizeBlkAllocConfig() : VarsizeBlkAllocConfig(0, 0, "") {}
+
+    //! VarsizeBlkAllocConfig constructor type 2
+    /*!
+      \param name as std::string argument signifies name of block allocator
+    */
     VarsizeBlkAllocConfig(const std::string& name) : VarsizeBlkAllocConfig(0, 0, name) {}
 
+    //! VarsizeBlkAllocConfig constructor type 3
+    /*!
+      \param blk_size as uint64 argument signifies block size
+      \param n_blks as uint64 argument signifies number of blocks
+      \param name as std::string argument signifies name of block allocator
+    */
     VarsizeBlkAllocConfig(uint64_t blk_size, uint64_t n_blks, const std::string& name) :
             BlkAllocConfig(blk_size, n_blks, name),
             m_nsegments(1),
@@ -45,23 +61,49 @@ public:
             m_max_cache_blks(0) {
     }
 
+    //! Set Physical Page Size
+    /*!
+      \param page_size an uint32 argument
+      \return void
+    */
     void set_phys_page_size(uint32_t page_size) {
         m_phys_page_size = page_size;
     }
 
+    //! Set Total Segments
+    /*!
+      \param nsegments an uint32 argument signifies number of segments
+      \return void
+    */
     void set_total_segments(uint32_t nsegments) {
         m_nsegments = nsegments;
     }
 
+    //! Set Blocks per Portion
+    /*!
+      \param pg_per_portion an uint32 argument signifies pages per portion
+      \return void
+    */
     void set_blks_per_portion(uint32_t pg_per_portion) {
         assert(pg_per_portion % get_blks_per_phys_page() == 0);
         m_blks_per_portion = pg_per_portion;
     }
 
+    //! Set Max Cache Blocks
+    /*!
+      \param ncache_entries an uint32 argument signifies max blocks in cache
+      \return void
+    */
     void set_max_cache_blks(uint64_t ncache_entries) {
         m_max_cache_blks = ncache_entries;
     }
     
+    //! Set Block Count per Slab
+    /*!
+      \param nblks a uint32 vector argument signifies block count for all slabs
+      \param weights a float vector argument signifies weights for all slabs
+      \return void
+    */
     void set_slab(  std::vector<uint32_t> nblks,
                     std::vector<float> weights  ) {
         assert(nblks.size()+1 == weights.size());
@@ -71,43 +113,84 @@ public:
         }
     }
 
+    //! Set Blocks per Temp group
+    /*!
+      \param npgs_per_temp_group an uint64 argument signifies number of pages per temp group
+      \return void
+    */
     void set_blks_per_temp_group(uint64_t npgs_per_temp_group) {
         m_blks_per_temp_group = npgs_per_temp_group;
     }
 
+    //! Get Physical Page Size
+    /*!
+      \return physical page size as uint32
+    */
     uint32_t get_phys_page_size() const {
         return m_phys_page_size;
     }
 
+    //! Get Total Segments
+    /*!
+      \return number of segments as uint32
+    */
     uint32_t get_total_segments() const {
         return m_nsegments;
     }
 
+    //! Get Blocks per Portion
+    /*!
+      \return blocks per portion as uint64
+    */
     uint64_t get_blks_per_portion() const {
         return m_blks_per_portion;
     }
 
+    //! Get Blocks per Segment
+    /*!
+      \return blocks per segment as uint64
+    */
     uint64_t get_blks_per_segment() const {
         return (uint64_t) (get_total_blks() / get_total_segments());
     }
 
+    //! Get Total Portions
+    /*!
+      \return portion count as uint64
+    */
     uint64_t get_total_portions() const {
         assert(get_total_blks() % get_blks_per_portion() == 0);
             return get_total_blks() / get_blks_per_portion();
     }
 
+    //! Get Max Cache Blocks
+    /*!
+      \return max cache blocks as uint64
+    */
     uint64_t get_max_cache_blks() const {
         return m_max_cache_blks;
     }
 
+    //! Get Blocks per Temp Group
+    /*!
+      \return blocks per temp group as uint64
+    */
     uint64_t get_blks_per_temp_group() const {
         return m_blks_per_temp_group;
     }
 
+    //! Get Blocks per Physical Page
+    /*!
+      \return blocks per physical page as uint32
+    */
     uint32_t get_blks_per_phys_page() const {
         return get_phys_page_size() / get_blk_size();
     }
 
+    //! Get Temp Group Count
+    /*!
+      \return temp group count as uint32
+    */
     uint32_t get_total_temp_group() const {
         if (get_total_blks() % get_blks_per_temp_group() == 0) {
             return (uint32_t) (get_total_blks() / get_blks_per_temp_group());
@@ -116,21 +199,38 @@ public:
         }
     }
 
+    //! Get Slab Count
+    /*!
+      \return slab count as uint32
+    */
     uint32_t get_slab_cnt() const {
         return m_slab_capacity.size();
     }
 
+    //! Get Slab Capacity
+    /*!
+      \return slab capacity as uint32
+    */
     uint32_t get_slab_capacity(uint32_t index) const {
         return m_slab_capacity[index];
     }
 
-    // Return slab index and capacity
+    //! Get slab
+    /*!
+      \param nblks an uint32 argument signifies number of blocks
+      \return slab index and capacity as a std::pair of uint32s
+    */
     std::pair<uint32_t,uint32_t> get_slab(uint32_t nblks) const {
         uint32_t i = m_slab_nblks.size();
         for(; i > 0 && nblks < m_slab_nblks[i-1]; i--);
         return std::make_pair(i, m_slab_capacity[i]);
     }
-    
+
+    //! Get lower bound of a particular slab
+    /*!
+      \param indx an uint32 argument signifies slab index
+      \return lower bound of slab pointed by indx as uint32
+    */
     uint32_t get_slab_lower_bound(uint32_t indx) const {
         /* m_slab_nblks[i] has the blocks from m_slab_nblks[i - 1] to m_slab_nblks[i] */
         return(m_slab_nblks[indx - 1]);
@@ -447,7 +547,8 @@ public:
     VarsizeBlkAllocator(VarsizeBlkAllocConfig &cfg, bool init);
     virtual ~VarsizeBlkAllocator();
 
-    BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid, bool best_fit = false) override;
+    BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints,
+                        BlkId *out_blkid, bool best_fit = false) override;
     BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints &hints, 
                                  std::vector<BlkId> &out_blkid) override;
     void free(const BlkId &b) override;
@@ -458,6 +559,9 @@ public:
     virtual BlkAllocStatus alloc(BlkId &out_blkid) override;
     virtual void inited() override;
     virtual bool is_blk_alloced(BlkId &in_bid) override;
+
+    flip::Flip* get_flip() { return m_flip.get(); }
+
 private:
     VarsizeBlkAllocConfig m_cfg; // Config for Varsize
     std::thread m_thread_id; // Thread pointer for this region
@@ -466,6 +570,7 @@ private:
     BlkAllocatorState m_region_state;
 
     homeds::Bitset *m_alloc_bm;   // Bitset of all allocation
+    std::unique_ptr<flip::Flip> m_flip;
 
 #ifndef DEBUG
     homeds::Bitset *m_alloced_bm;   // Bitset of all allocation
