@@ -29,14 +29,11 @@ HomeBlks::HomeBlks(const init_params& cfg) :
         m_scan_cnt(0),
         m_init_failed(false),
         m_shutdown(false),
-        m_devices_added(false),
         m_init_finished(false) {
 
     _instance = this;
     /* set the homestore config parameters */
-    HomeStoreConfig::phys_page_size = m_cfg.physical_page_size;
-    HomeStoreConfig::align_size = m_cfg.disk_align_size;
-    HomeStoreConfig::atomic_phys_page_size = m_cfg.atomic_page_size;
+    populate_disk_attrs();
     /* If these parameters changes then we need to take care of upgrade/revert in device manager */
     HomeStoreConfig::max_chunks = MAX_CHUNKS;
     HomeStoreConfig::max_vdevs = MAX_VDEVS;
@@ -48,29 +45,62 @@ HomeBlks::HomeBlks(const init_params& cfg) :
     assert(VOL_SB_SIZE >= sizeof(vol_sb));
     assert(VOL_SB_SIZE >= sizeof(vol_config_sb));
 
-    assert(m_cfg.atomic_page_size >= m_cfg.min_virtual_page_size);
-    assert(cfg.max_cap / cfg.devices.size() > MIN_DISK_CAP_SUPPORTED);
-    assert(cfg.max_cap < MAX_SUPPORTED_CAP);
+    assert(HomeStoreConfig::atomic_phys_page_size >= HomeStoreConfig::min_page_size);
 
     m_out_params.max_io_size = VOL_MAX_IO_SIZE;
     int ret = posix_memalign((void**)&m_cfg_sb, HomeStoreConfig::align_size, VOL_SB_SIZE);
     assert(!ret);
 
     /* create cache */
-    m_cache = new Cache< BlkId >(m_cfg.cache_size, m_cfg.physical_page_size);
+    m_cache = new Cache< BlkId >(m_cfg.cache_size, HomeStoreConfig::atomic_phys_page_size);
 
     /* create device manager */
     m_dev_mgr = new homestore::DeviceManager(new_vdev_found, sizeof(sb_blkstore_blob), m_cfg.iomgr,
-                                             virtual_dev_process_completions, m_cfg.is_file, m_cfg.system_uuid);
+                                             virtual_dev_process_completions, m_cfg.is_file, m_cfg.system_uuid, 
+                                             std::bind(&HomeBlks::process_vdev_error, this, std::placeholders::_1));
 
     /* start thread */
     m_thread_id = std::thread(&HomeBlks::init_thread, this);
 }
 
+void HomeBlks::populate_disk_attrs() {
+    if (m_cfg.disk_attr) {
+        HomeStoreConfig::phys_page_size = m_cfg.disk_attr->physical_page_size;
+        HomeStoreConfig::align_size = m_cfg.disk_attr->disk_align_size;
+        HomeStoreConfig::atomic_phys_page_size = m_cfg.disk_attr->atomic_page_size;
+    } else {
+        /* We should take these params from the config file or from the disks direectly */
+        HomeStoreConfig::phys_page_size = 4096;
+        HomeStoreConfig::align_size = 4096;
+        HomeStoreConfig::atomic_phys_page_size = 4096;
+    }
+    LOGINFO("atomic_phys_page size is set to {}", HomeStoreConfig::atomic_phys_page_size);
+    LOGINFO("align size is set to {}", HomeStoreConfig::align_size);
+    LOGINFO("phys_page size is set to {}", HomeStoreConfig::phys_page_size);
+}
+
+cap_attrs HomeBlks::get_system_capacity() {
+    cap_attrs cap;
+    cap.used_data_size = get_data_blkstore()->get_used_size();
+    cap.used_metadata_size = get_metadata_blkstore()->get_used_size();
+    cap.used_total_size = cap.used_data_size + cap.used_metadata_size;
+    cap.initial_total_size = get_data_blkstore()->get_size() + get_metadata_blkstore()->get_size();
+    return cap;
+}
+
+cap_attrs HomeBlks::get_vol_capacity(const VolumePtr& vol) {
+    cap_attrs cap;
+    cap.used_data_size = vol->get_data_used_size();
+    cap.used_metadata_size = vol->get_metadata_used_size();
+    cap.used_total_size = cap.used_data_size + cap.used_metadata_size;
+    cap.initial_total_size = vol->get_size();
+    return cap;
+}
+    
 std::error_condition HomeBlks::write(const VolumePtr& vol, uint64_t lba, uint8_t* buf, uint32_t nblks,
                                      const vol_interface_req_ptr& req) {
     assert(m_rdy);
-    if (is_shutdown()) {
+    if (!m_rdy || is_shutdown()) {
         return std::make_error_condition(std::errc::device_or_resource_busy);
     }
     return (vol->write(lba, buf, nblks, req));
@@ -78,7 +108,7 @@ std::error_condition HomeBlks::write(const VolumePtr& vol, uint64_t lba, uint8_t
 
 std::error_condition HomeBlks::read(const VolumePtr& vol, uint64_t lba, int nblks, const vol_interface_req_ptr& req) {
     assert(m_rdy);
-    if (is_shutdown()) {
+    if (!m_rdy || is_shutdown()) {
         return std::make_error_condition(std::errc::device_or_resource_busy);
     }
     return (vol->read(lba, nblks, req, false));
@@ -87,13 +117,17 @@ std::error_condition HomeBlks::read(const VolumePtr& vol, uint64_t lba, int nblk
 std::error_condition HomeBlks::sync_read(const VolumePtr& vol, uint64_t lba, int nblks,
                                          const vol_interface_req_ptr& req) {
     assert(m_rdy);
-    if (is_shutdown()) {
+    if (!m_rdy || is_shutdown()) {
         return std::make_error_condition(std::errc::device_or_resource_busy);
     }
     return (vol->read(lba, nblks, req, true));
 }
 
 VolumePtr HomeBlks::create_volume(const vol_params& params) {
+    
+    if (!m_rdy || is_shutdown()) {
+        return nullptr;
+    }
     if (params.size >= m_size_avail) {
         LOGINFO("there is a possibility of running out of space as total size of the volumes"
                 "created are more then maximum capacity");
@@ -125,7 +159,6 @@ VolumePtr HomeBlks::create_volume(const vol_params& params) {
     return nullptr;
 }
 
-
 // 
 // Each volume will have use_count set to 2 here in this function:
 // 1. HomeBlks::m_volume_map;
@@ -133,9 +166,11 @@ VolumePtr HomeBlks::create_volume(const vol_params& params) {
 // 3. IOTest::vol will hold another use_count but we will release use_count 
 // in IOTest before this function so it will be same use_count both with production or test.
 // 
-#define VOLUME_CLEAN_USE_CNT 2
 
 std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
+    if (!m_rdy || is_shutdown()) {
+        return std::make_error_condition(std::errc::device_or_resource_busy);
+    }
     try {
         std::lock_guard<std::mutex> lg(m_vol_lock);
         auto it = m_volume_map.find(uuid);
@@ -274,6 +309,7 @@ HomeBlks::vol_sb_remove(vol_sb *sb) {
         assert (prev_sb);
         // we do have a valid prev_sb, update it. 
         auto it = m_volume_map.find(prev_sb->uuid);
+        free(prev_sb);
         assert(it != m_volume_map.end());
         
         auto vol = it->second;
@@ -297,6 +333,7 @@ HomeBlks::vol_sb_remove(vol_sb *sb) {
         next_sb = vol_sb_read(sb->next_blkid);
         assert(next_sb);
         auto it = m_volume_map.find(next_sb->uuid);
+        free(next_sb);
         assert(it != m_volume_map.end());
         auto vol = it->second;
         
@@ -374,6 +411,27 @@ void HomeBlks::vol_sb_write(vol_sb* sb, bool lock) {
     };
 }
 
+void HomeBlks::process_vdev_error(vdev_info_block* vb) {
+    /* For now we need to move all volumes in a failed state. Later on when we move to multiple virtual devices for
+     * data blkstoree we need to move only those volumes to failed state which  belong to this virtual device.
+     */
+    m_vol_lock.lock();
+    auto it = m_volume_map.begin();
+    while (it != m_volume_map.end()) {
+        auto old_state = it->second->get_state();
+        if (old_state == ONLINE) {
+            /* We don't persist this state. Reason that we come over here is that
+             * disks are not working. It doesn't make sense to write to faulty
+             * disks.
+             */
+            it->second->set_state(OFFLINE, false);
+            m_cfg.vol_state_change_cb(it->second, old_state, OFFLINE);
+        }
+        ++it;
+    }
+    m_vol_lock.unlock();
+}
+
 void HomeBlks::new_vdev_found(DeviceManager* dev_mgr, vdev_info_block* vb) {
     /* create blkstore */
     blkstore_blob* blob = (blkstore_blob*)vb->context_data;
@@ -393,15 +451,28 @@ void HomeBlks::create_blkstores() {
 
 void HomeBlks::attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback cb) { vol->attach_completion_cb(cb); }
 
-void HomeBlks::add_devices() { m_dev_mgr->add_devices(m_cfg.devices, m_cfg.disk_init); }
+void HomeBlks::add_devices() { 
+    m_dev_mgr->add_devices(m_cfg.devices, m_cfg.disk_init); 
+    assert(m_dev_mgr->get_total_cap() / m_cfg.devices.size() > MIN_DISK_CAP_SUPPORTED);
+    assert(m_dev_mgr->get_total_cap() < MAX_SUPPORTED_CAP);
+}
 
 void HomeBlks::vol_mounted(const VolumePtr& vol, vol_state state) {
     m_cfg.vol_mounted_cb(vol, state);
     LOGINFO("vol mounted name {} state {}", vol->get_sb()->vol_name, state);
 }
 
-void HomeBlks::vol_state_change(const VolumePtr& vol, vol_state old_state, vol_state new_state) {
-    m_cfg.vol_state_change_cb(vol, old_state, new_state);
+bool HomeBlks::vol_state_change(const VolumePtr& vol, vol_state new_state) {
+    assert(new_state == OFFLINE || new_state == ONLINE);
+    m_vol_lock.lock();
+    try {
+        vol->set_state(new_state);
+    } catch (std::exception &e) {
+        LOGERROR("{}", e.what());
+        return false;
+    }
+    m_vol_lock.unlock();
+    return true;
 }
 
 homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >* HomeBlks::get_data_blkstore() {
@@ -476,18 +547,23 @@ void HomeBlks::scan_volumes() {
                     sb->prev_blkid.set(m_last_vol_sb->blkid);
                     vol_sb_write(sb, false);
                 }
+
+                if (sb->state == ONLINE && m_vdev_failed) {
+                    /* Move all the volumes to failed state */
+                    sb->state = FAILED;
+                    vol_sb_write(sb, false);
+                }
                 num_vol++;
                 decltype(m_volume_map)::iterator it;
 
                 bool happened{false};
                 std::tie(it, happened) = m_volume_map.emplace(std::make_pair(vol_uuid, nullptr));
                 assert(happened);
-                m_scan_cnt++;
 
+                m_scan_cnt++;
                 VolumePtr new_vol;
                 try {
                     new_vol = Volume::make_volume(sb);
-                    new_vol->recovery_start();
                 } catch (const std::exception& e) {
                     m_scan_cnt--;
                     throw e;
@@ -534,7 +610,7 @@ void HomeBlks::create_data_blkstore(vdev_info_block* vb) {
         /* change it to context */
         struct blkstore_blob blob;
         blob.type = blkstore_type::DATA_STORE;
-        uint64_t size = (90 * m_cfg.max_cap) / 100;
+        uint64_t size = (90 * m_dev_mgr->get_total_cap()) / 100;
         size = ALIGN_SIZE(size, HomeStoreConfig::phys_page_size);
         m_size_avail = size;
         LOGINFO("maximum capacity for data blocks is {}", m_size_avail);
@@ -555,7 +631,7 @@ void HomeBlks::create_metadata_blkstore(vdev_info_block* vb) {
     if (vb == nullptr) {
         struct blkstore_blob blob;
         blob.type = blkstore_type::METADATA_STORE;
-        uint64_t size = (2 * m_cfg.max_cap) / 100;
+        uint64_t size = (2 * m_dev_mgr->get_total_cap()) / 100;
         size = ALIGN_SIZE(size, HomeStoreConfig::phys_page_size);
         m_metadata_blk_store = new BlkStore< VdevFixedBlkAllocatorPolicy, BLKSTORE_BUFFER_TYPE >(
             m_dev_mgr, m_cache, size, RD_MODIFY_WRITEBACK_CACHE, 0, (char*)&blob, sizeof(blkstore_blob),
@@ -579,7 +655,7 @@ void HomeBlks::create_sb_blkstore(vdev_info_block* vb) {
         struct sb_blkstore_blob blob;
         blob.type = blkstore_type::SB_STORE;
         blob.blkid.set(BlkId::invalid_internal_id());
-        uint64_t size = (1 * m_cfg.max_cap) / 100;
+        uint64_t size = (1 * m_dev_mgr->get_total_cap()) / 100;
         size = ALIGN_SIZE(size, HomeStoreConfig::phys_page_size);
         m_sb_blk_store = new BlkStore< VdevVarSizeBlkAllocatorPolicy >(
             m_dev_mgr, m_cache, size, PASS_THRU, m_cfg.devices.size() - 1, (char*)&blob, sizeof(sb_blkstore_blob),
@@ -650,7 +726,6 @@ void HomeBlks::init_thread() {
         bool init = m_cfg.disk_init;
         /* attach physical devices */
         add_devices();
-        m_devices_added = true;
                 
         /* create blkstore if it is a first time boot */
         if (init) {
@@ -668,8 +743,10 @@ void HomeBlks::init_thread() {
                 // the flag should be set again; 
                 m_cfg_sb->clear_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
                 config_super_block_write(true);
-            } else {
+            } else if (!init) {
                 LOGCRITICAL("System experienced sudden panic since last boot!");
+            } else {
+                LOGINFO("Initializing the system");
             }
         }
 
@@ -700,18 +777,22 @@ void HomeBlks::init_thread() {
     m_cfg.init_done_cb(error, m_out_params);
 }
 
-void HomeBlks::vol_scan_cmpltd(const VolumePtr& vol, vol_state state) {
+void HomeBlks::vol_scan_cmpltd(const VolumePtr& vol, vol_state state, bool success) {
 
-    vol_mounted(vol, state);
+    if (success) {
+        vol_mounted(vol, state);
+    } else {
+        m_init_failed = true;
+    }
 
     int cnt = m_scan_cnt.fetch_sub(1, std::memory_order_relaxed);
     if (cnt == 1) {
         if (m_init_failed) {
-            LOGERROR("init failed");
+            LOGCRITICAL("init failed");
             auto error = std::make_error_condition(std::errc::io_error);
             m_cfg.init_done_cb(error, m_out_params);
         } else {
-            LOGINFO("scan completed");
+            LOGINFO("init completed");
             m_rdy = true;
             m_dev_mgr->inited();
             m_cfg.init_done_cb(no_error, m_out_params);
@@ -721,7 +802,6 @@ void HomeBlks::vol_scan_cmpltd(const VolumePtr& vol, vol_state state) {
 
 const char* HomeBlks::get_name(const VolumePtr& vol) { return vol->get_name(); }
 uint64_t    HomeBlks::get_page_size(const VolumePtr& vol) { return vol->get_page_size(); }
-uint64_t    HomeBlks::get_size(const VolumePtr& vol) { return vol->get_size(); }
 
 homeds::blob HomeBlks::at_offset(const boost::intrusive_ptr< BlkBuffer >& buf, uint32_t offset) {
     return (buf->at_offset(offset));

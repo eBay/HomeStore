@@ -153,10 +153,6 @@ public:
         params.disk_init = init;
         params.devices = device_info;
         params.is_file = is_file ? true : false;
-        params.max_cap = max_disk_capacity ;
-        params.physical_page_size = 4096;
-        params.disk_align_size = 4096;
-        params.atomic_page_size = 4096;
         params.iomgr = iomgr_obj;
         params.init_done_cb = std::bind(&IOTest::init_done_cb, this, std::placeholders::_1, std::placeholders::_2);
         params.vol_mounted_cb = std::bind(&IOTest::vol_mounted_cb, this, std::placeholders::_1, std::placeholders::_2);
@@ -183,10 +179,10 @@ public:
 
     void vol_init(int cnt, const VolumePtr& vol_obj) {
         vol[cnt] = vol_obj;
-        max_vol_blks[cnt] = VolInterface::get_instance()->get_size(vol_obj) / 
+        max_vol_blks[cnt] = VolInterface::get_instance()->get_vol_capacity(vol_obj).initial_total_size / 
                                            VolInterface::get_instance()->get_page_size(vol_obj);
         m_vol_bm[cnt] = new homeds::Bitset(max_vol_blks[cnt]);
-        assert(VolInterface::get_instance()->get_size(vol_obj) == max_vol_size);
+        assert(VolInterface::get_instance()->get_vol_capacity(vol_obj).initial_total_size == max_vol_size);
     }
 
     void vol_state_change_cb(const VolumePtr& vol, vol_state old_state, vol_state new_state) {

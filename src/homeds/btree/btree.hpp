@@ -105,6 +105,8 @@ private:
     BtreeMetrics                     m_metrics;
     std::unique_ptr< btree_store_t > m_btree_store;
     comp_callback m_comp_cb;
+    bool m_destroy = false;
+    std::atomic<uint64_t> m_total_nodes = 0;
 
     static thread_local homeds::reserve_vector< btree_locked_node_info, 5 >  wr_locked_nodes;
     static thread_local homeds::reserve_vector< btree_locked_node_info, 5 >  rd_locked_nodes;
@@ -208,10 +210,12 @@ public:
             m_metrics(BtreeStoreType, cfg.get_name().c_str()) {}
     
     ~Btree() {
-        destroy();
+        if (!m_destroy) {
+            destroy(nullptr, true);
+        }
     }
         
-    btree_status_t destroy(free_blk_callback free_blk_cb = nullptr, destroy_btree_comp_callback destroy_btree_comp_cb = nullptr) {
+    btree_status_t destroy(free_blk_callback free_blk_cb, bool mem_only) {
         m_btree_lock.write_lock();
         BtreeNodePtr  root;
         homeds::thread::locktype acq_lock = LOCKTYPE_WRITE;
@@ -222,15 +226,17 @@ public:
             m_btree_lock.unlock();
             return ret;
         }
-        ret = free(root, free_blk_cb, multinode_req);
+        ret = free(root, free_blk_cb, multinode_req, mem_only);
         unlock_node(root, acq_lock);
         m_btree_lock.unlock();
-        // if this is a delete vol call, send the comp callback to caller;
-        if (ret == btree_status_t::success && destroy_btree_comp_cb) {
-            /* XXX: do we need to pass the status to callback */
-            destroy_btree_comp_cb();
-        }
         DLOGDEBUG("btree nodes destroyed {}", m_btree_cfg.get_name());
+        
+        if (ret == btree_status_t::success) {
+            m_destroy = true;
+        }
+        if (!mem_only) {
+            assert(m_total_nodes == 0);
+        }
         return ret;
     }
 
@@ -244,7 +250,7 @@ public:
     // 2. If free_blk_cb is not null, callback to caller for leaf node's blk_id;
     // Assumption is that there are no pending IOs when it is called.
     // 
-    btree_status_t free(BtreeNodePtr node, free_blk_callback free_blk_cb, btree_multinode_req_ptr multinode_req) {
+    btree_status_t free(BtreeNodePtr node, free_blk_callback free_blk_cb, btree_multinode_req_ptr multinode_req, bool mem_only) {
         // TODO - this calls free node on mem_tree and ssd_tree.
         // In ssd_tree we free actual block id, which is not correct behavior
         // we shouldnt really free any blocks on free node, just reclaim any memory
@@ -269,7 +275,7 @@ public:
                 if (ret != btree_status_t::success) {
                     return ret;
                 }
-                ret = free(child, free_blk_cb, multinode_req);
+                ret = free(child, free_blk_cb, multinode_req, mem_only);
                 unlock_node(child, acq_lock);
                 i++;
             }
@@ -286,12 +292,13 @@ public:
         if (ret != btree_status_t::success) {
             return ret;
         }
-        if (free_blk_cb) { 
-            free_node(node, multinode_req);
-        } else  {
-            free_node(node, multinode_req, true);
-        }
+        
+        free_node(node, multinode_req, mem_only);
         return ret;
+    }
+
+    uint64_t get_used_size() {
+        return m_total_nodes.load();
     }
 
     btree_status_t range_put(const BtreeKey &k, const BtreeValue &v, btree_put_type put_type,
@@ -832,9 +839,7 @@ out:
         }
 
         auto start_ret = my_node->find(query_req.get_start_of_range(), nullptr, nullptr);
-        assert(IS_VALID_INTERIOR_CHILD_INDX(start_ret, my_node));
         auto end_ret = my_node->find(query_req.get_end_of_range(), nullptr, nullptr);
-        assert(IS_VALID_INTERIOR_CHILD_INDX(end_ret, my_node));
         bool unlocked_already = false;
         int ind = -1;
         
@@ -2030,6 +2035,7 @@ out:
         BtreeNodePtr n = btree_store_t::alloc_node(m_btree_store.get(), true /* is_leaf */, is_new_allocation);
         n->set_leaf(true);
         COUNTER_INCREMENT(m_metrics, btree_leaf_node_count, 1);
+        m_total_nodes++;
         return n;
     }
 
@@ -2038,6 +2044,7 @@ out:
         BtreeNodePtr n = btree_store_t::alloc_node(m_btree_store.get(), false /* isLeaf */, is_new_allocation);
         n->set_leaf(false);
         COUNTER_INCREMENT(m_metrics, btree_int_node_count, 1);
+        m_total_nodes++;
         return n;
     }
 
@@ -2048,6 +2055,7 @@ out:
         COUNTER_DECREMENT_IF_ELSE(m_metrics, node->is_leaf(), btree_leaf_node_count, btree_int_node_count, 1);
         assert(node->is_valid_node());
         node->set_valid_node(false);
+        m_total_nodes--;
         btree_store_t::free_node(m_btree_store.get(), node, multinode_req, mem_only);
     }
 
@@ -2082,11 +2090,11 @@ out:
                 ret = fix_pc_gen_mistmatch(parent_node, child_node, parent_ind);
                 if (ret != btree_status_t::success) {
                     LOGERROR("node recovery failed btree name {}", m_btree_cfg.get_name());
-                    child_node->unlock(LOCKTYPE_WRITE);
+                    unlock_node(child_node, LOCKTYPE_WRITE);
                     return ret;
                 }
             }
-            child_node->unlock(LOCKTYPE_WRITE);
+            unlock_node(child_node, LOCKTYPE_WRITE);
         }
         
         auto acq_lock = (child_node->is_leaf()) ? leaf_lock_type : int_lock_type;

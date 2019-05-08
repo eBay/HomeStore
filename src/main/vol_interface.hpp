@@ -18,6 +18,7 @@
 #include "homeds/utility/useful_defs.hpp"
 #include <utility/obj_life_counter.hpp>
 #include <atomic>
+#include <boost/optional.hpp>
 
 namespace homestore {
 class Volume;
@@ -28,6 +29,13 @@ void intrusive_ptr_release(BlkBuffer* buf);
 class VolInterface;
 struct init_params;
 VolInterface* vol_homestore_init(const init_params& cfg);
+
+struct cap_attrs {
+    uint64_t used_data_size;
+    uint64_t used_metadata_size;
+    uint64_t used_total_size;
+    uint64_t initial_total_size;
+};
 
 struct buf_info {
     uint64_t                          size;
@@ -100,9 +108,10 @@ typedef boost::intrusive_ptr< vol_interface_req > vol_interface_req_ptr;
 
 enum vol_state {
     ONLINE = 0,
-    FAILED = 1,
-    OFFLINE = 2,
-    DEGRADED = 3,
+    FAILED = 1, // It moved to offline only when it find vdev in failed state during boot
+    OFFLINE = 2, // Either AM can move it to offline or internally HS can move it offline if there are error on a disk
+    DEGRADED = 3, // If a data of a volume in a failed state is deleted. We delete the data if we found any volume in a 
+                  // failed state during boot.
     MOUNTING = 4,
     DESTROYING = 5,
     UNINITED = 6,
@@ -126,6 +135,18 @@ struct out_params {
 
 typedef std::shared_ptr< Volume > VolumePtr;
 
+/* This is the optional parameteres which should be given by its consumers only when there is no
+ * system command to get these parameteres directly from disks. Or Consumer want to override
+ * the default values.
+ */
+struct disk_attributes {
+    uint32_t                physical_page_size;    // page size of ssds. It should be same for all the disks.
+                                                   // It shouldn't be less then 8k
+    uint32_t                disk_align_size;       // size alignment supported by disks. It should be
+                                                   // same for all the disks.
+    uint32_t                atomic_page_size;      // atomic page size of the disk
+};
+
 struct init_params {
 public:
     typedef std::function< void(std::error_condition err, const out_params& params) > init_done_callback;
@@ -134,20 +155,18 @@ public:
     typedef std::function< void(const VolumePtr& vol, vol_state old_state, vol_state new_state) >
         vol_state_change_callback;
 
+    /* system parameters */
     uint32_t                min_virtual_page_size; // minimum page size supported. Ideally it should be 4k.
     uint64_t                cache_size;            // memory available for cache. We should give 80 % of the whole
     bool                    disk_init;             // true if disk has to be initialized.
     std::vector< dev_info > devices;               // name of the devices.
     bool                    is_file;
-    uint64_t                max_cap;               // max capacity of this system.
-    uint32_t                physical_page_size;    // page size of ssds. It should be same for all the disks.
-                                                   // It shouldn't be less then 8k
-    uint32_t                disk_align_size;       // size alignment supported by disks. It should be
-                                                   // same for all the disks.
-    uint32_t                atomic_page_size;      // atomic page size of the disk
     std::shared_ptr< iomgr::ioMgr > iomgr;
     boost::uuids::uuid      system_uuid;
     io_flag                 flag = io_flag::DIRECT_IO;
+
+    /* optional parameters */
+    boost::optional< disk_attributes > disk_attr; 
 
     /* completions callback */
     init_done_callback        init_done_cb;
@@ -187,7 +206,6 @@ public:
                                            const vol_interface_req_ptr& req) = 0;
     virtual const char*          get_name(const VolumePtr& vol) = 0;
     virtual uint64_t             get_page_size(const VolumePtr& vol) = 0;
-    virtual uint64_t             get_size(const VolumePtr& vol) = 0;
     virtual boost::uuids::uuid   get_uuid(std::shared_ptr<Volume> vol) = 0;
     virtual homeds::blob         at_offset(const boost::intrusive_ptr< BlkBuffer >& buf, uint32_t offset) = 0;
     virtual VolumePtr            create_volume(const vol_params& params) = 0;
@@ -198,6 +216,9 @@ public:
     virtual void attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback cb) = 0;
     
     virtual std::error_condition shutdown(shutdown_comp_callback shutdown_comp_cb, bool force = false) = 0;
+    virtual cap_attrs get_system_capacity() = 0;
+    virtual cap_attrs get_vol_capacity(const VolumePtr& vol) = 0;
+    virtual bool vol_state_change(const VolumePtr& vol, vol_state new_state) = 0;
 
 #ifndef NDEBUG
     virtual void print_tree(const VolumePtr& vol) = 0;

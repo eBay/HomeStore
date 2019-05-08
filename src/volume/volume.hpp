@@ -140,6 +140,8 @@ private:
     std::atomic< uint64_t >           seq_Id;
     VolumeMetrics                     m_metrics;
     std::mutex                        m_sb_lock; // lock for updating vol's sb
+    std::atomic<uint64_t>             m_used_size = 0;
+    bool                              m_recovery_error = false;
 
 private:
     Volume(const vol_params& params);
@@ -179,12 +181,12 @@ public:
 
     // callback from mapping layer for free leaf node(data blks) so that volume layer could do blk free.
     void process_free_blk_callback(Free_Blk_Entry fbe);
-    void process_destroy_btree_comp_callback();
     
     uint64_t get_elapsed_time(Clock::time_point startTime);
     void     attach_completion_cb(const io_comp_callback& cb);
     void     print_tree();
     void     blk_recovery_callback(const MappingValue& mv);
+    void     set_recovery_error();
 
     mapping* get_mapping_handle() { return m_map; }
 
@@ -194,7 +196,8 @@ public:
         return (get_size() / get_page_size()) - 1;
     }
 
-
+    uint64_t get_data_used_size() {return m_used_size;}
+    uint64_t get_metadata_used_size();
     const char* get_name() const { return (m_sb->vol_name); }
     uint64_t    get_page_size() const { return m_sb->page_size; }
     uint64_t    get_size() const { return m_sb->size; }

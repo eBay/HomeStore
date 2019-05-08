@@ -37,8 +37,7 @@ Volume::Volume(const vol_params& params) : m_comp_cb(params.io_comp_cb), m_metri
             params.page_size,
             params.vol_name,
             std::bind(&Volume::process_metadata_completions, this, std::placeholders::_1),
-            std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1),
-            std::bind(&Volume::process_destroy_btree_comp_callback, this));
+            std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
 
     auto ret = posix_memalign((void**)&m_sb, HomeStoreConfig::align_size, VOL_SB_SIZE);
     assert(!ret);
@@ -67,8 +66,7 @@ Volume::Volume(vol_sb* sb) : m_sb(sb), m_metrics(sb->vol_name) {
                 m_sb->page_size,
                 m_sb->vol_name,
                 std::bind(&Volume::process_metadata_completions, this, std::placeholders::_1), 
-                std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1),
-                std::bind(&Volume::process_destroy_btree_comp_callback, this));
+                std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
         m_sb->btree_sb = m_map->get_btree_sb();
         m_sb->state = vol_state::DEGRADED;;
         HomeBlks::instance()->vol_sb_write(m_sb);
@@ -80,14 +78,14 @@ Volume::Volume(vol_sb* sb) : m_sb(sb), m_metrics(sb->vol_name) {
                  m_sb->btree_sb,
                  std::bind(&Volume::process_metadata_completions, this, std::placeholders::_1),
                  std::bind(&Volume::alloc_blk_callback, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3),
-                 std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1),
-                 std::bind(&Volume::process_destroy_btree_comp_callback, this));
-        m_sb->state = vol_state::ONLINE;
+                 std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
     }
+    assert(m_sb->state == OFFLINE || m_sb->state == DEGRADED || m_sb->state == ONLINE);
     seq_Id = 3;
     alloc_single_block_in_mem();
 
     m_data_blkstore = HomeBlks::instance()->get_data_blkstore();
+    recovery_start();
     m_state = vol_state::MOUNTING;
 }
 
@@ -96,17 +94,7 @@ void Volume::recovery_start() {
     vol_scan_alloc_blks();
 }
 
-// 
-// All the leaf nodes of mapping btree has been de-allocated:
-// 1. remove the vol sb on disk
-// 2. free m_sb in-memory
-// 2. free m_map in-memory
-//
-void Volume::process_destroy_btree_comp_callback() {
-    HomeBlks::instance()->vol_sb_remove(get_sb());
-    free(m_sb);
-    delete m_map;
-}
+uint64_t Volume::get_metadata_used_size() {return m_map->get_used_size();}
 
 //
 // No need to do it in multi-threading since blkstore.free_blk is in-mem operation. 
@@ -115,7 +103,11 @@ void Volume::process_destroy_btree_comp_callback() {
 void 
 Volume::process_free_blk_callback(Free_Blk_Entry fbe){
     LOGDEBUG("{}: bid: {}, offset: {}, nblks: {}, get_pagesz: {}", __FUNCTION__, fbe.m_blkId.to_string(), fbe.m_blk_offset, fbe.m_nblks_to_free, get_page_size());
-    m_data_blkstore->free_blk(fbe.m_blkId, HomeBlks::instance()->get_data_pagesz() * fbe.m_blk_offset, HomeBlks::instance()->get_data_pagesz() * fbe.m_nblks_to_free);
+    
+    uint64_t size = HomeBlks::instance()->get_data_pagesz() * fbe.m_nblks_to_free;
+    m_data_blkstore->free_blk(fbe.m_blkId, HomeBlks::instance()->get_data_pagesz() * fbe.m_blk_offset, 
+                                HomeBlks::instance()->get_data_pagesz() * fbe.m_nblks_to_free);
+    m_used_size.fetch_sub(size, std::memory_order_relaxed);
 }
 
 boost::uuids::uuid Volume::get_uuid() {
@@ -129,8 +121,8 @@ vol_state Volume::get_state() {
 void Volume::set_state(vol_state state, bool persist) {
     lock_sb_for_update();
     m_state = state;
-    m_sb->state = state;
     if (persist) {
+        m_sb->state = state;
         HomeBlks::instance()->vol_sb_write(get_sb(), true);
     }
     unlock_sb_for_update();
@@ -144,7 +136,7 @@ Volume::blk_recovery_process_completions(bool success) {
     assert(m_state == vol_state::MOUNTING);
     m_state = m_sb->state;
     m_map->recovery_cmpltd();
-    HomeBlks::instance()->vol_scan_cmpltd(shared_from_this(), m_sb->state);
+    HomeBlks::instance()->vol_scan_cmpltd(shared_from_this(), m_sb->state, success);
 }
 
 /* TODO: This part of the code should be moved to mapping layer. Ideally
@@ -154,6 +146,7 @@ void Volume::alloc_blk_callback(struct BlkId bid, size_t offset_size, size_t siz
     assert(m_state == vol_state::MOUNTING);
     BlkId free_bid(bid.get_blkid_at(offset_size, size, HomeBlks::instance()->get_data_pagesz()));
     m_data_blkstore->alloc_blk(free_bid);
+    m_used_size.fetch_add(size, std::memory_order_relaxed);
 }
 
 void 
@@ -178,7 +171,14 @@ Volume::~Volume() {
         // 2. Delete in-memory m_map and m_data_blkstore;
         // 3. Clean on-disk volume super block related data?
         //
+        // destroy is a sync call.
+        LOGINFO(" size {}", m_used_size.load());
         m_map->destroy();
+        // all blks should have been freed
+        assert(m_used_size.load() == 0);
+        HomeBlks::instance()->vol_sb_remove(get_sb());
+        free(m_sb);
+        delete m_map;
     }
 }
 
@@ -202,6 +202,7 @@ void Volume::process_metadata_completions(const volume_req_ptr& vreq) {
             uint64_t free_size = HomeBlks::instance()->get_data_pagesz() * ptr.m_nblks_to_free;
             m_data_blkstore->free_blk(ptr.m_blkId, HomeBlks::instance()->get_data_pagesz() * ptr.m_blk_offset,
                                       free_size);
+            m_used_size.fetch_sub(free_size, std::memory_order_relaxed);
         }
     }
 
@@ -278,7 +279,6 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
 }
 
 std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, const vol_interface_req_ptr& hb_req) {
-    assert(m_sb->state == vol_state::ONLINE);
     assert(m_sb->page_size % HomeBlks::instance()->get_data_pagesz() == 0);
     assert((m_sb->page_size * nlbas) <= VOL_MAX_IO_SIZE);
 
@@ -310,6 +310,7 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
         return hb_req->err;
     }
 
+    m_used_size.fetch_add(nlbas * m_sb->page_size, std::memory_order_relaxed);
     boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector());
     mvec->set(buf, m_sb->page_size * nlbas, 0);
 
@@ -588,6 +589,8 @@ Volume::get_allocated_blks() {
     uint64_t start_lba = 0, end_lba = 0;
 
     std::vector<ThreadPool::TaskFuture<void>>   v;
+
+    bool success = true;
     while (end_lba < max_lba) {
         // if high watermark is hit, wait for a while so that we do not consuming too 
         // much memory pushing new tasks. This is helpful when volume size is extreamly large.
@@ -600,7 +603,9 @@ Volume::get_allocated_blks() {
         end_lba = std::min((unsigned long long)max_lba, end_lba + NUM_BLKS_PER_THREAD_TO_QUERY);
 
         v.push_back(submit_job([this, start_lba, end_lba, mp]() {
-            mp->sweep_alloc_blks(start_lba, end_lba);
+            if (mp->sweep_alloc_blks(start_lba, end_lba)) {
+                this->set_recovery_error();
+            }
         } ));
     }
 
@@ -609,7 +614,12 @@ Volume::get_allocated_blks() {
     }
 
     // return completed with success to the caller 
-    blk_recovery_process_completions(true);
+    blk_recovery_process_completions(!m_recovery_error);
+}
+
+void Volume::set_recovery_error() {
+    /* XXX: does it need to be atomic variable. Don't think so as we can only set it to false in thread pool */
+    m_recovery_error = true;
 }
 
 bool 

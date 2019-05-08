@@ -117,7 +117,6 @@ class HomeBlks : public VolInterface {
     out_params                                                                           m_out_params;
     std::unique_ptr< sisl::HttpServer >                                                  m_http_server;
     std::atomic< bool >                                                                  m_shutdown;
-    std::atomic< bool >                                                                  m_devices_added;
     std::atomic< bool >                                                                  m_init_finished;
     std::condition_variable                                                              m_cv;
     std::mutex                                                                           m_cv_mtx;
@@ -147,18 +146,21 @@ public:
     virtual VolumePtr            lookup_volume(const boost::uuids::uuid& uuid) override;
     virtual const char*          get_name(const VolumePtr& vol) override;
     virtual uint64_t             get_page_size(const VolumePtr& vol) override;
-    virtual uint64_t             get_size(const VolumePtr& vol) override;
     virtual boost::uuids::uuid   get_uuid(VolumePtr vol) override;
     virtual homeds::blob         at_offset(const boost::intrusive_ptr< BlkBuffer >& buf, uint32_t offset) override;
+    virtual bool vol_state_change(const VolumePtr& vol, vol_state new_state) override;
     void                         vol_sb_write(vol_sb* sb);
     void                         vol_sb_write(vol_sb* sb, bool lock);
     void                         vol_sb_init(vol_sb* sb);
     void                         config_super_block_init(BlkId& bid);
     void                         config_super_block_write(bool lock);
-    void                         vol_scan_cmpltd(const VolumePtr& vol, vol_state state);
+    void                         vol_scan_cmpltd(const VolumePtr& vol, vol_state state, bool success);
+    void                         populate_disk_attrs();
     virtual void                 attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback cb) override;
 
     virtual std::error_condition shutdown(shutdown_comp_callback shutdown_comp_cb, bool force = false) override;
+    virtual cap_attrs get_system_capacity() override;
+    virtual cap_attrs get_vol_capacity(const VolumePtr& vol) override;
 
     homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >*                     get_data_blkstore();
     homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy, BLKSTORE_BUFFER_TYPE >* get_metadata_blkstore();
@@ -180,6 +182,7 @@ public:
 private:
     BlkId                             alloc_blk();
     static void                       new_vdev_found(DeviceManager* dev_mgr, vdev_info_block* vb);
+    void                              process_vdev_error(vdev_info_block* vb);
     void                              create_blkstores();
     void                              add_devices();
     void                              vol_mounted(const VolumePtr& vol, vol_state state);

@@ -168,10 +168,6 @@ public:
         params.disk_init = true;
         params.devices = device_info;
         params.is_file = true;
-        params.max_cap = MAX_SIZE;
-        params.physical_page_size = 4096;
-        params.disk_align_size = 4096;
-        params.atomic_page_size = 4096;
         params.iomgr = iomgr_obj;
         params.init_done_cb = std::bind(&MapTest::init_done_cb, this, std::placeholders::_1, std::placeholders::_2);
         params.vol_mounted_cb = std::bind(&MapTest::vol_mounted_cb, this, std::placeholders::_1, std::placeholders::_2);
@@ -220,8 +216,7 @@ public:
                 params.page_size,
                 name,
                 std::bind(&MapTest::process_metadata_completions, this, std::placeholders::_1),
-                std::bind(&MapTest::process_free_blk_callback, this, std::placeholders::_1),
-                std::bind(&MapTest::process_free_blk_comp_callback, this));
+                std::bind(&MapTest::process_free_blk_callback, this, std::placeholders::_1));
             
         start = true;
         ev_fd = eventfd(0, EFD_NONBLOCK);

@@ -17,8 +17,10 @@ namespace homestore {
 DeviceManager::DeviceManager(NewVDevCallback vcb,
                              uint32_t const vdev_metadata_size,
                              std::shared_ptr<iomgr::ioMgr> iomgr,
-                             homeio::comp_callback cb, bool is_file, boost::uuids::uuid system_uuid) :
-        m_comp_cb(cb), m_new_vdev_cb(vcb), m_iomgr(iomgr), m_gen_cnt(0), m_is_file(is_file), m_system_uuid(system_uuid) {
+                             homeio::comp_callback cb, bool is_file, boost::uuids::uuid system_uuid, 
+                             vdev_error_callback vdev_error_cb) :
+        m_comp_cb(cb), m_new_vdev_cb(vcb), m_iomgr(iomgr), m_gen_cnt(0), m_is_file(is_file), m_system_uuid(system_uuid),
+        m_vdev_error_cb(vdev_error_cb) {
 #ifndef NDEBUG
     if (HomeStoreConfig::open_flag == BUFFERED_IO) {
         m_open_flags = O_RDWR;
@@ -44,7 +46,12 @@ DeviceManager::DeviceManager(NewVDevCallback vcb,
     
     assert(m_chunk_memory != nullptr);
     assert(m_vdev_metadata_size <= MAX_CONTEXT_DATA_SZ);
-    LOGERROR("{} iomgr use_count: {}", __FUNCTION__, m_iomgr.use_count());
+}
+
+/* It returns total capacity availble to use by virtual dev. */
+size_t DeviceManager::get_total_cap() {
+    /* we don't support hetrogenous disks */
+    return (m_pdevs.size() * (m_pdevs[0]->get_total_cap()));
 }
 
 void DeviceManager::init_devices(std::vector< dev_info > &devices) {
@@ -133,7 +140,8 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info > &devices) {
                                 m_dm_info_size, &is_inited);
         if (!is_inited) {
             // Super block is not present, possibly a new device, will format the device later
-            LOGINFO("Device {} appears to be not formatted. Will format it", d.dev_names);
+            LOGCRITICAL("Device {} appears to be not formatted. Will format it and replace it with the failed disks." 
+                         "Replacing it with the failed disks can cause data loss", d.dev_names);
             uninit_devs.push_back(std::move(pdev));
             continue;
         }
@@ -197,13 +205,9 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info > &devices) {
             for (uint32_t i = 0; i < HomeStoreConfig::max_chunks; ++i) {
                 if (m_chunk_info[i].pdev_id == dev_id) {
                     auto vdev_id = m_chunk_info[i].vdev_id;
+                    assert(m_vdev_info[vdev_id].vdev_id == vdev_id);
                     /* mark this vdev failed */
-                    for (uint32_t j = 0; j < m_vdev_hdr->num_vdevs; j++) {
-                        if (m_vdev_info[j].vdev_id == vdev_id) {
-                            /* change it to enum */
-                            m_vdev_info[j].failed = true;
-                        }
-                    }
+                    m_vdev_info[vdev_id].failed = true;
                 }
             }
             rewrite = true;
@@ -231,6 +235,7 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info > &devices) {
             if (m_chunk_info[cid].is_sb_chunk) {
                 m_pdevs[m_chunk_info[cid].pdev_id]->attach_superblock_chunk(m_chunks[cid].get());
             }
+            assert(m_chunk_info[cid].chunk_id == cid);
             cid = m_chunk_info[cid].next_chunk_id;
             num_chunks++;
         }
@@ -253,10 +258,30 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info > &devices) {
         m_last_vdevid = vid;
         m_new_vdev_cb(this, &m_vdev_info[vid]);
         assert(m_vdev_info[vid].slot_allocated);
+        assert(m_vdev_info[vid].vdev_id == vid);
         vid = m_vdev_info[vid].next_vdev_id;
         num_vdevs++;
     }
     assert(num_vdevs == m_vdev_hdr->num_vdevs);
+}
+
+void DeviceManager::handle_error(PhysicalDev *pdev) {
+    int cnt = pdev->inc_error_cnt();
+
+    /* When cnt reaches MAX_ERROR_CNT we notify only once until
+     * we reset the cnt to zero.
+     */
+    if (cnt != MAX_ERROR_CNT) {
+        return;
+    }
+    
+    /* send errors on all vdev in this pdev */
+    for (uint32_t i = 0; i < HomeStoreConfig::max_chunks; ++i) {
+        if (m_chunk_info[i].pdev_id == pdev->get_dev_id()) {
+            auto vdev_id = m_chunk_info[i].vdev_id;
+            m_vdev_error_cb(&m_vdev_info[vdev_id]);
+        }
+    }
 }
 
 void DeviceManager::add_chunks(uint32_t vid, chunk_add_callback cb) {
