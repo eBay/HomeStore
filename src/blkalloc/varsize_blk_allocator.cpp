@@ -59,7 +59,7 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig &cfg, bool init) 
 
     // Create segments with as many blk groups as configured.
     uint64_t seg_nblks = cfg.get_total_blks() / cfg.get_total_segments();
-    uint64_t portions_per_seg = cfg.get_total_portions() / cfg.get_total_segments();
+    uint64_t portions_per_seg = get_portions_per_segment();
     for (auto i = 0U; i < cfg.get_total_segments(); i++) {
         BlkAllocSegment *seg = new BlkAllocSegment(seg_nblks, i, portions_per_seg);
         m_segments.push_back(seg);
@@ -76,6 +76,11 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig &cfg, bool init) 
     if (init) {
         inited();
      }
+}
+
+
+uint64_t VarsizeBlkAllocator::get_portions_per_segment() {
+    return (m_cfg.get_total_portions() / m_cfg.get_total_segments());
 }
 
 VarsizeBlkAllocator::~VarsizeBlkAllocator() {
@@ -364,7 +369,8 @@ void VarsizeBlkAllocator::free(const BlkId &b) {
     }
     BlkAllocPortion *portion = blknum_to_portion(b.get_id());
     BlkAllocSegment *segment = blknum_to_segment(b.get_id());
-
+    
+    segment->add_free_blks(b.get_nblks());
     portion->lock();
     // Reset the bits
     assert(m_alloc_bm->is_bits_set_reset(b.get_id(), b.get_nblks(), true));
@@ -382,67 +388,65 @@ void VarsizeBlkAllocator::free(const BlkId &b) {
 // This runs on per region thread and is at present single threaded.
 void VarsizeBlkAllocator::fill_cache(BlkAllocSegment *seg) {
     uint64_t nadded_blks = 0;
-    if (!seg) {
-        auto max_free_blks = m_segments[0]->get_free_blks();
-        seg = m_segments[0];
-        for (auto i = 1U; i < m_segments.size(); i++) {
-    std::atomic<uint8_t> m_refcnt; 
-            auto free_blks = m_segments[i]->get_free_blks();
-            if (free_blks > max_free_blks) {
-                seg = m_segments[i];
-                max_free_blks = free_blks;
-            }
-        }
-       LOGTRACEMOD(varsize_blk_alloc, "Seg was not allocated. So segment chosen");
-    }
 
+    assert(seg == nullptr);
     /* While cache is not full */
-    uint64_t start_portion_num = seg->get_clock_hand();
-    while (m_cache_n_entries.load(std::memory_order_acquire) <
+    uint32_t total_segments = 0;
+    /* we are going through all the segments so that we can ensure that all slabs are populated. 
+     * We might need to find a efficient way of doing it later.
+     */
+    while (total_segments < m_segments.size()) {
+        seg = m_segments[m_last_indx++ % m_segments.size()];
+        ++total_segments;
+        uint64_t start_portion_num = seg->get_clock_hand();
+        while (m_cache_n_entries.load(std::memory_order_acquire) <
                 get_config().get_max_cache_blks()) {
 
-        bool refill_needed = false;
-        auto sum = 0U;
-        for (auto i = 0U; i < m_slab_entries.size(); i++) {
-            // Low water mark for cache slabs is half of full capacity
-            auto count = m_slab_entries[i]._a.load(std::memory_order_acq_rel);
-            sum += count;
-            if (count && count <= get_config().get_slab_capacity(i)/2) {
-                LOGTRACEMOD(varsize_blk_alloc, "Hit low water mark for slab {} capacity = {}",
-                    i, m_slab_entries[i]._a.load(std::memory_order_acq_rel));
-                refill_needed = true;
+            bool refill_needed = false;
+            auto sum = 0U;
+            for (auto i = 0U; i < m_slab_entries.size(); i++) {
+                // Low water mark for cache slabs is half of full capacity
+                auto count = m_slab_entries[i]._a.load(std::memory_order_acq_rel);
+                sum += count;
+                if (count && count <= get_config().get_slab_capacity(i)/2) {
+                    LOGTRACEMOD(varsize_blk_alloc, "Hit low water mark for slab {} capacity = {}",
+                            i, m_slab_entries[i]._a.load(std::memory_order_acq_rel));
+                    refill_needed = true;
+                    break;
+                }
+            }
+            if (!refill_needed && sum) break; // Atleast one slab has sufficient blocks
+
+            LOGTRACEMOD(varsize_blk_alloc, "Refill cache");
+            uint64_t portion_num = seg->get_clock_hand();
+            nadded_blks += fill_cache_in_portion(portion_num, seg);
+
+            // Goto next group within the segment.
+            seg->inc_clock_hand();
+            portion_num = seg->get_clock_hand();
+
+            if (portion_num == start_portion_num) {
+                // Came one full circle, no need to look more.
                 break;
             }
         }
-        if (!refill_needed && sum) break; // Atleast one slab has sufficient blocks
 
-        LOGTRACEMOD(varsize_blk_alloc, "Refill cache");
-        uint64_t portion_num = seg->get_clock_hand();
-        nadded_blks += fill_cache_in_portion(portion_num, seg);
-
-        // Goto next group within the segment.
-        portion_num = (portion_num+1) % get_config().get_total_portions();
-        seg->set_clock_hand(portion_num);
-
-        if (portion_num == start_portion_num) {
-            // Came one full circle, no need to look more.
+        if (nadded_blks) {
+            assert(seg->get_free_blks() >= nadded_blks);
+            seg->remove_free_blks(nadded_blks);
+            LOGTRACEMOD(varsize_blk_alloc, "Bitset sweep thread added {} blks to blk cache", nadded_blks);
             break;
+        } else {
+            LOGTRACEMOD(varsize_blk_alloc, "Bitset sweep failed to add any blocks to blk cache");
         }
-    }
-
-    if (nadded_blks) {
-        assert(seg->get_free_blks() >= nadded_blks);
-        seg->remove_free_blks(nadded_blks);
-        LOGTRACEMOD(varsize_blk_alloc, "Bitset sweep thread added {} blks to blk cache", nadded_blks);
-    } else {
-        LOGTRACEMOD(varsize_blk_alloc, "Bitset sweep failed to add any blocks to blk cache");
     }
 }
 
-uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t portion_num, BlkAllocSegment *seg) {
+uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t seg_portion_num, BlkAllocSegment *seg) {
     EmptyClass dummy;
     uint64_t n_added_blks = 0;
 
+    uint64_t portion_num = seg->get_seg_num() * get_portions_per_segment() + seg_portion_num;
     BlkAllocPortion &portion = m_blk_portions[portion_num];
     auto num_blks_per_portion = get_config().get_blks_per_portion();
     auto cur_blk_id = portion_num * num_blks_per_portion;
