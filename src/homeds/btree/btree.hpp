@@ -298,7 +298,7 @@ public:
     }
 
     uint64_t get_used_size() {
-        return m_total_nodes.load();
+        return NodeSize * m_total_nodes.load();
     }
 
     btree_status_t range_put(const BtreeKey &k, const BtreeValue &v, btree_put_type put_type,
