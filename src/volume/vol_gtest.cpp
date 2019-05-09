@@ -654,9 +654,12 @@ public:
         uint64_t tot_cap = VolInterface::get_instance()->get_system_capacity().initial_total_size;
         uint64_t used_cap = VolInterface::get_instance()->get_system_capacity().used_total_size;
         assert(used_cap <= tot_cap);
-        for (uint32_t i = 0; i < vol.size(); i++) {
+        //for (uint32_t i = 0; i < vol.size(); i++) {
+        while (!vol.empty()) {
             // std::move will release the ref_count in IOTest::vol and pass to HomeBlks::remove_volume
-            VolInterface::get_instance()->remove_volume(VolInterface::get_instance()->get_uuid(std::move(vol[i])));   
+            auto uuid = VolInterface::get_instance()->get_uuid(vol[0]);
+            vol.erase(vol.begin());
+            VolInterface::get_instance()->remove_volume(uuid);
         }
         used_cap = VolInterface::get_instance()->get_system_capacity().used_total_size;
         if (used_cap != 0) {

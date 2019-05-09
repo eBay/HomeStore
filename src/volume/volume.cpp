@@ -176,15 +176,8 @@ Volume::~Volume() {
         m_map->destroy();
         // all blks should have been freed
         assert(m_used_size.load() == 0);
-
-        // Submit to another thread to do the sb remove to avoid dead lock in which map erase would 
-        // trigger volume's destructr (when no I/O is running) 
-        std::vector<ThreadPool::TaskFuture<void>>   task_result;
-        task_result.push_back(submit_job([this](){
-                HomeBlks::instance()->vol_sb_remove(this->get_sb());
-                free(m_sb);
-                }));
-                
+        HomeBlks::instance()->vol_sb_remove(get_sb());
+        free(m_sb);
         delete m_map;
     }
 }
