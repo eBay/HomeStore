@@ -169,7 +169,7 @@ Volume::~Volume() {
         //    1.a for leaf node, get key/value and call m_data_blkstore.free_blk to free the block;
         //    1.b for non-leaf node, call btree_store_t::free_node which is in Btree::free();
         // 2. Delete in-memory m_map and m_data_blkstore;
-        // 3. Clean on-disk volume super block related data?
+        // 3. Clean on-disk volume super block related data
         //
         // destroy is a sync call.
         LOGINFO(" size {}", m_used_size.load());

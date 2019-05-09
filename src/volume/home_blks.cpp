@@ -172,16 +172,24 @@ std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
         return std::make_error_condition(std::errc::device_or_resource_busy);
     }
     try {
-        std::lock_guard<std::mutex> lg(m_vol_lock);
-        auto it = m_volume_map.find(uuid);
-        if (it == m_volume_map.end()) {
-            return std::make_error_condition(std::errc::no_such_device_or_address);
+        std::shared_ptr<Volume> hold_vol_ref = nullptr; 
+        {
+            std::lock_guard<std::mutex> lg(m_vol_lock);
+            auto it = m_volume_map.find(uuid);
+            if (it == m_volume_map.end()) {
+                return std::make_error_condition(std::errc::no_such_device_or_address);
+            }
+
+            it->second->set_state(DESTROYING);
+
+            // hold an additional ref to vol to avoid dead lock (when no IO is running)
+            // e.g. w/o this line, erase will leave ref to zero which will trigger ~Volume, which leads to deadlock.
+            hold_vol_ref = it->second;
+
+            // remove it from the map;
+            m_volume_map.erase(it);
         }
-
-        it->second->set_state(DESTROYING);
-
-        // remove it from the map;
-        m_volume_map.erase(it);
+       
         // vol sb should be removed after all blks(data blk and btree blk) have been freed.
 
         // volume destructor will be called since the user_count of share_ptr 
