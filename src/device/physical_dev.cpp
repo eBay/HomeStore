@@ -25,21 +25,6 @@ using namespace homeio;
 
 DriveEndPoint* PhysicalDev::m_ep = NULL;
 
-#ifdef __APPLE__
-
-ssize_t preadv(int fd, const struct iovec* iov, int iovcnt, off_t offset) {
-    lseek(fd, offset, SEEK_SET);
-    return ::readv(fd, iov, iovcnt);
-}
-
-ssize_t pwritev(int fd, const struct iovec* iov, int iovcnt, off_t offset) {
-
-    lseek(fd, offset, SEEK_SET);
-    return ::writev(fd, iov, iovcnt);
-}
-
-#endif
-
 static std::atomic< uint64_t > glob_phys_dev_offset(0);
 static std::atomic< uint32_t > glob_phys_dev_ids(0);
 
@@ -134,7 +119,18 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
         assert((get_size() % HomeStoreConfig::phys_page_size) == 0);
         m_mgr->create_new_chunk(this, SUPERBLOCK_SIZE, get_size() - align_size, nullptr);
 
-        /* create two chunks for super blocks */
+        /* check for min size */
+        uint64_t min_size = SUPERBLOCK_SIZE + 2 * dm_info_size;
+        if (m_devsize <= min_size) {
+            std::stringstream ss; ss << "Min size requiired is " << min_size << " and disk size is " << m_devsize;
+            const std::string s = ss.str();
+            LOGERROR("{}", ss.str());
+            throw homestore::homestore_exception(s, homestore_error::min_size_not_avail);
+        }
+
+        /* We create two chunks for super blocks. Since writing a sb chunk is not atomic operation, 
+         * so at any given point only one SB chunk is valid.
+         */
         for (int i = 0; i < 2; ++i) {
             uint64_t align_size = ALIGN_SIZE(dm_info_size, HomeStoreConfig::phys_page_size);
             assert(align_size == dm_info_size);
@@ -153,6 +149,10 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
     }
 }
 
+size_t PhysicalDev::get_total_cap() {
+    return (m_devsize - (SUPERBLOCK_SIZE + m_dm_chunk[0]->get_size() + m_dm_chunk[1]->get_size()));
+}
+
 bool PhysicalDev::load_super_block() {
     memset(m_super_blk, 0, SUPERBLOCK_SIZE);
 
@@ -166,7 +166,10 @@ bool PhysicalDev::load_super_block() {
     }
 
     if (m_super_blk->system_uuid != m_system_uuid) {
-        return false;
+        std::stringstream ss; ss << "we found the homestore formatted device with a different system UUID";
+        const std::string s = ss.str();
+        LOGCRITICAL("{}", ss.str());
+        throw homestore::homestore_exception(s, homestore_error::formatted_disk_found);
     }
 
     m_info_blk.dev_num = m_super_blk->this_dev_info.dev_num;
@@ -261,6 +264,7 @@ void PhysicalDev::sync_write(const char* data, uint32_t size, uint64_t offset) {
         std::stringstream ss;
         ss << "dev_name " << get_devname() << ":" << e.what() << "\n";
         const std::string s = ss.str();
+        device_manager()->handle_error(this);
         throw std::system_error(e.code(), s);
     }
 }
@@ -272,6 +276,7 @@ void PhysicalDev::sync_writev(const struct iovec* iov, int iovcnt, uint32_t size
         std::stringstream ss;
         ss << "dev_name " << get_devname() << e.what() << "\n";
         const std::string s = ss.str();
+        device_manager()->handle_error(this);
         throw std::system_error(e.code(), s);
     }
 }
@@ -283,6 +288,7 @@ void PhysicalDev::sync_read(char* data, uint32_t size, uint64_t offset) {
         std::stringstream ss;
         ss << "dev_name " << get_devname() << e.what() << "\n";
         const std::string s = ss.str();
+        device_manager()->handle_error(this);
         throw std::system_error(e.code(), s);
     }
 }
@@ -294,6 +300,7 @@ void PhysicalDev::sync_readv(const struct iovec* iov, int iovcnt, uint32_t size,
         std::stringstream ss;
         ss << "dev_name " << get_devname() << e.what() << "\n";
         const std::string s = ss.str();
+        device_manager()->handle_error(this);
         throw std::system_error(e.code(), s);
     }
 }
