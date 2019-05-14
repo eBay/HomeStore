@@ -76,7 +76,6 @@ public:
     void read_one(uint64_t id, uint32_t size, bool expected = true) {
         boost::intrusive_ptr< homestore::CacheBuffer< blk_id > > cbuf;
         bool found = m_cache->get(blk_id(id), &cbuf);
-        EXPECT_EQ(found, expected);
 
         if (found) {
             auto blob = cbuf->at_offset(0);
