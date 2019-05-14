@@ -25,9 +25,7 @@ ENUM(generator_op_error, uint32_t, no_error, store_failed, store_timeout, data_v
 template < typename K, typename V, typename Store >
 class KVGenerator {
 public:
-    KVGenerator() : m_executor(4 /* threads */, std::make_unique<folly::LifoSemMPMCQueue<
-                                                                           folly::CPUThreadPoolExecutor::CPUTask,
-            folly::QueueBehaviorIfFull::BLOCK>>(20000)) {
+    KVGenerator() : m_executor(4 /* threads */, 1 /* priorities */, 20000 /* maxQueueSize */) {
         srand(time(0));
         m_store = std::make_shared<Store >();
         m_executor.start();
