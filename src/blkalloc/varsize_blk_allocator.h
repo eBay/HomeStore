@@ -543,6 +543,7 @@ public:
  *
  */
 class VarsizeBlkAllocator : public BlkAllocator {
+    uint32_t m_last_indx = 0 ;
 public:
     VarsizeBlkAllocator(VarsizeBlkAllocConfig &cfg, bool init);
     virtual ~VarsizeBlkAllocator();
@@ -594,6 +595,7 @@ private:
     const VarsizeBlkAllocConfig &get_config() const override {
         return (VarsizeBlkAllocConfig &) m_cfg;
     }
+    uint64_t get_portions_per_segment();
 
     // Thread related functions
     std::string state_string(BlkAllocatorState state) const;

@@ -361,10 +361,6 @@ public:
 
     static void deref(CacheBuffer< K >& b) { intrusive_ptr_release(&b); }
 
-    static bool deref_testz(CacheBuffer< K >& b) { return b.m_refcount.decrement_testz(); }
-
-    static bool deref_test_le(CacheBuffer< K >& b, int32_t check) { return b.m_refcount.decrement_test_le(check); }
-
     static bool test_le(CacheBuffer< K >& b, int32_t check) { return b.m_refcount.test_le(check); }
 
     static bool test_le(const CacheBuffer< K >& b, int32_t check) { return b.m_refcount.test_le(check); }

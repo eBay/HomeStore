@@ -602,6 +602,8 @@ public:
 
     uint64_t get_size() const { return m_vdev.get_size(); }
 
+    uint64_t get_used_size() const { return m_vdev.get_used_size(); }
+
     void update_vb_context(uint8_t* blob) { m_vdev.update_vb_context(blob); }
 
     VirtualDev< BAllocator, RoundRobinDeviceSelector >* get_vdev() { return &m_vdev; };

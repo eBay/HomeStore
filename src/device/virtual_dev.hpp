@@ -123,6 +123,7 @@ protected:
     auto pdev = vd_req->chunk->get_physical_dev_mutable();
     if (vd_req->err) {
         COUNTER_INCREMENT_IF_ELSE(pdev->get_metrics(), vd_req->is_read, drive_read_errors, drive_write_errors, 1);
+        pdev->device_manager()->handle_error(pdev);
     } else {
         HISTOGRAM_OBSERVE_IF_ELSE(pdev->get_metrics(), vd_req->is_read, drive_read_latency, drive_write_latency,
                                   get_elapsed_time_us(vd_req->io_start_time));
@@ -182,12 +183,13 @@ private:
     uint32_t                                 m_num_chunks;
     comp_callback                            m_comp_cb;
     uint32_t                                 m_pagesz;
+    std::atomic<uint64_t>                    m_used_size;
 
 public:
     /* Create a new virtual dev for these parameters */
     VirtualDev(DeviceManager* mgr, uint64_t context_size, uint32_t nmirror, bool is_stripe, uint32_t page_size,
                const std::vector< PhysicalDev* >& pdev_list, comp_callback cb, char* blob, uint64_t size) :
-            m_comp_cb(cb) {
+            m_comp_cb(cb), m_used_size(0) {
         m_mgr = mgr;
         m_pagesz = page_size;
 
@@ -259,8 +261,6 @@ public:
     }
 
     void process_completions(boost::intrusive_ptr< virtualdev_req > req) {
-        assert(req->err == no_error);
-
         m_comp_cb(req);
         /* XXX:we probably have to do something if a write/read is spread
          * across the chunks from this layer.
@@ -303,6 +303,8 @@ public:
         PhysicalDevChunk* primary_chunk;
         uint64_t          primary_dev_offset = to_dev_offset(in_blkid, &primary_chunk);
         auto              blkid = to_chunk_specific_id(in_blkid, &primary_chunk);
+        auto size = m_used_size.fetch_add(in_blkid.data_size(m_pagesz), std::memory_order_relaxed);
+        assert(size <= get_size());
         return (primary_chunk->get_blk_allocator()->alloc(blkid));
     }
 
@@ -375,9 +377,13 @@ public:
 
             if (status == BLK_ALLOC_SUCCESS) {
                 // Set the id as globally unique id
+                uint64_t tot_size = 0;
                 for (uint32_t i = 0; i < out_blkid.size(); i++) {
                     out_blkid[i] = to_glob_uniq_blkid(out_blkid[i], picked_chunk);
+                    tot_size += out_blkid[i].data_size(m_pagesz);
                 }
+                auto size = m_used_size.fetch_add(tot_size, std::memory_order_relaxed);
+                assert(size <= get_size());
             }
             return status;
         } catch (const std::exception& e) {
@@ -393,6 +399,8 @@ public:
         // Convert blk id to chunk specific id and call its allocator to free
         BlkId cb = to_chunk_specific_id(b, &chunk);
         chunk->get_blk_allocator()->free(cb);
+        m_used_size.fetch_sub(b.data_size(m_pagesz), std::memory_order_relaxed);
+        assert(m_used_size.load() >= 0);
     }
 
     void write(const BlkId& bid, const homeds::MemVector& buf, boost::intrusive_ptr< virtualdev_req > req,
@@ -582,6 +590,8 @@ public:
 
     void     update_vb_context(uint8_t* blob) { m_mgr->update_vb_context(m_vb->vdev_id, blob); }
     uint64_t get_size() const { return m_vb->size; }
+
+    uint64_t get_used_size() const { return m_used_size.load(); }
 
     void expand(uint32_t addln_size) {}
 

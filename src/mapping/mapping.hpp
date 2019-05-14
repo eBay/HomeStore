@@ -341,13 +341,11 @@ class mapping {
     typedef function< void(struct BlkId blkid, size_t offset_size, size_t size) > alloc_blk_callback;
     typedef function< void(boost::intrusive_ptr< volume_req > cookie) >           comp_callback;
     typedef std::function< void(Free_Blk_Entry fbe) >                             free_blk_callback;
-    typedef std::function< void() >                                               destroy_btree_comp_callback;
 
 private:
     MappingBtreeDeclType*       m_bt;
     alloc_blk_callback          m_alloc_blk_cb;
     free_blk_callback           m_free_blk_cb;
-    destroy_btree_comp_callback m_destroy_btree_comp_cb;
     comp_callback               m_comp_cb;
     uint32_t                    m_vol_page_size;
     const MappingValue          EMPTY_MAPPING_VALUE;
@@ -404,13 +402,13 @@ public:
     }
 
     void destroy() {
-        m_bt->destroy(std::bind(&mapping::process_free_blk_callback, this, std::placeholders::_1),
-                      std::bind(&mapping::process_destroy_btree_comp_callback, this));
+        /* XXX: do we need to handle error condition here ?. In the next boot we will automatically recaim these blocks */
+        m_bt->destroy(std::bind(&mapping::process_free_blk_callback, this, std::placeholders::_1), false);
     }
 
     void recovery_cmpltd() { m_bt->recovery_cmpltd(); }
 
-    void sweep_alloc_blks(uint64_t start_lba, uint64_t end_lba) {
+    int sweep_alloc_blks(uint64_t start_lba, uint64_t end_lba) {
         MappingKey                                 start_key(start_lba, 1), end_key(end_lba, 1);
         auto                                       search_range = BtreeSearchRange(start_key, true, end_key, true);
         GetCBParam                                 param(nullptr);
@@ -420,7 +418,10 @@ public:
             search_range, BtreeQueryType::TREE_TRAVERSAL_QUERY, (end_lba - start_lba + 1),
             std::bind(&mapping::get_alloc_blks_cb, this, placeholders::_1, placeholders::_2, placeholders::_3),
             (BRangeQueryCBParam< MappingKey, MappingValue >*)&param);
-        m_bt->query(qreq, result_kv);
+        if (m_bt->query(qreq, result_kv) != btree_status_t::success) {
+            return -1;
+        }
+        return 0;
     }
 
     void process_completions(boost::intrusive_ptr< writeback_req > cookie, bool status) {
@@ -431,8 +432,6 @@ public:
         m_comp_cb(req);
     }
 
-    void process_destroy_btree_comp_callback() { m_destroy_btree_comp_cb(); }
-
     void process_free_blk_callback(MappingValue& mv) {
         Blob_Array< ValueEntry > array = mv.get_array();
         for (uint32_t i = 0; i < array.get_total_elements(); ++i) {
@@ -440,16 +439,15 @@ public:
             array.get((uint32_t)i, ve, true);
             LOGDEBUG("{}: vol_page: {}, data_page: {}, n_lba: {}", __FUNCTION__, m_vol_page_size,
                      HomeBlks::instance()->get_data_pagesz(), ve.get_nlba());
-            // FIXME: (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * ve.get_nlba()
-            Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(), ve.get_nlba());
+            uint64_t nlba = (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * ve.get_nlba();
+            Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(), nlba);
             m_free_blk_cb(fbe);
         }
     }
 
     mapping(uint64_t volsize, uint32_t page_size, const std::string& unique_name, comp_callback comp_cb,
-            free_blk_callback free_blk_cb, destroy_btree_comp_callback destroy_btree_comp_cb) :
+            free_blk_callback free_blk_cb) :
             m_free_blk_cb(free_blk_cb),
-            m_destroy_btree_comp_cb(destroy_btree_comp_cb),
             m_comp_cb(comp_cb),
             m_vol_page_size(page_size) {
         homeds::btree::BtreeConfig btree_cfg(unique_name.c_str());
@@ -466,11 +464,9 @@ public:
     }
 
     mapping(uint64_t volsize, uint32_t page_size, const std::string& unique_name, btree_super_block& btree_sb,
-            comp_callback comp_cb, alloc_blk_callback alloc_blk_cb, free_blk_callback free_blk_cb,
-            destroy_btree_comp_callback destroy_btree_comp_cb) :
+            comp_callback comp_cb, alloc_blk_callback alloc_blk_cb, free_blk_callback free_blk_cb) :
             m_alloc_blk_cb(alloc_blk_cb),
             m_free_blk_cb(free_blk_cb),
-            m_destroy_btree_comp_cb(destroy_btree_comp_cb),
             m_comp_cb(comp_cb),
             m_vol_page_size(page_size) {
         homeds::btree::BtreeConfig btree_cfg(unique_name.c_str());
@@ -486,6 +482,7 @@ public:
             std::bind(&mapping::process_completions, this, std::placeholders::_1, std::placeholders::_2));
     }
 
+    uint64_t get_used_size() { return m_bt->get_used_size(); }
     btree_super_block get_btree_sb() { return (m_bt->get_btree_sb()); }
 
     error_condition get(boost::intrusive_ptr< volume_req > req, vector< pair< MappingKey, MappingValue > >& values) {
@@ -503,7 +500,11 @@ public:
             search_range, BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, num_lba,
             std::bind(&mapping::match_item_cb_get, this, placeholders::_1, placeholders::_2, placeholders::_3),
             (BRangeQueryCBParam< MappingKey, MappingValue >*)&param);
-        m_bt->query(qreq, result_kv);
+        auto ret = m_bt->query(qreq, result_kv);
+
+        if (ret != btree_status_t::success && ret != btree_status_t::has_more) {
+            return btree_read_failed;
+        }
 
         // fill the gaps
         auto last_lba = start_lba;

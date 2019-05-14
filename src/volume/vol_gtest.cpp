@@ -187,10 +187,6 @@ public:
         params.disk_init = init;
         params.devices = device_info;
         params.is_file = true;
-        params.max_cap = max_capacity ;
-        params.physical_page_size = 4096;
-        params.disk_align_size = 4096;
-        params.atomic_page_size = 4096;
         params.iomgr = iomgr_obj;
         params.init_done_cb = std::bind(&IOTest::init_done_cb, this, std::placeholders::_1, std::placeholders::_2);
         params.vol_mounted_cb = std::bind(&IOTest::vol_mounted_cb, this, std::placeholders::_1, std::placeholders::_2);
@@ -222,12 +218,12 @@ public:
         vol[cnt] = vol_obj;
         fd[cnt] = open(file_name.c_str(), O_RDWR | O_DIRECT);
         staging_fd[cnt] = open(staging_file_name.c_str(), O_RDWR | O_DIRECT);
-        max_vol_blks[cnt] = VolInterface::get_instance()->get_size(vol_obj) / 
+        max_vol_blks[cnt] = VolInterface::get_instance()->get_vol_capacity(vol_obj).initial_total_size / 
                                            VolInterface::get_instance()->get_page_size(vol_obj);
         m_vol_bm[cnt] = new homeds::Bitset(max_vol_blks[cnt]);
         cur_checkpoint[cnt] = 0;
         assert(fd[cnt] > 0);
-        assert(VolInterface::get_instance()->get_size(vol_obj) == max_vol_size);
+        assert(VolInterface::get_instance()->get_vol_capacity(vol_obj).initial_total_size == max_vol_size);
     }
 
     void vol_state_change_cb(const VolumePtr& vol, vol_state old_state, vol_state new_state) {
@@ -239,7 +235,7 @@ public:
         /* Create a volume */
         for (uint32_t i = 0; i < max_vols; i++) {
             vol_params params;
-            params.page_size = ((i > (max_vols/2)) ? 4096 : 2048);
+            params.page_size = ((i > (max_vols/2)) ? 2048 : 4096);
             params.size = max_vol_size;
             params.io_comp_cb = ([this](const vol_interface_req_ptr& vol_req)
                                  { process_completions(vol_req); });
@@ -654,9 +650,19 @@ public:
 
        
     void delete_volumes() {
-        for (uint32_t i = 0; i < vol.size(); i++) {
+        uint64_t tot_cap = VolInterface::get_instance()->get_system_capacity().initial_total_size;
+        uint64_t used_cap = VolInterface::get_instance()->get_system_capacity().used_total_size;
+        assert(used_cap <= tot_cap);
+        //for (uint32_t i = 0; i < vol.size(); i++) {
+        while (!vol.empty()) {
             // std::move will release the ref_count in IOTest::vol and pass to HomeBlks::remove_volume
-            VolInterface::get_instance()->remove_volume(VolInterface::get_instance()->get_uuid(std::move(vol[i])));   
+            auto uuid = VolInterface::get_instance()->get_uuid(vol[0]);
+            vol.erase(vol.begin());
+            VolInterface::get_instance()->remove_volume(uuid);
+        }
+        used_cap = VolInterface::get_instance()->get_system_capacity().used_total_size;
+        if (used_cap != 0) {
+            assert(0);
         }
     }
 
@@ -694,8 +700,9 @@ TEST_F(IOTest, normal_random_io_test) {
     this->wait_cmpl();
     LOGINFO("write_cnt {}", write_cnt);
     LOGINFO("read_cnt {}", read_cnt);
-   this->shutdown();
-   this->remove_files();
+    this->delete_volumes();
+    this->shutdown();
+    this->remove_files();
 }
 
 /* it bursts the IOs. max outstanding IOs are very high. In this testcase, it

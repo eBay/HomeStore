@@ -349,7 +349,7 @@ public:
     }
 
     static void deref_node(SSDBtreeNode* bn) {
-        homestore::CacheBuffer< homestore::BlkId >::deref_testz((homestore::CacheBuffer< homestore::BlkId >&)*bn);
+        homestore::CacheBuffer< homestore::BlkId >::deref((homestore::CacheBuffer< homestore::BlkId >&)*bn);
     }
 
 private:
