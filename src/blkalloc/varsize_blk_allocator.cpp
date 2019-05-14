@@ -447,6 +447,7 @@ uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t seg_portion_num, Bl
     uint64_t n_added_blks = 0;
 
     uint64_t portion_num = seg->get_seg_num() * get_portions_per_segment() + seg_portion_num;
+    assert(m_cfg.get_total_portions() > portion_num);
     BlkAllocPortion &portion = m_blk_portions[portion_num];
     auto num_blks_per_portion = get_config().get_blks_per_portion();
     auto cur_blk_id = portion_num * num_blks_per_portion;

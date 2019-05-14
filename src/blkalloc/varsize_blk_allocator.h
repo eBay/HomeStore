@@ -277,7 +277,7 @@ public:
     }
 
     uint64_t get_clock_hand() const {
-        return m_alloc_clock_hand;
+        return m_alloc_clock_hand % m_total_portions;
     }
 
     void set_clock_hand(uint64_t hand) {
@@ -285,11 +285,7 @@ public:
     }
 
     void inc_clock_hand() {
-        if (m_alloc_clock_hand == m_total_portions) {
-            m_alloc_clock_hand = 0;
-        } else {
-            m_alloc_clock_hand++;
-        }
+        ++m_alloc_clock_hand;
     }
 
     bool operator<(BlkAllocSegment &other_seg) const {
@@ -628,7 +624,9 @@ private:
     }
 
     uint64_t blknum_to_segment_num(uint64_t blknum) const {
-        return blknum / get_config().get_blks_per_segment();
+        auto seg_num = blknum / get_config().get_blks_per_segment();
+        assert(seg_num < m_cfg.get_total_segments());
+        return seg_num;
     }
 
     BlkAllocSegment *blknum_to_segment(uint64_t blknum) const {
