@@ -26,13 +26,13 @@ public:
     // If the num_entries in queue > size given in max_queue_size, block and wait until queue becomes less. 
     // IOMgr thread should dequeue the requests and start executing.
     void add(callback_t done_cb);
-    void start();
-    void stop(bool wait_io_complete =  false);
     bool is_empty();
 
 private:
     void process_ev_callback(const int fd, const void* cookie, const int event);
     bool is_running() const;
+    void start();
+    void stop(bool wait_io_complete =  true);
 
 private:
     folly::MPMCQueue<callback_t, std::atomic, true>     m_cq;

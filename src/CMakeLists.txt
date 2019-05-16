@@ -10,6 +10,7 @@ else()
     add_compile_options(-DNDEBUG=1 -O3 -D_PRERELEASE=1)
 endif()
 
+include (CTest)
 find_package(Boost 1.64 REQUIRED)
 find_package (Threads REQUIRED)
 find_library(LIB_AIO aio)

@@ -35,6 +35,8 @@ IOMgrExecutor::IOMgrExecutor(int num_threads, int num_priorities, uint32_t max_q
            EPOLLIN, 9, nullptr);
     m_ep = new LoadGenEP(m_iomgr);
     m_iomgr->add_ep(m_ep);
+    // exec start should be called before iomgr->start
+    start();
     m_iomgr->start();
     uint64_t temp = 1;
     std::this_thread::sleep_for(std::chrono::seconds(2));
@@ -48,7 +50,9 @@ IOMgrExecutor::~IOMgrExecutor() {
     //
     // put iomgr's stop here (instead of IOMgrExecutor::stop) so that 
     // executor could be restarted after a IOMgrExecutor::stop();
+    stop(true);
     m_iomgr->stop();
+
 }
 
 bool
@@ -69,7 +73,7 @@ IOMgrExecutor::process_ev_callback(const int fd, const void* cookie, const int e
         LOGINFO("{}, not running, exit...", __FUNCTION__);
         return;
     }
-
+    
     assert(fd == m_ev_fd);
     
     uint64_t temp;
@@ -85,7 +89,9 @@ IOMgrExecutor::process_ev_callback(const int fd, const void* cookie, const int e
     //
     // trigger another event
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
-    m_iomgr->fd_reschedule(fd, event);
+        
+    //m_iomgr->fd_reschedule(fd, event);
+    [[maybe_unused]] auto wsize = write(m_ev_fd, &temp, sizeof(uint64_t));
     
     callback_t cb;
     m_cq.blockingRead(cb);
@@ -125,7 +131,7 @@ IOMgrExecutor::stop(bool wait_io_complete) {
     }
 }
 
-void 
+void  
 IOMgrExecutor::start() {
     m_running.store(true, std::memory_order_relaxed);
 }

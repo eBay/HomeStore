@@ -32,7 +32,7 @@ TEST(TEST_IOMGR_EXEC, TEST1) {
     thread_idx = 0;
     max_queue_cap = 2000;
     IOMgrExecutor* exec = new IOMgrExecutor(NUM_IO_THREADS, NUM_PRI, max_queue_cap);
-    exec->start();
+    
     const uint64_t repeat_cnt = 100;
     uint64_t count = 0;
     for (auto i = 0ul; i < repeat_cnt; i++) {
@@ -47,7 +47,6 @@ TEST(TEST_IOMGR_EXEC, TEST1) {
     
     EXPECT_EQ(count, repeat_cnt);
 
-    exec->stop(true);
     delete exec;
 }
 
@@ -56,7 +55,7 @@ TEST(TEST_IOMGR_EXEC, TEST2) {
     thread_idx = 0;
     max_queue_cap = 20;
     IOMgrExecutor* exec = new IOMgrExecutor(NUM_IO_THREADS, NUM_PRI, max_queue_cap);
-    exec->start();
+    
     uint64_t count = 0;
     const uint64_t repeat_cnt = 100;
     for (auto i = 0ul; i < repeat_cnt; i++) {
@@ -71,7 +70,6 @@ TEST(TEST_IOMGR_EXEC, TEST2) {
 
     EXPECT_EQ(count, repeat_cnt);
 
-    exec->stop(true);
     delete exec;
 }
 
