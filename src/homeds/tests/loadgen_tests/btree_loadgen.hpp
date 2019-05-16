@@ -1,9 +1,9 @@
 #include "homeds/loadgen/loadgen_common.hpp"
 namespace homeds {
     namespace loadgen {
-        template < typename K, typename V, typename Store >
+        template < typename K, typename V, typename Store, typename Executor >
         struct BtreeLoadGen {
-            KVGenerator<K,V,Store> kvg;
+            KVGenerator<K,V,Store,Executor> kvg;
             std::atomic<int64_t> stored_keys = 0, outstanding_create = 0, outstanding_others = 0;
             int CHECKPOINT_RANGE_BATCH_SIZE = 50;
             std::mutex m_mtx;

@@ -16,13 +16,14 @@
 #include "storespecs/membtree_store_spec.hpp"
 
 #include "btree_loadgen.hpp"
+#include "homeds/loadgen/iomgr_executor.hpp"
 
 SDS_LOGGING_INIT(btree_structures, btree_nodes, btree_generics, varsize_blk_alloc, iomgr)
 THREAD_BUFFER_INIT;
 
 using namespace homeds::loadgen;
 
-#define G_SimpleKV_Mem BtreeLoadGen<SimpleNumberKey, FixedBytesValue<64>, MemBtreeStoreSpec<SimpleNumberKey, FixedBytesValue<64>, 8192 >>
+#define G_SimpleKV_Mem BtreeLoadGen<SimpleNumberKey, FixedBytesValue<64>, MemBtreeStoreSpec<SimpleNumberKey, FixedBytesValue<64>, 8192 >, IOMgrExecutor>
 
 static uint64_t NIO=0,NK=0;//total ios and total keys
 static int PC=0,PR=0,PU=0,PD=0;//total % for op 
