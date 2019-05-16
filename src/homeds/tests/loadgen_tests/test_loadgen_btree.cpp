@@ -52,6 +52,7 @@
 #include "btree_simple/btree_key_spec.hpp"
 #include "btree_simple/btree_value_spec.hpp"
 #include "btree_simple/btree_store_spec.hpp"
+#include "homeds/loadgen/iomgr_executor.hpp"
 
 SDS_LOGGING_INIT(btree_structures, btree_nodes, btree_generics, varsize_blk_alloc, iomgr)
 THREAD_BUFFER_INIT;
@@ -59,7 +60,7 @@ THREAD_BUFFER_INIT;
 using namespace homeds::loadgen;
 
 #define simple_mem_btree_store_t MemBtreeStoreSpec<SimpleNumberKey, FixedBytesValue<64>, 8192 >
-#define KVG KVGenerator<SimpleNumberKey, FixedBytesValue<64>, simple_mem_btree_store_t >
+#define KVG KVGenerator<SimpleNumberKey, FixedBytesValue<64>, simple_mem_btree_store_t, IOMgrExecutor >
 
 static uint64_t N=0;//total number of keys
 
