@@ -259,7 +259,7 @@ public:
 
 private:
     uint64_t m_alloc_clock_hand;
-    std::atomic<uint64_t> m_free_blks;
+    std::atomic<uint64_t> m_free_blks = 0;
     uint64_t m_total_blks;
     uint64_t m_total_portions;
     uint32_t m_seg_num; // Segment sequence number
