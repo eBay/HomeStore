@@ -256,7 +256,7 @@ public:
         homestore::BlkId blkid(bn->get_node_id().m_id);
         req->is_read = false;
         req->multinode_req = multinode_req;
-        req->isSyncCall = multinode_req ? multinode_req->is_sync : false;
+        req->isSyncCall = multinode_req ? multinode_req->is_sync : true;
 #ifndef NDEBUG
         assert(bn->is_btree);
 #endif

@@ -133,7 +133,7 @@ class Volume : public std::enable_shared_from_this< Volume > {
 private:
     mapping*                          m_map;
     boost::intrusive_ptr< BlkBuffer > m_only_in_mem_buff;
-    struct vol_sb*                    m_sb;
+    struct vol_mem_sb*                    m_sb;
     enum vol_state                    m_state;
     void                              alloc_single_block_in_mem();
     io_comp_callback                  m_comp_cb;
@@ -142,10 +142,11 @@ private:
     std::mutex                        m_sb_lock; // lock for updating vol's sb
     std::atomic<uint64_t>             m_used_size = 0;
     bool                              m_recovery_error = false;
+    std::atomic< uint64_t >           m_err_cnt = 0;
 
 private:
     Volume(const vol_params& params);
-    Volume(vol_sb* sb);
+    Volume(vol_mem_sb* sb);
     void check_and_complete_req(const vol_interface_req_ptr& hb_req, const std::error_condition& err,
                                 bool call_completion_cb);
 
@@ -165,9 +166,11 @@ public:
     std::error_condition write(uint64_t lba, uint8_t* buf, uint32_t nblks, const vol_interface_req_ptr& hb_req);
     std::error_condition read(uint64_t lba, int nblks, const vol_interface_req_ptr& hb_req, bool sync);
 
-    void lock_sb_for_update() { m_sb_lock.lock(); }
-    void unlock_sb_for_update() { m_sb_lock.unlock();}
-    struct vol_sb *get_sb() {return m_sb;};
+    /* Note: We should not take m_vol_lock in homeblks after taking this lock. Otherwise it will lead
+     * to deadlock.
+     * We should take this lock whenever in memory sb is modified.
+     */
+    struct vol_mem_sb *get_sb() {return m_sb;};
     
     void vol_scan_alloc_blks();
     void blk_recovery_process_completions(bool success);
@@ -191,16 +194,16 @@ public:
     mapping* get_mapping_handle() { return m_map; }
 
     uint64_t get_last_lba() {
-        assert(m_sb->size != 0);
+        assert(m_sb->ondisk_sb->size != 0);
         // lba starts from 0, then 1, 2, ... 
         return (get_size() / get_page_size()) - 1;
     }
 
     uint64_t get_data_used_size() {return m_used_size;}
     uint64_t get_metadata_used_size();
-    const char* get_name() const { return (m_sb->vol_name); }
-    uint64_t    get_page_size() const { return m_sb->page_size; }
-    uint64_t    get_size() const { return m_sb->size; }
+    const char* get_name() const { return (m_sb->ondisk_sb->vol_name); }
+    uint64_t    get_page_size() const { return m_sb->ondisk_sb->page_size; }
+    uint64_t    get_size() const { return m_sb->ondisk_sb->size; }
     boost::uuids::uuid get_uuid();
     vol_state get_state();
     void set_state(vol_state state, bool persist = true);

@@ -55,10 +55,11 @@ public:
         REGISTER_COUNTER(cache_erase_count, "Total number of erases from cache", "cache_op_count", {"op", "erase"});
         REGISTER_COUNTER(cache_update_count, "Total number of updates to a cache entry", "cache_op_count", {"op", "update"});
         REGISTER_COUNTER(cache_object_count, "Total number of cache entries", sisl::_publish_as::publish_as_gauge);
+        REGISTER_COUNTER(cache_size, "Total size of cache", sisl::_publish_as::publish_as_gauge);
         REGISTER_COUNTER(cache_add_error_count, "Num cache entries unable to insert");
-        REGISTER_COUNTER(cache_num_evictions, "Total number of evictions");
-        REGISTER_COUNTER(cache_num_evictions_punt, "Total number of evictions punted because of busy");
-        REGISTER_COUNTER(cache_num_duplicate_inserts, "Total number of inserts whose entry already exists");
+        REGISTER_COUNTER(cache_num_evictions, "Total number of cache evictions");
+        REGISTER_COUNTER(cache_num_evictions_punt, "Total number of cache evictions punted because of busy");
+        REGISTER_COUNTER(cache_num_duplicate_inserts, "Total number of cache inserts whose entry already exists");
 
         register_me_to_farm();
     }
