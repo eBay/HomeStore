@@ -1,5 +1,5 @@
 # ##########   #######   ############
-FROM hub.tess.io/sds/sds_cpp_base:1.21
+FROM hub.tess.io/sds/sds_cpp_base:1.25
 LABEL description="Automated SDS compilation"
 
 ARG CONAN_CHANNEL

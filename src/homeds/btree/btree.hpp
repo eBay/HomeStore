@@ -162,7 +162,7 @@ public:
             LOGERROR("btree create failed. error {} name {}", ret, cfg.get_name());
             return nullptr;
         }
-        LOGINFO("btree created {}", cfg.get_name());
+        LOGDEBUG("btree created {}", cfg.get_name());
         return bt;
     }
 

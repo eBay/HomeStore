@@ -698,7 +698,7 @@ private:
     PhysicalDevChunk* create_dev_chunk(uint32_t pdev_ind, std::shared_ptr< BlkAllocator > ba, uint32_t primary_id) {
         auto              pdev = m_primary_pdev_chunks_list[pdev_ind].pdev;
         PhysicalDevChunk* chunk = m_mgr->alloc_chunk(pdev, m_vb->vdev_id, m_chunk_size, primary_id);
-        LOGINFO("Allocating new chunk for vdev_id = {} pdev_id = {} chunk: {}", m_vb->vdev_id, pdev->get_dev_id(),
+        LOGDEBUG("Allocating new chunk for vdev_id = {} pdev_id = {} chunk: {}", m_vb->vdev_id, pdev->get_dev_id(),
                 chunk->to_string());
         chunk->set_blk_allocator(ba);
 
