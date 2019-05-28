@@ -69,7 +69,7 @@ struct vol_config_sb : vol_sb_header {
 } __attribute((packed));
 
 /* If it exceeds 8k then we need to use two buffer to keep the data consistent */
-struct vol_sb : vol_sb_header {
+struct vol_ondisk_sb : vol_sb_header {
     BlkId next_blkid;
     BlkId prev_blkid;
 
@@ -82,6 +82,14 @@ struct vol_sb : vol_sb_header {
 
     uint64_t get_page_size() const { return page_size; }
 } __attribute((packed));
+
+struct vol_mem_sb {
+    vol_ondisk_sb *ondisk_sb;
+    std::mutex  m_sb_lock; // lock for updating vol's sb
+    void lock() { m_sb_lock.lock();};
+    void unlock() {m_sb_lock.unlock();};
+    ~vol_mem_sb() {free(ondisk_sb);}
+};
 
 using namespace homeds::btree;
 #define HOMEBLKS_SHUTDOWN (HomeBlks::instance()->is_shutdown())
@@ -107,8 +115,8 @@ class HomeBlks : public VolInterface {
     Cache< BlkId >*                                                                      m_cache;
     bool                                                                                 m_rdy;
     std::map< boost::uuids::uuid, std::shared_ptr< homestore::Volume > >                 m_volume_map;
-    std::mutex                                                                           m_vol_lock;
-    vol_sb*                                                                              m_last_vol_sb;
+    std::recursive_mutex                                                                 m_vol_lock;
+    vol_mem_sb*                                                                          m_last_vol_sb;
     bool                                                                                 m_vdev_failed;
     uint64_t                                                                             m_size_avail;
     uint32_t                                                                             m_data_pagesz;
@@ -125,10 +133,10 @@ public:
     static VolInterface* init(const init_params& cfg);
     static HomeBlks*     instance();
     // Sanity check for sb;
-    bool vol_sb_sanity(vol_sb* sb);
+    bool vol_sb_sanity(vol_mem_sb* sb);
     
     // Read volume super block based on blkid
-    vol_sb* vol_sb_read(BlkId bid);
+    vol_mem_sb* vol_sb_read(BlkId bid);
 
     HomeBlks(const init_params& cfg);
     ~HomeBlks() {  
@@ -149,11 +157,10 @@ public:
     virtual boost::uuids::uuid   get_uuid(VolumePtr vol) override;
     virtual homeds::blob         at_offset(const boost::intrusive_ptr< BlkBuffer >& buf, uint32_t offset) override;
     virtual bool vol_state_change(const VolumePtr& vol, vol_state new_state) override;
-    void                         vol_sb_write(vol_sb* sb);
-    void                         vol_sb_write(vol_sb* sb, bool lock);
-    void                         vol_sb_init(vol_sb* sb);
+    void                         vol_sb_write(vol_mem_sb* sb);
+    void                         vol_sb_init(vol_mem_sb* sb);
     void                         config_super_block_init(BlkId& bid);
-    void                         config_super_block_write(bool lock);
+    void                         config_super_block_write();
     void                         vol_scan_cmpltd(const VolumePtr& vol, vol_state state, bool success);
     void                         populate_disk_attrs();
     virtual void                 attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback cb) override;
@@ -164,7 +171,7 @@ public:
 
     homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >*                     get_data_blkstore();
     homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy, BLKSTORE_BUFFER_TYPE >* get_metadata_blkstore();
-    void                                                                                 vol_sb_remove(vol_sb* sb);
+    void                                                                                 vol_sb_remove(vol_mem_sb* sb);
     uint32_t                                                                             get_data_pagesz() const;
     uint64_t get_boot_cnt();
 

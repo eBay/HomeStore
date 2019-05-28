@@ -39,16 +39,17 @@ Volume::Volume(const vol_params& params) : m_comp_cb(params.io_comp_cb), m_metri
             std::bind(&Volume::process_metadata_completions, this, std::placeholders::_1),
             std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
 
-    auto ret = posix_memalign((void**)&m_sb, HomeStoreConfig::align_size, VOL_SB_SIZE);
+    m_sb = new vol_mem_sb();
+    auto ret = posix_memalign((void**)&(m_sb->ondisk_sb), HomeStoreConfig::align_size, VOL_SB_SIZE);
     assert(!ret);
     assert(m_sb != nullptr);
 
-    m_sb->btree_sb = m_map->get_btree_sb();
-    m_sb->state = vol_state::ONLINE;
-    m_sb->page_size = params.page_size;
-    m_sb->size = params.size;
-    m_sb->uuid = params.uuid;
-    memcpy(m_sb->vol_name, params.vol_name, VOL_NAME_SIZE);
+    m_sb->ondisk_sb->btree_sb = m_map->get_btree_sb();
+    m_sb->ondisk_sb->state = vol_state::ONLINE;
+    m_sb->ondisk_sb->page_size = params.page_size;
+    m_sb->ondisk_sb->size = params.size;
+    m_sb->ondisk_sb->uuid = params.uuid;
+    memcpy(m_sb->ondisk_sb->vol_name, params.vol_name, VOL_NAME_SIZE);
     HomeBlks::instance()->vol_sb_init(m_sb);
 
     seq_Id = 3;
@@ -58,29 +59,29 @@ Volume::Volume(const vol_params& params) : m_comp_cb(params.io_comp_cb), m_metri
     m_state = vol_state::ONLINE;
 }
 
-Volume::Volume(vol_sb* sb) : m_sb(sb), m_metrics(sb->vol_name) {
+Volume::Volume(vol_mem_sb* sb) : m_sb(sb), m_metrics(sb->ondisk_sb->vol_name) {
     m_state = vol_state::UNINITED;
-    if (m_sb->state == vol_state::FAILED) {
+    if (m_sb->ondisk_sb->state == vol_state::FAILED) {
         m_map = new mapping(
-                m_sb->size, 
-                m_sb->page_size,
-                m_sb->vol_name,
+                m_sb->ondisk_sb->size, 
+                m_sb->ondisk_sb->page_size,
+                m_sb->ondisk_sb->vol_name,
                 std::bind(&Volume::process_metadata_completions, this, std::placeholders::_1), 
                 std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
-        m_sb->btree_sb = m_map->get_btree_sb();
-        m_sb->state = vol_state::DEGRADED;;
+        m_sb->ondisk_sb->btree_sb = m_map->get_btree_sb();
+        m_sb->ondisk_sb->state = vol_state::DEGRADED;;
         HomeBlks::instance()->vol_sb_write(m_sb);
     } else {
          m_map = new mapping(
-                 m_sb->size, 
-                 m_sb->page_size,
-                 m_sb->vol_name,
-                 m_sb->btree_sb,
+                 m_sb->ondisk_sb->size, 
+                 m_sb->ondisk_sb->page_size,
+                 m_sb->ondisk_sb->vol_name,
+                 m_sb->ondisk_sb->btree_sb,
                  std::bind(&Volume::process_metadata_completions, this, std::placeholders::_1),
                  std::bind(&Volume::alloc_blk_callback, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3),
                  std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
     }
-    assert(m_sb->state == OFFLINE || m_sb->state == DEGRADED || m_sb->state == ONLINE);
+    assert(m_sb->ondisk_sb->state == OFFLINE || m_sb->ondisk_sb->state == DEGRADED || m_sb->ondisk_sb->state == ONLINE);
     seq_Id = 3;
     alloc_single_block_in_mem();
 
@@ -111,7 +112,7 @@ Volume::process_free_blk_callback(Free_Blk_Entry fbe){
 }
 
 boost::uuids::uuid Volume::get_uuid() {
-    return (get_sb()->uuid);
+    return (get_sb()->ondisk_sb->uuid);
 }
 
 vol_state Volume::get_state() {
@@ -119,13 +120,13 @@ vol_state Volume::get_state() {
 }
     
 void Volume::set_state(vol_state state, bool persist) {
-    lock_sb_for_update();
     m_state = state;
     if (persist) {
-        m_sb->state = state;
-        HomeBlks::instance()->vol_sb_write(get_sb(), true);
+        m_sb->lock();
+        m_sb->ondisk_sb->state = state;
+        m_sb->unlock();
+        HomeBlks::instance()->vol_sb_write(get_sb());
     }
-    unlock_sb_for_update();
 }
 
 void Volume::attach_completion_cb(const io_comp_callback& cb) { m_comp_cb = cb; }
@@ -134,9 +135,9 @@ void
 Volume::blk_recovery_process_completions(bool success) {
     LOGINFO("block recovery of volume {} completed with {}", get_name(), success ? "success": "failure");
     assert(m_state == vol_state::MOUNTING);
-    m_state = m_sb->state;
+    m_state = m_sb->ondisk_sb->state;
     m_map->recovery_cmpltd();
-    HomeBlks::instance()->vol_scan_cmpltd(shared_from_this(), m_sb->state, success);
+    HomeBlks::instance()->vol_scan_cmpltd(shared_from_this(), m_sb->ondisk_sb->state, success);
 }
 
 /* TODO: This part of the code should be moved to mapping layer. Ideally
@@ -161,8 +162,8 @@ Volume::vol_scan_alloc_blks() {
 Volume::~Volume() {
     LOGINFO("Destroying volume: {}", get_name());
     if (get_state() != DESTROYING) {
-        free(m_sb);
         delete m_map;
+        delete(m_sb);
     } else  {
         // 
         // 1. Traverse mapping btree in post order:
@@ -177,8 +178,8 @@ Volume::~Volume() {
         // all blks should have been freed
         assert(m_used_size.load() == 0);
         HomeBlks::instance()->vol_sb_remove(get_sb());
-        free(m_sb);
         delete m_map;
+        delete(m_sb);
     }
 }
 
@@ -255,7 +256,7 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
         ValueEntry   ve(vreq->seqId, vreq->bid, 0, vreq->nlbas, carr);
         MappingValue value(ve);
 #ifndef NDEBUG
-        vreq->vol_uuid = m_sb->uuid;
+        vreq->vol_uuid = m_sb->ondisk_sb->uuid;
         LOGDEBUG("Mapping.PUT ,vol_uuid:{},Key:{},Value:{}", boost::uuids::to_string(vreq->vol_uuid),
                  key.to_string(), value.to_string());
 #endif
@@ -279,8 +280,8 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
 }
 
 std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, const vol_interface_req_ptr& hb_req) {
-    assert(m_sb->page_size % HomeBlks::instance()->get_data_pagesz() == 0);
-    assert((m_sb->page_size * nlbas) <= VOL_MAX_IO_SIZE);
+    assert(m_sb->ondisk_sb->page_size % HomeBlks::instance()->get_data_pagesz() == 0);
+    assert((m_sb->ondisk_sb->page_size * nlbas) <= VOL_MAX_IO_SIZE);
 
     if (is_offline()) {
         return std::make_error_condition(std::errc::no_such_device);
@@ -290,7 +291,7 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
     blk_alloc_hints      hints;
     hints.desired_temp = 0;
     hints.dev_id_hint = -1;
-    hints.multiplier = (m_sb->page_size / HomeBlks::instance()->get_data_pagesz());
+    hints.multiplier = (m_sb->ondisk_sb->page_size / HomeBlks::instance()->get_data_pagesz());
 
     // TODO: @hkadayam Remove the init() call and fix the tests to always use fresh vol_interface_req on every call
     hb_req->init();
@@ -299,7 +300,7 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
 
     LOGTRACE("write: lba={}, nlbas={}, buf={}, req_id={}", lba, nlbas, (void *)buf, hb_req->request_id);
     try {
-        BlkAllocStatus status = m_data_blkstore->alloc_blk(nlbas * m_sb->page_size, hints, bid);
+        BlkAllocStatus status = m_data_blkstore->alloc_blk(nlbas * m_sb->ondisk_sb->page_size, hints, bid);
         assert(status == BLK_ALLOC_SUCCESS);
         HISTOGRAM_OBSERVE(m_metrics, volume_blkalloc_latency, get_elapsed_time_ns(hb_req->io_start_time));
         COUNTER_INCREMENT(m_metrics, volume_write_count, 1);
@@ -310,9 +311,9 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
         return hb_req->err;
     }
 
-    m_used_size.fetch_add(nlbas * m_sb->page_size, std::memory_order_relaxed);
+    m_used_size.fetch_add(nlbas * m_sb->ondisk_sb->page_size, std::memory_order_relaxed);
     boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector());
-    mvec->set(buf, m_sb->page_size * nlbas, 0);
+    mvec->set(buf, m_sb->ondisk_sb->page_size * nlbas, 0);
 
     uint32_t offset = 0;
     uint32_t lbas_snt = 0;
@@ -336,8 +337,8 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
             vreq->lastCommited_seqId = vreq->seqId; // keeping only latest version always
             vreq->op_start_time = data_io_start_time;
 
-            assert((bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) % m_sb->page_size) == 0);
-            vreq->nlbas = bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) / m_sb->page_size;
+            assert((bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) % m_sb->ondisk_sb->page_size) == 0);
+            vreq->nlbas = bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) / m_sb->ondisk_sb->page_size;
             LOGDEBUG("alloc_blk: bid: {}, offset: {}, nblks: {}", 
                     bid[i].to_string(), 
                     bid[i].data_size(HomeBlks::instance()->get_data_pagesz()), 
@@ -360,7 +361,7 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
         return hb_req->err;
     }
 
-    auto wr_size = m_sb->page_size * nlbas;
+    auto wr_size = m_sb->ondisk_sb->page_size * nlbas;
     HISTOGRAM_OBSERVE(m_metrics, volume_write_size_distribution, wr_size);
     COUNTER_INCREMENT(m_metrics, volume_write_size_total, wr_size);
 
@@ -390,6 +391,11 @@ void Volume::check_and_complete_req(const vol_interface_req_ptr& hb_req, const s
             // Was not completed earlier, so complete the io
             COUNTER_INCREMENT_IF_ELSE(m_metrics, hb_req->is_read, volume_write_error_count, volume_read_error_count, 1);
             if (call_completion) { m_comp_cb(hb_req); }
+            uint64_t cnt = m_err_cnt.fetch_add(1, std::memory_order_relaxed);
+#define VOL_ERROR_PRINT_CNT 1000
+            if (cnt % VOL_ERROR_PRINT_CNT) {
+                LOGERROR("seeing error {} on vol {}", err.message(), get_name());
+            }
         } else {
             LOGINFO("Receiving completion on already completed request id={}", hb_req->request_id);
         }
@@ -413,7 +419,7 @@ std::error_condition Volume::read_metadata(const vol_req_ptr& vreq) {
     std::vector< std::pair< MappingKey, MappingValue > > kvs;
 
 #ifndef NDEBUG
-    vreq->vol_uuid = m_sb->uuid;
+    vreq->vol_uuid = m_sb->ondisk_sb->uuid;
     LOGDEBUG("Mapping.GET vol_uuid:{} ,key:{} last_seqId: {}", boost::uuids::to_string(vreq->vol_uuid),
              key.to_string(), vreq->lastCommited_seqId);
 #endif
@@ -438,7 +444,7 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
     }
 
     try {
-        assert(m_sb->state == vol_state::ONLINE);
+        assert(m_sb->ondisk_sb->state == vol_state::ONLINE);
         hb_req->init();
         hb_req->io_start_time = Clock::now();
         hb_req->is_read = true;
@@ -457,7 +463,7 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
         std::vector< std::pair< MappingKey, MappingValue > > kvs;
 
  #ifndef NDEBUG
-        vreq->vol_uuid = m_sb->uuid;
+        vreq->vol_uuid = m_sb->ondisk_sb->uuid;
         LOGDEBUG("Mapping.GET vol_uuid:{} ,last_seqId: {}", boost::uuids::to_string(vreq->vol_uuid),
                 vreq->lastCommited_seqId);
 #endif
@@ -480,7 +486,7 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
 #endif
         for (auto& kv : kvs) {
             if (!(kv.second.is_valid())) {
-                hb_req->read_buf_list.emplace_back(m_sb->get_page_size(), 0, m_only_in_mem_buff);
+                hb_req->read_buf_list.emplace_back(m_sb->ondisk_sb->get_page_size(), 0, m_only_in_mem_buff);
 #ifndef NDEBUG
                 cur_lba++;
 #endif
@@ -527,7 +533,7 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
                 }
             }
         }
-        auto rd_size = m_sb->page_size * nlbas;
+        auto rd_size = m_sb->ondisk_sb->page_size * nlbas;
         HISTOGRAM_OBSERVE(m_metrics, volume_read_size_distribution, rd_size);
         COUNTER_INCREMENT(m_metrics, volume_read_size_total, rd_size);
 
@@ -550,7 +556,7 @@ void Volume::alloc_single_block_in_mem() {
 
     // Create a new block of memory for the blocks requested and set the memvec pointer to that
     uint8_t* ptr;
-    uint32_t size = m_sb->page_size;
+    uint32_t size = m_sb->ondisk_sb->page_size;
     ptr = (uint8_t*)malloc(size);
     if (ptr == nullptr) {
         throw std::bad_alloc();

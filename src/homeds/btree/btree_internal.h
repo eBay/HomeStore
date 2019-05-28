@@ -711,7 +711,7 @@ class BtreeMetrics : public sisl::MetricsGroupWrapper {
 public:
     explicit BtreeMetrics(btree_store_type store_type, const char *inst_name) :
             sisl::MetricsGroupWrapper(enum_name(store_type), inst_name) {
-        REGISTER_COUNTER(btree_obj_count, "Btree object count");
+        REGISTER_COUNTER(btree_obj_count, "Btree object count", sisl::_publish_as::publish_as_gauge);
         REGISTER_COUNTER(btree_leaf_node_count, "Btree Leaf node count",
                 "btree_node_count", {"node_type", "leaf"}, sisl::_publish_as::publish_as_gauge);
         REGISTER_COUNTER(btree_int_node_count, "Btree Interior node count",
