@@ -162,7 +162,7 @@ public:
             LOGERROR("btree create failed. error {} name {}", ret, cfg.get_name());
             return nullptr;
         }
-        LOGINFO("btree created {}", cfg.get_name());
+        LOGDEBUG("btree created {}", cfg.get_name());
         return bt;
     }
 
@@ -2096,9 +2096,11 @@ out:
             }
             unlock_node(child_node, LOCKTYPE_WRITE);
         }
-        
-        auto acq_lock = (child_node->is_leaf()) ? leaf_lock_type : int_lock_type;
+       
+        auto is_leaf = child_node->is_leaf();
+        auto acq_lock = is_leaf ? leaf_lock_type : int_lock_type;
         btree_status_t ret = lock_and_refresh_node(child_node, acq_lock, multinode_req);
+        assert(is_leaf == child_node->is_leaf());
         assert(child_node->is_valid_node());
         return ret;
     }

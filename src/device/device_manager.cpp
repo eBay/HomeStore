@@ -439,7 +439,7 @@ vdev_info_block *DeviceManager::alloc_vdev(uint32_t req_size, uint32_t nmirrors,
     m_last_vdevid = vb->vdev_id;
     vb->next_vdev_id = INVALID_VDEV_ID;
 
-    LOGINFO("Creating vdev id = {} size = {}", vb->vdev_id, vb->size);
+    LOGDEBUG("Creating vdev id = {} size = {}", vb->vdev_id, vb->size);
     m_vdev_hdr->num_vdevs++;
     write_info_blocks();
     return vb;
@@ -483,7 +483,7 @@ PhysicalDevChunk *DeviceManager::create_new_chunk(PhysicalDev *pdev, uint64_t st
     PhysicalDevChunk *craw = chunk.get();
     pdev->attach_chunk(craw, prev_chunk);
 
-    LOGINFO("Creating chunk: {}", chunk->to_string());
+    LOGDEBUG("Creating chunk: {}", chunk->to_string());
     m_chunks[chunk->get_chunk_id()] = std::move(chunk);
     m_chunk_hdr->num_chunks++;
 

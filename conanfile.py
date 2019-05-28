@@ -5,7 +5,7 @@ from conans import ConanFile, CMake, tools
 class HomestoreConan(ConanFile):
     name = "homestore"
 
-    version = "0.11.6"
+    version = "0.11.8"
 
     license = "Proprietary"
     url = "https://github.corp.ebay.com/SDS/Homestore"
@@ -19,22 +19,27 @@ class HomestoreConan(ConanFile):
 
     requires = (
                 "benchmark/1.4.1@oss/stable",
-                "boost_dynamic_bitset/1.67.0@bincrafters/stable",
-                "boost_circular_buffer/1.67.0@bincrafters/stable",
-                "boost_heap/1.67.0@bincrafters/stable",
-                "boost_uuid/1.67.0@bincrafters/stable",
-                "double-conversion/3.1.1@bincrafters/stable",
+                "boost_asio/1.69.0@bincrafters/stable",
+                "boost_dynamic_bitset/1.69.0@bincrafters/stable",
+                "boost_circular_buffer/1.69.0@bincrafters/stable",
+                "boost_heap/1.69.0@bincrafters/stable",
+                "boost_intrusive/1.69.0@bincrafters/stable",
+                "boost_preprocessor/1.69.0@bincrafters/stable",
+                "boost_uuid/1.69.0@bincrafters/stable",
+                "double-conversion/3.1.4@bincrafters/stable",
                 "farmhash/1.0.0@oss/stable",
-                "folly/2019.02.18.00@bincrafters/testing",
+                "folly/2019.05.20.00@bincrafters/testing",
                 "gtest/1.8.1@bincrafters/stable",
-                "iomgr/2.2.0@sds/testing",
+                "iomgr/2.2.3@sds/testing",
+                "libevent/2.1.8@bincrafters/stable",
                 "lzma/5.2.4@bincrafters/stable",
-                "sisl/0.2.5@sisl/testing",
-                "OpenSSL/1.0.2q@conan/stable",
-                "sds_logging/4.0.0@sds/testing",
-                "sds_options/0.1.4@sds/testing",
+                "sisl/0.3.1@sisl/testing",
+                "OpenSSL/1.0.2r@conan/stable",
+                "sds_logging/4.1.1@sds/testing",
+                "sds_options/0.1.5@sds/testing",
                 "isa-l/2.21.0@oss/stable",
-                "flip/0.0.3@sds/testing",
+                "flip/0.0.4@sds/testing",
+                "zstd/1.3.8@bincrafters/stable",
                 )
 
     generators = "cmake"

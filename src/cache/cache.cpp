@@ -52,6 +52,7 @@ bool IntrusiveCache<K, V>::insert(V &v, V **out_ptr, const std::function<void(V 
          m_evictors[hash_code % EVICTOR_PARTITIONS]->add_record(v.get_evict_record_mutable())) {
         COUNTER_INCREMENT(m_metrics, cache_insert_count, 1);
         COUNTER_INCREMENT(m_metrics, cache_object_count, 1);
+        COUNTER_INCREMENT(m_metrics, cache_size, V::get_size(&(v.get_evict_record_mutable())));
         v.on_cache_insert();
     } else {
         /* remove from the hash table */
@@ -70,7 +71,13 @@ bool IntrusiveCache<K, V>::modify_size(V &v, uint32_t size) {
     const K *pk = V::extract_key(v);
     auto b = K::get_blob(*pk);
     uint64_t hash_code = util::Hash64((const char *)b.bytes, (size_t)b.size);
-    return(m_evictors[hash_code % EVICTOR_PARTITIONS]->modify_size(size));
+    auto ret = (m_evictors[hash_code % EVICTOR_PARTITIONS]->modify_size(size));
+    
+    if (ret) {
+        COUNTER_INCREMENT(m_metrics, cache_size, V::get_size(&(v.get_evict_record_mutable())));
+    }
+
+    return ret;
 }
 
 template< typename K, typename V>
@@ -116,6 +123,7 @@ bool IntrusiveCache<K, V>::erase(V &v) {
             m_evictors[hash_code % EVICTOR_PARTITIONS]->delete_record(v.get_evict_record_mutable());
             COUNTER_INCREMENT(m_metrics, cache_erase_count, 1);
             COUNTER_DECREMENT(m_metrics, cache_object_count, 1);
+            COUNTER_DECREMENT(m_metrics, cache_size, V::get_size(v.get_evict_record_mutable()));
         }
         v.on_cache_evict();
         v.unlock();
@@ -156,6 +164,8 @@ bool IntrusiveCache<K, V>::is_safe_to_evict(const CurrentEvictor::EvictRecordTyp
             }
             v->unlock();
             safe_to_evict = ret;
+            COUNTER_DECREMENT(m_metrics, cache_object_count, 1);
+            COUNTER_DECREMENT(m_metrics, cache_size, V::get_size(erec));
         }
     }
 
@@ -309,6 +319,10 @@ bool Cache<K>::erase(const K &k, uint32_t offset, uint32_t size,
         }
         out_removed_buf->on_cache_evict();
         out_removed_buf->unlock();
+        COUNTER_INCREMENT(this->m_metrics, cache_erase_count, 1);
+        COUNTER_DECREMENT(this->m_metrics, cache_object_count, 1);
+        COUNTER_DECREMENT(this->m_metrics, cache_size, 
+                CacheBuffer< K >::get_size(&(out_removed_buf->get_evict_record_mutable())));
     }
 
     if (ret_removed_buf != nullptr && out_removed_buf != nullptr) {
@@ -360,6 +374,10 @@ void Cache<K>::safe_erase(const K &k, erase_comp_cb cb) {
             if (cb != nullptr) {
                 cb(out_buf);
             }
+            COUNTER_INCREMENT(this->m_metrics, cache_erase_count, 1);
+            COUNTER_DECREMENT(this->m_metrics, cache_object_count, 1);
+            COUNTER_DECREMENT(this->m_metrics, cache_size, 
+                              CacheBuffer< K >::get_size(&(out_buf->get_evict_record_mutable())));
         }
     } else {
         assert(!can_remove);

@@ -4,6 +4,8 @@
 #include <device/virtual_dev.hpp>
 #include <cassert>
 #include <device/blkbuffer.hpp>
+#include <iostream>
+#include <stdexcept>
 
 SDS_OPTION_GROUP(home_blks, (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service", cxxopts::value<int32_t>()->default_value("5000"), "port"))
 
@@ -42,7 +44,7 @@ HomeBlks::HomeBlks(const init_params& cfg) :
     HomeStoreConfig::open_flag = m_cfg.flag;
     m_data_pagesz = m_cfg.min_virtual_page_size;
 
-    assert(VOL_SB_SIZE >= sizeof(vol_sb));
+    assert(VOL_SB_SIZE >= sizeof(vol_ondisk_sb));
     assert(VOL_SB_SIZE >= sizeof(vol_config_sb));
 
     assert(HomeStoreConfig::atomic_phys_page_size >= HomeStoreConfig::min_page_size);
@@ -89,6 +91,10 @@ cap_attrs HomeBlks::get_system_capacity() {
 }
 
 cap_attrs HomeBlks::get_vol_capacity(const VolumePtr& vol) {
+    if (!vol) {
+        assert(0);
+        throw std::invalid_argument("null vol ptr");
+    }
     cap_attrs cap;
     cap.used_data_size = vol->get_data_used_size();
     cap.used_metadata_size = vol->get_metadata_used_size();
@@ -100,6 +106,10 @@ cap_attrs HomeBlks::get_vol_capacity(const VolumePtr& vol) {
 std::error_condition HomeBlks::write(const VolumePtr& vol, uint64_t lba, uint8_t* buf, uint32_t nblks,
                                      const vol_interface_req_ptr& req) {
     assert(m_rdy);
+    if (!vol) {
+        assert(0);
+        throw std::invalid_argument("null vol ptr");
+    }
     if (!m_rdy || is_shutdown()) {
         return std::make_error_condition(std::errc::device_or_resource_busy);
     }
@@ -108,6 +118,10 @@ std::error_condition HomeBlks::write(const VolumePtr& vol, uint64_t lba, uint8_t
 
 std::error_condition HomeBlks::read(const VolumePtr& vol, uint64_t lba, int nblks, const vol_interface_req_ptr& req) {
     assert(m_rdy);
+    if (!vol) {
+        assert(0);
+        throw std::invalid_argument("null vol ptr");
+    }
     if (!m_rdy || is_shutdown()) {
         return std::make_error_condition(std::errc::device_or_resource_busy);
     }
@@ -117,6 +131,10 @@ std::error_condition HomeBlks::read(const VolumePtr& vol, uint64_t lba, int nblk
 std::error_condition HomeBlks::sync_read(const VolumePtr& vol, uint64_t lba, int nblks,
                                          const vol_interface_req_ptr& req) {
     assert(m_rdy);
+    if (!vol) {
+        assert(0);
+        throw std::invalid_argument("null vol ptr");
+    }
     if (!m_rdy || is_shutdown()) {
         return std::make_error_condition(std::errc::device_or_resource_busy);
     }
@@ -135,15 +153,14 @@ VolumePtr HomeBlks::create_volume(const vol_params& params) {
     try {
         decltype(m_volume_map)::iterator it;
         // Try to add an entry for this volume
-        {
-            std::lock_guard< std::mutex > lg(m_vol_lock);
-            bool                          happened{false};
-            std::tie(it, happened) = m_volume_map.emplace(std::make_pair(params.uuid, nullptr));
-            if (!happened) {
-                if (m_volume_map.end() != it)
-                    return it->second;
-                throw std::runtime_error("Unknown bug");
+        std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
+        bool                          happened{false};
+        std::tie(it, happened) = m_volume_map.emplace(std::make_pair(params.uuid, nullptr));
+        if (!happened) {
+            if (m_volume_map.end() != it) {
+                return it->second;
             }
+            throw std::runtime_error("Unknown bug");
         }
         // Okay, this is a new volume so let's create it
         auto new_vol = Volume::make_volume(params);
@@ -172,19 +189,14 @@ std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
         return std::make_error_condition(std::errc::device_or_resource_busy);
     }
     try {
-        std::shared_ptr<Volume> hold_vol_ref = nullptr; 
         {
-            std::lock_guard<std::mutex> lg(m_vol_lock);
+            std::lock_guard<std::recursive_mutex> lg(m_vol_lock);
             auto it = m_volume_map.find(uuid);
             if (it == m_volume_map.end()) {
                 return std::make_error_condition(std::errc::no_such_device_or_address);
             }
 
             it->second->set_state(DESTROYING);
-
-            // hold an additional ref to vol to avoid dead lock (when no IO is running)
-            // e.g. w/o this line, erase will leave ref to zero which will trigger ~Volume, which leads to deadlock.
-            hold_vol_ref = it->second;
 
             // remove it from the map;
             m_volume_map.erase(it);
@@ -205,7 +217,7 @@ std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
 
 VolumePtr HomeBlks::lookup_volume(const boost::uuids::uuid& uuid) {
 
-    std::lock_guard< std::mutex > lg(m_vol_lock);
+    std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
     auto                          it = m_volume_map.find(uuid);
     if (m_volume_map.end() != it) {
         return it->second;
@@ -226,72 +238,71 @@ BlkId HomeBlks::alloc_blk() {
     return bid;
 }
 
-void HomeBlks::vol_sb_init(vol_sb* sb) {
+void HomeBlks::vol_sb_init(vol_mem_sb* sb) {
     /* allocate block */
 
     BlkId                         bid = alloc_blk();
-    std::lock_guard< std::mutex > lg(m_vol_lock);
+    std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
     // No need to hold vol's sb update lock here since it is being initiated and not added to m_volume_map yet;
-    sb->gen_cnt = 0;
-    sb->prev_blkid.set(m_last_vol_sb ? m_last_vol_sb->blkid.to_integer() : BlkId::invalid_internal_id());
-    sb->next_blkid.set(BlkId::invalid_internal_id());
-    sb->blkid.set(bid);
-    sb->version = VOL_SB_VERSION;
-    sb->magic = VOL_SB_MAGIC;
+    sb->ondisk_sb->gen_cnt = 0;
+    sb->ondisk_sb->prev_blkid.set(m_last_vol_sb ? m_last_vol_sb->ondisk_sb->blkid.to_integer() : 
+                                                  BlkId::invalid_internal_id());
+    sb->ondisk_sb->next_blkid.set(BlkId::invalid_internal_id());
+    sb->ondisk_sb->blkid.set(bid);
+    sb->ondisk_sb->version = VOL_SB_VERSION;
+    sb->ondisk_sb->magic = VOL_SB_MAGIC;
 
     /* write the sb */
-    vol_sb_write(sb, true);
+    vol_sb_write(sb);
 
     /* update the previous pointers */
     if (m_last_vol_sb != nullptr) {
-        auto last_vol = m_volume_map[m_last_vol_sb->uuid];
-        assert(last_vol);
-        last_vol->lock_sb_for_update();
+        m_last_vol_sb->lock();
         assert(m_cfg_sb->vol_list_head.to_integer() != BlkId::invalid_internal_id());
-        assert(m_last_vol_sb->next_blkid.to_integer() == BlkId::invalid_internal_id());
-        m_last_vol_sb->next_blkid.set(bid);
-        vol_sb_write(m_last_vol_sb, true);
-        last_vol->unlock_sb_for_update();
+        assert(m_last_vol_sb->ondisk_sb->next_blkid.to_integer() == BlkId::invalid_internal_id());
+        m_last_vol_sb->ondisk_sb->next_blkid.set(bid);
+        m_last_vol_sb->unlock();
+        vol_sb_write(m_last_vol_sb);
     } else {
         assert(m_cfg_sb->vol_list_head.to_integer() == BlkId::invalid_internal_id());
         m_cfg_sb->vol_list_head.set(bid);
     }
 
     m_cfg_sb->num_vols++;
-    config_super_block_write(true);
+    config_super_block_write();
     /* update the last volume super block. If exception happens in between it won't be updated */
     m_last_vol_sb = sb;
 }
 
 bool 
-HomeBlks::vol_sb_sanity(vol_sb* sb) {
-    return ((sb->magic == VOL_SB_MAGIC) && 
-            (sb->version == VOL_SB_VERSION));
+HomeBlks::vol_sb_sanity(vol_mem_sb* sb) {
+    return ((sb->ondisk_sb->magic == VOL_SB_MAGIC) && 
+            (sb->ondisk_sb->version == VOL_SB_VERSION));
 }
 
-vol_sb* 
+vol_mem_sb* 
 HomeBlks::vol_sb_read(BlkId bid) {
     bool rewrite = false;
     if (bid.to_integer() == BlkId::invalid_internal_id()) return nullptr;
     std::vector<boost::intrusive_ptr<BlkBuffer>> bbuf = m_sb_blk_store->read_nmirror(bid, m_cfg.devices.size() - 1);
     boost::intrusive_ptr<BlkBuffer> valid_buf = get_valid_buf(bbuf, rewrite);
 
-    vol_sb *sb = nullptr;
-    int ret = posix_memalign((void **) &sb, HomeStoreConfig::align_size, VOL_SB_SIZE); 
+    vol_mem_sb *sb = new vol_mem_sb;
+    int ret = posix_memalign((void **) &(sb->ondisk_sb), HomeStoreConfig::align_size, VOL_SB_SIZE); 
     assert(!ret);
-    memcpy(sb, valid_buf->at_offset(0).bytes, sizeof(*sb));
+    memcpy(sb->ondisk_sb, valid_buf->at_offset(0).bytes, sizeof(vol_ondisk_sb));
     
     // TODO: how do we recover this if it fails in release mode?
-    assert(sb->blkid.to_integer() == bid.to_integer());
+    assert(sb->ondisk_sb->blkid.to_integer() == bid.to_integer());
 
     if (!vol_sb_sanity(sb)) {
-        LOGERROR("Sanity check failure for vol sb: name: {}", sb->vol_name);
+        LOGERROR("Sanity check failure for vol sb: name: {}", sb->ondisk_sb->vol_name);
         return nullptr;
     }
 
     if (rewrite) {
         /* update the super block */
-        vol_sb_write(sb, false);
+        vol_sb_write(sb);
     }
 
     return sb;
@@ -307,53 +318,60 @@ HomeBlks::vol_sb_read(BlkId bid) {
 // 6. Free the vol_sb's blk_id
 //
 void 
-HomeBlks::vol_sb_remove(vol_sb *sb) {
-    LOGINFO("Removing sb of vol: {}", sb->vol_name);
-    m_vol_lock.lock();
+HomeBlks::vol_sb_remove(vol_mem_sb *sb) {
+    LOGINFO("Removing sb of vol: {}", sb->ondisk_sb->vol_name);
+    std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
 
-    vol_sb* prev_sb = nullptr;
-    if (sb->prev_blkid.to_integer() != BlkId::invalid_internal_id()) {
-        prev_sb = vol_sb_read(sb->prev_blkid);
+    vol_mem_sb* prev_sb = nullptr;
+    if (sb->ondisk_sb->prev_blkid.to_integer() != BlkId::invalid_internal_id()) {
+        prev_sb = vol_sb_read(sb->ondisk_sb->prev_blkid);
         assert (prev_sb);
         // we do have a valid prev_sb, update it. 
-        auto it = m_volume_map.find(prev_sb->uuid);
-        free(prev_sb);
+        auto it = m_volume_map.find(prev_sb->ondisk_sb->uuid);
+        delete(prev_sb);
         assert(it != m_volume_map.end());
         
         auto vol = it->second;
+        prev_sb = vol->get_sb();
         // need to update the in-memory copy of sb then persist this copy to disk;
-        vol->lock_sb_for_update();
-        vol->get_sb()->next_blkid = sb->next_blkid;
-        vol_sb_write(vol->get_sb(), true);
-        vol->unlock_sb_for_update();
+        prev_sb->lock();
+        prev_sb->ondisk_sb->next_blkid = sb->ondisk_sb->next_blkid;
+        prev_sb->unlock();
+        vol_sb_write(prev_sb);
+        if (sb == m_last_vol_sb) {
+            m_last_vol_sb = prev_sb;
+        }
     } else {
         // no prev_sb, this is the first sb being removed. 
         // we need to update m_cfg_sb to sb->nextblkid;
         assert(m_cfg_sb);
         // if there is next sb, sb->next_blkid will be invalid interal blkid, which is good;
-        m_cfg_sb->vol_list_head.set(sb->next_blkid);
+        m_cfg_sb->vol_list_head.set(sb->ondisk_sb->next_blkid);
+        if (sb == m_last_vol_sb) {
+            m_last_vol_sb = nullptr;
+        }
         // persist m_cfg_sb 
-        config_super_block_write(true); // false since we already hold m_vol_lock
+        config_super_block_write();
     }
 
-    vol_sb* next_sb = nullptr;
-    if (sb->next_blkid.to_integer() != BlkId::invalid_internal_id()) {
-        next_sb = vol_sb_read(sb->next_blkid);
+    vol_mem_sb* next_sb = nullptr;
+    if (sb->ondisk_sb->next_blkid.to_integer() != BlkId::invalid_internal_id()) {
+        next_sb = vol_sb_read(sb->ondisk_sb->next_blkid);
         assert(next_sb);
-        auto it = m_volume_map.find(next_sb->uuid);
-        free(next_sb);
+        auto it = m_volume_map.find(next_sb->ondisk_sb->uuid);
+        delete(next_sb);
         assert(it != m_volume_map.end());
         auto vol = it->second;
         
+        next_sb = vol->get_sb();
         // need to update the in-memory copy of sb then persist this copy to disk;
-        vol->lock_sb_for_update();
-        vol->get_sb()->prev_blkid = sb->prev_blkid;
-        vol_sb_write(vol->get_sb(), true);
-        vol->unlock_sb_for_update();
+        next_sb->lock();
+        next_sb->ondisk_sb->prev_blkid = sb->ondisk_sb->prev_blkid;
+        next_sb->unlock();
+        vol_sb_write(next_sb);
     } 
     
-    m_vol_lock.unlock();
-    m_sb_blk_store->free_blk(sb->blkid, boost::none, boost::none);
+    m_sb_blk_store->free_blk(sb->ondisk_sb->blkid, boost::none, boost::none);
 }
 
 void HomeBlks::config_super_block_init(BlkId& bid) {
@@ -366,7 +384,7 @@ void HomeBlks::config_super_block_init(BlkId& bid) {
     m_cfg_sb->magic = VOL_SB_MAGIC;
     m_cfg_sb->boot_cnt = 0;
     m_cfg_sb->init_flag(0);
-    config_super_block_write(false);
+    config_super_block_write();
 }
 
 boost::uuids::uuid 
@@ -374,56 +392,44 @@ HomeBlks::get_uuid(VolumePtr vol) {
     return vol->get_uuid();
 }
 
-void HomeBlks::config_super_block_write(bool lock) {
+void HomeBlks::config_super_block_write() {
     homeds::MemVector mvec;
+    std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
 
-    if (!lock) {
-        m_vol_lock.lock();
-    }
     m_cfg_sb->gen_cnt++;
     try {
         mvec.set((uint8_t*)m_cfg_sb, VOL_SB_SIZE, 0);
         m_sb_blk_store->write(m_cfg_sb->blkid, mvec);
     } catch (std::exception& e) {
-        if (!lock) {
-            m_vol_lock.unlock();
-        };
         throw e;
     }
-
-    if (!lock) {
-        m_vol_lock.unlock();
-    };
 }
 
-void HomeBlks::vol_sb_write(vol_sb* sb) { vol_sb_write(sb, false); }
-
-void HomeBlks::vol_sb_write(vol_sb* sb, bool lock) {
+void HomeBlks::vol_sb_write(vol_mem_sb* sb) {
     homeds::MemVector mvec;
+    std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
 
-    if (!lock) {
-        m_vol_lock.lock();
-    }
+    /* take a sb lock so that nobody update the in memory copy while
+     * we are persisting it to disk.
+     */
+    sb->lock();
     try {
-        sb->gen_cnt++;
-        mvec.set((uint8_t*)sb, VOL_SB_SIZE, 0);
-        m_sb_blk_store->write(sb->blkid, mvec);
+        sb->ondisk_sb->gen_cnt++;
+        mvec.set((uint8_t*)sb->ondisk_sb, VOL_SB_SIZE, 0);
+        m_sb_blk_store->write(sb->ondisk_sb->blkid, mvec);
     } catch (std::exception& e) {
-        if (!lock) {
-            m_vol_lock.unlock();
-        };
+        sb->unlock();
         throw e;
     }
-    if (!lock) {
-        m_vol_lock.unlock();
-    };
+
+    sb->unlock();
 }
 
 void HomeBlks::process_vdev_error(vdev_info_block* vb) {
     /* For now we need to move all volumes in a failed state. Later on when we move to multiple virtual devices for
      * data blkstoree we need to move only those volumes to failed state which  belong to this virtual device.
      */
-    m_vol_lock.lock();
+    std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
     auto it = m_volume_map.begin();
     while (it != m_volume_map.end()) {
         auto old_state = it->second->get_state();
@@ -437,7 +443,6 @@ void HomeBlks::process_vdev_error(vdev_info_block* vb) {
         }
         ++it;
     }
-    m_vol_lock.unlock();
 }
 
 void HomeBlks::new_vdev_found(DeviceManager* dev_mgr, vdev_info_block* vb) {
@@ -467,19 +472,18 @@ void HomeBlks::add_devices() {
 
 void HomeBlks::vol_mounted(const VolumePtr& vol, vol_state state) {
     m_cfg.vol_mounted_cb(vol, state);
-    LOGINFO("vol mounted name {} state {}", vol->get_sb()->vol_name, state);
+    LOGINFO("vol mounted name {} state {}", vol->get_sb()->ondisk_sb->vol_name, state);
 }
 
 bool HomeBlks::vol_state_change(const VolumePtr& vol, vol_state new_state) {
     assert(new_state == OFFLINE || new_state == ONLINE);
-    m_vol_lock.lock();
+    std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
     try {
         vol->set_state(new_state);
     } catch (std::exception &e) {
         LOGERROR("{}", e.what());
         return false;
     }
-    m_vol_lock.unlock();
     return true;
 }
 
@@ -526,40 +530,40 @@ void HomeBlks::scan_volumes() {
     int num_vol = 0;
     try {
         while (blkid.to_integer() != BlkId::invalid_internal_id()) {
-            vol_sb *sb = vol_sb_read(blkid);
+            vol_mem_sb *sb = vol_sb_read(blkid);
             if (sb == nullptr) {
                 // TODO: Error handling here...
             }
 
-            auto vol_uuid = sb->uuid;
+            auto vol_uuid = sb->ondisk_sb->uuid;
 
             if (!m_cfg.vol_found_cb(vol_uuid)) {
-                LOGINFO("vol delete after recovery {}", sb->vol_name);
+                LOGINFO("vol delete after recovery {}", sb->ondisk_sb->vol_name);
                 /* don't need to mount this volume. Delete this volume. Its block will be recaimed automatically */
                 LOGINFO("volume is deleted {}", boost::uuids::to_string(vol_uuid));
                 if (m_last_vol_sb) {
-                    m_last_vol_sb->next_blkid = sb->next_blkid;
+                    m_last_vol_sb->ondisk_sb->next_blkid = sb->ondisk_sb->next_blkid;
                     /* write vdev superblocks */
-                    vol_sb_write(m_last_vol_sb, false);
+                    vol_sb_write(m_last_vol_sb);
                 } else {
-                    m_cfg_sb->vol_list_head = sb->next_blkid;
+                    m_cfg_sb->vol_list_head = sb->ondisk_sb->next_blkid;
                     m_cfg_sb->num_vols--;
-                    config_super_block_write(false);
+                    config_super_block_write();
                 }
             } else {
                 /* create the volume */
-                assert(sb->state != DESTROYING);
-                if (m_last_vol_sb && BlkId::compare(sb->prev_blkid, m_last_vol_sb->blkid)) {
+                assert(sb->ondisk_sb->state != DESTROYING);
+                if (m_last_vol_sb && BlkId::compare(sb->ondisk_sb->prev_blkid, m_last_vol_sb->ondisk_sb->blkid)) {
                     /* prev volume is deleted. update the prev blkid */
                     LOGINFO("updating the previous volume blkid");
-                    sb->prev_blkid.set(m_last_vol_sb->blkid);
-                    vol_sb_write(sb, false);
+                    sb->ondisk_sb->prev_blkid.set(m_last_vol_sb->ondisk_sb->blkid);
+                    vol_sb_write(sb);
                 }
 
-                if (sb->state == ONLINE && m_vdev_failed) {
+                if (sb->ondisk_sb->state == ONLINE && m_vdev_failed) {
                     /* Move all the volumes to failed state */
-                    sb->state = FAILED;
-                    vol_sb_write(sb, false);
+                    sb->ondisk_sb->state = FAILED;
+                    vol_sb_write(sb);
                 }
                 num_vol++;
                 decltype(m_volume_map)::iterator it;
@@ -582,8 +586,8 @@ void HomeBlks::scan_volumes() {
                 m_sb_blk_store->alloc_blk(blkid);
                 m_last_vol_sb = sb;
             }
-            blkid = sb->next_blkid;
-            LOGINFO("vol found {}", sb->vol_name);
+            blkid = sb->ondisk_sb->next_blkid;
+            LOGINFO("vol found {}", sb->ondisk_sb->vol_name);
         }
 
         assert(num_vol == m_cfg_sb->num_vols);
@@ -707,7 +711,7 @@ void HomeBlks::create_sb_blkstore(vdev_info_block* vb) {
         assert(m_cfg_sb->blkid.to_integer() == blob->blkid.to_integer());
         m_cfg_sb->boot_cnt++;
         /* update the config super block */
-        config_super_block_write(false);
+        config_super_block_write();
     }
 }
 
@@ -744,13 +748,13 @@ void HomeBlks::init_thread() {
         // Will not resume shutdown if we reboot from an un-finished shutdown procedure. 
         //
         {
-            std::lock_guard<std::mutex>  lg(m_vol_lock);
+            std::lock_guard<std::recursive_mutex>  lg(m_vol_lock);
             if (m_cfg_sb->test_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN)) {
                 LOGDEBUG("System was shutdown cleanly.");
                 // clear the flag and persist to disk, if we received a new shutdown and completed successfully, 
                 // the flag should be set again; 
                 m_cfg_sb->clear_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
-                config_super_block_write(true);
+                config_super_block_write();
             } else if (!init) {
                 LOGCRITICAL("System experienced sudden panic since last boot!");
             } else {
@@ -852,7 +856,7 @@ void HomeBlks::get_obj_life(sisl::HttpCallData cd) {
 void HomeBlks::shutdown_process(shutdown_comp_callback shutdown_comp_cb, bool force) {
     try {
         auto start = std::chrono::steady_clock::now();
-        m_vol_lock.lock();
+        std::unique_lock<std::recursive_mutex>  lg(m_vol_lock);
         while (m_volume_map.size()) {
             for (auto & x : m_volume_map) {
                 if (x.second.use_count() == 1) {
@@ -890,31 +894,28 @@ void HomeBlks::shutdown_process(shutdown_comp_callback shutdown_comp_cb, bool fo
                 }
 
                 // unlock before we go sleep
-                m_vol_lock.unlock();
+                lg.unlock();
 
                 // sleep for a while before we make another check;
                 std::this_thread::sleep_for(2s);
 
                 // take look before we make another check;
-                m_vol_lock.lock();
+                lg.lock();
             }
         }
 
-        m_vol_lock.unlock();
 
         assert(m_volume_map.size() == 0);
 
         // m_cfg_sb needs to to be freed in the last, because we need to set the clean shutdown flag
         // after shutdown is succesfully completed;
 
-        { 
-            std::lock_guard<std::mutex>  lg(m_vol_lock);
-            // clear the shutdown bit on disk;
-            m_cfg_sb->set_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
-            config_super_block_write(true);
-            // free the in-memory copy 
-            free(m_cfg_sb);
-        }
+        // clear the shutdown bit on disk;
+        m_cfg_sb->set_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
+        config_super_block_write();
+        // free the in-memory copy 
+        free(m_cfg_sb);
+        lg.unlock();
 
         // All of volume's destructors have been called, now release shared resoruces.
         delete m_sb_blk_store;
