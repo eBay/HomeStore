@@ -80,17 +80,7 @@ IOMgrExecutor::process_ev_callback(const int fd, const void* cookie, const int e
     [[maybe_unused]] auto rsize = read(fd, &temp, sizeof(uint64_t));
 
     m_iomgr->process_done(fd, event);
-
-    // 
-    // this sleep before reschedule is to wait for I/O threads to complete 
-    // looping the epollfd_pri, otherwise reschedule event will be missed and hence stuck.
-    //
-    // TODO: remove this sleep after epollfd_pri has been removed.
-    //
-    // trigger another event
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
-        
-    //m_iomgr->fd_reschedule(fd, event);
+    
     [[maybe_unused]] auto wsize = write(m_ev_fd, &temp, sizeof(uint64_t));
     
     callback_t cb;

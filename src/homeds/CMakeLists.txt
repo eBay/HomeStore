@@ -11,7 +11,7 @@ message(WARNING "BTree test disabled due to interface change.")
 
 if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
     message("Debug build")
-    add_compile_options(-D_DEBUG=1 -O0 -DDEBUG_RCU )#-D_PRERELEASE=1
+    add_compile_options(-D_DEBUG=1 -O0 -DDEBUG_RCU -D_PRERELEASE=1)
 else()
     message("Release build")
     add_compile_options(-DNDEBUG=1 -O3)
@@ -56,13 +56,13 @@ add_executable(obj_allocator_benchmark ${OBJ_ALLOCATOR_BENCHMARK_FILES})
 target_link_libraries(obj_allocator_benchmark ${COMMON_LIB_DEPS})
 add_test(NAME ObjAllocatorBenchmark COMMAND obj_allocator_benchmark)
 
-set(TEST_BTREE_SIMPLE_FILES 
-    tests/loadgen_tests/test_loadgen_btree.cpp
-    loadgen/iomgr_executor.cpp
-    )
-add_executable(test_btree_simple ${TEST_BTREE_SIMPLE_FILES})
-target_link_libraries(test_btree_simple homestore ${COMMON_LIB_DEPS})
-#add_test(NAME TestBtreeSimple COMMAND test_btree_simple)
+set(TEST_LOAD_FILES 
+        tests/loadgen_tests/test_load.cpp
+        loadgen/iomgr_executor.cpp
+        )
+add_executable(test_load ${TEST_LOAD_FILES})
+target_link_libraries(test_load homestore ${COMMON_LIB_DEPS})
+add_test(NAME TestLoad COMMAND test_load)
 
 set(TEST_IOMGR_EXEC_FILES 
     tests/test_iomgr_executor.cpp

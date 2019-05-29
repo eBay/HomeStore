@@ -4,10 +4,10 @@ set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CPP_FLAGS} ${CPP_WARNINGS} -DRCU_SIGN
 
 if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
     message("Debug build")
-    add_compile_options(-D_DEBUG=1 -O0 -DDEBUG_RCU )#-D_PRERELEASE
+    add_compile_options(-D_DEBUG=1 -O0 -DDEBUG_RCU -D_PRERELEASE=1)
 else()
     message("Release build")
-    add_compile_options(-DNDEBUG=1 -O3 )#-D_PRERELEASE
+    add_compile_options(-DNDEBUG=1 -O3 -D_PRERELEASE=1)
 endif()
 
 include (CTest)
