@@ -124,7 +124,10 @@ private:
 struct MemVector : public sisl::ObjLifeCounter< MemVector > {
 private:
     std::vector< MemPiece > m_list;
-    mutable std::mutex      m_mtx;
+    /* we need recursive mutex because we can call init() function while holding it
+     * and which internally can again call get_blob which also takes mutex.
+     */
+    mutable std::recursive_mutex      m_mtx;
     std::atomic< uint8_t >  m_refcnt;
 
 public:
@@ -163,7 +166,7 @@ public:
     uint32_t npieces() const { return (m_list.size()); }
 
     void set(uint8_t* ptr, uint32_t size, uint32_t offset) {
-        std::unique_lock< std::mutex > mtx(m_mtx);
+        std::unique_lock< std::recursive_mutex > mtx(m_mtx);
         m_list.erase(m_list.begin(), m_list.end());
         MemPiece m(ptr, size, offset);
         m_list.push_back(m);
@@ -173,7 +176,7 @@ public:
 
     void get(homeds::blob* outb, uint32_t offset = 0) const {
         uint32_t                       ind = 0;
-        std::unique_lock< std::mutex > mtx(m_mtx);
+        std::unique_lock< std::recursive_mutex > mtx(m_mtx);
         if ((m_list.size() && bsearch(offset, -1, &ind))) {
             auto piece_offset = m_list.at(ind).offset();
             assert(piece_offset <= offset);
@@ -220,7 +223,7 @@ public:
     /* This method will try to set or append the offset to the memory piece. However, if there is already an entry
      * within reach for given offset/size, it will reject the entry and return false. Else it sets or adds the entry */
     bool append(uint8_t* ptr, uint32_t offset, uint32_t size) {
-        std::unique_lock< std::mutex > mtx(m_mtx);
+        std::unique_lock< std::recursive_mutex > mtx(m_mtx);
         bool                           added = false;
         MemPiece                       mp(ptr, size, offset);
         added = add_piece_to_list(mp);
@@ -241,7 +244,7 @@ public:
     }
 
     uint32_t size(uint32_t offset, uint32_t size) const {
-        std::unique_lock< std::mutex > mtx(m_mtx);
+        std::unique_lock< std::recursive_mutex > mtx(m_mtx);
         uint32_t                       s = 0;
         uint32_t                       offset_read = 0;
         bool                           start = false;
@@ -275,7 +278,7 @@ public:
     }
 
     uint32_t size() const {
-        std::unique_lock< std::mutex > mtx(m_mtx);
+        std::unique_lock< std::recursive_mutex > mtx(m_mtx);
         uint32_t                       s = 0;
         for (auto it = m_list.begin(); it < m_list.end(); ++it) {
             s += (*it).size();
@@ -296,7 +299,7 @@ public:
     uint32_t insert_missing_pieces(uint32_t offset, uint32_t size,
                                    std::vector< std::pair< uint32_t, uint32_t > >& missing_mp) {
         uint32_t                       new_ind;
-        std::unique_lock< std::mutex > mtx(m_mtx);
+        std::unique_lock< std::recursive_mutex > mtx(m_mtx);
         cursor_t                       c;
         uint32_t                       inserted_size = 0;
 
@@ -355,16 +358,17 @@ public:
         return inserted_size;
     }
 
-    bool update_missing_piece(uint32_t offset, uint32_t size, uint8_t* ptr) {
+    bool update_missing_piece(uint32_t offset, uint32_t size, uint8_t* ptr, std::function< void() > init_cb) {
         uint32_t                       new_ind;
         bool                           inserted = false;
-        std::unique_lock< std::mutex > mtx(m_mtx);
+        std::unique_lock< std::recursive_mutex > mtx(m_mtx);
         bool                           found = find_index(offset, -1, &new_ind);
         assert(found);
         auto& mp = get_nth_piece_mutable(new_ind);
         if (mp.ptr() == nullptr) {
             mp.set_ptr(ptr);
             inserted = true;
+            init_cb();
         }
         assert(size == mp.size());
         return inserted;

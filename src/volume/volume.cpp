@@ -191,6 +191,7 @@ void Volume::process_metadata_completions(const volume_req_ptr& vreq) {
     vreq->done = true;
 #endif
 
+    COUNTER_DECREMENT(m_metrics, volume_outstanding_metadata_write_count, 1);
     auto& parent_req = vreq->parent_req;
     assert(parent_req != nullptr);
 
@@ -235,6 +236,11 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
 
     // Shortcut to error completion
     if (vreq->err) {
+        if (!vreq->is_read) {
+            COUNTER_DECREMENT(m_metrics, volume_outstanding_data_write_count, 1);
+        } else {
+            COUNTER_DECREMENT(m_metrics, volume_outstanding_data_read_count, 1);
+        }
         return check_and_complete_req(parent_req, vreq->err, true /* call_completion_cb */);
     }
 
@@ -260,6 +266,8 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
         LOGDEBUG("Mapping.PUT ,vol_uuid:{},Key:{},Value:{}", boost::uuids::to_string(vreq->vol_uuid),
                  key.to_string(), value.to_string());
 #endif
+        COUNTER_DECREMENT(m_metrics, volume_outstanding_data_write_count, 1);
+        COUNTER_INCREMENT(m_metrics, volume_outstanding_metadata_write_count, 1);
         m_map->put(vreq, key, value);
     } else {
         std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;
@@ -275,6 +283,7 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
             }
         }
         
+        COUNTER_DECREMENT(m_metrics, volume_outstanding_data_read_count, 1);
         check_and_complete_req(parent_req, no_error, true /* call_completion_cb */);
     }
 }
@@ -343,6 +352,7 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
                     bid[i].to_string(), 
                     bid[i].data_size(HomeBlks::instance()->get_data_pagesz()), 
                     vreq->nlbas);
+            COUNTER_INCREMENT(m_metrics, volume_outstanding_data_write_count, 1);
             boost::intrusive_ptr< BlkBuffer > bbuf = m_data_blkstore->write(
                 bid[i], mvec, offset, boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vreq), req_q);
 
@@ -469,7 +479,9 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
 #endif
 
         COUNTER_INCREMENT(m_metrics, volume_read_count, 1);
+        COUNTER_INCREMENT(m_metrics, volume_outstanding_metadata_read_count, 1);
         auto err = m_map->get(vreq, kvs);
+        COUNTER_DECREMENT(m_metrics, volume_outstanding_metadata_read_count, 1);
         if (err) {
             if (err != homestore_error::lba_not_exist) {
                 COUNTER_INCREMENT(m_metrics, volume_read_error_count, 1);
@@ -510,6 +522,7 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
                 auto sz = get_page_size() * kv.first.get_n_lba();
                 auto offset = HomeBlks::instance()->get_data_pagesz() * ve.get_blk_offset();
                 child_vreq->read_buf_offset = offset;
+                COUNTER_INCREMENT(m_metrics, volume_outstanding_data_read_count, 1);
                 boost::intrusive_ptr< BlkBuffer > bbuf =
                     m_data_blkstore->read(ve.get_blkId(), offset, sz,
                                           boost::static_pointer_cast< blkstore_req< BlkBuffer > >(child_vreq));
@@ -517,6 +530,7 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
                 // TODO: @hkadayam There is a potential for race of read_buf_list getting emplaced after completion
                 hb_req->read_buf_list.emplace_back(sz, offset, bbuf);
                 if (sync) {
+                    COUNTER_DECREMENT(m_metrics, volume_outstanding_data_read_count, 1);
                     std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;
                     uint64_t offset = 0;
                     for (int i = 0; i < child_vreq->nlbas; i++) {

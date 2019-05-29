@@ -261,7 +261,7 @@ public:
     uint32_t get_data_offset() const { return m_data_offset; }
 
     bool update_missing_piece(uint32_t offset, uint32_t size, uint8_t* ptr) {
-        bool inserted = get_memvec().update_missing_piece(m_data_offset + offset, size, ptr);
+        bool inserted = get_memvec().update_missing_piece(m_data_offset + offset, size, ptr, [this] () {init();});
         return inserted;
     }
 
@@ -338,6 +338,8 @@ public:
             cache->safe_erase(k, nullptr);
         }
     }
+
+    virtual void init() {};
 
     void set_free_state() { m_can_free = true; }
 

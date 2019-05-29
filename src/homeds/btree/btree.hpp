@@ -2100,8 +2100,9 @@ out:
         auto is_leaf = child_node->is_leaf();
         auto acq_lock = is_leaf ? leaf_lock_type : int_lock_type;
         btree_status_t ret = lock_and_refresh_node(child_node, acq_lock, multinode_req);
-        assert(is_leaf == child_node->is_leaf());
+
         assert(child_node->is_valid_node());
+        assert(is_leaf == child_node->is_leaf());
         return ret;
     }
 

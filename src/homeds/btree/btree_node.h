@@ -17,12 +17,15 @@ namespace homeds { namespace btree {
 struct transient_hdr_t {
     sisl::atomic_counter< uint16_t > upgraders;
     folly::SharedMutexReadPriority lock;
+    /* these variables are accessed without taking lock and are not expected to change after init */
+    bool is_leaf;
 #ifndef NDEBUG
     int is_lock;
 #endif
     transient_hdr_t()
+        : upgraders(0), is_leaf(false)
 #ifndef NDEBUG
-        : is_lock(-1)
+        , is_lock(-1)
 #endif
         {};
 };
@@ -172,6 +175,7 @@ public:
 
     void set_valid_node(bool valid);
     bool is_valid_node() const;
+    void init();
 
     void get_last_key(BtreeKey *out_lastkey);
     void get_first_key(BtreeKey *out_firstkey);
