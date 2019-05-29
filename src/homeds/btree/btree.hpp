@@ -1584,7 +1584,7 @@ out:
             goto done;
         }
 
-        if (root->get_total_entries() != 0) {
+        if (root->get_total_entries() != 0 || root->is_leaf()/*some other thread collapsed root already*/) {
             unlock_node(root, locktype::LOCKTYPE_WRITE);
             goto done;
         }
