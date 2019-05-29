@@ -281,7 +281,7 @@ public:
     }
 
     void cache_buf_erase_cb(boost::intrusive_ptr< Buffer >                                  erased_buf,
-                            std::deque< boost::intrusive_ptr< homestore::writeback_req > >& dependent_req_q,
+                            std::deque< boost::intrusive_ptr< homestore::writeback_req > > dependent_req_q,
                             const BlkId                                                     bid) {
         assert(is_read_modify_cache());
         if (is_write_back_cache()) {
@@ -316,7 +316,7 @@ public:
         if (is_read_modify_cache()) {
             assert(size_offset.get_value_or(0) == 0 && free_size == bid.data_size(m_pagesz));
             m_cache->safe_erase(
-                bid, [this, bid, &dependent_req_q, mem_only](boost::intrusive_ptr< CacheBuffer< BlkId > > erased_buf) {
+                bid, [this, bid, dependent_req_q, mem_only](boost::intrusive_ptr< CacheBuffer< BlkId > > erased_buf) {
                     if (!mem_only) {
                         this->cache_buf_erase_cb(boost::static_pointer_cast< Buffer >(erased_buf), dependent_req_q, bid);
                     }
@@ -591,10 +591,10 @@ public:
     }
 
     void                                  reset_vdev_failed_state() { m_vdev.reset_failed_state(); }
-    boost::intrusive_ptr< writeback_req > read_locked(boost::intrusive_ptr< Buffer > buf, bool is_write_modifiable) {
+    boost::intrusive_ptr< writeback_req > refresh_buf(boost::intrusive_ptr< Buffer > buf, bool is_write_modifiable) {
         assert(buf.get());
         if (is_write_back_cache()) {
-            return (m_wb_cache.writeBack_cache_read(buf, is_write_modifiable));
+            return (m_wb_cache.writeBack_refresh_buf(buf, is_write_modifiable));
         }
 
         return nullptr;

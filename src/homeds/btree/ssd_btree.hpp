@@ -75,6 +75,14 @@ public:
     bool is_err_set() {
         return is_err.get() != 0 ? true : false;
     }
+
+    virtual void init() override {
+        /* Note : it is called under cache lock to prevent multiple threads to call init. And init function
+         * internally also try to take the cache lock to access cache to update in memory structure. So 
+         * we have to be careful in taking any lock inside this function.
+         */
+        ((SSDBtreeNode *)this)->init();
+    }
 };
 
 struct btree_device_info {
@@ -194,6 +202,7 @@ public:
         if (copy_from != nullptr) {
             copy_node(store, copy_from, new_node);
         }
+        new_node->init();
         return new_node;
     }
 
@@ -231,6 +240,7 @@ public:
         boost::intrusive_ptr< btree_buffer_t > frm_buff = boost::dynamic_pointer_cast< btree_buffer_t >(copy_from);
         to_buff->set_memvec(frm_buff->get_memvec_intrusive(), frm_buff->get_data_offset(), frm_buff->get_cache_size());
         copy_to->set_node_id(original_to_id); // restore original copy_to id
+        copy_to->init();
     }
 
     static void swap_node(SSDBtreeStore* impl, boost::intrusive_ptr< SSDBtreeNode > node1,
@@ -247,7 +257,9 @@ public:
         node2->set_memvec(mvec1, node2->get_data_offset(), node2->get_cache_size());
         /* restore the node ids */
         node1->set_node_id(id1);
+        node1->init();
         node2->set_node_id(id2);
+        node2->init();
     }
 
     static btree_status_t write_node(SSDBtreeStore* impl, boost::intrusive_ptr< SSDBtreeNode > bn,
@@ -313,7 +325,7 @@ public:
         /* add the latest request pending on this node */
         try {
             auto req =
-                store->m_blkstore->read_locked(boost::static_pointer_cast< btree_buffer_t >(bn), is_write_modifiable);
+                store->m_blkstore->refresh_buf(boost::static_pointer_cast< btree_buffer_t >(bn), is_write_modifiable);
             if (req && multinode_req) {
                 multinode_req->dependent_req_q.push_back(req);
             }

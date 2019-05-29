@@ -145,7 +145,9 @@ public:
 
         /* set the node ids */
         node1->set_node_id(id1);
+        node1->init();
         node2->set_node_id(id2);
+        node2->init();
         free(temp);
     }
 

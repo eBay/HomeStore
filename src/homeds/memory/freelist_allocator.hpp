@@ -20,9 +20,12 @@ struct free_list_header {
 class FreeListAllocatorMetrics : public sisl::MetricsGroupWrapper {
 public:
     explicit FreeListAllocatorMetrics() : sisl::MetricsGroupWrapper("FreeListAllocator", "Singleton") {
-        REGISTER_COUNTER(freelist_alloc_hit, "Number of allocs from cache");
-        REGISTER_COUNTER(freelist_alloc_miss, "Number of allocs from system");
-        REGISTER_COUNTER(freelist_dealloc_passthru, "Number of dealloc not cached because of size mismatch");
+        REGISTER_COUNTER(freelist_alloc_hit, "freelist: Number of allocs from cache");
+        REGISTER_COUNTER(freelist_alloc_miss, "freelist: Number of allocs from system");
+        REGISTER_COUNTER(freelist_dealloc_passthru, "freelist: Number of dealloc not cached because of size mismatch");
+        REGISTER_COUNTER(freelist_dealloc, "freelist: Number of deallocs to system");
+        REGISTER_COUNTER(freelist_alloc_size, "freelist: size of alloc", sisl::_publish_as::publish_as_gauge);
+        REGISTER_COUNTER(freelist_cache_size, "freelist: cache size", sisl::_publish_as::publish_as_gauge);
 
         register_me_to_farm();
     }
@@ -56,32 +59,41 @@ public:
 
     uint8_t *allocate(uint32_t size_needed) {
         uint8_t *ptr;
-        //auto &metrics = FreeListAllocatorMetrics::instance();
+        auto &metrics = FreeListAllocatorMetrics::instance();
 
         if (m_head == nullptr) {
             ptr = (uint8_t *)malloc(size_needed);
-            //COUNTER_INCREMENT(metrics, freelist_alloc_miss, 1);
+            COUNTER_INCREMENT(metrics, freelist_alloc_miss, 1);
         } else {
             ptr = (uint8_t *)m_head;
-            //COUNTER_INCREMENT(metrics, freelist_alloc_hit, 1);
+            COUNTER_INCREMENT(metrics, freelist_alloc_hit, 1);
             m_head = m_head->next;
+            COUNTER_DECREMENT(metrics, freelist_cache_size, size_needed);
         }
 
+        COUNTER_INCREMENT(metrics, freelist_alloc_size, size_needed);
         m_list_count--;
         return ptr;
     }
 
     bool deallocate(uint8_t *mem, uint32_t size_alloced) {
-        //auto &metrics = FreeListAllocatorMetrics::instance();
+        auto &metrics = FreeListAllocatorMetrics::instance();
 
-        if ((size_alloced != Size) || (m_list_count == MaxListCount)) {
+        COUNTER_DECREMENT(metrics, freelist_alloc_size, size_alloced);
+        if (
+#ifndef NDEBUG
+            1 || 
+#endif
+            (size_alloced != Size) || (m_list_count == MaxListCount)) {
             if (size_alloced != Size) {
-                //COUNTER_INCREMENT(metrics, freelist_dealloc_passthru, 1);
+                COUNTER_INCREMENT(metrics, freelist_dealloc_passthru, 1);
             }
             free(mem);
+            COUNTER_INCREMENT(metrics,freelist_dealloc, 1);
             return true;
         }
         auto *hdr = (free_list_header *)mem;
+        COUNTER_INCREMENT(metrics, freelist_cache_size, size_alloced);
         hdr->next = m_head;
         m_head = hdr;
         m_list_count++;
