@@ -96,7 +96,6 @@ DecBNodeType(std::string) to_string() const {
 
 /* Provides the occupied data size within the node */
 DecBNodeType(bool) is_leaf() const {
-    assert(m_common_header.is_leaf == call_variant_method_const(this, is_leaf));
     return m_common_header.is_leaf;
 }
 
