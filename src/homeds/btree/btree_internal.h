@@ -21,6 +21,10 @@
 #include "homeds/memory/obj_allocator.hpp"
 #include <utility/atomic_counter.hpp>
 #include <utility/obj_life_counter.hpp>
+#include <sds_logging/logging.h>
+#include <boost/preprocessor/cat.hpp>
+#include <boost/preprocessor/control/if.hpp>
+#include <boost/preprocessor/stringize.hpp>
 
 ENUM(btree_status_t, uint32_t, 
     success,
@@ -38,8 +42,63 @@ ENUM(btree_status_t, uint32_t,
 );
 
 /* We should always find the child smaller or equal then  search key in the interior nodes. */
-#define IS_VALID_INTERIOR_CHILD_INDX(ret, node) ((ret.end_of_search_index < (int)node->get_total_entries()) || \
-                                                    node->get_edge_id().is_valid())
+#ifndef NDEBUG
+#define ASSERT_IS_VALID_INTERIOR_CHILD_INDX(ret, node) \
+    DEBUG_ASSERT(((ret.end_of_search_index < (int)node->get_total_entries()) || node->get_edge_id().is_valid()), \
+        "Is_valid_interior_child_check_failed: end_of_search_index={} total_entries={}, edge_valid={}", \
+            ret.end_of_search_index, node->get_total_entries(), node->get_edge_id().is_valid())
+#else
+#define ASSERT_IS_VALID_INTERIOR_CHILD_INDX(ret, node)
+#endif
+
+#define _BTNODE_LOG_FORMAT    "[node={}:{}:N={}]: "
+//#define _BTNODE_LOG_MSG(node)  _type_desc(node), node->get_node_id_int(), node->get_total_entries()
+#define _BTNODE_LOG_MSG(node)  (node->is_leaf() ? "L" : "I"), node->get_node_id_int(), node->get_total_entries()
+#define _BTMSG_EXPAND(...)    __VA_ARGS__
+
+//#define BT_LOG(level, fmt, ...) LOG##level("[btree={}] " fmt, m_btree_cfg.get_name(), ##__VA_ARGS__)
+//#define BT_LOG(level, mod, fmt, ...) BOOST_PP_CAT(LOG, BOOST_PP_CAT(level, MOD)) (mod, "[btree={}] " fmt, m_btree_cfg.get_name(), ##__VA_ARGS__)
+
+#define BT_LOG(level, mod, node, fmt, ...) \
+    LOG##level##MOD(\
+        BOOST_PP_IF(BOOST_PP_IS_EMPTY(mod), base, mod), \
+        "[btree={}]" \
+        BOOST_PP_IF(BOOST_PP_IS_EMPTY(node), "{}: ", _BTNODE_LOG_FORMAT) \
+        fmt, m_btree_cfg.get_name(), \
+        BOOST_PP_EXPAND(_BTMSG_EXPAND BOOST_PP_IF(BOOST_PP_IS_EMPTY(node), (""), (_BTNODE_LOG_MSG(node)))), \
+        ##__VA_ARGS__)
+
+#define BT_ASSERT(asserttype, cond, node, fmt, ...) \
+    asserttype##_ASSERT(cond, \
+        "[btree={}]" \
+        BOOST_PP_IF(BOOST_PP_IS_EMPTY(node), "{}: ", _BTNODE_LOG_FORMAT) \
+        fmt, m_btree_cfg.get_name(), \
+        BOOST_PP_EXPAND(_BTMSG_EXPAND BOOST_PP_IF(BOOST_PP_IS_EMPTY(node), (""), (_BTNODE_LOG_MSG(node)))), \
+        ##__VA_ARGS__)
+
+#define BT_ASSERT_OP(asserttype, optype, val1, val2, node, ...) \
+    asserttype##_ASSERT_##optype(val1, val2, \
+        "[btree={}]" \
+        BOOST_PP_IF(BOOST_PP_IS_EMPTY(node), "{}: ", _BTNODE_LOG_FORMAT), \
+        m_btree_cfg.get_name(), \
+        BOOST_PP_EXPAND(_BTMSG_EXPAND BOOST_PP_IF(BOOST_PP_IS_EMPTY(node), (""), (_BTNODE_LOG_MSG(node)))), \
+        ##__VA_ARGS__)
+
+#define BT_ASSERT_EQ(asserttype, ...)  BT_ASSERT_OP(asserttype, EQ, ##__VA_ARGS__)
+#define BT_ASSERT_NE(asserttype, ...)  BT_ASSERT_OP(asserttype, NE, ##__VA_ARGS__)
+#define BT_ASSERT_GT(asserttype, ...)  BT_ASSERT_OP(asserttype, GT, ##__VA_ARGS__)
+#define BT_ASSERT_GE(asserttype, ...)  BT_ASSERT_OP(asserttype, GE, ##__VA_ARGS__)
+#define BT_ASSERT_LT(asserttype, ...)  BT_ASSERT_OP(asserttype, LT, ##__VA_ARGS__)
+#define BT_ASSERT_LE(asserttype, ...)  BT_ASSERT_OP(asserttype, LE, ##__VA_ARGS__)
+
+#define BT_DEBUG_ASSERT(...)                BT_ASSERT(DEBUG, __VA_ARGS__)
+#define BT_RELEASE_ASSERT(...)              BT_ASSERT(RELEASE, __VA_ARGS__)
+#define BT_LOG_ASSERT(...)                  BT_ASSERT(LOGMSG, __VA_ARGS__)
+
+#define BT_DEBUG_ASSERT_CMP(optype, ...)    BT_ASSERT_OP(DEBUG, optype, ##__VA_ARGS__)
+#define BT_RELEASE_ASSERT_CMP(optype, ...)  BT_ASSERT_OP(RELEASE, optype, ##__VA_ARGS__)
+#define BT_LOG_ASSERT_CMP(optype, ...)      BT_ASSERT_OP(LOGMSG, optype, ##__VA_ARGS__)
+
 //structure to track btree multinode operations on different nodes
 #define btree_multinode_req_ptr boost::intrusive_ptr < btree_multinode_req < btree_req_type > >
 
@@ -577,7 +636,7 @@ class BtreeNodeInfo : public BtreeValue {
     }
 
     void set_blob(const homeds::blob& b) override {
-        assert(b.size == sizeof(bnodeid_t));
+        DEBUG_ASSERT_EQ(b.size, sizeof(bnodeid_t));
         m_bnodeid = *(bnodeid_t *)b.bytes;
     }
 
@@ -689,7 +748,7 @@ template <size_t NodeSize, size_t CacheCount = DEFAULT_FREELIST_CACHE_COUNT> cla
     }
 
     static uint8_t* allocate() {
-        assert(bt_node_allocator_initialized);
+        DEBUG_ASSERT_EQ(bt_node_allocator_initialized, true);
         return bt_node_allocator->get_allocator()->allocate(NodeSize);
     }
 

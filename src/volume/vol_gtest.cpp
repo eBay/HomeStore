@@ -48,10 +48,8 @@ uint64_t max_outstanding_ios = 64u;
 uint64_t max_disk_capacity = 10 * Gi;
 uint64_t match_cnt = 0; 
 using log_level = spdlog::level::level_enum;
-SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write, iomgr,
-                 btree_structures, btree_nodes, btree_generics,
-                 varsize_blk_alloc,
-                 VMOD_VOL_MAPPING, httpserver_lmod)
+SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write, iomgr, btree_structures, btree_nodes, btree_generics,
+                 varsize_blk_alloc, VMOD_VOL_MAPPING, httpserver_lmod)
 
 /**************** Common class created for all tests ***************/
 
@@ -440,7 +438,7 @@ public:
         populate_buf(buf, size, lba, cur);
        
         memcpy(buf1, buf, size);
-        
+
         boost::intrusive_ptr<req> req(new struct req());
         req->lba = lba;
         req->nblks = nblks;
@@ -901,7 +899,8 @@ int main(int argc, char *argv[]) {
     testing::InitGoogleTest(&argc, argv);
     SDS_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
     sds_logging::SetLogger("test_volume");
-    spdlog::set_pattern("[%D %T.%f%z] [%^%l%$] [%t] %v");
+    sds_logging::install_crash_handler();
+    spdlog::set_pattern("[%D %T.%f] [%^%L%$] [%t] %v");
 
     run_time = SDS_OPTIONS["run_time"].as<uint32_t>();
     num_threads = SDS_OPTIONS["num_threads"].as<uint32_t>();
