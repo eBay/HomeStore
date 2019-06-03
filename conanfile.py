@@ -30,7 +30,7 @@ class HomestoreConan(ConanFile):
                 "farmhash/1.0.0@oss/stable",
                 "folly/2019.05.20.00@bincrafters/testing",
                 "gtest/1.8.1@bincrafters/stable",
-                "iomgr/2.2.3@sds/testing",
+                "iomgr/2.2.4@sds/testing",
                 "libevent/2.1.8@bincrafters/stable",
                 "lzma/5.2.4@bincrafters/stable",
                 "sisl/0.3.2@sisl/testing",
