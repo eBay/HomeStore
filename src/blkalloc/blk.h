@@ -88,11 +88,7 @@ struct BlkId {
         set(UINT64_MAX, UINT8_MAX, UINT16_MAX);
     }
 
-    BlkId(BlkId &other) {
-        m_id = other.m_id;
-        m_nblks = other.m_nblks;
-        m_chunk_num = other.m_chunk_num;
-    }
+    BlkId(BlkId &other) = default;
 
     BlkId get_blkid_at(uint32_t offset, uint32_t pagesz) const {
         assert(offset % pagesz == 0);

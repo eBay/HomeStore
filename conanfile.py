@@ -18,7 +18,7 @@ class HomestoreConan(ConanFile):
     default_options = 'shared=False', 'fPIC=True', 'coverage=False'
 
     requires = (
-                "benchmark/1.4.1@oss/stable",
+                "benchmark/1.5.0@oss/stable",
                 "boost_asio/1.69.0@bincrafters/stable",
                 "boost_dynamic_bitset/1.69.0@bincrafters/stable",
                 "boost_circular_buffer/1.69.0@bincrafters/stable",
@@ -33,9 +33,9 @@ class HomestoreConan(ConanFile):
                 "iomgr/2.2.3@sds/testing",
                 "libevent/2.1.8@bincrafters/stable",
                 "lzma/5.2.4@bincrafters/stable",
-                "sisl/0.3.1@sisl/testing",
-                "OpenSSL/1.0.2r@conan/stable",
-                "sds_logging/4.1.1@sds/testing",
+                "sisl/0.3.2@sisl/testing",
+                "OpenSSL/1.0.2s@conan/stable",
+                "sds_logging/5.0.0@sds/testing",
                 "sds_options/0.1.5@sds/testing",
                 "isa-l/2.21.0@oss/stable",
                 "flip/0.0.4@sds/testing",

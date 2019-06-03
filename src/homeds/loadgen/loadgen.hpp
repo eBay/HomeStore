@@ -34,7 +34,7 @@ public:
     
     static void handle_generic_error(generator_op_error err, const key_info< K >* ki, void* store_error,
                                      const std::string& err_text = "") {
-        LOGDFATAL_IF(true, "Store reported error {}, failed key = {} error_text = {}", err, ki->m_key, err_text);
+        LOGDFATAL("Store reported error {}, failed key = {} error_text = {}", err, ki->m_key, err_text);
     }
 
     void preload(KeyPattern key_pattern, ValuePattern value_pattern, uint32_t count,
