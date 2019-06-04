@@ -25,7 +25,6 @@ template<btree_store_type BtreeStoreType,
             btree_node_type LeafNodeType,
             size_t NodeSize, typename btree_req_type >
 btree_node_t::BtreeNode() : m_common_header() {
-    init_btree_node();
 }
 
 #if 0
@@ -34,8 +33,12 @@ DecBNodeType(typename btree_store_t::HeaderType *) get_impl_node() {
 }
 #endif
 
-DecBNodeType(void) init_btree_node() {
-    m_common_header.upgraders.set(0);
+/* This function is called to initialize any constant variables which can be
+ * accessed without taking a lock. Normally this function is called when 
+ * it is bought in memory first time from disk, during swap and copy.
+ */
+DecBNodeType(void) init() {
+    m_common_header.is_leaf = call_variant_method_const(this, is_leaf);
 }
 
 /************* CRUD on a node ************/
@@ -93,10 +96,13 @@ DecBNodeType(std::string) to_string() const {
 
 /* Provides the occupied data size within the node */
 DecBNodeType(bool) is_leaf() const {
-    return call_variant_method_const(this, is_leaf);
+    return m_common_header.is_leaf;
 }
+
 DecBNodeType(void) set_leaf(bool leaf) {
+    m_common_header.is_leaf = leaf;
     call_variant_method(this, set_leaf, leaf);
+    assert(m_common_header.is_leaf == call_variant_method_const(this, is_leaf));
 }
 DecBNodeType(uint32_t) get_total_entries() const {
     return call_variant_method_const(this, get_total_entries);

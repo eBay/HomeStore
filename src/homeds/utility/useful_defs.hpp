@@ -18,7 +18,7 @@
 #endif
 
 using Clock = std::chrono::steady_clock;
-#define CURRENT_CLOCK(name) Clock::time_point (name) = Clock::now()
+#define CURRENT_CLOCK(name) Clock::time_point name = Clock::now()
 
 inline uint64_t get_elapsed_time_ns(Clock::time_point t) {
     std::chrono::nanoseconds ns = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - t);

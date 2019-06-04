@@ -49,7 +49,7 @@ uint64_t max_disk_capacity = 10 * Gi;
 uint64_t match_cnt = 0; 
 using log_level = spdlog::level::level_enum;
 SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write, iomgr, btree_structures, btree_nodes, btree_generics,
-                 varsize_blk_alloc, VMOD_VOL_MAPPING, httpserver_lmod)
+                 varsize_blk_alloc, VMOD_VOL_MAPPING, httpserver_lmod, volume)
 
 /**************** Common class created for all tests ***************/
 

@@ -1130,7 +1130,8 @@ done:
         // We need to upgrade the child to WriteLock
         ret = upgrade_node(child_node, nullptr, child_curlock, none_lock_type, multinode_req);
         if (ret != btree_status_t::success) {
-            BT_LOG(DEBUG, btree_structures, child_node, "Upgrade of child node lock failed, retrying from root");            BT_LOG_ASSERT_CMP(EQ, child_curlock, homeds::thread::LOCKTYPE_NONE, child_node);
+            BT_LOG(DEBUG, btree_structures, child_node, "Upgrade of child node lock failed, retrying from root");
+            BT_LOG_ASSERT_CMP(EQ, child_curlock, homeds::thread::LOCKTYPE_NONE, child_node);
             goto out;
         }
         BT_LOG_ASSERT_CMP(EQ, none_lock_type, homeds::thread::LOCKTYPE_NONE, my_node);
@@ -2068,8 +2069,10 @@ out:
         auto is_leaf = child_node->is_leaf();
         auto acq_lock = is_leaf ? leaf_lock_type : int_lock_type;
         btree_status_t ret = lock_and_refresh_node(child_node, acq_lock, multinode_req);
-        BT_DEBUG_ASSERT_CMP(EQ, is_leaf, child_node->is_leaf(), child_node);
+
         BT_DEBUG_ASSERT_CMP(EQ, child_node->is_valid_node(), true, child_node);
+        BT_DEBUG_ASSERT_CMP(EQ, is_leaf, child_node->is_leaf(), child_node);
+
         return ret;
     }
 

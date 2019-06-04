@@ -267,7 +267,7 @@ public:
         }
     }
 
-    writeback_req_ptr writeBack_cache_read(const boost::intrusive_ptr< CacheBuffer< K > >& cache_buf,
+    writeback_req_ptr writeBack_refresh_buf(const boost::intrusive_ptr< CacheBuffer< K > >& cache_buf,
                                            bool is_write_modifiable) {
         auto& wbc_buf = (boost::intrusive_ptr< WriteBackCacheBuffer< K > > &)cache_buf;
 
@@ -325,7 +325,7 @@ public:
          */
 #ifndef NDEBUG
         if (vol_test_enable) {
-            auto req = writeBack_cache_read(cache_buf, true);
+            auto req = writeBack_refresh_buf(cache_buf, true);
             if (req != nullptr) {
                 dependent_req_q.push_back(req);
             }

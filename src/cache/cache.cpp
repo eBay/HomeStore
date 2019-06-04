@@ -74,7 +74,7 @@ bool IntrusiveCache<K, V>::modify_size(V &v, uint32_t size) {
     auto ret = (m_evictors[hash_code % EVICTOR_PARTITIONS]->modify_size(size));
     
     if (ret) {
-        COUNTER_INCREMENT(m_metrics, cache_size, V::get_size(&(v.get_evict_record_mutable())));
+        COUNTER_INCREMENT(m_metrics, cache_size, size);
     }
 
     return ret;
@@ -124,8 +124,8 @@ bool IntrusiveCache<K, V>::erase(V &v) {
             COUNTER_INCREMENT(m_metrics, cache_erase_count, 1);
             COUNTER_DECREMENT(m_metrics, cache_object_count, 1);
             COUNTER_DECREMENT(m_metrics, cache_size, V::get_size(v.get_evict_record_mutable()));
+            v.on_cache_evict();
         }
-        v.on_cache_evict();
         v.unlock();
     }
     return found;
@@ -161,11 +161,11 @@ bool IntrusiveCache<K, V>::is_safe_to_evict(const CurrentEvictor::EvictRecordTyp
                                                    });
             if (ret) {
                 v->on_cache_evict();
+                COUNTER_DECREMENT(m_metrics, cache_object_count, 1);
+                COUNTER_DECREMENT(m_metrics, cache_size, V::get_size(erec));
             }
             v->unlock();
             safe_to_evict = ret;
-            COUNTER_DECREMENT(m_metrics, cache_object_count, 1);
-            COUNTER_DECREMENT(m_metrics, cache_size, V::get_size(erec));
         }
     }
 
@@ -315,14 +315,14 @@ bool Cache<K>::erase(const K &k, uint32_t offset, uint32_t size,
         out_removed_buf->lock();
         if (out_removed_buf->get_cache_state() == CACHE_INSERTED) {
             // We successfully removed the entry from hash set. So we can remove the record from eviction list as well.
+            COUNTER_DECREMENT(this->m_metrics, cache_size, 
+                    CacheBuffer< K >::get_size(&(out_removed_buf->get_evict_record_mutable())));
+            COUNTER_INCREMENT(this->m_metrics, cache_erase_count, 1);
+            COUNTER_DECREMENT(this->m_metrics, cache_object_count, 1);
             this->m_evictors[hash_code % EVICTOR_PARTITIONS]->delete_record((out_removed_buf)->get_evict_record_mutable());
+            out_removed_buf->on_cache_evict();
         }
-        out_removed_buf->on_cache_evict();
         out_removed_buf->unlock();
-        COUNTER_INCREMENT(this->m_metrics, cache_erase_count, 1);
-        COUNTER_DECREMENT(this->m_metrics, cache_object_count, 1);
-        COUNTER_DECREMENT(this->m_metrics, cache_size, 
-                CacheBuffer< K >::get_size(&(out_removed_buf->get_evict_record_mutable())));
     }
 
     if (ret_removed_buf != nullptr && out_removed_buf != nullptr) {
@@ -365,19 +365,19 @@ void Cache<K>::safe_erase(const K &k, erase_comp_cb cb) {
             // We successfully removed the entry from hash set. So we can remove the record from eviction list as well.
             out_buf->lock();
             if (out_buf->get_cache_state() == CACHE_INSERTED) {
+                COUNTER_INCREMENT(this->m_metrics, cache_erase_count, 1);
+                COUNTER_DECREMENT(this->m_metrics, cache_object_count, 1);
+                COUNTER_DECREMENT(this->m_metrics, cache_size, 
+                        CacheBuffer< K >::get_size(&(out_buf->get_evict_record_mutable())));
                 this->m_evictors[hash_code % EVICTOR_PARTITIONS]->delete_record((out_buf)->get_evict_record_mutable());
+                out_buf->on_cache_evict();
             }
-            out_buf->on_cache_evict();
             out_buf->unlock();
  
             auto cb = out_buf->get_cb();
             if (cb != nullptr) {
                 cb(out_buf);
             }
-            COUNTER_INCREMENT(this->m_metrics, cache_erase_count, 1);
-            COUNTER_DECREMENT(this->m_metrics, cache_object_count, 1);
-            COUNTER_DECREMENT(this->m_metrics, cache_size, 
-                              CacheBuffer< K >::get_size(&(out_buf->get_evict_record_mutable())));
         }
     } else {
         assert(!can_remove);

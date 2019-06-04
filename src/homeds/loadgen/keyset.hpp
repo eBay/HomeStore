@@ -394,7 +394,8 @@ private:
         m_last_gen_slots[pattern].store(slot, std::memory_order_relaxed);
     }
 
-    int32_t _get_next_slot(int32_t cur_slot, KeyPattern pattern, auto& it, bool *rotated) {
+    template<class Iterator>
+    int32_t _get_next_slot(int32_t cur_slot, KeyPattern pattern, Iterator& it, bool *rotated) {
         *rotated = false;
         if (pattern == SEQUENTIAL) {
             ++it;

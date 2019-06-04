@@ -40,6 +40,29 @@ public:
 
 #define homestore_flip HomeStoreFlip::instance()
 #endif
+
+#define METRICS_DUMP_MSG            sisl::MetricsFarm::getInstance().get_result_in_json_string()
+
+#ifndef NDEBUG
+#define DEBUG_METRICS_DUMP_FORMAT   METRICS_DUMP_FORMAT
+#define DEBUG_METRICS_DUMP_MSG      METRICS_DUMP_MSG
+
+#define LOGMSG_METRICS_DUMP_FORMAT  METRICS_DUMP_FORMAT
+#define LOGMSG_METRICS_DUMP_MSG     METRICS_DUMP_MSG
+
+#define RELEASE_METRICS_DUMP_FORMAT METRICS_DUMP_FORMAT
+#define RELEASE_METRICS_DUMP_MSG    METRICS_DUMP_MSG
+#else
+#define DEBUG_METRICS_DUMP_FORMAT   "{}"
+#define DEBUG_METRICS_DUMP_MSG      "N/A"
+
+#define LOGMSG_METRICS_DUMP_FORMAT  "{}"
+#define LOGMSG_METRICS_DUMP_MSG     "N/A"
+
+#define RELEASE_METRICS_DUMP_FORMAT METRICS_DUMP_FORMAT
+#define RELEASE_METRICS_DUMP_MSG    METRICS_DUMP_MSG
+#endif
+
 }
 
 #endif
