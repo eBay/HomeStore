@@ -78,6 +78,7 @@ typedef std::function< void(boost::intrusive_ptr< virtualdev_req > req) > virtua
 #define to_vdev_req(req) boost::static_pointer_cast< virtualdev_req >(req)
 
 struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
+    uint64_t                    request_id;
     uint64_t                    version;
     virtualdev_comp_callback    cb;
     uint64_t                    size;

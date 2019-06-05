@@ -17,27 +17,29 @@ using namespace homestore;
 bool vol_test_enable = false;
 #endif
 
-namespace homestore {
-    void intrusive_ptr_add_ref(homestore::BlkBuffer *buf) {
-        intrusive_ptr_add_ref((homestore::WriteBackCacheBuffer <BlkId> *) buf);
-    }
+SDS_LOGGING_DECL(volume)
 
-    void intrusive_ptr_release(homestore::BlkBuffer *buf) {
-        intrusive_ptr_release((homestore::WriteBackCacheBuffer <BlkId> *) buf);
-    }
+namespace homestore {
+void intrusive_ptr_add_ref(homestore::BlkBuffer* buf) {
+    intrusive_ptr_add_ref((homestore::WriteBackCacheBuffer< BlkId >*)buf);
 }
+
+void intrusive_ptr_release(homestore::BlkBuffer* buf) {
+    intrusive_ptr_release((homestore::WriteBackCacheBuffer< BlkId >*)buf);
+}
+} // namespace homestore
 
 VolInterface*                                                    VolInterface::_instance = nullptr;
 homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >* Volume::m_data_blkstore = nullptr;
 
-Volume::Volume(const vol_params& params) : m_comp_cb(params.io_comp_cb), m_metrics(params.vol_name) {
+Volume::Volume(const vol_params& params) :
+        m_comp_cb(params.io_comp_cb),
+        m_metrics(params.vol_name),
+        m_vol_name(params.vol_name) {
     m_state = vol_state::UNINITED;
-    m_map = new mapping(
-            params.size, 
-            params.page_size,
-            params.vol_name,
-            std::bind(&Volume::process_metadata_completions, this, std::placeholders::_1),
-            std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
+    m_map = new mapping(params.size, params.page_size, params.vol_name,
+                        std::bind(&Volume::process_metadata_completions, this, std::placeholders::_1),
+                        std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
 
     m_sb = new vol_mem_sb();
     auto ret = posix_memalign((void**)&(m_sb->ondisk_sb), HomeStoreConfig::align_size, VOL_SB_SIZE);
@@ -59,27 +61,23 @@ Volume::Volume(const vol_params& params) : m_comp_cb(params.io_comp_cb), m_metri
     m_state = vol_state::ONLINE;
 }
 
-Volume::Volume(vol_mem_sb* sb) : m_sb(sb), m_metrics(sb->ondisk_sb->vol_name) {
+Volume::Volume(vol_mem_sb* sb) : m_sb(sb), m_metrics(sb->ondisk_sb->vol_name), m_vol_name(sb->ondisk_sb->vol_name) {
     m_state = vol_state::UNINITED;
     if (m_sb->ondisk_sb->state == vol_state::FAILED) {
-        m_map = new mapping(
-                m_sb->ondisk_sb->size, 
-                m_sb->ondisk_sb->page_size,
-                m_sb->ondisk_sb->vol_name,
-                std::bind(&Volume::process_metadata_completions, this, std::placeholders::_1), 
-                std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
+        m_map = new mapping(m_sb->ondisk_sb->size, m_sb->ondisk_sb->page_size, m_sb->ondisk_sb->vol_name,
+                            std::bind(&Volume::process_metadata_completions, this, std::placeholders::_1),
+                            std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
         m_sb->ondisk_sb->btree_sb = m_map->get_btree_sb();
-        m_sb->ondisk_sb->state = vol_state::DEGRADED;;
+        m_sb->ondisk_sb->state = vol_state::DEGRADED;
+        ;
         HomeBlks::instance()->vol_sb_write(m_sb);
     } else {
-         m_map = new mapping(
-                 m_sb->ondisk_sb->size, 
-                 m_sb->ondisk_sb->page_size,
-                 m_sb->ondisk_sb->vol_name,
-                 m_sb->ondisk_sb->btree_sb,
-                 std::bind(&Volume::process_metadata_completions, this, std::placeholders::_1),
-                 std::bind(&Volume::alloc_blk_callback, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3),
-                 std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
+        m_map = new mapping(m_sb->ondisk_sb->size, m_sb->ondisk_sb->page_size, m_sb->ondisk_sb->vol_name,
+                            m_sb->ondisk_sb->btree_sb,
+                            std::bind(&Volume::process_metadata_completions, this, std::placeholders::_1),
+                            std::bind(&Volume::alloc_blk_callback, this, std::placeholders::_1, std::placeholders::_2,
+                                      std::placeholders::_3),
+                            std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
     }
     assert(m_sb->ondisk_sb->state == OFFLINE || m_sb->ondisk_sb->state == DEGRADED || m_sb->ondisk_sb->state == ONLINE);
     seq_Id = 3;
@@ -91,34 +89,28 @@ Volume::Volume(vol_mem_sb* sb) : m_sb(sb), m_metrics(sb->ondisk_sb->vol_name) {
 }
 
 /* it should be called during recovery */
-void Volume::recovery_start() {
-    vol_scan_alloc_blks();
-}
+void Volume::recovery_start() { vol_scan_alloc_blks(); }
 
-uint64_t Volume::get_metadata_used_size() {return m_map->get_used_size();}
+uint64_t Volume::get_metadata_used_size() { return m_map->get_used_size(); }
 
 //
-// No need to do it in multi-threading since blkstore.free_blk is in-mem operation. 
+// No need to do it in multi-threading since blkstore.free_blk is in-mem operation.
 //
-//void Volume::process_free_blk_callback(BlkId& blk_id, uint64_t size_offset, uint64_t nblks_to_free) {
-void 
-Volume::process_free_blk_callback(Free_Blk_Entry fbe){
-    LOGDEBUG("{}: bid: {}, offset: {}, nblks: {}, get_pagesz: {}", __FUNCTION__, fbe.m_blkId.to_string(), fbe.m_blk_offset, fbe.m_nblks_to_free, get_page_size());
-    
+// void Volume::process_free_blk_callback(BlkId& blk_id, uint64_t size_offset, uint64_t nblks_to_free) {
+void Volume::process_free_blk_callback(Free_Blk_Entry fbe) {
+    VOL_LOG(DEBUG, volume,,"Freeing blks cb - bid: {}, offset: {}, nblks: {}, get_pagesz: {}", fbe.m_blkId.to_string(),
+             fbe.m_blk_offset, fbe.m_nblks_to_free, get_page_size());
+
     uint64_t size = HomeBlks::instance()->get_data_pagesz() * fbe.m_nblks_to_free;
-    m_data_blkstore->free_blk(fbe.m_blkId, HomeBlks::instance()->get_data_pagesz() * fbe.m_blk_offset, 
-                                HomeBlks::instance()->get_data_pagesz() * fbe.m_nblks_to_free);
+    m_data_blkstore->free_blk(fbe.m_blkId, HomeBlks::instance()->get_data_pagesz() * fbe.m_blk_offset,
+                              HomeBlks::instance()->get_data_pagesz() * fbe.m_nblks_to_free);
     m_used_size.fetch_sub(size, std::memory_order_relaxed);
 }
 
-boost::uuids::uuid Volume::get_uuid() {
-    return (get_sb()->ondisk_sb->uuid);
-}
+boost::uuids::uuid Volume::get_uuid() { return (get_sb()->ondisk_sb->uuid); }
 
-vol_state Volume::get_state() {
-    return m_state;
-}
-    
+vol_state Volume::get_state() { return m_state; }
+
 void Volume::set_state(vol_state state, bool persist) {
     m_state = state;
     if (persist) {
@@ -131,9 +123,8 @@ void Volume::set_state(vol_state state, bool persist) {
 
 void Volume::attach_completion_cb(const io_comp_callback& cb) { m_comp_cb = cb; }
 
-void 
-Volume::blk_recovery_process_completions(bool success) {
-    LOGINFO("block recovery of volume {} completed with {}", get_name(), success ? "success": "failure");
+void Volume::blk_recovery_process_completions(bool success) {
+    VOL_LOG(INFO, volume,, "block recovery of volume completed with {}", (success ? "success" : "failure"));
     assert(m_state == vol_state::MOUNTING);
     m_state = m_sb->ondisk_sb->state;
     m_map->recovery_cmpltd();
@@ -150,22 +141,19 @@ void Volume::alloc_blk_callback(struct BlkId bid, size_t offset_size, size_t siz
     m_used_size.fetch_add(size, std::memory_order_relaxed);
 }
 
-void 
-Volume::vol_scan_alloc_blks() {
-    std::vector<ThreadPool::TaskFuture<void>>   task_result;
-    task_result.push_back(submit_job([this](){
-                this->get_allocated_blks();
-                }));
+void Volume::vol_scan_alloc_blks() {
+    std::vector< ThreadPool::TaskFuture< void > > task_result;
+    task_result.push_back(submit_job([this]() { this->get_allocated_blks(); }));
     return;
 }
 
 Volume::~Volume() {
-    LOGINFO("Destroying volume: {}", get_name());
+    VOL_LOG(INFO, , , "Destroying volume");
     if (get_state() != DESTROYING) {
         delete m_map;
-        delete(m_sb);
-    } else  {
-        // 
+        delete (m_sb);
+    } else {
+        //
         // 1. Traverse mapping btree in post order:
         //    1.a for leaf node, get key/value and call m_data_blkstore.free_blk to free the block;
         //    1.b for non-leaf node, call btree_store_t::free_node which is in Btree::free();
@@ -173,13 +161,15 @@ Volume::~Volume() {
         // 3. Clean on-disk volume super block related data
         //
         // destroy is a sync call.
-        LOGINFO(" size {}", m_used_size.load());
+        VOL_LOG(INFO, , , "Vol destroy frees {} used blks", m_used_size.load());
         m_map->destroy();
+
         // all blks should have been freed
-        assert(m_used_size.load() == 0);
+        VOL_LOG_ASSERT_CMP(EQ, m_used_size.load(), 0, , "All blks expected to be freed");
+
         HomeBlks::instance()->vol_sb_remove(get_sb());
         delete m_map;
-        delete(m_sb);
+        delete (m_sb);
     }
 }
 
@@ -195,12 +185,13 @@ void Volume::process_metadata_completions(const volume_req_ptr& vreq) {
     auto& parent_req = vreq->parent_req;
     assert(parent_req != nullptr);
 
-    LOGTRACE("metadata_complete: req_id={}, err={}", parent_req->request_id, vreq->err.message());
+    VOL_LOG(TRACE, volume, parent_req, "metadata_complete: err={}", vreq->err.message());
     HISTOGRAM_OBSERVE(m_metrics, volume_map_write_latency, get_elapsed_time_us(vreq->op_start_time));
 
     if (vreq->err == no_error) {
         for (auto& ptr : vreq->blkIds_to_free) {
-            LOGDEBUG("Freeing Blk: {} {} {}", ptr.m_blkId.to_string(), ptr.m_blk_offset, ptr.m_nblks_to_free);
+            VOL_LOG(DEBUG, volume, vreq->parent_req, "Freeing Blk: {} {} {}",
+                ptr.m_blkId.to_string(), ptr.m_blk_offset, ptr.m_nblks_to_free);
             uint64_t free_size = HomeBlks::instance()->get_data_pagesz() * ptr.m_nblks_to_free;
             m_data_blkstore->free_blk(ptr.m_blkId, HomeBlks::instance()->get_data_pagesz() * ptr.m_blk_offset,
                                       free_size);
@@ -226,13 +217,13 @@ volume_req_ptr Volume::create_vol_req(Volume* vol, const vol_interface_req_ptr& 
 }
 
 void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req) {
-    auto vreq = volume_req::cast(bs_req);
+    auto  vreq = volume_req::cast(bs_req);
     auto& parent_req = vreq->parent_req;
 
     assert(parent_req != nullptr);
     assert(!vreq->isSyncCall);
 
-    LOGTRACE("data_complete: req_id={}, err={}", parent_req->request_id, vreq->err.message());
+    VOL_LOG(TRACE, volume, parent_req, "data op complete: err={}", vreq->err.message());
 
     // Shortcut to error completion
     if (vreq->err) {
@@ -251,7 +242,7 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
 
         MappingKey                                  key(vreq->lba, vreq->nlbas);
         std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;
-        uint64_t offset = 0;
+        uint64_t                                    offset = 0;
 
         for (int i = 0; i < vreq->nlbas; i++) {
             carr[i] = crc16_t10dif(init_crc_16, vreq->bbuf->at_offset(offset).bytes, get_page_size());
@@ -263,26 +254,22 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
         MappingValue value(ve);
 #ifndef NDEBUG
         vreq->vol_uuid = m_sb->ondisk_sb->uuid;
-        LOGDEBUG("Mapping.PUT ,vol_uuid:{},Key:{},Value:{}", boost::uuids::to_string(vreq->vol_uuid),
-                 key.to_string(), value.to_string());
+        VOL_LOG(DEBUG, volume, vreq->parent_req, "Mapping.PUT, vol_uuid:{}, Key:{}, Value:{}",
+            boost::uuids::to_string(vreq->vol_uuid), key.to_string(), value.to_string());
 #endif
         COUNTER_DECREMENT(m_metrics, volume_outstanding_data_write_count, 1);
         COUNTER_INCREMENT(m_metrics, volume_outstanding_metadata_write_count, 1);
         m_map->put(vreq, key, value);
     } else {
         std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;
-        uint64_t offset = 0;
+        uint64_t                                    offset = 0;
         for (int i = 0; i < vreq->nlbas; i++) {
-            carr[i] = crc16_t10dif(init_crc_16, vreq->bbuf->at_offset(vreq->read_buf_offset + offset).bytes, 
-                                   get_page_size());
+            carr[i] =
+                crc16_t10dif(init_crc_16, vreq->bbuf->at_offset(vreq->read_buf_offset + offset).bytes, get_page_size());
             offset += get_page_size();
-            if (vreq->checksum[i] != carr[i]) {
-                LOGINFO("checksum mismatch");
-                assert(0);
-                abort();
-            }
+
+            VOL_RELEASE_ASSERT_CMP(EQ, vreq->checksum[i], carr[i], vreq->parent_req, "Checksum mismatch");
         }
-        
         COUNTER_DECREMENT(m_metrics, volume_outstanding_data_read_count, 1);
         check_and_complete_req(parent_req, no_error, true /* call_completion_cb */);
     }
@@ -307,15 +294,14 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
     hb_req->io_start_time = Clock::now();
     hb_req->is_read = false;
 
-    LOGTRACE("write: lba={}, nlbas={}, buf={}, req_id={}", lba, nlbas, (void *)buf, hb_req->request_id);
+    VOL_LOG(TRACE, volume, hb_req, "write: lba={}, nlbas={}, buf={}", lba, nlbas, (void*)buf);
     try {
         BlkAllocStatus status = m_data_blkstore->alloc_blk(nlbas * m_sb->ondisk_sb->page_size, hints, bid);
         assert(status == BLK_ALLOC_SUCCESS);
         HISTOGRAM_OBSERVE(m_metrics, volume_blkalloc_latency, get_elapsed_time_ns(hb_req->io_start_time));
         COUNTER_INCREMENT(m_metrics, volume_write_count, 1);
     } catch (const std::exception& e) {
-        assert(0);
-        LOGERROR("{}", e.what());
+        VOL_LOG_ASSERT(0, hb_req, "Exception: {}", e.what())
         check_and_complete_req(hb_req, std::make_error_condition(std::errc::device_or_resource_busy), false);
         return hb_req->err;
     }
@@ -329,7 +315,7 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
     uint32_t i = 0;
 
     Clock::time_point data_io_start_time = Clock::now();
-    auto sid = seq_Id.fetch_add(1, memory_order_seq_cst);
+    auto              sid = seq_Id.fetch_add(1, memory_order_seq_cst);
 
     // An outside cover to ensure that all vol reqs are issued before any one vol request completion triggering
     // vol_interface_req completion.
@@ -348,11 +334,11 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
 
             assert((bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) % m_sb->ondisk_sb->page_size) == 0);
             vreq->nlbas = bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) / m_sb->ondisk_sb->page_size;
-            LOGDEBUG("alloc_blk: bid: {}, offset: {}, nblks: {}", 
-                    bid[i].to_string(), 
-                    bid[i].data_size(HomeBlks::instance()->get_data_pagesz()), 
-                    vreq->nlbas);
+
+            VOL_LOG(TRACE, volume, vreq->parent_req, "alloc_blk: bid: {}, offset: {}, nblks: {}", bid[i].to_string(),
+                     bid[i].data_size(HomeBlks::instance()->get_data_pagesz()), vreq->nlbas);
             COUNTER_INCREMENT(m_metrics, volume_outstanding_data_write_count, 1);
+
             boost::intrusive_ptr< BlkBuffer > bbuf = m_data_blkstore->write(
                 bid[i], mvec, offset, boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vreq), req_q);
 
@@ -364,9 +350,7 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
         check_and_complete_req(hb_req, no_error, true /* call_completion_cb */);
         assert(lbas_snt == nlbas);
     } catch (const std::exception& e) {
-        assert(0);
-        LOGERROR("{}", e.what());
-
+        VOL_LOG_ASSERT(0, hb_req, "Exception: {}", e.what())
         check_and_complete_req(hb_req, std::make_error_condition(std::errc::io_error), false);
         return hb_req->err;
     }
@@ -389,10 +373,10 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
  * 3) call_completion_cb: Should we call the inbuilt completion as part of the complete_io
  */
 void Volume::check_and_complete_req(const vol_interface_req_ptr& hb_req, const std::error_condition& err,
-        bool call_completion) {
+                                    bool call_completion) {
     // If there is error and request is not completed yet, we need to complete it now.
-    LOGTRACE("complete_io: req_id={}, err={}, call_completion={}, outstanding_io_cnt={}", hb_req->request_id,
-            err.message(), call_completion, hb_req->outstanding_io_cnt.get());
+    VOL_LOG(TRACE, volume, hb_req, "complete_io: err={}, call_completion={}, outstanding_io_cnt={}",
+             err.message(), call_completion, hb_req->outstanding_io_cnt.get());
 
     if (err) {
         // NOTE: We do not decrement the outstanding_io_cnt here, so that if there is any partial success,
@@ -400,21 +384,20 @@ void Volume::check_and_complete_req(const vol_interface_req_ptr& hb_req, const s
         if (hb_req->set_error(err)) {
             // Was not completed earlier, so complete the io
             COUNTER_INCREMENT_IF_ELSE(m_metrics, hb_req->is_read, volume_write_error_count, volume_read_error_count, 1);
-            if (call_completion) { m_comp_cb(hb_req); }
-            uint64_t cnt = m_err_cnt.fetch_add(1, std::memory_order_relaxed);
-#define VOL_ERROR_PRINT_CNT 1000
-            if (cnt % VOL_ERROR_PRINT_CNT) {
-                LOGERROR("seeing error {} on vol {}", err.message(), get_name());
+            if (call_completion) {
+                m_comp_cb(hb_req);
             }
+            uint64_t cnt = m_err_cnt.fetch_add(1, std::memory_order_relaxed);
+            VOL_LOG(ERROR,, hb_req, "Vol operation error {}", err.message());
         } else {
-            LOGINFO("Receiving completion on already completed request id={}", hb_req->request_id);
+            VOL_LOG(WARN,, hb_req, "Receiving completion on already completed request id={}", hb_req->request_id);
         }
     } else {
         if (hb_req->outstanding_io_cnt.decrement_testz(1)) {
             HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, hb_req->is_read, volume_read_latency, volume_write_latency,
-                    get_elapsed_time_us(hb_req->io_start_time));
+                                      get_elapsed_time_us(hb_req->io_start_time));
             if (call_completion) {
-                LOGTRACE("complete_io: req_id={} DONE\n", hb_req->request_id);
+                VOL_LOG(TRACE, volume, hb_req, "IO DONE");
                 m_comp_cb(hb_req);
             }
         }
@@ -430,8 +413,8 @@ std::error_condition Volume::read_metadata(const vol_req_ptr& vreq) {
 
 #ifndef NDEBUG
     vreq->vol_uuid = m_sb->ondisk_sb->uuid;
-    LOGDEBUG("Mapping.GET vol_uuid:{} ,key:{} last_seqId: {}", boost::uuids::to_string(vreq->vol_uuid),
-             key.to_string(), vreq->lastCommited_seqId);
+    VOL_LOG(DEBUG, volume, vreq->parent_req, "Mapping.GET vol_uuid:{} ,key:{} last_seqId: {}",
+        boost::uuids::to_string(vreq->vol_uuid), key.to_string(), vreq->lastCommited_seqId);
 #endif
 
     auto err = m_map->get(vreq, key, kvs);
@@ -459,12 +442,13 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
         hb_req->io_start_time = Clock::now();
         hb_req->is_read = true;
 
-        LOGTRACE("read: lba={}, nlbas={}, sync={}, req_id={}", lba, nlbas, sync, hb_req->request_id);
+        VOL_LOG(TRACE, volume, hb_req, "read: lba={}, nlbas={}, sync={}", lba, nlbas, sync);
 
         // seqId shoudl be passed from vol interface req and passed to mapping layer
         auto sid = seq_Id.fetch_add(1, memory_order_seq_cst);
 
         volume_req_ptr vreq = Volume::create_vol_req(this, hb_req);
+        vreq->request_id = hb_req->request_id;
         vreq->lba = lba;
         vreq->nlbas = nlbas;
         vreq->seqId = GET_IO_SEQ_ID(sid);
@@ -472,10 +456,10 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
 
         std::vector< std::pair< MappingKey, MappingValue > > kvs;
 
- #ifndef NDEBUG
+#ifndef NDEBUG
         vreq->vol_uuid = m_sb->ondisk_sb->uuid;
-        LOGDEBUG("Mapping.GET vol_uuid:{} ,last_seqId: {}", boost::uuids::to_string(vreq->vol_uuid),
-                vreq->lastCommited_seqId);
+        VOL_LOG(DEBUG, volume, vreq->parent_req, "Mapping.GET vol_uuid:{}, last_seqId: {}",
+            boost::uuids::to_string(vreq->vol_uuid), vreq->lastCommited_seqId);
 #endif
 
         COUNTER_INCREMENT(m_metrics, volume_read_count, 1);
@@ -522,6 +506,7 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
                 auto sz = get_page_size() * kv.first.get_n_lba();
                 auto offset = HomeBlks::instance()->get_data_pagesz() * ve.get_blk_offset();
                 child_vreq->read_buf_offset = offset;
+
                 COUNTER_INCREMENT(m_metrics, volume_outstanding_data_read_count, 1);
                 boost::intrusive_ptr< BlkBuffer > bbuf =
                     m_data_blkstore->read(ve.get_blkId(), offset, sz,
@@ -532,17 +517,14 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
                 if (sync) {
                     COUNTER_DECREMENT(m_metrics, volume_outstanding_data_read_count, 1);
                     std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;
-                    uint64_t offset = 0;
+                    uint64_t                                    offset = 0;
                     for (int i = 0; i < child_vreq->nlbas; i++) {
-                        carr[i] = crc16_t10dif(init_crc_16, 
-                                    child_vreq->bbuf->at_offset(child_vreq->read_buf_offset + offset).bytes,
-                                    get_page_size());
+                        carr[i] = crc16_t10dif(init_crc_16,
+                                               child_vreq->bbuf->at_offset(child_vreq->read_buf_offset + offset).bytes,
+                                               get_page_size());
                         offset += get_page_size();
-                        if (child_vreq->checksum[i] != carr[i]) {
-                            LOGINFO("checksum mismatch");
-                            assert(0);
-                            abort();
-                        }
+                        VOL_RELEASE_ASSERT_CMP(EQ, child_vreq->checksum[i], carr[i], child_vreq->parent_req,
+                            "Checksum mismatch");
                     }
                 }
             }
@@ -553,8 +535,7 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
 
         check_and_complete_req(hb_req, no_error, !sync /* call_completion_cb */); // Atleast 1 metadata io is completed.
     } catch (const std::exception& e) {
-        assert(0);
-        LOGERROR("{}", e.what());
+        VOL_LOG_ASSERT(0, hb_req, "Exception: {}", e.what())
         check_and_complete_req(hb_req, std::make_error_condition(std::errc::device_or_resource_busy), false);
         return hb_req->err;
     }
@@ -599,20 +580,19 @@ void Volume::alloc_single_block_in_mem() {
 //
 // Repeat until "Range Query" returns false (nothing more left to query);
 //
-void
-Volume::get_allocated_blks() {
-    
+void Volume::get_allocated_blks() {
+
     mapping* mp = get_mapping_handle();
 
-    uint64_t max_lba = get_last_lba() + 1; 
+    uint64_t max_lba = get_last_lba() + 1;
 
     uint64_t start_lba = 0, end_lba = 0;
 
-    std::vector<ThreadPool::TaskFuture<void>>   v;
+    std::vector< ThreadPool::TaskFuture< void > > v;
 
     bool success = true;
     while (end_lba < max_lba) {
-        // if high watermark is hit, wait for a while so that we do not consuming too 
+        // if high watermark is hit, wait for a while so that we do not consuming too
         // much memory pushing new tasks. This is helpful when volume size is extreamly large.
         if (get_thread_pool().high_watermark()) {
             std::this_thread::yield();
@@ -626,14 +606,14 @@ Volume::get_allocated_blks() {
             if (mp->sweep_alloc_blks(start_lba, end_lba)) {
                 this->set_recovery_error();
             }
-        } ));
+        }));
     }
 
     for (auto& x : v) {
         x.get();
     }
 
-    // return completed with success to the caller 
+    // return completed with success to the caller
     blk_recovery_process_completions(!m_recovery_error);
 }
 
@@ -642,7 +622,4 @@ void Volume::set_recovery_error() {
     m_recovery_error = true;
 }
 
-bool 
-Volume::is_offline() {
-    return (m_state == DESTROYING || m_state == FAILED || m_state == OFFLINE);
-} 
+bool Volume::is_offline() { return (m_state == DESTROYING || m_state == FAILED || m_state == OFFLINE); }
