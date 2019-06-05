@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         PROJECT = 'homestore'
-        CONAN_CHANNEL = 'testing'
+        CONAN_CHANNEL = 'develop'
         CONAN_USER = 'sds'
         CONAN_PASS = credentials('CONAN_PASS')
     }
@@ -35,7 +35,7 @@ pipeline {
 
         stage('Deploy') {
             when {
-                branch "${CONAN_CHANNEL}/*"
+                branch "${CONAN_CHANNEL}"
             }
             steps {
                 sh "docker run --rm ${PROJECT}-${TAG}"
