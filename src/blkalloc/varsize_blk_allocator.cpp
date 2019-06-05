@@ -39,11 +39,11 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig &cfg, bool init) 
 
 #ifndef NDEBUG
     m_alloced_bm = new homeds::Bitset(cfg.get_total_blks());
-    
+
     for (auto i = 0U; i < cfg.get_total_temp_group(); i++) {
         m_temp_groups[i].m_temp_group_id = i;
     }
-    
+
     for (auto i = 0U; i < cfg.get_total_portions(); i++) {
         m_blk_portions[i].m_blk_portion_id = i;
     }
@@ -53,13 +53,16 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig &cfg, bool init) 
     for (auto i = 0U; i < cfg.get_slab_cnt(); i++) {
         atomwrapper<uint32_t> a_i(0);
         m_slab_entries.push_back(a_i);
-        LOGINFOMOD(varsize_blk_alloc, 
-                   "Capacity of slab {} = {}", i, m_slab_entries[i]._a.load(std::memory_order_acq_rel));
+        LOGINFOMOD(varsize_blk_alloc, "Capacity of slab {} = {}",
+                   i, m_slab_entries[i]._a.load(std::memory_order_acq_rel));
     }
 
     // Create segments with as many blk groups as configured.
     uint64_t seg_nblks = cfg.get_total_blks() / cfg.get_total_segments();
     uint64_t portions_per_seg = get_portions_per_segment();
+    LOGINFOMOD(varsize_blk_alloc,
+            "Segment Count = {}, Blocks per segment = {}, portions={}",
+                cfg.get_total_segments(), seg_nblks, portions_per_seg);
     for (auto i = 0U; i < cfg.get_total_segments(); i++) {
         BlkAllocSegment *seg = new BlkAllocSegment(seg_nblks, i, portions_per_seg);
         m_segments.push_back(seg);
@@ -75,7 +78,7 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig &cfg, bool init) 
     // Start a thread which will do sweeping job of free segments
     if (init) {
         inited();
-     }
+    }
 }
 
 
@@ -87,10 +90,13 @@ VarsizeBlkAllocator::~VarsizeBlkAllocator() {
     {
         std::lock_guard< std::mutex > lk(m_mutex);
         if (m_region_state != BLK_ALLOCATOR_EXITING) {
+            LOGINFOMOD(varsize_blk_alloc,
+                "Region state = {}, set to {}",
+                m_region_state, BLK_ALLOCATOR_EXITING);
             m_region_state = BLK_ALLOCATOR_EXITING;
         }
     }
-    
+
     m_cv.notify_all();
     if (m_thread_id.joinable()) {
         m_thread_id.join();
@@ -100,6 +106,7 @@ VarsizeBlkAllocator::~VarsizeBlkAllocator() {
     delete(m_alloced_bm);
     for (auto i = 0U; i < m_cfg.get_total_segments(); i++) {
         delete(m_segments[i]);
+        LOGINFOMOD(varsize_blk_alloc, "Deleted segment {}", i);
     }
 }
 
@@ -119,14 +126,19 @@ void VarsizeBlkAllocator::allocator_state_machine() {
 
             if (m_region_state == BLK_ALLOCATOR_DONE) {
                 m_cv.wait(lk);
+                LOGINFOMOD(varsize_blk_alloc, "Region state : done");
             }
 
             if (m_region_state == BLK_ALLOCATOR_WAIT_ALLOC) {
                 m_region_state = BLK_ALLOCATOR_ALLOCATING;
                 allocate_seg = m_wait_alloc_segment;
                 allocate = true;
+                LOGINFOMOD(varsize_blk_alloc,
+                        "Region state : wait-alloc -> allocating");
+
             } else if (m_region_state == BLK_ALLOCATOR_EXITING) {
-                // TODO: Handle exiting message more periodically.
+                LOGINFOMOD(varsize_blk_alloc,
+                        "TODO: Handle exiting message more periodically");
                 break;
             }
         }
@@ -151,13 +163,19 @@ void VarsizeBlkAllocator::allocator_state_machine() {
 
 bool
 VarsizeBlkAllocator::is_blk_alloced(BlkId &b) {
-    return(m_alloced_bm->is_bits_set_reset(b.get_id(), b.get_nblks(), true));
+    auto ret = m_alloced_bm->is_bits_set_reset(b.get_id(), b.get_nblks(), true);
+    LOGINFOMOD(varsize_blk_alloc,
+            "Is allocated: id={}, nblks={}, status={}",
+            b.get_id(), b.get_nblks(), ret);
+    return ret;
 }
 
 BlkAllocStatus 
 VarsizeBlkAllocator::alloc(BlkId &in_bid) {
     m_alloced_bm->set_bits(in_bid.get_id(), in_bid.get_nblks());
     m_alloc_bm->set_bits(in_bid.get_id(), in_bid.get_nblks());
+    LOGINFOMOD(varsize_blk_alloc,
+            "Allocated: id={}, nblks={}", in_bid.get_id(), in_bid.get_nblks());
     return BLK_ALLOC_SUCCESS;
 }
 
@@ -176,19 +194,23 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks,
 
     uint8_t blks_rqstd = nblks;
 
+    LOGDEBUGMOD(varsize_blk_alloc, "init status={}", m_init);
     assert(m_init);
 
+    LOGDEBUGMOD(varsize_blk_alloc,
+            "nblks={}, hints multiplier={}", nblks, hints.multiplier);
     assert(nblks % hints.multiplier == 0);
 
 #ifndef NDEBUG
     if (!hints.is_contiguous && nblks  != 1) {
         blks_rqstd = ALIGN_SIZE((nblks / 2), hints.multiplier);
+        LOGDEBUGMOD(varsize_blk_alloc,
+            "blocks requested={}", blks_rqstd);
     }
 #endif
 
     while (blks_alloced != nblks && retry_cnt < MAX_RETRY_CNT) {
         BlkId blkid;
-        
         if (alloc(blks_rqstd, hints, &blkid, true) != BLK_ALLOC_SUCCESS) {
             /* check the cache to see what blocks are available and get those
              * blocks from the btree cache.
@@ -197,21 +219,30 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks,
             if (blks_rqstd == 0) {
                 /* It should never happen. It means we are running out of space */
                 blks_rqstd = nblks - blks_alloced;
+                LOGERRORMOD(varsize_blk_alloc,
+                        "Could not allocated any blocks. Running out of space");
             }
             retry_cnt++;
+            LOGINFOMOD(varsize_blk_alloc, "Retry count={}", retry_cnt);
             continue;
         }
+        LOGINFOMOD(varsize_blk_alloc, "Blocks allocated={}", blks_alloced);
         blks_alloced += blkid.get_nblks();
+        LOGDEBUGMOD(varsize_blk_alloc,
+            "blks_alloced={}, hints multiplier={}", blks_alloced, hints.multiplier);
         assert(blks_alloced % hints.multiplier == 0);
 
         blks_rqstd = nblks - blks_alloced;
         out_blkid.push_back(blkid);
         retry_cnt++;
+        LOGINFOMOD(varsize_blk_alloc, "Retry count={}", retry_cnt);
     }
 #ifndef NDEBUG
     if(blks_alloced != nblks)
         LOGERRORMOD(varsize_blk_alloc, "blks_alloced != nblks : {}  {}",blks_alloced, nblks);
 #endif
+    LOGDEBUGMOD(varsize_blk_alloc,
+            "blks_alloced={}, blocks requested={}", blks_alloced, nblks);
     assert(blks_alloced == nblks);
     if (blks_alloced != nblks) {
         assert(blks_alloced < nblks);
