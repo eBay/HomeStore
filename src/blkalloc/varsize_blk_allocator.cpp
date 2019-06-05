@@ -103,7 +103,9 @@ VarsizeBlkAllocator::~VarsizeBlkAllocator() {
     }
     delete(m_blk_cache);
     delete(m_alloc_bm);
+#ifndef NDEBUG
     delete(m_alloced_bm);
+#endif
     for (auto i = 0U; i < m_cfg.get_total_segments(); i++) {
         delete(m_segments[i]);
         LOGINFOMOD(varsize_blk_alloc, "Deleted segment {}", i);
@@ -167,12 +169,18 @@ VarsizeBlkAllocator::is_blk_alloced(BlkId &b) {
     LOGINFOMOD(varsize_blk_alloc,
             "Is allocated: id={}, nblks={}, status={}",
             b.get_id(), b.get_nblks(), ret);
-    return ret;
+#ifndef NDEBUG
+    return(m_alloced_bm->is_bits_set_reset(b.get_id(), b.get_nblks(), true));
+#else
+    return true;
+#endif
 }
 
 BlkAllocStatus 
 VarsizeBlkAllocator::alloc(BlkId &in_bid) {
+#ifndef NDEBUG
     m_alloced_bm->set_bits(in_bid.get_id(), in_bid.get_nblks());
+#endif
     m_alloc_bm->set_bits(in_bid.get_id(), in_bid.get_nblks());
     LOGINFOMOD(varsize_blk_alloc,
             "Allocated: id={}, nblks={}", in_bid.get_id(), in_bid.get_nblks());
