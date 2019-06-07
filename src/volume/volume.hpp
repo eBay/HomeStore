@@ -89,6 +89,7 @@ struct volume_req : public blkstore_req< BlkBuffer > {
     std::shared_ptr< Volume >     vol_instance;
     std::vector< Free_Blk_Entry > blkIds_to_free;
     uint64_t                      seqId;
+    uint64_t                      reqId;
     uint64_t                      lastCommited_seqId;
     Clock::time_point             op_start_time;
     uint16_t                      checksum[MAX_NUM_LBA];
@@ -201,6 +202,11 @@ private:
     bool                              m_recovery_error = false;
     std::atomic< uint64_t >           m_err_cnt = 0;
     std::string                       m_vol_name;
+#ifndef NDEBUG
+    std::mutex                            m_req_mtx;
+    std::map< uint64_t, volume_req_ptr > m_req_map;
+#endif
+    std::atomic< uint64_t >             m_req_id = 0;
 
 private:
     Volume(const vol_params& params);
