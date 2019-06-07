@@ -134,6 +134,7 @@ class HomeBlks : public VolInterface {
 
 public:
     static VolInterface* init(const init_params& cfg);
+    static std::string   version;
     static HomeBlks*     instance();
     // Sanity check for sb;
     bool vol_sb_sanity(vol_mem_sb* sb);
@@ -188,6 +189,9 @@ public:
     static void get_metrics(sisl::HttpCallData cd);
     static void get_obj_life(sisl::HttpCallData cd);
     static void get_prometheus_metrics(sisl::HttpCallData cd);
+    static void get_log_level(sisl::HttpCallData cd);
+    static void set_log_level(sisl::HttpCallData cd);
+    static void dump_stack_trace(sisl::HttpCallData cd);
 
 private:
     BlkId                             alloc_blk();
