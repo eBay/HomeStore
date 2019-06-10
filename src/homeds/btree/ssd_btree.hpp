@@ -338,9 +338,10 @@ public:
             }
 #ifndef NO_CHECKSUM
             auto physical_node = (LeafPhysicalNode*)((boost::static_pointer_cast< SSDBtreeNode >(bn))->at_offset(0).bytes);
-            auto is_match = physical_node->verify_node(get_node_area_size(store));
+            verify_result vr;
+            auto is_match = physical_node->verify_node(get_node_area_size(store),vr);
             if (!is_match) {
-                LOGINFO("mismatch node");
+                LOGERROR("mismatch node: {}", vr.to_string());
                 assert(0);
                 abort();
             }

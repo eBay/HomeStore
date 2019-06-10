@@ -369,12 +369,11 @@ public:
 
 class VarsizeAllocCacheEntry : public BtreeKey {
 private:
-    typedef struct __attribute__((packed)) {
+    typedef struct __attribute__((packed, aligned(1))) {
         uint64_t m_phys_page_id:36; // Page id and blk num inside page
         uint64_t m_blk_num:36;
         uint64_t m_nblks:10;   // Total number of blocks
-        uint64_t m_temp :10;   // Temperature of each page
-        uint64_t padd:28; // will be removed later
+        uint64_t m_temp :14;   // Temperature of each page
     } blob_t;
 
     blob_t *m_blob;
