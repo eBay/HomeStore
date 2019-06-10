@@ -831,7 +831,6 @@ void HomeBlks::print_tree(const VolumePtr& vol) { vol->print_tree(); }
 
 void HomeBlks::get_version(sisl::HttpCallData cd) {
     HomeBlks *hb = (HomeBlks *)(cd->cookie());
-    auto req = cd->request();
     hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, std::string("HomeBlks: ") + HomeBlks::version);
 }
 
@@ -877,7 +876,7 @@ void HomeBlks::set_log_level(sisl::HttpCallData cd) {
         return;
     }
     auto new_log_level = _new_log_level->val;
-    
+
     if (logmodule == nullptr) {
         sds_logging::SetAllModuleLogLevel(spdlog::level::from_str(new_log_level));
     } else {
@@ -889,13 +888,11 @@ void HomeBlks::set_log_level(sisl::HttpCallData cd) {
 
 void HomeBlks::get_log_level(sisl::HttpCallData cd) {
     HomeBlks *hb = (HomeBlks *)(cd->cookie());
-    auto req = cd->request();
     hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, sds_logging::GetAllModuleLogLevel().dump());
 }
 
 void HomeBlks::dump_stack_trace(sisl::HttpCallData cd) {
     HomeBlks *hb = (HomeBlks *)(cd->cookie());
-    auto req = cd->request();
     sds_logging::log_stack_trace(true);
     hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, "Look for stack trace in the log file");
 }
