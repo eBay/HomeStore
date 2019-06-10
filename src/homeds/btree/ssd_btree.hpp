@@ -288,6 +288,13 @@ public:
                 impl->m_blkstore->write(blkid, req->ssd_buf,
                         boost::static_pointer_cast< homestore::blkstore_req< btree_buffer_t > >(req),
                         multinode_req->dependent_req_q);
+#ifndef NDEBUG
+                {
+                    if (!req->isSyncCall) {
+                        multinode_req->child_req_q.push_back((uint64_t)req.get());
+                    }
+                }
+#endif
             } else {
                 std::deque< boost::intrusive_ptr< homestore::writeback_req > >dependent_req_q(0);
                 impl->m_blkstore->write(blkid, req->ssd_buf,

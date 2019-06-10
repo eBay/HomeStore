@@ -89,7 +89,6 @@ struct BlkId {
     }
 
     BlkId(BlkId &other) = default;
-
     BlkId get_blkid_at(uint32_t offset, uint32_t pagesz) const {
         assert(offset % pagesz == 0);
         uint32_t remaining_size = ((m_nblks - (offset/pagesz)) * pagesz);

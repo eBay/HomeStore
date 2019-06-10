@@ -68,6 +68,9 @@ struct vol_config_sb : vol_sb_header {
     bool     test_flag(vol_cfg_sb_flag_t bit) { return flags & bit; }
 } __attribute((packed));
 
+//static_assert(std::is_trivially_copyable< vol_config_sb >::value, "Expecting vol_config_sb to be trivally copyable");
+static_assert(std::is_trivially_copyable< BlkId >::value, "Expecting BlkId to be trivally copyable");
+
 /* If it exceeds 8k then we need to use two buffer to keep the data consistent */
 struct vol_ondisk_sb : vol_sb_header {
     BlkId next_blkid;
