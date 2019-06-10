@@ -9,11 +9,54 @@
 #include <vector>
 #include <atomic>
 #include <flip/flip.hpp>
+#include <sds_logging/logging.h>
+#include <boost/preprocessor/cat.hpp>
+#include <boost/preprocessor/control/if.hpp>
+#include <boost/preprocessor/stringize.hpp>
 
 using namespace homeds::btree;
 
 namespace homestore {
 /****************** VarsizeBlkAllocator Section **********************/
+
+// clang-format off
+
+#define BLKALLOC_LOG(level, mod, ...)                         \
+    LOG##level##MOD(                                    \
+        BOOST_PP_IF(BOOST_PP_IS_EMPTY(mod), base, mod), \
+        "[blkalloc = {}]",                              \
+        m_cfg.get_name(),                               \
+        ##__VA_ARGS__)
+
+#define _BLKALLOC_ASSERT_MSG(asserttype, ...)                           \
+    "\n**********************************************************\n"    \
+    "[blkalloc = {}\n]", "Metrics = {}\n" "{}"                          \
+    "\n**********************************************************\n",   \
+    m_cfg.get_name(),                                                   \
+    asserttype##_METRICS_DUMP_MSG,                                      \
+    sds_logging::format_log_msg(__VA_ARGS__)
+
+// clang-format on
+
+#define BLKALLOC_ASSERT(asserttype, cond, ...)  \
+    asserttype##_ASSERT(cond, _BLKALLOC_ASSERT_MSG(asserttype, ##__VA_ARGS__))
+#define BLKALLOC_ASSERT_OP(asserttype, optype, val1, val2, ...)   \
+    asserttype##_ASSERT_##optype(val1, val2, _BLKALLOC_ASSERT_MSG(asserttype, ##__VA_ARGS__))
+#define BLKALLOC_ASSERT_EQ(asserttype, ...) BLKALLOC_ASSERT_OP(asserttype, EQ, ##__VA_ARGS__)
+#define BLKALLOC_ASSERT_NE(asserttype, ...) BLKALLOC_ASSERT_OP(asserttype, NE, ##__VA_ARGS__)
+#define BLKALLOC_ASSERT_GT(asserttype, ...) BLKALLOC_ASSERT_OP(asserttype, GT, ##__VA_ARGS__)
+#define BLKALLOC_ASSERT_GE(asserttype, ...) BLKALLOC_ASSERT_OP(asserttype, GE, ##__VA_ARGS__)
+#define BLKALLOC_ASSERT_LT(asserttype, ...) BLKALLOC_ASSERT_OP(asserttype, LT, ##__VA_ARGS__)
+#define BLKALLOC_ASSERT_LE(asserttype, ...) BLKALLOC_ASSERT_OP(asserttype, LE, ##__VA_ARGS__)
+#define BLKALLOC_DEBUG_ASSERT(...)          BLKALLOC_ASSERT(DEBUG, __VA_ARGS__)
+#define BLKALLOC_RELEASE_ASSERT(...)        BLKALLOC_ASSERT(RELEASE, __VA_ARGS__)
+#define BLKALLOC_LOG_ASSERT(...)            BLKALLOC_ASSERT(LOGMSG, __VA_ARGS__)
+#define BLKALLOC_DEBUG_ASSERT_CMP(optype, ...)      \
+                                            BLKALLOC_ASSERT_OP(DEBUG, optype, ##__VA_ARGS__)
+#define BLKALLOC_RELEASE_ASSERT_CMP(optype, ...)    \
+                                            BLKALLOC_ASSERT_OP(RELEASE, optype, ##__VA_ARGS__)
+#define BLKALLOC_LOG_ASSERT_CMP(optype, ...)        \
+                                            BLKALLOC_ASSERT_OP(LOGMSG, optype, ##__VA_ARGS__)
 
 template <typename T>
 struct atomwrapper {
@@ -490,6 +533,44 @@ private:
 #endif
 };
 
+class BlkAllocMetrics : public sisl::MetricsGroupWrapper {
+public:
+    explicit BlkAllocMetrics(const char* inst_name) :
+                sisl::MetricsGroupWrapper("BlkAlloc", inst_name) {
+        REGISTER_COUNTER(   blkalloc_slab0_capacity,
+                            "Block allocator slab 0 capacity",
+                            sisl::_publish_as::publish_as_gauge );
+        REGISTER_COUNTER(   blkalloc_slab1_capacity,
+                            "Block allocator slab 1 capacity",
+                            sisl::_publish_as::publish_as_gauge );
+        REGISTER_COUNTER(   blkalloc_slab2_capacity,
+                            "Block allocator slab 2 capacity",
+                            sisl::_publish_as::publish_as_gauge );
+        REGISTER_COUNTER(   blkalloc_slab3_capacity,
+                            "Block allocator slab 3 capacity",
+                            sisl::_publish_as::publish_as_gauge );
+        REGISTER_COUNTER(   blkalloc_slab4_capacity,
+                            "Block allocator slab 4 capacity",
+                            sisl::_publish_as::publish_as_gauge );
+        REGISTER_COUNTER(   blkalloc_slab5_capacity,
+                            "Block allocator slab 5 capacity",
+                            sisl::_publish_as::publish_as_gauge );
+        REGISTER_COUNTER(   blkalloc_slab6_capacity,
+                            "Block allocator slab 6 capacity",
+                            sisl::_publish_as::publish_as_gauge );
+        REGISTER_COUNTER(   blkalloc_slab7_capacity,
+                            "Block allocator slab 7 capacity",
+                            sisl::_publish_as::publish_as_gauge );
+        REGISTER_COUNTER(   blkalloc_slab8_capacity,
+                            "Block allocator slab 8 capacity",
+                            sisl::_publish_as::publish_as_gauge );
+        REGISTER_COUNTER(   blkalloc_slab9_capacity,
+                            "Block allocator slab 9 capacity",
+                            sisl::_publish_as::publish_as_gauge );
+        register_me_to_farm();
+    }
+};
+
 #if 0
 class VarsizeAllocCacheSearch : public BtreeSearchRange {
 public:
@@ -585,6 +666,7 @@ private:
 
     std::atomic< uint32_t > m_cache_n_entries; // Total number of blk entries to cache
     std::vector<atomwrapper<uint32_t>> m_slab_entries; // Blk cnt for each slab in cache
+    BlkAllocMetrics m_metrics;
     bool m_init;
 
 private:
@@ -661,6 +743,8 @@ private:
         out_entry->set_temperature(get_blk_temperature(blknum));
     }
     uint64_t get_best_fit_cache(uint64_t blks_rqstd);
+    void incrCounter(unsigned int index, unsigned int val);
+    void decrCounter(unsigned int index, unsigned int val);
 };
 
 #define BLKID_RANGE_FIRST    0UL
