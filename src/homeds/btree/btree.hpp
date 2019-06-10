@@ -77,9 +77,16 @@ private:
     comp_callback m_comp_cb;
     bool m_destroy = false;
     std::atomic<uint64_t> m_total_nodes = 0;
+#ifndef NDEBUG
+    std::atomic<uint64_t> m_req_id = 0;
+#endif
 
     static thread_local homeds::reserve_vector< btree_locked_node_info, 5 >  wr_locked_nodes;
     static thread_local homeds::reserve_vector< btree_locked_node_info, 5 >  rd_locked_nodes;
+#ifndef NDEBUG
+    std::mutex                            m_req_mtx;
+    std::map< uint64_t, btree_multinode_req_ptr > m_req_map;
+#endif
 
     ////////////////// Implementation /////////////////////////
 public:
@@ -104,6 +111,12 @@ public:
 
             /* initialize this req to empty the dependent req_q */
             multinode_req->cmpltd();
+#ifndef NDEBUG
+            std::unique_lock< std::mutex > mtx(m_req_mtx);
+            auto it = m_req_map.find(multinode_req->req_id);
+            assert (it != m_req_map.end());
+            m_req_map.erase(it);
+#endif
         }
     }
 
@@ -308,6 +321,14 @@ public:
         multinode_req = btree_multinode_req<btree_req_type>::make_request(cookie, dependent_req, true, false);
         multinode_req->writes_pending.increment(1);
         btree_status_t ret = btree_status_t::success;
+#ifndef NDEBUG
+        {
+            static atomic<uint64_t> req_id = 0;
+            std::unique_lock< std::mutex > mtx(m_req_mtx);
+            multinode_req->req_id = ++m_req_id;
+            m_req_map.emplace(std::make_pair(multinode_req->req_id, multinode_req));
+        }
+#endif
 retry:
         multinode_req->retry_cnt++;
         multinode_req->node_read_cnt = 0;
@@ -544,6 +565,13 @@ out:
         btree_multinode_req_ptr multinode_req = btree_multinode_req<btree_req_type>::make_request(cookie, 
                                                                     dependent_req, true, false);
         multinode_req->writes_pending.increment(1);
+#ifndef NDEBUG
+        {
+            std::unique_lock< std::mutex > mtx(m_req_mtx);
+            multinode_req->req_id = ++m_req_id;
+            m_req_map.emplace(std::make_pair(multinode_req->req_id, multinode_req));
+        }
+#endif
     retry:
 
         btree_status_t status = btree_status_t::success;
