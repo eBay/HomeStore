@@ -107,7 +107,7 @@ struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
 
 protected:
     friend class homeds::ObjectAllocator< virtualdev_req >;
-    virtualdev_req() : err(no_error), is_read(false), isSyncCall(false), refcount(0) {}
+    virtualdev_req() : request_id(0), err(no_error), is_read(false), isSyncCall(false), refcount(0) {}
 };
 
 [[maybe_unused]] static void virtual_dev_process_completions(int64_t res, uint8_t* cookie) {
@@ -120,6 +120,16 @@ protected:
         /* TODO: it should have more specific errors */
         vd_req->err = std::make_error_condition(std::io_errc::stream);
     }
+
+#ifdef _PRERELEASE
+    if (homestore_flip->test_flip("io_write_comp_error_flip")) {
+        vd_req->err = write_failed;
+    }
+
+    if (homestore_flip->test_flip("io_read_comp_error_flip")) {
+        vd_req->err = read_failed;
+    }
+#endif
 
     auto pdev = vd_req->chunk->get_physical_dev_mutable();
     if (vd_req->err) {

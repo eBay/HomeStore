@@ -236,7 +236,8 @@ public:
         stringstream ss;
         ss << "Seq:" << get_seqId() << "," << get_blkId() << ",Boff:" << unsigned(get_blk_offset());
         ss << ",v_nlba:" << unsigned(get_nlba());
-         ss << ",cs:" << get_checksums_string();
+
+        ss << ",cs:" << get_checksums_string();
         return ss.str();
     }
     friend ostream& operator<<(ostream& os, const ValueEntry& ve) {

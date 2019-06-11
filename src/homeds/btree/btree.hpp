@@ -475,7 +475,7 @@ out:
 #ifndef NDEBUG
         check_lock_debug();
 #endif
-        if (ret == btree_status_t::success) {
+        if (ret == btree_status_t::success || ret == btree_status_t::has_more) {
             COUNTER_INCREMENT(m_metrics, read_node_count_in_query_ops, multinode_req->node_read_cnt);
         } else {
             COUNTER_INCREMENT(m_metrics, query_err_cnt, 1);
@@ -1007,7 +1007,14 @@ done:
             child_cur_lock = locktype::LOCKTYPE_NONE;
         }
 
-
+#ifdef _PRERELEASE 
+        {
+            auto time = homestore_flip->get_test_flip<uint64_t>("btree_upgrade_delay");
+            if (time) {
+                usleep(time.get());
+            }
+        }
+#endif
         ret = lock_node_upgrade(my_node, multinode_req);
         if (ret != btree_status_t::success) {
             cur_lock = locktype::LOCKTYPE_NONE;
@@ -1044,6 +1051,12 @@ done:
             }
             child_cur_lock = child_lock_type;
         }
+
+#ifdef _PRERELEASE
+        if (homestore_flip->test_flip("btree_upgrade_node_fail", child_node->is_leaf())) {
+            ret = btree_status_t::retry;
+        }
+#endif
 
         BT_DEBUG_ASSERT_CMP(EQ, my_node->m_common_header.is_lock, 1, my_node);
     done:
@@ -1124,8 +1137,16 @@ done:
         auto child_lock_type = child_curlock;
         auto none_lock_type = LOCKTYPE_NONE;
         
-        if (!child_node->is_split_needed(m_btree_cfg, k, v, &ind_hint, put_type, bur)) {
-            return ret;
+#ifdef _PRERELEASE
+        auto time = homestore_flip->get_test_flip<int>("btree_delay_and_split", child_node->get_total_entries());
+        if (time && child_node->get_total_entries() > 2) {
+            usleep(time.get());
+        } else 
+#endif
+        {
+            if (!child_node->is_split_needed(m_btree_cfg, k, v, &ind_hint, put_type, bur)) {
+                return ret;
+            }
         }
        
         /* Split needed */
@@ -1134,6 +1155,12 @@ done:
             /* In case of range update we might split multiple childs of a parent in a single
              * iteration which result into less space in the parent node.
              */
+#ifdef _PRERELEASE
+            if (homestore_flip->test_flip("simulate_parent_node_full")) {
+                ret = btree_status_t::retry;
+                goto out;
+            }
+#endif
             if (my_node->is_split_needed(m_btree_cfg, k, v, &ind_hint, put_type, bur)) {
                 //restart from root
                 ret = btree_status_t::retry;
@@ -1171,7 +1198,7 @@ done:
             goto out;
         }
         
-        // After split, parentNode would have split, retry search and walk down.
+        // After split, retry search and walk down.
         unlock_node(child_node, homeds::thread::LOCKTYPE_WRITE);
         child_curlock = LOCKTYPE_NONE;
         COUNTER_INCREMENT(m_metrics, btree_split_count, 1);
@@ -1757,9 +1784,10 @@ out:
         child_node2->set_next_bnode(child_node1->get_next_bnode());
         child_node1->set_next_bnode(child_node2->get_node_id());
         uint32_t child1_filled_size = m_btree_cfg.get_node_area_size() - child_node1->get_available_size(m_btree_cfg);
-        uint32_t res = child_node1->move_out_to_right_by_size(m_btree_cfg, child_node2,
-                                                              m_btree_cfg.get_split_size(child1_filled_size));
 
+        auto split_size = m_btree_cfg.get_split_size(child1_filled_size);
+        uint32_t res =child_node1->move_out_to_right_by_size(m_btree_cfg, child_node2, split_size);
+       
         BT_DEBUG_ASSERT_CMP(GT, res, 0, child_node1); //means cannot split entries
         BT_DEBUG_ASSERT_CMP(GT, child_node1->get_total_entries(), 0, child_node1);
 
@@ -1782,6 +1810,13 @@ out:
         BT_LOG(DEBUG, btree_structures, parent_node, "Split child_node={} with new_child_node={}, split_key={}",
             child_node1->get_node_id_int(), child_node2->get_node_id_int(), out_split_key->to_string());
 
+#ifdef _PRERELEASE
+        if (homestore_flip->test_flip("btree_split_failure", child_node->is_leaf())) {
+            child_node1->flip_pc_gen_flag();
+            child_node1->move_in_from_right_by_size(m_btree_cfg, child_node2, split_size);
+        }
+#endif
+       
        // NOTE: Do not access parentInd after insert, since insert would have
         // we write right child node, than parent and than left child
         write_node_async(child_node2, multinode_req);
@@ -1844,6 +1879,10 @@ out:
             minfo.push_back(m);
         }
 
+
+        uint32_t first_node_nentries = minfo[0].node->get_total_entries();
+        
+        assert(indices_list.size() == minfo.size());
         K last_pkey;//last key of parent node
         if (minfo[indices_list.size() - 1].parent_index != parent_node->get_total_entries()) {
             /* If it is not edge we always preserve the last key in a given merge group of nodes.*/
@@ -1924,10 +1963,18 @@ out:
 
         ret.nmerged = minfo.size() - ndeleted_nodes;
 
+#ifdef _PRERELEASE
+        if (homestore_flip->test_flip("btree_merge_failure", minfo[0].node->is_leaf())) {
+            minfo[0].node->flip_pc_gen_flag();
+            minfo[0].node->set_total_entries(first_node_nentries);
+        } else 
+#endif
+        {
         write_node_async(minfo[0].node, multinode_req);
 #ifndef NDEBUG
         validate_sanity(minfo,parent_node,indices_list);
 #endif
+        }
 
         // Loop again in reverse order to unlock the nodes. freeable nodes need to be unlocked and freed
         for (int n = minfo.size() - 1; n >= 0; n--) {

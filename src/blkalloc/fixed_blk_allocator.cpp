@@ -83,6 +83,12 @@ BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &hi
                                  std::vector<BlkId> &out_blkid) {
     BlkId blkid;
     assert(nblks == 1);
+
+#ifdef _PRERELEASE
+    if (homestore_flip->test_flip("fixed_blkalloc_no_blks", nblks)) {
+        return BLK_ALLOC_SPACEFULL;
+    }
+#endif
     if (alloc(nblks, hints, &blkid) == BLK_ALLOC_SUCCESS) {
 #ifndef NDEBUG
         std::unique_lock< std::mutex > lk(m_bm_mutex);

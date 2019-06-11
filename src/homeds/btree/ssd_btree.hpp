@@ -162,6 +162,11 @@ public:
         if (status != btree_status_t::success) {
             req->ssd_buf->set_error();
         }
+#ifdef _PRERELEASE
+        if (homestore_flip->test_flip("btree_write_comp_fail")) {
+            status = btree_status_t::write_failed;
+        }
+#endif
         m_comp_cb(status, req->multinode_req);
     }
 
@@ -209,6 +214,11 @@ public:
     static boost::intrusive_ptr< SSDBtreeNode > read_node(SSDBtreeStore* store, bnodeid_t id) {
         // Read the data from the block store
         try {
+#ifdef _PRERELEASE
+            if (homestore_flip->test_flip("btree_read_fail", (uint64_t)(id.m_id))) {
+                folly::throwSystemError("flip error");
+            }
+#endif
             homestore::BlkId blkid(id.m_id);
             auto             req = ssd_btree_req::make_object();
             req->is_read = true;
@@ -284,6 +294,11 @@ public:
             multinode_req->writes_pending.increment(1);
         }
         try {
+#ifdef _PRERELEASE
+            if (homestore_flip->test_flip("btree_write_fail", bn->get_node_id().m_id)) {
+                folly::throwSystemError("flip error");
+            }
+#endif
             if (multinode_req) {
                 impl->m_blkstore->write(blkid, req->ssd_buf,
                         boost::static_pointer_cast< homestore::blkstore_req< btree_buffer_t > >(req),
@@ -331,6 +346,11 @@ public:
 
         /* add the latest request pending on this node */
         try {
+#ifdef _PRERELEASE
+            if (homestore_flip->test_flip("btree_refresh_fail", bn->get_node_id().m_id)) {
+                folly::throwSystemError("flip error");
+            }
+#endif
             auto req =
                 store->m_blkstore->refresh_buf(boost::static_pointer_cast< btree_buffer_t >(bn), is_write_modifiable);
             if (req && multinode_req) {

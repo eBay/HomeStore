@@ -194,6 +194,12 @@ public:
                               const writeback_req_ptr& wb_req, std::error_condition status) {
         auto& wbc_buf = (boost::intrusive_ptr< WriteBackCacheBuffer< K > > &)cache_buf;
 
+#ifdef _PRERELEASE
+        if (auto ret = homestore_flip->get_test_flip<int>("writeBack_completion_req_delay_us")) {
+            usleep(ret.get());
+        }
+#endif
+
         /* invalidate the buffer if request is failed */
         std::unique_lock< std::mutex > buf_mtx(wbc_buf->mtx);
 
@@ -294,7 +300,7 @@ public:
                  */
                 assert((wbc_buf->get_memvec()).npieces() == 1);
                 void* mem;
-                if (0 == posix_memalign((void**)&mem, 4096, outb.size)) {
+                if (0 == posix_memalign((void**)&mem, HomeStoreConfig::align_size, outb.size)) {
                     /* outb.bytes get freed when last_pending_req is completed */
                     memcpy(mem, outb.bytes, outb.size);
                     outb.bytes = (uint8_t*)mem;
@@ -323,14 +329,6 @@ public:
          * write req is pending on it. Use case exist only in btree but it read
          * before freeing it which helps in creating a dependency chain.
          */
-#ifndef NDEBUG
-        if (vol_test_enable) {
-            auto req = writeBack_refresh_buf(cache_buf, true);
-            if (req != nullptr) {
-                dependent_req_q.push_back(req);
-            }
-        }
-#endif
         writeBack_write_internal(cache_buf, wb_req, dependent_req_q);
     }
 

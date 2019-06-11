@@ -178,6 +178,7 @@ public:
     void                                                                                 vol_sb_remove(vol_mem_sb* sb);
     uint32_t                                                                             get_data_pagesz() const;
     uint64_t get_boot_cnt();
+    void init_done(std::error_condition err, const out_params& params);
 
 #ifndef NDEBUG
     void print_tree(const VolumePtr& vol);

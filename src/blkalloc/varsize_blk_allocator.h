@@ -556,8 +556,6 @@ public:
     virtual void inited() override;
     virtual bool is_blk_alloced(BlkId &in_bid) override;
 
-    flip::Flip* get_flip() { return m_flip.get(); }
-
 private:
     VarsizeBlkAllocConfig m_cfg; // Config for Varsize
     std::thread m_thread_id; // Thread pointer for this region
@@ -566,9 +564,8 @@ private:
     BlkAllocatorState m_region_state;
 
     homeds::Bitset *m_alloc_bm;   // Bitset of all allocation
-    std::unique_ptr<flip::Flip> m_flip;
 
-#ifndef DEBUG
+#ifndef NDEBUG
     homeds::Bitset *m_alloced_bm;   // Bitset of all allocation
 #endif
 
