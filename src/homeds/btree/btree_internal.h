@@ -101,6 +101,10 @@ struct btree_multinode_req : public sisl::ObjLifeCounter< struct btree_multinode
     bool                                                 is_sync;
     int                                                  retry_cnt = 0;
     int                                                  node_read_cnt = 0;
+#ifndef NDEBUG
+    uint64_t                                             req_id = 0;
+    std::vector< uint64_t >                              child_req_q;
+#endif
 
     btree_multinode_req() :
             writes_pending(0),

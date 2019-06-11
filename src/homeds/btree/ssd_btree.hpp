@@ -288,6 +288,13 @@ public:
                 impl->m_blkstore->write(blkid, req->ssd_buf,
                         boost::static_pointer_cast< homestore::blkstore_req< btree_buffer_t > >(req),
                         multinode_req->dependent_req_q);
+#ifndef NDEBUG
+                {
+                    if (!req->isSyncCall) {
+                        multinode_req->child_req_q.push_back((uint64_t)req.get());
+                    }
+                }
+#endif
             } else {
                 std::deque< boost::intrusive_ptr< homestore::writeback_req > >dependent_req_q(0);
                 impl->m_blkstore->write(blkid, req->ssd_buf,
@@ -331,9 +338,10 @@ public:
             }
 #ifndef NO_CHECKSUM
             auto physical_node = (LeafPhysicalNode*)((boost::static_pointer_cast< SSDBtreeNode >(bn))->at_offset(0).bytes);
-            auto is_match = physical_node->verify_node(get_node_area_size(store));
+            verify_result vr;
+            auto is_match = physical_node->verify_node(get_node_area_size(store),vr);
             if (!is_match) {
-                LOGINFO("mismatch node");
+                LOGERROR("mismatch node: {}", vr.to_string());
                 assert(0);
                 abort();
             }

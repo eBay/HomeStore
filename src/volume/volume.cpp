@@ -199,6 +199,14 @@ void Volume::process_metadata_completions(const volume_req_ptr& vreq) {
     }
 
     check_and_complete_req(parent_req, vreq->err, true /* call_completion_cb */);
+#ifndef NDEBUG
+    {
+        std::unique_lock< std::mutex > mtx(m_req_mtx);
+        auto it = m_req_map.find(vreq->reqId);
+        assert (it != m_req_map.end());
+        m_req_map.erase(it);
+    }
+#endif
 }
 
 void Volume::process_vol_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req) {
@@ -231,6 +239,14 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
         } else {
             COUNTER_DECREMENT(m_metrics, volume_outstanding_data_read_count, 1);
         }
+#ifndef NDEBUG
+        {
+            std::unique_lock< std::mutex > mtx(m_req_mtx);
+            auto it = m_req_map.find(vreq->reqId);
+            assert (it != m_req_map.end());
+            m_req_map.erase(it);
+        }
+#endif
         return check_and_complete_req(parent_req, vreq->err, true /* call_completion_cb */);
     }
 
@@ -271,6 +287,14 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
         }
         COUNTER_DECREMENT(m_metrics, volume_outstanding_data_read_count, 1);
         check_and_complete_req(parent_req, no_error, true /* call_completion_cb */);
+#ifndef NDEBUG
+        {
+            std::unique_lock< std::mutex > mtx(m_req_mtx);
+            auto it = m_req_map.find(vreq->reqId);
+            assert (it != m_req_map.end());
+            m_req_map.erase(it);
+        }
+#endif
     }
 }
 
@@ -330,6 +354,7 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
             vreq->seqId = GET_IO_SEQ_ID(sid); // TODO - actual seqId/lastCommit seq id should be from vol interface req
             vreq->lastCommited_seqId = vreq->seqId; // keeping only latest version always
             vreq->op_start_time = data_io_start_time;
+            vreq->reqId = ++m_req_id;
 
             assert((bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) % m_sb->ondisk_sb->page_size) == 0);
             vreq->nlbas = bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) / m_sb->ondisk_sb->page_size;
@@ -337,6 +362,13 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
             VOL_LOG(TRACE, volume, vreq->parent_req, "alloc_blk: bid: {}, offset: {}, nblks: {}", bid[i].to_string(),
                      bid[i].data_size(HomeBlks::instance()->get_data_pagesz()), vreq->nlbas);
             COUNTER_INCREMENT(m_metrics, volume_outstanding_data_write_count, 1);
+
+#ifndef NDEBUG
+            {
+                std::unique_lock< std::mutex > mtx(m_req_mtx);
+                m_req_map.emplace(std::make_pair(vreq->reqId, vreq));
+            }
+#endif
 
             boost::intrusive_ptr< BlkBuffer > bbuf = m_data_blkstore->write(
                 bid[i], mvec, offset, boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vreq), req_q);
@@ -492,6 +524,7 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
                 child_vreq->is_read = true;
                 child_vreq->isSyncCall = sync;
                 child_vreq->op_start_time = data_io_start_time;
+                child_vreq->reqId = ++m_req_id;
 
                 assert(kv.second.get_array().get_total_elements() == 1);
                 ValueEntry ve;
@@ -507,6 +540,14 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
                 child_vreq->read_buf_offset = offset;
 
                 COUNTER_INCREMENT(m_metrics, volume_outstanding_data_read_count, 1);
+#ifndef NDEBUG
+                {
+                    if (!sync) {
+                        std::unique_lock< std::mutex > mtx(m_req_mtx);
+                        m_req_map.emplace(std::make_pair(child_vreq->reqId, child_vreq));
+                    }
+                }
+#endif
                 boost::intrusive_ptr< BlkBuffer > bbuf =
                     m_data_blkstore->read(ve.get_blkId(), offset, sz,
                                           boost::static_pointer_cast< blkstore_req< BlkBuffer > >(child_vreq));
