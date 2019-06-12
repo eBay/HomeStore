@@ -412,12 +412,11 @@ public:
 
 class VarsizeAllocCacheEntry : public BtreeKey {
 private:
-    typedef struct __attribute__((packed)) {
+    typedef struct __attribute__((packed, aligned(1))) {
         uint64_t m_phys_page_id:36; // Page id and blk num inside page
         uint64_t m_blk_num:36;
         uint64_t m_nblks:10;   // Total number of blocks
-        uint64_t m_temp :10;   // Temperature of each page
-        uint64_t padd:28; // will be removed later
+        uint64_t m_temp :14;   // Temperature of each page
     } blob_t;
 
     blob_t *m_blob;
@@ -638,8 +637,6 @@ public:
     virtual void inited() override;
     virtual bool is_blk_alloced(BlkId &in_bid) override;
 
-    flip::Flip* get_flip() { return m_flip.get(); }
-
 private:
     VarsizeBlkAllocConfig m_cfg; // Config for Varsize
     std::thread m_thread_id; // Thread pointer for this region
@@ -648,9 +645,8 @@ private:
     BlkAllocatorState m_region_state;
 
     homeds::Bitset *m_alloc_bm;   // Bitset of all allocation
-    std::unique_ptr<flip::Flip> m_flip;
 
-#ifndef DEBUG
+#ifndef NDEBUG
     homeds::Bitset *m_alloced_bm;   // Bitset of all allocation
 #endif
 

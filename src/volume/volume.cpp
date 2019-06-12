@@ -69,7 +69,6 @@ Volume::Volume(vol_mem_sb* sb) : m_sb(sb), m_metrics(sb->ondisk_sb->vol_name), m
                             std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
         m_sb->ondisk_sb->btree_sb = m_map->get_btree_sb();
         m_sb->ondisk_sb->state = vol_state::DEGRADED;
-        ;
         HomeBlks::instance()->vol_sb_write(m_sb);
     } else {
         m_map = new mapping(m_sb->ondisk_sb->size, m_sb->ondisk_sb->page_size, m_sb->ondisk_sb->vol_name,

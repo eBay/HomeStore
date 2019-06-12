@@ -239,6 +239,7 @@ struct bnodeid {
 
     bool           is_valid() const { return (m_id != set_bits< 63 >()); }
     static bnodeid empty_bnodeid() { return bnodeid(); }
+    uint64_t get_int() { return (m_id << 63 | 1) ; };
 } __attribute__((packed));
 
 typedef bnodeid bnodeid_t;

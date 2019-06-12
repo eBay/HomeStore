@@ -271,7 +271,11 @@ void DeviceManager::handle_error(PhysicalDev *pdev) {
     /* When cnt reaches MAX_ERROR_CNT we notify only once until
      * we reset the cnt to zero.
      */
-    if (cnt != MAX_ERROR_CNT) {
+    if (cnt != MAX_ERROR_CNT
+#ifdef _PRERELEASE
+      && !(homestore_flip->test_flip("device_fail", pdev->get_devname()))
+#endif  
+    ) {
         return;
     }
     

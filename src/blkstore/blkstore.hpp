@@ -174,8 +174,14 @@ public:
     void process_completions(boost::intrusive_ptr< virtualdev_req > v_req) {
         auto req = to_blkstore_req(v_req);
 
-        assert(req->err == no_error);
         if (!req->is_read) {
+#ifdef _PRERELEASE
+            if (auto flip_ret = homestore_flip->get_test_flip<int>("delay_us_and_inject_error_on_completion", 
+                                v_req->request_id)) {
+                usleep(flip_ret.get());
+                req->err = homestore_error::write_failed;
+            }
+#endif
             HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_write_latency, get_elapsed_time_us(req->blkstore_op_start_time));
 
             if (is_write_back_cache()) {
@@ -473,7 +479,11 @@ public:
         boost::intrusive_ptr< Buffer > bbuf;
         bool cache_found = m_cache->get(bid, (boost::intrusive_ptr< CacheBuffer< BlkId > >*)&bbuf);
         req->blkstore_ref_cnt.increment(1);
-        if (!cache_found) {
+        if (!cache_found
+#ifdef _PRERELEASE
+            || (cache_found && (homestore_flip->test_flip("cache_insert_race", size, offset)))
+#endif
+        ) {
             // Not found in cache, create a new block buf and prepare it for insert to dev and cache.
             bbuf = Buffer::make_object();
 

@@ -17,6 +17,8 @@
 #include <sds_logging/logging.h>
 #include <metrics/metrics.hpp>
 #include "homeds/utility/useful_defs.hpp"
+#include "main/homestore_header.hpp"
+#include "error/error.h"
 
 namespace homeio {
 #ifdef __APPLE__
@@ -163,6 +165,14 @@ void DriveEndPoint::async_writev(int m_sync_fd, const struct iovec* iov, int iov
     io_set_eventfd(iocb, ev_fd);
     iocb->data = cookie;
     info->is_read = false;
+
+#ifdef _PRERELEASE
+    if (homestore_flip->test_flip("io_write_error_flip")) {
+        comp_cb(homestore::homestore_error::write_failed, cookie);
+        return;
+    }
+#endif
+
     if (io_submit(ioctx, 1, &iocb) != 1) {
         comp_cb(errno, cookie);
     }
@@ -185,6 +195,12 @@ void DriveEndPoint::async_readv(int m_sync_fd, const struct iovec* iov, int iovc
     iocb->data = cookie;
     info->is_read = true;
 
+#ifdef _PRERELEASE
+    if (homestore_flip->test_flip("io_read_error_flip", iovcnt, size)) {
+        comp_cb(homestore::homestore_error::read_failed, cookie);
+        return;
+    }
+#endif
     LOGTRACE("Reading: {} vectors", iovcnt);
     if (io_submit(ioctx, 1, &iocb) != 1) {
         comp_cb(errno, cookie);
@@ -192,7 +208,13 @@ void DriveEndPoint::async_readv(int m_sync_fd, const struct iovec* iov, int iovc
 }
 
 void DriveEndPoint::sync_write(int m_sync_fd, const char* data, uint32_t size, uint64_t offset) {
+#ifdef _PRERELEASE
+    if (homestore_flip->test_flip("io_sync_write_error_flip", size)) {
+        folly::throwSystemError("flip error");
+    }
+#endif
     ssize_t written_size = pwrite(m_sync_fd, data, (ssize_t)size, (off_t)offset);
+    
     if (written_size != size) {
         std::stringstream ss;
         ss << "Error trying to write offset " << offset << " size to write = " << size
@@ -202,6 +224,11 @@ void DriveEndPoint::sync_write(int m_sync_fd, const char* data, uint32_t size, u
 }
 
 void DriveEndPoint::sync_writev(int m_sync_fd, const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset) {
+#ifdef _PRERELEASE
+    if (homestore_flip->test_flip("io_sync_write_error_flip", iovcnt, size)) {
+        folly::throwSystemError("flip error");
+    }
+#endif
     ssize_t written_size = pwritev(m_sync_fd, iov, iovcnt, offset);
     if (written_size != size) {
         std::stringstream ss;
@@ -212,6 +239,11 @@ void DriveEndPoint::sync_writev(int m_sync_fd, const struct iovec* iov, int iovc
 }
 
 void DriveEndPoint::sync_read(int m_sync_fd, char* data, uint32_t size, uint64_t offset) {
+#ifdef _PRERELEASE
+    if (homestore_flip->test_flip("io_sync_read_error_flip", size)) {
+        folly::throwSystemError("flip error");
+    }
+#endif
     ssize_t read_size = pread(m_sync_fd, data, (ssize_t)size, (off_t)offset);
     if (read_size != size) {
         std::stringstream ss;
@@ -223,6 +255,11 @@ void DriveEndPoint::sync_read(int m_sync_fd, char* data, uint32_t size, uint64_t
 }
 
 void DriveEndPoint::sync_readv(int m_sync_fd, const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset) {
+#ifdef _PRERELEASE
+    if (homestore_flip->test_flip("io_sync_read_error_flip", iovcnt, size)) {
+        folly::throwSystemError("flip error");
+    }
+#endif
     ssize_t read_size = preadv(m_sync_fd, iov, iovcnt, (off_t)offset);
     if (read_size != size) {
         std::stringstream ss;

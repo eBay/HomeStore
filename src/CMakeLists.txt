@@ -2,6 +2,12 @@ set (CPP_FLAGS "-faligned-new -Dlinux")
 set (CPP_WARNINGS "-Wall -Wextra -Werror -Wno-unused-parameter -Wno-unused-variable -Wno-empty-body -Wno-array-bounds -Wno-cast-function-type -Wno-maybe-uninitialized")
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CPP_FLAGS} ${CPP_WARNINGS} -DBOOST_ALLOW_DEPRECATED_HEADERS -DRCU_SIGNAL")
 
+if ("$ENV{HOMESTORE_BUILD_TAG}" STREQUAL "")
+    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DPACKAGE_VERSION=\\\"${CONAN_PACKAGE_VERSION}\\\"")
+else()
+    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DPACKAGE_VERSION=\\\"${CONAN_PACKAGE_VERSION}-$ENV{HOMESTORE_BUILD_TAG}\\\"")
+endif()
+
 if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
     message("Debug build")
     add_compile_options(-D_DEBUG=1 -O0 -DDEBUG_RCU -D_PRERELEASE=1)
