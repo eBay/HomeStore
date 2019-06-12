@@ -36,7 +36,6 @@ HomeBlks::HomeBlks(const init_params& cfg) :
         m_shutdown(false),
         m_init_finished(false) {
 
-    sds_logging::install_crash_handler();
     _instance = this;
     /* set the homestore config parameters */
     populate_disk_attrs();
