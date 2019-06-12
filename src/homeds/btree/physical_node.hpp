@@ -46,6 +46,13 @@ typedef struct __attribute__((__packed__)) {
 
     uint64_t node_gen;
     bnodeid_t edge_entry;
+    string to_string() const {
+        stringstream ss;
+        ss << "magic=" << magic << " checksum=" << checksum <<" node_id=" << node_id << " nentries=" << nentries;
+        ss <<" node_type=" << node_type << " leaf=" << leaf << " valid_node=" <<valid_node;
+        ss <<" node_gen=" << node_gen << " edge_entry=" << edge_entry;
+        return ss.str();
+    }
 } persistent_hdr_t;
 
 #ifndef NO_CHECKSUM
@@ -92,6 +99,7 @@ protected:
             set_node_id(*id);
         } else {
             assert(get_node_id() == *id);
+            assert(get_magic() == MAGICAL_VALUE);
         }
     }
 
@@ -108,6 +116,7 @@ protected:
             set_node_id(id);
         } else {
             assert(get_node_id() == id);
+            assert(get_magic() == MAGICAL_VALUE);
         }
     }
 
@@ -152,6 +161,13 @@ protected:
     uint32_t get_total_entries() const {
         return m_pers_header.nentries;
     }
+    
+#ifdef _PRERELEASE
+    /* used only in testing */
+    void set_total_entries(uint32_t n_entries) const {
+        m_pers_header.nentries = n_entries;
+    }
+#endif
 
     void set_total_entries(uint32_t n) {
         get_persistent_header()->nentries = n;
@@ -254,6 +270,16 @@ protected:
     }
 
     bool is_merge_needed(const BtreeConfig &cfg) const {
+#ifdef _PRERELEASE
+        if (homestore_flip->test_flip("btree_merge_node") && get_occupied_size(cfg) < cfg.get_node_area_size()) {
+            return true;
+        }
+
+        auto ret = homestore_flip->get_test_flip<uint64_t>("btree_merge_node_pct");
+        if (ret && get_occupied_size(cfg) < (ret.get() * cfg.get_node_area_size()/100)) {
+            return true;
+        }
+#endif
         return (get_occupied_size(cfg) < get_suggested_min_size(cfg));
     }
 
@@ -279,7 +305,9 @@ protected:
     // Assumption: Node lock is already taken
     auto find(const BtreeSearchRange &range, BtreeKey *outkey, BtreeValue *outval, bool copy_key = true,
             bool copy_val = true) const {
-        assert(get_magic()==MAGICAL_VALUE);
+
+        LOGMSG_ASSERT((get_magic() == MAGICAL_VALUE), "{}", m_pers_header.to_string());
+
         auto result = bsearch_node(range);
 
         if (result.end_of_search_index == (int)get_total_entries() && !has_valid_edge()) {
@@ -317,7 +345,9 @@ protected:
     uint32_t get_all(const BtreeSearchRange &range, uint32_t max_count,
                                 int &start_ind, int &end_ind,
                      std::vector<std::pair<K, V>> *out_values = nullptr) {
-        assert(get_magic()==MAGICAL_VALUE);
+//        BT_LOG_ASSERT_CMP(EQ, get_magic(), MAGICAL_VALUE, , "{}", m_pers_header.to_string());
+        LOGMSG_ASSERT((get_magic() == MAGICAL_VALUE), "{}", m_pers_header.to_string());
+
         auto count = 0U;
         // Get the start index of the search range.
         BtreeSearchRange sr = range.extract_start_of_range();
@@ -391,6 +421,7 @@ protected:
         auto result = find(key, nullptr, nullptr);
         bool ret = true;
 
+        LOGMSG_ASSERT((get_magic() == MAGICAL_VALUE), "{}", m_pers_header.to_string());
         if (put_type == btree_put_type::INSERT_ONLY_IF_NOT_EXISTS) {
             if (result.found) { 
                 LOGINFO("entry already exist");
@@ -414,6 +445,7 @@ protected:
         }
         assert(get_magic()==MAGICAL_VALUE);
 
+        LOGMSG_ASSERT((get_magic() == MAGICAL_VALUE), "{}", m_pers_header.to_string());
         return ret;
     }
 
@@ -431,6 +463,7 @@ protected:
         }
 
         to_variant_node()->remove(result.end_of_search_index);
+        LOGMSG_ASSERT((get_magic() == MAGICAL_VALUE), "{}", m_pers_header.to_string());
         return true;
     }
 
@@ -449,7 +482,7 @@ protected:
         auto result = find(key, outkey, outval);
         assert(result.found);
         to_variant_node()->update(result.end_of_search_index, val);
-        assert(get_magic()==MAGICAL_VALUE);
+        LOGMSG_ASSERT((get_magic() == MAGICAL_VALUE), "{}", m_pers_header.to_string());
     }
 
     //////////// Edge Related Methods ///////////////

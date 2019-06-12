@@ -163,6 +163,7 @@ public:
     bool is_leaf() const;
     void set_leaf(bool leaf);
     uint32_t get_total_entries() const;
+    void  set_total_entries(uint32_t);
     uint32_t get_available_size(const BtreeConfig &cfg) const;
     bnodeid_t get_node_id() const;
     uint64_t  get_node_id_int() const;

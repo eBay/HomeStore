@@ -35,8 +35,6 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig &cfg, bool init) 
     // TODO: Raise exception when blk_size > page_size or total blks is less than some number etc...
     m_alloc_bm = new homeds::Bitset(cfg.get_total_blks());
 
-    m_flip = std::make_unique<flip::Flip>();
-
 #ifndef NDEBUG
     m_alloced_bm = new homeds::Bitset(cfg.get_total_blks());
     
@@ -188,9 +186,14 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks,
 
     assert(nblks % hints.multiplier == 0);
 
-#ifndef NDEBUG
-    if (!hints.is_contiguous && nblks  != 1) {
-        blks_rqstd = ALIGN_SIZE((nblks / 2), hints.multiplier);
+#ifdef _PRERELEASE
+    if (homestore_flip->test_flip("varsize_blkalloc_no_blks", nblks)) {
+        return BLK_ALLOC_SPACEFULL;
+    }
+
+    auto split_cnt = homestore_flip->get_test_flip<int>("blkalloc_split_blk", nblks);
+    if (!hints.is_contiguous && nblks  != 1 && split_cnt) {
+        blks_rqstd = ALIGN_SIZE((nblks / split_cnt.get()), hints.multiplier);
     }
 #endif
 
@@ -267,6 +270,13 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
         found = (status == btree_status_t::success);
         
         if (found) {
+#ifdef _PRERELEASE
+            if (homestore_flip->test_flip("blkalloc_no_blks_cache", nblks)) {
+                EmptyClass dummy;
+                m_blk_cache->put(actual_entry, dummy, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
+                found = false;
+            }
+#endif
             if (best_fit) {
                 if (actual_entry.get_blk_count() < hints.multiplier) {
                     /* it should be atleast equal to hints multiplier. If not then wait for cache to populate */
@@ -371,10 +381,6 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
 }
 
 void VarsizeBlkAllocator::free(const BlkId &b) {
-    if (m_flip->test_flip("modify_bitmap")) {
-        LOGTRACEMOD(varsize_blk_alloc, "Flip hit in free(). Won't free blocks.");
-        return;
-    }
     BlkAllocPortion *portion = blknum_to_portion(b.get_id());
     BlkAllocSegment *segment = blknum_to_segment(b.get_id());
     

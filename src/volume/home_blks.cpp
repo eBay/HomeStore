@@ -36,6 +36,7 @@ HomeBlks::HomeBlks(const init_params& cfg) :
         m_shutdown(false),
         m_init_finished(false) {
 
+    sds_logging::install_crash_handler();
     _instance = this;
     /* set the homestore config parameters */
     populate_disk_attrs();
@@ -607,7 +608,7 @@ void HomeBlks::scan_volumes() {
         if (cnt == 1) {
             LOGERROR("{}", e.what());
             auto error = std::make_error_condition(std::errc::io_error);
-            m_cfg.init_done_cb(error, m_out_params);
+            init_done(error, m_out_params);
         }
         return;
     }
@@ -616,8 +617,13 @@ void HomeBlks::scan_volumes() {
     if (cnt == 1) {
         m_rdy = true;
         m_dev_mgr->inited();
-        m_cfg.init_done_cb(no_error, m_out_params);
+        init_done(no_error, m_out_params);
     }
+}
+
+void HomeBlks::init_done(std::error_condition err, const out_params& params) {
+    LOGINFO("init done status {}", err.message());
+    m_cfg.init_done_cb(err, m_out_params);
 }
 
 void HomeBlks::create_data_blkstore(vdev_info_block* vb) {
@@ -792,7 +798,7 @@ void HomeBlks::init_thread() {
         LOGERROR("{}", e.what());
         error = std::make_error_condition(std::errc::io_error);
     }
-    m_cfg.init_done_cb(error, m_out_params);
+    init_done(error, m_out_params);
 }
 
 void HomeBlks::vol_scan_cmpltd(const VolumePtr& vol, vol_state state, bool success) {
@@ -808,12 +814,12 @@ void HomeBlks::vol_scan_cmpltd(const VolumePtr& vol, vol_state state, bool succe
         if (m_init_failed) {
             LOGCRITICAL("init failed");
             auto error = std::make_error_condition(std::errc::io_error);
-            m_cfg.init_done_cb(error, m_out_params);
+            init_done(error, m_out_params);
         } else {
             LOGINFO("init completed");
             m_rdy = true;
             m_dev_mgr->inited();
-            m_cfg.init_done_cb(no_error, m_out_params);
+            init_done(no_error, m_out_params);
         }
     }
 }

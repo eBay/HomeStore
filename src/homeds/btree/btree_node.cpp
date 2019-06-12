@@ -107,6 +107,13 @@ DecBNodeType(void) set_leaf(bool leaf) {
 DecBNodeType(uint32_t) get_total_entries() const {
     return call_variant_method_const(this, get_total_entries);
 }
+
+#ifdef _PRERELEASE
+DecBNodeType(void) set_total_entries(uint32_t nentries) {
+    call_variant_method(this, set_total_entries, nentries);
+}
+#endif
+
 DecBNodeType(uint32_t) get_available_size(const BtreeConfig &cfg) const {
     return call_variant_method_const(this, get_available_size, cfg);
 }
