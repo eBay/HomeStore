@@ -23,8 +23,8 @@ RUN conan create -pr debug ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"
 
 RUN find /root/.conan/data/homestore -name "test_*" -exec mv {} /usr/local/bin \
 RUN find /root/.conan/data/homestore -name "perf_*" -exec mv {} /usr/local/bin \
-RUN find /root/.conan/data/homestore -name "obj_allocator_benchmark" -exec mv {} /usr/local/bin \;
-RUN find /root/.conan/data/homestore -name "vol_test.py" -exec mv {} /usr/local/bin \;
+RUN find /root/.conan/data/homestore -name "obj_allocator_benchmark" -exec mv {} /usr/local/bin \
+RUN find /root/.conan/data/homestore -name "vol_test.py" -exec mv {} /usr/local/bin \
 
 EXPOSE 5000
 
