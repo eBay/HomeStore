@@ -14,10 +14,6 @@ port=5000
 
 entrypoint="tail -f /dev/null"
 
-#entrypoint="cd ${mount_dst} &&
-#            /usr/bin/vol_test.py -t recovery >> hs_log_recovery.txt &&
-#            /usr/bin/vol_test.py -t vol_del >> hs_log_vol_del.txt"
-
 start() {
     mkdir ${mount_src}
     docker pull ${image}
@@ -43,7 +39,18 @@ login() {
 }
 
 test_normal() {
-    docker exec -it ${container} "cd /opt/bin/ && ./vol_test.py --test_suits=normal"
+    docker exec -it ${container} bash -c \
+            "cd /opt/bin/;./vol_test.py --test_suits=normal > log_normal.txt"
+}
+
+test_recovery() {
+    docker exec -it ${container} bash -c \
+            "cd /opt/bin/;./vol_test.py -t recovery > log_recovery.txt"
+}
+
+test_vol_del() {
+    docker exec -it ${container} bash -c \
+            "cd /opt/bin/;./vol_test.py -t vol_del > log_vol_del.txt"
 }
 
 case "$1" in
@@ -69,9 +76,15 @@ case "$1" in
     'test_normal')
             test_normal
             ;;
+    'test_recovery')
+            test_recovery
+            ;;
+    'test_vol_del')
+            test_vol_del
+            ;;
     *)
             echo
-            echo "Usage: $0 { start | stop | restart | logs | login | status }"
+            echo "Usage: $0 { start | stop | restart | logs | login | status | test_normal | test_recovery | test_vol_del }"
             echo
             exit 1
             ;;
