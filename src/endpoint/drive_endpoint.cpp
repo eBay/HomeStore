@@ -129,7 +129,11 @@ void DriveEndPoint::async_write(int m_sync_fd, const char* data, uint32_t size, 
     info->fd = m_sync_fd;
 
     LOGTRACE("Writing: {}", size);
-    if (io_submit(ioctx, 1, &iocb) != 1) {
+    
+    auto ret = 0;
+    while ((ret = io_submit(ioctx, 1, &iocb)) != 1 && errno == EAGAIN) {
+    }
+    if (ret != 1) {
         LOGERROR("io submit fail fd {}, size {}, offset {}, errno {}", m_sync_fd, size, offset, errno);
         comp_cb(errno, cookie);
     }
@@ -154,7 +158,10 @@ void DriveEndPoint::async_read(int m_sync_fd, char* data, uint32_t size, uint64_
     info->fd = m_sync_fd;
 
     LOGTRACE("Reading: {}", size);
-    if (io_submit(ioctx, 1, &iocb) != 1) {
+    auto ret = 0;
+    while ((ret = io_submit(ioctx, 1, &iocb)) != 1 && errno == EAGAIN) {
+    }
+    if (ret != 1) {
         LOGERROR("io submit fail fd {}, size {}, offset {}, errno {}", m_sync_fd, size, offset, errno);
         comp_cb(errno, cookie);
     }
@@ -184,8 +191,10 @@ void DriveEndPoint::async_writev(int m_sync_fd, const struct iovec* iov, int iov
         return;
     }
 #endif
-
-    if (io_submit(ioctx, 1, &iocb) != 1) {
+    auto ret = 0;
+    while ((ret = io_submit(ioctx, 1, &iocb)) != 1 && errno == EAGAIN) {
+    }
+    if (ret != 1) {
         LOGERROR("io submit fail fd {}, iovcnt {}, size {}, offset {}, errno {}", m_sync_fd, iovcnt, size, offset, errno);
         comp_cb(errno, cookie);
     }
@@ -217,7 +226,10 @@ void DriveEndPoint::async_readv(int m_sync_fd, const struct iovec* iov, int iovc
     }
 #endif
     LOGTRACE("Reading: {} vectors", iovcnt);
-    if (io_submit(ioctx, 1, &iocb) != 1) {
+    auto ret = 0;
+    while ((ret = io_submit(ioctx, 1, &iocb)) != 1 && errno == EAGAIN) {
+    }
+    if (ret != 1) {
         LOGERROR("io submit fail fd {}, iovcnt {}, size {}, offset {}, errno {}", m_sync_fd, iovcnt, size, offset, errno);
         comp_cb(errno, cookie);
     }
