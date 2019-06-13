@@ -82,9 +82,14 @@ case "$1" in
     'test_vol_del')
             test_vol_del
             ;;
+    'test_all')
+            test_normal
+            test_recovery
+            test_vol_del
+            ;;
     *)
             echo
-            echo "Usage: $0 { start | stop | restart | logs | login | status | test_normal | test_recovery | test_vol_del }"
+            echo "Usage: $0 { start | stop | restart | logs | login | status | test_normal | test_recovery | test_vol_del | test_all }"
             echo
             exit 1
             ;;
