@@ -42,12 +42,6 @@ namespace homestore {
     asserttype##_ASSERT(cond, _BLKALLOC_ASSERT_MSG(asserttype, ##__VA_ARGS__))
 #define BLKALLOC_ASSERT_OP(asserttype, optype, val1, val2, ...)   \
     asserttype##_ASSERT_##optype(val1, val2, _BLKALLOC_ASSERT_MSG(asserttype, ##__VA_ARGS__))
-#define BLKALLOC_ASSERT_EQ(asserttype, ...) BLKALLOC_ASSERT_OP(asserttype, EQ, ##__VA_ARGS__)
-#define BLKALLOC_ASSERT_NE(asserttype, ...) BLKALLOC_ASSERT_OP(asserttype, NE, ##__VA_ARGS__)
-#define BLKALLOC_ASSERT_GT(asserttype, ...) BLKALLOC_ASSERT_OP(asserttype, GT, ##__VA_ARGS__)
-#define BLKALLOC_ASSERT_GE(asserttype, ...) BLKALLOC_ASSERT_OP(asserttype, GE, ##__VA_ARGS__)
-#define BLKALLOC_ASSERT_LT(asserttype, ...) BLKALLOC_ASSERT_OP(asserttype, LT, ##__VA_ARGS__)
-#define BLKALLOC_ASSERT_LE(asserttype, ...) BLKALLOC_ASSERT_OP(asserttype, LE, ##__VA_ARGS__)
 #define BLKALLOC_DEBUG_ASSERT(...)          BLKALLOC_ASSERT(DEBUG, __VA_ARGS__)
 #define BLKALLOC_RELEASE_ASSERT(...)        BLKALLOC_ASSERT(RELEASE, __VA_ARGS__)
 #define BLKALLOC_LOG_ASSERT(...)            BLKALLOC_ASSERT(LOGMSG, __VA_ARGS__)
@@ -739,8 +733,8 @@ private:
         out_entry->set_temperature(get_blk_temperature(blknum));
     }
     uint64_t get_best_fit_cache(uint64_t blks_rqstd);
-    void incrCounter(unsigned int index, unsigned int val);
-    void decrCounter(unsigned int index, unsigned int val);
+    void incr_counter(unsigned int index, unsigned int val);
+    void decr_counter(unsigned int index, unsigned int val);
 };
 
 #define BLKID_RANGE_FIRST    0UL
