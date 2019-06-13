@@ -116,7 +116,8 @@ protected:
     boost::intrusive_ptr< virtualdev_req > vd_req((virtualdev_req*)cookie, false);
     assert(vd_req->version == 0xDEAD);
 
-    if (vd_req->err == no_error && res < 0) {
+    if (vd_req->err == no_error && res != 0) {
+        LOGERROR("seeing error on request id {} error {}", vd_req->request_id, res);
         /* TODO: it should have more specific errors */
         vd_req->err = std::make_error_condition(std::io_errc::stream);
     }

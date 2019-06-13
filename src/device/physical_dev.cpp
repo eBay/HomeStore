@@ -72,6 +72,7 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
     struct stat stat_buf;
     stat(devname.c_str(), &stat_buf);
     m_devsize = (uint64_t)stat_buf.st_size;
+    LOGINFO("opening device {} device size {} inited {}", devname, m_devsize, is_init);
     assert(sizeof(super_block) <= SUPERBLOCK_SIZE);
     auto ret = posix_memalign((void**)&m_super_blk, HomeStoreConfig::align_size, SUPERBLOCK_SIZE);
     /* super block should always be written atomically. */
@@ -94,6 +95,8 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
         throw std::system_error(errno, std::system_category(), "error while opening the device");
         return;
     }
+
+    LOGINFO("FD of {} device name {}", m_devfd, m_devname);
 
     if (is_file) {
         struct stat buf;

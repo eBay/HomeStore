@@ -76,6 +76,15 @@ public:
             homeds::ObjectAllocator< blkstore_req< Buffer > >::make_object());
     }
 
+    bool is_blk_from_cache(uint32_t offset) {
+        for (uint32_t i = 0; i < missing_pieces.size(); ++i) {
+            if (offset >= missing_pieces[i].offset && offset < missing_pieces[i].offset + size) {
+                return true;
+            }
+        }
+        return false; 
+    }
+
     virtual void free_yourself() { homeds::ObjectAllocator< blkstore_req< Buffer > >::deallocate(this); }
 protected:
     friend class homeds::ObjectAllocator< blkstore_req< Buffer > >;
@@ -210,8 +219,8 @@ public:
             }
         }
 
-        req->missing_pieces.erase(req->missing_pieces.begin(), req->missing_pieces.end());
         m_comp_cb(req);
+        req->missing_pieces.clear();
     }
 
     void update_cache(boost::intrusive_ptr< blkstore_req< Buffer > > req) {
