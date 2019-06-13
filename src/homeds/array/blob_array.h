@@ -32,7 +32,7 @@ namespace homeds {
     class Blob_Array {
     private:
         struct header {
-            uint16_t m_total_elements:15;//total elements in array
+            uint16_t m_total_elements;//total elements in array
         } __attribute__((packed));
 
         struct record {

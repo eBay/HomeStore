@@ -68,6 +68,9 @@ struct vol_config_sb : vol_sb_header {
     bool     test_flag(vol_cfg_sb_flag_t bit) { return flags & bit; }
 } __attribute((packed));
 
+//static_assert(std::is_trivially_copyable< vol_config_sb >::value, "Expecting vol_config_sb to be trivally copyable");
+static_assert(std::is_trivially_copyable< BlkId >::value, "Expecting BlkId to be trivally copyable");
+
 /* If it exceeds 8k then we need to use two buffer to keep the data consistent */
 struct vol_ondisk_sb : vol_sb_header {
     BlkId next_blkid;
@@ -131,6 +134,7 @@ class HomeBlks : public VolInterface {
 
 public:
     static VolInterface* init(const init_params& cfg);
+    static std::string   version;
     static HomeBlks*     instance();
     // Sanity check for sb;
     bool vol_sb_sanity(vol_mem_sb* sb);
@@ -185,6 +189,9 @@ public:
     static void get_metrics(sisl::HttpCallData cd);
     static void get_obj_life(sisl::HttpCallData cd);
     static void get_prometheus_metrics(sisl::HttpCallData cd);
+    static void get_log_level(sisl::HttpCallData cd);
+    static void set_log_level(sisl::HttpCallData cd);
+    static void dump_stack_trace(sisl::HttpCallData cd);
 
 private:
     BlkId                             alloc_blk();

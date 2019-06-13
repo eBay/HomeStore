@@ -92,6 +92,13 @@ struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
 
     std::error_condition get_status() const { return err; }
 
+    std::string to_string() {
+        std::stringstream ss;
+        ss << "vol_interface_req: request_id=" << request_id << " dir=" << (is_read ? "R" : "W")
+           << " outstanding_io_cnt=" << outstanding_io_cnt.get();
+        return ss.str();
+    }
+
 public:
     vol_interface_req() : outstanding_io_cnt(0), refcount(0), is_fail_completed(false)
     {}

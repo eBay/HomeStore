@@ -12,11 +12,14 @@ SDS_OPTION_GROUP(home_blks, (hb_stats_port, "", "hb_stats_port", "Stats port for
 using namespace homestore;
 
 HomeBlks* HomeBlks::_instance = nullptr;
+std::string HomeBlks::version = PACKAGE_VERSION;
 
 VolInterface* homestore::vol_homestore_init(const init_params& cfg) { return (HomeBlks::init(cfg)); }
 
 VolInterface* HomeBlks::init(const init_params& cfg) {
     fLI::FLAGS_minloglevel = 3;
+
+    LOGINFO("HomeBlks version: {}", HomeBlks::version);
     _instance = new HomeBlks(cfg);
     return ((VolInterface*)(_instance));
 }
@@ -772,7 +775,10 @@ void HomeBlks::init_thread() {
                 handler_info("/api/v1/version", HomeBlks::get_version, (void *)this),
                 handler_info("/api/v1/getMetrics", HomeBlks::get_metrics, (void *)this),
                 handler_info("/api/v1/getObjLife", HomeBlks::get_obj_life, (void *)this),
-                handler_info("/metrics", HomeBlks::get_prometheus_metrics, (void *)this)
+                handler_info("/metrics", HomeBlks::get_prometheus_metrics, (void *)this),
+                handler_info("/api/v1/getLogLevel", HomeBlks::get_log_level, (void *)this),
+                handler_info("/api/v1/setLogLevel", HomeBlks::set_log_level, (void *)this),
+                handler_info("/api/v1/dumpStackTrace", HomeBlks::dump_stack_trace, (void *)this),
         }}));
         m_http_server->start();
 
@@ -825,7 +831,7 @@ void HomeBlks::print_tree(const VolumePtr& vol) { vol->print_tree(); }
 
 void HomeBlks::get_version(sisl::HttpCallData cd) {
     HomeBlks *hb = (HomeBlks *)(cd->cookie());
-    hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, "HomeBlks version: 1.0");
+    hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, std::string("HomeBlks: ") + HomeBlks::version);
 }
 
 void HomeBlks::get_metrics(sisl::HttpCallData cd) {
@@ -850,7 +856,48 @@ void HomeBlks::get_obj_life(sisl::HttpCallData cd) {
     hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, j.dump());
 }
 
-// 
+void HomeBlks::set_log_level(sisl::HttpCallData cd) {
+    HomeBlks *hb = (HomeBlks *)(cd->cookie());
+    auto req = cd->request();
+
+    const evhtp_kv_t* _new_log_level = nullptr;
+    const evhtp_kv_t* _new_log_module = nullptr;
+    const char* logmodule = nullptr;
+    char* endptr = nullptr;
+
+    _new_log_module = evhtp_kvs_find_kv(req->uri->query, "logmodule");
+    if (_new_log_module) {
+        logmodule = _new_log_module->val;
+    }
+
+    _new_log_level = evhtp_kvs_find_kv(req->uri->query, "loglevel");
+    if (!_new_log_level) {
+        hb->m_http_server->respond_NOTOK(cd, EVHTP_RES_BADREQ, "Invalid loglevel param!");
+        return;
+    }
+    auto new_log_level = _new_log_level->val;
+
+    if (logmodule == nullptr) {
+        sds_logging::SetAllModuleLogLevel(spdlog::level::from_str(new_log_level));
+    } else {
+        sds_logging::SetModuleLogLevel(logmodule, spdlog::level::from_str(new_log_level));
+    }
+
+    hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, sds_logging::GetAllModuleLogLevel().dump());
+}
+
+void HomeBlks::get_log_level(sisl::HttpCallData cd) {
+    HomeBlks *hb = (HomeBlks *)(cd->cookie());
+    hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, sds_logging::GetAllModuleLogLevel().dump());
+}
+
+void HomeBlks::dump_stack_trace(sisl::HttpCallData cd) {
+    HomeBlks *hb = (HomeBlks *)(cd->cookie());
+    sds_logging::log_stack_trace(true);
+    hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, "Look for stack trace in the log file");
+}
+
+//
 // free resources shared accross volumes
 //
 void HomeBlks::shutdown_process(shutdown_comp_callback shutdown_comp_cb, bool force) {

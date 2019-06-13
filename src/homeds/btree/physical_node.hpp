@@ -48,6 +48,28 @@ typedef struct __attribute__((__packed__)) {
     bnodeid_t edge_entry;
 } persistent_hdr_t;
 
+#ifndef NO_CHECKSUM
+struct verify_result{
+    uint8_t act_magic;
+    uint16_t act_checksum;
+    uint8_t exp_magic;
+    uint16_t exp_checksum;
+
+    std::string to_string() const {
+        std::stringstream ss;
+        ss  << "Actual magic=" << act_magic
+            << "Expected magic=" << exp_magic
+            << "Actual checksum=" << act_checksum
+            << "Exected checksum=" << exp_checksum;
+        return ss.str();
+    }
+
+    friend ostream& operator<<(ostream& os, const verify_result& vr) {
+        os << vr.to_string();
+        return os;
+    }
+};
+#endif
 #define physical_node_t  PhysicalNode<VNode, K, V, NodeSize>
 
 template <typename VNode, typename K, typename V, size_t NodeSize>
@@ -117,11 +139,13 @@ protected:
         get_persistent_header()->checksum =
             crc16_t10dif(init_crc_16, m_node_area, size);
     }
-
-    bool verify_node(size_t size) {
-        return (get_magic() == MAGICAL_VALUE && get_checksum() ==
-                crc16_t10dif(init_crc_16, m_node_area, size))?
-            true : false;
+    
+    bool verify_node(size_t size, verify_result& vr) {
+        vr.act_magic = get_magic();
+        vr.exp_magic = MAGICAL_VALUE;
+        vr.act_checksum = get_checksum();
+        vr.exp_checksum = crc16_t10dif(init_crc_16, m_node_area, size);
+        return (vr.act_magic == vr.exp_magic && vr.act_checksum == vr.exp_checksum)? true : false;
     }
 #endif
 
@@ -131,18 +155,22 @@ protected:
 
     void set_total_entries(uint32_t n) {
         get_persistent_header()->nentries = n;
+        assert(get_magic()==MAGICAL_VALUE);
     }
 
     void inc_entries() {
         get_persistent_header()->nentries++;
+        assert(get_magic()==MAGICAL_VALUE);
     }
 
     void dec_entries() {
         get_persistent_header()->nentries--;
+        assert(get_magic()==MAGICAL_VALUE);
     }
 
     void add_entries(uint32_t addn) {
         get_persistent_header()->nentries += addn;
+        assert(get_magic()==MAGICAL_VALUE);
     }
 
     void sub_entries(uint32_t subn) {
@@ -151,6 +179,7 @@ protected:
 
     void set_node_id(bnodeid_t id) {
         get_persistent_header()->node_id = id;
+        assert(get_magic()==MAGICAL_VALUE);
     }
 
     bnodeid_t get_node_id() const {
@@ -168,6 +197,7 @@ protected:
 
     void set_leaf(bool leaf) {
         get_persistent_header()->leaf = leaf;
+        assert(get_magic()==MAGICAL_VALUE);
     }
 
     btree_node_type get_node_type() const {
@@ -176,6 +206,7 @@ protected:
 
     void set_node_type(btree_node_type t) {
         get_persistent_header()->node_type = (uint32_t)t;
+        assert(get_magic()==MAGICAL_VALUE);
     }
 
     uint64_t get_gen() const {
@@ -184,18 +215,22 @@ protected:
 
     void inc_gen() {
         get_persistent_header()->node_gen++;
+        assert(get_magic()==MAGICAL_VALUE);
     }
 
     void flip_pc_gen_flag() {
         get_persistent_header()->node_id.m_pc_gen_flag = get_persistent_header()->node_id.m_pc_gen_flag ? 0 : 1;
+        assert(get_magic()==MAGICAL_VALUE);
     }
     
     void set_gen(uint64_t g) {
         get_persistent_header()->node_gen = g;
+        assert(get_magic()==MAGICAL_VALUE);
     }
 
     void set_valid_node(bool valid) {
         get_persistent_header()->valid_node = (valid ? 1 : 0);
+        assert(get_magic()==MAGICAL_VALUE);
     }
 
     bool is_valid_node() const {
@@ -228,6 +263,7 @@ protected:
 
     void set_next_bnode(bnodeid_t b) {
         get_persistent_header()->next_node = b;
+        assert(get_magic()==MAGICAL_VALUE);
     }
 
     bnodeid_t get_edge_id() const {
@@ -243,6 +279,7 @@ protected:
     // Assumption: Node lock is already taken
     auto find(const BtreeSearchRange &range, BtreeKey *outkey, BtreeValue *outval, bool copy_key = true,
             bool copy_val = true) const {
+        assert(get_magic()==MAGICAL_VALUE);
         auto result = bsearch_node(range);
 
         if (result.end_of_search_index == (int)get_total_entries() && !has_valid_edge()) {
@@ -280,6 +317,7 @@ protected:
     uint32_t get_all(const BtreeSearchRange &range, uint32_t max_count,
                                 int &start_ind, int &end_ind,
                      std::vector<std::pair<K, V>> *out_values = nullptr) {
+        assert(get_magic()==MAGICAL_VALUE);
         auto count = 0U;
         // Get the start index of the search range.
         BtreeSearchRange sr = range.extract_start_of_range();
@@ -349,6 +387,7 @@ protected:
 #endif
 
     bool put(const BtreeKey &key, const BtreeValue &val, btree_put_type put_type, BtreeValue &existing_val) {
+        assert(get_magic()==MAGICAL_VALUE);
         auto result = find(key, nullptr, nullptr);
         bool ret = true;
 
@@ -373,6 +412,7 @@ protected:
         } else {
             assert(0);
         }
+        assert(get_magic()==MAGICAL_VALUE);
 
         return ret;
     }
@@ -381,6 +421,7 @@ protected:
         auto result = find(key, nullptr, nullptr);
         assert(!is_leaf() || (!result.found)); // We do not support duplicate keys yet
         to_variant_node()->insert(result.end_of_search_index, key, val);
+        assert(get_magic()==MAGICAL_VALUE);
     }
 
     bool remove_one(const BtreeSearchRange &range, BtreeKey *outkey, BtreeValue *outval) {
@@ -399,6 +440,7 @@ protected:
         to_variant_node()->get_nth_value(index, &nth_val, false);
         nth_val.append_blob(val,existing_val);
         to_variant_node()->update(index, key, nth_val);
+        assert(get_magic()==MAGICAL_VALUE);
     }
 
     /* Update the key and value pair and after update if outkey and outval are non-nullptr, it fills them with
@@ -407,16 +449,19 @@ protected:
         auto result = find(key, outkey, outval);
         assert(result.found);
         to_variant_node()->update(result.end_of_search_index, val);
+        assert(get_magic()==MAGICAL_VALUE);
     }
 
     //////////// Edge Related Methods ///////////////
     void invalidate_edge() {
         set_edge_id(bnodeid::empty_bnodeid());
+        assert(get_magic()==MAGICAL_VALUE);
     }
 
     void set_edge_value(const BtreeValue &v) {
         BtreeNodeInfo *bni = (BtreeNodeInfo *) &v;
         set_edge_id(bni->bnode_id());
+        assert(get_magic()==MAGICAL_VALUE);
     }
 
     void get_edge_value(BtreeValue *v) const {
@@ -464,6 +509,7 @@ protected:
 protected:
     
     auto bsearch_node(const BtreeSearchRange &range) const {
+        assert(get_magic()==MAGICAL_VALUE);
         auto ret = bsearch(-1, get_total_entries(), range);
         auto selection = range.selection_option();
        
