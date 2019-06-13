@@ -37,6 +37,7 @@ HomeBlks::HomeBlks(const init_params& cfg) :
         m_init_finished(false) {
 
     _instance = this;
+    LOGINFO("homeblks initing {}", m_cfg.to_string());
     /* set the homestore config parameters */
     populate_disk_attrs();
     /* If these parameters changes then we need to take care of upgrade/revert in device manager */
@@ -173,7 +174,9 @@ VolumePtr HomeBlks::create_volume(const vol_params& params) {
         } else {
             m_size_avail -= params.size;
         }
-        LOGINFO("vol created {}", params.vol_name);
+        LOGINFO("vol created {}", params.to_string());
+        auto system_cap = get_system_capacity();
+        LOGINFO("{}", system_cap.to_string());
         return it->second;
     } catch (const std::exception& e) { LOGERROR("{}", e.what()); }
     return nullptr;
@@ -622,6 +625,10 @@ void HomeBlks::scan_volumes() {
 
 void HomeBlks::init_done(std::error_condition err, const out_params& params) {
     LOGINFO("init done status {}", err.message());
+    if (!err) {
+        auto system_cap = get_system_capacity();
+        LOGINFO("{}", system_cap.to_string());
+    }
     m_cfg.init_done_cb(err, m_out_params);
 }
 
