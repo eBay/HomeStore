@@ -19,6 +19,9 @@
 #include <utility/obj_life_counter.hpp>
 #include <atomic>
 #include <boost/optional.hpp>
+#include <sstream>
+#include <string>  
+#include <iostream>
 
 namespace homestore {
 class Volume;
@@ -35,6 +38,12 @@ struct cap_attrs {
     uint64_t used_metadata_size;
     uint64_t used_total_size;
     uint64_t initial_total_size;
+    std::string to_string() {
+        std::stringstream ss;
+        ss << "used_data_size = " << used_data_size << ", used_metadata_size = " << used_metadata_size 
+            << ", used_total_size = " << used_total_size << ", initial_total_size = " << initial_total_size;
+        return ss.str();
+    }
 };
 
 struct buf_info {
@@ -134,6 +143,12 @@ struct vol_params {
     io_comp_callback   io_comp_cb;
 #define VOL_NAME_SIZE 100
     char vol_name[VOL_NAME_SIZE];
+
+    std::string to_string() const {
+        std::stringstream ss;
+        ss << "page_size=" << page_size << ",size=" << size <<",vol_name=" << vol_name;
+        return ss.str();
+    }
 };
 
 struct out_params {
@@ -182,6 +197,18 @@ public:
     vol_state_change_callback vol_state_change_cb;
 
 public:
+    std::string to_string() {
+        std::stringstream ss;
+        ss << "min_virtual_page_size=" << min_virtual_page_size << ",cache_size=" << cache_size <<",disk_init=" << disk_init 
+            << ",is_file=" << is_file << ",flag =" << flag 
+            << ",number of devices =" << devices.size();
+        ss << "device names = ";
+        for (uint32_t i = 0; i < devices.size(); ++i) {
+            ss << devices[i].dev_names;
+            ss << ", ";
+        }
+        return ss.str();
+    }
     init_params() = default;
 };
 

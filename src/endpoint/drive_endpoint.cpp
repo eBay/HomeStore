@@ -102,14 +102,17 @@ void DriveEndPoint::process_completions(int fd, void* cookie, int event) {
         struct iocb_info* info = static_cast< iocb_info* >(events[i].obj);
         struct iocb*      iocb = static_cast< struct iocb* >(info);
         iocb_list.push(info);
-        comp_cb(events[i].res, (uint8_t*)events[i].data);
+        if (info->size != events[i].res || events[i].res2) {
+            LOGERROR("io is not completed properly. size read/written {} info {} error {}", events[i].res, 
+                        info->to_string(), events[i].res2);
+        }
+        comp_cb(events[i].res2, (uint8_t*)events[i].data);
     }
 }
 
 void DriveEndPoint::async_write(int m_sync_fd, const char* data, uint32_t size, uint64_t offset, uint8_t* cookie) {
     if (iocb_list.empty()) {
         sync_write(m_sync_fd, data, size, offset);
-        comp_cb(0, cookie);
         return;
     }
 
@@ -121,9 +124,13 @@ void DriveEndPoint::async_write(int m_sync_fd, const char* data, uint32_t size, 
     io_set_eventfd(iocb, ev_fd);
     iocb->data = cookie;
     info->is_read = false;
+    info->size = size;
+    info->offset = offset;
+    info->fd = m_sync_fd;
 
     LOGTRACE("Writing: {}", size);
     if (io_submit(ioctx, 1, &iocb) != 1) {
+        LOGERROR("io submit fail fd {}, size {}, offset {}, errno {}", m_sync_fd, size, offset, errno);
         comp_cb(errno, cookie);
     }
 }
@@ -132,7 +139,6 @@ void DriveEndPoint::async_read(int m_sync_fd, char* data, uint32_t size, uint64_
 
     if (iocb_list.empty()) {
         sync_read(m_sync_fd, data, size, offset);
-        comp_cb(0, cookie);
         return;
     }
     struct iocb_info* info = iocb_list.top();
@@ -143,9 +149,13 @@ void DriveEndPoint::async_read(int m_sync_fd, char* data, uint32_t size, uint64_
     io_set_eventfd(iocb, ev_fd);
     iocb->data = cookie;
     info->is_read = true;
+    info->size = size;
+    info->offset = offset;
+    info->fd = m_sync_fd;
 
     LOGTRACE("Reading: {}", size);
     if (io_submit(ioctx, 1, &iocb) != 1) {
+        LOGERROR("io submit fail fd {}, size {}, offset {}, errno {}", m_sync_fd, size, offset, errno);
         comp_cb(errno, cookie);
     }
 }
@@ -155,7 +165,6 @@ void DriveEndPoint::async_writev(int m_sync_fd, const struct iovec* iov, int iov
 
     if (iocb_list.empty()) {
         sync_writev(m_sync_fd, iov, iovcnt, size, offset);
-        comp_cb(0, cookie);
         return;
     }
     struct iocb_info* info = iocb_list.top();
@@ -165,6 +174,9 @@ void DriveEndPoint::async_writev(int m_sync_fd, const struct iovec* iov, int iov
     io_set_eventfd(iocb, ev_fd);
     iocb->data = cookie;
     info->is_read = false;
+    info->size = size;
+    info->offset = offset;
+    info->fd = m_sync_fd;
 
 #ifdef _PRERELEASE
     if (homestore_flip->test_flip("io_write_error_flip")) {
@@ -174,6 +186,7 @@ void DriveEndPoint::async_writev(int m_sync_fd, const struct iovec* iov, int iov
 #endif
 
     if (io_submit(ioctx, 1, &iocb) != 1) {
+        LOGERROR("io submit fail fd {}, iovcnt {}, size {}, offset {}, errno {}", m_sync_fd, iovcnt, size, offset, errno);
         comp_cb(errno, cookie);
     }
 }
@@ -183,7 +196,6 @@ void DriveEndPoint::async_readv(int m_sync_fd, const struct iovec* iov, int iovc
 
     if (iocb_list.empty()) {
         sync_readv(m_sync_fd, iov, iovcnt, size, offset);
-        comp_cb(0, cookie);
         return;
     }
     struct iocb_info* info = iocb_list.top();
@@ -194,6 +206,9 @@ void DriveEndPoint::async_readv(int m_sync_fd, const struct iovec* iov, int iovc
     io_set_eventfd(iocb, ev_fd);
     iocb->data = cookie;
     info->is_read = true;
+    info->size = size;
+    info->offset = offset;
+    info->fd = m_sync_fd;
 
 #ifdef _PRERELEASE
     if (homestore_flip->test_flip("io_read_error_flip", iovcnt, size)) {
@@ -203,6 +218,7 @@ void DriveEndPoint::async_readv(int m_sync_fd, const struct iovec* iov, int iovc
 #endif
     LOGTRACE("Reading: {} vectors", iovcnt);
     if (io_submit(ioctx, 1, &iocb) != 1) {
+        LOGERROR("io submit fail fd {}, iovcnt {}, size {}, offset {}, errno {}", m_sync_fd, iovcnt, size, offset, errno);
         comp_cb(errno, cookie);
     }
 }
@@ -218,7 +234,7 @@ void DriveEndPoint::sync_write(int m_sync_fd, const char* data, uint32_t size, u
     if (written_size != size) {
         std::stringstream ss;
         ss << "Error trying to write offset " << offset << " size to write = " << size
-           << " size written = " << written_size << "\n";
+           << " size written = " << written_size << " err no" << errno << " m_sync_fd" << m_sync_fd << "\n";
         folly::throwSystemError(ss.str());
     }
 }
@@ -233,7 +249,7 @@ void DriveEndPoint::sync_writev(int m_sync_fd, const struct iovec* iov, int iovc
     if (written_size != size) {
         std::stringstream ss;
         ss << "Error trying to write offset " << offset << " size to write = " << size
-           << " size written = " << written_size << "\n";
+           << " size written = " << written_size << "err no" << errno << " m_sync_fd" << m_sync_fd << "\n";
         folly::throwSystemError(ss.str());
     }
 }
@@ -249,7 +265,7 @@ void DriveEndPoint::sync_read(int m_sync_fd, char* data, uint32_t size, uint64_t
         std::stringstream ss;
         int               i = errno;
         ss << "Error trying to read offset " << offset << " size to read = " << size << " size read = " << read_size
-           << "\n";
+           << "err no" << errno << " m_sync_fd" << m_sync_fd << "\n";
         folly::throwSystemError(ss.str());
     }
 }
@@ -264,7 +280,7 @@ void DriveEndPoint::sync_readv(int m_sync_fd, const struct iovec* iov, int iovcn
     if (read_size != size) {
         std::stringstream ss;
         ss << "Error trying to read offset " << offset << " size to read = " << size << " size read = " << read_size
-           << "\n";
+           << "err no" << errno << " m_sync_fd" << m_sync_fd << "\n";
         folly::throwSystemError(ss.str());
     }
 }
