@@ -19,7 +19,7 @@ RUN conan install --build missing ${SOURCE_PATH}
 
 # Build the variants we will publish
 ENV ASAN_OPTIONS=detect_leaks=0
-RUN conan create -pr debug ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"
+RUN conan create ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"
 
 RUN find /root/.conan/data/homestore -name "test_*" -exec mv {} /usr/local/bin \
 RUN find /root/.conan/data/homestore -name "perf_*" -exec mv {} /usr/local/bin \
