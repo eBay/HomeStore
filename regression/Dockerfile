@@ -15,14 +15,14 @@ COPY src/ ${SOURCE_PATH}src
 COPY regression/run_regression /usr/local/bin
 
 WORKDIR /output
-RUN conan install --build missing ${SOURCE_PATH}
+RUN conan install -pr debug --build missing ${SOURCE_PATH}
 
 # Build the variants we will publish
 ENV ASAN_OPTIONS=detect_leaks=0
 RUN conan create -pr debug ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"
 
-RUN find /root/.conan/data/homestore -name "test_" -exec mv {} /usr/local/bin \;
-    find /root/.conan/data/homestore -name "perf_" -exec mv {} /usr/local/bin \;
+RUN find /root/.conan/data/homestore -name "test_*" -exec mv {} /usr/local/bin \;
+    find /root/.conan/data/homestore -name "perf_*" -exec mv {} /usr/local/bin \;
     find /root/.conan/data/homestore -name "obj_allocator_benchmark" -exec mv {} /usr/local/bin \;
     find /root/.conan/data/homestore -name "vol_test.py" -exec mv {} /usr/local/bin \;
 
