@@ -39,8 +39,11 @@ pipeline {
                 branch "${CONAN_CHANNEL}"
             }
             steps {
+                sh "docker run --rm ${PROJECT}-${TAG}"
+                sh "docker run --rm ${PROJECT}-${TAG}-disco"
+                slackSend channel: '#conan-pkgs', message: "*${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}* has been uploaded to conan repo."
                 withDockerRegistry([credentialsId: 'sds+sds', url: "https://ecr.vip.ebayc3.com"]) {
-                    sh "docker tag ${PROJECT}-${TAG}-disco ecr.vip.ebayc3.com/${ORG}/${PROJECT}:${CONAN_CHANNEL}-regression"
+                    sh "docker tag ${PROJECT}-${TAG}-regression ecr.vip.ebayc3.com/${ORG}/${PROJECT}:${CONAN_CHANNEL}-regression"
                     sh "docker push ecr.vip.ebayc3.com/${ORG}/${PROJECT}:${CONAN_CHANNEL}-regression"
                     sh "docker rmi ecr.vip.ebayc3.com/${ORG}/${PROJECT}:${CONAN_CHANNEL}-regression"
                     slackSend channel: '#conan-pkgs', message: "*${PROJECT}:${CONAN_CHANNEL}-regression* has been pushed to ECR."
