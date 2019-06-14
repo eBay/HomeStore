@@ -38,7 +38,7 @@ class HomestoreConan(ConanFile):
                 "sds_logging/5.2.0@sds/testing",
                 "sds_options/0.1.5@sds/testing",
                 "isa-l/2.21.0@oss/stable",
-                "flip/0.0.4@sds/testing",
+                "flip/0.1.0@sds/testing",
                 "zstd/1.3.8@bincrafters/stable",
                 )
 

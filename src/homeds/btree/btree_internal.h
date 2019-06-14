@@ -78,10 +78,24 @@ ENUM(btree_status_t, uint32_t, success, not_found, item_found, closest_found, cl
 #define BT_ASSERT_LT(asserttype, ...) BT_ASSERT_OP(asserttype, LT, ##__VA_ARGS__)
 #define BT_ASSERT_LE(asserttype, ...) BT_ASSERT_OP(asserttype, LE, ##__VA_ARGS__)
 
+/* Assert with log messages. Parameters are
+ * cond: Condition which when false will trigger the assert
+ * node: [optional]Btree node whose node details has to be printed
+ * fmt: Format message
+ * ...: Any parameters to pass to these format messages
+ */
 #define BT_DEBUG_ASSERT(...) BT_ASSERT(DEBUG, __VA_ARGS__)
 #define BT_RELEASE_ASSERT(...) BT_ASSERT(RELEASE, __VA_ARGS__)
 #define BT_LOG_ASSERT(...) BT_ASSERT(LOGMSG, __VA_ARGS__)
 
+/* Assert if comparision does not match. Parameters are
+ * Comparator: What comparison to do, valid values are one of [EQ, NE, GT, GE, LT, LE]
+ * val1: LHS to compare
+ * val2: RHS to compare
+ * node: [optional]Btree node whose node details has to be printed
+ * fmt: [optional] Additional message
+ * ...: Any parameters to pass to these format messages
+ */
 #define BT_DEBUG_ASSERT_CMP(optype, ...) BT_ASSERT_OP(DEBUG, optype, ##__VA_ARGS__)
 #define BT_RELEASE_ASSERT_CMP(optype, ...) BT_ASSERT_OP(RELEASE, optype, ##__VA_ARGS__)
 #define BT_LOG_ASSERT_CMP(optype, ...) BT_ASSERT_OP(LOGMSG, optype, ##__VA_ARGS__)
