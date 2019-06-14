@@ -1,5 +1,5 @@
 # ##########   #######   ############
-FROM ecr.vip.ebayc3.com/sds/sds_cpp_base:1.25
+FROM ecr.vip.ebayc3.com/sds/sds_cpp_base:2.4
 LABEL description="Automated SDS compilation"
 
 ARG CONAN_CHANNEL
@@ -23,12 +23,12 @@ WORKDIR /output
 ENV ASAN_OPTIONS=detect_leaks=0
 RUN conan create -pr debug ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"
 RUN conan create ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"
-RUN conan create -pr bionic_nosanitize ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"
+RUN conan create -pr nosanitize ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"
 
 # Generates coverage reports
 RUN set -eux; \
     eval $(grep 'name =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,name,PKG_NAME,'); \
-    conan install -o ${PKG_NAME}:coverage=True -pr bionic_nosanitize ${SOURCE_PATH}; \
+    conan install -o ${PKG_NAME}:coverage=True -pr nosanitize ${SOURCE_PATH}; \
     conan build ${SOURCE_PATH};
 
 CMD set -eux; \

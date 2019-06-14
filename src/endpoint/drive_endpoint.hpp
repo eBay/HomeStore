@@ -5,6 +5,8 @@
 
 #include <unistd.h>
 #include <string>
+#include <iostream> 
+#include <sstream> 
 #include <iomgr/iomgr.hpp>
 #include <stack>
 #include <atomic>
@@ -28,7 +30,16 @@ typedef std::function< void (int64_t res, uint8_t* cookie) > comp_callback;
 #ifdef linux
 struct iocb_info : public iocb {
 	bool is_read;
+    uint32_t size;
+    uint64_t offset;
 	Clock::time_point start_time;
+    int fd;
+        
+    std::string to_string() const {
+        std::stringstream ss;
+        ss << "is_read = " << is_read << ", size = " << size << ", offset = " << offset << ", fd = " << fd;
+        return ss.str();
+    }
 };
 
 class DriveEndPoint : public iomgr::EndPoint {
