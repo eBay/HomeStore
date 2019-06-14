@@ -48,6 +48,7 @@ pipeline {
                     sh "docker rmi ecr.vip.ebayc3.com/${ORG}/${PROJECT}:${CONAN_CHANNEL}-regression"
                     slackSend channel: '#conan-pkgs', message: "*${PROJECT}:${CONAN_CHANNEL}-regression* has been pushed to ECR."
                 }
+            }
         }
     }
 
