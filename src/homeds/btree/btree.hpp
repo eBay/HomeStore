@@ -1053,9 +1053,12 @@ done:
         }
 
 #ifdef _PRERELEASE
-        if (homestore_flip->test_flip("btree_upgrade_node_fail", child_node->is_leaf())) {
+    {
+        bool is_leaf = child_node ? child_node->is_leaf() : false;
+        if (homestore_flip->test_flip("btree_upgrade_node_fail", false)) {
             ret = btree_status_t::retry;
         }
+    }
 #endif
 
         BT_DEBUG_ASSERT_CMP(EQ, my_node->m_common_header.is_lock, 1, my_node);

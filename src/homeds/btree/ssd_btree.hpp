@@ -361,7 +361,7 @@ public:
             verify_result vr;
             auto is_match = physical_node->verify_node(get_node_area_size(store),vr);
             if (!is_match) {
-                LOGERROR("mismatch node: {}", vr.to_string());
+                LOGERROR("mismatch node: {} is it from cache", vr.to_string());
                 assert(0);
                 abort();
             }
