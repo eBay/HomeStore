@@ -20,7 +20,6 @@ pipeline {
         stage('Build') {
             steps {
                 sh "docker build --rm --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_PASS=${CONAN_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${TAG} ."
-                sh "docker build -f Dockerfile.disco --rm --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_PASS=${CONAN_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${TAG}-disco ."
             }
         }
 
@@ -39,7 +38,6 @@ pipeline {
             }
             steps {
                 sh "docker run --rm ${PROJECT}-${TAG}"
-                sh "docker run --rm ${PROJECT}-${TAG}-disco"
                 slackSend channel: '#conan-pkgs', message: "*${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}* has been uploaded to conan repo."
             }
         }
@@ -49,7 +47,6 @@ pipeline {
         always {
             sh "docker rm -f ${PROJECT}_coverage || true"
             sh "docker rmi -f ${PROJECT}-${TAG}"
-            sh "docker rmi -f ${PROJECT}-${TAG}-disco"
         }
     }
 }
