@@ -77,7 +77,8 @@ void DriveEndPoint::init_local() {
         ss << "io_setup failed with ret status " << err << " errno = " << errno;
         folly::throwSystemError(ss.str());
     }
-
+    
+    assert(ioctx);
     for (int i = 0; i < MAX_OUTSTANDING_IO; i++) {
         struct iocb_info* info = (struct iocb_info*)malloc(sizeof(struct iocb_info));
         iocb_list.push(info);
@@ -206,7 +207,8 @@ void DriveEndPoint::async_writev(int m_sync_fd, const struct iovec* iov, int iov
     while ((ret = io_submit(ioctx, 1, &iocb)) != 1 && errno == EAGAIN) {
     }
     if (ret != 1) {
-        LOGERROR("io submit fail fd {}, iovcnt {}, size {}, offset {}, errno {}", m_sync_fd, iovcnt, size, offset, errno);
+        LOGERROR("io submit fail fd {}, iovcnt {}, size {}, offset {}, errno {}, ioctx {}", m_sync_fd, 
+                    iovcnt, size, offset, errno, (uint64_t)ioctx);
         comp_cb(errno, cookie);
     }
 }
