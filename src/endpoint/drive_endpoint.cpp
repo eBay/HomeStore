@@ -70,7 +70,15 @@ void DriveEndPoint::init_local() {
                         std::bind(&DriveEndPoint::process_completions, this, std::placeholders::_1,
                                   std::placeholders::_2, std::placeholders::_3),
                         EPOLLIN, 0, NULL);
-    io_setup(MAX_OUTSTANDING_IO, &ioctx);
+    int err = io_setup(MAX_OUTSTANDING_IO, &ioctx);
+    if (err) {
+        LOGCRITICAL("io_setup failed with ret status {} errno {}", err, errno);
+        std::stringstream ss;
+        ss << "io_setup failed with ret status " << err << " errno = " << errno;
+        folly::throwSystemError(ss.str());
+    }
+    
+    assert(ioctx);
     for (int i = 0; i < MAX_OUTSTANDING_IO; i++) {
         struct iocb_info* info = (struct iocb_info*)malloc(sizeof(struct iocb_info));
         iocb_list.push(info);
@@ -95,6 +103,7 @@ void DriveEndPoint::process_completions(int fd, void* cookie, int event) {
     }
     if (ret < 0) {
         /* TODO how to handle it */
+        LOGERROR("process_completions ret is less then zero {}", ret);
         cmp_err++;
     }
     for (int i = 0; i < ret; i++) {
@@ -113,6 +122,7 @@ void DriveEndPoint::process_completions(int fd, void* cookie, int event) {
 void DriveEndPoint::async_write(int m_sync_fd, const char* data, uint32_t size, uint64_t offset, uint8_t* cookie) {
     if (iocb_list.empty()) {
         sync_write(m_sync_fd, data, size, offset);
+        comp_cb(0, cookie);
         return;
     }
 
@@ -143,6 +153,7 @@ void DriveEndPoint::async_read(int m_sync_fd, char* data, uint32_t size, uint64_
 
     if (iocb_list.empty()) {
         sync_read(m_sync_fd, data, size, offset);
+        comp_cb(0, cookie);
         return;
     }
     struct iocb_info* info = iocb_list.top();
@@ -172,6 +183,7 @@ void DriveEndPoint::async_writev(int m_sync_fd, const struct iovec* iov, int iov
 
     if (iocb_list.empty()) {
         sync_writev(m_sync_fd, iov, iovcnt, size, offset);
+        comp_cb(0, cookie);
         return;
     }
     struct iocb_info* info = iocb_list.top();
@@ -195,7 +207,8 @@ void DriveEndPoint::async_writev(int m_sync_fd, const struct iovec* iov, int iov
     while ((ret = io_submit(ioctx, 1, &iocb)) != 1 && errno == EAGAIN) {
     }
     if (ret != 1) {
-        LOGERROR("io submit fail fd {}, iovcnt {}, size {}, offset {}, errno {}", m_sync_fd, iovcnt, size, offset, errno);
+        LOGERROR("io submit fail fd {}, iovcnt {}, size {}, offset {}, errno {}, ioctx {}", m_sync_fd, 
+                    iovcnt, size, offset, errno, (uint64_t)ioctx);
         comp_cb(errno, cookie);
     }
 }
@@ -205,6 +218,7 @@ void DriveEndPoint::async_readv(int m_sync_fd, const struct iovec* iov, int iovc
 
     if (iocb_list.empty()) {
         sync_readv(m_sync_fd, iov, iovcnt, size, offset);
+        comp_cb(0, cookie);
         return;
     }
     struct iocb_info* info = iocb_list.top();
