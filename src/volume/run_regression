@@ -40,17 +40,17 @@ login() {
 
 test_normal() {
     docker exec -it ${container} bash -c \
-            "cd /opt/bin/;./vol_test.py --test_suits=normal > log_normal.txt"
+        "cd /usr/local/bin; python vol_test.py --test_suits=normal >> ${mount_dst}/log_normal.txt"
 }
 
 test_recovery() {
     docker exec -it ${container} bash -c \
-            "cd /opt/bin/;./vol_test.py -t recovery > log_recovery.txt"
+        "cd /usr/local/bin; python vol_test.py --test_suits=recovery >> ${mount_dst}/log_recovery.txt"
 }
 
 test_vol_del() {
     docker exec -it ${container} bash -c \
-            "cd /opt/bin/;./vol_test.py -t vol_del > log_vol_del.txt"
+        "cd /usr/local/bin; python vol_test.py --test_suits=vol_del >> ${mount_dst}/log_vol_del.txt"
 }
 
 case "$1" in

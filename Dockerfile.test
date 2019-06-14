@@ -12,7 +12,7 @@ COPY conanfile.py ${SOURCE_PATH}
 COPY cmake/ ${SOURCE_PATH}cmake
 COPY CMakeLists.txt ${SOURCE_PATH}
 COPY src/ ${SOURCE_PATH}src
-COPY regression/run_regression /usr/local/bin
+COPY src/volume/run_regression /usr/local/bin
 
 WORKDIR /output
 RUN conan install --build missing ${SOURCE_PATH}
