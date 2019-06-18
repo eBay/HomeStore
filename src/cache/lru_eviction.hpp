@@ -6,6 +6,7 @@
 
 #include <mutex>
 #include "cache_common.hpp"
+#include "cache_log.hpp"
 
 namespace homestore {
 
@@ -60,11 +61,11 @@ public:
                 /* reinsert it at the same position */
                 it = m_list.insert(it, *rec);
                 count++;
-                LOGDEBUG("reinserting it"); 
+                CACHE_LOG(DEBUG, cache, "reinserting it"); 
             }
             
             if (count) { 
-                LOGDEBUG("LRU ejection had to skip {} entries", count); 
+                CACHE_LOG(DEBUG, cache, "LRU ejection had to skip {} entries", count); 
             }
         }
 

@@ -3,10 +3,12 @@
 //
 
 #include "cache.h"
+#include "cache_common.hpp"
+#include "cache_log.hpp"
 #include "homeds/memory/obj_allocator.hpp"
 #include <memory>
-#include "cache_common.hpp"
-#include <sds_logging/logging.h>
+
+SDS_LOGGING_DECL(cache)
 
 namespace homestore {
 
@@ -14,7 +16,7 @@ namespace homestore {
 template< typename K, typename V>
 IntrusiveCache<K, V>::IntrusiveCache(uint64_t max_cache_size, uint32_t avg_size_per_entry) :
         m_hash_set((max_cache_size/avg_size_per_entry)/ENTRIES_PER_BUCKET) {
-    LOGINFO("Initializing cache with cache_size = {} with {} partitions", max_cache_size, EVICTOR_PARTITIONS);
+    CACHE_LOG(INFO, , "Initializing cache with cache_size = {} with {} partitions", max_cache_size, EVICTOR_PARTITIONS);
     for (auto i = 0; i < EVICTOR_PARTITIONS; i++) {
         m_evictors[i] = std::make_unique<CurrentEvictor>(i, max_cache_size/EVICTOR_PARTITIONS,
                                                          (std::bind(&IntrusiveCache<K, V>::is_safe_to_evict,
@@ -29,7 +31,7 @@ bool IntrusiveCache<K, V>::insert(V &v, V **out_ptr, const std::function<void(V 
     auto b = K::get_blob(*pk);
     uint64_t hash_code = util::Hash64((const char *)b.bytes, (size_t)b.size);
 
-    LOGDEBUGMOD(cache_vmod_write, "Attemping to insert in cache: {}", v.to_string());
+    CACHE_LOG(DEBUG, cache, "Attemping to insert in cache: {}", v.to_string());
 
     // Try adding the record into the hash set.
     bool inserted = m_hash_set.insert(*pk, v, out_ptr, hash_code, found_cb);
@@ -40,7 +42,7 @@ bool IntrusiveCache<K, V>::insert(V &v, V **out_ptr, const std::function<void(V 
             m_evictors[hash_code % EVICTOR_PARTITIONS]->upvote((*out_ptr)->get_evict_record_mutable());
         }
         (*out_ptr)->unlock();
-        LOGDEBUGMOD(cache_vmod_write, "Following entry exist in cache already: {}", (*out_ptr)->to_string());
+        CACHE_LOG(DEBUG, cache, "Following entry exist in cache already: {}", (*out_ptr)->to_string());
         COUNTER_INCREMENT(m_metrics, cache_num_duplicate_inserts, 1);
         return false;
     }
@@ -56,7 +58,7 @@ bool IntrusiveCache<K, V>::insert(V &v, V **out_ptr, const std::function<void(V 
         v.on_cache_insert();
     } else {
         /* remove from the hash table */
-        LOGINFOMOD(cache_vmod_write, "Unable to evict any record, removing entry {} from cache", v.to_string());
+        CACHE_LOG(INFO, cache, "Unable to evict any record, removing entry {} from cache", v.to_string());
         COUNTER_INCREMENT(m_metrics, cache_add_error_count, 1);
         m_hash_set.remove(*pk, hash_code);
         ret = false;
@@ -83,7 +85,7 @@ bool IntrusiveCache<K, V>::modify_size(V &v, uint32_t size) {
 template< typename K, typename V>
 bool IntrusiveCache<K, V>::upsert(const V &v, bool *out_key_exists) {
     // Not supported yet
-    assert(0);
+    CACHE_DEBUG_ASSERT(0, "Not Supported yet!");
     return false;
 }
 
@@ -148,7 +150,7 @@ bool IntrusiveCache<K, V>::is_safe_to_evict(const CurrentEvictor::EvictRecordTyp
          */
         if (v->try_lock()) {
             boost::intrusive_ptr <CacheBuffer< K >> out_removed_buf(nullptr);
-            assert(v->get_cache_state() == CACHE_INSERTED);
+            CACHE_LOG_ASSERT_CMP(EQ, v->get_cache_state(), CACHE_INSERTED);
             /* It remove the entry only if ref cnt is one */
             const K *pk = V::extract_key((const V &) *crec);
             auto b = K::get_blob(*pk);
@@ -187,7 +189,7 @@ Cache<K>::~Cache() {
 template <typename K>
 bool Cache<K>::upsert(const K &k, const homeds::blob &b, boost::intrusive_ptr< CacheBuffer<K> > *out_smart_buf) {
     // TODO: Not supported yet
-    assert(0);
+    CACHE_DEBUG_ASSERT(0, "Not Supported yet!");
     return false;
 }
 
@@ -358,7 +360,7 @@ void Cache<K>::safe_erase(const K &k, erase_comp_cb cb) {
                                    });
     if (found) {
         if (cb != nullptr) {
-            assert(out_buf);
+            CACHE_DEBUG_ASSERT(out_buf, );
             out_buf->set_cb(cb);
         }
         if (can_remove) {
@@ -380,7 +382,7 @@ void Cache<K>::safe_erase(const K &k, erase_comp_cb cb) {
             }
         }
     } else {
-        assert(!can_remove);
+        CACHE_DEBUG_ASSERT(!can_remove, );
         cb(out_buf);
     }
 };
