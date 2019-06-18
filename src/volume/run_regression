@@ -2,7 +2,7 @@
 # Startup script for Homestore
 
 container="homestore"
-image="ecr.vip.ebayc3.com/sds/sds_develop:2.1"
+image="ecr.vip.ebayc3.com/sds/homestore:develop-test"
 
 name_plus_date="${container}"-$(date +"%Y%m%d%H%M")
 mount_base_dir=$(pwd)
@@ -23,7 +23,8 @@ start() {
 }
 
 stop() {
-	docker stop ${container}
+    docker stop ${container}
+    docker rmi -f ${image}
 }
 
 status() {
