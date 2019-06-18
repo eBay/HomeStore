@@ -15,7 +15,7 @@
 #include "homeds/btree/mem_btree.hpp"
 #include <metrics/metrics.hpp>
 
-SDS_LOGGING_INIT(btree_structures, btree_nodes, btree_generics, varsize_blk_alloc, iomgr, device)
+SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 THREAD_BUFFER_INIT;
 
 #define MAX_CACHE_SIZE     2 * 1024 * 1024 * 1024

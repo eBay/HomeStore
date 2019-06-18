@@ -1,5 +1,4 @@
-#ifndef HOMESTORE_VOL_CONFIG_HPP
-#define HOMESTORE_VOL_CONFIG_HPP
+#pragma once
 
 /* NOTE: This file exports interface required to access homeblocks. we should try to avoid including any
  * homestore/homeblocks related hpp file.
@@ -20,7 +19,7 @@
 #include <atomic>
 #include <boost/optional.hpp>
 #include <sstream>
-#include <string>  
+#include <string>
 #include <iostream>
 
 namespace homestore {
@@ -259,5 +258,3 @@ public:
 #endif
 };
 } // namespace homestore
-
-#endif

@@ -14,7 +14,7 @@
 #include <boost/intrusive_ptr.hpp>
 #include "cache.cpp"
 
-SDS_LOGGING_INIT(cache, cache_vmod_evict, cache_vmod_write);
+SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 THREAD_BUFFER_INIT;
 
 using namespace std;

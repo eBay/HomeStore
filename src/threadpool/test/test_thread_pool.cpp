@@ -11,7 +11,7 @@
 #include <flip/flip.hpp> 
 #include "../thread_pool.h"
 
-SDS_LOGGING_INIT()
+SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 using homestore::submit_job;
 using homestore::ThreadPool;

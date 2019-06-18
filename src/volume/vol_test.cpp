@@ -34,7 +34,7 @@ static size_t const page_size = sysconf(_SC_PAGESIZE);
 
 using log_level = spdlog::level::level_enum;
 
-SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write, iomgr, btree_structures, btree_nodes, btree_generics)
+SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 homestore::DeviceManager *dev_mgr = nullptr;
 std::shared_ptr<homestore::Volume> vol;
