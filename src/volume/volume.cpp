@@ -169,6 +169,8 @@ Volume::~Volume() {
         HomeBlks::instance()->vol_sb_remove(get_sb());
         delete m_map;
         delete (m_sb);
+        auto system_cap = HomeBlks::instance()->get_system_capacity();
+        VOL_LOG(INFO, volume, ,"volume {} is destroyed. New system capacity is {}", m_vol_name, system_cap.to_string());
     }
 }
 
@@ -283,7 +285,9 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
                 crc16_t10dif(init_crc_16, vreq->bbuf->at_offset(vreq->read_buf_offset + offset).bytes, get_page_size());
             offset += get_page_size();
 
-            VOL_RELEASE_ASSERT_CMP(EQ, vreq->checksum[i], carr[i], vreq->parent_req, "Checksum mismatch");
+            VOL_RELEASE_ASSERT_CMP(EQ, vreq->checksum[i], carr[i], vreq->parent_req, 
+                            "Checksum mismatch and blks from cache {}", 
+                            vreq->is_blk_from_cache(vreq->read_buf_offset + offset));
         }
         COUNTER_DECREMENT(m_metrics, volume_outstanding_data_read_count, 1);
         check_and_complete_req(parent_req, no_error, true /* call_completion_cb */);

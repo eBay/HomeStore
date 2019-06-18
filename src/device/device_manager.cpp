@@ -9,8 +9,10 @@
 #include <fcntl.h>
 #include <boost/range.hpp>
 #include <iomgr/iomgr.hpp>
+#include "device_log.hpp"
 
-SDS_LOGGING_DECL(DEVICE_MANAGER)
+SDS_LOGGING_DECL(device, DEVICE_MANAGER)
+
 using namespace homeio;
 namespace homestore {
 
@@ -35,7 +37,9 @@ DeviceManager::DeviceManager(NewVDevCallback vcb,
     m_pdev_id = 0;
     m_dm_info_size = ALIGN_SIZE(DM_INFO_BLK_SIZE, HomeStoreConfig::phys_page_size);
     auto ret = posix_memalign((void **) &m_chunk_memory, HomeStoreConfig::align_size, m_dm_info_size); 
-    assert(m_chunk_memory != nullptr);
+    
+    DEV_LOG_ASSERT_CMP(NE, m_chunk_memory, nullptr);
+
     bzero(m_chunk_memory, m_dm_info_size);
     m_dm_info = (dm_info *)m_chunk_memory;
 
@@ -44,8 +48,7 @@ DeviceManager::DeviceManager(NewVDevCallback vcb,
     m_vdev_hdr = &m_dm_info->vdev_hdr;
     m_scan_cmpltd = false;
     
-    assert(m_chunk_memory != nullptr);
-    assert(m_vdev_metadata_size <= MAX_CONTEXT_DATA_SZ);
+    DEV_LOG_ASSERT_CMP(LE, m_vdev_metadata_size, MAX_CONTEXT_DATA_SZ);
 }
 
 /* It returns total capacity availble to use by virtual dev. */
@@ -76,7 +79,7 @@ void DeviceManager::init_devices(std::vector< dev_info > &devices) {
     m_chunk_hdr->num_chunks = 0;
     m_chunk_hdr->info_offset = CHUNK_INFO_BLK_OFFSET;
     m_chunk_info = (chunk_info_block *)(m_chunk_memory + m_chunk_hdr->info_offset);
-    assert(HomeStoreConfig::max_chunks <= MAX_CHUNK_ID);
+    DEV_LOG_ASSERT_CMP(LE, HomeStoreConfig::max_chunks, MAX_CHUNK_ID);
 
     // create new pdev info
     m_pdev_hdr->magic = MAGIC;
@@ -140,7 +143,7 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info > &devices) {
                                 m_dm_info_size, &is_inited);
         if (!is_inited) {
             // Super block is not present, possibly a new device, will format the device later
-            LOGCRITICAL("Device {} appears to be not formatted. Will format it and replace it with the failed disks." 
+            DEV_LOG(CRITICAL, device, "Device {} appears to be not formatted. Will format it and replace it with the failed disks." 
                          "Replacing it with the failed disks can cause data loss", d.dev_names);
             uninit_devs.push_back(std::move(pdev));
             continue;
@@ -149,19 +152,23 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info > &devices) {
         if (!pdev_size) {
             pdev_size = pdev->get_size();
         }
-        assert(pdev_size == pdev->get_size());
+        
+        DEV_LOG_ASSERT_CMP(EQ, pdev_size, pdev->get_size());
+
         if (m_gen_cnt.load() < pdev->sb_gen_cnt()) {
             m_gen_cnt = pdev->sb_gen_cnt();
             device_id = pdev->get_dev_id();
             rewrite = true;
         }
-        assert(m_pdevs[pdev->get_dev_id()].get() == nullptr);
+
+        DEV_LOG_ASSERT(m_pdevs[pdev->get_dev_id()].get() == nullptr, );
+
         m_pdevs[pdev->get_dev_id()] = std::move(pdev);
     }
 
+    DEV_LOG_ASSERT_CMP(NE, m_gen_cnt.load(), 0, "Couldn't find any valid device.");
+
     if (m_gen_cnt.load() == 0) {
-        /* couldn't find any valid device */
-        assert(0);
         std::stringstream ss; ss << "No valid device found. line no:" << __LINE__ << "file name:" <<__FILE__;
         const std::string s = ss.str();
         throw homestore::homestore_exception(s, homestore_error::no_valid_device_found);
@@ -171,15 +178,15 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info > &devices) {
     read_info_blocks(device_id);
  
     /* TODO : If it is different then existing chunk in pdev superblock has to be deleted and new has to be created */
-    assert(m_dm_info_size == m_dm_info->size);
-    assert(m_dm_info->version == CURRENT_DM_INFO_VERSION);
+    DEV_LOG_ASSERT_CMP(EQ, m_dm_info_size, m_dm_info->size);
+    DEV_LOG_ASSERT_CMP(EQ, m_dm_info->version, CURRENT_DM_INFO_VERSION);
     /* find the devices which has to be replaced */
-    assert(m_pdev_hdr->num_phys_devs <= HomeStoreConfig::max_pdevs);
+    DEV_LOG_ASSERT_CMP(LE, m_pdev_hdr->num_phys_devs, HomeStoreConfig::max_pdevs);
     for (uint32_t dev_id = 0; dev_id < m_pdev_hdr->num_phys_devs; ++dev_id) {
         if (m_pdevs[dev_id].get() == nullptr) {
             std::unique_ptr< PhysicalDev > pdev = std::move(uninit_devs.back());
+            DEV_LOG_ASSERT(pdev != nullptr, "null pdev!");
             if (pdev == nullptr) {
-                assert(0);
                 /* we don't have sufficient disks to replace */
                 std::stringstream ss; ss << "No spare disk found. line no: " << __LINE__ << "file name:" << __FILE__;
                 const std::string s = ss.str();
@@ -205,7 +212,7 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info > &devices) {
             for (uint32_t i = 0; i < HomeStoreConfig::max_chunks; ++i) {
                 if (m_chunk_info[i].pdev_id == dev_id) {
                     auto vdev_id = m_chunk_info[i].vdev_id;
-                    assert(m_vdev_info[vdev_id].vdev_id == vdev_id);
+                    DEV_LOG_ASSERT_CMP(EQ, m_vdev_info[vdev_id].vdev_id, vdev_id);
                     /* mark this vdev failed */
                     m_vdev_info[vdev_id].failed = true;
                 }
@@ -214,12 +221,7 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info > &devices) {
         }
     }
 
-    assert(uninit_devs.empty());
-    if (!uninit_devs.empty()) {
-        /* we found devices which we are not adding to the system */
-        assert(0);
-        LOGINFO("Found spare devices which are not added to the system");
-    }
+    DEV_LOG_ASSERT(uninit_devs.empty(), "Found spare devices which are not added to the system!");
 
     m_pdev_id = m_pdev_hdr->num_phys_devs;
 
@@ -228,20 +230,20 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info > &devices) {
     for (uint32_t dev_id = 0; dev_id < m_pdev_hdr->num_phys_devs; ++dev_id) {
         uint32_t cid = m_pdevs[dev_id]->get_first_chunk_id();
         while (cid != INVALID_CHUNK_ID) {
-            assert(m_chunks[cid] == nullptr);
-            assert(cid < HomeStoreConfig::max_chunks);
+            DEV_LOG_ASSERT(m_chunks[cid] == nullptr, "");
+            DEV_LOG_ASSERT_CMP(LT, cid, HomeStoreConfig::max_chunks);
             m_chunks[cid] = std::make_unique< PhysicalDevChunk >(
                 m_pdevs[m_chunk_info[cid].pdev_id].get(), &m_chunk_info[cid]);
             if (m_chunk_info[cid].is_sb_chunk) {
                 m_pdevs[m_chunk_info[cid].pdev_id]->attach_superblock_chunk(m_chunks[cid].get());
             }
-            assert(m_chunk_info[cid].chunk_id == cid);
+            DEV_LOG_ASSERT_CMP(EQ, m_chunk_info[cid].chunk_id, cid);
             cid = m_chunk_info[cid].next_chunk_id;
             num_chunks++;
         }
     }
 
-    assert(num_chunks == m_chunk_hdr->num_chunks);
+    DEV_LOG_ASSERT_CMP(EQ, num_chunks, m_chunk_hdr->num_chunks);
 
     m_scan_cmpltd = true;
     /* superblock to all disks is re written if gen cnt mismatches or disks are replaced */
@@ -254,15 +256,15 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info > &devices) {
     uint32_t vid = m_vdev_hdr->first_vdev_id;
     uint32_t num_vdevs = 0;
     while (vid != INVALID_VDEV_ID) {
-        assert(vid < HomeStoreConfig::max_vdevs);
+        DEV_LOG_ASSERT_CMP(LT, vid, HomeStoreConfig::max_vdevs);
         m_last_vdevid = vid;
         m_new_vdev_cb(this, &m_vdev_info[vid]);
-        assert(m_vdev_info[vid].slot_allocated);
-        assert(m_vdev_info[vid].vdev_id == vid);
+        DEV_LOG_ASSERT(m_vdev_info[vid].slot_allocated, "");
+        DEV_LOG_ASSERT_CMP(EQ, m_vdev_info[vid].vdev_id, vid);
         vid = m_vdev_info[vid].next_vdev_id;
         num_vdevs++;
     }
-    assert(num_vdevs == m_vdev_hdr->num_vdevs);
+    DEV_LOG_ASSERT_CMP(EQ, num_vdevs, m_vdev_hdr->num_vdevs);
 }
 
 void DeviceManager::handle_error(PhysicalDev *pdev) {
@@ -271,7 +273,11 @@ void DeviceManager::handle_error(PhysicalDev *pdev) {
     /* When cnt reaches MAX_ERROR_CNT we notify only once until
      * we reset the cnt to zero.
      */
-    if (cnt != MAX_ERROR_CNT) {
+    if (cnt != MAX_ERROR_CNT
+#ifdef _PRERELEASE
+      && !(homestore_flip->test_flip("device_fail", pdev->get_devname()))
+#endif  
+    ) {
         return;
     }
     
@@ -288,7 +294,7 @@ void DeviceManager::add_chunks(uint32_t vid, chunk_add_callback cb) {
     for (uint32_t dev_id = 0; dev_id < m_pdev_hdr->num_phys_devs; ++dev_id) {
         uint32_t cid = m_pdevs[dev_id]->get_first_chunk_id();
         while (cid != INVALID_CHUNK_ID) {
-            assert(m_chunks[cid].get() != nullptr);
+            DEV_DEBUG_ASSERT(m_chunks[cid].get() != nullptr, "");
             if (m_chunks[cid]->get_vdev_id() == vid) {
                 cb(m_chunks[cid].get());
             }
@@ -305,7 +311,7 @@ void DeviceManager::inited() {
                 cid = m_chunks[cid]->get_next_chunk_id();
                 continue;
             }
-            assert(m_chunks[cid]->get_blk_allocator() != nullptr);
+            DEV_DEBUG_ASSERT(m_chunks[cid]->get_blk_allocator() != nullptr, "");
             m_chunks[cid]->get_blk_allocator()->inited();
             cid = m_chunks[cid]->get_next_chunk_id();
         }
@@ -330,17 +336,17 @@ void DeviceManager::read_info_blocks(uint32_t dev_id) {
     m_pdevs[dev_id]->read_dm_chunk(m_chunk_memory, m_dm_info_size);
 
     auto dm = (dm_info *) m_chunk_memory;
-    assert( dm->magic == MAGIC );
+    DEV_DEBUG_ASSERT_CMP(EQ, dm->magic, MAGIC);
 #ifndef NO_CHECKSUM
     auto crc = crc16_t10dif (  init_crc_16,
                             (const unsigned char *)(m_chunk_memory + DM_PAYLOAD_OFFSET),
                             m_dm_info_size - DM_PAYLOAD_OFFSET );
-    assert(dm->checksum == crc);
+    DEV_DEBUG_ASSERT_CMP(EQ, dm->checksum, crc);
 #endif
 
-    assert(m_vdev_hdr->magic == MAGIC);
-    assert(m_chunk_hdr->magic == MAGIC);
-    assert(m_pdev_hdr->magic == MAGIC);
+    DEV_DEBUG_ASSERT_CMP(EQ, m_vdev_hdr->magic, MAGIC);
+    DEV_DEBUG_ASSERT_CMP(EQ, m_chunk_hdr->magic, MAGIC);
+    DEV_DEBUG_ASSERT_CMP(EQ, m_pdev_hdr->magic, MAGIC);
  
     m_vdev_info = (vdev_info_block *)(m_chunk_memory + m_vdev_hdr->info_offset);
     m_chunk_info = (chunk_info_block *)(m_chunk_memory + m_chunk_hdr->info_offset);
@@ -368,22 +374,22 @@ void DeviceManager::write_info_blocks() {
         m_pdevs[i]->write_dm_chunk(m_gen_cnt, m_chunk_memory, m_dm_info_size);
     }
     
-    assert(m_vdev_hdr->magic == MAGIC);
-    assert(m_chunk_hdr->magic == MAGIC);
-    assert(m_pdev_hdr->magic == MAGIC);
+    DEV_DEBUG_ASSERT_CMP(EQ, m_vdev_hdr->magic, MAGIC);
+    DEV_DEBUG_ASSERT_CMP(EQ, m_chunk_hdr->magic, MAGIC);
+    DEV_DEBUG_ASSERT_CMP(EQ, m_pdev_hdr->magic, MAGIC);
 }
 
 PhysicalDevChunk *DeviceManager::alloc_chunk(PhysicalDev *pdev, uint32_t vdev_id, uint64_t req_size, uint32_t primary_id) {
     std::lock_guard<decltype(m_dev_mutex)> lock(m_dev_mutex);
 
-    assert(req_size % HomeStoreConfig::phys_page_size == 0);
+    DEV_DEBUG_ASSERT(req_size % HomeStoreConfig::phys_page_size == 0, "");
     PhysicalDevChunk *chunk = pdev->find_free_chunk(req_size);
     if (chunk == nullptr) {
         std::stringstream ss; ss << "No space available for chunk size = " << req_size << " in pdev id = " << pdev->get_dev_id();
         const std::string s = ss.str();
         throw homestore::homestore_exception(s, homestore_error::no_space_avail);
     }
-    assert(chunk->get_size() >= req_size);
+    DEV_DEBUG_ASSERT_CMP(GE, chunk->get_size(), req_size);
     chunk->set_vdev_id(vdev_id); // Set the chunk as busy or engaged to a vdev
     chunk->set_primary_chunk_id(primary_id);
 
@@ -430,7 +436,7 @@ vdev_info_block *DeviceManager::alloc_vdev(uint32_t req_size, uint32_t nmirrors,
     vb->prev_vdev_id = m_last_vdevid;
     if (m_last_vdevid == INVALID_VDEV_ID) {
         // This is the first vdev being created.
-        assert(m_vdev_hdr->first_vdev_id == INVALID_VDEV_ID);
+        DEV_DEBUG_ASSERT_CMP(EQ, m_vdev_hdr->first_vdev_id, INVALID_VDEV_ID);
         m_vdev_hdr->first_vdev_id = vb->vdev_id;
     } else {
         auto prev_vb = &m_vdev_info[m_last_vdevid];
@@ -439,7 +445,7 @@ vdev_info_block *DeviceManager::alloc_vdev(uint32_t req_size, uint32_t nmirrors,
     m_last_vdevid = vb->vdev_id;
     vb->next_vdev_id = INVALID_VDEV_ID;
 
-    LOGDEBUG("Creating vdev id = {} size = {}", vb->vdev_id, vb->size);
+    DEV_LOG(DEBUG, device, "Creating vdev id = {} size = {}", vb->vdev_id, vb->size);
     m_vdev_hdr->num_vdevs++;
     write_info_blocks();
     return vb;
@@ -483,7 +489,7 @@ PhysicalDevChunk *DeviceManager::create_new_chunk(PhysicalDev *pdev, uint64_t st
     PhysicalDevChunk *craw = chunk.get();
     pdev->attach_chunk(craw, prev_chunk);
 
-    LOGDEBUG("Creating chunk: {}", chunk->to_string());
+    DEV_LOG(DEBUG, device, "Creating chunk: {}", chunk->to_string());
     m_chunks[chunk->get_chunk_id()] = std::move(chunk);
     m_chunk_hdr->num_chunks++;
 
@@ -491,7 +497,7 @@ PhysicalDevChunk *DeviceManager::create_new_chunk(PhysicalDev *pdev, uint64_t st
 }
 
 void DeviceManager::remove_chunk(uint32_t chunk_id) {
-    assert(m_chunk_info[chunk_id].slot_allocated);
+    DEV_DEBUG_ASSERT(m_chunk_info[chunk_id].slot_allocated, "");
     m_chunk_info[chunk_id].slot_allocated = false; // Free up the slot for future allocations
     m_chunk_hdr->num_chunks--;
 }

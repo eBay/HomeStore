@@ -38,7 +38,7 @@ public:
     }
 };
 
-#define homestore_flip HomeStoreFlip::instance()
+#define homestore_flip homestore::HomeStoreFlip::instance()
 #endif
 
 #define METRICS_DUMP_MSG            sisl::MetricsFarm::getInstance().get_result_in_json_string()

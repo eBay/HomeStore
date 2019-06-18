@@ -8,7 +8,7 @@
 #include <sds_options/options.h>
 #include "homeds/array/sparse_vector.hpp"
 
-SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write)
+SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 void func(const homeds::sparse_vector<int> &cvec) {
     LOGINFO("vec.at(1) = {}", cvec.at(1));

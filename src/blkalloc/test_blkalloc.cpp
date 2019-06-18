@@ -9,7 +9,7 @@
 #include "blk_allocator.h"
 #include "varsize_blk_allocator.h"
 
-SDS_LOGGING_INIT(btree_structures, btree_nodes, btree_generics, varsize_blk_alloc)
+SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 THREAD_BUFFER_INIT;
 
 using namespace std;
@@ -221,13 +221,6 @@ TEST_F(VarsizeBlkAllocatorTest, alloc_free_test) {
     LOGINFO("Allocated {} blocks, Allocator state: {}",
             m_alloced_count.load(), m_varsize_allocator->to_string());
 
-    flip::FlipClient fclient(m_varsize_allocator->get_flip());
-    flip::FlipFrequency freq;
-    freq.set_count(1);
-    freq.set_percent(100);
-    /* Inject a no return action flip */
-    fclient.inject_noreturn_flip("modify_bitmap", {}, freq);
-
     for (auto i = 0U; i < NTHREADS; i++) {
         thrs[i] = new std::thread(free_var_blocks, this, blkids[i]);
     }
@@ -266,13 +259,6 @@ TEST_F(VarsizeBlkAllocatorTest, alloc_free_nblks_test) {
 
     LOGINFO("Allocated {} blocks, Allocator state: {}",
             m_alloced_count.load(), m_varsize_allocator->to_string());
-
-    flip::FlipClient fclient(m_varsize_allocator->get_flip());
-    flip::FlipFrequency freq;
-    freq.set_count(1);
-    freq.set_percent(100);
-    /* Inject a no return action flip */
-    fclient.inject_noreturn_flip("modify_bitmap", {}, freq);
 
     for (auto i = 0U; i < NTHREADS; i++) {
         thrs[i] = new std::thread(free_var_blocks, this, blkids[i]);

@@ -16,7 +16,7 @@
 
 #include "homeds/btree/mem_btree.hpp"
 
-SDS_LOGGING_INIT
+SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 using namespace std;
 using namespace homeds::btree;
