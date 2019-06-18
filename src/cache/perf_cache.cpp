@@ -14,7 +14,7 @@
 #include <boost/intrusive_ptr.hpp>
 #include "cache.cpp"
 
-SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write);
+SDS_LOGGING_INIT(cache, cache_vmod_evict, cache_vmod_write);
 THREAD_BUFFER_INIT;
 
 using namespace std;
@@ -157,6 +157,7 @@ int main(int argc, char** argv)
 {
     SDS_OPTIONS_LOAD(argc, argv, logging)
     sds_logging::SetLogger("perf_cache");
+    sds_logging::install_crash_handler();
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
     setup(TEST_COUNT * THREADS);
     ::benchmark::Initialize(&argc, argv);
