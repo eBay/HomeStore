@@ -11,7 +11,7 @@
 #include <boost/range/irange.hpp>
 #include <utility/thread_buffer.hpp>
 
-SDS_LOGGING_INIT()
+SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 THREAD_BUFFER_INIT;
 
 using namespace std;

@@ -9,7 +9,7 @@
 #include "blk_allocator.h"
 #include "varsize_blk_allocator.h"
 
-SDS_LOGGING_INIT(btree_structures, btree_nodes, btree_generics, varsize_blk_alloc)
+SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 THREAD_BUFFER_INIT;
 
 using namespace std;

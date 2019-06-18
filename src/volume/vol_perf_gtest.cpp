@@ -55,8 +55,7 @@ std::atomic<uint64_t> read_cnt(0);
 std::atomic<uint64_t> read_err_cnt(0);
 std::atomic<size_t> outstanding_ios(0);
 using log_level = spdlog::level::level_enum;
-SDS_LOGGING_INIT(cache, cache_vmod_evict, cache_vmod_write, iomgr, btree_structures, btree_nodes, btree_generics,
-                 varsize_blk_alloc, VMOD_VOL_MAPPING, VMOD_BTREE, httpserver_lmod, volume, device)
+SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 /**************** Common class created for all tests ***************/
 

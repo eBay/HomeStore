@@ -2,7 +2,7 @@
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
 
-SDS_LOGGING_INIT()
+SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 THREAD_BUFFER_INIT;
 
 using namespace homeds;

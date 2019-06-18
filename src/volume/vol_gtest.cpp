@@ -46,14 +46,13 @@ constexpr auto Gi = Ki * Mi;
 uint64_t max_io_size = 1 * Mi;
 uint64_t max_outstanding_ios = 64u;
 uint64_t max_disk_capacity = 10 * Gi;
-uint64_t match_cnt = 0; 
+uint64_t match_cnt = 0;
 using log_level = spdlog::level::level_enum;
-SDS_LOGGING_INIT(cache, cache_vmod_evict, cache_vmod_write, iomgr, btree_structures, btree_nodes, btree_generics,
-                 varsize_blk_alloc, VMOD_VOL_MAPPING, httpserver_lmod, volume, device)
+SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 /**************** Common class created for all tests ***************/
 
-class test_ep : public iomgr::EndPoint { 
+class test_ep : public iomgr::EndPoint {
 public:
     test_ep(std::shared_ptr<iomgr::ioMgr> iomgr) :iomgr::EndPoint(iomgr) {
     }

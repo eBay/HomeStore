@@ -7,9 +7,9 @@
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
 
-SDS_LOGGING_INIT(iomgr)
 
-SDS_OPTIONS_ENABLE(logging)
+SDS_LOGGING_INIT(iomgr)
+SDS_OPTIONS_ENABLE(logging, iomgr)
 using namespace homeds::loadgen;
 
     
