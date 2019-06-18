@@ -5,7 +5,7 @@ container="homestore"
 image="ecr.vip.ebayc3.com/sds/homestore:develop-test"
 
 name_plus_date="${container}"-$(date +"%Y%m%d%H%M")
-mount_base_dir=$(pwd)
+mount_base_dir=/opt/sds/mount
 mount_src="${mount_base_dir}/${name_plus_date}"
 mount_dst="/home/${container}"
 mount_opts="--mount src=${mount_src},target=${mount_dst},type=bind"
@@ -18,7 +18,7 @@ start() {
     mkdir ${mount_src}
     docker pull ${image}
     docker run --rm --privileged ${mount_opts} -v ${mount_base_dir}:/tmp/source \
-        --pid=host -e TZ=GMT-7 -d --name ${container} \
+        --pid=host -e TZ=GMT+7 -d --name ${container} \
         --entrypoint /bin/sh ${image} -c "${entrypoint}"
 }
 
@@ -32,7 +32,7 @@ status() {
 }
 
 logs() {
-    docker logs ${container}
+    docker logs -t ${container}
 }
 
 login() {
@@ -63,6 +63,7 @@ case "$1" in
             ;;
     'restart')
             stop
+            sleep 5s
             start
             ;;
     'logs')
@@ -74,18 +75,20 @@ case "$1" in
     'status')
             status
             ;;
-    'test_normal')
+    'test-normal')
             test_normal
             ;;
-    'test_recovery')
+    'test-recovery')
             test_recovery
             ;;
-    'test_vol_del')
+    'test-vol-del')
             test_vol_del
             ;;
-    'test_all')
+    'test-all')
             test_normal
+            sleep 10s
             test_recovery
+            sleep 10s
             test_vol_del
             ;;
     *)
