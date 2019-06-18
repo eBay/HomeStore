@@ -21,9 +21,23 @@ RUN conan install --build missing ${SOURCE_PATH}
 ENV ASAN_OPTIONS=detect_leaks=0
 RUN conan create ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"
 
-RUN find /root/.conan/data/homestore -name "test_*" -exec mv {} /usr/local/bin \;
-RUN find /root/.conan/data/homestore -name "perf_*" -exec mv {} /usr/local/bin \;
 RUN find /root/.conan/data/homestore -name "obj_allocator_benchmark" -exec mv {} /usr/local/bin \;
+RUN find /root/.conan/data/homestore -name "perf_cache" -exec mv {} /usr/local/bin \;
+RUN find /root/.conan/data/homestore -name "perf_test_volume" -exec mv {} /usr/local/bin \;
+RUN find /root/.conan/data/homestore -name "test_avector" -exec mv {} /usr/local/bin \;
+RUN find /root/.conan/data/homestore -name "test_bitset" -exec mv {} /usr/local/bin \;
+RUN find /root/.conan/data/homestore -name "test_bitword" -exec mv {} /usr/local/bin \;
+RUN find /root/.conan/data/homestore -name "test_blkalloc" -exec mv {} /usr/local/bin \;
+RUN find /root/.conan/data/homestore -name "test_btree_crud" -exec mv {} /usr/local/bin \;
+RUN find /root/.conan/data/homestore -name "test_cache" -exec mv {} /usr/local/bin \;
+RUN find /root/.conan/data/homestore -name "test_composite_allocator" -exec mv {} /usr/local/bin \;
+RUN find /root/.conan/data/homestore -name "test_hash" -exec mv {} /usr/local/bin \;
+RUN find /root/.conan/data/homestore -name "test_iomgr_exec" -exec mv {} /usr/local/bin \;
+RUN find /root/.conan/data/homestore -name "test_load" -exec mv {} /usr/local/bin \;
+RUN find /root/.conan/data/homestore -name "test_mapping" -exec mv {} /usr/local/bin \;
+RUN find /root/.conan/data/homestore -name "test_obj_allocator" -exec mv {} /usr/local/bin \;
+RUN find /root/.conan/data/homestore -name "test_threadpool" -exec mv {} /usr/local/bin \;
+RUN find /root/.conan/data/homestore -name "test_volume" -exec mv {} /usr/local/bin \;
 RUN find /root/.conan/data/homestore -name "vol_test.py" -exec mv {} /usr/local/bin \;
 
 EXPOSE 5000
