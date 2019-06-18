@@ -93,7 +93,7 @@ case "$1" in
             ;;
     *)
             echo
-            echo "Usage: $0 { start | stop | restart | logs | login | status | test_normal | test_recovery | test_vol_del | test_all }"
+            echo "Usage: $0 { start | stop | restart | logs | login | status | test-normal | test-recovery | test-vol-del | test-all }"
             echo
             exit 1
             ;;
