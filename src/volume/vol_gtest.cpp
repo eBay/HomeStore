@@ -39,7 +39,8 @@ uint64_t max_vols = 50;
 uint64_t max_num_writes = 100000;
 uint64_t run_time;
 uint64_t num_threads;
-bool read_enable;
+bool read_enable = true;
+bool enable_crash_handler = true;
 constexpr auto Ki = 1024ull;
 constexpr auto Mi = Ki * Ki;
 constexpr auto Gi = Ki * Mi;
@@ -878,7 +879,8 @@ SDS_OPTION_GROUP(test_volume,
 (read_enable, "", "read_enable", "read enable 0 or 1", ::cxxopts::value<uint32_t>()->default_value("1"), "flag"),
 (max_disk_capacity, "", "max_disk_capacity", "max disk capacity", ::cxxopts::value<uint64_t>()->default_value("7"), "GB"),
 (max_volume, "", "max_volume", "max volume", ::cxxopts::value<uint64_t>()->default_value("50"), "number"),
-(max_num_writes, "", "max_num_writes", "max num of writes", ::cxxopts::value<uint64_t>()->default_value("100000"), "number"))
+(max_num_writes, "", "max_num_writes", "max num of writes", ::cxxopts::value<uint64_t>()->default_value("100000"), "number"),
+(enable_crash_handler, "", "enable_crash_handler", "enable crash handler 0 or 1", ::cxxopts::value<uint32_t>()->default_value("1"), "flag"))
 
 
 #define ENABLED_OPTIONS logging, home_blks, test_volume
@@ -898,7 +900,6 @@ int main(int argc, char *argv[]) {
     testing::InitGoogleTest(&argc, argv);
     SDS_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
     sds_logging::SetLogger("test_volume");
-    sds_logging::install_crash_handler();
     spdlog::set_pattern("[%D %T.%f] [%^%L%$] [%t] %v");
 
     run_time = SDS_OPTIONS["run_time"].as<uint32_t>();
@@ -907,5 +908,7 @@ int main(int argc, char *argv[]) {
     max_disk_capacity = ((SDS_OPTIONS["max_disk_capacity"].as<uint64_t>())  * (1ul<< 30));
     max_vols = SDS_OPTIONS["max_volume"].as<uint64_t>();
     max_num_writes= SDS_OPTIONS["max_num_writes"].as<uint64_t>();
+    enable_crash_handler = SDS_OPTIONS["enable_crash_handler"].as<uint32_t>();
+    if (enable_crash_handler) sds_logging::install_crash_handler();
     return RUN_ALL_TESTS();
 }
