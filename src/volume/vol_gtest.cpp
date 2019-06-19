@@ -37,7 +37,6 @@ THREAD_BUFFER_INIT;
 std::array< std::string, 4 > names = {"/tmp/file1", "/tmp/file2", "/tmp/file3", "/tmp/file4"};
 uint64_t max_vols = 50;
 uint64_t max_num_writes = 100000;
-uint32_t = 100000;
 uint64_t run_time;
 uint64_t num_threads;
 bool read_enable = true;
