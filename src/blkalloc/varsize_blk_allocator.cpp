@@ -160,14 +160,14 @@ void VarsizeBlkAllocator::allocator_state_machine() {
 
             if (m_region_state == BLK_ALLOCATOR_DONE) {
                 m_cv.wait(lk);
-                BLKALLOC_LOG(INFO, , "Region state : done");
+                BLKALLOC_LOG(TRACE, , "Region state : done");
             }
 
             if (m_region_state == BLK_ALLOCATOR_WAIT_ALLOC) {
                 m_region_state = BLK_ALLOCATOR_ALLOCATING;
                 allocate_seg = m_wait_alloc_segment;
                 allocate = true;
-                BLKALLOC_LOG(INFO, , "Region state : wait-alloc -> allocating");
+                BLKALLOC_LOG(TRACE, , "Region state : wait-alloc -> allocating");
 
             } else if (m_region_state == BLK_ALLOCATOR_EXITING) {
                 BLKALLOC_LOG(INFO, , "TODO: Handle exiting message more periodically");
@@ -266,10 +266,10 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks,
                 BLKALLOC_LOG(ERROR, , "Could not allocated any blocks. Running out of space");
             }
             retry_cnt++;
-            BLKALLOC_LOG(INFO, , "Retry count={}", retry_cnt);
+            BLKALLOC_LOG(TRACE, , "Retry count={}", retry_cnt);
             continue;
         }
-        BLKALLOC_LOG(INFO, , "Blocks allocated={}", blks_alloced);
+        BLKALLOC_LOG(TRACE, , "Blocks allocated={}", blks_alloced);
         blks_alloced += blkid.get_nblks();
         BLKALLOC_LOG(DEBUG, varsize_blk_alloc,
             "blks_alloced={}, hints multiplier={}", blks_alloced, hints.multiplier);
@@ -278,7 +278,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks,
         blks_rqstd = nblks - blks_alloced;
         out_blkid.push_back(blkid);
         retry_cnt++;
-        BLKALLOC_LOG(INFO, , "Retry count={}", retry_cnt);
+        BLKALLOC_LOG(TRACE, , "Retry count={}", retry_cnt);
     }
 #ifndef NDEBUG
     if(blks_alloced != nblks)

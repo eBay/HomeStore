@@ -346,16 +346,16 @@ public:
 
         /* add the latest request pending on this node */
         try {
-#ifdef _PRERELEASE
-            if (homestore_flip->test_flip("btree_refresh_fail", bn->get_node_id().m_id)) {
-                folly::throwSystemError("flip error");
-            }
-#endif
             auto req =
                 store->m_blkstore->refresh_buf(boost::static_pointer_cast< btree_buffer_t >(bn), is_write_modifiable);
             if (req && multinode_req) {
                 multinode_req->dependent_req_q.push_back(req);
             }
+#ifdef _PRERELEASE
+            if (homestore_flip->test_flip("btree_refresh_fail", bn->get_node_id().m_id)) {
+                folly::throwSystemError("flip error");
+            }
+#endif
 #ifndef NO_CHECKSUM
             auto physical_node = (LeafPhysicalNode*)((boost::static_pointer_cast< SSDBtreeNode >(bn))->at_offset(0).bytes);
             verify_result vr;

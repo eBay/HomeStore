@@ -351,6 +351,7 @@ public:
             }
             while (st <= kv.first.end() && m_blk_id_arr[st] != -1) {
                 if (is_invalid || bst != m_blk_id_arr[st]) {
+                    LOGINFO("lba st {}", st);
                     m_map->print_tree();
                     std::this_thread::sleep_for(std::chrono::seconds(5));
                     assert(0);
