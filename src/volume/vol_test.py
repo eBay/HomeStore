@@ -14,27 +14,36 @@ for opt,arg in opts:
         print(("testing suits (%s)")%(arg))
 
 def normal():
-    status = subprocess.check_output("./test_volume --run_time=3600", shell=True)
-    f = open( '/home/homestore/log_normal.txt', 'w' )
+    status = subprocess.check_output("./test_volume \
+            --run_time=12000 --max_num_writes=5000000", shell=True)
+    f = open( '/home/homestore/log_normal.txt', 'w+' )
     f.write(status)
     f.close()
     return '[  PASSED  ] 1 test' in status
 
 def vol_delete():
     status = subprocess.check_output("./test_volume --gtest_filter=*vol_del*", shell=True)
-    f = open( '/home/homestore/log_delete.txt', 'w' )
+    f = open( '/home/homestore/log_delete.txt', 'w+' )
     f.write(status)
     f.close()
     return '[  PASSED  ] 1 test' in status
 
 def recovery():
-    subprocess.call("./test_volume --gtest_filter=*normal_abort_random* --run_time=300 --install_crash=0", shell=True)
+    status = subprocess.check_output("./test_volume \
+            --gtest_filter=*normal_abort_random* --run_time=300 --install_crash=0", shell=True)
+    f = open( '/home/homestore/log_abort.txt', 'w+')
+    f.write(status)
+    f.close()
     for x in range(1, 50):
-        subprocess.call("./test_volume --gtest_filter=*recovery_abort* --run_time=300 --install_crash=0", shell=True)
+        status = subprocess.call("./test_volume \
+                --gtest_filter=*recovery_abort* --run_time=300 --install_crash=0", shell=True)
+        f = open( '/home/homestore/log_recovery.txt', 'a+' )
+        f.write(status)
+        f.close()
 
 def mapping():
-    status = subprocess.check_output("./test_mapping --num_ios=1000000", shell=True)
-    f = open( '/home/homestore/log_mapping.txt', 'w' )
+    status = subprocess.check_output("./test_mapping --num_ios=10000000", shell=True)
+    f = open( '/home/homestore/log_mapping.txt', 'w+' )
     f.write(status)
     f.close()
     return '[  PASSED  ] 1 test' in status
