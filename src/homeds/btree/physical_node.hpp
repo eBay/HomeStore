@@ -331,6 +331,10 @@ protected:
     }
 
     void get_last_key(BtreeKey *out_lastkey) {
+        assert(get_total_entries() > 0);
+        if (get_total_entries() == 0) {
+            return;
+        }
         return to_variant_node()->get_nth_key(get_total_entries() - 1, out_lastkey, false);
     }
 
