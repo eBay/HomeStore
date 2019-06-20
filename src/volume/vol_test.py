@@ -14,7 +14,8 @@ for opt,arg in opts:
         print(("testing suits (%s)")%(arg))
 
 def normal():
-    status = subprocess.check_output("./test_volume --run_time=12000", shell=True)
+    status = subprocess.check_output("./test_volume \
+            --run_time=12000 --max_num_writes=5000000", shell=True)
     f = open( '/home/homestore/log_normal.txt', 'w+' )
     f.write(status)
     f.close()
