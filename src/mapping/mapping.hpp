@@ -34,12 +34,16 @@ struct LbaId {
 
     LbaId(uint64_t lba_start, uint64_t n_lba) : m_lba_start(lba_start), m_n_lba(n_lba) { assert(n_lba < MAX_NUM_LBA); }
 
+    uint64_t end() {
+        return(m_lba_start + m_n_lba - 1);
+    }
+
     bool is_invalid() { return m_lba_start == 0 && m_n_lba == 0; }
 
 } __attribute__((__packed__));
 
 // MappingKey is fixed size
-class MappingKey : public homeds::btree::BtreeKey, public sisl::ObjLifeCounter< MappingKey > {
+class MappingKey : public homeds::btree::ExtentBtreeKey, public sisl::ObjLifeCounter< MappingKey > {
     LbaId  m_lbaId;
     LbaId* m_lbaId_ptr;
 
@@ -47,7 +51,7 @@ public:
     MappingKey() : ObjLifeCounter(), m_lbaId_ptr(&m_lbaId) {}
 
     MappingKey(const MappingKey& other) :
-            BtreeKey(),
+            ExtentBtreeKey(),
             ObjLifeCounter(),
             m_lbaId(other.get_lbaId()),
             m_lbaId_ptr(&m_lbaId) {}
@@ -59,34 +63,33 @@ public:
 
     LbaId get_lbaId() const { return *m_lbaId_ptr; }
 
+
     uint64_t start() const { return m_lbaId_ptr->m_lba_start; }
 
     uint64_t end() const { return start() + get_n_lba() - 1; }
 
     uint16_t get_n_lba() const { return m_lbaId_ptr->m_n_lba; }
 
-    // used by btree to ensure inserted keys are sorted
-    virtual int compare(const BtreeKey* input) const override {
+    /* used by btree to compare the end key of input with end key
+     * It return the result of 
+     *                 *(this) - *(input) 
+     */
+    virtual int compare_end(const BtreeKey* input) const override {
         MappingKey* o = (MappingKey*)input;
-        if (o->end() < start())
-            return 1; // go left
-        else if (end() < o->start())
-            return -1; // go right
-        else
-            return 0; // overlap
+        if (end() > o->end()) return 1; // go left
+        else if (end() < o->end()) return -1; // go right
+        else return 0; // overlap
     }
-
-    // used by btree range queries to find overlaps with existing keys in inner/leaf nodes
-    virtual int compare_range(const BtreeSearchRange& input) const override {
-        // check if any overlap in lba range - return 0 if the case
-        MappingKey* o_start = (MappingKey*)input.get_start_key();
-        MappingKey* o_end = (MappingKey*)input.get_end_key();
-        if (o_end->end() < start())
-            return 1; // no overlap - go left
-        else if (end() < o_start->start())
-            return -1; // no overlap- go right
-        else
-            return 0; // overlap
+    
+    /* used by btree to compare the start key of input with the end key
+     * It return the result of 
+     *                 *(this) - *(input) 
+     */
+    virtual int compare_start(const BtreeKey* input) const override {
+        MappingKey* o = (MappingKey*)input;
+        if (end() > o->start()) return 1; // go left
+        else if (end() < o->start()) return -1; // go right
+        else return 0; // overlap
     }
 
     virtual homeds::blob get_blob() const override { return {(uint8_t*)m_lbaId_ptr, get_fixed_size()}; }
@@ -101,7 +104,13 @@ public:
         LbaId* other = (LbaId*)b.bytes;
         set(other->m_lba_start, other->m_n_lba);
     }
-
+    
+    virtual void copy_end_key_blob(const homeds::blob& b) override {
+        assert(b.size == get_fixed_size());
+        LbaId* other = (LbaId*)b.bytes;
+        set(other->end(), 1);
+    }
+    
     void set(uint64_t lba_start, uint8_t n_lba) {
         m_lbaId.m_lba_start = lba_start;
         m_lbaId.m_n_lba = n_lba;
@@ -114,7 +123,7 @@ public:
 
     virtual string to_string() const override {
         stringstream ss;
-        ss << "lba_st=" << start() << ",nlba=" << get_n_lba();
+        ss << "lba_st=" << start() << ",lba_end=" << (start() + get_n_lba() - 1);
         return ss.str();
     }
 
@@ -604,8 +613,9 @@ private:
                         auto lba_offset = overlap.get_start_offset(*e_key);
                         ve.add_offset(lba_offset, overlap.get_n_lba(), m_vol_page_size);
                         result_kv.emplace_back(make_pair(overlap, MappingValue(ve)));
-                    } else
+                    } else {
                         result_kv.emplace_back(make_pair(MappingKey(*e_key), MappingValue(ve)));
+                    }
                     break;
                 }
                 // else {
@@ -685,9 +695,10 @@ private:
 
             if (e_varray.get_total_elements() != 0) {
                 e_varray.mem_align();
-                if (curr_lbarange_st < e_key->start()) // add last running range
+                if (curr_lbarange_st < e_key->start()) { // add last running range
                     add_missing_interval(curr_lbarange_st, e_key->start() - 1, new_ve,
                                          curr_lbarange_st - s_in_range->start(), replace_kv);
+                }
 
                 add_overlaps(e_key, e_value, param, replace_kv);
                 curr_lbarange_st = e_key->end() + 1; // restart running range
@@ -718,13 +729,13 @@ private:
                 auto blk_end =
                     blk_start + (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * curve.get_nlba() - 1;
                 for (Free_Blk_Entry& fbe : param->m_req->blkIds_to_free) {
-                    if (fbe.m_blkId.get_chunk_num() != curve.get_blkId().get_chunk_num())
+                    if (fbe.m_blkId.get_chunk_num() != curve.get_blkId().get_chunk_num()) {
                         continue;
+                    }
                     auto fblk_start = fbe.m_blkId.get_id() + fbe.m_blk_offset;
                     auto fblk_end = fblk_start + fbe.m_nblks_to_free - 1;
                     if (blk_end < fblk_start || fblk_end < blk_start) {
-                    } // non overlapping
-                    else {
+                    } else {
                         LOGERROR("Error::Put_CB:,{} ", ss.str());
                         assert(0);
                     }
@@ -747,21 +758,20 @@ private:
 
         // pick higher start of subrange/inputrange
         MappingKey* s_subrange = (MappingKey*)param->get_sub_range().get_start_key();
-        MappingKey* s_in_range = (MappingKey*)param->get_input_range().get_start_key();
+        assert(s_subrange->start() ==  s_subrange->end());
 
-        if (param->get_sub_range().is_start_inclusive())
-            start_lba = max(s_subrange->start(), s_in_range->start());
-        else
-            start_lba = max(s_subrange->end() + 1, s_in_range->start());
-
-        // pick lower end of subrange/inputrange
-        MappingKey* e_subrange = (MappingKey*)param->get_sub_range().get_end_key();   // end is always inclusive
-        MappingKey* e_in_range = (MappingKey*)param->get_input_range().get_end_key(); // inclusive
-
-        if (param->get_sub_range().is_end_inclusive()) {
-            end_lba = min(e_subrange->end(), e_in_range->end());
+        if (param->get_sub_range().is_start_inclusive()) {
+            start_lba = s_subrange->start();
         } else {
-            end_lba = min(e_subrange->start() - 1, e_in_range->end());
+            start_lba = s_subrange->start() + 1;
+        }
+
+        MappingKey* e_subrange = (MappingKey*)param->get_sub_range().get_end_key();
+        assert(e_subrange->start() == e_subrange->end());
+        if (param->get_sub_range().is_end_inclusive()) {
+            end_lba = e_subrange->end();
+        } else {
+            end_lba = e_subrange->end() - 1;
         }
     }
 

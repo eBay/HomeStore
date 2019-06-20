@@ -564,7 +564,10 @@ public:
                         LOGINFO("mismatch found offset {} size {}", tot_size_read, size_read);
 #ifndef NDEBUG
                         VolInterface::get_instance()->print_tree(vol);
-#endif              
+#endif
+                        LOGINFO("lba {} {}", req->lba, req->nblks);
+                        std::this_thread::sleep_for(std::chrono::seconds(5)); 
+                        sleep(30);
                         assert(0);
                     }
                 }
