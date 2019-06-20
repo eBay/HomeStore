@@ -41,7 +41,7 @@ login() {
 
 test_normal() {
     docker exec -it ${container} bash -c \
-        "cd /usr/local/bin; python vol_test.py --test_suits=normal >> ${mount_dst}/log_normal.txt"
+        "cd /usr/local/bin; python vol_test.py --test_suits=normal"
 }
 
 test_recovery() {
@@ -51,12 +51,12 @@ test_recovery() {
 
 test_vol_del() {
     docker exec -it ${container} bash -c \
-        "cd /usr/local/bin; python vol_test.py --test_suits=vol_del >> ${mount_dst}/log_vol_del.txt"
+        "cd /usr/local/bin; python vol_test.py --test_suits=vol_del"
 }
 
 test_sequence() {
     docker exec -it ${container} bash -c \
-        "cd /usr/local/bin; python vol_test.py --test_suits=sequence >> ${mount_dst}/log_sequence.txt"
+        "cd /usr/local/bin; python vol_test.py --test_suits=sequence"
 }
 
 case "$1" in
