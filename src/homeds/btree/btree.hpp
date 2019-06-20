@@ -1564,13 +1564,13 @@ out:
 
 #ifndef NDEBUG
         K ckey, pkey;
-        if (ind != my_node->get_total_entries()) { //not edge
+        if (ind != my_node->get_total_entries() && child_node->get_total_entries()) { //not edge
             child_node->get_last_key(&ckey);
             my_node->get_nth_key(ind, &pkey, true);
             BT_DEBUG_ASSERT_CMP(LE, ckey.compare(&pkey), 0, my_node);
         }
 
-        if (ind > 0) { //not first child
+        if (ind > 0 && child_node->get_total_entries()) { //not first child
             child_node->get_first_key(&ckey);
             my_node->get_nth_key(ind-1, &pkey, true);
             BT_DEBUG_ASSERT_CMP(LT, pkey.compare(&ckey), 0, my_node);
