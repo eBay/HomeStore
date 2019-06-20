@@ -46,7 +46,7 @@ test_normal() {
 
 test_recovery() {
     docker exec -it ${container} bash -c \
-        "cd /usr/local/bin; python vol_test.py --test_suits=recovery >> ${mount_dst}/log_recovery.txt"
+        "cd /usr/local/bin; python vol_test.py --test_suits=recovery"
 }
 
 test_vol_del() {
