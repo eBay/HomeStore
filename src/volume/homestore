@@ -13,7 +13,8 @@ host=$(hostname -f)
 port=5000
 
 entrypoint="cp /usr/local/bin/test_volume ${mount_dst}; \
-            cp /usr/local/bin/test_mapping ${mount_dst};"
+            cp /usr/local/bin/test_mapping ${mount_dst}; \
+            tail -f /dev/null"
 
 start() {
     mkdir ${mount_src}
