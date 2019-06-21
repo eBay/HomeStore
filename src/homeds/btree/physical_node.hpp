@@ -310,6 +310,9 @@ protected:
 
         auto result = bsearch_node(range);
 
+        if (get_total_entries() == 0) {
+            return result;
+        }
         if (result.end_of_search_index == (int)get_total_entries() && !has_valid_edge()) {
             assert(!result.found);
             return result;
@@ -576,6 +579,9 @@ protected:
         auto ret = bsearch(-1, get_total_entries(), range);
         auto selection = range.selection_option();
        
+        if (get_total_entries() == 0) {
+            return result;
+        }
         if (ret.found) {
             assert(ret.end_of_search_index < (int)get_total_entries() && ret.end_of_search_index > -1);
         }
