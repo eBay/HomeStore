@@ -580,7 +580,7 @@ protected:
         auto selection = range.selection_option();
        
         if (get_total_entries() == 0) {
-            return result;
+            return ret;
         }
         if (ret.found) {
             assert(ret.end_of_search_index < (int)get_total_entries() && ret.end_of_search_index > -1);
