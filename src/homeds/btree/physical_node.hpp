@@ -599,8 +599,10 @@ protected:
                     if (has_valid_edge()) {
                         ret.end_of_search_index = get_total_entries();
                     } else {
-                        assert(get_total_entries() > 0);
-                        ret.end_of_search_index = get_total_entries() - 1;
+                        assert(is_leaf() || get_total_entries() > 0);
+                        if (get_total_entries() != 0) {
+                            ret.end_of_search_index = get_total_entries() - 1;
+                        }
                     }
                 }
             }
