@@ -28,6 +28,7 @@ THREAD_BUFFER_INIT;
 
 /************************** GLOBAL VARIABLES ***********************/
 
+
 #define MAX_DEVICES 2
 #define HOMEBLKS_SB_FLAGS_SHUTDOWN 0x00000001UL
 
