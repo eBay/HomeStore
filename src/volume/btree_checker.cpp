@@ -769,149 +769,25 @@ TEST_F(IOTest, normal_random_io_test) {
     this->remove_files();
 }
 
-/* it bursts the IOs. max outstanding IOs are very high. In this testcase, it
- * will automatically be flow controlled by device.
- */
-TEST_F(IOTest, burst_random_io_test) {
-    /* fork a new process */
-    max_outstanding_ios = 20000;
-    this->init = true;
-    /* child process */
-    this->start_homestore();
-    this->wait_cmpl();
-    LOGINFO("write_cnt {}", write_cnt);
-    LOGINFO("read_cnt {}", read_cnt);
-    this->shutdown();
-    this->remove_files();
-}
-
-/************ Below tests init the systems. Exit with abort. ****************/ 
-
-TEST_F(IOTest, abort_random_io_test) {
-    /* fork a new process */
-    this->init = true;
-    this->is_abort = true;
-    /* child process */
-    this->start_homestore();
-    this->wait_cmpl();
-    LOGINFO("write_cnt {}", write_cnt);
-    LOGINFO("read_cnt {}", read_cnt);
-}
-
-/************ Below tests recover the systems. Exit with clean shutdown. *********/ 
-
-/* Tests which does recovery. End up with a clean shutdown */
-TEST_F(IOTest, recovery_random_io_test) {
-    /* fork a new process */
-    this->init = false;
-    /* child process */
-    this->start_homestore();
-    this->wait_cmpl();
-    this->remove_files();
-}
-
-/************ Below tests recover the systems. Exit with abort. ***********/ 
-
-TEST_F(IOTest, recovery_abort_random_io_test) {
-    /* fork a new process */
-    this->init = false;
-    this->is_abort = true;
-    /* child process */
-    this->start_homestore();
-    this->wait_cmpl();
-    this->remove_files();
-}
-
-/************ Below tests delete volumes. Should exit with clean shutdown. ***********/ 
-TEST_F(IOTest, normal_vol_create_del_test) {
-    this->init = true;
-    this->vol_create_del_test = true;
-    max_vols = 1000;
-    this->start_homestore();
-    this->wait_cmpl();
-    this->shutdown();
-}
-
-/************ Below tests shutdown homestore. Should exit with clean shutdown. ***********/ 
-TEST_F(IOTest, normal_force_shutdown_by_timeout_homeblks_test) {
-    /* fork a new process */
-    this->init = true;
-    /* child process */
-    this->start_homestore();
-    this->wait_cmpl();
-    LOGINFO("write_cnt {}", write_cnt);
-    LOGINFO("read_cnt {}", read_cnt);
-  
-    this->shutdown_force(true);
-    this->remove_files();
-}
-
-TEST_F(IOTest, normal_force_shutdown_by_api_homeblks_test) {
-    /* fork a new process */
-    this->init = true;
-    /* child process */
-    this->start_homestore();
-    this->wait_cmpl();
-    LOGINFO("write_cnt {}", write_cnt);
-    LOGINFO("read_cnt {}", read_cnt);
-  
-    this->shutdown_force(false);
-    this->remove_files();
-}
-
-// simulate reboot with m_cfg_sb flags set w/ shutdown bit 
-TEST_F(IOTest, shutdown_on_reboot_homeblks_test) {
-    /* fork a new process */
-    this->init = false;
-    this->shutdown_on_reboot = true;
-    /* child process */
-    this->start_homestore();
-    this->wait_cmpl();
-    this->remove_files();
-}
-
-TEST_F(IOTest, normal_shutdown_homeblks_with_incoming_io_test) {
- 
-}
-   
 /************************* CLI options ***************************/
 
-SDS_OPTION_GROUP(test_volume, 
-(run_time, "", "run_time", "run time for io", ::cxxopts::value<uint32_t>()->default_value("30"), "seconds"),
-(num_threads, "", "num_threads", "num threads for io", ::cxxopts::value<uint32_t>()->default_value("8"), "number"),
-(read_enable, "", "read_enable", "read enable 0 or 1", ::cxxopts::value<uint32_t>()->default_value("1"), "flag"),
-(max_disk_capacity, "", "max_disk_capacity", "max disk capacity", ::cxxopts::value<uint64_t>()->default_value("7"), "GB"),
-(max_volume, "", "max_volume", "max volume", ::cxxopts::value<uint64_t>()->default_value("50"), "number"),
-(max_num_writes, "", "max_num_writes", "max num of writes", ::cxxopts::value<uint64_t>()->default_value("100000"), "number"),
-(enable_crash_handler, "", "enable_crash_handler", "enable crash handler 0 or 1", ::cxxopts::value<uint32_t>()->default_value("1"), "flag"))
+SDS_OPTION_GROUP(check_btree,
+(blk_id, "", "blk_id", "Block ID", ::cxxopts::value<uint32_t>()->default_value("0"), ""),
 
-
-#define ENABLED_OPTIONS logging, home_blks, test_volume
+#define ENABLED_OPTIONS logging, home_blks, check_btree
 SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
 
 /************************** MAIN ********************************/
 
-/* We can run this target either by using default options which run the normal io tests or by setting different options.
- * Format is
- *   1. ./test_volume
- *   2. ./test_volume --gtest_filter=*recovery* --run_time=120 --num_threads=16 --max_disk_capacity=10 --max_volume=50
- * Above command run all tests having a recovery keyword for 120 seconds with 16 threads , 10g disk capacity and 50 volumes
+/* Run format is
+ *      ./check_btree --blk_id=<blk id>
  */
 int main(int argc, char *argv[]) {
-    srand(time(0));
-    ::testing::GTEST_FLAG(filter) = "*normal_random*";
     testing::InitGoogleTest(&argc, argv);
     SDS_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
-    sds_logging::SetLogger("test_volume");
+    sds_logging::SetLogger("check_btree");
     spdlog::set_pattern("[%D %T.%f] [%^%L%$] [%t] %v");
 
-    run_time = SDS_OPTIONS["run_time"].as<uint32_t>();
-    num_threads = SDS_OPTIONS["num_threads"].as<uint32_t>();
-    read_enable = SDS_OPTIONS["read_enable"].as<uint32_t>();
-    max_disk_capacity = ((SDS_OPTIONS["max_disk_capacity"].as<uint64_t>())  * (1ul<< 30));
-    max_vols = SDS_OPTIONS["max_volume"].as<uint64_t>();
-    max_num_writes= SDS_OPTIONS["max_num_writes"].as<uint64_t>();
-    enable_crash_handler = SDS_OPTIONS["enable_crash_handler"].as<uint32_t>();
-    if (enable_crash_handler) sds_logging::install_crash_handler();
+    blk_id = SDS_OPTIONS["blk_id"].as<uint32_t>();
     return RUN_ALL_TESTS();
 }
