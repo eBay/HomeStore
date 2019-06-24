@@ -12,7 +12,9 @@ mount_opts="--mount src=${mount_src},target=${mount_dst},type=bind"
 host=$(hostname -f)
 port=5000
 
-entrypoint="tail -f /dev/null"
+entrypoint="cp /usr/local/bin/test_volume ${mount_dst}; \
+            cp /usr/local/bin/test_mapping ${mount_dst}; \
+            tail -f /dev/null"
 
 start() {
     mkdir ${mount_src}

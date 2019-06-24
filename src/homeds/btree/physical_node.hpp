@@ -315,6 +315,14 @@ protected:
             return result;
         }
 
+        if (get_total_entries() == 0) {
+            assert(has_valid_edge() || is_leaf());
+            if (is_leaf()) {
+                /* Leaf doesn't have any elements */
+                return result;
+            }
+        }
+
         if (outval) {
             to_variant_node_const()->get(result.end_of_search_index, outval, copy_val /* copy */);
         }
@@ -591,7 +599,10 @@ protected:
                     if (has_valid_edge()) {
                         ret.end_of_search_index = get_total_entries();
                     } else {
-                        ret.end_of_search_index = get_total_entries() - 1;
+                        assert(is_leaf() || get_total_entries() > 0);
+                        if (get_total_entries() != 0) {
+                            ret.end_of_search_index = get_total_entries() - 1;
+                        }
                     }
                 }
             }
@@ -601,6 +612,7 @@ protected:
              */
              if (!is_leaf() && (selection == _MultiMatchSelector::BEST_FIT_TO_CLOSEST_FOR_REMOVE)) {
                 if (ret.end_of_search_index < (int)get_total_entries()) {
+                    assert(get_total_entries() > 0);
                     if (ret.end_of_search_index == (int)(get_total_entries() - 1)) {
                         if (has_valid_edge()) {
                             ret.end_of_search_index = (int)get_total_entries();
