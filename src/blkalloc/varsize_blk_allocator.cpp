@@ -466,59 +466,69 @@ void VarsizeBlkAllocator::free(const BlkId &b) {
 }
 
 // This runs on per region thread and is at present single threaded.
+/* we are going through the segments which has maximum free blks so that we can ensure that all slabs are populated.
+ * We might need to find a efficient way of doing it later.
+ */
 void VarsizeBlkAllocator::fill_cache(BlkAllocSegment *seg) {
     uint64_t nadded_blks = 0;
 
     BLKALLOC_LOG_ASSERT(seg == nullptr);
     /* While cache is not full */
     uint32_t total_segments = 0;
-    /* we are going through all the segments so that we can ensure that all slabs are populated. 
-     * We might need to find a efficient way of doing it later.
-     */
-    while (total_segments < m_segments.size()) {
-        seg = m_segments[m_last_indx++ % m_segments.size()];
-        ++total_segments;
-        uint64_t start_portion_num = seg->get_clock_hand();
-        while (m_cache_n_entries.load(std::memory_order_acquire) <
-                get_config().get_max_cache_blks()) {
+    uint32_t max_blks = 0;
+    for (uint32_t i = 0; i < m_segments.size(); ++i) {
+        if (m_segments[i]->get_free_blks() > max_blks) {
+            seg = m_segments[i];
+            max_blks = m_segments[i]->get_free_blks();
+        }
+    }
 
-            bool refill_needed = false;
-            auto sum = 0U;
-            for (auto i = 0U; i < m_slab_entries.size(); i++) {
-                // Low water mark for cache slabs is half of full capacity
-                auto count = m_slab_entries[i]._a.load(std::memory_order_acq_rel);
-                sum += count;
-                if (count && count <= get_config().get_slab_capacity(i)/2) {
-                    BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Hit low water mark for slab {} capacity = {}",
-                            i, m_slab_entries[i]._a.load(std::memory_order_acq_rel));
-                    refill_needed = true;
-                    break;
-                }
-            }
-            if (!refill_needed && sum) break; // Atleast one slab has sufficient blocks
+    if (seg == nullptr) {
+        LOGINFO("There are no free blocks in var size blk allocator");
+        return;
+    }
 
-            BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Refill cache");
-            uint64_t portion_num = seg->get_clock_hand();
-            nadded_blks += fill_cache_in_portion(portion_num, seg);
+    uint64_t start_portion_num = seg->get_clock_hand();
+    while (m_cache_n_entries.load(std::memory_order_acquire) <
+            get_config().get_max_cache_blks()) {
 
-            // Goto next group within the segment.
-            seg->inc_clock_hand();
-            portion_num = seg->get_clock_hand();
-
-            if (portion_num == start_portion_num) {
-                // Came one full circle, no need to look more.
+        bool refill_needed = false;
+        for (auto i = 0U; i < m_slab_entries.size(); i++) {
+            // Low water mark for cache slabs is half of full capacity
+            auto count = m_slab_entries[i]._a.load(std::memory_order_acq_rel);
+            if (count <= get_config().get_slab_capacity(i)/2) {
+                BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Hit low water mark for slab {} capacity = {}",
+                        i, m_slab_entries[i]._a.load(std::memory_order_acq_rel));
+                refill_needed = true;
                 break;
+            } else {
+                // atleast one slab is full.Wake up the IO thread 
+                std::unique_lock< std::mutex > lk(m_mutex);
+                m_cv.notify_all();
             }
         }
+        if (!refill_needed) break; // Atleast one slab has sufficient blocks
 
-        if (nadded_blks) {
-            BLKALLOC_LOG_ASSERT(seg->get_free_blks() >= nadded_blks);
-            seg->remove_free_blks(nadded_blks);
-            BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Bitset sweep thread added {} blks to blk cache", nadded_blks);
+        BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Refill cache");
+        uint64_t portion_num = seg->get_clock_hand();
+        nadded_blks += fill_cache_in_portion(portion_num, seg);
+
+        // Goto next group within the segment.
+        seg->inc_clock_hand();
+        portion_num = seg->get_clock_hand();
+
+        if (portion_num == start_portion_num) {
+            // Came one full circle, no need to look more.
             break;
-        } else {
-            BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Bitset sweep failed to add any blocks to blk cache");
         }
+    }
+
+    if (nadded_blks) {
+        BLKALLOC_LOG_ASSERT(seg->get_free_blks() >= nadded_blks);
+        seg->remove_free_blks(nadded_blks);
+        BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Bitset sweep thread added {} blks to blk cache", nadded_blks);
+    } else {
+        BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Bitset sweep failed to add any blocks to blk cache");
     }
 }
 
@@ -697,7 +707,7 @@ void VarsizeBlkAllocator::request_more_blks_wait(BlkAllocSegment *seg) {
             m_cv.notify_all();
     }
     // Wait for notification that it is done
-    while (m_region_state != BLK_ALLOCATOR_DONE && m_region_state != BLK_ALLOCATOR_EXITING) {
+    if (m_region_state != BLK_ALLOCATOR_DONE && m_region_state != BLK_ALLOCATOR_EXITING) {
         m_cv.wait(lk);
     }
 }
