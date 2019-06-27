@@ -283,15 +283,15 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks,
         retry_cnt++;
         BLKALLOC_LOG(TRACE, , "Retry count={}", retry_cnt);
     }
-#ifndef NDEBUG
-    if(blks_alloced != nblks)
-        BLKALLOC_LOG(ERROR, , "blks_alloced != nblks : {}  {}",blks_alloced, nblks);
-#endif
-    BLKALLOC_LOG(DEBUG, varsize_blk_alloc,
+    
+    BLKALLOC_LOG(TRACE, varsize_blk_alloc,
             "blks_alloced={}, blocks requested={}", blks_alloced, nblks);
-    BLKALLOC_LOG_ASSERT(blks_alloced == nblks);
+    
     if (blks_alloced != nblks) {
-        m_blk_cache->print_tree();
+        if (m_cache_n_entries.load(std::memory_order_acquire) != 0) {
+            m_blk_cache->print_tree();
+        }
+        BLKALLOC_LOG(ERROR, , "blks_alloced != nblks : {}  {}",blks_alloced, nblks);
         BLKALLOC_LOG_ASSERT(blks_alloced < nblks);
         /* free blks */
         for (auto it = out_blkid.begin(); it != out_blkid.end(); ++it) {
