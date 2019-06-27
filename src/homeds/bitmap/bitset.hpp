@@ -15,7 +15,7 @@
 namespace homeds {
 typedef Bitword< uint64_t > Bitword64;
 
-struct bitblock {
+struct BitBlock {
     uint64_t start_bit;
     uint32_t nbits;
 };
@@ -42,45 +42,53 @@ public:
     }
 
     explicit Bitset(const homeds::blob &b) {
-        auto sbitset = (serialized_bitset *)b.bytes;
+        auto nwords = 0U;
 
-        uint32_t nwords = (sbitset->serialized_size - sizeof(serialized_bitset))/ sizeof(Bitword64);
-        m_words.reserve(nwords);
-
-        for (auto i = 0U; i < nwords; i++) {
-            m_words.emplace_back(sbitset->words[i]);
+        if (b.size % sizeof(Bitword64) == 0) {
+            nwords = b.size / sizeof(Bitword64);
+        } else {
+            nwords = b.size / sizeof(Bitword64) + 1;
         }
-        m_nbits = nwords * sizeof(Bitword64);
+
+        m_words.reserve(nwords);     
+        
+        auto p = (Bitword64*) b.bytes;
+        for (auto i = 0U; i < nwords; i++) {
+            m_words.emplace_back(p[i]);
+        }
+        m_nbits = nwords * Bitword64::size();
     }
 
     uint64_t get_total_bits() const {
         return m_nbits;
     }
 
-    /* Serialize the bitset into the blob provided upto blob bytes. Returns if it able completely serialize within
-     * the bytes specified.
-     */
+    // Serialize the bitset into the blob provided upto blob bytes. 
+    // Returns if it able completely serialize within the bytes specified.
     bool serialize(const homeds::blob &b) {
-        assert(b.size >= sizeof(serialized_bitset)); // We need to at least serialize size bytes
-
-        uint32_t slot = 0;
-        uint32_t max_slots = (b.size - sizeof(serialized_bitset))/sizeof(Bitword64);
-
-        auto sbitset = (serialized_bitset *)b.bytes;
-        sbitset->serialized_size = b.size;
-        for (auto w : m_words) {
-            if (slot >= max_slots) {
-                break;
-            }
-            sbitset->words[slot++] = w;
+        if (b.size < size_serialized()) {
+            return false;
         }
 
-        return (b.size >= size_serialized());
+        uint64_t j = 0ULL;
+        for (auto& w : m_words) {
+            uint64_t t = w.to_integer();
+            //for (auto i = 7; i >= 0; i--) {
+            for (auto i = 0U; i < 8; i++) {
+                // serilize 8 bits once a time
+                b.bytes[i+j] = (uint8_t)(t & 0xffULL);
+                t >>= 8;
+            }
+            j += 8; // move on to next word which is 8 bytes;
+        }
+
+        return true;
     }
 
-    /* Returns how much bytes it will occupy when this bitset is serialized */
+    // Returns how much bytes it will occupy when this bitset is serialized 
+    // Not the size is rounded up to words, not bits;
     uint32_t size_serialized() const {
-        return sizeof(serialized_bitset) + (sizeof(Bitword64) * m_words.size());
+        return (sizeof(Bitword64) * m_words.size());
     }
 
     void set_reset_bits(uint64_t b, int nbits, bool value) {
@@ -159,9 +167,12 @@ public:
         return is_bits_set_reset(b, nbits, false);
     }
 
-    bitblock get_next_contiguous_n_reset_bits(uint64_t start_bit, uint32_t n) {
+    // assumption: n < total_bits_in_one_word
+    // get contiguous n bits within one word;
+    // Limitation: even n is less than Bitword64::size(), returned bits can not accross two words;
+    BitBlock get_next_contiguous_n_reset_bits(uint64_t start_bit, uint32_t n) {
         int offset = get_word_offset(start_bit);
-        bitblock retb = {0, 0};
+        BitBlock retb = {0, 0};
 
         while (1) {
             Bitword64 *word = get_word(start_bit);
@@ -182,7 +193,7 @@ public:
         return retb;
     }
 
-    bitblock get_next_contiguous_reset_bits(uint64_t start_bit) {
+    BitBlock get_next_contiguous_reset_bits(uint64_t start_bit) {
         return(get_next_contiguous_n_reset_bits(start_bit, 1));
     }
 
@@ -190,6 +201,14 @@ public:
         for (Bitword64 &w : m_words) {
             w.print();
         }
+    }
+    
+    std::string to_string() {
+        std::string out;
+        for (Bitword64 &w : m_words) {
+            out += w.to_string();
+        }
+        return out;
     }
 
 private:

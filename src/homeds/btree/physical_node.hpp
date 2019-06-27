@@ -602,6 +602,8 @@ protected:
                         assert(is_leaf() || get_total_entries() > 0);
                         if (get_total_entries() != 0) {
                             ret.end_of_search_index = get_total_entries() - 1;
+                        } else {
+                            ret.found = false;
                         }
                     }
                 }
