@@ -5,7 +5,11 @@
 #include <cassert>
 #include <device/blkbuffer.hpp>
 #include <iostream>
+#include <fstream>
 #include <stdexcept>
+#include <nlohmann/json.hpp>
+#include <boost/lexical_cast.hpp>
+#include <boost/uuid/uuid_io.hpp>
 
 SDS_OPTION_GROUP(home_blks, (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service", cxxopts::value<int32_t>()->default_value("5000"), "port"))
 
@@ -47,6 +51,19 @@ HomeBlks::HomeBlks(const init_params& cfg) :
     HomeStoreConfig::min_page_size = m_cfg.min_virtual_page_size;
     HomeStoreConfig::open_flag = m_cfg.flag;
     m_data_pagesz = m_cfg.min_virtual_page_size;
+
+    nlohmann::json json;
+    json["phys_page_size"]          = HomeStoreConfig::phys_page_size;
+    json["atomic_phys_page_size"]   = HomeStoreConfig::atomic_phys_page_size;
+    json["align_size"]              = HomeStoreConfig::align_size;
+    json["min_page_size"]           = HomeStoreConfig::min_page_size;
+    json["open_flag"]               = HomeStoreConfig::open_flag;
+    json["cache_size"]              = m_cfg.cache_size;
+    json["system_uuid"]             = boost::lexical_cast<std::string>(m_cfg.system_uuid);
+    json["devices"]                 = nlohmann::json::parse(m_cfg.devices);
+
+    std::ofstream hs_config("hs_config.json");
+    hs_config << json;
 
     assert(VOL_SB_SIZE >= sizeof(vol_ondisk_sb));
     assert(VOL_SB_SIZE >= sizeof(vol_config_sb));
