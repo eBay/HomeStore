@@ -323,9 +323,9 @@ public:
 	T to_integer() {
 		return m_bits;
 	}
-
-	void print() {
-		char str[size() + 1] = {0};
+    
+    std::string to_string() {
+        char str[size() + 1] = {0};
 		T e = m_bits;
 
 		str[size()] = '\0';
@@ -333,7 +333,12 @@ public:
 			str[i] = (e & 1) ? '1' : '0';
 			e >>= 1;
 		}
-		printf("%s\n", str);
+        return std::string(str);
+    }
+
+	void print() {
+        std::string str = to_string();
+		printf("%s\n", str.c_str());
 	}
 
 private:
