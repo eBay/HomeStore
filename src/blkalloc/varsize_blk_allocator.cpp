@@ -291,6 +291,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks,
             "blks_alloced={}, blocks requested={}", blks_alloced, nblks);
     BLKALLOC_LOG_ASSERT(blks_alloced == nblks);
     if (blks_alloced != nblks) {
+        m_blk_cache->print_tree();
         BLKALLOC_LOG_ASSERT(blks_alloced < nblks);
         /* free blks */
         for (auto it = out_blkid.begin(); it != out_blkid.end(); ++it) {
