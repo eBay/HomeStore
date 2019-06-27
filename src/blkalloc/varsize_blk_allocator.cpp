@@ -150,10 +150,12 @@ VarsizeBlkAllocator::~VarsizeBlkAllocator() {
 void VarsizeBlkAllocator::allocator_state_machine() {
     BLKALLOC_LOG(INFO, , "Starting new blk sweep thread");
     BlkAllocSegment *allocate_seg = nullptr;
+    int slab_indx;
     bool allocate = false;
 
     while (true) {
         allocate_seg = nullptr;
+        slab_indx = -1;
         allocate = false;
         {
             std::unique_lock< std::mutex > lk(m_mutex);
@@ -166,6 +168,7 @@ void VarsizeBlkAllocator::allocator_state_machine() {
             if (m_region_state == BLK_ALLOCATOR_WAIT_ALLOC) {
                 m_region_state = BLK_ALLOCATOR_ALLOCATING;
                 allocate_seg = m_wait_alloc_segment;
+                slab_indx = m_wait_slab_indx;
                 allocate = true;
                 BLKALLOC_LOG(TRACE, , "Region state : wait-alloc -> allocating");
 
@@ -176,7 +179,7 @@ void VarsizeBlkAllocator::allocator_state_machine() {
         }
         if (allocate) {
             BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Fill cache for segment");
-            fill_cache(allocate_seg);
+            fill_cache(allocate_seg, slab_indx);
             {
                 // acquire lock
                 std::unique_lock< std::mutex > lk(m_mutex);
@@ -349,7 +352,8 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
                 } else {
                     /* trigger blk allocator to populate cache */
                     if (actual_entry.get_blk_count() != nblks) {
-                        request_more_blks(nullptr);
+                        auto slab_indx = get_config().get_slab(nblks).first;
+                        request_more_blks(nullptr, slab_indx);
                     }
                     break;
                 }
@@ -380,7 +384,8 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
                     attempt, (uint32_t)nblks, hints.desired_temp);
         }
 
-        request_more_blks_wait(nullptr);
+        auto slab_indx = get_config().get_slab(nblks).first;
+        request_more_blks_wait(nullptr, slab_indx);
         attempt++;
     }
 
@@ -467,9 +472,10 @@ void VarsizeBlkAllocator::free(const BlkId &b) {
 
 // This runs on per region thread and is at present single threaded.
 /* we are going through the segments which has maximum free blks so that we can ensure that all slabs are populated.
- * We might need to find a efficient way of doing it later.
+ * We might need to find a efficient way of doing it later. It stop processing the segment when any slab greater then
+ * slab_indx is full.
  */
-void VarsizeBlkAllocator::fill_cache(BlkAllocSegment *seg) {
+void VarsizeBlkAllocator::fill_cache(BlkAllocSegment *seg, int slab_indx) {
     uint64_t nadded_blks = 0;
 
     BLKALLOC_LOG_ASSERT(seg == nullptr);
@@ -492,19 +498,20 @@ void VarsizeBlkAllocator::fill_cache(BlkAllocSegment *seg) {
     while (m_cache_n_entries.load(std::memory_order_acquire) <
             get_config().get_max_cache_blks()) {
 
-        bool refill_needed = false;
-        for (auto i = 0U; i < m_slab_entries.size(); i++) {
+        bool refill_needed = true;
+        assert(slab_indx >= 0);
+        if (slab_indx < 0) {
+            slab_indx = 0;
+        }
+        for (auto i = slab_indx; i < (int)m_slab_entries.size(); ++i) {
             // Low water mark for cache slabs is half of full capacity
             auto count = m_slab_entries[i]._a.load(std::memory_order_acq_rel);
             if (count <= get_config().get_slab_capacity(i)/2) {
                 BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Hit low water mark for slab {} capacity = {}",
                         i, m_slab_entries[i]._a.load(std::memory_order_acq_rel));
-                refill_needed = true;
-                break;
             } else {
                 // atleast one slab is full.Wake up the IO thread 
-                std::unique_lock< std::mutex > lk(m_mutex);
-                m_cv.notify_all();
+                refill_needed = false;
             }
         }
         if (!refill_needed) break; // Atleast one slab has sufficient blocks
@@ -512,6 +519,13 @@ void VarsizeBlkAllocator::fill_cache(BlkAllocSegment *seg) {
         BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Refill cache");
         uint64_t portion_num = seg->get_clock_hand();
         nadded_blks += fill_cache_in_portion(portion_num, seg);
+        if (nadded_blks > 0) {
+            /* We got some blks. wake the IO threads if there are waiting. This thread will continue to
+             * populate the desired slab.
+             */
+            std::unique_lock< std::mutex > lk(m_mutex);
+            m_cv.notify_all();
+        }
 
         // Goto next group within the segment.
         seg->inc_clock_hand();
@@ -680,13 +694,14 @@ uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t seg_portion_num, Bl
 
 // Run in non-region threads. It can be called by multiple threads simultaneously.
 // Request for more blocks from a specified segment. If BlkSegment is NULL, then it picks the 1st segment to allocate from.
-void VarsizeBlkAllocator::request_more_blks(BlkAllocSegment *seg) {
+void VarsizeBlkAllocator::request_more_blks(BlkAllocSegment *seg, int slab_indx) {
     bool allocate = false;
     {
         // acquire lock
         std::unique_lock< std::mutex > lk(m_mutex);
         if (m_region_state == BLK_ALLOCATOR_DONE) {
             m_wait_alloc_segment = seg;
+            m_wait_slab_indx = slab_indx;
             m_region_state = BLK_ALLOCATOR_WAIT_ALLOC;
             allocate = true;
         }
@@ -697,12 +712,13 @@ void VarsizeBlkAllocator::request_more_blks(BlkAllocSegment *seg) {
     }
 }
 
-void VarsizeBlkAllocator::request_more_blks_wait(BlkAllocSegment *seg) {
+void VarsizeBlkAllocator::request_more_blks_wait(BlkAllocSegment *seg, int slab_indx) {
     /* TODO: rishabh if segment is not NULL then this function won't work */ 
     std::unique_lock< std::mutex > lk(m_mutex);
     BLKALLOC_LOG_ASSERT(!seg);
     if (m_region_state == BLK_ALLOCATOR_DONE) {
             m_wait_alloc_segment = seg;
+            m_wait_slab_indx = slab_indx;
             m_region_state = BLK_ALLOCATOR_WAIT_ALLOC;
             m_cv.notify_all();
     }
