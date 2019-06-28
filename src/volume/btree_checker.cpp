@@ -24,6 +24,8 @@ extern "C" {
 
 using namespace homestore;
 
+std::string vol_uuid;
+
 nlohmann::json get_config() {
     std::ifstream in("hs_config.json");
     if (!in.is_open()) {
@@ -36,7 +38,12 @@ nlohmann::json get_config() {
 }
 
 void init_done_cb(  std::error_condition err,
-                    struct out_params params) {}
+                    struct out_params params) {
+
+    auto uuid = boost::lexical_cast<uuid>(vol_uuid);
+    auto vol = VolInterface::get_instance()->lookup_volume(uuid);
+    VolInterface::get_instance()->print_tree(vol);
+}
 
 bool vol_found_cb (boost::uuids::uuid uuid) {
     return true;
@@ -65,45 +72,28 @@ void start_homestore() {
     params.system_uuid = boost::lexical_cast<uuid>(config["system_uuid"]);
     params.iomgr = nullptr;
     params.init_done_cb = init_done_cb;
-    params.vol_mounted_cb = vol_mounted_cb;
-    params.vol_state_change_cb = vol_state_change_cb;
-    params.vol_found_cb = vol_found_cb;
+    params.vol_mounted_cb = std::bind(&vol_mounted_cb,
+            this, std::placeholders::_1, std::placeholders::_2);
+    params.vol_state_change_cb = std::bind(&vol_state_change_cb,
+            this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
+    params.vol_found_cb = std::bind(&vol_found_cb, this, std::placeholders::_1);
     VolInterface::init(params);
 }
 
 /************************* CLI options ***************************/
 
-SDS_OPTION_GROUP(test_volume, 
-(run_time, "", "run_time", "run time for io", ::cxxopts::value<uint32_t>()->default_value("30"), "seconds"),
-(num_threads, "", "num_threads", "num threads for io", ::cxxopts::value<uint32_t>()->default_value("8"), "number"),
-(read_enable, "", "read_enable", "read enable 0 or 1", ::cxxopts::value<uint32_t>()->default_value("1"), "flag"),
-(max_disk_capacity, "", "max_disk_capacity", "max disk capacity", ::cxxopts::value<uint64_t>()->default_value("7"), "GB"),
+SDS_OPTION_GROUP(check_btree,
+(vol_uuid, "", "vol_uuid", "volume uuid", ::cxxopts::value<std::string>(), "string"))
 
-
-#define ENABLED_OPTIONS logging, home_blks, test_volume
+#define ENABLED_OPTIONS logging, home_blks, check_btree
 SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
 
 /************************** MAIN ********************************/
 
 int main(int argc, char *argv[]) {
-    srand(time(0));
     SDS_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
-    sds_logging::SetLogger("test_volume");
-    spdlog::set_pattern("[%D %T.%f] [%^%L%$] [%t] %v");
-
-    run_time = SDS_OPTIONS["run_time"].as<uint32_t>();
-    num_threads = SDS_OPTIONS["num_threads"].as<uint32_t>();
-    read_enable = SDS_OPTIONS["read_enable"].as<uint32_t>();
-    max_disk_capacity = ((SDS_OPTIONS["max_disk_capacity"].as<uint64_t>())  * (1ul<< 30));
-    max_vols = SDS_OPTIONS["max_volume"].as<uint64_t>();
-    max_num_writes= SDS_OPTIONS["max_num_writes"].as<uint64_t>();
-    enable_crash_handler = SDS_OPTIONS["enable_crash_handler"].as<uint32_t>();
-    if (enable_crash_handler) sds_logging::install_crash_handler();
-
+    vol_uuid = boost::lexical_cast<uuid>(SDS_OPTIONS["vol_uuid"].as<std::string>());
     this->start_homestore();
-    this->wait_cmpl();
-    this->shutdown();
-
     return 0;
 }
 

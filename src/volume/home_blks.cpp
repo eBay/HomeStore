@@ -854,9 +854,7 @@ homeds::blob HomeBlks::at_offset(const boost::intrusive_ptr< BlkBuffer >& buf, u
     return (buf->at_offset(offset));
 }
 
-#ifndef NDEBUG
 void HomeBlks::print_tree(const VolumePtr& vol) { vol->print_tree(); }
-#endif
 
 void HomeBlks::get_version(sisl::HttpCallData cd) {
     HomeBlks *hb = (HomeBlks *)(cd->cookie());

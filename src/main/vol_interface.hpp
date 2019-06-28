@@ -244,17 +244,14 @@ public:
     virtual VolumePtr            create_volume(const vol_params& params) = 0;
     virtual std::error_condition remove_volume(const boost::uuids::uuid& uuid) = 0;
     virtual VolumePtr            lookup_volume(const boost::uuids::uuid& uuid) = 0;
+    virtual void                 print_tree(const VolumePtr& vol) = 0;
 
     /* AM should call it in case of recovery or reboot when homestore try to mount the existing volume */
     virtual void attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback cb) = 0;
-    
+
     virtual std::error_condition shutdown(shutdown_comp_callback shutdown_comp_cb, bool force = false) = 0;
     virtual cap_attrs get_system_capacity() = 0;
     virtual cap_attrs get_vol_capacity(const VolumePtr& vol) = 0;
     virtual bool vol_state_change(const VolumePtr& vol, vol_state new_state) = 0;
-
-#ifndef NDEBUG
-    virtual void print_tree(const VolumePtr& vol) = 0;
-#endif
 };
 } // namespace homestore
