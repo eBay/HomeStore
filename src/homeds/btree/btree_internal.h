@@ -313,6 +313,7 @@ ENUM(btree_put_type, uint16_t,
      APPEND_IF_EXISTS_ELSE_INSERT)
 
 class BtreeSearchRange;
+
 class BtreeKey {
 public:
     BtreeKey() = default;
@@ -323,15 +324,21 @@ public:
     // virtual BtreeKey& operator=(const BtreeKey& other) = delete; // Deleting = overload forces the derived to define
     // its = overload
     virtual int          compare(const BtreeKey* other) const = 0;
+
+    /* Applicable only for extent keys. It compare start key of (*other) with end key of (*this) */
+    virtual int          compare_start(const BtreeKey* other) const { return compare(other); };
     virtual int          compare_range(const BtreeSearchRange& range) const = 0;
     virtual homeds::blob get_blob() const = 0;
     virtual void         set_blob(const homeds::blob& b) = 0;
     virtual void         copy_blob(const homeds::blob& b) = 0;
+    /* Applicable to extent keys. It doesn't copy the entire blob. Copy only the end key of the blob */
+    virtual void         copy_end_key_blob(const homeds::blob& b) { copy_blob(b); };
 
     virtual uint32_t get_blob_size() const = 0;
     virtual void     set_blob_size(uint32_t size) = 0;
 
     virtual std::string to_string() const = 0;
+    virtual bool is_extent_key() { return false; }
 };
 
 ENUM(_MultiMatchSelector, uint16_t, DO_NOT_CARE, LEFT_MOST, RIGHT_MOST,
@@ -407,6 +414,29 @@ public:
 
     _MultiMatchSelector selection_option() const { return m_multi_selector; }
     void                set_selection_option(_MultiMatchSelector o) { m_multi_selector = o; }
+};
+
+/* This type is for keys which is range in itself i.e each key is having its own
+ * start() and end().
+ */
+class ExtentBtreeKey : public BtreeKey {
+public:
+    ExtentBtreeKey() = default;
+    virtual ~ExtentBtreeKey() = default;
+    virtual bool is_extent_key() { return true; }
+    virtual int compare_end(const BtreeKey* other) const = 0;
+    virtual int compare_start(const BtreeKey* other) const override = 0;
+    virtual void copy_end_key_blob(const homeds::blob& b) override = 0;
+
+    /* we always compare the end key in case of extent */
+    virtual int compare(const BtreeKey* other) const override {
+        return(compare_end(other));
+    }
+
+    /* we always compare the end key in case of extent */
+    virtual int compare_range(const BtreeSearchRange& range) const override {
+        return(compare_end(range.get_end_key()));
+    }
 };
 
 class BtreeValue {

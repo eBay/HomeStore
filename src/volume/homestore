@@ -5,20 +5,22 @@ container="homestore"
 image="ecr.vip.ebayc3.com/sds/homestore:develop-test"
 
 name_plus_date="${container}"-$(date +"%Y%m%d%H%M")
-mount_base_dir=$(pwd)
+mount_base_dir=/opt/sds/mount
 mount_src="${mount_base_dir}/${name_plus_date}"
 mount_dst="/home/${container}"
 mount_opts="--mount src=${mount_src},target=${mount_dst},type=bind"
 host=$(hostname -f)
 port=5000
 
-entrypoint="tail -f /dev/null"
+entrypoint="cp /usr/local/bin/test_volume ${mount_dst}; \
+            cp /usr/local/bin/test_mapping ${mount_dst}; \
+            tail -f /dev/null"
 
 start() {
     mkdir ${mount_src}
     docker pull ${image}
     docker run --rm --privileged ${mount_opts} -v ${mount_base_dir}:/tmp/source \
-        --pid=host -e TZ=GMT-7 -d --name ${container} \
+        --pid=host -e TZ=GMT+7 -d --name ${container} \
         --entrypoint /bin/sh ${image} -c "${entrypoint}"
 }
 
@@ -32,7 +34,7 @@ status() {
 }
 
 logs() {
-    docker logs ${container}
+    docker logs -t ${container}
 }
 
 login() {
@@ -41,17 +43,22 @@ login() {
 
 test_normal() {
     docker exec -it ${container} bash -c \
-        "cd /usr/local/bin; python vol_test.py --test_suits=normal >> ${mount_dst}/log_normal.txt"
+        "cd /usr/local/bin; python vol_test.py --test_suits=normal"
 }
 
 test_recovery() {
     docker exec -it ${container} bash -c \
-        "cd /usr/local/bin; python vol_test.py --test_suits=recovery >> ${mount_dst}/log_recovery.txt"
+        "cd /usr/local/bin; python vol_test.py --test_suits=recovery"
 }
 
 test_vol_del() {
     docker exec -it ${container} bash -c \
-        "cd /usr/local/bin; python vol_test.py --test_suits=vol_del >> ${mount_dst}/log_vol_del.txt"
+        "cd /usr/local/bin; python vol_test.py --test_suits=vol_del"
+}
+
+test_sequence() {
+    docker exec -it ${container} bash -c \
+        "cd /usr/local/bin; python vol_test.py --test_suits=sequence"
 }
 
 case "$1" in
@@ -63,6 +70,7 @@ case "$1" in
             ;;
     'restart')
             stop
+            sleep 5s
             start
             ;;
     'logs')
@@ -74,23 +82,21 @@ case "$1" in
     'status')
             status
             ;;
-    'test_normal')
+    'test-normal')
             test_normal
             ;;
-    'test_recovery')
+    'test-recovery')
             test_recovery
             ;;
-    'test_vol_del')
+    'test-vol-del')
             test_vol_del
             ;;
-    'test_all')
-            test_normal
-            test_recovery
-            test_vol_del
+    'test-sequence')
+            test_sequence
             ;;
     *)
             echo
-            echo "Usage: $0 { start | stop | restart | logs | login | status | test_normal | test_recovery | test_vol_del | test_all }"
+            echo "Usage: $0 { start | stop | restart | logs | login | status | test-normal | test-recovery | test-vol-del | test-sequence }"
             echo
             exit 1
             ;;

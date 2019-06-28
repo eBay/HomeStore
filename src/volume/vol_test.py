@@ -14,22 +14,57 @@ for opt,arg in opts:
         print(("testing suits (%s)")%(arg))
 
 def normal():
-    subprocess.call("./test_volume --run_time=360", shell=True)
+    status = subprocess.check_output("./test_volume \
+            --run_time=12000 --max_num_writes=5000000", shell=True)
+    f = open( '/home/homestore/log_normal.txt', 'w+' )
+    f.write(status)
+    f.close()
+    return '[  PASSED  ] 1 test' in status
 
 def vol_delete():
-    subprocess.call("./test_volume --gtest_filter=*vol_del*", shell=True)
+    status = subprocess.check_output("./test_volume --gtest_filter=*vol_del*", shell=True)
+    f = open( '/home/homestore/log_delete.txt', 'w+' )
+    f.write(status)
+    f.close()
+    return '[  PASSED  ] 1 test' in status
 
 def recovery():
-    subprocess.call("./test_volume --gtest_filter=*normal_abort_random* --run_time=300", shell=True)
+    status = subprocess.check_output("./test_volume \
+            --gtest_filter=*normal_abort_random* --run_time=300 --install_crash=0", shell=True)
+    f = open( '/home/homestore/log_abort.txt', 'w+')
+    f.write(status)
+    f.close()
+    for x in range(1, 50):
+        status = subprocess.call("./test_volume \
+                --gtest_filter=*recovery_abort* --run_time=300 --install_crash=0", shell=True)
+        f = open( '/home/homestore/log_recovery.txt', 'a+' )
+        f.write(status)
+        f.close()
 
-    for x in range(1, 300):
-        subprocess.call("./test_volume --gtest_filter=*recovery_abort* --run_time=300", shell=True)
+def mapping():
+    status = subprocess.check_output("./test_mapping --num_ios=10000000", shell=True)
+    f = open( '/home/homestore/log_mapping.txt', 'w+' )
+    f.write(status)
+    f.close()
+    return '[  PASSED  ] 1 test' in status
+
+def sequence():
+    if normal() == False:
+        sys.exit(0)
+    if mapping() == False:
+        sys.exit(0)
 
 if test_suits == "normal":
     normal()
     
+if test_suits == "vol_del":
+    vol_delete()
+
 if test_suits == "recovery":
     recovery()
     
-if test_suits == "vol_del":
-    vol_delete()
+if test_suits == "mapping":
+    mapping()
+
+if test_suits == "sequence":
+    sequence()

@@ -728,7 +728,10 @@ out:
                     if (my_node->get_total_entries() > 0) {
                         K ekey;
                         next_node->get_nth_key(0,&ekey,false);
-                        if (query_req.get_input_range().get_end_key()->compare(&ekey) < 0) {//early lookup end
+                        /* comparing the end key of the input rangee with the start key of the next interval to see
+                         * if it overlaps
+                         */
+                        if (query_req.get_input_range().get_end_key()->compare_start(&ekey) < 0) {//early lookup end
                             query_req.cursor().m_last_key = nullptr;
                             break;
                         }
@@ -781,7 +784,12 @@ out:
                 return ret;
             }
             if (query_req.cursor().m_last_key != nullptr) {
-                return btree_status_t::has_more;
+                if (query_req.get_input_range().get_end_key()->compare(query_req.cursor().m_last_key.get()) == 0) {
+                    /* we finished just at the last key */
+                    return btree_status_t::success;
+                } else {
+                    return btree_status_t::has_more;
+                }
             } else {
                 return btree_status_t::success;
             }
@@ -831,6 +839,10 @@ out:
             if (out_values.size() >= query_req.get_batch_size()) {
                 BT_DEBUG_ASSERT_CMP(EQ, out_values.size(), query_req.get_batch_size(), my_node);
                 query_req.cursor().m_last_key = std::make_unique< K >(out_values.back().first);
+                if (query_req.get_input_range().get_end_key()->compare(query_req.cursor().m_last_key.get()) == 0) {
+                    /* we finished just at the last key */
+                    return btree_status_t::success;
+                }
                 return btree_status_t::has_more;
             }
 
@@ -1075,11 +1087,12 @@ done:
             //BT_DEBUG_ASSERT_CMP(NE, bur->callback(), nullptr, my_node); // TODO - range req without callback implementation
             std::vector< std::pair< K, V > > match;
             int                              start_ind = 0, end_ind = 0;
-            my_node->get_all(bur->get_input_range(), UINT32_MAX, start_ind, end_ind, &match);
+            my_node->get_all(bur->get_cb_param()->get_sub_range(), UINT32_MAX, start_ind, end_ind, &match);
 
             vector< pair< K, V > > replace_kv;
             bur->callback()(match, replace_kv, bur->get_cb_param());
-            if (match.size() > 0 && start_ind <= end_ind) {
+            assert(start_ind <= end_ind);
+            if (match.size() > 0) {
                 my_node->remove(start_ind, end_ind);
             }
             for (auto &pair : replace_kv) { // insert is based on compare() of BtreeKey
@@ -1113,7 +1126,7 @@ done:
             /* just get start/end index from get_all. We don't release the parent lock until this
              * key range is not inserted from start_ind to end_ind.
              */
-            my_node->get_all(bur->get_input_range(), UINT32_MAX, start_ind, end_ind);
+            my_node->get_all(bur->get_cb_param()->get_input_range(), UINT32_MAX, start_ind, end_ind);
         } else {
             auto result = my_node->find(k, nullptr, nullptr);
             end_ind = start_ind = result.end_of_search_index;
@@ -1221,30 +1234,21 @@ out:
         return ret;
     }
 
+    /* This function is called for the interior nodes whose childs are leaf nodes to calculate the sub range */
     void get_subrange(BtreeNodePtr my_node, BtreeUpdateRequest<K, V> *bur, int curr_ind) {
+        
         if (!bur) {
             return;
         }
 
-        //find start of subrange
-        bool start_inc;
-        K start_key;
-        BtreeKey *start_key_ptr = &start_key;
-        
         if (curr_ind > 0) {
-            /* start of subrange will be more then the key in curr_ind - 1 */
+            /* start of subrange will always be more then the key in curr_ind - 1 */
+            K start_key;
+            BtreeKey *start_key_ptr = &start_key;
+            
             my_node->get_nth_key(curr_ind - 1, start_key_ptr, false);
-            start_inc = false;
-        } else {
-            /* start key is the start key of the input range */
-            start_key_ptr = const_cast<BtreeKey *>(bur->get_input_range().get_start_key());
-            start_inc = bur->get_input_range().is_start_inclusive();
+            assert(start_key_ptr->compare(bur->get_cb_param()->get_sub_range().get_start_key()) <= 0);
         }
-        
-        const_cast<BtreeKey *>(bur->get_cb_param()->get_sub_range().get_start_key())->copy_blob(
-                start_key_ptr->get_blob());//copy
-        bur->get_cb_param()->get_sub_range().set_start_incl(start_inc);
-
         
         //find end of subrange
         bool end_inc = true;
@@ -1253,17 +1257,24 @@ out:
         
         if (curr_ind < (int) my_node->get_total_entries()) {
             my_node->get_nth_key(curr_ind, end_key_ptr, false);
-            end_inc = true;
+            if (end_key_ptr->compare(bur->get_input_range().get_end_key()) >= 0) {
+                /* this is last index to process as end of range is smaller then key in this node */
+                end_key_ptr = const_cast<BtreeKey *>(bur->get_input_range().get_end_key());
+                end_inc = bur->get_cb_param()->get_input_range().is_end_inclusive();
+            } else {
+                end_inc = true;
+            }
         } else {
             /* it is the edge node. end key is the end of input range */
             BT_LOG_ASSERT_CMP(EQ, my_node->get_edge_id().is_valid(), true, my_node);
             end_key_ptr = const_cast<BtreeKey *>(bur->get_input_range().get_end_key());
-            end_inc = bur->get_input_range().is_end_inclusive();
+            end_inc = bur->get_cb_param()->get_input_range().is_end_inclusive();
         }
         
-        const_cast<BtreeKey *>(bur->get_cb_param()->get_sub_range().get_end_key())->copy_blob(
-                end_key_ptr->get_blob());//copy
+        auto blob = end_key_ptr->get_blob();
+        const_cast<BtreeKey *>(bur->get_cb_param()->get_sub_range().get_end_key())->copy_blob(blob);//copy
         bur->get_cb_param()->get_sub_range().set_end_incl(end_inc);
+        /* We don't neeed to update the start at it is updated when entries are inserted in leaf nodes */
     }
 
     /* This function does the heavy lifiting of co-ordinating inserts. It is a recursive function which walks
@@ -1300,9 +1311,13 @@ out:
         }
         
         bool is_any_child_splitted = false;
+        K checkpoint_key;
+        bool is_checkpont = false;
         
         multinode_req->node_read_cnt++;
 retry:
+        assert(!bur || const_cast<BtreeKey *>(bur->get_cb_param()->get_sub_range().get_start_key())->compare(
+                bur->get_input_range().get_start_key()) == 0);
         int start_ind = 0, end_ind = -1;
 
         /* Get the start and end ind in a parent node for the range updates. For 
@@ -1316,6 +1331,7 @@ retry:
         BT_DEBUG_ASSERT((curlock == LOCKTYPE_READ || curlock == LOCKTYPE_WRITE), my_node,
             "unexpected locktype {}", curlock);
         curr_ind = start_ind;
+
         while (curr_ind <= end_ind) { // iterate all matched childrens
             homeds::thread::locktype child_cur_lock = homeds::thread::LOCKTYPE_NONE;
 
@@ -1352,8 +1368,19 @@ retry:
             }
 
             /* Get subrange if it is a range update */
-            if (bur) {
+            if (bur && child_node->is_leaf()) {
+                /* We get the subrange only for leaf because this is where we will be inserting keys. In interior nodes,
+                 * keys are always propogated from the lower nodes.
+                 */
                 get_subrange(my_node, bur, curr_ind);
+
+                if (curr_ind != (int)my_node->get_total_entries()) {
+                    /* if it is not an edge node then update the end key in input range after insert has happened in 
+                     * the leaf nodes.
+                     */
+                     my_node->get_nth_key(curr_ind, &checkpoint_key, true);
+                     is_checkpont = true;
+                }
                 BT_LOG(DEBUG, btree_structures, my_node, "Subrange:s:{},e:{},c:{},nid:{},eidvalid?:{},sk:{},ek:{}",
                     start_ind, end_ind, curr_ind, my_node->get_node_id().to_string(), my_node->get_edge_id().is_valid(),
                     bur->get_cb_param()->get_sub_range().get_start_key()->to_string(),
@@ -1366,9 +1393,13 @@ retry:
                 my_node->get_nth_key(curr_ind, &pkey, true);
                 if (child_node->get_total_entries() != 0){
                     child_node->get_last_key(&ckey);
-                    assert(ckey.compare(&pkey) <= 0);
+                    if (!child_node->is_leaf()) {
+                        assert(ckey.compare(&pkey) == 0);
+                    } else {
+                        assert(ckey.compare(&pkey) <= 0);
+                    }
                 }
-                assert(k.compare(&pkey) <= 0);
+                assert(bur != nullptr || k.compare(&pkey) <= 0);
             }
             if (curr_ind > 0){//not first child
                 my_node->get_nth_key(curr_ind - 1, &pkey, true);
@@ -1376,7 +1407,7 @@ retry:
                     child_node->get_first_key(&ckey);
                     assert(pkey.compare(&ckey) <= 0);
                 }
-                assert(k.compare(&pkey) >= 0);
+                assert(bur != nullptr || k.compare(&pkey) >= 0);
             }
 #endif
             if (curr_ind == end_ind) {
@@ -1391,17 +1422,29 @@ retry:
                 assert(child_node->m_common_header.is_lock);
             }
 #endif
+            K cur_range_ekey;
+            if (bur) {
+                /* this would be the new start key after this range is inserted */
+                cur_range_ekey.copy_blob(const_cast<BtreeKey *>(bur->get_cb_param()->get_sub_range().get_end_key())->get_blob());
+            }
+
             ret = do_put(child_node, child_cur_lock, k, v, ind_hint, put_type,
                                   existing_val, multinode_req, bur);
 
             if (ret != btree_status_t::success) {
                 goto out;
             }
-            if (bur) {//savepoint of range
-                // update original input range
-                // cb gets cb->input range for manipulation
+
+            if (bur && is_checkpont) {//savepoint of range only if this parent has leaf nodes
+                
+                /* update the start indx of both sub range and input range */
+                const_cast<BtreeKey *>(bur->get_cb_param()->get_sub_range().get_start_key())->copy_blob(
+                            checkpoint_key.get_blob());//copy
+                bur->get_cb_param()->get_sub_range().set_start_incl(false);
+                
+                // update input range for checkpointing
                 const_cast<BtreeKey *>(bur->get_input_range().get_start_key())->copy_blob(
-                        const_cast<BtreeKey *>(bur->get_cb_param()->get_sub_range().get_end_key())->get_blob());//copy
+                            checkpoint_key.get_blob());//copy
                 bur->get_input_range().set_start_incl(false);
             }
             curr_ind++;
@@ -1427,7 +1470,7 @@ out:
                 K curKey, prevKey;
                 my_node->get_nth_key(i-1,&prevKey,false);
                 my_node->get_nth_key(i,&curKey,false);
-                assert(prevKey.compare(&curKey)<=0);
+                assert(prevKey.compare(&curKey) < 0);
             }
 #endif
             bool is_found = my_node->remove_one(range, outkey, outval);
@@ -1436,7 +1479,7 @@ out:
                 K curKey, prevKey;
                 my_node->get_nth_key(i-1,&prevKey,false);
                 my_node->get_nth_key(i,&curKey,false);
-                assert(prevKey.compare(&curKey)<=0);
+                assert(prevKey.compare(&curKey) < 0);
             }
 #endif
             if (is_found) {
@@ -1521,13 +1564,13 @@ out:
 
 #ifndef NDEBUG
         K ckey, pkey;
-        if (ind != my_node->get_total_entries()) { //not edge
+        if (ind != my_node->get_total_entries() && child_node->get_total_entries()) { //not edge
             child_node->get_last_key(&ckey);
             my_node->get_nth_key(ind, &pkey, true);
             BT_DEBUG_ASSERT_CMP(LE, ckey.compare(&pkey), 0, my_node);
         }
 
-        if (ind > 0) { //not first child
+        if (ind > 0 && child_node->get_total_entries()) { //not first child
             child_node->get_first_key(&ckey);
             my_node->get_nth_key(ind-1, &pkey, true);
             BT_DEBUG_ASSERT_CMP(LT, pkey.compare(&ckey), 0, my_node);
@@ -1803,7 +1846,11 @@ out:
         // Insert the last entry in first child to parent node
         child_node1->get_last_key(out_split_key);
         ninfo.set_bnode_id(child_node1->get_node_id());
-        parent_node->insert(*out_split_key, ninfo);
+
+        /* If key is extent then we always insert the end key in the parent node */
+        K out_split_end_key;
+        out_split_end_key.copy_end_key_blob(out_split_key->get_blob());
+        parent_node->insert(out_split_end_key, ninfo);
 
 #ifndef NDEBUG
         K split_key;
