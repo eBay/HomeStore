@@ -591,39 +591,13 @@ protected:
         /* BEST_FIT_TO_CLOSEST is used by remove only. Remove doesn't support range_remove. Until
          * then we have the special logic :
          */
-        if (selection == _MultiMatchSelector::BEST_FIT_TO_CLOSEST || 
-                selection == _MultiMatchSelector::BEST_FIT_TO_CLOSEST_FOR_REMOVE) {
-            if (!ret.found) {
-                ret.found = true;
-                if (ret.end_of_search_index == (int)get_total_entries()) {
-                    if (has_valid_edge()) {
-                        ret.end_of_search_index = get_total_entries();
-                    } else {
-                        assert(is_leaf() || get_total_entries() > 0);
-                        if (get_total_entries() != 0) {
-                            ret.end_of_search_index = get_total_entries() - 1;
-                        } else {
-                            ret.found = false;
-                        }
-                    }
+        if (selection == _MultiMatchSelector::BEST_FIT_TO_CLOSEST_FOR_REMOVE) {
+            if (!ret.found && is_leaf()) {
+                if (get_total_entries() != 0) {
+                    ret.end_of_search_index = get_total_entries() - 1;
+                    ret.found = true;
                 }
             }
-
-            /* TODO: This code gets the second min for the interior nodes only for remove. It will be
-             * removed once we have the range_query for remove.
-             */
-             if (!is_leaf() && (selection == _MultiMatchSelector::BEST_FIT_TO_CLOSEST_FOR_REMOVE)) {
-                if (ret.end_of_search_index < (int)get_total_entries()) {
-                    assert(get_total_entries() > 0);
-                    if (ret.end_of_search_index == (int)(get_total_entries() - 1)) {
-                        if (has_valid_edge()) {
-                            ret.end_of_search_index = (int)get_total_entries();
-                        }
-                    } else {
-                        ++ret.end_of_search_index;
-                    }
-                }
-             }
         }
 
         return ret;
@@ -638,10 +612,8 @@ protected:
             return(_MultiMatchSelector::LEFT_MOST);
         } else if (selection == _MultiMatchSelector::RIGHT_MOST) {
             return(_MultiMatchSelector::RIGHT_MOST);
-        } else if (selection == _MultiMatchSelector::BEST_FIT_TO_CLOSEST) {
-            return(_MultiMatchSelector::LEFT_MOST);
         } else if (selection == _MultiMatchSelector::BEST_FIT_TO_CLOSEST_FOR_REMOVE) {
-            return(_MultiMatchSelector::DO_NOT_CARE);
+            return(_MultiMatchSelector::LEFT_MOST);
         }
         return(_MultiMatchSelector::DO_NOT_CARE);
     }
