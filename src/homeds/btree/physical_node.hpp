@@ -641,7 +641,7 @@ protected:
         } else if (selection == _MultiMatchSelector::BEST_FIT_TO_CLOSEST) {
             return(_MultiMatchSelector::LEFT_MOST);
         } else if (selection == _MultiMatchSelector::BEST_FIT_TO_CLOSEST_FOR_REMOVE) {
-            return(_MultiMatchSelector::DO_NOT_CARE);
+            return(_MultiMatchSelector::LEFT_MOST);
         }
         return(_MultiMatchSelector::DO_NOT_CARE);
     }

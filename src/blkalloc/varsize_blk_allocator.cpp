@@ -262,24 +262,32 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks,
             /* check the cache to see what blocks are available and get those
              * blocks from the btree cache.
              */
-            blks_rqstd = get_best_fit_cache(blks_rqstd);
-            if (blks_rqstd == 0) {
+            auto new_blks_rqstd = get_best_fit_cache(blks_rqstd);
+            if (new_blks_rqstd == 0) {
                 /* It should never happen. It means we are running out of space */
-                blks_rqstd = nblks - blks_alloced;
-                BLKALLOC_LOG(ERROR, , "Could not allocated any blocks. Running out of space");
+                new_blks_rqstd = nblks - blks_alloced;
+                BLKALLOC_LOG(ERROR, , "Could not allocate any blocks. Running out of space");
             }
-            retry_cnt++;
-            BLKALLOC_LOG(TRACE, , "Retry count={}", retry_cnt);
-            continue;
-        }
-        BLKALLOC_LOG(TRACE, , "Blocks allocated={}", blks_alloced);
-        blks_alloced += blkid.get_nblks();
-        BLKALLOC_LOG(DEBUG, varsize_blk_alloc,
-            "blks_alloced={}, hints multiplier={}", blks_alloced, hints.multiplier);
-        BLKALLOC_LOG_ASSERT(blks_alloced % hints.multiplier == 0);
 
-        blks_rqstd = nblks - blks_alloced;
-        out_blkid.push_back(blkid);
+            /* It is because of a bug in btree where we can keep checking for the edge entry
+             * in the btree cache which doesn't have any keys. This code will go away once we
+             * have the range query implemented in btree.
+             */
+            if (new_blks_rqstd == blks_rqstd) {
+                blks_rqstd = ALIGN_SIZE((new_blks_rqstd/2), hints.multiplier);
+            } else {
+                blks_rqstd = new_blks_rqstd;
+            }
+        } else {
+            BLKALLOC_LOG(TRACE, , "Blocks allocated={}", blks_alloced);
+            blks_alloced += blkid.get_nblks();
+            BLKALLOC_LOG(DEBUG, varsize_blk_alloc,
+                    "blks_alloced={}, hints multiplier={}", blks_alloced, hints.multiplier);
+            BLKALLOC_LOG_ASSERT(blks_alloced % hints.multiplier == 0);
+
+            blks_rqstd = nblks - blks_alloced;
+            out_blkid.push_back(blkid);
+        }
         retry_cnt++;
         BLKALLOC_LOG(TRACE, , "Retry count={}", retry_cnt);
     }
