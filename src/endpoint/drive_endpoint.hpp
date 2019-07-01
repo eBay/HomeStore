@@ -12,6 +12,7 @@
 #include <atomic>
 #include <mutex>
 #include "homeds/utility/useful_defs.hpp"
+#include <metrics/metrics.hpp>
 
 #ifdef linux
 #include <fcntl.h>
@@ -42,6 +43,27 @@ struct iocb_info : public iocb {
     }
 };
 
+class DriveEndPointMetrics : public sisl::MetricsGroupWrapper {
+    static int thread_num;
+public:
+    DriveEndPointMetrics() : sisl::MetricsGroupWrapper("DriveEndPoint", std::to_string(++thread_num)) {
+        LOGINFO("metrics is inited");
+        REGISTER_COUNTER(spurious_events, "spurious events");
+        REGISTER_COUNTER(io_get_event_err, "io get event error");
+        REGISTER_COUNTER(write_cnt, "Drive async write count");
+        REGISTER_COUNTER(read_cnt, "Drive async read count");
+        REGISTER_COUNTER(write_size, "Total Count of buffer provided for write");
+        REGISTER_COUNTER(read_size, "Total Count of buffer provided for read");
+        REGISTER_COUNTER(no_iocb, "no iocb left for read/write");
+        REGISTER_COUNTER(eagain_error, "eagain_error for read/write");
+        REGISTER_COUNTER(unalign_write, "number of unaligned writes");
+
+        register_me_to_farm();
+    }
+
+    void init() {};
+};
+
 class DriveEndPoint : public iomgr::EndPoint {
 public:
 	DriveEndPoint(std::shared_ptr<iomgr::ioMgr> iomgr, comp_callback cb);
@@ -70,6 +92,7 @@ private:
 	atomic<uint64_t> spurious_events;
 	atomic<uint64_t> cmp_err;
 	comp_callback comp_cb;
+    static thread_local DriveEndPointMetrics m_metrics;
 };
 #else 
 class DriveEndPoint : public iomgr::EndPoint {

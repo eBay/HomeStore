@@ -256,8 +256,10 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks,
     }
 #endif
 
+    COUNTER_INCREMENT(m_metrics, num_alloc, 1);
     while (blks_alloced != nblks && retry_cnt < MAX_RETRY_CNT) {
         BlkId blkid;
+        COUNTER_INCREMENT(m_metrics, num_split, 1);
         if (alloc(blks_rqstd, hints, &blkid, true) != BLK_ALLOC_SUCCESS) {
             /* check the cache to see what blocks are available and get those
              * blocks from the btree cache.
@@ -343,7 +345,6 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
     while (true) {
         auto status = m_blk_cache->remove_any(regex, &actual_entry, &dummy_val);
         found = (status == btree_status_t::success);
-        
         if (found) {
 #ifdef _PRERELEASE
             if (homestore_flip->test_flip("blkalloc_no_blks_cache", nblks)) {
@@ -386,11 +387,13 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &
                 BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Capacity of slab {} = {}", i, 
                             m_slab_entries[i]._a.load(std::memory_order_acq_rel));
             }
+            COUNTER_INCREMENT(m_metrics, num_attempts_failed, 1); 
             break;
         } else {
             BLKALLOC_LOG(TRACE, varsize_blk_alloc, 
                     "Attempt #{} to allocate nblks={} temperature={} failed. Waiting for cache to be filled",
                     attempt, (uint32_t)nblks, hints.desired_temp);
+            COUNTER_INCREMENT(m_metrics, num_retry, 1); 
         }
 
         auto slab_indx = get_config().get_slab(nblks).first;
