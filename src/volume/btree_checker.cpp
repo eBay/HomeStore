@@ -2,7 +2,7 @@
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
 #include <main/vol_interface.hpp>
-#include <volume/home_blks.hpp>
+//#include <volume/home_blks.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <boost/lexical_cast.hpp>
@@ -24,6 +24,10 @@ extern "C" {
 }
 
 using namespace homestore;
+
+THREAD_BUFFER_INIT;
+using log_level = spdlog::level::level_enum;
+SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 std::string vol_uuid;
 
