@@ -5,6 +5,7 @@
 #include <volume/home_blks.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
+#include <boost/lexical_cast.hpp>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -32,7 +33,7 @@ nlohmann::json get_config() {
         return nullptr;
     }
     nlohmann::json file;
-    file << in;
+    in >> file;
     in.close();
     return file;
 }
@@ -40,7 +41,7 @@ nlohmann::json get_config() {
 void init_done_cb(  std::error_condition err,
                     struct out_params params) {
 
-    auto uuid = boost::lexical_cast<uuid>(vol_uuid);
+    auto uuid = boost::lexical_cast<boost::uuids::uuid>(vol_uuid);
     auto vol = VolInterface::get_instance()->lookup_volume(uuid);
     VolInterface::get_instance()->print_tree(vol);
 }
@@ -67,16 +68,16 @@ void start_homestore() {
     params.disk_attr->disk_align_size = config["align_size"];
     params.disk_attr->atomic_page_size = config["atomic_phys_page_size"];
     params.disk_init = false;
-    params.devices = config["devices"].get<std::vector<dev_info>>();
+    for (auto& device : config["devices"]) {
+        params.devices.emplace_back(dev_info{device});
+    }
     params.is_file = true;
-    params.system_uuid = boost::lexical_cast<uuid>(config["system_uuid"]);
+    params.system_uuid = boost::lexical_cast<boost::uuids::uuid>(config["system_uuid"]);
     params.iomgr = nullptr;
     params.init_done_cb = init_done_cb;
-    params.vol_mounted_cb = std::bind(&vol_mounted_cb,
-            this, std::placeholders::_1, std::placeholders::_2);
-    params.vol_state_change_cb = std::bind(&vol_state_change_cb,
-            this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
-    params.vol_found_cb = std::bind(&vol_found_cb, this, std::placeholders::_1);
+    params.vol_mounted_cb = vol_mounted_cb;
+    params.vol_state_change_cb = vol_state_change_cb;
+    params.vol_found_cb = vol_found_cb;
     VolInterface::init(params);
 }
 
@@ -92,8 +93,8 @@ SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
 
 int main(int argc, char *argv[]) {
     SDS_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
-    vol_uuid = boost::lexical_cast<uuid>(SDS_OPTIONS["vol_uuid"].as<std::string>());
-    this->start_homestore();
+    vol_uuid = SDS_OPTIONS["vol_uuid"].as<std::string>();
+    start_homestore();
     return 0;
 }
 
