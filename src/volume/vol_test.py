@@ -48,11 +48,24 @@ def mapping():
     f.close()
     return '[  PASSED  ] 1 test' in status
 
+def load():
+    status = subprocess.check_output("./test_load \
+            --num_io=100000000000 --num_keys=1000000 --run_time=21600 --gtest_filter=Map* ", shell=True)
+    f = open( '/home/homestore/log_load.txt', 'w+' )
+    f.write(status)
+    f.close()
+    return '[  PASSED  ] 1 test' in status
+
 def sequence():
     if normal() == False:
         sys.exit(0)
+    time.sleep(5)
+    if load() == False:
+        sys.exit(0)
+    time.sleep(5)
     if mapping() == False:
         sys.exit(0)
+
 
 if test_suits == "normal":
     normal()
@@ -68,3 +81,6 @@ if test_suits == "mapping":
 
 if test_suits == "sequence":
     sequence()
+
+if test_suits == "load":
+    load()

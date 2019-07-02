@@ -27,13 +27,13 @@ public:
     // IOMgr thread should dequeue the requests and start executing.
     void add(callback_t done_cb);
     bool is_empty();
-
+    std::shared_ptr<iomgr::ioMgr> get_iomgr();
 private:
     void process_ev_callback(const int fd, const void* cookie, const int event);
     bool is_running() const;
     void start();
     void stop(bool wait_io_complete =  true);
-
+    
 private:
     folly::MPMCQueue<callback_t, std::atomic, true>     m_cq;
     std::shared_ptr<iomgr::ioMgr>                       m_iomgr;

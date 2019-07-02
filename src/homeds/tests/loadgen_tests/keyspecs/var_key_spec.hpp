@@ -1,9 +1,5 @@
-//
-// Created by Kadayam, Hari on 3/28/19.
-//
-
-#ifndef HOMESTORE_BTREE_KEY_SPEC_HPP
-#define HOMESTORE_BTREE_KEY_SPEC_HPP
+#ifndef HOMESTORE_BTREE_VAR_KEY_SPEC_HPP
+#define HOMESTORE_BTREE_VAR_KEY_SPEC_HPP
 
 #include "homeds/loadgen/loadgen_common.hpp"
 #include "homeds/loadgen/spec/key_spec.hpp"
@@ -11,53 +7,53 @@
 #include <spdlog/fmt/bundled/ostream.h>
 
 namespace homeds { namespace loadgen {
-class SimpleNumberKey : public homeds::btree::BtreeKey, public KeySpec {
+class VarBytesKey : public homeds::btree::BtreeKey, public KeySpec {
 private:
     uint64_t m_num;
 
 public:
-    static SimpleNumberKey gen_key(KeyPattern spec, SimpleNumberKey *ref_key = nullptr) {
+    static VarBytesKey gen_key(KeyPattern spec, VarBytesKey *ref_key = nullptr) {
         switch (spec) {
         case KeyPattern::SEQUENTIAL:
-            return ref_key ? SimpleNumberKey(ref_key->to_integer() + 1) : SimpleNumberKey();
+            return ref_key ? VarBytesKey(ref_key->to_integer() + 1) : VarBytesKey();
 
         case KeyPattern::UNI_RANDOM:
-            return SimpleNumberKey(rand());
+            return VarBytesKey(rand());
 
         case KeyPattern::OUT_OF_BOUND:
-            return SimpleNumberKey((uint64_t)-1);
+            return VarBytesKey((uint64_t)-1);
 
         default:
             // We do not support other gen spec yet
             assert(0);
-            return SimpleNumberKey();
+            return VarBytesKey();
         }
     }
 
-    static constexpr bool is_fixed_size() { return true; }
+    static constexpr bool is_fixed_size() { return false; }
     static constexpr uint32_t get_max_size() { return sizeof(uint64_t); }
 
-    explicit SimpleNumberKey(uint64_t num = 0) : m_num(num) {}
-    SimpleNumberKey(const SimpleNumberKey& other) = default;
-    SimpleNumberKey& operator=(const SimpleNumberKey& other) = default;
+    explicit VarBytesKey(uint64_t num = 0) : m_num(num) {}
+    VarBytesKey(const VarBytesKey& other) = default;
+    VarBytesKey& operator=(const VarBytesKey& other) = default;
 
     static constexpr size_t get_fixed_size() { return sizeof(uint64_t); }
     uint64_t to_integer() const { return m_num; }
 
     virtual bool operator==(const KeySpec& other) const override {
-        return (compare((const BtreeKey *)&(SimpleNumberKey&)other) == 0);
+        return (compare((const BtreeKey *)&(VarBytesKey&)other) == 0);
     }
 
     int compare(const BtreeKey* o) const override {
-        SimpleNumberKey* other = (SimpleNumberKey*)o;
+        VarBytesKey* other = (VarBytesKey*)o;
         if (m_num < other->m_num) { return -1; }
         else if (m_num > other->m_num) { return 1; }
         else { return 0; }
     }
 
     int compare_range(const homeds::btree::BtreeSearchRange& range) const override {
-        auto other_start = (SimpleNumberKey*)range.get_start_key();
-        auto other_end = (SimpleNumberKey*)range.get_end_key();
+        auto other_start = (VarBytesKey*)range.get_start_key();
+        auto other_end = (VarBytesKey*)range.get_end_key();
 
         assert(0); // Do not support it yet
         return 0;
@@ -78,22 +74,22 @@ public:
     virtual void set_blob_size(uint32_t size) {}
     virtual std::string to_string() const { return std::to_string(m_num); }
 
-    friend ostream& operator<<(ostream& os, const SimpleNumberKey& k) {
+    friend ostream& operator<<(ostream& os, const VarBytesKey& k) {
         os << std::to_string(k.m_num);
         return os;
     }
 
-    static void gen_keys_in_range(SimpleNumberKey& k1, uint32_t num_of_keys, std::vector<SimpleNumberKey> keys_inrange){
+    static void gen_keys_in_range(VarBytesKey& k1, uint32_t num_of_keys, std::vector<VarBytesKey> keys_inrange){
         assert(0);
     }
-    
+
     virtual bool is_consecutive(KeySpec& k) override {
-        SimpleNumberKey* nk = (SimpleNumberKey*)&k;
+        VarBytesKey* nk = (VarBytesKey*)&k;
         if(m_num+1==nk->m_num)return true;
         else return false;
     }
 };
-
+#if 0
 class CompositeNumberKey : public homeds::btree::BtreeKey, public KeySpec {
 private:
     typedef struct __attribute__((packed)) {
@@ -125,12 +121,6 @@ public:
         }
     }
 
-    virtual bool is_consecutive(KeySpec& k) override {
-        CompositeNumberKey* nk = (CompositeNumberKey*)&k;
-        assert(0);//to implement
-        return false;
-    }
-    
     static constexpr bool is_fixed_size() { return true; }
     static constexpr uint32_t get_max_size() { return sizeof(attr_t); }
 
@@ -262,6 +252,6 @@ public:
     bool operator<(const CompositeNumberKey& o) const { return (compare(&o) < 0); }
     bool operator==(const CompositeNumberKey& other) const { return (compare(&other) == 0); }
 };
-
+#endif
 } } // namespace homeds::loadgen
 #endif //HOMESTORE_BTREE_KEY_SPEC_HPP
