@@ -23,15 +23,13 @@ DeviceManager::DeviceManager(NewVDevCallback vcb,
                              vdev_error_callback vdev_error_cb) :
         m_comp_cb(cb), m_new_vdev_cb(vcb), m_iomgr(iomgr), m_gen_cnt(0), m_is_file(is_file), m_system_uuid(system_uuid),
         m_vdev_error_cb(vdev_error_cb) {
-#ifndef NDEBUG
-    if (HomeStoreConfig::open_flag == BUFFERED_IO) {
-        m_open_flags = O_RDWR;
-    } else {
-        m_open_flags = O_RDWR | O_DIRECT;
+
+    switch(HomeStoreConfig::open_flag) {
+        case BUFFERED_IO : m_open_flags = O_RDWR; break;
+        case READ_ONLY   : m_open_flags = O_RDONLY; break;
+        case DIRECT_IO   :
+        default          : m_open_flags = O_RDWR | O_DIRECT;
     }
-#else
-    m_open_flags = O_RDWR | O_DIRECT;
-#endif
     m_last_vdevid = INVALID_VDEV_ID;
     m_vdev_metadata_size = vdev_metadata_size;
     m_pdev_id = 0;

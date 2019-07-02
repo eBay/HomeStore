@@ -65,7 +65,8 @@ void vol_state_change_cb(   std::shared_ptr<Volume> vol,
 void start_homestore() {
     auto config = get_config();
     init_params params;
-    params.flag = homestore::io_flag::DIRECT_IO;
+    params.disk_init = false;
+    params.flag = homestore::io_flag::READ_ONLY;
     params.min_virtual_page_size = config["min_page_size"];
     params.cache_size = config["cache_size"];
     params.disk_attr->physical_page_size = config["phys_page_size"];
