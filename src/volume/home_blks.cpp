@@ -64,7 +64,7 @@ HomeBlks::HomeBlks(const init_params& cfg) :
         json["devices"].emplace_back(device.dev_names);
     }
 
-    std::ofstream hs_config("hs_config.json");
+    std::ofstream hs_config("/tmp/hs_config.json");
     hs_config << json;
 
     assert(VOL_SB_SIZE >= sizeof(vol_ondisk_sb));

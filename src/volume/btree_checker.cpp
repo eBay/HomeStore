@@ -32,7 +32,7 @@ SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 std::string vol_uuid;
 
 nlohmann::json get_config() {
-    std::ifstream in("hs_config.json");
+    std::ifstream in("/tmp/hs_config.json");
     if (!in.is_open()) {
         return nullptr;
     }
