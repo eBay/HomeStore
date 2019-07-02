@@ -18,6 +18,8 @@
 #include <utility/obj_life_counter.hpp>
 #include <atomic>
 #include <boost/optional.hpp>
+#include <boost/lexical_cast.hpp>
+#include <boost/uuid/uuid_io.hpp>
 #include <sstream>
 #include <string>
 #include <iostream>
@@ -145,7 +147,9 @@ struct vol_params {
 
     std::string to_string() const {
         std::stringstream ss;
-        ss << "page_size=" << page_size << ",size=" << size <<",vol_name=" << vol_name;
+        ss  << "page_size=" << page_size << ",size=" << size
+            << ",vol_name=" << vol_name  << ",uuid="
+            << boost::lexical_cast<std::string>(uuid);
         return ss.str();
     }
 };
