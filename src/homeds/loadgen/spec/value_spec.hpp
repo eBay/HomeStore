@@ -6,18 +6,37 @@
 #define HOMESTORE_VALUE_SPEC_HPP
 
 namespace homeds {
-namespace loadgen {
+    namespace loadgen {
+        class ValueSpec {
+        public:
+            static uint64_t MAX_VALUES;
+            virtual uint64_t get_hash_code() = 0;
+            virtual int compare(ValueSpec& other)=0;
+            virtual bool is_consecutive(ValueSpec& k) = 0;
+        };
+        
+        uint64_t ValueSpec::MAX_VALUES=0;
 
-void gen_random_string(uint8_t *s, const size_t len) {
-    static const char alphanum[] =
+        static const char alphanum[] =
             "0123456789"
             "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
             "abcdefghijklmnopqrstuvwxyz";
-
-    for (size_t i = 0u; i < len-1; ++i) {
-        s[i] = alphanum[rand() % (sizeof(alphanum) - 1)];
-    }
-    s[len-1] = 0;
-}
+    
+        void gen_random_string(std::vector<uint8_t>& s, const size_t len) {
+            for (size_t i = 0u; i < len-1; ++i) {
+                //s[i] = alphanum[rand() % (sizeof(alphanum) - 1)];
+                s.push_back(alphanum[rand() % (sizeof(alphanum) - 1)]);
+    
+            }
+            s.push_back(0);
+        }
+    
+        void gen_random_string(uint8_t *s, const size_t len) {
+            for (size_t i = 0u; i < len-1; ++i) {
+                s[i] = alphanum[rand() % (sizeof(alphanum) - 1)];
+            }
+            s[len-1] = 0;
+        }
+  
 } } // namespace homeds::loadgen
 #endif // HOMESTORE_VALUE_SPEC_HPP

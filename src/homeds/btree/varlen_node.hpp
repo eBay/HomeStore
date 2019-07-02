@@ -113,7 +113,6 @@ public:
 #ifndef NDEBUG
     void validate_sanity() {
         int i=0;
-        std::map<int, bool> mapOfWords;
         //validate if keys are in ascending orde
         K prevKey;
         while(i<(int)this->get_total_entries()) {
@@ -122,12 +121,6 @@ public:
             uint64_t kp = *(uint64_t*)key.get_blob().bytes;
             if(i>0 && prevKey.compare(&key)>0){
                 LOGDEBUG("non sorted entry : {} -> {} ", kp, this->to_string());
-                assert(0);
-            }
-            std::pair<std::map<int, bool>::iterator, bool > result;
-            result = mapOfWords.insert(std::make_pair(kp,true));
-            if(result.second==false) {
-                LOGDEBUG("Duplicate entry : {} -> {} ", kp, this->to_string());
                 assert(0);
             }
             prevKey = key;

@@ -220,6 +220,8 @@ public:
 
     uint8_t get_nlba() const { return (uint8_t)m_ptr->m_nlba; }
 
+    void set_nlba(uint8_t nlba){ m_ptr->m_nlba=nlba;}
+    
     uint16_t& get_checksum_at(uint8_t index) const {
         assert(index < get_nlba());
         return m_ptr->m_carr[index];
@@ -495,7 +497,8 @@ public:
     uint64_t get_used_size() { return m_bt->get_used_size(); }
     btree_super_block get_btree_sb() { return (m_bt->get_btree_sb()); }
 
-    error_condition get(boost::intrusive_ptr< volume_req > req, vector< pair< MappingKey, MappingValue > >& values) {
+    error_condition get(boost::intrusive_ptr< volume_req > req, vector< pair< MappingKey, MappingValue > >& values,
+            bool fill_gaps=true) {
         uint64_t                                      start_lba = req->lba;
         uint64_t                                      num_lba = req->nlbas;
         uint64_t                                      end_lba = start_lba + req->nlbas - 1;
@@ -516,25 +519,29 @@ public:
             return btree_read_failed;
         }
 
-        // fill the gaps
-        auto last_lba = start_lba;
-        for (auto i = 0u; i < result_kv.size(); i++) {
-            int nl = result_kv[i].first.start() - last_lba;
-            while (nl-- > 0) {
+        if(fill_gaps) {
+            // fill the gaps
+            auto last_lba = start_lba;
+            for (auto i = 0u; i < result_kv.size(); i++) {
+                int nl = result_kv[i].first.start() - last_lba;
+                while (nl-- > 0) {
+                    values.emplace_back(make_pair(MappingKey(last_lba, 1), EMPTY_MAPPING_VALUE));
+                    last_lba++;
+                }
+                values.emplace_back(result_kv[i]);
+                last_lba = result_kv[i].first.end() + 1;
+            }
+            while (last_lba <= end_lba) {
                 values.emplace_back(make_pair(MappingKey(last_lba, 1), EMPTY_MAPPING_VALUE));
                 last_lba++;
             }
-            values.emplace_back(result_kv[i]);
-            last_lba = result_kv[i].first.end() + 1;
-        }
-        while (last_lba <= end_lba) {
-            values.emplace_back(make_pair(MappingKey(last_lba, 1), EMPTY_MAPPING_VALUE));
-            last_lba++;
-        }
-
 #ifndef NDEBUG
-        validate_get_response(start_lba, num_lba, values);
+            validate_get_response(start_lba, num_lba, values);
 #endif
+        }else{
+            values.insert(values.begin(),result_kv.begin(),result_kv.end());
+        }
+        
         return no_error;
     }
 
@@ -627,7 +634,7 @@ private:
         ss << ",result_kv:";
         for (auto& ptr : result_kv)
             ss << ptr.first.to_string() << "," << ptr.second.to_string();
-        LOGDEBUG("Get_CB:,{} ", ss.str());
+        LOGTRACE("Get_CB:,{} ", ss.str());
 #endif
     }
 
@@ -646,6 +653,8 @@ private:
         uint64_t start_lba = 0, end_lba = 0;
         get_start_end_lba(cb_param, start_lba, end_lba);
         UpdateCBParam* param = (UpdateCBParam*)cb_param;
+        ValueEntry new_ve;
+        param->get_new_value().get_array().get(0, new_ve, false);
 #ifndef NDEBUG
         stringstream ss;
         ss << "vol_uuid:" << boost::uuids::to_string(param->m_req->vol_uuid);
@@ -655,12 +664,11 @@ private:
         ss << ",ie:" << ((MappingKey*)param->get_input_range().get_end_key())->to_string();
         ss << ",ss:" << ((MappingKey*)param->get_sub_range().get_start_key())->to_string();
         ss << ",se:" << ((MappingKey*)param->get_sub_range().get_end_key())->to_string();
+        ss << ",NewValue:" << new_ve.to_string();
         ss << ",match_kv:";
         for (auto& ptr : match_kv)
             ss << ptr.first.to_string() << "," << ptr.second.to_string();
 #endif
-        ValueEntry new_ve;
-        param->get_new_value().get_array().get(0, new_ve, false);
         MappingKey* s_in_range = (MappingKey*)param->get_input_range().get_start_key();
         auto        curr_lbarange_st = start_lba;
         for (auto& existing : match_kv) {
@@ -681,7 +689,7 @@ private:
                         ve.get_seqId() < param->m_req->lastCommited_seqId) { // eligible for removal
 
                         if (param->is_state_modifiable()) { // actual put cb, not is_split cb
-                            LOGDEBUG("Free entry:{} nblks {}", ve.to_string(),
+                            LOGTRACE("Free entry:{} nblks {}", ve.to_string(),
                                      (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * e_key->get_n_lba());
                             Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(),
                                                (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) *
@@ -735,7 +743,10 @@ private:
                     auto fblk_start = fbe.m_blkId.get_id() + fbe.m_blk_offset;
                     auto fblk_end = fblk_start + fbe.m_nblks_to_free - 1;
                     if (blk_end < fblk_start || fblk_end < blk_start) {
-                    } else {
+                    } // non overlapping
+                    else {
+                        ss << ",replace_kv:";
+                        for (auto& ptr : replace_kv) { ss << ptr.first.to_string() << "," << ptr.second.to_string(); }
                         LOGERROR("Error::Put_CB:,{} ", ss.str());
                         assert(0);
                     }
@@ -745,7 +756,7 @@ private:
         }
         ss << ",replace_kv:";
         for (auto& ptr : replace_kv) { ss << ptr.first.to_string() << "," << ptr.second.to_string(); }
-        if (param->is_state_modifiable()) { LOGDEBUG("Put_CB:,{} ", ss.str()); }
+        if (param->is_state_modifiable()) { LOGTRACE("Put_CB:,{} ", ss.str()); }
 #endif
     }
 
