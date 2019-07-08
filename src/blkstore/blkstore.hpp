@@ -264,7 +264,10 @@ public:
         // Allocate a block from the device manager
         hints.is_contiguous = true;
         assert(size % m_pagesz == 0);
-        alloc_blk(size, hints, out_blkid);
+        auto ret_blk = alloc_blk(size, hints, out_blkid);
+        if (ret_blk != BLK_ALLOC_SUCCESS) {
+            return nullptr;
+        }
 
         // Create an object for the buffer
         auto buf = Buffer::make_object();

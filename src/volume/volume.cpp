@@ -324,6 +324,11 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
     VOL_LOG(TRACE, volume, hb_req, "write: lba={}, nlbas={}, buf={}", lba, nlbas, (void*)buf);
     try {
         BlkAllocStatus status = m_data_blkstore->alloc_blk(nlbas * m_sb->ondisk_sb->page_size, hints, bid);
+        if (status != BLK_ALLOC_SUCCESS) {
+            LOGERROR("failing IO as it is out of disk space");
+            check_and_complete_req(hb_req, std::make_error_condition(std::errc::no_space_on_device), false);
+            return std::errc::no_space_on_device;
+        }
         assert(status == BLK_ALLOC_SUCCESS);
         HISTOGRAM_OBSERVE(m_metrics, volume_blkalloc_latency, get_elapsed_time_ns(hb_req->io_start_time));
         COUNTER_INCREMENT(m_metrics, volume_write_count, 1);
