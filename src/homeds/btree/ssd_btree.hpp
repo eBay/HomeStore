@@ -190,6 +190,10 @@ public:
         homestore::blk_alloc_hints hints;
         homestore::BlkId           blkid;
         auto safe_buf = store->m_blkstore->alloc_blk_cached(1 * HomeStoreConfig::atomic_phys_page_size, hints, &blkid);
+        if (safe_buf == nullptr) {
+            LOGERROR("btree alloc failed. No space avail");
+            return nullptr;
+        }
 
 #ifndef NDEBUG
         assert(safe_buf->is_btree);
