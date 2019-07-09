@@ -25,7 +25,7 @@ namespace homestore {
 #define BLKALLOC_LOG(level, mod, fmt, ...)              \
     LOG##level##MOD(                                    \
         BOOST_PP_IF(BOOST_PP_IS_EMPTY(mod), base, mod), \
-        "[blkalloc = {}]",                              \
+        "[blkalloc = {}] {}",                           \
         m_cfg.get_name(), fmt,                          \
         ##__VA_ARGS__)
 
