@@ -84,6 +84,10 @@ public:
         }
         return false; 
     }
+    
+    void start_time() {
+        blkstore_op_start_time = Clock::now();
+    }
 
     virtual void free_yourself() { homeds::ObjectAllocator< blkstore_req< Buffer > >::deallocate(this); }
 protected:
@@ -373,7 +377,7 @@ public:
             process_completions(to_vdev_req(req));
         } else {
             HISTOGRAM_OBSERVE(m_metrics, blkstore_wbcache_hold_time, get_elapsed_time_us(wb_req->cache_start_time));
-            req->blkstore_op_start_time = Clock::now();
+            req->start_time();
             m_vdev.write(req->bid, m_wb_cache.writeback_get_memvec(req), to_vdev_req(req), req->data_offset);
         }
     }
@@ -448,7 +452,7 @@ public:
         assert(dependent_req_q.empty());
 
         // Now write data to the device
-        req->blkstore_op_start_time = Clock::now();
+        req->start_time();
         // TODO: rishabh, need to check the return status
         m_vdev.write(bid, ibuf->get_memvec(), to_vdev_req(req), data_offset);
         if (req->isSyncCall) {
@@ -487,6 +491,7 @@ public:
         COUNTER_INCREMENT(m_metrics, blkstore_read_op_count, 1);
         COUNTER_INCREMENT(m_metrics, blkstore_read_data_size, size);
 
+        req->start_time();
         // Check if the entry exists in the cache.
         boost::intrusive_ptr< Buffer > bbuf;
         bool cache_found = m_cache->get(bid, (boost::intrusive_ptr< CacheBuffer< BlkId > >*)&bbuf);
@@ -537,7 +542,6 @@ public:
         if (missing_mp.size()) {
             HISTOGRAM_OBSERVE(m_metrics, blkstore_partial_cache_distribution, missing_mp.size());
             COUNTER_INCREMENT(m_metrics, blkstore_drive_read_count, missing_mp.size());
-            req->blkstore_op_start_time = Clock::now();
         }
 
         uint8_t* ptr;
