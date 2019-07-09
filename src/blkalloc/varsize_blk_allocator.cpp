@@ -304,7 +304,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks,
         BLKALLOC_LOG(ERROR, , "blks_alloced != nblks : {}  {}",blks_alloced, nblks);
         BLKALLOC_LOG_ASSERT(blks_alloced < nblks);
         /* free blks */
-        for (auto it = out_blkid.begin(); it != out_blkid.end(); ++it) {
+        for (auto it = out_blkid.begin(); it != out_blkid.end();) {
             free(*it);
             it = out_blkid.erase(it);
         }
