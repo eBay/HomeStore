@@ -82,7 +82,7 @@ public:
 
     // This is not mandatory overridden method for BtreeValue, but for testing comparision
     bool operator==(const VarBytesValue& other) const {
-        return (memcpy((uint8_t*)&m_bytes[0], other.get_blob().m_bytes, m_bytes.size()) == 0);
+        return std::strcmp((char*)&m_bytes[0], (char*)other.get_blob().bytes) == 0;
     }
 
     virtual uint64_t get_hash_code() override{
@@ -92,9 +92,9 @@ public:
 
     void set_bytes_ptr () { m_bytes_ptr = m_bytes[0]; }
 
-    virtual int compare(ValueSpec& other) override{
-        assert(0);
-        return 0;
+    virtual int compare(ValueSpec& other) override {
+        VarBytesValue* vb = (VarBytesValue*)& other;
+        return std::strcmp((char*)&m_bytes[0], (char*)vb->get_blob().bytes);
     }
     virtual bool is_consecutive(ValueSpec& v) override {
         assert(0);
