@@ -1,6 +1,6 @@
 namespace homeds {
     namespace loadgen {
-#define MAX_SIZE          7 * Gi
+#define MAX_SIZE          1 * Gi
         typedef std::function< void(std::error_condition err, const out_params& params) > init_done_callback;
         
         template<typename Executor>
