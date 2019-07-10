@@ -31,7 +31,7 @@ namespace homestore {
 
 #define _BLKALLOC_ASSERT_MSG(asserttype, ...)                           \
     "\n**********************************************************\n"    \
-    "[blkalloc = {}\n]", "Metrics = {}\n" "{}"                          \
+    "[blkalloc = {}\n]" "Metrics = {}\n" "{}"                           \
     "\n**********************************************************\n",   \
     m_cfg.get_name(),                                                   \
     asserttype##_METRICS_DUMP_MSG,                                      \
