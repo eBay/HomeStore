@@ -585,6 +585,7 @@ void HomeBlks::scan_volumes() {
                 VolumePtr new_vol;
                 try {
                     new_vol = Volume::make_volume(sb);
+                    new_vol->recovery_start();
                 } catch (const std::exception& e) {
                     m_scan_cnt--;
                     throw e;

@@ -285,6 +285,7 @@ public:
     /* Load the virtual dev from vdev_info_block and create a Virtual Dev. */
     VirtualDev(DeviceManager* mgr, vdev_info_block* vb, comp_callback cb) : m_vb(vb), m_mgr(mgr), m_comp_cb(cb) {
         m_selector = std::make_unique< DefaultDeviceSelector >();
+        m_used_size = 0;
         m_chunk_size = 0;
         m_num_chunks = 0;
         m_pagesz = vb->page_size;
