@@ -55,6 +55,11 @@ IOMgrExecutor::~IOMgrExecutor() {
 
 }
 
+std::shared_ptr<iomgr::ioMgr> 
+IOMgrExecutor::get_iomgr() {
+    return m_iomgr;
+}
+
 bool
 IOMgrExecutor::is_empty() {
     return m_cq.isEmpty();

@@ -23,13 +23,15 @@ static constexpr btree_node_type find_leaf_node_type() {
     } else if (!K::is_fixed_size() && V::is_fixed_size()) {
         return btree_node_type::VAR_KEY;
     } else {
-        return btree_node_type::VAR_OBJECT;
+        //return btree_node_type::VAR_OBJECT;
+        return btree_node_type::VAR_VALUE;
     }
 }
 
 template< typename K >
 static constexpr btree_node_type find_interior_node_type() {
-    return (K::is_fixed_size() ? btree_node_type::SIMPLE : btree_node_type::VAR_KEY);
+    //return (K::is_fixed_size() ? btree_node_type::SIMPLE : btree_node_type::VAR_KEY);
+    return (K::is_fixed_size() ? btree_node_type::SIMPLE : btree_node_type::VAR_VALUE);
 }
 
 #define TOTAL_ENTRIES 1000000
@@ -40,6 +42,9 @@ template< typename K, typename V, size_t NodeSize = 8192 >
 class MemBtreeStoreSpec : public StoreSpec< K, V > {
 public:
     MemBtreeStoreSpec() {
+    }
+
+    virtual void init_store() override{
         BtreeConfig btree_cfg;
         btree_cfg.set_max_objs(TOTAL_ENTRIES);
         btree_cfg.set_max_key_size(K::get_max_size());
@@ -79,7 +84,7 @@ public:
     }
 
     virtual uint32_t query(K& start_key, bool start_incl, K& end_key, bool end_incl, uint32_t batch_size,
-                           void *cb_context, std::function<bool(K&, V&, bool, void *)> foreach_cb) override {
+                           std::vector<std::pair<K, V>> &result) override {
         auto search_range = BtreeSearchRange(start_key, start_incl, end_key, end_incl);
         BtreeQueryRequest<K, V> qreq(search_range, BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, batch_size);
 
@@ -94,18 +99,18 @@ public:
             
             has_more = (status == btree_status_t::has_more);
             auto is_success = (status == btree_status_t::has_more) || (status == btree_status_t::success);
-            for (auto &val : values) {
-                bool need_more = foreach_cb(val.first, val.second, is_success, cb_context);
-                if (!need_more) { return result_count; }
-                ++result_count;
-            }
+            
+            result.insert(result.end(),values.begin(),values.end());
+           
             values.clear();
         } while (has_more);
 
+        result_count+=result.size();
         return result_count;
     }
 
-    virtual std::vector< V > range_update(K& start_key, bool start_incl, K& end_key, bool end_incl) {
+    virtual bool range_update(K& start_key, bool start_incl, K& end_key, bool end_incl,
+                                          V& start_value, V& end_value){
         assert(0); // not supported yet
         return {};
     }

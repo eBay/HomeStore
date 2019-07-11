@@ -20,9 +20,10 @@ enum homestore_error {
     hetrogenous_disks = 9,
     min_size_not_avail = 10,
     formatted_disk_found = 11,
-    btree_read_failed = 9,
-    write_failed = 10,
-    read_failed = 11
+    btree_read_failed = 12,
+    write_failed = 13,
+    read_failed = 14, 
+    space_not_avail = 15
 };
 
 class homstore_err_category : public std::error_category {

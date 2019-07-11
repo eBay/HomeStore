@@ -138,6 +138,8 @@ public:
         if (bt_dev_info->new_device) {
             m_cache = new homestore::Cache< homestore::BlkId >(100 * 1024 * 1024, 4096);
 
+            assert(bt_dev_info->dev_mgr != nullptr);
+
             m_blkstore = new homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy, btree_buffer_t >(
                 bt_dev_info->dev_mgr, m_cache, 0, homestore::BlkStoreCacheType::RD_MODIFY_WRITEBACK_CACHE, 0,
                 nullptr, bt_dev_info->size, HomeStoreConfig::atomic_phys_page_size, "Btree",
@@ -188,6 +190,10 @@ public:
         homestore::blk_alloc_hints hints;
         homestore::BlkId           blkid;
         auto safe_buf = store->m_blkstore->alloc_blk_cached(1 * HomeStoreConfig::atomic_phys_page_size, hints, &blkid);
+        if (safe_buf == nullptr) {
+            LOGERROR("btree alloc failed. No space avail");
+            return nullptr;
+        }
 
 #ifndef NDEBUG
         assert(safe_buf->is_btree);
@@ -346,16 +352,16 @@ public:
 
         /* add the latest request pending on this node */
         try {
-#ifdef _PRERELEASE
-            if (homestore_flip->test_flip("btree_refresh_fail", bn->get_node_id().m_id)) {
-                folly::throwSystemError("flip error");
-            }
-#endif
             auto req =
                 store->m_blkstore->refresh_buf(boost::static_pointer_cast< btree_buffer_t >(bn), is_write_modifiable);
             if (req && multinode_req) {
                 multinode_req->dependent_req_q.push_back(req);
             }
+#ifdef _PRERELEASE
+            if (homestore_flip->test_flip("btree_refresh_fail", bn->get_node_id().m_id)) {
+                folly::throwSystemError("flip error");
+            }
+#endif
 #ifndef NO_CHECKSUM
             auto physical_node = (LeafPhysicalNode*)((boost::static_pointer_cast< SSDBtreeNode >(bn))->at_offset(0).bytes);
             verify_result vr;

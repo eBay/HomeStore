@@ -13,6 +13,7 @@
 #include <boost/preprocessor/cat.hpp>
 #include <boost/preprocessor/control/if.hpp>
 #include <boost/preprocessor/stringize.hpp>
+#include <metrics/metrics.hpp>
 
 using namespace homeds::btree;
 
@@ -560,6 +561,13 @@ public:
         REGISTER_COUNTER(   blkalloc_slab9_capacity,
                             "Block allocator slab 9 capacity",
                             sisl::_publish_as::publish_as_gauge );
+        
+        REGISTER_COUNTER(num_alloc, "number of times alloc called");
+        /* In ideal scnario if there are no splits then it should be same as num_alloc */
+        REGISTER_COUNTER(num_split, "number of times it split");
+        /* It should be zero in ideal scenario */
+        REGISTER_COUNTER(num_retry, "number of times it retry because of cache of no blks");
+        REGISTER_COUNTER(num_attempts_failed, "number of times it fail to get entry from cache after max retry");
         register_me_to_farm();
     }
 };
@@ -648,6 +656,7 @@ private:
 
     std::vector<BlkAllocSegment*> m_segments; // Lookup map for segment id - segment
     BlkAllocSegment *m_wait_alloc_segment = nullptr; // A flag/hold variable, for caller thread
+    int m_wait_slab_indx = -1;
     // to pass which segment to look for sweep
 
     // Overall page and page group tables
@@ -669,9 +678,9 @@ private:
     std::string state_string(BlkAllocatorState state) const;
 
     // Sweep and cache related functions
-    void request_more_blks(BlkAllocSegment *seg = nullptr);
-    void request_more_blks_wait(BlkAllocSegment *seg = nullptr);
-    void fill_cache(BlkAllocSegment *seg);
+    void request_more_blks(BlkAllocSegment *seg, int slab_indx);
+    void request_more_blks_wait(BlkAllocSegment *seg, int slab_indx);
+    void fill_cache(BlkAllocSegment *seg, int slab_indx);
     uint64_t fill_cache_in_portion(uint64_t portion_num, BlkAllocSegment *seg);
 
     // Convenience routines

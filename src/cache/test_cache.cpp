@@ -10,7 +10,7 @@
 #include <cstring>
 #include "cache.cpp"
 
-SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write);
+SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 THREAD_BUFFER_INIT;
 
 struct blk_id {
@@ -133,6 +133,7 @@ int main(int argc, char *argv[]) {
     SDS_OPTIONS_LOAD(argc, argv, logging)
     testing::InitGoogleTest(&argc, argv);
     sds_logging::SetLogger("test_cache");
+    sds_logging::install_crash_handler();
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
     return RUN_ALL_TESTS();
 }

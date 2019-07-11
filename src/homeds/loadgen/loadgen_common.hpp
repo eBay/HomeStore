@@ -18,6 +18,7 @@ enum KeyPattern {
 };
 
 enum ValuePattern {
+    SEQUENTIAL_VAL,
     RANDOM_BYTES
 };
 

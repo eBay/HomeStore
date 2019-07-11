@@ -728,7 +728,10 @@ out:
                     if (my_node->get_total_entries() > 0) {
                         K ekey;
                         next_node->get_nth_key(0,&ekey,false);
-                        if (query_req.get_input_range().get_end_key()->compare(&ekey) < 0) {//early lookup end
+                        /* comparing the end key of the input rangee with the start key of the next interval to see
+                         * if it overlaps
+                         */
+                        if (query_req.get_input_range().get_end_key()->compare_start(&ekey) < 0) {//early lookup end
                             query_req.cursor().m_last_key = nullptr;
                             break;
                         }
@@ -781,7 +784,12 @@ out:
                 return ret;
             }
             if (query_req.cursor().m_last_key != nullptr) {
-                return btree_status_t::has_more;
+                if (query_req.get_input_range().get_end_key()->compare(query_req.cursor().m_last_key.get()) == 0) {
+                    /* we finished just at the last key */
+                    return btree_status_t::success;
+                } else {
+                    return btree_status_t::has_more;
+                }
             } else {
                 return btree_status_t::success;
             }
@@ -831,6 +839,10 @@ out:
             if (out_values.size() >= query_req.get_batch_size()) {
                 BT_DEBUG_ASSERT_CMP(EQ, out_values.size(), query_req.get_batch_size(), my_node);
                 query_req.cursor().m_last_key = std::make_unique< K >(out_values.back().first);
+                if (query_req.get_input_range().get_end_key()->compare(query_req.cursor().m_last_key.get()) == 0) {
+                    /* we finished just at the last key */
+                    return btree_status_t::success;
+                }
                 return btree_status_t::has_more;
             }
 
@@ -1075,11 +1087,12 @@ done:
             //BT_DEBUG_ASSERT_CMP(NE, bur->callback(), nullptr, my_node); // TODO - range req without callback implementation
             std::vector< std::pair< K, V > > match;
             int                              start_ind = 0, end_ind = 0;
-            my_node->get_all(bur->get_input_range(), UINT32_MAX, start_ind, end_ind, &match);
+            my_node->get_all(bur->get_cb_param()->get_sub_range(), UINT32_MAX, start_ind, end_ind, &match);
 
             vector< pair< K, V > > replace_kv;
             bur->callback()(match, replace_kv, bur->get_cb_param());
-            if (match.size() > 0 && start_ind <= end_ind) {
+            assert(start_ind <= end_ind);
+            if (match.size() > 0) {
                 my_node->remove(start_ind, end_ind);
             }
             for (auto &pair : replace_kv) { // insert is based on compare() of BtreeKey
@@ -1113,7 +1126,7 @@ done:
             /* just get start/end index from get_all. We don't release the parent lock until this
              * key range is not inserted from start_ind to end_ind.
              */
-            my_node->get_all(bur->get_input_range(), UINT32_MAX, start_ind, end_ind);
+            my_node->get_all(bur->get_cb_param()->get_input_range(), UINT32_MAX, start_ind, end_ind);
         } else {
             auto result = my_node->find(k, nullptr, nullptr);
             end_ind = start_ind = result.end_of_search_index;
@@ -1221,30 +1234,21 @@ out:
         return ret;
     }
 
+    /* This function is called for the interior nodes whose childs are leaf nodes to calculate the sub range */
     void get_subrange(BtreeNodePtr my_node, BtreeUpdateRequest<K, V> *bur, int curr_ind) {
+        
         if (!bur) {
             return;
         }
 
-        //find start of subrange
-        bool start_inc;
-        K start_key;
-        BtreeKey *start_key_ptr = &start_key;
-        
         if (curr_ind > 0) {
-            /* start of subrange will be more then the key in curr_ind - 1 */
+            /* start of subrange will always be more then the key in curr_ind - 1 */
+            K start_key;
+            BtreeKey *start_key_ptr = &start_key;
+            
             my_node->get_nth_key(curr_ind - 1, start_key_ptr, false);
-            start_inc = false;
-        } else {
-            /* start key is the start key of the input range */
-            start_key_ptr = const_cast<BtreeKey *>(bur->get_input_range().get_start_key());
-            start_inc = bur->get_input_range().is_start_inclusive();
+            assert(start_key_ptr->compare(bur->get_cb_param()->get_sub_range().get_start_key()) <= 0);
         }
-        
-        const_cast<BtreeKey *>(bur->get_cb_param()->get_sub_range().get_start_key())->copy_blob(
-                start_key_ptr->get_blob());//copy
-        bur->get_cb_param()->get_sub_range().set_start_incl(start_inc);
-
         
         //find end of subrange
         bool end_inc = true;
@@ -1253,17 +1257,24 @@ out:
         
         if (curr_ind < (int) my_node->get_total_entries()) {
             my_node->get_nth_key(curr_ind, end_key_ptr, false);
-            end_inc = true;
+            if (end_key_ptr->compare(bur->get_input_range().get_end_key()) >= 0) {
+                /* this is last index to process as end of range is smaller then key in this node */
+                end_key_ptr = const_cast<BtreeKey *>(bur->get_input_range().get_end_key());
+                end_inc = bur->get_cb_param()->get_input_range().is_end_inclusive();
+            } else {
+                end_inc = true;
+            }
         } else {
             /* it is the edge node. end key is the end of input range */
             BT_LOG_ASSERT_CMP(EQ, my_node->get_edge_id().is_valid(), true, my_node);
             end_key_ptr = const_cast<BtreeKey *>(bur->get_input_range().get_end_key());
-            end_inc = bur->get_input_range().is_end_inclusive();
+            end_inc = bur->get_cb_param()->get_input_range().is_end_inclusive();
         }
         
-        const_cast<BtreeKey *>(bur->get_cb_param()->get_sub_range().get_end_key())->copy_blob(
-                end_key_ptr->get_blob());//copy
+        auto blob = end_key_ptr->get_blob();
+        const_cast<BtreeKey *>(bur->get_cb_param()->get_sub_range().get_end_key())->copy_blob(blob);//copy
         bur->get_cb_param()->get_sub_range().set_end_incl(end_inc);
+        /* We don't neeed to update the start at it is updated when entries are inserted in leaf nodes */
     }
 
     /* This function does the heavy lifiting of co-ordinating inserts. It is a recursive function which walks
@@ -1300,9 +1311,13 @@ out:
         }
         
         bool is_any_child_splitted = false;
+        K checkpoint_key;
+        bool is_checkpont = false;
         
         multinode_req->node_read_cnt++;
 retry:
+        assert(!bur || const_cast<BtreeKey *>(bur->get_cb_param()->get_sub_range().get_start_key())->compare(
+                bur->get_input_range().get_start_key()) == 0);
         int start_ind = 0, end_ind = -1;
 
         /* Get the start and end ind in a parent node for the range updates. For 
@@ -1316,6 +1331,7 @@ retry:
         BT_DEBUG_ASSERT((curlock == LOCKTYPE_READ || curlock == LOCKTYPE_WRITE), my_node,
             "unexpected locktype {}", curlock);
         curr_ind = start_ind;
+
         while (curr_ind <= end_ind) { // iterate all matched childrens
             homeds::thread::locktype child_cur_lock = homeds::thread::LOCKTYPE_NONE;
 
@@ -1352,8 +1368,19 @@ retry:
             }
 
             /* Get subrange if it is a range update */
-            if (bur) {
+            if (bur && child_node->is_leaf()) {
+                /* We get the subrange only for leaf because this is where we will be inserting keys. In interior nodes,
+                 * keys are always propogated from the lower nodes.
+                 */
                 get_subrange(my_node, bur, curr_ind);
+
+                if (curr_ind != (int)my_node->get_total_entries()) {
+                    /* if it is not an edge node then update the end key in input range after insert has happened in 
+                     * the leaf nodes.
+                     */
+                     my_node->get_nth_key(curr_ind, &checkpoint_key, true);
+                     is_checkpont = true;
+                }
                 BT_LOG(DEBUG, btree_structures, my_node, "Subrange:s:{},e:{},c:{},nid:{},eidvalid?:{},sk:{},ek:{}",
                     start_ind, end_ind, curr_ind, my_node->get_node_id().to_string(), my_node->get_edge_id().is_valid(),
                     bur->get_cb_param()->get_sub_range().get_start_key()->to_string(),
@@ -1366,9 +1393,13 @@ retry:
                 my_node->get_nth_key(curr_ind, &pkey, true);
                 if (child_node->get_total_entries() != 0){
                     child_node->get_last_key(&ckey);
-                    assert(ckey.compare(&pkey) <= 0);
+                    if (!child_node->is_leaf()) {
+                        assert(ckey.compare(&pkey) == 0);
+                    } else {
+                        assert(ckey.compare(&pkey) <= 0);
+                    }
                 }
-                assert(k.compare(&pkey) <= 0);
+                assert(bur != nullptr || k.compare(&pkey) <= 0);
             }
             if (curr_ind > 0){//not first child
                 my_node->get_nth_key(curr_ind - 1, &pkey, true);
@@ -1376,7 +1407,7 @@ retry:
                     child_node->get_first_key(&ckey);
                     assert(pkey.compare(&ckey) <= 0);
                 }
-                assert(k.compare(&pkey) >= 0);
+                assert(bur != nullptr || k.compare(&pkey) >= 0);
             }
 #endif
             if (curr_ind == end_ind) {
@@ -1391,17 +1422,29 @@ retry:
                 assert(child_node->m_common_header.is_lock);
             }
 #endif
+            K cur_range_ekey;
+            if (bur) {
+                /* this would be the new start key after this range is inserted */
+                cur_range_ekey.copy_blob(const_cast<BtreeKey *>(bur->get_cb_param()->get_sub_range().get_end_key())->get_blob());
+            }
+
             ret = do_put(child_node, child_cur_lock, k, v, ind_hint, put_type,
                                   existing_val, multinode_req, bur);
 
             if (ret != btree_status_t::success) {
                 goto out;
             }
-            if (bur) {//savepoint of range
-                // update original input range
-                // cb gets cb->input range for manipulation
+
+            if (bur && is_checkpont) {//savepoint of range only if this parent has leaf nodes
+                
+                /* update the start indx of both sub range and input range */
+                const_cast<BtreeKey *>(bur->get_cb_param()->get_sub_range().get_start_key())->copy_blob(
+                            checkpoint_key.get_blob());//copy
+                bur->get_cb_param()->get_sub_range().set_start_incl(false);
+                
+                // update input range for checkpointing
                 const_cast<BtreeKey *>(bur->get_input_range().get_start_key())->copy_blob(
-                        const_cast<BtreeKey *>(bur->get_cb_param()->get_sub_range().get_end_key())->get_blob());//copy
+                            checkpoint_key.get_blob());//copy
                 bur->get_input_range().set_start_incl(false);
             }
             curr_ind++;
@@ -1427,7 +1470,7 @@ out:
                 K curKey, prevKey;
                 my_node->get_nth_key(i-1,&prevKey,false);
                 my_node->get_nth_key(i,&curKey,false);
-                assert(prevKey.compare(&curKey)<=0);
+                assert(prevKey.compare(&curKey) < 0);
             }
 #endif
             bool is_found = my_node->remove_one(range, outkey, outval);
@@ -1436,7 +1479,7 @@ out:
                 K curKey, prevKey;
                 my_node->get_nth_key(i-1,&prevKey,false);
                 my_node->get_nth_key(i,&curKey,false);
-                assert(prevKey.compare(&curKey)<=0);
+                assert(prevKey.compare(&curKey) < 0);
             }
 #endif
             if (is_found) {
@@ -1521,13 +1564,13 @@ out:
 
 #ifndef NDEBUG
         K ckey, pkey;
-        if (ind != my_node->get_total_entries()) { //not edge
+        if (ind != my_node->get_total_entries() && child_node->get_total_entries()) { //not edge
             child_node->get_last_key(&ckey);
             my_node->get_nth_key(ind, &pkey, true);
             BT_DEBUG_ASSERT_CMP(LE, ckey.compare(&pkey), 0, my_node);
         }
 
-        if (ind > 0) { //not first child
+        if (ind > 0 && child_node->get_total_entries()) { //not first child
             child_node->get_first_key(&ckey);
             my_node->get_nth_key(ind-1, &pkey, true);
             BT_DEBUG_ASSERT_CMP(LT, pkey.compare(&ckey), 0, my_node);
@@ -1565,6 +1608,11 @@ out:
 
         // Create a new child node and split them
         child_node = alloc_interior_node();
+        if (child_node == nullptr) {
+            ret = btree_status_t::space_not_avail;
+            unlock_node(root, homeds::thread::LOCKTYPE_WRITE);
+            goto done;
+        }
 
         /* it swap the data while keeping the nodeid same */
         btree_store_t::swap_node(m_btree_store.get(), root, child_node);
@@ -1782,6 +1830,9 @@ out:
         BtreeNodeInfo ninfo;
         BtreeNodePtr child_node1 = child_node;
         BtreeNodePtr child_node2 = child_node1->is_leaf() ? alloc_leaf_node() : alloc_interior_node();
+        if (child_node2 == nullptr) {
+           return(btree_status_t::space_not_avail);
+        }
         btree_status_t ret = btree_status_t::success;
 
         child_node2->set_next_bnode(child_node1->get_next_bnode());
@@ -1803,7 +1854,11 @@ out:
         // Insert the last entry in first child to parent node
         child_node1->get_last_key(out_split_key);
         ninfo.set_bnode_id(child_node1->get_node_id());
-        parent_node->insert(*out_split_key, ninfo);
+
+        /* If key is extent then we always insert the end key in the parent node */
+        K out_split_end_key;
+        out_split_end_key.copy_end_key_blob(out_split_key->get_blob());
+        parent_node->insert(out_split_end_key, ninfo);
 
 #ifndef NDEBUG
         K split_key;
@@ -1834,10 +1889,11 @@ out:
     struct merge_info {
         BtreeNodePtr node;
         BtreeNodePtr node_orig;
-        uint16_t  parent_index=0xFFFF;
-        bool freed=false;
-        bool is_new_allocation=false;
-        bool is_last_key=false;
+        uint16_t  parent_index = 0xFFFF;
+        bool freed = false;
+        bool is_new_allocation = false;
+        bool is_last_key = false;
+        bool is_lock = false;
     };
 
     auto merge_nodes(BtreeNodePtr parent_node, std::vector< int >& indices_list,  btree_multinode_req_ptr multinode_req) {
@@ -1850,6 +1906,7 @@ out:
         std::vector< merge_info > minfo;
         BtreeNodeInfo             child_info;
         uint32_t                  ndeleted_nodes = 0;
+        bool                      merge_cmplt = false;
 
         // Loop into all index and initialize list
         minfo.reserve(indices_list.size());
@@ -1866,14 +1923,19 @@ out:
             ret.status = read_and_lock_node(child_info.bnode_id(), m.node_orig, locktype::LOCKTYPE_WRITE, 
                                     locktype::LOCKTYPE_WRITE, multinode_req);
             if (ret.status != btree_status_t::success) {
-                return ret;
+                goto out;
             }
             BT_LOG_ASSERT_CMP(EQ, m.node_orig->is_valid_node(), true, m.node_orig);
             m.node = m.node_orig;
+            m.is_lock = true;
 
             if (i != 0) { // create replica childs except first child
                 m.node = btree_store_t::alloc_node(m_btree_store.get(), m.node_orig->is_leaf(), m.is_new_allocation,
                                                    m.node_orig);
+                if (m.node == nullptr) {
+                    ret.status = btree_status_t::space_not_avail;
+                    goto out;
+                }
                 minfo[i - 1].node->set_next_bnode(m.node->get_node_id()); // link them
             }
             m.node->flip_pc_gen_flag();
@@ -1883,102 +1945,105 @@ out:
         }
 
 
-        uint32_t first_node_nentries = minfo[0].node->get_total_entries();
-        
-        assert(indices_list.size() == minfo.size());
-        K last_pkey;//last key of parent node
-        if (minfo[indices_list.size() - 1].parent_index != parent_node->get_total_entries()) {
-            /* If it is not edge we always preserve the last key in a given merge group of nodes.*/
-            parent_node->get_nth_key(minfo[indices_list.size() - 1].parent_index, &last_pkey, true);
-        }
+        {
+            uint32_t first_node_nentries = minfo[0].node->get_total_entries();
 
-        // Rebalance entries for each of the node and mark any node to be removed, if empty.
-        auto i = 0U;
-        auto j = 1U;
-        auto balanced_size = m_btree_cfg.get_ideal_fill_size();
-        int last_indx = minfo[0].parent_index;//last seen index in parent whos child was not freed
-        while ((i < indices_list.size() - 1) && (j < indices_list.size())) {
-            minfo[j].parent_index -= ndeleted_nodes; // Adjust the parent index for deleted nodes
+            assert(indices_list.size() == minfo.size());
+            K last_pkey;//last key of parent node
+            if (minfo[indices_list.size() - 1].parent_index != parent_node->get_total_entries()) {
+                /* If it is not edge we always preserve the last key in a given merge group of nodes.*/
+                parent_node->get_nth_key(minfo[indices_list.size() - 1].parent_index, &last_pkey, true);
+            }
 
-            if (minfo[i].node->get_occupied_size(m_btree_cfg) < balanced_size) {
-                // We have room to pull some from next node
-                uint32_t pull_size = balanced_size - minfo[i].node->get_occupied_size(m_btree_cfg);
-                if (minfo[i].node->move_in_from_right_by_size(m_btree_cfg, minfo[j].node, pull_size)) {
-                    // move in internally updates edge if needed
-                    ret.merged = true;
+            // Rebalance entries for each of the node and mark any node to be removed, if empty.
+            auto i = 0U;
+            auto j = 1U;
+            auto balanced_size = m_btree_cfg.get_ideal_fill_size();
+            int last_indx = minfo[0].parent_index;//last seen index in parent whos child was not freed
+            while ((i < indices_list.size() - 1) && (j < indices_list.size())) {
+                minfo[j].parent_index -= ndeleted_nodes; // Adjust the parent index for deleted nodes
+
+                if (minfo[i].node->get_occupied_size(m_btree_cfg) < balanced_size) {
+                    // We have room to pull some from next node
+                    uint32_t pull_size = balanced_size - minfo[i].node->get_occupied_size(m_btree_cfg);
+                    if (minfo[i].node->move_in_from_right_by_size(m_btree_cfg, minfo[j].node, pull_size)) {
+                        // move in internally updates edge if needed
+                        ret.merged = true;
+                    }
+
+                    if (minfo[j].node->get_total_entries() == 0) {
+                        // We have removed all the entries from the next node, remove the entry in parent and move on to
+                        // the next node. 
+
+                        minfo[j].freed = true;
+                        parent_node->remove(minfo[j].parent_index); // remove interally updates parents edge if needed
+                        minfo[i].node->set_next_bnode(minfo[j].node->get_next_bnode());
+                        ndeleted_nodes++;
+                        ret.merged = true;//case when no entries moved but node is still empty
+                    }
                 }
-                
-                if (minfo[j].node->get_total_entries() == 0) {
-                    // We have removed all the entries from the next node, remove the entry in parent and move on to
-                    // the next node. 
 
-                    minfo[j].freed = true;
-                    parent_node->remove(minfo[j].parent_index); // remove interally updates parents edge if needed
-                    minfo[i].node->set_next_bnode(minfo[j].node->get_next_bnode());
-                    ndeleted_nodes++;
-                    ret.merged = true;//case when no entries moved but node is still empty
+                if (!minfo[j].freed) {
+                    last_indx = minfo[j].parent_index;
+                    /* update the sibling index */
+                    i = j;
+                }
+                j++;
+            }
+
+            BT_LOG_ASSERT_CMP(EQ, minfo[0].freed, false, minfo[0].node); // If we merge it, we expect the left most one has at least 1 entry.
+            for (auto n = 0u; n < minfo.size(); n++) {
+                if (!minfo[n].freed) {
+                    // lets get the last key and put in the entry into parent node
+                    BtreeNodeInfo ninfo(minfo[n].node->get_node_id());
+
+                    if (minfo[n].parent_index == parent_node->get_total_entries()) { //edge entrys
+                        parent_node->update(minfo[n].parent_index, ninfo);
+                    } else if (minfo[n].node->get_total_entries() != 0) {
+                        K last_ckey;//last key in child
+                        minfo[n].node->get_last_key(&last_ckey);
+                        parent_node->update(minfo[n].parent_index, last_ckey, ninfo);
+                    } else {
+                        parent_node->update(minfo[n].parent_index, ninfo);
+                    }
+
+                    if (n == 0) {
+                        continue;
+                    } // skip first child commit.
+
+                    write_node_async(minfo[n].node, multinode_req);
                 }
             }
 
-            if (!minfo[j].freed) {
-                last_indx = minfo[j].parent_index;
-                /* update the sibling index */
-                i = j;
+            if (last_indx != (int)parent_node->get_total_entries()) {
+                /* preserve the last key if it is not the edge */
+                V temp_value;
+                parent_node->get(last_indx, &temp_value, true);//save value
+                parent_node->update(last_indx, last_pkey, temp_value);//update key keeping same value
             }
-            j++;
-        }
-
-        BT_LOG_ASSERT_CMP(EQ, minfo[0].freed, false, minfo[0].node); // If we merge it, we expect the left most one has at least 1 entry.
-        for (auto n = 0u; n < minfo.size(); n++) {
-            if (!minfo[n].freed) {
-                // lets get the last key and put in the entry into parent node
-                BtreeNodeInfo ninfo(minfo[n].node->get_node_id());
-
-                if (minfo[n].parent_index == parent_node->get_total_entries()) { //edge entrys
-                    parent_node->update(minfo[n].parent_index, ninfo);
-                } else if (minfo[n].node->get_total_entries() != 0) {
-                    K last_ckey;//last key in child
-                    minfo[n].node->get_last_key(&last_ckey);
-                    parent_node->update(minfo[n].parent_index, last_ckey, ninfo);
-                } else {
-                    parent_node->update(minfo[n].parent_index, ninfo);
-                }
-
-                if (n == 0) {
-                    continue;
-                } // skip first child commit.
-
-                write_node_async(minfo[n].node, multinode_req);
-            }
-        }
-
-        if (last_indx != (int)parent_node->get_total_entries()) {
-            /* preserve the last key if it is not the edge */
-            V temp_value;
-            parent_node->get(last_indx, &temp_value, true);//save value
-            parent_node->update(last_indx, last_pkey, temp_value);//update key keeping same value
-        }
 #ifndef NDEBUG
-        validate_sanity_next_child(parent_node, (uint32_t)last_indx);
+            validate_sanity_next_child(parent_node, (uint32_t)last_indx);
 #endif
-        // Its time to write the parent node and loop again to write all nodes and free freed nodes
-        write_node_async(parent_node, multinode_req);
+            // Its time to write the parent node and loop again to write all nodes and free freed nodes
+            write_node_async(parent_node, multinode_req);
 
-        ret.nmerged = minfo.size() - ndeleted_nodes;
+            ret.nmerged = minfo.size() - ndeleted_nodes;
 
 #ifdef _PRERELEASE
-        if (homestore_flip->test_flip("btree_merge_failure", minfo[0].node->is_leaf())) {
-            minfo[0].node->flip_pc_gen_flag();
-            minfo[0].node->set_total_entries(first_node_nentries);
-        } else 
+            if (homestore_flip->test_flip("btree_merge_failure", minfo[0].node->is_leaf())) {
+                minfo[0].node->flip_pc_gen_flag();
+                minfo[0].node->set_total_entries(first_node_nentries);
+            } else 
 #endif
-        {
-        write_node_async(minfo[0].node, multinode_req);
+            {
+                write_node_async(minfo[0].node, multinode_req);
 #ifndef NDEBUG
-        validate_sanity(minfo,parent_node,indices_list);
+                validate_sanity(minfo,parent_node,indices_list);
 #endif
+            }
+            merge_cmplt = true;
         }
-
+out:
         // Loop again in reverse order to unlock the nodes. freeable nodes need to be unlocked and freed
         for (int n = minfo.size() - 1; n >= 0; n--) {
             if (minfo[n].freed) {
@@ -1986,10 +2051,13 @@ out:
                 free_node(minfo[n].node, multinode_req);
             }
             // free original node except first
-            if (n != 0 && minfo[n].is_new_allocation) {
+            if (n != 0 && minfo[n].is_new_allocation && merge_cmplt) {
                 free_node(minfo[n].node_orig, multinode_req);
             }
-            unlock_node(minfo[n].node_orig, locktype::LOCKTYPE_WRITE);
+
+            if (minfo[n].is_lock) {
+                unlock_node(minfo[n].node_orig, locktype::LOCKTYPE_WRITE);
+            }
         }
 
         return ret;
@@ -2080,6 +2148,9 @@ out:
     BtreeNodePtr alloc_leaf_node() {
         bool         is_new_allocation;
         BtreeNodePtr n = btree_store_t::alloc_node(m_btree_store.get(), true /* is_leaf */, is_new_allocation);
+        if (n == nullptr) {
+            return nullptr;
+        }
         n->set_leaf(true);
         COUNTER_INCREMENT(m_metrics, btree_leaf_node_count, 1);
         m_total_nodes++;
@@ -2089,6 +2160,9 @@ out:
     BtreeNodePtr alloc_interior_node() {
         bool         is_new_allocation;
         BtreeNodePtr n = btree_store_t::alloc_node(m_btree_store.get(), false /* isLeaf */, is_new_allocation);
+        if (n == nullptr) {
+            return nullptr;
+        }
         n->set_leaf(false);
         COUNTER_INCREMENT(m_metrics, btree_int_node_count, 1);
         m_total_nodes++;
@@ -2391,6 +2465,9 @@ protected:
     btree_status_t create_root_node() {
         // Assign one node as root node and initially root is leaf
         BtreeNodePtr root = alloc_leaf_node();
+        if (root == nullptr) {
+            return (btree_status_t::space_not_avail);
+        }
         m_root_node = root->get_node_id();
         btree_status_t ret = btree_status_t::success;
 

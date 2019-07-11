@@ -17,6 +17,8 @@
 #define hs_unlikely(x) (x)
 #endif
 
+#define HOMESTORE_LOG_MODS btree_structures, btree_nodes, btree_generics, cache, cache_vmod_evict, cache_vmod_write, device, httpserver_lmod, iomgr, varsize_blk_alloc, VMOD_VOL_MAPPING, volume
+
 using Clock = std::chrono::steady_clock;
 #define CURRENT_CLOCK(name) Clock::time_point name = Clock::now()
 
@@ -25,6 +27,7 @@ inline uint64_t get_elapsed_time_ns(Clock::time_point t) {
     return ns.count();
 }
 
+inline uint64_t get_elapsed_time_ms(Clock::time_point t) { return get_elapsed_time_ns(t) / (1000 * 1000); }
 inline uint64_t get_elapsed_time_us(Clock::time_point t) { return get_elapsed_time_ns(t) / 1000; }
 
 inline uint64_t get_elapsed_time_ns(Clock::time_point t1, Clock::time_point t2) {

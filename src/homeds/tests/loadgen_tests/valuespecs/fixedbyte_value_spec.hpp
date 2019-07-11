@@ -14,7 +14,7 @@ namespace homeds {
 namespace loadgen {
 
 template < size_t Size >
-class FixedBytesValue : public homeds::btree::BtreeValue {
+class FixedBytesValue : public homeds::btree::BtreeValue, public ValueSpec {
 public:
     static FixedBytesValue<Size> gen_value(ValuePattern spec, FixedBytesValue<Size>* ref_value = nullptr) {
         FixedBytesValue val;
@@ -72,9 +72,19 @@ public:
         return (memcpy(m_bytes, other.get_blob().m_bytes, Size) == 0);
     }
 
-    static uint64_t hash_code(const FixedBytesValue& value) {
-        homeds::blob b = value.get_blob();
+    virtual uint64_t get_hash_code() override{
+        homeds::blob b = get_blob();
         return util::Hash64((const char *)b.bytes, (size_t)b.size);
+    }
+    
+    virtual int compare(ValueSpec& other) override{
+        FixedBytesValue* fbv = (FixedBytesValue*)&other;
+        return memcmp(m_bytes, fbv->m_bytes, Size);
+    }
+
+    virtual bool is_consecutive(ValueSpec& v) override {
+        assert(0);
+        return false;
     }
 
 private:

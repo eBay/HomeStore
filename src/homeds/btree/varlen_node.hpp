@@ -113,7 +113,6 @@ public:
 #ifndef NDEBUG
     void validate_sanity() {
         int i=0;
-        std::map<int, bool> mapOfWords;
         //validate if keys are in ascending orde
         K prevKey;
         while(i<(int)this->get_total_entries()) {
@@ -122,12 +121,6 @@ public:
             uint64_t kp = *(uint64_t*)key.get_blob().bytes;
             if(i>0 && prevKey.compare(&key)>0){
                 LOGDEBUG("non sorted entry : {} -> {} ", kp, this->to_string());
-                assert(0);
-            }
-            std::pair<std::map<int, bool>::iterator, bool > result;
-            result = mapOfWords.insert(std::make_pair(kp,true));
-            if(result.second==false) {
-                LOGDEBUG("Duplicate entry : {} -> {} ", kp, this->to_string());
                 assert(0);
             }
             prevKey = key;
@@ -297,8 +290,9 @@ public:
                 std::vector<std::pair<K, V>> match, replace_kv;
                 const_cast<VariableNode *>(this)->get_all(ureq->get_input_range(), 
                         UINT32_MAX, start_ind, end_ind, &match);
-                for (auto &pair : match) 
+                for (auto &pair : match) { 
                     existing_size += pair.first.get_blob_size() + pair.second.get_blob_size() + get_record_size();
+                }
 
                 ureq->get_cb_param()->set_state_modifiable(false);
                 ureq->callback()(match, replace_kv,ureq->get_cb_param());
@@ -318,20 +312,20 @@ public:
                     size_needed = new_size - existing_size;
                 }
             } else {
-        // NOTE : size_needed is just an guess here. Actual implementation of Mapping key/value can have 
-        // specific logic which determines of size changes on insert or update.
-        auto result = this->find(key, nullptr, nullptr/*amdesai - Commented - &curval*/);
-                if (!result.found) // We need to insert, this newly. Find out if we have space for value.
-            size_needed = key.get_blob_size() + val.get_blob_size() + get_record_size();
-                else if (this->is_leaf()) {
-            //for internal nodes, size does not change on updates
-            // Its an update, see how much additioanl space needed
-            V existingVal;
-            get(result.end_of_search_index, &existingVal, false);
+                // NOTE : size_needed is just an guess here. Actual implementation of Mapping key/value can have 
+                // specific logic which determines of size changes on insert or update.
+                auto result = this->find(key, nullptr, nullptr/*amdesai - Commented - &curval*/);
+                if (!result.found)  { // We need to insert, this newly. Find out if we have space for value.
+                    size_needed = key.get_blob_size() + val.get_blob_size() + get_record_size();
+                } else if (this->is_leaf()) {
+                    //for internal nodes, size does not change on updates
+                    // Its an update, see how much additioanl space needed
+                    V existingVal;
+                    get(result.end_of_search_index, &existingVal, false);
                     size_needed =
-                            existingVal.estimate_size_after_append(val) - get_nth_value_len(result.end_of_search_index);
+                        existingVal.estimate_size_after_append(val) - get_nth_value_len(result.end_of_search_index);
                 }
-        }
+            }
         }
         uint32_t alreadyFilledSize = cfg.get_node_area_size() - get_available_size(cfg);
         return alreadyFilledSize + size_needed >= cfg.get_ideal_fill_size();

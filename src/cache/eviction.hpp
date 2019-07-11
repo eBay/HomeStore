@@ -9,7 +9,7 @@
 #include <atomic>
 #include <boost/intrusive/list.hpp>
 #include <main/homestore_config.hpp>
-#include "cache_common.hpp"
+#include "cache_log.hpp"
 
 namespace homestore {
 
@@ -86,9 +86,9 @@ public:
     void delete_record(EvictRecordType &rec) {
         m_evict_policy.remove(rec);
         auto rec_size = m_get_size_cb(&rec);
-        assert(rec_size >= 0);
+        CACHE_LOG_ASSERT_CMP(GE, rec_size, 0);
         int64_t size = m_cur_size.fetch_sub(rec_size, std::memory_order_acq_rel);
-        assert(size >= 0);
+        CACHE_LOG_ASSERT_CMP(GE, size, 0);
     }
 
 private:
@@ -115,9 +115,9 @@ private:
                     }
                 });
         /* XXX: should we handle it */
-        assert(dealloc_size >= needed_size);
+        CACHE_LOG_ASSERT_CMP(GE, dealloc_size, needed_size);
         int64_t size = m_cur_size.fetch_sub(dealloc_size, std::memory_order_acq_rel);
-        assert(size >= 0);
+        CACHE_LOG_ASSERT_CMP(GE, size, 0);
         return true;
     }
 

@@ -315,6 +315,14 @@ protected:
             return result;
         }
 
+        if (get_total_entries() == 0) {
+            assert(has_valid_edge() || is_leaf());
+            if (is_leaf()) {
+                /* Leaf doesn't have any elements */
+                return result;
+            }
+        }
+
         if (outval) {
             to_variant_node_const()->get(result.end_of_search_index, outval, copy_val /* copy */);
         }
@@ -331,6 +339,10 @@ protected:
     }
 
     void get_last_key(BtreeKey *out_lastkey) {
+        assert(get_total_entries() > 0);
+        if (get_total_entries() == 0) {
+            return;
+        }
         return to_variant_node()->get_nth_key(get_total_entries() - 1, out_lastkey, false);
     }
 
@@ -349,62 +361,88 @@ protected:
         LOGMSG_ASSERT((get_magic() == MAGICAL_VALUE), "{}", m_pers_header.to_string());
 
         auto count = 0U;
+        
         // Get the start index of the search range.
         BtreeSearchRange sr = range.extract_start_of_range();
-        sr.set_selection_option(_MultiMatchSelector::LEFT_MOST);
-        auto result = bsearch_node(sr);//doing bsearch only based on start key
-        start_ind = result.end_of_search_index;
-        //at this point start index will point to exact found or element after that
+        sr.set_selection_option(_MultiMatchSelector::DO_NOT_CARE);
         
-        if (!range.is_start_inclusive()) { //start found but not inclusive
-            while(start_ind < (int)get_total_entries()){
+        auto result = bsearch_node(sr);//doing bsearch only based on start key
+        // at this point start index will point to exact found or element after that
+        start_ind = result.end_of_search_index;
+        
+        if (!range.is_start_inclusive()) {
+            if (start_ind < (int)get_total_entries()) {
+                /* start is not inclusive so increment the start_ind if it is same as this key */
                 int x = to_variant_node_const()->compare_nth_key(*range.get_start_key(), start_ind);
-                if(x!=0)break;//stop at first non matchking key
-                start_ind++;
+                if (x == 0) {
+                    start_ind++;
+                }
+            } else {
+                assert(is_leaf() || has_valid_edge());
+            }
+        }
+       
+        if (start_ind == (int)get_total_entries() && is_leaf()) {
+            end_ind = start_ind;
+            return 0;//no result found
+        }
+       
+        assert((start_ind < (int)get_total_entries()) || has_valid_edge());
+        
+        // search by the end index
+        sr = range.extract_end_of_range();
+        sr.set_selection_option(_MultiMatchSelector::DO_NOT_CARE);
+        result = bsearch_node(sr);//doing bsearch only based on start key
+        end_ind = result.end_of_search_index;
 
-                //for now mapping only searches with one lba start and one lba end. This check ensures that.
-                // in future when that changes, remove this assert
-                assert(start_ind<=result.end_of_search_index+1);
+        assert(start_ind <= end_ind);
+
+        /* we don't support end exclusive */
+        assert(range.is_end_inclusive());
+            
+        if (end_ind == (int)get_total_entries() && !has_valid_edge()) {
+            --end_ind;
+        }
+
+        if (is_leaf()) {
+            /* Decrement the end indx if range doesn't overlap with the start of key at end indx */
+            homeds::blob blob;
+            K key;
+            to_variant_node()->get_nth_key(end_ind, &key, false);
+            
+            if ((range.get_start_key())->compare_start(&key) < 0 && ((range.get_end_key())->compare_start(&key)) < 0) {
+                if (start_ind == end_ind) {
+                    /* no match */
+                    return 0;
+                }
+                --end_ind;
             }
         }
         
-        if(start_ind==(int)get_total_entries() && !has_valid_edge()){
-            if(is_leaf())return 0;
-            assert(0);
+        assert(start_ind <= end_ind);
+        count = end_ind - start_ind + 1;
+        if (count > max_count) {
+            count = max_count;
         }
         
-        end_ind=start_ind;
-        while(end_ind < (int) get_total_entries()){
-            int x = to_variant_node_const()->compare_nth_key(*range.get_end_key(), end_ind);
-            if(x>0)break;//stop at first higher key than end
-            else if(x==0 && !range.is_end_inclusive())break; //stop at first matching key if not inclusive
-            end_ind++;
-        }
+        /* We should always find the entries in interior node */
+        assert(start_ind < (int)get_total_entries() || has_valid_edge());
+        assert(end_ind < (int)get_total_entries() || has_valid_edge());
         
-        if(is_leaf()) {
-            end_ind--;
-        }else if(!is_leaf() && end_ind==(int)get_total_entries() && !has_valid_edge()) {
-            end_ind--; //non valid edge
-            assert(start_ind<=end_ind);//we shoudl always find someting in inner nodes
-        }
-        
-        if(out_values==nullptr){
-            if(start_ind>end_ind)
-                return count;//no result found
-            count = end_ind-start_ind+1;
-            if(count>max_count)count=max_count;
+        if (out_values == nullptr) {
             return count;
         }
-        for (auto i = start_ind; ((i <= end_ind) && (count < max_count)); i++) {
+
+        /* get the keys and values */
+        for (auto i = start_ind; i < (int)(start_ind + count); ++i) {
             K key;V value;
-            if(i==(int)get_total_entries() && !is_leaf())
+            if (i == (int)get_total_entries() && !is_leaf())
                 get_edge_value(&value);//invalid key in case of edge entry for internal node
             else {
                 to_variant_node()->get_nth_key(i, &key, true);
                 to_variant_node()->get_nth_value(i, &value, true);
             }
             out_values->emplace_back(std::make_pair<>(key, value));
-            count++;
         }
         return count;
     }
@@ -553,33 +591,13 @@ protected:
         /* BEST_FIT_TO_CLOSEST is used by remove only. Remove doesn't support range_remove. Until
          * then we have the special logic :
          */
-        if (selection == _MultiMatchSelector::BEST_FIT_TO_CLOSEST || 
-                selection == _MultiMatchSelector::BEST_FIT_TO_CLOSEST_FOR_REMOVE) {
-            if (!ret.found) {
-                ret.found = true;
-                if (ret.end_of_search_index == (int)get_total_entries()) {
-                    if (has_valid_edge()) {
-                        ret.end_of_search_index = get_total_entries();
-                    } else {
-                        ret.end_of_search_index = get_total_entries() - 1;
-                    }
+        if (selection == _MultiMatchSelector::BEST_FIT_TO_CLOSEST_FOR_REMOVE) {
+            if (!ret.found && is_leaf()) {
+                if (get_total_entries() != 0) {
+                    ret.end_of_search_index = get_total_entries() - 1;
+                    ret.found = true;
                 }
             }
-
-            /* TODO: This code gets the second min for the interior nodes only for remove. It will be
-             * removed once we have the range_query for remove.
-             */
-             if (!is_leaf() && (selection == _MultiMatchSelector::BEST_FIT_TO_CLOSEST_FOR_REMOVE)) {
-                if (ret.end_of_search_index < (int)get_total_entries()) {
-                    if (ret.end_of_search_index == (int)(get_total_entries() - 1)) {
-                        if (has_valid_edge()) {
-                            ret.end_of_search_index = (int)get_total_entries();
-                        }
-                    } else {
-                        ++ret.end_of_search_index;
-                    }
-                }
-             }
         }
 
         return ret;
@@ -594,10 +612,8 @@ protected:
             return(_MultiMatchSelector::LEFT_MOST);
         } else if (selection == _MultiMatchSelector::RIGHT_MOST) {
             return(_MultiMatchSelector::RIGHT_MOST);
-        } else if (selection == _MultiMatchSelector::BEST_FIT_TO_CLOSEST) {
-            return(_MultiMatchSelector::LEFT_MOST);
         } else if (selection == _MultiMatchSelector::BEST_FIT_TO_CLOSEST_FOR_REMOVE) {
-            return(_MultiMatchSelector::DO_NOT_CARE);
+            return(_MultiMatchSelector::LEFT_MOST);
         }
         return(_MultiMatchSelector::DO_NOT_CARE);
     }
