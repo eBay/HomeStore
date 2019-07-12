@@ -7,6 +7,7 @@ class HomestoreConan(ConanFile):
 
     version = "0.11.14"
 
+
     license = "Proprietary"
     url = "https://github.corp.ebay.com/SDS/Homestore"
     description = "HomeStore"
