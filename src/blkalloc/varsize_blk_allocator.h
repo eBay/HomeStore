@@ -22,16 +22,16 @@ namespace homestore {
 
 // clang-format off
 
-#define BLKALLOC_LOG(level, mod, ...)                         \
+#define BLKALLOC_LOG(level, mod, fmt, ...)              \
     LOG##level##MOD(                                    \
         BOOST_PP_IF(BOOST_PP_IS_EMPTY(mod), base, mod), \
-        "[blkalloc = {}]",                              \
+        "[blkalloc = {}]" fmt,                          \
         m_cfg.get_name(),                               \
         ##__VA_ARGS__)
 
 #define _BLKALLOC_ASSERT_MSG(asserttype, ...)                           \
     "\n**********************************************************\n"    \
-    "[blkalloc = {}\n]", "Metrics = {}\n" "{}"                          \
+    "[blkalloc = {}\n]" "Metrics = {}\n" "{}"                           \
     "\n**********************************************************\n",   \
     m_cfg.get_name(),                                                   \
     asserttype##_METRICS_DUMP_MSG,                                      \
