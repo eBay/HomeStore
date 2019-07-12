@@ -38,7 +38,7 @@ class HomestoreConan(ConanFile):
                 "sds_logging/5.2.0@sds/testing",
                 "sds_options/0.1.5@sds/testing",
                 "isa-l/2.21.0@oss/stable",
-                "flip/0.0.4@sds/testing",
+                "flip/0.1.0@sds/testing",
                 "zstd/1.4.0@bincrafters/stable",
                 )
 
@@ -80,11 +80,11 @@ class HomestoreConan(ConanFile):
         self.copy("*.hpp", dst="include", src="src", keep_path=True)
         self.copy("*/btree_node.cpp", dst="include", src="src", keep_path=True)
         self.copy("*cache/cache.cpp", dst="include", src="src", keep_path=True)
-        self.copy("*.so", dst="lib", keep_path=False)
-        self.copy("*.dll", dst="lib", keep_path=False)
-        self.copy("*.dylib", dst="lib", keep_path=False)
-        self.copy("*.lib", dst="lib", keep_path=False)
-        self.copy("*.a", dst="lib", keep_path=False)
+        self.copy("*homeblks.so", dst="lib", keep_path=False)
+        self.copy("*homeblks.dll", dst="lib", keep_path=False)
+        self.copy("*homeblks.dylib", dst="lib", keep_path=False)
+        self.copy("*homeblks.lib", dst="lib", keep_path=False)
+        self.copy("*homeblks.a", dst="lib", keep_path=False)
 
     def package_info(self):
         self.cpp_info.libs = tools.collect_libs(self)
