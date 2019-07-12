@@ -201,12 +201,31 @@ private:
     std::atomic<uint64_t>                    m_used_size;
 
 public:
+    void init(DeviceManager* mgr, vdev_info_block* vb, comp_callback cb, uint32_t page_size) {
+        m_mgr = mgr;
+        m_vb = vb;
+        m_comp_cb = cb;
+        m_used_size = 0;
+        m_chunk_size = 0;
+        m_num_chunks = 0;
+        m_pagesz = page_size;
+        m_selector = std::make_unique< DefaultDeviceSelector >();
+    }
+
+    /* Load the virtual dev from vdev_info_block and create a Virtual Dev. */
+    VirtualDev(DeviceManager* mgr, vdev_info_block* vb, comp_callback cb) {
+        init(mgr, vb, cb, vb->page_size);
+
+        m_mgr->add_chunks(vb->vdev_id, [this](PhysicalDevChunk* chunk) { add_chunk(chunk); });
+
+        DEV_LOG_ASSERT_CMP(EQ, vb->num_primary_chunks * (vb->num_mirrors + 1), m_num_chunks);
+        DEV_LOG_ASSERT_CMP(EQ, vb->size, vb->num_primary_chunks * m_chunk_size);
+    }
+
     /* Create a new virtual dev for these parameters */
     VirtualDev(DeviceManager* mgr, uint64_t context_size, uint32_t nmirror, bool is_stripe, uint32_t page_size,
-               const std::vector< PhysicalDev* >& pdev_list, comp_callback cb, char* blob, uint64_t size) :
-            m_comp_cb(cb), m_used_size(0) {
-        m_mgr = mgr;
-        m_pagesz = page_size;
+               const std::vector< PhysicalDev* >& pdev_list, comp_callback cb, char* blob, uint64_t size) {
+        init(mgr, nullptr, cb, page_size);
 
         // Now its time to allocate chunks as needed
         DEV_LOG_ASSERT_CMP(LT, nmirror, pdev_list.size()); // Mirrors should be at least one less than device list.
@@ -264,7 +283,6 @@ public:
             }
         }
 
-        m_selector = std::make_unique< DefaultDeviceSelector >();
         for (auto& pdev : pdev_list) {
             m_selector->add_pdev(pdev);
         }
@@ -280,19 +298,6 @@ public:
         /* XXX:we probably have to do something if a write/read is spread
          * across the chunks from this layer.
          */
-    }
-
-    /* Load the virtual dev from vdev_info_block and create a Virtual Dev. */
-    VirtualDev(DeviceManager* mgr, vdev_info_block* vb, comp_callback cb) : m_vb(vb), m_mgr(mgr), m_comp_cb(cb) {
-        m_selector = std::make_unique< DefaultDeviceSelector >();
-        m_used_size = 0;
-        m_chunk_size = 0;
-        m_num_chunks = 0;
-        m_pagesz = vb->page_size;
-        m_mgr->add_chunks(vb->vdev_id, [this](PhysicalDevChunk* chunk) { add_chunk(chunk); });
-
-        DEV_LOG_ASSERT_CMP(EQ, vb->num_primary_chunks * (vb->num_mirrors + 1), m_num_chunks);
-        DEV_LOG_ASSERT_CMP(EQ, vb->size, vb->num_primary_chunks * m_chunk_size);
     }
 
     ~VirtualDev() = default;

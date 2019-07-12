@@ -84,7 +84,7 @@ Volume::Volume(vol_mem_sb* sb) : m_sb(sb), m_metrics(sb->ondisk_sb->vol_name), m
     alloc_single_block_in_mem();
 
     m_data_blkstore = HomeBlks::instance()->get_data_blkstore();
-    //recovery_start();
+    recovery_start();
 }
 
 /* it should be called during recovery */
