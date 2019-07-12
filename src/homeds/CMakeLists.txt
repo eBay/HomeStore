@@ -62,7 +62,7 @@ set(TEST_LOAD_FILES
         )
 add_executable(test_load ${TEST_LOAD_FILES})
 target_link_libraries(test_load homestore homeblks ${COMMON_LIB_DEPS})
-add_test(NAME TestLoad COMMAND test_load)
+#add_test(NAME TestLoad COMMAND test_load)
 
 FIND_PACKAGE(Boost COMPONENTS program_options REQUIRED)
 TARGET_LINK_LIBRARIES(test_load ${Boost_LIBRARIES})
