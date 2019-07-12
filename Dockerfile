@@ -1,5 +1,5 @@
 # ##########   #######   ############
-FROM ecr.vip.ebayc3.com/sds/sds_cpp_base:2.5
+FROM ecr.vip.ebayc3.com/sds/sds_cpp_base:2.6
 LABEL description="Automated SDS compilation"
 
 ARG CONAN_CHANNEL
@@ -7,7 +7,7 @@ ARG CONAN_USER
 ARG CONAN_PASS=${CONAN_USER}
 ARG HOMESTORE_BUILD_TAG
 ENV CONAN_USER=${CONAN_USER:-sds}
-ENV CONAN_CHANNEL=${CONAN_CHANNEL:-develop}
+ENV CONAN_CHANNEL=${CONAN_CHANNEL:-testing}
 ENV CONAN_PASS=${CONAN_PASS:-password}
 ENV HOMESTORE_BUILD_TAG=${HOMESTORE_BUILD_TAG:-release}
 ENV SOURCE_PATH=/tmp/source/
