@@ -808,6 +808,7 @@ TEST_F(IOTest, recovery_random_io_test) {
     /* child process */
     this->start_homestore();
     this->wait_cmpl();
+    this->shutdown();
     this->remove_files();
 }
 
