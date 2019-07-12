@@ -324,6 +324,11 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
     VOL_LOG(TRACE, volume, hb_req, "write: lba={}, nlbas={}, buf={}", lba, nlbas, (void*)buf);
     try {
         BlkAllocStatus status = m_data_blkstore->alloc_blk(nlbas * m_sb->ondisk_sb->page_size, hints, bid);
+        if (status != BLK_ALLOC_SUCCESS) {
+            LOGERROR("failing IO as it is out of disk space");
+            check_and_complete_req(hb_req, std::make_error_condition(std::errc::no_space_on_device), false);
+            return std::errc::no_space_on_device;
+        }
         assert(status == BLK_ALLOC_SUCCESS);
         HISTOGRAM_OBSERVE(m_metrics, volume_blkalloc_latency, get_elapsed_time_ns(hb_req->io_start_time));
         COUNTER_INCREMENT(m_metrics, volume_write_count, 1);
@@ -431,6 +436,9 @@ void Volume::check_and_complete_req(const vol_interface_req_ptr& hb_req, const s
         if (hb_req->outstanding_io_cnt.decrement_testz(1)) {
             HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, hb_req->is_read, volume_read_latency, volume_write_latency,
                                       get_elapsed_time_us(hb_req->io_start_time));
+            if (get_elapsed_time_ms(hb_req->io_start_time) > 5000) {
+                VOL_LOG(WARN,, hb_req, "vol req took time {}", get_elapsed_time_ms(hb_req->io_start_time));
+            }
             if (call_completion) {
                 VOL_LOG(TRACE, volume, hb_req, "IO DONE");
                 m_comp_cb(hb_req);

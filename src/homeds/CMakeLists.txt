@@ -61,8 +61,11 @@ set(TEST_LOAD_FILES
         loadgen/iomgr_executor.cpp
         )
 add_executable(test_load ${TEST_LOAD_FILES})
-target_link_libraries(test_load homestore ${COMMON_LIB_DEPS})
-add_test(NAME TestLoad COMMAND test_load)
+target_link_libraries(test_load homestore homeblks ${COMMON_LIB_DEPS})
+#add_test(NAME TestLoad COMMAND test_load)
+
+FIND_PACKAGE(Boost COMPONENTS program_options REQUIRED)
+TARGET_LINK_LIBRARIES(test_load ${Boost_LIBRARIES})
 
 set(TEST_IOMGR_EXEC_FILES 
     tests/test_iomgr_executor.cpp

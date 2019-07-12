@@ -1608,6 +1608,11 @@ out:
 
         // Create a new child node and split them
         child_node = alloc_interior_node();
+        if (child_node == nullptr) {
+            ret = btree_status_t::space_not_avail;
+            unlock_node(root, homeds::thread::LOCKTYPE_WRITE);
+            goto done;
+        }
 
         /* it swap the data while keeping the nodeid same */
         btree_store_t::swap_node(m_btree_store.get(), root, child_node);
@@ -1825,6 +1830,9 @@ out:
         BtreeNodeInfo ninfo;
         BtreeNodePtr child_node1 = child_node;
         BtreeNodePtr child_node2 = child_node1->is_leaf() ? alloc_leaf_node() : alloc_interior_node();
+        if (child_node2 == nullptr) {
+           return(btree_status_t::space_not_avail);
+        }
         btree_status_t ret = btree_status_t::success;
 
         child_node2->set_next_bnode(child_node1->get_next_bnode());
@@ -1881,10 +1889,11 @@ out:
     struct merge_info {
         BtreeNodePtr node;
         BtreeNodePtr node_orig;
-        uint16_t  parent_index=0xFFFF;
-        bool freed=false;
-        bool is_new_allocation=false;
-        bool is_last_key=false;
+        uint16_t  parent_index = 0xFFFF;
+        bool freed = false;
+        bool is_new_allocation = false;
+        bool is_last_key = false;
+        bool is_lock = false;
     };
 
     auto merge_nodes(BtreeNodePtr parent_node, std::vector< int >& indices_list,  btree_multinode_req_ptr multinode_req) {
@@ -1897,6 +1906,7 @@ out:
         std::vector< merge_info > minfo;
         BtreeNodeInfo             child_info;
         uint32_t                  ndeleted_nodes = 0;
+        bool                      merge_cmplt = false;
 
         // Loop into all index and initialize list
         minfo.reserve(indices_list.size());
@@ -1913,14 +1923,19 @@ out:
             ret.status = read_and_lock_node(child_info.bnode_id(), m.node_orig, locktype::LOCKTYPE_WRITE, 
                                     locktype::LOCKTYPE_WRITE, multinode_req);
             if (ret.status != btree_status_t::success) {
-                return ret;
+                goto out;
             }
             BT_LOG_ASSERT_CMP(EQ, m.node_orig->is_valid_node(), true, m.node_orig);
             m.node = m.node_orig;
+            m.is_lock = true;
 
             if (i != 0) { // create replica childs except first child
                 m.node = btree_store_t::alloc_node(m_btree_store.get(), m.node_orig->is_leaf(), m.is_new_allocation,
                                                    m.node_orig);
+                if (m.node == nullptr) {
+                    ret.status = btree_status_t::space_not_avail;
+                    goto out;
+                }
                 minfo[i - 1].node->set_next_bnode(m.node->get_node_id()); // link them
             }
             m.node->flip_pc_gen_flag();
@@ -1930,102 +1945,105 @@ out:
         }
 
 
-        uint32_t first_node_nentries = minfo[0].node->get_total_entries();
-        
-        assert(indices_list.size() == minfo.size());
-        K last_pkey;//last key of parent node
-        if (minfo[indices_list.size() - 1].parent_index != parent_node->get_total_entries()) {
-            /* If it is not edge we always preserve the last key in a given merge group of nodes.*/
-            parent_node->get_nth_key(minfo[indices_list.size() - 1].parent_index, &last_pkey, true);
-        }
+        {
+            uint32_t first_node_nentries = minfo[0].node->get_total_entries();
 
-        // Rebalance entries for each of the node and mark any node to be removed, if empty.
-        auto i = 0U;
-        auto j = 1U;
-        auto balanced_size = m_btree_cfg.get_ideal_fill_size();
-        int last_indx = minfo[0].parent_index;//last seen index in parent whos child was not freed
-        while ((i < indices_list.size() - 1) && (j < indices_list.size())) {
-            minfo[j].parent_index -= ndeleted_nodes; // Adjust the parent index for deleted nodes
+            assert(indices_list.size() == minfo.size());
+            K last_pkey;//last key of parent node
+            if (minfo[indices_list.size() - 1].parent_index != parent_node->get_total_entries()) {
+                /* If it is not edge we always preserve the last key in a given merge group of nodes.*/
+                parent_node->get_nth_key(minfo[indices_list.size() - 1].parent_index, &last_pkey, true);
+            }
 
-            if (minfo[i].node->get_occupied_size(m_btree_cfg) < balanced_size) {
-                // We have room to pull some from next node
-                uint32_t pull_size = balanced_size - minfo[i].node->get_occupied_size(m_btree_cfg);
-                if (minfo[i].node->move_in_from_right_by_size(m_btree_cfg, minfo[j].node, pull_size)) {
-                    // move in internally updates edge if needed
-                    ret.merged = true;
+            // Rebalance entries for each of the node and mark any node to be removed, if empty.
+            auto i = 0U;
+            auto j = 1U;
+            auto balanced_size = m_btree_cfg.get_ideal_fill_size();
+            int last_indx = minfo[0].parent_index;//last seen index in parent whos child was not freed
+            while ((i < indices_list.size() - 1) && (j < indices_list.size())) {
+                minfo[j].parent_index -= ndeleted_nodes; // Adjust the parent index for deleted nodes
+
+                if (minfo[i].node->get_occupied_size(m_btree_cfg) < balanced_size) {
+                    // We have room to pull some from next node
+                    uint32_t pull_size = balanced_size - minfo[i].node->get_occupied_size(m_btree_cfg);
+                    if (minfo[i].node->move_in_from_right_by_size(m_btree_cfg, minfo[j].node, pull_size)) {
+                        // move in internally updates edge if needed
+                        ret.merged = true;
+                    }
+
+                    if (minfo[j].node->get_total_entries() == 0) {
+                        // We have removed all the entries from the next node, remove the entry in parent and move on to
+                        // the next node. 
+
+                        minfo[j].freed = true;
+                        parent_node->remove(minfo[j].parent_index); // remove interally updates parents edge if needed
+                        minfo[i].node->set_next_bnode(minfo[j].node->get_next_bnode());
+                        ndeleted_nodes++;
+                        ret.merged = true;//case when no entries moved but node is still empty
+                    }
                 }
-                
-                if (minfo[j].node->get_total_entries() == 0) {
-                    // We have removed all the entries from the next node, remove the entry in parent and move on to
-                    // the next node. 
 
-                    minfo[j].freed = true;
-                    parent_node->remove(minfo[j].parent_index); // remove interally updates parents edge if needed
-                    minfo[i].node->set_next_bnode(minfo[j].node->get_next_bnode());
-                    ndeleted_nodes++;
-                    ret.merged = true;//case when no entries moved but node is still empty
+                if (!minfo[j].freed) {
+                    last_indx = minfo[j].parent_index;
+                    /* update the sibling index */
+                    i = j;
+                }
+                j++;
+            }
+
+            BT_LOG_ASSERT_CMP(EQ, minfo[0].freed, false, minfo[0].node); // If we merge it, we expect the left most one has at least 1 entry.
+            for (auto n = 0u; n < minfo.size(); n++) {
+                if (!minfo[n].freed) {
+                    // lets get the last key and put in the entry into parent node
+                    BtreeNodeInfo ninfo(minfo[n].node->get_node_id());
+
+                    if (minfo[n].parent_index == parent_node->get_total_entries()) { //edge entrys
+                        parent_node->update(minfo[n].parent_index, ninfo);
+                    } else if (minfo[n].node->get_total_entries() != 0) {
+                        K last_ckey;//last key in child
+                        minfo[n].node->get_last_key(&last_ckey);
+                        parent_node->update(minfo[n].parent_index, last_ckey, ninfo);
+                    } else {
+                        parent_node->update(minfo[n].parent_index, ninfo);
+                    }
+
+                    if (n == 0) {
+                        continue;
+                    } // skip first child commit.
+
+                    write_node_async(minfo[n].node, multinode_req);
                 }
             }
 
-            if (!minfo[j].freed) {
-                last_indx = minfo[j].parent_index;
-                /* update the sibling index */
-                i = j;
+            if (last_indx != (int)parent_node->get_total_entries()) {
+                /* preserve the last key if it is not the edge */
+                V temp_value;
+                parent_node->get(last_indx, &temp_value, true);//save value
+                parent_node->update(last_indx, last_pkey, temp_value);//update key keeping same value
             }
-            j++;
-        }
-
-        BT_LOG_ASSERT_CMP(EQ, minfo[0].freed, false, minfo[0].node); // If we merge it, we expect the left most one has at least 1 entry.
-        for (auto n = 0u; n < minfo.size(); n++) {
-            if (!minfo[n].freed) {
-                // lets get the last key and put in the entry into parent node
-                BtreeNodeInfo ninfo(minfo[n].node->get_node_id());
-
-                if (minfo[n].parent_index == parent_node->get_total_entries()) { //edge entrys
-                    parent_node->update(minfo[n].parent_index, ninfo);
-                } else if (minfo[n].node->get_total_entries() != 0) {
-                    K last_ckey;//last key in child
-                    minfo[n].node->get_last_key(&last_ckey);
-                    parent_node->update(minfo[n].parent_index, last_ckey, ninfo);
-                } else {
-                    parent_node->update(minfo[n].parent_index, ninfo);
-                }
-
-                if (n == 0) {
-                    continue;
-                } // skip first child commit.
-
-                write_node_async(minfo[n].node, multinode_req);
-            }
-        }
-
-        if (last_indx != (int)parent_node->get_total_entries()) {
-            /* preserve the last key if it is not the edge */
-            V temp_value;
-            parent_node->get(last_indx, &temp_value, true);//save value
-            parent_node->update(last_indx, last_pkey, temp_value);//update key keeping same value
-        }
 #ifndef NDEBUG
-        validate_sanity_next_child(parent_node, (uint32_t)last_indx);
+            validate_sanity_next_child(parent_node, (uint32_t)last_indx);
 #endif
-        // Its time to write the parent node and loop again to write all nodes and free freed nodes
-        write_node_async(parent_node, multinode_req);
+            // Its time to write the parent node and loop again to write all nodes and free freed nodes
+            write_node_async(parent_node, multinode_req);
 
-        ret.nmerged = minfo.size() - ndeleted_nodes;
+            ret.nmerged = minfo.size() - ndeleted_nodes;
 
 #ifdef _PRERELEASE
-        if (homestore_flip->test_flip("btree_merge_failure", minfo[0].node->is_leaf())) {
-            minfo[0].node->flip_pc_gen_flag();
-            minfo[0].node->set_total_entries(first_node_nentries);
-        } else 
+            if (homestore_flip->test_flip("btree_merge_failure", minfo[0].node->is_leaf())) {
+                minfo[0].node->flip_pc_gen_flag();
+                minfo[0].node->set_total_entries(first_node_nentries);
+            } else 
 #endif
-        {
-        write_node_async(minfo[0].node, multinode_req);
+            {
+                write_node_async(minfo[0].node, multinode_req);
 #ifndef NDEBUG
-        validate_sanity(minfo,parent_node,indices_list);
+                validate_sanity(minfo,parent_node,indices_list);
 #endif
+            }
+            merge_cmplt = true;
         }
-
+out:
         // Loop again in reverse order to unlock the nodes. freeable nodes need to be unlocked and freed
         for (int n = minfo.size() - 1; n >= 0; n--) {
             if (minfo[n].freed) {
@@ -2033,10 +2051,13 @@ out:
                 free_node(minfo[n].node, multinode_req);
             }
             // free original node except first
-            if (n != 0 && minfo[n].is_new_allocation) {
+            if (n != 0 && minfo[n].is_new_allocation && merge_cmplt) {
                 free_node(minfo[n].node_orig, multinode_req);
             }
-            unlock_node(minfo[n].node_orig, locktype::LOCKTYPE_WRITE);
+
+            if (minfo[n].is_lock) {
+                unlock_node(minfo[n].node_orig, locktype::LOCKTYPE_WRITE);
+            }
         }
 
         return ret;
@@ -2127,6 +2148,9 @@ out:
     BtreeNodePtr alloc_leaf_node() {
         bool         is_new_allocation;
         BtreeNodePtr n = btree_store_t::alloc_node(m_btree_store.get(), true /* is_leaf */, is_new_allocation);
+        if (n == nullptr) {
+            return nullptr;
+        }
         n->set_leaf(true);
         COUNTER_INCREMENT(m_metrics, btree_leaf_node_count, 1);
         m_total_nodes++;
@@ -2136,6 +2160,9 @@ out:
     BtreeNodePtr alloc_interior_node() {
         bool         is_new_allocation;
         BtreeNodePtr n = btree_store_t::alloc_node(m_btree_store.get(), false /* isLeaf */, is_new_allocation);
+        if (n == nullptr) {
+            return nullptr;
+        }
         n->set_leaf(false);
         COUNTER_INCREMENT(m_metrics, btree_int_node_count, 1);
         m_total_nodes++;
@@ -2438,6 +2465,9 @@ protected:
     btree_status_t create_root_node() {
         // Assign one node as root node and initially root is leaf
         BtreeNodePtr root = alloc_leaf_node();
+        if (root == nullptr) {
+            return (btree_status_t::space_not_avail);
+        }
         m_root_node = root->get_node_id();
         btree_status_t ret = btree_status_t::success;
 

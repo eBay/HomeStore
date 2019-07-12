@@ -27,6 +27,7 @@ inline uint64_t get_elapsed_time_ns(Clock::time_point t) {
     return ns.count();
 }
 
+inline uint64_t get_elapsed_time_ms(Clock::time_point t) { return get_elapsed_time_ns(t) / (1000 * 1000); }
 inline uint64_t get_elapsed_time_us(Clock::time_point t) { return get_elapsed_time_ns(t) / 1000; }
 
 inline uint64_t get_elapsed_time_ns(Clock::time_point t1, Clock::time_point t2) {

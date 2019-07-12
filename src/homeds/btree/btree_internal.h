@@ -27,7 +27,7 @@
 #include <boost/preprocessor/stringize.hpp>
 
 ENUM(btree_status_t, uint32_t, success, not_found, item_found, closest_found, closest_removed, retry, has_more,
-     read_failed, write_failed, stale_buf, refresh_failed, put_failed);
+     read_failed, write_failed, stale_buf, refresh_failed, put_failed, space_not_avail);
 
 /* We should always find the child smaller or equal then  search key in the interior nodes. */
 #ifndef NDEBUG

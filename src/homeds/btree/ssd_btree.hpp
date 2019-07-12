@@ -138,6 +138,8 @@ public:
         if (bt_dev_info->new_device) {
             m_cache = new homestore::Cache< homestore::BlkId >(100 * 1024 * 1024, 4096);
 
+            assert(bt_dev_info->dev_mgr != nullptr);
+
             m_blkstore = new homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy, btree_buffer_t >(
                 bt_dev_info->dev_mgr, m_cache, 0, homestore::BlkStoreCacheType::RD_MODIFY_WRITEBACK_CACHE, 0,
                 nullptr, bt_dev_info->size, HomeStoreConfig::atomic_phys_page_size, "Btree",
@@ -188,6 +190,10 @@ public:
         homestore::blk_alloc_hints hints;
         homestore::BlkId           blkid;
         auto safe_buf = store->m_blkstore->alloc_blk_cached(1 * HomeStoreConfig::atomic_phys_page_size, hints, &blkid);
+        if (safe_buf == nullptr) {
+            LOGERROR("btree alloc failed. No space avail");
+            return nullptr;
+        }
 
 #ifndef NDEBUG
         assert(safe_buf->is_btree);
