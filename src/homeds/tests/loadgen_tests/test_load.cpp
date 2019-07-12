@@ -93,6 +93,7 @@ struct SSDBtreeTest : public testing::Test{
         di.init(loadgen->get_executor(),
                 std::bind(&SSDBtreeTest::init_done_cb, this, std::placeholders::_1,std::placeholders::_2));
         join();//sync wait for test to finish
+        di.cleanup();
     }
 };
 
@@ -126,6 +127,7 @@ struct SSDBtreeVarKVTest : public testing::Test{
         di.init(loadgen->get_executor(),
                 std::bind(&SSDBtreeVarKVTest::init_done_cb, this, std::placeholders::_1,std::placeholders::_2));
         join();//sync wait for test to finish
+        di.cleanup();
     }
 };
 
@@ -161,6 +163,7 @@ struct MapTest : public testing::Test{
         di.init(loadgen->get_executor(),
                 std::bind(&MapTest::init_done_cb, this, std::placeholders::_1,std::placeholders::_2));
         join();//sync wait for test to finish
+        di.cleanup();
     }
 };
 
