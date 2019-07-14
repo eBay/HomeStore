@@ -54,6 +54,7 @@ bool verify_hdr = true;
 bool verify_data = true;
 bool read_verify = false;
 uint32_t load_type = 0;
+#define VOL_PAGE_SIZE 4096
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 /**************** Common class created for all tests ***************/
@@ -198,7 +199,7 @@ public:
 #else
         params.flag = homestore::io_flag::DIRECT_IO;
 #endif
-        params.min_virtual_page_size = 2048;
+        params.min_virtual_page_size = VOL_PAGE_SIZE;
         params.cache_size = 4 * 1024 * 1024 * 1024ul;
         params.disk_init = init;
         params.devices = device_info;
@@ -255,7 +256,7 @@ public:
         /* Create a volume */
         vol_params params;
         int cnt = vol_indx.fetch_add(1, std::memory_order_acquire);
-        params.page_size = (cnt/2) ? 2048 : 4096;
+        params.page_size = VOL_PAGE_SIZE;
         params.size = max_vol_size;
         params.io_comp_cb = ([this](const vol_interface_req_ptr& vol_req)
                 { process_completions(vol_req); });
@@ -507,7 +508,7 @@ public:
 
     void populate_buf(uint8_t *buf, uint64_t size, uint64_t lba, int cur) {
         for (uint64_t write_sz = 0; write_sz < size; write_sz = write_sz + sizeof(uint64_t)) {
-            if (!(write_sz % 2048)) {
+            if (!(write_sz % VOL_PAGE_SIZE)) {
                 *((uint64_t *)(buf + write_sz)) = lba;
                 if (!((write_sz % VolInterface::get_instance()->get_page_size(vol_info[cur]->vol)))) {
                     ++lba;
@@ -588,7 +589,7 @@ public:
                 } else {
                     size_read = b.size;
                 }
-                size_read = 2048;
+                size_read = VOL_PAGE_SIZE;
                 int j = 0;
                 if (verify_data) {
                     j = memcmp((void *) b.bytes, (uint8_t *)((uint64_t)req->buf + tot_size_read), size_read);
