@@ -218,8 +218,9 @@ public:
 
         m_mgr->add_chunks(vb->vdev_id, [this](PhysicalDevChunk* chunk) { add_chunk(chunk); });
 
-        DEV_LOG_ASSERT_CMP(EQ, vb->num_primary_chunks * (vb->num_mirrors + 1), m_num_chunks);
-        DEV_LOG_ASSERT_CMP(EQ, vb->size, vb->num_primary_chunks * m_chunk_size);
+        HS_ASSERT_CMP(LOGMSG, vb->num_primary_chunks * (vb->num_mirrors + 1), ==,
+                      m_num_chunks); // Mirrors should be at least one less than device list.
+        HS_ASSERT_CMP(LOGMSG, vb->get_size(), ==, vb->num_primary_chunks * m_chunk_size);
     }
 
     /* Create a new virtual dev for these parameters */
