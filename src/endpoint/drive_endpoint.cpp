@@ -118,6 +118,10 @@ void DriveEndPoint::process_completions(int fd, void* cookie, int event) {
         if (info->size != events[i].res || events[i].res2) {
             LOGERROR("io is not completed properly. size read/written {} info {} error {}", events[i].res, 
                         info->to_string(), events[i].res2);
+            if (events[i].res2 == 0) {
+                comp_cb(EIO, (uint8_t*)events[i].data);
+                continue;
+            }
         }
         comp_cb(events[i].res2, (uint8_t*)events[i].data);
     }

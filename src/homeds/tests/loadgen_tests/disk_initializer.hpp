@@ -10,6 +10,9 @@ namespace homeds {
             std::shared_ptr<iomgr::ioMgr> m_ioMgr;
         public:
         
+            void cleanup(){
+                remove("file_load_gen");
+            }
             void init( Executor& executor, init_done_callback  init_done_cb) {
                 m_ioMgr = executor.get_iomgr();
                 start_homestore(init_done_cb);

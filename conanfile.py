@@ -5,7 +5,8 @@ from conans import ConanFile, CMake, tools
 class HomestoreConan(ConanFile):
     name = "homestore"
 
-    version = "0.11.14"
+    version = "0.11.15"
+
 
     license = "Proprietary"
     url = "https://github.corp.ebay.com/SDS/Homestore"
@@ -80,11 +81,11 @@ class HomestoreConan(ConanFile):
         self.copy("*.hpp", dst="include", src="src", keep_path=True)
         self.copy("*/btree_node.cpp", dst="include", src="src", keep_path=True)
         self.copy("*cache/cache.cpp", dst="include", src="src", keep_path=True)
-        self.copy("*.so", dst="lib", keep_path=False)
-        self.copy("*.dll", dst="lib", keep_path=False)
-        self.copy("*.dylib", dst="lib", keep_path=False)
-        self.copy("*.lib", dst="lib", keep_path=False)
-        self.copy("*.a", dst="lib", keep_path=False)
+        self.copy("*homeblks.so", dst="lib", keep_path=False)
+        self.copy("*homeblks.dll", dst="lib", keep_path=False)
+        self.copy("*homeblks.dylib", dst="lib", keep_path=False)
+        self.copy("*homeblks.lib", dst="lib", keep_path=False)
+        self.copy("*homeblks.a", dst="lib", keep_path=False)
 
     def package_info(self):
         self.cpp_info.libs = tools.collect_libs(self)

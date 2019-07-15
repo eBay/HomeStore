@@ -80,11 +80,11 @@ Volume::Volume(vol_mem_sb* sb) : m_sb(sb), m_metrics(sb->ondisk_sb->vol_name), m
     }
     assert(m_sb->ondisk_sb->state == OFFLINE || m_sb->ondisk_sb->state == DEGRADED || m_sb->ondisk_sb->state == ONLINE);
     seq_Id = 3;
+    m_state = vol_state::MOUNTING;
     alloc_single_block_in_mem();
 
     m_data_blkstore = HomeBlks::instance()->get_data_blkstore();
     recovery_start();
-    m_state = vol_state::MOUNTING;
 }
 
 /* it should be called during recovery */
