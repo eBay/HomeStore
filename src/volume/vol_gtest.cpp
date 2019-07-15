@@ -50,6 +50,11 @@ uint64_t max_outstanding_ios = 64u;
 uint64_t max_disk_capacity = 10 * Gi;
 uint64_t match_cnt = 0;
 using log_level = spdlog::level::level_enum;
+bool verify_hdr = true;
+bool verify_data = true;
+bool read_verify = false;
+uint32_t load_type = 0;
+#define VOL_PAGE_SIZE 4096
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 /**************** Common class created for all tests ***************/
@@ -194,7 +199,7 @@ public:
 #else
         params.flag = homestore::io_flag::DIRECT_IO;
 #endif
-        params.min_virtual_page_size = 2048;
+        params.min_virtual_page_size = VOL_PAGE_SIZE;
         params.cache_size = 4 * 1024 * 1024 * 1024ul;
         params.disk_init = init;
         params.devices = device_info;
@@ -251,7 +256,7 @@ public:
         /* Create a volume */
         vol_params params;
         int cnt = vol_indx.fetch_add(1, std::memory_order_acquire);
-        params.page_size = (cnt/2) ? 2048 : 4096;
+        params.page_size = VOL_PAGE_SIZE;
         params.size = max_vol_size;
         params.io_comp_cb = ([this](const vol_interface_req_ptr& vol_req)
                 { process_completions(vol_req); });
@@ -352,7 +357,8 @@ public:
             return;
         }
 
-        if ((write_cnt < max_num_writes) || (outstanding_ios.load() < max_outstanding_ios && get_elapsed_time(startTime) < run_time)) {
+        if ((write_cnt < max_num_writes) || 
+            (outstanding_ios.load() < max_outstanding_ios && get_elapsed_time(startTime) < run_time)) {
             /* raise an event */
             iomgr_obj->fd_reschedule(fd, event);
         }
@@ -370,14 +376,36 @@ public:
                     return;
                 }
             }
-            random_write();
+            write_io();
             if (read_enable) {
-                random_read();
+                read_io();
             }
             ++cnt;
         }
     }
     
+    void write_io() {
+        switch (load_type) {
+            case 0:
+                random_write();
+                break;
+            case 1:
+                same_write();
+                break;
+        }
+    }
+
+    void read_io() {
+        switch (load_type) {
+            case 0:
+                random_read();
+                break;
+            case 1:
+                same_read();
+                break;
+        }
+    }
+
     void init_files() {
         /* initialize the file */
         for (uint32_t i = 0; i < max_vols; ++i) {
@@ -402,6 +430,14 @@ public:
         }
     }
 
+    void same_write() {
+        write_vol(0, 5, 100);
+    }
+
+    void same_read() {
+        read_vol(0, 5, 100);
+    }
+
     void random_write() {
         /* XXX: does it really matter if it is atomic or not */
         int cur = ++cur_vol % max_vols;
@@ -413,7 +449,9 @@ public:
         lba = rand() % (vol_info[cur]->max_vol_blks - max_blks);
         nblks = rand() % max_blks;
         if (nblks == 0) { nblks = 1; }
-        {
+
+        if (verify_data) {
+            /* can not support concurrent overlapping writes if whole data need to be verified */
             std::unique_lock< std::mutex > lk(vol_info[cur]->vol_mutex);
             /* check if someone is already doing writes/reads */ 
             if (nblks && vol_info[cur]->m_vol_bm->is_bits_reset(lba, nblks)) {
@@ -422,6 +460,10 @@ public:
                 goto start;
             }
         }
+        write_vol(cur, lba, nblks);
+    }
+
+    void write_vol(uint32_t cur, uint64_t lba, uint64_t nblks) {
         uint8_t *buf = nullptr;
         uint8_t *buf1 = nullptr;
         uint64_t size = nblks * VolInterface::get_instance()->get_page_size(vol_info[cur]->vol);
@@ -463,12 +505,16 @@ public:
         }
         LOGDEBUG("Wrote {} {} ",lba,nblks);
     }
+
     void populate_buf(uint8_t *buf, uint64_t size, uint64_t lba, int cur) {
-        for (uint64_t write_sz = 0; (write_sz + sizeof(uint64_t)) < size; write_sz = write_sz + sizeof(uint64_t)) {
-            *((uint64_t *)(buf + write_sz)) = random();
-            if (!(write_sz % VolInterface::get_instance()->get_page_size(vol_info[cur]->vol))) {
+        for (uint64_t write_sz = 0; write_sz < size; write_sz = write_sz + sizeof(uint64_t)) {
+            if (!(write_sz % VOL_PAGE_SIZE)) {
                 *((uint64_t *)(buf + write_sz)) = lba;
-                ++lba;
+                if (!((write_sz % VolInterface::get_instance()->get_page_size(vol_info[cur]->vol)))) {
+                    ++lba;
+                }
+            } else {
+                *((uint64_t *)(buf + write_sz)) = random();
             }
         }
     }
@@ -485,14 +531,18 @@ public:
         lba = rand() % (vol_info[cur]->max_vol_blks - max_blks);
         nblks = rand() % max_blks;
         if (nblks == 0) { nblks = 1; }
-        {
+        
+        if (verify_data) {
+            /* Don't send overlapping reads with pending writes if data verification is on */
             std::unique_lock< std::mutex > lk(vol_info[cur]->vol_mutex);
             /* check if someone is already doing writes/reads */ 
-            if (vol_info[cur]->m_vol_bm->is_bits_reset(lba, nblks))
+            if (vol_info[cur]->m_vol_bm->is_bits_reset(lba, nblks)) {
                 vol_info[cur]->m_vol_bm->set_bits(lba, nblks);
-            else
+            } else {
                 goto start;
+            }
         }
+
         read_vol(cur, lba, nblks);
         LOGDEBUG("Read {} {} ",lba,nblks);
     }
@@ -539,8 +589,25 @@ public:
                 } else {
                     size_read = b.size;
                 }
-                size_read = 2048;
-                int j = memcmp((void *) b.bytes, (uint8_t *)((uint64_t)req->buf + tot_size_read), size_read);
+                size_read = VOL_PAGE_SIZE;
+                int j = 0;
+                if (verify_data) {
+                    j = memcmp((void *) b.bytes, (uint8_t *)((uint64_t)req->buf + tot_size_read), size_read);
+                } else {
+                    /* we will only verify the header. We write lba number in the header */
+                    j = memcmp((void *) b.bytes, (uint8_t *)((uint64_t)req->buf + tot_size_read), sizeof (uint64_t));
+                    if (j) {
+                        /* read it from the staging file as it contains the data for which we haven't gotten the
+                         * completion yet.
+                         */
+                        auto ret = pread(vol_info[req->cur_vol]->staging_fd, (uint8_t *)((uint64_t)req->buf + tot_size_read),
+                                            size_read, req->offset + tot_size_read);
+                        if (ret != size_read) {
+                            assert(0);
+                        }
+                        j = memcmp((void *) b.bytes, (uint8_t *)((uint64_t)req->buf + tot_size_read), sizeof (uint64_t));
+                    }
+                }
                 match_cnt++;
                 if (j) {
                    
@@ -633,12 +700,15 @@ public:
 
         bool verify_io = false;
         
-        if (!req->is_read && req->err == no_error && read_enable) {
+        if (!req->is_read && req->err == no_error && read_verify) {
             (void)VolInterface::get_instance()->sync_read(vol_info[req->cur_vol]->vol, req->lba, req->nblks, req);
             LOGTRACE("IO DONE, req_id={}, outstanding_ios={}", req->request_id, outstanding_ios.load());
             verify_io = true;
+        } else if ((req->is_read && req->err == no_error)) {
+            verify_io = true;
         }
-        if ((req->is_read && req->err == no_error) || verify_io) {
+
+        if (verify_io && (verify_hdr || verify_data)) {
             /* read from the file and verify it */
             auto ret = pread(req->fd, req->buf, req->size, req->offset);
             if (ret != req->size) {
@@ -880,11 +950,15 @@ TEST_F(IOTest, normal_shutdown_homeblks_with_incoming_io_test) {
 
 SDS_OPTION_GROUP(test_volume, 
 (run_time, "", "run_time", "run time for io", ::cxxopts::value<uint32_t>()->default_value("30"), "seconds"),
+(load_type, "", "load_type", "load_type", ::cxxopts::value<uint32_t>()->default_value("0"), "random_write_read:0, same_write_read:1"),
 (num_threads, "", "num_threads", "num threads for io", ::cxxopts::value<uint32_t>()->default_value("8"), "number"),
 (read_enable, "", "read_enable", "read enable 0 or 1", ::cxxopts::value<uint32_t>()->default_value("1"), "flag"),
 (max_disk_capacity, "", "max_disk_capacity", "max disk capacity", ::cxxopts::value<uint64_t>()->default_value("7"), "GB"),
 (max_volume, "", "max_volume", "max volume", ::cxxopts::value<uint64_t>()->default_value("50"), "number"),
 (max_num_writes, "", "max_num_writes", "max num of writes", ::cxxopts::value<uint64_t>()->default_value("100000"), "number"),
+(verify_hdr, "", "verify_hdr", "data verification", ::cxxopts::value<uint64_t>()->default_value("1"), "0 or 1"),
+(verify_data, "", "verify_data", "data verification", ::cxxopts::value<uint64_t>()->default_value("1"), "0 or 1"),
+(read_verify, "", "read_verify", "read verification for each write", ::cxxopts::value<uint64_t>()->default_value("0"), "0 or 1"),
 (enable_crash_handler, "", "enable_crash_handler", "enable crash handler 0 or 1", ::cxxopts::value<uint32_t>()->default_value("1"), "flag"))
 
 
@@ -914,6 +988,10 @@ int main(int argc, char *argv[]) {
     max_vols = SDS_OPTIONS["max_volume"].as<uint64_t>();
     max_num_writes= SDS_OPTIONS["max_num_writes"].as<uint64_t>();
     enable_crash_handler = SDS_OPTIONS["enable_crash_handler"].as<uint32_t>();
+    verify_hdr = SDS_OPTIONS["verify_hdr"].as<uint64_t>() ? true : false;
+    verify_data = SDS_OPTIONS["verify_data"].as<uint64_t>() ? true : false;
+    read_verify = SDS_OPTIONS["read_verify"].as<uint64_t>() ? true : false;
+    load_type = SDS_OPTIONS["load_type"].as<uint32_t>();
     if (enable_crash_handler) sds_logging::install_crash_handler();
     return RUN_ALL_TESTS();
 }

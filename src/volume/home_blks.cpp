@@ -169,6 +169,12 @@ VolumePtr HomeBlks::create_volume(const vol_params& params) {
     if (!m_rdy || is_shutdown()) {
         return nullptr;
     }
+
+    if (params.page_size != HomeStoreConfig::min_page_size) {
+        LOGERROR("{} page size is not supported", params.page_size);
+        return nullptr;
+    }
+
     if (params.size >= m_size_avail) {
         LOGINFO("there is a possibility of running out of space as total size of the volumes"
                 "created are more then maximum capacity");
