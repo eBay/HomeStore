@@ -28,7 +28,7 @@ RUN set -eux; \
     if [ "nosanitize" = "${BUILD_TYPE}" ]; then \
       eval $(grep 'name =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,name,PKG_NAME,'); \
       eval $(grep -m 1 'version =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,version,PKG_VERSION,'); \
-      /usr/local/bin/build-wrapper-linux-x86-64 --out-dir /tmp/sonar conan create --build missing -o ${PKG_NAME}:coverage=True -pr ${BUILD_TYPE} ${SOURCE_PATH} sds/debug; \
+      /usr/local/bin/build-wrapper-linux-x86-64 --out-dir /tmp/sonar conan create -o ${PKG_NAME}:coverage=True -pr ${BUILD_TYPE} ${SOURCE_PATH} sds/debug; \
       BUILD_BASE=~/.conan/data/${PKG_NAME}/${PKG_VERSION}/sds/debug/build; \
       BUILD_DIR=`find ${BUILD_BASE} -maxdepth 1 -type d \( ! -wholename ${BUILD_BASE} \) -print`; \
       cp ${SOURCE_PATH}sonar-project.properties ${BUILD_DIR}; \
