@@ -9,7 +9,6 @@
 #pragma once
 
 #include <iostream>
-#include <assert.h>
 #include <pthread.h>
 #include <vector>
 #include <atomic>
@@ -18,6 +17,7 @@
 #include "homeds/memory/chunk_allocator.hpp"
 #include "homeds/memory/sys_allocator.hpp"
 #include <utility/atomic_counter.hpp>
+#include <sds_logging/logging.h>
 #include "btree_store.hpp"
 #include "btree_node.h"
 #include "physical_node.hpp"
@@ -158,14 +158,15 @@ public:
 
     static void ref_node(MemBtreeNode *bn) {
         auto mbh = (mem_btree_node_header *)bn;
-        assert(mbh->magic == 0xDEADBEEF);
+        LOGMSG_ASSERT_EQ(mbh->magic, 0xDEADBEEF, "Invalid Magic for Membtree node {}, Metrics {}", bn->to_string(),
+            sisl::MetricsFarm::getInstance().get_result_in_json_string());
         mbh->refcount.increment();
     }
 
-
     static void deref_node(MemBtreeNode *bn) {
         auto mbh = (mem_btree_node_header *)bn;
-        assert(mbh->magic == 0xDEADBEEF);
+        LOGMSG_ASSERT_EQ(mbh->magic, 0xDEADBEEF, "Invalid Magic for Membtree node {}, Metrics {}", bn->to_string(),
+                         sisl::MetricsFarm::getInstance().get_result_in_json_string());
         if (mbh->refcount.decrement_testz()) {
             mbh->magic = 0;
             bn->~MemBtreeNode();
@@ -175,6 +176,5 @@ public:
     
 private:
     BtreeConfig m_cfg;
- 
 };
 } }

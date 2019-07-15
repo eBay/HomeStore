@@ -14,6 +14,8 @@
 #include <memory>
 #include "homeds/memory/obj_allocator.hpp"
 #include <sds_logging/logging.h>
+#include <spdlog/fmt/fmt.h>
+#include "main/homestore_assert.hpp"
 
 #include "threadpool/thread_pool.h"
 using namespace std;
@@ -34,6 +36,9 @@ struct Free_Blk_Entry {
             m_blkId(m_blkId),
             m_blk_offset(m_blk_offset),
             m_nblks_to_free(m_nblks_to_free) {}
+
+    uint8_t blk_offset() const { return m_blk_offset; }
+    uint8_t blks_to_free() const { return m_nblks_to_free; }
 };
 
 struct volume_req;
@@ -50,15 +55,65 @@ typedef boost::intrusive_ptr< volume_req > volume_req_ptr;
 #define _VOL_REQ_LOG_VERBOSE_MSG(req) req->to_string()
 #define _VOLMSG_EXPAND(...) __VA_ARGS__
 
-// clang-format off
+#if 0
+#define _DUMMY_EXPAND(...) __VA_ARGS__
+#define _EXPAND(...) BOOST_PP_EXPAND(_DUMMY_EXPAND __VA_ARGS__)
+
 #define VOL_LOG(level, mod, req, fmt, ...)                                                                             \
     LOG##level##MOD(BOOST_PP_IF(BOOST_PP_IS_EMPTY(mod), base, mod),                                                    \
                     "[vol={}]"                                                                                         \
                     BOOST_PP_IF(BOOST_PP_IS_EMPTY(req), "{}: ", _VOL_REQ_LOG_FORMAT)                                   \
                     fmt, m_vol_name,                                                                                   \
-                    BOOST_PP_EXPAND(_VOLMSG_EXPAND BOOST_PP_IF(BOOST_PP_IS_EMPTY(req), (""), (_VOL_REQ_LOG_MSG(req)))),\
-                    ##__VA_ARGS__)
+                    _EXPAND(BOOST_PP_IF(BOOST_PP_IS_EMPTY(req), (""), (_VOL_REQ_LOG_MSG(req))))
 
+#define VOL_LOG(level, mod, req, f, ...)                                                                               \
+    if (IS_##level##_MOD_ON(BOOST_PP_IF(BOOST_PP_IS_EMPTY(mod), base, mod))) {                                         \
+        fmt::memory_buffer _log_buf;                                                                                   \
+        fmt::format_to(_log_buf, "[vol={}]", m_vol_name);                                                              \
+        HS_LOG(_log_buf, level, mod, req, f, ##__VA_ARGS__);                                                           \
+    }
+#endif
+
+#if 0
+#define VOL_LOG(level, mod, req, msg, ...)                                                                             \
+    {                                                                                                                  \
+        BOOST_PP_IF(BOOST_PP_IS_EMPTY(req), volume_req* r = nullptr, const auto& r = req);                             \
+        LOG##level##MOD_FMT(BOOST_PP_IF(BOOST_PP_IS_EMPTY(mod), base, mod),                                            \
+                            ([this, r](fmt::memory_buffer& buf, const char* m, auto&&... args) {                       \
+                                fmt::format_to(buf, "[{}:{}] [vol={}] ", file_name(__FILE__), __LINE__,                \
+                                               this->m_vol_name);                                                      \
+                                if (r)                                                                                 \
+                                    fmt::format_to(buf, "[req_id={}] ", r->request_id);                                \
+                                fmt::format_to(buf, m, args...);                                                       \
+                            }),                                                                                        \
+                            msg, ##__VA_ARGS__);                                                                       \
+    }
+#endif
+#define VOL_LOG(level, mod, req, msg, ...) HS_SUBMOD_LOG(level, mod, req, "vol", this->m_vol_name, msg, ##__VA_ARGS__)
+#define VOL_ASSERT(assert_type, cond, req, ...)                                                                        \
+    HS_SUBMOD_ASSERT(assert_type, cond, req, "vol", this->m_vol_name, ##__VA_ARGS__)
+#define VOL_ASSERT_CMP(assert_type, val1, cmp, val2, req, ...)                                                         \
+    HS_SUBMOD_ASSERT_CMP(assert_type, val1, cmp, val2, req, "vol", this->m_vol_name, ##__VA_ARGS__)
+
+#if 0
+#define VOL_ASSERT(assert_type, cond, req, ...)                                                                        \
+    assert_type##_ASSERT_FMT(cond,                                                                                     \
+                             [&](fmt::memory_buffer& buf, const char* m, auto&&... args) {                             \
+                                 assert_formatter(buf, m, BOOST_PP_IF(BOOST_PP_IS_EMPTY(req), "", req->to_string()),   \
+                                                  args...);                                                            \
+                             },                                                                                        \
+                             ##__VA_ARGS__)
+
+#define VOL_ASSERT_CMP(assert_type, val1, cmp, val2, req, ...)                                                         \
+    assert_type##_ASSERT_CMP(val1, cmp, val2,                                                                          \
+                             [&](fmt::memory_buffer& buf, const char* m, auto&&... args) {                             \
+                                 cmp_assert_formatter(                                                                 \
+                                     buf, m, BOOST_PP_IF(BOOST_PP_IS_EMPTY(req), "", req->to_string()), args...);      \
+                             },                                                                                        \
+                             ##__VA_ARGS__)
+#endif
+#if 0
+// clang-format off
 #define _VOL_ASSERT_MSG(asserttype, req, ...) \
         "\n**********************************************************\n"                                               \
         "[vol={}] " BOOST_PP_IF(BOOST_PP_IS_EMPTY(req), "{}: ", _VOL_REQ_LOG_VERBOSE_FORMAT) "\nMetrics = {}\n" "{}"   \
@@ -73,14 +128,15 @@ typedef boost::intrusive_ptr< volume_req > volume_req_ptr;
     asserttype##_ASSERT(cond, _VOL_ASSERT_MSG(asserttype, req, fmt, ##__VA_ARGS__))
 #define VOL_ASSERT_OP(asserttype, optype, val1, val2, req, ...)                                                        \
     asserttype##_ASSERT_##optype(val1, val2, _VOL_ASSERT_MSG(asserttype, req, ##__VA_ARGS__))
+#endif
 
 #define VOL_DEBUG_ASSERT(...) VOL_ASSERT(DEBUG, __VA_ARGS__)
 #define VOL_RELEASE_ASSERT(...) VOL_ASSERT(RELEASE, __VA_ARGS__)
 #define VOL_LOG_ASSERT(...) VOL_ASSERT(LOGMSG, __VA_ARGS__)
 
-#define VOL_DEBUG_ASSERT_CMP(optype, ...) VOL_ASSERT_OP(DEBUG, optype, ##__VA_ARGS__)
-#define VOL_RELEASE_ASSERT_CMP(optype, ...) VOL_ASSERT_OP(RELEASE, optype, ##__VA_ARGS__)
-#define VOL_LOG_ASSERT_CMP(optype, ...) VOL_ASSERT_OP(LOGMSG, optype, ##__VA_ARGS__)
+#define VOL_DEBUG_ASSERT_CMP(...) VOL_ASSERT_CMP(DEBUG, ##__VA_ARGS__)
+#define VOL_RELEASE_ASSERT_CMP(...) VOL_ASSERT_CMP(RELEASE, ##__VA_ARGS__)
+#define VOL_LOG_ASSERT_CMP(...) VOL_ASSERT_CMP(LOGMSG, ##__VA_ARGS__)
 
 struct volume_req : public blkstore_req< BlkBuffer > {
     uint64_t                      lba;
@@ -118,7 +174,8 @@ public:
      */
     virtual ~volume_req() = default;
 
-    // virtual size_t get_your_size() const override { return sizeof(volume_req); }
+    // virtual size_t get_your_size() const override { return
+    // sizeof(volume_req); }
 
     static volume_req_ptr cast(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req) {
         return boost::static_pointer_cast< volume_req >(bs_req);
@@ -203,10 +260,10 @@ private:
     std::atomic< uint64_t >           m_err_cnt = 0;
     std::string                       m_vol_name;
 #ifndef NDEBUG
-    std::mutex                            m_req_mtx;
+    std::mutex                           m_req_mtx;
     std::map< uint64_t, volume_req_ptr > m_req_map;
 #endif
-    std::atomic< uint64_t >             m_req_id = 0;
+    std::atomic< uint64_t > m_req_id = 0;
 
 private:
     Volume(const vol_params& params);
@@ -230,9 +287,25 @@ public:
     std::error_condition write(uint64_t lba, uint8_t* buf, uint32_t nblks, const vol_interface_req_ptr& hb_req);
     std::error_condition read(uint64_t lba, int nblks, const vol_interface_req_ptr& hb_req, bool sync);
 
-    /* Note: We should not take m_vol_lock in homeblks after taking this lock. Otherwise it will lead
-     * to deadlock.
-     * We should take this lock whenever in memory sb is modified.
+    template < typename... Args >
+    void cmp_assert_formatter(fmt::memory_buffer& buf, const char* msg, const std::string& req_str,
+                              const Args&... args) {
+        sds_logging::default_cmp_assert_formatter(buf, msg, args...);
+        assert_formatter(buf, msg, req_str, args...);
+    }
+
+    template < typename... Args >
+    void assert_formatter(fmt::memory_buffer& buf, const char* msg, const std::string& req_str, const Args&... args) {
+        fmt::format_to(buf, "\n[vol={}]", m_vol_name);
+        if (req_str.size()) {
+            fmt::format_to(buf, "\n[request={}]", req_str);
+        }
+        fmt::format_to(buf, "\nMetrics = {}\n", sisl::MetricsFarm::getInstance().get_result_in_json_string());
+    }
+
+    /* Note: We should not take m_vol_lock in homeblks after taking this lock.
+     * Otherwise it will lead to deadlock. We should take this lock whenever in
+     * memory sb is modified.
      */
     struct vol_mem_sb* get_sb() {
         return m_sb;
@@ -248,7 +321,8 @@ public:
     void process_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
     void recovery_start();
 
-    // callback from mapping layer for free leaf node(data blks) so that volume layer could do blk free.
+    // callback from mapping layer for free leaf node(data blks) so that volume
+    // layer could do blk free.
     void process_free_blk_callback(Free_Blk_Entry fbe);
 
     uint64_t get_elapsed_time(Clock::time_point startTime);
@@ -274,7 +348,7 @@ public:
     vol_state          get_state();
     void               set_state(vol_state state, bool persist = true);
     bool               is_offline();
-};
+}; // namespace homestore
 
 #define NUM_BLKS_PER_THREAD_TO_QUERY 10000ull
 } // namespace homestore
