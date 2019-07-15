@@ -35,7 +35,7 @@ class HomestoreConan(ConanFile):
                 "lzma/5.2.4@bincrafters/stable",
                 "sisl/0.3.2@sisl/testing",
                 "OpenSSL/1.0.2s@conan/stable",
-                "sds_logging/5.2.1@sds/testing",
+                "sds_logging/5.3.0@sds/testing",
                 "sds_options/0.1.5@sds/testing",
                 "isa-l/2.21.0@oss/stable",
                 "flip/0.1.0@sds/testing",
