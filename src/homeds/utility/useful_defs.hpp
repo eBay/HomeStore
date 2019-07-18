@@ -17,7 +17,9 @@
 #define hs_unlikely(x) (x)
 #endif
 
-#define HOMESTORE_LOG_MODS btree_structures, btree_nodes, btree_generics, cache, cache_vmod_evict, cache_vmod_write, device, httpserver_lmod, iomgr, varsize_blk_alloc, VMOD_VOL_MAPPING, volume
+#define HOMESTORE_LOG_MODS                                                                                             \
+    btree_structures, btree_nodes, btree_generics, cache, cache_vmod_evict, cache_vmod_write, device, httpserver_lmod, \
+        iomgr, varsize_blk_alloc, VMOD_VOL_MAPPING, volume, blk_read_tracker
 
 using Clock = std::chrono::steady_clock;
 #define CURRENT_CLOCK(name) Clock::time_point name = Clock::now()

@@ -14,7 +14,7 @@
 #include <memory>
 #include "homeds/memory/obj_allocator.hpp"
 #include <sds_logging/logging.h>
-
+#include "blk_read_tracker.hpp"
 #include "threadpool/thread_pool.h"
 using namespace std;
 
@@ -24,17 +24,6 @@ namespace homestore {
 #define INVALID_SEQ_ID UINT64_MAX
 class mapping;
 enum vol_state;
-
-struct Free_Blk_Entry {
-    BlkId   m_blkId;
-    uint8_t m_blk_offset : NBLKS_BITS;
-    uint8_t m_nblks_to_free : NBLKS_BITS;
-
-    Free_Blk_Entry(const BlkId& m_blkId, uint8_t m_blk_offset, uint8_t m_nblks_to_free) :
-            m_blkId(m_blkId),
-            m_blk_offset(m_blk_offset),
-            m_nblks_to_free(m_nblks_to_free) {}
-};
 
 struct volume_req;
 typedef boost::intrusive_ptr< volume_req > volume_req_ptr;
@@ -94,6 +83,7 @@ struct volume_req : public blkstore_req< BlkBuffer > {
     Clock::time_point             op_start_time;
     uint16_t                      checksum[MAX_NUM_LBA];
     uint64_t                      read_buf_offset;
+    uint64_t                      read_size;
 
     /* number of times mapping table need to be updated for this req. It can
      * break the ios update in mapping btree depending on the key range.
@@ -101,6 +91,7 @@ struct volume_req : public blkstore_req< BlkBuffer > {
     std::atomic< int >                        num_mapping_update;
     boost::intrusive_ptr< vol_interface_req > parent_req;
     BlkId                                     blkId; // used only for debugging purpose
+
 #ifndef NDEBUG
     bool               done;
     boost::uuids::uuid vol_uuid;
@@ -183,6 +174,10 @@ public:
         REGISTER_HISTOGRAM(volume_read_size_distribution, "Distribution of volume read sizes",
                            HistogramBucketsType(LinearUpto64Buckets));
 
+        REGISTER_HISTOGRAM(volume_pending_blk_read_map_sz, "Size of pending blk read map");
+        REGISTER_COUNTER(volume_concurrent_blk_rw, "Concurrent read writes on blk",
+                         sisl::_publish_as::publish_as_gauge);
+        REGISTER_COUNTER(volume_erase_blk_rescheduled, "Erase blk rescheduled due to concurrent rw");
         register_me_to_farm();
     }
 };
@@ -203,16 +198,19 @@ private:
     std::atomic< uint64_t >           m_err_cnt = 0;
     std::string                       m_vol_name;
 #ifndef NDEBUG
-    std::mutex                            m_req_mtx;
+    std::mutex                           m_req_mtx;
     std::map< uint64_t, volume_req_ptr > m_req_map;
 #endif
-    std::atomic< uint64_t >             m_req_id = 0;
+    std::atomic< uint64_t > m_req_id = 0;
+    // Map of blks for which read is requested, to prevent parallel writes to free those blks
+    // it also stores corresponding eviction record created by any parallel writes
+    std::unique_ptr< Blk_Read_Tracker > m_read_blk_tracker;
 
 private:
     Volume(const vol_params& params);
     Volume(vol_mem_sb* sb);
     void check_and_complete_req(const vol_interface_req_ptr& hb_req, const std::error_condition& err,
-                                bool call_completion_cb);
+                                bool call_completion_cb, std::vector< Free_Blk_Entry >* fbes = nullptr);
 
 public:
     template < typename... Args >
@@ -251,6 +249,11 @@ public:
     // callback from mapping layer for free leaf node(data blks) so that volume layer could do blk free.
     void process_free_blk_callback(Free_Blk_Entry fbe);
 
+    void pending_read_blk_cb(BlkId& bid);
+    void get_free_blk_entries(std::vector< std::pair< MappingKey, MappingValue > >& kvs,
+                              std::vector< Free_Blk_Entry >&                        fbes);
+    bool remove_free_blk_entry(std::vector< Free_Blk_Entry >& fbes, std::pair< MappingKey, MappingValue >& kv);
+
     uint64_t get_elapsed_time(Clock::time_point startTime);
     void     attach_completion_cb(const io_comp_callback& cb);
     void     print_tree();
@@ -274,6 +277,10 @@ public:
     vol_state          get_state();
     void               set_state(vol_state state, bool persist = true);
     bool               is_offline();
+
+#ifndef NDEBUG
+    void verify_pending_blks();
+#endif
 };
 
 #define NUM_BLKS_PER_THREAD_TO_QUERY 10000ull

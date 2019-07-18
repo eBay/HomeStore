@@ -22,37 +22,33 @@
 
 namespace homeds {
 
-#define hash_read_lock()    lock(true)
-#define hash_read_unlock()  unlock(true)
-#define hash_write_lock()   lock(false)
+#define hash_read_lock() lock(true)
+#define hash_read_unlock() unlock(true)
+#define hash_write_lock() lock(false)
 #define hash_write_unlock() unlock(false)
 
-[[maybe_unused]]
-static uint64_t compute_hash_code(homeds::blob b) {
-    return util::Hash64((const char *)b.bytes, (size_t)b.size);
+[[maybe_unused]] static uint64_t compute_hash_code(homeds::blob b) {
+    return util::Hash64((const char*)b.bytes, (size_t)b.size);
 }
 
-class HashNode : public boost::intrusive::slist_base_hook<> {
-};
+class HashNode : public boost::intrusive::slist_base_hook<> {};
 
 ////////////// hash_bucket implementation /////////////////
-template <typename K, typename V>
-class HashBucket
-{
+template < typename K, typename V >
+class HashBucket {
 public:
-    HashBucket() {
-    }
+    HashBucket() {}
 
     ~HashBucket() {
         auto it(m_list.begin());
         while (it != m_list.end()) {
             m_list.erase(it);
-            V::deref(*it);   // <<< Dobule free which will decrease CacheBuffer::m_refcount to -1 during shutdown
+            V::deref(*it); // <<< Dobule free which will decrease CacheBuffer::m_refcount to -1 during shutdown
             it = m_list.begin();
         }
     }
 
-    bool insert(const K &k, V &v, V **outv, const std::function<void(V *)> &found_cb = nullptr) {
+    bool insert(const K& k, V& v, V** outv, const std::function< void(V*) >& found_cb = nullptr) {
         bool found = false;
 
         hash_write_lock();
@@ -86,7 +82,7 @@ public:
         return !found;
     }
 
-    bool get(const K &k, V **outv) {
+    bool get(const K& k, V** outv) {
         bool found = false;
 
         hash_read_lock();
@@ -106,7 +102,7 @@ public:
         return found;
     }
 
-    bool remove(const K &k, const std::function<void(V *)> &found_cb) {
+    bool remove(const K& k, const std::function< void(V*) >& found_cb) {
         bool found = false;
 
         hash_write_lock();
@@ -128,8 +124,9 @@ public:
         return found;
     }
 
-    bool safe_remove(const K &k, const std::function<void(V *)> &found_cb, 
-                        bool &can_remove) {
+    uint64_t get_size() { return m_list.size(); }
+
+    bool safe_remove(const K& k, const std::function< void(V*) >& found_cb, bool& can_remove) {
         bool ret = false;
 
         hash_write_lock();
@@ -143,7 +140,7 @@ public:
                  */
                 V::set_free_state(*it);
                 ret = true;
-                if (V::test_le((const V &)*it, 1)) {
+                if (V::test_le((const V&)*it, 1)) {
                     can_remove = true;
                     if (found_cb) {
                         found_cb(&*it);
@@ -161,22 +158,25 @@ public:
                 }
                 break;
             } else if (x > 0) {
-                 break;
+                break;
             }
         }
         hash_write_unlock();
-        return ret;   
+        return ret;
     }
 
     /* It remove only if ref_cnt is 1 */
-    bool check_and_remove(const K &k, const std::function<void(V *)> &found_cb) {
+    bool check_and_remove(const K& k, const std::function< void(V*) >& found_cb, bool dec_ref = false) {
         bool ret = false;
 
         hash_write_lock();
         for (auto it(m_list.begin()), itend(m_list.end()); it != itend; ++it) {
             int x = K::compare(*(V::extract_key(*it)), k);
             if (x == 0) {
-                if (V::test_le((const V &)*it, 1)) {
+                if (dec_ref) {
+                    V::deref(*it);
+                }
+                if (V::test_le((const V&)*it, 1)) {
                     if (found_cb) {
                         found_cb(&*it);
                     }
@@ -192,15 +192,15 @@ public:
             }
         }
         hash_write_unlock();
-        return ret;   
+        return ret;
     }
 
-    bool release(const K &k) {
+    bool release(const K& k) {
         bool removed;
         return remove(k, &removed, nullptr);
     }
 
-    bool release(V *n) {
+    bool release(V* n) {
         bool removed;
         return remove(*(V::extract_key(n)), &removed, nullptr);
     }
@@ -229,102 +229,124 @@ private:
 #ifndef GLOBAL_HASHSET_LOCK
     folly::SharedMutexReadPriority m_lock;
 #endif
-typedef boost::intrusive::slist< V > hash_node_list;
-    hash_node_list m_list;
+    typedef boost::intrusive::slist< V > hash_node_list;
+    hash_node_list                       m_list;
 };
 
 ////////////// hash_table implementation /////////////////
-template <typename K, typename V>
+template < typename K, typename V >
 class IntrusiveHashSet {
 public:
     IntrusiveHashSet(uint32_t nBuckets) {
+        m_size = 0;
         m_nbuckets = nBuckets;
-        m_buckets = new HashBucket<K, V>[nBuckets];
+        m_buckets = new HashBucket< K, V >[nBuckets];
     }
 
-    ~IntrusiveHashSet() {
-        delete[] m_buckets;
-    }
+    ~IntrusiveHashSet() { delete[] m_buckets; }
 
-    bool insert(V &v, V **outv, const std::function<void(V *)> &found_cb = nullptr) {
+    uint64_t get_size() {
 #ifdef GLOBAL_HASHSET_LOCK
-        std::lock_guard<std::mutex> lk(m);
+        std::lock_guard< std::mutex > lk(m);
 #endif
-        const K *pk = V::extract_key(v);
-        HashBucket<K, V> *hb = get_bucket(*pk);
-        return (hb->insert(*pk, v, outv, found_cb));
+        return m_size;
     }
 
-    bool insert(const K &k, V &v, V **outv, uint64_t hash_code, const std::function<void(V *)> &found_cb = nullptr) {
+    bool insert(V& v, V** outv, const std::function< void(V*) >& found_cb = nullptr) {
 #ifdef GLOBAL_HASHSET_LOCK
-        std::lock_guard<std::mutex> lk(m);
+        std::lock_guard< std::mutex > lk(m);
 #endif
-
-        HashBucket<K, V> *hb = get_bucket(hash_code);
-        return (hb->insert(k, v, outv, found_cb));
+        const K*            pk = V::extract_key(v);
+        HashBucket< K, V >* hb = get_bucket(*pk);
+        bool                inserted = (hb->insert(*pk, v, outv, found_cb));
+        if (inserted)
+            m_size++;
+        return inserted;
     }
 
-    bool get(const K &k, V **outv) {
+    bool insert(const K& k, V& v, V** outv, uint64_t hash_code, const std::function< void(V*) >& found_cb = nullptr) {
 #ifdef GLOBAL_HASHSET_LOCK
-        std::lock_guard<std::mutex> lk(m);
+        std::lock_guard< std::mutex > lk(m);
 #endif
-        HashBucket<K, V> *hb = get_bucket(k);
+
+        HashBucket< K, V >* hb = get_bucket(hash_code);
+        bool                inserted = (hb->insert(k, v, outv, found_cb));
+        if (inserted)
+            m_size++;
+        return inserted;
+    }
+
+    bool get(const K& k, V** outv) {
+#ifdef GLOBAL_HASHSET_LOCK
+        std::lock_guard< std::mutex > lk(m);
+#endif
+        HashBucket< K, V >* hb = get_bucket(k);
         return (hb->get(k, outv));
     }
 
-    bool get(const K &k, V **outv, uint64_t hash_code) {
+    bool get(const K& k, V** outv, uint64_t hash_code) {
 #ifdef GLOBAL_HASHSET_LOCK
-        std::lock_guard<std::mutex> lk(m);
+        std::lock_guard< std::mutex > lk(m);
 #endif
-        HashBucket<K, V> *hb = get_bucket(hash_code);
+        HashBucket< K, V >* hb = get_bucket(hash_code);
         return (hb->get(k, outv));
     }
 
-    bool safe_remove(const K &k, uint64_t hash_code, bool &can_remove, 
-                     const std::function<void(V *)> &found_cb = nullptr) {
+    bool safe_remove(const K& k, uint64_t hash_code, bool& can_remove,
+                     const std::function< void(V*) >& found_cb = nullptr) {
 #ifdef GLOBAL_HASHSET_LOCK
-        std::lock_guard<std::mutex> lk(m);
+        std::lock_guard< std::mutex > lk(m);
 #endif
-        HashBucket<K, V> *hb = get_bucket(hash_code);
-        return (hb->safe_remove(k, found_cb, can_remove));
+        HashBucket< K, V >* hb = get_bucket(hash_code);
+        bool                removed = (hb->safe_remove(k, found_cb, can_remove));
+        if (removed)
+            m_size--;
+        return removed;
     }
 
-    bool remove(const K &k, const std::function<void(V *)> &found_cb = nullptr) {
+    bool remove(const K& k, const std::function< void(V*) >& found_cb = nullptr) {
 #ifdef GLOBAL_HASHSET_LOCK
-        std::lock_guard<std::mutex> lk(m);
+        std::lock_guard< std::mutex > lk(m);
 #endif
-        HashBucket<K, V> *hb = get_bucket(k);
-        return (hb->remove(k, found_cb));
+        HashBucket< K, V >* hb = get_bucket(k);
+        bool                removed = (hb->remove(k, found_cb));
+        if (removed)
+            m_size--;
+        return removed;
     }
 
-    bool remove(const K &k, uint64_t hash_code, const std::function<void(V *)> &found_cb = nullptr) {
+    bool remove(const K& k, uint64_t hash_code, const std::function< void(V*) >& found_cb = nullptr) {
 #ifdef GLOBAL_HASHSET_LOCK
-        std::lock_guard<std::mutex> lk(m);
+        std::lock_guard< std::mutex > lk(m);
 #endif
-        HashBucket<K, V> *hb = get_bucket(hash_code);
-        return (hb->remove(k, found_cb));
+        HashBucket< K, V >* hb = get_bucket(hash_code);
+        bool                removed = (hb->remove(k, found_cb));
+        if (removed)
+            m_size--;
+        return removed;
     }
 
-    bool check_and_remove(const K &k, uint64_t hash_code, const std::function<void(V *)> &found_cb = nullptr) {
+    bool check_and_remove(const K& k, uint64_t hash_code, const std::function< void(V*) >& found_cb = nullptr,
+                          bool dec_ref = false) {
 #ifdef GLOBAL_HASHSET_LOCK
-        std::lock_guard<std::mutex> lk(m);
+        std::lock_guard< std::mutex > lk(m);
 #endif
-        HashBucket<K, V> *hb = get_bucket(hash_code);
-        return (hb->check_and_remove(k, found_cb));
+        HashBucket< K, V >* hb = get_bucket(hash_code);
+        bool                removed = (hb->check_and_remove(k, found_cb, dec_ref));
+        if (removed)
+            m_size--;
+        return removed;
     }
 
 private:
-    HashBucket<K, V> *get_bucket(const K &k) {
-        return &(m_buckets[compute_hash_code(K::get_blob(k)) % m_nbuckets]);
-    }
+    HashBucket< K, V >* get_bucket(const K& k) { return &(m_buckets[compute_hash_code(K::get_blob(k)) % m_nbuckets]); }
 
-    HashBucket<K, V> *get_bucket(uint64_t hash_code) {
-        return &(m_buckets[hash_code % m_nbuckets]);
-    }
+    HashBucket< K, V >* get_bucket(uint64_t hash_code) { return &(m_buckets[hash_code % m_nbuckets]); }
 
 private:
-    uint32_t m_nbuckets;
-    HashBucket<K, V> *m_buckets;
+    std::atomic< uint64_t > m_size;
+    uint32_t                m_nbuckets;
+    HashBucket< K, V >*     m_buckets;
 
 #ifdef GLOBAL_HASHSET_LOCK
     std::mutex m;
@@ -332,4 +354,3 @@ private:
 };
 
 } // namespace homeds
-
