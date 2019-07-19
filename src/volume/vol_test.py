@@ -6,9 +6,20 @@ import sys
 import getopt
 from time import sleep
 
-opts,args = getopt.getopt(sys.argv[1:], 't', ['test_suits=']) 
+# slack details
+slackcmd = ("./slackpost "
+            "https://hooks.slack.com/services/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 "
+            "sds-homestore "
+            "regression-bot \""
+           )
 
+def slackpost(msg):
+    cmd = slackcmd + msg + "\""
+    subprocess.call(cmd, shell=True)
+
+opts,args = getopt.getopt(sys.argv[1:], 't', ['test_suits='])
 test_suits = ""
+
 for opt,arg in opts:
     if opt in ('-t', '--test_suits'):
         test_suits = arg
@@ -58,14 +69,21 @@ def load():
     return '[  PASSED  ] 1 test' in status
 
 def sequence():
+    slackpost("Regression Test Starting")
     if normal() == False:
+        slackpost("Normal Test Failed")
         sys.exit(0)
+    slackpost("Normal Test Passed")
     sleep(5)
     if load() == False:
+        slackpost("Load Test Failed")
         sys.exit(0)
+    slackpost("Load Test Passed")
     sleep(5)
     if mapping() == False:
+        slackpost("Mapping Test Failed")
         sys.exit(0)
+    slackpost("Mapping Test Passed")
 
 if test_suits == "normal":
     normal()
