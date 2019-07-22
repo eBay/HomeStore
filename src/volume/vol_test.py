@@ -6,6 +6,11 @@ import sys
 import getopt
 from time import sleep
 
+
+opts,args = getopt.getopt(sys.argv[1:], 'td:', ['test_suits=', 'dirpath=']) 
+test_suits = ""
+dirpath = "./"
+
 # slack details
 slackcmd = ("./slackpost "
             "https://hooks.slack.com/services/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 "
@@ -17,13 +22,13 @@ def slackpost(msg):
     cmd = slackcmd + msg + "\""
     subprocess.call(cmd, shell=True)
 
-opts,args = getopt.getopt(sys.argv[1:], 't', ['test_suits='])
-test_suits = ""
-
 for opt,arg in opts:
     if opt in ('-t', '--test_suits'):
         test_suits = arg
         print(("testing suits (%s)")%(arg))
+    if opt in ('-d', '--dirpath'):
+        dirpath = arg
+        print(("dir path (%s)")%(arg))
 
 def normal():
     status = subprocess.check_output("./test_volume \
@@ -41,17 +46,8 @@ def vol_delete():
     return '[  PASSED  ] 1 test' in status
 
 def recovery():
-    status = subprocess.check_output("./test_volume \
-            --gtest_filter=*normal_abort_random* --run_time=300 --install_crash=0", shell=True)
-    f = open( '/home/homestore/log_abort.txt', 'w+')
-    f.write(status)
-    f.close()
-    for x in range(1, 50):
-        status = subprocess.call("./test_volume \
-                --gtest_filter=*recovery_abort* --run_time=300 --install_crash=0", shell=True)
-        f = open( '/home/homestore/log_recovery.txt', 'a+' )
-        f.write(status)
-        f.close()
+    subprocess.call(dirpath + "test_volume --gtest_filter=*abort_random* --run_time=300 --enable_crash_handler=0", shell=True)
+    subprocess.check_call(dirpath + "test_volume --gtest_filter=*recovery_random* --run_time=300 --enable_crash_handler=1", shell=True)
 
 def mapping():
     status = subprocess.check_output("./test_mapping --num_ios=10000000", shell=True)
