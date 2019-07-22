@@ -91,7 +91,6 @@ Volume::Volume(vol_mem_sb* sb) : m_sb(sb), m_metrics(sb->ondisk_sb->vol_name), m
     m_data_blkstore = HomeBlks::instance()->get_data_blkstore();
     m_read_blk_tracker = std::make_unique< Blk_Read_Tracker >(
         sb->ondisk_sb->vol_name, std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
-    recovery_start();
 }
 
 /* it should be called during recovery */

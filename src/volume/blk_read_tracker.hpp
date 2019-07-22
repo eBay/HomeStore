@@ -82,9 +82,8 @@ struct BlkEvictionRecord : public homeds::HashNode, sisl::ObjLifeCounter< BlkEvi
 class BlkReadTrackerMetrics : public sisl::MetricsGroupWrapper {
 public:
     explicit BlkReadTrackerMetrics(const char* vol_name) : sisl::MetricsGroupWrapper("BlkReadTracker", vol_name) {
-        REGISTER_HISTOGRAM(pending_blk_read_map_sz, "Size of pending blk read map");
-        REGISTER_COUNTER(concurrent_blk_rw, "Concurrent read writes on blk", sisl::_publish_as::publish_as_gauge);
-        REGISTER_COUNTER(erase_blk_rescheduled, "Erase blk rescheduled due to concurrent rw");
+        REGISTER_COUNTER(blktrack_pending_blk_read_map_sz, "Size of pending blk read map", sisl::_publish_as::publish_as_gauge);
+        REGISTER_COUNTER(blktrack_erase_blk_rescheduled, "Erase blk rescheduled due to concurrent rw");
         register_me_to_farm();
     }
 };
@@ -110,9 +109,8 @@ public:
         // If value already present , insert() will just increase ref count of value by 1.
         bool inserted = m_pending_reads_map.insert(bid, *ber, &outber, hash_code);
         if (inserted) {
-            HISTOGRAM_OBSERVE(m_metrics, pending_blk_read_map_sz, m_pending_reads_map.get_size());
+            COUNTER_INCREMENT(m_metrics, blktrack_pending_blk_read_map_sz, 1);
         } else { // record exists already, some other read happened
-            COUNTER_INCREMENT(m_metrics, concurrent_blk_rw, 1);
             homeds::ObjectAllocator< BlkEvictionRecord >::deallocate(ber);
         }
         BLKTRACKER_LOG(TRACE, blk_read_tracker, , "Marked read pending Bid:{},{}", bid, inserted);
@@ -153,9 +151,7 @@ public:
             },
             true /* dec additional ref corresponding to insert by pending_read_blk_cb*/);
         if (is_removed) {
-            HISTOGRAM_OBSERVE(m_metrics, pending_blk_read_map_sz, m_pending_reads_map.get_size());
-        } else {
-            COUNTER_DECREMENT(m_metrics, concurrent_blk_rw, 1);
+            COUNTER_DECREMENT(m_metrics, blktrack_pending_blk_read_map_sz, 1);
         }
         BLKTRACKER_LOG(TRACE, blk_read_tracker, , "UnMarked Read pending Bid:{},status:{}", fbe.m_blkId, is_removed);
     }
@@ -184,10 +180,9 @@ public:
                                                      },
                                                      true /* dec additional ref corresponding to get above*/);
             if (is_removed) {
-                HISTOGRAM_OBSERVE(m_metrics, pending_blk_read_map_sz, m_pending_reads_map.get_size());
+                COUNTER_DECREMENT(m_metrics, blktrack_pending_blk_read_map_sz, 1);
             } else {
-                COUNTER_INCREMENT(m_metrics, erase_blk_rescheduled, 1);
-                COUNTER_DECREMENT(m_metrics, concurrent_blk_rw, 1);
+                COUNTER_INCREMENT(m_metrics, blktrack_erase_blk_rescheduled, 1);
             }
             BLKTRACKER_LOG(TRACE, blk_read_tracker, , "Marked erase write Bid:{},offset:{},nblks:{},status:{}", bid,
                            fbe.m_blk_offset, fbe.m_nblks_to_free, is_removed);

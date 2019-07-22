@@ -173,11 +173,6 @@ public:
                            HistogramBucketsType(ExponentialOfTwoBuckets));
         REGISTER_HISTOGRAM(volume_read_size_distribution, "Distribution of volume read sizes",
                            HistogramBucketsType(LinearUpto64Buckets));
-
-        REGISTER_HISTOGRAM(volume_pending_blk_read_map_sz, "Size of pending blk read map");
-        REGISTER_COUNTER(volume_concurrent_blk_rw, "Concurrent read writes on blk",
-                         sisl::_publish_as::publish_as_gauge);
-        REGISTER_COUNTER(volume_erase_blk_rescheduled, "Erase blk rescheduled due to concurrent rw");
         register_me_to_farm();
     }
 };
