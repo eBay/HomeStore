@@ -60,6 +60,7 @@ HomeBlks::HomeBlks(const init_params& cfg) :
     json["open_flag"]               = HomeStoreConfig::open_flag;
     json["cache_size"]              = m_cfg.cache_size;
     json["system_uuid"]             = boost::lexical_cast<std::string>(m_cfg.system_uuid);
+    json["is_file"]                 = m_cfg.is_file;
     for (auto& device : m_cfg.devices) {
         json["devices"].emplace_back(device.dev_names);
     }

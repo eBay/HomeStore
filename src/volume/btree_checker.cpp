@@ -85,10 +85,10 @@ void start_homestore() {
         std::cout << device << " | ";
         params.devices.emplace_back(dev_info{device});
     }
-    params.is_file = true;
+    params.is_file = config["is_file"];
     std::cout << "\nsystem uuid=" << config["system_uuid"] << std::endl;
     params.system_uuid = gen(std::string(config["system_uuid"]));
-    params.iomgr = nullptr;
+    params.iomgr = std::make_shared<iomgr::ioMgr>(2, 1);
     params.init_done_cb = init_done_cb;
     params.vol_mounted_cb = vol_mounted_cb;
     params.vol_state_change_cb = vol_state_change_cb;
