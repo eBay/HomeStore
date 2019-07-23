@@ -46,8 +46,11 @@ def vol_delete():
     return '[  PASSED  ] 1 test' in status
 
 def recovery():
-    subprocess.call(dirpath + "test_volume --gtest_filter=*abort_random* --run_time=300 --enable_crash_handler=0", shell=True)
-    subprocess.check_call(dirpath + "test_volume --gtest_filter=*recovery_random* --run_time=300 --enable_crash_handler=1", shell=True)
+    subprocess.call(dirpath + "test_volume --gtest_filter=*abort_random* --run_time=30 --enable_crash_handler=0", shell=True)
+    subprocess.check_call(dirpath + "test_volume --gtest_filter=*recovery_random* --run_time=30 --enable_crash_handler=1 --verify_hdr=0 --verify_data=0", shell=True)
+
+def recovery_abort():
+    subprocess.check_call(dirpath + "test_volume --gtest_filter=*recovery_abort* --run_time=600 --enable_crash_handler=0", shell=True)
 
 def mapping():
     status = subprocess.check_output("./test_mapping --num_ios=10000000", shell=True)
@@ -64,22 +67,47 @@ def load():
     f.close()
     return '[  PASSED  ] 1 test' in status
 
-def sequence():
+def nightly():
+    # 1. normal IO test
     slackpost("Regression Test Starting")
+    print("normal test started")
     if normal() == False:
-        slackpost("Normal Test Failed")
+        print("normal test failed")
         sys.exit(0)
-    slackpost("Normal Test Passed")
+    print("normal test completed")
     sleep(5)
+
+    # 2. load gen test
+    print("load test started")
     if load() == False:
-        slackpost("Load Test Failed")
+        print("load test failed")
         sys.exit(0)
-    slackpost("Load Test Passed")
+    print("load test completed")
     sleep(5)
-    if mapping() == False:
-        slackpost("Mapping Test Failed")
-        sys.exit(0)
-    slackpost("Mapping Test Passed")
+
+    # 3. recovery test
+    print("recovery test started")
+    subprocess.call(dirpath + "test_volume --gtest_filter=*abort_random* --run_time=300 --enable_crash_handler=0", shell=True)
+    i = 1
+    while i < 30:
+        if recovery_abort() == False:
+            print("recovery test failed")
+            sys.exit(0)
+        i += 1
+    subprocess.call(dirpath + "test_volume --gtest_filter=*recovery_random* --run_time=300 --enable_crash_handler=0", shell=True)
+    print("recovery test completed")
+    sleep(5)
+
+    # 4. create del vol
+    print("create del vol test started")
+    if subprocess.check_call(dirpath + "test_volume --gtest_filter=*normal_vol_create_del_test* --max_vols=10000", shell=True) == False:
+         print("create del vol test failed")
+         sys.exit(0)
+    print("create del vol test passed")
+    sleep(5)
+    
+    print("nightly test passed")
+    slackpost("nightly Test Passed")
 
 if test_suits == "normal":
     normal()
@@ -93,8 +121,8 @@ if test_suits == "recovery":
 if test_suits == "mapping":
     mapping()
 
-if test_suits == "sequence":
-    sequence()
+if test_suits == "nightly":
+    nightly()
 
 if test_suits == "load":
     load()
