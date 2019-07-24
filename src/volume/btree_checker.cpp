@@ -31,6 +31,17 @@ SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 std::string vol_uuid;
 boost::uuids::string_generator gen;
+std::condition_variable m_cv;
+std::mutex m_mutex;
+
+void notify_cmpl() {
+    m_cv.notify_all();
+}
+
+void wait_cmpl() {
+    std::unique_lock<std::mutex> lk(m_mutex);
+    m_cv.wait(lk);
+}
 
 nlohmann::json get_config() {
     std::ifstream in("/tmp/hs_config.json");
@@ -49,6 +60,7 @@ void init_done_cb(  std::error_condition err,
     auto uuid = gen(std::string(vol_uuid));
     auto vol = VolInterface::get_instance()->lookup_volume(uuid);
     VolInterface::get_instance()->print_tree(vol);
+    notify_cmpl();
 }
 
 bool vol_found_cb (boost::uuids::uuid uuid) {
@@ -110,6 +122,7 @@ int main(int argc, char *argv[]) {
     SDS_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
     vol_uuid = SDS_OPTIONS["vol_uuid"].as<std::string>();
     start_homestore();
+    wait_cmpl();
     return 0;
 }
 
