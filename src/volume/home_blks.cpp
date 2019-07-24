@@ -150,6 +150,12 @@ VolumePtr HomeBlks::create_volume(const vol_params& params) {
     if (!m_rdy || is_shutdown()) {
         return nullptr;
     }
+
+    if (params.page_size != HomeStoreConfig::min_page_size) {
+        LOGERROR("{} page size is not supported", params.page_size);
+        return nullptr;
+    }
+
     if (params.size >= m_size_avail) {
         LOGINFO("there is a possibility of running out of space as total size of the volumes"
                 "created are more then maximum capacity");
@@ -401,6 +407,13 @@ HomeBlks::get_uuid(VolumePtr vol) {
     return vol->get_uuid();
 }
 
+#ifndef NDEBUG
+void
+HomeBlks::verify_pending_blks(const VolumePtr& vol) {
+    return vol->verify_pending_blks();
+}
+
+#endif
 void HomeBlks::config_super_block_write() {
     homeds::MemVector mvec;
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
@@ -585,6 +598,7 @@ void HomeBlks::scan_volumes() {
                 VolumePtr new_vol;
                 try {
                     new_vol = Volume::make_volume(sb);
+                    new_vol->recovery_start();
                 } catch (const std::exception& e) {
                     m_scan_cnt--;
                     throw e;
