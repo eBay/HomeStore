@@ -90,7 +90,7 @@ def nightly():
     print("recovery test started")
     subprocess.call(dirpath + "test_volume --gtest_filter=*abort_random* --run_time=300 --enable_crash_handler=0", shell=True)
     i = 1
-    while i < 30:
+    while i < 10:
         recovery_abort()
         s = "recovery test iteration" + repr(i) + "passed" 
         print(s)
