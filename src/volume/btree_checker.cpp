@@ -101,10 +101,13 @@ void start_homestore() {
     std::cout << "\nsystem uuid=" << config["system_uuid"] << std::endl;
     params.system_uuid = gen(std::string(config["system_uuid"]));
     params.iomgr = std::make_shared<iomgr::ioMgr>(2, 1);
-    params.init_done_cb = init_done_cb;
-    params.vol_mounted_cb = vol_mounted_cb;
-    params.vol_state_change_cb = vol_state_change_cb;
-    params.vol_found_cb = vol_found_cb;
+    params.init_done_cb = std::bind(init_done_cb,
+            std::placeholders::_1, std::placeholders::_2);
+    params.vol_mounted_cb = std::bind(vol_mounted_cb,
+            std::placeholders::_1, std::placeholders::_2);
+    params.vol_state_change_cb = std::bind(vol_state_change_cb,
+            std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
+    params.vol_found_cb = std::bind(vol_found_cb, std::placeholders::_1);
     VolInterface::init(params);
 }
 
