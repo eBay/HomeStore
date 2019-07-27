@@ -27,6 +27,7 @@ struct Free_Blk_Entry {
     uint8_t m_blk_offset : NBLKS_BITS;
     uint8_t m_nblks_to_free : NBLKS_BITS;
 
+    Free_Blk_Entry() {};
     Free_Blk_Entry(const BlkId& m_blkId, uint8_t m_blk_offset, uint8_t m_nblks_to_free) :
             m_blkId(m_blkId),
             m_blk_offset(m_blk_offset),
@@ -39,7 +40,7 @@ struct BlkEvictionRecord : public homeds::HashNode, sisl::ObjLifeCounter< BlkEvi
     std::atomic< bool >              m_can_free;  // mark free for erasure
     std::vector< Free_Blk_Entry >    m_free_list; // list of pair(offset,size) to be freed when no ref left
 
-    BlkEvictionRecord(BlkId& key) : m_key(key), m_refcount(0), m_can_free(false) {}
+    BlkEvictionRecord(BlkId& key) : m_key(key), m_refcount(0), m_can_free(false), m_free_list(0) {}
 
     friend void intrusive_ptr_add_ref(BlkEvictionRecord* ber) { ber->m_refcount.increment(); }
 

@@ -128,7 +128,7 @@ protected:
     friend class homeds::ObjectAllocator< volume_req >;
 
     // Volume req should always be created from Volume::create_vol_req()
-    volume_req() : is_read(false), num_mapping_update(0), parent_req(nullptr) {
+    volume_req() : is_read(false), blkIds_to_free(0), num_mapping_update(0), parent_req(nullptr) {
 #ifndef NDEBUG
         done = false;
 #endif
