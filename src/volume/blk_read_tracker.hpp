@@ -27,7 +27,7 @@ struct Free_Blk_Entry {
     uint8_t m_blk_offset : NBLKS_BITS;
     uint8_t m_nblks_to_free : NBLKS_BITS;
 
-    Free_Blk_Entry() {};
+    Free_Blk_Entry(){};
     Free_Blk_Entry(const BlkId& m_blkId, uint8_t m_blk_offset, uint8_t m_nblks_to_free) :
             m_blkId(m_blkId),
             m_blk_offset(m_blk_offset),
@@ -39,8 +39,9 @@ struct BlkEvictionRecord : public homeds::HashNode, sisl::ObjLifeCounter< BlkEvi
     sisl::atomic_counter< uint32_t > m_refcount;  // Refcount
     std::atomic< bool >              m_can_free;  // mark free for erasure
     std::vector< Free_Blk_Entry >    m_free_list; // list of pair(offset,size) to be freed when no ref left
+    std::mutex                       m_mtx;       // This mutex prevents multiple writers to free list
 
-    BlkEvictionRecord(BlkId& key) : m_key(key), m_refcount(0), m_can_free(false), m_free_list(0) {}
+    BlkEvictionRecord(BlkId& key) : m_key(key), m_refcount(0), m_can_free(false), m_free_list(0), m_mtx() {}
 
     friend void intrusive_ptr_add_ref(BlkEvictionRecord* ber) { ber->m_refcount.increment(); }
 
@@ -52,9 +53,14 @@ struct BlkEvictionRecord : public homeds::HashNode, sisl::ObjLifeCounter< BlkEvi
         }
     }
 
+    void add_to_free_list(Free_Blk_Entry& fbe) {
+        m_mtx.lock();
+        m_free_list.push_back(fbe);
+        m_mtx.unlock();
+    }
+
     BlkId&                         get_key() { return m_key; }
     std::vector< Free_Blk_Entry >* get_free_list() { return &m_free_list; }
-    void                           add_to_free_list(Free_Blk_Entry& fbe) { m_free_list.push_back(fbe); }
     void                           free_yourself() { homeds::ObjectAllocator< BlkEvictionRecord >::deallocate(this); }
     void                           set_free_state() { m_can_free = true; }
     void                           reset_free_state() { m_can_free = false; }
@@ -83,7 +89,8 @@ struct BlkEvictionRecord : public homeds::HashNode, sisl::ObjLifeCounter< BlkEvi
 class BlkReadTrackerMetrics : public sisl::MetricsGroupWrapper {
 public:
     explicit BlkReadTrackerMetrics(const char* vol_name) : sisl::MetricsGroupWrapper("BlkReadTracker", vol_name) {
-        REGISTER_COUNTER(blktrack_pending_blk_read_map_sz, "Size of pending blk read map", sisl::_publish_as::publish_as_gauge);
+        REGISTER_COUNTER(blktrack_pending_blk_read_map_sz, "Size of pending blk read map",
+                         sisl::_publish_as::publish_as_gauge);
         REGISTER_COUNTER(blktrack_erase_blk_rescheduled, "Erase blk rescheduled due to concurrent rw");
         register_me_to_farm();
     }
@@ -166,9 +173,9 @@ public:
         bool               found = m_pending_reads_map.get(bid, &outber, hash_code); // get increases ref if found
         if (!found) {                                                                // no read pending
             m_remove_cb(fbe);
-        } else if (found) { // there is read pending
-            outber->add_to_free_list(fbe);
-            outber->set_free_state(); // mark for removal
+        } else if (found) {                // there is read pending
+            outber->add_to_free_list(fbe); // thread safe addition
+            outber->set_free_state();      // mark for removal
 
             // check_and_remove - If ref count becomes 1, it will be removed as only hashmap is holding the ref.
             bool is_removed =
