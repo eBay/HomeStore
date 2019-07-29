@@ -21,7 +21,7 @@ WORKDIR /output
 ENV ASAN_OPTIONS=detect_leaks=0
 
 RUN set -eux; \
-    if [ "disabled" = "${BUILD_TYPE}" ]; then \
+    if [ "nosanitize" = "${BUILD_TYPE}" ]; then \
       eval $(grep 'name =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,name,PKG_NAME,'); \
       eval $(grep -m 1 'version =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,version,PKG_VERSION,'); \
       conan install --build missing -o ${PKG_NAME}:coverage=True -pr ${BUILD_TYPE} ${SOURCE_PATH}; \
