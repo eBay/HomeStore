@@ -373,7 +373,7 @@ public:
     ~DeviceManager(); 
 
     /* Initial routine to call upon bootup or everytime new physical devices to be added dynamically */
-    void add_devices(std::vector< dev_info >& devices, bool is_init);
+    void add_devices(std::vector< dev_info >& devices, bool is_init, bool is_read_only);
     size_t get_total_cap(void);
     #define MAX_ERROR_CNT 1000
     void handle_error(PhysicalDev *pdev);
@@ -425,7 +425,7 @@ public:
     void update_vb_context(uint32_t vdev_id, uint8_t* blob);
 
 private:
-    void load_and_repair_devices(std::vector< dev_info >& devices);
+    void load_and_repair_devices(std::vector< dev_info >& devices, bool is_read_only);
     void init_devices(std::vector< dev_info >& devices);
 
     void read_info_blocks(uint32_t dev_id);

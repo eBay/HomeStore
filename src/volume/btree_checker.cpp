@@ -97,6 +97,10 @@ void start_homestore() {
         std::cout << device << " | ";
         params.devices.emplace_back(dev_info{device});
     }
+    params.is_read_only = bool();
+    if (params.is_read_only) {
+        std::cout << "\nRead only flag set" << std::endl;
+    }
     params.is_file = config["is_file"];
     std::cout << "\nsystem uuid=" << config["system_uuid"] << std::endl;
     params.system_uuid = gen(std::string(config["system_uuid"]));
@@ -111,6 +115,15 @@ void start_homestore() {
     VolInterface::init(params);
 }
 
+void shutdown_callback() {
+    VolInterface::del_instance();
+}
+
+void shutdown() {
+    std::unique_lock<std::mutex> lk(m_mutex);
+    VolInterface::get_instance()->shutdown(std::bind(shutdown_callback));
+}
+
 /************************* CLI options ***************************/
 
 SDS_OPTION_GROUP(check_btree,
@@ -123,9 +136,12 @@ SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
 
 int main(int argc, char *argv[]) {
     SDS_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
+    sds_logging::SetLogger("check_btree");
+    spdlog::set_pattern("[%D %T.%f] [%^%L%$] [%t] %v");
     vol_uuid = SDS_OPTIONS["vol_uuid"].as<std::string>();
     start_homestore();
     wait_cmpl();
+    shutdown();
     return 0;
 }
 

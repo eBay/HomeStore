@@ -504,10 +504,12 @@ void HomeBlks::create_blkstores() {
     create_sb_blkstore(nullptr);
 }
 
-void HomeBlks::attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback cb) { vol->attach_completion_cb(cb); }
+void HomeBlks::attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback cb) {
+    vol->attach_completion_cb(cb);
+}
 
-void HomeBlks::add_devices() { 
-    m_dev_mgr->add_devices(m_cfg.devices, m_cfg.disk_init); 
+void HomeBlks::add_devices() {
+    m_dev_mgr->add_devices(m_cfg.devices, m_cfg.disk_init, m_cfg.is_read_only ? true : false);
     assert(m_dev_mgr->get_total_cap() / m_cfg.devices.size() > MIN_DISK_CAP_SUPPORTED);
     assert(m_dev_mgr->get_total_cap() < MAX_SUPPORTED_CAP);
 }
@@ -763,7 +765,9 @@ void HomeBlks::create_sb_blkstore(vdev_info_block* vb) {
         assert(m_cfg_sb->blkid.to_integer() == blob->blkid.to_integer());
         m_cfg_sb->boot_cnt++;
         /* update the config super block */
-        config_super_block_write();
+        if (!m_cfg.is_read_only) {
+            config_super_block_write();
+        }
     }
 }
 

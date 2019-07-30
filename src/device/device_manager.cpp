@@ -126,8 +126,8 @@ void DeviceManager::update_vb_context(uint32_t vdev_id, uint8_t *blob) {
     write_info_blocks();
 }
 
-void DeviceManager::load_and_repair_devices(std::vector< dev_info > &devices) {
-    
+void DeviceManager::load_and_repair_devices(std::vector< dev_info > &devices,
+                                                            bool is_read_only) {
     std::vector< std::unique_ptr< PhysicalDev > > uninit_devs;
     uninit_devs.reserve(devices.size());
     uint64_t device_id = INVALID_DEV_ID;
@@ -156,7 +156,7 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info > &devices) {
         if (m_gen_cnt.load() < pdev->sb_gen_cnt()) {
             m_gen_cnt = pdev->sb_gen_cnt();
             device_id = pdev->get_dev_id();
-            rewrite = true;
+            rewrite = !is_read_only;
         }
 
         DEV_LOG_ASSERT(m_pdevs[pdev->get_dev_id()].get() == nullptr, );
@@ -317,7 +317,8 @@ void DeviceManager::inited() {
 }
 
 /* add constant */
-void DeviceManager::add_devices(std::vector< dev_info > &devices, bool is_init) {
+void DeviceManager::add_devices(std::vector< dev_info > &devices,
+                                        bool is_init, bool is_read_only) {
     uint64_t max_dev_offset = 0;
 
     if (is_init) {
@@ -325,7 +326,7 @@ void DeviceManager::add_devices(std::vector< dev_info > &devices, bool is_init) 
         return;
     }
 
-    load_and_repair_devices(devices);
+    load_and_repair_devices(devices, is_read_only);
     return;
 }
 

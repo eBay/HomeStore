@@ -191,7 +191,8 @@ public:
     io_flag                 flag = io_flag::DIRECT_IO;
 
     /* optional parameters */
-    boost::optional< disk_attributes > disk_attr; 
+    boost::optional< disk_attributes > disk_attr;
+    boost::optional< bool > is_read_only;
 
     /* completions callback */
     init_done_callback        init_done_cb;
