@@ -258,8 +258,8 @@ public:
     virtual cap_attrs get_vol_capacity(const VolumePtr& vol) = 0;
     virtual bool vol_state_change(const VolumePtr& vol, vol_state new_state) = 0;
 
-#ifndef NDEBUG
     virtual void print_tree(const VolumePtr& vol) = 0;
+#ifndef NDEBUG
     virtual void verify_pending_blks(const VolumePtr& vol) = 0;
 #endif
 };
