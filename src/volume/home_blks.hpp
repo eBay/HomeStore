@@ -180,8 +180,8 @@ public:
     uint64_t get_boot_cnt();
     void init_done(std::error_condition err, const out_params& params);
 
-#ifndef NDEBUG
     void print_tree(const VolumePtr& vol);
+#ifndef NDEBUG
     void verify_pending_blks(const VolumePtr& vol);
 #endif
 
