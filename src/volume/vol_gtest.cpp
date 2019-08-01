@@ -305,7 +305,12 @@ public:
             startTime = Clock::now();
         } else {
             assert(vol_cnt == max_vols);
-            verify_done = false;
+            if (verify_hdr || verify_data) {
+                verify_done = false;
+            } else {
+                verify_done = true;
+                startTime = Clock::now();
+            }
             LOGINFO("init completed, verify started");
         }
         max_io_size = params.max_io_size;
@@ -901,7 +906,6 @@ TEST_F(IOTest, recovery_abort_random_io_test) {
 TEST_F(IOTest, normal_vol_create_del_test) {
     this->init = true;
     this->vol_create_del_test = true;
-    max_vols = 1000;
     this->start_homestore();
     this->wait_cmpl();
     this->shutdown();

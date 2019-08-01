@@ -5,7 +5,7 @@ from conans import ConanFile, CMake, tools
 class HomestoreConan(ConanFile):
     name = "homestore"
 
-    version = "0.11.15"
+    version = "0.11.17"
 
 
     license = "Proprietary"
@@ -29,17 +29,17 @@ class HomestoreConan(ConanFile):
                 "boost_uuid/1.69.0@bincrafters/stable",
                 "double-conversion/3.1.4@bincrafters/stable",
                 "farmhash/1.0.0@oss/stable",
-                "folly/2019.06.17.00@bincrafters/testing",
+                "folly/2019.07.22.00@bincrafters/testing",
                 "gtest/1.8.1@bincrafters/stable",
                 "iomgr/2.2.6@sds/testing",
                 "libevent/2.1.10@bincrafters/stable",
                 "lzma/5.2.4@bincrafters/stable",
-                "sisl/0.3.2@sisl/testing",
+                "sisl/0.3.3@sisl/testing",
                 "OpenSSL/1.0.2s@conan/stable",
                 "sds_logging/5.3.0@sds/testing",
                 "sds_options/0.1.5@sds/testing",
                 "isa-l/2.21.0@oss/stable",
-                "flip/0.1.0@sds/testing",
+                "flip/0.1.1@sds/testing",
                 "zstd/1.4.0@bincrafters/stable",
                 )
 

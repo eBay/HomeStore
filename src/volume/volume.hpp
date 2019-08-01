@@ -183,7 +183,7 @@ protected:
     friend class homeds::ObjectAllocator< volume_req >;
 
     // Volume req should always be created from Volume::create_vol_req()
-    volume_req() : is_read(false), num_mapping_update(0), parent_req(nullptr) {
+    volume_req() : is_read(false), blkIds_to_free(0), num_mapping_update(0), parent_req(nullptr) {
 #ifndef NDEBUG
         done = false;
 #endif
@@ -228,11 +228,6 @@ public:
                            HistogramBucketsType(ExponentialOfTwoBuckets));
         REGISTER_HISTOGRAM(volume_read_size_distribution, "Distribution of volume read sizes",
                            HistogramBucketsType(LinearUpto64Buckets));
-
-        REGISTER_HISTOGRAM(volume_pending_blk_read_map_sz, "Size of pending blk read map");
-        REGISTER_COUNTER(volume_concurrent_blk_rw, "Concurrent read writes on blk",
-                         sisl::_publish_as::publish_as_gauge);
-        REGISTER_COUNTER(volume_erase_blk_rescheduled, "Erase blk rescheduled due to concurrent rw");
         register_me_to_farm();
     }
 };
