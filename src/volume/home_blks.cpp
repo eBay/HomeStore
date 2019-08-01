@@ -407,6 +407,13 @@ HomeBlks::get_uuid(VolumePtr vol) {
     return vol->get_uuid();
 }
 
+#ifndef NDEBUG
+void
+HomeBlks::verify_pending_blks(const VolumePtr& vol) {
+    return vol->verify_pending_blks();
+}
+
+#endif
 void HomeBlks::config_super_block_write() {
     homeds::MemVector mvec;
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);

@@ -39,7 +39,8 @@ Volume::Volume(const vol_params& params) :
     m_state = vol_state::UNINITED;
     m_map = new mapping(params.size, params.page_size, params.vol_name,
                         std::bind(&Volume::process_metadata_completions, this, std::placeholders::_1),
-                        std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
+                        std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1),
+                        std::bind(&Volume::pending_read_blk_cb, this, std::placeholders::_1));
 
     m_sb = new vol_mem_sb();
     auto ret = posix_memalign((void**)&(m_sb->ondisk_sb), HomeStoreConfig::align_size, VOL_SB_SIZE);
@@ -59,6 +60,8 @@ Volume::Volume(const vol_params& params) :
 
     m_data_blkstore = HomeBlks::instance()->get_data_blkstore();
     m_state = vol_state::ONLINE;
+    m_read_blk_tracker = std::make_unique< Blk_Read_Tracker >(
+        params.vol_name, std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
 }
 
 Volume::Volume(vol_mem_sb* sb) : m_sb(sb), m_metrics(sb->ondisk_sb->vol_name), m_vol_name(sb->ondisk_sb->vol_name) {
@@ -66,7 +69,8 @@ Volume::Volume(vol_mem_sb* sb) : m_sb(sb), m_metrics(sb->ondisk_sb->vol_name), m
     if (m_sb->ondisk_sb->state == vol_state::FAILED) {
         m_map = new mapping(m_sb->ondisk_sb->size, m_sb->ondisk_sb->page_size, m_sb->ondisk_sb->vol_name,
                             std::bind(&Volume::process_metadata_completions, this, std::placeholders::_1),
-                            std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
+                            std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1),
+                            std::bind(&Volume::pending_read_blk_cb, this, std::placeholders::_1));
         m_sb->ondisk_sb->btree_sb = m_map->get_btree_sb();
         m_sb->ondisk_sb->state = vol_state::DEGRADED;
         HomeBlks::instance()->vol_sb_write(m_sb);
@@ -76,7 +80,8 @@ Volume::Volume(vol_mem_sb* sb) : m_sb(sb), m_metrics(sb->ondisk_sb->vol_name), m
                             std::bind(&Volume::process_metadata_completions, this, std::placeholders::_1),
                             std::bind(&Volume::alloc_blk_callback, this, std::placeholders::_1, std::placeholders::_2,
                                       std::placeholders::_3),
-                            std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
+                            std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1),
+                            std::bind(&Volume::pending_read_blk_cb, this, std::placeholders::_1));
     }
     assert(m_sb->ondisk_sb->state == OFFLINE || m_sb->ondisk_sb->state == DEGRADED || m_sb->ondisk_sb->state == ONLINE);
     seq_Id = 3;
@@ -84,6 +89,8 @@ Volume::Volume(vol_mem_sb* sb) : m_sb(sb), m_metrics(sb->ondisk_sb->vol_name), m
     alloc_single_block_in_mem();
 
     m_data_blkstore = HomeBlks::instance()->get_data_blkstore();
+    m_read_blk_tracker = std::make_unique< Blk_Read_Tracker >(
+        sb->ondisk_sb->vol_name, std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
     recovery_start();
 }
 
@@ -104,6 +111,50 @@ void Volume::process_free_blk_callback(Free_Blk_Entry fbe) {
     m_data_blkstore->free_blk(fbe.m_blkId, HomeBlks::instance()->get_data_pagesz() * fbe.m_blk_offset,
                               HomeBlks::instance()->get_data_pagesz() * fbe.m_nblks_to_free);
     m_used_size.fetch_sub(size, std::memory_order_relaxed);
+}
+
+/* when read happens on mapping btree, under read lock we mark blk so it does not get removed by concurrent writes */
+void Volume::pending_read_blk_cb(BlkId& bid) { m_read_blk_tracker->insert(bid); }
+
+#ifndef NDEBUG
+void Volume::verify_pending_blks() { assert(m_read_blk_tracker->get_size() == 0); }
+#endif
+
+/* convertes kvs to free blk entries*/
+void Volume::get_free_blk_entries(std::vector< std::pair< MappingKey, MappingValue > >& kvs,
+                                  std::vector< Free_Blk_Entry >&                        fbes) {
+    auto it = kvs.begin();
+    while (it != kvs.end()) {
+        std::pair< MappingKey, MappingValue >& kv = *it;
+        if (!kv.second.is_valid()) {
+            ++it;
+            continue;
+        }
+        ValueEntry ve;
+        (kv.second.get_array()).get(0, ve, false);
+        uint8_t blk_offset = 0, nblks = 0;
+        blk_offset = ve.get_blk_offset();
+        nblks = (m_sb->ondisk_sb->size / HomeBlks::instance()->get_data_pagesz()) * ve.get_nlba();
+        fbes.push_back(Free_Blk_Entry(ve.get_blkId(), blk_offset, nblks));
+        ++it;
+    }
+}
+
+/* Removes blkid from free blk entries*/
+bool Volume::remove_free_blk_entry(std::vector< Free_Blk_Entry >& fbes, std::pair< MappingKey, MappingValue >& kv) {
+    ValueEntry ve;
+    (kv.second.get_array()).get(0, ve, false);
+    auto bid = ve.get_blkId();
+    auto it = fbes.begin();
+    while (it != fbes.end()) {
+        Free_Blk_Entry& fbe = *it;
+        if (BlkId::compare(fbe.m_blkId, bid) == 0 && ve.get_blk_offset() == fbe.m_blk_offset) {
+            fbes.erase(it);
+            return true;
+        }
+        ++it;
+    }
+    return false;
 }
 
 boost::uuids::uuid Volume::get_uuid() { return (get_sb()->ondisk_sb->uuid); }
@@ -189,25 +240,13 @@ void Volume::process_metadata_completions(const volume_req_ptr& vreq) {
     VOL_LOG(TRACE, volume, parent_req, "metadata_complete: status={}", vreq->err.message());
     HISTOGRAM_OBSERVE(m_metrics, volume_map_write_latency, get_elapsed_time_us(vreq->op_start_time));
 
-    if (vreq->err == no_error) {
-        for (auto& ptr : vreq->blkIds_to_free) {
-            VOL_LOG(DEBUG, volume, vreq->parent_req, "Freeing Blk: {} {} {}", ptr.m_blkId.to_string(), ptr.blk_offset(),
-                    ptr.blks_to_free());
-            uint64_t free_size = HomeBlks::instance()->get_data_pagesz() * ptr.m_nblks_to_free;
-            m_data_blkstore->free_blk(ptr.m_blkId, HomeBlks::instance()->get_data_pagesz() * ptr.m_blk_offset,
-                                      free_size);
-            m_used_size.fetch_sub(free_size, std::memory_order_relaxed);
-        }
-    }
-
-    check_and_complete_req(parent_req, vreq->err, true /* call_completion_cb */);
-#ifndef NDEBUG
-    {
-        std::unique_lock< std::mutex > mtx(m_req_mtx);
-        auto                           it = m_req_map.find(vreq->reqId);
-        assert(it != m_req_map.end());
-        m_req_map.erase(it);
-    }
+    check_and_complete_req(parent_req, vreq->err, true /* call_completion_cb */, &(vreq->blkIds_to_free));
+#ifndef NDEBUG {
+    std::unique_lock< std::mutex > mtx(m_req_mtx);
+    auto                           it = m_req_map.find(vreq->reqId);
+    assert(it != m_req_map.end());
+    m_req_map.erase(it);
+}
 #endif
 }
 
@@ -234,6 +273,12 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
 
     VOL_LOG(TRACE, volume, parent_req, "data op complete: status={}", vreq->err.message());
 
+    std::vector< Free_Blk_Entry > fbes;
+    if (vreq->is_read) {
+        fbes.push_back(Free_Blk_Entry(vreq->bid, vreq->read_buf_offset, vreq->read_size));
+        // for write flow, we havent marked anything till meta completion, so nothing to do
+    }
+
     // Shortcut to error completion
     if (vreq->err) {
         if (!vreq->is_read) {
@@ -249,7 +294,8 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
             m_req_map.erase(it);
         }
 #endif
-        return check_and_complete_req(parent_req, vreq->err, true /* call_completion_cb */);
+        return check_and_complete_req(parent_req, vreq->err, true /* call_completion_cb */,
+                                      &fbes /* empty for write flow*/);
     }
 
     HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, vreq->is_read, volume_data_read_latency, volume_data_write_latency,
@@ -290,7 +336,7 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
                                    vreq->is_blk_from_cache(vreq->read_buf_offset + offset));
         }
         COUNTER_DECREMENT(m_metrics, volume_outstanding_data_read_count, 1);
-        check_and_complete_req(parent_req, no_error, true /* call_completion_cb */);
+        check_and_complete_req(parent_req, no_error, true /* call_completion_cb */, &fbes);
 #ifndef NDEBUG
         {
             std::unique_lock< std::mutex > mtx(m_req_mtx);
@@ -360,7 +406,8 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
             volume_req_ptr vreq = Volume::create_vol_req(this, hb_req);
             vreq->bid = bid[i];
             vreq->lba = lba + lbas_snt;
-            vreq->seqId = GET_IO_SEQ_ID(sid); // TODO - actual seqId/lastCommit seq id should be from vol interface req
+            // TODO - actual seqId/lastCommit seq id should be from vol interface req
+            vreq->seqId = INVALID_SEQ_ID;           // GET_IO_SEQ_ID(sid);
             vreq->lastCommited_seqId = vreq->seqId; // keeping only latest version always
             vreq->op_start_time = data_io_start_time;
             vreq->reqId = ++m_req_id;
@@ -413,10 +460,12 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
  * 3) call_completion_cb: Should we call the inbuilt completion as part of the complete_io
  */
 void Volume::check_and_complete_req(const vol_interface_req_ptr& hb_req, const std::error_condition& err,
-                                    bool call_completion) {
+                                    bool call_completion, std::vector< Free_Blk_Entry >* fbes) {
     // If there is error and request is not completed yet, we need to complete it now.
     VOL_LOG(TRACE, volume, hb_req, "complete_io: status={}, call_completion={}, outstanding_io_cnt={}", err.message(),
             call_completion, hb_req->outstanding_io_cnt.get());
+
+    m_read_blk_tracker->safe_remove_blks(hb_req->is_read, fbes, err);
 
     if (err) {
         // NOTE: We do not decrement the outstanding_io_cnt here, so that if there is any partial success,
@@ -479,6 +528,8 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
         return std::make_error_condition(std::errc::no_such_device);
     }
 
+    std::vector< Free_Blk_Entry > fbes; // used to clean up in case of error(for async) and in case of sync call
+
     try {
         assert(m_sb->ondisk_sb->state == vol_state::ONLINE);
         hb_req->init();
@@ -494,7 +545,7 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
         vreq->request_id = hb_req->request_id;
         vreq->lba = lba;
         vreq->nlbas = nlbas;
-        vreq->seqId = GET_IO_SEQ_ID(sid);
+        vreq->seqId = INVALID_SEQ_ID;           // GET_IO_SEQ_ID(sid);
         vreq->lastCommited_seqId = vreq->seqId; // read only latest value
 
         std::vector< std::pair< MappingKey, MappingValue > > kvs;
@@ -509,11 +560,14 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
         COUNTER_INCREMENT(m_metrics, volume_outstanding_metadata_read_count, 1);
         auto err = m_map->get(vreq, kvs);
         COUNTER_DECREMENT(m_metrics, volume_outstanding_metadata_read_count, 1);
+
+        get_free_blk_entries(kvs, fbes);
+
         if (err) {
             if (err != homestore_error::lba_not_exist) {
                 COUNTER_INCREMENT(m_metrics, volume_read_error_count, 1);
             }
-            check_and_complete_req(hb_req, err, false /* call_completion_cb */);
+            check_and_complete_req(hb_req, err, false /* call_completion_cb */, &fbes);
             return err;
         }
         HISTOGRAM_OBSERVE(m_metrics, volume_map_read_latency, get_elapsed_time_us(hb_req->io_start_time));
@@ -550,7 +604,8 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
                 auto sz = get_page_size() * kv.first.get_n_lba();
                 auto offset = HomeBlks::instance()->get_data_pagesz() * ve.get_blk_offset();
                 child_vreq->read_buf_offset = offset;
-
+                child_vreq->bid = ve.get_blkId();
+                child_vreq->read_size = sz;
                 COUNTER_INCREMENT(m_metrics, volume_outstanding_data_read_count, 1);
 #ifndef NDEBUG
                 {
@@ -577,6 +632,8 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
                         VOL_RELEASE_ASSERT_CMP(child_vreq->checksum[i], ==, carr[i], child_vreq->parent_req,
                                                "Checksum mismatch");
                     }
+                } else { // for async call, clean up is done in process completion
+                    remove_free_blk_entry(fbes, kv);
                 }
             }
         }
@@ -584,10 +641,17 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
         HISTOGRAM_OBSERVE(m_metrics, volume_read_size_distribution, rd_size);
         COUNTER_INCREMENT(m_metrics, volume_read_size_total, rd_size);
 
-        check_and_complete_req(hb_req, no_error, !sync /* call_completion_cb */); // Atleast 1 metadata io is completed.
+#ifndef NDEBUG
+        if (sync)
+            assert(fbes.size() == kvs.size());
+        else
+            assert(fbes.size() == 0);
+#endif
+        // Atleast 1 metadata io is completed.
+        check_and_complete_req(hb_req, no_error, !sync /* call_completion_cb */, &fbes);
     } catch (const std::exception& e) {
         VOL_LOG_ASSERT(0, hb_req, "Exception: {}", e.what())
-        check_and_complete_req(hb_req, std::make_error_condition(std::errc::device_or_resource_busy), false);
+        check_and_complete_req(hb_req, std::make_error_condition(std::errc::device_or_resource_busy), false, &fbes);
         return hb_req->err;
     }
     return no_error;

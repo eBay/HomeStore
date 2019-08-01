@@ -34,9 +34,7 @@ struct LbaId {
 
     LbaId(uint64_t lba_start, uint64_t n_lba) : m_lba_start(lba_start), m_n_lba(n_lba) { assert(n_lba < MAX_NUM_LBA); }
 
-    uint64_t end() {
-        return(m_lba_start + m_n_lba - 1);
-    }
+    uint64_t end() { return (m_lba_start + m_n_lba - 1); }
 
     bool is_invalid() { return m_lba_start == 0 && m_n_lba == 0; }
 
@@ -63,7 +61,6 @@ public:
 
     LbaId get_lbaId() const { return *m_lbaId_ptr; }
 
-
     uint64_t start() const { return m_lbaId_ptr->m_lba_start; }
 
     uint64_t end() const { return start() + get_n_lba() - 1; }
@@ -71,25 +68,31 @@ public:
     uint16_t get_n_lba() const { return m_lbaId_ptr->m_n_lba; }
 
     /* used by btree to compare the end key of input with end key
-     * It return the result of 
-     *                 *(this) - *(input) 
+     * It return the result of
+     *                 *(this) - *(input)
      */
     virtual int compare_end(const BtreeKey* input) const override {
         MappingKey* o = (MappingKey*)input;
-        if (end() > o->end()) return 1; // go left
-        else if (end() < o->end()) return -1; // go right
-        else return 0; // overlap
+        if (end() > o->end())
+            return 1; // go left
+        else if (end() < o->end())
+            return -1; // go right
+        else
+            return 0; // overlap
     }
-    
+
     /* used by btree to compare the start key of input with the end key
-     * It return the result of 
-     *                 *(this) - *(input) 
+     * It return the result of
+     *                 *(this) - *(input)
      */
     virtual int compare_start(const BtreeKey* input) const override {
         MappingKey* o = (MappingKey*)input;
-        if (end() > o->start()) return 1; // go left
-        else if (end() < o->start()) return -1; // go right
-        else return 0; // overlap
+        if (end() > o->start())
+            return 1; // go left
+        else if (end() < o->start())
+            return -1; // go right
+        else
+            return 0; // overlap
     }
 
     virtual homeds::blob get_blob() const override { return {(uint8_t*)m_lbaId_ptr, get_fixed_size()}; }
@@ -104,13 +107,13 @@ public:
         LbaId* other = (LbaId*)b.bytes;
         set(other->m_lba_start, other->m_n_lba);
     }
-    
+
     virtual void copy_end_key_blob(const homeds::blob& b) override {
         assert(b.size == get_fixed_size());
         LbaId* other = (LbaId*)b.bytes;
         set(other->end(), 1);
     }
-    
+
     void set(uint64_t lba_start, uint8_t n_lba) {
         m_lbaId.m_lba_start = lba_start;
         m_lbaId.m_n_lba = n_lba;
@@ -220,8 +223,8 @@ public:
 
     uint8_t get_nlba() const { return (uint8_t)m_ptr->m_nlba; }
 
-    void set_nlba(uint8_t nlba){ m_ptr->m_nlba=nlba;}
-    
+    void set_nlba(uint8_t nlba) { m_ptr->m_nlba = nlba; }
+
     uint16_t& get_checksum_at(uint8_t index) const {
         assert(index < get_nlba());
         return m_ptr->m_carr[index];
@@ -353,14 +356,16 @@ class mapping {
     typedef function< void(struct BlkId blkid, size_t offset_size, size_t size) > alloc_blk_callback;
     typedef function< void(boost::intrusive_ptr< volume_req > cookie) >           comp_callback;
     typedef std::function< void(Free_Blk_Entry fbe) >                             free_blk_callback;
+    typedef std::function< void(BlkId& bid) >                                     pending_read_blk_cb;
 
 private:
-    MappingBtreeDeclType*       m_bt;
-    alloc_blk_callback          m_alloc_blk_cb;
-    free_blk_callback           m_free_blk_cb;
-    comp_callback               m_comp_cb;
-    uint32_t                    m_vol_page_size;
-    const MappingValue          EMPTY_MAPPING_VALUE;
+    MappingBtreeDeclType* m_bt;
+    alloc_blk_callback    m_alloc_blk_cb;
+    free_blk_callback     m_free_blk_cb;
+    pending_read_blk_cb   m_pending_read_blk_cb;
+    comp_callback         m_comp_cb;
+    uint32_t              m_vol_page_size;
+    const MappingValue    EMPTY_MAPPING_VALUE;
 
     class GetCBParam : public BRangeQueryCBParam< MappingKey, MappingValue > {
     public:
@@ -409,12 +414,11 @@ public:
         }
     }
 
-    ~mapping() {
-        delete m_bt;
-    }
+    ~mapping() { delete m_bt; }
 
     void destroy() {
-        /* XXX: do we need to handle error condition here ?. In the next boot we will automatically recaim these blocks */
+        /* XXX: do we need to handle error condition here ?. In the next boot we will automatically recaim these blocks
+         */
         m_bt->destroy(std::bind(&mapping::process_free_blk_callback, this, std::placeholders::_1), false);
     }
 
@@ -451,15 +455,16 @@ public:
             array.get((uint32_t)i, ve, true);
             LOGDEBUG("{}: vol_page: {}, data_page: {}, n_lba: {}", __FUNCTION__, m_vol_page_size,
                      HomeBlks::instance()->get_data_pagesz(), ve.get_nlba());
-            uint64_t nlba = (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * ve.get_nlba();
+            uint64_t       nlba = (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * ve.get_nlba();
             Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(), nlba);
             m_free_blk_cb(fbe);
         }
     }
 
     mapping(uint64_t volsize, uint32_t page_size, const std::string& unique_name, comp_callback comp_cb,
-            free_blk_callback free_blk_cb) :
+            free_blk_callback free_blk_cb, pending_read_blk_cb pending_read_cb = nullptr) :
             m_free_blk_cb(free_blk_cb),
+            m_pending_read_blk_cb(pending_read_cb),
             m_comp_cb(comp_cb),
             m_vol_page_size(page_size) {
         homeds::btree::BtreeConfig btree_cfg(unique_name.c_str());
@@ -476,9 +481,11 @@ public:
     }
 
     mapping(uint64_t volsize, uint32_t page_size, const std::string& unique_name, btree_super_block& btree_sb,
-            comp_callback comp_cb, alloc_blk_callback alloc_blk_cb, free_blk_callback free_blk_cb) :
+            comp_callback comp_cb, alloc_blk_callback alloc_blk_cb, free_blk_callback free_blk_cb,
+            pending_read_blk_cb pending_read_cb = nullptr) :
             m_alloc_blk_cb(alloc_blk_cb),
             m_free_blk_cb(free_blk_cb),
+            m_pending_read_blk_cb(pending_read_cb),
             m_comp_cb(comp_cb),
             m_vol_page_size(page_size) {
         homeds::btree::BtreeConfig btree_cfg(unique_name.c_str());
@@ -494,20 +501,20 @@ public:
             std::bind(&mapping::process_completions, this, std::placeholders::_1, std::placeholders::_2));
     }
 
-    uint64_t get_used_size() { return m_bt->get_used_size(); }
+    uint64_t          get_used_size() { return m_bt->get_used_size(); }
     btree_super_block get_btree_sb() { return (m_bt->get_btree_sb()); }
 
     error_condition get(boost::intrusive_ptr< volume_req > req, vector< pair< MappingKey, MappingValue > >& values,
-            bool fill_gaps=true) {
-        uint64_t                                      start_lba = req->lba;
-        uint64_t                                      num_lba = req->nlbas;
-        uint64_t                                      end_lba = start_lba + req->nlbas - 1;
-        MappingKey                                    start_key(start_lba, 1);
-        MappingKey                                    end_key(end_lba, 1);
+                        bool fill_gaps = true) {
+        uint64_t   start_lba = req->lba;
+        uint64_t   num_lba = req->nlbas;
+        uint64_t   end_lba = start_lba + req->nlbas - 1;
+        MappingKey start_key(start_lba, 1);
+        MappingKey end_key(end_lba, 1);
 
-        auto                                          search_range = BtreeSearchRange(start_key, true, end_key, true);
-        GetCBParam                                    param(req);
-        std::vector< pair< MappingKey, MappingValue > >    result_kv;
+        auto                                            search_range = BtreeSearchRange(start_key, true, end_key, true);
+        GetCBParam                                      param(req);
+        std::vector< pair< MappingKey, MappingValue > > result_kv;
 
         BtreeQueryRequest< MappingKey, MappingValue > qreq(
             search_range, BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, num_lba,
@@ -519,7 +526,7 @@ public:
             return btree_read_failed;
         }
 
-        if(fill_gaps) {
+        if (fill_gaps) {
             // fill the gaps
             auto last_lba = start_lba;
             for (auto i = 0u; i < result_kv.size(); i++) {
@@ -538,10 +545,10 @@ public:
 #ifndef NDEBUG
             validate_get_response(start_lba, num_lba, values);
 #endif
-        }else{
-            values.insert(values.begin(),result_kv.begin(),result_kv.end());
+        } else {
+            values.insert(values.begin(), result_kv.begin(), result_kv.end());
         }
-        
+
         return no_error;
     }
 
@@ -623,6 +630,9 @@ private:
                     } else {
                         result_kv.emplace_back(make_pair(MappingKey(*e_key), MappingValue(ve)));
                     }
+                    if (m_pending_read_blk_cb) {
+                        m_pending_read_blk_cb(ve.get_blkId()); // mark this blk as pending read
+                    }
                     break;
                 }
                 // else {
@@ -653,7 +663,7 @@ private:
         uint64_t start_lba = 0, end_lba = 0;
         get_start_end_lba(cb_param, start_lba, end_lba);
         UpdateCBParam* param = (UpdateCBParam*)cb_param;
-        ValueEntry new_ve;
+        ValueEntry     new_ve;
         param->get_new_value().get_array().get(0, new_ve, false);
 #ifndef NDEBUG
         stringstream ss;
@@ -717,7 +727,7 @@ private:
             add_missing_interval(curr_lbarange_st, end_lba, new_ve, curr_lbarange_st - s_in_range->start(), replace_kv);
         }
 
-            // TODO - merge kv which have contigous lba and BlkIds - may be not that useful for performance
+        // TODO - merge kv which have contigous lba and BlkIds - may be not that useful for performance
 #ifndef NDEBUG
         for (auto& pair : replace_kv) {
             Blob_Array< ValueEntry >& array = pair.second.get_array();
@@ -746,7 +756,9 @@ private:
                     } // non overlapping
                     else {
                         ss << ",replace_kv:";
-                        for (auto& ptr : replace_kv) { ss << ptr.first.to_string() << "," << ptr.second.to_string(); }
+                        for (auto& ptr : replace_kv) {
+                            ss << ptr.first.to_string() << "," << ptr.second.to_string();
+                        }
                         LOGERROR("Error::Put_CB:,{} ", ss.str());
                         assert(0);
                     }
@@ -755,8 +767,12 @@ private:
             }
         }
         ss << ",replace_kv:";
-        for (auto& ptr : replace_kv) { ss << ptr.first.to_string() << "," << ptr.second.to_string(); }
-        if (param->is_state_modifiable()) { LOGTRACE("Put_CB:,{} ", ss.str()); }
+        for (auto& ptr : replace_kv) {
+            ss << ptr.first.to_string() << "," << ptr.second.to_string();
+        }
+        if (param->is_state_modifiable()) {
+            LOGTRACE("Put_CB:,{} ", ss.str());
+        }
 #endif
     }
 
@@ -769,7 +785,7 @@ private:
 
         // pick higher start of subrange/inputrange
         MappingKey* s_subrange = (MappingKey*)param->get_sub_range().get_start_key();
-        assert(s_subrange->start() ==  s_subrange->end());
+        assert(s_subrange->start() == s_subrange->end());
 
         if (param->get_sub_range().is_start_inclusive()) {
             start_lba = s_subrange->start();

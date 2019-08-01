@@ -4,6 +4,7 @@ import subprocess
 import os
 import sys
 import getopt
+from time import sleep
 
 opts,args = getopt.getopt(sys.argv[1:], 't', ['test_suits=']) 
 
@@ -59,13 +60,12 @@ def load():
 def sequence():
     if normal() == False:
         sys.exit(0)
-    time.sleep(5)
+    sleep(5)
     if load() == False:
         sys.exit(0)
-    time.sleep(5)
+    sleep(5)
     if mapping() == False:
         sys.exit(0)
-
 
 if test_suits == "normal":
     normal()
