@@ -1,25 +1,16 @@
 //
 // Created by Amit Desai on 07/15/19.
 //
-
 #ifndef HOMESTORE_BLK_READ_TRACKER_STORE_SPEC_HPP
 #define HOMESTORE_BLK_READ_TRACKER_STORE_SPEC_HPP
 
+#include "blkalloc/blk.h"
+#include <utility/obj_life_counter.hpp>
+#include "homeds/hash/intrusive_hashset.hpp"
+#include "homeds/memory/obj_allocator.hpp"
+#include <metrics/metrics.hpp>
+
 namespace homestore {
-
-SDS_LOGGING_DECL(blk_read_tracker)
-#define _BLKMSG_EXPAND(...) __VA_ARGS__
-
-// clang-format off
-#define BLKTRACKER_LOG(level, mod, req, fmt, ...)                                 \
-    LOG##level##MOD(BOOST_PP_IF(BOOST_PP_IS_EMPTY(mod), base, mod),               \
-                    "[blk_read_tracker={}]"                                       \
-                    BOOST_PP_IF(BOOST_PP_IS_EMPTY(req), "{}: ", "")               \
-                    fmt, "",                                                      \
-                    BOOST_PP_EXPAND(_BLKMSG_EXPAND BOOST_PP_IF(BOOST_PP_IS_EMPTY(req), (""), (""))),\
-                    ##__VA_ARGS__)
-
-// clang-format on
 
 #define BLK_READ_MAP_SIZE 128
 struct Free_Blk_Entry {
@@ -32,6 +23,10 @@ struct Free_Blk_Entry {
             m_blkId(m_blkId),
             m_blk_offset(m_blk_offset),
             m_nblks_to_free(m_nblks_to_free) {}
+
+    BlkId   blk_id() const { return m_blkId; }
+    uint8_t blk_offset() const { return m_blk_offset; }
+    uint8_t blks_to_free() const { return m_nblks_to_free; }
 };
 
 struct BlkEvictionRecord : public homeds::HashNode, sisl::ObjLifeCounter< BlkEvictionRecord > {
@@ -101,102 +96,24 @@ class Blk_Read_Tracker {
     BlkReadTrackerMetrics                                m_metrics;
     typedef std::function< void(Free_Blk_Entry) >        blk_remove_cb;
     blk_remove_cb                                        m_remove_cb;
+    std::string                                          m_vol_name;
 
 public:
     Blk_Read_Tracker(const char* vol_name, blk_remove_cb remove_cb) :
             m_pending_reads_map(BLK_READ_MAP_SIZE),
             m_metrics(vol_name),
-            m_remove_cb(remove_cb) {}
+            m_remove_cb(remove_cb),
+            m_vol_name(vol_name) {}
 
-    void insert(BlkId& bid) {
-        homeds::blob       b = BlkId::get_blob(bid);
-        uint64_t           hash_code = util::Hash64((const char*)b.bytes, (size_t)b.size);
-        BlkEvictionRecord* ber = BlkEvictionRecord::make_object(bid);
-        BlkEvictionRecord* outber = nullptr;
-        // insert into pending read map and set ref of value to 2(one for hashmap and one for client)
-        // If value already present , insert() will just increase ref count of value by 1.
-        bool inserted = m_pending_reads_map.insert(bid, *ber, &outber, hash_code);
-        if (inserted) {
-            COUNTER_INCREMENT(m_metrics, blktrack_pending_blk_read_map_sz, 1);
-        } else { // record exists already, some other read happened
-            homeds::ObjectAllocator< BlkEvictionRecord >::deallocate(ber);
-        }
-        BLKTRACKER_LOG(TRACE, blk_read_tracker, , "Marked read pending Bid:{},{}", bid, inserted);
-    }
-
-    void safe_remove_blks(bool is_read, std::vector< Free_Blk_Entry >* fbes, const std::error_condition& err) {
-        if (fbes == nullptr) {
-            return; // nothing to remove
-        }
-        if (is_read) {
-            for (Free_Blk_Entry& fbe : *fbes) {
-                safe_remove_blk_on_read(fbe);
-            }
-        } else {
-            if (err != no_error) {
-                return; // there was error in write, no need to erase any blks
-            }
-            for (Free_Blk_Entry& fbe : *fbes) {
-                safe_remove_blk_on_write(fbe);
-            }
-        }
-    }
+    void insert(BlkId& bid);
 
     /* after read is finished, tis marked for safe removal*/
-    void safe_remove_blk_on_read(Free_Blk_Entry& fbe) {
-        homeds::blob b = BlkId::get_blob(fbe.m_blkId);
-        uint64_t     hash_code = util::Hash64((const char*)b.bytes, (size_t)b.size);
-
-        bool is_removed = m_pending_reads_map.check_and_remove(
-            fbe.m_blkId, hash_code,
-            [this](BlkEvictionRecord* ber) {
-                // no more ref left
-                if (ber->can_free()) {
-                    for (auto& fbe : *ber->get_free_list()) {
-                        m_remove_cb(fbe);
-                    }
-                }
-            },
-            true /* dec additional ref corresponding to insert by pending_read_blk_cb*/);
-        if (is_removed) {
-            COUNTER_DECREMENT(m_metrics, blktrack_pending_blk_read_map_sz, 1);
-        }
-        BLKTRACKER_LOG(TRACE, blk_read_tracker, , "UnMarked Read pending Bid:{},status:{}", fbe.m_blkId, is_removed);
-    }
+    void safe_remove_blk_on_read(Free_Blk_Entry& fbe);
 
     /* after overwriting blk id in write flow, its marked for safe removal if cannot be freed immediatly*/
-    void safe_remove_blk_on_write(Free_Blk_Entry& fbe) {
-        BlkId              bid = fbe.m_blkId;
-        homeds::blob       b = BlkId::get_blob(bid);
-        uint64_t           hash_code = util::Hash64((const char*)b.bytes, (size_t)b.size);
-        BlkEvictionRecord* outber = nullptr;
-        bool               found = m_pending_reads_map.get(bid, &outber, hash_code); // get increases ref if found
-        if (!found) {                                                                // no read pending
-            m_remove_cb(fbe);
-        } else if (found) {                // there is read pending
-            outber->add_to_free_list(fbe); // thread safe addition
-            outber->set_free_state();      // mark for removal
+    void safe_remove_blk_on_write(Free_Blk_Entry& fbe);
 
-            // check_and_remove - If ref count becomes 1, it will be removed as only hashmap is holding the ref.
-            bool is_removed =
-                m_pending_reads_map.check_and_remove(bid, hash_code,
-                                                     [this](BlkEvictionRecord* ber) {
-                                                         // no more ref left
-                                                         for (auto& fbe : *ber->get_free_list()) {
-                                                             m_remove_cb(fbe);
-                                                         }
-                                                     },
-                                                     true /* dec additional ref corresponding to get above*/);
-            if (is_removed) {
-                COUNTER_DECREMENT(m_metrics, blktrack_pending_blk_read_map_sz, 1);
-            } else {
-                COUNTER_INCREMENT(m_metrics, blktrack_erase_blk_rescheduled, 1);
-            }
-            BLKTRACKER_LOG(TRACE, blk_read_tracker, , "Marked erase write Bid:{},offset:{},nblks:{},status:{}", bid,
-                           fbe.m_blk_offset, fbe.m_nblks_to_free, is_removed);
-        }
-    }
-
+    void     safe_remove_blks(bool is_read, std::vector< Free_Blk_Entry >* fbes, const std::error_condition& err);
     uint64_t get_size() { return m_pending_reads_map.get_size(); }
 };
 } // namespace homestore

@@ -16,8 +16,8 @@
 #include <sds_logging/logging.h>
 #include <spdlog/fmt/fmt.h>
 #include "main/homestore_assert.hpp"
-#include "blk_read_tracker.hpp"
 #include "threadpool/thread_pool.h"
+#include "blk_read_tracker.hpp"
 
 using namespace std;
 
@@ -42,80 +42,11 @@ typedef boost::intrusive_ptr< volume_req > volume_req_ptr;
 #define _VOL_REQ_LOG_VERBOSE_MSG(req) req->to_string()
 #define _VOLMSG_EXPAND(...) __VA_ARGS__
 
-#if 0
-#define _DUMMY_EXPAND(...) __VA_ARGS__
-#define _EXPAND(...) BOOST_PP_EXPAND(_DUMMY_EXPAND __VA_ARGS__)
-
-#define VOL_LOG(level, mod, req, fmt, ...)                                                                             \
-    LOG##level##MOD(BOOST_PP_IF(BOOST_PP_IS_EMPTY(mod), base, mod),                                                    \
-                    "[vol={}]"                                                                                         \
-                    BOOST_PP_IF(BOOST_PP_IS_EMPTY(req), "{}: ", _VOL_REQ_LOG_FORMAT)                                   \
-                    fmt, m_vol_name,                                                                                   \
-                    _EXPAND(BOOST_PP_IF(BOOST_PP_IS_EMPTY(req), (""), (_VOL_REQ_LOG_MSG(req))))
-
-#define VOL_LOG(level, mod, req, f, ...)                                                                               \
-    if (IS_##level##_MOD_ON(BOOST_PP_IF(BOOST_PP_IS_EMPTY(mod), base, mod))) {                                         \
-        fmt::memory_buffer _log_buf;                                                                                   \
-        fmt::format_to(_log_buf, "[vol={}]", m_vol_name);                                                              \
-        HS_LOG(_log_buf, level, mod, req, f, ##__VA_ARGS__);                                                           \
-    }
-#endif
-
-#if 0
-#define VOL_LOG(level, mod, req, msg, ...)                                                                             \
-    {                                                                                                                  \
-        BOOST_PP_IF(BOOST_PP_IS_EMPTY(req), volume_req* r = nullptr, const auto& r = req);                             \
-        LOG##level##MOD_FMT(BOOST_PP_IF(BOOST_PP_IS_EMPTY(mod), base, mod),                                            \
-                            ([this, r](fmt::memory_buffer& buf, const char* m, auto&&... args) {                       \
-                                fmt::format_to(buf, "[{}:{}] [vol={}] ", file_name(__FILE__), __LINE__,                \
-                                               this->m_vol_name);                                                      \
-                                if (r)                                                                                 \
-                                    fmt::format_to(buf, "[req_id={}] ", r->request_id);                                \
-                                fmt::format_to(buf, m, args...);                                                       \
-                            }),                                                                                        \
-                            msg, ##__VA_ARGS__);                                                                       \
-    }
-#endif
 #define VOL_LOG(level, mod, req, msg, ...) HS_SUBMOD_LOG(level, mod, req, "vol", this->m_vol_name, msg, ##__VA_ARGS__)
 #define VOL_ASSERT(assert_type, cond, req, ...)                                                                        \
     HS_SUBMOD_ASSERT(assert_type, cond, req, "vol", this->m_vol_name, ##__VA_ARGS__)
 #define VOL_ASSERT_CMP(assert_type, val1, cmp, val2, req, ...)                                                         \
     HS_SUBMOD_ASSERT_CMP(assert_type, val1, cmp, val2, req, "vol", this->m_vol_name, ##__VA_ARGS__)
-
-#if 0
-#define VOL_ASSERT(assert_type, cond, req, ...)                                                                        \
-    assert_type##_ASSERT_FMT(cond,                                                                                     \
-                             [&](fmt::memory_buffer& buf, const char* m, auto&&... args) {                             \
-                                 assert_formatter(buf, m, BOOST_PP_IF(BOOST_PP_IS_EMPTY(req), "", req->to_string()),   \
-                                                  args...);                                                            \
-                             },                                                                                        \
-                             ##__VA_ARGS__)
-
-#define VOL_ASSERT_CMP(assert_type, val1, cmp, val2, req, ...)                                                         \
-    assert_type##_ASSERT_CMP(val1, cmp, val2,                                                                          \
-                             [&](fmt::memory_buffer& buf, const char* m, auto&&... args) {                             \
-                                 cmp_assert_formatter(                                                                 \
-                                     buf, m, BOOST_PP_IF(BOOST_PP_IS_EMPTY(req), "", req->to_string()), args...);      \
-                             },                                                                                        \
-                             ##__VA_ARGS__)
-#endif
-#if 0
-// clang-format off
-#define _VOL_ASSERT_MSG(asserttype, req, ...) \
-        "\n**********************************************************\n"                                               \
-        "[vol={}] " BOOST_PP_IF(BOOST_PP_IS_EMPTY(req), "{}: ", _VOL_REQ_LOG_VERBOSE_FORMAT) "\nMetrics = {}\n" "{}"   \
-        "\n**********************************************************\n",                                              \
-        m_vol_name,                                                                                                    \
-        BOOST_PP_EXPAND(_VOLMSG_EXPAND BOOST_PP_IF(BOOST_PP_IS_EMPTY(req), (""), (_VOL_REQ_LOG_VERBOSE_MSG(req)))),    \
-        asserttype##_METRICS_DUMP_MSG,                                                                                 \
-        sds_logging::format_log_msg(__VA_ARGS__)
-// clang-format on
-
-#define VOL_ASSERT(asserttype, cond, req, fmt, ...)                                                                    \
-    asserttype##_ASSERT(cond, _VOL_ASSERT_MSG(asserttype, req, fmt, ##__VA_ARGS__))
-#define VOL_ASSERT_OP(asserttype, optype, val1, val2, req, ...)                                                        \
-    asserttype##_ASSERT_##optype(val1, val2, _VOL_ASSERT_MSG(asserttype, req, ##__VA_ARGS__))
-#endif
 
 #define VOL_DEBUG_ASSERT(...) VOL_ASSERT(DEBUG, __VA_ARGS__)
 #define VOL_RELEASE_ASSERT(...) VOL_ASSERT(RELEASE, __VA_ARGS__)

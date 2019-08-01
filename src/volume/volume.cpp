@@ -240,12 +240,13 @@ void Volume::process_metadata_completions(const volume_req_ptr& vreq) {
     HISTOGRAM_OBSERVE(m_metrics, volume_map_write_latency, get_elapsed_time_us(vreq->op_start_time));
 
     check_and_complete_req(parent_req, vreq->err, true /* call_completion_cb */, &(vreq->blkIds_to_free));
-#ifndef NDEBUG {
-    std::unique_lock< std::mutex > mtx(m_req_mtx);
-    auto                           it = m_req_map.find(vreq->reqId);
-    assert(it != m_req_map.end());
-    m_req_map.erase(it);
-}
+#ifndef NDEBUG
+    {
+        std::unique_lock< std::mutex > mtx(m_req_mtx);
+        auto                           it = m_req_map.find(vreq->reqId);
+        assert(it != m_req_map.end());
+        m_req_map.erase(it);
+    }
 #endif
 }
 
