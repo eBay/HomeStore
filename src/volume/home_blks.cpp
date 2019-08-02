@@ -304,7 +304,9 @@ void HomeBlks::vol_sb_init(vol_mem_sb* sb) {
     }
 
     m_cfg_sb->num_vols++;
-    config_super_block_write();
+    if (!m_cfg.is_read_only) {
+        config_super_block_write();
+    }
     /* update the last volume super block. If exception happens in between it won't be updated */
     m_last_vol_sb = sb;
 }
@@ -386,7 +388,9 @@ HomeBlks::vol_sb_remove(vol_mem_sb *sb) {
             m_last_vol_sb = nullptr;
         }
         // persist m_cfg_sb 
-        config_super_block_write();
+        if (!m_cfg.is_read_only) {
+            config_super_block_write();
+        }
     }
 
     vol_mem_sb* next_sb = nullptr;
@@ -419,7 +423,9 @@ void HomeBlks::config_super_block_init(BlkId& bid) {
     m_cfg_sb->magic = VOL_SB_MAGIC;
     m_cfg_sb->boot_cnt = 0;
     m_cfg_sb->init_flag(0);
-    config_super_block_write();
+    if (!m_cfg.is_read_only) {
+        config_super_block_write();
+    }
 }
 
 boost::uuids::uuid 
@@ -592,7 +598,9 @@ void HomeBlks::scan_volumes() {
                 } else {
                     m_cfg_sb->vol_list_head = sb->ondisk_sb->next_blkid;
                     m_cfg_sb->num_vols--;
-                    config_super_block_write();
+                    if (!m_cfg.is_read_only) {
+                        config_super_block_write();
+                    }
                 }
             } else {
                 /* create the volume */
@@ -810,7 +818,9 @@ void HomeBlks::init_thread() {
                 // clear the flag and persist to disk, if we received a new shutdown and completed successfully, 
                 // the flag should be set again; 
                 m_cfg_sb->clear_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
-                config_super_block_write();
+                if (!m_cfg.is_read_only) {
+                    config_super_block_write();
+                }
             } else if (!init) {
                 LOGCRITICAL("System experienced sudden panic since last boot!");
             } else {
@@ -1010,7 +1020,9 @@ void HomeBlks::shutdown_process(shutdown_comp_callback shutdown_comp_cb, bool fo
 
         // clear the shutdown bit on disk;
         m_cfg_sb->set_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
-        config_super_block_write();
+        if (!m_cfg.is_read_only) {
+            config_super_block_write();
+        }
         // free the in-memory copy 
         free(m_cfg_sb);
         lg.unlock();

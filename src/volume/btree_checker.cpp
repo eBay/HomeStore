@@ -25,6 +25,9 @@ extern "C" {
 
 using namespace homestore;
 
+#define VOL_PREFIX          "/tmp/vol"
+#define STAGING_VOL_PREFIX  "staging"
+
 THREAD_BUFFER_INIT;
 using log_level = spdlog::level::level_enum;
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
@@ -33,6 +36,8 @@ std::string vol_uuid;
 boost::uuids::string_generator gen;
 std::condition_variable m_cv;
 std::mutex m_mutex;
+
+init_params params;
 
 void notify_cmpl() {
     m_cv.notify_all();
@@ -77,7 +82,6 @@ void vol_state_change_cb(   std::shared_ptr<Volume> vol,
 /* start homestore */
 void start_homestore() {
     auto config = get_config();
-    init_params params;
     params.flag = homestore::io_flag::READ_ONLY;
     std::cout << "Configuration\nio_flag = READ_ONLY\n";
     std::cout << "min page size=" << config["min_page_size"] << std::endl;
@@ -124,6 +128,19 @@ void shutdown() {
     VolInterface::get_instance()->shutdown(std::bind(shutdown_callback));
 }
 
+void remove_files() {
+    for (auto device : params.devices) {
+        remove(device.dev_names.c_str());
+    }
+    int ret = 0;
+    for (uint32_t i = 0; !ret; i++) {
+        std::string name = VOL_PREFIX + std::to_string(i);
+        remove(name.c_str());
+        name = name + STAGING_VOL_PREFIX;
+        ret += remove(name.c_str());
+    }
+}
+
 /************************* CLI options ***************************/
 
 SDS_OPTION_GROUP(check_btree,
@@ -139,9 +156,12 @@ int main(int argc, char *argv[]) {
     sds_logging::SetLogger("check_btree");
     spdlog::set_pattern("[%D %T.%f] [%^%L%$] [%t] %v");
     vol_uuid = SDS_OPTIONS["vol_uuid"].as<std::string>();
+
     start_homestore();
     wait_cmpl();
     shutdown();
+    remove_files();
+
     return 0;
 }
 
