@@ -17,8 +17,8 @@ namespace homeds {
             Clock::time_point startTime;
             Clock::time_point print_startTime;
             
-            BtreeLoadGen(uint8_t n_threads){
-                kvg=std::make_unique<KVGenerator<K,V,Store,Executor>>(n_threads);
+            BtreeLoadGen(uint8_t n_threads, bool verification = true){
+                kvg = std::make_unique<KVGenerator<K,V,Store,Executor>>(n_threads, verification);
             }
             std::atomic<int64_t> C_NC = 0, C_NR = 0, C_NU = 0, C_ND = 0, C_NRU = 0, C_NRQ = 0;//current op issued counter
 
@@ -331,5 +331,6 @@ namespace homeds {
             }
 
         };
+
     }
 }

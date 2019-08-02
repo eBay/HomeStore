@@ -26,10 +26,11 @@ ENUM(generator_op_error, uint32_t, no_error, store_failed, store_timeout, data_v
 template < typename K, typename V, typename Store, typename Exector >
 class KVGenerator {
 public:
-    KVGenerator(uint8_t n_threads) :
+    KVGenerator(uint8_t n_threads, bool verification) :
     m_executor(n_threads /* threads */, 1 /* priorities */, 20000 /* maxQueueSize */){
         srand(time(0));
         m_store = std::make_shared<Store >();
+        m_verify = verification;
     }
     
     void set_max_keys(uint64_t max_keys){
@@ -181,6 +182,9 @@ public:
     }
 
 private:
+    bool _verify() {
+        return m_verify;
+    }
 
     void op_start() {
         m_outstanding.increment(1);
@@ -238,7 +242,7 @@ private:
         
         // If mutating key is not ok, which means strongly consistent and hence we should check only for last
         // hash_code in find_hash_code. Else we can check all previous values.
-        if (!kip->validate_hash_code(value.get_hash_code(), exclusive_access)) {
+        if (_verify() && !kip->validate_hash_code(value.get_hash_code(), exclusive_access)) {
             //TODO -below log message would not be correct for non-exclusive access as we use last_hash_code
 
             //hashcode did not match, if exclusive than compare the last value
@@ -293,7 +297,7 @@ success:
             return;
         }
 
-        if (!kip->validate_hash_code(value.get_hash_code(), exclusive_access)) {
+        if (_verify() && !kip->validate_hash_code(value.get_hash_code(), exclusive_access)) {
             error_cb(generator_op_error::data_validation_failed, kip.m_ki, nullptr,
                      fmt::format("Remove op has incorrect value hash_code={}", value.get_hash_code()));
             assert(0);
@@ -329,8 +333,8 @@ success:
 
     void _range_query(KeyPattern pattern, uint32_t num_keys_in_range, bool valid_query, bool exclusive_access,
                       bool start_incl, bool end_incl, store_error_cb_t error_cb) {
-        std::vector< key_info_ptr< K, V > > kis;
-        std::vector< std::pair<K, V>> kvs;
+        std::vector< key_info_ptr< K, V > >     kis;
+        std::vector< std::pair<K, V>>           kvs;
 
         if (valid_query) {
             kis = m_key_registry.get_contiguous_keys(pattern, exclusive_access, false /* is_mutate */, num_keys_in_range);
@@ -342,11 +346,11 @@ success:
         //auto it = m_key_registry.find_key(start_incl ? kis[0] : kis[1]);
         auto count = m_store->query(kis[0]->m_key, start_incl, kis.back()->m_key, end_incl, 1000, kvs);
         if(!valid_query){
-            if(count>0){
+            if(count > 0){
                 error_cb(generator_op_error::data_missing, kis[0].m_ki, nullptr,
                          fmt::format("Was expecting no result"));
             }
-        }else {
+        } else if (_verify()){
             m_store->verify(kis, kvs, error_cb, exclusive_access);
         }
     }
@@ -388,6 +392,8 @@ private:
     Exector                                                                  m_executor;
     sisl::atomic_counter< int64_t >                                          m_outstanding = 0;
     folly::Baton<>                                                           m_test_baton;
+    // KV verification on/off
+    bool                                                                     m_verify;
 };
 } // namespace loadgen
 } // namespace homeds
