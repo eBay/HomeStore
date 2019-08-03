@@ -10,22 +10,20 @@
 #include "homeds/btree/btree.hpp"
 #include <spdlog/fmt/bundled/ostream.h>
 
-namespace homeds { namespace loadgen {
+namespace homeds {
+namespace loadgen {
 class SimpleNumberKey : public homeds::btree::BtreeKey, public KeySpec {
 private:
     uint64_t m_num;
 
 public:
-    static SimpleNumberKey gen_key(KeyPattern spec, SimpleNumberKey *ref_key = nullptr) {
+    static SimpleNumberKey gen_key(KeyPattern spec, SimpleNumberKey* ref_key = nullptr) {
         switch (spec) {
-        case KeyPattern::SEQUENTIAL:
-            return ref_key ? SimpleNumberKey(ref_key->to_integer() + 1) : SimpleNumberKey();
+        case KeyPattern::SEQUENTIAL: return ref_key ? SimpleNumberKey(ref_key->to_integer() + 1) : SimpleNumberKey();
 
-        case KeyPattern::UNI_RANDOM:
-            return SimpleNumberKey(rand());
+        case KeyPattern::UNI_RANDOM: return SimpleNumberKey(rand());
 
-        case KeyPattern::OUT_OF_BOUND:
-            return SimpleNumberKey((uint64_t)-1);
+        case KeyPattern::OUT_OF_BOUND: return SimpleNumberKey((uint64_t)-1);
 
         default:
             // We do not support other gen spec yet
@@ -34,7 +32,7 @@ public:
         }
     }
 
-    static constexpr bool is_fixed_size() { return true; }
+    static constexpr bool     is_fixed_size() { return true; }
     static constexpr uint32_t get_max_size() { return sizeof(uint64_t); }
 
     explicit SimpleNumberKey(uint64_t num = 0) : m_num(num) {}
@@ -42,17 +40,21 @@ public:
     SimpleNumberKey& operator=(const SimpleNumberKey& other) = default;
 
     static constexpr size_t get_fixed_size() { return sizeof(uint64_t); }
-    uint64_t to_integer() const { return m_num; }
+    uint64_t                to_integer() const { return m_num; }
 
     virtual bool operator==(const KeySpec& other) const override {
-        return (compare((const BtreeKey *)&(SimpleNumberKey&)other) == 0);
+        return (compare((const BtreeKey*)&(SimpleNumberKey&)other) == 0);
     }
 
     int compare(const BtreeKey* o) const override {
         SimpleNumberKey* other = (SimpleNumberKey*)o;
-        if (m_num < other->m_num) { return -1; }
-        else if (m_num > other->m_num) { return 1; }
-        else { return 0; }
+        if (m_num < other->m_num) {
+            return -1;
+        } else if (m_num > other->m_num) {
+            return 1;
+        } else {
+            return 0;
+        }
     }
 
     int compare_range(const homeds::btree::BtreeSearchRange& range) const override {
@@ -69,13 +71,13 @@ public:
     };
 
     virtual void set_blob(const homeds::blob& b) {
-        auto n = *((uint64_t *)b.bytes);
+        auto n = *((uint64_t*)b.bytes);
         m_num = n;
     }
     virtual void copy_blob(const homeds::blob& b) { set_blob(b); }
 
-    virtual uint32_t get_blob_size() const { return sizeof(uint64_t); }
-    virtual void set_blob_size(uint32_t size) {}
+    virtual uint32_t    get_blob_size() const { return sizeof(uint64_t); }
+    virtual void        set_blob_size(uint32_t size) {}
     virtual std::string to_string() const { return std::to_string(m_num); }
 
     friend ostream& operator<<(ostream& os, const SimpleNumberKey& k) {
@@ -83,14 +85,17 @@ public:
         return os;
     }
 
-    static void gen_keys_in_range(SimpleNumberKey& k1, uint32_t num_of_keys, std::vector<SimpleNumberKey> keys_inrange){
+    static void gen_keys_in_range(SimpleNumberKey& k1, uint32_t num_of_keys,
+                                  std::vector< SimpleNumberKey > keys_inrange) {
         assert(0);
     }
-    
+
     virtual bool is_consecutive(KeySpec& k) override {
         SimpleNumberKey* nk = (SimpleNumberKey*)&k;
-        if(m_num+1==nk->m_num)return true;
-        else return false;
+        if (m_num + 1 == nk->m_num)
+            return true;
+        else
+            return false;
     }
 };
 
@@ -103,20 +108,16 @@ private:
     } attr_t;
 
     attr_t* m_attr;
-    attr_t m_inplace_attr;
+    attr_t  m_inplace_attr;
 
 public:
-    static CompositeNumberKey gen_key(KeyPattern spec, CompositeNumberKey *ref_key = nullptr) {
+    static CompositeNumberKey gen_key(KeyPattern spec, CompositeNumberKey* ref_key = nullptr) {
         switch (spec) {
-        case KeyPattern::SEQUENTIAL:
-            assert(ref_key != nullptr);
-            return CompositeNumberKey(ref_key->to_integer() + 1);
+        case KeyPattern::SEQUENTIAL: assert(ref_key != nullptr); return CompositeNumberKey(ref_key->to_integer() + 1);
 
-        case KeyPattern::UNI_RANDOM:
-            return CompositeNumberKey(rand());
+        case KeyPattern::UNI_RANDOM: return CompositeNumberKey(rand());
 
-        case KeyPattern::OUT_OF_BOUND:
-            return CompositeNumberKey((uint64_t)-1);
+        case KeyPattern::OUT_OF_BOUND: return CompositeNumberKey((uint64_t)-1);
 
         default:
             // We do not support other gen spec yet
@@ -127,11 +128,11 @@ public:
 
     virtual bool is_consecutive(KeySpec& k) override {
         CompositeNumberKey* nk = (CompositeNumberKey*)&k;
-        assert(0);//to implement
+        assert(0); // to implement
         return false;
     }
-    
-    static constexpr bool is_fixed_size() { return true; }
+
+    static constexpr bool     is_fixed_size() { return true; }
     static constexpr uint32_t get_max_size() { return sizeof(attr_t); }
 
     CompositeNumberKey(uint32_t count, uint16_t rank, uint64_t blk_num) {
@@ -160,9 +161,9 @@ public:
     uint32_t get_count() const { return (m_attr->m_count); }
     uint16_t get_rank() const { return (m_attr->m_rank); }
     uint64_t get_blk_num() const { return (m_attr->m_blk_num); }
-    void set_count(uint32_t count) { m_attr->m_count = count; }
-    void set_rank(uint32_t rank) { m_attr->m_rank = rank; }
-    void set_blk_num(uint32_t blkNum) { m_attr->m_blk_num = blkNum; }
+    void     set_count(uint32_t count) { m_attr->m_count = count; }
+    void     set_rank(uint32_t rank) { m_attr->m_rank = rank; }
+    void     set_blk_num(uint32_t blkNum) { m_attr->m_blk_num = blkNum; }
     uint64_t to_integer() const {
         uint64_t n;
         memcpy(&n, m_attr, sizeof(uint64_t));
@@ -170,7 +171,7 @@ public:
     }
 
     virtual bool operator==(const KeySpec& rhs) const override {
-        return (compare((const BtreeKey *)&(CompositeNumberKey&)rhs) == 0);
+        return (compare((const BtreeKey*)&(CompositeNumberKey&)rhs) == 0);
     }
 
     int compare(const BtreeKey* o) const override {
@@ -241,12 +242,12 @@ public:
         return b;
     }
 
-    virtual void set_blob(const homeds::blob& b) override { m_attr = (attr_t*)b.bytes; }
-    virtual void copy_blob(const homeds::blob& b) override { memcpy(m_attr, b.bytes, b.size); }
+    virtual void     set_blob(const homeds::blob& b) override { m_attr = (attr_t*)b.bytes; }
+    virtual void     copy_blob(const homeds::blob& b) override { memcpy(m_attr, b.bytes, b.size); }
     virtual uint32_t get_blob_size() const override { return (sizeof(attr_t)); }
 
     static uint32_t get_fixed_size() { return (sizeof(attr_t)); }
-    virtual void set_blob_size(uint32_t size) override {}
+    virtual void    set_blob_size(uint32_t size) override {}
 
     std::string to_string() const {
         std::stringstream ss;
@@ -263,5 +264,6 @@ public:
     bool operator==(const CompositeNumberKey& other) const { return (compare(&other) == 0); }
 };
 
-} } // namespace homeds::loadgen
-#endif //HOMESTORE_BTREE_KEY_SPEC_HPP
+} // namespace loadgen
+} // namespace homeds
+#endif // HOMESTORE_BTREE_KEY_SPEC_HPP

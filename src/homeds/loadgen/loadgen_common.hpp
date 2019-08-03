@@ -5,7 +5,8 @@
 #ifndef HOMESTORE_LOADGEN_COMMON_HPP
 #define HOMESTORE_LOADGEN_COMMON_HPP
 
-namespace homeds { namespace loadgen {
+namespace homeds {
+namespace loadgen {
 enum KeyPattern {
     SEQUENTIAL = 0,
     UNI_RANDOM,
@@ -17,18 +18,16 @@ enum KeyPattern {
     KEY_PATTERN_SENTINEL // Last option
 };
 
-enum ValuePattern {
-    SEQUENTIAL_VAL,
-    RANDOM_BYTES
-};
+enum ValuePattern { SEQUENTIAL_VAL, RANDOM_BYTES };
 
-template< typename K>
+template < typename K >
 struct key_range_t {
-    K& start_key;
+    K&   start_key;
     bool start_incl;
 
-    K& end_key;
+    K&   end_key;
     bool end_incl;
 };
-} } // namespace homeds::loadgen
-#endif //HOMESTORE_LOADGEN_COMMON_HPP
+} // namespace loadgen
+} // namespace homeds
+#endif // HOMESTORE_LOADGEN_COMMON_HPP
