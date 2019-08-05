@@ -33,6 +33,9 @@ using log_level = spdlog::level::level_enum;
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 std::string vol_uuid;
+bool print_checksum  = true;
+bool cleanup_devices = true;
+
 boost::uuids::string_generator gen;
 std::condition_variable m_cv;
 std::mutex m_mutex;
@@ -129,8 +132,10 @@ void shutdown() {
 }
 
 void remove_files() {
-    for (auto device : params.devices) {
-        remove(device.dev_names.c_str());
+    if (cleanup_devices) {
+        for (auto device : params.devices) {
+            remove(device.dev_names.c_str());
+        }
     }
     int ret = 0;
     for (uint32_t i = 0; !ret; i++) {
@@ -144,7 +149,10 @@ void remove_files() {
 /************************* CLI options ***************************/
 
 SDS_OPTION_GROUP(check_btree,
-(vol_uuid, "", "vol_uuid", "volume uuid", ::cxxopts::value<std::string>(), "string"))
+(vol_uuid, "", "vol_uuid", "volume uuid", ::cxxopts::value<std::string>(), "string"),
+(print_checksum, "", "print_checksum", "print checksum", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"),
+(cleanup_devices, "", "cleanup_devices", "cleanup devices", ::cxxopts::value<uint32_t>()->default_value("0"), "flag")
+)
 
 #define ENABLED_OPTIONS logging, home_blks, check_btree
 SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
@@ -156,6 +164,8 @@ int main(int argc, char *argv[]) {
     sds_logging::SetLogger("check_btree");
     spdlog::set_pattern("[%D %T.%f] [%^%L%$] [%t] %v");
     vol_uuid = SDS_OPTIONS["vol_uuid"].as<std::string>();
+    print_checksum  = SDS_OPTIONS["print_checksum"].as<uint32_t>();
+    cleanup_devices = SDS_OPTIONS["cleanup_devices"].as<uint32_t>();
 
     start_homestore();
     wait_cmpl();
