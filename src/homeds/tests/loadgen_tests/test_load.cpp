@@ -172,9 +172,9 @@ struct CacheTest : public testing::Test {
         loadgen = std::make_unique< G_CacheKV >(parameters.NT);
         loadgen->initParam(parameters);
         LOGINFO("WarmUp Started");
-        loadgen->warmup(false, true, false, false);
+        loadgen->warmup(false, false, false, false);
         LOGINFO("Regression Started");
-        loadgen->regression(false, true, false, false);
+        loadgen->regression(false, false, false, false);
     }
 };
 
@@ -209,7 +209,7 @@ SDS_OPTIONS_ENABLE(logging, test_load, test_volume)
 int main(int argc, char* argv[]) {
     testing::InitGoogleTest(&argc, argv);
 
-    ::testing::GTEST_FLAG(filter) = "*Map*:*Cache*";
+    ::testing::GTEST_FLAG(filter) = "*Cache*";
     SDS_OPTIONS_LOAD(argc, argv, logging, test_load)
     sds_logging::SetLogger("test_load");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
