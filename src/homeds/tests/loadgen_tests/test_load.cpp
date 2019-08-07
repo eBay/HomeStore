@@ -171,8 +171,6 @@ struct CacheTest : public testing::Test {
     void execute() {
         loadgen = std::make_unique< G_CacheKV >(parameters.NT);
         loadgen->initParam(parameters);
-        LOGINFO("WarmUp Started");
-        loadgen->warmup(false, false, false, false);
         LOGINFO("Regression Started");
         loadgen->regression(false, false, false, false);
     }
