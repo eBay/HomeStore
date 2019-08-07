@@ -209,7 +209,7 @@ SDS_OPTIONS_ENABLE(logging, test_load, test_volume)
 int main(int argc, char* argv[]) {
     testing::InitGoogleTest(&argc, argv);
 
-    ::testing::GTEST_FLAG(filter) = "*Cache*";
+    ::testing::GTEST_FLAG(filter) = "*Map*:*Cache*";
     SDS_OPTIONS_LOAD(argc, argv, logging, test_load)
     sds_logging::SetLogger("test_load");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
