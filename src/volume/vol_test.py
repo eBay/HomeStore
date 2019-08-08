@@ -4,7 +4,13 @@ import subprocess
 import os
 import sys
 import getopt
+import sys
+sys.stdout.flush()
 from time import sleep
+
+opts,args = getopt.getopt(sys.argv[1:], 'td:', ['test_suits=', 'dirpath=']) 
+test_suits = ""
+dirpath = "./"
 
 # slack details
 slackcmd = ("./slackpost "
@@ -17,13 +23,13 @@ def slackpost(msg):
     cmd = slackcmd + msg + "\""
     subprocess.call(cmd, shell=True)
 
-opts,args = getopt.getopt(sys.argv[1:], 't', ['test_suits='])
-test_suits = ""
-
 for opt,arg in opts:
     if opt in ('-t', '--test_suits'):
         test_suits = arg
         print(("testing suits (%s)")%(arg))
+    if opt in ('-d', '--dirpath'):
+        dirpath = arg
+        print(("dir path (%s)")%(arg))
 
 def normal():
     status = subprocess.check_output("./test_volume \
@@ -41,17 +47,11 @@ def vol_delete():
     return '[  PASSED  ] 1 test' in status
 
 def recovery():
-    status = subprocess.check_output("./test_volume \
-            --gtest_filter=*normal_abort_random* --run_time=300 --install_crash=0", shell=True)
-    f = open( '/home/homestore/log_abort.txt', 'w+')
-    f.write(status)
-    f.close()
-    for x in range(1, 50):
-        status = subprocess.call("./test_volume \
-                --gtest_filter=*recovery_abort* --run_time=300 --install_crash=0", shell=True)
-        f = open( '/home/homestore/log_recovery.txt', 'a+' )
-        f.write(status)
-        f.close()
+    subprocess.call(dirpath + "test_volume --gtest_filter=*abort_random* --run_time=30 --enable_crash_handler=0", shell=True)
+    subprocess.check_call(dirpath + "test_volume --gtest_filter=*recovery_random* --run_time=30 --enable_crash_handler=1 --verify_hdr=0 --verify_data=0", shell=True)
+
+def recovery_abort():
+    subprocess.call(dirpath + "test_volume --gtest_filter=*recovery_abort* --run_time=600 --enable_crash_handler=0", shell=True)
 
 def mapping():
     status = subprocess.check_output("./test_mapping --num_ios=10000000", shell=True)
@@ -68,22 +68,47 @@ def load():
     f.close()
     return '[  PASSED  ] 1 test' in status
 
-def sequence():
-    slackpost("Regression Test Starting")
+def nightly():
+    # 1. normal IO test
+    print("normal test started")
     if normal() == False:
-        slackpost("Normal Test Failed")
+        print("normal test failed")
         sys.exit(0)
-    slackpost("Normal Test Passed")
+    print("normal test completed")
     sleep(5)
+
+    # 2. load gen test
+    print("load test started")
     if load() == False:
-        slackpost("Load Test Failed")
+        print("load test failed")
         sys.exit(0)
-    slackpost("Load Test Passed")
+    print("load test completed")
     sleep(5)
-    if mapping() == False:
-        slackpost("Mapping Test Failed")
+
+    # 3. recovery test
+    print("recovery test started")
+    subprocess.call(dirpath + "test_volume --gtest_filter=*abort_random* --run_time=300 --enable_crash_handler=0", shell=True)
+    i = 1
+    while i < 10:
+        recovery_abort()
+        s = "recovery test iteration" + repr(i) + "passed" 
+        print(s)
+        i += 1
+    if (subprocess.check_call(dirpath + "test_volume --gtest_filter=*recovery_random* --run_time=300 --enable_crash_handler=0", shell=True)) == False:
+        print("recovery test failed")
         sys.exit(0)
-    slackpost("Mapping Test Passed")
+    print("recovery test completed")
+    sleep(5)
+
+    # 4. create del vol
+    print("create del vol test started")
+    if subprocess.check_call(dirpath + "test_volume --gtest_filter=*normal_vol_create_del_test* --max_vols=10000", shell=True) == False:
+         print("create del vol test failed")
+         sys.exit(0)
+    print("create del vol test passed")
+    sleep(5)
+    
+    print("nightly test passed")
 
 if test_suits == "normal":
     normal()
@@ -97,8 +122,8 @@ if test_suits == "recovery":
 if test_suits == "mapping":
     mapping()
 
-if test_suits == "sequence":
-    sequence()
+if test_suits == "nightly":
+    nightly()
 
 if test_suits == "load":
     load()

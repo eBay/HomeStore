@@ -16,12 +16,10 @@ namespace loadgen {
 template < size_t Size >
 class FixedBytesValue : public homeds::btree::BtreeValue, public ValueSpec {
 public:
-    static FixedBytesValue<Size> gen_value(ValuePattern spec, FixedBytesValue<Size>* ref_value = nullptr) {
+    static FixedBytesValue< Size > gen_value(ValuePattern spec, FixedBytesValue< Size >* ref_value = nullptr) {
         FixedBytesValue val;
         switch (spec) {
-        case ValuePattern::RANDOM_BYTES:
-            gen_random_string(val.m_bytes, Size);
-            return val;
+        case ValuePattern::RANDOM_BYTES: gen_random_string(val.m_bytes, Size); return val;
 
         default:
             // We do not support other gen spec yet
@@ -30,7 +28,7 @@ public:
         return val;
     }
 
-    static constexpr bool is_fixed_size() { return true; }
+    static constexpr bool     is_fixed_size() { return true; }
     static constexpr uint32_t get_max_size() { return Size; }
 
     FixedBytesValue() : homeds::btree::BtreeValue() { m_bytes_ptr = &m_bytes[0]; }
@@ -48,7 +46,7 @@ public:
 
     homeds::blob get_blob() const override {
         homeds::blob b;
-        b.bytes = (uint8_t *)m_bytes;
+        b.bytes = (uint8_t*)m_bytes;
         b.size = Size;
         return b;
     }
@@ -60,7 +58,7 @@ public:
     void            set_blob_size(uint32_t size) override { assert(size == sizeof(Size)); }
     uint32_t        estimate_size_after_append(const BtreeValue& new_val) override { return Size; }
     static uint32_t get_fixed_size() { return Size; }
-    std::string     to_string() const { return std::string((const char *)m_bytes); }
+    std::string     to_string() const { return std::string((const char*)m_bytes); }
 
     friend ostream& operator<<(ostream& os, const FixedBytesValue& v) {
         os << "val = " << v.m_bytes;
@@ -72,12 +70,12 @@ public:
         return (memcpy(m_bytes, other.get_blob().m_bytes, Size) == 0);
     }
 
-    virtual uint64_t get_hash_code() override{
+    virtual uint64_t get_hash_code() override {
         homeds::blob b = get_blob();
-        return util::Hash64((const char *)b.bytes, (size_t)b.size);
+        return util::Hash64((const char*)b.bytes, (size_t)b.size);
     }
-    
-    virtual int compare(ValueSpec& other) override{
+
+    virtual int compare(ValueSpec& other) override {
         FixedBytesValue* fbv = (FixedBytesValue*)&other;
         return memcmp(m_bytes, fbv->m_bytes, Size);
     }
@@ -91,6 +89,7 @@ private:
     uint8_t* m_bytes_ptr;
     uint8_t  m_bytes[Size];
 };
-} } // namespace homeds::loadgen
+} // namespace loadgen
+} // namespace homeds
 
-#endif //HOMESTORE_BTREE_VALUE_SPEC_HPP
+#endif // HOMESTORE_BTREE_VALUE_SPEC_HPP
