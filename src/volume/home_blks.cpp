@@ -890,6 +890,13 @@ homeds::blob HomeBlks::at_offset(const boost::intrusive_ptr< BlkBuffer >& buf, u
 
 void HomeBlks::print_tree(const VolumePtr& vol) { vol->print_tree(); }
 
+void HomeBlks::print_node(const VolumePtr& vol,
+            uint64_t id, uint8_t nblks, uint16_t chunk_num) {
+    BlkId blkid;
+    blkid.set(id, nblks, chunk_num);
+    vol->print_node(blkid);
+}
+
 void HomeBlks::get_version(sisl::HttpCallData cd) {
     HomeBlks *hb = (HomeBlks *)(cd->cookie());
     hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, std::string("HomeBlks: ") + HomeBlks::version);

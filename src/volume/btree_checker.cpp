@@ -33,8 +33,11 @@ using log_level = spdlog::level::level_enum;
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 std::string vol_uuid;
-bool print_checksum  = true;
-bool cleanup_devices = true;
+uint64_t blkid = 0;
+uint8_t  nblks = 0;
+uint16_t chunk = 0;
+bool print_checksum  = false;
+bool cleanup_devices = false;
 
 boost::uuids::string_generator gen;
 std::condition_variable m_cv;
@@ -150,6 +153,9 @@ void remove_files() {
 
 SDS_OPTION_GROUP(check_btree,
 (vol_uuid, "", "vol_uuid", "volume uuid", ::cxxopts::value<std::string>(), "string"),
+(blkid, "", "blkid", "block id", ::cxxopts::value<uint64_t>()->default_value("0"), "number"),
+(nblks, "", "nblks", "num of blks", ::cxxopts::value<uint8_t>()->default_value("0"), "number"),
+(chunk, "", "chunk", "chunk", ::cxxopts::value<uint16_t>()->default_value("0"), "number"),
 (print_checksum, "", "print_checksum", "print checksum", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"),
 (cleanup_devices, "", "cleanup_devices", "cleanup devices", ::cxxopts::value<uint32_t>()->default_value("0"), "flag")
 )
@@ -163,7 +169,10 @@ int main(int argc, char *argv[]) {
     SDS_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
     sds_logging::SetLogger("check_btree");
     spdlog::set_pattern("[%D %T.%f] [%^%L%$] [%t] %v");
-    vol_uuid = SDS_OPTIONS["vol_uuid"].as<std::string>();
+    vol_uuid        = SDS_OPTIONS["vol_uuid"].as<std::string>();
+    blkid           = SDS_OPTIONS["blkid"].as<uint64_t>();
+    nblks           = SDS_OPTIONS["nblks"].as<uint8_t>();
+    chunk           = SDS_OPTIONS["chunk"].as<uint16_t>();
     print_checksum  = SDS_OPTIONS["print_checksum"].as<uint32_t>();
     cleanup_devices = SDS_OPTIONS["cleanup_devices"].as<uint32_t>();
 
