@@ -10,7 +10,7 @@ ENV CONAN_CHANNEL=${CONAN_CHANNEL:-develop}
 ENV BUILD_TYPE=${BUILD_TYPE:-default}
 
 WORKDIR /output
-RUN set -eux
+RUN set -eux; \
     eval $(grep 'name =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,name,PKG_NAME,'); \
     eval $(grep -m 1 'version =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,version,PKG_VERSION,'); \
     conan install -pr ${BUILD_TYPE} ${PKG_NAME}/${PKG_VERSION}@${CONAN_USER}/${CONAN_CHANNEL}
