@@ -8,6 +8,10 @@ ARG BUILD_TYPE
 ENV CONAN_USER=${CONAN_USER:-sds}
 ENV CONAN_CHANNEL=${CONAN_CHANNEL:-develop}
 ENV BUILD_TYPE=${BUILD_TYPE:-default}
+ENV SOURCE_PATH=/tmp/source/
+
+COPY .git/ ${SOURCE_PATH}.git
+RUN cd ${SOURCE_PATH}; git reset --hard
 
 WORKDIR /output
 RUN set -eux; \
@@ -16,5 +20,4 @@ RUN set -eux; \
     conan install -pr ${BUILD_TYPE} ${PKG_NAME}/${PKG_VERSION}@${CONAN_USER}/${CONAN_CHANNEL}
 
 EXPOSE 5000
-
 # ##########   #######   ############
