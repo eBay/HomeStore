@@ -29,17 +29,16 @@ class HomestoreConan(ConanFile):
                 "boost_uuid/1.69.0@bincrafters/stable",
                 "double-conversion/3.1.4@bincrafters/stable",
                 "farmhash/1.0.0@oss/stable",
+                "flip/0.1.1@sds/testing",
                 "folly/2019.07.22.00@bincrafters/testing",
                 "gtest/1.8.1@bincrafters/stable",
+                "isa-l/2.21.0@oss/stable",
                 "iomgr/2.2.6@sds/testing",
                 "libevent/2.1.10@bincrafters/stable",
-                "lzma/5.2.4@bincrafters/stable",
                 "sisl/0.3.6@sisl/develop",
                 "sds_logging/5.2.0@sds/testing",
                 "sds_options/0.1.5@sds/testing",
-                "isa-l/2.21.0@oss/stable",
-                "flip/0.1.1@sds/testing",
-                "zstd/1.4.0@bincrafters/stable",
+                ("zstd/1.3.8@bincrafters/stable", "override"), # Just here for build, not a direct dependency
                 )
 
     generators = "cmake"
