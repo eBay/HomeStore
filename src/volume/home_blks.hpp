@@ -131,6 +131,7 @@ class HomeBlks : public VolInterface {
     std::atomic< bool >                                                                  m_init_finished;
     std::condition_variable                                                              m_cv;
     std::mutex                                                                           m_cv_mtx;
+    bool                                                                                 m_print_checksum;
 
 public:
     static VolInterface* init(const init_params& cfg);
@@ -180,12 +181,15 @@ public:
     uint64_t get_boot_cnt();
     void init_done(std::error_condition err, const out_params& params);
 
-    void print_tree(const VolumePtr& vol);
-    void print_node(const VolumePtr& vol, uint64_t id, uint8_t nblks, uint16_t chunk_num);
+    void print_tree(const VolumePtr& vol, bool chksum = true);
+    void print_node(const VolumePtr& vol, uint64_t id,
+                uint8_t nblks, uint16_t chunk_num, bool chksum = true);
 
 #ifndef NDEBUG
     void verify_pending_blks(const VolumePtr& vol);
 #endif
+
+    bool print_checksum() { return m_print_checksum; }
 
 public:
     // All http handlers, TODO: Consider moving this to separate class

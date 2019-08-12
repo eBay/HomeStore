@@ -38,7 +38,8 @@ HomeBlks::HomeBlks(const init_params& cfg) :
         m_scan_cnt(0),
         m_init_failed(false),
         m_shutdown(false),
-        m_init_finished(false) {
+        m_init_finished(false),
+        m_print_checksum(true) {
 
     _instance = this;
     LOGINFO("homeblks initing {}", m_cfg.to_string());
@@ -888,12 +889,16 @@ homeds::blob HomeBlks::at_offset(const boost::intrusive_ptr< BlkBuffer >& buf, u
     return (buf->at_offset(offset));
 }
 
-void HomeBlks::print_tree(const VolumePtr& vol) { vol->print_tree(); }
+void HomeBlks::print_tree(const VolumePtr& vol, bool chksum) {
+    m_print_checksum = chksum;
+    vol->print_tree();
+}
 
-void HomeBlks::print_node(const VolumePtr& vol,
-            uint64_t id, uint8_t nblks, uint16_t chunk_num) {
+void HomeBlks::print_node(const VolumePtr& vol, uint64_t id,
+                uint8_t nblks, uint16_t chunk_num, bool chksum) {
     BlkId blkid;
     blkid.set(id, nblks, chunk_num);
+    m_print_checksum = chksum;
     vol->print_node(blkid);
 }
 

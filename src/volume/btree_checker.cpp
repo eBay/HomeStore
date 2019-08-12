@@ -70,7 +70,11 @@ void init_done_cb(  std::error_condition err,
 
     auto uuid = gen(std::string(vol_uuid));
     auto vol = VolInterface::get_instance()->lookup_volume(uuid);
-    VolInterface::get_instance()->print_tree(vol);
+    if (!blkid && !nblks && !chunk) {
+        VolInterface::get_instance()->print_tree(vol, print_checksum);
+    } else { // print node
+        VolInterface::get_instance()->print_node(vol, blkid, nblks, chunk, print_checksum);
+    }
     notify_cmpl();
 }
 
