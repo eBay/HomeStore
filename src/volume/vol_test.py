@@ -8,7 +8,6 @@ import sys
 sys.stdout.flush()
 from time import sleep
 
-
 opts,args = getopt.getopt(sys.argv[1:], 'td:', ['test_suits=', 'dirpath=']) 
 test_suits = ""
 dirpath = "./"

@@ -29,18 +29,16 @@ class HomestoreConan(ConanFile):
                 "boost_uuid/1.69.0@bincrafters/stable",
                 "double-conversion/3.1.4@bincrafters/stable",
                 "farmhash/1.0.0@oss/stable",
+                "flip/0.1.1@sds/testing",
                 "folly/2019.07.22.00@bincrafters/testing",
                 "gtest/1.8.1@bincrafters/stable",
+                "isa-l/2.21.0@oss/stable",
                 "iomgr/2.2.6@sds/testing",
                 "libevent/2.1.10@bincrafters/stable",
-                "lzma/5.2.4@bincrafters/stable",
-                "sisl/0.3.3@sisl/testing",
-                "OpenSSL/1.0.2s@conan/stable",
+                "sisl/0.3.6@sisl/develop",
                 "sds_logging/5.2.0@sds/testing",
                 "sds_options/0.1.5@sds/testing",
-                "isa-l/2.21.0@oss/stable",
-                "flip/0.1.1@sds/testing",
-                "zstd/1.4.0@bincrafters/stable",
+                ("zstd/1.3.8@bincrafters/stable", "override"), # Just here for build, not a direct dependency
                 )
 
     generators = "cmake"
@@ -86,6 +84,24 @@ class HomestoreConan(ConanFile):
         self.copy("*homeblks.dylib", dst="lib", keep_path=False)
         self.copy("*homeblks.lib", dst="lib", keep_path=False)
         self.copy("*homeblks.a", dst="lib", keep_path=False)
+        self.copy("*obj_allocator_benchmark", dst="bin", keep_path=False)
+        self.copy("*perf_cache", dst="bin", keep_path=False)
+        self.copy("*perf_test_volume", dst="bin", keep_path=False)
+        self.copy("*test_avector", dst="bin", keep_path=False)
+        self.copy("*test_bitset", dst="bin", keep_path=False)
+        self.copy("*test_bitword", dst="bin", keep_path=False)
+        self.copy("*test_blkalloc", dst="bin", keep_path=False)
+        self.copy("*test_btree_crud", dst="bin", keep_path=False)
+        self.copy("*test_cache", dst="bin", keep_path=False)
+        self.copy("*test_composite_allocator", dst="bin", keep_path=False)
+        self.copy("*test_hash", dst="bin", keep_path=False)
+        self.copy("*test_iomgr_exec", dst="bin", keep_path=False)
+        self.copy("*test_load", dst="bin", keep_path=False)
+        self.copy("*test_mapping", dst="bin", keep_path=False)
+        self.copy("*test_obj_allocator", dst="bin", keep_path=False)
+        self.copy("*test_threadpool", dst="bin", keep_path=False)
+        self.copy("*test_volume", dst="bin", keep_path=False)
+        self.copy("*vol_test.py", src="src/", dst="bin", keep_path=False)
 
     def package_info(self):
         self.cpp_info.libs = tools.collect_libs(self)
@@ -99,3 +115,23 @@ class HomestoreConan(ConanFile):
             self.cpp_info.libs.append('gcov')
         if self.settings.os == "Linux":
             self.cpp_info.libs.extend(["aio"])
+
+    def deploy(self):
+        self.copy("*obj_allocator_benchmark", dst="/usr/local/bin", keep_path=False)
+        self.copy("*perf_cache", dst="/usr/local/bin", keep_path=False)
+        self.copy("*perf_test_volume", dst="/usr/local/bin", keep_path=False)
+        self.copy("*test_avector", dst="/usr/local/bin", keep_path=False)
+        self.copy("*test_bitset", dst="/usr/local/bin", keep_path=False)
+        self.copy("*test_bitword", dst="/usr/local/bin", keep_path=False)
+        self.copy("*test_blkalloc", dst="/usr/local/bin", keep_path=False)
+        self.copy("*test_btree_crud", dst="/usr/local/bin", keep_path=False)
+        self.copy("*test_cache", dst="/usr/local/bin", keep_path=False)
+        self.copy("*test_composite_allocator", dst="/usr/local/bin", keep_path=False)
+        self.copy("*test_hash", dst="/usr/local/bin", keep_path=False)
+        self.copy("*test_iomgr_exec", dst="/usr/local/bin", keep_path=False)
+        self.copy("*test_load", dst="/usr/local/bin", keep_path=False)
+        self.copy("*test_mapping", dst="/usr/local/bin", keep_path=False)
+        self.copy("*test_obj_allocator", dst="/usr/local/bin", keep_path=False)
+        self.copy("*test_threadpool", dst="/usr/local/bin", keep_path=False)
+        self.copy("*test_volume", dst="/usr/local/bin", keep_path=False)
+        self.copy("*vol_test.py", dst="/usr/local/bin", keep_path=False)

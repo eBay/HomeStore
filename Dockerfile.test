@@ -1,45 +1,24 @@
 # ##########   #######   ############
-FROM ecr.vip.ebayc3.com/sds/sds_develop:2.1
+FROM ecr.vip.ebayc3.com/sds/sds_develop:2.9
 LABEL description="Automated HomeStore compilation"
 
 ARG CONAN_CHANNEL
 ARG CONAN_USER
+ARG BUILD_TYPE
 ENV CONAN_USER=${CONAN_USER:-sds}
 ENV CONAN_CHANNEL=${CONAN_CHANNEL:-develop}
+ENV BUILD_TYPE=${BUILD_TYPE:-default}
 ENV SOURCE_PATH=/tmp/source/
 
-COPY conanfile.py ${SOURCE_PATH}
-COPY cmake/ ${SOURCE_PATH}cmake
-COPY CMakeLists.txt ${SOURCE_PATH}
-COPY src/ ${SOURCE_PATH}src
-COPY src/volume/homestore /usr/local/bin
+COPY .git/ ${SOURCE_PATH}.git
+RUN cd ${SOURCE_PATH}; git reset --hard
 
 WORKDIR /output
-RUN conan install --build missing ${SOURCE_PATH}
-
-# Build the variants we will publish
-ENV ASAN_OPTIONS=detect_leaks=0
-RUN conan create ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"
-
-RUN find /root/.conan/data/homestore -name "obj_allocator_benchmark" -exec mv {} /usr/local/bin \;
-RUN find /root/.conan/data/homestore -name "perf_cache" -exec mv {} /usr/local/bin \;
-RUN find /root/.conan/data/homestore -name "perf_test_volume" -exec mv {} /usr/local/bin \;
-RUN find /root/.conan/data/homestore -name "test_avector" -exec mv {} /usr/local/bin \;
-RUN find /root/.conan/data/homestore -name "test_bitset" -exec mv {} /usr/local/bin \;
-RUN find /root/.conan/data/homestore -name "test_bitword" -exec mv {} /usr/local/bin \;
-RUN find /root/.conan/data/homestore -name "test_blkalloc" -exec mv {} /usr/local/bin \;
-RUN find /root/.conan/data/homestore -name "test_btree_crud" -exec mv {} /usr/local/bin \;
-RUN find /root/.conan/data/homestore -name "test_cache" -exec mv {} /usr/local/bin \;
-RUN find /root/.conan/data/homestore -name "test_composite_allocator" -exec mv {} /usr/local/bin \;
-RUN find /root/.conan/data/homestore -name "test_hash" -exec mv {} /usr/local/bin \;
-RUN find /root/.conan/data/homestore -name "test_iomgr_exec" -exec mv {} /usr/local/bin \;
-RUN find /root/.conan/data/homestore -name "test_load" -exec mv {} /usr/local/bin \;
-RUN find /root/.conan/data/homestore -name "test_mapping" -exec mv {} /usr/local/bin \;
-RUN find /root/.conan/data/homestore -name "test_obj_allocator" -exec mv {} /usr/local/bin \;
-RUN find /root/.conan/data/homestore -name "test_threadpool" -exec mv {} /usr/local/bin \;
-RUN find /root/.conan/data/homestore -name "test_volume" -exec mv {} /usr/local/bin \;
-RUN find /root/.conan/data/homestore -name "vol_test.py" -exec mv {} /usr/local/bin \;
+RUN set -eux; \
+    eval $(grep 'name =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,name,PKG_NAME,'); \
+    eval $(grep -m 1 'version =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,version,PKG_VERSION,'); \
+    conan install -pr ${BUILD_TYPE} ${PKG_NAME}/${PKG_VERSION}@${CONAN_USER}/${CONAN_CHANNEL}; \
+    conan remove -f '*';
 
 EXPOSE 5000
-
 # ##########   #######   ############
