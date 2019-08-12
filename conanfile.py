@@ -101,7 +101,7 @@ class HomestoreConan(ConanFile):
         self.copy("*test_obj_allocator", dst="bin", keep_path=False)
         self.copy("*test_threadpool", dst="bin", keep_path=False)
         self.copy("*test_volume", dst="bin", keep_path=False)
-        self.copy("*vol_test.py", dst="bin", keep_path=False)
+        self.copy("*vol_test.py", src="src/", dst="bin", keep_path=False)
 
     def package_info(self):
         self.cpp_info.libs = tools.collect_libs(self)
@@ -134,4 +134,4 @@ class HomestoreConan(ConanFile):
         self.copy("*test_obj_allocator", dst="/usr/local/bin", keep_path=False)
         self.copy("*test_threadpool", dst="/usr/local/bin", keep_path=False)
         self.copy("*test_volume", dst="/usr/local/bin", keep_path=False)
-        self.copy("*vol_test.py", src="src/", dst="/usr/local/bin", keep_path=False)
+        self.copy("*vol_test.py", dst="/usr/local/bin", keep_path=False)
