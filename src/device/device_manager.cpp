@@ -166,8 +166,6 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info > &devices) {
         m_pdevs[pdev->get_dev_id()] = std::move(pdev);
     }
 
-    DEV_LOG_ASSERT_CMP(NE, m_gen_cnt.load(), 0, "Couldn't find any valid device.");
-
     if (m_gen_cnt.load() == 0) {
         std::stringstream ss; ss << "No valid device found. line no:" << __LINE__ << "file name:" <<__FILE__;
         const std::string s = ss.str();
@@ -210,7 +208,8 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info > &devices) {
              * larger number of chunks, we should optimize it.
              */
             for (uint32_t i = 0; i < HomeStoreConfig::max_chunks; ++i) {
-                if (m_chunk_info[i].pdev_id == dev_id) {
+                if (m_chunk_info[i].pdev_id == dev_id && 
+                    m_chunk_info[i].slot_allocated && m_chunk_info[i].vdev_id != INVALID_VDEV_ID) {
                     auto vdev_id = m_chunk_info[i].vdev_id;
                     DEV_LOG_ASSERT_CMP(EQ, m_vdev_info[vdev_id].vdev_id, vdev_id);
                     /* mark this vdev failed */

@@ -45,6 +45,7 @@ IOMgrExecutor::~IOMgrExecutor() {
     // executor could be restarted after a IOMgrExecutor::stop();
     stop(true);
     m_iomgr->stop();
+    m_iomgr.reset();
 }
 
 std::shared_ptr< iomgr::ioMgr > IOMgrExecutor::get_iomgr() { return m_iomgr; }
