@@ -20,7 +20,8 @@ pipeline {
 
         stage('Build') {
             steps {
-                sh "docker build --rm --build-arg BUILD_TYPE=nosanitize --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_PASS=${CONAN_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${TAG}-debug ."
+                sh "docker build --rm --build-arg BUILD_TYPE=debug --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_PASS=${CONAN_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${TAG}-debug ."
+                sh "docker build --rm --build-arg BUILD_TYPE=nosanitize --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_PASS=${CONAN_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${TAG}-nosanitize ."
                 sh "docker build --rm --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_PASS=${CONAN_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${TAG} ."
             }
         }
@@ -32,6 +33,7 @@ pipeline {
             steps {
                 sh "docker run --rm ${PROJECT}-${TAG}"
                 sh "docker run --rm ${PROJECT}-${TAG}-debug"
+                sh "docker run --rm ${PROJECT}-${TAG}-nosanitize"
                 slackSend channel: '#conan-pkgs', message: "*${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}* has been uploaded to conan repo."
                 withDockerRegistry([credentialsId: 'sds+sds', url: "https://ecr.vip.ebayc3.com"]) {
                     sh "docker build -f Dockerfile.test --rm --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_PASS=${CONAN_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${TAG}-test ."
@@ -39,6 +41,12 @@ pipeline {
                     sh "docker push ecr.vip.ebayc3.com/${ORG}/${PROJECT}:${CONAN_CHANNEL}-test"
                     sh "docker rmi ecr.vip.ebayc3.com/${ORG}/${PROJECT}:${CONAN_CHANNEL}-test"
                     slackSend channel: '#conan-pkgs', message: "*${PROJECT}:${CONAN_CHANNEL}-test* has been pushed to ECR."
+
+                    sh "docker build -f Dockerfile.test --rm --build-arg BUILD_TYPE=release --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_PASS=${CONAN_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${TAG}-release ."
+                    sh "docker tag ${PROJECT}-${TAG}-release ecr.vip.ebayc3.com/${ORG}/${PROJECT}:${CONAN_CHANNEL}-release"
+                    sh "docker push ecr.vip.ebayc3.com/${ORG}/${PROJECT}:${CONAN_CHANNEL}-release"
+                    sh "docker rmi ecr.vip.ebayc3.com/${ORG}/${PROJECT}:${CONAN_CHANNEL}-release"
+                    slackSend channel: '#conan-pkgs', message: "*${PROJECT}:${CONAN_CHANNEL}-release* has been pushed to ECR."
                 }
             }
         }
@@ -49,6 +57,9 @@ pipeline {
         always {
             sh "docker rmi -f ${PROJECT}-${TAG}"
             sh "docker rmi -f ${PROJECT}-${TAG}-debug"
+            sh "docker rmi -f ${PROJECT}-${TAG}-nosanitize"
+            sh "docker rmi -f ${PROJECT}-${TAG}-release"
+            sh "docker rmi -f ${PROJECT}-${TAG}-test"
         }
     }
 }
