@@ -104,7 +104,7 @@ uint64_t Volume::get_metadata_used_size() { return m_map->get_used_size(); }
 // void Volume::process_free_blk_callback(BlkId& blk_id, uint64_t size_offset, uint64_t nblks_to_free) {
 void Volume::process_free_blk_callback(Free_Blk_Entry fbe) {
     VOL_LOG(DEBUG, volume, , "Freeing blks cb - bid: {}, offset: {}, nblks: {}, get_pagesz: {}",
-            fbe.m_blkId.to_string(), fbe.m_blk_offset, fbe.m_nblks_to_free, get_page_size());
+            fbe.m_blkId.to_string(), fbe.blk_offset(), fbe.blks_to_free(), get_page_size());
 
     uint64_t size = HomeBlks::instance()->get_data_pagesz() * fbe.m_nblks_to_free;
     m_data_blkstore->free_blk(fbe.m_blkId, HomeBlks::instance()->get_data_pagesz() * fbe.m_blk_offset,
@@ -214,14 +214,13 @@ Volume::~Volume() {
         m_map->destroy();
 
         // all blks should have been freed
-        VOL_LOG_ASSERT_CMP(EQ, m_used_size.load(), 0, , "All blks expected to be freed");
+        VOL_ASSERT_CMP(LOGMSG, m_used_size.load(), ==, 0, , "All blks expected to be freed");
 
         HomeBlks::instance()->vol_sb_remove(get_sb());
         delete m_map;
         delete (m_sb);
         auto system_cap = HomeBlks::instance()->get_system_capacity();
-        VOL_LOG(INFO, volume, , "volume {} is destroyed. New system capacity is {}", m_vol_name,
-                system_cap.to_string());
+        VOL_LOG(INFO, volume, , "volume is destroyed. New system capacity is {}", system_cap.to_string());
     }
 }
 
@@ -237,7 +236,7 @@ void Volume::process_metadata_completions(const volume_req_ptr& vreq) {
     auto& parent_req = vreq->parent_req;
     assert(parent_req != nullptr);
 
-    VOL_LOG(TRACE, volume, parent_req, "metadata_complete: err={}", vreq->err.message());
+    VOL_LOG(TRACE, volume, parent_req, "metadata_complete: status={}", vreq->err.message());
     HISTOGRAM_OBSERVE(m_metrics, volume_map_write_latency, get_elapsed_time_us(vreq->op_start_time));
 
     check_and_complete_req(parent_req, vreq->err, true /* call_completion_cb */, &(vreq->blkIds_to_free));
@@ -272,7 +271,7 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
     assert(parent_req != nullptr);
     assert(!vreq->isSyncCall);
 
-    VOL_LOG(TRACE, volume, parent_req, "data op complete: err={}", vreq->err.message());
+    VOL_LOG(TRACE, volume, parent_req, "data op complete: status={}", vreq->err.message());
 
     std::vector< Free_Blk_Entry > fbes;
     if (vreq->is_read) {
@@ -332,7 +331,7 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
                 crc16_t10dif(init_crc_16, vreq->bbuf->at_offset(vreq->read_buf_offset + offset).bytes, get_page_size());
             offset += get_page_size();
 
-            VOL_RELEASE_ASSERT_CMP(EQ, vreq->checksum[i], carr[i], vreq->parent_req,
+            VOL_RELEASE_ASSERT_CMP(vreq->checksum[i], ==, carr[i], vreq->parent_req,
                                    "Checksum mismatch and blks from cache {}",
                                    vreq->is_blk_from_cache(vreq->read_buf_offset + offset));
         }
@@ -463,7 +462,7 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
 void Volume::check_and_complete_req(const vol_interface_req_ptr& hb_req, const std::error_condition& err,
                                     bool call_completion, std::vector< Free_Blk_Entry >* fbes) {
     // If there is error and request is not completed yet, we need to complete it now.
-    VOL_LOG(TRACE, volume, hb_req, "complete_io: err={}, call_completion={}, outstanding_io_cnt={}", err.message(),
+    VOL_LOG(TRACE, volume, hb_req, "complete_io: status={}, call_completion={}, outstanding_io_cnt={}", err.message(),
             call_completion, hb_req->outstanding_io_cnt.get());
 
     m_read_blk_tracker->safe_remove_blks(hb_req->is_read, fbes, err);
@@ -630,7 +629,7 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
                                                child_vreq->bbuf->at_offset(child_vreq->read_buf_offset + offset).bytes,
                                                get_page_size());
                         offset += get_page_size();
-                        VOL_RELEASE_ASSERT_CMP(EQ, child_vreq->checksum[i], carr[i], child_vreq->parent_req,
+                        VOL_RELEASE_ASSERT_CMP(child_vreq->checksum[i], ==, carr[i], child_vreq->parent_req,
                                                "Checksum mismatch");
                     }
                 } else { // for async call, clean up is done in process completion
