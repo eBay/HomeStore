@@ -157,7 +157,7 @@ public:
              BlkStoreCacheType cache_type,       // Type of cache, writeback, writethru, none
              uint64_t          page_size,        // Block device page size
              const char*       name,             // Name for blkstore
-             bool              recovery_init,  // do we need to initialize bll allocator in recovery
+             bool              recovery_init,  // do we need to initialize blk allocator in recovery
              comp_callback     comp_cb = nullptr // Callback on completion. It can be attached later as well.
              ) :
             m_pagesz(page_size),
