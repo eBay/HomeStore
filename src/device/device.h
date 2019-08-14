@@ -373,7 +373,7 @@ public:
     ~DeviceManager(); 
 
     /* Initial routine to call upon bootup or everytime new physical devices to be added dynamically */
-    void add_devices(std::vector< dev_info >& devices, bool is_init, bool is_read_only);
+    void add_devices(std::vector< dev_info >& devices, bool is_init);
     size_t get_total_cap(void);
     #define MAX_ERROR_CNT 1000
     void handle_error(PhysicalDev *pdev);
@@ -423,9 +423,10 @@ public:
     void inited();
     void write_info_blocks();
     void update_vb_context(uint32_t vdev_id, uint8_t* blob);
+    void disable_writes() { m_is_read_only = true; }
 
 private:
-    void load_and_repair_devices(std::vector< dev_info >& devices, bool is_read_only);
+    void load_and_repair_devices(std::vector< dev_info >& devices);
     void init_devices(std::vector< dev_info >& devices);
 
     void read_info_blocks(uint32_t dev_id);
@@ -444,6 +445,7 @@ private:
     std::shared_ptr< iomgr::ioMgr > m_iomgr;
     std::atomic< uint64_t >         m_gen_cnt;
     bool                            m_is_file;
+    bool                            m_is_read_only;
 
     char* m_chunk_memory;
 

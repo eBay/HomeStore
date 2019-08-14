@@ -577,7 +577,11 @@ public:
 
     void print_tree() { m_bt->print_tree(); }
 
-    void print_node(BlkId blkid) { m_bt->print_node(blkid.get_id()); }
+    void print_node(const BlkId& blkid) {
+        bnodeid_t bid(blkid.to_integer(), 0);
+        m_bt->print_node(bid);
+    }
+
 private:
     /**
      * Callback called once for each bnode

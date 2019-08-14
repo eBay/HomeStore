@@ -85,6 +85,9 @@ HomeBlks::HomeBlks(const init_params& cfg) :
     m_dev_mgr = new homestore::DeviceManager(new_vdev_found, sizeof(sb_blkstore_blob), m_cfg.iomgr,
                                              virtual_dev_process_completions, m_cfg.is_file, m_cfg.system_uuid, 
                                              std::bind(&HomeBlks::process_vdev_error, this, std::placeholders::_1));
+    if (m_dev_mgr && m_cfg.is_read_only) {
+        m_dev_mgr->disable_writes();
+    }
 
     /* start thread */
     m_thread_id = std::thread(&HomeBlks::init_thread, this);
@@ -516,7 +519,7 @@ void HomeBlks::attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback c
 }
 
 void HomeBlks::add_devices() {
-    m_dev_mgr->add_devices(m_cfg.devices, m_cfg.disk_init, m_cfg.is_read_only ? true : false);
+    m_dev_mgr->add_devices(m_cfg.devices, m_cfg.disk_init);
     assert(m_dev_mgr->get_total_cap() / m_cfg.devices.size() > MIN_DISK_CAP_SUPPORTED);
     assert(m_dev_mgr->get_total_cap() < MAX_SUPPORTED_CAP);
 }

@@ -21,8 +21,8 @@ DeviceManager::DeviceManager(NewVDevCallback vcb,
                              std::shared_ptr<iomgr::ioMgr> iomgr,
                              homeio::comp_callback cb, bool is_file, boost::uuids::uuid system_uuid, 
                              vdev_error_callback vdev_error_cb) :
-        m_comp_cb(cb), m_new_vdev_cb(vcb), m_iomgr(iomgr), m_gen_cnt(0), m_is_file(is_file), m_system_uuid(system_uuid),
-        m_vdev_error_cb(vdev_error_cb) {
+        m_comp_cb(cb), m_new_vdev_cb(vcb), m_iomgr(iomgr), m_gen_cnt(0), m_is_file(is_file),
+        m_is_read_only(false), m_system_uuid(system_uuid), m_vdev_error_cb(vdev_error_cb) {
 
     switch(HomeStoreConfig::open_flag) {
 #ifndef NDEBUG
@@ -128,8 +128,7 @@ void DeviceManager::update_vb_context(uint32_t vdev_id, uint8_t *blob) {
     write_info_blocks();
 }
 
-void DeviceManager::load_and_repair_devices(std::vector< dev_info > &devices,
-                                                            bool is_read_only) {
+void DeviceManager::load_and_repair_devices(std::vector< dev_info > &devices) {
     std::vector< std::unique_ptr< PhysicalDev > > uninit_devs;
     uninit_devs.reserve(devices.size());
     uint64_t device_id = INVALID_DEV_ID;
@@ -158,7 +157,7 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info > &devices,
         if (m_gen_cnt.load() < pdev->sb_gen_cnt()) {
             m_gen_cnt = pdev->sb_gen_cnt();
             device_id = pdev->get_dev_id();
-            rewrite = !is_read_only;
+            rewrite   = !m_is_read_only;
         }
 
         DEV_LOG_ASSERT(m_pdevs[pdev->get_dev_id()].get() == nullptr, );
@@ -319,16 +318,14 @@ void DeviceManager::inited() {
 }
 
 /* add constant */
-void DeviceManager::add_devices(std::vector< dev_info > &devices,
-                                        bool is_init, bool is_read_only) {
+void DeviceManager::add_devices(std::vector< dev_info > &devices, bool is_init) {
     uint64_t max_dev_offset = 0;
-
     if (is_init) {
         init_devices(devices);
         return;
     }
 
-    load_and_repair_devices(devices, is_read_only);
+    load_and_repair_devices(devices);
     return;
 }
 

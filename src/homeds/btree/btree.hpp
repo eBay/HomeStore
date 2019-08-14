@@ -646,7 +646,7 @@ out:
         m_btree_lock.unlock();
     }
 
-    void print_node(bnodeid_t bnodeid) {
+    void print_node(const bnodeid_t& bnodeid) {
         std::stringstream ss;
         BtreeNodePtr node;
         m_btree_lock.read_lock();
