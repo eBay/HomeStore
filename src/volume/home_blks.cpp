@@ -897,10 +897,7 @@ void HomeBlks::print_tree(const VolumePtr& vol, bool chksum) {
     vol->print_tree();
 }
 
-void HomeBlks::print_node(const VolumePtr& vol, uint64_t id,
-                uint8_t nblks, uint16_t chunk_num, bool chksum) {
-    BlkId blkid;
-    blkid.set(id, nblks, chunk_num);
+void HomeBlks::print_node(const VolumePtr& vol, uint64_t blkid, bool chksum) {
     m_print_checksum = chksum;
     vol->print_node(blkid);
 }

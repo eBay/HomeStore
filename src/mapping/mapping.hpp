@@ -577,8 +577,8 @@ public:
 
     void print_tree() { m_bt->print_tree(); }
 
-    void print_node(const BlkId& blkid) {
-        bnodeid_t bid(blkid.to_integer(), 0);
+    void print_node(uint64_t blkid) {
+        bnodeid_t bid(blkid);
         m_bt->print_node(bid);
     }
 

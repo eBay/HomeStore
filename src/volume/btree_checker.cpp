@@ -34,8 +34,6 @@ SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 std::string vol_uuid;
 uint64_t blkid = 0;
-uint8_t  nblks = 0;
-uint16_t chunk = 0;
 bool print_checksum  = false;
 bool cleanup_devices = false;
 
@@ -70,10 +68,10 @@ void init_done_cb(  std::error_condition err,
 
     auto uuid = gen(std::string(vol_uuid));
     auto vol = VolInterface::get_instance()->lookup_volume(uuid);
-    if (!blkid && !nblks && !chunk) {
+    if (!blkid) {
         VolInterface::get_instance()->print_tree(vol, print_checksum);
     } else { // print node
-        VolInterface::get_instance()->print_node(vol, blkid, nblks, chunk, print_checksum);
+        VolInterface::get_instance()->print_node(vol, blkid, print_checksum);
     }
     notify_cmpl();
 }
@@ -158,8 +156,6 @@ void remove_files() {
 SDS_OPTION_GROUP(check_btree,
 (vol_uuid, "", "vol_uuid", "volume uuid", ::cxxopts::value<std::string>(), "string"),
 (blkid, "", "blkid", "block id", ::cxxopts::value<uint64_t>()->default_value("0"), "number"),
-(nblks, "", "nblks", "num of blks", ::cxxopts::value<uint8_t>()->default_value("0"), "number"),
-(chunk, "", "chunk", "chunk", ::cxxopts::value<uint16_t>()->default_value("0"), "number"),
 (print_checksum, "", "print_checksum", "print checksum", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"),
 (cleanup_devices, "", "cleanup_devices", "cleanup devices", ::cxxopts::value<uint32_t>()->default_value("0"), "flag")
 )
@@ -175,8 +171,6 @@ int main(int argc, char *argv[]) {
     spdlog::set_pattern("[%D %T.%f] [%^%L%$] [%t] %v");
     vol_uuid        = SDS_OPTIONS["vol_uuid"].as<std::string>();
     blkid           = SDS_OPTIONS["blkid"].as<uint64_t>();
-    nblks           = SDS_OPTIONS["nblks"].as<uint8_t>();
-    chunk           = SDS_OPTIONS["chunk"].as<uint16_t>();
     print_checksum  = SDS_OPTIONS["print_checksum"].as<uint32_t>();
     cleanup_devices = SDS_OPTIONS["cleanup_devices"].as<uint32_t>();
 

@@ -182,8 +182,7 @@ public:
     void init_done(std::error_condition err, const out_params& params);
 
     void print_tree(const VolumePtr& vol, bool chksum = true);
-    void print_node(const VolumePtr& vol, uint64_t id,
-                uint8_t nblks, uint16_t chunk_num, bool chksum = true);
+    void print_node(const VolumePtr& vol, uint64_t blkid, bool chksum = true);
 
 #ifndef NDEBUG
     void verify_pending_blks(const VolumePtr& vol);
