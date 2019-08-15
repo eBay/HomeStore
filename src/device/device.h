@@ -54,12 +54,19 @@ struct pdevs_block {
     uint32_t num_phys_devs; // Total number of physical devices in the entire system
     uint32_t max_phys_devs;
     uint64_t info_offset;
+
+    uint64_t get_magic() const { return magic; }
+    uint32_t get_num_phys_devs() const { return num_phys_devs; }
 } __attribute((packed));
 
 struct pdev_info_block {
     uint32_t dev_num;        // Device ID for this store instance.
     uint32_t first_chunk_id; // First chunk id for this physical device
     uint64_t dev_offset;     // Start offset of the device in global offset
+
+    uint32_t get_dev_num() const { return dev_num; }
+    uint32_t get_first_chunk_id() const { return first_chunk_id; }
+    uint64_t get_dev_offset() const { return dev_offset; }
 } __attribute((packed));
 
 /************* chunk Info Block definition ******************/
@@ -69,6 +76,9 @@ struct chunks_block {
     uint32_t num_chunks; // Number of physical chunks for this block
     uint32_t max_num_chunks;
     uint64_t info_offset;
+
+    uint64_t get_magic() const { return magic; }
+    uint32_t get_num_chunks() const { return num_chunks; }
 } __attribute((packed));
 
 struct chunk_info_block {
@@ -82,6 +92,10 @@ struct chunk_info_block {
     uint32_t primary_chunk_id;   // Valid chunk id if this is a mirror of some chunk
     bool     slot_allocated;     // Is this slot allocated for any chunks.
     bool     is_sb_chunk;        // This chunk is not assigned to any vdev but super block
+
+    uint64_t get_chunk_size() const { return chunk_size; }
+    uint32_t get_chunk_id() const { return chunk_id; }
+    bool     is_slot_allocated() const { return slot_allocated; }
 } __attribute((packed));
 
 /************* Vdev Info Block definition ******************/
@@ -94,6 +108,10 @@ struct vdevs_block {
     uint32_t first_vdev_id; // First vdev id / Head of the vdev list;
     uint64_t info_offset;
     uint32_t context_data_size;
+
+    uint32_t get_num_vdevs() const { return num_vdevs; }
+    uint64_t get_magic() const { return magic; }
+    uint32_t get_first_vdev_id() const { return first_vdev_id; }
 } __attribute((packed));
 
 struct vdev_info_block {
@@ -107,6 +125,9 @@ struct vdev_info_block {
     bool     failed;                            // set to true if disk is replaced
     char     context_data[MAX_CONTEXT_DATA_SZ]; // Application dependent context data
     uint32_t num_primary_chunks;
+
+    uint32_t get_vdev_id() const { return vdev_id; }
+    uint64_t get_size() const { return size; }
 } __attribute((packed));
 
 /*******************Super Block Definition*******************/
@@ -121,19 +142,26 @@ struct super_block {
     pdev_info_block    this_dev_info; // Info about this device itself
     chunk_info_block   dm_chunk[2];   // chunk info blocks
     boost::uuids::uuid system_uuid;
+
+    uint64_t get_magic() const { return magic; }
 } __attribute((packed));
 #define SUPERBLOCK_SIZE (HomeStoreConfig::atomic_phys_page_size)
 #define SUPERBLOCK_PAYLOAD_OFFSET 10
 
 struct dm_info {
     /* header of pdev, chunk and vdev */
-    uint64_t     magic; // Header magic expected to be at the top of block
+    uint64_t     magic;    // Header magic expected to be at the top of block
     uint16_t     checksum; // Payload Checksum
     uint32_t     version;
     uint64_t     size;
     pdevs_block  pdev_hdr;
     chunks_block chunk_hdr;
     vdevs_block  vdev_hdr;
+
+    uint64_t get_magic() const { return magic; }
+    uint64_t get_size() const { return size; }
+    uint32_t get_version() const { return version; }
+    uint16_t get_checksum() const { return checksum; }
 } __attribute((packed));
 
 #define PDEV_INFO_BLK_OFFSET sizeof(dm_info)
@@ -269,12 +297,12 @@ public:
     PhysicalDev(DeviceManager* mgr, const std::string& devname, int const oflags, std::shared_ptr< iomgr::ioMgr > iomgr,
                 homeio::comp_callback& cb, boost::uuids::uuid& uuid, uint32_t dev_num, uint64_t dev_offset,
                 uint32_t is_file, bool is_init, uint64_t dm_info_size, bool* is_inited);
-    ~PhysicalDev(); 
+    ~PhysicalDev();
 
     void     update(uint32_t dev_num, uint64_t dev_offset, uint32_t first_chunk_id);
     void     attach_superblock_chunk(PhysicalDevChunk* chunk);
     uint64_t sb_gen_cnt();
-    size_t get_total_cap();
+    size_t   get_total_cap();
 
     int                 get_devfd() const { return m_devfd; }
     std::string         get_devname() const { return m_devname; }
@@ -334,22 +362,22 @@ private:
     bool validate_device();
 
 private:
-    static homeio::DriveEndPoint*   m_ep; // one instance for all physical devices
+    static homeio::DriveEndPoint* m_ep; // one instance for all physical devices
 
-    DeviceManager*                  m_mgr; // Back pointer to physical device
-    int                             m_devfd;
-    std::string                     m_devname;
-    super_block*                    m_super_blk; // Persisent header block
-    uint64_t                        m_devsize;
-    homeio::comp_callback           m_comp_cb;
-    std::shared_ptr< iomgr::ioMgr > m_iomgr;
-    struct pdev_info_block          m_info_blk;
-    PhysicalDevChunk*               m_dm_chunk[2];
-    PhysicalDevMetrics              m_metrics; // Metrics instance per physical device
-    int                             m_cur_indx;
-    bool                            m_superblock_valid;
-    boost::uuids::uuid              m_system_uuid;
-    sisl::atomic_counter<uint64_t>  m_error_cnt;
+    DeviceManager*                   m_mgr; // Back pointer to physical device
+    int                              m_devfd;
+    std::string                      m_devname;
+    super_block*                     m_super_blk; // Persisent header block
+    uint64_t                         m_devsize;
+    homeio::comp_callback            m_comp_cb;
+    std::shared_ptr< iomgr::ioMgr >  m_iomgr;
+    struct pdev_info_block           m_info_blk;
+    PhysicalDevChunk*                m_dm_chunk[2];
+    PhysicalDevMetrics               m_metrics; // Metrics instance per physical device
+    int                              m_cur_indx;
+    bool                             m_superblock_valid;
+    boost::uuids::uuid               m_system_uuid;
+    sisl::atomic_counter< uint64_t > m_error_cnt;
 };
 
 class AbstractVirtualDev {
@@ -360,23 +388,23 @@ public:
 class DeviceManager {
     typedef std::function< void(DeviceManager*, vdev_info_block*) > NewVDevCallback;
     typedef std::function< void(PhysicalDevChunk*) >                chunk_add_callback;
-    typedef std::function< void (vdev_info_block *) > vdev_error_callback;
+    typedef std::function< void(vdev_info_block*) >                 vdev_error_callback;
 
     friend class PhysicalDev;
     friend class PhysicalDevChunk;
 
 public:
     DeviceManager(NewVDevCallback vcb, uint32_t const vdev_metadata_size, std::shared_ptr< iomgr::ioMgr > iomgr,
-                  homeio::comp_callback comp_cb, bool is_file, boost::uuids::uuid system_uuid, 
+                  homeio::comp_callback comp_cb, bool is_file, boost::uuids::uuid system_uuid,
                   vdev_error_callback vdev_error_cb);
 
-    ~DeviceManager(); 
+    ~DeviceManager();
 
     /* Initial routine to call upon bootup or everytime new physical devices to be added dynamically */
-    void add_devices(std::vector< dev_info >& devices, bool is_init);
+    void   add_devices(std::vector< dev_info >& devices, bool is_init);
     size_t get_total_cap(void);
-    #define MAX_ERROR_CNT 1000
-    void handle_error(PhysicalDev *pdev);
+#define MAX_ERROR_CNT 1000
+    void handle_error(PhysicalDev* pdev);
 
     /* This is not very efficient implementation of get_all_devices(), however, this is expected to be called during
      * the start of the devices and for that purpose its efficient enough */

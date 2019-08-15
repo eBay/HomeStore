@@ -126,6 +126,7 @@ public:
 
     BtreeStore(BtreeConfig& cfg, void* btree_specific_context, comp_callback comp_cbt, bool is_in_recovery) {
         m_comp_cb = comp_cbt;
+        DEBUG_ASSERT((m_comp_cb != nullptr), "Expected m_comp_cb to valid");
         assert(comp_cbt);
         assert(m_comp_cb);
         m_is_in_recovery = is_in_recovery;

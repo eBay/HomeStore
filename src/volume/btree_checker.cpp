@@ -53,7 +53,7 @@ void wait_cmpl() {
 }
 
 nlohmann::json get_config() {
-    std::ifstream in("/tmp/hs_config.json");
+    std::ifstream in("hs_config.json");
     if (!in.is_open()) {
         return nullptr;
     }
