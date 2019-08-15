@@ -141,7 +141,7 @@ def vol_io_fail_test():
     
     print("vol io fail test recovery started")
     status = subprocess.check_call(dirpath + "test_volume \
-                --gtest_filter=IOTest.recovery_io_test --run_time=300", shell=True)
+                --gtest_filter=IOTest.recovery_io_test --run_time=300 --verify_data=0", shell=True)
     if status == True:
         print("vol io fail recevery test failed")
         sys.exit(0)
