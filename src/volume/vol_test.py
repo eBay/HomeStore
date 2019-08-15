@@ -41,18 +41,18 @@ def recovery():
 
 def normal():
     print("normal test started")
-    status = subprocess.check_output(dirpath + "test_volume \
+    status = subprocess.check_call(dirpath + "test_volume \
             --run_time=12000 --max_num_writes=5000000 --gtest_filter=IOTest.init_io_test --remove_file=0", shell=True)
     print("normal test completed")
-    if status == False:
+    if status == True:
         sys.exit(0)
 
 def load():
     print("load test started")
-    status = subprocess.check_output(dirpath + "test_load \
+    status = subprocess.check_call(dirpath + "test_load \
             --num_io=100000000000 --num_keys=1000000 --run_time=21600 --gtest_filter=Map* ", shell=True)
     print("load test completed")
-    if status == False:
+    if status == True:
         sys.exit(0)
 
 def recovery_nightly():
@@ -65,16 +65,18 @@ def recovery_nightly():
         print(s)
         i += 1
     
-    if (subprocess.check_call(dirpath + "test_volume --gtest_filter=IOTest.recovery_io_test \
-            --run_time=300 --remove_file=0", shell=True)) == False:
+    status = subprocess.check_call(dirpath + "test_volume --gtest_filter=IOTest.recovery_io_test \
+            --run_time=300 --remove_file=0", shell=True)
+    if status == True:
         print("recovery test failed")
         sys.exit(0)
     print("recovery test completed")
 
 def one_disk_replace():
     print("one disk replace test started");
-    if (subprocess.check_call(dirpath + "test_volume --gtest_filter=IOTest.one_disk_replace_test \
-            --run_time=300 --remove_file=0 --verify_hdr=0 --verify_data=0", shell=True)) == FALSE:
+    status = subprocess.check_call(dirpath + "test_volume --gtest_filter=IOTest.one_disk_replace_test \
+            --run_time=300 --remove_file=0 --verify_hdr=0 --verify_data=0", shell=True)
+    if status == True:
         print("recovery test with one disk replace failed")
         sys.exit(0)
     print("recovery test with one disk replace passed")
@@ -83,39 +85,46 @@ def one_disk_replace_abort():
     print("recovery abort with one disk replace started")
     subprocess.call(dirpath + "test_volume --gtest_filter=IOTest.one_disk_replace_abort_test \
           --run_time=300 --remove_file=0 --verify_hdr=0 --verify_data=0 --enable_crash_handler=0", shell=True)
-    if (subprocess.check_call(dirpath + "test_volume --gtest_filter=IOTest.recovery_io_test \
-           --run_time=300 --remove_file=0 --verify_hdr=0 --verify_data --expected_vol_state=2", shell=True)) == FALSE:
+    status = subprocess.check_call(dirpath + "test_volume --gtest_filter=IOTest.recovery_io_test \
+          --run_time=300 --remove_file=0 --verify_hdr=0 --verify_data=0 --expected_vol_state=2", shell=True)
+    if status == True:
         print("recovery abort with one disk replace failed")
         sys.exit(0)
     print("recovery abort with one disk replace passed")
 
 def both_disk_replace():
     print("Both disk replace started")
-    if (subprocess.check_call(dirpath + "test_volume \
-                    --gtest_filter=IOTest.two_disk_replace_test --run_time=300", shell=True)) == FALSE:
+    status = subprocess.check_call(dirpath + "test_volume \
+                    --gtest_filter=IOTest.two_disk_replace_test --run_time=300", shell=True)
+    if status == True:
         print("Both disk replace failed")
         sys.exit(0)
+    status = subprocess.check_call(dirpath + "test_volume \
+            --run_time=300 --max_num_writes=5000000 --gtest_filter=IOTest.init_io_test --remove_file=0", shell=True)
     print("Both disk replace passed")
 
 def one_disk_fail():
     print("one disk fail test started")
-    if (subprocess.check_call(dirpath + "test_volume \
-                    --gtest_filter=IOTest.one_disk_fail_test --run_time=300", shell=True)) == FALSE:
+    status = subprocess.check_call(dirpath + "test_volume \
+                    --gtest_filter=IOTest.one_disk_fail_test --run_time=300", shell=True)
+    if status == True:
         print("Both disk replace failed")
         sys.exit(0)
     print("one disk fail test passed")
 
 def vol_offline_test():
     print("vol offline test started")
-    if (subprocess.check_call(dirpath + "test_volume \
-                --gtest_filter=IOTest.vol_offline_test --run_time=300", shell=True)) == FALSE:  
+    status = subprocess.check_call(dirpath + "test_volume \
+                --gtest_filter=IOTest.vol_offline_test --run_time=300", shell=True)
+    if status == True:
         print("vol offline test failed")
         sys.exit(0)
     print("vol offline test passed")
     
     print("vol offline test recovery started")
-    if (subprocess.check_call(dirpath + "test_volume \
-                --gtest_filter=IOTest.recovery_io_test --run_time=300 --expected_vol_state=1", shell=True)) == FALSE:  
+    status = subprocess.check_call(dirpath + "test_volume \
+                --gtest_filter=IOTest.recovery_io_test --run_time=300 --expected_vol_state=1", shell=True)
+    if status == True:
         print("vol offline test recovery failed")
         sys.exit(0)
     print("vol offline test recovery passed")
@@ -123,23 +132,26 @@ def vol_offline_test():
 def vol_io_fail_test():
     print("vol io fail test started")
     
-    if (subprocess.check_call(dirpath + "test_volume \
-                --gtest_filter=IOTest.vol_io_fail_test --run_time=300", shell=True)) == FALSE:  
+    status = subprocess.check_call(dirpath + "test_volume \
+                --gtest_filter=IOTest.vol_io_fail_test --run_time=300 --remove_file=0", shell=True)
+    if status == True:
         print("vol io fail test failed")
         sys.exit(0)
     print("vol io test test passed")
     
     print("vol io fail test recovery started")
-    if (subprocess.check_call(dirpath + "test_volume \
-                --gtest_filter=IOTest.recovery_io_test --run_time=300", shell=True)) == FALSE:  
+    status = subprocess.check_call(dirpath + "test_volume \
+                --gtest_filter=IOTest.recovery_io_test --run_time=300", shell=True)
+    if status == True:
         print("vol io fail recevery test failed")
         sys.exit(0)
     print("vol io fail test recovery passed")
 
 def vol_create_del_test():
     print("create del vol test started")
-    if subprocess.check_call(dirpath + "test_volume \
-                             --gtest_filter=IOTest.normal_vol_create_del_test --max_vols=10000", shell=True) == False:
+    status = subprocess.check_call(dirpath + "test_volume \
+                             --gtest_filter=IOTest.normal_vol_create_del_test --max_vols=10000", shell=True)
+    if status == True:
          print("create del vol test failed")
          sys.exit(0)
     print("create del vol test passed")
