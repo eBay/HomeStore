@@ -1,6 +1,7 @@
 set(VOLUME_SOURCE_FILES
        volume.cpp
        home_blks.cpp
+       blk_read_tracker.cpp
       )
 add_library(hs_volume OBJECT ${VOLUME_SOURCE_FILES})
 

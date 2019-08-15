@@ -36,7 +36,7 @@ class HomestoreConan(ConanFile):
                 "iomgr/2.2.8@sds/develop",
                 "libevent/2.1.10@bincrafters/stable",
                 "sisl/0.3.6@sisl/develop",
-                "sds_logging/5.2.0@sds/testing",
+                "sds_logging/5.3.2@sds/develop",
                 "sds_options/0.1.5@sds/testing",
                 ("zstd/1.3.8@bincrafters/stable", "override"), # Just here for build, not a direct dependency
                 )
