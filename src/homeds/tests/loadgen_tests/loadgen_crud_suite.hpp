@@ -132,19 +132,21 @@ struct BtreeLoadGen {
     void do_sub_range_test() {
         // We do inserts then issue large range update to test inner node fanout
         // also add flips to simulate split while in fanout
-
-        kvg->preload(KeyPattern::SEQUENTIAL, ValuePattern::SEQUENTIAL_VAL, get_warmup_key_count(100));
+        int64_t kc = get_warmup_key_count(100);
+        kvg->preload(KeyPattern::SEQUENTIAL, ValuePattern::SEQUENTIAL_VAL, kc);
+        stored_keys += kc;
+        assert(kvg->get_keys_count() == (uint64_t)kc);
         kvg->reset_pattern(KeyPattern::SEQUENTIAL, 0);
-        
+
         FlipClient fc(HomeStoreFlip::instance());
         FlipFrequency freq;
         freq.set_count(1);
         freq.set_percent(100);
         fc.inject_noreturn_flip("btree_leaf_node_split", { }, freq);
-        
+
         kvg->run_parallel([&]() {
             // single range update over entire tree
-            for(int i = 0; i < get_warmup_key_count(100); i+= UPDATE_RANGE_BATCH_SIZE) {
+            for (int i = 0; i < kc; i += UPDATE_RANGE_BATCH_SIZE) {
                 kvg->range_update(KeyPattern::SEQUENTIAL, ValuePattern::SEQUENTIAL_VAL, UPDATE_RANGE_BATCH_SIZE, true,
                                   true, true);
             }
