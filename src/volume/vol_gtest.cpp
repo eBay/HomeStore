@@ -981,10 +981,12 @@ start:
         while (outstanding_ios.load() != 0) {
             m_cv.wait(lk);
         }
+        LOGINFO("stopping iomgr");
         if (iomgr_start) {
             iomgr_obj->stop();
         }
         vol_info.clear();
+        LOGINFO("shutting homestore");
         VolInterface::get_instance()->shutdown(std::bind(&IOTest::shutdown_callback, this, std::placeholders::_1));
     }
 };

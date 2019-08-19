@@ -276,6 +276,7 @@ std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
         // volume destructor will be called since the user_count of share_ptr 
         // will drop to zero while going out of this scope;
         std::error_condition no_err;
+        LOGINFO("volume will be deleted name : {}", cur_vol->get_name());
         return no_err;
     } catch (std::exception& e) {
         LOGERROR("{}", e.what());
@@ -1049,6 +1050,7 @@ std::error_condition HomeBlks::shutdown(shutdown_comp_callback shutdown_comp_cb,
         LOGINFO("shutdown thread already started;");
         return no_error;
     }
+    LOGINFO("shutting down the homestore");
     started = true;
     
     m_shutdown = true;
