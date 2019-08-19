@@ -967,7 +967,7 @@ void HomeBlks::shutdown_process(shutdown_comp_callback shutdown_comp_cb, bool fo
                         LOGERROR("Shutdown timeout for {} seconds, trigger force shutdown. ", SHUTDOWN_TIMEOUT_NUM_SECS);
                     }
                     // trigger dump on debug mode
-                    assert(0);
+                    assert(force);
 
                     // in release mode, just forcely free 
                     // Force trigger every Volume's destructor when there 

@@ -343,8 +343,10 @@ public:
         /* create volume */
         if (err) {
             assert(expected_init_fail);
-            std::unique_lock< std::mutex > lk(m_mutex);
-            m_init_done_cv.notify_all();
+            {
+                std::unique_lock< std::mutex > lk(m_mutex);
+                m_init_done_cv.notify_all();
+            }
             notify_cmpl();
             return;
         }
@@ -395,14 +397,15 @@ public:
     void vol_create_del() {
         while (1) {
             {
-                std::unique_lock< std::mutex > lk(m_mutex);
                 if (vol_create_cnt >= max_vols && vol_del_cnt >= max_vols) {
-                    if (!outstanding_ios.load()) {
-                        notify_cmpl();
-                     }
+                    notify_cmpl();
                     return;
                 }
-                outstanding_ios++;
+
+                std::unique_lock< std::mutex > lk(m_mutex);
+                if (!io_stalled) {
+                    outstanding_ios++;
+                }
             }
             create_volume();
             vol_create_cnt++;
@@ -439,7 +442,6 @@ public:
         /* send 8 IOs in one schedule */
         while (cnt < 8 && outstanding_ios < max_outstanding_ios) {
             {
-                std::unique_lock< std::mutex > lk(m_mutex);
                 if (io_stalled) {
                     break;
                 }
@@ -581,6 +583,14 @@ start:
         if (vol == nullptr) {
             return;
         }
+        {
+            std::unique_lock< std::mutex > lk(m_mutex);
+            if (io_stalled) {
+                return;
+            } else {
+                ++outstanding_ios;
+            }
+        }
         uint64_t size = nblks * VolInterface::get_instance()->get_page_size(vol);
         auto ret = posix_memalign((void **) &buf, 4096, size);
         if (ret) {
@@ -606,7 +616,7 @@ start:
         req->fd = vol_info[cur]->fd;
         req->is_read = false;
         req->cur_vol = cur;
-        ++outstanding_ios;
+        
         ++write_cnt;
         ret = pwrite(vol_info[cur]->staging_fd, req->buf, req->size, req->offset);
         assert(ret == req->size);
@@ -673,6 +683,14 @@ start:
         if (vol == nullptr) {
             return;
         }
+        {
+            std::unique_lock< std::mutex > lk(m_mutex);
+            if (io_stalled) {
+                return;
+            } else {
+                ++outstanding_ios;
+            }
+        }
         uint64_t size = nblks * VolInterface::get_instance()->get_page_size(vol);
         auto ret = posix_memalign((void **) &buf, 4096, size);
         if (ret) {
@@ -688,7 +706,6 @@ start:
         req->offset = lba * VolInterface::get_instance()->get_page_size(vol);
         req->buf = buf;
         req->cur_vol = cur;
-        outstanding_ios++;
         read_cnt++;
         auto ret_io = VolInterface::get_instance()->read(vol, lba, nblks, req);
         if (ret_io != no_error) {
@@ -866,7 +883,7 @@ start:
             }
         }
 
-        --outstanding_ios;
+        outstanding_ios--;
         if (verify_done && is_abort) {
             if ((get_elapsed_time(startTime) > (random() % run_time))) {
                 abort();
@@ -874,12 +891,7 @@ start:
         }
 
         if (verify_done && ((get_elapsed_time(startTime) > run_time))) {
-            LOGINFO("ios cmpled {}. waiting for outstanding ios to be completed", write_cnt.load());
-            io_stalled = true;
-            std::unique_lock< std::mutex > lk(m_mutex);
-            if (outstanding_ios.load() == 0) {
-                notify_cmpl();
-            }
+            notify_cmpl();
         } else {
             [[maybe_unused]] auto rsize = read(ev_fd, &temp, sizeof(uint64_t));
             uint64_t size = write(ev_fd, &temp, sizeof(uint64_t));
@@ -895,7 +907,8 @@ start:
     }
 
     void notify_cmpl() {
-        cmpl_done_signaled = true;
+        std::unique_lock< std::mutex > lk(m_mutex);
+        io_stalled = true;
         m_cv.notify_all();
     }
 
@@ -906,7 +919,7 @@ start:
 
     void wait_cmpl() {
         std::unique_lock< std::mutex > lk(m_mutex);
-        if (cmpl_done_signaled) {
+        if (io_stalled) {
             return;
         }
         m_cv.wait(lk);
@@ -962,10 +975,15 @@ start:
 
     void shutdown() {
         // release the ref_count to volumes;
+        
+        std::unique_lock< std::mutex > lk(m_mutex);
+        assert(io_stalled);
+        while (outstanding_ios.load() != 0) {
+            m_cv.wait(lk);
+        }
         if (iomgr_start) {
             iomgr_obj->stop();
         }
-        std::unique_lock< std::mutex > lk(m_mutex);
         vol_info.clear();
         VolInterface::get_instance()->shutdown(std::bind(&IOTest::shutdown_callback, this, std::placeholders::_1));
     }
