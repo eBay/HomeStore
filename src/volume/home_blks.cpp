@@ -19,7 +19,11 @@ VolInterface* homestore::vol_homestore_init(const init_params& cfg) { return (Ho
 VolInterface* HomeBlks::init(const init_params& cfg) {
     fLI::FLAGS_minloglevel = 3;
 
-    LOGINFO("HomeBlks version: {}", HomeBlks::version);
+#ifndef NDEBUG
+    LOGINFO("HomeBlks DEBUG version: {}", HomeBlks::version);
+#else
+    LOGINFO("HomeBlks RELEASE version: {}", HomeBlks::version);
+#endif
     _instance = new HomeBlks(cfg);
     return ((VolInterface*)(_instance));
 }
