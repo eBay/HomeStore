@@ -1339,6 +1339,16 @@ retry:
         curr_ind = start_ind;
 
         while (curr_ind <= end_ind) { // iterate all matched childrens
+
+#ifdef _PRERELEASE
+            if (curr_ind - start_ind > 1 &&
+                homestore_flip->test_flip("btree_leaf_node_split")) {
+                LOGINFO("btree_leaf_node_split flip is set");
+                ret = btree_status_t::retry;
+                goto out;
+            }
+#endif
+
             homeds::thread::locktype child_cur_lock = homeds::thread::LOCKTYPE_NONE;
 
             // Get the childPtr for given key.

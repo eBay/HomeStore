@@ -148,6 +148,7 @@ struct MapTest : public testing::Test {
 
     void init_done_cb(std::error_condition err, const homeds::out_params& params1) {
         loadgen->initParam(parameters); // internally inits mapping
+        loadgen->specific_tests(SPECIFIC_TEST::MAP);
         LOGINFO("Regression Started");
         loadgen->regression(true, false, true, true);
         is_complete = true;
