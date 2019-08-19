@@ -1438,11 +1438,6 @@ retry:
                 assert(child_node->m_common_header.is_lock);
             }
 #endif
-            K cur_range_ekey;
-            if (bur) {
-                /* this would be the new start key after this range is inserted */
-                cur_range_ekey.copy_blob(const_cast<BtreeKey *>(bur->get_cb_param()->get_sub_range().get_end_key())->get_blob());
-            }
 
             ret = do_put(child_node, child_cur_lock, k, v, ind_hint, put_type,
                                   existing_val, multinode_req, bur);
