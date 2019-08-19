@@ -1,11 +1,14 @@
 #include "homeds/loadgen/loadgen_common.hpp"
-
+using namespace flip;
 namespace homeds::loadgen {
+enum SPECIFIC_TEST {
+    MAP = 0,
+};
 class Param {
 public:
-    uint64_t          NIO, NK, NRT;             // total ios and total keys
-    int               PC, PR, PU, PD, PRU, PRQ; // total % for op
-    uint64_t          PRINT_INTERVAL, WST;
+    uint64_t          NIO{}, NK{}, NRT{};                   // total ios and total keys
+    int               PC{}, PR{}, PU{}, PD{}, PRU{}, PRQ{}; // total % for op
+    uint64_t          PRINT_INTERVAL{}, WST{};
     uint64_t          WARM_UP_KEYS = 0;
     uint8_t           NT = 0; // num of threads
     Clock::time_point startTime;
@@ -24,8 +27,8 @@ struct BtreeLoadGen {
     std::condition_variable m_cv;
     Param                   p;
 
-    BtreeLoadGen(uint8_t n_threads, bool verification = true){
-        kvg = std::make_unique<KVGenerator<K,V,Store,Executor>>(n_threads, verification);
+    explicit BtreeLoadGen(uint8_t n_threads, bool verification = true) {
+        kvg = std::make_unique< KVGenerator< K, V, Store, Executor > >(n_threads, verification);
     }
     std::atomic< int64_t > C_NC = 0, C_NR = 0, C_NU = 0, C_ND = 0, C_NRU = 0, C_NRQ = 0; // current op issued counter
 
@@ -110,22 +113,50 @@ struct BtreeLoadGen {
                 kvg->remove(KeyPattern::UNI_RANDOM, true, true);
             }
         });
-        
+
         kvg->remove_all_keys();
     }
 
     void initParam(homeds::loadgen::Param& parameters) {
-        //reset times so as runtime is based on start of each test.
-        //workload shift is also based on each test instead of global
+        // reset times so as runtime is based on start of each test.
+        // workload shift is also based on each test instead of global
         parameters.startTime = Clock::now();
         parameters.print_startTime = Clock::now();
         parameters.workload_shiftTime = Clock::now();
-        
+
         this->p = parameters;
         kvg->set_max_keys(p.NK);
         kvg->init_generator();
     }
 
+    void do_sub_range_test() {
+        // We do inserts then issue large range update to test inner node fanout
+        // also add flips to simulate split while in fanout
+        int64_t kc = get_warmup_key_count(100);
+        kvg->preload(KeyPattern::SEQUENTIAL, ValuePattern::SEQUENTIAL_VAL, kc);
+        stored_keys += kc;
+        assert(kvg->get_keys_count() == (uint64_t)kc);
+        kvg->reset_pattern(KeyPattern::SEQUENTIAL, 0);
+
+        FlipClient fc(HomeStoreFlip::instance());
+        FlipFrequency freq;
+        freq.set_count(1);
+        freq.set_percent(100);
+        fc.inject_noreturn_flip("btree_leaf_node_split", { }, freq);
+
+        kvg->run_parallel([&]() {
+            // single range update over entire tree
+            for (int i = 0; i < kc; i += UPDATE_RANGE_BATCH_SIZE) {
+                kvg->range_update(KeyPattern::SEQUENTIAL, ValuePattern::SEQUENTIAL_VAL, UPDATE_RANGE_BATCH_SIZE, true,
+                                  true, true);
+            }
+        });
+    }
+    void specific_tests(SPECIFIC_TEST st) {
+        if (st == SPECIFIC_TEST::MAP) {
+            do_sub_range_test();
+        }
+    }
     void warmup(bool update_allowed, bool remove_allowed, bool range_update_allowed, bool range_query_allowed) {
         // basic serialized tests
         do_inserts();
@@ -334,7 +365,6 @@ struct BtreeLoadGen {
         return -1;
     }
 
-
     int  half = 50, full = 100;
     void try_shift_workload() {
         if (get_elapsed_time(p.workload_shiftTime) > p.WST) {
@@ -352,5 +382,4 @@ struct BtreeLoadGen {
         }
     }
 };
-}
-
+} // namespace homeds::loadgen
