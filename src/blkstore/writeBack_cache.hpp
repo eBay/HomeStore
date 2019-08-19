@@ -79,7 +79,7 @@ struct WriteBackCacheBuffer : public CacheBuffer< K > {
     /* TODO, it will be removed, once safe_evict is implmented */
 
     writeback_req_ptr last_pending_req;     /* latest pending req on this buffer */
-    writeback_req_ptr error_req;            /* latest req on which error is set */
+    bool error = false; // true if any write fail on this buffer
 
 #ifndef NDEBUG
     /* Queue of the pending requests on this buffer */
@@ -88,8 +88,7 @@ struct WriteBackCacheBuffer : public CacheBuffer< K > {
 
     WriteBackCacheBuffer() :
             gen_cnt(0),
-            last_pending_req(nullptr),
-            error_req(nullptr)
+            last_pending_req(nullptr)
 #ifndef NDEBUG
             ,
             pending_req_q()
@@ -97,7 +96,6 @@ struct WriteBackCacheBuffer : public CacheBuffer< K > {
                 {};
 
     virtual ~WriteBackCacheBuffer() {
-        error_req = NULL;
         assert(last_pending_req == nullptr);
 #ifndef NDEBUG
         assert(pending_req_q.empty());
@@ -231,9 +229,8 @@ public:
             wbc_buf->last_pending_req = nullptr;
         }
 
-        if (status != no_error) {
-            assert(wbc_buf->error_req == nullptr);
-            wbc_buf->error_req = wb_req;
+        if (status != no_error && !wbc_buf->error) {
+            wbc_buf->error = true;
             /* evict it from the cache. */
             m_cache->safe_erase(cache_buf, nullptr);
         }
@@ -279,11 +276,11 @@ public:
 
         writeback_req_ptr req;
         std::unique_lock< std::mutex > buf_mtx(wbc_buf->mtx);
-        if (wbc_buf->error_req != nullptr) {
+        if (wbc_buf->error) {
             /* previous request on this buffer is failed. All subsequent writes
              * need to be failed until it is evicted.
              */
-            req = wbc_buf->error_req;
+            throw homestore::homestore_exception("write_failed", homestore_error::dependent_req_failed);
         } else {
             req = wbc_buf->last_pending_req;
         }

@@ -198,6 +198,7 @@ private:
     uint32_t                                 m_num_chunks;
     comp_callback                            m_comp_cb;
     uint32_t                                 m_pagesz;
+    bool                                     m_recovery_init;
     std::atomic< uint64_t >                  m_used_size;
 
 public:
@@ -210,12 +211,14 @@ public:
         m_num_chunks = 0;
         m_pagesz = page_size;
         m_selector = std::make_unique< DefaultDeviceSelector >();
+        m_recovery_init = false;
     }
 
     /* Load the virtual dev from vdev_info_block and create a Virtual Dev. */
-    VirtualDev(DeviceManager* mgr, vdev_info_block* vb, comp_callback cb) {
+    VirtualDev(DeviceManager* mgr, vdev_info_block* vb, comp_callback cb, bool recovery_init) {
         init(mgr, vb, cb, vb->page_size);
 
+        m_recovery_init = recovery_init;
         m_mgr->add_chunks(vb->vdev_id, [this](PhysicalDevChunk* chunk) { add_chunk(chunk); });
 
         HS_ASSERT_CMP(LOGMSG, vb->num_primary_chunks * (vb->num_mirrors + 1), ==,
@@ -671,7 +674,8 @@ private:
             m_selector->add_pdev(pcm.pdev);
         }
         HS_ASSERT_CMP(DEBUG, m_chunk_size, <=, MAX_CHUNK_SIZE);
-        std::shared_ptr< BlkAllocator > ba = create_allocator(m_chunk_size, chunk->get_chunk_id(), false);
+        std::shared_ptr< BlkAllocator > ba = create_allocator(m_chunk_size, chunk->get_chunk_id(), 
+                                                                m_recovery_init);
         chunk->set_blk_allocator(ba);
 
         /* set the same blk allocator to other mirror chunks */

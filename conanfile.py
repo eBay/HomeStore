@@ -33,7 +33,7 @@ class HomestoreConan(ConanFile):
                 "folly/2019.07.22.00@bincrafters/testing",
                 "gtest/1.8.1@bincrafters/stable",
                 "isa-l/2.21.0@oss/stable",
-                "iomgr/2.2.6@sds/testing",
+                "iomgr/2.2.8@sds/develop",
                 "libevent/2.1.10@bincrafters/stable",
                 "sisl/0.3.6@sisl/develop",
                 "sds_logging/5.3.2@sds/develop",

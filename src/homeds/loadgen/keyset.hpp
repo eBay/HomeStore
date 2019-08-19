@@ -519,24 +519,24 @@ private:
         _free_key(ki);
     }
 
-    std::shared_ptr< V > _generate_value(ValuePattern value_pattern, V* lst_value = nullptr) {
-        assert(value_pattern == ValuePattern::RANDOM_BYTES); // Seq not yet implmented
+    std::shared_ptr< V > _generate_value(ValuePattern value_pattern) {
+        
         std::shared_ptr< V > nv = nullptr;
         int                  trygen = 0;
         do {
-            // TODO - seq pattern is not yet implemented
             if (trygen++ == MAX_VALUE_RANGE) {
                 LOGERROR("Could not generate values!!!");
                 assert(0);
             }
-
-            nv = std::make_shared< V >(V::gen_value(value_pattern, lst_value));
+        
+            nv = std::make_shared< V >(V::gen_value(value_pattern, _get_last_gen_value(value_pattern)));
         } while (has_value(nv));
         auto result = m_value_set.insert(nv);
         if (result.second == false) {
             LOGERROR("generated value is not unique!");
             assert(0);
         }
+        _set_last_gen_value(nv);
         LOGDEBUG("Generated value:{}", nv->to_string());
         return nv;
     }
@@ -669,6 +669,14 @@ private:
         return &m_keys[last_slot]->m_key;
     }
 
+    V* _get_last_gen_value(ValuePattern pattern) {
+        return m_last_gen_value.get();
+    }
+    
+    void _set_last_gen_value(std::shared_ptr< V >  value) {
+        m_last_gen_value = value;
+    }
+
     void _set_last_gen_slot(KeyPattern pattern, size_t slot) {
         m_last_gen_slots[pattern].store(slot, std::memory_order_relaxed);
     }
@@ -773,6 +781,7 @@ private:
     std::set< key_info< K, V >*, compare_key_info< K, V > > m_data_set;
     std::set< std::shared_ptr< V >, compare_value >         m_value_set; // actual values
     int32_t                                                 m_ndirty = 0;
+    std::shared_ptr< V >                                    m_last_gen_value = nullptr;
 
     key_info< K, V >                                           m_invalid_ki;
     std::array< std::atomic< int32_t >, KEY_PATTERN_SENTINEL > m_last_gen_slots;
