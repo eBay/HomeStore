@@ -57,6 +57,8 @@ bool read_verify = false;
 uint32_t load_type = 0;
 uint32_t remove_file = 1;
 uint32_t expected_vol_state = 0;
+uint32_t verify_only = 0;
+uint32_t is_abort = 0;
 #define VOL_PAGE_SIZE 4096
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
@@ -129,7 +131,6 @@ protected:
     uint64_t max_vol_size;
     bool verify_done;
     bool move_verify_to_done;
-    bool is_abort;
     bool shutdown_on_reboot;
     bool vol_create_del_test;
     int disk_replace_cnt = 0;
@@ -148,7 +149,7 @@ protected:
     bool iomgr_start = false;
 
 public:
-    IOTest():vol_info(0), device_info(0), is_abort(false), staging_match_cnt(0) {
+    IOTest():vol_info(0), device_info(0), staging_match_cnt(0) {
         vol_cnt = 0;
         cur_vol = 0;
         max_vol_size = 0;
@@ -826,6 +827,10 @@ public:
                 verify_done = true;
                 LOGINFO("verfication from the staging file for {} number of blks", staging_match_cnt.load());
                 LOGINFO("verify is done. starting IOs");
+                if (verify_only) {
+                    notify_cmpl();
+                    return;
+                }
                 startTime = Clock::now();
                 [[maybe_unused]] auto rsize = read(ev_fd, &temp, sizeof(uint64_t));
                 uint64_t size = write(ev_fd, &temp, sizeof(uint64_t));
@@ -836,11 +841,14 @@ public:
         }
 
         --outstanding_ios;
-        if (verify_done && ((get_elapsed_time(startTime) > run_time))) {
-            LOGINFO("ios cmpled {}. waiting for outstanding ios to be completed", write_cnt.load());
-            if (is_abort) {
+        if (verify_done && is_abort) {
+            if ((get_elapsed_time(startTime) > (random() % run_time))) {
                 abort();
             }
+        }
+
+        if (verify_done && ((get_elapsed_time(startTime) > run_time))) {
+            LOGINFO("ios cmpled {}. waiting for outstanding ios to be completed", write_cnt.load());
             io_stalled = true;
             if (io_scheduling_cnt.load() != 0) {
                 /* wait for threads to finish */
@@ -995,25 +1003,6 @@ TEST_F(IOTest, recovery_io_test) {
     }
 }
 
-
-/************ Below tests does IO and exit with abort. ****************/ 
-
-TEST_F(IOTest, init_abort_io_test) {
-    this->init = true;
-    this->is_abort = true;
-    this->start_homestore();
-    this->wait_cmpl();
-    LOGINFO("write_cnt {}", write_cnt);
-    LOGINFO("read_cnt {}", read_cnt);
-}
-
-TEST_F(IOTest, recovery_abort_io_test) {
-    this->init = false;
-    this->is_abort = true;
-    this->start_homestore();
-    this->wait_cmpl();
-}
-
 /************ Below tests delete volumes. Should exit with clean shutdown. ***********/ 
 
 TEST_F(IOTest, vol_create_del_test) {
@@ -1139,7 +1128,9 @@ SDS_OPTION_GROUP(test_volume,
 (read_verify, "", "read_verify", "read verification for each write", ::cxxopts::value<uint64_t>()->default_value("0"), "0 or 1"),
 (enable_crash_handler, "", "enable_crash_handler", "enable crash handler 0 or 1", ::cxxopts::value<uint32_t>()->default_value("1"), "flag"),
 (remove_file, "", "remove_file", "remove file at the end of test 0 or 1", ::cxxopts::value<uint32_t>()->default_value("1"), "flag"),
-(expected_vol_state,"", "expected_vol_state", "volume state expected during boot", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"))
+(expected_vol_state,"", "expected_vol_state", "volume state expected during boot", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"),
+(verify_only,"", "verify_only", "verify only boot", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"),
+(abort,"", "abort", "abort", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"))
 
 
 #define ENABLED_OPTIONS logging, home_blks, test_volume
@@ -1174,6 +1165,8 @@ int main(int argc, char *argv[]) {
     load_type = SDS_OPTIONS["load_type"].as<uint32_t>();
     remove_file = SDS_OPTIONS["remove_file"].as<uint32_t>();
     expected_vol_state = SDS_OPTIONS["expected_vol_state"].as<uint32_t>();
+    verify_only = SDS_OPTIONS["verify_only"].as<uint32_t>();
+    is_abort = SDS_OPTIONS["abort"].as<uint32_t>();
     if (enable_crash_handler) sds_logging::install_crash_handler();
     return RUN_ALL_TESTS();
 }
