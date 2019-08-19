@@ -106,6 +106,10 @@ class IOTest :  public ::testing::Test {
        homeds::Bitset *m_vol_bm;
        uint64_t max_vol_blks;
        uint64_t cur_checkpoint;
+       std::atomic<uint64_t> start_lba;
+       std::atomic<uint64_t> start_large_lba; 
+       std::atomic<uint64_t> num_io;
+       vol_info_t() : start_lba(0), start_large_lba(0), num_io(0) {}; 
        ~vol_info_t() {delete m_vol_bm;}
     };
 
@@ -141,7 +145,6 @@ protected:
     std::atomic<uint64_t> vol_create_cnt;
     std::atomic<uint64_t> vol_del_cnt;
     std::atomic<uint64_t> vol_indx;
-    std::atomic<uint64_t> io_scheduling_cnt = 0;
     std::atomic<bool> io_stalled = false;
     homestore::vol_state m_expected_vol_state = homestore::vol_state::ONLINE;
     bool expected_init_fail = false;
@@ -421,18 +424,10 @@ public:
             return;
         }
 
-        io_scheduling_cnt++;
         if ((outstanding_ios.load() < max_outstanding_ios && io_stalled.load() == false)) {
             /* raise an event */
             iomgr_obj->fd_reschedule(fd, event);
         } else {
-            io_scheduling_cnt--;
-            if (!io_scheduling_cnt.load()) {
-                std::unique_lock< std::mutex > lk(m_mutex);
-                if (outstanding_ios.load() == 0) {
-                    notify_cmpl();
-                }
-            }
             return;
         }
 
@@ -456,13 +451,6 @@ public:
             ++cnt;
         }
         
-        io_scheduling_cnt--;
-        if (io_scheduling_cnt.load() == 0 && io_stalled.load() == true) {
-            std::unique_lock< std::mutex > lk(m_mutex);
-            if (outstanding_ios.load() == 0) {
-                notify_cmpl();
-            }
-        }
     }
     
     void write_io() {
@@ -483,6 +471,9 @@ public:
                 break;
             case 1:
                 same_read();
+                break;
+            case 2:
+                seq_write();
                 break;
         }
     }
@@ -513,6 +504,41 @@ public:
 
     void same_write() {
         write_vol(0, 5, 100);
+    }
+
+    void seq_write() { 
+        /* XXX: does it really matter if it is atomic or not */
+        int cur = ++cur_vol % max_vols;
+        uint64_t lba; 
+        uint64_t nblks;
+start:
+        /* we won't be writing more then 128 blocks in one io */
+        auto vol = vol_info[cur]->vol;
+        if (vol == nullptr) {
+            return;
+        }    
+        if (vol_info[cur]->num_io.fetch_add(1, std::memory_order_acquire) == 1000) {
+            nblks = 200; 
+            lba = (vol_info[cur]->start_large_lba.fetch_add(nblks, std::memory_order_acquire)) % 
+                (vol_info[cur]->max_vol_blks - nblks);
+        } else {
+            nblks = 2; 
+            lba = (vol_info[cur]->start_lba.fetch_add(nblks, std::memory_order_acquire)) % 
+                (vol_info[cur]->max_vol_blks - nblks);
+        }    
+        if (nblks == 0) { nblks = 1; } 
+
+        if (verify_data) {
+            /* can not support concurrent overlapping writes if whole data need to be verified */
+            std::unique_lock< std::mutex > lk(vol_info[cur]->vol_mutex);
+            /* check if someone is already doing writes/reads */ 
+            if (nblks && vol_info[cur]->m_vol_bm->is_bits_reset(lba, nblks)) {
+                vol_info[cur]->m_vol_bm->set_bits(lba, nblks);
+            } else {
+                goto start;
+            }    
+        }    
+        write_vol(cur, lba, nblks);
     }
 
     void same_read() {
@@ -850,10 +876,6 @@ public:
         if (verify_done && ((get_elapsed_time(startTime) > run_time))) {
             LOGINFO("ios cmpled {}. waiting for outstanding ios to be completed", write_cnt.load());
             io_stalled = true;
-            if (io_scheduling_cnt.load() != 0) {
-                /* wait for threads to finish */
-                return;
-            }
             std::unique_lock< std::mutex > lk(m_mutex);
             if (outstanding_ios.load() == 0) {
                 notify_cmpl();
