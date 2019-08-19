@@ -1126,7 +1126,7 @@ done:
             /* just get start/end index from get_all. We don't release the parent lock until this
              * key range is not inserted from start_ind to end_ind.
              */
-            my_node->get_all(bur->get_cb_param()->get_input_range(), UINT32_MAX, start_ind, end_ind);
+            my_node->get_all(bur->get_input_range(), UINT32_MAX, start_ind, end_ind);
         } else {
             auto result = my_node->find(k, nullptr, nullptr);
             end_ind = start_ind = result.end_of_search_index;
@@ -1241,6 +1241,7 @@ out:
             return;
         }
 
+#ifndef NDEBUG
         if (curr_ind > 0) {
             /* start of subrange will always be more then the key in curr_ind - 1 */
             K start_key;
@@ -1249,6 +1250,7 @@ out:
             my_node->get_nth_key(curr_ind - 1, start_key_ptr, false);
             assert(start_key_ptr->compare(bur->get_cb_param()->get_sub_range().get_start_key()) <= 0);
         }
+#endif
         
         //find end of subrange
         bool end_inc = true;
@@ -1260,7 +1262,7 @@ out:
             if (end_key_ptr->compare(bur->get_input_range().get_end_key()) >= 0) {
                 /* this is last index to process as end of range is smaller then key in this node */
                 end_key_ptr = const_cast<BtreeKey *>(bur->get_input_range().get_end_key());
-                end_inc = bur->get_cb_param()->get_input_range().is_end_inclusive();
+                end_inc = bur->get_input_range().is_end_inclusive();
             } else {
                 end_inc = true;
             }
@@ -1268,12 +1270,16 @@ out:
             /* it is the edge node. end key is the end of input range */
             BT_LOG_ASSERT_CMP(EQ, my_node->get_edge_id().is_valid(), true, my_node);
             end_key_ptr = const_cast<BtreeKey *>(bur->get_input_range().get_end_key());
-            end_inc = bur->get_cb_param()->get_input_range().is_end_inclusive();
+            end_inc = bur->get_input_range().is_end_inclusive();
         }
         
         auto blob = end_key_ptr->get_blob();
         const_cast<BtreeKey *>(bur->get_cb_param()->get_sub_range().get_end_key())->copy_blob(blob);//copy
         bur->get_cb_param()->get_sub_range().set_end_incl(end_inc);
+        
+        auto ret = bur->get_cb_param()->get_sub_range().get_start_key()->compare(
+                                bur->get_cb_param()->get_sub_range().get_end_key());
+        BT_LOG_ASSERT_CMP(LE, ret, 0, my_node);
         /* We don't neeed to update the start at it is updated when entries are inserted in leaf nodes */
     }
 
