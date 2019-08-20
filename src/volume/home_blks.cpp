@@ -19,7 +19,11 @@ VolInterface* homestore::vol_homestore_init(const init_params& cfg) { return (Ho
 VolInterface* HomeBlks::init(const init_params& cfg) {
     fLI::FLAGS_minloglevel = 3;
 
-    LOGINFO("HomeBlks version: {}", HomeBlks::version);
+#ifndef NDEBUG
+    LOGINFO("HomeBlks DEBUG version: {}", HomeBlks::version);
+#else
+    LOGINFO("HomeBlks RELEASE version: {}", HomeBlks::version);
+#endif
     _instance = new HomeBlks(cfg);
     return ((VolInterface*)(_instance));
 }
@@ -272,6 +276,7 @@ std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
         // volume destructor will be called since the user_count of share_ptr 
         // will drop to zero while going out of this scope;
         std::error_condition no_err;
+        LOGINFO("volume will be deleted name : {}", cur_vol->get_name());
         return no_err;
     } catch (std::exception& e) {
         LOGERROR("{}", e.what());
@@ -967,7 +972,7 @@ void HomeBlks::shutdown_process(shutdown_comp_callback shutdown_comp_cb, bool fo
                         LOGERROR("Shutdown timeout for {} seconds, trigger force shutdown. ", SHUTDOWN_TIMEOUT_NUM_SECS);
                     }
                     // trigger dump on debug mode
-                    assert(0);
+                    assert(force);
 
                     // in release mode, just forcely free 
                     // Force trigger every Volume's destructor when there 
@@ -1045,6 +1050,7 @@ std::error_condition HomeBlks::shutdown(shutdown_comp_callback shutdown_comp_cb,
         LOGINFO("shutdown thread already started;");
         return no_error;
     }
+    LOGINFO("shutting down the homestore");
     started = true;
     
     m_shutdown = true;
