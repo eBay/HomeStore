@@ -1002,6 +1002,13 @@ TEST_F(IOTest, lifecycle_test) {
     this->wait_cmpl();
     LOGINFO("write_cnt {}", write_cnt);
     LOGINFO("read_cnt {}", read_cnt);
+
+    FlipClient fc(HomeStoreFlip::instance());
+    FlipFrequency freq;
+    freq.set_count(10);
+    freq.set_percent(100);
+
+    fc.inject_retval_flip("vol_comp_delay_us", {}, freq, 100);
     this->delete_volumes();
     this->shutdown();
     this->remove_files();
