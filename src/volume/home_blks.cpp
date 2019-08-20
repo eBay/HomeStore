@@ -413,57 +413,6 @@ void
 HomeBlks::vol_sb_remove(vol_mem_sb *sb) {
     LOGINFO("Removing sb of vol: {}", sb->ondisk_sb->vol_name);
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
-
-    vol_mem_sb* prev_sb = nullptr;
-    if (sb->ondisk_sb->prev_blkid.to_integer() != BlkId::invalid_internal_id()) {
-        prev_sb = vol_sb_read(sb->ondisk_sb->prev_blkid);
-        assert (prev_sb);
-        // we do have a valid prev_sb, update it. 
-        auto it = m_volume_map.find(prev_sb->ondisk_sb->uuid);
-        delete(prev_sb);
-        assert(it != m_volume_map.end());
-        
-        auto vol = it->second;
-        prev_sb = vol->get_sb();
-        // need to update the in-memory copy of sb then persist this copy to disk;
-        prev_sb->lock();
-        prev_sb->ondisk_sb->next_blkid = sb->ondisk_sb->next_blkid;
-        prev_sb->unlock();
-        vol_sb_write(prev_sb);
-        if (sb == m_last_vol_sb) {
-            m_last_vol_sb = prev_sb;
-        }
-    } else {
-        // no prev_sb, this is the first sb being removed. 
-        // we need to update m_cfg_sb to sb->nextblkid;
-        assert(m_cfg_sb);
-        // if there is next sb, sb->next_blkid will be invalid interal blkid, which is good;
-        m_cfg_sb->vol_list_head.set(sb->ondisk_sb->next_blkid);
-        if (sb == m_last_vol_sb) {
-            m_last_vol_sb = nullptr;
-        }
-        // persist m_cfg_sb 
-        if (!m_cfg.is_read_only) {
-            config_super_block_write();
-        }
-    }
-
-    vol_mem_sb* next_sb = nullptr;
-    if (sb->ondisk_sb->next_blkid.to_integer() != BlkId::invalid_internal_id()) {
-        next_sb = vol_sb_read(sb->ondisk_sb->next_blkid);
-        assert(next_sb);
-        auto it = m_volume_map.find(next_sb->ondisk_sb->uuid);
-        delete(next_sb);
-        assert(it != m_volume_map.end());
-        auto vol = it->second;
-        
-        next_sb = vol->get_sb();
-        // need to update the in-memory copy of sb then persist this copy to disk;
-        next_sb->lock();
-        next_sb->ondisk_sb->prev_blkid = sb->ondisk_sb->prev_blkid;
-        next_sb->unlock();
-        vol_sb_write(next_sb);
-    } 
     m_sb_blk_store->free_blk(sb->ondisk_sb->blkid, boost::none, boost::none);
 }
 
