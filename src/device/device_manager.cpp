@@ -165,7 +165,7 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info >& devices) {
         if (m_gen_cnt.load() < pdev->sb_gen_cnt()) {
             m_gen_cnt = pdev->sb_gen_cnt();
             device_id = pdev->get_dev_id();
-            rewrite   = !HomeStoreConfig::is_read_only;
+            rewrite   = HomeStoreConfig::is_read_only ? false : true;
         }
 
         HS_ASSERT_NULL(LOGMSG, m_pdevs[pdev->get_dev_id()].get());

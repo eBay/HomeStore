@@ -51,7 +51,7 @@ HomeBlks::HomeBlks(const init_params& cfg) :
     HomeStoreConfig::max_pdevs = MAX_PDEVS;
     HomeStoreConfig::min_page_size = m_cfg.min_virtual_page_size;
     HomeStoreConfig::open_flag = m_cfg.flag;
-    HomeStoreConfig::is_read_only = m_cfg.is_read_only;
+    HomeStoreConfig::is_read_only = (m_cfg.is_read_only) ? true : false;
     m_data_pagesz = m_cfg.min_virtual_page_size;
 
     nlohmann::json json;

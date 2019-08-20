@@ -7,3 +7,4 @@ uint64_t homestore::HomeStoreConfig::max_chunks = MAX_CHUNKS;
 uint64_t homestore::HomeStoreConfig::max_vdevs = MAX_VDEVS;
 uint64_t homestore::HomeStoreConfig::max_pdevs = MAX_PDEVS;
 homestore::io_flag homestore::HomeStoreConfig::open_flag = DIRECT_IO;
+bool homestore::HomeStoreConfig::is_read_only = false;
