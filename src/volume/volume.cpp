@@ -492,6 +492,12 @@ void Volume::check_and_complete_req(const vol_interface_req_ptr& hb_req, const s
             VOL_LOG(WARN, , hb_req, "vol req took time {}", get_elapsed_time_ms(hb_req->io_start_time));
         }
         if (call_completion) {
+#ifdef _PRERELEASE
+            if (auto flip_ret = homestore_flip->get_test_flip<int>("vol_comp_delay_us")) {
+                LOGINFO("delaying completion in volume");
+                usleep(flip_ret.get());
+            }
+#endif
             VOL_LOG(TRACE, volume, hb_req, "IO DONE");
             m_comp_cb(hb_req);
         }
