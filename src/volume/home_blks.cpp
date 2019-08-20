@@ -264,7 +264,9 @@ std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
                 m_last_vol_sb = nullptr;
             }
             // persist m_cfg_sb 
-            config_super_block_write();
+            if (!m_cfg.is_read_only) {
+                config_super_block_write();
+            }
         }
 
         // updating the next super block
