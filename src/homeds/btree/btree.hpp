@@ -646,6 +646,20 @@ out:
         m_btree_lock.unlock();
     }
 
+    void print_node(const bnodeid_t& bnodeid) {
+        std::stringstream ss;
+        BtreeNodePtr node;
+        m_btree_lock.read_lock();
+        homeds::thread::locktype acq_lock = homeds::thread::locktype::LOCKTYPE_READ;
+        if (read_and_lock_node(bnodeid, node, acq_lock, acq_lock, nullptr) != btree_status_t::success) {
+            return;
+        }
+        ss << "[" << node->to_string() << "]";
+        unlock_node(node, acq_lock);
+        BT_LOG(INFO, , , "Node : <{}>", ss.str());
+        m_btree_lock.unlock();
+    }
+
     nlohmann::json get_metrics_in_json(bool updated = true) { return m_metrics.get_result_in_json(updated); }
 
 private:

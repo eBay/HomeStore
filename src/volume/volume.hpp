@@ -255,6 +255,7 @@ public:
     uint64_t get_elapsed_time(Clock::time_point startTime);
     void     attach_completion_cb(const io_comp_callback& cb);
     void     print_tree();
+    void     print_node(uint64_t blkid);
     void     blk_recovery_callback(const MappingValue& mv);
     void     set_recovery_error();
 

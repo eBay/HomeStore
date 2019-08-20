@@ -18,6 +18,8 @@
 #include <utility/obj_life_counter.hpp>
 #include <atomic>
 #include <boost/optional.hpp>
+#include <boost/lexical_cast.hpp>
+#include <boost/uuid/uuid_io.hpp>
 #include <sstream>
 #include <string>
 #include <iostream>
@@ -145,7 +147,9 @@ struct vol_params {
 
     std::string to_string() const {
         std::stringstream ss;
-        ss << "page_size=" << page_size << ",size=" << size <<",vol_name=" << vol_name;
+        ss  << "page_size=" << page_size << ",size=" << size
+            << ",vol_name=" << vol_name  << ",uuid="
+            << boost::lexical_cast<std::string>(uuid);
         return ss.str();
     }
 };
@@ -187,7 +191,8 @@ public:
     io_flag                 flag = io_flag::DIRECT_IO;
 
     /* optional parameters */
-    boost::optional< disk_attributes > disk_attr; 
+    boost::optional< disk_attributes > disk_attr;
+    boost::optional< bool > is_read_only;
 
     /* completions callback */
     init_done_callback        init_done_cb;
@@ -247,14 +252,15 @@ public:
 
     /* AM should call it in case of recovery or reboot when homestore try to mount the existing volume */
     virtual void attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback cb) = 0;
-    
+
     virtual std::error_condition shutdown(shutdown_comp_callback shutdown_comp_cb, bool force = false) = 0;
     virtual cap_attrs get_system_capacity() = 0;
     virtual cap_attrs get_vol_capacity(const VolumePtr& vol) = 0;
     virtual bool vol_state_change(const VolumePtr& vol, vol_state new_state) = 0;
 
+    virtual void print_tree(const VolumePtr& vol, bool chksum = true) = 0;
+    virtual void print_node(const VolumePtr& vol, uint64_t blkid, bool chksum = true) = 0;
 #ifndef NDEBUG
-    virtual void print_tree(const VolumePtr& vol) = 0;
     virtual void verify_pending_blks(const VolumePtr& vol) = 0;
 #endif
 };
