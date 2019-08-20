@@ -100,10 +100,32 @@ void Volume::recovery_start() { vol_scan_alloc_blks(); }
 
 uint64_t Volume::get_metadata_used_size() { return m_map->get_used_size(); }
 
+#ifdef _PRERELEASE 
+void Volume::set_flip() {
+    FlipClient fc(HomeStoreFlip::instance());
+    FlipFrequency freq;
+    FlipCondition cond1;
+    freq.set_count(2000000000);
+    freq.set_percent(10);
+    
+    /* io flips */
+    fc.inject_noreturn_flip("vol_vchild_error", {}, freq);
+    fc.inject_retval_flip("vol_delay_read_us", {}, freq, 20);
+    fc.inject_retval_flip("cache_insert_race", {}, freq, 20);
+
+    /* error flips */
+    freq.set_percent(2);
+    fc.inject_retval_flip("delay_us_and_inject_error_on_completion", {}, freq, 20);
+    fc.inject_noreturn_flip("varsize_blkalloc_no_blks", {}, freq);
+    
+    fc.create_condition("nuber of blks in a write", flip::Operator::EQUAL, 8, &cond1);
+    fc.inject_retval_flip("blkalloc_split_blk", {}, freq, 4);
+}
+#endif
+
 //
 // No need to do it in multi-threading since blkstore.free_blk is in-mem operation.
 //
-// void Volume::process_free_blk_callback(BlkId& blk_id, uint64_t size_offset, uint64_t nblks_to_free) {
 void Volume::process_free_blk_callback(Free_Blk_Entry fbe) {
     VOL_LOG(DEBUG, volume, , "Freeing blks cb - bid: {}, offset: {}, nblks: {}, get_pagesz: {}",
             fbe.m_blkId.to_string(), fbe.blk_offset(), fbe.blks_to_free(), get_page_size());
@@ -474,6 +496,11 @@ void Volume::check_and_complete_req(const vol_interface_req_ptr& hb_req, const s
 
     m_read_blk_tracker->safe_remove_blks(hb_req->is_read, fbes, err);
 
+#ifdef _PRERELEASE
+    if (hb_req->outstanding_io_cnt > 2 && homestore_flip->test_flip("vol_vchild_error")) {
+        err = homestore_error::flip_comp_error;
+    }
+#endif
     if (err) {
         if (hb_req->set_error(err)) {
             // Was not completed earlier, so complete the io

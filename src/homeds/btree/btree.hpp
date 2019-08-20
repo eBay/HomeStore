@@ -93,7 +93,45 @@ public:
     btree_super_block get_btree_sb() {
         return m_sb;
     }
-    
+
+#ifdef _PRERELEASE 
+    static void set_io_flip() {
+        /* IO flips */
+        FlipClient fc(HomeStoreFlip::instance());
+        FlipFrequency freq;
+        FlipCondition cond1;
+        FlipCondition cond2;
+        freq.set_count(2000000000);
+        freq.set_percent(20);
+
+        fc.inject_noreturn_flip("btree_upgrade_node_fail", {}, freq);
+
+        fc.create_condition("nuber of entries in a node", flip::Operator::EQUAL, 4, &cond1);
+        fc.create_condition("nuber of entries in a node", flip::Operator::EQUAL, 2, &cond2);
+        
+        fc.inject_noreturn_flip("btree_delay_and_split", {cond1, cond 2}, freq);
+        fc.inject_noreturn_flip("btree_delay_and_split_leaf", {cond1, cond 2}, freq);
+        fc.inject_noreturn_flip("btree_parent_node_full", {}, freq);
+        fc.inject_noreturn_flip("btree_leaf_node_split", {}, freq);
+        fc.inject_retval_flip("btree_upgrade_delay", {}, freq, 20);
+        fc.inject_retval_flip("writeBack_completion_req_delay_us", {}, freq, 20);
+    }
+
+    static void set_error_flip() {
+        /* error flips */
+        FlipClient fc(HomeStoreFlip::instance());
+        FlipFrequency freq;
+        freq.set_count(2000000000);
+        freq.set_percent(2);
+        
+        fc.inject_noreturn_flip("btree_split_failure", {}, freq);
+        fc.inject_noreturn_flip("btree_write_comp_fail", {}, freq);
+        fc.inject_noreturn_flip("btree_read_fail", {}, freq);
+        fc.inject_noreturn_flip("btree_write_fail", {}, freq);
+        fc.inject_noreturn_flip("btree_refresh_fail", {}, freq);
+    }
+#endif
+
     void process_completions(btree_status_t status, btree_multinode_req_ptr multinode_req) {
         
         if (!multinode_req) {
@@ -1154,7 +1192,11 @@ done:
         auto none_lock_type = LOCKTYPE_NONE;
         
 #ifdef _PRERELEASE
-        auto time = homestore_flip->get_test_flip<int>("btree_delay_and_split", child_node->get_total_entries());
+        if (child_node->is_leaf()) {
+            auto time = homestore_flip->get_test_flip<int>("btree_delay_and_split_leaf", child_node->get_total_entries());
+        } else {
+            auto time = homestore_flip->get_test_flip<int>("btree_delay_and_split", child_node->get_total_entries());
+        }
         if (time && child_node->get_total_entries() > 2) {
             usleep(time.get());
         } else 
@@ -1172,7 +1214,7 @@ done:
              * iteration which result into less space in the parent node.
              */
 #ifdef _PRERELEASE
-            if (homestore_flip->test_flip("simulate_parent_node_full")) {
+            if (homestore_flip->test_flip("btree_parent_node_full")) {
                 ret = btree_status_t::retry;
                 goto out;
             }
@@ -1879,7 +1921,7 @@ out:
             child_node1->get_node_id_int(), child_node2->get_node_id_int(), out_split_key->to_string());
 
 #ifdef _PRERELEASE
-        if (homestore_flip->test_flip("btree_split_failure", child_node->is_leaf())) {
+        if (BtreeStoreType == SSD_BTREE && homestore_flip->test_flip("btree_split_failure", child_node->is_leaf())) {
             child_node1->flip_pc_gen_flag();
             child_node1->move_in_from_right_by_size(m_btree_cfg, child_node2, split_size);
         }
@@ -1889,6 +1931,11 @@ out:
         // we write right child node, than parent and than left child
         write_node_async(child_node2, multinode_req);
         write_node_async(parent_node, multinode_req);
+#ifdef _PRERELEASE
+        if (BtreeStoreType == SSD_BTREE && homestore_flip->test_flip("btree_split_panic", child_node->is_leaf())) {
+            abort(0);
+        }
+#endif
         write_node_async(child_node1, multinode_req);
         
         // NOTE: Do not access parentInd after insert, since insert would have
