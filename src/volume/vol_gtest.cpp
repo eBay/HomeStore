@@ -995,7 +995,11 @@ start:
 
 /*********** Below Tests does IO and exit with clean shutdown *************/
 
-/* it initialize the homestore, create volume, delete volume and shutdown the system */
+/*!
+    @test   lifecycle_test
+    @brief  It initialize the homestore, create volume, delete volume 
+            and shutdown the system
+ */
 TEST_F(IOTest, lifecycle_test) {
     this->init = true;
     this->start_homestore();
@@ -1014,7 +1018,11 @@ TEST_F(IOTest, lifecycle_test) {
     this->remove_files();
 }
 
-/* it initialize the homestore, create volume and shutdown the system */
+/*!
+    @test   init_io_test
+    @brief  It initialize the homestore, create volume and
+            shutdown the system
+ */
 TEST_F(IOTest, init_io_test) {
     this->init = true;
     this->start_homestore();
@@ -1027,7 +1035,10 @@ TEST_F(IOTest, init_io_test) {
     }
 }
 
-/* Tests which does recovery. End up with a clean shutdown */
+/*!
+    @test   recovery_io_test
+    @brief  Tests which does recovery. End up with a clean shutdown
+ */
 TEST_F(IOTest, recovery_io_test) {
     this->init = false;
     switch (expected_vol_state) {
@@ -1052,8 +1063,10 @@ TEST_F(IOTest, recovery_io_test) {
     }
 }
 
-/************ Below tests delete volumes. Should exit with clean shutdown. ***********/ 
-
+/*!
+    @test   vol_create_del_test
+    @brief  Below tests delete volumes. Should exit with clean shutdown.
+ */
 TEST_F(IOTest, vol_create_del_test) {
     this->init = true;
     this->vol_create_del_test = true;

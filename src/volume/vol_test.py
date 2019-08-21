@@ -169,43 +169,54 @@ def vol_create_del_test():
 
 def nightly():
 
-    # load gen test
+    """ @test load gen test
+    """
     load()
     sleep(5)
 
-    # normal IO test
+    """ @test normal IO test
+    """
     normal()
     sleep(5)
     
-    # recovery test
+    """ @test recovery test
+    """
     recovery_nightly()
     sleep(5)
 
-    # one disk is replaced during boot time
+    """ @test  one disk is replaced during boot time
+    """
     one_disk_replace()
     sleep(5)
 
-    # homestore crashed during recovery with one disk replace
+    """ @test homestore crashed during recovery with one disk replace
+    """
     one_disk_replace_abort()
     sleep(5)
     
-    # Both disks are replaced during boot time
+    """ @test Both disks are replaced during boot time
+    """
     both_disk_replace()
     sleep(5)
     
-    # One Disk failure during boot time
+    """ @test One Disk failure during boot time
+    """
     one_disk_fail()
     sleep(5)
 
-    # Move volume to offline when IOs are going on
+    """ @test Move volume to offline when IOs are going on
+    """
     vol_offline_test()
     sleep(5)
 
-    # Set IO error and verify all volumes come online after reboot and data is verified.
+    """ @test Set IO error and verify all volumes come online
+              after reboot and data is verified.
+    """
     vol_io_fail_test()
     sleep(5)
 
-    # create del vol
+    """ @test create del vol
+    """
     vol_create_del_test()
     sleep(5)
     print("nightly test passed")
