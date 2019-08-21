@@ -157,6 +157,8 @@ public:
 
     virtual std::error_condition remove_volume(const boost::uuids::uuid& uuid) override;
     virtual VolumePtr            lookup_volume(const boost::uuids::uuid& uuid) override;
+    virtual SnapshotPtr          snap_volume(VolumePtr) override;
+
     virtual const char*          get_name(const VolumePtr& vol) override;
     virtual uint64_t             get_page_size(const VolumePtr& vol) override;
     virtual boost::uuids::uuid   get_uuid(VolumePtr vol) override;
