@@ -26,6 +26,7 @@
 
 namespace homestore {
 class Volume;
+class Snapshot;
 class BlkBuffer;
 void intrusive_ptr_add_ref(BlkBuffer* buf);
 void intrusive_ptr_release(BlkBuffer* buf);
@@ -159,6 +160,7 @@ struct out_params {
 };
 
 typedef std::shared_ptr< Volume > VolumePtr;
+typedef std::shared_ptr< Snapshot > SnapshotPtr;
 
 /* This is the optional parameteres which should be given by its consumers only when there is no
  * system command to get these parameteres directly from disks. Or Consumer want to override
@@ -248,7 +250,8 @@ public:
     virtual homeds::blob         at_offset(const boost::intrusive_ptr< BlkBuffer >& buf, uint32_t offset) = 0;
     virtual VolumePtr            create_volume(const vol_params& params) = 0;
     virtual std::error_condition remove_volume(const boost::uuids::uuid& uuid) = 0;
-    virtual VolumePtr            lookup_volume(const boost::uuids::uuid& uuid) = 0;
+    virtual VolumePtr              lookup_volume(const boost::uuids::uuid& uuid) = 0;
+    virtual SnapshotPtr            snap_volume(VolumePtr volptr) = 0;
 
     /* AM should call it in case of recovery or reboot when homestore try to mount the existing volume */
     virtual void attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback cb) = 0;

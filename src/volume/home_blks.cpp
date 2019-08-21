@@ -319,6 +319,17 @@ VolumePtr HomeBlks::lookup_volume(const boost::uuids::uuid& uuid) {
     return nullptr;
 }
 
+SnapshotPtr HomeBlks::snap_volume(VolumePtr volptr) {
+    if (!m_rdy || is_shutdown()) {
+        LOGINFO("Snapshot: volume not online");
+        return nullptr;
+    }
+
+    auto sp = volptr->make_snapshot();
+    LOGINFO("Snapshot created volume {}, Snapshot {}", volptr->to_string(), sp->to_string());
+    return sp;
+}
+
 HomeBlks* HomeBlks::instance() { return _instance; }
 
 BlkId HomeBlks::alloc_blk() {

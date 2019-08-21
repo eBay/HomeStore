@@ -19,6 +19,8 @@
 #include "threadpool/thread_pool.h"
 #include "blk_read_tracker.hpp"
 
+#include <volume/snapshot.hpp>
+
 using namespace std;
 
 namespace homestore {
@@ -183,6 +185,10 @@ private:
     std::map< uint64_t, volume_req_ptr > m_req_map;
 #endif
     std::atomic< uint64_t > m_req_id = 0;
+
+    std::atomic< uint64_t > m_snap_id = 0; // Next snapshot Id for this vol. Always grows
+    std::map<uint64_t, SnapshotPtr> m_snapmap; // Id to Snapshot.
+
     // Map of blks for which read is requested, to prevent parallel writes to free those blks
     // it also stores corresponding eviction record created by any parallel writes
     std::unique_ptr< Blk_Read_Tracker > m_read_blk_tracker;
@@ -199,6 +205,11 @@ public:
         return std::shared_ptr< Volume >(new Volume(std::forward< Args >(args)...));
     }
 
+    std::shared_ptr< Snapshot > make_snapshot() {
+        auto sp = std::shared_ptr<Snapshot>(new Snapshot(this, m_snap_id, seq_Id));
+        m_snapmap[m_snap_id++] = sp;
+        return sp;
+    }
     static homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >* m_data_blkstore;
     static void           process_vol_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
     static volume_req_ptr create_vol_req(Volume* vol, const vol_interface_req_ptr& hb_req);
@@ -280,6 +291,12 @@ public:
 #ifndef NDEBUG
     void verify_pending_blks();
 #endif
+
+    std::string to_string() {
+        std::stringstream ss;
+        ss << "Name :" << get_name() << ", UUID :" << get_uuid() << ", Size:" << get_size() << ((is_offline()) ? ", Offline" : ", Not Offline") << ", State :" << get_state();
+        return ss.str();
+    }
 };
 
 #define NUM_BLKS_PER_THREAD_TO_QUERY 10000ull
