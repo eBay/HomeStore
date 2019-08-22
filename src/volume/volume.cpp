@@ -548,6 +548,8 @@ void Volume::check_and_complete_req(const vol_interface_req_ptr& hb_req, const s
 
 void Volume::print_tree() { m_map->print_tree(); }
 
+void Volume::print_node(uint64_t blkid) { m_map->print_node(blkid); }
+
 #if 0
 std::error_condition Volume::read_metadata(const vol_req_ptr& vreq) {
     MappingKey                                           key(vreq->lba, vreq->nlbas);

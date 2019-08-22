@@ -16,9 +16,11 @@ SDS_LOGGING_DECL(device, DEVICE_MANAGER)
 using namespace homeio;
 namespace homestore {
 
-DeviceManager::DeviceManager(NewVDevCallback vcb, uint32_t const vdev_metadata_size,
-                             std::shared_ptr< iomgr::ioMgr > iomgr, homeio::comp_callback cb, bool is_file,
-                             boost::uuids::uuid system_uuid, vdev_error_callback vdev_error_cb) :
+DeviceManager::DeviceManager(NewVDevCallback vcb,
+                             uint32_t const vdev_metadata_size,
+                             std::shared_ptr<iomgr::ioMgr> iomgr,
+                             homeio::comp_callback cb, bool is_file, boost::uuids::uuid system_uuid, 
+                             vdev_error_callback vdev_error_cb) :
         m_comp_cb(cb),
         m_new_vdev_cb(vcb),
         m_iomgr(iomgr),
@@ -26,15 +28,15 @@ DeviceManager::DeviceManager(NewVDevCallback vcb, uint32_t const vdev_metadata_s
         m_is_file(is_file),
         m_system_uuid(system_uuid),
         m_vdev_error_cb(vdev_error_cb) {
+
+    switch(HomeStoreConfig::open_flag) {
 #ifndef NDEBUG
-    if (HomeStoreConfig::open_flag == BUFFERED_IO) {
-        m_open_flags = O_RDWR;
-    } else {
-        m_open_flags = O_RDWR | O_DIRECT;
-    }
-#else
-    m_open_flags = O_RDWR | O_DIRECT;
+        case BUFFERED_IO : m_open_flags = O_RDWR; break;
 #endif
+        case READ_ONLY   : m_open_flags = O_RDONLY; break;
+        case DIRECT_IO   :
+        default          : m_open_flags = O_RDWR | O_DIRECT;
+    }
     m_last_vdevid = INVALID_VDEV_ID;
     m_vdev_metadata_size = vdev_metadata_size;
     m_pdev_id = 0;
@@ -133,7 +135,6 @@ void DeviceManager::update_vb_context(uint32_t vdev_id, uint8_t* blob) {
 }
 
 void DeviceManager::load_and_repair_devices(std::vector< dev_info >& devices) {
-
     std::vector< std::unique_ptr< PhysicalDev > > uninit_devs;
     uninit_devs.reserve(devices.size());
     uint64_t device_id = INVALID_DEV_ID;
@@ -164,7 +165,7 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info >& devices) {
         if (m_gen_cnt.load() < pdev->sb_gen_cnt()) {
             m_gen_cnt = pdev->sb_gen_cnt();
             device_id = pdev->get_dev_id();
-            rewrite = true;
+            rewrite   = HomeStoreConfig::is_read_only ? false : true;
         }
 
         HS_ASSERT_NULL(LOGMSG, m_pdevs[pdev->get_dev_id()].get());
@@ -329,7 +330,6 @@ void DeviceManager::inited() {
 /* add constant */
 void DeviceManager::add_devices(std::vector< dev_info >& devices, bool is_init) {
     uint64_t max_dev_offset = 0;
-
     if (is_init) {
         init_devices(devices);
         return;

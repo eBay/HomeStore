@@ -17,6 +17,7 @@ struct HomeStoreConfig {
     static uint64_t max_vdevs;
     static uint64_t max_pdevs;
     static io_flag open_flag;
+    static bool is_read_only;
 };
 
 constexpr uint32_t ID_BITS = 32;

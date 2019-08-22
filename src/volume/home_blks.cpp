@@ -5,7 +5,11 @@
 #include <cassert>
 #include <device/blkbuffer.hpp>
 #include <iostream>
+#include <fstream>
 #include <stdexcept>
+#include <nlohmann/json.hpp>
+#include <boost/lexical_cast.hpp>
+#include <boost/uuid/uuid_io.hpp>
 
 SDS_OPTION_GROUP(home_blks, (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service", cxxopts::value<int32_t>()->default_value("5000"), "port"))
 
@@ -38,7 +42,8 @@ HomeBlks::HomeBlks(const init_params& cfg) :
         m_scan_cnt(0),
         m_init_failed(false),
         m_shutdown(false),
-        m_init_finished(false) {
+        m_init_finished(false),
+        m_print_checksum(true) {
 
     _instance = this;
     LOGINFO("homeblks initing {}", m_cfg.to_string());
@@ -50,7 +55,24 @@ HomeBlks::HomeBlks(const init_params& cfg) :
     HomeStoreConfig::max_pdevs = MAX_PDEVS;
     HomeStoreConfig::min_page_size = m_cfg.min_virtual_page_size;
     HomeStoreConfig::open_flag = m_cfg.flag;
+    HomeStoreConfig::is_read_only = (m_cfg.is_read_only) ? true : false;
     m_data_pagesz = m_cfg.min_virtual_page_size;
+
+    nlohmann::json json;
+    json["phys_page_size"]          = HomeStoreConfig::phys_page_size;
+    json["atomic_phys_page_size"]   = HomeStoreConfig::atomic_phys_page_size;
+    json["align_size"]              = HomeStoreConfig::align_size;
+    json["min_page_size"]           = HomeStoreConfig::min_page_size;
+    json["open_flag"]               = HomeStoreConfig::open_flag;
+    json["cache_size"]              = m_cfg.cache_size;
+    json["system_uuid"]             = boost::lexical_cast<std::string>(m_cfg.system_uuid);
+    json["is_file"]                 = m_cfg.is_file;
+    for (auto& device : m_cfg.devices) {
+        json["devices"].emplace_back(device.dev_names);
+    }
+
+    std::ofstream hs_config("hs_config.json");
+    hs_config << json;
 
     assert(VOL_SB_SIZE >= sizeof(vol_ondisk_sb));
     assert(VOL_SB_SIZE >= sizeof(vol_config_sb));
@@ -246,7 +268,9 @@ std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
                 m_last_vol_sb = nullptr;
             }
             // persist m_cfg_sb 
-            config_super_block_write();
+            if (!m_cfg.is_read_only) {
+                config_super_block_write();
+            }
         }
 
         // updating the next super block
@@ -342,7 +366,9 @@ void HomeBlks::vol_sb_init(vol_mem_sb* sb) {
     }
 
     m_cfg_sb->num_vols++;
-    config_super_block_write();
+    if (!m_cfg.is_read_only) {
+        config_super_block_write();
+    }
     /* update the last volume super block. If exception happens in between it won't be updated */
     m_last_vol_sb = sb;
 }
@@ -394,7 +420,6 @@ void
 HomeBlks::vol_sb_remove(vol_mem_sb *sb) {
     LOGINFO("Removing sb of vol: {}", sb->ondisk_sb->vol_name);
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
-    
     m_sb_blk_store->free_blk(sb->ondisk_sb->blkid, boost::none, boost::none);
 }
 
@@ -408,7 +433,9 @@ void HomeBlks::config_super_block_init(BlkId& bid) {
     m_cfg_sb->magic = VOL_SB_MAGIC;
     m_cfg_sb->boot_cnt = 0;
     m_cfg_sb->init_flag(0);
-    config_super_block_write();
+    if (!m_cfg.is_read_only) {
+        config_super_block_write();
+    }
 }
 
 boost::uuids::uuid 
@@ -493,10 +520,12 @@ void HomeBlks::create_blkstores() {
     create_sb_blkstore(nullptr);
 }
 
-void HomeBlks::attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback cb) { vol->attach_completion_cb(cb); }
+void HomeBlks::attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback cb) {
+    vol->attach_completion_cb(cb);
+}
 
-void HomeBlks::add_devices() { 
-    m_dev_mgr->add_devices(m_cfg.devices, m_cfg.disk_init); 
+void HomeBlks::add_devices() {
+    m_dev_mgr->add_devices(m_cfg.devices, m_cfg.disk_init);
     assert(m_dev_mgr->get_total_cap() / m_cfg.devices.size() > MIN_DISK_CAP_SUPPORTED);
     assert(m_dev_mgr->get_total_cap() < MAX_SUPPORTED_CAP);
 }
@@ -586,7 +615,9 @@ void HomeBlks::scan_volumes() {
                 } else {
                     m_cfg_sb->vol_list_head = sb->ondisk_sb->next_blkid;
                     m_cfg_sb->num_vols--;
-                    config_super_block_write();
+                    if (!m_cfg.is_read_only) {
+                        config_super_block_write();
+                    }
                 }
             } else {
                 /* create the volume */
@@ -761,7 +792,9 @@ void HomeBlks::create_sb_blkstore(vdev_info_block* vb) {
         assert(m_cfg_sb->blkid.to_integer() == blob->blkid.to_integer());
         m_cfg_sb->boot_cnt++;
         /* update the config super block */
-        config_super_block_write();
+        if (!m_cfg.is_read_only) {
+            config_super_block_write();
+        }
     }
 }
 
@@ -804,7 +837,9 @@ void HomeBlks::init_thread() {
                 // clear the flag and persist to disk, if we received a new shutdown and completed successfully, 
                 // the flag should be set again; 
                 m_cfg_sb->clear_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
-                config_super_block_write();
+                if (!m_cfg.is_read_only) {
+                    config_super_block_write();
+                }
             } else if (!init) {
                 LOGCRITICAL("System experienced sudden panic since last boot!");
             } else {
@@ -874,8 +909,6 @@ homeds::blob HomeBlks::at_offset(const boost::intrusive_ptr< BlkBuffer >& buf, u
 }
 
 #ifndef NDEBUG
-void HomeBlks::print_tree(const VolumePtr& vol) { vol->print_tree(); }
-
 void HomeBlks::set_io_flip() {
     Volume::set_io_flip();
     MappingBtreeDeclType::set_io_flip();
@@ -886,6 +919,16 @@ void HomeBlks::set_error_flip() {
     MappingBtreeDeclType::set_error_flip(); 
 }
 #endif
+
+void HomeBlks::print_tree(const VolumePtr& vol, bool chksum) {
+    m_print_checksum = chksum;
+    vol->print_tree();
+}
+
+void HomeBlks::print_node(const VolumePtr& vol, uint64_t blkid, bool chksum) {
+    m_print_checksum = chksum;
+    vol->print_node(blkid);
+}
 
 void HomeBlks::get_version(sisl::HttpCallData cd) {
     HomeBlks *hb = (HomeBlks *)(cd->cookie());
@@ -1017,7 +1060,9 @@ void HomeBlks::shutdown_process(shutdown_comp_callback shutdown_comp_cb, bool fo
 
         // clear the shutdown bit on disk;
         m_cfg_sb->set_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
-        config_super_block_write();
+        if (!m_cfg.is_read_only) {
+            config_super_block_write();
+        }
         // free the in-memory copy 
         free(m_cfg_sb);
         lg.unlock();
