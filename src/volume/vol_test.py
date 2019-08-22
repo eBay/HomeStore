@@ -5,6 +5,7 @@ import os
 import sys
 import getopt
 import sys
+from multiprocessing import Process
 sys.stdout.flush()
 from time import sleep
 
@@ -140,6 +141,18 @@ def vol_create_del_test():
                --gtest_filter=IOTest.normal_vol_create_del_test --max_vols=10000", shell=True, stderr=subprocess.STDOUT)
     print("create del vol test passed")
 
+def seq_load_start():
+    print("seq workload started")
+    subprocess.check_call(dirpath + "test_volume \
+            --run_time=24000 --max_num_writes=5000000 --gtest_filter=IOTest.init_io_test --remove_file=0 --flip=1 --load_type=2",\
+            stderr=subprocess.STDOUT, shell=True)
+    print("normal test completed")
+    
+def seq_vol_load():
+    p = Process(target = seq_load_start())
+    p.start()
+    p.join()
+
 def nightly():
 
     # load gen test
@@ -228,3 +241,6 @@ if test_suits == "recovery_nightly":
 
 if test_suits == "load":
     load()
+ 
+if test_suits == "seq_workload":
+    seq_vol_load()

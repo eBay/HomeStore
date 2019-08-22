@@ -390,6 +390,7 @@ public:
         std::unique_lock< std::mutex > lk(m_mutex);
         /* notify who is waiting for init to be completed */
         m_init_done_cv.notify_all();
+#ifdef _PRERELEASE
         if (flip_set == 1) {
             VolInterface::get_instance()->set_io_flip();
         } else if (flip_set == 2){
@@ -397,6 +398,7 @@ public:
             VolInterface::get_instance()->set_io_flip();
             VolInterface::get_instance()->set_error_flip();
         }
+#endif
         return;
     }
 
@@ -469,6 +471,9 @@ public:
             case 1:
                 same_write();
                 break;
+            case 2:
+                seq_write();
+                break;
         }
     }
 
@@ -479,9 +484,6 @@ public:
                 break;
             case 1:
                 same_read();
-                break;
-            case 2:
-                seq_write();
                 break;
         }
     }
@@ -820,6 +822,9 @@ start:
 
         bool verify_io = false;
         
+            case 2:
+                seq_write();
+                break;
         if (!req->is_read && req->err == no_error && read_verify) {
             (void)VolInterface::get_instance()->sync_read(vol_info[req->cur_vol]->vol, req->lba, req->nblks, req);
             LOGTRACE("IO DONE, req_id={}, outstanding_ios={}", req->request_id, outstanding_ios.load());
