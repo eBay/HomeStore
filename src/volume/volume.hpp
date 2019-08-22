@@ -202,7 +202,8 @@ public:
     static homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >* m_data_blkstore;
     static void           process_vol_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
     static volume_req_ptr create_vol_req(Volume* vol, const vol_interface_req_ptr& hb_req);
-    static void set_flip();
+    static void set_io_flip();
+    static void set_error_flip();
 
     ~Volume();
 

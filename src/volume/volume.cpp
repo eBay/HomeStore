@@ -101,25 +101,35 @@ void Volume::recovery_start() { vol_scan_alloc_blks(); }
 uint64_t Volume::get_metadata_used_size() { return m_map->get_used_size(); }
 
 #ifdef _PRERELEASE 
-void Volume::set_flip() {
-    FlipClient fc(HomeStoreFlip::instance());
+void Volume::set_error_flip() {
+    FlipClient *fc = HomeStoreFlip::client_instance();
     FlipFrequency freq;
     FlipCondition cond1;
     freq.set_count(2000000000);
-    freq.set_percent(10);
+    freq.set_percent(1);
+    
+    /* error flips */
+    freq.set_percent(1);
+    fc->inject_noreturn_flip("vol_vchild_error", {}, freq);
+    fc->inject_retval_flip("delay_us_and_inject_error_on_completion", {}, freq, 20);
+    fc->inject_noreturn_flip("varsize_blkalloc_no_blks", {}, freq);
+    
+}
+
+void Volume::set_io_flip() {
+    FlipClient *fc = HomeStoreFlip::client_instance();
+    FlipFrequency freq;
+    FlipCondition cond1;
+    freq.set_count(2000000000);
+    freq.set_percent(2);
     
     /* io flips */
-    fc.inject_noreturn_flip("vol_vchild_error", {}, freq);
-    fc.inject_retval_flip("vol_delay_read_us", {}, freq, 20);
-    fc.inject_retval_flip("cache_insert_race", {}, freq, 20);
+    fc->inject_retval_flip("vol_delay_read_us", {}, freq, 20);
 
-    /* error flips */
-    freq.set_percent(2);
-    fc.inject_retval_flip("delay_us_and_inject_error_on_completion", {}, freq, 20);
-    fc.inject_noreturn_flip("varsize_blkalloc_no_blks", {}, freq);
+    fc->inject_retval_flip("cache_insert_race", {}, freq, 20);
     
-    fc.create_condition("nuber of blks in a write", flip::Operator::EQUAL, 8, &cond1);
-    fc.inject_retval_flip("blkalloc_split_blk", {}, freq, 4);
+    fc->create_condition("nuber of blks in a write", flip::Operator::EQUAL, 8, &cond1);
+    fc->inject_retval_flip("blkalloc_split_blk", {cond1}, freq, 4);
 }
 #endif
 
@@ -265,6 +275,11 @@ void Volume::process_metadata_completions(const volume_req_ptr& vreq) {
     VOL_LOG(TRACE, volume, parent_req, "metadata_complete: status={}", vreq->err.message());
     HISTOGRAM_OBSERVE(m_metrics, volume_map_write_latency, get_elapsed_time_us(vreq->op_start_time));
 
+#ifdef _PRERELEASE
+    if (parent_req->outstanding_io_cnt.get() > 2 && homestore_flip->test_flip("vol_vchild_error")) {
+        vreq->err = homestore_error::flip_comp_error;
+    }
+#endif
     check_and_complete_req(parent_req, vreq->err, true /* call_completion_cb */, &(vreq->blkIds_to_free));
 #ifndef NDEBUG
     {
@@ -305,6 +320,11 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
         // for write flow, we havent marked anything till meta completion, so nothing to do
     }
 
+#ifdef _PRERELEASE
+    if (parent_req->outstanding_io_cnt.get() > 2 && homestore_flip->test_flip("vol_vchild_error")) {
+        vreq->err = homestore_error::flip_comp_error;
+    }
+#endif
     // Shortcut to error completion
     if (vreq->err) {
         if (!vreq->is_read) {
@@ -496,11 +516,6 @@ void Volume::check_and_complete_req(const vol_interface_req_ptr& hb_req, const s
 
     m_read_blk_tracker->safe_remove_blks(hb_req->is_read, fbes, err);
 
-#ifdef _PRERELEASE
-    if (hb_req->outstanding_io_cnt > 2 && homestore_flip->test_flip("vol_vchild_error")) {
-        err = homestore_error::flip_comp_error;
-    }
-#endif
     if (err) {
         if (hb_req->set_error(err)) {
             // Was not completed earlier, so complete the io

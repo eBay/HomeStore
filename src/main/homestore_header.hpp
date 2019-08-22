@@ -36,6 +36,11 @@ public:
         static flip::Flip inst;
         return &inst;
     }
+
+    static flip::FlipClient *client_instance() {
+        static flip::FlipClient fc(HomeStoreFlip::instance());
+        return &fc;
+    }
 };
 
 #define homestore_flip homestore::HomeStoreFlip::instance()

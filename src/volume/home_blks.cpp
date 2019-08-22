@@ -875,6 +875,16 @@ homeds::blob HomeBlks::at_offset(const boost::intrusive_ptr< BlkBuffer >& buf, u
 
 #ifndef NDEBUG
 void HomeBlks::print_tree(const VolumePtr& vol) { vol->print_tree(); }
+
+void HomeBlks::set_io_flip() {
+    Volume::set_io_flip();
+    MappingBtreeDeclType::set_io_flip();
+}
+
+void HomeBlks::set_error_flip() {
+    Volume::set_error_flip();
+    MappingBtreeDeclType::set_error_flip(); 
+}
 #endif
 
 void HomeBlks::get_version(sisl::HttpCallData cd) {

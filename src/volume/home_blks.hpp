@@ -183,6 +183,8 @@ public:
 #ifndef NDEBUG
     void print_tree(const VolumePtr& vol);
     void verify_pending_blks(const VolumePtr& vol);
+    void set_io_flip();
+    void set_error_flip();
 #endif
 
 public:

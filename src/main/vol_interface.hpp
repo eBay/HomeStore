@@ -256,6 +256,8 @@ public:
 #ifndef NDEBUG
     virtual void print_tree(const VolumePtr& vol) = 0;
     virtual void verify_pending_blks(const VolumePtr& vol) = 0;
+    virtual void set_io_flip() = 0;
+    virtual void set_error_flip() = 0;
 #endif
 };
 } // namespace homestore
