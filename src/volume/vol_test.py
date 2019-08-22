@@ -1,7 +1,7 @@
 #!/usr/bin/env python
-"""@package vol_test.py
-    Regression Tests linked to PR merge
-"""
+## @file vol_test.py
+#  Regression Tests linked to PR merge
+
 import subprocess
 import os
 import sys
@@ -44,6 +44,8 @@ def recovery():
         print("recovery failed")
         sys.exit(1)
 
+## @test    normal
+#  @brief   Normal IO test
 def normal():
     print("normal test started")
     status = subprocess.check_call(dirpath + "test_volume \
@@ -53,6 +55,8 @@ def normal():
         print("normal test failed")
         sys.exit(1)
 
+## @test    load
+#  @brief   Test using load generator
 def load():
     print("load test started")
     status = subprocess.check_call(dirpath + "test_load \
@@ -62,6 +66,8 @@ def load():
         print("load test failed")
         sys.exit(1)
 
+## @test    recovery_nightly
+#  @brief   Nightly recovery test
 def recovery_nightly():
     print("recovery test started")
     i = 1
@@ -85,6 +91,8 @@ def recovery_nightly():
         sys.exit(1)
     print("recovery test completed")
 
+## @test    one_disk_replace
+#  @brief   One disk is replaced during boot time
 def one_disk_replace():
     print("one disk replace test started");
     status = subprocess.check_call(dirpath + "test_volume --gtest_filter=IOTest.one_disk_replace_test \
@@ -94,6 +102,8 @@ def one_disk_replace():
         sys.exit(1)
     print("recovery test with one disk replace passed")
 
+## @test    one_disk_replace_abort
+#  @brief   Homestore crashed during recovery with one disk replace
 def one_disk_replace_abort():
     print("recovery abort with one disk replace started")
     subprocess.call(dirpath + "test_volume --gtest_filter=IOTest.one_disk_replace_abort_test \
@@ -105,6 +115,8 @@ def one_disk_replace_abort():
         sys.exit(1)
     print("recovery abort with one disk replace passed")
 
+## @test    both_disk_replace
+#  @brief   Both disks are replaced during boot time
 def both_disk_replace():
     print("Both disk replace started")
     status = subprocess.check_call(dirpath + "test_volume \
@@ -116,6 +128,8 @@ def both_disk_replace():
             --run_time=300 --max_num_writes=5000000 --gtest_filter=IOTest.init_io_test --remove_file=0", shell=True)
     print("Both disk replace passed")
 
+## @test    one_disk_fail
+#  @brief   One Disk failure during boot time
 def one_disk_fail():
     print("one disk fail test started")
     status = subprocess.check_call(dirpath + "test_volume \
@@ -125,6 +139,8 @@ def one_disk_fail():
         sys.exit(1)
     print("one disk fail test passed")
 
+## @test    vol_offline_test
+#  @brief   Move volume to offline when IOs are going on
 def vol_offline_test():
     print("vol offline test started")
     status = subprocess.check_call(dirpath + "test_volume \
@@ -142,6 +158,9 @@ def vol_offline_test():
         sys.exit(1)
     print("vol offline test recovery passed")
 
+## @test    vol_io_fail_test
+#  @brief   Set IO error and verify all volumes come online
+#           after reboot and data is verified.
 def vol_io_fail_test():
     print("vol io fail test started")
     
@@ -160,6 +179,8 @@ def vol_io_fail_test():
         sys.exit(1)
     print("vol io fail test recovery passed")
 
+##  @test   vol_create_del_test
+#   @brief  Create and Delete Volume
 def vol_create_del_test():
     print("create del vol test started")
     status = subprocess.check_call(dirpath + "test_volume \
@@ -171,54 +192,33 @@ def vol_create_del_test():
 
 def nightly():
 
-    """ @test load gen test
-    """
     load()
     sleep(5)
 
-    """ @test normal IO test
-    """
     normal()
     sleep(5)
-    
-    """ @test recovery test
-    """
+
     recovery_nightly()
     sleep(5)
 
-    """ @test  one disk is replaced during boot time
-    """
     one_disk_replace()
     sleep(5)
 
-    """ @test homestore crashed during recovery with one disk replace
-    """
     one_disk_replace_abort()
     sleep(5)
-    
-    """ @test Both disks are replaced during boot time
-    """
+
     both_disk_replace()
     sleep(5)
-    
-    """ @test One Disk failure during boot time
-    """
+
     one_disk_fail()
     sleep(5)
 
-    """ @test Move volume to offline when IOs are going on
-    """
     vol_offline_test()
     sleep(5)
 
-    """ @test Set IO error and verify all volumes come online
-              after reboot and data is verified.
-    """
     vol_io_fail_test()
     sleep(5)
 
-    """ @test create del vol
-    """
     vol_create_del_test()
     sleep(5)
     print("nightly test passed")
