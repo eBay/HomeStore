@@ -30,7 +30,7 @@ class HomestoreConan(ConanFile):
                 "double-conversion/3.1.4@bincrafters/stable",
                 "evhtp/1.2.18.1@oss/stable",
                 "farmhash/1.0.0@oss/stable",
-                "flip/0.1.1@sds/testing",
+                "flip/0.1.2@sds/testing",
                 "folly/2019.08.19.00@bincrafters/develop",
                 "gtest/1.8.1@bincrafters/stable",
                 "isa-l/2.21.0@oss/stable",
@@ -40,8 +40,9 @@ class HomestoreConan(ConanFile):
                 "sds_logging/5.3.2@sds/develop",
                 "sds_options/0.1.5@sds/testing",
                 ("grpc/1.22.1@oss/stable", "override"), # Just here for build, not a direct dependency
-                ("OpenSSL/1.1.1c@conan/stable", "override"), # Just here for build, not a direct dependency
-                ("zstd/1.4.0@bincrafters/stable", "override"), # Just here for build, not a direct dependency
+                ("sds_prometheus/0.7.1@sds/stable", "override"),
+                ("OpenSSL/1.1.1c@conan/stable", "override"),
+                ("zstd/1.4.0@bincrafters/stable", "override"),
                 )
 
     generators = "cmake"
