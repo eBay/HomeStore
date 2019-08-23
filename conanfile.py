@@ -28,17 +28,20 @@ class HomestoreConan(ConanFile):
                 "boost_preprocessor/1.69.0@bincrafters/stable",
                 "boost_uuid/1.69.0@bincrafters/stable",
                 "double-conversion/3.1.4@bincrafters/stable",
+                "evhtp/1.2.18.1@oss/stable",
                 "farmhash/1.0.0@oss/stable",
                 "flip/0.1.1@sds/testing",
-                "folly/2019.07.22.00@bincrafters/testing",
+                "folly/2019.08.19.00@bincrafters/develop",
                 "gtest/1.8.1@bincrafters/stable",
                 "isa-l/2.21.0@oss/stable",
-                "iomgr/2.2.8@sds/develop",
-                "libevent/2.1.10@bincrafters/stable",
+                "iomgr/2.2.9@sds/develop",
+                "libevent/2.1.11@bincrafters/stable",
                 "sisl/0.3.6@sisl/develop",
                 "sds_logging/5.3.2@sds/develop",
                 "sds_options/0.1.5@sds/testing",
-                ("zstd/1.3.8@bincrafters/stable", "override"), # Just here for build, not a direct dependency
+                ("grpc/1.22.1@oss/stable", "override"), # Just here for build, not a direct dependency
+                ("OpenSSL/1.1.1c@conan/stable", "override"), # Just here for build, not a direct dependency
+                ("zstd/1.4.0@bincrafters/stable", "override"), # Just here for build, not a direct dependency
                 )
 
     generators = "cmake"
