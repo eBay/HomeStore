@@ -260,8 +260,10 @@ public:
 
     virtual void print_tree(const VolumePtr& vol, bool chksum = true) = 0;
     virtual void print_node(const VolumePtr& vol, uint64_t blkid, bool chksum = true) = 0;
-#ifndef _PRERELEASE
+#ifndef NDEBUG
     virtual void verify_pending_blks(const VolumePtr& vol) = 0;
+#endif
+#ifdef _PRERELEASE
     virtual void set_io_flip() = 0;
     virtual void set_error_flip() = 0;
 #endif
