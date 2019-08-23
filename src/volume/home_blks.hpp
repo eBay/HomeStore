@@ -186,6 +186,8 @@ public:
 
 #ifndef NDEBUG
     void verify_pending_blks(const VolumePtr& vol);
+#endif
+#ifdef _PRERELEASE
     void set_io_flip();
     void set_error_flip();
 #endif

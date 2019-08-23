@@ -908,7 +908,7 @@ homeds::blob HomeBlks::at_offset(const boost::intrusive_ptr< BlkBuffer >& buf, u
     return (buf->at_offset(offset));
 }
 
-#ifndef NDEBUG
+#ifdef _PRERELEASE
 void HomeBlks::set_io_flip() {
     Volume::set_io_flip();
     MappingBtreeDeclType::set_io_flip();
