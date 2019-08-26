@@ -53,7 +53,8 @@ constexpr auto Gi = Ki * Mi;
 uint64_t max_io_size = 1 * Mi;
 uint64_t max_outstanding_ios = 64u;
 uint64_t max_disk_capacity = 10 * Gi;
-uint64_t match_cnt = 0;
+std::atomic<uint64_t> match_cnt = 0;
+std::atomic<uint64_t> hdr_only_match_cnt = 0;
 using log_level = spdlog::level::level_enum;
 bool verify_hdr = true;
 bool verify_data = true;
@@ -63,6 +64,7 @@ uint32_t remove_file = 1;
 uint32_t expected_vol_state = 0;
 uint32_t verify_only = 0;
 uint32_t is_abort = 0;
+uint32_t flip_set = 0;
 #define VOL_PAGE_SIZE 4096
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
@@ -105,7 +107,6 @@ class IOTest :  public ::testing::Test {
     struct vol_info_t {
        VolumePtr vol;
        int fd;
-       int staging_fd;
        std::mutex vol_mutex;
        homeds::Bitset *m_vol_bm;
        uint64_t max_vol_blks;
@@ -145,7 +146,6 @@ protected:
     bool vol_offline = false;
     bool expect_io_error = false;
     Clock::time_point print_startTime;
-    std::atomic<uint64_t> staging_match_cnt;
     std::atomic<uint64_t> vol_create_cnt;
     std::atomic<uint64_t> vol_del_cnt;
     std::atomic<uint64_t> vol_indx;
@@ -156,7 +156,7 @@ protected:
     bool iomgr_start = false;
 
 public:
-    IOTest():vol_info(0), device_info(0), staging_match_cnt(0) {
+    IOTest():vol_info(0), device_info(0) {
         vol_cnt = 0;
         cur_vol = 0;
         max_vol_size = 0;
@@ -285,8 +285,7 @@ public:
         
         std::shared_ptr<vol_info_t> info = std::make_shared<vol_info_t> ();
         info->vol = vol_obj;
-        info->fd = open(file_name.c_str(), O_RDWR | O_DIRECT); 
-        info->staging_fd = open(staging_file_name.c_str(), O_RDWR | O_DIRECT);
+        info->fd = open(file_name.c_str(), O_RDWR); 
         info->max_vol_blks = VolInterface::get_instance()->get_vol_capacity(vol_obj).initial_total_size /
                                 VolInterface::get_instance()->get_page_size(vol_obj);
         info->m_vol_bm = new homeds::Bitset(info->max_vol_blks);;
@@ -355,6 +354,9 @@ public:
             return;
         }
         
+        auto ret = posix_memalign((void **) &init_buf, 4096, max_io_size);
+        assert(!ret);
+        bzero(init_buf, max_io_size);
         assert(!expected_init_fail);
         if (init) {
             if (!vol_create_del_test) {
@@ -376,9 +378,6 @@ public:
             }
         }
         max_io_size = params.max_io_size;
-        auto ret = posix_memalign((void **) &init_buf, 4096, max_io_size);
-        assert(!ret);
-        bzero(init_buf, max_io_size);
         ev_fd = eventfd(0, EFD_NONBLOCK);
 
         iomgr_obj->add_fd(ev_fd, [this](auto fd, auto cookie, auto event) { process_ev_common(fd, cookie, event); },
@@ -395,6 +394,16 @@ public:
         std::unique_lock< std::mutex > lk(m_mutex);
         /* notify who is waiting for init to be completed */
         m_init_done_cv.notify_all();
+
+#ifdef _PRERELEASE
+        if (flip_set == 1) {
+            VolInterface::get_instance()->set_io_flip();
+        } else if (flip_set == 2) {
+            expect_io_error = true;
+            VolInterface::get_instance()->set_io_flip();
+            VolInterface::get_instance()->set_error_flip();
+        }
+#endif
         return;
     }
 
@@ -467,6 +476,9 @@ public:
             case 1:
                 same_write();
                 break;
+            case 2:
+                seq_write();
+                break;
         }
     }
 
@@ -477,9 +489,6 @@ public:
                 break;
             case 1:
                 same_read();
-                break;
-            case 2:
-                seq_write();
                 break;
         }
     }
@@ -495,12 +504,7 @@ public:
                     write_size = max_io_size;
                 }
                 auto ret = pwrite(vol_info[i]->fd, init_buf, write_size, (off_t) offset);
-                assert(ret = write_size);
-                if (ret != 0) {
-                    return;
-                }
-                ret = pwrite(vol_info[i]->staging_fd, init_buf, write_size, (off_t) offset);
-                assert(ret = write_size);
+                assert(ret == write_size);
                 if (ret != 0) {
                     return;
                 }
@@ -622,8 +626,6 @@ start:
         req->cur_vol = cur;
         
         ++write_cnt;
-        ret = pwrite(vol_info[cur]->staging_fd, req->buf, req->size, req->offset);
-        assert(ret == req->size);
         auto ret_io = VolInterface::get_instance()->write(vol, lba, buf, nblks, req);
         if (ret_io != no_error) {
             assert(ret_io == std::errc::no_such_device || expect_io_error);
@@ -718,7 +720,7 @@ start:
         }
     }
 
-    void verify(const VolumePtr& vol, boost::intrusive_ptr<req> req) {
+    bool verify(const VolumePtr& vol, boost::intrusive_ptr<req> req, bool can_panic) {
         int64_t tot_size_read = 0;
         for (auto &info : req->read_buf_list) {
             auto offset = info.offset;
@@ -736,42 +738,17 @@ start:
                 int j = 0;
                 if (verify_data) {
                     j = memcmp((void *) b.bytes, (uint8_t *)((uint64_t)req->buf + tot_size_read), size_read);
-                } else {
+                    match_cnt++;
+                }
+
+                if (j != 0 && (!verify_data || !verify_done)) {
                     /* we will only verify the header. We write lba number in the header */
                     j = memcmp((void *) b.bytes, (uint8_t *)((uint64_t)req->buf + tot_size_read), sizeof (uint64_t));
-                    if (j) {
-                        /* read it from the staging file as it contains the data for which we haven't gotten the
-                         * completion yet.
-                         */
-                        auto ret = pread(vol_info[req->cur_vol]->staging_fd, (uint8_t *)((uint64_t)req->buf + tot_size_read),
-                                            size_read, req->offset + tot_size_read);
-                        if (ret != size_read) {
-                            assert(0);
-                        }
-                        j = memcmp((void *) b.bytes, (uint8_t *)((uint64_t)req->buf + tot_size_read), sizeof (uint64_t));
-                    }
+                    hdr_only_match_cnt++;
                 }
-                match_cnt++;
                 if (j) {
-                   
-                    if (!verify_done) {
-                        /* compare it from the staging file */
-                        auto ret = pread(vol_info[req->cur_vol]->staging_fd, (uint8_t *)((uint64_t)req->buf + tot_size_read),
-                                            size_read, req->offset + tot_size_read);
-                        if (ret != size_read) {
-                            assert(0);
-                        }
-                        int j = memcmp((void *) b.bytes, (uint8_t *)((uint64_t)req->buf + tot_size_read), size_read);
-                        staging_match_cnt++;
-                        assert(j == 0);
-                        /* update the data in primary file */
-                        ret = pwrite(vol_info[req->cur_vol]->fd, (uint8_t *)((uint64_t)req->buf + tot_size_read), size_read, 
-                                    req->offset + tot_size_read);
-                        if (ret != size_read) {
-                            assert(0);
-                            return;
-                        }
-                    } else {
+                    if (can_panic) {
+
                         LOGINFO("mismatch found offset {} size {}", tot_size_read, size_read);
 #ifndef NDEBUG
                         VolInterface::get_instance()->print_tree(vol);
@@ -780,6 +757,8 @@ start:
                         std::this_thread::sleep_for(std::chrono::seconds(5)); 
                         sleep(30);
                         assert(0);
+                    } else {
+                        return false;
                     }
                 }
                 size -= size_read;
@@ -788,6 +767,7 @@ start:
             }
         }
         assert(tot_size_read == req->size);
+        return true;
     }
 
     void verify_vols() {
@@ -861,7 +841,7 @@ start:
             if (ret != req->size) {
                 assert(0);
             }
-            verify(vol_info[req->cur_vol]->vol, req);
+            verify(vol_info[req->cur_vol]->vol, req, true);
         }
        
         {
@@ -872,7 +852,7 @@ start:
         if (move_verify_to_done && !verify_done) {
             if (outstanding_ios.load() == 0) {
                 verify_done = true;
-                LOGINFO("verfication from the staging file for {} number of blks", staging_match_cnt.load());
+                LOGINFO("verfied only hdr {} number of blks", hdr_only_match_cnt.load());
                 LOGINFO("verify is done. starting IOs");
                 if (verify_only) {
                     notify_cmpl();
@@ -979,17 +959,23 @@ start:
 
     void shutdown() {
         // release the ref_count to volumes;
-        
-        std::unique_lock< std::mutex > lk(m_mutex);
-        assert(io_stalled);
-        while (outstanding_ios.load() != 0) {
-            m_cv.wait(lk);
+       
+        {
+            std::unique_lock< std::mutex > lk(m_mutex);
+            assert(io_stalled);
+            while (outstanding_ios.load() != 0) {
+                m_cv.wait(lk);
+            }
         }
         LOGINFO("stopping iomgr");
         if (iomgr_start) {
             iomgr_obj->stop();
         }
-        vol_info.clear();
+
+        {
+            std::unique_lock< std::mutex > lk(m_mutex);
+            vol_info.clear();
+        }
         LOGINFO("shutting homestore");
         VolInterface::get_instance()->shutdown(std::bind(&IOTest::shutdown_callback, this, std::placeholders::_1));
     }
@@ -1196,7 +1182,8 @@ SDS_OPTION_GROUP(test_volume,
 (remove_file, "", "remove_file", "remove file at the end of test 0 or 1", ::cxxopts::value<uint32_t>()->default_value("1"), "flag"),
 (expected_vol_state,"", "expected_vol_state", "volume state expected during boot", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"),
 (verify_only,"", "verify_only", "verify only boot", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"),
-(abort,"", "abort", "abort", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"))
+(abort,"", "abort", "abort", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"),
+(flip,"", "flip", "flip", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"))
 
 
 #define ENABLED_OPTIONS logging, home_blks, test_volume
@@ -1233,6 +1220,7 @@ int main(int argc, char *argv[]) {
     expected_vol_state = SDS_OPTIONS["expected_vol_state"].as<uint32_t>();
     verify_only = SDS_OPTIONS["verify_only"].as<uint32_t>();
     is_abort = SDS_OPTIONS["abort"].as<uint32_t>();
+    flip_set = SDS_OPTIONS["flip"].as<uint32_t>();
     if (enable_crash_handler) sds_logging::install_crash_handler();
     return RUN_ALL_TESTS();
 }

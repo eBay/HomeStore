@@ -411,7 +411,6 @@ public:
             }
             return status;
         } catch (const std::exception& e) {
-            HS_ASSERT(DEBUG, 0, "{}", e.what());
             return BLK_ALLOC_FAILED;
         }
     }
