@@ -100,10 +100,42 @@ void Volume::recovery_start() { vol_scan_alloc_blks(); }
 
 uint64_t Volume::get_metadata_used_size() { return m_map->get_used_size(); }
 
+#ifdef _PRERELEASE 
+void Volume::set_error_flip() {
+    FlipClient *fc = HomeStoreFlip::client_instance();
+    FlipFrequency freq;
+    FlipCondition cond1;
+    freq.set_count(2000000000);
+    freq.set_percent(1);
+    
+    /* error flips */
+    freq.set_percent(1);
+    fc->inject_noreturn_flip("vol_vchild_error", {}, freq);
+    fc->inject_retval_flip("delay_us_and_inject_error_on_completion", {}, freq, 20);
+    fc->inject_noreturn_flip("varsize_blkalloc_no_blks", {}, freq);
+    
+}
+
+void Volume::set_io_flip() {
+    FlipClient *fc = HomeStoreFlip::client_instance();
+    FlipFrequency freq;
+    FlipCondition cond1;
+    freq.set_count(2000000000);
+    freq.set_percent(2);
+    
+    /* io flips */
+    fc->inject_retval_flip("vol_delay_read_us", {}, freq, 20);
+
+    fc->inject_retval_flip("cache_insert_race", {}, freq, 20);
+    
+    fc->create_condition("nuber of blks in a write", flip::Operator::EQUAL, 8, &cond1);
+    fc->inject_retval_flip("blkalloc_split_blk", {cond1}, freq, 4);
+}
+#endif
+
 //
 // No need to do it in multi-threading since blkstore.free_blk is in-mem operation.
 //
-// void Volume::process_free_blk_callback(BlkId& blk_id, uint64_t size_offset, uint64_t nblks_to_free) {
 void Volume::process_free_blk_callback(Free_Blk_Entry fbe) {
     VOL_LOG(DEBUG, volume, , "Freeing blks cb - bid: {}, offset: {}, nblks: {}, get_pagesz: {}",
             fbe.m_blkId.to_string(), fbe.blk_offset(), fbe.blks_to_free(), get_page_size());
@@ -243,6 +275,11 @@ void Volume::process_metadata_completions(const volume_req_ptr& vreq) {
     VOL_LOG(TRACE, volume, parent_req, "metadata_complete: status={}", vreq->err.message());
     HISTOGRAM_OBSERVE(m_metrics, volume_map_write_latency, get_elapsed_time_us(vreq->op_start_time));
 
+#ifdef _PRERELEASE
+    if (parent_req->outstanding_io_cnt.get() > 2 && homestore_flip->test_flip("vol_vchild_error")) {
+        vreq->err = homestore_error::flip_comp_error;
+    }
+#endif
     check_and_complete_req(parent_req, vreq->err, true /* call_completion_cb */, &(vreq->blkIds_to_free));
 #ifndef NDEBUG
     {
@@ -283,6 +320,11 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
         // for write flow, we havent marked anything till meta completion, so nothing to do
     }
 
+#ifdef _PRERELEASE
+    if (parent_req->outstanding_io_cnt.get() > 2 && homestore_flip->test_flip("vol_vchild_error")) {
+        vreq->err = homestore_error::flip_comp_error;
+    }
+#endif
     // Shortcut to error completion
     if (vreq->err) {
         if (!vreq->is_read) {

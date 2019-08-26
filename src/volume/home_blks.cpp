@@ -908,6 +908,18 @@ homeds::blob HomeBlks::at_offset(const boost::intrusive_ptr< BlkBuffer >& buf, u
     return (buf->at_offset(offset));
 }
 
+#ifdef _PRERELEASE
+void HomeBlks::set_io_flip() {
+    Volume::set_io_flip();
+    MappingBtreeDeclType::set_io_flip();
+}
+
+void HomeBlks::set_error_flip() {
+    Volume::set_error_flip();
+    MappingBtreeDeclType::set_error_flip(); 
+}
+#endif
+
 void HomeBlks::print_tree(const VolumePtr& vol, bool chksum) {
     m_print_checksum = chksum;
     vol->print_tree();

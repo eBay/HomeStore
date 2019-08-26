@@ -50,6 +50,11 @@ void Blk_Read_Tracker::safe_remove_blk_on_read(Free_Blk_Entry& fbe) {
     homeds::blob b = BlkId::get_blob(fbe.m_blkId);
     uint64_t     hash_code = util::Hash64((const char*)b.bytes, (size_t)b.size);
 
+#ifdef _PRERELEASE
+    if (auto flip_ret = homestore_flip->get_test_flip<int>("vol_delay_read_us")) {
+        usleep(flip_ret.get());
+    }
+#endif
     bool is_removed = m_pending_reads_map.check_and_remove(
         fbe.m_blkId, hash_code,
         [this](BlkEvictionRecord* ber) {

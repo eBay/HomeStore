@@ -131,6 +131,19 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
     m_system_uuid = system_uuid;
 
     HS_ASSERT_CMP(LOGMSG, m_devsize, >, 0);
+    if (m_devsize == 0) {
+        std::stringstream ss;
+        ss << "disk size is " << m_devsize;
+        const std::string s = ss.str();
+        throw homestore::homestore_exception(s, homestore_error::min_size_not_avail);
+    }
+
+    auto temp = m_devsize;
+    m_devsize = ALIGN_SIZE_TO_LEFT(m_devsize, HomeStoreConfig::phys_page_size);
+    if (m_devsize != temp) {
+        LOGWARN("device size is not the multiple of physical page size old size {}", temp);
+    }
+    LOGINFO("size of disk {} is {}", m_devname, m_devsize);
     m_dm_chunk[0] = m_dm_chunk[1] = nullptr;
     if (is_init) {
         /* create a chunk */

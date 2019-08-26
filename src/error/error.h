@@ -23,7 +23,8 @@ enum homestore_error {
     btree_read_failed = 12,
     write_failed = 13,
     read_failed = 14, 
-    space_not_avail = 15
+    space_not_avail = 15,
+    flip_comp_error = 16
 };
 
 class homstore_err_category : public std::error_category {

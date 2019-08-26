@@ -500,7 +500,7 @@ public:
         req->blkstore_ref_cnt.increment(1);
         if (!cache_found
 #ifdef _PRERELEASE
-            || (cache_found && (homestore_flip->test_flip("cache_insert_race", size, offset)))
+            || (cache_found && (homestore_flip->test_flip("cache_insert_race")))
 #endif
         ) {
             // Not found in cache, create a new block buf and prepare it for insert to dev and cache.
