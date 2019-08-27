@@ -544,7 +544,7 @@ void VarsizeBlkAllocator::fill_cache(BlkAllocSegment* seg, int slab_indx) {
         // Calculate Fragmentation and Sweep Factor
         auto frag_factor = static_cast<float>(nfragments) / nadded_blks;
         auto sweep_factor = static_cast<float>(nscanned_blks) / get_config().get_blks_per_segment();
-        BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Bitset sweep thread added {} \
+        BLKALLOC_LOG(INFO, varsize_blk_alloc, "Bitset sweep thread added {} \
                 blks to blk cache (Fragmentation factor = {}, Sweep factor = {})",
                 nadded_blks, frag_factor, sweep_factor);
     } else {
