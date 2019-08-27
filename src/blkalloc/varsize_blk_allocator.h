@@ -562,7 +562,7 @@ private:
     void     request_more_blks(BlkAllocSegment* seg, int slab_indx);
     void     request_more_blks_wait(BlkAllocSegment* seg, int slab_indx);
     void     fill_cache(BlkAllocSegment* seg, int slab_indx);
-    uint64_t fill_cache_in_portion(uint64_t portion_num, BlkAllocSegment* seg);
+    std::pair<uint64_t, uint64_t> fill_cache_in_portion(uint64_t portion_num, BlkAllocSegment* seg);
 
     // Convenience routines
     uint64_t blknum_to_phys_pageid(uint64_t blknum) const { return blknum / get_config().get_blks_per_phys_page(); }
