@@ -542,11 +542,13 @@ void VarsizeBlkAllocator::fill_cache(BlkAllocSegment* seg, int slab_indx) {
         BLKALLOC_ASSERT_CMP(LOGMSG, seg->get_free_blks(), >=, nadded_blks);
         seg->remove_free_blks(nadded_blks);
         // Calculate Fragmentation and Sweep Factor
-        auto frag_factor = static_cast<float>(nfragments) / nadded_blks;
-        auto sweep_factor = static_cast<float>(nscanned_blks) / get_config().get_blks_per_segment();
-        BLKALLOC_LOG(INFO, varsize_blk_alloc, "Bitset sweep thread added {} \
-                blks to blk cache (Fragmentation factor = {}, Sweep factor = {})",
-                nadded_blks, frag_factor, sweep_factor);
+        int64_t frag_percent  = (nfragments*100)/nadded_blks;
+        int64_t sweep_percent = (nscanned_blks*100)/get_config().get_blks_per_segment();
+        GAUGE_UPDATE(m_metrics, fragmentation_percentage, frag_percent);
+        GAUGE_UPDATE(m_metrics, sweep_percentage, sweep_percent);
+        BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Bitset sweep thread added {} \
+                blks to blk cache (Fragmentation = {}%, Sweep = {}%)",
+                nadded_blks, frag_percent, sweep_percent);
     } else {
         BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Bitset sweep failed to add any blocks to blk cache");
     }
@@ -693,9 +695,11 @@ VarsizeBlkAllocator::fill_cache_in_portion(uint64_t seg_portion_num, BlkAllocSeg
         }
 
         // Update the counters
-        n_added_blks += total_bits;
-        n_fragments++;
-        m_cache_n_entries.fetch_add(total_bits, std::memory_order_acq_rel);
+        if (total_bits) {
+            n_added_blks += total_bits;
+            n_fragments++;
+            m_cache_n_entries.fetch_add(total_bits, std::memory_order_acq_rel);
+        }
     }
     portion.unlock();
     return std::make_pair(n_added_blks, n_fragments);

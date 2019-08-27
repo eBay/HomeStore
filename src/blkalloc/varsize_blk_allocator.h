@@ -446,6 +446,10 @@ public:
         REGISTER_COUNTER(blkalloc_slab9_capacity, "Block allocator slab 9 capacity",
                          sisl::_publish_as::publish_as_gauge);
 
+        /* Metrics for monitoring fragmentation */
+        REGISTER_GAUGE(fragmentation_percentage, "Percent Fragmentation");
+        REGISTER_GAUGE(sweep_percentage, "Percent Bitmap Sweep");
+
         REGISTER_COUNTER(num_alloc, "number of times alloc called");
         /* In ideal scnario if there are no splits then it should be same as num_alloc */
         REGISTER_COUNTER(num_split, "number of times it split");
