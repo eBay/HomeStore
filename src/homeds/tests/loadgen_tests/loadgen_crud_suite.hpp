@@ -14,6 +14,7 @@ public:
     Clock::time_point startTime;
     Clock::time_point print_startTime;
     Clock::time_point workload_shiftTime;
+    uint8_t           enable_write_log;
 };
 
 template < typename K, typename V, typename Store, typename Executor >

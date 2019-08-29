@@ -1,3 +1,4 @@
+#pragma once
 #include <folly/MPMCQueue.h>
 #include <iomgr/iomgr.hpp>
 

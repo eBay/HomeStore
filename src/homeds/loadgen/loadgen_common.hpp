@@ -5,8 +5,13 @@
 #ifndef HOMESTORE_LOADGEN_COMMON_HPP
 #define HOMESTORE_LOADGEN_COMMON_HPP
 
-namespace homeds {
+namespace homeds { 
 namespace loadgen {
+
+constexpr auto Ki = 1024ull;
+constexpr auto Mi = Ki * Ki;
+constexpr auto Gi = Ki * Mi;
+
 enum KeyPattern {
     SEQUENTIAL = 0,
     UNI_RANDOM,

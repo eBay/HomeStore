@@ -221,7 +221,7 @@ public:
         max_vol_size = (60 * max_capacity)/ (100 * max_vols);
 
         iomgr_obj = std::make_shared<iomgr::ioMgr>(2, num_threads); 
-        LOGINFO("OK1 iomgr_obj use_count: {}", iomgr_obj.use_count()); 
+        
         init_params params; 
 #if 0
         params.flag = homestore::io_flag::BUFFERED_IO;
