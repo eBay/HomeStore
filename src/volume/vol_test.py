@@ -84,7 +84,7 @@ def recovery_nightly():
     i = 1
     while i < 10:
         subprocess.check_call(dirpath + "test_volume \
-        --gtest_filter=IOTest.recovery_io_test --run_time=300 --enable_crash_handler=0 --verify_only=true --flip=1", \
+        --gtest_filter=IOTest.recovery_io_test --run_time=300 --enable_crash_handler=0 --verify_only=1 --flip=1", \
         stderr=subprocess.STDOUT, shell=True)
         
         subprocess.call(dirpath + "test_volume \
