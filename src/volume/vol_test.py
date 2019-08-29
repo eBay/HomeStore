@@ -69,6 +69,14 @@ def load():
             --num_io=100000000000 --num_keys=1000000 --run_time=21600 --gtest_filter=Map* ", stderr=subprocess.STDOUT, shell=True)
     print("load test completed")
 
+## @test    load
+#  @brief   Test Volume using load generator
+def load_volume():
+    print("Volume load test started")
+    subprocess.check_call(dirpath + "test_load \
+            --num_io=100000000000 --num_keys=1000000 --run_time=21600 --gtest_filter=*Volume* ", stderr=subprocess.STDOUT, shell=True)
+    print("Volume load test completed")
+
 ## @test    recovery_nightly
 #  @brief   Nightly recovery test
 def recovery_nightly():
@@ -76,7 +84,7 @@ def recovery_nightly():
     i = 1
     while i < 10:
         subprocess.check_call(dirpath + "test_volume \
-        --gtest_filter=IOTest.recovery_io_test --run_time=300 --enable_crash_handler=0 --verify_only=true --flip=1", \
+        --gtest_filter=IOTest.recovery_io_test --run_time=300 --enable_crash_handler=0 --verify_only=1 --flip=1", \
         stderr=subprocess.STDOUT, shell=True)
         
         subprocess.call(dirpath + "test_volume \
@@ -178,6 +186,9 @@ def seq_vol_load():
 
 def nightly():
 
+    load_volume()
+    sleep(5)
+
     load()
     sleep(5)
 
@@ -255,5 +266,8 @@ if test_suits == "recovery_nightly":
 if test_suits == "load":
     load()
  
+if test_suits == "load_volume":
+    load_volume()
+
 if test_suits == "seq_workload":
     seq_vol_load()
