@@ -12,9 +12,6 @@ using namespace homeds::btree;
 namespace homeds {
 namespace loadgen {
 #define INVALID_SEQ_ID UINT64_MAX
-constexpr auto Ki = 1024ull;
-constexpr auto Mi = Ki * Ki;
-constexpr auto Gi = Ki * Mi;
 
 template < typename K, typename V, size_t NodeSize = 8192 >
 class MapStoreSpec : public StoreSpec< K, V > {
