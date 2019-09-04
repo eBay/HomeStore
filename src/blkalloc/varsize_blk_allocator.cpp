@@ -60,7 +60,8 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig& cfg, bool init) 
     BLKALLOC_LOG(INFO, , "Segment Count = {}, Blocks per segment = {}, portions={}", cfg.get_total_segments(),
                  seg_nblks, portions_per_seg);
     for (auto i = 0U; i < cfg.get_total_segments(); i++) {
-        BlkAllocSegment* seg = new BlkAllocSegment(seg_nblks, i, portions_per_seg);
+        std::string seg_name = cfg.get_name() + "_seg_"+ std::to_string(i);
+        BlkAllocSegment* seg = new BlkAllocSegment(seg_nblks, i, portions_per_seg, seg_name);
         m_segments.push_back(seg);
     }
 
@@ -471,8 +472,6 @@ void VarsizeBlkAllocator::free(const BlkId& b) {
  */
 void VarsizeBlkAllocator::fill_cache(BlkAllocSegment* seg, int slab_indx) {
     uint64_t nadded_blks    = 0;
-    uint64_t nfragments     = 0;
-    uint64_t nscanned_blks  = 0;
 
     BLKALLOC_ASSERT_NULL(LOGMSG, seg);
     /* While cache is not full */
@@ -516,10 +515,7 @@ void VarsizeBlkAllocator::fill_cache(BlkAllocSegment* seg, int slab_indx) {
 
         BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Refill cache");
         uint64_t portion_num = seg->get_clock_hand();
-        auto stat = fill_cache_in_portion(portion_num, seg);
-        nadded_blks     += stat.first;
-        nfragments      += stat.second;
-        nscanned_blks   += get_config().get_blks_per_portion();
+        nadded_blks += fill_cache_in_portion(portion_num, seg);
         if (nadded_blks > 0) {
             /* We got some blks. wake the IO threads if there are waiting. This thread will continue to
              * populate the desired slab.
@@ -541,21 +537,13 @@ void VarsizeBlkAllocator::fill_cache(BlkAllocSegment* seg, int slab_indx) {
     if (nadded_blks) {
         BLKALLOC_ASSERT_CMP(LOGMSG, seg->get_free_blks(), >=, nadded_blks);
         seg->remove_free_blks(nadded_blks);
-        // Calculate Fragmentation and Sweep Factor
-        int64_t frag_percent  = (nfragments*100)/nadded_blks;
-        int64_t sweep_percent = (nscanned_blks*100)/get_config().get_blks_per_segment();
-        GAUGE_UPDATE(m_metrics, fragmentation_percentage, frag_percent);
-        GAUGE_UPDATE(m_metrics, sweep_percentage, sweep_percent);
-        BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Bitset sweep thread added {} \
-                blks to blk cache (Fragmentation = {}%, Sweep = {}%)",
-                nadded_blks, frag_percent, sweep_percent);
+        BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Bitset sweep thread added {} blks to blk cache", nadded_blks);
     } else {
         BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Bitset sweep failed to add any blocks to blk cache");
     }
 }
 
-std::pair<uint64_t, uint64_t>
-VarsizeBlkAllocator::fill_cache_in_portion(uint64_t seg_portion_num, BlkAllocSegment* seg) {
+uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t seg_portion_num, BlkAllocSegment* seg) {
     EmptyClass dummy;
     uint64_t   n_added_blks = 0;
     uint64_t   n_fragments  = 0;
@@ -702,7 +690,8 @@ VarsizeBlkAllocator::fill_cache_in_portion(uint64_t seg_portion_num, BlkAllocSeg
         }
     }
     portion.unlock();
-    return std::make_pair(n_added_blks, n_fragments);
+    seg->reportFragmentation(n_added_blks, n_fragments);
+    return n_added_blks;
 }
 
 // Run in non-region threads. It can be called by multiple threads simultaneously.

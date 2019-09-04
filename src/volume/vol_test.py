@@ -15,17 +15,6 @@ opts,args = getopt.getopt(sys.argv[1:], 'td:', ['test_suits=', 'dirpath='])
 test_suits = ""
 dirpath = "./"
 
-# slack details
-slackcmd = ("./slackpost "
-            "https://hooks.slack.com/services/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 "
-            "sds-homestore "
-            "regression-bot \""
-           )
-
-def slackpost(msg):
-    cmd = slackcmd + msg + "\""
-    subprocess.call(cmd, shell=True)
-
 for opt,arg in opts:
     if opt in ('-t', '--test_suits'):
         test_suits = arg

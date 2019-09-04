@@ -234,6 +234,16 @@ public:
     }
 };
 
+class SegmentMetrics : public sisl::MetricsGroupWrapper {
+public:
+    explicit SegmentMetrics(const char* seg_name) : sisl::MetricsGroupWrapper("Segment", seg_name) {
+        /* Metrics for monitoring fragmentation */
+        REGISTER_HISTOGRAM(frag_pct_distribution, "Distribution of fragmentation percentage",
+                           HistogramBucketsType(LinearUpto64Buckets));
+        register_me_to_farm();
+    }
+};
+
 class BlkAllocSegment {
 public:
     class CompareSegAvail {
@@ -253,9 +263,12 @@ private:
     uint64_t                m_total_blks;
     uint64_t                m_total_portions;
     uint32_t                m_seg_num; // Segment sequence number
+    SegmentMetrics          m_metrics;
 
 public:
-    BlkAllocSegment(uint64_t nblks, uint32_t seg_num, uint64_t nportions) : m_total_portions(nportions) {
+    BlkAllocSegment(uint64_t nblks, uint32_t seg_num, uint64_t nportions, std::string seg_name) :
+            m_total_portions(nportions),
+            m_metrics(seg_name.c_str()) {
         set_total_blks(nblks);
         add_free_blks(nblks);
         set_seg_num(seg_num);
@@ -289,6 +302,12 @@ public:
     void set_seg_num(uint32_t n) { m_seg_num = n; }
 
     uint32_t get_seg_num() const { return m_seg_num; }
+
+    void reportFragmentation(uint64_t nadded_blks, uint64_t nfragments) {
+        float frag_ratio = (static_cast<float>(nfragments)) / nadded_blks;
+        uint32_t scaled_frag_factor = static_cast<uint32_t>(frag_ratio * 64);
+        HISTOGRAM_OBSERVE(m_metrics, frag_pct_distribution, scaled_frag_factor);
+    }
 };
 
 class BlkAllocPortion {
@@ -446,10 +465,6 @@ public:
         REGISTER_COUNTER(blkalloc_slab9_capacity, "Block allocator slab 9 capacity",
                          sisl::_publish_as::publish_as_gauge);
 
-        /* Metrics for monitoring fragmentation */
-        REGISTER_GAUGE(fragmentation_percentage, "Percent Fragmentation");
-        REGISTER_GAUGE(sweep_percentage, "Percent Bitmap Sweep");
-
         REGISTER_COUNTER(num_alloc, "number of times alloc called");
         /* In ideal scnario if there are no splits then it should be same as num_alloc */
         REGISTER_COUNTER(num_split, "number of times it split");
@@ -566,7 +581,7 @@ private:
     void     request_more_blks(BlkAllocSegment* seg, int slab_indx);
     void     request_more_blks_wait(BlkAllocSegment* seg, int slab_indx);
     void     fill_cache(BlkAllocSegment* seg, int slab_indx);
-    std::pair<uint64_t, uint64_t> fill_cache_in_portion(uint64_t portion_num, BlkAllocSegment* seg);
+    uint64_t fill_cache_in_portion(uint64_t portion_num, BlkAllocSegment* seg);
 
     // Convenience routines
     uint64_t blknum_to_phys_pageid(uint64_t blknum) const { return blknum / get_config().get_blks_per_phys_page(); }
