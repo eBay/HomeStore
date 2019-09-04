@@ -34,7 +34,6 @@ TARGET_LINK_LIBRARIES(perf_test_volume ${Boost_LIBRARIES})
 TARGET_LINK_LIBRARIES(check_btree ${Boost_LIBRARIES})
 
 file(COPY vol_test.py DESTINATION ${CMAKE_BINARY_DIR}/bin)
-file(COPY slackpost DESTINATION ${CMAKE_BINARY_DIR}/bin)
 add_test(NAME TestVol COMMAND test_volume)
 add_test(NAME TestVolRecovery COMMAND ${CMAKE_BINARY_DIR}/bin/vol_test.py --test_suits=recovery --dirpath=${CMAKE_BINARY_DIR}/bin/)
 SET_TESTS_PROPERTIES(TestVolRecovery PROPERTIES DEPENDS TestVol)
