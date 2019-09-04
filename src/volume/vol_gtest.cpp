@@ -788,7 +788,7 @@ start:
                     io_size = max_blks;
                 }
                 read_vol(cur, lba, io_size);
-                vol_info[cur]->cur_checkpoint = lba;
+                vol_info[cur]->cur_checkpoint = lba + io_size;
                 if (outstanding_ios > max_outstanding_ios) {
                     return;
                 }

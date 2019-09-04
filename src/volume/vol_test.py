@@ -50,7 +50,7 @@ def recovery():
 def normal():
     print("normal test started")
     subprocess.check_call(dirpath + "test_volume \
-            --run_time=24000 --max_num_writes=5000000 --gtest_filter=IOTest.init_io_test --remove_file=0 --flip=1",\
+            --run_time=20000 --max_num_writes=5000000 --gtest_filter=IOTest.init_io_test --remove_file=0 --flip=1",\
             stderr=subprocess.STDOUT, shell=True)
     print("normal test completed")
 
@@ -89,7 +89,7 @@ def recovery_nightly():
         
         subprocess.call(dirpath + "test_volume \
         --gtest_filter=IOTest.recovery_io_test --run_time=300 --enable_crash_handler=0 --verify_data=0 --verify_hdr=0 \
-        --abort=true --flip=1", shell=True)
+        --abort=1 --flip=1", shell=True)
         s = "recovery test iteration" + repr(i) + "passed" 
         print(s)
         i += 1
