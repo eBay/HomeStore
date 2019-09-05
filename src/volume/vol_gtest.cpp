@@ -849,6 +849,7 @@ start:
             vol_info[req->cur_vol]->m_vol_bm->reset_bits(req->lba, req->nblks);
         }
         
+        outstanding_ios--;
         if (move_verify_to_done && !verify_done) {
             if (outstanding_ios.load() == 0) {
                 verify_done = true;
@@ -867,7 +868,6 @@ start:
             }
         }
 
-        outstanding_ios--;
         if (verify_done && is_abort) {
             if ((get_elapsed_time(startTime) > (random() % run_time))) {
                 abort();
