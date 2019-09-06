@@ -1,5 +1,5 @@
 # ##########   #######   ############
-FROM ecr.vip.ebayc3.com/sds/sds_cpp_base:2.9
+FROM ecr.vip.ebayc3.com/sds/sds_cpp_base:2.12
 LABEL description="Automated SDS compilation"
 
 ARG BUILD_TYPE
