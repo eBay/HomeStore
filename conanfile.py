@@ -5,8 +5,8 @@ from conans import ConanFile, CMake, tools
 class HomestoreConan(ConanFile):
     name = "homestore"
 
-    version = "0.11.18"
-
+    version = "0.11.19"
+    revision_mode = "scm"
 
     license = "Proprietary"
     url = "https://github.corp.ebay.com/SDS/Homestore"
