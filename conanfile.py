@@ -5,8 +5,8 @@ from conans import ConanFile, CMake, tools
 class HomestoreConan(ConanFile):
     name = "homestore"
 
-    version = "0.11.18"
-
+    version = "0.11.19"
+    revision_mode = "scm"
 
     license = "Proprietary"
     url = "https://github.corp.ebay.com/SDS/Homestore"
@@ -36,11 +36,10 @@ class HomestoreConan(ConanFile):
                 "isa-l/2.21.0@oss/stable",
                 "iomgr/2.2.9@sds/develop",
                 "libevent/2.1.11@bincrafters/stable",
-                "sisl/0.3.6@sisl/develop",
+                "sisl/0.3.7@sisl/develop",
                 "sds_logging/5.3.2@sds/develop",
                 "sds_options/0.1.5@sds/testing",
-                ("grpc/1.23.0@oss/develop", "override"), # Just here for build, not a direct dependency
-                ("sds_prometheus/0.7.1@sds/stable", "override"),
+                ("jsonformoderncpp/3.7.0@vthiery/stable", "override"),
                 ("OpenSSL/1.1.1c@conan/stable", "override"),
                 ("zstd/1.4.0@bincrafters/stable", "override"),
                 )
