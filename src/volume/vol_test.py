@@ -73,18 +73,19 @@ def recovery_nightly():
     i = 1
     while i < 10:
         subprocess.check_call(dirpath + "test_volume \
-        --gtest_filter=IOTest.recovery_io_test --run_time=300 --enable_crash_handler=0 --verify_only=1 --flip=1", \
+        --gtest_filter=IOTest.recovery_io_test --run_time=300 --enable_crash_handler=0 --verify_only=1 --flip=1 \
+        --remove_file=0", \
         stderr=subprocess.STDOUT, shell=True)
         
         subprocess.call(dirpath + "test_volume \
         --gtest_filter=IOTest.recovery_io_test --run_time=300 --enable_crash_handler=0 --verify_data=0 --verify_hdr=0 \
-        --abort=1 --flip=1", shell=True)
+        --abort=1 --flip=1 --remove_file=0", shell=True)
         s = "recovery test iteration" + repr(i) + "passed" 
         print(s)
         i += 1
     
     subprocess.check_call(dirpath + "test_volume --gtest_filter=IOTest.recovery_io_test \
-            --run_time=300 --remove_file=0", stderr=subprocess.STDOUT, shell=True)
+            --run_time=300 --remove_file=1", stderr=subprocess.STDOUT, shell=True)
     print("recovery test completed")
 
 ## @test    one_disk_replace
