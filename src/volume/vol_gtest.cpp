@@ -538,7 +538,7 @@ start:
         }    
         if (nblks == 0) { nblks = 1; } 
 
-        if (verify_data) {
+        if (load_type != 2) {
             /* can not support concurrent overlapping writes if whole data need to be verified */
             std::unique_lock< std::mutex > lk(vol_info[cur]->vol_mutex);
             /* check if someone is already doing writes/reads */ 
@@ -571,7 +571,7 @@ start:
         nblks = rand() % max_blks;
         if (nblks == 0) { nblks = 1; }
 
-        if (verify_data) {
+        if (load_type != 2) {
             /* can not support concurrent overlapping writes if whole data need to be verified */
             std::unique_lock< std::mutex > lk(vol_info[cur]->vol_mutex);
             /* check if someone is already doing writes/reads */ 
@@ -668,7 +668,7 @@ start:
         nblks = rand() % max_blks;
         if (nblks == 0) { nblks = 1; }
         
-        if (verify_data) {
+        if (load_type != 2) {
             /* Don't send overlapping reads with pending writes if data verification is on */
             std::unique_lock< std::mutex > lk(vol_info[cur]->vol_mutex);
             /* check if someone is already doing writes/reads */ 
@@ -1169,7 +1169,7 @@ TEST_F(IOTest, vol_io_fail_test) {
 
 SDS_OPTION_GROUP(test_volume, 
 (run_time, "", "run_time", "run time for io", ::cxxopts::value<uint32_t>()->default_value("30"), "seconds"),
-(load_type, "", "load_type", "load_type", ::cxxopts::value<uint32_t>()->default_value("0"), "random_write_read:0, same_write_read:1"),
+(load_type, "", "load_type", "load_type", ::cxxopts::value<uint32_t>()->default_value("0"), "random_write_read:0, same_write_read:1, overlap_write=2"),
 (num_threads, "", "num_threads", "num threads for io", ::cxxopts::value<uint32_t>()->default_value("8"), "number"),
 (read_enable, "", "read_enable", "read enable 0 or 1", ::cxxopts::value<uint32_t>()->default_value("1"), "flag"),
 (max_disk_capacity, "", "max_disk_capacity", "max disk capacity", ::cxxopts::value<uint64_t>()->default_value("7"), "GB"),
@@ -1221,6 +1221,10 @@ int main(int argc, char *argv[]) {
     verify_only = SDS_OPTIONS["verify_only"].as<uint32_t>();
     is_abort = SDS_OPTIONS["abort"].as<uint32_t>();
     flip_set = SDS_OPTIONS["flip"].as<uint32_t>();
+
+    if (load_type == 2) {
+        verify_data = 0;
+    }
     if (enable_crash_handler) sds_logging::install_crash_handler();
     return RUN_ALL_TESTS();
 }
