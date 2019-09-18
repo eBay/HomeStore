@@ -306,6 +306,11 @@ public:
         return nth_key.compare_range(range);
     }
 
+    void get_all_kvs(std::vector< pair< BtreeKey*, BtreeValue* > >* kvs) const {
+        LOGERROR("Not implemented");
+        return;
+    }
+
     /////////////// Other Internal Methods /////////////
     void set_nth_obj(uint32_t ind, const BtreeKey &k, const BtreeValue &v) {
         assert(ind <= this->get_total_entries());

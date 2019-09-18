@@ -456,6 +456,8 @@ public:
 class BtreeValue {
 public:
     BtreeValue() {}
+    virtual ~BtreeValue() {}
+
     // BtreeValue(const BtreeValue& other) = delete; // Deleting copy constructor forces the derived class to define its
     // own copy constructor
 

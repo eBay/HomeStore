@@ -358,8 +358,9 @@ class mapping {
     typedef std::function< void(Free_Blk_Entry fbe) >                             free_blk_callback;
     typedef std::function< void(BlkId& bid) >                                     pending_read_blk_cb;
 
-private:
+    public:
     MappingBtreeDeclType* m_bt;
+private:
     alloc_blk_callback    m_alloc_blk_cb;
     free_blk_callback     m_free_blk_cb;
     pending_read_blk_cb   m_pending_read_blk_cb;
@@ -582,7 +583,18 @@ public:
         m_bt->print_node(bid);
     }
 
+    void merge(mapping* other) {
+        m_bt->merge(other->m_bt,
+            bind(&mapping::mapping_merge_cb, this, placeholders::_1, placeholders::_2, placeholders::_3));
+    }
+
 private:
+    void mapping_merge_cb(vector< pair< MappingKey, MappingValue > >&      match_kv,
+                           vector< pair< MappingKey, MappingValue > >&      replace_kv,
+                           BRangeUpdateCBParam< MappingKey, MappingValue >* cb_param) {
+        match_item_cb_put_internal(match_kv, replace_kv, false, cb_param);
+    }
+
     /**
      * Callback called once for each bnode
      * @param match_kv  - list of all match K/V for bnode (based on key.compare/compare_range)
@@ -653,6 +665,12 @@ private:
 #endif
     }
 
+    void match_item_cb_put(vector< pair< MappingKey, MappingValue > >&      match_kv,
+                            vector< pair< MappingKey, MappingValue > >&      replace_kv,
+                            BRangeUpdateCBParam< MappingKey, MappingValue >* cb_param) {
+        match_item_cb_put_internal(match_kv, replace_kv, true, cb_param);
+    }
+
     /**
      * Callback called onces for each eligible bnode
      * @param match_kv - list of all match K/V for bnode (based on key.compare/compare_range)
@@ -661,15 +679,24 @@ private:
      *
      * We piggyback on put to delete old commited seq Id.
      */
-    void match_item_cb_put(vector< pair< MappingKey, MappingValue > >&      match_kv,
+    void match_item_cb_put_internal(vector< pair< MappingKey, MappingValue > >&      match_kv,
                            vector< pair< MappingKey, MappingValue > >&      replace_kv,
+                           bool is_valid_param,
                            BRangeUpdateCBParam< MappingKey, MappingValue >* cb_param) {
 
         uint64_t start_lba = 0, end_lba = 0;
         get_start_end_lba(cb_param, start_lba, end_lba);
-        UpdateCBParam* param = (UpdateCBParam*)cb_param;
         ValueEntry     new_ve;
-        param->get_new_value().get_array().get(0, new_ve, false);
+        cb_param->get_new_value().get_array().get(0, new_ve, false);
+
+        UpdateCBParam *param;
+
+        if (is_valid_param) {
+            param = (UpdateCBParam*)cb_param;
+        } else {
+            param = nullptr;
+        }
+
 #ifndef NDEBUG
         stringstream ss;
         ss << "vol_uuid:" << boost::uuids::to_string(param->m_req->vol_uuid);
@@ -684,7 +711,7 @@ private:
         for (auto& ptr : match_kv)
             ss << ptr.first.to_string() << "," << ptr.second.to_string();
 #endif
-        MappingKey* s_in_range = (MappingKey*)param->get_input_range().get_start_key();
+        MappingKey* s_in_range = (MappingKey*)cb_param->get_input_range().get_start_key();
         auto        curr_lbarange_st = start_lba;
         for (auto& existing : match_kv) {
             MappingKey*               e_key = &existing.first;
@@ -699,7 +726,6 @@ private:
                 uint32_t total = e_varray.get_total_elements();
                 if (i != (int)total - 1 ||
                     (e_key->start() >= start_lba && e_key->end() <= end_lba) /*last element full overlap*/) {
-
                     if (param->m_req->lastCommited_seqId == INVALID_SEQ_ID ||
                         ve.get_seqId() < param->m_req->lastCommited_seqId) { // eligible for removal
 
@@ -723,7 +749,7 @@ private:
                                          curr_lbarange_st - s_in_range->start(), replace_kv);
                 }
 
-                add_overlaps(e_key, e_value, param, replace_kv);
+                add_overlaps(e_key, e_value, is_valid_param, is_valid_param ? param : cb_param, replace_kv);
                 curr_lbarange_st = e_key->end() + 1; // restart running range
             }
         }
@@ -808,8 +834,9 @@ private:
     }
 
     /** result of overlap of k1/k2 is added to replace_kv **/
-    void add_overlaps(MappingKey* k1, MappingValue* v1, UpdateCBParam* param,
+    void add_overlaps(MappingKey* k1, MappingValue* v1, bool is_valid_param, BRangeUpdateCBParam<MappingKey, MappingValue>* param,
                       vector< pair< MappingKey, MappingValue > >& replace_kv) {
+
 
         MappingKey*   k2 = &(param->get_new_key());
         MappingValue* v2 = &(param->get_new_value());
@@ -848,15 +875,15 @@ private:
         for (int i = e_varray.get_total_elements() - 1; i >= 0; i--) {
             ValueEntry ve;
             e_varray.get(i, ve, false);
-            if (param->m_req->lastCommited_seqId == INVALID_SEQ_ID ||
-                ve.get_seqId() < param->m_req->lastCommited_seqId) { // eligible for removal
+            if (is_valid_param && (((UpdateCBParam*)param)->m_req->lastCommited_seqId == INVALID_SEQ_ID ||
+                ve.get_seqId() < ((UpdateCBParam*)param)->m_req->lastCommited_seqId)) { // eligible for removal
 
-                if (param->is_state_modifiable()) { // actual put cb, not is_split cb
+                if (((UpdateCBParam*)param)->is_state_modifiable()) { // actual put cb, not is_split cb
                     LOGDEBUG("Free entry:{} nblks {}", ve.to_string(),
                              (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * k1->get_n_lba());
                     Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(),
                                        (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * ve.get_nlba());
-                    param->m_req->blkIds_to_free.emplace_back(fbe);
+                    ((UpdateCBParam*)param)->m_req->blkIds_to_free.emplace_back(fbe);
                 }
                 e_varray.remove(i);
             }
