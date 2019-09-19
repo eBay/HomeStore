@@ -726,8 +726,8 @@ private:
                 uint32_t total = e_varray.get_total_elements();
                 if (i != (int)total - 1 ||
                     (e_key->start() >= start_lba && e_key->end() <= end_lba) /*last element full overlap*/) {
-                    if (param->m_req->lastCommited_seqId == INVALID_SEQ_ID ||
-                        ve.get_seqId() < param->m_req->lastCommited_seqId) { // eligible for removal
+                    if ((param != nullptr) && (param->m_req->lastCommited_seqId == INVALID_SEQ_ID ||
+                        ve.get_seqId() < param->m_req->lastCommited_seqId)) { // eligible for removal
 
                         if (param->is_state_modifiable()) { // actual put cb, not is_split cb
                             LOGTRACE("Free entry:{} nblks {}", ve.to_string(),
