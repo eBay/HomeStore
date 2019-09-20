@@ -358,9 +358,8 @@ class mapping {
     typedef std::function< void(Free_Blk_Entry fbe) >                             free_blk_callback;
     typedef std::function< void(BlkId& bid) >                                     pending_read_blk_cb;
 
-    public:
-    MappingBtreeDeclType* m_bt;
 private:
+    MappingBtreeDeclType* m_bt;
     alloc_blk_callback    m_alloc_blk_cb;
     free_blk_callback     m_free_blk_cb;
     pending_read_blk_cb   m_pending_read_blk_cb;
@@ -576,6 +575,10 @@ public:
         return no_error;
     }
 
+    MappingBtreeDeclType* get_btree(void) {
+        return m_bt;
+    }
+
     void print_tree() { m_bt->print_tree(); }
 
     void print_node(uint64_t blkid) {
@@ -584,7 +587,7 @@ public:
     }
 
     void merge(mapping* other) {
-        m_bt->merge(other->m_bt,
+        m_bt->merge(other->get_btree(),
             bind(&mapping::mapping_merge_cb, this, placeholders::_1, placeholders::_2, placeholders::_3));
     }
 
@@ -691,6 +694,8 @@ private:
 
         UpdateCBParam *param;
 
+        // TODO: refactor this function and add_overlaps into btree code so it doesnt 
+        // depend on UpdateCBParam. Once we have that, is_valid_param can be removed
         if (is_valid_param) {
             param = (UpdateCBParam*)cb_param;
         } else {
