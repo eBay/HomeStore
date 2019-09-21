@@ -31,17 +31,15 @@ class HomestoreConan(ConanFile):
                 "evhtp/1.2.18.1@oss/stable",
                 "farmhash/1.0.0@oss/stable",
                 "flip/0.1.3@sds/testing",
-                "folly/2019.08.19.00@bincrafters/develop",
+                "folly/2019.09.02.00@bincrafters/develop",
                 "gtest/1.8.1@bincrafters/stable",
                 "isa-l/2.21.0@oss/stable",
-                "iomgr/2.2.9@sds/develop",
+                "iomgr/2.2.10@sds/develop",
                 "libevent/2.1.11@bincrafters/stable",
-                "sisl/0.3.7@sisl/develop",
-                "sds_logging/5.3.2@sds/develop",
-                "sds_options/0.1.5@sds/testing",
-                ("jsonformoderncpp/3.7.0@vthiery/stable", "override"),
-                ("OpenSSL/1.1.1c@conan/stable", "override"),
-                ("zstd/1.4.0@bincrafters/stable", "override"),
+                "sisl/0.3.8@sisl/develop",
+                "sds_logging/5.3.3@sds/develop",
+                "sds_options/1.0.0@sds/develop",
+                ("zstd/1.3.8@bincrafters/stable", "override"),
                 )
 
     generators = "cmake"

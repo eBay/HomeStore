@@ -263,7 +263,7 @@ SDS_OPTION_GROUP(
      ::cxxopts::value< uint64_t >()->default_value("3600"), "number"),
     (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service", cxxopts::value<int32_t>()->default_value("5001"), "port"))
 
-SDS_OPTIONS_ENABLE(logging, test_load, test_volume)
+SDS_OPTIONS_ENABLE(logging, test_load)
 
 // TODO: VolumeTest couldn't be started after MapSSDTest. Seems because of the http server can't be started because of bing to the same port 5001
 int main(int argc, char* argv[]) {

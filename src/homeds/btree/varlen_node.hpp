@@ -13,6 +13,8 @@
 #include "boost/range/irange.hpp"
 #include <sds_logging/logging.h>
 
+SDS_LOGGING_DECL(btree_generics)
+
 namespace homeds { namespace btree {
 
 struct btree_obj_record {
@@ -104,7 +106,7 @@ public:
     /* Insert the key and value in provided index
      * Assumption: Node lock is already taken */
     void insert(int ind, const BtreeKey &key, const BtreeValue &val) {
-        LOGTRACE("{}:{}",key.to_string(),val.to_string());
+        LOGTRACEMOD(btree_generics, "{}:{}",key.to_string(),val.to_string());
         insert(ind, key.get_blob(), val.get_blob());
 #ifndef NDEBUG
         validate_sanity();
@@ -120,7 +122,7 @@ public:
             get_nth_key(i,&key,false);
             uint64_t kp = *(uint64_t*)key.get_blob().bytes;
             if(i>0 && prevKey.compare(&key)>0){
-                LOGDEBUG("non sorted entry : {} -> {} ", kp, this->to_string());
+                LOGDEBUGMOD(btree_generics, "non sorted entry : {} -> {} ", kp, this->to_string());
                 assert(0);
             }
             prevKey = key;
@@ -148,7 +150,7 @@ public:
 
     // TODO - currently we do not support variable size key
     void update(int ind, const BtreeKey &key, const BtreeValue &val)  {
-        LOGTRACE("Update called:{}",this->to_string());
+        LOGTRACEMOD(btree_generics, "Update called:{}",this->to_string());
         assert(ind <= (int)this->get_total_entries());
 
         // If we are updating the edge value, none of the other logic matter. Just update edge value and move on
@@ -171,11 +173,11 @@ public:
             if(val_ptr != vblob.bytes) {
                 //TODO - we can reclaim space if new obj size is lower than cur obj size
                 // Same or smaller size update, just copy the value blob
-                LOGTRACE("Not an in-place update, have to copying data of size {}", vblob.size);
+                LOGTRACEMOD(btree_generics, "Not an in-place update, have to copying data of size {}", vblob.size);
                 memcpy(val_ptr, vblob.bytes, vblob.size);
             }else{
                 // do nothing
-                LOGTRACE("In place update, not copying data.");
+                LOGTRACEMOD(btree_generics, "In place update, not copying data.");
             }
             this->inc_gen();
             return;
@@ -183,7 +185,7 @@ public:
         
         remove(ind);
         insert(ind, key, val);
-        LOGTRACE("Size changed for either key or value. Had to delete and insert :{}",this->to_string());
+        LOGTRACEMOD(btree_generics, "Size changed for either key or value. Had to delete and insert :{}",this->to_string());
        
     }
 
@@ -553,7 +555,7 @@ public:
 private:
     uint32_t insert(int ind, const homeds::blob &key_blob, const homeds::blob &val_blob)  {
         assert(ind <= (int)this->get_total_entries());
-        LOGTRACE("{}:{}:{}:{}",ind ,get_var_node_header()->m_tail_arena_offset,get_arena_free_space() ,get_var_node_header()->m_available_space);
+        LOGTRACEMOD(btree_generics, "{}:{}:{}:{}",ind ,get_var_node_header()->m_tail_arena_offset,get_arena_free_space() ,get_var_node_header()->m_available_space);
         uint16_t obj_size = key_blob.size + val_blob.size;
         uint16_t to_insert_size = obj_size + get_record_size();
         if (to_insert_size > get_var_node_header()->m_available_space) {
@@ -620,7 +622,7 @@ private:
         if (no_of_entries == 0) {
             // this happens when  there is only entry and in update, we first remove and than insert
             get_var_node_header()->m_tail_arena_offset = get_var_node_header()->m_init_available_space;
-            LOGTRACE("Full available size reclaimed");
+            LOGTRACEMOD(btree_generics, "Full available size reclaimed");
             return;
         }
         Record rec[no_of_entries]; 
@@ -669,7 +671,7 @@ private:
 #ifndef NDEBUG
         validate_sanity();
 #endif
-        LOGTRACE("Sparse space reclaimed:{}",sparce_space);
+        LOGTRACEMOD(btree_generics, "Sparse space reclaimed:{}",sparce_space);
     }
 
     // See template specialization below for each nodetype
