@@ -9,7 +9,7 @@
 
 
 SDS_LOGGING_INIT(iomgr)
-SDS_OPTIONS_ENABLE(logging, iomgr)
+SDS_OPTIONS_ENABLE(logging)
 using namespace homeds::loadgen;
 
     
