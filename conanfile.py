@@ -30,7 +30,7 @@ class HomestoreConan(ConanFile):
                 "double-conversion/3.1.4@bincrafters/stable",
                 "evhtp/1.2.18.1@oss/stable",
                 "farmhash/1.0.0@oss/stable",
-                "flip/0.1.3@sds/testing",
+                "flip/0.2.0@sds/testing",
                 "folly/2019.09.02.00@bincrafters/develop",
                 "gtest/1.8.1@bincrafters/stable",
                 "isa-l/2.21.0@oss/stable",
