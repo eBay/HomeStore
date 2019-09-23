@@ -39,7 +39,7 @@ class HomestoreConan(ConanFile):
                 "sisl/0.3.8@sisl/develop",
                 "sds_logging/5.3.3@sds/develop",
                 "sds_options/1.0.0@sds/develop",
-                ("zstd/1.3.8@bincrafters/stable", "override"),
+                ("zstd/1.4.0@bincrafters/stable", "override"),
                 )
 
     generators = "cmake"
