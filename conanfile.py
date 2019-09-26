@@ -5,7 +5,7 @@ from conans import ConanFile, CMake, tools
 class HomestoreConan(ConanFile):
     name = "homestore"
 
-    version = "0.11.19"
+    version = "0.11.20"
     revision_mode = "scm"
 
     license = "Proprietary"
@@ -30,8 +30,8 @@ class HomestoreConan(ConanFile):
                 "double-conversion/3.1.4@bincrafters/stable",
                 "evhtp/1.2.18.1@oss/stable",
                 "farmhash/1.0.0@oss/stable",
-                "flip/0.1.3@sds/testing",
-                "folly/2019.09.02.00@bincrafters/develop",
+                "flip/0.2.0@sds/develop",
+                "folly/2019.09.23.00@bincrafters/testing",
                 "gtest/1.8.1@bincrafters/stable",
                 "isa-l/2.21.0@oss/stable",
                 "iomgr/2.2.10@sds/develop",
@@ -39,7 +39,7 @@ class HomestoreConan(ConanFile):
                 "sisl/0.3.8@sisl/develop",
                 "sds_logging/5.3.3@sds/develop",
                 "sds_options/1.0.0@sds/develop",
-                ("zstd/1.3.8@bincrafters/stable", "override"),
+                ("zstd/1.4.0@bincrafters/stable", "override"),
                 )
 
     generators = "cmake"
