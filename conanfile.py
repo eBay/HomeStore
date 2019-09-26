@@ -5,7 +5,7 @@ from conans import ConanFile, CMake, tools
 class HomestoreConan(ConanFile):
     name = "homestore"
 
-    version = "0.11.19"
+    version = "0.11.20"
     revision_mode = "scm"
 
     license = "Proprietary"
@@ -31,7 +31,7 @@ class HomestoreConan(ConanFile):
                 "evhtp/1.2.18.1@oss/stable",
                 "farmhash/1.0.0@oss/stable",
                 "flip/0.2.0@sds/develop",
-                "folly/2019.09.02.00@bincrafters/develop",
+                "folly/2019.09.23.00@bincrafters/testing",
                 "gtest/1.8.1@bincrafters/stable",
                 "isa-l/2.21.0@oss/stable",
                 "iomgr/2.2.10@sds/develop",
