@@ -34,10 +34,10 @@ class HomestoreConan(ConanFile):
                 "folly/2019.09.23.00@bincrafters/testing",
                 "gtest/1.8.1@bincrafters/stable",
                 "isa-l/2.21.0@oss/stable",
-                "iomgr/2.2.10@sds/develop",
+                "iomgr/2.2.11@sds/develop",
                 "libevent/2.1.11@bincrafters/stable",
-                "sisl/0.3.8@sisl/develop",
-                "sds_logging/5.3.3@sds/develop",
+                "sisl/0.3.9@sisl/develop",
+                "sds_logging/6.0.0@sds/develop",
                 "sds_options/1.0.0@sds/develop",
                 ("zstd/1.4.0@bincrafters/stable", "override"),
                 )
