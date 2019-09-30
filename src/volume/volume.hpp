@@ -202,6 +202,10 @@ public:
     static homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >* m_data_blkstore;
     static void           process_vol_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
     static volume_req_ptr create_vol_req(Volume* vol, const vol_interface_req_ptr& hb_req);
+#ifdef _PRERELEASE
+    static void set_io_flip();
+    static void set_error_flip();
+#endif
 
     ~Volume();
 
@@ -255,6 +259,7 @@ public:
     uint64_t get_elapsed_time(Clock::time_point startTime);
     void     attach_completion_cb(const io_comp_callback& cb);
     void     print_tree();
+    void     print_node(uint64_t blkid);
     void     blk_recovery_callback(const MappingValue& mv);
     void     set_recovery_error();
 

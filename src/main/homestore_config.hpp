@@ -17,6 +17,7 @@ struct HomeStoreConfig {
     static uint64_t max_vdevs;
     static uint64_t max_pdevs;
     static io_flag open_flag;
+    static bool is_read_only;
 };
 
 constexpr uint32_t ID_BITS = 32;
@@ -48,6 +49,9 @@ constexpr uint32_t MAX_PDEVS = 8;
 
 /* NOTE: it can give size more then the size passed in argument to make it aligned */
 #define ALIGN_SIZE(size, align) (((size % align) == 0) ? size : (size + (align - (size % align))))
+
+/* NOTE: it can give size less then size passed in argument to make it aligned */
+#define ALIGN_SIZE_TO_LEFT(size, align) (((size % align) == 0) ? size : (size - (size % align)))
 #define MAX_UUID_LEN 128
 
 }

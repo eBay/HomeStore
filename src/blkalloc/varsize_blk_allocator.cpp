@@ -60,7 +60,8 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig& cfg, bool init) 
     BLKALLOC_LOG(INFO, , "Segment Count = {}, Blocks per segment = {}, portions={}", cfg.get_total_segments(),
                  seg_nblks, portions_per_seg);
     for (auto i = 0U; i < cfg.get_total_segments(); i++) {
-        BlkAllocSegment* seg = new BlkAllocSegment(seg_nblks, i, portions_per_seg);
+        std::string seg_name = cfg.get_name() + "_seg_"+ std::to_string(i);
+        BlkAllocSegment* seg = new BlkAllocSegment(seg_nblks, i, portions_per_seg, seg_name);
         m_segments.push_back(seg);
     }
 
@@ -470,7 +471,7 @@ void VarsizeBlkAllocator::free(const BlkId& b) {
  * slab_indx is full.
  */
 void VarsizeBlkAllocator::fill_cache(BlkAllocSegment* seg, int slab_indx) {
-    uint64_t nadded_blks = 0;
+    uint64_t nadded_blks    = 0;
 
     BLKALLOC_ASSERT_NULL(LOGMSG, seg);
     /* While cache is not full */
@@ -505,6 +506,8 @@ void VarsizeBlkAllocator::fill_cache(BlkAllocSegment* seg, int slab_indx) {
             } else {
                 // atleast one slab is full.Wake up the IO thread
                 refill_needed = false;
+                /* break; // commented out so that logs for all slabs can be printed
+                 */
             }
         }
         if (!refill_needed)
@@ -543,6 +546,7 @@ void VarsizeBlkAllocator::fill_cache(BlkAllocSegment* seg, int slab_indx) {
 uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t seg_portion_num, BlkAllocSegment* seg) {
     EmptyClass dummy;
     uint64_t   n_added_blks = 0;
+    uint64_t   n_fragments  = 0;
 
     uint64_t portion_num = seg->get_seg_num() * get_portions_per_segment() + seg_portion_num;
     BLKALLOC_ASSERT_CMP(LOGMSG, m_cfg.get_total_portions(), >, portion_num);
@@ -679,10 +683,14 @@ uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t seg_portion_num, Bl
         }
 
         // Update the counters
-        n_added_blks += total_bits;
-        m_cache_n_entries.fetch_add(total_bits, std::memory_order_acq_rel);
+        if (total_bits) {
+            n_added_blks += total_bits;
+            n_fragments++;
+            m_cache_n_entries.fetch_add(total_bits, std::memory_order_acq_rel);
+        }
     }
     portion.unlock();
+    seg->reportFragmentation(n_added_blks, n_fragments);
     return n_added_blks;
 }
 

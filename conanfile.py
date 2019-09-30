@@ -5,8 +5,8 @@ from conans import ConanFile, CMake, tools
 class HomestoreConan(ConanFile):
     name = "homestore"
 
-    version = "0.11.17"
-
+    version = "0.11.20"
+    revision_mode = "scm"
 
     license = "Proprietary"
     url = "https://github.corp.ebay.com/SDS/Homestore"
@@ -28,19 +28,18 @@ class HomestoreConan(ConanFile):
                 "boost_preprocessor/1.69.0@bincrafters/stable",
                 "boost_uuid/1.69.0@bincrafters/stable",
                 "double-conversion/3.1.4@bincrafters/stable",
+                "evhtp/1.2.18.1@oss/stable",
                 "farmhash/1.0.0@oss/stable",
-                "folly/2019.07.22.00@bincrafters/testing",
+                "flip/0.2.0@sds/develop",
+                "folly/2019.09.23.00@bincrafters/testing",
                 "gtest/1.8.1@bincrafters/stable",
-                "iomgr/2.2.6@sds/testing",
-                "libevent/2.1.10@bincrafters/stable",
-                "lzma/5.2.4@bincrafters/stable",
-                "sisl/0.3.5@sisl/testing",
-                "OpenSSL/1.0.2s@conan/stable",
-                "sds_logging/5.3.1@sds/testing",
-                "sds_options/0.1.5@sds/testing",
                 "isa-l/2.21.0@oss/stable",
-                "flip/0.1.1@sds/testing",
-                "zstd/1.4.0@bincrafters/stable",
+                "iomgr/2.2.11@sds/develop",
+                "libevent/2.1.11@bincrafters/stable",
+                "sisl/0.3.9@sisl/develop",
+                "sds_logging/6.0.0@sds/develop",
+                "sds_options/1.0.0@sds/develop",
+                ("zstd/1.4.0@bincrafters/stable", "override"),
                 )
 
     generators = "cmake"
@@ -86,6 +85,10 @@ class HomestoreConan(ConanFile):
         self.copy("*homeblks.dylib", dst="lib", keep_path=False)
         self.copy("*homeblks.lib", dst="lib", keep_path=False)
         self.copy("*homeblks.a", dst="lib", keep_path=False)
+        self.copy("*test_load", dst="bin", keep_path=False)
+        self.copy("*test_mapping", dst="bin", keep_path=False)
+        self.copy("*test_volume", dst="bin", keep_path=False)
+        self.copy("*vol_test.py", src="src/", dst="bin", keep_path=False)
 
     def package_info(self):
         self.cpp_info.libs = tools.collect_libs(self)
@@ -99,3 +102,9 @@ class HomestoreConan(ConanFile):
             self.cpp_info.libs.append('gcov')
         if self.settings.os == "Linux":
             self.cpp_info.libs.extend(["aio"])
+
+    def deploy(self):
+        self.copy("*test_load", dst="/usr/local/bin", keep_path=False)
+        self.copy("*test_mapping", dst="/usr/local/bin", keep_path=False)
+        self.copy("*test_volume", dst="/usr/local/bin", keep_path=False)
+        self.copy("*vol_test.py", dst="/usr/local/bin", keep_path=False)

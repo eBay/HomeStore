@@ -1,28 +1,19 @@
 #!/usr/bin/env python
+## @file vol_test.py
+#  Regression Tests linked to PR merge
 
 import subprocess
 import os
 import sys
 import getopt
 import sys
+from multiprocessing import Process
 sys.stdout.flush()
 from time import sleep
-
 
 opts,args = getopt.getopt(sys.argv[1:], 'td:', ['test_suits=', 'dirpath=']) 
 test_suits = ""
 dirpath = "./"
-
-# slack details
-slackcmd = ("./slackpost "
-            "https://hooks.slack.com/services/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 "
-            "sds-homestore "
-            "regression-bot \""
-           )
-
-def slackpost(msg):
-    cmd = slackcmd + msg + "\""
-    subprocess.call(cmd, shell=True)
 
 for opt,arg in opts:
     if opt in ('-t', '--test_suits'):
@@ -32,99 +23,241 @@ for opt,arg in opts:
         dirpath = arg
         print(("dir path (%s)")%(arg))
 
-def normal():
-    status = subprocess.check_output("./test_volume \
-            --run_time=12000 --max_num_writes=5000000", shell=True)
-    f = open( '/home/homestore/log_normal.txt', 'w+' )
-    f.write(status)
-    f.close()
-    return '[  PASSED  ] 1 test' in status
-
-def vol_delete():
-    status = subprocess.check_output("./test_volume --gtest_filter=*vol_del*", shell=True)
-    f = open( '/home/homestore/log_delete.txt', 'w+' )
-    f.write(status)
-    f.close()
-    return '[  PASSED  ] 1 test' in status
 
 def recovery():
-    subprocess.call(dirpath + "test_volume --gtest_filter=*abort_random* --run_time=30 --enable_crash_handler=0", shell=True)
-    subprocess.check_call(dirpath + "test_volume --gtest_filter=*recovery_random* --run_time=30 --enable_crash_handler=1 --verify_hdr=0 --verify_data=0", shell=True)
+    subprocess.check_call(dirpath + "test_volume \
+    --gtest_filter=IOTest.init_io_test --run_time=30 --enable_crash_handler=0 --remove_file=0", \
+    stderr=subprocess.STDOUT, shell=True)
+    
+    subprocess.check_call(dirpath + "test_volume \
+    --gtest_filter=IOTest.recovery_io_test --verify_hdr=0 --verify_data=0 --run_time=30 --enable_crash_handler=1", \
+    stderr=subprocess.STDOUT, shell=True)
+    print("recovery passed")
 
-def recovery_abort():
-    subprocess.call(dirpath + "test_volume --gtest_filter=*recovery_abort* --run_time=600 --enable_crash_handler=0", shell=True)
-
-def mapping():
-    status = subprocess.check_output("./test_mapping --num_ios=10000000", shell=True)
-    f = open( '/home/homestore/log_mapping.txt', 'w+' )
-    f.write(status)
-    f.close()
-    return '[  PASSED  ] 1 test' in status
-
-def load():
-    status = subprocess.check_output("./test_load \
-            --num_io=100000000000 --num_keys=1000000 --run_time=21600 --gtest_filter=Map* ", shell=True)
-    f = open( '/home/homestore/log_load.txt', 'w+' )
-    f.write(status)
-    f.close()
-    return '[  PASSED  ] 1 test' in status
-
-def nightly():
-    # 1. normal IO test
+## @test    normal
+#  @brief   Normal IO test
+def normal():
     print("normal test started")
-    if normal() == False:
-        print("normal test failed")
-        sys.exit(0)
+    subprocess.check_call(dirpath + "test_volume \
+            --run_time=20000 --max_num_writes=5000000 --gtest_filter=IOTest.init_io_test --remove_file=0 --flip=1",\
+            stderr=subprocess.STDOUT, shell=True)
     print("normal test completed")
-    sleep(5)
 
-    # 2. load gen test
+def normal_flip():
+    print("normal test started")
+    subprocess.check_call(dirpath + "test_volume \
+            --run_time=10000 --max_num_writes=5000000 --gtest_filter=IOTest.init_io_test --remove_file=0 --verify_data = 0 \
+            --flip=2", stderr=subprocess.STDOUT, shell=True)
+    print("normal test completed")
+
+## @test    load
+#  @brief   Test using load generator
+def load():
     print("load test started")
-    if load() == False:
-        print("load test failed")
-        sys.exit(0)
+    subprocess.check_call(dirpath + "test_load \
+            --num_io=100000000000 --num_keys=1000000 --run_time=21600 --gtest_filter=Map* ", stderr=subprocess.STDOUT, shell=True)
     print("load test completed")
-    sleep(5)
 
-    # 3. recovery test
+## @test    load
+#  @brief   Test Volume using load generator
+def load_volume():
+    print("Volume load test started")
+    subprocess.check_call(dirpath + "test_load \
+            --num_io=100000000000 --num_keys=1000000 --run_time=21600 --gtest_filter=*Volume* ", stderr=subprocess.STDOUT, shell=True)
+    print("Volume load test completed")
+
+## @test    recovery_nightly
+#  @brief   Nightly recovery test
+def recovery_nightly():
     print("recovery test started")
-    subprocess.call(dirpath + "test_volume --gtest_filter=*abort_random* --run_time=300 --enable_crash_handler=0", shell=True)
     i = 1
     while i < 10:
-        recovery_abort()
+        subprocess.check_call(dirpath + "test_volume \
+        --gtest_filter=IOTest.recovery_io_test --run_time=300 --enable_crash_handler=0 --verify_only=1 --flip=1 \
+        --remove_file=0", \
+        stderr=subprocess.STDOUT, shell=True)
+        
+        subprocess.call(dirpath + "test_volume \
+        --gtest_filter=IOTest.recovery_io_test --run_time=300 --enable_crash_handler=0 --verify_data=0 --verify_hdr=0 \
+        --abort=1 --flip=1 --remove_file=0", shell=True)
         s = "recovery test iteration" + repr(i) + "passed" 
         print(s)
         i += 1
-    if (subprocess.check_call(dirpath + "test_volume --gtest_filter=*recovery_random* --run_time=300 --enable_crash_handler=0", shell=True)) == False:
-        print("recovery test failed")
-        sys.exit(0)
+    
+    subprocess.check_call(dirpath + "test_volume --gtest_filter=IOTest.recovery_io_test \
+            --run_time=300 --remove_file=1", stderr=subprocess.STDOUT, shell=True)
     print("recovery test completed")
+
+## @test    one_disk_replace
+#  @brief   One disk is replaced during boot time
+def one_disk_replace():
+    print("one disk replace test started");
+    subprocess.check_call(dirpath + "test_volume --gtest_filter=IOTest.one_disk_replace_test \
+            --run_time=300 --remove_file=0 --verify_hdr=0 --verify_data=0", stderr=subprocess.STDOUT, shell=True)
+    print("recovery test with one disk replace passed")
+
+## @test    one_disk_replace_abort
+#  @brief   Homestore crashed during recovery with one disk replace
+def one_disk_replace_abort():
+    print("recovery abort with one disk replace started")
+    subprocess.call(dirpath + "test_volume --gtest_filter=IOTest.one_disk_replace_abort_test \
+          --run_time=300 --remove_file=0 --verify_hdr=0 --verify_data=0 --enable_crash_handler=0", shell=True)
+    subprocess.check_call(dirpath + "test_volume --gtest_filter=IOTest.recovery_io_test \
+          --run_time=300 --remove_file=0 --verify_hdr=0 --verify_data=0 --expected_vol_state=2", \
+          stderr=subprocess.STDOUT, shell=True)
+    print("recovery abort with one disk replace passed")
+
+## @test    both_disk_replace
+#  @brief   Both disks are replaced during boot time
+def both_disk_replace():
+    print("Both disk replace started")
+    subprocess.check_call(dirpath + "test_volume \
+                    --gtest_filter=IOTest.two_disk_replace_test --run_time=300", stderr=subprocess.STDOUT, shell=True)
+    subprocess.check_call(dirpath + "test_volume \
+            --run_time=300 --max_num_writes=5000000 --gtest_filter=IOTest.init_io_test --remove_file=0", \
+            stderr=subprocess.STDOUT, shell=True)
+    print("Both disk replace passed")
+
+## @test    one_disk_fail
+#  @brief   One Disk failure during boot time
+def one_disk_fail():
+    print("one disk fail test started")
+    subprocess.check_call(dirpath + "test_volume \
+                    --gtest_filter=IOTest.one_disk_fail_test --run_time=300", stderr=subprocess.STDOUT, shell=True)
+    print("one disk fail test passed")
+
+## @test    vol_offline_test
+#  @brief   Move volume to offline when IOs are going on
+def vol_offline_test():
+    print("vol offline test started")
+    subprocess.check_call(dirpath + "test_volume \
+                --gtest_filter=IOTest.vol_offline_test --run_time=300", stderr=subprocess.STDOUT, shell=True)
+    print("vol offline test passed")
+    
+    print("vol offline test recovery started")
+    status = subprocess.check_call(dirpath + "test_volume \
+                --gtest_filter=IOTest.recovery_io_test --run_time=300 --expected_vol_state=1", stderr=subprocess.STDOUT, shell=True)
+    print("vol offline test recovery passed")
+
+## @test    vol_io_fail_test
+#  @brief   Set IO error and verify all volumes come online
+#           after reboot and data is verified.
+def vol_io_fail_test():
+    print("vol io fail test started")
+    
+    subprocess.check_call(dirpath + "test_volume \
+           --gtest_filter=IOTest.vol_io_fail_test --run_time=300 --remove_file=0", shell=True, stderr=subprocess.STDOUT)
+    print("vol io test test passed")
+    
+    print("vol io fail test recovery started")
+    subprocess.check_call(dirpath + "test_volume \
+           --gtest_filter=IOTest.recovery_io_test --run_time=300 --verify_data=0", shell=True, stderr=subprocess.STDOUT)
+    print("vol io fail test recovery passed")
+
+##  @test   vol_create_del_test
+#   @brief  Create and Delete Volume
+def vol_create_del_test():
+    print("create del vol test started")
+    subprocess.check_call(dirpath + "test_volume \
+               --gtest_filter=IOTest.normal_vol_create_del_test --max_vols=10000", shell=True, stderr=subprocess.STDOUT)
+    print("create del vol test passed")
+
+def seq_load_start():
+    print("seq workload started")
+    subprocess.check_call(dirpath + "test_volume \
+            --run_time=24000 --max_num_writes=5000000 --gtest_filter=IOTest.init_io_test --remove_file=0 --flip=1 --load_type=2",\
+            stderr=subprocess.STDOUT, shell=True)
+    print("normal test completed")
+    
+def seq_vol_load():
+    p = Process(target = seq_load_start())
+    p.start()
+    p.join()
+
+def nightly():
+
+    load_volume()
     sleep(5)
 
-    # 4. create del vol
-    print("create del vol test started")
-    if subprocess.check_call(dirpath + "test_volume --gtest_filter=*normal_vol_create_del_test* --max_vols=10000", shell=True) == False:
-         print("create del vol test failed")
-         sys.exit(0)
-    print("create del vol test passed")
+    load()
+    sleep(5)
+
+    normal()
+    sleep(5)
+
+    recovery_nightly()
     sleep(5)
     
+    # normal IO test
+    normal_flip()
+    sleep(5)
+
+    one_disk_replace()
+    sleep(5)
+
+    one_disk_replace_abort()
+    sleep(5)
+
+    both_disk_replace()
+    sleep(5)
+
+    one_disk_fail()
+    sleep(5)
+
+    vol_offline_test()
+    sleep(5)
+
+    vol_io_fail_test()
+    sleep(5)
+
+    vol_create_del_test()
+    sleep(5)
     print("nightly test passed")
 
 if test_suits == "normal":
     normal()
     
-if test_suits == "vol_del":
-    vol_delete()
-
 if test_suits == "recovery":
     recovery()
     
 if test_suits == "mapping":
     mapping()
 
+if test_suits == "one_disk_replace":
+    one_disk_replace()
+
+if test_suits == "one_disk_replace_abort":
+    one_disk_replace_abort()
+
+if test_suits == "both_disk_replace":
+    both_disk_replace()
+
+if test_suits == "one_disk_fail":
+    one_disk_fail()
+
+if test_suits == "vol_offline_test":
+    vol_offline_test()
+
+if test_suits == "vol_io_fail_test":
+    vol_io_fail_test()
+
+if test_suits == "vol_create_del_test":
+    vol_create_del_test()
+
+if test_suits == "normal_flip":
+    normal_flip()
+
 if test_suits == "nightly":
     nightly()
 
+if test_suits == "recovery_nightly":
+    recovery_nightly()
+
 if test_suits == "load":
     load()
+ 
+if test_suits == "load_volume":
+    load_volume()
+
+if test_suits == "seq_workload":
+    seq_vol_load()

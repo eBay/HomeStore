@@ -156,6 +156,7 @@ public:
              BlkStoreCacheType cache_type,       // Type of cache, writeback, writethru, none
              uint64_t          page_size,        // Block device page size
              const char*       name,             // Name for blkstore
+             bool              recovery_init,  // do we need to initialize blk allocator in recovery
              comp_callback     comp_cb = nullptr // Callback on completion. It can be attached later as well.
              ) :
             m_pagesz(page_size),
@@ -167,7 +168,8 @@ public:
                            this->writeback_free_blkid(req, status);
                        })),
             m_cache_type(cache_type),
-            m_vdev(mgr, vb, (std::bind(&BlkStore::process_completions, this, std::placeholders::_1))),
+            m_vdev(mgr, vb, (std::bind(&BlkStore::process_completions, this, 
+                             std::placeholders::_1)), recovery_init),
             m_comp_cb(comp_cb),
             m_metrics(name) {}
 
@@ -499,7 +501,7 @@ public:
         req->blkstore_ref_cnt.increment(1);
         if (!cache_found
 #ifdef _PRERELEASE
-            || (cache_found && (homestore_flip->test_flip("cache_insert_race", size, offset)))
+            || (cache_found && (homestore_flip->test_flip("cache_insert_race")))
 #endif
         ) {
             // Not found in cache, create a new block buf and prepare it for insert to dev and cache.

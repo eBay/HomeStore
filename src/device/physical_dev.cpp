@@ -51,6 +51,7 @@ void PhysicalDev::attach_superblock_chunk(PhysicalDevChunk* chunk) {
         HS_ASSERT_NULL(DEBUG, m_dm_chunk[m_cur_indx]);
         HS_ASSERT_CMP(DEBUG, m_cur_indx, <, 2);
         m_dm_chunk[m_cur_indx++] = chunk;
+        return;
     }
     if (chunk->get_chunk_id() == m_super_blk->dm_chunk[0].chunk_id) {
         HS_ASSERT_NULL(DEBUG, m_dm_chunk[0]);
@@ -95,10 +96,19 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
     m_superblock_valid = false;
 
     m_devfd = m_ep->open_dev(devname.c_str(), oflags);
-    if (m_devfd == -1) {
+
+    if (m_devfd == -1
+#ifdef _PRERELEASE
+      || (homestore_flip->test_flip("device_boot_fail", devname.c_str()))
+#endif
+    ) {
+        
+        free(m_super_blk);
+
+   
         HS_LOG(ERROR, device, "device open failed errno {} dev_name {}", errno, devname.c_str());
+
         throw std::system_error(errno, std::system_category(), "error while opening the device");
-        return;
     }
 
     LOGINFO("FD of {} device name {}", m_devfd, m_devname);
@@ -106,12 +116,14 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
     if (is_file) {
         struct stat buf;
         if (fstat(m_devfd, &buf) < 0) {
+            free(m_super_blk);
             HS_ASSERT(LOGMSG, 0, "device stat failed errno {} dev_name {}", errno, devname.c_str());
             throw std::system_error(errno, std::system_category(), "error while getting size of the device");
         }
         m_devsize = buf.st_size;
     } else {
         if (ioctl(m_devfd, BLKGETSIZE64, &m_devsize) < 0) {
+            free(m_super_blk);
             HS_ASSERT(LOGMSG, 0, "device stat failed errno {} dev_name {}", errno, devname.c_str());
             throw std::system_error(errno, std::system_category(), "error while getting size of the device");
         }
@@ -119,6 +131,19 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
     m_system_uuid = system_uuid;
 
     HS_ASSERT_CMP(LOGMSG, m_devsize, >, 0);
+    if (m_devsize == 0) {
+        std::stringstream ss;
+        ss << "disk size is " << m_devsize;
+        const std::string s = ss.str();
+        throw homestore::homestore_exception(s, homestore_error::min_size_not_avail);
+    }
+
+    auto temp = m_devsize;
+    m_devsize = ALIGN_SIZE_TO_LEFT(m_devsize, HomeStoreConfig::phys_page_size);
+    if (m_devsize != temp) {
+        LOGWARN("device size is not the multiple of physical page size old size {}", temp);
+    }
+    LOGINFO("size of disk {} is {}", m_devname, m_devsize);
     m_dm_chunk[0] = m_dm_chunk[1] = nullptr;
     if (is_init) {
         /* create a chunk */
@@ -151,9 +176,11 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
          */
     } else {
         *is_inited = load_super_block();
-        /* If it is different then it mean it require upgrade/revert handling */
-        HS_ASSERT_CMP(LOGMSG, m_super_blk->dm_chunk[0].get_chunk_size(), ==, dm_info_size);
-        HS_ASSERT_CMP(LOGMSG, m_super_blk->dm_chunk[1].get_chunk_size(), ==, dm_info_size);
+        if (*is_inited) {
+            /* If it is different then it mean it require upgrade/revert handling */
+           HS_ASSERT_CMP(LOGMSG, m_super_blk->dm_chunk[0].get_chunk_size(), ==, dm_info_size);
+           HS_ASSERT_CMP(LOGMSG, m_super_blk->dm_chunk[1].get_chunk_size(), ==, dm_info_size);
+        }
     }
 }
 

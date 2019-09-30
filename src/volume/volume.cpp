@@ -73,6 +73,8 @@ Volume::Volume(vol_mem_sb* sb) : m_sb(sb), m_metrics(sb->ondisk_sb->vol_name), m
                             std::bind(&Volume::pending_read_blk_cb, this, std::placeholders::_1));
         m_sb->ondisk_sb->btree_sb = m_map->get_btree_sb();
         m_sb->ondisk_sb->state = vol_state::DEGRADED;
+        LOGINFO("reinitialized the volume {} because vdev is in failed state. It state will be degraded"
+                "until it is resync", sb->ondisk_sb->vol_name);
         HomeBlks::instance()->vol_sb_write(m_sb);
     } else {
         m_map = new mapping(m_sb->ondisk_sb->size, m_sb->ondisk_sb->page_size, m_sb->ondisk_sb->vol_name,
@@ -98,10 +100,42 @@ void Volume::recovery_start() { vol_scan_alloc_blks(); }
 
 uint64_t Volume::get_metadata_used_size() { return m_map->get_used_size(); }
 
+#ifdef _PRERELEASE 
+void Volume::set_error_flip() {
+    FlipClient *fc = HomeStoreFlip::client_instance();
+    FlipFrequency freq;
+    FlipCondition cond1;
+    freq.set_count(2000000000);
+    freq.set_percent(1);
+    
+    /* error flips */
+    freq.set_percent(1);
+    fc->inject_noreturn_flip("vol_vchild_error", {}, freq);
+    fc->inject_retval_flip("delay_us_and_inject_error_on_completion", {}, freq, 20);
+    fc->inject_noreturn_flip("varsize_blkalloc_no_blks", {}, freq);
+    
+}
+
+void Volume::set_io_flip() {
+    FlipClient *fc = HomeStoreFlip::client_instance();
+    FlipFrequency freq;
+    FlipCondition cond1;
+    freq.set_count(2000000000);
+    freq.set_percent(2);
+    
+    /* io flips */
+    fc->inject_retval_flip("vol_delay_read_us", {}, freq, 20);
+
+    fc->inject_retval_flip("cache_insert_race", {}, freq, 20);
+    
+    fc->create_condition("nuber of blks in a write", flip::Operator::EQUAL, 8, &cond1);
+    fc->inject_retval_flip("blkalloc_split_blk", {cond1}, freq, 4);
+}
+#endif
+
 //
 // No need to do it in multi-threading since blkstore.free_blk is in-mem operation.
 //
-// void Volume::process_free_blk_callback(BlkId& blk_id, uint64_t size_offset, uint64_t nblks_to_free) {
 void Volume::process_free_blk_callback(Free_Blk_Entry fbe) {
     VOL_LOG(DEBUG, volume, , "Freeing blks cb - bid: {}, offset: {}, nblks: {}, get_pagesz: {}",
             fbe.m_blkId.to_string(), fbe.blk_offset(), fbe.blks_to_free(), get_page_size());
@@ -161,6 +195,7 @@ boost::uuids::uuid Volume::get_uuid() { return (get_sb()->ondisk_sb->uuid); }
 vol_state Volume::get_state() { return m_state; }
 
 void Volume::set_state(vol_state state, bool persist) {
+    LOGINFO("volume state changed from {} to {}", m_state, state);
     m_state = state;
     if (persist) {
         m_sb->lock();
@@ -197,11 +232,12 @@ void Volume::vol_scan_alloc_blks() {
 }
 
 Volume::~Volume() {
-    VOL_LOG(INFO, , , "Destroying volume");
     if (get_state() != DESTROYING) {
+        VOL_LOG(INFO, , , "Shutting volume");
         delete m_map;
         delete (m_sb);
     } else {
+        VOL_LOG(INFO, , , "Destroying volume");
         //
         // 1. Traverse mapping btree in post order:
         //    1.a for leaf node, get key/value and call m_data_blkstore.free_blk to free the block;
@@ -239,6 +275,11 @@ void Volume::process_metadata_completions(const volume_req_ptr& vreq) {
     VOL_LOG(TRACE, volume, parent_req, "metadata_complete: status={}", vreq->err.message());
     HISTOGRAM_OBSERVE(m_metrics, volume_map_write_latency, get_elapsed_time_us(vreq->op_start_time));
 
+#ifdef _PRERELEASE
+    if (parent_req->outstanding_io_cnt.get() > 2 && homestore_flip->test_flip("vol_vchild_error")) {
+        vreq->err = homestore_error::flip_comp_error;
+    }
+#endif
     check_and_complete_req(parent_req, vreq->err, true /* call_completion_cb */, &(vreq->blkIds_to_free));
 #ifndef NDEBUG
     {
@@ -279,6 +320,11 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
         // for write flow, we havent marked anything till meta completion, so nothing to do
     }
 
+#ifdef _PRERELEASE
+    if (parent_req->outstanding_io_cnt.get() > 2 && homestore_flip->test_flip("vol_vchild_error")) {
+        vreq->err = homestore_error::flip_comp_error;
+    }
+#endif
     // Shortcut to error completion
     if (vreq->err) {
         if (!vreq->is_read) {
@@ -294,8 +340,9 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
             m_req_map.erase(it);
         }
 #endif
-        return check_and_complete_req(parent_req, vreq->err, true /* call_completion_cb */,
+        check_and_complete_req(parent_req, vreq->err, true /* call_completion_cb */,
                                       &fbes /* empty for write flow*/);
+        return;
     }
 
     HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, vreq->is_read, volume_data_read_latency, volume_data_write_latency,
@@ -352,7 +399,20 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
     assert(m_sb->ondisk_sb->page_size % HomeBlks::instance()->get_data_pagesz() == 0);
     assert((m_sb->ondisk_sb->page_size * nlbas) <= VOL_MAX_IO_SIZE);
 
+    // TODO: @hkadayam Remove the init() call and fix the tests to always use fresh vol_interface_req on every call
+    hb_req->init();
+    hb_req->io_start_time = Clock::now();
+    hb_req->is_read = false;
+    // An outside cover to ensure that all vol reqs are issued before any one vol request completion triggering
+    // vol_interface_req completion.
+    hb_req->outstanding_io_cnt.set(1);
+    
+    // buf will be freed automatically when ref count drops to zero
+    boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector());
+    mvec->set(buf, m_sb->ondisk_sb->page_size * nlbas, 0);
+    
     if (is_offline()) {
+        check_and_complete_req(hb_req, std::make_error_condition(std::errc::no_such_device), false, nullptr);
         return std::make_error_condition(std::errc::no_such_device);
     }
 
@@ -361,11 +421,6 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
     hints.desired_temp = 0;
     hints.dev_id_hint = -1;
     hints.multiplier = (m_sb->ondisk_sb->page_size / HomeBlks::instance()->get_data_pagesz());
-
-    // TODO: @hkadayam Remove the init() call and fix the tests to always use fresh vol_interface_req on every call
-    hb_req->init();
-    hb_req->io_start_time = Clock::now();
-    hb_req->is_read = false;
 
     VOL_LOG(TRACE, volume, hb_req, "write: lba={}, nlbas={}, buf={}", lba, nlbas, (void*)buf);
     try {
@@ -385,8 +440,6 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
     }
 
     m_used_size.fetch_add(nlbas * m_sb->ondisk_sb->page_size, std::memory_order_relaxed);
-    boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector());
-    mvec->set(buf, m_sb->ondisk_sb->page_size * nlbas, 0);
 
     uint32_t offset = 0;
     uint32_t lbas_snt = 0;
@@ -394,10 +447,6 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
 
     Clock::time_point data_io_start_time = Clock::now();
     auto              sid = seq_Id.fetch_add(1, memory_order_seq_cst);
-
-    // An outside cover to ensure that all vol reqs are issued before any one vol request completion triggering
-    // vol_interface_req completion.
-    hb_req->outstanding_io_cnt.set(1);
 
     try {
         for (i = 0; i < bid.size(); ++i) {
@@ -468,35 +517,38 @@ void Volume::check_and_complete_req(const vol_interface_req_ptr& hb_req, const s
     m_read_blk_tracker->safe_remove_blks(hb_req->is_read, fbes, err);
 
     if (err) {
-        // NOTE: We do not decrement the outstanding_io_cnt here, so that if there is any partial success,
-        // the else if part does not get executed. This way we avoid an atomic operation on success cases.
         if (hb_req->set_error(err)) {
             // Was not completed earlier, so complete the io
             COUNTER_INCREMENT_IF_ELSE(m_metrics, hb_req->is_read, volume_write_error_count, volume_read_error_count, 1);
-            if (call_completion) {
-                m_comp_cb(hb_req);
-            }
             uint64_t cnt = m_err_cnt.fetch_add(1, std::memory_order_relaxed);
             VOL_LOG(ERROR, , hb_req, "Vol operation error {}", err.message());
         } else {
             VOL_LOG(WARN, , hb_req, "Receiving completion on already completed request id={}", hb_req->request_id);
         }
-    } else {
-        if (hb_req->outstanding_io_cnt.decrement_testz(1)) {
-            HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, hb_req->is_read, volume_read_latency, volume_write_latency,
-                                      get_elapsed_time_us(hb_req->io_start_time));
-            if (get_elapsed_time_ms(hb_req->io_start_time) > 5000) {
-                VOL_LOG(WARN, , hb_req, "vol req took time {}", get_elapsed_time_ms(hb_req->io_start_time));
+    }
+        
+    if (hb_req->outstanding_io_cnt.decrement_testz(1)) {
+        HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, hb_req->is_read, volume_read_latency, volume_write_latency,
+                get_elapsed_time_us(hb_req->io_start_time));
+        if (get_elapsed_time_ms(hb_req->io_start_time) > 5000) {
+            VOL_LOG(WARN, , hb_req, "vol req took time {}", get_elapsed_time_ms(hb_req->io_start_time));
+        }
+        if (call_completion) {
+#ifdef _PRERELEASE
+            if (auto flip_ret = homestore_flip->get_test_flip<int>("vol_comp_delay_us")) {
+                LOGINFO("delaying completion in volume");
+                usleep(flip_ret.get());
             }
-            if (call_completion) {
-                VOL_LOG(TRACE, volume, hb_req, "IO DONE");
-                m_comp_cb(hb_req);
-            }
+#endif
+            VOL_LOG(TRACE, volume, hb_req, "IO DONE");
+            m_comp_cb(hb_req);
         }
     }
 }
 
 void Volume::print_tree() { m_map->print_tree(); }
+
+void Volume::print_node(uint64_t blkid) { m_map->print_node(blkid); }
 
 #if 0
 std::error_condition Volume::read_metadata(const vol_req_ptr& vreq) {
@@ -524,19 +576,14 @@ std::error_condition Volume::read_metadata(const vol_req_ptr& vreq) {
 #endif
 
 std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_req_ptr& hb_req, bool sync) {
-    if (is_offline()) {
-        return std::make_error_condition(std::errc::no_such_device);
-    }
-
+    
     std::vector< Free_Blk_Entry > fbes; // used to clean up in case of error(for async) and in case of sync call
 
     try {
-        assert(m_sb->ondisk_sb->state == vol_state::ONLINE);
+        VOL_LOG(TRACE, volume, hb_req, "read: lba={}, nlbas={}, sync={}", lba, nlbas, sync);
         hb_req->init();
         hb_req->io_start_time = Clock::now();
         hb_req->is_read = true;
-
-        VOL_LOG(TRACE, volume, hb_req, "read: lba={}, nlbas={}, sync={}", lba, nlbas, sync);
 
         // seqId shoudl be passed from vol interface req and passed to mapping layer
         auto sid = seq_Id.fetch_add(1, memory_order_seq_cst);
@@ -556,6 +603,10 @@ std::error_condition Volume::read(uint64_t lba, int nlbas, const vol_interface_r
                 boost::uuids::to_string(vreq->vol_uuid), vreq->lastCommited_seqId);
 #endif
 
+        if (is_offline()) {
+            check_and_complete_req(hb_req, std::make_error_condition(std::errc::no_such_device), false, nullptr);
+            return std::make_error_condition(std::errc::no_such_device);
+        }
         COUNTER_INCREMENT(m_metrics, volume_read_count, 1);
         COUNTER_INCREMENT(m_metrics, volume_outstanding_metadata_read_count, 1);
         auto err = m_map->get(vreq, kvs);

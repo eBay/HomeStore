@@ -14,7 +14,7 @@ using namespace homeds::btree;
 namespace homeds {
 namespace loadgen {
 
-template< typename K, typename V >
+template < typename K, typename V >
 static constexpr btree_node_type find_leaf_node_type() {
     if (K::is_fixed_size() && V::is_fixed_size()) {
         return btree_node_type::SIMPLE;
@@ -23,28 +23,28 @@ static constexpr btree_node_type find_leaf_node_type() {
     } else if (!K::is_fixed_size() && V::is_fixed_size()) {
         return btree_node_type::VAR_KEY;
     } else {
-        //return btree_node_type::VAR_OBJECT;
+        // return btree_node_type::VAR_OBJECT;
         return btree_node_type::VAR_VALUE;
     }
 }
 
-template< typename K >
+template < typename K >
 static constexpr btree_node_type find_interior_node_type() {
-    //return (K::is_fixed_size() ? btree_node_type::SIMPLE : btree_node_type::VAR_KEY);
+    // return (K::is_fixed_size() ? btree_node_type::SIMPLE : btree_node_type::VAR_KEY);
     return (K::is_fixed_size() ? btree_node_type::SIMPLE : btree_node_type::VAR_VALUE);
 }
 
 #define TOTAL_ENTRIES 1000000
 
-#define LoadGenMemBtree  Btree<btree_store_type::MEM_BTREE, K, V, find_interior_node_type<K>(), find_leaf_node_type<K, V>(), NodeSize>
+#define LoadGenMemBtree                                                                                                \
+    Btree< btree_store_type::MEM_BTREE, K, V, find_interior_node_type< K >(), find_leaf_node_type< K, V >(), NodeSize >
 
-template< typename K, typename V, size_t NodeSize = 8192 >
+template < typename K, typename V, size_t NodeSize = 8192 >
 class MemBtreeStoreSpec : public StoreSpec< K, V > {
 public:
-    MemBtreeStoreSpec() {
-    }
+    MemBtreeStoreSpec() {}
 
-    virtual void init_store() override{
+    virtual void init_store() override {
         BtreeConfig btree_cfg;
         btree_cfg.set_max_objs(TOTAL_ENTRIES);
         btree_cfg.set_max_key_size(K::get_max_size());
@@ -54,63 +54,62 @@ public:
 
     virtual bool insert(K& k, V& v) override {
         auto status = m_bt->put(k, v, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
-        return status==btree_status_t::success;
+        return status == btree_status_t::success;
     }
 
     virtual bool upsert(K& k, V& v) override {
         auto status = m_bt->put(k, v, btree_put_type::REPLACE_IF_EXISTS_ELSE_INSERT);
-        return status==btree_status_t::success;
+        return status == btree_status_t::success;
     }
 
     virtual bool update(K& k, V& v) override {
         auto status = m_bt->put(k, v, btree_put_type::REPLACE_ONLY_IF_EXISTS);
-        return status==btree_status_t::success;
+        return status == btree_status_t::success;
     }
 
     virtual bool get(K& k, V* out_v) override {
         auto status = m_bt->get(k, out_v);
-        return status==btree_status_t::success;
+        return status == btree_status_t::success;
     }
 
     virtual bool remove(K& k, V* removed_v = nullptr) override {
         auto status = m_bt->remove(k, removed_v);
-        return status==btree_status_t::success;
+        return status == btree_status_t::success;
     }
 
-    virtual bool remove_any(K& start_key, bool start_incl, K& end_key, bool end_incl, K *out_key, V* out_val) override {
+    virtual bool remove_any(K& start_key, bool start_incl, K& end_key, bool end_incl, K* out_key, V* out_val) override {
         BtreeSearchRange range(start_key, start_incl, end_key, end_incl);
-        auto status = m_bt->remove_any(range, out_key, out_val);
-        return status==btree_status_t::success;
+        auto             status = m_bt->remove_any(range, out_key, out_val);
+        return status == btree_status_t::success;
     }
 
     virtual uint32_t query(K& start_key, bool start_incl, K& end_key, bool end_incl, uint32_t batch_size,
-                           std::vector<std::pair<K, V>> &result) override {
-        auto search_range = BtreeSearchRange(start_key, start_incl, end_key, end_incl);
-        BtreeQueryRequest<K, V> qreq(search_range, BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, batch_size);
+                           std::vector< std::pair< K, V > >& result) override {
+        auto                      search_range = BtreeSearchRange(start_key, start_incl, end_key, end_incl);
+        BtreeQueryRequest< K, V > qreq(search_range, BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, batch_size);
 
         auto result_count = 0U;
 
-        std::vector<std::pair<K, V>> values;
+        std::vector< std::pair< K, V > > values;
         values.reserve(batch_size);
 
         bool has_more = false;
         do {
             auto status = m_bt->query(qreq, values);
-            
+
             has_more = (status == btree_status_t::has_more);
             auto is_success = (status == btree_status_t::has_more) || (status == btree_status_t::success);
-            
-            result.insert(result.end(),values.begin(),values.end());
-           
+
+            result.insert(result.end(), values.begin(), values.end());
+
             values.clear();
         } while (has_more);
 
-        result_count+=result.size();
+        result_count += result.size();
         return result_count;
     }
 
-    virtual bool range_update(K& start_key, bool start_incl, K& end_key, bool end_incl,
-                                          V& start_value, V& end_value){
+    virtual bool range_update(K& start_key, bool start_incl, K& end_key, bool end_incl, V& start_value, V& end_value) {
         assert(0); // not supported yet
         return {};
     }
@@ -121,4 +120,4 @@ private:
 } // namespace loadgen
 } // namespace homeds
 
-#endif //HOMESTORE_BTREE_STORE_SPEC_HPP
+#endif // HOMESTORE_BTREE_STORE_SPEC_HPP

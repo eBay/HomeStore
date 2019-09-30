@@ -23,9 +23,11 @@
 #include "homeds/utility/useful_defs.hpp"
 #include <spdlog/fmt/bundled/ostream.h>
 #include "homeds/array/reserve_vector.hpp"
+#include <main/homestore_header.hpp>
 
 using namespace std;
 using namespace homeds::thread;
+using namespace flip;
 
 #ifndef NDEBUG
 #define MAX_BTREE_DEPTH 100
@@ -93,7 +95,47 @@ public:
     btree_super_block get_btree_sb() {
         return m_sb;
     }
-    
+
+#ifdef _PRERELEASE 
+    static void set_io_flip() {
+        /* IO flips */
+        FlipClient *fc = homestore::HomeStoreFlip::client_instance();
+        FlipFrequency freq;
+        FlipCondition cond1;
+        FlipCondition cond2;
+        freq.set_count(2000000000);
+        freq.set_percent(2);
+
+        fc->create_condition("nuber of entries in a node", flip::Operator::EQUAL, 0, &cond1);
+        fc->create_condition("nuber of entries in a node", flip::Operator::EQUAL, 1, &cond2);
+        fc->inject_noreturn_flip("btree_upgrade_node_fail", {cond1, cond2}, freq);
+
+        fc->create_condition("nuber of entries in a node", flip::Operator::EQUAL, 4, &cond1);
+        fc->create_condition("nuber of entries in a node", flip::Operator::EQUAL, 2, &cond2);
+        
+        fc->inject_noreturn_flip("btree_delay_and_split", {cond1, cond2}, freq);
+        fc->inject_noreturn_flip("btree_delay_and_split_leaf", {cond1, cond2}, freq);
+        fc->inject_noreturn_flip("btree_parent_node_full", {}, freq);
+        fc->inject_noreturn_flip("btree_leaf_node_split", {}, freq);
+        fc->inject_retval_flip("btree_upgrade_delay", {}, freq, 20);
+        fc->inject_retval_flip("writeBack_completion_req_delay_us", {}, freq, 20);
+    }
+
+    static void set_error_flip() {
+        /* error flips */
+        FlipClient *fc = homestore::HomeStoreFlip::client_instance();
+        FlipFrequency freq;
+        freq.set_count(2000000000);
+        freq.set_percent(1);
+        
+        fc->inject_noreturn_flip("btree_split_failure", {}, freq);
+        fc->inject_noreturn_flip("btree_write_comp_fail", {}, freq);
+        fc->inject_noreturn_flip("btree_read_fail", {}, freq);
+        fc->inject_noreturn_flip("btree_write_fail", {}, freq);
+        fc->inject_noreturn_flip("btree_refresh_fail", {}, freq);
+    }
+#endif
+
     void process_completions(btree_status_t status, btree_multinode_req_ptr multinode_req) {
         
         if (!multinode_req) {
@@ -646,6 +688,20 @@ out:
         m_btree_lock.unlock();
     }
 
+    void print_node(const bnodeid_t& bnodeid) {
+        std::stringstream ss;
+        BtreeNodePtr node;
+        m_btree_lock.read_lock();
+        homeds::thread::locktype acq_lock = homeds::thread::locktype::LOCKTYPE_READ;
+        if (read_and_lock_node(bnodeid, node, acq_lock, acq_lock, nullptr) != btree_status_t::success) {
+            return;
+        }
+        ss << "[" << node->to_string() << "]";
+        unlock_node(node, acq_lock);
+        BT_LOG(INFO, , , "Node : <{}>", ss.str());
+        m_btree_lock.unlock();
+    }
+
     nlohmann::json get_metrics_in_json(bool updated = true) { return m_metrics.get_result_in_json(updated); }
 
 private:
@@ -1066,8 +1122,12 @@ done:
 
 #ifdef _PRERELEASE
     {
-        bool is_leaf = child_node ? child_node->is_leaf() : false;
-        if (homestore_flip->test_flip("btree_upgrade_node_fail", false)) {
+        int is_leaf = 0;
+        
+        if (child_node && child_node->is_leaf()) {
+            is_leaf = 1;
+        }
+        if (homestore_flip->test_flip("btree_upgrade_node_fail", is_leaf)) {
             ret = btree_status_t::retry;
         }
     }
@@ -1126,7 +1186,7 @@ done:
             /* just get start/end index from get_all. We don't release the parent lock until this
              * key range is not inserted from start_ind to end_ind.
              */
-            my_node->get_all(bur->get_cb_param()->get_input_range(), UINT32_MAX, start_ind, end_ind);
+            my_node->get_all(bur->get_input_range(), UINT32_MAX, start_ind, end_ind);
         } else {
             auto result = my_node->find(k, nullptr, nullptr);
             end_ind = start_ind = result.end_of_search_index;
@@ -1154,7 +1214,12 @@ done:
         auto none_lock_type = LOCKTYPE_NONE;
         
 #ifdef _PRERELEASE
-        auto time = homestore_flip->get_test_flip<int>("btree_delay_and_split", child_node->get_total_entries());
+        boost::optional<int> time;
+        if (child_node->is_leaf()) {
+            time = homestore_flip->get_test_flip<int>("btree_delay_and_split_leaf", child_node->get_total_entries());
+        } else {
+            time = homestore_flip->get_test_flip<int>("btree_delay_and_split", child_node->get_total_entries());
+        }
         if (time && child_node->get_total_entries() > 2) {
             usleep(time.get());
         } else 
@@ -1172,7 +1237,7 @@ done:
              * iteration which result into less space in the parent node.
              */
 #ifdef _PRERELEASE
-            if (homestore_flip->test_flip("simulate_parent_node_full")) {
+            if (homestore_flip->test_flip("btree_parent_node_full")) {
                 ret = btree_status_t::retry;
                 goto out;
             }
@@ -1241,6 +1306,7 @@ out:
             return;
         }
 
+#ifndef NDEBUG
         if (curr_ind > 0) {
             /* start of subrange will always be more then the key in curr_ind - 1 */
             K start_key;
@@ -1249,6 +1315,7 @@ out:
             my_node->get_nth_key(curr_ind - 1, start_key_ptr, false);
             assert(start_key_ptr->compare(bur->get_cb_param()->get_sub_range().get_start_key()) <= 0);
         }
+#endif
         
         //find end of subrange
         bool end_inc = true;
@@ -1260,7 +1327,7 @@ out:
             if (end_key_ptr->compare(bur->get_input_range().get_end_key()) >= 0) {
                 /* this is last index to process as end of range is smaller then key in this node */
                 end_key_ptr = const_cast<BtreeKey *>(bur->get_input_range().get_end_key());
-                end_inc = bur->get_cb_param()->get_input_range().is_end_inclusive();
+                end_inc = bur->get_input_range().is_end_inclusive();
             } else {
                 end_inc = true;
             }
@@ -1268,12 +1335,16 @@ out:
             /* it is the edge node. end key is the end of input range */
             BT_LOG_ASSERT_CMP(EQ, my_node->get_edge_id().is_valid(), true, my_node);
             end_key_ptr = const_cast<BtreeKey *>(bur->get_input_range().get_end_key());
-            end_inc = bur->get_cb_param()->get_input_range().is_end_inclusive();
+            end_inc = bur->get_input_range().is_end_inclusive();
         }
         
         auto blob = end_key_ptr->get_blob();
         const_cast<BtreeKey *>(bur->get_cb_param()->get_sub_range().get_end_key())->copy_blob(blob);//copy
         bur->get_cb_param()->get_sub_range().set_end_incl(end_inc);
+        
+        auto ret = bur->get_cb_param()->get_sub_range().get_start_key()->compare(
+                                bur->get_cb_param()->get_sub_range().get_end_key());
+        BT_LOG_ASSERT_CMP(LE, ret, 0, my_node);
         /* We don't neeed to update the start at it is updated when entries are inserted in leaf nodes */
     }
 
@@ -1333,6 +1404,16 @@ retry:
         curr_ind = start_ind;
 
         while (curr_ind <= end_ind) { // iterate all matched childrens
+
+#ifdef _PRERELEASE
+            if (curr_ind - start_ind > 1 &&
+                homestore_flip->test_flip("btree_leaf_node_split")) {
+                LOGINFO("btree_leaf_node_split flip is set");
+                ret = btree_status_t::retry;
+                goto out;
+            }
+#endif
+
             homeds::thread::locktype child_cur_lock = homeds::thread::LOCKTYPE_NONE;
 
             // Get the childPtr for given key.
@@ -1422,11 +1503,6 @@ retry:
                 assert(child_node->m_common_header.is_lock);
             }
 #endif
-            K cur_range_ekey;
-            if (bur) {
-                /* this would be the new start key after this range is inserted */
-                cur_range_ekey.copy_blob(const_cast<BtreeKey *>(bur->get_cb_param()->get_sub_range().get_end_key())->get_blob());
-            }
 
             ret = do_put(child_node, child_cur_lock, k, v, ind_hint, put_type,
                                   existing_val, multinode_req, bur);
@@ -1869,7 +1945,8 @@ out:
             child_node1->get_node_id_int(), child_node2->get_node_id_int(), out_split_key->to_string());
 
 #ifdef _PRERELEASE
-        if (homestore_flip->test_flip("btree_split_failure", child_node->is_leaf())) {
+        if (BtreeStoreType == btree_store_type::SSD_BTREE && 
+                homestore_flip->test_flip("btree_split_failure", child_node->is_leaf())) {
             child_node1->flip_pc_gen_flag();
             child_node1->move_in_from_right_by_size(m_btree_cfg, child_node2, split_size);
         }
@@ -1879,6 +1956,12 @@ out:
         // we write right child node, than parent and than left child
         write_node_async(child_node2, multinode_req);
         write_node_async(parent_node, multinode_req);
+#ifdef _PRERELEASE
+        if (BtreeStoreType == btree_store_type::SSD_BTREE && 
+                homestore_flip->test_flip("btree_split_panic", child_node->is_leaf())) {
+            abort();
+        }
+#endif
         write_node_async(child_node1, multinode_req);
         
         // NOTE: Do not access parentInd after insert, since insert would have
