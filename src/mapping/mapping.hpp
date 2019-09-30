@@ -15,9 +15,6 @@
 
 SDS_LOGGING_DECL(VMOD_VOL_MAPPING)
 
-#ifndef DEBUG
-bool same_value_gen = false;
-#endif
 
 using namespace homeds::btree;
 
