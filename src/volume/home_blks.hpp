@@ -11,9 +11,6 @@
 #include <async_http/http_server.hpp>
 #include <threadpool/thread_pool.h>
 
-#ifndef DEBUG
-bool same_value_gen = false;
-#endif
 namespace homestore {
 
 #define VOL_MAX_IO_SIZE MEMVEC_MAX_IO_SIZE
