@@ -4,18 +4,6 @@ namespace homeds::loadgen {
 enum SPECIFIC_TEST {
     MAP = 0,
 };
-class Param {
-public:
-    uint64_t          NIO{}, NK{}, NRT{};                   // total ios and total keys
-    int               PC{}, PR{}, PU{}, PD{}, PRU{}, PRQ{}; // total % for op
-    uint64_t          PRINT_INTERVAL{}, WST{};
-    uint64_t          WARM_UP_KEYS = 0;
-    uint8_t           NT = 0; // num of threads
-    Clock::time_point startTime;
-    Clock::time_point print_startTime;
-    Clock::time_point workload_shiftTime;
-    uint8_t           enable_write_log;
-};
 
 template < typename K, typename V, typename Store, typename Executor >
 struct BtreeLoadGen {
@@ -127,7 +115,7 @@ struct BtreeLoadGen {
 
         this->p = parameters;
         kvg->set_max_keys(p.NK);
-        kvg->init_generator();
+        kvg->init_generator(parameters);
     }
 
     void do_sub_range_test() {

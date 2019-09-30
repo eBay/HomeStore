@@ -29,13 +29,10 @@ struct key_info {
     uint32_t                                              m_read_count = 0;
     int32_t                                               m_slot_num;
     std::unique_ptr< boost::circular_buffer< uint64_t > > m_val_hash_codes;
-    std::shared_ptr< V >                                  m_val;      // current value
-    std::shared_ptr< V >                                  m_last_val; // last value
 
     key_info(const K& key, int32_t slot_num = -1) : m_key(key), m_slot_num(slot_num) {}
 
-    key_info(const K& key, int32_t slot_num, V& value, uint64_t val_hash_code) : key_info(key, slot_num) {
-        update_value(value);
+    key_info(const K& key, int32_t slot_num, uint64_t val_hash_code) : key_info(key, slot_num) {
         add_hash_code(val_hash_code);
     }
 
@@ -100,25 +97,6 @@ struct key_info {
         return (m_exclusive_access);
     }
 
-    void update_value(std::shared_ptr< V > v) {
-        folly::RWSpinLock::WriteHolder guard(m_lock);
-        assert(m_last_val == nullptr);
-        m_last_val = m_val;
-        m_val = v;
-    }
-
-    std::shared_ptr< V > get_and_reset_last_value() {
-        folly::RWSpinLock::WriteHolder guard(m_lock);
-        std::shared_ptr< V >           temp = m_last_val;
-        m_last_val = nullptr;
-        return temp;
-    }
-
-    std::shared_ptr< V > get_value() {
-        folly::RWSpinLock::WriteHolder guard(m_lock);
-        return m_val;
-    }
-
     void add_hash_code(uint64_t hash_code) {
         folly::RWSpinLock::WriteHolder guard(m_lock);
         if (!m_val_hash_codes) {
@@ -149,8 +127,7 @@ struct key_info {
     friend std::ostream& operator<<(std::ostream& os, const key_info< K, V >& ki) {
         os << "KeyInfo: [Key=" << ki.m_key << " last_hash_code=" << ki.get_last_hash_code()
            << " slot_num=" << ki.m_slot_num << " mutating_count=" << ki.m_mutate_count
-           << " read_count=" << ki.m_read_count << " exclusive_access?=" << ki.m_exclusive_access
-           << " last_value=" << ki.m_val << "]";
+           << " read_count=" << ki.m_read_count << " exclusive_access?=" << ki.m_exclusive_access;
         return os;
     }
 
@@ -233,8 +210,6 @@ public:
             assert(ki->m_read_count == 0 && ki->m_mutate_count == 0);
             ++itr;
         }
-
-        assert(m_data_set.size() == m_value_set.size());
     };
 
     uint64_t get_keys_count() { return m_data_set.size(); }
@@ -249,17 +224,7 @@ public:
         LOGERROR("key set:{}", ss.str());
     }
     
-    void print_value_set() {
-        auto              itr = m_value_set.begin();
-        std::stringstream ss;
-        while (itr != m_value_set.end()) {
-            ss << (*itr)->to_string() << "\n";
-            ++itr;
-        }
-        LOGERROR("value set:{}", ss.str());
-    }
-
-    int update_contigious_kv(std::vector< key_info_ptr< K, V > >& kv) {
+    int update_contigious_kv(std::vector< key_info_ptr< K, V > >& kv, std::vector< std::shared_ptr< V > > &val_vec) {
         std::unique_lock l(m_rwlock);
         if (kv.size() == 0)
             return 0;
@@ -276,44 +241,21 @@ public:
                 pregenerated = false;
             } else {
                 /** GENERATE SEQ VALUE AND SEE IF IT ALREADY EXISTS **/
-                std::shared_ptr< V > temp =
-                    std::make_shared< V >(V::gen_value(ValuePattern::SEQUENTIAL_VAL, val.get()));
-
-                if (!val->is_consecutive(*temp.get()))
-                    break; // rolled over values
-
+                std::shared_ptr< V > temp = V::gen_value(ValuePattern::SEQUENTIAL_VAL, val.get());
+                if (temp == nullptr) {
+                    return count;
+                }
                 val = temp;
-
-                if (has_value((val))) {
-                    break; // continuity brokern
-                }
-                auto result = m_value_set.insert(val);
-                if (result.second == false) {
-                    LOGERROR("generated value is not unique!");
-                    assert(0);
-                }
             }
 
             /** LINK NEW VALUE TO EXISTING KEY */
-            kip->update_value(val); // REMOVAL OF VALUE TAKEN CARE SEPERATLY
             kip->add_hash_code(val->get_hash_code());
+            val_vec.push_back(val);
 
             count++;
             ++keyit;
         }
         return count;
-    }
-
-    void remove_old_values(std::vector< key_info_ptr< K, V > >& res) {
-        std::unique_lock l(m_rwlock);
-        auto             itr = res.begin();
-        while (itr != res.end()) {
-            auto                 kip = *itr;
-            std::shared_ptr< V > val = kip->get_and_reset_last_value();
-            if (val)
-                _remove_value(val);
-            ++itr;
-        }
     }
 
     std::shared_ptr< V > generate_value(ValuePattern value_pattern) {
@@ -351,11 +293,6 @@ public:
     // Assume last key as invalid key always. NOTE: This will no longer be invalid in case it is actually
     // inserted into the store.
     key_info_ptr< K, V > generate_invalid_key() { return key_info_ptr(this, &m_invalid_ki, true); }
-
-    std::shared_ptr< V > get_value(ValuePattern value_pattern) {
-        assert(0); // TODO -support reuse of values, need to track using smart ptrs of when to delete unused val
-        return nullptr;
-    }
 
     key_info_ptr< K, V > get_key(KeyPattern pattern, bool is_mutate, bool exclusive_access) {
 
@@ -432,20 +369,6 @@ public:
         assert(result.second);
     }
 
-    void remove_value(std::shared_ptr< V > value) {
-        std::unique_lock l(m_rwlock);
-        _remove_value(value);
-    }
-
-    void _remove_value(std::shared_ptr< V > value) {
-        LOGDEBUG("Erasing value:{}", value->to_string());
-        auto x = m_value_set.erase(value);
-        if (x == 0) {
-            LOGERROR("Value not found!");
-            assert(0);
-        }
-    }
-
     void remove_key(key_info_ptr< K, V >& kip) {
         std::unique_lock l(m_rwlock);
         LOGDEBUG("Erasing key:{}", kip.m_ki->m_key.to_string());
@@ -484,16 +407,6 @@ public:
         return true;
     }
 
-    bool has_value(std::shared_ptr< V > value) {
-        auto it = m_value_set.find(value);
-        if (it == m_value_set.end())
-            return false;
-        const std::shared_ptr< V > exp_value = *it;
-        if (exp_value->compare(*value.get()) != 0)
-            return false;
-        return true;
-    }
-
     friend struct key_info_ptr< K, V >;
 
     void reset_pattern(KeyPattern pattern, int index = 0) {
@@ -523,21 +436,7 @@ private:
         
         std::shared_ptr< V > nv = nullptr;
         int                  trygen = 0;
-        do {
-            if (trygen++ == MAX_VALUE_RANGE) {
-                LOGERROR("Could not generate values!!!");
-                assert(0);
-            }
-        
-            nv = std::make_shared< V >(V::gen_value(value_pattern, _get_last_gen_value(value_pattern)));
-        } while (has_value(nv));
-        auto result = m_value_set.insert(nv);
-        if (result.second == false) {
-            LOGERROR("generated value is not unique!");
-            assert(0);
-        }
-        _set_last_gen_value(nv);
-        LOGDEBUG("Generated value:{}", nv->to_string());
+        nv = V::gen_value(value_pattern, _get_last_gen_value(value_pattern));
         return nv;
     }
 
@@ -779,13 +678,13 @@ private:
     boost::dynamic_bitset<> m_used_slots;  // can have slots mark freed but eventually freed
     boost::dynamic_bitset<> m_alive_slots; // will only have slots which are not mark freed
     std::set< key_info< K, V >*, compare_key_info< K, V > > m_data_set;
-    std::set< std::shared_ptr< V >, compare_value >         m_value_set; // actual values
     int32_t                                                 m_ndirty = 0;
     std::shared_ptr< V >                                    m_last_gen_value = nullptr;
 
     key_info< K, V >                                           m_invalid_ki;
     std::array< std::atomic< int32_t >, KEY_PATTERN_SENTINEL > m_last_gen_slots;
     std::array< std::atomic< int32_t >, KEY_PATTERN_SENTINEL > m_next_read_slots;
+    bool                                                       m_unique_val = false; //value generated needs to be unique
 };
 
 template < typename K, typename V >
