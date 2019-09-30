@@ -744,6 +744,11 @@ start:
                 if (j != 0 && (!verify_data || !verify_done)) {
                     /* we will only verify the header. We write lba number in the header */
                     j = memcmp((void *) b.bytes, (uint8_t *)((uint64_t)req->buf + tot_size_read), sizeof (uint64_t));
+                    if (!j) {
+                        /* copy the data */
+                        auto ret = pwrite(vol_info[req->cur_vol]->fd, b.bytes, b.size, tot_size_read + req->offset);
+                        assert(ret == b.size);
+                    }
                     hdr_only_match_cnt++;
                 }
                 if (j) {
