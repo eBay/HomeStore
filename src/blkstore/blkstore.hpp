@@ -82,14 +82,13 @@ public:
                 return true;
             }
         }
-        return false; 
-    }
-    
-    void start_time() {
-        blkstore_op_start_time = Clock::now();
+        return false;
     }
 
+    void start_time() { blkstore_op_start_time = Clock::now(); }
+
     virtual void free_yourself() { homeds::ObjectAllocator< blkstore_req< Buffer > >::deallocate(this); }
+
 protected:
     friend class homeds::ObjectAllocator< blkstore_req< Buffer > >;
     blkstore_req() : bbuf(nullptr), blkstore_ref_cnt(0), missing_pieces(0), data_offset(0){};
@@ -172,9 +171,7 @@ public:
             m_comp_cb(comp_cb),
             m_metrics(name) {}
 
-    ~BlkStore() {
-    
-    }
+    ~BlkStore() {}
 
     void attach_compl(comp_callback comp_cb) { m_comp_cb = comp_cb; }
 
@@ -189,13 +186,14 @@ public:
 
         if (!req->is_read) {
 #ifdef _PRERELEASE
-            if (auto flip_ret = homestore_flip->get_test_flip<int>("delay_us_and_inject_error_on_completion", 
-                                v_req->request_id)) {
+            if (auto flip_ret = homestore_flip->get_test_flip< int >("delay_us_and_inject_error_on_completion",
+                                                                     v_req->request_id)) {
                 usleep(flip_ret.get());
                 req->err = homestore_error::write_failed;
             }
 #endif
-            HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_write_latency, get_elapsed_time_us(req->blkstore_op_start_time));
+            HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_write_latency,
+                              get_elapsed_time_us(req->blkstore_op_start_time));
 
             if (is_write_back_cache()) {
                 m_wb_cache.writeBack_completion(req->bbuf, to_wb_req(req), req->err);
@@ -302,9 +300,9 @@ public:
         free_blk(bid, size_offset, size, dependent_req_q);
     }
 
-    void cache_buf_erase_cb(boost::intrusive_ptr< Buffer >                                  erased_buf,
+    void cache_buf_erase_cb(boost::intrusive_ptr< Buffer >                                 erased_buf,
                             std::deque< boost::intrusive_ptr< homestore::writeback_req > > dependent_req_q,
-                            const BlkId                                                     bid) {
+                            const BlkId                                                    bid) {
         assert(is_read_modify_cache());
         if (is_write_back_cache()) {
             auto req = blkstore_req< Buffer >::make_request();
@@ -322,7 +320,8 @@ public:
      * nblks refer to the total blks from offset to free.
      */
     void free_blk(const BlkId& bid, boost::optional< uint32_t > size_offset, boost::optional< uint32_t > size,
-                  std::deque< boost::intrusive_ptr< homestore::writeback_req > >& dependent_req_q, bool mem_only = false) {
+                  std::deque< boost::intrusive_ptr< homestore::writeback_req > >& dependent_req_q,
+                  bool                                                            mem_only = false) {
         boost::intrusive_ptr< Buffer > erased_buf(nullptr);
         bool                           found = false;
 
@@ -340,7 +339,8 @@ public:
             m_cache->safe_erase(
                 bid, [this, bid, dependent_req_q, mem_only](boost::intrusive_ptr< CacheBuffer< BlkId > > erased_buf) {
                     if (!mem_only) {
-                        this->cache_buf_erase_cb(boost::static_pointer_cast< Buffer >(erased_buf), dependent_req_q, bid);
+                        this->cache_buf_erase_cb(boost::static_pointer_cast< Buffer >(erased_buf), dependent_req_q,
+                                                 bid);
                     }
                 });
             /* cache will raise callback when ref_cnt becomes zero */
@@ -456,7 +456,8 @@ public:
         // TODO: rishabh, need to check the return status
         m_vdev.write(bid, ibuf->get_memvec(), to_vdev_req(req), data_offset);
         if (req->isSyncCall) {
-            HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_write_latency, get_elapsed_time_us(req->blkstore_op_start_time));
+            HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_write_latency,
+                              get_elapsed_time_us(req->blkstore_op_start_time));
         }
         return ibuf;
     }

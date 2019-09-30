@@ -10,11 +10,41 @@ struct _dummy_req {
     uint64_t request_id = 0;
 };
 
-/* HS Log, Req log, plain log and submod+req logs */
-#define HS_REQ_LOG(level, mod, req, msg, ...)                                                                          \
+/***** HomeStore Logging Macro facility: Goal is to provide consistent logging capability
+ *
+ * HS_LOG: Use this log macro to simply log the message for a given logmod (without any request or other details)
+ * Parameters are
+ * level: log level to which this message is logged, Possible values are TRACE, DEBUG, INFO, WARN, ERROR, CRITICAL
+ * logmod: Log module name. This parameter can be empty (upon which it uses base log module), which is on by default
+ * msg: The actual message in fmt style where parameters are mentioned as {}
+ * msg_params [optional]: Paramters for the above message if any.
+ *
+ *
+ * HS_REQ_LOG: Use this log macro to log the message along with the request id. It will log of the format:
+ * <Timestamp etc..>  [req_id=1234] <Actual message>
+ * Parameters are
+ * level: log level to which this message is logged, Possible values are TRACE, DEBUG, INFO, WARN, ERROR, CRITICAL
+ * logmod: Log module name. This parameter can be empty (upon which it uses base log module), which is on by default
+ * req: Request id value to log. It can be empty in which case this macro is exactly same as HS_LOG()
+ * msg: The actual message in fmt style where parameters are mentioned as {}
+ * msg_params [optional]: Paramters for the above message if any.
+ *
+ *
+ * HS_SUBMOD_LOG: Use this macro to log the message with both request_id and submodule name and value. Log format is:
+ * <Timestamp etc..>  [volume=<vol_name>] [req_id=1234] <Actual message>
+ * Parameters are
+ * level: log level to which this message is logged, Possible values are TRACE, DEBUG, INFO, WARN, ERROR, CRITICAL
+ * logmod: Log module name. This parameter can be empty (upon which it uses base log module), which is on by default
+ * req: Request id value to log. It can be empty in which it will not print req_id portion of the log
+ * submod_name: Submodule name (for example volume or blkalloc or btree etc...)
+ * submod_val: Submodule value (for example vol1 or chunk1 or mem_btree_1 etc...)
+ * msg: The actual message in fmt style where parameters are mentioned as {}
+ * msg_params [optional]: Paramters for the above message if any.
+ */
+#define HS_REQ_LOG(level, logmod, req, msg, ...)                                                                       \
     {                                                                                                                  \
         BOOST_PP_IF(BOOST_PP_IS_EMPTY(req), _dummy_req* r = nullptr, const auto& r = req);                             \
-        LOG##level##MOD_FMT(BOOST_PP_IF(BOOST_PP_IS_EMPTY(mod), base, mod),                                            \
+        LOG##level##MOD_FMT(BOOST_PP_IF(BOOST_PP_IS_EMPTY(logmod), base, logmod),                                      \
                             ([this, r](fmt::memory_buffer& buf, const char* m, auto&&... args) {                       \
                                 fmt::format_to(buf, "[{}:{}] ", file_name(__FILE__), __LINE__);                        \
                                 if (r)                                                                                 \
@@ -23,11 +53,11 @@ struct _dummy_req {
                             }),                                                                                        \
                             msg, ##__VA_ARGS__);                                                                       \
     }
-#define HS_LOG(level, mod, msg, ...) HS_REQ_LOG(level, mod, , msg, ##__VA_ARGS__)
-#define HS_SUBMOD_LOG(level, mod, req, submod_name, submod_val, msg, ...)                                              \
+#define HS_LOG(level, logmod, msg, ...) HS_REQ_LOG(level, logmod, , msg, ##__VA_ARGS__)
+#define HS_SUBMOD_LOG(level, logmod, req, submod_name, submod_val, msg, ...)                                           \
     {                                                                                                                  \
         BOOST_PP_IF(BOOST_PP_IS_EMPTY(req), _dummy_req* r = nullptr, const auto& r = req);                             \
-        LOG##level##MOD_FMT(BOOST_PP_IF(BOOST_PP_IS_EMPTY(mod), base, mod),                                            \
+        LOG##level##MOD_FMT(BOOST_PP_IF(BOOST_PP_IS_EMPTY(logmod), base, logmod),                                      \
                             ([&](fmt::memory_buffer& buf, const char* m, auto&&... args) {                             \
                                 fmt::format_to(buf, "[{}:{}] [{}={}] ", file_name(__FILE__), __LINE__, submod_name,    \
                                                submod_val);                                                            \
