@@ -770,8 +770,8 @@ private:
                         for (auto& ptr : replace_kv) {
                             ss << ptr.first.to_string() << "," << ptr.second.to_string();
                         }
-                       // LOGERROR("Error::Put_CB:,{} ", ss.str());
-                      //  assert(0);
+                        LOGERROR("Error::Put_CB:,{} ", ss.str());
+                        assert(0);
                     }
                 }
                 i++;
