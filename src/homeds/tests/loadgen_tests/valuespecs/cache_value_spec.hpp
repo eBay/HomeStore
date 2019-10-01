@@ -57,13 +57,15 @@ public:
             CacheValue v = CacheValue(raw_buf, CACHE_ENTRY_SIZE);
             std::shared_ptr< CacheValue > temp = std::make_shared< CacheValue >(v);
             return temp;
-            break;
         }
         default:
             // We do not support other gen spec yet
-            assert(0);
             break;
         }
+        assert(0);
+        CacheValue v = CacheValue();
+        std::shared_ptr< CacheValue > temp = std::make_shared< CacheValue >(v);
+        return temp;
     }
 
     CacheValue() {};
