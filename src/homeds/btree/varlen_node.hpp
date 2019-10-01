@@ -552,7 +552,7 @@ public:
         return nth_key.compare_range(range);
     }
 
-    void get_all_kvs(std::vector< pair< BtreeKey*, BtreeValue* > >* kvs) const {
+    void get_all_kvs(std::vector< pair< K, V > >* kvs) const {
         assert(this->is_leaf());
         if (!this->is_leaf()) {
             LOGERROR("Got a non-leaf node {}", this->to_string());
@@ -560,13 +560,11 @@ public:
         }
 
         for (uint32_t i = 0; i < this->get_total_entries(); i++) {
-            K* key;
-            V* val;
+            K key;
+            V val;
 
-            key = new K;
-            val = new V;
-            get_nth_key(i, key, true); // Copy
-            get(i, val, true);         // Copy
+            get_nth_key(i, &key, true); // Copy
+            get(i, &val, true);         // Copy
             kvs->push_back(make_pair(key, val));
         }
     }

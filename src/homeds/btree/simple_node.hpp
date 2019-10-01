@@ -306,7 +306,7 @@ public:
         return nth_key.compare_range(range);
     }
 
-    void get_all_kvs(std::vector< pair< BtreeKey*, BtreeValue* > >* kvs) const {
+    void get_all_kvs(std::vector< pair< K, V > >* kvs) const {
         LOGERROR("Not implemented");
         return;
     }
