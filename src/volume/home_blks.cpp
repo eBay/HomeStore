@@ -15,6 +15,10 @@ SDS_OPTION_GROUP(home_blks, (hb_stats_port, "", "hb_stats_port", "Stats port for
 
 using namespace homestore;
 
+#ifndef DEBUG
+bool same_value_gen = false;
+#endif
+
 HomeBlks* HomeBlks::_instance = nullptr;
 std::string HomeBlks::version = PACKAGE_VERSION;
 

@@ -23,7 +23,7 @@ template< typename K, typename V >
 class VolumeStoreSpec : public StoreSpec< K, V > {
 public:
 
-    virtual void init_store() override {
+    virtual void init_store(homeds::loadgen::Param& parameters) override {
         m_vol_mgr = VolumeManager<IOMgrExecutor>::instance();
     }
 
@@ -46,17 +46,17 @@ public:
     }
     
     // new write
-    virtual bool insert(K& k, V& v) override {
+    virtual bool insert(K& k, std::shared_ptr<V> v) override {
         return update_internal (k, v);
     }
 
-    virtual bool upsert(K& k, V& v) override {
+    virtual bool upsert(K& k, std::shared_ptr<V> v) override {
         assert(0);
         return update_internal (k, v);
     }
 
     // over-write
-    virtual bool update(K& k, V& v) override {
+    virtual bool update(K& k, std::shared_ptr<V> v) override {
         VolumeKey*      vk = dynamic_cast<VolumeKey*>(&k);
         
         uint64_t        nblks = vk->nblks();
@@ -83,18 +83,19 @@ public:
         return true;
     }
 
-    virtual uint32_t query(K& start_key, bool start_incl, K& end_key, bool end_incl, uint32_t batch_size, std::vector<std::pair<K, V>> &result) {
+    virtual uint32_t query(K& start_key, bool start_incl, K& end_key, bool end_incl, std::vector<std::pair<K, V>> &result) {
         assert(0);
         return 1;
     }
 
-    virtual bool range_update(K& start_key, bool start_incl, K& end_key, bool end_incl, V& start_value, V& end_value) {
+    virtual bool range_update(K& start_key, bool start_incl, K& end_key, bool end_incl, 
+                              std::vector< std::shared_ptr<V> > &result) {
         assert(0);
         return true;
     }
 
 private: 
-    bool update_internal(K& k, V& v) {
+    bool update_internal(K& k, std::shared_ptr<V> v) {
         VolumeKey*      vk = dynamic_cast<VolumeKey*>(&k);
 
         uint64_t        nblks = vk->nblks();

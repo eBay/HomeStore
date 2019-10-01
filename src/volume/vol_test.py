@@ -46,7 +46,7 @@ def normal():
 def normal_flip():
     print("normal test started")
     subprocess.check_call(dirpath + "test_volume \
-            --run_time=10000 --max_num_writes=5000000 --gtest_filter=IOTest.init_io_test --remove_file=0 --verify_data = 0 \
+            --run_time=10000 --max_num_writes=5000000 --gtest_filter=IOTest.init_io_test --remove_file=0 --verify_data=0 \
             --flip=2", stderr=subprocess.STDOUT, shell=True)
     print("normal test completed")
 
