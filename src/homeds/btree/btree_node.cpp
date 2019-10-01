@@ -271,7 +271,7 @@ DecBNodeType(int) compare_nth_key_range(const BtreeSearchRange &range, int ind) 
     return call_variant_method_const(this, compare_nth_key_range, range, ind);
 }
 
-DecBNodeType(void) get_all_kvs(std::vector< pair< BtreeKey*, BtreeValue* > >* kvs) const {
+DecBNodeType(void) get_all_kvs(std::vector< pair< K, V > >* kvs) const {
     call_variant_method_const(this, get_all_kvs, kvs);
 }
 

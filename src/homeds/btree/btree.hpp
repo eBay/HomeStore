@@ -682,26 +682,22 @@ out:
 
       void merge(Btree* other, match_item_cb_update_t<K,V> merge_cb) {
 
-        std::vector< pair< BtreeKey*, BtreeValue* > > other_kvs;
+          std::vector< pair< K, V > > other_kvs;
 
-        other->get_all_kvs(&other_kvs);
-        for (auto it = other_kvs.begin(); it != other_kvs.end(); it++) {
-            K*  k = (K*)(it->first);
-            V*  v = (V*)(it->second);
-            BRangeUpdateCBParam< K, V > local_param(*k,*v);
-            K   start(k->start(),1) , end(k->end(), 1);
+          other->get_all_kvs(&other_kvs);
+          for (auto it = other_kvs.begin(); it != other_kvs.end(); it++) {
+              K                           k = it->first;
+              V                           v = it->second;
+              BRangeUpdateCBParam< K, V > local_param(k, v);
+              K                           start(k.start(), 1), end(k.end(), 1);
 
-            auto                     search_range = BtreeSearchRange(start, true, end, true);
-            BtreeUpdateRequest< K, V > ureq(search_range, merge_cb, (BRangeUpdateCBParam< K, V >*)&local_param);
-
-            range_put(*k, *v, btree_put_type::APPEND_IF_EXISTS_ELSE_INSERT, nullptr, nullptr, ureq);
-
-            delete (it->first);
-            delete (it->second);
-        }
+              auto                       search_range = BtreeSearchRange(start, true, end, true);
+              BtreeUpdateRequest< K, V > ureq(search_range, merge_cb, (BRangeUpdateCBParam< K, V >*)&local_param);
+              range_put(k, v, btree_put_type::APPEND_IF_EXISTS_ELSE_INSERT, nullptr, nullptr, ureq);
+          }
     }
 
-    void get_all_kvs(std::vector< pair< BtreeKey*, BtreeValue* > >* kvs) {
+    void get_all_kvs(std::vector< pair< K, V > >* kvs) {
         std::vector< BtreeNodePtr > leaves;
 
         get_leaf_nodes(&leaves);

@@ -220,7 +220,7 @@ public:
     }
     void get_nth_key(int ind, BtreeKey *outkey, bool copy) const;
     void set_nth_key(uint32_t ind, BtreeKey *key);
-    void get_all_kvs(std::vector< pair< BtreeKey*, BtreeValue* > >* kvs) const;
+    void get_all_kvs(std::vector< pair< K, V > >* kvs) const;
 
 protected:
     uint32_t get_nth_obj_size(int ind) const;
