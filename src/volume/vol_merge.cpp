@@ -150,14 +150,14 @@ public:
 
         --outstanding_ios;
         if (outstanding_ios.load() == 0) {
+
+            LOGINFO("DIFF Values:");
+            vol_info[0]->vol->get_mapping_handle()->diff(vol_info[1]->vol->get_mapping_handle());
             LOGINFO("Vol 0");
             vol_info[0]->vol->print_tree();
             LOGINFO("Vol 1");
             vol_info[1]->vol->print_tree();
-
-            vol_info[0]->vol->get_mapping_handle()->merge(vol_info[1]->vol->get_mapping_handle());
-            LOGINFO("Merged Vol 0");
-            vol_info[0]->vol->print_tree();
+            //vol_info[0]->vol->print_tree();
 
             notify_cmpl();
         }
@@ -349,9 +349,12 @@ public:
         struct lba_nblks_s {
             uint64_t lba;
             uint64_t nblks;
-        } lba_nblks[10] = {{100, 16}, {132, 8}, {200, 8}, {220, 8}, {108, 8}, {120, 8}, {130, 8}, {270, 8}};
-//        } lba_nblks[10] = {{100, 16}, {132, 8}, {200, 8}, {220, 8}, {116, 4}, {120, 8}, {130, 8}, {270, 8}};
-//        } lba_nblks[10] = {{100, 16}, {132, 8}, {200, 8}, {220, 8}, {308, 8}, {320, 8}, {330, 8}, {370, 8}};
+        } lba_nblks[10] = 
+                //{{100, 16}, {132, 8}, {200, 8}, {220, 8}, {116, 8}, {130, 8}, {138, 8}, {142, 8}};
+                /* 100-115, 116-123, 130-131, 132-137, 138-139, 140-141, 142-145, 146-149, 200-207, 220-227 */
+                {{100, 16}, {132, 8}, {200, 8}, {220, 8}, {116, 8}, {120, 8}, {130, 8}, {270, 8}};
+                /* 100-115, 116-119, 120-123, 124-127, 130-131, 132-137, 138-139, 200-207, 220-227, 270-277 */
+                        
 
         write_vol(cur, lba_nblks[widx].lba, lba_nblks[widx].nblks);
         widx++;

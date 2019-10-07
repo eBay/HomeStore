@@ -680,7 +680,157 @@ out:
         return remove_any(BtreeSearchRange(key), nullptr, outval, dependent_req, cookie);
     }
 
-      void merge(Btree* other, match_item_cb_update_t<K,V> merge_cb) {
+    void diff(Btree *other, uint32_t vol_page_size, vector <pair <K, V>> *diff_kv) {
+       std::vector< pair<K,V> > my_kvs, other_kvs;
+
+       get_all_kvs(&my_kvs);
+       other->get_all_kvs(&other_kvs);
+       auto it1 = my_kvs.begin();
+       auto it2 = other_kvs.begin();
+
+       K k1, k2, k;
+       V v1, v2, v;
+
+       if (it1 != my_kvs.end()) {
+           k1 = it1->first;
+           v1 = it1->second;
+       }
+       if (it2 != other_kvs.end()) {
+           k2 = it2->first;
+           v2 = it2->second;
+       }
+
+       while ((it1 != my_kvs.end()) && (it2 != other_kvs.end())) {
+           if (k1.preceeds(&k2)) {
+               /* k1 preceeds k2 - push k1 and continue */
+               diff_kv->emplace_back(make_pair(k1,v1));
+               it1++;
+               if (it1 == my_kvs.end()) {
+                   break;
+               }
+               k1 = it1->first;
+               v1 = it1->second;
+           } else if (k1.succeeds(&k2)) {
+               /* k2 preceeds k1 - push k2 and continue */
+               diff_kv->emplace_back(make_pair(k2, v2));
+               it2++;
+               if (it2 == other_kvs.end()) {
+                   break;
+               }
+               k2 = it2->first;
+               v2 = it2->second;
+           } else {
+               /* k1 and k2 overlaps */
+               uint64_t start, k1_offset = 0, k2_offset = 0;
+               uint64_t nlba = 0, ovr_nlba = 0;
+
+               /* Non-overlapping beginning part */
+               if (k1.start() < k2.start()) {
+                   nlba = k2.start() - k1.start();
+                   k.set(k1.start(), nlba);
+                   v = v1;
+                   v.add_offset(0, nlba, vol_page_size);
+                   diff_kv->emplace_back(make_pair(k, v));
+                   k1_offset += nlba;
+                   start = k1.start() + nlba;
+               } else if (k2.start() < k1.start()) {
+                   nlba = k1.start() - k2.start();
+                   k.set(k2.start(), nlba);
+                   v = v2;
+                   v.add_offset(0, nlba, vol_page_size);
+                   diff_kv->emplace_back(make_pair(k, v));
+                   k2_offset += nlba;
+                   start = k2.start() + nlba;
+               } else {
+                   start = k1.start(); //Same Start - no overlapping part.
+               }
+
+               /* Overlapping part */
+               if (k1.end() < k2.end()) {
+                   ovr_nlba = k1.get_n_lba() - k1_offset;
+               } else {
+                   ovr_nlba = k2.get_n_lba() - k2_offset;
+               }
+
+               k.set(start, ovr_nlba);
+
+               if (v1.is_new(v2)) {
+                   v = v1;
+                   v.add_offset(k1_offset, ovr_nlba, vol_page_size);
+                   k1_offset += ovr_nlba;
+               } else {
+                   v = v2;
+                   v.add_offset(k2_offset, ovr_nlba, vol_page_size);
+                   k2_offset += ovr_nlba;
+               }
+
+               diff_kv->emplace_back(make_pair(k, v));
+
+               /* Non-overlapping tail part */
+               start = start + ovr_nlba;
+               if (k1.end() == k2.end()) {
+                   /* No tail part */
+                   it1++;
+                   if (it1 == my_kvs.end()) {
+                       break;
+                   }
+                   k1 = it1->first;
+                   v1 = it1->second;
+                   it2++;
+                   if (it2 == my_kvs.end()) {
+                       break;
+                   }
+                   k2 = it2->first;
+                   v2 = it2->second;
+               } else if (k1.end() < start) {
+                   /* k2 has tail part */
+                   nlba = k2.end() - start + 1;
+                   k2.set(start, nlba);
+                   v2.add_offset(k2_offset, nlba, vol_page_size);
+
+                   it1++;
+                   if (it1 == my_kvs.end()) {
+                       // Add k2,v2
+                       diff_kv->emplace_back(make_pair(k2, v2));
+                       it2++;
+                       break;
+                   }
+                   k1 = it1->first;
+                   v1 = it1->second;
+               } else {
+                   /* k1 has tail part */
+                   nlba = k1.end() - start + 1;
+                   v = v1;
+                   v.add_offset(k1_offset, nlba, vol_page_size);
+                   k1.set(start, nlba);
+
+                   it2++;
+                   if (it2 == other_kvs.end()) {
+                       diff_kv->emplace_back(make_pair(k1, v));
+                       it1++;
+                       break;
+                   }
+                   k2 = it2->first;
+                   v2 = it2->second;
+
+                   v1 = v;
+               }
+           }
+       }
+
+       while (it1 != my_kvs.end()) {
+           diff_kv->emplace_back(make_pair(it1->first, it1->second));
+           it1++;
+       }
+
+       while (it2 != other_kvs.end()) {
+           diff_kv->emplace_back(make_pair(it2->first, it2->second));
+           it2++;
+       }
+
+    }
+
+    void merge(Btree* other, match_item_cb_update_t<K,V> merge_cb) {
 
           std::vector< pair< K, V > > other_kvs;
 

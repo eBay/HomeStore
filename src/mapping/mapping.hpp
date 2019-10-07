@@ -95,6 +95,24 @@ public:
             return 0; // overlap
     }
 
+    virtual bool preceeds(const BtreeKey *k) const override {
+        MappingKey *o = (MappingKey *)k;
+        if (end() < o->start()) {
+            return true;
+        }
+
+        return false;
+    }
+
+    virtual bool succeeds(const BtreeKey *k) const override {
+        MappingKey *o = (MappingKey*) k;
+        if (o->end() < start()) {
+            return true;
+        }
+
+        return false;
+    }
+
     virtual homeds::blob get_blob() const override { return {(uint8_t*)m_lbaId_ptr, get_fixed_size()}; }
 
     virtual void set_blob(const homeds::blob& b) override {
@@ -321,6 +339,42 @@ public:
             ve.add_offset(lba_offset, nlba, vol_page_size);
             j++;
         }
+    }
+
+    /* true if my value is newer than other */
+    bool is_new(MappingValue other) {
+        /* all mapping value entries have same seqid */
+        vector< ValueEntry > my_v_array, other_v_array;
+
+        get_array().get_all(my_v_array, true);
+        other.get_array().get_all(other_v_array, true);
+
+        /* If other size is 0, my value is always new */
+        if (other_v_array.size() <= 0) {
+            return true;
+        }
+
+        /* If other size is not 0 and my value is 0, my value is old */
+        if (my_v_array.size() <= 0) {
+            return false;
+        }
+
+        /* If other seqId is invalid, my value is new */
+        if (other_v_array[0].get_seqId() == INVALID_SEQ_ID) {
+            return true;
+        }
+
+        /* If my seqId is invalid and other is not, my value is old */
+        if (my_v_array[0].get_seqId() == INVALID_SEQ_ID) {
+            return false;
+        }
+
+        /* If my value is greater than other, my value is new */
+        if (my_v_array[0].compare(&other_v_array[0]) > 0) {
+            return true;
+        }
+
+        return false;
     }
 
     // insert entry to this mapping value, maintaing it sorted by seqId - deep copy
@@ -584,6 +638,14 @@ public:
     void print_node(uint64_t blkid) {
         bnodeid_t bid(blkid);
         m_bt->print_node(bid);
+    }
+
+    void diff(mapping* other) {
+        vector< pair< MappingKey, MappingValue > > diff_kv;
+        m_bt->diff(other->get_btree(), m_vol_page_size, &diff_kv);
+        for (auto it = diff_kv.begin(); it != diff_kv.end(); it++) {
+            LOGINFO("Diff KV = {} {}", it->first, it->second);
+        }
     }
 
     void merge(mapping* other) {

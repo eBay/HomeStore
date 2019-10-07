@@ -440,6 +440,10 @@ public:
     virtual bool is_extent_key() { return true; }
     virtual int compare_end(const BtreeKey* other) const = 0;
     virtual int compare_start(const BtreeKey* other) const override = 0;
+
+    virtual bool preceeds(const BtreeKey *other) const = 0;
+    virtual bool succeeds(const BtreeKey *other) const = 0;
+
     virtual void copy_end_key_blob(const homeds::blob& b) override = 0;
 
     /* we always compare the end key in case of extent */
