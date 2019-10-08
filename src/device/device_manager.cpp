@@ -173,7 +173,6 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info >& devices) {
         m_pdevs[pdev->get_dev_id()] = std::move(pdev);
     }
 
-    HS_ASSERT_CMP(LOGMSG, m_gen_cnt.load(), !=, 0, "Couldn't find any valid device.");
     if (m_gen_cnt.load() == 0) {
         std::stringstream ss;
         ss << "No valid device found. line no:" << __LINE__ << "file name:" << __FILE__;
