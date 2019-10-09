@@ -17,6 +17,7 @@
 #include <main/homestore_header.hpp>
 //#include "iomgr_executor.hpp"
 
+extern bool loadgen_error_happen;
 namespace homeds {
 namespace loadgen {
 
@@ -201,16 +202,14 @@ private:
         auto value = m_key_registry.generate_value(value_pattern);
 
         bool success = m_store->insert(kip->m_key, value);
-        if (success != expected_success) {
-            m_key_registry.print_data_set();
-            error_cb(generator_op_error::store_failed, kip.m_ki, nullptr,
-                     fmt::format("Insert status expected {} got {}", expected_success, success));
+        
+        if (!success) {
+            kip->set_error();
+            loadgen_error_happen = true;
         }
-
-        if (success) {
-            kip->add_hash_code(value->get_hash_code());
-            LOGTRACE("Insert {}", *kip);
-        }
+        
+        kip->add_hash_code(value->get_hash_code());
+        LOGTRACE("Insert {}", *kip);
     }
 
     void _get(KeyPattern pattern, bool exclusive_access, store_error_cb_t error_cb, bool expected_success,
@@ -299,13 +298,10 @@ private:
         auto value = m_key_registry.generate_value(value_pattern);
 
         bool success = m_store->update(kip->m_key, value);
-        if (success != expected_success) {
-            error_cb(generator_op_error::store_failed, kip.m_ki, nullptr,
-                     fmt::format("Update status expected {} got {}", expected_success, success));
-            return;
-        }
+        
         if (!success) {
-            return;
+            kip->set_error();
+            loadgen_error_happen = true;
         }
         kip->add_hash_code(value->get_hash_code());
         LOGTRACE("Update {}", *kip);
@@ -378,7 +374,13 @@ private:
             return;
         }
 
-        m_store->range_update(kips[0]->m_key, start_incl, kips.back()->m_key, end_incl, val_vec_p);
+        bool success = m_store->range_update(kips[0]->m_key, start_incl, kips.back()->m_key, end_incl, val_vec_p);
+        if (!success) {
+            for (uint32_t i = 0; i < kips.size(); ++i) {
+                kips[i]->set_error();
+                loadgen_error_happen = true;
+            }
+        }
     }
 
     void _reset_pattern(KeyPattern key_pattern, int index = 0) { m_key_registry.reset_pattern(key_pattern, index); }
