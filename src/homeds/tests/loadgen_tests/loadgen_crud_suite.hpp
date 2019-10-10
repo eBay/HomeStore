@@ -1,5 +1,6 @@
 #include "homeds/loadgen/loadgen_common.hpp"
 using namespace flip;
+extern bool loadgen_error_happen;
 namespace homeds::loadgen {
 enum SPECIFIC_TEST {
     MAP = 0,
@@ -337,6 +338,10 @@ struct BtreeLoadGen {
     int8_t select_io() {
         try_shift_workload();
         int ran = rand() % 100;
+        if (loadgen_error_happen) {
+            /* only do range query if error happen */
+            return 6;
+        }
         if (ran < p.PC)
             return 1;
         else if (ran < p.PR)

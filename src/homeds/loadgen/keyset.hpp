@@ -28,12 +28,25 @@ struct key_info {
     uint32_t                                              m_mutate_count = 0;
     uint32_t                                              m_read_count = 0;
     int32_t                                               m_slot_num;
+    bool                                                  m_err = false;
     std::unique_ptr< boost::circular_buffer< uint64_t > > m_val_hash_codes;
 
     key_info(const K& key, int32_t slot_num = -1) : m_key(key), m_slot_num(slot_num) {}
 
     key_info(const K& key, int32_t slot_num, uint64_t val_hash_code) : key_info(key, slot_num) {
         add_hash_code(val_hash_code);
+    }
+
+    void set_error() {
+        m_err = true;
+    }
+
+    bool is_error() {
+        return m_err;
+    }
+
+    void clear_error() {
+        m_err = false;
     }
 
     void mutation_started() {
@@ -105,17 +118,19 @@ struct key_info {
         m_val_hash_codes->push_back(hash_code);
     }
 
-    bool validate_hash_code(uint64_t hash_code, bool only_last) const {
+    bool validate_hash_code(uint64_t hash_code, bool only_last) {
         folly::RWSpinLock::ReadHolder guard(const_cast< folly::RWSpinLock& >(m_lock));
-        if (only_last) {
+        if (only_last && !is_error()) {
             return (m_val_hash_codes->back() == hash_code);
         }
         for (auto h : *m_val_hash_codes) {
             if (h == hash_code) {
+                clear_error();
+                m_val_hash_codes->push_back(hash_code);
                 return true;
             }
         }
-
+        
         return false;
     }
 
@@ -481,14 +496,14 @@ private:
             }
         } else if (pattern == UNI_RANDOM) {
             start_slot = rand() % m_keys.size();
-            if (!_can_use_for_get(start_slot)) {
+            if (!_can_use_for_get(start_slot, is_mutate)) {
                 start_slot = _get_next_slot(start_slot, pattern, it, &temprotate);
             }
         }
         auto cur_slot = start_slot;
         while (rotated == false || cur_slot != start_slot) {
             auto next_slot = _get_next_slot(cur_slot, pattern, it, &rotated);
-            if (_can_use_for_get(cur_slot)) {
+            if (_can_use_for_get(cur_slot, is_mutate)) {
                 auto temp = m_keys[cur_slot].get();
                 if (exclusive_access && !temp->mark_exclusive()) {
                     cur_slot = next_slot; // try next as someone else took exclusive lock
@@ -526,7 +541,7 @@ private:
 
         while ((it != m_data_set.end()) && (num_needed > kis.size())) {
             ki = *it;
-            if (_can_use_for_get(ki->m_slot_num)) {
+            if (_can_use_for_get(ki->m_slot_num, is_mutate)) {
                 if (exclusive_access) {
                     if (!ki->mark_exclusive()) { // contiquity broken due to non-exclsuive exceess
                         m_next_read_slots[first_key_pattern].store(ki->m_slot_num, std::memory_order_release);
@@ -600,7 +615,9 @@ private:
         }
     }
 
-    bool _can_use_for_get(int32_t slot) { return (m_alive_slots[slot] && !m_keys[slot]->is_exclusive()); }
+    bool _can_use_for_get(int32_t slot, bool is_mutate) { 
+        return ((m_alive_slots[slot] && !m_keys[slot]->is_exclusive()) && (!is_mutate || !m_keys[slot]->is_error())); 
+    }
 
     void _free_key(key_info< K, V >* ki) {
         assert(m_used_slots[ki->m_slot_num]);
