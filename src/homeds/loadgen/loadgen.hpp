@@ -341,6 +341,7 @@ private:
     retry:
         auto count = m_store->query(kis[0]->m_key, true, kis.back()->m_key, true, kvs);
         if (count == 0) {
+            std::this_thread::sleep_for(std::chrono::seconds(10));
             goto retry;
         }
         uint32_t store_indx = 0;
