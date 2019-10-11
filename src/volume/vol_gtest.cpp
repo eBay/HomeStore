@@ -919,7 +919,7 @@ start:
         boost::uuids::uuid uuid;
         {
             std::unique_lock< std::mutex > lk(m_mutex);
-            if (vol_indx >= (int)vol_info.size()) {
+            if (vol_indx >= (int)vol_info.size() || vol_info[vol_indx]->vol == nullptr) {
                 return false;
             }
             uuid = VolInterface::get_instance()->get_uuid(vol_info[vol_indx]->vol);
