@@ -17,7 +17,6 @@
 #include <main/homestore_header.hpp>
 //#include "iomgr_executor.hpp"
 
-extern bool loadgen_error_happen;
 namespace homeds {
 namespace loadgen {
 
@@ -116,6 +115,14 @@ public:
         });
     }
 
+    void verify_all(uint32_t num_keys_in_range) {
+        this->op_start();
+        m_executor.add([=] {
+            this->_verify_all(num_keys_in_range);
+            this->op_done(nullptr);
+        });
+    }
+
     void get_non_existing(bool expected_success) { get_non_existing(handle_generic_error, expected_success); }
 
     void get_non_existing(store_error_cb_t error_cb = handle_generic_error, bool expected_success = false) {
@@ -203,9 +210,18 @@ private:
 
         bool success = m_store->insert(kip->m_key, value);
         
+        if (success != expected_success) {
+            error_cb(generator_op_error::store_failed, kip.m_ki, nullptr,
+                     fmt::format("Insert status expected {} got {}", expected_success, success));
+        }
+
         if (!success) {
+            if (new_key) {
+                m_key_registry.remove_key(kip); 
+                return;
+            }
             kip->set_error();
-            loadgen_error_happen = true;
+            /* error happen. We move to only verify mode */
         }
         
         kip->add_hash_code(value->get_hash_code());
@@ -299,12 +315,48 @@ private:
 
         bool success = m_store->update(kip->m_key, value);
         
+        if (success != expected_success) {
+            error_cb(generator_op_error::store_failed, kip.m_ki, nullptr,
+                     fmt::format("update status expected {} got {}", expected_success, success));
+        }
+        
         if (!success) {
             kip->set_error();
-            loadgen_error_happen = true;
         }
         kip->add_hash_code(value->get_hash_code());
         LOGTRACE("Update {}", *kip);
+    }
+
+    void _verify_all(uint32_t num_keys_in_range) {
+        static bool reset = false;
+        std::vector< key_info_ptr< K, V > > kis;
+        std::vector< std::pair< K, V > >    kvs;
+        
+        if (!reset) {
+            m_key_registry.reset_pattern(KeyPattern::SEQUENTIAL, 0);
+            reset = true;
+        }
+        kis = m_key_registry.get_consecutive_keys(KeyPattern::SEQUENTIAL, true, false /* is_mutate */, num_keys_in_range);
+
+    retry:
+        auto count = m_store->query(kis[0]->m_key, true, kis.back()->m_key, true, kvs);
+        if (count == 0) {
+            goto retry;
+        }
+        uint32_t store_indx = 0;
+        assert(store_indx <= kvs.size());
+        for (uint32_t i = 0; i < kvs.size(); ++i) {
+            if (kis[store_indx]->m_key != kvs[i].first) {
+                continue;
+            }
+            if (!kis[store_indx]->validate_hash_code(kvs[i].second.get_hash_code(), true)) {
+                // TODO -below log message would not be correct for non-exclusive access as we use last_hash_code
+
+                assert(!"hashcode mismatch");
+                return;
+            }
+            store_indx++;
+        }
     }
 
     void _range_query(KeyPattern pattern, uint32_t num_keys_in_range, bool valid_query, bool exclusive_access,
@@ -378,8 +430,9 @@ private:
         if (!success) {
             for (uint32_t i = 0; i < kips.size(); ++i) {
                 kips[i]->set_error();
-                loadgen_error_happen = true;
             }
+            error_cb(generator_op_error::store_failed, kips[0].m_ki, nullptr,
+                     fmt::format("range update status failed"));
         }
     }
 
