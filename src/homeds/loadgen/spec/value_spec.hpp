@@ -11,8 +11,6 @@ class ValueSpec {
 public:
     static uint64_t  MAX_VALUES;
     virtual uint64_t get_hash_code() = 0;
-    virtual int      compare(ValueSpec& other) = 0;
-    virtual bool     is_consecutive(ValueSpec& k) = 0;
 };
 
 uint64_t ValueSpec::MAX_VALUES = 0;

@@ -47,23 +47,27 @@ public:
         ve.get_blkId().m_id = 0;
     }
 
-    static MapValue gen_value(ValuePattern spec, MapValue* ref_value = nullptr) {
+    static std::shared_ptr< MapValue >  gen_value(ValuePattern spec, MapValue* ref_value = nullptr) {
         std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;
         for (auto i = 0ul; i < CS_ARRAY_STACK_SIZE; i++)
             carr[i] = 1;
-
         switch (spec) {
         case ValuePattern::SEQUENTIAL_VAL: {
             if (ref_value) {
                 MapValue value(*ref_value);
                 value.addToId(1);
                 if (value.start() == MAX_VALUES) {
+                    /* return invalid value */
                     value.reset();
+                    std::shared_ptr< MapValue > temp(nullptr);
+                    return temp;
                 }
-                return value;
+                std::shared_ptr< MapValue > temp = std::make_shared< MapValue >(value);
+                return temp;
             } else {
                 ValueEntry ve(INVALID_SEQ_ID, BlkId(1, 1, 0), 0, 1, carr);
-                return MapValue(ve);
+                std::shared_ptr< MapValue > temp = std::make_shared< MapValue >(ve);
+                return temp;
             }
         }
         case ValuePattern::RANDOM_BYTES: {
@@ -83,12 +87,14 @@ public:
 
             ValueEntry ve(sid, BlkId(sblk, 1, 0), 0, 1, carr);
 
-            return MapValue(ve);
+            std::shared_ptr< MapValue > temp = std::make_shared< MapValue >(ve);
+            return temp;
         }
         default:
             // We do not support other gen spec yet
             assert(0);
-            return MapValue();
+            std::shared_ptr< MapValue > temp = std::make_shared< MapValue >(MapValue());
+            return temp;
         }
     }
 
@@ -109,26 +115,6 @@ public:
     virtual uint64_t get_hash_code() override {
         homeds::blob b = get_blob();
         return util::Hash64((const char*)b.bytes, (size_t)b.size);
-    }
-
-    virtual int compare(ValueSpec& other) override {
-        MapValue* mv = (MapValue*)&other;
-        assert(end() - start() == 0);
-        assert(mv->end() - mv->start() == 0);
-
-        int x = start() - mv->start();
-        if (x == 0)
-            return 0;
-        else
-            return x; // which start is lesser
-    }
-
-    virtual bool is_consecutive(ValueSpec& v) override {
-        MapValue* nv = (MapValue*)&v;
-        if (end() + 1 == nv->start())
-            return true;
-        else
-            return false;
     }
 };
 } // namespace loadgen

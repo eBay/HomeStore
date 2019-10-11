@@ -10,35 +10,37 @@
 #include "homeds/loadgen/spec/value_spec.hpp"
 #include <farmhash.h>
 
+#define CACHE_ENTRY_SIZE 8192
 namespace homeds {
 namespace loadgen {
+class CacheValueBuffer : public CacheBuffer< CacheKey > {
+public:
+    static CacheValueBuffer* make_object() { return homeds::ObjectAllocator< CacheValueBuffer >::make_object(); }
+
+    void free_yourself() { homeds::ObjectAllocator< CacheValueBuffer >::deallocate(this); }
+
+    friend void intrusive_ptr_add_ref(CacheValueBuffer* buf) {
+        intrusive_ptr_add_ref((CacheBuffer< CacheKey >*)buf);
+    }
+
+    friend void intrusive_ptr_release(CacheValueBuffer* buf) {
+        intrusive_ptr_release((CacheBuffer< CacheKey >*)buf);
+    }
+};
+
 class CacheValue : public ValueSpec {
-    uint64_t m_id = 0;
+    
+    boost::intrusive_ptr< CacheValueBuffer > m_buf;
 
 #define INVALID_SEQ_ID UINT64_MAX
 public:
-    void set_id(uint64_t id) { m_id = id; }
 
-    uint64_t get_id() const { return m_id; }
-
-    static CacheValue gen_value(ValuePattern spec, CacheValue* ref_value = nullptr) {
+    static std::shared_ptr< CacheValue > gen_value(ValuePattern spec, CacheValue* ref_value = nullptr) {
         std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;
         for (auto i = 0ul; i < CS_ARRAY_STACK_SIZE; i++)
             carr[i] = 1;
-
         switch (spec) {
-        case ValuePattern::SEQUENTIAL_VAL: {
-            uint64_t newid = 0;
-            if (ref_value) {
-                newid = ref_value->get_id() + 1;
-                if (newid == MAX_VALUES) {
-                    newid = 0;
-                }
-                return CacheValue(newid);
-            } else {
-                return CacheValue(0);
-            }
-        }
+        case ValuePattern::SEQUENTIAL_VAL:
         case ValuePattern::RANDOM_BYTES: {
 
             /* Seed */
@@ -51,52 +53,41 @@ public:
             std::uniform_int_distribution< long long unsigned > distribution(0, MAX_VALUES);
 
             auto sid = distribution(generator);
-
-            return CacheValue(sid);
+            uint8_t* raw_buf = generate_bytes(sid, CACHE_ENTRY_SIZE);
+            CacheValue v = CacheValue(raw_buf, CACHE_ENTRY_SIZE);
+            std::shared_ptr< CacheValue > temp = std::make_shared< CacheValue >(v);
+            return temp;
         }
         default:
             // We do not support other gen spec yet
-            assert(0);
-            return CacheValue();
+            break;
         }
+        assert(0);
+        CacheValue v = CacheValue();
+        std::shared_ptr< CacheValue > temp = std::make_shared< CacheValue >(v);
+        return temp;
     }
 
-    CacheValue() {}
-    CacheValue(uint64_t id) { set_id(id); }
+    CacheValue() {};
+    CacheValue(uint8_t  *data,  size_t size) { 
+        boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector());
+        mvec->set(data, CACHE_ENTRY_SIZE, 0);
 
-    CacheValue& operator=(const CacheValue& other) {
-        uint64_t id = ((CacheValue*)(&other))->get_id();
-        set_id(id);
-        return *this;
+        auto buf = CacheValueBuffer::make_object();
+        buf->set_memvec(mvec, 0, CACHE_ENTRY_SIZE);
+        m_buf = boost::intrusive_ptr< CacheValueBuffer >(buf);
     }
+
+    CacheValue(boost::intrusive_ptr< CacheValueBuffer > buf) : m_buf(buf) {};
 
     virtual uint64_t get_hash_code() override {
-        homeds::blob b = get_blob();
-        return util::Hash64((const char*)b.bytes, (size_t)b.size);
+        auto blob = m_buf->at_offset(0);
+        assert(blob.size == CACHE_ENTRY_SIZE);
+        return util::Hash64((const char*)blob.bytes, (size_t)blob.size);
     }
 
-    virtual int compare(ValueSpec& other) override {
-        CacheValue* mv = (CacheValue*)&other;
-
-        int x = get_id() - mv->get_id();
-        if (x == 0)
-            return 0;
-        else
-            return x; // which start is lesser
-    }
-
-    virtual bool is_consecutive(ValueSpec& v) override {
-        CacheValue* nv = (CacheValue*)&v;
-        if (get_id() + 1 == nv->get_id())
-            return true;
-        else
-            return false;
-    }
-
-    static void* merge_bytes(std::vector< void* > locs) {
-        // creates new bytes array and combines all data from locs
-        return nullptr;
-    }
+    boost::intrusive_ptr< CacheValueBuffer > get_buf() { return m_buf; }
+    void set_buf(boost::intrusive_ptr< CacheValueBuffer > buf) { m_buf = buf; }
 
     static uint8_t* generate_bytes(uint64_t id, uint64_t size) {
         // generates 4k bytes with repeating id at loc
@@ -106,27 +97,6 @@ public:
         return (uint8_t*)raw_buf;
     }
 
-    static void release_bytes(uint64_t* loc, uint64_t size) {
-        // release 4k bytes at loc
-        free(loc);
-    }
-
-    static bool verify_id(uint64_t* loc, uint64_t id, uint64_t size) {
-        // verifies if loc has repeating id
-        for (auto b = 0U; b < size / sizeof(uint64_t); b++)
-            if (loc[b] != id)
-                return false;
-        return true;
-    }
-
-    virtual std::string to_string() const { return std::to_string(get_id()); }
-
-    homeds::blob get_blob() const {
-        homeds::blob b;
-        b.bytes = (uint8_t*)&m_id;
-        b.size = sizeof(uint64_t);
-        return b;
-    }
 };
 } // namespace loadgen
 } // namespace homeds
