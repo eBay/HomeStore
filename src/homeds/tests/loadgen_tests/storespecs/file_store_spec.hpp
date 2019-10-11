@@ -98,9 +98,6 @@ public:
             num_blks = end_offset - start_offset;
         }
         
-        if (num_blks > 1) {
-            LOGINFO("numblks read {}", num_blks);
-        }
         void *buf = nullptr;
         ssize_t size = num_blks * BLK_SIZE;
         auto ret = posix_memalign((void**)&buf, 4096, size);
@@ -133,6 +130,7 @@ public:
 
     virtual bool range_update(MapKey& start_key, bool start_incl, MapKey& end_key, bool end_incl, 
                                 std::vector< std::shared_ptr<BlkValue> > &result) {
+        static int cnt = 0;
         auto start_offset = start_key.start();
         auto end_offset = end_key.start();
         auto num_blks = end_offset - start_offset + 1;

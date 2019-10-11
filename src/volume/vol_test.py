@@ -159,7 +159,7 @@ def vol_io_fail_test():
 def vol_create_del_test():
     print("create del vol test started")
     subprocess.check_call(dirpath + "test_volume \
-               --gtest_filter=IOTest.normal_vol_create_del_test --max_vols=10000", shell=True, stderr=subprocess.STDOUT)
+               --gtest_filter=IOTest.vol_create_del_test --max_volume=10000", shell=True, stderr=subprocess.STDOUT)
     print("create del vol test passed")
 
 def seq_load_start():

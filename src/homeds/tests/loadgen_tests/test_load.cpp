@@ -71,7 +71,7 @@ using namespace homeds::loadgen;
 #define G_FileKV BtreeLoadGen< MapKey, BlkValue, FileStoreSpec, IOMgrExecutor >
 
 static Param parameters;
-bool loadgen_error_happen = false;
+bool loadgen_verify_mode = false;
 
 struct BtreeTest : public testing::Test {
     std::unique_ptr< G_SimpleKV_Mem > loadgen;
