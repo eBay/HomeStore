@@ -136,7 +136,11 @@ cap_attrs HomeBlks::get_vol_capacity(const VolumePtr& vol) {
     cap.initial_total_size = vol->get_size();
     return cap;
 }
-    
+
+vol_interface_req_ptr  HomeBlks::create_vol_hb_req() {
+    return Volume::create_vol_hb_req();
+}
+
 std::error_condition HomeBlks::write(const VolumePtr& vol, uint64_t lba, uint8_t* buf, uint32_t nblks,
                                      const vol_interface_req_ptr& req) {
     assert(m_rdy);

@@ -150,6 +150,7 @@ public:
     ~HomeBlks() {  
         m_thread_id.join();
     }
+    virtual vol_interface_req_ptr  create_vol_hb_req() override;
     virtual std::error_condition write(const VolumePtr& vol, uint64_t lba, uint8_t* buf, uint32_t nblks,
                                        const vol_interface_req_ptr& req) override;
     virtual std::error_condition read(const VolumePtr& vol, uint64_t lba, int nblks,

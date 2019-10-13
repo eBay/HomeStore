@@ -71,18 +71,20 @@ struct _counter_generator {
 struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
     std::vector< buf_info >     read_buf_list;
     sisl::atomic_counter< int > outstanding_io_cnt;
+    sisl::atomic_counter< int > outstanding_data_io_cnt;
     sisl::atomic_counter< int > refcount;
     Clock::time_point           io_start_time;
     std::error_condition        err;
     std::atomic< bool >         is_fail_completed;
     bool                        is_read;
     uint64_t                    request_id;
+    void*                       cookie; // any tag alongs
 
     friend void intrusive_ptr_add_ref(vol_interface_req* req) { req->refcount.increment(1); }
 
     friend void intrusive_ptr_release(vol_interface_req* req) {
         if (req->refcount.decrement_testz()) {
-            delete(req);
+            req->free_yourself();
         }
     }
 
@@ -106,21 +108,24 @@ struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
     std::string to_string() {
         std::stringstream ss;
         ss << "vol_interface_req: request_id=" << request_id << " dir=" << (is_read ? "R" : "W")
-           << " outstanding_io_cnt=" << outstanding_io_cnt.get();
+           << " outstanding_io_cnt=" << outstanding_io_cnt.get()
+           << " outstanding_data_io_cnt=" << outstanding_data_io_cnt.get();
         return ss.str();
     }
 
 public:
-    vol_interface_req() : outstanding_io_cnt(0), refcount(0), is_fail_completed(false)
-    {}
-    virtual ~vol_interface_req() = default;
+    vol_interface_req() : outstanding_io_cnt(0), outstanding_data_io_cnt(0), 
+    refcount(0), is_fail_completed(false) {}
+    ~vol_interface_req() {};
 
     void init() {
         outstanding_io_cnt.set(0);
+        outstanding_data_io_cnt.set(0);
         is_fail_completed.store(false);
         request_id = counter_generator.next_request_id();
         err = no_error;
     }
+    virtual void free_yourself() = 0;
 };
 typedef boost::intrusive_ptr< vol_interface_req > vol_interface_req_ptr;
 
@@ -206,7 +211,7 @@ public:
     std::string to_string() {
         std::stringstream ss;
         ss << "min_virtual_page_size=" << min_virtual_page_size << ",cache_size=" << cache_size <<",disk_init=" << disk_init 
-            << ",is_file=" << is_file << ",flag =" << flag 
+            << ",is_file=" << is_file << ",flag =" << flag  
             << ",number of devices =" << devices.size();
         ss << "device names = ";
         for (uint32_t i = 0; i < devices.size(); ++i) {
@@ -238,8 +243,9 @@ public:
     static VolInterface* get_instance() { return _instance; }
     static void del_instance() { delete _instance;}
 
-    virtual std::error_condition write(const VolumePtr& vol, uint64_t lba, uint8_t* buf, uint32_t nblks,
-                                       const vol_interface_req_ptr& req) = 0;
+    virtual vol_interface_req_ptr  create_vol_hb_req() = 0;
+    virtual std::error_condition   write(const VolumePtr& vol, uint64_t lba, uint8_t* buf, uint32_t nblks,
+                                         const vol_interface_req_ptr& req) = 0;
     virtual std::error_condition read(const VolumePtr& vol, uint64_t lba, int nblks,
                                       const vol_interface_req_ptr& req) = 0;
     virtual std::error_condition sync_read(const VolumePtr& vol, uint64_t lba, int nblks,

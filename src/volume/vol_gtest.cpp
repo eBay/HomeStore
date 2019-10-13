@@ -19,6 +19,7 @@
 #include <utility/thread_buffer.hpp>
 #include <chrono>
 #include <thread>
+#include <boost/filesystem.hpp>
 extern "C" {
 #include <fcntl.h>
 #include <sys/epoll.h>
@@ -85,7 +86,7 @@ public:
 uint64_t req_cnt = 0;
 uint64_t req_free_cnt = 0;
 class IOTest :  public ::testing::Test {
-    struct req : vol_interface_req {
+    struct req {
         ssize_t size;
         off_t offset;
         uint64_t lba;
@@ -106,6 +107,7 @@ class IOTest :  public ::testing::Test {
     };
     struct vol_info_t {
        VolumePtr vol;
+       boost::uuids::uuid uuid;
        int fd;
        std::mutex vol_mutex;
        homeds::Bitset *m_vol_bm;
@@ -285,6 +287,7 @@ public:
         
         std::shared_ptr<vol_info_t> info = std::make_shared<vol_info_t> ();
         info->vol = vol_obj;
+        info->uuid = VolInterface::get_instance()->get_uuid(vol_obj);
         info->fd = open(file_name.c_str(), O_RDWR); 
         info->max_vol_blks = VolInterface::get_instance()->get_vol_capacity(vol_obj).initial_total_size /
                                 VolInterface::get_instance()->get_page_size(vol_obj);
@@ -615,7 +618,7 @@ start:
        
         memcpy(buf1, buf, size);
 
-        boost::intrusive_ptr<req> req(new struct req());
+        req* req = new struct req();
         req->lba = lba;
         req->nblks = nblks;
         req->size = size;
@@ -626,10 +629,12 @@ start:
         req->cur_vol = cur;
         
         ++write_cnt;
-        auto ret_io = VolInterface::get_instance()->write(vol, lba, buf, nblks, req);
+        auto vreq = VolInterface::get_instance()->create_vol_hb_req();
+        vreq->cookie = req;
+        auto ret_io = VolInterface::get_instance()->write(vol, lba, buf, nblks, vreq);
         if (ret_io != no_error) {
             assert(ret_io == std::errc::no_such_device || expect_io_error);
-            process_completions(req);
+            process_completions(vreq);
         }
         LOGDEBUG("Wrote {} {} ",lba,nblks);
     }
@@ -703,7 +708,7 @@ start:
             assert(0);
         }
         assert(buf != nullptr);
-        boost::intrusive_ptr<req> req(new struct req());
+        req* req = new struct req();
         req->lba = lba;
         req->nblks = nblks;
         req->fd = vol_info[cur]->fd;
@@ -713,16 +718,18 @@ start:
         req->buf = buf;
         req->cur_vol = cur;
         read_cnt++;
-        auto ret_io = VolInterface::get_instance()->read(vol, lba, nblks, req);
+        auto vreq = VolInterface::get_instance()->create_vol_hb_req();
+        vreq->cookie = req;
+        auto ret_io = VolInterface::get_instance()->read(vol, lba, nblks, vreq);
         if (ret_io != no_error) {
             assert(ret_io == std::errc::no_such_device || expect_io_error);
-            process_completions(req);
+            process_completions(vreq);
         }
     }
 
-    bool verify(const VolumePtr& vol, boost::intrusive_ptr<req> req, bool can_panic) {
+    bool verify(const VolumePtr& vol, req* request, const vol_interface_req_ptr& vol_req, bool can_panic) {
         int64_t tot_size_read = 0;
-        for (auto &info : req->read_buf_list) {
+        for (auto &info : vol_req->read_buf_list) {
             auto offset = info.offset;
             auto size = info.size;
             auto buf = info.buf;
@@ -737,16 +744,16 @@ start:
                 size_read = VOL_PAGE_SIZE;
                 int j = 0;
                 if (verify_data) {
-                    j = memcmp((void *) b.bytes, (uint8_t *)((uint64_t)req->buf + tot_size_read), size_read);
+                    j = memcmp((void *) b.bytes, (uint8_t *)((uint64_t)request->buf + tot_size_read), size_read);
                     match_cnt++;
                 }
 
                 if (j != 0 && (!verify_data || !verify_done)) {
                     /* we will only verify the header. We write lba number in the header */
-                    j = memcmp((void *) b.bytes, (uint8_t *)((uint64_t)req->buf + tot_size_read), sizeof (uint64_t));
+                    j = memcmp((void *) b.bytes, (uint8_t *)((uint64_t)request->buf + tot_size_read), sizeof (uint64_t));
                     if (!j) {
                         /* copy the data */
-                        auto ret = pwrite(vol_info[req->cur_vol]->fd, b.bytes, b.size, tot_size_read + req->offset);
+                        auto ret = pwrite(vol_info[request->cur_vol]->fd, b.bytes, b.size, tot_size_read + request->offset);
                         assert(ret == b.size);
                     }
                     hdr_only_match_cnt++;
@@ -758,7 +765,7 @@ start:
 #ifndef NDEBUG
                         VolInterface::get_instance()->print_tree(vol);
 #endif
-                        LOGINFO("lba {} {}", req->lba, req->nblks);
+                        LOGINFO("lba {} {}", request->lba, request->nblks);
                         std::this_thread::sleep_for(std::chrono::seconds(5)); 
                         sleep(30);
                         assert(0);
@@ -771,7 +778,7 @@ start:
                 tot_size_read += size_read;
             }
         }
-        assert(tot_size_read == req->size);
+        assert(tot_size_read == request->size);
         return true;
     }
 
@@ -807,14 +814,14 @@ start:
 
     void process_completions(const vol_interface_req_ptr& vol_req) {
         /* raise an event */
-        boost::intrusive_ptr<req> req = boost::static_pointer_cast<struct req>(vol_req);
+        req* request = (req*)vol_req->cookie;
         static uint64_t print_time = 30;
         uint64_t temp = 1;
         auto elapsed_time = get_elapsed_time(print_startTime);
 
         /* it validates that we don't have two completions for the same requests */
-        assert(!req->done);
-        req->done = true;
+        assert(!request->done);
+        request->done = true;
         
         if (elapsed_time > print_time) {
             LOGINFO("write ios cmpled {}", write_cnt.load());
@@ -822,37 +829,39 @@ start:
             print_startTime = Clock::now();
         }
         
-        assert(req->err == no_error || expect_io_error || req->err == std::errc::no_such_device);
+        assert(vol_req->err == no_error || expect_io_error || vol_req->err == std::errc::no_such_device);
         LOGTRACE("IO DONE, req_id={}, outstanding_ios={}", vol_req->request_id, outstanding_ios.load());
-        if (!req->is_read && req->err == no_error) {
+        if (!vol_req->is_read && vol_req->err == no_error) {
             /* write to a file */
-            auto ret = pwrite(req->fd, req->buf, req->size, req->offset);
-            assert(ret == req->size);
+            auto ret = pwrite(request->fd, request->buf, request->size, request->offset);
+            assert(ret == request->size);
         }
 
         bool verify_io = false;
         
-        if (!req->is_read && req->err == no_error && read_verify) {
-            (void)VolInterface::get_instance()->sync_read(vol_info[req->cur_vol]->vol, req->lba, req->nblks, req);
-            LOGTRACE("IO DONE, req_id={}, outstanding_ios={}", req->request_id, outstanding_ios.load());
+        if (!vol_req->is_read && vol_req->err == no_error && read_verify) {
+            (void)VolInterface::get_instance()->sync_read(vol_info[request->cur_vol]->vol, request->lba, request->nblks, vol_req);
+            LOGTRACE("IO DONE, req_id={}, outstanding_ios={}", vol_req->request_id, outstanding_ios.load());
             verify_io = true;
-        } else if ((req->is_read && req->err == no_error)) {
+        } else if ((vol_req->is_read && vol_req->err == no_error)) {
             verify_io = true;
         }
 
         if (verify_io && (verify_hdr || verify_data)) {
             /* read from the file and verify it */
-            auto ret = pread(req->fd, req->buf, req->size, req->offset);
-            if (ret != req->size) {
+            auto ret = pread(request->fd, request->buf, request->size, request->offset);
+            if (ret != request->size) {
                 assert(0);
             }
-            verify(vol_info[req->cur_vol]->vol, req, true);
+            verify(vol_info[request->cur_vol]->vol, request, vol_req,true);
         }
        
         {
-            std::unique_lock< std::mutex > lk(vol_info[req->cur_vol]->vol_mutex);
-            vol_info[req->cur_vol]->m_vol_bm->reset_bits(req->lba, req->nblks);
+            std::unique_lock< std::mutex > lk(vol_info[request->cur_vol]->vol_mutex);
+            vol_info[request->cur_vol]->m_vol_bm->reset_bits(request->lba, request->nblks);
         }
+        
+        delete request; // no longer needed
         
         outstanding_ios--;
         if (move_verify_to_done && !verify_done) {
@@ -923,9 +932,6 @@ start:
                 return false;
             }
             uuid = VolInterface::get_instance()->get_uuid(vol_info[vol_indx]->vol);
-#ifndef NDEBUG
-            VolInterface::get_instance()->verify_pending_blks(vol_info[vol_indx]->vol);
-#endif
             vol_info[vol_indx]->vol = nullptr;
         }
         VolInterface::get_instance()->remove_volume(uuid);
@@ -956,12 +962,22 @@ start:
         bool force = false;
         // release the ref_count to volumes;
         if (!timeout) {
+            remove_journal_files();
             vol_info.clear();
             force = true;
         }
         VolInterface::get_instance()->shutdown(std::bind(&IOTest::shutdown_callback, this, std::placeholders::_1), force);
     }
 
+    void remove_journal_files() {
+        //Remove journal folders
+        for ( auto i = 0u; i < vol_info.size(); i++) {
+            std::string name = boost::lexical_cast<std::string>(vol_info[i]->uuid);
+            boost::filesystem::remove_all(name);
+            LOGINFO("Removed journal dir: {}",  name);
+            remove(name.c_str());
+        }
+    }
     void shutdown() {
         // release the ref_count to volumes;
        
@@ -979,6 +995,7 @@ start:
 
         {
             std::unique_lock< std::mutex > lk(m_mutex);
+            remove_journal_files();
             vol_info.clear();
         }
         LOGINFO("shutting homestore");
