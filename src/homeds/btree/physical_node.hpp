@@ -77,9 +77,9 @@ struct verify_result{
     }
 };
 #endif
-#define physical_node_t  PhysicalNode<VNode, K, V, NodeSize>
+#define physical_node_t  PhysicalNode<VNode, K, V>
 
-template <typename VNode, typename K, typename V, size_t NodeSize>
+template <typename VNode, typename K, typename V>
 class PhysicalNode {
 protected:
     persistent_hdr_t m_pers_header;

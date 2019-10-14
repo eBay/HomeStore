@@ -81,8 +81,6 @@ HomeBlks::HomeBlks(const init_params& cfg) :
     assert(VOL_SB_SIZE >= sizeof(vol_ondisk_sb));
     assert(VOL_SB_SIZE >= sizeof(vol_config_sb));
 
-    assert(HomeStoreConfig::atomic_phys_page_size >= HomeStoreConfig::min_page_size);
-
     m_out_params.max_io_size = VOL_MAX_IO_SIZE;
     int ret = posix_memalign((void**)&m_cfg_sb, HomeStoreConfig::align_size, VOL_SB_SIZE);
     assert(!ret);
@@ -106,9 +104,15 @@ void HomeBlks::populate_disk_attrs() {
         HomeStoreConfig::atomic_phys_page_size = m_cfg.disk_attr->atomic_page_size;
     } else {
         /* We should take these params from the config file or from the disks direectly */
+#ifndef NDEBUG
+        HomeStoreConfig::phys_page_size = 4096;
+        HomeStoreConfig::align_size = 4096;
+        HomeStoreConfig::atomic_phys_page_size = 512;
+#else
         HomeStoreConfig::phys_page_size = 4096;
         HomeStoreConfig::align_size = 4096;
         HomeStoreConfig::atomic_phys_page_size = 4096;
+#endif
     }
     LOGINFO("atomic_phys_page size is set to {}", HomeStoreConfig::atomic_phys_page_size);
     LOGINFO("align size is set to {}", HomeStoreConfig::align_size);

@@ -65,7 +65,7 @@ uint32_t expected_vol_state = 0;
 uint32_t verify_only = 0;
 uint32_t is_abort = 0;
 uint32_t flip_set = 0;
-#define VOL_PAGE_SIZE 4096
+#define VOL_PAGE_SIZE 512
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 /**************** Common class created for all tests ***************/

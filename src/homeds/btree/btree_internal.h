@@ -735,6 +735,7 @@ private:
     uint32_t m_max_value_size;
 
     uint32_t m_node_area_size;
+    uint32_t m_node_size;
 
     uint8_t m_ideal_fill_pct;
     uint8_t m_split_pct;
@@ -742,14 +743,16 @@ private:
     std::string m_btree_name; // Unique name for the btree
 
 public:
-    BtreeConfig(const char* btree_name = nullptr) {
+    BtreeConfig(uint32_t node_size, const char* btree_name = nullptr) {
         m_max_objs = 0;
         m_max_key_size = m_max_value_size = 0;
         m_ideal_fill_pct = 90;
         m_split_pct = 50;
         m_btree_name = btree_name ? btree_name : std::string("btree");
+        m_node_size = node_size;
     }
 
+    uint32_t get_node_size() { return m_node_size; };
     uint32_t get_max_key_size() const { return m_max_key_size; }
     void     set_max_key_size(uint32_t max_key_size) { m_max_key_size = max_key_size; }
 

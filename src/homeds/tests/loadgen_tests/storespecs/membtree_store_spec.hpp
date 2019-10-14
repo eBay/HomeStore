@@ -37,7 +37,7 @@ static constexpr btree_node_type find_interior_node_type() {
 #define TOTAL_ENTRIES 1000000
 
 #define LoadGenMemBtree                                                                                                \
-    Btree< btree_store_type::MEM_BTREE, K, V, find_interior_node_type< K >(), find_leaf_node_type< K, V >(), NodeSize >
+    Btree< btree_store_type::MEM_BTREE, K, V, find_interior_node_type< K >(), find_leaf_node_type< K, V >() >
 
 template < typename K, typename V, size_t NodeSize = 8192 >
 class MemBtreeStoreSpec : public StoreSpec< K, V > {
@@ -45,7 +45,7 @@ public:
     MemBtreeStoreSpec() {}
 
     virtual void init_store(homeds::loadgen::Param& parameters) override {
-        BtreeConfig btree_cfg;
+        BtreeConfig btree_cfg(4096);
         btree_cfg.set_max_objs(TOTAL_ENTRIES);
         btree_cfg.set_max_key_size(K::get_max_size());
         btree_cfg.set_max_value_size(V::get_max_size());
