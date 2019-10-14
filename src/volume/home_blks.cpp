@@ -104,15 +104,9 @@ void HomeBlks::populate_disk_attrs() {
         HomeStoreConfig::atomic_phys_page_size = m_cfg.disk_attr->atomic_page_size;
     } else {
         /* We should take these params from the config file or from the disks direectly */
-#ifndef NDEBUG
         HomeStoreConfig::phys_page_size = 4096;
         HomeStoreConfig::align_size = 4096;
-        HomeStoreConfig::atomic_phys_page_size = 512;
-#else
-        HomeStoreConfig::phys_page_size = 4096;
-        HomeStoreConfig::align_size = 4096;
-        HomeStoreConfig::atomic_phys_page_size = 512;
-#endif
+        HomeStoreConfig::atomic_phys_page_size = 4096;
     }
     LOGINFO("atomic_phys_page size is set to {}", HomeStoreConfig::atomic_phys_page_size);
     LOGINFO("align size is set to {}", HomeStoreConfig::align_size);
