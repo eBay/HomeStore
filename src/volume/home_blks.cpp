@@ -111,7 +111,7 @@ void HomeBlks::populate_disk_attrs() {
 #else
         HomeStoreConfig::phys_page_size = 4096;
         HomeStoreConfig::align_size = 4096;
-        HomeStoreConfig::atomic_phys_page_size = 4096;
+        HomeStoreConfig::atomic_phys_page_size = 512;
 #endif
     }
     LOGINFO("atomic_phys_page size is set to {}", HomeStoreConfig::atomic_phys_page_size);
