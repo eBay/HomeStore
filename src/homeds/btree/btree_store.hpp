@@ -12,17 +12,17 @@
 namespace homeds {
 namespace btree {
 
-#define btree_store_t BtreeStore< BtreeStoreType, K, V, InteriorNodeType, LeafNodeType, NodeSize, btree_req_type >
+#define btree_store_t BtreeStore< BtreeStoreType, K, V, InteriorNodeType, LeafNodeType, btree_req_type >
 
 template < btree_store_type BtreeStoreType, typename K, typename V, btree_node_type InteriorNodeType,
-           btree_node_type LeafNodeType, size_t NodeSize, typename btree_req_type >
+           btree_node_type LeafNodeType, typename btree_req_type >
 class BtreeNode;
 
-#define btree_node_t BtreeNode< BtreeStoreType, K, V, InteriorNodeType, LeafNodeType, NodeSize, btree_req_type >
+#define btree_node_t BtreeNode< BtreeStoreType, K, V, InteriorNodeType, LeafNodeType, btree_req_type >
 #define BtreeNodePtr boost::intrusive_ptr< btree_node_t >
 
 template < btree_store_type BtreeStoreType, typename K, typename V, btree_node_type InteriorNodeType,
-           btree_node_type LeafNodeType, size_t NodeSize, typename btree_req_type >
+           btree_node_type LeafNodeType, typename btree_req_type >
 class BtreeStore {
     typedef std::function< void(boost::intrusive_ptr< btree_req_type > cookie, btree_status_t status) >
         comp_callback;

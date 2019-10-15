@@ -20,17 +20,17 @@ using namespace boost;
 
 namespace homeds { namespace btree {
 
-#define SimpleNode              VariantNode<btree_node_type::SIMPLE, K, V, NodeSize>
+#define SimpleNode              VariantNode<btree_node_type::SIMPLE, K, V>
 
-template< typename K, typename V, size_t NodeSize >
-class SimpleNode : public PhysicalNode<SimpleNode, K, V, NodeSize> {
+template< typename K, typename V >
+class SimpleNode : public PhysicalNode<SimpleNode, K, V> {
 public:
     SimpleNode(bnodeid_t id, bool init,const BtreeConfig &cfg) :
-            PhysicalNode<SimpleNode, K, V, NodeSize>(id, init) {
+            PhysicalNode<SimpleNode, K, V>(id, init) {
         this->set_node_type(btree_node_type::SIMPLE);
     }
     SimpleNode(bnodeid_t* id, bool init,const BtreeConfig &cfg) :
-            PhysicalNode<SimpleNode, K, V, NodeSize>(id, init) {
+            PhysicalNode<SimpleNode, K, V>(id, init) {
         this->set_node_type(btree_node_type::SIMPLE);
     }
 public:

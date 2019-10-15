@@ -468,7 +468,7 @@ public:
             m_pending_read_blk_cb(pending_read_cb),
             m_comp_cb(comp_cb),
             m_vol_page_size(page_size) {
-        homeds::btree::BtreeConfig btree_cfg(unique_name.c_str());
+        homeds::btree::BtreeConfig btree_cfg(HomeStoreConfig::atomic_phys_page_size, unique_name.c_str());
         btree_cfg.set_max_objs(volsize / page_size);
         btree_cfg.set_max_key_size(sizeof(uint32_t));
         btree_cfg.set_max_value_size(page_size);
@@ -489,7 +489,7 @@ public:
             m_pending_read_blk_cb(pending_read_cb),
             m_comp_cb(comp_cb),
             m_vol_page_size(page_size) {
-        homeds::btree::BtreeConfig btree_cfg(unique_name.c_str());
+        homeds::btree::BtreeConfig btree_cfg(HomeStoreConfig::atomic_phys_page_size, unique_name.c_str());
         btree_cfg.set_max_objs(volsize / page_size);
         btree_cfg.set_max_key_size(sizeof(uint32_t));
         btree_cfg.set_max_value_size(page_size);

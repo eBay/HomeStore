@@ -14,7 +14,6 @@ namespace homeds { namespace btree {
             typename V,                       \
             btree_node_type InteriorNodeType, \
             btree_node_type LeafNodeType,     \
-            size_t NodeSize,                  \
             typename btree_req_type >         \
     ret btree_node_t::
 
@@ -23,7 +22,7 @@ template<btree_store_type BtreeStoreType,
             typename V,
             btree_node_type InteriorNodeType,
             btree_node_type LeafNodeType,
-            size_t NodeSize, typename btree_req_type >
+            typename btree_req_type >
 btree_node_t::BtreeNode() : m_common_header() {
 }
 

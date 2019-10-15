@@ -26,9 +26,9 @@
 namespace homeds {
 namespace btree {
 
-#define SSDBtreeNode BtreeNode< btree_store_type::SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize, homestore::writeback_req >
-#define SSDBtreeStore BtreeStore< btree_store_type::SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, NodeSize, homestore::writeback_req >
-#define btree_buffer_t BtreeBuffer< K, V, InteriorNodeType, LeafNodeType, NodeSize >
+#define SSDBtreeNode BtreeNode< btree_store_type::SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, homestore::writeback_req >
+#define SSDBtreeStore BtreeStore< btree_store_type::SSD_BTREE, K, V, InteriorNodeType, LeafNodeType, homestore::writeback_req >
+#define btree_buffer_t BtreeBuffer< K, V, InteriorNodeType, LeafNodeType >
 #define ssdbtree_multinode_req_ptr boost::intrusive_ptr < btree_multinode_req < homestore::writeback_req > > 
 
 /* The class BtreeBuffer represents the buffer type that is used to interact with the BlkStore. It will have
@@ -49,7 +49,7 @@ namespace btree {
  *   * Reader Write Lock                                *
  *   ****************************************************
  */
-template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType, size_t NodeSize >
+template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
 class BtreeBuffer : public homestore::WriteBackCacheBuffer< homestore::BlkId > {
     /* error is set if any write fails. Read from the same buffer keep on failing
      * until it is not evicted from the cache.
@@ -95,7 +95,7 @@ struct btree_device_info {
     bool                                  is_async;
 };
 
-template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType, size_t NodeSize >
+template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
 class SSDBtreeStore {
     typedef std::function< void(btree_status_t status, ssdbtree_multinode_req_ptr multinode_req) > 
                             comp_callback;
@@ -116,7 +116,7 @@ class SSDBtreeStore {
     };
 
 public:
-    using HeaderType = BtreeBuffer< K, V, InteriorNodeType, LeafNodeType, NodeSize >;
+    using HeaderType = BtreeBuffer< K, V, InteriorNodeType, LeafNodeType >;
 
     static std::unique_ptr< SSDBtreeStore > init_btree(BtreeConfig& cfg, void* btree_specific_context,
                                                        comp_callback comp_cb, bool is_in_recovery = false) {
@@ -124,14 +124,14 @@ public:
             new SSDBtreeStore(cfg, btree_specific_context, comp_cb, is_in_recovery));
     }
 
-    BtreeStore(BtreeConfig& cfg, void* btree_specific_context, comp_callback comp_cbt, bool is_in_recovery) {
+    BtreeStore(BtreeConfig& cfg, void* btree_specific_context, comp_callback comp_cbt, bool is_in_recovery) : m_cfg(cfg) {
         m_comp_cb = comp_cbt;
         DEBUG_ASSERT((m_comp_cb != nullptr), "Expected m_comp_cb to valid");
         assert(comp_cbt);
         assert(m_comp_cb);
         m_is_in_recovery = is_in_recovery;
-        m_cfg = cfg;
-        m_cfg.set_node_area_size(NodeSize - sizeof(LeafPhysicalNode));
+        m_node_size = cfg.get_node_size();
+        m_cfg.set_node_area_size(m_node_size - sizeof(LeafPhysicalNode));
 
         auto bt_dev_info = (btree_device_info*)btree_specific_context;
 
@@ -143,7 +143,7 @@ public:
 
             m_blkstore = new homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy, btree_buffer_t >(
                 bt_dev_info->dev_mgr, m_cache, 0, homestore::BlkStoreCacheType::RD_MODIFY_WRITEBACK_CACHE, 0,
-                nullptr, bt_dev_info->size, HomeStoreConfig::atomic_phys_page_size, "Btree",
+                nullptr, bt_dev_info->size, m_node_size, "Btree",
                 (std::bind(&SSDBtreeStore::process_completions, std::placeholders::_1)));
         } else {
             m_blkstore =
@@ -176,11 +176,10 @@ public:
     static uint8_t* get_physical(const SSDBtreeNode* bn) {
         btree_buffer_t* bbuf = (btree_buffer_t*)(bn);
         homeds::blob    b = bbuf->at_offset(0);
-        assert(b.size == NodeSize);
         return b.bytes;
     }
 
-    static uint32_t get_node_area_size(SSDBtreeStore* store) { return NodeSize - sizeof(LeafPhysicalNode); }
+    static uint32_t get_node_area_size(SSDBtreeStore* store) { return store->get_node_size() - sizeof(LeafPhysicalNode); }
 
     static boost::intrusive_ptr< SSDBtreeNode >
     alloc_node(SSDBtreeStore* store, bool is_leaf,
@@ -190,7 +189,7 @@ public:
         is_new_allocation = true;
         homestore::blk_alloc_hints hints;
         homestore::BlkId           blkid;
-        auto safe_buf = store->m_blkstore->alloc_blk_cached(1 * HomeStoreConfig::atomic_phys_page_size, hints, &blkid);
+        auto safe_buf = store->m_blkstore->alloc_blk_cached(1 * store->get_node_size(), hints, &blkid);
         if (safe_buf == nullptr) {
             LOGERROR("btree alloc failed. No space avail");
             return nullptr;
@@ -201,13 +200,13 @@ public:
 #endif
         // Access the physical node buffer and initialize it
         homeds::blob b = safe_buf->at_offset(0);
-        assert(b.size == NodeSize);
+        assert(b.size == store->get_node_size());
         if (is_leaf) {
             bnodeid_t bid(blkid.to_integer(), 0);
-            auto      n = new (b.bytes) VariantNode< LeafNodeType, K, V, NodeSize >(&bid, true, store->m_cfg);
+            auto      n = new (b.bytes) VariantNode< LeafNodeType, K, V >(&bid, true, store->m_cfg);
         } else {
             bnodeid_t bid(blkid.to_integer(), 0);
-            auto      n = new (b.bytes) VariantNode< InteriorNodeType, K, V, NodeSize >(&bid, true, store->m_cfg);
+            auto      n = new (b.bytes) VariantNode< InteriorNodeType, K, V >(&bid, true, store->m_cfg);
         }
         boost::intrusive_ptr< SSDBtreeNode > new_node = boost::static_pointer_cast< SSDBtreeNode >(safe_buf);
 
@@ -218,6 +217,7 @@ public:
         return new_node;
     }
 
+    uint32_t get_node_size() { return m_node_size; };
     static boost::intrusive_ptr< SSDBtreeNode > read_node(SSDBtreeStore* store, bnodeid_t id) {
         // Read the data from the block store
         try {
@@ -234,7 +234,7 @@ public:
             }
             req->isSyncCall = true;
             auto safe_buf = store->m_blkstore->read(
-                    blkid, 0, NodeSize, boost::static_pointer_cast< homestore::blkstore_req< btree_buffer_t > >(req));
+                    blkid, 0, store->get_node_size(), boost::static_pointer_cast< homestore::blkstore_req< btree_buffer_t > >(req));
 
 #ifndef NDEBUG
             if (store->m_is_in_recovery) {
@@ -411,6 +411,7 @@ private:
 
     BtreeConfig m_cfg;
     bool        m_is_in_recovery;
+    uint32_t    m_node_size;
 };
 } // namespace btree
 } // namespace homeds

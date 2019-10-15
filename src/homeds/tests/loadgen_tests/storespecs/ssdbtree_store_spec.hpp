@@ -19,7 +19,7 @@ namespace loadgen {
 //btree_node_type::VAR_VALUE, NodeSize, writeback_req>
 
 #define LoadGenSSDBtree                                                                                                \
-    Btree< btree_store_type::SSD_BTREE, K, V, find_interior_node_type< K >(), find_leaf_node_type< K, V >(), NodeSize, \
+    Btree< btree_store_type::SSD_BTREE, K, V, find_interior_node_type< K >(), find_leaf_node_type< K, V >(), \
            writeback_req >
 
 struct ssd_loadgen_req;
@@ -52,7 +52,7 @@ public:
     SSDBtreeStoreSpec() {}
 
     virtual void init_store(homeds::loadgen::Param& parameters) override {
-        homeds::btree::BtreeConfig btree_cfg;
+        homeds::btree::BtreeConfig btree_cfg(4096);
         btree_cfg.set_max_objs(TOTAL_ENTRIES);
         btree_cfg.set_max_key_size(K::get_max_size());
         btree_cfg.set_max_value_size(V::get_max_size());

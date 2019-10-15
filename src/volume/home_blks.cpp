@@ -81,8 +81,6 @@ HomeBlks::HomeBlks(const init_params& cfg) :
     assert(VOL_SB_SIZE >= sizeof(vol_ondisk_sb));
     assert(VOL_SB_SIZE >= sizeof(vol_config_sb));
 
-    assert(HomeStoreConfig::atomic_phys_page_size >= HomeStoreConfig::min_page_size);
-
     m_out_params.max_io_size = VOL_MAX_IO_SIZE;
     int ret = posix_memalign((void**)&m_cfg_sb, HomeStoreConfig::align_size, VOL_SB_SIZE);
     assert(!ret);
