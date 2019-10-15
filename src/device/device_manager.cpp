@@ -13,29 +13,25 @@
 
 SDS_LOGGING_DECL(device, DEVICE_MANAGER)
 
-using namespace homeio;
+using namespace iomgr;
 namespace homestore {
 
-DeviceManager::DeviceManager(NewVDevCallback vcb,
-                             uint32_t const vdev_metadata_size,
-                             std::shared_ptr<iomgr::ioMgr> iomgr,
-                             homeio::comp_callback cb, bool is_file, boost::uuids::uuid system_uuid, 
-                             vdev_error_callback vdev_error_cb) :
-        m_comp_cb(cb),
+DeviceManager::DeviceManager(NewVDevCallback vcb, uint32_t const vdev_metadata_size,
+                             const iomgr::io_interface_comp_cb_t& io_comp_cb, bool is_file,
+                             boost::uuids::uuid system_uuid, const vdev_error_callback& vdev_error_cb) :
         m_new_vdev_cb(vcb),
-        m_iomgr(iomgr),
         m_gen_cnt(0),
         m_is_file(is_file),
         m_system_uuid(system_uuid),
         m_vdev_error_cb(vdev_error_cb) {
 
-    switch(HomeStoreConfig::open_flag) {
+    switch (HomeStoreConfig::open_flag) {
 #ifndef NDEBUG
-        case BUFFERED_IO : m_open_flags = O_RDWR; break;
+    case BUFFERED_IO: m_open_flags = O_RDWR; break;
 #endif
-        case READ_ONLY   : m_open_flags = O_RDONLY; break;
-        case DIRECT_IO   :
-        default          : m_open_flags = O_RDWR | O_DIRECT;
+    case READ_ONLY: m_open_flags = O_RDONLY; break;
+    case DIRECT_IO:
+    default: m_open_flags = O_RDWR | O_DIRECT;
     }
     m_last_vdevid = INVALID_VDEV_ID;
     m_vdev_metadata_size = vdev_metadata_size;
@@ -52,6 +48,9 @@ DeviceManager::DeviceManager(NewVDevCallback vcb,
     m_chunk_hdr = &m_dm_info->chunk_hdr;
     m_vdev_hdr = &m_dm_info->vdev_hdr;
     m_scan_cmpltd = false;
+
+    // Attach completions to the drive end point this DeviceManager is going to use
+    iomanager.default_drive_interface()->attach_completion_cb(io_comp_cb);
 
     HS_ASSERT_CMP(LOGMSG, m_vdev_metadata_size, <=, MAX_CONTEXT_DATA_SZ);
 }
@@ -96,8 +95,8 @@ void DeviceManager::init_devices(std::vector< dev_info >& devices) {
     for (auto& d : devices) {
         bool                           is_inited;
         std::unique_ptr< PhysicalDev > pdev =
-            std::make_unique< PhysicalDev >(this, d.dev_names, m_open_flags, m_iomgr, m_comp_cb, m_system_uuid,
-                                            m_pdev_id++, max_dev_offset, m_is_file, true, m_dm_info_size, &is_inited);
+            std::make_unique< PhysicalDev >(this, d.dev_names, m_open_flags, m_system_uuid, m_pdev_id++, max_dev_offset,
+                                            m_is_file, true, m_dm_info_size, &is_inited);
 
         max_dev_offset += pdev->get_size();
         if (!pdev_size) {
@@ -144,8 +143,8 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info >& devices) {
     for (auto& d : devices) {
         bool                           is_inited;
         std::unique_ptr< PhysicalDev > pdev =
-            std::make_unique< PhysicalDev >(this, d.dev_names, m_open_flags, m_iomgr, m_comp_cb, m_system_uuid,
-                                            INVALID_DEV_ID, 0, m_is_file, false, m_dm_info_size, &is_inited);
+            std::make_unique< PhysicalDev >(this, d.dev_names, m_open_flags, m_system_uuid, INVALID_DEV_ID, 0,
+                                            m_is_file, false, m_dm_info_size, &is_inited);
         if (!is_inited) {
             // Super block is not present, possibly a new device, will format the device later
             HS_LOG(CRITICAL, device,
@@ -165,7 +164,7 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info >& devices) {
         if (m_gen_cnt.load() < pdev->sb_gen_cnt()) {
             m_gen_cnt = pdev->sb_gen_cnt();
             device_id = pdev->get_dev_id();
-            rewrite   = HomeStoreConfig::is_read_only ? false : true;
+            rewrite = HomeStoreConfig::is_read_only ? false : true;
         }
 
         HS_ASSERT_NULL(LOGMSG, m_pdevs[pdev->get_dev_id()].get());
@@ -218,8 +217,8 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info >& devices) {
              * larger number of chunks, we should optimize it.
              */
             for (uint32_t i = 0; i < HomeStoreConfig::max_chunks; ++i) {
-                if (m_chunk_info[i].pdev_id == dev_id && 
-                    m_chunk_info[i].slot_allocated && m_chunk_info[i].vdev_id != INVALID_VDEV_ID) {
+                if (m_chunk_info[i].pdev_id == dev_id && m_chunk_info[i].slot_allocated &&
+                    m_chunk_info[i].vdev_id != INVALID_VDEV_ID) {
                     auto vdev_id = m_chunk_info[i].vdev_id;
                     HS_ASSERT_CMP(LOGMSG, m_vdev_info[vdev_id].get_vdev_id(), ==, vdev_id);
                     /* mark this vdev failed */

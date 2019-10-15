@@ -21,7 +21,8 @@
 #include <error/error.h>
 #include <csignal>
 #include "homeds/utility/useful_defs.hpp"
-#include <spdlog/fmt/bundled/ostream.h>
+//#include <spdlog/fmt/bundled/ostream.h>
+#include <spdlog/fmt/ostr.h>
 #include "homeds/array/reserve_vector.hpp"
 #include <main/homestore_header.hpp>
 

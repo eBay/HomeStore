@@ -11,11 +11,13 @@
 #include <boost/lexical_cast.hpp>
 #include <boost/uuid/uuid_io.hpp>
 
-SDS_OPTION_GROUP(home_blks, (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service", cxxopts::value<int32_t>()->default_value("5000"), "port"))
+SDS_OPTION_GROUP(home_blks,
+                 (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
+                  cxxopts::value< int32_t >()->default_value("5000"), "port"))
 
 using namespace homestore;
 
-HomeBlks* HomeBlks::_instance = nullptr;
+HomeBlks*   HomeBlks::_instance = nullptr;
 std::string HomeBlks::version = PACKAGE_VERSION;
 
 VolInterface* homestore::vol_homestore_init(const init_params& cfg) { return (HomeBlks::init(cfg)); }
@@ -59,14 +61,14 @@ HomeBlks::HomeBlks(const init_params& cfg) :
     m_data_pagesz = m_cfg.min_virtual_page_size;
 
     nlohmann::json json;
-    json["phys_page_size"]          = HomeStoreConfig::phys_page_size;
-    json["atomic_phys_page_size"]   = HomeStoreConfig::atomic_phys_page_size;
-    json["align_size"]              = HomeStoreConfig::align_size;
-    json["min_page_size"]           = HomeStoreConfig::min_page_size;
-    json["open_flag"]               = HomeStoreConfig::open_flag;
-    json["cache_size"]              = m_cfg.cache_size;
-    json["system_uuid"]             = boost::lexical_cast<std::string>(m_cfg.system_uuid);
-    json["is_file"]                 = m_cfg.is_file;
+    json["phys_page_size"] = HomeStoreConfig::phys_page_size;
+    json["atomic_phys_page_size"] = HomeStoreConfig::atomic_phys_page_size;
+    json["align_size"] = HomeStoreConfig::align_size;
+    json["min_page_size"] = HomeStoreConfig::min_page_size;
+    json["open_flag"] = HomeStoreConfig::open_flag;
+    json["cache_size"] = m_cfg.cache_size;
+    json["system_uuid"] = boost::lexical_cast< std::string >(m_cfg.system_uuid);
+    json["is_file"] = m_cfg.is_file;
     for (auto& device : m_cfg.devices) {
         json["devices"].emplace_back(device.dev_names);
     }
@@ -87,8 +89,8 @@ HomeBlks::HomeBlks(const init_params& cfg) :
     m_cache = new Cache< BlkId >(m_cfg.cache_size, HomeStoreConfig::atomic_phys_page_size);
 
     /* create device manager */
-    m_dev_mgr = new homestore::DeviceManager(new_vdev_found, sizeof(sb_blkstore_blob), m_cfg.iomgr,
-                                             virtual_dev_process_completions, m_cfg.is_file, m_cfg.system_uuid, 
+    m_dev_mgr = new homestore::DeviceManager(new_vdev_found, sizeof(sb_blkstore_blob), virtual_dev_process_completions,
+                                             m_cfg.is_file, m_cfg.system_uuid,
                                              std::bind(&HomeBlks::process_vdev_error, this, std::placeholders::_1));
 
     /* start thread */
@@ -132,7 +134,7 @@ cap_attrs HomeBlks::get_vol_capacity(const VolumePtr& vol) {
     cap.initial_total_size = vol->get_size();
     return cap;
 }
-    
+
 std::error_condition HomeBlks::write(const VolumePtr& vol, uint64_t lba, uint8_t* buf, uint32_t nblks,
                                      const vol_interface_req_ptr& req) {
     assert(m_rdy);
@@ -172,7 +174,6 @@ std::error_condition HomeBlks::sync_read(const VolumePtr& vol, uint64_t lba, int
 }
 
 VolumePtr HomeBlks::create_volume(const vol_params& params) {
-    
     if (!m_rdy || is_shutdown()) {
         return nullptr;
     }
@@ -190,7 +191,7 @@ VolumePtr HomeBlks::create_volume(const vol_params& params) {
         decltype(m_volume_map)::iterator it;
         // Try to add an entry for this volume
         std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
-        bool                          happened{false};
+        bool                                    happened{false};
         std::tie(it, happened) = m_volume_map.emplace(std::make_pair(params.uuid, nullptr));
         if (!happened) {
             if (m_volume_map.end() != it) {
@@ -214,21 +215,21 @@ VolumePtr HomeBlks::create_volume(const vol_params& params) {
     return nullptr;
 }
 
-// 
+//
 // Each volume will have use_count set to 2 here in this function:
 // 1. HomeBlks::m_volume_map;
 // 2. This function's it->second hold another use_count
-// 3. IOTest::vol will hold another use_count but we will release use_count 
+// 3. IOTest::vol will hold another use_count but we will release use_count
 // in IOTest before this function so it will be same use_count both with production or test.
-// 
+//
 
 std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
     if (!m_rdy || is_shutdown()) {
         return std::make_error_condition(std::errc::device_or_resource_busy);
     }
     try {
-        std::lock_guard<std::recursive_mutex> lg(m_vol_lock);
-        auto it = m_volume_map.find(uuid);
+        std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
+        auto                                    it = m_volume_map.find(uuid);
         if (it == m_volume_map.end()) {
             return std::make_error_condition(std::errc::no_such_device_or_address);
         }
@@ -242,10 +243,10 @@ std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
         vol_mem_sb* prev_sb = nullptr;
         if (sb->ondisk_sb->prev_blkid.to_integer() != BlkId::invalid_internal_id()) {
             prev_sb = vol_sb_read(sb->ondisk_sb->prev_blkid);
-            assert (prev_sb);
-            // we do have a valid prev_sb, update it. 
+            assert(prev_sb);
+            // we do have a valid prev_sb, update it.
             auto it = m_volume_map.find(prev_sb->ondisk_sb->uuid);
-            delete(prev_sb);
+            delete (prev_sb);
             assert(it != m_volume_map.end());
 
             auto vol = it->second;
@@ -259,7 +260,7 @@ std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
                 m_last_vol_sb = prev_sb;
             }
         } else {
-            // no prev_sb, this is the first sb being removed. 
+            // no prev_sb, this is the first sb being removed.
             // we need to update m_cfg_sb to sb->nextblkid;
             assert(m_cfg_sb);
             // if there is next sb, sb->next_blkid will be invalid interal blkid, which is good;
@@ -267,7 +268,7 @@ std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
             if (sb == m_last_vol_sb) {
                 m_last_vol_sb = nullptr;
             }
-            // persist m_cfg_sb 
+            // persist m_cfg_sb
             if (!m_cfg.is_read_only) {
                 config_super_block_write();
             }
@@ -279,7 +280,7 @@ std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
             next_sb = vol_sb_read(sb->ondisk_sb->next_blkid);
             assert(next_sb);
             auto it = m_volume_map.find(next_sb->ondisk_sb->uuid);
-            delete(next_sb);
+            delete (next_sb);
             assert(it != m_volume_map.end());
             auto vol = it->second;
 
@@ -289,15 +290,15 @@ std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
             next_sb->ondisk_sb->prev_blkid = sb->ondisk_sb->prev_blkid;
             next_sb->unlock();
             vol_sb_write(next_sb);
-        } 
+        }
 
         // set the state and remove it from the map
         cur_vol->set_state(DESTROYING);
         m_volume_map.erase(uuid);
-        
+
         // vol sb should be removed after all blks(data blk and btree blk) have been freed.
 
-        // volume destructor will be called since the user_count of share_ptr 
+        // volume destructor will be called since the user_count of share_ptr
         // will drop to zero while going out of this scope;
         std::error_condition no_err;
         LOGINFO("volume will be deleted name : {}", cur_vol->get_name());
@@ -312,7 +313,7 @@ std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
 VolumePtr HomeBlks::lookup_volume(const boost::uuids::uuid& uuid) {
 
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
-    auto                          it = m_volume_map.find(uuid);
+    auto                                    it = m_volume_map.find(uuid);
     if (m_volume_map.end() != it) {
         return it->second;
     }
@@ -338,12 +339,12 @@ BlkId HomeBlks::alloc_blk() {
 void HomeBlks::vol_sb_init(vol_mem_sb* sb) {
     /* allocate block */
 
-    BlkId                         bid = alloc_blk();
+    BlkId                                   bid = alloc_blk();
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
     // No need to hold vol's sb update lock here since it is being initiated and not added to m_volume_map yet;
     sb->ondisk_sb->gen_cnt = 0;
-    sb->ondisk_sb->prev_blkid.set(m_last_vol_sb ? m_last_vol_sb->ondisk_sb->blkid.to_integer() : 
-                                                  BlkId::invalid_internal_id());
+    sb->ondisk_sb->prev_blkid.set(m_last_vol_sb ? m_last_vol_sb->ondisk_sb->blkid.to_integer()
+                                                : BlkId::invalid_internal_id());
     sb->ondisk_sb->next_blkid.set(BlkId::invalid_internal_id());
     sb->ondisk_sb->blkid.set(bid);
     sb->ondisk_sb->version = VOL_SB_VERSION;
@@ -373,24 +374,22 @@ void HomeBlks::vol_sb_init(vol_mem_sb* sb) {
     m_last_vol_sb = sb;
 }
 
-bool 
-HomeBlks::vol_sb_sanity(vol_mem_sb* sb) {
-    return ((sb->ondisk_sb->magic == VOL_SB_MAGIC) && 
-            (sb->ondisk_sb->version == VOL_SB_VERSION));
+bool HomeBlks::vol_sb_sanity(vol_mem_sb* sb) {
+    return ((sb->ondisk_sb->magic == VOL_SB_MAGIC) && (sb->ondisk_sb->version == VOL_SB_VERSION));
 }
 
-vol_mem_sb* 
-HomeBlks::vol_sb_read(BlkId bid) {
+vol_mem_sb* HomeBlks::vol_sb_read(BlkId bid) {
     bool rewrite = false;
-    if (bid.to_integer() == BlkId::invalid_internal_id()) return nullptr;
-    std::vector<boost::intrusive_ptr<BlkBuffer>> bbuf = m_sb_blk_store->read_nmirror(bid, m_cfg.devices.size() - 1);
-    boost::intrusive_ptr<BlkBuffer> valid_buf = get_valid_buf(bbuf, rewrite);
+    if (bid.to_integer() == BlkId::invalid_internal_id())
+        return nullptr;
+    std::vector< boost::intrusive_ptr< BlkBuffer > > bbuf = m_sb_blk_store->read_nmirror(bid, m_cfg.devices.size() - 1);
+    boost::intrusive_ptr< BlkBuffer >                valid_buf = get_valid_buf(bbuf, rewrite);
 
-    vol_mem_sb *sb = new vol_mem_sb;
-    int ret = posix_memalign((void **) &(sb->ondisk_sb), HomeStoreConfig::align_size, VOL_SB_SIZE); 
+    vol_mem_sb* sb = new vol_mem_sb;
+    int         ret = posix_memalign((void**)&(sb->ondisk_sb), HomeStoreConfig::align_size, VOL_SB_SIZE);
     assert(!ret);
     memcpy(sb->ondisk_sb, valid_buf->at_offset(0).bytes, sizeof(vol_ondisk_sb));
-    
+
     // TODO: how do we recover this if it fails in release mode?
     assert(sb->ondisk_sb->blkid.to_integer() == bid.to_integer());
 
@@ -407,7 +406,7 @@ HomeBlks::vol_sb_read(BlkId bid) {
     return sb;
 }
 
-// 
+//
 // Steps:
 // 1. Read the super block based on BlkId.
 // 2. Get prev_blkid/next_blkid.
@@ -416,8 +415,7 @@ HomeBlks::vol_sb_read(BlkId bid) {
 // 5. Persiste the previous/nxt super block.
 // 6. Free the vol_sb's blk_id
 //
-void 
-HomeBlks::vol_sb_remove(vol_mem_sb *sb) {
+void HomeBlks::vol_sb_remove(vol_mem_sb* sb) {
     LOGINFO("Removing sb of vol: {}", sb->ondisk_sb->vol_name);
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
     m_sb_blk_store->free_blk(sb->ondisk_sb->blkid, boost::none, boost::none);
@@ -438,33 +436,25 @@ void HomeBlks::config_super_block_init(BlkId& bid) {
     }
 }
 
-boost::uuids::uuid 
-HomeBlks::get_uuid(VolumePtr vol) {
-    return vol->get_uuid();
-}
+boost::uuids::uuid HomeBlks::get_uuid(VolumePtr vol) { return vol->get_uuid(); }
 
 #ifndef NDEBUG
-void
-HomeBlks::verify_pending_blks(const VolumePtr& vol) {
-    return vol->verify_pending_blks();
-}
+void HomeBlks::verify_pending_blks(const VolumePtr& vol) { return vol->verify_pending_blks(); }
 
 #endif
 void HomeBlks::config_super_block_write() {
-    homeds::MemVector mvec;
+    homeds::MemVector                       mvec;
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
 
     m_cfg_sb->gen_cnt++;
     try {
         mvec.set((uint8_t*)m_cfg_sb, VOL_SB_SIZE, 0);
         m_sb_blk_store->write(m_cfg_sb->blkid, mvec);
-    } catch (std::exception& e) {
-        throw e;
-    }
+    } catch (std::exception& e) { throw e; }
 }
 
 void HomeBlks::vol_sb_write(vol_mem_sb* sb) {
-    homeds::MemVector mvec;
+    homeds::MemVector                       mvec;
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
 
     /* take a sb lock so that nobody update the in memory copy while
@@ -488,7 +478,7 @@ void HomeBlks::process_vdev_error(vdev_info_block* vb) {
      * data blkstoree we need to move only those volumes to failed state which  belong to this virtual device.
      */
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
-    auto it = m_volume_map.begin();
+    auto                                    it = m_volume_map.begin();
     while (it != m_volume_map.end()) {
         auto old_state = it->second->get_state();
         if (old_state == ONLINE) {
@@ -520,9 +510,7 @@ void HomeBlks::create_blkstores() {
     create_sb_blkstore(nullptr);
 }
 
-void HomeBlks::attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback cb) {
-    vol->attach_completion_cb(cb);
-}
+void HomeBlks::attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback cb) { vol->attach_completion_cb(cb); }
 
 void HomeBlks::add_devices() {
     m_dev_mgr->add_devices(m_cfg.devices, m_cfg.disk_init);
@@ -540,7 +528,7 @@ bool HomeBlks::vol_state_change(const VolumePtr& vol, vol_state new_state) {
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
     try {
         vol->set_state(new_state);
-    } catch (std::exception &e) {
+    } catch (std::exception& e) {
         LOGERROR("{}", e.what());
         return false;
     }
@@ -579,9 +567,9 @@ boost::intrusive_ptr< BlkBuffer > HomeBlks::get_valid_buf(const std::vector< boo
     return valid_buf;
 }
 
-// 
-// TODO: Do we need to handle shutdown request during scan_volumes since it may take a long to 
-// time to finish scan all the volumes? 
+//
+// TODO: Do we need to handle shutdown request during scan_volumes since it may take a long to
+// time to finish scan all the volumes?
 //
 // Does it make sense to let consumer wait until a shutdown request can be served by HomeStore after scan_volumes?
 //
@@ -594,10 +582,10 @@ void HomeBlks::scan_volumes() {
     if (homestore_flip->test_flip("reboot_abort")) {
         abort();
     }
-#endif  
+#endif
     try {
         while (blkid.to_integer() != BlkId::invalid_internal_id()) {
-            vol_mem_sb *sb = vol_sb_read(blkid);
+            vol_mem_sb* sb = vol_sb_read(blkid);
             if (sb == nullptr) {
                 // TODO: Error handling here...
             }
@@ -706,11 +694,11 @@ void HomeBlks::create_data_blkstore(vdev_info_block* vb) {
         m_size_avail = size;
         LOGINFO("maximum capacity for data blocks is {}", m_size_avail);
         m_data_blk_store = new BlkStore< VdevVarSizeBlkAllocatorPolicy >(
-            m_dev_mgr, m_cache, size, WRITEBACK_CACHE, 0, (char*)&blob, sizeof(blkstore_blob), m_data_pagesz,
-            "data", Volume::process_vol_data_completions);
+            m_dev_mgr, m_cache, size, WRITEBACK_CACHE, 0, (char*)&blob, sizeof(blkstore_blob), m_data_pagesz, "data",
+            Volume::process_vol_data_completions);
     } else {
         m_data_blk_store = new BlkStore< VdevVarSizeBlkAllocatorPolicy >(
-            m_dev_mgr, m_cache, vb, WRITEBACK_CACHE, m_data_pagesz, "data", (vb->failed ? true : false), 
+            m_dev_mgr, m_cache, vb, WRITEBACK_CACHE, m_data_pagesz, "data", (vb->failed ? true : false),
             Volume::process_vol_data_completions);
         if (vb->failed) {
             m_vdev_failed = true;
@@ -766,9 +754,8 @@ void HomeBlks::create_sb_blkstore(vdev_info_block* vb) {
         m_sb_blk_store->update_vb_context((uint8_t*)&blob);
     } else {
         /* create a blkstore */
-        m_sb_blk_store = new BlkStore< VdevVarSizeBlkAllocatorPolicy >(m_dev_mgr, m_cache, vb, PASS_THRU,
-                                                                       HomeStoreConfig::atomic_phys_page_size,
-                                                                       "superblock", false);
+        m_sb_blk_store = new BlkStore< VdevVarSizeBlkAllocatorPolicy >(
+            m_dev_mgr, m_cache, vb, PASS_THRU, HomeStoreConfig::atomic_phys_page_size, "superblock", false);
         if (vb->failed) {
             m_vdev_failed = true;
             LOGINFO("super block store is in failed state");
@@ -801,12 +788,12 @@ void HomeBlks::create_sb_blkstore(vdev_info_block* vb) {
 bool HomeBlks::is_ready() { return (m_rdy); }
 
 uint64_t HomeBlks::get_boot_cnt() {
-    
+
     assert(m_cfg_sb->boot_cnt < UINT16_MAX);
-    return (uint16_t) m_cfg_sb->boot_cnt; 
+    return (uint16_t)m_cfg_sb->boot_cnt;
 }
 
-// 
+//
 // Handle the race between shutdown therad and init thread;
 // 1. HomeStore starts init
 // 2. AM send shutdown request immediately
@@ -821,21 +808,21 @@ void HomeBlks::init_thread() {
         bool init = m_cfg.disk_init;
         /* attach physical devices */
         add_devices();
-                
+
         /* create blkstore if it is a first time boot */
         if (init) {
             create_blkstores();
         }
 
-        // 
-        // Will not resume shutdown if we reboot from an un-finished shutdown procedure. 
+        //
+        // Will not resume shutdown if we reboot from an un-finished shutdown procedure.
         //
         {
-            std::lock_guard<std::recursive_mutex>  lg(m_vol_lock);
+            std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
             if (m_cfg_sb->test_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN)) {
                 LOGDEBUG("System was shutdown cleanly.");
-                // clear the flag and persist to disk, if we received a new shutdown and completed successfully, 
-                // the flag should be set again; 
+                // clear the flag and persist to disk, if we received a new shutdown and completed successfully,
+                // the flag should be set again;
                 m_cfg_sb->clear_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
                 if (!m_cfg.is_read_only) {
                     config_super_block_write();
@@ -850,18 +837,20 @@ void HomeBlks::init_thread() {
         sisl::HttpServerConfig cfg;
         cfg.is_tls_enabled = false;
         cfg.bind_address = "0.0.0.0";
-        cfg.server_port = SDS_OPTIONS["hb_stats_port"].as<int32_t>();
+        cfg.server_port = SDS_OPTIONS["hb_stats_port"].as< int32_t >();
         cfg.read_write_timeout_secs = 10;
 
-        m_http_server = std::unique_ptr< sisl::HttpServer >(new sisl::HttpServer(cfg, {{
-                handler_info("/api/v1/version", HomeBlks::get_version, (void *)this),
-                handler_info("/api/v1/getMetrics", HomeBlks::get_metrics, (void *)this),
-                handler_info("/api/v1/getObjLife", HomeBlks::get_obj_life, (void *)this),
-                handler_info("/metrics", HomeBlks::get_prometheus_metrics, (void *)this),
-                handler_info("/api/v1/getLogLevel", HomeBlks::get_log_level, (void *)this),
-                handler_info("/api/v1/setLogLevel", HomeBlks::set_log_level, (void *)this),
-                handler_info("/api/v1/dumpStackTrace", HomeBlks::dump_stack_trace, (void *)this),
-        }}));
+        m_http_server = std::unique_ptr< sisl::HttpServer >(
+            new sisl::HttpServer(cfg,
+                                 {{
+                                     handler_info("/api/v1/version", HomeBlks::get_version, (void*)this),
+                                     handler_info("/api/v1/getMetrics", HomeBlks::get_metrics, (void*)this),
+                                     handler_info("/api/v1/getObjLife", HomeBlks::get_obj_life, (void*)this),
+                                     handler_info("/metrics", HomeBlks::get_prometheus_metrics, (void*)this),
+                                     handler_info("/api/v1/getLogLevel", HomeBlks::get_log_level, (void*)this),
+                                     handler_info("/api/v1/setLogLevel", HomeBlks::set_log_level, (void*)this),
+                                     handler_info("/api/v1/dumpStackTrace", HomeBlks::dump_stack_trace, (void*)this),
+                                 }}));
         m_http_server->start();
 
         /* scan volumes */
@@ -869,7 +858,7 @@ void HomeBlks::init_thread() {
         m_init_finished = true;
         m_cv.notify_all();
         return;
-        
+
     } catch (const std::exception& e) {
         m_init_failed = true;
         LOGERROR("{}", e.what());
@@ -916,7 +905,7 @@ void HomeBlks::set_io_flip() {
 
 void HomeBlks::set_error_flip() {
     Volume::set_error_flip();
-    MappingBtreeDeclType::set_error_flip(); 
+    MappingBtreeDeclType::set_error_flip();
 }
 #endif
 
@@ -931,40 +920,41 @@ void HomeBlks::print_node(const VolumePtr& vol, uint64_t blkid, bool chksum) {
 }
 
 void HomeBlks::get_version(sisl::HttpCallData cd) {
-    HomeBlks *hb = (HomeBlks *)(cd->cookie());
+    HomeBlks* hb = (HomeBlks*)(cd->cookie());
     hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, std::string("HomeBlks: ") + HomeBlks::version);
 }
 
 void HomeBlks::get_metrics(sisl::HttpCallData cd) {
-    HomeBlks *hb = (HomeBlks *)(cd->cookie());
+    HomeBlks*   hb = (HomeBlks*)(cd->cookie());
     std::string msg = sisl::MetricsFarm::getInstance().get_result_in_json_string();
     hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, msg);
 }
 
 void HomeBlks::get_prometheus_metrics(sisl::HttpCallData cd) {
-    HomeBlks *hb = (HomeBlks *)(cd->cookie());
+    HomeBlks*   hb = (HomeBlks*)(cd->cookie());
     std::string msg = sisl::MetricsFarm::getInstance().report(sisl::ReportFormat::kTextFormat);
     hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, msg);
 }
 
 void HomeBlks::get_obj_life(sisl::HttpCallData cd) {
-    HomeBlks *hb = (HomeBlks *)(cd->cookie());
+    HomeBlks*      hb = (HomeBlks*)(cd->cookie());
     nlohmann::json j;
-    sisl::ObjCounterRegistry::foreach([&j](const std::string& name, int64_t created, int64_t alive) {
-        std::stringstream ss; ss << "created=" << created << " alive=" << alive;
+    sisl::ObjCounterRegistry::foreach ([&j](const std::string& name, int64_t created, int64_t alive) {
+        std::stringstream ss;
+        ss << "created=" << created << " alive=" << alive;
         j[name] = ss.str();
     });
     hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, j.dump());
 }
 
 void HomeBlks::set_log_level(sisl::HttpCallData cd) {
-    HomeBlks *hb = (HomeBlks *)(cd->cookie());
-    auto req = cd->request();
+    HomeBlks* hb = (HomeBlks*)(cd->cookie());
+    auto      req = cd->request();
 
     const evhtp_kv_t* _new_log_level = nullptr;
     const evhtp_kv_t* _new_log_module = nullptr;
-    const char* logmodule = nullptr;
-    char* endptr = nullptr;
+    const char*       logmodule = nullptr;
+    char*             endptr = nullptr;
 
     _new_log_module = evhtp_kvs_find_kv(req->uri->query, "logmodule");
     if (_new_log_module) {
@@ -988,12 +978,12 @@ void HomeBlks::set_log_level(sisl::HttpCallData cd) {
 }
 
 void HomeBlks::get_log_level(sisl::HttpCallData cd) {
-    HomeBlks *hb = (HomeBlks *)(cd->cookie());
+    HomeBlks* hb = (HomeBlks*)(cd->cookie());
     hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, sds_logging::GetAllModuleLogLevel().dump());
 }
 
 void HomeBlks::dump_stack_trace(sisl::HttpCallData cd) {
-    HomeBlks *hb = (HomeBlks *)(cd->cookie());
+    HomeBlks* hb = (HomeBlks*)(cd->cookie());
     sds_logging::log_stack_trace(true);
     hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, "Look for stack trace in the log file");
 }
@@ -1003,36 +993,38 @@ void HomeBlks::dump_stack_trace(sisl::HttpCallData cd) {
 //
 void HomeBlks::shutdown_process(shutdown_comp_callback shutdown_comp_cb, bool force) {
     try {
-        auto start = std::chrono::steady_clock::now();
-        std::unique_lock<std::recursive_mutex>  lg(m_vol_lock);
+        auto                                     start = std::chrono::steady_clock::now();
+        std::unique_lock< std::recursive_mutex > lg(m_vol_lock);
         while (m_volume_map.size()) {
-            for (auto & x : m_volume_map) {
+            for (auto& x : m_volume_map) {
                 if (x.second.use_count() == 1) {
-                    LOGINFO("vol: {} ref_count successfully drops to 1. Trigger normal shutdown. ", x.second->get_name());
+                    LOGINFO("vol: {} ref_count successfully drops to 1. Trigger normal shutdown. ",
+                            x.second->get_name());
                     m_volume_map.erase(x.first);
                 }
             }
 
             if (m_volume_map.size() != 0) {
                 auto end = std::chrono::steady_clock::now();
-                auto num_seconds = std::chrono::duration_cast<std::chrono::seconds>(end - start).count();
+                auto num_seconds = std::chrono::duration_cast< std::chrono::seconds >(end - start).count();
 
                 // triger force shutdown if timeout
                 if (force || (num_seconds > SHUTDOWN_TIMEOUT_NUM_SECS)) {
                     if (force) {
                         LOGINFO("FORCE shutdown requested!");
                     } else {
-                        LOGERROR("Shutdown timeout for {} seconds, trigger force shutdown. ", SHUTDOWN_TIMEOUT_NUM_SECS);
+                        LOGERROR("Shutdown timeout for {} seconds, trigger force shutdown. ",
+                                 SHUTDOWN_TIMEOUT_NUM_SECS);
                     }
                     // trigger dump on debug mode
                     assert(force);
 
-                    // in release mode, just forcely free 
-                    // Force trigger every Volume's destructor when there 
+                    // in release mode, just forcely free
+                    // Force trigger every Volume's destructor when there
                     // is ref_count leak for this volume instance.
                     for (auto& x : m_volume_map) {
                         LOGERROR("Force Shutdown vol: {}, ref_cnt: {}", x.second->get_name(), x.second.use_count());
-                        x.second.get()->~Volume();       
+                        x.second.get()->~Volume();
                     }
 
                     m_volume_map.clear();
@@ -1052,7 +1044,6 @@ void HomeBlks::shutdown_process(shutdown_comp_callback shutdown_comp_cb, bool fo
             }
         }
 
-
         assert(m_volume_map.size() == 0);
 
         // m_cfg_sb needs to to be freed in the last, because we need to set the clean shutdown flag
@@ -1063,7 +1054,7 @@ void HomeBlks::shutdown_process(shutdown_comp_callback shutdown_comp_cb, bool fo
         if (!m_cfg.is_read_only) {
             config_super_block_write();
         }
-        // free the in-memory copy 
+        // free the in-memory copy
         free(m_cfg_sb);
         lg.unlock();
 
@@ -1075,10 +1066,10 @@ void HomeBlks::shutdown_process(shutdown_comp_callback shutdown_comp_cb, bool fo
         // BlkStore ::m_cache/m_wb_cache points to HomeBlks::m_cache;
         delete m_cache;
 
-        delete m_dev_mgr; 
+        delete m_dev_mgr;
 
         // Waiting for http server thread to join
-        m_http_server->stop();   
+        m_http_server->stop();
         m_http_server.reset();
 
         shutdown_comp_cb(true);
@@ -1088,7 +1079,7 @@ void HomeBlks::shutdown_process(shutdown_comp_callback shutdown_comp_cb, bool fo
     }
 }
 
-// 
+//
 // Shutdown:
 // 1. Set persistent state of shutdown
 // 2. Start a thread to do shutdown routines;
@@ -1107,18 +1098,18 @@ std::error_condition HomeBlks::shutdown(shutdown_comp_callback shutdown_comp_cb,
     }
     LOGINFO("shutting down the homestore");
     started = true;
-    
+
     m_shutdown = true;
 
-    // 
+    //
     // Need to wait m_init_finished to be true before we create shutdown thread because:
-    // 1. if init thread is running slower than shutdown thread, 
-    // 2. it is possible that shutdown thread completed but init thread 
-    //    is still creating resources, which would be resource leak 
+    // 1. if init thread is running slower than shutdown thread,
+    // 2. it is possible that shutdown thread completed but init thread
+    //    is still creating resources, which would be resource leak
     //    after shutdown thread exits;
     //
     {
-        std::unique_lock<std::mutex>   lk(m_cv_mtx);
+        std::unique_lock< std::mutex > lk(m_cv_mtx);
         if (!m_init_finished.load()) {
             m_cv.wait(lk);
         }
@@ -1127,10 +1118,9 @@ std::error_condition HomeBlks::shutdown(shutdown_comp_callback shutdown_comp_cb,
     // The volume destructor should be triggered automatcially when ref_cnt drops to zero;
 
     // Sart a thread to monitor the shutdown progress, if timeout, trigger force shutdown
-    std::vector<ThreadPool::TaskFuture<void>>   task_result;
-    task_result.push_back(submit_job([this, &shutdown_comp_cb, force](){
-                this->shutdown_process(shutdown_comp_cb, force);
-                }));
+    std::vector< ThreadPool::TaskFuture< void > > task_result;
+    task_result.push_back(
+        submit_job([this, &shutdown_comp_cb, force]() { this->shutdown_process(shutdown_comp_cb, force); }));
 
     for (auto& x : task_result) {
         x.get();
@@ -1140,6 +1130,4 @@ std::error_condition HomeBlks::shutdown(shutdown_comp_callback shutdown_comp_cb,
 }
 
 // m_shutdown is used for I/O threads to check is_shutdown() without holding m_vol_lock;
-bool HomeBlks::is_shutdown() {
-    return m_shutdown.load();
-}
+bool HomeBlks::is_shutdown() { return m_shutdown.load(); }

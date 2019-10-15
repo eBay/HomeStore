@@ -5,8 +5,6 @@
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
 #include "mapping.hpp"
-#include <iomgr/iomgr.hpp>
-#include <iomgr/aio_drive_interface.hpp>
 
 extern "C" {
 #include <fcntl.h>
@@ -30,36 +28,12 @@ extern "C" __attribute__((no_sanitize_address)) const char* __asan_default_optio
 uint64_t num_ios;
 uint64_t num_threads;
 
-/* Simulating a test target - similar to SCST or NVMEoF target */
-class MapTest;
-class TestTarget {
+class test_ep : public iomgr::EndPoint {
 public:
-    TestTarget(MapTest* test) { m_test_store = test; }
-    void init() {
-        m_ev_fd = eventfd(0, EFD_NONBLOCK);
-        m_ev_fdinfo = iomanager.add_fd(m_ev_fd,
-                                       std::bind(&TestTarget::on_new_io_request, this, std::placeholders::_1,
-                                                 std::placeholders::_2, std::placeholders::_3),
-                                       EPOLLIN, 9, nullptr);
-    }
-
-    void shutdown() { iomanager.remove_fd(m_ev_fdinfo); }
-    void kickstart_io() {
-        uint64_t              temp = 1;
-        [[maybe_unused]] auto wsize = write(m_ev_fd, &temp, sizeof(uint64_t));
-    }
-
-    void on_new_io_request(int fd, void* cookie, int event);
-
-    void io_request_done() {
-        uint64_t              temp = 1;
-        [[maybe_unused]] auto wsize = write(m_ev_fd, &temp, sizeof(uint64_t));
-    }
-
-private:
-    int             m_ev_fd;
-    iomgr::fd_info* m_ev_fdinfo;
-    MapTest*        m_test_store;
+    test_ep(std::shared_ptr< iomgr::ioMgr > iomgr) : iomgr::EndPoint(iomgr) {}
+    void shutdown_local() override {}
+    void init_local() override {}
+    void print_perf() override {}
 };
 
 struct MapTest : public testing::Test {
@@ -76,21 +50,22 @@ protected:
     uint64_t Mi = Ki * Ki;
     uint64_t Gi = Ki * Mi;
 
-    std::vector< dev_info > device_info;
-    std::atomic< uint64_t > seq_Id;
-    bool                    start = false;
-    boost::uuids::uuid      uuid;
-    int                     fd;
-    int                     ev_fd;
-    std::atomic< size_t >   outstanding_ios;
-    uint64_t                max_outstanding_ios = 64u;
-    std::atomic< size_t >   issued_ios;
-    uint64_t                max_issue_ios = 0u;
-    std::atomic< size_t >   unreturned_lbas;
-    TestTarget              m_tgt;
+    std::shared_ptr< iomgr::ioMgr > iomgr_obj;
+    std::vector< dev_info >         device_info;
+    std::atomic< uint64_t >         seq_Id;
+    bool                            start = false;
+    boost::uuids::uuid              uuid;
+    int                             fd;
+    test_ep*                        ep;
+    int                             ev_fd;
+    std::atomic< size_t >           outstanding_ios;
+    uint64_t                        max_outstanding_ios = 64u;
+    std::atomic< size_t >           issued_ios;
+    uint64_t                        max_issue_ios = 0u;
+    std::atomic< size_t >           unreturned_lbas;
 
 public:
-    MapTest() : m_tgt(this) {
+    MapTest() {
         m_lba_bm = new homeds::Bitset(MAX_LBA);
         m_blk_bm = new homeds::Bitset(MAX_BLK);
         for (auto i = 0u; i < MAX_LBA; i++)
@@ -176,7 +151,6 @@ public:
         iomanager.add_drive_interface(
             std::dynamic_pointer_cast< iomgr::DriveInterface >(std::make_shared< iomgr::AioDriveInterface >()),
             true /* is_default */);
-        m_tgt.init();
 
         init_params params;
 #ifndef NDEBUG
@@ -229,10 +203,27 @@ public:
                             std::bind(&MapTest::process_free_blk_callback, this, std::placeholders::_1));
 
         start = true;
-        m_tgt.kickstart_io();
+        ev_fd = eventfd(0, EFD_NONBLOCK);
+        iomgr_obj->add_fd(
+            ev_fd, [this](auto fd, auto cookie, auto event) { process_ev_common(fd, cookie, event); }, EPOLLIN, 9,
+            nullptr);
+        ep = new test_ep(iomgr_obj);
+        iomgr_obj->add_ep(ep);
+        iomgr_obj->start();
+        uint64_t              temp = 1;
+        [[maybe_unused]] auto rsize = read(ev_fd, &temp, sizeof(uint64_t));
+        uint64_t              size = write(ev_fd, &temp, sizeof(uint64_t));
+        if (size != sizeof(uint64_t)) { assert(0); }
     }
 
-    void process_new_request() {
+    void process_ev_common(int fd, void* cookie, int event) {
+        uint64_t              temp;
+        [[maybe_unused]] auto rsize = read(ev_fd, &temp, sizeof(uint64_t));
+        iomgr_obj->process_done(fd, event);
+        if (outstanding_ios.load() < max_outstanding_ios && issued_ios.load() < max_issue_ios) {
+            /* raise an event */
+            iomgr_obj->fd_reschedule(fd, event);
+        }
         if (issued_ios.load() == max_issue_ios) return;
         outstanding_ios++;
         issued_ios++;
@@ -409,12 +400,6 @@ public:
     }
 };
 
-void TestTarget::on_new_io_request(int fd, void* cookie, int event) {
-    uint64_t              temp;
-    [[maybe_unused]] auto rsize = read(m_ev_fd, &temp, sizeof(uint64_t));
-    m_test_store->process_new_request();
-}
-
 TEST_F(MapTest, RandomTest) {
     this->start_homestore();
 
@@ -434,10 +419,11 @@ int main(int argc, char* argv[]) {
     sds_logging::SetLogger("test_mapping");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 
-    num_threads = SDS_OPTIONS["num_threads"].as< uint32_t >();
+    testing::InitGoogleTest(&argc, argv);
+
     num_ios = SDS_OPTIONS["num_ios"].as< uint64_t >();
     num_ios /= 2; // half read half write
+    num_threads = SDS_OPTIONS["num_threads"].as< uint64_t >();
 
-    testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
