@@ -57,15 +57,15 @@ public:
     }
     static void recovery_cmpltd(MemBtreeStore *store) {};
 
-    static uint8_t *get_physical(const MemBtreeNode *bn) {
+    static uint8_t *get_physical(const MemBtreeNode *bn) const {
         return (uint8_t *)((uint8_t *)bn + sizeof(MemBtreeNode));
     }
 
-    static uint32_t get_node_area_size(MemBtreeStore *store) {
+    static uint32_t get_node_area_size(MemBtreeStore *store) const {
         return store->get_node_size() - sizeof(MemBtreeNode) - sizeof(LeafPhysicalNode);
     }
 
-    uint32_t get_node_size() {
+    uint32_t get_node_size() const {
         return m_node_size;
     }
 
@@ -105,10 +105,10 @@ public:
 
     static uint8_t *allocate_mem(uint32_t node_size) {
         uint8_t *mem = nullptr;
-        if (node_size == 512) {
-            mem = BtreeNodeAllocator< 512 > ::allocate();
-        } else if (node_size == 4096) {
+        if (node_size == 4096) {
             mem = BtreeNodeAllocator< 4096 > ::allocate();
+        } else if (node_size == 512) {
+            mem = BtreeNodeAllocator< 512 > ::allocate();
         } else {
             mem = (uint8_t *)malloc(node_size);
         }
