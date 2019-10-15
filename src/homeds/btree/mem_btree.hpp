@@ -57,11 +57,11 @@ public:
     }
     static void recovery_cmpltd(MemBtreeStore *store) {};
 
-    static uint8_t *get_physical(const MemBtreeNode *bn) const {
+    static uint8_t *get_physical(const MemBtreeNode *bn) {
         return (uint8_t *)((uint8_t *)bn + sizeof(MemBtreeNode));
     }
 
-    static uint32_t get_node_area_size(MemBtreeStore *store) const {
+    static uint32_t get_node_area_size(MemBtreeStore *store) {
         return store->get_node_size() - sizeof(MemBtreeNode) - sizeof(LeafPhysicalNode);
     }
 
