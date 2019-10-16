@@ -175,6 +175,12 @@ std::error_condition HomeBlks::sync_read(const VolumePtr& vol, uint64_t lba, int
 
 VolumePtr HomeBlks::create_volume(const vol_params& params) {
     
+    if (m_cfg.is_read_only) {
+        assert(0);
+        LOGERROR("can not create vol on read only boot");
+        return nullptr;
+    }
+    
     if (!m_rdy || is_shutdown()) {
         return nullptr;
     }
@@ -225,6 +231,12 @@ VolumePtr HomeBlks::create_volume(const vol_params& params) {
 // 
 
 std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
+   
+    if (m_cfg.is_read_only) {
+        assert(0);
+        return std::make_error_condition(std::errc::device_or_resource_busy);
+    }
+
     if (!m_rdy || is_shutdown()) {
         return std::make_error_condition(std::errc::device_or_resource_busy);
     }
@@ -269,10 +281,6 @@ std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
             if (sb == m_last_vol_sb) {
                 m_last_vol_sb = nullptr;
             }
-            // persist m_cfg_sb 
-            if (!m_cfg.is_read_only) {
-                config_super_block_write();
-            }
         }
 
         // updating the next super block
@@ -293,6 +301,10 @@ std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
             vol_sb_write(next_sb);
         } 
 
+        // persist m_cfg_sb
+        m_cfg_sb->num_vols--;
+        config_super_block_write();
+        
         // set the state and remove it from the map
         cur_vol->set_state(DESTROYING);
         m_volume_map.erase(uuid);
@@ -340,6 +352,7 @@ BlkId HomeBlks::alloc_blk() {
 void HomeBlks::vol_sb_init(vol_mem_sb* sb) {
     /* allocate block */
 
+    assert(!m_cfg.is_read_only);
     BlkId                         bid = alloc_blk();
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
     // No need to hold vol's sb update lock here since it is being initiated and not added to m_volume_map yet;
@@ -368,9 +381,7 @@ void HomeBlks::vol_sb_init(vol_mem_sb* sb) {
     }
 
     m_cfg_sb->num_vols++;
-    if (!m_cfg.is_read_only) {
-        config_super_block_write();
-    }
+    config_super_block_write();
     /* update the last volume super block. If exception happens in between it won't be updated */
     m_last_vol_sb = sb;
 }
@@ -435,9 +446,7 @@ void HomeBlks::config_super_block_init(BlkId& bid) {
     m_cfg_sb->magic = VOL_SB_MAGIC;
     m_cfg_sb->boot_cnt = 0;
     m_cfg_sb->init_flag(0);
-    if (!m_cfg.is_read_only) {
-        config_super_block_write();
-    }
+    config_super_block_write();
 }
 
 boost::uuids::uuid 
@@ -616,11 +625,8 @@ void HomeBlks::scan_volumes() {
                     vol_sb_write(m_last_vol_sb);
                 } else {
                     m_cfg_sb->vol_list_head = sb->ondisk_sb->next_blkid;
-                    m_cfg_sb->num_vols--;
-                    if (!m_cfg.is_read_only) {
-                        config_super_block_write();
-                    }
                 }
+                m_cfg_sb->num_vols--;
             } else {
                 /* create the volume */
                 assert(sb->ondisk_sb->state != DESTROYING);
@@ -662,7 +668,11 @@ void HomeBlks::scan_volumes() {
             LOGINFO("vol found {}", sb->ondisk_sb->vol_name);
         }
 
-        assert(num_vol == m_cfg_sb->num_vols);
+        assert(num_vol <= m_cfg_sb->num_vols);
+        m_cfg_sb->num_vols = num_vol;
+        if (!m_cfg.is_read_only) {
+            config_super_block_write();
+        }
         /* clear the state in virtual devices as appropiate state is set in volume superblocks */
         if (m_vdev_failed) {
             m_data_blk_store->reset_vdev_failed_state();
