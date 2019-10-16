@@ -301,6 +301,75 @@ public:
         return b;
     }
 
+    void get_overlap_diff_kvs(MappingKey* k1, MappingValue* v1, MappingKey* k2, MappingValue* v2,
+                              uint32_t vol_page_size, diff_read_next_t& to_read,
+                              std::vector< pair< MappingKey, MappingValue > >& overlap_kvs) {
+        static MappingKey   k;
+        static MappingValue v;
+
+        uint64_t start, k1_offset = 0, k2_offset = 0;
+        uint64_t nlba = 0, ovr_nlba = 0;
+
+        /* Non-overlapping beginning part */
+        if (k1->start() < k2->start()) {
+            nlba = k2->start() - k1->start();
+            k.set(k1->start(), nlba);
+            v = *v1;
+            v.add_offset(0, nlba, vol_page_size);
+            overlap_kvs.emplace_back(make_pair(k, v));
+            k1_offset += nlba;
+            start = k1->start() + nlba;
+        } else if (k2->start() < k1->start()) {
+            nlba = k1->start() - k2->start();
+            k.set(k2->start(), nlba);
+            v = *v2;
+            v.add_offset(0, nlba, vol_page_size);
+            overlap_kvs.emplace_back(make_pair(k, v));
+            k2_offset += nlba;
+            start = k2->start() + nlba;
+        } else {
+            start = k1->start(); // Same Start - no overlapping part.
+        }
+
+        /* Overlapping part */
+        if (k1->end() < k2->end()) {
+            ovr_nlba = k1->get_n_lba() - k1_offset;
+        } else {
+            ovr_nlba = k2->get_n_lba() - k2_offset;
+        }
+
+        k.set(start, ovr_nlba);
+
+        if (v1->is_new(*v2)) {
+            v = *v1;
+            v.add_offset(k1_offset, ovr_nlba, vol_page_size);
+            k1_offset += ovr_nlba;
+        } else {
+            v = *v2;
+            v.add_offset(k2_offset, ovr_nlba, vol_page_size);
+            k2_offset += ovr_nlba;
+        }
+
+        overlap_kvs.emplace_back(make_pair(k, v));
+        /* Non-overlapping tail part */
+        start = start + ovr_nlba;
+        if (k1->end() == k2->end()) {
+            to_read = READ_BOTH; // Read both
+        } else if (k1->end() < start) {
+            /* k2 has tail part */
+            nlba = k2->end() - start + 1;
+            k2->set(start, nlba);
+            v2->add_offset(k2_offset, nlba, vol_page_size);
+            to_read = READ_FIRST;
+        } else {
+            /* k1 has tail part */
+            nlba = k1->end() - start + 1;
+            k1->set(start, nlba);
+            v1->add_offset(k1_offset, nlba, vol_page_size);
+            to_read = READ_SECOND;
+        }
+    }
+
     virtual void set_blob(const homeds::blob& b) override { m_earr.set_mem((void*)(b.bytes), b.size); }
 
     virtual void copy_blob(const homeds::blob& b) override {
