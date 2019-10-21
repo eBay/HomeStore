@@ -104,26 +104,12 @@ public:
     }
 
     static uint8_t *allocate_mem(uint32_t node_size) {
-        uint8_t *mem = nullptr;
-        if (node_size == 4096) {
-            mem = BtreeNodeAllocator< 4096 > ::allocate();
-        } else if (node_size == 512) {
-            mem = BtreeNodeAllocator< 512 > ::allocate();
-        } else {
-            mem = (uint8_t *)malloc(node_size);
-        }
+        uint8_t *mem = (uint8_t *)malloc(node_size);
         return mem;
     }
 
     static void deallocate_mem(uint8_t *mem) {
-        size_t size = sizeof(mem);
-        if (size == 512) {
-            BtreeNodeAllocator< 512 >::deallocate(mem);
-        } else if (size == 4096) {
-            BtreeNodeAllocator< 4096 >::deallocate(mem);
-        } else {
-            free(mem);
-        }
+        free(mem);
     }
 
     static boost::intrusive_ptr<MemBtreeNode> read_node(MemBtreeStore *store, bnodeid_t id) {
