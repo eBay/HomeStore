@@ -180,6 +180,12 @@ template < typename Allocator, typename DefaultDeviceSelector >
 class VirtualDev : public AbstractVirtualDev {
     typedef std::function< void(boost::intrusive_ptr< virtualdev_req > req) > comp_callback;
 
+    struct AppendWriteTail {
+        uint32_t m_dev_id;
+        uint32_t m_chunk_id;
+        uint64_t m_offset;  // offset in chunk, range is [0, m_chunk_size];
+    };
+
 private:
     vdev_info_block* m_vb;         // This device block info
     DeviceManager*   m_mgr;        // Device Manager back pointer
@@ -201,6 +207,10 @@ private:
     bool                                     m_recovery_init;
     std::atomic< uint64_t >                  m_used_size;
 
+    // for append_write:
+    AppendWriteTail                          m_app_tail;
+    std::mutex                               m_app_mtx;  // mutex taken for any update on m_app_tail;
+
 public:
     void init(DeviceManager* mgr, vdev_info_block* vb, comp_callback cb, uint32_t page_size) {
         m_mgr = mgr;
@@ -212,6 +222,9 @@ public:
         m_pagesz = page_size;
         m_selector = std::make_unique< DefaultDeviceSelector >();
         m_recovery_init = false;
+        m_app_tail.m_dev_id = 0;
+        m_app_tail.m_chunk_id = 0;
+        m_app_tail.m_offset = 0;
     }
 
     /* Load the virtual dev from vdev_info_block and create a Virtual Dev. */
@@ -290,6 +303,7 @@ public:
         for (auto& pdev : pdev_list) {
             m_selector->add_pdev(pdev);
         }
+
     }
 
     void reset_failed_state() {
@@ -300,6 +314,7 @@ public:
     void process_completions(boost::intrusive_ptr< virtualdev_req > req) {
         m_comp_cb(req);
         /* XXX:we probably have to do something if a write/read is spread
+         *
          * across the chunks from this layer.
          */
     }
@@ -315,6 +330,81 @@ public:
         std::lock_guard< decltype(m_mgmt_mutex) > lock(m_mgmt_mutex);
         m_num_chunks++;
         (chunk->get_primary_chunk()) ? add_mirror_chunk(chunk) : add_primary_chunk(chunk);
+    }
+
+    // 
+    // convert unique offset;
+    //
+    uint64_t to_glob_uniq_offset(uint32_t dev_id, uint32_t chunk_id, uint64_t offset_in_chunk) { 
+        return get_chunk_start_offset(dev_id, chunk_id) + offset_in_chunk;
+    }
+
+    uint64_t get_chunk_start_offset(uint32_t dev_id, uint32_t chunk_id) {
+        return m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id]->get_start_offset();
+    }
+
+    // 
+    // Journal append write:
+    // 1. Append this buf and return the offset;
+    // 2. Advance tail to prepare for next append;
+    // 
+    // Note: 
+    // The space check is managed by upper layer; 
+    //
+    // TODO: 
+    // 1. Write by chunks instead of seq fill in same chunk:
+    //    chunk-1, chunk-2, chunk-3, chunk-1, chunk-2, ...
+    //
+    uint64_t append_write(void* buf, uint64_t len) {
+        uint64_t offset_in_chunk = 0, dev_id = 0, chunk_id = 0;
+        {
+            std::lock_guard<std::mutex>  l(m_app_mtx);
+            if (len + m_app_tail.m_offset > m_chunk_size) {
+                if (m_app_tail.m_chunk_id + 1 >= m_primary_pdev_chunks_list[m_app_tail.m_dev_id].chunks_in_pdev.size()) {
+                    // last chunk in current device, advance dev id;
+                    m_app_tail.m_chunk_id = 0;
+                    m_app_tail.m_dev_id = (m_app_tail.m_dev_id + 1) % m_primary_pdev_chunks_list.size();
+                } else {
+                    // advance chunk id;
+                    m_app_tail.m_chunk_id++;
+                }
+                m_app_tail.m_offset = 0;
+            }
+
+            offset_in_chunk  = m_app_tail.m_offset;
+            dev_id = m_app_tail.m_dev_id;
+            chunk_id = m_app_tail.m_chunk_id;
+        
+            // update offset;
+            m_app_tail.m_offset += len;
+        }
+
+        // lock is releaed here and other I/O threads could acquire the lock to do append_write in parallel;
+        
+        // do the sync write;
+        write_sync(dev_id, chunk_id, offset_in_chunk, buf, len);
+
+        return to_glob_uniq_offset(dev_id, chunk_id, offset_in_chunk);
+    }
+    
+    void write_sync(uint32_t dev_id, uint32_t chunk_id, uint64_t offset_in_chunk, void* buf, uint64_t len) {
+        auto chunk = m_mgr->get_chunk_mutable(chunk_id);
+        auto dev_offset = get_chunk_start_offset(dev_id, chunk_id) + offset_in_chunk;
+        struct iovec iov[1];
+
+        iov[0].iov_base= (uint8_t*) buf;
+        iov[0].iov_len = len;
+
+        auto pdev = chunk->get_physical_dev_mutable();
+        
+        HS_LOG(INFO, device, "Writing in device: {}, offset = {}", pdev->get_dev_id(), dev_offset);
+
+        COUNTER_INCREMENT(pdev->get_metrics(), drive_write_vector_count, 1);
+        pdev->sync_writev(iov, 1, len, dev_offset);
+
+        if (get_nmirrors()) {
+            write_nmirror(iov, 1, len, chunk, dev_offset);
+        }
     }
 
     bool is_blk_alloced(BlkId& in_blkid) {
@@ -478,24 +568,31 @@ public:
         }
 
         if (get_nmirrors()) {
-            uint64_t primary_chunk_offset = dev_offset - chunk->get_start_offset();
+            // We do not support async mirrored writes yet.
+            HS_ASSERT(DEBUG, ((req == nullptr) || req->isSyncCall), "Expected null req or a sync call");
+        
+            write_nmirror(iov, iovcnt, size, chunk, dev_offset);
+        }
+    }
 
-            // Write to the mirror as well
-            for (auto i : boost::irange< uint32_t >(0, get_nmirrors())) {
-                for (auto mchunk : m_mirror_chunks.find(chunk)->second) {
-                    dev_offset = mchunk->get_start_offset() + primary_chunk_offset;
+    void write_nmirror(const iovec* iov, int iovcnt, uint32_t size, PhysicalDevChunk* chunk, uint64_t dev_offset) {
+        uint64_t primary_chunk_offset = dev_offset - chunk->get_start_offset();
 
-                    // We do not support async mirrored writes yet.
-                    HS_ASSERT(DEBUG, ((req == nullptr) || req->isSyncCall), "Expected null req or a sync call");
-                    auto pdev = mchunk->get_physical_dev_mutable();
+        // Write to the mirror as well
+        for (auto i : boost::irange< uint32_t >(0, get_nmirrors())) {
+            for (auto mchunk : m_mirror_chunks.find(chunk)->second) {
+                dev_offset = mchunk->get_start_offset() + primary_chunk_offset;
 
-                    COUNTER_INCREMENT(pdev->get_metrics(), drive_sync_write_count, 1);
-                    auto start_time = Clock::now();
-                    pdev->sync_writev(iov, iovcnt, size, dev_offset);
-                    HISTOGRAM_OBSERVE(pdev->get_metrics(), drive_write_latency, get_elapsed_time_us(start_time));
-                }
+                // We do not support async mirrored writes yet.
+                auto pdev = mchunk->get_physical_dev_mutable();
+
+                COUNTER_INCREMENT(pdev->get_metrics(), drive_sync_write_count, 1);
+                auto start_time = Clock::now();
+                pdev->sync_writev(iov, iovcnt, size, dev_offset);
+                HISTOGRAM_OBSERVE(pdev->get_metrics(), drive_write_latency, get_elapsed_time_us(start_time));
             }
         }
+
     }
 
     void read_nmirror(const BlkId& bid, std::vector< boost::intrusive_ptr< homeds::MemVector > > mp, uint64_t size,

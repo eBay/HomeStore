@@ -1,6 +1,7 @@
 #pragma once
 #include "write_log_recorder.hpp"
 #include "vol_crc_persist_mgr.hpp"
+#include <logdb/log_db.hpp>
 
 #define MAX_DEVICES     2
 #define VOL_PREFIX      "/tmp/vol"
@@ -284,11 +285,21 @@ public:
             std::lock_guard<std::mutex>   lk(m_vol_info[vol_id]->m_mtx);
             reset_bm_bits(vol_id, lba, nblks);
         }
-        
+
+        logdb_write(vol_id, lba, nblks);
+                
         return ret_io;
     }
         
 private:
+    void logdb_write(uint64_t vol_id, uint64_t lba, uint64_t nblks) {
+        stringstream ss;
+        ss << vol_id << " " << lba << " " << nblks;
+
+        uint64_t offset;
+        LogDB::instance()->append_write((void*)(ss.str().c_str()), ss.str().size(), offset);
+    }
+        
 
     uint64_t get_rand_vol() {
         std::random_device rd; 

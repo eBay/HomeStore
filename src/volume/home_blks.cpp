@@ -529,6 +529,7 @@ void HomeBlks::new_vdev_found(DeviceManager* dev_mgr, vdev_info_block* vb) {
     case DATA_STORE: HomeBlks::instance()->create_data_blkstore(vb); break;
     case METADATA_STORE: HomeBlks::instance()->create_metadata_blkstore(vb); break;
     case SB_STORE: HomeBlks::instance()->create_sb_blkstore(vb); break;
+    case LOG_DB_STORE: HomeBlks::instance()->create_logdb_blkstore(vb); break;
     default: assert(0);
     }
 }
@@ -537,6 +538,7 @@ void HomeBlks::create_blkstores() {
     create_data_blkstore(nullptr);
     create_metadata_blkstore(nullptr);
     create_sb_blkstore(nullptr);
+    create_logdb_blkstore(nullptr);
 }
 
 void HomeBlks::attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback cb) {
@@ -564,6 +566,10 @@ bool HomeBlks::vol_state_change(const VolumePtr& vol, vol_state new_state) {
         return false;
     }
     return true;
+}
+
+homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >* HomeBlks::get_logdb_blkstore() {
+    return m_logdb_blk_store;
 }
 
 homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >* HomeBlks::get_data_blkstore() {
@@ -713,6 +719,27 @@ void HomeBlks::init_done(std::error_condition err, const out_params& params) {
         LOGINFO("{}", system_cap.to_string());
     }
     m_cfg.init_done_cb(err, m_out_params);
+}
+
+
+void HomeBlks::create_logdb_blkstore(vdev_info_block* vb) {
+    if (vb == nullptr) {
+        struct blkstore_blob blob;
+        blob.type = blkstore_type::LOG_DB_STORE;
+        uint64_t size = (1 * m_dev_mgr->get_total_cap()) / 100;
+        size = ALIGN_SIZE(size, HomeStoreConfig::phys_page_size);
+        m_logdb_blk_store = new BlkStore< VdevVarSizeBlkAllocatorPolicy >(
+            m_dev_mgr, m_cache, size, PASS_THRU, 0, (char*)&blob, sizeof(blkstore_blob),
+            HomeStoreConfig::atomic_phys_page_size, "logdb");
+    } else {
+        m_logdb_blk_store = new BlkStore< VdevVarSizeBlkAllocatorPolicy >(
+            m_dev_mgr, m_cache, vb, PASS_THRU, HomeStoreConfig::atomic_phys_page_size, "logdb",
+            (vb->failed ? true : false));
+        if (vb->failed) {
+            m_vdev_failed = true;
+            LOGINFO("logdb block store is in failed state");
+        }
+    }
 }
 
 void HomeBlks::create_data_blkstore(vdev_info_block* vb) {

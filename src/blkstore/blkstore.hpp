@@ -137,6 +137,7 @@ public:
              const char*       name,             // Name for blkstore
              comp_callback     comp_cb = nullptr // Callback on completion. It can be attached later as well.
              ) :
+            m_size(size),
             m_pagesz(page_size),
             m_cache(cache),
             m_wb_cache(cache, ([this](boost::intrusive_ptr< writeback_req > req, std::error_condition status) {
@@ -177,6 +178,8 @@ public:
     ~BlkStore() {
     
     }
+    
+    uint64_t get_size() { return m_size; }
 
     void attach_compl(comp_callback comp_cb) { m_comp_cb = comp_cb; }
 
@@ -392,6 +395,7 @@ public:
         /* mark this req as completed in writeback_cache to do the clean up. */
         m_wb_cache.writeBack_completion(req->bbuf, to_wb_req(req), status);
     }
+
 
     void write(BlkId& bid, homeds::MemVector& mvec) { m_vdev.write(bid, mvec, nullptr, 0); }
 
@@ -636,7 +640,15 @@ public:
 
     VirtualDev< BAllocator, RoundRobinDeviceSelector >* get_vdev() { return &m_vdev; };
 
+    // 
+    // Append buffer with variable size at the end and write to disk;
+    //
+    uint64_t append_write(void* buf, uint64_t len) {
+        return m_vdev.append_write(buf, len);  
+    }
+
 private:
+    uint64_t                                           m_size;
     uint32_t                                           m_pagesz;
     Cache< BlkId >*                                    m_cache;
     WriteBackCache< BlkId >                            m_wb_cache;
