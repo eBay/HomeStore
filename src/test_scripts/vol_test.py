@@ -145,8 +145,11 @@ def vol_offline_test():
 def vol_io_fail_test():
     print("vol io fail test started")
     
-    subprocess.check_call(dirpath + "test_volume \
-           --gtest_filter=IOTest.vol_io_fail_test --run_time=300 --remove_file=0", shell=True, stderr=subprocess.STDOUT)
+    process = Popen([dirpath + "test_volume", "--gtest_filter=IOTest.vol_io_fail_test", "--run_time=30", "--remove_file=0"])
+    p_status = process.wait()
+    if p_status != 0:
+        print ("test failed")
+        sys.exit(-1)
     print("vol io test test passed")
     
     print("vol io fail test recovery started")

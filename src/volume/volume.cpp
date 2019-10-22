@@ -127,6 +127,8 @@ void Volume::set_io_flip() {
     fc->inject_retval_flip("vol_delay_read_us", {}, freq, 20);
 
     fc->inject_retval_flip("cache_insert_race", {}, freq, 20);
+    fc->inject_retval_flip("io_write_iocb_empty_flip", {}, freq, 20);
+    fc->inject_retval_flip("io_read_iocb_empty_flip", {}, freq, 20);
     
     fc->create_condition("nuber of blks in a write", flip::Operator::EQUAL, 8, &cond1);
     fc->inject_retval_flip("blkalloc_split_blk", {cond1}, freq, 4);

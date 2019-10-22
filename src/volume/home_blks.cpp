@@ -706,6 +706,11 @@ void HomeBlks::init_done(std::error_condition err, const out_params& params) {
         LOGINFO("{}", system_cap.to_string());
     }
     m_cfg.init_done_cb(err, m_out_params);
+
+#ifndef NDEBUG
+    /* It will trigger race conditions without generating any IO error */
+    set_io_flip();
+#endif
 }
 
 void HomeBlks::create_data_blkstore(vdev_info_block* vb) {
