@@ -29,7 +29,6 @@ LogDB* LogDB::instance() {
 //
 bool LogDB::append_write(void* buf, uint64_t len, uint64_t& out_offset) {
     std::lock_guard<std::mutex> l(m_mtx);
-    std::vector<uint8_t>  data;
 
     size_t data_sz = sizeof(LogDBRecordHeader) + len + sizeof(LogDBRecordFooter);
 
@@ -38,30 +37,36 @@ bool LogDB::append_write(void* buf, uint64_t len, uint64_t& out_offset) {
         HS_LOG(ERROR, logdb, "Fail to write to logdb. No space left: {}, {}, {}", m_write_size, data_sz, len);
         return false;
     }
-
-    m_write_size += data_sz;
-
-    data.reserve(data_sz);
-    fill(data.begin(), data.end(), 0);
     
-    LogDBRecordHeader* hdr = (LogDBRecordHeader*)&data[0];
+    // buf will be freed automatcially after ref drops to 0
+    boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector());
+
+    LogDBRecordHeader *hdr = new LogDBRecordHeader();
 
     hdr->m_version = LOG_DB_RECORD_HDR_VER;
     hdr->m_magic = LOG_DB_RECORD_HDR_MAGIC;
     hdr->m_crc = crc32_ieee(init_crc32, (unsigned char*)buf, len);
     hdr->m_len = len;
 
-    // do buf copy
-    std::memcpy(hdr + sizeof(LogDBRecordHeader), buf, len);
-    
-    // save the previous crc in the footer;
-    LogDBRecordFooter* ft = (LogDBRecordFooter*)&data[data_sz - sizeof(LogDBRecordFooter)];
+    // send the write request with MemVector to avoid data copy
+    MemPiece mp_hdr((uint8_t*)hdr, (uint32_t)sizeof(LogDBRecordHeader), 0ul);
+    mvec->push_back(mp_hdr);
+
+    MemPiece mp_data((uint8_t*)buf, (uint32_t)len, 0ul);
+    mvec->push_back(mp_data);
+
+    LogDBRecordFooter* ft = new LogDBRecordFooter();
+
     ft->m_prev_crc = m_last_crc;
+
+    MemPiece mp_ft((uint8_t*)ft, (uint32_t)sizeof(LogDBRecordFooter), 0ul);
+    mvec->push_back(mp_ft);
 
     m_last_crc = hdr->m_crc;
 
-    out_offset = m_blkstore->append_write((void*)&data[0], data_sz);
+    out_offset = m_blkstore->write_at_offset(mvec, m_write_size);
 
+    m_write_size += data_sz;
     return true;
 }
 }

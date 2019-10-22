@@ -180,12 +180,6 @@ template < typename Allocator, typename DefaultDeviceSelector >
 class VirtualDev : public AbstractVirtualDev {
     typedef std::function< void(boost::intrusive_ptr< virtualdev_req > req) > comp_callback;
 
-    struct AppendWriteTail {
-        uint32_t m_dev_id;
-        uint32_t m_chunk_id;
-        uint64_t m_offset;  // offset in chunk, range is [0, m_chunk_size];
-    };
-
 private:
     vdev_info_block* m_vb;         // This device block info
     DeviceManager*   m_mgr;        // Device Manager back pointer
@@ -207,10 +201,6 @@ private:
     bool                                     m_recovery_init;
     std::atomic< uint64_t >                  m_used_size;
 
-    // for append_write:
-    AppendWriteTail                          m_app_tail;
-    std::mutex                               m_app_mtx;  // mutex taken for any update on m_app_tail;
-
 public:
     void init(DeviceManager* mgr, vdev_info_block* vb, comp_callback cb, uint32_t page_size) {
         m_mgr = mgr;
@@ -222,9 +212,6 @@ public:
         m_pagesz = page_size;
         m_selector = std::make_unique< DefaultDeviceSelector >();
         m_recovery_init = false;
-        m_app_tail.m_dev_id = 0;
-        m_app_tail.m_chunk_id = 0;
-        m_app_tail.m_offset = 0;
     }
 
     /* Load the virtual dev from vdev_info_block and create a Virtual Dev. */
@@ -344,66 +331,66 @@ public:
     }
 
     // 
-    // Journal append write:
-    // 1. Append this buf and return the offset;
-    // 2. Advance tail to prepare for next append;
-    // 
-    // Note: 
-    // The space check is managed by upper layer; 
-    //
     // TODO: 
     // 1. Write by chunks instead of seq fill in same chunk:
     //    chunk-1, chunk-2, chunk-3, chunk-1, chunk-2, ...
     //
-    uint64_t append_write(void* buf, uint64_t len) {
-        uint64_t offset_in_chunk = 0, dev_id = 0, chunk_id = 0;
-        {
-            std::lock_guard<std::mutex>  l(m_app_mtx);
-            if (len + m_app_tail.m_offset > m_chunk_size) {
-                if (m_app_tail.m_chunk_id + 1 >= m_primary_pdev_chunks_list[m_app_tail.m_dev_id].chunks_in_pdev.size()) {
-                    // last chunk in current device, advance dev id;
-                    m_app_tail.m_chunk_id = 0;
-                    m_app_tail.m_dev_id = (m_app_tail.m_dev_id + 1) % m_primary_pdev_chunks_list.size();
-                } else {
-                    // advance chunk id;
-                    m_app_tail.m_chunk_id++;
-                }
-                m_app_tail.m_offset = 0;
-            }
-
-            offset_in_chunk  = m_app_tail.m_offset;
-            dev_id = m_app_tail.m_dev_id;
-            chunk_id = m_app_tail.m_chunk_id;
-        
-            // update offset;
-            m_app_tail.m_offset += len;
-        }
-
-        // lock is releaed here and other I/O threads could acquire the lock to do append_write in parallel;
-        
+    bool write_at_offset(boost::intrusive_ptr< homeds::MemVector > mvec, uint64_t offset) {
+        uint32_t dev_id = 0, chunk_id = 0; 
+        uint64_t offset_in_chunk = 0;
+        uint64_t dev_offset = logical_to_dev_offset(offset, dev_id, chunk_id, offset_in_chunk);
+       
         // do the sync write;
-        write_sync(dev_id, chunk_id, offset_in_chunk, buf, len);
+        write_sync(dev_offset, chunk_id, mvec);
 
-        return to_glob_uniq_offset(dev_id, chunk_id, offset_in_chunk);
+        return true;
     }
     
-    void write_sync(uint32_t dev_id, uint32_t chunk_id, uint64_t offset_in_chunk, void* buf, uint64_t len) {
-        auto chunk = m_mgr->get_chunk_mutable(chunk_id);
-        auto dev_offset = get_chunk_start_offset(dev_id, chunk_id) + offset_in_chunk;
-        struct iovec iov[1];
+    // 
+    // convert from logical offset to device offset
+    //
+    uint64_t logical_to_dev_offset(uint64_t log_offset, uint32_t& dev_id, uint32_t& chunk_id, uint64_t& offset_in_chunk) {
+        dev_id = 0;
+        chunk_id = 0;
+        offset_in_chunk = 0;
+        
+        uint64_t off_l = log_offset;
+        for (size_t d = 0; d < m_primary_pdev_chunks_list.size(); d++) {
+            for (size_t c = 0; c < m_primary_pdev_chunks_list[d].chunks_in_pdev.size(); c++) {
+                if (off_l < m_chunk_size) {
+                    off_l -= m_chunk_size;
+                } else {
+                    dev_id = d; 
+                    chunk_id = c;
+                    offset_in_chunk = off_l;
+                    return to_glob_uniq_offset(dev_id, chunk_id, offset_in_chunk);
+                }
+            }
+        }
+        
+        HS_ASSERT(DEBUG, false, "Input log_offset is invalid: {}, should be between 0 ~ {}", log_offset, m_chunk_size * m_num_chunks);
+        return 0;
+    }
 
-        iov[0].iov_base= (uint8_t*) buf;
-        iov[0].iov_len = len;
+    void write_sync(uint64_t dev_offset, uint32_t chunk_id, boost::intrusive_ptr< homeds::MemVector > mvec) {
+        auto chunk = m_mgr->get_chunk_mutable(chunk_id);
+        const int iovcnt = mvec->npieces();
+        struct iovec iov[iovcnt];
+
+        for (int i = 0; i < iovcnt; i++) {
+            iov[i].iov_base = mvec->get_nth_piece(i).ptr();
+            iov[i].iov_len = mvec->get_nth_piece(i).size();
+        }
 
         auto pdev = chunk->get_physical_dev_mutable();
         
         HS_LOG(INFO, device, "Writing in device: {}, offset = {}", pdev->get_dev_id(), dev_offset);
 
         COUNTER_INCREMENT(pdev->get_metrics(), drive_write_vector_count, 1);
-        pdev->sync_writev(iov, 1, len, dev_offset);
+        pdev->sync_writev(iov, iovcnt, mvec->size(), dev_offset);
 
         if (get_nmirrors()) {
-            write_nmirror(iov, 1, len, chunk, dev_offset);
+            write_nmirror(iov, iovcnt, mvec->size(), chunk, dev_offset);
         }
     }
 

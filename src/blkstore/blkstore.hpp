@@ -643,8 +643,8 @@ public:
     // 
     // Append buffer with variable size at the end and write to disk;
     //
-    uint64_t append_write(void* buf, uint64_t len) {
-        return m_vdev.append_write(buf, len);  
+    uint64_t write_at_offset(boost::intrusive_ptr< homeds::MemVector > mvec, uint64_t offset) {
+        return m_vdev.write_at_offset(mvec, offset);  
     }
 
 private:
