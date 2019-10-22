@@ -432,6 +432,7 @@ int main(int argc, const char *argv[]) {
     btree_cfg.set_max_objs(nTotalCount);
     btree_cfg.set_max_key_size(sizeof(TestEntry));
     btree_cfg.set_max_value_size(0);
+    btree_cfg.set_node_size(4096);
     MemBtree< TestEntry, EmptyClass> bt(btree_cfg);
 
     threadarg_t *targs = new threadarg_t[nThreads];

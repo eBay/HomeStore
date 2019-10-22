@@ -42,25 +42,25 @@ namespace btree {
 #define container_of(ptr, type, member) ({ (type*)((char*)ptr - offsetof(type, member)); })
 #endif
 
-#define btree_t Btree< BtreeStoreType, K, V, InteriorNodeType, LeafNodeType, NodeSize, btree_req_type >
+#define btree_t Btree< BtreeStoreType, K, V, InteriorNodeType, LeafNodeType, btree_req_type >
 
 struct btree_super_block {
     bnodeid root_node;
 } __attribute((packed));
 
 template < btree_store_type BtreeStoreType, typename K, typename V, btree_node_type InteriorNodeType,
-        btree_node_type LeafNodeType, size_t NodeSize = 8192, typename btree_req_type = struct empty_writeback_req >
+        btree_node_type LeafNodeType, typename btree_req_type = struct empty_writeback_req >
 struct _btree_locked_node_info {
     btree_node_t* node;
     Clock::time_point start_time;
 };
 
 #define btree_locked_node_info  \
-    _btree_locked_node_info< BtreeStoreType, K, V, InteriorNodeType, LeafNodeType, NodeSize, btree_req_type>
+    _btree_locked_node_info< BtreeStoreType, K, V, InteriorNodeType, LeafNodeType, btree_req_type>
 
 
 template < btree_store_type BtreeStoreType, typename K, typename V, btree_node_type InteriorNodeType,
-           btree_node_type LeafNodeType, size_t NodeSize = 8192, typename btree_req_type = struct empty_writeback_req >
+           btree_node_type LeafNodeType, typename btree_req_type = struct empty_writeback_req >
 class Btree {
     typedef std::function< void(boost::intrusive_ptr< btree_req_type > cookie, bool status) > comp_callback;
     typedef std::function< void (V& mv) >      free_blk_callback;
@@ -79,6 +79,7 @@ private:
     comp_callback m_comp_cb;
     bool m_destroy = false;
     std::atomic<uint64_t> m_total_nodes = 0;
+    uint32_t    m_node_size = 4096;
 #ifndef NDEBUG
     std::atomic<uint64_t> m_req_id = 0;
 #endif
@@ -204,7 +205,6 @@ public:
     }
 
     void do_common_init() {
-        BtreeNodeAllocator< NodeSize >::create();
 
         // TODO: Check if node_area_size need to include persistent header
         uint32_t node_area_size = btree_store_t::get_node_area_size(m_btree_store.get());
@@ -232,7 +232,7 @@ public:
 
     Btree(BtreeConfig &cfg) :
             m_btree_cfg(cfg),
-            m_metrics(BtreeStoreType, cfg.get_name().c_str()) {}
+            m_metrics(BtreeStoreType, cfg.get_name().c_str()), m_node_size(cfg.get_node_size()) {}
     
     ~Btree() {
         if (!m_destroy) {
@@ -323,7 +323,7 @@ public:
     }
 
     uint64_t get_used_size() {
-        return NodeSize * m_total_nodes.load();
+        return m_node_size * m_total_nodes.load();
     }
 
     btree_status_t range_put(const BtreeKey &k, const BtreeValue &v, btree_put_type put_type,
@@ -2460,7 +2460,7 @@ out:
 
         COUNTER_INCREMENT_IF_ELSE(m_metrics, node->is_leaf(), btree_leaf_node_writes, btree_int_node_writes, 1);
         HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, node->is_leaf(), btree_leaf_node_occupancy, btree_int_node_occupancy,
-                                  ((NodeSize - node->get_available_size(m_btree_cfg)) * 100)/NodeSize);
+                                  ((m_node_size - node->get_available_size(m_btree_cfg)) * 100)/m_node_size);
         return(btree_store_t::write_node(m_btree_store.get(), node, multinode_req));
     }
 
@@ -2643,16 +2643,16 @@ protected:
 //static inline const char* _type_desc(BtreeNodePtr n) { return n->is_leaf() ? "L" : "I"; }
 
 template < btree_store_type BtreeStoreType, typename K, typename V, btree_node_type InteriorNodeType,
-           btree_node_type LeafNodeType, size_t NodeSize, typename btree_req_type >
+           btree_node_type LeafNodeType, typename btree_req_type >
 thread_local homeds::reserve_vector< btree_locked_node_info, 5 > btree_t::wr_locked_nodes;
 
 template < btree_store_type BtreeStoreType, typename K, typename V, btree_node_type InteriorNodeType,
-           btree_node_type LeafNodeType, size_t NodeSize, typename btree_req_type >
+           btree_node_type LeafNodeType, typename btree_req_type >
 thread_local homeds::reserve_vector< btree_locked_node_info, 5 > btree_t::rd_locked_nodes;
 
 #ifdef SERIALIZABLE_QUERY_IMPLEMENTATION
 template < btree_store_type BtreeStoreType, typename K, typename V, btree_node_type InteriorNodeType,
-           btree_node_type LeafNodeType, size_t NodeSize = 8192, typename btree_req_type = struct empty_writeback_req >
+           btree_node_type LeafNodeType, typename btree_req_type = struct empty_writeback_req >
 class BtreeLockTrackerImpl : public BtreeLockTracker {
 public:
     BtreeLockTrackerImpl(btree_t* bt) : m_bt(bt) {}

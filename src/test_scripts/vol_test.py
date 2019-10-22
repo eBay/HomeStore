@@ -145,8 +145,11 @@ def vol_offline_test():
 def vol_io_fail_test():
     print("vol io fail test started")
     
-    subprocess.check_call(dirpath + "test_volume \
-           --gtest_filter=IOTest.vol_io_fail_test --run_time=300 --remove_file=0", shell=True, stderr=subprocess.STDOUT)
+    process = Popen([dirpath + "test_volume", "--gtest_filter=IOTest.vol_io_fail_test", "--run_time=30", "--remove_file=0"])
+    p_status = process.wait()
+    if p_status != 0:
+        print ("test failed")
+        sys.exit(-1)
     print("vol io test test passed")
     
     print("vol io fail test recovery started")
@@ -159,7 +162,7 @@ def vol_io_fail_test():
 def vol_create_del_test():
     print("create del vol test started")
     subprocess.check_call(dirpath + "test_volume \
-               --gtest_filter=IOTest.vol_create_del_test --max_volume=10000", shell=True, stderr=subprocess.STDOUT)
+               --gtest_filter=IOTest.vol_create_del_test --max_volume=1000", shell=True, stderr=subprocess.STDOUT)
     print("create del vol test passed")
 
 def seq_load_start():
@@ -207,7 +210,7 @@ def nightly():
     vol_offline_test()
     sleep(5)
 
-    vol_io_fail_test()
+  #  vol_io_fail_test()
     sleep(5)
 
     vol_create_del_test()

@@ -356,7 +356,7 @@ public:
             notify_cmpl();
             return;
         }
-        
+        max_io_size = params.max_io_size;
         auto ret = posix_memalign((void **) &init_buf, 4096, max_io_size);
         assert(!ret);
         bzero(init_buf, max_io_size);
