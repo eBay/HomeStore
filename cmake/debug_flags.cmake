@@ -39,25 +39,39 @@
 # missing values. With these, I've never seen a stack frame I couldn't step
 # into, and never seen <optimized out> when I look at a local.
 #
-set (REALLY_NO_OPTIMIZATION_FLAGS "-fno-short-enums"                                                    )# Binary-incompatible with code compiled otherwise.
-set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-aggressive-loop-optimizations"  ) # Changes behavior on overflow.
-set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-branch-count-reg"               )# Changes CPU instructions used.  set (REALLY_NO_OPTIMIZATION_FLAGS ="${REALLY_NO_OPTIMIZATION_FLAGS}+= -fno-dce                           )# Can be wrong in the presence of bugs (CBWITPOB).  set (REALLY_NO_OPTIMIZATION_FLAGS ="${REALLY_NO_OPTIMIZATION_FLAGS}+= -fno-delete-null-pointer-checks    )# CBWITPOB.  set (REALLY_NO_OPTIMIZATION_FLAGS ="${REALLY_NO_OPTIMIZATION_FLAGS}+= -fno-dse                           )# CBWITPOB.  set (REALLY_NO_OPTIMIZATION_FLAGS ="${REALLY_NO_OPTIMIZATION_FLAGS}+= -fno-early-inlining                )# NO INLINING! Because...  set (REALLY_NO_OPTIMIZATION_FLAGS ="${REALLY_NO_OPTIMIZATION_FLAGS}+= -fno-gcse-lm                       )# Changes CPU instructions used.  set (REALLY_NO_OPTIMIZATION_FLAGS ="${REALLY_NO_OPTIMIZATION_FLAGS}+= -fno-inline                        )# ...inlining also does things like elide locals.  set (REALLY_NO_OPTIMIZATION_FLAGS ="${REALLY_NO_OPTIMIZATION_FLAGS}+= -fno-ira-hoist-pressure            )# Might be irrelevant, but NO HOISTING!  set (REALLY_NO_OPTIMIZATION_FLAGS ="${REALLY_NO_OPTIMIZATION_FLAGS}+= -fno-ivopts                        )# Elides and changes instructions. CBWITPOB.  set (REALLY_NO_OPTIMIZATION_FLAGS ="${REALLY_NO_OPTIMIZATION_FLAGS}+= -fno-jump-tables                   )# Changes CPU instructions for switch statements.  set (REALLY_NO_OPTIMIZATION_FLAGS ="${REALLY_NO_OPTIMIZATION_FLAGS}+= -fno-move-loop-invariants          )# NO HOISTING!  set (REALLY_NO_OPTIMIZATION_FLAGS ="${REALLY_NO_OPTIMIZATION_FLAGS}+= -fno-peephole                      )# Exploiting CPU quirks. CBWITPOB.  set (REALLY_NO_OPTIMIZATION_FLAGS ="${REALLY_NO_OPTIMIZATION_FLAGS}+= -fno-prefetch-loop-arrays          )# Changes CPU instructions, even GCC manual is ambivalent.
-set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-rename-registers"               )# Maybe wrong in the presence of bugs?
-set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-toplevel-reorder"               )# Elides unused static variable, reorders globals.
-set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-tree-coalesce-vars"             )# Elides temporaries. CBWITPOB.
-set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-tree-cselim"                    )# Reorders, violates C++ mem model, CBWITPOB.
-set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-tree-forwprop"                  )# Reorders and changes instructions. CBWITPOB.
-set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-tree-loop-if-convert"           )# Reorders and changes instructions. CBWITPOB.
-set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-tree-loop-im"                   )# Reorders and changes instructions. CBWITPOB.
-set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-tree-loop-optimize"             )# Reorders and changes instructions. CBWITPOB.
-set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-tree-phiprop"                   )# NO HOISTING! Reorders and changes. CBWITPOB.
-set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-tree-pta"                       )# Less analysis means maybe less interference.
-set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-tree-reassoc"                   )# Elides and vectories.
-set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-tree-scev-cprop"                )# Elides and changes instructions.
-set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-tree-vect-loop-version"         )# E&C.
-set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-web"                            )# E&C.
-set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-tree-slp-vectorize"             )# E&C.
-set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fthreadsafe-statics"                )# Slightly smaller in code that doesn't need to be TS.
+set (REALLY_NO_OPTIMIZATION_FLAGS "-fno-short-enums"                                                  )# Binary-incompatible with code compiled otherwise.
+set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-aggressive-loop-optimizations") # Changes behavior on overflow.
+set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-branch-count-reg"             )# Changes CPU instructions used.
+set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-dce"                          )# Can be wrong in the presence of bugs (CBWITPOB).
+set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-delete-null-pointer-checks"   )# CBWITPOB.
+set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-dse"                          )# CBWITPOB.
+set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-early-inlining"               )# NO INLINING! Because...
+set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-gcse-lm"                      )# Changes CPU instructions used.
+set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-inline"                       )# ...inlining also does things like elide locals.
+set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-inline-small-functions"       )# ...inlining also does things like elide locals.
+set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-default-inline"               )# ...inlining also does things like elide locals.
+set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-ira-hoist-pressure"           )# Might be irrelevant, but NO HOISTING!
+set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-ivopts"                       )# Elides and changes instructions. CBWITPOB.
+set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-jump-tables"                  )# Changes CPU instructions for switch statements.
+set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-move-loop-invariants"         )# NO HOISTING!
+set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-peephole"                     )# Exploiting CPU quirks. CBWITPOB.
+set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-prefetch-loop-arrays"         )# Changes CPU instructions, even GCC manual is ambivalent.
+set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-rename-registers"             )# Maybe wrong in the presence of bugs?
+set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-toplevel-reorder"             )# Elides unused static variable, reorders globals.
+set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-tree-coalesce-vars"           )# Elides temporaries. CBWITPOB.
+set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-tree-cselim"                  )# Reorders, violates C++ mem model, CBWITPOB.
+set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-tree-forwprop"                )# Reorders and changes instructions. CBWITPOB.
+set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-tree-loop-if-convert"         )# Reorders and changes instructions. CBWITPOB.
+set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-tree-loop-im"                 )# Reorders and changes instructions. CBWITPOB.
+set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-tree-loop-optimize"           )# Reorders and changes instructions. CBWITPOB.
+set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-tree-phiprop"                 )# NO HOISTING! Reorders and changes. CBWITPOB.
+set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-tree-pta"                     )# Less analysis means maybe less interference.
+set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-tree-reassoc"                 )# Elides and vectories.
+set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-tree-scev-cprop"              )# Elides and changes instructions.
+set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-tree-vect-loop-version"       )# E&C.
+set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-web"                          )# E&C.
+set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fno-tree-slp-vectorize"           )# E&C.
+set (REALLY_NO_OPTIMIZATION_FLAGS "${REALLY_NO_OPTIMIZATION_FLAGS} -fthreadsafe-statics"              )# Slightly smaller in code that doesn't need to be TS.
 
 if (${CONAN_BUILD_COVERAGE})
   include (cmake/CodeCoverage.cmake)
