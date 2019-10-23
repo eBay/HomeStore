@@ -10,6 +10,7 @@
 #include <nlohmann/json.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/uuid/uuid_io.hpp>
+#include <logdb/log_db.hpp>
 
 SDS_OPTION_GROUP(home_blks, (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service", cxxopts::value<int32_t>()->default_value("5000"), "port"))
 
@@ -730,11 +731,13 @@ void HomeBlks::create_logdb_blkstore(vdev_info_block* vb) {
         size = ALIGN_SIZE(size, HomeStoreConfig::phys_page_size);
         m_logdb_blk_store = new BlkStore< VdevVarSizeBlkAllocatorPolicy >(
             m_dev_mgr, m_cache, size, PASS_THRU, 0, (char*)&blob, sizeof(blkstore_blob),
-            HomeStoreConfig::atomic_phys_page_size, "logdb");
+            HomeStoreConfig::atomic_phys_page_size, "logdb", 
+            LogDev::process_log_data_completions);
     } else {
         m_logdb_blk_store = new BlkStore< VdevVarSizeBlkAllocatorPolicy >(
             m_dev_mgr, m_cache, vb, PASS_THRU, HomeStoreConfig::atomic_phys_page_size, "logdb",
-            (vb->failed ? true : false));
+            (vb->failed ? true : false), 
+            LogDev::process_log_data_completions);
         if (vb->failed) {
             m_vdev_failed = true;
             LOGINFO("logdb block store is in failed state");

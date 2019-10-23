@@ -14,7 +14,7 @@ const uint32_t LOG_DB_RECORD_HDR_VER = 0x1;
 const uint32_t INVALID_CRC32_VALUE = 0x0;
 
 // 
-//  LogDB Layout: 
+//  LogDev Layout: 
 // 
 // First Record               Last Record
 //  |                             |
@@ -24,49 +24,81 @@ const uint32_t INVALID_CRC32_VALUE = 0x0;
 //  ------------------------------------------
 //  |<-- 1 --> | <-- 2 -->|  ...  |<-- N --> |   
 //
-struct LogDBRecordHeader {
+struct LogDevRecordHeader {
     uint8_t     m_version;
     uint32_t    m_magic;
     uint32_t    m_crc;      // crc of this record; 
     uint32_t    m_len;      // len of data for this record;
 };
 
-struct LogDBRecordFooter {
+struct LogDevRecordFooter {
     uint32_t    m_prev_crc;  // crc of previous record
 };
 
+struct logdev_req;
+typedef boost::intrusive_ptr< logdev_req > logdev_req_ptr;
+
+struct logdev_req : public blkstore_req< BlkBuffer > {
+public:
+    static boost::intrusive_ptr< logdev_req > make_request() {
+        return boost::intrusive_ptr< logdev_req >(homeds::ObjectAllocator< logdev_req >::make_object());
+    }
+
+    virtual void free_yourself() override { homeds::ObjectAllocator< logdev_req >::deallocate(this); }
+
+    virtual ~logdev_req() = default;
+
+    // virtual size_t get_your_size() const override { return sizeof(ssd_loadgen_req); }
+
+    static logdev_req_ptr cast(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req) {
+        return boost::static_pointer_cast< logdev_req >(bs_req);
+    }
+
+protected:
+    friend class homeds::ObjectAllocator< logdev_req >;
+};
+
 //
-// We have only one LogDB instance serving all the volume log write requests;
+// We have only one LogDev instance serving all the volume log write requests;
 //
-// LogDB exposes APIs to LogStore layer.
+// LogDev exposes APIs to LogStore layer.
 //  
+// TODO:
+// 3. generate log_id
+// 4. Recovery support : journal superblock;
+// 5. Handle multiple chunk in blkstore layer
+// 
+// 5. Remove mutex because only one will write (Group Commit)
+// 6. LogDevReq and re-use this one for later write;
 //
-class LogDB {
+class LogDev {
     
 public:
-    LogDB();
-    ~LogDB();
+    LogDev();
+    ~LogDev();
     
-    static LogDB* instance();
+    static LogDev* instance();
     
-    // return offset 
-    bool append_write(void* buf, uint64_t len, uint64_t& offset);
+    static void process_log_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
+
+    // returns offset 
+    bool append_write(boost::intrusive_ptr< homeds::MemVector > mvec, uint64_t& offset, boost::intrusive_ptr< logdev_req > req);
     
-    // Read
+    // return true if the given offset is a valid start of a record
+    bool read(const homeds::MemPiece& mp, uint64_t offset, boost::intrusive_ptr< logdev_req > req);
     
     // Group Commit 
    
     // Compact
 
 private:
+    uint32_t cal_crc(boost::intrusive_ptr< homeds::MemVector > mvec);
 
 private:
     homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >*    m_blkstore;
     uint64_t                                                            m_write_size;   
     uint32_t                                                            m_last_crc;
-    std::mutex                                                          m_mtx;
-    static LogDB*                                                       _instance;
-    // support group commit 
+    static LogDev*                                                       _instance;
 
-}; // LogDB
+}; // LogDev
 } // homestore

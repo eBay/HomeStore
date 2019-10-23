@@ -297,7 +297,11 @@ private:
         ss << vol_id << " " << lba << " " << nblks;
 
         uint64_t offset;
-        LogDB::instance()->append_write((void*)(ss.str().c_str()), ss.str().size(), offset);
+        
+        boost::intrusive_ptr< logdev_req > req = logdev_req::make_request();
+        boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector());
+        mvec->set((uint8_t*)(ss.str().c_str()), ss.str().size(), 0);
+        LogDev::instance()->append_write(mvec, offset, req);
     }
         
 

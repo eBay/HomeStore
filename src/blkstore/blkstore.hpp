@@ -643,8 +643,9 @@ public:
     // 
     // Append buffer with variable size at the end and write to disk;
     //
-    uint64_t write_at_offset(boost::intrusive_ptr< homeds::MemVector > mvec, uint64_t offset) {
-        return m_vdev.write_at_offset(mvec, offset);  
+    uint64_t write_at_offset(boost::intrusive_ptr< homeds::MemVector > mvec, uint64_t offset, boost::intrusive_ptr< writeback_req > wb_req) {
+        auto req = to_blkstore_req(wb_req);
+        return m_vdev.write_at_offset(mvec, offset,  to_vdev_req(req));  
     }
 
 private:
