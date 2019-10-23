@@ -19,6 +19,7 @@ from home_blk_flip import *
 
 opts,args = getopt.getopt(sys.argv[1:], 't:m:a:d:', ['test_type=', 'mnt_points=', 'am_ip_addrs=', 'dirpath='])
 dirpath = "./"
+test_type = "io_error_tests"
 
 # parse arguments
 for opt,arg in opts:
@@ -63,10 +64,12 @@ if test_type == "drive_fatal_tests":
     # reboot AM after few minutes
 
 if test_type == "reboot_one_am_tests":
+    print("invalid test")
     # reboot any one AM
 
 if test_type == "reboot_all_am_tests":
     # reboot all AMs
+    print("invalid test")
 
 p_status = process.wait()
 if p_status != 0:

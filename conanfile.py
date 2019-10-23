@@ -115,4 +115,5 @@ class HomestoreConan(ConanFile):
         self.copy("*test_load", dst="/usr/local/bin", keep_path=False)
         self.copy("*test_mapping", dst="/usr/local/bin", keep_path=False)
         self.copy("*test_volume", dst="/usr/local/bin", keep_path=False)
+        self.copy("vol_test.py", dst="/usr/local/bin", src="bin/scripts", keep_path=False)
         self.copy("*", dst="/usr/local/bin/home_blks_scripts", src="bin/scripts", keep_path=True)
