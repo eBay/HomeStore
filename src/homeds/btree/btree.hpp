@@ -680,6 +680,32 @@ out:
         return remove_any(BtreeSearchRange(key), nullptr, outval, dependent_req, cookie);
     }
 
+      void merge(Btree* other, match_item_cb_update_t<K,V> merge_cb) {
+
+          std::vector< pair< K, V > > other_kvs;
+
+          other->get_all_kvs(&other_kvs);
+          for (auto it = other_kvs.begin(); it != other_kvs.end(); it++) {
+              K                           k = it->first;
+              V                           v = it->second;
+              BRangeUpdateCBParam< K, V > local_param(k, v);
+              K                           start(k.start(), 1), end(k.end(), 1);
+
+              auto                       search_range = BtreeSearchRange(start, true, end, true);
+              BtreeUpdateRequest< K, V > ureq(search_range, merge_cb, (BRangeUpdateCBParam< K, V >*)&local_param);
+              range_put(k, v, btree_put_type::APPEND_IF_EXISTS_ELSE_INSERT, nullptr, nullptr, ureq);
+          }
+    }
+
+    void get_all_kvs(std::vector< pair< K, V > >* kvs) {
+        std::vector< BtreeNodePtr > leaves;
+
+        get_leaf_nodes(&leaves);
+        for (auto l : leaves) {
+            l->get_all_kvs(kvs);
+        }
+    }
+
     void print_tree() {
         m_btree_lock.read_lock();
         std::stringstream ss;
@@ -727,6 +753,55 @@ private:
                 to_string(node->get_edge_id(),ss);
         }
         unlock_node(node, acq_lock);
+    }
+
+    /*
+     * Get all leaf nodes from the read-only tree (CP tree, Snap Tree etc)
+     * NOTE: Doesn't take any lock
+     */
+    void get_leaf_nodes(std::vector <BtreeNodePtr> *leaves) {
+        /* TODO: Add a flag to indicate RO tree
+         * TODO: Check the flag here
+         */
+        get_leaf_nodes(m_root_node, leaves);
+    }
+
+    // TODO: Remove the locks once we have RO flags
+    void get_leaf_nodes(bnodeid_t bnodeid, std::vector< BtreeNodePtr >* leaves) {
+        BtreeNodePtr node;
+
+        if (read_and_lock_node(bnodeid, node, LOCKTYPE_READ, LOCKTYPE_READ, nullptr) != btree_status_t::success) {
+            return;
+        }
+
+        if (node->is_leaf()) {
+            BtreeNodePtr next_node = nullptr;
+            leaves->push_back(node);
+            while (node->get_next_bnode().is_valid()) {
+                auto ret =
+                    read_and_lock_sibling(node->get_next_bnode(), next_node, LOCKTYPE_READ, LOCKTYPE_READ, nullptr);
+                unlock_node(node, LOCKTYPE_READ);
+                assert(ret == btree_status_t::success);
+                if (ret != btree_status_t::success) {
+                    LOGERROR("Cannot read sibling node for {}", node);
+                    return;
+                }
+                assert(next_node->is_leaf());
+                leaves->push_back(next_node);
+                node = next_node;
+            }
+            unlock_node(node, LOCKTYPE_READ);
+            return;
+        }
+
+        assert(node->get_total_entries() > 0);
+        if (node->get_total_entries() > 0) {
+            BtreeNodeInfo p;
+            node->get(0, &p, false);
+            //XXX If we cannot get rid of locks, lock child and release parent here
+            get_leaf_nodes(p.bnode_id(), leaves);
+        }
+        unlock_node(node, LOCKTYPE_READ);
     }
 
     btree_status_t do_get(BtreeNodePtr my_node, const BtreeSearchRange& range, BtreeKey* outkey, 

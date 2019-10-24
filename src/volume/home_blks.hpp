@@ -150,6 +150,7 @@ public:
     ~HomeBlks() {  
         m_thread_id.join();
     }
+    virtual vol_interface_req_ptr  create_vol_hb_req() override;
     virtual std::error_condition write(const VolumePtr& vol, uint64_t lba, uint8_t* buf, uint32_t nblks,
                                        const vol_interface_req_ptr& req) override;
     virtual std::error_condition read(const VolumePtr& vol, uint64_t lba, int nblks,
@@ -160,6 +161,8 @@ public:
 
     virtual std::error_condition remove_volume(const boost::uuids::uuid& uuid) override;
     virtual VolumePtr            lookup_volume(const boost::uuids::uuid& uuid) override;
+    virtual SnapshotPtr          snap_volume(VolumePtr) override;
+
     virtual const char*          get_name(const VolumePtr& vol) override;
     virtual uint64_t             get_page_size(const VolumePtr& vol) override;
     virtual boost::uuids::uuid   get_uuid(VolumePtr vol) override;

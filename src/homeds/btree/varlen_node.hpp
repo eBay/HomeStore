@@ -302,7 +302,7 @@ public:
                 }
 
                 ureq->get_cb_param()->set_state_modifiable(false);
-                ureq->callback()(match, replace_kv,ureq->get_cb_param());
+                ureq->callback()(match, replace_kv, ureq->get_cb_param());
 #if 0
                 if(replace_kv.size()>0 && !(this->get_edge_id().is_valid())){
                     std::pair<K, V> &pair2 =replace_kv[replace_kv.size()-1];
@@ -556,6 +556,23 @@ public:
         K nth_key;
         get_nth_key(ind, &nth_key, false /* copyKey */);
         return nth_key.compare_range(range);
+    }
+
+    void get_all_kvs(std::vector< pair< K, V > >* kvs) const {
+        assert(this->is_leaf());
+        if (!this->is_leaf()) {
+            LOGERROR("Got a non-leaf node {}", this->to_string());
+            return;
+        }
+
+        for (uint32_t i = 0; i < this->get_total_entries(); i++) {
+            K key;
+            V val;
+
+            get_nth_key(i, &key, true); // Copy
+            get(i, &val, true);         // Copy
+            kvs->push_back(make_pair(key, val));
+        }
     }
 
 private:
