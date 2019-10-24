@@ -189,6 +189,9 @@ public:
     std::shared_ptr< iomgr::ioMgr > iomgr;
     boost::uuids::uuid      system_uuid;
     io_flag                 flag = io_flag::DIRECT_IO;
+#ifndef NDEBUG
+    size_t                  mem_btree_page_size;
+#endif
 
     /* optional parameters */
     boost::optional< disk_attributes > disk_attr;

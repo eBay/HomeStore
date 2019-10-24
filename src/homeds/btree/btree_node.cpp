@@ -53,12 +53,12 @@ DecBNodeType(void) get(int ind, BtreeValue *outval, bool copy) const {
     call_variant_method_const(this, get, ind, outval, copy);
 }
 
-DecBNodeType(void) insert(const BtreeKey &key, const BtreeValue &val) {
-    call_physical_method(this, insert, key, val);
+DecBNodeType(btree_status_t) insert(const BtreeKey &key, const BtreeValue &val) {
+    return call_physical_method(this, insert, key, val);
 }
 
-DecBNodeType(void) insert(int ind, const BtreeKey &key, const BtreeValue &val) {
-    call_variant_method(this, insert, ind, key, val);
+DecBNodeType(btree_status_t) insert(int ind, const BtreeKey &key, const BtreeValue &val) {
+    return call_variant_method(this, insert, ind, key, val);
 }
 
 DecBNodeType(void) remove(int ind) {

@@ -168,9 +168,7 @@ struct dm_info {
 #define CHUNK_INFO_BLK_OFFSET (PDEV_INFO_BLK_OFFSET + (sizeof(pdev_info_block) * HomeStoreConfig::max_pdevs))
 #define VDEV_INFO_BLK_OFFSET (CHUNK_INFO_BLK_OFFSET + sizeof(chunk_info_block) * HomeStoreConfig::max_chunks)
 
-#define DM_INFO_BLK_SIZE                                                                                               \
-    (sizeof(dm_info) + PDEV_INFO_BLK_OFFSET + CHUNK_INFO_BLK_OFFSET +                                                  \
-     HomeStoreConfig::max_vdevs * sizeof(vdev_info_block))
+#define DM_INFO_BLK_SIZE  (VDEV_INFO_BLK_OFFSET + HomeStoreConfig::max_vdevs * sizeof(vdev_info_block))
 
 #define DM_PAYLOAD_OFFSET 10
 

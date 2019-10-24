@@ -105,13 +105,18 @@ public:
     
     /* Insert the key and value in provided index
      * Assumption: Node lock is already taken */
-    void insert(int ind, const BtreeKey &key, const BtreeValue &val) {
+    btree_status_t insert(int ind, const BtreeKey &key, const BtreeValue &val) {
         LOGTRACEMOD(btree_generics, "{}:{}",key.to_string(),val.to_string());
-        insert(ind, key.get_blob(), val.get_blob());
+        auto sz = insert(ind, key.get_blob(), val.get_blob());
 #ifndef NDEBUG
         validate_sanity();
 #endif
+        if (sz == 0) {
+            return btree_status_t::insert_failed;
+        }
+        return btree_status_t::success;
     }
+
 #ifndef NDEBUG
     void validate_sanity() {
         int i=0;
@@ -384,7 +389,7 @@ public:
         auto other_gen = other.get_gen();
 
         int ind = this->get_total_entries() - 1;
-        while (ind >= 0) {
+        while (ind > 0) {
             homeds::blob kb;
             kb.bytes = (uint8_t *)get_nth_obj(ind);
             kb.size = get_nth_key_len(ind);
@@ -393,14 +398,15 @@ public:
             vb.bytes = kb.bytes + kb.size;
             vb.size = get_nth_value_len(ind);
 
+            auto sz = other.insert(0, kb, vb); // Keep on inserting on the first index, thus moving everything to right
+            if (!sz) break;
+            moved_size += sz;
+            ind--;
             if ((kb.size + vb.size + get_record_size()) > size_to_move) {
                 // We reached threshold of how much we could move
                 break;
             }
-            auto sz = other.insert(0, kb, vb); // Keep on inserting on the first index, thus moving everything to right
-            if (!sz) break;
-            moved_size += sz;
-            ind--; size_to_move -= sz;
+            size_to_move -= sz;
         }
         remove(ind+1, this->get_total_entries()-1);
 
