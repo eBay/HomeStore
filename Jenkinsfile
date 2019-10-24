@@ -23,7 +23,7 @@ pipeline {
                 branch "develop"
             }
             steps {
-                sh "docker build --rm --build-arg COVERAGE_ON='true' --build-arg BUILD_TYPE=nosanitize --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_PASS=${CONAN_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${GIT_COMMIT}-coverage ."
+                sh "docker build --rm --build-arg COVERAGE_ON='true' --build-arg BUILD_TYPE=nosanitize --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_PASS=${CONAN_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} ."
             }
         }
 
@@ -64,7 +64,6 @@ pipeline {
 
     post {
         always {
-            sh "docker rmi -f ${PROJECT}-${GIT_COMMIT}-coverage"
             sh "docker rmi -f ${PROJECT}-${GIT_COMMIT}-nosanitize"
             sh "docker rmi -f ${PROJECT}-${GIT_COMMIT}-debug"
             sh "docker rmi -f ${PROJECT}-${GIT_COMMIT}"
