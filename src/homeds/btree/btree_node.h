@@ -39,7 +39,7 @@ public:
 
     // Insert the key and value in provided index
     // Assumption: Node lock is already taken
-    void insert(int ind, const BtreeKey &key, const BtreeValue &val);
+    btree_status_t insert(int ind, const BtreeKey &key, const BtreeValue &val);
 
 #ifndef NDEBUG
     std::string to_string() const;
@@ -151,8 +151,8 @@ public:
 
     // Methods the variant nodes need to override from
     void get(int ind, BtreeValue *outval, bool copy) const;
-    void insert(const BtreeKey &key, const BtreeValue &val);
-    void insert(int ind, const BtreeKey &key, const BtreeValue &val);
+    btree_status_t insert(const BtreeKey &key, const BtreeValue &val);
+    btree_status_t insert(int ind, const BtreeKey &key, const BtreeValue &val);
     void remove(int ind);
     void remove(int ind_s, int ind_e);
     void update(int ind, const BtreeValue &val);

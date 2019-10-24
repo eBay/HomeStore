@@ -41,7 +41,7 @@ THREAD_BUFFER_INIT;
 #define STAGING_VOL_PREFIX "staging"
 #define VOL_PREFIX "/tmp/vol"
 
-std::array< std::string, 4 > names = {"/tmp/file1", "/tmp/file2", "/tmp/file3", "/tmp/file4"};
+std::array< std::string, 4 > names = {"/tmp/vol_file1", "/tmp/vol_file2", "/tmp/vol_file3", "/tmp/vol_file4"};
 uint64_t max_vols = 50;
 uint64_t max_num_writes = 100000;
 uint64_t run_time;
@@ -66,6 +66,11 @@ uint32_t expected_vol_state = 0;
 uint32_t verify_only = 0;
 uint32_t is_abort = 0;
 uint32_t flip_set = 0;
+uint32_t atomic_page_size = 4096;
+uint32_t vol_page_size = 4096;
+uint32_t phy_page_size = 4096;
+uint32_t mem_btree_page_size = 4096;
+extern bool vol_gtest;
 #define VOL_PAGE_SIZE 4096
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
@@ -230,7 +235,7 @@ public:
 #else
         params.flag = homestore::io_flag::DIRECT_IO;
 #endif
-        params.min_virtual_page_size = VOL_PAGE_SIZE;
+        params.min_virtual_page_size = vol_page_size;
         params.cache_size = 4 * 1024 * 1024 * 1024ul;
         params.disk_init = init;
         params.devices = device_info;
@@ -241,6 +246,14 @@ public:
         params.vol_state_change_cb = std::bind(&IOTest::vol_state_change_cb, this, std::placeholders::_1, 
                                                 std::placeholders::_2, std::placeholders::_3);
         params.vol_found_cb = std::bind(&IOTest::vol_found_cb, this, std::placeholders::_1);
+       
+        params.disk_attr = disk_attributes();
+        params.disk_attr->physical_page_size = phy_page_size;
+        params.disk_attr->disk_align_size = 4096;
+        params.disk_attr->atomic_page_size = atomic_page_size;
+#ifndef NDEBUG
+        params.mem_btree_page_size = mem_btree_page_size;
+#endif  
         boost::uuids::string_generator gen;
         params.system_uuid = gen("01970496-0262-11e9-8eb2-f2801f1b9fd1");
         VolInterface::init(params);
@@ -310,7 +323,7 @@ public:
         /* Create a volume */
         vol_params params;
         int cnt = vol_indx.fetch_add(1, std::memory_order_acquire);
-        params.page_size = VOL_PAGE_SIZE;
+        params.page_size = vol_page_size;
         params.size = max_vol_size;
         params.io_comp_cb = ([this](const vol_interface_req_ptr& vol_req)
                 { process_completions(vol_req); });
@@ -641,7 +654,7 @@ start:
 
     void populate_buf(uint8_t *buf, uint64_t size, uint64_t lba, int cur) {
         for (uint64_t write_sz = 0; write_sz < size; write_sz = write_sz + sizeof(uint64_t)) {
-            if (!(write_sz % VOL_PAGE_SIZE)) {
+            if (!(write_sz % vol_page_size)) {
                 *((uint64_t *)(buf + write_sz)) = lba;
                 auto vol = vol_info[cur]->vol;
                 if (vol == nullptr) {
@@ -741,7 +754,7 @@ start:
                 } else {
                     size_read = b.size;
                 }
-                size_read = VOL_PAGE_SIZE;
+                size_read = vol_page_size;
                 int j = 0;
                 if (verify_data) {
                     j = memcmp((void *) b.bytes, (uint8_t *)((uint64_t)request->buf + tot_size_read), size_read);
@@ -1205,7 +1218,11 @@ SDS_OPTION_GROUP(test_volume,
 (expected_vol_state,"", "expected_vol_state", "volume state expected during boot", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"),
 (verify_only,"", "verify_only", "verify only boot", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"),
 (abort,"", "abort", "abort", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"),
-(flip,"", "flip", "flip", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"))
+(flip,"", "flip", "flip", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"),
+(atomic_page_size,"", "atomic_page_size", "atomic_page_size", ::cxxopts::value<uint32_t>()->default_value("4096"), "atomic_page_size"),
+(vol_page_size,"", "vol_page_size", "vol_page_size", ::cxxopts::value<uint32_t>()->default_value("4096"), "vol_page_size"),
+(phy_page_size,"", "phy_page_size", "phy_page_size", ::cxxopts::value<uint32_t>()->default_value("4096"), "phy_page_size"),
+(mem_btree_page_size,"", "mem_btree_page_size", "mem_btree_page_size", ::cxxopts::value<uint32_t>()->default_value("8192"), "mem_btree_page_size"))
 
 
 #define ENABLED_OPTIONS logging, home_blks, test_volume
@@ -1243,6 +1260,10 @@ int main(int argc, char *argv[]) {
     verify_only = SDS_OPTIONS["verify_only"].as<uint32_t>();
     is_abort = SDS_OPTIONS["abort"].as<uint32_t>();
     flip_set = SDS_OPTIONS["flip"].as<uint32_t>();
+    atomic_page_size = SDS_OPTIONS["atomic_page_size"].as<uint32_t>();
+    vol_page_size = SDS_OPTIONS["vol_page_size"].as<uint32_t>();
+    phy_page_size = SDS_OPTIONS["phy_page_size"].as<uint32_t>();
+    mem_btree_page_size = SDS_OPTIONS["mem_btree_page_size"].as<uint32_t>();  
 
     if (load_type == 2) {
         verify_data = 0;

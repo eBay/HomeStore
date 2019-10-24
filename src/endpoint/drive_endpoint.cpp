@@ -218,7 +218,7 @@ void DriveEndPoint::async_writev(int m_sync_fd, const struct iovec* iov, int iov
     m_metrics.init();
     if (iocb_list.empty() 
 #ifdef _PRERELEASE
-    || homestore_flip->test_flip("io_write_iocb_empty_flip", iovcnt, size)
+    || homestore_flip->test_flip("io_write_iocb_empty_flip")
 #endif
     ) {
         COUNTER_INCREMENT(m_metrics, no_iocb, 1);
@@ -272,7 +272,7 @@ void DriveEndPoint::async_readv(int m_sync_fd, const struct iovec* iov, int iovc
     m_metrics.init();
     if (iocb_list.empty()
 #ifdef _PRERELEASE
-    || homestore_flip->test_flip("io_read_iocb_empty_flip", iovcnt, size)
+    || homestore_flip->test_flip("io_read_iocb_empty_flip")
 #endif
     ) {
         COUNTER_INCREMENT(m_metrics, no_iocb, 1);

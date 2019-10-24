@@ -69,7 +69,7 @@ public:
 
     // Insert the key and value in provided index
     // Assumption: Node lock is already taken
-    void insert(uint32_t ind, const BtreeKey &key, const BtreeValue &val) {
+    btree_status_t insert(uint32_t ind, const BtreeKey &key, const BtreeValue &val) {
         //K& k = *(dynamic_cast<K *>(&key));
         //assert(get_total_entries() < getMaxEntries());
         uint32_t sz = (this->get_total_entries() - (ind + 1) + 1) * get_nth_obj_size(0);
@@ -85,6 +85,7 @@ public:
 #ifndef NDEBUG
         validate_sanity();
 #endif
+        return btree_status_t::success;
     }
 
     std::string to_string() const {

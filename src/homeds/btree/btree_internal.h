@@ -27,7 +27,7 @@
 #include <boost/preprocessor/stringize.hpp>
 
 ENUM(btree_status_t, uint32_t, success, not_found, item_found, closest_found, closest_removed, retry, has_more,
-     read_failed, write_failed, stale_buf, refresh_failed, put_failed, space_not_avail);
+     read_failed, write_failed, stale_buf, refresh_failed, put_failed, space_not_avail, split_failed, insert_failed);
 
 /* We should always find the child smaller or equal then  search key in the interior nodes. */
 #ifndef NDEBUG
@@ -147,7 +147,7 @@ struct btree_multinode_req : public sisl::ObjLifeCounter< struct btree_multinode
             dependent_req_q(0),
             is_write_modifiable(is_write_modifiable),
             is_sync(is_sync) {
-        if (!req.get()) {
+        if (req.get()) {
             dependent_req_q.push_back(req);
         }
     }
@@ -832,6 +832,7 @@ public:
                            {"node_type", "leaf"}, HistogramBucketsType(ExponentialOfTwoBuckets));
         REGISTER_COUNTER(btree_retry_count, "number of retries");
         REGISTER_COUNTER(write_err_cnt, "number of errors in write");
+        REGISTER_COUNTER(split_failed, "split failed");
         REGISTER_COUNTER(query_err_cnt, "number of errors in query");
         REGISTER_COUNTER(read_node_count_in_write_ops, "number of nodes read in write_op");
         REGISTER_COUNTER(read_node_count_in_query_ops, "number of nodes read in query_op");

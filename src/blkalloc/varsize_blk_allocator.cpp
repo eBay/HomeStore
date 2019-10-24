@@ -65,8 +65,8 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig& cfg, bool init) 
         m_segments.push_back(seg);
     }
 
-    // Create a btree to cache temperature, blks info (blk num, page id etc..)
-    BtreeConfig btree_cfg(8192, cfg.get_name().c_str());
+    BtreeConfig btree_cfg(HomeStoreConfig::mem_btree_page_size, cfg.get_name().c_str());
+
     btree_cfg.set_max_objs(cfg.get_max_cache_blks());
     btree_cfg.set_max_key_size(sizeof(VarsizeAllocCacheEntry));
     btree_cfg.set_max_value_size(0);

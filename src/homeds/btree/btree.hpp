@@ -1203,7 +1203,14 @@ done:
             is_leaf = 1;
         }
         if (homestore_flip->test_flip("btree_upgrade_node_fail", is_leaf)) {
+            unlock_node(my_node, cur_lock);
+            cur_lock = locktype::LOCKTYPE_NONE;
+            if (child_node) {
+                unlock_node(child_node, child_cur_lock);
+                child_cur_lock = locktype::LOCKTYPE_NONE;
+            }
             ret = btree_status_t::retry;
+            goto done;
         }
     }
 #endif
@@ -1231,7 +1238,11 @@ done:
                 my_node->remove(start_ind, end_ind);
             }
             for (auto &pair : replace_kv) { // insert is based on compare() of BtreeKey
-                my_node->insert(pair.first, pair.second);
+                auto status = my_node->insert(pair.first, pair.second);
+                BT_LOG_ASSERT_CMP(EQ, status, btree_status_t::success, );
+                if (status != btree_status_t::success) {
+                    return status;
+                 }
             }
         } else {
             if (!my_node->put(k, v, put_type, existing_val)) {
@@ -1996,6 +2007,11 @@ out:
         BT_DEBUG_ASSERT_CMP(GT, res, 0, child_node1); //means cannot split entries
         BT_DEBUG_ASSERT_CMP(GT, child_node1->get_total_entries(), 0, child_node1);
 
+        if (res == 0) {
+            /* it can not split the node. We should return error */
+            COUNTER_INCREMENT(m_metrics, split_failed, 1);
+            return btree_status_t::split_failed;
+        }
         child_node1->flip_pc_gen_flag();
 
         // Update the existing parent node entry to point to second child ptr.

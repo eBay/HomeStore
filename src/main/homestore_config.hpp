@@ -13,6 +13,7 @@ struct HomeStoreConfig {
     static size_t atomic_phys_page_size; // atomic page size supported by disk
     static size_t align_size;
     static size_t min_page_size; // minimum page size supported by HS
+    static size_t mem_btree_page_size; // page size used by memory btree
     static uint64_t max_chunks;
     static uint64_t max_vdevs;
     static uint64_t max_pdevs;
