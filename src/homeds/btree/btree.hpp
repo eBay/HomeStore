@@ -680,7 +680,7 @@ out:
         return remove_any(BtreeSearchRange(key), nullptr, outval, dependent_req, cookie);
     }
 
-    void diff(Btree *other, uint32_t vol_page_size, vector <pair <K, V>> *diff_kv) {
+    void diff(Btree *other, uint32_t param, vector <pair <K, V>> *diff_kv) {
        std::vector< pair<K,V> > my_kvs, other_kvs;
 
        get_all_kvs(&my_kvs);
@@ -724,7 +724,7 @@ out:
                std::vector< pair< K, V > > overlap_kvs;
                diff_read_next_t            to_read = READ_BOTH;
 
-               v1.get_overlap_diff_kvs(&k1, &v1, &k2, &v2, vol_page_size, to_read, overlap_kvs);
+               v1.get_overlap_diff_kvs(&k1, &v1, &k2, &v2, param, to_read, overlap_kvs);
                for (auto ovr_it = overlap_kvs.begin(); ovr_it != overlap_kvs.end(); ovr_it++) {
                    diff_kv->emplace_back(make_pair(ovr_it->first, ovr_it->second));
                }

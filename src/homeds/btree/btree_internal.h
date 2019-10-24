@@ -482,7 +482,7 @@ public:
     virtual uint32_t estimate_size_after_append(const BtreeValue& new_val) = 0;
 
     virtual void get_overlap_diff_kvs(BtreeKey* k1, BtreeValue* v1, BtreeKey* k2, BtreeValue* v2,
-                                      uint32_t vol_page_size, diff_read_next_t& to_read,
+                                      uint32_t param, diff_read_next_t& to_read,
                                       std::vector< std::pair< BtreeKey, BtreeValue > >& overlap_kvs) {
         LOGINFO("Not Implemented");
     }
@@ -700,7 +700,7 @@ public:
 
     void append_blob(const BtreeValue& new_val, BtreeValue& existing_val) override { set_blob(new_val.get_blob()); }
 
-    void get_overlap_diff_kvs(BtreeKey* k1, BtreeValue* v1, BtreeKey* k2, BtreeValue* v2, uint32_t vol_page_size,
+    void get_overlap_diff_kvs(BtreeKey* k1, BtreeValue* v1, BtreeKey* k2, BtreeValue* v2, uint32_t param,
                               diff_read_next_t&                                 to_read,
                               std::vector< std::pair< BtreeKey, BtreeValue > >& overlap_kvs) override {}
 
@@ -744,7 +744,7 @@ public:
 
     void set_blob_size(uint32_t size) override {}
 
-    void get_overlap_diff_kvs(BtreeKey* k1, BtreeValue* v1, BtreeKey* k2, BtreeValue* v2, uint32_t vol_page_size,
+    void get_overlap_diff_kvs(BtreeKey* k1, BtreeValue* v1, BtreeKey* k2, BtreeValue* v2, uint32_t param,
                               diff_read_next_t&                                 to_read,
                               std::vector< std::pair< BtreeKey, BtreeValue > >& overlap_kvs) override {}
 
