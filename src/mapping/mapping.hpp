@@ -96,6 +96,24 @@ public:
             return 0; // overlap
     }
 
+    virtual bool preceeds(const BtreeKey *k) const override {
+        MappingKey *o = (MappingKey *)k;
+        if (end() < o->start()) {
+            return true;
+        }
+
+        return false;
+    }
+
+    virtual bool succeeds(const BtreeKey *k) const override {
+        MappingKey *o = (MappingKey*) k;
+        if (o->end() < start()) {
+            return true;
+        }
+
+        return false;
+    }
+
     virtual homeds::blob get_blob() const override { return {(uint8_t*)m_lbaId_ptr, get_fixed_size()}; }
 
     virtual void set_blob(const homeds::blob& b) override {
@@ -284,6 +302,75 @@ public:
         return b;
     }
 
+    void get_overlap_diff_kvs(MappingKey* k1, MappingValue* v1, MappingKey* k2, MappingValue* v2,
+                              uint32_t vol_page_size, diff_read_next_t& to_read,
+                              std::vector< pair< MappingKey, MappingValue > >& overlap_kvs) {
+        static MappingKey   k;
+        static MappingValue v;
+
+        uint64_t start, k1_offset = 0, k2_offset = 0;
+        uint64_t nlba = 0, ovr_nlba = 0;
+
+        /* Non-overlapping beginning part */
+        if (k1->start() < k2->start()) {
+            nlba = k2->start() - k1->start();
+            k.set(k1->start(), nlba);
+            v = *v1;
+            v.add_offset(0, nlba, vol_page_size);
+            overlap_kvs.emplace_back(make_pair(k, v));
+            k1_offset += nlba;
+            start = k1->start() + nlba;
+        } else if (k2->start() < k1->start()) {
+            nlba = k1->start() - k2->start();
+            k.set(k2->start(), nlba);
+            v = *v2;
+            v.add_offset(0, nlba, vol_page_size);
+            overlap_kvs.emplace_back(make_pair(k, v));
+            k2_offset += nlba;
+            start = k2->start() + nlba;
+        } else {
+            start = k1->start(); // Same Start - no overlapping part.
+        }
+
+        /* Overlapping part */
+        if (k1->end() < k2->end()) {
+            ovr_nlba = k1->get_n_lba() - k1_offset;
+        } else {
+            ovr_nlba = k2->get_n_lba() - k2_offset;
+        }
+
+        k.set(start, ovr_nlba);
+
+        if (v1->is_new(*v2)) {
+            v = *v1;
+            v.add_offset(k1_offset, ovr_nlba, vol_page_size);
+            k1_offset += ovr_nlba;
+        } else {
+            v = *v2;
+            v.add_offset(k2_offset, ovr_nlba, vol_page_size);
+            k2_offset += ovr_nlba;
+        }
+
+        overlap_kvs.emplace_back(make_pair(k, v));
+        /* Non-overlapping tail part */
+        start = start + ovr_nlba;
+        if (k1->end() == k2->end()) {
+            to_read = READ_BOTH; // Read both
+        } else if (k1->end() < start) {
+            /* k2 has tail part */
+            nlba = k2->end() - start + 1;
+            k2->set(start, nlba);
+            v2->add_offset(k2_offset, nlba, vol_page_size);
+            to_read = READ_FIRST;
+        } else {
+            /* k1 has tail part */
+            nlba = k1->end() - start + 1;
+            k1->set(start, nlba);
+            v1->add_offset(k1_offset, nlba, vol_page_size);
+            to_read = READ_SECOND;
+        }
+    }
+
     virtual void set_blob(const homeds::blob& b) override { m_earr.set_mem((void*)(b.bytes), b.size); }
 
     virtual void copy_blob(const homeds::blob& b) override {
@@ -322,6 +409,42 @@ public:
             ve.add_offset(lba_offset, nlba, vol_page_size);
             j++;
         }
+    }
+
+    /* true if my value is newer than other */
+    bool is_new(MappingValue other) {
+        /* all mapping value entries have same seqid */
+        vector< ValueEntry > my_v_array, other_v_array;
+
+        get_array().get_all(my_v_array, true);
+        other.get_array().get_all(other_v_array, true);
+
+        /* If other size is 0, my value is always new */
+        if (other_v_array.size() <= 0) {
+            return true;
+        }
+
+        /* If other size is not 0 and my value is 0, my value is old */
+        if (my_v_array.size() <= 0) {
+            return false;
+        }
+
+        /* If other seqId is invalid, my value is new */
+        if (other_v_array[0].get_seqId() == INVALID_SEQ_ID) {
+            return true;
+        }
+
+        /* If my seqId is invalid and other is not, my value is old */
+        if (my_v_array[0].get_seqId() == INVALID_SEQ_ID) {
+            return false;
+        }
+
+        /* If my value is greater than other, my value is new */
+        if (my_v_array[0].compare(&other_v_array[0]) > 0) {
+            return true;
+        }
+
+        return false;
     }
 
     // insert entry to this mapping value, maintaing it sorted by seqId - deep copy
@@ -585,6 +708,14 @@ public:
     void print_node(uint64_t blkid) {
         bnodeid_t bid(blkid);
         m_bt->print_node(bid);
+    }
+
+    void diff(mapping* other) {
+        vector< pair< MappingKey, MappingValue > > diff_kv;
+        m_bt->diff(other->get_btree(), m_vol_page_size, &diff_kv);
+        for (auto it = diff_kv.begin(); it != diff_kv.end(); it++) {
+            LOGINFO("Diff KV = {} {}", it->first, it->second);
+        }
     }
 
     void merge(mapping* other) {

@@ -29,6 +29,13 @@
 ENUM(btree_status_t, uint32_t, success, not_found, item_found, closest_found, closest_removed, retry, has_more,
      read_failed, write_failed, stale_buf, refresh_failed, put_failed, space_not_avail, split_failed, insert_failed);
 
+typedef enum {
+    READ_NONE = 0,
+    READ_FIRST = 1,
+    READ_SECOND = 2,
+    READ_BOTH = 3,
+} diff_read_next_t;
+
 /* We should always find the child smaller or equal then  search key in the interior nodes. */
 #ifndef NDEBUG
 #define ASSERT_IS_VALID_INTERIOR_CHILD_INDX(ret, node)                                                                 \
@@ -440,6 +447,10 @@ public:
     virtual bool is_extent_key() { return true; }
     virtual int compare_end(const BtreeKey* other) const = 0;
     virtual int compare_start(const BtreeKey* other) const override = 0;
+
+    virtual bool preceeds(const BtreeKey *other) const = 0;
+    virtual bool succeeds(const BtreeKey *other) const = 0;
+
     virtual void copy_end_key_blob(const homeds::blob& b) override = 0;
 
     /* we always compare the end key in case of extent */
@@ -469,6 +480,12 @@ public:
     virtual uint32_t get_blob_size() const = 0;
     virtual void     set_blob_size(uint32_t size) = 0;
     virtual uint32_t estimate_size_after_append(const BtreeValue& new_val) = 0;
+
+    virtual void get_overlap_diff_kvs(BtreeKey* k1, BtreeValue* v1, BtreeKey* k2, BtreeValue* v2,
+                                      uint32_t param, diff_read_next_t& to_read,
+                                      std::vector< std::pair< BtreeKey, BtreeValue > >& overlap_kvs) {
+        LOGINFO("Not Implemented");
+    }
 
     virtual std::string to_string() const { return ""; }
 };
@@ -683,6 +700,10 @@ public:
 
     void append_blob(const BtreeValue& new_val, BtreeValue& existing_val) override { set_blob(new_val.get_blob()); }
 
+    void get_overlap_diff_kvs(BtreeKey* k1, BtreeValue* v1, BtreeKey* k2, BtreeValue* v2, uint32_t param,
+                              diff_read_next_t&                                 to_read,
+                              std::vector< std::pair< BtreeKey, BtreeValue > >& overlap_kvs) override {}
+
     uint32_t        get_blob_size() const override { return sizeof(bnodeid_t); }
     static uint32_t get_fixed_size() { return sizeof(bnodeid_t); }
     void            set_blob_size(uint32_t size) override {}
@@ -722,6 +743,10 @@ public:
     uint32_t get_blob_size() const override { return 0; }
 
     void set_blob_size(uint32_t size) override {}
+
+    void get_overlap_diff_kvs(BtreeKey* k1, BtreeValue* v1, BtreeKey* k2, BtreeValue* v2, uint32_t param,
+                              diff_read_next_t&                                 to_read,
+                              std::vector< std::pair< BtreeKey, BtreeValue > >& overlap_kvs) override {}
 
     EmptyClass& operator=(const EmptyClass& other) { return (*this); }
 
