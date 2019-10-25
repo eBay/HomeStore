@@ -20,10 +20,12 @@ pipeline {
 
         stage('Coverage') {
             when {
-                branch "develop"
+                not {
+                    branch "testing/*"
+                }
             }
             steps {
-                sh "docker build --rm --build-arg COVERAGE_ON='true' --build-arg BUILD_TYPE=nosanitize --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_PASS=${CONAN_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} ."
+                sh "docker build --rm --build-arg COVERAGE_ON='true' --build-arg BUILD_TYPE=nosanitize --build-arg BRANCH_NAME=${BRANCH_NAME} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} ."
             }
         }
 
