@@ -2,13 +2,15 @@
 FROM ecr.vip.ebayc3.com/sds/sds_cpp_base:2.15-dev
 LABEL description="Automated SDS compilation"
 
+ARG BRANCH_NAME
 ARG BUILD_TYPE
+ARG COVERAGE_ON
 ARG CONAN_CHANNEL
 ARG CONAN_USER
 ARG CONAN_PASS=${CONAN_USER}
-ARG COVERAGE_ON
 ARG HOMESTORE_BUILD_TAG
 
+ENV BRANCH_NAME=${BRANCH_NAME:-unknown}
 ENV BUILD_TYPE=${BUILD_TYPE:-default}
 ENV COVERAGE_ON=${COVERAGE_ON:-false}
 ENV CONAN_USER=${CONAN_USER:-sds}
@@ -30,7 +32,10 @@ RUN set -eux; \
       conan install --build missing -o ${PKG_NAME}:coverage=True -pr ${BUILD_TYPE} ${SOURCE_PATH}; \
       build-wrapper-linux-x86-64 --out-dir /tmp/sonar conan build ${SOURCE_PATH}; \
       find . -name "*.gcno" -exec gcov {} \; ; \
-      cp ${SOURCE_PATH}sonar-project.properties ./; \
+      if [ "develop" != "${BRANCH_NAME}" ]; then \
+          echo "sonar.branch.name=${BRANCH_NAME}" >> ${SOURCE_PATH}sonar-project.properties; \
+          echo "sonar.branch.target=master" >> ${SOURCE_PATH}sonar-project.properties; \
+      fi; \
       sonar-scanner -Dsonar.projectBaseDir=${SOURCE_PATH} -Dsonar.projectVersion="${PKG_VERSION}"; \
     fi;
 
