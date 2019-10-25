@@ -23,10 +23,10 @@ class HomestoreConan(ConanFile):
             "iomgr/2.2.11@sds/develop",
 
             # Not commonly updated
-            "flip/0.2.2@sds/testing",
+            "flip/0.2.3@sds/develop",
             "sds_logging/6.0.0@sds/testing",
             "sds_options/1.0.0@sds/testing",
-            "sisl/0.3.10@sisl/develop",
+            "sisl/0.3.10@sisl/testing",
 
             # FOSS, rarely updated
             "benchmark/1.5.0@oss/stable",
