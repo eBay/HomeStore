@@ -18,7 +18,7 @@
 #include "main/homestore_assert.hpp"
 #include "threadpool/thread_pool.h"
 #include "blk_read_tracker.hpp"
-
+#include "journal/vol_journal.hpp"
 #include <volume/snapshot.hpp>
 
 using namespace std;
@@ -28,6 +28,7 @@ namespace homestore {
 #define MAX_NUM_LBA ((1 << NBLKS_BITS) - 1)
 #define INVALID_SEQ_ID UINT64_MAX
 class mapping;
+class VolumeJournal;
 enum vol_state;
 
 struct volume_req;
@@ -58,6 +59,7 @@ typedef boost::intrusive_ptr< volume_req > volume_req_ptr;
 #define VOL_RELEASE_ASSERT_CMP(...) VOL_ASSERT_CMP(RELEASE, ##__VA_ARGS__)
 #define VOL_LOG_ASSERT_CMP(...) VOL_ASSERT_CMP(LOGMSG, ##__VA_ARGS__)
 
+    
 struct volume_req : public blkstore_req< BlkBuffer > {
     uint64_t                      lba;
     int                           nlbas;
@@ -123,6 +125,19 @@ protected:
     }
 };
 
+struct vol_hb_req : public vol_interface_req {
+    std::vector< volume_req_ptr > child_reqs; // all spawned child requests of vol hb req
+    
+    virtual ~vol_hb_req()= default;
+    
+    virtual void free_yourself() override { delete this; }
+
+    static vol_interface_req_ptr make_instance() { return vol_interface_req_ptr((vol_interface_req*)new vol_hb_req); }
+
+    static vol_hb_req* cast(const vol_interface_req_ptr& hb_req) { return (vol_hb_req*)hb_req.get(); }
+    
+};
+
 class VolumeMetrics : public sisl::MetricsGroupWrapper {
 public:
     explicit VolumeMetrics(const char* vol_name) : sisl::MetricsGroupWrapper("Volume", vol_name) {
@@ -168,6 +183,7 @@ public:
 class Volume : public std::enable_shared_from_this< Volume > {
 private:
     mapping*                          m_map;
+    VolumeJournal*                    m_volume_journal;
     boost::intrusive_ptr< BlkBuffer > m_only_in_mem_buff;
     struct vol_mem_sb*                m_sb;
     enum vol_state                    m_state;
@@ -200,6 +216,9 @@ private:
     void check_and_complete_req(const vol_interface_req_ptr& hb_req, const std::error_condition& err,
                                 bool call_completion_cb, std::vector< Free_Blk_Entry >* fbes = nullptr);
 
+    // Create journal record key/value from all child volume requests
+    void set_journal_key_value(VolumeJournalKey& jkey, VolumeJournalValue& jval, vol_hb_req* vhb_req);
+
 public:
     template < typename... Args >
     static std::shared_ptr< Volume > make_volume(Args&&... args) {
@@ -214,6 +233,7 @@ public:
     static homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >* m_data_blkstore;
     static void           process_vol_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
     static volume_req_ptr create_vol_req(Volume* vol, const vol_interface_req_ptr& hb_req);
+    static vol_interface_req_ptr create_vol_hb_req();
 #ifdef _PRERELEASE
     static void set_io_flip();
     static void set_error_flip();
@@ -248,7 +268,7 @@ public:
     struct vol_mem_sb* get_sb() {
         return m_sb;
     };
-
+    
     void vol_scan_alloc_blks();
     void blk_recovery_process_completions(bool success);
     void alloc_blk_callback(struct BlkId bid, size_t offset_size, size_t size);
@@ -256,6 +276,7 @@ public:
     // async call to start the multi-threaded work.
     void get_allocated_blks();
     void process_metadata_completions(const volume_req_ptr& wb_req);
+    void process_journal_completions(std::vector< volume_req_ptr >& child_reqs, uint64_t log_id);
     void process_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
     void recovery_start();
 

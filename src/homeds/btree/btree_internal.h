@@ -27,7 +27,7 @@
 #include <boost/preprocessor/stringize.hpp>
 
 ENUM(btree_status_t, uint32_t, success, not_found, item_found, closest_found, closest_removed, retry, has_more,
-     read_failed, write_failed, stale_buf, refresh_failed, put_failed, space_not_avail);
+     read_failed, write_failed, stale_buf, refresh_failed, put_failed, space_not_avail, split_failed, insert_failed);
 
 typedef enum {
     READ_NONE = 0,
@@ -154,7 +154,7 @@ struct btree_multinode_req : public sisl::ObjLifeCounter< struct btree_multinode
             dependent_req_q(0),
             is_write_modifiable(is_write_modifiable),
             is_sync(is_sync) {
-        if (!req.get()) {
+        if (req.get()) {
             dependent_req_q.push_back(req);
         }
     }
@@ -762,6 +762,7 @@ private:
     uint32_t m_max_value_size;
 
     uint32_t m_node_area_size;
+    uint32_t m_node_size;
 
     uint8_t m_ideal_fill_pct;
     uint8_t m_split_pct;
@@ -769,14 +770,16 @@ private:
     std::string m_btree_name; // Unique name for the btree
 
 public:
-    BtreeConfig(const char* btree_name = nullptr) {
+    BtreeConfig(uint32_t node_size, const char* btree_name = nullptr) {
         m_max_objs = 0;
         m_max_key_size = m_max_value_size = 0;
         m_ideal_fill_pct = 90;
         m_split_pct = 50;
         m_btree_name = btree_name ? btree_name : std::string("btree");
+        m_node_size = node_size;
     }
 
+    uint32_t get_node_size() { return m_node_size; };
     uint32_t get_max_key_size() const { return m_max_key_size; }
     void     set_max_key_size(uint32_t max_key_size) { m_max_key_size = max_key_size; }
 
@@ -854,6 +857,7 @@ public:
                            {"node_type", "leaf"}, HistogramBucketsType(ExponentialOfTwoBuckets));
         REGISTER_COUNTER(btree_retry_count, "number of retries");
         REGISTER_COUNTER(write_err_cnt, "number of errors in write");
+        REGISTER_COUNTER(split_failed, "split failed");
         REGISTER_COUNTER(query_err_cnt, "number of errors in query");
         REGISTER_COUNTER(read_node_count_in_write_ops, "number of nodes read in write_op");
         REGISTER_COUNTER(read_node_count_in_query_ops, "number of nodes read in query_op");

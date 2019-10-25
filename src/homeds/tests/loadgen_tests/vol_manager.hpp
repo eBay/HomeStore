@@ -17,7 +17,7 @@ constexpr uint32_t VOL_PAGE_SIZE   = 4096;
 constexpr uint32_t MAX_IO_SIZE = (VOL_PAGE_SIZE * ((1 << MEMPIECE_ENCODE_MAX_BITS) - 1));
 constexpr uint32_t MAX_CRC_DEPTH = 3;
 
-class VolReq : public vol_interface_req {
+class VolReq {
 public:
     ssize_t     size;
     off_t       offset;
@@ -221,7 +221,7 @@ public:
         auto ret = posix_memalign((void **) &buf, VOL_PAGE_SIZE, size);
         assert(!ret);
 
-        boost::intrusive_ptr<VolReq> req(new struct VolReq());
+        VolReq* req =new VolReq();
         req->lba = lba;
         req->nblks = nblks;
         req->is_read = true;
@@ -236,8 +236,10 @@ public:
         if (verify == false) {
             m_read_verify_skip++;
         }
-        
-        auto ret_io = VolInterface::get_instance()->read(m_vols[vol_id], lba, nblks, req);
+
+        auto vreq = VolInterface::get_instance()->create_vol_hb_req();
+        vreq->cookie = req;
+        auto ret_io = VolInterface::get_instance()->read(m_vols[vol_id], lba, nblks, vreq);
         if (ret_io != no_error) {
             assert(0);
             m_outstd_ios--;
@@ -256,7 +258,7 @@ public:
         assert(vol_id < m_max_vols);
         
         auto size = get_size(nblks);
-        boost::intrusive_ptr<VolReq> req(new struct VolReq());
+        VolReq* req = new VolReq();
         req->lba = lba;
         req->nblks = nblks;
         req->size = size;
@@ -272,7 +274,9 @@ public:
             req->hash.push_back(get_hash((uint8_t*)((uint64_t)buf + get_size(i))));
         }
 
-        auto ret_io = VolInterface::get_instance()->write(m_vols[vol_id], lba, buf, nblks, req);
+        auto vreq = VolInterface::get_instance()->create_vol_hb_req();
+        vreq->cookie = req;
+        auto ret_io = VolInterface::get_instance()->write(m_vols[vol_id], lba, buf, nblks, vreq);
         if (ret_io != no_error) {
             assert(0);
             m_outstd_ios--;
@@ -447,7 +451,7 @@ private:
     // For Read: do the verification.
     // For Write: update hash code;
     void process_completions(const vol_interface_req_ptr& vol_req) {
-        boost::intrusive_ptr<VolReq> req = boost::static_pointer_cast<struct VolReq>(vol_req);
+        VolReq* req = (VolReq*)vol_req->cookie;
 
         static uint64_t pt = 30;
         static Clock::time_point pt_start = Clock::now();
@@ -461,7 +465,7 @@ private:
         m_outstd_ios--;
 
         if (req->is_read) {
-            verify(req);
+            verify(req, vol_req);
         } else {
             // write: update hash
             assert(req->hash.size() == req->nblks);
@@ -477,19 +481,19 @@ private:
             std::lock_guard<std::mutex> lk(m_vol_info[req->vol_id]->m_mtx);
             reset_bm_bits(req->vol_id, req->lba, req->nblks);
         }
-
+        delete req; // no longer needed
     }
    
     // 
     // verify by compare the crc in the read buffer returned in req with crc saved with write;
     //
-    void verify(boost::intrusive_ptr<VolReq> req) {
+    void verify(VolReq* req, const vol_interface_req_ptr& vol_req) {
         // if req->verify is false, we still want to process the read_buf_list to verify 
         // the nblks returned, just skip crc check;
         uint64_t nblks_in_buf_list = 0;
 
         // process returned read buf
-        for (auto& info : req->read_buf_list) {
+        for (auto& info : vol_req->read_buf_list) {
             auto offset = info.offset;
             auto size = info.size;
             auto buf = info.buf;

@@ -18,15 +18,18 @@ namespace loadgen {
 class VolumeValue : public ValueSpec {
         
 public:
-    static VolumeValue gen_value(ValuePattern spec, VolumeValue* ref_value = nullptr) {
+    static std::shared_ptr<  VolumeValue > gen_value(ValuePattern spec, VolumeValue* ref_value = nullptr) {
+        std::shared_ptr<  VolumeValue >temp;
         switch (spec) {
             case ValuePattern::SEQUENTIAL_VAL:
-                if(ref_value) {
-                    return VolumeValue(*ref_value);
-                } 
-                    
-                return VolumeValue();
-
+                if (ref_value) {
+                     VolumeValue v = VolumeValue(*ref_value);
+                     temp = std::make_shared< VolumeValue >(v);
+                } else { 
+                    VolumeValue v = VolumeValue();
+                    temp = std::make_shared< VolumeValue >(v);
+                }
+                break;
             case ValuePattern::RANDOM_BYTES:
             {
                 // 
@@ -56,15 +59,20 @@ public:
                     *(uint64_t*)(bytes + i) = dist(generator);
                 }
                 
-                return VolumeValue(1, util::Hash64((const char *)&bytes[0], VOL_PAGE_SIZE));
+                VolumeValue v = VolumeValue(1, util::Hash64((const char *)&bytes[0], VOL_PAGE_SIZE));
+                temp = std::make_shared< VolumeValue >(v);
+                break;
             }
 
             default:
                 // We do not support other gen spec yet
                 assert(0);
-                return VolumeValue();
+                VolumeValue v = VolumeValue();
+                temp = std::make_shared< VolumeValue >(v);
+                break;
         }
 
+        return temp;
     }
 
     ~VolumeValue() {
@@ -108,12 +116,7 @@ public:
         //return util::Hash64((const char *)m_bytes, get_size(m_nblks));
     }
 
-    virtual bool is_consecutive(ValueSpec& v) override {
-        assert(0);
-        return false;
-    }
-            
-    virtual int compare(ValueSpec& other) override {
+    int compare(ValueSpec& other) {
         return to_string().compare(((const VolumeValue*)&(VolumeValue&)other)->to_string());
 #if 0
         VolumeValue* vv = (VolumeValue*)&other;

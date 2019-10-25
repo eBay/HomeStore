@@ -11,6 +11,9 @@
 #include <async_http/http_server.hpp>
 #include <threadpool/thread_pool.h>
 
+#ifndef DEBUG
+extern bool same_value_gen;
+#endif
 namespace homestore {
 
 #define VOL_MAX_IO_SIZE MEMVEC_MAX_IO_SIZE
@@ -101,10 +104,10 @@ using namespace homeds::btree;
 
 #define BLKSTORE_BUFFER_TYPE                                                                                           \
     BtreeBuffer< MappingKey, MappingValue, btree_node_type::VAR_VALUE,                     \
-                                btree_node_type::VAR_VALUE, 4096>
+                                btree_node_type::VAR_VALUE >
 #define MappingBtreeDeclType                                                                                           \
     Btree< btree_store_type::SSD_BTREE, MappingKey, MappingValue, btree_node_type::VAR_VALUE, \
-                          btree_node_type::VAR_VALUE, 4096, writeback_req >
+                          btree_node_type::VAR_VALUE, writeback_req >
 class HomeBlks : public VolInterface {
     static HomeBlks* _instance;
 
@@ -147,6 +150,7 @@ public:
     ~HomeBlks() {  
         m_thread_id.join();
     }
+    virtual vol_interface_req_ptr  create_vol_hb_req() override;
     virtual std::error_condition write(const VolumePtr& vol, uint64_t lba, uint8_t* buf, uint32_t nblks,
                                        const vol_interface_req_ptr& req) override;
     virtual std::error_condition read(const VolumePtr& vol, uint64_t lba, int nblks,

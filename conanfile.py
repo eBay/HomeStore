@@ -5,7 +5,7 @@ from conans import ConanFile, CMake, tools
 class HomestoreConan(ConanFile):
     name = "homestore"
 
-    version = "0.11.20"
+    version = "0.11.21"
     revision_mode = "scm"
 
     license = "Proprietary"
@@ -19,35 +19,44 @@ class HomestoreConan(ConanFile):
     default_options = 'shared=False', 'fPIC=True', 'coverage=False'
 
     requires = (
-                "benchmark/1.5.0@oss/stable",
-                "boost_asio/1.69.0@bincrafters/stable",
-                "boost_dynamic_bitset/1.69.0@bincrafters/stable",
-                "boost_circular_buffer/1.69.0@bincrafters/stable",
-                "boost_heap/1.69.0@bincrafters/stable",
-                "boost_intrusive/1.69.0@bincrafters/stable",
-                "boost_preprocessor/1.69.0@bincrafters/stable",
-                "boost_uuid/1.69.0@bincrafters/stable",
-                "double-conversion/3.1.4@bincrafters/stable",
-                "evhtp/1.2.18.1@oss/stable",
-                "farmhash/1.0.0@oss/stable",
-                "flip/0.2.0@sds/develop",
-                "folly/2019.09.23.00@bincrafters/testing",
-                "gtest/1.8.1@bincrafters/stable",
-                "isa-l/2.21.0@oss/stable",
-                "iomgr/2.2.10@sds/develop",
-                "libevent/2.1.11@bincrafters/stable",
-                "sisl/0.3.8@sisl/develop",
-                "sds_logging/5.3.3@sds/develop",
-                "sds_options/1.0.0@sds/develop",
-                ("zstd/1.4.0@bincrafters/stable", "override"),
-                )
+            # Frequently updated
+            "iomgr/2.2.11@sds/develop",
+
+            # Not commonly updated
+            "flip/0.2.2@sds/testing",
+            "sds_logging/6.0.0@sds/testing",
+            "sds_options/1.0.0@sds/testing",
+            "jungle/2019.09.05@oss/develop",
+            "sisl/0.3.10@sisl/develop",
+
+            # FOSS, rarely updated
+            "benchmark/1.5.0@oss/stable",
+            "boost_asio/1.69.0@bincrafters/stable",
+            "boost_dynamic_bitset/1.69.0@bincrafters/stable",
+            "boost_circular_buffer/1.69.0@bincrafters/stable",
+            "boost_heap/1.69.0@bincrafters/stable",
+            "boost_intrusive/1.69.0@bincrafters/stable",
+            "boost_preprocessor/1.69.0@bincrafters/stable",
+            "boost_uuid/1.69.0@bincrafters/stable",
+            "double-conversion/3.1.4@bincrafters/stable",
+            "evhtp/1.2.18.1@oss/stable",
+            "farmhash/1.0.0@oss/stable",
+            "folly/2019.09.23.00@bincrafters/stable",
+            "isa-l/2.21.0@oss/stable",
+            "libevent/2.1.11@bincrafters/stable",
+            ("zstd/1.4.0@bincrafters/stable", "override"),
+            )
 
     generators = "cmake"
     exports_sources = "cmake/*", "src/*", "CMakeLists.txt"
+    keep_imports = True
 
     def configure(self):
         if self.settings.sanitize != None:
             del self.options.coverage
+
+    def imports(self):
+        self.copy(root_package="flip", pattern="*.py", dst="bin/scripts", src="python/flip/", keep_path=True)
 
     def requirements(self):
         if not self.settings.build_type == "Debug":
@@ -88,7 +97,7 @@ class HomestoreConan(ConanFile):
         self.copy("*test_load", dst="bin", keep_path=False)
         self.copy("*test_mapping", dst="bin", keep_path=False)
         self.copy("*test_volume", dst="bin", keep_path=False)
-        self.copy("*vol_test.py", src="src/", dst="bin", keep_path=False)
+        self.copy("*", dst="bin/scripts", src="bin/scripts", keep_path=True)
 
     def package_info(self):
         self.cpp_info.libs = tools.collect_libs(self)
@@ -107,4 +116,5 @@ class HomestoreConan(ConanFile):
         self.copy("*test_load", dst="/usr/local/bin", keep_path=False)
         self.copy("*test_mapping", dst="/usr/local/bin", keep_path=False)
         self.copy("*test_volume", dst="/usr/local/bin", keep_path=False)
-        self.copy("*vol_test.py", dst="/usr/local/bin", keep_path=False)
+        self.copy("vol_test.py", dst="/usr/local/bin", src="bin/scripts", keep_path=False)
+        self.copy("*", dst="/usr/local/bin/home_blks_scripts", src="bin/scripts", keep_path=True)

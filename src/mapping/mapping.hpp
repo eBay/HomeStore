@@ -15,6 +15,7 @@
 
 SDS_LOGGING_DECL(VMOD_VOL_MAPPING)
 
+
 using namespace homeds::btree;
 
 #define LBA_MASK 0xFFFFFFFFFFFF
@@ -590,7 +591,7 @@ public:
             m_pending_read_blk_cb(pending_read_cb),
             m_comp_cb(comp_cb),
             m_vol_page_size(page_size) {
-        homeds::btree::BtreeConfig btree_cfg(unique_name.c_str());
+        homeds::btree::BtreeConfig btree_cfg(HomeStoreConfig::atomic_phys_page_size, unique_name.c_str());
         btree_cfg.set_max_objs(volsize / page_size);
         btree_cfg.set_max_key_size(sizeof(uint32_t));
         btree_cfg.set_max_value_size(page_size);
@@ -611,7 +612,7 @@ public:
             m_pending_read_blk_cb(pending_read_cb),
             m_comp_cb(comp_cb),
             m_vol_page_size(page_size) {
-        homeds::btree::BtreeConfig btree_cfg(unique_name.c_str());
+        homeds::btree::BtreeConfig btree_cfg(HomeStoreConfig::atomic_phys_page_size, unique_name.c_str());
         btree_cfg.set_max_objs(volsize / page_size);
         btree_cfg.set_max_key_size(sizeof(uint32_t));
         btree_cfg.set_max_value_size(page_size);
@@ -909,6 +910,11 @@ private:
                     assert(preve.compare(&curve) > 0);
                 }
                 assert(curve.get_nlba() == pair.first.get_n_lba());
+                if (same_value_gen) {
+                    // same values can be generated for different keys in some test cases
+                    ++i;
+                    continue;
+                }
                 // check if replace entries dont overlap free entries
                 auto blk_start = curve.get_blkId().get_id() + curve.get_blk_offset();
                 auto blk_end =

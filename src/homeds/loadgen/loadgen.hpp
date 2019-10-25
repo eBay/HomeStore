@@ -38,7 +38,7 @@ public:
 
     Exector& get_executor() { return m_executor; }
 
-    void init_generator() { m_store->init_store(); }
+    void init_generator(homeds::loadgen::Param& parameters) { m_store->init_store(parameters); }
 
     typedef std::function< void(generator_op_error, const key_info< K, V >*, void*, const std::string&) >
                                           store_error_cb_t;
@@ -112,6 +112,14 @@ public:
         m_executor.add([=] {
             this->_range_query(pattern, num_keys_in_range, true, exclusive_access, start_incl, end_incl, error_cb);
             this->op_done(success_cb, -1);
+        });
+    }
+
+    void verify_all(uint32_t num_keys_in_range) {
+        this->op_start();
+        m_executor.add([=] {
+            this->_verify_all(num_keys_in_range);
+            this->op_done(nullptr);
         });
     }
 
@@ -198,21 +206,26 @@ private:
 
         // Generate a new value.
         // TODO: Instead of passing nullptr, save the value in lock protected entity and pass them as ref for gen_value
-        auto value =
-            (new_value) ? m_key_registry.generate_value(value_pattern) : m_key_registry.get_value(value_pattern);
+        auto value = m_key_registry.generate_value(value_pattern);
 
-        bool success = m_store->insert(kip->m_key, *value);
+        bool success = m_store->insert(kip->m_key, value);
+        
         if (success != expected_success) {
-            m_key_registry.print_data_set();
             error_cb(generator_op_error::store_failed, kip.m_ki, nullptr,
                      fmt::format("Insert status expected {} got {}", expected_success, success));
         }
 
-        if (success) {
-            kip->update_value(value);
-            kip->add_hash_code(value->get_hash_code());
-            LOGTRACE("Insert {}", *kip);
+        if (!success) {
+            if (new_key) {
+                m_key_registry.remove_key(kip); 
+                return;
+            }
+            kip->set_error();
+            /* error happen. We move to only verify mode */
         }
+        
+        kip->add_hash_code(value->get_hash_code());
+        LOGTRACE("Insert {}", *kip);
     }
 
     void _get(KeyPattern pattern, bool exclusive_access, store_error_cb_t error_cb, bool expected_success,
@@ -221,7 +234,7 @@ private:
         const auto kip = valid_key ? m_key_registry.get_key(pattern, false /* for_mutate */, exclusive_access)
                                    : m_key_registry.generate_invalid_key();
 
-        V    value = *kip->get_value();
+        V    value;
         bool success = m_store->get(kip->m_key, &value);
         if (success != expected_success) {
             error_cb(generator_op_error::store_failed, kip.m_ki, nullptr,
@@ -237,21 +250,13 @@ private:
 
         if (_verify() && !kip->validate_hash_code(value.get_hash_code(), exclusive_access)) {
             // TODO -below log message would not be correct for non-exclusive access as we use last_hash_code
-
-            // hashcode did not match, if exclusive than compare the last value
-            if (exclusive_access && 0 == value.compare(*kip.m_ki->get_value().get())) {
-                goto success;
-            }
-
-            print_blob(kip.m_ki->get_value()->get_blob());
-            print_blob(value.get_blob());
+            
             error_cb(generator_op_error::data_validation_failed, kip.m_ki, nullptr,
                      fmt::format("HashCode mistmatch between loadgen and store {}:{}", kip->get_last_hash_code(),
                                  value.get_hash_code()));
             assert(0);
             return;
         }
-    success:
         LOGTRACE("Get {}", *kip);
     }
 
@@ -273,17 +278,15 @@ private:
         auto kip = valid_key ? m_key_registry.get_key(pattern, true /* for_mutate */, exclusive_access)
                              : m_key_registry.generate_invalid_key();
         assert(kip.m_ki->m_free_pending == false);
-        V value = *kip->get_value(); //preassigning so as can be successful by default 
+        V value; //preassigning so as can be successful by default 
 
         //  remove from store
         bool success = m_store->remove(kip->m_key, &value);
 
         //remvoe from loadgen, no other threads can pick up this if has exclusive access
         m_key_registry.remove_key(kip);
-        m_key_registry.remove_value(kip->get_value());
 
         if (success != expected_success) {
-            m_key_registry.print_data_set();
             error_cb(generator_op_error::store_failed, kip.m_ki, nullptr,
                      fmt::format("Remove status expected {} got {}", expected_success, success));
             return;
@@ -308,23 +311,53 @@ private:
         auto kip = valid_key ? m_key_registry.get_key(key_pattern, true /* is_mutate */, exclusive_access)
                              : m_key_registry.generate_invalid_key();
 
-        auto value =
-            (new_value) ? m_key_registry.generate_value(value_pattern) : m_key_registry.get_value(value_pattern);
+        auto value = m_key_registry.generate_value(value_pattern);
 
-        bool success = m_store->update(kip->m_key, *value);
+        bool success = m_store->update(kip->m_key, value);
+        
         if (success != expected_success) {
             error_cb(generator_op_error::store_failed, kip.m_ki, nullptr,
-                     fmt::format("Update status expected {} got {}", expected_success, success));
-            return;
+                     fmt::format("update status expected {} got {}", expected_success, success));
         }
+        
         if (!success) {
-            return;
+            kip->set_error();
         }
-        kip->update_value(value);
-        m_key_registry.remove_value(kip->get_and_reset_last_value());
-
         kip->add_hash_code(value->get_hash_code());
         LOGTRACE("Update {}", *kip);
+    }
+
+    void _verify_all(uint32_t num_keys_in_range) {
+        static bool reset = false;
+        std::vector< key_info_ptr< K, V > > kis;
+        std::vector< std::pair< K, V > >    kvs;
+        
+        if (!reset) {
+            m_key_registry.reset_pattern(KeyPattern::SEQUENTIAL, 0);
+            reset = true;
+        }
+        kis = m_key_registry.get_consecutive_keys(KeyPattern::SEQUENTIAL, true, false /* is_mutate */, num_keys_in_range);
+
+    retry:
+        auto count = m_store->query(kis[0]->m_key, true, kis.back()->m_key, true, kvs);
+        if (count == 0) {
+            std::this_thread::sleep_for(std::chrono::seconds(10));
+            goto retry;
+        }
+        uint32_t store_indx = 0;
+        assert(store_indx <= kvs.size());
+        for (uint32_t i = 0; i < kvs.size(); ++i) {
+            if (kis[store_indx]->m_key != kvs[i].first) {
+                continue;
+            }
+            if (!kis[store_indx]->validate_hash_code(kvs[i].second.get_hash_code(), true)) {
+                // TODO -below log message would not be correct for non-exclusive access as we use last_hash_code
+
+                assert(!"hashcode mismatch");
+                return;
+            }
+            store_indx++;
+        }
     }
 
     void _range_query(KeyPattern pattern, uint32_t num_keys_in_range, bool valid_query, bool exclusive_access,
@@ -341,15 +374,33 @@ private:
 
         // const auto it = m_data_set.rlock()->find(start_incl ? kis[0] : kis[1]);
         // auto it = m_key_registry.find_key(start_incl ? kis[0] : kis[1]);
-        auto count = m_store->query(kis[0]->m_key, start_incl, kis.back()->m_key, end_incl, 1000, kvs);
+        auto count = m_store->query(kis[0]->m_key, start_incl, kis.back()->m_key, end_incl, kvs);
 
-        if(!valid_query){
-            if(count > 0){
+        if (!valid_query) {
+            if (count > 0) {
                 error_cb(generator_op_error::data_missing, kis[0].m_ki, nullptr,
                          fmt::format("Was expecting no result"));
             }
-        } else if (_verify()){
-            m_store->verify(kis, kvs, error_cb, exclusive_access);
+            return;
+        } 
+        
+        if (!_verify()) {
+            return;
+        }
+
+        uint32_t store_indx = 0;
+        assert(store_indx <= kvs.size());
+        for (uint32_t i = 0; i < kvs.size(); ++i) {
+            if (kis[store_indx]->m_key != kvs[i].first) {
+                continue;
+            }
+            if (!kis[store_indx]->validate_hash_code(kvs[i].second.get_hash_code(), exclusive_access)) {
+                // TODO -below log message would not be correct for non-exclusive access as we use last_hash_code
+
+                assert(!"hashcode mismatch");
+                return;
+            }
+            store_indx++;
         }
     }
 
@@ -366,18 +417,24 @@ private:
         // get existing keys
         kips = m_key_registry.get_consecutive_keys(pattern, exclusive_access, true /* is_mutate */, num_keys_in_range);
 
-        int updated = m_key_registry.update_contigious_kv(kips);
+        std::vector< std::shared_ptr< V > > val_vec_p;
+        int updated = m_key_registry.update_contigious_kv(kips, val_vec_p);
         if (updated != (int)kips.size()) {
             kips.erase(kips.begin() + updated, kips.end());
         }
 
-        if (kips.size() == 0)
+        if (kips.size() == 0) {
             return;
+        }
 
-        m_store->range_update(kips[0]->m_key, start_incl, kips.back()->m_key, end_incl, *(kips[0]->get_value().get()),
-                              *(kips.back()->get_value().get()));
-
-        m_key_registry.remove_old_values(kips);
+        bool success = m_store->range_update(kips[0]->m_key, start_incl, kips.back()->m_key, end_incl, val_vec_p);
+        if (!success) {
+            for (uint32_t i = 0; i < kips.size(); ++i) {
+                kips[i]->set_error();
+            }
+            error_cb(generator_op_error::store_failed, kips[0].m_ki, nullptr,
+                     fmt::format("range update status failed"));
+        }
     }
 
     void _reset_pattern(KeyPattern key_pattern, int index = 0) { m_key_registry.reset_pattern(key_pattern, index); }

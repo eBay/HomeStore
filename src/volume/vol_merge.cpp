@@ -93,7 +93,7 @@ class MinHS {
         uint64_t        cur_checkpoint;
         ~vol_info_t() { delete m_vol_bm; }
     };
-    struct req : vol_interface_req {
+    struct req  {
         ssize_t  size;
         off_t    offset;
         uint64_t lba;
@@ -161,6 +161,8 @@ public:
 
             notify_cmpl();
         }
+        req* request = (req*)vol_req->cookie;
+        delete request; // no longer needed
     }
 
     void create_volume() {
@@ -281,7 +283,7 @@ public:
             assert(0);
         }
         assert(buf != nullptr);
-        boost::intrusive_ptr< req > req(new struct req());
+        req* req =new struct req();
         req->lba = lba;
         req->nblks = nblks;
         req->fd = vol_info[cur]->fd;
@@ -292,7 +294,9 @@ public:
         req->cur_vol = cur;
         outstanding_ios++;
         read_cnt++;
-        auto ret_io = VolInterface::get_instance()->read(vol_info[cur]->vol, lba, nblks, req);
+        auto vreq = VolInterface::get_instance()->create_vol_hb_req();
+        vreq->cookie = req;
+        auto ret_io = VolInterface::get_instance()->read(vol_info[cur]->vol, lba, nblks, vreq);
         if (ret_io != no_error) {
             outstanding_ios--;
             read_err_cnt++;
@@ -320,7 +324,7 @@ public:
 
         memcpy(buf1, buf, size);
 
-        boost::intrusive_ptr< req > req(new struct req());
+        req* req =new struct req();
         req->lba = lba;
         req->nblks = nblks;
         req->size = size;
@@ -333,7 +337,9 @@ public:
         ++write_cnt;
         ret = pwrite(vol_info[cur]->staging_fd, req->buf, req->size, req->offset);
         assert(ret == req->size);
-        auto ret_io = VolInterface::get_instance()->write(vol_info[cur]->vol, lba, buf, nblks, req);
+        auto vreq = VolInterface::get_instance()->create_vol_hb_req();
+        vreq->cookie = req;
+        auto ret_io = VolInterface::get_instance()->write(vol_info[cur]->vol, lba, buf, nblks, vreq);
         if (ret_io != no_error) {
             assert(0);
             free(buf);
@@ -395,7 +401,7 @@ public:
         populate_buf(buf, size, lba, 0);
         memcpy(buf1, buf, size);
 
-        boost::intrusive_ptr< req > req(new struct req());
+        req* req = new struct req();
 
         req->lba = lba;
         req->nblks = nblks;
@@ -409,7 +415,9 @@ public:
         ++outstanding_ios;
         ++write_cnt;
 
-        auto ret_io = VolInterface::get_instance()->write(vol_info[cur]->vol, lba, buf, nblks, req);
+        auto vreq = VolInterface::get_instance()->create_vol_hb_req();
+        vreq->cookie = req;
+        auto ret_io = VolInterface::get_instance()->write(vol_info[cur]->vol, lba, buf, nblks, vreq);
         if (ret_io != no_error) {
             assert(0);
             free(buf);

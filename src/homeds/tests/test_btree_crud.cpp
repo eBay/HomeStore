@@ -316,7 +316,7 @@ protected:
 
 public:
     BtreeCrudTest() {
-        BtreeConfig btree_cfg;
+        BtreeConfig btree_cfg(4096);
         btree_cfg.set_max_objs(TOTAL_ENTRIES);
         btree_cfg.set_max_key_size(sizeof(TestSimpleKey));
         btree_cfg.set_max_value_size(0);

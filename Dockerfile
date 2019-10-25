@@ -1,13 +1,16 @@
 # ##########   #######   ############
-FROM ecr.vip.ebayc3.com/sds/sds_cpp_base:2.13-dev
+FROM ecr.vip.ebayc3.com/sds/sds_cpp_base:2.15-dev
 LABEL description="Automated SDS compilation"
 
 ARG BUILD_TYPE
 ARG CONAN_CHANNEL
 ARG CONAN_USER
 ARG CONAN_PASS=${CONAN_USER}
+ARG COVERAGE_ON
 ARG HOMESTORE_BUILD_TAG
+
 ENV BUILD_TYPE=${BUILD_TYPE:-default}
+ENV COVERAGE_ON=${COVERAGE_ON:-false}
 ENV CONAN_USER=${CONAN_USER:-sds}
 ENV CONAN_CHANNEL=${CONAN_CHANNEL:-snapshot}
 ENV CONAN_PASS=${CONAN_PASS:-password}
@@ -21,14 +24,14 @@ WORKDIR /output
 ENV ASAN_OPTIONS=detect_leaks=0
 
 RUN set -eux; \
-    if [ "nosanitize" = "${BUILD_TYPE}" ]; then \
-      eval $(grep 'name =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,name,PKG_NAME,'); \
-      eval $(grep -m 1 'version =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,version,PKG_VERSION,'); \
+    eval $(grep 'name =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,name,PKG_NAME,'); \
+    eval $(grep -m 1 'version =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,version,PKG_VERSION,'); \
+    if [ "nosanitize" = "${BUILD_TYPE}" ] && [ "true" = "${COVERAGE_ON}" ]; then \
       conan install --build missing -o ${PKG_NAME}:coverage=True -pr ${BUILD_TYPE} ${SOURCE_PATH}; \
-      /usr/local/bin/build-wrapper-linux-x86-64 --out-dir /tmp/sonar conan build ${SOURCE_PATH}; \
-      cp ${SOURCE_PATH}sonar-project.properties ./; \
+      build-wrapper-linux-x86-64 --out-dir /tmp/sonar conan build ${SOURCE_PATH}; \
       find . -name "*.gcno" -exec gcov {} \; ; \
-      /usr/local/bin/sonar-scanner -Dsonar.projectBaseDir=${SOURCE_PATH} -Dsonar.projectVersion="${PKG_VERSION}"; \
+      cp ${SOURCE_PATH}sonar-project.properties ./; \
+      sonar-scanner -Dsonar.projectBaseDir=${SOURCE_PATH} -Dsonar.projectVersion="${PKG_VERSION}"; \
     fi;
 
 RUN conan create -pr ${BUILD_TYPE} ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"

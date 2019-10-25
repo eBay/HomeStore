@@ -19,7 +19,7 @@ namespace loadgen {
 //btree_node_type::VAR_VALUE, NodeSize, writeback_req>
 
 #define LoadGenSSDBtree                                                                                                \
-    Btree< btree_store_type::SSD_BTREE, K, V, find_interior_node_type< K >(), find_leaf_node_type< K, V >(), NodeSize, \
+    Btree< btree_store_type::SSD_BTREE, K, V, find_interior_node_type< K >(), find_leaf_node_type< K, V >(), \
            writeback_req >
 
 struct ssd_loadgen_req;
@@ -51,8 +51,8 @@ class SSDBtreeStoreSpec : public StoreSpec< K, V > {
 public:
     SSDBtreeStoreSpec() {}
 
-    virtual void init_store() override {
-        homeds::btree::BtreeConfig btree_cfg;
+    virtual void init_store(homeds::loadgen::Param& parameters) override {
+        homeds::btree::BtreeConfig btree_cfg(4096);
         btree_cfg.set_max_objs(TOTAL_ENTRIES);
         btree_cfg.set_max_key_size(K::get_max_size());
         btree_cfg.set_max_value_size(V::get_max_size());
@@ -72,16 +72,16 @@ public:
         }
     }
 
-    virtual bool insert(K& k, V& v) override { return update(k, v); }
+    virtual bool insert(K& k, std::shared_ptr<V> v) override { return update(k, v); }
 
-    virtual bool upsert(K& k, V& v) override { return update(k, v); }
+    virtual bool upsert(K& k, std::shared_ptr<V> v) override { return update(k, v); }
 
-    virtual bool update(K& k, V& v) override {
+    virtual bool update(K& k, std::shared_ptr<V> v) override {
         boost::intrusive_ptr< ssd_loadgen_req > req = ssd_loadgen_req::make_request();
         V                                       existing_val;
         req->state = writeback_req_state::WB_REQ_COMPL;
         // m_bt->put(k, v, btree_put_type::REPLACE_ONLY_IF_EXISTS, to_wb_req(req), to_wb_req(req), &existing_val);
-        m_bt->put(k, v, btree_put_type::REPLACE_IF_EXISTS_ELSE_INSERT, to_wb_req(req), to_wb_req(req), &existing_val);
+        m_bt->put(k, *(v.get()), btree_put_type::REPLACE_IF_EXISTS_ELSE_INSERT, to_wb_req(req), to_wb_req(req), &existing_val);
         return true;
     }
 
@@ -101,15 +101,15 @@ public:
         return status == btree_status_t::success;
     }
 
-    virtual uint32_t query(K& start_key, bool start_incl, K& end_key, bool end_incl, uint32_t batch_size,
+    virtual uint32_t query(K& start_key, bool start_incl, K& end_key, bool end_incl,
                            std::vector< std::pair< K, V > >& result) override {
+#define MAX_BATCH_SIZE 20000000 // set it to big value so that everything is queried in one operation
         auto                      search_range = BtreeSearchRange(start_key, start_incl, end_key, end_incl);
-        BtreeQueryRequest< K, V > qreq(search_range, BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, batch_size);
+        BtreeQueryRequest< K, V > qreq(search_range, BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, MAX_BATCH_SIZE);
 
         auto result_count = 0U;
 
         std::vector< std::pair< K, V > > values;
-        values.reserve(batch_size);
 
         bool has_more = false;
         do {
@@ -127,7 +127,8 @@ public:
         return result_count;
     }
 
-    virtual bool range_update(K& start_key, bool start_incl, K& end_key, bool end_incl, V& start_value, V& end_value) {
+    virtual bool range_update(K& start_key, bool start_incl, K& end_key, bool end_incl,
+                              std::vector<std::shared_ptr<V>> &result) {
         assert(0); // not supported yet
         return {};
     }
