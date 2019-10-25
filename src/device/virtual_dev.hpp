@@ -429,7 +429,7 @@ public:
                uint32_t data_offset = 0) {
         BlkOpStatus  ret_status = BLK_OP_SUCCESS;
         uint32_t     size = bid.get_nblks() * get_page_size();
-        struct iovec iov[BlkId::max_blks_in_op()];
+        iovec iov[BlkId::max_blks_in_op()];
         int          iovcnt = 0;
 
         uint32_t p = 0;
@@ -572,7 +572,7 @@ public:
 
     void readv(const BlkId& bid, const homeds::MemVector& buf, boost::intrusive_ptr< virtualdev_req > req) {
         // Convert the input memory to iovector
-        struct iovec iov[BlkId::max_blks_in_op()];
+        iovec iov[BlkId::max_blks_in_op()];
         int          iovcnt = 0;
         uint32_t     size = buf.size();
 

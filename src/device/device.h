@@ -331,16 +331,16 @@ public:
     PhysicalDevChunk* find_free_chunk(uint64_t req_size);
 
     void write(const char* data, uint32_t size, uint64_t offset, uint8_t* cookie);
-    void writev(const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie);
+    void writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie);
 
     void read(char* data, uint32_t size, uint64_t offset, uint8_t* cookie);
-    void readv(const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie);
+    void readv(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie);
 
     void sync_write(const char* data, uint32_t size, uint64_t offset);
-    void sync_writev(const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset);
+    void sync_writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset);
 
     void            sync_read(char* data, uint32_t size, uint64_t offset);
-    void            sync_readv(const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset);
+    void            sync_readv(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset);
     pdev_info_block get_info_blk();
     void            read_dm_chunk(char* mem, uint64_t size);
     void            write_dm_chunk(uint64_t gen_cnt, char* mem, uint64_t size);
