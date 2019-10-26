@@ -114,8 +114,8 @@ public:
         fc->create_condition("nuber of entries in a node", flip::Operator::EQUAL, 4, &cond1);
         fc->create_condition("nuber of entries in a node", flip::Operator::EQUAL, 2, &cond2);
         
-        fc->inject_noreturn_flip("btree_delay_and_split", {cond1, cond2}, freq);
-        fc->inject_noreturn_flip("btree_delay_and_split_leaf", {cond1, cond2}, freq);
+        fc->inject_retval_flip("btree_delay_and_split", {cond1, cond2}, freq, 20);
+        fc->inject_retval_flip("btree_delay_and_split_leaf", {cond1, cond2}, freq, 20);
         fc->inject_noreturn_flip("btree_parent_node_full", {}, freq);
         fc->inject_noreturn_flip("btree_leaf_node_split", {}, freq);
         fc->inject_retval_flip("btree_upgrade_delay", {}, freq, 20);
@@ -175,7 +175,7 @@ public:
             return nullptr;
         }
 
-        LOGINFO("btree created {}", cfg.get_name());
+        LOGINFO("btree created {} node size {}", cfg.get_name(), cfg.get_node_size());
         return bt;
     }
 
@@ -188,7 +188,7 @@ public:
             LOGERROR("btree create failed. error {} name {}", ret, cfg.get_name());
             return nullptr;
         }
-        LOGDEBUG("btree created {}", cfg.get_name());
+        LOGDEBUG("btree created {} node size {}", cfg.get_name(), cfg.get_node_size());
         return bt;
     }
 
@@ -200,7 +200,7 @@ public:
                 std::bind(&Btree::process_completions, bt, std::placeholders::_1, std::placeholders::_2), true);
         bt->m_btree_store = std::move(impl_ptr);
         bt->init_recovery(btree_sb);
-        LOGINFO("btree recovered and created {}", cfg.get_name());
+        LOGINFO("btree recovered and created {} node size {}", cfg.get_name(), cfg.get_node_size());
         return bt;
     }
 
@@ -1164,9 +1164,9 @@ done:
             }
             for (auto &pair : replace_kv) { // insert is based on compare() of BtreeKey
                 auto status = my_node->insert(pair.first, pair.second);
-                BT_LOG_ASSERT_CMP(EQ, status, btree_status_t::success, );
                 if (status != btree_status_t::success) {
-                    return status;
+                    COUNTER_INCREMENT(m_metrics, insert_failed_count, 1);
+                    return btree_status_t::retry;
                  }
             }
         } else {

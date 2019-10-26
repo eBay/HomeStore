@@ -52,7 +52,7 @@ using namespace homeds::loadgen;
 
 #define G_SimpleKV_Mem                                                                                                 \
     BtreeLoadGen< SimpleNumberKey, FixedBytesValue< 64 >,                                                              \
-                  MemBtreeStoreSpec< SimpleNumberKey, FixedBytesValue< 64 >, 4096 >, IOMgrExecutor >
+                  MemBtreeStoreSpec< SimpleNumberKey, FixedBytesValue< 64 >, 512 >, IOMgrExecutor >
 
 #define G_SimpleKV_SSD                                                                                                 \
     BtreeLoadGen< SimpleNumberKey, FixedBytesValue< 64 >,                                                              \
@@ -152,8 +152,8 @@ struct SSDBtreeVarKVTest : public testing::Test {
 TEST_F(SSDBtreeVarKVTest, VarKVSSDTest) { this->execute(); }
 
 struct MapTest : public testing::Test {
-    std::unique_ptr< G_MapKV_SSD >   loadgen;
     DiskInitializer< IOMgrExecutor > di;
+    std::unique_ptr< G_MapKV_SSD >   loadgen;
     std::mutex                       m_mtx;
     std::condition_variable          m_cv;
     bool                             is_complete = false;
@@ -175,7 +175,7 @@ struct MapTest : public testing::Test {
     void execute() {
         loadgen = std::make_unique< G_MapKV_SSD >(parameters.NT); // starts iomgr
         di.init(loadgen->get_executor(),
-                std::bind(&MapTest::init_done_cb, this, std::placeholders::_1, std::placeholders::_2));
+                std::bind(&MapTest::init_done_cb, this, std::placeholders::_1, std::placeholders::_2), 512);
         join(); // sync wait for test to finish
         di.cleanup();
     }
@@ -326,7 +326,7 @@ SDS_OPTIONS_ENABLE(logging, test_load)
 
 // TODO: VolumeTest couldn't be started after MapSSDTest. Seems because of the http server can't be started because of bing to the same port 5001
 int main(int argc, char* argv[]) {
-    ::testing::GTEST_FLAG(filter) = "*Map*:*Cache*";    
+    ::testing::GTEST_FLAG(filter) = "*Map*:*Cache*";
     testing::InitGoogleTest(&argc, argv);
 
     SDS_OPTIONS_LOAD(argc, argv, logging, test_load)

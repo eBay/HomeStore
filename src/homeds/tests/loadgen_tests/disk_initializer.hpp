@@ -11,13 +11,20 @@ class DiskInitializer {
     std::shared_ptr< iomgr::ioMgr > m_ioMgr;
 
 public:
+    void shutdown_callback(bool success) {
+        VolInterface::del_instance();
+        assert(success);
+    }
+    ~DiskInitializer() {
+        VolInterface::get_instance()->shutdown(std::bind(&DiskInitializer::shutdown_callback, this, std::placeholders::_1));
+    }
     void cleanup() { remove("file_load_gen"); }
-    void init(Executor& executor, init_done_callback init_done_cb) {
+    void init(Executor& executor, init_done_callback init_done_cb, size_t atomic_page_size=2048) {
         m_ioMgr = executor.get_iomgr();
-        start_homestore(init_done_cb);
+        start_homestore(init_done_cb, atomic_page_size);
     }
 
-    void start_homestore(init_done_callback init_done_cb) {
+    void start_homestore(init_done_callback init_done_cb, size_t atomic_page_size) {
         /* start homestore */
         /* create files */
 
@@ -42,6 +49,10 @@ public:
         params.is_file = true;
         params.iomgr = m_ioMgr;
         params.init_done_cb = init_done_cb;
+        params.disk_attr = disk_attributes();
+        params.disk_attr->physical_page_size = 4096;
+        params.disk_attr->disk_align_size = 4096;
+        params.disk_attr->atomic_page_size = atomic_page_size;
         params.vol_mounted_cb =
             std::bind(&DiskInitializer::vol_mounted_cb, this, std::placeholders::_1, std::placeholders::_2);
         params.vol_state_change_cb = std::bind(&DiskInitializer::vol_state_change_cb, this, std::placeholders::_1,

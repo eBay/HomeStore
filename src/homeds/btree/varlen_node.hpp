@@ -565,8 +565,8 @@ private:
         uint16_t obj_size = key_blob.size + val_blob.size;
         uint16_t to_insert_size = obj_size + get_record_size();
         if (to_insert_size > get_var_node_header()->m_available_space) {
-            // No space to insert.
-            assert(0);//something went south
+            LOGDEBUG("insert failed insert size {} available size {}", to_insert_size, 
+                        get_var_node_header()->m_available_space);
             return 0;
         }
 

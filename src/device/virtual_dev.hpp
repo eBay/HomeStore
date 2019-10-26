@@ -341,7 +341,6 @@ public:
             ret = alloc_blk(nblks, hints, blkid);
             if (ret == BLK_ALLOC_SUCCESS) {
                 *out_blkid = blkid[0];
-                HS_ASSERT_CMP(DEBUG, blkid.size(), <=, HomeStoreConfig::atomic_phys_page_size);
             } else {
                 HS_ASSERT_CMP(DEBUG, blkid.size(), ==, 0);
             }

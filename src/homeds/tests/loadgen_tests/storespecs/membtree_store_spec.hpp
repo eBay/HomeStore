@@ -45,7 +45,7 @@ public:
     MemBtreeStoreSpec() {}
 
     virtual void init_store(homeds::loadgen::Param& parameters) override {
-        BtreeConfig btree_cfg(4096);
+        BtreeConfig btree_cfg(NodeSize);
         btree_cfg.set_max_objs(TOTAL_ENTRIES);
         btree_cfg.set_max_key_size(K::get_max_size());
         btree_cfg.set_max_value_size(V::get_max_size());

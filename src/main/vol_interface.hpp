@@ -190,7 +190,7 @@ public:
     boost::uuids::uuid      system_uuid;
     io_flag                 flag = io_flag::DIRECT_IO;
 #ifndef NDEBUG
-    size_t                  mem_btree_page_size;
+    size_t                  mem_btree_page_size = 512;
 #endif
 
     /* optional parameters */

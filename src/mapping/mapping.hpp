@@ -565,13 +565,13 @@ public:
             (BRangeUpdateCBParam< MappingKey, MappingValue >*)&param);
         m_bt->range_put(key, value, btree_put_type::APPEND_IF_EXISTS_ELSE_INSERT, to_wb_req(req), to_wb_req(req), ureq);
 
-#ifndef NDEBUG
-        // vector<pair<MappingKey, MappingValue>> values;
-        // auto temp = req->lastCommited_seqId;
-        // req->lastCommited_seqId = req->seqId;
-        // get(req, values);
-        // req->lastCommited_seqId = temp;
-        // validate_get_response(key.start(), key.get_n_lba(), values, &value, req);
+#if 0
+        vector<pair<MappingKey, MappingValue>> values;
+        auto temp = req->lastCommited_seqId;
+        req->lastCommited_seqId = req->seqId;
+        get(req, values);
+        req->lastCommited_seqId = temp;
+        validate_get_response(key.start(), key.get_n_lba(), values, &value, req);
 #endif
         return no_error;
     }
