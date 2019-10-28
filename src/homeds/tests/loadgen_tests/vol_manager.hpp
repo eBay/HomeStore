@@ -133,6 +133,7 @@ public:
    
     void shutdown_callback(bool success) {
         VolInterface::del_instance();
+        LogDev::del_instance();
         assert(success);       
         m_shutdown_cb_done = true;
     }
@@ -285,23 +286,47 @@ public:
             std::lock_guard<std::mutex>   lk(m_vol_info[vol_id]->m_mtx);
             reset_bm_bits(vol_id, lba, nblks);
         }
+        
+        static bool f = true;
+        if (f) {
+            f = false;
+            logdb_write(vol_id, lba, nblks, VolumeManager::process_logdev_completions);
+        }
 
-        logdb_write(vol_id, lba, nblks);
-                
         return ret_io;
     }
         
 private:
-    void logdb_write(uint64_t vol_id, uint64_t lba, uint64_t nblks) {
-        stringstream ss;
-        ss << vol_id << " " << lba << " " << nblks;
+    static void process_logdev_completions(const logdev_req_ptr& req) {
+        LOGINFO("Logdev write callback received!");
+    }
 
-        uint64_t offset;
-        
-        boost::intrusive_ptr< logdev_req > req = logdev_req::make_request();
-        boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector());
-        mvec->set((uint8_t*)(ss.str().c_str()), ss.str().size(), 0);
-        LogDev::instance()->append_write(mvec, offset, req);
+    void logdb_write(uint64_t vol_id, uint64_t lba, uint64_t nblks, logdev_comp_callback cb) {
+        std::string ss = std::to_string(vol_id) + " " + std::to_string(nblks);
+        uint64_t offset = 0;
+
+        char* ptr = nullptr;
+        int  ret = posix_memalign((void**)&ptr, HomeStoreConfig::align_size, HomeStoreConfig::align_size);
+        //int  ret = posix_memalign((void**)&ptr, LOGDEV_BLKSIZE, LOGDEV_BLKSIZE);
+        if (ret != 0) {
+            throw std::bad_alloc();
+        }
+        strncpy(ptr, ss.c_str(), ss.size());
+
+        struct iovec* iov = nullptr;
+        ret = posix_memalign((void**)&iov, HomeStoreConfig::align_size, sizeof(struct iovec));
+        if (ret != 0) {
+            throw std::bad_alloc();
+        }
+
+        iov[0].iov_base = (uint8_t*)ptr;
+        iov[0].iov_len = HomeStoreConfig::align_size;
+        //iov[0].iov_len = LOGDEV_BLKSIZE;
+
+        LogDev::instance()->append_write(iov, 1, offset, cb);
+
+        free(iov);
+        LOGINFO("offset: {}", offset);
     }
         
 

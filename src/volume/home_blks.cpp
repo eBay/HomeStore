@@ -732,12 +732,12 @@ void HomeBlks::create_logdb_blkstore(vdev_info_block* vb) {
         m_logdb_blk_store = new BlkStore< VdevVarSizeBlkAllocatorPolicy >(
             m_dev_mgr, m_cache, size, PASS_THRU, 0, (char*)&blob, sizeof(blkstore_blob),
             HomeStoreConfig::atomic_phys_page_size, "logdb", 
-            LogDev::process_log_data_completions);
+            std::bind(&LogDev::process_logdev_completions, LogDev::instance(), std::placeholders::_1));
     } else {
         m_logdb_blk_store = new BlkStore< VdevVarSizeBlkAllocatorPolicy >(
             m_dev_mgr, m_cache, vb, PASS_THRU, HomeStoreConfig::atomic_phys_page_size, "logdb",
             (vb->failed ? true : false), 
-            LogDev::process_log_data_completions);
+            std::bind(&LogDev::process_logdev_completions, LogDev::instance(), std::placeholders::_1));
         if (vb->failed) {
             m_vdev_failed = true;
             LOGINFO("logdb block store is in failed state");
@@ -1120,6 +1120,7 @@ void HomeBlks::shutdown_process(shutdown_comp_callback shutdown_comp_cb, bool fo
         delete m_sb_blk_store;
         delete m_data_blk_store;
         delete m_metadata_blk_store;
+        delete m_logdb_blk_store;
 
         // BlkStore ::m_cache/m_wb_cache points to HomeBlks::m_cache;
         delete m_cache;

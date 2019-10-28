@@ -356,7 +356,7 @@ void DriveEndPoint::sync_writev(int m_sync_fd, const struct iovec* iov, int iovc
     if (written_size != size) {
         std::stringstream ss;
         ss << "Error trying to write offset " << offset << " size to write = " << size
-           << " size written = " << written_size << "err no" << errno << " m_sync_fd" << m_sync_fd << "\n";
+           << " size written = " << written_size << " err no: " << errno << " err msg: " << strerror(errno) << " m_sync_fd" << m_sync_fd << "\n";
         folly::throwSystemError(ss.str());
     }
     COUNTER_INCREMENT(m_metrics, write_cnt, 1);

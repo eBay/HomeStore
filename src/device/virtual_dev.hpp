@@ -335,46 +335,74 @@ public:
         
     }
 
-    bool write_at_offset(boost::intrusive_ptr< homeds::MemVector > mvec, uint64_t offset, boost::intrusive_ptr< virtualdev_req > req) {
+    uint64_t get_len(const struct iovec* iov, const int iovcnt) {
+        uint64_t len = 0;
+        for (int i = 0; i < iovcnt; i++) {
+            len += iov[i].iov_len;
+        }
+        return len;
+    }
+
+    // 
+    // TODO: provide iterator for LogDev layer to consume to iterate all the records;
+    //
+    bool write_at_offset(const struct iovec* iov, const int iovcnt, uint64_t offset, boost::intrusive_ptr< virtualdev_req > req) {
         uint32_t dev_id = 0, chunk_id = 0; 
         uint64_t offset_in_chunk = 0;
+        uint64_t len = get_len(iov, iovcnt);
+        // convert chunk start offset to gloable offset, then + offset_in_chunk;
         uint64_t dev_offset = logical_to_dev_offset(offset, dev_id, chunk_id, offset_in_chunk);
-        const int iovcnt = mvec->npieces();
-        struct iovec iov[iovcnt];
 
-        for (int i = 0; i < iovcnt; i++) {
-            iov[i].iov_base = mvec->get_nth_piece(i).ptr();
-            iov[i].iov_len = mvec->get_nth_piece(i).size();
+        bool ret = true;
+        try {
+            PhysicalDevChunk* chunk = m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id];
+            if (req) {
+                req->version = 0xDEAD;
+                req->cb = std::bind(&VirtualDev::process_completions, this, std::placeholders::_1);
+                req->size = len;
+                req->chunk = chunk;
+            }
+
+            auto chunk_num = m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id]->get_chunk_id();
+            auto chunk_2 = m_mgr->get_chunk_mutable(chunk_num);
+            auto chunk_s_off = chunk_2->get_start_offset();
+
+            auto pdev_2 = chunk_2->get_physical_dev();
+
+            auto dev_offset_2 = pdev_2->get_dev_offset();
+
+            auto pdev = m_primary_pdev_chunks_list[dev_id].pdev;
+
+            HS_LOG(INFO, device, "Writing in device: {}, offset = {}", dev_id, dev_offset);
+
+            COUNTER_INCREMENT(pdev->get_metrics(), drive_write_vector_count, 1);
+
+            if (!req || req->isSyncCall) {
+                auto start_time = Clock::now();
+                COUNTER_INCREMENT(pdev->get_metrics(), drive_sync_write_count, 1);
+                pdev->sync_writev(iov, iovcnt, len, dev_offset);
+                HISTOGRAM_OBSERVE(pdev->get_metrics(), drive_write_latency, get_elapsed_time_us(start_time));
+            } else {
+                COUNTER_INCREMENT(pdev->get_metrics(), drive_async_write_count, 1);
+                req->inc_ref();
+                req->io_start_time = Clock::now();
+                pdev->writev(iov, iovcnt, len, dev_offset, (uint8_t*)req.get());
+            }
+
+            if (get_nmirrors()) {
+                // We do not support async mirrored writes yet.
+                HS_ASSERT(DEBUG, ((req == nullptr) || req->isSyncCall), "Expected null req or a sync call");
+                write_nmirror(iov, iovcnt, len, chunk, dev_offset);
+            }
+
+        } catch (const std::exception& e) {
+            ret = false;
+            HS_ASSERT(DEBUG, 0, "{}", e.what());
         }
 
-        PhysicalDevChunk* chunk = m_mgr->get_chunk_mutable(chunk_id);
-        auto pdev = chunk->get_physical_dev_mutable();
-       
-        HS_LOG(INFO, device, "Writing in device: {}, offset = {}", dev_id, dev_offset);
-
-        COUNTER_INCREMENT(pdev->get_metrics(), drive_write_vector_count, 1);
-
-        if (!req || req->isSyncCall) {
-            auto start_time = Clock::now();
-            COUNTER_INCREMENT(pdev->get_metrics(), drive_sync_write_count, 1);
-            pdev->sync_writev(iov, iovcnt, mvec->size(), dev_offset);
-            HISTOGRAM_OBSERVE(pdev->get_metrics(), drive_write_latency, get_elapsed_time_us(start_time));
-        } else {
-            COUNTER_INCREMENT(pdev->get_metrics(), drive_async_write_count, 1);
-            req->inc_ref();
-            req->io_start_time = Clock::now();
-            pdev->writev(iov, iovcnt, mvec->size(), dev_offset, (uint8_t*)req.get());
-        }
-
-        if (get_nmirrors()) {
-            // We do not support async mirrored writes yet.
-            HS_ASSERT(DEBUG, ((req == nullptr) || req->isSyncCall), "Expected null req or a sync call");
-            write_nmirror(iov, iovcnt, mvec->size(), chunk, dev_offset);
-        }
- 
-        return true;
+        return ret;
     }
-    
+ 
     // 
     // convert from logical offset to device offset
     //
@@ -386,12 +414,13 @@ public:
         uint64_t off_l = log_offset;
         for (size_t d = 0; d < m_primary_pdev_chunks_list.size(); d++) {
             for (size_t c = 0; c < m_primary_pdev_chunks_list[d].chunks_in_pdev.size(); c++) {
-                if (off_l < m_chunk_size) {
+                if (off_l > m_chunk_size) {
                     off_l -= m_chunk_size;
                 } else {
                     dev_id = d; 
                     chunk_id = c;
                     offset_in_chunk = off_l;
+            
                     return to_glob_uniq_offset(dev_id, chunk_id, offset_in_chunk);
                 }
             }

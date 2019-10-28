@@ -5,14 +5,19 @@ namespace homestore {
 LogDev* LogDev::_instance = nullptr;
 
 LogDev::LogDev() {
+    m_comp_cb = nullptr;
     m_last_crc = INVALID_CRC32_VALUE;
     m_write_size = 0;
-    m_blkstore = HomeBlks::instance()->get_logdb_blkstore();
+    //m_blkstore = VolInterface::get_instance()->get_logdb_blkstore();
     //HS_ASSERT_CMP(DEBUG, m_blkstore, !=, nullptr);
 }
 
 LogDev::~LogDev() {
 
+}
+
+void LogDev::del_instance() {
+    delete _instance;
 }
 
 LogDev* LogDev::instance() {
@@ -24,10 +29,12 @@ LogDev* LogDev::instance() {
 // 
 // calculate crc based on input buffers splitted in multiple buffers in MemVector;
 //
-uint32_t LogDev::cal_crc(boost::intrusive_ptr< homeds::MemVector > mvec) {
+uint32_t LogDev::get_crc_and_len(struct iovec* iov, int iovcnt, uint64_t& len) {
     uint32_t crc = init_crc32;
-    for (size_t i = 0; i < mvec->npieces(); i++) {
-        crc = crc32_ieee(crc, (unsigned char*)mvec->get_nth_piece(i).ptr(), mvec->get_nth_piece(i).size());
+    len = 0;
+    for (int i = 0; i < iovcnt; i++) {
+        crc = crc32_ieee(crc, (unsigned char*)(iov[i].iov_base), iov[i].iov_len);
+        len += iov[i].iov_len;
     }
 
     return crc;
@@ -47,50 +54,79 @@ uint32_t LogDev::cal_crc(boost::intrusive_ptr< homeds::MemVector > mvec) {
 // TODO:
 // 1. Avoid new and Memory should come from pre-allocated buffer when group-commit kicks in
 //
-bool LogDev::append_write(boost::intrusive_ptr< homeds::MemVector > mvec, uint64_t& out_offset,  boost::intrusive_ptr< logdev_req > req) {
-    size_t data_sz = sizeof(LogDevRecordHeader) + mvec->size() + sizeof(LogDevRecordFooter);
+bool LogDev::append_write(struct iovec* iov_i, int iovcnt_i, uint64_t& out_offset, logdev_comp_callback cb) {
+    m_comp_cb = cb;
+    uint64_t len = 0; 
+    uint32_t crc = get_crc_and_len(iov_i, iovcnt_i, len);
+
+    size_t data_sz = sizeof(LogDevRecordHeader) + len + sizeof(LogDevRecordFooter);
+    uint64_t blkstore_sz = HomeBlks::instance()->get_logdb_blkstore()->get_size();
 
     // validate size being written;
-    if (m_write_size + data_sz > m_blkstore->get_size()) {
-        HS_LOG(ERROR, logdb, "Fail to write to logdb. No space left: {}, {}, {}", m_write_size, data_sz, mvec->size());
+    if (m_write_size + data_sz > blkstore_sz) {
+        HS_LOG(ERROR, logdb, "Fail to write to logdb. No space left: {}, {}, {}", m_write_size, data_sz, len);
         return false;
     }
     
-    LogDevRecordHeader *hdr = new LogDevRecordHeader();
+    const int iovcnt = iovcnt_i + 2;
+    struct iovec iov[iovcnt];
+
+    LogDevRecordHeader *hdr = nullptr;
+    int ret = posix_memalign((void**)&hdr, LOGDEV_BLKSIZE, LOGDEV_BLKSIZE);
+
+    if (ret != 0 ) {
+        throw std::bad_alloc();
+    }
     
     hdr->m_version = LOG_DB_RECORD_HDR_VER;
     hdr->m_magic = LOG_DB_RECORD_HDR_MAGIC;
-    hdr->m_crc = cal_crc(mvec);
-    hdr->m_len = mvec->size();
+    hdr->m_crc = crc;
+    hdr->m_len = len;
 
-    // insert header portion before the data buffer
-    MemPiece mp_hdr((uint8_t*)hdr, (uint32_t)sizeof(LogDevRecordHeader), 0ul);
-    mvec->insert_at(0, mp_hdr);
+    iov[0].iov_base = (uint8_t*)hdr;
+    iov[0].iov_len = LOGDEV_BLKSIZE;
 
-    LogDevRecordFooter* ft = new LogDevRecordFooter();
+    // move pointer from input iov_i to iov;
+    for (int i = 0, j = 1; i < iovcnt_i; i++, j++) {
+        iov[j].iov_base = iov_i[i].iov_base;
+        iov[j].iov_len = iov_i[i].iov_len;
+    }
+
+    LogDevRecordFooter* ft = nullptr;
+    ret = posix_memalign((void**)&ft, LOGDEV_BLKSIZE, LOGDEV_BLKSIZE);
+    if (ret != 0 ) {
+        throw std::bad_alloc();
+    }
 
     ft->m_prev_crc = m_last_crc;
 
-    // push back the footer portion
-    MemPiece mp_ft((uint8_t*)ft, (uint32_t)sizeof(LogDevRecordFooter), 0ul);
-    mvec->push_back(mp_ft);
+    iov[iovcnt-1].iov_base = (uint8_t*)ft;
+    iov[iovcnt-1].iov_len = LOGDEV_BLKSIZE;
 
     m_last_crc = hdr->m_crc;
 
-    out_offset = m_blkstore->write_at_offset(mvec, m_write_size, to_wb_req(req));
+    auto req = logdev_req::make_request();
+    out_offset = HomeBlks::instance()->get_logdb_blkstore()->write_at_offset(iov, iovcnt, m_write_size, to_wb_req(req));
 
     m_write_size += data_sz;
     return true;
 }
 
 //
-bool LogDev::read(const homeds::MemPiece& mp, uint64_t offset, boost::intrusive_ptr< logdev_req > req) {
+bool LogDev::read(uint64_t offset, boost::intrusive_ptr< logdev_req > req) {
     // To be implemented
     return true;
 }
 
-void LogDev::process_log_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req) {
-
+void LogDev::process_logdev_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req) {
+    auto req = to_logdev_req(bs_req);
+    if (!req->is_read) {
+       // update logdev read metrics; 
+    } else {
+       // update logdev write metrics;
+    }
+    
+    m_comp_cb(req);
 }
 
 }
