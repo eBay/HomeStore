@@ -90,6 +90,13 @@ bool LogDev::append_write(struct iovec* iov_i, int iovcnt_i, uint64_t& out_offse
     for (int i = 0, j = 1; i < iovcnt_i; i++, j++) {
         iov[j].iov_base = iov_i[i].iov_base;
         iov[j].iov_len = iov_i[i].iov_len;
+
+#ifdef _PRERELEASE
+        if (iov_i[i].iov_len % LOGDEV_BLKSIZE) {
+            HS_LOG(ERROR, logdb, "Invalid iov_len, must be {} aligned. ", LOGDEV_BLKSIZE);
+            return false;
+        }
+#endif
     }
 
     LogDevRecordFooter* ft = nullptr;
@@ -106,7 +113,10 @@ bool LogDev::append_write(struct iovec* iov_i, int iovcnt_i, uint64_t& out_offse
     m_last_crc = hdr->m_crc;
 
     auto req = logdev_req::make_request();
-    out_offset = HomeBlks::instance()->get_logdb_blkstore()->write_at_offset(iov, iovcnt, m_write_size, to_wb_req(req));
+
+    out_offset = m_write_size;
+    
+    HomeBlks::instance()->get_logdb_blkstore()->write_at_offset(iov, iovcnt, m_write_size, to_wb_req(req));
 
     m_write_size += data_sz;
     return true;

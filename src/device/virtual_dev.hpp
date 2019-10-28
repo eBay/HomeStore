@@ -346,14 +346,13 @@ public:
     // 
     // TODO: provide iterator for LogDev layer to consume to iterate all the records;
     //
-    bool write_at_offset(const struct iovec* iov, const int iovcnt, uint64_t offset, boost::intrusive_ptr< virtualdev_req > req) {
+    uint64_t write_at_offset(const struct iovec* iov, const int iovcnt, uint64_t offset, boost::intrusive_ptr< virtualdev_req > req) {
         uint32_t dev_id = 0, chunk_id = 0; 
         uint64_t offset_in_chunk = 0;
         uint64_t len = get_len(iov, iovcnt);
         // convert chunk start offset to gloable offset, then + offset_in_chunk;
         uint64_t dev_offset = logical_to_dev_offset(offset, dev_id, chunk_id, offset_in_chunk);
 
-        bool ret = true;
         try {
             PhysicalDevChunk* chunk = m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id];
             if (req) {
@@ -362,14 +361,6 @@ public:
                 req->size = len;
                 req->chunk = chunk;
             }
-
-            auto chunk_num = m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id]->get_chunk_id();
-            auto chunk_2 = m_mgr->get_chunk_mutable(chunk_num);
-            auto chunk_s_off = chunk_2->get_start_offset();
-
-            auto pdev_2 = chunk_2->get_physical_dev();
-
-            auto dev_offset_2 = pdev_2->get_dev_offset();
 
             auto pdev = m_primary_pdev_chunks_list[dev_id].pdev;
 
@@ -396,11 +387,10 @@ public:
             }
 
         } catch (const std::exception& e) {
-            ret = false;
             HS_ASSERT(DEBUG, 0, "{}", e.what());
         }
 
-        return ret;
+        return dev_offset;
     }
  
     // 
