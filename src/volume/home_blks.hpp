@@ -118,7 +118,7 @@ class HomeBlks : public VolInterface {
     homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >*                     m_data_blk_store;
     homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy, BLKSTORE_BUFFER_TYPE >* m_metadata_blk_store;
     homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >*                     m_sb_blk_store;
-    homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >*                     m_logdb_blk_store;
+    homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >*                     m_logdev_blk_store;
     vol_config_sb*                                                                       m_cfg_sb;
     Cache< BlkId >*                                                                      m_cache;
     bool                                                                                 m_rdy;
@@ -184,7 +184,7 @@ public:
 
     homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >*                     get_data_blkstore();
     homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy, BLKSTORE_BUFFER_TYPE >* get_metadata_blkstore();
-    homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >*                     get_logdb_blkstore();
+    homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >*                     get_logdev_blkstore();
     void                                                                                 vol_sb_remove(vol_mem_sb* sb);
     uint32_t                                                                             get_data_pagesz() const;
     uint64_t get_boot_cnt();
@@ -228,7 +228,7 @@ private:
     void create_data_blkstore(vdev_info_block* vb);
     void create_metadata_blkstore(vdev_info_block* vb);
     void create_sb_blkstore(vdev_info_block* vb);
-    void create_logdb_blkstore(vdev_info_block* vb);
+    void create_logdev_blkstore(vdev_info_block* vb);
     bool is_ready();
     void init_thread();
     void volume_destroy();

@@ -287,27 +287,27 @@ public:
             reset_bm_bits(vol_id, lba, nblks);
         }
         
-        static bool f = true;
-        if (f) {
-            f = false;
-            logdb_write(vol_id, lba, nblks, VolumeManager::process_logdev_completions);
+        // TODO: move it to concurrent logdev write after Group Commit is implemented;
+        if (m_logdev_done) {
+            m_logdev_done = false;
+            logdev_write(vol_id, lba, nblks, std::bind(&VolumeManager::process_logdev_completions, this, std::placeholders::_1));
         }
 
         return ret_io;
     }
         
 private:
-    static void process_logdev_completions(const logdev_req_ptr& req) {
+    void process_logdev_completions(const logdev_req_ptr& req) {
+        m_logdev_done = true;
         LOGINFO("Logdev write callback received!");
     }
 
-    void logdb_write(uint64_t vol_id, uint64_t lba, uint64_t nblks, logdev_comp_callback cb) {
+    void logdev_write(uint64_t vol_id, uint64_t lba, uint64_t nblks, logdev_comp_callback cb) {
         std::string ss = std::to_string(vol_id) + " " + std::to_string(nblks);
         uint64_t offset = 0;
 
         char* ptr = nullptr;
         int  ret = posix_memalign((void**)&ptr, HomeStoreConfig::align_size, HomeStoreConfig::align_size);
-        //int  ret = posix_memalign((void**)&ptr, LOGDEV_BLKSIZE, LOGDEV_BLKSIZE);
         if (ret != 0) {
             throw std::bad_alloc();
         }
@@ -321,7 +321,6 @@ private:
 
         iov[0].iov_base = (uint8_t*)ptr;
         iov[0].iov_len = HomeStoreConfig::align_size;
-        //iov[0].iov_len = LOGDEV_BLKSIZE;
 
         LogDev::instance()->append_write(iov, 1, offset, cb);
 
@@ -600,6 +599,7 @@ private:
 
     bool                                            m_enable_write_log;
     std::shared_ptr<WriteLogRecorder<uint64_t>>     m_write_recorder;
+    bool                                            m_logdev_done = true;
 }; // VolumeManager
 
 template <typename T>

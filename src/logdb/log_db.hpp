@@ -4,7 +4,7 @@
 #include <volume/home_blks.hpp>
 #include <blkstore/blkstore.hpp>
 
-SDS_LOGGING_DECL(logdb) 
+SDS_LOGGING_DECL(logdev) 
 
 namespace homestore {
 

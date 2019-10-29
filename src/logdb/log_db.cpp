@@ -8,8 +8,6 @@ LogDev::LogDev() {
     m_comp_cb = nullptr;
     m_last_crc = INVALID_CRC32_VALUE;
     m_write_size = 0;
-    //m_blkstore = VolInterface::get_instance()->get_logdb_blkstore();
-    //HS_ASSERT_CMP(DEBUG, m_blkstore, !=, nullptr);
 }
 
 LogDev::~LogDev() {
@@ -59,12 +57,12 @@ bool LogDev::append_write(struct iovec* iov_i, int iovcnt_i, uint64_t& out_offse
     uint64_t len = 0; 
     uint32_t crc = get_crc_and_len(iov_i, iovcnt_i, len);
 
-    size_t data_sz = sizeof(LogDevRecordHeader) + len + sizeof(LogDevRecordFooter);
-    uint64_t blkstore_sz = HomeBlks::instance()->get_logdb_blkstore()->get_size();
+    size_t data_sz = LOGDEV_BLKSIZE + len + LOGDEV_BLKSIZE;
+    uint64_t blkstore_sz = HomeBlks::instance()->get_logdev_blkstore()->get_size();
 
     // validate size being written;
     if (m_write_size + data_sz > blkstore_sz) {
-        HS_LOG(ERROR, logdb, "Fail to write to logdb. No space left: {}, {}, {}", m_write_size, data_sz, len);
+        HS_LOG(ERROR, logdev, "Fail to write to logdev. No space left: {}, {}, {}", m_write_size, data_sz, len);
         return false;
     }
     
@@ -93,7 +91,7 @@ bool LogDev::append_write(struct iovec* iov_i, int iovcnt_i, uint64_t& out_offse
 
 #ifdef _PRERELEASE
         if (iov_i[i].iov_len % LOGDEV_BLKSIZE) {
-            HS_LOG(ERROR, logdb, "Invalid iov_len, must be {} aligned. ", LOGDEV_BLKSIZE);
+            HS_LOG(ERROR, logdev, "Invalid iov_len, must be {} aligned. ", LOGDEV_BLKSIZE);
             return false;
         }
 #endif
@@ -116,7 +114,7 @@ bool LogDev::append_write(struct iovec* iov_i, int iovcnt_i, uint64_t& out_offse
 
     out_offset = m_write_size;
     
-    HomeBlks::instance()->get_logdb_blkstore()->write_at_offset(iov, iovcnt, m_write_size, to_wb_req(req));
+    HomeBlks::instance()->get_logdev_blkstore()->write_at_offset(iov, iovcnt, m_write_size, to_wb_req(req));
 
     m_write_size += data_sz;
     return true;

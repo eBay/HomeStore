@@ -353,7 +353,7 @@ public:
         // convert chunk start offset to gloable offset, then + offset_in_chunk;
         uint64_t dev_offset = logical_to_dev_offset(offset, dev_id, chunk_id, offset_in_chunk);
 
-        try {
+        //try {
             PhysicalDevChunk* chunk = m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id];
             if (req) {
                 req->version = 0xDEAD;
@@ -385,11 +385,11 @@ public:
                 HS_ASSERT(DEBUG, ((req == nullptr) || req->isSyncCall), "Expected null req or a sync call");
                 write_nmirror(iov, iovcnt, len, chunk, dev_offset);
             }
-
+#if 0
         } catch (const std::exception& e) {
             HS_ASSERT(DEBUG, 0, "{}", e.what());
         }
-
+#endif
         return dev_offset;
     }
  
