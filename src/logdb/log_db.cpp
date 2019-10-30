@@ -106,7 +106,7 @@ bool LogDev::append_write(struct iovec* iov_i, int iovcnt_i, uint64_t& out_offse
         throw std::bad_alloc();
     }
 
-    ft->m_prev_crc = m_last_crc;
+    ft->t.m_prev_crc = m_last_crc;
 
     iov[iovcnt-1].iov_base = (uint8_t*)ft;
     iov[iovcnt-1].iov_len = LOGDEV_BLKSIZE;
