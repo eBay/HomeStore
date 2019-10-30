@@ -368,6 +368,11 @@ struct BtreeLoadGen {
         if (remove_allowed)
             kvg->remove_all_keys();
         join();
+        LOGINFO("stored_keys:{}, outstanding_create:{},"
+                " outstanding_others:{}, creates:{}, reads:{}, updates:{}, deletes:{}, "
+                "rangeupdate:{}, rangequery:{}, total_io:{}, verify_io:{}",
+                stored_keys, outstanding_create, outstanding_others, C_NC, C_NR, C_NU, C_ND,
+                C_NRU / UPDATE_RANGE_BATCH_SIZE, C_NRQ / QUERY_RANGE_BATCH_SIZE, get_issued_ios(), C_NV);
     }
 
     int8_t select_io() {

@@ -47,6 +47,7 @@ add_subdirectory(error)
 add_subdirectory(main)
 add_subdirectory(threadpool)
 add_subdirectory(mapping)
+add_subdirectory(test_scripts)
 
 set(HOMESTORE_OBJECTS
         $<TARGET_OBJECTS:hs_main>

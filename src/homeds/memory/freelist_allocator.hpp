@@ -69,10 +69,10 @@ public:
             COUNTER_INCREMENT(metrics, freelist_alloc_hit, 1);
             m_head = m_head->next;
             COUNTER_DECREMENT(metrics, freelist_cache_size, size_needed);
+            m_list_count--;
         }
 
         COUNTER_INCREMENT(metrics, freelist_alloc_size, size_needed);
-        m_list_count--;
         return ptr;
     }
 

@@ -77,9 +77,9 @@ struct verify_result{
     }
 };
 #endif
-#define physical_node_t  PhysicalNode<VNode, K, V, NodeSize>
+#define physical_node_t  PhysicalNode<VNode, K, V>
 
-template <typename VNode, typename K, typename V, size_t NodeSize>
+template <typename VNode, typename K, typename V>
 class PhysicalNode {
 protected:
     persistent_hdr_t m_pers_header;
@@ -465,18 +465,18 @@ protected:
                 LOGINFO("entry already exist");
                 return false;
             }
-            to_variant_node()->insert(result.end_of_search_index, key, val);
+            (void)to_variant_node()->insert(result.end_of_search_index, key, val);
         } else if (put_type == btree_put_type::REPLACE_ONLY_IF_EXISTS) {
             if (!result.found) return false;
             to_variant_node()->update(result.end_of_search_index, key, val);
         } else if (put_type == btree_put_type::REPLACE_IF_EXISTS_ELSE_INSERT) {
-            !(result.found) ? to_variant_node()->insert(result.end_of_search_index, key, val) :
+            !(result.found) ? (void)to_variant_node()->insert(result.end_of_search_index, key, val) :
                              to_variant_node()->update(result.end_of_search_index, key, val);
         } else if (put_type == btree_put_type::APPEND_ONLY_IF_EXISTS) {
             if (!result.found) return false;
             append(result.end_of_search_index, key, val, existing_val);
         } else if (put_type == btree_put_type::APPEND_IF_EXISTS_ELSE_INSERT) {
-            (!result.found) ? to_variant_node()->insert(result.end_of_search_index, key, val) :
+            (!result.found) ? (void)to_variant_node()->insert(result.end_of_search_index, key, val) :
                              append(result.end_of_search_index, key, val, existing_val);
         } else {
             assert(0);
@@ -487,11 +487,12 @@ protected:
         return ret;
     }
 
-    void insert(const BtreeKey &key, const BtreeValue &val) {
+    btree_status_t insert(const BtreeKey &key, const BtreeValue &val) {
         auto result = find(key, nullptr, nullptr);
         assert(!is_leaf() || (!result.found)); // We do not support duplicate keys yet
-        to_variant_node()->insert(result.end_of_search_index, key, val);
+        auto ret = to_variant_node()->insert(result.end_of_search_index, key, val);
         assert(get_magic()==MAGICAL_VALUE);
+        return ret;
     }
 
     bool remove_one(const BtreeSearchRange &range, BtreeKey *outkey, BtreeValue *outval) {

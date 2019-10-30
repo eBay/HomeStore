@@ -20,17 +20,17 @@ using namespace boost;
 
 namespace homeds { namespace btree {
 
-#define SimpleNode              VariantNode<btree_node_type::SIMPLE, K, V, NodeSize>
+#define SimpleNode              VariantNode<btree_node_type::SIMPLE, K, V>
 
-template< typename K, typename V, size_t NodeSize >
-class SimpleNode : public PhysicalNode<SimpleNode, K, V, NodeSize> {
+template< typename K, typename V >
+class SimpleNode : public PhysicalNode<SimpleNode, K, V> {
 public:
     SimpleNode(bnodeid_t id, bool init,const BtreeConfig &cfg) :
-            PhysicalNode<SimpleNode, K, V, NodeSize>(id, init) {
+            PhysicalNode<SimpleNode, K, V>(id, init) {
         this->set_node_type(btree_node_type::SIMPLE);
     }
     SimpleNode(bnodeid_t* id, bool init,const BtreeConfig &cfg) :
-            PhysicalNode<SimpleNode, K, V, NodeSize>(id, init) {
+            PhysicalNode<SimpleNode, K, V>(id, init) {
         this->set_node_type(btree_node_type::SIMPLE);
     }
 public:
@@ -69,7 +69,7 @@ public:
 
     // Insert the key and value in provided index
     // Assumption: Node lock is already taken
-    void insert(uint32_t ind, const BtreeKey &key, const BtreeValue &val) {
+    btree_status_t insert(uint32_t ind, const BtreeKey &key, const BtreeValue &val) {
         //K& k = *(dynamic_cast<K *>(&key));
         //assert(get_total_entries() < getMaxEntries());
         uint32_t sz = (this->get_total_entries() - (ind + 1) + 1) * get_nth_obj_size(0);
@@ -85,6 +85,7 @@ public:
 #ifndef NDEBUG
         validate_sanity();
 #endif
+        return btree_status_t::success;
     }
 
     std::string to_string() const {

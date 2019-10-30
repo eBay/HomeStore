@@ -304,6 +304,8 @@ public:
         btree_cfg.set_max_objs(TOTAL_ENTRIES);
         btree_cfg.set_max_key_size(sizeof(TestSimpleKey));
         btree_cfg.set_max_value_size(0);
+        btree_cfg.set_node_size(4096);
+        BtreeNodeAllocator< 512 >::create(); 
         m_bt = TestBtreeDeclType::create_btree(btree_cfg, &bt_dev_info);
         init_entries();
     }

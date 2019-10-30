@@ -138,6 +138,8 @@ void Volume::set_io_flip() {
     fc->inject_retval_flip("vol_delay_read_us", {}, freq, 20);
 
     fc->inject_retval_flip("cache_insert_race", {}, freq, 20);
+    fc->inject_retval_flip("io_write_iocb_empty_flip", {}, freq, 20);
+    fc->inject_retval_flip("io_read_iocb_empty_flip", {}, freq, 20);
     
     fc->create_condition("nuber of blks in a write", flip::Operator::EQUAL, 8, &cond1);
     fc->inject_retval_flip("blkalloc_split_blk", {cond1}, freq, 4);
@@ -323,7 +325,8 @@ vol_interface_req_ptr  Volume::create_vol_hb_req() {
     return vol_hb_req::make_instance();
 }
 
-void Volume::process_journal_completions(std::vector< volume_req_ptr >& child_reqs, uint64_t log_id) {
+void Volume::process_journal_completions(vol_hb_req* vhb_req, uint64_t log_id) {
+    auto child_reqs =  vhb_req->child_reqs;
     auto itr = child_reqs.begin();
     while (itr != child_reqs.end()) {
         auto                                        vreq = *itr;
@@ -424,7 +427,7 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
             
             // TODO - in future append is going to be async and process_journal_compl will be invoked
             // when data is persisted on drive (group commit)
-            process_journal_completions(vhb_req->child_reqs, log_id);
+            process_journal_completions(vhb_req, log_id);
         }
     } else {
         std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;
@@ -598,6 +601,10 @@ void Volume::check_and_complete_req(const vol_interface_req_ptr& hb_req, const s
             VOL_LOG(WARN, , hb_req, "vol req took time {}", get_elapsed_time_ms(hb_req->io_start_time));
         }
         if (call_completion) {
+            // Clear child requests before returning completion. 
+            // This ensure release of cyclic dependancy between child_reqs and parent_req intrusive ptrs.
+            auto  vhb_req = vol_hb_req::cast(hb_req);
+            vhb_req->child_reqs.clear();
 #ifdef _PRERELEASE
             if (auto flip_ret = homestore_flip->get_test_flip<int>("vol_comp_delay_us")) {
                 LOGINFO("delaying completion in volume");

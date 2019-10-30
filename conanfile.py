@@ -5,7 +5,7 @@ from conans import ConanFile, CMake, tools
 class HomestoreConan(ConanFile):
     name = "homestore"
 
-    version = "0.11.20"
+    version = "0.11.21"
     revision_mode = "scm"
 
     license = "Proprietary"
@@ -23,11 +23,11 @@ class HomestoreConan(ConanFile):
             "iomgr/2.2.11@sds/develop",
 
             # Not commonly updated
-            "flip/0.2.0@sds/testing",
+            "flip/0.2.3@sds/develop",
             "sds_logging/6.0.0@sds/testing",
             "sds_options/1.0.0@sds/testing",
-            "jungle/2019.09.05@oss/develop",
-            "sisl/0.3.10@sisl/develop",
+            "jungle/2019.10.22@oss/testing",
+            "sisl/0.3.10@sisl/testing",
 
             # FOSS, rarely updated
             "benchmark/1.5.0@oss/stable",
@@ -49,10 +49,14 @@ class HomestoreConan(ConanFile):
 
     generators = "cmake"
     exports_sources = "cmake/*", "src/*", "CMakeLists.txt"
+    keep_imports = True
 
     def configure(self):
         if self.settings.sanitize != None:
             del self.options.coverage
+
+    def imports(self):
+        self.copy(root_package="flip", pattern="*.py", dst="bin/scripts", src="python/flip/", keep_path=True)
 
     def requirements(self):
         if not self.settings.build_type == "Debug":
@@ -93,7 +97,7 @@ class HomestoreConan(ConanFile):
         self.copy("*test_load", dst="bin", keep_path=False)
         self.copy("*test_mapping", dst="bin", keep_path=False)
         self.copy("*test_volume", dst="bin", keep_path=False)
-        self.copy("*vol_test.py", src="src/", dst="bin", keep_path=False)
+        self.copy("*", dst="bin/scripts", src="bin/scripts", keep_path=True)
 
     def package_info(self):
         self.cpp_info.libs = tools.collect_libs(self)
@@ -112,4 +116,5 @@ class HomestoreConan(ConanFile):
         self.copy("*test_load", dst="/usr/local/bin", keep_path=False)
         self.copy("*test_mapping", dst="/usr/local/bin", keep_path=False)
         self.copy("*test_volume", dst="/usr/local/bin", keep_path=False)
-        self.copy("*vol_test.py", dst="/usr/local/bin", keep_path=False)
+        self.copy("vol_test.py", dst="/usr/local/bin", src="bin/scripts", keep_path=False)
+        self.copy("*", dst="/usr/local/bin/home_blks_scripts", src="bin/scripts", keep_path=True)

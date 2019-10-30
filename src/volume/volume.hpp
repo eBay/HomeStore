@@ -127,7 +127,7 @@ protected:
 
 struct vol_hb_req : public vol_interface_req {
     std::vector< volume_req_ptr > child_reqs; // all spawned child requests of vol hb req
-    
+
     virtual ~vol_hb_req()= default;
     
     virtual void free_yourself() override { delete this; }
@@ -276,7 +276,7 @@ public:
     // async call to start the multi-threaded work.
     void get_allocated_blks();
     void process_metadata_completions(const volume_req_ptr& wb_req);
-    void process_journal_completions(std::vector< volume_req_ptr >& child_reqs, uint64_t log_id);
+    void process_journal_completions(vol_hb_req* vhb_req, uint64_t log_id);
     void process_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
     void recovery_start();
 
