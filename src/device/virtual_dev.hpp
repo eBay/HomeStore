@@ -410,6 +410,8 @@ public:
             }
             return status;
         } catch (const std::exception& e) {
+            LOGERROR("exception happened {}", e.what());
+            assert(0);
             return BLK_ALLOC_FAILED;
         }
     }
@@ -520,7 +522,8 @@ public:
             HS_ASSERT_CMP(DEBUG, b.size, ==, bid.data_size(m_pagesz));
             mchunk->get_physical_dev_mutable()->sync_read((char*)b.bytes, b.size, dev_offset);
 
-            if (cnt == nmirror) {
+            ++cnt;
+            if (cnt == nmirror + 1) {
                 break;
             }
         }
