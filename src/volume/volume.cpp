@@ -121,7 +121,7 @@ void Volume::set_io_flip() {
     FlipFrequency freq;
     FlipCondition cond1;
     freq.set_count(2000000000);
-    freq.set_percent(2);
+    freq.set_percent(5);
     
     /* io flips */
     fc->inject_retval_flip("vol_delay_read_us", {}, freq, 20);
@@ -130,8 +130,7 @@ void Volume::set_io_flip() {
     fc->inject_retval_flip("io_write_iocb_empty_flip", {}, freq, 20);
     fc->inject_retval_flip("io_read_iocb_empty_flip", {}, freq, 20);
     
-    fc->create_condition("nuber of blks in a write", flip::Operator::EQUAL, 8, &cond1);
-    fc->inject_retval_flip("blkalloc_split_blk", {cond1}, freq, 4);
+    fc->inject_retval_flip("blkalloc_split_blk", {}, freq, 4);
 }
 #endif
 
@@ -465,6 +464,7 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
 
             assert((bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) % m_sb->ondisk_sb->page_size) == 0);
             vreq->nlbas = bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) / m_sb->ondisk_sb->page_size;
+            assert(vreq->nlbas > 0);
 
             VOL_LOG(TRACE, volume, vreq->parent_req, "alloc_blk: bid: {}, offset: {}, nblks: {}", bid[i].to_string(),
                     bid[i].data_size(HomeBlks::instance()->get_data_pagesz()), vreq->nlbas);

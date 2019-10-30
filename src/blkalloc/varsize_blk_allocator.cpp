@@ -235,8 +235,8 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
         return BLK_ALLOC_SPACEFULL;
     }
 
-    auto split_cnt = homestore_flip->get_test_flip< int >("blkalloc_split_blk", nblks);
-    if (!hints.is_contiguous && nblks != 1 && split_cnt) {
+    auto split_cnt = homestore_flip->get_test_flip< int >("blkalloc_split_blk");
+    if (!hints.is_contiguous && split_cnt && nblks > split_cnt.get()) {
         blks_rqstd = ALIGN_SIZE((nblks / split_cnt.get()), hints.multiplier);
         BLKALLOC_LOG(DEBUG, varsize_blk_alloc, "blocks requested={}, nblks={}, split_cnt={}", blks_rqstd, nblks,
                      split_cnt.get());
