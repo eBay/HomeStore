@@ -173,7 +173,9 @@ public:
             m_vdev(mgr, vb, (std::bind(&BlkStore::process_completions, this, 
                              std::placeholders::_1)), recovery_init),
             m_comp_cb(comp_cb),
-            m_metrics(name) {}
+            m_metrics(name) {
+                m_size = m_vdev.get_size();
+            }
 
     ~BlkStore() {
     
