@@ -466,6 +466,7 @@ void HomeBlks::config_super_block_init(BlkId& bid) {
     m_cfg_sb->magic = VOL_SB_MAGIC;
     m_cfg_sb->boot_cnt = 0;
     m_cfg_sb->init_flag(0);
+    m_cfg_sb->uuid = m_cfg.system_uuid;
     config_super_block_write();
 }
 
@@ -590,12 +591,20 @@ boost::intrusive_ptr< BlkBuffer > HomeBlks::get_valid_buf(const std::vector< boo
                                                           bool& rewrite) {
     boost::intrusive_ptr< BlkBuffer > valid_buf = nullptr;
     uint32_t                          gen_cnt = 0;
+    boost::uuids::uuid                uuid;
     for (uint32_t i = 0; i < bbuf.size(); i++) {
         vol_sb_header* hdr = (vol_sb_header*)(bbuf[i]->at_offset(0).bytes);
+        if (i == 0) {
+            uuid = hdr->uuid;
+        }
         if (hdr->magic != VOL_SB_MAGIC || hdr->version != VOL_SB_VERSION) {
             LOGINFO("found superblock with invalid magic and version");
             continue;
         }
+
+        /* It is not possible to get two valid super blocks with different uuid. */
+        HS_ASSERT_CMP(RELEASE, uuid, ==, hdr->uuid)
+        
         if (hdr->gen_cnt > gen_cnt) {
             if (valid_buf != nullptr) {
                 /* superblock is not consistent across the disks */
