@@ -308,11 +308,12 @@ private:
 
         char* ptr = nullptr;
         int  ret = posix_memalign((void**)&ptr, HomeStoreConfig::align_size, HomeStoreConfig::align_size);
+
         if (ret != 0) {
             throw std::bad_alloc();
         }
         strncpy(ptr, ss.c_str(), ss.size());
-
+        
         struct iovec* iov = nullptr;
         ret = posix_memalign((void**)&iov, HomeStoreConfig::align_size, sizeof(struct iovec));
         if (ret != 0) {
@@ -325,6 +326,7 @@ private:
         LogDev::instance()->append_write(iov, 1, offset, cb);
 
         free(iov);
+        free(ptr);
         LOGINFO("offset: {}", offset);
     }
         

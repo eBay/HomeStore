@@ -71,12 +71,13 @@ bool LogDev::append_write(struct iovec* iov_i, int iovcnt_i, uint64_t& out_offse
 
     LogDevRecordHeader *hdr = nullptr;
     int ret = posix_memalign((void**)&hdr, LOGDEV_BLKSIZE, LOGDEV_BLKSIZE);
+    
     std::memset((void*)hdr, 0, sizeof(LogDevRecordHeader));
-
+    
     if (ret != 0 ) {
         throw std::bad_alloc();
     }
-    
+
     hdr->h.m_version = LOG_DB_RECORD_HDR_VER;
     hdr->h.m_magic = LOG_DB_RECORD_HDR_MAGIC;
     hdr->h.m_crc = crc;
@@ -100,8 +101,9 @@ bool LogDev::append_write(struct iovec* iov_i, int iovcnt_i, uint64_t& out_offse
 
     LogDevRecordFooter* ft = nullptr;
     ret = posix_memalign((void**)&ft, LOGDEV_BLKSIZE, sizeof(LogDevRecordFooter));
+    
     std::memset((void*)ft, 0, sizeof(LogDevRecordFooter));
-
+    
     if (ret != 0 ) {
         throw std::bad_alloc();
     }
@@ -120,6 +122,9 @@ bool LogDev::append_write(struct iovec* iov_i, int iovcnt_i, uint64_t& out_offse
     HomeBlks::instance()->get_logdev_blkstore()->write_at_offset(iov, iovcnt, m_write_size, to_wb_req(req));
 
     m_write_size += data_sz;
+
+    free(hdr);
+    free(ft);
     return true;
 }
 
