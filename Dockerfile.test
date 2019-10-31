@@ -21,5 +21,12 @@ RUN set -eux; \
     conan remove -f '*'; \
     pip install grpcio-tools
 
+RUN set -eux; \
+    apt-get update; \
+    apt-get upgrade -y; \
+    apt-get install iputils-ping; \
+    apt-get install net-tools; \
+    rm -rf /var/lib/apt/lists/*;
+
 EXPOSE 5000
 # ##########   #######   ############
