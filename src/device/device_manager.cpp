@@ -63,7 +63,7 @@ size_t DeviceManager::get_total_cap() {
 }
 
 void DeviceManager::init_devices(std::vector< dev_info >& devices) {
-    uint32_t max_dev_offset = 0;
+    uint64_t max_dev_offset = 0;
 
     /* set the offset */
     m_dm_info->magic = MAGIC;
