@@ -63,6 +63,7 @@ HomeBlks::HomeBlks(const init_params& cfg) :
     HomeStoreConfig::is_read_only = (m_cfg.is_read_only) ? true : false;
 #ifndef NDEBUG
     HomeStoreConfig::mem_btree_page_size = m_cfg.mem_btree_page_size;
+    flip::Flip::instance().start_rpc_server();
 #endif
     /* Btree leaf node in mapping btree should accomdate minimum 2 entries to do the split. And on a average
      * a value consume 2 bytes (for checksum) per blk and few bytes for each IO and node header.
