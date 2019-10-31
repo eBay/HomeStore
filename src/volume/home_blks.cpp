@@ -594,15 +594,18 @@ boost::intrusive_ptr< BlkBuffer > HomeBlks::get_valid_buf(const std::vector< boo
     boost::uuids::uuid                uuid;
     for (uint32_t i = 0; i < bbuf.size(); i++) {
         vol_sb_header* hdr = (vol_sb_header*)(bbuf[i]->at_offset(0).bytes);
-        if (i == 0) {
-            uuid = hdr->uuid;
-        }
+        
         if (hdr->magic != VOL_SB_MAGIC || hdr->version != VOL_SB_VERSION) {
             LOGINFO("found superblock with invalid magic and version");
             continue;
         }
 
-        /* It is not possible to get two valid super blocks with different uuid. */
+        if (gen_cnt == 0) {
+            /* update only for first valid sb */
+            uuid = hdr->uuid;
+        }
+       
+       /* It is not possible to get two valid super blocks with different uuid. */
         HS_ASSERT_CMP(RELEASE, uuid, ==, hdr->uuid)
         
         if (hdr->gen_cnt > gen_cnt) {
