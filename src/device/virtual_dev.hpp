@@ -91,6 +91,7 @@ struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
     sisl::atomic_counter< int > refcount;
     PhysicalDevChunk*           chunk;
     Clock::time_point           io_start_time;
+    std::atomic<uint8_t>        outstanding_cb = 0;             
 
     void inc_ref() { intrusive_ptr_add_ref(this); }
     void dec_ref() { intrusive_ptr_release(this); }
@@ -319,7 +320,14 @@ public:
     }
 
     void process_completions(boost::intrusive_ptr< virtualdev_req > req) {
-        m_comp_cb(req);
+        if (req->outstanding_cb.load() > 0) {
+            req->outstanding_cb.fetch_sub(1, std::memory_order_relaxed);
+        }
+            
+        if (req->outstanding_cb.load() == 0) {
+            m_comp_cb(req);
+        }
+        
         /* XXX:we probably have to do something if a write/read is spread
          *
          * across the chunks from this layer.
@@ -406,7 +414,10 @@ public:
         return true;
     }
 
-    bool handle_chunk_alignment(const uint32_t dev_id, const uint32_t chunk_id, const uint64_t eof_offset_in_chunk) {
+    bool handle_chunk_alignment(const uint32_t dev_id, const uint32_t chunk_id, const uint64_t eof_offset_in_chunk, boost::intrusive_ptr< virtualdev_req > req) {
+        if (req) {
+            req->outstanding_cb.fetch_add(1, std::memory_order_relaxed);
+        }
         // get previous dev_id;
         uint32_t prev_dev_id = dev_id, prev_chunk_id = chunk_id;
         if (chunk_id == 0) {
@@ -422,7 +433,6 @@ public:
         }
 
         try {
-            auto pdev = m_primary_pdev_chunks_list[prev_dev_id].pdev;
             struct iovec iov_eof[1];
 
             Chunk_EOF* ce = nullptr;
@@ -438,18 +448,54 @@ public:
             iov_eof[0].iov_base = (uint8_t*)ce;
             iov_eof[0].iov_len = sizeof(Chunk_EOF);
 
-            pdev->sync_writev(iov_eof, 1, sizeof(Chunk_EOF), get_chunk_start_offset(prev_dev_id, prev_chunk_id) + eof_offset_in_chunk);
+            auto pdev  = m_primary_pdev_chunks_list[prev_dev_id].pdev;
+            auto chunk = m_primary_pdev_chunks_list[prev_dev_id].chunks_in_pdev[prev_chunk_id];
 
-            HS_LOG(INFO, device, "Successfully write EOF at chunk num: {}", m_primary_pdev_chunks_list[prev_dev_id].chunks_in_pdev[prev_chunk_id]->get_chunk_id());
+            if (req) {
+                req->version = 0xDEAD;
+                req->cb = std::bind(&VirtualDev::process_completions, this, std::placeholders::_1);
+                req->size = sizeof(Chunk_EOF);
+                req->chunk = chunk;
+            }
+
+            auto offset_in_dev = get_chunk_start_offset(prev_dev_id, prev_chunk_id) + eof_offset_in_chunk;
+
+            // do the actual write;
+            do_write_internal(pdev, chunk, iov_eof, 1, sizeof(Chunk_EOF), offset_in_dev, req);
+    
+            HS_LOG(INFO, device, "Successfully write EOF at chunk num: {} at offset_in_dev: {}", 
+                    m_primary_pdev_chunks_list[prev_dev_id].chunks_in_pdev[prev_chunk_id]->get_chunk_id(), 
+                    offset_in_dev);
 
             free(ce);
-
         } catch (std::exception& e) {
             HS_ASSERT(DEBUG, false, "write chunk EOF failed with exception: {}", e.what());
             return false;
         }
 
         return true;
+    }
+    
+    void do_write_internal(PhysicalDev* pdev, PhysicalDevChunk* chunk, const struct iovec* iov, const int iovcnt, const uint64_t len, const uint64_t offset_in_dev, boost::intrusive_ptr< virtualdev_req > req) {
+        COUNTER_INCREMENT(pdev->get_metrics(), drive_write_vector_count, 1);
+
+        if (!req || req->isSyncCall) {
+            auto start_time = Clock::now();
+            COUNTER_INCREMENT(pdev->get_metrics(), drive_sync_write_count, 1);
+            pdev->sync_writev(iov, iovcnt, len, offset_in_dev);
+            HISTOGRAM_OBSERVE(pdev->get_metrics(), drive_write_latency, get_elapsed_time_us(start_time));
+        } else {
+            COUNTER_INCREMENT(pdev->get_metrics(), drive_async_write_count, 1);
+            req->inc_ref();
+            req->io_start_time = Clock::now();
+            pdev->writev(iov, iovcnt, len, offset_in_dev, (uint8_t*)req.get());
+        }
+
+        if (get_nmirrors()) {
+            // We do not support async mirrored writes yet.
+            HS_ASSERT(DEBUG, ((req == nullptr) || req->isSyncCall), "Expected null req or a sync call");
+            write_nmirror(iov, iovcnt, len, chunk, offset_in_dev);
+        }
     }
 
     // 
@@ -463,9 +509,15 @@ public:
         uint64_t len = get_len(iov, iovcnt);
         bool across_chunk = false;
 
+        if (req) {
+            req->outstanding_cb.store(1);
+        }
+
         if (!reserve_offset(len, across_chunk, eof_offset_in_chunk)) {
             HS_LOG(ERROR, device, "Failed to reserve offset, no space left. Cur Write Size: {}, buf_len: {}, total capacity: {}", 
                     m_write_sz_in_total.load(), len, get_size());
+
+            req->outstanding_cb.fetch_sub(1, std::memory_order_relaxed);
             return false;
         }
 
@@ -474,11 +526,12 @@ public:
         const uint64_t offset = m_write_sz_in_total.load() - len;
 
         // convert logical offset to dev offset
-        uint64_t offset_in_dev = logical_to_dev_offset(offset, dev_id, chunk_id, offset_in_chunk);
+        const uint64_t offset_in_dev = logical_to_dev_offset(offset, dev_id, chunk_id, offset_in_chunk);
 
         HS_ASSERT_CMP(DEBUG, offset_in_chunk, ==, m_write_sz_in_chunk.load() - len);
 
-        if (across_chunk && !handle_chunk_alignment(dev_id, chunk_id, eof_offset_in_chunk)) {
+        if (across_chunk && !handle_chunk_alignment(dev_id, chunk_id, eof_offset_in_chunk, req)) {
+            HS_ASSERT(DEBUG, 0, "handle_chunk_alignment return failure. ")
             return false;
         } 
            
@@ -494,27 +547,9 @@ public:
             auto pdev = m_primary_pdev_chunks_list[dev_id].pdev;
 
             HS_LOG(INFO, device, "Writing in device: {}, offset = {}", dev_id, offset_in_dev);
-
-            COUNTER_INCREMENT(pdev->get_metrics(), drive_write_vector_count, 1);
-
-            if (!req || req->isSyncCall) {
-                auto start_time = Clock::now();
-                COUNTER_INCREMENT(pdev->get_metrics(), drive_sync_write_count, 1);
-                pdev->sync_writev(iov, iovcnt, len, offset_in_dev);
-                HISTOGRAM_OBSERVE(pdev->get_metrics(), drive_write_latency, get_elapsed_time_us(start_time));
-            } else {
-                COUNTER_INCREMENT(pdev->get_metrics(), drive_async_write_count, 1);
-                req->inc_ref();
-                req->io_start_time = Clock::now();
-                pdev->writev(iov, iovcnt, len, offset_in_dev, (uint8_t*)req.get());
-            }
-
-            if (get_nmirrors()) {
-                // We do not support async mirrored writes yet.
-                HS_ASSERT(DEBUG, ((req == nullptr) || req->isSyncCall), "Expected null req or a sync call");
-                write_nmirror(iov, iovcnt, len, chunk, offset_in_dev);
-            }
-
+            
+            do_write_internal(pdev, chunk, iov, iovcnt, len, offset_in_dev, req);
+            
         } catch (const std::exception& e) {
             HS_ASSERT(DEBUG, 0, "{}", e.what());
         }
@@ -696,27 +731,7 @@ public:
 
         HS_LOG(INFO, device, "Writing in device: {}, offset = {}", pdev->get_dev_id(), dev_offset);
 
-        COUNTER_INCREMENT(pdev->get_metrics(), drive_write_vector_count, iovcnt);
-
-        if (!req || req->isSyncCall) {
-            auto start_time = Clock::now();
-            COUNTER_INCREMENT(pdev->get_metrics(), drive_sync_write_count, 1);
-            pdev->sync_writev(iov, iovcnt, size, dev_offset);
-            HISTOGRAM_OBSERVE(pdev->get_metrics(), drive_write_latency, get_elapsed_time_us(start_time));
-        } else {
-            COUNTER_INCREMENT(pdev->get_metrics(), drive_async_write_count, 1);
-
-            req->inc_ref();
-            req->io_start_time = Clock::now();
-            pdev->writev(iov, iovcnt, size, dev_offset, (uint8_t*)req.get());
-        }
-
-        if (get_nmirrors()) {
-            // We do not support async mirrored writes yet.
-            HS_ASSERT(DEBUG, ((req == nullptr) || req->isSyncCall), "Expected null req or a sync call");
-        
-            write_nmirror(iov, iovcnt, size, chunk, dev_offset);
-        }
+        do_write_internal(pdev, chunk, iov, iovcnt, size, dev_offset, req);
     }
 
     void write_nmirror(const iovec* iov, int iovcnt, uint32_t size, PhysicalDevChunk* chunk, uint64_t dev_offset) {
