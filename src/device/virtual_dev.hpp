@@ -215,8 +215,8 @@ private:
     std::atomic< uint64_t >                  m_used_size;
 
     // data structure for append write
-    std::atomic<uint64_t>                    m_write_sz_in_total;
-    std::atomic<uint64_t>                    m_write_sz_in_chunk;
+    std::atomic<uint64_t>                    m_write_sz_in_total; // this size will be decreased by truncate and increased by append;
+    std::atomic<uint64_t>                    m_write_sz_in_chunk; // write size within chunk, used to check chunk boundary;
 
 public:
     void init(DeviceManager* mgr, vdev_info_block* vb, comp_callback cb, uint32_t page_size) {
@@ -470,6 +470,7 @@ public:
         }
 
         // get logical offset
+        // TODO: The way to get logical offset needs to be updated after Truncate is being added.
         const uint64_t offset = m_write_sz_in_total.load() - len;
 
         // convert logical offset to dev offset
