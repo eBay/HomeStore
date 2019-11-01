@@ -231,7 +231,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
     BLKALLOC_ASSERT_CMP(LOGMSG, nblks % hints.multiplier, ==, 0);
 
 #ifdef _PRERELEASE
-    if (homestore_flip->test_flip("varsize_blkalloc_no_blks", nblks)) {
+    if (homestore_flip->test_flip("varsize_blkalloc_no_blks")) {
         return BLK_ALLOC_SPACEFULL;
     }
 
