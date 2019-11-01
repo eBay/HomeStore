@@ -17,6 +17,7 @@ constexpr uint64_t CACHE_SIZE      = (4*1024*1024*1024ul);
 constexpr uint32_t VOL_PAGE_SIZE   = 4096;
 constexpr uint32_t MAX_IO_SIZE = (VOL_PAGE_SIZE * ((1 << MEMPIECE_ENCODE_MAX_BITS) - 1));
 constexpr uint32_t MAX_CRC_DEPTH = 3;
+const uint64_t LOGDEV_BUF_SIZE = HomeStoreConfig::align_size * 1024;
 
 class VolReq {
 public:
@@ -307,7 +308,7 @@ private:
         uint64_t offset = 0;
 
         char* ptr = nullptr;
-        int  ret = posix_memalign((void**)&ptr, HomeStoreConfig::align_size, HomeStoreConfig::align_size);
+        int  ret = posix_memalign((void**)&ptr, HomeStoreConfig::align_size, LOGDEV_BUF_SIZE);
 
         if (ret != 0) {
             throw std::bad_alloc();
@@ -321,13 +322,17 @@ private:
         }
 
         iov[0].iov_base = (uint8_t*)ptr;
-        iov[0].iov_len = HomeStoreConfig::align_size;
+        iov[0].iov_len = LOGDEV_BUF_SIZE;
 
-        LogDev::instance()->append_write(iov, 1, offset, cb);
+        bool bret= LogDev::instance()->append_write(iov, 1, offset, cb);
+        if (bret) {
+            LOGINFO("offset: {}", offset);
+        } else {
+            LOGERROR("Expected failure becuase of no space left. ");
+        }
 
         free(iov);
         free(ptr);
-        LOGINFO("offset: {}", offset);
     }
         
 

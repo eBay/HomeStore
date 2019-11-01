@@ -7,7 +7,6 @@ LogDev* LogDev::_instance = nullptr;
 LogDev::LogDev() {
     m_comp_cb = nullptr;
     m_last_crc = INVALID_CRC32_VALUE;
-    m_write_size = 0;
 }
 
 LogDev::~LogDev() {
@@ -57,26 +56,16 @@ bool LogDev::append_write(struct iovec* iov_i, int iovcnt_i, uint64_t& out_offse
     uint64_t len = 0; 
     uint32_t crc = get_crc_and_len(iov_i, iovcnt_i, len);
 
-    size_t data_sz = sizeof(LogDevRecordHeader) + len + sizeof(LogDevRecordFooter);
-    uint64_t blkstore_sz = HomeBlks::instance()->get_logdev_blkstore()->get_size();
-
-    // validate size being written;
-    if (m_write_size + data_sz > blkstore_sz) {
-        HS_LOG(ERROR, logdev, "Fail to write to logdev. No space left: {}, {}, {}", m_write_size, data_sz, len);
-        return false;
-    }
-    
     const int iovcnt = iovcnt_i + 2;
     struct iovec iov[iovcnt];
 
     LogDevRecordHeader *hdr = nullptr;
     int ret = posix_memalign((void**)&hdr, LOGDEV_BLKSIZE, LOGDEV_BLKSIZE);
-    
-    std::memset((void*)hdr, 0, sizeof(LogDevRecordHeader));
-    
     if (ret != 0 ) {
         throw std::bad_alloc();
     }
+
+    std::memset((void*)hdr, 0, sizeof(LogDevRecordHeader));
 
     hdr->h.m_version = LOG_DB_RECORD_HDR_VER;
     hdr->h.m_magic = LOG_DB_RECORD_HDR_MAGIC;
@@ -101,12 +90,11 @@ bool LogDev::append_write(struct iovec* iov_i, int iovcnt_i, uint64_t& out_offse
 
     LogDevRecordFooter* ft = nullptr;
     ret = posix_memalign((void**)&ft, LOGDEV_BLKSIZE, sizeof(LogDevRecordFooter));
-    
-    std::memset((void*)ft, 0, sizeof(LogDevRecordFooter));
-    
     if (ret != 0 ) {
         throw std::bad_alloc();
     }
+
+    std::memset((void*)ft, 0, sizeof(LogDevRecordFooter));
 
     ft->t.m_prev_crc = m_last_crc;
 
@@ -117,15 +105,11 @@ bool LogDev::append_write(struct iovec* iov_i, int iovcnt_i, uint64_t& out_offse
 
     auto req = logdev_req::make_request();
 
-    out_offset = m_write_size;
-    
-    HomeBlks::instance()->get_logdev_blkstore()->write_at_offset(iov, iovcnt, m_write_size, to_wb_req(req));
-
-    m_write_size += data_sz;
+    bool success = HomeBlks::instance()->get_logdev_blkstore()->append_write(iov, iovcnt, out_offset, to_wb_req(req));
 
     free(hdr);
     free(ft);
-    return true;
+    return success;
 }
 
 //

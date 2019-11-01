@@ -175,10 +175,23 @@ public:
  * Allocator: The type of AllocatorPolicy to allocate blocks for writes.
  * DefaultDeviceSelector: Which device to select for allocation
  */
+const uint32_t VIRDEV_BLKSIZE = 512;
+const uint64_t CHUNK_EOF = 0xabcdabcd;
 
 template < typename Allocator, typename DefaultDeviceSelector >
 class VirtualDev : public AbstractVirtualDev {
     typedef std::function< void(boost::intrusive_ptr< virtualdev_req > req) > comp_callback;
+
+    struct Chunk_EOF_t {
+        uint64_t  e;
+    };
+
+    typedef union {
+        struct Chunk_EOF_t eof;
+        unsigned char padding[VIRDEV_BLKSIZE];
+    } Chunk_EOF;
+
+    static_assert(sizeof(Chunk_EOF) == VIRDEV_BLKSIZE, "LogDevRecordHeader must be VIRDEV_SIZE bytes");
 
 private:
     vdev_info_block* m_vb;         // This device block info
@@ -201,6 +214,10 @@ private:
     bool                                     m_recovery_init;
     std::atomic< uint64_t >                  m_used_size;
 
+    // data structure for append write
+    std::atomic<uint64_t>                    m_write_sz_in_total;
+    std::atomic<uint64_t>                    m_write_sz_in_chunk;
+
 public:
     void init(DeviceManager* mgr, vdev_info_block* vb, comp_callback cb, uint32_t page_size) {
         m_mgr = mgr;
@@ -212,6 +229,8 @@ public:
         m_pagesz = page_size;
         m_selector = std::make_unique< DefaultDeviceSelector >();
         m_recovery_init = false;
+        m_write_sz_in_chunk = 0;
+        m_write_sz_in_total = 0;
     }
 
     /* Load the virtual dev from vdev_info_block and create a Virtual Dev. */
@@ -226,9 +245,6 @@ public:
         HS_ASSERT_CMP(LOGMSG, vb->get_size(), ==, vb->num_primary_chunks * m_chunk_size);
     }
 
-    uint64_t get_size() {
-        return m_num_chunks * m_chunk_size;
-    }
 
     /* Create a new virtual dev for these parameters */
     VirtualDev(DeviceManager* mgr, uint64_t context_size, uint32_t nmirror, bool is_stripe, uint32_t page_size,
@@ -351,16 +367,120 @@ public:
         return len;
     }
 
+
     // 
+    // reserve offset with input buf_len;
+    //
+    bool reserve_offset(uint64_t buf_len, bool& across_chunk, uint64_t& eof_offset_in_chunk) {
+        if (m_write_sz_in_total.load() + buf_len <= get_size()) {
+            if (m_write_sz_in_chunk.load() == m_chunk_size) {
+                // not across boundary(no remaining portion) but move to a new chunk
+                m_write_sz_in_total.fetch_add(buf_len, std::memory_order_relaxed);
+                m_write_sz_in_chunk.store(buf_len);
+
+                across_chunk = false;
+            } else if (m_write_sz_in_chunk.load() + buf_len <= m_chunk_size) {
+                // not cross chunk boundary
+                m_write_sz_in_chunk.fetch_add(buf_len, std::memory_order_relaxed);
+                m_write_sz_in_total.fetch_add(buf_len, std::memory_order_relaxed);
+
+                across_chunk = false;
+            } else if (m_write_sz_in_total.load() + m_chunk_size - m_write_sz_in_chunk.load() + buf_len < get_size()) {
+                // accrossing chunk boundary and still enough size left
+                HS_ASSERT_CMP(DEBUG, m_chunk_size - m_write_sz_in_chunk.load(), >=, VIRDEV_BLKSIZE);
+                
+                eof_offset_in_chunk = m_write_sz_in_chunk.load();
+                across_chunk = true;
+
+                m_write_sz_in_total.fetch_add(buf_len + m_chunk_size - m_write_sz_in_chunk.load(), std::memory_order_relaxed);
+                m_write_sz_in_chunk.store(buf_len);
+            } else {
+                // across bundary and no space left
+                return false;
+            }
+        } else {
+            // no space left
+            return false;
+        }
+
+        return true;
+    }
+
+    bool handle_chunk_alignment(const uint32_t dev_id, const uint32_t chunk_id, const uint64_t eof_offset_in_chunk) {
+        // get previous dev_id;
+        uint32_t prev_dev_id = dev_id, prev_chunk_id = chunk_id;
+        if (chunk_id == 0) {
+            if (dev_id == 0) { 
+                prev_dev_id = m_primary_pdev_chunks_list.size() - 1;
+            } else {
+                prev_dev_id--;
+            }
+            prev_chunk_id = m_primary_pdev_chunks_list[prev_dev_id].chunks_in_pdev.size() - 1;
+        } else {
+            // chunk_id > 0, prev dev_id stays the same;
+            prev_chunk_id--;
+        }
+
+        try {
+            auto pdev = m_primary_pdev_chunks_list[prev_dev_id].pdev;
+            struct iovec iov_eof[1];
+
+            Chunk_EOF* ce = nullptr;
+            auto ret = posix_memalign((void**)&ce, VIRDEV_BLKSIZE, VIRDEV_BLKSIZE); 
+            if (ret != 0) {
+                throw std::bad_alloc();
+                return false;
+            }
+
+            memset((void*)ce, 0, sizeof(Chunk_EOF));
+
+            ce->eof.e = CHUNK_EOF;
+            iov_eof[0].iov_base = (uint8_t*)ce;
+            iov_eof[0].iov_len = sizeof(Chunk_EOF);
+
+            pdev->sync_writev(iov_eof, 1, sizeof(Chunk_EOF), get_chunk_start_offset(prev_dev_id, prev_chunk_id) + eof_offset_in_chunk);
+
+            HS_LOG(INFO, device, "Successfully write EOF at chunk num: {}", m_primary_pdev_chunks_list[prev_dev_id].chunks_in_pdev[prev_chunk_id]->get_chunk_id());
+
+            free(ce);
+
+        } catch (std::exception& e) {
+            HS_ASSERT(DEBUG, false, "write chunk EOF failed with exception: {}", e.what());
+            return false;
+        }
+
+        return true;
+    }
+
+    // 
+    // Return true if the append is successful, otherwise return false;
+    //
     // TODO: provide iterator for LogDev layer to consume to iterate all the records;
     //
-    uint64_t write_at_offset(const struct iovec* iov, const int iovcnt, uint64_t offset, boost::intrusive_ptr< virtualdev_req > req) {
+    bool append_write(const struct iovec* iov, const int iovcnt, uint64_t& out_offset, boost::intrusive_ptr< virtualdev_req > req) {
         uint32_t dev_id = 0, chunk_id = 0; 
-        uint64_t offset_in_chunk = 0;
+        uint64_t offset_in_chunk = 0, eof_offset_in_chunk = 0;
         uint64_t len = get_len(iov, iovcnt);
-        // convert chunk start offset to gloable offset, then + offset_in_chunk;
+        bool across_chunk = false;
+
+        if (!reserve_offset(len, across_chunk, eof_offset_in_chunk)) {
+            HS_LOG(ERROR, device, "Failed to reserve offset, no space left. Cur Write Size: {}, buf_len: {}, total capacity: {}", 
+                    m_write_sz_in_total.load(), len, get_size());
+            return false;
+        }
+
+        // get logical offset
+        const uint64_t offset = m_write_sz_in_total.load() - len;
+
+        // convert logical offset to dev offset
         uint64_t offset_in_dev = logical_to_dev_offset(offset, dev_id, chunk_id, offset_in_chunk);
 
+        HS_ASSERT_CMP(DEBUG, offset_in_chunk, ==, m_write_sz_in_chunk.load() - len);
+
+        if (across_chunk && !handle_chunk_alignment(dev_id, chunk_id, eof_offset_in_chunk)) {
+            return false;
+        } 
+           
         try {
             PhysicalDevChunk* chunk = m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id];
             if (req) {
@@ -398,13 +518,15 @@ public:
             HS_ASSERT(DEBUG, 0, "{}", e.what());
         }
 
-        return to_glob_uniq_offset(dev_id, chunk_id, offset_in_chunk);
+        out_offset = offset;
+        return true;
     }
  
     // 
     // convert from logical offset to device offset
+    // it handles device overloop, e.g. reach to end of the device then start from the beginning device
     //
-    uint64_t logical_to_dev_offset(uint64_t log_offset, uint32_t& dev_id, uint32_t& chunk_id, uint64_t& offset_in_chunk) {
+    uint64_t logical_to_dev_offset(const uint64_t log_offset, uint32_t& dev_id, uint32_t& chunk_id, uint64_t& offset_in_chunk) {
         dev_id = 0;
         chunk_id = 0;
         offset_in_chunk = 0;
@@ -412,7 +534,7 @@ public:
         uint64_t off_l = log_offset;
         for (size_t d = 0; d < m_primary_pdev_chunks_list.size(); d++) {
             for (size_t c = 0; c < m_primary_pdev_chunks_list[d].chunks_in_pdev.size(); c++) {
-                if (off_l > m_chunk_size) {
+                if (off_l >= m_chunk_size) {
                     off_l -= m_chunk_size;
                 } else {
                     dev_id = d; 
@@ -761,6 +883,10 @@ public:
     uint64_t get_chunk_size() const { return m_chunk_size; }
 
 private:
+    uint64_t get_size() {
+        return m_num_chunks * m_chunk_size; 
+    }
+
     /* Adds a primary chunk to the chunk list in pdev */
     void add_primary_chunk(PhysicalDevChunk* chunk) {
         auto pdev_id = chunk->get_physical_dev()->get_dev_id();

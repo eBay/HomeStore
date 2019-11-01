@@ -137,7 +137,6 @@ public:
              const char*       name,             // Name for blkstore
              comp_callback     comp_cb = nullptr // Callback on completion. It can be attached later as well.
              ) :
-            m_size(size),
             m_pagesz(page_size),
             m_cache(cache),
             m_wb_cache(cache, ([this](boost::intrusive_ptr< writeback_req > req, std::error_condition status) {
@@ -173,16 +172,12 @@ public:
             m_vdev(mgr, vb, (std::bind(&BlkStore::process_completions, this, 
                              std::placeholders::_1)), recovery_init),
             m_comp_cb(comp_cb),
-            m_metrics(name) {
-                m_size = m_vdev.get_size();
-            }
+            m_metrics(name) { }
 
     ~BlkStore() {
     
     }
     
-    uint64_t get_size() { return m_size; }
-
     void attach_compl(comp_callback comp_cb) { m_comp_cb = comp_cb; }
 
     bool is_write_back_cache() {
@@ -645,13 +640,12 @@ public:
     // 
     // Append buffer with variable size at the end and write to disk;
     //
-    uint64_t write_at_offset(const struct iovec* iov, const int iovcnt, uint64_t offset, boost::intrusive_ptr< writeback_req > wb_req) {
+    bool append_write(const struct iovec* iov, const int iovcnt, uint64_t& out_offset, boost::intrusive_ptr< writeback_req > wb_req) {
         auto req = to_blkstore_req(wb_req);
-        return m_vdev.write_at_offset(iov, iovcnt, offset, to_vdev_req(req));  
+        return m_vdev.append_write(iov, iovcnt, out_offset, to_vdev_req(req));  
     }
 
 private:
-    uint64_t                                           m_size;
     uint32_t                                           m_pagesz;
     Cache< BlkId >*                                    m_cache;
     WriteBackCache< BlkId >                            m_wb_cache;

@@ -110,8 +110,6 @@ private:
     uint32_t get_crc_and_len(struct iovec* iov, int iovcnt, uint64_t& len);
 
 private:
-   // homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >*    m_blkstore;
-    uint64_t                                                            m_write_size;   
     uint32_t                                                            m_last_crc;
     static LogDev*                                                       _instance;
     logdev_comp_callback                                                m_comp_cb;
