@@ -1,7 +1,7 @@
 #pragma once
 #include "write_log_recorder.hpp"
 #include "vol_crc_persist_mgr.hpp"
-#include <logdb/log_db.hpp>
+#include <logdev/log_dev.hpp>
 
 #define MAX_DEVICES     2
 #define VOL_PREFIX      "/tmp/vol"
