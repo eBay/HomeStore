@@ -30,8 +30,9 @@ const uint32_t LOGDEV_BLKSIZE = 512;          // device write iov_len minum size
 struct LogDevRecordHeader_t {
     uint8_t     m_version;
     uint32_t    m_magic;
-    uint32_t    m_crc;      // crc of this record; 
-    uint32_t    m_len;      // len of data for this record;
+    uint32_t    m_crc;        // crc of this record; 
+    uint32_t    m_prev_crc;   // crc of this record; 
+    uint32_t    m_len;        // len of data for this record;
 };
 
 typedef union {
@@ -39,18 +40,8 @@ typedef union {
     unsigned char padding[LOGDEV_BLKSIZE];
 } LogDevRecordHeader;
 
-
-struct LogDevRecordFooter_t {
-    uint32_t    m_prev_crc;  // crc of previous record
-};
-
-typedef union {
-    struct LogDevRecordFooter_t t;
-    unsigned char padding[LOGDEV_BLKSIZE];
-} LogDevRecordFooter;
-
 static_assert(sizeof(LogDevRecordHeader) == LOGDEV_BLKSIZE, "LogDevRecordHeader must be LOGDEV_SIZE bytes");
-static_assert(sizeof(LogDevRecordFooter) == LOGDEV_BLKSIZE, "LogDevRecordFooter must be LOGDEV_SIZE bytes");
+
 struct logdev_req;
 typedef boost::intrusive_ptr< logdev_req > logdev_req_ptr;
 

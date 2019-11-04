@@ -56,7 +56,7 @@ bool LogDev::append_write(struct iovec* iov_i, int iovcnt_i, uint64_t& out_offse
     uint64_t len = 0; 
     uint32_t crc = get_crc_and_len(iov_i, iovcnt_i, len);
 
-    const int iovcnt = iovcnt_i + 2;
+    const int iovcnt = iovcnt_i + 1;  // add header slot
     struct iovec iov[iovcnt];
 
     LogDevRecordHeader *hdr = nullptr;
@@ -70,6 +70,7 @@ bool LogDev::append_write(struct iovec* iov_i, int iovcnt_i, uint64_t& out_offse
     hdr->h.m_version = LOG_DB_RECORD_HDR_VER;
     hdr->h.m_magic = LOG_DB_RECORD_HDR_MAGIC;
     hdr->h.m_crc = crc;
+    hdr->h.m_prev_crc = m_last_crc;
     hdr->h.m_len = len;
 
     iov[0].iov_base = (uint8_t*)hdr;
@@ -88,19 +89,6 @@ bool LogDev::append_write(struct iovec* iov_i, int iovcnt_i, uint64_t& out_offse
 #endif
     }
 
-    LogDevRecordFooter* ft = nullptr;
-    ret = posix_memalign((void**)&ft, LOGDEV_BLKSIZE, sizeof(LogDevRecordFooter));
-    if (ret != 0 ) {
-        throw std::bad_alloc();
-    }
-
-    std::memset((void*)ft, 0, sizeof(LogDevRecordFooter));
-
-    ft->t.m_prev_crc = m_last_crc;
-
-    iov[iovcnt-1].iov_base = (uint8_t*)ft;
-    iov[iovcnt-1].iov_len = LOGDEV_BLKSIZE;
-
     m_last_crc = hdr->h.m_crc;
 
     auto req = logdev_req::make_request();
@@ -108,7 +96,7 @@ bool LogDev::append_write(struct iovec* iov_i, int iovcnt_i, uint64_t& out_offse
     bool success = HomeBlks::instance()->get_logdev_blkstore()->append_write(iov, iovcnt, out_offset, to_wb_req(req));
 
     free(hdr);
-    free(ft);
+    //free(ft);
     return success;
 }
 

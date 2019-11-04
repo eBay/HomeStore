@@ -393,7 +393,7 @@ public:
                 m_write_sz_in_total.fetch_add(buf_len, std::memory_order_relaxed);
 
                 across_chunk = false;
-            } else if (m_write_sz_in_total.load() + m_chunk_size - m_write_sz_in_chunk.load() + buf_len < get_size()) {
+            } else if (m_write_sz_in_total.load() + m_chunk_size - m_write_sz_in_chunk.load() + buf_len <= get_size()) {
                 // accrossing chunk boundary and still enough size left
                 HS_ASSERT_CMP(DEBUG, m_chunk_size - m_write_sz_in_chunk.load(), >=, VIRDEV_BLKSIZE);
                 
@@ -411,6 +411,7 @@ public:
             return false;
         }
 
+        // successfully reserved required offset
         return true;
     }
 
