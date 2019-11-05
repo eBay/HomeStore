@@ -323,12 +323,36 @@ private:
         iov[0].iov_base = (uint8_t*)ptr;
         iov[0].iov_len = LOGDEV_BUF_SIZE;
         
-        uint64_t offset = LogDev::instance()->reserve(LOGDEV_BUF_SIZE + sizeof (LogDevRecordHeader));
-        if (offset != INVALID_OFFSET) {
-            bool bret= LogDev::instance()->write_at_offset(offset, iov, 1, cb);
+        uint64_t offset_1 = LogDev::instance()->reserve(LOGDEV_BUF_SIZE + sizeof (LogDevRecordHeader));
+
+        static bool two_reserve_test = true;
+        uint64_t offset_2 = 0;
+
+        // test two reserve followed by two writes;
+        if (two_reserve_test) {
+            offset_2 = LogDev::instance()->reserve(LOGDEV_BUF_SIZE + sizeof (LogDevRecordHeader));
+            if (offset_2 != INVALID_OFFSET) {
+                bool bret= LogDev::instance()->write_at_offset(offset_2, iov, 1, cb);
+                if (bret) {
+                    LOGINFO("offset: {}", offset_2);
+                } else {
+                    HS_ASSERT(DEBUG, 0, "Unexpected Failure! ");
+                }
+
+            } else {
+                LOGERROR("Expected failure becuase of no space left. "); 
+            }
+
+            two_reserve_test = false;
+        }  else {
+            two_reserve_test = true;
+        }
+
+        if (offset_1 != INVALID_OFFSET) {
+            bool bret= LogDev::instance()->write_at_offset(offset_1, iov, 1, cb);
 
             if (bret) {
-                LOGINFO("offset: {}", offset);
+                LOGINFO("offset: {}", offset_1);
             } else {
                 HS_ASSERT(DEBUG, 0, "Unexpected Failure! ");
             }
