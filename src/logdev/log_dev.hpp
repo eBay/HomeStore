@@ -89,6 +89,14 @@ public:
 
     // returns offset 
     bool append_write(struct iovec* iov, int iovcnt, uint64_t& out_offset, logdev_comp_callback cb);
+    
+    bool write_at_offset(const uint64_t offset, struct iovec* iov, int iovcnt, logdev_comp_callback cb);
+
+    // 
+    // Reserve offset, 
+    // Current assumption is single threaded;
+    //
+    uint64_t reserve(const uint64_t size);
 
     // return true if the given offset is a valid start of a record
     bool read(uint64_t offset, boost::intrusive_ptr< logdev_req > req);

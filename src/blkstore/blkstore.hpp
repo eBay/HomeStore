@@ -637,6 +637,15 @@ public:
 
     VirtualDev< BAllocator, RoundRobinDeviceSelector >* get_vdev() { return &m_vdev; };
 
+    uint64_t reserve(uint64_t size) {
+        return m_vdev.reserve(size);
+    }
+
+    bool write_at_offset(const uint64_t offset, const struct iovec* iov, const int iovcnt, boost::intrusive_ptr< writeback_req > wb_req) {
+        auto req = to_blkstore_req(wb_req);
+        return m_vdev.write_at_offset(offset, iov, iovcnt, to_vdev_req(req));  
+    }
+#if 0
     // 
     // Append buffer with variable size at the end and write to disk;
     //
@@ -644,6 +653,7 @@ public:
         auto req = to_blkstore_req(wb_req);
         return m_vdev.append_write(iov, iovcnt, out_offset, to_vdev_req(req));  
     }
+#endif
 
 private:
     uint32_t                                           m_pagesz;

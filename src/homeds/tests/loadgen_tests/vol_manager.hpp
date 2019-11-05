@@ -305,7 +305,6 @@ private:
 
     void logdev_write(uint64_t vol_id, uint64_t lba, uint64_t nblks, logdev_comp_callback cb) {
         std::string ss = std::to_string(vol_id) + " " + std::to_string(nblks);
-        uint64_t offset = 0;
 
         char* ptr = nullptr;
         int  ret = posix_memalign((void**)&ptr, HomeStoreConfig::align_size, LOGDEV_BUF_SIZE);
@@ -323,12 +322,18 @@ private:
 
         iov[0].iov_base = (uint8_t*)ptr;
         iov[0].iov_len = LOGDEV_BUF_SIZE;
+        
+        uint64_t offset = LogDev::instance()->reserve(LOGDEV_BUF_SIZE + sizeof (LogDevRecordHeader));
+        if (offset != INVALID_OFFSET) {
+            bool bret= LogDev::instance()->write_at_offset(offset, iov, 1, cb);
 
-        bool bret= LogDev::instance()->append_write(iov, 1, offset, cb);
-        if (bret) {
-            LOGINFO("offset: {}", offset);
+            if (bret) {
+                LOGINFO("offset: {}", offset);
+            } else {
+                HS_ASSERT(DEBUG, 0, "Unexpected Failure! ");
+            }
         } else {
-            LOGERROR("Expected failure becuase of no space left. ");
+            LOGERROR("Expected failure becuase of no space left. "); 
         }
 
         free(iov);

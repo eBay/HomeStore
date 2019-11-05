@@ -178,6 +178,7 @@ public:
  */
 const uint32_t VIRDEV_BLKSIZE = 512;
 const uint64_t CHUNK_EOF = 0xabcdabcd;
+const uint64_t INVALID_OFFSET = std::numeric_limits<unsigned long long>::max();
 
 template < typename Allocator, typename DefaultDeviceSelector >
 class VirtualDev : public AbstractVirtualDev {
@@ -217,7 +218,8 @@ private:
 
     // data structure for append write
     std::atomic<uint64_t>                    m_write_sz_in_total; // this size will be decreased by truncate and increased by append;
-    std::atomic<uint64_t>                    m_write_sz_in_chunk; // write size within chunk, used to check chunk boundary;
+    //std::atomic<uint64_t>                    m_write_sz_in_chunk; // write size within chunk, used to check chunk boundary;
+    std::atomic<uint64_t>                    m_reserved_sz; // write size within chunk, used to check chunk boundary;
 
 public:
     void init(DeviceManager* mgr, vdev_info_block* vb, comp_callback cb, uint32_t page_size) {
@@ -230,8 +232,9 @@ public:
         m_pagesz = page_size;
         m_selector = std::make_unique< DefaultDeviceSelector >();
         m_recovery_init = false;
-        m_write_sz_in_chunk = 0;
-        m_write_sz_in_total = 0;
+        //m_write_sz_in_chunk.store(0, std::memory_order_relaxed);
+        m_write_sz_in_total.store(0, std::memory_order_relaxed);
+        m_reserved_sz.store(0, std::memory_order_relaxed);
     }
 
     /* Load the virtual dev from vdev_info_block and create a Virtual Dev. */
@@ -375,11 +378,62 @@ public:
         return len;
     }
 
+    // 
+    // reserve size for next append_write
+    // assumptions: will be called only in single threaded
+    //
+    // One possible calling sequence:
+    //
+    // offset_1 = reserve(size1);
+    // offset_2 = reserve(size2);
+    //
+    // write_at_offset(offset_2);
+    // write_at_offset(offset_1);
+    //
+    uint64_t reserve(uint64_t size) {
+        if (m_write_sz_in_total.load() + m_reserved_sz.load() + size > get_size()) {
+            // not enough space left;
+            HS_LOG(ERROR, device, "No space left! m_write_sz_in_total: {}, m_reserved_sz: {}", m_write_sz_in_total.load(), m_reserved_sz.load());
+            return INVALID_OFFSET;
+        } 
 
+        // TODO: with trucate being supported, below calculation needs to be updated;
+        uint64_t end_offset = m_write_sz_in_total.load() + m_reserved_sz.load();
+        uint32_t dev_id = 0, chunk_id = 0;
+        uint64_t offset_in_chunk = 0;
+
+        auto dev_in_offset = logical_to_dev_offset(end_offset, dev_id, chunk_id, offset_in_chunk);
+
+        uint64_t reserved_size = size;
+
+        if (offset_in_chunk + size <= m_chunk_size) {
+            // not acrossing boundary
+            m_reserved_sz.fetch_add(size, std::memory_order_relaxed);
+        } else if (m_write_sz_in_total.load() + m_reserved_sz.load() + m_chunk_size - offset_in_chunk + size <= get_size()) {
+            // across chunk boundary, still enough space;
+            m_reserved_sz.fetch_add(size + m_chunk_size - offset_in_chunk, std::memory_order_relaxed);
+
+            // if across chunk boudary, we need to return the offset in the chunk, 
+            // so that the next write with this offset could get the chance to write the EndOfChunk;
+            reserved_size += m_chunk_size - offset_in_chunk;
+        } else {
+            // across chunk boundary and no space left;
+            HS_LOG(ERROR, device, "No space left! m_write_sz_in_total: {}, m_reserved_sz: {}", m_write_sz_in_total.load(), m_reserved_sz.load());
+            return INVALID_OFFSET;
+            // m_reserved_sz stays sthe same;
+        }
+
+        // if we made a successful reserve, calculate the offset of the reserved portion and return;
+        uint64_t offset = m_write_sz_in_total.load() + m_reserved_sz.load() - reserved_size;
+
+        return offset;
+    }
+
+#if 0
     // 
     // reserve offset with input buf_len;
     //
-    bool reserve_offset(uint64_t buf_len, bool& across_chunk, uint64_t& eof_offset_in_chunk) {
+    bool process_offset(uint64_t buf_len, bool& across_chunk, uint64_t& eof_offset_in_chunk) {
         if (m_write_sz_in_total.load() + buf_len <= get_size()) {
             if (m_write_sz_in_chunk.load() == m_chunk_size) {
                 // not across boundary(no remaining portion) but move to a new chunk
@@ -399,6 +453,9 @@ public:
                 
                 eof_offset_in_chunk = m_write_sz_in_chunk.load();
                 across_chunk = true;
+                
+                // update total reserved size with skipped portion because of boundary;
+                m_reserved_sz.fetch_sub(m_chunk_size - m_write_sz_in_chunk.load(), std::memory_order_relaxed);
 
                 m_write_sz_in_total.fetch_add(buf_len + m_chunk_size - m_write_sz_in_chunk.load(), std::memory_order_relaxed);
                 m_write_sz_in_chunk.store(buf_len);
@@ -411,14 +468,19 @@ public:
             return false;
         }
 
+        // Now update reserved size to reduce the buf_len;
+        m_reserved_sz.fetch_sub(buf_len, std::memory_order_relaxed);
+
         // successfully reserved required offset
         return true;
     }
+#endif
 
     bool handle_chunk_alignment(const uint32_t dev_id, const uint32_t chunk_id, const uint64_t eof_offset_in_chunk, boost::intrusive_ptr< virtualdev_req > req) {
         if (req) {
             req->outstanding_cb.fetch_add(1, std::memory_order_relaxed);
         }
+#if 0
         // get previous dev_id;
         uint32_t prev_dev_id = dev_id, prev_chunk_id = chunk_id;
         if (chunk_id == 0) {
@@ -432,7 +494,7 @@ public:
             // chunk_id > 0, prev dev_id stays the same;
             prev_chunk_id--;
         }
-
+#endif
         try {
             struct iovec iov_eof[1];
 
@@ -449,8 +511,8 @@ public:
             iov_eof[0].iov_base = (uint8_t*)ce;
             iov_eof[0].iov_len = sizeof(Chunk_EOF);
 
-            auto pdev  = m_primary_pdev_chunks_list[prev_dev_id].pdev;
-            auto chunk = m_primary_pdev_chunks_list[prev_dev_id].chunks_in_pdev[prev_chunk_id];
+            auto pdev  = m_primary_pdev_chunks_list[dev_id].pdev;
+            auto chunk = m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id];
 
             if (req) {
                 req->version = 0xDEAD;
@@ -459,13 +521,13 @@ public:
                 req->chunk = chunk;
             }
 
-            auto offset_in_dev = get_chunk_start_offset(prev_dev_id, prev_chunk_id) + eof_offset_in_chunk;
+            auto offset_in_dev = get_chunk_start_offset(dev_id, chunk_id) + eof_offset_in_chunk;
 
             // do the actual write;
             do_write_internal(pdev, chunk, iov_eof, 1, sizeof(Chunk_EOF), offset_in_dev, req);
     
             HS_LOG(INFO, device, "Successfully write EOF at chunk num: {} at offset_in_dev: {}", 
-                    m_primary_pdev_chunks_list[prev_dev_id].chunks_in_pdev[prev_chunk_id]->get_chunk_id(), 
+                    m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id]->get_chunk_id(), 
                     offset_in_dev);
 
             free(ce);
@@ -499,6 +561,70 @@ public:
         }
     }
 
+    bool write_at_offset(const uint64_t offset, const struct iovec* iov, const int iovcnt, boost::intrusive_ptr< virtualdev_req > req) {
+        uint32_t dev_id = 0, chunk_id = 0; 
+        uint64_t offset_in_chunk = 0, eof_offset_in_chunk = 0;
+        uint64_t len = get_len(iov, iovcnt);
+        //bool across_chunk = false;
+
+        if (req) {
+            req->outstanding_cb.store(1);
+        }
+
+        HS_ASSERT_CMP(DEBUG, m_write_sz_in_total.load() + m_reserved_sz.load(), >, offset, "Wrting at offset: {}, which is out of reserved portion is not allowed!", offset);
+
+        // convert logical offset to dev offset
+        uint64_t offset_in_dev = logical_to_dev_offset(offset, dev_id, chunk_id, offset_in_chunk);
+
+        // update reserved size
+        m_reserved_sz.fetch_sub(len, std::memory_order_relaxed);
+        m_write_sz_in_total.fetch_add(len, std::memory_order_relaxed);
+
+        if (m_chunk_size - offset_in_chunk < len) {
+            auto d = m_chunk_size - offset_in_chunk;
+            
+            // update reserved size
+            m_reserved_sz.fetch_sub(d, std::memory_order_relaxed);
+
+            // update totoal write size;
+            m_write_sz_in_total.fetch_add(d, std::memory_order_relaxed);
+            
+            if (!handle_chunk_alignment(dev_id, chunk_id, offset_in_chunk, req)) {
+                HS_ASSERT(DEBUG, 0, "handle_chunk_alignment return failure. ")
+                return false;
+            }
+            
+            // move logical offset ahead to skip boundary;
+            auto new_offset = offset + d;
+        
+            // get the new dev offset;
+            offset_in_dev = logical_to_dev_offset(new_offset, dev_id, chunk_id, offset_in_chunk);
+
+            HS_ASSERT_CMP(DEBUG, offset_in_chunk, ==, 0);
+        }
+
+        try {
+            PhysicalDevChunk* chunk = m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id];
+            if (req) {
+                req->version = 0xDEAD;
+                req->cb = std::bind(&VirtualDev::process_completions, this, std::placeholders::_1);
+                req->size = len;
+                req->chunk = chunk;
+            }
+
+            auto pdev = m_primary_pdev_chunks_list[dev_id].pdev;
+
+            HS_LOG(INFO, device, "Writing in device: {}, offset = {}", dev_id, offset_in_dev);
+            
+            do_write_internal(pdev, chunk, iov, iovcnt, len, offset_in_dev, req);
+            
+        } catch (const std::exception& e) {
+            HS_ASSERT(DEBUG, 0, "{}", e.what());
+        }
+
+        return true;
+    }
+#if 0
     // 
     // Return true if the append is successful, otherwise return false;
     //
@@ -514,7 +640,7 @@ public:
             req->outstanding_cb.store(1);
         }
 
-        if (!reserve_offset(len, across_chunk, eof_offset_in_chunk)) {
+        if (!process_offset(len, across_chunk, eof_offset_in_chunk)) {
             HS_LOG(ERROR, device, "Failed to reserve offset, no space left. Cur Write Size: {}, buf_len: {}, total capacity: {}", 
                     m_write_sz_in_total.load(), len, get_size());
 
@@ -558,7 +684,7 @@ public:
         out_offset = offset;
         return true;
     }
- 
+#endif 
     // 
     // convert from logical offset to device offset
     // it handles device overloop, e.g. reach to end of the device then start from the beginning device
