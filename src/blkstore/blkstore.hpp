@@ -667,7 +667,7 @@ public:
         m_vdev.readv(offset, iov, iovcnt);
     }
     
-    void trucate(const uint64_t offset) {
+    void truncate(const uint64_t offset) {
         m_vdev.truncate(offset);
     }
     // End of LogDev Layer specifications:

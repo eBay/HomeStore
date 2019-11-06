@@ -302,10 +302,10 @@ private:
         m_logdev_done = true;
         LOGINFO("Logdev write callback received!");
 
-        logdev_read_and_verify();   
+        // logdev_read_and_verify();   
     }
     
-    void lodev_read_and_verify() {
+    void logdev_read_and_verify() {
         // read verify: grab last written offset as input and compare the read data with stored data
         auto read_offset = m_logdev_offset.front();
 
