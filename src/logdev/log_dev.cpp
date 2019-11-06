@@ -38,7 +38,6 @@ uint32_t LogDev::get_crc_and_len(struct iovec* iov, int iovcnt, uint64_t& len) {
 }
 
 // 
-// append_write is serialized
 //
 // With group commit, the through put will be much better;
 //
@@ -69,8 +68,8 @@ bool LogDev::write_at_offset(const uint64_t offset, struct iovec* iov_i, int iov
 
     std::memset((void*)hdr, 0, sizeof(LogDevRecordHeader));
 
-    hdr->h.m_version = LOG_DB_RECORD_HDR_VER;
-    hdr->h.m_magic = LOG_DB_RECORD_HDR_MAGIC;
+    hdr->h.m_version = LOG_DEV_RECORD_HDR_VER;
+    hdr->h.m_magic = LOG_DEV_RECORD_HDR_MAGIC;
     hdr->h.m_crc = crc;
     hdr->h.m_prev_crc = m_last_crc;
     hdr->h.m_len = len;
@@ -78,19 +77,10 @@ bool LogDev::write_at_offset(const uint64_t offset, struct iovec* iov_i, int iov
     iov[0].iov_base = (uint8_t*)hdr;
     iov[0].iov_len = LOGDEV_BLKSIZE;
 
-    // move pointer from input iov_i to iov;
-    for (int i = 0, j = 1; i < iovcnt_i; i++, j++) {
-        iov[j].iov_base = iov_i[i].iov_base;
-        iov[j].iov_len = iov_i[i].iov_len;
-
-#ifdef _PRERELEASE
-        if (iov_i[i].iov_len % LOGDEV_BLKSIZE) {
-            HS_LOG(ERROR, logdev, "Invalid iov_len, must be {} aligned. ", LOGDEV_BLKSIZE);
-            return false;
-        }
-#endif
+    if (!copy_iov(&iov[1], iov_i, iovcnt_i)) {
+        return false;
     }
-
+    
     m_last_crc = hdr->h.m_crc;
 
     auto req = logdev_req::make_request();
@@ -117,8 +107,8 @@ bool LogDev::append_write(struct iovec* iov_i, int iovcnt_i, uint64_t& out_offse
 
     std::memset((void*)hdr, 0, sizeof(LogDevRecordHeader));
 
-    hdr->h.m_version = LOG_DB_RECORD_HDR_VER;
-    hdr->h.m_magic = LOG_DB_RECORD_HDR_MAGIC;
+    hdr->h.m_version = LOG_DEV_RECORD_HDR_VER;
+    hdr->h.m_magic = LOG_DEV_RECORD_HDR_MAGIC;
     hdr->h.m_crc = crc;
     hdr->h.m_prev_crc = m_last_crc;
     hdr->h.m_len = len;
@@ -126,19 +116,8 @@ bool LogDev::append_write(struct iovec* iov_i, int iovcnt_i, uint64_t& out_offse
     iov[0].iov_base = (uint8_t*)hdr;
     iov[0].iov_len = LOGDEV_BLKSIZE;
 
-    // move pointer from input iov_i to iov;
-    for (int i = 0, j = 1; i < iovcnt_i; i++, j++) {
-        iov[j].iov_base = iov_i[i].iov_base;
-        iov[j].iov_len = iov_i[i].iov_len;
-
-#ifdef _PRERELEASE
-        if (iov_i[i].iov_len % LOGDEV_BLKSIZE) {
-            HS_LOG(ERROR, logdev, "Invalid iov_len, must be {} aligned. ", LOGDEV_BLKSIZE);
-            return false;
-        }
-#endif
-    }
-
+    copy_iov(&iov[1], iov_i, iovcnt_i);
+    
     m_last_crc = hdr->h.m_crc;
 
     auto req = logdev_req::make_request();
@@ -156,10 +135,86 @@ uint64_t LogDev::reserve(const uint64_t size) {
     return HomeBlks::instance()->get_logdev_blkstore()->reserve(size);
 }
 
+// 
+// truncate 
 //
-bool LogDev::read(uint64_t offset, boost::intrusive_ptr< logdev_req > req) {
-    // To be implemented
+void LogDev::truncate(const uint64_t offset) {
+    HomeBlks::instance()->get_logdev_blkstore()->truncate(offset); 
+}
+
+ssize_t LogDev::readv(const uint64_t offset, struct iovec* iov_i, int iovcnt_i) {
+    int iovcnt = iovcnt_i + 1;
+    struct iovec iov[iovcnt];
+    
+    LogDevRecordHeader *hdr = nullptr;
+    int ret = posix_memalign((void**)&hdr, LOGDEV_BLKSIZE, LOGDEV_BLKSIZE);
+    if (ret != 0 ) {
+        throw std::bad_alloc();
+    }
+    std::memset((void*)hdr, 0, sizeof(LogDevRecordHeader));
+
+    iov[0].iov_base = (uint8_t*) hdr;
+    iov[0].iov_len = sizeof(LogDevRecordHeader);
+
+    // copy pointers and length
+    copy_iov(&iov[1], iov_i, iovcnt_i);
+
+    HomeBlks::instance()->get_logdev_blkstore()->readv(offset, iov, iovcnt);
+    
+    if (!header_verify(hdr)) {
+        HS_ASSERT(DEBUG, 0, "Log header corrupted!");
+        return -1;
+    }
+
+    auto len = hdr->h.m_len;
+    free(hdr);
+    return len;
+}
+
+bool LogDev::copy_iov(struct iovec* dest, struct iovec* src, int iovcnt) {
+    for (int i = 0; i < iovcnt; i++) {
+        dest[i].iov_base = src[i].iov_base;
+        dest[i].iov_len = src[i].iov_len;
+
+#ifndef NDEBUG
+        if (src[i].iov_len % LOGDEV_BLKSIZE) {
+            HS_LOG(ERROR, logdev, "Invalid iov_len, must be {} aligned. ", LOGDEV_BLKSIZE);
+            return false;
+        }
+#endif
+    }
     return true;
+}
+
+bool LogDev::header_verify(LogDevRecordHeader* hdr) {
+     // header version and crc verification
+    if ((hdr->h.m_version != LOG_DEV_RECORD_HDR_VER) || (hdr->h.m_magic != LOG_DEV_RECORD_HDR_MAGIC)) {
+        return false;
+    }
+
+    return true;
+}
+
+// 
+// read
+//
+ssize_t LogDev::read(const uint64_t offset, const uint64_t size, const void* buf) {
+    HomeBlks::instance()->get_logdev_blkstore()->read(offset, size, buf);
+    
+    LogDevRecordHeader* hdr = (LogDevRecordHeader*)((unsigned char*)buf + sizeof(LogDevRecordHeader));
+
+    if (!header_verify(hdr)) {
+        HS_ASSERT(DEBUG, 0, "Log header corrupted!");
+        return -1;
+    }
+
+    // skip header and caculate crc of the data buffer
+    uint32_t crc = crc32_ieee(init_crc32, (unsigned char*)((char*)buf + sizeof(LogDevRecordHeader)), hdr->h.m_len);
+   
+    HS_ASSERT_CMP(DEBUG, hdr->h.m_len, ==, size, "Log size mismatch from input size: {} : {}", hdr->h.m_len, size);
+    HS_ASSERT_CMP(DEBUG, hdr->h.m_crc, ==, crc, "Log header CRC mismatch: {} : {}", hdr->h.m_crc, crc);
+
+    return hdr->h.m_len;
 }
 
 void LogDev::process_logdev_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req) {

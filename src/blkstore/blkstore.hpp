@@ -636,7 +636,8 @@ public:
     void update_vb_context(uint8_t* blob) { m_vdev.update_vb_context(blob); }
 
     VirtualDev< BAllocator, RoundRobinDeviceSelector >* get_vdev() { return &m_vdev; };
-
+    
+    // Start of LogDev Layer calls
     uint64_t reserve(uint64_t size) {
         return m_vdev.reserve(size);
     }
@@ -654,6 +655,22 @@ public:
         return m_vdev.append_write(iov, iovcnt, out_offset, to_vdev_req(req));  
     }
 #endif
+
+    // 
+    // Read
+    //
+    void read(const uint64_t offset, const uint64_t size, const void* buf) {
+        m_vdev.read(offset, size, buf);
+    }
+    
+    void readv(const uint64_t offset, struct iovec* iov, int iovcnt) {
+        m_vdev.readv(offset, iov, iovcnt);
+    }
+    
+    void trucate(const uint64_t offset) {
+        m_vdev.truncate(offset);
+    }
+    // End of LogDev Layer specifications:
 
 private:
     uint32_t                                           m_pagesz;

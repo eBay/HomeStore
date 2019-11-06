@@ -9,8 +9,8 @@ SDS_LOGGING_DECL(logdev)
 namespace homestore {
 
 const uint32_t init_crc32 = 0x12345678;
-const uint32_t LOG_DB_RECORD_HDR_MAGIC = 0xdeadbeaf;
-const uint32_t LOG_DB_RECORD_HDR_VER = 0x1;
+const uint32_t LOG_DEV_RECORD_HDR_MAGIC = 0xdeadbeaf;
+const uint32_t LOG_DEV_RECORD_HDR_VER = 0x1;
 const uint32_t INVALID_CRC32_VALUE = 0x0;
 const uint32_t LOGDEV_BLKSIZE = 512;          // device write iov_len minum size is 512 bytes;
 
@@ -85,6 +85,7 @@ public:
     static LogDev* instance();
     static void del_instance();
     
+    // callback from blkstore, registered at blkstore creation;
     void process_logdev_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
 
     // returns offset 
@@ -98,12 +99,25 @@ public:
     //
     uint64_t reserve(const uint64_t size);
 
-    // return true if the given offset is a valid start of a record
-    bool read(uint64_t offset, boost::intrusive_ptr< logdev_req > req);
+    // 
+    // read is sync
+    // return actual bytes read on success or -1 on failure
+    //
+    ssize_t read(const uint64_t offset, const uint64_t size, const void* buf);
+    
+    ssize_t readv(const uint64_t offset, struct iovec* iov, int iovcnt);
+
+    // truncate
+    void truncate(const uint64_t offset);
 
     // Group Commit 
    
-    // Compact
+private:
+    // header verification
+    bool header_verify(LogDevRecordHeader* hdr);
+
+    // copy iov pointers and len
+    bool copy_iov(struct iovec* dest, struct iovec* src, int iovcnt);
 
 private:
     uint32_t get_crc_and_len(struct iovec* iov, int iovcnt, uint64_t& len);

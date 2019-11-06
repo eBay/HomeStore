@@ -301,6 +301,40 @@ private:
     void process_logdev_completions(const logdev_req_ptr& req) {
         m_logdev_done = true;
         LOGINFO("Logdev write callback received!");
+
+        logdev_read_and_verify();   
+    }
+    
+    void lodev_read_and_verify() {
+        // read verify: grab last written offset as input and compare the read data with stored data
+        auto read_offset = m_logdev_offset.front();
+
+        char* ptr = nullptr;
+        int  ret = posix_memalign((void**)&ptr, HomeStoreConfig::align_size, LOGDEV_BUF_SIZE);
+        if (ret != 0) {
+            throw std::bad_alloc();
+        }
+
+        struct iovec* iov = nullptr;
+        ret = posix_memalign((void**)&iov, HomeStoreConfig::align_size, sizeof(struct iovec));
+        if (ret != 0) {
+            throw std::bad_alloc();
+        }
+
+        iov[0].iov_base = (uint8_t*) ptr;
+        iov[0].iov_len = LOGDEV_BUF_SIZE;
+
+        LogDev::instance()->readv(read_offset, iov, 1);  
+        
+        ptr[m_logdev_data[read_offset].size()] = 0;
+
+        if (m_logdev_data[read_offset].compare(ptr) != 0) {
+            LOGERROR("Returned buf: {} is not same as stored buf: {}", ptr, m_logdev_data[read_offset]);
+            assert(0);
+        } 
+         
+        free(iov);   
+        free(ptr);
     }
 
     void logdev_write(uint64_t vol_id, uint64_t lba, uint64_t nblks, logdev_comp_callback cb) {
@@ -332,7 +366,13 @@ private:
         if (two_reserve_test) {
             offset_2 = LogDev::instance()->reserve(LOGDEV_BUF_SIZE + sizeof (LogDevRecordHeader));
             if (offset_2 != INVALID_OFFSET) {
+                
+                m_logdev_offset.push_front(offset_2);
+                m_logdev_data[offset_2] = ss;
+
                 bool bret= LogDev::instance()->write_at_offset(offset_2, iov, 1, cb);
+                
+
                 if (bret) {
                     LOGINFO("offset: {}", offset_2);
                 } else {
@@ -349,6 +389,9 @@ private:
         }
 
         if (offset_1 != INVALID_OFFSET) {
+            m_logdev_data[offset_1] = ss;
+            m_logdev_offset.push_front(offset_1);
+
             bool bret= LogDev::instance()->write_at_offset(offset_1, iov, 1, cb);
 
             if (bret) {
@@ -636,6 +679,8 @@ private:
     bool                                            m_enable_write_log;
     std::shared_ptr<WriteLogRecorder<uint64_t>>     m_write_recorder;
     bool                                            m_logdev_done = true;
+    std::map<uint64_t, std::string>                 m_logdev_data;  // offset to string length
+    std::deque<uint64_t>                            m_logdev_offset;
 }; // VolumeManager
 
 template <typename T>

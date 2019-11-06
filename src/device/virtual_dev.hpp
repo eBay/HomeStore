@@ -365,11 +365,6 @@ public:
         return m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id]->get_start_offset();
     }
 
-    // read at a logical offset
-    void read_at_offset(const homeds::MemPiece& mp, uint64_t log_offset) {
-        
-    }
-
     uint64_t get_len(const struct iovec* iov, const int iovcnt) {
         uint64_t len = 0;
         for (int i = 0; i < iovcnt; i++) {
@@ -624,6 +619,7 @@ public:
 
         return true;
     }
+
 #if 0
     // 
     // Return true if the append is successful, otherwise return false;
@@ -684,7 +680,7 @@ public:
         out_offset = offset;
         return true;
     }
-#endif 
+#endif
     // 
     // convert from logical offset to device offset
     // it handles device overloop, e.g. reach to end of the device then start from the beginning device
@@ -711,6 +707,37 @@ public:
         
         HS_ASSERT(DEBUG, false, "Input log_offset is invalid: {}, should be between 0 ~ {}", log_offset, m_chunk_size * m_num_chunks);
         return 0;
+    }
+    
+    void truncate(const uint64_t offset) {
+        // to be implemented
+        
+    }
+
+    void readv(const uint64_t offset, struct iovec* iov, int iovcnt) {
+        uint32_t dev_id = 0, chunk_id = 0;
+        uint64_t offset_in_chunk = 0;
+        uint64_t len = get_len(iov, iovcnt);
+
+        uint64_t offset_in_dev = logical_to_dev_offset(offset, dev_id, chunk_id, offset_in_chunk);
+
+        auto pdev = m_primary_pdev_chunks_list[dev_id].pdev;
+        auto chunk = m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id];
+
+        do_readv_internal(pdev, chunk, offset_in_dev, iov, iovcnt, len, nullptr);
+    }
+
+    // read at a logical offset
+    void read(const uint64_t offset, const uint64_t size, const void* buf) {
+        uint32_t dev_id = 0, chunk_id = 0;
+        uint64_t offset_in_chunk = 0;
+
+        uint64_t offset_in_dev = logical_to_dev_offset(offset, dev_id, chunk_id, offset_in_chunk);
+
+        auto pdev = m_primary_pdev_chunks_list[dev_id].pdev;
+        auto chunk = m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id];
+
+        do_read_internal(pdev, chunk, offset_in_dev, (char*)buf, size, nullptr);
     }
 
     bool is_blk_alloced(BlkId& in_blkid) {
@@ -909,6 +936,76 @@ public:
             }
         }
     }
+    
+    void do_readv_internal(PhysicalDev* pdev, PhysicalDevChunk* pchunk, const uint64_t dev_offset, struct iovec* iov, int iovcnt, uint64_t size, boost::intrusive_ptr< virtualdev_req > req) {
+        COUNTER_INCREMENT(pdev->get_metrics(), drive_read_vector_count, iovcnt);
+
+        if (!req || req->isSyncCall) {
+            auto start = Clock::now();
+            COUNTER_INCREMENT(pdev->get_metrics(), drive_sync_read_count, 1);
+            pdev->sync_readv(iov, iovcnt, size, dev_offset);
+            HISTOGRAM_OBSERVE(pdev->get_metrics(), drive_read_latency, get_elapsed_time_us(start));
+        } else {
+            COUNTER_INCREMENT(pdev->get_metrics(), drive_async_read_count, 1);
+            req->version = 0xDEAD;
+            req->cb = std::bind(&VirtualDev::process_completions, this, std::placeholders::_1);
+            req->size = size;
+            req->inc_ref();
+            req->chunk = pchunk;
+            req->io_start_time = Clock::now();
+
+            pdev->readv(iov, iovcnt, size, dev_offset, (uint8_t*)req.get());
+        }
+
+        if (hs_unlikely(get_nmirrors())) {
+            // If failed and we have mirrors, we can read from any one of the mirrors as well
+            uint64_t primary_chunk_offset = dev_offset - pchunk->get_start_offset();
+            for (auto mchunk : m_mirror_chunks.find(pchunk)->second) {
+                uint64_t dev_offset_m = mchunk->get_start_offset() + primary_chunk_offset;
+                req->inc_ref();
+                mchunk->get_physical_dev_mutable()->readv(iov, iovcnt, size, dev_offset_m, (uint8_t*)req.get());
+            }
+        }
+    }
+
+    void do_read_internal(PhysicalDev* pdev, PhysicalDevChunk* pchunk, const uint64_t dev_offset, char* ptr, const uint64_t size, boost::intrusive_ptr< virtualdev_req > req) {
+        COUNTER_INCREMENT(pdev->get_metrics(), drive_read_vector_count, 1);
+
+        if (!req || req->isSyncCall) {
+            // if req is null (sync), or it is a sync call;
+            auto start = Clock::now(); 
+            COUNTER_INCREMENT(pdev->get_metrics(), drive_sync_read_count, 1);
+            pdev->sync_read(ptr, size, dev_offset);
+            HISTOGRAM_OBSERVE(pdev->get_metrics(), drive_read_latency, get_elapsed_time_us(start));
+        } else {
+            COUNTER_INCREMENT(pdev->get_metrics(), drive_async_read_count, 1);
+            // aysnc read
+            req->version = 0xDEAD;
+            req->cb = std::bind(&VirtualDev::process_completions, this, std::placeholders::_1);
+            req->size = size;
+            req->chunk = pchunk;
+            req->io_start_time = Clock::now();
+            req->inc_ref();
+
+            pdev->read(ptr, size, dev_offset, (uint8_t*)req.get());
+        }
+
+        if (hs_unlikely(get_nmirrors())) {
+            // If failed and we have mirrors, we can read from any one of the mirrors as well
+            uint64_t primary_chunk_offset = dev_offset - pchunk->get_start_offset();
+            for (auto mchunk : m_mirror_chunks.find(pchunk)->second) {
+                uint64_t dev_offset_m = mchunk->get_start_offset() + primary_chunk_offset;
+                auto     pdev = mchunk->get_physical_dev_mutable();
+
+                HS_ASSERT(DEBUG, ((req == nullptr) || req->isSyncCall), "Expecting null req or sync call");
+
+                COUNTER_INCREMENT(pdev->get_metrics(), drive_sync_read_count, 1);
+                auto start_time = Clock::now();
+                pdev->sync_read(ptr, size, dev_offset_m);
+                HISTOGRAM_OBSERVE(pdev->get_metrics(), drive_read_latency, get_elapsed_time_us(start_time));
+            }
+        }
+    }
 
     /* Read the data for a given BlkId. With this method signature, virtual dev can read only in block boundary
      * and nothing in-between offsets (say if blk size is 8K it cannot read 4K only, rather as full 8K. It does not
@@ -919,38 +1016,8 @@ public:
         PhysicalDevChunk* primary_chunk;
 
         uint64_t primary_dev_offset = to_dev_offset(bid, &primary_chunk);
-        req->version = 0xDEAD;
-        req->cb = std::bind(&VirtualDev::process_completions, this, std::placeholders::_1);
-        req->size = mp.size();
-        req->chunk = primary_chunk;
-        req->io_start_time = Clock::now();
 
-        auto pdev = primary_chunk->get_physical_dev_mutable();
-        if (req->isSyncCall) {
-            COUNTER_INCREMENT(pdev->get_metrics(), drive_sync_read_count, 1);
-            pdev->sync_read((char*)mp.ptr(), mp.size(), primary_dev_offset);
-            HISTOGRAM_OBSERVE(pdev->get_metrics(), drive_read_latency, get_elapsed_time_us(req->io_start_time));
-        } else {
-            COUNTER_INCREMENT(pdev->get_metrics(), drive_async_read_count, 1);
-
-            req->inc_ref();
-            pdev->read((char*)mp.ptr(), mp.size(), primary_dev_offset, (uint8_t*)req.get());
-        }
-
-        if (hs_unlikely(get_nmirrors())) {
-            // If failed and we have mirrors, we can read from any one of the mirrors as well
-            uint64_t primary_chunk_offset = primary_dev_offset - primary_chunk->get_start_offset();
-            for (auto mchunk : m_mirror_chunks.find(primary_chunk)->second) {
-                uint64_t dev_offset = mchunk->get_start_offset() + primary_chunk_offset;
-                auto     pdev = mchunk->get_physical_dev_mutable();
-                HS_ASSERT(DEBUG, ((req == nullptr) || req->isSyncCall), "Expecting null req or sync call");
-
-                COUNTER_INCREMENT(pdev->get_metrics(), drive_sync_read_count, 1);
-                auto start_time = Clock::now();
-                pdev->sync_read((char*)mp.ptr(), mp.size(), dev_offset);
-                HISTOGRAM_OBSERVE(pdev->get_metrics(), drive_read_latency, get_elapsed_time_us(start_time));
-            }
-        }
+        do_read_internal(primary_chunk->get_physical_dev_mutable(), primary_chunk, primary_dev_offset, (char*)mp.ptr(), mp.size(), req);
     }
 
     void readv(const BlkId& bid, const homeds::MemVector& buf, boost::intrusive_ptr< virtualdev_req > req) {
@@ -961,8 +1028,6 @@ public:
 
         HS_ASSERT_CMP(DEBUG, buf.size(), ==,
                       bid.get_nblks() * get_page_size()); // Expected to be less than allocated blk originally.
-        req->version = 0xDEAD;
-        req->cb = std::bind(&VirtualDev::process_completions, this, std::placeholders::_1);
         for (auto i : boost::irange< uint32_t >(0, buf.npieces())) {
             homeds::blob b;
             buf.get(&b, i);
@@ -976,24 +1041,8 @@ public:
         uint64_t          primary_dev_offset = to_dev_offset(bid, &primary_chunk);
 
         auto pdev = primary_chunk->get_physical_dev_mutable();
-        COUNTER_INCREMENT(pdev->get_metrics(), drive_async_read_count, 1);
-        COUNTER_INCREMENT(pdev->get_metrics(), drive_read_vector_count, iovcnt);
 
-        req->size = size;
-        req->inc_ref();
-        req->chunk = primary_chunk;
-        req->io_start_time = Clock::now();
-        pdev->readv(iov, iovcnt, size, primary_dev_offset, (uint8_t*)req.get());
-
-        if (hs_unlikely(get_nmirrors())) {
-            // If failed and we have mirrors, we can read from any one of the mirrors as well
-            uint64_t primary_chunk_offset = primary_dev_offset - primary_chunk->get_start_offset();
-            for (auto mchunk : m_mirror_chunks.find(primary_chunk)->second) {
-                uint64_t dev_offset = mchunk->get_start_offset() + primary_chunk_offset;
-                req->inc_ref();
-                mchunk->get_physical_dev_mutable()->readv(iov, iovcnt, size, dev_offset, (uint8_t*)req.get());
-            }
-        }
+        do_readv_internal(pdev, primary_chunk, primary_dev_offset, iov, iovcnt, size, req);
     }
 
     void     update_vb_context(uint8_t* blob) { m_mgr->update_vb_context(m_vb->vdev_id, blob); }
