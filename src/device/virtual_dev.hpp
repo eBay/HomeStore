@@ -721,23 +721,41 @@ public:
 
         uint64_t offset_in_dev = logical_to_dev_offset(offset, dev_id, chunk_id, offset_in_chunk);
 
+        // 
+        // if the size of the read buffer is acrossing boundary
+        // move to start of next chunk
+        //
+        if (offset_in_chunk + len > m_chunk_size) {
+            offset_in_dev = logical_to_dev_offset(offset + m_chunk_size - offset_in_chunk, dev_id, chunk_id, offset_in_chunk);   
+            HS_ASSERT_CMP(DEBUG, offset_in_chunk, ==, 0);
+        }
+
         auto pdev = m_primary_pdev_chunks_list[dev_id].pdev;
         auto chunk = m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id];
-
+        
         do_readv_internal(pdev, chunk, offset_in_dev, iov, iovcnt, len, nullptr);
     }
 
     // read at a logical offset
-    void read(const uint64_t offset, const uint64_t size, const void* buf) {
+    void read(const uint64_t offset, const uint64_t len, const void* buf) {
         uint32_t dev_id = 0, chunk_id = 0;
         uint64_t offset_in_chunk = 0;
 
         uint64_t offset_in_dev = logical_to_dev_offset(offset, dev_id, chunk_id, offset_in_chunk);
 
+        // 
+        // if the size of the read buffer is acrossing boundary
+        // move to start of next chunk
+        //
+        if (offset_in_chunk + len > m_chunk_size) {
+            offset_in_dev = logical_to_dev_offset(offset + m_chunk_size - offset_in_chunk, dev_id, chunk_id, offset_in_chunk);   
+            HS_ASSERT_CMP(DEBUG, offset_in_chunk, ==, 0);
+        }
+
         auto pdev = m_primary_pdev_chunks_list[dev_id].pdev;
         auto chunk = m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id];
 
-        do_read_internal(pdev, chunk, offset_in_dev, (char*)buf, size, nullptr);
+        do_read_internal(pdev, chunk, offset_in_dev, (char*)buf, len, nullptr);
     }
 
     bool is_blk_alloced(BlkId& in_blkid) {

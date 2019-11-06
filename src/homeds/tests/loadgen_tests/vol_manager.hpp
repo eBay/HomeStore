@@ -299,10 +299,10 @@ public:
         
 private:
     void process_logdev_completions(const logdev_req_ptr& req) {
-        m_logdev_done = true;
         LOGINFO("Logdev write callback received!");
 
-        // logdev_read_and_verify();   
+        logdev_read_and_verify();
+        m_logdev_done = true;
     }
     
     void logdev_read_and_verify() {
@@ -335,6 +335,8 @@ private:
          
         free(iov);   
         free(ptr);
+
+        m_logdev_read_verified = true;
     }
 
     void logdev_write(uint64_t vol_id, uint64_t lba, uint64_t nblks, logdev_comp_callback cb) {
@@ -366,13 +368,12 @@ private:
         if (two_reserve_test) {
             offset_2 = LogDev::instance()->reserve(LOGDEV_BUF_SIZE + sizeof (LogDevRecordHeader));
             if (offset_2 != INVALID_OFFSET) {
-                
                 m_logdev_offset.push_front(offset_2);
                 m_logdev_data[offset_2] = ss;
 
+                m_logdev_read_verified = false;
                 bool bret= LogDev::instance()->write_at_offset(offset_2, iov, 1, cb);
                 
-
                 if (bret) {
                     LOGINFO("offset: {}", offset_2);
                 } else {
@@ -388,10 +389,19 @@ private:
             two_reserve_test = true;
         }
 
+        // 
+        // Wait for the 1st write(if there is any) to be read and verified before we start another write. 
+        // This is just for the ease of testing code only, not a restriction for production code;
+        //
+        while (!m_logdev_read_verified) {
+            sleep(1);
+        }
+
         if (offset_1 != INVALID_OFFSET) {
             m_logdev_data[offset_1] = ss;
             m_logdev_offset.push_front(offset_1);
 
+            m_logdev_read_verified = false;
             bool bret= LogDev::instance()->write_at_offset(offset_1, iov, 1, cb);
 
             if (bret) {
@@ -679,6 +689,7 @@ private:
     bool                                            m_enable_write_log;
     std::shared_ptr<WriteLogRecorder<uint64_t>>     m_write_recorder;
     bool                                            m_logdev_done = true;
+    bool                                            m_logdev_read_verified = false;
     std::map<uint64_t, std::string>                 m_logdev_data;  // offset to string length
     std::deque<uint64_t>                            m_logdev_offset;
 }; // VolumeManager
