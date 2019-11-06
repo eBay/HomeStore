@@ -5,7 +5,7 @@ from conans import ConanFile, CMake, tools
 class HomestoreConan(ConanFile):
     name = "homestore"
 
-    version = "0.11.21"
+    version = "0.11.22"
     revision_mode = "scm"
 
     license = "Proprietary"
@@ -24,9 +24,9 @@ class HomestoreConan(ConanFile):
 
             # Not commonly updated
             "flip/0.2.4@sds/develop",
-            "sds_logging/6.0.0@sds/testing",
-            "sds_options/1.0.0@sds/testing",
-            "sisl/0.3.10@sisl/testing",
+            "sds_logging/6.1.0@sds/develop",
+            "sds_options/1.0.0@sds/develop",
+            "sisl/0.3.10@sisl/develop",
 
             # FOSS, rarely updated
             "benchmark/1.5.0@oss/stable",
