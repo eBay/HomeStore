@@ -160,11 +160,17 @@ ssize_t LogDev::readv(const uint64_t offset, struct iovec* iov_i, int iovcnt_i) 
     copy_iov(&iov[1], iov_i, iovcnt_i);
 
     HomeBlks::instance()->get_logdev_blkstore()->readv(offset, iov, iovcnt);
-    
+
     if (!header_verify(hdr)) {
         HS_ASSERT(DEBUG, 0, "Log header corrupted!");
         return -1;
     }
+
+    uint32_t crc = crc32_ieee(init_crc32, (unsigned char*)(iov[1].iov_base), iov[1].iov_len);
+    
+    HS_ASSERT_CMP(DEBUG, hdr->h.m_len, ==, iov[1].iov_len, "Log size mismatch from input size: {} : {}", hdr->h.m_len, iov[1].iov_len);
+
+    HS_ASSERT_CMP(DEBUG, hdr->h.m_crc, ==, crc, "Log header CRC mismatch: {} : {}", hdr->h.m_crc, crc);
 
     auto len = hdr->h.m_len;
     free(hdr);
@@ -226,6 +232,23 @@ void LogDev::process_logdev_completions(const boost::intrusive_ptr< blkstore_req
     }
     
     m_comp_cb(req);
+}
+
+void LogDev::start_recovery() {
+#if 0
+    // start read from offset 0 until we hit the end of the log records;
+    struct iovec iov[1];
+    void* ptr = nullptr;
+ 
+    // read 4k page
+    int ret = posix_memalign((void**)&ptr, HomeStoreConfig::align_size, HomeStoreConfig::align_size);
+    if (ret != 0 ) {
+        throw std::bad_alloc();
+    }   
+    
+    iov[0].iov_base = (uint8_t*) ptr;
+    iov[0].iov_len = HomeStoreConfig::align_size;
+#endif
 }
 
 }

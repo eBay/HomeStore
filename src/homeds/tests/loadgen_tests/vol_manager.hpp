@@ -360,7 +360,7 @@ private:
         iov[0].iov_len = LOGDEV_BUF_SIZE;
         
         uint64_t offset_1 = LogDev::instance()->reserve(LOGDEV_BUF_SIZE + sizeof (LogDevRecordHeader));
-
+#if 1
         static bool two_reserve_test = true;
         uint64_t offset_2 = 0;
 
@@ -396,7 +396,7 @@ private:
         while (!m_logdev_read_verified) {
             sleep(1);
         }
-
+#endif
         if (offset_1 != INVALID_OFFSET) {
             m_logdev_data[offset_1] = ss;
             m_logdev_offset.push_front(offset_1);
