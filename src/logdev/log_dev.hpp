@@ -110,6 +110,7 @@ public:
     // truncate
     void truncate(const uint64_t offset);
 
+    void start_recovery();
     // Group Commit 
    
 private:
