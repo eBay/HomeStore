@@ -420,7 +420,11 @@ public:
     void destroy() {
         /* XXX: do we need to handle error condition here ?. In the next boot we will automatically recaim these blocks
          */
-        m_bt->destroy(std::bind(&mapping::process_free_blk_callback, this, std::placeholders::_1), false);
+        auto ret = m_bt->destroy(std::bind(&mapping::process_free_blk_callback, this, std::placeholders::_1), false);
+        if (ret != btree_status_t::success) {
+            LOGERROR("mapping btree destroy returned unsuccessfully : {} ", ret);   
+            assert(0);
+        }
     }
 
     void recovery_cmpltd() { m_bt->recovery_cmpltd(); }
