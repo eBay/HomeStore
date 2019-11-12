@@ -714,7 +714,16 @@ public:
         
     }
 
-    void readv(const uint64_t offset, struct iovec* iov, int iovcnt) {
+    void update_write_sz(uint64_t total_written_sz) {
+        m_write_sz_in_total = total_written_sz;
+    }
+
+    // 
+    // return:
+    //     on error, -1 is returned;
+    //     on success, num of bytes read;
+    //
+    ssize_t readv(const uint64_t offset, struct iovec* iov, int iovcnt) {
         uint32_t dev_id = 0, chunk_id = 0;
         uint64_t offset_in_chunk = 0;
         uint64_t len = get_len(iov, iovcnt);
@@ -733,11 +742,11 @@ public:
         auto pdev = m_primary_pdev_chunks_list[dev_id].pdev;
         auto chunk = m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id];
         
-        do_readv_internal(pdev, chunk, offset_in_dev, iov, iovcnt, len, nullptr);
+        return do_readv_internal(pdev, chunk, offset_in_dev, iov, iovcnt, len, nullptr);
     }
 
     // read at a logical offset
-    void read(const uint64_t offset, const uint64_t len, const void* buf) {
+    ssize_t read(const uint64_t offset, const uint64_t len, const void* buf) {
         uint32_t dev_id = 0, chunk_id = 0;
         uint64_t offset_in_chunk = 0;
 
@@ -755,7 +764,7 @@ public:
         auto pdev = m_primary_pdev_chunks_list[dev_id].pdev;
         auto chunk = m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id];
 
-        do_read_internal(pdev, chunk, offset_in_dev, (char*)buf, len, nullptr);
+        return do_read_internal(pdev, chunk, offset_in_dev, (char*)buf, len, nullptr);
     }
 
     bool is_blk_alloced(BlkId& in_blkid) {
@@ -955,13 +964,13 @@ public:
         }
     }
     
-    void do_readv_internal(PhysicalDev* pdev, PhysicalDevChunk* pchunk, const uint64_t dev_offset, struct iovec* iov, int iovcnt, uint64_t size, boost::intrusive_ptr< virtualdev_req > req) {
+    ssize_t do_readv_internal(PhysicalDev* pdev, PhysicalDevChunk* pchunk, const uint64_t dev_offset, struct iovec* iov, int iovcnt, uint64_t size, boost::intrusive_ptr< virtualdev_req > req) {
         COUNTER_INCREMENT(pdev->get_metrics(), drive_read_vector_count, iovcnt);
-
+        ssize_t bytes_read = 0;
         if (!req || req->isSyncCall) {
             auto start = Clock::now();
             COUNTER_INCREMENT(pdev->get_metrics(), drive_sync_read_count, 1);
-            pdev->sync_readv(iov, iovcnt, size, dev_offset);
+            bytes_read = pdev->sync_readv(iov, iovcnt, size, dev_offset);
             HISTOGRAM_OBSERVE(pdev->get_metrics(), drive_read_latency, get_elapsed_time_us(start));
         } else {
             COUNTER_INCREMENT(pdev->get_metrics(), drive_async_read_count, 1);
@@ -973,6 +982,7 @@ public:
             req->io_start_time = Clock::now();
 
             pdev->readv(iov, iovcnt, size, dev_offset, (uint8_t*)req.get());
+            bytes_read = size; // no one consumes return value for async read;
         }
 
         if (hs_unlikely(get_nmirrors())) {
@@ -984,16 +994,19 @@ public:
                 mchunk->get_physical_dev_mutable()->readv(iov, iovcnt, size, dev_offset_m, (uint8_t*)req.get());
             }
         }
+
+        return bytes_read;
     }
 
-    void do_read_internal(PhysicalDev* pdev, PhysicalDevChunk* pchunk, const uint64_t dev_offset, char* ptr, const uint64_t size, boost::intrusive_ptr< virtualdev_req > req) {
+    ssize_t do_read_internal(PhysicalDev* pdev, PhysicalDevChunk* pchunk, const uint64_t dev_offset, char* ptr, const uint64_t size, boost::intrusive_ptr< virtualdev_req > req) {
         COUNTER_INCREMENT(pdev->get_metrics(), drive_read_vector_count, 1);
+        ssize_t bytes_read = 0;
 
         if (!req || req->isSyncCall) {
             // if req is null (sync), or it is a sync call;
             auto start = Clock::now(); 
             COUNTER_INCREMENT(pdev->get_metrics(), drive_sync_read_count, 1);
-            pdev->sync_read(ptr, size, dev_offset);
+            bytes_read = pdev->sync_read(ptr, size, dev_offset);
             HISTOGRAM_OBSERVE(pdev->get_metrics(), drive_read_latency, get_elapsed_time_us(start));
         } else {
             COUNTER_INCREMENT(pdev->get_metrics(), drive_async_read_count, 1);
@@ -1006,6 +1019,7 @@ public:
             req->inc_ref();
 
             pdev->read(ptr, size, dev_offset, (uint8_t*)req.get());
+            bytes_read = size;
         }
 
         if (hs_unlikely(get_nmirrors())) {
@@ -1023,6 +1037,8 @@ public:
                 HISTOGRAM_OBSERVE(pdev->get_metrics(), drive_read_latency, get_elapsed_time_us(start_time));
             }
         }
+
+        return bytes_read;
     }
 
     /* Read the data for a given BlkId. With this method signature, virtual dev can read only in block boundary

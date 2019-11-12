@@ -703,6 +703,7 @@ void HomeBlks::scan_volumes() {
             m_data_blk_store->reset_vdev_failed_state();
             m_metadata_blk_store->reset_vdev_failed_state();
             m_sb_blk_store->reset_vdev_failed_state();
+            m_logdev_blk_store->reset_vdev_failed_state();
             m_vdev_failed = false;
         }
     } catch (const std::exception& e) {

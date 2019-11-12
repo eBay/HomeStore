@@ -670,6 +670,10 @@ public:
     void truncate(const uint64_t offset) {
         m_vdev.truncate(offset);
     }
+
+    void update_write_sz(const uint64_t write_sz) {
+        m_vdev.update_write_sz(write_sz);
+    }
     // End of LogDev Layer specifications:
 
 private:

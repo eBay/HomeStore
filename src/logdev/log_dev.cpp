@@ -26,8 +26,8 @@ LogDev* LogDev::instance() {
 // 
 // calculate crc based on input buffers splitted in multiple buffers in MemVector;
 //
-uint32_t LogDev::get_crc_and_len(struct iovec* iov, int iovcnt, uint64_t& len) {
-    uint32_t crc = init_crc32;
+crc_type_t LogDev::get_crc_and_len(struct iovec* iov, int iovcnt, uint64_t& len) {
+    crc_type_t crc = init_crc32;
     len = 0;
     for (int i = 0; i < iovcnt; i++) {
         crc = crc32_ieee(crc, (unsigned char*)(iov[i].iov_base), iov[i].iov_len);
@@ -55,7 +55,7 @@ bool LogDev::write_at_offset(const uint64_t offset, struct iovec* iov_i, int iov
 
     m_comp_cb = cb;
     uint64_t len = 0; 
-    uint32_t crc = get_crc_and_len(iov_i, iovcnt_i, len);
+    crc_type_t crc = get_crc_and_len(iov_i, iovcnt_i, len);
 
     const int iovcnt = iovcnt_i + 1;  // add header slot
     struct iovec iov[iovcnt];
@@ -94,7 +94,7 @@ bool LogDev::write_at_offset(const uint64_t offset, struct iovec* iov_i, int iov
 bool LogDev::append_write(struct iovec* iov_i, int iovcnt_i, uint64_t& out_offset, logdev_comp_callback cb) {
     m_comp_cb = cb;
     uint64_t len = 0; 
-    uint32_t crc = get_crc_and_len(iov_i, iovcnt_i, len);
+    crc_type_t crc = get_crc_and_len(iov_i, iovcnt_i, len);
 
     const int iovcnt = iovcnt_i + 1;  // add header slot
     struct iovec iov[iovcnt];
@@ -142,6 +142,12 @@ void LogDev::truncate(const uint64_t offset) {
     HomeBlks::instance()->get_logdev_blkstore()->truncate(offset); 
 }
 
+// 
+// return value:
+// 1. Actual bytes read
+// 2. 0 for end of file
+// 3. -1 for error;
+//
 ssize_t LogDev::readv(const uint64_t offset, struct iovec* iov_i, int iovcnt_i) {
     int iovcnt = iovcnt_i + 1;
     struct iovec iov[iovcnt];
@@ -151,10 +157,10 @@ ssize_t LogDev::readv(const uint64_t offset, struct iovec* iov_i, int iovcnt_i) 
     if (ret != 0 ) {
         throw std::bad_alloc();
     }
-    std::memset((void*)hdr, 0, sizeof(LogDevRecordHeader));
+    std::memset((void*)hdr, 0, get_header_size());
 
     iov[0].iov_base = (uint8_t*) hdr;
-    iov[0].iov_len = sizeof(LogDevRecordHeader);
+    iov[0].iov_len = get_header_size();
 
     // copy pointers and length
     copy_iov(&iov[1], iov_i, iovcnt_i);
@@ -166,7 +172,7 @@ ssize_t LogDev::readv(const uint64_t offset, struct iovec* iov_i, int iovcnt_i) 
         return -1;
     }
 
-    uint32_t crc = crc32_ieee(init_crc32, (unsigned char*)(iov[1].iov_base), iov[1].iov_len);
+    crc_type_t crc = crc32_ieee(init_crc32, (unsigned char*)(iov[1].iov_base), iov[1].iov_len);
     
     HS_ASSERT_CMP(DEBUG, hdr->h.m_len, ==, iov[1].iov_len, "Log size mismatch from input size: {} : {}", hdr->h.m_len, iov[1].iov_len);
 
@@ -203,11 +209,15 @@ bool LogDev::header_verify(LogDevRecordHeader* hdr) {
 
 // 
 // read
+// return value:
+// 1. Actual bytes read
+// 2. 0 for end of file
+// 3. -1 for error;
 //
 ssize_t LogDev::read(const uint64_t offset, const uint64_t size, const void* buf) {
     HomeBlks::instance()->get_logdev_blkstore()->read(offset, size, buf);
     
-    LogDevRecordHeader* hdr = (LogDevRecordHeader*)((unsigned char*)buf + sizeof(LogDevRecordHeader));
+    auto* hdr = (LogDevRecordHeader*)((unsigned char*)buf + get_header_size());
 
     if (!header_verify(hdr)) {
         HS_ASSERT(DEBUG, 0, "Log header corrupted!");
@@ -215,7 +225,7 @@ ssize_t LogDev::read(const uint64_t offset, const uint64_t size, const void* buf
     }
 
     // skip header and caculate crc of the data buffer
-    uint32_t crc = crc32_ieee(init_crc32, (unsigned char*)((char*)buf + sizeof(LogDevRecordHeader)), hdr->h.m_len);
+    crc_type_t crc = crc32_ieee(init_crc32, (unsigned char*)((char*)buf + get_header_size()), hdr->h.m_len);
    
     HS_ASSERT_CMP(DEBUG, hdr->h.m_len, ==, size, "Log size mismatch from input size: {} : {}", hdr->h.m_len, size);
     HS_ASSERT_CMP(DEBUG, hdr->h.m_crc, ==, crc, "Log header CRC mismatch: {} : {}", hdr->h.m_crc, crc);
@@ -233,22 +243,109 @@ void LogDev::process_logdev_completions(const boost::intrusive_ptr< blkstore_req
     
     m_comp_cb(req);
 }
-
+       
+// 
+// TODO: 
+// Handle truncate case; 
+//     - If allow truncate to update start offset, then it would be much simpler and efficient.
+//
 void LogDev::start_recovery() {
-#if 0
     // start read from offset 0 until we hit the end of the log records;
     struct iovec iov[1];
     void* ptr = nullptr;
- 
+
+    uint64_t offset = 0, num_records = 0;
+    uint64_t total_size = 0;   // total bytes found for valid log entries;
+    ssize_t bytes_read = 0;
+
     // read 4k page
-    int ret = posix_memalign((void**)&ptr, HomeStoreConfig::align_size, HomeStoreConfig::align_size);
+    int ret = posix_memalign((void**)&ptr, LOGDEV_ALIGN_SIZE, LOGDEV_ALIGN_SIZE);
     if (ret != 0 ) {
         throw std::bad_alloc();
     }   
     
     iov[0].iov_base = (uint8_t*) ptr;
-    iov[0].iov_len = HomeStoreConfig::align_size;
-#endif
+    iov[0].iov_len = LOGDEV_ALIGN_SIZE;
+    
+    uint32_t prev_crc = INVALID_CRC32_VALUE;
+
+    // read 4k
+    while ((bytes_read = readv(offset, iov, 1)) != 0) {
+        if (bytes_read == -1) {
+            // error handling
+            HS_ASSERT(LOGMSG, false, "LogDev Recovery Failed! Read returned -1!");
+            throw std::runtime_error("LogDev Recovery Failed! Read returned -1!");
+            return;
+        } 
+        uint64_t offset_in_buf = 0;
+        
+        HS_ASSERT_CMP(DEBUG, bytes_read, >, 0);
+
+        while (offset_in_buf + sizeof (LogDevRecordHeader) <= (uint64_t)bytes_read) { 
+            // 0. if we still have at least size of header left in the read buf
+            uint8_t* buf = (uint8_t*)((char**)(iov[0].iov_base) + offset_in_buf);
+
+            auto* hdr = (LogDevRecordHeader*)buf;
+            // 1. Header is good.
+            if (header_verify(hdr)) {
+                auto record_size = get_header_size() + hdr->h.m_len;
+
+                if (offset_in_buf + record_size <= (uint64_t)bytes_read) {
+                    // this is fully read log record, verify data crc;
+                    crc_type_t crc = crc32_ieee(init_crc32, (unsigned char*)((char*)buf + get_header_size()), hdr->h.m_len);
+                    
+                    // 2. cur crc is good;
+                    HS_ASSERT_CMP(DEBUG, hdr->h.m_crc, ==, crc, "Log header Current CRC mismatch: {} : {}", hdr->h.m_crc, crc);
+                    if (hdr->h.m_crc != crc) {
+                        // what do we do in release mode?
+                        throw std::runtime_error("Log header Current CRC mismatch!");
+                        return;
+                    }
+                    
+                    // 3. prev_crc must match; Otherwise treat as end of log record;
+                    if (hdr->h.m_prev_crc != prev_crc) {
+                        HS_LOG(INFO, logdev, "Found a log record with prev_crc not match, treated as end of log record, num_records: {}, total_size: {}.", num_records, total_size);
+                        goto success_exit;
+                    }
+
+                    // update num records;
+                    num_records++;
+                    
+                    // update totoal size;
+                    total_size += (sizeof (LogDevRecordHeader) + hdr->h.m_len);
+
+                    // advance offset_in_buf;
+                    offset_in_buf += get_header_size() + hdr->h.m_len;
+                } else {
+                    // We should not be seeing record acrossing two pages!
+                    HS_ASSERT(LOGMSG, false, "Corrupted log records! Unexpected torn log record acrossing two pages!");
+    
+                    HS_LOG(ERROR, logdev, "LogDev Recovery encourtered corruption, log records: {} scanned will be dropped!", num_records);
+
+                    // In relase mode, we just return and drop all the log records;
+                    return;
+                }
+            } else {
+                // This is not a valid record. Reached the last record, stop processing;
+                HS_LOG(INFO, logdev, "Invalid Header detected, treated as end of log record, num_records: {}, total_size: {}.", num_records, total_size);
+                goto success_exit;
+            }
+        }
+
+        // we are done with this buf, and need to go ahead to read next 4k for processing;
+        offset += offset_in_buf;
+
+        // clear the buf for reuse
+        std::memset(ptr, 0, HomeStoreConfig::align_size);
+    }
+
+success_exit: 
+    // Update Virtual layer to write teh total_size;
+    HomeBlks::instance()->get_logdev_blkstore()->update_write_sz(total_size); 
+
+    // end of file was returned;
+    HS_LOG(INFO, logdev, "LogDev Recovery Successfully Completed!");
+    return;
 }
 
-}
+} // homestore

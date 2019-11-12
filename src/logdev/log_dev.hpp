@@ -8,11 +8,14 @@ SDS_LOGGING_DECL(logdev)
 
 namespace homestore {
 
+typedef uint32_t crc_type_t;
+
 const uint32_t init_crc32 = 0x12345678;
 const uint32_t LOG_DEV_RECORD_HDR_MAGIC = 0xdeadbeaf;
 const uint32_t LOG_DEV_RECORD_HDR_VER = 0x1;
 const uint32_t INVALID_CRC32_VALUE = 0x0;
 const uint32_t LOGDEV_BLKSIZE = 512;          // device write iov_len minum size is 512 bytes;
+const uint64_t LOGDEV_ALIGN_SIZE = HomeStoreConfig::align_size;
 
 #define to_logdev_req(req) boost::static_pointer_cast< logdev_req >(req)
 
@@ -30,8 +33,8 @@ const uint32_t LOGDEV_BLKSIZE = 512;          // device write iov_len minum size
 struct LogDevRecordHeader_t {
     uint8_t     m_version;
     uint32_t    m_magic;
-    uint32_t    m_crc;        // crc of this record; 
-    uint32_t    m_prev_crc;   // crc of this record; 
+    crc_type_t  m_crc;        // crc of this record; 
+    crc_type_t  m_prev_crc;   // crc of this record; 
     uint32_t    m_len;        // len of data for this record;
 };
 
@@ -114,6 +117,8 @@ public:
     // Group Commit 
    
 private:
+    uint64_t get_header_size() { return sizeof(LogDevRecordHeader); }
+
     // header verification
     bool header_verify(LogDevRecordHeader* hdr);
 
@@ -121,7 +126,7 @@ private:
     bool copy_iov(struct iovec* dest, struct iovec* src, int iovcnt);
 
 private:
-    uint32_t get_crc_and_len(struct iovec* iov, int iovcnt, uint64_t& len);
+    crc_type_t get_crc_and_len(struct iovec* iov, int iovcnt, uint64_t& len);
 
 private:
     uint32_t                                                            m_last_crc;

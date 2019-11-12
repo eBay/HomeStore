@@ -286,11 +286,11 @@ void PhysicalDev::writev(const struct iovec* iov, int iovcnt, uint32_t size, uin
 }
 
 void PhysicalDev::read(char* data, uint32_t size, uint64_t offset, uint8_t* cookie) {
-    m_ep->async_read(get_devfd(), data, size, (off_t)offset, cookie);
+    return m_ep->async_read(get_devfd(), data, size, (off_t)offset, cookie);
 }
 
 void PhysicalDev::readv(const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie) {
-    m_ep->async_readv(get_devfd(), iov, iovcnt, size, (off_t)offset, cookie);
+    return m_ep->async_readv(get_devfd(), iov, iovcnt, size, (off_t)offset, cookie);
 }
 
 void PhysicalDev::sync_write(const char* data, uint32_t size, uint64_t offset) {
@@ -317,27 +317,29 @@ void PhysicalDev::sync_writev(const struct iovec* iov, int iovcnt, uint32_t size
     }
 }
 
-void PhysicalDev::sync_read(char* data, uint32_t size, uint64_t offset) {
+ssize_t PhysicalDev::sync_read(char* data, uint32_t size, uint64_t offset) {
     try {
-        m_ep->sync_read(get_devfd(), data, size, (off_t)offset);
+        return m_ep->sync_read(get_devfd(), data, size, (off_t)offset);
     } catch (const std::system_error& e) {
         std::stringstream ss;
         ss << "dev_name " << get_devname() << e.what() << "\n";
         const std::string s = ss.str();
         device_manager()->handle_error(this);
         throw std::system_error(e.code(), s);
+        return -1;
     }
 }
 
-void PhysicalDev::sync_readv(const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset) {
+ssize_t PhysicalDev::sync_readv(const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset) {
     try {
-        m_ep->sync_readv(get_devfd(), iov, iovcnt, size, (off_t)offset);
+        return m_ep->sync_readv(get_devfd(), iov, iovcnt, size, (off_t)offset);
     } catch (const std::system_error& e) {
         std::stringstream ss;
         ss << "dev_name " << get_devname() << e.what() << "\n";
         const std::string s = ss.str();
         device_manager()->handle_error(this);
         throw std::system_error(e.code(), s);
+        return -1;
     }
 }
 
