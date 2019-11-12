@@ -11,10 +11,10 @@
 
 #if defined __GNUC__ || defined __llvm__
 #define hs_likely(x) __builtin_expect(!!(x), 1)
-#define hs_unlikely(x) __builtin_expect(!!(x), 0)
+#define sisl_unlikely(x) __builtin_expect(!!(x), 0)
 #else
 #define hs_likely(x) (x)
-#define hs_unlikely(x) (x)
+#define sisl_unlikely(x) (x)
 #endif
 
 #define HOMESTORE_LOG_MODS                                                                                             \

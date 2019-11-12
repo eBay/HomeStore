@@ -28,7 +28,7 @@ namespace homestore {
 class VdevFixedBlkAllocatorPolicy {
 public:
     typedef FixedBlkAllocator AllocatorType;
-    typedef BlkAllocConfig    AllocatorConfig;
+    typedef BlkAllocConfig AllocatorConfig;
 
     static void get_config(uint64_t size, uint32_t vpage_size, BlkAllocConfig* out_config) {
         /* for fixed block allocator page and block size is kept same as it doesn't make any
@@ -41,7 +41,7 @@ public:
 
 class VdevVarSizeBlkAllocatorPolicy {
 public:
-    typedef VarsizeBlkAllocator   AllocatorType;
+    typedef VarsizeBlkAllocator AllocatorType;
     typedef VarsizeBlkAllocConfig AllocatorConfig;
 
     static void get_config(uint64_t size, uint32_t vpage_size, BlkAllocConfig* out_config) {
@@ -60,9 +60,9 @@ public:
         /* Blk sizes in slabs : nblks < 1, nblks < 2, 2 <= nblks < 4,
          * 4 <= nblks < 8, 8 <= nblks < 16, nblks >= 16
          */
-        int                     num_slabs = 10;
+        int num_slabs = 10;
         std::vector< uint32_t > slab_limits(num_slabs - 1, 0);
-        std::vector< float >    slab_weights(num_slabs, 0.1); // (1 / num_slabs) = 0.1
+        std::vector< float > slab_weights(num_slabs, 0.1); // (1 / num_slabs) = 0.1
         for (auto i = 0U; i < slab_limits.size(); i++) {
             slab_limits[i] = (1 << i);
         }
@@ -71,7 +71,7 @@ public:
 };
 
 struct pdev_chunk_map {
-    PhysicalDev*                     pdev;
+    PhysicalDev* pdev;
     std::vector< PhysicalDevChunk* > chunks_in_pdev;
 };
 
@@ -81,36 +81,34 @@ typedef std::function< void(boost::intrusive_ptr< virtualdev_req > req) > virtua
 #define to_vdev_req(req) boost::static_pointer_cast< virtualdev_req >(req)
 
 struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
-    uint64_t                    request_id;
-    uint64_t                    version;
-    virtualdev_comp_callback    cb;
-    uint64_t                    size;
-    std::error_condition        err;
-    bool                        is_read;
-    bool                        isSyncCall;
+    uint64_t request_id;
+    uint64_t version;
+    virtualdev_comp_callback cb;
+    uint64_t size;
+    std::error_condition err;
+    bool is_read;
+    bool isSyncCall;
     sisl::atomic_counter< int > refcount;
-    PhysicalDevChunk*           chunk;
-    Clock::time_point           io_start_time;
-    std::atomic<uint8_t>        outstanding_cb = 0;             
+    PhysicalDevChunk* chunk;
+    Clock::time_point io_start_time;
+    std::atomic< uint8_t > outstanding_cb = 0;
 
     void inc_ref() { intrusive_ptr_add_ref(this); }
     void dec_ref() { intrusive_ptr_release(this); }
 
     static boost::intrusive_ptr< virtualdev_req > make_request() {
-        return boost::intrusive_ptr< virtualdev_req >(homeds::ObjectAllocator< virtualdev_req >::make_object());
+        return boost::intrusive_ptr< virtualdev_req >(sisl::ObjectAllocator< virtualdev_req >::make_object());
     }
-    virtual void free_yourself() { homeds::ObjectAllocator< virtualdev_req >::deallocate(this); }
+    virtual void free_yourself() { sisl::ObjectAllocator< virtualdev_req >::deallocate(this); }
 
     friend void intrusive_ptr_add_ref(virtualdev_req* req) { req->refcount.increment(1); }
     friend void intrusive_ptr_release(virtualdev_req* req) {
-        if (req->refcount.decrement_testz()) {
-            req->free_yourself();
-        }
+        if (req->refcount.decrement_testz()) { req->free_yourself(); }
     }
     virtual ~virtualdev_req() { version = 0; }
 
 protected:
-    friend class homeds::ObjectAllocator< virtualdev_req >;
+    friend class sisl::ObjectAllocator< virtualdev_req >;
     virtualdev_req() : request_id(0), err(no_error), is_read(false), isSyncCall(false), refcount(0) {}
 };
 
@@ -127,13 +125,9 @@ protected:
     }
 
 #ifdef _PRERELEASE
-    if (homestore_flip->test_flip("io_write_comp_error_flip")) {
-        vd_req->err = write_failed;
-    }
+    if (homestore_flip->test_flip("io_write_comp_error_flip")) { vd_req->err = write_failed; }
 
-    if (homestore_flip->test_flip("io_read_comp_error_flip")) {
-        vd_req->err = read_failed;
-    }
+    if (homestore_flip->test_flip("io_read_comp_error_flip")) { vd_req->err = read_failed; }
 #endif
 
     auto pdev = vd_req->chunk->get_physical_dev_mutable();
@@ -178,14 +172,14 @@ public:
  */
 const uint32_t VIRDEV_BLKSIZE = 512;
 const uint64_t CHUNK_EOF = 0xabcdabcd;
-const uint64_t INVALID_OFFSET = std::numeric_limits<unsigned long long>::max();
+const uint64_t INVALID_OFFSET = std::numeric_limits< unsigned long long >::max();
 
 template < typename Allocator, typename DefaultDeviceSelector >
 class VirtualDev : public AbstractVirtualDev {
     typedef std::function< void(boost::intrusive_ptr< virtualdev_req > req) > comp_callback;
 
     struct Chunk_EOF_t {
-        uint64_t  e;
+        uint64_t e;
     };
 
     typedef union {
@@ -196,10 +190,10 @@ class VirtualDev : public AbstractVirtualDev {
     static_assert(sizeof(Chunk_EOF) == VIRDEV_BLKSIZE, "LogDevRecordHeader must be VIRDEV_SIZE bytes");
 
 private:
-    vdev_info_block* m_vb;         // This device block info
-    DeviceManager*   m_mgr;        // Device Manager back pointer
-    uint64_t         m_chunk_size; // Chunk size that will be allocated in a physical device
-    std::mutex       m_mgmt_mutex; // Any mutex taken for management operations (like adding/removing chunks).
+    vdev_info_block* m_vb;   // This device block info
+    DeviceManager* m_mgr;    // Device Manager back pointer
+    uint64_t m_chunk_size;   // Chunk size that will be allocated in a physical device
+    std::mutex m_mgmt_mutex; // Any mutex taken for management operations (like adding/removing chunks).
 
     // List of physical devices this virtual device uses and its corresponding chunks for the physdev
     std::vector< pdev_chunk_map > m_primary_pdev_chunks_list;
@@ -210,16 +204,17 @@ private:
 
     // Instance of device selector
     std::unique_ptr< DefaultDeviceSelector > m_selector;
-    uint32_t                                 m_num_chunks;
-    comp_callback                            m_comp_cb;
-    uint32_t                                 m_pagesz;
-    bool                                     m_recovery_init;
-    std::atomic< uint64_t >                  m_used_size;
+    uint32_t m_num_chunks;
+    comp_callback m_comp_cb;
+    uint32_t m_pagesz;
+    bool m_recovery_init;
+    std::atomic< uint64_t > m_used_size;
 
     // data structure for append write
-    std::atomic<uint64_t>                    m_write_sz_in_total; // this size will be decreased by truncate and increased by append;
-    //std::atomic<uint64_t>                    m_write_sz_in_chunk; // write size within chunk, used to check chunk boundary;
-    std::atomic<uint64_t>                    m_reserved_sz; // write size within chunk, used to check chunk boundary;
+    std::atomic< uint64_t > m_write_sz_in_total; // this size will be decreased by truncate and increased by append;
+    // std::atomic<uint64_t>                    m_write_sz_in_chunk; // write size within chunk, used to check chunk
+    // boundary;
+    std::atomic< uint64_t > m_reserved_sz; // write size within chunk, used to check chunk boundary;
 
 public:
     void init(DeviceManager* mgr, vdev_info_block* vb, comp_callback cb, uint32_t page_size) {
@@ -232,7 +227,7 @@ public:
         m_pagesz = page_size;
         m_selector = std::make_unique< DefaultDeviceSelector >();
         m_recovery_init = false;
-        //m_write_sz_in_chunk.store(0, std::memory_order_relaxed);
+        // m_write_sz_in_chunk.store(0, std::memory_order_relaxed);
         m_write_sz_in_total.store(0, std::memory_order_relaxed);
         m_reserved_sz.store(0, std::memory_order_relaxed);
     }
@@ -248,7 +243,6 @@ public:
                       m_num_chunks); // Mirrors should be at least one less than device list.
         HS_ASSERT_CMP(LOGMSG, vb->get_size(), ==, vb->num_primary_chunks * m_chunk_size);
     }
-
 
     /* Create a new virtual dev for these parameters */
     VirtualDev(DeviceManager* mgr, uint64_t context_size, uint32_t nmirror, bool is_stripe, uint32_t page_size,
@@ -289,7 +283,7 @@ public:
 
         for (auto i : boost::irange< uint32_t >(0, m_num_chunks)) {
             std::shared_ptr< BlkAllocator > ba = create_allocator(m_chunk_size, i, true);
-            auto                            pdev_ind = i % pdev_list.size();
+            auto pdev_ind = i % pdev_list.size();
 
             // Create a chunk on selected physical device and add it to chunks in physdev list
             auto chunk = create_dev_chunk(pdev_ind, ba, INVALID_CHUNK_ID);
@@ -297,13 +291,11 @@ public:
 
             // If we have mirror, create a map between chunk and its mirrored chunks
             if (nmirror) {
-                uint32_t                         next_ind = i;
+                uint32_t next_ind = i;
                 std::vector< PhysicalDevChunk* > vec;
                 vec.reserve(nmirror);
                 for (auto j : boost::irange< uint32_t >(0, nmirror)) {
-                    if ((++next_ind) == m_primary_pdev_chunks_list.size()) {
-                        next_ind = 0;
-                    }
+                    if ((++next_ind) == m_primary_pdev_chunks_list.size()) { next_ind = 0; }
                     auto mchunk = create_dev_chunk(next_ind, ba, chunk->get_chunk_id());
                     vec.push_back(mchunk);
                 }
@@ -314,7 +306,6 @@ public:
         for (auto& pdev : pdev_list) {
             m_selector->add_pdev(pdev);
         }
-
     }
 
     void reset_failed_state() {
@@ -323,14 +314,10 @@ public:
     }
 
     void process_completions(boost::intrusive_ptr< virtualdev_req > req) {
-        if (req->outstanding_cb.load() > 0) {
-            req->outstanding_cb.fetch_sub(1, std::memory_order_relaxed);
-        }
-            
-        if (req->outstanding_cb.load() == 0) {
-            m_comp_cb(req);
-        }
-        
+        if (req->outstanding_cb.load() > 0) { req->outstanding_cb.fetch_sub(1, std::memory_order_relaxed); }
+
+        if (req->outstanding_cb.load() == 0) { m_comp_cb(req); }
+
         /* XXX:we probably have to do something if a write/read is spread
          *
          * across the chunks from this layer.
@@ -350,14 +337,15 @@ public:
         (chunk->get_primary_chunk()) ? add_mirror_chunk(chunk) : add_primary_chunk(chunk);
     }
 
-    // 
+    //
     // convert unique offset;
     //
-    uint64_t to_glob_uniq_offset(uint32_t dev_id, uint32_t chunk_id, uint64_t offset_in_chunk) { 
-        return m_primary_pdev_chunks_list[dev_id].pdev->get_dev_offset() + get_chunk_start_offset(dev_id, chunk_id) + offset_in_chunk;
+    uint64_t to_glob_uniq_offset(uint32_t dev_id, uint32_t chunk_id, uint64_t offset_in_chunk) {
+        return m_primary_pdev_chunks_list[dev_id].pdev->get_dev_offset() + get_chunk_start_offset(dev_id, chunk_id) +
+            offset_in_chunk;
     }
-    
-    uint64_t get_offset_in_dev(uint32_t dev_id, uint32_t chunk_id, uint64_t offset_in_chunk) { 
+
+    uint64_t get_offset_in_dev(uint32_t dev_id, uint32_t chunk_id, uint64_t offset_in_chunk) {
         return get_chunk_start_offset(dev_id, chunk_id) + offset_in_chunk;
     }
 
@@ -373,7 +361,7 @@ public:
         return len;
     }
 
-    // 
+    //
     // reserve size for next append_write
     // assumptions: will be called only in single threaded
     //
@@ -388,9 +376,10 @@ public:
     uint64_t reserve(uint64_t size) {
         if (m_write_sz_in_total.load() + m_reserved_sz.load() + size > get_size()) {
             // not enough space left;
-            HS_LOG(ERROR, device, "No space left! m_write_sz_in_total: {}, m_reserved_sz: {}", m_write_sz_in_total.load(), m_reserved_sz.load());
+            HS_LOG(ERROR, device, "No space left! m_write_sz_in_total: {}, m_reserved_sz: {}",
+                   m_write_sz_in_total.load(), m_reserved_sz.load());
             return INVALID_OFFSET;
-        } 
+        }
 
         // TODO: with trucate being supported, below calculation needs to be updated;
         uint64_t end_offset = m_write_sz_in_total.load() + m_reserved_sz.load();
@@ -404,16 +393,18 @@ public:
         if (offset_in_chunk + size <= m_chunk_size) {
             // not acrossing boundary
             m_reserved_sz.fetch_add(size, std::memory_order_relaxed);
-        } else if (m_write_sz_in_total.load() + m_reserved_sz.load() + m_chunk_size - offset_in_chunk + size <= get_size()) {
+        } else if (m_write_sz_in_total.load() + m_reserved_sz.load() + m_chunk_size - offset_in_chunk + size <=
+                   get_size()) {
             // across chunk boundary, still enough space;
             m_reserved_sz.fetch_add(size + m_chunk_size - offset_in_chunk, std::memory_order_relaxed);
 
-            // if across chunk boudary, we need to return the offset in the chunk, 
+            // if across chunk boudary, we need to return the offset in the chunk,
             // so that the next write with this offset could get the chance to write the EndOfChunk;
             reserved_size += m_chunk_size - offset_in_chunk;
         } else {
             // across chunk boundary and no space left;
-            HS_LOG(ERROR, device, "No space left! m_write_sz_in_total: {}, m_reserved_sz: {}", m_write_sz_in_total.load(), m_reserved_sz.load());
+            HS_LOG(ERROR, device, "No space left! m_write_sz_in_total: {}, m_reserved_sz: {}",
+                   m_write_sz_in_total.load(), m_reserved_sz.load());
             return INVALID_OFFSET;
             // m_reserved_sz stays sthe same;
         }
@@ -471,10 +462,9 @@ public:
     }
 #endif
 
-    bool handle_chunk_alignment(const uint32_t dev_id, const uint32_t chunk_id, const uint64_t eof_offset_in_chunk, boost::intrusive_ptr< virtualdev_req > req) {
-        if (req) {
-            req->outstanding_cb.fetch_add(1, std::memory_order_relaxed);
-        }
+    bool handle_chunk_alignment(const uint32_t dev_id, const uint32_t chunk_id, const uint64_t eof_offset_in_chunk,
+                                boost::intrusive_ptr< virtualdev_req > req) {
+        if (req) { req->outstanding_cb.fetch_add(1, std::memory_order_relaxed); }
 #if 0
         // get previous dev_id;
         uint32_t prev_dev_id = dev_id, prev_chunk_id = chunk_id;
@@ -494,7 +484,7 @@ public:
             struct iovec iov_eof[1];
 
             Chunk_EOF* ce = nullptr;
-            auto ret = posix_memalign((void**)&ce, VIRDEV_BLKSIZE, VIRDEV_BLKSIZE); 
+            auto ret = posix_memalign((void**)&ce, VIRDEV_BLKSIZE, VIRDEV_BLKSIZE);
             if (ret != 0) {
                 throw std::bad_alloc();
                 return false;
@@ -506,7 +496,7 @@ public:
             iov_eof[0].iov_base = (uint8_t*)ce;
             iov_eof[0].iov_len = sizeof(Chunk_EOF);
 
-            auto pdev  = m_primary_pdev_chunks_list[dev_id].pdev;
+            auto pdev = m_primary_pdev_chunks_list[dev_id].pdev;
             auto chunk = m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id];
 
             if (req) {
@@ -520,10 +510,9 @@ public:
 
             // do the actual write;
             do_write_internal(pdev, chunk, iov_eof, 1, sizeof(Chunk_EOF), offset_in_dev, req);
-    
-            HS_LOG(INFO, device, "Successfully write EOF at chunk num: {} at offset_in_dev: {}", 
-                    m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id]->get_chunk_id(), 
-                    offset_in_dev);
+
+            HS_LOG(INFO, device, "Successfully write EOF at chunk num: {} at offset_in_dev: {}",
+                   m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id]->get_chunk_id(), offset_in_dev);
 
             free(ce);
         } catch (std::exception& e) {
@@ -533,8 +522,10 @@ public:
 
         return true;
     }
-    
-    void do_write_internal(PhysicalDev* pdev, PhysicalDevChunk* chunk, const struct iovec* iov, const int iovcnt, const uint64_t len, const uint64_t offset_in_dev, boost::intrusive_ptr< virtualdev_req > req) {
+
+    void do_write_internal(PhysicalDev* pdev, PhysicalDevChunk* chunk, const struct iovec* iov, const int iovcnt,
+                           const uint64_t len, const uint64_t offset_in_dev,
+                           boost::intrusive_ptr< virtualdev_req > req) {
         COUNTER_INCREMENT(pdev->get_metrics(), drive_write_vector_count, 1);
 
         if (!req || req->isSyncCall) {
@@ -556,17 +547,17 @@ public:
         }
     }
 
-    bool write_at_offset(const uint64_t offset, const struct iovec* iov, const int iovcnt, boost::intrusive_ptr< virtualdev_req > req) {
-        uint32_t dev_id = 0, chunk_id = 0; 
+    bool write_at_offset(const uint64_t offset, const struct iovec* iov, const int iovcnt,
+                         boost::intrusive_ptr< virtualdev_req > req) {
+        uint32_t dev_id = 0, chunk_id = 0;
         uint64_t offset_in_chunk = 0, eof_offset_in_chunk = 0;
         uint64_t len = get_len(iov, iovcnt);
-        //bool across_chunk = false;
+        // bool across_chunk = false;
 
-        if (req) {
-            req->outstanding_cb.store(1);
-        }
+        if (req) { req->outstanding_cb.store(1); }
 
-        HS_ASSERT_CMP(DEBUG, m_write_sz_in_total.load() + m_reserved_sz.load(), >, offset, "Wrting at offset: {}, which is out of reserved portion is not allowed!", offset);
+        HS_ASSERT_CMP(DEBUG, m_write_sz_in_total.load() + m_reserved_sz.load(), >, offset,
+                      "Wrting at offset: {}, which is out of reserved portion is not allowed!", offset);
 
         // convert logical offset to dev offset
         uint64_t offset_in_dev = logical_to_dev_offset(offset, dev_id, chunk_id, offset_in_chunk);
@@ -577,21 +568,21 @@ public:
 
         if (m_chunk_size - offset_in_chunk < len) {
             auto d = m_chunk_size - offset_in_chunk;
-            
+
             // update reserved size
             m_reserved_sz.fetch_sub(d, std::memory_order_relaxed);
 
             // update totoal write size;
             m_write_sz_in_total.fetch_add(d, std::memory_order_relaxed);
-            
+
             if (!handle_chunk_alignment(dev_id, chunk_id, offset_in_chunk, req)) {
                 HS_ASSERT(DEBUG, 0, "handle_chunk_alignment return failure. ")
                 return false;
             }
-            
+
             // move logical offset ahead to skip boundary;
             auto new_offset = offset + d;
-        
+
             // get the new dev offset;
             offset_in_dev = logical_to_dev_offset(new_offset, dev_id, chunk_id, offset_in_chunk);
 
@@ -610,12 +601,10 @@ public:
             auto pdev = m_primary_pdev_chunks_list[dev_id].pdev;
 
             HS_LOG(INFO, device, "Writing in device: {}, offset = {}", dev_id, offset_in_dev);
-            
+
             do_write_internal(pdev, chunk, iov, iovcnt, len, offset_in_dev, req);
-            
-        } catch (const std::exception& e) {
-            HS_ASSERT(DEBUG, 0, "{}", e.what());
-        }
+
+        } catch (const std::exception& e) { HS_ASSERT(DEBUG, 0, "{}", e.what()); }
 
         return true;
     }
@@ -681,37 +670,38 @@ public:
         return true;
     }
 #endif
-    // 
+    //
     // convert from logical offset to device offset
     // it handles device overloop, e.g. reach to end of the device then start from the beginning device
     //
-    uint64_t logical_to_dev_offset(const uint64_t log_offset, uint32_t& dev_id, uint32_t& chunk_id, uint64_t& offset_in_chunk) {
+    uint64_t logical_to_dev_offset(const uint64_t log_offset, uint32_t& dev_id, uint32_t& chunk_id,
+                                   uint64_t& offset_in_chunk) {
         dev_id = 0;
         chunk_id = 0;
         offset_in_chunk = 0;
-        
+
         uint64_t off_l = log_offset;
         for (size_t d = 0; d < m_primary_pdev_chunks_list.size(); d++) {
             for (size_t c = 0; c < m_primary_pdev_chunks_list[d].chunks_in_pdev.size(); c++) {
                 if (off_l >= m_chunk_size) {
                     off_l -= m_chunk_size;
                 } else {
-                    dev_id = d; 
+                    dev_id = d;
                     chunk_id = c;
                     offset_in_chunk = off_l;
-            
+
                     return get_offset_in_dev(dev_id, chunk_id, offset_in_chunk);
                 }
             }
         }
-        
-        HS_ASSERT(DEBUG, false, "Input log_offset is invalid: {}, should be between 0 ~ {}", log_offset, m_chunk_size * m_num_chunks);
+
+        HS_ASSERT(DEBUG, false, "Input log_offset is invalid: {}, should be between 0 ~ {}", log_offset,
+                  m_chunk_size * m_num_chunks);
         return 0;
     }
-    
+
     void truncate(const uint64_t offset) {
         // to be implemented
-        
     }
 
     void readv(const uint64_t offset, struct iovec* iov, int iovcnt) {
@@ -742,16 +732,16 @@ public:
 
     bool is_blk_alloced(BlkId& in_blkid) {
         PhysicalDevChunk* primary_chunk;
-        uint64_t          primary_dev_offset = to_dev_offset(in_blkid, &primary_chunk);
-        auto              blkid = to_chunk_specific_id(in_blkid, &primary_chunk);
+        uint64_t primary_dev_offset = to_dev_offset(in_blkid, &primary_chunk);
+        auto blkid = to_chunk_specific_id(in_blkid, &primary_chunk);
         return (primary_chunk->get_blk_allocator()->is_blk_alloced(blkid));
     }
 
     BlkAllocStatus alloc_blk(BlkId& in_blkid) {
         PhysicalDevChunk* primary_chunk;
-        uint64_t          primary_dev_offset = to_dev_offset(in_blkid, &primary_chunk);
-        auto              blkid = to_chunk_specific_id(in_blkid, &primary_chunk);
-        auto              size = m_used_size.fetch_add(in_blkid.data_size(m_pagesz), std::memory_order_relaxed);
+        uint64_t primary_dev_offset = to_dev_offset(in_blkid, &primary_chunk);
+        auto blkid = to_chunk_specific_id(in_blkid, &primary_chunk);
+        auto size = m_used_size.fetch_add(in_blkid.data_size(m_pagesz), std::memory_order_relaxed);
         HS_ASSERT_CMP(DEBUG, size, <=, get_size());
         return (primary_chunk->get_blk_allocator()->alloc(blkid));
     }
@@ -777,8 +767,8 @@ public:
 
     BlkAllocStatus alloc_blk(uint8_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) {
         try {
-            uint32_t       dev_ind{0};
-            uint32_t       chunk_num, start_chunk_num;
+            uint32_t dev_ind{0};
+            uint32_t chunk_num, start_chunk_num;
             BlkAllocStatus status = BLK_ALLOC_FAILED;
 
             // First select a device to allocate from
@@ -793,7 +783,7 @@ public:
             // Pick a physical chunk based on physDevId.
             // TODO: Right now there is only one primary chunk per device in a virtualdev. Need to support multiple
             // chunks. In that case just using physDevId as chunk number is not right strategy.
-            uint32_t          start_dev_ind = dev_ind;
+            uint32_t start_dev_ind = dev_ind;
             PhysicalDevChunk* picked_chunk = nullptr;
 
             do {
@@ -813,12 +803,8 @@ public:
                     }
                 }
 
-                if (status == BLK_ALLOC_SUCCESS) {
-                    break;
-                }
-                if (!hints.can_look_for_other_dev) {
-                    break;
-                }
+                if (status == BLK_ALLOC_SUCCESS) { break; }
+                if (!hints.can_look_for_other_dev) { break; }
                 dev_ind = (uint32_t)((dev_ind + 1) % m_primary_pdev_chunks_list.size());
             } while (dev_ind != start_dev_ind);
 
@@ -833,9 +819,7 @@ public:
                 HS_ASSERT_CMP(DEBUG, size, <=, get_size());
             }
             return status;
-        } catch (const std::exception& e) {
-            return BLK_ALLOC_FAILED;
-        }
+        } catch (const std::exception& e) { return BLK_ALLOC_FAILED; }
     }
 
     void free_blk(const BlkId& b) {
@@ -850,10 +834,10 @@ public:
 
     void write(const BlkId& bid, const homeds::MemVector& buf, boost::intrusive_ptr< virtualdev_req > req,
                uint32_t data_offset = 0) {
-        BlkOpStatus  ret_status = BLK_OP_SUCCESS;
-        uint32_t     size = bid.get_nblks() * get_page_size();
+        BlkOpStatus ret_status = BLK_OP_SUCCESS;
+        uint32_t size = bid.get_nblks() * get_page_size();
         struct iovec iov[BlkId::max_blks_in_op()];
-        int          iovcnt = 0;
+        int iovcnt = 0;
 
         uint32_t p = 0;
         uint32_t end_offset = data_offset + bid.data_size(m_pagesz);
@@ -905,24 +889,21 @@ public:
                 HISTOGRAM_OBSERVE(pdev->get_metrics(), drive_write_latency, get_elapsed_time_us(start_time));
             }
         }
-
     }
 
     void read_nmirror(const BlkId& bid, std::vector< boost::intrusive_ptr< homeds::MemVector > > mp, uint64_t size,
                       uint32_t nmirror) {
         HS_ASSERT_CMP(DEBUG, nmirror, <=, get_nmirrors());
-        uint32_t          cnt = 0;
+        uint32_t cnt = 0;
         PhysicalDevChunk* primary_chunk;
-        uint64_t          primary_dev_offset = to_dev_offset(bid, &primary_chunk);
-        uint64_t          primary_chunk_offset = primary_dev_offset - primary_chunk->get_start_offset();
+        uint64_t primary_dev_offset = to_dev_offset(bid, &primary_chunk);
+        uint64_t primary_chunk_offset = primary_dev_offset - primary_chunk->get_start_offset();
 
         homeds::blob b;
         mp[cnt]->get(&b, 0);
         HS_ASSERT_CMP(DEBUG, b.size, ==, bid.data_size(m_pagesz));
         primary_chunk->get_physical_dev_mutable()->sync_read((char*)b.bytes, b.size, primary_dev_offset);
-        if (cnt == nmirror) {
-            return;
-        }
+        if (cnt == nmirror) { return; }
         ++cnt;
         for (auto mchunk : m_mirror_chunks.find(primary_chunk)->second) {
             uint64_t dev_offset = mchunk->get_start_offset() + primary_chunk_offset;
@@ -931,13 +912,12 @@ public:
             HS_ASSERT_CMP(DEBUG, b.size, ==, bid.data_size(m_pagesz));
             mchunk->get_physical_dev_mutable()->sync_read((char*)b.bytes, b.size, dev_offset);
 
-            if (cnt == nmirror) {
-                break;
-            }
+            if (cnt == nmirror) { break; }
         }
     }
-    
-    void do_readv_internal(PhysicalDev* pdev, PhysicalDevChunk* pchunk, const uint64_t dev_offset, struct iovec* iov, int iovcnt, uint64_t size, boost::intrusive_ptr< virtualdev_req > req) {
+
+    void do_readv_internal(PhysicalDev* pdev, PhysicalDevChunk* pchunk, const uint64_t dev_offset, struct iovec* iov,
+                           int iovcnt, uint64_t size, boost::intrusive_ptr< virtualdev_req > req) {
         COUNTER_INCREMENT(pdev->get_metrics(), drive_read_vector_count, iovcnt);
 
         if (!req || req->isSyncCall) {
@@ -957,7 +937,7 @@ public:
             pdev->readv(iov, iovcnt, size, dev_offset, (uint8_t*)req.get());
         }
 
-        if (hs_unlikely(get_nmirrors())) {
+        if (sisl_unlikely(get_nmirrors())) {
             // If failed and we have mirrors, we can read from any one of the mirrors as well
             uint64_t primary_chunk_offset = dev_offset - pchunk->get_start_offset();
             for (auto mchunk : m_mirror_chunks.find(pchunk)->second) {
@@ -968,12 +948,13 @@ public:
         }
     }
 
-    void do_read_internal(PhysicalDev* pdev, PhysicalDevChunk* pchunk, const uint64_t dev_offset, char* ptr, const uint64_t size, boost::intrusive_ptr< virtualdev_req > req) {
+    void do_read_internal(PhysicalDev* pdev, PhysicalDevChunk* pchunk, const uint64_t dev_offset, char* ptr,
+                          const uint64_t size, boost::intrusive_ptr< virtualdev_req > req) {
         COUNTER_INCREMENT(pdev->get_metrics(), drive_read_vector_count, 1);
 
         if (!req || req->isSyncCall) {
             // if req is null (sync), or it is a sync call;
-            auto start = Clock::now(); 
+            auto start = Clock::now();
             COUNTER_INCREMENT(pdev->get_metrics(), drive_sync_read_count, 1);
             pdev->sync_read(ptr, size, dev_offset);
             HISTOGRAM_OBSERVE(pdev->get_metrics(), drive_read_latency, get_elapsed_time_us(start));
@@ -990,12 +971,12 @@ public:
             pdev->read(ptr, size, dev_offset, (uint8_t*)req.get());
         }
 
-        if (hs_unlikely(get_nmirrors())) {
+        if (sisl_unlikely(get_nmirrors())) {
             // If failed and we have mirrors, we can read from any one of the mirrors as well
             uint64_t primary_chunk_offset = dev_offset - pchunk->get_start_offset();
             for (auto mchunk : m_mirror_chunks.find(pchunk)->second) {
                 uint64_t dev_offset_m = mchunk->get_start_offset() + primary_chunk_offset;
-                auto     pdev = mchunk->get_physical_dev_mutable();
+                auto pdev = mchunk->get_physical_dev_mutable();
 
                 HS_ASSERT(DEBUG, ((req == nullptr) || req->isSyncCall), "Expecting null req or sync call");
 
@@ -1017,14 +998,15 @@ public:
 
         uint64_t primary_dev_offset = to_dev_offset(bid, &primary_chunk);
 
-        do_read_internal(primary_chunk->get_physical_dev_mutable(), primary_chunk, primary_dev_offset, (char*)mp.ptr(), mp.size(), req);
+        do_read_internal(primary_chunk->get_physical_dev_mutable(), primary_chunk, primary_dev_offset, (char*)mp.ptr(),
+                         mp.size(), req);
     }
 
     void readv(const BlkId& bid, const homeds::MemVector& buf, boost::intrusive_ptr< virtualdev_req > req) {
         // Convert the input memory to iovector
         struct iovec iov[BlkId::max_blks_in_op()];
-        int          iovcnt = 0;
-        uint32_t     size = buf.size();
+        int iovcnt = 0;
+        uint32_t size = buf.size();
 
         HS_ASSERT_CMP(DEBUG, buf.size(), ==,
                       bid.get_nblks() * get_page_size()); // Expected to be less than allocated blk originally.
@@ -1038,14 +1020,14 @@ public:
         }
 
         PhysicalDevChunk* primary_chunk;
-        uint64_t          primary_dev_offset = to_dev_offset(bid, &primary_chunk);
+        uint64_t primary_dev_offset = to_dev_offset(bid, &primary_chunk);
 
         auto pdev = primary_chunk->get_physical_dev_mutable();
 
         do_readv_internal(pdev, primary_chunk, primary_dev_offset, iov, iovcnt, size, req);
     }
 
-    void     update_vb_context(uint8_t* blob) { m_mgr->update_vb_context(m_vb->vdev_id, blob); }
+    void update_vb_context(uint8_t* blob) { m_mgr->update_vb_context(m_vb->vdev_id, blob); }
     uint64_t get_size() const { return m_vb->size; }
 
     uint64_t get_used_size() const { return m_used_size.load(); }
@@ -1075,9 +1057,7 @@ public:
     uint64_t get_chunk_size() const { return m_chunk_size; }
 
 private:
-    uint64_t get_size() {
-        return m_num_chunks * m_chunk_size; 
-    }
+    uint64_t get_size() { return m_num_chunks * m_chunk_size; }
 
     /* Adds a primary chunk to the chunk list in pdev */
     void add_primary_chunk(PhysicalDevChunk* chunk) {
@@ -1109,8 +1089,7 @@ private:
             m_selector->add_pdev(pcm.pdev);
         }
         HS_ASSERT_CMP(DEBUG, m_chunk_size, <=, MAX_CHUNK_SIZE);
-        std::shared_ptr< BlkAllocator > ba = create_allocator(m_chunk_size, chunk->get_chunk_id(), 
-                                                                m_recovery_init);
+        std::shared_ptr< BlkAllocator > ba = create_allocator(m_chunk_size, chunk->get_chunk_id(), m_recovery_init);
         chunk->set_blk_allocator(ba);
 
         /* set the same blk allocator to other mirror chunks */
@@ -1158,7 +1137,7 @@ private:
     }
 
     PhysicalDevChunk* create_dev_chunk(uint32_t pdev_ind, std::shared_ptr< BlkAllocator > ba, uint32_t primary_id) {
-        auto              pdev = m_primary_pdev_chunks_list[pdev_ind].pdev;
+        auto pdev = m_primary_pdev_chunks_list[pdev_ind].pdev;
         PhysicalDevChunk* chunk = m_mgr->alloc_chunk(pdev, m_vb->vdev_id, m_chunk_size, primary_id);
         HS_LOG(DEBUG, device, "Allocating new chunk for vdev_id = {} pdev_id = {} chunk: {}", m_vb->get_vdev_id(),
                pdev->get_dev_id(), chunk->to_string());

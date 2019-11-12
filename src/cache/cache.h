@@ -10,11 +10,12 @@
 #include "homeds/hash/intrusive_hashset.hpp"
 #include "lru_eviction.hpp"
 #include <boost/intrusive_ptr.hpp>
-#include "homeds/memory/obj_allocator.hpp"
+#include <fds/obj_allocator.hpp>
 #include "main/homestore_config.hpp"
 #include <execinfo.h>
 #include <utility/obj_life_counter.hpp>
 #include <metrics/metrics.hpp>
+#include <fds/utils.hpp>
 
 namespace homestore {
 
@@ -34,7 +35,7 @@ public:
     CurrentEvictor::EvictRecordType& get_evict_record_mutable() { return m_evict_record; }
 
     static CacheRecord* evict_to_cache_record(const CurrentEvictor::EvictRecordType* p_erec) {
-        return (p_erec ? homeds::container_of(p_erec, &CacheRecord::m_evict_record) : nullptr);
+        return (p_erec ? container_of(p_erec, &CacheRecord::m_evict_record) : nullptr);
     }
 };
 
@@ -53,7 +54,8 @@ public:
         REGISTER_COUNTER(cache_insert_count, "Total number of inserts to cache", "cache_op_count", {"op", "insert"});
         REGISTER_COUNTER(cache_read_count, "Total number of reads to cache", "cache_op_count", {"op", "read"});
         REGISTER_COUNTER(cache_erase_count, "Total number of erases from cache", "cache_op_count", {"op", "erase"});
-        REGISTER_COUNTER(cache_update_count, "Total number of updates to a cache entry", "cache_op_count", {"op", "update"});
+        REGISTER_COUNTER(cache_update_count, "Total number of updates to a cache entry", "cache_op_count",
+                         {"op", "update"});
         REGISTER_COUNTER(cache_object_count, "Total number of cache entries", sisl::_publish_as::publish_as_gauge);
         REGISTER_COUNTER(cache_size, "Total size of cache", sisl::_publish_as::publish_as_gauge);
         REGISTER_COUNTER(cache_add_error_count, "Num cache entries unable to insert");
@@ -96,8 +98,8 @@ public:
 
 protected:
     std::unique_ptr< CurrentEvictor > m_evictors[EVICTOR_PARTITIONS];
-    homeds::IntrusiveHashSet< K, V >  m_hash_set;
-    CacheMetrics                      m_metrics;
+    homeds::IntrusiveHashSet< K, V > m_hash_set;
+    CacheMetrics m_metrics;
 };
 
 template < typename K >
@@ -113,7 +115,7 @@ public:
     /* Put the raw buffer into the cache with key k. It returns whether put is successful and if so provides
      * the smart pointer of CacheBuffer. Upsert flag of false indicates if the data already exists, do not insert */
     bool insert(const K& k, const homeds::blob& b, uint32_t value_offset,
-                boost::intrusive_ptr< CacheBuffer< K > >*       out_smart_buf,
+                boost::intrusive_ptr< CacheBuffer< K > >* out_smart_buf,
                 const std::function< void(CacheBuffer< K >*) >& found_cb = nullptr);
     bool insert(const K& k, const boost::intrusive_ptr< CacheBuffer< K > > in_buf,
                 boost::intrusive_ptr< CacheBuffer< K > >* out_smart_buf);
@@ -152,20 +154,20 @@ public:
 #ifndef NDEBUG
     bool recovered;
 #endif
-    K                                         m_key;         // Key to access this cache
-    boost::intrusive_ptr< homeds::MemVector > m_mem;         // Memory address which is what this buffer contained with
-    sisl::atomic_counter< uint32_t >          m_refcount;    // Refcount
-    uint32_t                                  m_data_offset; // offset in m_mem that it points to
-    std::atomic< uint32_t >                   m_cache_size;  // size inserted in a cache
-    std::atomic< bool >                       m_can_free;
-    Cache< K >*                               m_cache;
-    erase_comp_cb                             m_cb;
+    K m_key;                                         // Key to access this cache
+    boost::intrusive_ptr< homeds::MemVector > m_mem; // Memory address which is what this buffer contained with
+    sisl::atomic_counter< uint32_t > m_refcount;     // Refcount
+    uint32_t m_data_offset;                          // offset in m_mem that it points to
+    std::atomic< uint32_t > m_cache_size;            // size inserted in a cache
+    std::atomic< bool > m_can_free;
+    Cache< K >* m_cache;
+    erase_comp_cb m_cb;
 
     /* this mutex prevent erase and insert to happen in parallel. It is taken in two cases
      *  1. Whenever something changes in eviction :- upvode, downvote, erase and size.
      *  2. Whenever cache state is changed.
      */
-    std::mutex      m_mtx;
+    std::mutex m_mtx;
     cache_buf_state m_state;
 
 #ifndef NDEBUG
@@ -233,9 +235,7 @@ public:
     virtual ~CacheBuffer() {
 #ifndef NDEBUG
         for (int i = 0; i < MAX_ENTRIES; i++) {
-            if (arr_symbols[i] != NULL) {
-                free(arr_symbols[i]);
-            }
+            if (arr_symbols[i] != NULL) { free(arr_symbols[i]); }
         }
 #endif
     };
@@ -261,7 +261,7 @@ public:
     uint32_t get_data_offset() const { return m_data_offset; }
 
     bool update_missing_piece(uint32_t offset, uint32_t size, uint8_t* ptr) {
-        bool inserted = get_memvec().update_missing_piece(m_data_offset + offset, size, ptr, [this] () {init();});
+        bool inserted = get_memvec().update_missing_piece(m_data_offset + offset, size, ptr, [this]() { init(); });
         return inserted;
     }
 
@@ -313,7 +313,7 @@ public:
 
     friend void intrusive_ptr_add_ref(CacheBuffer< K >* buf) {
 #ifndef NDEBUG
-        int  x = buf->m_indx.increment() % MAX_ENTRIES;
+        int x = buf->m_indx.increment() % MAX_ENTRIES;
         auto size = backtrace((void**)(buf->arr_symbols[x]), 10);
 #endif
         buf->m_refcount.increment();
@@ -321,9 +321,9 @@ public:
 
     friend void intrusive_ptr_release(CacheBuffer< K >* buf) {
         const K k = *(extract_key(*buf));
-        auto    cache = buf->m_cache;
-        bool    can_free = buf->can_free();
-        int     cnt = buf->m_refcount.decrement();
+        auto cache = buf->m_cache;
+        bool can_free = buf->can_free();
+        int cnt = buf->m_refcount.decrement();
         /* can not access the buffer after ref_Cnt is
          * decremented.
          */
@@ -339,12 +339,12 @@ public:
         }
     }
 
-    virtual void init() {};
+    virtual void init(){};
 
     void set_free_state() { m_can_free = true; }
 
-    void        reset_free_state() { m_can_free = false; }
-    bool        can_free() { return (m_can_free); }
+    void reset_free_state() { m_can_free = false; }
+    bool can_free() { return (m_can_free); }
     std::string to_string() const {
         std::stringstream ss;
         ss << "Cache Key = " << m_key.to_string() << " Cache Mem = " << m_mem->to_string()
@@ -352,8 +352,8 @@ public:
         return ss.str();
     }
 
-    virtual void free_yourself() { homeds::ObjectAllocator< CacheBufferType >::deallocate(this); }
-    //virtual size_t get_your_size() const { return sizeof(CacheBuffer< K >); }
+    virtual void free_yourself() { sisl::ObjectAllocator< CacheBufferType >::deallocate(this); }
+    // virtual size_t get_your_size() const { return sizeof(CacheBuffer< K >); }
 
     //////////// Mandatory IntrusiveHashSet definitions ////////////////
     static void ref(CacheBuffer< K >& b) { intrusive_ptr_add_ref(&b); }
