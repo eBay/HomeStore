@@ -448,6 +448,16 @@ public:
         return ret;
     }
 
+    ssize_t preadv(const struct iovec *iov, int iovcnt, off_t offset) {
+        ssize_t ret = 0;
+        return ret;
+    }
+
+    ssize_t pwritev(const struct iovec *iov, int iovcnt, off_t offset, boost::intrusive_ptr< virtualdev_req > req) {
+        ssize_t ret = 0;
+        return ret;
+    }
+
     // end of vdev interface stubs
 
     // 
