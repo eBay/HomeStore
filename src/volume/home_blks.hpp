@@ -31,7 +31,7 @@ enum blkstore_type {
     DATA_STORE = 1,
     METADATA_STORE = 2,
     SB_STORE = 3,
-    LOG_DB_STORE = 4,
+    LOGDEV_STORE = 4,
 };
 
 struct blkstore_blob {

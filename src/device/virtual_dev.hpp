@@ -350,6 +350,44 @@ public:
         (chunk->get_primary_chunk()) ? add_mirror_chunk(chunk) : add_primary_chunk(chunk);
     }
 
+    // start of vdev interface stubs 
+    off_t alloc_blk(size_t size, bool chunk_overlap_ok = false) {
+        off_t ret = 0;
+        return ret;
+    }
+    
+    ssize_t pwrite(const void* buf, size_t count, off_t offset) {
+        ssize_t  ret = 0;
+        return ret;
+    }
+
+    ssize_t pread(void* buf, size_t count, off_t offset) {
+        ssize_t ret = 0;
+        return ret;
+    }
+
+    off_t lseek(off_t offset, int where = SEEK_SET) {
+        off_t ret = 0;
+        return ret;
+    }
+    
+    off_t seeked_pos() const {
+        off_t ret = 0;
+        return ret;
+    }
+
+    ssize_t read(void* buf, size_t count) {
+        ssize_t ret = 0;
+        return ret;
+    }
+    
+    ssize_t write(const void* buf, size_t count) {
+        ssize_t ret = 0;
+        return ret;
+    }
+
+    // end of vdev interface stubs
+
     // 
     // convert unique offset;
     //
@@ -722,6 +760,10 @@ public:
     // return:
     //     on error, -1 is returned;
     //     on success, num of bytes read;
+    //
+    // TODO:
+    // 1. Do we make two read if the offset/len across two chunks?
+    // 2. Or just read remaining parts of the chunk and return the bytes read in this chunk;
     //
     ssize_t readv(const uint64_t offset, struct iovec* iov, int iovcnt) {
         uint32_t dev_id = 0, chunk_id = 0;
