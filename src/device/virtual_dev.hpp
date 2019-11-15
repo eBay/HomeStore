@@ -428,7 +428,7 @@ public:
         return ret;
     }
 
-    off_t lseek(off_t offset, int where = SEEK_SET) {
+    off_t lseek(off_t offset, int whence = SEEK_SET) {
         off_t ret = 0;
         return ret;
     }
