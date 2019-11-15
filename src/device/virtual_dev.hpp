@@ -351,66 +351,8 @@ public:
     }
 
     // start of vdev interface stubs 
-    off_t alloc_blk(size_t size, bool chunk_overlap_ok = false) {
-        off_t ret = 0;
-        return ret;
-    }
-    
-    ssize_t pwrite(const void* buf, size_t count, off_t offset) {
-        ssize_t  ret = 0;
-        return ret;
-    }
-
-    ssize_t pread(void* buf, size_t count, off_t offset) {
-        ssize_t ret = 0;
-        return ret;
-    }
-
-    off_t lseek(off_t offset, int where = SEEK_SET) {
-        off_t ret = 0;
-        return ret;
-    }
-    
-    off_t seeked_pos() const {
-        off_t ret = 0;
-        return ret;
-    }
-
-    ssize_t read(void* buf, size_t count) {
-        ssize_t ret = 0;
-        return ret;
-    }
-    
-    ssize_t write(const void* buf, size_t count) {
-        ssize_t ret = 0;
-        return ret;
-    }
-
-    // end of vdev interface stubs
-
-    // 
-    // convert unique offset;
-    //
-    uint64_t to_glob_uniq_offset(uint32_t dev_id, uint32_t chunk_id, uint64_t offset_in_chunk) { 
-        return m_primary_pdev_chunks_list[dev_id].pdev->get_dev_offset() + get_chunk_start_offset(dev_id, chunk_id) + offset_in_chunk;
-    }
-    
-    uint64_t get_offset_in_dev(uint32_t dev_id, uint32_t chunk_id, uint64_t offset_in_chunk) { 
-        return get_chunk_start_offset(dev_id, chunk_id) + offset_in_chunk;
-    }
-
-    uint64_t get_chunk_start_offset(uint32_t dev_id, uint32_t chunk_id) {
-        return m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id]->get_start_offset();
-    }
-
-    uint64_t get_len(const struct iovec* iov, const int iovcnt) {
-        uint64_t len = 0;
-        for (int i = 0; i < iovcnt; i++) {
-            len += iov[i].iov_len;
-        }
-        return len;
-    }
-
+ 
+  
     // 
     // reserve size for next append_write
     // assumptions: will be called only in single threaded
@@ -461,6 +403,76 @@ public:
 
         return offset;
     }
+    
+    // 
+    // @brief
+    //
+    // @param size : 
+    // @param chunk_overlap_ok :
+    //
+    // @return 
+    //
+    off_t alloc_blk(size_t size, bool chunk_overlap_ok = false) {
+        HS_ASSERT_CMP(DEBUG, chunk_overlap_ok, ==, false);
+        off_t ret = 0;
+        return ret;
+    }
+    
+    ssize_t pwrite(const void* buf, size_t count, off_t offset, boost::intrusive_ptr< virtualdev_req > req) {
+        ssize_t  ret = 0;
+        return ret;
+    }
+
+    ssize_t pread(void* buf, size_t count, off_t offset) {
+        ssize_t ret = 0;
+        return ret;
+    }
+
+    off_t lseek(off_t offset, int where = SEEK_SET) {
+        off_t ret = 0;
+        return ret;
+    }
+    
+    off_t seeked_pos() const {
+        off_t ret = 0;
+        return ret;
+    }
+
+    ssize_t read(void* buf, size_t count) {
+        ssize_t ret = 0;
+        return ret;
+    }
+    
+    ssize_t write(const void* buf, size_t count, boost::intrusive_ptr< virtualdev_req > req) {
+        ssize_t ret = 0;
+        return ret;
+    }
+
+    // end of vdev interface stubs
+
+    // 
+    // convert unique offset;
+    //
+    uint64_t to_glob_uniq_offset(uint32_t dev_id, uint32_t chunk_id, uint64_t offset_in_chunk) { 
+        return m_primary_pdev_chunks_list[dev_id].pdev->get_dev_offset() + get_chunk_start_offset(dev_id, chunk_id) + offset_in_chunk;
+    }
+    
+    uint64_t get_offset_in_dev(uint32_t dev_id, uint32_t chunk_id, uint64_t offset_in_chunk) { 
+        return get_chunk_start_offset(dev_id, chunk_id) + offset_in_chunk;
+    }
+
+    uint64_t get_chunk_start_offset(uint32_t dev_id, uint32_t chunk_id) {
+        return m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id]->get_start_offset();
+    }
+
+    uint64_t get_len(const struct iovec* iov, const int iovcnt) {
+        uint64_t len = 0;
+        for (int i = 0; i < iovcnt; i++) {
+            len += iov[i].iov_len;
+        }
+        return len;
+    }
+
 
 #if 0
     // 
