@@ -12,36 +12,17 @@ namespace homestore {
 
 typedef int64_t logid_t;
 
-const uint32_t init_crc32 = 0x12345678;
+typedef uint32_t crc32_t;
 
-const uint32_t LOGDEV_BLKSIZE = 512; // device write iov_len minum size is 512 bytes;
-
-static constexpr uint32_t INVALID_CRC32_VALUE = 0x0u;
+static constexpr crc32_t init_crc32 = 0x12345678;
+static constexpr crc32_t INVALID_CRC32_VALUE = 0x0u;
 static constexpr uint32_t LOG_GROUP_HDR_MAGIC = 0xDABAF00D;
 static constexpr uint32_t dma_boundary = 512; // Mininum size the dma/writes to be aligned with
 static constexpr uint32_t initial_read_size = 4096;
 static constexpr uint32_t bulk_read_size = 512 * 1024;
 
-#if 0
-//
-//  LogDev Layout:
-//
-// First Record               Last Record
-//  |                             |
-//  |                             |
-//  ------------------------------------------
-//  |H| data |F|H| data |F|  ...  |H| data |F| ...
-//  ------------------------------------------
-//  |<-- 1 --> | <-- 2 -->|  ...  |<-- N --> |
-//
-struct LogDevRecordHeader_t {
-    uint8_t m_version;
-    uint32_t m_magic;
-    uint32_t m_crc;      // crc of this record;
-    uint32_t m_prev_crc; // crc of this record;
-    uint32_t m_len;      // len of data for this record;
-};
-#endif
+// Extra blks read during recovery to validate if indeed there is no corruption.
+static constexpr uint32_t max_blks_read_for_additional_check = 20;
 
 // clang-format off
 /*
@@ -82,16 +63,6 @@ struct log_record {
         context = ctx;
     }
 
-#if 0
-    serialized_log_record* create_serialized(serialized_log_record* sr, int64_t log_idx) const {
-        sr->log_idx = log_idx;
-        sr->size = size;
-        sr->is_inlined = is_inlinebale();
-        if (is_inlinebale()) { memcpy(sr->data, data_ptr, size); }
-        return sr;
-    }
-#endif
-
     size_t inlined_size() const { return sizeof(serialized_log_record) + (is_inlinebale() ? size : 0); }
     size_t serialized_size() const { return sizeof(serialized_log_record) + size; }
     bool is_inlinebale() const { return (size < inline_size); }
@@ -107,8 +78,8 @@ struct log_group_header {
     uint32_t group_size;         // Total size of this group including this header
     uint32_t inline_data_offset; // Offset of inlined area of data
     uint32_t oob_data_offset;    // Offset of where the data which are not inlined starts
-    uint32_t prev_grp_crc;       // Checksum of the previous group that was written
-    uint32_t cur_grp_crc;        // Checksum of the current group record
+    crc32_t prev_grp_crc;        // Checksum of the previous group that was written
+    crc32_t cur_grp_crc;         // Checksum of the current group record
 
     uint32_t inline_data_size() const {
         return oob_data_offset ? (oob_data_offset - inline_data_offset) : (group_size - inline_data_offset);
@@ -138,7 +109,7 @@ struct log_group_header {
     logid_t start_idx() const { return start_log_idx; }
     uint32_t nrecords() const { return n_log_records; }
     uint32_t total_size() const { return group_size; }
-    uint32_t this_group_crc() const { return cur_grp_crc; }
+    crc32_t this_group_crc() const { return cur_grp_crc; }
     uint32_t _inline_data_offset() const { return inline_data_offset; }
 
     friend std::ostream& operator<<(std::ostream& os, const log_group_header& h) {
@@ -179,7 +150,7 @@ public:
     bool can_accomodate(const log_record& record) const { return (m_nrecords <= m_max_records); }
 
     const iovec_array& finish();
-    uint32_t compute_crc();
+    crc32_t compute_crc();
 
     log_group_header* header() const { return (log_group_header*)m_cur_log_buf; }
     iovec_array& iovecs() { return m_iovecs; }
@@ -226,15 +197,6 @@ private:
     int64_t m_flush_log_idx_upto;
     uint64_t m_log_dev_offset;
 };
-
-#if 0
-typedef union {
-    struct LogDevRecordHeader_t h;
-    unsigned char               padding[LOGDEV_BLKSIZE];
-} LogDevRecordHeader;
-
-static_assert(sizeof(LogDevRecordHeader) == LOGDEV_BLKSIZE, "LogDevRecordHeader must be LOGDEV_SIZE bytes");
-#endif
 
 /************************************* LogDev Request to BlkStore Section ************************************/
 struct logdev_req;
@@ -392,7 +354,7 @@ public:
     // Group Commit
 #endif
 
-    uint32_t get_prev_crc() const { return m_last_crc; }
+    crc32_t get_prev_crc() const { return m_last_crc; }
 
 private:
 #if 0
@@ -429,7 +391,7 @@ private:
     logid_t m_last_flush_idx = -1; // Track last flushed and truncated log idx
     logid_t m_last_truncate_idx = -1;
 
-    uint32_t m_last_crc = INVALID_CRC32_VALUE;
+    crc32_t m_last_crc = INVALID_CRC32_VALUE;
     log_append_comp_callback m_append_comp_cb = nullptr;
     log_found_callback m_logfound_cb = nullptr;
 

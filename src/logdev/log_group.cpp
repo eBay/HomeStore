@@ -89,9 +89,9 @@ const iovec_array& LogGroup::finish() {
     return m_iovecs;
 }
 
-uint32_t LogGroup::compute_crc() {
-    uint32_t crc = crc32_ieee(init_crc32, (unsigned char*)(m_iovecs[0].iov_base) + sizeof(log_group_header),
-                              m_iovecs[0].iov_len - sizeof(log_group_header));
+crc32_t LogGroup::compute_crc() {
+    crc32_t crc = crc32_ieee(init_crc32, (unsigned char*)(m_iovecs[0].iov_base) + sizeof(log_group_header),
+                             m_iovecs[0].iov_len - sizeof(log_group_header));
     for (auto i = 1u; i < m_iovecs.size(); ++i) {
         crc = crc32_ieee(crc, (unsigned char*)(m_iovecs[i].iov_base), m_iovecs[i].iov_len);
     }

@@ -74,8 +74,8 @@ public:
     int open_dev(std::string devname, int oflags);
     void sync_write(int m_sync_fd, const char* data, uint32_t size, uint64_t offset);
     void sync_writev(int m_sync_fd, const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset);
-    void sync_read(int m_sync_fd, char* data, uint32_t size, uint64_t offset);
-    void sync_readv(int m_sync_fd, const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset);
+    ssize_t sync_read(int m_sync_fd, char* data, uint32_t size, uint64_t offset);
+    ssize_t sync_readv(int m_sync_fd, const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset);
     void async_write(int m_sync_fd, const char* data, uint32_t size, uint64_t offset, uint8_t* cookie);
     void async_writev(int m_sync_fd, const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset,
                       uint8_t* cookie);

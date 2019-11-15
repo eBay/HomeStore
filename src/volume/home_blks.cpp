@@ -540,7 +540,7 @@ void HomeBlks::new_vdev_found(DeviceManager* dev_mgr, vdev_info_block* vb) {
     case DATA_STORE: HomeBlks::instance()->create_data_blkstore(vb); break;
     case METADATA_STORE: HomeBlks::instance()->create_metadata_blkstore(vb); break;
     case SB_STORE: HomeBlks::instance()->create_sb_blkstore(vb); break;
-    case LOG_DB_STORE: HomeBlks::instance()->create_logdev_blkstore(vb); break;
+    case LOGDEV_STORE: HomeBlks::instance()->create_logdev_blkstore(vb); break;
     default: assert(0);
     }
 }
@@ -703,6 +703,7 @@ void HomeBlks::scan_volumes() {
             m_data_blk_store->reset_vdev_failed_state();
             m_metadata_blk_store->reset_vdev_failed_state();
             m_sb_blk_store->reset_vdev_failed_state();
+            m_logdev_blk_store->reset_vdev_failed_state();
             m_vdev_failed = false;
         }
     } catch (const std::exception& e) {
@@ -742,7 +743,7 @@ void HomeBlks::init_done(std::error_condition err, const out_params& params) {
 void HomeBlks::create_logdev_blkstore(vdev_info_block* vb) {
     if (vb == nullptr) {
         struct blkstore_blob blob;
-        blob.type = blkstore_type::LOG_DB_STORE;
+        blob.type = blkstore_type::LOGDEV_STORE;
         uint64_t size = (1 * m_dev_mgr->get_total_cap()) / 100;
         size = ALIGN_SIZE(size, HomeStoreConfig::phys_page_size);
         m_logdev_blk_store = new BlkStore< VdevVarSizeBlkAllocatorPolicy >(

@@ -11,43 +11,35 @@ void LogDev::do_load(uint64_t device_cursor) {
     auto store = HomeBlks::instance()->get_logdev_blkstore();
     bool read_more = true;
 
+    store->seek(device_cursor);
     while (read_more) {
         // Read the data in bulk (of say 512K) and then process each log group header
         auto buf = std::make_shared< sisl::byte_array >(bulk_read_size, dma_boundary);
         auto rbuf = buf->bytes;
 
-        auto group_dev_offset = device_cursor;
-        store->read(device_cursor, bulk_read_size, (void*)rbuf);
-        auto this_read_remains = bulk_read_size;
-        device_cursor += bulk_read_size;
+        uint64_t log_group_offset;
+        do {
+            log_group_offset = store->seeked_pos();
+            auto this_read_remains = store->read(bulk_read_size, (void*)rbuf);
+            if (this_read_remains != 0) { break };
+
+            // We have come to the end of the device, seek to start and read the remaining
+            store->seek(0);
+        } while (true);
 
         // Loop thru the entire bulk read buffer and process one log group at a time.
         while (this_read_remains > 0) {
-            auto header = (log_group_header*)rbuf;
-            if (header->magic_word() != LOG_GROUP_HDR_MAGIC) {
-                // HS_ASSERT_CMP(RELEASE, m_last_crc, ==, INVALID_CRC32_VALUE, "Invalid magic, and its not first
-                // record!");
-                read_more = false;
+            auto header = read_validate_header(rbuf, this_read_remains, &read_more);
+            if (header == nullptr) {
+                assert(read_more == false);
                 break;
             }
 
-            // We can only do crc match in read if we have read all the blocks. We don't want to aggressively read more
-            // data than we need to just to compare CRC for read operation. It can be done during recovery.
-            if (header->total_size() > this_read_remains) {
-                read_more = true;
-                device_cursor -= (header->total_size() - this_read_remains); // Adjust the cursor back
+            if (read_more) {
+                // We have partial header, need to read more
+                store->seek(log_group_offset);
                 break;
             }
-
-            // TODO: Generalize this by validating multiple things
-            // a) Header magic match
-            // b) This CRC match
-            // c) Previous CRC match
-            // d) If any mismatch, keep reading next N (512) blocks and see if it has data (log_idx > prev_log_idx)
-            uint32_t crc = crc32_ieee(init_crc32, ((uint8_t*)rbuf) + sizeof(log_group_header),
-                                      header->total_size() - sizeof(log_group_header));
-            HS_ASSERT_CMP(RELEASE, header->this_group_crc(), ==, crc, "CRC mismatch on read data");
-            m_last_crc = crc;
 
             // Loop through each record within the log group and do a callback
             auto i = 0u;
@@ -57,12 +49,12 @@ void LogDev::do_load(uint64_t device_cursor) {
 
                 // Do a callback on the found log entry
                 log_buffer b(buf, data_offset, rec->size);
-                m_logfound_cb(log_key{header->start_idx() + i, group_dev_offset}, b);
+                m_logfound_cb(log_key{header->start_idx() + i, log_group_offset}, b);
                 ++i;
             }
 
             m_log_idx = header->start_idx() + i;
-            group_dev_offset += header->total_size();
+            log_group_offset += header->total_size();
             rbuf += header->total_size();
             this_read_remains -= header->total_size();
         }
@@ -97,8 +89,8 @@ log_buffer LogDev::read(const log_key& key) {
     // We can only do crc match in read if we have read all the blocks. We don't want to aggressively read more data
     // than we need to just to compare CRC for read operation. It can be done during recovery.
     if (header->total_size() <= initial_read_size) {
-        uint32_t crc = crc32_ieee(init_crc32, ((uint8_t*)rbuf) + sizeof(log_group_header),
-                                  header->total_size() - sizeof(log_group_header));
+        crc32_t crc = crc32_ieee(init_crc32, ((uint8_t*)rbuf) + sizeof(log_group_header),
+                                 header->total_size() - sizeof(log_group_header));
         HS_ASSERT_CMP(RELEASE, header->this_group_crc(), ==, crc, "CRC mismatch on read data");
     }
 
@@ -124,196 +116,68 @@ log_buffer LogDev::read(const log_key& key) {
     return b;
 }
 
-#if 0
-//
-// calculate crc based on input buffers splitted in multiple buffers in MemVector;
-//
-uint32_t LogDev::get_crc_and_len(struct iovec* iov, int iovcnt, uint64_t& len) {
-    uint32_t crc = init_crc32;
-    len = 0;
-    for (int i = 0; i < iovcnt; i++) {
-        crc = crc32_ieee(crc, (unsigned char*)(iov[i].iov_base), iov[i].iov_len);
-        len += iov[i].iov_len;
-    }
+log_group_header* LogDev::read_validate_header(uint8_t* buf, uint32_t size, bool* read_more) {
+    auto header = (log_group_header*)rbuf;
+    if (header->magic_word() != LOG_GROUP_HDR_MAGIC) {
+        auto store = HomeBlks::instance()->get_logdev_blkstore();
+        auto cur_pos = store->seeked_pos();
 
-    return crc;
-}
-
-//
-//
-// With group commit, the through put will be much better;
-//
-// Note:
-// 1. This routine is supposed to be called by group commit, which is single threaded.
-//    Hence no lock is needed.
-//    If group commit design has changed to support Multi-threading, update this routine with lock protection;
-// 2. mvec can take multiple data buffer, and crc will be calculated for all the buffers;
-//
-// TODO:
-// 1. Avoid new and Memory should come from pre-allocated buffer when group-commit kicks in
-//
-
-bool LogDev::write_at_offset(const uint64_t offset, struct iovec* iov_i, int iovcnt_i, logdev_comp_callback cb) {
-
-    m_comp_cb = cb;
-    uint64_t len = 0;
-    uint32_t crc = get_crc_and_len(iov_i, iovcnt_i, len);
-
-    const int    iovcnt = iovcnt_i + 1; // add header slot
-    struct iovec iov[iovcnt];
-
-    LogDevRecordHeader* hdr = nullptr;
-    int                 ret = posix_memalign((void**)&hdr, LOGDEV_BLKSIZE, LOGDEV_BLKSIZE);
-    if (ret != 0) {
-        throw std::bad_alloc();
-    }
-
-    std::memset((void*)hdr, 0, sizeof(LogDevRecordHeader));
-
-    hdr->h.m_version = LOG_DEV_RECORD_HDR_VER;
-    hdr->h.m_magic = LOG_DEV_RECORD_HDR_MAGIC;
-    hdr->h.m_crc = crc;
-    hdr->h.m_prev_crc = m_last_crc;
-    hdr->h.m_len = len;
-
-    iov[0].iov_base = (uint8_t*)hdr;
-    iov[0].iov_len = LOGDEV_BLKSIZE;
-
-    if (!copy_iov(&iov[1], iov_i, iovcnt_i)) {
-        return false;
-    }
-
-    m_last_crc = hdr->h.m_crc;
-
-    auto req = logdev_req::make_request();
-
-    bool success = HomeBlks::instance()->get_logdev_blkstore()->write_at_offset(offset, iov, iovcnt, to_wb_req(req));
-
-    free(hdr);
-    return success;
-}
-
-bool LogDev::append_write(struct iovec* iov_i, int iovcnt_i, uint64_t& out_offset, logdev_comp_callback cb) {
-    m_comp_cb = cb;
-    uint64_t len = 0; 
-    uint32_t crc = get_crc_and_len(iov_i, iovcnt_i, len);
-
-    const int iovcnt = iovcnt_i + 1;  // add header slot
-    struct iovec iov[iovcnt];
-
-    LogDevRecordHeader *hdr = nullptr;
-    int ret = posix_memalign((void**)&hdr, LOGDEV_BLKSIZE, LOGDEV_BLKSIZE);
-    if (ret != 0 ) {
-        throw std::bad_alloc();
-    }
-
-    std::memset((void*)hdr, 0, sizeof(LogDevRecordHeader));
-
-    hdr->h.m_version = LOG_DEV_RECORD_HDR_VER;
-    hdr->h.m_magic = LOG_DEV_RECORD_HDR_MAGIC;
-    hdr->h.m_crc = crc;
-    hdr->h.m_prev_crc = m_last_crc;
-    hdr->h.m_len = len;
-
-    iov[0].iov_base = (uint8_t*)hdr;
-    iov[0].iov_len = LOGDEV_BLKSIZE;
-
-    copy_iov(&iov[1], iov_i, iovcnt_i);
-    
-    m_last_crc = hdr->h.m_crc;
-
-    auto req = logdev_req::make_request();
-
-    bool success = HomeBlks::instance()->get_logdev_blkstore()->append_write(iov, iovcnt, out_offset, to_wb_req(req));
-
-    free(hdr);
-    return success;
-}
-//
-// Reserve size of offset
-//
-uint64_t LogDev::reserve(const uint64_t size) { return HomeBlks::instance()->get_logdev_blkstore()->reserve(size); }
-
-//
-// truncate
-//
-void LogDev::truncate(const uint64_t offset) { HomeBlks::instance()->get_logdev_blkstore()->truncate(offset); }
-
-ssize_t LogDev::readv(const uint64_t offset, struct iovec* iov_i, int iovcnt_i) {
-    int          iovcnt = iovcnt_i + 1;
-    struct iovec iov[iovcnt];
-
-    LogDevRecordHeader* hdr = nullptr;
-    int                 ret = posix_memalign((void**)&hdr, LOGDEV_BLKSIZE, LOGDEV_BLKSIZE);
-    if (ret != 0) {
-        throw std::bad_alloc();
-    }
-    std::memset((void*)hdr, 0, sizeof(LogDevRecordHeader));
-
-    iov[0].iov_base = (uint8_t*)hdr;
-    iov[0].iov_len = sizeof(LogDevRecordHeader);
-
-    // copy pointers and length
-    copy_iov(&iov[1], iov_i, iovcnt_i);
-
-    HomeBlks::instance()->get_logdev_blkstore()->readv(offset, iov, iovcnt);
-
-    if (!header_verify(hdr)) {
-        HS_ASSERT(DEBUG, 0, "Log header corrupted!");
-        return -1;
-    }
-
-    auto len = hdr->h.m_len;
-    free(hdr);
-    return len;
-}
-
-bool LogDev::copy_iov(struct iovec* dest, struct iovec* src, int iovcnt) {
-    for (int i = 0; i < iovcnt; i++) {
-        dest[i].iov_base = src[i].iov_base;
-        dest[i].iov_len = src[i].iov_len;
-
-#ifndef NDEBUG
-        if (src[i].iov_len % LOGDEV_BLKSIZE) {
-            HS_LOG(ERROR, logdev, "Invalid iov_len, must be {} aligned. ", LOGDEV_BLKSIZE);
-            return false;
+        // We do not have the magic, its now to determine if it is indeed corruption in the data or we reached the end
+        // of the cycle. The way to determine is keep reading all 512 block boundary and try to see if we see any valid
+        // headers and whose log_idx > our idx
+        while ((safe_buf = read_next_header(max_blks_read_for_additional_check)) != nullptr) {
+            auto header = (log_group_header*)safe_buf.get();
+            HS_ASSERT_CMP(RELEASE, m_log_idx, >, header->start_log_idx,
+                          "Found a header with future log_idx after reaching end of log. Hence rbuf which was read "
+                          "must have been corrupted");
         }
-#endif
-    }
-    return true;
-}
 
-bool LogDev::header_verify(LogDevRecordHeader* hdr) {
-    // header version and crc verification
-    if ((hdr->h.m_version != LOG_DEV_RECORD_HDR_VER) || (hdr->h.m_magic != LOG_DEV_RECORD_HDR_MAGIC)) {
-        return false;
+        store->seek(cur_pos); // Seek it back since cursor would have moved whatever we have read
+        *read_more = false;
+        return nullptr;
     }
 
-    return true;
-}
-
-//
-// read
-//
-ssize_t LogDev::read(const uint64_t offset, const uint64_t size, const void* buf) {
-    HomeBlks::instance()->get_logdev_blkstore()->read(offset, size, buf);
-
-    LogDevRecordHeader* hdr = (LogDevRecordHeader*)((unsigned char*)buf + sizeof(LogDevRecordHeader));
-
-    if (!header_verify(hdr)) {
-        HS_ASSERT(DEBUG, 0, "Log header corrupted!");
-        return -1;
+    // We don't have all the buffers for this group yet, try to read more later.
+    if (header->total_size() > size) {
+        *read_more = true;
+        return header;
     }
 
-    // skip header and caculate crc of the data buffer
-    uint32_t crc = crc32_ieee(init_crc32, (unsigned char*)((char*)buf + sizeof(LogDevRecordHeader)), hdr->h.m_len);
+    // Compute CRC of the data and validate
+    crc32_t crc = crc32_ieee(init_crc32, ((uint8_t*)rbuf) + sizeof(log_group_header),
+                             header->total_size() - sizeof(log_group_header));
+    HS_ASSERT_CMP(RELEASE, header->this_group_crc(), ==, crc, "CRC mismatch on read data");
 
-    HS_ASSERT_CMP(DEBUG, hdr->h.m_len, ==, size, "Log size mismatch from input size: {} : {}", hdr->h.m_len, size);
-    HS_ASSERT_CMP(DEBUG, hdr->h.m_crc, ==, crc, "Log header CRC mismatch: {} : {}", hdr->h.m_crc, crc);
+    // Validate previous CRC that we have seen
+    if (m_last_crc != INVALID_CRC32_VALUE) {
+        HS_ASSERT_CMP(RELEASE, header->prev_grp_crc, ==, m_last_crc,
+                      "Prev CRC value does not match with whats in header");
+    }
 
-    return hdr->h.m_len;
+    m_last_crc = crc;
+    *read_more = false;
+    return header;
 }
-#endif
+
+std::shared_ptr< sisl::byte_array > LogDev::read_next_header(uint32_t max_buf_reads) {
+    uint32_t read_count = 0;
+
+    auto store = HomeBlks::instance()->get_logdev_blkstore();
+    while (read_count < max_buf_reads) {
+        auto tmp_buf = std::make_shared< sisl::byte_array >(dma_boundary, dma_boundary);
+        auto read_bytes = store->read(dma_boundary, (void*)tmp_buf);
+        if (read_bytes == 0) {
+            store->seek(0);
+            continue;
+        }
+        assert(read_bytes >= sizeof(log_group_header));
+        ++read_count;
+
+        auto header = (log_group_header*)tmp_buf;
+        if (header->magic_word() == LOG_GROUP_HDR_MAGIC) { return tmp_buf; }
+    }
+    return nullptr;
+}
 
 /*
  * This method prepares the log records to be flushed and returns the log_group which is fully prepared
@@ -334,16 +198,16 @@ LogGroup* LogDev::prepare_flush(int32_t estimated_records) {
     lg->finish();
     lg->m_flush_log_idx_from = m_last_flush_idx + 1;
     lg->m_flush_log_idx_upto = flushing_upto_idx;
-    lg->m_log_dev_offset = HomeBlks::instance()->get_logdev_blkstore()->reserve(lg->header()->group_size);
+    lg->m_log_dev_offset = HomeBlks::instance()->get_logdev_blkstore()->alloc_blks(lg->header()->group_size);
 
     LOGINFO("Flushing upto log_idx={}");
     LOGINFO("Log Group: {}", *lg);
     return lg;
 }
 
-// This method checks if in case we were to add a record of size provided, do we enter into a state which exceeds our
-// threshold. If so, it first flushes whats accumulated so far and then add the pending flush size counter with the new
-// record size
+// This method checks if in case we were to add a record of size provided, do we enter into a state which exceeds
+// our threshold. If so, it first flushes whats accumulated so far and then add the pending flush size counter with
+// the new record size
 void LogDev::flush_if_needed(const uint32_t new_record_size, logid_t new_idx) {
     // If after adding the record size, if we have enough to flush, attempt to flush by setting the atomic bool
     // variable.
