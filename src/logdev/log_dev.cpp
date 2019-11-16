@@ -11,20 +11,21 @@ void LogDev::do_load(uint64_t device_cursor) {
     auto store = HomeBlks::instance()->get_logdev_blkstore();
     bool read_more = true;
 
-    store->seek(device_cursor);
+    store->lseek(device_cursor);
     while (read_more) {
         // Read the data in bulk (of say 512K) and then process each log group header
         auto buf = std::make_shared< sisl::byte_array >(bulk_read_size, dma_boundary);
         auto rbuf = buf->bytes;
+        ssize_t this_read_remains;
 
         uint64_t log_group_offset;
         do {
             log_group_offset = store->seeked_pos();
-            auto this_read_remains = store->read(bulk_read_size, (void*)rbuf);
-            if (this_read_remains != 0) { break };
+            this_read_remains = store->read((void*)rbuf, bulk_read_size);
+            if (this_read_remains != 0) { break; }
 
             // We have come to the end of the device, seek to start and read the remaining
-            store->seek(0);
+            store->lseek(0);
         } while (true);
 
         // Loop thru the entire bulk read buffer and process one log group at a time.
@@ -37,7 +38,7 @@ void LogDev::do_load(uint64_t device_cursor) {
 
             if (read_more) {
                 // We have partial header, need to read more
-                store->seek(log_group_offset);
+                store->lseek(log_group_offset);
                 break;
             }
 
@@ -76,7 +77,7 @@ log_buffer LogDev::read(const log_key& key) {
     if (!_read_buf) { _read_buf = sisl::make_aligned_unique< uint8_t >(dma_boundary, initial_read_size); }
     auto rbuf = _read_buf.get();
     auto store = HomeBlks::instance()->get_logdev_blkstore();
-    store->read(key.dev_offset, initial_read_size, (void*)rbuf);
+    store->pread((void*)rbuf, initial_read_size, key.dev_offset);
 
     auto header = (log_group_header*)rbuf;
     HS_ASSERT_CMP(RELEASE, header->magic_word(), ==, LOG_GROUP_HDR_MAGIC, "Log header corrupted with magic mismatch!");
@@ -108,7 +109,7 @@ log_buffer LogDev::read(const log_key& key) {
         if (second_part_size > initial_read_size) {
             rbuf = (uint8_t*)std::aligned_alloc(dma_boundary, sisl::round_up(second_part_size, dma_boundary));
         }
-        store->read(key.dev_offset + data_offset + first_part_size, second_part_size, (void*)rbuf);
+        store->pread((void*)rbuf, second_part_size, key.dev_offset + data_offset + first_part_size);
         std::memcpy((void*)(b.data() + first_part_size), (void*)rbuf, second_part_size);
         if (second_part_size > initial_read_size) { std::free(rbuf); }
     }
@@ -117,7 +118,7 @@ log_buffer LogDev::read(const log_key& key) {
 }
 
 log_group_header* LogDev::read_validate_header(uint8_t* buf, uint32_t size, bool* read_more) {
-    auto header = (log_group_header*)rbuf;
+    auto header = (log_group_header*)buf;
     if (header->magic_word() != LOG_GROUP_HDR_MAGIC) {
         auto store = HomeBlks::instance()->get_logdev_blkstore();
         auto cur_pos = store->seeked_pos();
@@ -125,14 +126,15 @@ log_group_header* LogDev::read_validate_header(uint8_t* buf, uint32_t size, bool
         // We do not have the magic, its now to determine if it is indeed corruption in the data or we reached the end
         // of the cycle. The way to determine is keep reading all 512 block boundary and try to see if we see any valid
         // headers and whose log_idx > our idx
+        std::shared_ptr< sisl::byte_array > safe_buf;
         while ((safe_buf = read_next_header(max_blks_read_for_additional_check)) != nullptr) {
             auto header = (log_group_header*)safe_buf.get();
-            HS_ASSERT_CMP(RELEASE, m_log_idx, >, header->start_log_idx,
+            HS_ASSERT_CMP(RELEASE, m_log_idx.load(std::memory_order_acquire), >, header->start_idx(),
                           "Found a header with future log_idx after reaching end of log. Hence rbuf which was read "
                           "must have been corrupted");
         }
 
-        store->seek(cur_pos); // Seek it back since cursor would have moved whatever we have read
+        store->lseek(cur_pos); // Seek it back since cursor would have moved whatever we have read
         *read_more = false;
         return nullptr;
     }
@@ -144,13 +146,13 @@ log_group_header* LogDev::read_validate_header(uint8_t* buf, uint32_t size, bool
     }
 
     // Compute CRC of the data and validate
-    crc32_t crc = crc32_ieee(init_crc32, ((uint8_t*)rbuf) + sizeof(log_group_header),
+    crc32_t crc = crc32_ieee(init_crc32, ((uint8_t*)buf) + sizeof(log_group_header),
                              header->total_size() - sizeof(log_group_header));
     HS_ASSERT_CMP(RELEASE, header->this_group_crc(), ==, crc, "CRC mismatch on read data");
 
     // Validate previous CRC that we have seen
     if (m_last_crc != INVALID_CRC32_VALUE) {
-        HS_ASSERT_CMP(RELEASE, header->prev_grp_crc, ==, m_last_crc,
+        HS_ASSERT_CMP(RELEASE, header->prev_group_crc(), ==, m_last_crc,
                       "Prev CRC value does not match with whats in header");
     }
 
@@ -165,15 +167,15 @@ std::shared_ptr< sisl::byte_array > LogDev::read_next_header(uint32_t max_buf_re
     auto store = HomeBlks::instance()->get_logdev_blkstore();
     while (read_count < max_buf_reads) {
         auto tmp_buf = std::make_shared< sisl::byte_array >(dma_boundary, dma_boundary);
-        auto read_bytes = store->read(dma_boundary, (void*)tmp_buf);
+        auto read_bytes = store->read((void*)tmp_buf.get(), dma_boundary);
         if (read_bytes == 0) {
-            store->seek(0);
+            store->lseek(0);
             continue;
         }
-        assert(read_bytes >= sizeof(log_group_header));
+        assert(read_bytes >= (ssize_t)sizeof(log_group_header));
         ++read_count;
 
-        auto header = (log_group_header*)tmp_buf;
+        auto header = (log_group_header*)tmp_buf.get();
         if (header->magic_word() == LOG_GROUP_HDR_MAGIC) { return tmp_buf; }
     }
     return nullptr;
@@ -198,7 +200,7 @@ LogGroup* LogDev::prepare_flush(int32_t estimated_records) {
     lg->finish();
     lg->m_flush_log_idx_from = m_last_flush_idx + 1;
     lg->m_flush_log_idx_upto = flushing_upto_idx;
-    lg->m_log_dev_offset = HomeBlks::instance()->get_logdev_blkstore()->alloc_blks(lg->header()->group_size);
+    lg->m_log_dev_offset = HomeBlks::instance()->get_logdev_blkstore()->alloc_blk(lg->header()->group_size);
 
     LOGINFO("Flushing upto log_idx={}");
     LOGINFO("Log Group: {}", *lg);
@@ -237,7 +239,7 @@ void LogDev::do_flush(LogGroup* lg) {
 
     auto req = logdev_req::make_request();
     req->m_log_group = lg;
-    store->write_at_offset(lg->m_log_dev_offset, lg->iovecs().data(), (int)lg->iovecs().size(), to_wb_req(req));
+    store->pwritev(lg->iovecs().data(), (int)lg->iovecs().size(), lg->m_log_dev_offset, to_wb_req(req));
 }
 
 void LogDev::process_logdev_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req) {

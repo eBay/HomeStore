@@ -622,8 +622,31 @@ public:
 
     VirtualDev< BAllocator, RoundRobinDeviceSelector >* get_vdev() { return &m_vdev; };
 
+    off_t alloc_blk(size_t size, bool chunk_overlap_ok = false) { return m_vdev.alloc_blk(size, chunk_overlap_ok); }
+
+    ssize_t pwrite(const void* buf, size_t count, off_t offset, boost::intrusive_ptr< virtualdev_req > req) {
+        return m_vdev.pwrite(buf, count, offset, req);
+    }
+
+    ssize_t pread(void* buf, size_t count, off_t offset) { return m_vdev.pread(buf, count, offset); }
+
+    off_t lseek(off_t offset, int whence = SEEK_SET) { return m_vdev.lseek(offset, whence); }
+
+    off_t seeked_pos() const { return m_vdev.seeked_pos(); }
+
+    ssize_t read(void* buf, size_t count) { return m_vdev.read(buf, count); }
+
+    ssize_t write(const void* buf, size_t count, boost::intrusive_ptr< virtualdev_req > req) {
+        return m_vdev.write(buf, count, req);
+    }
+
     // Start of LogDev Layer calls
     uint64_t reserve(uint64_t size) { return m_vdev.reserve(size); }
+
+    ssize_t pwritev(const struct iovec* iov, const int iovcnt, off_t offset,
+                    boost::intrusive_ptr< writeback_req > wb_req) {
+        return 0;
+    }
 
     bool write_at_offset(const uint64_t offset, const struct iovec* iov, const int iovcnt,
                          boost::intrusive_ptr< writeback_req > wb_req) {

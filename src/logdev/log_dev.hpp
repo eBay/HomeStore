@@ -110,6 +110,7 @@ struct log_group_header {
     uint32_t nrecords() const { return n_log_records; }
     uint32_t total_size() const { return group_size; }
     crc32_t this_group_crc() const { return cur_grp_crc; }
+    crc32_t prev_group_crc() const { return prev_grp_crc; }
     uint32_t _inline_data_offset() const { return inline_data_offset; }
 
     friend std::ostream& operator<<(std::ostream& os, const log_group_header& h) {
@@ -334,43 +335,9 @@ public:
     // callback from blkstore, registered at blkstore creation;
     void process_logdev_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
 
-#if 0
-    // returns offset
-    bool append_write(struct iovec* iov, int iovcnt, uint64_t& out_offset, logdev_comp_callback cb);
-
-    bool write_at_offset(const uint64_t offset, struct iovec* iov, int iovcnt, logdev_comp_callback cb);
-
-    //
-    // read is sync
-    // return actual bytes read on success or -1 on failure
-    //
-    ssize_t read(const uint64_t offset, const uint64_t size, const void* buf);
-
-    ssize_t readv(const uint64_t offset, struct iovec* iov, int iovcnt);
-
-    // truncate
-    void truncate(const uint64_t offset);
-
-    // Group Commit
-#endif
-
     crc32_t get_prev_crc() const { return m_last_crc; }
 
 private:
-#if 0
-    // header verification
-    bool header_verify(LogDevRecordHeader* hdr);
-
-    // copy iov pointers and len
-    bool copy_iov(struct iovec* dest, struct iovec* src, int iovcnt);
-
-    //
-    // Reserve offset,
-    // Current assumption is single threaded;
-    //
-    uint64_t reserve(const uint64_t size);
-#endif
-
     LogDev() = default;
     ~LogDev() = default;
     static LogGroup* new_log_group();
@@ -379,8 +346,9 @@ private:
     void do_flush(LogGroup* lg);
     void flush_if_needed(const uint32_t new_record_size, logid_t new_idx = -1);
     void on_flush_completion(LogGroup* lg);
-    // sisl::blob do_read(uint32_t offset, uint32_t size, uint8_t* already_read_buf, uint32_t already_read_size);
     void do_load(uint64_t offset);
+    log_group_header* read_validate_header(uint8_t* buf, uint32_t size, bool* read_more);
+    std::shared_ptr< sisl::byte_array > read_next_header(uint32_t max_buf_reads);
 
 private:
     sisl::StreamTracker< log_record > m_log_records; // The container which stores all in-memory log records
