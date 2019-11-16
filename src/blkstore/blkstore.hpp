@@ -640,6 +640,12 @@ public:
         return m_vdev.write(buf, count, req);
     }
 
+    ssize_t preadv(const struct iovec* iov, int iovcnt, off_t offset) { return m_vdev.preadv(iov, iovcnt, offset); }
+
+    ssize_t pwritev(const struct iovec* iov, int iovcnt, off_t offset, boost::intrusive_ptr< virtualdev_req > req) {
+        return m_vdev.pwritev(iov, iovcnt, offset, req);
+    }
+
     // Start of LogDev Layer calls
     uint64_t reserve(uint64_t size) { return m_vdev.reserve(size); }
 
