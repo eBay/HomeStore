@@ -114,8 +114,7 @@ void Volume::set_error_flip() {
     
     /* error flips */
     freq.set_percent(1);
-//    fc->inject_noreturn_flip("vol_vchild_error", { null_cond }, freq);
- //   fc->inject_retval_flip("delay_us_and_inject_error_on_completion", { null_cond }, freq, 20);
+    fc->inject_retval_flip("delay_us_and_inject_error_on_completion", { null_cond }, freq, 20);
     fc->inject_noreturn_flip("varsize_blkalloc_no_blks", { null_cond }, freq);
     
 }
@@ -283,11 +282,6 @@ void Volume::process_metadata_completions(const volume_req_ptr& vreq) {
     VOL_LOG(TRACE, volume, parent_req, "metadata_complete: status={}", vreq->err.message());
     HISTOGRAM_OBSERVE(m_metrics, volume_map_write_latency, get_elapsed_time_us(vreq->op_start_time));
 
-#ifdef _PRERELEASE
-    if (parent_req->outstanding_io_cnt.get() > 2 && homestore_flip->test_flip("vol_vchild_error")) {
-        vreq->err = homestore_error::flip_comp_error;
-    }
-#endif
     check_and_complete_req(parent_req, vreq->err, true /* call_completion_cb */, &(vreq->blkIds_to_free));
 #ifndef NDEBUG
     {
