@@ -257,7 +257,13 @@ public:
             m_btree_lock.unlock();
             return ret;
         }
-        ret = free(root, free_blk_cb, multinode_req, mem_only);
+        
+        try {
+            ret = free(root, free_blk_cb, multinode_req, mem_only);
+        } catch (std::exception& e) {
+            BT_LOG_ASSERT(false, root, "free returned exception : {}", e.what());
+        }
+
         unlock_node(root, acq_lock);
         m_btree_lock.unlock();
         BT_LOG(DEBUG, , , "btree nodes destroyed");
@@ -316,15 +322,22 @@ public:
                 V val;
                 node->get(i, &val, false);
                 // Caller will free the blk in blkstore in sync mode, which is fine since it is in-memory operation;
-                free_blk_cb(val);
+                try {
+                    free_blk_cb(val);
+                } catch (std::exception& e) {
+                    BT_LOG_ASSERT(false, node, "free_blk_cb returned exception: {}", e.what());
+                }
             }
         }
       
         if (ret != btree_status_t::success) {
             return ret;
         }
-        
-        free_node(node, multinode_req, mem_only);
+        try {
+            free_node(node, multinode_req, mem_only);
+        } catch (std::exception& e) {
+            BT_LOG_ASSERT(false, node, "free_node returned exception: {}", e.what());
+        }
         return ret;
     }
 

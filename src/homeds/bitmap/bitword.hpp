@@ -292,7 +292,7 @@ public:
         uint64_t count;
         *pmax_count = 0;
 
-        if (start == size()) {
+        if (0l <= start && size() == (uint32_t)start) {
             return -1;
         }
  
