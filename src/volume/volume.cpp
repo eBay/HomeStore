@@ -105,14 +105,17 @@ void Volume::set_error_flip() {
     FlipClient *fc = HomeStoreFlip::client_instance();
     FlipFrequency freq;
     FlipCondition cond1;
+    
+    FlipCondition null_cond;
+    fc->create_condition("", flip::Operator::DONT_CARE, (int)1, &null_cond);
+    
     freq.set_count(2000000000);
     freq.set_percent(1);
     
     /* error flips */
     freq.set_percent(1);
-    fc->inject_noreturn_flip("vol_vchild_error", {}, freq);
-    fc->inject_retval_flip("delay_us_and_inject_error_on_completion", {}, freq, 20);
-    fc->inject_noreturn_flip("varsize_blkalloc_no_blks", {}, freq);
+    fc->inject_retval_flip("delay_us_and_inject_error_on_completion", { null_cond }, freq, 20);
+    fc->inject_noreturn_flip("varsize_blkalloc_no_blks", { null_cond }, freq);
     
 }
 
@@ -123,14 +126,17 @@ void Volume::set_io_flip() {
     freq.set_count(2000000000);
     freq.set_percent(5);
     
-    /* io flips */
-    fc->inject_retval_flip("vol_delay_read_us", {}, freq, 20);
-
-    fc->inject_retval_flip("cache_insert_race", {}, freq, 20);
-    fc->inject_retval_flip("io_write_iocb_empty_flip", {}, freq, 20);
-    fc->inject_retval_flip("io_read_iocb_empty_flip", {}, freq, 20);
+    FlipCondition null_cond;
+    fc->create_condition("", flip::Operator::DONT_CARE, (int)1, &null_cond);
     
-    fc->inject_retval_flip("blkalloc_split_blk", {}, freq, 4);
+    /* io flips */
+      fc->inject_retval_flip("vol_delay_read_us", { null_cond }, freq, 20);
+
+     fc->inject_retval_flip("cache_insert_race", { null_cond }, freq, 20);
+     fc->inject_retval_flip("io_write_iocb_empty_flip", { null_cond }, freq, 20);
+     fc->inject_retval_flip("io_read_iocb_empty_flip", { null_cond }, freq, 20);
+    
+     fc->inject_retval_flip("blkalloc_split_blk", { null_cond }, freq, 4);
 }
 #endif
 
@@ -276,11 +282,6 @@ void Volume::process_metadata_completions(const volume_req_ptr& vreq) {
     VOL_LOG(TRACE, volume, parent_req, "metadata_complete: status={}", vreq->err.message());
     HISTOGRAM_OBSERVE(m_metrics, volume_map_write_latency, get_elapsed_time_us(vreq->op_start_time));
 
-#ifdef _PRERELEASE
-    if (parent_req->outstanding_io_cnt.get() > 2 && homestore_flip->test_flip("vol_vchild_error")) {
-        vreq->err = homestore_error::flip_comp_error;
-    }
-#endif
     check_and_complete_req(parent_req, vreq->err, true /* call_completion_cb */, &(vreq->blkIds_to_free));
 #ifndef NDEBUG
     {

@@ -301,11 +301,6 @@ public:
             multinode_req->writes_pending.increment(1);
         }
         try {
-#ifdef _PRERELEASE
-            if (homestore_flip->test_flip("btree_write_fail", bn->get_node_id().m_id)) {
-                folly::throwSystemError("flip error");
-            }
-#endif
             if (multinode_req) {
                 impl->m_blkstore->write(blkid, req->ssd_buf,
                         boost::static_pointer_cast< homestore::blkstore_req< btree_buffer_t > >(req),

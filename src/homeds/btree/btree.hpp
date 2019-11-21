@@ -106,6 +106,9 @@ public:
         FlipCondition cond2;
         freq.set_count(2000000000);
         freq.set_percent(2);
+    
+        FlipCondition null_cond;
+        fc->create_condition("", flip::Operator::DONT_CARE, (int)1, &null_cond);
 
         fc->create_condition("nuber of entries in a node", flip::Operator::EQUAL, 0, &cond1);
         fc->create_condition("nuber of entries in a node", flip::Operator::EQUAL, 1, &cond2);
@@ -116,10 +119,10 @@ public:
         
         fc->inject_retval_flip("btree_delay_and_split", {cond1, cond2}, freq, 20);
         fc->inject_retval_flip("btree_delay_and_split_leaf", {cond1, cond2}, freq, 20);
-        fc->inject_noreturn_flip("btree_parent_node_full", {}, freq);
-        fc->inject_noreturn_flip("btree_leaf_node_split", {}, freq);
-        fc->inject_retval_flip("btree_upgrade_delay", {}, freq, 20);
-        fc->inject_retval_flip("writeBack_completion_req_delay_us", {}, freq, 20);
+        fc->inject_noreturn_flip("btree_parent_node_full", {null_cond}, freq);
+        fc->inject_noreturn_flip("btree_leaf_node_split", {null_cond}, freq);
+        fc->inject_retval_flip("btree_upgrade_delay", {null_cond}, freq, 20);
+        fc->inject_retval_flip("writeBack_completion_req_delay_us", {null_cond}, freq, 20);
     }
 
     static void set_error_flip() {
@@ -129,11 +132,14 @@ public:
         freq.set_count(2000000000);
         freq.set_percent(1);
         
-        fc->inject_noreturn_flip("btree_split_failure", {}, freq);
-        fc->inject_noreturn_flip("btree_write_comp_fail", {}, freq);
-        fc->inject_noreturn_flip("btree_read_fail", {}, freq);
-        fc->inject_noreturn_flip("btree_write_fail", {}, freq);
-        fc->inject_noreturn_flip("btree_refresh_fail", {}, freq);
+        FlipCondition null_cond;
+        fc->create_condition("", flip::Operator::DONT_CARE, (int)1, &null_cond);
+        
+        fc->inject_noreturn_flip("btree_split_failure", {null_cond}, freq);
+        fc->inject_noreturn_flip("btree_write_comp_fail", {null_cond}, freq);
+        fc->inject_noreturn_flip("btree_read_fail", {null_cond}, freq);
+        fc->inject_noreturn_flip("btree_write_fail", {null_cond}, freq);
+        fc->inject_noreturn_flip("btree_refresh_fail", {null_cond}, freq);
     }
 #endif
 

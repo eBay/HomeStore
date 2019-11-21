@@ -16,7 +16,9 @@ def vol_comp_error(address):
     fclient = FlipRPCClient(address)
     fclient.inject_ret_flip("delay_us_and_inject_error_on_completion",
                              fspec.FlipFrequency(count=1, percent=100),
-                             [],
+                             [
+                                fspec.FlipCondition(oper=fspec.Operator.DONT_CARE)
+                             ],
                              fspec.ParamValue(long_value=20)
                            )
     print("vol_comp_error")
@@ -25,42 +27,61 @@ def space_full_error(address):
     fclient = FlipRPCClient(address)
     fclient.inject_test_flip("varsize_blkalloc_no_blks",
                             fspec.FlipFrequency(count=1, percent=100),
-                            [])
+                            [
+                                fspec.FlipCondition(oper=fspec.Operator.DONT_CARE)
+                            ]
+                            )
     print("space_full_error")
 
 def btree_split_failure(address):
     fclient = FlipRPCClient(address)
     fclient.inject_test_flip("btree_split_failure",
                              fspec.FlipFrequency(count=1, percent=100),
-                             [])
+                             [
+                                fspec.FlipCondition(oper=fspec.Operator.DONT_CARE)
+                             ]
+                            )
     print("btree_split_failure")
 
 def btree_write_comp_fail(address):
     fclient = FlipRPCClient(address)
     fclient.inject_test_flip("btree_write_comp_fail",
                               fspec.FlipFrequency(count=1, percent=100),
-                              [])
+                              [
+                                fspec.FlipCondition(oper=fspec.Operator.DONT_CARE)
+                              ]
+                            )
     print("btree_write_cmpl_fail")
 
 def btree_read_fail(address):
     fclient = FlipRPCClient(address)
     fclient.inject_test_flip("btree_read_fail",
                               fspec.FlipFrequency(count=1, percent=100),
-                              [])
+                              [
+                                  fspec.FlipCondition(oper=fspec.Operator.DONT_CARE)
+                              ]
+                            )
     print("btree_read_fail")
 
 def btree_write_fail(address):
     fclient = FlipRPCClient(address)
     fclient.inject_test_flip("btree_write_fail",
                               fspec.FlipFrequency(count=1, percent=100),
-                              [])
+                              [
+                                fspec.FlipCondition(oper=fspec.Operator.DONT_CARE)
+                              ]
+                             )
+                             
     print("btree_write_fail")
     
 def btree_refresh_fail(address):
     fclient = FlipRPCClient(address)
     fclient.inject_test_flip("btree_refresh_fail",
                               fspec.FlipFrequency(count=1, percent=100),
-                              [])
+                              [
+                                fspec.FlipCondition(oper=fspec.Operator.DONT_CARE)
+                              ]
+                            )
     print("btree_refresh_fail")
 
 def btree_split_panic(address):
@@ -68,7 +89,10 @@ def btree_split_panic(address):
         fclient = FlipRPCClient(address)
         fclient.inject_test_flip("btree_split_panic",
                                   fspec.FlipFrequency(count=1, percent=100),
-                                  [])
+                                  [
+                                    fspec.FlipCondition(oper=fspec.Operator.DONT_CARE)
+                                  ]
+                                )
         print("btree_split_panic")
     except:
         print("could not set flip")
@@ -77,21 +101,24 @@ def io_write_error(address):
     fclient = FlipRPCClient(address)
     fclient.inject_test_flip("io_write_error_flip",
                               fspec.FlipFrequency(count=1, percent=100),
-                              [])
+                             fspec.FlipCondition(oper=fpesc.Operator.DONT_CARE)
+                            )
     print("io_write_error")
 
 def btree_blkalloc_no_blks(address):
     fclient = FlipRPCClient(address)
     fclient.inject_test_flip("fixed_blkalloc_no_blks",
                               fspec.FlipFrequency(count=1, percent=100),
-                              [])
+                              fspec.FlipCondition(oper=fpesc.Operator.DONT_CARE)
+                            )
     print("btree_blkalloc_no_blks")
 
 def io_read_error(address):
     fclient = FlipRPCClient(address)
     fclient.inject_test_flip("io_read_error_flip",
                               fspec.FlipFrequency(count=1, percent=100),
-                              [])
+                              fspec.FlipCondition(oper=fpesc.Operator.DONT_CARE)
+                            )
     print("io_read_error")
 
 io_error_tests = [
