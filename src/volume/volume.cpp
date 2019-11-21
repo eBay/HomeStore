@@ -114,7 +114,7 @@ void Volume::set_error_flip() {
     
     /* error flips */
     freq.set_percent(1);
-    fc->inject_retval_flip("delay_us_and_inject_error_on_completion", { null_cond }, freq, 20);
+//    fc->inject_retval_flip("delay_us_and_inject_error_on_completion", { null_cond }, freq, 20);
     fc->inject_noreturn_flip("varsize_blkalloc_no_blks", { null_cond }, freq);
     
 }
