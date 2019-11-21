@@ -105,14 +105,18 @@ void Volume::set_error_flip() {
     FlipClient *fc = HomeStoreFlip::client_instance();
     FlipFrequency freq;
     FlipCondition cond1;
+    
+    FlipCondition null_cond;
+    fc->create_condition("", flip::Operator::DONT_CARE, (int)1, &null_cond);
+    
     freq.set_count(2000000000);
     freq.set_percent(1);
     
     /* error flips */
     freq.set_percent(1);
-    fc->inject_noreturn_flip("vol_vchild_error", {}, freq);
-    fc->inject_retval_flip("delay_us_and_inject_error_on_completion", {}, freq, 20);
-    fc->inject_noreturn_flip("varsize_blkalloc_no_blks", {}, freq);
+//    fc->inject_noreturn_flip("vol_vchild_error", { null_cond }, freq);
+ //   fc->inject_retval_flip("delay_us_and_inject_error_on_completion", { null_cond }, freq, 20);
+    fc->inject_noreturn_flip("varsize_blkalloc_no_blks", { null_cond }, freq);
     
 }
 
@@ -123,14 +127,17 @@ void Volume::set_io_flip() {
     freq.set_count(2000000000);
     freq.set_percent(5);
     
-    /* io flips */
-    fc->inject_retval_flip("vol_delay_read_us", {}, freq, 20);
-
-    fc->inject_retval_flip("cache_insert_race", {}, freq, 20);
-    fc->inject_retval_flip("io_write_iocb_empty_flip", {}, freq, 20);
-    fc->inject_retval_flip("io_read_iocb_empty_flip", {}, freq, 20);
+    FlipCondition null_cond;
+    fc->create_condition("", flip::Operator::DONT_CARE, (int)1, &null_cond);
     
-    fc->inject_retval_flip("blkalloc_split_blk", {}, freq, 4);
+    /* io flips */
+      fc->inject_retval_flip("vol_delay_read_us", { null_cond }, freq, 20);
+
+     fc->inject_retval_flip("cache_insert_race", { null_cond }, freq, 20);
+     fc->inject_retval_flip("io_write_iocb_empty_flip", { null_cond }, freq, 20);
+     fc->inject_retval_flip("io_read_iocb_empty_flip", { null_cond }, freq, 20);
+    
+     fc->inject_retval_flip("blkalloc_split_blk", { null_cond }, freq, 4);
 }
 #endif
 
