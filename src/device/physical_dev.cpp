@@ -286,9 +286,9 @@ void PhysicalDev::readv(const struct iovec* iov, int iovcnt, uint32_t size, uint
     return m_ep->async_readv(get_devfd(), iov, iovcnt, size, (off_t)offset, cookie);
 }
 
-void PhysicalDev::sync_write(const char* data, uint32_t size, uint64_t offset) {
+ssize_t PhysicalDev::sync_write(const char* data, uint32_t size, uint64_t offset) {
     try {
-        m_ep->sync_write(get_devfd(), data, size, (off_t)offset);
+        return m_ep->sync_write(get_devfd(), data, size, (off_t)offset);
     } catch (const std::system_error& e) {
         std::stringstream ss;
         ss << "dev_name " << get_devname() << ":" << e.what() << "\n";
@@ -298,9 +298,9 @@ void PhysicalDev::sync_write(const char* data, uint32_t size, uint64_t offset) {
     }
 }
 
-void PhysicalDev::sync_writev(const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset) {
+ssize_t PhysicalDev::sync_writev(const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset) {
     try {
-        m_ep->sync_writev(get_devfd(), iov, iovcnt, size, (off_t)offset);
+        return m_ep->sync_writev(get_devfd(), iov, iovcnt, size, (off_t)offset);
     } catch (const std::system_error& e) {
         std::stringstream ss;
         ss << "dev_name " << get_devname() << e.what() << "\n";
@@ -450,6 +450,7 @@ PhysicalDevChunk::PhysicalDevChunk(PhysicalDev* pdev, uint32_t chunk_id, uint64_
     m_chunk_info->primary_chunk_id = INVALID_CHUNK_ID;
     m_chunk_info->vdev_id = INVALID_VDEV_ID;
     m_chunk_info->is_sb_chunk = false;
+    m_chunk_info->end_of_chunk_offset = size;
     m_pdev = pdev;
 }
 
