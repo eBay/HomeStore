@@ -140,6 +140,11 @@ void DeviceManager::update_vb_data_start_offset(uint32_t vdev_id, off_t offset) 
     write_info_blocks();
 }
 
+void DeviceManager::get_vb_context(uint32_t vdev_id, char* ctx_data) {
+    std::lock_guard< decltype(m_dev_mutex) > lock(m_dev_mutex);
+    memcpy(ctx_data, m_vdev_info[vdev_id].context_data, m_vdev_hdr->context_data_size);
+}
+
 void DeviceManager::update_vb_context(uint32_t vdev_id, uint8_t* blob) {
     std::lock_guard< decltype(m_dev_mutex) > lock(m_dev_mutex);
     memcpy(m_vdev_info[vdev_id].context_data, blob, m_vdev_hdr->context_data_size);

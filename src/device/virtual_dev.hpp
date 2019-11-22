@@ -216,6 +216,10 @@ private:
     off_t               m_seek_cursor = 0;          // the seek cursor
 
 public:
+    static constexpr size_t context_data_size() {
+        return MAX_CONTEXT_DATA_SZ;
+    }
+
     void init(DeviceManager* mgr, vdev_info_block* vb, comp_callback cb, uint32_t page_size) {
         m_mgr = mgr;
         m_vb = vb;
@@ -1142,6 +1146,10 @@ public:
         auto pdev = primary_chunk->get_physical_dev_mutable();
 
         do_preadv_internal(pdev, primary_chunk, primary_dev_offset, iov, iovcnt, size, req);
+    }
+
+    void get_vb_context(uint8_t* ctx_data) const {
+        m_mgr->get_vb_context(m_vb->vdev_id, (char*)ctx_data);
     }
 
     void update_vb_context(uint8_t* blob) { m_mgr->update_vb_context(m_vb->vdev_id, blob); }

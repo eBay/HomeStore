@@ -100,7 +100,7 @@ struct chunk_info_block {
 } __attribute((packed));
 
 /************* Vdev Info Block definition ******************/
-#define MAX_CONTEXT_DATA_SZ 512
+#define MAX_CONTEXT_DATA_SZ 2048
 
 struct vdevs_block {
     uint64_t magic;     // Header magic expected to be at the top of block
@@ -454,6 +454,7 @@ public:
     void inited();
     void write_info_blocks();
     void update_vb_context(uint32_t vdev_id, uint8_t* blob);
+    void get_vb_context(uint32_t vdev_id, char* ctx_data); 
 
     void update_end_of_chunk(PhysicalDevChunk* chunk, off_t offset);
     void update_vb_data_start_offset(uint32_t vdev_id, off_t offset);
