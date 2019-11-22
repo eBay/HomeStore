@@ -134,7 +134,6 @@ public:
    
     void shutdown_callback(bool success) {
         VolInterface::del_instance();
-        LogDev::del_instance();
         assert(success);       
         m_shutdown_cb_done = true;
     }
@@ -287,17 +286,18 @@ public:
             std::lock_guard<std::mutex>   lk(m_vol_info[vol_id]->m_mtx);
             reset_bm_bits(vol_id, lba, nblks);
         }
-        
+#if 0    
         // TODO: move it to concurrent logdev write after Group Commit is implemented;
         if (m_logdev_done) {
             m_logdev_done = false;
             logdev_write(vol_id, lba, nblks, std::bind(&VolumeManager::process_logdev_completions, this, std::placeholders::_1));
         }
-
+#endif
         return ret_io;
     }
         
 private:
+#if 0
     void process_logdev_completions(const logdev_req_ptr& req) {
         LOGINFO("Logdev write callback received!");
 
@@ -417,7 +417,7 @@ private:
         free(ptr);
     }
         
-
+#endif
     uint64_t get_rand_vol() {
         std::random_device rd; 
         std::default_random_engine generator(rd());

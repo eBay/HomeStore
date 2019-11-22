@@ -44,6 +44,10 @@ public:
     }
 };
 
+#define HOMESTORE_LOG_MODS                                                                                             \
+        btree_structures, btree_nodes, btree_generics, cache, device, httpserver_lmod, iomgr, varsize_blk_alloc,           \
+                VMOD_VOL_MAPPING, volume, logdev, flip
+
 #define homestore_flip homestore::HomeStoreFlip::instance()
 #endif
 

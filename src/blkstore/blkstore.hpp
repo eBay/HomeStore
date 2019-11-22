@@ -624,6 +624,8 @@ public:
 
     off_t alloc_blk(size_t size, bool chunk_overlap_ok = false) { return m_vdev.alloc_blk(size, chunk_overlap_ok); }
 
+    ssize_t pwrite(const void* buf, size_t count, off_t offset) { return m_vdev.pwrite(buf, count, offset); }
+    
     ssize_t pwrite(const void* buf, size_t count, off_t offset, boost::intrusive_ptr< virtualdev_req > req) {
         return m_vdev.pwrite(buf, count, offset, req);
     }
@@ -636,11 +638,19 @@ public:
 
     ssize_t read(void* buf, size_t count) { return m_vdev.read(buf, count); }
 
+    ssize_t write(const void* buf, size_t count) { return m_vdev.write(buf, count); }
+
     ssize_t write(const void* buf, size_t count, boost::intrusive_ptr< virtualdev_req > req) {
         return m_vdev.write(buf, count, req);
     }
 
     ssize_t preadv(const struct iovec* iov, int iovcnt, off_t offset) { return m_vdev.preadv(iov, iovcnt, offset); }
+
+    ssize_t preadv(const struct iovec* iov, int iovcnt, off_t offset, boost::intrusive_ptr< virtualdev_req > req) { 
+        return m_vdev.preadv(iov, iovcnt, offset, req); 
+    }
+
+    ssize_t pwritev(const struct iovec* iov, int iovcnt, off_t offset) { return m_vdev.pwritev(iov, iovcnt, offset); }
 
     ssize_t pwritev(const struct iovec* iov, int iovcnt, off_t offset, boost::intrusive_ptr< virtualdev_req > req) {
         return m_vdev.pwritev(iov, iovcnt, offset, req);

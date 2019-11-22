@@ -92,6 +92,7 @@ struct chunk_info_block {
     uint32_t primary_chunk_id;   // Valid chunk id if this is a mirror of some chunk
     bool slot_allocated;         // Is this slot allocated for any chunks.
     bool is_sb_chunk;            // This chunk is not assigned to any vdev but super block
+    off_t end_of_chunk_offset;   // The offset indicates end of chunk.
 
     uint64_t get_chunk_size() const { return chunk_size; }
     uint32_t get_chunk_id() const { return chunk_id; }
@@ -99,7 +100,7 @@ struct chunk_info_block {
 } __attribute((packed));
 
 /************* Vdev Info Block definition ******************/
-#define MAX_CONTEXT_DATA_SZ 512
+#define MAX_CONTEXT_DATA_SZ 2048
 
 struct vdevs_block {
     uint64_t magic;     // Header magic expected to be at the top of block
@@ -123,8 +124,10 @@ struct vdev_info_block {
     uint32_t next_vdev_id;                  // Next pointer of vdevice list
     bool slot_allocated;                    // Is this current slot allocated
     bool failed;                            // set to true if disk is replaced
+    uint32_t num_primary_chunks;     
+    off_t data_start_offset;                // Logical offset for the 1st written data;
     char context_data[MAX_CONTEXT_DATA_SZ]; // Application dependent context data
-    uint32_t num_primary_chunks;
+                                            // TODO: make context_data to reserve 4k minus existing structure size and expose API for sync read/write.
 
     uint32_t get_vdev_id() const { return vdev_id; }
     uint64_t get_size() const { return size; }
@@ -260,6 +263,9 @@ public:
         return ss.str();
     }
 
+    void update_end_of_chunk(off_t off) { m_chunk_info->end_of_chunk_offset = off; }
+    off_t get_end_of_chunk() { return m_chunk_info->end_of_chunk_offset; }
+
 private:
     chunk_info_block* m_chunk_info;
     PhysicalDev* m_pdev;
@@ -333,8 +339,8 @@ public:
     void read(char* data, uint32_t size, uint64_t offset, uint8_t* cookie);
     void readv(const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie);
 
-    void sync_write(const char* data, uint32_t size, uint64_t offset);
-    void sync_writev(const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset);
+    ssize_t sync_write(const char* data, uint32_t size, uint64_t offset);
+    ssize_t sync_writev(const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset);
 
     ssize_t sync_read(char* data, uint32_t size, uint64_t offset);
     ssize_t sync_readv(const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset);
@@ -448,6 +454,10 @@ public:
     void inited();
     void write_info_blocks();
     void update_vb_context(uint32_t vdev_id, uint8_t* blob);
+    void get_vb_context(uint32_t vdev_id, char* ctx_data); 
+
+    void update_end_of_chunk(PhysicalDevChunk* chunk, off_t offset);
+    void update_vb_data_start_offset(uint32_t vdev_id, off_t offset);
 
 private:
     void load_and_repair_devices(std::vector< dev_info >& devices);
