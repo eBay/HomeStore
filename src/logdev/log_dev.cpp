@@ -1,10 +1,40 @@
 #include "log_dev.hpp"
 
 namespace homestore {
-void LogDev::load(uint64_t dev_offset) {
-    do_load(dev_offset);
-    m_log_records.reinit(m_log_idx);
-    m_last_flush_idx = m_log_idx - 1;
+void LogDev::start(bool format) {
+    HS_ASSERT_NOTNULL(LOGMSG, m_append_comp_cb, "Expected Append callback to be registered");
+    HS_ASSERT_NOTNULL(LOGMSG, m_store_found_cb, "Expected Log store found callback to be registered");
+    HS_ASSERT_NOTNULL(LOGMSG, m_logfound_cb, "Expected Logs found callback to be registered");
+
+    // First read the info block
+    auto bstore = HomeBlks::instance()->get_logdev_blkstore();
+
+    // TODO: Don't create 2K as is, but query vdev_info layer to see available vb_context size
+    m_info_blk_buf = sisl::make_aligned_unique< uint8_t >(dma_boundary, logdev_info_block::size);
+    bstore->get_vb_context(m_info_blk_buf.get());
+    m_info_blk = (logdev_info_block*)m_info_blk_buf.get();
+
+    if (format) {
+        m_info_blk->start_dev_offset = 0;
+        m_id_reserver = std::make_unique< IDReserver >(128); // Start with estimate of 128 stores
+        _persist_info_block();
+    } else {
+        sisl::blob b{&m_info_blk->store_id_info[0], logdev_info_block::store_info_size()};
+        m_id_reserver = std::make_unique< IDReserver >(b);
+
+        // Notify to the caller that a new log store was reserved earlier and it is being loaded
+        uint32_t store_id;
+        if (m_id_reserver->first_reserved_id(store_id)) {
+            m_store_found_cb(store_id);
+            while (m_id_reserver->next_reserved_id(store_id)) {
+                m_store_found_cb(store_id);
+            }
+        }
+
+        do_load(m_info_blk->start_dev_offset);
+        m_log_records.reinit(m_log_idx);
+        m_last_flush_idx = m_log_idx - 1;
+    }
 }
 
 void LogDev::do_load(uint64_t device_cursor) {
@@ -14,7 +44,7 @@ void LogDev::do_load(uint64_t device_cursor) {
     store->lseek(device_cursor);
     while (read_more) {
         // Read the data in bulk (of say 512K) and then process each log group header
-        auto buf = std::make_shared< sisl::byte_array >(bulk_read_size, dma_boundary);
+        auto buf = sisl::make_byte_array(bulk_read_size, dma_boundary);
         auto rbuf = buf->bytes;
         ssize_t this_read_remains;
 
@@ -50,7 +80,7 @@ void LogDev::do_load(uint64_t device_cursor) {
 
                 // Do a callback on the found log entry
                 log_buffer b(buf, data_offset, rec->size);
-                m_logfound_cb(log_key{header->start_idx() + i, log_group_offset}, b);
+                m_logfound_cb(rec->store_id, logdev_key{header->start_idx() + i, log_group_offset}, b);
                 ++i;
             }
 
@@ -62,14 +92,14 @@ void LogDev::do_load(uint64_t device_cursor) {
     }
 }
 
-int64_t LogDev::append(uint8_t* data, uint32_t size, void* cb_context) {
+int64_t LogDev::append_async(logstore_id_t store_id, uint8_t* data, uint32_t size, void* cb_context) {
     auto idx = m_log_idx.fetch_add(1, std::memory_order_acq_rel);
     flush_if_needed(size, idx);
-    m_log_records.create(idx, data, size, cb_context);
+    m_log_records.create(idx, store_id, data, size, cb_context);
     return idx;
 }
 
-log_buffer LogDev::read(const log_key& key) {
+log_buffer LogDev::read(const logdev_key& key) {
     static thread_local sisl::aligned_unique_ptr< uint8_t > _read_buf;
 
     // First read the offset and read the log_group. Then locate the log_idx within that and get the actual data
@@ -98,7 +128,7 @@ log_buffer LogDev::read(const log_key& key) {
     serialized_log_record* rec = header->nth_record(key.idx - header->start_log_idx);
     uint32_t data_offset = (rec->offset + (rec->is_inlined ? 0 : header->oob_data_offset));
 
-    log_buffer b(std::make_shared< sisl::byte_array >((size_t)rec->size));
+    log_buffer b(sisl::make_byte_array((size_t)rec->size));
     if ((data_offset + b.size()) < initial_read_size) {
         std::memcpy((void*)b.data(), (void*)(rbuf + data_offset), b.size()); // Already read them enough, copy the data
     } else {
@@ -126,7 +156,7 @@ log_group_header* LogDev::read_validate_header(uint8_t* buf, uint32_t size, bool
         // We do not have the magic, its now to determine if it is indeed corruption in the data or we reached the end
         // of the cycle. The way to determine is keep reading all 512 block boundary and try to see if we see any valid
         // headers and whose log_idx > our idx
-        std::shared_ptr< sisl::byte_array > safe_buf;
+        sisl::byte_array safe_buf;
         while ((safe_buf = read_next_header(max_blks_read_for_additional_check)) != nullptr) {
             auto header = (log_group_header*)safe_buf.get();
             HS_ASSERT_CMP(RELEASE, m_log_idx.load(std::memory_order_acquire), >, header->start_idx(),
@@ -161,13 +191,33 @@ log_group_header* LogDev::read_validate_header(uint8_t* buf, uint32_t size, bool
     return header;
 }
 
-std::shared_ptr< sisl::byte_array > LogDev::read_next_header(uint32_t max_buf_reads) {
+uint32_t LogDev::reserve_store_id(bool persist) {
+    std::unique_lock lg(m_store_reserve_mutex);
+    auto id = m_id_reserver.reserve();
+    if (persist) { _persist_info_block(); }
+    return id;
+}
+
+void LogDev::persist_store_ids() {
+    std::unique_lock lg(m_store_reserve_mutex);
+    _persist_info_block();
+}
+
+void LogDev::_persist_info_block() {
+    auto store = HomeBlks::instance()->get_logdev_blkstore();
+    auto store_id_buf = m_id_reserver.serialize();
+
+    memcpy((void*)m_info_blk->store_id_info, store_id_buf->bytes, store_id_buf->size);
+    store->update_vb_context(m_info_blk_buf.get());
+}
+
+sisl::byte_array LogDev::read_next_header(uint32_t max_buf_reads) {
     uint32_t read_count = 0;
 
     auto store = HomeBlks::instance()->get_logdev_blkstore();
     while (read_count < max_buf_reads) {
-        auto tmp_buf = std::make_shared< sisl::byte_array >(dma_boundary, dma_boundary);
-        auto read_bytes = store->read((void*)tmp_buf.get(), dma_boundary);
+        auto tmp_buf = sisl::make_byte_array(dma_boundary, dma_boundary);
+        auto read_bytes = store->read((void*)tmp_buf->bytes, dma_boundary);
         if (read_bytes == 0) {
             store->lseek(0);
             continue;
@@ -175,7 +225,7 @@ std::shared_ptr< sisl::byte_array > LogDev::read_next_header(uint32_t max_buf_re
         assert(read_bytes >= (ssize_t)sizeof(log_group_header));
         ++read_count;
 
-        auto header = (log_group_header*)tmp_buf.get();
+        auto header = (log_group_header*)tmp_buf->bytes;
         if (header->magic_word() == LOG_GROUP_HDR_MAGIC) { return tmp_buf; }
     }
     return nullptr;
@@ -258,7 +308,7 @@ void LogDev::on_flush_completion(LogGroup* lg) {
 
     for (auto idx = lg->m_flush_log_idx_from; idx <= lg->m_flush_log_idx_upto; ++idx) {
         auto& record = m_log_records.at(idx);
-        m_append_comp_cb(log_key{idx, lg->m_log_dev_offset}, record.context);
+        m_append_comp_cb(record.store_id, logdev_key{idx, lg->m_log_dev_offset}, record.context);
     }
 #if 0
         if (upto_idx > (m_last_truncate_idx + LogDev::truncate_idx_frequency)) {

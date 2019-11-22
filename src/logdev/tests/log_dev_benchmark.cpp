@@ -72,13 +72,13 @@ static std::shared_ptr< iomgr::ioMgr > start_homestore(uint32_t ndevices, uint64
     return iomgr_obj;
 }
 
-static void on_append_completion(log_key lkey, void* ctx) {
+static void on_append_completion(logdev_key lkey, void* ctx) {
     _log_keys.push_back(lkey);
     LOGINFO("Append completed with log_idx = {} offset = {}", lkey.idx, lkey.dev_offset);
     if (first_offset == -1UL) { first_offset = lkey.dev_offset; }
 }
 
-static void on_log_found(log_key lkey, log_buffer buf) {
+static void on_log_found(logdev_key lkey, log_buffer buf) {
     _log_keys.push_back(lkey);
     LOGINFO("Found a log with log_idx = {} offset = {}", lkey.idx, lkey.dev_offset);
 }

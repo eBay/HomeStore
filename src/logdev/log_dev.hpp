@@ -5,14 +5,15 @@
 #include <fds/utils.hpp>
 #include <volume/home_blks.hpp>
 #include <blkstore/blkstore.hpp>
+#include <fds/id_reserver.hpp>
 
 SDS_LOGGING_DECL(logdev)
 
 namespace homestore {
 
 typedef int64_t logid_t;
-
 typedef uint32_t crc32_t;
+typedef uint32_t logstore_id_t;
 
 static constexpr crc32_t init_crc32 = 0x12345678;
 static constexpr crc32_t INVALID_CRC32_VALUE = 0x0u;
@@ -46,6 +47,7 @@ struct serialized_log_record {
     uint32_t size;           // Size of this log record
     uint32_t offset : 31;    // Offset within the log_group where data is residing
     uint32_t is_inlined : 1; // Is the log data is inlined or out-of-band area
+    logstore_id_t store_id;  // ID of the store this log is associated with
 } __attribute__((packed));
 
 /* This structure represents the in-memory representation of a log record */
@@ -57,7 +59,8 @@ struct log_record {
     uint32_t size;
     void* context;
 
-    log_record(uint8_t* d, uint32_t sz, void* ctx) {
+    log_record(logstore_id_t sid, uint8_t* d, uint32_t sz, void* ctx) {
+        store_id = sid;
         data_ptr = d;
         size = sz;
         context = ctx;
@@ -226,29 +229,19 @@ protected:
     friend class sisl::ObjectAllocator< logdev_req >;
 };
 
-//
-// We have only one LogDev instance serving all the volume log write requests;
-//
-// LogDev exposes APIs to LogStore layer.
-//
-// TODO:
-// 1. Handle multiple chunk in blkstore layer
-// 2. Recovery support : journal superblock;
-//
-
 typedef int64_t logid_t;
-struct log_key {
+struct logdev_key {
     logid_t idx;
     uint64_t dev_offset;
 };
 
 struct log_buffer {
 public:
-    log_buffer(const std::shared_ptr< sisl::byte_array >& base_data, uint32_t offset, uint32_t size) :
+    log_buffer(const sisl::byte_array& base_data, uint32_t offset, uint32_t size) :
             m_base_buffer(base_data),
             m_log_data_view(m_base_buffer->bytes + offset, size) {}
 
-    log_buffer(const std::shared_ptr< sisl::byte_array >& base_data) : log_buffer(base_data, 0, base_data->size) {}
+    log_buffer(const sisl::byte_array& base_data) : log_buffer(base_data, 0, base_data->size) {}
     log_buffer(const log_buffer& other) = default;
 
     sisl::blob blob() const { return m_log_data_view; }
@@ -256,14 +249,25 @@ public:
     uint32_t size() const { return m_log_data_view.size; }
 
 private:
-    std::shared_ptr< sisl::byte_array > m_base_buffer;
+    sisl::byte_array m_base_buffer;
     sisl::blob m_log_data_view;
 };
 
+/* This structure represents the logdevice super block which will sit inside the user_context block of the
+ * vdev_info_block. */
+struct logdev_info_block {
+    static constexpr uint32_t size = 2048;
+    static constexpr uint32_t store_info_size() { return size - sizeof(logdev_info_block); }
+
+    uint64_t start_dev_offset = 0;
+    uint8_t store_id_info[0];
+} __attribute__((packed));
+
 class LogDev {
 public:
-    typedef std::function< void(log_key, void*) > log_append_comp_callback;
-    typedef std::function< void(log_key, log_buffer) > log_found_callback;
+    typedef std::function< void(logstore_id_t, logdev_key, void*) > log_append_comp_callback;
+    typedef std::function< void(logstore_id_t, logdev_key, log_buffer) > log_found_callback;
+    typedef std::function< void(logstore_id_t) > store_found_callback;
 
     // static constexpr int64_t flush_threshold_size = 4096;
     static constexpr int64_t flush_threshold_size = 100;
@@ -275,9 +279,18 @@ public:
     }
 
     /**
+     * @brief Start the logdev. This method reads the log virtual dev info block, loads all of the store and prepares
+     * to the recovery. It is expected that all callbacks are registered before calling the start.
+     *
+     * @param format: Do we need to format the logdev or not.
+     */
+    void start(bool format);
+
+    /**
      * @brief Append the data to the log device asynchronously. The buffer that is passed is expected to be valid, till
      * the append callback is done.
      *
+     * @param store_id: The upper layer store id for this log record
      * @param data : Pointer to the data to be appended
      * @param size : Size of the data. At this point it does not support size > Max_Atomic_Page_size of underlying
      * structure which could be 8K
@@ -286,7 +299,7 @@ public:
      *
      * @return logid_t : log_idx of the log of the data.
      */
-    logid_t append(uint8_t* data, uint32_t size, void* cb_context);
+    logid_t append_async(logstore_id_t store_id, uint8_t* data, uint32_t size, void* cb_context);
 
     /**
      * @brief Read the log id from the device offset
@@ -298,7 +311,7 @@ public:
      * @return log_buffer : Opaque structure which contains the data blob and its size. It is safe buffer and hence it
      * need not be freed and can be cheaply passed it around.
      */
-    log_buffer read(const log_key& key);
+    log_buffer read(const logdev_key& key);
 
     /**
      * @brief Load the data from the blkstore starting with offset. This method loads data in bulk and then call the
@@ -314,7 +327,7 @@ public:
      * NOTE: This method is not thread safe.
      *
      * @param cb Callback to call upon completion of append. It will call with 2 parameters
-     * a) log_key: The key to access the log dev data. It can be treated as opaque (internally has log_id and device
+     * a) logdev_key: The key to access the log dev data. It can be treated as opaque (internally has log_id and device
      * offset)
      * b) Context: The context which was passed to append method.
      */
@@ -325,15 +338,43 @@ public:
      * NOTE: This method is not thread safe.
      *
      * @param cb Callback to call upon completion of append. It will call with 3 parameters
-     * a) log_key: The key to access the log dev data, which is retrieved from the device. It can be treated as opaque
-     * (internally has log_id and device offset)
-     * b) log_buffer: Opaque structure which contains the data and size of the log which key refers to. The underlying
-     * buffer it returns is ref counted and hence it need not be explicitly freed.
+     * a) logdev_key: The key to access the log dev data, which is retrieved from the device. It can be treated as
+     * opaque (internally has log_id and device offset) b) log_buffer: Opaque structure which contains the data and size
+     * of the log which key refers to. The underlying buffer it returns is ref counted and hence it need not be
+     * explicitly freed.
      */
     void register_logfound_cb(const log_found_callback& cb) { m_logfound_cb = cb; }
 
+    /**
+     * @brief Register the callback when a store is found during loading phase
+     *
+     * @param cb This callback is called only during load phase where it found a log store. The parameter is a store id
+     * used to register earlier.
+     */
+    void register_store_found_cb(const store_found_callback& cb) { m_store_found_cb = cb; }
+
     // callback from blkstore, registered at blkstore creation;
     void process_logdev_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
+
+    /**
+     * @brief Reserve logstore id and persist if needed. It persists the entire map about the logstore id inside the
+     *
+     * @param persist : Need to persist the reserved id or not
+     * @return uint32_t : Return the reserved id
+     */
+    logstore_id_t reserve_store_id(bool persist = true);
+
+    /**
+     * @brief Is the given store id already reserved.
+     *
+     * @return true or false
+     */
+    bool is_reserved_store_id(logstore_id_t id);
+
+    /**
+     * @brief This method persist the store ids reserved/unreserved inside the vdev super block
+     */
+    void persist_store_ids();
 
     crc32_t get_prev_crc() const { return m_last_crc; }
 
@@ -348,10 +389,13 @@ private:
     void on_flush_completion(LogGroup* lg);
     void do_load(uint64_t offset);
     log_group_header* read_validate_header(uint8_t* buf, uint32_t size, bool* read_more);
-    std::shared_ptr< sisl::byte_array > read_next_header(uint32_t max_buf_reads);
+    sisl::byte_array read_next_header(uint32_t max_buf_reads);
+
+    void _persist_info_block();
 
 private:
     sisl::StreamTracker< log_record > m_log_records; // The container which stores all in-memory log records
+    std::unique_ptr< sisl::IDReserver > m_id_reserver;
     std::atomic< logid_t > m_log_idx = 0;            // Generator of log idx
     std::atomic< int64_t > m_pending_flush_size = 0; // How much flushable logs are pending
     std::atomic< bool > m_is_flushing = false; // Is LogDev currently flushing (so far supports one flusher at a time)
@@ -362,6 +406,11 @@ private:
     crc32_t m_last_crc = INVALID_CRC32_VALUE;
     log_append_comp_callback m_append_comp_cb = nullptr;
     log_found_callback m_logfound_cb = nullptr;
+    store_found_callback m_store_found_cb = nullptr;
 
+    // LogDev Info block related fields
+    std::mutex m_store_reserve_mutex;
+    sisl::aligned_unique_ptr< uint8_t > m_info_blk_buf = nullptr;
+    logdev_info_block* m_info_blk = nullptr;
 }; // LogDev
 } // namespace homestore

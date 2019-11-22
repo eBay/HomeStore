@@ -7,16 +7,16 @@ THREAD_BUFFER_INIT;
 SDS_LOGGING_INIT(test_log_dev, btree_structures, btree_nodes, btree_generics, cache, device, httpserver_lmod, iomgr,
                  varsize_blk_alloc, VMOD_VOL_MAPPING, volume, logdev, flip)
 
-std::vector< log_key > _log_keys;
+std::vector< logdev_key > _logdev_keys;
 static uint64_t first_offset = (uint64_t)-1UL;
-static void on_append_completion(log_key lkey, void* ctx) {
-    _log_keys.push_back(lkey);
+static void on_append_completion(logdev_key lkey, void* ctx) {
+    _logdev_keys.push_back(lkey);
     LOGINFO("Append completed with log_idx = {} offset = {}", lkey.idx, lkey.dev_offset);
     if (first_offset == -1UL) { first_offset = lkey.dev_offset; }
 }
 
-static void on_log_found(log_key lkey, log_buffer buf) {
-    _log_keys.push_back(lkey);
+static void on_log_found(logdev_key lkey, log_buffer buf) {
+    _logdev_keys.push_back(lkey);
     LOGINFO("Found a log with log_idx = {} offset = {}", lkey.idx, lkey.dev_offset);
 }
 
@@ -100,7 +100,7 @@ int main(int argc, char* argv[]) {
     }
 
     auto i = 0;
-    for (auto& lk : _log_keys) {
+    for (auto& lk : _logdev_keys) {
         auto b = ld->read(lk);
         auto exp_val = std::to_string(i);
         auto actual_val = std::string((const char*)b.data(), (size_t)b.size());
