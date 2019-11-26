@@ -842,6 +842,7 @@ public:
         REGISTER_COUNTER(btree_int_node_count, "Btree Interior node count", "btree_node_count",
                          {"node_type", "interior"}, sisl::_publish_as::publish_as_gauge);
         REGISTER_COUNTER(btree_split_count, "Total number of btree node splits");
+        REGISTER_COUNTER(insert_failed_count, "Total number of inserts failed");
         REGISTER_COUNTER(btree_merge_count, "Total number of btree node merges");
         REGISTER_COUNTER(btree_depth, "Depth of btree", sisl::_publish_as::publish_as_gauge);
 

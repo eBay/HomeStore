@@ -13,7 +13,9 @@ SDS_LOGGING_DECL(cache)
 namespace homestore {
 
 // This structure represents each entry into the evictable location
-struct LRUEvictRecord : public boost::intrusive::list_base_hook<> {};
+struct LRUEvictRecord : public boost::intrusive::list_base_hook<> {
+    LRUEvictRecord& operator=(LRUEvictRecord const& rhs) = default;
+};
 
 class LRUEvictionPolicy {
 public:

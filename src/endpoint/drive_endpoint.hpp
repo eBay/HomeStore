@@ -44,9 +44,9 @@ struct iocb_info : public iocb {
 };
 
 class DriveEndPointMetrics : public sisl::MetricsGroupWrapper {
-    static int thread_num;
+    static std::atomic<int> thread_num;
 public:
-    DriveEndPointMetrics() : sisl::MetricsGroupWrapper("DriveEndPoint", std::to_string(++thread_num)) {
+    DriveEndPointMetrics() : sisl::MetricsGroupWrapper("DriveEndPoint", std::to_string(thread_num.fetch_add(1))) {
         LOGINFO("metrics is inited");
         REGISTER_COUNTER(spurious_events, "spurious events");
         REGISTER_COUNTER(io_get_event_err, "io get event error");

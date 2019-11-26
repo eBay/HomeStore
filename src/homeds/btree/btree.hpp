@@ -106,6 +106,9 @@ public:
         FlipCondition cond2;
         freq.set_count(2000000000);
         freq.set_percent(2);
+    
+        FlipCondition null_cond;
+        fc->create_condition("", flip::Operator::DONT_CARE, (int)1, &null_cond);
 
         fc->create_condition("nuber of entries in a node", flip::Operator::EQUAL, 0, &cond1);
         fc->create_condition("nuber of entries in a node", flip::Operator::EQUAL, 1, &cond2);
@@ -114,12 +117,12 @@ public:
         fc->create_condition("nuber of entries in a node", flip::Operator::EQUAL, 4, &cond1);
         fc->create_condition("nuber of entries in a node", flip::Operator::EQUAL, 2, &cond2);
         
-        fc->inject_noreturn_flip("btree_delay_and_split", {cond1, cond2}, freq);
-        fc->inject_noreturn_flip("btree_delay_and_split_leaf", {cond1, cond2}, freq);
-        fc->inject_noreturn_flip("btree_parent_node_full", {}, freq);
-        fc->inject_noreturn_flip("btree_leaf_node_split", {}, freq);
-        fc->inject_retval_flip("btree_upgrade_delay", {}, freq, 20);
-        fc->inject_retval_flip("writeBack_completion_req_delay_us", {}, freq, 20);
+        fc->inject_retval_flip("btree_delay_and_split", {cond1, cond2}, freq, 20);
+        fc->inject_retval_flip("btree_delay_and_split_leaf", {cond1, cond2}, freq, 20);
+        fc->inject_noreturn_flip("btree_parent_node_full", {null_cond}, freq);
+        fc->inject_noreturn_flip("btree_leaf_node_split", {null_cond}, freq);
+        fc->inject_retval_flip("btree_upgrade_delay", {null_cond}, freq, 20);
+        fc->inject_retval_flip("writeBack_completion_req_delay_us", {null_cond}, freq, 20);
     }
 
     static void set_error_flip() {
@@ -129,11 +132,14 @@ public:
         freq.set_count(2000000000);
         freq.set_percent(1);
         
-        fc->inject_noreturn_flip("btree_split_failure", {}, freq);
-        fc->inject_noreturn_flip("btree_write_comp_fail", {}, freq);
-        fc->inject_noreturn_flip("btree_read_fail", {}, freq);
-        fc->inject_noreturn_flip("btree_write_fail", {}, freq);
-        fc->inject_noreturn_flip("btree_refresh_fail", {}, freq);
+        FlipCondition null_cond;
+        fc->create_condition("", flip::Operator::DONT_CARE, (int)1, &null_cond);
+        
+        fc->inject_noreturn_flip("btree_split_failure", {null_cond}, freq);
+        fc->inject_noreturn_flip("btree_write_comp_fail", {null_cond}, freq);
+        fc->inject_noreturn_flip("btree_read_fail", {null_cond}, freq);
+        fc->inject_noreturn_flip("btree_write_fail", {null_cond}, freq);
+        fc->inject_noreturn_flip("btree_refresh_fail", {null_cond}, freq);
     }
 #endif
 
@@ -175,7 +181,7 @@ public:
             return nullptr;
         }
 
-        LOGINFO("btree created {}", cfg.get_name());
+        LOGINFO("btree created {} node size {}", cfg.get_name(), cfg.get_node_size());
         return bt;
     }
 
@@ -188,7 +194,7 @@ public:
             LOGERROR("btree create failed. error {} name {}", ret, cfg.get_name());
             return nullptr;
         }
-        LOGDEBUG("btree created {}", cfg.get_name());
+        LOGDEBUG("btree created {} node size {}", cfg.get_name(), cfg.get_node_size());
         return bt;
     }
 
@@ -200,7 +206,7 @@ public:
                 std::bind(&Btree::process_completions, bt, std::placeholders::_1, std::placeholders::_2), true);
         bt->m_btree_store = std::move(impl_ptr);
         bt->init_recovery(btree_sb);
-        LOGINFO("btree recovered and created {}", cfg.get_name());
+        LOGINFO("btree recovered and created {} node size {}", cfg.get_name(), cfg.get_node_size());
         return bt;
     }
 
@@ -251,7 +257,13 @@ public:
             m_btree_lock.unlock();
             return ret;
         }
-        ret = free(root, free_blk_cb, multinode_req, mem_only);
+        
+        try {
+            ret = free(root, free_blk_cb, multinode_req, mem_only);
+        } catch (std::exception& e) {
+            BT_LOG_ASSERT(false, root, "free returned exception : {}", e.what());
+        }
+
         unlock_node(root, acq_lock);
         m_btree_lock.unlock();
         BT_LOG(DEBUG, , , "btree nodes destroyed");
@@ -310,15 +322,22 @@ public:
                 V val;
                 node->get(i, &val, false);
                 // Caller will free the blk in blkstore in sync mode, which is fine since it is in-memory operation;
-                free_blk_cb(val);
+                try {
+                    free_blk_cb(val);
+                } catch (std::exception& e) {
+                    BT_LOG_ASSERT(false, node, "free_blk_cb returned exception: {}", e.what());
+                }
             }
         }
       
         if (ret != btree_status_t::success) {
             return ret;
         }
-        
-        free_node(node, multinode_req, mem_only);
+        try {
+            free_node(node, multinode_req, mem_only);
+        } catch (std::exception& e) {
+            BT_LOG_ASSERT(false, node, "free_node returned exception: {}", e.what());
+        }
         return ret;
     }
 
@@ -1360,9 +1379,9 @@ done:
             }
             for (auto &pair : replace_kv) { // insert is based on compare() of BtreeKey
                 auto status = my_node->insert(pair.first, pair.second);
-                BT_LOG_ASSERT_CMP(EQ, status, btree_status_t::success, );
                 if (status != btree_status_t::success) {
-                    return status;
+                    COUNTER_INCREMENT(m_metrics, insert_failed_count, 1);
+                    return btree_status_t::retry;
                  }
             }
         } else {

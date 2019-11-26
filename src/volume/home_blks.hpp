@@ -58,6 +58,7 @@ struct vol_sb_header {
     uint32_t gen_cnt;
     BlkId    blkid;
     uint64_t boot_cnt;
+    boost::uuids::uuid uuid;
 } __attribute((packed));
 
 struct vol_config_sb : vol_sb_header {
@@ -82,7 +83,6 @@ struct vol_ondisk_sb : vol_sb_header {
     vol_state                        state;
     uint64_t                         page_size;
     uint64_t                         size;
-    boost::uuids::uuid               uuid;
     char                             vol_name[VOL_NAME_SIZE];
     homeds::btree::btree_super_block btree_sb;
 

@@ -81,6 +81,9 @@ public:
         is_new_allocation =  true;
         uint8_t *mem = allocate_mem(store->get_node_size());
         auto btree_node = new (mem) MemBtreeNode();
+        if (btree_node == nullptr) {
+            throw std::bad_alloc();
+        }
 
         if (is_leaf) {
             bnodeid_t bid(reinterpret_cast<std::uintptr_t>(mem),0);
@@ -89,6 +92,7 @@ public:
             bnodeid_t bid(reinterpret_cast<std::uintptr_t>(mem),0);
             auto n = new(mem + sizeof(MemBtreeNode)) VariantNode<InteriorNodeType, K, V >(&bid, true, store->m_cfg);
         }
+        
         auto mbh = (mem_btree_node_header *)btree_node;
         mbh->magic = 0xDEADBEEF;
         mbh->refcount.set(1);
@@ -105,6 +109,10 @@ public:
 
     static uint8_t *allocate_mem(uint32_t node_size) {
         uint8_t *mem = (uint8_t *)malloc(node_size);
+        if (mem == nullptr) {
+            throw std::bad_alloc();
+        }
+
         return mem;
     }
 

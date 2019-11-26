@@ -149,7 +149,7 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
         /* create a chunk */
         uint64_t align_size = ALIGN_SIZE(SUPERBLOCK_SIZE, HomeStoreConfig::phys_page_size);
         HS_ASSERT_CMP(LOGMSG, get_size() % HomeStoreConfig::phys_page_size, ==, 0);
-        m_mgr->create_new_chunk(this, SUPERBLOCK_SIZE, get_size() - align_size, nullptr);
+        m_mgr->create_new_chunk(this, align_size, get_size() - align_size, nullptr);
 
         /* check for min size */
         uint64_t min_size = SUPERBLOCK_SIZE + 2 * dm_info_size;

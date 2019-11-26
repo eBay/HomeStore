@@ -543,7 +543,11 @@ public:
     void destroy() {
         /* XXX: do we need to handle error condition here ?. In the next boot we will automatically recaim these blocks
          */
-        m_bt->destroy(std::bind(&mapping::process_free_blk_callback, this, std::placeholders::_1), false);
+        auto ret = m_bt->destroy(std::bind(&mapping::process_free_blk_callback, this, std::placeholders::_1), false);
+        if (ret != btree_status_t::success) {
+            LOGERROR("mapping btree destroy returned unsuccessfully : {} ", ret);   
+            assert(0);
+        }
     }
 
     void recovery_cmpltd() { m_bt->recovery_cmpltd(); }
@@ -688,13 +692,13 @@ public:
             (BRangeUpdateCBParam< MappingKey, MappingValue >*)&param);
         m_bt->range_put(key, value, btree_put_type::APPEND_IF_EXISTS_ELSE_INSERT, to_wb_req(req), to_wb_req(req), ureq);
 
-#ifndef NDEBUG
-        // vector<pair<MappingKey, MappingValue>> values;
-        // auto temp = req->lastCommited_seqId;
-        // req->lastCommited_seqId = req->seqId;
-        // get(req, values);
-        // req->lastCommited_seqId = temp;
-        // validate_get_response(key.start(), key.get_n_lba(), values, &value, req);
+#if 0
+        vector<pair<MappingKey, MappingValue>> values;
+        auto temp = req->lastCommited_seqId;
+        req->lastCommited_seqId = req->seqId;
+        get(req, values);
+        req->lastCommited_seqId = temp;
+        validate_get_response(key.start(), key.get_n_lba(), values, &value, req);
 #endif
         return no_error;
     }

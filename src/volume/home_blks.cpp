@@ -57,19 +57,29 @@ HomeBlks::HomeBlks(const init_params& cfg) :
     HomeStoreConfig::max_chunks = MAX_CHUNKS;
     HomeStoreConfig::max_vdevs = MAX_VDEVS;
     HomeStoreConfig::max_pdevs = MAX_PDEVS;
-    HomeStoreConfig::min_page_size = m_cfg.min_virtual_page_size;
+    HomeStoreConfig::min_io_size = m_cfg.min_virtual_page_size > HomeStoreConfig::atomic_phys_page_size ? 
+                                            HomeStoreConfig::atomic_phys_page_size : m_cfg.min_virtual_page_size;
     HomeStoreConfig::open_flag = m_cfg.flag;
     HomeStoreConfig::is_read_only = (m_cfg.is_read_only) ? true : false;
 #ifndef NDEBUG
-//    HomeStoreConfig::mem_btree_page_size = m_cfg.mem_btree_page_size;
+    HomeStoreConfig::mem_btree_page_size = m_cfg.mem_btree_page_size;
+    flip::Flip::instance().start_rpc_server();
 #endif
+    /* Btree leaf node in mapping btree should accomdate minimum 2 entries to do the split. And on a average
+     * a value consume 2 bytes (for checksum) per blk and few bytes for each IO and node header.
+     * max_blk_cnt represents max number of blks blk allocator should give in a blk. We are taking 
+     * conservatively 4 entries in a node with avg size of 2 for each blk.
+     * Note :- This restriction will go away once btree start supporinting higer size value.
+     */
+    HomeStoreConfig::max_blk_cnt = HomeStoreConfig::atomic_phys_page_size/(4 * 2);
+    
     m_data_pagesz = m_cfg.min_virtual_page_size;
 
     nlohmann::json json;
     json["phys_page_size"]          = HomeStoreConfig::phys_page_size;
     json["atomic_phys_page_size"]   = HomeStoreConfig::atomic_phys_page_size;
     json["align_size"]              = HomeStoreConfig::align_size;
-    json["min_page_size"]           = HomeStoreConfig::min_page_size;
+    json["min_io_size"]             = HomeStoreConfig::min_io_size;
     json["open_flag"]               = HomeStoreConfig::open_flag;
     json["cache_size"]              = m_cfg.cache_size;
     json["system_uuid"]             = boost::lexical_cast<std::string>(m_cfg.system_uuid);
@@ -83,6 +93,8 @@ HomeBlks::HomeBlks(const init_params& cfg) :
 
     assert(VOL_SB_SIZE >= sizeof(vol_ondisk_sb));
     assert(VOL_SB_SIZE >= sizeof(vol_config_sb));
+    assert(HomeStoreConfig::phys_page_size >= HomeStoreConfig::atomic_phys_page_size);
+    assert(HomeStoreConfig::phys_page_size >= HomeStoreConfig::min_io_size);
 
     m_out_params.max_io_size = VOL_MAX_IO_SIZE;
     int ret = posix_memalign((void**)&m_cfg_sb, HomeStoreConfig::align_size, VOL_SB_SIZE);
@@ -109,7 +121,12 @@ void HomeBlks::populate_disk_attrs() {
         /* We should take these params from the config file or from the disks direectly */
         HomeStoreConfig::phys_page_size = 4096;
         HomeStoreConfig::align_size = 4096;
+#ifndef NDEBUG
+          /* TODO: i am going to change it to 512 once it is passed in homestore nightly */
         HomeStoreConfig::atomic_phys_page_size = 4096;
+#else
+        HomeStoreConfig::atomic_phys_page_size = 4096;
+#endif
     }
     LOGINFO("atomic_phys_page size is set to {}", HomeStoreConfig::atomic_phys_page_size);
     LOGINFO("align size is set to {}", HomeStoreConfig::align_size);
@@ -192,7 +209,7 @@ VolumePtr HomeBlks::create_volume(const vol_params& params) {
         return nullptr;
     }
 
-    if (params.page_size != HomeStoreConfig::min_page_size) {
+    if (params.page_size != get_data_pagesz()) {
         LOGERROR("{} page size is not supported", params.page_size);
         return nullptr;
     }
@@ -464,6 +481,7 @@ void HomeBlks::config_super_block_init(BlkId& bid) {
     m_cfg_sb->magic = VOL_SB_MAGIC;
     m_cfg_sb->boot_cnt = 0;
     m_cfg_sb->init_flag(0);
+    m_cfg_sb->uuid = m_cfg.system_uuid;
     config_super_block_write();
 }
 
@@ -588,12 +606,23 @@ boost::intrusive_ptr< BlkBuffer > HomeBlks::get_valid_buf(const std::vector< boo
                                                           bool& rewrite) {
     boost::intrusive_ptr< BlkBuffer > valid_buf = nullptr;
     uint32_t                          gen_cnt = 0;
+    boost::uuids::uuid                uuid;
     for (uint32_t i = 0; i < bbuf.size(); i++) {
         vol_sb_header* hdr = (vol_sb_header*)(bbuf[i]->at_offset(0).bytes);
+        
         if (hdr->magic != VOL_SB_MAGIC || hdr->version != VOL_SB_VERSION) {
             LOGINFO("found superblock with invalid magic and version");
             continue;
         }
+
+        if (gen_cnt == 0) {
+            /* update only for first valid sb */
+            uuid = hdr->uuid;
+        }
+       
+       /* It is not possible to get two valid super blocks with different uuid. */
+        HS_ASSERT_CMP(RELEASE, uuid, ==, hdr->uuid)
+        
         if (hdr->gen_cnt > gen_cnt) {
             if (valid_buf != nullptr) {
                 /* superblock is not consistent across the disks */
@@ -722,13 +751,12 @@ void HomeBlks::init_done(std::error_condition err, const out_params& params) {
     if (!err) {
         auto system_cap = get_system_capacity();
         LOGINFO("{}", system_cap.to_string());
+#ifndef NDEBUG
+        /* It will trigger race conditions without generating any IO error */
+        set_io_flip();
+#endif
     }
     m_cfg.init_done_cb(err, m_out_params);
-
-#ifndef NDEBUG
-    /* It will trigger race conditions without generating any IO error */
-    set_io_flip();
-#endif
 }
 
 void HomeBlks::create_data_blkstore(vdev_info_block* vb) {

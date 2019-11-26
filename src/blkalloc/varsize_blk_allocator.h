@@ -466,6 +466,7 @@ public:
                          sisl::_publish_as::publish_as_gauge);
 
         REGISTER_COUNTER(num_alloc, "number of times alloc called");
+        REGISTER_COUNTER(alloc_fail, "number of times alloc failed");
         /* In ideal scnario if there are no splits then it should be same as num_alloc */
         REGISTER_COUNTER(num_split, "number of times it split");
         /* It should be zero in ideal scenario */

@@ -46,7 +46,7 @@ print("dir path:", dirpath )
 
 # Start IO process
 file_args = "--input-files=" + mnt_point
-process = Popen([dirpath + "test_load", "--gtest_filter=*File*", file_args, "--run_time=1800"])
+process = Popen([dirpath + "test_load", "--gtest_filter=*File*", file_args, "--run_time=1800", "--num_io=100000000000", "--num_keys=1000000]")
 
 # Inject error after 900 seconds
 sleep(900)
@@ -56,7 +56,7 @@ random.seed(datetime.datetime.now())
 x = random.randrange(0, len(ip_addr_list))
 
 # Inject error
-if test_type == "io_error_tests" and test_type == "panic_tests":
+if test_type == "io_error_tests" or test_type == "panic_tests":
     set_flip(ip_addr_list[x], test_type)
 
 if test_type == "drive_fatal_tests":
