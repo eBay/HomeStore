@@ -44,11 +44,11 @@ def normal():
     print("normal test completed")
 
 def normal_flip():
-    print("normal test started")
+    print("normal test started with flip = 2")
     subprocess.check_call(dirpath + "test_volume \
-            --run_time=10000 --max_num_writes=5000000 --gtest_filter=IOTest.init_io_test --remove_file=0 --verify_data=0 \
+            --run_time=3600 --max_num_writes=5000000 --gtest_filter=IOTest.init_io_test --remove_file=0 --verify_data=0 \
             --flip=2 --log_mods flip", stderr=subprocess.STDOUT, shell=True)
-    print("normal test completed")
+    print("normal test completed with flip =  2")
 
 ## @test    load
 #  @brief   Test using load generator
