@@ -4,7 +4,7 @@ pipeline {
     environment {
         ORG = 'sds'
         PROJECT = 'homestore'
-        CONAN_CHANNEL = 'develop'
+        CONAN_CHANNEL = 'snapshot'
         CONAN_USER = 'sds'
         CONAN_PASS = credentials('CONAN_PASS')
     }

@@ -699,6 +699,153 @@ out:
         return remove_any(BtreeSearchRange(key), nullptr, outval, dependent_req, cookie);
     }
 
+    void diff(Btree *other, uint32_t param, vector <pair <K, V>> *diff_kv) {
+       std::vector< pair<K,V> > my_kvs, other_kvs;
+
+       get_all_kvs(&my_kvs);
+       other->get_all_kvs(&other_kvs);
+       auto it1 = my_kvs.begin();
+       auto it2 = other_kvs.begin();
+
+       K k1, k2;
+       V v1, v2;
+
+       if (it1 != my_kvs.end()) {
+           k1 = it1->first;
+           v1 = it1->second;
+       }
+       if (it2 != other_kvs.end()) {
+           k2 = it2->first;
+           v2 = it2->second;
+       }
+
+       while ((it1 != my_kvs.end()) && (it2 != other_kvs.end())) {
+           if (k1.preceeds(&k2)) {
+               /* k1 preceeds k2 - push k1 and continue */
+               diff_kv->emplace_back(make_pair(k1,v1));
+               it1++;
+               if (it1 == my_kvs.end()) {
+                   break;
+               }
+               k1 = it1->first;
+               v1 = it1->second;
+           } else if (k1.succeeds(&k2)) {
+               /* k2 preceeds k1 - push k2 and continue */
+               diff_kv->emplace_back(make_pair(k2, v2));
+               it2++;
+               if (it2 == other_kvs.end()) {
+                   break;
+               }
+               k2 = it2->first;
+               v2 = it2->second;
+           } else {
+               /* k1 and k2 overlaps */
+               std::vector< pair< K, V > > overlap_kvs;
+               diff_read_next_t            to_read = READ_BOTH;
+
+               v1.get_overlap_diff_kvs(&k1, &v1, &k2, &v2, param, to_read, overlap_kvs);
+               for (auto ovr_it = overlap_kvs.begin(); ovr_it != overlap_kvs.end(); ovr_it++) {
+                   diff_kv->emplace_back(make_pair(ovr_it->first, ovr_it->second));
+               }
+
+               switch (to_read) {
+               case READ_FIRST:
+                   it1++;
+                   if (it1 == my_kvs.end()) {
+                       // Add k2,v2
+                       diff_kv->emplace_back(make_pair(k2, v2));
+                       it2++;
+                       break;
+                   }
+                   k1 = it1->first;
+                   v1 = it1->second;
+                   break;
+
+               case READ_SECOND:
+                   it2++;
+                   if (it2 == other_kvs.end()) {
+                       diff_kv->emplace_back(make_pair(k1, v1));
+                       it1++;
+                       break;
+                   }
+                   k2 = it2->first;
+                   v2 = it2->second;
+                   break;
+
+                case READ_BOTH: 
+                   /* No tail part */
+                   it1++;
+                   if (it1 == my_kvs.end()) {
+                       break;
+                   }
+                   k1 = it1->first;
+                   v1 = it1->second;
+                   it2++;
+                   if (it2 == my_kvs.end()) {
+                       break;
+                   }
+                   k2 = it2->first;
+                   v2 = it2->second;
+                   break;
+
+                default:
+                    LOGERROR("ERROR: Getting Overlapping Diff KVS for {}:{}, {}:{}, to_read {}", k1, v1, k2, v2, to_read);
+                    /* skip both */
+                    it1++;
+                    if (it1 == my_kvs.end()) {
+                        break;
+                    }
+                    k1 = it1->first;
+                    v1 = it1->second;
+                    it2++;
+                    if (it2 == my_kvs.end()) {
+                        break;
+                    }
+                    k2 = it2->first;
+                    v2 = it2->second;
+                    break;
+                }
+           }
+       }
+
+       while (it1 != my_kvs.end()) {
+           diff_kv->emplace_back(make_pair(it1->first, it1->second));
+           it1++;
+       }
+
+       while (it2 != other_kvs.end()) {
+           diff_kv->emplace_back(make_pair(it2->first, it2->second));
+           it2++;
+       }
+
+    }
+
+    void merge(Btree* other, match_item_cb_update_t<K,V> merge_cb) {
+
+          std::vector< pair< K, V > > other_kvs;
+
+          other->get_all_kvs(&other_kvs);
+          for (auto it = other_kvs.begin(); it != other_kvs.end(); it++) {
+              K                           k = it->first;
+              V                           v = it->second;
+              BRangeUpdateCBParam< K, V > local_param(k, v);
+              K                           start(k.start(), 1), end(k.end(), 1);
+
+              auto                       search_range = BtreeSearchRange(start, true, end, true);
+              BtreeUpdateRequest< K, V > ureq(search_range, merge_cb, (BRangeUpdateCBParam< K, V >*)&local_param);
+              range_put(k, v, btree_put_type::APPEND_IF_EXISTS_ELSE_INSERT, nullptr, nullptr, ureq);
+          }
+    }
+
+    void get_all_kvs(std::vector< pair< K, V > >* kvs) {
+        std::vector< BtreeNodePtr > leaves;
+
+        get_leaf_nodes(&leaves);
+        for (auto l : leaves) {
+            l->get_all_kvs(kvs);
+        }
+    }
+
     void print_tree() {
         m_btree_lock.read_lock();
         std::stringstream ss;
@@ -746,6 +893,55 @@ private:
                 to_string(node->get_edge_id(),ss);
         }
         unlock_node(node, acq_lock);
+    }
+
+    /*
+     * Get all leaf nodes from the read-only tree (CP tree, Snap Tree etc)
+     * NOTE: Doesn't take any lock
+     */
+    void get_leaf_nodes(std::vector <BtreeNodePtr> *leaves) {
+        /* TODO: Add a flag to indicate RO tree
+         * TODO: Check the flag here
+         */
+        get_leaf_nodes(m_root_node, leaves);
+    }
+
+    // TODO: Remove the locks once we have RO flags
+    void get_leaf_nodes(bnodeid_t bnodeid, std::vector< BtreeNodePtr >* leaves) {
+        BtreeNodePtr node;
+
+        if (read_and_lock_node(bnodeid, node, LOCKTYPE_READ, LOCKTYPE_READ, nullptr) != btree_status_t::success) {
+            return;
+        }
+
+        if (node->is_leaf()) {
+            BtreeNodePtr next_node = nullptr;
+            leaves->push_back(node);
+            while (node->get_next_bnode().is_valid()) {
+                auto ret =
+                    read_and_lock_sibling(node->get_next_bnode(), next_node, LOCKTYPE_READ, LOCKTYPE_READ, nullptr);
+                unlock_node(node, LOCKTYPE_READ);
+                assert(ret == btree_status_t::success);
+                if (ret != btree_status_t::success) {
+                    LOGERROR("Cannot read sibling node for {}", node);
+                    return;
+                }
+                assert(next_node->is_leaf());
+                leaves->push_back(next_node);
+                node = next_node;
+            }
+            unlock_node(node, LOCKTYPE_READ);
+            return;
+        }
+
+        assert(node->get_total_entries() > 0);
+        if (node->get_total_entries() > 0) {
+            BtreeNodeInfo p;
+            node->get(0, &p, false);
+            //XXX If we cannot get rid of locks, lock child and release parent here
+            get_leaf_nodes(p.bnode_id(), leaves);
+        }
+        unlock_node(node, LOCKTYPE_READ);
     }
 
     btree_status_t do_get(BtreeNodePtr my_node, const BtreeSearchRange& range, BtreeKey* outkey, 

@@ -5,6 +5,9 @@ set(VOLUME_SOURCE_FILES
       )
 add_library(hs_volume OBJECT ${VOLUME_SOURCE_FILES})
 
+set(TEST_MERGE_SOURCE_FILES
+       vol_merge.cpp
+      )
 set(TEST_VOLUME_SOURCE_FILES
        vol_gtest.cpp
       )
@@ -15,9 +18,13 @@ set(BTREE_CHECKER_SOURCE_FILES
        btree_checker.cpp
       )
 
+add_executable(test_merge
+                  ${TEST_MERGE_SOURCE_FILES}
+              )
 add_executable(test_volume
                   ${TEST_VOLUME_SOURCE_FILES}
                 )
+
 
 # Coverage doesn't like binaries that don't run...
 if (NOT ${CONAN_BUILD_COVERAGE})
@@ -32,6 +39,8 @@ if (NOT ${CONAN_BUILD_COVERAGE})
     TARGET_LINK_LIBRARIES(perf_test_volume ${Boost_LIBRARIES})
     TARGET_LINK_LIBRARIES(check_btree ${Boost_LIBRARIES})
 endif ()
+
+target_link_libraries(test_merge homeblks ${COMMON_LIB_DEPS})
 
 target_link_libraries(test_volume homeblks ${COMMON_LIB_DEPS})
 

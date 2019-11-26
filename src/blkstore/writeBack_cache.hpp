@@ -158,6 +158,9 @@ public:
         buf_mtx.unlock();
 
         for (auto it = dependent_req_q.begin(); it != dependent_req_q.end(); ++it) {
+            if ((*it).get() == nullptr) {
+                break;
+            }
             std::unique_lock< std::mutex > mtx((*it)->mtx);
             if ((*it)->state != WB_REQ_COMPL) {
                 /* insert it into dependent req queue */
