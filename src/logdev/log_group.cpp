@@ -56,6 +56,8 @@ bool LogGroup::add_record(const log_record& record, int64_t log_idx) {
 
     // Fill the slots
     m_record_slots[m_nrecords].size = record.size;
+    m_record_slots[m_nrecords].store_id = record.store_id;
+    m_record_slots[m_nrecords].store_seq_num = record.seq_num;
     if (record.is_inlinebale()) {
         m_record_slots[m_nrecords].offset = m_inline_data_pos;
         m_record_slots[m_nrecords].is_inlined = true;

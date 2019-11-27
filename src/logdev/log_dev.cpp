@@ -2,9 +2,9 @@
 
 namespace homestore {
 void LogDev::start(bool format) {
-    HS_ASSERT_NOTNULL(LOGMSG, m_append_comp_cb, "Expected Append callback to be registered");
-    HS_ASSERT_NOTNULL(LOGMSG, m_store_found_cb, "Expected Log store found callback to be registered");
-    HS_ASSERT_NOTNULL(LOGMSG, m_logfound_cb, "Expected Logs found callback to be registered");
+    HS_ASSERT(LOGMSG, (m_append_comp_cb != nullptr), "Expected Append callback to be registered");
+    HS_ASSERT(LOGMSG, (m_store_found_cb != nullptr), "Expected Log store found callback to be registered");
+    HS_ASSERT(LOGMSG, (m_logfound_cb != nullptr), "Expected Logs found callback to be registered");
 
     // First read the info block
     auto bstore = HomeBlks::instance()->get_logdev_blkstore();
@@ -16,11 +16,12 @@ void LogDev::start(bool format) {
 
     if (format) {
         m_info_blk->start_dev_offset = 0;
-        m_id_reserver = std::make_unique< IDReserver >(128); // Start with estimate of 128 stores
+        m_id_reserver = std::make_unique< sisl::IDReserver >(128u); // Start with estimate of 128 stores
         _persist_info_block();
     } else {
-        sisl::blob b{&m_info_blk->store_id_info[0], logdev_info_block::store_info_size()};
-        m_id_reserver = std::make_unique< IDReserver >(b);
+        sisl::byte_array b = sisl::make_byte_array(logdev_info_block::store_info_size(), 0);
+        memcpy((void*)b->bytes, (void*)&m_info_blk->store_id_info[0], logdev_info_block::store_info_size());
+        m_id_reserver = std::make_unique< sisl::IDReserver >(b);
 
         // Notify to the caller that a new log store was reserved earlier and it is being loaded
         uint32_t store_id;
@@ -80,7 +81,7 @@ void LogDev::do_load(uint64_t device_cursor) {
 
                 // Do a callback on the found log entry
                 log_buffer b(buf, data_offset, rec->size);
-                m_logfound_cb(rec->store_id, logdev_key{header->start_idx() + i, log_group_offset}, b);
+                m_logfound_cb(rec->store_id, rec->store_seq_num, {header->start_idx() + i, log_group_offset}, b);
                 ++i;
             }
 
@@ -92,10 +93,11 @@ void LogDev::do_load(uint64_t device_cursor) {
     }
 }
 
-int64_t LogDev::append_async(logstore_id_t store_id, uint8_t* data, uint32_t size, void* cb_context) {
+int64_t LogDev::append_async(logstore_id_t store_id, logstore_seq_num_t seq_num, uint8_t* data, uint32_t size,
+                             void* cb_context) {
     auto idx = m_log_idx.fetch_add(1, std::memory_order_acq_rel);
     flush_if_needed(size, idx);
-    m_log_records.create(idx, store_id, data, size, cb_context);
+    m_log_records.create(idx, store_id, seq_num, data, size, cb_context);
     return idx;
 }
 
@@ -193,7 +195,7 @@ log_group_header* LogDev::read_validate_header(uint8_t* buf, uint32_t size, bool
 
 uint32_t LogDev::reserve_store_id(bool persist) {
     std::unique_lock lg(m_store_reserve_mutex);
-    auto id = m_id_reserver.reserve();
+    auto id = m_id_reserver->reserve();
     if (persist) { _persist_info_block(); }
     return id;
 }
@@ -205,7 +207,7 @@ void LogDev::persist_store_ids() {
 
 void LogDev::_persist_info_block() {
     auto store = HomeBlks::instance()->get_logdev_blkstore();
-    auto store_id_buf = m_id_reserver.serialize();
+    auto store_id_buf = m_id_reserver->serialize();
 
     memcpy((void*)m_info_blk->store_id_info, store_id_buf->bytes, store_id_buf->size);
     store->update_vb_context(m_info_blk_buf.get());

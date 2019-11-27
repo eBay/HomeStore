@@ -14,6 +14,7 @@ namespace homestore {
 typedef int64_t logid_t;
 typedef uint32_t crc32_t;
 typedef uint32_t logstore_id_t;
+typedef int64_t logstore_seq_num_t;
 
 static constexpr crc32_t init_crc32 = 0x12345678;
 static constexpr crc32_t INVALID_CRC32_VALUE = 0x0u;
@@ -44,10 +45,11 @@ static constexpr uint32_t max_blks_read_for_additional_check = 20;
 /************************************* Log Record Section ************************************/
 /* Each log record which is serialized to the persistent store in the following format */
 struct serialized_log_record {
-    uint32_t size;           // Size of this log record
-    uint32_t offset : 31;    // Offset within the log_group where data is residing
-    uint32_t is_inlined : 1; // Is the log data is inlined or out-of-band area
-    logstore_id_t store_id;  // ID of the store this log is associated with
+    uint32_t size;                    // Size of this log record
+    uint32_t offset : 31;             // Offset within the log_group where data is residing
+    uint32_t is_inlined : 1;          // Is the log data is inlined or out-of-band area
+    logstore_seq_num_t store_seq_num; // Seqnum by the log store
+    logstore_id_t store_id;           // ID of the store this log is associated with
 } __attribute__((packed));
 
 /* This structure represents the in-memory representation of a log record */
@@ -58,9 +60,12 @@ struct log_record {
     uint8_t* data_ptr;
     uint32_t size;
     void* context;
+    logstore_id_t store_id;
+    logstore_seq_num_t seq_num;
 
-    log_record(logstore_id_t sid, uint8_t* d, uint32_t sz, void* ctx) {
+    log_record(logstore_id_t sid, logstore_seq_num_t snum, uint8_t* d, uint32_t sz, void* ctx) {
         store_id = sid;
+        seq_num = snum;
         data_ptr = d;
         size = sz;
         context = ctx;
@@ -266,7 +271,7 @@ struct logdev_info_block {
 class LogDev {
 public:
     typedef std::function< void(logstore_id_t, logdev_key, void*) > log_append_comp_callback;
-    typedef std::function< void(logstore_id_t, logdev_key, log_buffer) > log_found_callback;
+    typedef std::function< void(logstore_id_t, logstore_seq_num_t, logdev_key, log_buffer) > log_found_callback;
     typedef std::function< void(logstore_id_t) > store_found_callback;
 
     // static constexpr int64_t flush_threshold_size = 4096;
@@ -291,6 +296,7 @@ public:
      * the append callback is done.
      *
      * @param store_id: The upper layer store id for this log record
+     * @param seq_num: Upper layer store seq_num
      * @param data : Pointer to the data to be appended
      * @param size : Size of the data. At this point it does not support size > Max_Atomic_Page_size of underlying
      * structure which could be 8K
@@ -299,7 +305,8 @@ public:
      *
      * @return logid_t : log_idx of the log of the data.
      */
-    logid_t append_async(logstore_id_t store_id, uint8_t* data, uint32_t size, void* cb_context);
+    logid_t append_async(logstore_id_t store_id, logstore_seq_num_t seq_num, uint8_t* data, uint32_t size,
+                         void* cb_context);
 
     /**
      * @brief Read the log id from the device offset
