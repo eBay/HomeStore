@@ -11,6 +11,9 @@
 #include <async_http/http_server.hpp>
 #include <threadpool/thread_pool.h>
 
+#ifndef DEBUG
+extern bool same_value_gen;
+#endif
 namespace homestore {
 
 #define VOL_MAX_IO_SIZE MEMVEC_MAX_IO_SIZE
@@ -55,6 +58,7 @@ struct vol_sb_header {
     uint32_t gen_cnt;
     BlkId    blkid;
     uint64_t boot_cnt;
+    boost::uuids::uuid uuid;
 } __attribute((packed));
 
 struct vol_config_sb : vol_sb_header {
@@ -79,7 +83,6 @@ struct vol_ondisk_sb : vol_sb_header {
     vol_state                        state;
     uint64_t                         page_size;
     uint64_t                         size;
-    boost::uuids::uuid               uuid;
     char                             vol_name[VOL_NAME_SIZE];
     homeds::btree::btree_super_block btree_sb;
 
@@ -101,10 +104,10 @@ using namespace homeds::btree;
 
 #define BLKSTORE_BUFFER_TYPE                                                                                           \
     BtreeBuffer< MappingKey, MappingValue, btree_node_type::VAR_VALUE,                     \
-                                btree_node_type::VAR_VALUE, 4096>
+                                btree_node_type::VAR_VALUE >
 #define MappingBtreeDeclType                                                                                           \
     Btree< btree_store_type::SSD_BTREE, MappingKey, MappingValue, btree_node_type::VAR_VALUE, \
-                          btree_node_type::VAR_VALUE, 4096, writeback_req >
+                          btree_node_type::VAR_VALUE, writeback_req >
 class HomeBlks : public VolInterface {
     static HomeBlks* _instance;
 
@@ -147,6 +150,7 @@ public:
     ~HomeBlks() {  
         m_thread_id.join();
     }
+    virtual vol_interface_req_ptr  create_vol_hb_req() override;
     virtual std::error_condition write(const VolumePtr& vol, uint64_t lba, uint8_t* buf, uint32_t nblks,
                                        const vol_interface_req_ptr& req) override;
     virtual std::error_condition read(const VolumePtr& vol, uint64_t lba, int nblks,
@@ -157,6 +161,8 @@ public:
 
     virtual std::error_condition remove_volume(const boost::uuids::uuid& uuid) override;
     virtual VolumePtr            lookup_volume(const boost::uuids::uuid& uuid) override;
+    virtual SnapshotPtr          snap_volume(VolumePtr) override;
+
     virtual const char*          get_name(const VolumePtr& vol) override;
     virtual uint64_t             get_page_size(const VolumePtr& vol) override;
     virtual boost::uuids::uuid   get_uuid(VolumePtr vol) override;

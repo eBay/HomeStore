@@ -27,7 +27,14 @@
 #include <boost/preprocessor/stringize.hpp>
 
 ENUM(btree_status_t, uint32_t, success, not_found, item_found, closest_found, closest_removed, retry, has_more,
-     read_failed, write_failed, stale_buf, refresh_failed, put_failed, space_not_avail);
+     read_failed, write_failed, stale_buf, refresh_failed, put_failed, space_not_avail, split_failed, insert_failed);
+
+typedef enum {
+    READ_NONE = 0,
+    READ_FIRST = 1,
+    READ_SECOND = 2,
+    READ_BOTH = 3,
+} diff_read_next_t;
 
 /* We should always find the child smaller or equal then  search key in the interior nodes. */
 #ifndef NDEBUG
@@ -147,7 +154,7 @@ struct btree_multinode_req : public sisl::ObjLifeCounter< struct btree_multinode
             dependent_req_q(0),
             is_write_modifiable(is_write_modifiable),
             is_sync(is_sync) {
-        if (!req.get()) {
+        if (req.get()) {
             dependent_req_q.push_back(req);
         }
     }
@@ -440,6 +447,10 @@ public:
     virtual bool is_extent_key() { return true; }
     virtual int compare_end(const BtreeKey* other) const = 0;
     virtual int compare_start(const BtreeKey* other) const override = 0;
+
+    virtual bool preceeds(const BtreeKey *other) const = 0;
+    virtual bool succeeds(const BtreeKey *other) const = 0;
+
     virtual void copy_end_key_blob(const homeds::blob& b) override = 0;
 
     /* we always compare the end key in case of extent */
@@ -456,6 +467,8 @@ public:
 class BtreeValue {
 public:
     BtreeValue() {}
+    virtual ~BtreeValue() {}
+
     // BtreeValue(const BtreeValue& other) = delete; // Deleting copy constructor forces the derived class to define its
     // own copy constructor
 
@@ -467,6 +480,12 @@ public:
     virtual uint32_t get_blob_size() const = 0;
     virtual void     set_blob_size(uint32_t size) = 0;
     virtual uint32_t estimate_size_after_append(const BtreeValue& new_val) = 0;
+
+    virtual void get_overlap_diff_kvs(BtreeKey* k1, BtreeValue* v1, BtreeKey* k2, BtreeValue* v2,
+                                      uint32_t param, diff_read_next_t& to_read,
+                                      std::vector< std::pair< BtreeKey, BtreeValue > >& overlap_kvs) {
+        LOGINFO("Not Implemented");
+    }
 
     virtual std::string to_string() const { return ""; }
 };
@@ -681,6 +700,10 @@ public:
 
     void append_blob(const BtreeValue& new_val, BtreeValue& existing_val) override { set_blob(new_val.get_blob()); }
 
+    void get_overlap_diff_kvs(BtreeKey* k1, BtreeValue* v1, BtreeKey* k2, BtreeValue* v2, uint32_t param,
+                              diff_read_next_t&                                 to_read,
+                              std::vector< std::pair< BtreeKey, BtreeValue > >& overlap_kvs) override {}
+
     uint32_t        get_blob_size() const override { return sizeof(bnodeid_t); }
     static uint32_t get_fixed_size() { return sizeof(bnodeid_t); }
     void            set_blob_size(uint32_t size) override {}
@@ -721,6 +744,10 @@ public:
 
     void set_blob_size(uint32_t size) override {}
 
+    void get_overlap_diff_kvs(BtreeKey* k1, BtreeValue* v1, BtreeKey* k2, BtreeValue* v2, uint32_t param,
+                              diff_read_next_t&                                 to_read,
+                              std::vector< std::pair< BtreeKey, BtreeValue > >& overlap_kvs) override {}
+
     EmptyClass& operator=(const EmptyClass& other) { return (*this); }
 
     uint32_t estimate_size_after_append(const BtreeValue& new_val) override { return 0; }
@@ -735,6 +762,7 @@ private:
     uint32_t m_max_value_size;
 
     uint32_t m_node_area_size;
+    uint32_t m_node_size;
 
     uint8_t m_ideal_fill_pct;
     uint8_t m_split_pct;
@@ -742,14 +770,16 @@ private:
     std::string m_btree_name; // Unique name for the btree
 
 public:
-    BtreeConfig(const char* btree_name = nullptr) {
+    BtreeConfig(uint32_t node_size, const char* btree_name = nullptr) {
         m_max_objs = 0;
         m_max_key_size = m_max_value_size = 0;
         m_ideal_fill_pct = 90;
         m_split_pct = 50;
         m_btree_name = btree_name ? btree_name : std::string("btree");
+        m_node_size = node_size;
     }
 
+    uint32_t get_node_size() { return m_node_size; };
     uint32_t get_max_key_size() const { return m_max_key_size; }
     void     set_max_key_size(uint32_t max_key_size) { m_max_key_size = max_key_size; }
 
@@ -812,6 +842,7 @@ public:
         REGISTER_COUNTER(btree_int_node_count, "Btree Interior node count", "btree_node_count",
                          {"node_type", "interior"}, sisl::_publish_as::publish_as_gauge);
         REGISTER_COUNTER(btree_split_count, "Total number of btree node splits");
+        REGISTER_COUNTER(insert_failed_count, "Total number of inserts failed");
         REGISTER_COUNTER(btree_merge_count, "Total number of btree node merges");
         REGISTER_COUNTER(btree_depth, "Depth of btree", sisl::_publish_as::publish_as_gauge);
 
@@ -827,6 +858,7 @@ public:
                            {"node_type", "leaf"}, HistogramBucketsType(ExponentialOfTwoBuckets));
         REGISTER_COUNTER(btree_retry_count, "number of retries");
         REGISTER_COUNTER(write_err_cnt, "number of errors in write");
+        REGISTER_COUNTER(split_failed, "split failed");
         REGISTER_COUNTER(query_err_cnt, "number of errors in query");
         REGISTER_COUNTER(read_node_count_in_write_ops, "number of nodes read in write_op");
         REGISTER_COUNTER(read_node_count_in_query_ops, "number of nodes read in query_op");

@@ -54,6 +54,7 @@ public:
     explicit MapKey(uint64_t lba_start, uint64_t n_lba) : MappingKey(lba_start, n_lba) {}
     explicit MapKey(const MapKey& key) : MappingKey() { set(key.start(), key.get_n_lba()); }
     explicit MapKey(const MappingKey& key) { set(key.start(), key.get_n_lba()); }
+    MapKey() {};
 
     virtual bool operator==(const KeySpec& other) const override {
         return (compare((const BtreeKey*)&(MapKey&)other) == 0);

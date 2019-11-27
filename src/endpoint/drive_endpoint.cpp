@@ -41,7 +41,7 @@ thread_local int                        DriveEndPoint::ev_fd = 0;
 thread_local io_context_t               DriveEndPoint::ioctx = 0;
 thread_local stack< struct iocb_info* > DriveEndPoint::iocb_list;
 thread_local DriveEndPointMetrics       DriveEndPoint::m_metrics = DriveEndPointMetrics();
-int                                     DriveEndPointMetrics::thread_num = 0;
+std::atomic<int>                        DriveEndPointMetrics::thread_num = 0;
 
 DriveEndPoint::DriveEndPoint(std::shared_ptr< iomgr::ioMgr > iomgr, comp_callback cb) :
         EndPoint(iomgr),
@@ -218,7 +218,7 @@ void DriveEndPoint::async_writev(int m_sync_fd, const iovec* iov, int iovcnt, ui
     m_metrics.init();
     if (iocb_list.empty() 
 #ifdef _PRERELEASE
-    || homestore_flip->test_flip("io_write_iocb_empty_flip", iovcnt, size)
+    || homestore_flip->test_flip("io_write_iocb_empty_flip")
 #endif
     ) {
         COUNTER_INCREMENT(m_metrics, no_iocb, 1);
@@ -272,7 +272,7 @@ void DriveEndPoint::async_readv(int m_sync_fd, const iovec* iov, int iovcnt, uin
     m_metrics.init();
     if (iocb_list.empty()
 #ifdef _PRERELEASE
-    || homestore_flip->test_flip("io_read_iocb_empty_flip", iovcnt, size)
+    || homestore_flip->test_flip("io_read_iocb_empty_flip")
 #endif
     ) {
         COUNTER_INCREMENT(m_metrics, no_iocb, 1);

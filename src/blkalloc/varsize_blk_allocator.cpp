@@ -65,8 +65,8 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig& cfg, bool init) 
         m_segments.push_back(seg);
     }
 
-    // Create a btree to cache temperature, blks info (blk num, page id etc..)
-    BtreeConfig btree_cfg(cfg.get_name().c_str());
+    BtreeConfig btree_cfg(HomeStoreConfig::mem_btree_page_size, cfg.get_name().c_str());
+
     btree_cfg.set_max_objs(cfg.get_max_cache_blks());
     btree_cfg.set_max_key_size(sizeof(VarsizeAllocCacheEntry));
     btree_cfg.set_max_value_size(0);
@@ -231,12 +231,12 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
     BLKALLOC_ASSERT_CMP(LOGMSG, nblks % hints.multiplier, ==, 0);
 
 #ifdef _PRERELEASE
-    if (homestore_flip->test_flip("varsize_blkalloc_no_blks", nblks)) {
+    if (homestore_flip->test_flip("varsize_blkalloc_no_blks")) {
         return BLK_ALLOC_SPACEFULL;
     }
 
-    auto split_cnt = homestore_flip->get_test_flip< int >("blkalloc_split_blk", nblks);
-    if (!hints.is_contiguous && nblks != 1 && split_cnt) {
+    auto split_cnt = homestore_flip->get_test_flip< int >("blkalloc_split_blk");
+    if (!hints.is_contiguous && split_cnt && nblks > split_cnt.get()) {
         blks_rqstd = ALIGN_SIZE((nblks / split_cnt.get()), hints.multiplier);
         BLKALLOC_LOG(DEBUG, varsize_blk_alloc, "blocks requested={}, nblks={}, split_cnt={}", blks_rqstd, nblks,
                      split_cnt.get());
@@ -247,6 +247,9 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
     while (blks_alloced != nblks && retry_cnt < MAX_RETRY_CNT) {
         BlkId blkid;
         COUNTER_INCREMENT(m_metrics, num_split, 1);
+        if (blks_rqstd > HomeStoreConfig::max_blk_cnt) {
+            blks_rqstd = ALIGN_SIZE_TO_LEFT(HomeStoreConfig::max_blk_cnt, hints.multiplier);
+        }
         if (alloc(blks_rqstd, hints, &blkid, true) != BLK_ALLOC_SUCCESS) {
             /* check the cache to see what blocks are available and get those
              * blocks from the btree cache.
@@ -258,12 +261,12 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
                 BLKALLOC_LOG(ERROR, , "Could not allocate any blocks. Running out of space");
             }
 
-            /* It is because of a bug in btree where we can keep checking for the edge entry
+            /* It is because of a bug in btree where we can keep checking for the leaf node
              * in the btree cache which doesn't have any keys. This code will go away once we
              * have the range query implemented in btree.
              */
-            if (new_blks_rqstd == blks_rqstd) {
-                blks_rqstd = ALIGN_SIZE((new_blks_rqstd / 2), hints.multiplier);
+            if (new_blks_rqstd >= blks_rqstd) {
+                blks_rqstd = ALIGN_SIZE((blks_rqstd / 2), hints.multiplier);
             } else {
                 blks_rqstd = new_blks_rqstd;
             }
@@ -288,7 +291,8 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
             m_blk_cache->print_tree();
         }
         BLKALLOC_LOG(ERROR, , "blks_alloced != nblks : {}  {}", blks_alloced, nblks);
-        BLKALLOC_ASSERT_CMP(LOGMSG, blks_alloced, <, nblks);
+        BLKALLOC_ASSERT_CMP(LOGMSG, blks_alloced, ==, nblks);
+        COUNTER_INCREMENT(m_metrics, alloc_fail, 1);
         /* free blks */
         for (auto it = out_blkid.begin(); it != out_blkid.end(); ) {
             free(*it);

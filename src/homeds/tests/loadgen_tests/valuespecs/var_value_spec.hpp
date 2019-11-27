@@ -16,7 +16,8 @@ namespace loadgen {
 template < size_t Max_Size >
 class VarBytesValue : public homeds::btree::BtreeValue, public ValueSpec {
 public:
-    static VarBytesValue< Max_Size > gen_value(ValuePattern spec, VarBytesValue< Max_Size >* ref_value = nullptr) {
+    static std::shared_ptr< VarBytesValue <Max_Size> > gen_value(ValuePattern spec, 
+                                       VarBytesValue< Max_Size >* ref_value = nullptr) {
         VarBytesValue val;
         size_t        size = 0;
         while (size < 8) {
@@ -32,7 +33,8 @@ public:
             // We do not support other gen spec yet
             assert(0);
         }
-        return val;
+        std::shared_ptr< VarBytesValue <Max_Size> > temp = std::make_shared< VarBytesValue <Max_Size> >(val);
+        return temp;
     }
 
     static constexpr bool     is_fixed_size() { return false; }
@@ -93,15 +95,6 @@ public:
     }
 
     void set_bytes_ptr() { m_bytes_ptr = m_bytes[0]; }
-
-    virtual int compare(ValueSpec& other) override {
-        VarBytesValue* vb = (VarBytesValue*)&other;
-        return std::strcmp((char*)&m_bytes[0], (char*)vb->get_blob().bytes);
-    }
-    virtual bool is_consecutive(ValueSpec& v) override {
-        assert(0);
-        return false;
-    }
 
 private:
     uint8_t*               m_bytes_ptr = nullptr;

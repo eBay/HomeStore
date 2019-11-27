@@ -17,6 +17,10 @@ SDS_OPTION_GROUP(home_blks,
 
 using namespace homestore;
 
+#ifndef DEBUG
+bool same_value_gen = false;
+#endif
+
 HomeBlks*   HomeBlks::_instance = nullptr;
 std::string HomeBlks::version = PACKAGE_VERSION;
 
@@ -55,16 +59,30 @@ HomeBlks::HomeBlks(const init_params& cfg) :
     HomeStoreConfig::max_chunks = MAX_CHUNKS;
     HomeStoreConfig::max_vdevs = MAX_VDEVS;
     HomeStoreConfig::max_pdevs = MAX_PDEVS;
-    HomeStoreConfig::min_page_size = m_cfg.min_virtual_page_size;
+    HomeStoreConfig::min_io_size = m_cfg.min_virtual_page_size > HomeStoreConfig::atomic_phys_page_size
+        ? HomeStoreConfig::atomic_phys_page_size
+        : m_cfg.min_virtual_page_size;
     HomeStoreConfig::open_flag = m_cfg.flag;
     HomeStoreConfig::is_read_only = (m_cfg.is_read_only) ? true : false;
+#ifndef NDEBUG
+    HomeStoreConfig::mem_btree_page_size = m_cfg.mem_btree_page_size;
+    flip::Flip::instance().start_rpc_server();
+#endif
+    /* Btree leaf node in mapping btree should accomdate minimum 2 entries to do the split. And on a average
+     * a value consume 2 bytes (for checksum) per blk and few bytes for each IO and node header.
+     * max_blk_cnt represents max number of blks blk allocator should give in a blk. We are taking
+     * conservatively 4 entries in a node with avg size of 2 for each blk.
+     * Note :- This restriction will go away once btree start supporinting higer size value.
+     */
+    HomeStoreConfig::max_blk_cnt = HomeStoreConfig::atomic_phys_page_size / (4 * 2);
+
     m_data_pagesz = m_cfg.min_virtual_page_size;
 
     nlohmann::json json;
     json["phys_page_size"] = HomeStoreConfig::phys_page_size;
     json["atomic_phys_page_size"] = HomeStoreConfig::atomic_phys_page_size;
     json["align_size"] = HomeStoreConfig::align_size;
-    json["min_page_size"] = HomeStoreConfig::min_page_size;
+    json["min_io_size"] = HomeStoreConfig::min_io_size;
     json["open_flag"] = HomeStoreConfig::open_flag;
     json["cache_size"] = m_cfg.cache_size;
     json["system_uuid"] = boost::lexical_cast< std::string >(m_cfg.system_uuid);
@@ -78,8 +96,8 @@ HomeBlks::HomeBlks(const init_params& cfg) :
 
     assert(VOL_SB_SIZE >= sizeof(vol_ondisk_sb));
     assert(VOL_SB_SIZE >= sizeof(vol_config_sb));
-
-    assert(HomeStoreConfig::atomic_phys_page_size >= HomeStoreConfig::min_page_size);
+    assert(HomeStoreConfig::phys_page_size >= HomeStoreConfig::atomic_phys_page_size);
+    assert(HomeStoreConfig::phys_page_size >= HomeStoreConfig::min_io_size);
 
     m_out_params.max_io_size = VOL_MAX_IO_SIZE;
     int ret = posix_memalign((void**)&m_cfg_sb, HomeStoreConfig::align_size, VOL_SB_SIZE);
@@ -106,7 +124,12 @@ void HomeBlks::populate_disk_attrs() {
         /* We should take these params from the config file or from the disks direectly */
         HomeStoreConfig::phys_page_size = 4096;
         HomeStoreConfig::align_size = 4096;
+#ifndef NDEBUG
+        /* TODO: i am going to change it to 512 once it is passed in homestore nightly */
         HomeStoreConfig::atomic_phys_page_size = 4096;
+#else
+        HomeStoreConfig::atomic_phys_page_size = 4096;
+#endif
     }
     LOGINFO("atomic_phys_page size is set to {}", HomeStoreConfig::atomic_phys_page_size);
     LOGINFO("align size is set to {}", HomeStoreConfig::align_size);
@@ -135,6 +158,8 @@ cap_attrs HomeBlks::get_vol_capacity(const VolumePtr& vol) {
     return cap;
 }
 
+vol_interface_req_ptr HomeBlks::create_vol_hb_req() { return Volume::create_vol_hb_req(); }
+
 std::error_condition HomeBlks::write(const VolumePtr& vol, uint64_t lba, uint8_t* buf, uint32_t nblks,
                                      const vol_interface_req_ptr& req) {
     assert(m_rdy);
@@ -142,9 +167,7 @@ std::error_condition HomeBlks::write(const VolumePtr& vol, uint64_t lba, uint8_t
         assert(0);
         throw std::invalid_argument("null vol ptr");
     }
-    if (!m_rdy || is_shutdown()) {
-        return std::make_error_condition(std::errc::device_or_resource_busy);
-    }
+    if (!m_rdy || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
     return (vol->write(lba, buf, nblks, req));
 }
 
@@ -154,9 +177,7 @@ std::error_condition HomeBlks::read(const VolumePtr& vol, uint64_t lba, int nblk
         assert(0);
         throw std::invalid_argument("null vol ptr");
     }
-    if (!m_rdy || is_shutdown()) {
-        return std::make_error_condition(std::errc::device_or_resource_busy);
-    }
+    if (!m_rdy || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
     return (vol->read(lba, nblks, req, false));
 }
 
@@ -167,18 +188,20 @@ std::error_condition HomeBlks::sync_read(const VolumePtr& vol, uint64_t lba, int
         assert(0);
         throw std::invalid_argument("null vol ptr");
     }
-    if (!m_rdy || is_shutdown()) {
-        return std::make_error_condition(std::errc::device_or_resource_busy);
-    }
+    if (!m_rdy || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
     return (vol->read(lba, nblks, req, true));
 }
 
 VolumePtr HomeBlks::create_volume(const vol_params& params) {
-    if (!m_rdy || is_shutdown()) {
+    if (m_cfg.is_read_only) {
+        assert(0);
+        LOGERROR("can not create vol on read only boot");
         return nullptr;
     }
 
-    if (params.page_size != HomeStoreConfig::min_page_size) {
+    if (!m_rdy || is_shutdown()) { return nullptr; }
+
+    if (params.page_size != get_data_pagesz()) {
         LOGERROR("{} page size is not supported", params.page_size);
         return nullptr;
     }
@@ -194,9 +217,7 @@ VolumePtr HomeBlks::create_volume(const vol_params& params) {
         bool                                    happened{false};
         std::tie(it, happened) = m_volume_map.emplace(std::make_pair(params.uuid, nullptr));
         if (!happened) {
-            if (m_volume_map.end() != it) {
-                return it->second;
-            }
+            if (m_volume_map.end() != it) { return it->second; }
             throw std::runtime_error("Unknown bug");
         }
         // Okay, this is a new volume so let's create it
@@ -224,15 +245,17 @@ VolumePtr HomeBlks::create_volume(const vol_params& params) {
 //
 
 std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
-    if (!m_rdy || is_shutdown()) {
+
+    if (m_cfg.is_read_only) {
+        assert(0);
         return std::make_error_condition(std::errc::device_or_resource_busy);
     }
+
+    if (!m_rdy || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
     try {
         std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
         auto                                    it = m_volume_map.find(uuid);
-        if (it == m_volume_map.end()) {
-            return std::make_error_condition(std::errc::no_such_device_or_address);
-        }
+        if (it == m_volume_map.end()) { return std::make_error_condition(std::errc::no_such_device_or_address); }
         auto cur_vol = it->second;
         auto sb = cur_vol->get_sb();
         /* Remove the block from the previous super block. We are going to delete the super block later when
@@ -256,22 +279,14 @@ std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
             prev_sb->ondisk_sb->next_blkid = sb->ondisk_sb->next_blkid;
             prev_sb->unlock();
             vol_sb_write(prev_sb);
-            if (sb == m_last_vol_sb) {
-                m_last_vol_sb = prev_sb;
-            }
+            if (sb == m_last_vol_sb) { m_last_vol_sb = prev_sb; }
         } else {
             // no prev_sb, this is the first sb being removed.
             // we need to update m_cfg_sb to sb->nextblkid;
             assert(m_cfg_sb);
             // if there is next sb, sb->next_blkid will be invalid interal blkid, which is good;
             m_cfg_sb->vol_list_head.set(sb->ondisk_sb->next_blkid);
-            if (sb == m_last_vol_sb) {
-                m_last_vol_sb = nullptr;
-            }
-            // persist m_cfg_sb
-            if (!m_cfg.is_read_only) {
-                config_super_block_write();
-            }
+            if (sb == m_last_vol_sb) { m_last_vol_sb = nullptr; }
         }
 
         // updating the next super block
@@ -291,6 +306,10 @@ std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
             next_sb->unlock();
             vol_sb_write(next_sb);
         }
+
+        // persist m_cfg_sb
+        m_cfg_sb->num_vols--;
+        config_super_block_write();
 
         // set the state and remove it from the map
         cur_vol->set_state(DESTROYING);
@@ -314,10 +333,19 @@ VolumePtr HomeBlks::lookup_volume(const boost::uuids::uuid& uuid) {
 
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
     auto                                    it = m_volume_map.find(uuid);
-    if (m_volume_map.end() != it) {
-        return it->second;
-    }
+    if (m_volume_map.end() != it) { return it->second; }
     return nullptr;
+}
+
+SnapshotPtr HomeBlks::snap_volume(VolumePtr volptr) {
+    if (!m_rdy || is_shutdown()) {
+        LOGINFO("Snapshot: volume not online");
+        return nullptr;
+    }
+
+    auto sp = volptr->make_snapshot();
+    LOGINFO("Snapshot created volume {}, Snapshot {}", volptr->to_string(), sp->to_string());
+    return sp;
 }
 
 HomeBlks* HomeBlks::instance() { return _instance; }
@@ -339,6 +367,7 @@ BlkId HomeBlks::alloc_blk() {
 void HomeBlks::vol_sb_init(vol_mem_sb* sb) {
     /* allocate block */
 
+    assert(!m_cfg.is_read_only);
     BlkId                                   bid = alloc_blk();
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
     // No need to hold vol's sb update lock here since it is being initiated and not added to m_volume_map yet;
@@ -367,9 +396,7 @@ void HomeBlks::vol_sb_init(vol_mem_sb* sb) {
     }
 
     m_cfg_sb->num_vols++;
-    if (!m_cfg.is_read_only) {
-        config_super_block_write();
-    }
+    config_super_block_write();
     /* update the last volume super block. If exception happens in between it won't be updated */
     m_last_vol_sb = sb;
 }
@@ -380,8 +407,7 @@ bool HomeBlks::vol_sb_sanity(vol_mem_sb* sb) {
 
 vol_mem_sb* HomeBlks::vol_sb_read(BlkId bid) {
     bool rewrite = false;
-    if (bid.to_integer() == BlkId::invalid_internal_id())
-        return nullptr;
+    if (bid.to_integer() == BlkId::invalid_internal_id()) return nullptr;
     std::vector< boost::intrusive_ptr< BlkBuffer > > bbuf = m_sb_blk_store->read_nmirror(bid, m_cfg.devices.size() - 1);
     boost::intrusive_ptr< BlkBuffer >                valid_buf = get_valid_buf(bbuf, rewrite);
 
@@ -431,9 +457,8 @@ void HomeBlks::config_super_block_init(BlkId& bid) {
     m_cfg_sb->magic = VOL_SB_MAGIC;
     m_cfg_sb->boot_cnt = 0;
     m_cfg_sb->init_flag(0);
-    if (!m_cfg.is_read_only) {
-        config_super_block_write();
-    }
+    m_cfg_sb->uuid = m_cfg.system_uuid;
+    config_super_block_write();
 }
 
 boost::uuids::uuid HomeBlks::get_uuid(VolumePtr vol) { return vol->get_uuid(); }
@@ -547,12 +572,23 @@ boost::intrusive_ptr< BlkBuffer > HomeBlks::get_valid_buf(const std::vector< boo
                                                           bool& rewrite) {
     boost::intrusive_ptr< BlkBuffer > valid_buf = nullptr;
     uint32_t                          gen_cnt = 0;
+    boost::uuids::uuid                uuid;
     for (uint32_t i = 0; i < bbuf.size(); i++) {
         vol_sb_header* hdr = (vol_sb_header*)(bbuf[i]->at_offset(0).bytes);
+
         if (hdr->magic != VOL_SB_MAGIC || hdr->version != VOL_SB_VERSION) {
             LOGINFO("found superblock with invalid magic and version");
             continue;
         }
+
+        if (gen_cnt == 0) {
+            /* update only for first valid sb */
+            uuid = hdr->uuid;
+        }
+
+        /* It is not possible to get two valid super blocks with different uuid. */
+        HS_ASSERT_CMP(RELEASE, uuid, ==, hdr->uuid)
+
         if (hdr->gen_cnt > gen_cnt) {
             if (valid_buf != nullptr) {
                 /* superblock is not consistent across the disks */
@@ -579,9 +615,7 @@ void HomeBlks::scan_volumes() {
     m_scan_cnt++;
     int num_vol = 0;
 #ifdef _PRERELEASE
-    if (homestore_flip->test_flip("reboot_abort")) {
-        abort();
-    }
+    if (homestore_flip->test_flip("reboot_abort")) { abort(); }
 #endif
     try {
         while (blkid.to_integer() != BlkId::invalid_internal_id()) {
@@ -602,11 +636,8 @@ void HomeBlks::scan_volumes() {
                     vol_sb_write(m_last_vol_sb);
                 } else {
                     m_cfg_sb->vol_list_head = sb->ondisk_sb->next_blkid;
-                    m_cfg_sb->num_vols--;
-                    if (!m_cfg.is_read_only) {
-                        config_super_block_write();
-                    }
                 }
+                m_cfg_sb->num_vols--;
             } else {
                 /* create the volume */
                 assert(sb->ondisk_sb->state != DESTROYING);
@@ -648,7 +679,9 @@ void HomeBlks::scan_volumes() {
             LOGINFO("vol found {}", sb->ondisk_sb->vol_name);
         }
 
-        assert(num_vol == m_cfg_sb->num_vols);
+        assert(num_vol <= m_cfg_sb->num_vols);
+        m_cfg_sb->num_vols = num_vol;
+        if (!m_cfg.is_read_only) { config_super_block_write(); }
         /* clear the state in virtual devices as appropiate state is set in volume superblocks */
         if (m_vdev_failed) {
             m_data_blk_store->reset_vdev_failed_state();
@@ -680,6 +713,10 @@ void HomeBlks::init_done(std::error_condition err, const out_params& params) {
     if (!err) {
         auto system_cap = get_system_capacity();
         LOGINFO("{}", system_cap.to_string());
+#ifndef NDEBUG
+        /* It will trigger race conditions without generating any IO error */
+        set_io_flip();
+#endif
     }
     m_cfg.init_done_cb(err, m_out_params);
 }
@@ -779,9 +816,7 @@ void HomeBlks::create_sb_blkstore(vdev_info_block* vb) {
         assert(m_cfg_sb->blkid.to_integer() == blob->blkid.to_integer());
         m_cfg_sb->boot_cnt++;
         /* update the config super block */
-        if (!m_cfg.is_read_only) {
-            config_super_block_write();
-        }
+        if (!m_cfg.is_read_only) { config_super_block_write(); }
     }
 }
 
@@ -810,9 +845,7 @@ void HomeBlks::init_thread() {
         add_devices();
 
         /* create blkstore if it is a first time boot */
-        if (init) {
-            create_blkstores();
-        }
+        if (init) { create_blkstores(); }
 
         //
         // Will not resume shutdown if we reboot from an un-finished shutdown procedure.
@@ -824,9 +857,7 @@ void HomeBlks::init_thread() {
                 // clear the flag and persist to disk, if we received a new shutdown and completed successfully,
                 // the flag should be set again;
                 m_cfg_sb->clear_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
-                if (!m_cfg.is_read_only) {
-                    config_super_block_write();
-                }
+                if (!m_cfg.is_read_only) { config_super_block_write(); }
             } else if (!init) {
                 LOGCRITICAL("System experienced sudden panic since last boot!");
             } else {
@@ -957,9 +988,7 @@ void HomeBlks::set_log_level(sisl::HttpCallData cd) {
     char*             endptr = nullptr;
 
     _new_log_module = evhtp_kvs_find_kv(req->uri->query, "logmodule");
-    if (_new_log_module) {
-        logmodule = _new_log_module->val;
-    }
+    if (_new_log_module) { logmodule = _new_log_module->val; }
 
     _new_log_level = evhtp_kvs_find_kv(req->uri->query, "loglevel");
     if (!_new_log_level) {
@@ -1051,9 +1080,7 @@ void HomeBlks::shutdown_process(shutdown_comp_callback shutdown_comp_cb, bool fo
 
         // clear the shutdown bit on disk;
         m_cfg_sb->set_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
-        if (!m_cfg.is_read_only) {
-            config_super_block_write();
-        }
+        if (!m_cfg.is_read_only) { config_super_block_write(); }
         // free the in-memory copy
         free(m_cfg_sb);
         lg.unlock();
@@ -1110,9 +1137,7 @@ std::error_condition HomeBlks::shutdown(shutdown_comp_callback shutdown_comp_cb,
     //
     {
         std::unique_lock< std::mutex > lk(m_cv_mtx);
-        if (!m_init_finished.load()) {
-            m_cv.wait(lk);
-        }
+        if (!m_init_finished.load()) { m_cv.wait(lk); }
     }
 
     // The volume destructor should be triggered automatcially when ref_cnt drops to zero;

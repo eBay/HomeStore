@@ -34,8 +34,16 @@
 #include "keyspecs/vol_key_spec.hpp"
 #include "valuespecs/vol_value_spec.hpp"
 
-#include "disk_initializer.hpp"
+#include "storespecs/file_store_spec.hpp"
+#include "valuespecs/blk_value_spec.hpp"
 
+#include "disk_initializer.hpp"
+#include <linux/fs.h>
+#include <sys/ioctl.h>
+
+#ifndef DEBUG
+extern bool same_value_gen;
+#endif
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 THREAD_BUFFER_INIT;
@@ -44,7 +52,7 @@ using namespace homeds::loadgen;
 
 #define G_SimpleKV_Mem                                                                                                 \
     BtreeLoadGen< SimpleNumberKey, FixedBytesValue< 64 >,                                                              \
-                  MemBtreeStoreSpec< SimpleNumberKey, FixedBytesValue< 64 >, 4096 >, IOMgrExecutor >
+                  MemBtreeStoreSpec< SimpleNumberKey, FixedBytesValue< 64 >, 512 >, IOMgrExecutor >
 
 #define G_SimpleKV_SSD                                                                                                 \
     BtreeLoadGen< SimpleNumberKey, FixedBytesValue< 64 >,                                                              \
@@ -60,7 +68,10 @@ using namespace homeds::loadgen;
 
 #define G_Volume_Test BtreeLoadGen<VolumeKey, VolumeValue, VolumeStoreSpec<VolumeKey, VolumeValue>, IOMgrExecutor>
 
+#define G_FileKV BtreeLoadGen< MapKey, BlkValue, FileStoreSpec, IOMgrExecutor >
+
 static Param parameters;
+bool loadgen_verify_mode = false;
 
 struct BtreeTest : public testing::Test {
     std::unique_ptr< G_SimpleKV_Mem > loadgen;
@@ -141,8 +152,8 @@ struct SSDBtreeVarKVTest : public testing::Test {
 TEST_F(SSDBtreeVarKVTest, VarKVSSDTest) { this->execute(); }
 
 struct MapTest : public testing::Test {
-    std::unique_ptr< G_MapKV_SSD >   loadgen;
     DiskInitializer< IOMgrExecutor > di;
+    std::unique_ptr< G_MapKV_SSD >   loadgen;
     std::mutex                       m_mtx;
     std::condition_variable          m_cv;
     bool                             is_complete = false;
@@ -164,13 +175,60 @@ struct MapTest : public testing::Test {
     void execute() {
         loadgen = std::make_unique< G_MapKV_SSD >(parameters.NT); // starts iomgr
         di.init(loadgen->get_executor(),
-                std::bind(&MapTest::init_done_cb, this, std::placeholders::_1, std::placeholders::_2));
+                std::bind(&MapTest::init_done_cb, this, std::placeholders::_1, std::placeholders::_2), 512);
         join(); // sync wait for test to finish
         di.cleanup();
     }
 };
 
 TEST_F(MapTest, MapSSDTest) { this->execute(); }
+
+struct FileTest : public testing::Test {
+    std::unique_ptr< G_FileKV >      loadgen;
+    DiskInitializer< IOMgrExecutor > di;
+    std::mutex                       m_mtx;
+    std::condition_variable          m_cv;
+    bool                             is_complete = false;
+
+    void join() {
+        std::unique_lock< std::mutex > lk(m_mtx);
+        m_cv.wait(lk, [this] { return is_complete; });
+    }
+
+    void init_done_cb(std::error_condition err, const homeds::out_params& params1) {
+        loadgen->specific_tests(SPECIFIC_TEST::MAP);
+        LOGINFO("Regression Started");
+        size_t size = 0;
+        for (uint32_t i = 0; i < parameters.file_names.size(); ++i) {
+            auto fd = open(parameters.file_names[i].c_str(), O_RDWR);
+            struct stat buf;
+            uint64_t devsize = 0;
+            if (fstat(fd, &buf) >= 0) {
+                devsize = buf.st_size;
+            } else {
+                ioctl(fd, BLKGETSIZE64, &devsize);
+            }
+            assert(devsize > 0);
+            devsize = devsize - (devsize % MAX_SEGMENT_SIZE);
+            size += devsize;
+        }
+        parameters.NK = size / BLK_SIZE;
+        loadgen->initParam(parameters); // internally inits mapping
+        loadgen->regression(true, false, true, true);
+        is_complete = true;
+        m_cv.notify_one();
+    }
+
+    void execute() {
+        loadgen = std::make_unique< G_FileKV >(parameters.NT); // starts iomgr
+        di.init(loadgen->get_executor(),
+                std::bind(&FileTest::init_done_cb, this, std::placeholders::_1, std::placeholders::_2));
+        join(); // sync wait for test to finish
+        di.cleanup();
+    }
+};
+
+TEST_F(FileTest, FileTest) { this->execute(); }
 
 struct CacheTest : public testing::Test {
     std::unique_ptr< G_CacheKV > loadgen;
@@ -261,13 +319,14 @@ SDS_OPTION_GROUP(
     (enable_write_log, "", "enable_write_log", "enable write log persistence", ::cxxopts::value< uint8_t >()->default_value("0"), "number"),
     (workload_shift_time, "", "workload_shift_time", "time in sec to shift workload",
      ::cxxopts::value< uint64_t >()->default_value("3600"), "number"),
-    (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service", cxxopts::value<int32_t>()->default_value("5001"), "port"))
+    (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service", cxxopts::value<int32_t>()->default_value("5001"), "port"),
+    (files, "", "input-files", "Do IO on a set of files", cxxopts::value< std::vector< std::string > >(),"path,[path,...]"))
 
 SDS_OPTIONS_ENABLE(logging, test_load)
 
 // TODO: VolumeTest couldn't be started after MapSSDTest. Seems because of the http server can't be started because of bing to the same port 5001
 int main(int argc, char* argv[]) {
-    ::testing::GTEST_FLAG(filter) = "*Map*:*Cache*";    
+    ::testing::GTEST_FLAG(filter) = "*Map*:*Cache*";
     testing::InitGoogleTest(&argc, argv);
 
     SDS_OPTIONS_LOAD(argc, argv, logging, test_load)
@@ -300,7 +359,17 @@ int main(int argc, char* argv[]) {
     parameters.PRU += parameters.PD;
     parameters.PRQ = 100;
     srand(time(0));
+#ifndef DEBUG
+    same_value_gen = true;
+#endif
 
+    if (SDS_OPTIONS.count("input-files")) {
+        for (auto const& path : SDS_OPTIONS["input-files"].as< std::vector< std::string > >()) {
+            parameters.file_names.push_back(path);
+        }
+        /* We don't support more then one file */
+        assert(parameters.file_names.size() == 1);
+    }
     assert(parameters.WARM_UP_KEYS <=
            parameters.NK); // this is required as we set MAX_KEYS in key spec as per value of NK
            

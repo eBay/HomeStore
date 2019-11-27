@@ -100,7 +100,6 @@ struct chunk_info_block {
 } __attribute((packed));
 
 /************* Vdev Info Block definition ******************/
-#define MAX_CONTEXT_DATA_SZ 512
 
 struct vdevs_block {
     uint64_t magic;     // Header magic expected to be at the top of block
@@ -115,21 +114,34 @@ struct vdevs_block {
     uint32_t get_first_vdev_id() const { return first_vdev_id; }
 } __attribute((packed));
 
+#define SUPERBLOCK_SIZE (HomeStoreConfig::atomic_phys_page_size)
+#define SUPERBLOCK_PAYLOAD_OFFSET 10
+
+#define MAX_VDEV_INFO_BLOCK_SZ          4096
+#define MAX_VDEV_INFO_BLOCK_HDR_SZ      512
+#define MAX_CONTEXT_DATA_SZ             (MAX_VDEV_INFO_BLOCK_SZ - MAX_VDEV_INFO_BLOCK_HDR_SZ)
+
 struct vdev_info_block {
-    uint32_t vdev_id;                           // Id for this vdev. It is a index in the array of vdev_info_blk
-    uint64_t size;                              // Size of the vdev
-    uint32_t num_mirrors;                       // Total number of mirrors
-    uint32_t page_size;                         // IO block size for this vdev
-    uint32_t prev_vdev_id;                      // Prev pointer of vdevice list
-    uint32_t next_vdev_id;                      // Next pointer of vdevice list
-    bool     slot_allocated;                    // Is this current slot allocated
-    bool     failed;                            // set to true if disk is replaced
-    char     context_data[MAX_CONTEXT_DATA_SZ]; // Application dependent context data
-    uint32_t num_primary_chunks;
+    uint32_t vdev_id;                           // 4: Id for this vdev. It is a index in the array of vdev_info_blk
+    uint64_t size;                              // 12: Size of the vdev
+    uint32_t num_mirrors;                       // 16: Total number of mirrors
+    uint32_t page_size;                         // 20: IO block size for this vdev
+    uint32_t prev_vdev_id;                      // 24: Prev pointer of vdevice list
+    uint32_t next_vdev_id;                      // 28: Next pointer of vdevice list
+    bool     slot_allocated;                    // 29: Is this current slot allocated
+    bool     failed;                            // 30: set to true if disk is replaced
+    uint32_t num_primary_chunks;                // 34:
+    uint8_t  padding[MAX_VDEV_INFO_BLOCK_HDR_SZ - 34];                      
+    char     context_data[MAX_VDEV_INFO_BLOCK_SZ - MAX_VDEV_INFO_BLOCK_HDR_SZ];
 
     uint32_t get_vdev_id() const { return vdev_id; }
     uint64_t get_size() const { return size; }
 } __attribute((packed));
+
+// This assert is trying catch mistakes of overlaping the header to context_data portion.
+static_assert(offsetof(vdev_info_block, context_data) == MAX_VDEV_INFO_BLOCK_HDR_SZ, "vdev info block header size should be size of 512 bytes!");
+
+static_assert(sizeof(vdev_info_block) == MAX_VDEV_INFO_BLOCK_SZ, "vdev info block size should be 4096 bytes!");
 
 /*******************Super Block Definition*******************/
 
@@ -146,8 +158,6 @@ struct super_block {
 
     uint64_t get_magic() const { return magic; }
 } __attribute((packed));
-#define SUPERBLOCK_SIZE (HomeStoreConfig::atomic_phys_page_size)
-#define SUPERBLOCK_PAYLOAD_OFFSET 10
 
 struct dm_info {
     /* header of pdev, chunk and vdev */
@@ -169,9 +179,7 @@ struct dm_info {
 #define CHUNK_INFO_BLK_OFFSET (PDEV_INFO_BLK_OFFSET + (sizeof(pdev_info_block) * HomeStoreConfig::max_pdevs))
 #define VDEV_INFO_BLK_OFFSET (CHUNK_INFO_BLK_OFFSET + sizeof(chunk_info_block) * HomeStoreConfig::max_chunks)
 
-#define DM_INFO_BLK_SIZE                                                                                               \
-    (sizeof(dm_info) + PDEV_INFO_BLK_OFFSET + CHUNK_INFO_BLK_OFFSET +                                                  \
-     HomeStoreConfig::max_vdevs * sizeof(vdev_info_block))
+#define DM_INFO_BLK_SIZE  (VDEV_INFO_BLK_OFFSET + HomeStoreConfig::max_vdevs * sizeof(vdev_info_block))
 
 #define DM_PAYLOAD_OFFSET 10
 

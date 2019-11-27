@@ -30,7 +30,7 @@ struct transient_hdr_t {
         {};
 };
 
-template< btree_node_type NodeType, typename K, typename V, size_t NodeSize >
+template< btree_node_type NodeType, typename K, typename V >
 class VariantNode {
 public:
     VariantNode( bnodeid_t id, bool init, const BtreeConfig &cfg);
@@ -39,7 +39,7 @@ public:
 
     // Insert the key and value in provided index
     // Assumption: Node lock is already taken
-    void insert(int ind, const BtreeKey &key, const BtreeValue &val);
+    btree_status_t insert(int ind, const BtreeKey &key, const BtreeValue &val);
 
 #ifndef NDEBUG
     std::string to_string() const;
@@ -50,13 +50,13 @@ public:
     void update(int ind, const BtreeValue &val);
     void update(int ind, const BtreeKey &key, const BtreeValue &val);
 
-    uint32_t move_out_to_right_by_entries(const BtreeConfig &cfg, VariantNode<NodeType, K, V, NodeSize> *other_node,
+    uint32_t move_out_to_right_by_entries(const BtreeConfig &cfg, VariantNode<NodeType, K, V> *other_node,
                                           uint32_t nentries);
-    uint32_t move_out_to_right_by_size(const BtreeConfig &cfg, VariantNode<NodeType, K, V, NodeSize> *other_node,
+    uint32_t move_out_to_right_by_size(const BtreeConfig &cfg, VariantNode<NodeType, K, V > *other_node,
                                        uint32_t size);
-    uint32_t move_in_from_right_by_entries(const BtreeConfig &cfg, VariantNode<NodeType, K, V, NodeSize> *other_node,
+    uint32_t move_in_from_right_by_entries(const BtreeConfig &cfg, VariantNode<NodeType, K, V> *other_node,
                                            uint32_t nentries);
-    uint32_t move_in_from_right_by_size(const BtreeConfig &cfg, VariantNode<NodeType, K, V, NodeSize> *other_node,
+    uint32_t move_in_from_right_by_size(const BtreeConfig &cfg, VariantNode<NodeType, K, V> *other_node,
                                         uint32_t size);
     
     uint32_t get_available_size(const BtreeConfig &cfg) const;
@@ -71,6 +71,7 @@ public:
     bool overlap_nth_key_range(const BtreeSearchRange &range, int ind) const;
     void get_edge_value(BtreeValue *outval) const;
     void set_nth_key(uint32_t ind, BtreeKey *key);
+
 private:
     /////////////// Other Internal Methods /////////////
     void set_nth_obj(int ind, const BtreeKey &k, const BtreeValue &v);
@@ -81,10 +82,10 @@ private:
     void set_nth_value(int ind, const BtreeValue &v);
 };
 
-#define LeafVariantNode      VariantNode< LeafNodeType, K, V, NodeSize >
-#define InteriorVariantNode  VariantNode< InteriorNodeType, K, V, NodeSize >
-#define LeafPhysicalNode     PhysicalNode< LeafVariantNode, K, V, NodeSize >
-#define InteriorPhysicalNode PhysicalNode< InteriorVariantNode, K, V, NodeSize >
+#define LeafVariantNode      VariantNode< LeafNodeType, K, V >
+#define InteriorVariantNode  VariantNode< InteriorNodeType, K, V >
+#define LeafPhysicalNode     PhysicalNode< LeafVariantNode, K, V >
+#define InteriorPhysicalNode PhysicalNode< InteriorVariantNode, K, V >
 #define BtreeNodePtr         boost::intrusive_ptr< btree_node_t >
 
 #define to_variant_node(bn)  \
@@ -126,11 +127,10 @@ template<
         typename V,
         btree_node_type InteriorNodeType,
         btree_node_type LeafNodeType,
-        size_t NodeSize,
         typename btree_req_type
         >
 class BtreeNode : public btree_store_t::HeaderType,
-        sisl::ObjLifeCounter< BtreeNode<BtreeStoreType, K, V, InteriorNodeType, LeafNodeType, NodeSize, btree_req_type > > {
+        sisl::ObjLifeCounter< BtreeNode<BtreeStoreType, K, V, InteriorNodeType, LeafNodeType, btree_req_type > > {
 public:
     transient_hdr_t m_common_header;
 
@@ -151,8 +151,8 @@ public:
 
     // Methods the variant nodes need to override from
     void get(int ind, BtreeValue *outval, bool copy) const;
-    void insert(const BtreeKey &key, const BtreeValue &val);
-    void insert(int ind, const BtreeKey &key, const BtreeValue &val);
+    btree_status_t insert(const BtreeKey &key, const BtreeValue &val);
+    btree_status_t insert(int ind, const BtreeKey &key, const BtreeValue &val);
     void remove(int ind);
     void remove(int ind_s, int ind_e);
     void update(int ind, const BtreeValue &val);
@@ -219,6 +219,7 @@ public:
     }
     void get_nth_key(int ind, BtreeKey *outkey, bool copy) const;
     void set_nth_key(uint32_t ind, BtreeKey *key);
+    void get_all_kvs(std::vector< pair< K, V > >* kvs) const;
 
 protected:
     uint32_t get_nth_obj_size(int ind) const;

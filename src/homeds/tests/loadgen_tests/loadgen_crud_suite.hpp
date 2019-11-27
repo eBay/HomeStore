@@ -4,18 +4,6 @@ namespace homeds::loadgen {
 enum SPECIFIC_TEST {
     MAP = 0,
 };
-class Param {
-public:
-    uint64_t          NIO{}, NK{}, NRT{};                   // total ios and total keys
-    int               PC{}, PR{}, PU{}, PD{}, PRU{}, PRQ{}; // total % for op
-    uint64_t          PRINT_INTERVAL{}, WST{};
-    uint64_t          WARM_UP_KEYS = 0;
-    uint8_t           NT = 0; // num of threads
-    Clock::time_point startTime;
-    Clock::time_point print_startTime;
-    Clock::time_point workload_shiftTime;
-    uint8_t           enable_write_log;
-};
 
 template < typename K, typename V, typename Store, typename Executor >
 struct BtreeLoadGen {
@@ -27,11 +15,12 @@ struct BtreeLoadGen {
     std::mutex              m_mtx;
     std::condition_variable m_cv;
     Param                   p;
+    bool                    m_loadgen_verify_mode = false;
 
     explicit BtreeLoadGen(uint8_t n_threads, bool verification = true) {
         kvg = std::make_unique< KVGenerator< K, V, Store, Executor > >(n_threads, verification);
     }
-    std::atomic< int64_t > C_NC = 0, C_NR = 0, C_NU = 0, C_ND = 0, C_NRU = 0, C_NRQ = 0; // current op issued counter
+    std::atomic< int64_t > C_NC = 0, C_NR = 0, C_NU = 0, C_ND = 0, C_NRU = 0, C_NRQ = 0, C_NV = 0; // current op issued counter
 
     int64_t get_warmup_key_count(int percent) { return percent * p.WARM_UP_KEYS / 100; }
 
@@ -127,7 +116,7 @@ struct BtreeLoadGen {
 
         this->p = parameters;
         kvg->set_max_keys(p.NK);
-        kvg->init_generator();
+        kvg->init_generator(parameters);
     }
 
     void do_sub_range_test() {
@@ -232,66 +221,94 @@ struct BtreeLoadGen {
     int64_t get_issued_ios() {
         return C_NC + C_NR + C_NU + C_ND + C_NRU / UPDATE_RANGE_BATCH_SIZE + C_NRQ / QUERY_RANGE_BATCH_SIZE;
     }
+    
+    void handle_generic_error(generator_op_error err, const key_info< K, V >* ki, void* store_error,
+                                     const std::string& err_text = "") {
+        m_loadgen_verify_mode = true;
+        LOGERROR("Store reported error {}, error_text = {}", err, err_text);
+    }
 
     void try_create() {
-        if (!increment_create())
-            return;
+        if (!increment_create()) return;
+
         kvg->insert_new(KeyPattern::UNI_RANDOM, ValuePattern::RANDOM_BYTES,
-                        std::bind(&BtreeLoadGen::insert_success_cb, this, std::placeholders::_1));
+                        std::bind(&BtreeLoadGen::insert_success_cb, this, std::placeholders::_1), true,
+                        std::bind(&BtreeLoadGen::handle_generic_error, this, std::placeholders::_1, 
+                                  std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
         C_NC++;
         try_print();
     }
 
     void try_read() {
-        if (!increment_other())
-            return;
+        if (!increment_other()) return;
+
         kvg->get(KeyPattern::UNI_RANDOM, true, true, true,
-                 std::bind(&BtreeLoadGen::read_update_success_cb, this, std::placeholders::_1));
+                 std::bind(&BtreeLoadGen::read_update_success_cb, this, std::placeholders::_1),
+                 std::bind(&BtreeLoadGen::handle_generic_error, this, std::placeholders::_1, 
+                           std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
         C_NR++;
         try_print();
     }
 
     void try_update() {
-        if (!increment_other())
-            return;
+        if (!increment_other()) return;
+
         kvg->update(KeyPattern::UNI_RANDOM, ValuePattern::RANDOM_BYTES, true, true, true,
-                    std::bind(&BtreeLoadGen::read_update_success_cb, this, std::placeholders::_1));
+                    std::bind(&BtreeLoadGen::read_update_success_cb, this, std::placeholders::_1),
+                    std::bind(&BtreeLoadGen::handle_generic_error, this, std::placeholders::_1, 
+                              std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
         C_NU++;
         try_print();
     }
 
     void try_range_update() {
-        if (!is_storedkey_watermark_reached(UPDATE_RANGE_BATCH_SIZE * 2))
-            return;
+        if (!is_storedkey_watermark_reached(UPDATE_RANGE_BATCH_SIZE * 2)) return;
+
         while (!increment_other(UPDATE_RANGE_BATCH_SIZE)) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
             // if cannot accomodate, halt issue of any new ios and wait for pending ios to finish
         }
         kvg->range_update(KeyPattern::UNI_RANDOM, ValuePattern::RANDOM_BYTES, UPDATE_RANGE_BATCH_SIZE, true, true, true,
-                          std::bind(&BtreeLoadGen::read_update_success_cb, this, std::placeholders::_1));
+                          std::bind(&BtreeLoadGen::read_update_success_cb, this, std::placeholders::_1),
+                          std::bind(&BtreeLoadGen::handle_generic_error, this, std::placeholders::_1, 
+                                    std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
         C_NRU += UPDATE_RANGE_BATCH_SIZE;
         try_print();
     }
 
     void try_range_query() {
-        if (!is_storedkey_watermark_reached(QUERY_RANGE_BATCH_SIZE * 2))
-            return;
+        if (!is_storedkey_watermark_reached(QUERY_RANGE_BATCH_SIZE * 2)) return;
+
         while (!increment_other(QUERY_RANGE_BATCH_SIZE)) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
             // if cannot accomodate, halt issue of any new ios and wait for pending ios to finish
         }
         kvg->range_query(KeyPattern::UNI_RANDOM, QUERY_RANGE_BATCH_SIZE, true, true, true,
-                         std::bind(&BtreeLoadGen::read_update_success_cb, this, std::placeholders::_1));
+                         std::bind(&BtreeLoadGen::read_update_success_cb, this, std::placeholders::_1),
+                         std::bind(&BtreeLoadGen::handle_generic_error, this, std::placeholders::_1, 
+                                   std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
 
         C_NRQ += QUERY_RANGE_BATCH_SIZE;
         try_print();
+    }
+
+    bool try_verify_all() {
+        if (C_NV > (int64_t)p.NK) {
+            return true;
+        }
+        kvg->verify_all(QUERY_RANGE_BATCH_SIZE);
+        C_NV += QUERY_RANGE_BATCH_SIZE;
+        try_print();
+        return false;
     }
 
     void try_delete() {
         if (!increment_other())
             return;
         kvg->remove(KeyPattern::UNI_RANDOM, true, true,
-                    std::bind(&BtreeLoadGen::remove_success_cb, this, std::placeholders::_1));
+                    std::bind(&BtreeLoadGen::remove_success_cb, this, std::placeholders::_1), true,
+                    std::bind(&BtreeLoadGen::handle_generic_error, this, std::placeholders::_1,
+                              std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
         C_ND++;
         try_print();
     }
@@ -302,9 +319,9 @@ struct BtreeLoadGen {
 
             LOGINFO("stored_keys:{}, outstanding_create:{},"
                     " outstanding_others:{}, creates:{}, reads:{}, updates:{}, deletes:{}, "
-                    "rangeupdate:{}, rangequery:{}, total_io:{}",
+                    "rangeupdate:{}, rangequery:{}, total_io:{}, verify_io:{}",
                     stored_keys, outstanding_create, outstanding_others, C_NC, C_NR, C_NU, C_ND,
-                    C_NRU / UPDATE_RANGE_BATCH_SIZE, C_NRQ / QUERY_RANGE_BATCH_SIZE, get_issued_ios());
+                    C_NRU / UPDATE_RANGE_BATCH_SIZE, C_NRQ / QUERY_RANGE_BATCH_SIZE, get_issued_ios(), C_NV);
         }
     }
 
@@ -312,7 +329,14 @@ struct BtreeLoadGen {
         kvg->run_parallel([&]() {
             while (true) {
                 auto op = select_io();
+                
+                if (m_loadgen_verify_mode) {
 
+                    if (!range_query_allowed || try_verify_all()) {
+                        break;
+                    }
+                    continue;
+                }
                 if (op == 1)
                     try_create();
                 else if (op == 2)
@@ -344,6 +368,11 @@ struct BtreeLoadGen {
         if (remove_allowed)
             kvg->remove_all_keys();
         join();
+        LOGINFO("stored_keys:{}, outstanding_create:{},"
+                " outstanding_others:{}, creates:{}, reads:{}, updates:{}, deletes:{}, "
+                "rangeupdate:{}, rangequery:{}, total_io:{}, verify_io:{}",
+                stored_keys, outstanding_create, outstanding_others, C_NC, C_NR, C_NU, C_ND,
+                C_NRU / UPDATE_RANGE_BATCH_SIZE, C_NRQ / QUERY_RANGE_BATCH_SIZE, get_issued_ios(), C_NV);
     }
 
     int8_t select_io() {

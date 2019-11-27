@@ -35,7 +35,7 @@ class HomeStoreFlip {
 public:
     static flip::Flip* instance() {
         static flip::Flip inst;
-        return &inst;
+        return &(flip::Flip::instance());
     }
 
     static flip::FlipClient* client_instance() {

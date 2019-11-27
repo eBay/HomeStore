@@ -27,9 +27,19 @@ add_executable(test_hash ${TEST_HASH_SOURCE_FILES})
 target_link_libraries(test_hash ${COMMON_LIB_DEPS} iberty)
 add_test(NAME Hash COMMAND test_hash)
 
-set(TEST_COMPOSITE_SOURCE_FILES tests/test_composite_allocator.cpp)
-add_executable(test_composite_allocator ${TEST_COMPOSITE_SOURCE_FILES})
-target_link_libraries(test_composite_allocator ${COMMON_LIB_DEPS} iberty)
+# Coverage doesn't like binaries that don't run...
+if (NOT ${CONAN_BUILD_COVERAGE})
+    set(TEST_COMPOSITE_SOURCE_FILES tests/test_composite_allocator.cpp)
+    add_executable(test_composite_allocator ${TEST_COMPOSITE_SOURCE_FILES})
+    target_link_libraries(test_composite_allocator ${COMMON_LIB_DEPS} iberty)
+
+    set(TEST_IOMGR_EXEC_FILES
+        tests/test_iomgr_executor.cpp
+        loadgen/iomgr_executor.cpp
+        )
+    add_executable(test_iomgr_exec ${TEST_IOMGR_EXEC_FILES})
+    target_link_libraries(test_iomgr_exec homestore ${COMMON_LIB_DEPS})
+endif ()
 
 set(TEST_OBJALLOCATOR_SOURCE_FILES tests/test_obj_allocator.cpp)
 add_executable(test_obj_allocator ${TEST_OBJALLOCATOR_SOURCE_FILES})

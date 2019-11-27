@@ -14,7 +14,6 @@ namespace homeds { namespace btree {
             typename V,                       \
             btree_node_type InteriorNodeType, \
             btree_node_type LeafNodeType,     \
-            size_t NodeSize,                  \
             typename btree_req_type >         \
     ret btree_node_t::
 
@@ -23,7 +22,7 @@ template<btree_store_type BtreeStoreType,
             typename V,
             btree_node_type InteriorNodeType,
             btree_node_type LeafNodeType,
-            size_t NodeSize, typename btree_req_type >
+            typename btree_req_type >
 btree_node_t::BtreeNode() : m_common_header() {
 }
 
@@ -54,12 +53,12 @@ DecBNodeType(void) get(int ind, BtreeValue *outval, bool copy) const {
     call_variant_method_const(this, get, ind, outval, copy);
 }
 
-DecBNodeType(void) insert(const BtreeKey &key, const BtreeValue &val) {
-    call_physical_method(this, insert, key, val);
+DecBNodeType(btree_status_t) insert(const BtreeKey &key, const BtreeValue &val) {
+    return call_physical_method(this, insert, key, val);
 }
 
-DecBNodeType(void) insert(int ind, const BtreeKey &key, const BtreeValue &val) {
-    call_variant_method(this, insert, ind, key, val);
+DecBNodeType(btree_status_t) insert(int ind, const BtreeKey &key, const BtreeValue &val) {
+    return call_variant_method(this, insert, ind, key, val);
 }
 
 DecBNodeType(void) remove(int ind) {
@@ -269,6 +268,10 @@ DecBNodeType(bool) overlap_nth_key_range(const BtreeSearchRange &range, int ind)
 // Compares the nth key (n=ind) with given key (cmp_key) and returns -1, 0, 1 if cmp_key <=> nth_key respectively
 DecBNodeType(int) compare_nth_key_range(const BtreeSearchRange &range, int ind) const {
     return call_variant_method_const(this, compare_nth_key_range, range, ind);
+}
+
+DecBNodeType(void) get_all_kvs(std::vector< pair< K, V > >* kvs) const {
+    call_variant_method_const(this, get_all_kvs, kvs);
 }
 
 DecBNodeType(void) get_edge_value(BtreeValue *outval) const{

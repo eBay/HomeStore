@@ -53,10 +53,10 @@ struct var_node_header {
 #define memlshift(ptr, size) (memmove(ptr, ptr-size, size))
 
 #define NodeTypeImpl btree_node_type::VAR_VALUE
-#define VariableNode VariantNode<btree_node_type::VAR_VALUE, K, V,  NodeSize>
-#define VariantNodeType VariantNode<NodeType, K, V,  NodeSize>
+#define VariableNode VariantNode<btree_node_type::VAR_VALUE, K, V>
+#define VariantNodeType VariantNode<NodeType, K, V>
         
-template< btree_node_type NodeType, typename K, typename V,  size_t NodeSize>
+template< btree_node_type NodeType, typename K, typename V>
 struct VarNodeSpecificImpl {
     static uint16_t get_nth_key_len(const VariantNodeType *node, int ind) {return 0;}
     static uint16_t get_nth_value_len(const VariantNodeType *node, int ind) {return 0;}
@@ -73,13 +73,13 @@ struct VarNodeSpecificImpl {
  *  
  */
  
-template< typename K, typename V,  size_t NodeSize>
-class VariableNode : public PhysicalNode<VariableNode,K, V, NodeSize> {
+template< typename K, typename V >
+class VariableNode : public PhysicalNode<VariableNode,K, V> {
 public:
-    friend struct VarNodeSpecificImpl<NodeTypeImpl, K, V,  NodeSize>;
+    friend struct VarNodeSpecificImpl<NodeTypeImpl, K, V>;
 
     VariableNode( bnodeid_t id, bool init,const BtreeConfig &cfg) :
-            PhysicalNode<VariableNode, K, V, NodeSize>(id, init) {
+            PhysicalNode<VariableNode, K, V>(id, init) {
         this->set_node_type(NodeTypeImpl);
         if (init) {
             // Tail arena points to the edge of the node as data arena grows backwards. Entire space is now available
@@ -91,7 +91,7 @@ public:
     }
 
     VariableNode( bnodeid_t* id, bool init,const BtreeConfig &cfg) :
-            PhysicalNode<VariableNode, K, V, NodeSize>(id, init) {
+            PhysicalNode<VariableNode, K, V>(id, init) {
         this->set_node_type(NodeTypeImpl);
         if (init) {
             // Tail arena points to the edge of the node as data arena grows backwards. Entire space is now available
@@ -105,13 +105,18 @@ public:
     
     /* Insert the key and value in provided index
      * Assumption: Node lock is already taken */
-    void insert(int ind, const BtreeKey &key, const BtreeValue &val) {
+    btree_status_t insert(int ind, const BtreeKey &key, const BtreeValue &val) {
         LOGTRACEMOD(btree_generics, "{}:{}",key.to_string(),val.to_string());
-        insert(ind, key.get_blob(), val.get_blob());
+        auto sz = insert(ind, key.get_blob(), val.get_blob());
 #ifndef NDEBUG
         validate_sanity();
 #endif
+        if (sz == 0) {
+            return btree_status_t::insert_failed;
+        }
+        return btree_status_t::success;
     }
+
 #ifndef NDEBUG
     void validate_sanity() {
         int i=0;
@@ -297,7 +302,7 @@ public:
                 }
 
                 ureq->get_cb_param()->set_state_modifiable(false);
-                ureq->callback()(match, replace_kv,ureq->get_cb_param());
+                ureq->callback()(match, replace_kv, ureq->get_cb_param());
 #if 0
                 if(replace_kv.size()>0 && !(this->get_edge_id().is_valid())){
                     std::pair<K, V> &pair2 =replace_kv[replace_kv.size()-1];
@@ -384,7 +389,7 @@ public:
         auto other_gen = other.get_gen();
 
         int ind = this->get_total_entries() - 1;
-        while (ind >= 0) {
+        while (ind > 0) {
             homeds::blob kb;
             kb.bytes = (uint8_t *)get_nth_obj(ind);
             kb.size = get_nth_key_len(ind);
@@ -393,14 +398,15 @@ public:
             vb.bytes = kb.bytes + kb.size;
             vb.size = get_nth_value_len(ind);
 
+            auto sz = other.insert(0, kb, vb); // Keep on inserting on the first index, thus moving everything to right
+            if (!sz) break;
+            moved_size += sz;
+            ind--;
             if ((kb.size + vb.size + get_record_size()) > size_to_move) {
                 // We reached threshold of how much we could move
                 break;
             }
-            auto sz = other.insert(0, kb, vb); // Keep on inserting on the first index, thus moving everything to right
-            if (!sz) break;
-            moved_size += sz;
-            ind--; size_to_move -= sz;
+            size_to_move -= sz;
         }
         remove(ind+1, this->get_total_entries()-1);
 
@@ -552,6 +558,23 @@ public:
         return nth_key.compare_range(range);
     }
 
+    void get_all_kvs(std::vector< pair< K, V > >* kvs) const {
+        assert(this->is_leaf());
+        if (!this->is_leaf()) {
+            LOGERROR("Got a non-leaf node {}", this->to_string());
+            return;
+        }
+
+        for (uint32_t i = 0; i < this->get_total_entries(); i++) {
+            K key;
+            V val;
+
+            get_nth_key(i, &key, true); // Copy
+            get(i, &val, true);         // Copy
+            kvs->push_back(make_pair(key, val));
+        }
+    }
+
 private:
     uint32_t insert(int ind, const homeds::blob &key_blob, const homeds::blob &val_blob)  {
         assert(ind <= (int)this->get_total_entries());
@@ -559,8 +582,8 @@ private:
         uint16_t obj_size = key_blob.size + val_blob.size;
         uint16_t to_insert_size = obj_size + get_record_size();
         if (to_insert_size > get_var_node_header()->m_available_space) {
-            // No space to insert.
-            assert(0);//something went south
+            LOGDEBUG("insert failed insert size {} available size {}", to_insert_size, 
+                        get_var_node_header()->m_available_space);
             return 0;
         }
 
@@ -676,20 +699,20 @@ private:
 
     // See template specialization below for each nodetype
     uint16_t get_nth_key_len(int ind) const {
-        return VarNodeSpecificImpl<NodeTypeImpl, K, V,  NodeSize>::get_nth_key_len(this, ind);
+        return VarNodeSpecificImpl<NodeTypeImpl, K, V>::get_nth_key_len(this, ind);
     }
     uint16_t get_nth_value_len(int ind) const {
-        return VarNodeSpecificImpl<NodeTypeImpl, K, V,  NodeSize>::get_nth_value_len(this, ind);
+        return VarNodeSpecificImpl<NodeTypeImpl, K, V>::get_nth_value_len(this, ind);
     }
     uint16_t get_record_size() const {
-        return VarNodeSpecificImpl< NodeTypeImpl, K, V,  NodeSize >::get_record_size(this);
+        return VarNodeSpecificImpl< NodeTypeImpl, K, V >::get_record_size(this);
     }
 
     void set_nth_key_len(uint8_t *rec_ptr, uint16_t key_len) {
-        VarNodeSpecificImpl< NodeTypeImpl, K, V,  NodeSize >::set_nth_key_len(this, rec_ptr, key_len);
+        VarNodeSpecificImpl< NodeTypeImpl, K, V >::set_nth_key_len(this, rec_ptr, key_len);
     }
     void set_nth_value_len(uint8_t *rec_ptr, uint16_t value_len) {
-        VarNodeSpecificImpl< NodeTypeImpl, K, V,  NodeSize >::set_nth_value_len(this, rec_ptr, value_len);
+        VarNodeSpecificImpl< NodeTypeImpl, K, V >::set_nth_value_len(this, rec_ptr, value_len);
     }
 
     const uint8_t *get_nth_record(int ind) const {
@@ -735,77 +758,77 @@ private:
 };
 
 /***************** Template Specialization for variable key records ******************/
-template< typename K, typename V, size_t NodeSize >
-struct VarNodeSpecificImpl<btree_node_type::VAR_KEY, K, V,  NodeSize> {
-    static uint16_t get_nth_key_len(const VariantNode<btree_node_type::VAR_KEY, K, V,  NodeSize> *node, int ind) {
+template< typename K, typename V >
+struct VarNodeSpecificImpl<btree_node_type::VAR_KEY, K, V > {
+    static uint16_t get_nth_key_len(const VariantNode<btree_node_type::VAR_KEY, K, V > *node, int ind) {
         return ((const var_key_record *) node->get_nth_record(ind))->m_key_len;
     }
 
-    static uint16_t get_nth_value_len(const VariantNode< btree_node_type::VAR_KEY, K, V,  NodeSize > *node, int ind) {
+    static uint16_t get_nth_value_len(const VariantNode< btree_node_type::VAR_KEY, K, V > *node, int ind) {
         return V::get_fixed_size();
     }
 
-    static uint16_t get_record_size(const VariantNode< btree_node_type::VAR_KEY, K, V,  NodeSize > *node) {
+    static uint16_t get_record_size(const VariantNode< btree_node_type::VAR_KEY, K, V > *node) {
         return sizeof(var_key_record);
     }
 
-    static void set_nth_key_len(const VariantNode< btree_node_type::VAR_KEY, K, V,  NodeSize> *node, uint8_t *rec_ptr, uint16_t key_len) {
+    static void set_nth_key_len(const VariantNode< btree_node_type::VAR_KEY, K, V > *node, uint8_t *rec_ptr, uint16_t key_len) {
         ((var_key_record *)rec_ptr)->m_key_len = key_len;
     }
 
-    static void set_nth_value_len(const VariantNode< btree_node_type::VAR_KEY, K, V,  NodeSize > *node, uint8_t *rec_ptr,
+    static void set_nth_value_len(const VariantNode< btree_node_type::VAR_KEY, K, V > *node, uint8_t *rec_ptr,
                                   uint16_t value_len) {
         assert(value_len == V::get_fixed_size());
     }
 };
 
 /***************** Template Specialization for variable value records ******************/
-template< typename K, typename V, size_t NodeSize >
-struct VarNodeSpecificImpl<btree_node_type::VAR_VALUE , K, V,  NodeSize> {
-    static uint16_t get_nth_key_len(const VariantNode<btree_node_type::VAR_VALUE, K, V,  NodeSize> *node, int ind) {
+template< typename K, typename V >
+struct VarNodeSpecificImpl<btree_node_type::VAR_VALUE , K, V > {
+    static uint16_t get_nth_key_len(const VariantNode<btree_node_type::VAR_VALUE, K, V > *node, int ind) {
         return K::get_fixed_size();
     }
 
-    static uint16_t get_nth_value_len(const VariantNode< btree_node_type::VAR_VALUE, K, V,  NodeSize > *node, int ind) {
+    static uint16_t get_nth_value_len(const VariantNode< btree_node_type::VAR_VALUE, K, V > *node, int ind) {
         return ((const var_value_record *)node->get_nth_record(ind))->m_value_len;
     }
 
-    static uint16_t get_record_size(const VariantNode< btree_node_type::VAR_VALUE, K, V,  NodeSize > *node) {
+    static uint16_t get_record_size(const VariantNode< btree_node_type::VAR_VALUE, K, V > *node) {
         return sizeof(var_value_record);
     }
 
-    static void set_nth_key_len(const VariantNode< btree_node_type::VAR_VALUE, K, V,  NodeSize > *node, uint8_t *rec_ptr,
+    static void set_nth_key_len(const VariantNode< btree_node_type::VAR_VALUE, K, V > *node, uint8_t *rec_ptr,
                                 uint16_t key_len) {
         assert(key_len == K::get_fixed_size());
     }
 
-    static void set_nth_value_len(const VariantNode< btree_node_type::VAR_VALUE, K, V,  NodeSize > *node, uint8_t *rec_ptr,
+    static void set_nth_value_len(const VariantNode< btree_node_type::VAR_VALUE, K, V > *node, uint8_t *rec_ptr,
                                   uint16_t value_len) {
         ((var_value_record *)rec_ptr)->m_value_len = value_len;
     }
 };
 
 /***************** Template Specialization for variable object records ******************/
-template< typename K, typename V, size_t NodeSize >
-struct VarNodeSpecificImpl<btree_node_type::VAR_OBJECT, K, V,  NodeSize> {
-    static uint16_t get_nth_key_len(const VariantNode<btree_node_type::VAR_OBJECT, K, V,  NodeSize> *node, int ind) {
+template< typename K, typename V >
+struct VarNodeSpecificImpl<btree_node_type::VAR_OBJECT, K, V> {
+    static uint16_t get_nth_key_len(const VariantNode<btree_node_type::VAR_OBJECT, K, V> *node, int ind) {
         return ((const var_obj_record *)node->get_nth_record(ind))->m_key_len;
     }
 
-    static uint16_t get_nth_value_len(const VariantNode< btree_node_type::VAR_OBJECT, K, V,  NodeSize > *node, int ind) {
+    static uint16_t get_nth_value_len(const VariantNode< btree_node_type::VAR_OBJECT, K, V > *node, int ind) {
         return ((const var_value_record *)node->get_nth_record(ind))->m_value_len;
     }
 
-    static uint16_t get_record_size(const VariantNode< btree_node_type::VAR_OBJECT, K, V,  NodeSize > *node) {
+    static uint16_t get_record_size(const VariantNode< btree_node_type::VAR_OBJECT, K, V > *node) {
         return sizeof(var_value_record);
     }
 
-    static void set_nth_key_len(const VariantNode< btree_node_type::VAR_OBJECT, K, V,  NodeSize > *node, uint8_t *rec_ptr,
+    static void set_nth_key_len(const VariantNode< btree_node_type::VAR_OBJECT, K, V > *node, uint8_t *rec_ptr,
                                 uint16_t key_len) {
         ((var_obj_record *)rec_ptr)->m_key_len = key_len;
     }
 
-    static void set_nth_value_len(const VariantNode< btree_node_type::VAR_OBJECT, K, V,  NodeSize > *node, uint8_t *rec_ptr,
+    static void set_nth_value_len(const VariantNode< btree_node_type::VAR_OBJECT, K, V > *node, uint8_t *rec_ptr,
                                   uint16_t value_len) {
         ((var_obj_record *)rec_ptr)->m_value_len = value_len;
     }

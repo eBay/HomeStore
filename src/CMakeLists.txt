@@ -1,5 +1,5 @@
 set (CPP_FLAGS "-faligned-new -Dlinux")
-set (CPP_WARNINGS "-Wall -Wextra -Werror -Wno-unused-parameter -Wno-unused-variable -Wno-empty-body -Wno-array-bounds -Wno-cast-function-type -Wno-maybe-uninitialized")
+set (CPP_WARNINGS "-Wall -Wextra -Werror -Wno-unused-parameter -Wno-unused-variable -Wno-empty-body -Wno-array-bounds -Wno-cast-function-type -Wno-maybe-uninitialized -Wno-deprecated-copy")
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CPP_FLAGS} ${CPP_WARNINGS} -DBOOST_ALLOW_DEPRECATED_HEADERS -DRCU_SIGNAL")
 
 if ("$ENV{HOMESTORE_BUILD_TAG}" STREQUAL "")
@@ -38,12 +38,15 @@ add_subdirectory(blkstore)
 add_subdirectory(cache)
 add_subdirectory(device)
 #add_subdirectory(endpoint)
+add_subdirectory(logstore)
+add_subdirectory(journal)
 add_subdirectory(homeds)
 add_subdirectory(volume)
 add_subdirectory(error)
 add_subdirectory(main)
 add_subdirectory(threadpool)
 add_subdirectory(mapping)
+add_subdirectory(test_scripts)
 
 set(HOMESTORE_OBJECTS
         $<TARGET_OBJECTS:hs_main>
@@ -51,6 +54,7 @@ set(HOMESTORE_OBJECTS
         #$<TARGET_OBJECTS:hs_endpoint>
         $<TARGET_OBJECTS:hs_blkalloc>
         $<TARGET_OBJECTS:hs_error>
+        $<TARGET_OBJECTS:hs_logstore>
         )
 add_library(homestore STATIC ${HOMESTORE_OBJECTS})
 target_link_libraries(homestore ${COMMON_LIB_DEPS})

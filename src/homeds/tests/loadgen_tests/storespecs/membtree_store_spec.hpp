@@ -37,33 +37,33 @@ static constexpr btree_node_type find_interior_node_type() {
 #define TOTAL_ENTRIES 1000000
 
 #define LoadGenMemBtree                                                                                                \
-    Btree< btree_store_type::MEM_BTREE, K, V, find_interior_node_type< K >(), find_leaf_node_type< K, V >(), NodeSize >
+    Btree< btree_store_type::MEM_BTREE, K, V, find_interior_node_type< K >(), find_leaf_node_type< K, V >() >
 
 template < typename K, typename V, size_t NodeSize = 8192 >
 class MemBtreeStoreSpec : public StoreSpec< K, V > {
 public:
     MemBtreeStoreSpec() {}
 
-    virtual void init_store() override {
-        BtreeConfig btree_cfg;
+    virtual void init_store(homeds::loadgen::Param& parameters) override {
+        BtreeConfig btree_cfg(NodeSize);
         btree_cfg.set_max_objs(TOTAL_ENTRIES);
         btree_cfg.set_max_key_size(K::get_max_size());
         btree_cfg.set_max_value_size(V::get_max_size());
         m_bt = std::unique_ptr< LoadGenMemBtree >(LoadGenMemBtree::create_btree(btree_cfg, nullptr));
     }
 
-    virtual bool insert(K& k, V& v) override {
-        auto status = m_bt->put(k, v, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
+    virtual bool insert(K& k, std::shared_ptr<V> v) override {
+        auto status = m_bt->put(k, *(v.get()), btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
         return status == btree_status_t::success;
     }
 
-    virtual bool upsert(K& k, V& v) override {
-        auto status = m_bt->put(k, v, btree_put_type::REPLACE_IF_EXISTS_ELSE_INSERT);
+    virtual bool upsert(K& k, std::shared_ptr<V> v) override {
+        auto status = m_bt->put(k, *(v.get()), btree_put_type::REPLACE_IF_EXISTS_ELSE_INSERT);
         return status == btree_status_t::success;
     }
 
-    virtual bool update(K& k, V& v) override {
-        auto status = m_bt->put(k, v, btree_put_type::REPLACE_ONLY_IF_EXISTS);
+    virtual bool update(K& k, std::shared_ptr<V> v) override {
+        auto status = m_bt->put(k, *(v.get()), btree_put_type::REPLACE_ONLY_IF_EXISTS);
         return status == btree_status_t::success;
     }
 
@@ -83,15 +83,15 @@ public:
         return status == btree_status_t::success;
     }
 
-    virtual uint32_t query(K& start_key, bool start_incl, K& end_key, bool end_incl, uint32_t batch_size,
+    virtual uint32_t query(K& start_key, bool start_incl, K& end_key, bool end_incl,
                            std::vector< std::pair< K, V > >& result) override {
+#define MAX_BATCH_SIZE 20000000 // set it to big value so that everything is queried in one operation
         auto                      search_range = BtreeSearchRange(start_key, start_incl, end_key, end_incl);
-        BtreeQueryRequest< K, V > qreq(search_range, BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, batch_size);
+        BtreeQueryRequest< K, V > qreq(search_range, BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, MAX_BATCH_SIZE);
 
         auto result_count = 0U;
 
         std::vector< std::pair< K, V > > values;
-        values.reserve(batch_size);
 
         bool has_more = false;
         do {
@@ -109,7 +109,8 @@ public:
         return result_count;
     }
 
-    virtual bool range_update(K& start_key, bool start_incl, K& end_key, bool end_incl, V& start_value, V& end_value) {
+    virtual bool range_update(K& start_key, bool start_incl, K& end_key, bool end_incl, 
+                              std::vector< std::shared_ptr<V> > &result) {
         assert(0); // not supported yet
         return {};
     }

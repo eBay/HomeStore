@@ -53,6 +53,10 @@ Volume::Volume(const vol_params& params) :
     m_sb->ondisk_sb->size = params.size;
     m_sb->ondisk_sb->uuid = params.uuid;
     memcpy(m_sb->ondisk_sb->vol_name, params.vol_name, VOL_NAME_SIZE);
+
+    /* Create home journal instance per volume - Journal has same id as volume*/
+    m_volume_journal = new VolumeJournal(boost::uuids::to_string(m_sb->ondisk_sb->uuid));
+
     HomeBlks::instance()->vol_sb_init(m_sb);
 
     seq_Id = 3;
@@ -73,6 +77,10 @@ Volume::Volume(vol_mem_sb* sb) : m_sb(sb), m_metrics(sb->ondisk_sb->vol_name), m
                             std::bind(&Volume::pending_read_blk_cb, this, std::placeholders::_1));
         m_sb->ondisk_sb->btree_sb = m_map->get_btree_sb();
         m_sb->ondisk_sb->state = vol_state::DEGRADED;
+        
+        /* Create home journal instance per volume */
+        m_volume_journal = new VolumeJournal(boost::uuids::to_string(m_sb->ondisk_sb->uuid));
+
         LOGINFO("reinitialized the volume {} because vdev is in failed state. It state will be degraded"
                 "until it is resync", sb->ondisk_sb->vol_name);
         HomeBlks::instance()->vol_sb_write(m_sb);
@@ -84,6 +92,9 @@ Volume::Volume(vol_mem_sb* sb) : m_sb(sb), m_metrics(sb->ondisk_sb->vol_name), m
                                       std::placeholders::_3),
                             std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1),
                             std::bind(&Volume::pending_read_blk_cb, this, std::placeholders::_1));
+        /* Create home journal instance per volume */
+        m_volume_journal = new VolumeJournal(boost::uuids::to_string(m_sb->ondisk_sb->uuid));
+
     }
     assert(m_sb->ondisk_sb->state == OFFLINE || m_sb->ondisk_sb->state == DEGRADED || m_sb->ondisk_sb->state == ONLINE);
     seq_Id = 3;
@@ -105,14 +116,17 @@ void Volume::set_error_flip() {
     FlipClient *fc = HomeStoreFlip::client_instance();
     FlipFrequency freq;
     FlipCondition cond1;
+    
+    FlipCondition null_cond;
+    fc->create_condition("", flip::Operator::DONT_CARE, (int)1, &null_cond);
+    
     freq.set_count(2000000000);
     freq.set_percent(1);
     
     /* error flips */
     freq.set_percent(1);
-    fc->inject_noreturn_flip("vol_vchild_error", {}, freq);
-    fc->inject_retval_flip("delay_us_and_inject_error_on_completion", {}, freq, 20);
-    fc->inject_noreturn_flip("varsize_blkalloc_no_blks", {}, freq);
+//    fc->inject_retval_flip("delay_us_and_inject_error_on_completion", { null_cond }, freq, 20);
+    fc->inject_noreturn_flip("varsize_blkalloc_no_blks", { null_cond }, freq);
     
 }
 
@@ -121,15 +135,19 @@ void Volume::set_io_flip() {
     FlipFrequency freq;
     FlipCondition cond1;
     freq.set_count(2000000000);
-    freq.set_percent(2);
+    freq.set_percent(5);
+    
+    FlipCondition null_cond;
+    fc->create_condition("", flip::Operator::DONT_CARE, (int)1, &null_cond);
     
     /* io flips */
-    fc->inject_retval_flip("vol_delay_read_us", {}, freq, 20);
+      fc->inject_retval_flip("vol_delay_read_us", { null_cond }, freq, 20);
 
-    fc->inject_retval_flip("cache_insert_race", {}, freq, 20);
+     fc->inject_retval_flip("cache_insert_race", { null_cond }, freq, 20);
+     fc->inject_retval_flip("io_write_iocb_empty_flip", { null_cond }, freq, 20);
+     fc->inject_retval_flip("io_read_iocb_empty_flip", { null_cond }, freq, 20);
     
-    fc->create_condition("nuber of blks in a write", flip::Operator::EQUAL, 8, &cond1);
-    fc->inject_retval_flip("blkalloc_split_blk", {cond1}, freq, 4);
+     fc->inject_retval_flip("blkalloc_split_blk", { null_cond }, freq, 4);
 }
 #endif
 
@@ -235,6 +253,7 @@ Volume::~Volume() {
     if (get_state() != DESTROYING) {
         VOL_LOG(INFO, , , "Shutting volume");
         delete m_map;
+        delete m_volume_journal;
         delete (m_sb);
     } else {
         VOL_LOG(INFO, , , "Destroying volume");
@@ -254,6 +273,7 @@ Volume::~Volume() {
 
         HomeBlks::instance()->vol_sb_remove(get_sb());
         delete m_map;
+        delete m_volume_journal;
         delete (m_sb);
         auto system_cap = HomeBlks::instance()->get_system_capacity();
         VOL_LOG(INFO, volume, , "volume is destroyed. New system capacity is {}", system_cap.to_string());
@@ -275,11 +295,6 @@ void Volume::process_metadata_completions(const volume_req_ptr& vreq) {
     VOL_LOG(TRACE, volume, parent_req, "metadata_complete: status={}", vreq->err.message());
     HISTOGRAM_OBSERVE(m_metrics, volume_map_write_latency, get_elapsed_time_us(vreq->op_start_time));
 
-#ifdef _PRERELEASE
-    if (parent_req->outstanding_io_cnt.get() > 2 && homestore_flip->test_flip("vol_vchild_error")) {
-        vreq->err = homestore_error::flip_comp_error;
-    }
-#endif
     check_and_complete_req(parent_req, vreq->err, true /* call_completion_cb */, &(vreq->blkIds_to_free));
 #ifndef NDEBUG
     {
@@ -302,7 +317,57 @@ volume_req_ptr Volume::create_vol_req(Volume* vol, const vol_interface_req_ptr& 
     vreq->vol_instance = vol->shared_from_this();
 
     hb_req->outstanding_io_cnt.increment(1);
+    hb_req->outstanding_data_io_cnt.increment(1);
     return vreq;
+}
+
+vol_interface_req_ptr  Volume::create_vol_hb_req() {
+    return vol_hb_req::make_instance();
+}
+
+void Volume::process_journal_completions(vol_hb_req* vhb_req, uint64_t log_id) {
+    auto child_reqs =  vhb_req->child_reqs;
+    auto itr = child_reqs.begin();
+    while (itr != child_reqs.end()) {
+        auto                                        vreq = *itr;
+        MappingKey                                  key(vreq->lba, vreq->nlbas);
+        std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;
+        uint64_t                                    offset = 0;
+        for (int i = 0; i < vreq->nlbas; i++) {
+            carr[i] = crc16_t10dif(init_crc_16, vreq->bbuf->at_offset(offset).bytes, get_page_size());
+            offset += get_page_size();
+        }
+        vreq->op_start_time = Clock::now();
+        ValueEntry   ve(log_id, vreq->bid, 0, vreq->nlbas, carr);
+        MappingValue value(ve);
+#ifndef NDEBUG
+        vreq->vol_uuid = m_sb->ondisk_sb->uuid;
+        VOL_LOG(DEBUG, volume, vreq->parent_req, "Mapping.PUT, vol_uuid:{}, Key:{}, Value:{}",
+                boost::uuids::to_string(vreq->vol_uuid), key.to_string(), value.to_string());
+#endif
+        COUNTER_DECREMENT(m_metrics, volume_outstanding_data_write_count, 1);
+        COUNTER_INCREMENT(m_metrics, volume_outstanding_metadata_write_count, 1);
+        m_map->put(vreq, key, value);
+        ++itr;
+    }
+}
+
+void Volume::set_journal_key_value(VolumeJournalKey& jkey, VolumeJournalValue& jval, vol_hb_req* vhb_req) {
+    // Set key
+    std::string vol_id_str = boost::lexical_cast< std::string >(get_uuid());
+    const char* volId = vol_id_str.c_str();
+    uint64_t    lsn = 0; // TODO - to set plsn here which comes all the way from client DM
+    jkey.set(lsn, volId);
+
+    // Set value
+    std::vector< Lba_Blk_Entry > lbes;
+    auto                                        itr = vhb_req->child_reqs.begin();
+    while (itr != vhb_req->child_reqs.end()) {
+        auto creq = *itr;
+        lbes.push_back(Lba_Blk_Entry(creq->lba, creq->nlbas, creq->bid));
+        ++itr;
+    }
+    jval.set(lbes);
 }
 
 void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req) {
@@ -341,7 +406,7 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
         }
 #endif
         check_and_complete_req(parent_req, vreq->err, true /* call_completion_cb */,
-                                      &fbes /* empty for write flow*/);
+                               &fbes /* empty for write flow*/);
         return;
     }
 
@@ -349,27 +414,21 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
                               get_elapsed_time_us(vreq->op_start_time));
     if (!vreq->is_read) {
         assert(vreq->nlbas < 256 && vreq->bid.get_nblks() < 256);
-
-        MappingKey                                  key(vreq->lba, vreq->nlbas);
-        std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;
-        uint64_t                                    offset = 0;
-
-        for (int i = 0; i < vreq->nlbas; i++) {
-            carr[i] = crc16_t10dif(init_crc_16, vreq->bbuf->at_offset(offset).bytes, get_page_size());
-            offset += get_page_size();
+        if (vreq->parent_req->outstanding_data_io_cnt.decrement_testz(1)) {
+            // all data io finished, time to write to journal
+            // get all child requests from request context
+            auto  vhb_req = vol_hb_req::cast(parent_req);
+            VolumeJournalKey jkey;
+            VolumeJournalValue jvalue;
+            set_journal_key_value(jkey, jvalue, vhb_req);
+            
+            uint64_t log_id;
+            m_volume_journal->append_sync(jkey, jvalue, log_id); // sync write to journal
+            
+            // TODO - in future append is going to be async and process_journal_compl will be invoked
+            // when data is persisted on drive (group commit)
+            process_journal_completions(vhb_req, log_id);
         }
-
-        vreq->op_start_time = Clock::now();
-        ValueEntry   ve(vreq->seqId, vreq->bid, 0, vreq->nlbas, carr);
-        MappingValue value(ve);
-#ifndef NDEBUG
-        vreq->vol_uuid = m_sb->ondisk_sb->uuid;
-        VOL_LOG(DEBUG, volume, vreq->parent_req, "Mapping.PUT, vol_uuid:{}, Key:{}, Value:{}",
-                boost::uuids::to_string(vreq->vol_uuid), key.to_string(), value.to_string());
-#endif
-        COUNTER_DECREMENT(m_metrics, volume_outstanding_data_write_count, 1);
-        COUNTER_INCREMENT(m_metrics, volume_outstanding_metadata_write_count, 1);
-        m_map->put(vreq, key, value);
     } else {
         std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;
         uint64_t                                    offset = 0;
@@ -406,11 +465,11 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
     // An outside cover to ensure that all vol reqs are issued before any one vol request completion triggering
     // vol_interface_req completion.
     hb_req->outstanding_io_cnt.set(1);
-    
+
     // buf will be freed automatically when ref count drops to zero
     boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector());
     mvec->set(buf, m_sb->ondisk_sb->page_size * nlbas, 0);
-    
+
     if (is_offline()) {
         check_and_complete_req(hb_req, std::make_error_condition(std::errc::no_such_device), false, nullptr);
         return std::make_error_condition(std::errc::no_such_device);
@@ -447,39 +506,51 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
 
     Clock::time_point data_io_start_time = Clock::now();
     auto              sid = seq_Id.fetch_add(1, memory_order_seq_cst);
+    auto              vhb_req = vol_hb_req::cast(hb_req);
+    
+    /* Create child requests */
+    for (i = 0; i < bid.size(); ++i) {
+        volume_req_ptr vreq = Volume::create_vol_req(this, hb_req);
+        vreq->bid = bid[i];
+        vreq->lba = lba + lbas_snt;
+        // TODO - actual seqId/lastCommit seq id should be from vol interface req
+        vreq->seqId = INVALID_SEQ_ID;           // GET_IO_SEQ_ID(sid);
+        vreq->lastCommited_seqId = vreq->seqId; // keeping only latest version always
+        vreq->op_start_time = data_io_start_time;
+        vreq->reqId = ++m_req_id;
 
-    try {
-        for (i = 0; i < bid.size(); ++i) {
-            std::deque< writeback_req_ptr > req_q;
+        assert((bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) % m_sb->ondisk_sb->page_size) == 0);
+        vreq->nlbas = bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) / m_sb->ondisk_sb->page_size;
 
-            volume_req_ptr vreq = Volume::create_vol_req(this, hb_req);
-            vreq->bid = bid[i];
-            vreq->lba = lba + lbas_snt;
-            // TODO - actual seqId/lastCommit seq id should be from vol interface req
-            vreq->seqId = INVALID_SEQ_ID;           // GET_IO_SEQ_ID(sid);
-            vreq->lastCommited_seqId = vreq->seqId; // keeping only latest version always
-            vreq->op_start_time = data_io_start_time;
-            vreq->reqId = ++m_req_id;
+        assert((bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) % m_sb->ondisk_sb->page_size) == 0);
+        vreq->nlbas = bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) / m_sb->ondisk_sb->page_size;
+        assert(vreq->nlbas > 0);
+       
+        vhb_req->child_reqs.push_back(vreq);
 
-            assert((bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) % m_sb->ondisk_sb->page_size) == 0);
-            vreq->nlbas = bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) / m_sb->ondisk_sb->page_size;
 
-            VOL_LOG(TRACE, volume, vreq->parent_req, "alloc_blk: bid: {}, offset: {}, nblks: {}", bid[i].to_string(),
-                    bid[i].data_size(HomeBlks::instance()->get_data_pagesz()), vreq->nlbas);
-            COUNTER_INCREMENT(m_metrics, volume_outstanding_data_write_count, 1);
+        VOL_LOG(TRACE, volume, vreq->parent_req, "alloc_blk: bid: {}, offset: {}, nblks: {}", bid[i].to_string(),
+                bid[i].data_size(HomeBlks::instance()->get_data_pagesz()), vreq->nlbas);
+        COUNTER_INCREMENT(m_metrics, volume_outstanding_data_write_count, 1);
 
 #ifndef NDEBUG
-            {
-                std::unique_lock< std::mutex > mtx(m_req_mtx);
-                m_req_map.emplace(std::make_pair(vreq->reqId, vreq));
-            }
+        {
+            std::unique_lock< std::mutex > mtx(m_req_mtx);
+            m_req_map.emplace(std::make_pair(vreq->reqId, vreq));
+        }
 #endif
+        lbas_snt += vreq->nlbas;
+    }
+    try {
+        /* Issue child requests */
+        for (i = 0; i < vhb_req->child_reqs.size(); ++i) {
+            volume_req_ptr                  vreq = vhb_req->child_reqs[i];
+            std::deque< writeback_req_ptr > req_q;
 
             boost::intrusive_ptr< BlkBuffer > bbuf = m_data_blkstore->write(
-                bid[i], mvec, offset, boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vreq), req_q);
+                vreq->bid, mvec, offset, boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vreq), req_q);
 
             offset += bid[i].data_size(HomeBlks::instance()->get_data_pagesz());
-            lbas_snt += vreq->nlbas;
         }
 
         HISTOGRAM_OBSERVE(m_metrics, volume_pieces_per_write, bid.size());
@@ -534,6 +605,10 @@ void Volume::check_and_complete_req(const vol_interface_req_ptr& hb_req, const s
             VOL_LOG(WARN, , hb_req, "vol req took time {}", get_elapsed_time_ms(hb_req->io_start_time));
         }
         if (call_completion) {
+            // Clear child requests before returning completion. 
+            // This ensure release of cyclic dependancy between child_reqs and parent_req intrusive ptrs.
+            auto  vhb_req = vol_hb_req::cast(hb_req);
+            vhb_req->child_reqs.clear();
 #ifdef _PRERELEASE
             if (auto flip_ret = homestore_flip->get_test_flip<int>("vol_comp_delay_us")) {
                 LOGINFO("delaying completion in volume");

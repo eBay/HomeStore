@@ -16,6 +16,7 @@
 #include <sys/ioctl.h>
 #include <linux/fs.h>
 #include "main/test_setup/simple_hs_setup.hpp"
+#include <boost/filesystem.hpp>
 extern "C" {
 #include <fcntl.h>
 #include <sys/epoll.h>
@@ -68,10 +69,11 @@ public:
 
 uint64_t req_cnt = 0;
 uint64_t req_free_cnt = 0;
-class IOTest : public ::testing::Test {
-    struct req : vol_interface_req {
-        ssize_t  size;
-        off_t    offset;
+class IOTest :  public ::testing::Test {
+    // req is tagged along as cookie in vol hb req
+    struct req  {
+        ssize_t size;
+        off_t offset;
         uint64_t lba;
         uint32_t nblks;
         int      fd;
@@ -81,27 +83,30 @@ class IOTest : public ::testing::Test {
         virtual ~req() { req_free_cnt++; }
     };
 
+    struct vol_info_t {
+        boost::uuids::uuid uuid;
+    };
 protected:
-    std::shared_ptr< iomgr::ioMgr > iomgr_obj;
-    bool                            init;
-    std::vector< VolumePtr >        vol;
-    std::vector< homeds::Bitset* >  m_vol_bm;
-    std::vector< uint64_t >         max_vol_blks;
-    std::atomic< uint64_t >         vol_cnt;
-    test_ep*                        ep;
-    int                             ev_fd;
-    std::condition_variable         m_cv;
-    std::mutex                      m_mutex;
-    uint64_t                        cur_vol;
-    Clock::time_point               start_time;
-    Clock::time_point               end_time;
-    std::vector< dev_info >         device_info;
-    uint64_t                        max_vol_size;
-    std::atomic< int >              rdy_state;
-    bool                            is_abort;
-    bool                            preload_done;
-    Clock::time_point               print_startTime;
-
+    std::shared_ptr<iomgr::ioMgr> iomgr_obj;
+    bool init;
+    std::vector<VolumePtr> vol;
+    std::vector<homeds::Bitset *> m_vol_bm;
+    std::vector<uint64_t> max_vol_blks;
+    std::atomic<uint64_t> vol_cnt;
+    test_ep *ep;
+    int ev_fd;
+    std::condition_variable m_cv;
+    std::mutex m_mutex;
+    uint64_t cur_vol;
+    Clock::time_point start_time;
+    Clock::time_point end_time;
+    std::vector<dev_info> device_info;
+    uint64_t max_vol_size;
+    std::atomic<int> rdy_state;
+    bool is_abort;
+    bool preload_done;
+    Clock::time_point print_startTime;
+    std::vector< std::shared_ptr<vol_info_t> > vol_info;
 public:
     IOTest() : vol(max_vols), m_vol_bm(max_vols), max_vol_blks(max_vols), device_info(0), is_abort(false) {
         vol_cnt = 0;
@@ -113,7 +118,20 @@ public:
 
     void print() {}
 
+    void remove_journal_files() {
+        //Remove journal folders
+        for ( auto i = 0u; i < vol_info.size(); i++) {
+            std::string name = boost::lexical_cast<std::string>(vol_info[i]->uuid);
+            boost::filesystem::remove_all(name);
+            LOGINFO("Removed journal dir: {}",  name);
+            remove(name.c_str());
+        }
+    }
+    
     void remove_files() {
+        remove_journal_files();
+        vol_info.clear();
+        
         remove("/tmp/perf_file1");
         remove("/tmp/perf_file2");
         remove("/tmp/perf_file3");
@@ -162,12 +180,19 @@ public:
         VolInterface::get_instance()->attach_vol_completion_cb(vol_obj, cb);
     }
 
+    
     void vol_init(int cnt, const VolumePtr& vol_obj) {
+        std::shared_ptr<vol_info_t> info = std::make_shared<vol_info_t> ();
+        info->uuid = VolInterface::get_instance()->get_uuid(vol_obj);
+        
         vol[cnt] = vol_obj;
         max_vol_blks[cnt] = VolInterface::get_instance()->get_vol_capacity(vol_obj).initial_total_size /
             VolInterface::get_instance()->get_page_size(vol_obj);
         m_vol_bm[cnt] = new homeds::Bitset(max_vol_blks[cnt]);
         assert(VolInterface::get_instance()->get_vol_capacity(vol_obj).initial_total_size == max_vol_size);
+
+        std::unique_lock< std::mutex > lk(m_mutex);
+        vol_info.push_back(info);
     }
 
     void vol_state_change_cb(const VolumePtr& vol, vol_state old_state, vol_state new_state) { assert(0); }
@@ -275,8 +300,8 @@ public:
          * write to a file after ios are completed.
          */
         assert(buf != nullptr);
-
-        boost::intrusive_ptr< req > req(new struct req());
+       
+        req* req = new struct req();
         req->lba = lba;
         req->nblks = nblks;
         req->size = size;
@@ -285,7 +310,9 @@ public:
         req->cur_vol = cur;
         ++outstanding_ios;
         ++write_cnt;
-        auto ret_io = VolInterface::get_instance()->write(vol[cur], lba, buf, nblks, req);
+        auto vreq = VolInterface::get_instance()->create_vol_hb_req();
+        vreq->cookie = req;
+        auto ret_io = VolInterface::get_instance()->write(vol[cur], lba, buf, nblks, vreq);
         if (ret_io != no_error) {
             assert(0);
             free(buf);
@@ -318,8 +345,8 @@ public:
     }
 
     void read_vol(uint32_t cur, uint64_t lba, uint64_t nblks) {
-        uint64_t                    size = nblks * VolInterface::get_instance()->get_page_size(vol[cur]);
-        boost::intrusive_ptr< req > req(new struct req());
+        uint64_t size = nblks * VolInterface::get_instance()->get_page_size(vol[cur]);
+        req* req = new struct req();
         req->lba = lba;
         req->nblks = nblks;
         req->is_read = true;
@@ -328,7 +355,9 @@ public:
         req->cur_vol = cur;
         outstanding_ios++;
         read_cnt++;
-        auto ret_io = VolInterface::get_instance()->read(vol[cur], lba, nblks, req);
+        auto vreq = VolInterface::get_instance()->create_vol_hb_req();
+        vreq->cookie = req;
+        auto ret_io = VolInterface::get_instance()->read(vol[cur], lba, nblks, vreq);
         if (ret_io != no_error) {
             outstanding_ios--;
             read_err_cnt++;
@@ -338,9 +367,8 @@ public:
 
     void process_completions(const vol_interface_req_ptr& vol_req) {
         /* raise an event */
-        boost::intrusive_ptr< req > req = boost::static_pointer_cast< struct req >(vol_req);
-        static uint64_t             print_time = 30;
-        uint64_t                    temp = 1;
+        static uint64_t print_time = 30;
+        uint64_t temp = 1;
         --outstanding_ios;
         auto elapsed_time = get_elapsed_time(print_startTime);
         if (elapsed_time > print_time) {
@@ -371,6 +399,8 @@ public:
             uint64_t              size = write(ev_fd, &temp, sizeof(uint64_t));
             if (size != sizeof(uint64_t)) { assert(0); }
         }
+        req* cookie = (req*)(vol_req->cookie);
+        delete cookie;
     }
 
     uint64_t get_elapsed_time(Clock::time_point start_time) {
