@@ -476,7 +476,7 @@ public:
         HS_ASSERT_CMP(DEBUG, len, <=, m_reserved_sz, 
                 "Write size:{} larger then reserved size: {} is not allowed!", len, m_reserved_sz);
 
-        HS_ASSERT_CMP(DEBUG, get_reserved_tail_offset(), >=, offset + len,
+        HS_ASSERT_CMP(DEBUG, (uint64_t)get_reserved_tail_offset(), >=, (uint64_t)(offset + len),
                 "Wrting at offset: {}, which is out of reserved portion is not allowed!", offset);
 
         // convert logical offset to dev offset
@@ -524,7 +524,7 @@ public:
 
             // bytes written should always equal to requested write size, since alloc_blk handles offset 
             // which will never across chunk boundary;
-            HS_ASSERT_CMP(DEBUG, bytes_written, ==, count, "Bytes written not equal to input len!");
+            HS_ASSERT_CMP(DEBUG, (size_t)bytes_written, ==, count, "Bytes written not equal to input len!");
 
         } catch (const std::exception& e) { HS_ASSERT(DEBUG, 0, "{}", e.what()); }
 
@@ -1182,8 +1182,6 @@ public:
     uint64_t get_chunk_size() const { return m_chunk_size; }
 
 private:
-    uint64_t get_size() { return m_num_chunks * m_chunk_size; }
-
     /* Adds a primary chunk to the chunk list in pdev */
     void add_primary_chunk(PhysicalDevChunk* chunk) {
         auto pdev_id = chunk->get_physical_dev()->get_dev_id();
