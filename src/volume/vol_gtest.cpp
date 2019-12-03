@@ -1011,27 +1011,6 @@ private:
             remove(name.c_str());
         }
     }
-    void shutdown() {
-        // release the ref_count to volumes;
-
-        {
-            std::unique_lock< std::mutex > lk(m_mutex);
-            assert(io_stalled);
-            while (outstanding_ios.load() != 0) {
-                m_cv.wait(lk);
-            }
-        }
-        LOGINFO("stopping iomgr");
-        if (iomgr_start) { iomgr_obj->stop(); }
-
-        {
-            std::unique_lock< std::mutex > lk(m_mutex);
-            remove_journal_files();
-            vol_info.clear();
-        }
-        LOGINFO("shutting homestore");
-        VolInterface::get_instance()->shutdown(std::bind(&IOTest::shutdown_callback, this, std::placeholders::_1));
-    }
 };
 
 /************************** Test cases ****************************/
@@ -1243,19 +1222,20 @@ SDS_OPTION_GROUP(
     (mem_btree_page_size, "", "mem_btree_page_size", "mem_btree_page_size",
      ::cxxopts::value< uint32_t >()->default_value("8192"), "mem_btree_page_size"))
 
-#define ENABLED_OPTIONS logging, home_blks,
-test_volume SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
+#define ENABLED_OPTIONS logging, home_blks, test_volume
 
-    /************************** MAIN ********************************/
+SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
 
-    /* We can run this target either by using default options which run the normal io tests or by setting different
-     * options. Format is
-     *   1. ./test_volume
-     *   2. ./test_volume --gtest_filter=*recovery* --run_time=120 --num_threads=16 --max_disk_capacity=10
-     * --max_volume=50 Above command run all tests having a recovery keyword for 120 seconds with 16 threads , 10g disk
-     * capacity and 50 volumes
-     */
-    int main(int argc, char* argv[]) {
+/************************** MAIN ********************************/
+
+/* We can run this target either by using default options which run the normal io tests or by setting different
+ * options. Format is
+ *   1. ./test_volume
+ *   2. ./test_volume --gtest_filter=*recovery* --run_time=120 --num_threads=16 --max_disk_capacity=10
+ * --max_volume=50 Above command run all tests having a recovery keyword for 120 seconds with 16 threads , 10g disk
+ * capacity and 50 volumes
+ */
+int main(int argc, char* argv[]) {
     srand(time(0));
     ::testing::GTEST_FLAG(filter) = "*lifecycle_test*";
     testing::InitGoogleTest(&argc, argv);

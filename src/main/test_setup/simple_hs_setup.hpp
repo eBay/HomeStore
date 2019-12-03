@@ -81,6 +81,7 @@ struct simple_store_req : public vol_interface_req {
 
     simple_store_req() { buf = nullptr; }
     virtual ~simple_store_req() { free(buf); }
+    virtual void free_yourself() override { delete this; }
 };
 
 struct vol_info {

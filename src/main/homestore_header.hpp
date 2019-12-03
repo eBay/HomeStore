@@ -44,7 +44,7 @@ public:
     }
 };
 
-#define homestore_flip Flip::instance()
+#define homestore_flip (&flip::Flip::instance())
 #endif
 
 #define METRICS_DUMP_MSG sisl::MetricsFarm::getInstance().get_result_in_json_string()

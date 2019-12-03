@@ -37,8 +37,8 @@ if (NOT ${CONAN_BUILD_COVERAGE})
         tests/test_iomgr_executor.cpp
         loadgen/iomgr_executor.cpp
         )
-    add_executable(test_iomgr_exec ${TEST_IOMGR_EXEC_FILES})
-    target_link_libraries(test_iomgr_exec homestore ${COMMON_LIB_DEPS})
+    #add_executable(test_iomgr_exec ${TEST_IOMGR_EXEC_FILES})
+    #target_link_libraries(test_iomgr_exec homestore ${COMMON_LIB_DEPS})
 endif ()
 
 set(TEST_OBJALLOCATOR_SOURCE_FILES tests/test_obj_allocator.cpp)

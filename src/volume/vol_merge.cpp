@@ -1,4 +1,3 @@
-#include <iomgr/iomgr.hpp>
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
 #include <main/vol_interface.hpp>
@@ -12,6 +11,7 @@
 #include <atomic>
 #include <string>
 #include <utility/thread_buffer.hpp>
+#include <iomgr/iomgr.hpp>
 #include <chrono>
 #include <thread>
 
@@ -93,7 +93,7 @@ class MinHS {
         uint64_t        cur_checkpoint;
         ~vol_info_t() { delete m_vol_bm; }
     };
-    struct req  {
+    struct req {
         ssize_t  size;
         off_t    offset;
         uint64_t lba;
@@ -146,7 +146,7 @@ public:
     void process_completions(const vol_interface_req_ptr& vol_req) {
         static bool snap = true;
         static bool first = true;
-        //LOGINFO("Process Completions {} {}", write_cnt, outstanding_ios);
+        // LOGINFO("Process Completions {} {}", write_cnt, outstanding_ios);
 
         --outstanding_ios;
         if (outstanding_ios.load() == 0) {
@@ -157,7 +157,7 @@ public:
             vol_info[0]->vol->print_tree();
             LOGINFO("Vol 1");
             vol_info[1]->vol->print_tree();
-            //vol_info[0]->vol->print_tree();
+            // vol_info[0]->vol->print_tree();
 
             notify_cmpl();
         }
@@ -256,9 +256,7 @@ public:
 
             auto ret = pwrite(vol_info[cur]->fd, init_buf, write_size, (off_t)offset);
             assert(ret = write_size);
-            if (ret != 0) {
-                return;
-            }
+            if (ret != 0) { return; }
         }
     }
 
@@ -279,11 +277,9 @@ public:
         uint8_t* buf = nullptr;
         uint64_t size = nblks * VolInterface::get_instance()->get_page_size(vol_info[cur]->vol);
         auto     ret = posix_memalign((void**)&buf, 4096, size);
-        if (ret) {
-            assert(0);
-        }
+        if (ret) { assert(0); }
         assert(buf != nullptr);
-        req* req =new struct req();
+        req* req = new struct req();
         req->lba = lba;
         req->nblks = nblks;
         req->fd = vol_info[cur]->fd;
@@ -310,9 +306,7 @@ public:
         uint8_t* buf1 = nullptr;
         uint64_t size = nblks * VolInterface::get_instance()->get_page_size(vol_info[cur]->vol);
         auto     ret = posix_memalign((void**)&buf, 4096, size);
-        if (ret) {
-            assert(0);
-        }
+        if (ret) { assert(0); }
         ret = posix_memalign((void**)&buf1, 4096, size);
         assert(!ret);
         /* buf will be owned by homestore after sending the IO. so we need to allocate buf1 which will be used to
@@ -324,7 +318,7 @@ public:
 
         memcpy(buf1, buf, size);
 
-        req* req =new struct req();
+        req* req = new struct req();
         req->lba = lba;
         req->nblks = nblks;
         req->size = size;
@@ -355,12 +349,11 @@ public:
         struct lba_nblks_s {
             uint64_t lba;
             uint64_t nblks;
-        } lba_nblks[10] = 
-                //{{100, 16}, {132, 8}, {200, 8}, {220, 8}, {116, 8}, {130, 8}, {138, 8}, {142, 8}};
-                /* 100-115, 116-123, 130-131, 132-137, 138-139, 140-141, 142-145, 146-149, 200-207, 220-227 */
-                {{100, 16}, {132, 8}, {200, 8}, {220, 8}, {116, 8}, {120, 8}, {130, 8}, {270, 8}};
-                /* 100-115, 116-119, 120-123, 124-127, 130-131, 132-137, 138-139, 200-207, 220-227, 270-277 */
-                        
+        } lba_nblks[10] =
+            //{{100, 16}, {132, 8}, {200, 8}, {220, 8}, {116, 8}, {130, 8}, {138, 8}, {142, 8}};
+            /* 100-115, 116-123, 130-131, 132-137, 138-139, 140-141, 142-145, 146-149, 200-207, 220-227 */
+            {{100, 16}, {132, 8}, {200, 8}, {220, 8}, {116, 8}, {120, 8}, {130, 8}, {270, 8}};
+        /* 100-115, 116-119, 120-123, 124-127, 130-131, 132-137, 138-139, 200-207, 220-227, 270-277 */
 
         write_vol(cur, lba_nblks[widx].lba, lba_nblks[widx].nblks);
         widx++;
@@ -375,8 +368,7 @@ public:
     start:
         lba = rand() % (vol_info[cur]->max_vol_blks - max_blks);
         nblks = rand() % max_blks;
-        if (nblks == 0)
-            nblks = 1;
+        if (nblks == 0) nblks = 1;
         {
             std::unique_lock< std::mutex > lk(vol_info[cur]->vol_mutex);
             if (nblks && vol_info[cur]->m_vol_bm->is_bits_reset(lba, nblks)) {
@@ -390,12 +382,8 @@ public:
         uint64_t size = nblks * VolInterface::get_instance()->get_page_size(vol_info[cur]->vol);
 
         buf = buf1 = nullptr;
-        if (posix_memalign((void**)&buf, 4096, size)) {
-            assert(0);
-        }
-        if (posix_memalign((void**)&buf1, 4096, size)) {
-            assert(0);
-        }
+        if (posix_memalign((void**)&buf, 4096, size)) { assert(0); }
+        if (posix_memalign((void**)&buf1, 4096, size)) { assert(0); }
 
         assert(buf != nullptr && buf1 != nullptr);
         populate_buf(buf, size, lba, 0);
@@ -487,8 +475,9 @@ public:
         bzero(init_buf, max_io_size);
         ev_fd = eventfd(0, EFD_NONBLOCK);
 
-        iomgr_obj->add_fd(ev_fd, [this](auto fd, auto cookie, auto event) { process_ev_common(fd, cookie, event); },
-                          EPOLLIN, 9, nullptr);
+        iomgr_obj->add_fd(
+            ev_fd, [this](auto fd, auto cookie, auto event) { process_ev_common(fd, cookie, event); }, EPOLLIN, 9,
+            nullptr);
         ep = new test_ep(iomgr_obj);
         iomgr_obj->add_ep(ep);
         iomgr_obj->start();
