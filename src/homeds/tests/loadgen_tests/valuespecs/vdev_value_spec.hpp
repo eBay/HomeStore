@@ -50,13 +50,6 @@ public:
 
     VDevValue(const VDevValue& other) { copy_blob(other.get_blob()); }
 
-#if 0
-    VDevValue& operator=(const VDevValue& other) {
-        copy_blob(other.get_blob());
-        return *this;
-    }
-#endif
-
     void copy_blob(const homeds::blob& b) {
         m_bytes.clear();
         for (size_t i = 0; i < b.size; i++) {
@@ -87,8 +80,6 @@ public:
         homeds::blob b = get_blob();
         return util::Hash64((const char*)b.bytes, (size_t)b.size);
     }
-
-    //void set_bytes_ptr() { m_bytes_ptr = &m_bytes[0]; }
 
     uint8_t* get_buf() { return &m_bytes[0]; }
     

@@ -292,6 +292,9 @@ public:
             auto chunk = create_dev_chunk(pdev_ind, ba, INVALID_CHUNK_ID);
             m_primary_pdev_chunks_list[pdev_ind].chunks_in_pdev.push_back(chunk);
 
+            // update end of chunk offset;
+            chunk->update_end_of_chunk(m_chunk_size);
+
             // If we have mirror, create a map between chunk and its mirrored chunks
             if (nmirror) {
                 uint32_t next_ind = i;
@@ -375,7 +378,7 @@ public:
         }
         return  m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id];
     }
-
+    
     //
     // @brief
     //
@@ -445,10 +448,23 @@ public:
     }
 
     // 
+    // Note: 
     // write advances seek cursor
     //
     ssize_t write(const void* buf, size_t count, boost::intrusive_ptr< virtualdev_req > req) {
-        auto bytes_written = pwrite(buf, count, m_seek_cursor, req);
+        if (get_used_space() + count > get_size()) {
+            // not enough space left;
+            HS_LOG(ERROR, device, "No space left! m_write_sz_in_total: {}, m_reserved_sz: {}",
+                   m_write_sz_in_total, m_reserved_sz);
+            return -1;
+        }
+
+        if (m_reserved_sz != 0) {
+            HS_LOG(ERROR, device, "write can't be served when m_reserved_sz:{} is not comsumed by pwrite yet.", m_reserved_sz);
+            return -1;
+        }
+
+        auto bytes_written = do_pwrite(buf, count, m_seek_cursor, req);
         m_seek_cursor += bytes_written;
         return bytes_written;
     }
@@ -457,6 +473,10 @@ public:
         return write(buf, count, nullptr);
     }
 
+    // 
+    // Note:
+    // pwrite doesn't advances cursor
+    //
     ssize_t pwrite(const void* buf, size_t count, off_t offset) {
         return pwrite(buf, count, offset, nullptr);
     }
@@ -473,19 +493,11 @@ public:
 
         if (req) { req->outstanding_cb.store(1); }
 
-        HS_ASSERT_CMP(DEBUG, len, <=, m_reserved_sz, 
-                "Write size:{} larger then reserved size: {} is not allowed!", len, m_reserved_sz);
-
-        HS_ASSERT_CMP(DEBUG, (uint64_t)get_reserved_tail_offset(), >=, (uint64_t)(offset + len),
-                "Wrting at offset: {}, which is out of reserved portion is not allowed!", offset);
-
         // convert logical offset to dev offset
         uint64_t offset_in_dev = logical_to_dev_offset(offset, dev_id, chunk_id, offset_in_chunk);
         
-        HS_ASSERT_CMP(DEBUG, m_chunk_size - offset_in_chunk, >=, len, "Writing size: {} acrossing chunk is not allowed!", len);
+        HS_ASSERT_CMP(RELEASE, m_chunk_size - offset_in_chunk, >=, len, "Writing size: {} acrossing chunk is not allowed!", len);
 
-        // update reserved size
-        m_reserved_sz -= len;
         m_write_sz_in_total += len;
 
         PhysicalDevChunk* chunk = m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id];
@@ -500,14 +512,9 @@ public:
     }
 
     // 
-    // Assumption:
-    // pwrite/pwritev always use offset returned from alloc_blk to do the write;
+    // split `do_write` from `pwrite` so that `write` could re-use this sub-routine
     //
-    // Note:
-    // 1. pwrite should not across chunk boundaries 
-    //    because alloc_blk garunteens offset returned always doesn't across chunk boundary;
-    //
-    ssize_t pwrite(const void* buf, size_t count, off_t offset, boost::intrusive_ptr< virtualdev_req > req) {
+    ssize_t do_pwrite(const void* buf, size_t count, off_t offset, boost::intrusive_ptr< virtualdev_req > req) {
         uint32_t dev_id = 0, chunk_id = 0;
         
         auto offset_in_dev = process_write_offset(count, offset, dev_id, chunk_id, req);
@@ -529,6 +536,27 @@ public:
         } catch (const std::exception& e) { HS_ASSERT(DEBUG, 0, "{}", e.what()); }
 
         return bytes_written;
+    }
+
+    // 
+    // Important assumption:
+    // pwrite/pwritev always use offset returned from alloc_blk to do the write;
+    //
+    // Note:
+    // 1. pwrite should not across chunk boundaries 
+    //    because alloc_blk garunteens offset returned always doesn't across chunk boundary;
+    //
+    ssize_t pwrite(const void* buf, size_t count, off_t offset, boost::intrusive_ptr< virtualdev_req > req) {
+        HS_ASSERT_CMP(RELEASE, count, <=, m_reserved_sz, 
+                "Write size:{} larger then reserved size: {} is not allowed!", count, m_reserved_sz);
+        
+        HS_ASSERT_CMP(RELEASE, (uint64_t)get_reserved_tail_offset(), >=, (uint64_t)(offset + count), 
+                "Wrting at offset: {}, which is out of reserved portion is not allowed!", offset);
+        
+        // update reserved size
+        m_reserved_sz -= count;
+
+        return do_pwrite(buf, count, offset, req);
     }
 
     ssize_t do_pwrite_internal(PhysicalDev* pdev, PhysicalDevChunk* chunk, const char* buf, const uint32_t len, 
@@ -616,8 +644,10 @@ public:
 
         bool across_chunk = false;
         
-        HS_ASSERT_CMP(DEBUG, (uint64_t)end_of_chunk, <=, m_chunk_size, "Invalid end of chunk: {} detected on chunk num: {}", end_of_chunk, chunk->get_chunk_id());
-        HS_ASSERT_CMP(DEBUG, (uint64_t)offset_in_chunk, <=, chunk_size, "Invalid m_seek_cursor: {} which falls in beyond end of chunk: {}!", m_seek_cursor, end_of_chunk);
+        HS_ASSERT_CMP(RELEASE, (uint64_t)end_of_chunk, <=, m_chunk_size, 
+                "Invalid end of chunk: {} detected on chunk num: {}", end_of_chunk, chunk->get_chunk_id());
+        HS_ASSERT_CMP(RELEASE, (uint64_t)offset_in_chunk, <=, chunk_size, 
+                "Invalid m_seek_cursor: {} which falls in beyond end of chunk: {}!", m_seek_cursor, end_of_chunk);
         
         // if read size is larger then what's left in this chunk
         if (count > (chunk_size - offset_in_chunk)) {
@@ -630,7 +660,8 @@ public:
         
         if (bytes_read != -1) {
             // Update seek curosr after read;
-            HS_ASSERT_CMP(DEBUG, (size_t)bytes_read, ==, count, "bytes_read returned: {} must be equal to requested size: {}!", bytes_read, count);
+            HS_ASSERT_CMP(RELEASE, (size_t)bytes_read, ==, count, 
+                    "bytes_read returned: {} must be equal to requested size: {}!", bytes_read, count);
             m_seek_cursor += bytes_read;
             if (across_chunk) {
                 m_seek_cursor += (m_chunk_size - end_of_chunk);

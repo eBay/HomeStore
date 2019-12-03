@@ -15,7 +15,6 @@ namespace homeds {
 namespace loadgen {
 
 // 
-// A dummy key that is not actually used, just to satisfy loadgen framework 
 //
 class VDevKey : public KeySpec {
 private:
@@ -79,7 +78,7 @@ public:
     }
 
 private:
-    uint64_t m_key_val;  // a dummy key
+    uint64_t m_key_val;  
 };
 
 }  // loadgen

@@ -37,7 +37,8 @@
 #include "storespecs/file_store_spec.hpp"
 #include "valuespecs/blk_value_spec.hpp"
 
-#include "storespecs/vdev_store_spec.hpp"
+#include "storespecs/vdev_prw_store_spec.hpp"
+#include "storespecs/vdev_rw_store_spec.hpp"
 #include "keyspecs/vdev_key_spec.hpp"
 #include "valuespecs/vdev_value_spec.hpp"
 
@@ -75,7 +76,9 @@ using namespace homeds::loadgen;
 
 #define G_FileKV BtreeLoadGen< MapKey, BlkValue, FileStoreSpec, IOMgrExecutor >
 
-#define G_VDev_Test BtreeLoadGen< VDevKey, VDevValue, VDevStoreSpec, IOMgrExecutor>
+#define G_VDev_Test_PRW BtreeLoadGen< VDevKey, VDevValue, VDevPRWStoreSpec, IOMgrExecutor>
+
+#define G_VDev_Test_RW BtreeLoadGen< SimpleNumberKey, VDevValue, VDevRWStoreSpec, IOMgrExecutor>
 
 static Param parameters;
 bool loadgen_verify_mode = false;
@@ -237,8 +240,8 @@ struct FileTest : public testing::Test {
 
 TEST_F(FileTest, FileTest) { this->execute(); }
 
-struct VDevTest : public testing::Test {
-    std::unique_ptr< G_VDev_Test >   loadgen;
+struct VDevTest_RW : public testing::Test {
+    std::unique_ptr< G_VDev_Test_RW >   loadgen;
     DiskInitializer< IOMgrExecutor > di;
     std::mutex                       m_mtx;
     std::condition_variable          m_cv;
@@ -260,15 +263,48 @@ struct VDevTest : public testing::Test {
     void execute() {
         // disable verfication for vdev test
         parameters.NT = 1;   // vdev APIs are not thread-safe;
-        loadgen = std::make_unique< G_VDev_Test >(parameters.NT, false); 
+        loadgen = std::make_unique< G_VDev_Test_RW >(parameters.NT, false); 
         di.init(loadgen->get_executor(),
-                std::bind(&VDevTest::init_done_cb, this, std::placeholders::_1, std::placeholders::_2));
+                std::bind(&VDevTest_RW::init_done_cb, this, std::placeholders::_1, std::placeholders::_2));
         join(); // sync wait for test to finish
         di.cleanup();
     }
 };
 
-TEST_F(VDevTest, VDevTest) { this->execute(); }
+TEST_F(VDevTest_RW, VDevTest_RW) { this->execute(); }
+
+struct VDevTest_PRW : public testing::Test {
+    std::unique_ptr< G_VDev_Test_PRW >   loadgen;
+    DiskInitializer< IOMgrExecutor > di;
+    std::mutex                       m_mtx;
+    std::condition_variable          m_cv;
+    bool                             is_complete = false;
+
+    void join() {
+        std::unique_lock< std::mutex > lk(m_mtx);
+        m_cv.wait(lk, [this] { return is_complete; });
+    }
+
+    void init_done_cb(std::error_condition err, const homeds::out_params& params1) {
+        loadgen->initParam(parameters); 
+        LOGINFO("Regression Started");
+        loadgen->regression(true, false, false, false);
+        is_complete = true;
+        m_cv.notify_one();
+    }
+
+    void execute() {
+        // disable verfication for vdev test
+        parameters.NT = 1;   // vdev APIs are not thread-safe;
+        loadgen = std::make_unique< G_VDev_Test_PRW >(parameters.NT, false); 
+        di.init(loadgen->get_executor(),
+                std::bind(&VDevTest_PRW::init_done_cb, this, std::placeholders::_1, std::placeholders::_2));
+        join(); // sync wait for test to finish
+        di.cleanup();
+    }
+};
+
+TEST_F(VDevTest_PRW, VDevTest_PRW) { this->execute(); }
 
 struct CacheTest : public testing::Test {
     std::unique_ptr< G_CacheKV > loadgen;
