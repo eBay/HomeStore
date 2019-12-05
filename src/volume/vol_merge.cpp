@@ -12,6 +12,7 @@
 #include <string>
 #include <utility/thread_buffer.hpp>
 #include <iomgr/iomgr.hpp>
+#include <iomgr/aio_drive_interface.hpp>
 #include <chrono>
 #include <thread>
 
@@ -47,14 +48,6 @@ SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 // SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write, iomgr, btree_structures, btree_nodes, btree_generics,
 //                 varsize_blk_alloc, VMOD_VOL_MAPPING, httpserver_lmod, volume)
-
-class test_ep : public iomgr::EndPoint {
-public:
-    test_ep(std::shared_ptr< iomgr::ioMgr > iomgr) : iomgr::EndPoint(iomgr) {}
-    void shutdown_local() override {}
-    void init_local() override {}
-    void print_perf() override {}
-};
 
 /*** CLI options ***/
 SDS_OPTION_GROUP(
@@ -115,7 +108,6 @@ class MinHS {
 private:
     std::mutex                                   m_mutex;
     std::atomic< uint64_t >                      vol_indx;
-    std::shared_ptr< iomgr::ioMgr >              iomgr_obj;
     uint64_t                                     max_vol_size;
     std::vector< std::shared_ptr< vol_info_t > > vol_info;
     std::vector< SnapshotPtr >                   snaps;
@@ -124,8 +116,8 @@ private:
     Clock::time_point                            startTime;
     std::condition_variable                      m_cv;
 
-    test_ep*              ep;
-    int                   ev_fd;
+    int                   m_ev_fd;
+    iomgr::fd_info*       m_ev_fdinfo;
     void*                 init_buf;
     std::atomic< size_t > outstanding_ios;
     uint64_t              max_outstanding_ios = 8u;
@@ -136,12 +128,7 @@ private:
 
 public:
     MinHS() : vol_indx(0) {}
-    ~MinHS() {
-        if (iomgr_obj) {
-            iomgr_obj->stop();
-            iomgr_obj.reset();
-        }
-    }
+    ~MinHS() { iomanager.stop(); }
 
     void process_completions(const vol_interface_req_ptr& vol_req) {
         static bool snap = true;
@@ -222,9 +209,18 @@ public:
             max_capacity += max_disk_capacity;
         }
 
-        max_vol_size = (60 * max_capacity) / (100 * max_vols);
+        iomanager.start(1 /* total interfaces */, num_threads);
+        iomanager.add_drive_interface(
+            std::dynamic_pointer_cast< iomgr::DriveInterface >(std::make_shared< iomgr::AioDriveInterface >()),
+            true /* is_default */);
 
-        iomgr_obj = std::make_shared< iomgr::ioMgr >(1, num_threads);
+        m_ev_fd = eventfd(0, EFD_NONBLOCK);
+        m_ev_fdinfo = iomanager.add_fd(iomanager.default_drive_interface(), m_ev_fd,
+                                       std::bind(&MinHS::process_ev_common, this, std::placeholders::_1,
+                                                 std::placeholders::_2, std::placeholders::_3),
+                                       EPOLLIN, 9, nullptr);
+
+        max_vol_size = (60 * max_capacity) / (100 * max_vols);
 
         init_params params;
 
@@ -234,7 +230,6 @@ public:
         params.disk_init = init;
         params.devices = device_info;
         params.is_file = true;
-        params.iomgr = iomgr_obj;
         params.init_done_cb = std::bind(&MinHS::init_done_cb, this, std::placeholders::_1, std::placeholders::_2);
         params.vol_mounted_cb = std::bind(&MinHS::vol_mounted_cb, this, std::placeholders::_1, std::placeholders::_2);
         params.vol_state_change_cb = std::bind(&MinHS::vol_state_change_cb, this, std::placeholders::_1,
@@ -422,12 +417,10 @@ public:
     }
 
     void process_ev_common(int fd, void* cookie, int event) {
-        uint64_t    temp;
         static bool first = true;
 
-        auto rsize = read(ev_fd, &temp, sizeof(uint64_t));
-
-        iomgr_obj->process_done(fd, event);
+        uint64_t              temp;
+        [[maybe_unused]] auto rsize = read(m_ev_fd, &temp, sizeof(uint64_t));
 
         LOGINFO("Write Cnt {} Max Num Writes {}", write_cnt, max_num_writes);
         if (write_cnt >= max_num_writes) {
@@ -437,7 +430,7 @@ public:
         if ((write_cnt < max_num_writes) ||
             (outstanding_ios.load() < max_outstanding_ios && get_elapsed_time(startTime) < run_time)) {
             /* raise an event */
-            iomgr_obj->fd_reschedule(fd, event);
+            iomanager.fd_reschedule(fd, event);
         }
 
         size_t cnt = 0;
@@ -473,17 +466,11 @@ public:
         auto ret = posix_memalign((void**)&init_buf, 4096, max_io_size);
         assert(!ret);
         bzero(init_buf, max_io_size);
-        ev_fd = eventfd(0, EFD_NONBLOCK);
 
-        iomgr_obj->add_fd(
-            ev_fd, [this](auto fd, auto cookie, auto event) { process_ev_common(fd, cookie, event); }, EPOLLIN, 9,
-            nullptr);
-        ep = new test_ep(iomgr_obj);
-        iomgr_obj->add_ep(ep);
-        iomgr_obj->start();
         outstanding_ios = 0;
-        uint64_t temp = 1;
-        auto     wsize = write(ev_fd, &temp, sizeof(uint64_t));
+        uint64_t              temp = 1;
+        [[maybe_unused]] auto wsize = write(m_ev_fd, &temp, sizeof(uint64_t));
+
         return;
     }
 

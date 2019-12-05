@@ -18,9 +18,9 @@ set(BTREE_CHECKER_SOURCE_FILES
        btree_checker.cpp
       )
 
-#add_executable(test_merge
-#                  ${TEST_MERGE_SOURCE_FILES}
-#              )
+add_executable(test_merge
+                  ${TEST_MERGE_SOURCE_FILES}
+              )
 add_executable(test_volume
                   ${TEST_VOLUME_SOURCE_FILES}
                 )
@@ -40,7 +40,7 @@ if (NOT ${CONAN_BUILD_COVERAGE})
     TARGET_LINK_LIBRARIES(check_btree ${Boost_LIBRARIES})
 endif ()
 
-#target_link_libraries(test_merge homeblks ${COMMON_LIB_DEPS})
+target_link_libraries(test_merge homeblks ${COMMON_LIB_DEPS})
 
 target_link_libraries(test_volume homeblks ${COMMON_LIB_DEPS})
 
