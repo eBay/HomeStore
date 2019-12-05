@@ -49,8 +49,11 @@ public:
     // read
     bool pread(VDevKey& k, VDevValue* out_v) { 
         std::lock_guard<std::mutex> l(m_mtx);
-        auto off = k.get_key_val();
+        auto off = k.get_offset();
         auto count = m_off_to_info_map[off].size;
+
+        assert(count == k.get_alloc_size());
+
         uint8_t buf[count];
         auto bytes_read = m_store->pread((void*)buf, (size_t)count, (off_t)off);
 
@@ -68,12 +71,13 @@ public:
 
     bool pwrite(VDevKey& k, std::shared_ptr<VDevValue> v) {
         std::lock_guard<std::mutex> l(m_mtx);
-        auto off = k.get_key_val();
+        auto off = k.get_offset();
+        auto count = k.get_alloc_size();
+        v->update_value(count);
         auto buf = v->get_buf();
-        auto count = v->get_size();
         
         if (m_write_sz + count > m_store->get_size()) {
-            LOGTRACE("Expected out of space: write size {} : {} will exceed blkstore maximum size: {}", m_write_sz, count, m_store->get_size());
+            LOGWARN("Expected out of space: write size {} : {} will exceed blkstore maximum size: {}", m_write_sz, count, m_store->get_size());
             return true;
         }
 

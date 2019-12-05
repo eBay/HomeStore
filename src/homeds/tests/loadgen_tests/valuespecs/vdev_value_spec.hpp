@@ -12,18 +12,13 @@
 namespace homeds {
 namespace loadgen {
        
-constexpr size_t  MAX_SIZE = 4096; 
-constexpr size_t  VDEV_BLK_SIZE = 512; 
-
 class VDevValue : public ValueSpec {
 
 public:
     static std::shared_ptr<  VDevValue > gen_value(ValuePattern spec, VDevValue* ref_value = nullptr) {
-        size_t        size = VDEV_BLK_SIZE;
+        size_t        size = 512;
         
         VDevValue     val;
-        // size that is rounded to VDEV_BLK_SIZE
-        // size_t     size = (1 + rand() % (MAX_SIZE / VDEV_BLK_SIZE)) * VDEV_BLK_SIZE;
 
         switch (spec) {
             case ValuePattern::RANDOM_BYTES:
@@ -85,16 +80,14 @@ public:
     
     size_t get_size() { return m_bytes.size(); }
 
-private:
-    size_t round_up_blk_size (size_t sz, size_t blk_size) {
-        int d = sz/blk_size;
-        return std::min((d+1) * blk_size, MAX_SIZE);
+    void update_value(size_t size) {
+        m_bytes.clear();
+        gen_random_string(m_bytes, size);
+        assert(m_bytes.size() == size);
     }
 
 private:
-    //uint8_t*               m_bytes_ptr = nullptr;
     std::vector< uint8_t > m_bytes;
 };
 } 
 } // namespace homeds::loadgen
-

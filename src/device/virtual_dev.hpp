@@ -292,7 +292,7 @@ public:
             auto chunk = create_dev_chunk(pdev_ind, ba, INVALID_CHUNK_ID);
             m_primary_pdev_chunks_list[pdev_ind].chunks_in_pdev.push_back(chunk);
 
-            // update end of chunk offset;
+            // set initial value of "end of chunk offset";
             chunk->update_end_of_chunk(m_chunk_size);
 
             // If we have mirror, create a map between chunk and its mirrored chunks

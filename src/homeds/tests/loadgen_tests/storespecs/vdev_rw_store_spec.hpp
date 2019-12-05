@@ -95,6 +95,11 @@ public:
 
         HS_ASSERT_CMP(DEBUG, cursor, ==, off);
 
+        if (m_write_sz + count > m_store->get_size()) {
+            LOGWARN("Expected out of space: write size {} : {} will exceed blkstore maximum size: {}", m_write_sz, count, m_store->get_size());
+            return true;
+        }
+
         auto bytes_written = m_store->write(buf, count);
         
         auto cursor_after_write = m_store->seeked_pos();
@@ -115,6 +120,7 @@ public:
         m_off_arr.push_back(off);
         
         print_counter();
+        m_write_sz += count;
         return true;
 
     }
@@ -175,6 +181,7 @@ private:
 private:
     uint64_t                                                                m_write_cnt = 0;   
     uint64_t                                                                m_read_cnt = 0;   
+    uint64_t                                                                m_write_sz = 0;   
     homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >*        m_store;
     std::map<uint64_t, write_info>                                          m_off_to_info_map;   // off to write info
     std::vector<uint64_t>                                                   m_off_arr;           // unique off write
