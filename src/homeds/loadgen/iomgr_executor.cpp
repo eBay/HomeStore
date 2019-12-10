@@ -50,7 +50,7 @@ IOMgrExecutor::~IOMgrExecutor() {
     //
     // put iomgr's stop here (instead of IOMgrExecutor::stop) so that
     // executor could be restarted after a IOMgrExecutor::stop();
-    stop(true);
+    if(m_running.load()) { stop(true); }
     if (m_ev_fdinfo) iomanager.remove_fd(iomanager.default_drive_interface(), m_ev_fdinfo);
     iomanager.stop();
 }

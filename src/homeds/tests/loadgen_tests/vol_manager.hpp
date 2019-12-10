@@ -270,6 +270,7 @@ public:
         return ret_io;
     }
 
+    void set_max_vols(uint64_t num_vols) { m_max_vols = num_vols; }
 private:
     uint64_t get_rand_vol() {
         std::random_device                                  rd;
@@ -384,6 +385,9 @@ private:
         std::string name = VOL_PREFIX + std::to_string(vol_index);
 
         memcpy(p.vol_name, name.c_str(), (name.length() + 1));
+        
+        // wait for VolInterface to run firstly to initiate instance.
+        sleep(2);
 
         auto vol_obj = VolInterface::get_instance()->create_volume(p);
 
@@ -502,6 +506,7 @@ private:
 
     uint64_t get_hash(uint8_t* bytes) { return util::Hash64((const char*)bytes, VOL_PAGE_SIZE); }
 
+
 private:
     std::vector< dev_info >    m_device_info;
     init_done_callback         m_done_cb; // callback to loadgen test case;
@@ -511,7 +516,7 @@ private:
     uint64_t       m_max_vol_size;
     uint64_t       m_max_cap;
     uint64_t       m_max_disk_cap;
-    const uint64_t m_max_vols = 50;
+    uint64_t m_max_vols = 50;
     const uint64_t m_max_io_size = MAX_IO_SIZE;
 
     // io count

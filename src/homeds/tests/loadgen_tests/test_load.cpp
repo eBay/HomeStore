@@ -275,12 +275,17 @@ public:
 
         m_vol_mgr = VolumeManager< IOMgrExecutor >::instance();
 
+        uint64_t num_vols = SDS_OPTIONS["num_vols"].as< uint64_t >();  
+        m_vol_mgr->set_max_vols(num_vols);
+
         // start vol manager which creates a bunch of volumes;
         m_vol_mgr->start(parameters.enable_write_log, m_loadgen->get_executor(),
                          std::bind(&VolumeLoadTest::init_done_cb, this, std::placeholders::_1));
 
         // wait for loadgen to finish
         join();
+
+        m_loadgen->get_executor().stop();
 
         m_vol_mgr->stop();
 
@@ -321,7 +326,8 @@ SDS_OPTION_GROUP(
     (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
      cxxopts::value< int32_t >()->default_value("5001"), "port"),
     (files, "", "input-files", "Do IO on a set of files", cxxopts::value< std::vector< std::string > >(),
-     "path,[path,...]"))
+     "path,[path,...]"),
+    (num_vols, "", "num_vols", "number of vols to create",  ::cxxopts::value< uint64_t >()->default_value("50"), "number"))
 
 SDS_OPTIONS_ENABLE(logging, test_load)
 
