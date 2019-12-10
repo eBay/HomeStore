@@ -194,6 +194,7 @@ public:
             if (auto flip_ret = homestore_flip->get_test_flip<int>("delay_us_and_inject_error_on_completion", 
                                 v_req->request_id)) {
                 usleep(flip_ret.get());
+                req->err = homestore_error::write_failed;
             }
 #endif
             HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_write_latency, get_elapsed_time_us(req->blkstore_op_start_time));
