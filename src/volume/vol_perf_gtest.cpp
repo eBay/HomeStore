@@ -69,9 +69,9 @@ public:
 
 uint64_t req_cnt = 0;
 uint64_t req_free_cnt = 0;
-class IOTest :  public ::testing::Test {
+class IOTest : public ::testing::Test {
     // req is tagged along as cookie in vol hb req
-    struct req  {
+    struct req {
         ssize_t size;
         off_t offset;
         uint64_t lba;
@@ -86,27 +86,29 @@ class IOTest :  public ::testing::Test {
     struct vol_info_t {
         boost::uuids::uuid uuid;
     };
+
 protected:
-    std::shared_ptr<iomgr::ioMgr> iomgr_obj;
+    std::shared_ptr< iomgr::ioMgr > iomgr_obj;
     bool init;
-    std::vector<VolumePtr> vol;
-    std::vector<homeds::Bitset *> m_vol_bm;
-    std::vector<uint64_t> max_vol_blks;
-    std::atomic<uint64_t> vol_cnt;
-    test_ep *ep;
+    std::vector< VolumePtr > vol;
+    std::vector< homeds::Bitset* > m_vol_bm;
+    std::vector< uint64_t > max_vol_blks;
+    std::atomic< uint64_t > vol_cnt;
+    test_ep* ep;
     int ev_fd;
     std::condition_variable m_cv;
     std::mutex m_mutex;
     uint64_t cur_vol;
     Clock::time_point start_time;
     Clock::time_point end_time;
-    std::vector<dev_info> device_info;
+    std::vector< dev_info > device_info;
     uint64_t max_vol_size;
-    std::atomic<int> rdy_state;
+    std::atomic< int > rdy_state;
     bool is_abort;
     bool preload_done;
     Clock::time_point print_startTime;
-    std::vector< std::shared_ptr<vol_info_t> > vol_info;
+    std::vector< std::shared_ptr< vol_info_t > > vol_info;
+
 public:
     IOTest() : vol(max_vols), m_vol_bm(max_vols), max_vol_blks(max_vols), device_info(0), is_abort(false) {
         vol_cnt = 0;
@@ -119,19 +121,19 @@ public:
     void print() {}
 
     void remove_journal_files() {
-        //Remove journal folders
-        for ( auto i = 0u; i < vol_info.size(); i++) {
-            std::string name = boost::lexical_cast<std::string>(vol_info[i]->uuid);
+        // Remove journal folders
+        for (auto i = 0u; i < vol_info.size(); i++) {
+            std::string name = boost::lexical_cast< std::string >(vol_info[i]->uuid);
             boost::filesystem::remove_all(name);
-            LOGINFO("Removed journal dir: {}",  name);
+            LOGINFO("Removed journal dir: {}", name);
             remove(name.c_str());
         }
     }
-    
+
     void remove_files() {
         remove_journal_files();
         vol_info.clear();
-        
+
         remove("/tmp/perf_file1");
         remove("/tmp/perf_file2");
         remove("/tmp/perf_file3");
@@ -180,11 +182,10 @@ public:
         VolInterface::get_instance()->attach_vol_completion_cb(vol_obj, cb);
     }
 
-    
     void vol_init(int cnt, const VolumePtr& vol_obj) {
-        std::shared_ptr<vol_info_t> info = std::make_shared<vol_info_t> ();
+        std::shared_ptr< vol_info_t > info = std::make_shared< vol_info_t >();
         info->uuid = VolInterface::get_instance()->get_uuid(vol_obj);
-        
+
         vol[cnt] = vol_obj;
         max_vol_blks[cnt] = VolInterface::get_instance()->get_vol_capacity(vol_obj).initial_total_size /
             VolInterface::get_instance()->get_page_size(vol_obj);
@@ -300,7 +301,7 @@ public:
          * write to a file after ios are completed.
          */
         assert(buf != nullptr);
-       
+
         req* req = new struct req();
         req->lba = lba;
         req->nblks = nblks;

@@ -74,6 +74,7 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
                   devname, m_devsize, is_init);
 
     auto ret = posix_memalign((void**)&m_super_blk, HomeStoreConfig::align_size, SUPERBLOCK_SIZE);
+
     /* super block should always be written atomically. */
     HS_ASSERT_NOTNULL(LOGMSG, m_super_blk);
     HS_ASSERT_CMP(LOGMSG, sizeof(super_block), <=, HomeStoreConfig::atomic_phys_page_size);
@@ -127,9 +128,7 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
 
     auto temp = m_devsize;
     m_devsize = ALIGN_SIZE_TO_LEFT(m_devsize, HomeStoreConfig::phys_page_size);
-    if (m_devsize != temp) {
-        LOGWARN("device size is not the multiple of physical page size old size {}", temp);
-    }
+    if (m_devsize != temp) { LOGWARN("device size is not the multiple of physical page size old size {}", temp); }
     LOGINFO("size of disk {} is {}", m_devname, m_devsize);
     m_dm_chunk[0] = m_dm_chunk[1] = nullptr;
     if (is_init) {
@@ -183,9 +182,7 @@ bool PhysicalDev::load_super_block() {
     // Validate if its homestore formatted device
 
     bool is_omstore_dev = validate_device();
-    if (!is_omstore_dev) {
-        return false;
-    }
+    if (!is_omstore_dev) { return false; }
 
     if (m_super_blk->system_uuid != m_system_uuid) {
         std::stringstream ss;
@@ -251,7 +248,7 @@ inline bool PhysicalDev::validate_device() {
 
 inline void PhysicalDev::write_superblock() {
     ssize_t bytes = pwrite(m_devfd, m_super_blk, SUPERBLOCK_SIZE, 0);
-    if (hs_unlikely((bytes < 0) || (size_t)bytes != SUPERBLOCK_SIZE)) {
+    if (sisl_unlikely((bytes < 0) || (size_t)bytes != SUPERBLOCK_SIZE)) {
         throw std::system_error(errno, std::system_category(), "error while writing a superblock" + get_devname());
     }
 }
@@ -259,7 +256,7 @@ inline void PhysicalDev::write_superblock() {
 inline void PhysicalDev::read_superblock() {
     memset(m_super_blk, 0, SUPERBLOCK_SIZE);
     ssize_t bytes = pread(m_devfd, m_super_blk, SUPERBLOCK_SIZE, 0);
-    if (hs_unlikely((bytes < 0) || ((size_t)bytes != SUPERBLOCK_SIZE))) {
+    if (sisl_unlikely((bytes < 0) || ((size_t)bytes != SUPERBLOCK_SIZE))) {
         throw std::system_error(errno, std::system_category(), "error while reading a superblock" + get_devname());
     }
 }
@@ -280,9 +277,9 @@ void PhysicalDev::readv(const iovec* iov, int iovcnt, uint32_t size, uint64_t of
     drive_iface->async_readv(get_devfd(), iov, iovcnt, size, (off_t)offset, cookie);
 }
 
-void PhysicalDev::sync_write(const char* data, uint32_t size, uint64_t offset) {
+ssize_t PhysicalDev::sync_write(const char* data, uint32_t size, uint64_t offset) {
     try {
-        drive_iface->sync_write(get_devfd(), data, size, (off_t)offset);
+        return drive_iface->sync_write(get_devfd(), data, size, (off_t)offset);
     } catch (const std::system_error& e) {
         std::stringstream ss;
         ss << "dev_name " << get_devname() << ":" << e.what() << "\n";
@@ -292,9 +289,9 @@ void PhysicalDev::sync_write(const char* data, uint32_t size, uint64_t offset) {
     }
 }
 
-void PhysicalDev::sync_writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset) {
+ssize_t PhysicalDev::sync_writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset) {
     try {
-        drive_iface->sync_writev(get_devfd(), iov, iovcnt, size, (off_t)offset);
+        return drive_iface->sync_writev(get_devfd(), iov, iovcnt, size, (off_t)offset);
     } catch (const std::system_error& e) {
         std::stringstream ss;
         ss << "dev_name " << get_devname() << e.what() << "\n";
@@ -304,27 +301,29 @@ void PhysicalDev::sync_writev(const iovec* iov, int iovcnt, uint32_t size, uint6
     }
 }
 
-void PhysicalDev::sync_read(char* data, uint32_t size, uint64_t offset) {
+ssize_t PhysicalDev::sync_read(char* data, uint32_t size, uint64_t offset) {
     try {
-        drive_iface->sync_read(get_devfd(), data, size, (off_t)offset);
+        return drive_iface->sync_read(get_devfd(), data, size, (off_t)offset);
     } catch (const std::system_error& e) {
         std::stringstream ss;
         ss << "dev_name " << get_devname() << e.what() << "\n";
         const std::string s = ss.str();
         device_manager()->handle_error(this);
         throw std::system_error(e.code(), s);
+        return -1;
     }
 }
 
-void PhysicalDev::sync_readv(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset) {
+ssize_t PhysicalDev::sync_readv(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset) {
     try {
-        drive_iface->sync_readv(get_devfd(), iov, iovcnt, size, (off_t)offset);
+        return drive_iface->sync_readv(get_devfd(), iov, iovcnt, size, (off_t)offset);
     } catch (const std::system_error& e) {
         std::stringstream ss;
         ss << "dev_name " << get_devname() << e.what() << "\n";
         const std::string s = ss.str();
         device_manager()->handle_error(this);
         throw std::system_error(e.code(), s);
+        return -1;
     }
 }
 
@@ -334,8 +333,7 @@ void PhysicalDev::attach_chunk(PhysicalDevChunk* chunk, PhysicalDevChunk* after)
         chunk->set_prev_chunk(after);
 
         auto next = after->get_next_chunk();
-        if (next)
-            next->set_prev_chunk(chunk);
+        if (next) next->set_prev_chunk(chunk);
         after->set_next_chunk(chunk);
     } else {
         HS_ASSERT_CMP(DEBUG, m_info_blk.get_first_chunk_id(), ==, INVALID_CHUNK_ID);
@@ -345,7 +343,7 @@ void PhysicalDev::attach_chunk(PhysicalDevChunk* chunk, PhysicalDevChunk* after)
 
 std::array< uint32_t, 2 > PhysicalDev::merge_free_chunks(PhysicalDevChunk* chunk) {
     std::array< uint32_t, 2 > freed_ids = {INVALID_CHUNK_ID, INVALID_CHUNK_ID};
-    uint32_t                  nids = 0;
+    uint32_t nids = 0;
 
     // Check if previous and next chunk are free, if so make it contiguous chunk
     PhysicalDevChunk* prev_chunk = chunk->get_prev_chunk();
@@ -358,8 +356,7 @@ std::array< uint32_t, 2 > PhysicalDev::merge_free_chunks(PhysicalDevChunk* chunk
 
         // Erase the current chunk entry
         prev_chunk->set_next_chunk(chunk->get_next_chunk());
-        if (next_chunk)
-            next_chunk->set_prev_chunk(prev_chunk);
+        if (next_chunk) next_chunk->set_prev_chunk(prev_chunk);
 
         freed_ids[nids++] = chunk->get_chunk_id();
         chunk = prev_chunk;
@@ -372,8 +369,7 @@ std::array< uint32_t, 2 > PhysicalDev::merge_free_chunks(PhysicalDevChunk* chunk
         // Erase the current chunk entry
         next_chunk->set_prev_chunk(chunk->get_prev_chunk());
         auto p = chunk->get_prev_chunk();
-        if (p)
-            p->set_next_chunk(next_chunk);
+        if (p) p->set_next_chunk(next_chunk);
         freed_ids[nids++] = chunk->get_chunk_id();
     }
     return freed_ids;
@@ -445,6 +441,7 @@ PhysicalDevChunk::PhysicalDevChunk(PhysicalDev* pdev, uint32_t chunk_id, uint64_
     m_chunk_info->primary_chunk_id = INVALID_CHUNK_ID;
     m_chunk_info->vdev_id = INVALID_VDEV_ID;
     m_chunk_info->is_sb_chunk = false;
+    m_chunk_info->end_of_chunk_offset = size;
     m_pdev = pdev;
 }
 

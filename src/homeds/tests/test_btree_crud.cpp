@@ -5,6 +5,7 @@
 #include <iostream>
 #include "homeds/btree/btree.hpp"
 #include <thread>
+#include <memory>
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
 #include <utility/thread_buffer.hpp>

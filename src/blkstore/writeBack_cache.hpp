@@ -26,7 +26,7 @@ typedef std::function< void(const writeback_req_ptr& req, std::error_condition s
 #define to_wb_req(req) boost::static_pointer_cast< writeback_req >(req)
 
 struct writeback_req : public virtualdev_req {
-    mutex              mtx;
+    mutex mtx;
     blkstore_callback* blkstore_cb;
 
     /* Queue of the requests which should be written only after this req is written.
@@ -43,25 +43,25 @@ struct writeback_req : public virtualdev_req {
     std::vector< writeback_req_ptr > dependent_req_q;
 #endif
 
-    int                  mem_gen_cnt;
-    writeback_req_state  state;
+    int mem_gen_cnt;
+    writeback_req_state state;
     std::error_condition status;
-    homeds::MemVector    memvec;
-    Clock::time_point    cache_start_time; // Start time to put the wb cache to the request
+    homeds::MemVector memvec;
+    Clock::time_point cache_start_time; // Start time to put the wb cache to the request
 
     static boost::intrusive_ptr< writeback_req > make_request() {
-        return boost::intrusive_ptr< writeback_req >(homeds::ObjectAllocator< writeback_req >::make_object());
+        return boost::intrusive_ptr< writeback_req >(sisl::ObjectAllocator< writeback_req >::make_object());
     }
 
-    virtual void free_yourself() override { homeds::ObjectAllocator< writeback_req >::deallocate(this); }
-    
+    virtual void free_yourself() override { sisl::ObjectAllocator< writeback_req >::deallocate(this); }
+
     virtual ~writeback_req() {
         assert(dependent_req_q.empty());
         assert(state == WB_REQ_COMPL || state == WB_REQ_INIT);
     }
 
 protected:
-    friend class homeds::ObjectAllocator< writeback_req >;
+    friend class sisl::ObjectAllocator< writeback_req >;
     writeback_req() :
             req_q(),
             dependent_cnt(0),
@@ -75,11 +75,11 @@ protected:
 template < typename K >
 struct WriteBackCacheBuffer : public CacheBuffer< K > {
     mutex mtx;
-    int   gen_cnt;
+    int gen_cnt;
     /* TODO, it will be removed, once safe_evict is implmented */
 
-    writeback_req_ptr last_pending_req;     /* latest pending req on this buffer */
-    bool error = false; // true if any write fail on this buffer
+    writeback_req_ptr last_pending_req; /* latest pending req on this buffer */
+    bool error = false;                 // true if any write fail on this buffer
 
 #ifndef NDEBUG
     /* Queue of the pending requests on this buffer */
@@ -111,7 +111,7 @@ class WriteBackCache {
 private:
     blkstore_callback m_blkstore_write_cb;
     blkstore_callback m_blkstore_free_cb;
-    Cache< K >*   m_cache;
+    Cache< K >* m_cache;
 
 public:
     WriteBackCache(Cache< K >* cache, blkstore_callback blkstore_write_cb, blkstore_callback blkstore_free_cb) :
@@ -119,16 +119,15 @@ public:
             m_blkstore_free_cb(blkstore_free_cb),
             m_cache(cache){};
 
-    static boost::intrusive_ptr< WriteBackCacheBuffer< K > > to_wbc_buf(
-            const boost::intrusive_ptr< CacheBuffer< K > >& cache_buf) {
+    static boost::intrusive_ptr< WriteBackCacheBuffer< K > >
+    to_wbc_buf(const boost::intrusive_ptr< CacheBuffer< K > >& cache_buf) {
         return boost::static_pointer_cast< WriteBackCacheBuffer< K > >(cache_buf);
     }
 
     void writeBack_write_internal(const boost::intrusive_ptr< CacheBuffer< K > >& cache_buf,
-                                  const writeback_req_ptr& wb_req,
-                                  std::deque< writeback_req_ptr >& dependent_req_q) {
-        //auto wbc_buf = to_wbc_buf(cache_buf);
-        auto& wbc_buf = (boost::intrusive_ptr< WriteBackCacheBuffer< K > > &)cache_buf;
+                                  const writeback_req_ptr& wb_req, std::deque< writeback_req_ptr >& dependent_req_q) {
+        // auto wbc_buf = to_wbc_buf(cache_buf);
+        auto& wbc_buf = (boost::intrusive_ptr< WriteBackCacheBuffer< K > >&)cache_buf;
 
         assert(wb_req->state == WB_REQ_INIT);
         wb_req->state = WB_REQ_SCANNING;
@@ -158,9 +157,7 @@ public:
         buf_mtx.unlock();
 
         for (auto it = dependent_req_q.begin(); it != dependent_req_q.end(); ++it) {
-            if ((*it).get() == nullptr) {
-                break;
-            }
+            if ((*it).get() == nullptr) { break; }
             std::unique_lock< std::mutex > mtx((*it)->mtx);
             if ((*it)->state != WB_REQ_COMPL) {
                 /* insert it into dependent req queue */
@@ -193,12 +190,10 @@ public:
 
     void writeBack_completion(const boost::intrusive_ptr< CacheBuffer< K > >& cache_buf,
                               const writeback_req_ptr& wb_req, std::error_condition status) {
-        auto& wbc_buf = (boost::intrusive_ptr< WriteBackCacheBuffer< K > > &)cache_buf;
+        auto& wbc_buf = (boost::intrusive_ptr< WriteBackCacheBuffer< K > >&)cache_buf;
 
 #ifdef _PRERELEASE
-        if (auto ret = homestore_flip->get_test_flip<int>("writeBack_completion_req_delay_us")) {
-            usleep(ret.get());
-        }
+        if (auto ret = homestore_flip->get_test_flip< int >("writeBack_completion_req_delay_us")) { usleep(ret.get()); }
 #endif
 
         /* invalidate the buffer if request is failed */
@@ -274,8 +269,8 @@ public:
     }
 
     writeback_req_ptr writeBack_refresh_buf(const boost::intrusive_ptr< CacheBuffer< K > >& cache_buf,
-                                           bool is_write_modifiable) {
-        auto& wbc_buf = (boost::intrusive_ptr< WriteBackCacheBuffer< K > > &)cache_buf;
+                                            bool is_write_modifiable) {
+        auto& wbc_buf = (boost::intrusive_ptr< WriteBackCacheBuffer< K > >&)cache_buf;
 
         writeback_req_ptr req;
         std::unique_lock< std::mutex > buf_mtx(wbc_buf->mtx);
@@ -313,15 +308,13 @@ public:
         return req;
     }
 
-    void write_blk(const boost::intrusive_ptr< CacheBuffer< K > >& cache_buf,
-                   const writeback_req_ptr& wb_req,
+    void write_blk(const boost::intrusive_ptr< CacheBuffer< K > >& cache_buf, const writeback_req_ptr& wb_req,
                    std::deque< writeback_req_ptr >& dependent_req_q) {
         wb_req->blkstore_cb = &m_blkstore_write_cb;
         writeBack_write_internal(cache_buf, wb_req, dependent_req_q);
     }
 
-    void free_blk(const boost::intrusive_ptr< CacheBuffer< K > >& cache_buf,
-                  const writeback_req_ptr& wb_req,
+    void free_blk(const boost::intrusive_ptr< CacheBuffer< K > >& cache_buf, const writeback_req_ptr& wb_req,
                   std::deque< writeback_req_ptr >& dependent_req_q) {
         wb_req->blkstore_cb = &m_blkstore_free_cb;
 
@@ -332,9 +325,7 @@ public:
         writeBack_write_internal(cache_buf, wb_req, dependent_req_q);
     }
 
-    const homeds::MemVector& writeback_get_memvec(writeback_req_ptr req) const {
-        return req->memvec;
-    }
+    const homeds::MemVector& writeback_get_memvec(writeback_req_ptr req) const { return req->memvec; }
 };
 } // namespace homestore
 

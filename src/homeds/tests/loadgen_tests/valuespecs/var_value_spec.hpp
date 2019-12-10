@@ -94,7 +94,7 @@ public:
         return util::Hash64((const char*)b.bytes, (size_t)b.size);
     }
 
-    void set_bytes_ptr() { m_bytes_ptr = m_bytes[0]; }
+    void set_bytes_ptr() { m_bytes_ptr = &m_bytes[0]; }
 
 private:
     uint8_t*               m_bytes_ptr = nullptr;

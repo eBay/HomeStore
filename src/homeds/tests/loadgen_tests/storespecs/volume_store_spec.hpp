@@ -130,6 +130,4 @@ private:
 }
 }
 
-
 #endif
-
