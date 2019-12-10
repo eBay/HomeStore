@@ -22,8 +22,8 @@ enum io_flag {
     BUFFERED_IO = 0, // should be set if file system doesn't support direct IOs and we are working on a file as a disk.
                      // This option is enabled only on in debug build.
 #endif
-    DIRECT_IO = 1,  // recommened mode
-    READ_ONLY = 2   // Read-only mode for post-mortem checks
+    DIRECT_IO = 1, // recommened mode
+    READ_ONLY = 2  // Read-only mode for post-mortem checks
 };
 
 struct dev_info {
@@ -38,13 +38,13 @@ public:
         return &(flip::Flip::instance());
     }
 
-    static flip::FlipClient *client_instance() {
+    static flip::FlipClient* client_instance() {
         static flip::FlipClient fc(HomeStoreFlip::instance());
         return &fc;
     }
 };
 
-#define homestore_flip homestore::HomeStoreFlip::instance()
+#define homestore_flip (&flip::Flip::instance())
 #endif
 
 #define METRICS_DUMP_MSG sisl::MetricsFarm::getInstance().get_result_in_json_string()

@@ -21,11 +21,12 @@
 #include <boost/uuid/uuid_generators.hpp> // generators
 #include <boost/uuid/uuid_io.hpp>         // streaming operators etc.
 #include "homeds/array/sparse_vector.hpp"
-#include "iomgr/iomgr.hpp"
-#include "endpoint/drive_endpoint.hpp"
 #include <boost/uuid/uuid_generators.hpp>
 #include "homeds/utility/useful_defs.hpp"
 #include <isa-l/crc.h>
+#include <iomgr/iomgr.hpp>
+
+using namespace iomgr;
 
 namespace homestore {
 
@@ -302,9 +303,9 @@ class PhysicalDev {
     friend class DeviceManager;
 
 public:
-    PhysicalDev(DeviceManager* mgr, const std::string& devname, int const oflags, std::shared_ptr< iomgr::ioMgr > iomgr,
-                homeio::comp_callback& cb, boost::uuids::uuid& uuid, uint32_t dev_num, uint64_t dev_offset,
-                uint32_t is_file, bool is_init, uint64_t dm_info_size, bool* is_inited);
+    PhysicalDev(DeviceManager* mgr, const std::string& devname, int const oflags, boost::uuids::uuid& uuid,
+                uint32_t dev_num, uint64_t dev_offset, uint32_t is_file, bool is_init, uint64_t dm_info_size,
+                bool* is_inited);
     ~PhysicalDev();
 
     void     update(uint32_t dev_num, uint64_t dev_offset, uint32_t first_chunk_id);
@@ -338,16 +339,16 @@ public:
     PhysicalDevChunk* find_free_chunk(uint64_t req_size);
 
     void write(const char* data, uint32_t size, uint64_t offset, uint8_t* cookie);
-    void writev(const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie);
+    void writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie);
 
     void read(char* data, uint32_t size, uint64_t offset, uint8_t* cookie);
-    void readv(const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie);
+    void readv(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie);
 
     void sync_write(const char* data, uint32_t size, uint64_t offset);
-    void sync_writev(const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset);
+    void sync_writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset);
 
     void            sync_read(char* data, uint32_t size, uint64_t offset);
-    void            sync_readv(const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset);
+    void            sync_readv(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset);
     pdev_info_block get_info_blk();
     void            read_dm_chunk(char* mem, uint64_t size);
     void            write_dm_chunk(uint64_t gen_cnt, char* mem, uint64_t size);
@@ -370,16 +371,12 @@ private:
     bool validate_device();
 
 private:
-    static homeio::DriveEndPoint* m_ep; // one instance for all physical devices
-
     DeviceManager*                   m_mgr; // Back pointer to physical device
     int                              m_devfd;
     std::string                      m_devname;
     super_block*                     m_super_blk; // Persisent header block
     uint64_t                         m_devsize;
-    homeio::comp_callback            m_comp_cb;
-    std::shared_ptr< iomgr::ioMgr >  m_iomgr;
-    struct pdev_info_block           m_info_blk;
+    pdev_info_block                  m_info_blk;
     PhysicalDevChunk*                m_dm_chunk[2];
     PhysicalDevMetrics               m_metrics; // Metrics instance per physical device
     int                              m_cur_indx;
@@ -402,9 +399,9 @@ class DeviceManager {
     friend class PhysicalDevChunk;
 
 public:
-    DeviceManager(NewVDevCallback vcb, uint32_t const vdev_metadata_size, std::shared_ptr< iomgr::ioMgr > iomgr,
-                  homeio::comp_callback comp_cb, bool is_file, boost::uuids::uuid system_uuid,
-                  vdev_error_callback vdev_error_cb);
+    DeviceManager(NewVDevCallback vcb, uint32_t const vdev_metadata_size,
+                  const iomgr::io_interface_comp_cb_t& io_comp_cb, bool is_file, boost::uuids::uuid system_uuid,
+                  const vdev_error_callback& vdev_error_cb);
 
     ~DeviceManager();
 
@@ -474,12 +471,10 @@ private:
     void              remove_chunk(uint32_t chunk_id);
 
 private:
-    int                             m_open_flags;
-    homeio::comp_callback           m_comp_cb;
-    NewVDevCallback                 m_new_vdev_cb;
-    std::shared_ptr< iomgr::ioMgr > m_iomgr;
-    std::atomic< uint64_t >         m_gen_cnt;
-    bool                            m_is_file;
+    int                     m_open_flags;
+    NewVDevCallback         m_new_vdev_cb;
+    std::atomic< uint64_t > m_gen_cnt;
+    bool                    m_is_file;
 
     char* m_chunk_memory;
 

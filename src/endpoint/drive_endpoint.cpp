@@ -23,12 +23,12 @@
 namespace homeio {
 #ifdef __APPLE__
 
-ssize_t preadv(int fd, const struct iovec* iov, int iovcnt, off_t offset) {
+ssize_t preadv(int fd, const iovec* iov, int iovcnt, off_t offset) {
     lseek(fd, offset, SEEK_SET);
     return ::readv(fd, iov, iovcnt);
 }
 
-ssize_t pwritev(int fd, const struct iovec* iov, int iovcnt, off_t offset) {
+ssize_t pwritev(int fd, const iovec* iov, int iovcnt, off_t offset) {
     lseek(fd, offset, SEEK_SET);
     return ::writev(fd, iov, iovcnt);
 }
@@ -212,7 +212,7 @@ void DriveEndPoint::async_read(int m_sync_fd, char* data, uint32_t size, uint64_
     COUNTER_INCREMENT(m_metrics, read_size, size);
 }
 
-void DriveEndPoint::async_writev(int m_sync_fd, const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset,
+void DriveEndPoint::async_writev(int m_sync_fd, const iovec* iov, int iovcnt, uint32_t size, uint64_t offset,
                                  uint8_t* cookie) {
 
     m_metrics.init();
@@ -266,7 +266,7 @@ void DriveEndPoint::async_writev(int m_sync_fd, const struct iovec* iov, int iov
     COUNTER_INCREMENT(m_metrics, write_size, size);
 }
 
-void DriveEndPoint::async_readv(int m_sync_fd, const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset,
+void DriveEndPoint::async_readv(int m_sync_fd, const iovec* iov, int iovcnt, uint32_t size, uint64_t offset,
                                 uint8_t* cookie) {
 
     m_metrics.init();
@@ -341,7 +341,7 @@ void DriveEndPoint::sync_write(int m_sync_fd, const char* data, uint32_t size, u
     COUNTER_INCREMENT(m_metrics, write_size, size);
 }
 
-void DriveEndPoint::sync_writev(int m_sync_fd, const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset) {
+void DriveEndPoint::sync_writev(int m_sync_fd, const iovec* iov, int iovcnt, uint32_t size, uint64_t offset) {
 #ifdef _PRERELEASE
     if (homestore_flip->test_flip("io_sync_write_error_flip", iovcnt, size)) {
         folly::throwSystemError("flip error");
@@ -382,7 +382,7 @@ void DriveEndPoint::sync_read(int m_sync_fd, char* data, uint32_t size, uint64_t
     COUNTER_INCREMENT(m_metrics, read_size, size);
 }
 
-void DriveEndPoint::sync_readv(int m_sync_fd, const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset) {
+void DriveEndPoint::sync_readv(int m_sync_fd, const iovec* iov, int iovcnt, uint32_t size, uint64_t offset) {
     m_metrics.init();
 #ifdef _PRERELEASE
     if (homestore_flip->test_flip("io_sync_read_error_flip", iovcnt, size)) {

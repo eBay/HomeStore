@@ -66,12 +66,12 @@ using namespace homeds::loadgen;
 
 #define G_CacheKV BtreeLoadGen< CacheKey, CacheValue, CacheStoreSpec< CacheKey, CacheValue, 4096 >, IOMgrExecutor >
 
-#define G_Volume_Test BtreeLoadGen<VolumeKey, VolumeValue, VolumeStoreSpec<VolumeKey, VolumeValue>, IOMgrExecutor>
+#define G_Volume_Test BtreeLoadGen< VolumeKey, VolumeValue, VolumeStoreSpec< VolumeKey, VolumeValue >, IOMgrExecutor >
 
 #define G_FileKV BtreeLoadGen< MapKey, BlkValue, FileStoreSpec, IOMgrExecutor >
 
 static Param parameters;
-bool loadgen_verify_mode = false;
+bool         loadgen_verify_mode = false;
 
 struct BtreeTest : public testing::Test {
     std::unique_ptr< G_SimpleKV_Mem > loadgen;
@@ -200,9 +200,9 @@ struct FileTest : public testing::Test {
         LOGINFO("Regression Started");
         size_t size = 0;
         for (uint32_t i = 0; i < parameters.file_names.size(); ++i) {
-            auto fd = open(parameters.file_names[i].c_str(), O_RDWR);
+            auto        fd = open(parameters.file_names[i].c_str(), O_RDWR);
             struct stat buf;
-            uint64_t devsize = 0;
+            uint64_t    devsize = 0;
             if (fstat(fd, &buf) >= 0) {
                 devsize = buf.st_size;
             } else {
@@ -243,11 +243,11 @@ struct CacheTest : public testing::Test {
 
 class VolumeLoadTest : public testing::Test {
 private:
-    std::unique_ptr<G_Volume_Test>  m_loadgen; 
-    VolumeManager<IOMgrExecutor>*   m_vol_mgr = nullptr;
-    std::mutex                      m_mtx;
-    std::condition_variable         m_cv;
-    bool                            m_is_complete = false;
+    std::unique_ptr< G_Volume_Test > m_loadgen;
+    VolumeManager< IOMgrExecutor >*  m_vol_mgr = nullptr;
+    std::mutex                       m_mtx;
+    std::condition_variable          m_cv;
+    bool                             m_is_complete = false;
 
 private:
     void init_done_cb(std::error_condition err) {
@@ -257,40 +257,38 @@ private:
         m_loadgen->initParam(parameters);
         LOGINFO("Starting I/O ...");
         m_loadgen->regression(true, false, false, false);
-        LOGINFO("I/O Completed . "); 
+        LOGINFO("I/O Completed . ");
         m_is_complete = true;
         m_cv.notify_one();
     }
-    
+
     void join() {
-        std::unique_lock<std::mutex>    lk(m_mtx);
-        m_cv.wait(lk, [this] {return m_is_complete;});
+        std::unique_lock< std::mutex > lk(m_mtx);
+        m_cv.wait(lk, [this] { return m_is_complete; });
     }
 
 public:
     void execute() {
         // start iomgr
         // volume store handles verification by itself;
-        m_loadgen = std::make_unique<G_Volume_Test>(parameters.NT, false);
+        m_loadgen = std::make_unique< G_Volume_Test >(parameters.NT, false);
 
-        m_vol_mgr = VolumeManager<IOMgrExecutor>::instance();
+        m_vol_mgr = VolumeManager< IOMgrExecutor >::instance();
 
         // start vol manager which creates a bunch of volumes;
-        m_vol_mgr->start(parameters.enable_write_log, m_loadgen->get_executor(), 
-                std::bind(&VolumeLoadTest::init_done_cb, this, std::placeholders::_1));
+        m_vol_mgr->start(parameters.enable_write_log, m_loadgen->get_executor(),
+                         std::bind(&VolumeLoadTest::init_done_cb, this, std::placeholders::_1));
 
         // wait for loadgen to finish
         join();
-        
+
         m_vol_mgr->stop();
 
-        VolumeManager<IOMgrExecutor>::del_instance();
+        VolumeManager< IOMgrExecutor >::del_instance();
     }
 };
 
-TEST_F(VolumeLoadTest, VolumeTest) {
-    this->execute();
-}
+TEST_F(VolumeLoadTest, VolumeTest) { this->execute(); }
 
 TEST_F(CacheTest, CacheMemTest) { this->execute(); }
 
@@ -316,15 +314,19 @@ SDS_OPTION_GROUP(
     (warm_up_keys, "", "warm_up_keys", "num of warm up keys", ::cxxopts::value< uint64_t >()->default_value("200"),
      "number"),
     (num_threads, "", "num_threads", "num of threads", ::cxxopts::value< uint8_t >()->default_value("8"), "number"),
-    (enable_write_log, "", "enable_write_log", "enable write log persistence", ::cxxopts::value< uint8_t >()->default_value("0"), "number"),
+    (enable_write_log, "", "enable_write_log", "enable write log persistence",
+     ::cxxopts::value< uint8_t >()->default_value("0"), "number"),
     (workload_shift_time, "", "workload_shift_time", "time in sec to shift workload",
      ::cxxopts::value< uint64_t >()->default_value("3600"), "number"),
-    (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service", cxxopts::value<int32_t>()->default_value("5001"), "port"),
-    (files, "", "input-files", "Do IO on a set of files", cxxopts::value< std::vector< std::string > >(),"path,[path,...]"))
+    (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
+     cxxopts::value< int32_t >()->default_value("5001"), "port"),
+    (files, "", "input-files", "Do IO on a set of files", cxxopts::value< std::vector< std::string > >(),
+     "path,[path,...]"))
 
 SDS_OPTIONS_ENABLE(logging, test_load)
 
-// TODO: VolumeTest couldn't be started after MapSSDTest. Seems because of the http server can't be started because of bing to the same port 5001
+// TODO: VolumeTest couldn't be started after MapSSDTest. Seems because of the http server can't be started because of
+// bing to the same port 5001
 int main(int argc, char* argv[]) {
     ::testing::GTEST_FLAG(filter) = "*Map*:*Cache*";
     testing::InitGoogleTest(&argc, argv);
@@ -372,6 +374,6 @@ int main(int argc, char* argv[]) {
     }
     assert(parameters.WARM_UP_KEYS <=
            parameters.NK); // this is required as we set MAX_KEYS in key spec as per value of NK
-           
+
     return RUN_ALL_TESTS();
 }
