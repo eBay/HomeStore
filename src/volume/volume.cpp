@@ -114,8 +114,8 @@ void Volume::set_error_flip() {
     
     /* error flips */
     freq.set_percent(1);
-//    fc->inject_retval_flip("delay_us_and_inject_error_on_completion", { null_cond }, freq, 20);
-    fc->inject_noreturn_flip("varsize_blkalloc_no_blks", { null_cond }, freq);
+    fc->inject_retval_flip("delay_us_and_inject_error_on_completion", { null_cond }, freq, 20);
+//    fc->inject_noreturn_flip("varsize_blkalloc_no_blks", { null_cond }, freq);
     
 }
 
@@ -550,6 +550,7 @@ void Volume::check_and_complete_req(const vol_interface_req_ptr& hb_req, const s
 }
 
 void Volume::print_tree() { m_map->print_tree(); }
+void Volume::verify_tree() { m_map->verify_tree(); }
 
 void Volume::print_node(uint64_t blkid) { m_map->print_node(blkid); }
 

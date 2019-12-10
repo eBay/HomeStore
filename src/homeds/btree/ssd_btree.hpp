@@ -165,11 +165,6 @@ public:
         if (status != btree_status_t::success) {
             req->ssd_buf->set_error();
         }
-#ifdef _PRERELEASE
-        if (homestore_flip->test_flip("btree_write_comp_fail")) {
-            status = btree_status_t::write_failed;
-        }
-#endif
         m_comp_cb(status, req->multinode_req);
     }
 
@@ -343,6 +338,7 @@ public:
                         ssdbtree_multinode_req_ptr multinode_req, bool is_write_modifiable) {
 
         if (boost::static_pointer_cast< btree_buffer_t >(bn)->is_err_set()) {
+            LOGERROR("failing refresh");
             return btree_status_t::stale_buf;
         }
 
