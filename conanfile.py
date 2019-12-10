@@ -27,7 +27,7 @@ class HomestoreConan(ConanFile):
             "sds_logging/6.0.0@sds/testing",
             "sds_options/1.0.0@sds/testing",
             "jungle/2019.10.22@oss/testing",
-            "sisl/0.3.12@hkadayam/develop",
+            "sisl/0.3.15@sisl/develop",
 
             # FOSS, rarely updated
             "benchmark/1.5.0@oss/stable",

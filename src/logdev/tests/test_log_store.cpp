@@ -1,25 +1,11 @@
-#include "../log_dev.hpp"
+#include "../log_store.hpp"
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
-#include <memory>
 
 using namespace homestore;
 THREAD_BUFFER_INIT;
-SDS_LOGGING_INIT(test_log_dev, btree_structures, btree_nodes, btree_generics, cache, device, httpserver_lmod, iomgr,
+SDS_LOGGING_INIT(test_log_store, btree_structures, btree_nodes, btree_generics, cache, device, httpserver_lmod, iomgr,
                  varsize_blk_alloc, VMOD_VOL_MAPPING, volume, logdev, flip)
-
-std::vector< logdev_key > _logdev_keys;
-static uint64_t first_offset = (uint64_t)-1UL;
-static void on_append_completion(logdev_key lkey, void* ctx) {
-    _logdev_keys.push_back(lkey);
-    LOGINFO("Append completed with log_idx = {} offset = {}", lkey.idx, lkey.dev_offset);
-    if (first_offset == -1UL) { first_offset = lkey.dev_offset; }
-}
-
-static void on_log_found(logdev_key lkey, log_buffer buf) {
-    _logdev_keys.push_back(lkey);
-    LOGINFO("Found a log with log_idx = {} offset = {}", lkey.idx, lkey.dev_offset);
-}
 
 static std::shared_ptr< iomgr::ioMgr > start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthreads) {
     std::vector< dev_info > device_info;
@@ -72,8 +58,8 @@ static std::shared_ptr< iomgr::ioMgr > start_homestore(uint32_t ndevices, uint64
     return iomgr_obj;
 }
 
-SDS_OPTIONS_ENABLE(logging, test_log_dev)
-SDS_OPTION_GROUP(test_log_dev,
+SDS_OPTIONS_ENABLE(logging, test_log_store)
+SDS_OPTION_GROUP(test_log_store,
                  (num_threads, "", "num_threads", "number of threads",
                   ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
                  (num_devs, "", "num_devs", "number of devices to create",
@@ -82,36 +68,35 @@ SDS_OPTION_GROUP(test_log_dev,
                   ::cxxopts::value< uint64_t >()->default_value("5120"), "number"));
 
 int main(int argc, char* argv[]) {
-    SDS_OPTIONS_LOAD(argc, argv, logging, test_log_dev);
-    sds_logging::SetLogger("test_log_dev");
+    SDS_OPTIONS_LOAD(argc, argv, logging, test_log_store);
+    sds_logging::SetLogger("test_log_store");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 
     auto iomgr_obj = start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),
                                      SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024,
                                      SDS_OPTIONS["num_threads"].as< uint32_t >());
 
-    std::string s[1024];
-    auto ld = LogDev::instance();
-    ld->register_append_cb(on_append_completion);
-    ld->register_logfound_cb(on_log_found);
+    HomeLogStore::start(true);
+    auto ls = HomeLogStore::create_new_log_store();
 
-    for (auto i = 0u; i < 195; i++) {
-        s[i] = std::to_string(i);
-        ld->append_async(0, 0, (uint8_t*)s[i].c_str(), s[i].size() + 1, nullptr);
+    std::atomic< int64_t > pending_count = 0;
+    std::mutex _mtx;
+    std::condition_variable _cv;
+    std::vector< std::string > s;
+    s.reserve(200);
+
+    for (auto i = 0; i < 195; i++) {
+        ++pending_count;
+        s.push_back(std::to_string(i));
+        ls->write_async(i, {(uint8_t*)s.back().c_str(), (uint32_t)s.back().size() + 1}, nullptr,
+                        [&pending_count, &_cv](logstore_seq_num_t seq_num, bool success, void* ctx) {
+                            LOGINFO("Completed write of seq_num {} ", seq_num);
+                            if (--pending_count == 0) { _cv.notify_all(); }
+                        });
     }
 
-    auto i = 0;
-    for (auto& lk : _logdev_keys) {
-        auto b = ld->read(lk);
-        auto exp_val = std::to_string(i);
-        auto actual_val = std::string((const char*)b.data(), (size_t)b.size());
-        if (actual_val != exp_val) {
-            LOGERROR("Error in reading value for log_idx {} actual_val={} expected_val={}", i, actual_val, exp_val);
-        } else {
-            LOGINFO("Read value {} for log_idx {}", actual_val, i);
-        }
-        ++i;
+    {
+        std::unique_lock< std::mutex > lk(_mtx);
+        _cv.wait(lk, [&] { return (pending_count == 0); });
     }
-
-    ld->load(first_offset);
 }
