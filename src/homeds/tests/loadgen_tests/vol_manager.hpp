@@ -14,7 +14,6 @@ namespace loadgen {
 
 constexpr uint64_t CACHE_SIZE      = (4*1024*1024*1024ul);
 constexpr uint32_t VOL_PAGE_SIZE   = 4096;
-constexpr uint32_t MAX_IO_SIZE = (VOL_PAGE_SIZE * ((1 << MEMPIECE_ENCODE_MAX_BITS) - 1));
 constexpr uint32_t MAX_CRC_DEPTH = 3;
 
 class VolReq : public vol_interface_req {
@@ -376,6 +375,7 @@ private:
     }
     
     void init_done_cb(std::error_condition err, const out_params& params) {
+        m_max_io_size = params.max_io_size;
         for (auto vol_cnt = 0ull; vol_cnt < m_max_vols; vol_cnt++) {
             create_volume(vol_cnt);
         }
@@ -537,7 +537,7 @@ private:
     uint64_t                        m_max_cap;
     uint64_t                        m_max_disk_cap;
     const uint64_t                  m_max_vols      = 50;
-    const uint64_t                  m_max_io_size   = MAX_IO_SIZE;
+    uint64_t                        m_max_io_size;
 
     // io count
     std::atomic<uint64_t>           m_outstd_ios = 0;
