@@ -135,11 +135,11 @@ public:
         FlipCondition null_cond;
         fc->create_condition("", flip::Operator::DONT_CARE, (int)1, &null_cond);
         
-     //   fc->inject_noreturn_flip("btree_split_failure", {null_cond}, freq);
+        fc->inject_noreturn_flip("btree_split_failure", {null_cond}, freq);
         fc->inject_noreturn_flip("btree_write_comp_fail", {null_cond}, freq);
-    //    fc->inject_noreturn_flip("btree_read_fail", {null_cond}, freq);
-     //   fc->inject_noreturn_flip("btree_write_fail", {null_cond}, freq);
-     //   fc->inject_noreturn_flip("btree_refresh_fail", {null_cond}, freq);
+        fc->inject_noreturn_flip("btree_read_fail", {null_cond}, freq);
+        fc->inject_noreturn_flip("btree_write_fail", {null_cond}, freq);
+        fc->inject_noreturn_flip("btree_refresh_fail", {null_cond}, freq);
     }
 #endif
 
