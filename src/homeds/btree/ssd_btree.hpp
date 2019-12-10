@@ -165,10 +165,10 @@ public:
         if (status != btree_status_t::success) {
             req->ssd_buf->set_error();
         }
-#ifdef _PRERELEASE  
-        if (homestore_flip->test_flip("btree_write_comp_fail")) {   
-            status = btree_status_t::write_failed;  
-        }   
+#ifdef _PRERELEASE
+        if (homestore_flip->test_flip("btree_write_comp_fail")) {
+            status = btree_status_t::write_failed;
+        }
 #endif
         m_comp_cb(status, req->multinode_req);
     }
