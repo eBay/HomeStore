@@ -550,6 +550,7 @@ void Volume::check_and_complete_req(const vol_interface_req_ptr& hb_req, const s
 }
 
 void Volume::print_tree() { m_map->print_tree(); }
+void Volume::verify_tree() { m_map->verify_tree(); }
 
 void Volume::print_node(uint64_t blkid) { m_map->print_node(blkid); }
 

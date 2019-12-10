@@ -79,7 +79,7 @@ HomeBlks::HomeBlks(const init_params& cfg) :
     json["phys_page_size"]          = HomeStoreConfig::phys_page_size;
     json["atomic_phys_page_size"]   = HomeStoreConfig::atomic_phys_page_size;
     json["align_size"]              = HomeStoreConfig::align_size;
-    json["min_io_size"]             = HomeStoreConfig::min_io_size;
+    json["min_virtual_page_size"]   = m_cfg.min_virtual_page_size;
     json["open_flag"]               = HomeStoreConfig::open_flag;
     json["cache_size"]              = m_cfg.cache_size;
     json["system_uuid"]             = boost::lexical_cast<std::string>(m_cfg.system_uuid);
@@ -122,8 +122,7 @@ void HomeBlks::populate_disk_attrs() {
         HomeStoreConfig::phys_page_size = 4096;
         HomeStoreConfig::align_size = 4096;
 #ifndef NDEBUG
-          /* TODO: i am going to change it to 512 once it is passed in homestore nightly */
-        HomeStoreConfig::atomic_phys_page_size = 4096;
+        HomeStoreConfig::atomic_phys_page_size = 512;
 #else
         HomeStoreConfig::atomic_phys_page_size = 4096;
 #endif
@@ -909,6 +908,7 @@ void HomeBlks::init_thread() {
                 handler_info("/api/v1/getLogLevel", HomeBlks::get_log_level, (void *)this),
                 handler_info("/api/v1/setLogLevel", HomeBlks::set_log_level, (void *)this),
                 handler_info("/api/v1/dumpStackTrace", HomeBlks::dump_stack_trace, (void *)this),
+                handler_info("/api/v1/verifyHS", HomeBlks::verify_hs, (void *)this),
         }}));
         m_http_server->start();
 
@@ -971,6 +971,26 @@ void HomeBlks::set_error_flip() {
 void HomeBlks::print_tree(const VolumePtr& vol, bool chksum) {
     m_print_checksum = chksum;
     vol->print_tree();
+}
+
+void HomeBlks::verify_tree(const VolumePtr& vol) {
+    LOGINFO("verifying vol {}", vol->get_name());
+    vol->verify_tree();
+}
+
+void HomeBlks::verify_vols() {
+    std::unique_lock<std::recursive_mutex>  lg(m_vol_lock);
+    auto it = m_volume_map.begin();
+    while (it != m_volume_map.end()) {
+        verify_tree(it->second);
+        ++it;
+    }
+}
+
+void HomeBlks::verify_hs(sisl::HttpCallData cd) {
+    HomeBlks *hb = (HomeBlks *)(cd->cookie());
+    hb->verify_vols();
+    hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, std::string("HomeBlks verified"));
 }
 
 void HomeBlks::print_node(const VolumePtr& vol, uint64_t blkid, bool chksum) {

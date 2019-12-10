@@ -192,7 +192,7 @@ def nightly():
     sleep(5)
     
     # normal IO test
-    normal_flip()
+ #   normal_flip()
     sleep(5)
 
     one_disk_replace()
