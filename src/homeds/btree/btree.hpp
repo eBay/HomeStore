@@ -747,11 +747,11 @@ private:
                 my_node->get(i, &child, false);
                 verify_node(child.bnode_id(), my_node, i);
                 if (i > 0) {
-                    BT_RELEASE_ASSERT_CMP(LT, prev_key.compare(&key), 0, my_node);
+                    BT_LOG_ASSERT_CMP(LT, prev_key.compare(&key), 0, my_node);
                 }
             }
             if (my_node->is_leaf() && i > 0) {
-                BT_RELEASE_ASSERT_CMP(LT, prev_key.compare_start(&key), 0, my_node);
+                BT_LOG_ASSERT_CMP(LT, prev_key.compare_start(&key), 0, my_node);
             }
             prev_key = key;
         }
@@ -762,14 +762,14 @@ private:
 
             K last_key;
             my_node->get_nth_key(my_node->get_total_entries() - 1, &last_key, false);
-            BT_RELEASE_ASSERT_CMP(EQ, last_key.compare(&parent_key), 0, parent_node);
+            BT_LOG_ASSERT_CMP(EQ, last_key.compare(&parent_key), 0, parent_node);
         } else if (parent_node) {
             K parent_key;
             parent_node->get_nth_key(indx - 1, &parent_key, false);
 
             K first_key;
             my_node->get_nth_key(0, &first_key, false);
-            BT_RELEASE_ASSERT_CMP(GT, first_key.compare(&parent_key), 0, parent_node);
+            BT_LOG_ASSERT_CMP(GT, first_key.compare(&parent_key), 0, parent_node);
         }
 
         if (my_node->get_edge_id().is_valid()) {

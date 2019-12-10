@@ -974,6 +974,7 @@ void HomeBlks::print_tree(const VolumePtr& vol, bool chksum) {
 }
 
 void HomeBlks::verify_tree(const VolumePtr& vol) {
+    LOGINFO("verifying vol {}", vol->get_name());
     vol->verify_tree();
 }
 
