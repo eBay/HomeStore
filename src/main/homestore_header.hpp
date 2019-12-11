@@ -77,5 +77,9 @@ public:
     LOG##level##MOD(BOOST_PP_IF(BOOST_PP_IS_EMPTY(mod), base, mod), "{}", _log_buf.data());
 #endif
 
+#define HOMESTORE_LOG_MODS                                                                                             \
+    btree_structures, btree_nodes, btree_generics, cache, device, httpserver_lmod, iomgr, varsize_blk_alloc,           \
+        VMOD_VOL_MAPPING, volume, flip
+
 } // namespace homestore
 #endif

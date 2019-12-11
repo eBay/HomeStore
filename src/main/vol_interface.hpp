@@ -14,7 +14,8 @@
 #include <sds_logging/logging.h>
 #include <mutex>
 #include <utility/atomic_counter.hpp>
-#include "homeds/utility/useful_defs.hpp"
+//#include <fds/utils.hpp>
+#include <fds/utils.hpp>
 #include <utility/obj_life_counter.hpp>
 #include <atomic>
 #include <boost/optional.hpp>
@@ -36,10 +37,10 @@ struct init_params;
 VolInterface* vol_homestore_init(const init_params& cfg);
 
 struct cap_attrs {
-    uint64_t    used_data_size;
-    uint64_t    used_metadata_size;
-    uint64_t    used_total_size;
-    uint64_t    initial_total_size;
+    uint64_t used_data_size;
+    uint64_t used_metadata_size;
+    uint64_t used_total_size;
+    uint64_t initial_total_size;
     std::string to_string() {
         std::stringstream ss;
         ss << "used_data_size = " << used_data_size << ", used_metadata_size = " << used_metadata_size
@@ -49,8 +50,8 @@ struct cap_attrs {
 };
 
 struct buf_info {
-    uint64_t                          size;
-    int                               offset;
+    uint64_t size;
+    int offset;
     boost::intrusive_ptr< BlkBuffer > buf;
 
     buf_info(uint64_t sz, int off, boost::intrusive_ptr< BlkBuffer >& bbuf) : size(sz), offset(off), buf(bbuf) {}
@@ -63,22 +64,22 @@ struct _counter_generator {
     }
 
     _counter_generator() : request_id_counter(0) {}
-    uint64_t                next_request_id() { return request_id_counter.fetch_add(1, std::memory_order_relaxed); }
+    uint64_t next_request_id() { return request_id_counter.fetch_add(1, std::memory_order_relaxed); }
     std::atomic< uint64_t > request_id_counter;
 };
 #define counter_generator _counter_generator::instance()
 
 struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
-    std::vector< buf_info >     read_buf_list;
+    std::vector< buf_info > read_buf_list;
     sisl::atomic_counter< int > outstanding_io_cnt;
     sisl::atomic_counter< int > outstanding_data_io_cnt;
     sisl::atomic_counter< int > refcount;
-    Clock::time_point           io_start_time;
-    std::error_condition        err;
-    std::atomic< bool >         is_fail_completed;
-    bool                        is_read;
-    uint64_t                    request_id;
-    void*                       cookie; // any tag alongs
+    Clock::time_point io_start_time;
+    std::error_condition err;
+    std::atomic< bool > is_fail_completed;
+    bool is_read;
+    uint64_t request_id;
+    void* cookie; // any tag alongs
 
     friend void intrusive_ptr_add_ref(vol_interface_req* req) { req->refcount.increment(1); }
 
@@ -138,13 +139,13 @@ enum vol_state {
 };
 
 typedef std::function< void(const vol_interface_req_ptr& req) > io_comp_callback;
-typedef std::function< void(bool success) >                     shutdown_comp_callback;
+typedef std::function< void(bool success) > shutdown_comp_callback;
 
 struct vol_params {
-    uint64_t           page_size;
-    uint64_t           size;
+    uint64_t page_size;
+    uint64_t size;
     boost::uuids::uuid uuid;
-    io_comp_callback   io_comp_cb;
+    io_comp_callback io_comp_cb;
 #define VOL_NAME_SIZE 100
     char vol_name[VOL_NAME_SIZE];
 
@@ -160,7 +161,7 @@ struct out_params {
     uint64_t max_io_size; // currently it is 1 MB based on 4k minimum page size
 };
 
-typedef std::shared_ptr< Volume >   VolumePtr;
+typedef std::shared_ptr< Volume > VolumePtr;
 typedef std::shared_ptr< Snapshot > SnapshotPtr;
 
 /* This is the optional parameteres which should be given by its consumers only when there is no
@@ -178,31 +179,31 @@ struct disk_attributes {
 struct init_params {
 public:
     typedef std::function< void(std::error_condition err, const out_params& params) > init_done_callback;
-    typedef std::function< bool(boost::uuids::uuid uuid) >                            vol_found_callback;
-    typedef std::function< void(const VolumePtr& vol, vol_state state) >              vol_mounted_callback;
+    typedef std::function< bool(boost::uuids::uuid uuid) > vol_found_callback;
+    typedef std::function< void(const VolumePtr& vol, vol_state state) > vol_mounted_callback;
     typedef std::function< void(const VolumePtr& vol, vol_state old_state, vol_state new_state) >
         vol_state_change_callback;
 
     /* system parameters */
-    uint32_t                min_virtual_page_size; // minimum page size supported. Ideally it should be 4k.
-    uint64_t                cache_size;            // memory available for cache. We should give 80 % of the whole
-    bool                    disk_init;             // true if disk has to be initialized.
-    std::vector< dev_info > devices;               // name of the devices.
-    bool                    is_file;
-    boost::uuids::uuid      system_uuid;
-    io_flag                 flag = io_flag::DIRECT_IO;
+    uint32_t min_virtual_page_size;  // minimum page size supported. Ideally it should be 4k.
+    uint64_t cache_size;             // memory available for cache. We should give 80 % of the whole
+    bool disk_init;                  // true if disk has to be initialized.
+    std::vector< dev_info > devices; // name of the devices.
+    bool is_file;
+    boost::uuids::uuid system_uuid;
+    io_flag flag = io_flag::DIRECT_IO;
 #ifndef NDEBUG
     size_t mem_btree_page_size = 8192;
 #endif
 
     /* optional parameters */
     boost::optional< disk_attributes > disk_attr;
-    boost::optional< bool >            is_read_only;
+    boost::optional< bool > is_read_only;
 
     /* completions callback */
-    init_done_callback        init_done_cb;
-    vol_found_callback        vol_found_cb;
-    vol_mounted_callback      vol_mounted_cb;
+    init_done_callback init_done_cb;
+    vol_found_callback vol_found_cb;
+    vol_mounted_callback vol_mounted_cb;
     vol_state_change_callback vol_state_change_cb;
 
 public:
@@ -239,31 +240,31 @@ public:
     }
 
     static VolInterface* get_instance() { return _instance; }
-    static void          del_instance() { delete _instance; }
+    static void del_instance() { delete _instance; }
 
     virtual vol_interface_req_ptr create_vol_hb_req() = 0;
-    virtual std::error_condition  write(const VolumePtr& vol, uint64_t lba, uint8_t* buf, uint32_t nblks,
-                                        const vol_interface_req_ptr& req) = 0;
-    virtual std::error_condition  read(const VolumePtr& vol, uint64_t lba, int nblks,
+    virtual std::error_condition write(const VolumePtr& vol, uint64_t lba, uint8_t* buf, uint32_t nblks,
                                        const vol_interface_req_ptr& req) = 0;
-    virtual std::error_condition  sync_read(const VolumePtr& vol, uint64_t lba, int nblks,
-                                            const vol_interface_req_ptr& req) = 0;
-    virtual const char*           get_name(const VolumePtr& vol) = 0;
-    virtual uint64_t              get_page_size(const VolumePtr& vol) = 0;
-    virtual boost::uuids::uuid    get_uuid(std::shared_ptr< Volume > vol) = 0;
-    virtual homeds::blob          at_offset(const boost::intrusive_ptr< BlkBuffer >& buf, uint32_t offset) = 0;
-    virtual VolumePtr             create_volume(const vol_params& params) = 0;
-    virtual std::error_condition  remove_volume(const boost::uuids::uuid& uuid) = 0;
-    virtual VolumePtr             lookup_volume(const boost::uuids::uuid& uuid) = 0;
-    virtual SnapshotPtr           snap_volume(VolumePtr volptr) = 0;
+    virtual std::error_condition read(const VolumePtr& vol, uint64_t lba, int nblks,
+                                      const vol_interface_req_ptr& req) = 0;
+    virtual std::error_condition sync_read(const VolumePtr& vol, uint64_t lba, int nblks,
+                                           const vol_interface_req_ptr& req) = 0;
+    virtual const char* get_name(const VolumePtr& vol) = 0;
+    virtual uint64_t get_page_size(const VolumePtr& vol) = 0;
+    virtual boost::uuids::uuid get_uuid(std::shared_ptr< Volume > vol) = 0;
+    virtual homeds::blob at_offset(const boost::intrusive_ptr< BlkBuffer >& buf, uint32_t offset) = 0;
+    virtual VolumePtr create_volume(const vol_params& params) = 0;
+    virtual std::error_condition remove_volume(const boost::uuids::uuid& uuid) = 0;
+    virtual VolumePtr lookup_volume(const boost::uuids::uuid& uuid) = 0;
+    virtual SnapshotPtr snap_volume(VolumePtr volptr) = 0;
 
     /* AM should call it in case of recovery or reboot when homestore try to mount the existing volume */
     virtual void attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback cb) = 0;
 
     virtual std::error_condition shutdown(shutdown_comp_callback shutdown_comp_cb, bool force = false) = 0;
-    virtual cap_attrs            get_system_capacity() = 0;
-    virtual cap_attrs            get_vol_capacity(const VolumePtr& vol) = 0;
-    virtual bool                 vol_state_change(const VolumePtr& vol, vol_state new_state) = 0;
+    virtual cap_attrs get_system_capacity() = 0;
+    virtual cap_attrs get_vol_capacity(const VolumePtr& vol) = 0;
+    virtual bool vol_state_change(const VolumePtr& vol, vol_state new_state) = 0;
 
     virtual void print_tree(const VolumePtr& vol, bool chksum = true) = 0;
     virtual void print_node(const VolumePtr& vol, uint64_t blkid, bool chksum = true) = 0;

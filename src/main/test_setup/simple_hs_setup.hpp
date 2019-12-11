@@ -4,7 +4,7 @@
 #include <iomgr/iomgr.hpp>
 #include <iomgr/aio_drive_interface.hpp>
 #include <folly/SharedMutex.h>
-#include "homeds/utility/useful_defs.hpp"
+#include <fds/utils.hpp>
 
 namespace homestore {
 #define vol_interface VolInterface::get_instance()
@@ -35,49 +35,49 @@ public:
 
     void shutdown() { iomanager.remove_fd(m_iface.get(), m_ev_fdinfo); }
     void kickstart_io() {
-        uint64_t              temp = 1;
+        uint64_t temp = 1;
         [[maybe_unused]] auto wsize = write(m_ev_fd, &temp, sizeof(uint64_t));
     }
 
     void on_new_io_request(int fd, void* cookie, int event);
 
     void io_request_done() {
-        uint64_t              temp = 1;
+        uint64_t temp = 1;
         [[maybe_unused]] auto wsize = write(m_ev_fd, &temp, sizeof(uint64_t));
     }
 
 private:
-    int                                    m_ev_fd;
-    iomgr::fd_info*                        m_ev_fdinfo;
+    int m_ev_fd;
+    iomgr::fd_info* m_ev_fdinfo;
     std::shared_ptr< TestTargetInterface > m_iface;
-    SimpleTestStore*                       m_test_store;
+    SimpleTestStore* m_test_store;
 };
 
 struct simple_store_cfg {
-    uint32_t                   m_ndevices = 2;
+    uint32_t m_ndevices = 2;
     std::vector< std::string > m_devs;
-    uint32_t                   m_nthreads = 4;
-    uint32_t                   m_nvols = 1;
-    uint64_t                   m_dev_size = 4 * 1024 * 1024 * 1024ul;
-    uint64_t                   m_cache_size = 2 * 1024 * 1024 * 1024ul;
-    uint64_t                   m_max_io_size = 1 * 1024 * 1024ul;
-    bool                       is_shadow_vol = false;
-    bool                       is_read_verify = false; // Should we verify the write followed by sync read
-    uint64_t                   m_run_time_ms = 30 * 1000;
-    uint32_t                   m_qdepth = 64;
-    uint8_t                    m_read_pct = 50;
-    bool                       m_is_file = true;
+    uint32_t m_nthreads = 4;
+    uint32_t m_nvols = 1;
+    uint64_t m_dev_size = 4 * 1024 * 1024 * 1024ul;
+    uint64_t m_cache_size = 2 * 1024 * 1024 * 1024ul;
+    uint64_t m_max_io_size = 1 * 1024 * 1024ul;
+    bool is_shadow_vol = false;
+    bool is_read_verify = false; // Should we verify the write followed by sync read
+    uint64_t m_run_time_ms = 30 * 1000;
+    uint32_t m_qdepth = 64;
+    uint8_t m_read_pct = 50;
+    bool m_is_file = true;
 };
 
 struct simple_store_req : public vol_interface_req {
-    ssize_t  size;
-    off_t    offset;
+    ssize_t size;
+    off_t offset;
     uint64_t lba;
     uint32_t nblks;
     uint8_t* buf;
-    bool     is_read;
+    bool is_read;
     uint64_t cur_vol;
-    bool     done = false;
+    bool done = false;
 
     simple_store_req() { buf = nullptr; }
     virtual ~simple_store_req() { free(buf); }
@@ -85,10 +85,10 @@ struct simple_store_req : public vol_interface_req {
 };
 
 struct vol_info {
-    VolumePtr                         vol_obj;
-    uint64_t                          max_vol_blks = 0;
+    VolumePtr vol_obj;
+    uint64_t max_vol_blks = 0;
     std::shared_ptr< homeds::Bitset > blk_bits;
-    folly::SharedMutexWritePriority   bitset_rwlock;
+    folly::SharedMutexWritePriority bitset_rwlock;
 
     explicit vol_info(const VolumePtr& obj) {
         vol_obj = obj;
@@ -115,25 +115,25 @@ struct vol_info {
 
 class SimpleTestStore {
 private:
-    TestTarget              m_tgt;
-    simple_store_cfg        m_cfg;
-    init_params             m_init_params;
+    TestTarget m_tgt;
+    simple_store_cfg m_cfg;
+    init_params m_init_params;
     std::vector< dev_info > m_dev_infos;
 
-    std::mutex              m_mutex;
+    std::mutex m_mutex;
     std::condition_variable m_init_done_cv;
     std::condition_variable m_io_done_cv;
 
     std::vector< vol_info > m_vol_infos;
-    std::atomic< size_t >   m_outstanding_ios = 0;
+    std::atomic< size_t > m_outstanding_ios = 0;
     std::atomic< uint64_t > m_write_cnt = 0;
     std::atomic< uint64_t > m_read_cnt = 0;
     std::atomic< uint64_t > m_read_err_cnt = 0;
 
-    uint64_t          m_vol_size = 512 * 1024 * 1024;
+    uint64_t m_vol_size = 512 * 1024 * 1024;
     Clock::time_point m_start_time;
 
-    static constexpr uint32_t    vol_page_size = 4096;
+    static constexpr uint32_t vol_page_size = 4096;
     static constexpr const char* vol_prefix = "vol";
 
 public:
@@ -273,7 +273,7 @@ public:
 
         uint8_t* buf = nullptr;
         uint64_t size = nblks * vol_interface->get_page_size(vinfo.vol_obj);
-        auto     ret = posix_memalign((void**)&buf, 4096, size);
+        auto ret = posix_memalign((void**)&buf, 4096, size);
         if (ret) { assert(0); }
         assert(buf != nullptr);
 
@@ -338,8 +338,8 @@ public:
 
     void process_completions(const vol_interface_req_ptr& vol_req) {
         boost::intrusive_ptr< simple_store_req > req = boost::static_pointer_cast< simple_store_req >(vol_req);
-        static Clock::time_point                 last_print_time = Clock::now();
-        static uint64_t                          print_time = 30 * 1000;
+        static Clock::time_point last_print_time = Clock::now();
+        static uint64_t print_time = 30 * 1000;
 
         /* it validates that we don't have two completions for the same requests */
         DEBUG_ASSERT_EQ(req->done, false);
@@ -373,7 +373,7 @@ public:
 };
 
 void TestTarget::on_new_io_request(int fd, void* cookie, int event) {
-    uint64_t              temp;
+    uint64_t temp;
     [[maybe_unused]] auto rsize = read(m_ev_fd, &temp, sizeof(uint64_t));
     m_test_store->process_new_request();
 }

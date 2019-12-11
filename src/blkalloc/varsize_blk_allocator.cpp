@@ -9,6 +9,7 @@
 #include <iostream>
 #include <cassert>
 #include <thread>
+#include <fds/utils.hpp>
 #include "homeds/btree/mem_btree.hpp"
 #include <sds_logging/logging.h>
 
@@ -60,7 +61,7 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig& cfg, bool init) 
     BLKALLOC_LOG(INFO, , "Segment Count = {}, Blocks per segment = {}, portions={}", cfg.get_total_segments(),
                  seg_nblks, portions_per_seg);
     for (auto i = 0U; i < cfg.get_total_segments(); i++) {
-        std::string seg_name = cfg.get_name() + "_seg_"+ std::to_string(i);
+        std::string seg_name = cfg.get_name() + "_seg_" + std::to_string(i);
         BlkAllocSegment* seg = new BlkAllocSegment(seg_nblks, i, portions_per_seg, seg_name);
         m_segments.push_back(seg);
     }
@@ -73,40 +74,80 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig& cfg, bool init) 
     m_blk_cache = VarsizeBlkAllocatorBtree::create_btree(btree_cfg, nullptr);
 
     // Start a thread which will do sweeping job of free segments
-    if (init) {
-        inited();
-    }
+    if (init) { inited(); }
 }
 
 void VarsizeBlkAllocator::incr_counter(unsigned int index, unsigned int val) {
     switch (index) {
-    case 0: COUNTER_INCREMENT(m_metrics, blkalloc_slab0_capacity, val); break;
-    case 1: COUNTER_INCREMENT(m_metrics, blkalloc_slab1_capacity, val); break;
-    case 2: COUNTER_INCREMENT(m_metrics, blkalloc_slab2_capacity, val); break;
-    case 3: COUNTER_INCREMENT(m_metrics, blkalloc_slab3_capacity, val); break;
-    case 4: COUNTER_INCREMENT(m_metrics, blkalloc_slab4_capacity, val); break;
-    case 5: COUNTER_INCREMENT(m_metrics, blkalloc_slab5_capacity, val); break;
-    case 6: COUNTER_INCREMENT(m_metrics, blkalloc_slab6_capacity, val); break;
-    case 7: COUNTER_INCREMENT(m_metrics, blkalloc_slab7_capacity, val); break;
-    case 8: COUNTER_INCREMENT(m_metrics, blkalloc_slab8_capacity, val); break;
-    case 9: COUNTER_INCREMENT(m_metrics, blkalloc_slab9_capacity, val); break;
-    default: BLKALLOC_LOG(DEBUG, varsize_blk_alloc, "Invalid index={} for slab counter increment", index);
+    case 0:
+        COUNTER_INCREMENT(m_metrics, blkalloc_slab0_capacity, val);
+        break;
+    case 1:
+        COUNTER_INCREMENT(m_metrics, blkalloc_slab1_capacity, val);
+        break;
+    case 2:
+        COUNTER_INCREMENT(m_metrics, blkalloc_slab2_capacity, val);
+        break;
+    case 3:
+        COUNTER_INCREMENT(m_metrics, blkalloc_slab3_capacity, val);
+        break;
+    case 4:
+        COUNTER_INCREMENT(m_metrics, blkalloc_slab4_capacity, val);
+        break;
+    case 5:
+        COUNTER_INCREMENT(m_metrics, blkalloc_slab5_capacity, val);
+        break;
+    case 6:
+        COUNTER_INCREMENT(m_metrics, blkalloc_slab6_capacity, val);
+        break;
+    case 7:
+        COUNTER_INCREMENT(m_metrics, blkalloc_slab7_capacity, val);
+        break;
+    case 8:
+        COUNTER_INCREMENT(m_metrics, blkalloc_slab8_capacity, val);
+        break;
+    case 9:
+        COUNTER_INCREMENT(m_metrics, blkalloc_slab9_capacity, val);
+        break;
+    default:
+        BLKALLOC_LOG(DEBUG, varsize_blk_alloc, "Invalid index={} for slab counter increment", index);
     }
 }
 
 void VarsizeBlkAllocator::decr_counter(unsigned int index, unsigned int val) {
     switch (index) {
-    case 0: COUNTER_DECREMENT(m_metrics, blkalloc_slab0_capacity, val); break;
-    case 1: COUNTER_DECREMENT(m_metrics, blkalloc_slab1_capacity, val); break;
-    case 2: COUNTER_DECREMENT(m_metrics, blkalloc_slab2_capacity, val); break;
-    case 3: COUNTER_DECREMENT(m_metrics, blkalloc_slab3_capacity, val); break;
-    case 4: COUNTER_DECREMENT(m_metrics, blkalloc_slab4_capacity, val); break;
-    case 5: COUNTER_DECREMENT(m_metrics, blkalloc_slab5_capacity, val); break;
-    case 6: COUNTER_DECREMENT(m_metrics, blkalloc_slab6_capacity, val); break;
-    case 7: COUNTER_DECREMENT(m_metrics, blkalloc_slab7_capacity, val); break;
-    case 8: COUNTER_DECREMENT(m_metrics, blkalloc_slab8_capacity, val); break;
-    case 9: COUNTER_DECREMENT(m_metrics, blkalloc_slab9_capacity, val); break;
-    default: BLKALLOC_LOG(DEBUG, varsize_blk_alloc, "Invalid index={} for slab counter decrement", index);
+    case 0:
+        COUNTER_DECREMENT(m_metrics, blkalloc_slab0_capacity, val);
+        break;
+    case 1:
+        COUNTER_DECREMENT(m_metrics, blkalloc_slab1_capacity, val);
+        break;
+    case 2:
+        COUNTER_DECREMENT(m_metrics, blkalloc_slab2_capacity, val);
+        break;
+    case 3:
+        COUNTER_DECREMENT(m_metrics, blkalloc_slab3_capacity, val);
+        break;
+    case 4:
+        COUNTER_DECREMENT(m_metrics, blkalloc_slab4_capacity, val);
+        break;
+    case 5:
+        COUNTER_DECREMENT(m_metrics, blkalloc_slab5_capacity, val);
+        break;
+    case 6:
+        COUNTER_DECREMENT(m_metrics, blkalloc_slab6_capacity, val);
+        break;
+    case 7:
+        COUNTER_DECREMENT(m_metrics, blkalloc_slab7_capacity, val);
+        break;
+    case 8:
+        COUNTER_DECREMENT(m_metrics, blkalloc_slab8_capacity, val);
+        break;
+    case 9:
+        COUNTER_DECREMENT(m_metrics, blkalloc_slab9_capacity, val);
+        break;
+    default:
+        BLKALLOC_LOG(DEBUG, varsize_blk_alloc, "Invalid index={} for slab counter decrement", index);
     }
 }
 
@@ -125,9 +166,7 @@ VarsizeBlkAllocator::~VarsizeBlkAllocator() {
     }
 
     m_cv.notify_all();
-    if (m_thread_id.joinable()) {
-        m_thread_id.join();
-    }
+    if (m_thread_id.joinable()) { m_thread_id.join(); }
     delete (m_blk_cache);
     delete (m_alloc_bm);
 #ifndef NDEBUG
@@ -145,8 +184,8 @@ VarsizeBlkAllocator::~VarsizeBlkAllocator() {
 void VarsizeBlkAllocator::allocator_state_machine() {
     BLKALLOC_LOG(INFO, , "Starting new blk sweep thread");
     BlkAllocSegment* allocate_seg = nullptr;
-    int              slab_indx;
-    bool             allocate = false;
+    int slab_indx;
+    bool allocate = false;
 
     while (true) {
         allocate_seg = nullptr;
@@ -179,9 +218,7 @@ void VarsizeBlkAllocator::allocator_state_machine() {
                 // acquire lock
                 std::unique_lock< std::mutex > lk(m_mutex);
                 m_wait_alloc_segment = nullptr;
-                if (m_region_state != BLK_ALLOCATOR_EXITING) {
-                    m_region_state = BLK_ALLOCATOR_DONE;
-                }
+                if (m_region_state != BLK_ALLOCATOR_EXITING) { m_region_state = BLK_ALLOCATOR_DONE; }
                 m_cv.notify_all();
             }
             BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Done with fill cache for segment");
@@ -211,16 +248,14 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(BlkId& in_bid) {
 }
 
 void VarsizeBlkAllocator::inited() {
-    if (!m_init) {
-        m_thread_id = std::thread(thread_func, this);
-    }
+    if (!m_init) { m_thread_id = std::thread(thread_func, this); }
     m_init = true;
 }
 
 BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& hints,
                                           std::vector< BlkId >& out_blkid) {
     uint8_t blks_alloced = 0;
-    int     retry_cnt = 0;
+    int retry_cnt = 0;
 
     uint8_t blks_rqstd = nblks;
 
@@ -231,9 +266,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
     BLKALLOC_ASSERT_CMP(LOGMSG, nblks % hints.multiplier, ==, 0);
 
 #ifdef _PRERELEASE
-    if (homestore_flip->test_flip("varsize_blkalloc_no_blks")) {
-        return BLK_ALLOC_SPACEFULL;
-    }
+    if (homestore_flip->test_flip("varsize_blkalloc_no_blks", nblks)) { return BLK_ALLOC_SPACEFULL; }
 
     auto split_cnt = homestore_flip->get_test_flip< int >("blkalloc_split_blk");
     if (!hints.is_contiguous && split_cnt && nblks > split_cnt.get()) {
@@ -287,14 +320,12 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
     BLKALLOC_LOG(TRACE, varsize_blk_alloc, "blks_alloced={}, blocks requested={}", blks_alloced, nblks);
 
     if (blks_alloced != nblks) {
-        if (m_cache_n_entries.load(std::memory_order_acquire) != 0) {
-            m_blk_cache->print_tree();
-        }
+        if (m_cache_n_entries.load(std::memory_order_acquire) != 0) { m_blk_cache->print_tree(); }
         BLKALLOC_LOG(ERROR, , "blks_alloced != nblks : {}  {}", blks_alloced, nblks);
         BLKALLOC_ASSERT_CMP(LOGMSG, blks_alloced, ==, nblks);
         COUNTER_INCREMENT(m_metrics, alloc_fail, 1);
         /* free blks */
-        for (auto it = out_blkid.begin(); it != out_blkid.end(); ) {
+        for (auto it = out_blkid.begin(); it != out_blkid.end();) {
             free(*it);
             it = out_blkid.erase(it);
         }
@@ -308,9 +339,7 @@ uint64_t VarsizeBlkAllocator::get_best_fit_cache(uint64_t blks_rqstd) {
 
     auto slab_index = get_config().get_slab(blks_rqstd).first;
     while (slab_index > 0) {
-        if (m_slab_entries[slab_index]._a.load()) {
-            return (get_config().get_slab_lower_bound(slab_index));
-        }
+        if (m_slab_entries[slab_index]._a.load()) { return (get_config().get_slab_lower_bound(slab_index)); }
         slab_index--;
     }
 
@@ -320,7 +349,7 @@ uint64_t VarsizeBlkAllocator::get_best_fit_cache(uint64_t blks_rqstd) {
 BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& hints, BlkId* out_blkid,
                                           bool best_fit) {
     BlkAllocStatus ret = BLK_ALLOC_SUCCESS;
-    bool           found = false;
+    bool found = false;
 
     // TODO: Instead of given value, try to have leeway like 10% of both sides as range for desired_temp or bkt.
     VarsizeAllocCacheEntry start_entry(BLKID_RANGE_FIRST, PAGEID_RANGE_FIRST, nblks, hints.desired_temp);
@@ -331,7 +360,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
                            _MultiMatchSelector::BEST_FIT_TO_CLOSEST_FOR_REMOVE);
 
     EmptyClass dummy_val;
-    int        attempt = 1;
+    int attempt = 1;
     while (true) {
         auto status = m_blk_cache->remove_any(regex, &actual_entry, &dummy_val);
         found = (status == btree_status_t::success);
@@ -390,9 +419,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
         attempt++;
     }
 
-    if (!found) {
-        return BLK_ALLOC_SPACEFULL;
-    }
+    if (!found) { return BLK_ALLOC_SPACEFULL; }
 
     /* get excess blks */
     int excess_nblks = actual_entry.get_blk_count() - nblks;
@@ -415,8 +442,8 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
     uint64_t alloc_blks = actual_entry.get_blk_count() - excess_nblks;
     if (excess_nblks > 0) {
         uint64_t blknum = actual_entry.get_blk_num();
-        int      leading_npages = (int)(blknum_to_phys_pageid(blknum + alloc_blks) - actual_entry.get_phys_page_id());
-        int      trailing_npages = (int)(blknum_to_phys_pageid(blknum + actual_entry.get_blk_count()) -
+        int leading_npages = (int)(blknum_to_phys_pageid(blknum + alloc_blks) - actual_entry.get_phys_page_id());
+        int trailing_npages = (int)(blknum_to_phys_pageid(blknum + actual_entry.get_blk_count()) -
                                     blknum_to_phys_pageid(blknum + excess_nblks));
 
         VarsizeAllocCacheEntry excess_entry;
@@ -475,7 +502,7 @@ void VarsizeBlkAllocator::free(const BlkId& b) {
  * slab_indx is full.
  */
 void VarsizeBlkAllocator::fill_cache(BlkAllocSegment* seg, int slab_indx) {
-    uint64_t nadded_blks    = 0;
+    uint64_t nadded_blks = 0;
 
     BLKALLOC_ASSERT_NULL(LOGMSG, seg);
     /* While cache is not full */
@@ -498,9 +525,7 @@ void VarsizeBlkAllocator::fill_cache(BlkAllocSegment* seg, int slab_indx) {
 
         bool refill_needed = true;
         assert(slab_indx >= 0);
-        if (slab_indx < 0) {
-            slab_indx = 0;
-        }
+        if (slab_indx < 0) { slab_indx = 0; }
         for (auto i = slab_indx; i < (int)m_slab_entries.size(); ++i) {
             // Low water mark for cache slabs is half of full capacity
             auto count = m_slab_entries[i]._a.load(std::memory_order_acq_rel);
@@ -514,8 +539,7 @@ void VarsizeBlkAllocator::fill_cache(BlkAllocSegment* seg, int slab_indx) {
                  */
             }
         }
-        if (!refill_needed)
-            break; // Atleast one slab has sufficient blocks
+        if (!refill_needed) break; // Atleast one slab has sufficient blocks
 
         BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Refill cache");
         uint64_t portion_num = seg->get_clock_hand();
@@ -549,16 +573,16 @@ void VarsizeBlkAllocator::fill_cache(BlkAllocSegment* seg, int slab_indx) {
 
 uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t seg_portion_num, BlkAllocSegment* seg) {
     EmptyClass dummy;
-    uint64_t   n_added_blks = 0;
-    uint64_t   n_fragments  = 0;
+    uint64_t n_added_blks = 0;
+    uint64_t n_fragments = 0;
 
     uint64_t portion_num = seg->get_seg_num() * get_portions_per_segment() + seg_portion_num;
     BLKALLOC_ASSERT_CMP(LOGMSG, m_cfg.get_total_portions(), >, portion_num);
     BlkAllocPortion& portion = m_blk_portions[portion_num];
-    auto             num_blks_per_portion = get_config().get_blks_per_portion();
-    auto             cur_blk_id = portion_num * num_blks_per_portion;
-    auto             end_blk_id = cur_blk_id + num_blks_per_portion;
-    uint32_t         num_blks_per_phys_page = get_config().get_blks_per_phys_page();
+    auto num_blks_per_portion = get_config().get_blks_per_portion();
+    auto cur_blk_id = portion_num * num_blks_per_portion;
+    auto end_blk_id = cur_blk_id + num_blks_per_portion;
+    uint32_t num_blks_per_phys_page = get_config().get_blks_per_phys_page();
 
     portion.lock();
     /* TODO: Consider caching the m_cache_n_entries and give some leeway
@@ -572,20 +596,16 @@ uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t seg_portion_num, Bl
         BLKALLOC_ASSERT_CMP(LOGMSG, b.nbits, <=, MAX_NBLKS);
 
         /* If there are no free blocks are none within the assigned portion */
-        if (!b.nbits || b.start_bit >= end_blk_id) {
-            break;
-        }
+        if (!b.nbits || b.start_bit >= end_blk_id) { break; }
 
         /* Limit cache update to within portion boundary */
-        if (b.start_bit + b.nbits > end_blk_id) {
-            b.nbits = end_blk_id - b.start_bit;
-        }
+        if (b.start_bit + b.nbits > end_blk_id) { b.nbits = end_blk_id - b.start_bit; }
 
         /* Create cache entry for start till end or upto next page boundary,
            whichever is earlier. This will be used if start is not aligned
            with a page boundary
          */
-        uint64_t     total_bits = 0;
+        uint64_t total_bits = 0;
         unsigned int nbits = b.start_bit % num_blks_per_phys_page;
         if (nbits) {
             nbits = std::min(num_blks_per_phys_page - nbits, b.nbits);
@@ -714,9 +734,7 @@ void VarsizeBlkAllocator::request_more_blks(BlkAllocSegment* seg, int slab_indx)
         }
     } // release lock
 
-    if (allocate) {
-        m_cv.notify_all();
-    }
+    if (allocate) { m_cv.notify_all(); }
 }
 
 void VarsizeBlkAllocator::request_more_blks_wait(BlkAllocSegment* seg, int slab_indx) {
@@ -730,9 +748,7 @@ void VarsizeBlkAllocator::request_more_blks_wait(BlkAllocSegment* seg, int slab_
         m_cv.notify_all();
     }
     // Wait for notification that it is done
-    if (m_region_state != BLK_ALLOCATOR_DONE && m_region_state != BLK_ALLOCATOR_EXITING) {
-        m_cv.wait(lk);
-    }
+    if (m_region_state != BLK_ALLOCATOR_DONE && m_region_state != BLK_ALLOCATOR_EXITING) { m_cv.wait(lk); }
 }
 
 std::string VarsizeBlkAllocator::state_string(BlkAllocatorState state) const {
@@ -777,15 +793,11 @@ int VarsizeAllocCacheEntry::compare_range(const BtreeSearchRange& range) const {
 
     int ret = is_in_range(this->get_blk_count(), start_entry->get_blk_count(), range.is_start_inclusive(),
                           end_entry->get_blk_count(), range.is_end_inclusive());
-    if (ret != 0) {
-        return ret;
-    }
+    if (ret != 0) { return ret; }
 
     ret = is_in_range(this->get_temperature(), start_entry->get_temperature(), range.is_start_inclusive(),
                       end_entry->get_temperature(), range.is_end_inclusive());
-    if (ret != 0) {
-        return ret;
-    }
+    if (ret != 0) { return ret; }
 
     ret = is_in_range(this->get_phys_page_id(), start_entry->get_phys_page_id(), range.is_start_inclusive(),
                       end_entry->get_phys_page_id(), range.is_end_inclusive());

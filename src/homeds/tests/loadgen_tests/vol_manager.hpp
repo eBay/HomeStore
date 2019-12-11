@@ -1,6 +1,7 @@
 #pragma once
 #include "write_log_recorder.hpp"
 #include "vol_crc_persist_mgr.hpp"
+#include <logdev/log_dev.hpp>
 
 #define MAX_DEVICES 2
 #define VOL_PREFIX "/tmp/vol"
@@ -16,17 +17,18 @@ constexpr uint64_t CACHE_SIZE = (4 * 1024 * 1024 * 1024ul);
 constexpr uint32_t VOL_PAGE_SIZE = 4096;
 constexpr uint32_t MAX_IO_SIZE = (VOL_PAGE_SIZE * ((1 << MEMPIECE_ENCODE_MAX_BITS) - 1));
 constexpr uint32_t MAX_CRC_DEPTH = 3;
+const uint64_t LOGDEV_BUF_SIZE = HomeStoreConfig::align_size * 1024;
 
 class VolReq {
 public:
-    ssize_t                 size;
-    off_t                   offset;
-    uint64_t                lba;
-    uint32_t                nblks;
-    uint8_t*                buf; // read;
-    bool                    is_read;
-    bool                    verify; // only valid for read;
-    uint64_t                vol_id;
+    ssize_t size;
+    off_t offset;
+    uint64_t lba;
+    uint32_t nblks;
+    uint8_t* buf; // read;
+    bool is_read;
+    bool verify; // only valid for read;
+    uint64_t vol_id;
     std::vector< uint64_t > hash; // only valid for write
 
 public:
@@ -38,8 +40,8 @@ public:
 };
 
 struct VolumeInfo {
-    std::mutex      m_mtx; // lock
-    homeds::Bitset* m_bm;  // volume block write bitmap
+    std::mutex m_mtx;     // lock
+    homeds::Bitset* m_bm; // volume block write bitmap
 
     VolumeInfo(uint64_t vol_total_blks) { m_bm = new homeds::Bitset(vol_total_blks); }
 
@@ -161,7 +163,7 @@ public:
     uint8_t* gen_value(uint64_t& nblks) {
         uint8_t* bytes = nullptr;
         uint64_t size = get_size(nblks);
-        auto     ret = posix_memalign((void**)&bytes, VOL_PAGE_SIZE, size);
+        auto ret = posix_memalign((void**)&bytes, VOL_PAGE_SIZE, size);
 
         if (ret) { assert(0); }
 
@@ -239,7 +241,7 @@ public:
         assert(lba < max_vol_blks() - nblks);
         assert(vol_id < m_max_vols);
 
-        auto    size = get_size(nblks);
+        auto size = get_size(nblks);
         VolReq* req = new VolReq();
         req->lba = lba;
         req->nblks = nblks;
@@ -271,16 +273,138 @@ public:
     }
 
     void set_max_vols(uint64_t num_vols) { m_max_vols = num_vols; }
+
 private:
+#if 0
+    void process_logdev_completions(const logdev_req_ptr& req) {
+        LOGINFO("Logdev write callback received!");
+
+        logdev_read_and_verify();
+        m_logdev_done = true;
+    }
+    
+    void logdev_read_and_verify() {
+        // read verify: grab last written offset as input and compare the read data with stored data
+        auto read_offset = m_logdev_offset.front();
+
+        char* ptr = nullptr;
+        int  ret = posix_memalign((void**)&ptr, HomeStoreConfig::align_size, LOGDEV_BUF_SIZE);
+        if (ret != 0) {
+            throw std::bad_alloc();
+        }
+
+        struct iovec* iov = nullptr;
+        ret = posix_memalign((void**)&iov, HomeStoreConfig::align_size, sizeof(struct iovec));
+        if (ret != 0) {
+            throw std::bad_alloc();
+        }
+
+        iov[0].iov_base = (uint8_t*) ptr;
+        iov[0].iov_len = LOGDEV_BUF_SIZE;
+
+        LogDev::instance()->readv(read_offset, iov, 1);  
+        
+        ptr[m_logdev_data[read_offset].size()] = 0;
+
+        if (m_logdev_data[read_offset].compare(ptr) != 0) {
+            LOGERROR("Returned buf: {} is not same as stored buf: {}", ptr, m_logdev_data[read_offset]);
+            assert(0);
+        } 
+         
+        free(iov);   
+        free(ptr);
+
+        m_logdev_read_verified = true;
+    }
+
+    void logdev_write(uint64_t vol_id, uint64_t lba, uint64_t nblks, logdev_comp_callback cb) {
+        std::string ss = std::to_string(vol_id) + " " + std::to_string(nblks);
+
+        char* ptr = nullptr;
+        int  ret = posix_memalign((void**)&ptr, HomeStoreConfig::align_size, LOGDEV_BUF_SIZE);
+
+        if (ret != 0) {
+            throw std::bad_alloc();
+        }
+        strncpy(ptr, ss.c_str(), ss.size());
+        
+        struct iovec* iov = nullptr;
+        ret = posix_memalign((void**)&iov, HomeStoreConfig::align_size, sizeof(struct iovec));
+        if (ret != 0) {
+            throw std::bad_alloc();
+        }
+
+        iov[0].iov_base = (uint8_t*)ptr;
+        iov[0].iov_len = LOGDEV_BUF_SIZE;
+        
+        uint64_t offset_1 = LogDev::instance()->reserve(LOGDEV_BUF_SIZE + sizeof (LogDevRecordHeader));
+#if 1
+        static bool two_reserve_test = true;
+        uint64_t offset_2 = 0;
+
+        // test two reserve followed by two writes;
+        if (two_reserve_test) {
+            offset_2 = LogDev::instance()->reserve(LOGDEV_BUF_SIZE + sizeof (LogDevRecordHeader));
+            if (offset_2 != INVALID_OFFSET) {
+                m_logdev_offset.push_front(offset_2);
+                m_logdev_data[offset_2] = ss;
+
+                m_logdev_read_verified = false;
+                bool bret= LogDev::instance()->pwritev(iov, 1, offset_2, cb);
+                
+                if (bret) {
+                    LOGINFO("offset: {}", offset_2);
+                } else {
+                    HS_ASSERT(DEBUG, 0, "Unexpected Failure! ");
+                }
+
+            } else {
+                LOGERROR("Expected failure becuase of no space left. "); 
+            }
+
+            two_reserve_test = false;
+        }  else {
+            two_reserve_test = true;
+        }
+
+        // 
+        // Wait for the 1st write(if there is any) to be read and verified before we start another write. 
+        // This is just for the ease of testing code only, not a restriction for production code;
+        //
+        while (!m_logdev_read_verified) {
+            sleep(1);
+        }
+#endif
+        if (offset_1 != INVALID_OFFSET) {
+            m_logdev_data[offset_1] = ss;
+            m_logdev_offset.push_front(offset_1);
+
+            m_logdev_read_verified = false;
+            bool bret= LogDev::instance()->pwritev(iov, 1, offset_1, cb);
+
+            if (bret) {
+                LOGINFO("offset: {}", offset_1);
+            } else {
+                HS_ASSERT(DEBUG, 0, "Unexpected Failure! ");
+            }
+        } else {
+            LOGERROR("Expected failure becuase of no space left. "); 
+        }
+
+        free(iov);
+        free(ptr);
+    }
+
+#endif
     uint64_t get_rand_vol() {
-        std::random_device                                  rd;
-        std::default_random_engine                          generator(rd());
+        std::random_device rd;
+        std::default_random_engine generator(rd());
         std::uniform_int_distribution< long long unsigned > dist(0, m_max_vols - 1);
         return dist(generator);
     }
 
     uint64_t get_rand_lba() {
-        std::random_device         rd;
+        std::random_device rd;
         std::default_random_engine generator(rd());
         // make sure the the lba doesn't write accross max vol size;
         // MAX_KEYS is initiated as max vol size;
@@ -289,8 +413,8 @@ private:
     }
 
     uint64_t get_rand_nblks() {
-        std::random_device                                  rd;
-        std::default_random_engine                          generator(rd());
+        std::random_device rd;
+        std::default_random_engine generator(rd());
         std::uniform_int_distribution< long long unsigned > dist(1, max_io_nblks());
         return dist(generator);
     }
@@ -299,8 +423,8 @@ private:
         assert(size > 0);
         assert(size % sizeof(uint64_t) == 0);
 
-        std::random_device                                  rd;
-        std::default_random_engine                          generator(rd());
+        std::random_device rd;
+        std::default_random_engine generator(rd());
         std::uniform_int_distribution< long long unsigned > dist(std::numeric_limits< unsigned long long >::min(),
                                                                  std::numeric_limits< unsigned long long >::max());
 
@@ -385,7 +509,7 @@ private:
         std::string name = VOL_PREFIX + std::to_string(vol_index);
 
         memcpy(p.vol_name, name.c_str(), (name.length() + 1));
-        
+
         // wait for VolInterface to run firstly to initiate instance.
         sleep(2);
 
@@ -435,7 +559,7 @@ private:
     void process_completions(const vol_interface_req_ptr& vol_req) {
         VolReq* req = (VolReq*)vol_req->cookie;
 
-        static uint64_t          pt = 30;
+        static uint64_t pt = 30;
         static Clock::time_point pt_start = Clock::now();
 
         auto elapsed_time = get_elapsed_time(pt_start);
@@ -479,8 +603,8 @@ private:
             auto buf = info.buf;
             while (size != 0) {
                 homeds::blob b = VolInterface::get_instance()->at_offset(buf, offset);
-                auto         hash = get_hash(b.bytes);
-                auto         stored_hash = m_verify_mgr->get_crc(req->vol_id, req->lba + nblks_in_buf_list);
+                auto hash = get_hash(b.bytes);
+                auto stored_hash = m_verify_mgr->get_crc(req->vol_id, req->lba + nblks_in_buf_list);
 
                 if (req->verify && hash != stored_hash) {
                     LOGERROR("Verify Failed: Hash Code Mismatch: vol_id: {}, lba: {}, nblks {}, hash: {} : {}",
@@ -506,16 +630,15 @@ private:
 
     uint64_t get_hash(uint8_t* bytes) { return util::Hash64((const char*)bytes, VOL_PAGE_SIZE); }
 
-
 private:
-    std::vector< dev_info >    m_device_info;
-    init_done_callback         m_done_cb; // callback to loadgen test case;
-    std::vector< VolumePtr >   m_vols;    // volume instances;
+    std::vector< dev_info > m_device_info;
+    init_done_callback m_done_cb;    // callback to loadgen test case;
+    std::vector< VolumePtr > m_vols; // volume instances;
     std::vector< std::string > m_file_names;
 
-    uint64_t       m_max_vol_size;
-    uint64_t       m_max_cap;
-    uint64_t       m_max_disk_cap;
+    uint64_t m_max_vol_size;
+    uint64_t m_max_cap;
+    uint64_t m_max_disk_cap;
     uint64_t m_max_vols = 50;
     const uint64_t m_max_io_size = MAX_IO_SIZE;
 
@@ -527,15 +650,19 @@ private:
     std::atomic< uint64_t > m_wrt_err_cnt = 0;
     std::atomic< uint64_t > m_writes_skip = 0;
     std::atomic< uint64_t > m_read_verify_skip = 0;
-    std::atomic< bool >     m_shutdown_cb_done = false;
+    std::atomic< bool > m_shutdown_cb_done = false;
 
     static VolumeManager< Executor >* _instance;
 
-    std::vector< VolumeInfo* >                  m_vol_info;
+    std::vector< VolumeInfo* > m_vol_info;
     std::shared_ptr< VolVerifyMgr< uint64_t > > m_verify_mgr; // crc type uint64_t
 
-    bool                                            m_enable_write_log;
+    bool m_enable_write_log;
     std::shared_ptr< WriteLogRecorder< uint64_t > > m_write_recorder;
+    bool m_logdev_done = true;
+    bool m_logdev_read_verified = false;
+    std::map< uint64_t, std::string > m_logdev_data; // offset to string length
+    std::deque< uint64_t > m_logdev_offset;
 }; // VolumeManager
 
 template < typename T >

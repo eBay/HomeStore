@@ -10,6 +10,7 @@
 #include <nlohmann/json.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/uuid/uuid_io.hpp>
+#include <logdev/log_dev.hpp>
 
 SDS_OPTION_GROUP(home_blks,
                  (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
@@ -21,7 +22,7 @@ using namespace homestore;
 bool same_value_gen = false;
 #endif
 
-HomeBlks*   HomeBlks::_instance = nullptr;
+HomeBlks* HomeBlks::_instance = nullptr;
 std::string HomeBlks::version = PACKAGE_VERSION;
 
 VolInterface* homestore::vol_homestore_init(const init_params& cfg) { return (HomeBlks::init(cfg)); }
@@ -214,7 +215,7 @@ VolumePtr HomeBlks::create_volume(const vol_params& params) {
         decltype(m_volume_map)::iterator it;
         // Try to add an entry for this volume
         std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
-        bool                                    happened{false};
+        bool happened{false};
         std::tie(it, happened) = m_volume_map.emplace(std::make_pair(params.uuid, nullptr));
         if (!happened) {
             if (m_volume_map.end() != it) { return it->second; }
@@ -254,7 +255,7 @@ std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
     if (!m_rdy || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
     try {
         std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
-        auto                                    it = m_volume_map.find(uuid);
+        auto it = m_volume_map.find(uuid);
         if (it == m_volume_map.end()) { return std::make_error_condition(std::errc::no_such_device_or_address); }
         auto cur_vol = it->second;
         auto sb = cur_vol->get_sb();
@@ -332,7 +333,7 @@ std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
 VolumePtr HomeBlks::lookup_volume(const boost::uuids::uuid& uuid) {
 
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
-    auto                                    it = m_volume_map.find(uuid);
+    auto it = m_volume_map.find(uuid);
     if (m_volume_map.end() != it) { return it->second; }
     return nullptr;
 }
@@ -351,7 +352,7 @@ SnapshotPtr HomeBlks::snap_volume(VolumePtr volptr) {
 HomeBlks* HomeBlks::instance() { return _instance; }
 
 BlkId HomeBlks::alloc_blk() {
-    BlkId           bid;
+    BlkId bid;
     blk_alloc_hints hints;
     hints.desired_temp = 0;
     hints.dev_id_hint = -1;
@@ -368,7 +369,7 @@ void HomeBlks::vol_sb_init(vol_mem_sb* sb) {
     /* allocate block */
 
     assert(!m_cfg.is_read_only);
-    BlkId                                   bid = alloc_blk();
+    BlkId bid = alloc_blk();
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
     // No need to hold vol's sb update lock here since it is being initiated and not added to m_volume_map yet;
     sb->ondisk_sb->gen_cnt = 0;
@@ -409,10 +410,10 @@ vol_mem_sb* HomeBlks::vol_sb_read(BlkId bid) {
     bool rewrite = false;
     if (bid.to_integer() == BlkId::invalid_internal_id()) return nullptr;
     std::vector< boost::intrusive_ptr< BlkBuffer > > bbuf = m_sb_blk_store->read_nmirror(bid, m_cfg.devices.size() - 1);
-    boost::intrusive_ptr< BlkBuffer >                valid_buf = get_valid_buf(bbuf, rewrite);
+    boost::intrusive_ptr< BlkBuffer > valid_buf = get_valid_buf(bbuf, rewrite);
 
     vol_mem_sb* sb = new vol_mem_sb;
-    int         ret = posix_memalign((void**)&(sb->ondisk_sb), HomeStoreConfig::align_size, VOL_SB_SIZE);
+    int ret = posix_memalign((void**)&(sb->ondisk_sb), HomeStoreConfig::align_size, VOL_SB_SIZE);
     assert(!ret);
     memcpy(sb->ondisk_sb, valid_buf->at_offset(0).bytes, sizeof(vol_ondisk_sb));
 
@@ -468,7 +469,7 @@ void HomeBlks::verify_pending_blks(const VolumePtr& vol) { return vol->verify_pe
 
 #endif
 void HomeBlks::config_super_block_write() {
-    homeds::MemVector                       mvec;
+    homeds::MemVector mvec;
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
 
     m_cfg_sb->gen_cnt++;
@@ -479,7 +480,7 @@ void HomeBlks::config_super_block_write() {
 }
 
 void HomeBlks::vol_sb_write(vol_mem_sb* sb) {
-    homeds::MemVector                       mvec;
+    homeds::MemVector mvec;
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
 
     /* take a sb lock so that nobody update the in memory copy while
@@ -503,7 +504,7 @@ void HomeBlks::process_vdev_error(vdev_info_block* vb) {
      * data blkstoree we need to move only those volumes to failed state which  belong to this virtual device.
      */
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
-    auto                                    it = m_volume_map.begin();
+    auto it = m_volume_map.begin();
     while (it != m_volume_map.end()) {
         auto old_state = it->second->get_state();
         if (old_state == ONLINE) {
@@ -522,10 +523,20 @@ void HomeBlks::new_vdev_found(DeviceManager* dev_mgr, vdev_info_block* vb) {
     /* create blkstore */
     blkstore_blob* blob = (blkstore_blob*)vb->context_data;
     switch (blob->type) {
-    case DATA_STORE: HomeBlks::instance()->create_data_blkstore(vb); break;
-    case METADATA_STORE: HomeBlks::instance()->create_metadata_blkstore(vb); break;
-    case SB_STORE: HomeBlks::instance()->create_sb_blkstore(vb); break;
-    default: assert(0);
+    case DATA_STORE:
+        HomeBlks::instance()->create_data_blkstore(vb);
+        break;
+    case METADATA_STORE:
+        HomeBlks::instance()->create_metadata_blkstore(vb);
+        break;
+    case SB_STORE:
+        HomeBlks::instance()->create_sb_blkstore(vb);
+        break;
+    case LOGDEV_STORE:
+        HomeBlks::instance()->create_logdev_blkstore(vb);
+        break;
+    default:
+        assert(0);
     }
 }
 
@@ -533,6 +544,7 @@ void HomeBlks::create_blkstores() {
     create_data_blkstore(nullptr);
     create_metadata_blkstore(nullptr);
     create_sb_blkstore(nullptr);
+    create_logdev_blkstore(nullptr);
 }
 
 void HomeBlks::attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback cb) { vol->attach_completion_cb(cb); }
@@ -560,6 +572,10 @@ bool HomeBlks::vol_state_change(const VolumePtr& vol, vol_state new_state) {
     return true;
 }
 
+homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >* HomeBlks::get_logdev_blkstore() {
+    return m_logdev_blk_store;
+}
+
 homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >* HomeBlks::get_data_blkstore() {
     return m_data_blk_store;
 }
@@ -571,8 +587,8 @@ homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy, BLKSTORE_BUFFER_TYP
 boost::intrusive_ptr< BlkBuffer > HomeBlks::get_valid_buf(const std::vector< boost::intrusive_ptr< BlkBuffer > >& bbuf,
                                                           bool& rewrite) {
     boost::intrusive_ptr< BlkBuffer > valid_buf = nullptr;
-    uint32_t                          gen_cnt = 0;
-    boost::uuids::uuid                uuid;
+    uint32_t gen_cnt = 0;
+    boost::uuids::uuid uuid;
     for (uint32_t i = 0; i < bbuf.size(); i++) {
         vol_sb_header* hdr = (vol_sb_header*)(bbuf[i]->at_offset(0).bytes);
 
@@ -687,6 +703,7 @@ void HomeBlks::scan_volumes() {
             m_data_blk_store->reset_vdev_failed_state();
             m_metadata_blk_store->reset_vdev_failed_state();
             m_sb_blk_store->reset_vdev_failed_state();
+            m_logdev_blk_store->reset_vdev_failed_state();
             m_vdev_failed = false;
         }
     } catch (const std::exception& e) {
@@ -719,6 +736,29 @@ void HomeBlks::init_done(std::error_condition err, const out_params& params) {
 #endif
     }
     m_cfg.init_done_cb(err, m_out_params);
+}
+
+void HomeBlks::create_logdev_blkstore(vdev_info_block* vb) {
+    if (vb == nullptr) {
+        struct blkstore_blob blob;
+        blob.type = blkstore_type::LOGDEV_STORE;
+        uint64_t size = (1 * m_dev_mgr->get_total_cap()) / 100;
+        size = ALIGN_SIZE(size, HomeStoreConfig::phys_page_size);
+        m_logdev_blk_store = new BlkStore< VdevVarSizeBlkAllocatorPolicy >(
+            m_dev_mgr, m_cache, size, PASS_THRU, 0, (char*)&blob, sizeof(blkstore_blob),
+            HomeStoreConfig::atomic_phys_page_size, "logdev",
+            std::bind(&LogDev::process_logdev_completions, LogDev::instance(), std::placeholders::_1));
+    } else {
+        m_logdev_blk_store = new BlkStore< VdevVarSizeBlkAllocatorPolicy >(
+            m_dev_mgr, m_cache, vb, PASS_THRU, HomeStoreConfig::atomic_phys_page_size, "logdev",
+            (vb->failed ? true : false),
+            std::bind(&LogDev::process_logdev_completions, LogDev::instance(), std::placeholders::_1));
+        if (vb->failed) {
+            m_vdev_failed = true;
+            LOGINFO("logdev block store is in failed state");
+        }
+    }
+    // HomeLogStore::start();
 }
 
 void HomeBlks::create_data_blkstore(vdev_info_block* vb) {
@@ -809,7 +849,7 @@ void HomeBlks::create_sb_blkstore(vdev_info_block* vb) {
         /* read and build the config super block */
         std::vector< boost::intrusive_ptr< BlkBuffer > > bbuf =
             m_sb_blk_store->read_nmirror(blob->blkid, m_cfg.devices.size() - 1);
-        bool                              rewrite = false;
+        bool rewrite = false;
         boost::intrusive_ptr< BlkBuffer > valid_buf = get_valid_buf(bbuf, rewrite);
         memcpy(m_cfg_sb, valid_buf->at_offset(0).bytes, sizeof(*m_cfg_sb));
         assert(m_cfg_sb->gen_cnt > 0);
@@ -922,7 +962,7 @@ void HomeBlks::vol_scan_cmpltd(const VolumePtr& vol, vol_state state, bool succe
 }
 
 const char* HomeBlks::get_name(const VolumePtr& vol) { return vol->get_name(); }
-uint64_t    HomeBlks::get_page_size(const VolumePtr& vol) { return vol->get_page_size(); }
+uint64_t HomeBlks::get_page_size(const VolumePtr& vol) { return vol->get_page_size(); }
 
 homeds::blob HomeBlks::at_offset(const boost::intrusive_ptr< BlkBuffer >& buf, uint32_t offset) {
     return (buf->at_offset(offset));
@@ -956,19 +996,19 @@ void HomeBlks::get_version(sisl::HttpCallData cd) {
 }
 
 void HomeBlks::get_metrics(sisl::HttpCallData cd) {
-    HomeBlks*   hb = (HomeBlks*)(cd->cookie());
+    HomeBlks* hb = (HomeBlks*)(cd->cookie());
     std::string msg = sisl::MetricsFarm::getInstance().get_result_in_json_string();
     hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, msg);
 }
 
 void HomeBlks::get_prometheus_metrics(sisl::HttpCallData cd) {
-    HomeBlks*   hb = (HomeBlks*)(cd->cookie());
+    HomeBlks* hb = (HomeBlks*)(cd->cookie());
     std::string msg = sisl::MetricsFarm::getInstance().report(sisl::ReportFormat::kTextFormat);
     hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, msg);
 }
 
 void HomeBlks::get_obj_life(sisl::HttpCallData cd) {
-    HomeBlks*      hb = (HomeBlks*)(cd->cookie());
+    HomeBlks* hb = (HomeBlks*)(cd->cookie());
     nlohmann::json j;
     sisl::ObjCounterRegistry::foreach ([&j](const std::string& name, int64_t created, int64_t alive) {
         std::stringstream ss;
@@ -980,12 +1020,12 @@ void HomeBlks::get_obj_life(sisl::HttpCallData cd) {
 
 void HomeBlks::set_log_level(sisl::HttpCallData cd) {
     HomeBlks* hb = (HomeBlks*)(cd->cookie());
-    auto      req = cd->request();
+    auto req = cd->request();
 
     const evhtp_kv_t* _new_log_level = nullptr;
     const evhtp_kv_t* _new_log_module = nullptr;
-    const char*       logmodule = nullptr;
-    char*             endptr = nullptr;
+    const char* logmodule = nullptr;
+    char* endptr = nullptr;
 
     _new_log_module = evhtp_kvs_find_kv(req->uri->query, "logmodule");
     if (_new_log_module) { logmodule = _new_log_module->val; }
@@ -1022,7 +1062,7 @@ void HomeBlks::dump_stack_trace(sisl::HttpCallData cd) {
 //
 void HomeBlks::shutdown_process(shutdown_comp_callback shutdown_comp_cb, bool force) {
     try {
-        auto                                     start = std::chrono::steady_clock::now();
+        auto start = std::chrono::steady_clock::now();
         std::unique_lock< std::recursive_mutex > lg(m_vol_lock);
         while (m_volume_map.size()) {
             for (auto& x : m_volume_map) {
@@ -1089,6 +1129,7 @@ void HomeBlks::shutdown_process(shutdown_comp_callback shutdown_comp_cb, bool fo
         delete m_sb_blk_store;
         delete m_data_blk_store;
         delete m_metadata_blk_store;
+        delete m_logdev_blk_store;
 
         // BlkStore ::m_cache/m_wb_cache points to HomeBlks::m_cache;
         delete m_cache;
