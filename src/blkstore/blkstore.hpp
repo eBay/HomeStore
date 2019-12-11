@@ -620,12 +620,14 @@ public:
 
     void update_vb_context(uint8_t* blob) { m_vdev.update_vb_context(blob); }
 
+    void get_vb_context(uint8_t* blob) const { m_vdev.get_vb_context(blob); }
+
     VirtualDev< BAllocator, RoundRobinDeviceSelector >* get_vdev() { return &m_vdev; };
 
     off_t alloc_blk(size_t size, bool chunk_overlap_ok = false) { return m_vdev.alloc_blk(size, chunk_overlap_ok); }
 
     ssize_t pwrite(const void* buf, size_t count, off_t offset) { return m_vdev.pwrite(buf, count, offset); }
-    
+
     ssize_t pwrite(const void* buf, size_t count, off_t offset, boost::intrusive_ptr< virtualdev_req > req) {
         return m_vdev.pwrite(buf, count, offset, req);
     }
@@ -646,8 +648,8 @@ public:
 
     ssize_t preadv(const struct iovec* iov, int iovcnt, off_t offset) { return m_vdev.preadv(iov, iovcnt, offset); }
 
-    ssize_t preadv(const struct iovec* iov, int iovcnt, off_t offset, boost::intrusive_ptr< virtualdev_req > req) { 
-        return m_vdev.preadv(iov, iovcnt, offset, req); 
+    ssize_t preadv(const struct iovec* iov, int iovcnt, off_t offset, boost::intrusive_ptr< virtualdev_req > req) {
+        return m_vdev.preadv(iov, iovcnt, offset, req);
     }
 
     ssize_t pwritev(const struct iovec* iov, int iovcnt, off_t offset) { return m_vdev.pwritev(iov, iovcnt, offset); }
@@ -661,13 +663,8 @@ public:
 
     ssize_t pwritev(const struct iovec* iov, const int iovcnt, off_t offset,
                     boost::intrusive_ptr< writeback_req > wb_req) {
-        return 0;
-    }
-
-    bool write_at_offset(const uint64_t offset, const struct iovec* iov, const int iovcnt,
-                         boost::intrusive_ptr< writeback_req > wb_req) {
         auto req = to_blkstore_req(wb_req);
-        return m_vdev.write_at_offset(offset, iov, iovcnt, to_vdev_req(req));
+        return m_vdev.pwritev(iov, iovcnt, offset, to_vdev_req(req));
     }
 #if 0
     // 
