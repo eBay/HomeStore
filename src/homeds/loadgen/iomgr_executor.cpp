@@ -44,6 +44,7 @@ IOMgrExecutor::IOMgrExecutor(int num_threads, int num_priorities, uint32_t max_q
     [[maybe_unused]] auto wsize = write(m_ev_fd, &temp, sizeof(uint64_t));
 }
 
+// It is called everytime a loadgen test case finishes;
 IOMgrExecutor::~IOMgrExecutor() {
     //
     // m_ep will be deleted by iomgr
