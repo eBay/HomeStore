@@ -284,7 +284,9 @@ public:
 
         // wait for loadgen to finish
         join();
-
+        
+        // call executor stop here to wake up the threads blocking on reading the queue;
+        // need this with new iomgr so that vol ref can be released before we call shutdown.
         m_loadgen->get_executor().stop();
 
         m_vol_mgr->stop();
