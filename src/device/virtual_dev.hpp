@@ -319,14 +319,12 @@ public:
 
     bool is_blk_alloced(BlkId& in_blkid) {
         PhysicalDevChunk* primary_chunk;
-        uint64_t          primary_dev_offset = to_dev_offset(in_blkid, &primary_chunk);
         auto              blkid = to_chunk_specific_id(in_blkid, &primary_chunk);
         return (primary_chunk->get_blk_allocator()->is_blk_alloced(blkid));
     }
 
     BlkAllocStatus alloc_blk(BlkId& in_blkid) {
         PhysicalDevChunk* primary_chunk;
-        uint64_t          primary_dev_offset = to_dev_offset(in_blkid, &primary_chunk);
         auto              blkid = to_chunk_specific_id(in_blkid, &primary_chunk);
         auto              size = m_used_size.fetch_add(in_blkid.data_size(m_pagesz), std::memory_order_relaxed);
         HS_ASSERT_CMP(DEBUG, size, <=, get_size());
@@ -734,9 +732,7 @@ private:
     }
 
     BlkId to_glob_uniq_blkid(const BlkId& chunk_local_blkid, PhysicalDevChunk* chunk) const {
-        uint64_t glob_offset = ((chunk_local_blkid.get_id() * get_page_size()) + chunk->get_start_offset() +
-                                chunk->get_physical_dev()->get_dev_offset());
-        return BlkId(glob_offset / get_page_size(), chunk_local_blkid.get_nblks(), chunk->get_chunk_id());
+        return BlkId(chunk_local_blkid.get_id(), chunk_local_blkid.get_nblks(), chunk->get_chunk_id());
     }
 
     BlkId to_chunk_specific_id(const BlkId& glob_uniq_id, PhysicalDevChunk** chunk) const {
@@ -744,23 +740,14 @@ private:
         auto cid = glob_uniq_id.get_chunk_num();
         *chunk = m_mgr->get_chunk_mutable(cid);
 
-        // Offset within the physical device
-        uint64_t offset = (glob_uniq_id.get_id() * get_page_size()) - (*chunk)->get_physical_dev()->get_dev_offset();
-
-        // Offset within the chunk
-        uint64_t chunk_offset = offset - (*chunk)->get_start_offset();
-        return BlkId(chunk_offset / get_page_size(), glob_uniq_id.get_nblks(), 0);
+        return BlkId(glob_uniq_id.get_id(), glob_uniq_id.get_nblks(), 0);
     }
 
     uint64_t to_dev_offset(const BlkId& glob_uniq_id, PhysicalDevChunk** chunk) const {
         *chunk = m_mgr->get_chunk_mutable(glob_uniq_id.get_chunk_num());
 
-        // Offset within the physical device for a given chunk
-        return (glob_uniq_id.get_id() * get_page_size()) - (*chunk)->get_physical_dev()->get_dev_offset();
-    }
-
-    uint64_t to_chunk_offset(const BlkId& glob_uniq_id, PhysicalDevChunk** chunk) const {
-        return (to_dev_offset(glob_uniq_id, chunk) - (*chunk)->get_start_offset());
+        uint64_t dev_offset = glob_uniq_id.get_id() * get_page_size() + (*chunk)->get_start_offset();
+        return dev_offset;
     }
 
     uint32_t get_blks_per_chunk() const { return get_chunk_size() / get_page_size(); }
