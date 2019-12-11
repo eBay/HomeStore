@@ -1,13 +1,15 @@
 #include "../log_store.hpp"
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
+#include <iomgr/iomgr.hpp>
+#include <iomgr/aio_drive_interface.hpp>
 
 using namespace homestore;
 THREAD_BUFFER_INIT;
 SDS_LOGGING_INIT(test_log_store, btree_structures, btree_nodes, btree_generics, cache, device, httpserver_lmod, iomgr,
                  varsize_blk_alloc, VMOD_VOL_MAPPING, volume, logdev, flip)
 
-static std::shared_ptr< iomgr::ioMgr > start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthreads) {
+static void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthreads) {
     std::vector< dev_info > device_info;
     std::mutex start_mutex;
     std::condition_variable cv;
@@ -23,8 +25,11 @@ static std::shared_ptr< iomgr::ioMgr > start_homestore(uint32_t ndevices, uint64
         device_info.push_back({fpath});
     }
 
-    LOGINFO("Creating iomgr with {} threads", nthreads);
-    auto iomgr_obj = std::make_shared< iomgr::ioMgr >(2, nthreads);
+    LOGINFO("Starting iomgr with {} threads", nthreads);
+    iomanager.start(2 /* total interfaces */, nthreads);
+    iomanager.add_drive_interface(
+        std::dynamic_pointer_cast< iomgr::DriveInterface >(std::make_shared< iomgr::AioDriveInterface >()),
+        true /* is_default */);
 
     uint64_t cache_size = ((ndevices * dev_size) * 10) / 100;
     LOGINFO("Initialize and start HomeBlks with cache_size = {}", cache_size);
@@ -37,9 +42,7 @@ static std::shared_ptr< iomgr::ioMgr > start_homestore(uint32_t ndevices, uint64
     params.disk_init = true;
     params.devices = device_info;
     params.is_file = true;
-    params.iomgr = iomgr_obj;
     params.init_done_cb = [&](std::error_condition err, const out_params& params) {
-        iomgr_obj->start();
         LOGINFO("HomeBlks Init completed");
         {
             std::unique_lock< std::mutex > lk(start_mutex);
@@ -55,7 +58,6 @@ static std::shared_ptr< iomgr::ioMgr > start_homestore(uint32_t ndevices, uint64
 
     std::unique_lock< std::mutex > lk(start_mutex);
     cv.wait(lk, [&] { return inited; });
-    return iomgr_obj;
 }
 
 SDS_OPTIONS_ENABLE(logging, test_log_store)
@@ -72,9 +74,8 @@ int main(int argc, char* argv[]) {
     sds_logging::SetLogger("test_log_store");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 
-    auto iomgr_obj = start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),
-                                     SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024,
-                                     SDS_OPTIONS["num_threads"].as< uint32_t >());
+    start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(), SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024,
+                    SDS_OPTIONS["num_threads"].as< uint32_t >());
 
     HomeLogStore::start(true);
     auto ls = HomeLogStore::create_new_log_store();

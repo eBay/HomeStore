@@ -25,6 +25,7 @@
 #include <fds/utils.hpp>
 #include <isa-l/crc.h>
 #include <iomgr/iomgr.hpp>
+#include <cstddef>
 
 using namespace iomgr;
 
@@ -101,8 +102,6 @@ struct chunk_info_block {
 } __attribute((packed));
 
 /************* Vdev Info Block definition ******************/
-#define MAX_CONTEXT_DATA_SZ 2048
-
 struct vdevs_block {
     uint64_t magic;     // Header magic expected to be at the top of block
     uint32_t num_vdevs; // Number of virtual devices
@@ -119,29 +118,31 @@ struct vdevs_block {
 #define SUPERBLOCK_SIZE (HomeStoreConfig::atomic_phys_page_size)
 #define SUPERBLOCK_PAYLOAD_OFFSET 10
 
-#define MAX_VDEV_INFO_BLOCK_SZ          4096
-#define MAX_VDEV_INFO_BLOCK_HDR_SZ      512
-#define MAX_CONTEXT_DATA_SZ             (MAX_VDEV_INFO_BLOCK_SZ - MAX_VDEV_INFO_BLOCK_HDR_SZ)
+#define MAX_VDEV_INFO_BLOCK_SZ 4096
+#define MAX_VDEV_INFO_BLOCK_HDR_SZ 512
+#define MAX_CONTEXT_DATA_SZ (MAX_VDEV_INFO_BLOCK_SZ - MAX_VDEV_INFO_BLOCK_HDR_SZ)
 
 struct vdev_info_block {
-    uint32_t vdev_id;                           // 4: Id for this vdev. It is a index in the array of vdev_info_blk
-    uint64_t size;                              // 12: Size of the vdev
-    uint32_t num_mirrors;                       // 16: Total number of mirrors
-    uint32_t page_size;                         // 20: IO block size for this vdev
-    uint32_t prev_vdev_id;                      // 24: Prev pointer of vdevice list
-    uint32_t next_vdev_id;                      // 28: Next pointer of vdevice list
-    bool     slot_allocated;                    // 29: Is this current slot allocated
-    bool     failed;                            // 30: set to true if disk is replaced
-    uint32_t num_primary_chunks;                // 34:
-    uint8_t  padding[MAX_VDEV_INFO_BLOCK_HDR_SZ - 34];                      
-    char     context_data[MAX_VDEV_INFO_BLOCK_SZ - MAX_VDEV_INFO_BLOCK_HDR_SZ];
+    uint32_t vdev_id;            // 0: Id for this vdev. It is a index in the array of vdev_info_blk
+    uint64_t size;               // 4: Size of the vdev
+    uint32_t num_mirrors;        // 12: Total number of mirrors
+    uint32_t page_size;          // 16: IO block size for this vdev
+    uint32_t prev_vdev_id;       // 20: Prev pointer of vdevice list
+    uint32_t next_vdev_id;       // 24: Next pointer of vdevice list
+    bool slot_allocated;         // 28: Is this current slot allocated
+    bool failed;                 // 29: set to true if disk is replaced
+    uint32_t num_primary_chunks; // 30: number of primary chunks
+    off_t data_start_offset;     // 34: Logical offset for the 1st written data;
+    uint8_t padding[MAX_VDEV_INFO_BLOCK_HDR_SZ - 42]; // Ugly hardcode will be removed after moving to superblk blkstore
+    char context_data[MAX_CONTEXT_DATA_SZ];
 
     uint32_t get_vdev_id() const { return vdev_id; }
     uint64_t get_size() const { return size; }
 } __attribute((packed));
 
 // This assert is trying catch mistakes of overlaping the header to context_data portion.
-static_assert(offsetof(vdev_info_block, context_data) == MAX_VDEV_INFO_BLOCK_HDR_SZ, "vdev info block header size should be size of 512 bytes!");
+static_assert(offsetof(vdev_info_block, context_data) == MAX_VDEV_INFO_BLOCK_HDR_SZ,
+              "vdev info block header size should be size of 512 bytes!");
 
 static_assert(sizeof(vdev_info_block) == MAX_VDEV_INFO_BLOCK_SZ, "vdev info block size should be 4096 bytes!");
 
@@ -376,15 +377,11 @@ private:
     bool validate_device();
 
 private:
-    static homeio::DriveEndPoint* m_ep; // one instance for all physical devices
-
     DeviceManager* m_mgr; // Back pointer to physical device
     int m_devfd;
     std::string m_devname;
     super_block* m_super_blk; // Persisent header block
     uint64_t m_devsize;
-    homeio::comp_callback m_comp_cb;
-    std::shared_ptr< iomgr::ioMgr > m_iomgr;
     struct pdev_info_block m_info_blk;
     PhysicalDevChunk* m_dm_chunk[2];
     PhysicalDevMetrics m_metrics; // Metrics instance per physical device
@@ -464,7 +461,7 @@ public:
     void inited();
     void write_info_blocks();
     void update_vb_context(uint32_t vdev_id, uint8_t* blob);
-    void get_vb_context(uint32_t vdev_id, char* ctx_data); 
+    void get_vb_context(uint32_t vdev_id, char* ctx_data);
 
     void update_end_of_chunk(PhysicalDevChunk* chunk, off_t offset);
     void update_vb_data_start_offset(uint32_t vdev_id, off_t offset);
@@ -483,10 +480,10 @@ private:
     void remove_chunk(uint32_t chunk_id);
 
 private:
-    int                     m_open_flags;
-    NewVDevCallback         m_new_vdev_cb;
+    int m_open_flags;
+    NewVDevCallback m_new_vdev_cb;
     std::atomic< uint64_t > m_gen_cnt;
-    bool                    m_is_file;
+    bool m_is_file;
 
     char* m_chunk_memory;
 
