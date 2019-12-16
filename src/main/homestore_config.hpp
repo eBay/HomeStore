@@ -45,7 +45,7 @@ constexpr uint32_t MAX_PDEVS = 8;
 /* TODO: we store global unique ID in blkid. Instead it we only store chunk offset then 
  * max cacapity will increase from MAX_CHUNK_SIZE to MAX_CHUNKS * MAX_CHUNK_SIZE.
  */
-#define MAX_SUPPORTED_CAP MAX_CHUNK_SIZE
+#define MAX_SUPPORTED_CAP MAX_CHUNKS * MAX_CHUNK_SIZE
 #define MEMVEC_MAX_IO_SIZE (HomeStoreConfig::min_io_size * ((1 << MEMPIECE_ENCODE_MAX_BITS) - 1))
 #define MIN_CHUNK_SIZE (HomeStoreConfig::phys_page_size * BLKS_PER_PORTION * TOTAL_SEGMENTS)
 
