@@ -85,7 +85,7 @@ def recovery_nightly():
         i += 1
     
     subprocess.check_call(dirpath + "test_volume --gtest_filter=IOTest.recovery_io_test \
-            --run_time=300 --remove_file=1", stderr=subprocess.STDOUT, shell=True)
+            --run_time=300 --remove_file=0", stderr=subprocess.STDOUT, shell=True)
     print("recovery test completed")
 
 ## @test    one_disk_replace
