@@ -34,7 +34,7 @@ RUN set -eux; \
       find . -name "*.gcno" -exec gcov {} \; ; \
       if [ "develop" != "${BRANCH_NAME}" ]; then \
           echo "sonar.branch.name=${BRANCH_NAME}" >> ${SOURCE_PATH}sonar-project.properties; \
-          echo "sonar.branch.target=master" >> ${SOURCE_PATH}sonar-project.properties; \
+          echo "sonar.branch.target=develop" >> ${SOURCE_PATH}sonar-project.properties; \
       fi; \
       sonar-scanner -Dsonar.projectBaseDir=${SOURCE_PATH} -Dsonar.projectVersion="${PKG_VERSION}"; \
     fi;
