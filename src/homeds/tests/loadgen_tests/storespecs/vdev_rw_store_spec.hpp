@@ -10,7 +10,7 @@
 namespace homeds {
 namespace loadgen {
 // 
-// For vdev plugin, 
+// For vdev plugin for read/write;
 // SimpleNumberKey is not used
 // VDevValue is the data buffer written to vdev
 //
@@ -45,7 +45,10 @@ public:
         auto off = m_off_arr[index];
 
         auto count = m_off_to_info_map[off].size;
-        uint8_t buf[count];
+
+        uint8_t* buf = nullptr;
+        auto ret = posix_memalign((void**)&buf, 4096, count);
+        assert(!ret);
 
         auto seeked_pos = m_store->lseek(off);
         auto bytes_read = m_store->read((void*)buf, (size_t)count);
@@ -58,6 +61,7 @@ public:
 
         verify_read(bytes_read, buf, off, count);
 
+        free(buf);
         m_read_cnt++;
         print_counter();
         return true;

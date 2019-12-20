@@ -10,11 +10,12 @@
 namespace homeds {
 namespace loadgen {
 // 
-// For vdev plugin, 
+// vdev plugin for pread/pwrite;
+//
 // VDevKey generates offset reserved;
 // VDevValue is the data buffer written to vdev;
 //
-// read/write APIs are not thread-safe;
+// pread/rwrite APIs are not thread-safe;
 //
 // TODO: add truncate API
 //
@@ -54,11 +55,15 @@ public:
 
         assert(count == k.get_alloc_size());
 
-        uint8_t buf[count];
+        uint8_t* buf = nullptr;
+        auto ret = posix_memalign((void**)&buf, 4096, count);
+        assert(!ret);
+
         auto bytes_read = m_store->pread((void*)buf, (size_t)count, (off_t)off);
 
         verify_read(bytes_read, buf, off, count);
-        
+
+        free(buf);       
         m_read_cnt++;
         print_counter();
         return true;
