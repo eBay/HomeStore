@@ -26,11 +26,11 @@ for opt,arg in opts:
 
 def recovery():
     subprocess.check_call(dirpath + "test_volume \
-    --gtest_filter=IOTest.init_io_test --run_time=30 --enable_crash_handler=0 --remove_file=0 --log_mods flip", \
+    --gtest_filter=IOTest.init_io_test --run_time=30 --enable_crash_handler=0 --remove_file=0", \
     stderr=subprocess.STDOUT, shell=True)
     
     subprocess.check_call(dirpath + "test_volume \
-    --gtest_filter=IOTest.recovery_io_test --verify_hdr=0 --verify_data=0 --run_time=30 --enable_crash_handler=1 --log_mods flip", \
+    --gtest_filter=IOTest.recovery_io_test --verify_hdr=0 --verify_data=0 --run_time=30 --enable_crash_handler=1", \
     stderr=subprocess.STDOUT, shell=True)
     print("recovery passed")
 
@@ -39,7 +39,7 @@ def recovery():
 def normal():
     print("normal test started")
     subprocess.check_call(dirpath + "test_volume \
-            --run_time=20000 --max_num_writes=5000000 --gtest_filter=IOTest.init_io_test --remove_file=0 --flip=1 --log_mods flip",\
+            --run_time=20000 --max_num_writes=5000000 --gtest_filter=IOTest.init_io_test --remove_file=0 --flip=1",\
             stderr=subprocess.STDOUT, shell=True)
     print("normal test completed")
 
@@ -47,7 +47,7 @@ def normal_flip():
     print("normal test started with flip = 2")
     subprocess.check_call(dirpath + "test_volume \
             --run_time=3600 --max_num_writes=5000000 --gtest_filter=IOTest.init_io_test --remove_file=0 --verify_data=0 \
-            --flip=2 --log_mods flip", stderr=subprocess.STDOUT, shell=True)
+            --flip=2", stderr=subprocess.STDOUT, shell=True)
     print("normal test completed with flip =  2")
 
 ## @test    load
@@ -55,7 +55,7 @@ def normal_flip():
 def load():
     print("load test started")
     subprocess.check_call(dirpath + "test_load \
-            --num_io=100000000000 --num_keys=1000000 --run_time=21600 --gtest_filter=Map* --log_mods flip", stderr=subprocess.STDOUT, shell=True)
+            --num_io=100000000000 --num_keys=1000000 --run_time=21600 --gtest_filter=Map*", stderr=subprocess.STDOUT, shell=True)
     print("load test completed")
 
 ## @test    load
@@ -63,7 +63,7 @@ def load():
 def load_volume():
     print("Volume load test started")
     subprocess.check_call(dirpath + "test_load \
-            --num_io=100000000000 --num_keys=1000000 --run_time=21600 --gtest_filter=*Volume* --log_mods flip", stderr=subprocess.STDOUT, shell=True)
+            --num_io=100000000000 --num_keys=1000000 --run_time=21600 --gtest_filter=*Volume*", stderr=subprocess.STDOUT, shell=True)
     print("Volume load test completed")
 
 ## @test    recovery_nightly
@@ -74,12 +74,12 @@ def recovery_nightly():
     while i < 10:
         subprocess.check_call(dirpath + "test_volume \
         --gtest_filter=IOTest.recovery_io_test --run_time=300 --enable_crash_handler=0 --verify_only=1 --flip=1 \
-        --remove_file=0 --log_mods flip", \
+        --remove_file=0", \
         stderr=subprocess.STDOUT, shell=True)
         
         subprocess.call(dirpath + "test_volume \
         --gtest_filter=IOTest.recovery_io_test --run_time=300 --enable_crash_handler=0 --verify_data=0 --verify_hdr=0 \
-        --abort=1 --flip=1 --remove_file=0 --log_mods flip", shell=True)
+        --abort=1 --flip=1 --remove_file=0", shell=True)
         s = "recovery test iteration" + repr(i) + "passed" 
         print(s)
         i += 1
@@ -93,7 +93,7 @@ def recovery_nightly():
 def one_disk_replace():
     print("one disk replace test started");
     subprocess.check_call(dirpath + "test_volume --gtest_filter=IOTest.one_disk_replace_test \
-            --run_time=300 --remove_file=0 --verify_hdr=0 --verify_data=0 --log_mods flip", stderr=subprocess.STDOUT, shell=True)
+            --run_time=300 --remove_file=0 --verify_hdr=0 --verify_data=0", stderr=subprocess.STDOUT, shell=True)
     print("recovery test with one disk replace passed")
 
 ## @test    one_disk_replace_abort
@@ -101,9 +101,9 @@ def one_disk_replace():
 def one_disk_replace_abort():
     print("recovery abort with one disk replace started")
     subprocess.call(dirpath + "test_volume --gtest_filter=IOTest.one_disk_replace_abort_test \
-          --run_time=300 --remove_file=0 --verify_hdr=0 --verify_data=0 --enable_crash_handler=0 --log_mods flip", shell=True)
+          --run_time=300 --remove_file=0 --verify_hdr=0 --verify_data=0 --enable_crash_handler=0", shell=True)
     subprocess.check_call(dirpath + "test_volume --gtest_filter=IOTest.recovery_io_test \
-          --run_time=300 --remove_file=0 --verify_hdr=0 --verify_data=0 --expected_vol_state=2 --log_mods flip", \
+          --run_time=300 --remove_file=0 --verify_hdr=0 --verify_data=0 --expected_vol_state=2", \
           stderr=subprocess.STDOUT, shell=True)
     print("recovery abort with one disk replace passed")
 
@@ -114,7 +114,7 @@ def both_disk_replace():
     subprocess.check_call(dirpath + "test_volume \
                     --gtest_filter=IOTest.two_disk_replace_test --run_time=300", stderr=subprocess.STDOUT, shell=True)
     subprocess.check_call(dirpath + "test_volume \
-            --run_time=300 --max_num_writes=5000000 --gtest_filter=IOTest.init_io_test --remove_file=0 --log_mods flip", \
+            --run_time=300 --max_num_writes=5000000 --gtest_filter=IOTest.init_io_test --remove_file=0", \
             stderr=subprocess.STDOUT, shell=True)
     print("Both disk replace passed")
 
@@ -123,7 +123,7 @@ def both_disk_replace():
 def one_disk_fail():
     print("one disk fail test started")
     subprocess.check_call(dirpath + "test_volume \
-                    --gtest_filter=IOTest.one_disk_fail_test --run_time=300 --log_mods flip", stderr=subprocess.STDOUT, shell=True)
+                    --gtest_filter=IOTest.one_disk_fail_test --run_time=300", stderr=subprocess.STDOUT, shell=True)
     print("one disk fail test passed")
 
 ## @test    vol_offline_test
@@ -131,12 +131,12 @@ def one_disk_fail():
 def vol_offline_test():
     print("vol offline test started")
     subprocess.check_call(dirpath + "test_volume \
-                --gtest_filter=IOTest.vol_offline_test --run_time=300 --log_mods flip", stderr=subprocess.STDOUT, shell=True)
+                --gtest_filter=IOTest.vol_offline_test --run_time=300", stderr=subprocess.STDOUT, shell=True)
     print("vol offline test passed")
     
     print("vol offline test recovery started")
     status = subprocess.check_call(dirpath + "test_volume \
-                --gtest_filter=IOTest.recovery_io_test --run_time=300 --expected_vol_state=1 --log_mods flip", stderr=subprocess.STDOUT, shell=True)
+                --gtest_filter=IOTest.recovery_io_test --run_time=300 --expected_vol_state=1", stderr=subprocess.STDOUT, shell=True)
     print("vol offline test recovery passed")
 
 ## @test    vol_io_fail_test
@@ -154,7 +154,7 @@ def vol_io_fail_test():
     
     print("vol io fail test recovery started")
     subprocess.check_call(dirpath + "test_volume \
-           --gtest_filter=IOTest.recovery_io_test --run_time=300 --verify_data=0 --log_mods flip", shell=True, stderr=subprocess.STDOUT)
+           --gtest_filter=IOTest.recovery_io_test --run_time=300 --verify_data=0", shell=True, stderr=subprocess.STDOUT)
     print("vol io fail test recovery passed")
 
 ##  @test   vol_create_del_test
@@ -162,7 +162,7 @@ def vol_io_fail_test():
 def vol_create_del_test():
     print("create del vol test started")
     subprocess.check_call(dirpath + "test_volume \
-               --gtest_filter=IOTest.vol_create_del_test --max_volume=1000 --log_mods flip", shell=True, stderr=subprocess.STDOUT)
+               --gtest_filter=IOTest.vol_create_del_test --max_volume=1000", shell=True, stderr=subprocess.STDOUT)
     print("create del vol test passed")
 
 def seq_load_start():
