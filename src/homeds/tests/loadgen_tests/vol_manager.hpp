@@ -251,7 +251,7 @@ public:
     
     std::error_condition write(uint64_t vol_id, uint64_t lba, uint8_t* buf, uint64_t nblks) {
         assert(buf);
-        assert(lba < max_vol_blks() - nblks);
+        assert(lba <= max_vol_blks() - nblks);
         assert(vol_id < m_max_vols);
         
         auto size = get_size(nblks);
