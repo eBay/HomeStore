@@ -74,9 +74,10 @@ add_executable(test_load ${TEST_LOAD_FILES})
 target_link_libraries(test_load homestore homeblks ${COMMON_LIB_DEPS})
 
 add_test(NAME TestLoadCache COMMAND ${CMAKE_BINARY_DIR}/bin/test_load --gtest_filter=*Cache*)
-
+add_test(NAME TestLoadVDev COMMAND ${CMAKE_BINARY_DIR}/bin/test_load --gtest_filter=*VDevTest_RW* && ${CMAKE_BINARY_DIR}/bin/test_load --gtest_filter=*VDevTest_PRW*)
+SET_TESTS_PROPERTIES(TestLoadVDev PROPERTIES DEPENDS TestLoadCache)
 add_test(NAME TestVolLoadgen COMMAND ${CMAKE_BINARY_DIR}/bin/test_load --gtest_filter=*Volume*)
-SET_TESTS_PROPERTIES(TestVolLoadgen PROPERTIES DEPENDS TestLoadCache)
+SET_TESTS_PROPERTIES(TestVolLoadgen PROPERTIES DEPENDS TestLoadVDev)
 
 #add_test(NAME TestLoadMap COMMAND ${CMAKE_BINARY_DIR}/bin/test_load --gtest_filter=*Map*)
 #SET_TESTS_PROPERTIES(TestLoadMap PROPERTIES DEPENDS TestVolLoadgen)
