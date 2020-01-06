@@ -238,11 +238,11 @@ public:
            m_num_chunks = (uint32_t)pdev_list.size();
            int cnt = 1;
          
-           while (m_chunk_size > MAX_CHUNK_SIZE) {
+           do {
                 m_num_chunks = cnt * m_num_chunks;
                 m_chunk_size = size / m_num_chunks;
                 ++cnt;
-           }
+           } while (m_chunk_size > MAX_CHUNK_SIZE);
         } else {
             m_chunk_size = size;
             m_num_chunks = 1;
