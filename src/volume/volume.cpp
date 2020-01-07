@@ -35,7 +35,8 @@ homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >* Volume::m_data_
 Volume::Volume(const vol_params& params) :
         m_comp_cb(params.io_comp_cb),
         m_metrics(params.vol_name),
-        m_vol_name(params.vol_name) {
+        m_vol_name(params.vol_name),
+        m_vol_uuid(params.uuid) {
     m_state = vol_state::UNINITED;
     m_map = new mapping(params.size, params.page_size, params.vol_name,
                         std::bind(&Volume::process_metadata_completions, this, std::placeholders::_1),
