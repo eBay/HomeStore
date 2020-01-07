@@ -179,12 +179,6 @@ def seq_vol_load():
 
 def nightly():
 
-    load_volume()
-    sleep(5)
-
-    load()
-    sleep(5)
-
     normal()
     sleep(5)
 
@@ -216,6 +210,12 @@ def nightly():
     vol_create_del_test()
     sleep(5)
     print("nightly test passed")
+    
+    load_volume()
+    sleep(5)
+
+    load()
+    sleep(5)
 
 if test_suits == "normal":
     normal()
