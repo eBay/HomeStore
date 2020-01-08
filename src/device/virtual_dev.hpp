@@ -235,8 +235,14 @@ public:
         HS_ASSERT_CMP(LOGMSG, nmirror, <, pdev_list.size()); // Mirrors should be at least one less than device list.
 
         if (is_stripe) {
-            m_chunk_size = ((size - 1) / pdev_list.size()) + 1;
-            m_num_chunks = (uint32_t)pdev_list.size();
+           m_num_chunks = (uint32_t)pdev_list.size();
+           int cnt = 1;
+         
+           do {
+                m_num_chunks = cnt * m_num_chunks;
+                m_chunk_size = size / m_num_chunks;
+                ++cnt;
+           } while (m_chunk_size > MAX_CHUNK_SIZE);
         } else {
             m_chunk_size = size;
             m_num_chunks = 1;
@@ -245,6 +251,10 @@ public:
         if (m_chunk_size % MIN_CHUNK_SIZE) {
             m_chunk_size = ALIGN_SIZE(m_chunk_size, MIN_CHUNK_SIZE);
             HS_LOG(INFO, device, "size of a chunk is resized to {}", m_chunk_size);
+        }
+
+        if (m_chunk_size > MAX_CHUNK_SIZE) {
+            throw homestore::homestore_exception("invalid chunk size in init", homestore_error::invalid_chunk_size);
         }
 
         /* make size multiple of chunk size */
