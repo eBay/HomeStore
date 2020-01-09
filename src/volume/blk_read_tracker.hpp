@@ -97,13 +97,17 @@ class Blk_Read_Tracker {
     typedef std::function< void(Free_Blk_Entry) >        blk_remove_cb;
     blk_remove_cb                                        m_remove_cb;
     std::string                                          m_vol_name;
+    boost::uuids::uuid                                   m_vol_uuid;
 
 public:
-    Blk_Read_Tracker(const char* vol_name, blk_remove_cb remove_cb) :
+    Blk_Read_Tracker(   const char* vol_name,
+                        boost::uuids::uuid vol_uuid,
+                        blk_remove_cb remove_cb ) :
             m_pending_reads_map(BLK_READ_MAP_SIZE),
             m_metrics(vol_name),
             m_remove_cb(remove_cb),
-            m_vol_name(vol_name) {}
+            m_vol_name(vol_name),
+            m_vol_uuid(vol_uuid) {}
 
     void insert(BlkId& bid);
 

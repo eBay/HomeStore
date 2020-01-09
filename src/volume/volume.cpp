@@ -62,10 +62,15 @@ Volume::Volume(const vol_params& params) :
     m_data_blkstore = HomeBlks::instance()->get_data_blkstore();
     m_state = vol_state::ONLINE;
     m_read_blk_tracker = std::make_unique< Blk_Read_Tracker >(
-        params.vol_name, std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
+                params.vol_name, params.uuid,
+                std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
 }
 
-Volume::Volume(vol_mem_sb* sb) : m_sb(sb), m_metrics(sb->ondisk_sb->vol_name), m_vol_name(sb->ondisk_sb->vol_name) {
+Volume::Volume(vol_mem_sb* sb) :
+            m_sb(sb),
+            m_metrics(sb->ondisk_sb->vol_name),
+            m_vol_name(sb->ondisk_sb->vol_name),
+            m_vol_uuid(sb->ondisk_sb->uuid) {
     m_state = vol_state::UNINITED;
     if (m_sb->ondisk_sb->state == vol_state::FAILED) {
         m_map = new mapping(m_sb->ondisk_sb->size, m_sb->ondisk_sb->page_size, m_sb->ondisk_sb->vol_name,
@@ -93,7 +98,8 @@ Volume::Volume(vol_mem_sb* sb) : m_sb(sb), m_metrics(sb->ondisk_sb->vol_name), m
 
     m_data_blkstore = HomeBlks::instance()->get_data_blkstore();
     m_read_blk_tracker = std::make_unique< Blk_Read_Tracker >(
-        sb->ondisk_sb->vol_name, std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
+                    sb->ondisk_sb->vol_name, sb->ondisk_sb->uuid,
+                    std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
 }
 
 /* it should be called during recovery */
