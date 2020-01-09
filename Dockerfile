@@ -37,9 +37,9 @@ RUN set -eux; \
           echo "sonar.branch.target=develop" >> ${SOURCE_PATH}sonar-project.properties; \
       fi; \
       sonar-scanner -Dsonar.projectBaseDir=${SOURCE_PATH} -Dsonar.projectVersion="${PKG_VERSION}"; \
+    else \
+      conan create -pr ${BUILD_TYPE} ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"; \
     fi;
-
-RUN conan create -pr ${BUILD_TYPE} ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"
 
 CMD set -eux; \
     eval $(grep 'name =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,name,PKG_NAME,'); \
