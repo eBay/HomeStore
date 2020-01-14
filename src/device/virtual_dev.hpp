@@ -697,6 +697,14 @@ public:
     //
     //
     ssize_t preadv(const struct iovec* iov, int iovcnt, off_t offset) {
+        return preadv(iov, iovcnt, offset, nullptr);
+    }
+
+    //
+    // sync preadv if req is nulptr;
+    // async preadv if req is not nullptr;
+    //
+    ssize_t preadv(const struct iovec* iov, int iovcnt, off_t offset, boost::intrusive_ptr< virtualdev_req > req) {
         uint32_t dev_id = 0, chunk_id = 0;
         off_t offset_in_chunk = 0;
         uint64_t len = get_len(iov, iovcnt);
@@ -718,15 +726,7 @@ public:
         auto pdev = m_primary_pdev_chunks_list[dev_id].pdev;
         auto chunk = m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id];
 
-        return do_preadv_internal(pdev, chunk, offset_in_dev, iov, iovcnt, len, nullptr);
-    }
-
-    //
-    // async preadv
-    //
-    ssize_t preadv(const struct iovec* iov, int iovcnt, off_t offset, boost::intrusive_ptr< virtualdev_req > req) {
-        // TODO: to be implemented;
-        return 0;
+        return do_preadv_internal(pdev, chunk, offset_in_dev, iov, iovcnt, len, req);
     }
 
     off_t lseek(off_t offset, int whence = SEEK_SET) {

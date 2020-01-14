@@ -146,6 +146,16 @@ public:
      */
     void read_async(logstore_seq_num_t seq_num, void* cookie, const log_found_cb_t& cb);
 
+
+    /**
+     * @brief iterator to get all the log buffers;
+     *
+     * @param start_idx  idx to start with;
+     * @param cb called with current idx and log buffer.
+     * Return value of the cb: true means proceed, false means stop;
+     */
+    void foreach(int64_t start_idx, const std::function< bool(int64_t, log_buffer&) >& cb);
+
 private:
     void on_write_completion(logstore_req* req, const logdev_key& ld_key);
     void on_read_completion(logstore_req* req, const logdev_key& ld_key);

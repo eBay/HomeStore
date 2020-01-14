@@ -96,8 +96,8 @@ void LogDev::do_load(uint64_t device_cursor) {
 int64_t LogDev::append_async(logstore_id_t store_id, logstore_seq_num_t seq_num, uint8_t* data, uint32_t size,
                              void* cb_context) {
     auto idx = m_log_idx.fetch_add(1, std::memory_order_acq_rel);
-    flush_if_needed(size, idx);
     m_log_records.create(idx, store_id, seq_num, data, size, cb_context);
+    flush_if_needed(size, idx);
     return idx;
 }
 

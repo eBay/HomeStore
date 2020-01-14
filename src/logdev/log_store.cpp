@@ -73,6 +73,32 @@ void HomeLogStore::append_async(const sisl::blob& b, void* cookie, const log_wri
     write_async(m_seq_num.fetch_add(1, std::memory_order_acq_rel), b, cookie, cb);
 }
 
+log_buffer HomeLogStore::read_sync(logstore_seq_num_t seq_num) {
+    auto record = m_records.at(seq_num);
+    logdev_key ld_key = record.m_dev_key;
+    return LogDev::instance()->read(ld_key);
+}
+#if 0
+void HomeLogStore::read_async(logstore_req* req, const log_found_cb_t& cb) {
+    HS_ASSERT(LOGMSG, ((cb != nullptr) || (m_comp_cb != nullptr)),
+              "Expected either cb is not null or default cb registered");
+    auto record = m_records.at(req->seq_num);
+    logdev_key ld_key = record.m_dev_key;
+    req->cb = cb;
+    LogDev::instance()->read_async(ld_key, (void*)req);
+}
+
+void HomeLogStore::read_async(logstore_seq_num_t seq_num, void* cookie, const log_found_cb_t& cb) {
+    auto record = m_records.at(seq_num);
+    logdev_key ld_key = record.m_dev_key;
+    sisl::blob b;
+    auto* req = logstore_req::make(this, seq_num, &b, false /* not write */);
+    read_async(req, [cookie, cb](logstore_seq_num_t seq_num, log_buffer log_buf, void* cookie) {
+            cb(seq, log_buf, cookie);
+            logstore_req::free(req);
+            });
+}
+#endif
 void HomeLogStore::on_write_completion(logstore_req* req, const logdev_key& ld_key) {
     // Upon completion, create the mapping between seq_num and log dev key
     m_records.create_and_complete(req->seq_num, ld_key);
@@ -88,5 +114,13 @@ void HomeLogStore::on_log_found(logstore_seq_num_t seq_num, logdev_key ld_key, l
     m_records.create_and_complete(seq_num, ld_key);
     atomic_update_max(m_seq_num, seq_num + 1, std::memory_order_acq_rel);
     if (m_found_cb) m_found_cb(seq_num, buf, nullptr);
+}
+
+void HomeLogStore::foreach(int64_t start_idx, const std::function< bool(int64_t, log_buffer&) >& cb) {
+    m_records.foreach_completed(0, [&](long int cur_idx, long int max_idx, homestore::logstore_record& record) -> bool {
+            // do a sync read
+            auto log_buf = LogDev::instance()->read(record.m_dev_key);
+            return cb(cur_idx, log_buf);
+            });
 }
 } // namespace homestore
