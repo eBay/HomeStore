@@ -62,7 +62,7 @@ Volume::Volume(const vol_params& params) :
     m_data_blkstore = HomeBlks::instance()->get_data_blkstore();
     m_state = vol_state::ONLINE;
     m_read_blk_tracker = std::make_unique< Blk_Read_Tracker >(
-                m_vol_name, m_vol_uuid,
+                params.vol_name, params.uuid,
                 std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
 }
 
@@ -98,7 +98,7 @@ Volume::Volume(vol_mem_sb* sb) :
 
     m_data_blkstore = HomeBlks::instance()->get_data_blkstore();
     m_read_blk_tracker = std::make_unique< Blk_Read_Tracker >(
-                    m_vol_name, m_vol_uuid,
+                    sb->ondisk_sb->vol_name, sb->ondisk_sb->uuid,
                     std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
 }
 
