@@ -9,6 +9,7 @@
 #include "homeds/hash/intrusive_hashset.hpp"
 #include "homeds/memory/obj_allocator.hpp"
 #include <metrics/metrics.hpp>
+#include <boost/uuid/uuid.hpp>
 
 namespace homestore {
 
