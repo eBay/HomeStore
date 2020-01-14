@@ -9,7 +9,7 @@
 #include "homeds/hash/intrusive_hashset.hpp"
 #include "homeds/memory/obj_allocator.hpp"
 #include <metrics/metrics.hpp>
-#include <boost/uuid/uuid.hpp>
+#include <boost/lexical_cast.hpp>
 
 namespace homestore {
 
@@ -108,7 +108,7 @@ public:
             m_metrics(vol_name),
             m_remove_cb(remove_cb),
             m_vol_name(vol_name),
-            m_vol_uuid(boost::uuids::to_string(vol_uuid)) {}
+            m_vol_uuid(boost::lexical_cast<std::string>(vol_uuid)) {}
 
     void insert(BlkId& bid);
 
