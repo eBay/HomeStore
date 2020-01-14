@@ -44,13 +44,13 @@ typedef boost::intrusive_ptr< volume_req > volume_req_ptr;
 
 #define VOL_LOG(level, mod, req, msg, ...)                              \
     HS_SUBMOD_LOG(level, mod, req, "vol",                               \
-        boost::uuids::to_string(this->m_vol_uuid), msg, ##__VA_ARGS__)
+        this->m_vol_uuid, msg, ##__VA_ARGS__)
 #define VOL_ASSERT(assert_type, cond, req, ...)                         \
     HS_SUBMOD_ASSERT(assert_type, cond, req, "vol",                     \
-       boost::uuids::to_string(this->m_vol_uuid), ##__VA_ARGS__)
+        this->m_vol_uuid, ##__VA_ARGS__)
 #define VOL_ASSERT_CMP(assert_type, val1, cmp, val2, req, ...)          \
     HS_SUBMOD_ASSERT_CMP(assert_type, val1, cmp, val2, req, "vol",      \
-        boost::uuids::to_string(this->m_vol_uuid), ##__VA_ARGS__)
+        this->m_vol_uuid, ##__VA_ARGS__)
 
 #define VOL_DEBUG_ASSERT(...) VOL_ASSERT(DEBUG, __VA_ARGS__)
 #define VOL_RELEASE_ASSERT(...) VOL_ASSERT(RELEASE, __VA_ARGS__)
@@ -182,7 +182,7 @@ private:
     bool                              m_recovery_error = false;
     std::atomic< uint64_t >           m_err_cnt = 0;
     std::string                       m_vol_name;
-    boost::uuids::uuid                m_vol_uuid;
+    std::string                       m_vol_uuid;
 #ifndef NDEBUG
     std::mutex                           m_req_mtx;
     std::map< uint64_t, volume_req_ptr > m_req_map;
