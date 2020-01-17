@@ -238,6 +238,8 @@ typedef int64_t logid_t;
 struct logdev_key {
     logid_t idx;
     uint64_t dev_offset;
+
+    bool operator==(const logdev_key& other) { return (other.idx == idx) && (other.dev_offset == dev_offset); }
 };
 
 struct log_buffer {
@@ -258,6 +260,11 @@ private:
     sisl::blob m_log_data_view;
 };
 
+struct truncation_request_t {
+    logstore_id_t store_id;
+    logstore_seq_num_t upto_seq_num;
+};
+
 /* This structure represents the logdevice super block which will sit inside the user_context block of the
  * vdev_info_block. */
 struct logdev_info_block {
@@ -270,9 +277,10 @@ struct logdev_info_block {
 
 class LogDev {
 public:
-    typedef std::function< void(logstore_id_t, logdev_key, void*) > log_append_comp_callback;
+    typedef std::function< void(logstore_id_t, logdev_key, logdev_key, void*) > log_append_comp_callback;
     typedef std::function< void(logstore_id_t, logstore_seq_num_t, logdev_key, log_buffer) > log_found_callback;
     typedef std::function< void(logstore_id_t) > store_found_callback;
+    typedef std::function< void(void) > flush_blocked_callback;
 
     // static constexpr int64_t flush_threshold_size = 4096;
     static constexpr int64_t flush_threshold_size = 100;
@@ -385,6 +393,21 @@ public:
 
     crc32_t get_prev_crc() const { return m_last_crc; }
 
+    /**
+     * @brief This method attempts to block the log flush and then make a callback cb. If it is already blocked,
+     * then after previous flush is completed, it will make the callback (while log flush is still under blocked state)
+     *
+     * @param cb Callback
+     * @return true or false based on if it is able to block the flush right away.
+     */
+    bool try_lock_flush(const flush_blocked_callback& cb);
+
+    /**
+     * @brief Unblock the flush. While unblocking if there are other requests to block or any flush pending it first
+     * executes them before unblocking
+     */
+    void unlock_flush();
+
 private:
     LogDev() = default;
     ~LogDev() = default;
@@ -419,5 +442,9 @@ private:
     std::mutex m_store_reserve_mutex;
     sisl::aligned_unique_ptr< uint8_t > m_info_blk_buf = nullptr;
     logdev_info_block* m_info_blk = nullptr;
+
+    // Block flush Q request Q
+    std::mutex m_block_flush_q_mutex;
+    std::vector< flush_blocked_callback > m_block_flush_q;
 }; // LogDev
 } // namespace homestore

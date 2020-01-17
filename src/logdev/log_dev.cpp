@@ -307,10 +307,11 @@ void LogDev::process_logdev_completions(const boost::intrusive_ptr< blkstore_req
 void LogDev::on_flush_completion(LogGroup* lg) {
     m_log_records.complete(lg->m_flush_log_idx_from, lg->m_flush_log_idx_upto);
     m_last_flush_idx = lg->m_flush_log_idx_upto;
+    auto flush_ld_key = logdev_key{m_last_flush_idx, lg->m_log_dev_offset};
 
     for (auto idx = lg->m_flush_log_idx_from; idx <= lg->m_flush_log_idx_upto; ++idx) {
         auto& record = m_log_records.at(idx);
-        m_append_comp_cb(record.store_id, logdev_key{idx, lg->m_log_dev_offset}, record.context);
+        m_append_comp_cb(record.store_id, logdev_key{idx, lg->m_log_dev_offset}, flush_ld_key, record.context);
     }
 #if 0
         if (upto_idx > (m_last_truncate_idx + LogDev::truncate_idx_frequency)) {
@@ -319,6 +320,30 @@ void LogDev::on_flush_completion(LogGroup* lg) {
         }
 #endif
     m_last_crc = lg->header()->cur_grp_crc;
+    unlock_flush();
+}
+
+bool LogDev::try_lock_flush(const flush_blocked_callback& cb) {
+    std::unique_lock lk(m_block_flush_q_mutex);
+    bool expected_flushing = false;
+    if (m_is_flushing.compare_exchange_strong(expected_flushing, true, std::memory_order_acq_rel)) {
+        cb();
+        return true;
+    }
+
+    // Flushing is blocked already, add it to the callback q
+    m_block_flush_q.emplace_back(cb);
+    return false;
+}
+
+void LogDev::unlock_flush() {
+    if (m_block_flush_q.size() > 0) {
+        std::unique_lock lk(m_block_flush_q_mutex);
+        for (auto& cb : m_block_flush_q) {
+            cb();
+        }
+        m_block_flush_q.clear();
+    }
     m_is_flushing.store(false, std::memory_order_release);
 
     // Try to do chain flush if its really needed.

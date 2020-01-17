@@ -10,7 +10,7 @@
 #include <nlohmann/json.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/uuid/uuid_io.hpp>
-#include <logdev/log_dev.hpp>
+#include <logdev/log_store.hpp>
 
 SDS_OPTION_GROUP(home_blks,
                  (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
@@ -758,7 +758,7 @@ void HomeBlks::create_logdev_blkstore(vdev_info_block* vb) {
             LOGINFO("logdev block store is in failed state");
         }
     }
-    // HomeLogStore::start();
+    home_log_store_mgr.start((vb == nullptr));
 }
 
 void HomeBlks::create_data_blkstore(vdev_info_block* vb) {
@@ -908,7 +908,8 @@ void HomeBlks::init_thread() {
         sisl::HttpServerConfig cfg;
         cfg.is_tls_enabled = false;
         cfg.bind_address = "0.0.0.0";
-        cfg.server_port = SDS_OPTIONS["hb_stats_port"].as< int32_t >();
+        // cfg.server_port = SDS_OPTIONS["hb_stats_port"].as< int32_t >();
+        cfg.server_port = 5000;
         cfg.read_write_timeout_secs = 10;
 
         m_http_server = std::unique_ptr< sisl::HttpServer >(

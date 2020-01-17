@@ -44,14 +44,67 @@ struct logstore_req {
     }
 };
 
+struct truncation_entry_t {
+    logstore_seq_num_t seq_num;
+    logdev_key ld_key;
+};
+
+class HomeLogStore;
+class HomeLogStoreMgr {
+    friend class HomeLogStore;
+
+public:
+    static HomeLogStoreMgr& instance() {
+        static HomeLogStoreMgr inst;
+        return inst;
+    }
+
+    /**
+     * @brief Start the entire HomeLogStore set and does recover the existing logstores. Really this is the first
+     * method to be executed on log store.
+     *
+     * @param format If set to true, will not recover, but create a fresh log store set.
+     */
+    void start(bool format);
+
+    /**
+     * @brief Create a brand new log store (both in-memory and on device) and returns its instance. It also book keeps
+     * the created log store and user can get this instance of log store by using logstore_d
+     *
+     * @return std::shared_ptr< HomeLogStore >
+     */
+    std::shared_ptr< HomeLogStore > create_new_log_store();
+
+    /**
+     * @brief Open an existing log store and does a recovery. It then creates an instance of this logstore and returns
+     *
+     * @param store_id: Store ID of the log store to open
+     * @return std::shared_ptr< HomeLogStore >
+     */
+    std::shared_ptr< HomeLogStore > open_log_store(logstore_id_t store_id);
+
+    /**
+     * @brief Truncate all the log stores physically on the device.
+     *
+     */
+    void dev_truncate();
+
+private:
+    void __on_log_store_found(logstore_id_t store_id);
+    void __on_io_completion(logstore_id_t id, logdev_key ld_key, logdev_key flush_idx, void* ctx);
+    void __on_logfound(logstore_id_t id, logstore_seq_num_t seq_num, logdev_key ld_key, log_buffer buf);
+
+    void truncate_after_flush_lock(logstore_id_t store_id, logstore_id_t upto_seq_num);
+
+private:
+    folly::Synchronized< std::map< logstore_id_t, std::shared_ptr< HomeLogStore > > > m_id_logstore_map;
+};
+
+#define home_log_store_mgr HomeLogStoreMgr::instance()
+
 class HomeLogStore {
 public:
-    static void start(bool format);
-    static std::shared_ptr< HomeLogStore > create_new_log_store();
-    static std::shared_ptr< HomeLogStore > open_log_store(logstore_id_t store_id);
-    static void __on_log_store_found(logstore_id_t store_id);
-    static void __on_io_completion(logstore_id_t id, logdev_key ld_key, void* ctx);
-    static void __on_logfound(logstore_id_t id, logstore_seq_num_t seq_num, logdev_key ld_key, log_buffer buf);
+    friend class HomeLogStoreMgr;
 
     HomeLogStore(uint32_t store_id);
 
@@ -146,18 +199,55 @@ public:
      */
     void read_async(logstore_seq_num_t seq_num, void* cookie, const log_found_cb_t& cb);
 
-private:
-    void on_write_completion(logstore_req* req, const logdev_key& ld_key);
-    void on_read_completion(logstore_req* req, const logdev_key& ld_key);
-    void on_log_found(logstore_seq_num_t seq_num, logdev_key ld_key, log_buffer buf);
+    /**
+     * @brief Truncate the logs for this log store upto the seq_num provided (inclusive). Once truncated, the reads
+     * on seq_num <= upto_seq_num will return an error. The truncation in general is a 2 step process, where first
+     * in-memory structure of the logs are truncated and then logdevice actual space is truncated.
+     *
+     * @param upto_seq_num: Seq num upto which logs are to be truncated
+     * @param in_memory_truncate_only If set to false, it will force to truncate the device right away. Its better to
+     * set this to false on cases where there are multiple log stores, so that once all in-memory truncation is
+     * completed, a device truncation can be triggered for all the logstores. The device truncation is more expensive
+     * and grouping them together yields better results.
+     */
+    void truncate(logstore_seq_num_t upto_seq_num, bool in_memory_truncate_only = true);
+
+    /**
+     * @brief Get the safe truncation log dev key from this log store perspective. Please note that the safe idx is not
+     * globally safe, but it is safe from this log store perspective only. To get global safe id, one should access all
+     * log stores and get the minimum of them before truncating.
+     *
+     * @return logdev_key
+     */
+    logdev_key get_safe_truncation_log_dev_key() const {
+        auto ld_key = *(m_safe_truncate_ld_key.rlock());
+        return ld_key;
+    }
 
 private:
-    static folly::Synchronized< std::map< logstore_id_t, std::shared_ptr< HomeLogStore > > > m_id_logstore_map;
+    void on_write_completion(logstore_req* req, logdev_key ld_key, logdev_key flush_idx);
+    void on_read_completion(logstore_req* req, logdev_key ld_key);
+    void on_log_found(logstore_seq_num_t seq_num, logdev_key ld_key, log_buffer buf);
+    void do_truncate(logstore_seq_num_t upto_seq_num);
+    void create_truncation_barrier(void);
+    int search_max_le(logstore_seq_num_t input_sn);
+
+private:
     logstore_id_t m_store_id;
     sisl::StreamTracker< logstore_record > m_records;
     log_req_comp_cb_t m_comp_cb;
     log_found_cb_t m_found_cb;
     std::atomic< logstore_seq_num_t > m_seq_num = 0;
+
+    logdev_key m_last_flush_ldkey = {0, 0};             // The log id of the last flushed batch.
+    truncation_entry_t m_flush_batch_max = {0, {0, 0}}; // The maximum seqnum we have seen in the prev flushed batch
+
+    // Logdev key determined to be safe to truncate from this log store perspective.
+    folly::Synchronized< logdev_key > m_safe_truncate_ld_key;
+
+    // std::atomic< logid_t > m_safe_truncate_log_idx =
+    //    std::numeric_limits< logid_t >::max(); // Logid determined to be safe to truncate from this log store
+    std::vector< truncation_entry_t > m_truncation_barriers; // List of truncation barriers
 };
 
 } // namespace homestore
