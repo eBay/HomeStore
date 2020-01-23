@@ -26,7 +26,7 @@ class HomestoreConan(ConanFile):
             "flip/0.2.5@sds/develop",
             "sds_logging/6.1.0@sds/develop",
             "sds_options/1.0.0@sds/develop",
-            "jungle/2019.10.22@oss/testing",
+            "jungle/1.0.0@oss/develop",
 
             # FOSS, rarely updated
             "benchmark/1.5.0@oss/stable",
