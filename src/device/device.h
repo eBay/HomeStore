@@ -21,11 +21,13 @@
 #include <boost/uuid/uuid_generators.hpp> // generators
 #include <boost/uuid/uuid_io.hpp>         // streaming operators etc.
 #include "homeds/array/sparse_vector.hpp"
-#include "iomgr/iomgr.hpp"
-#include "endpoint/drive_endpoint.hpp"
 #include <boost/uuid/uuid_generators.hpp>
-#include "homeds/utility/useful_defs.hpp"
+#include <fds/utils.hpp>
 #include <isa-l/crc.h>
+#include <iomgr/iomgr.hpp>
+#include <cstddef>
+
+using namespace iomgr;
 
 namespace homestore {
 
@@ -90,17 +92,16 @@ struct chunk_info_block {
     uint32_t prev_chunk_id;      // Prev pointer in the chunk
     uint32_t next_chunk_id;      // Next pointer in the chunk
     uint32_t primary_chunk_id;   // Valid chunk id if this is a mirror of some chunk
-    bool     slot_allocated;     // Is this slot allocated for any chunks.
-    bool     is_sb_chunk;        // This chunk is not assigned to any vdev but super block
+    bool slot_allocated;         // Is this slot allocated for any chunks.
+    bool is_sb_chunk;            // This chunk is not assigned to any vdev but super block
+    off_t end_of_chunk_offset;   // The offset indicates end of chunk.
 
     uint64_t get_chunk_size() const { return chunk_size; }
     uint32_t get_chunk_id() const { return chunk_id; }
-    bool     is_slot_allocated() const { return slot_allocated; }
+    bool is_slot_allocated() const { return slot_allocated; }
 } __attribute((packed));
 
 /************* Vdev Info Block definition ******************/
-#define MAX_CONTEXT_DATA_SZ 512
-
 struct vdevs_block {
     uint64_t magic;     // Header magic expected to be at the top of block
     uint32_t num_vdevs; // Number of virtual devices
@@ -114,49 +115,62 @@ struct vdevs_block {
     uint32_t get_first_vdev_id() const { return first_vdev_id; }
 } __attribute((packed));
 
+#define SUPERBLOCK_SIZE (HomeStoreConfig::atomic_phys_page_size)
+#define SUPERBLOCK_PAYLOAD_OFFSET 10
+
+#define MAX_VDEV_INFO_BLOCK_SZ 4096
+#define MAX_VDEV_INFO_BLOCK_HDR_SZ 512
+#define MAX_CONTEXT_DATA_SZ (MAX_VDEV_INFO_BLOCK_SZ - MAX_VDEV_INFO_BLOCK_HDR_SZ)
+
 struct vdev_info_block {
-    uint32_t vdev_id;                           // Id for this vdev. It is a index in the array of vdev_info_blk
-    uint64_t size;                              // Size of the vdev
-    uint32_t num_mirrors;                       // Total number of mirrors
-    uint32_t page_size;                         // IO block size for this vdev
-    uint32_t prev_vdev_id;                      // Prev pointer of vdevice list
-    uint32_t next_vdev_id;                      // Next pointer of vdevice list
-    bool     slot_allocated;                    // Is this current slot allocated
-    bool     failed;                            // set to true if disk is replaced
-    char     context_data[MAX_CONTEXT_DATA_SZ]; // Application dependent context data
-    uint32_t num_primary_chunks;
+    uint32_t vdev_id;            // 0: Id for this vdev. It is a index in the array of vdev_info_blk
+    uint64_t size;               // 4: Size of the vdev
+    uint32_t num_mirrors;        // 12: Total number of mirrors
+    uint32_t page_size;          // 16: IO block size for this vdev
+    uint32_t prev_vdev_id;       // 20: Prev pointer of vdevice list
+    uint32_t next_vdev_id;       // 24: Next pointer of vdevice list
+    bool slot_allocated;         // 28: Is this current slot allocated
+    bool failed;                 // 29: set to true if disk is replaced
+    uint32_t num_primary_chunks; // 30: number of primary chunks
+    off_t data_start_offset;     // 34: Logical offset for the 1st written data;
+    uint8_t padding[MAX_VDEV_INFO_BLOCK_HDR_SZ - 42]; // Ugly hardcode will be removed after moving to superblk blkstore
+    char context_data[MAX_CONTEXT_DATA_SZ];
 
     uint32_t get_vdev_id() const { return vdev_id; }
     uint64_t get_size() const { return size; }
 } __attribute((packed));
 
+// This assert is trying catch mistakes of overlaping the header to context_data portion.
+static_assert(offsetof(vdev_info_block, context_data) == MAX_VDEV_INFO_BLOCK_HDR_SZ,
+              "vdev info block header size should be size of 512 bytes!");
+
+static_assert(sizeof(vdev_info_block) == MAX_VDEV_INFO_BLOCK_SZ, "vdev info block size should be 4096 bytes!");
+
 /*******************Super Block Definition*******************/
 
 /* This header should be atomically written to the disks. It should always be smaller then ssd atomic page size */
 struct super_block {
-    uint64_t           magic;   // Header magic expected to be at the top of block
-    uint32_t           version; // Version Id of this structure
-    uint64_t           gen_cnt;
-    char               product_name[64]; // Product name
-    int                cur_indx;
-    pdev_info_block    this_dev_info; // Info about this device itself
-    chunk_info_block   dm_chunk[2];   // chunk info blocks
+    uint64_t magic;   // Header magic expected to be at the top of block
+    uint32_t version; // Version Id of this structure
+    uint64_t gen_cnt;
+    char product_name[64]; // Product name
+    int cur_indx;
+    pdev_info_block this_dev_info; // Info about this device itself
+    chunk_info_block dm_chunk[2];  // chunk info blocks
     boost::uuids::uuid system_uuid;
 
     uint64_t get_magic() const { return magic; }
 } __attribute((packed));
-#define SUPERBLOCK_SIZE (HomeStoreConfig::atomic_phys_page_size)
-#define SUPERBLOCK_PAYLOAD_OFFSET 10
 
 struct dm_info {
     /* header of pdev, chunk and vdev */
-    uint64_t     magic;    // Header magic expected to be at the top of block
-    uint16_t     checksum; // Payload Checksum
-    uint32_t     version;
-    uint64_t     size;
-    pdevs_block  pdev_hdr;
+    uint64_t magic;    // Header magic expected to be at the top of block
+    uint16_t checksum; // Payload Checksum
+    uint32_t version;
+    uint64_t size;
+    pdevs_block pdev_hdr;
     chunks_block chunk_hdr;
-    vdevs_block  vdev_hdr;
+    vdevs_block vdev_hdr;
 
     uint64_t get_magic() const { return magic; }
     uint64_t get_size() const { return size; }
@@ -168,7 +182,7 @@ struct dm_info {
 #define CHUNK_INFO_BLK_OFFSET (PDEV_INFO_BLK_OFFSET + (sizeof(pdev_info_block) * HomeStoreConfig::max_pdevs))
 #define VDEV_INFO_BLK_OFFSET (CHUNK_INFO_BLK_OFFSET + sizeof(chunk_info_block) * HomeStoreConfig::max_chunks)
 
-#define DM_INFO_BLK_SIZE  (VDEV_INFO_BLK_OFFSET + HomeStoreConfig::max_vdevs * sizeof(vdev_info_block))
+#define DM_INFO_BLK_SIZE (VDEV_INFO_BLK_OFFSET + HomeStoreConfig::max_vdevs * sizeof(vdev_info_block))
 
 #define DM_PAYLOAD_OFFSET 10
 
@@ -242,7 +256,7 @@ public:
     PhysicalDevChunk* get_prev_chunk() const;
 
     chunk_info_block* get_chunk_info() { return m_chunk_info; }
-    uint16_t          get_chunk_id() const { return (uint16_t)m_chunk_info->chunk_id; }
+    uint16_t get_chunk_id() const { return (uint16_t)m_chunk_info->chunk_id; }
 
     void free_slot() { m_chunk_info->slot_allocated = false; }
 
@@ -260,11 +274,14 @@ public:
         return ss.str();
     }
 
+    void update_end_of_chunk(off_t off) { m_chunk_info->end_of_chunk_offset = off; }
+    off_t get_end_of_chunk() { return m_chunk_info->end_of_chunk_offset; }
+
 private:
-    chunk_info_block*               m_chunk_info;
-    PhysicalDev*                    m_pdev;
+    chunk_info_block* m_chunk_info;
+    PhysicalDev* m_pdev;
     std::shared_ptr< BlkAllocator > m_allocator;
-    uint64_t                        m_vdev_metadata_size;
+    uint64_t m_vdev_metadata_size;
 };
 
 class PhysicalDevMetrics : public sisl::MetricsGroupWrapper {
@@ -292,22 +309,22 @@ class PhysicalDev {
     friend class DeviceManager;
 
 public:
-    PhysicalDev(DeviceManager* mgr, const std::string& devname, int const oflags, std::shared_ptr< iomgr::ioMgr > iomgr,
-                homeio::comp_callback& cb, boost::uuids::uuid& uuid, uint32_t dev_num, uint64_t dev_offset,
-                uint32_t is_file, bool is_init, uint64_t dm_info_size, bool* is_inited);
+    PhysicalDev(DeviceManager* mgr, const std::string& devname, int const oflags, boost::uuids::uuid& uuid,
+                uint32_t dev_num, uint64_t dev_offset, uint32_t is_file, bool is_init, uint64_t dm_info_size,
+                bool* is_inited);
     ~PhysicalDev();
 
-    void     update(uint32_t dev_num, uint64_t dev_offset, uint32_t first_chunk_id);
-    void     attach_superblock_chunk(PhysicalDevChunk* chunk);
+    void update(uint32_t dev_num, uint64_t dev_offset, uint32_t first_chunk_id);
+    void attach_superblock_chunk(PhysicalDevChunk* chunk);
     uint64_t sb_gen_cnt();
-    size_t   get_total_cap();
+    size_t get_total_cap();
 
-    int                 get_devfd() const { return m_devfd; }
-    std::string         get_devname() const { return m_devname; }
-    uint64_t            get_size() const { return m_devsize; }
-    uint32_t            get_first_chunk_id() const { return m_info_blk.first_chunk_id; }
-    uint64_t            get_dev_offset() const { return m_info_blk.dev_offset; }
-    uint32_t            get_dev_id() const { return m_info_blk.dev_num; }
+    int get_devfd() const { return m_devfd; }
+    std::string get_devname() const { return m_devname; }
+    uint64_t get_size() const { return m_devsize; }
+    uint32_t get_first_chunk_id() const { return m_info_blk.first_chunk_id; }
+    uint64_t get_dev_offset() const { return m_info_blk.dev_offset; }
+    uint32_t get_dev_id() const { return m_info_blk.dev_num; }
     PhysicalDevMetrics& get_metrics() { return m_metrics; }
 
     void set_dev_offset(uint64_t offset) { m_info_blk.dev_offset = offset; }
@@ -328,20 +345,20 @@ public:
     PhysicalDevChunk* find_free_chunk(uint64_t req_size);
 
     void write(const char* data, uint32_t size, uint64_t offset, uint8_t* cookie);
-    void writev(const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie);
+    void writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie);
 
     void read(char* data, uint32_t size, uint64_t offset, uint8_t* cookie);
-    void readv(const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie);
+    void readv(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie);
 
-    void sync_write(const char* data, uint32_t size, uint64_t offset);
-    void sync_writev(const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset);
+    ssize_t sync_write(const char* data, uint32_t size, uint64_t offset);
+    ssize_t sync_writev(const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset);
 
-    void            sync_read(char* data, uint32_t size, uint64_t offset);
-    void            sync_readv(const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset);
+    ssize_t sync_read(char* data, uint32_t size, uint64_t offset);
+    ssize_t sync_readv(const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset);
     pdev_info_block get_info_blk();
-    void            read_dm_chunk(char* mem, uint64_t size);
-    void            write_dm_chunk(uint64_t gen_cnt, char* mem, uint64_t size);
-    uint64_t        inc_error_cnt() { return (m_error_cnt.increment(1)); }
+    void read_dm_chunk(char* mem, uint64_t size);
+    void write_dm_chunk(uint64_t gen_cnt, char* mem, uint64_t size);
+    uint64_t inc_error_cnt() { return (m_error_cnt.increment(1)); }
 
 private:
     inline void write_superblock();
@@ -360,21 +377,17 @@ private:
     bool validate_device();
 
 private:
-    static homeio::DriveEndPoint* m_ep; // one instance for all physical devices
-
-    DeviceManager*                   m_mgr; // Back pointer to physical device
-    int                              m_devfd;
-    std::string                      m_devname;
-    super_block*                     m_super_blk; // Persisent header block
-    uint64_t                         m_devsize;
-    homeio::comp_callback            m_comp_cb;
-    std::shared_ptr< iomgr::ioMgr >  m_iomgr;
-    struct pdev_info_block           m_info_blk;
-    PhysicalDevChunk*                m_dm_chunk[2];
-    PhysicalDevMetrics               m_metrics; // Metrics instance per physical device
-    int                              m_cur_indx;
-    bool                             m_superblock_valid;
-    boost::uuids::uuid               m_system_uuid;
+    DeviceManager* m_mgr; // Back pointer to physical device
+    int m_devfd;
+    std::string m_devname;
+    super_block* m_super_blk; // Persisent header block
+    uint64_t m_devsize;
+    struct pdev_info_block m_info_blk;
+    PhysicalDevChunk* m_dm_chunk[2];
+    PhysicalDevMetrics m_metrics; // Metrics instance per physical device
+    int m_cur_indx;
+    bool m_superblock_valid;
+    boost::uuids::uuid m_system_uuid;
     sisl::atomic_counter< uint64_t > m_error_cnt;
 };
 
@@ -385,21 +398,21 @@ public:
 
 class DeviceManager {
     typedef std::function< void(DeviceManager*, vdev_info_block*) > NewVDevCallback;
-    typedef std::function< void(PhysicalDevChunk*) >                chunk_add_callback;
-    typedef std::function< void(vdev_info_block*) >                 vdev_error_callback;
+    typedef std::function< void(PhysicalDevChunk*) > chunk_add_callback;
+    typedef std::function< void(vdev_info_block*) > vdev_error_callback;
 
     friend class PhysicalDev;
     friend class PhysicalDevChunk;
 
 public:
-    DeviceManager(NewVDevCallback vcb, uint32_t const vdev_metadata_size, std::shared_ptr< iomgr::ioMgr > iomgr,
-                  homeio::comp_callback comp_cb, bool is_file, boost::uuids::uuid system_uuid,
-                  vdev_error_callback vdev_error_cb);
+    DeviceManager(NewVDevCallback vcb, uint32_t const vdev_metadata_size,
+                  const iomgr::io_interface_comp_cb_t& io_comp_cb, bool is_file, boost::uuids::uuid system_uuid,
+                  const vdev_error_callback& vdev_error_cb);
 
     ~DeviceManager();
 
     /* Initial routine to call upon bootup or everytime new physical devices to be added dynamically */
-    void   add_devices(std::vector< dev_info >& devices, bool is_init);
+    void add_devices(std::vector< dev_info >& devices, bool is_init);
     size_t get_total_cap(void);
 #define MAX_ERROR_CNT 1000
     void handle_error(PhysicalDev* pdev);
@@ -407,13 +420,12 @@ public:
     /* This is not very efficient implementation of get_all_devices(), however, this is expected to be called during
      * the start of the devices and for that purpose its efficient enough */
     std::vector< PhysicalDev* > get_all_devices() {
-        std::vector< PhysicalDev* >              vec;
+        std::vector< PhysicalDev* > vec;
         std::lock_guard< decltype(m_dev_mutex) > lock(m_dev_mutex);
 
         vec.reserve(m_pdevs.size());
         for (auto& pdev : m_pdevs) {
-            if (pdev)
-                vec.push_back(pdev.get());
+            if (pdev) vec.push_back(pdev.get());
         }
         return vec;
     }
@@ -449,6 +461,10 @@ public:
     void inited();
     void write_info_blocks();
     void update_vb_context(uint32_t vdev_id, uint8_t* blob);
+    void get_vb_context(uint32_t vdev_id, char* ctx_data);
+
+    void update_end_of_chunk(PhysicalDevChunk* chunk, off_t offset);
+    void update_vb_data_start_offset(uint32_t vdev_id, off_t offset);
 
 private:
     void load_and_repair_devices(std::vector< dev_info >& devices);
@@ -457,45 +473,43 @@ private:
     void read_info_blocks(uint32_t dev_id);
 
     chunk_info_block* alloc_new_chunk_slot(uint32_t* pslot_num);
-    vdev_info_block*  alloc_new_vdev_slot();
+    vdev_info_block* alloc_new_vdev_slot();
 
     PhysicalDevChunk* create_new_chunk(PhysicalDev* pdev, uint64_t start_offset, uint64_t size,
                                        PhysicalDevChunk* prev_chunk);
-    void              remove_chunk(uint32_t chunk_id);
+    void remove_chunk(uint32_t chunk_id);
 
 private:
-    int                             m_open_flags;
-    homeio::comp_callback           m_comp_cb;
-    NewVDevCallback                 m_new_vdev_cb;
-    std::shared_ptr< iomgr::ioMgr > m_iomgr;
-    std::atomic< uint64_t >         m_gen_cnt;
-    bool                            m_is_file;
+    int m_open_flags;
+    NewVDevCallback m_new_vdev_cb;
+    std::atomic< uint64_t > m_gen_cnt;
+    bool m_is_file;
 
     char* m_chunk_memory;
 
     /* This memory is carved out of chunk memory. Any changes in any of the block should end up writing all the blocks
      * on disk.
      */
-    dm_info*          m_dm_info;
-    pdevs_block*      m_pdev_hdr;
-    chunks_block*     m_chunk_hdr;
-    vdevs_block*      m_vdev_hdr;
-    pdev_info_block*  m_pdev_info;
+    dm_info* m_dm_info;
+    pdevs_block* m_pdev_hdr;
+    chunks_block* m_chunk_hdr;
+    vdevs_block* m_vdev_hdr;
+    pdev_info_block* m_pdev_info;
     chunk_info_block* m_chunk_info;
-    vdev_info_block*  m_vdev_info;
+    vdev_info_block* m_vdev_info;
 
     std::mutex m_dev_mutex;
 
-    homeds::sparse_vector< std::unique_ptr< PhysicalDev > >      m_pdevs;
+    homeds::sparse_vector< std::unique_ptr< PhysicalDev > > m_pdevs;
     homeds::sparse_vector< std::unique_ptr< PhysicalDevChunk > > m_chunks;
-    homeds::sparse_vector< AbstractVirtualDev* >                 m_vdevs;
-    uint32_t                                                     m_last_vdevid;
-    uint32_t                                                     m_vdev_metadata_size; // Appln metadata size for vdev
-    uint32_t                                                     m_pdev_id;
-    bool                                                         m_scan_cmpltd;
-    uint64_t                                                     m_dm_info_size;
-    boost::uuids::uuid                                           m_system_uuid;
-    vdev_error_callback                                          m_vdev_error_cb;
+    homeds::sparse_vector< AbstractVirtualDev* > m_vdevs;
+    uint32_t m_last_vdevid;
+    uint32_t m_vdev_metadata_size; // Appln metadata size for vdev
+    uint32_t m_pdev_id;
+    bool m_scan_cmpltd;
+    uint64_t m_dm_info_size;
+    boost::uuids::uuid m_system_uuid;
+    vdev_error_callback m_vdev_error_cb;
 };
 
 } // namespace homestore

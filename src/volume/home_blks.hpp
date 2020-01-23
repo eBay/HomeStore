@@ -31,6 +31,7 @@ enum blkstore_type {
     DATA_STORE = 1,
     METADATA_STORE = 2,
     SB_STORE = 3,
+    LOGDEV_STORE = 4,
 };
 
 struct blkstore_blob {
@@ -117,6 +118,7 @@ class HomeBlks : public VolInterface {
     homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >*                     m_data_blk_store;
     homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy, BLKSTORE_BUFFER_TYPE >* m_metadata_blk_store;
     homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >*                     m_sb_blk_store;
+    homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >*                     m_logdev_blk_store;
     vol_config_sb*                                                                       m_cfg_sb;
     Cache< BlkId >*                                                                      m_cache;
     bool                                                                                 m_rdy;
@@ -150,6 +152,7 @@ public:
     ~HomeBlks() {  
         m_thread_id.join();
     }
+    virtual vol_interface_req_ptr  create_vol_hb_req() override;
     virtual std::error_condition write(const VolumePtr& vol, uint64_t lba, uint8_t* buf, uint32_t nblks,
                                        const vol_interface_req_ptr& req) override;
     virtual std::error_condition read(const VolumePtr& vol, uint64_t lba, int nblks,
@@ -160,6 +163,8 @@ public:
 
     virtual std::error_condition remove_volume(const boost::uuids::uuid& uuid) override;
     virtual VolumePtr            lookup_volume(const boost::uuids::uuid& uuid) override;
+    virtual SnapshotPtr          snap_volume(VolumePtr) override;
+
     virtual const char*          get_name(const VolumePtr& vol) override;
     virtual uint64_t             get_page_size(const VolumePtr& vol) override;
     virtual boost::uuids::uuid   get_uuid(VolumePtr vol) override;
@@ -179,6 +184,7 @@ public:
 
     homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >*                     get_data_blkstore();
     homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy, BLKSTORE_BUFFER_TYPE >* get_metadata_blkstore();
+    homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >*                     get_logdev_blkstore();
     void                                                                                 vol_sb_remove(vol_mem_sb* sb);
     uint32_t                                                                             get_data_pagesz() const;
     uint64_t get_boot_cnt();
@@ -224,6 +230,7 @@ private:
     void create_data_blkstore(vdev_info_block* vb);
     void create_metadata_blkstore(vdev_info_block* vb);
     void create_sb_blkstore(vdev_info_block* vb);
+    void create_logdev_blkstore(vdev_info_block* vb);
     bool is_ready();
     void init_thread();
     void volume_destroy();

@@ -4,8 +4,7 @@ from conans import ConanFile, CMake, tools
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-
-    version = "0.11.23"
+    version = "0.12.01"
     revision_mode = "scm"
 
     license = "Proprietary"
@@ -20,13 +19,14 @@ class HomestoreConan(ConanFile):
 
     requires = (
             # Frequently updated
-            "iomgr/2.2.12@sds/develop",
+            "iomgr/3.0.4@sds/iomgr_v3",
+            "sisl/0.3.15@sisl/develop",
 
             # Not commonly updated
             "flip/0.2.5@sds/develop",
             "sds_logging/6.1.0@sds/develop",
             "sds_options/1.0.0@sds/develop",
-            "sisl/0.3.11@sisl/develop",
+            "jungle/2019.10.22@oss/testing",
 
             # FOSS, rarely updated
             "benchmark/1.5.0@oss/stable",
@@ -41,6 +41,7 @@ class HomestoreConan(ConanFile):
             "evhtp/1.2.18.1@oss/stable",
             "farmhash/1.0.0@oss/stable",
             "folly/2019.09.23.00@bincrafters/stable",
+            "gtest/1.8.1@bincrafters/stable",
             "isa-l/2.21.0@oss/stable",
             "libevent/2.1.11@bincrafters/stable",
             ("zstd/1.4.0@bincrafters/stable", "override"),

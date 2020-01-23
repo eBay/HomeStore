@@ -5,7 +5,6 @@
 #pragma once
 
 #include <mutex>
-#include "cache_common.hpp"
 #include "main/homestore_assert.hpp"
 
 SDS_LOGGING_DECL(cache)
@@ -19,14 +18,14 @@ struct LRUEvictRecord : public boost::intrusive::list_base_hook<> {
 
 class LRUEvictionPolicy {
 public:
-    typedef LRUEvictRecord                                      RecordType;
+    typedef LRUEvictRecord RecordType;
     typedef std::function< bool(const LRUEvictRecord&, bool&) > CanEjectCallback;
 
     LRUEvictionPolicy(int num_entries) {}
 
     ~LRUEvictionPolicy() {
         std::lock_guard< decltype(m_list_guard) > guard(m_list_guard);
-        auto                                      it = m_list.begin();
+        auto it = m_list.begin();
         while (it != m_list.end()) {
             it = m_list.erase(it);
         }
@@ -39,7 +38,7 @@ public:
 
     void remove(LRUEvictRecord& rec) {
         std::lock_guard< decltype(m_list_guard) > guard(m_list_guard);
-        auto                                      it = m_list.iterator_to(rec);
+        auto it = m_list.iterator_to(rec);
         m_list.erase(it);
     }
 
@@ -54,9 +53,7 @@ public:
             /* return the next element */
             it = m_list.erase(it);
             if (cb(*rec, stop)) {
-                if (stop) {
-                    return;
-                }
+                if (stop) { return; }
                 /* point to the last element before delete */
                 --it;
             } else {
@@ -66,9 +63,7 @@ public:
                 HS_LOG(DEBUG, cache, "reinserting it");
             }
 
-            if (count) {
-                HS_LOG(DEBUG, cache, "LRU ejection had to skip {} entries", count);
-            }
+            if (count) { HS_LOG(DEBUG, cache, "LRU ejection had to skip {} entries", count); }
         }
 
         // No available candidate to evict
@@ -89,7 +84,7 @@ public:
     }
 
 private:
-    std::mutex                               m_list_guard;
+    std::mutex m_list_guard;
     boost::intrusive::list< LRUEvictRecord > m_list;
 };
 
