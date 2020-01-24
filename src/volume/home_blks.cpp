@@ -75,6 +75,11 @@ HomeBlks::HomeBlks(const init_params& cfg) :
     
     m_data_pagesz = m_cfg.min_virtual_page_size;
 
+    if (m_cfg.devices.size() == 0) {
+        LOGERROR("no devices given");
+        throw std::invalid_argument("null device list");
+    }
+
     nlohmann::json json;
     json["phys_page_size"]          = HomeStoreConfig::phys_page_size;
     json["atomic_phys_page_size"]   = HomeStoreConfig::atomic_phys_page_size;
