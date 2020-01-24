@@ -642,7 +642,7 @@ private:
     uint64_t m_max_cap;
     uint64_t m_max_disk_cap;
     uint64_t m_max_vols = 50;
-    const uint64_t m_max_io_size = MAX_IO_SIZE;
+    uint64_t m_max_io_size;
 
     // io count
     std::atomic< uint64_t > m_outstd_ios = 0;
