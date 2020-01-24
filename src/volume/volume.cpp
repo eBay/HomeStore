@@ -35,7 +35,8 @@ homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >* Volume::m_data_
 Volume::Volume(const vol_params& params) :
         m_comp_cb(params.io_comp_cb),
         m_metrics(params.vol_name),
-        m_vol_name(params.vol_name) {
+        m_vol_name(params.vol_name),
+        m_vol_uuid(boost::uuids::to_string(params.uuid)) {
     m_state = vol_state::UNINITED;
     m_map = new mapping(params.size, params.page_size, params.vol_name,
                         std::bind(&Volume::process_metadata_completions, this, std::placeholders::_1),
@@ -65,10 +66,15 @@ Volume::Volume(const vol_params& params) :
     m_data_blkstore = HomeBlks::instance()->get_data_blkstore();
     m_state = vol_state::ONLINE;
     m_read_blk_tracker = std::make_unique< Blk_Read_Tracker >(
-        params.vol_name, std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
+                params.vol_name, params.uuid,
+                std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
 }
 
-Volume::Volume(vol_mem_sb* sb) : m_sb(sb), m_metrics(sb->ondisk_sb->vol_name), m_vol_name(sb->ondisk_sb->vol_name) {
+Volume::Volume(vol_mem_sb* sb) :
+            m_sb(sb),
+            m_metrics(sb->ondisk_sb->vol_name),
+            m_vol_name(sb->ondisk_sb->vol_name),
+            m_vol_uuid(boost::uuids::to_string(sb->ondisk_sb->uuid)) {
     m_state = vol_state::UNINITED;
     if (m_sb->ondisk_sb->state == vol_state::FAILED) {
         m_map = new mapping(m_sb->ondisk_sb->size, m_sb->ondisk_sb->page_size, m_sb->ondisk_sb->vol_name,
@@ -103,7 +109,8 @@ Volume::Volume(vol_mem_sb* sb) : m_sb(sb), m_metrics(sb->ondisk_sb->vol_name), m
 
     m_data_blkstore = HomeBlks::instance()->get_data_blkstore();
     m_read_blk_tracker = std::make_unique< Blk_Read_Tracker >(
-        sb->ondisk_sb->vol_name, std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
+                    sb->ondisk_sb->vol_name, sb->ondisk_sb->uuid,
+                    std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
 }
 
 /* it should be called during recovery */
@@ -617,6 +624,7 @@ void Volume::check_and_complete_req(const vol_interface_req_ptr& hb_req, const s
 }
 
 void Volume::print_tree() { m_map->print_tree(); }
+void Volume::verify_tree() { m_map->verify_tree(); }
 
 void Volume::print_node(uint64_t blkid) { m_map->print_node(blkid); }
 

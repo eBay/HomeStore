@@ -1,5 +1,5 @@
 # ##########   #######   ############
-FROM ecr.vip.ebayc3.com/sds/sds_cpp_base:2.15-dev
+FROM ecr.vip.ebayc3.com/sds/sds_cpp_base:3.1
 LABEL description="Automated SDS compilation"
 
 ARG BRANCH_NAME
@@ -34,12 +34,12 @@ RUN set -eux; \
       find . -name "*.gcno" -exec gcov {} \; ; \
       if [ "develop" != "${BRANCH_NAME}" ]; then \
           echo "sonar.branch.name=${BRANCH_NAME}" >> ${SOURCE_PATH}sonar-project.properties; \
-          echo "sonar.branch.target=master" >> ${SOURCE_PATH}sonar-project.properties; \
+          echo "sonar.branch.target=develop" >> ${SOURCE_PATH}sonar-project.properties; \
       fi; \
       sonar-scanner -Dsonar.projectBaseDir=${SOURCE_PATH} -Dsonar.projectVersion="${PKG_VERSION}"; \
+    else \
+      conan create -pr ${BUILD_TYPE} ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"; \
     fi;
-
-RUN conan create -pr ${BUILD_TYPE} ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"
 
 CMD set -eux; \
     eval $(grep 'name =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,name,PKG_NAME,'); \

@@ -708,6 +708,7 @@ public:
     }
 
     void print_tree() { m_bt->print_tree(); }
+    void verify_tree() { m_bt->verify_tree(); }
 
     void print_node(uint64_t blkid) {
         bnodeid_t bid(blkid);

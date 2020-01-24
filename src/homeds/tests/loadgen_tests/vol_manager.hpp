@@ -13,9 +13,8 @@
 namespace homeds {
 namespace loadgen {
 
-constexpr uint64_t CACHE_SIZE = (4 * 1024 * 1024 * 1024ul);
-constexpr uint32_t VOL_PAGE_SIZE = 4096;
-constexpr uint32_t MAX_IO_SIZE = (VOL_PAGE_SIZE * ((1 << MEMPIECE_ENCODE_MAX_BITS) - 1));
+constexpr uint64_t CACHE_SIZE      = (4*1024*1024*1024ul);
+constexpr uint32_t VOL_PAGE_SIZE   = 4096;
 constexpr uint32_t MAX_CRC_DEPTH = 3;
 const uint64_t LOGDEV_BUF_SIZE = HomeStoreConfig::align_size * 1024;
 
@@ -238,7 +237,7 @@ public:
 
     std::error_condition write(uint64_t vol_id, uint64_t lba, uint8_t* buf, uint64_t nblks) {
         assert(buf);
-        assert(lba < max_vol_blks() - nblks);
+        assert(lba < (max_vol_blks() - nblks));
         assert(vol_id < m_max_vols);
 
         auto size = get_size(nblks);
@@ -408,14 +407,16 @@ private:
         std::default_random_engine generator(rd());
         // make sure the the lba doesn't write accross max vol size;
         // MAX_KEYS is initiated as max vol size;
-        std::uniform_int_distribution< long long unsigned > dist(0, KeySpec::MAX_KEYS - max_io_nblks());
+        // lba: [0, max_vol_blks - max_io_nblks)
+        std::uniform_int_distribution<long long unsigned> dist(0, KeySpec::MAX_KEYS - max_io_nblks() - 1);
         return dist(generator);
     }
 
     uint64_t get_rand_nblks() {
         std::random_device rd;
         std::default_random_engine generator(rd());
-        std::uniform_int_distribution< long long unsigned > dist(1, max_io_nblks());
+        // nblks: [1, max_io_nblks]
+        std::uniform_int_distribution<long long unsigned> dist(1, max_io_nblks());
         return dist(generator);
     }
 
@@ -486,6 +487,7 @@ private:
     }
 
     void init_done_cb(std::error_condition err, const out_params& params) {
+        m_max_io_size = params.max_io_size;
         for (auto vol_cnt = 0ull; vol_cnt < m_max_vols; vol_cnt++) {
             create_volume(vol_cnt);
         }
@@ -631,16 +633,16 @@ private:
     uint64_t get_hash(uint8_t* bytes) { return util::Hash64((const char*)bytes, VOL_PAGE_SIZE); }
 
 private:
-    std::vector< dev_info > m_device_info;
-    init_done_callback m_done_cb;    // callback to loadgen test case;
-    std::vector< VolumePtr > m_vols; // volume instances;
-    std::vector< std::string > m_file_names;
+    std::vector<dev_info>           m_device_info;
+    init_done_callback              m_done_cb;    // callback to loadgen test case;
+    std::vector<VolumePtr>          m_vols;       // volume instances;
+    std::vector<std::string>        m_file_names;
 
     uint64_t m_max_vol_size;
     uint64_t m_max_cap;
     uint64_t m_max_disk_cap;
     uint64_t m_max_vols = 50;
-    const uint64_t m_max_io_size = MAX_IO_SIZE;
+    uint64_t m_max_io_size;
 
     // io count
     std::atomic< uint64_t > m_outstd_ios = 0;

@@ -45,11 +45,15 @@ typedef boost::intrusive_ptr< volume_req > volume_req_ptr;
 #define _VOL_REQ_LOG_VERBOSE_MSG(req) req->to_string()
 #define _VOLMSG_EXPAND(...) __VA_ARGS__
 
-#define VOL_LOG(level, mod, req, msg, ...) HS_SUBMOD_LOG(level, mod, req, "vol", this->m_vol_name, msg, ##__VA_ARGS__)
-#define VOL_ASSERT(assert_type, cond, req, ...)                                                                        \
-    HS_SUBMOD_ASSERT(assert_type, cond, req, "vol", this->m_vol_name, ##__VA_ARGS__)
-#define VOL_ASSERT_CMP(assert_type, val1, cmp, val2, req, ...)                                                         \
-    HS_SUBMOD_ASSERT_CMP(assert_type, val1, cmp, val2, req, "vol", this->m_vol_name, ##__VA_ARGS__)
+#define VOL_LOG(level, mod, req, msg, ...)                              \
+    HS_SUBMOD_LOG(level, mod, req, "vol",                               \
+        this->m_vol_uuid, msg, ##__VA_ARGS__)
+#define VOL_ASSERT(assert_type, cond, req, ...)                         \
+    HS_SUBMOD_ASSERT(assert_type, cond, req, "vol",                     \
+        this->m_vol_uuid, ##__VA_ARGS__)
+#define VOL_ASSERT_CMP(assert_type, val1, cmp, val2, req, ...)          \
+    HS_SUBMOD_ASSERT_CMP(assert_type, val1, cmp, val2, req, "vol",      \
+        this->m_vol_uuid, ##__VA_ARGS__)
 
 #define VOL_DEBUG_ASSERT(...) VOL_ASSERT(DEBUG, __VA_ARGS__)
 #define VOL_RELEASE_ASSERT(...) VOL_ASSERT(RELEASE, __VA_ARGS__)
@@ -183,17 +187,20 @@ private:
     mapping* m_map;
     VolumeJournal* m_volume_journal;
     boost::intrusive_ptr< BlkBuffer > m_only_in_mem_buff;
-    struct vol_mem_sb* m_sb;
-    enum vol_state m_state;
-    void alloc_single_block_in_mem();
-    io_comp_callback m_comp_cb;
-    std::atomic< uint64_t > seq_Id;
-    VolumeMetrics m_metrics;
-    std::mutex m_sb_lock; // lock for updating vol's sb
-    std::atomic< uint64_t > m_used_size = 0;
-    bool m_recovery_error = false;
-    std::atomic< uint64_t > m_err_cnt = 0;
-    std::string m_vol_name;
+
+    struct vol_mem_sb*                m_sb;
+    enum vol_state                    m_state;
+    void                              alloc_single_block_in_mem();
+    io_comp_callback                  m_comp_cb;
+    std::atomic< uint64_t >           seq_Id;
+    VolumeMetrics                     m_metrics;
+    std::mutex                        m_sb_lock; // lock for updating vol's sb
+    std::atomic< uint64_t >           m_used_size = 0;
+    bool                              m_recovery_error = false;
+    std::atomic< uint64_t >           m_err_cnt = 0;
+    std::string                       m_vol_name;
+    std::string                       m_vol_uuid;
+ 
 #ifndef NDEBUG
     std::mutex m_req_mtx;
     std::map< uint64_t, volume_req_ptr > m_req_map;
@@ -252,8 +259,12 @@ public:
 
     template < typename... Args >
     void assert_formatter(fmt::memory_buffer& buf, const char* msg, const std::string& req_str, const Args&... args) {
-        fmt::format_to(buf, "\n[vol={}]", m_vol_name);
-        if (req_str.size()) { fmt::format_to(buf, "\n[request={}]", req_str); }
+
+        fmt::format_to(buf, "\n[vol={}]", m_vol_uuid);
+        if (req_str.size()) {
+            fmt::format_to(buf, "\n[request={}]", req_str);
+        }
+
         fmt::format_to(buf, "\nMetrics = {}\n", sisl::MetricsFarm::getInstance().get_result_in_json_string());
     }
 
@@ -286,11 +297,12 @@ public:
     bool remove_free_blk_entry(std::vector< Free_Blk_Entry >& fbes, std::pair< MappingKey, MappingValue >& kv);
 
     uint64_t get_elapsed_time(Clock::time_point startTime);
-    void attach_completion_cb(const io_comp_callback& cb);
-    void print_tree();
-    void print_node(uint64_t blkid);
-    void blk_recovery_callback(const MappingValue& mv);
-    void set_recovery_error();
+    void     attach_completion_cb(const io_comp_callback& cb);
+    void     print_tree();
+    void     verify_tree();
+    void     print_node(uint64_t blkid);
+    void     blk_recovery_callback(const MappingValue& mv);
+    void     set_recovery_error();
 
     mapping* get_mapping_handle() { return m_map; }
 
