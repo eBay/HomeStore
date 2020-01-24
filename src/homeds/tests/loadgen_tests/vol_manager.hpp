@@ -634,28 +634,9 @@ private:
 
 private:
     std::vector<dev_info>           m_device_info;
-    std::shared_ptr<iomgr::ioMgr>   m_iomgr;
     init_done_callback              m_done_cb;    // callback to loadgen test case;
     std::vector<VolumePtr>          m_vols;       // volume instances;
     std::vector<std::string>        m_file_names;
-
-    uint64_t                        m_max_vol_size;
-    uint64_t                        m_max_cap;
-    uint64_t                        m_max_disk_cap;
-    const uint64_t                  m_max_vols      = 50;
-    uint64_t                        m_max_io_size;
-
-    // io count
-    std::atomic<uint64_t>           m_outstd_ios = 0;
-    std::atomic<uint64_t>           m_wrt_cnt = 0;
-    std::atomic<uint64_t>           m_rd_cnt = 0;
-    std::atomic<uint64_t>           m_rd_err_cnt = 0;
-    std::atomic<uint64_t>           m_wrt_err_cnt = 0;
-    std::atomic<uint64_t>           m_writes_skip = 0;
-    std::atomic<uint64_t>           m_read_verify_skip = 0;
-    std::atomic<bool>               m_shutdown_cb_done = false;
-    
-    static VolumeManager<Executor>*    _instance;
 
     uint64_t m_max_vol_size;
     uint64_t m_max_cap;
