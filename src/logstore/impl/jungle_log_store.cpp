@@ -66,7 +66,7 @@ Status LogStore::append(uint64_t& out_seq_num, const KV& kv) {
         out_seq_num += 1;
     } else {
         // no logs so far case
-        assert(s.getValue() == jungle::Status::NO_LOGS);
+        assert(s.getValue() == jungle::Status::LOG_NOT_EXIST);
         out_seq_num = 1;
     }
     uint64_t log_id = out_seq_num;
