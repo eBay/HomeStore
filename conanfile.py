@@ -20,8 +20,9 @@ class HomestoreConan(ConanFile):
 
     requires = (
             # Frequently updated
-            "iomgr/3.0.4@sds/iomgr_v3",
-            "sisl/0.3.16@sisl/develop",
+            #"iomgr/3.0.4@sds/iomgr_v3",
+            "iomgr/3.0.7@hkadayam/iomgr_v3",
+            "sisl/0.3.18@hkadayam/develop",
 
             # Not commonly updated
             "flip/0.2.5@sds/develop",

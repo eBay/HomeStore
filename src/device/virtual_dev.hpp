@@ -372,7 +372,7 @@ public:
         }
         return m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id];
     }
-    
+
     //
     // @brief
     //
@@ -441,20 +441,21 @@ public:
         return offset;
     }
 
-    // 
-    // Note: 
+    //
+    // Note:
     // write advances seek cursor
     //
     ssize_t write(const void* buf, size_t count, boost::intrusive_ptr< virtualdev_req > req) {
         if (get_used_space() + count > get_size()) {
             // not enough space left;
-            HS_LOG(ERROR, device, "No space left! m_write_sz_in_total: {}, m_reserved_sz: {}",
-                   m_write_sz_in_total, m_reserved_sz);
+            HS_LOG(ERROR, device, "No space left! m_write_sz_in_total: {}, m_reserved_sz: {}", m_write_sz_in_total,
+                   m_reserved_sz);
             return -1;
         }
 
         if (m_reserved_sz != 0) {
-            HS_LOG(ERROR, device, "write can't be served when m_reserved_sz:{} is not comsumed by pwrite yet.", m_reserved_sz);
+            HS_LOG(ERROR, device, "write can't be served when m_reserved_sz:{} is not comsumed by pwrite yet.",
+                   m_reserved_sz);
             return -1;
         }
 
@@ -463,11 +464,9 @@ public:
         return bytes_written;
     }
 
-    ssize_t write(const void* buf, size_t count) {
-        return write(buf, count, nullptr);
-    }
+    ssize_t write(const void* buf, size_t count) { return write(buf, count, nullptr); }
 
-    // 
+    //
     // Note:
     // pwrite doesn't advances cursor
     //
@@ -487,8 +486,9 @@ public:
 
         // convert logical offset to dev offset
         uint64_t offset_in_dev = logical_to_dev_offset(offset, dev_id, chunk_id, offset_in_chunk);
-        
-        HS_ASSERT_CMP(RELEASE, m_chunk_size - offset_in_chunk, >=, len, "Writing size: {} acrossing chunk is not allowed!", len);
+
+        HS_ASSERT_CMP(RELEASE, m_chunk_size - offset_in_chunk, >=, len,
+                      "Writing size: {} acrossing chunk is not allowed!", len);
 
         m_write_sz_in_total += len;
 
@@ -503,7 +503,7 @@ public:
         return offset_in_dev;
     }
 
-    // 
+    //
     // split `do_write` from `pwrite` so that `write` could re-use this sub-routine
     //
     ssize_t do_pwrite(const void* buf, size_t count, off_t offset, boost::intrusive_ptr< virtualdev_req > req) {
@@ -530,28 +530,28 @@ public:
         return bytes_written;
     }
 
-    // 
+    //
     // Important assumption:
     // pwrite/pwritev always use offset returned from alloc_blk to do the write;
     //
     // Note:
-    // 1. pwrite should not across chunk boundaries 
+    // 1. pwrite should not across chunk boundaries
     //    because alloc_blk garunteens offset returned always doesn't across chunk boundary;
     //
     ssize_t pwrite(const void* buf, size_t count, off_t offset, boost::intrusive_ptr< virtualdev_req > req) {
-        HS_ASSERT_CMP(RELEASE, count, <=, m_reserved_sz, 
-                "Write size:{} larger then reserved size: {} is not allowed!", count, m_reserved_sz);
-        
-        HS_ASSERT_CMP(RELEASE, (uint64_t)get_reserved_tail_offset(), >=, (uint64_t)(offset + count), 
-                "Wrting at offset: {}, which is out of reserved portion is not allowed!", offset);
-        
+        HS_ASSERT_CMP(RELEASE, count, <=, m_reserved_sz, "Write size:{} larger then reserved size: {} is not allowed!",
+                      count, m_reserved_sz);
+
+        HS_ASSERT_CMP(RELEASE, (uint64_t)get_reserved_tail_offset(), >=, (uint64_t)(offset + count),
+                      "Wrting at offset: {}, which is out of reserved portion is not allowed!", offset);
+
         // update reserved size
         m_reserved_sz -= count;
 
         return do_pwrite(buf, count, offset, req);
     }
 
-    ssize_t do_pwrite_internal(PhysicalDev* pdev, PhysicalDevChunk* chunk, const char* buf, const uint32_t len, 
+    ssize_t do_pwrite_internal(PhysicalDev* pdev, PhysicalDevChunk* chunk, const char* buf, const uint32_t len,
                                const uint64_t offset_in_dev, boost::intrusive_ptr< virtualdev_req > req) {
         COUNTER_INCREMENT(pdev->get_metrics(), drive_write_vector_count, 1);
 
@@ -634,12 +634,12 @@ public:
         auto chunk_size = std::min((uint64_t)end_of_chunk, m_chunk_size);
 
         bool across_chunk = false;
-        
-        HS_ASSERT_CMP(RELEASE, (uint64_t)end_of_chunk, <=, m_chunk_size, 
-                "Invalid end of chunk: {} detected on chunk num: {}", end_of_chunk, chunk->get_chunk_id());
-        HS_ASSERT_CMP(RELEASE, (uint64_t)offset_in_chunk, <=, chunk_size, 
-                "Invalid m_seek_cursor: {} which falls in beyond end of chunk: {}!", m_seek_cursor, end_of_chunk);
-        
+
+        HS_ASSERT_CMP(RELEASE, (uint64_t)end_of_chunk, <=, m_chunk_size,
+                      "Invalid end of chunk: {} detected on chunk num: {}", end_of_chunk, chunk->get_chunk_id());
+        HS_ASSERT_CMP(RELEASE, (uint64_t)offset_in_chunk, <=, chunk_size,
+                      "Invalid m_seek_cursor: {} which falls in beyond end of chunk: {}!", m_seek_cursor, end_of_chunk);
+
         // if read size is larger then what's left in this chunk
         if (count > (chunk_size - offset_in_chunk)) {
             // truncate size to what is left;
@@ -651,8 +651,8 @@ public:
 
         if (bytes_read != -1) {
             // Update seek curosr after read;
-            HS_ASSERT_CMP(RELEASE, (size_t)bytes_read, ==, count, 
-                    "bytes_read returned: {} must be equal to requested size: {}!", bytes_read, count);
+            HS_ASSERT_CMP(RELEASE, (size_t)bytes_read, ==, count,
+                          "bytes_read returned: {} must be equal to requested size: {}!", bytes_read, count);
             m_seek_cursor += bytes_read;
             if (across_chunk) { m_seek_cursor += (m_chunk_size - end_of_chunk); }
         }
@@ -696,7 +696,13 @@ public:
     //       we only do read on one chunk and return the num of bytes read on this chunk;
     //
     //
-    ssize_t preadv(const struct iovec* iov, int iovcnt, off_t offset) {
+    ssize_t preadv(const struct iovec* iov, int iovcnt, off_t offset) { return preadv(iov, iovcnt, offset, nullptr); }
+
+    //
+    // sync preadv if req is nulptr;
+    // async preadv if req is not nullptr;
+    //
+    ssize_t preadv(const struct iovec* iov, int iovcnt, off_t offset, boost::intrusive_ptr< virtualdev_req > req) {
         uint32_t dev_id = 0, chunk_id = 0;
         off_t offset_in_chunk = 0;
         uint64_t len = get_len(iov, iovcnt);
@@ -718,15 +724,7 @@ public:
         auto pdev = m_primary_pdev_chunks_list[dev_id].pdev;
         auto chunk = m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id];
 
-        return do_preadv_internal(pdev, chunk, offset_in_dev, iov, iovcnt, len, nullptr);
-    }
-
-    //
-    // async preadv
-    //
-    ssize_t preadv(const struct iovec* iov, int iovcnt, off_t offset, boost::intrusive_ptr< virtualdev_req > req) {
-        // TODO: to be implemented;
-        return 0;
+        return do_preadv_internal(pdev, chunk, offset_in_dev, iov, iovcnt, len, req);
     }
 
     off_t lseek(off_t offset, int whence = SEEK_SET) {
@@ -986,10 +984,10 @@ public:
 
     void write(const BlkId& bid, const homeds::MemVector& buf, boost::intrusive_ptr< virtualdev_req > req,
                uint32_t data_offset = 0) {
-        BlkOpStatus  ret_status = BLK_OP_SUCCESS;
-        uint32_t     size = bid.get_nblks() * get_page_size();
+        BlkOpStatus ret_status = BLK_OP_SUCCESS;
+        uint32_t size = bid.get_nblks() * get_page_size();
         iovec iov[BlkId::max_blks_in_op()];
-        int          iovcnt = 0;
+        int iovcnt = 0;
 
         uint32_t p = 0;
         uint32_t end_offset = data_offset + bid.data_size(m_pagesz);
@@ -1084,9 +1082,7 @@ public:
             mchunk->get_physical_dev_mutable()->sync_read((char*)b.bytes, b.size, dev_offset);
 
             ++cnt;
-            if (cnt == nmirror + 1) {
-                break;
-            }
+            if (cnt == nmirror + 1) { break; }
         }
     }
 
@@ -1151,8 +1147,8 @@ public:
     void readv(const BlkId& bid, const homeds::MemVector& buf, boost::intrusive_ptr< virtualdev_req > req) {
         // Convert the input memory to iovector
         iovec iov[BlkId::max_blks_in_op()];
-        int          iovcnt = 0;
-        uint32_t     size = buf.size();
+        int iovcnt = 0;
+        uint32_t size = buf.size();
 
         HS_ASSERT_CMP(DEBUG, buf.size(), ==,
                       bid.get_nblks() * get_page_size()); // Expected to be less than allocated blk originally.
@@ -1173,9 +1169,9 @@ public:
         do_preadv_internal(pdev, primary_chunk, primary_dev_offset, iov, iovcnt, size, req);
     }
 
-    void get_vb_context(uint8_t* ctx_data) const { m_mgr->get_vb_context(m_vb->vdev_id, (char*)ctx_data); }
+    void get_vb_context(const sisl::blob& ctx_data) const { m_mgr->get_vb_context(m_vb->vdev_id, ctx_data); }
 
-    void update_vb_context(uint8_t* blob) { m_mgr->update_vb_context(m_vb->vdev_id, blob); }
+    void update_vb_context(const sisl::blob& ctx_data) { m_mgr->update_vb_context(m_vb->vdev_id, ctx_data); }
     uint64_t get_size() const { return m_vb->size; }
 
     uint64_t get_used_size() const { return m_used_size.load(); }

@@ -42,6 +42,10 @@
 #include "keyspecs/vdev_key_spec.hpp"
 #include "valuespecs/vdev_value_spec.hpp"
 
+#include "storespecs/log_store_spec.hpp"
+#include "keyspecs/logstore_key_spec.hpp"
+#include "valuespecs/logstore_value_spec.hpp"
+
 
 #include "disk_initializer.hpp"
 #include <linux/fs.h>
@@ -79,6 +83,8 @@ using namespace homeds::loadgen;
 #define G_VDev_Test_PRW BtreeLoadGen< VDevKey, VDevValue, VDevPRWStoreSpec, IOMgrExecutor>
 
 #define G_VDev_Test_RW BtreeLoadGen< SimpleNumberKey, VDevValue, VDevRWStoreSpec, IOMgrExecutor>
+
+#define G_LogStore_Test BtreeLoadGen< LogStoreKey, LogStoreValue, LogStoreSpec, IOMgrExecutor>
 
 static Param parameters;
 bool         loadgen_verify_mode = false;
@@ -317,6 +323,8 @@ struct CacheTest : public testing::Test {
     }
 };
 
+TEST_F(CacheTest, CacheMemTest) { this->execute(); }
+
 class VolumeLoadTest : public testing::Test {
 private:
     std::unique_ptr< G_Volume_Test > m_loadgen;
@@ -373,7 +381,38 @@ public:
 
 TEST_F(VolumeLoadTest, VolumeTest) { this->execute(); }
 
-TEST_F(CacheTest, CacheMemTest) { this->execute(); }
+struct LogStoreLoadTest : public testing::Test {
+    std::unique_ptr< G_LogStore_Test>   loadgen;
+    DiskInitializer< IOMgrExecutor >    di;
+    std::mutex                          m_mtx;
+    std::condition_variable             m_cv;
+    bool                                is_complete = false;
+
+    void join() {
+        std::unique_lock< std::mutex > lk(m_mtx);
+        m_cv.wait(lk, [this] { return is_complete; });
+    }
+
+    void init_done_cb(std::error_condition err, const homeds::out_params& params1) {
+        loadgen->initParam(parameters);
+        LOGINFO("Regression Started");
+        loadgen->regression(true, false, false, false);
+        is_complete = true;
+        m_cv.notify_one();
+    }
+
+    void execute() {
+        // disable verification because it is async write, similar as volume test load;
+        // verification will be done by logstore spec;
+        loadgen = std::make_unique< G_LogStore_Test>(parameters.NT, false);
+        di.init(loadgen->get_executor(),
+                std::bind(&LogStoreLoadTest::init_done_cb, this, std::placeholders::_1, std::placeholders::_2));
+        join(); // sync wait for test to finish
+        di.cleanup();
+    }
+};
+
+TEST_F(LogStoreLoadTest, LogStoreTest) { this->execute(); }
 
 SDS_OPTION_GROUP(
     test_load, (num_io, "", "num_io", "num of io", ::cxxopts::value< uint64_t >()->default_value("1000"), "number"),

@@ -16,15 +16,30 @@ SDS_LOGGING_INIT(test_log_store, btree_structures, btree_nodes, btree_generics, 
 struct test_log_data {
     uint32_t size;
     uint8_t data[0];
+
+    uint32_t total_size() const { return sizeof(test_log_data) + size; }
 };
 
 typedef std::function< void(logstore_seq_num_t) > test_log_store_comp_cb_t;
+
+#define ASSERT_OUT_OF_RANGE_EXCEPTION(lsn, method)                                                                     \
+    try {                                                                                                              \
+        method;                                                                                                        \
+        FAIL() << "Expected std::out_of_range exception for lsn=" << m_log_store->get_store_id() << ":" << lsn         \
+               << " but not thrown";                                                                                   \
+    } catch (const std::out_of_range& err) {                                                                           \
+    } catch (...) {                                                                                                    \
+        FAIL() << "Expected std::out_of_range for lsn=" << m_log_store->get_store_id() << ":" << lsn                   \
+               << " but got different exception";                                                                      \
+    }
 
 class TestLogStoreClient {
 public:
     explicit TestLogStoreClient(const test_log_store_comp_cb_t& cb) {
         m_comp_cb = cb;
         m_log_store = home_log_store_mgr.create_new_log_store();
+        m_log_store->register_log_found_cb(std::bind(&TestLogStoreClient::on_log_found, this, std::placeholders::_1,
+                                                     std::placeholders::_2, std::placeholders::_3));
     }
 
     void insert_next_batch(uint32_t batch_size) {
@@ -43,30 +58,50 @@ public:
         uint32_t seed = std::chrono::system_clock::now().time_since_epoch().count();
         std::shuffle(lsns.begin(), lsns.end(), std::default_random_engine(seed));
 
+        ASSERT_LT(m_log_store->get_contiguous_issued_seq_num(0), start_lsn + nparallel_count);
+        ASSERT_LT(m_log_store->get_contiguous_completed_seq_num(0), start_lsn + nparallel_count);
         for (auto lsn : lsns) {
-            auto sz = rand() % max_data_size;
-
-            // Generate buffer of randome size and fill with specific data
-            auto raw_buf = (uint8_t*)malloc(sizeof(test_log_data) + sz);
-            test_log_data* d = new (raw_buf) test_log_data();
-            d->size = sz;
-            for (auto i = 0u; i < sz; ++i) {
-                // Get printable ascii character range
-                d->data[i] = ((lsn % 94) + 33);
-            }
-
-            m_log_store->write_async(lsn, {(uint8_t*)d, d->size}, nullptr,
+            auto d = prepare_data(lsn);
+            m_log_store->write_async(lsn, {(uint8_t*)d, d->total_size()}, nullptr,
                                      [d, this](logstore_seq_num_t seq_num, bool success, void* ctx) {
-                                         LOGINFO("Completed write of lsn {} ", seq_num);
                                          free(d);
                                          m_comp_cb(seq_num);
                                      });
         }
     }
 
+    void read_validate(bool expect_all_completed = false) {
+        auto trunc_upto = m_log_store->truncated_upto();
+        for (auto i = 0; i <= trunc_upto; ++i) {
+            // ASSERT_OUT_OF_RANGE_EXCEPTION(i, m_log_store->read_sync(i))
+            ASSERT_THROW(m_log_store->read_sync(i), std::out_of_range)
+                << "Expected std::out_of_range exception for lsn=" << m_log_store->get_store_id() << ":" << i
+                << " but not thrown";
+        }
+
+        auto upto = expect_all_completed ? m_cur_lsn.load() - 1 : m_log_store->get_contiguous_completed_seq_num(0);
+        for (auto i = m_log_store->truncated_upto() + 1; i < upto; ++i) {
+            try {
+                auto b = m_log_store->read_sync(i);
+                auto tl = (test_log_data*)b.data();
+                ASSERT_EQ(tl->total_size(), b.size())
+                    << "Size Mismatch for lsn=" << m_log_store->get_store_id() << ":" << i;
+                validate_data(tl, i);
+            } catch (const std::exception& e) {
+                LOGFATAL("Unexpected out_of_range exception for lsn={}:{}", m_log_store->get_store_id(), i);
+            }
+        }
+    }
+
     void read(logstore_seq_num_t lsn) {
-        EXPECT_GT(lsn, m_truncated_upto_lsn);
+        ASSERT_GT(lsn, m_truncated_upto_lsn);
         // m_log_store->read(id);
+    }
+
+    void on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx) {
+        LOGTRACE("Recovered lsn {} with log data of size {}", lsn, buf.size())
+        auto tl = (test_log_data*)buf.data();
+        validate_data(tl, lsn);
     }
 
     void truncate(logstore_seq_num_t lsn) {
@@ -75,17 +110,55 @@ public:
     }
 
 private:
-    std::shared_ptr< HomeLogStore > m_log_store;
-    std::atomic< logstore_seq_num_t > m_truncated_upto_lsn = 0;
-    std::atomic< logstore_seq_num_t > m_cur_lsn = 0;
-    test_log_store_comp_cb_t m_comp_cb;
+    test_log_data* prepare_data(logstore_seq_num_t lsn) {
+        auto sz = rand() % max_data_size;
 
-    static constexpr uint32_t max_data_size = 1024;
+        // Generate buffer of randome size and fill with specific data
+        auto raw_buf = (uint8_t*)malloc(sizeof(test_log_data) + sz);
+        test_log_data* d = new (raw_buf) test_log_data();
+        d->size = sz;
+        char c = ((lsn % 94) + 33);
+        for (auto i = 0u; i < sz; ++i) {
+            // Get printable ascii character range
+            d->data[i] = c;
+        }
+        return d;
+    }
+
+    void validate_data(test_log_data* d, logstore_seq_num_t lsn) {
+        ASSERT_LT(d->size, max_data_size);
+
+        char c = ((lsn % 94) + 33);
+        std::string actual = std::string((const char*)&d->data[0], (size_t)d->size);
+        std::string expected = std::string((size_t)d->size, c);
+        ASSERT_EQ(actual, expected) << "Data mismatch for LSN=" << m_log_store->get_store_id() << ":" << lsn
+                                    << " size=" << d->size;
+
+#if 0
+        for (auto i = 0u; i < d->size; ++i) {
+            ASSERT_EQ(d->data[i], c) << "Data mismatch for LSN=" << m_log_store->get_store_id() << ":" << lsn
+                                     << " nth byte=" << i << " Expected='" << c << "' got='" << d->data[i]
+                                     << "' size=" << d->size;
+        }
+#endif
+    }
+
+    friend class LogStoreTest;
+
+private:
+    test_log_store_comp_cb_t m_comp_cb;
+    std::atomic< logstore_seq_num_t > m_truncated_upto_lsn = -1;
+    std::atomic< logstore_seq_num_t > m_cur_lsn = 0;
+    std::shared_ptr< HomeLogStore > m_log_store;
+
+    static constexpr uint32_t max_data_size = 64;
 };
 
 struct LogStoreTest : public testing::Test {
 public:
-    static void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthreads) {
+    void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthreads, bool restart = false) {
+        if (restart) { shutdown(); }
+
         std::vector< dev_info > device_info;
         std::mutex start_mutex;
         std::condition_variable cv;
@@ -94,15 +167,18 @@ public:
         LOGINFO("creating {} device files with each of size {} ", ndevices, dev_size);
         for (uint32_t i = 0; i < ndevices; i++) {
             std::string fpath = "/tmp/" + std::to_string(i + 1);
-            std::ofstream ofs(fpath.c_str(), std::ios::binary | std::ios::out);
-            ofs.seekp(dev_size - 1);
-            ofs.write("", 1);
-            ofs.close();
+            if (!restart) {
+                std::ofstream ofs(fpath.c_str(), std::ios::binary | std::ios::out);
+                ofs.seekp(dev_size - 1);
+                ofs.write("", 1);
+                ofs.close();
+            }
             device_info.push_back({fpath});
         }
 
         LOGINFO("Starting iomgr with {} threads", nthreads);
-        iomanager.start(1 /* total interfaces */, nthreads);
+        iomanager.start(1 /* total interfaces */, nthreads,
+                        std::bind(&LogStoreTest::on_thread_msg, this, std::placeholders::_1));
         iomanager.add_drive_interface(
             std::dynamic_pointer_cast< iomgr::DriveInterface >(std::make_shared< iomgr::AioDriveInterface >()),
             true /* is_default */);
@@ -115,7 +191,7 @@ public:
         params.flag = homestore::io_flag::DIRECT_IO;
         params.min_virtual_page_size = 4096;
         params.cache_size = cache_size;
-        params.disk_init = true;
+        params.disk_init = !restart;
         params.devices = device_info;
         params.is_file = true;
         params.init_done_cb = [&](std::error_condition err, const out_params& params) {
@@ -130,19 +206,21 @@ public:
         params.vol_state_change_cb = [](const VolumePtr& vol, vol_state old_state, vol_state new_state) {};
         params.vol_found_cb = [](boost::uuids::uuid uuid) -> bool { return true; };
         params.system_uuid = gen("01970496-0262-11e9-8eb2-f2801f1b9fd1");
-        VolInterface::init(params);
+        VolInterface::init(params, !restart);
 
         std::unique_lock< std::mutex > lk(start_mutex);
         cv.wait(lk, [&] { return inited; });
     }
 
     void init(uint32_t n_log_stores, uint64_t n_total_records) {
+#if 0
         m_ev_fd = eventfd(0, EFD_NONBLOCK);
         m_ev_fdinfo = iomanager.add_fd(m_ev_fd,
                                        std::bind(&LogStoreTest::process_event, this, std::placeholders::_1,
                                                  std::placeholders::_2, std::placeholders::_3),
                                        EPOLLIN, 9, nullptr);
-        m_pending_issued_records = std::lround(n_total_records / batch_size) * batch_size;
+#endif
+        m_pending_issued_records = std::lround(n_total_records / _batch_size) * _batch_size;
         m_pending_comp_records = 0;
 
         // Create multiple log stores
@@ -152,28 +230,57 @@ public:
         }
     }
 
-    void shutdown() { iomanager.remove_fd(this->m_ev_fdinfo); }
+    void shutdown() {
+        std::mutex stop_mutex;
+        std::condition_variable cv;
+        VolInterface::get_instance()->shutdown([&](bool success) { cv.notify_all(); });
+
+        // Wait for the shutdown flag.
+        std::unique_lock< std::mutex > lk(stop_mutex);
+        cv.wait(lk, [&] { return true; });
+
+        VolInterface::del_instance();
+        iomanager.stop();
+    }
+
+#if 0
     void process_event(int fd, void* cookie, int event) {
         uint64_t temp;
         [[maybe_unused]] auto rsize = read(this->m_ev_fd, &temp, sizeof(uint64_t));
         do_insert();
     }
+#endif
 
-    void kickstart_inserts() {
+    void on_thread_msg(const iomgr_msg& msg) {
+        switch (msg.m_type) {
+        case iomgr_msg_type::WAKEUP:
+            do_insert();
+            break;
+        default:
+            break;
+        }
+    }
+
+    void kickstart_inserts(uint32_t batch_size) {
+#if 0
         uint64_t temp = 1;
         [[maybe_unused]] auto wsize = write(this->m_ev_fd, &temp, sizeof(uint64_t));
+#endif
+        _batch_size = batch_size;
+        iomanager.send_msg(-1, iomgr_msg(iomgr_msg_type::WAKEUP));
     }
 
     void do_insert() {
         // Randomly pick a store client and write journal entry batch.
-        while (m_pending_issued_records.fetch_sub(batch_size) > 0) {
-            m_pending_comp_records.fetch_add(batch_size);
-            m_log_store_clients[rand() % m_log_store_clients.size()]->insert_next_batch(batch_size);
+        while (m_pending_issued_records.load() > 0) {
+            m_pending_issued_records.fetch_sub(_batch_size);
+            m_pending_comp_records.fetch_add(_batch_size);
+            m_log_store_clients[rand() % m_log_store_clients.size()]->insert_next_batch(_batch_size);
         }
     }
 
     void on_insert_completion(logstore_seq_num_t lsn) {
-        if ((m_pending_comp_records.fetch_sub(1) == 0) && (m_pending_issued_records == 0)) {
+        if ((m_pending_comp_records.fetch_sub(1) == 1) && (m_pending_issued_records == 0)) {
             m_pending_cv.notify_all();
         }
     }
@@ -185,26 +292,110 @@ public:
         }
     }
 
+    void read_validate(bool expect_all_completed = false) {
+        for (auto& lsc : m_log_store_clients) {
+            lsc->read_validate(expect_all_completed);
+        }
+    }
+
+    void truncate_validate() {
+        for (auto i = 0u; i < m_log_store_clients.size(); ++i) {
+            auto& lsc = m_log_store_clients[i];
+
+            // lsc->truncate(lsc->m_cur_lsn.load() - 1);
+            lsc->truncate(lsc->m_log_store->get_contiguous_completed_seq_num(0));
+            lsc->read_validate();
+
+            auto tres = home_log_store_mgr.device_truncate(true);
+#if 0
+            if (parallel_to_writes) {
+                if (i < m_log_store_clients.size() - 1) {
+                    ASSERT_EQ(tres.idx, m_truncate_log_idx.load());
+                } else {
+                    // Last one should move the device truncation log idx
+                    ASSERT_GT(tres.idx, m_truncate_log_idx.load());
+                    m_truncate_log_idx.store(tres.idx);
+                }
+#endif
+            ASSERT_GE(tres.idx, m_truncate_log_idx.load());
+            m_truncate_log_idx.store(tres.idx);
+        }
+    }
+
 protected:
     std::vector< std::unique_ptr< TestLogStoreClient > > m_log_store_clients;
-    int m_ev_fd;
-    iomgr::fd_info* m_ev_fdinfo;
+    //    int m_ev_fd;
+    //    iomgr::fd_info* m_ev_fdinfo;
 
     std::atomic< int64_t > m_pending_issued_records = 0;
     std::atomic< int64_t > m_pending_comp_records = 0;
     std::mutex m_pending_mtx;
     std::condition_variable m_pending_cv;
+    std::atomic< logid_t > m_truncate_log_idx = -1;
 
-    static constexpr uint32_t batch_size = 10;
+    static uint32_t _batch_size;
 };
+uint32_t LogStoreTest::_batch_size = 10u;
 
-TEST_F(LogStoreTest, RandomInsertThenTruncate) {
-    LogStoreTest::start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),
-                                  SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024,
-                                  SDS_OPTIONS["num_threads"].as< uint32_t >());
+TEST_F(LogStoreTest, RandomAndSequentialInsertThenTruncate) {
+    // ****************** Test 1 - Random write and truncate at the end **********************
+    LOGINFO("Step 1: Start homestore");
+    this->start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),
+                          SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024,
+                          SDS_OPTIONS["num_threads"].as< uint32_t >());
+
+    LOGINFO("Step 2: Prepare num records and create reqd log stores");
     this->init(SDS_OPTIONS["num_logstores"].as< uint32_t >(), SDS_OPTIONS["num_records"].as< uint32_t >());
-    this->kickstart_inserts();
+
+    LOGINFO("Step 3: Inserting randomly within a batch of 10 in parallel fashion as a burst");
+    this->kickstart_inserts(10);
+
+    LOGINFO("Step 4: Wait for the Inserts to complete");
     this->wait_for_inserts();
+
+    LOGINFO("Step 5: Read all the inserts one by one for each log store to validate if what is written is valid");
+    this->read_validate(true);
+
+    LOGINFO("Step 6: Truncate all of the inserts one log store at a time and validate log dev truncation is marked "
+            "correctly and also validate if all data prior to truncation return exception");
+    this->truncate_validate();
+
+    // ****************** Test 2 - Sequential write and parallel truncate **********************
+    LOGINFO("Step 7: Reinit the num records to start sequential write test");
+    this->init(0, SDS_OPTIONS["num_records"].as< uint32_t >());
+
+    LOGINFO("Step 8: Issue sequential inserts as a burst");
+    this->kickstart_inserts(1);
+
+    auto trunc_attempt = 0;
+    LOGINFO("Step 9: In parallel to writes issue truncation upto completion");
+    do {
+        usleep(1000);
+        this->truncate_validate();
+        ++trunc_attempt;
+        ASSERT_LT(trunc_attempt, 30);
+        LOGINFO("Still pending completions = {}, pending issued = {}", this->m_pending_comp_records.load(),
+                m_pending_issued_records.load());
+    } while (((this->m_pending_comp_records != 0) || (m_pending_issued_records != 0)));
+    LOGINFO("Truncation has been issued and validated for {} times before all records are completely truncated",
+            trunc_attempt);
+
+    LOGINFO("Step 10: Wait for the Inserts to complete");
+    this->wait_for_inserts();
+
+    LOGINFO("Step 11: Do a final truncation and validate");
+    this->truncate_validate();
+
+    LOGINFO("Step 12: Restarting the homestore, which should trigger the log store recovery");
+    this->start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),
+                          SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024,
+                          SDS_OPTIONS["num_threads"].as< uint32_t >(), true /* restart */);
+
+    LOGINFO("Step 13: Wait for recovery to complete");
+    sleep(60);
+
+    LOGINFO("Step 14: Shutting down the homestore");
+    this->shutdown();
 }
 
 SDS_OPTIONS_ENABLE(logging, test_log_store)

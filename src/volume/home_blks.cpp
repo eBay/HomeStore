@@ -747,12 +747,12 @@ void HomeBlks::create_logdev_blkstore(vdev_info_block* vb) {
         m_logdev_blk_store = new BlkStore< VdevVarSizeBlkAllocatorPolicy >(
             m_dev_mgr, m_cache, size, PASS_THRU, 0, (char*)&blob, sizeof(blkstore_blob),
             HomeStoreConfig::atomic_phys_page_size, "logdev",
-            std::bind(&LogDev::process_logdev_completions, LogDev::instance(), std::placeholders::_1));
+            std::bind(&LogDev::process_logdev_completions, &HomeLogStoreMgr::logdev(), std::placeholders::_1));
     } else {
         m_logdev_blk_store = new BlkStore< VdevVarSizeBlkAllocatorPolicy >(
             m_dev_mgr, m_cache, vb, PASS_THRU, HomeStoreConfig::atomic_phys_page_size, "logdev",
             (vb->failed ? true : false),
-            std::bind(&LogDev::process_logdev_completions, LogDev::instance(), std::placeholders::_1));
+            std::bind(&LogDev::process_logdev_completions, &HomeLogStoreMgr::logdev(), std::placeholders::_1));
         if (vb->failed) {
             m_vdev_failed = true;
             LOGINFO("logdev block store is in failed state");
@@ -828,7 +828,7 @@ void HomeBlks::create_sb_blkstore(vdev_info_block* vb) {
         config_super_block_init(bid);
 
         /* update the context info */
-        m_sb_blk_store->update_vb_context((uint8_t*)&blob);
+        m_sb_blk_store->update_vb_context(sisl::blob((uint8_t*)&blob, (uint32_t)sizeof(sb_blkstore_blob)));
     } else {
         /* create a blkstore */
         m_sb_blk_store = new BlkStore< VdevVarSizeBlkAllocatorPolicy >(
@@ -1141,6 +1141,7 @@ void HomeBlks::shutdown_process(shutdown_comp_callback shutdown_comp_cb, bool fo
         m_http_server->stop();
         m_http_server.reset();
 
+        home_log_store_mgr.stop();
         shutdown_comp_cb(true);
     } catch (const std::exception& e) {
         LOGERROR("{}", e.what());

@@ -236,10 +236,14 @@ protected:
 
 typedef int64_t logid_t;
 struct logdev_key {
-    logid_t idx;
-    uint64_t dev_offset;
+    logid_t idx = -1;
+    uint64_t dev_offset = 0;
 
     bool operator==(const logdev_key& other) { return (other.idx == idx) && (other.dev_offset == dev_offset); }
+    friend std::ostream& operator<<(std::ostream& os, const logdev_key& k) {
+        os << "[idx=" << k.idx << " dev_offset=" << k.dev_offset << "]";
+        return os;
+    }
 };
 
 struct log_buffer {
@@ -271,25 +275,31 @@ struct logdev_info_block {
     static constexpr uint32_t size = 2048;
     static constexpr uint32_t store_info_size() { return size - sizeof(logdev_info_block); }
 
+    uint32_t blkstore_type = 4; // TODO: Padding. Once this persistent area is moved to recovery mgr, this 4 bytes
+                                // padding can be removed.
     uint64_t start_dev_offset = 0;
     uint8_t store_id_info[0];
 } __attribute__((packed));
 
 class LogDev {
 public:
-    typedef std::function< void(logstore_id_t, logdev_key, logdev_key, void*) > log_append_comp_callback;
+    typedef std::function< void(logstore_id_t, logdev_key, logdev_key, uint32_t nremaining_in_batch, void*) >
+        log_append_comp_callback;
     typedef std::function< void(logstore_id_t, logstore_seq_num_t, logdev_key, log_buffer) > log_found_callback;
     typedef std::function< void(logstore_id_t) > store_found_callback;
     typedef std::function< void(void) > flush_blocked_callback;
 
-    // static constexpr int64_t flush_threshold_size = 4096;
-    static constexpr int64_t flush_threshold_size = 100;
+    static constexpr int64_t flush_threshold_size = 4096;
+    // static constexpr int64_t flush_threshold_size = 100;
     static constexpr int64_t flush_data_threshold_size = flush_threshold_size - sizeof(log_group_header);
 
     static LogDev* instance() {
         static LogDev _instance;
         return &_instance;
     }
+
+    LogDev() = default;
+    ~LogDev() = default;
 
     /**
      * @brief Start the logdev. This method reads the log virtual dev info block, loads all of the store and prepares
@@ -298,6 +308,12 @@ public:
      * @param format: Do we need to format the logdev or not.
      */
     void start(bool format);
+
+    /**
+     * @brief Stop the logdev. It resets all the parameters it is using and thus can be started later
+     *
+     */
+    void stop();
 
     /**
      * @brief Append the data to the log device asynchronously. The buffer that is passed is expected to be valid, till
@@ -409,8 +425,6 @@ public:
     void unlock_flush();
 
 private:
-    LogDev() = default;
-    ~LogDev() = default;
     static LogGroup* new_log_group();
 
     LogGroup* prepare_flush(int32_t estimated_record);
@@ -424,7 +438,8 @@ private:
     void _persist_info_block();
 
 private:
-    sisl::StreamTracker< log_record > m_log_records; // The container which stores all in-memory log records
+    std::unique_ptr< sisl::StreamTracker< log_record > >
+        m_log_records; // The container which stores all in-memory log records
     std::unique_ptr< sisl::IDReserver > m_id_reserver;
     std::atomic< logid_t > m_log_idx = 0;            // Generator of log idx
     std::atomic< int64_t > m_pending_flush_size = 0; // How much flushable logs are pending
