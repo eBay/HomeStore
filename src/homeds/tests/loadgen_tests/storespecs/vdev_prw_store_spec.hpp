@@ -17,8 +17,6 @@ namespace loadgen {
 //
 // pread/rwrite APIs are not thread-safe;
 //
-// TODO: add truncate API
-//
 class VDevPRWStoreSpec : public StoreSpec< VDevKey, VDevValue > {
 struct write_info {
     uint64_t    size;

@@ -324,4 +324,11 @@ void LogDev::on_flush_completion(LogGroup* lg) {
     // Try to do chain flush if its really needed.
     flush_if_needed(0);
 }
+
+void LogDev::truncate(const logdev_key& key) {
+    auto store = HomeBlks::instance()->get_logdev_blkstore();
+    
+    m_log_records.truncate(key.idx);
+    store->truncate(key.dev_offset);
+}
 } // namespace homestore

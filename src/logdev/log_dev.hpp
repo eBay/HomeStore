@@ -385,6 +385,13 @@ public:
 
     crc32_t get_prev_crc() const { return m_last_crc; }
 
+    /**
+     * @brief : truncate up to input log id;
+     *
+     * @param key : the key containing log id that needs to be truncate up to;
+     */
+    void truncate(const logdev_key& key); 
+
 private:
     LogDev() = default;
     ~LogDev() = default;
