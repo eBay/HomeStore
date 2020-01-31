@@ -188,6 +188,7 @@ public:
     void init_done(std::error_condition err, const out_params& params);
 
     void print_tree(const VolumePtr& vol, bool chksum = true);
+    void verify_tree(const VolumePtr& vol);
     void print_node(const VolumePtr& vol, uint64_t blkid, bool chksum = true);
 
 #ifndef NDEBUG
@@ -209,6 +210,7 @@ public:
     static void get_log_level(sisl::HttpCallData cd);
     static void set_log_level(sisl::HttpCallData cd);
     static void dump_stack_trace(sisl::HttpCallData cd);
+    static void verify_hs(sisl::HttpCallData cd);
 
 private:
     BlkId alloc_blk();
@@ -230,6 +232,7 @@ private:
     void init_thread();
     void volume_destroy();
     bool is_shutdown();
+    void verify_vols();
     void shutdown_process(shutdown_comp_callback shutdown_comp_cb, bool force);
 };
 } // namespace homestore

@@ -40,8 +40,6 @@ thread_local struct io_event DriveEndPoint::events[MAX_COMPLETIONS] = {{}};
 thread_local int DriveEndPoint::ev_fd = 0;
 thread_local io_context_t DriveEndPoint::ioctx = 0;
 thread_local stack< struct iocb_info* > DriveEndPoint::iocb_list;
-thread_local DriveEndPointMetrics DriveEndPoint::m_metrics = DriveEndPointMetrics();
-int DriveEndPointMetrics::thread_num = 0;
 
 DriveEndPoint::DriveEndPoint(std::shared_ptr< iomgr::ioMgr > iomgr, comp_callback cb) :
         EndPoint(iomgr),

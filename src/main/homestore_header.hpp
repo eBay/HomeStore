@@ -81,5 +81,11 @@ public:
     btree_structures, btree_nodes, btree_generics, cache, device, httpserver_lmod, iomgr, varsize_blk_alloc,           \
         VMOD_VOL_MAPPING, volume, flip
 
+template< typename T >
+std::string to_hex( T i ) {
+    return fmt::format("{0:x}", i);
+}
+
+
 } // namespace homestore
 #endif

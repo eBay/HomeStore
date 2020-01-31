@@ -330,7 +330,10 @@ public:
     static btree_status_t refresh_node(SSDBtreeStore* store, boost::intrusive_ptr< SSDBtreeNode > bn,
                                        ssdbtree_multinode_req_ptr multinode_req, bool is_write_modifiable) {
 
-        if (boost::static_pointer_cast< btree_buffer_t >(bn)->is_err_set()) { return btree_status_t::stale_buf; }
+        if (boost::static_pointer_cast< btree_buffer_t >(bn)->is_err_set()) {
+            LOGERROR("failing refresh");
+            return btree_status_t::stale_buf;
+        }
 
         /* add the latest request pending on this node */
         try {

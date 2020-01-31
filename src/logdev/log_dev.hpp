@@ -424,6 +424,13 @@ public:
      */
     void unlock_flush();
 
+    /**
+     * @brief : truncate up to input log id;
+     *
+     * @param key : the key containing log id that needs to be truncate up to;
+     */
+    void truncate(const logdev_key& key);
+
 private:
     static LogGroup* new_log_group();
 

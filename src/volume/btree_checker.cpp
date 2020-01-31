@@ -26,17 +26,19 @@ extern "C" {
 
 using namespace homestore;
 
-#define VOL_PREFIX "/tmp/vol"
-#define STAGING_VOL_PREFIX "staging"
+std::vector< std::shared_ptr<Volume> > vol_list;
+#define VOL_PREFIX          "/tmp/vol"
+#define STAGING_VOL_PREFIX  "staging"
 
 THREAD_BUFFER_INIT;
 using log_level = spdlog::level::level_enum;
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 std::string vol_uuid;
-uint64_t    blkid = 0;
-bool        print_checksum = false;
-bool        cleanup_devices = false;
+
+uint64_t blkid = 0;
+bool print_tree  = false;
+bool verify_tree  = false;
 
 boost::uuids::string_generator gen;
 std::condition_variable        m_cv;
@@ -62,19 +64,35 @@ nlohmann::json get_config() {
 
 void init_done_cb(std::error_condition err, struct out_params params) {
 
-    auto uuid = gen(std::string(vol_uuid));
+    boost::uuids::uuid uuid;
+    if (vol_uuid.length() != 0) {
+        uuid = gen(std::string(vol_uuid));
+    }
     auto vol = VolInterface::get_instance()->lookup_volume(uuid);
-    if (!blkid) {
-        VolInterface::get_instance()->print_tree(vol, print_checksum);
+    if (print_tree) {
+        VolInterface::get_instance()->print_tree(vol);
+    } else if (verify_tree) {
+        if (vol) {
+            VolInterface::get_instance()->verify_tree(vol);
+        } else {
+            LOGINFO("verifying all volumes");
+            for (uint32_t i = 0; i < vol_list.size(); ++i) {
+                LOGINFO("verifying volume {}", VolInterface::get_instance()->get_name(vol_list[i]));
+                VolInterface::get_instance()->verify_tree(vol_list[i]);
+            }
+        }
     } else { // print node
-        VolInterface::get_instance()->print_node(vol, blkid, print_checksum);
+        VolInterface::get_instance()->print_node(vol, blkid, true);
     }
     notify_cmpl();
 }
 
 bool vol_found_cb(boost::uuids::uuid uuid) { return true; }
 
-void vol_mounted_cb(std::shared_ptr< Volume > vol, vol_state state) {}
+void vol_mounted_cb(    std::shared_ptr<Volume> vol,
+                        vol_state state     ) {
+    vol_list.push_back(vol);
+}
 
 void vol_state_change_cb(std::shared_ptr< Volume > vol, vol_state old_state, vol_state new_state) {}
 
@@ -89,8 +107,8 @@ void start_homestore() {
         true /* is_default */);
 
     std::cout << "Configuration\nio_flag = READ_ONLY\n";
-    std::cout << "min page size=" << config["min_page_size"] << std::endl;
-    params.min_virtual_page_size = config["min_page_size"];
+    std::cout << "min page size=" << config["min_virtual_page_size"] << std::endl;
+    params.min_virtual_page_size = config["min_virtual_page_size"];
     std::cout << "cache size=" << config["cache_size"] << std::endl;
     params.cache_size = config["cache_size"];
     params.disk_attr = disk_attributes();
@@ -122,33 +140,19 @@ void start_homestore() {
 void shutdown_callback() { VolInterface::del_instance(); }
 
 void shutdown() {
-    std::unique_lock< std::mutex > lk(m_mutex);
+    std::unique_lock<std::mutex> lk(m_mutex);
+    vol_list.clear();
     VolInterface::get_instance()->shutdown(std::bind(shutdown_callback));
-}
-
-void remove_files() {
-    if (cleanup_devices) {
-        for (auto device : params.devices) {
-            remove(device.dev_names.c_str());
-        }
-    }
-    int ret = 0;
-    for (uint32_t i = 0; !ret; i++) {
-        std::string name = VOL_PREFIX + std::to_string(i);
-        remove(name.c_str());
-        name = name + STAGING_VOL_PREFIX;
-        ret += remove(name.c_str());
-    }
 }
 
 /************************* CLI options ***************************/
 
-SDS_OPTION_GROUP(check_btree, (vol_uuid, "", "vol_uuid", "volume uuid", ::cxxopts::value< std::string >(), "string"),
-                 (blkid, "", "blkid", "block id", ::cxxopts::value< uint64_t >()->default_value("0"), "number"),
-                 (print_checksum, "", "print_checksum", "print checksum",
-                  ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
-                 (cleanup_devices, "", "cleanup_devices", "cleanup devices",
-                  ::cxxopts::value< uint32_t >()->default_value("0"), "flag"))
+SDS_OPTION_GROUP(check_btree,
+(vol_uuid, "", "vol_uuid", "volume uuid", ::cxxopts::value<std::string>()->default_value(""), "string"),
+(blkid, "", "blkid", "block id", ::cxxopts::value<uint64_t>()->default_value("0"), "number"),
+(print_tree, "", "print_tree", "print tree", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"),
+(verify_tree, "", "verify_tree", "verify tree", ::cxxopts::value<uint32_t>()->default_value("0"), "flag")
+)
 
 #define ENABLED_OPTIONS logging, home_blks, check_btree
 SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
@@ -159,15 +163,14 @@ int main(int argc, char* argv[]) {
     SDS_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
     sds_logging::SetLogger("check_btree");
     spdlog::set_pattern("[%D %T.%f] [%^%L%$] [%t] %v");
-    vol_uuid = SDS_OPTIONS["vol_uuid"].as< std::string >();
-    blkid = SDS_OPTIONS["blkid"].as< uint64_t >();
-    print_checksum = SDS_OPTIONS["print_checksum"].as< uint32_t >();
-    cleanup_devices = SDS_OPTIONS["cleanup_devices"].as< uint32_t >();
 
+    vol_uuid        = SDS_OPTIONS["vol_uuid"].as<std::string>();
+    blkid           = SDS_OPTIONS["blkid"].as<uint64_t>();
+    print_tree      = SDS_OPTIONS["print_tree"].as<uint32_t>();
+    verify_tree     = SDS_OPTIONS["verify_tree"].as<uint32_t>();
     start_homestore();
     wait_cmpl();
     shutdown();
-    remove_files();
 
     return 0;
 }

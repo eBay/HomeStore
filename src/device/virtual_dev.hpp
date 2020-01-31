@@ -211,9 +211,9 @@ private:
     std::atomic< uint64_t > m_used_size;
 
     // data structure for append write
-    uint64_t m_reserved_sz = 0;       // write size within chunk, used to check chunk boundary;
-    uint64_t m_write_sz_in_total = 0; // this size will be decreased by truncate and increased by append;
-    off_t m_seek_cursor = 0;          // the seek cursor
+    uint64_t m_reserved_sz = 0;                  // write size within chunk, used to check chunk boundary;
+    off_t m_seek_cursor = 0;                     // the seek cursor
+    std::atomic< uint64_t > m_write_sz_in_total; // this size will be decreased by truncate and increased by append;
 
 public:
     static constexpr size_t context_data_size() { return MAX_CONTEXT_DATA_SZ; }
@@ -228,9 +228,8 @@ public:
         m_pagesz = page_size;
         m_selector = std::make_unique< DefaultDeviceSelector >();
         m_recovery_init = false;
-        // m_write_sz_in_chunk.store(0, std::memory_order_relaxed);
-        m_write_sz_in_total = 0;
         m_reserved_sz = 0;
+        m_write_sz_in_total.store(0, std::memory_order_relaxed);
     }
 
     /* Load the virtual dev from vdev_info_block and create a Virtual Dev. */
@@ -254,8 +253,14 @@ public:
         HS_ASSERT_CMP(LOGMSG, nmirror, <, pdev_list.size()); // Mirrors should be at least one less than device list.
 
         if (is_stripe) {
-            m_chunk_size = ((size - 1) / pdev_list.size()) + 1;
             m_num_chunks = (uint32_t)pdev_list.size();
+            int cnt = 1;
+
+            do {
+                m_num_chunks = cnt * m_num_chunks;
+                m_chunk_size = size / m_num_chunks;
+                ++cnt;
+            } while (m_chunk_size > MAX_CHUNK_SIZE);
         } else {
             m_chunk_size = size;
             m_num_chunks = 1;
@@ -264,6 +269,10 @@ public:
         if (m_chunk_size % MIN_CHUNK_SIZE) {
             m_chunk_size = ALIGN_SIZE(m_chunk_size, MIN_CHUNK_SIZE);
             HS_LOG(INFO, device, "size of a chunk is resized to {}", m_chunk_size);
+        }
+
+        if (m_chunk_size > MAX_CHUNK_SIZE) {
+            throw homestore::homestore_exception("invalid chunk size in init", homestore_error::invalid_chunk_size);
         }
 
         /* make size multiple of chunk size */
@@ -341,26 +350,98 @@ public:
         (chunk->get_primary_chunk()) ? add_mirror_chunk(chunk) : add_primary_chunk(chunk);
     }
 
-    // start of vdev interface stubs
+    /**
+     * @brief : get the start logical offset where data starts;
+     *
+     * @return : the start logical offset where data starts;
+     */
+    off_t data_start_offset() const { return m_vb->data_start_offset; }
 
-    off_t data_start_offset() { return m_vb->data_start_offset; }
-
-    //
-    // Supposed to be called when truncate happens;
-    //
+    /**
+     * @brief : persist start logical offset to vdev's super block
+     * Supposed to be called when truncate happens;
+     *
+     * @param offset : the start logical offset to be persisted
+     */
     void update_data_start_offset(off_t offset) {
         m_vb->data_start_offset = offset;
         // call device manager to update it's in-memory copy and persist this field to disk;
         m_mgr->update_vb_data_start_offset(m_vb->vdev_id, offset);
     }
 
-    off_t get_reserved_tail_offset() { return data_start_offset() + m_write_sz_in_total + m_reserved_sz; }
+    /**
+     * @brief : get the logcial tail offset;
+     *
+     * @param reserve_space_include : include reserved space or not;
+     *
+     * @return : the logical tail offset;
+     */
+    off_t get_tail_offset(bool reserve_space_include = true) const {
+        auto tail = data_start_offset() + m_write_sz_in_total.load();
+        if (reserve_space_include) { tail += m_reserved_sz; }
+        if (tail >= get_size()) { tail -= get_size(); }
 
-    uint64_t get_used_space() { return m_write_sz_in_total + m_reserved_sz; }
+        return tail;
+    }
 
-    //
-    // TODO: organize chunks in a vector so that we can get next chunk id easily;
-    //
+    /**
+     * @brief : get the used space in vdev
+     *
+     * @return : the used space in vdev
+     */
+    uint64_t get_used_space() const { return m_write_sz_in_total.load() + m_reserved_sz; }
+
+    /**
+     * @brief : get the free space left in vdev
+     *
+     * @return : free space left in vdev
+     */
+    uint64_t get_free_space() { return get_size() - get_used_space(); }
+
+    /**
+     * @brief : truncate vdev to the provided logcial offset
+     *
+     * @param offset: logical offset that vdev needs to truncate to.
+     *
+     * Concurrency:
+     * 1. truncate and write can be received concurrently.
+     * 2. multiple truncate calls can be received concurently.
+     *
+     * Following things should happen for truncate:
+     * 1. update in-memory counter of total write size.
+     * 2. update vdev superblock of the new start logical offset that is being truncate to;
+     *
+     */
+    void truncate(const off_t offset) {
+        HS_LOG(INFO, device, "truncating to logical offset: {}", offset);
+        const off_t ds_off = data_start_offset();
+        uint64_t size_to_truncate = 0;
+        if (offset >= ds_off) {
+            // the truncate offset is larger than current start offset
+            size_to_truncate = offset - ds_off;
+        } else {
+            // the truncate offset is smaller than current start offset, meaning we are looping back to previous chunks;
+            size_to_truncate = get_size() - (ds_off - offset);
+            HS_ASSERT_CMP(RELEASE, get_tail_offset(), >=, offset);
+        }
+
+        // update in-memory total write size counter;
+        m_write_sz_in_total.fetch_sub(size_to_truncate, std::memory_order_relaxed);
+
+        // persist new start logical offset to sb, which is already lock protected;
+        update_data_start_offset(offset);
+    }
+
+    /**
+     * @brief : get the next chunk handle based on input dev_id and chunk_id
+     *
+     * @param dev_id : the current dev_id
+     * @param chunk_id : the current chunk_id
+     *
+     * @return : the hundle to the next chunk, if current chunk is the last chunk, loop back to begining device/chunk;
+     *
+     * TODO: organize chunks in a vector so that we can get next chunk id easily;
+     */
     PhysicalDevChunk* get_next_chunk(uint32_t dev_id, uint32_t chunk_id) {
         if ((chunk_id + 1) < m_primary_pdev_chunks_list[dev_id].chunks_in_pdev.size()) {
             // next chunk is within same dev;
@@ -373,48 +454,51 @@ public:
         return m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id];
     }
 
-    //
-    // @brief
-    //
-    // @param size :
-    // @param chunk_overlap_ok :
-    //
-    // @return
-    //
-    // One possible calling sequence:
-    //
-    // offset_1 = reserve(size1);
-    // offset_2 = reserve(size2);
-    //
-    // write_at_offset(offset_2);
-    // write_at_offset(offset_1);
-    //
+    /**
+     * @brief : allocate space specified by input size.
+     *
+     * @param size : size to be allocated
+     * @param chunk_overlap_ok : accepted chunk overlap while allocating spaces
+     *
+     * @return : the start unique offset of the allocated space
+     *
+     * Possible calling sequence:
+     * offset_1 = reserve(size1);
+     * offset_2 = reserve(size2);
+     * write_at_offset(offset_2);
+     * write_at_offset(offset_1);
+     */
     off_t alloc_blk(size_t size, bool chunk_overlap_ok = false) {
         HS_ASSERT_CMP(DEBUG, chunk_overlap_ok, ==, false);
 
         if (get_used_space() + size > get_size()) {
             // not enough space left;
-            HS_LOG(ERROR, device, "No space left! m_write_sz_in_total: {}, m_reserved_sz: {}", m_write_sz_in_total,
-                   m_reserved_sz);
+            HS_LOG(ERROR, device, "No space left! m_write_sz_in_total: {}, m_reserved_sz: {}",
+                   m_write_sz_in_total.load(), m_reserved_sz);
             return INVALID_OFFSET;
         }
 
-        off_t end_offset = get_reserved_tail_offset();
+        off_t ds_off = data_start_offset();
+        off_t end_offset = get_tail_offset();
         off_t offset_in_chunk = 0;
         uint32_t dev_id = 0, chunk_id = 0;
 
         auto dev_in_offset = logical_to_dev_offset(end_offset, dev_id, chunk_id, offset_in_chunk);
 
+#ifndef NDEBUG
+        if (end_offset < ds_off) {
+            HS_ASSERT_CMP(DEBUG, get_size() - get_used_space(), ==, (uint64_t)(ds_off - end_offset));
+        }
+#endif
+        // works for both "end_offset >= ds_off" and "end_offset < ds_off";
         if (offset_in_chunk + size <= m_chunk_size) {
-            // not acrossing boundary
-            // Nothing to do;
+            // not acrossing boundary, nothing to do;
         } else if ((get_used_space() + (m_chunk_size - offset_in_chunk) + size) <= get_size()) {
             // across chunk boundary, still enough space;
 
             // Update the overhead to total write size;
-            m_write_sz_in_total += (m_chunk_size - offset_in_chunk);
+            m_write_sz_in_total.fetch_add(m_chunk_size - offset_in_chunk, std::memory_order_relaxed);
 
-            // TODO: we can optimize how to avoid this two writes;
             // If across chunk boudary, update the chunk super-block of the chunk size
             auto chunk = m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id];
             m_mgr->update_end_of_chunk(chunk, offset_in_chunk);
@@ -426,30 +510,38 @@ public:
             m_mgr->update_end_of_chunk(chunk, m_chunk_size);
         } else {
             // across chunk boundary and no space left;
-            HS_LOG(ERROR, device, "No space left! m_write_sz_in_total: {}, m_reserved_sz: {}", m_write_sz_in_total,
-                   m_reserved_sz);
+            HS_LOG(ERROR, device, "No space left! m_write_sz_in_total: {}, m_reserved_sz: {}",
+                   m_write_sz_in_total.load(), m_reserved_sz);
             return INVALID_OFFSET;
             // m_reserved_sz stays sthe same;
         }
 
         // if we made a successful reserve, return the tail offset;
-        off_t offset = get_reserved_tail_offset();
+        off_t offset = get_tail_offset();
 
         // update reserved size;
         m_reserved_sz += size;
 
+        // assert that returnning logical offset is in good range;
+        HS_ASSERT_CMP(DEBUG, (uint64_t)offset, <=, get_size());
         return offset;
     }
 
-    //
-    // Note:
-    // write advances seek cursor
-    //
+    /**
+     * @brief : writes up to count bytes from the buffer starting at buf.
+     * write advances seek cursor;
+     *
+     * @param buf : buffer to be written
+     * @param count : size of buffer in bytes
+     * @param req : async req;
+     *
+     * @return : On success, the number of bytes written is returned.  On error, -1 is returned.
+     */
     ssize_t write(const void* buf, size_t count, boost::intrusive_ptr< virtualdev_req > req) {
         if (get_used_space() + count > get_size()) {
             // not enough space left;
-            HS_LOG(ERROR, device, "No space left! m_write_sz_in_total: {}, m_reserved_sz: {}", m_write_sz_in_total,
-                   m_reserved_sz);
+            HS_LOG(ERROR, device, "No space left! m_write_sz_in_total: {}, m_reserved_sz: {}",
+                   m_write_sz_in_total.load(), m_reserved_sz);
             return -1;
         }
 
@@ -466,20 +558,19 @@ public:
 
     ssize_t write(const void* buf, size_t count) { return write(buf, count, nullptr); }
 
-    //
-    // Note:
-    // pwrite doesn't advances cursor
-    //
-    ssize_t pwrite(const void* buf, size_t count, off_t offset) { return pwrite(buf, count, offset, nullptr); }
-
-    //
-    // Based on write offset and len:
-    // 1. Make serveral assertions to validate input
-    // 2. Update counter
-    // 3. Return offset_in_dev, chunk_id and dev_id to caller;
-    //
-    off_t process_write_offset(size_t len, off_t offset, uint32_t& dev_id, uint32_t& chunk_id,
-                               boost::intrusive_ptr< virtualdev_req > req) {
+    /**
+     * @brief : convert logical offset to physicall offset for pwrite/pwritev;
+     *
+     * @param len : len of data that is going to be written
+     * @param offset : logical offset to be written
+     * @param dev_id : the return value of device id
+     * @param chunk_id : the return value of chunk id
+     * @param req : async req
+     *
+     * @return : the unique offset
+     */
+    off_t process_pwrite_offset(size_t len, off_t offset, uint32_t& dev_id, uint32_t& chunk_id,
+                                boost::intrusive_ptr< virtualdev_req > req) {
         off_t offset_in_chunk = 0;
 
         if (req) { req->outstanding_cb.store(1); }
@@ -487,10 +578,12 @@ public:
         // convert logical offset to dev offset
         uint64_t offset_in_dev = logical_to_dev_offset(offset, dev_id, chunk_id, offset_in_chunk);
 
+        // this assert only valid for pwrite/pwritev, which calls alloc_blk to get the offset to do the write, which
+        // garunteens write will with the returned offset will not accross chunk boundary.
         HS_ASSERT_CMP(RELEASE, m_chunk_size - offset_in_chunk, >=, len,
-                      "Writing size: {} acrossing chunk is not allowed!", len);
+                      "Writing size: {} crossing chunk is not allowed!", len);
 
-        m_write_sz_in_total += len;
+        m_write_sz_in_total.fetch_add(len, std::memory_order_relaxed);
 
         PhysicalDevChunk* chunk = m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id];
         if (req) {
@@ -504,12 +597,12 @@ public:
     }
 
     //
-    // split `do_write` from `pwrite` so that `write` could re-use this sub-routine
+    // split do_write from pwrite so that write could re-use this sub-routine
     //
     ssize_t do_pwrite(const void* buf, size_t count, off_t offset, boost::intrusive_ptr< virtualdev_req > req) {
         uint32_t dev_id = 0, chunk_id = 0;
 
-        auto offset_in_dev = process_write_offset(count, offset, dev_id, chunk_id, req);
+        auto offset_in_dev = process_pwrite_offset(count, offset, dev_id, chunk_id, req);
 
         ssize_t bytes_written = 0;
         try {
@@ -530,20 +623,23 @@ public:
         return bytes_written;
     }
 
-    //
-    // Important assumption:
-    // pwrite/pwritev always use offset returned from alloc_blk to do the write;
-    //
-    // Note:
-    // 1. pwrite should not across chunk boundaries
-    //    because alloc_blk garunteens offset returned always doesn't across chunk boundary;
-    //
-    ssize_t pwrite(const void* buf, size_t count, off_t offset, boost::intrusive_ptr< virtualdev_req > req) {
+    /**
+     * @brief : writes up to count bytes from the buffer starting at buf at offset offset.
+     * The cursor is not changed.
+     * pwrite always use offset returned from alloc_blk to do the write;
+     * pwrite should not across chunk boundaries because alloc_blk garunteens offset
+     * returned always doesn't across chunk boundary;
+     *
+     * @param buf : buffer pointing to the data being written
+     * @param count : size of buffer to be written
+     * @param offset : offset to be written
+     * @param req : async req
+     *
+     * @return : On success, the number of bytes read or written is returned, or -1 on error.
+     */
+    ssize_t pwrite(const void* buf, size_t count, off_t offset, boost::intrusive_ptr< virtualdev_req > req = nullptr) {
         HS_ASSERT_CMP(RELEASE, count, <=, m_reserved_sz, "Write size:{} larger then reserved size: {} is not allowed!",
                       count, m_reserved_sz);
-
-        HS_ASSERT_CMP(RELEASE, (uint64_t)get_reserved_tail_offset(), >=, (uint64_t)(offset + count),
-                      "Wrting at offset: {}, which is out of reserved portion is not allowed!", offset);
 
         // update reserved size
         m_reserved_sz -= count;
@@ -551,7 +647,19 @@ public:
         return do_pwrite(buf, count, offset, req);
     }
 
-    ssize_t do_pwrite_internal(PhysicalDev* pdev, PhysicalDevChunk* chunk, const char* buf, const uint32_t len,
+    /**
+     * @brief : the internal implementation of pwrite
+     *
+     * @param pdev : pointer to devic3
+     * @param pchunk : pointer to chunk
+     * @param buf : buffer to be written
+     * @param len : length of buffer
+     * @param offset_in_dev : physical offset in device to be written
+     * @param req : if req is null, it will be sync call, if not, it will be async call;
+     *
+     * @return : bytes written;
+     */
+    ssize_t do_pwrite_internal(PhysicalDev* pdev, PhysicalDevChunk* pchunk, const char* buf, const uint32_t len,
                                const uint64_t offset_in_dev, boost::intrusive_ptr< virtualdev_req > req) {
         COUNTER_INCREMENT(pdev->get_metrics(), drive_write_vector_count, 1);
 
@@ -575,28 +683,30 @@ public:
         if (get_nmirrors()) {
             // We do not support async mirrored writes yet.
             HS_ASSERT(DEBUG, ((req == nullptr) || req->isSyncCall), "Expected null req or a sync call");
-            write_nmirror(buf, len, chunk, offset_in_dev);
+            write_nmirror(buf, len, pchunk, offset_in_dev);
         }
 
         return bytes_written;
     }
 
-    //
-    // sync pwritev
-    //
-    ssize_t pwritev(const struct iovec* iov, int iovcnt, off_t offset) { return pwritev(iov, iovcnt, offset, nullptr); }
-
-    //
-    // async pwritev
-    //
-    // Note:
-    // 1. pwritev should not across chunk boundaries
-    //    because alloc_blk garunteens offset returned always doesn't across chunk boundary;
-    //
-    ssize_t pwritev(const struct iovec* iov, int iovcnt, off_t offset, boost::intrusive_ptr< virtualdev_req > req) {
+    /**
+     * @brief : writes iovcnt buffers of data described by iov to the offset.
+     * pwritev doesn't advance curosr;
+     *
+     * @param iov : the iovec that holds vector of data buffers
+     * @param iovcnt : size of iov
+     * @param offset : offset to be written
+     * @param req : aync req.
+     * if req is not nullptr, it will be an async call.
+     * if req is nullptr, it will be a sync call.
+     *
+     * @return : On success, number of bytes written. On error, -1 is returned
+     */
+    ssize_t pwritev(const struct iovec* iov, int iovcnt, off_t offset,
+                    boost::intrusive_ptr< virtualdev_req > req = nullptr) {
         uint32_t dev_id = 0, chunk_id = 0;
         auto len = get_len(iov, iovcnt);
-        auto offset_in_dev = process_write_offset(len, offset, dev_id, chunk_id, req);
+        auto offset_in_dev = process_pwrite_offset(len, offset, dev_id, chunk_id, req);
 
         ssize_t bytes_written = 0;
         try {
@@ -616,13 +726,17 @@ public:
         return bytes_written;
     }
 
-    //
-    // read advances seek cursor
-    //
-    // read needs to take care of end of chunk and if the read size is acrossing the end of chunk:
-    // 1. Only read the size before end of chunk;
-    // 2. Update m_seek_cursor to next chunk;
-    //
+    /**
+     * @brief : read up to count bytes into the buffer starting at buf.
+     * Only read the size before end of chunk and update m_seek_cursor to next chunk;
+     *
+     * @param buf : the buffer that points to read out data
+     * @param count : the size of buffer;
+     *
+     * @return : On success, the number of bytes read is returned (zero indicates end of file), and the cursor is
+     * advanced by this number. it is not an error if this number is smaller than the number requested, because it can
+     * be end of chunk, since read won't across chunk.
+     */
     ssize_t read(void* buf, size_t count) {
         uint32_t dev_id = 0, chunk_id = 0;
         off_t offset_in_chunk = 0;
@@ -660,13 +774,16 @@ public:
         return bytes_read;
     }
 
-    //
-    // pread doesn't need to care about the "end of chunk", just return anything that is requested by the offset;
-    //
-    // Note:
-    // pread doesn't advance m_seek_curosr
-    //
-    //
+    /**
+     * @brief : reads up to count bytes at offset into the buffer starting at buf.
+     * The curosr is not updated.
+     *
+     * @param buf : the buffer that points to the read out data.
+     * @param count : size of buffer
+     * @param offset : the start offset to do read
+     *
+     * @return : On success, returns the number of bytes. On error, -1 is returned.
+     */
     ssize_t pread(void* buf, size_t count, off_t offset) {
         uint32_t dev_id = 0, chunk_id = 0;
         off_t offset_in_chunk = 0;
@@ -685,24 +802,25 @@ public:
         return do_read_internal(pdev, pchunk, offset_in_dev, (char*)buf, count, nullptr);
     }
 
-    //
-    // We don't have a use case for external caller of preadv now, meaning iov will always have only 1 element;
-    //
-    // return:
-    //     on error, -1 is returned;
-    //     on success, num of bytes read;
-    //
-    // Note: if the len is acrossing chunk boundary,
-    //       we only do read on one chunk and return the num of bytes read on this chunk;
-    //
-    //
-    ssize_t preadv(const struct iovec* iov, int iovcnt, off_t offset) { return preadv(iov, iovcnt, offset, nullptr); }
+    /**
+     * @brief : read at offset and save output to iov.
+     * We don't have a use case for external caller of preadv now, meaning iov will always have only 1 element;
+     * if the len is acrossing chunk boundary,
+     * we only do read on one chunk and return the num of bytes read on this chunk;
+     *
+     * @param iov : the iovect to store the read out data
+     * @param iovcnt : size of iovev
+     * @param offset : the start offset to read
+     *
+     * @return : return the number of bytes read; On error, -1 is returned.
+     */
+    ssize_t preadv(const struct iovec* iov, int iovcnt, off_t offset,
+                   boost::intrusive_ptr< virtualdev_req > req = nullptr) {
+        if (req) {
+            HS_ASSERT(DEBUG, false, "Not implemented yet");
+            return 0;
+        }
 
-    //
-    // sync preadv if req is nulptr;
-    // async preadv if req is not nullptr;
-    //
-    ssize_t preadv(const struct iovec* iov, int iovcnt, off_t offset, boost::intrusive_ptr< virtualdev_req > req) {
         uint32_t dev_id = 0, chunk_id = 0;
         off_t offset_in_chunk = 0;
         uint64_t len = get_len(iov, iovcnt);
@@ -726,7 +844,40 @@ public:
 
         return do_preadv_internal(pdev, chunk, offset_in_dev, iov, iovcnt, len, req);
     }
-
+#if 0
+    /**
+     * @brief  : async preadv
+     * No use case for now. Not implemeted yet; 
+     *
+     * @param iov
+     * @param iovcnt
+     * @param offset
+     * @param req
+     *
+     * @return 
+     */
+    ssize_t preadv(const struct iovec* iov, int iovcnt, off_t offset, boost::intrusive_ptr< virtualdev_req > req) {
+        HS_ASSERT(DEBUG, false, "Not implemented yet");
+        return 0;
+    }
+#endif
+    /**
+     * @brief : repositions the cusor of the device to the argument offset
+     * according to the directive whence as follows:
+     * SEEK_SET
+     *     The curosr is set to offset bytes.
+     * SEEK_CUR
+     *     The cursor is set to its current location plus offset bytes.
+     * SEEK_END
+     *     Not supported yet. No use case for now.
+     *
+     * @param offset : the logical offset
+     * @param whence : see above
+     *
+     * @return :  Upon successful completion, lseek() returns the resulting offset
+     * location as measured in bytes from the beginning of the file.  On
+     * error, the value (off_t) -1 is returned
+     */
     off_t lseek(off_t offset, int whence = SEEK_SET) {
         switch (whence) {
         case SEEK_SET:
@@ -744,8 +895,26 @@ public:
         return m_seek_cursor;
     }
 
+    /**
+     * @brief : this API can be replaced by lseek(0, SEEK_CUR);
+     *
+     * @return : current curosr offset
+     */
     off_t seeked_pos() const { return m_seek_cursor; }
 
+    /**
+     * @brief : internal implementation for preadv, so that it call be reused by different callers;
+     *
+     * @param pdev : pointer to device
+     * @param pchunk : pointer to chunk
+     * @param dev_offset : physical offset in device
+     * @param iov : io vector
+     * @param iovcnt : the count of vectors in iov
+     * @param size : size of buffers in iov
+     * @param req : async req, if req is nullptr, it is a sync call, if not, it is an async call;
+     *
+     * @return : size being read.
+     */
     ssize_t do_preadv_internal(PhysicalDev* pdev, PhysicalDevChunk* pchunk, const uint64_t dev_offset,
                                const struct iovec* iov, int iovcnt, uint64_t size,
                                boost::intrusive_ptr< virtualdev_req > req) {
@@ -781,24 +950,40 @@ public:
 
         return bytes_read;
     }
-    // end of vdev interface stubs
 
-    //
-    // convert unique offset;
-    //
-    uint64_t to_glob_uniq_offset(uint32_t dev_id, uint32_t chunk_id, uint64_t offset_in_chunk) {
-        return m_primary_pdev_chunks_list[dev_id].pdev->get_dev_offset() + get_chunk_start_offset(dev_id, chunk_id) +
-            offset_in_chunk;
-    }
-
+    /**
+     * @brief : convert logical offset in chunk to the physical device offset
+     *
+     * @param dev_id : the device id
+     * @param chunk_id : the chunk id;
+     * @param offset_in_chunk : the logical offset in chunk;
+     *
+     * @return : the physical device offset;
+     */
     uint64_t get_offset_in_dev(uint32_t dev_id, uint32_t chunk_id, uint64_t offset_in_chunk) {
         return get_chunk_start_offset(dev_id, chunk_id) + offset_in_chunk;
     }
 
+    /**
+     * @brief : get the physical start offset of the chunk;
+     *
+     * @param dev_id : the deivce id;
+     * @param chunk_id : the chunk id;
+     *
+     * @return : the physical start offset of the chunk;
+     */
     uint64_t get_chunk_start_offset(uint32_t dev_id, uint32_t chunk_id) {
         return m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id]->get_start_offset();
     }
 
+    /**
+     * @brief : get total length of the iov
+     *
+     * @param iov : iovector
+     * @param iovcnt : the count of vectors in iov
+     *
+     * @return : the total size of buffer in iov
+     */
     uint64_t get_len(const struct iovec* iov, const int iovcnt) {
         uint64_t len = 0;
         for (int i = 0; i < iovcnt; i++) {
@@ -807,10 +992,20 @@ public:
         return len;
     }
 
-    //
-    // if req is nullptr, it is sync write;
-    //
-    ssize_t do_pwritev_internal(PhysicalDev* pdev, PhysicalDevChunk* chunk, const struct iovec* iov, const int iovcnt,
+    /**
+     * @brief : internal implementation of pwritev, so that it can be called by differnet callers;
+     *
+     * @param pdev : pointer to device
+     * @param pchunk : pointer to chunk
+     * @param iov : io vector
+     * @param iovcnt : the count of vectors in iov
+     * @param len : total size of buffer length in iov
+     * @param offset_in_dev : physical offset in device
+     * @param req : if req is nullptr, it is a sync call, if not, it will be an async call;
+     *
+     * @return : size that has been written;
+     */
+    ssize_t do_pwritev_internal(PhysicalDev* pdev, PhysicalDevChunk* pchunk, const struct iovec* iov, const int iovcnt,
                                 const uint64_t len, const uint64_t offset_in_dev,
                                 boost::intrusive_ptr< virtualdev_req > req) {
         COUNTER_INCREMENT(pdev->get_metrics(), drive_write_vector_count, 1);
@@ -835,16 +1030,23 @@ public:
         if (get_nmirrors()) {
             // We do not support async mirrored writes yet.
             HS_ASSERT(DEBUG, ((req == nullptr) || req->isSyncCall), "Expected null req or a sync call");
-            writev_nmirror(iov, iovcnt, len, chunk, offset_in_dev);
+            writev_nmirror(iov, iovcnt, len, pchunk, offset_in_dev);
         }
 
         return bytes_written;
     }
 
-    //
-    // convert from logical offset to device offset
-    // it handles device overloop, e.g. reach to end of the device then start from the beginning device
-    //
+    /**
+     * @brief : Convert from logical offset to device offset.
+     * It handles device overloop, e.g. reach to end of the device then start from the beginning device
+     *
+     * @param log_offset : the logical offset
+     * @param dev_id     : the device id after convertion
+     * @param chunk_id   : the chunk id after convertion
+     * @param offset_in_chunk : the relative offset in chunk
+     *
+     * @return : the unique offset after converion;
+     */
     uint64_t logical_to_dev_offset(const off_t log_offset, uint32_t& dev_id, uint32_t& chunk_id,
                                    off_t& offset_in_chunk) {
         dev_id = 0;
@@ -871,24 +1073,28 @@ public:
         return 0;
     }
 
-    void truncate(const uint64_t offset) {
-        // to be implemented
+    /**
+     * @brief : the total size that has been written to vdev, this API will be called during reboot and
+     * upper layer(logdev) has completed scanning all the valid records in vdev and then update the total size
+     * in vdev.
+     *
+     * @param total_written_sz : total size written in vdev;
+     */
+    void update_write_sz(uint64_t total_written_sz) {
+        m_write_sz_in_total.store(total_written_sz, std::memory_order_relaxed);
     }
-
-    void update_write_sz(uint64_t total_written_sz) { m_write_sz_in_total = total_written_sz; }
 
     bool is_blk_alloced(BlkId& in_blkid) {
         PhysicalDevChunk* primary_chunk;
-        uint64_t primary_dev_offset = to_dev_offset(in_blkid, &primary_chunk);
         auto blkid = to_chunk_specific_id(in_blkid, &primary_chunk);
         return (primary_chunk->get_blk_allocator()->is_blk_alloced(blkid));
     }
 
     BlkAllocStatus alloc_blk(BlkId& in_blkid) {
         PhysicalDevChunk* primary_chunk;
-        uint64_t primary_dev_offset = to_dev_offset(in_blkid, &primary_chunk);
         auto blkid = to_chunk_specific_id(in_blkid, &primary_chunk);
         auto size = m_used_size.fetch_add(in_blkid.data_size(m_pagesz), std::memory_order_relaxed);
+
         HS_ASSERT_CMP(DEBUG, size, <=, get_size());
         return (primary_chunk->get_blk_allocator()->alloc(blkid));
     }
@@ -1289,9 +1495,7 @@ private:
     }
 
     BlkId to_glob_uniq_blkid(const BlkId& chunk_local_blkid, PhysicalDevChunk* chunk) const {
-        uint64_t glob_offset = ((chunk_local_blkid.get_id() * get_page_size()) + chunk->get_start_offset() +
-                                chunk->get_physical_dev()->get_dev_offset());
-        return BlkId(glob_offset / get_page_size(), chunk_local_blkid.get_nblks(), chunk->get_chunk_id());
+        return BlkId(chunk_local_blkid.get_id(), chunk_local_blkid.get_nblks(), chunk->get_chunk_id());
     }
 
     BlkId to_chunk_specific_id(const BlkId& glob_uniq_id, PhysicalDevChunk** chunk) const {
@@ -1299,23 +1503,14 @@ private:
         auto cid = glob_uniq_id.get_chunk_num();
         *chunk = m_mgr->get_chunk_mutable(cid);
 
-        // Offset within the physical device
-        uint64_t offset = (glob_uniq_id.get_id() * get_page_size()) - (*chunk)->get_physical_dev()->get_dev_offset();
-
-        // Offset within the chunk
-        uint64_t chunk_offset = offset - (*chunk)->get_start_offset();
-        return BlkId(chunk_offset / get_page_size(), glob_uniq_id.get_nblks(), 0);
+        return BlkId(glob_uniq_id.get_id(), glob_uniq_id.get_nblks(), 0);
     }
 
     uint64_t to_dev_offset(const BlkId& glob_uniq_id, PhysicalDevChunk** chunk) const {
         *chunk = m_mgr->get_chunk_mutable(glob_uniq_id.get_chunk_num());
 
-        // Offset within the physical device for a given chunk
-        return (glob_uniq_id.get_id() * get_page_size()) - (*chunk)->get_physical_dev()->get_dev_offset();
-    }
-
-    uint64_t to_chunk_offset(const BlkId& glob_uniq_id, PhysicalDevChunk** chunk) const {
-        return (to_dev_offset(glob_uniq_id, chunk) - (*chunk)->get_start_offset());
+        uint64_t dev_offset = glob_uniq_id.get_id() * get_page_size() + (*chunk)->get_start_offset();
+        return dev_offset;
     }
 
     uint32_t get_blks_per_chunk() const { return get_chunk_size() / get_page_size(); }

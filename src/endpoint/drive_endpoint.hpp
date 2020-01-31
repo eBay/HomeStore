@@ -45,10 +45,9 @@ struct iocb_info : public iocb {
 };
 
 class DriveEndPointMetrics : public sisl::MetricsGroupWrapper {
-    static int thread_num;
 
 public:
-    DriveEndPointMetrics() : sisl::MetricsGroupWrapper("DriveEndPoint", std::to_string(thread_num.fetch_add(1))) {
+    DriveEndPointMetrics() : sisl::MetricsGroupWrapper("DriveEndPoint", "DriveEndPoint") {
         LOGINFO("metrics is inited");
         REGISTER_COUNTER(spurious_events, "spurious events");
         REGISTER_COUNTER(io_get_event_err, "io get event error");
@@ -93,10 +92,11 @@ private:
     static thread_local stack< struct iocb_info* > iocb_list;
     static thread_local struct io_event events[MAX_COMPLETIONS];
 
-    atomic< uint64_t > spurious_events;
-    atomic< uint64_t > cmp_err;
-    comp_callback comp_cb;
-    static thread_local DriveEndPointMetrics m_metrics;
+	atomic<uint64_t> spurious_events;
+	atomic<uint64_t> cmp_err;
+	comp_callback comp_cb;
+    DriveEndPointMetrics m_metrics;
+
 };
 #else
 class DriveEndPoint : public iomgr::EndPoint {

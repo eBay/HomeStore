@@ -14,7 +14,7 @@ static void update_config(const LogConfig& log_config, jungle::DBConfig& db_conf
     db_config.logFileTtl_sec = log_config.logFileTtl_sec;
     db_config.maxEntriesInLogFile = log_config.maxEntriesInLogFile;
     db_config.maxLogFileSize = log_config.maxLogFileSize;
-    db_config.pureLsmMode = log_config.pureLsmMode;
+//    db_config.pureLsmMode = log_config.pureLsmMode;
 }
 
 LogStore::LogStore(const std::string& journal_uuid, const homestore::LogConfig& log_config) {
@@ -66,7 +66,7 @@ Status LogStore::append(uint64_t& out_seq_num, const KV& kv) {
         out_seq_num += 1;
     } else {
         // no logs so far case
-        assert(s.getValue() == jungle::Status::NO_LOGS);
+        assert(s.getValue() == jungle::Status::LOG_NOT_EXIST);
         out_seq_num = 1;
     }
     uint64_t log_id = out_seq_num;

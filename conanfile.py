@@ -4,7 +4,6 @@ from conans import ConanFile, CMake, tools
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-
     version = "0.12.01"
     revision_mode = "scm"
 
@@ -20,15 +19,14 @@ class HomestoreConan(ConanFile):
 
     requires = (
             # Frequently updated
-            #"iomgr/3.0.4@sds/iomgr_v3",
-            "iomgr/3.0.7@hkadayam/iomgr_v3",
-            "sisl/0.3.18@hkadayam/develop",
+            "iomgr/3.0.6@sds/iomgr_v3",
+            "sisl/0.3.17@sisl/develop",
 
             # Not commonly updated
             "flip/0.2.5@sds/develop",
             "sds_logging/6.1.0@sds/develop",
             "sds_options/1.0.0@sds/develop",
-            "jungle/2019.10.22@oss/testing",
+            "jungle/1.0.0@oss/develop",
 
             # FOSS, rarely updated
             "benchmark/1.5.0@oss/stable",
