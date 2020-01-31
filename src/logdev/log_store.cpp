@@ -26,10 +26,15 @@ void HomeLogStoreMgr::stop() {
 std::shared_ptr< HomeLogStore > HomeLogStoreMgr::create_new_log_store() {
     auto store_id = m_log_dev.reserve_store_id(true /* persist */);
     auto lstore = std::make_shared< HomeLogStore >(store_id);
-    m_id_logstore_map.wlock()->insert(std::make_pair<>(store_id, lstore));
+    m_id_logstore_map.wlock()->insert(std::make_pair<>(store_id, logstore_info_t{lstore, nullptr}));
     return lstore;
 }
 
+void HomeLogStoreMgr::open_log_store(logstore_id_t store_id, const log_store_opened_cb_t& on_open_cb) {
+    m_id_logstore_map.wlock()->insert(std::make_pair<>(store_id, logstore_info_t{nullptr, on_open_cb}));
+}
+
+#if 0
 std::shared_ptr< HomeLogStore > HomeLogStoreMgr::open_log_store(logstore_id_t store_id) {
     auto m = m_id_logstore_map.rlock();
     auto it = m->find(store_id);
@@ -39,10 +44,20 @@ std::shared_ptr< HomeLogStore > HomeLogStoreMgr::open_log_store(logstore_id_t st
     }
     return it->second;
 }
+#endif
 
 void HomeLogStoreMgr::__on_log_store_found(logstore_id_t store_id) {
-    auto lstore = std::make_shared< HomeLogStore >(store_id);
-    m_id_logstore_map.wlock()->insert(std::make_pair<>(store_id, lstore));
+    auto m = m_id_logstore_map.rlock();
+    auto it = m->find(store_id);
+    if (it == m->end()) {
+        LOGERROR("Store Id {} found but not opened yet, ignoring the store", store_id);
+        return;
+    }
+
+    LOGINFO("Found a logstore store_id={}, Creating a new HomeLogStore instance", store_id);
+    auto& l_info = const_cast< logstore_info_t& >(it->second);
+    l_info.m_log_store = std::make_shared< HomeLogStore >(store_id);
+    if (l_info.m_on_log_store_opened) l_info.m_on_log_store_opened(l_info.m_log_store);
 }
 
 void HomeLogStoreMgr::__on_io_completion(logstore_id_t id, logdev_key ld_key, logdev_key flush_ld_key,
@@ -57,7 +72,7 @@ void HomeLogStoreMgr::__on_io_completion(logstore_id_t id, logdev_key ld_key, lo
 
 void HomeLogStoreMgr::__on_logfound(logstore_id_t id, logstore_seq_num_t seq_num, logdev_key ld_key, log_buffer buf) {
     auto it = m_id_logstore_map.rlock()->find(id);
-    auto& log_store = it->second;
+    auto& log_store = it->second.m_log_store;
     log_store->on_log_found(seq_num, ld_key, buf);
 }
 
@@ -66,7 +81,7 @@ logdev_key HomeLogStoreMgr::device_truncate(bool dry_run) {
 
     m_id_logstore_map.withRLock([&](auto& id_logstore_map) {
         for (auto& id_logstore : id_logstore_map) {
-            auto& store_ptr = id_logstore.second;
+            auto& store_ptr = id_logstore.second.m_log_store;
             auto store_key = store_ptr->get_safe_truncation_log_dev_key();
             if (store_key.idx < min_safe_ld_key.idx) { min_safe_ld_key = store_key; }
         }
@@ -177,7 +192,7 @@ void HomeLogStore::on_log_found(logstore_seq_num_t seq_num, logdev_key ld_key, l
     m_records.create_and_complete(seq_num, ld_key);
     atomic_update_max(m_seq_num, seq_num + 1, std::memory_order_acq_rel);
     atomic_update_min(m_last_truncated_seq_num, seq_num, std::memory_order_acq_rel);
-    if (m_found_cb) m_found_cb(seq_num, buf, nullptr);
+    if (m_found_cb != nullptr) m_found_cb(seq_num, buf, nullptr);
 }
 
 void HomeLogStore::create_truncation_barrier() {

@@ -289,8 +289,8 @@ public:
     typedef std::function< void(logstore_id_t) > store_found_callback;
     typedef std::function< void(void) > flush_blocked_callback;
 
-    static constexpr int64_t flush_threshold_size = 4096;
-    // static constexpr int64_t flush_threshold_size = 100;
+    // static constexpr int64_t flush_threshold_size = 4096;
+    static constexpr int64_t flush_threshold_size = 512;
     static constexpr int64_t flush_data_threshold_size = flush_threshold_size - sizeof(log_group_header);
 
     static LogDev* instance() {

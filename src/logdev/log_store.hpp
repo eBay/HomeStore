@@ -14,11 +14,12 @@ struct logstore_record {
 };
 
 class logstore_req;
+class HomeLogStore;
 using log_req_comp_cb_t = std::function< void(logstore_req*, bool) >;
 using log_write_comp_cb_t = std::function< void(logstore_seq_num_t, bool, void*) >;
 using log_found_cb_t = std::function< void(logstore_seq_num_t, log_buffer, void*) >;
+using log_store_opened_cb_t = std::function< void(std::shared_ptr< HomeLogStore >) >;
 
-class HomeLogStore;
 struct logstore_req {
     HomeLogStore* log_store;    // Backpointer to the log store
     logstore_seq_num_t seq_num; // Log store specific seq_num (which could be monotonically increaseing with logstore)
@@ -48,6 +49,11 @@ struct logstore_req {
 struct truncation_entry_t {
     logstore_seq_num_t seq_num;
     logdev_key ld_key;
+};
+
+struct logstore_info_t {
+    std::shared_ptr< HomeLogStore > m_log_store;
+    log_store_opened_cb_t m_on_log_store_opened;
 };
 
 class HomeLogStore;
@@ -90,7 +96,8 @@ public:
      * @param store_id: Store ID of the log store to open
      * @return std::shared_ptr< HomeLogStore >
      */
-    std::shared_ptr< HomeLogStore > open_log_store(logstore_id_t store_id);
+    void open_log_store(logstore_id_t store_id, const log_store_opened_cb_t& on_open_cb);
+    // std::shared_ptr< HomeLogStore > open_log_store(logstore_id_t store_id);
 
     /**
      * @brief Truncate all the log stores physically on the device.
@@ -99,6 +106,15 @@ public:
      * @return logdev_key: Log dev key upto which the device is truncated.
      */
     logdev_key device_truncate(bool dry_run = false);
+
+    /**
+     * @brief Register a callback upon opening a new log store during recovery. As soon as HomeLogStoreMgr::start is
+     * called without format, the recovery will start and will create log stores automatically. Without calling this
+     * method before calling start, consumer will not be able to get callback on data.
+     *
+     * @param cb
+     */
+    void register_log_store_opened_cb(const log_store_opened_cb_t& cb) { m_log_store_opened_cb = cb; }
 
 private:
     void __on_log_store_found(logstore_id_t store_id);
@@ -109,7 +125,8 @@ private:
     void truncate_after_flush_lock(logstore_id_t store_id, logstore_id_t upto_seq_num);
 
 private:
-    folly::Synchronized< std::map< logstore_id_t, std::shared_ptr< HomeLogStore > > > m_id_logstore_map;
+    folly::Synchronized< std::map< logstore_id_t, logstore_info_t > > m_id_logstore_map;
+    log_store_opened_cb_t m_log_store_opened_cb;
     LogDev m_log_dev;
 };
 
