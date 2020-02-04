@@ -13,8 +13,8 @@
 namespace homeds {
 namespace loadgen {
 
-constexpr uint64_t CACHE_SIZE      = (4*1024*1024*1024ul);
-constexpr uint32_t VOL_PAGE_SIZE   = 4096;
+constexpr uint64_t CACHE_SIZE = (4 * 1024 * 1024 * 1024ul);
+constexpr uint32_t VOL_PAGE_SIZE = 4096;
 constexpr uint32_t MAX_CRC_DEPTH = 3;
 const uint64_t LOGDEV_BUF_SIZE = HomeStoreConfig::align_size * 1024;
 
@@ -55,7 +55,7 @@ public:
     VolumeManager() {
         // create vol loadgen folder
         auto ret = mkdir(vol_loadgen_dir.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-        if (ret != 0) {
+        if ((ret != 0) && (errno != EEXIST)) {
             LOGERROR("Create folder: {} failed.", vol_loadgen_dir);
             assert(0);
         }
@@ -408,7 +408,7 @@ private:
         // make sure the the lba doesn't write accross max vol size;
         // MAX_KEYS is initiated as max vol size;
         // lba: [0, max_vol_blks - max_io_nblks)
-        std::uniform_int_distribution<long long unsigned> dist(0, KeySpec::MAX_KEYS - max_io_nblks() - 1);
+        std::uniform_int_distribution< long long unsigned > dist(0, KeySpec::MAX_KEYS - max_io_nblks() - 1);
         return dist(generator);
     }
 
@@ -416,7 +416,7 @@ private:
         std::random_device rd;
         std::default_random_engine generator(rd());
         // nblks: [1, max_io_nblks]
-        std::uniform_int_distribution<long long unsigned> dist(1, max_io_nblks());
+        std::uniform_int_distribution< long long unsigned > dist(1, max_io_nblks());
         return dist(generator);
     }
 
@@ -633,10 +633,10 @@ private:
     uint64_t get_hash(uint8_t* bytes) { return util::Hash64((const char*)bytes, VOL_PAGE_SIZE); }
 
 private:
-    std::vector<dev_info>           m_device_info;
-    init_done_callback              m_done_cb;    // callback to loadgen test case;
-    std::vector<VolumePtr>          m_vols;       // volume instances;
-    std::vector<std::string>        m_file_names;
+    std::vector< dev_info > m_device_info;
+    init_done_callback m_done_cb;    // callback to loadgen test case;
+    std::vector< VolumePtr > m_vols; // volume instances;
+    std::vector< std::string > m_file_names;
 
     uint64_t m_max_vol_size;
     uint64_t m_max_cap;
