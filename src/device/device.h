@@ -138,6 +138,8 @@ struct vdev_info_block {
 
     uint32_t get_vdev_id() const { return vdev_id; }
     uint64_t get_size() const { return size; }
+
+    static constexpr uint32_t max_context_size() { return MAX_CONTEXT_DATA_SZ; }
 } __attribute((packed));
 
 // This assert is trying catch mistakes of overlaping the header to context_data portion.
@@ -460,8 +462,8 @@ public:
     void add_chunks(uint32_t vid, chunk_add_callback cb);
     void inited();
     void write_info_blocks();
-    void update_vb_context(uint32_t vdev_id, uint8_t* blob);
-    void get_vb_context(uint32_t vdev_id, char* ctx_data);
+    void update_vb_context(uint32_t vdev_id, const sisl::blob& ctx_data);
+    void get_vb_context(uint32_t vdev_id, const sisl::blob& ctx_data);
 
     void update_end_of_chunk(PhysicalDevChunk* chunk, off_t offset);
     void update_vb_data_start_offset(uint32_t vdev_id, off_t offset);

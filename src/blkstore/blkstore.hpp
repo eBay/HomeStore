@@ -618,9 +618,9 @@ public:
 
     uint64_t get_used_size() const { return m_vdev.get_used_size(); }
 
-    void update_vb_context(uint8_t* blob) { m_vdev.update_vb_context(blob); }
+    void update_vb_context(const sisl::blob& ctx_data) { m_vdev.update_vb_context(ctx_data); }
 
-    void get_vb_context(uint8_t* blob) const { m_vdev.get_vb_context(blob); }
+    void get_vb_context(const sisl::blob& ctx_data) const { m_vdev.get_vb_context(ctx_data); }
 
     VirtualDev< BAllocator, RoundRobinDeviceSelector >* get_vdev() { return &m_vdev; };
 

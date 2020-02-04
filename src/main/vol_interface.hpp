@@ -227,10 +227,14 @@ class VolInterface {
 
 public:
     virtual ~VolInterface() {}
-    static bool init(const init_params& cfg) {
+    static bool init(const init_params& cfg, bool force_reinit = false) {
         static std::once_flag flag1;
         try {
-            std::call_once(flag1, [&cfg]() { _instance = vol_homestore_init(cfg); });
+            if (force_reinit) {
+                _instance = vol_homestore_init(cfg);
+            } else {
+                std::call_once(flag1, [&cfg]() { _instance = vol_homestore_init(cfg); });
+            }
             return true;
         } catch (const std::exception& e) {
             LOGERROR("{}", e.what());
@@ -238,6 +242,23 @@ public:
             return false;
         }
     }
+
+#if 0
+    static bool restart(const init_params& cfg) {
+        if (_instance) {
+            std::condition_variable _cv;
+            _instance->shutdown([_cv]() { _cv.notify_all(); });
+
+            {
+                std::mutex _mtx;
+                std::unique_lock< std::mutex > lk(_mtx);
+                _cv.wait(lk, [&] { return true; });
+            }
+            del_instance();
+        }
+        _instance = vol_homestore_init(cfg);
+    }
+#endif
 
     static VolInterface* get_instance() { return _instance; }
     static void del_instance() { delete _instance; }

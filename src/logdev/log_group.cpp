@@ -1,4 +1,5 @@
 #include "log_dev.hpp"
+#include "log_store.hpp"
 
 namespace homestore {
 
@@ -82,7 +83,7 @@ const iovec_array& LogGroup::finish() {
     log_group_header* hdr = header();
     hdr->magic = LOG_GROUP_HDR_MAGIC;
     hdr->n_log_records = m_nrecords;
-    hdr->prev_grp_crc = LogDev::instance()->get_prev_crc();
+    hdr->prev_grp_crc = HomeLogStoreMgr::logdev().get_prev_crc();
     hdr->inline_data_offset = sizeof(log_group_header) + (m_max_records * sizeof(serialized_log_record));
     hdr->oob_data_offset = m_iovecs[0].iov_len;
     hdr->group_size = hdr->oob_data_offset + m_oob_data_pos;
