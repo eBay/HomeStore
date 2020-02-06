@@ -24,7 +24,7 @@ struct Param {
     uint64_t run_time;
     uint32_t per_read;
     uint32_t per_write;
-    bool     fixed_wrt_sz_enabled;
+    bool fixed_wrt_sz_enabled;
     uint32_t fixed_wrt_sz;
     uint32_t min_wrt_sz;
     uint32_t max_wrt_sz;
@@ -32,7 +32,6 @@ struct Param {
 };
 SDS_LOGGING_DECL(test_vdev)
 static Param gp;
-
 
 static void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthreads) {
     std::vector< dev_info > device_info;
@@ -42,7 +41,7 @@ static void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthre
 
     LOGINFO("creating {} device files with each of size {} ", ndevices, dev_size);
     for (uint32_t i = 0; i < ndevices; i++) {
-        std::string fpath = "/tmp/" + std::to_string(i + 1);
+        std::string fpath = "/tmp/test_vdev_" + std::to_string(i + 1);
         std::ofstream ofs(fpath.c_str(), std::ios::binary | std::ios::out);
         ofs.seekp(dev_size - 1);
         ofs.write("", 1);
@@ -89,10 +88,10 @@ static void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthre
 constexpr uint32_t dma_alignment = 512;
 
 class VDevIOTest : public ::testing::Test {
-struct write_info {
-    uint64_t size;
-    uint64_t crc;
-};
+    struct write_info {
+        uint64_t size;
+        uint64_t crc;
+    };
 
 public:
     uint64_t get_elapsed_time(Clock::time_point start) {
@@ -103,22 +102,18 @@ public:
     uint64_t io_cnt() { return m_read_cnt + m_wrt_cnt; }
 
     bool keep_running() {
-        if (get_elapsed_time(m_start_time) >= gp.run_time && io_cnt() >= gp.num_io) { 
-            return false;
-        }
+        if (get_elapsed_time(m_start_time) >= gp.run_time && io_cnt() >= gp.num_io) { return false; }
         return true;
     }
-    
-    uint32_t write_ratio () {
-        if (m_wrt_cnt == 0)  return 0;
+
+    uint32_t write_ratio() {
+        if (m_wrt_cnt == 0) return 0;
         if (m_read_cnt == 0) return 100;
-        return (100*m_wrt_cnt) / (m_read_cnt + m_wrt_cnt);
+        return (100 * m_wrt_cnt) / (m_read_cnt + m_wrt_cnt);
     }
 
     bool do_write() {
-        if (write_ratio() < gp.per_write) {
-            return true;
-        }
+        if (write_ratio() < gp.per_write) { return true; }
 
         return false;
     }
@@ -127,32 +122,32 @@ public:
         m_start_time = Clock::now();
         m_store = HomeBlks::instance()->get_logdev_blkstore();
         m_total_size = m_store->get_size();
-        
-        std::vector<ThreadPool::TaskFuture<void>> v;
+
+        std::vector< ThreadPool::TaskFuture< void > > v;
 
         while (keep_running()) {
             if (do_write()) {
-               random_write(); 
+                random_write();
             } else {
-               random_read();
+                random_read();
             }
 
-            if (time_to_truncate()) {
-                truncate(get_rand_truncate_offset());
-            }
+            if (time_to_truncate()) { truncate(get_rand_truncate_offset()); }
 
             print_counters(30); // print every 30 seconds;
         }
     }
-    
-    // get random truncate offset between [m_start_off + used_space*20%, m_start_off + used_space*80%], rounded up to 512 bytes;
+
+    // get random truncate offset between [m_start_off + used_space*20%, m_start_off + used_space*80%], rounded up to
+    // 512 bytes;
     off_t get_rand_truncate_offset() {
         auto used_space = m_store->get_used_space();
-        
+
         std::random_device rd;
         std::default_random_engine generator(rd());
-        std::uniform_int_distribution< long long unsigned > dist(m_start_off + used_space/5, m_start_off + (used_space*4)/5);
-        
+        std::uniform_int_distribution< long long unsigned > dist(m_start_off + used_space / 5,
+                                                                 m_start_off + (used_space * 4) / 5);
+
         auto rand_off = dist(generator);
         auto off = sisl::round_up(rand_off, dma_alignment);
 
@@ -161,12 +156,13 @@ public:
     }
 
     void truncate(off_t off_to_truncate) {
-        LOGINFO("truncating to offset: 0x{}, start: 0x{}, tail: 0x{}", to_hex(off_to_truncate), to_hex(m_store->get_start_offset()), to_hex(m_store->get_tail_offset()));
+        LOGINFO("truncating to offset: 0x{}, start: 0x{}, tail: 0x{}", to_hex(off_to_truncate),
+                to_hex(m_store->get_start_offset()), to_hex(m_store->get_tail_offset()));
 
         validate_truncate_offset(off_to_truncate);
 
         auto tail_before = m_store->get_tail_offset();
-        m_store->truncate(off_to_truncate);   
+        m_store->truncate(off_to_truncate);
         auto tail_after = m_store->get_tail_offset();
 
         HS_ASSERT_CMP(DEBUG, tail_before, ==, tail_after);
@@ -174,7 +170,7 @@ public:
 
         if (off_to_truncate > m_start_off) {
             // remove the offsets before truncate offset, since they are not valid for read anymore;
-            for (auto it = m_off_to_info_map.begin(); it != m_off_to_info_map.end(); ) {
+            for (auto it = m_off_to_info_map.begin(); it != m_off_to_info_map.end();) {
                 if (it->first < off_to_truncate && it->first >= m_start_off) {
                     LOGDEBUG("remove offset: 0x{}", to_hex(it->first));
                     it = m_off_to_info_map.erase(it);
@@ -182,8 +178,9 @@ public:
                     it++;
                 }
             }
-        } else {  // truncate offset is before m_start_off;
-            LOGINFO("truncating before start offset, looping back to beginning devices at offset: 0x{}", to_hex(off_to_truncate));
+        } else { // truncate offset is before m_start_off;
+            LOGINFO("truncating before start offset, looping back to beginning devices at offset: 0x{}",
+                    to_hex(off_to_truncate));
             m_truncate_loop_back_cnt++;
             // remove the offsets before truncate offset and after m_start_off;
             for (auto it = m_off_to_info_map.begin(); it != m_off_to_info_map.end();) {
@@ -195,10 +192,10 @@ public:
                 }
             }
         }
-        
+
         m_start_off = off_to_truncate;
         m_truncate_cnt++;
-        
+
         space_usage_asserts();
     }
 
@@ -207,7 +204,8 @@ public:
 
         auto elapsed_time = get_elapsed_time(pt_start);
         if (elapsed_time > print_every_n_secs) {
-            LOGINFO("write: {}, read: {}, truncate: {}, truncate_loop_back: {}", m_wrt_cnt , m_read_cnt, m_truncate_cnt, m_truncate_loop_back_cnt);
+            LOGINFO("write: {}, read: {}, truncate: {}, truncate_loop_back: {}", m_wrt_cnt, m_read_cnt, m_truncate_cnt,
+                    m_truncate_loop_back_cnt);
             pt_start = Clock::now();
         }
     }
@@ -224,9 +222,7 @@ public:
     bool time_to_truncate() {
         auto used_space = m_store->get_used_space();
 
-        if (gp.truncate_watermark_percentage <= (100*used_space / m_total_size)) {
-            return true;
-        }
+        if (gp.truncate_watermark_percentage <= (100 * used_space / m_total_size)) { return true; }
         return false;
     }
 
@@ -252,24 +248,26 @@ public:
     void validate_read_offset(off_t off) {
         auto tail_offset = m_store->get_tail_offset();
         auto start_offset = m_store->get_start_offset();
-        
+
         HS_ASSERT_CMP(DEBUG, m_start_off, ==, start_offset);
         if (start_offset < tail_offset) {
             HS_ASSERT_CMP(DEBUG, off, >=, start_offset, "Wrong offset: {}, start_off: {}", off, start_offset);
             HS_ASSERT_CMP(DEBUG, off, <, tail_offset, "Wrong offset: {}, tail_offset: {}", off, tail_offset);
         } else {
-            HS_ASSERT(DEBUG, off < tail_offset || off >= start_offset, "Wrong offset: {}, start: {}, tail: {}", off, start_offset, tail_offset);
+            HS_ASSERT(DEBUG, off < tail_offset || off >= start_offset, "Wrong offset: {}, start: {}, tail: {}", off,
+                      start_offset, tail_offset);
         }
     }
 
     void random_read() {
         auto it = m_off_to_info_map.begin();
-        std::advance(it, rand() % m_off_to_info_map.size());        
+        std::advance(it, rand() % m_off_to_info_map.size());
         auto off_to_read = it->first;
 
-        LOGDEBUG("reading on offset: 0x{}, size: {}, start: 0x{}, tail: 0x{}", to_hex(off_to_read), it->second.size, to_hex(m_start_off), to_hex(m_store->get_tail_offset()));
-        
-        //validate_read_offset(off_to_read);
+        LOGDEBUG("reading on offset: 0x{}, size: {}, start: 0x{}, tail: 0x{}", to_hex(off_to_read), it->second.size,
+                 to_hex(m_start_off), to_hex(m_store->get_tail_offset()));
+
+        // validate_read_offset(off_to_read);
 
         uint8_t* buf = nullptr;
         auto ret = posix_memalign((void**)&buf, 4096, it->second.size);
@@ -282,35 +280,37 @@ public:
         HS_ASSERT_CMP(DEBUG, (size_t)bytes_read, ==, (size_t)(it->second.size));
 
         auto crc = util::Hash64((const char*)buf, (size_t)bytes_read);
-        HS_ASSERT_CMP(DEBUG, crc, ==, it->second.crc, 
-                "CRC Mismatch: read out crc: {}, saved write: {}", 
-                crc, it->second.crc);
-        free(buf);       
+        HS_ASSERT_CMP(DEBUG, crc, ==, it->second.crc, "CRC Mismatch: read out crc: {}, saved write: {}", crc,
+                      it->second.crc);
+        free(buf);
         m_read_cnt++;
     }
 
     void random_write() {
         auto sz_to_wrt = rand_size();
         auto off_to_wrt = m_store->alloc_blk(sz_to_wrt);
-        
+
         auto it = m_off_to_info_map.find(off_to_wrt);
         if (it != m_off_to_info_map.end()) {
-            LOGERROR("write offset already exists, off: 0x{}, size: {}, crc: 0x{}", to_hex(it->first), it->second.size, to_hex(it->second.crc));
-            HS_ASSERT(DEBUG, it == m_off_to_info_map.end(), "assert failure writing to some offset: {} that's already in the map!", off_to_wrt);
+            LOGERROR("write offset already exists, off: 0x{}, size: {}, crc: 0x{}", to_hex(it->first), it->second.size,
+                     to_hex(it->second.crc));
+            HS_ASSERT(DEBUG, it == m_off_to_info_map.end(),
+                      "assert failure writing to some offset: {} that's already in the map!", off_to_wrt);
         }
-        
+
         validate_write_offset(off_to_wrt, sz_to_wrt);
-        
-        LOGDEBUG("writing to offset: 0x{}, size: {}, start: 0x{}, tail: 0x{}", to_hex(off_to_wrt), sz_to_wrt, to_hex(m_start_off), to_hex(m_store->get_tail_offset()));
+
+        LOGDEBUG("writing to offset: 0x{}, size: {}, start: 0x{}, tail: 0x{}", to_hex(off_to_wrt), sz_to_wrt,
+                 to_hex(m_start_off), to_hex(m_store->get_tail_offset()));
 
         uint8_t* buf = nullptr;
         auto ret = posix_memalign((void**)&buf, 4096, sz_to_wrt);
         HS_ASSERT_CMP(RELEASE, ret, ==, 0);
-        
+
         gen_rand_buf(buf, sz_to_wrt);
-        
+
         auto bytes_written = m_store->pwrite(buf, sz_to_wrt, off_to_wrt);
-        
+
         HS_ASSERT_CMP(DEBUG, bytes_written, !=, -1, "bytes_written returned -1, errno: {}", errno);
         HS_ASSERT_CMP(DEBUG, (size_t)bytes_written, ==, (size_t)sz_to_wrt);
         HS_ASSERT_CMP(DEBUG, (size_t)off_to_wrt, <, (size_t)m_total_size);
@@ -318,7 +318,7 @@ public:
         m_wrt_cnt++;
         m_off_to_info_map[off_to_wrt].size = sz_to_wrt;
         m_off_to_info_map[off_to_wrt].crc = util::Hash64((const char*)buf, (size_t)sz_to_wrt);
-        
+
         free(buf);
     }
 
@@ -327,14 +327,12 @@ public:
         for (size_t i = 0u; i < len - 1; ++i) {
             s[i] = alphanum[rand() % (sizeof(alphanum) - 1)];
         }
-        s[len-1] = 0;
+        s[len - 1] = 0;
     }
 
     // size between 512 ~ 8192, 512 aligned;
     uint32_t rand_size() {
-        if (gp.fixed_wrt_sz_enabled) {
-            return gp.fixed_wrt_sz;
-        }
+        if (gp.fixed_wrt_sz_enabled) { return gp.fixed_wrt_sz; }
 
         std::random_device rd;
         std::default_random_engine generator(rd());
@@ -343,44 +341,45 @@ public:
     }
 
 private:
-    off_t       m_start_off = 0;
-    uint64_t    m_wrt_cnt = 0;
-    uint64_t    m_read_cnt = 0;
-    uint64_t    m_truncate_cnt = 0;
-    uint64_t    m_truncate_loop_back_cnt = 0;
-    uint64_t    m_total_size = 0;
-    std::map<off_t, write_info>     m_off_to_info_map;
-    Clock::time_point               m_start_time;
-    homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >*        m_store;
+    off_t m_start_off = 0;
+    uint64_t m_wrt_cnt = 0;
+    uint64_t m_read_cnt = 0;
+    uint64_t m_truncate_cnt = 0;
+    uint64_t m_truncate_loop_back_cnt = 0;
+    uint64_t m_total_size = 0;
+    std::map< off_t, write_info > m_off_to_info_map;
+    Clock::time_point m_start_time;
+    homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >* m_store;
 };
 
 TEST_F(VDevIOTest, VDevIOTest) { this->execute(); }
 
-SDS_OPTION_GROUP(test_vdev,
-                 (truncate_watermark_percentage, "", "truncate_watermark_percentage", "percentage of space usage to trigger truncate",
-                  ::cxxopts::value< uint32_t >()->default_value("80"), "number"),
-                 (fixed_write_size_enabled, "", "fixed_write_size_enabled", "fixed write size enabled 0 or 1",
-                  ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
-                 (fixed_write_size, "", "fixed_write_size", "fixed write size",
-                  ::cxxopts::value< uint32_t >()->default_value("512"), "number"),
-                 (min_write_size, "", "min_write_size", "minimum write size",
-                  ::cxxopts::value< uint32_t >()->default_value("512"), "number"),
-                 (max_write_size, "", "max_write_size", "maximum write size",
-                  ::cxxopts::value< uint32_t >()->default_value("8192"), "number"),
-                 (num_threads, "", "num_threads", "number of threads",
-                  ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
-                 (num_devs, "", "num_devs", "number of devices to create",
-                  ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
-                 (dev_size_mb, "", "dev_size_mb", "size of each device in MB",
-                  ::cxxopts::value< uint64_t >()->default_value("5120"), "number"), 
-                 (run_time, "", "run_time", "running time in seconds", 
-                  ::cxxopts::value< uint64_t >()->default_value("30"), "number"),
-                 (num_io, "", "num_io", "number of io", 
-                  ::cxxopts::value< uint64_t >()->default_value("3000"), "number"), 
-                 (per_read, "", "per_read", "read percentage of io that are reads", 
-                  ::cxxopts::value< uint32_t >()->default_value("20"), "number"),
-                 (per_write, "", "per_write", "write percentage of io that are writes", 
-                  ::cxxopts::value< uint32_t >()->default_value("80"), "number"));
+SDS_OPTION_GROUP(
+    test_vdev,
+    (truncate_watermark_percentage, "", "truncate_watermark_percentage",
+     "percentage of space usage to trigger truncate", ::cxxopts::value< uint32_t >()->default_value("80"), "number"),
+    (fixed_write_size_enabled, "", "fixed_write_size_enabled", "fixed write size enabled 0 or 1",
+     ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
+    (fixed_write_size, "", "fixed_write_size", "fixed write size", ::cxxopts::value< uint32_t >()->default_value("512"),
+     "number"),
+    (min_write_size, "", "min_write_size", "minimum write size", ::cxxopts::value< uint32_t >()->default_value("512"),
+     "number"),
+    (max_write_size, "", "max_write_size", "maximum write size", ::cxxopts::value< uint32_t >()->default_value("8192"),
+     "number"),
+    (num_threads, "", "num_threads", "number of threads", ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
+    (num_devs, "", "num_devs", "number of devices to create", ::cxxopts::value< uint32_t >()->default_value("2"),
+     "number"),
+    (dev_size_mb, "", "dev_size_mb", "size of each device in MB", ::cxxopts::value< uint64_t >()->default_value("5120"),
+     "number"),
+    (run_time, "", "run_time", "running time in seconds", ::cxxopts::value< uint64_t >()->default_value("30"),
+     "number"),
+    (num_io, "", "num_io", "number of io", ::cxxopts::value< uint64_t >()->default_value("3000"), "number"),
+    (per_read, "", "per_read", "read percentage of io that are reads",
+     ::cxxopts::value< uint32_t >()->default_value("20"), "number"),
+    (per_write, "", "per_write", "write percentage of io that are writes",
+     ::cxxopts::value< uint32_t >()->default_value("80"), "number"),
+    (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
+     cxxopts::value< int32_t >()->default_value("5003"), "port"));
 
 int main(int argc, char* argv[]) {
     SDS_OPTIONS_LOAD(argc, argv, logging, test_vdev);
@@ -390,28 +389,34 @@ int main(int argc, char* argv[]) {
 
     start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(), SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024,
                     SDS_OPTIONS["num_threads"].as< uint32_t >());
-    gp.num_io = SDS_OPTIONS["num_io"].as<uint64_t>();
-    gp.run_time = SDS_OPTIONS["run_time"].as<uint64_t>();
-    gp.per_read = SDS_OPTIONS["per_read"].as<uint32_t>();
-    gp.per_write = SDS_OPTIONS["per_write"].as<uint32_t>();
-    gp.fixed_wrt_sz_enabled = SDS_OPTIONS["fixed_write_size_enabled"].as<uint32_t>();
-    gp.fixed_wrt_sz = SDS_OPTIONS["fixed_write_size"].as<uint32_t>();
-    gp.min_wrt_sz = SDS_OPTIONS["min_write_size"].as<uint32_t>();
-    gp.max_wrt_sz = SDS_OPTIONS["max_write_size"].as<uint32_t>();
-    gp.truncate_watermark_percentage = SDS_OPTIONS["truncate_watermark_percentage"].as<uint32_t>();
+    gp.num_io = SDS_OPTIONS["num_io"].as< uint64_t >();
+    gp.run_time = SDS_OPTIONS["run_time"].as< uint64_t >();
+    gp.per_read = SDS_OPTIONS["per_read"].as< uint32_t >();
+    gp.per_write = SDS_OPTIONS["per_write"].as< uint32_t >();
+    gp.fixed_wrt_sz_enabled = SDS_OPTIONS["fixed_write_size_enabled"].as< uint32_t >();
+    gp.fixed_wrt_sz = SDS_OPTIONS["fixed_write_size"].as< uint32_t >();
+    gp.min_wrt_sz = SDS_OPTIONS["min_write_size"].as< uint32_t >();
+    gp.max_wrt_sz = SDS_OPTIONS["max_write_size"].as< uint32_t >();
+    gp.truncate_watermark_percentage = SDS_OPTIONS["truncate_watermark_percentage"].as< uint32_t >();
 
-    if (gp.per_read == 0 || gp.per_write == 0 || (gp.per_read + gp.per_write != 100)) { gp.per_read = 20; gp.per_write = 80; }
+    if (gp.per_read == 0 || gp.per_write == 0 || (gp.per_read + gp.per_write != 100)) {
+        gp.per_read = 20;
+        gp.per_write = 80;
+    }
 
     if (gp.truncate_watermark_percentage <= 5 || gp.truncate_watermark_percentage >= 95) {
         LOGERROR("truncate_watermark_percentage need to be between [5, 95], change to defaut value: 80");
         gp.truncate_watermark_percentage = 80;
     }
 
-    LOGINFO("Testing with run_time: {}, num_io: {},  read/write percentage: {}/{}, truncate_watermark_percentage: {}", 
+    LOGINFO("Testing with run_time: {}, num_io: {},  read/write percentage: {}/{}, truncate_watermark_percentage: {}",
             gp.run_time, gp.num_io, gp.per_read, gp.per_write, gp.truncate_watermark_percentage);
 
-    if (gp.fixed_wrt_sz_enabled) { LOGINFO("Testing with fixed write size: {}", gp.fixed_wrt_sz); } 
-    else { LOGINFO("Testing with min write size: {}, max write size: {}", gp.min_wrt_sz, gp.max_wrt_sz); }
+    if (gp.fixed_wrt_sz_enabled) {
+        LOGINFO("Testing with fixed write size: {}", gp.fixed_wrt_sz);
+    } else {
+        LOGINFO("Testing with min write size: {}, max write size: {}", gp.min_wrt_sz, gp.max_wrt_sz);
+    }
 
-    return RUN_ALL_TESTS();   
+    return RUN_ALL_TESTS();
 }
