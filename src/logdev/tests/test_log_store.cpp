@@ -79,6 +79,15 @@ public:
                     << "Size Mismatch for lsn=" << m_log_store->get_store_id() << ":" << i;
                 validate_data(tl, i);
             } catch (const std::exception& e) {
+                if (!expect_all_completed) {
+                    // In case we run truncation in parallel to read, it is possible truncate moved, so adjust the
+                    // truncated_upto accordingly.
+                    auto trunc_upto = m_log_store->truncated_upto();
+                    if (i <= trunc_upto) {
+                        i = trunc_upto;
+                        continue;
+                    }
+                }
                 LOGFATAL("Unexpected out_of_range exception for lsn={}:{}", m_log_store->get_store_id(), i);
             }
         }
@@ -102,10 +111,21 @@ public:
 
 private:
     test_log_data* prepare_data(logstore_seq_num_t lsn) {
-        auto sz = rand() % max_data_size;
+        uint32_t sz;
+        uint8_t* raw_buf;
 
         // Generate buffer of randome size and fill with specific data
-        auto raw_buf = (uint8_t*)malloc(sizeof(test_log_data) + sz);
+        if ((rand() % 100) < 10) {
+            // 10% of data is dma'ble aligned boundary
+            auto alloc_sz = sisl::round_up((rand() % max_data_size) + sizeof(test_log_data), dma_boundary);
+            int ret = posix_memalign((void**)&raw_buf, dma_boundary, alloc_sz);
+            assert(ret == 0);
+            sz = alloc_sz - sizeof(test_log_data);
+        } else {
+            sz = rand() % max_data_size;
+            raw_buf = (uint8_t*)malloc(sizeof(test_log_data) + sz);
+        }
+
         test_log_data* d = new (raw_buf) test_log_data();
         d->size = sz;
         char c = ((lsn % 94) + 33);
@@ -117,8 +137,6 @@ private:
     }
 
     void validate_data(test_log_data* d, logstore_seq_num_t lsn) {
-        ASSERT_LT(d->size, max_data_size);
-
         char c = ((lsn % 94) + 33);
         std::string actual = std::string((const char*)&d->data[0], (size_t)d->size);
         std::string expected = std::string((size_t)d->size, c);
@@ -134,7 +152,7 @@ private:
     std::atomic< logstore_seq_num_t > m_cur_lsn = 0;
     std::shared_ptr< HomeLogStore > m_log_store;
 
-    static constexpr uint32_t max_data_size = 64;
+    static constexpr uint32_t max_data_size = 1024;
 };
 
 #define sample_db SampleDB::instance()
@@ -157,7 +175,7 @@ public:
 
         LOGINFO("creating {} device files with each of size {} ", ndevices, dev_size);
         for (uint32_t i = 0; i < ndevices; i++) {
-            std::string fpath = "/tmp/" + std::to_string(i + 1);
+            std::string fpath = "/tmp/log_store_dev_" + std::to_string(i + 1);
             if (!restart) {
                 std::ofstream ofs(fpath.c_str(), std::ios::binary | std::ios::out);
                 ofs.seekp(dev_size - 1);
@@ -381,6 +399,7 @@ TEST_F(LogStoreTest, BurstSeqInsertAndTruncateInParallel) {
     this->truncate_validate();
 }
 
+#if 0
 TEST_F(LogStoreTest, ThrottleSeqInsertThenRecover) {
     LOGINFO("Step 1: Reinit the num records to start sequential write test");
     this->init(SDS_OPTIONS["num_records"].as< uint32_t >());
@@ -402,68 +421,6 @@ TEST_F(LogStoreTest, ThrottleSeqInsertThenRecover) {
     LOGINFO("Step 5: Wait for recovery to complete");
     sleep(60);
 }
-
-#if 0
-TEST_F(LogStoreTest, RandomAndSequentialInsertThenTruncate) {
-    // ****************** Test 1 - Random write and truncate at the end **********************
-    LOGINFO("Step 1: Start homestore");
-    this->start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),
-                          SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024,
-                          SDS_OPTIONS["num_threads"].as< uint32_t >());
-
-    LOGINFO("Step 2: Prepare num records and create reqd log stores");
-    this->init(SDS_OPTIONS["num_logstores"].as< uint32_t >(), SDS_OPTIONS["num_records"].as< uint32_t >());
-
-    LOGINFO("Step 3: Inserting randomly within a batch of 10 in parallel fashion as a burst");
-    this->kickstart_inserts(10);
-
-    LOGINFO("Step 4: Wait for the Inserts to complete");
-    this->wait_for_inserts();
-
-    LOGINFO("Step 5: Read all the inserts one by one for each log store to validate if what is written is valid");
-    this->read_validate(true);
-
-    LOGINFO("Step 6: Truncate all of the inserts one log store at a time and validate log dev truncation is marked "
-            "correctly and also validate if all data prior to truncation return exception");
-    this->truncate_validate();
-
-    // ****************** Test 2 - Sequential write and parallel truncate **********************
-    LOGINFO("Step 7: Reinit the num records to start sequential write test");
-    this->init(0, SDS_OPTIONS["num_records"].as< uint32_t >());
-
-    LOGINFO("Step 8: Issue sequential inserts as a burst");
-    this->kickstart_inserts(1);
-
-    auto trunc_attempt = 0;
-    LOGINFO("Step 9: In parallel to writes issue truncation upto completion");
-    do {
-        usleep(1000);
-        this->truncate_validate();
-        ++trunc_attempt;
-        ASSERT_LT(trunc_attempt, 30);
-        LOGINFO("Still pending completions = {}, pending issued = {}", this->m_nrecords_waiting_to_complete.load(),
-                m_nrecords_waiting_to_issue.load());
-    } while (((this->m_nrecords_waiting_to_complete != 0) || (m_nrecords_waiting_to_issue != 0)));
-    LOGINFO("Truncation has been issued and validated for {} times before all records are completely truncated",
-            trunc_attempt);
-
-    LOGINFO("Step 10: Wait for the Inserts to complete");
-    this->wait_for_inserts();
-
-    LOGINFO("Step 11: Do a final truncation and validate");
-    this->truncate_validate();
-
-    LOGINFO("Step 12: Restarting the homestore, which should trigger the log store recovery");
-    this->start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),
-                          SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024,
-                          SDS_OPTIONS["num_threads"].as< uint32_t >(), true /* restart */);
-
-    LOGINFO("Step 13: Wait for recovery to complete");
-    sleep(60);
-
-    LOGINFO("Step 14: Shutting down the homestore");
-    this->shutdown();
-}
 #endif
 
 SDS_OPTIONS_ENABLE(logging, test_log_store)
@@ -479,7 +436,9 @@ SDS_OPTION_GROUP(test_log_store,
                  (num_logstores, "", "num_logstores", "number of log stores",
                   ::cxxopts::value< uint32_t >()->default_value("4"), "number"),
                  (num_records, "", "num_records", "number of record to test",
-                  ::cxxopts::value< uint32_t >()->default_value("10000"), "number"));
+                  ::cxxopts::value< uint32_t >()->default_value("10000"), "number"),
+                 (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
+                  cxxopts::value< int32_t >()->default_value("5002"), "port"));
 
 #if 0
 void parse() {

@@ -59,7 +59,7 @@ bool LogGroup::add_record(const log_record& record, int64_t log_idx) {
     m_record_slots[m_nrecords].size = record.size;
     m_record_slots[m_nrecords].store_id = record.store_id;
     m_record_slots[m_nrecords].store_seq_num = record.seq_num;
-    if (record.is_inlinebale()) {
+    if (record.is_inlineable()) {
         m_record_slots[m_nrecords].offset = m_inline_data_pos;
         m_record_slots[m_nrecords].is_inlined = true;
         std::memcpy((void*)(m_cur_log_buf + m_inline_data_pos), record.data_ptr, record.size);
@@ -70,7 +70,7 @@ bool LogGroup::add_record(const log_record& record, int64_t log_idx) {
         m_record_slots[m_nrecords].offset = m_oob_data_pos;
         m_record_slots[m_nrecords].is_inlined = false;
         m_iovecs.emplace_back((void*)record.data_ptr, record.size);
-        m_oob_data_pos += sisl::round_up(record.size, dma_boundary);
+        m_oob_data_pos += record.size;
     }
     m_nrecords++;
 

@@ -71,9 +71,12 @@ struct log_record {
         context = ctx;
     }
 
-    size_t inlined_size() const { return sizeof(serialized_log_record) + (is_inlinebale() ? size : 0); }
+    size_t inlined_size() const { return sizeof(serialized_log_record) + (is_inlineable() ? size : 0); }
     size_t serialized_size() const { return sizeof(serialized_log_record) + size; }
-    bool is_inlinebale() const { return (size < inline_size); }
+    bool is_inlineable() const {
+        // Need inlining if size is smaller or size/buffer is not in dma'ble boundary.
+        return ((size < inline_size) || ((size % dma_boundary) != 0) || (((uintptr_t)data_ptr % dma_boundary) != 0));
+    }
     static size_t serialized_size(uint32_t sz) { return sizeof(serialized_log_record) + sz; }
 };
 
@@ -167,10 +170,10 @@ public:
     uint32_t actual_data_size() const { return m_actual_data_size; }
 
     friend std::ostream& operator<<(std::ostream& os, const LogGroup& lg) {
-        auto s = fmt::format("Header:[{}]\nLog_idx_range: [{} - {}] DevOffset: {} Max_Records: {} \n"
+        auto s = fmt::format("Header:[{}]\nLog_idx_range: [{} - {}] DevOffset: {} Max_Records: {} IOVecSize: {}\n"
                              "-----------------------------------------------------------------\n",
                              *((log_group_header*)lg.m_cur_log_buf), lg.m_flush_log_idx_from, lg.m_flush_log_idx_upto,
-                             lg.m_log_dev_offset, lg.m_max_records);
+                             lg.m_log_dev_offset, lg.m_max_records, lg.m_iovecs.size());
         os << s;
         return os;
     }
