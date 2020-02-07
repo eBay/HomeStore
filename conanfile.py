@@ -18,33 +18,21 @@ class HomestoreConan(ConanFile):
     default_options = 'shared=False', 'fPIC=True', 'coverage=False'
 
     requires = (
-            # Frequently updated
-            "iomgr/3.0.6@sds/iomgr_v3",
-            "sisl/0.3.17@sisl/develop",
-
-            # Not commonly updated
-            "flip/0.2.5@sds/develop",
-            "sds_logging/6.1.0@sds/develop",
-            "sds_options/1.0.0@sds/develop",
-            "jungle/1.0.0@oss/develop",
+            "flip/0.2.6@sds/develop",
+            "iomgr/3.0.7@sds/iomgr_v3",
+            "jungle/1.0.1@sds/testing",
+            "sds_logging/6.1.2@sds/develop",
+            "sisl/0.3.18@sisl/develop",
 
             # FOSS, rarely updated
-            "benchmark/1.5.0@oss/stable",
-            "boost_asio/1.69.0@bincrafters/stable",
-            "boost_dynamic_bitset/1.69.0@bincrafters/stable",
-            "boost_circular_buffer/1.69.0@bincrafters/stable",
-            "boost_heap/1.69.0@bincrafters/stable",
-            "boost_intrusive/1.69.0@bincrafters/stable",
-            "boost_preprocessor/1.69.0@bincrafters/stable",
-            "boost_uuid/1.69.0@bincrafters/stable",
-            "double-conversion/3.1.4@bincrafters/stable",
-            "evhtp/1.2.18.1@oss/stable",
-            "farmhash/1.0.0@oss/stable",
-            "folly/2019.09.23.00@bincrafters/stable",
-            "gtest/1.8.1@bincrafters/stable",
-            "isa-l/2.21.0@oss/stable",
-            "libevent/2.1.11@bincrafters/stable",
-            ("zstd/1.4.0@bincrafters/stable", "override"),
+            "benchmark/1.5.0",
+            "boost/1.72.0",
+            "double-conversion/3.1.5",
+            "evhtp/1.2.18.2",
+            "farmhash/1.0.0",
+            "folly/2019.09.30.00",
+            "isa-l/2.21.0",
+            "libevent/2.1.11",
             )
 
     generators = "cmake"
@@ -60,7 +48,7 @@ class HomestoreConan(ConanFile):
 
     def requirements(self):
         if not self.settings.build_type == "Debug":
-            self.requires("gperftools/2.7.0@oss/stable")
+            self.requires("gperftools/2.7.0")
 
     def build(self):
         cmake = CMake(self)
