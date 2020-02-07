@@ -81,15 +81,15 @@ HomeBlks::HomeBlks(const init_params& cfg) :
 
     nlohmann::json json;
 
-    json["phys_page_size"]          = HomeStoreConfig::phys_page_size;
-    json["atomic_phys_page_size"]   = HomeStoreConfig::atomic_phys_page_size;
-    json["align_size"]              = HomeStoreConfig::align_size;
-    json["min_virtual_page_size"]   = m_cfg.min_virtual_page_size;
-    json["open_flag"]               = HomeStoreConfig::open_flag;
-    json["cache_size"]              = m_cfg.cache_size;
-    json["system_uuid"]             = boost::lexical_cast<std::string>(m_cfg.system_uuid);
-    json["is_file"]                 = m_cfg.is_file;
-  
+    json["phys_page_size"] = HomeStoreConfig::phys_page_size;
+    json["atomic_phys_page_size"] = HomeStoreConfig::atomic_phys_page_size;
+    json["align_size"] = HomeStoreConfig::align_size;
+    json["min_virtual_page_size"] = m_cfg.min_virtual_page_size;
+    json["open_flag"] = HomeStoreConfig::open_flag;
+    json["cache_size"] = m_cfg.cache_size;
+    json["system_uuid"] = boost::lexical_cast< std::string >(m_cfg.system_uuid);
+    json["is_file"] = m_cfg.is_file;
+
     for (auto& device : m_cfg.devices) {
         json["devices"].emplace_back(device.dev_names);
     }
@@ -909,20 +909,21 @@ void HomeBlks::init_thread() {
         sisl::HttpServerConfig cfg;
         cfg.is_tls_enabled = false;
         cfg.bind_address = "0.0.0.0";
-        // cfg.server_port = SDS_OPTIONS["hb_stats_port"].as< int32_t >();
-        cfg.server_port = 5000;
+        cfg.server_port = SDS_OPTIONS["hb_stats_port"].as< int32_t >();
         cfg.read_write_timeout_secs = 10;
 
-        m_http_server = std::unique_ptr< sisl::HttpServer >(new sisl::HttpServer(cfg, {{
-                handler_info("/api/v1/version", HomeBlks::get_version, (void *)this),
-                handler_info("/api/v1/getMetrics", HomeBlks::get_metrics, (void *)this),
-                handler_info("/api/v1/getObjLife", HomeBlks::get_obj_life, (void *)this),
-                handler_info("/metrics", HomeBlks::get_prometheus_metrics, (void *)this),
-                handler_info("/api/v1/getLogLevel", HomeBlks::get_log_level, (void *)this),
-                handler_info("/api/v1/setLogLevel", HomeBlks::set_log_level, (void *)this),
-                handler_info("/api/v1/dumpStackTrace", HomeBlks::dump_stack_trace, (void *)this),
-                handler_info("/api/v1/verifyHS", HomeBlks::verify_hs, (void *)this),
-        }}));
+        m_http_server = std::unique_ptr< sisl::HttpServer >(
+            new sisl::HttpServer(cfg,
+                                 {{
+                                     handler_info("/api/v1/version", HomeBlks::get_version, (void*)this),
+                                     handler_info("/api/v1/getMetrics", HomeBlks::get_metrics, (void*)this),
+                                     handler_info("/api/v1/getObjLife", HomeBlks::get_obj_life, (void*)this),
+                                     handler_info("/metrics", HomeBlks::get_prometheus_metrics, (void*)this),
+                                     handler_info("/api/v1/getLogLevel", HomeBlks::get_log_level, (void*)this),
+                                     handler_info("/api/v1/setLogLevel", HomeBlks::set_log_level, (void*)this),
+                                     handler_info("/api/v1/dumpStackTrace", HomeBlks::dump_stack_trace, (void*)this),
+                                     handler_info("/api/v1/verifyHS", HomeBlks::verify_hs, (void*)this),
+                                 }}));
 
         m_http_server->start();
 
@@ -993,7 +994,7 @@ void HomeBlks::verify_tree(const VolumePtr& vol) {
 }
 
 void HomeBlks::verify_vols() {
-    std::unique_lock<std::recursive_mutex>  lg(m_vol_lock);
+    std::unique_lock< std::recursive_mutex > lg(m_vol_lock);
     auto it = m_volume_map.begin();
     while (it != m_volume_map.end()) {
         verify_tree(it->second);
@@ -1002,7 +1003,7 @@ void HomeBlks::verify_vols() {
 }
 
 void HomeBlks::verify_hs(sisl::HttpCallData cd) {
-    HomeBlks *hb = (HomeBlks *)(cd->cookie());
+    HomeBlks* hb = (HomeBlks*)(cd->cookie());
     hb->verify_vols();
     hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, std::string("HomeBlks verified"));
 }

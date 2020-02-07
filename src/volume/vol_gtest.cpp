@@ -41,35 +41,36 @@ THREAD_BUFFER_INIT;
 #define STAGING_VOL_PREFIX "staging"
 #define VOL_PREFIX "/tmp/vol"
 
-std::array< std::string, 4 > names = {"/tmp/vol_file1", "/tmp/vol_file2", "/tmp/vol_file3", "/tmp/vol_file4"};
-uint64_t                     max_vols = 50;
-uint64_t                     max_num_writes = 100000;
-uint64_t                     run_time;
-uint64_t                     num_threads;
-bool                         read_enable = true;
-bool                         enable_crash_handler = true;
-constexpr auto               Ki = 1024ull;
-constexpr auto               Mi = Ki * Ki;
-constexpr auto               Gi = Ki * Mi;
-uint64_t                     max_io_size = 1 * Mi;
-uint64_t                     max_outstanding_ios = 64u;
-uint64_t                     max_disk_capacity = 10 * Gi;
-std::atomic< uint64_t >      match_cnt = 0;
-std::atomic< uint64_t >      hdr_only_match_cnt = 0;
+std::array< std::string, 4 > names = {"/tmp/vol_gtest_file1", "/tmp/vol_gtest_file2", "/tmp/vol_gtest_file3",
+                                      "/tmp/vol_gtest_file4"};
+uint64_t max_vols = 50;
+uint64_t max_num_writes = 100000;
+uint64_t run_time;
+uint64_t num_threads;
+bool read_enable = true;
+bool enable_crash_handler = true;
+constexpr auto Ki = 1024ull;
+constexpr auto Mi = Ki * Ki;
+constexpr auto Gi = Ki * Mi;
+uint64_t max_io_size = 1 * Mi;
+uint64_t max_outstanding_ios = 64u;
+uint64_t max_disk_capacity = 10 * Gi;
+std::atomic< uint64_t > match_cnt = 0;
+std::atomic< uint64_t > hdr_only_match_cnt = 0;
 using log_level = spdlog::level::level_enum;
-bool        verify_hdr = true;
-bool        verify_data = true;
-bool        read_verify = false;
-uint32_t    load_type = 0;
-uint32_t    remove_file = 1;
-uint32_t    expected_vol_state = 0;
-uint32_t    verify_only = 0;
-uint32_t    is_abort = 0;
-uint32_t    flip_set = 0;
-uint32_t    atomic_page_size = 512;
-uint32_t    vol_page_size = 4096;
-uint32_t    phy_page_size = 4096;
-uint32_t    mem_btree_page_size = 4096;
+bool verify_hdr = true;
+bool verify_data = true;
+bool read_verify = false;
+uint32_t load_type = 0;
+uint32_t remove_file = 1;
+uint32_t expected_vol_state = 0;
+uint32_t verify_only = 0;
+uint32_t is_abort = 0;
+uint32_t flip_set = 0;
+uint32_t atomic_page_size = 512;
+uint32_t vol_page_size = 4096;
+uint32_t phy_page_size = 4096;
+uint32_t mem_btree_page_size = 4096;
 extern bool vol_gtest;
 #define VOL_PAGE_SIZE 4096
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
@@ -80,15 +81,15 @@ uint64_t req_cnt = 0;
 uint64_t req_free_cnt = 0;
 class IOTest : public ::testing::Test {
     struct req {
-        ssize_t  size;
-        off_t    offset;
+        ssize_t size;
+        off_t offset;
         uint64_t lba;
         uint32_t nblks;
-        int      fd;
+        int fd;
         uint8_t* buf;
-        bool     is_read;
+        bool is_read;
         uint64_t cur_vol;
-        bool     done = false;
+        bool done = false;
         req() {
             buf = nullptr;
             req_cnt++;
@@ -99,13 +100,13 @@ class IOTest : public ::testing::Test {
         }
     };
     struct vol_info_t {
-        VolumePtr               vol;
-        boost::uuids::uuid      uuid;
-        int                     fd;
-        std::mutex              vol_mutex;
-        homeds::Bitset*         m_vol_bm;
-        uint64_t                max_vol_blks;
-        uint64_t                cur_checkpoint;
+        VolumePtr vol;
+        boost::uuids::uuid uuid;
+        int fd;
+        std::mutex vol_mutex;
+        homeds::Bitset* m_vol_bm;
+        uint64_t max_vol_blks;
+        uint64_t cur_checkpoint;
         std::atomic< uint64_t > start_lba;
         std::atomic< uint64_t > start_large_lba;
         std::atomic< uint64_t > num_io;
@@ -138,62 +139,62 @@ class IOTest : public ::testing::Test {
 
         void shutdown() { iomanager.remove_fd(m_iface.get(), m_ev_fdinfo); }
         void kickstart_io() {
-            uint64_t              temp = 1;
+            uint64_t temp = 1;
             [[maybe_unused]] auto wsize = write(m_ev_fd, &temp, sizeof(uint64_t));
         }
 
         void on_new_io_request(int fd, void* cookie, int event) {
-            uint64_t              temp;
+            uint64_t temp;
             [[maybe_unused]] auto rsize = read(m_ev_fd, &temp, sizeof(uint64_t));
             m_io_test->process_new_request();
         }
 
         void io_request_done() {
-            uint64_t              temp = 1;
+            uint64_t temp = 1;
             [[maybe_unused]] auto wsize = write(m_ev_fd, &temp, sizeof(uint64_t));
         }
 
     private:
-        int                                    m_ev_fd;
-        iomgr::fd_info*                        m_ev_fdinfo;
+        int m_ev_fd;
+        iomgr::fd_info* m_ev_fdinfo;
         std::shared_ptr< TestTargetInterface > m_iface;
-        IOTest*                                m_io_test;
+        IOTest* m_io_test;
     };
 
 protected:
-    std::atomic< size_t >                        outstanding_ios;
-    std::atomic< uint64_t >                      write_cnt;
-    std::atomic< uint64_t >                      read_cnt;
-    std::atomic< uint64_t >                      read_err_cnt;
-    bool                                         init;
+    std::atomic< size_t > outstanding_ios;
+    std::atomic< uint64_t > write_cnt;
+    std::atomic< uint64_t > read_cnt;
+    std::atomic< uint64_t > read_err_cnt;
+    bool init;
     std::vector< std::shared_ptr< vol_info_t > > vol_info;
-    std::atomic< uint64_t >                      vol_cnt;
-    std::condition_variable                      m_cv;
-    std::condition_variable                      m_init_done_cv;
-    std::mutex                                   m_mutex;
-    void*                                        init_buf = nullptr;
-    uint64_t                                     cur_vol;
-    Clock::time_point                            startTime;
-    std::vector< dev_info >                      device_info;
-    uint64_t                                     max_capacity;
-    uint64_t                                     max_vol_size;
-    bool                                         verify_done;
-    bool                                         move_verify_to_done;
-    bool                                         shutdown_on_reboot;
-    bool                                         vol_create_del_test;
-    int                                          disk_replace_cnt = 0;
-    bool                                         vol_offline = false;
-    bool                                         expect_io_error = false;
-    Clock::time_point                            print_startTime;
-    std::atomic< uint64_t >                      vol_create_cnt;
-    std::atomic< uint64_t >                      vol_del_cnt;
-    std::atomic< uint64_t >                      vol_indx;
-    std::atomic< bool >                          io_stalled = false;
-    homestore::vol_state                         m_expected_vol_state = homestore::vol_state::ONLINE;
-    bool                                         expected_init_fail = false;
-    bool                                         cmpl_done_signaled = false;
-    bool                                         iomgr_start = false;
-    TestTarget                                   m_tgt;
+    std::atomic< uint64_t > vol_cnt;
+    std::condition_variable m_cv;
+    std::condition_variable m_init_done_cv;
+    std::mutex m_mutex;
+    void* init_buf = nullptr;
+    uint64_t cur_vol;
+    Clock::time_point startTime;
+    std::vector< dev_info > device_info;
+    uint64_t max_capacity;
+    uint64_t max_vol_size;
+    bool verify_done;
+    bool move_verify_to_done;
+    bool shutdown_on_reboot;
+    bool vol_create_del_test;
+    int disk_replace_cnt = 0;
+    bool vol_offline = false;
+    bool expect_io_error = false;
+    Clock::time_point print_startTime;
+    std::atomic< uint64_t > vol_create_cnt;
+    std::atomic< uint64_t > vol_del_cnt;
+    std::atomic< uint64_t > vol_indx;
+    std::atomic< bool > io_stalled = false;
+    homestore::vol_state m_expected_vol_state = homestore::vol_state::ONLINE;
+    bool expected_init_fail = false;
+    bool cmpl_done_signaled = false;
+    bool iomgr_start = false;
+    TestTarget m_tgt;
 
 public:
     IOTest() : vol_info(0), device_info(0), m_tgt(this) {
@@ -351,7 +352,7 @@ public:
     void create_volume() {
         /* Create a volume */
         vol_params params;
-        int        cnt = vol_indx.fetch_add(1, std::memory_order_acquire);
+        int cnt = vol_indx.fetch_add(1, std::memory_order_acquire);
         params.page_size = vol_page_size;
         params.size = max_vol_size;
         params.io_comp_cb = std::bind(&IOTest::process_completions, this, std::placeholders::_1);
@@ -374,7 +375,7 @@ public:
         /* create staging file for the outstanding IOs. we compare it from staging file
          * if mismatch fails from main file.
          */
-        std::string   staging_name = name + STAGING_VOL_PREFIX;
+        std::string staging_name = name + STAGING_VOL_PREFIX;
         std::ofstream staging_ofs(staging_name, std::ios::binary | std::ios::out);
         staging_ofs.seekp(max_vol_size);
         staging_ofs.write("", 1);
@@ -579,16 +580,26 @@ public:
 private:
     void write_io() {
         switch (load_type) {
-        case 0: random_write(); break;
-        case 1: same_write(); break;
-        case 2: seq_write(); break;
+        case 0:
+            random_write();
+            break;
+        case 1:
+            same_write();
+            break;
+        case 2:
+            seq_write();
+            break;
         }
     }
 
     void read_io() {
         switch (load_type) {
-        case 0: random_read(); break;
-        case 1: same_read(); break;
+        case 0:
+            random_read();
+            break;
+        case 1:
+            same_read();
+            break;
         }
     }
 
@@ -613,7 +624,7 @@ private:
 
     void seq_write() {
         /* XXX: does it really matter if it is atomic or not */
-        int      cur = ++cur_vol % max_vols;
+        int cur = ++cur_vol % max_vols;
         uint64_t lba;
         uint64_t nblks;
     start:
@@ -648,17 +659,15 @@ private:
 
     void random_write() {
         /* XXX: does it really matter if it is atomic or not */
-        int      cur = ++cur_vol % max_vols;
+        int cur = ++cur_vol % max_vols;
         uint64_t lba;
         uint64_t nblks;
     start:
         /* we won't be writing more then 128 blocks in one io */
         auto vol = vol_info[cur]->vol;
 
-        if (vol == nullptr) {
-            return;
-        }
-        uint64_t max_blks = max_io_size/VolInterface::get_instance()->get_page_size(vol);
+        if (vol == nullptr) { return; }
+        uint64_t max_blks = max_io_size / VolInterface::get_instance()->get_page_size(vol);
         // lba: [0, max_vol_blks - max_blks)
 
         lba = rand() % (vol_info[cur]->max_vol_blks - max_blks);
@@ -682,7 +691,7 @@ private:
     void write_vol(uint32_t cur, uint64_t lba, uint64_t nblks) {
         uint8_t* buf = nullptr;
         uint8_t* buf1 = nullptr;
-        auto     vol = vol_info[cur]->vol;
+        auto vol = vol_info[cur]->vol;
         if (vol == nullptr) { return; }
         {
             std::unique_lock< std::mutex > lk(m_mutex);
@@ -693,7 +702,7 @@ private:
             }
         }
         uint64_t size = nblks * VolInterface::get_instance()->get_page_size(vol);
-        auto     ret = posix_memalign((void**)&buf, 4096, size);
+        auto ret = posix_memalign((void**)&buf, 4096, size);
         if (ret) { assert(0); }
         ret = posix_memalign((void**)&buf1, 4096, size);
         assert(!ret);
@@ -742,7 +751,7 @@ private:
 
     void random_read() {
         /* XXX: does it really matter if it is atomic or not */
-        int      cur = ++cur_vol % max_vols;
+        int cur = ++cur_vol % max_vols;
         uint64_t lba;
         uint64_t nblks;
     start:
@@ -772,7 +781,7 @@ private:
 
     void read_vol(uint32_t cur, uint64_t lba, uint64_t nblks) {
         uint8_t* buf = nullptr;
-        auto     vol = vol_info[cur]->vol;
+        auto vol = vol_info[cur]->vol;
         if (vol == nullptr) { return; }
         {
             std::unique_lock< std::mutex > lk(m_mutex);
@@ -783,7 +792,7 @@ private:
             }
         }
         uint64_t size = nblks * VolInterface::get_instance()->get_page_size(vol);
-        auto     ret = posix_memalign((void**)&buf, 4096, size);
+        auto ret = posix_memalign((void**)&buf, 4096, size);
         if (ret) { assert(0); }
         assert(buf != nullptr);
         req* req = new struct req();
@@ -812,7 +821,7 @@ private:
             auto size = info.size;
             auto buf = info.buf;
             while (size != 0) {
-                uint32_t     size_read = 0;
+                uint32_t size_read = 0;
                 homeds::blob b = VolInterface::get_instance()->at_offset(buf, offset);
                 if (b.size > size) {
                     size_read = size;
@@ -863,7 +872,7 @@ private:
 
     void verify_vols() {
         static uint64_t print_time = 30;
-        auto            elapsed_time = get_elapsed_time(print_startTime);
+        auto elapsed_time = get_elapsed_time(print_startTime);
         if (elapsed_time > print_time) {
             LOGINFO("verifying vols");
             print_startTime = Clock::now();
@@ -891,10 +900,10 @@ private:
 
     void process_completions(const vol_interface_req_ptr& vol_req) {
         /* raise an event */
-        req*            request = (req*)vol_req->cookie;
+        req* request = (req*)vol_req->cookie;
         static uint64_t print_time = 30;
-        uint64_t        temp = 1;
-        auto            elapsed_time = get_elapsed_time(print_startTime);
+        uint64_t temp = 1;
+        auto elapsed_time = get_elapsed_time(print_startTime);
 
         /* it validates that we don't have two completions for the same requests */
         assert(!request->done);
@@ -997,7 +1006,7 @@ private:
 
     void shutdown_force(bool timeout) {
         std::unique_lock< std::mutex > lk(m_mutex);
-        bool                           force = false;
+        bool force = false;
         // release the ref_count to volumes;
         if (!timeout) {
             remove_journal_files();
@@ -1039,7 +1048,7 @@ TEST_F(IOTest, lifecycle_test) {
     LOGINFO("write_cnt {}", write_cnt);
     LOGINFO("read_cnt {}", read_cnt);
 
-    FlipClient    fc(HomeStoreFlip::instance());
+    FlipClient fc(HomeStoreFlip::instance());
     FlipFrequency freq;
     freq.set_count(10);
     freq.set_percent(100);
@@ -1074,10 +1083,18 @@ TEST_F(IOTest, init_io_test) {
 TEST_F(IOTest, recovery_io_test) {
     this->init = false;
     switch (expected_vol_state) {
-    case 0: this->m_expected_vol_state = homestore::vol_state::ONLINE; break;
-    case 1: this->m_expected_vol_state = homestore::vol_state::OFFLINE; break;
-    case 2: this->m_expected_vol_state = homestore::vol_state::DEGRADED; break;
-    case 3: this->m_expected_vol_state = homestore::vol_state::FAILED; break;
+    case 0:
+        this->m_expected_vol_state = homestore::vol_state::ONLINE;
+        break;
+    case 1:
+        this->m_expected_vol_state = homestore::vol_state::OFFLINE;
+        break;
+    case 2:
+        this->m_expected_vol_state = homestore::vol_state::DEGRADED;
+        break;
+    case 3:
+        this->m_expected_vol_state = homestore::vol_state::FAILED;
+        break;
     }
     this->start_homestore();
     this->wait_homestore_init_done();
@@ -1118,7 +1135,7 @@ TEST_F(IOTest, one_disk_replace_abort_test) {
     this->expected_init_fail = true;
     this->m_expected_vol_state = homestore::vol_state::DEGRADED;
 
-    FlipClient    fc(HomeStoreFlip::instance());
+    FlipClient fc(HomeStoreFlip::instance());
     FlipFrequency freq;
     freq.set_count(100);
     freq.set_percent(100);
@@ -1142,7 +1159,7 @@ TEST_F(IOTest, two_disk_replace_test) {
 TEST_F(IOTest, one_disk_fail_test) {
     this->init = false;
 
-    FlipClient    fc(HomeStoreFlip::instance());
+    FlipClient fc(HomeStoreFlip::instance());
     FlipFrequency freq;
     FlipCondition cond1;
     FlipCondition cond2;
@@ -1175,7 +1192,7 @@ TEST_F(IOTest, vol_io_fail_test) {
     this->start_homestore();
     this->wait_homestore_init_done();
 
-    FlipClient    fc(HomeStoreFlip::instance());
+    FlipClient fc(HomeStoreFlip::instance());
     FlipCondition cond1;
     FlipCondition cond2;
     FlipFrequency freq;
