@@ -66,6 +66,7 @@ void LogDev::do_load(uint64_t device_cursor) {
         // Read the data in bulk (of say 512K) and then process each log group header
         auto buf = sisl::make_byte_array(bulk_read_size, dma_boundary);
         auto rbuf = buf->bytes;
+        uint32_t rbuf_offset = 0;
         ssize_t this_read_remains;
 
         uint64_t log_group_offset;
@@ -96,7 +97,7 @@ void LogDev::do_load(uint64_t device_cursor) {
             auto i = 0u;
             while (i < header->nrecords()) {
                 auto* rec = header->nth_record(i);
-                uint32_t data_offset = (rec->offset + (rec->is_inlined ? 0 : header->oob_data_offset));
+                uint32_t data_offset = rbuf_offset + (rec->offset + (rec->is_inlined ? 0 : header->oob_data_offset));
 
                 // Do a callback on the found log entry
                 log_buffer b(buf, data_offset, rec->size);
@@ -107,6 +108,7 @@ void LogDev::do_load(uint64_t device_cursor) {
             m_log_idx = header->start_idx() + i;
             log_group_offset += header->total_size();
             rbuf += header->total_size();
+            rbuf_offset += header->total_size();
             this_read_remains -= header->total_size();
         }
     }
