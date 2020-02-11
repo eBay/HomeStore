@@ -12,11 +12,19 @@ class HomestoreConan(ConanFile):
     url = "https://github.corp.ebay.com/SDS/Homestore"
     description = "HomeStore"
 
-    settings = "arch", "os", "compiler", "build_type", "sanitize"
-    options = {"shared": ['True', 'False'],
-               "fPIC": ['True', 'False'],
-               "coverage": ['True', 'False']}
-    default_options = 'shared=False', 'fPIC=True', 'coverage=False'
+    settings = "arch", "os", "compiler", "build_type"
+    options = {
+                "shared": ['True', 'False'],
+                "fPIC": ['True', 'False'],
+                "coverage": ['True', 'False'],
+                "sanitize": ['True', 'False'],
+                }
+    default_options = (
+                        'shared=False',
+                        'fPIC=True',
+                        'coverage=False',
+                        'sanitize=False',
+                        )
 
     requires = (
             "flip/0.2.6@sds/develop",
@@ -40,8 +48,8 @@ class HomestoreConan(ConanFile):
     keep_imports = True
 
     def configure(self):
-        if self.settings.sanitize != None:
-            del self.options.coverage
+        if self.options.sanitize:
+            self.options.coverage = False
 
     def imports(self):
         self.copy(root_package="flip", pattern="*.py", dst="bin/scripts", src="python/flip/", keep_path=True)
@@ -58,12 +66,12 @@ class HomestoreConan(ConanFile):
                        'MEMORY_SANITIZER_ON': 'OFF'}
         test_target = None
 
-        if self.settings.sanitize != "address" and self.options.coverage == 'True':
+        if self.options.sanitize:
+            definitions['MEMORY_SANITIZER_ON'] = 'ON'
+
+        if self.options.coverage:
             definitions['CONAN_BUILD_COVERAGE'] = 'ON'
             test_target = 'coverage'
-
-        if self.settings.sanitize != None:
-            definitions['MEMORY_SANITIZER_ON'] = 'ON'
 
         if self.settings.build_type == 'Debug':
             definitions['CMAKE_BUILD_TYPE'] = 'Debug'
@@ -90,7 +98,7 @@ class HomestoreConan(ConanFile):
     def package_info(self):
         self.cpp_info.libs = tools.collect_libs(self)
         self.cpp_info.cxxflags.append("-DBOOST_ALLOW_DEPRECATED_HEADERS")
-        if self.settings.sanitize != None:
+        if self.options.sanitize:
             self.cpp_info.sharedlinkflags.append("-fsanitize=address")
             self.cpp_info.exelinkflags.append("-fsanitize=address")
             self.cpp_info.sharedlinkflags.append("-fsanitize=undefined")
