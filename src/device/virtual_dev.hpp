@@ -239,9 +239,9 @@ public:
             m_chunk_size = size / m_num_chunks;
             /* chunk size should not be greater then max chunk size */
             if (m_chunk_size > MAX_CHUNK_SIZE) {
+                 m_chunk_size = MAX_CHUNK_SIZE;;
                  size = ALIGN_SIZE(size, MAX_CHUNK_SIZE);
                  m_num_chunks = size / MAX_CHUNK_SIZE;
-                 m_chunk_size = size / m_num_chunks;
             }
         } else {
             m_chunk_size = size;
