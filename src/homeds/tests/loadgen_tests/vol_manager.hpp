@@ -251,7 +251,7 @@ public:
     
     std::error_condition write(uint64_t vol_id, uint64_t lba, uint8_t* buf, uint64_t nblks) {
         assert(buf);
-        assert(lba <= max_vol_blks() - nblks);
+        assert(lba < (max_vol_blks() - nblks));
         assert(vol_id < m_max_vols);
         
         auto size = get_size(nblks);
@@ -297,13 +297,15 @@ private:
         std::default_random_engine generator(rd());
         // make sure the the lba doesn't write accross max vol size;
         // MAX_KEYS is initiated as max vol size;
-        std::uniform_int_distribution<long long unsigned> dist(0, KeySpec::MAX_KEYS - max_io_nblks());
+        // lba: [0, max_vol_blks - max_io_nblks)
+        std::uniform_int_distribution<long long unsigned> dist(0, KeySpec::MAX_KEYS - max_io_nblks() - 1);
         return dist(generator);
     }
 
     uint64_t get_rand_nblks() {
         std::random_device rd;
         std::default_random_engine generator(rd());
+        // nblks: [1, max_io_nblks]
         std::uniform_int_distribution<long long unsigned> dist(1, max_io_nblks());
         return dist(generator);
     }

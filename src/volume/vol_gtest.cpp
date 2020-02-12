@@ -580,8 +580,10 @@ start:
             return;
         }
         uint64_t max_blks = max_io_size/VolInterface::get_instance()->get_page_size(vol);
+        // lba: [0, max_vol_blks - max_blks)
         lba = rand() % (vol_info[cur]->max_vol_blks - max_blks);
-        nblks = rand() % max_blks;
+        // nblks: [1, max_blks]
+        nblks = rand() % (max_blks + 1);
         if (nblks == 0) { nblks = 1; }
 
         if (load_type != 2) {

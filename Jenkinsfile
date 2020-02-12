@@ -5,6 +5,8 @@ pipeline {
         ORG = 'sds'
         CONAN_USER = 'sds'
         CONAN_PASS = credentials('CONAN_PASS')
+        MASTER_BRANCH = 'develop'
+        STABLE_BRANCH = 'testing/*'
     }
 
     stages {
@@ -12,8 +14,8 @@ pipeline {
             steps {
                 script {
                     PROJECT = sh(script: "grep -m 1 'name =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
-                    TAG = sh(script: "grep -m 1 'version =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
                     CONAN_CHANNEL = sh(script: "echo ${BRANCH_NAME} | sed -E 's,(\\w+).*,\\1,' | tr -d '\n'", returnStdout: true)
+                    TAG = sh(script: "grep -m 1 'version =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
                 }
             }
         }
@@ -21,27 +23,25 @@ pipeline {
         stage('Coverage') {
             when {
                 not {
-                    branch "testing/*"
+                    branch "${STABLE_BRANCH}"
                 }
             }
             steps {
-                sh "docker build -f Dockerfile.sonar --rm --build-arg COVERAGE_ON='true' --build-arg BUILD_TYPE=nosanitize --build-arg BRANCH_NAME=${BRANCH_NAME} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} ."
+                sh "docker build -f Dockerfile.sonar --rm --build-arg COVERAGE_ON='true' --build-arg BUILD_TYPE=debug --build-arg BRANCH_NAME=${BRANCH_NAME} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} ."
             }
         }
 
         stage('Build') {
             steps {
-                sh "docker build --rm --build-arg BUILD_TYPE=nosanitize --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_PASS=${CONAN_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${GIT_COMMIT}-nosanitize ."
                 sh "docker build --rm --build-arg BUILD_TYPE=debug --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_PASS=${CONAN_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${GIT_COMMIT}-debug ."
-                sh "docker build --rm --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_PASS=${CONAN_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${GIT_COMMIT} ."
+                sh "docker build --rm --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_PASS=${CONAN_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${GIT_COMMIT}-release ."
             }
         }
 
         stage('Deploy') {
             steps {
-                sh "docker run --rm ${PROJECT}-${GIT_COMMIT}-nosanitize"
                 sh "docker run --rm ${PROJECT}-${GIT_COMMIT}-debug"
-                sh "docker run --rm ${PROJECT}-${GIT_COMMIT}"
+                sh "docker run --rm ${PROJECT}-${GIT_COMMIT}-release"
                 slackSend channel: '#conan-pkgs', message: "*${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}* has been uploaded to conan repo."
             }
         }
@@ -70,9 +70,8 @@ pipeline {
 
     post {
         always {
-            sh "docker rmi -f ${PROJECT}-${GIT_COMMIT}-nosanitize"
             sh "docker rmi -f ${PROJECT}-${GIT_COMMIT}-debug"
-            sh "docker rmi -f ${PROJECT}-${GIT_COMMIT}"
+            sh "docker rmi -f ${PROJECT}-${GIT_COMMIT}-release"
             sh "docker rmi -f ${PROJECT}-${GIT_COMMIT}-release"
             sh "docker rmi -f ${PROJECT}-${GIT_COMMIT}-test"
         }
