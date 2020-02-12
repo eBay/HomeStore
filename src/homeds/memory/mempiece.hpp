@@ -145,7 +145,7 @@ public:
 
     friend void intrusive_ptr_add_ref(MemVector* mvec) { 
         int cnt = mvec->m_refcnt.fetch_add(1);
-        HS_ASSERT_CMP(RELEASE, cnt, == , UINT16_MAX); 
+        HS_ASSERT_CMP(RELEASE, cnt, <= , UINT16_MAX); 
     }
 
     friend void intrusive_ptr_release(MemVector* mvec) {
