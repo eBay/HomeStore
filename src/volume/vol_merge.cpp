@@ -29,20 +29,20 @@ struct dev_info {
 THREAD_BUFFER_INIT;
 
 std::array< std::string, 4 > names = {"/var/tmp/min1", "/var/tmp/min2", "/var/tmp/min3", "/var/tmp/min4"};
-uint64_t                     max_vols = 2;
-uint64_t                     max_num_writes;
-uint64_t                     snap_after_writes = 4;
-uint64_t                     run_time;
-uint64_t                     num_threads = 1;
-bool                         read_enable;
-constexpr auto               Ki = 1024ull;
-constexpr auto               Mi = Ki * Ki;
-constexpr auto               Gi = Ki * Mi;
-uint64_t                     max_io_size = 1 * Mi;
-uint64_t                     max_outstanding_ios = 8u;
-uint64_t                     max_disk_capacity = 10 * Gi;
-uint64_t                     match_cnt = 0;
-uint64_t                     max_capacity;
+uint64_t max_vols = 2;
+uint64_t max_num_writes;
+uint64_t snap_after_writes = 4;
+uint64_t run_time;
+uint64_t num_threads = 1;
+bool read_enable;
+constexpr auto Ki = 1024ull;
+constexpr auto Mi = Ki * Ki;
+constexpr auto Gi = Ki * Mi;
+uint64_t max_io_size = 1 * Mi;
+uint64_t max_outstanding_ios = 8u;
+uint64_t max_disk_capacity = 10 * Gi;
+uint64_t match_cnt = 0;
+uint64_t max_capacity;
 using log_level = spdlog::level::level_enum;
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
@@ -77,23 +77,23 @@ class MinHS {
 
     bool init = true;
     struct vol_info_t {
-        VolumePtr       vol;
-        int             fd;
-        int             staging_fd;
-        std::mutex      vol_mutex;
+        VolumePtr vol;
+        int fd;
+        int staging_fd;
+        std::mutex vol_mutex;
         homeds::Bitset* m_vol_bm;
-        uint64_t        max_vol_blks;
-        uint64_t        cur_checkpoint;
+        uint64_t max_vol_blks;
+        uint64_t cur_checkpoint;
         ~vol_info_t() { delete m_vol_bm; }
     };
     struct req {
-        ssize_t  size;
-        off_t    offset;
+        ssize_t size;
+        off_t offset;
         uint64_t lba;
         uint32_t nblks;
-        int      fd;
+        int fd;
         uint8_t* buf;
-        bool     is_read;
+        bool is_read;
         uint64_t cur_vol;
         req() {
             buf = nullptr;
@@ -106,21 +106,21 @@ class MinHS {
     };
 
 private:
-    std::mutex                                   m_mutex;
-    std::atomic< uint64_t >                      vol_indx;
-    uint64_t                                     max_vol_size;
+    std::mutex m_mutex;
+    std::atomic< uint64_t > vol_indx;
+    uint64_t max_vol_size;
     std::vector< std::shared_ptr< vol_info_t > > vol_info;
-    std::vector< SnapshotPtr >                   snaps;
-    std::atomic< uint64_t >                      vol_cnt;
-    std::atomic< int >                           rdy_state;
-    Clock::time_point                            startTime;
-    std::condition_variable                      m_cv;
+    std::vector< SnapshotPtr > snaps;
+    std::atomic< uint64_t > vol_cnt;
+    std::atomic< int > rdy_state;
+    Clock::time_point startTime;
+    std::condition_variable m_cv;
 
-    int                   m_ev_fd;
-    iomgr::fd_info*       m_ev_fdinfo;
-    void*                 init_buf;
+    int m_ev_fd;
+    std::shared_ptr< iomgr::fd_info > m_ev_fdinfo;
+    void* init_buf;
     std::atomic< size_t > outstanding_ios;
-    uint64_t              max_outstanding_ios = 8u;
+    uint64_t max_outstanding_ios = 8u;
 
     std::atomic< uint64_t > write_cnt = 0;
     std::atomic< uint64_t > read_cnt = 0;
@@ -154,7 +154,7 @@ public:
 
     void create_volume() {
         vol_params params;
-        int        cnt = vol_indx.fetch_add(1, std::memory_order_acquire);
+        int cnt = vol_indx.fetch_add(1, std::memory_order_acquire);
 
         params.page_size = 4096;
         params.size = max_vol_size;
@@ -178,8 +178,8 @@ public:
     }
 
     typedef std::shared_ptr< Volume > VolumePtr;
-    void                              vol_init(const VolumePtr& vol_obj) {
-        std::string                   file_name = std::string(VolInterface::get_instance()->get_name(vol_obj));
+    void vol_init(const VolumePtr& vol_obj) {
+        std::string file_name = std::string(VolInterface::get_instance()->get_name(vol_obj));
         std::shared_ptr< vol_info_t > info = std::make_shared< vol_info_t >();
         info->vol = vol_obj;
         info->fd = open(file_name.c_str(), O_RDWR | O_DIRECT);
@@ -271,7 +271,7 @@ public:
     void read_vol(uint32_t cur, uint64_t lba, uint64_t nblks) {
         uint8_t* buf = nullptr;
         uint64_t size = nblks * VolInterface::get_instance()->get_page_size(vol_info[cur]->vol);
-        auto     ret = posix_memalign((void**)&buf, 4096, size);
+        auto ret = posix_memalign((void**)&buf, 4096, size);
         if (ret) { assert(0); }
         assert(buf != nullptr);
         req* req = new struct req();
@@ -300,7 +300,7 @@ public:
         uint8_t* buf = nullptr;
         uint8_t* buf1 = nullptr;
         uint64_t size = nblks * VolInterface::get_instance()->get_page_size(vol_info[cur]->vol);
-        auto     ret = posix_memalign((void**)&buf, 4096, size);
+        auto ret = posix_memalign((void**)&buf, 4096, size);
         if (ret) { assert(0); }
         ret = posix_memalign((void**)&buf1, 4096, size);
         assert(!ret);
@@ -419,7 +419,7 @@ public:
     void process_ev_common(int fd, void* cookie, int event) {
         static bool first = true;
 
-        uint64_t              temp;
+        uint64_t temp;
         [[maybe_unused]] auto rsize = read(m_ev_fd, &temp, sizeof(uint64_t));
 
         LOGINFO("Write Cnt {} Max Num Writes {}", write_cnt, max_num_writes);
@@ -468,7 +468,7 @@ public:
         bzero(init_buf, max_io_size);
 
         outstanding_ios = 0;
-        uint64_t              temp = 1;
+        uint64_t temp = 1;
         [[maybe_unused]] auto wsize = write(m_ev_fd, &temp, sizeof(uint64_t));
 
         return;

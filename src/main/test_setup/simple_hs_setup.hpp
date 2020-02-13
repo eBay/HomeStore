@@ -48,7 +48,7 @@ public:
 
 private:
     int m_ev_fd;
-    iomgr::fd_info* m_ev_fdinfo;
+    std::shared_ptr< iomgr::fd_info > m_ev_fdinfo;
     std::shared_ptr< TestTargetInterface > m_iface;
     SimpleTestStore* m_test_store;
 };

@@ -1,6 +1,7 @@
 set(LOGDEV_SOURCE_FILES
         log_dev.cpp
         log_group.cpp
+        log_stream.cpp
         log_store.cpp
     )
 add_library(hs_logdev OBJECT ${LOGDEV_SOURCE_FILES})

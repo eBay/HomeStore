@@ -24,7 +24,7 @@ void LogGroup::reset(uint32_t max_records) {
     m_actual_data_size = 0;
 
     m_iovecs.clear();
-    m_iovecs.emplace_back((void*)m_cur_log_buf, 0);
+    m_iovecs.emplace_back((void*)m_cur_log_buf, m_inline_data_pos);
 }
 
 void LogGroup::create_overflow_buf(uint32_t min_needed) {

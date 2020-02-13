@@ -50,7 +50,7 @@ static void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthre
     }
 
     LOGINFO("Starting iomgr with {} threads", nthreads);
-    iomanager.start(2 /* total interfaces */, nthreads);
+    iomanager.start(1 /* total interfaces */, nthreads);
     iomanager.add_drive_interface(
         std::dynamic_pointer_cast< iomgr::DriveInterface >(std::make_shared< iomgr::AioDriveInterface >()),
         true /* is_default */);
@@ -418,5 +418,8 @@ int main(int argc, char* argv[]) {
         LOGINFO("Testing with min write size: {}, max write size: {}", gp.min_wrt_sz, gp.max_wrt_sz);
     }
 
-    return RUN_ALL_TESTS();
+    auto res = RUN_ALL_TESTS();
+    iomanager.stop();
+
+    return res;
 }

@@ -156,7 +156,7 @@ class IOTest : public ::testing::Test {
 
     private:
         int m_ev_fd;
-        iomgr::fd_info* m_ev_fdinfo;
+        std::shared_ptr< iomgr::fd_info > m_ev_fdinfo;
         std::shared_ptr< TestTargetInterface > m_iface;
         IOTest* m_io_test;
     };

@@ -45,32 +45,32 @@ public:
 
     void shutdown() { iomanager.remove_fd(m_ev_fdinfo); }
     void kickstart_io() {
-        uint64_t              temp = 1;
+        uint64_t temp = 1;
         [[maybe_unused]] auto wsize = write(m_ev_fd, &temp, sizeof(uint64_t));
     }
 
     void on_new_io_request(int fd, void* cookie, int event);
 
     void io_request_done() {
-        uint64_t              temp = 1;
+        uint64_t temp = 1;
         [[maybe_unused]] auto wsize = write(m_ev_fd, &temp, sizeof(uint64_t));
     }
 
 private:
-    int             m_ev_fd;
-    iomgr::fd_info* m_ev_fdinfo;
-    MapTest*        m_test_store;
+    int m_ev_fd;
+    std::shared_ptr< iomgr::fd_info > m_ev_fdinfo;
+    MapTest* m_test_store;
 };
 
 struct MapTest : public testing::Test {
 protected:
     std::condition_variable m_cv;
-    std::mutex              m_cv_mtx;
-    std::mutex              mutex;
-    homeds::Bitset*         m_lba_bm;
-    homeds::Bitset*         m_blk_bm;
-    long long int           m_blk_id_arr[MAX_LBA];
-    mapping*                m_map;
+    std::mutex m_cv_mtx;
+    std::mutex mutex;
+    homeds::Bitset* m_lba_bm;
+    homeds::Bitset* m_blk_bm;
+    long long int m_blk_id_arr[MAX_LBA];
+    mapping* m_map;
 
     uint64_t Ki = 1024ull;
     uint64_t Mi = Ki * Ki;
@@ -78,16 +78,16 @@ protected:
 
     std::vector< dev_info > device_info;
     std::atomic< uint64_t > seq_Id;
-    bool                    start = false;
-    boost::uuids::uuid      uuid;
-    int                     fd;
-    int                     ev_fd;
-    std::atomic< size_t >   outstanding_ios;
-    uint64_t                max_outstanding_ios = 64u;
-    std::atomic< size_t >   issued_ios;
-    uint64_t                max_issue_ios = 0u;
-    std::atomic< size_t >   unreturned_lbas;
-    TestTarget              m_tgt;
+    bool start = false;
+    boost::uuids::uuid uuid;
+    int fd;
+    int ev_fd;
+    std::atomic< size_t > outstanding_ios;
+    uint64_t max_outstanding_ios = 64u;
+    std::atomic< size_t > issued_ios;
+    uint64_t max_issue_ios = 0u;
+    std::atomic< size_t > unreturned_lbas;
+    TestTarget m_tgt;
 
 public:
     MapTest() : m_tgt(this) {
@@ -153,9 +153,9 @@ public:
         if (issued_ios.load() == max_issue_ios && outstanding == 1) {
             notify_cmpl();
         } else if (issued_ios.load() < max_issue_ios) {
-            uint64_t              temp = 1;
+            uint64_t temp = 1;
             [[maybe_unused]] auto rsize = read(ev_fd, &temp, sizeof(uint64_t));
-            uint64_t              size = write(ev_fd, &temp, sizeof(uint64_t));
+            uint64_t size = write(ev_fd, &temp, sizeof(uint64_t));
         }
     }
 
@@ -333,10 +333,10 @@ public:
 
     void verify(std::vector< std::pair< MappingKey, MappingValue > >& kvs) {
         for (auto& kv : kvs) {
-            auto          st = kv.first.start();
-            ValueEntry    ve;
+            auto st = kv.first.start();
+            ValueEntry ve;
             long long int bst = 0;
-            bool          is_invalid = false;
+            bool is_invalid = false;
             if (kv.second.is_valid()) {
                 kv.second.get_array().get(0, ve, false);
                 bst = ve.get_blkId().get_id() + ve.get_blk_offset();
@@ -375,12 +375,12 @@ public:
         req->lba = lba;
         req->nlbas = nlbas;
         req->blkId = bid;
-        MappingKey                                  key(lba, nlbas);
+        MappingKey key(lba, nlbas);
         std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;
 
         for (auto i = 0ul, j = lba; j < lba + nlbas; i++, j++)
             carr[i] = j % 65000;
-        ValueEntry   ve(sid, bid, 0, nlbas, carr);
+        ValueEntry ve(sid, bid, 0, nlbas, carr);
         MappingValue value(ve);
 #ifndef NDEBUG
         req->vol_uuid = uuid;
@@ -393,7 +393,7 @@ public:
 
     void random_write() {
         uint64_t lba = 0, nlbas = 0;
-        BlkId    bid;
+        BlkId bid;
         generate_random_lba_nlbas(lba, nlbas);
         generate_random_blkId(bid, nlbas);
         write_lba(lba, nlbas, bid);
@@ -410,7 +410,7 @@ public:
 };
 
 void TestTarget::on_new_io_request(int fd, void* cookie, int event) {
-    uint64_t              temp;
+    uint64_t temp;
     [[maybe_unused]] auto rsize = read(m_ev_fd, &temp, sizeof(uint64_t));
     m_test_store->process_new_request();
 }
