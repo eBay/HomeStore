@@ -37,7 +37,7 @@ constexpr uint32_t TOTAL_SEGMENTS = 8;
  * the code for upgrade/revert. 
  */
 constexpr uint32_t MAX_CHUNKS = 128;
-constexpr uint32_t MAX_VDEVS = 8;
+constexpr uint32_t MAX_VDEVS = 16;
 constexpr uint32_t MAX_PDEVS = 8;
 
 #define MAX_CHUNK_SIZE (((1lu << ID_BITS) - 1) * (HomeStoreConfig::min_io_size)) // 16T
