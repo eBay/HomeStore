@@ -662,7 +662,7 @@ public:
 
     void readv(const uint64_t offset, struct iovec* iov, int iovcnt) { m_vdev.readv(offset, iov, iovcnt); }
 
-    void update_write_sz(const uint64_t write_sz) { m_vdev.update_write_sz(write_sz); }
+    void update_tail_offset(const off_t tail) { m_vdev.update_tail_offset(tail); }
 
     void truncate(const off_t offset) {m_vdev.truncate(offset);}
 
