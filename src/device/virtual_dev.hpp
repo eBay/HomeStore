@@ -1074,14 +1074,22 @@ public:
     }
 
     /**
-     * @brief : the total size that has been written to vdev, this API will be called during reboot and
-     * upper layer(logdev) has completed scanning all the valid records in vdev and then update the total size
-     * in vdev.
+     * @brief : update the tail to vdev, this API will be called during reboot and
+     * upper layer(logdev) has completed scanning all the valid records in vdev and then 
+     * update the tail in vdev.
      *
-     * @param total_written_sz : total size written in vdev;
+     * @param tail : logical tail offset
      */
-    void update_write_sz(uint64_t total_written_sz) {
-        m_write_sz_in_total.store(total_written_sz, std::memory_order_relaxed);
+    void update_tail_offset(const off_t tail) {
+        off_t start = data_start_offset();
+        if (tail >= start) {
+            m_write_sz_in_total.store(tail - start, std::memory_order_relaxed);
+        } else {
+            m_write_sz_in_total.store(get_size() - start + tail, std::memory_order_relaxed);
+        }
+
+        HS_ASSERT(RELEASE, get_tail_offset() == tail, "tail offset mismatch after calculation {} : {}", 
+                get_tail_offset(), tail);
     }
 
     bool is_blk_alloced(BlkId& in_blkid) {
