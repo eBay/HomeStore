@@ -253,6 +253,7 @@ public:
             HS_LOG(INFO, device, "size of a chunk is resized to {}", m_chunk_size);
         }
 
+        HS_LOG(INFO, device, "size of a chunk is {} is_stripe {}", m_chunk_size, is_stripe);
         if (m_chunk_size > MAX_CHUNK_SIZE) {
             throw homestore::homestore_exception("invalid chunk size in init", homestore_error::invalid_chunk_size);
         }
