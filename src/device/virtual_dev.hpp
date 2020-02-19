@@ -240,7 +240,6 @@ public:
             /* chunk size should not be greater then max chunk size */
             if (m_chunk_size > MAX_CHUNK_SIZE) {
                  m_chunk_size = MAX_CHUNK_SIZE;;
-                 size = ALIGN_SIZE(size, MAX_CHUNK_SIZE);
                  m_num_chunks = size / MAX_CHUNK_SIZE;
             }
         } else {
@@ -253,7 +252,7 @@ public:
             HS_LOG(INFO, device, "size of a chunk is resized to {}", m_chunk_size);
         }
 
-        HS_LOG(INFO, device, "size of a chunk is {} is_stripe {}", m_chunk_size, is_stripe);
+        LOGINFO(device, "size of a chunk is {} is_stripe {} num chunks {}", m_chunk_size, is_stripe, m_num_chunks);
         if (m_chunk_size > MAX_CHUNK_SIZE) {
             throw homestore::homestore_exception("invalid chunk size in init", homestore_error::invalid_chunk_size);
         }
