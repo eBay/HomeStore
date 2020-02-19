@@ -21,7 +21,7 @@
 #include <error/error.h>
 #include <csignal>
 #include "homeds/utility/useful_defs.hpp"
-#include <spdlog/fmt/bundled/ostream.h>
+#include <fmt/ostream.h>
 #include "homeds/array/reserve_vector.hpp"
 #include <main/homestore_header.hpp>
 
@@ -699,6 +699,12 @@ out:
         return remove_any(BtreeSearchRange(key), nullptr, outval, dependent_req, cookie);
     }
 
+    void verify_tree() {
+        m_btree_lock.read_lock();
+        verify_node(m_root_node, nullptr, -1);
+        m_btree_lock.unlock();
+    }
+
     void print_tree() {
         m_btree_lock.read_lock();
         std::stringstream ss;
@@ -724,6 +730,54 @@ out:
     nlohmann::json get_metrics_in_json(bool updated = true) { return m_metrics.get_result_in_json(updated); }
 
 private:
+    void verify_node(bnodeid_t bnodeid, BtreeNodePtr parent_node, uint32_t indx) {
+        homeds::thread::locktype acq_lock = homeds::thread::locktype::LOCKTYPE_READ;
+        BtreeNodePtr my_node;
+        if (read_and_lock_node(bnodeid, my_node, acq_lock, acq_lock, nullptr) != btree_status_t::success) {
+            LOGINFO("read node failed");
+            return;
+        }
+
+        K prev_key;
+        for (uint32_t i = 0; i < my_node->get_total_entries(); ++i) {
+            K key;
+            my_node->get_nth_key(i, &key, false);
+            if (!my_node->is_leaf()) {
+                BtreeNodeInfo child;
+                my_node->get(i, &child, false);
+                verify_node(child.bnode_id(), my_node, i);
+                if (i > 0) {
+                    BT_LOG_ASSERT_CMP(LT, prev_key.compare(&key), 0, my_node);
+                }
+            }
+            if (my_node->is_leaf() && i > 0) {
+                BT_LOG_ASSERT_CMP(LT, prev_key.compare_start(&key), 0, my_node);
+            }
+            prev_key = key;
+        }
+
+        if (parent_node && parent_node->get_total_entries() != indx) {
+            K parent_key;
+            parent_node->get_nth_key(indx, &parent_key, false);
+
+            K last_key;
+            my_node->get_nth_key(my_node->get_total_entries() - 1, &last_key, false);
+            BT_LOG_ASSERT_CMP(EQ, last_key.compare(&parent_key), 0, parent_node);
+        } else if (parent_node) {
+            K parent_key;
+            parent_node->get_nth_key(indx - 1, &parent_key, false);
+
+            K first_key;
+            my_node->get_nth_key(0, &first_key, false);
+            BT_LOG_ASSERT_CMP(GT, first_key.compare(&parent_key), 0, parent_node);
+        }
+
+        if (my_node->get_edge_id().is_valid()) {
+            verify_node(my_node->get_edge_id(), my_node, my_node->get_total_entries());
+        }
+        unlock_node(my_node, acq_lock);
+    }
+
     void to_string(bnodeid_t bnodeid, std::stringstream &ss) {
         BtreeNodePtr node;
 
@@ -1170,7 +1224,8 @@ done:
 
         btree_status_t ret = btree_status_t::success;
         if (bur != nullptr) {
-            //BT_DEBUG_ASSERT_CMP(NE, bur->callback(), nullptr, my_node); // TODO - range req without callback implementation
+            //BT_DEBUG_ASSERT_CMP(NE, bur->callback(), nullptr, my_node); // TODO - range req without 
+                                                                          // callback implementation
             std::vector< std::pair< K, V > > match;
             int                              start_ind = 0, end_ind = 0;
             my_node->get_all(bur->get_cb_param()->get_sub_range(), UINT32_MAX, start_ind, end_ind, &match);
@@ -1183,6 +1238,7 @@ done:
             }
             for (auto &pair : replace_kv) { // insert is based on compare() of BtreeKey
                 auto status = my_node->insert(pair.first, pair.second);
+                BT_RELEASE_ASSERT((status == btree_status_t::success), my_node, "unexpected insert failure");
                 if (status != btree_status_t::success) {
                     COUNTER_INCREMENT(m_metrics, insert_failed_count, 1);
                     return btree_status_t::retry;
@@ -1466,6 +1522,14 @@ retry:
             // Directly get write lock for leaf, since its an insert.
             child_cur_lock = (child_node->is_leaf()) ? LOCKTYPE_WRITE : LOCKTYPE_READ;
             
+            /* Get subrange if it is a range update */
+            if (bur && child_node->is_leaf()) {
+                /* We get the subrange only for leaf because this is where we will be inserting keys. In interior nodes,
+                 * keys are always propogated from the lower nodes.
+                 */
+                get_subrange(my_node, bur, curr_ind);
+            }
+
             /* check if child node is needed to split */
             bool split_occured = false;
             ret = check_and_split_node(my_node, bur, k, v, ind_hint, put_type, multinode_req, child_node, 
@@ -1478,12 +1542,7 @@ retry:
                 goto retry;
             }
 
-            /* Get subrange if it is a range update */
             if (bur && child_node->is_leaf()) {
-                /* We get the subrange only for leaf because this is where we will be inserting keys. In interior nodes,
-                 * keys are always propogated from the lower nodes.
-                 */
-                get_subrange(my_node, bur, curr_ind);
 
                 if (curr_ind != (int)my_node->get_total_entries()) {
                     /* if it is not an edge node then update the end key in input range after insert has happened in 

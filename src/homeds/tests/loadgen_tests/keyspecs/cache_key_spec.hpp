@@ -7,7 +7,7 @@
 
 #include "homeds/loadgen/loadgen_common.hpp"
 #include "homeds/loadgen/spec/key_spec.hpp"
-#include <spdlog/fmt/bundled/ostream.h>
+#include <fmt/ostream.h>
 #include <random>
 namespace homeds {
 namespace loadgen {

@@ -24,7 +24,8 @@ enum homestore_error {
     write_failed = 13,
     read_failed = 14, 
     space_not_avail = 15,
-    flip_comp_error = 16
+    flip_comp_error = 16,
+    invalid_chunk_size = 17
 };
 
 class homstore_err_category : public std::error_category {

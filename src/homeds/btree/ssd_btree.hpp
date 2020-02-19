@@ -343,6 +343,7 @@ public:
                         ssdbtree_multinode_req_ptr multinode_req, bool is_write_modifiable) {
 
         if (boost::static_pointer_cast< btree_buffer_t >(bn)->is_err_set()) {
+            LOGERROR("failing refresh");
             return btree_status_t::stale_buf;
         }
 

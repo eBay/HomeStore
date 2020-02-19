@@ -18,7 +18,6 @@ endif()
 
 
 include (CTest)
-find_package(Boost 1.64 REQUIRED)
 find_package (Threads REQUIRED)
 find_library(LIB_AIO aio)
 find_library(LIB_DOUBLE_CONVERSION double-conversion)

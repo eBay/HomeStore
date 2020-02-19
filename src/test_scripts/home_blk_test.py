@@ -46,7 +46,7 @@ print("dir path:", dirpath )
 
 # Start IO process
 file_args = "--input-files=" + mnt_point
-process = Popen([dirpath + "test_load", "--gtest_filter=*File*", file_args, "--run_time=1800", "--num_io=100000000000", "--num_keys=1000000]")
+process = Popen([dirpath + "test_load", "--gtest_filter=*File*", file_args, "--run_time=1800", "--num_io=100000000000", "--num_keys=1000000"])
 
 # Inject error after 900 seconds
 sleep(900)

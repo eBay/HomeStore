@@ -4,7 +4,7 @@
 #include "homeds/loadgen/loadgen_common.hpp"
 #include "homeds/loadgen/spec/key_spec.hpp"
 #include "homeds/btree/btree.hpp"
-#include <spdlog/fmt/bundled/ostream.h>
+#include <fmt/ostream.h>
 
 namespace homeds {
 namespace loadgen {
