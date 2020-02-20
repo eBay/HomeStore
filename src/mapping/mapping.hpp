@@ -149,8 +149,10 @@ public:
 
 } __attribute__((__packed__));
 
+#define VALUE_ENTRY_VERSION 0x1
 struct ValueEntry {
 private:
+//    uint32_t magic = VALUE_ENTRY_VERSION;
     uint64_t m_seqId;
     BlkId    m_blkId;
     uint64_t m_nlba : NBLKS_BITS;
@@ -181,7 +183,8 @@ public:
     ValueEntry(uint8_t* ptr) : m_ptr((ValueEntry*)ptr) {}
 
     uint32_t get_blob_size() {
-        return sizeof(uint64_t) + sizeof(BlkId) + sizeof(uint8_t) + sizeof(uint8_t) + sizeof(uint16_t) * get_nlba();
+        return sizeof(uint64_t) + sizeof(BlkId) + sizeof(uint8_t) + 
+                sizeof(uint8_t) + sizeof(uint16_t) * get_nlba();
     }
 
     homeds::blob get_blob() { return {(uint8_t*)m_ptr, get_blob_size()}; }
@@ -277,6 +280,20 @@ public:
     // creates array with  value entrys - on heap -bcopy
     MappingValue(vector< ValueEntry >& elements) : ObjLifeCounter() { m_earr.set_elements(elements); }
 
+    MappingValue(MappingValue& other, uint16_t offset, uint32_t  nblks, uint32_t page_size) {
+        Blob_Array< ValueEntry >& arr = other.get_array();
+        assert(arr.get_total_elements() == 1);
+        ValueEntry ve;
+        arr.get(0, ve, true);
+        ve.add_offset(offset, nblks, page_size);
+        m_earr.set_element(ve);
+    }
+
+    MappingValue(boost::intrusive_ptr< volume_req > req, const MappingValue& one, uint32_t one_offset, 
+                    const MappingValue& second, uint32_t second_offset, uint32_t page_size) {
+        assert(0);
+    }
+
     virtual homeds::blob get_blob() const override {
         homeds::blob b;
         b.bytes = (uint8_t*)m_earr.get_mem();
@@ -341,6 +358,30 @@ public:
         v_array.insert(v_array.begin() + i, ve);
         out.get_array().set_elements(v_array);
     }
+
+#if 0
+    void truncate(boost::intrusive_ptr< volume_req > req) {
+        Blob_Array< ValueEntry >& e_varray = get_array();
+
+        // iterate and remove all entries except latest one
+        for (int i = e_varray.get_total_elements() - 1; i >= 0; i--) {
+            ValueEntry ve;
+            e_varray.get(i, ve, false);
+            uint32_t total = e_varray.get_total_elements();
+            if (req->lastCommited_seqId == INVALID_SEQ_ID ||
+                    ve.get_seqId() < req->lastCommited_seqId) { // eligible for removal
+
+                LOGTRACE("Free entry:{} nblks {}", ve.to_string(),
+                        (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * e_key->get_n_lba());
+                Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(),
+                        (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) *
+                        e_key->get_n_lba());
+                param->m_req->blkIds_to_free.emplace_back(fbe);
+                e_varray.remove(i);
+            }
+        }
+    }
+#endif
 
     string to_str() const {
         stringstream ss;
@@ -659,8 +700,13 @@ private:
 #endif
     }
 
-    /**
-     * Callback called onces for each eligible bnode
+    /* It calculate the offset in a value by looking at start lba */
+    uint32_t compute_val_offset(BRangeUpdateCBParam< MappingKey, MappingValue >* cb_param, uint64_t start_lba) {
+        uint64_t input_start_lba = cb_param->get_new_key().start();
+        return (start_lba - input_start_lba);
+    }
+
+    /* Callback called onces for each eligible bnode
      * @param match_kv - list of all match K/V for bnode (based on key.compare/compare_range)
      * @param replace_kv - btree replaces all K/V in match_kv with replace_kv
      * @param cb_param - All parameteres provided by mapping.put can be accessed from this
@@ -672,11 +718,14 @@ private:
                            BRangeUpdateCBParam< MappingKey, MappingValue >* cb_param) {
 
         uint64_t start_lba = 0, end_lba = 0;
-        get_start_end_lba(cb_param, start_lba, end_lba);
         UpdateCBParam* param = (UpdateCBParam*)cb_param;
-        ValueEntry     new_ve;
-        param->get_new_value().get_array().get(0, new_ve, false);
+        
+        get_start_end_lba(cb_param, start_lba, end_lba);
+        auto req = param->m_req;
+        MappingValue& new_val = param->get_new_value();
+
 #ifndef NDEBUG
+        uint16_t replace_kv_size = req->blkIds_to_free.size();
         stringstream ss;
         ss << "vol_uuid:" << boost::uuids::to_string(param->m_req->vol_uuid);
         ss << ",Lba:" << param->m_req->lba << ",nlbas:" << param->m_req->nlbas << ",seqId:" << param->m_req->seqId
@@ -685,61 +734,68 @@ private:
         ss << ",ie:" << ((MappingKey*)param->get_input_range().get_end_key())->to_string();
         ss << ",ss:" << ((MappingKey*)param->get_sub_range().get_start_key())->to_string();
         ss << ",se:" << ((MappingKey*)param->get_sub_range().get_end_key())->to_string();
-        ss << ",NewValue:" << new_ve.to_string();
         ss << ",match_kv:";
         for (auto& ptr : match_kv)
             ss << ptr.first.to_string() << "," << ptr.second.to_string();
 #endif
-        MappingKey* s_in_range = (MappingKey*)param->get_input_range().get_start_key();
-        auto        curr_lbarange_st = start_lba;
+        /* We don't change BLKID in value. Instead we store offset of lba range that we are storing */
+        uint32_t initial_val_offset = compute_val_offset(cb_param, start_lba);
+        uint32_t new_val_offset = initial_val_offset;
         for (auto& existing : match_kv) {
-            MappingKey*               e_key = &existing.first;
-            MappingValue*             e_value = &existing.second;
-            Blob_Array< ValueEntry >& e_varray = e_value->get_array();
+            MappingKey* e_key = &existing.first;
 
-            // iterate and remove all entries except latest one
-            // for latest one, if key fully overlaps, we can remove that too
-            for (int i = e_varray.get_total_elements() - 1; i >= 0; i--) {
-                ValueEntry ve;
-                e_varray.get(i, ve, false);
-                uint32_t total = e_varray.get_total_elements();
-                if (i != (int)total - 1 ||
-                    (e_key->start() >= start_lba && e_key->end() <= end_lba) /*last element full overlap*/) {
-
-                    if (param->m_req->lastCommited_seqId == INVALID_SEQ_ID ||
-                        ve.get_seqId() < param->m_req->lastCommited_seqId) { // eligible for removal
-
-                        if (param->is_state_modifiable()) { // actual put cb, not is_split cb
-                            LOGTRACE("Free entry:{} nblks {}", ve.to_string(),
-                                     (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * e_key->get_n_lba());
-                            Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(),
-                                               (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) *
-                                                   e_key->get_n_lba());
-                            param->m_req->blkIds_to_free.emplace_back(fbe);
-                        }
-                        e_varray.remove(i);
-                    }
-                }
+            if (e_key->start() > start_lba) {
+                /* add missing interval */
+                add_new_interval(start_lba, e_key->start() - 1, new_val, new_val_offset, replace_kv);
+                new_val_offset += e_key->start() - start_lba;
+                start_lba = e_key->start();
             }
 
-            if (e_varray.get_total_elements() != 0) {
-                e_varray.mem_align();
-                if (curr_lbarange_st < e_key->start()) { // add last running range
-                    add_missing_interval(curr_lbarange_st, e_key->start() - 1, new_ve,
-                                         curr_lbarange_st - s_in_range->start(), replace_kv);
-                }
-
-                add_overlaps(e_key, e_value, param, replace_kv);
-                curr_lbarange_st = e_key->end() + 1; // restart running range
+            MappingValue* e_value = &existing.second;
+            uint32_t existing_val_offset = 0;
+            /* enable it when snapshot comes */
+#if 0
+            /* Truncate the existing value based on seq ID */
+            e_value->truncate(req);
+#endif
+                
+            /* we need to split the existing key/value at the start */
+            if (e_key->start() < start_lba) {
+                /* It will always be the first entry */
+                assert(new_val_offset == initial_val_offset);
+                // split existing key at the start and add new interval
+                add_new_interval(e_key->start(), start_lba - 1, *e_value, existing_val_offset, replace_kv);
+                existing_val_offset += start_lba - e_key->start();
+            }
+            
+            /* Now both intervals have the same start */
+            // compute overlap
+            auto end_lba_overlap = e_key->end() < end_lba ? e_key->end() : end_lba;
+            compute_and_add_overlap(req, start_lba, end_lba_overlap, new_val, new_val_offset, *e_value, 
+                                    existing_val_offset, replace_kv);
+#ifndef NDEBUG
+            ++replace_kv_size;
+#endif
+            uint32_t nblks = end_lba_overlap - start_lba + 1;
+            new_val_offset += nblks;
+            existing_val_offset += nblks;
+            start_lba += nblks;
+            
+            if (e_key->end() > end_lba) {
+                assert(start_lba == end_lba + 1);
+                // split existing key at the end and add new interval 
+                add_new_interval(start_lba, e_key->end(), *e_value, existing_val_offset, replace_kv);
             }
         }
 
-        if (curr_lbarange_st <= end_lba) { // add new range
-            add_missing_interval(curr_lbarange_st, end_lba, new_ve, curr_lbarange_st - s_in_range->start(), replace_kv);
+        assert(req->blkIds_to_free.size() == replace_kv_size);
+        if (start_lba <= end_lba) { // add new range
+            add_new_interval(start_lba, end_lba, new_val, new_val_offset, replace_kv);
         }
 
         // TODO - merge kv which have contigous lba and BlkIds - may be not that useful for performance
 #ifndef NDEBUG
+        /* sanity check */
         for (auto& pair : replace_kv) {
             Blob_Array< ValueEntry >& array = pair.second.get_array();
 
@@ -786,9 +842,6 @@ private:
         for (auto& ptr : replace_kv) {
             ss << ptr.first.to_string() << "," << ptr.second.to_string();
         }
-        if (param->is_state_modifiable()) {
-            LOGTRACE("Put_CB:,{} ", ss.str());
-        }
 #endif
     }
 
@@ -818,84 +871,31 @@ private:
         }
     }
 
-    /** result of overlap of k1/k2 is added to replace_kv **/
-    void add_overlaps(MappingKey* k1, MappingValue* v1, UpdateCBParam* param,
-                      vector< pair< MappingKey, MappingValue > >& replace_kv) {
+    /* result of overlap of k1/k2 is added to replace_kv */
+    void compute_and_add_overlap(boost::intrusive_ptr< volume_req > req, uint64_t s_lba, uint64_t e_lba, 
+            MappingValue& new_val, uint16_t new_val_offset, MappingValue& e_val, uint16_t e_val_offset,
+            vector< pair< MappingKey, MappingValue > >& replace_kv) {
 
-        MappingKey*   k2 = &(param->get_new_key());
-        MappingValue* v2 = &(param->get_new_value());
-        assert(v2->get_array().get_total_elements() == 1);
+        auto       nlba = e_lba - s_lba + 1;
 
-        auto start = k1->start();
-        auto end = k1->end();
-        if (k2->start() > start) { // non overlaping start
-            auto         nlba = k2->start() - start;
-            MappingValue val_start(*v1);
-            val_start.add_offset(0, nlba, m_vol_page_size);
-            replace_kv.emplace_back(make_pair(MappingKey(start, nlba), val_start));
-            start = k2->start();
-        }
-        MappingKey   key_end;
-        MappingValue val_end(*v1);
-        if (k2->end() < k1->end()) { // non overlaping end
-            key_end.set(k2->end() + 1, k1->end() - k2->end());
-            auto lba_offset = k2->end() - k1->start() + 1;
-            val_end.add_offset(lba_offset, key_end.get_n_lba(), m_vol_page_size);
-            end = k2->end();
-        }
-        assert(start >= k2->start() && start >= k1->start());
-        assert(end <= k2->end() && end <= k1->end());
+        /* This code assumes that there is only one value entry */
+        Blob_Array< ValueEntry >& e_varray = e_val.get_array();
+        ValueEntry ve;
+        e_varray.get(0, ve, false);
+        uint16_t blk_offset = (e_val_offset * m_vol_page_size) /  HomeBlks::instance()->get_data_pagesz();
+        Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset() + blk_offset, 
+                            (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * nlba);
+        req->blkIds_to_free.emplace_back(fbe);
 
-        // get entris from both v1/v2 and offset is needed for both of them
-        auto       overlap_nlba = end - start + 1;
-        MappingKey key3(start, overlap_nlba);
-        auto       k1_offset = start - k1->start();
-        auto       k2_offset = start - k2->start();
-        // add offset to v1
-        v1->add_offset(k1_offset, overlap_nlba, m_vol_page_size); // modify original in place
-
-        // remove older version
-        Blob_Array< ValueEntry >& e_varray = v1->get_array();
-        for (int i = e_varray.get_total_elements() - 1; i >= 0; i--) {
-            ValueEntry ve;
-            e_varray.get(i, ve, false);
-            if (param->m_req->lastCommited_seqId == INVALID_SEQ_ID ||
-                ve.get_seqId() < param->m_req->lastCommited_seqId) { // eligible for removal
-
-                if (param->is_state_modifiable()) { // actual put cb, not is_split cb
-                    LOGDEBUG("Free entry:{} nblks {}", ve.to_string(),
-                             (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * k1->get_n_lba());
-                    Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(),
-                                       (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * ve.get_nlba());
-                    param->m_req->blkIds_to_free.emplace_back(fbe);
-                }
-                e_varray.remove(i);
-            }
-        }
-        e_varray.mem_align();
-
-        ValueEntry new_ve;
-        // add offset to v2
-        v2->get_array().get(0, new_ve, true);
-        new_ve.add_offset(k2_offset, overlap_nlba, m_vol_page_size);
-
-        // combine v1 and v2
-        MappingValue value3;
-        v1->add_copy(new_ve, value3);
-        replace_kv.emplace_back(make_pair(key3, value3));
-
-        if (!(key_end.get_lbaId().is_invalid())) {
-            replace_kv.emplace_back(make_pair(key_end, val_end));
-        }
+        replace_kv.emplace_back(make_pair(MappingKey(s_lba, nlba), MappingValue(new_val, new_val_offset, nlba,  
+                                                                        m_vol_page_size)));
     }
 
-    /**add missing interval to replace kv**/
-    void add_missing_interval(uint64_t s_lba, uint64_t e_lba, ValueEntry& ve, uint16_t lba_offset,
+    /* add missing interval to replace kv */
+    void add_new_interval(uint64_t s_lba, uint64_t e_lba, MappingValue& val, uint16_t lba_offset,
                               vector< pair< MappingKey, MappingValue > >& replace_kv) {
-        ValueEntry gap_entry(ve);
         auto       nlba = e_lba - s_lba + 1;
-        gap_entry.add_offset(lba_offset, nlba, m_vol_page_size);
-        replace_kv.emplace_back(make_pair(MappingKey(s_lba, nlba), MappingValue(gap_entry)));
+        replace_kv.emplace_back(make_pair(MappingKey(s_lba, nlba), MappingValue(val, lba_offset, nlba, m_vol_page_size)));
     }
 
 #ifndef NDEBUG

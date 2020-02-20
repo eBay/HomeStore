@@ -292,32 +292,10 @@ public:
             if (ureq) {
                 //TODO - determine size needed for non-callback based range updates in future
                 assert(ureq->callback() != nullptr);
-                int start_ind = 0, end_ind = 0;
-                uint32_t new_size = 0, existing_size = 0;
-                std::vector<std::pair<K, V>> match, replace_kv;
-                const_cast<VariableNode *>(this)->get_all(ureq->get_input_range(), 
-                        UINT32_MAX, start_ind, end_ind, &match);
-                for (auto &pair : match) { 
-                    existing_size += pair.first.get_blob_size() + pair.second.get_blob_size() + get_record_size();
-                }
-
-                ureq->get_cb_param()->set_state_modifiable(false);
-                ureq->callback()(match, replace_kv,ureq->get_cb_param());
-#if 0
-                if(replace_kv.size()>0 && !(this->get_edge_id().is_valid())){
-                    std::pair<K, V> &pair2 =replace_kv[replace_kv.size()-1];
-                    assert(pair2.first.compare(ureq->get_cb_param()->get_sub_range().get_end_key()) <= 0);
-                }
-#endif 
-                ureq->get_cb_param()->set_state_modifiable(true);
-                
-                for (auto &pair : replace_kv) {
-                    new_size += pair.first.get_blob_size() + pair.second.get_blob_size() + get_record_size();
-                }
-
-                if (new_size > existing_size) {
-                    size_needed = new_size - existing_size;
-                }
+                /* If there is an overlap then we can add 2 more keys :- one in the front and other in the tail.
+                 * Here assumption is that size of a value added is not going to change because of overlaps.
+                 */
+                size_needed = val.get_blob_size() + (2 * (key.get_blob_size() + get_record_size()));
             } else {
                 // NOTE : size_needed is just an guess here. Actual implementation of Mapping key/value can have 
                 // specific logic which determines of size changes on insert or update.
