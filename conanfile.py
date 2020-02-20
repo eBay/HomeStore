@@ -5,45 +5,42 @@ from conans import ConanFile, CMake, tools
 class HomestoreConan(ConanFile):
     name = "homestore"
 
-    version = "0.11.22"
+    version = "0.11.24"
     revision_mode = "scm"
 
     license = "Proprietary"
     url = "https://github.corp.ebay.com/SDS/Homestore"
     description = "HomeStore"
 
-    settings = "arch", "os", "compiler", "build_type", "sanitize"
-    options = {"shared": ['True', 'False'],
-               "fPIC": ['True', 'False'],
-               "coverage": ['True', 'False']}
-    default_options = 'shared=False', 'fPIC=True', 'coverage=False'
+    settings = "arch", "os", "compiler", "build_type"
+    options = {
+                "shared": ['True', 'False'],
+                "fPIC": ['True', 'False'],
+                "coverage": ['True', 'False'],
+                "sanitize": ['True', 'False'],
+                }
+    default_options = (
+                        'shared=False',
+                        'fPIC=True',
+                        'coverage=False',
+                        'sanitize=False',
+                        )
 
     requires = (
-            # Frequently updated
-            "iomgr/2.2.12@sds/develop",
-
-            # Not commonly updated
-            "flip/0.2.5@sds/develop",
-            "sds_logging/6.1.0@sds/develop",
-            "sds_options/1.0.0@sds/develop",
-            "sisl/0.3.11@sisl/develop",
+            "flip/0.2.6@sds/develop",
+            "iomgr/2.2.13@sds/develop",
+            "sds_logging/6.1.2@sds/develop",
+            "sisl/0.3.18@sisl/develop",
 
             # FOSS, rarely updated
-            "benchmark/1.5.0@oss/stable",
-            "boost_asio/1.69.0@bincrafters/stable",
-            "boost_dynamic_bitset/1.69.0@bincrafters/stable",
-            "boost_circular_buffer/1.69.0@bincrafters/stable",
-            "boost_heap/1.69.0@bincrafters/stable",
-            "boost_intrusive/1.69.0@bincrafters/stable",
-            "boost_preprocessor/1.69.0@bincrafters/stable",
-            "boost_uuid/1.69.0@bincrafters/stable",
-            "double-conversion/3.1.4@bincrafters/stable",
-            "evhtp/1.2.18.1@oss/stable",
-            "farmhash/1.0.0@oss/stable",
-            "folly/2019.09.23.00@bincrafters/stable",
-            "isa-l/2.21.0@oss/stable",
-            "libevent/2.1.11@bincrafters/stable",
-            ("zstd/1.4.0@bincrafters/stable", "override"),
+            "benchmark/1.5.0",
+            "boost/1.72.0",
+            "double-conversion/3.1.5",
+            "evhtp/1.2.18.2",
+            "farmhash/1.0.0",
+            "folly/2019.09.30.00",
+            "isa-l/2.21.0",
+            "libevent/2.1.11",
             )
 
     generators = "cmake"
@@ -51,15 +48,15 @@ class HomestoreConan(ConanFile):
     keep_imports = True
 
     def configure(self):
-        if self.settings.sanitize != None:
-            del self.options.coverage
+        if self.options.sanitize:
+            self.options.coverage = False
 
     def imports(self):
         self.copy(root_package="flip", pattern="*.py", dst="bin/scripts", src="python/flip/", keep_path=True)
 
     def requirements(self):
         if not self.settings.build_type == "Debug":
-            self.requires("gperftools/2.7.0@oss/stable")
+            self.requires("gperftools/2.7.0")
 
     def build(self):
         cmake = CMake(self)
@@ -69,12 +66,12 @@ class HomestoreConan(ConanFile):
                        'MEMORY_SANITIZER_ON': 'OFF'}
         test_target = None
 
-        if self.settings.sanitize != "address" and self.options.coverage == 'True':
+        if self.options.sanitize:
+            definitions['MEMORY_SANITIZER_ON'] = 'ON'
+
+        if self.options.coverage:
             definitions['CONAN_BUILD_COVERAGE'] = 'ON'
             test_target = 'coverage'
-
-        if self.settings.sanitize != None:
-            definitions['MEMORY_SANITIZER_ON'] = 'ON'
 
         if self.settings.build_type == 'Debug':
             definitions['CMAKE_BUILD_TYPE'] = 'Debug'
@@ -101,7 +98,7 @@ class HomestoreConan(ConanFile):
     def package_info(self):
         self.cpp_info.libs = tools.collect_libs(self)
         self.cpp_info.cxxflags.append("-DBOOST_ALLOW_DEPRECATED_HEADERS")
-        if self.settings.sanitize != None:
+        if self.options.sanitize:
             self.cpp_info.sharedlinkflags.append("-fsanitize=address")
             self.cpp_info.exelinkflags.append("-fsanitize=address")
             self.cpp_info.sharedlinkflags.append("-fsanitize=undefined")

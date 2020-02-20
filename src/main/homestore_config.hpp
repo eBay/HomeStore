@@ -37,23 +37,24 @@ constexpr uint32_t TOTAL_SEGMENTS = 8;
  * the code for upgrade/revert. 
  */
 constexpr uint32_t MAX_CHUNKS = 128;
-constexpr uint32_t MAX_VDEVS = 8;
+constexpr uint32_t MAX_VDEVS = 16;
 constexpr uint32_t MAX_PDEVS = 8;
 
-#define MAX_CHUNK_SIZE (((1lu << ID_BITS) - 1) * (HomeStoreConfig::min_io_size)) // 16T
-
-/* TODO: we store global unique ID in blkid. Instead it we only store chunk offset then 
- * max cacapity will increase from MAX_CHUNK_SIZE to MAX_CHUNKS * MAX_CHUNK_SIZE.
- */
-#define MAX_SUPPORTED_CAP MAX_CHUNK_SIZE
-#define MEMVEC_MAX_IO_SIZE (HomeStoreConfig::min_io_size * ((1 << MEMPIECE_ENCODE_MAX_BITS) - 1))
-#define MIN_CHUNK_SIZE (HomeStoreConfig::phys_page_size * BLKS_PER_PORTION * TOTAL_SEGMENTS)
 
 /* NOTE: it can give size more then the size passed in argument to make it aligned */
 #define ALIGN_SIZE(size, align) (((size % align) == 0) ? size : (size + (align - (size % align))))
 
 /* NOTE: it can give size less then size passed in argument to make it aligned */
 #define ALIGN_SIZE_TO_LEFT(size, align) (((size % align) == 0) ? size : (size - (size % align)))
+
+/* TODO: we store global unique ID in blkid. Instead it we only store chunk offset then 
+ * max cacapity will increase from MAX_CHUNK_SIZE to MAX_CHUNKS * MAX_CHUNK_SIZE.
+ */
+#define MAX_SUPPORTED_CAP MAX_CHUNKS * MAX_CHUNK_SIZE
+#define MEMVEC_MAX_IO_SIZE (HomeStoreConfig::min_io_size * ((1 << MEMPIECE_ENCODE_MAX_BITS) - 1))
+#define MIN_CHUNK_SIZE (HomeStoreConfig::phys_page_size * BLKS_PER_PORTION * TOTAL_SEGMENTS)
+#define MAX_CHUNK_SIZE ALIGN_SIZE_TO_LEFT((((1lu << ID_BITS) - 1) * (HomeStoreConfig::min_io_size)), MIN_CHUNK_SIZE) // 16T
+
 #define MAX_UUID_LEN 128
 
 }
