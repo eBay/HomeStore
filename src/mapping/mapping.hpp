@@ -152,7 +152,7 @@ public:
 #define VALUE_ENTRY_VERSION 0x1
 struct ValueEntry {
 private:
-//    uint32_t magic = VALUE_ENTRY_VERSION;
+    uint8_t  magic = VALUE_ENTRY_VERSION;
     uint64_t m_seqId;
     BlkId    m_blkId;
     uint64_t m_nlba : NBLKS_BITS;
@@ -165,7 +165,7 @@ private:
     ValueEntry*                                 m_ptr;
 
 public:
-    ValueEntry() : m_seqId(0), m_blkId(0), m_nlba(0), m_blk_offset(0), m_carr() { m_ptr = (ValueEntry*)&m_seqId; }
+    ValueEntry() : m_seqId(0), m_blkId(0), m_nlba(0), m_blk_offset(0), m_carr() { m_ptr = (ValueEntry*)this; }
 
     // deep copy
     ValueEntry(uint64_t seqId, const BlkId& blkId, uint8_t blk_offset, uint8_t nlba,
@@ -175,7 +175,7 @@ public:
             m_nlba(nlba),
             m_blk_offset(blk_offset),
             m_carr(carr) {
-        m_ptr = (ValueEntry*)&m_seqId;
+        m_ptr = (ValueEntry*)this;
     }
 
     ValueEntry(const ValueEntry& ve) { copy_from(ve); }
@@ -183,7 +183,7 @@ public:
     ValueEntry(uint8_t* ptr) : m_ptr((ValueEntry*)ptr) {}
 
     uint32_t get_blob_size() {
-        return sizeof(uint64_t) + sizeof(BlkId) + sizeof(uint8_t) + 
+        return sizeof(uint8_t) + sizeof(uint64_t) + sizeof(BlkId) + sizeof(uint8_t) + 
                 sizeof(uint8_t) + sizeof(uint16_t) * get_nlba();
     }
 
@@ -203,7 +203,7 @@ public:
         m_nlba = ve.get_nlba();
         for (auto i = 0; i < ve.get_nlba(); i++)
             m_carr[i] = ve.get_checksum_at(i);
-        m_ptr = (ValueEntry*)&m_seqId;
+        m_ptr = (ValueEntry*)this;
     }
 
     void add_offset(uint8_t lba_offset, uint8_t nlba, uint32_t vol_page_size) {
