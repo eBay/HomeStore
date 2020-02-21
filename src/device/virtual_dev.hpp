@@ -236,12 +236,12 @@ public:
 
         if (is_stripe) {
             m_num_chunks = (uint32_t)pdev_list.size();
-            m_chunk_size = size / m_num_chunks;
-            /* chunk size should not be greater then max chunk size */
-            if (m_chunk_size > MAX_CHUNK_SIZE) {
-                 m_chunk_size = MAX_CHUNK_SIZE;;
-                 m_num_chunks = size / MAX_CHUNK_SIZE;
-            }
+            int cnt = 1;
+            do {
+                m_num_chunks = cnt * m_num_chunks;
+                m_chunk_size = size / m_num_chunks;
+                ++cnt;
+            } while (m_chunk_size > MAX_CHUNK_SIZE);
         } else {
             m_chunk_size = size;
             m_num_chunks = 1;
