@@ -183,18 +183,19 @@ namespace homeds {
             return size;
         }
 
-        // access elements by index.Dosent do bcopy
-        void get(uint32_t index, ElementType &element, bool copy) const{
+        // access elements by index.Doesn't do bcopy
+        void get(uint32_t index, ElementType &element, bool copy) const {
             assert(index < m_header->m_total_elements);
             assert(is_initialized);
             record *curr_rec = get_record(index);
             blob b;
             b.size = curr_rec->m_size;
             b.bytes = get_data_ptr(curr_rec->m_offset);
-            if (copy)
+            if (copy) {
                 element.copy_blob(b);
-            else
+            } else {
                 element.set_blob(b);
+            }
         }
 
         //returns total elements in array
