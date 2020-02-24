@@ -40,69 +40,6 @@ ENUM(btree_status_t, uint32_t, success, not_found, item_found, closest_found, cl
 #define ASSERT_IS_VALID_INTERIOR_CHILD_INDX(ret, node)
 #endif
 
-#if 0
-#define _BTNODE_LOG_FORMAT "[node={}:{}:N={}]: "
-#define _BTNODE_LOG_MSG(node) (node->is_leaf() ? "L" : "I"), node->get_node_id_int(), node->get_total_entries()
-
-#define _BTNODE_LOG_VERBOSE_FORMAT "node = {}\n"
-#define _BTNODE_LOG_VERBOSE_MSG(node) node->to_string()
-#define _BTMSG_EXPAND(...) __VA_ARGS__
-
-// clang-format off
-#define THIS_BT_LOG(level, mod, node, fmt, ...)                                                                             \
-    LOG##level##MOD(                                                                                                   \
-        BOOST_PP_IF(BOOST_PP_IS_EMPTY(mod), base, mod),                                                                \
-        "[btree={}]" BOOST_PP_IF(BOOST_PP_IS_EMPTY(node), "{}: ", _BTNODE_LOG_FORMAT) fmt,                             \
-        m_btree_cfg.get_name(),                                                                                        \
-        BOOST_PP_EXPAND(_BTMSG_EXPAND BOOST_PP_IF(BOOST_PP_IS_EMPTY(node), (""), (_BTNODE_LOG_MSG(node)))),            \
-        ##__VA_ARGS__)
-
-#define _BT_ASSERT_MSG(asserttype, node, ...) \
-        "\n**********************************************************\n"                                               \
-        "btree = {}\n" BOOST_PP_IF(BOOST_PP_IS_EMPTY(node), "{}: ", _BTNODE_LOG_VERBOSE_FORMAT) "Metrics = {}\n" "{}"  \
-        "\n**********************************************************\n",                                              \
-        m_btree_cfg.get_name(),                                                                                        \
-        BOOST_PP_EXPAND(_BTMSG_EXPAND BOOST_PP_IF(BOOST_PP_IS_EMPTY(node), (""), (_BTNODE_LOG_VERBOSE_MSG(node)))),    \
-        asserttype##_METRICS_DUMP_MSG,                                                                                 \
-        sds_logging::format_log_msg(__VA_ARGS__)
-// clang-format on
-
-#define BT_ASSERT(asserttype, cond, node, fmt, ...)                                                                    \
-    asserttype##_ASSERT(cond, _BT_ASSERT_MSG(asserttype, node, fmt, ##__VA_ARGS__))
-
-#define BT_ASSERT_OP(asserttype, optype, val1, val2, node, ...)                                                        \
-    asserttype##_ASSERT_##optype(val1, val2, _BT_ASSERT_MSG(asserttype, node, ##__VA_ARGS__))
-
-#define BT_ASSERT_EQ(asserttype, ...) BT_ASSERT_OP(asserttype, EQ, ##__VA_ARGS__)
-#define BT_ASSERT_NE(asserttype, ...) BT_ASSERT_OP(asserttype, NE, ##__VA_ARGS__)
-#define BT_ASSERT_GT(asserttype, ...) BT_ASSERT_OP(asserttype, GT, ##__VA_ARGS__)
-#define BT_ASSERT_GE(asserttype, ...) BT_ASSERT_OP(asserttype, GE, ##__VA_ARGS__)
-#define BT_ASSERT_LT(asserttype, ...) BT_ASSERT_OP(asserttype, LT, ##__VA_ARGS__)
-#define BT_ASSERT_LE(asserttype, ...) BT_ASSERT_OP(asserttype, LE, ##__VA_ARGS__)
-
-/* Assert with log messages. Parameters are
- * cond: Condition which when false will trigger the assert
- * node: [optional]Btree node whose node details has to be printed
- * fmt: Format message
- * ...: Any parameters to pass to these format messages
- */
-#define BT_DEBUG_ASSERT(...) BT_ASSERT(DEBUG, __VA_ARGS__)
-#define BT_RELEASE_ASSERT(...) BT_ASSERT(RELEASE, __VA_ARGS__)
-#define BT_LOG_ASSERT(...) BT_ASSERT(LOGMSG, __VA_ARGS__)
-
-/* Assert if comparision does not match. Parameters are
- * Comparator: What comparison to do, valid values are one of [EQ, NE, GT, GE, LT, LE]
- * val1: LHS to compare
- * val2: RHS to compare
- * node: [optional]Btree node whose node details has to be printed
- * fmt: [optional] Additional message
- * ...: Any parameters to pass to these format messages
- */
-#define BT_DEBUG_ASSERT_CMP(optype, ...) BT_ASSERT_OP(DEBUG, optype, ##__VA_ARGS__)
-#define BT_RELEASE_ASSERT_CMP(optype, ...) BT_ASSERT_OP(RELEASE, optype, ##__VA_ARGS__)
-#define BT_LOG_ASSERT_CMP(optype, ...) BT_ASSERT_OP(LOGMSG, optype, ##__VA_ARGS__)
-#endif
-
 #define THIS_BT_LOG(level, mod, node, msg, ...)                                                                        \
     HS_DETAILED_LOG(level, mod, , "btree", m_btree_cfg.get_name(), BOOST_PP_IF(BOOST_PP_IS_EMPTY(node), , "node"),     \
                     node->to_string(), msg, ##__VA_ARGS__)
