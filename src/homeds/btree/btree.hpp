@@ -49,64 +49,61 @@ struct btree_super_block {
 } __attribute((packed));
 
 template < btree_store_type BtreeStoreType, typename K, typename V, btree_node_type InteriorNodeType,
-        btree_node_type LeafNodeType, typename btree_req_type = struct empty_writeback_req >
+           btree_node_type LeafNodeType, typename btree_req_type = struct empty_writeback_req >
 struct _btree_locked_node_info {
     btree_node_t* node;
     Clock::time_point start_time;
 };
 
-#define btree_locked_node_info  \
-    _btree_locked_node_info< BtreeStoreType, K, V, InteriorNodeType, LeafNodeType, btree_req_type>
-
+#define btree_locked_node_info                                                                                         \
+    _btree_locked_node_info< BtreeStoreType, K, V, InteriorNodeType, LeafNodeType, btree_req_type >
 
 template < btree_store_type BtreeStoreType, typename K, typename V, btree_node_type InteriorNodeType,
            btree_node_type LeafNodeType, typename btree_req_type = struct empty_writeback_req >
 class Btree {
     typedef std::function< void(boost::intrusive_ptr< btree_req_type > cookie, bool status) > comp_callback;
-    typedef std::function< void (V& mv) >      free_blk_callback;
-    typedef std::function< void () >           destroy_btree_comp_callback;
+    typedef std::function< void(V& mv) > free_blk_callback;
+    typedef std::function< void() > destroy_btree_comp_callback;
 
 private:
-    bnodeid_t              m_root_node;
+    bnodeid_t m_root_node;
     homeds::thread::RWLock m_btree_lock;
 
-    uint32_t          m_max_nodes;
-    BtreeConfig       m_btree_cfg;
+    uint32_t m_max_nodes;
+    BtreeConfig m_btree_cfg;
     btree_super_block m_sb;
 
-    BtreeMetrics                     m_metrics;
+    BtreeMetrics m_metrics;
     std::unique_ptr< btree_store_t > m_btree_store;
     comp_callback m_comp_cb;
     bool m_destroy = false;
-    std::atomic<uint64_t> m_total_nodes = 0;
-    uint32_t    m_node_size = 4096;
+    std::atomic< uint64_t > m_total_nodes = 0;
+    uint32_t m_node_size = 4096;
 #ifndef NDEBUG
-    std::atomic<uint64_t> m_req_id = 0;
+    std::atomic< uint64_t > m_req_id = 0;
 #endif
 
-    static thread_local homeds::reserve_vector< btree_locked_node_info, 5 >  wr_locked_nodes;
-    static thread_local homeds::reserve_vector< btree_locked_node_info, 5 >  rd_locked_nodes;
+    static thread_local homeds::reserve_vector< btree_locked_node_info, 5 > wr_locked_nodes;
+    static thread_local homeds::reserve_vector< btree_locked_node_info, 5 > rd_locked_nodes;
 #ifndef NDEBUG
-    std::mutex                            m_req_mtx;
+    std::mutex m_req_mtx;
     std::map< uint64_t, btree_multinode_req_ptr > m_req_map;
 #endif
 
     ////////////////// Implementation /////////////////////////
 public:
-    btree_super_block get_btree_sb() {
-        return m_sb;
-    }
+    btree_super_block get_btree_sb() { return m_sb; }
 
-#ifdef _PRERELEASE 
+#ifdef _PRERELEASE
     static void set_io_flip() {
         /* IO flips */
-        FlipClient *fc = homestore::HomeStoreFlip::client_instance();
+        FlipClient* fc = homestore::HomeStoreFlip::client_instance();
         FlipFrequency freq;
         FlipCondition cond1;
         FlipCondition cond2;
         freq.set_count(2000000000);
         freq.set_percent(2);
-    
+
         FlipCondition null_cond;
         fc->create_condition("", flip::Operator::DONT_CARE, (int)1, &null_cond);
 
@@ -116,7 +113,7 @@ public:
 
         fc->create_condition("nuber of entries in a node", flip::Operator::EQUAL, 4, &cond1);
         fc->create_condition("nuber of entries in a node", flip::Operator::EQUAL, 2, &cond2);
-        
+
         fc->inject_retval_flip("btree_delay_and_split", {cond1, cond2}, freq, 20);
         fc->inject_retval_flip("btree_delay_and_split_leaf", {cond1, cond2}, freq, 20);
         fc->inject_noreturn_flip("btree_parent_node_full", {null_cond}, freq);
@@ -127,14 +124,14 @@ public:
 
     static void set_error_flip() {
         /* error flips */
-        FlipClient *fc = homestore::HomeStoreFlip::client_instance();
+        FlipClient* fc = homestore::HomeStoreFlip::client_instance();
         FlipFrequency freq;
         freq.set_count(2000000000);
         freq.set_percent(1);
-        
+
         FlipCondition null_cond;
         fc->create_condition("", flip::Operator::DONT_CARE, (int)1, &null_cond);
-        
+
         fc->inject_noreturn_flip("btree_split_failure", {null_cond}, freq);
         fc->inject_noreturn_flip("btree_write_comp_fail", {null_cond}, freq);
         fc->inject_noreturn_flip("btree_read_fail", {null_cond}, freq);
@@ -144,7 +141,7 @@ public:
 #endif
 
     void process_completions(btree_status_t status, btree_multinode_req_ptr multinode_req) {
-        
+
         if (!multinode_req) {
             return;
         }
@@ -153,9 +150,8 @@ public:
         }
         if (multinode_req->writes_pending.decrement_testz()) {
             if (m_comp_cb && multinode_req->cookie) {
-                BT_LOG_ASSERT_CMP(EQ, multinode_req->is_sync, false, );
-                m_comp_cb(multinode_req->cookie, 
-                        (multinode_req->status == btree_status_t::success) ? true : false);
+                BT_LOG_ASSERT_CMP(multinode_req->is_sync, ==, false, );
+                m_comp_cb(multinode_req->cookie, (multinode_req->status == btree_status_t::success) ? true : false);
             }
 
             /* initialize this req to empty the dependent req_q */
@@ -163,47 +159,52 @@ public:
 #ifndef NDEBUG
             std::unique_lock< std::mutex > mtx(m_req_mtx);
             auto it = m_req_map.find(multinode_req->req_id);
-            assert (it != m_req_map.end());
+            assert(it != m_req_map.end());
             m_req_map.erase(it);
 #endif
         }
     }
 
-    static btree_t *create_btree(BtreeConfig &cfg, void *btree_specific_context, comp_callback comp_cb) {
-        Btree *bt = new Btree(cfg);
+    static btree_t* create_btree(BtreeConfig& cfg, void* btree_specific_context, comp_callback comp_cb) {
+        Btree* bt = new Btree(cfg);
         bt->m_comp_cb = comp_cb;
-        auto impl_ptr = btree_store_t::init_btree(cfg, btree_specific_context, 
-                std::bind(&Btree::process_completions, bt, std::placeholders::_1, std::placeholders::_2));
+        auto impl_ptr = btree_store_t::init_btree(
+            cfg, btree_specific_context,
+            std::bind(&Btree::process_completions, bt, std::placeholders::_1, std::placeholders::_2));
         bt->m_btree_store = std::move(impl_ptr);
         btree_status_t ret = bt->init();
-        if (ret != btree_status_t::success)  {
+        if (ret != btree_status_t::success) {
             LOGERROR("btree create failed. error {} name {}", ret, cfg.get_name());
             return nullptr;
         }
 
-        LOGINFO("btree created {} node size {}", cfg.get_name(), cfg.get_node_size());
+        HS_SUBMOD_LOG(INFO, base, , "btree", cfg.get_name(), "New {} created: Node size {}", BtreeStoreType,
+                      cfg.get_node_size());
         return bt;
     }
 
     static btree_t* create_btree(BtreeConfig& cfg, void* btree_specific_context) {
         auto impl_ptr = btree_store_t::init_btree(cfg, btree_specific_context, nullptr);
-        Btree *bt = new Btree(cfg);
+        Btree* bt = new Btree(cfg);
         bt->m_btree_store = std::move(impl_ptr);
         btree_status_t ret = bt->init();
-        if (ret != btree_status_t::success)  {
+        if (ret != btree_status_t::success) {
             LOGERROR("btree create failed. error {} name {}", ret, cfg.get_name());
             return nullptr;
         }
-        LOGDEBUG("btree created {} node size {}", cfg.get_name(), cfg.get_node_size());
+
+        HS_SUBMOD_LOG(INFO, base, , "btree", cfg.get_name(), "New {} created: Node size {}", BtreeStoreType,
+                      cfg.get_node_size());
         return bt;
     }
 
-    static btree_t *create_btree(btree_super_block &btree_sb, BtreeConfig& cfg,
-                                    void *btree_specific_context, comp_callback comp_cb) {
-        Btree *bt = new Btree(cfg);
+    static btree_t* create_btree(btree_super_block& btree_sb, BtreeConfig& cfg, void* btree_specific_context,
+                                 comp_callback comp_cb) {
+        Btree* bt = new Btree(cfg);
         bt->m_comp_cb = comp_cb;
-        auto impl_ptr = btree_store_t::init_btree(cfg, btree_specific_context,
-                std::bind(&Btree::process_completions, bt, std::placeholders::_1, std::placeholders::_2), true);
+        auto impl_ptr = btree_store_t::init_btree(
+            cfg, btree_specific_context,
+            std::bind(&Btree::process_completions, bt, std::placeholders::_1, std::placeholders::_2), true);
         bt->m_btree_store = std::move(impl_ptr);
         bt->init_recovery(btree_sb);
         LOGINFO("btree recovered and created {} node size {}", cfg.get_name(), cfg.get_node_size());
@@ -219,89 +220,91 @@ public:
         // calculate number of nodes
         uint32_t max_leaf_nodes =
             (m_btree_cfg.get_max_objs() * (m_btree_cfg.get_max_key_size() + m_btree_cfg.get_max_value_size())) /
-                node_area_size + 1;
+                node_area_size +
+            1;
         max_leaf_nodes += (100 * max_leaf_nodes) / 60; // Assume 60% btree full
 
-        m_max_nodes = max_leaf_nodes + ((double) max_leaf_nodes * 0.05) + 1; // Assume 5% for interior nodes
+        m_max_nodes = max_leaf_nodes + ((double)max_leaf_nodes * 0.05) + 1; // Assume 5% for interior nodes
     }
-    
+
     btree_status_t init() {
         do_common_init();
-        return(create_root_node());
+        return (create_root_node());
     }
-    
-    void init_recovery(btree_super_block btree_sb){
+
+    void init_recovery(btree_super_block btree_sb) {
         m_sb = btree_sb;
         do_common_init();
         m_root_node = m_sb.root_node;
     }
 
-    Btree(BtreeConfig &cfg) :
+    Btree(BtreeConfig& cfg) :
             m_btree_cfg(cfg),
-            m_metrics(BtreeStoreType, cfg.get_name().c_str()), m_node_size(cfg.get_node_size()) {}
-    
+            m_metrics(BtreeStoreType, cfg.get_name().c_str()),
+            m_node_size(cfg.get_node_size()) {}
+
     ~Btree() {
         if (!m_destroy) {
             destroy(nullptr, true);
         }
     }
-        
+
     btree_status_t destroy(free_blk_callback free_blk_cb, bool mem_only) {
         m_btree_lock.write_lock();
-        BtreeNodePtr  root;
+        BtreeNodePtr root;
         homeds::thread::locktype acq_lock = LOCKTYPE_WRITE;
-        
-        btree_multinode_req_ptr multinode_req = btree_multinode_req<btree_req_type>::make_request();
+
+        btree_multinode_req_ptr multinode_req = btree_multinode_req< btree_req_type >::make_request();
         auto ret = read_and_lock_root(m_root_node, root, acq_lock, acq_lock, multinode_req);
         if (ret != btree_status_t::success) {
             m_btree_lock.unlock();
             return ret;
         }
-        
+
         try {
             ret = free(root, free_blk_cb, multinode_req, mem_only);
-        } catch (std::exception& e) {
-            BT_LOG_ASSERT(false, root, "free returned exception : {}", e.what());
-        }
+        } catch (std::exception& e) { BT_LOG_ASSERT(false, root, "free returned exception : {}", e.what()); }
 
         unlock_node(root, acq_lock);
         m_btree_lock.unlock();
-        BT_LOG(DEBUG, , , "btree nodes destroyed");
-        
+        THIS_BT_LOG(DEBUG, base, , "btree nodes destroyed");
+
         if (ret == btree_status_t::success) {
             m_destroy = true;
         }
         if (!mem_only) {
-            BT_LOG_ASSERT_CMP(EQ, m_total_nodes, 0, );
+            BT_LOG_ASSERT_CMP(m_total_nodes, ==, 0, );
         }
         return ret;
     }
 
-    void recovery_cmpltd() { 
-        btree_store_t::recovery_cmpltd(m_btree_store.get()); 
-        BT_LOG(DEBUG, ,  , "recovery completed");
+    void recovery_cmpltd() {
+        btree_store_t::recovery_cmpltd(m_btree_store.get());
+        THIS_BT_LOG(DEBUG, base, , "recovery completed");
     }
 
-    // 
+    //
     // 1. free nodes in post order traversal of tree to free non-leaf node
     // 2. If free_blk_cb is not null, callback to caller for leaf node's blk_id;
     // Assumption is that there are no pending IOs when it is called.
-    // 
-    btree_status_t free(BtreeNodePtr node, free_blk_callback free_blk_cb, btree_multinode_req_ptr multinode_req, bool mem_only) {
+    //
+    btree_status_t free(BtreeNodePtr node, free_blk_callback free_blk_cb, btree_multinode_req_ptr multinode_req,
+                        bool mem_only) {
         // TODO - this calls free node on mem_tree and ssd_tree.
         // In ssd_tree we free actual block id, which is not correct behavior
         // we shouldnt really free any blocks on free node, just reclaim any memory
         // occupied by ssd_tree structure in memory. Ideally we should have sepearte
         // api like deleteNode which should be called instead of freeNode
-        homeds::thread::locktype                             acq_lock = homeds::thread::LOCKTYPE_WRITE;
-        uint32_t                                             i = 0;
+        homeds::thread::locktype acq_lock = homeds::thread::LOCKTYPE_WRITE;
+        uint32_t i = 0;
         btree_status_t ret = btree_status_t::success;
- 
+
         if (!node->is_leaf()) {
             BtreeNodeInfo child_info;
             while (i <= node->get_total_entries()) {
                 if (i == node->get_total_entries()) {
-                    if(!(node->get_edge_id().is_valid()))break;
+                    if (!(node->get_edge_id().is_valid()))
+                        break;
                     child_info.set_bnode_id(node->get_edge_id());
                 } else {
                     node->get(i, &child_info, false /* copy */);
@@ -329,73 +332,69 @@ public:
                 }
             }
         }
-      
+
         if (ret != btree_status_t::success) {
             return ret;
         }
         try {
             free_node(node, multinode_req, mem_only);
-        } catch (std::exception& e) {
-            BT_LOG_ASSERT(false, node, "free_node returned exception: {}", e.what());
-        }
+        } catch (std::exception& e) { BT_LOG_ASSERT(false, node, "free_node returned exception: {}", e.what()); }
         return ret;
     }
 
-    uint64_t get_used_size() {
-        return m_node_size * m_total_nodes.load();
+    uint64_t get_used_size() { return m_node_size * m_total_nodes.load(); }
+
+    btree_status_t range_put(const BtreeKey& k, const BtreeValue& v, btree_put_type put_type,
+                             boost::intrusive_ptr< btree_req_type > dependent_req,
+                             boost::intrusive_ptr< btree_req_type > cookie, BtreeUpdateRequest< K, V >& bur) {
+        V temp_v;
+        // initialize cb param
+        K sub_st(*(K*)bur.get_input_range().get_start_key()), sub_en(*(K*)bur.get_input_range().get_end_key()); // cpy
+        K in_st(*(K*)bur.get_input_range().get_start_key()), in_en(*(K*)bur.get_input_range().get_end_key());   // cpy
+        bur.get_cb_param()->get_input_range().set(in_st, bur.get_input_range().is_start_inclusive(), in_en,
+                                                  bur.get_input_range().is_end_inclusive());
+        bur.get_cb_param()->get_sub_range().set(sub_st, bur.get_input_range().is_start_inclusive(), sub_en,
+                                                bur.get_input_range().is_end_inclusive());
+        return (put(k, v, put_type, dependent_req, cookie, &temp_v, &bur));
     }
 
-    btree_status_t range_put(const BtreeKey &k, const BtreeValue &v, btree_put_type put_type,
-                   boost::intrusive_ptr<btree_req_type> dependent_req, boost::intrusive_ptr<btree_req_type> cookie,
-                   BtreeUpdateRequest<K, V> &bur) {
+    btree_status_t put(const BtreeKey& k, const BtreeValue& v, btree_put_type put_type) {
         V temp_v;
-        //initialize cb param
-        K sub_st(*(K*)bur.get_input_range().get_start_key()), sub_en(*(K*)bur.get_input_range().get_end_key());//cpy
-        K in_st(*(K*)bur.get_input_range().get_start_key()), in_en(*(K*)bur.get_input_range().get_end_key());//cpy
-        bur.get_cb_param()->get_input_range().set(in_st, bur.get_input_range().is_start_inclusive(),
-                                                in_en, bur.get_input_range().is_end_inclusive());
-        bur.get_cb_param()->get_sub_range().set(sub_st, bur.get_input_range().is_start_inclusive(),
-                                                sub_en, bur.get_input_range().is_end_inclusive());
-        return(put(k, v, put_type, dependent_req, cookie, &temp_v, &bur));
+        return (put(k, v, put_type, nullptr, nullptr, &temp_v));
     }
-    
-    btree_status_t put(const BtreeKey &k, const BtreeValue &v, btree_put_type put_type) {
-        V temp_v;
-        return(put(k, v, put_type, nullptr, nullptr, &temp_v));
-    }
-    
-    btree_status_t put(const BtreeKey &k, const BtreeValue &v, btree_put_type put_type, 
-            boost::intrusive_ptr<btree_req_type> dependent_req,
-            boost::intrusive_ptr<btree_req_type> cookie, BtreeValue *existing_val = nullptr, 
-            BtreeUpdateRequest<K,V> *bur = nullptr) {
+
+    btree_status_t put(const BtreeKey& k, const BtreeValue& v, btree_put_type put_type,
+                       boost::intrusive_ptr< btree_req_type > dependent_req,
+                       boost::intrusive_ptr< btree_req_type > cookie, BtreeValue* existing_val = nullptr,
+                       BtreeUpdateRequest< K, V >* bur = nullptr) {
 
         COUNTER_INCREMENT(m_metrics, btree_write_ops_count, 1);
         homeds::thread::locktype acq_lock = homeds::thread::LOCKTYPE_READ;
         int ind = -1;
         bool is_leaf = false;
 
-        //BT_LOG(INFO, base, , "Put called for key = {}, value = {}", k.to_string(), v.to_string());
+        // THIS_BT_LOG(INFO, base, , "Put called for key = {}, value = {}", k.to_string(), v.to_string());
 
         m_btree_lock.read_lock();
-        
+
         btree_multinode_req_ptr multinode_req;
-        multinode_req = btree_multinode_req<btree_req_type>::make_request(cookie, dependent_req, true, false);
+        multinode_req = btree_multinode_req< btree_req_type >::make_request(cookie, dependent_req, true, false);
         multinode_req->writes_pending.increment(1);
         btree_status_t ret = btree_status_t::success;
 #ifndef NDEBUG
         {
-            static atomic<uint64_t> req_id = 0;
+            static atomic< uint64_t > req_id = 0;
             std::unique_lock< std::mutex > mtx(m_req_mtx);
             multinode_req->req_id = ++m_req_id;
             m_req_map.emplace(std::make_pair(multinode_req->req_id, multinode_req));
         }
 #endif
-retry:
+    retry:
         multinode_req->retry_cnt++;
         multinode_req->node_read_cnt = 0;
 
-        BT_LOG_ASSERT_CMP(EQ, rd_locked_nodes.size(), 0,);
-        BT_LOG_ASSERT_CMP(EQ, wr_locked_nodes.size(), 0,);
+        BT_LOG_ASSERT_CMP(rd_locked_nodes.size(), ==, 0, );
+        BT_LOG_ASSERT_CMP(wr_locked_nodes.size(), ==, 0, );
 
         BtreeNodePtr root;
         ret = read_and_lock_root(m_root_node, root, acq_lock, acq_lock, multinode_req);
@@ -410,52 +409,52 @@ retry:
             unlock_node(root, acq_lock);
             m_btree_lock.unlock();
             ret = check_split_root(k, v, multinode_req, put_type, bur);
-            BT_LOG_ASSERT_CMP(EQ, rd_locked_nodes.size(), 0,);
-            BT_LOG_ASSERT_CMP(EQ, wr_locked_nodes.size(), 0,);
+            BT_LOG_ASSERT_CMP(rd_locked_nodes.size(), ==, 0, );
+            BT_LOG_ASSERT_CMP(wr_locked_nodes.size(), ==, 0, );
 
             // We must have gotten a new root, need to start from scratch.
             m_btree_lock.read_lock();
-            
+
             if (ret != btree_status_t::success) {
                 LOGERROR("root split failed btree name {}", m_btree_cfg.get_name());
                 goto out;
             }
-            
+
             goto retry;
-        
+
         } else if ((is_leaf) && (acq_lock != homeds::thread::LOCKTYPE_WRITE)) {
-           
+
             // Root is a leaf, need to take write lock, instead of read, retry
             unlock_node(root, acq_lock);
             acq_lock = homeds::thread::LOCKTYPE_WRITE;
             goto retry;
-        
+
         } else {
             ret = do_put(root, acq_lock, k, v, ind, put_type, *existing_val, multinode_req, bur);
             if (ret == btree_status_t::retry) {
                 // Need to start from top down again, since there is a race between 2 inserts or deletes.
                 acq_lock = homeds::thread::LOCKTYPE_READ;
-                BT_LOG(TRACE, btree_generics, , "retrying put operation");
-                BT_LOG_ASSERT_CMP(EQ, rd_locked_nodes.size(), 0,);
-                BT_LOG_ASSERT_CMP(EQ, wr_locked_nodes.size(), 0,);
+                THIS_BT_LOG(TRACE, btree_generics, , "retrying put operation");
+                BT_LOG_ASSERT_CMP(rd_locked_nodes.size(), ==, 0, );
+                BT_LOG_ASSERT_CMP(wr_locked_nodes.size(), ==, 0, );
                 goto retry;
             }
         }
 
-out:
+    out:
         m_btree_lock.unlock();
 #ifndef NDEBUG
         check_lock_debug();
 #endif
         if (ret != btree_status_t::success) {
-            BT_LOG(INFO, , , "btree put failed {}", ret);
+            THIS_BT_LOG(INFO, base, , "btree put failed {}", ret);
             COUNTER_INCREMENT(m_metrics, write_err_cnt, 1);
         } else {
             COUNTER_INCREMENT(m_metrics, btree_retry_count, multinode_req->retry_cnt);
             COUNTER_INCREMENT(m_metrics, read_node_count_in_write_ops, multinode_req->node_read_cnt);
         }
         process_completions(ret, multinode_req);
-        
+
         return ret;
     }
 
@@ -466,20 +465,21 @@ out:
     }
 
     btree_status_t get_any(const BtreeSearchRange& range, BtreeKey* outkey, BtreeValue* outval) {
-        btree_status_t ret = btree_status_t::success;;
+        btree_status_t ret = btree_status_t::success;
+        ;
         bool is_found;
 
         m_btree_lock.read_lock();
         BtreeNodePtr root;
-        btree_multinode_req_ptr multinode_req = btree_multinode_req<btree_req_type>::make_request(false, false);
-       
+        btree_multinode_req_ptr multinode_req = btree_multinode_req< btree_req_type >::make_request(false, false);
+
         ret = read_and_lock_root(m_root_node, root, LOCKTYPE_READ, LOCKTYPE_READ, multinode_req);
         if (ret != btree_status_t::success) {
             goto out;
         }
 
         ret = do_get(root, range, outkey, outval, multinode_req);
-out:
+    out:
         m_btree_lock.unlock();
 
         // TODO: Assert if key returned from do_get is same as key requested, incase of perfect match
@@ -491,21 +491,21 @@ out:
     }
 
     btree_status_t query(BtreeQueryRequest< K, V >& query_req, std::vector< std::pair< K, V > >& out_values) {
-        //initialize cb param
+        // initialize cb param
         K in_st(*(K*)query_req.get_input_range().get_start_key());
-        K in_en(*(K*)query_req.get_input_range().get_end_key());//cpy
+        K in_en(*(K*)query_req.get_input_range().get_end_key()); // cpy
         COUNTER_INCREMENT(m_metrics, btree_query_ops_count, 1);
         if (query_req.get_cb_param()) {
             query_req.get_cb_param()->get_input_range().set(in_st, query_req.get_input_range().is_start_inclusive(),
-                                                  in_en, query_req.get_input_range().is_end_inclusive());
+                                                            in_en, query_req.get_input_range().is_end_inclusive());
         }
-        
+
         btree_status_t ret = btree_status_t::success;
         if (query_req.get_batch_size() == 0) {
             return ret;
         }
-        
-        btree_multinode_req_ptr multinode_req = btree_multinode_req<btree_req_type>::make_request(false, false);
+
+        btree_multinode_req_ptr multinode_req = btree_multinode_req< btree_req_type >::make_request(false, false);
 
         query_req.init_batch_range();
 
@@ -521,7 +521,7 @@ out:
             ret = do_sweep_query(root, query_req, out_values, multinode_req);
             break;
 
-        case BtreeQueryType::TREE_TRAVERSAL_QUERY: 
+        case BtreeQueryType::TREE_TRAVERSAL_QUERY:
             ret = do_traversal_query(root, query_req, out_values, nullptr, multinode_req);
             break;
 
@@ -531,7 +531,7 @@ out:
             break;
         }
 
-out:
+    out:
         m_btree_lock.unlock();
 #ifndef NDEBUG
         check_lock_debug();
@@ -550,7 +550,7 @@ out:
         query_req.init_batch_range();
 
         m_btree_lock.read_lock();
-        
+
         BtreeNodePtr root;
         btree_status_t ret = btree_status_t::success;
 
@@ -560,7 +560,7 @@ out:
         }
 
         ret = do_sweep_query(root, query_req, out_values);
-out:
+    out:
         m_btree_lock.unlock();
 
 #ifndef NDEBUG
@@ -569,7 +569,7 @@ out:
         return ret;
     }
 
-    btree_status_t serializable_query(BtreeSerializableQueryRequest& query_req, 
+    btree_status_t serializable_query(BtreeSerializableQueryRequest& query_req,
                                       std::vector< std::pair< K, V > >& out_values) {
         query_req.init_batch_range();
 
@@ -592,7 +592,7 @@ out:
         }
 
         ret = do_serialzable_query(node, query_req, out_values);
-out:
+    out:
         m_btree_lock.unlock();
 
         // TODO: Assert if key returned from do_get is same as key requested, incase of perfect match
@@ -615,16 +615,16 @@ out:
     }
 
     btree_status_t remove_any(const BtreeSearchRange& range, BtreeKey* outkey, BtreeValue* outval,
-                    boost::intrusive_ptr< btree_req_type > dependent_req,
-                    boost::intrusive_ptr< btree_req_type > cookie) {
+                              boost::intrusive_ptr< btree_req_type > dependent_req,
+                              boost::intrusive_ptr< btree_req_type > cookie) {
         homeds::thread::locktype acq_lock = homeds::thread::locktype::LOCKTYPE_READ;
-        bool                     is_found = false;
+        bool is_found = false;
         bool is_leaf = false;
 
         m_btree_lock.read_lock();
-        
-        btree_multinode_req_ptr multinode_req = btree_multinode_req<btree_req_type>::make_request(cookie, 
-                                                                    dependent_req, true, false);
+
+        btree_multinode_req_ptr multinode_req =
+            btree_multinode_req< btree_req_type >::make_request(cookie, dependent_req, true, false);
         multinode_req->writes_pending.increment(1);
 #ifndef NDEBUG
         {
@@ -649,7 +649,7 @@ out:
                 // There are no entries in btree.
                 unlock_node(root, acq_lock);
                 status = btree_status_t::not_found;
-                BT_LOG(DEBUG, , root, "entry not found in btree");
+                THIS_BT_LOG(DEBUG, base, root, "entry not found in btree");
                 goto out;
             }
             BT_LOG_ASSERT(root->get_edge_id().is_valid(), root, "Invalid edge id");
@@ -682,7 +682,7 @@ out:
             }
         }
 
-out:
+    out:
         m_btree_lock.unlock();
 #ifndef NDEBUG
         check_lock_debug();
@@ -695,7 +695,7 @@ out:
     btree_status_t remove(const BtreeKey& key, BtreeValue* outval) { return (remove(key, outval, nullptr, nullptr)); }
 
     btree_status_t remove(const BtreeKey& key, BtreeValue* outval, boost::intrusive_ptr< btree_req_type > dependent_req,
-                boost::intrusive_ptr< btree_req_type > cookie) {
+                          boost::intrusive_ptr< btree_req_type > cookie) {
         return remove_any(BtreeSearchRange(key), nullptr, outval, dependent_req, cookie);
     }
 
@@ -709,7 +709,7 @@ out:
         m_btree_lock.read_lock();
         std::stringstream ss;
         to_string(m_root_node, ss);
-        BT_LOG(INFO, , , "Pre order traversal of tree : <{}>", ss.str());
+        THIS_BT_LOG(INFO, base, , "Pre order traversal of tree : <{}>", ss.str());
         m_btree_lock.unlock();
     }
 
@@ -723,7 +723,7 @@ out:
         }
         ss << "[" << node->to_string() << "]";
         unlock_node(node, acq_lock);
-        BT_LOG(INFO, , , "Node : <{}>", ss.str());
+        THIS_BT_LOG(INFO, base, , "Node : <{}>", ss.str());
         m_btree_lock.unlock();
     }
 
@@ -747,11 +747,11 @@ private:
                 my_node->get(i, &child, false);
                 verify_node(child.bnode_id(), my_node, i);
                 if (i > 0) {
-                    BT_LOG_ASSERT_CMP(LT, prev_key.compare(&key), 0, my_node);
+                    BT_LOG_ASSERT_CMP(prev_key.compare(&key), <, 0, my_node);
                 }
             }
             if (my_node->is_leaf() && i > 0) {
-                BT_LOG_ASSERT_CMP(LT, prev_key.compare_start(&key), 0, my_node);
+                BT_LOG_ASSERT_CMP(prev_key.compare_start(&key), <, 0, my_node);
             }
             prev_key = key;
         }
@@ -762,14 +762,14 @@ private:
 
             K last_key;
             my_node->get_nth_key(my_node->get_total_entries() - 1, &last_key, false);
-            BT_LOG_ASSERT_CMP(EQ, last_key.compare(&parent_key), 0, parent_node);
+            BT_LOG_ASSERT_CMP(last_key.compare(&parent_key), ==, 0, parent_node);
         } else if (parent_node) {
             K parent_key;
             parent_node->get_nth_key(indx - 1, &parent_key, false);
 
             K first_key;
             my_node->get_nth_key(0, &first_key, false);
-            BT_LOG_ASSERT_CMP(GT, first_key.compare(&parent_key), 0, parent_node);
+            BT_LOG_ASSERT_CMP(first_key.compare(&parent_key), >, 0, parent_node);
         }
 
         if (my_node->get_edge_id().is_valid()) {
@@ -778,7 +778,7 @@ private:
         unlock_node(my_node, acq_lock);
     }
 
-    void to_string(bnodeid_t bnodeid, std::stringstream &ss) {
+    void to_string(bnodeid_t bnodeid, std::stringstream& ss) {
         BtreeNodePtr node;
 
         homeds::thread::locktype acq_lock = homeds::thread::locktype::LOCKTYPE_READ;
@@ -793,17 +793,17 @@ private:
             while (i < node->get_total_entries()) {
                 BtreeNodeInfo p;
                 node->get(i, &p, false);
-                to_string(p.bnode_id(),ss);
+                to_string(p.bnode_id(), ss);
                 i++;
             }
-            if(node->get_edge_id().is_valid())
-                to_string(node->get_edge_id(),ss);
+            if (node->get_edge_id().is_valid())
+                to_string(node->get_edge_id(), ss);
         }
         unlock_node(node, acq_lock);
     }
 
-    btree_status_t do_get(BtreeNodePtr my_node, const BtreeSearchRange& range, BtreeKey* outkey, 
-                          BtreeValue* outval, btree_multinode_req_ptr multinode_req) {
+    btree_status_t do_get(BtreeNodePtr my_node, const BtreeSearchRange& range, BtreeKey* outkey, BtreeValue* outval,
+                          btree_multinode_req_ptr multinode_req) {
         btree_status_t ret = btree_status_t::success;
         bool is_child_lock = false;
         homeds::thread::locktype child_locktype;
@@ -814,40 +814,40 @@ private:
             if (result.found) {
                 ret = btree_status_t::success;
             } else {
-                ret = btree_status_t::not_found; 
+                ret = btree_status_t::not_found;
             }
             unlock_node(my_node, homeds::thread::locktype::LOCKTYPE_READ);
             return ret;
         }
 
         BtreeNodeInfo child_info;
-        auto          result = my_node->find(range, nullptr, &child_info);
+        auto result = my_node->find(range, nullptr, &child_info);
         ASSERT_IS_VALID_INTERIOR_CHILD_INDX(result, my_node);
-        
-        BtreeNodePtr  child_node;
+
+        BtreeNodePtr child_node;
         child_locktype = homeds::thread::LOCKTYPE_READ;
-        ret = read_and_lock_child(child_info.bnode_id(), child_node, my_node, result.end_of_search_index, 
-                            child_locktype, child_locktype, multinode_req);
+        ret = read_and_lock_child(child_info.bnode_id(), child_node, my_node, result.end_of_search_index,
+                                  child_locktype, child_locktype, multinode_req);
         if (ret != btree_status_t::success) {
             goto out;
         }
-        
+
         unlock_node(my_node, homeds::thread::locktype::LOCKTYPE_READ);
 
         return (do_get(child_node, range, outkey, outval, multinode_req));
-out:
+    out:
         unlock_node(my_node, homeds::thread::locktype::LOCKTYPE_READ);
         return ret;
     }
 
     btree_status_t do_sweep_query(BtreeNodePtr my_node, BtreeQueryRequest< K, V >& query_req,
-                        std::vector< std::pair< K, V > >& out_values, btree_multinode_req_ptr multinode_req) {
+                                  std::vector< std::pair< K, V > >& out_values, btree_multinode_req_ptr multinode_req) {
         btree_status_t ret = btree_status_t::success;
         multinode_req->node_read_cnt++;
         if (my_node->is_leaf()) {
-            BT_DEBUG_ASSERT_CMP(GT, query_req.get_batch_size(), 0, my_node);
+            BT_DEBUG_ASSERT_CMP(query_req.get_batch_size(), >, 0, my_node);
 
-            auto         count = 0U;
+            auto count = 0U;
             BtreeNodePtr next_node = nullptr;
 
             do {
@@ -856,20 +856,20 @@ out:
                     my_node = next_node;
                     if (my_node->get_total_entries() > 0) {
                         K ekey;
-                        next_node->get_nth_key(0,&ekey,false);
+                        next_node->get_nth_key(0, &ekey, false);
                         /* comparing the end key of the input rangee with the start key of the next interval to see
                          * if it overlaps
                          */
-                        if (query_req.get_input_range().get_end_key()->compare_start(&ekey) < 0) {//early lookup end
+                        if (query_req.get_input_range().get_end_key()->compare_start(&ekey) < 0) { // early lookup end
                             query_req.cursor().m_last_key = nullptr;
                             break;
                         }
                     }
                 }
 
-                BT_LOG(TRACE, btree_nodes, my_node, "Query leaf node:\n {}", my_node->to_string());
+                THIS_BT_LOG(TRACE, btree_nodes, my_node, "Query leaf node:\n {}", my_node->to_string());
 
-                int                              start_ind = 0, end_ind = 0;
+                int start_ind = 0, end_ind = 0;
                 std::vector< std::pair< K, V > > match_kv;
                 auto cur_count = my_node->get_all(query_req.this_batch_range(), query_req.get_batch_size() - count,
                                                   start_ind, end_ind, &match_kv);
@@ -886,15 +886,15 @@ out:
                         out_values.insert(out_values.end(), result_kv.begin(), result_kv.begin() + ele_to_add);
                     count += ele_to_add;
 
-                    BT_DEBUG_ASSERT_CMP(LE, count, query_req.get_batch_size(), my_node);
+                    BT_DEBUG_ASSERT_CMP(count, <=, query_req.get_batch_size(), my_node);
                 } else {
                     out_values.insert(std::end(out_values), std::begin(match_kv), std::end(match_kv));
                     count += cur_count;
                 }
 
                 if ((count < query_req.get_batch_size()) && my_node->get_next_bnode().is_valid()) {
-                    ret = read_and_lock_sibling(my_node->get_next_bnode(), next_node, LOCKTYPE_READ, 
-                                                      LOCKTYPE_READ, multinode_req);
+                    ret = read_and_lock_sibling(my_node->get_next_bnode(), next_node, LOCKTYPE_READ, LOCKTYPE_READ,
+                                                multinode_req);
                     if (ret != btree_status_t::success) {
                         LOGERROR("read failed btree name {}", m_btree_cfg.get_name());
                         ret = btree_status_t::read_failed;
@@ -929,8 +929,8 @@ out:
         ASSERT_IS_VALID_INTERIOR_CHILD_INDX(result, my_node);
 
         BtreeNodePtr child_node;
-        ret = read_and_lock_child(start_child_info.bnode_id(), child_node, my_node, result.end_of_search_index, 
-                        LOCKTYPE_READ, LOCKTYPE_READ, multinode_req);
+        ret = read_and_lock_child(start_child_info.bnode_id(), child_node, my_node, result.end_of_search_index,
+                                  LOCKTYPE_READ, LOCKTYPE_READ, multinode_req);
         unlock_node(my_node, homeds::thread::locktype::LOCKTYPE_READ);
         if (ret != btree_status_t::success) {
             return ret;
@@ -939,34 +939,34 @@ out:
     }
 
     btree_status_t do_traversal_query(BtreeNodePtr my_node, BtreeQueryRequest< K, V >& query_req,
-                            std::vector< std::pair< K, V > >& out_values, BtreeSearchRange* sub_range, 
-                            btree_multinode_req_ptr multinode_req) {
+                                      std::vector< std::pair< K, V > >& out_values, BtreeSearchRange* sub_range,
+                                      btree_multinode_req_ptr multinode_req) {
         btree_status_t ret = btree_status_t::success;
 
         multinode_req->node_read_cnt++;
         if (my_node->is_leaf()) {
-            BT_LOG_ASSERT_CMP(GT, query_req.get_batch_size(), 0, my_node);
+            BT_LOG_ASSERT_CMP(query_req.get_batch_size(), >, 0, my_node);
 
-            int                              start_ind = 0, end_ind = 0;
+            int start_ind = 0, end_ind = 0;
             std::vector< std::pair< K, V > > match_kv;
             my_node->get_all(query_req.this_batch_range(), query_req.get_batch_size() - (uint32_t)out_values.size(),
                              start_ind, end_ind, &match_kv);
 
             if (query_req.callback()) {
-                //TODO - support accurate sub ranges in future instead of setting input range
+                // TODO - support accurate sub ranges in future instead of setting input range
                 query_req.get_cb_param()->set_sub_range(query_req.get_input_range());
-                std::vector<std::pair<K, V>> result_kv;
+                std::vector< std::pair< K, V > > result_kv;
                 query_req.callback()(match_kv, result_kv, query_req.get_cb_param());
                 auto ele_to_add = result_kv.size();
                 if (ele_to_add > 0) {
-                    out_values.insert(out_values.end(), result_kv.begin(), result_kv.begin()+ele_to_add);
+                    out_values.insert(out_values.end(), result_kv.begin(), result_kv.begin() + ele_to_add);
                 }
             }
             out_values.insert(std::end(out_values), std::begin(match_kv), std::end(match_kv));
 
             unlock_node(my_node, homeds::thread::locktype::LOCKTYPE_READ);
             if (out_values.size() >= query_req.get_batch_size()) {
-                BT_DEBUG_ASSERT_CMP(EQ, out_values.size(), query_req.get_batch_size(), my_node);
+                BT_DEBUG_ASSERT_CMP(out_values.size(), ==, query_req.get_batch_size(), my_node);
                 query_req.cursor().m_last_key = std::make_unique< K >(out_values.back().first);
                 if (query_req.get_input_range().get_end_key()->compare(query_req.cursor().m_last_key.get()) == 0) {
                     /* we finished just at the last key */
@@ -982,23 +982,25 @@ out:
         auto end_ret = my_node->find(query_req.get_end_of_range(), nullptr, nullptr);
         bool unlocked_already = false;
         int ind = -1;
-        
-        if(start_ret.end_of_search_index==(int)my_node->get_total_entries() && !(my_node->get_edge_id().is_valid())) {
-            goto done;//no results found
-        } else if(end_ret.end_of_search_index==(int)my_node->get_total_entries() && !(my_node->get_edge_id().is_valid())) {
-            end_ret.end_of_search_index--;//end is not valid
+
+        if (start_ret.end_of_search_index == (int)my_node->get_total_entries() &&
+            !(my_node->get_edge_id().is_valid())) {
+            goto done; // no results found
+        } else if (end_ret.end_of_search_index == (int)my_node->get_total_entries() &&
+                   !(my_node->get_edge_id().is_valid())) {
+            end_ret.end_of_search_index--; // end is not valid
         }
 
-        BT_LOG_ASSERT_CMP(LE, start_ret.end_of_search_index, end_ret.end_of_search_index, my_node);
+        BT_LOG_ASSERT_CMP(start_ret.end_of_search_index, <=, end_ret.end_of_search_index, my_node);
         ind = start_ret.end_of_search_index;
-        
+
         while (ind <= end_ret.end_of_search_index) {
             BtreeNodeInfo child_info;
             my_node->get(ind, &child_info, false);
-            BtreeNodePtr child_node = nullptr; 
+            BtreeNodePtr child_node = nullptr;
             homeds::thread::locktype child_cur_lock = homeds::thread::LOCKTYPE_READ;
-            ret = read_and_lock_child(child_info.bnode_id(), child_node, my_node, ind, 
-                                            child_cur_lock, child_cur_lock, multinode_req);
+            ret = read_and_lock_child(child_info.bnode_id(), child_node, my_node, ind, child_cur_lock, child_cur_lock,
+                                      multinode_req);
             if (ret != btree_status_t::success) {
                 break;
             }
@@ -1016,7 +1018,7 @@ out:
             }
             ind++;
         }
-done:
+    done:
         if (!unlocked_already) {
             unlock_node(my_node, homeds::thread::locktype::LOCKTYPE_READ);
         }
@@ -1026,7 +1028,7 @@ done:
 
 #ifdef SERIALIZABLE_QUERY_IMPLEMENTATION
     btree_status_t do_serialzable_query(BtreeNodePtr my_node, BtreeSerializableQueryRequest& query_req,
-                              std::vector< std::pair< K, V > >& out_values) {
+                                        std::vector< std::pair< K, V > >& out_values) {
 
         btree_status_t ret = btree_status_t::success;
         if (my_node->is_leaf) {
@@ -1064,17 +1066,16 @@ done:
         }
 
         BtreeNodeId start_child_ptr, end_child_ptr;
-        auto        start_ret = my_node->find(query_req.get_start_of_range(), nullptr, &start_child_ptr);
+        auto start_ret = my_node->find(query_req.get_start_of_range(), nullptr, &start_child_ptr);
         ASSERT_IS_VALID_INTERIOR_CHILD_INDX(start_ret, my_node);
-        auto        end_ret = my_node->find(query_req.get_end_of_range(), nullptr, &end_child_ptr);
+        auto end_ret = my_node->find(query_req.get_end_of_range(), nullptr, &end_child_ptr);
         ASSERT_IS_VALID_INTERIOR_CHILD_INDX(end_ret, my_node);
 
         BtreeNodePtr child_node;
         if (start_ret.end_of_search_index == end_ret.end_of_search_index) {
-            BT_LOG_ASSERT_CMP(EQ, start_child_ptr, end_child_ptr, my_node);
+            BT_LOG_ASSERT_CMP(start_child_ptr, ==, end_child_ptr, my_node);
 
-            ret = read_and_lock_node(start_child_ptr.get_node_id(), child_node, 
-                                        LOCKTYPE_READ, LOCKTYPE_READ, nullptr);
+            ret = read_and_lock_node(start_child_ptr.get_node_id(), child_node, LOCKTYPE_READ, LOCKTYPE_READ, nullptr);
             if (ret != btree_status_t::success) {
                 unlock_node(my_node, homeds::thread::locktype::LOCKTYPE_READ);
                 return ret;
@@ -1092,8 +1093,7 @@ done:
             for (auto i = start_ret.end_of_search_index; i <= end_ret.end_of_search_index; i++) {
                 BtreeNodeId child_ptr;
                 my_node->get_nth_value(i, &child_ptr, false);
-                ret = read_and_lock_node(child_ptr.get_node_id(), child_node, 
-                                             LOCKTYPE_READ, LOCKTYPE_READ, nullptr);
+                ret = read_and_lock_node(child_ptr.get_node_id(), child_node, LOCKTYPE_READ, LOCKTYPE_READ, nullptr);
                 if (ret != btree_status_t::success) {
                     unlock_node(my_node, homeds::thread::locktype::LOCKTYPE_READ);
                     return ret;
@@ -1103,7 +1103,7 @@ done:
 
                 ret = do_serialzable_query(child_node, query_req, out_values);
                 if (ret == BTREE_AGAIN) {
-                    BT_LOG_ASSERT_CMP(EQ, out_values.size(), query_req.get_batch_size(),);
+                    BT_LOG_ASSERT_CMP(out_values.size(), ==, query_req.get_batch_size(), );
                     break;
                 }
             }
@@ -1132,8 +1132,8 @@ done:
      * it to be locked too. If it is able to successfully upgrade it continue to retain its
      * old lock. If failed to upgrade, will release all locks.
      */
-     btree_status_t upgrade_node(BtreeNodePtr my_node, BtreeNodePtr child_node, homeds::thread::locktype& cur_lock,
-                      homeds::thread::locktype &child_cur_lock, btree_multinode_req_ptr multinode_req) {
+    btree_status_t upgrade_node(BtreeNodePtr my_node, BtreeNodePtr child_node, homeds::thread::locktype& cur_lock,
+                                homeds::thread::locktype& child_cur_lock, btree_multinode_req_ptr multinode_req) {
         uint64_t prev_gen;
         btree_status_t ret = btree_status_t::success;
         homeds::thread::locktype child_lock_type = child_cur_lock;
@@ -1148,9 +1148,9 @@ done:
             child_cur_lock = locktype::LOCKTYPE_NONE;
         }
 
-#ifdef _PRERELEASE 
+#ifdef _PRERELEASE
         {
-            auto time = homestore_flip->get_test_flip<uint64_t>("btree_upgrade_delay");
+            auto time = homestore_flip->get_test_flip< uint64_t >("btree_upgrade_delay");
             if (time) {
                 usleep(time.get());
             }
@@ -1161,7 +1161,7 @@ done:
             cur_lock = locktype::LOCKTYPE_NONE;
             return ret;
         }
-        
+
         // The node was not changed by anyone else during upgrade.
         cur_lock = homeds::thread::LOCKTYPE_WRITE;
 
@@ -1194,40 +1194,40 @@ done:
         }
 
 #ifdef _PRERELEASE
-    {
-        int is_leaf = 0;
-        
-        if (child_node && child_node->is_leaf()) {
-            is_leaf = 1;
-        }
-        if (homestore_flip->test_flip("btree_upgrade_node_fail", is_leaf)) {
-            unlock_node(my_node, cur_lock);
-            cur_lock = locktype::LOCKTYPE_NONE;
-            if (child_node) {
-                unlock_node(child_node, child_cur_lock);
-                child_cur_lock = locktype::LOCKTYPE_NONE;
+        {
+            int is_leaf = 0;
+
+            if (child_node && child_node->is_leaf()) {
+                is_leaf = 1;
             }
-            ret = btree_status_t::retry;
-            goto done;
+            if (homestore_flip->test_flip("btree_upgrade_node_fail", is_leaf)) {
+                unlock_node(my_node, cur_lock);
+                cur_lock = locktype::LOCKTYPE_NONE;
+                if (child_node) {
+                    unlock_node(child_node, child_cur_lock);
+                    child_cur_lock = locktype::LOCKTYPE_NONE;
+                }
+                ret = btree_status_t::retry;
+                goto done;
+            }
         }
-    }
 #endif
 
-        BT_DEBUG_ASSERT_CMP(EQ, my_node->m_common_header.is_lock, 1, my_node);
+        BT_DEBUG_ASSERT_CMP(my_node->m_common_header.is_lock, ==, 1, my_node);
     done:
         return ret;
     }
 
-    btree_status_t update_leaf_node(BtreeNodePtr my_node, const BtreeKey &k, const BtreeValue &v, 
-                                    btree_put_type put_type, BtreeValue &existing_val, btree_multinode_req_ptr multinode_req,
-                                    BtreeUpdateRequest<K, V> *bur) {
+    btree_status_t update_leaf_node(BtreeNodePtr my_node, const BtreeKey& k, const BtreeValue& v,
+                                    btree_put_type put_type, BtreeValue& existing_val,
+                                    btree_multinode_req_ptr multinode_req, BtreeUpdateRequest< K, V >* bur) {
 
         btree_status_t ret = btree_status_t::success;
         if (bur != nullptr) {
-            //BT_DEBUG_ASSERT_CMP(NE, bur->callback(), nullptr, my_node); // TODO - range req without 
-                                                                          // callback implementation
+            // BT_DEBUG_ASSERT_CMP(bur->callback(), !=, nullptr, my_node); // TODO - range req without
+            // callback implementation
             std::vector< std::pair< K, V > > match;
-            int                              start_ind = 0, end_ind = 0;
+            int start_ind = 0, end_ind = 0;
             my_node->get_all(bur->get_cb_param()->get_sub_range(), UINT32_MAX, start_ind, end_ind, &match);
 
             vector< pair< K, V > > replace_kv;
@@ -1236,13 +1236,13 @@ done:
             if (match.size() > 0) {
                 my_node->remove(start_ind, end_ind);
             }
-            for (auto &pair : replace_kv) { // insert is based on compare() of BtreeKey
+            for (auto& pair : replace_kv) { // insert is based on compare() of BtreeKey
                 auto status = my_node->insert(pair.first, pair.second);
                 BT_RELEASE_ASSERT((status == btree_status_t::success), my_node, "unexpected insert failure");
                 if (status != btree_status_t::success) {
                     COUNTER_INCREMENT(m_metrics, insert_failed_count, 1);
                     return btree_status_t::retry;
-                 }
+                }
             }
         } else {
             if (!my_node->put(k, v, put_type, existing_val)) {
@@ -1251,12 +1251,12 @@ done:
         }
 
 #ifndef NDEBUG
-        //sorted check
-        for (auto i=1u; i < my_node->get_total_entries(); i++) {
+        // sorted check
+        for (auto i = 1u; i < my_node->get_total_entries(); i++) {
             K curKey, prevKey;
-            my_node->get_nth_key(i-1, &prevKey, false);
+            my_node->get_nth_key(i - 1, &prevKey, false);
             my_node->get_nth_key(i, &curKey, false);
-            BT_DEBUG_ASSERT_CMP(LE, prevKey.compare(&curKey), 0, my_node);
+            BT_DEBUG_ASSERT_CMP(prevKey.compare(&curKey), <=, 0, my_node);
         }
 #endif
         write_node_async(my_node, multinode_req);
@@ -1264,11 +1264,11 @@ done:
         return ret;
     }
 
-    btree_status_t get_start_and_end_ind(BtreeNodePtr my_node, BtreeUpdateRequest<K, V> *bur, const BtreeKey &k, 
-                                         int &start_ind, int &end_ind) {
+    btree_status_t get_start_and_end_ind(BtreeNodePtr my_node, BtreeUpdateRequest< K, V >* bur, const BtreeKey& k,
+                                         int& start_ind, int& end_ind) {
 
         btree_status_t ret = btree_status_t::success;
-        if (bur != nullptr) { 
+        if (bur != nullptr) {
             /* just get start/end index from get_all. We don't release the parent lock until this
              * key range is not inserted from start_ind to end_ind.
              */
@@ -1287,35 +1287,35 @@ done:
     }
 
     /* It split the child if a split is required. It releases lock on parent and child_node in case of failure */
-    btree_status_t check_and_split_node(BtreeNodePtr my_node, BtreeUpdateRequest<K, V> *bur, const BtreeKey &k,
-                                        const BtreeValue &v, int ind_hint, btree_put_type put_type, 
-                                        btree_multinode_req_ptr multinode_req, BtreeNodePtr  child_node,
-                                        homeds::thread::locktype &curlock, homeds::thread::locktype &child_curlock,
-                                        int child_ind, bool &split_occured) {
+    btree_status_t check_and_split_node(BtreeNodePtr my_node, BtreeUpdateRequest< K, V >* bur, const BtreeKey& k,
+                                        const BtreeValue& v, int ind_hint, btree_put_type put_type,
+                                        btree_multinode_req_ptr multinode_req, BtreeNodePtr child_node,
+                                        homeds::thread::locktype& curlock, homeds::thread::locktype& child_curlock,
+                                        int child_ind, bool& split_occured) {
 
         split_occured = false;
         K split_key;
         btree_status_t ret = btree_status_t::success;
         auto child_lock_type = child_curlock;
         auto none_lock_type = LOCKTYPE_NONE;
-        
+
 #ifdef _PRERELEASE
-        boost::optional<int> time;
+        boost::optional< int > time;
         if (child_node->is_leaf()) {
-            time = homestore_flip->get_test_flip<int>("btree_delay_and_split_leaf", child_node->get_total_entries());
+            time = homestore_flip->get_test_flip< int >("btree_delay_and_split_leaf", child_node->get_total_entries());
         } else {
-            time = homestore_flip->get_test_flip<int>("btree_delay_and_split", child_node->get_total_entries());
+            time = homestore_flip->get_test_flip< int >("btree_delay_and_split", child_node->get_total_entries());
         }
         if (time && child_node->get_total_entries() > 2) {
             usleep(time.get());
-        } else 
+        } else
 #endif
         {
             if (!child_node->is_split_needed(m_btree_cfg, k, v, &ind_hint, put_type, bur)) {
                 return ret;
             }
         }
-       
+
         /* Split needed */
         if (bur) {
 
@@ -1329,7 +1329,7 @@ done:
             }
 #endif
             if (my_node->is_split_needed(m_btree_cfg, k, v, &ind_hint, put_type, bur)) {
-                //restart from root
+                // restart from root
                 ret = btree_status_t::retry;
                 goto out;
             }
@@ -1342,35 +1342,35 @@ done:
         // Time to split the child, but we need to convert parent to write lock
         ret = upgrade_node(my_node, child_node, curlock, child_curlock, multinode_req);
         if (ret != btree_status_t::success) {
-            BT_LOG(DEBUG, btree_structures, my_node, "Upgrade of node lock failed, retrying from root");
-            BT_LOG_ASSERT_CMP(EQ, curlock, homeds::thread::LOCKTYPE_NONE, my_node);
+            THIS_BT_LOG(DEBUG, btree_structures, my_node, "Upgrade of node lock failed, retrying from root");
+            BT_LOG_ASSERT_CMP(curlock, ==, homeds::thread::LOCKTYPE_NONE, my_node);
             goto out;
         }
-        BT_LOG_ASSERT_CMP(EQ, child_curlock, child_lock_type, my_node);
-        BT_LOG_ASSERT_CMP(EQ, curlock, homeds::thread::LOCKTYPE_WRITE, my_node);
+        BT_LOG_ASSERT_CMP(child_curlock, ==, child_lock_type, my_node);
+        BT_LOG_ASSERT_CMP(curlock, ==, homeds::thread::LOCKTYPE_WRITE, my_node);
 
         // We need to upgrade the child to WriteLock
         ret = upgrade_node(child_node, nullptr, child_curlock, none_lock_type, multinode_req);
         if (ret != btree_status_t::success) {
-            BT_LOG(DEBUG, btree_structures, child_node, "Upgrade of child node lock failed, retrying from root");
-            BT_LOG_ASSERT_CMP(EQ, child_curlock, homeds::thread::LOCKTYPE_NONE, child_node);
+            THIS_BT_LOG(DEBUG, btree_structures, child_node, "Upgrade of child node lock failed, retrying from root");
+            BT_LOG_ASSERT_CMP(child_curlock, ==, homeds::thread::LOCKTYPE_NONE, child_node);
             goto out;
         }
-        BT_LOG_ASSERT_CMP(EQ, none_lock_type, homeds::thread::LOCKTYPE_NONE, my_node);
-        BT_LOG_ASSERT_CMP(EQ, child_curlock, homeds::thread::LOCKTYPE_WRITE, child_node);
+        BT_LOG_ASSERT_CMP(none_lock_type, ==, homeds::thread::LOCKTYPE_NONE, my_node);
+        BT_LOG_ASSERT_CMP(child_curlock, ==, homeds::thread::LOCKTYPE_WRITE, child_node);
 
         // Real time to split the node and get point at which it was split
         ret = split_node(my_node, child_node, child_ind, &split_key, multinode_req);
         if (ret != btree_status_t::success) {
             goto out;
         }
-        
+
         // After split, retry search and walk down.
         unlock_node(child_node, homeds::thread::LOCKTYPE_WRITE);
         child_curlock = LOCKTYPE_NONE;
         COUNTER_INCREMENT(m_metrics, btree_split_count, 1);
         split_occured = true;
-out:
+    out:
         if (ret != btree_status_t::success) {
             if (curlock != LOCKTYPE_NONE) {
                 unlock_node(my_node, curlock);
@@ -1386,8 +1386,8 @@ out:
     }
 
     /* This function is called for the interior nodes whose childs are leaf nodes to calculate the sub range */
-    void get_subrange(BtreeNodePtr my_node, BtreeUpdateRequest<K, V> *bur, int curr_ind) {
-        
+    void get_subrange(BtreeNodePtr my_node, BtreeUpdateRequest< K, V >* bur, int curr_ind) {
+
         if (!bur) {
             return;
         }
@@ -1396,41 +1396,41 @@ out:
         if (curr_ind > 0) {
             /* start of subrange will always be more then the key in curr_ind - 1 */
             K start_key;
-            BtreeKey *start_key_ptr = &start_key;
-            
+            BtreeKey* start_key_ptr = &start_key;
+
             my_node->get_nth_key(curr_ind - 1, start_key_ptr, false);
             assert(start_key_ptr->compare(bur->get_cb_param()->get_sub_range().get_start_key()) <= 0);
         }
 #endif
-        
-        //find end of subrange
+
+        // find end of subrange
         bool end_inc = true;
         K end_key;
-        BtreeKey *end_key_ptr = &end_key;
-        
-        if (curr_ind < (int) my_node->get_total_entries()) {
+        BtreeKey* end_key_ptr = &end_key;
+
+        if (curr_ind < (int)my_node->get_total_entries()) {
             my_node->get_nth_key(curr_ind, end_key_ptr, false);
             if (end_key_ptr->compare(bur->get_input_range().get_end_key()) >= 0) {
                 /* this is last index to process as end of range is smaller then key in this node */
-                end_key_ptr = const_cast<BtreeKey *>(bur->get_input_range().get_end_key());
+                end_key_ptr = const_cast< BtreeKey* >(bur->get_input_range().get_end_key());
                 end_inc = bur->get_input_range().is_end_inclusive();
             } else {
                 end_inc = true;
             }
         } else {
             /* it is the edge node. end key is the end of input range */
-            BT_LOG_ASSERT_CMP(EQ, my_node->get_edge_id().is_valid(), true, my_node);
-            end_key_ptr = const_cast<BtreeKey *>(bur->get_input_range().get_end_key());
+            BT_LOG_ASSERT_CMP(my_node->get_edge_id().is_valid(), ==, true, my_node);
+            end_key_ptr = const_cast< BtreeKey* >(bur->get_input_range().get_end_key());
             end_inc = bur->get_input_range().is_end_inclusive();
         }
-        
+
         auto blob = end_key_ptr->get_blob();
-        const_cast<BtreeKey *>(bur->get_cb_param()->get_sub_range().get_end_key())->copy_blob(blob);//copy
+        const_cast< BtreeKey* >(bur->get_cb_param()->get_sub_range().get_end_key())->copy_blob(blob); // copy
         bur->get_cb_param()->get_sub_range().set_end_incl(end_inc);
-        
+
         auto ret = bur->get_cb_param()->get_sub_range().get_start_key()->compare(
-                                bur->get_cb_param()->get_sub_range().get_end_key());
-        BT_LOG_ASSERT_CMP(LE, ret, 0, my_node);
+            bur->get_cb_param()->get_sub_range().get_end_key());
+        BT_LOG_ASSERT_CMP(ret, <=, 0, my_node);
         /* We don't neeed to update the start at it is updated when entries are inserted in leaf nodes */
     }
 
@@ -1449,35 +1449,34 @@ out:
      * is_end_path = set to true only for last path from root to tree, for range put
      * op          = tracks multi node io.
      */
-    btree_status_t do_put(BtreeNodePtr my_node, homeds::thread::locktype curlock,
-                const BtreeKey &k, const BtreeValue &v, int ind_hint, btree_put_type put_type,
-                BtreeValue &existing_val,
-                btree_multinode_req_ptr multinode_req,
-                BtreeUpdateRequest<K, V> *bur = nullptr) {
+    btree_status_t do_put(BtreeNodePtr my_node, homeds::thread::locktype curlock, const BtreeKey& k,
+                          const BtreeValue& v, int ind_hint, btree_put_type put_type, BtreeValue& existing_val,
+                          btree_multinode_req_ptr multinode_req, BtreeUpdateRequest< K, V >* bur = nullptr) {
 
         btree_status_t ret = btree_status_t::success;
         bool unlocked_already = false;
-        int  curr_ind = -1;
-        
+        int curr_ind = -1;
+
         if (my_node->is_leaf()) {
             /* update the leaf node */
-            BT_LOG_ASSERT_CMP(EQ, curlock, LOCKTYPE_WRITE, my_node);
+            BT_LOG_ASSERT_CMP(curlock, ==, LOCKTYPE_WRITE, my_node);
             ret = update_leaf_node(my_node, k, v, put_type, existing_val, multinode_req, bur);
             unlock_node(my_node, curlock);
             return ret;
         }
-        
+
         bool is_any_child_splitted = false;
         K checkpoint_key;
         bool is_checkpont = false;
-        
+
         multinode_req->node_read_cnt++;
-retry:
-        assert(!bur || const_cast<BtreeKey *>(bur->get_cb_param()->get_sub_range().get_start_key())->compare(
-                bur->get_input_range().get_start_key()) == 0);
+    retry:
+        assert(!bur ||
+               const_cast< BtreeKey* >(bur->get_cb_param()->get_sub_range().get_start_key())
+                       ->compare(bur->get_input_range().get_start_key()) == 0);
         int start_ind = 0, end_ind = -1;
 
-        /* Get the start and end ind in a parent node for the range updates. For 
+        /* Get the start and end ind in a parent node for the range updates. For
          * non range updates, start ind and end ind are same.
          */
         ret = get_start_and_end_ind(my_node, bur, k, start_ind, end_ind);
@@ -1485,15 +1484,14 @@ retry:
             goto out;
         }
 
-        BT_DEBUG_ASSERT((curlock == LOCKTYPE_READ || curlock == LOCKTYPE_WRITE), my_node,
-            "unexpected locktype {}", curlock);
+        BT_DEBUG_ASSERT((curlock == LOCKTYPE_READ || curlock == LOCKTYPE_WRITE), my_node, "unexpected locktype {}",
+                        curlock);
         curr_ind = start_ind;
 
         while (curr_ind <= end_ind) { // iterate all matched childrens
 
 #ifdef _PRERELEASE
-            if (curr_ind - start_ind > 1 &&
-                homestore_flip->test_flip("btree_leaf_node_split")) {
+            if (curr_ind - start_ind > 1 && homestore_flip->test_flip("btree_leaf_node_split")) {
                 LOGINFO("btree_leaf_node_split flip is set");
                 ret = btree_status_t::retry;
                 goto out;
@@ -1504,24 +1502,24 @@ retry:
 
             // Get the childPtr for given key.
             BtreeNodeInfo child_info;
-            BtreeNodePtr  child_node;
-            
-            ret = get_child_and_lock_node(my_node, curr_ind, child_info, child_node, LOCKTYPE_READ, 
-                               LOCKTYPE_WRITE, multinode_req);
+            BtreeNodePtr child_node;
+
+            ret = get_child_and_lock_node(my_node, curr_ind, child_info, child_node, LOCKTYPE_READ, LOCKTYPE_WRITE,
+                                          multinode_req);
             if (ret != btree_status_t::success) {
-               if (ret == btree_status_t::not_found) {
+                if (ret == btree_status_t::not_found) {
                     // Either the node was updated or mynode is freed. Just proceed again from top.
                     /* XXX: Is this case really possible as we always take the parent lock and never
                      * release it.
                      */
                     ret = btree_status_t::retry;
-               }
-               goto out; 
+                }
+                goto out;
             }
 
             // Directly get write lock for leaf, since its an insert.
             child_cur_lock = (child_node->is_leaf()) ? LOCKTYPE_WRITE : LOCKTYPE_READ;
-            
+
             /* Get subrange if it is a range update */
             if (bur && child_node->is_leaf()) {
                 /* We get the subrange only for leaf because this is where we will be inserting keys. In interior nodes,
@@ -1532,8 +1530,8 @@ retry:
 
             /* check if child node is needed to split */
             bool split_occured = false;
-            ret = check_and_split_node(my_node, bur, k, v, ind_hint, put_type, multinode_req, child_node, 
-                                       curlock, child_cur_lock, curr_ind, split_occured);
+            ret = check_and_split_node(my_node, bur, k, v, ind_hint, put_type, multinode_req, child_node, curlock,
+                                       child_cur_lock, curr_ind, split_occured);
             if (ret != btree_status_t::success) {
                 goto out;
             }
@@ -1545,23 +1543,24 @@ retry:
             if (bur && child_node->is_leaf()) {
 
                 if (curr_ind != (int)my_node->get_total_entries()) {
-                    /* if it is not an edge node then update the end key in input range after insert has happened in 
+                    /* if it is not an edge node then update the end key in input range after insert has happened in
                      * the leaf nodes.
                      */
-                     my_node->get_nth_key(curr_ind, &checkpoint_key, true);
-                     is_checkpont = true;
+                    my_node->get_nth_key(curr_ind, &checkpoint_key, true);
+                    is_checkpont = true;
                 }
-                BT_LOG(DEBUG, btree_structures, my_node, "Subrange:s:{},e:{},c:{},nid:{},eidvalid?:{},sk:{},ek:{}",
-                    start_ind, end_ind, curr_ind, my_node->get_node_id().to_string(), my_node->get_edge_id().is_valid(),
-                    bur->get_cb_param()->get_sub_range().get_start_key()->to_string(),
-                    bur->get_cb_param()->get_sub_range().get_end_key()->to_string());
+                THIS_BT_LOG(DEBUG, btree_structures, my_node, "Subrange:s:{},e:{},c:{},nid:{},eidvalid?:{},sk:{},ek:{}",
+                            start_ind, end_ind, curr_ind, my_node->get_node_id().to_string(),
+                            my_node->get_edge_id().is_valid(),
+                            bur->get_cb_param()->get_sub_range().get_start_key()->to_string(),
+                            bur->get_cb_param()->get_sub_range().get_end_key()->to_string());
             }
 
 #ifndef NDEBUG
-            K ckey,pkey;
-            if (curr_ind != (int)my_node->get_total_entries()) { //not edge
+            K ckey, pkey;
+            if (curr_ind != (int)my_node->get_total_entries()) { // not edge
                 my_node->get_nth_key(curr_ind, &pkey, true);
-                if (child_node->get_total_entries() != 0){
+                if (child_node->get_total_entries() != 0) {
                     child_node->get_last_key(&ckey);
                     if (!child_node->is_leaf()) {
                         assert(ckey.compare(&pkey) == 0);
@@ -1571,9 +1570,9 @@ retry:
                 }
                 assert(bur != nullptr || k.compare(&pkey) <= 0);
             }
-            if (curr_ind > 0){//not first child
+            if (curr_ind > 0) { // not first child
                 my_node->get_nth_key(curr_ind - 1, &pkey, true);
-                if (child_node->get_total_entries() != 0){
+                if (child_node->get_total_entries() != 0) {
                     child_node->get_first_key(&ckey);
                     assert(pkey.compare(&ckey) <= 0);
                 }
@@ -1593,28 +1592,27 @@ retry:
             }
 #endif
 
-            ret = do_put(child_node, child_cur_lock, k, v, ind_hint, put_type,
-                                  existing_val, multinode_req, bur);
+            ret = do_put(child_node, child_cur_lock, k, v, ind_hint, put_type, existing_val, multinode_req, bur);
 
             if (ret != btree_status_t::success) {
                 goto out;
             }
 
-            if (bur && is_checkpont) {//savepoint of range only if this parent has leaf nodes
-                
+            if (bur && is_checkpont) { // savepoint of range only if this parent has leaf nodes
+
                 /* update the start indx of both sub range and input range */
-                const_cast<BtreeKey *>(bur->get_cb_param()->get_sub_range().get_start_key())->copy_blob(
-                            checkpoint_key.get_blob());//copy
+                const_cast< BtreeKey* >(bur->get_cb_param()->get_sub_range().get_start_key())
+                    ->copy_blob(checkpoint_key.get_blob()); // copy
                 bur->get_cb_param()->get_sub_range().set_start_incl(false);
-                
+
                 // update input range for checkpointing
-                const_cast<BtreeKey *>(bur->get_input_range().get_start_key())->copy_blob(
-                            checkpoint_key.get_blob());//copy
+                const_cast< BtreeKey* >(bur->get_input_range().get_start_key())
+                    ->copy_blob(checkpoint_key.get_blob()); // copy
                 bur->get_input_range().set_start_incl(false);
             }
             curr_ind++;
         }
-out:
+    out:
         if (curlock != LOCKTYPE_NONE) {
             unlock_node(my_node, curlock);
         }
@@ -1624,33 +1622,32 @@ out:
     }
 
     btree_status_t do_remove(BtreeNodePtr my_node, homeds::thread::locktype curlock, const BtreeSearchRange& range,
-                             BtreeKey* outkey, BtreeValue* outval,
-                             btree_multinode_req_ptr multinode_req) {
+                             BtreeKey* outkey, BtreeValue* outval, btree_multinode_req_ptr multinode_req) {
         btree_status_t ret = btree_status_t::success;
         if (my_node->is_leaf()) {
-            BT_DEBUG_ASSERT_CMP(EQ, curlock, LOCKTYPE_WRITE, my_node);
+            BT_DEBUG_ASSERT_CMP(curlock, ==, LOCKTYPE_WRITE, my_node);
 
 #ifndef NDEBUG
-            for(auto i=1u;i<my_node->get_total_entries();i++){
+            for (auto i = 1u; i < my_node->get_total_entries(); i++) {
                 K curKey, prevKey;
-                my_node->get_nth_key(i-1,&prevKey,false);
-                my_node->get_nth_key(i,&curKey,false);
+                my_node->get_nth_key(i - 1, &prevKey, false);
+                my_node->get_nth_key(i, &curKey, false);
                 assert(prevKey.compare(&curKey) < 0);
             }
 #endif
             bool is_found = my_node->remove_one(range, outkey, outval);
 #ifndef NDEBUG
-            for(auto i=1u;i<my_node->get_total_entries();i++){
+            for (auto i = 1u; i < my_node->get_total_entries(); i++) {
                 K curKey, prevKey;
-                my_node->get_nth_key(i-1,&prevKey,false);
-                my_node->get_nth_key(i,&curKey,false);
+                my_node->get_nth_key(i - 1, &prevKey, false);
+                my_node->get_nth_key(i, &curKey, false);
                 assert(prevKey.compare(&curKey) < 0);
             }
 #endif
             if (is_found) {
                 write_node_async(my_node, multinode_req);
                 COUNTER_DECREMENT(m_metrics, btree_obj_count, 1);
-            } 
+            }
 
             unlock_node(my_node, curlock);
             return is_found ? btree_status_t::success : btree_status_t::not_found;
@@ -1659,7 +1656,6 @@ out:
     retry:
         locktype child_cur_lock = LOCKTYPE_NONE;
 
-       
         /* range delete is not supported yet */
         // Get the childPtr for given key.
         auto result = my_node->find(range, nullptr, nullptr);
@@ -1668,8 +1664,8 @@ out:
 
         BtreeNodeInfo child_info;
         BtreeNodePtr child_node;
-        ret = get_child_and_lock_node(my_node, ind, child_info, child_node, 
-                        LOCKTYPE_READ, LOCKTYPE_WRITE, multinode_req);
+        ret =
+            get_child_and_lock_node(my_node, ind, child_info, child_node, LOCKTYPE_READ, LOCKTYPE_WRITE, multinode_req);
 
         if (ret != btree_status_t::success) {
             unlock_node(my_node, curlock);
@@ -1687,10 +1683,10 @@ out:
             // If we are unable to upgrade the node, ask the caller to retry.
             ret = upgrade_node(my_node, child_node, curlock, child_cur_lock, multinode_req);
             if (ret != btree_status_t::success) {
-                BT_DEBUG_ASSERT_CMP(EQ, curlock, homeds::thread::LOCKTYPE_NONE, my_node)
+                BT_DEBUG_ASSERT_CMP(curlock, ==, homeds::thread::LOCKTYPE_NONE, my_node)
                 return ret;
             }
-            BT_DEBUG_ASSERT_CMP(EQ, curlock, homeds::thread::LOCKTYPE_WRITE, my_node);
+            BT_DEBUG_ASSERT_CMP(curlock, ==, homeds::thread::LOCKTYPE_WRITE, my_node);
 
 #define MAX_ADJANCENT_INDEX 3
 
@@ -1729,16 +1725,16 @@ out:
 
 #ifndef NDEBUG
         K ckey, pkey;
-        if (ind != my_node->get_total_entries() && child_node->get_total_entries()) { //not edge
+        if (ind != my_node->get_total_entries() && child_node->get_total_entries()) { // not edge
             child_node->get_last_key(&ckey);
             my_node->get_nth_key(ind, &pkey, true);
-            BT_DEBUG_ASSERT_CMP(LE, ckey.compare(&pkey), 0, my_node);
+            BT_DEBUG_ASSERT_CMP(ckey.compare(&pkey), <=, 0, my_node);
         }
 
-        if (ind > 0 && child_node->get_total_entries()) { //not first child
+        if (ind > 0 && child_node->get_total_entries()) { // not first child
             child_node->get_first_key(&ckey);
-            my_node->get_nth_key(ind-1, &pkey, true);
-            BT_DEBUG_ASSERT_CMP(LT, pkey.compare(&ckey), 0, my_node);
+            my_node->get_nth_key(ind - 1, &pkey, true);
+            BT_DEBUG_ASSERT_CMP(pkey.compare(&ckey), <, 0, my_node);
         }
 #endif
 
@@ -1749,19 +1745,17 @@ out:
         // have been unlocked by the recursive function and it could also been deleted.
     }
 
-    btree_status_t check_split_root(const BtreeKey& k, const BtreeValue& v,
-                          btree_multinode_req_ptr multinode_req, btree_put_type& putType,
-                          BtreeUpdateRequest< K, V >* bur = nullptr) {
-        int          ind;
-        K            split_key;
+    btree_status_t check_split_root(const BtreeKey& k, const BtreeValue& v, btree_multinode_req_ptr multinode_req,
+                                    btree_put_type& putType, BtreeUpdateRequest< K, V >* bur = nullptr) {
+        int ind;
+        K split_key;
         BtreeNodePtr child_node = nullptr;
         btree_status_t ret = btree_status_t::success;
 
         m_btree_lock.write_lock();
         BtreeNodePtr root;
-        
-        ret = read_and_lock_root(m_root_node, root, locktype::LOCKTYPE_WRITE, 
-                                locktype::LOCKTYPE_WRITE, multinode_req);
+
+        ret = read_and_lock_root(m_root_node, root, locktype::LOCKTYPE_WRITE, locktype::LOCKTYPE_WRITE, multinode_req);
         if (ret != btree_status_t::success) {
             goto done;
         }
@@ -1783,8 +1777,9 @@ out:
         btree_store_t::swap_node(m_btree_store.get(), root, child_node);
         write_node_async(child_node, multinode_req);
 
-        BT_LOG(DEBUG, btree_structures, root, "Root node is full, swapping contents with child_node {} and split that",
-            child_node->get_node_id_int());
+        THIS_BT_LOG(DEBUG, btree_structures, root,
+                    "Root node is full, swapping contents with child_node {} and split that",
+                    child_node->get_node_id_int());
 
         /* Reading a node again to get the latest buffer from writeback cache. We are going
          * to write this node again in split node. We can not have two consecutive writes on the
@@ -1799,14 +1794,14 @@ out:
             goto done;
         }
 
-        BT_DEBUG_ASSERT_CMP(EQ, root->get_total_entries(), 0, root);
+        BT_DEBUG_ASSERT_CMP(root->get_total_entries(), ==, 0, root);
         ret = split_node(root, child_node, root->get_total_entries(), &split_key, multinode_req);
-        BT_DEBUG_ASSERT_CMP(EQ, m_root_node, root->get_node_id(), root);
+        BT_DEBUG_ASSERT_CMP(m_root_node, ==, root->get_node_id(), root);
 
         /* unlock child node */
         ret = btree_store_t::refresh_node(m_btree_store.get(), root, multinode_req, true);
         unlock_node(root, homeds::thread::LOCKTYPE_WRITE);
-        
+
         if (ret == btree_status_t::success) {
             COUNTER_INCREMENT(m_metrics, btree_depth, 1);
         }
@@ -1820,20 +1815,19 @@ out:
         btree_status_t ret = btree_status_t::success;
 
         m_btree_lock.write_lock();
-        BtreeNodePtr root; 
-        
-        ret = read_and_lock_root(m_root_node, root, locktype::LOCKTYPE_WRITE, 
-                                                locktype::LOCKTYPE_WRITE, multinode_req);
+        BtreeNodePtr root;
+
+        ret = read_and_lock_root(m_root_node, root, locktype::LOCKTYPE_WRITE, locktype::LOCKTYPE_WRITE, multinode_req);
         if (ret != btree_status_t::success) {
             goto done;
         }
 
-        if (root->get_total_entries() != 0 || root->is_leaf()/*some other thread collapsed root already*/) {
+        if (root->get_total_entries() != 0 || root->is_leaf() /*some other thread collapsed root already*/) {
             unlock_node(root, locktype::LOCKTYPE_WRITE);
             goto done;
         }
 
-        BT_DEBUG_ASSERT_CMP(EQ, root->get_edge_id().is_valid(), true, root);
+        BT_DEBUG_ASSERT_CMP(root->get_edge_id().is_valid(), ==, true, root);
         child_node = read_node(root->get_edge_id(), multinode_req);
         if (child_node == nullptr) {
             unlock_node(root, locktype::LOCKTYPE_WRITE);
@@ -1843,7 +1837,7 @@ out:
 
         btree_store_t::swap_node(m_btree_store.get(), root, child_node);
         write_node_async(root, multinode_req);
-        BT_DEBUG_ASSERT_CMP(EQ, m_root_node, root->get_node_id(), root);
+        BT_DEBUG_ASSERT_CMP(m_root_node, ==, root->get_node_id(), root);
 
         // Elevate the edge child as root.
         unlock_node(root, locktype::LOCKTYPE_WRITE);
@@ -1863,12 +1857,12 @@ out:
      * multinode request which is created in the caller.
      */
     btree_status_t fix_pc_gen_mistmatch(BtreeNodePtr parent_node, BtreeNodePtr child_node1, uint32_t parent_ind) {
-        BT_LOG(TRACE, btree_generics, child_node1, "Before fix, parent: {}", parent_node->get_node_id_int());
+        THIS_BT_LOG(TRACE, btree_generics, child_node1, "Before fix, parent: {}", parent_node->get_node_id_int());
 
         vector< BtreeNodePtr > nodes_to_free;
-        K                      parent_key;
-        BtreeNodePtr           parent_sibbling = nullptr;
-        bnodeid_t              sibbling_id;
+        K parent_key;
+        BtreeNodePtr parent_sibbling = nullptr;
+        bnodeid_t sibbling_id;
         btree_status_t ret = btree_status_t::success;
 
         if (parent_ind != parent_node->get_total_entries()) {
@@ -1882,7 +1876,7 @@ out:
                 }
                 // else its an edge entry, do nothing
             } else {
-                bool         borrowKeys = true;
+                bool borrowKeys = true;
                 BtreeNodePtr old_sibbling = nullptr;
                 do {
                     // merge case, borrow entries
@@ -1905,14 +1899,14 @@ out:
                         BT_LOG_ASSERT(0, child_node1, "Error in fixing gen mismatch");
                     }
                     auto res = old_sibbling->find(parent_key, nullptr);
-                    int  no_of_keys = old_sibbling->get_total_entries();
+                    int no_of_keys = old_sibbling->get_total_entries();
                     if (res.found) {
                         no_of_keys = res.end_of_search_index + 1;
                         borrowKeys = false;
                     }
                     uint32_t nentries =
                         child_node1->move_in_from_right_by_entries(m_btree_cfg, old_sibbling, no_of_keys);
-                    BT_LOG_ASSERT_CMP(GT, nentries, 0, child_node1);
+                    BT_LOG_ASSERT_CMP(nentries, >, 0, child_node1);
                     nodes_to_free.push_back(old_sibbling);
                 } while (borrowKeys);
             }
@@ -1945,7 +1939,7 @@ out:
             // parent ind is edge , so no key in parent to match against this is not valid in case of split crash
             // for merge, we have borrow everything on right
             BtreeNodePtr curr = nullptr;
-            bnodeid_t    next = child_node1->get_next_bnode();
+            bnodeid_t next = child_node1->get_next_bnode();
             while ((next.is_valid())) {
                 curr = read_node(next, nullptr);
                 if (curr == nullptr) {
@@ -1973,7 +1967,7 @@ out:
         if (ret != btree_status_t::success) {
             return ret;
         }
-        
+
         for (int i = 0; i < (int)nodes_to_free.size(); i++) {
             free_node(nodes_to_free[i], nullptr);
         }
@@ -1984,19 +1978,19 @@ out:
         if (parent_ind != parent_node->get_total_entries()) {
             K child_node1_last_key;
             child_node1->get_last_key(&child_node1_last_key);
-            BT_DEBUG_ASSERT_CMP(EQ, child_node1_last_key.compare(&parent_key), 0, child_node1);
+            BT_DEBUG_ASSERT_CMP(child_node1_last_key.compare(&parent_key), ==, 0, child_node1);
         }
 #endif
         return ret;
     }
 
-    btree_status_t split_node(BtreeNodePtr parent_node, BtreeNodePtr child_node, uint32_t parent_ind, 
-                BtreeKey* out_split_key, btree_multinode_req_ptr multinode_req) {
+    btree_status_t split_node(BtreeNodePtr parent_node, BtreeNodePtr child_node, uint32_t parent_ind,
+                              BtreeKey* out_split_key, btree_multinode_req_ptr multinode_req) {
         BtreeNodeInfo ninfo;
         BtreeNodePtr child_node1 = child_node;
         BtreeNodePtr child_node2 = child_node1->is_leaf() ? alloc_leaf_node() : alloc_interior_node();
         if (child_node2 == nullptr) {
-           return(btree_status_t::space_not_avail);
+            return (btree_status_t::space_not_avail);
         }
         btree_status_t ret = btree_status_t::success;
 
@@ -2005,10 +1999,17 @@ out:
         uint32_t child1_filled_size = m_btree_cfg.get_node_area_size() - child_node1->get_available_size(m_btree_cfg);
 
         auto split_size = m_btree_cfg.get_split_size(child1_filled_size);
-        uint32_t res =child_node1->move_out_to_right_by_size(m_btree_cfg, child_node2, split_size);
-       
-        BT_DEBUG_ASSERT_CMP(GT, res, 0, child_node1); //means cannot split entries
-        BT_DEBUG_ASSERT_CMP(GT, child_node1->get_total_entries(), 0, child_node1);
+        uint32_t res = child_node1->move_out_to_right_by_size(m_btree_cfg, child_node2, split_size);
+
+        static bool once = false;
+        if (!once) {
+            BT_LOG_ASSERT_CMP(res, <, 0, child_node1, "Fake assert"); // means cannot split entries
+            once = true;
+        }
+
+        BT_DEBUG_ASSERT_CMP(res, >, 0, child_node1,
+                            "Unable to split entries in the child node"); // means cannot split entries
+        BT_DEBUG_ASSERT_CMP(child_node1->get_total_entries(), >, 0, child_node1);
 
         if (res == 0) {
             /* it can not split the node. We should return error */
@@ -2033,31 +2034,31 @@ out:
 #ifndef NDEBUG
         K split_key;
         child_node2->get_first_key(&split_key);
-        BT_DEBUG_ASSERT_CMP(GT, split_key.compare(out_split_key), 0, child_node2);
+        BT_DEBUG_ASSERT_CMP(split_key.compare(out_split_key), >, 0, child_node2);
 #endif
-        BT_LOG(DEBUG, btree_structures, parent_node, "Split child_node={} with new_child_node={}, split_key={}",
-            child_node1->get_node_id_int(), child_node2->get_node_id_int(), out_split_key->to_string());
+        THIS_BT_LOG(DEBUG, btree_structures, parent_node, "Split child_node={} with new_child_node={}, split_key={}",
+                    child_node1->get_node_id_int(), child_node2->get_node_id_int(), out_split_key->to_string());
 
 #ifdef _PRERELEASE
-        if (BtreeStoreType == btree_store_type::SSD_BTREE && 
-                homestore_flip->test_flip("btree_split_failure", child_node->is_leaf())) {
+        if (BtreeStoreType == btree_store_type::SSD_BTREE &&
+            homestore_flip->test_flip("btree_split_failure", child_node->is_leaf())) {
             child_node1->flip_pc_gen_flag();
             child_node1->move_in_from_right_by_size(m_btree_cfg, child_node2, split_size);
         }
 #endif
-       
-       // NOTE: Do not access parentInd after insert, since insert would have
+
+        // NOTE: Do not access parentInd after insert, since insert would have
         // we write right child node, than parent and than left child
         write_node_async(child_node2, multinode_req);
         write_node_async(parent_node, multinode_req);
 #ifdef _PRERELEASE
-        if (BtreeStoreType == btree_store_type::SSD_BTREE && 
-                homestore_flip->test_flip("btree_split_panic", child_node->is_leaf())) {
+        if (BtreeStoreType == btree_store_type::SSD_BTREE &&
+            homestore_flip->test_flip("btree_split_panic", child_node->is_leaf())) {
             abort();
         }
 #endif
         write_node_async(child_node1, multinode_req);
-        
+
         // NOTE: Do not access parentInd after insert, since insert would have
         // shifted parentNode to the right.
         return ret;
@@ -2066,67 +2067,67 @@ out:
     struct merge_info {
         BtreeNodePtr node;
         BtreeNodePtr node_orig;
-        uint16_t  parent_index = 0xFFFF;
+        uint16_t parent_index = 0xFFFF;
         bool freed = false;
         bool is_new_allocation = false;
         bool is_last_key = false;
         bool is_lock = false;
     };
 
-    auto merge_nodes(BtreeNodePtr parent_node, std::vector< int >& indices_list,  btree_multinode_req_ptr multinode_req) {
+    auto merge_nodes(BtreeNodePtr parent_node, std::vector< int >& indices_list,
+                     btree_multinode_req_ptr multinode_req) {
         struct {
-            bool     merged;  // Have we merged at all
-            uint32_t nmerged; // If we merged, how many are the final result of nodes 
-            btree_status_t status;       
+            bool merged;      // Have we merged at all
+            uint32_t nmerged; // If we merged, how many are the final result of nodes
+            btree_status_t status;
         } ret{false, 0, btree_status_t::success};
 
         std::vector< merge_info > minfo;
-        BtreeNodeInfo             child_info;
-        uint32_t                  ndeleted_nodes = 0;
-        bool                      merge_cmplt = false;
+        BtreeNodeInfo child_info;
+        uint32_t ndeleted_nodes = 0;
+        bool merge_cmplt = false;
 
         // Loop into all index and initialize list
         minfo.reserve(indices_list.size());
-        
+
         for (auto i = 0u; i < indices_list.size(); i++) {
             if (indices_list[i] == (int)parent_node->get_total_entries()) {
                 BT_LOG_ASSERT(parent_node->get_edge_id().is_valid(), parent_node,
-                    "Assertion failure, expected valid edge for parent_node: {}");
+                              "Assertion failure, expected valid edge for parent_node");
             }
-                
-            parent_node->get(indices_list[i], &child_info, false /* copy */);
-            merge_info m;
 
-            ret.status = read_and_lock_node(child_info.bnode_id(), m.node_orig, locktype::LOCKTYPE_WRITE, 
-                                    locktype::LOCKTYPE_WRITE, multinode_req);
+            parent_node->get(indices_list[i], &child_info, false /* copy */);
+            merge_info _m;
+
+            ret.status = read_and_lock_node(child_info.bnode_id(), _m.node_orig, locktype::LOCKTYPE_WRITE,
+                                            locktype::LOCKTYPE_WRITE, multinode_req);
             if (ret.status != btree_status_t::success) {
                 goto out;
             }
-            BT_LOG_ASSERT_CMP(EQ, m.node_orig->is_valid_node(), true, m.node_orig);
-            m.node = m.node_orig;
-            m.is_lock = true;
+            BT_LOG_ASSERT_CMP(_m.node_orig->is_valid_node(), ==, true, _m.node_orig);
+            _m.node = _m.node_orig;
+            _m.is_lock = true;
 
             if (i != 0) { // create replica childs except first child
-                m.node = btree_store_t::alloc_node(m_btree_store.get(), m.node_orig->is_leaf(), m.is_new_allocation,
-                                                   m.node_orig);
-                if (m.node == nullptr) {
+                _m.node = btree_store_t::alloc_node(m_btree_store.get(), _m.node_orig->is_leaf(), _m.is_new_allocation,
+                                                    _m.node_orig);
+                if (_m.node == nullptr) {
                     ret.status = btree_status_t::space_not_avail;
                     goto out;
                 }
-                minfo[i - 1].node->set_next_bnode(m.node->get_node_id()); // link them
+                minfo[i - 1].node->set_next_bnode(_m.node->get_node_id()); // link them
             }
-            m.node->flip_pc_gen_flag();
-            m.freed = false;
-            m.parent_index = indices_list[i];
-            minfo.push_back(m);
+            _m.node->flip_pc_gen_flag();
+            _m.freed = false;
+            _m.parent_index = indices_list[i];
+            minfo.push_back(_m);
         }
-
 
         {
             uint32_t first_node_nentries = minfo[0].node->get_total_entries();
 
             assert(indices_list.size() == minfo.size());
-            K last_pkey;//last key of parent node
+            K last_pkey; // last key of parent node
             if (minfo[indices_list.size() - 1].parent_index != parent_node->get_total_entries()) {
                 /* If it is not edge we always preserve the last key in a given merge group of nodes.*/
                 parent_node->get_nth_key(minfo[indices_list.size() - 1].parent_index, &last_pkey, true);
@@ -2136,7 +2137,7 @@ out:
             auto i = 0U;
             auto j = 1U;
             auto balanced_size = m_btree_cfg.get_ideal_fill_size();
-            int last_indx = minfo[0].parent_index;//last seen index in parent whos child was not freed
+            int last_indx = minfo[0].parent_index; // last seen index in parent whos child was not freed
             while ((i < indices_list.size() - 1) && (j < indices_list.size())) {
                 minfo[j].parent_index -= ndeleted_nodes; // Adjust the parent index for deleted nodes
 
@@ -2150,13 +2151,13 @@ out:
 
                     if (minfo[j].node->get_total_entries() == 0) {
                         // We have removed all the entries from the next node, remove the entry in parent and move on to
-                        // the next node. 
+                        // the next node.
 
                         minfo[j].freed = true;
                         parent_node->remove(minfo[j].parent_index); // remove interally updates parents edge if needed
                         minfo[i].node->set_next_bnode(minfo[j].node->get_next_bnode());
                         ndeleted_nodes++;
-                        ret.merged = true;//case when no entries moved but node is still empty
+                        ret.merged = true; // case when no entries moved but node is still empty
                     }
                 }
 
@@ -2168,16 +2169,17 @@ out:
                 j++;
             }
 
-            BT_LOG_ASSERT_CMP(EQ, minfo[0].freed, false, minfo[0].node); // If we merge it, we expect the left most one has at least 1 entry.
+            BT_LOG_ASSERT_CMP(minfo[0].freed, ==, false,
+                              minfo[0].node); // If we merge it, we expect the left most one has at least 1 entry.
             for (auto n = 0u; n < minfo.size(); n++) {
                 if (!minfo[n].freed) {
                     // lets get the last key and put in the entry into parent node
                     BtreeNodeInfo ninfo(minfo[n].node->get_node_id());
 
-                    if (minfo[n].parent_index == parent_node->get_total_entries()) { //edge entrys
+                    if (minfo[n].parent_index == parent_node->get_total_entries()) { // edge entrys
                         parent_node->update(minfo[n].parent_index, ninfo);
                     } else if (minfo[n].node->get_total_entries() != 0) {
-                        K last_ckey;//last key in child
+                        K last_ckey; // last key in child
                         minfo[n].node->get_last_key(&last_ckey);
                         parent_node->update(minfo[n].parent_index, last_ckey, ninfo);
                     } else {
@@ -2195,8 +2197,8 @@ out:
             if (last_indx != (int)parent_node->get_total_entries()) {
                 /* preserve the last key if it is not the edge */
                 V temp_value;
-                parent_node->get(last_indx, &temp_value, true);//save value
-                parent_node->update(last_indx, last_pkey, temp_value);//update key keeping same value
+                parent_node->get(last_indx, &temp_value, true);        // save value
+                parent_node->update(last_indx, last_pkey, temp_value); // update key keeping same value
             }
 #ifndef NDEBUG
             validate_sanity_next_child(parent_node, (uint32_t)last_indx);
@@ -2210,17 +2212,17 @@ out:
             if (homestore_flip->test_flip("btree_merge_failure", minfo[0].node->is_leaf())) {
                 minfo[0].node->flip_pc_gen_flag();
                 minfo[0].node->set_total_entries(first_node_nentries);
-            } else 
+            } else
 #endif
             {
                 write_node_async(minfo[0].node, multinode_req);
 #ifndef NDEBUG
-                validate_sanity(minfo,parent_node,indices_list);
+                validate_sanity(minfo, parent_node, indices_list);
 #endif
             }
             merge_cmplt = true;
         }
-out:
+    out:
         // Loop again in reverse order to unlock the nodes. freeable nodes need to be unlocked and freed
         for (int n = minfo.size() - 1; n >= 0; n--) {
             if (minfo[n].freed) {
@@ -2240,10 +2242,9 @@ out:
         return ret;
     }
 
-
 #ifndef NDEBUG
     void validate_sanity_next_child(BtreeNodePtr parent_node, uint32_t ind) {
-        BtreeNodeInfo             child_info;
+        BtreeNodeInfo child_info;
         K child_key;
         K parent_key;
 
@@ -2256,7 +2257,7 @@ out:
                 return;
             }
         }
-        parent_node->get(ind+1, &child_info, false /* copy */);
+        parent_node->get(ind + 1, &child_info, false /* copy */);
         auto child_node = read_node(child_info.bnode_id(), nullptr);
         lock_and_refresh_node(child_node, locktype::LOCKTYPE_READ, nullptr);
         if (child_node->get_total_entries() == 0) {
@@ -2270,7 +2271,7 @@ out:
     }
 
     void validate_sanity(std::vector< merge_info >& minfo, BtreeNodePtr parent_node, std::vector< int >& indices_list) {
-        int          index_sub = indices_list[0];
+        int index_sub = indices_list[0];
         BtreeNodePtr prev = nullptr;
         int last_indx = -1;
 
@@ -2285,12 +2286,12 @@ out:
                 BtreeNodeInfo child_info;
                 assert(index_sub == minfo[i].parent_index);
                 parent_node->get(minfo[i].parent_index, &child_info, false);
-                BT_DEBUG_ASSERT_CMP(EQ, child_info.bnode_id(), minfo[i].node->get_node_id(), parent_node);
+                BT_DEBUG_ASSERT_CMP(child_info.bnode_id(), ==, minfo[i].node->get_node_id(), parent_node);
                 index_sub++;
                 if (prev != nullptr && prev->get_next_bnode().m_id != minfo[i].node->get_node_id().m_id) {
                     cout << "oops";
                 }
-                
+
                 if (minfo[i].node->get_total_entries() == 0) {
                     continue;
                 }
@@ -2302,7 +2303,7 @@ out:
                 if (minfo[i].parent_index != 0) {
                     K parent_key;
                     parent_node->get_nth_key(minfo[i].parent_index - 1, &parent_key, false);
-                    BT_DEBUG_ASSERT_CMP(GE, first_key.compare(&parent_key), 0, parent_node);
+                    BT_DEBUG_ASSERT_CMP(first_key.compare(&parent_key), >=, 0, parent_node);
                 }
 
                 if (minfo[i].parent_index != parent_node->get_total_entries()) {
@@ -2310,9 +2311,9 @@ out:
                     parent_node->get_nth_key(minfo[i].parent_index, &parent_key, false);
                     if (i == last_indx) {
                         /* we always preserve the last key */
-                        BT_DEBUG_ASSERT_CMP(LE, last_key.compare(&parent_key), 0, parent_node);
+                        BT_DEBUG_ASSERT_CMP(last_key.compare(&parent_key), <=, 0, parent_node);
                     } else {
-                        BT_DEBUG_ASSERT_CMP(EQ, last_key.compare(&parent_key), 0, parent_node);
+                        BT_DEBUG_ASSERT_CMP(last_key.compare(&parent_key), ==, 0, parent_node);
                     }
                 }
                 prev = minfo[i].node;
@@ -2323,7 +2324,7 @@ out:
 #endif
 
     BtreeNodePtr alloc_leaf_node() {
-        bool         is_new_allocation;
+        bool is_new_allocation;
         BtreeNodePtr n = btree_store_t::alloc_node(m_btree_store.get(), true /* is_leaf */, is_new_allocation);
         if (n == nullptr) {
             return nullptr;
@@ -2335,7 +2336,7 @@ out:
     }
 
     BtreeNodePtr alloc_interior_node() {
-        bool         is_new_allocation;
+        bool is_new_allocation;
         BtreeNodePtr n = btree_store_t::alloc_node(m_btree_store.get(), false /* isLeaf */, is_new_allocation);
         if (n == nullptr) {
             return nullptr;
@@ -2348,29 +2349,28 @@ out:
 
     /* Note:- This function assumes that access of this node is thread safe. */
     void free_node(BtreeNodePtr& node, btree_multinode_req_ptr multinode_req, bool mem_only = false) {
-        BT_LOG(DEBUG, btree_generics, node, "Freeing node");
+        THIS_BT_LOG(DEBUG, btree_generics, node, "Freeing node");
 
         COUNTER_DECREMENT_IF_ELSE(m_metrics, node->is_leaf(), btree_leaf_node_count, btree_int_node_count, 1);
-        BT_LOG_ASSERT_CMP(EQ, node->is_valid_node(), true, node);
+        BT_LOG_ASSERT_CMP(node->is_valid_node(), ==, true, node);
         node->set_valid_node(false);
         m_total_nodes--;
         btree_store_t::free_node(m_btree_store.get(), node, multinode_req, mem_only);
     }
 
     /* Recovery process is different for root node, child node and sibling node depending on how the node
-     * is accessed. This is the reason to create below three apis separately. 
+     * is accessed. This is the reason to create below three apis separately.
      */
-    btree_status_t read_and_lock_root(bnodeid_t id, BtreeNodePtr &node_ptr, thread::locktype int_lock_type, 
-                                        thread::locktype leaf_lock_type, btree_multinode_req_ptr multinode_req) {
+    btree_status_t read_and_lock_root(bnodeid_t id, BtreeNodePtr& node_ptr, thread::locktype int_lock_type,
+                                      thread::locktype leaf_lock_type, btree_multinode_req_ptr multinode_req) {
         /* there is no recovery for root node as it is always written to a fixed bnodeid */
-        return(read_and_lock_node(id, node_ptr, int_lock_type, int_lock_type, multinode_req));
+        return (read_and_lock_node(id, node_ptr, int_lock_type, int_lock_type, multinode_req));
     }
 
     /* It read the node, take the lock and recover it if required */
-    btree_status_t read_and_lock_child(bnodeid_t child_id, BtreeNodePtr &child_node, BtreeNodePtr parent_node,
-        uint32_t parent_ind,
-        thread::locktype int_lock_type,
-        thread::locktype leaf_lock_type, btree_multinode_req_ptr multinode_req) {
+    btree_status_t read_and_lock_child(bnodeid_t child_id, BtreeNodePtr& child_node, BtreeNodePtr parent_node,
+                                       uint32_t parent_ind, thread::locktype int_lock_type,
+                                       thread::locktype leaf_lock_type, btree_multinode_req_ptr multinode_req) {
 
         child_node = read_node(child_id, multinode_req);
         if (child_node == nullptr) {
@@ -2384,7 +2384,7 @@ out:
                 LOGERROR("refresh failed btree name {}", m_btree_cfg.get_name());
                 return ret;
             }
-            if (child_id.m_pc_gen_flag != child_node->get_node_id().m_pc_gen_flag) { //check again
+            if (child_id.m_pc_gen_flag != child_node->get_node_id().m_pc_gen_flag) { // check again
                 ret = fix_pc_gen_mistmatch(parent_node, child_node, parent_ind);
                 if (ret != btree_status_t::success) {
                     LOGERROR("node recovery failed btree name {}", m_btree_cfg.get_name());
@@ -2394,43 +2394,41 @@ out:
             }
             unlock_node(child_node, LOCKTYPE_WRITE);
         }
-       
+
         auto is_leaf = child_node->is_leaf();
         auto acq_lock = is_leaf ? leaf_lock_type : int_lock_type;
         btree_status_t ret = lock_and_refresh_node(child_node, acq_lock, multinode_req);
 
-        BT_DEBUG_ASSERT_CMP(EQ, child_node->is_valid_node(), true, child_node);
-        BT_DEBUG_ASSERT_CMP(EQ, is_leaf, child_node->is_leaf(), child_node);
+        BT_DEBUG_ASSERT_CMP(child_node->is_valid_node(), ==, true, child_node);
+        BT_DEBUG_ASSERT_CMP(is_leaf, ==, child_node->is_leaf(), child_node);
 
         return ret;
     }
 
     /* It read the node, take the lock and recover it if required */
-    btree_status_t read_and_lock_sibling(bnodeid_t id, BtreeNodePtr &node_ptr, thread::locktype int_lock_type,
-                                            thread::locktype leaf_lock_type, 
-                                            btree_multinode_req_ptr multinode_req) {
-        
+    btree_status_t read_and_lock_sibling(bnodeid_t id, BtreeNodePtr& node_ptr, thread::locktype int_lock_type,
+                                         thread::locktype leaf_lock_type, btree_multinode_req_ptr multinode_req) {
+
         /* TODO: Currently we do not have any recovery while sibling is read. It is not a problem today
          * as we always scan the whole btree traversally during boot. However, we should support
          * it later.
          */
-        return(read_and_lock_node(id, node_ptr, int_lock_type, int_lock_type, multinode_req));
+        return (read_and_lock_node(id, node_ptr, int_lock_type, int_lock_type, multinode_req));
     }
 
     /* It read the node and take a lock of the node. It doesn't recover the node.
      * @int_lock_type  :- lock type if a node is interior node.
      * @leaf_lock_type :- lock type if a node is leaf node.
      */
-    btree_status_t read_and_lock_node(bnodeid_t id, BtreeNodePtr &node_ptr, thread::locktype int_lock_type, 
-                                        thread::locktype leaf_lock_type, 
-                                        btree_multinode_req_ptr multinode_req) {
-        
+    btree_status_t read_and_lock_node(bnodeid_t id, BtreeNodePtr& node_ptr, thread::locktype int_lock_type,
+                                      thread::locktype leaf_lock_type, btree_multinode_req_ptr multinode_req) {
+
         node_ptr = read_node(id, multinode_req);
         if (node_ptr == nullptr) {
             LOGERROR("read failed btree name {}", m_btree_cfg.get_name());
             return btree_status_t::read_failed;
         }
-        
+
         auto acq_lock = (node_ptr->is_leaf()) ? leaf_lock_type : int_lock_type;
         auto ret = lock_and_refresh_node(node_ptr, acq_lock, multinode_req);
         if (ret != btree_status_t::success) {
@@ -2441,10 +2439,9 @@ out:
         return btree_status_t::success;
     }
 
-    btree_status_t get_child_and_lock_node(BtreeNodePtr node, uint32_t index, BtreeNodeInfo &child_info, 
-                                    BtreeNodePtr &child_node, thread::locktype int_lock_type, 
-                                    thread::locktype leaf_lock_type, 
-                                    btree_multinode_req_ptr multinode_req) {
+    btree_status_t get_child_and_lock_node(BtreeNodePtr node, uint32_t index, BtreeNodeInfo& child_info,
+                                           BtreeNodePtr& child_node, thread::locktype int_lock_type,
+                                           thread::locktype leaf_lock_type, btree_multinode_req_ptr multinode_req) {
 
         if (index == node->get_total_entries()) {
             child_info.set_bnode_id(node->get_edge_id());
@@ -2454,41 +2451,39 @@ out:
                 return btree_status_t::not_found;
             }
         } else {
-            BT_LOG_ASSERT_CMP(LT, index, node->get_total_entries(), node);
+            BT_LOG_ASSERT_CMP(index, <, node->get_total_entries(), node);
             node->get(index, &child_info, false /* copy */);
         }
 
-        return(read_and_lock_child(child_info.bnode_id(), child_node, node, index, int_lock_type, 
-                                    leaf_lock_type, multinode_req));
+        return (read_and_lock_child(child_info.bnode_id(), child_node, node, index, int_lock_type, leaf_lock_type,
+                                    multinode_req));
     }
 
     /* It doesn't return anything as io will be completed (success or failure) asynchronously */
-    void  write_node_async(BtreeNodePtr& node, btree_multinode_req_ptr multinode_req) {
+    void write_node_async(BtreeNodePtr& node, btree_multinode_req_ptr multinode_req) {
         /* ignore the return status */
-        BT_DEBUG_ASSERT_CMP(NE, multinode_req, nullptr, node);
-        BT_DEBUG_ASSERT_CMP(NE, node->m_common_header.is_lock, 0, node);
+        BT_DEBUG_ASSERT_CMP(multinode_req, !=, nullptr, node);
+        BT_DEBUG_ASSERT_CMP(node->m_common_header.is_lock, !=, 0, node);
         write_node(node, multinode_req);
     }
 
-    btree_status_t write_node_sync(BtreeNodePtr& node) {
-        return(write_node(node, nullptr));
-    }
+    btree_status_t write_node_sync(BtreeNodePtr& node) { return (write_node(node, nullptr)); }
 
     btree_status_t write_node(BtreeNodePtr& node, btree_multinode_req_ptr multinode_req) {
-        BT_LOG(DEBUG, btree_generics, node, "Writing node");
+        THIS_BT_LOG(DEBUG, btree_generics, node, "Writing node");
 
         COUNTER_INCREMENT_IF_ELSE(m_metrics, node->is_leaf(), btree_leaf_node_writes, btree_int_node_writes, 1);
         HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, node->is_leaf(), btree_leaf_node_occupancy, btree_int_node_occupancy,
-                                  ((m_node_size - node->get_available_size(m_btree_cfg)) * 100)/m_node_size);
-        return(btree_store_t::write_node(m_btree_store.get(), node, multinode_req));
+                                  ((m_node_size - node->get_available_size(m_btree_cfg)) * 100) / m_node_size);
+        return (btree_store_t::write_node(m_btree_store.get(), node, multinode_req));
     }
 
     BtreeNodePtr read_node(bnodeid_t id, btree_multinode_req_ptr multinode_req) {
-        return(btree_store_t::read_node(m_btree_store.get(), id));
+        return (btree_store_t::read_node(m_btree_store.get(), id));
     }
 
     btree_status_t lock_and_refresh_node(BtreeNodePtr node, homeds::thread::locktype type,
-                   btree_multinode_req_ptr multinode_req) {
+                                         btree_multinode_req_ptr multinode_req) {
         bool is_write_modifiable;
         node->lock(type);
         if (type == homeds::thread::LOCKTYPE_WRITE) {
@@ -2544,21 +2539,23 @@ out:
     }
 
     void observe_lock_time(const BtreeNodePtr& node, homeds::thread::locktype type, uint64_t time_spent) {
-        if (time_spent == 0) { return; }
+        if (time_spent == 0) {
+            return;
+        }
 
         if (type == LOCKTYPE_READ) {
-            HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, node->is_leaf(),
-                    btree_inclusive_time_in_leaf_node, btree_inclusive_time_in_int_node, time_spent);
+            HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, node->is_leaf(), btree_inclusive_time_in_leaf_node,
+                                      btree_inclusive_time_in_int_node, time_spent);
         } else {
-            HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, node->is_leaf(),
-                                      btree_exclusive_time_in_leaf_node, btree_exclusive_time_in_int_node, time_spent);
+            HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, node->is_leaf(), btree_exclusive_time_in_leaf_node,
+                                      btree_exclusive_time_in_int_node, time_spent);
         }
     }
 
-    static std::string node_info_list(std::vector< btree_locked_node_info > *pnode_infos) {
+    static std::string node_info_list(std::vector< btree_locked_node_info >* pnode_infos) {
         std::stringstream ss;
-        for (auto &info : *pnode_infos) {
-            ss << (void *)info.node << ", ";
+        for (auto& info : *pnode_infos) {
+            ss << (void*)info.node << ", ";
         }
         ss << "\n";
         return ss.str();
@@ -2571,12 +2568,12 @@ out:
         info.node = node.get();
         if (ltype == LOCKTYPE_WRITE) {
             wr_locked_nodes.push_back(info);
-            DLOGTRACEMOD(btree_generics, "ADDING node {} to write locked nodes list, its size = {}", (void *)info.node,
-                    wr_locked_nodes.size());
+            DLOGTRACEMOD(btree_generics, "ADDING node {} to write locked nodes list, its size = {}", (void*)info.node,
+                         wr_locked_nodes.size());
         } else if (ltype == LOCKTYPE_READ) {
             rd_locked_nodes.push_back(info);
-            DLOGTRACEMOD(btree_generics,"ADDING node {} to read locked nodes list, its size = {}", (void *)info.node,
-                    rd_locked_nodes.size());
+            DLOGTRACEMOD(btree_generics, "ADDING node {} to read locked nodes list, its size = {}", (void*)info.node,
+                         rd_locked_nodes.size());
         } else {
             DEBUG_ASSERT(false, "Invalid locktype {}", ltype);
         }
@@ -2591,7 +2588,7 @@ out:
                 *out_info = info;
                 pnode_infos->pop_back();
                 DLOGTRACEMOD(btree_generics, "REMOVING node {} from {} locked nodes list, its size = {}",
-                        (void *)info.node, (ltype == LOCKTYPE_WRITE) ? "write" : "read", pnode_infos->size());
+                             (void*)info.node, (ltype == LOCKTYPE_WRITE) ? "write" : "read", pnode_infos->size());
                 return true;
             } else if (pnode_infos->size() > 1) {
                 info = pnode_infos->at(pnode_infos->size() - 2);
@@ -2600,7 +2597,7 @@ out:
                     pnode_infos->at(pnode_infos->size() - 2) = pnode_infos->back();
                     pnode_infos->pop_back();
                     DLOGTRACEMOD(btree_generics, "REMOVING node {} from {} locked nodes list, its size = {}",
-                            (void *)info.node,(ltype == LOCKTYPE_WRITE) ? "write" : "read", pnode_infos->size());
+                                 (void*)info.node, (ltype == LOCKTYPE_WRITE) ? "write" : "read", pnode_infos->size());
                     return true;
                 }
             }
@@ -2610,12 +2607,12 @@ out:
         if (pnode_infos->empty()) {
             LOGERROR("locked_node_list: node = {} not found, locked node list empty", (void*)node.get());
         } else if (pnode_infos->size() == 1) {
-            LOGERROR("locked_node_list: node = {} not found, total list count = 1, Expecting node = {}", (void*)node.get(),
-                     (void*)pnode_infos->back().node);
+            LOGERROR("locked_node_list: node = {} not found, total list count = 1, Expecting node = {}",
+                     (void*)node.get(), (void*)pnode_infos->back().node);
         } else {
             LOGERROR("locked_node_list: node = {} not found, total list count = {}, Expecting nodes = {} or {}",
-                    (void*)node.get(), pnode_infos->size(), (void*)pnode_infos->back().node,
-                    (void*)pnode_infos->at(pnode_infos->size()-2).node);
+                     (void*)node.get(), pnode_infos->size(), (void*)pnode_infos->back().node,
+                     (void*)pnode_infos->at(pnode_infos->size() - 2).node);
         }
 #endif
         return false;
@@ -2624,7 +2621,7 @@ out:
     static uint64_t end_of_lock(const BtreeNodePtr& node, locktype ltype) {
         btree_locked_node_info info;
         if (!remove_locked_node(node, ltype, &info)) {
-            DEBUG_ASSERT(false, "Expected node = {} is not there in locked_node_list", (void *)node.get());
+            DEBUG_ASSERT(false, "Expected node = {} is not there in locked_node_list", (void*)node.get());
             return 0;
         }
         // DEBUG_ASSERT_EQ(node.get(), info.node);
@@ -2659,7 +2656,7 @@ protected:
     BtreeConfig* get_config() { return &m_btree_cfg; }
 };
 
-//static inline const char* _type_desc(BtreeNodePtr n) { return n->is_leaf() ? "L" : "I"; }
+// static inline const char* _type_desc(BtreeNodePtr n) { return n->is_leaf() ? "L" : "I"; }
 
 template < btree_store_type BtreeStoreType, typename K, typename V, btree_node_type InteriorNodeType,
            btree_node_type LeafNodeType, typename btree_req_type >
@@ -2704,7 +2701,7 @@ public:
     BtreeNodePtr top() { return (m_nodes.size == 0) ? nullptr : m_nodes.top().first; }
 
 private:
-    btree_t                                                           m_bt;
+    btree_t m_bt;
     std::stack< std::pair< BtreeNodePtr, homeds::thread::locktype > > m_nodes;
 };
 #endif

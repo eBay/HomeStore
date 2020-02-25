@@ -36,21 +36,14 @@ typedef boost::intrusive_ptr< volume_req > volume_req_ptr;
 #define BOOT_CNT_MASK 0x0000fffffffffffful
 #define GET_IO_SEQ_ID(sid) ((HomeBlks::instance()->get_boot_cnt() << SEQ_ID_BIT_CNT) | (sid & BOOT_CNT_MASK))
 
-#define _VOL_REQ_LOG_FORMAT "[req_id={}]: "
-#define _VOL_REQ_LOG_MSG(req) req->request_id
-#define _VOL_REQ_LOG_VERBOSE_FORMAT "[request={}]"
-#define _VOL_REQ_LOG_VERBOSE_MSG(req) req->to_string()
-#define _VOLMSG_EXPAND(...) __VA_ARGS__
-
-#define VOL_LOG(level, mod, req, msg, ...)                              \
-    HS_SUBMOD_LOG(level, mod, req, "vol",                               \
-        this->m_vol_uuid, msg, ##__VA_ARGS__)
-#define VOL_ASSERT(assert_type, cond, req, ...)                         \
-    HS_SUBMOD_ASSERT(assert_type, cond, req, "vol",                     \
-        this->m_vol_uuid, ##__VA_ARGS__)
-#define VOL_ASSERT_CMP(assert_type, val1, cmp, val2, req, ...)          \
-    HS_SUBMOD_ASSERT_CMP(assert_type, val1, cmp, val2, req, "vol",      \
-        this->m_vol_uuid, ##__VA_ARGS__)
+#define VOL_INFO_LOG(volname, msg, ...) HS_SUBMOD_LOG(INFO, base, , "vol", volname, msg, ##__VA_ARGS__)
+#define VOL_ERROR_LOG(volname, msg, ...) HS_SUBMOD_LOG(ERROR, base, , "vol", volname, msg, ##__VA_ARGS__)
+#define THIS_VOL_LOG(level, mod, req, msg, ...)                                                                        \
+    HS_SUBMOD_LOG(level, mod, req, "vol", this->m_vol_uuid, msg, ##__VA_ARGS__)
+#define VOL_ASSERT(assert_type, cond, req, ...)                                                                        \
+    HS_SUBMOD_ASSERT(assert_type, cond, req, "vol", this->m_vol_uuid, ##__VA_ARGS__)
+#define VOL_ASSERT_CMP(assert_type, val1, cmp, val2, req, ...)                                                         \
+    HS_SUBMOD_ASSERT_CMP(assert_type, val1, cmp, val2, req, "vol", this->m_vol_uuid, ##__VA_ARGS__)
 
 #define VOL_DEBUG_ASSERT(...) VOL_ASSERT(DEBUG, __VA_ARGS__)
 #define VOL_RELEASE_ASSERT(...) VOL_ASSERT(RELEASE, __VA_ARGS__)
@@ -61,28 +54,28 @@ typedef boost::intrusive_ptr< volume_req > volume_req_ptr;
 #define VOL_LOG_ASSERT_CMP(...) VOL_ASSERT_CMP(LOGMSG, ##__VA_ARGS__)
 
 struct volume_req : public blkstore_req< BlkBuffer > {
-    uint64_t                      lba;
-    int                           nlbas;
-    bool                          is_read;
-    std::shared_ptr< Volume >     vol_instance;
+    uint64_t lba;
+    int nlbas;
+    bool is_read;
+    std::shared_ptr< Volume > vol_instance;
     std::vector< Free_Blk_Entry > blkIds_to_free;
-    uint64_t                      seqId;
-    uint64_t                      reqId;
-    uint64_t                      lastCommited_seqId;
-    Clock::time_point             op_start_time;
-    uint16_t                      checksum[MAX_NUM_LBA];
-    uint64_t                      read_buf_offset;
-    uint64_t                      read_size;
+    uint64_t seqId;
+    uint64_t reqId;
+    uint64_t lastCommited_seqId;
+    Clock::time_point op_start_time;
+    uint16_t checksum[MAX_NUM_LBA];
+    uint64_t read_buf_offset;
+    uint64_t read_size;
 
     /* number of times mapping table need to be updated for this req. It can
      * break the ios update in mapping btree depending on the key range.
      */
-    std::atomic< int >                        num_mapping_update;
+    std::atomic< int > num_mapping_update;
     boost::intrusive_ptr< vol_interface_req > parent_req;
-    BlkId                                     blkId; // used only for debugging purpose
+    BlkId blkId; // used only for debugging purpose
 
 #ifndef NDEBUG
-    bool               done;
+    bool done;
     boost::uuids::uuid vol_uuid;
 #endif
 
@@ -169,22 +162,22 @@ public:
 
 class Volume : public std::enable_shared_from_this< Volume > {
 private:
-    mapping*                          m_map;
+    mapping* m_map;
     boost::intrusive_ptr< BlkBuffer > m_only_in_mem_buff;
-    struct vol_mem_sb*                m_sb;
-    enum vol_state                    m_state;
-    void                              alloc_single_block_in_mem();
-    io_comp_callback                  m_comp_cb;
-    std::atomic< uint64_t >           seq_Id;
-    VolumeMetrics                     m_metrics;
-    std::mutex                        m_sb_lock; // lock for updating vol's sb
-    std::atomic< uint64_t >           m_used_size = 0;
-    bool                              m_recovery_error = false;
-    std::atomic< uint64_t >           m_err_cnt = 0;
-    std::string                       m_vol_name;
-    std::string                       m_vol_uuid;
+    struct vol_mem_sb* m_sb;
+    enum vol_state m_state;
+    void alloc_single_block_in_mem();
+    io_comp_callback m_comp_cb;
+    std::atomic< uint64_t > seq_Id;
+    VolumeMetrics m_metrics;
+    std::mutex m_sb_lock; // lock for updating vol's sb
+    std::atomic< uint64_t > m_used_size = 0;
+    bool m_recovery_error = false;
+    std::atomic< uint64_t > m_err_cnt = 0;
+    std::string m_vol_name;
+    std::string m_vol_uuid;
 #ifndef NDEBUG
-    std::mutex                           m_req_mtx;
+    std::mutex m_req_mtx;
     std::map< uint64_t, volume_req_ptr > m_req_map;
 #endif
     std::atomic< uint64_t > m_req_id = 0;
@@ -205,7 +198,7 @@ public:
     }
 
     static homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >* m_data_blkstore;
-    static void           process_vol_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
+    static void process_vol_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
     static volume_req_ptr create_vol_req(Volume* vol, const vol_interface_req_ptr& hb_req);
 #ifdef _PRERELEASE
     static void set_io_flip();
@@ -258,16 +251,16 @@ public:
 
     void pending_read_blk_cb(BlkId& bid);
     void get_free_blk_entries(std::vector< std::pair< MappingKey, MappingValue > >& kvs,
-                              std::vector< Free_Blk_Entry >&                        fbes);
+                              std::vector< Free_Blk_Entry >& fbes);
     bool remove_free_blk_entry(std::vector< Free_Blk_Entry >& fbes, std::pair< MappingKey, MappingValue >& kv);
 
     uint64_t get_elapsed_time(Clock::time_point startTime);
-    void     attach_completion_cb(const io_comp_callback& cb);
-    void     print_tree();
-    void     verify_tree();
-    void     print_node(uint64_t blkid);
-    void     blk_recovery_callback(const MappingValue& mv);
-    void     set_recovery_error();
+    void attach_completion_cb(const io_comp_callback& cb);
+    void print_tree();
+    void verify_tree();
+    void print_node(uint64_t blkid);
+    void blk_recovery_callback(const MappingValue& mv);
+    void set_recovery_error();
 
     mapping* get_mapping_handle() { return m_map; }
 
@@ -277,15 +270,15 @@ public:
         return (get_size() / get_page_size()) - 1;
     }
 
-    uint64_t           get_data_used_size() { return m_used_size; }
-    uint64_t           get_metadata_used_size();
-    const char*        get_name() const { return (m_sb->ondisk_sb->vol_name); }
-    uint64_t           get_page_size() const { return m_sb->ondisk_sb->page_size; }
-    uint64_t           get_size() const { return m_sb->ondisk_sb->size; }
+    uint64_t get_data_used_size() { return m_used_size; }
+    uint64_t get_metadata_used_size();
+    const char* get_name() const { return (m_sb->ondisk_sb->vol_name); }
+    uint64_t get_page_size() const { return m_sb->ondisk_sb->page_size; }
+    uint64_t get_size() const { return m_sb->ondisk_sb->size; }
     boost::uuids::uuid get_uuid();
-    vol_state          get_state();
-    void               set_state(vol_state state, bool persist = true);
-    bool               is_offline();
+    vol_state get_state();
+    void set_state(vol_state state, bool persist = true);
+    bool is_offline();
 
 #ifndef NDEBUG
     void verify_pending_blks();
