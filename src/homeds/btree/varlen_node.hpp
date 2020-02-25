@@ -292,10 +292,13 @@ public:
             if (ureq) {
                 //TODO - determine size needed for non-callback based range updates in future
                 assert(ureq->callback() != nullptr);
-                /* If there is an overlap then we can add 2 more keys :- one in the front and other in the tail.
-                 * Here assumption is that size of a value added is not going to change because of overlaps.
+                /* If there is an overlap then we can add (n + 1) more keys :- one in the front, one in the tail and
+                 * other in between match entries (n - 1).
                  */
-                size_needed = val.get_blob_size() + (2 * (key.get_blob_size() + get_record_size()));
+                std::vector<std::pair<K, V>> match;
+                int start_ind = 0, end_ind = 0;
+                const_cast<VariableNode *>(this)->get_all(ureq->get_input_range(), UINT32_MAX, start_ind, end_ind, &match);
+                size_needed = val.get_blob_size() + ((match.size() + 1) * (key.get_blob_size() + get_record_size()));
             } else {
                 // NOTE : size_needed is just an guess here. Actual implementation of Mapping key/value can have 
                 // specific logic which determines of size changes on insert or update.
