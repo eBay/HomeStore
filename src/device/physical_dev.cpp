@@ -99,19 +99,18 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
 
     if (m_devfd == -1
 #ifdef _PRERELEASE
-      || (homestore_flip->test_flip("device_boot_fail", devname.c_str()))
+        || (homestore_flip->test_flip("device_boot_fail", devname.c_str()))
 #endif
     ) {
-        
+
         free(m_super_blk);
 
-   
         HS_LOG(ERROR, device, "device open failed errno {} dev_name {}", errno, devname.c_str());
 
         throw std::system_error(errno, std::system_category(), "error while opening the device");
     }
 
-    LOGINFO("FD of {} device name {}", m_devfd, m_devname);
+    LOGINFO("Device {} opened with FD {}", m_devname, m_devfd);
 
     if (is_file) {
         struct stat buf;
@@ -143,7 +142,7 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
     if (m_devsize != temp) {
         LOGWARN("device size is not the multiple of physical page size old size {}", temp);
     }
-    LOGINFO("size of disk {} is {}", m_devname, m_devsize);
+    LOGINFO("Device {} size is {}", m_devname, m_devsize);
     m_dm_chunk[0] = m_dm_chunk[1] = nullptr;
     if (is_init) {
         /* create a chunk */
@@ -178,8 +177,8 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
         *is_inited = load_super_block();
         if (*is_inited) {
             /* If it is different then it mean it require upgrade/revert handling */
-           HS_ASSERT_CMP(LOGMSG, m_super_blk->dm_chunk[0].get_chunk_size(), ==, dm_info_size);
-           HS_ASSERT_CMP(LOGMSG, m_super_blk->dm_chunk[1].get_chunk_size(), ==, dm_info_size);
+            HS_ASSERT_CMP(LOGMSG, m_super_blk->dm_chunk[0].get_chunk_size(), ==, dm_info_size);
+            HS_ASSERT_CMP(LOGMSG, m_super_blk->dm_chunk[1].get_chunk_size(), ==, dm_info_size);
         }
     }
 }
@@ -358,7 +357,7 @@ void PhysicalDev::attach_chunk(PhysicalDevChunk* chunk, PhysicalDevChunk* after)
 
 std::array< uint32_t, 2 > PhysicalDev::merge_free_chunks(PhysicalDevChunk* chunk) {
     std::array< uint32_t, 2 > freed_ids = {INVALID_CHUNK_ID, INVALID_CHUNK_ID};
-    uint32_t                  nids = 0;
+    uint32_t nids = 0;
 
     // Check if previous and next chunk are free, if so make it contiguous chunk
     PhysicalDevChunk* prev_chunk = chunk->get_prev_chunk();
