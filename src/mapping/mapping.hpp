@@ -464,7 +464,7 @@ public:
         /* XXX: do we need to handle error condition here ?. In the next boot we will automatically recaim these blocks
          */
         auto ret = m_bt->destroy(std::bind(&mapping::process_free_blk_callback, this, std::placeholders::_1), false);
-        HS_SUBMOD_ASSERT(LOGMSG, (ret != btree_status_t::success), , "vol", m_unique_name,
+        HS_SUBMOD_ASSERT(LOGMSG, (ret == btree_status_t::success), , "vol", m_unique_name,
                          "Error in destroying mapping btree ret={} ", ret);
     }
 
