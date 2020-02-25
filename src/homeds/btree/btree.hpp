@@ -1236,6 +1236,7 @@ private:
             if (match.size() > 0) {
                 my_node->remove(start_ind, end_ind);
             }
+            BT_DEBUG_ASSERT_CMP(replace_kv.size(), >=, match.size(), my_node);
             for (auto& pair : replace_kv) { // insert is based on compare() of BtreeKey
                 auto status = my_node->insert(pair.first, pair.second);
                 BT_RELEASE_ASSERT((status == btree_status_t::success), my_node, "unexpected insert failure");
