@@ -205,6 +205,14 @@ public:
         m_io_done_cv.wait(lk);
     }
 
+    void shutdown() {
+        LOGINFO("shutting homestore");
+        VolInterface::get_instance()->shutdown([](bool success) { VolInterface::del_instance(); });
+
+        LOGINFO("stopping iomgr");
+        iomanager.stop();
+    }
+
     virtual void init_done_cb(std::error_condition err, const out_params& params) {
         if (err) {
             m_init_done_cv.notify_all();

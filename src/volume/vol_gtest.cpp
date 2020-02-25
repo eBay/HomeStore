@@ -542,15 +542,15 @@ public:
             }
         }
         m_tgt.shutdown();
-        LOGINFO("stopping iomgr");
-        iomanager.stop();
-
         {
             std::unique_lock< std::mutex > lk(m_mutex);
             vol_info.clear();
         }
         LOGINFO("shutting homestore");
         VolInterface::get_instance()->shutdown(std::bind(&IOTest::shutdown_callback, this, std::placeholders::_1));
+
+        LOGINFO("stopping iomgr");
+        iomanager.stop();
     }
 
     void wait_homestore_init_done() {

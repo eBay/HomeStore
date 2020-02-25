@@ -19,10 +19,10 @@ class HomestoreConan(ConanFile):
 
     requires = (
             "flip/0.2.6@sds/develop",
-            "iomgr/3.0.9@hkadayam/iomgr_v3",
+            "iomgr/3.1.0@sds/iomgr_v3",
             "jungle/1.0.1@sds/testing",
             "sds_logging/6.1.2@sds/develop",
-            "sisl/1.0.0@hkadayam/develop",
+            "sisl/1.0.1@sisl/develop",
 
             # FOSS, rarely updated
             "benchmark/1.5.0",
