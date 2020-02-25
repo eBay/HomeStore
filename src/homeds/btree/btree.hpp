@@ -2001,12 +2001,6 @@ private:
         auto split_size = m_btree_cfg.get_split_size(child1_filled_size);
         uint32_t res = child_node1->move_out_to_right_by_size(m_btree_cfg, child_node2, split_size);
 
-        static bool once = false;
-        if (!once) {
-            BT_LOG_ASSERT_CMP(res, <, 0, child_node1, "Fake assert"); // means cannot split entries
-            once = true;
-        }
-
         BT_DEBUG_ASSERT_CMP(res, >, 0, child_node1,
                             "Unable to split entries in the child node"); // means cannot split entries
         BT_DEBUG_ASSERT_CMP(child_node1->get_total_entries(), >, 0, child_node1);
