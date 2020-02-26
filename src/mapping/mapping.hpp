@@ -254,9 +254,6 @@ public:
         ss << "Seq:" << get_seqId() << "," << get_blkId() << ",Boff:" << unsigned(get_blk_offset());
         ss << ",v_nlba:" << unsigned(get_nlba());
 
-        if (HomeBlks::instance()->print_checksum()) {
-            ss << ",cs:" << get_checksums_string();
-        }
         return ss.str();
     }
     friend ostream& operator<<(ostream& os, const ValueEntry& ve) {
@@ -843,6 +840,7 @@ private:
         for (auto& ptr : replace_kv) {
             ss << ptr.first.to_string() << "," << ptr.second.to_string();
         }
+        LOGDEBUGMOD(VMOD_VOL_MAPPING, "{}", ss.str());
 #endif
     }
 
