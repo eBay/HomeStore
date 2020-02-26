@@ -1054,7 +1054,7 @@ TEST_F(IOTest, lifecycle_test) {
     freq.set_percent(100);
 
     fc.inject_retval_flip("vol_comp_delay_us", {}, freq, 100);
-    this->delete_volumes();
+    // this->delete_volumes();
     this->shutdown();
     this->remove_files();
 }
