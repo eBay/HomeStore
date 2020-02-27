@@ -26,13 +26,22 @@ class SampleLogStoreClient {
 public:
     SampleLogStoreClient(std::shared_ptr< HomeLogStore > store, const test_log_store_comp_cb_t& cb) {
         m_comp_cb = cb;
+        set_log_store(store);
+    }
+
+    explicit SampleLogStoreClient(const test_log_store_comp_cb_t& cb) :
+            SampleLogStoreClient(home_log_store_mgr.create_new_log_store(), cb) {}
+
+    void set_log_store(std::shared_ptr< HomeLogStore > store) {
         m_log_store = store;
         m_log_store->register_log_found_cb(std::bind(&SampleLogStoreClient::on_log_found, this, std::placeholders::_1,
                                                      std::placeholders::_2, std::placeholders::_3));
     }
 
-    explicit SampleLogStoreClient(const test_log_store_comp_cb_t& cb) :
-            SampleLogStoreClient(home_log_store_mgr.create_new_log_store(), cb) {}
+    void reset_recovery() {
+        m_n_recovered_lsns = 0;
+        m_n_recovered_truncated_lsns = 0;
+    }
 
     void insert_next_batch(uint32_t batch_size) {
         auto cur_lsn = m_cur_lsn.fetch_add(batch_size);
@@ -74,7 +83,7 @@ public:
         for (auto i = m_log_store->truncated_upto() + 1; i < upto; ++i) {
             try {
                 auto b = m_log_store->read_sync(i);
-                auto tl = (test_log_data*)b.data();
+                auto tl = (test_log_data*)b.bytes();
                 ASSERT_EQ(tl->total_size(), b.size())
                     << "Size Mismatch for lsn=" << m_log_store->get_store_id() << ":" << i;
                 validate_data(tl, i);
@@ -93,15 +102,29 @@ public:
         }
     }
 
+    void recovery_validate() {
+        LOGINFO("Totally recovered {} non-truncated lsns and {} truncated lsns for store {}", m_n_recovered_lsns,
+                m_n_recovered_truncated_lsns, m_log_store->get_store_id());
+        EXPECT_EQ(m_n_recovered_lsns, m_cur_lsn.load() - m_truncated_upto_lsn.load() - 1)
+            << "Recovered " << m_n_recovered_lsns << " valid lsns for store " << m_log_store->get_store_id()
+            << " Expected to have " << m_cur_lsn.load() - m_truncated_upto_lsn.load() - 1
+            << " lsns: m_cur_lsn=" << m_cur_lsn.load() << " truncated_upto_lsn=" << m_truncated_upto_lsn;
+    }
+
     void read(logstore_seq_num_t lsn) {
         ASSERT_GT(lsn, m_truncated_upto_lsn);
         // m_log_store->read(id);
     }
 
     void on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx) {
-        LOGTRACE("Recovered lsn {} with log data of size {}", lsn, buf.size())
-        auto tl = (test_log_data*)buf.data();
+        LOGDEBUG("Recovered lsn {}:{} with log data of size {}", m_log_store->get_store_id(), lsn, buf.size())
+        EXPECT_LE(lsn, m_cur_lsn.load()) << "Recovered incorrect lsn " << m_log_store->get_store_id() << ":" << lsn
+                                         << "Expected less than cur_lsn " << m_cur_lsn.load();
+        auto tl = (test_log_data*)buf.bytes();
         validate_data(tl, lsn);
+
+        // Count only the ones which are after truncated, because recovery could receive even truncated lsns
+        (lsn > m_truncated_upto_lsn) ? m_n_recovered_lsns++ : m_n_recovered_truncated_lsns++;
     }
 
     void truncate(logstore_seq_num_t lsn) {
@@ -151,7 +174,8 @@ private:
     std::atomic< logstore_seq_num_t > m_truncated_upto_lsn = -1;
     std::atomic< logstore_seq_num_t > m_cur_lsn = 0;
     std::shared_ptr< HomeLogStore > m_log_store;
-
+    int64_t m_n_recovered_lsns = 0;
+    int64_t m_n_recovered_truncated_lsns = 0;
     static constexpr uint32_t max_data_size = 1024;
 };
 
@@ -194,9 +218,8 @@ public:
 
         if (restart) {
             for (auto i = 0u; i < n_log_stores; ++i) {
-                home_log_store_mgr.open_log_store(i, [this](std::shared_ptr< HomeLogStore > log_store) {
-                    m_log_store_clients.push_back(std::make_unique< SampleLogStoreClient >(
-                        log_store, std::bind(&SampleDB::on_log_insert_completion, this, std::placeholders::_1)));
+                home_log_store_mgr.open_log_store(i, [i, this](std::shared_ptr< HomeLogStore > log_store) {
+                    m_log_store_clients[i]->set_log_store(log_store);
                 });
             }
         }
@@ -224,7 +247,7 @@ public:
         params.vol_state_change_cb = [](const VolumePtr& vol, vol_state old_state, vol_state new_state) {};
         params.vol_found_cb = [](boost::uuids::uuid uuid) -> bool { return true; };
         params.system_uuid = gen("01970496-0262-11e9-8eb2-f2801f1b9fd1");
-        VolInterface::init(params, !restart);
+        VolInterface::init(params, restart);
 
         std::unique_lock< std::mutex > lk(start_mutex);
         cv.wait(lk, [&] { return inited; });
@@ -246,15 +269,15 @@ public:
         std::unique_lock< std::mutex > lk(stop_mutex);
         cv.wait(lk, [&] { return true; });
 
-        m_log_store_clients.clear();
+        // m_log_store_clients.clear();
         VolInterface::del_instance();
         iomanager.stop();
     }
 
     void on_thread_msg(const iomgr_msg& msg) {
         switch (msg.m_type) {
-        case iomgr_msg_type::WAKEUP:
-            if (m_on_wakeup_cb) m_on_wakeup_cb();
+        case iomgr_msg_type::CUSTOM_MSG:
+            if (m_on_schedule_io_cb) m_on_schedule_io_cb();
             break;
         default:
             break;
@@ -265,7 +288,7 @@ public:
         if (m_io_closure) m_io_closure(lsn);
     }
 
-    std::function< void() > m_on_wakeup_cb;
+    std::function< void() > m_on_schedule_io_cb;
     test_log_store_comp_cb_t m_io_closure;
     std::vector< std::unique_ptr< SampleLogStoreClient > > m_log_store_clients;
 };
@@ -276,14 +299,18 @@ public:
         // m_nrecords_waiting_to_issue = std::lround(n_total_records / _batch_size) * _batch_size;
         m_nrecords_waiting_to_issue = n_total_records;
         m_nrecords_waiting_to_complete = 0;
-        sample_db.m_on_wakeup_cb = std::bind(&LogStoreTest::do_insert, this);
+        sample_db.m_on_schedule_io_cb = std::bind(&LogStoreTest::do_insert, this);
         sample_db.m_io_closure = std::bind(&LogStoreTest::on_insert_completion, this, std::placeholders::_1);
+
+        for (auto& lsc : sample_db.m_log_store_clients) {
+            lsc->reset_recovery();
+        }
     }
 
     void kickstart_inserts(uint32_t batch_size, uint32_t q_depth) {
         m_batch_size = batch_size;
         m_q_depth = q_depth;
-        iomanager.send_msg(-1, iomgr_msg(iomgr_msg_type::WAKEUP));
+        iomanager.send_msg(-1, iomgr_msg(iomgr_msg_type::CUSTOM_MSG));
     }
 
     void do_insert() {
@@ -343,6 +370,13 @@ public:
         }
     }
 
+    void recovery_validate() {
+        for (auto i = 0u; i < sample_db.m_log_store_clients.size(); ++i) {
+            auto& lsc = sample_db.m_log_store_clients[i];
+            lsc->recovery_validate();
+        }
+    }
+
 protected:
     std::atomic< int64_t > m_nrecords_waiting_to_issue = 0;
     std::atomic< int64_t > m_nrecords_waiting_to_complete = 0;
@@ -399,29 +433,57 @@ TEST_F(LogStoreTest, BurstSeqInsertAndTruncateInParallel) {
     this->truncate_validate();
 }
 
-#if 0
 TEST_F(LogStoreTest, ThrottleSeqInsertThenRecover) {
     LOGINFO("Step 1: Reinit the num records to start sequential write test");
     this->init(SDS_OPTIONS["num_records"].as< uint32_t >());
 
-    LOGINFO("Step 2: Issue sequential inserts with q depth of 64");
-    this->kickstart_inserts(1, 64);
+    LOGINFO("Step 2: Issue sequential inserts with q depth of 30");
+    this->kickstart_inserts(1, 30);
 
     LOGINFO("Step 3: Wait for the Inserts to complete");
     this->wait_for_inserts();
 
-    LOGINFO("Step 4: Restart homestore");
+    LOGINFO("Step 4: Read all the inserts one by one for each log store to validate if what is written is valid");
+    this->read_validate(true);
+
+    LOGINFO("Step 5: Restart homestore");
     sample_db.start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),                  // num devices
                               SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024, // device sizes
                               SDS_OPTIONS["num_threads"].as< uint32_t >(),               // num threads
                               SDS_OPTIONS["num_logstores"].as< uint32_t >(),             // num log stores
                               true                                                       // restart
     );
+    this->recovery_validate();
+    this->init(SDS_OPTIONS["num_records"].as< uint32_t >());
 
-    LOGINFO("Step 5: Wait for recovery to complete");
-    sleep(60);
+    LOGINFO("Step 6: Restart homestore again to validate recovery on consecutive restarts");
+    sample_db.start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),                  // num devices
+                              SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024, // device sizes
+                              SDS_OPTIONS["num_threads"].as< uint32_t >(),               // num threads
+                              SDS_OPTIONS["num_logstores"].as< uint32_t >(),             // num log stores
+                              true                                                       // restart
+    );
+    this->recovery_validate();
+    this->init(SDS_OPTIONS["num_records"].as< uint32_t >());
+
+    LOGINFO("Step 7: Issue more sequential inserts after restarts with q depth of 15");
+    this->kickstart_inserts(1, 15);
+
+    LOGINFO("Step 8: Wait for the previous Inserts to complete");
+    this->wait_for_inserts();
+
+    LOGINFO("Step 9: Read all the inserts one by one for each log store to validate if what is written is valid");
+    this->read_validate(true);
+
+    LOGINFO("Step 10: Restart homestore again to validate recovery of inserted data after restarts");
+    sample_db.start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),                  // num devices
+                              SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024, // device sizes
+                              SDS_OPTIONS["num_threads"].as< uint32_t >(),               // num threads
+                              SDS_OPTIONS["num_logstores"].as< uint32_t >(),             // num log stores
+                              true                                                       // restart
+    );
+    this->recovery_validate();
 }
-#endif
 
 SDS_OPTIONS_ENABLE(logging, test_log_store)
 SDS_OPTION_GROUP(test_log_store,

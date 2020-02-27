@@ -156,7 +156,7 @@ class IOTest : public ::testing::Test {
 
     private:
         int m_ev_fd;
-        iomgr::fd_info* m_ev_fdinfo;
+        std::shared_ptr< iomgr::fd_info > m_ev_fdinfo;
         std::shared_ptr< TestTargetInterface > m_iface;
         IOTest* m_io_test;
     };
@@ -542,15 +542,15 @@ public:
             }
         }
         m_tgt.shutdown();
-        LOGINFO("stopping iomgr");
-        iomanager.stop();
-
         {
             std::unique_lock< std::mutex > lk(m_mutex);
             vol_info.clear();
         }
         LOGINFO("shutting homestore");
         VolInterface::get_instance()->shutdown(std::bind(&IOTest::shutdown_callback, this, std::placeholders::_1));
+
+        LOGINFO("stopping iomgr");
+        iomanager.stop();
     }
 
     void wait_homestore_init_done() {
@@ -1054,7 +1054,7 @@ TEST_F(IOTest, lifecycle_test) {
     freq.set_percent(100);
 
     fc.inject_retval_flip("vol_comp_delay_us", {}, freq, 100);
-    this->delete_volumes();
+    // this->delete_volumes();
     this->shutdown();
     this->remove_files();
 }

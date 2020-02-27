@@ -27,11 +27,11 @@ private:
 
 private:
     folly::MPMCQueue< callback_t, std::atomic, true > m_cq;
-    int                                               m_ev_fd;
-    iomgr::fd_info*                                   m_ev_fdinfo = nullptr;
-    std::atomic_bool                                  m_running;
-    std::atomic_ullong                                m_read_cnt;
-    std::atomic_ullong                                m_write_cnt;
+    int m_ev_fd;
+    std::shared_ptr< iomgr::fd_info > m_ev_fdinfo = nullptr;
+    std::atomic_bool m_running;
+    std::atomic_ullong m_read_cnt;
+    std::atomic_ullong m_write_cnt;
 };
 
 } // namespace loadgen

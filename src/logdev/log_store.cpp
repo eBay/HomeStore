@@ -191,7 +191,7 @@ void HomeLogStore::on_log_found(logstore_seq_num_t seq_num, logdev_key ld_key, l
     // Upon completion, create the mapping between seq_num and log dev key
     m_records.create_and_complete(seq_num, ld_key);
     atomic_update_max(m_seq_num, seq_num + 1, std::memory_order_acq_rel);
-    atomic_update_min(m_last_truncated_seq_num, seq_num, std::memory_order_acq_rel);
+    atomic_update_min(m_last_truncated_seq_num, seq_num - 1, std::memory_order_acq_rel);
     if (m_found_cb != nullptr) m_found_cb(seq_num, buf, nullptr);
 }
 

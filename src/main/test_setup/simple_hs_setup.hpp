@@ -48,7 +48,7 @@ public:
 
 private:
     int m_ev_fd;
-    iomgr::fd_info* m_ev_fdinfo;
+    std::shared_ptr< iomgr::fd_info > m_ev_fdinfo;
     std::shared_ptr< TestTargetInterface > m_iface;
     SimpleTestStore* m_test_store;
 };
@@ -203,6 +203,14 @@ public:
     void wait_for_io_done() {
         std::unique_lock< std::mutex > lk(m_mutex);
         m_io_done_cv.wait(lk);
+    }
+
+    void shutdown() {
+        LOGINFO("shutting homestore");
+        VolInterface::get_instance()->shutdown([](bool success) { VolInterface::del_instance(); });
+
+        LOGINFO("stopping iomgr");
+        iomanager.stop();
     }
 
     virtual void init_done_cb(std::error_condition err, const out_params& params) {

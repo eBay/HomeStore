@@ -497,6 +497,7 @@ int main(int argc, char* argv[]) {
     test_store.kickstart_io();
     test_store.wait_for_io_done();
     LOGINFO("Metrics: {}", sisl::MetricsFarm::getInstance().get_result_in_json().dump(2));
+    test_store.shutdown();
     /*for (uint32_t i = 0; i < dev_names.size(); ++i) {
         auto   fd = open(dev_names[0].c_str(), O_RDWR);
         size_t devsize = 0;

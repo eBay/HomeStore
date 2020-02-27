@@ -1164,6 +1164,7 @@ void HomeBlks::shutdown_process(shutdown_comp_callback shutdown_comp_cb, bool fo
         m_http_server.reset();
 
         home_log_store_mgr.stop();
+        m_shutdown = false;
         shutdown_comp_cb(true);
     } catch (const std::exception& e) {
         LOGERROR("{}", e.what());
@@ -1177,19 +1178,18 @@ void HomeBlks::shutdown_process(shutdown_comp_callback shutdown_comp_cb, bool fo
 // 2. Start a thread to do shutdown routines;
 //
 std::error_condition HomeBlks::shutdown(shutdown_comp_callback shutdown_comp_cb, bool force) {
-    // shutdown thread should be only started once;
-    static bool started = false;
-
     if (m_init_failed) {
         LOGINFO("Init is failed. Nothing to shutdown");
         return no_error;
     }
-    if (started) {
+
+    if (m_shutdown) {
+        // shutdown thread should be only started once;
         LOGINFO("shutdown thread already started;");
         return no_error;
     }
+
     LOGINFO("shutting down the homestore");
-    started = true;
 
     m_shutdown = true;
 

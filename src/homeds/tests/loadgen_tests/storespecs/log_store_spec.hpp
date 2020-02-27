@@ -46,7 +46,7 @@ public:
 
         {
             std::lock_guard< std::mutex > lg(m_mtx);
-            auto hash = util::Hash64((const char*)log_read.data(), log_read.size());
+            auto hash = util::Hash64((const char*)log_read.bytes(), log_read.size());
             if (hash != m_wrt_map[seq].crc) {
                 LOGERROR("Crc Mismatch Failure! read crc: {}, write crc: {}", hash, m_wrt_map[seq].crc);
                 assert(0);

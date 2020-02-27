@@ -21,7 +21,7 @@ static constexpr crc32_t INVALID_CRC32_VALUE = 0x0u;
 static constexpr uint32_t LOG_GROUP_HDR_MAGIC = 0xDABAF00D;
 static constexpr uint32_t dma_boundary = 512; // Mininum size the dma/writes to be aligned with
 static constexpr uint32_t initial_read_size = 4096;
-static constexpr uint32_t bulk_read_size = 512 * 1024;
+static constexpr uint64_t bulk_read_size = 512 * 1024;
 
 // Extra blks read during recovery to validate if indeed there is no corruption.
 static constexpr uint32_t max_blks_read_for_additional_check = 20;
@@ -249,6 +249,7 @@ struct logdev_key {
     }
 };
 
+#if 0
 struct log_buffer {
 public:
     log_buffer(const sisl::byte_array& base_data, uint32_t offset, uint32_t size) :
@@ -266,6 +267,9 @@ private:
     sisl::byte_array m_base_buffer;
     sisl::blob m_log_data_view;
 };
+#endif
+
+typedef sisl::byte_view log_buffer;
 
 struct truncation_request_t {
     logstore_id_t store_id;
@@ -284,6 +288,21 @@ struct logdev_info_block {
     uint8_t store_id_info[0];
 } __attribute__((packed));
 
+class log_stream_reader {
+public:
+    log_stream_reader(uint64_t device_cursor);
+    sisl::byte_view next_group(uint64_t* out_dev_offset);
+    sisl::byte_view group_in_next_page();
+    uint64_t group_cursor() const { return m_cur_group_cursor; }
+
+private:
+    sisl::byte_view read_next_bytes(uint64_t nbytes);
+
+private:
+    sisl::byte_view m_cur_log_buf;
+    uint64_t m_cur_group_cursor;
+};
+
 class LogDev {
 public:
     typedef std::function< void(logstore_id_t, logdev_key, logdev_key, uint32_t nremaining_in_batch, void*) >
@@ -292,9 +311,11 @@ public:
     typedef std::function< void(logstore_id_t) > store_found_callback;
     typedef std::function< void(void) > flush_blocked_callback;
 
-    // static constexpr int64_t flush_threshold_size = 4096;
-    static constexpr int64_t flush_threshold_size = 512;
+    static constexpr int64_t flush_threshold_size = 4096;
+    // static constexpr int64_t flush_threshold_size = 512;
     static constexpr int64_t flush_data_threshold_size = flush_threshold_size - sizeof(log_group_header);
+    static constexpr uint64_t flush_timer_frequency_us = 750;
+    static constexpr uint64_t max_time_between_flush_us = 500;
 
     static LogDev* instance() {
         static LogDev _instance;
@@ -439,13 +460,18 @@ private:
 
     LogGroup* prepare_flush(int32_t estimated_record);
     void do_flush(LogGroup* lg);
-    void flush_if_needed(const uint32_t new_record_size, logid_t new_idx = -1);
+    void flush_if_needed(const uint32_t new_record_size = 0, logid_t new_idx = -1);
+    void flush_by_size(const uint32_t min_threshold, const uint32_t new_record_size = 0, logid_t new_idx = -1);
     void on_flush_completion(LogGroup* lg);
     void do_load(uint64_t offset);
+
+#if 0
     log_group_header* read_validate_header(uint8_t* buf, uint32_t size, bool* read_more);
     sisl::byte_array read_next_header(uint32_t max_buf_reads);
+#endif
 
     void _persist_info_block();
+    void assert_next_pages(log_stream_reader& lstream);
 
 private:
     std::unique_ptr< sisl::StreamTracker< log_record > >
@@ -454,6 +480,8 @@ private:
     std::atomic< logid_t > m_log_idx = 0;            // Generator of log idx
     std::atomic< int64_t > m_pending_flush_size = 0; // How much flushable logs are pending
     std::atomic< bool > m_is_flushing = false; // Is LogDev currently flushing (so far supports one flusher at a time)
+
+    Clock::time_point m_last_flush_time;
 
     logid_t m_last_flush_idx = -1; // Track last flushed and truncated log idx
     logid_t m_last_truncate_idx = -1;
@@ -471,5 +499,9 @@ private:
     // Block flush Q request Q
     std::mutex m_block_flush_q_mutex;
     std::vector< flush_blocked_callback > m_block_flush_q;
+
+    // Timer handle
+    iomgr::timer_handle_t m_flush_timer_hdl;
 }; // LogDev
+
 } // namespace homestore

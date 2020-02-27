@@ -706,6 +706,8 @@ public:
                     boost::intrusive_ptr< virtualdev_req > req = nullptr) {
         uint32_t dev_id = 0, chunk_id = 0;
         auto len = get_len(iov, iovcnt);
+        m_reserved_sz -= len;
+
         auto offset_in_dev = process_pwrite_offset(len, offset, dev_id, chunk_id, req);
 
         ssize_t bytes_written = 0;
