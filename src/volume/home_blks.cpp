@@ -1182,7 +1182,7 @@ bool HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
                 [this, shutdown_done_cb, force](void* cookie) { schedule_shutdown(shutdown_done_cb, force); });
             return false;
         }
-        iomanager.cancel_global_timer(m_shutdown_timer_hdl);
+        iomanager.cancel_thread_timer(m_shutdown_timer_hdl);
         LOGINFO("All volumes are shutdown successfully, proceed to bring down other subsystems");
 
         // m_cfg_sb needs to to be freed in the last, because we need to set the clean shutdown flag
