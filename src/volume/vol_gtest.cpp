@@ -300,7 +300,7 @@ public:
     void move_vol_to_online() {
         /* move all volumes to online */
         for (uint64_t i = 0; i < max_vols; ++i) {
-            VolInterface::get_instance()->vol_state_change(vol_info[i]->vol, ONLINE);
+            VolInterface::get_instance()->vol_state_change(vol_info[i]->vol, vol_state::ONLINE);
         }
         /* start ios */
         m_tgt.io_request_done();
@@ -320,7 +320,7 @@ public:
         assert(state == m_expected_vol_state);
         if (m_expected_vol_state == homestore::vol_state::DEGRADED ||
             m_expected_vol_state == homestore::vol_state::OFFLINE) {
-            VolInterface::get_instance()->vol_state_change(vol_obj, ONLINE);
+            VolInterface::get_instance()->vol_state_change(vol_obj, vol_state::ONLINE);
         }
     }
 
@@ -546,8 +546,8 @@ public:
             std::unique_lock< std::mutex > lk(m_mutex);
             vol_info.clear();
         }
-        LOGINFO("shutting homestore");
-        VolInterface::get_instance()->shutdown(std::bind(&IOTest::shutdown_callback, this, std::placeholders::_1));
+        LOGINFO("shutting down homeblks");
+        VolInterface::get_instance()->shutdown();
 
         LOGINFO("stopping iomgr");
         iomanager.stop();
@@ -999,11 +999,6 @@ private:
         return true;
     }
 
-    void shutdown_callback(bool success) {
-        VolInterface::del_instance();
-        assert(success);
-    }
-
     void shutdown_force(bool timeout) {
         std::unique_lock< std::mutex > lk(m_mutex);
         bool force = false;
@@ -1013,8 +1008,7 @@ private:
             vol_info.clear();
             force = true;
         }
-        VolInterface::get_instance()->shutdown(std::bind(&IOTest::shutdown_callback, this, std::placeholders::_1),
-                                               force);
+        VolInterface::get_instance()->shutdown(force);
     }
 
     void remove_journal_files() {
@@ -1054,8 +1048,11 @@ TEST_F(IOTest, lifecycle_test) {
     freq.set_percent(100);
 
     fc.inject_retval_flip("vol_comp_delay_us", {}, freq, 100);
-    // this->delete_volumes();
+    this->delete_volumes();
+    LOGINFO("All volumes are deleted, do a shutdown of homestore");
     this->shutdown();
+
+    LOGINFO("Shutdown of homestore is completed, removing files");
     this->remove_files();
 }
 
@@ -1177,7 +1174,7 @@ TEST_F(IOTest, one_disk_fail_test) {
 
 TEST_F(IOTest, vol_offline_test) {
     this->init = true;
-    this->m_expected_vol_state = OFFLINE;
+    this->m_expected_vol_state = vol_state::OFFLINE;
     this->start_homestore();
     this->wait_homestore_init_done();
     this->expect_io_error = true;

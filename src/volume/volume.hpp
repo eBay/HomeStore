@@ -20,6 +20,7 @@
 #include "blk_read_tracker.hpp"
 #include "journal/vol_journal.hpp"
 #include <volume/snapshot.hpp>
+#include <utility/enum.hpp>
 
 using namespace std;
 
@@ -37,7 +38,7 @@ typedef boost::intrusive_ptr< volume_req > volume_req_ptr;
 /* first 48 bits are actual sequence ID and last 16 bits are boot cnt */
 #define SEQ_ID_BIT_CNT 48ul
 #define BOOT_CNT_MASK 0x0000fffffffffffful
-#define GET_IO_SEQ_ID(sid) ((HomeBlks::instance()->get_boot_cnt() << SEQ_ID_BIT_CNT) | (sid & BOOT_CNT_MASK))
+#define GET_IO_SEQ_ID(sid) ((m_hb->get_boot_cnt() << SEQ_ID_BIT_CNT) | (sid & BOOT_CNT_MASK))
 
 #define _VOL_REQ_LOG_FORMAT "[req_id={}]: "
 #define _VOL_REQ_LOG_MSG(req) req->request_id
@@ -45,15 +46,11 @@ typedef boost::intrusive_ptr< volume_req > volume_req_ptr;
 #define _VOL_REQ_LOG_VERBOSE_MSG(req) req->to_string()
 #define _VOLMSG_EXPAND(...) __VA_ARGS__
 
-#define VOL_LOG(level, mod, req, msg, ...)                              \
-    HS_SUBMOD_LOG(level, mod, req, "vol",                               \
-        this->m_vol_uuid, msg, ##__VA_ARGS__)
-#define VOL_ASSERT(assert_type, cond, req, ...)                         \
-    HS_SUBMOD_ASSERT(assert_type, cond, req, "vol",                     \
-        this->m_vol_uuid, ##__VA_ARGS__)
-#define VOL_ASSERT_CMP(assert_type, val1, cmp, val2, req, ...)          \
-    HS_SUBMOD_ASSERT_CMP(assert_type, val1, cmp, val2, req, "vol",      \
-        this->m_vol_uuid, ##__VA_ARGS__)
+#define VOL_LOG(level, mod, req, msg, ...) HS_SUBMOD_LOG(level, mod, req, "vol", this->m_vol_uuid, msg, ##__VA_ARGS__)
+#define VOL_ASSERT(assert_type, cond, req, ...)                                                                        \
+    HS_SUBMOD_ASSERT(assert_type, cond, req, "vol", this->m_vol_uuid, ##__VA_ARGS__)
+#define VOL_ASSERT_CMP(assert_type, val1, cmp, val2, req, ...)                                                         \
+    HS_SUBMOD_ASSERT_CMP(assert_type, val1, cmp, val2, req, "vol", this->m_vol_uuid, ##__VA_ARGS__)
 
 #define VOL_DEBUG_ASSERT(...) VOL_ASSERT(DEBUG, __VA_ARGS__)
 #define VOL_RELEASE_ASSERT(...) VOL_ASSERT(RELEASE, __VA_ARGS__)
@@ -184,23 +181,23 @@ public:
 
 class Volume : public std::enable_shared_from_this< Volume > {
 private:
-    mapping* m_map;
-    VolumeJournal* m_volume_journal;
+    std::unique_ptr< mapping > m_map;
+    std::unique_ptr< VolumeJournal > m_volume_journal;
     boost::intrusive_ptr< BlkBuffer > m_only_in_mem_buff;
 
-    struct vol_mem_sb*                m_sb;
-    enum vol_state                    m_state;
-    void                              alloc_single_block_in_mem();
-    io_comp_callback                  m_comp_cb;
-    std::atomic< uint64_t >           seq_Id;
-    VolumeMetrics                     m_metrics;
-    std::mutex                        m_sb_lock; // lock for updating vol's sb
-    std::atomic< uint64_t >           m_used_size = 0;
-    bool                              m_recovery_error = false;
-    std::atomic< uint64_t >           m_err_cnt = 0;
-    std::string                       m_vol_name;
-    std::string                       m_vol_uuid;
- 
+    std::unique_ptr< vol_mem_sb > m_sb;
+    std::atomic< vol_state > m_state = vol_state::UNINITED;
+    void alloc_single_block_in_mem();
+    io_comp_callback m_comp_cb;
+    std::atomic< uint64_t > seq_Id;
+    VolumeMetrics m_metrics;
+    std::mutex m_sb_lock; // lock for updating vol's sb
+    std::atomic< uint64_t > m_used_size = 0;
+    bool m_recovery_error = false;
+    std::atomic< uint64_t > m_err_cnt = 0;
+    std::string m_vol_name;
+    std::string m_vol_uuid;
+
 #ifndef NDEBUG
     std::mutex m_req_mtx;
     std::map< uint64_t, volume_req_ptr > m_req_map;
@@ -214,6 +211,8 @@ private:
     // Map of blks for which read is requested, to prevent parallel writes to free those blks
     // it also stores corresponding eviction record created by any parallel writes
     std::unique_ptr< Blk_Read_Tracker > m_read_blk_tracker;
+
+    HomeBlksSafePtr m_hb; // Hold onto the homeblks to maintain reference
 
 private:
     Volume(const vol_params& params);
@@ -245,8 +244,9 @@ public:
 #endif
 
     ~Volume();
+    void shutdown();
+    void destroy();
 
-    std::error_condition destroy();
     std::error_condition write(uint64_t lba, uint8_t* buf, uint32_t nblks, const vol_interface_req_ptr& hb_req);
     std::error_condition read(uint64_t lba, int nblks, const vol_interface_req_ptr& hb_req, bool sync);
 
@@ -261,9 +261,7 @@ public:
     void assert_formatter(fmt::memory_buffer& buf, const char* msg, const std::string& req_str, const Args&... args) {
 
         fmt::format_to(buf, "\n[vol={}]", m_vol_uuid);
-        if (req_str.size()) {
-            fmt::format_to(buf, "\n[request={}]", req_str);
-        }
+        if (req_str.size()) { fmt::format_to(buf, "\n[request={}]", req_str); }
 
         fmt::format_to(buf, "\nMetrics = {}\n", sisl::MetricsFarm::getInstance().get_result_in_json_string());
     }
@@ -273,7 +271,7 @@ public:
      * memory sb is modified.
      */
     struct vol_mem_sb* get_sb() {
-        return m_sb;
+        return m_sb.get();
     };
 
     void vol_scan_alloc_blks();
@@ -297,14 +295,14 @@ public:
     bool remove_free_blk_entry(std::vector< Free_Blk_Entry >& fbes, std::pair< MappingKey, MappingValue >& kv);
 
     uint64_t get_elapsed_time(Clock::time_point startTime);
-    void     attach_completion_cb(const io_comp_callback& cb);
-    void     print_tree();
-    void     verify_tree();
-    void     print_node(uint64_t blkid);
-    void     blk_recovery_callback(const MappingValue& mv);
-    void     set_recovery_error();
+    void attach_completion_cb(const io_comp_callback& cb);
+    void print_tree();
+    void verify_tree();
+    void print_node(uint64_t blkid);
+    void blk_recovery_callback(const MappingValue& mv);
+    void set_recovery_error();
 
-    mapping* get_mapping_handle() { return m_map; }
+    mapping* get_mapping_handle() { return m_map.get(); }
 
     uint64_t get_last_lba() {
         assert(m_sb->ondisk_sb->size != 0);

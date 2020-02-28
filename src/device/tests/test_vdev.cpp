@@ -419,6 +419,7 @@ int main(int argc, char* argv[]) {
     }
 
     auto res = RUN_ALL_TESTS();
+    VolInterface::get_instance()->shutdown();
     iomanager.stop();
 
     return res;

@@ -489,15 +489,11 @@ public:
         return true;
     }
 
-    void shutdown_callback(bool success) {
-        VolInterface::del_instance();
-        assert(success);
-    }
-
     void shutdown() {
         std::unique_lock< std::mutex > lk(m_mutex);
         vol_info.clear();
-        VolInterface::get_instance()->shutdown(std::bind(&MinHS::shutdown_callback, this, std::placeholders::_1));
+        bool success = VolInterface::get_instance()->shutdown();
+        assert(success);
     }
 
     void wait_cmpl() {

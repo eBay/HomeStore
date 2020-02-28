@@ -15,7 +15,6 @@
 
 SDS_LOGGING_DECL(VMOD_VOL_MAPPING)
 
-
 using namespace homeds::btree;
 
 #define LBA_MASK 0xFFFFFFFFFFFF
@@ -43,7 +42,7 @@ struct LbaId {
 
 // MappingKey is fixed size
 class MappingKey : public homeds::btree::ExtentBtreeKey, public sisl::ObjLifeCounter< MappingKey > {
-    LbaId  m_lbaId;
+    LbaId m_lbaId;
     LbaId* m_lbaId_ptr;
 
 public:
@@ -96,20 +95,16 @@ public:
             return 0; // overlap
     }
 
-    virtual bool preceeds(const BtreeKey *k) const override {
-        MappingKey *o = (MappingKey *)k;
-        if (end() < o->start()) {
-            return true;
-        }
+    virtual bool preceeds(const BtreeKey* k) const override {
+        MappingKey* o = (MappingKey*)k;
+        if (end() < o->start()) { return true; }
 
         return false;
     }
 
-    virtual bool succeeds(const BtreeKey *k) const override {
-        MappingKey *o = (MappingKey*) k;
-        if (o->end() < start()) {
-            return true;
-        }
+    virtual bool succeeds(const BtreeKey* k) const override {
+        MappingKey* o = (MappingKey*)k;
+        if (o->end() < start()) { return true; }
 
         return false;
     }
@@ -170,7 +165,7 @@ public:
 struct ValueEntry {
 private:
     uint64_t m_seqId;
-    BlkId    m_blkId;
+    BlkId m_blkId;
     uint64_t m_nlba : NBLKS_BITS;
     uint64_t m_blk_offset : NBLKS_BITS; // offset based on blk store not based on vol page size
 
@@ -178,7 +173,7 @@ private:
     // as we call get_blob_size which takes into account actual nblks to determine exact size of checksum array
     // TODO - can be replaced by thread local buffer in future
     std::array< uint16_t, CS_ARRAY_STACK_SIZE > m_carr;
-    ValueEntry*                                 m_ptr;
+    ValueEntry* m_ptr;
 
 public:
     ValueEntry() : m_seqId(0), m_blkId(0), m_nlba(0), m_blk_offset(0), m_carr() { m_ptr = (ValueEntry*)&m_seqId; }
@@ -305,7 +300,7 @@ public:
     void get_overlap_diff_kvs(MappingKey* k1, MappingValue* v1, MappingKey* k2, MappingValue* v2,
                               uint32_t vol_page_size, diff_read_next_t& to_read,
                               std::vector< pair< MappingKey, MappingValue > >& overlap_kvs) {
-        static MappingKey   k;
+        static MappingKey k;
         static MappingValue v;
 
         uint64_t start, k1_offset = 0, k2_offset = 0;
@@ -395,8 +390,7 @@ public:
     Blob_Array< ValueEntry >& get_array() { return m_earr; }
 
     bool is_valid() {
-        if (m_earr.get_total_elements() == 0)
-            return false;
+        if (m_earr.get_total_elements() == 0) return false;
         return true;
     }
 
@@ -420,29 +414,19 @@ public:
         other.get_array().get_all(other_v_array, true);
 
         /* If other size is 0, my value is always new */
-        if (other_v_array.size() <= 0) {
-            return true;
-        }
+        if (other_v_array.size() <= 0) { return true; }
 
         /* If other size is not 0 and my value is 0, my value is old */
-        if (my_v_array.size() <= 0) {
-            return false;
-        }
+        if (my_v_array.size() <= 0) { return false; }
 
         /* If other seqId is invalid, my value is new */
-        if (other_v_array[0].get_seqId() == INVALID_SEQ_ID) {
-            return true;
-        }
+        if (other_v_array[0].get_seqId() == INVALID_SEQ_ID) { return true; }
 
         /* If my seqId is invalid and other is not, my value is old */
-        if (my_v_array[0].get_seqId() == INVALID_SEQ_ID) {
-            return false;
-        }
+        if (my_v_array[0].get_seqId() == INVALID_SEQ_ID) { return false; }
 
         /* If my value is greater than other, my value is new */
-        if (my_v_array[0].compare(&other_v_array[0]) > 0) {
-            return true;
-        }
+        if (my_v_array[0].compare(&other_v_array[0]) > 0) { return true; }
 
         return false;
     }
@@ -478,18 +462,19 @@ public:
 
 class mapping {
     typedef function< void(struct BlkId blkid, size_t offset_size, size_t size) > alloc_blk_callback;
-    typedef function< void(boost::intrusive_ptr< volume_req > cookie) >           comp_callback;
-    typedef std::function< void(Free_Blk_Entry fbe) >                             free_blk_callback;
-    typedef std::function< void(BlkId& bid) >                                     pending_read_blk_cb;
+    typedef function< void(boost::intrusive_ptr< volume_req > cookie) > comp_callback;
+    typedef std::function< void(Free_Blk_Entry fbe) > free_blk_callback;
+    typedef std::function< void(BlkId& bid) > pending_read_blk_cb;
 
 private:
+    HomeBlksSafePtr m_hb;
     MappingBtreeDeclType* m_bt;
-    alloc_blk_callback    m_alloc_blk_cb;
-    free_blk_callback     m_free_blk_cb;
-    pending_read_blk_cb   m_pending_read_blk_cb;
-    comp_callback         m_comp_cb;
-    uint32_t              m_vol_page_size;
-    const MappingValue    EMPTY_MAPPING_VALUE;
+    alloc_blk_callback m_alloc_blk_cb;
+    free_blk_callback m_free_blk_cb;
+    pending_read_blk_cb m_pending_read_blk_cb;
+    comp_callback m_comp_cb;
+    uint32_t m_vol_page_size;
+    const MappingValue EMPTY_MAPPING_VALUE;
 
     class GetCBParam : public BRangeQueryCBParam< MappingKey, MappingValue > {
     public:
@@ -508,16 +493,16 @@ private:
     };
 
 public:
-    void get_alloc_blks_cb(vector< pair< MappingKey, MappingValue > >&     match_kv,
-                           vector< pair< MappingKey, MappingValue > >&     result_kv,
+    void get_alloc_blks_cb(vector< pair< MappingKey, MappingValue > >& match_kv,
+                           vector< pair< MappingKey, MappingValue > >& result_kv,
                            BRangeQueryCBParam< MappingKey, MappingValue >* cb_param) {
         uint64_t start_lba = 0, end_lba = 0;
         get_start_end_lba(cb_param, start_lba, end_lba);
         ValueEntry new_ve; // empty
 
         for (auto i = 0u; i < match_kv.size(); ++i) {
-            auto&                    existing = match_kv[i];
-            MappingKey*              e_key = &existing.first;
+            auto& existing = match_kv[i];
+            MappingKey* e_key = &existing.first;
             Blob_Array< ValueEntry > array = (&existing.second)->get_array();
             assert(array.get_total_elements() > 0);
 
@@ -532,7 +517,7 @@ public:
                 } else {
                     assert(!overlap.get_start_offset(*e_key));
                 }
-                m_alloc_blk_cb(ve.get_blkId(), (ve.get_blk_offset() * HomeBlks::instance()->get_data_pagesz()),
+                m_alloc_blk_cb(ve.get_blkId(), (ve.get_blk_offset() * m_hb->get_data_pagesz()),
                                (overlap.get_n_lba() * m_vol_page_size));
             }
         }
@@ -545,7 +530,7 @@ public:
          */
         auto ret = m_bt->destroy(std::bind(&mapping::process_free_blk_callback, this, std::placeholders::_1), false);
         if (ret != btree_status_t::success) {
-            LOGERROR("mapping btree destroy returned unsuccessfully : {} ", ret);   
+            LOGERROR("mapping btree destroy returned unsuccessfully : {} ", ret);
             assert(0);
         }
     }
@@ -553,26 +538,22 @@ public:
     void recovery_cmpltd() { m_bt->recovery_cmpltd(); }
 
     int sweep_alloc_blks(uint64_t start_lba, uint64_t end_lba) {
-        MappingKey                                 start_key(start_lba, 1), end_key(end_lba, 1);
-        auto                                       search_range = BtreeSearchRange(start_key, true, end_key, true);
-        GetCBParam                                 param(nullptr);
+        MappingKey start_key(start_lba, 1), end_key(end_lba, 1);
+        auto search_range = BtreeSearchRange(start_key, true, end_key, true);
+        GetCBParam param(nullptr);
         vector< pair< MappingKey, MappingValue > > result_kv;
 
         BtreeQueryRequest< MappingKey, MappingValue > qreq(
             search_range, BtreeQueryType::TREE_TRAVERSAL_QUERY, (end_lba - start_lba + 1),
             std::bind(&mapping::get_alloc_blks_cb, this, placeholders::_1, placeholders::_2, placeholders::_3),
             (BRangeQueryCBParam< MappingKey, MappingValue >*)&param);
-        if (m_bt->query(qreq, result_kv) != btree_status_t::success) {
-            return -1;
-        }
+        if (m_bt->query(qreq, result_kv) != btree_status_t::success) { return -1; }
         return 0;
     }
 
     void process_completions(boost::intrusive_ptr< writeback_req > cookie, bool status) {
         boost::intrusive_ptr< volume_req > req = boost::static_pointer_cast< volume_req >(cookie);
-        if (req->status == no_error) {
-            req->status = status ? no_error : btree_write_failed;
-        }
+        if (req->status == no_error) { req->status = status ? no_error : btree_write_failed; }
         m_comp_cb(req);
     }
 
@@ -582,8 +563,8 @@ public:
             ValueEntry ve;
             array.get((uint32_t)i, ve, true);
             LOGDEBUG("{}: vol_page: {}, data_page: {}, n_lba: {}", __FUNCTION__, m_vol_page_size,
-                     HomeBlks::instance()->get_data_pagesz(), ve.get_nlba());
-            uint64_t       nlba = (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * ve.get_nlba();
+                     m_hb->get_data_pagesz(), ve.get_nlba());
+            uint64_t nlba = (m_vol_page_size / m_hb->get_data_pagesz()) * ve.get_nlba();
             Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(), nlba);
             m_free_blk_cb(fbe);
         }
@@ -595,13 +576,14 @@ public:
             m_pending_read_blk_cb(pending_read_cb),
             m_comp_cb(comp_cb),
             m_vol_page_size(page_size) {
+        m_hb = HomeBlks::safe_instance();
         homeds::btree::BtreeConfig btree_cfg(HomeStoreConfig::atomic_phys_page_size, unique_name.c_str());
         btree_cfg.set_max_objs(volsize / page_size);
         btree_cfg.set_max_key_size(sizeof(uint32_t));
         btree_cfg.set_max_value_size(page_size);
 
         homeds::btree::btree_device_info bt_dev_info;
-        bt_dev_info.blkstore = (void*)HomeBlks::instance()->get_metadata_blkstore();
+        bt_dev_info.blkstore = (void*)m_hb->get_metadata_blkstore();
         bt_dev_info.new_device = false;
         m_bt = MappingBtreeDeclType::create_btree(
             btree_cfg, &bt_dev_info,
@@ -616,32 +598,33 @@ public:
             m_pending_read_blk_cb(pending_read_cb),
             m_comp_cb(comp_cb),
             m_vol_page_size(page_size) {
+        m_hb = HomeBlks::safe_instance();
         homeds::btree::BtreeConfig btree_cfg(HomeStoreConfig::atomic_phys_page_size, unique_name.c_str());
         btree_cfg.set_max_objs(volsize / page_size);
         btree_cfg.set_max_key_size(sizeof(uint32_t));
         btree_cfg.set_max_value_size(page_size);
 
         homeds::btree::btree_device_info bt_dev_info;
-        bt_dev_info.blkstore = HomeBlks::instance()->get_metadata_blkstore();
+        bt_dev_info.blkstore = m_hb->get_metadata_blkstore();
         bt_dev_info.new_device = false;
         m_bt = MappingBtreeDeclType::create_btree(
             btree_sb, btree_cfg, &bt_dev_info,
             std::bind(&mapping::process_completions, this, std::placeholders::_1, std::placeholders::_2));
     }
 
-    uint64_t          get_used_size() { return m_bt->get_used_size(); }
+    uint64_t get_used_size() { return m_bt->get_used_size(); }
     btree_super_block get_btree_sb() { return (m_bt->get_btree_sb()); }
 
     error_condition get(boost::intrusive_ptr< volume_req > req, vector< pair< MappingKey, MappingValue > >& values,
                         bool fill_gaps = true) {
-        uint64_t   start_lba = req->lba;
-        uint64_t   num_lba = req->nlbas;
-        uint64_t   end_lba = start_lba + req->nlbas - 1;
+        uint64_t start_lba = req->lba;
+        uint64_t num_lba = req->nlbas;
+        uint64_t end_lba = start_lba + req->nlbas - 1;
         MappingKey start_key(start_lba, 1);
         MappingKey end_key(end_lba, 1);
 
-        auto                                            search_range = BtreeSearchRange(start_key, true, end_key, true);
-        GetCBParam                                      param(req);
+        auto search_range = BtreeSearchRange(start_key, true, end_key, true);
+        GetCBParam param(req);
         std::vector< pair< MappingKey, MappingValue > > result_kv;
 
         BtreeQueryRequest< MappingKey, MappingValue > qreq(
@@ -650,9 +633,7 @@ public:
             (BRangeQueryCBParam< MappingKey, MappingValue >*)&param);
         auto ret = m_bt->query(qreq, result_kv);
 
-        if (ret != btree_status_t::success && ret != btree_status_t::has_more) {
-            return btree_read_failed;
-        }
+        if (ret != btree_status_t::success && ret != btree_status_t::has_more) { return btree_read_failed; }
 
         if (fill_gaps) {
             // fill the gaps
@@ -683,10 +664,10 @@ public:
     error_condition put(boost::intrusive_ptr< volume_req > req, MappingKey& key, MappingValue& value) {
         assert(value.get_array().get_total_elements() == 1);
         UpdateCBParam param(req, key, value);
-        MappingKey    start(key.start(), 1);
-        MappingKey    end(key.end(), 1);
+        MappingKey start(key.start(), 1);
+        MappingKey end(key.end(), 1);
 
-        auto                                           search_range = BtreeSearchRange(start, true, end, true);
+        auto search_range = BtreeSearchRange(start, true, end, true);
         BtreeUpdateRequest< MappingKey, MappingValue > ureq(
             search_range, bind(&mapping::match_item_cb_put, this, placeholders::_1, placeholders::_2, placeholders::_3),
             (BRangeUpdateCBParam< MappingKey, MappingValue >*)&param);
@@ -703,9 +684,7 @@ public:
         return no_error;
     }
 
-    MappingBtreeDeclType* get_btree(void) {
-        return m_bt;
-    }
+    MappingBtreeDeclType* get_btree(void) { return m_bt; }
 
     void print_tree() { m_bt->print_tree(); }
     void verify_tree() { m_bt->verify_tree(); }
@@ -725,13 +704,13 @@ public:
 
     void merge(mapping* other) {
         m_bt->merge(other->get_btree(),
-            bind(&mapping::mapping_merge_cb, this, placeholders::_1, placeholders::_2, placeholders::_3));
+                    bind(&mapping::mapping_merge_cb, this, placeholders::_1, placeholders::_2, placeholders::_3));
     }
 
 private:
-    void mapping_merge_cb(vector< pair< MappingKey, MappingValue > >&      match_kv,
-                           vector< pair< MappingKey, MappingValue > >&      replace_kv,
-                           BRangeUpdateCBParam< MappingKey, MappingValue >* cb_param) {
+    void mapping_merge_cb(vector< pair< MappingKey, MappingValue > >& match_kv,
+                          vector< pair< MappingKey, MappingValue > >& replace_kv,
+                          BRangeUpdateCBParam< MappingKey, MappingValue >* cb_param) {
         match_item_cb_put_internal(match_kv, replace_kv, false, cb_param);
     }
 
@@ -741,8 +720,8 @@ private:
      * @param result_kv - All KV which are passed backed to mapping.get by btree. Btree dosent use this.
      * @param cb_param -  All parameteres provided by mapping.get can be accessed from this
      */
-    void match_item_cb_get(vector< pair< MappingKey, MappingValue > >&     match_kv,
-                           vector< pair< MappingKey, MappingValue > >&     result_kv,
+    void match_item_cb_get(vector< pair< MappingKey, MappingValue > >& match_kv,
+                           vector< pair< MappingKey, MappingValue > >& result_kv,
                            BRangeQueryCBParam< MappingKey, MappingValue >* cb_param) {
         uint64_t start_lba = 0, end_lba = 0;
         get_start_end_lba(cb_param, start_lba, end_lba);
@@ -767,8 +746,8 @@ private:
 #endif
 
         for (auto i = 0u; i < match_kv.size(); i++) {
-            auto&                    existing = match_kv[i];
-            MappingKey*              e_key = &existing.first;
+            auto& existing = match_kv[i];
+            MappingKey* e_key = &existing.first;
             Blob_Array< ValueEntry > array = (&existing.second)->get_array();
             for (int j = array.get_total_elements() - 1; j >= 0; j--) {
                 // seqId use to filter out KVs with higher seqIds and put only latest seqid entry in result_kv
@@ -805,9 +784,9 @@ private:
 #endif
     }
 
-    void match_item_cb_put(vector< pair< MappingKey, MappingValue > >&      match_kv,
-                            vector< pair< MappingKey, MappingValue > >&      replace_kv,
-                            BRangeUpdateCBParam< MappingKey, MappingValue >* cb_param) {
+    void match_item_cb_put(vector< pair< MappingKey, MappingValue > >& match_kv,
+                           vector< pair< MappingKey, MappingValue > >& replace_kv,
+                           BRangeUpdateCBParam< MappingKey, MappingValue >* cb_param) {
         match_item_cb_put_internal(match_kv, replace_kv, true, cb_param);
     }
 
@@ -819,19 +798,18 @@ private:
      *
      * We piggyback on put to delete old commited seq Id.
      */
-    void match_item_cb_put_internal(vector< pair< MappingKey, MappingValue > >&      match_kv,
-                           vector< pair< MappingKey, MappingValue > >&      replace_kv,
-                           bool is_valid_param,
-                           BRangeUpdateCBParam< MappingKey, MappingValue >* cb_param) {
+    void match_item_cb_put_internal(vector< pair< MappingKey, MappingValue > >& match_kv,
+                                    vector< pair< MappingKey, MappingValue > >& replace_kv, bool is_valid_param,
+                                    BRangeUpdateCBParam< MappingKey, MappingValue >* cb_param) {
 
         uint64_t start_lba = 0, end_lba = 0;
         get_start_end_lba(cb_param, start_lba, end_lba);
-        ValueEntry     new_ve;
+        ValueEntry new_ve;
         cb_param->get_new_value().get_array().get(0, new_ve, false);
 
-        UpdateCBParam *param;
+        UpdateCBParam* param;
 
-        // TODO: refactor this function and add_overlaps into btree code so it doesnt 
+        // TODO: refactor this function and add_overlaps into btree code so it doesnt
         // depend on UpdateCBParam. Once we have that, is_valid_param can be removed
         if (is_valid_param) {
             param = (UpdateCBParam*)cb_param;
@@ -854,10 +832,10 @@ private:
             ss << ptr.first.to_string() << "," << ptr.second.to_string();
 #endif
         MappingKey* s_in_range = (MappingKey*)cb_param->get_input_range().get_start_key();
-        auto        curr_lbarange_st = start_lba;
+        auto curr_lbarange_st = start_lba;
         for (auto& existing : match_kv) {
-            MappingKey*               e_key = &existing.first;
-            MappingValue*             e_value = &existing.second;
+            MappingKey* e_key = &existing.first;
+            MappingValue* e_value = &existing.second;
             Blob_Array< ValueEntry >& e_varray = e_value->get_array();
 
             // iterate and remove all entries except latest one
@@ -868,15 +846,15 @@ private:
                 uint32_t total = e_varray.get_total_elements();
                 if (i != (int)total - 1 ||
                     (e_key->start() >= start_lba && e_key->end() <= end_lba) /*last element full overlap*/) {
-                    if ((param != nullptr) && (param->m_req->lastCommited_seqId == INVALID_SEQ_ID ||
-                        ve.get_seqId() < param->m_req->lastCommited_seqId)) { // eligible for removal
+                    if ((param != nullptr) &&
+                        (param->m_req->lastCommited_seqId == INVALID_SEQ_ID ||
+                         ve.get_seqId() < param->m_req->lastCommited_seqId)) { // eligible for removal
 
                         if (param->is_state_modifiable()) { // actual put cb, not is_split cb
                             LOGTRACE("Free entry:{} nblks {}", ve.to_string(),
-                                     (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * e_key->get_n_lba());
+                                     (m_vol_page_size / m_hb->get_data_pagesz()) * e_key->get_n_lba());
                             Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(),
-                                               (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) *
-                                                   e_key->get_n_lba());
+                                               (m_vol_page_size / m_hb->get_data_pagesz()) * e_key->get_n_lba());
                             param->m_req->blkIds_to_free.emplace_back(fbe);
                         }
                         e_varray.remove(i);
@@ -922,12 +900,9 @@ private:
                 }
                 // check if replace entries dont overlap free entries
                 auto blk_start = curve.get_blkId().get_id() + curve.get_blk_offset();
-                auto blk_end =
-                    blk_start + (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * curve.get_nlba() - 1;
+                auto blk_end = blk_start + (m_vol_page_size / m_hb->get_data_pagesz()) * curve.get_nlba() - 1;
                 for (Free_Blk_Entry& fbe : param->m_req->blkIds_to_free) {
-                    if (fbe.m_blkId.get_chunk_num() != curve.get_blkId().get_chunk_num()) {
-                        continue;
-                    }
+                    if (fbe.m_blkId.get_chunk_num() != curve.get_blkId().get_chunk_num()) { continue; }
                     auto fblk_start = fbe.m_blkId.get_id() + fbe.m_blk_offset;
                     auto fblk_end = fblk_start + fbe.m_nblks_to_free - 1;
                     if (blk_end < fblk_start || fblk_end < blk_start) {
@@ -948,9 +923,7 @@ private:
         for (auto& ptr : replace_kv) {
             ss << ptr.first.to_string() << "," << ptr.second.to_string();
         }
-        if (param->is_state_modifiable()) {
-            LOGTRACE("Put_CB:,{} ", ss.str());
-        }
+        if (param->is_state_modifiable()) { LOGTRACE("Put_CB:,{} ", ss.str()); }
 #endif
     }
 
@@ -981,24 +954,24 @@ private:
     }
 
     /** result of overlap of k1/k2 is added to replace_kv **/
-    void add_overlaps(MappingKey* k1, MappingValue* v1, bool is_valid_param, BRangeUpdateCBParam<MappingKey, MappingValue>* param,
+    void add_overlaps(MappingKey* k1, MappingValue* v1, bool is_valid_param,
+                      BRangeUpdateCBParam< MappingKey, MappingValue >* param,
                       vector< pair< MappingKey, MappingValue > >& replace_kv) {
 
-
-        MappingKey*   k2 = &(param->get_new_key());
+        MappingKey* k2 = &(param->get_new_key());
         MappingValue* v2 = &(param->get_new_value());
         assert(v2->get_array().get_total_elements() == 1);
 
         auto start = k1->start();
         auto end = k1->end();
         if (k2->start() > start) { // non overlaping start
-            auto         nlba = k2->start() - start;
+            auto nlba = k2->start() - start;
             MappingValue val_start(*v1);
             val_start.add_offset(0, nlba, m_vol_page_size);
             replace_kv.emplace_back(make_pair(MappingKey(start, nlba), val_start));
             start = k2->start();
         }
-        MappingKey   key_end;
+        MappingKey key_end;
         MappingValue val_end(*v1);
         if (k2->end() < k1->end()) { // non overlaping end
             key_end.set(k2->end() + 1, k1->end() - k2->end());
@@ -1010,10 +983,10 @@ private:
         assert(end <= k2->end() && end <= k1->end());
 
         // get entris from both v1/v2 and offset is needed for both of them
-        auto       overlap_nlba = end - start + 1;
+        auto overlap_nlba = end - start + 1;
         MappingKey key3(start, overlap_nlba);
-        auto       k1_offset = start - k1->start();
-        auto       k2_offset = start - k2->start();
+        auto k1_offset = start - k1->start();
+        auto k2_offset = start - k2->start();
         // add offset to v1
         v1->add_offset(k1_offset, overlap_nlba, m_vol_page_size); // modify original in place
 
@@ -1022,14 +995,15 @@ private:
         for (int i = e_varray.get_total_elements() - 1; i >= 0; i--) {
             ValueEntry ve;
             e_varray.get(i, ve, false);
-            if (is_valid_param && (((UpdateCBParam*)param)->m_req->lastCommited_seqId == INVALID_SEQ_ID ||
-                ve.get_seqId() < ((UpdateCBParam*)param)->m_req->lastCommited_seqId)) { // eligible for removal
+            if (is_valid_param &&
+                (((UpdateCBParam*)param)->m_req->lastCommited_seqId == INVALID_SEQ_ID ||
+                 ve.get_seqId() < ((UpdateCBParam*)param)->m_req->lastCommited_seqId)) { // eligible for removal
 
                 if (((UpdateCBParam*)param)->is_state_modifiable()) { // actual put cb, not is_split cb
                     LOGDEBUG("Free entry:{} nblks {}", ve.to_string(),
-                             (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * k1->get_n_lba());
+                             (m_vol_page_size / m_hb->get_data_pagesz()) * k1->get_n_lba());
                     Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(),
-                                       (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * ve.get_nlba());
+                                       (m_vol_page_size / m_hb->get_data_pagesz()) * ve.get_nlba());
                     ((UpdateCBParam*)param)->m_req->blkIds_to_free.emplace_back(fbe);
                 }
                 e_varray.remove(i);
@@ -1047,16 +1021,14 @@ private:
         v1->add_copy(new_ve, value3);
         replace_kv.emplace_back(make_pair(key3, value3));
 
-        if (!(key_end.get_lbaId().is_invalid())) {
-            replace_kv.emplace_back(make_pair(key_end, val_end));
-        }
+        if (!(key_end.get_lbaId().is_invalid())) { replace_kv.emplace_back(make_pair(key_end, val_end)); }
     }
 
     /**add missing interval to replace kv**/
     void add_missing_interval(uint64_t s_lba, uint64_t e_lba, ValueEntry& ve, uint16_t lba_offset,
                               vector< pair< MappingKey, MappingValue > >& replace_kv) {
         ValueEntry gap_entry(ve);
-        auto       nlba = e_lba - s_lba + 1;
+        auto nlba = e_lba - s_lba + 1;
         gap_entry.add_offset(lba_offset, nlba, m_vol_page_size);
         replace_kv.emplace_back(make_pair(MappingKey(s_lba, nlba), MappingValue(gap_entry)));
     }
@@ -1067,8 +1039,8 @@ private:
                                MappingValue* exp_value = nullptr, boost::intrusive_ptr< volume_req > req = nullptr) {
         uint32_t i = 0;
         uint64_t last_slba = lba_start;
-        uint8_t  last_bid_offset = 0;
-        BlkId    expBid;
+        uint8_t last_bid_offset = 0;
+        BlkId expBid;
         if (exp_value != nullptr) {
             ValueEntry ve;
             exp_value->get_array().get(0, ve, false);
@@ -1081,7 +1053,7 @@ private:
 
                 if (req) { // do it again to trace
                     vector< pair< MappingKey, MappingValue > > values;
-                    auto                                       temp = req->lastCommited_seqId;
+                    auto temp = req->lastCommited_seqId;
                     req->lastCommited_seqId = req->seqId;
                     MappingKey key(lba_start, n_lba);
                     get(req, values);
@@ -1101,8 +1073,7 @@ private:
                     std::this_thread::sleep_for(std::chrono::seconds(10));
                     assert(0);
                 }
-                last_bid_offset +=
-                    values[i].first.get_n_lba() * (m_vol_page_size / HomeBlks::instance()->get_data_pagesz());
+                last_bid_offset += values[i].first.get_n_lba() * (m_vol_page_size / m_hb->get_data_pagesz());
             }
             last_slba = values[i].first.end() + 1;
             i++;

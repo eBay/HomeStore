@@ -261,16 +261,9 @@ public:
     }
 
     void shutdown() {
-        std::mutex stop_mutex;
-        std::condition_variable cv;
-        VolInterface::get_instance()->shutdown([&](bool success) { cv.notify_all(); });
-
-        // Wait for the shutdown flag.
-        std::unique_lock< std::mutex > lk(stop_mutex);
-        cv.wait(lk, [&] { return true; });
+        VolInterface::get_instance()->shutdown();
 
         // m_log_store_clients.clear();
-        VolInterface::del_instance();
         iomanager.stop();
     }
 

@@ -170,7 +170,7 @@ public:
             m_comp_cb(comp_cb),
             m_metrics(name) {}
 
-    ~BlkStore() {}
+    ~BlkStore() = default;
 
     void attach_compl(comp_callback comp_cb) { m_comp_cb = comp_cb; }
 
@@ -626,8 +626,8 @@ public:
 
     off_t alloc_blk(size_t size, bool chunk_overlap_ok = false) { return m_vdev.alloc_blk(size, chunk_overlap_ok); }
 
-    ssize_t pwrite(const void* buf, size_t count, off_t offset, boost::intrusive_ptr< virtualdev_req > req = nullptr) { 
-        return m_vdev.pwrite(buf, count, offset, req); 
+    ssize_t pwrite(const void* buf, size_t count, off_t offset, boost::intrusive_ptr< virtualdev_req > req = nullptr) {
+        return m_vdev.pwrite(buf, count, offset, req);
     }
 
     ssize_t pread(void* buf, size_t count, off_t offset) { return m_vdev.pread(buf, count, offset); }
@@ -644,28 +644,29 @@ public:
         return m_vdev.write(buf, count, req);
     }
 
-    ssize_t preadv(const struct iovec* iov, int iovcnt, off_t offset, boost::intrusive_ptr< virtualdev_req > req = nullptr) { 
-        return m_vdev.preadv(iov, iovcnt, offset, req); 
+    ssize_t preadv(const struct iovec* iov, int iovcnt, off_t offset,
+                   boost::intrusive_ptr< virtualdev_req > req = nullptr) {
+        return m_vdev.preadv(iov, iovcnt, offset, req);
     }
-    
-    ssize_t pwritev(const struct iovec* iov, int iovcnt, off_t offset, boost::intrusive_ptr< virtualdev_req > req = nullptr) { 
-        return m_vdev.pwritev(iov, iovcnt, offset, req); 
+
+    ssize_t pwritev(const struct iovec* iov, int iovcnt, off_t offset,
+                    boost::intrusive_ptr< virtualdev_req > req = nullptr) {
+        return m_vdev.pwritev(iov, iovcnt, offset, req);
     }
-    
+
     uint64_t get_used_space() const { return m_vdev.get_used_space(); }
 
     off_t get_start_offset() const { return m_vdev.data_start_offset(); }
 
-    off_t get_tail_offset() const { return m_vdev.get_tail_offset(); } 
-    
+    off_t get_tail_offset() const { return m_vdev.get_tail_offset(); }
+
     void read(const uint64_t offset, const uint64_t size, const void* buf) { m_vdev.read(offset, size, buf); }
 
     void readv(const uint64_t offset, struct iovec* iov, int iovcnt) { m_vdev.readv(offset, iov, iovcnt); }
 
     void update_tail_offset(const off_t tail) { m_vdev.update_tail_offset(tail); }
 
-    void truncate(const off_t offset) {m_vdev.truncate(offset);}
-
+    void truncate(const off_t offset) { m_vdev.truncate(offset); }
 
 private:
     uint32_t m_pagesz;

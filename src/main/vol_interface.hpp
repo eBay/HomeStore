@@ -24,6 +24,7 @@
 #include <sstream>
 #include <string>
 #include <iostream>
+#include <utility/enum.hpp>
 
 namespace homestore {
 class Volume;
@@ -34,7 +35,12 @@ void intrusive_ptr_release(BlkBuffer* buf);
 
 class VolInterface;
 struct init_params;
-VolInterface* vol_homestore_init(const init_params& cfg);
+class VolInterfaceImpl {
+public:
+    static VolInterface* init(const init_params& cfg, bool force_reinit);
+    static boost::intrusive_ptr< VolInterface > safe_instance();
+    static VolInterface* raw_instance();
+};
 
 struct cap_attrs {
     uint64_t used_data_size;
@@ -127,16 +133,16 @@ public:
 };
 typedef boost::intrusive_ptr< vol_interface_req > vol_interface_req_ptr;
 
-enum vol_state {
-    ONLINE = 0,
-    FAILED = 1,   // It moved to offline only when it find vdev in failed state during boot
-    OFFLINE = 2,  // Either AM can move it to offline or internally HS can move it offline if there are error on a disk
-    DEGRADED = 3, // If a data of a volume in a failed state is deleted. We delete the data if we found any volume in a
-                  // failed state during boot.
-    MOUNTING = 4,
-    DESTROYING = 5,
-    UNINITED = 6,
-};
+ENUM(vol_state, uint32_t,
+     ONLINE,     // Online state after loading
+     FAILED,     // It moved to offline only when it find vdev in failed state during boot
+     OFFLINE,    // Either AM can move it to offline or internally HS can move it offline if there are error on a disk
+     DEGRADED,   // If a data of a volume in a failed state is deleted. We delete the data if we found any volume in a
+                 // failed state during boot.
+     MOUNTING,   // Process of mounting
+     DESTROYING, // Marked to this state, while actual volume is deleted
+     UNINITED    // Initial state when volume is brought up
+);
 
 typedef std::function< void(const vol_interface_req_ptr& req) > io_comp_callback;
 typedef std::function< void(bool success) > shutdown_comp_callback;
@@ -223,45 +229,12 @@ public:
 };
 
 class VolInterface {
-    static VolInterface* _instance;
-
 public:
     virtual ~VolInterface() {}
     static bool init(const init_params& cfg, bool force_reinit = false) {
-        static std::once_flag flag1;
-        try {
-            if (force_reinit) {
-                _instance = vol_homestore_init(cfg);
-            } else {
-                std::call_once(flag1, [&cfg]() { _instance = vol_homestore_init(cfg); });
-            }
-            return true;
-        } catch (const std::exception& e) {
-            LOGERROR("{}", e.what());
-            assert(0);
-            return false;
-        }
+        return (VolInterfaceImpl::init(cfg, force_reinit) != nullptr);
     }
-
-#if 0
-    static bool restart(const init_params& cfg) {
-        if (_instance) {
-            std::condition_variable _cv;
-            _instance->shutdown([_cv]() { _cv.notify_all(); });
-
-            {
-                std::mutex _mtx;
-                std::unique_lock< std::mutex > lk(_mtx);
-                _cv.wait(lk, [&] { return true; });
-            }
-            del_instance();
-        }
-        _instance = vol_homestore_init(cfg);
-    }
-#endif
-
-    static VolInterface* get_instance() { return _instance; }
-    static void del_instance() { delete _instance; }
+    static VolInterface* get_instance() { return VolInterfaceImpl::raw_instance(); }
 
     virtual vol_interface_req_ptr create_vol_hb_req() = 0;
     virtual std::error_condition write(const VolumePtr& vol, uint64_t lba, uint8_t* buf, uint32_t nblks,
@@ -282,7 +255,8 @@ public:
     /* AM should call it in case of recovery or reboot when homestore try to mount the existing volume */
     virtual void attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback cb) = 0;
 
-    virtual std::error_condition shutdown(shutdown_comp_callback shutdown_comp_cb, bool force = false) = 0;
+    virtual bool shutdown(bool force = false) = 0;
+    virtual bool trigger_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool force = false) = 0;
     virtual cap_attrs get_system_capacity() = 0;
     virtual cap_attrs get_vol_capacity(const VolumePtr& vol) = 0;
     virtual bool vol_state_change(const VolumePtr& vol, vol_state new_state) = 0;

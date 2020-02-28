@@ -123,7 +123,6 @@ public:
     }
 
     void shutdown_callback(bool success) {
-        VolInterface::del_instance();
         assert(success);
         m_shutdown_cb_done = true;
     }
@@ -131,7 +130,7 @@ public:
     void shutdown() {
         // release the ref_count to volumes;
         m_vols.clear();
-        VolInterface::get_instance()->shutdown(
+        VolInterface::get_instance()->trigger_shutdown(
             std::bind(&VolumeManager::shutdown_callback, this, std::placeholders::_1));
     }
 
