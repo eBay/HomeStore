@@ -69,6 +69,7 @@ uint32_t atomic_page_size = 512;
 uint32_t vol_page_size = 4096;
 uint32_t phy_page_size = 4096;
 uint32_t mem_btree_page_size = 4096;
+bool can_delete_volume = false;
 extern bool vol_gtest;
 #define VOL_PAGE_SIZE 4096
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
@@ -1067,6 +1068,9 @@ TEST_F(IOTest, recovery_io_test) {
     }
     this->start_homestore();
     this->wait_cmpl();
+    if (can_delete_volume) {
+        this->delete_volumes();
+    }
     this->shutdown();
     if (remove_file) {
         this->remove_files();
@@ -1204,6 +1208,7 @@ SDS_OPTION_GROUP(test_volume,
 (verify_only,"", "verify_only", "verify only boot", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"),
 (abort,"", "abort", "abort", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"),
 (flip,"", "flip", "flip", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"),
+(delete_volume,"", "delete_volume", "delete_volume", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"),
 (atomic_page_size,"", "atomic_page_size", "atomic_page_size", ::cxxopts::value<uint32_t>()->default_value("4096"), "atomic_page_size"),
 (vol_page_size,"", "vol_page_size", "vol_page_size", ::cxxopts::value<uint32_t>()->default_value("4096"), "vol_page_size"),
 (phy_page_size,"", "phy_page_size", "phy_page_size", ::cxxopts::value<uint32_t>()->default_value("4096"), "phy_page_size"),
@@ -1245,6 +1250,7 @@ int main(int argc, char *argv[]) {
     verify_only = SDS_OPTIONS["verify_only"].as<uint32_t>();
     is_abort = SDS_OPTIONS["abort"].as<uint32_t>();
     flip_set = SDS_OPTIONS["flip"].as<uint32_t>();
+    can_delete_volume = SDS_OPTIONS["delete_volume"].as<uint32_t>() ?  true : false;
     atomic_page_size = SDS_OPTIONS["atomic_page_size"].as<uint32_t>();
     vol_page_size = SDS_OPTIONS["vol_page_size"].as<uint32_t>();
     phy_page_size = SDS_OPTIONS["phy_page_size"].as<uint32_t>();

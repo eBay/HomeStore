@@ -273,9 +273,6 @@ public:
         if (ret == btree_status_t::success) {
             m_destroy = true;
         }
-        if (!mem_only) {
-            BT_LOG_ASSERT_CMP(m_total_nodes, ==, 0, );
-        }
         return ret;
     }
 
@@ -304,8 +301,9 @@ public:
             BtreeNodeInfo child_info;
             while (i <= node->get_total_entries()) {
                 if (i == node->get_total_entries()) {
-                    if (!(node->get_edge_id().is_valid()))
+                    if (!(node->get_edge_id().is_valid())) {
                         break;
+                    }
                     child_info.set_bnode_id(node->get_edge_id());
                 } else {
                     node->get(i, &child_info, false /* copy */);
