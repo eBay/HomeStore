@@ -262,9 +262,6 @@ Volume::~Volume() {
         THIS_VOL_LOG(INFO, , , "Vol destroy frees {} used blks", m_used_size.load());
         m_map->destroy();
 
-        // all blks should have been freed
-        VOL_ASSERT_CMP(LOGMSG, m_used_size.load(), ==, 0, , "All blks expected to be freed");
-
         HomeBlks::instance()->vol_sb_remove(get_sb());
         delete m_map;
         delete (m_sb);
