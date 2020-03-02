@@ -78,9 +78,6 @@ namespace homeds {
             is_initialized = true;
         }
 
-        uint16_t get_meta_size() const{
-            return sizeof(record) * m_header->m_total_elements + sizeof(header);
-        }
 
         uint8_t *get_data_ptr(uint16_t offset) const{
             return m_data + offset;
@@ -104,6 +101,10 @@ namespace homeds {
             set_elements(other);
         }
 
+        uint16_t get_meta_size() const {
+            return sizeof(record) * m_header->m_total_elements + sizeof(header);
+        }
+ 
         //deep copy all elements from other array
         void set_elements(const Blob_Array &other) {
             free_mem_if_needed();

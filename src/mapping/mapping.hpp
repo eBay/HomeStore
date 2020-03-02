@@ -149,14 +149,20 @@ public:
 } __attribute__((__packed__));
 
 #define VALUE_ENTRY_VERSION 0x1
+struct ValueEntryMeta {
+    uint8_t magic = VALUE_ENTRY_VERSION;
+    uint64_t seqId;
+    BlkId blkId;
+    uint64_t nlba : NBLKS_BITS;
+    uint64_t blk_offset : NBLKS_BITS; // offset based on blk store not based on vol page size
+    ValueEntryMeta(uint64_t seqId, const BlkId& blkId, uint8_t blk_offset, uint8_t nlba) : seqId(seqId), blkId(blkId), 
+                    nlba(nlba), blk_offset(blk_offset) {};
+    ValueEntryMeta() : seqId(0), blkId(0), nlba(0), blk_offset(0) {};
+} __attribute__((__packed__));
+
 struct ValueEntry {
 private:
-    uint8_t magic = VALUE_ENTRY_VERSION;
-    uint64_t m_seqId;
-    BlkId m_blkId;
-    uint64_t m_nlba : NBLKS_BITS;
-    uint64_t m_blk_offset : NBLKS_BITS; // offset based on blk store not based on vol page size
-
+    ValueEntryMeta m_meta;
     // this allocates 2^NBLKS_BITS size array for checksum on stack, however actual memory used is less on bnode
     // as we call get_blob_size which takes into account actual nblks to determine exact size of checksum array
     // TODO - can be replaced by thread local buffer in future
@@ -164,16 +170,12 @@ private:
     ValueEntry* m_ptr;
 
 public:
-    ValueEntry() : m_seqId(0), m_blkId(0), m_nlba(0), m_blk_offset(0), m_carr() { m_ptr = (ValueEntry*)this; }
+    ValueEntry() : m_meta(), m_carr() { m_ptr = (ValueEntry*)this; }
 
     // deep copy
     ValueEntry(uint64_t seqId, const BlkId& blkId, uint8_t blk_offset, uint8_t nlba,
                const std::array< uint16_t, CS_ARRAY_STACK_SIZE >& carr) :
-            m_seqId(seqId),
-            m_blkId(blkId),
-            m_nlba(nlba),
-            m_blk_offset(blk_offset),
-            m_carr(carr) {
+            m_meta(seqId, blkId, blk_offset, nlba), m_carr(carr) {
         m_ptr = (ValueEntry*)this;
     }
 
@@ -182,8 +184,7 @@ public:
     ValueEntry(uint8_t* ptr) : m_ptr((ValueEntry*)ptr) {}
 
     uint32_t get_blob_size() {
-        return sizeof(uint8_t) + sizeof(uint64_t) + sizeof(BlkId) + sizeof(uint8_t) + sizeof(uint8_t) +
-            sizeof(uint16_t) * get_nlba();
+        return sizeof(m_meta) + sizeof(uint16_t) * get_nlba();
     }
 
     homeds::blob get_blob() { return {(uint8_t*)m_ptr, get_blob_size()}; }
@@ -196,10 +197,10 @@ public:
     }
 
     void copy_from(const ValueEntry& ve) {
-        m_seqId = ve.get_seqId();
-        m_blkId = ve.get_blkId();
-        m_blk_offset = ve.get_blk_offset();
-        m_nlba = ve.get_nlba();
+        m_meta.seqId = ve.get_seqId();
+        m_meta.blkId = ve.get_blkId();
+        m_meta.blk_offset = ve.get_blk_offset();
+        m_meta.nlba = ve.get_nlba();
         for (auto i = 0; i < ve.get_nlba(); i++)
             m_carr[i] = ve.get_checksum_at(i);
         m_ptr = (ValueEntry*)this;
@@ -209,24 +210,24 @@ public:
         // move checksum array elements to start from offset position
         assert(lba_offset < get_nlba());
         memmove((void*)&(m_ptr->m_carr[0]), (void*)(&(m_ptr->m_carr[lba_offset])), sizeof(uint16_t) * nlba);
-        m_ptr->m_nlba = nlba;
+        m_ptr->m_meta.nlba = nlba;
         uint8_t blk_offset = (vol_page_size / HomeBlks::instance()->get_data_pagesz()) * lba_offset;
-        m_ptr->m_blk_offset += blk_offset;
+        m_ptr->m_meta.blk_offset += blk_offset;
 #ifndef NDEBUG
         auto actual_nblks = (vol_page_size / HomeBlks::instance()->get_data_pagesz()) * nlba;
         assert(blk_offset + actual_nblks <= get_blkId().get_nblks());
 #endif
     }
 
-    uint64_t get_seqId() const { return m_ptr->m_seqId; }
+    uint64_t get_seqId() const { return m_ptr->m_meta.seqId; }
 
-    BlkId& get_blkId() const { return m_ptr->m_blkId; }
+    BlkId& get_blkId() const { return m_ptr->m_meta.blkId; }
 
-    uint8_t get_blk_offset() const { return (uint8_t)m_ptr->m_blk_offset; }
+    uint8_t get_blk_offset() const { return (uint8_t)m_ptr->m_meta.blk_offset; }
 
-    uint8_t get_nlba() const { return (uint8_t)m_ptr->m_nlba; }
+    uint8_t get_nlba() const { return (uint8_t)m_ptr->m_meta.nlba; }
 
-    void set_nlba(uint8_t nlba) { m_ptr->m_nlba = nlba; }
+    void set_nlba(uint8_t nlba) { m_ptr->m_meta.nlba = nlba; }
 
     uint16_t& get_checksum_at(uint8_t index) const {
         assert(index < get_nlba());
@@ -321,6 +322,12 @@ public:
     virtual string to_string() const override { return m_earr.to_string(); }
 
     Blob_Array< ValueEntry >& get_array() { return m_earr; }
+
+    uint32_t meta_size() {
+        uint32_t size = 0;
+        size = sizeof(ValueEntryMeta) + m_earr.get_meta_size();
+        return size;
+    }
 
     bool is_valid() {
         if (m_earr.get_total_elements() == 0)
@@ -606,6 +613,7 @@ public:
         auto search_range = BtreeSearchRange(start, true, end, true);
         BtreeUpdateRequest< MappingKey, MappingValue > ureq(
             search_range, bind(&mapping::match_item_cb_put, this, placeholders::_1, placeholders::_2, placeholders::_3),
+            bind(&mapping::get_size_needed, this, placeholders::_1, placeholders::_2),
             (BRangeUpdateCBParam< MappingKey, MappingValue >*)&param);
         m_bt->range_put(key, value, btree_put_type::APPEND_IF_EXISTS_ELSE_INSERT, to_wb_req(req), to_wb_req(req), ureq);
 
@@ -703,6 +711,20 @@ private:
     uint32_t compute_val_offset(BRangeUpdateCBParam< MappingKey, MappingValue >* cb_param, uint64_t start_lba) {
         uint64_t input_start_lba = cb_param->get_new_key().start();
         return (start_lba - input_start_lba);
+    }
+
+    uint32_t get_size_needed(vector< pair< MappingKey, MappingValue > >& match_kv, 
+                            BRangeUpdateCBParam< MappingKey, MappingValue >* cb_param) {
+ 
+        UpdateCBParam* param = (UpdateCBParam*)cb_param;
+        MappingValue& new_val = param->get_new_value();
+        int overlap_entries = match_kv.size();
+
+        /* In worse case, one value is divided into (2 * overlap_entries + 1). Same meta data of a value (it is fixed size) 
+         * will be copied to all new entries.
+         */
+        uint32_t new_size = (overlap_entries + 1) * new_val.meta_size() + new_val.get_blob_size();
+        return new_size;
     }
 
     /* Callback called onces for each eligible bnode

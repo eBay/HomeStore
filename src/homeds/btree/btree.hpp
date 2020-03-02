@@ -24,6 +24,7 @@
 #include <fmt/ostream.h>
 #include "homeds/array/reserve_vector.hpp"
 #include <main/homestore_header.hpp>
+#include <main/homestore_config.hpp>
 
 using namespace std;
 using namespace homeds::thread;
@@ -1959,7 +1960,9 @@ private:
         /* we should synchronously try to recover this node. If we write asynchronously then
          * we need to do refresh.
          */
-        ret = write_node_sync(child_node1);
+        if (!homestore::HomeStoreConfig::is_read_only) {
+            ret = write_node_sync(child_node1);
+        }
 
         if (parent_sibbling != nullptr) {
             unlock_node(parent_sibbling, locktype::LOCKTYPE_READ);
@@ -1969,8 +1972,10 @@ private:
             return ret;
         }
 
-        for (int i = 0; i < (int)nodes_to_free.size(); i++) {
-            free_node(nodes_to_free[i], nullptr);
+        if (!homestore::HomeStoreConfig::is_read_only) {
+            for (int i = 0; i < (int)nodes_to_free.size(); i++) {
+                free_node(nodes_to_free[i], nullptr);
+            }
         }
 
         COUNTER_INCREMENT(m_metrics, btree_num_pc_gen_mismatch, 1);

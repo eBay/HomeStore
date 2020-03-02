@@ -32,6 +32,9 @@ static std::atomic< uint64_t > glob_phys_dev_offset(0);
 static std::atomic< uint32_t > glob_phys_dev_ids(0);
 
 PhysicalDev::~PhysicalDev() {
+    
+    LOGINFO("device name {} superblock magic {} product name {} version {}", m_devname, m_super_blk->magic, 
+            m_super_blk->product_name, m_super_blk->version);
     free(m_super_blk);
     // m_ep will be deleted in iomgr::stop
 }
@@ -196,6 +199,8 @@ bool PhysicalDev::load_super_block() {
 
     bool is_omstore_dev = validate_device();
     if (!is_omstore_dev) {
+        LOGCRITICAL("invalid device name {} found magic {} product name {} version {}", m_devname, m_super_blk->magic, 
+                        m_super_blk->product_name, m_super_blk->version);
         return false;
     }
 
