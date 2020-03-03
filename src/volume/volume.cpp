@@ -160,7 +160,12 @@ void Volume::process_free_blk_callback(Free_Blk_Entry fbe) {
 }
 
 /* when read happens on mapping btree, under read lock we mark blk so it does not get removed by concurrent writes */
-void Volume::pending_read_blk_cb(BlkId& bid) { m_read_blk_tracker->insert(bid); }
+void Volume::pending_read_blk_cb(BlkId& bid) {
+    if (m_state != vol_state::ONLINE) {
+        /* Don't need to add it in read tracker if volume is not in online mode */
+        m_read_blk_tracker->insert(bid);
+    }
+}
 
 #ifndef NDEBUG
 void Volume::verify_pending_blks() { assert(m_read_blk_tracker->get_size() == 0); }
@@ -263,6 +268,10 @@ Volume::~Volume() {
         m_map->destroy();
 
         HomeBlks::instance()->vol_sb_remove(get_sb());
+        assert(m_used_size.load() == 0);
+        if (m_used_size.load() != 0) {
+            LOGERROR("used_size {} is not zero", m_used_size);
+        }
         delete m_map;
         delete (m_sb);
         auto system_cap = HomeBlks::instance()->get_system_capacity();
@@ -756,9 +765,9 @@ void Volume::get_allocated_blks() {
 
     mapping* mp = get_mapping_handle();
 
-    uint64_t max_lba = get_last_lba() + 1;
+    int64_t max_lba = get_last_lba();
 
-    uint64_t start_lba = 0, end_lba = 0;
+    int64_t start_lba = 0, end_lba = -1;
 
     std::vector< ThreadPool::TaskFuture< void > > v;
 
@@ -771,8 +780,9 @@ void Volume::get_allocated_blks() {
             continue;
         }
 
-        start_lba = end_lba;
+        start_lba = end_lba + 1;
         end_lba = std::min((unsigned long long)max_lba, end_lba + NUM_BLKS_PER_THREAD_TO_QUERY);
+        LOGINFO("Start lba {} end lab {}", start_lba, end_lba);
 
         v.push_back(submit_job([this, start_lba, end_lba, mp]() {
             if (mp->sweep_alloc_blks(start_lba, end_lba)) {
