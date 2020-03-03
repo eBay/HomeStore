@@ -769,8 +769,14 @@ start:
                 }
                 if (j) {
                     if (can_panic) {
-
-                        LOGINFO("mismatch found offset {} size {}", tot_size_read, size_read);
+                        
+                        /* verify the header */
+                        j = memcmp((void *) b.bytes, (uint8_t *)((uint64_t)req->buf + tot_size_read), sizeof (uint64_t));
+                        if (j != 0) {
+                            LOGINFO("header mismatch lba read {}", *((uint64_t *)b.bytes));
+                        }
+                        LOGINFO("mismatch found lba {} nlba {} total_size_read {}", req->lba, req->nblks, 
+                                    tot_size_read);
 #ifndef NDEBUG
                         VolInterface::get_instance()->print_tree(vol);
 #endif

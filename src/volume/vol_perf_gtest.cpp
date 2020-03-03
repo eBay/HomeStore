@@ -29,7 +29,7 @@ THREAD_BUFFER_INIT;
 
 /************************** GLOBAL VARIABLES ***********************/
 
-#define PRELOAD_WRITES 100000000 // with 4k write it is 400 G insertion
+uint64_t preload_writes = 100000000; // with 4k write it is 400 G insertion
 
 uint64_t max_disk_capacity;
 #define MAX_DEVICES 2
@@ -55,6 +55,7 @@ std::atomic< uint64_t > write_cnt(0);
 std::atomic< uint64_t > read_cnt(0);
 std::atomic< uint64_t > read_err_cnt(0);
 std::atomic< size_t > outstanding_ios(0);
+bool disk_init = true;
 using log_level = spdlog::level::level_enum;
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
@@ -202,7 +203,7 @@ public:
             create_volume();
         } else {
             assert(vol_cnt == max_vols);
-            LOGINFO("init completed, verify started");
+            LOGINFO("init completed");
         }
         ev_fd = eventfd(0, EFD_NONBLOCK);
 
@@ -228,10 +229,7 @@ public:
             iomgr_obj->fd_reschedule(fd, event);
         }
 
-        if (!write_cnt) {
-            LOGINFO("preload started");
-        }
-        if (!preload_done && read_p > 50 && write_cnt < PRELOAD_WRITES) {
+        if (!preload_done && write_cnt < preload_writes) {
             while (outstanding_ios < max_outstanding_ios) {
                 random_write();
             }
@@ -241,6 +239,10 @@ public:
             start_time = Clock::now();
             LOGINFO("io started");
             write_cnt = 1;
+            read_cnt = 1;
+        }
+        if (write_cnt == 1 && !preload_done) {
+            LOGINFO("preload started");
         }
 
         while (outstanding_ios < max_outstanding_ios) {
@@ -410,11 +412,10 @@ public:
 
 TEST_F(IOTest, normal_random_io_test) {
     /* fork a new process */
-    this->init = true;
+    this->init = disk_init;
     /* child process */
     this->start_homestore();
     this->wait_cmpl();
-    this->remove_files();
     LOGINFO("Metrics for this run: {}", sisl::MetricsFarm::getInstance().get_result_in_json().dump(4));
     LOGINFO("write_cnt {}", write_cnt);
     LOGINFO("read_cnt {}", read_cnt);
@@ -437,12 +438,16 @@ SDS_OPTION_GROUP(perf_test_volume,
                   ::cxxopts::value< uint32_t >()->default_value("50"), "percentage"),
                  (device_list, "", "device_list", "List of device paths",
                   ::cxxopts::value< std::vector< std::string > >(), "path [...]"),
-                 (io_size, "", "io_size", "size of io in KB", ::cxxopts::value< uint32_t >()->default_value("0"),
+                 (io_size, "", "io_size", "size of io in KB", ::cxxopts::value< uint32_t >()->default_value("64"),
                   "size of io in KB"),
                  (cache_size, "", "cache_size", "size of cache in GB",
                   ::cxxopts::value< uint32_t >()->default_value("4"), "size of cache in GB"),
                  (is_file, "", "is_file", "is_it file", ::cxxopts::value< uint32_t >()->default_value("0"),
                   "is it file"),
+                 (init, "", "init", "init", ::cxxopts::value< uint32_t >()->default_value("1"), 
+                  "init"), 
+                 (preload_writes, "", "preload_writes", "preload_writes", ::cxxopts::value< uint32_t >()->default_value("100000000"), 
+                  "preload_writes"), 
                  (ref_cnt, "", "ref_count", "display object life counters",
                   ::cxxopts::value< uint32_t >()->default_value("0"), "display object life counters"))
 #define ENABLED_OPTIONS logging, home_blks, perf_test_volume
@@ -477,16 +482,21 @@ int main(int argc, char* argv[]) {
         dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();
     }
     cache_size = SDS_OPTIONS["cache_size"].as< uint32_t >();
+    preload_writes = SDS_OPTIONS["preload_writes"].as< uint32_t >();
     is_file = SDS_OPTIONS["is_file"].as< uint32_t >();
     ref_cnt = SDS_OPTIONS["ref_count"].as< uint32_t >();
+    disk_init = SDS_OPTIONS["init"].as< uint32_t >() ? true : false;
+
 
     if (dev_names.size() == 0) {
         LOGINFO("creating files");
         for (uint32_t i = 0; i < MAX_DEVICES; i++) {
-            std::ofstream ofs(names[i].c_str(), std::ios::binary | std::ios::out);
-            ofs.seekp(10 * Gi - 1);
-            ofs.write("", 1);
-            ofs.close();
+            if (disk_init) {
+                std::ofstream ofs(names[i].c_str(), std::ios::binary | std::ios::out);
+                ofs.seekp(10 * Gi - 1);
+                ofs.write("", 1);
+                ofs.close();
+            }
             dev_names.push_back(names[i]);
         }
         is_file = 1;

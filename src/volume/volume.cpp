@@ -782,7 +782,6 @@ void Volume::get_allocated_blks() {
 
         start_lba = end_lba + 1;
         end_lba = std::min((unsigned long long)max_lba, end_lba + NUM_BLKS_PER_THREAD_TO_QUERY);
-        LOGINFO("Start lba {} end lab {}", start_lba, end_lba);
 
         v.push_back(submit_job([this, start_lba, end_lba, mp]() {
             if (mp->sweep_alloc_blks(start_lba, end_lba)) {
