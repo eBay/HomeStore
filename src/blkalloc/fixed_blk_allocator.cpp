@@ -29,6 +29,10 @@ FixedBlkAllocator::~FixedBlkAllocator() {
 BlkAllocStatus FixedBlkAllocator::alloc(BlkId &in_bid) {
     std::unique_lock< std::mutex > lk(m_bm_mutex);
     assert(in_bid.get_nblks() == 1);
+    if (m_alloc_bm->is_bits_set_reset(in_bid.get_id(), in_bid.get_nblks(), true)) {
+        /* XXX: We need to have better status */
+        return BLK_ALLOC_FAILED;
+    }
     m_alloc_bm->set_bits(in_bid.get_id(), in_bid.get_nblks());
     return BLK_ALLOC_SUCCESS;
 }

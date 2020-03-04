@@ -879,10 +879,12 @@ private:
                     std::vector< std::pair< K, V > > result_kv;
                     query_req.callback()(match_kv, result_kv, query_req.get_cb_param());
                     auto ele_to_add = result_kv.size();
-                    if (count + ele_to_add > query_req.get_batch_size())
+                    if (count + ele_to_add > query_req.get_batch_size()) {
                         ele_to_add = query_req.get_batch_size() - count;
-                    if (ele_to_add > 0)
+                    }
+                    if (ele_to_add > 0) {
                         out_values.insert(out_values.end(), result_kv.begin(), result_kv.begin() + ele_to_add);
+                    }
                     count += ele_to_add;
 
                     BT_DEBUG_ASSERT_CMP(count, <=, query_req.get_batch_size(), my_node);

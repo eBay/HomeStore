@@ -336,9 +336,13 @@ public:
     BlkAllocStatus alloc_blk(BlkId& in_blkid) {
         PhysicalDevChunk* primary_chunk;
         auto blkid = to_chunk_specific_id(in_blkid, &primary_chunk);
-        auto size = m_used_size.fetch_add(in_blkid.data_size(m_pagesz), std::memory_order_relaxed);
-        HS_ASSERT_CMP(DEBUG, size, <=, get_size());
-        return (primary_chunk->get_blk_allocator()->alloc(blkid));
+        auto status = primary_chunk->get_blk_allocator()->alloc(blkid);
+        if (status == BLK_ALLOC_SUCCESS) {
+            /* insert it only if it is not previously allocated */
+            auto size = m_used_size.fetch_add(in_blkid.data_size(m_pagesz), std::memory_order_relaxed);
+            HS_ASSERT_CMP(DEBUG, size, <=, get_size());
+        }
+        return BLK_ALLOC_SUCCESS;
     }
 
     BlkAllocStatus alloc_blk(uint8_t nblks, const blk_alloc_hints& hints, BlkId* out_blkid) {

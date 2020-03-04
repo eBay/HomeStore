@@ -205,6 +205,10 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(BlkId& in_bid) {
 #ifndef NDEBUG
     m_alloced_bm->set_bits(in_bid.get_id(), in_bid.get_nblks());
 #endif
+    if (m_alloc_bm->is_bits_set_reset(in_bid.get_id(), in_bid.get_nblks(), true)) {
+        /* XXX: We need to have better status */
+        return BLK_ALLOC_FAILED;
+    }
     m_alloc_bm->set_bits(in_bid.get_id(), in_bid.get_nblks());
     BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Allocated: id={}, nblks={}", in_bid.get_id(), in_bid.get_nblks());
     return BLK_ALLOC_SUCCESS;
