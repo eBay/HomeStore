@@ -239,6 +239,7 @@ void Volume::blk_recovery_process_completions(bool success) {
 void Volume::alloc_blk_callback(struct BlkId bid, size_t offset_size, size_t size) {
     assert(m_state == vol_state::MOUNTING);
     BlkId free_bid(bid.get_blkid_at(offset_size, size, HomeBlks::instance()->get_data_pagesz()));
+    THIS_VOL_LOG(TRACE, volume, , "bid={}", free_bid.to_string());
     m_data_blkstore->alloc_blk(free_bid);
     m_used_size.fetch_add(size, std::memory_order_relaxed);
 }
