@@ -92,6 +92,11 @@ struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
     PhysicalDevChunk* chunk;
     Clock::time_point io_start_time;
 
+#ifndef NDEBUG
+    uint64_t dev_offset;
+    uint8_t *mem;
+#endif
+
     void inc_ref() { intrusive_ptr_add_ref(this); }
     void dec_ref() { intrusive_ptr_release(this); }
 
@@ -140,6 +145,19 @@ protected:
         COUNTER_INCREMENT_IF_ELSE(pdev->get_metrics(), vd_req->is_read, drive_read_errors, drive_write_errors, 1);
         pdev->device_manager()->handle_error(pdev);
     } else {
+#ifndef NDEBUG
+        if (!vd_req->is_read) {
+            uint8_t* ptr;
+            int      ret = posix_memalign((void**)&ptr, HomeStoreConfig::align_size, vd_req->size);
+            if (ret != 0) {
+                assert(0);
+            }
+            pdev->sync_read((char*)ptr, vd_req->size, vd_req->dev_offset);
+            ret = memcmp(ptr, vd_req->mem, vd_req->size); 
+            assert(ret == 0);
+            free(ptr);
+        }
+#endif
         HISTOGRAM_OBSERVE_IF_ELSE(pdev->get_metrics(), vd_req->is_read, drive_read_latency, drive_write_latency,
                                   get_elapsed_time_us(vd_req->io_start_time));
     }
@@ -487,6 +505,10 @@ public:
 
             req->inc_ref();
             req->io_start_time = Clock::now();
+#ifndef NDEBUG
+            req->dev_offset = dev_offset;
+            req->mem = (uint8_t *)(iov[0].iov_base);
+#endif
             pdev->writev(iov, iovcnt, size, dev_offset, (uint8_t*)req.get());
         }
 
