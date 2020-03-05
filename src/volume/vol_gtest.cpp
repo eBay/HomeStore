@@ -252,7 +252,7 @@ public:
         params.cache_size = 4 * 1024 * 1024 * 1024ul;
         params.disk_init = init;
         params.devices = device_info;
-        params.is_file = true;
+        params.is_file = dev_names.size() ? false : true;
         params.iomgr = iomgr_obj;
         params.init_done_cb = std::bind(&IOTest::init_done_cb, this, std::placeholders::_1, std::placeholders::_2);
         params.vol_mounted_cb = std::bind(&IOTest::vol_mounted_cb, this, std::placeholders::_1, std::placeholders::_2);
