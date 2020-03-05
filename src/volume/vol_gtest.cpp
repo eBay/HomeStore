@@ -71,6 +71,7 @@ uint32_t phy_page_size = 4096;
 uint32_t mem_btree_page_size = 4096;
 bool can_delete_volume = false;
 extern bool vol_gtest;
+std::vector< std::string > dev_names;
 #define VOL_PAGE_SIZE 4096
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
@@ -187,8 +188,11 @@ public:
         }
     }
     void remove_files() {
-        for (auto &n : names) {
-            remove(n.c_str());
+        /* no need to delete the user created file/disk */
+        if (dev_names.size() == 0) {
+            for (auto &n : names) {
+                remove(n.c_str());
+            }
         }
 
         for (uint32_t i = 0; i < max_vols; i++) {
@@ -207,21 +211,31 @@ public:
             
         /* create files */
 
-        for (uint32_t i = 0; i < MAX_DEVICES; i++) {
-            dev_info temp_info;
-            temp_info.dev_names = names[i];
-            device_info.push_back(temp_info);
-            if (init || disk_replace_cnt > 0) {
-                if (!init) {
-                    remove(names[i].c_str());
-                }
-                std::ofstream ofs(names[i].c_str(), std::ios::binary | std::ios::out);
-                ofs.seekp(max_disk_capacity - 1);
-                ofs.write("", 1);
-                ofs.close();
-                --disk_replace_cnt;
+        if (dev_names.size() != 0) {
+            for (uint32_t i = 0; i < dev_names.size(); i++) {
+                dev_info temp_info;
+                temp_info.dev_names = dev_names[i];
+                /* we use this capacity to calculate volume size */
+                max_capacity += max_disk_capacity;
+                device_info.push_back(temp_info);
             }
-            max_capacity += max_disk_capacity;
+        } else {
+            for (uint32_t i = 0; i < MAX_DEVICES; i++) {
+                dev_info temp_info;
+                temp_info.dev_names = names[i];
+                device_info.push_back(temp_info);
+                if (init || disk_replace_cnt > 0) {
+                    if (!init) {
+                        remove(names[i].c_str());
+                    }
+                    std::ofstream ofs(names[i].c_str(), std::ios::binary | std::ios::out);
+                    ofs.seekp(max_disk_capacity - 1);
+                    ofs.write("", 1);
+                    ofs.close();
+                    --disk_replace_cnt;
+                }
+                max_capacity += max_disk_capacity;
+            }
         }
         /* Don't populate the whole disks. Only 80 % of it */
         max_vol_size = (60 * max_capacity)/ (100 * max_vols);
@@ -1217,6 +1231,7 @@ SDS_OPTION_GROUP(test_volume,
 (delete_volume,"", "delete_volume", "delete_volume", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"),
 (atomic_page_size,"", "atomic_page_size", "atomic_page_size", ::cxxopts::value<uint32_t>()->default_value("4096"), "atomic_page_size"),
 (vol_page_size,"", "vol_page_size", "vol_page_size", ::cxxopts::value<uint32_t>()->default_value("4096"), "vol_page_size"),
+(device_list, "", "device_list", "List of device paths", ::cxxopts::value< std::vector< std::string > >(), "path [...]"),
 (phy_page_size,"", "phy_page_size", "phy_page_size", ::cxxopts::value<uint32_t>()->default_value("4096"), "phy_page_size"),
 (mem_btree_page_size,"", "mem_btree_page_size", "mem_btree_page_size", ::cxxopts::value<uint32_t>()->default_value("8192"), "mem_btree_page_size"))
 
@@ -1261,7 +1276,11 @@ int main(int argc, char *argv[]) {
     vol_page_size = SDS_OPTIONS["vol_page_size"].as<uint32_t>();
     phy_page_size = SDS_OPTIONS["phy_page_size"].as<uint32_t>();
     mem_btree_page_size = SDS_OPTIONS["mem_btree_page_size"].as<uint32_t>();  
-
+    
+    if (SDS_OPTIONS.count("device_list")) {
+        dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();
+    }
+    
     if (load_type == 2) {
         verify_data = 0;
     }

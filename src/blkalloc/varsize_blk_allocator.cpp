@@ -193,8 +193,11 @@ void VarsizeBlkAllocator::allocator_state_machine() {
 
 bool VarsizeBlkAllocator::is_blk_alloced(BlkId& b) {
 #ifndef NDEBUG
+    BlkAllocPortion* portion = blknum_to_portion(b.get_id());
+    portion->lock();
     auto ret = m_alloced_bm->is_bits_set_reset(b.get_id(), b.get_nblks(), true);
     BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Is allocated: id={}, nblks={}, status={}", b.get_id(), b.get_nblks(), ret);
+    portion->unlock();
     return ret;
 #else
     return true;
