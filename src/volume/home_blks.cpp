@@ -130,7 +130,9 @@ void HomeBlks::populate_disk_attrs() {
         HomeStoreConfig::phys_page_size = 4096;
         HomeStoreConfig::align_size = 4096;
 #ifndef NDEBUG
-        HomeStoreConfig::atomic_phys_page_size = 4096;
+        if (!m_cfg.is_file) {
+            HomeStoreConfig::atomic_phys_page_size = 512;
+        }
 #else
         HomeStoreConfig::atomic_phys_page_size = 4096;
 #endif

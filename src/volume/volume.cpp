@@ -161,7 +161,7 @@ void Volume::process_free_blk_callback(Free_Blk_Entry fbe) {
 
 /* when read happens on mapping btree, under read lock we mark blk so it does not get removed by concurrent writes */
 void Volume::pending_read_blk_cb(BlkId& bid) {
-    if (m_state != vol_state::ONLINE) {
+    if (m_state == vol_state::ONLINE) {
         /* Don't need to add it in read tracker if volume is not in online mode */
         m_read_blk_tracker->insert(bid);
     }
