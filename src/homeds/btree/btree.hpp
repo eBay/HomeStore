@@ -1494,7 +1494,6 @@ private:
 
 #ifdef _PRERELEASE
             if (curr_ind - start_ind > 1 && homestore_flip->test_flip("btree_leaf_node_split")) {
-                LOGINFO("btree_leaf_node_split flip is set");
                 ret = btree_status_t::retry;
                 goto out;
             }
