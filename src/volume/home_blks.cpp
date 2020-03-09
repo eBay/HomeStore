@@ -1195,6 +1195,8 @@ void HomeBlks::shutdown_process(shutdown_comp_callback shutdown_comp_cb, bool fo
 // 2. Start a thread to do shutdown routines;
 //
 std::error_condition HomeBlks::shutdown(shutdown_comp_callback shutdown_comp_cb, bool force) {
+    static bool started = false;
+
     if (m_init_failed) {
         LOGINFO("Init is failed. Nothing to shutdown");
         return no_error;
@@ -1207,8 +1209,6 @@ std::error_condition HomeBlks::shutdown(shutdown_comp_callback shutdown_comp_cb,
     }
 
     LOGINFO("shutting down the homestore");
-    started = true;
-
     m_shutdown = true;
 
     //
