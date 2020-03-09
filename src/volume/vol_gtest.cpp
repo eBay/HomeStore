@@ -959,9 +959,6 @@ start:
                 return false;
             }
             uuid = VolInterface::get_instance()->get_uuid(vol_info[vol_indx]->vol);
-#ifndef NDEBUG
-            VolInterface::get_instance()->verify_pending_blks(vol_info[vol_indx]->vol);
-#endif
             vol_info[vol_indx]->vol = nullptr;
         }
         VolInterface::get_instance()->remove_volume(uuid);
