@@ -8,6 +8,7 @@
 #include <vector>
 #include <memory>
 #include <error/error.h>
+#include <iomgr/iomgr.hpp>
 #include <boost/intrusive_ptr.hpp>
 #include <cassert>
 #include <sds_logging/logging.h>
