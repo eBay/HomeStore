@@ -780,7 +780,7 @@ private:
     void mapping_merge_cb(vector< pair< MappingKey, MappingValue > >&      match_kv,
                            vector< pair< MappingKey, MappingValue > >&      replace_kv,
                            BRangeUpdateCBParam< MappingKey, MappingValue >* cb_param) {
-        match_item_cb_put_internal(match_kv, replace_kv, false, cb_param);
+        match_item_cb_put(match_kv, replace_kv, cb_param);
     }
 
     /**

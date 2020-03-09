@@ -132,6 +132,7 @@ class HomeBlks : public VolInterface {
     data_blkstore_t* m_data_blk_store;
     metadata_blkstore_t* m_metadata_blk_store;
     sb_blkstore_t* m_sb_blk_store;
+    logdev_blkstore_t* m_logdev_blk_store;
     homeblks_sb* m_homeblks_sb; // the homesotre super block
     Cache< BlkId >* m_cache;
     bool m_rdy;
@@ -236,6 +237,7 @@ private:
     void create_data_blkstore(vdev_info_block* vb);
     void create_metadata_blkstore(vdev_info_block* vb);
     void create_sb_blkstore(vdev_info_block* vb);
+    void create_logdev_blkstore(vdev_info_block* vb);
     bool is_ready();
     void init_thread();
     void volume_destroy();

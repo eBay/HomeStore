@@ -1329,7 +1329,7 @@ public:
             req->version = 0xDEAD;
             req->cb = std::bind(&VirtualDev::process_completions, this, std::placeholders::_1);
             req->size = size;
-            req->chunk = pchunk;
+            req->chunk = primary_chunk;
             req->io_start_time = Clock::now();
             req->inc_ref();
 
