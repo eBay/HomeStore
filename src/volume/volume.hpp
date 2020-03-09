@@ -255,13 +255,12 @@ public:
     bool remove_free_blk_entry(std::vector< Free_Blk_Entry >& fbes, std::pair< MappingKey, MappingValue >& kv);
 
     uint64_t get_elapsed_time(Clock::time_point startTime);
-    void attach_completion_cb(const io_comp_callback& cb);
-    void print_tree();
-    void verify_tree();
-    void print_node(uint64_t blkid);
-    void blk_recovery_callback(const MappingValue& mv);
-    void set_recovery_error();
-
+    void     attach_completion_cb(const io_comp_callback& cb);
+    void     print_tree();
+    bool     verify_tree();
+    void     print_node(uint64_t blkid);
+    void     blk_recovery_callback(const MappingValue& mv);
+    void     set_recovery_error();
     mapping* get_mapping_handle() { return m_map; }
 
     uint64_t get_last_lba() {
@@ -270,19 +269,24 @@ public:
         return (get_size() / get_page_size()) - 1;
     }
 
-    uint64_t get_data_used_size() { return m_used_size; }
-    uint64_t get_metadata_used_size();
-    const char* get_name() const { return (m_sb->ondisk_sb->vol_name); }
-    uint64_t get_page_size() const { return m_sb->ondisk_sb->page_size; }
-    uint64_t get_size() const { return m_sb->ondisk_sb->size; }
-    boost::uuids::uuid get_uuid();
-    vol_state get_state();
-    void set_state(vol_state state, bool persist = true);
-    bool is_offline();
+    uint64_t            get_data_used_size() { return m_used_size; }
+    uint64_t            get_metadata_used_size();
+    const char*         get_name() const { return (m_sb->ondisk_sb->vol_name); }
+    uint64_t            get_page_size() const { return m_sb->ondisk_sb->page_size; }
+    uint64_t            get_size() const { return m_sb->ondisk_sb->size; }
+    boost::uuids::uuid  get_uuid();
+    vol_state           get_state();
+    void                set_state(vol_state state, bool persist = true);
+    bool                is_offline();
 
-#ifndef NDEBUG
-    void verify_pending_blks();
-#endif
+    
+    /**
+     * @brief : fix mapping btree
+     *
+     * @return : true for successfully fixed.
+     *           false for fail to fix 
+     */
+    bool                fix_mapping_btree(bool verify);
 };
 
 #define NUM_BLKS_PER_THREAD_TO_QUERY 10000ull

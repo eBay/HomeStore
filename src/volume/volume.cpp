@@ -47,8 +47,8 @@ Volume::Volume(const vol_params& params) :
     auto ret = posix_memalign((void**)&(m_sb->ondisk_sb), HomeStoreConfig::align_size, VOL_SB_SIZE);
     assert(!ret);
     assert(m_sb != nullptr);
-
-    m_sb->ondisk_sb->btree_sb = m_map->get_btree_sb();
+    
+	m_sb->ondisk_sb->btree_sb = m_map->get_btree_sb();
     m_sb->ondisk_sb->state = vol_state::ONLINE;
     m_sb->ondisk_sb->page_size = params.page_size;
     m_sb->ondisk_sb->size = params.size;
@@ -166,10 +166,6 @@ void Volume::pending_read_blk_cb(BlkId& bid) {
         m_read_blk_tracker->insert(bid);
     }
 }
-
-#ifndef NDEBUG
-void Volume::verify_pending_blks() { assert(m_read_blk_tracker->get_size() == 0); }
-#endif
 
 /* convertes kvs to free blk entries*/
 void Volume::get_free_blk_entries(std::vector< std::pair< MappingKey, MappingValue > >& kvs,
@@ -562,7 +558,7 @@ void Volume::check_and_complete_req(const vol_interface_req_ptr& hb_req, const s
 }
 
 void Volume::print_tree() { m_map->print_tree(); }
-void Volume::verify_tree() { m_map->verify_tree(); }
+bool Volume::verify_tree() { return m_map->verify_tree(); }
 
 void Volume::print_node(uint64_t blkid) { m_map->print_node(blkid); }
 
@@ -771,7 +767,7 @@ void Volume::get_allocated_blks() {
     int64_t start_lba = 0, end_lba = -1;
 
     std::vector< ThreadPool::TaskFuture< void > > v;
-
+    
     bool success = true;
     while (end_lba < max_lba) {
         // if high watermark is hit, wait for a while so that we do not consuming too
@@ -804,3 +800,15 @@ void Volume::set_recovery_error() {
 }
 
 bool Volume::is_offline() { return (m_state == DESTROYING || m_state == FAILED || m_state == OFFLINE); }
+
+bool Volume::fix_mapping_btree(bool verify) { 
+    auto ret = m_map->fix(0, get_last_lba(), verify);
+    
+    // update new btree sb;
+    if (ret) {
+        m_sb->ondisk_sb->btree_sb = m_map->get_btree_sb();
+        HomeBlks::instance()->vol_sb_write(m_sb);
+    }
+
+    return ret;
+}
