@@ -38,7 +38,7 @@ class HomestoreConan(ConanFile):
             "double-conversion/3.1.5",
             "evhtp/1.2.18.2",
             "farmhash/1.0.0",
-            "folly/2019.09.30.00",
+            "folly/2020.03.02.00",
             "isa-l/2.21.0",
             "libevent/2.1.11",
             )
