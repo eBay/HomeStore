@@ -499,6 +499,7 @@ int main(int argc, char* argv[]) {
     sds_logging::SetLogger("perf_test_volume");
     spdlog::set_pattern("[%D %T.%f%z] [%^%l%$] [%t] %v");
 
+#if 0
     disk_init = SDS_OPTIONS["init"].as< uint32_t >() ? true : false;
 
 
@@ -515,7 +516,7 @@ int main(int argc, char* argv[]) {
         }
         is_file = 1;
     }
-
+#endif
     for (uint32_t i = 0; i < dev_names.size(); ++i) {
         auto fd = open(dev_names[0].c_str(), O_RDWR);
     simple_store_cfg cfg;
