@@ -519,6 +519,7 @@ int main(int argc, char* argv[]) {
 #endif
     for (uint32_t i = 0; i < dev_names.size(); ++i) {
         auto fd = open(dev_names[0].c_str(), O_RDWR);
+    }
     simple_store_cfg cfg;
     cfg.m_run_time_ms = SDS_OPTIONS["run_time"].as< uint32_t >() * 1000;
     cfg.m_nthreads = SDS_OPTIONS["num_threads"].as< uint32_t >();

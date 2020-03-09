@@ -866,7 +866,7 @@ private:
                     if (can_panic) {
                         
                         /* verify the header */
-                        j = memcmp((void *) b.bytes, (uint8_t *)((uint64_t)vol_req->buf + tot_size_read), sizeof (uint64_t));
+                        j = memcmp((void *) b.bytes, (uint8_t *)((uint64_t)request->buf + tot_size_read), sizeof (uint64_t));
                         if (j != 0) {
                             LOGINFO("header mismatch lba read {}", *((uint64_t *)b.bytes));
                         }
