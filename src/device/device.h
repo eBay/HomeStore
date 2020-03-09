@@ -24,7 +24,6 @@
 #include <boost/uuid/uuid_generators.hpp>
 #include <fds/utils.hpp>
 #include <isa-l/crc.h>
-#include <iomgr/iomgr.hpp>
 #include <cstddef>
 
 using namespace iomgr;
