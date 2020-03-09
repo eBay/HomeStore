@@ -91,6 +91,11 @@ struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
     sisl::atomic_counter< int > refcount;
     PhysicalDevChunk* chunk;
     Clock::time_point io_start_time;
+
+#ifndef NDEBUG
+    uint64_t dev_offset;
+    uint8_t *mem;
+#endif
     std::atomic< uint8_t > outstanding_cb = 0;
 
     void inc_ref() { intrusive_ptr_add_ref(this); }
@@ -271,6 +276,7 @@ public:
             HS_LOG(INFO, device, "size of a chunk is resized to {}", m_chunk_size);
         }
 
+        LOGINFO("size of a chunk is {} is_stripe {} num chunks {}", m_chunk_size, is_stripe, m_num_chunks);
         if (m_chunk_size > MAX_CHUNK_SIZE) {
             throw homestore::homestore_exception("invalid chunk size in init", homestore_error::invalid_chunk_size);
         }
@@ -1103,10 +1109,14 @@ public:
     BlkAllocStatus alloc_blk(BlkId& in_blkid) {
         PhysicalDevChunk* primary_chunk;
         auto blkid = to_chunk_specific_id(in_blkid, &primary_chunk);
-        auto size = m_used_size.fetch_add(in_blkid.data_size(m_pagesz), std::memory_order_relaxed);
 
-        HS_ASSERT_CMP(DEBUG, size, <=, get_size());
-        return (primary_chunk->get_blk_allocator()->alloc(blkid));
+        auto status = primary_chunk->get_blk_allocator()->alloc(blkid);
+        if (status == BLK_ALLOC_SUCCESS) {
+            /* insert it only if it is not previously allocated */
+            auto size = m_used_size.fetch_add(in_blkid.data_size(m_pagesz), std::memory_order_relaxed);
+            HS_ASSERT_CMP(DEBUG, size, <=, get_size());
+        }
+        return BLK_ALLOC_SUCCESS;
     }
 
     BlkAllocStatus alloc_blk(uint8_t nblks, const blk_alloc_hints& hints, BlkId* out_blkid) {
@@ -1202,7 +1212,7 @@ public:
                uint32_t data_offset = 0) {
         BlkOpStatus ret_status = BLK_OP_SUCCESS;
         uint32_t size = bid.get_nblks() * get_page_size();
-        iovec iov[BlkId::max_blks_in_op()];
+        struct iovec iov[BlkId::max_blks_in_op()];
         int iovcnt = 0;
 
         uint32_t p = 0;
@@ -1302,8 +1312,8 @@ public:
         }
     }
 
-    ssize_t do_read_internal(PhysicalDev* pdev, PhysicalDevChunk* pchunk, const uint64_t dev_offset, char* ptr,
-                             const uint64_t size, boost::intrusive_ptr< virtualdev_req > req) {
+    ssize_t do_read_internal(PhysicalDev* pdev, PhysicalDevChunk* primary_chunk, const uint64_t primary_dev_offset,
+                             char* ptr, const uint64_t size, boost::intrusive_ptr< virtualdev_req > req) {
         COUNTER_INCREMENT(pdev->get_metrics(), drive_read_vector_count, 1);
         ssize_t bytes_read = 0;
 
@@ -1311,7 +1321,7 @@ public:
             // if req is null (sync), or it is a sync call;
             auto start = Clock::now();
             COUNTER_INCREMENT(pdev->get_metrics(), drive_sync_read_count, 1);
-            bytes_read = pdev->sync_read(ptr, size, dev_offset);
+            bytes_read = pdev->sync_read(ptr, size, primary_dev_offset);
             HISTOGRAM_OBSERVE(pdev->get_metrics(), drive_read_latency, get_elapsed_time_us(start));
         } else {
             COUNTER_INCREMENT(pdev->get_metrics(), drive_async_read_count, 1);
@@ -1319,26 +1329,26 @@ public:
             req->version = 0xDEAD;
             req->cb = std::bind(&VirtualDev::process_completions, this, std::placeholders::_1);
             req->size = size;
-            req->chunk = pchunk;
+            req->chunk = primary_chunk;
             req->io_start_time = Clock::now();
             req->inc_ref();
 
-            pdev->read(ptr, size, dev_offset, (uint8_t*)req.get());
+            pdev->read(ptr, size, primary_dev_offset, (uint8_t*)req.get());
             bytes_read = size;
         }
 
         if (sisl_unlikely(get_nmirrors())) {
             // If failed and we have mirrors, we can read from any one of the mirrors as well
-            uint64_t primary_chunk_offset = dev_offset - pchunk->get_start_offset();
-            for (auto mchunk : m_mirror_chunks.find(pchunk)->second) {
-                uint64_t dev_offset_m = mchunk->get_start_offset() + primary_chunk_offset;
-                auto pdev = mchunk->get_physical_dev_mutable();
 
+            uint64_t primary_chunk_offset = primary_dev_offset - primary_chunk->get_start_offset();
+            for (auto mchunk : m_mirror_chunks.find(primary_chunk)->second) {
+                uint64_t dev_offset = mchunk->get_start_offset() + primary_chunk_offset;
+                auto pdev = mchunk->get_physical_dev_mutable();
                 HS_ASSERT(DEBUG, ((req == nullptr) || req->isSyncCall), "Expecting null req or sync call");
 
                 COUNTER_INCREMENT(pdev->get_metrics(), drive_sync_read_count, 1);
                 auto start_time = Clock::now();
-                pdev->sync_read(ptr, size, dev_offset_m);
+                pdev->sync_read(ptr, size, dev_offset);
                 HISTOGRAM_OBSERVE(pdev->get_metrics(), drive_read_latency, get_elapsed_time_us(start_time));
             }
         }
@@ -1362,7 +1372,7 @@ public:
 
     void readv(const BlkId& bid, const homeds::MemVector& buf, boost::intrusive_ptr< virtualdev_req > req) {
         // Convert the input memory to iovector
-        iovec iov[BlkId::max_blks_in_op()];
+        struct iovec iov[BlkId::max_blks_in_op()];
         int iovcnt = 0;
         uint32_t size = buf.size();
 
@@ -1384,6 +1394,7 @@ public:
 
         do_preadv_internal(pdev, primary_chunk, primary_dev_offset, iov, iovcnt, size, req);
     }
+
 
     void get_vb_context(const sisl::blob& ctx_data) const { m_mgr->get_vb_context(m_vb->vdev_id, ctx_data); }
 

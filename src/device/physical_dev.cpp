@@ -30,7 +30,14 @@ namespace homestore {
 static std::atomic< uint64_t > glob_phys_dev_offset(0);
 static std::atomic< uint32_t > glob_phys_dev_ids(0);
 
-PhysicalDev::~PhysicalDev() { free(m_super_blk); }
+
+PhysicalDev::~PhysicalDev() {
+    
+    LOGINFO("device name {} superblock magic {} product name {} version {}", m_devname, m_super_blk->magic, 
+            m_super_blk->product_name, m_super_blk->version);
+    free(m_super_blk);
+    // m_ep will be deleted in iomgr::stop
+}
 
 void PhysicalDev::update(uint32_t dev_num, uint64_t dev_offset, uint32_t first_chunk_id) {
 
@@ -99,7 +106,7 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
         throw std::system_error(errno, std::system_category(), "error while opening the device");
     }
 
-    LOGINFO("FD of {} device name {}", m_devfd, m_devname);
+    LOGINFO("Device {} opened with FD {}", m_devname, m_devfd);
 
     if (is_file) {
         struct stat buf;
@@ -128,8 +135,11 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
 
     auto temp = m_devsize;
     m_devsize = ALIGN_SIZE_TO_LEFT(m_devsize, HomeStoreConfig::phys_page_size);
-    if (m_devsize != temp) { LOGWARN("device size is not the multiple of physical page size old size {}", temp); }
-    LOGINFO("size of disk {} is {}", m_devname, m_devsize);
+
+    if (m_devsize != temp) {
+        LOGWARN("device size is not the multiple of physical page size old size {}", temp);
+    }
+    LOGINFO("Device {} size is {}", m_devname, m_devsize);
     m_dm_chunk[0] = m_dm_chunk[1] = nullptr;
     if (is_init) {
         /* create a chunk */
@@ -182,7 +192,12 @@ bool PhysicalDev::load_super_block() {
     // Validate if its homestore formatted device
 
     bool is_omstore_dev = validate_device();
-    if (!is_omstore_dev) { return false; }
+
+    if (!is_omstore_dev) {
+        LOGCRITICAL("invalid device name {} found magic {} product name {} version {}", m_devname, m_super_blk->magic, 
+                        m_super_blk->product_name, m_super_blk->version);
+        return false;
+    }
 
     if (m_super_blk->system_uuid != m_system_uuid) {
         std::stringstream ss;

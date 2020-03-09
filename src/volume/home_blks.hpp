@@ -11,6 +11,7 @@
 #include <async_http/http_server.hpp>
 #include <threadpool/thread_pool.h>
 #include <utility/atomic_counter.hpp>
+#include <metrics/metrics.hpp>
 
 #ifndef DEBUG
 extern bool same_value_gen;
@@ -49,36 +50,43 @@ struct sb_blkstore_blob : blkstore_blob {
 
 #define VOL_SB_SIZE HomeStoreConfig::atomic_phys_page_size
 #define VOL_SB_MAGIC 0xCEEDDEEB
-/* Note: version is same for both vol config and vol sb */
 #define VOL_SB_VERSION 0x1
-typedef uint32_t vol_cfg_sb_flag_t;
+#define HOMEBLKS_SB_SIZE HomeStoreConfig::atomic_phys_page_size
+#define HOMEBLKS_SB_MAGIC 0xCEEDDEEB
+#define HOMEBLKS_SB_VERSION 0x1
+
+typedef uint32_t homeblks_sb_flag_t;
 
 #define HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN 0x00000001UL
-struct vol_sb_header {
+struct homeblks_sb {
     uint64_t magic;
     uint64_t version;
     uint32_t gen_cnt;
     BlkId blkid;
-    uint64_t boot_cnt;
     boost::uuids::uuid uuid;
-} __attribute((packed));
 
-struct vol_config_sb : vol_sb_header {
+    uint64_t boot_cnt;
     BlkId vol_list_head;
     int num_vols;
-    vol_cfg_sb_flag_t flags;
+    homeblks_sb_flag_t flags;
 
-    void init_flag(vol_cfg_sb_flag_t f) { flags = f; }
-    void set_flag(vol_cfg_sb_flag_t bit) { flags |= bit; }
-    void clear_flag(vol_cfg_sb_flag_t bit) { flags &= ~bit; }
-    bool test_flag(vol_cfg_sb_flag_t bit) { return flags & bit; }
+    void init_flag(homeblks_sb_flag_t f) { flags = f; }
+    void set_flag(homeblks_sb_flag_t bit) { flags |= bit; }
+    void clear_flag(homeblks_sb_flag_t bit) { flags &= ~bit; }
+    bool test_flag(homeblks_sb_flag_t bit) { return flags & bit; }
 } __attribute((packed));
 
-// static_assert(std::is_trivially_copyable< vol_config_sb >::value, "Expecting vol_config_sb to be trivally copyable");
+// static_assert(std::is_trivially_copyable< homeblks_sb >::value, "Expecting homeblks_sb to be trivally copyable");
 static_assert(std::is_trivially_copyable< BlkId >::value, "Expecting BlkId to be trivally copyable");
 
 /* If it exceeds 8k then we need to use two buffer to keep the data consistent */
-struct vol_ondisk_sb : vol_sb_header {
+struct vol_ondisk_sb {
+    uint64_t magic;
+    uint64_t version;
+    uint32_t gen_cnt;
+    BlkId blkid;
+    boost::uuids::uuid uuid;
+
     BlkId next_blkid;
     BlkId prev_blkid;
 
@@ -118,6 +126,21 @@ using namespace homeds::btree;
 class HomeBlks;
 using HomeBlksSafePtr = boost::intrusive_ptr< HomeBlks >;
 
+typedef homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy > data_blkstore_t;
+typedef homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy > sb_blkstore_t;
+typedef homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy, BLKSTORE_BUFFER_TYPE > metadata_blkstore_t;
+typedef homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy > logdev_blkstore_t;
+typedef std::map< boost::uuids::uuid, std::shared_ptr< homestore::Volume > > vol_map_t;
+typedef boost::intrusive_ptr< BlkBuffer > blk_buf_t;
+
+class HomeBlksMetrics : public sisl::MetricsGroupWrapper {
+public:
+    explicit HomeBlksMetrics(const char* homeblks_name) : sisl::MetricsGroupWrapper("HomeBlks", homeblks_name) {
+        REGISTER_HISTOGRAM(scan_volumes_latency, "Scan Volumes latency");
+        register_me_to_farm();
+    }
+};
+
 /**
  * @brief HomeBlks - Implementor of VolInterface.
  *
@@ -137,14 +160,14 @@ class HomeBlks : public VolInterface {
     init_params m_cfg;
     std::thread m_thread_id;
     std::unique_ptr< DeviceManager > m_dev_mgr;
-    std::unique_ptr< BlkStore< VdevVarSizeBlkAllocatorPolicy > > m_data_blk_store;
-    std::unique_ptr< BlkStore< VdevFixedBlkAllocatorPolicy, BLKSTORE_BUFFER_TYPE > > m_metadata_blk_store;
-    std::unique_ptr< BlkStore< VdevVarSizeBlkAllocatorPolicy > > m_sb_blk_store;
-    std::unique_ptr< BlkStore< VdevVarSizeBlkAllocatorPolicy > > m_logdev_blk_store;
-    sisl::aligned_unique_ptr< vol_config_sb > m_cfg_sb;
+    std::unique_ptr< data_blkstore_t > m_data_blk_store;
+    std::unique_ptr< metadata_blkstore_t > m_metadata_blk_store;
+    std::unique_ptr< sb_blkstore_t > m_sb_blk_store;
+    std::unique_ptr< logdev_blkstore_t > m_logdev_blk_store;
+    sisl::aligned_unique_ptr< homeblks_sb > m_homeblks_sb; // the homestore super block
     std::unique_ptr< Cache< BlkId > > m_cache;
     bool m_rdy;
-    std::map< boost::uuids::uuid, std::shared_ptr< Volume > > m_volume_map;
+    vol_map_t m_volume_map;
     std::recursive_mutex m_vol_lock;
     vol_mem_sb* m_last_vol_sb;
     bool m_vdev_failed;
@@ -161,6 +184,7 @@ class HomeBlks : public VolInterface {
     sisl::atomic_counter< uint64_t > m_usage_counter = 1;
     bool m_print_checksum;
     iomgr::timer_handle_t m_shutdown_timer_hdl = iomgr::null_timer_handle;
+    HomeBlksMetrics m_metrics;
 
 public:
     static std::string version;
@@ -198,16 +222,15 @@ public:
     virtual std::error_condition remove_volume(const boost::uuids::uuid& uuid) override;
     virtual VolumePtr lookup_volume(const boost::uuids::uuid& uuid) override;
     virtual SnapshotPtr snap_volume(VolumePtr) override;
-
     virtual const char* get_name(const VolumePtr& vol) override;
     virtual uint64_t get_page_size(const VolumePtr& vol) override;
     virtual boost::uuids::uuid get_uuid(VolumePtr vol) override;
-    virtual homeds::blob at_offset(const boost::intrusive_ptr< BlkBuffer >& buf, uint32_t offset) override;
+    virtual homeds::blob at_offset(const blk_buf_t& buf, uint32_t offset) override;
     virtual bool vol_state_change(const VolumePtr& vol, vol_state new_state) override;
     void vol_sb_write(vol_mem_sb* sb);
     void vol_sb_init(vol_mem_sb* sb);
-    void config_super_block_init(BlkId& bid);
-    void config_super_block_write();
+    void homeblks_sb_init(BlkId& bid);
+    void homeblks_sb_write();
     void vol_scan_cmpltd(const VolumePtr& vol, vol_state state, bool success);
     void populate_disk_attrs();
     virtual void attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback cb) override;
@@ -218,21 +241,37 @@ public:
     virtual cap_attrs get_system_capacity() override;
     virtual cap_attrs get_vol_capacity(const VolumePtr& vol) override;
 
-    homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >* get_data_blkstore();
-    homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy, BLKSTORE_BUFFER_TYPE >* get_metadata_blkstore();
-    homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >* get_logdev_blkstore();
+    data_blkstore_t* get_data_blkstore();
+    metadata_blkstore_t* get_metadata_blkstore();
+    logdev_blkstore_t* get_logdev_blkstore();
     void vol_sb_remove(vol_mem_sb* sb);
     uint32_t get_data_pagesz() const;
     uint64_t get_boot_cnt();
     void init_done(std::error_condition err, const out_params& params);
 
     void print_tree(const VolumePtr& vol, bool chksum = true);
-    void verify_tree(const VolumePtr& vol);
+    bool verify_tree(const VolumePtr& vol);
     void print_node(const VolumePtr& vol, uint64_t blkid, bool chksum = true);
 
-#ifndef NDEBUG
-    void verify_pending_blks(const VolumePtr& vol);
-#endif
+    /**
+     * @brief : fix corrupted mapping in volume
+     *
+     * @param vol : volume pointer that holds the mapping btree being fxied
+     *
+     * @return : true for a successful fix;
+     *           false for a failed fix;
+     */
+    virtual bool fix_tree(VolumePtr vol, bool verify = false) override;
+
+    /**
+     * @brief : get volume state
+     *
+     * @param vol : volume pointer to whose state is being returned;
+     *
+     * @return : volume state
+     */
+    virtual vol_state get_state(VolumePtr vol) override;
+
 #ifdef _PRERELEASE
     void set_io_flip();
     void set_error_flip();
@@ -254,15 +293,11 @@ public:
 private:
     HomeBlks(const init_params& cfg);
     BlkId alloc_blk();
-    static void new_vdev_found(DeviceManager* dev_mgr, vdev_info_block* vb);
     void process_vdev_error(vdev_info_block* vb);
     void create_blkstores();
     void add_devices();
     void vol_mounted(const VolumePtr& vol, vol_state state);
     void vol_state_change(const VolumePtr& vol, vol_state old_state, vol_state new_state);
-    boost::intrusive_ptr< BlkBuffer > get_valid_buf(const std::vector< boost::intrusive_ptr< BlkBuffer > >& bbuf,
-                                                    bool& rewrite);
-    void construct_vol_config_sb(std::vector< boost::intrusive_ptr< BlkBuffer > >& bbuf, bool& rewrite);
     void scan_volumes();
     void create_data_blkstore(vdev_info_block* vb);
     void create_metadata_blkstore(vdev_info_block* vb);
@@ -275,6 +310,8 @@ private:
     void schedule_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool force);
     bool do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool force);
     bool do_volume_shutdown(bool force);
+    blk_buf_t get_valid_buf(const std::vector< blk_buf_t >& bbuf, bool& rewrite);
+    static void new_vdev_found(DeviceManager* dev_mgr, vdev_info_block* vb);
 };
 } // namespace homestore
 #endif // OMSTORE_OMSTORE_HPP

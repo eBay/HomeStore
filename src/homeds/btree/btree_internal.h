@@ -25,6 +25,7 @@
 #include <boost/preprocessor/cat.hpp>
 #include <boost/preprocessor/control/if.hpp>
 #include <boost/preprocessor/stringize.hpp>
+#include "main/homestore_assert.hpp"
 
 ENUM(btree_status_t, uint32_t, success, not_found, item_found, closest_found, closest_removed, retry, has_more,
      read_failed, write_failed, stale_buf, refresh_failed, put_failed, space_not_avail, split_failed, insert_failed);
@@ -46,66 +47,23 @@ typedef enum {
 #define ASSERT_IS_VALID_INTERIOR_CHILD_INDX(ret, node)
 #endif
 
-#define _BTNODE_LOG_FORMAT "[node={}:{}:N={}]: "
-#define _BTNODE_LOG_MSG(node) (node->is_leaf() ? "L" : "I"), node->get_node_id_int(), node->get_total_entries()
+#define THIS_BT_LOG(level, mod, node, msg, ...)                                                                        \
+    HS_DETAILED_LOG(level, mod, , "btree", m_btree_cfg.get_name(), BOOST_PP_IF(BOOST_PP_IS_EMPTY(node), , "node"),     \
+                    node->to_string(), msg, ##__VA_ARGS__)
+#define BT_ASSERT(assert_type, cond, node, ...)                                                                        \
+    HS_DETAILED_ASSERT(assert_type, cond, , "btree", m_btree_cfg.get_name(),                                           \
+                       BOOST_PP_IF(BOOST_PP_IS_EMPTY(node), , "node"), node->to_string(), ##__VA_ARGS__)
+#define BT_ASSERT_CMP(assert_type, val1, cmp, val2, node, ...)                                                         \
+    HS_DETAILED_ASSERT_CMP(assert_type, val1, cmp, val2, , "btree", m_btree_cfg.get_name(),                            \
+                           BOOST_PP_IF(BOOST_PP_IS_EMPTY(node), , "node"), node->to_string(), ##__VA_ARGS__)
 
-#define _BTNODE_LOG_VERBOSE_FORMAT "node = {}\n"
-#define _BTNODE_LOG_VERBOSE_MSG(node) node->to_string()
-#define _BTMSG_EXPAND(...) __VA_ARGS__
-
-// clang-format off
-#define BT_LOG(level, mod, node, fmt, ...)                                                                             \
-    LOG##level##MOD(                                                                                                   \
-        BOOST_PP_IF(BOOST_PP_IS_EMPTY(mod), base, mod),                                                                \
-        "[btree={}]" BOOST_PP_IF(BOOST_PP_IS_EMPTY(node), "{}: ", _BTNODE_LOG_FORMAT) fmt,                             \
-        m_btree_cfg.get_name(),                                                                                        \
-        BOOST_PP_EXPAND(_BTMSG_EXPAND BOOST_PP_IF(BOOST_PP_IS_EMPTY(node), (""), (_BTNODE_LOG_MSG(node)))),            \
-        ##__VA_ARGS__)
-
-#define _BT_ASSERT_MSG(asserttype, node, ...) \
-        "\n**********************************************************\n"                                               \
-        "btree = {}\n" BOOST_PP_IF(BOOST_PP_IS_EMPTY(node), "{}: ", _BTNODE_LOG_VERBOSE_FORMAT) "Metrics = {}\n" "{}"  \
-        "\n**********************************************************\n",                                              \
-        m_btree_cfg.get_name(),                                                                                        \
-        BOOST_PP_EXPAND(_BTMSG_EXPAND BOOST_PP_IF(BOOST_PP_IS_EMPTY(node), (""), (_BTNODE_LOG_VERBOSE_MSG(node)))),    \
-        asserttype##_METRICS_DUMP_MSG,                                                                                 \
-        sds_logging::format_log_msg(__VA_ARGS__)
-// clang-format on
-
-#define BT_ASSERT(asserttype, cond, node, fmt, ...)                                                                    \
-    asserttype##_ASSERT(cond, _BT_ASSERT_MSG(asserttype, node, fmt, ##__VA_ARGS__))
-
-#define BT_ASSERT_OP(asserttype, optype, val1, val2, node, ...)                                                        \
-    asserttype##_ASSERT_##optype(val1, val2, _BT_ASSERT_MSG(asserttype, node, ##__VA_ARGS__))
-
-#define BT_ASSERT_EQ(asserttype, ...) BT_ASSERT_OP(asserttype, EQ, ##__VA_ARGS__)
-#define BT_ASSERT_NE(asserttype, ...) BT_ASSERT_OP(asserttype, NE, ##__VA_ARGS__)
-#define BT_ASSERT_GT(asserttype, ...) BT_ASSERT_OP(asserttype, GT, ##__VA_ARGS__)
-#define BT_ASSERT_GE(asserttype, ...) BT_ASSERT_OP(asserttype, GE, ##__VA_ARGS__)
-#define BT_ASSERT_LT(asserttype, ...) BT_ASSERT_OP(asserttype, LT, ##__VA_ARGS__)
-#define BT_ASSERT_LE(asserttype, ...) BT_ASSERT_OP(asserttype, LE, ##__VA_ARGS__)
-
-/* Assert with log messages. Parameters are
- * cond: Condition which when false will trigger the assert
- * node: [optional]Btree node whose node details has to be printed
- * fmt: Format message
- * ...: Any parameters to pass to these format messages
- */
 #define BT_DEBUG_ASSERT(...) BT_ASSERT(DEBUG, __VA_ARGS__)
 #define BT_RELEASE_ASSERT(...) BT_ASSERT(RELEASE, __VA_ARGS__)
 #define BT_LOG_ASSERT(...) BT_ASSERT(LOGMSG, __VA_ARGS__)
 
-/* Assert if comparision does not match. Parameters are
- * Comparator: What comparison to do, valid values are one of [EQ, NE, GT, GE, LT, LE]
- * val1: LHS to compare
- * val2: RHS to compare
- * node: [optional]Btree node whose node details has to be printed
- * fmt: [optional] Additional message
- * ...: Any parameters to pass to these format messages
- */
-#define BT_DEBUG_ASSERT_CMP(optype, ...) BT_ASSERT_OP(DEBUG, optype, ##__VA_ARGS__)
-#define BT_RELEASE_ASSERT_CMP(optype, ...) BT_ASSERT_OP(RELEASE, optype, ##__VA_ARGS__)
-#define BT_LOG_ASSERT_CMP(optype, ...) BT_ASSERT_OP(LOGMSG, optype, ##__VA_ARGS__)
+#define BT_DEBUG_ASSERT_CMP(...) BT_ASSERT_CMP(DEBUG, ##__VA_ARGS__)
+#define BT_RELEASE_ASSERT_CMP(...) BT_ASSERT_CMP(RELEASE, ##__VA_ARGS__)
+#define BT_LOG_ASSERT_CMP(...) BT_ASSERT_CMP(LOGMSG, ##__VA_ARGS__)
 
 // structure to track btree multinode operations on different nodes
 #define btree_multinode_req_ptr boost::intrusive_ptr< btree_multinode_req< btree_req_type > >
@@ -334,8 +292,8 @@ class BtreeSearchRange;
 class BtreeKey {
 public:
     BtreeKey() = default;
-    // BtreeKey(const BtreeKey& other) = delete; // Deleting copy constructor forces the derived class to define its own
-    // copy constructor
+    // BtreeKey(const BtreeKey& other) = delete; // Deleting copy constructor forces the
+    // derived class to define its own copy constructor
     virtual ~BtreeKey() = default;
 
     // virtual BtreeKey& operator=(const BtreeKey& other) = delete; // Deleting = overload forces the derived to define
@@ -348,6 +306,7 @@ public:
     virtual homeds::blob get_blob() const = 0;
     virtual void set_blob(const homeds::blob& b) = 0;
     virtual void copy_blob(const homeds::blob& b) = 0;
+
     /* Applicable to extent keys. It doesn't copy the entire blob. Copy only the end key of the blob */
     virtual void copy_end_key_blob(const homeds::blob& b) { copy_blob(b); };
 
@@ -359,10 +318,12 @@ public:
 };
 
 ENUM(_MultiMatchSelector, uint16_t, DO_NOT_CARE, LEFT_MOST, RIGHT_MOST,
-     BEST_FIT_TO_CLOSEST,           // Return the entry either same or more then the search key. If nothing is available
-                                    // then return the entry just smaller then the search key.
-     BEST_FIT_TO_CLOSEST_FOR_REMOVE // It is similar as BEST_FIT_TO_CLOSEST but have special handling for remove
-                                    // This code will be removed once range query is supported in remove
+     BEST_FIT_TO_CLOSEST,           // Return the entry either same or more then the search key. If
+                                    // nothing is available then return the entry just smaller then the
+                                    // search key.
+     BEST_FIT_TO_CLOSEST_FOR_REMOVE // It is similar as BEST_FIT_TO_CLOSEST but have special
+                                    // handling for remove This code will be removed once
+                                    // range query is supported in remove
 )
 
 class BtreeSearchRange {
@@ -484,8 +445,8 @@ public:
     virtual std::string to_string() const { return ""; }
 };
 
-/* This class is a top level class to keep track of the locks that are held currently. It is used for serializabke
- * query to unlock all nodes in right order at the end of the lock */
+/* This class is a top level class to keep track of the locks that are held currently. It is
+ * used for serializabke query to unlock all nodes in right order at the end of the lock */
 class BtreeLockTracker {
 public:
     virtual ~BtreeLockTracker() = default;
@@ -496,25 +457,26 @@ struct BtreeQueryCursor {
     std::unique_ptr< BtreeLockTracker > m_locked_nodes;
 };
 
-ENUM(
-    BtreeQueryType, uint8_t,
-    // This is default query which walks to first element in range, and then sweeps/walks across the leaf nodes.
-    // However, if upon pagination, it again walks down the query from the key it left off.
-    SWEEP_NON_INTRUSIVE_PAGINATION_QUERY,
+ENUM(BtreeQueryType, uint8_t,
+     // This is default query which walks to first element in range, and then sweeps/walks
+     // across the leaf nodes. However, if upon pagination, it again walks down the query from
+     // the key it left off.
+     SWEEP_NON_INTRUSIVE_PAGINATION_QUERY,
 
-    // Similar to sweep query, except that it retains the node and its lock during pagination. This is more of intrusive
-    // query and if the caller is not careful, the read lock will never be unlocked and could cause deadlocks. Use this
-    // option carefully.
-    SWEEP_INTRUSIVE_PAGINATION_QUERY,
+     // Similar to sweep query, except that it retains the node and its lock during
+     // pagination. This is more of intrusive query and if the caller is not careful, the read
+     // lock will never be unlocked and could cause deadlocks. Use this option carefully.
+     SWEEP_INTRUSIVE_PAGINATION_QUERY,
 
-    // This is relatively inefficient query where every leaf node goes from its parent node instead of walking the
-    // leaf node across. This is useful only if we want to check and recover if parent and leaf node are in different
-    // generations or crash recovery cases.
-    TREE_TRAVERSAL_QUERY,
+     // This is relatively inefficient query where every leaf node goes from its parent node
+     // instead of walking the leaf node across. This is useful only if we want to check and
+     // recover if parent and leaf node are in different generations or crash recovery cases.
+     TREE_TRAVERSAL_QUERY,
 
-    // This is both inefficient and quiet intrusive/unsafe query, where it locks the range that is being queried for
-    // and do not allow any insert or update within that range. It essentially create a serializable level of isolation.
-    SERIALIZABLE_QUERY)
+     // This is both inefficient and quiet intrusive/unsafe query, where it locks the range
+     // that is being queried for and do not allow any insert or update within that range. It
+     // essentially create a serializable level of isolation.
+     SERIALIZABLE_QUERY)
 
 // Base class for range callback params
 class BRangeCBParam {
@@ -529,7 +491,8 @@ public:
 
 private:
     BtreeSearchRange m_input_range; // Btree range filter originally provided
-    BtreeSearchRange m_sub_range;   // Btree sub range used during callbacks. start non-inclusive, but end inclusive.
+    BtreeSearchRange m_sub_range;   // Btree sub range used during callbacks. start
+                                    // non-inclusive, but end inclusive.
 };
 
 // class for range query callback param
@@ -624,18 +587,22 @@ template < typename K, typename V >
 using match_item_cb_update_t = std::function< void(std::vector< std::pair< K, V > >&, std::vector< std::pair< K, V > >&,
                                                    BRangeUpdateCBParam< K, V >*) >;
 template < typename K, typename V >
+using get_size_needed_cb_t = std::function < uint32_t(std::vector< std::pair< K, V > >&, BRangeUpdateCBParam< K, V >*) >;
+template < typename K, typename V >
 class BtreeUpdateRequest : public BRangeRequest {
 public:
-    BtreeUpdateRequest(BtreeSearchRange& search_range, match_item_cb_update_t< K, V > cb = nullptr,
+    BtreeUpdateRequest(BtreeSearchRange& search_range, match_item_cb_update_t< K, V > cb = nullptr, 
+                       get_size_needed_cb_t< K, V > size_cb = nullptr,
                        BRangeUpdateCBParam< K, V >* cb_param = nullptr) :
-            BRangeRequest(cb_param, search_range),
-            m_cb(cb) {}
+            BRangeRequest(cb_param, search_range), m_cb(cb), m_size_cb(size_cb) {}
 
     match_item_cb_update_t< K, V > callback() const { return m_cb; }
     BRangeUpdateCBParam< K, V >* get_cb_param() const { return (BRangeUpdateCBParam< K, V >*)m_cb_param; }
+    get_size_needed_cb_t< K, V > get_size_needed_callback() { return m_size_cb; }
 
 protected:
     const match_item_cb_update_t< K, V > m_cb;
+    const get_size_needed_cb_t <K, V> m_size_cb;
 };
 
 #if 0

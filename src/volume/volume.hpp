@@ -40,13 +40,10 @@ typedef boost::intrusive_ptr< volume_req > volume_req_ptr;
 #define BOOT_CNT_MASK 0x0000fffffffffffful
 #define GET_IO_SEQ_ID(sid) ((m_hb->get_boot_cnt() << SEQ_ID_BIT_CNT) | (sid & BOOT_CNT_MASK))
 
-#define _VOL_REQ_LOG_FORMAT "[req_id={}]: "
-#define _VOL_REQ_LOG_MSG(req) req->request_id
-#define _VOL_REQ_LOG_VERBOSE_FORMAT "[request={}]"
-#define _VOL_REQ_LOG_VERBOSE_MSG(req) req->to_string()
-#define _VOLMSG_EXPAND(...) __VA_ARGS__
-
-#define VOL_LOG(level, mod, req, msg, ...) HS_SUBMOD_LOG(level, mod, req, "vol", this->m_vol_uuid, msg, ##__VA_ARGS__)
+#define VOL_INFO_LOG(volname, msg, ...) HS_SUBMOD_LOG(INFO, base, , "vol", volname, msg, ##__VA_ARGS__)
+#define VOL_ERROR_LOG(volname, msg, ...) HS_SUBMOD_LOG(ERROR, base, , "vol", volname, msg, ##__VA_ARGS__)
+#define THIS_VOL_LOG(level, mod, req, msg, ...)                                                                        \
+    HS_SUBMOD_LOG(level, mod, req, "vol", this->m_vol_uuid, msg, ##__VA_ARGS__)
 #define VOL_ASSERT(assert_type, cond, req, ...)                                                                        \
     HS_SUBMOD_ASSERT(assert_type, cond, req, "vol", this->m_vol_uuid, ##__VA_ARGS__)
 #define VOL_ASSERT_CMP(assert_type, val1, cmp, val2, req, ...)                                                         \
@@ -297,7 +294,7 @@ public:
     uint64_t get_elapsed_time(Clock::time_point startTime);
     void attach_completion_cb(const io_comp_callback& cb);
     void print_tree();
-    void verify_tree();
+    bool verify_tree();
     void print_node(uint64_t blkid);
     void blk_recovery_callback(const MappingValue& mv);
     void set_recovery_error();
@@ -310,6 +307,13 @@ public:
         return (get_size() / get_page_size()) - 1;
     }
 
+    /**
+     * @brief : fix mapping btree
+     *
+     * @return : true for successfully fixed.
+     *           false for fail to fix
+     */
+    bool fix_mapping_btree(bool verify);
     uint64_t get_data_used_size() { return m_used_size; }
     uint64_t get_metadata_used_size();
     const char* get_name() const { return (m_sb->ondisk_sb->vol_name); }

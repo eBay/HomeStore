@@ -230,8 +230,11 @@ void VarsizeBlkAllocator::allocator_state_machine() {
 
 bool VarsizeBlkAllocator::is_blk_alloced(BlkId& b) {
 #ifndef NDEBUG
+    BlkAllocPortion* portion = blknum_to_portion(b.get_id());
+    portion->lock();
     auto ret = m_alloced_bm->is_bits_set_reset(b.get_id(), b.get_nblks(), true);
     BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Is allocated: id={}, nblks={}, status={}", b.get_id(), b.get_nblks(), ret);
+    portion->unlock();
     return ret;
 #else
     return true;
@@ -239,11 +242,21 @@ bool VarsizeBlkAllocator::is_blk_alloced(BlkId& b) {
 }
 
 BlkAllocStatus VarsizeBlkAllocator::alloc(BlkId& in_bid) {
+    BlkAllocPortion* portion = blknum_to_portion(in_bid.get_id());
+
+    portion->lock();
 #ifndef NDEBUG
     m_alloced_bm->set_bits(in_bid.get_id(), in_bid.get_nblks());
 #endif
+    if (m_alloc_bm->is_bits_set_reset(in_bid.get_id(), in_bid.get_nblks(), true)) {
+        /* XXX: We need to have better status */
+        portion->unlock();
+        return BLK_ALLOC_FAILED;
+    }
     m_alloc_bm->set_bits(in_bid.get_id(), in_bid.get_nblks());
     BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Allocated: id={}, nblks={}", in_bid.get_id(), in_bid.get_nblks());
+    portion->unlock();
+    
     return BLK_ALLOC_SUCCESS;
 }
 
