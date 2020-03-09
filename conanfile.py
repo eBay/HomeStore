@@ -31,7 +31,7 @@ class HomestoreConan(ConanFile):
             "iomgr/3.1.1@sds/iomgr_v3",
             "jungle/1.0.1@sds/testing",
             "sds_logging/6.1.2@sds/develop",
-            "sisl/0.3.18@sisl/develop",
+            "sisl/1.0.3@sisl/develop",
             # FOSS, rarely updated
             "benchmark/1.5.0",
             "boost/1.72.0",
