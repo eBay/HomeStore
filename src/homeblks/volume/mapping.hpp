@@ -9,9 +9,9 @@
 #include "homeds/array/blob_array.h"
 #include <math.h>
 #include <sds_logging/logging.h>
-#include <volume/volume.hpp>
+#include "volume.hpp"
 #include <utility/obj_life_counter.hpp>
-#include "volume/home_blks.hpp"
+#include "homeblks/home_blks.hpp"
 
 SDS_LOGGING_DECL(VMOD_VOL_MAPPING)
 
@@ -155,9 +155,12 @@ struct ValueEntryMeta {
     BlkId blkId;
     uint64_t nlba : NBLKS_BITS;
     uint64_t blk_offset : NBLKS_BITS; // offset based on blk store not based on vol page size
-    ValueEntryMeta(uint64_t seqId, const BlkId& blkId, uint8_t blk_offset, uint8_t nlba) : seqId(seqId), blkId(blkId), 
-                    nlba(nlba), blk_offset(blk_offset) {};
-    ValueEntryMeta() : seqId(0), blkId(0), nlba(0), blk_offset(0) {};
+    ValueEntryMeta(uint64_t seqId, const BlkId& blkId, uint8_t blk_offset, uint8_t nlba) :
+            seqId(seqId),
+            blkId(blkId),
+            nlba(nlba),
+            blk_offset(blk_offset){};
+    ValueEntryMeta() : seqId(0), blkId(0), nlba(0), blk_offset(0){};
 } __attribute__((__packed__));
 
 struct ValueEntry {
@@ -175,7 +178,8 @@ public:
     // deep copy
     ValueEntry(uint64_t seqId, const BlkId& blkId, uint8_t blk_offset, uint8_t nlba,
                const std::array< uint16_t, CS_ARRAY_STACK_SIZE >& carr) :
-            m_meta(seqId, blkId, blk_offset, nlba), m_carr(carr) {
+            m_meta(seqId, blkId, blk_offset, nlba),
+            m_carr(carr) {
         m_ptr = (ValueEntry*)this;
     }
 
@@ -183,9 +187,7 @@ public:
 
     ValueEntry(uint8_t* ptr) : m_ptr((ValueEntry*)ptr) {}
 
-    uint32_t get_blob_size() {
-        return sizeof(m_meta) + sizeof(uint16_t) * get_nlba();
-    }
+    uint32_t get_blob_size() { return sizeof(m_meta) + sizeof(uint16_t) * get_nlba(); }
 
     homeds::blob get_blob() { return {(uint8_t*)m_ptr, get_blob_size()}; }
 
@@ -400,8 +402,8 @@ public:
 };
 
 class mapping {
-    typedef function< void(struct BlkId blkid, size_t offset_size, size_t size) > alloc_blk_callback;
-    typedef function< void(boost::intrusive_ptr< volume_req > cookie) > comp_callback;
+    typedef std::function< void(struct BlkId blkid, size_t offset_size, size_t size) > alloc_blk_callback;
+    typedef std::function< void(boost::intrusive_ptr< volume_req > cookie) > comp_callback;
     typedef std::function< void(Free_Blk_Entry fbe) > free_blk_callback;
     typedef std::function< void(BlkId& bid) > pending_read_blk_cb;
 
@@ -713,15 +715,15 @@ private:
         return (start_lba - input_start_lba);
     }
 
-    uint32_t get_size_needed(vector< pair< MappingKey, MappingValue > >& match_kv, 
-                            BRangeUpdateCBParam< MappingKey, MappingValue >* cb_param) {
- 
+    uint32_t get_size_needed(vector< pair< MappingKey, MappingValue > >& match_kv,
+                             BRangeUpdateCBParam< MappingKey, MappingValue >* cb_param) {
+
         UpdateCBParam* param = (UpdateCBParam*)cb_param;
         MappingValue& new_val = param->get_new_value();
         int overlap_entries = match_kv.size();
 
-        /* In worse case, one value is divided into (2 * overlap_entries + 1). Same meta data of a value (it is fixed size) 
-         * will be copied to all new entries.
+        /* In worse case, one value is divided into (2 * overlap_entries + 1). Same meta data of a value (it is fixed
+         * size) will be copied to all new entries.
          */
         uint32_t new_size = (overlap_entries + 1) * new_val.meta_size() + new_val.get_blob_size();
         return new_size;

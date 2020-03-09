@@ -16,10 +16,10 @@ namespace loadgen {
 template < size_t Max_Size >
 class VarBytesValue : public homeds::btree::BtreeValue, public ValueSpec {
 public:
-    static std::shared_ptr< VarBytesValue <Max_Size> > gen_value(ValuePattern spec, 
-                                       VarBytesValue< Max_Size >* ref_value = nullptr) {
+    static std::shared_ptr< VarBytesValue< Max_Size > > gen_value(ValuePattern spec,
+                                                                  VarBytesValue< Max_Size >* ref_value = nullptr) {
         VarBytesValue val;
-        size_t        size = 0;
+        size_t size = 0;
         while (size < 8) {
             size = rand() % Max_Size;
         }
@@ -33,11 +33,11 @@ public:
             // We do not support other gen spec yet
             assert(0);
         }
-        std::shared_ptr< VarBytesValue <Max_Size> > temp = std::make_shared< VarBytesValue <Max_Size> >(val);
+        std::shared_ptr< VarBytesValue< Max_Size > > temp = std::make_shared< VarBytesValue< Max_Size > >(val);
         return temp;
     }
 
-    static constexpr bool     is_fixed_size() { return false; }
+    static constexpr bool is_fixed_size() { return false; }
     static constexpr uint32_t get_max_size() { return Max_Size; }
 
     VarBytesValue() : homeds::btree::BtreeValue() { m_bytes_ptr = &m_bytes[0]; }
@@ -70,9 +70,9 @@ public:
         assert(m_bytes.size() == b.size);
     }
     void append_blob(const BtreeValue& new_val, BtreeValue& existing_val) override { copy_blob(new_val.get_blob()); }
-    uint32_t        get_blob_size() const override { return m_bytes.size(); }
-    void            set_blob_size(uint32_t size) override { assert(size == sizeof(m_bytes.size())); }
-    uint32_t        estimate_size_after_append(const BtreeValue& new_val) override { return m_bytes.size(); }
+    uint32_t get_blob_size() const override { return m_bytes.size(); }
+    void set_blob_size(uint32_t size) override { assert(size == sizeof(m_bytes.size())); }
+    uint32_t estimate_size_after_append(const BtreeValue& new_val) override { return m_bytes.size(); }
     static uint32_t get_fixed_size() {
         assert(0);
         return 0;
@@ -97,7 +97,7 @@ public:
     void set_bytes_ptr() { m_bytes_ptr = m_bytes[0]; }
 
 private:
-    uint8_t*               m_bytes_ptr = nullptr;
+    uint8_t* m_bytes_ptr = nullptr;
     std::vector< uint8_t > m_bytes;
 };
 } // namespace loadgen

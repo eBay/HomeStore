@@ -3,8 +3,8 @@
 // Created by Kadayam, Hari on 06/11/17.
 //
 
-#include "home_blks.hpp"
-#include <mapping/mapping.hpp>
+#include <homeblks/home_blks.hpp>
+#include "mapping.hpp"
 #include <fstream>
 #include <atomic>
 #include "homeds/utility/useful_defs.hpp"
@@ -782,7 +782,7 @@ void Volume::get_allocated_blks() {
         }
 
         start_lba = end_lba + 1;
-        end_lba = std::min((unsigned long long)max_lba, end_lba + NUM_BLKS_PER_THREAD_TO_QUERY);
+        end_lba = std::min((uint64_t)max_lba, end_lba + HB_SETTINGS_VALUE(volume->blks_scan_query_batch_size));
         v.push_back(submit_job([this, start_lba, end_lba, mp]() {
             if (mp->sweep_alloc_blks(start_lba, end_lba)) {
                 this->set_recovery_error();

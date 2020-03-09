@@ -3,7 +3,7 @@
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
 #include <metrics/metrics.hpp>
-#include <main/vol_interface.hpp>
+#include <api/vol_interface.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <fstream>
@@ -444,10 +444,9 @@ SDS_OPTION_GROUP(perf_test_volume,
                   ::cxxopts::value< uint32_t >()->default_value("4"), "size of cache in GB"),
                  (is_file, "", "is_file", "is_it file", ::cxxopts::value< uint32_t >()->default_value("0"),
                   "is it file"),
-                 (init, "", "init", "init", ::cxxopts::value< uint32_t >()->default_value("1"), 
-                  "init"), 
-                 (preload_writes, "", "preload_writes", "preload_writes", ::cxxopts::value< uint32_t >()->default_value("100000000"), 
-                  "preload_writes"), 
+                 (init, "", "init", "init", ::cxxopts::value< uint32_t >()->default_value("1"), "init"),
+                 (preload_writes, "", "preload_writes", "preload_writes",
+                  ::cxxopts::value< uint32_t >()->default_value("100000000"), "preload_writes"),
                  (ref_cnt, "", "ref_count", "display object life counters",
                   ::cxxopts::value< uint32_t >()->default_value("0"), "display object life counters"))
 #define ENABLED_OPTIONS logging, home_blks, perf_test_volume
@@ -486,7 +485,6 @@ int main(int argc, char* argv[]) {
     is_file = SDS_OPTIONS["is_file"].as< uint32_t >();
     ref_cnt = SDS_OPTIONS["ref_count"].as< uint32_t >();
     disk_init = SDS_OPTIONS["init"].as< uint32_t >() ? true : false;
-
 
     if (dev_names.size() == 0) {
         LOGINFO("creating files");

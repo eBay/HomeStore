@@ -28,7 +28,7 @@ public:
         }
     }
 
-    static constexpr bool     is_fixed_size() { return false; }
+    static constexpr bool is_fixed_size() { return false; }
     static constexpr uint32_t get_max_size() { return sizeof(uint64_t); }
 
     explicit VarBytesKey(uint64_t num = 0) : m_num(num) {}
@@ -36,7 +36,7 @@ public:
     VarBytesKey& operator=(const VarBytesKey& other) = default;
 
     static constexpr size_t get_fixed_size() { return sizeof(uint64_t); }
-    uint64_t                to_integer() const { return m_num; }
+    uint64_t to_integer() const { return m_num; }
 
     virtual bool operator==(const KeySpec& other) const override {
         return (compare((const BtreeKey*)&(VarBytesKey&)other) == 0);
@@ -72,8 +72,8 @@ public:
     }
     virtual void copy_blob(const homeds::blob& b) { set_blob(b); }
 
-    virtual uint32_t    get_blob_size() const { return sizeof(uint64_t); }
-    virtual void        set_blob_size(uint32_t size) {}
+    virtual uint32_t get_blob_size() const { return sizeof(uint64_t); }
+    virtual void set_blob_size(uint32_t size) {}
     virtual std::string to_string() const { return std::to_string(m_num); }
 
     friend ostream& operator<<(ostream& os, const VarBytesKey& k) {

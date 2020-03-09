@@ -13,7 +13,7 @@
 #include "homeds/utility/useful_defs.hpp"
 #include "homeds/memory/freelist_allocator.hpp"
 #include "error/error.h"
-#include "main/homestore_header.hpp"
+#include "common/homestore_header.hpp"
 #include <metrics/metrics.hpp>
 #include "homeds/utility/enum.hpp"
 #include <boost/intrusive_ptr.hpp>
@@ -25,7 +25,7 @@
 #include <boost/preprocessor/cat.hpp>
 #include <boost/preprocessor/control/if.hpp>
 #include <boost/preprocessor/stringize.hpp>
-#include "main/homestore_assert.hpp"
+#include "common/homestore_assert.hpp"
 
 ENUM(btree_status_t, uint32_t, success, not_found, item_found, closest_found, closest_removed, retry, has_more,
      read_failed, write_failed, stale_buf, refresh_failed, put_failed, space_not_avail, split_failed, insert_failed);
@@ -574,14 +574,16 @@ template < typename K, typename V >
 using match_item_cb_update_t = std::function< void(std::vector< std::pair< K, V > >&, std::vector< std::pair< K, V > >&,
                                                    BRangeUpdateCBParam< K, V >*) >;
 template < typename K, typename V >
-using get_size_needed_cb_t = std::function < uint32_t(std::vector< std::pair< K, V > >&, BRangeUpdateCBParam< K, V >*) >;
+using get_size_needed_cb_t = std::function< uint32_t(std::vector< std::pair< K, V > >&, BRangeUpdateCBParam< K, V >*) >;
 template < typename K, typename V >
 class BtreeUpdateRequest : public BRangeRequest {
 public:
-    BtreeUpdateRequest(BtreeSearchRange& search_range, match_item_cb_update_t< K, V > cb = nullptr, 
+    BtreeUpdateRequest(BtreeSearchRange& search_range, match_item_cb_update_t< K, V > cb = nullptr,
                        get_size_needed_cb_t< K, V > size_cb = nullptr,
                        BRangeUpdateCBParam< K, V >* cb_param = nullptr) :
-            BRangeRequest(cb_param, search_range), m_cb(cb), m_size_cb(size_cb) {}
+            BRangeRequest(cb_param, search_range),
+            m_cb(cb),
+            m_size_cb(size_cb) {}
 
     match_item_cb_update_t< K, V > callback() const { return m_cb; }
     BRangeUpdateCBParam< K, V >* get_cb_param() const { return (BRangeUpdateCBParam< K, V >*)m_cb_param; }
@@ -589,7 +591,7 @@ public:
 
 protected:
     const match_item_cb_update_t< K, V > m_cb;
-    const get_size_needed_cb_t <K, V> m_size_cb;
+    const get_size_needed_cb_t< K, V > m_size_cb;
 };
 
 #if 0
@@ -825,95 +827,6 @@ std::atomic< bool > BtreeNodeAllocator< NodeSize, CacheCount >::bt_node_allocato
 template < size_t NodeSize, size_t CacheCount >
 std::unique_ptr< BtreeNodeAllocator< NodeSize, CacheCount > >
     BtreeNodeAllocator< NodeSize, CacheCount >::bt_node_allocator = nullptr;
-
-#if 0
-#define MIN_NODE_SIZE 8192
-#define MAX_NODE_SIZE 8192
-
-class BtreeNodeAllocator
-{
-public:
-    static constexpr uint32_t get_bucket_size(uint32_t count) {
-        uint32_t result = MIN_NODE_SIZE;
-        for (auto i = 0; i < count; i++) {
-            result *= MIN_NODE_SIZE;
-        }
-        return result;
-    }
-
-    static constexpr uint32_t get_nbuckets() {
-        return std::log2(MAX_NODE_SIZE) - std::log2(MIN_NODE_SIZE) + 1;
-    }
-
-    BtreeNodeAllocator() {
-        m_allocators.reserve(get_nbuckets());
-        for (auto i = 0U; i < get_nbuckets(); i++) {
-            auto *allocator = new homeds::FreeListAllocator< FREELIST_CACHE_COUNT, get_bucket_size(i)>();
-            m_allocators.push_back((void *)allocator);
-        }
-        // Allocate a default tail allocator for non-confirming sizes
-        auto *allocator = new homeds::FreeListAllocator< FREELIST_CACHE_COUNT, 0>();
-        m_allocators.push_back((void *)allocator);
-    }
-
-    ~BtreeNodeAllocator() {
-        for (auto i = 0U; i < get_nbuckets(); i++) {
-            auto *allocator = (homeds::FreeListAllocator< FREELIST_CACHE_COUNT, get_bucket_size(i)> *)m_allocators[i];
-            delete(allocator);
-        }
-        // Allocate a default tail allocator for non-confirming sizes
-        auto *allocator = (homeds::FreeListAllocator< FREELIST_CACHE_COUNT, 0> *)m_allocators[m_allocators.size()-1];
-        delete(allocator);
-    }
-
-    static BtreeNodeAllocator *create() {
-        bool initialized = bt_node_allocator_initialized.load(std::memory_order_acquire);
-        if (!initialized) {
-            std::unique_ptr< BtreeNodeAllocator > allocator = std::make_unique< BtreeNodeAllocator >();
-            if (bt_node_allocator_initialized.compare_exchange_strong(initialized, true, std::memory_order_acq_rel)) {
-                bt_node_allocator = std::move(allocator);
-            }
-        }
-        return bt_node_allocator.get();
-    }
-
-    static uint8_t *allocate(uint32_t size_needed)  {
-        uint32_t nbucket = (size_needed - 1)/MIN_NODE_SIZE + 1;
-        if (hs_unlikely(m_impl.get() == nullptr)) {
-            m_impl.reset(new FreeListAllocatorImpl< MaxListCount, Size >());
-        }
-
-        return (m_impl->allocate(size_needed));
-    }
-
-    static void deallocate(T *mem) {
-        mem->~T();
-        get_obj_allocator()->m_allocator->deallocate((uint8_t *)mem, sizeof(T));
-    }
-
-    static std::atomic< bool > bt_node_allocator_initialized;
-    static std::unique_ptr< BtreeNodeAllocator > bt_node_allocator;
-
-private:
-    homeds::FreeListAllocator< FREELIST_CACHE_COUNT, sizeof(T) > *get_freelist_allocator() {
-        return m_allocator.get();
-    }
-
-private:
-    std::vector< void * > m_allocators;
-
-    static ObjectAllocator< T, CacheCount > *get_obj_allocator() {
-        if (hs_unlikely((obj_allocator == nullptr))) {
-            obj_allocator = std::make_unique< ObjectAllocator< T, CacheCount > >();
-        }
-        return obj_allocator.get();
-    }
-};
-
-
-std::atomic< bool > BtreeNodeAllocator::bt_node_allocator_initialized(false);
-std::unique_ptr< BtreeNodeAllocator > BtreeNodeAllocator::bt_node_allocator = nullptr;
-#endif
 
 } // namespace btree
 } // namespace homeds

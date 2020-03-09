@@ -15,15 +15,15 @@
 #include <error/error.h>
 #include <metrics/metrics.hpp>
 #include <utility/atomic_counter.hpp>
-#include "main/homestore_header.hpp"
-#include "main/homestore_assert.hpp"
+#include "common/homestore_header.hpp"
+#include "common/homestore_assert.hpp"
 
 SDS_LOGGING_DECL(device)
 
 namespace homestore {
 
-#define VDEV_LABEL " for Homestore Virtual Device"
-#define PHYSICAL_HIST "physical"
+//#define VDEV_LABEL " for Homestore Virtual Device"
+//#define PHYSICAL_HIST "physical"
 
 class VdevFixedBlkAllocatorPolicy {
 public:
@@ -94,7 +94,7 @@ struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
 
 #ifndef NDEBUG
     uint64_t dev_offset;
-    uint8_t *mem;
+    uint8_t* mem;
 #endif
 
     void inc_ref() { intrusive_ptr_add_ref(this); }
@@ -148,12 +148,12 @@ protected:
 #ifndef NDEBUG
         if (!vd_req->is_read) {
             uint8_t* ptr;
-            int      ret = posix_memalign((void**)&ptr, HomeStoreConfig::align_size, vd_req->size);
+            int ret = posix_memalign((void**)&ptr, HomeStoreConfig::align_size, vd_req->size);
             if (ret != 0) {
                 assert(0);
             }
             pdev->sync_read((char*)ptr, vd_req->size, vd_req->dev_offset);
-            ret = memcmp(ptr, vd_req->mem, vd_req->size); 
+            ret = memcmp(ptr, vd_req->mem, vd_req->size);
             assert(ret == 0);
             free(ptr);
         }
@@ -507,7 +507,7 @@ public:
             req->io_start_time = Clock::now();
 #ifndef NDEBUG
             req->dev_offset = dev_offset;
-            req->mem = (uint8_t *)(iov[0].iov_base);
+            req->mem = (uint8_t*)(iov[0].iov_base);
 #endif
             pdev->writev(iov, iovcnt, size, dev_offset, (uint8_t*)req.get());
         }

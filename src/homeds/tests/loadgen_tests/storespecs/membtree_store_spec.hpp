@@ -52,17 +52,17 @@ public:
         m_bt = std::unique_ptr< LoadGenMemBtree >(LoadGenMemBtree::create_btree(btree_cfg, nullptr));
     }
 
-    virtual bool insert(K& k, std::shared_ptr<V> v) override {
+    virtual bool insert(K& k, std::shared_ptr< V > v) override {
         auto status = m_bt->put(k, *(v.get()), btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
         return status == btree_status_t::success;
     }
 
-    virtual bool upsert(K& k, std::shared_ptr<V> v) override {
+    virtual bool upsert(K& k, std::shared_ptr< V > v) override {
         auto status = m_bt->put(k, *(v.get()), btree_put_type::REPLACE_IF_EXISTS_ELSE_INSERT);
         return status == btree_status_t::success;
     }
 
-    virtual bool update(K& k, std::shared_ptr<V> v) override {
+    virtual bool update(K& k, std::shared_ptr< V > v) override {
         auto status = m_bt->put(k, *(v.get()), btree_put_type::REPLACE_ONLY_IF_EXISTS);
         return status == btree_status_t::success;
     }
@@ -79,15 +79,16 @@ public:
 
     virtual bool remove_any(K& start_key, bool start_incl, K& end_key, bool end_incl, K* out_key, V* out_val) override {
         BtreeSearchRange range(start_key, start_incl, end_key, end_incl);
-        auto             status = m_bt->remove_any(range, out_key, out_val);
+        auto status = m_bt->remove_any(range, out_key, out_val);
         return status == btree_status_t::success;
     }
 
     virtual uint32_t query(K& start_key, bool start_incl, K& end_key, bool end_incl,
                            std::vector< std::pair< K, V > >& result) override {
 #define MAX_BATCH_SIZE 20000000 // set it to big value so that everything is queried in one operation
-        auto                      search_range = BtreeSearchRange(start_key, start_incl, end_key, end_incl);
-        BtreeQueryRequest< K, V > qreq(search_range, BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, MAX_BATCH_SIZE);
+        auto search_range = BtreeSearchRange(start_key, start_incl, end_key, end_incl);
+        BtreeQueryRequest< K, V > qreq(search_range, BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY,
+                                       MAX_BATCH_SIZE);
 
         auto result_count = 0U;
 
@@ -109,8 +110,8 @@ public:
         return result_count;
     }
 
-    virtual bool range_update(K& start_key, bool start_incl, K& end_key, bool end_incl, 
-                              std::vector< std::shared_ptr<V> > &result) {
+    virtual bool range_update(K& start_key, bool start_incl, K& end_key, bool end_incl,
+                              std::vector< std::shared_ptr< V > >& result) {
         assert(0); // not supported yet
         return {};
     }

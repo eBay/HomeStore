@@ -38,15 +38,14 @@ add_subdirectory(cache)
 add_subdirectory(device)
 add_subdirectory(endpoint)
 add_subdirectory(homeds)
-add_subdirectory(volume)
+add_subdirectory(homeblks)
 add_subdirectory(error)
-add_subdirectory(main)
+add_subdirectory(common)
 add_subdirectory(threadpool)
-add_subdirectory(mapping)
 add_subdirectory(test_scripts)
 
 set(HOMESTORE_OBJECTS
-        $<TARGET_OBJECTS:hs_main>
+        $<TARGET_OBJECTS:hs_common>
         $<TARGET_OBJECTS:hs_device>
         $<TARGET_OBJECTS:hs_endpoint>
         $<TARGET_OBJECTS:hs_blkalloc>
@@ -57,5 +56,6 @@ target_link_libraries(homestore ${COMMON_LIB_DEPS})
 
 add_library(homeblks STATIC
                  ${HOMESTORE_OBJECTS}
+                 $<TARGET_OBJECTS:hs_homeblks>
                  $<TARGET_OBJECTS:hs_volume>)
 target_link_libraries(homeblks ${COMMON_LIB_DEPS})

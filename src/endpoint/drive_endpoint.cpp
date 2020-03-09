@@ -17,7 +17,7 @@
 #include <sds_logging/logging.h>
 #include <metrics/metrics.hpp>
 #include "homeds/utility/useful_defs.hpp"
-#include "main/homestore_config.hpp"
+#include "common/homestore_config.hpp"
 #include "error/error.h"
 
 namespace homeio {
@@ -36,9 +36,9 @@ ssize_t pwritev(int fd, const struct iovec* iov, int iovcnt, off_t offset) {
 #endif
 using namespace std;
 
-thread_local struct io_event            DriveEndPoint::events[MAX_COMPLETIONS] = {{}};
-thread_local int                        DriveEndPoint::ev_fd = 0;
-thread_local io_context_t               DriveEndPoint::ioctx = 0;
+thread_local std::vector< io_event > DriveEndPoint::events;
+thread_local int DriveEndPoint::ev_fd = 0;
+thread_local io_context_t DriveEndPoint::ioctx = 0;
 thread_local stack< struct iocb_info* > DriveEndPoint::iocb_list;
 
 DriveEndPoint::DriveEndPoint(std::shared_ptr< iomgr::ioMgr > iomgr, comp_callback cb) :
@@ -57,7 +57,7 @@ int DriveEndPoint::open_dev(std::string devname, int oflags) {
 
 void DriveEndPoint::shutdown_local() {
     // TODO: io_close
-    while(!iocb_list.empty()) {
+    while (!iocb_list.empty()) {
         auto t = iocb_list.top();
         free(t);
         iocb_list.pop();
@@ -66,20 +66,23 @@ void DriveEndPoint::shutdown_local() {
 
 void DriveEndPoint::init_local() {
     ev_fd = eventfd(0, EFD_NONBLOCK);
+    events.reserve(HS_SETTINGS_VALUE(device->max_completions_process_per_event_per_thread));
+
     iomgr->add_local_fd(ev_fd,
                         std::bind(&DriveEndPoint::process_completions, this, std::placeholders::_1,
                                   std::placeholders::_2, std::placeholders::_3),
                         EPOLLIN, 0, NULL);
-    int err = io_setup(MAX_OUTSTANDING_IO, &ioctx);
+    auto max_ios = HS_SETTINGS_VALUE(device->max_outstanding_ios_per_aio_thread);
+    int err = io_setup(max_ios, &ioctx);
     if (err) {
         LOGCRITICAL("io_setup failed with ret status {} errno {}", err, errno);
         std::stringstream ss;
         ss << "io_setup failed with ret status " << err << " errno = " << errno;
         folly::throwSystemError(ss.str());
     }
-    
+
     assert(ioctx);
-    for (int i = 0; i < MAX_OUTSTANDING_IO; i++) {
+    for (auto i = 0u; i < max_ios; i++) {
         struct iocb_info* info = (struct iocb_info*)malloc(sizeof(struct iocb_info));
         iocb_list.push(info);
     }
@@ -97,7 +100,7 @@ void DriveEndPoint::process_completions(int fd, void* cookie, int event) {
      */
     iomgr->process_done(fd, event);
     [[maybe_unused]] auto rsize = read(ev_fd, &temp, sizeof(uint64_t));
-    int                   ret = io_getevents(ioctx, 0, MAX_COMPLETIONS, events, NULL);
+    int ret = io_getevents(ioctx, 0, (int)events.capacity(), events.data(), NULL);
     if (ret == 0) {
         COUNTER_INCREMENT(m_metrics, spurious_events, 1);
     }
@@ -107,15 +110,15 @@ void DriveEndPoint::process_completions(int fd, void* cookie, int event) {
         COUNTER_INCREMENT(m_metrics, io_get_event_err, 1);
         return;
     }
-    
+
     for (int i = 0; i < ret; i++) {
         assert(static_cast< int64_t >(events[i].res) >= 0);
         struct iocb_info* info = static_cast< iocb_info* >(events[i].obj);
-        struct iocb*      iocb = static_cast< struct iocb* >(info);
+        struct iocb* iocb = static_cast< struct iocb* >(info);
         iocb_list.push(info);
         if (info->size != events[i].res || events[i].res2) {
-            LOGERROR("io is not completed properly. size read/written {} info {} error {}", events[i].res, 
-                        info->to_string(), events[i].res2);
+            LOGERROR("io is not completed properly. size read/written {} info {} error {}", events[i].res,
+                     info->to_string(), events[i].res2);
             if (events[i].res2 == 0) {
                 comp_cb(EIO, (uint8_t*)events[i].data);
                 continue;
@@ -135,7 +138,7 @@ void DriveEndPoint::async_write(int m_sync_fd, const char* data, uint32_t size, 
     }
 
     struct iocb_info* info = iocb_list.top();
-    struct iocb*      iocb = static_cast< struct iocb* >(info);
+    struct iocb* iocb = static_cast< struct iocb* >(info);
     iocb_list.pop();
 
     io_prep_pwrite(iocb, m_sync_fd, (void*)data, size, offset);
@@ -147,7 +150,7 @@ void DriveEndPoint::async_write(int m_sync_fd, const char* data, uint32_t size, 
     info->fd = m_sync_fd;
 
     LOGTRACE("Writing: {}", size);
-    
+
     auto ret = 0;
     ret = io_submit(ioctx, 1, &iocb);
 
@@ -157,12 +160,12 @@ void DriveEndPoint::async_write(int m_sync_fd, const char* data, uint32_t size, 
         comp_cb(0, cookie);
         return;
     }
-    
+
     if (ret != 1) {
         LOGERROR("io submit fail fd {}, size {}, offset {}, errno {}", m_sync_fd, size, offset, errno);
         comp_cb(errno, cookie);
     }
-    
+
     if (size % homestore::HomeStoreConfig::align_size) {
         COUNTER_INCREMENT(m_metrics, unalign_write, 1);
     }
@@ -180,7 +183,7 @@ void DriveEndPoint::async_read(int m_sync_fd, char* data, uint32_t size, uint64_
         return;
     }
     struct iocb_info* info = iocb_list.top();
-    struct iocb*      iocb = static_cast< struct iocb* >(info);
+    struct iocb* iocb = static_cast< struct iocb* >(info);
     iocb_list.pop();
 
     io_prep_pread(iocb, m_sync_fd, data, size, offset);
@@ -194,14 +197,14 @@ void DriveEndPoint::async_read(int m_sync_fd, char* data, uint32_t size, uint64_
     LOGTRACE("Reading: {}", size);
     auto ret = 0;
     ret = io_submit(ioctx, 1, &iocb);
- 
+
     if (ret != 1 && errno == EAGAIN) {
         COUNTER_INCREMENT(m_metrics, eagain_error, 1);
         sync_read(m_sync_fd, data, size, offset);
         comp_cb(0, cookie);
         return;
     }
-    
+
     if (ret != 1) {
         LOGERROR("io submit fail fd {}, size {}, offset {}, errno {}", m_sync_fd, size, offset, errno);
         comp_cb(errno, cookie);
@@ -214,9 +217,9 @@ void DriveEndPoint::async_writev(int m_sync_fd, const struct iovec* iov, int iov
                                  uint8_t* cookie) {
 
     m_metrics.init();
-    if (iocb_list.empty() 
+    if (iocb_list.empty()
 #ifdef _PRERELEASE
-    || homestore_flip->test_flip("io_write_iocb_empty_flip")
+        || homestore_flip->test_flip("io_write_iocb_empty_flip")
 #endif
     ) {
         COUNTER_INCREMENT(m_metrics, no_iocb, 1);
@@ -225,7 +228,7 @@ void DriveEndPoint::async_writev(int m_sync_fd, const struct iovec* iov, int iov
         return;
     }
     struct iocb_info* info = iocb_list.top();
-    struct iocb*      iocb = static_cast< struct iocb* >(info);
+    struct iocb* iocb = static_cast< struct iocb* >(info);
     iocb_list.pop();
     io_prep_pwritev(iocb, m_sync_fd, iov, iovcnt, offset);
     io_set_eventfd(iocb, ev_fd);
@@ -243,7 +246,7 @@ void DriveEndPoint::async_writev(int m_sync_fd, const struct iovec* iov, int iov
 #endif
     auto ret = 0;
     ret = io_submit(ioctx, 1, &iocb);
- 
+
     if (ret != 1 && errno == EAGAIN) {
         COUNTER_INCREMENT(m_metrics, eagain_error, 1);
         sync_writev(m_sync_fd, iov, iovcnt, size, offset);
@@ -252,11 +255,11 @@ void DriveEndPoint::async_writev(int m_sync_fd, const struct iovec* iov, int iov
     }
 
     if (ret != 1) {
-        LOGERROR("io submit fail fd {}, iovcnt {}, size {}, offset {}, errno {}, ioctx {}", m_sync_fd, 
-                    iovcnt, size, offset, errno, (uint64_t)ioctx);
+        LOGERROR("io submit fail fd {}, iovcnt {}, size {}, offset {}, errno {}, ioctx {}", m_sync_fd, iovcnt, size,
+                 offset, errno, (uint64_t)ioctx);
         comp_cb(errno, cookie);
     }
-    
+
     if (size % homestore::HomeStoreConfig::align_size) {
         COUNTER_INCREMENT(m_metrics, unalign_write, 1);
     }
@@ -270,7 +273,7 @@ void DriveEndPoint::async_readv(int m_sync_fd, const struct iovec* iov, int iovc
     m_metrics.init();
     if (iocb_list.empty()
 #ifdef _PRERELEASE
-    || homestore_flip->test_flip("io_read_iocb_empty_flip")
+        || homestore_flip->test_flip("io_read_iocb_empty_flip")
 #endif
     ) {
         COUNTER_INCREMENT(m_metrics, no_iocb, 1);
@@ -279,7 +282,7 @@ void DriveEndPoint::async_readv(int m_sync_fd, const struct iovec* iov, int iovc
         return;
     }
     struct iocb_info* info = iocb_list.top();
-    struct iocb*      iocb = static_cast< struct iocb* >(info);
+    struct iocb* iocb = static_cast< struct iocb* >(info);
     iocb_list.pop();
 
     io_prep_preadv(iocb, m_sync_fd, iov, iovcnt, offset);
@@ -299,16 +302,17 @@ void DriveEndPoint::async_readv(int m_sync_fd, const struct iovec* iov, int iovc
     LOGTRACE("Reading: {} vectors", iovcnt);
     auto ret = 0;
     ret = io_submit(ioctx, 1, &iocb);
-    
+
     if (ret != 1 && errno == EAGAIN) {
         COUNTER_INCREMENT(m_metrics, eagain_error, 1);
         sync_readv(m_sync_fd, iov, iovcnt, size, offset);
         comp_cb(0, cookie);
         return;
     }
-    
+
     if (ret != 1) {
-        LOGERROR("io submit fail fd {}, iovcnt {}, size {}, offset {}, errno {}", m_sync_fd, iovcnt, size, offset, errno);
+        LOGERROR("io submit fail fd {}, iovcnt {}, size {}, offset {}, errno {}", m_sync_fd, iovcnt, size, offset,
+                 errno);
         comp_cb(errno, cookie);
     }
     COUNTER_INCREMENT(m_metrics, read_cnt, 1);
@@ -326,9 +330,9 @@ void DriveEndPoint::sync_write(int m_sync_fd, const char* data, uint32_t size, u
     if (size % homestore::HomeStoreConfig::align_size) {
         COUNTER_INCREMENT(m_metrics, unalign_write, 1);
     }
-    
+
     ssize_t written_size = pwrite(m_sync_fd, data, (ssize_t)size, (off_t)offset);
-    
+
     if (written_size != size) {
         std::stringstream ss;
         ss << "Error trying to write offset " << offset << " size to write = " << size
@@ -345,11 +349,11 @@ void DriveEndPoint::sync_writev(int m_sync_fd, const struct iovec* iov, int iovc
         folly::throwSystemError("flip error");
     }
 #endif
-    
+
     if (size % homestore::HomeStoreConfig::align_size) {
         COUNTER_INCREMENT(m_metrics, unalign_write, 1);
     }
-    
+
     ssize_t written_size = pwritev(m_sync_fd, iov, iovcnt, offset);
     if (written_size != size) {
         std::stringstream ss;
@@ -371,7 +375,7 @@ void DriveEndPoint::sync_read(int m_sync_fd, char* data, uint32_t size, uint64_t
     ssize_t read_size = pread(m_sync_fd, data, (ssize_t)size, (off_t)offset);
     if (read_size != size) {
         std::stringstream ss;
-        int               i = errno;
+        int i = errno;
         ss << "Error trying to read offset " << offset << " size to read = " << size << " size read = " << read_size
            << "err no" << errno << " m_sync_fd" << m_sync_fd << "\n";
         folly::throwSystemError(ss.str());

@@ -8,16 +8,16 @@
 #include <mutex>
 #include <atomic>
 #include <boost/intrusive/list.hpp>
-#include <main/homestore_config.hpp>
-#include "main/homestore_assert.hpp"
+#include <common/homestore_config.hpp>
+#include "common/homestore_assert.hpp"
 
 namespace homestore {
 
 template < typename EvictionPolicy >
 class Evictor {
 public:
-    typedef typename EvictionPolicy::RecordType               EvictRecordType;
-    typedef std::function< bool(const EvictRecordType*) >     CanEvictCallback;
+    typedef typename EvictionPolicy::RecordType EvictRecordType;
+    typedef std::function< bool(const EvictRecordType*) > CanEvictCallback;
     typedef std::function< uint32_t(const EvictRecordType*) > GetSizeCallback;
 
     /* Initialize the evictor with maximum size it needs to keep it under, before it starts evictions. Caller also
@@ -116,12 +116,12 @@ private:
     }
 
 private:
-    CanEvictCallback       m_can_evict_cb;
-    GetSizeCallback        m_get_size_cb;
-    EvictionPolicy         m_evict_policy;
+    CanEvictCallback m_can_evict_cb;
+    GetSizeCallback m_get_size_cb;
+    EvictionPolicy m_evict_policy;
     std::atomic< int64_t > m_cur_size;
-    int64_t                m_max_size;
-    uint32_t               m_part_num;
+    int64_t m_max_size;
+    uint32_t m_part_num;
 };
 
 } // namespace homestore

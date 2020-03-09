@@ -1,0 +1,27 @@
+native_include "utility/non_null_ptr.hpp";
+
+namespace homeblkscfg;
+
+attribute "hotswap";
+attribute "deprecated";
+
+table Volume {
+    // Estimated amount of pending blks that are being read. Used to size the hash set bucket, need not be 
+    // accurate, but better estimate provide faster lookup.
+    estimated_pending_blk_reads: uint32 = 128;
+
+    blks_scan_query_batch_size: uint64 = 10000 (hotswap);
+}
+
+table GeneralConfig {
+    // Timeout we wait before we do force shutdown
+    shutdown_timeout_secs: uint32 = 300;
+}
+
+table HomeBlksSettings {
+    version: uint32;
+    volume: Volume;
+    general_config: GeneralConfig;
+}
+
+root_type HomeBlksSettings;

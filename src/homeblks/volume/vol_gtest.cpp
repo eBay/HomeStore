@@ -6,7 +6,7 @@
 #include <iomgr/iomgr.hpp>
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
-#include <main/vol_interface.hpp>
+#include <api/vol_interface.hpp>
 //#include <volume/home_blks.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
@@ -33,7 +33,6 @@ THREAD_BUFFER_INIT;
 
 /************************** GLOBAL VARIABLES ***********************/
 
-
 #define MAX_DEVICES 2
 #define HOMEBLKS_SB_FLAGS_SHUTDOWN 0x00000001UL
 
@@ -53,8 +52,8 @@ constexpr auto Gi = Ki * Mi;
 uint64_t max_io_size = 1 * Mi;
 uint64_t max_outstanding_ios = 64u;
 uint64_t max_disk_capacity = 10 * Gi;
-std::atomic<uint64_t> match_cnt = 0;
-std::atomic<uint64_t> hdr_only_match_cnt = 0;
+std::atomic< uint64_t > match_cnt = 0;
+std::atomic< uint64_t > hdr_only_match_cnt = 0;
 using log_level = spdlog::level::level_enum;
 bool verify_hdr = true;
 bool verify_data = true;
@@ -78,26 +77,22 @@ SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 class test_ep : public iomgr::EndPoint {
 public:
-    test_ep(std::shared_ptr<iomgr::ioMgr> iomgr) :iomgr::EndPoint(iomgr) {
-    }
-    void shutdown_local() override {
-    }
-    void init_local() override {
-    }
-    void print_perf() override {
-    }
+    test_ep(std::shared_ptr< iomgr::ioMgr > iomgr) : iomgr::EndPoint(iomgr) {}
+    void shutdown_local() override {}
+    void init_local() override {}
+    void print_perf() override {}
 };
 
 uint64_t req_cnt = 0;
 uint64_t req_free_cnt = 0;
-class IOTest :  public ::testing::Test {
+class IOTest : public ::testing::Test {
     struct req : vol_interface_req {
         ssize_t size;
         off_t offset;
         uint64_t lba;
         uint32_t nblks;
         int fd;
-        uint8_t *buf;
+        uint8_t* buf;
         bool is_read;
         uint64_t cur_vol;
         bool done = false;
@@ -108,40 +103,40 @@ class IOTest :  public ::testing::Test {
         virtual ~req() {
             free(buf);
             req_free_cnt++;
-        }   
+        }
     };
     struct vol_info_t {
-       VolumePtr vol;
-       int fd;
-       std::mutex vol_mutex;
-       homeds::Bitset *m_vol_bm;
-       uint64_t max_vol_blks;
-       uint64_t cur_checkpoint;
-       std::atomic<uint64_t> start_lba;
-       std::atomic<uint64_t> start_large_lba; 
-       std::atomic<uint64_t> num_io;
-       vol_info_t() : start_lba(0), start_large_lba(0), num_io(0) {}; 
-       ~vol_info_t() {delete m_vol_bm;}
+        VolumePtr vol;
+        int fd;
+        std::mutex vol_mutex;
+        homeds::Bitset* m_vol_bm;
+        uint64_t max_vol_blks;
+        uint64_t cur_checkpoint;
+        std::atomic< uint64_t > start_lba;
+        std::atomic< uint64_t > start_large_lba;
+        std::atomic< uint64_t > num_io;
+        vol_info_t() : start_lba(0), start_large_lba(0), num_io(0){};
+        ~vol_info_t() { delete m_vol_bm; }
     };
 
 protected:
-    std::atomic<size_t> outstanding_ios;
-    std::atomic<uint64_t> write_cnt;
-    std::atomic<uint64_t> read_cnt;
-    std::atomic<uint64_t> read_err_cnt;
-    std::shared_ptr<iomgr::ioMgr> iomgr_obj;
+    std::atomic< size_t > outstanding_ios;
+    std::atomic< uint64_t > write_cnt;
+    std::atomic< uint64_t > read_cnt;
+    std::atomic< uint64_t > read_err_cnt;
+    std::shared_ptr< iomgr::ioMgr > iomgr_obj;
     bool init;
-    std::vector< std::shared_ptr<vol_info_t> > vol_info;
-    std::atomic<uint64_t> vol_cnt;
-    test_ep *ep;
+    std::vector< std::shared_ptr< vol_info_t > > vol_info;
+    std::atomic< uint64_t > vol_cnt;
+    test_ep* ep;
     int ev_fd;
     std::condition_variable m_cv;
     std::condition_variable m_init_done_cv;
     std::mutex m_mutex;
-    void *init_buf = nullptr;
+    void* init_buf = nullptr;
     uint64_t cur_vol;
     Clock::time_point startTime;
-    std::vector<dev_info> device_info;
+    std::vector< dev_info > device_info;
     uint64_t max_capacity;
     uint64_t max_vol_size;
     bool verify_done;
@@ -152,17 +147,17 @@ protected:
     bool vol_offline = false;
     bool expect_io_error = false;
     Clock::time_point print_startTime;
-    std::atomic<uint64_t> vol_create_cnt;
-    std::atomic<uint64_t> vol_del_cnt;
-    std::atomic<uint64_t> vol_indx;
-    std::atomic<bool> io_stalled = false;
+    std::atomic< uint64_t > vol_create_cnt;
+    std::atomic< uint64_t > vol_del_cnt;
+    std::atomic< uint64_t > vol_indx;
+    std::atomic< bool > io_stalled = false;
     homestore::vol_state m_expected_vol_state = homestore::vol_state::ONLINE;
     bool expected_init_fail = false;
     bool cmpl_done_signaled = false;
     bool iomgr_start = false;
 
 public:
-    IOTest():vol_info(0), device_info(0) {
+    IOTest() : vol_info(0), device_info(0) {
         vol_cnt = 0;
         cur_vol = 0;
         max_vol_size = 0;
@@ -187,7 +182,7 @@ public:
         }
     }
     void remove_files() {
-        for (auto &n : names) {
+        for (auto& n : names) {
             remove(n.c_str());
         }
 
@@ -199,12 +194,11 @@ public:
         }
     }
 
-    void print() {
-    }
+    void print() {}
 
     void start_homestore() {
         /* start homestore */
-            
+
         /* create files */
 
         for (uint32_t i = 0; i < MAX_DEVICES; i++) {
@@ -224,11 +218,11 @@ public:
             max_capacity += max_disk_capacity;
         }
         /* Don't populate the whole disks. Only 80 % of it */
-        max_vol_size = (60 * max_capacity)/ (100 * max_vols);
+        max_vol_size = (60 * max_capacity) / (100 * max_vols);
 
-        iomgr_obj = std::make_shared<iomgr::ioMgr>(2, num_threads); 
-        
-        init_params params; 
+        iomgr_obj = std::make_shared< iomgr::ioMgr >(2, num_threads);
+
+        init_params params;
 #if 0
         params.flag = homestore::io_flag::BUFFERED_IO;
 #else
@@ -242,22 +236,22 @@ public:
         params.iomgr = iomgr_obj;
         params.init_done_cb = std::bind(&IOTest::init_done_cb, this, std::placeholders::_1, std::placeholders::_2);
         params.vol_mounted_cb = std::bind(&IOTest::vol_mounted_cb, this, std::placeholders::_1, std::placeholders::_2);
-        params.vol_state_change_cb = std::bind(&IOTest::vol_state_change_cb, this, std::placeholders::_1, 
-                                                std::placeholders::_2, std::placeholders::_3);
+        params.vol_state_change_cb = std::bind(&IOTest::vol_state_change_cb, this, std::placeholders::_1,
+                                               std::placeholders::_2, std::placeholders::_3);
         params.vol_found_cb = std::bind(&IOTest::vol_found_cb, this, std::placeholders::_1);
-       
+
         params.disk_attr = disk_attributes();
         params.disk_attr->physical_page_size = phy_page_size;
         params.disk_attr->disk_align_size = 4096;
         params.disk_attr->atomic_page_size = atomic_page_size;
 #ifndef NDEBUG
         params.mem_btree_page_size = mem_btree_page_size;
-#endif  
+#endif
         boost::uuids::string_generator gen;
         params.system_uuid = gen("01970496-0262-11e9-8eb2-f2801f1b9fd1");
         VolInterface::init(params);
     }
-   
+
     void move_vol_to_offline() {
         /* move all volumes to offline */
         for (uint64_t i = 0; i < max_vols; ++i) {
@@ -281,33 +275,34 @@ public:
     }
 
     void vol_mounted_cb(const VolumePtr& vol_obj, vol_state state) {
-       assert(!init);
-       int cnt = vol_cnt.fetch_add(1, std::memory_order_relaxed);
-       vol_init(vol_obj);
-       auto cb = [this](boost::intrusive_ptr<vol_interface_req> vol_req) { process_completions(vol_req); };
-       VolInterface::get_instance()->attach_vol_completion_cb(vol_obj, cb);
-       assert(state == m_expected_vol_state);
-       if (m_expected_vol_state == homestore::vol_state::DEGRADED || 
+        assert(!init);
+        int cnt = vol_cnt.fetch_add(1, std::memory_order_relaxed);
+        vol_init(vol_obj);
+        auto cb = [this](boost::intrusive_ptr< vol_interface_req > vol_req) { process_completions(vol_req); };
+        VolInterface::get_instance()->attach_vol_completion_cb(vol_obj, cb);
+        assert(state == m_expected_vol_state);
+        if (m_expected_vol_state == homestore::vol_state::DEGRADED ||
             m_expected_vol_state == homestore::vol_state::OFFLINE) {
             VolInterface::get_instance()->vol_state_change(vol_obj, ONLINE);
-       }
+        }
     }
 
     void vol_init(const VolumePtr& vol_obj) {
         std::string file_name = std::string(VolInterface::get_instance()->get_name(vol_obj));
         std::string staging_file_name = file_name + STAGING_VOL_PREFIX;
-        
-        std::shared_ptr<vol_info_t> info = std::make_shared<vol_info_t> ();
+
+        std::shared_ptr< vol_info_t > info = std::make_shared< vol_info_t >();
         info->vol = vol_obj;
-        info->fd = open(file_name.c_str(), O_RDWR); 
+        info->fd = open(file_name.c_str(), O_RDWR);
         info->max_vol_blks = VolInterface::get_instance()->get_vol_capacity(vol_obj).initial_total_size /
-                                VolInterface::get_instance()->get_page_size(vol_obj);
-        info->m_vol_bm = new homeds::Bitset(info->max_vol_blks);;
+            VolInterface::get_instance()->get_page_size(vol_obj);
+        info->m_vol_bm = new homeds::Bitset(info->max_vol_blks);
+        ;
         info->cur_checkpoint = 0;
 
         assert(info->fd > 0);
         assert(VolInterface::get_instance()->get_vol_capacity(vol_obj).initial_total_size == max_vol_size);
-     
+
         std::unique_lock< std::mutex > lk(m_mutex);
         vol_info.push_back(info);
     }
@@ -315,16 +310,15 @@ public:
     void vol_state_change_cb(const VolumePtr& vol, vol_state old_state, vol_state new_state) {
         assert(new_state == homestore::vol_state::FAILED);
     }
-    
+
     void create_volume() {
-        
+
         /* Create a volume */
         vol_params params;
         int cnt = vol_indx.fetch_add(1, std::memory_order_acquire);
         params.page_size = vol_page_size;
         params.size = max_vol_size;
-        params.io_comp_cb = ([this](const vol_interface_req_ptr& vol_req)
-                { process_completions(vol_req); });
+        params.io_comp_cb = ([this](const vol_interface_req_ptr& vol_req) { process_completions(vol_req); });
         params.uuid = boost::uuids::random_generator()();
         std::string name = VOL_PREFIX + std::to_string(cnt);
         memcpy(params.vol_name, name.c_str(), (name.length() + 1));
@@ -368,7 +362,7 @@ public:
             return;
         }
         max_io_size = params.max_io_size;
-        auto ret = posix_memalign((void **) &init_buf, 4096, max_io_size);
+        auto ret = posix_memalign((void**)&init_buf, 4096, max_io_size);
         assert(!ret);
         bzero(init_buf, max_io_size);
         assert(!expected_init_fail);
@@ -394,8 +388,9 @@ public:
         max_io_size = params.max_io_size;
         ev_fd = eventfd(0, EFD_NONBLOCK);
 
-        iomgr_obj->add_fd(ev_fd, [this](auto fd, auto cookie, auto event) { process_ev_common(fd, cookie, event); },
-                        EPOLLIN, 9, nullptr);
+        iomgr_obj->add_fd(
+            ev_fd, [this](auto fd, auto cookie, auto event) { process_ev_common(fd, cookie, event); }, EPOLLIN, 9,
+            nullptr);
         ep = new test_ep(iomgr_obj);
         iomgr_obj->add_ep(ep);
         iomgr_obj->start();
@@ -443,7 +438,7 @@ public:
         }
     }
 
-    void process_ev_common(int fd, void *cookie, int event) {
+    void process_ev_common(int fd, void* cookie, int event) {
         uint64_t temp;
         [[maybe_unused]] auto rsize = read(ev_fd, &temp, sizeof(uint64_t));
 
@@ -479,31 +474,20 @@ public:
             }
             ++cnt;
         }
-        
     }
-    
+
     void write_io() {
         switch (load_type) {
-            case 0:
-                random_write();
-                break;
-            case 1:
-                same_write();
-                break;
-            case 2:
-                seq_write();
-                break;
+        case 0: random_write(); break;
+        case 1: same_write(); break;
+        case 2: seq_write(); break;
         }
     }
 
     void read_io() {
         switch (load_type) {
-            case 0:
-                random_read();
-                break;
-            case 1:
-                same_read();
-                break;
+        case 0: random_read(); break;
+        case 1: same_read(); break;
         }
     }
 
@@ -517,7 +501,7 @@ public:
                 } else {
                     write_size = max_io_size;
                 }
-                auto ret = pwrite(vol_info[i]->fd, init_buf, write_size, (off_t) offset);
+                auto ret = pwrite(vol_info[i]->fd, init_buf, write_size, (off_t)offset);
                 assert(ret == write_size);
                 if (ret != 0) {
                     return;
@@ -526,48 +510,46 @@ public:
         }
     }
 
-    void same_write() {
-        write_vol(0, 5, 100);
-    }
+    void same_write() { write_vol(0, 5, 100); }
 
-    void seq_write() { 
+    void seq_write() {
         /* XXX: does it really matter if it is atomic or not */
         int cur = ++cur_vol % max_vols;
-        uint64_t lba; 
+        uint64_t lba;
         uint64_t nblks;
-start:
+    start:
         /* we won't be writing more then 128 blocks in one io */
         auto vol = vol_info[cur]->vol;
         if (vol == nullptr) {
             return;
-        }    
+        }
         if (vol_info[cur]->num_io.fetch_add(1, std::memory_order_acquire) == 1000) {
-            nblks = 200; 
-            lba = (vol_info[cur]->start_large_lba.fetch_add(nblks, std::memory_order_acquire)) % 
+            nblks = 200;
+            lba = (vol_info[cur]->start_large_lba.fetch_add(nblks, std::memory_order_acquire)) %
                 (vol_info[cur]->max_vol_blks - nblks);
         } else {
-            nblks = 2; 
-            lba = (vol_info[cur]->start_lba.fetch_add(nblks, std::memory_order_acquire)) % 
+            nblks = 2;
+            lba = (vol_info[cur]->start_lba.fetch_add(nblks, std::memory_order_acquire)) %
                 (vol_info[cur]->max_vol_blks - nblks);
-        }    
-        if (nblks == 0) { nblks = 1; } 
+        }
+        if (nblks == 0) {
+            nblks = 1;
+        }
 
         if (load_type != 2) {
             /* can not support concurrent overlapping writes if whole data need to be verified */
             std::unique_lock< std::mutex > lk(vol_info[cur]->vol_mutex);
-            /* check if someone is already doing writes/reads */ 
+            /* check if someone is already doing writes/reads */
             if (nblks && vol_info[cur]->m_vol_bm->is_bits_reset(lba, nblks)) {
                 vol_info[cur]->m_vol_bm->set_bits(lba, nblks);
             } else {
                 goto start;
-            }    
-        }    
+            }
+        }
         write_vol(cur, lba, nblks);
     }
 
-    void same_read() {
-        read_vol(0, 5, 100);
-    }
+    void same_read() { read_vol(0, 5, 100); }
 
     void random_write() {
         /* XXX: does it really matter if it is atomic or not */
@@ -580,17 +562,19 @@ start:
         if (vol == nullptr) {
             return;
         }
-        uint64_t max_blks = max_io_size/VolInterface::get_instance()->get_page_size(vol);
+        uint64_t max_blks = max_io_size / VolInterface::get_instance()->get_page_size(vol);
         // lba: [0, max_vol_blks - max_blks)
         lba = rand() % (vol_info[cur]->max_vol_blks - max_blks);
         // nblks: [1, max_blks]
         nblks = rand() % (max_blks + 1);
-        if (nblks == 0) { nblks = 1; }
+        if (nblks == 0) {
+            nblks = 1;
+        }
 
         if (load_type != 2) {
             /* can not support concurrent overlapping writes if whole data need to be verified */
             std::unique_lock< std::mutex > lk(vol_info[cur]->vol_mutex);
-            /* check if someone is already doing writes/reads */ 
+            /* check if someone is already doing writes/reads */
             if (nblks && vol_info[cur]->m_vol_bm->is_bits_reset(lba, nblks)) {
                 vol_info[cur]->m_vol_bm->set_bits(lba, nblks);
             } else {
@@ -601,8 +585,8 @@ start:
     }
 
     void write_vol(uint32_t cur, uint64_t lba, uint64_t nblks) {
-        uint8_t *buf = nullptr;
-        uint8_t *buf1 = nullptr;
+        uint8_t* buf = nullptr;
+        uint8_t* buf1 = nullptr;
         auto vol = vol_info[cur]->vol;
         if (vol == nullptr) {
             return;
@@ -616,11 +600,11 @@ start:
             }
         }
         uint64_t size = nblks * VolInterface::get_instance()->get_page_size(vol);
-        auto ret = posix_memalign((void **) &buf, 4096, size);
+        auto ret = posix_memalign((void**)&buf, 4096, size);
         if (ret) {
             assert(0);
         }
-        ret = posix_memalign((void **) &buf1, 4096, size);
+        ret = posix_memalign((void**)&buf1, 4096, size);
         assert(!ret);
         /* buf will be owned by homestore after sending the IO. so we need to allocate buf1 which will be used to
          * write to a file after ios are completed.
@@ -628,10 +612,10 @@ start:
         assert(buf != nullptr);
         assert(buf1 != nullptr);
         populate_buf(buf, size, lba, cur);
-       
+
         memcpy(buf1, buf, size);
 
-        boost::intrusive_ptr<req> req(new struct req());
+        boost::intrusive_ptr< req > req(new struct req());
         req->lba = lba;
         req->nblks = nblks;
         req->size = size;
@@ -640,20 +624,20 @@ start:
         req->fd = vol_info[cur]->fd;
         req->is_read = false;
         req->cur_vol = cur;
-        
+
         ++write_cnt;
         auto ret_io = VolInterface::get_instance()->write(vol, lba, buf, nblks, req);
         if (ret_io != no_error) {
             assert(ret_io == std::errc::no_such_device || expect_io_error);
             process_completions(req);
         }
-        LOGDEBUG("Wrote {} {} ",lba,nblks);
+        LOGDEBUG("Wrote {} {} ", lba, nblks);
     }
 
-    void populate_buf(uint8_t *buf, uint64_t size, uint64_t lba, int cur) {
+    void populate_buf(uint8_t* buf, uint64_t size, uint64_t lba, int cur) {
         for (uint64_t write_sz = 0; write_sz < size; write_sz = write_sz + sizeof(uint64_t)) {
             if (!(write_sz % vol_page_size)) {
-                *((uint64_t *)(buf + write_sz)) = lba;
+                *((uint64_t*)(buf + write_sz)) = lba;
                 auto vol = vol_info[cur]->vol;
                 if (vol == nullptr) {
                     return;
@@ -662,7 +646,7 @@ start:
                     ++lba;
                 }
             } else {
-                *((uint64_t *)(buf + write_sz)) = random();
+                *((uint64_t*)(buf + write_sz)) = random();
             }
         }
     }
@@ -678,16 +662,18 @@ start:
         if (vol == nullptr) {
             return;
         }
-        uint64_t max_blks = max_io_size/VolInterface::get_instance()->get_page_size(vol);
+        uint64_t max_blks = max_io_size / VolInterface::get_instance()->get_page_size(vol);
 
         lba = rand() % (vol_info[cur]->max_vol_blks - max_blks);
         nblks = rand() % max_blks;
-        if (nblks == 0) { nblks = 1; }
-        
+        if (nblks == 0) {
+            nblks = 1;
+        }
+
         if (load_type != 2) {
             /* Don't send overlapping reads with pending writes if data verification is on */
             std::unique_lock< std::mutex > lk(vol_info[cur]->vol_mutex);
-            /* check if someone is already doing writes/reads */ 
+            /* check if someone is already doing writes/reads */
             if (vol_info[cur]->m_vol_bm->is_bits_reset(lba, nblks)) {
                 vol_info[cur]->m_vol_bm->set_bits(lba, nblks);
             } else {
@@ -696,11 +682,11 @@ start:
         }
 
         read_vol(cur, lba, nblks);
-        LOGDEBUG("Read {} {} ",lba,nblks);
+        LOGDEBUG("Read {} {} ", lba, nblks);
     }
 
     void read_vol(uint32_t cur, uint64_t lba, uint64_t nblks) {
-        uint8_t *buf = nullptr;
+        uint8_t* buf = nullptr;
         auto vol = vol_info[cur]->vol;
         if (vol == nullptr) {
             return;
@@ -714,12 +700,12 @@ start:
             }
         }
         uint64_t size = nblks * VolInterface::get_instance()->get_page_size(vol);
-        auto ret = posix_memalign((void **) &buf, 4096, size);
+        auto ret = posix_memalign((void**)&buf, 4096, size);
         if (ret) {
             assert(0);
         }
         assert(buf != nullptr);
-        boost::intrusive_ptr<req> req(new struct req());
+        boost::intrusive_ptr< req > req(new struct req());
         req->lba = lba;
         req->nblks = nblks;
         req->fd = vol_info[cur]->fd;
@@ -736,9 +722,9 @@ start:
         }
     }
 
-    bool verify(const VolumePtr& vol, boost::intrusive_ptr<req> req, bool can_panic) {
+    bool verify(const VolumePtr& vol, boost::intrusive_ptr< req > req, bool can_panic) {
         int64_t tot_size_read = 0;
-        for (auto &info : req->read_buf_list) {
+        for (auto& info : req->read_buf_list) {
             auto offset = info.offset;
             auto size = info.size;
             auto buf = info.buf;
@@ -753,13 +739,13 @@ start:
                 size_read = vol_page_size;
                 int j = 0;
                 if (verify_data) {
-                    j = memcmp((void *) b.bytes, (uint8_t *)((uint64_t)req->buf + tot_size_read), size_read);
+                    j = memcmp((void*)b.bytes, (uint8_t*)((uint64_t)req->buf + tot_size_read), size_read);
                     match_cnt++;
                 }
 
                 if (j != 0 && (!verify_data || !verify_done)) {
                     /* we will only verify the header. We write lba number in the header */
-                    j = memcmp((void *) b.bytes, (uint8_t *)((uint64_t)req->buf + tot_size_read), sizeof (uint64_t));
+                    j = memcmp((void*)b.bytes, (uint8_t*)((uint64_t)req->buf + tot_size_read), sizeof(uint64_t));
                     if (!j) {
                         /* copy the data */
                         auto ret = pwrite(vol_info[req->cur_vol]->fd, b.bytes, b.size, tot_size_read + req->offset);
@@ -769,19 +755,19 @@ start:
                 }
                 if (j) {
                     if (can_panic) {
-                        
+
                         /* verify the header */
-                        j = memcmp((void *) b.bytes, (uint8_t *)((uint64_t)req->buf + tot_size_read), sizeof (uint64_t));
+                        j = memcmp((void*)b.bytes, (uint8_t*)((uint64_t)req->buf + tot_size_read), sizeof(uint64_t));
                         if (j != 0) {
-                            LOGINFO("header mismatch lba read {}", *((uint64_t *)b.bytes));
+                            LOGINFO("header mismatch lba read {}", *((uint64_t*)b.bytes));
                         }
-                        LOGINFO("mismatch found lba {} nlba {} total_size_read {}", req->lba, req->nblks, 
-                                    tot_size_read);
+                        LOGINFO("mismatch found lba {} nlba {} total_size_read {}", req->lba, req->nblks,
+                                tot_size_read);
 #ifndef NDEBUG
                         VolInterface::get_instance()->print_tree(vol);
 #endif
                         LOGINFO("lba {} {}", req->lba, req->nblks);
-                        std::this_thread::sleep_for(std::chrono::seconds(5)); 
+                        std::this_thread::sleep_for(std::chrono::seconds(5));
                         sleep(30);
                         assert(0);
                     } else {
@@ -803,7 +789,7 @@ start:
         if (elapsed_time > print_time) {
             LOGINFO("verifying vols");
             print_startTime = Clock::now();
-       } 
+        }
 
         for (uint32_t cur = 0; cur < max_vols; ++cur) {
             uint64_t max_blks = (max_io_size / VolInterface::get_instance()->get_page_size(vol_info[cur]->vol));
@@ -829,7 +815,7 @@ start:
 
     void process_completions(const vol_interface_req_ptr& vol_req) {
         /* raise an event */
-        boost::intrusive_ptr<req> req = boost::static_pointer_cast<struct req>(vol_req);
+        boost::intrusive_ptr< req > req = boost::static_pointer_cast< struct req >(vol_req);
         static uint64_t print_time = 30;
         uint64_t temp = 1;
         auto elapsed_time = get_elapsed_time(print_startTime);
@@ -837,13 +823,13 @@ start:
         /* it validates that we don't have two completions for the same requests */
         assert(!req->done);
         req->done = true;
-        
+
         if (elapsed_time > print_time) {
             LOGINFO("write ios cmpled {}", write_cnt.load());
             LOGINFO("read ios cmpled {}", read_cnt.load());
             print_startTime = Clock::now();
         }
-        
+
         assert(req->err == no_error || expect_io_error || req->err == std::errc::no_such_device);
         LOGTRACE("IO DONE, req_id={}, outstanding_ios={}", vol_req->request_id, outstanding_ios.load());
         if (!req->is_read && req->err == no_error) {
@@ -853,7 +839,7 @@ start:
         }
 
         bool verify_io = false;
-        
+
         if (!req->is_read && req->err == no_error && read_verify) {
             (void)VolInterface::get_instance()->sync_read(vol_info[req->cur_vol]->vol, req->lba, req->nblks, req);
             LOGTRACE("IO DONE, req_id={}, outstanding_ios={}", req->request_id, outstanding_ios.load());
@@ -870,12 +856,12 @@ start:
             }
             verify(vol_info[req->cur_vol]->vol, req, true);
         }
-       
+
         {
             std::unique_lock< std::mutex > lk(vol_info[req->cur_vol]->vol_mutex);
             vol_info[req->cur_vol]->m_vol_bm->reset_bits(req->lba, req->nblks);
         }
-        
+
         outstanding_ios--;
         if (move_verify_to_done && !verify_done) {
             if (outstanding_ios.load() == 0) {
@@ -964,7 +950,7 @@ start:
         }
         used_cap = VolInterface::get_instance()->get_system_capacity().used_total_size;
         if (used_cap != 0) {
-           // assert(0);
+            // assert(0);
         }
     }
 
@@ -972,7 +958,7 @@ start:
         VolInterface::del_instance();
         assert(success);
     }
-    
+
     void shutdown_force(bool timeout) {
         std::unique_lock< std::mutex > lk(m_mutex);
         bool force = false;
@@ -981,12 +967,13 @@ start:
             vol_info.clear();
             force = true;
         }
-        VolInterface::get_instance()->shutdown(std::bind(&IOTest::shutdown_callback, this, std::placeholders::_1), force);
+        VolInterface::get_instance()->shutdown(std::bind(&IOTest::shutdown_callback, this, std::placeholders::_1),
+                                               force);
     }
 
     void shutdown() {
         // release the ref_count to volumes;
-       
+
         {
             std::unique_lock< std::mutex > lk(m_mutex);
             assert(io_stalled);
@@ -1014,7 +1001,7 @@ start:
 
 /*!
     @test   lifecycle_test
-    @brief  It initialize the homestore, create volume, delete volume 
+    @brief  It initialize the homestore, create volume, delete volume
             and shutdown the system
  */
 TEST_F(IOTest, lifecycle_test) {
@@ -1059,18 +1046,10 @@ TEST_F(IOTest, init_io_test) {
 TEST_F(IOTest, recovery_io_test) {
     this->init = false;
     switch (expected_vol_state) {
-        case 0:
-            this->m_expected_vol_state = homestore::vol_state::ONLINE;
-            break;
-        case 1:
-            this->m_expected_vol_state = homestore::vol_state::OFFLINE;
-            break;
-        case 2:
-            this->m_expected_vol_state = homestore::vol_state::DEGRADED;
-            break;
-        case 3:
-            this->m_expected_vol_state = homestore::vol_state::FAILED;
-            break;
+    case 0: this->m_expected_vol_state = homestore::vol_state::ONLINE; break;
+    case 1: this->m_expected_vol_state = homestore::vol_state::OFFLINE; break;
+    case 2: this->m_expected_vol_state = homestore::vol_state::DEGRADED; break;
+    case 3: this->m_expected_vol_state = homestore::vol_state::FAILED; break;
     }
     this->start_homestore();
     this->wait_cmpl();
@@ -1115,13 +1094,13 @@ TEST_F(IOTest, one_disk_replace_abort_test) {
     this->disk_replace_cnt = 1;
     this->expected_init_fail = true;
     this->m_expected_vol_state = homestore::vol_state::DEGRADED;
-    
+
     FlipClient fc(HomeStoreFlip::instance());
     FlipFrequency freq;
     freq.set_count(100);
     freq.set_percent(100);
-    fc.inject_noreturn_flip("reboot_abort", { }, freq);
-    
+    fc.inject_noreturn_flip("reboot_abort", {}, freq);
+
     this->start_homestore();
     this->wait_cmpl();
     this->shutdown();
@@ -1149,7 +1128,7 @@ TEST_F(IOTest, one_disk_fail_test) {
     freq.set_count(100);
     freq.set_percent(100);
     fc.create_condition("setting error on file1", flip::Operator::EQUAL, names[0], &cond1);
-    fc.inject_noreturn_flip("device_boot_fail", { cond1 }, freq);
+    fc.inject_noreturn_flip("device_boot_fail", {cond1}, freq);
 
     this->expected_init_fail = true;
     this->start_homestore();
@@ -1176,7 +1155,7 @@ TEST_F(IOTest, vol_io_fail_test) {
     this->expect_io_error = true;
     this->start_homestore();
     this->wait_homestore_init_done();
-    
+
     FlipClient fc(HomeStoreFlip::instance());
     FlipCondition cond1;
     FlipCondition cond2;
@@ -1186,8 +1165,8 @@ TEST_F(IOTest, vol_io_fail_test) {
     freq.set_count(2000);
     freq.set_percent(50);
     fc.inject_noreturn_flip("io_write_comp_error_flip", {}, freq);
-    fc.inject_noreturn_flip("device_fail", { cond1, cond2 }, freq);
-    
+    fc.inject_noreturn_flip("device_fail", {cond1, cond2}, freq);
+
     this->wait_cmpl();
     this->shutdown();
     if (remove_file) {
@@ -1197,29 +1176,41 @@ TEST_F(IOTest, vol_io_fail_test) {
 
 /************************* CLI options ***************************/
 
-SDS_OPTION_GROUP(test_volume, 
-(run_time, "", "run_time", "run time for io", ::cxxopts::value<uint32_t>()->default_value("30"), "seconds"),
-(load_type, "", "load_type", "load_type", ::cxxopts::value<uint32_t>()->default_value("0"), "random_write_read:0, same_write_read:1, overlap_write=2"),
-(num_threads, "", "num_threads", "num threads for io", ::cxxopts::value<uint32_t>()->default_value("8"), "number"),
-(read_enable, "", "read_enable", "read enable 0 or 1", ::cxxopts::value<uint32_t>()->default_value("1"), "flag"),
-(max_disk_capacity, "", "max_disk_capacity", "max disk capacity", ::cxxopts::value<uint64_t>()->default_value("7"), "GB"),
-(max_volume, "", "max_volume", "max volume", ::cxxopts::value<uint64_t>()->default_value("50"), "number"),
-(max_num_writes, "", "max_num_writes", "max num of writes", ::cxxopts::value<uint64_t>()->default_value("100000"), "number"),
-(verify_hdr, "", "verify_hdr", "data verification", ::cxxopts::value<uint64_t>()->default_value("1"), "0 or 1"),
-(verify_data, "", "verify_data", "data verification", ::cxxopts::value<uint64_t>()->default_value("1"), "0 or 1"),
-(read_verify, "", "read_verify", "read verification for each write", ::cxxopts::value<uint64_t>()->default_value("0"), "0 or 1"),
-(enable_crash_handler, "", "enable_crash_handler", "enable crash handler 0 or 1", ::cxxopts::value<uint32_t>()->default_value("1"), "flag"),
-(remove_file, "", "remove_file", "remove file at the end of test 0 or 1", ::cxxopts::value<uint32_t>()->default_value("1"), "flag"),
-(expected_vol_state,"", "expected_vol_state", "volume state expected during boot", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"),
-(verify_only,"", "verify_only", "verify only boot", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"),
-(abort,"", "abort", "abort", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"),
-(flip,"", "flip", "flip", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"),
-(delete_volume,"", "delete_volume", "delete_volume", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"),
-(atomic_page_size,"", "atomic_page_size", "atomic_page_size", ::cxxopts::value<uint32_t>()->default_value("4096"), "atomic_page_size"),
-(vol_page_size,"", "vol_page_size", "vol_page_size", ::cxxopts::value<uint32_t>()->default_value("4096"), "vol_page_size"),
-(phy_page_size,"", "phy_page_size", "phy_page_size", ::cxxopts::value<uint32_t>()->default_value("4096"), "phy_page_size"),
-(mem_btree_page_size,"", "mem_btree_page_size", "mem_btree_page_size", ::cxxopts::value<uint32_t>()->default_value("8192"), "mem_btree_page_size"))
-
+SDS_OPTION_GROUP(
+    test_volume,
+    (run_time, "", "run_time", "run time for io", ::cxxopts::value< uint32_t >()->default_value("30"), "seconds"),
+    (load_type, "", "load_type", "load_type", ::cxxopts::value< uint32_t >()->default_value("0"),
+     "random_write_read:0, same_write_read:1, overlap_write=2"),
+    (num_threads, "", "num_threads", "num threads for io", ::cxxopts::value< uint32_t >()->default_value("8"),
+     "number"),
+    (read_enable, "", "read_enable", "read enable 0 or 1", ::cxxopts::value< uint32_t >()->default_value("1"), "flag"),
+    (max_disk_capacity, "", "max_disk_capacity", "max disk capacity",
+     ::cxxopts::value< uint64_t >()->default_value("7"), "GB"),
+    (max_volume, "", "max_volume", "max volume", ::cxxopts::value< uint64_t >()->default_value("50"), "number"),
+    (max_num_writes, "", "max_num_writes", "max num of writes", ::cxxopts::value< uint64_t >()->default_value("100000"),
+     "number"),
+    (verify_hdr, "", "verify_hdr", "data verification", ::cxxopts::value< uint64_t >()->default_value("1"), "0 or 1"),
+    (verify_data, "", "verify_data", "data verification", ::cxxopts::value< uint64_t >()->default_value("1"), "0 or 1"),
+    (read_verify, "", "read_verify", "read verification for each write",
+     ::cxxopts::value< uint64_t >()->default_value("0"), "0 or 1"),
+    (enable_crash_handler, "", "enable_crash_handler", "enable crash handler 0 or 1",
+     ::cxxopts::value< uint32_t >()->default_value("1"), "flag"),
+    (remove_file, "", "remove_file", "remove file at the end of test 0 or 1",
+     ::cxxopts::value< uint32_t >()->default_value("1"), "flag"),
+    (expected_vol_state, "", "expected_vol_state", "volume state expected during boot",
+     ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
+    (verify_only, "", "verify_only", "verify only boot", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
+    (abort, "", "abort", "abort", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
+    (flip, "", "flip", "flip", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
+    (delete_volume, "", "delete_volume", "delete_volume", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
+    (atomic_page_size, "", "atomic_page_size", "atomic_page_size",
+     ::cxxopts::value< uint32_t >()->default_value("4096"), "atomic_page_size"),
+    (vol_page_size, "", "vol_page_size", "vol_page_size", ::cxxopts::value< uint32_t >()->default_value("4096"),
+     "vol_page_size"),
+    (phy_page_size, "", "phy_page_size", "phy_page_size", ::cxxopts::value< uint32_t >()->default_value("4096"),
+     "phy_page_size"),
+    (mem_btree_page_size, "", "mem_btree_page_size", "mem_btree_page_size",
+     ::cxxopts::value< uint32_t >()->default_value("8192"), "mem_btree_page_size"))
 
 #define ENABLED_OPTIONS logging, home_blks, test_volume
 SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
@@ -1230,9 +1221,10 @@ SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
  * Format is
  *   1. ./test_volume
  *   2. ./test_volume --gtest_filter=*recovery* --run_time=120 --num_threads=16 --max_disk_capacity=10 --max_volume=50
- * Above command run all tests having a recovery keyword for 120 seconds with 16 threads , 10g disk capacity and 50 volumes
+ * Above command run all tests having a recovery keyword for 120 seconds with 16 threads , 10g disk capacity and 50
+ * volumes
  */
-int main(int argc, char *argv[]) {
+int main(int argc, char* argv[]) {
     srand(time(0));
     ::testing::GTEST_FLAG(filter) = "*lifecycle_test*";
     testing::InitGoogleTest(&argc, argv);
@@ -1240,31 +1232,32 @@ int main(int argc, char *argv[]) {
     sds_logging::SetLogger("test_volume");
     spdlog::set_pattern("[%D %T.%f] [%^%L%$] [%t] %v");
 
-    run_time = SDS_OPTIONS["run_time"].as<uint32_t>();
-    num_threads = SDS_OPTIONS["num_threads"].as<uint32_t>();
-    read_enable = SDS_OPTIONS["read_enable"].as<uint32_t>();
-    max_disk_capacity = ((SDS_OPTIONS["max_disk_capacity"].as<uint64_t>())  * (1ul<< 30));
-    max_vols = SDS_OPTIONS["max_volume"].as<uint64_t>();
-    max_num_writes= SDS_OPTIONS["max_num_writes"].as<uint64_t>();
-    enable_crash_handler = SDS_OPTIONS["enable_crash_handler"].as<uint32_t>();
-    verify_hdr = SDS_OPTIONS["verify_hdr"].as<uint64_t>() ? true : false;
-    verify_data = SDS_OPTIONS["verify_data"].as<uint64_t>() ? true : false;
-    read_verify = SDS_OPTIONS["read_verify"].as<uint64_t>() ? true : false;
-    load_type = SDS_OPTIONS["load_type"].as<uint32_t>();
-    remove_file = SDS_OPTIONS["remove_file"].as<uint32_t>();
-    expected_vol_state = SDS_OPTIONS["expected_vol_state"].as<uint32_t>();
-    verify_only = SDS_OPTIONS["verify_only"].as<uint32_t>();
-    is_abort = SDS_OPTIONS["abort"].as<uint32_t>();
-    flip_set = SDS_OPTIONS["flip"].as<uint32_t>();
-    can_delete_volume = SDS_OPTIONS["delete_volume"].as<uint32_t>() ?  true : false;
-    atomic_page_size = SDS_OPTIONS["atomic_page_size"].as<uint32_t>();
-    vol_page_size = SDS_OPTIONS["vol_page_size"].as<uint32_t>();
-    phy_page_size = SDS_OPTIONS["phy_page_size"].as<uint32_t>();
-    mem_btree_page_size = SDS_OPTIONS["mem_btree_page_size"].as<uint32_t>();  
+    run_time = SDS_OPTIONS["run_time"].as< uint32_t >();
+    num_threads = SDS_OPTIONS["num_threads"].as< uint32_t >();
+    read_enable = SDS_OPTIONS["read_enable"].as< uint32_t >();
+    max_disk_capacity = ((SDS_OPTIONS["max_disk_capacity"].as< uint64_t >()) * (1ul << 30));
+    max_vols = SDS_OPTIONS["max_volume"].as< uint64_t >();
+    max_num_writes = SDS_OPTIONS["max_num_writes"].as< uint64_t >();
+    enable_crash_handler = SDS_OPTIONS["enable_crash_handler"].as< uint32_t >();
+    verify_hdr = SDS_OPTIONS["verify_hdr"].as< uint64_t >() ? true : false;
+    verify_data = SDS_OPTIONS["verify_data"].as< uint64_t >() ? true : false;
+    read_verify = SDS_OPTIONS["read_verify"].as< uint64_t >() ? true : false;
+    load_type = SDS_OPTIONS["load_type"].as< uint32_t >();
+    remove_file = SDS_OPTIONS["remove_file"].as< uint32_t >();
+    expected_vol_state = SDS_OPTIONS["expected_vol_state"].as< uint32_t >();
+    verify_only = SDS_OPTIONS["verify_only"].as< uint32_t >();
+    is_abort = SDS_OPTIONS["abort"].as< uint32_t >();
+    flip_set = SDS_OPTIONS["flip"].as< uint32_t >();
+    can_delete_volume = SDS_OPTIONS["delete_volume"].as< uint32_t >() ? true : false;
+    atomic_page_size = SDS_OPTIONS["atomic_page_size"].as< uint32_t >();
+    vol_page_size = SDS_OPTIONS["vol_page_size"].as< uint32_t >();
+    phy_page_size = SDS_OPTIONS["phy_page_size"].as< uint32_t >();
+    mem_btree_page_size = SDS_OPTIONS["mem_btree_page_size"].as< uint32_t >();
 
     if (load_type == 2) {
         verify_data = 0;
     }
-    if (enable_crash_handler) sds_logging::install_crash_handler();
+    if (enable_crash_handler)
+        sds_logging::install_crash_handler();
     return RUN_ALL_TESTS();
 }

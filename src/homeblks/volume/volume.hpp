@@ -7,7 +7,7 @@
 #include "blkstore/writeBack_cache.hpp"
 #include <device/blkbuffer.hpp>
 #include <blkstore/blkstore.hpp>
-#include "home_blks.hpp"
+#include <homeblks/home_blks.hpp>
 #include <metrics/metrics.hpp>
 #include <utility/atomic_counter.hpp>
 #include <utility/obj_life_counter.hpp>
@@ -15,7 +15,7 @@
 #include "homeds/memory/obj_allocator.hpp"
 #include <sds_logging/logging.h>
 #include <spdlog/fmt/fmt.h>
-#include "main/homestore_assert.hpp"
+#include "common/homestore_assert.hpp"
 #include "threadpool/thread_pool.h"
 #include "blk_read_tracker.hpp"
 

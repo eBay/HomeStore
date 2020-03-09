@@ -1,5 +1,5 @@
 #include "home_blks.hpp"
-#include "volume.hpp"
+#include "volume/volume.hpp"
 #include <device/device.h>
 #include <device/virtual_dev.hpp>
 #include <cassert>
@@ -59,9 +59,8 @@ HomeBlks::HomeBlks(const init_params& cfg) :
     HomeStoreConfig::max_chunks = MAX_CHUNKS;
     HomeStoreConfig::max_vdevs = MAX_VDEVS;
     HomeStoreConfig::max_pdevs = MAX_PDEVS;
-    HomeStoreConfig::min_io_size = m_cfg.min_virtual_page_size > HomeStoreConfig::atomic_phys_page_size
-        ? HomeStoreConfig::atomic_phys_page_size
-        : m_cfg.min_virtual_page_size;
+    HomeStoreConfig::min_io_size =
+        std::min(m_cfg.min_virtual_page_size, (uint32_t)HomeStoreConfig::atomic_phys_page_size);
     HomeStoreConfig::open_flag = m_cfg.flag;
     HomeStoreConfig::is_read_only = (m_cfg.is_read_only) ? true : false;
 #ifndef NDEBUG
@@ -200,7 +199,6 @@ std::error_condition HomeBlks::sync_read(const VolumePtr& vol, uint64_t lba, int
 }
 
 VolumePtr HomeBlks::create_volume(const vol_params& params) {
-
     if (m_cfg.is_read_only) {
         assert(0);
         LOGERROR("can not create vol on read only boot");
@@ -258,7 +256,6 @@ VolumePtr HomeBlks::create_volume(const vol_params& params) {
 //
 
 std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
-
     if (m_cfg.is_read_only) {
         assert(0);
         return std::make_error_condition(std::errc::device_or_resource_busy);
@@ -351,7 +348,6 @@ std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
 }
 
 VolumePtr HomeBlks::lookup_volume(const boost::uuids::uuid& uuid) {
-
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
     auto it = m_volume_map.find(uuid);
     if (m_volume_map.end() != it) {
@@ -378,7 +374,6 @@ BlkId HomeBlks::alloc_blk() {
 
 void HomeBlks::vol_sb_init(vol_mem_sb* sb) {
     /* allocate block */
-
     assert(!m_cfg.is_read_only);
     BlkId bid = alloc_blk();
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
@@ -781,7 +776,6 @@ uint32_t HomeBlks::get_data_pagesz() const { return m_data_pagesz; }
 
 void HomeBlks::create_sb_blkstore(vdev_info_block* vb) {
     if (vb == nullptr) {
-
         /* create a blkstore */
         struct sb_blkstore_blob blob;
         blob.type = blkstore_type::SB_STORE;
@@ -1076,12 +1070,12 @@ void HomeBlks::shutdown_process(shutdown_comp_callback shutdown_comp_cb, bool fo
                 auto num_seconds = std::chrono::duration_cast< std::chrono::seconds >(end - start).count();
 
                 // triger force shutdown if timeout
-                if (force || (num_seconds > SHUTDOWN_TIMEOUT_NUM_SECS)) {
+                if (force || (num_seconds > HB_SETTINGS_VALUE(general_config->shutdown_timeout_secs))) {
                     if (force) {
                         LOGINFO("FORCE shutdown requested!");
                     } else {
                         LOGERROR("Shutdown timeout for {} seconds, trigger force shutdown. ",
-                                 SHUTDOWN_TIMEOUT_NUM_SECS);
+                                 HB_SETTINGS_VALUE(general_config->shutdown_timeout_secs));
                     }
                     // trigger dump on debug mode
                     assert(force);

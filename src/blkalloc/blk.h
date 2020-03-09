@@ -8,7 +8,6 @@
 #ifndef SRC_BLKALLOC_BLK_H_
 #define SRC_BLKALLOC_BLK_H_
 
-
 #include <iostream>
 #include <cassert>
 #include <sstream>
@@ -16,7 +15,7 @@
 #include "homeds/array/flexarray.hpp"
 #include "homeds/memory/mempiece.hpp"
 #include "homeds/utility/useful_defs.hpp"
-#include "main/homestore_config.hpp"
+#include "common/homestore_config.hpp"
 
 //#include "device/device.h"
 
@@ -25,21 +24,17 @@ namespace homestore {
 /* This structure represents the application wide unique block number. It also encomposses the number of blks. */
 
 struct BlkId {
-    uint64_t m_id:ID_BITS;                // Block number which is unique within the chunk
-    uint64_t m_nblks:NBLKS_BITS;          // Total number of blocks starting from previous block number
-    uint64_t m_chunk_num:CHUNK_NUM_BITS;  // Chunk number - which is unique for the entire application
+    uint64_t m_id : ID_BITS;               // Block number which is unique within the chunk
+    uint64_t m_nblks : NBLKS_BITS;         // Total number of blocks starting from previous block number
+    uint64_t m_chunk_num : CHUNK_NUM_BITS; // Chunk number - which is unique for the entire application
 
-    static uint64_t invalid_internal_id() {
-        return ((1ul << (BLKID_SIZE_BITS)) - 1);
-    }
+    static uint64_t invalid_internal_id() { return ((1ul << (BLKID_SIZE_BITS)) - 1); }
 
-    static uint64_t constexpr max_blks_in_op() {
-        return (uint64_t)(homeds::pow(2, NBLKS_BITS));
-    }
+    static uint64_t constexpr max_blks_in_op() { return (uint64_t)(homeds::pow(2, NBLKS_BITS)); }
 
-    static homeds::blob get_blob(const BlkId &id) {
+    static homeds::blob get_blob(const BlkId& id) {
         homeds::blob b;
-        b.bytes = (uint8_t *)&id;
+        b.bytes = (uint8_t*)&id;
         b.size = BLKID_SIZE;
 
         return b;
@@ -48,10 +43,10 @@ struct BlkId {
 #define begin_of(b) (b.m_id)
 #define end_of(b) (b.m_id + b.m_nblks)
 
-    static int compare(const BlkId &one, const BlkId &two) {
+    static int compare(const BlkId& one, const BlkId& two) {
         if (one.m_chunk_num > two.m_chunk_num) {
             return -1;
-        } else if(one.m_chunk_num < two.m_chunk_num) {
+        } else if (one.m_chunk_num < two.m_chunk_num) {
             return 1;
         }
 
@@ -72,27 +67,21 @@ struct BlkId {
 
     uint64_t to_integer() const {
         uint64_t i;
-        std::memcpy(&i, (const uint64_t *)this, sizeof(BlkId));
+        std::memcpy(&i, (const uint64_t*)this, sizeof(BlkId));
         return i;
     }
 
-    explicit BlkId(uint64_t id)  {
-        set(id, id>>ID_BITS, id>>(ID_BITS+CHUNK_NUM_BITS));
-    }
+    explicit BlkId(uint64_t id) { set(id, id >> ID_BITS, id >> (ID_BITS + CHUNK_NUM_BITS)); }
 
-    BlkId(uint64_t id, uint8_t nblks, uint16_t chunk_num = 0)  {
-        set(id, nblks, chunk_num);
-    }
+    BlkId(uint64_t id, uint8_t nblks, uint16_t chunk_num = 0) { set(id, nblks, chunk_num); }
 
-    BlkId() {
-        set(UINT64_MAX, UINT8_MAX, UINT16_MAX);
-    }
+    BlkId() { set(UINT64_MAX, UINT8_MAX, UINT16_MAX); }
 
-    BlkId(BlkId &other) = default;
+    BlkId(BlkId& other) = default;
     BlkId get_blkid_at(uint32_t offset, uint32_t pagesz) const {
         assert(offset % pagesz == 0);
-        uint32_t remaining_size = ((m_nblks - (offset/pagesz)) * pagesz);
-        return(get_blkid_at(offset, remaining_size, pagesz));
+        uint32_t remaining_size = ((m_nblks - (offset / pagesz)) * pagesz);
+        return (get_blkid_at(offset, remaining_size, pagesz));
     }
 
     BlkId get_blkid_at(uint32_t offset, uint32_t size, uint32_t pagesz) const {
@@ -101,8 +90,8 @@ struct BlkId {
 
         BlkId other;
 
-        other.m_id = m_id + (offset/pagesz);
-        other.m_nblks = (size/pagesz);
+        other.m_id = m_id + (offset / pagesz);
+        other.m_nblks = (size / pagesz);
         other.m_chunk_num = m_chunk_num;
 
         assert(other.m_id < m_id + m_nblks);
@@ -110,8 +99,8 @@ struct BlkId {
         return other;
     }
 
-    BlkId(const BlkId &other) = default;
-    BlkId &operator=(const BlkId &other) = default;
+    BlkId(const BlkId& other) = default;
+    BlkId& operator=(const BlkId& other) = default;
 
     void set(uint64_t id, uint8_t nblks, uint16_t chunk_num = 0) {
         m_id = id;
@@ -119,49 +108,33 @@ struct BlkId {
         m_chunk_num = chunk_num;
     }
 
-    void set(BlkId &bid) {
-        set(bid.get_id(),  bid.get_nblks(), bid.get_chunk_num());
-    }
+    void set(BlkId& bid) { set(bid.get_id(), bid.get_nblks(), bid.get_chunk_num()); }
 
-    void set(uint64_t bid) {
-       set(bid, bid>>ID_BITS, bid>>(ID_BITS+CHUNK_NUM_BITS)); 
-    }
+    void set(uint64_t bid) { set(bid, bid >> ID_BITS, bid >> (ID_BITS + CHUNK_NUM_BITS)); }
 
-    void set_id(uint64_t id) {
-	    m_id = id;
-    }
+    void set_id(uint64_t id) { m_id = id; }
 
-    uint64_t get_id() const {
-        return m_id;
-    }
+    uint64_t get_id() const { return m_id; }
 
-    void set_nblks(uint8_t nblks) {
-        m_nblks = nblks;
-    }
+    void set_nblks(uint8_t nblks) { m_nblks = nblks; }
 
-    uint8_t get_nblks() const {
-        return m_nblks;
-    }
+    uint8_t get_nblks() const { return m_nblks; }
 
-    uint16_t get_chunk_num() const {
-        return m_chunk_num;
-    }
+    uint16_t get_chunk_num() const { return m_chunk_num; }
 
     /* A blkID represent a page size which is assigned to a blk allocator */
-    uint32_t data_size(uint32_t page_size) const {
-        return (m_nblks * page_size); 
-    }
+    uint32_t data_size(uint32_t page_size) const { return (m_nblks * page_size); }
 
     std::string to_string() const {
         std::stringstream ss;
         ss << "Bid=" << m_id << " nblks=" << (uint32_t)m_nblks << " chunk=" << (uint32_t)m_chunk_num;
         return ss.str();
     }
-    friend std::ostream &operator<<(std::ostream &os, const BlkId &ve) {
+    friend std::ostream& operator<<(std::ostream& os, const BlkId& ve) {
         os << ve.to_string();
         return os;
     }
-}__attribute__ ((__packed__)) ;
+} __attribute__((__packed__));
 
 #define BLKID32_INVALID ((uint32_t)(-1))
 #define BLKID64_INVALID ((uint64_t)(-1))
@@ -214,7 +187,7 @@ struct SingleBlk {
     }
 };
 
-#define EXPECTED_BLK_PIECES        1
+#define EXPECTED_BLK_PIECES 1
 #define EXPECTED_MEM_PIECE_PER_BLK 2
 
 struct MemPiece {
@@ -288,7 +261,7 @@ public:
 };
 
 //#define toDynPieceNum(np) (np - MAX_STATIC_BLK_PIECES)
-#define total_piece_size(np, b) ((np) * b->getSizeofPiece())
+#define total_piece_size(np, b) ((np)*b->getSizeofPiece())
 
 //#define dynPieceSize(np)  ((toDynPieceNum(np) - 1)/DYNAMIC_BLK_PIECE_CHUNK + 1) *
 
@@ -344,5 +317,5 @@ public:
     }
 };
 #endif
-}
+} // namespace homestore
 #endif /* SRC_BLKALLOC_BLK_H_ */

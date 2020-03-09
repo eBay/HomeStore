@@ -19,22 +19,17 @@ public:
 
     void free_yourself() { homeds::ObjectAllocator< CacheValueBuffer >::deallocate(this); }
 
-    friend void intrusive_ptr_add_ref(CacheValueBuffer* buf) {
-        intrusive_ptr_add_ref((CacheBuffer< CacheKey >*)buf);
-    }
+    friend void intrusive_ptr_add_ref(CacheValueBuffer* buf) { intrusive_ptr_add_ref((CacheBuffer< CacheKey >*)buf); }
 
-    friend void intrusive_ptr_release(CacheValueBuffer* buf) {
-        intrusive_ptr_release((CacheBuffer< CacheKey >*)buf);
-    }
+    friend void intrusive_ptr_release(CacheValueBuffer* buf) { intrusive_ptr_release((CacheBuffer< CacheKey >*)buf); }
 };
 
 class CacheValue : public ValueSpec {
-    
+
     boost::intrusive_ptr< CacheValueBuffer > m_buf;
 
 #define INVALID_SEQ_ID UINT64_MAX
 public:
-
     static std::shared_ptr< CacheValue > gen_value(ValuePattern spec, CacheValue* ref_value = nullptr) {
         std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;
         for (auto i = 0ul; i < CS_ARRAY_STACK_SIZE; i++)
@@ -68,8 +63,8 @@ public:
         return temp;
     }
 
-    CacheValue() {};
-    CacheValue(uint8_t  *data,  size_t size) { 
+    CacheValue(){};
+    CacheValue(uint8_t* data, size_t size) {
         boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector());
         mvec->set(data, CACHE_ENTRY_SIZE, 0);
 
@@ -78,7 +73,7 @@ public:
         m_buf = boost::intrusive_ptr< CacheValueBuffer >(buf);
     }
 
-    CacheValue(boost::intrusive_ptr< CacheValueBuffer > buf) : m_buf(buf) {};
+    CacheValue(boost::intrusive_ptr< CacheValueBuffer > buf) : m_buf(buf){};
 
     virtual uint64_t get_hash_code() override {
         auto blob = m_buf->at_offset(0);
@@ -96,7 +91,6 @@ public:
             raw_buf[b] = id;
         return (uint8_t*)raw_buf;
     }
-
 };
 } // namespace loadgen
 } // namespace homeds

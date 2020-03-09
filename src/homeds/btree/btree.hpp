@@ -23,8 +23,8 @@
 #include "homeds/utility/useful_defs.hpp"
 #include <fmt/ostream.h>
 #include "homeds/array/reserve_vector.hpp"
-#include <main/homestore_header.hpp>
-#include <main/homestore_config.hpp>
+#include <common/homestore_header.hpp>
+#include <common/homestore_config.hpp>
 
 using namespace std;
 using namespace homeds::thread;
@@ -1690,12 +1690,10 @@ private:
             }
             BT_DEBUG_ASSERT_CMP(curlock, ==, homeds::thread::LOCKTYPE_WRITE, my_node);
 
-#define MAX_ADJANCENT_INDEX 3
-
             // We do have the write lock and hence can remove entries. Get a list of entries around the minimal child
             // node. Use the list of child entries and merge/share the keys among them.
             vector< int > indices_list;
-            my_node->get_adjacent_indicies(ind, indices_list, MAX_ADJANCENT_INDEX);
+            my_node->get_adjacent_indicies(ind, indices_list, HS_SETTINGS_VALUE(btree->max_nodes_to_rebalance));
 
             // There has to be at least 2 nodes to merge or share. If not let the node be and proceed further down.
             if (indices_list.size() > 1) {

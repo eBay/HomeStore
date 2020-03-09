@@ -15,9 +15,9 @@
 #include <mutex>
 #include <utility/atomic_counter.hpp>
 #include <atomic>
-#include <main/homestore_config.hpp>
+#include <common/homestore_config.hpp>
 #include <utility/obj_life_counter.hpp>
-#include <main/homestore_assert.hpp>
+#include <common/homestore_assert.hpp>
 
 namespace homeds {
 using namespace homestore;
@@ -43,13 +43,14 @@ struct __attribute__((__may_alias__)) __mempiece_tag {
 constexpr int SizeMultiplier = 4096;
 
 struct MemPiece : public sisl::ObjLifeCounter< MemPiece > {
-    homeds::tagged_ptr<uint8_t> m_mem;
+    homeds::tagged_ptr< uint8_t > m_mem;
 
-    MemPiece(uint8_t *mem, uint32_t size, uint32_t offset) :
-            ObjLifeCounter(), m_mem(mem, (uint16_t)gen_new_tag(encode(size), encode(offset))) {}
+    MemPiece(uint8_t* mem, uint32_t size, uint32_t offset) :
+            ObjLifeCounter(),
+            m_mem(mem, (uint16_t)gen_new_tag(encode(size), encode(offset))) {}
 
     MemPiece() : MemPiece(nullptr, 0, 0) {}
-    MemPiece(const MemPiece &other) : ObjLifeCounter(), m_mem(other.m_mem) {}
+    MemPiece(const MemPiece& other) : ObjLifeCounter(), m_mem(other.m_mem) {}
     ~MemPiece() {}
 
     void set_ptr(uint8_t* ptr) { m_mem.set_ptr(ptr); }
@@ -128,12 +129,11 @@ private:
     /* we need recursive mutex because we can call init() function while holding it
      * and which internally can again call get_blob which also takes mutex.
      */
-    mutable std::recursive_mutex      m_mtx;
-    std::atomic< uint16_t >  m_refcnt;
+    mutable std::recursive_mutex m_mtx;
+    std::atomic< uint16_t > m_refcnt;
 
 public:
-    MemVector(uint8_t *ptr, uint32_t size, uint32_t offset) :
-            ObjLifeCounter(), m_refcnt(0) {
+    MemVector(uint8_t* ptr, uint32_t size, uint32_t offset) : ObjLifeCounter(), m_refcnt(0) {
         m_list.reserve(1);
         MemPiece m(ptr, size, offset);
         m_list.push_back(m);
@@ -143,9 +143,9 @@ public:
     MemVector() : ObjLifeCounter(), m_refcnt(0) { m_list.reserve(1); }
     ~MemVector() { m_list.erase(m_list.begin(), m_list.end()); }
 
-    friend void intrusive_ptr_add_ref(MemVector* mvec) { 
+    friend void intrusive_ptr_add_ref(MemVector* mvec) {
         int cnt = mvec->m_refcnt.fetch_add(1);
-        HS_ASSERT_CMP(RELEASE, cnt, <= , UINT16_MAX); 
+        HS_ASSERT_CMP(RELEASE, cnt, <=, UINT16_MAX);
     }
 
     friend void intrusive_ptr_release(MemVector* mvec) {
@@ -163,7 +163,7 @@ public:
     }
 
     std::vector< MemPiece > get_m_list() const { return m_list; }
-    void                    copy(const MemVector& other) {
+    void copy(const MemVector& other) {
         assert(other.m_refcnt > 0);
         m_list = other.get_m_list();
     }
@@ -179,7 +179,7 @@ public:
     void set(const homeds::blob& b, uint32_t offset = 0) { set(b.bytes, b.size, offset); }
 
     void get(homeds::blob* outb, uint32_t offset = 0) const {
-        uint32_t                       ind = 0;
+        uint32_t ind = 0;
         std::unique_lock< std::recursive_mutex > mtx(m_mtx);
         if ((m_list.size() && bsearch(offset, -1, &ind))) {
             auto piece_offset = m_list.at(ind).offset();
@@ -212,7 +212,7 @@ public:
     }
 
     std::string to_string() const {
-        auto              n = npieces();
+        auto n = npieces();
         std::stringstream ss;
 
         if (n > 1)
@@ -228,8 +228,8 @@ public:
      * within reach for given offset/size, it will reject the entry and return false. Else it sets or adds the entry */
     bool append(uint8_t* ptr, uint32_t offset, uint32_t size) {
         std::unique_lock< std::recursive_mutex > mtx(m_mtx);
-        bool                           added = false;
-        MemPiece                       mp(ptr, size, offset);
+        bool added = false;
+        MemPiece mp(ptr, size, offset);
         added = add_piece_to_list(mp);
         return added;
     }
@@ -249,9 +249,9 @@ public:
 
     uint32_t size(uint32_t offset, uint32_t size) const {
         std::unique_lock< std::recursive_mutex > mtx(m_mtx);
-        uint32_t                       s = 0;
-        uint32_t                       offset_read = 0;
-        bool                           start = false;
+        uint32_t s = 0;
+        uint32_t offset_read = 0;
+        bool start = false;
         for (auto it = m_list.begin(); it < m_list.end(); ++it) {
             offset_read += (*it).offset();
             if ((offset_read + (*it).size()) >= offset && !start) {
@@ -283,7 +283,7 @@ public:
 
     uint32_t size() const {
         std::unique_lock< std::recursive_mutex > mtx(m_mtx);
-        uint32_t                       s = 0;
+        uint32_t s = 0;
         for (auto it = m_list.begin(); it < m_list.end(); ++it) {
             s += (*it).size();
         }
@@ -302,10 +302,10 @@ public:
 
     uint32_t insert_missing_pieces(uint32_t offset, uint32_t size,
                                    std::vector< std::pair< uint32_t, uint32_t > >& missing_mp) {
-        uint32_t                       new_ind;
+        uint32_t new_ind;
         std::unique_lock< std::recursive_mutex > mtx(m_mtx);
-        cursor_t                       c;
-        uint32_t                       inserted_size = 0;
+        cursor_t c;
+        uint32_t inserted_size = 0;
 
 #ifndef NDEBUG
         auto temp_offset = offset;
@@ -331,7 +331,7 @@ public:
 
             } else if (new_ind < npieces()) {
                 auto& mp = get_nth_piece(new_ind);
-                auto  sz = mp.offset() - offset;
+                auto sz = mp.offset() - offset;
                 if (size < sz) {
                     sz = size;
                 }
@@ -363,10 +363,10 @@ public:
     }
 
     bool update_missing_piece(uint32_t offset, uint32_t size, uint8_t* ptr, std::function< void() > init_cb) {
-        uint32_t                       new_ind;
-        bool                           inserted = false;
+        uint32_t new_ind;
+        bool inserted = false;
         std::unique_lock< std::recursive_mutex > mtx(m_mtx);
-        bool                           found = find_index(offset, -1, &new_ind);
+        bool found = find_index(offset, -1, &new_ind);
         assert(found);
         auto& mp = get_nth_piece_mutable(new_ind);
         if (mp.ptr() == nullptr) {
@@ -413,7 +413,7 @@ private:
      * zero.
      */
     bool bsearch(uint32_t offset, int start, uint32_t* out_ind) const {
-        int      end = m_list.size();
+        int end = m_list.size();
         uint32_t mid = 0;
 
         while ((end - start) > 1) {
