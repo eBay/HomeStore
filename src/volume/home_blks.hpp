@@ -27,10 +27,11 @@ namespace homestore {
 class MappingKey;
 class MappingValue;
 
-enum blkstore_type {
+enum blkstore_type : uint32_t {
     DATA_STORE = 1,
     METADATA_STORE = 2,
     SB_STORE = 3,
+    LOGDEV_STORE = 4,
 };
 
 struct blkstore_blob {
@@ -87,31 +88,30 @@ struct vol_ondisk_sb {
     BlkId next_blkid;
     BlkId prev_blkid;
 
-    vol_state                        state;
-    uint64_t                         page_size;
-    uint64_t                         size;
-    char                             vol_name[VOL_NAME_SIZE];
+    vol_state state;
+    uint64_t page_size;
+    uint64_t size;
+    char vol_name[VOL_NAME_SIZE];
     homeds::btree::btree_super_block btree_sb;
 
     uint64_t get_page_size() const { return page_size; }
 } __attribute((packed));
 
 struct vol_mem_sb {
-    vol_ondisk_sb *ondisk_sb;
-    std::mutex  m_sb_lock; // lock for updating vol's sb
-    void lock() { m_sb_lock.lock();};
-    void unlock() {m_sb_lock.unlock();};
-    ~vol_mem_sb() {free(ondisk_sb);}
+    vol_ondisk_sb* ondisk_sb;
+    std::mutex m_sb_lock; // lock for updating vol's sb
+    void lock() { m_sb_lock.lock(); };
+    void unlock() { m_sb_lock.unlock(); };
+    ~vol_mem_sb() { free(ondisk_sb); }
 };
 
 using namespace homeds::btree;
 #define HOMEBLKS_SHUTDOWN (HomeBlks::instance()->is_shutdown())
 
-#define SHUTDOWN_TIMEOUT_NUM_SECS              300
+#define SHUTDOWN_TIMEOUT_NUM_SECS 300
 
 #define BLKSTORE_BUFFER_TYPE                                                                                           \
-    BtreeBuffer< MappingKey, MappingValue, btree_node_type::VAR_VALUE,                     \
-                                btree_node_type::VAR_VALUE >
+    BtreeBuffer< MappingKey, MappingValue, btree_node_type::VAR_VALUE, btree_node_type::VAR_VALUE >
 #define MappingBtreeDeclType                                                                                           \
     Btree< btree_store_type::SSD_BTREE, MappingKey, MappingValue, btree_node_type::VAR_VALUE, \
                           btree_node_type::VAR_VALUE, writeback_req >
@@ -152,28 +152,28 @@ class HomeBlks : public VolInterface {
 
 public:
     static VolInterface* init(const init_params& cfg);
-    static std::string   version;
-    static HomeBlks*     instance();
+    static std::string version;
+    static HomeBlks* instance();
     // Sanity check for sb;
     bool vol_sb_sanity(vol_mem_sb* sb);
-    
+
     // Read volume super block based on blkid
     vol_mem_sb* vol_sb_read(BlkId bid);
 
     HomeBlks(const init_params& cfg);
-    ~HomeBlks() {  
-        m_thread_id.join();
-    }
+    ~HomeBlks() { m_thread_id.join(); }
+    virtual vol_interface_req_ptr create_vol_hb_req() override;
     virtual std::error_condition write(const VolumePtr& vol, uint64_t lba, uint8_t* buf, uint32_t nblks,
                                        const vol_interface_req_ptr& req) override;
     virtual std::error_condition read(const VolumePtr& vol, uint64_t lba, int nblks,
                                       const vol_interface_req_ptr& req) override;
     virtual std::error_condition sync_read(const VolumePtr& vol, uint64_t lba, int nblks,
                                            const vol_interface_req_ptr& req) override;
-    virtual VolumePtr            create_volume(const vol_params& params) override;
+    virtual VolumePtr create_volume(const vol_params& params) override;
 
     virtual std::error_condition remove_volume(const boost::uuids::uuid& uuid) override;
     virtual VolumePtr            lookup_volume(const boost::uuids::uuid& uuid) override;
+    virtual                      SnapshotPtr snap_volume(VolumePtr) override;
     virtual const char*          get_name(const VolumePtr& vol) override;
     virtual uint64_t             get_page_size(const VolumePtr& vol) override;
     virtual boost::uuids::uuid   get_uuid(VolumePtr vol) override;

@@ -20,7 +20,7 @@
 #include <boost/intrusive_ptr.hpp>
 #include <error/error.h>
 #include <csignal>
-#include "homeds/utility/useful_defs.hpp"
+#include <fds/utils.hpp>
 #include <fmt/ostream.h>
 #include "homeds/array/reserve_vector.hpp"
 #include <main/homestore_header.hpp>
@@ -702,6 +702,153 @@ public:
         m_btree_lock.read_lock();
         verify_node(m_root_node, nullptr, -1);
         m_btree_lock.unlock();
+    }
+
+    void diff(Btree *other, uint32_t param, vector <pair <K, V>> *diff_kv) {
+       std::vector< pair<K,V> > my_kvs, other_kvs;
+
+       get_all_kvs(&my_kvs);
+       other->get_all_kvs(&other_kvs);
+       auto it1 = my_kvs.begin();
+       auto it2 = other_kvs.begin();
+
+       K k1, k2;
+       V v1, v2;
+
+       if (it1 != my_kvs.end()) {
+           k1 = it1->first;
+           v1 = it1->second;
+       }
+       if (it2 != other_kvs.end()) {
+           k2 = it2->first;
+           v2 = it2->second;
+       }
+
+       while ((it1 != my_kvs.end()) && (it2 != other_kvs.end())) {
+           if (k1.preceeds(&k2)) {
+               /* k1 preceeds k2 - push k1 and continue */
+               diff_kv->emplace_back(make_pair(k1,v1));
+               it1++;
+               if (it1 == my_kvs.end()) {
+                   break;
+               }
+               k1 = it1->first;
+               v1 = it1->second;
+           } else if (k1.succeeds(&k2)) {
+               /* k2 preceeds k1 - push k2 and continue */
+               diff_kv->emplace_back(make_pair(k2, v2));
+               it2++;
+               if (it2 == other_kvs.end()) {
+                   break;
+               }
+               k2 = it2->first;
+               v2 = it2->second;
+           } else {
+               /* k1 and k2 overlaps */
+               std::vector< pair< K, V > > overlap_kvs;
+               diff_read_next_t            to_read = READ_BOTH;
+
+               v1.get_overlap_diff_kvs(&k1, &v1, &k2, &v2, param, to_read, overlap_kvs);
+               for (auto ovr_it = overlap_kvs.begin(); ovr_it != overlap_kvs.end(); ovr_it++) {
+                   diff_kv->emplace_back(make_pair(ovr_it->first, ovr_it->second));
+               }
+
+               switch (to_read) {
+               case READ_FIRST:
+                   it1++;
+                   if (it1 == my_kvs.end()) {
+                       // Add k2,v2
+                       diff_kv->emplace_back(make_pair(k2, v2));
+                       it2++;
+                       break;
+                   }
+                   k1 = it1->first;
+                   v1 = it1->second;
+                   break;
+
+               case READ_SECOND:
+                   it2++;
+                   if (it2 == other_kvs.end()) {
+                       diff_kv->emplace_back(make_pair(k1, v1));
+                       it1++;
+                       break;
+                   }
+                   k2 = it2->first;
+                   v2 = it2->second;
+                   break;
+
+                case READ_BOTH: 
+                   /* No tail part */
+                   it1++;
+                   if (it1 == my_kvs.end()) {
+                       break;
+                   }
+                   k1 = it1->first;
+                   v1 = it1->second;
+                   it2++;
+                   if (it2 == my_kvs.end()) {
+                       break;
+                   }
+                   k2 = it2->first;
+                   v2 = it2->second;
+                   break;
+
+                default:
+                    LOGERROR("ERROR: Getting Overlapping Diff KVS for {}:{}, {}:{}, to_read {}", k1, v1, k2, v2, to_read);
+                    /* skip both */
+                    it1++;
+                    if (it1 == my_kvs.end()) {
+                        break;
+                    }
+                    k1 = it1->first;
+                    v1 = it1->second;
+                    it2++;
+                    if (it2 == my_kvs.end()) {
+                        break;
+                    }
+                    k2 = it2->first;
+                    v2 = it2->second;
+                    break;
+                }
+           }
+       }
+
+       while (it1 != my_kvs.end()) {
+           diff_kv->emplace_back(make_pair(it1->first, it1->second));
+           it1++;
+       }
+
+       while (it2 != other_kvs.end()) {
+           diff_kv->emplace_back(make_pair(it2->first, it2->second));
+           it2++;
+       }
+
+    }
+
+    void merge(Btree* other, match_item_cb_update_t<K,V> merge_cb) {
+
+          std::vector< pair< K, V > > other_kvs;
+
+          other->get_all_kvs(&other_kvs);
+          for (auto it = other_kvs.begin(); it != other_kvs.end(); it++) {
+              K                           k = it->first;
+              V                           v = it->second;
+              BRangeUpdateCBParam< K, V > local_param(k, v);
+              K                           start(k.start(), 1), end(k.end(), 1);
+
+              auto                       search_range = BtreeSearchRange(start, true, end, true);
+              BtreeUpdateRequest< K, V > ureq(search_range, merge_cb, (BRangeUpdateCBParam< K, V >*)&local_param);
+              range_put(k, v, btree_put_type::APPEND_IF_EXISTS_ELSE_INSERT, nullptr, nullptr, ureq);
+          }
+    }
+
+    void get_all_kvs(std::vector< pair< K, V > >* kvs) {
+        std::vector< BtreeNodePtr > leaves;
+
+        get_leaf_nodes(&leaves);
+        for (auto l : leaves) {
+            l->get_all_kvs(kvs);
+        }
     }
 
     void print_tree() {

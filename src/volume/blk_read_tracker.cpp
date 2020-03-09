@@ -21,7 +21,7 @@ void Blk_Read_Tracker::insert(BlkId& bid) {
     if (inserted) {
         COUNTER_INCREMENT(m_metrics, blktrack_pending_blk_read_map_sz, 1);
     } else { // record exists already, some other read happened
-        homeds::ObjectAllocator< BlkEvictionRecord >::deallocate(ber);
+        sisl::ObjectAllocator< BlkEvictionRecord >::deallocate(ber);
     }
     THIS_VOL_LOG(TRACE, volume, , "Marked read pending Bid:{},{}", bid, inserted);
 }

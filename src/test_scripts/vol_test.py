@@ -177,6 +177,13 @@ def seq_vol_load():
     p.start()
     p.join()
 
+def vdev_nightly():
+    print("virtual dev pwrite/pread/truncate test started")
+    subprocess.check_call(dirpath + "test_virtual_device \
+            --truncate_watermark_percentage=80 --run_time=24000 --num_io=1000000 --min_write_size=512 --max_write_size=32768",\
+            stderr=subprocess.STDOUT, shell=True)
+    print("virtual dev pwrite/pread/truncate test completed")
+
 def nightly():
 
     normal()
@@ -215,6 +222,9 @@ def nightly():
     sleep(5)
 
     load()
+    sleep(5)
+
+    vdev_nightly()
     sleep(5)
 
 if test_suits == "normal":
@@ -264,3 +274,6 @@ if test_suits == "load_volume":
 
 if test_suits == "seq_workload":
     seq_vol_load()
+
+if test_suits == "vdev_nightly":
+    vdev_nightly()
