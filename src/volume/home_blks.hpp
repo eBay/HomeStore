@@ -119,36 +119,37 @@ using namespace homeds::btree;
 typedef homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >                         data_blkstore_t;
 typedef homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >                         sb_blkstore_t;
 typedef homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy, BLKSTORE_BUFFER_TYPE >     metadata_blkstore_t;
+typedef homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >                         logdev_blkstore_t;
 typedef std::map< boost::uuids::uuid, std::shared_ptr< homestore::Volume > >                    vol_map_t;
 typedef boost::intrusive_ptr< BlkBuffer >                                                       blk_buf_t;
 
 class HomeBlks : public VolInterface {
-    static HomeBlks*                        _instance;
+    static HomeBlks* _instance;
 
-    init_params                             m_cfg;
-    std::thread                             m_thread_id;
-    homestore::DeviceManager*               m_dev_mgr;
-    data_blkstore_t*                        m_data_blk_store;
-    metadata_blkstore_t*                    m_metadata_blk_store;
-    sb_blkstore_t*                          m_sb_blk_store;
-    homeblks_sb*                            m_homeblks_sb;    // the homesotre super block
-    Cache< BlkId >*                         m_cache;
-    bool                                    m_rdy;
-    vol_map_t                               m_volume_map;
-    std::recursive_mutex                    m_vol_lock;
-    vol_mem_sb*                             m_last_vol_sb;
-    bool                                    m_vdev_failed;
-    uint64_t                                m_size_avail;
-    uint32_t                                m_data_pagesz;
-    std::atomic< int >                      m_scan_cnt;
-    std::atomic< bool >                     m_init_failed;
-    out_params                              m_out_params;
-    std::unique_ptr< sisl::HttpServer >     m_http_server;
-    std::atomic< bool >                     m_shutdown;
-    std::atomic< bool >                     m_init_finished;
-    std::condition_variable                 m_cv;
-    std::mutex                              m_cv_mtx;
-    bool                                    m_print_checksum;
+    init_params m_cfg;
+    std::thread m_thread_id;
+    homestore::DeviceManager* m_dev_mgr;
+    data_blkstore_t* m_data_blk_store;
+    metadata_blkstore_t* m_metadata_blk_store;
+    sb_blkstore_t* m_sb_blk_store;
+    homeblks_sb* m_homeblks_sb; // the homesotre super block
+    Cache< BlkId >* m_cache;
+    bool m_rdy;
+    vol_map_t m_volume_map;
+    std::recursive_mutex m_vol_lock;
+    vol_mem_sb* m_last_vol_sb;
+    bool m_vdev_failed;
+    uint64_t m_size_avail;
+    uint32_t m_data_pagesz;
+    std::atomic< int > m_scan_cnt;
+    std::atomic< bool > m_init_failed;
+    out_params m_out_params;
+    std::unique_ptr< sisl::HttpServer > m_http_server;
+    std::atomic< bool > m_shutdown;
+    std::atomic< bool > m_init_finished;
+    std::condition_variable m_cv;
+    std::mutex m_cv_mtx;
+    bool m_print_checksum;
 
 public:
     static VolInterface* init(const init_params& cfg);
@@ -172,29 +173,30 @@ public:
     virtual VolumePtr create_volume(const vol_params& params) override;
 
     virtual std::error_condition remove_volume(const boost::uuids::uuid& uuid) override;
-    virtual VolumePtr            lookup_volume(const boost::uuids::uuid& uuid) override;
-    virtual                      SnapshotPtr snap_volume(VolumePtr) override;
-    virtual const char*          get_name(const VolumePtr& vol) override;
-    virtual uint64_t             get_page_size(const VolumePtr& vol) override;
-    virtual boost::uuids::uuid   get_uuid(VolumePtr vol) override;
-    virtual homeds::blob         at_offset(const blk_buf_t& buf, uint32_t offset) override;
+    virtual VolumePtr lookup_volume(const boost::uuids::uuid& uuid) override;
+    virtual SnapshotPtr snap_volume(VolumePtr) override;
+    virtual const char* get_name(const VolumePtr& vol) override;
+    virtual uint64_t get_page_size(const VolumePtr& vol) override;
+    virtual boost::uuids::uuid get_uuid(VolumePtr vol) override;
+    virtual homeds::blob at_offset(const blk_buf_t& buf, uint32_t offset) override;
     virtual bool vol_state_change(const VolumePtr& vol, vol_state new_state) override;
-    void                         vol_sb_write(vol_mem_sb* sb);
-    void                         vol_sb_init(vol_mem_sb* sb);
-    void                         homeblks_sb_init(BlkId& bid);
-    void                         homeblks_sb_write();
-    void                         vol_scan_cmpltd(const VolumePtr& vol, vol_state state, bool success);
-    void                         populate_disk_attrs();
-    virtual void                 attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback cb) override;
+    void vol_sb_write(vol_mem_sb* sb);
+    void vol_sb_init(vol_mem_sb* sb);
+    void homeblks_sb_init(BlkId& bid);
+    void homeblks_sb_write();
+    void vol_scan_cmpltd(const VolumePtr& vol, vol_state state, bool success);
+    void populate_disk_attrs();
+    virtual void attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback cb) override;
 
     virtual std::error_condition shutdown(shutdown_comp_callback shutdown_comp_cb, bool force = false) override;
     virtual cap_attrs get_system_capacity() override;
     virtual cap_attrs get_vol_capacity(const VolumePtr& vol) override;
 
-    data_blkstore_t*            get_data_blkstore();
-    metadata_blkstore_t*        get_metadata_blkstore();
-    void                        vol_sb_remove(vol_mem_sb* sb);
-    uint32_t                    get_data_pagesz() const;
+    data_blkstore_t* get_data_blkstore();
+    metadata_blkstore_t* get_metadata_blkstore();
+    logdev_blkstore_t* get_logdev_blkstore();
+    void vol_sb_remove(vol_mem_sb* sb);
+    uint32_t get_data_pagesz() const;
     uint64_t get_boot_cnt();
     void init_done(std::error_condition err, const out_params& params);
 
@@ -224,23 +226,23 @@ public:
     static void verify_hs(sisl::HttpCallData cd);
 
 private:
-    BlkId       alloc_blk();
-    void        process_vdev_error(vdev_info_block* vb);
-    void        create_blkstores();
-    void        add_devices();
-    void        vol_mounted(const VolumePtr& vol, vol_state state);
-    void        vol_state_change(const VolumePtr& vol, vol_state old_state, vol_state new_state);
-    void        scan_volumes();
-    void        create_data_blkstore(vdev_info_block* vb);
-    void        create_metadata_blkstore(vdev_info_block* vb);
-    void        create_sb_blkstore(vdev_info_block* vb);
-    bool        is_ready();
-    void        init_thread();
-    void        volume_destroy();
-    bool        is_shutdown();
-    void        verify_vols();
-    void        shutdown_process(shutdown_comp_callback shutdown_comp_cb, bool force);
-    blk_buf_t   get_valid_buf(const std::vector< blk_buf_t >& bbuf, bool& rewrite);
+    BlkId alloc_blk();
+    void process_vdev_error(vdev_info_block* vb);
+    void create_blkstores();
+    void add_devices();
+    void vol_mounted(const VolumePtr& vol, vol_state state);
+    void vol_state_change(const VolumePtr& vol, vol_state old_state, vol_state new_state);
+    void scan_volumes();
+    void create_data_blkstore(vdev_info_block* vb);
+    void create_metadata_blkstore(vdev_info_block* vb);
+    void create_sb_blkstore(vdev_info_block* vb);
+    bool is_ready();
+    void init_thread();
+    void volume_destroy();
+    bool is_shutdown();
+    void verify_vols();
+    void shutdown_process(shutdown_comp_callback shutdown_comp_cb, bool force);
+    blk_buf_t get_valid_buf(const std::vector< blk_buf_t >& bbuf, bool& rewrite);
     static void new_vdev_found(DeviceManager* dev_mgr, vdev_info_block* vb);
 };
 } // namespace homestore

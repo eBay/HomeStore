@@ -1312,8 +1312,8 @@ public:
         }
     }
 
-    ssize_t do_read_internal(PhysicalDev* pdev, PhysicalDevChunk* pchunk, const uint64_t dev_offset, char* ptr,
-                             const uint64_t size, boost::intrusive_ptr< virtualdev_req > req) {
+    ssize_t do_read_internal(PhysicalDev* pdev, PhysicalDevChunk* primary_chunk, const uint64_t primary_dev_offset,
+                             char* ptr, const uint64_t size, boost::intrusive_ptr< virtualdev_req > req) {
         COUNTER_INCREMENT(pdev->get_metrics(), drive_read_vector_count, 1);
         ssize_t bytes_read = 0;
 
@@ -1321,7 +1321,7 @@ public:
             // if req is null (sync), or it is a sync call;
             auto start = Clock::now();
             COUNTER_INCREMENT(pdev->get_metrics(), drive_sync_read_count, 1);
-            bytes_read = pdev->sync_read(ptr, size, dev_offset);
+            bytes_read = pdev->sync_read(ptr, size, primary_dev_offset);
             HISTOGRAM_OBSERVE(pdev->get_metrics(), drive_read_latency, get_elapsed_time_us(start));
         } else {
             COUNTER_INCREMENT(pdev->get_metrics(), drive_async_read_count, 1);
@@ -1333,7 +1333,7 @@ public:
             req->io_start_time = Clock::now();
             req->inc_ref();
 
-            pdev->read(ptr, size, dev_offset, (uint8_t*)req.get());
+            pdev->read(ptr, size, primary_dev_offset, (uint8_t*)req.get());
             bytes_read = size;
         }
 
@@ -1348,7 +1348,7 @@ public:
 
                 COUNTER_INCREMENT(pdev->get_metrics(), drive_sync_read_count, 1);
                 auto start_time = Clock::now();
-                pdev->sync_read(ptr, size, dev_offset_m);
+                pdev->sync_read(ptr, size, dev_offset);
                 HISTOGRAM_OBSERVE(pdev->get_metrics(), drive_read_latency, get_elapsed_time_us(start_time));
             }
         }
