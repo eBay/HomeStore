@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
+#include <metrics/metrics.hpp>
 #include <main/vol_interface.hpp>
 #include <iomgr/iomgr.hpp>
 #include <boost/uuid/uuid_generators.hpp>
@@ -32,28 +33,34 @@ SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 #if 0
 /************************** GLOBAL VARIABLES ***********************/
 
-#define PRELOAD_WRITES 100000000 // with 4k write it is 400 G insertion
+
+uint64_t preload_writes = 100000000; // with 4k write it is 400 G insertion
 
 uint64_t max_disk_capacity;
 #define MAX_DEVICES 2
 std::vector< std::string > dev_names;
-std::string                names[4] = {"/tmp/perf_file1", "/tmp/perf_file2", "/tmp/perf_file3", "/tmp/perf_file4"};
+std::string names[4] = {"/tmp/perf_file1", "/tmp/perf_file2", "/tmp/perf_file3", "/tmp/perf_file4"};
 
-uint64_t           max_vols = 1;
-uint64_t           run_time;
-uint64_t           num_threads;
-uint64_t           queue_depth;
-uint32_t           read_p;
-uint32_t           io_size;
-bool               is_file = false;
-bool               ref_cnt = false;
-constexpr auto     Ki = 1024ull;
-constexpr auto     Mi = Ki * Ki;
-constexpr auto     Gi = Ki * Mi;
+uint64_t max_vols = 1;
+uint64_t run_time;
+uint64_t num_threads;
+uint64_t queue_depth;
+uint32_t read_p;
+uint32_t io_size;
+bool is_file = false;
+bool ref_cnt = false;
+constexpr auto Ki = 1024ull;
+constexpr auto Mi = Ki * Ki;
+constexpr auto Gi = Ki * Mi;
 constexpr uint64_t max_io_size = 1 * Mi;
-uint64_t           max_outstanding_ios;
-uint64_t           match_cnt = 0;
-
+uint64_t max_outstanding_ios;
+uint64_t match_cnt = 0;
+uint64_t cache_size = 0;
+std::atomic< uint64_t > write_cnt(0);
+std::atomic< uint64_t > read_cnt(0);
+std::atomic< uint64_t > read_err_cnt(0);
+std::atomic< size_t > outstanding_ios(0);
+bool disk_init = true;
 using log_level = spdlog::level::level_enum;
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
@@ -192,11 +199,10 @@ public:
         m_vol_bm[cnt] = new homeds::Bitset(max_vol_blks[cnt]);
         assert(VolInterface::get_instance()->get_vol_capacity(vol_obj).initial_total_size == max_vol_size);
 
+    void vol_state_change_cb(const VolumePtr& vol, vol_state old_state, vol_state new_state) {
         std::unique_lock< std::mutex > lk(m_mutex);
         vol_info.push_back(info);
     }
-
-    void vol_state_change_cb(const VolumePtr& vol, vol_state old_state, vol_state new_state) { assert(0); }
 
     void create_volume() {
 
@@ -226,7 +232,7 @@ public:
             create_volume();
         } else {
             assert(vol_cnt == max_vols);
-            LOGINFO("init completed, verify started");
+            LOGINFO("init completed");
         }
         ev_fd = eventfd(0, EFD_NONBLOCK);
 
@@ -243,7 +249,7 @@ public:
     }
 
     void process_ev_common(int fd, void* cookie, int event) {
-        uint64_t              temp;
+        uint64_t temp;
         [[maybe_unused]] auto rsize = read(ev_fd, &temp, sizeof(uint64_t));
 
         iomgr_obj->process_done(fd, event);
@@ -252,8 +258,7 @@ public:
             iomgr_obj->fd_reschedule(fd, event);
         }
 
-        if (!write_cnt) { LOGINFO("preload started"); }
-        if (!preload_done && read_p > 50 && write_cnt < PRELOAD_WRITES) {
+        if (!preload_done && write_cnt < preload_writes) {
             while (outstanding_ios < max_outstanding_ios) {
                 random_write();
             }
@@ -263,6 +268,10 @@ public:
             start_time = Clock::now();
             LOGINFO("io started");
             write_cnt = 1;
+            read_cnt = 1;
+        }
+        if (write_cnt == 1 && !preload_done) {
+            LOGINFO("preload started");
         }
 
         while (outstanding_ios < max_outstanding_ios) {
@@ -287,7 +296,9 @@ public:
         if (!io_size) {
             uint64_t max_blks = max_io_size / VolInterface::get_instance()->get_page_size(vol[cur]);
             nblks = rand() % max_blks;
-            if (nblks == 0) { nblks = 1; }
+            if (nblks == 0) {
+                nblks = 1;
+            }
         } else {
             nblks = (io_size * 1024) / (VolInterface::get_instance()->get_page_size(vol[cur]));
         }
@@ -295,14 +306,15 @@ public:
         m_vol_bm[cur]->set_bits(lba, nblks);
         uint8_t* buf = nullptr;
         uint64_t size = nblks * VolInterface::get_instance()->get_page_size(vol[cur]);
-        auto     ret = posix_memalign((void**)&buf, 4096, size);
-        if (ret) { assert(0); }
+        auto ret = posix_memalign((void**)&buf, 4096, size);
+        if (ret) {
+            assert(0);
+        }
         /* buf will be owned by homestore after sending the IO. so we need to allocate buf1 which will be used to
          * write to a file after ios are completed.
          */
         assert(buf != nullptr);
-
-        req* req = new struct req();
+        boost::intrusive_ptr< req > req(new struct req());
         req->lba = lba;
         req->nblks = nblks;
         req->size = size;
@@ -332,7 +344,9 @@ public:
         if (!io_size) {
             uint64_t max_blks = max_io_size / VolInterface::get_instance()->get_page_size(vol[cur]);
             nblks = rand() % max_blks;
-            if (nblks == 0) { nblks = 1; }
+            if (nblks == 0) {
+                nblks = 1;
+            }
         } else {
             nblks = (io_size * 1024) / (VolInterface::get_instance()->get_page_size(vol[cur]));
         }
@@ -347,7 +361,7 @@ public:
 
     void read_vol(uint32_t cur, uint64_t lba, uint64_t nblks) {
         uint64_t size = nblks * VolInterface::get_instance()->get_page_size(vol[cur]);
-        req* req = new struct req();
+        boost::intrusive_ptr< req > req(new struct req());
         req->lba = lba;
         req->nblks = nblks;
         req->is_read = true;
@@ -368,6 +382,7 @@ public:
 
     void process_completions(const vol_interface_req_ptr& vol_req) {
         /* raise an event */
+        boost::intrusive_ptr< req > req = boost::static_pointer_cast< struct req >(vol_req);
         static uint64_t print_time = 30;
         uint64_t temp = 1;
         --outstanding_ios;
@@ -423,11 +438,11 @@ public:
 
 TEST_F(IOTest, normal_random_io_test) {
     /* fork a new process */
-    this->init = true;
+    this->init = disk_init;
     /* child process */
     this->start_homestore();
     this->wait_cmpl();
-    this->remove_files();
+    LOGINFO("Metrics for this run: {}", sisl::MetricsFarm::getInstance().get_result_in_json().dump(4));
     LOGINFO("write_cnt {}", write_cnt);
     LOGINFO("read_cnt {}", read_cnt);
     uint64_t time_dur = (std::chrono::duration_cast< std::chrono::seconds >(end_time - start_time)).count();
@@ -450,12 +465,16 @@ SDS_OPTION_GROUP(perf_test_volume,
                   ::cxxopts::value< uint32_t >()->default_value("50"), "percentage"),
                  (device_list, "", "device_list", "List of device paths",
                   ::cxxopts::value< std::vector< std::string > >(), "path [...]"),
-                 (io_size, "", "io_size", "size of io in KB", ::cxxopts::value< uint32_t >()->default_value("0"),
+                 (io_size, "", "io_size", "size of io in KB", ::cxxopts::value< uint32_t >()->default_value("64"),
                   "size of io in KB"),
                  (cache_size, "", "cache_size", "size of cache in GB",
                   ::cxxopts::value< uint32_t >()->default_value("4"), "size of cache in GB"),
                  (is_file, "", "is_file", "is_it file", ::cxxopts::value< uint32_t >()->default_value("0"),
                   "is it file"),
+                 (init, "", "init", "init", ::cxxopts::value< uint32_t >()->default_value("1"), 
+                  "init"), 
+                 (preload_writes, "", "preload_writes", "preload_writes", ::cxxopts::value< uint32_t >()->default_value("100000000"), 
+                  "preload_writes"), 
                  (ref_cnt, "", "ref_count", "display object life counters",
                   ::cxxopts::value< uint32_t >()->default_value("0"), "display object life counters"))
 #define ENABLED_OPTIONS logging, home_blks, perf_test_volume
@@ -480,6 +499,24 @@ int main(int argc, char* argv[]) {
     sds_logging::SetLogger("perf_test_volume");
     spdlog::set_pattern("[%D %T.%f%z] [%^%l%$] [%t] %v");
 
+#if 0
+    disk_init = SDS_OPTIONS["init"].as< uint32_t >() ? true : false;
+
+
+    if (dev_names.size() == 0) {
+        LOGINFO("creating files");
+        for (uint32_t i = 0; i < MAX_DEVICES; i++) {
+            if (disk_init) {
+                std::ofstream ofs(names[i].c_str(), std::ios::binary | std::ios::out);
+                ofs.seekp(10 * Gi - 1);
+                ofs.write("", 1);
+                ofs.close();
+            }
+            dev_names.push_back(names[i]);
+        }
+        is_file = 1;
+    }
+#endif
     simple_store_cfg cfg;
     cfg.m_run_time_ms = SDS_OPTIONS["run_time"].as< uint32_t >() * 1000;
     cfg.m_nthreads = SDS_OPTIONS["num_threads"].as< uint32_t >();

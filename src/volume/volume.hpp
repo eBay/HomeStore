@@ -39,21 +39,14 @@ typedef boost::intrusive_ptr< volume_req > volume_req_ptr;
 #define BOOT_CNT_MASK 0x0000fffffffffffful
 #define GET_IO_SEQ_ID(sid) ((HomeBlks::instance()->get_boot_cnt() << SEQ_ID_BIT_CNT) | (sid & BOOT_CNT_MASK))
 
-#define _VOL_REQ_LOG_FORMAT "[req_id={}]: "
-#define _VOL_REQ_LOG_MSG(req) req->request_id
-#define _VOL_REQ_LOG_VERBOSE_FORMAT "[request={}]"
-#define _VOL_REQ_LOG_VERBOSE_MSG(req) req->to_string()
-#define _VOLMSG_EXPAND(...) __VA_ARGS__
-
-#define VOL_LOG(level, mod, req, msg, ...)                              \
-    HS_SUBMOD_LOG(level, mod, req, "vol",                               \
-        this->m_vol_uuid, msg, ##__VA_ARGS__)
-#define VOL_ASSERT(assert_type, cond, req, ...)                         \
-    HS_SUBMOD_ASSERT(assert_type, cond, req, "vol",                     \
-        this->m_vol_uuid, ##__VA_ARGS__)
-#define VOL_ASSERT_CMP(assert_type, val1, cmp, val2, req, ...)          \
-    HS_SUBMOD_ASSERT_CMP(assert_type, val1, cmp, val2, req, "vol",      \
-        this->m_vol_uuid, ##__VA_ARGS__)
+#define VOL_INFO_LOG(volname, msg, ...) HS_SUBMOD_LOG(INFO, base, , "vol", volname, msg, ##__VA_ARGS__)
+#define VOL_ERROR_LOG(volname, msg, ...) HS_SUBMOD_LOG(ERROR, base, , "vol", volname, msg, ##__VA_ARGS__)
+#define THIS_VOL_LOG(level, mod, req, msg, ...)                                                                        \
+    HS_SUBMOD_LOG(level, mod, req, "vol", this->m_vol_uuid, msg, ##__VA_ARGS__)
+#define VOL_ASSERT(assert_type, cond, req, ...)                                                                        \
+    HS_SUBMOD_ASSERT(assert_type, cond, req, "vol", this->m_vol_uuid, ##__VA_ARGS__)
+#define VOL_ASSERT_CMP(assert_type, val1, cmp, val2, req, ...)                                                         \
+    HS_SUBMOD_ASSERT_CMP(assert_type, val1, cmp, val2, req, "vol", this->m_vol_uuid, ##__VA_ARGS__)
 
 #define VOL_DEBUG_ASSERT(...) VOL_ASSERT(DEBUG, __VA_ARGS__)
 #define VOL_RELEASE_ASSERT(...) VOL_ASSERT(RELEASE, __VA_ARGS__)
@@ -200,7 +193,6 @@ private:
     std::atomic< uint64_t >           m_err_cnt = 0;
     std::string                       m_vol_name;
     std::string                       m_vol_uuid;
- 
 #ifndef NDEBUG
     std::mutex m_req_mtx;
     std::map< uint64_t, volume_req_ptr > m_req_map;
@@ -297,12 +289,12 @@ public:
     bool remove_free_blk_entry(std::vector< Free_Blk_Entry >& fbes, std::pair< MappingKey, MappingValue >& kv);
 
     uint64_t get_elapsed_time(Clock::time_point startTime);
-    void     attach_completion_cb(const io_comp_callback& cb);
-    void     print_tree();
-    void     verify_tree();
-    void     print_node(uint64_t blkid);
-    void     blk_recovery_callback(const MappingValue& mv);
-    void     set_recovery_error();
+    void attach_completion_cb(const io_comp_callback& cb);
+    void print_tree();
+    void verify_tree();
+    void print_node(uint64_t blkid);
+    void blk_recovery_callback(const MappingValue& mv);
+    void set_recovery_error();
 
     mapping* get_mapping_handle() { return m_map; }
 

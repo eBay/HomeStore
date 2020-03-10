@@ -30,8 +30,8 @@ def recovery():
     stderr=subprocess.STDOUT, shell=True)
     
     subprocess.check_call(dirpath + "test_volume \
-    --gtest_filter=IOTest.recovery_io_test --verify_hdr=0 --verify_data=0 --run_time=30 --enable_crash_handler=1", \
-    stderr=subprocess.STDOUT, shell=True)
+    --gtest_filter=IOTest.recovery_io_test --verify_hdr=0 --verify_data=0 --run_time=30 --enable_crash_handler=1 \
+    --remove_file=1 --delete_volume=1", stderr=subprocess.STDOUT, shell=True)
     print("recovery passed")
 
 ## @test    normal
@@ -47,7 +47,7 @@ def normal_flip():
     print("normal test started with flip = 2")
     subprocess.check_call(dirpath + "test_volume \
             --run_time=3600 --max_num_writes=5000000 --gtest_filter=IOTest.init_io_test --remove_file=0 --verify_data=0 \
-            --flip=2", stderr=subprocess.STDOUT, shell=True)
+            --flip=1", stderr=subprocess.STDOUT, shell=True)
     print("normal test completed with flip =  2")
 
 ## @test    load
@@ -85,7 +85,7 @@ def recovery_nightly():
         i += 1
     
     subprocess.check_call(dirpath + "test_volume --gtest_filter=IOTest.recovery_io_test \
-            --run_time=300 --remove_file=0", stderr=subprocess.STDOUT, shell=True)
+            --run_time=300 --remove_file=1 --delete_volume=1", stderr=subprocess.STDOUT, shell=True)
     print("recovery test completed")
 
 ## @test    one_disk_replace
@@ -193,7 +193,7 @@ def nightly():
     sleep(5)
     
     # normal IO test
- #   normal_flip()
+    normal_flip()
     sleep(5)
 
     one_disk_replace()

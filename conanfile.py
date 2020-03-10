@@ -4,6 +4,7 @@ from conans import ConanFile, CMake, tools
 
 class HomestoreConan(ConanFile):
     name = "homestore"
+
     version = "0.12.01"
     revision_mode = "scm"
 
@@ -11,26 +12,33 @@ class HomestoreConan(ConanFile):
     url = "https://github.corp.ebay.com/SDS/Homestore"
     description = "HomeStore"
 
-    settings = "arch", "os", "compiler", "build_type", "sanitize"
-    options = {"shared": ['True', 'False'],
-               "fPIC": ['True', 'False'],
-               "coverage": ['True', 'False']}
-    default_options = 'shared=False', 'fPIC=True', 'coverage=False'
+    settings = "arch", "os", "compiler", "build_type"
+    options = {
+                "shared": ['True', 'False'],
+                "fPIC": ['True', 'False'],
+                "coverage": ['True', 'False'],
+                "sanitize": ['True', 'False'],
+                }
+    default_options = (
+                        'shared=False',
+                        'fPIC=True',
+                        'coverage=False',
+                        'sanitize=False',
+                        )
 
     requires = (
-            "flip/0.2.6@sds/develop",
-            "iomgr/3.1.0@sds/iomgr_v3",
+            "flip/0.2.7@sds/develop",
+            "iomgr/3.1.1@sds/iomgr_v3",
             "jungle/1.0.1@sds/testing",
-            "sds_logging/6.1.2@sds/develop",
-            "sisl/1.0.1@sisl/develop",
-
+            "sds_logging/7.0.0@sds/develop",
+            "sisl/1.0.3@sisl/develop",
             # FOSS, rarely updated
             "benchmark/1.5.0",
             "boost/1.72.0",
             "double-conversion/3.1.5",
             "evhtp/1.2.18.2",
             "farmhash/1.0.0",
-            "folly/2019.09.30.00",
+            "folly/2020.03.02.00",
             "isa-l/2.21.0",
             "libevent/2.1.11",
             )
@@ -40,8 +48,8 @@ class HomestoreConan(ConanFile):
     keep_imports = True
 
     def configure(self):
-        if self.settings.sanitize != None:
-            del self.options.coverage
+        if self.options.sanitize:
+            self.options.coverage = False
 
     def imports(self):
         self.copy(root_package="flip", pattern="*.py", dst="bin/scripts", src="python/flip/", keep_path=True)
@@ -58,12 +66,12 @@ class HomestoreConan(ConanFile):
                        'MEMORY_SANITIZER_ON': 'OFF'}
         test_target = None
 
-        if self.settings.sanitize != "address" and self.options.coverage == 'True':
+        if self.options.sanitize:
+            definitions['MEMORY_SANITIZER_ON'] = 'ON'
+
+        if self.options.coverage:
             definitions['CONAN_BUILD_COVERAGE'] = 'ON'
             test_target = 'coverage'
-
-        if self.settings.sanitize != None:
-            definitions['MEMORY_SANITIZER_ON'] = 'ON'
 
         if self.settings.build_type == 'Debug':
             definitions['CMAKE_BUILD_TYPE'] = 'Debug'
@@ -85,12 +93,13 @@ class HomestoreConan(ConanFile):
         self.copy("*test_load", dst="bin", keep_path=False)
         self.copy("*test_mapping", dst="bin", keep_path=False)
         self.copy("*test_volume", dst="bin", keep_path=False)
+        self.copy("*check_btree", dst="bin", keep_path=False)
         self.copy("*", dst="bin/scripts", src="bin/scripts", keep_path=True)
 
     def package_info(self):
         self.cpp_info.libs = tools.collect_libs(self)
         self.cpp_info.cxxflags.append("-DBOOST_ALLOW_DEPRECATED_HEADERS")
-        if self.settings.sanitize != None:
+        if self.options.sanitize:
             self.cpp_info.sharedlinkflags.append("-fsanitize=address")
             self.cpp_info.exelinkflags.append("-fsanitize=address")
             self.cpp_info.sharedlinkflags.append("-fsanitize=undefined")
@@ -104,5 +113,6 @@ class HomestoreConan(ConanFile):
         self.copy("*test_load", dst="/usr/local/bin", keep_path=False)
         self.copy("*test_mapping", dst="/usr/local/bin", keep_path=False)
         self.copy("*test_volume", dst="/usr/local/bin", keep_path=False)
+        self.copy("*check_btree", dst="/usr/local/bin", keep_path=False)
         self.copy("vol_test.py", dst="/usr/local/bin", src="bin/scripts", keep_path=False)
         self.copy("*", dst="/usr/local/bin/home_blks_scripts", src="bin/scripts", keep_path=True)

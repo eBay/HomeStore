@@ -215,8 +215,9 @@ public:
         ss << "device names = ";
         for (uint32_t i = 0; i < devices.size(); ++i) {
             ss << devices[i].dev_names;
-            ss << ", ";
+            ss << ",";
         }
+        ss << "]";
         return ss.str();
     }
     init_params() = default;

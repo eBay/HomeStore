@@ -17,6 +17,7 @@
 #include <atomic>
 #include <main/homestore_config.hpp>
 #include <utility/obj_life_counter.hpp>
+#include <main/homestore_assert.hpp>
 
 namespace homeds {
 using namespace homestore;
@@ -142,7 +143,10 @@ public:
     MemVector() : ObjLifeCounter(), m_refcnt(0) { m_list.reserve(1); }
     ~MemVector() { m_list.erase(m_list.begin(), m_list.end()); }
 
-    friend void intrusive_ptr_add_ref(MemVector* mvec) { mvec->m_refcnt++; }
+    friend void intrusive_ptr_add_ref(MemVector* mvec) { 
+        int cnt = mvec->m_refcnt.fetch_add(1);
+        HS_ASSERT_CMP(RELEASE, cnt, <= , UINT16_MAX); 
+    }
 
     friend void intrusive_ptr_release(MemVector* mvec) {
         if (mvec->m_refcnt.fetch_sub(1, std::memory_order_relaxed) != 1) { return; }
