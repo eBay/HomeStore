@@ -10,6 +10,7 @@
 #include <boost/uuid/uuid_io.hpp>
 #include <async_http/http_server.hpp>
 #include <threadpool/thread_pool.h>
+#include <metrics/metrics.hpp>
 
 #ifndef DEBUG
 extern bool same_value_gen;
@@ -123,6 +124,14 @@ typedef homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >         
 typedef std::map< boost::uuids::uuid, std::shared_ptr< homestore::Volume > >                    vol_map_t;
 typedef boost::intrusive_ptr< BlkBuffer >                                                       blk_buf_t;
 
+class HomeBlksMetrics : public sisl::MetricsGroupWrapper {
+public: 
+    explicit HomeBlksMetrics(const char* homeblks_name) : sisl::MetricsGroupWrapper("HomeBlks", homeblks_name) {
+        REGISTER_HISTOGRAM(scan_volumes_latency, "Scan Volumes latency");
+        register_me_to_farm();
+    }
+};
+
 class HomeBlks : public VolInterface {
     static HomeBlks* _instance;
 
@@ -151,7 +160,7 @@ class HomeBlks : public VolInterface {
     std::condition_variable m_cv;
     std::mutex m_cv_mtx;
     bool m_print_checksum;
-
+    HomeBlksMetrics m_metrics;
 public:
     static VolInterface* init(const init_params& cfg);
     static std::string version;
@@ -202,12 +211,30 @@ public:
     void init_done(std::error_condition err, const out_params& params);
 
     void print_tree(const VolumePtr& vol, bool chksum = true);
-    void verify_tree(const VolumePtr& vol);
+    bool verify_tree(const VolumePtr& vol);
     void print_node(const VolumePtr& vol, uint64_t blkid, bool chksum = true);
+    
 
-#ifndef NDEBUG
-    void verify_pending_blks(const VolumePtr& vol);
-#endif
+    /**
+     * @brief : fix corrupted mapping in volume
+     *
+     * @param vol : volume pointer that holds the mapping btree being fxied
+     *
+     * @return : true for a successful fix;
+     *           false for a failed fix;
+     */
+    virtual bool fix_tree(VolumePtr vol, bool verify = false) override;
+
+
+    /**
+     * @brief : get volume state
+     *
+     * @param vol : volume pointer to whose state is being returned;
+     *
+     * @return : volume state
+     */
+    virtual vol_state get_state(VolumePtr vol) override;
+
 #ifdef _PRERELEASE
     void set_io_flip();
     void set_error_flip();

@@ -50,7 +50,8 @@ HomeBlks::HomeBlks(const init_params& cfg) :
         m_init_failed(false),
         m_shutdown(false),
         m_init_finished(false),
-        m_print_checksum(true) {
+        m_print_checksum(true),
+        m_metrics("HomeBlks") {
 
     _instance = this;
     LOGINFO("homeblks initing {}", m_cfg.to_string());
@@ -480,10 +481,6 @@ void HomeBlks::homeblks_sb_init(BlkId& bid) {
 
 boost::uuids::uuid HomeBlks::get_uuid(VolumePtr vol) { return vol->get_uuid(); }
 
-#ifndef NDEBUG
-void HomeBlks::verify_pending_blks(const VolumePtr& vol) { return vol->verify_pending_blks(); }
-
-#endif
 void HomeBlks::homeblks_sb_write() {
     homeds::MemVector mvec;
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
@@ -946,7 +943,10 @@ void HomeBlks::init_thread() {
         m_http_server->start();
 
         /* scan volumes */
+        auto vol_scan_start_time = Clock::now();
         scan_volumes();
+        HISTOGRAM_OBSERVE(m_metrics, scan_volumes_latency, get_elapsed_time_ms(vol_scan_start_time));
+
         m_init_finished = true;
         m_cv.notify_all();
         return;
@@ -1004,9 +1004,9 @@ void HomeBlks::print_tree(const VolumePtr& vol, bool chksum) {
     vol->print_tree();
 }
 
-void HomeBlks::verify_tree(const VolumePtr& vol) {
+bool HomeBlks::verify_tree(const VolumePtr& vol) {
     VOL_INFO_LOG(vol->get_uuid(), "Verifying the integrity of the index tree");
-    vol->verify_tree();
+    return vol->verify_tree();
 }
 
 void HomeBlks::verify_vols() {
@@ -1210,8 +1210,6 @@ std::error_condition HomeBlks::shutdown(shutdown_comp_callback shutdown_comp_cb,
 
     LOGINFO("shutting down the homestore");
     m_shutdown = true;
-
-    //
     // Need to wait m_init_finished to be true before we create shutdown thread because:
     // 1. if init thread is running slower than shutdown thread,
     // 2. it is possible that shutdown thread completed but init thread
@@ -1224,7 +1222,7 @@ std::error_condition HomeBlks::shutdown(shutdown_comp_callback shutdown_comp_cb,
             m_cv.wait(lk);
         }
     }
-
+    
     // The volume destructor should be triggered automatcially when ref_cnt drops to zero;
 
     // Sart a thread to monitor the shutdown progress, if timeout, trigger force shutdown
@@ -1235,9 +1233,20 @@ std::error_condition HomeBlks::shutdown(shutdown_comp_callback shutdown_comp_cb,
     for (auto& x : task_result) {
         x.get();
     }
-
+    
     return no_error;
 }
 
 // m_shutdown is used for I/O threads to check is_shutdown() without holding m_vol_lock;
-bool HomeBlks::is_shutdown() { return m_shutdown.load(); }
+bool HomeBlks::is_shutdown() {
+    return m_shutdown.load();
+}
+
+vol_state HomeBlks::get_state(VolumePtr vol) {
+    return vol->get_state();
+}
+
+bool HomeBlks::fix_tree(VolumePtr vol, bool verify) {
+    std::unique_lock<std::recursive_mutex>  lg(m_vol_lock);
+    return vol->fix_mapping_btree(verify);
+}

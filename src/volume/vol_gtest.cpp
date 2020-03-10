@@ -8,7 +8,6 @@
 #include <main/vol_interface.hpp>
 #include <iomgr/iomgr.hpp>
 #include <iomgr/aio_drive_interface.hpp>
-//#include <volume/home_blks.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <fstream>
@@ -306,6 +305,19 @@ public:
         VolInterface::init(params);
     }
 
+    bool fix_vol_mapping_btree() {
+        /* fix all volumes mapping btrees */
+        for (uint64_t i = 0; i < max_vols; ++i) {
+            auto vol_ptr = vol_info[i]->vol;
+            auto ret = VolInterface::get_instance()->fix_tree(vol_ptr, true /* verify */);
+            if (ret == false) {
+                LOGERROR("fix_tree of vol: {} failed!", VolInterface::get_instance()->get_name(vol_ptr));
+                return false;
+            }
+        }
+        return true;
+    }
+
     void move_vol_to_offline() {
         /* move all volumes to offline */
         for (uint64_t i = 0; i < max_vols; ++i) {
@@ -316,7 +328,7 @@ public:
     void move_vol_to_online() {
         /* move all volumes to online */
         for (uint64_t i = 0; i < max_vols; ++i) {
-            VolInterface::get_instance()->vol_state_change(vol_info[i]->vol, ONLINE);
+            VolInterface::get_instance()->vol_state_change(vol_info[i]->vol, homestore::vol_state::ONLINE);
         }
         /* start ios */
         m_tgt.io_request_done();
@@ -749,7 +761,8 @@ private:
             assert(ret_io == std::errc::no_such_device || expect_io_error);
             process_completions(vreq);
         }
-        LOGDEBUG("Wrote {} {} ", lba, nblks);
+  
+        LOGDEBUG("Wrote lba: {}, nblks: {} ", lba, nblks);
     }
 
     void populate_buf(uint8_t* buf, uint64_t size, uint64_t lba, int cur) {
@@ -986,20 +999,27 @@ private:
         }
 
         if (verify_done && is_abort) {
-            if ((get_elapsed_time(startTime) > (random() % run_time))) { abort(); }
+            if (get_elapsed_time(startTime) > (random() % run_time)) {
+                abort();
+            }
         }
 
-        if (verify_done && ((get_elapsed_time(startTime) > run_time))) {
+        if (verify_done && time_to_stop()) {
             notify_cmpl();
         } else {
             m_tgt.io_request_done();
         }
     }
 
+    bool time_to_stop() {
+        return (write_cnt >= max_num_writes) || (get_elapsed_time(startTime) > run_time);
+    }
+
     uint64_t get_elapsed_time(Clock::time_point startTime) {
         std::chrono::seconds sec = std::chrono::duration_cast< std::chrono::seconds >(Clock::now() - startTime);
         return sec.count();
     }
+
 
     void notify_cmpl() {
         std::unique_lock< std::mutex > lk(m_mutex);
@@ -1233,6 +1253,134 @@ TEST_F(IOTest, vol_io_fail_test) {
     if (remove_file) { this->remove_files(); }
 }
 
+
+/**
+ * @brief : 
+ * Test Procedure:
+ * 1. start homesotre and do I/Os;
+ * 2. wait I/O completed
+ * 3. move all volumes to offline state;
+ * 4. inject flip point for read btree node to return failure.
+ * 5. start btree fix and it should return failure as expected, instead of core dump or crash;
+ * 6. delete volumes and shotdown homesotre;
+ *
+ * @param IOTest
+ * @param btree_fix_read_failure_test
+ */
+TEST_F(IOTest, btree_fix_read_failure_test) {
+    this->init = true;
+    this->start_homestore();
+
+    this->wait_cmpl();
+    LOGINFO("write_cnt {}", write_cnt);
+    LOGINFO("read_cnt {}", read_cnt);
+
+    sleep(5);
+
+    this->move_vol_to_offline();
+
+    VolInterface::get_instance()->set_error_flip();
+
+    auto ret = this->fix_vol_mapping_btree();
+    EXPECT_EQ(ret, false);
+
+    this->delete_volumes();
+
+    this->shutdown();
+    if (remove_file) {
+        this->remove_files();
+    }
+}
+
+/**
+ * @brief : 
+ * Test Procedure :
+ * 1. Start homestore and do customerized IO based on input parameter
+ * 2. wait I/O completed
+ * 3. move all volumes to offline state;
+ * 4. start btree fix (with verify set to true) on every volume and expect it to be successfully completed. 
+ * 5. verify KVs between newly created btree and old btree should also return successfully;
+ * 6. delete volumes and shotdown homestore;
+ *  
+ * @param IOTest
+ * @param btree_fix_test
+ */
+TEST_F(IOTest, btree_fix_test) {
+    this->init = true;
+    this->start_homestore();
+
+    this->wait_cmpl();
+    LOGINFO("write_cnt {}", write_cnt);
+    LOGINFO("read_cnt {}", read_cnt);
+
+    sleep(5);
+    assert(outstanding_ios == 0);  
+
+    this->move_vol_to_offline();
+    auto ret = this->fix_vol_mapping_btree();
+    EXPECT_EQ(ret, true);
+
+    this->delete_volumes();
+
+    this->shutdown();
+    if (remove_file) {
+        this->remove_files();
+    }
+}
+ 
+/**
+ * @brief : 
+ * Test Procedure :
+ * 1. Start homestore and do customerized IO based on input parameter
+ * 2. wait I/O completed
+ * 3. move all volumes to offline state;
+ * 4. start btree fix (with verify set to true) on every volume and expect it to be successfully completed. 
+ * 5. verify KVs between newly created btree and old btree should also return successfully;
+ * 6. move volume back online.
+ * 7. start I/O on volumes and wait I/O completed
+ * 8. delete all volumes and shutdown homestore and exit;
+ *
+ * @param IOTest
+ * @param btree_fix_test
+ */
+TEST_F(IOTest, btree_fix_rerun_io_test) {
+    this->init = true;
+    this->start_homestore();
+
+    this->wait_cmpl();
+    LOGINFO("write_cnt {}", write_cnt);
+    LOGINFO("read_cnt {}", read_cnt);
+
+    sleep(5);
+    assert(outstanding_ios == 0);  
+
+    this->move_vol_to_offline();
+    auto ret = this->fix_vol_mapping_btree();
+    EXPECT_EQ(ret, true);
+
+    startTime = Clock::now();
+    write_cnt = 0;
+    read_cnt = 0;
+    io_stalled = false;
+    this->move_vol_to_online();
+    
+    this->wait_cmpl();
+    LOGINFO("write_cnt {}", write_cnt);
+    LOGINFO("read_cnt {}", read_cnt);
+    
+    sleep(5);
+    assert(outstanding_ios == 0);  
+        
+    if (can_delete_volume) {
+        this->delete_volumes();
+    }
+
+    this->shutdown();
+    if (remove_file) {
+        this->remove_files();
+    }
+}
+ 
 /************************* CLI options ***************************/
 
 SDS_OPTION_GROUP(test_volume, 
