@@ -95,20 +95,16 @@ public:
             return 0; // overlap
     }
 
-    virtual bool preceeds(const BtreeKey *k) const override {
-        MappingKey *o = (MappingKey *)k;
-        if (end() < o->start()) {
-            return true;
-        }
+    virtual bool preceeds(const BtreeKey* k) const override {
+        MappingKey* o = (MappingKey*)k;
+        if (end() < o->start()) { return true; }
 
         return false;
     }
 
-    virtual bool succeeds(const BtreeKey *k) const override {
-        MappingKey *o = (MappingKey*) k;
-        if (o->end() < start()) {
-            return true;
-        }
+    virtual bool succeeds(const BtreeKey* k) const override {
+        MappingKey* o = (MappingKey*)k;
+        if (o->end() < start()) { return true; }
 
         return false;
     }
@@ -173,9 +169,12 @@ struct ValueEntryMeta {
     BlkId blkId;
     uint64_t nlba : NBLKS_BITS;
     uint64_t blk_offset : NBLKS_BITS; // offset based on blk store not based on vol page size
-    ValueEntryMeta(uint64_t seqId, const BlkId& blkId, uint8_t blk_offset, uint8_t nlba) : seqId(seqId), blkId(blkId), 
-                    nlba(nlba), blk_offset(blk_offset) {};
-    ValueEntryMeta() : seqId(0), blkId(0), nlba(0), blk_offset(0) {};
+    ValueEntryMeta(uint64_t seqId, const BlkId& blkId, uint8_t blk_offset, uint8_t nlba) :
+            seqId(seqId),
+            blkId(blkId),
+            nlba(nlba),
+            blk_offset(blk_offset){};
+    ValueEntryMeta() : seqId(0), blkId(0), nlba(0), blk_offset(0){};
 } __attribute__((__packed__));
 
 struct ValueEntry {
@@ -193,7 +192,8 @@ public:
     // deep copy
     ValueEntry(uint64_t seqId, const BlkId& blkId, uint8_t blk_offset, uint8_t nlba,
                const std::array< uint16_t, CS_ARRAY_STACK_SIZE >& carr) :
-            m_meta(seqId, blkId, blk_offset, nlba), m_carr(carr) {
+            m_meta(seqId, blkId, blk_offset, nlba),
+            m_carr(carr) {
         m_ptr = (ValueEntry*)this;
     }
 
@@ -201,9 +201,7 @@ public:
 
     ValueEntry(uint8_t* ptr) : m_ptr((ValueEntry*)ptr) {}
 
-    uint32_t get_blob_size() {
-        return sizeof(m_meta) + sizeof(uint16_t) * get_nlba();
-    }
+    uint32_t get_blob_size() { return sizeof(m_meta) + sizeof(uint16_t) * get_nlba(); }
 
     homeds::blob get_blob() { return {(uint8_t*)m_ptr, get_blob_size()}; }
 
@@ -323,7 +321,7 @@ public:
     void get_overlap_diff_kvs(MappingKey* k1, MappingValue* v1, MappingKey* k2, MappingValue* v2,
                               uint32_t vol_page_size, diff_read_next_t& to_read,
                               std::vector< pair< MappingKey, MappingValue > >& overlap_kvs) {
-        static MappingKey   k;
+        static MappingKey k;
         static MappingValue v;
 
         uint64_t start, k1_offset = 0, k2_offset = 0;
@@ -419,8 +417,7 @@ public:
     }
 
     bool is_valid() {
-        if (m_earr.get_total_elements() == 0)
-            return false;
+        if (m_earr.get_total_elements() == 0) return false;
         return true;
     }
 
@@ -444,29 +441,19 @@ public:
         other.get_array().get_all(other_v_array, true);
 
         /* If other size is 0, my value is always new */
-        if (other_v_array.size() <= 0) {
-            return true;
-        }
+        if (other_v_array.size() <= 0) { return true; }
 
         /* If other size is not 0 and my value is 0, my value is old */
-        if (my_v_array.size() <= 0) {
-            return false;
-        }
+        if (my_v_array.size() <= 0) { return false; }
 
         /* If other seqId is invalid, my value is new */
-        if (other_v_array[0].get_seqId() == INVALID_SEQ_ID) {
-            return true;
-        }
+        if (other_v_array[0].get_seqId() == INVALID_SEQ_ID) { return true; }
 
         /* If my seqId is invalid and other is not, my value is old */
-        if (my_v_array[0].get_seqId() == INVALID_SEQ_ID) {
-            return false;
-        }
+        if (my_v_array[0].get_seqId() == INVALID_SEQ_ID) { return false; }
 
         /* If my value is greater than other, my value is new */
-        if (my_v_array[0].compare(&other_v_array[0]) > 0) {
-            return true;
-        }
+        if (my_v_array[0].compare(&other_v_array[0]) > 0) { return true; }
 
         return false;
     }
@@ -510,7 +497,7 @@ public:
                 e_varray.remove(i);    
             }    
         }    
-    }    
+    }
 #endif
 
     friend ostream& operator<<(ostream& os, const MappingValue& ve) {
@@ -527,6 +514,7 @@ class mapping {
     constexpr static uint64_t lba_query_cnt = 1024ull;
 
 private:
+    HomeBlksSafePtr m_hb;
     MappingBtreeDeclType* m_bt;
     alloc_blk_callback m_alloc_blk_cb;
     free_blk_callback m_free_blk_cb;
@@ -535,8 +523,8 @@ private:
     uint32_t m_vol_page_size;
     const MappingValue EMPTY_MAPPING_VALUE;
     std::string m_unique_name;
-    bool                  m_fix_state = false;
-    uint64_t              m_outstanding_io = 0;
+    bool m_fix_state = false;
+    uint64_t m_outstanding_io = 0;
 
     class GetCBParam : public BRangeQueryCBParam< MappingKey, MappingValue > {
     public:
@@ -579,7 +567,7 @@ public:
                 } else {
                     assert(!overlap.get_start_offset(*e_key));
                 }
-                m_alloc_blk_cb(ve.get_blkId(), (ve.get_blk_offset() * HomeBlks::instance()->get_data_pagesz()),
+                m_alloc_blk_cb(ve.get_blkId(), (ve.get_blk_offset() * m_hb->get_data_pagesz()),
                                (overlap.get_n_lba() * m_vol_page_size));
             }
         }
@@ -607,24 +595,20 @@ public:
             search_range, BtreeQueryType::TREE_TRAVERSAL_QUERY, (end_lba - start_lba + 1),
             std::bind(&mapping::get_alloc_blks_cb, this, placeholders::_1, placeholders::_2, placeholders::_3),
             (BRangeQueryCBParam< MappingKey, MappingValue >*)&param);
-        if (m_bt->query(qreq, result_kv) != btree_status_t::success) {
-            return -1;
-        }
+        if (m_bt->query(qreq, result_kv) != btree_status_t::success) { return -1; }
         return 0;
     }
-    
+
     void process_completions(boost::intrusive_ptr< writeback_req > cookie, bool status) {
         if (m_fix_state) {
-            // if we are in fix state, we are generating internal put requests for new btree and should not return 
+            // if we are in fix state, we are generating internal put requests for new btree and should not return
             // to volume layer for callback.
             m_outstanding_io--;
             return;
         }
 
         boost::intrusive_ptr< volume_req > req = boost::static_pointer_cast< volume_req >(cookie);
-        if (req->status == no_error) {
-            req->status = status ? no_error : btree_write_failed;
-        }
+        if (req->status == no_error) { req->status = status ? no_error : btree_write_failed; }
         m_comp_cb(req);
     }
 
@@ -648,13 +632,14 @@ public:
             m_comp_cb(comp_cb),
             m_vol_page_size(page_size),
             m_unique_name(unique_name) {
+        m_hb = HomeBlks::safe_instance();
         homeds::btree::BtreeConfig btree_cfg(HomeStoreConfig::atomic_phys_page_size, unique_name.c_str());
         btree_cfg.set_max_objs(volsize / page_size);
         btree_cfg.set_max_key_size(sizeof(uint32_t));
         btree_cfg.set_max_value_size(page_size);
 
         homeds::btree::btree_device_info bt_dev_info;
-        bt_dev_info.blkstore = (void*)HomeBlks::instance()->get_metadata_blkstore();
+        bt_dev_info.blkstore = (void*)m_hb->get_metadata_blkstore();
         bt_dev_info.new_device = false;
         m_bt = MappingBtreeDeclType::create_btree(
             btree_cfg, &bt_dev_info,
@@ -670,13 +655,14 @@ public:
             m_comp_cb(comp_cb),
             m_vol_page_size(page_size),
             m_unique_name(unique_name) {
+        m_hb = HomeBlks::safe_instance();
         homeds::btree::BtreeConfig btree_cfg(HomeStoreConfig::atomic_phys_page_size, unique_name.c_str());
         btree_cfg.set_max_objs(volsize / page_size);
         btree_cfg.set_max_key_size(sizeof(uint32_t));
         btree_cfg.set_max_value_size(page_size);
 
         homeds::btree::btree_device_info bt_dev_info;
-        bt_dev_info.blkstore = HomeBlks::instance()->get_metadata_blkstore();
+        bt_dev_info.blkstore = m_hb->get_metadata_blkstore();
         bt_dev_info.new_device = false;
         m_bt = MappingBtreeDeclType::create_btree(
             btree_sb, btree_cfg, &bt_dev_info,
@@ -686,13 +672,14 @@ public:
     uint64_t get_used_size() { return m_bt->get_used_size(); }
     btree_super_block get_btree_sb() { return (m_bt->get_btree_sb()); }
 
-    error_condition get(boost::intrusive_ptr< volume_req > req, vector< pair< MappingKey, MappingValue > >& values, MappingBtreeDeclType* bt) {
-        uint64_t   start_lba = req->lba;
-        uint64_t   num_lba = req->nlbas;
-        uint64_t   end_lba = start_lba + req->nlbas - 1;
+    error_condition get(boost::intrusive_ptr< volume_req > req, vector< pair< MappingKey, MappingValue > >& values,
+                        MappingBtreeDeclType* bt) {
+        uint64_t start_lba = req->lba;
+        uint64_t num_lba = req->nlbas;
+        uint64_t end_lba = start_lba + req->nlbas - 1;
         MappingKey start_key(start_lba, 1);
         MappingKey end_key(end_lba, 1);
-        auto       search_range = BtreeSearchRange(start_key, true, end_key, true);
+        auto search_range = BtreeSearchRange(start_key, true, end_key, true);
         GetCBParam param(req);
         std::vector< pair< MappingKey, MappingValue > > result_kv;
 
@@ -702,13 +689,10 @@ public:
             (BRangeQueryCBParam< MappingKey, MappingValue >*)&param);
         auto ret = bt->query(qreq, result_kv);
 
-        if (ret != btree_status_t::success && ret != btree_status_t::has_more) {
-            return btree_read_failed;
-        }
-            
+        if (ret != btree_status_t::success && ret != btree_status_t::has_more) { return btree_read_failed; }
+
         values.insert(values.begin(), result_kv.begin(), result_kv.end());
         return no_error;
-
     }
 
     error_condition get(boost::intrusive_ptr< volume_req > req, vector< pair< MappingKey, MappingValue > >& values,
@@ -729,9 +713,7 @@ public:
             (BRangeQueryCBParam< MappingKey, MappingValue >*)&param);
         auto ret = m_bt->query(qreq, result_kv);
 
-        if (ret != btree_status_t::success && ret != btree_status_t::has_more) {
-            return btree_read_failed;
-        }
+        if (ret != btree_status_t::success && ret != btree_status_t::has_more) { return btree_read_failed; }
 
         if (fill_gaps) {
             // fill the gaps
@@ -759,7 +741,8 @@ public:
         return no_error;
     }
 
-    error_condition put(boost::intrusive_ptr< volume_req > req, MappingKey& key, MappingValue& value, MappingBtreeDeclType* bt) {
+    error_condition put(boost::intrusive_ptr< volume_req > req, MappingKey& key, MappingValue& value,
+                        MappingBtreeDeclType* bt) {
         assert(value.get_array().get_total_elements() == 1);
         UpdateCBParam param(req, key, value);
         MappingKey start(key.start(), 1);
@@ -785,24 +768,23 @@ public:
 
     error_condition put(boost::intrusive_ptr< volume_req > req, MappingKey& key, MappingValue& value) {
         return put(req, key, value, m_bt);
-
-    MappingBtreeDeclType* get_btree(void) {
-        return m_bt;
     }
+
+    MappingBtreeDeclType* get_btree(void) { return m_bt; }
 
     void print_tree() { m_bt->print_tree(); }
     bool verify_tree() { return m_bt->verify_tree(); }
-    
+
     /**
-     * @brief : Fix a btree by : 
+     * @brief : Fix a btree by :
      *      1. Create a new btree,
-     *      2. Iterating it's leaf node chain, 
+     *      2. Iterating it's leaf node chain,
      *      3. Add every K, V in leaf node into the new btree;
      *      4. Delete in-memory copy of the old btree;
      *
      * @param start_lba : start lba of to recover the btree;
      * @param end_lba   : end lba of to recover the btree
-     * @param verify    : if true, verify the new btree after recover by comparing the leaf 
+     * @param verify    : if true, verify the new btree after recover by comparing the leaf
      *                    node KVs between the old and new btrees;
      *                    if false, skip verification of the newly created btree;
      *
@@ -812,10 +794,10 @@ public:
      * No need to call old btree destroy() as blocks will be freed automatically;
      */
     bool fix(uint64_t start_lba, uint64_t end_lba, bool verify = false) {
-        if (start_lba >= end_lba)  { 
+        if (start_lba >= end_lba) {
             LOGERROR("Wrong input, start_lba: {}, should be smaller than end_lba: {}", start_lba, end_lba);
-            return false; 
-        }  
+            return false;
+        }
 
         LOGINFO("Fixing btree, start_lba: {}, end_lba: {}", start_lba, end_lba);
 
@@ -824,24 +806,24 @@ public:
         homeds::btree::btree_device_info bt_dev_info;
         bt_dev_info.blkstore = (void*)HomeBlks::instance()->get_metadata_blkstore();
         bt_dev_info.new_device = false;
-        auto new_bt = MappingBtreeDeclType::create_btree( 
-                btree_cfg, &bt_dev_info,
-                std::bind(&mapping::process_completions, this, std::placeholders::_1, std::placeholders::_2));
-        
-        m_fix_state = true;  
+        auto new_bt = MappingBtreeDeclType::create_btree(
+            btree_cfg, &bt_dev_info,
+            std::bind(&mapping::process_completions, this, std::placeholders::_1, std::placeholders::_2));
+
+        m_fix_state = true;
         m_outstanding_io = 0;
-        
+
         uint64_t num_kv_recovered = 0;
-        auto start = start_lba, end = std::min(start_lba + lba_query_cnt, end_lba); 
+        auto start = start_lba, end = std::min(start_lba + lba_query_cnt, end_lba);
         while (start <= end && end <= end_lba) {
             // get all the KVs from existing btree;
-            boost::intrusive_ptr<volume_req> vreq = volume_req::make_request();
+            boost::intrusive_ptr< volume_req > vreq = volume_req::make_request();
             vreq->lba = start;
             vreq->nlbas = end - start + 1;
             vreq->seqId = INVALID_SEQ_ID;
-            vreq->lastCommited_seqId = INVALID_SEQ_ID; 
+            vreq->lastCommited_seqId = INVALID_SEQ_ID;
 
-            std::vector<std::pair<MappingKey, MappingValue>> kvs;
+            std::vector< std::pair< MappingKey, MappingValue > > kvs;
             auto ret = get(vreq, kvs, false /* fill_gaps */);
             if (ret != no_error) {
                 LOGERROR("failed to get KVs from btree");
@@ -857,7 +839,7 @@ public:
                     return false;
                 }
 #else
-                boost::intrusive_ptr<volume_req> req = volume_req::make_request();
+                boost::intrusive_ptr< volume_req > req = volume_req::make_request();
                 req->seqId = INVALID_SEQ_ID;
                 req->lastCommited_seqId = INVALID_SEQ_ID; // keeping only latest version always
 #if 0
@@ -868,14 +850,14 @@ public:
                 req->blkId = ve.get_blkId();
 #endif
                 // without this line, btree is not trigging process_completions cb to mapping layer;
-                req->state = writeback_req_state::WB_REQ_COMPL; 
+                req->state = writeback_req_state::WB_REQ_COMPL;
                 m_outstanding_io++;
 
                 auto ret = put(req, x.first, x.second, new_bt);
                 if (ret != no_error) {
                     LOGERROR("failed to put node with k/v: {}/{}", x.first.to_string(), x.second.to_string());
                     return false;
-                } 
+                }
 #endif
                 LOGINFO("Successfully inserted K:{}, \n V:{}.", x.first.to_string(), x.second.to_string());
             }
@@ -904,12 +886,12 @@ public:
 
         // reset fix state to false
         m_fix_state = false;
-        return true; 
+        return true;
     }
-    
+
     /**
      * @brief : verify that the all the KVs in range [start_lba, end_lba] are the same between old_bt and new_bt
-     * 
+     *
      * @param start_lba : start lba
      * @param end_lba : end lba
      * @param old_bt : the old btree to be compared
@@ -918,20 +900,21 @@ public:
      * @return : true if all the KVs are the same between the two btrees;
      *           false if not;
      */
-    bool verify_fixed_bt(uint64_t start_lba, uint64_t end_lba, MappingBtreeDeclType* old_bt, MappingBtreeDeclType* new_bt) {
+    bool verify_fixed_bt(uint64_t start_lba, uint64_t end_lba, MappingBtreeDeclType* old_bt,
+                         MappingBtreeDeclType* new_bt) {
         uint64_t num_kv_verified = 0;
-        auto start = start_lba, end = std::min(start_lba + lba_query_cnt, end_lba); 
+        auto start = start_lba, end = std::min(start_lba + lba_query_cnt, end_lba);
         while (start <= end_lba) {
-			assert(start <= end);
-            std::vector<std::pair<MappingKey, MappingValue>> kvs_old;
-            std::vector<std::pair<MappingKey, MappingValue>> kvs_new;
-            
+            assert(start <= end);
+            std::vector< std::pair< MappingKey, MappingValue > > kvs_old;
+            std::vector< std::pair< MappingKey, MappingValue > > kvs_new;
+
             // get all the KVs from existing btree;
-            boost::intrusive_ptr<volume_req> vreq = volume_req::make_request();
+            boost::intrusive_ptr< volume_req > vreq = volume_req::make_request();
             vreq->lba = start;
             vreq->nlbas = end - start + 1;
             vreq->seqId = INVALID_SEQ_ID;
-            vreq->lastCommited_seqId = INVALID_SEQ_ID; 
+            vreq->lastCommited_seqId = INVALID_SEQ_ID;
 
             // now m_bt points to the new btree;
             auto ret_old = get(vreq, kvs_old, old_bt);
@@ -943,8 +926,8 @@ public:
             }
 
             if (kvs_new.size() != kvs_old.size()) {
-                LOGERROR("btree_fix verify failed, reason: mismatch total number of KV old: {} new: {}", 
-                        kvs_old.size(), kvs_new.size());
+                LOGERROR("btree_fix verify failed, reason: mismatch total number of KV old: {} new: {}", kvs_old.size(),
+                         kvs_new.size());
 
                 LOGINFO("Printing KVs for old and new btree tree for lba range: [{}, {}]", start, end);
                 print_kv(kvs_old);
@@ -954,10 +937,10 @@ public:
 
             for (uint64_t i = 0; i < kvs_old.size(); i++) {
                 if (kvs_old[i].first.to_string().compare(kvs_new[i].first.to_string()) != 0 ||
-                        kvs_old[i].second.to_string().compare(kvs_new[i].second.to_string()) != 0) {
-                    LOGERROR("btree_fix verify failed, reason: mismatch KV pair old K: {}, V: {}, new K: {}, V: {}", 
-                            kvs_old[i].first.to_string(), kvs_new[i].first.to_string(),
-                            kvs_old[i].second.to_string(), kvs_new[i].second.to_string());
+                    kvs_old[i].second.to_string().compare(kvs_new[i].second.to_string()) != 0) {
+                    LOGERROR("btree_fix verify failed, reason: mismatch KV pair old K: {}, V: {}, new K: {}, V: {}",
+                             kvs_old[i].first.to_string(), kvs_new[i].first.to_string(), kvs_old[i].second.to_string(),
+                             kvs_new[i].second.to_string());
                     return false;
                 }
             }
@@ -970,8 +953,8 @@ public:
         LOGINFO("Successfully verified recovered btree, total KV verified: {}", num_kv_verified);
         return true;
     }
-    
-    void print_kv(std::vector<std::pair<MappingKey, MappingValue>>& kvs) {
+
+    void print_kv(std::vector< std::pair< MappingKey, MappingValue > >& kvs) {
         LOGINFO("Total Elements: {}", kvs.size());
         uint32_t i = 0;
         for (auto& x : kvs) {
@@ -995,13 +978,13 @@ public:
 
     void merge(mapping* other) {
         m_bt->merge(other->get_btree(),
-            bind(&mapping::mapping_merge_cb, this, placeholders::_1, placeholders::_2, placeholders::_3));
+                    bind(&mapping::mapping_merge_cb, this, placeholders::_1, placeholders::_2, placeholders::_3));
     }
 
 private:
-    void mapping_merge_cb(vector< pair< MappingKey, MappingValue > >&      match_kv,
-                           vector< pair< MappingKey, MappingValue > >&      replace_kv,
-                           BRangeUpdateCBParam< MappingKey, MappingValue >* cb_param) {
+    void mapping_merge_cb(vector< pair< MappingKey, MappingValue > >& match_kv,
+                          vector< pair< MappingKey, MappingValue > >& replace_kv,
+                          BRangeUpdateCBParam< MappingKey, MappingValue >* cb_param) {
         match_item_cb_put(match_kv, replace_kv, cb_param);
     }
 
@@ -1081,15 +1064,15 @@ private:
         return (start_lba - input_start_lba);
     }
 
-    uint32_t get_size_needed(vector< pair< MappingKey, MappingValue > >& match_kv, 
-                            BRangeUpdateCBParam< MappingKey, MappingValue >* cb_param) {
- 
+    uint32_t get_size_needed(vector< pair< MappingKey, MappingValue > >& match_kv,
+                             BRangeUpdateCBParam< MappingKey, MappingValue >* cb_param) {
+
         UpdateCBParam* param = (UpdateCBParam*)cb_param;
         MappingValue& new_val = param->get_new_value();
         int overlap_entries = match_kv.size();
 
-        /* In worse case, one value is divided into (2 * overlap_entries + 1). Same meta data of a value (it is fixed size) 
-         * will be copied to all new entries.
+        /* In worse case, one value is divided into (2 * overlap_entries + 1). Same meta data of a value (it is
+         * fixed size) will be copied to all new entries.
          */
         uint32_t new_size = (overlap_entries + 1) * new_val.meta_size() + new_val.get_blob_size();
         return new_size;
@@ -1204,12 +1187,9 @@ private:
                 }
                 // check if replace entries dont overlap free entries
                 auto blk_start = curve.get_blkId().get_id() + curve.get_blk_offset();
-                auto blk_end =
-                    blk_start + (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * curve.get_nlba() - 1;
+                auto blk_end = blk_start + (m_vol_page_size / m_hb->get_data_pagesz()) * curve.get_nlba() - 1;
                 for (Free_Blk_Entry& fbe : param->m_req->blkIds_to_free) {
-                    if (fbe.m_blkId.get_chunk_num() != curve.get_blkId().get_chunk_num()) {
-                        continue;
-                    }
+                    if (fbe.m_blkId.get_chunk_num() != curve.get_blkId().get_chunk_num()) { continue; }
                     auto fblk_start = fbe.m_blkId.get_id() + fbe.m_blk_offset;
                     auto fblk_end = fblk_start + fbe.m_nblks_to_free - 1;
                     if (blk_end < fblk_start || fblk_end < blk_start) {
@@ -1327,8 +1307,7 @@ private:
                     std::this_thread::sleep_for(std::chrono::seconds(10));
                     assert(0);
                 }
-                last_bid_offset +=
-                    values[i].first.get_n_lba() * (m_vol_page_size / HomeBlks::instance()->get_data_pagesz());
+                last_bid_offset += values[i].first.get_n_lba() * (m_vol_page_size / m_hb->get_data_pagesz());
             }
             last_slba = values[i].first.end() + 1;
             i++;

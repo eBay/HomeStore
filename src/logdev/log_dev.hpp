@@ -299,6 +299,7 @@ private:
     sisl::byte_view read_next_bytes(uint64_t nbytes);
 
 private:
+    HomeBlksSafePtr m_hb;
     sisl::byte_view m_cur_log_buf;
     uint64_t m_cur_group_cursor;
 };
@@ -474,6 +475,7 @@ private:
     void assert_next_pages(log_stream_reader& lstream);
 
 private:
+    HomeBlksSafePtr m_hb; // Back pointer to homeblks
     std::unique_ptr< sisl::StreamTracker< log_record > >
         m_log_records; // The container which stores all in-memory log records
     std::unique_ptr< sisl::IDReserver > m_id_reserver;

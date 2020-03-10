@@ -1,7 +1,10 @@
 #include "log_dev.hpp"
 
 namespace homestore {
-log_stream_reader::log_stream_reader(uint64_t device_cursor) { m_cur_group_cursor = device_cursor; }
+log_stream_reader::log_stream_reader(uint64_t device_cursor) {
+    m_hb = HomeBlks::safe_instance();
+    m_cur_group_cursor = device_cursor;
+}
 
 sisl::byte_view log_stream_reader::next_group(uint64_t* out_dev_offset) {
     uint64_t min_needed = dma_boundary;
@@ -9,7 +12,7 @@ sisl::byte_view log_stream_reader::next_group(uint64_t* out_dev_offset) {
 
 read_again:
     if (m_cur_log_buf.size() < min_needed) {
-        HomeBlks::instance()->get_logdev_blkstore()->lseek(m_cur_group_cursor);
+        m_hb->get_logdev_blkstore()->lseek(m_cur_group_cursor);
         m_cur_log_buf = read_next_bytes(std::max(min_needed, bulk_read_size));
     }
     if (m_cur_log_buf.size() == 0) { return m_cur_log_buf; } // No more data available.
@@ -48,7 +51,7 @@ sisl::byte_view log_stream_reader::group_in_next_page() {
 
 sisl::byte_view log_stream_reader::read_next_bytes(uint64_t nbytes) {
     auto buf = sisl::byte_view(nbytes, dma_boundary);
-    auto store = HomeBlks::instance()->get_logdev_blkstore();
+    auto store = m_hb->get_logdev_blkstore();
 
     auto prev_pos = store->seeked_pos();
     auto actual_read = store->read((void*)buf.bytes(), nbytes);

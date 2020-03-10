@@ -222,7 +222,7 @@ public:
     void remove_files() {
         /* no need to delete the user created file/disk */
         if (dev_names.size() == 0) {
-            for (auto &n : names) {
+            for (auto& n : names) {
                 remove(n.c_str());
             }
         }
@@ -255,9 +255,7 @@ public:
                 temp_info.dev_names = names[i];
                 device_info.push_back(temp_info);
                 if (init || disk_replace_cnt > 0) {
-                    if (!init) {
-                        remove(names[i].c_str());
-                    }
+                    if (!init) { remove(names[i].c_str()); }
                     std::ofstream ofs(names[i].c_str(), std::ios::binary | std::ios::out);
                     ofs.seekp(max_disk_capacity - 1);
                     ofs.write("", 1);
@@ -348,7 +346,7 @@ public:
         assert(state == m_expected_vol_state);
         if (m_expected_vol_state == homestore::vol_state::DEGRADED ||
             m_expected_vol_state == homestore::vol_state::OFFLINE) {
-            VolInterface::get_instance()->vol_state_change(vol_obj, ONLINE);
+            VolInterface::get_instance()->vol_state_change(vol_obj, vol_state::ONLINE);
         }
     }
 
@@ -574,8 +572,8 @@ public:
             std::unique_lock< std::mutex > lk(m_mutex);
             vol_info.clear();
         }
-        LOGINFO("shutting homestore");
-        VolInterface::get_instance()->shutdown(std::bind(&IOTest::shutdown_callback, this, std::placeholders::_1));
+        LOGINFO("shutting down homeblks");
+        VolInterface::get_instance()->shutdown();
 
         LOGINFO("stopping iomgr");
         iomanager.stop();
@@ -761,7 +759,7 @@ private:
             assert(ret_io == std::errc::no_such_device || expect_io_error);
             process_completions(vreq);
         }
-  
+
         LOGDEBUG("Wrote lba: {}, nblks: {} ", lba, nblks);
     }
 
@@ -877,14 +875,13 @@ private:
                 }
                 if (j) {
                     if (can_panic) {
-                        
+
                         /* verify the header */
-                        j = memcmp((void *) b.bytes, (uint8_t *)((uint64_t)request->buf + tot_size_read), sizeof (uint64_t));
-                        if (j != 0) {
-                            LOGINFO("header mismatch lba read {}", *((uint64_t *)b.bytes));
-                        }
-                        LOGINFO("mismatch found lba {} nlba {} total_size_read {}", request->lba, request->nblks, 
-                                    tot_size_read);
+                        j = memcmp((void*)b.bytes, (uint8_t*)((uint64_t)request->buf + tot_size_read),
+                                   sizeof(uint64_t));
+                        if (j != 0) { LOGINFO("header mismatch lba read {}", *((uint64_t*)b.bytes)); }
+                        LOGINFO("mismatch found lba {} nlba {} total_size_read {}", request->lba, request->nblks,
+                                tot_size_read);
 #ifndef NDEBUG
                         VolInterface::get_instance()->print_tree(vol);
 #endif
@@ -999,9 +996,7 @@ private:
         }
 
         if (verify_done && is_abort) {
-            if (get_elapsed_time(startTime) > (random() % run_time)) {
-                abort();
-            }
+            if (get_elapsed_time(startTime) > (random() % run_time)) { abort(); }
         }
 
         if (verify_done && time_to_stop()) {
@@ -1011,15 +1006,12 @@ private:
         }
     }
 
-    bool time_to_stop() {
-        return (write_cnt >= max_num_writes) || (get_elapsed_time(startTime) > run_time);
-    }
+    bool time_to_stop() { return (write_cnt >= max_num_writes) || (get_elapsed_time(startTime) > run_time); }
 
     uint64_t get_elapsed_time(Clock::time_point startTime) {
         std::chrono::seconds sec = std::chrono::duration_cast< std::chrono::seconds >(Clock::now() - startTime);
         return sec.count();
     }
-
 
     void notify_cmpl() {
         std::unique_lock< std::mutex > lk(m_mutex);
@@ -1041,11 +1033,6 @@ private:
         return true;
     }
 
-    void shutdown_callback(bool success) {
-        VolInterface::del_instance();
-        assert(success);
-    }
-
     void shutdown_force(bool timeout) {
         std::unique_lock< std::mutex > lk(m_mutex);
         bool force = false;
@@ -1055,8 +1042,7 @@ private:
             vol_info.clear();
             force = true;
         }
-        VolInterface::get_instance()->shutdown(std::bind(&IOTest::shutdown_callback, this, std::placeholders::_1),
-                                               force);
+        VolInterface::get_instance()->shutdown(force);
     }
 
     void remove_journal_files() {
@@ -1096,8 +1082,11 @@ TEST_F(IOTest, lifecycle_test) {
     freq.set_percent(100);
 
     fc.inject_retval_flip("vol_comp_delay_us", {}, freq, 100);
-    // this->delete_volumes();
+    this->delete_volumes();
+    LOGINFO("All volumes are deleted, do a shutdown of homestore");
     this->shutdown();
+
+    LOGINFO("Shutdown of homestore is completed, removing files");
     this->remove_files();
 }
 
@@ -1142,9 +1131,7 @@ TEST_F(IOTest, recovery_io_test) {
     this->wait_homestore_init_done();
     this->kickstart_io();
     this->wait_cmpl();
-    if (can_delete_volume) {
-        this->delete_volumes();
-    }
+    if (can_delete_volume) { this->delete_volumes(); }
     this->shutdown();
     if (remove_file) { this->remove_files(); }
 }
@@ -1197,6 +1184,8 @@ TEST_F(IOTest, two_disk_replace_test) {
     this->disk_replace_cnt = 2;
     this->expected_init_fail = true;
     this->start_homestore();
+    this->wait_homestore_init_done();
+    this->kickstart_io();
     this->wait_cmpl();
     this->shutdown();
 }
@@ -1215,6 +1204,8 @@ TEST_F(IOTest, one_disk_fail_test) {
 
     this->expected_init_fail = true;
     this->start_homestore();
+    this->wait_homestore_init_done();
+    this->kickstart_io();
     this->wait_cmpl();
     this->shutdown();
     if (remove_file) { this->remove_files(); }
@@ -1222,7 +1213,7 @@ TEST_F(IOTest, one_disk_fail_test) {
 
 TEST_F(IOTest, vol_offline_test) {
     this->init = true;
-    this->m_expected_vol_state = OFFLINE;
+    this->m_expected_vol_state = vol_state::OFFLINE;
     this->start_homestore();
     this->wait_homestore_init_done();
     this->expect_io_error = true;
@@ -1253,9 +1244,8 @@ TEST_F(IOTest, vol_io_fail_test) {
     if (remove_file) { this->remove_files(); }
 }
 
-
 /**
- * @brief : 
+ * @brief :
  * Test Procedure:
  * 1. start homesotre and do I/Os;
  * 2. wait I/O completed
@@ -1270,8 +1260,10 @@ TEST_F(IOTest, vol_io_fail_test) {
 TEST_F(IOTest, btree_fix_read_failure_test) {
     this->init = true;
     this->start_homestore();
-
+    this->wait_homestore_init_done();
+    this->kickstart_io();
     this->wait_cmpl();
+
     LOGINFO("write_cnt {}", write_cnt);
     LOGINFO("read_cnt {}", read_cnt);
 
@@ -1287,34 +1279,34 @@ TEST_F(IOTest, btree_fix_read_failure_test) {
     this->delete_volumes();
 
     this->shutdown();
-    if (remove_file) {
-        this->remove_files();
-    }
+    if (remove_file) { this->remove_files(); }
 }
 
 /**
- * @brief : 
+ * @brief :
  * Test Procedure :
  * 1. Start homestore and do customerized IO based on input parameter
  * 2. wait I/O completed
  * 3. move all volumes to offline state;
- * 4. start btree fix (with verify set to true) on every volume and expect it to be successfully completed. 
+ * 4. start btree fix (with verify set to true) on every volume and expect it to be successfully completed.
  * 5. verify KVs between newly created btree and old btree should also return successfully;
  * 6. delete volumes and shotdown homestore;
- *  
+ *
  * @param IOTest
  * @param btree_fix_test
  */
 TEST_F(IOTest, btree_fix_test) {
     this->init = true;
     this->start_homestore();
-
+    this->wait_homestore_init_done();
+    this->kickstart_io();
     this->wait_cmpl();
+
     LOGINFO("write_cnt {}", write_cnt);
     LOGINFO("read_cnt {}", read_cnt);
 
     sleep(5);
-    assert(outstanding_ios == 0);  
+    assert(outstanding_ios == 0);
 
     this->move_vol_to_offline();
     auto ret = this->fix_vol_mapping_btree();
@@ -1323,18 +1315,16 @@ TEST_F(IOTest, btree_fix_test) {
     this->delete_volumes();
 
     this->shutdown();
-    if (remove_file) {
-        this->remove_files();
-    }
+    if (remove_file) { this->remove_files(); }
 }
- 
+
 /**
- * @brief : 
+ * @brief :
  * Test Procedure :
  * 1. Start homestore and do customerized IO based on input parameter
  * 2. wait I/O completed
  * 3. move all volumes to offline state;
- * 4. start btree fix (with verify set to true) on every volume and expect it to be successfully completed. 
+ * 4. start btree fix (with verify set to true) on every volume and expect it to be successfully completed.
  * 5. verify KVs between newly created btree and old btree should also return successfully;
  * 6. move volume back online.
  * 7. start I/O on volumes and wait I/O completed
@@ -1346,13 +1336,15 @@ TEST_F(IOTest, btree_fix_test) {
 TEST_F(IOTest, btree_fix_rerun_io_test) {
     this->init = true;
     this->start_homestore();
-
+    this->wait_homestore_init_done();
+    this->kickstart_io();
     this->wait_cmpl();
+
     LOGINFO("write_cnt {}", write_cnt);
     LOGINFO("read_cnt {}", read_cnt);
 
     sleep(5);
-    assert(outstanding_ios == 0);  
+    assert(outstanding_ios == 0);
 
     this->move_vol_to_offline();
     auto ret = this->fix_vol_mapping_btree();
@@ -1363,49 +1355,59 @@ TEST_F(IOTest, btree_fix_rerun_io_test) {
     read_cnt = 0;
     io_stalled = false;
     this->move_vol_to_online();
-    
+
     this->wait_cmpl();
     LOGINFO("write_cnt {}", write_cnt);
     LOGINFO("read_cnt {}", read_cnt);
-    
+
     sleep(5);
-    assert(outstanding_ios == 0);  
-        
-    if (can_delete_volume) {
-        this->delete_volumes();
-    }
+    assert(outstanding_ios == 0);
+
+    if (can_delete_volume) { this->delete_volumes(); }
 
     this->shutdown();
-    if (remove_file) {
-        this->remove_files();
-    }
+    if (remove_file) { this->remove_files(); }
 }
- 
+
 /************************* CLI options ***************************/
 
-SDS_OPTION_GROUP(test_volume, 
-(run_time, "", "run_time", "run time for io", ::cxxopts::value<uint32_t>()->default_value("30"), "seconds"),
-(load_type, "", "load_type", "load_type", ::cxxopts::value<uint32_t>()->default_value("0"), "random_write_read:0, same_write_read:1, overlap_write=2"),
-(num_threads, "", "num_threads", "num threads for io", ::cxxopts::value<uint32_t>()->default_value("8"), "number"),
-(read_enable, "", "read_enable", "read enable 0 or 1", ::cxxopts::value<uint32_t>()->default_value("1"), "flag"),
-(max_disk_capacity, "", "max_disk_capacity", "max disk capacity", ::cxxopts::value<uint64_t>()->default_value("7"), "GB"),
-(max_volume, "", "max_volume", "max volume", ::cxxopts::value<uint64_t>()->default_value("50"), "number"),
-(max_num_writes, "", "max_num_writes", "max num of writes", ::cxxopts::value<uint64_t>()->default_value("100000"), "number"),
-(verify_hdr, "", "verify_hdr", "data verification", ::cxxopts::value<uint64_t>()->default_value("1"), "0 or 1"),
-(verify_data, "", "verify_data", "data verification", ::cxxopts::value<uint64_t>()->default_value("1"), "0 or 1"),
-(read_verify, "", "read_verify", "read verification for each write", ::cxxopts::value<uint64_t>()->default_value("0"), "0 or 1"),
-(enable_crash_handler, "", "enable_crash_handler", "enable crash handler 0 or 1", ::cxxopts::value<uint32_t>()->default_value("1"), "flag"),
-(remove_file, "", "remove_file", "remove file at the end of test 0 or 1", ::cxxopts::value<uint32_t>()->default_value("1"), "flag"),
-(expected_vol_state,"", "expected_vol_state", "volume state expected during boot", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"),
-(verify_only,"", "verify_only", "verify only boot", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"),
-(abort,"", "abort", "abort", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"),
-(flip,"", "flip", "flip", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"),
-(delete_volume,"", "delete_volume", "delete_volume", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"),
-(atomic_page_size,"", "atomic_page_size", "atomic_page_size", ::cxxopts::value<uint32_t>()->default_value("4096"), "atomic_page_size"),
-(vol_page_size,"", "vol_page_size", "vol_page_size", ::cxxopts::value<uint32_t>()->default_value("4096"), "vol_page_size"),
-(device_list, "", "device_list", "List of device paths", ::cxxopts::value< std::vector< std::string > >(), "path [...]"),
-(phy_page_size,"", "phy_page_size", "phy_page_size", ::cxxopts::value<uint32_t>()->default_value("4096"), "phy_page_size"),
-(mem_btree_page_size,"", "mem_btree_page_size", "mem_btree_page_size", ::cxxopts::value<uint32_t>()->default_value("8192"), "mem_btree_page_size"))
+SDS_OPTION_GROUP(
+    test_volume,
+    (run_time, "", "run_time", "run time for io", ::cxxopts::value< uint32_t >()->default_value("30"), "seconds"),
+    (load_type, "", "load_type", "load_type", ::cxxopts::value< uint32_t >()->default_value("0"),
+     "random_write_read:0, same_write_read:1, overlap_write=2"),
+    (num_threads, "", "num_threads", "num threads for io", ::cxxopts::value< uint32_t >()->default_value("8"),
+     "number"),
+    (read_enable, "", "read_enable", "read enable 0 or 1", ::cxxopts::value< uint32_t >()->default_value("1"), "flag"),
+    (max_disk_capacity, "", "max_disk_capacity", "max disk capacity",
+     ::cxxopts::value< uint64_t >()->default_value("7"), "GB"),
+    (max_volume, "", "max_volume", "max volume", ::cxxopts::value< uint64_t >()->default_value("50"), "number"),
+    (max_num_writes, "", "max_num_writes", "max num of writes", ::cxxopts::value< uint64_t >()->default_value("100000"),
+     "number"),
+    (verify_hdr, "", "verify_hdr", "data verification", ::cxxopts::value< uint64_t >()->default_value("1"), "0 or 1"),
+    (verify_data, "", "verify_data", "data verification", ::cxxopts::value< uint64_t >()->default_value("1"), "0 or 1"),
+    (read_verify, "", "read_verify", "read verification for each write",
+     ::cxxopts::value< uint64_t >()->default_value("0"), "0 or 1"),
+    (enable_crash_handler, "", "enable_crash_handler", "enable crash handler 0 or 1",
+     ::cxxopts::value< uint32_t >()->default_value("1"), "flag"),
+    (remove_file, "", "remove_file", "remove file at the end of test 0 or 1",
+     ::cxxopts::value< uint32_t >()->default_value("1"), "flag"),
+    (expected_vol_state, "", "expected_vol_state", "volume state expected during boot",
+     ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
+    (verify_only, "", "verify_only", "verify only boot", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
+    (abort, "", "abort", "abort", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
+    (flip, "", "flip", "flip", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
+    (delete_volume, "", "delete_volume", "delete_volume", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
+    (atomic_page_size, "", "atomic_page_size", "atomic_page_size",
+     ::cxxopts::value< uint32_t >()->default_value("4096"), "atomic_page_size"),
+    (vol_page_size, "", "vol_page_size", "vol_page_size", ::cxxopts::value< uint32_t >()->default_value("4096"),
+     "vol_page_size"),
+    (device_list, "", "device_list", "List of device paths", ::cxxopts::value< std::vector< std::string > >(),
+     "path [...]"),
+    (phy_page_size, "", "phy_page_size", "phy_page_size", ::cxxopts::value< uint32_t >()->default_value("4096"),
+     "phy_page_size"),
+    (mem_btree_page_size, "", "mem_btree_page_size", "mem_btree_page_size",
+     ::cxxopts::value< uint32_t >()->default_value("8192"), "mem_btree_page_size"))
 
 #define ENABLED_OPTIONS logging, home_blks, test_volume
 
@@ -1427,35 +1429,31 @@ int main(int argc, char* argv[]) {
     SDS_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
     sds_logging::SetLogger("test_volume");
     spdlog::set_pattern("[%D %T.%f] [%^%L%$] [%t] %v");
-    run_time = SDS_OPTIONS["run_time"].as<uint32_t>();
-    num_threads = SDS_OPTIONS["num_threads"].as<uint32_t>();
-    read_enable = SDS_OPTIONS["read_enable"].as<uint32_t>();
-    max_disk_capacity = ((SDS_OPTIONS["max_disk_capacity"].as<uint64_t>())  * (1ul<< 30));
-    max_vols = SDS_OPTIONS["max_volume"].as<uint64_t>();
-    max_num_writes= SDS_OPTIONS["max_num_writes"].as<uint64_t>();
-    enable_crash_handler = SDS_OPTIONS["enable_crash_handler"].as<uint32_t>();
-    verify_hdr = SDS_OPTIONS["verify_hdr"].as<uint64_t>() ? true : false;
-    verify_data = SDS_OPTIONS["verify_data"].as<uint64_t>() ? true : false;
-    read_verify = SDS_OPTIONS["read_verify"].as<uint64_t>() ? true : false;
-    load_type = SDS_OPTIONS["load_type"].as<uint32_t>();
-    remove_file = SDS_OPTIONS["remove_file"].as<uint32_t>();
-    expected_vol_state = SDS_OPTIONS["expected_vol_state"].as<uint32_t>();
-    verify_only = SDS_OPTIONS["verify_only"].as<uint32_t>();
-    is_abort = SDS_OPTIONS["abort"].as<uint32_t>();
-    flip_set = SDS_OPTIONS["flip"].as<uint32_t>();
-    can_delete_volume = SDS_OPTIONS["delete_volume"].as<uint32_t>() ?  true : false;
-    atomic_page_size = SDS_OPTIONS["atomic_page_size"].as<uint32_t>();
-    vol_page_size = SDS_OPTIONS["vol_page_size"].as<uint32_t>();
-    phy_page_size = SDS_OPTIONS["phy_page_size"].as<uint32_t>();
-    mem_btree_page_size = SDS_OPTIONS["mem_btree_page_size"].as<uint32_t>();  
-    
-    if (SDS_OPTIONS.count("device_list")) {
-        dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();
-    }
-    
-    if (load_type == 2) {
-        verify_data = 0;
-    }
+    run_time = SDS_OPTIONS["run_time"].as< uint32_t >();
+    num_threads = SDS_OPTIONS["num_threads"].as< uint32_t >();
+    read_enable = SDS_OPTIONS["read_enable"].as< uint32_t >();
+    max_disk_capacity = ((SDS_OPTIONS["max_disk_capacity"].as< uint64_t >()) * (1ul << 30));
+    max_vols = SDS_OPTIONS["max_volume"].as< uint64_t >();
+    max_num_writes = SDS_OPTIONS["max_num_writes"].as< uint64_t >();
+    enable_crash_handler = SDS_OPTIONS["enable_crash_handler"].as< uint32_t >();
+    verify_hdr = SDS_OPTIONS["verify_hdr"].as< uint64_t >() ? true : false;
+    verify_data = SDS_OPTIONS["verify_data"].as< uint64_t >() ? true : false;
+    read_verify = SDS_OPTIONS["read_verify"].as< uint64_t >() ? true : false;
+    load_type = SDS_OPTIONS["load_type"].as< uint32_t >();
+    remove_file = SDS_OPTIONS["remove_file"].as< uint32_t >();
+    expected_vol_state = SDS_OPTIONS["expected_vol_state"].as< uint32_t >();
+    verify_only = SDS_OPTIONS["verify_only"].as< uint32_t >();
+    is_abort = SDS_OPTIONS["abort"].as< uint32_t >();
+    flip_set = SDS_OPTIONS["flip"].as< uint32_t >();
+    can_delete_volume = SDS_OPTIONS["delete_volume"].as< uint32_t >() ? true : false;
+    atomic_page_size = SDS_OPTIONS["atomic_page_size"].as< uint32_t >();
+    vol_page_size = SDS_OPTIONS["vol_page_size"].as< uint32_t >();
+    phy_page_size = SDS_OPTIONS["phy_page_size"].as< uint32_t >();
+    mem_btree_page_size = SDS_OPTIONS["mem_btree_page_size"].as< uint32_t >();
+
+    if (SDS_OPTIONS.count("device_list")) { dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >(); }
+
+    if (load_type == 2) { verify_data = 0; }
     if (enable_crash_handler) sds_logging::install_crash_handler();
     return RUN_ALL_TESTS();
 }

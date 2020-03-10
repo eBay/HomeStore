@@ -207,7 +207,7 @@ public:
 
     void shutdown() {
         LOGINFO("shutting homestore");
-        VolInterface::get_instance()->shutdown([](bool success) { VolInterface::del_instance(); });
+        VolInterface::get_instance()->shutdown();
 
         LOGINFO("stopping iomgr");
         iomanager.stop();

@@ -7,9 +7,10 @@ void LogDev::start(bool format) {
     HS_ASSERT(LOGMSG, (m_logfound_cb != nullptr), "Expected Logs found callback to be registered");
 
     m_log_records = std::make_unique< sisl::StreamTracker< log_record > >();
+    m_hb = HomeBlks::safe_instance();
 
     // First read the info block
-    auto bstore = HomeBlks::instance()->get_logdev_blkstore();
+    auto bstore = m_hb->get_logdev_blkstore();
 
     // TODO: Don't create 2K as is, but query vdev_info layer to see available vb_context size
     m_info_blk_buf = sisl::make_aligned_unique< uint8_t >(dma_boundary, logdev_info_block::size);
@@ -60,11 +61,12 @@ void LogDev::stop() {
     m_info_blk_buf = nullptr;
     m_info_blk = nullptr;
     m_block_flush_q.clear();
+    m_hb = nullptr;
 }
 
 #if 0
 void LogDev::do_load(uint64_t device_cursor) {
-    auto store = HomeBlks::instance()->get_logdev_blkstore();
+    auto store = m_hb->get_logdev_blkstore();
     bool more_records = true;
     logid_t loaded_from = -1;
 
@@ -169,7 +171,7 @@ void LogDev::do_load(uint64_t device_cursor) {
     } while (true);
 
     // Update the tail offset with where we finally end up loading, so that new append entries can be written from here.
-    auto store = HomeBlks::instance()->get_logdev_blkstore();
+    auto store = m_hb->get_logdev_blkstore();
     store->update_tail_offset(store->seeked_pos());
 }
 
@@ -188,7 +190,7 @@ void LogDev::assert_next_pages(log_stream_reader& lstream) {
                           *header);
         }
     }
-    HomeBlks::instance()->get_logdev_blkstore()->lseek(cursor); // Reset back
+    m_hb->get_logdev_blkstore()->lseek(cursor); // Reset back
 }
 
 int64_t LogDev::append_async(logstore_id_t store_id, logstore_seq_num_t seq_num, uint8_t* data, uint32_t size,
@@ -206,7 +208,7 @@ log_buffer LogDev::read(const logdev_key& key) {
     // Read about 4K of buffer
     if (!_read_buf) { _read_buf = sisl::make_aligned_unique< uint8_t >(dma_boundary, initial_read_size); }
     auto rbuf = _read_buf.get();
-    auto store = HomeBlks::instance()->get_logdev_blkstore();
+    auto store = m_hb->get_logdev_blkstore();
     store->pread((void*)rbuf, initial_read_size, key.dev_offset);
 
     auto header = (log_group_header*)rbuf;
@@ -273,7 +275,7 @@ log_buffer LogDev::read(const logdev_key& key) {
 log_group_header* LogDev::read_validate_header(uint8_t* buf, uint32_t size, bool* partial_group) {
     auto header = (log_group_header*)buf;
     if (header->magic_word() != LOG_GROUP_HDR_MAGIC) {
-        auto store = HomeBlks::instance()->get_logdev_blkstore();
+        auto store = m_hb->get_logdev_blkstore();
         auto cur_pos = store->seeked_pos();
         LOGINFO("Logdev data not seeing magic, must have come to end of logdev at pos {}", cur_pos);
 
@@ -318,7 +320,7 @@ log_group_header* LogDev::read_validate_header(uint8_t* buf, uint32_t size, bool
 sisl::byte_array LogDev::read_next_header(uint32_t max_buf_reads) {
     uint32_t read_count = 0;
 
-    auto store = HomeBlks::instance()->get_logdev_blkstore();
+    auto store = m_hb->get_logdev_blkstore();
     while (read_count < max_buf_reads) {
         auto tmp_buf = sisl::make_byte_array(dma_boundary, dma_boundary);
         auto read_bytes = store->read((void*)tmp_buf->bytes, dma_boundary);
@@ -349,7 +351,7 @@ void LogDev::persist_store_ids() {
 }
 
 void LogDev::_persist_info_block() {
-    auto store = HomeBlks::instance()->get_logdev_blkstore();
+    auto store = m_hb->get_logdev_blkstore();
     auto store_id_buf = m_id_reserver->serialize();
 
     memcpy((void*)m_info_blk->store_id_info, store_id_buf->bytes, store_id_buf->size);
@@ -375,7 +377,7 @@ LogGroup* LogDev::prepare_flush(int32_t estimated_records) {
     lg->finish();
     lg->m_flush_log_idx_from = m_last_flush_idx + 1;
     lg->m_flush_log_idx_upto = flushing_upto_idx;
-    lg->m_log_dev_offset = HomeBlks::instance()->get_logdev_blkstore()->alloc_blk(lg->header()->group_size);
+    lg->m_log_dev_offset = m_hb->get_logdev_blkstore()->alloc_blk(lg->header()->group_size);
 
     assert(lg->header()->oob_data_offset > 0);
     LOGINFO("Flushing upto log_idx={}", flushing_upto_idx);
@@ -415,7 +417,7 @@ void LogDev::flush_if_needed(const uint32_t new_record_size, logid_t new_idx) {
 }
 
 void LogDev::do_flush(LogGroup* lg) {
-    auto* store = HomeBlks::instance()->get_logdev_blkstore();
+    auto* store = m_hb->get_logdev_blkstore();
     // auto offset = store->reserve(lg->data_size() + sizeof(log_group_header));
 
     auto req = logdev_req::make_request();
@@ -481,7 +483,7 @@ void LogDev::unlock_flush() {
 }
 
 void LogDev::truncate(const logdev_key& key) {
-    auto store = HomeBlks::instance()->get_logdev_blkstore();
+    auto store = m_hb->get_logdev_blkstore();
 
     m_log_records->truncate(key.idx);
     store->truncate(key.dev_offset);

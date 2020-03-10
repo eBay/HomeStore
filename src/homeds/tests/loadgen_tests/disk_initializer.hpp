@@ -7,16 +7,12 @@ typedef std::function< void(std::error_condition err, const out_params& params) 
 template < typename Executor >
 class DiskInitializer {
     std::vector< dev_info > device_info;
-    boost::uuids::uuid      uuid;
+    boost::uuids::uuid uuid;
 
 public:
-    void shutdown_callback(bool success) {
-        VolInterface::del_instance();
-        assert(success);
-    }
     ~DiskInitializer() {
-        VolInterface::get_instance()->shutdown(
-            std::bind(&DiskInitializer::shutdown_callback, this, std::placeholders::_1));
+        auto success = VolInterface::get_instance()->shutdown();
+        assert(success);
     }
     void cleanup() { remove("file_load_gen"); }
     void init(Executor& executor, init_done_callback init_done_cb, size_t atomic_page_size = 2048) {

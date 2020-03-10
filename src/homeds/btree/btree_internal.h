@@ -15,7 +15,7 @@
 #include "error/error.h"
 #include "main/homestore_header.hpp"
 #include <metrics/metrics.hpp>
-#include "homeds/utility/enum.hpp"
+#include <utility/enum.hpp>
 #include <boost/intrusive_ptr.hpp>
 #include <fds/utils.hpp>
 #include <fds/obj_allocator.hpp>
