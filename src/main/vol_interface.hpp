@@ -14,7 +14,8 @@
 #include <sds_logging/logging.h>
 #include <mutex>
 #include <utility/atomic_counter.hpp>
-#include "homeds/utility/useful_defs.hpp"
+//#include <fds/utils.hpp>
+#include <fds/utils.hpp>
 #include <utility/obj_life_counter.hpp>
 #include <atomic>
 #include <boost/optional.hpp>
@@ -26,6 +27,7 @@
 
 namespace homestore {
 class Volume;
+class Snapshot;
 class BlkBuffer;
 void intrusive_ptr_add_ref(BlkBuffer* buf);
 void intrusive_ptr_release(BlkBuffer* buf);
@@ -70,19 +72,19 @@ struct _counter_generator {
 struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
     std::vector< buf_info > read_buf_list;
     sisl::atomic_counter< int > outstanding_io_cnt;
+    sisl::atomic_counter< int > outstanding_data_io_cnt;
     sisl::atomic_counter< int > refcount;
     Clock::time_point io_start_time;
     std::error_condition err;
     std::atomic< bool > is_fail_completed;
     bool is_read;
     uint64_t request_id;
+    void* cookie; // any tag alongs
 
     friend void intrusive_ptr_add_ref(vol_interface_req* req) { req->refcount.increment(1); }
 
     friend void intrusive_ptr_release(vol_interface_req* req) {
-        if (req->refcount.decrement_testz()) {
-            delete (req);
-        }
+        if (req->refcount.decrement_testz()) { req->free_yourself(); }
     }
 
     /* Set the error with error code,
@@ -105,20 +107,23 @@ struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
     std::string to_string() {
         std::stringstream ss;
         ss << "vol_interface_req: request_id=" << request_id << " dir=" << (is_read ? "R" : "W")
-           << " outstanding_io_cnt=" << outstanding_io_cnt.get();
+           << " outstanding_io_cnt=" << outstanding_io_cnt.get()
+           << " outstanding_data_io_cnt=" << outstanding_data_io_cnt.get();
         return ss.str();
     }
 
 public:
-    vol_interface_req() : outstanding_io_cnt(0), refcount(0), is_fail_completed(false) {}
-    virtual ~vol_interface_req() = default;
+    vol_interface_req() : outstanding_io_cnt(0), outstanding_data_io_cnt(0), refcount(0), is_fail_completed(false) {}
+    ~vol_interface_req() = default;
 
     void init() {
         outstanding_io_cnt.set(0);
+        outstanding_data_io_cnt.set(0);
         is_fail_completed.store(false);
         request_id = counter_generator.next_request_id();
         err = no_error;
     }
+    virtual void free_yourself() = 0;
 };
 typedef boost::intrusive_ptr< vol_interface_req > vol_interface_req_ptr;
 
@@ -157,6 +162,7 @@ struct out_params {
 };
 
 typedef std::shared_ptr< Volume > VolumePtr;
+typedef std::shared_ptr< Snapshot > SnapshotPtr;
 
 /* This is the optional parameteres which should be given by its consumers only when there is no
  * system command to get these parameteres directly from disks. Or Consumer want to override
@@ -184,7 +190,6 @@ public:
     bool disk_init;                  // true if disk has to be initialized.
     std::vector< dev_info > devices; // name of the devices.
     bool is_file;
-    std::shared_ptr< iomgr::ioMgr > iomgr;
     boost::uuids::uuid system_uuid;
     io_flag flag = io_flag::DIRECT_IO;
 #ifndef NDEBUG
@@ -205,8 +210,9 @@ public:
     std::string to_string() {
         std::stringstream ss;
         ss << "min_virtual_page_size=" << min_virtual_page_size << ",cache_size=" << cache_size
-           << ",disk_init=" << disk_init << ",is_file=" << is_file << ",flag=" << flag
-           << ",number of devices=" << devices.size() << ",device names=[";
+           << ",disk_init=" << disk_init << ",is_file=" << is_file << ",flag =" << flag
+           << ",number of devices =" << devices.size();
+        ss << "device names = ";
         for (uint32_t i = 0; i < devices.size(); ++i) {
             ss << devices[i].dev_names;
             ss << ",";
@@ -222,10 +228,14 @@ class VolInterface {
 
 public:
     virtual ~VolInterface() {}
-    static bool init(const init_params& cfg) {
+    static bool init(const init_params& cfg, bool force_reinit = false) {
         static std::once_flag flag1;
         try {
-            std::call_once(flag1, [&cfg]() { _instance = vol_homestore_init(cfg); });
+            if (force_reinit) {
+                _instance = vol_homestore_init(cfg);
+            } else {
+                std::call_once(flag1, [&cfg]() { _instance = vol_homestore_init(cfg); });
+            }
             return true;
         } catch (const std::exception& e) {
             LOGERROR("{}", e.what());
@@ -234,9 +244,27 @@ public:
         }
     }
 
+#if 0
+    static bool restart(const init_params& cfg) {
+        if (_instance) {
+            std::condition_variable _cv;
+            _instance->shutdown([_cv]() { _cv.notify_all(); });
+
+            {
+                std::mutex _mtx;
+                std::unique_lock< std::mutex > lk(_mtx);
+                _cv.wait(lk, [&] { return true; });
+            }
+            del_instance();
+        }
+        _instance = vol_homestore_init(cfg);
+    }
+#endif
+
     static VolInterface* get_instance() { return _instance; }
     static void del_instance() { delete _instance; }
 
+    virtual vol_interface_req_ptr create_vol_hb_req() = 0;
     virtual std::error_condition write(const VolumePtr& vol, uint64_t lba, uint8_t* buf, uint32_t nblks,
                                        const vol_interface_req_ptr& req) = 0;
     virtual std::error_condition read(const VolumePtr& vol, uint64_t lba, int nblks,
@@ -250,6 +278,7 @@ public:
     virtual VolumePtr create_volume(const vol_params& params) = 0;
     virtual std::error_condition remove_volume(const boost::uuids::uuid& uuid) = 0;
     virtual VolumePtr lookup_volume(const boost::uuids::uuid& uuid) = 0;
+    virtual SnapshotPtr snap_volume(VolumePtr volptr) = 0;
 
     /* AM should call it in case of recovery or reboot when homestore try to mount the existing volume */
     virtual void attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback cb) = 0;

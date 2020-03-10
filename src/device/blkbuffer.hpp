@@ -31,16 +31,12 @@ public:
 
 class BlkBuffer : public WriteBackCacheBuffer< BlkId > {
 public:
-    static BlkBuffer *make_object() {
-        return homeds::ObjectAllocator< BlkBuffer >::make_object();
-    }
+    static BlkBuffer* make_object() { return sisl::ObjectAllocator< BlkBuffer >::make_object(); }
 
-    virtual void free_yourself() override {
-        homeds::ObjectAllocator< BlkBuffer >::deallocate(this);
-    }
+    virtual void free_yourself() override { sisl::ObjectAllocator< BlkBuffer >::deallocate(this); }
 
     // virtual size_t get_your_size() const override { return sizeof(BlkBuffer); }
 };
 
-}
-#endif //OMSTORE_BLKBUFFER_HPP_HPP
+} // namespace homestore
+#endif // OMSTORE_BLKBUFFER_HPP_HPP

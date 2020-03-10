@@ -540,6 +540,23 @@ public:
         return nth_key.compare_range(range);
     }
 
+    void get_all_kvs(std::vector< pair< K, V > >* kvs) const {
+        assert(this->is_leaf());
+        if (!this->is_leaf()) {
+            LOGERROR("Got a non-leaf node {}", this->to_string());
+            return;
+        }
+
+        for (uint32_t i = 0; i < this->get_total_entries(); i++) {
+            K key;
+            V val;
+
+            get_nth_key(i, &key, true); // Copy
+            get(i, &val, true);         // Copy
+            kvs->push_back(make_pair(key, val));
+        }
+    }
+
 private:
     uint32_t insert(int ind, const homeds::blob &key_blob, const homeds::blob &val_blob)  {
         assert(ind <= (int)this->get_total_entries());
