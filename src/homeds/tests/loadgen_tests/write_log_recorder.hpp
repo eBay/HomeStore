@@ -4,7 +4,7 @@ namespace homeds {
 namespace loadgen { 
 
 constexpr uint64_t LOG_FILE_SIZE = 1 * 1024 * 1024 * 1024ull;
-std::string vol_loadgen_dir = "/tmp/vol_load_gen/";
+std::string vol_loadgen_dir = "vol_load_gen/";
 std::string vol_log_dir = vol_loadgen_dir + "log/";
 std::string vol_log_prefix = vol_log_dir + "vol_log_";
 

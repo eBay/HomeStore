@@ -37,9 +37,9 @@ THREAD_BUFFER_INIT;
 #define HOMEBLKS_SB_FLAGS_SHUTDOWN 0x00000001UL
 
 #define STAGING_VOL_PREFIX "staging"
-#define VOL_PREFIX "/tmp/vol"
+#define VOL_PREFIX "test_files/vol"
 
-std::array< std::string, 4 > names = {"/tmp/vol_file1", "/tmp/vol_file2", "/tmp/vol_file3", "/tmp/vol_file4"};
+std::array< std::string, 4 > names = {"test_files/vol_file1", "test_files/vol_file2", "test_files/vol_file3", "test_files/vol_file4"};
 uint64_t max_vols = 50;
 uint64_t max_num_writes = 100000;
 uint64_t run_time;
@@ -209,6 +209,10 @@ public:
         /* start homestore */
             
         /* create files */
+        struct stat st;
+        if (stat("test_files", &st) == -1) {
+            mkdir("test_files", 0700);
+        }
 
         if (dev_names.size() != 0) {
             for (uint32_t i = 0; i < dev_names.size(); i++) {
@@ -242,11 +246,7 @@ public:
         iomgr_obj = std::make_shared<iomgr::ioMgr>(2, num_threads); 
         
         init_params params; 
-#if 0
         params.flag = homestore::io_flag::BUFFERED_IO;
-#else
-        params.flag = homestore::io_flag::DIRECT_IO;
-#endif
         params.min_virtual_page_size = vol_page_size;
         params.cache_size = 4 * 1024 * 1024 * 1024ul;
         params.disk_init = init;

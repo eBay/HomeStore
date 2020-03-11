@@ -3,7 +3,7 @@
 #include "vol_crc_persist_mgr.hpp"
 
 #define MAX_DEVICES     2
-#define VOL_PREFIX      "/tmp/vol"
+#define VOL_PREFIX      "vol_load_gen/vol"
 
 // 
 // VolumeManager holds all the details about volume lifecyle:
@@ -59,11 +59,7 @@ typedef std::function<void(std::error_condition err)> init_done_callback;
 public: 
     VolumeManager() { 
         // create vol loadgen folder
-        auto ret = mkdir(vol_loadgen_dir.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-        if (ret != 0) {
-            LOGERROR("Create folder: {} failed.", vol_loadgen_dir);
-            assert(0);
-        }
+        mkdir(vol_loadgen_dir.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
     }
 
     ~VolumeManager() {
@@ -87,7 +83,9 @@ public:
         m_max_vol_size  = 0;
         m_max_disk_cap  = 10 * Gi;
 
-        m_file_names    = {"/tmp/file1", "/tmp/file2", "/tmp/file3", "/tmp/file4"};
+        struct stat st;
+        
+        m_file_names    = {"vol_load_gen/file1", "vol_load_gen/file2", "vol_load_gen/file3", "vol_load_gen/file4"};
 
         m_iomgr         = executor.get_iomgr();   
         m_done_cb       = init_done_cb;
@@ -352,11 +350,7 @@ private:
         m_max_vol_size = (80 * m_max_cap) / (100 * m_max_vols);
 
         init_params p; 
-#if 0
         p.flag = homestore::io_flag::BUFFERED_IO;
-#else
-        p.flag = homestore::io_flag::DIRECT_IO;
-#endif
         p.min_virtual_page_size = VOL_PAGE_SIZE;
         p.cache_size            = CACHE_SIZE;
         p.disk_init             = true;
