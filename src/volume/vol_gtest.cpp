@@ -7,7 +7,6 @@
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
 #include <main/vol_interface.hpp>
-//#include <volume/home_blks.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <fstream>
@@ -71,6 +70,7 @@ uint32_t phy_page_size = 4096;
 uint32_t mem_btree_page_size = 4096;
 bool can_delete_volume = false;
 extern bool vol_gtest;
+std::vector< std::string > dev_names;
 #define VOL_PAGE_SIZE 4096
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
@@ -187,8 +187,11 @@ public:
         }
     }
     void remove_files() {
-        for (auto &n : names) {
-            remove(n.c_str());
+        /* no need to delete the user created file/disk */
+        if (dev_names.size() == 0) {
+            for (auto &n : names) {
+                remove(n.c_str());
+            }
         }
 
         for (uint32_t i = 0; i < max_vols; i++) {
@@ -211,21 +214,31 @@ public:
             mkdir("test_files", 0700);
         }
 
-        for (uint32_t i = 0; i < MAX_DEVICES; i++) {
-            dev_info temp_info;
-            temp_info.dev_names = names[i];
-            device_info.push_back(temp_info);
-            if (init || disk_replace_cnt > 0) {
-                if (!init) {
-                    remove(names[i].c_str());
-                }
-                std::ofstream ofs(names[i].c_str(), std::ios::binary | std::ios::out);
-                ofs.seekp(max_disk_capacity - 1);
-                ofs.write("", 1);
-                ofs.close();
-                --disk_replace_cnt;
+        if (dev_names.size() != 0) {
+            for (uint32_t i = 0; i < dev_names.size(); i++) {
+                dev_info temp_info;
+                temp_info.dev_names = dev_names[i];
+                /* we use this capacity to calculate volume size */
+                max_capacity += max_disk_capacity;
+                device_info.push_back(temp_info);
             }
-            max_capacity += max_disk_capacity;
+        } else {
+            for (uint32_t i = 0; i < MAX_DEVICES; i++) {
+                dev_info temp_info;
+                temp_info.dev_names = names[i];
+                device_info.push_back(temp_info);
+                if (init || disk_replace_cnt > 0) {
+                    if (!init) {
+                        remove(names[i].c_str());
+                    }
+                    std::ofstream ofs(names[i].c_str(), std::ios::binary | std::ios::out);
+                    ofs.seekp(max_disk_capacity - 1);
+                    ofs.write("", 1);
+                    ofs.close();
+                    --disk_replace_cnt;
+                }
+                max_capacity += max_disk_capacity;
+            }
         }
         /* Don't populate the whole disks. Only 80 % of it */
         max_vol_size = (60 * max_capacity)/ (100 * max_vols);
@@ -238,7 +251,7 @@ public:
         params.cache_size = 4 * 1024 * 1024 * 1024ul;
         params.disk_init = init;
         params.devices = device_info;
-        params.is_file = true;
+        params.is_file = dev_names.size() ? false : true;
         params.iomgr = iomgr_obj;
         params.init_done_cb = std::bind(&IOTest::init_done_cb, this, std::placeholders::_1, std::placeholders::_2);
         params.vol_mounted_cb = std::bind(&IOTest::vol_mounted_cb, this, std::placeholders::_1, std::placeholders::_2);
@@ -258,6 +271,19 @@ public:
         VolInterface::init(params);
     }
    
+    bool fix_vol_mapping_btree() {
+        /* fix all volumes mapping btrees */
+        for (uint64_t i = 0; i < max_vols; ++i) {
+            auto vol_ptr = vol_info[i]->vol;
+            auto ret = VolInterface::get_instance()->fix_tree(vol_ptr, true /* verify */);
+            if (ret == false) {
+                LOGERROR("fix_tree of vol: {} failed!", VolInterface::get_instance()->get_name(vol_ptr));
+                return false;
+            }
+        }
+        return true;
+    }
+
     void move_vol_to_offline() {
         /* move all volumes to offline */
         for (uint64_t i = 0; i < max_vols; ++i) {
@@ -268,7 +294,7 @@ public:
     void move_vol_to_online() {
         /* move all volumes to online */
         for (uint64_t i = 0; i < max_vols; ++i) {
-            VolInterface::get_instance()->vol_state_change(vol_info[i]->vol, ONLINE);
+            VolInterface::get_instance()->vol_state_change(vol_info[i]->vol, homestore::vol_state::ONLINE);
         }
         /* start ios */
         uint64_t temp = 1;
@@ -647,7 +673,8 @@ start:
             assert(ret_io == std::errc::no_such_device || expect_io_error);
             process_completions(req);
         }
-        LOGDEBUG("Wrote {} {} ",lba,nblks);
+        
+        LOGDEBUG("Wrote lba: {}, nblks: {} ", lba, nblks);
     }
 
     void populate_buf(uint8_t *buf, uint64_t size, uint64_t lba, int cur) {
@@ -896,12 +923,12 @@ start:
         }
 
         if (verify_done && is_abort) {
-            if ((get_elapsed_time(startTime) > (random() % run_time))) {
+            if (get_elapsed_time(startTime) > (random() % run_time)) {
                 abort();
             }
         }
 
-        if (verify_done && ((get_elapsed_time(startTime) > run_time))) {
+        if (verify_done && time_to_stop()) {
             notify_cmpl();
         } else {
             [[maybe_unused]] auto rsize = read(ev_fd, &temp, sizeof(uint64_t));
@@ -912,10 +939,15 @@ start:
         }
     }
 
+    bool time_to_stop() {
+        return (write_cnt >= max_num_writes) || (get_elapsed_time(startTime) > run_time);
+    }
+
     uint64_t get_elapsed_time(Clock::time_point startTime) {
         std::chrono::seconds sec = std::chrono::duration_cast< std::chrono::seconds >(Clock::now() - startTime);
         return sec.count();
     }
+
 
     void notify_cmpl() {
         std::unique_lock< std::mutex > lk(m_mutex);
@@ -945,9 +977,6 @@ start:
                 return false;
             }
             uuid = VolInterface::get_instance()->get_uuid(vol_info[vol_indx]->vol);
-#ifndef NDEBUG
-            VolInterface::get_instance()->verify_pending_blks(vol_info[vol_indx]->vol);
-#endif
             vol_info[vol_indx]->vol = nullptr;
         }
         VolInterface::get_instance()->remove_volume(uuid);
@@ -1195,6 +1224,134 @@ TEST_F(IOTest, vol_io_fail_test) {
     }
 }
 
+
+/**
+ * @brief : 
+ * Test Procedure:
+ * 1. start homesotre and do I/Os;
+ * 2. wait I/O completed
+ * 3. move all volumes to offline state;
+ * 4. inject flip point for read btree node to return failure.
+ * 5. start btree fix and it should return failure as expected, instead of core dump or crash;
+ * 6. delete volumes and shotdown homesotre;
+ *
+ * @param IOTest
+ * @param btree_fix_read_failure_test
+ */
+TEST_F(IOTest, btree_fix_read_failure_test) {
+    this->init = true;
+    this->start_homestore();
+
+    this->wait_cmpl();
+    LOGINFO("write_cnt {}", write_cnt);
+    LOGINFO("read_cnt {}", read_cnt);
+
+    sleep(5);
+
+    this->move_vol_to_offline();
+
+    VolInterface::get_instance()->set_error_flip();
+
+    auto ret = this->fix_vol_mapping_btree();
+    EXPECT_EQ(ret, false);
+
+    this->delete_volumes();
+
+    this->shutdown();
+    if (remove_file) {
+        this->remove_files();
+    }
+}
+
+/**
+ * @brief : 
+ * Test Procedure :
+ * 1. Start homestore and do customerized IO based on input parameter
+ * 2. wait I/O completed
+ * 3. move all volumes to offline state;
+ * 4. start btree fix (with verify set to true) on every volume and expect it to be successfully completed. 
+ * 5. verify KVs between newly created btree and old btree should also return successfully;
+ * 6. delete volumes and shotdown homestore;
+ *  
+ * @param IOTest
+ * @param btree_fix_test
+ */
+TEST_F(IOTest, btree_fix_test) {
+    this->init = true;
+    this->start_homestore();
+
+    this->wait_cmpl();
+    LOGINFO("write_cnt {}", write_cnt);
+    LOGINFO("read_cnt {}", read_cnt);
+
+    sleep(5);
+    assert(outstanding_ios == 0);  
+
+    this->move_vol_to_offline();
+    auto ret = this->fix_vol_mapping_btree();
+    EXPECT_EQ(ret, true);
+
+    this->delete_volumes();
+
+    this->shutdown();
+    if (remove_file) {
+        this->remove_files();
+    }
+}
+ 
+/**
+ * @brief : 
+ * Test Procedure :
+ * 1. Start homestore and do customerized IO based on input parameter
+ * 2. wait I/O completed
+ * 3. move all volumes to offline state;
+ * 4. start btree fix (with verify set to true) on every volume and expect it to be successfully completed. 
+ * 5. verify KVs between newly created btree and old btree should also return successfully;
+ * 6. move volume back online.
+ * 7. start I/O on volumes and wait I/O completed
+ * 8. delete all volumes and shutdown homestore and exit;
+ *
+ * @param IOTest
+ * @param btree_fix_test
+ */
+TEST_F(IOTest, btree_fix_rerun_io_test) {
+    this->init = true;
+    this->start_homestore();
+
+    this->wait_cmpl();
+    LOGINFO("write_cnt {}", write_cnt);
+    LOGINFO("read_cnt {}", read_cnt);
+
+    sleep(5);
+    assert(outstanding_ios == 0);  
+
+    this->move_vol_to_offline();
+    auto ret = this->fix_vol_mapping_btree();
+    EXPECT_EQ(ret, true);
+
+    startTime = Clock::now();
+    write_cnt = 0;
+    read_cnt = 0;
+    io_stalled = false;
+    this->move_vol_to_online();
+    
+    this->wait_cmpl();
+    LOGINFO("write_cnt {}", write_cnt);
+    LOGINFO("read_cnt {}", read_cnt);
+    
+    sleep(5);
+    assert(outstanding_ios == 0);  
+        
+    if (can_delete_volume) {
+        this->delete_volumes();
+    }
+
+    this->shutdown();
+    if (remove_file) {
+        this->remove_files();
+    }
+}
+ 
 /************************* CLI options ***************************/
 
 SDS_OPTION_GROUP(test_volume, 
@@ -1217,6 +1374,7 @@ SDS_OPTION_GROUP(test_volume,
 (delete_volume,"", "delete_volume", "delete_volume", ::cxxopts::value<uint32_t>()->default_value("0"), "flag"),
 (atomic_page_size,"", "atomic_page_size", "atomic_page_size", ::cxxopts::value<uint32_t>()->default_value("4096"), "atomic_page_size"),
 (vol_page_size,"", "vol_page_size", "vol_page_size", ::cxxopts::value<uint32_t>()->default_value("4096"), "vol_page_size"),
+(device_list, "", "device_list", "List of device paths", ::cxxopts::value< std::vector< std::string > >(), "path [...]"),
 (phy_page_size,"", "phy_page_size", "phy_page_size", ::cxxopts::value<uint32_t>()->default_value("4096"), "phy_page_size"),
 (mem_btree_page_size,"", "mem_btree_page_size", "mem_btree_page_size", ::cxxopts::value<uint32_t>()->default_value("8192"), "mem_btree_page_size"))
 
@@ -1261,7 +1419,11 @@ int main(int argc, char *argv[]) {
     vol_page_size = SDS_OPTIONS["vol_page_size"].as<uint32_t>();
     phy_page_size = SDS_OPTIONS["phy_page_size"].as<uint32_t>();
     mem_btree_page_size = SDS_OPTIONS["mem_btree_page_size"].as<uint32_t>();  
-
+    
+    if (SDS_OPTIONS.count("device_list")) {
+        dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();
+    }
+    
     if (load_type == 2) {
         verify_data = 0;
     }

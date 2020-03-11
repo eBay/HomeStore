@@ -95,6 +95,14 @@ private:
 public:
     btree_super_block get_btree_sb() { return m_sb; }
 
+    
+   /**
+    * @brief : return the btree cfg 
+	*
+	* @return : the btree cfg;
+	*/
+    BtreeConfig get_btree_cfg() const { return m_btree_cfg; }
+
 #ifdef _PRERELEASE
     static void set_io_flip() {
         /* IO flips */
@@ -698,10 +706,18 @@ public:
         return remove_any(BtreeSearchRange(key), nullptr, outval, dependent_req, cookie);
     }
 
-    void verify_tree() {
+    /**
+     * @brief : verify btree is consistent and no corruption;
+     *
+     * @return : true if btree is not corrupted. 
+     *           false if btree is corrupted;
+     */
+    bool verify_tree() {
         m_btree_lock.read_lock();
-        verify_node(m_root_node, nullptr, -1);
+        bool ret = verify_node(m_root_node, nullptr, -1);
         m_btree_lock.unlock();
+
+        return ret;
     }
 
     void print_tree() {
@@ -727,30 +743,55 @@ public:
     }
 
     nlohmann::json get_metrics_in_json(bool updated = true) { return m_metrics.get_result_in_json(updated); }
-
+    
 private:
-    void verify_node(bnodeid_t bnodeid, BtreeNodePtr parent_node, uint32_t indx) {
+    
+    /**
+     * @brief : verify the btree node is corrupted or not;
+     * 
+     * Note: this function should never assert, but only return success or failure since it is in verification mode;
+     *
+     * @param bnodeid : node id
+     * @param parent_node : parent node ptr
+     * @param indx : index within thie node;
+     *
+     * @return : true if this node including all its children are not corrupted;
+     *           false if not;
+     */
+    bool verify_node(bnodeid_t bnodeid, BtreeNodePtr parent_node, uint32_t indx) {
         homeds::thread::locktype acq_lock = homeds::thread::locktype::LOCKTYPE_READ;
         BtreeNodePtr my_node;
         if (read_and_lock_node(bnodeid, my_node, acq_lock, acq_lock, nullptr) != btree_status_t::success) {
             LOGINFO("read node failed");
-            return;
+            return false;
         }
-
         K prev_key;
+        bool success = true;
         for (uint32_t i = 0; i < my_node->get_total_entries(); ++i) {
             K key;
             my_node->get_nth_key(i, &key, false);
             if (!my_node->is_leaf()) {
                 BtreeNodeInfo child;
                 my_node->get(i, &child, false);
-                verify_node(child.bnode_id(), my_node, i);
+                success = verify_node(child.bnode_id(), my_node, i);
+                if (!success) {
+                    goto exit_on_error;
+                }
+
                 if (i > 0) {
                     BT_LOG_ASSERT_CMP(prev_key.compare(&key), <, 0, my_node);
+                    if (prev_key.compare(&key) >= 0) {
+                        success = false;
+                        goto exit_on_error;
+                    }
                 }
             }
             if (my_node->is_leaf() && i > 0) {
                 BT_LOG_ASSERT_CMP(prev_key.compare_start(&key), <, 0, my_node);
+                if (prev_key.compare_start(&key) >= 0) {
+                    success = false;
+                    goto exit_on_error;
+                }
             }
             prev_key = key;
         }
@@ -762,6 +803,10 @@ private:
             K last_key;
             my_node->get_nth_key(my_node->get_total_entries() - 1, &last_key, false);
             BT_LOG_ASSERT_CMP(last_key.compare(&parent_key), ==, 0, parent_node);
+            if (last_key.compare(&parent_key) != 0) {
+                success = false;
+                goto exit_on_error;
+            }
         } else if (parent_node) {
             K parent_key;
             parent_node->get_nth_key(indx - 1, &parent_key, false);
@@ -769,12 +814,22 @@ private:
             K first_key;
             my_node->get_nth_key(0, &first_key, false);
             BT_LOG_ASSERT_CMP(first_key.compare(&parent_key), >, 0, parent_node);
+            if (first_key.compare(&parent_key) <= 0) {
+                success = false;
+                goto exit_on_error;
+            }
         }
 
         if (my_node->get_edge_id().is_valid()) {
-            verify_node(my_node->get_edge_id(), my_node, my_node->get_total_entries());
+            success = verify_node(my_node->get_edge_id(), my_node, my_node->get_total_entries());
+            if (!success) {
+                goto exit_on_error;
+            }
         }
+
+exit_on_error: 
         unlock_node(my_node, acq_lock);
+        return success;
     }
 
     void to_string(bnodeid_t bnodeid, std::stringstream& ss) {
@@ -879,10 +934,12 @@ private:
                     std::vector< std::pair< K, V > > result_kv;
                     query_req.callback()(match_kv, result_kv, query_req.get_cb_param());
                     auto ele_to_add = result_kv.size();
-                    if (count + ele_to_add > query_req.get_batch_size())
+                    if (count + ele_to_add > query_req.get_batch_size()) {
                         ele_to_add = query_req.get_batch_size() - count;
-                    if (ele_to_add > 0)
+                    }
+                    if (ele_to_add > 0) {
                         out_values.insert(out_values.end(), result_kv.begin(), result_kv.begin() + ele_to_add);
+                    }
                     count += ele_to_add;
 
                     BT_DEBUG_ASSERT_CMP(count, <=, query_req.get_batch_size(), my_node);
@@ -1492,7 +1549,6 @@ private:
 
 #ifdef _PRERELEASE
             if (curr_ind - start_ind > 1 && homestore_flip->test_flip("btree_leaf_node_split")) {
-                LOGINFO("btree_leaf_node_split flip is set");
                 ret = btree_status_t::retry;
                 goto out;
             }
@@ -1958,9 +2014,7 @@ private:
         /* we should synchronously try to recover this node. If we write asynchronously then
          * we need to do refresh.
          */
-        if (!homestore::HomeStoreConfig::is_read_only) {
-            ret = write_node_sync(child_node1);
-        }
+        ret = write_node_sync(child_node1);
 
         if (parent_sibbling != nullptr) {
             unlock_node(parent_sibbling, locktype::LOCKTYPE_READ);
@@ -1970,10 +2024,8 @@ private:
             return ret;
         }
 
-        if (!homestore::HomeStoreConfig::is_read_only) {
-            for (int i = 0; i < (int)nodes_to_free.size(); i++) {
-                free_node(nodes_to_free[i], nullptr);
-            }
+        for (int i = 0; i < (int)nodes_to_free.size(); i++) {
+            free_node(nodes_to_free[i], nullptr);
         }
 
         COUNTER_INCREMENT(m_metrics, btree_num_pc_gen_mismatch, 1);

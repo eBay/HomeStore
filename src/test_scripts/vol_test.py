@@ -30,8 +30,8 @@ def recovery():
     stderr=subprocess.STDOUT, shell=True)
     
     subprocess.check_call(dirpath + "test_volume \
-    --gtest_filter=IOTest.recovery_io_test --verify_hdr=0 --verify_data=0 --run_time=30 --enable_crash_handler=1", \
-    stderr=subprocess.STDOUT, shell=True)
+    --gtest_filter=IOTest.recovery_io_test --verify_hdr=0 --verify_data=0 --run_time=30 --enable_crash_handler=1 \
+    --remove_file=1 --delete_volume=1", stderr=subprocess.STDOUT, shell=True)
     print("recovery passed")
 
 ## @test    normal
@@ -47,7 +47,7 @@ def normal_flip():
     print("normal test started with flip = 2")
     subprocess.check_call(dirpath + "test_volume \
             --run_time=3600 --max_num_writes=5000000 --gtest_filter=IOTest.init_io_test --remove_file=0 --verify_data=0 \
-            --flip=2", stderr=subprocess.STDOUT, shell=True)
+            --flip=1", stderr=subprocess.STDOUT, shell=True)
     print("normal test completed with flip =  2")
 
 ## @test    load
@@ -85,7 +85,7 @@ def recovery_nightly():
         i += 1
     
     subprocess.check_call(dirpath + "test_volume --gtest_filter=IOTest.recovery_io_test \
-            --run_time=300 --remove_file=0", stderr=subprocess.STDOUT, shell=True)
+            --run_time=300 --remove_file=1 --delete_volume=1", stderr=subprocess.STDOUT, shell=True)
     print("recovery test completed")
 
 ## @test    one_disk_replace
@@ -170,13 +170,31 @@ def seq_load_start():
     subprocess.check_call(dirpath + "test_volume \
             --run_time=24000 --max_num_writes=5000000 --gtest_filter=IOTest.init_io_test --remove_file=0 --flip=1 --load_type=2",\
             stderr=subprocess.STDOUT, shell=True)
-    print("normal test completed")
+    print("seq workload test completed")
     
 def seq_vol_load():
     p = Process(target = seq_load_start())
     p.start()
     p.join()
 
+def btree_fix_on_read_failure():
+    print("btree fix failure test started")
+    subprocess.check_call(dirpath + "test_volume --run_time=100 --max_num_writes=1000 --gtest_filter=IOTest.btree_fix_read_failure_test",\
+            stderr=subprocess.STDOUT, shell=True)
+    print("btree fix failure test completed")
+ 
+def btree_fix():
+    print("btree fix started")
+    subprocess.check_call(dirpath + "test_volume --run_time=1000 --max_num_writes=100000 --gtest_filter=IOTest.btree_fix_test",\
+            stderr=subprocess.STDOUT, shell=True)
+    print("btree fix test completed")
+
+def btree_fix_rerun_io():
+    print("btree fix rerun io started")
+    subprocess.check_call(dirpath + "test_volume --run_time=1000 --max_num_writes=100000 --gtest_filter=IOTest.btree_fix_rerun_io_test",\
+            stderr=subprocess.STDOUT, shell=True)
+    print("btree fix rerun io test completed")
+   
 def nightly():
 
     normal()
@@ -186,7 +204,7 @@ def nightly():
     sleep(5)
     
     # normal IO test
- #   normal_flip()
+    normal_flip()
     sleep(5)
 
     one_disk_replace()
@@ -215,6 +233,12 @@ def nightly():
     sleep(5)
 
     load()
+    sleep(5)
+
+    btree_fix()
+    sleep(5)
+
+    btree_fix_on_read_failure()
     sleep(5)
 
 if test_suits == "normal":
@@ -261,6 +285,15 @@ if test_suits == "load":
  
 if test_suits == "load_volume":
     load_volume()
+
+if test_suits == "btree_fix":
+    btree_fix()
+
+if test_suits == "btree_fix_rerun_io":
+    btree_fix_rerun_io()
+
+if test_suits == "btree_fix_on_read_failure":
+    btree_fix_on_read_failure()
 
 if test_suits == "seq_workload":
     seq_vol_load()

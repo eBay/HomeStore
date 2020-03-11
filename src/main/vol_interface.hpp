@@ -259,12 +259,22 @@ public:
     virtual cap_attrs get_vol_capacity(const VolumePtr& vol) = 0;
     virtual bool vol_state_change(const VolumePtr& vol, vol_state new_state) = 0;
 
-    virtual void print_tree(const VolumePtr& vol, bool chksum = true) = 0;
-    virtual void verify_tree(const VolumePtr& vol) = 0;
     virtual void print_node(const VolumePtr& vol, uint64_t blkid, bool chksum = true) = 0;
-#ifndef NDEBUG
-    virtual void verify_pending_blks(const VolumePtr& vol) = 0;
-#endif
+    virtual void print_tree(const VolumePtr& vol, bool chksum = true) = 0;
+    virtual bool verify_tree(const VolumePtr& vol) = 0;
+
+    /**
+     * @brief : fix the btree which is in corrupted state;
+     *
+     * @param vol : vol that whose mapping btree is to be fixed;
+     * @param verify : if true, verify the fixed btree has exact same KVs in the leaf node;
+     *
+     * @return : true if successfully fixed;
+     *           false if not, e.g. when there is corruption in the btree node during fix;
+     */
+    virtual bool fix_tree(VolumePtr vol, bool verify = false) = 0;
+    virtual vol_state get_state(VolumePtr vol) = 0;
+
 #ifdef _PRERELEASE
     virtual void set_io_flip() = 0;
     virtual void set_error_flip() = 0;
