@@ -30,9 +30,7 @@ DeviceManager::DeviceManager(NewVDevCallback vcb,
         m_vdev_error_cb(vdev_error_cb) {
 
     switch(HomeStoreConfig::open_flag) {
-#ifndef NDEBUG
         case BUFFERED_IO : m_open_flags = O_RDWR; break;
-#endif
         case READ_ONLY   : m_open_flags = O_RDONLY; break;
         case DIRECT_IO   :
         default          : m_open_flags = O_RDWR | O_DIRECT;
