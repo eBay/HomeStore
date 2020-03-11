@@ -12,12 +12,15 @@
 #include <utility/atomic_counter.hpp>
 #include <utility/obj_life_counter.hpp>
 #include <memory>
-#include "homeds/memory/obj_allocator.hpp"
+#include <fds/obj_allocator.hpp>
 #include <sds_logging/logging.h>
 #include <spdlog/fmt/fmt.h>
 #include "main/homestore_assert.hpp"
 #include "threadpool/thread_pool.h"
 #include "blk_read_tracker.hpp"
+#include "journal/vol_journal.hpp"
+#include <volume/snapshot.hpp>
+#include <utility/enum.hpp>
 
 using namespace std;
 
@@ -26,6 +29,7 @@ namespace homestore {
 #define MAX_NUM_LBA ((1 << NBLKS_BITS) - 1)
 #define INVALID_SEQ_ID UINT64_MAX
 class mapping;
+class VolumeJournal;
 enum vol_state;
 
 struct volume_req;
@@ -34,7 +38,7 @@ typedef boost::intrusive_ptr< volume_req > volume_req_ptr;
 /* first 48 bits are actual sequence ID and last 16 bits are boot cnt */
 #define SEQ_ID_BIT_CNT 48ul
 #define BOOT_CNT_MASK 0x0000fffffffffffful
-#define GET_IO_SEQ_ID(sid) ((HomeBlks::instance()->get_boot_cnt() << SEQ_ID_BIT_CNT) | (sid & BOOT_CNT_MASK))
+#define GET_IO_SEQ_ID(sid) ((m_hb->get_boot_cnt() << SEQ_ID_BIT_CNT) | (sid & BOOT_CNT_MASK))
 
 #define VOL_INFO_LOG(volname, msg, ...) HS_SUBMOD_LOG(INFO, base, , "vol", volname, msg, ##__VA_ARGS__)
 #define VOL_ERROR_LOG(volname, msg, ...) HS_SUBMOD_LOG(ERROR, base, , "vol", volname, msg, ##__VA_ARGS__)
@@ -81,10 +85,10 @@ struct volume_req : public blkstore_req< BlkBuffer > {
 
 public:
     static boost::intrusive_ptr< volume_req > make_request() {
-        return boost::intrusive_ptr< volume_req >(homeds::ObjectAllocator< volume_req >::make_object());
+        return boost::intrusive_ptr< volume_req >(sisl::ObjectAllocator< volume_req >::make_object());
     }
 
-    virtual void free_yourself() override { homeds::ObjectAllocator< volume_req >::deallocate(this); }
+    virtual void free_yourself() override { sisl::ObjectAllocator< volume_req >::deallocate(this); }
 
     /* any derived class should have the virtual destructor to prevent
      * memory leak because pointer can be free with the base class.
@@ -108,7 +112,7 @@ public:
     }
 
 protected:
-    friend class homeds::ObjectAllocator< volume_req >;
+    friend class sisl::ObjectAllocator< volume_req >;
 
     // Volume req should always be created from Volume::create_vol_req()
     volume_req() : is_read(false), blkIds_to_free(0), num_mapping_update(0), parent_req(nullptr) {
@@ -116,6 +120,18 @@ protected:
         done = false;
 #endif
     }
+};
+
+struct vol_hb_req : public vol_interface_req {
+    std::vector< volume_req_ptr > child_reqs; // all spawned child requests of vol hb req
+
+    virtual ~vol_hb_req() = default;
+
+    virtual void free_yourself() override { delete this; }
+
+    static vol_interface_req_ptr make_instance() { return vol_interface_req_ptr((vol_interface_req*)new vol_hb_req); }
+
+    static vol_hb_req* cast(const vol_interface_req_ptr& hb_req) { return (vol_hb_req*)hb_req.get(); }
 };
 
 class VolumeMetrics : public sisl::MetricsGroupWrapper {
@@ -162,10 +178,12 @@ public:
 
 class Volume : public std::enable_shared_from_this< Volume > {
 private:
-    mapping* m_map;
+    std::unique_ptr< mapping > m_map;
+    std::unique_ptr< VolumeJournal > m_volume_journal;
     boost::intrusive_ptr< BlkBuffer > m_only_in_mem_buff;
-    struct vol_mem_sb* m_sb;
-    enum vol_state m_state;
+
+    std::unique_ptr< vol_mem_sb > m_sb;
+    std::atomic< vol_state > m_state = vol_state::UNINITED;
     void alloc_single_block_in_mem();
     io_comp_callback m_comp_cb;
     std::atomic< uint64_t > seq_Id;
@@ -176,14 +194,22 @@ private:
     std::atomic< uint64_t > m_err_cnt = 0;
     std::string m_vol_name;
     std::string m_vol_uuid;
+
 #ifndef NDEBUG
     std::mutex m_req_mtx;
     std::map< uint64_t, volume_req_ptr > m_req_map;
 #endif
     std::atomic< uint64_t > m_req_id = 0;
+
+    std::atomic< uint64_t > m_snap_id = 0;       // Next snapshot Id for this vol. Always grows
+                                                 // TODO: Goes into vol sb.
+    std::map< uint64_t, SnapshotPtr > m_snapmap; // Id to Snapshot.
+
     // Map of blks for which read is requested, to prevent parallel writes to free those blks
     // it also stores corresponding eviction record created by any parallel writes
     std::unique_ptr< Blk_Read_Tracker > m_read_blk_tracker;
+
+    HomeBlksSafePtr m_hb; // Hold onto the homeblks to maintain reference
 
 private:
     Volume(const vol_params& params);
@@ -191,23 +217,33 @@ private:
     void check_and_complete_req(const vol_interface_req_ptr& hb_req, const std::error_condition& err,
                                 bool call_completion_cb, std::vector< Free_Blk_Entry >* fbes = nullptr);
 
+    // Create journal record key/value from all child volume requests
+    void set_journal_key_value(VolumeJournalKey& jkey, VolumeJournalValue& jval, vol_hb_req* vhb_req);
+
 public:
     template < typename... Args >
     static std::shared_ptr< Volume > make_volume(Args&&... args) {
         return std::shared_ptr< Volume >(new Volume(std::forward< Args >(args)...));
     }
 
+    std::shared_ptr< Snapshot > make_snapshot() {
+        auto sp = std::shared_ptr< Snapshot >(new Snapshot(this, m_snap_id, seq_Id));
+        m_snapmap[m_snap_id++] = sp;
+        return sp;
+    }
     static homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >* m_data_blkstore;
     static void process_vol_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
     static volume_req_ptr create_vol_req(Volume* vol, const vol_interface_req_ptr& hb_req);
+    static vol_interface_req_ptr create_vol_hb_req();
 #ifdef _PRERELEASE
     static void set_io_flip();
     static void set_error_flip();
 #endif
 
     ~Volume();
+    void shutdown();
+    void destroy();
 
-    std::error_condition destroy();
     std::error_condition write(uint64_t lba, uint8_t* buf, uint32_t nblks, const vol_interface_req_ptr& hb_req);
     std::error_condition read(uint64_t lba, int nblks, const vol_interface_req_ptr& hb_req, bool sync);
 
@@ -220,10 +256,10 @@ public:
 
     template < typename... Args >
     void assert_formatter(fmt::memory_buffer& buf, const char* msg, const std::string& req_str, const Args&... args) {
+
         fmt::format_to(buf, "\n[vol={}]", m_vol_uuid);
-        if (req_str.size()) {
-            fmt::format_to(buf, "\n[request={}]", req_str);
-        }
+        if (req_str.size()) { fmt::format_to(buf, "\n[request={}]", req_str); }
+
         fmt::format_to(buf, "\nMetrics = {}\n", sisl::MetricsFarm::getInstance().get_result_in_json_string());
     }
 
@@ -232,7 +268,7 @@ public:
      * memory sb is modified.
      */
     struct vol_mem_sb* get_sb() {
-        return m_sb;
+        return m_sb.get();
     };
 
     void vol_scan_alloc_blks();
@@ -242,6 +278,7 @@ public:
     // async call to start the multi-threaded work.
     void get_allocated_blks();
     void process_metadata_completions(const volume_req_ptr& wb_req);
+    void process_journal_completions(vol_hb_req* vhb_req, uint64_t log_id);
     void process_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
     void recovery_start();
 
@@ -255,13 +292,14 @@ public:
     bool remove_free_blk_entry(std::vector< Free_Blk_Entry >& fbes, std::pair< MappingKey, MappingValue >& kv);
 
     uint64_t get_elapsed_time(Clock::time_point startTime);
-    void     attach_completion_cb(const io_comp_callback& cb);
-    void     print_tree();
-    bool     verify_tree();
-    void     print_node(uint64_t blkid);
-    void     blk_recovery_callback(const MappingValue& mv);
-    void     set_recovery_error();
-    mapping* get_mapping_handle() { return m_map; }
+    void attach_completion_cb(const io_comp_callback& cb);
+    void print_tree();
+    bool verify_tree();
+    void print_node(uint64_t blkid);
+    void blk_recovery_callback(const MappingValue& mv);
+    void set_recovery_error();
+
+    mapping* get_mapping_handle() { return m_map.get(); }
 
     uint64_t get_last_lba() {
         assert(m_sb->ondisk_sb->size != 0);
@@ -269,24 +307,33 @@ public:
         return (get_size() / get_page_size()) - 1;
     }
 
-    uint64_t            get_data_used_size() { return m_used_size; }
-    uint64_t            get_metadata_used_size();
-    const char*         get_name() const { return (m_sb->ondisk_sb->vol_name); }
-    uint64_t            get_page_size() const { return m_sb->ondisk_sb->page_size; }
-    uint64_t            get_size() const { return m_sb->ondisk_sb->size; }
-    boost::uuids::uuid  get_uuid();
-    vol_state           get_state();
-    void                set_state(vol_state state, bool persist = true);
-    bool                is_offline();
-
-    
     /**
      * @brief : fix mapping btree
      *
      * @return : true for successfully fixed.
-     *           false for fail to fix 
+     *           false for fail to fix
      */
-    bool                fix_mapping_btree(bool verify);
+    bool fix_mapping_btree(bool verify);
+    uint64_t get_data_used_size() { return m_used_size; }
+    uint64_t get_metadata_used_size();
+    const char* get_name() const { return (m_sb->ondisk_sb->vol_name); }
+    uint64_t get_page_size() const { return m_sb->ondisk_sb->page_size; }
+    uint64_t get_size() const { return m_sb->ondisk_sb->size; }
+    boost::uuids::uuid get_uuid();
+    vol_state get_state();
+    void set_state(vol_state state, bool persist = true);
+    bool is_offline();
+
+#ifndef NDEBUG
+    void verify_pending_blks();
+#endif
+
+    std::string to_string() {
+        std::stringstream ss;
+        ss << "Name :" << get_name() << ", UUID :" << get_uuid() << ", Size:" << get_size()
+           << ((is_offline()) ? ", Offline" : ", Not Offline") << ", State :" << get_state();
+        return ss.str();
+    }
 };
 
 #define NUM_BLKS_PER_THREAD_TO_QUERY 10000ull

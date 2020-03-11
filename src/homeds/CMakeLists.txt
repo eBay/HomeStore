@@ -37,8 +37,8 @@ if (NOT ${CONAN_BUILD_COVERAGE})
         tests/test_iomgr_executor.cpp
         loadgen/iomgr_executor.cpp
         )
-    add_executable(test_iomgr_exec ${TEST_IOMGR_EXEC_FILES})
-    target_link_libraries(test_iomgr_exec homestore ${COMMON_LIB_DEPS})
+    #add_executable(test_iomgr_exec ${TEST_IOMGR_EXEC_FILES})
+    #target_link_libraries(test_iomgr_exec homestore ${COMMON_LIB_DEPS})
 endif ()
 
 set(TEST_OBJALLOCATOR_SOURCE_FILES tests/test_obj_allocator.cpp)
@@ -72,9 +72,24 @@ set(TEST_LOAD_FILES
         )
 add_executable(test_load ${TEST_LOAD_FILES})
 target_link_libraries(test_load homestore homeblks ${COMMON_LIB_DEPS})
-add_test(NAME TestLoad COMMAND test_load)
+
+add_test(NAME TestLoadCache COMMAND ${CMAKE_BINARY_DIR}/bin/test_load --gtest_filter=*Cache*)
+
+add_test(NAME TestLoadVDev COMMAND ${CMAKE_BINARY_DIR}/bin/test_load --gtest_filter=*VDevTest_RW* && ${CMAKE_BINARY_DIR}/bin/test_load --gtest_filter=*VDevTest_PRW*)
+SET_TESTS_PROPERTIES(TestLoadVDev PROPERTIES DEPENDS TestLoadCache)
 
 add_test(NAME TestVolLoadgen COMMAND ${CMAKE_BINARY_DIR}/bin/test_load --gtest_filter=*Volume*)
-set_tests_properties(TestVolLoadgen PROPERTIES DEPENDS TestLoad)
+SET_TESTS_PROPERTIES(TestVolLoadgen PROPERTIES DEPENDS TestLoadVDev)
 
-target_link_libraries(test_load ${CONAN_LIBS})
+#add_test(NAME TestLoadMap COMMAND ${CMAKE_BINARY_DIR}/bin/test_load --gtest_filter=*Map*)
+#SET_TESTS_PROPERTIES(TestLoadMap PROPERTIES DEPENDS TestVolLoadgen)
+
+FIND_PACKAGE(Boost COMPONENTS program_options REQUIRED)
+TARGET_LINK_LIBRARIES(test_load ${Boost_LIBRARIES})
+
+set(TEST_IOMGR_EXEC_FILES 
+    tests/test_iomgr_executor.cpp
+    loadgen/iomgr_executor.cpp
+    )
+add_executable(test_iomgr_exec ${TEST_IOMGR_EXEC_FILES})
+target_link_libraries(test_iomgr_exec homestore ${COMMON_LIB_DEPS})

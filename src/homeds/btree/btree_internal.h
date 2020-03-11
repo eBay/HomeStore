@@ -10,15 +10,15 @@
 #include <vector>
 #include <iostream>
 #include <cmath>
-#include "homeds/utility/useful_defs.hpp"
-#include "homeds/memory/freelist_allocator.hpp"
+#include <fds/utils.hpp>
+#include <fds/freelist_allocator.hpp>
 #include "error/error.h"
 #include "main/homestore_header.hpp"
 #include <metrics/metrics.hpp>
-#include "homeds/utility/enum.hpp"
+#include <utility/enum.hpp>
 #include <boost/intrusive_ptr.hpp>
-#include "homeds/utility/useful_defs.hpp"
-#include "homeds/memory/obj_allocator.hpp"
+#include <fds/utils.hpp>
+#include <fds/obj_allocator.hpp>
 #include <utility/atomic_counter.hpp>
 #include <utility/obj_life_counter.hpp>
 #include <sds_logging/logging.h>
@@ -29,6 +29,13 @@
 
 ENUM(btree_status_t, uint32_t, success, not_found, item_found, closest_found, closest_removed, retry, has_more,
      read_failed, write_failed, stale_buf, refresh_failed, put_failed, space_not_avail, split_failed, insert_failed);
+
+typedef enum {
+    READ_NONE = 0,
+    READ_FIRST = 1,
+    READ_SECOND = 2,
+    READ_BOTH = 3,
+} diff_read_next_t;
 
 /* We should always find the child smaller or equal then  search key in the interior nodes. */
 #ifndef NDEBUG
@@ -105,14 +112,12 @@ struct btree_multinode_req : public sisl::ObjLifeCounter< struct btree_multinode
             dependent_req_q(0),
             is_write_modifiable(is_write_modifiable),
             is_sync(is_sync) {
-        if (req.get()) {
-            dependent_req_q.push_back(req);
-        }
+        if (req.get()) { dependent_req_q.push_back(req); }
     }
 
     template < class... Args >
     static btree_multinode_req_ptr make_request(Args&&... args) {
-        return (btree_multinode_req_ptr(homeds::ObjectAllocator< btree_multinode_req< btree_req_type > >::make_object(
+        return (btree_multinode_req_ptr(sisl::ObjectAllocator< btree_multinode_req< btree_req_type > >::make_object(
             std::forward< Args >(args)...)));
     }
 
@@ -128,11 +133,11 @@ struct btree_multinode_req : public sisl::ObjLifeCounter< struct btree_multinode
 
     friend void intrusive_ptr_release(btree_multinode_req* req) {
         if (req->m_refcount.decrement_testz()) {
-            homeds::ObjectAllocator< btree_multinode_req< btree_req_type > >::deallocate(req);
+            sisl::ObjectAllocator< btree_multinode_req< btree_req_type > >::deallocate(req);
         }
     }
 
-    friend class homeds::ObjectAllocator< btree_req_type >;
+    friend class sisl::ObjectAllocator< btree_req_type >;
 };
 
 struct empty_writeback_req {
@@ -142,9 +147,7 @@ struct empty_writeback_req {
         req->m_refcount.fetch_add(1, std::memory_order_acquire);
     }
     friend void intrusive_ptr_release(empty_writeback_req* req) {
-        if (req->m_refcount.fetch_sub(1, std::memory_order_acquire) == 1) {
-            free(req);
-        }
+        if (req->m_refcount.fetch_sub(1, std::memory_order_acquire) == 1) { free(req); }
     }
 };
 
@@ -293,19 +296,18 @@ public:
     // derived class to define its own copy constructor
     virtual ~BtreeKey() = default;
 
-    // virtual BtreeKey& operator=(const BtreeKey& other) = delete; // Deleting = overload
-    // forces the derived to define its = overload
+    // virtual BtreeKey& operator=(const BtreeKey& other) = delete; // Deleting = overload forces the derived to define
+    // its = overload
     virtual int compare(const BtreeKey* other) const = 0;
 
-    /* Applicable only for extent keys. It compare start key of (*other) with end key of
-     * (*this) */
+    /* Applicable only for extent keys. It compare start key of (*other) with end key of (*this) */
     virtual int compare_start(const BtreeKey* other) const { return compare(other); };
     virtual int compare_range(const BtreeSearchRange& range) const = 0;
     virtual homeds::blob get_blob() const = 0;
     virtual void set_blob(const homeds::blob& b) = 0;
     virtual void copy_blob(const homeds::blob& b) = 0;
-    /* Applicable to extent keys. It doesn't copy the entire blob. Copy only the end key of
-     * the blob */
+
+    /* Applicable to extent keys. It doesn't copy the entire blob. Copy only the end key of the blob */
     virtual void copy_end_key_blob(const homeds::blob& b) { copy_blob(b); };
 
     virtual uint32_t get_blob_size() const = 0;
@@ -402,6 +404,10 @@ public:
     virtual bool is_extent_key() { return true; }
     virtual int compare_end(const BtreeKey* other) const = 0;
     virtual int compare_start(const BtreeKey* other) const override = 0;
+
+    virtual bool preceeds(const BtreeKey* other) const = 0;
+    virtual bool succeeds(const BtreeKey* other) const = 0;
+
     virtual void copy_end_key_blob(const homeds::blob& b) override = 0;
 
     /* we always compare the end key in case of extent */
@@ -416,8 +422,10 @@ public:
 class BtreeValue {
 public:
     BtreeValue() {}
-    // BtreeValue(const BtreeValue& other) = delete; // Deleting copy constructor forces the
-    // derived class to define its own copy constructor
+    virtual ~BtreeValue() {}
+
+    // BtreeValue(const BtreeValue& other) = delete; // Deleting copy constructor forces the derived class to define its
+    // own copy constructor
 
     virtual homeds::blob get_blob() const = 0;
     virtual void set_blob(const homeds::blob& b) = 0;
@@ -427,6 +435,12 @@ public:
     virtual uint32_t get_blob_size() const = 0;
     virtual void set_blob_size(uint32_t size) = 0;
     virtual uint32_t estimate_size_after_append(const BtreeValue& new_val) = 0;
+
+    virtual void get_overlap_diff_kvs(BtreeKey* k1, BtreeValue* v1, BtreeKey* k2, BtreeValue* v2, uint32_t param,
+                                      diff_read_next_t& to_read,
+                                      std::vector< std::pair< BtreeKey, BtreeValue > >& overlap_kvs) {
+        LOGINFO("Not Implemented");
+    }
 
     virtual std::string to_string() const { return ""; }
 };
@@ -566,8 +580,7 @@ protected:
     BtreeSearchRange m_end_range;          // Search Range containing only end key
     BtreeQueryCursor m_cursor;             // An opaque cursor object for pagination
     BtreeQueryType m_query_type;           // Type of the query
-    uint32_t m_batch_size;                 // Count of items needed in this batch. This value can be changed
-                                           // on every cursor iteration
+    uint32_t m_batch_size; // Count of items needed in this batch. This value can be changed on every cursor iteration
     const match_item_cb_get_t< K, V > m_cb;
 };
 template < typename K, typename V >
@@ -648,6 +661,10 @@ public:
 
     void append_blob(const BtreeValue& new_val, BtreeValue& existing_val) override { set_blob(new_val.get_blob()); }
 
+    void get_overlap_diff_kvs(BtreeKey* k1, BtreeValue* v1, BtreeKey* k2, BtreeValue* v2, uint32_t param,
+                              diff_read_next_t& to_read,
+                              std::vector< std::pair< BtreeKey, BtreeValue > >& overlap_kvs) override {}
+
     uint32_t get_blob_size() const override { return sizeof(bnodeid_t); }
     static uint32_t get_fixed_size() { return sizeof(bnodeid_t); }
     void set_blob_size(uint32_t size) override {}
@@ -687,6 +704,10 @@ public:
     uint32_t get_blob_size() const override { return 0; }
 
     void set_blob_size(uint32_t size) override {}
+
+    void get_overlap_diff_kvs(BtreeKey* k1, BtreeValue* v1, BtreeKey* k2, BtreeValue* v2, uint32_t param,
+                              diff_read_next_t& to_read,
+                              std::vector< std::pair< BtreeKey, BtreeValue > >& overlap_kvs) override {}
 
     EmptyClass& operator=(const EmptyClass& other) { return (*this); }
 
@@ -769,7 +790,7 @@ public:
     auto get_allocator() { return &m_allocator; }
 
 private:
-    homeds::FreeListAllocator< CacheCount, NodeSize > m_allocator;
+    sisl::FreeListAllocator< CacheCount, NodeSize > m_allocator;
 };
 
 class BtreeMetrics : public sisl::MetricsGroupWrapper {
@@ -848,21 +869,21 @@ public:
     BtreeNodeAllocator() {
         m_allocators.reserve(get_nbuckets());
         for (auto i = 0U; i < get_nbuckets(); i++) {
-            auto *allocator = new homeds::FreeListAllocator< FREELIST_CACHE_COUNT, get_bucket_size(i)>();
+            auto *allocator = new sisl::FreeListAllocator< FREELIST_CACHE_COUNT, get_bucket_size(i)>();
             m_allocators.push_back((void *)allocator);
         }
         // Allocate a default tail allocator for non-confirming sizes
-        auto *allocator = new homeds::FreeListAllocator< FREELIST_CACHE_COUNT, 0>();
+        auto *allocator = new sisl::FreeListAllocator< FREELIST_CACHE_COUNT, 0>();
         m_allocators.push_back((void *)allocator);
     }
 
     ~BtreeNodeAllocator() {
         for (auto i = 0U; i < get_nbuckets(); i++) {
-            auto *allocator = (homeds::FreeListAllocator< FREELIST_CACHE_COUNT, get_bucket_size(i)> *)m_allocators[i];
+            auto *allocator = (sisl::FreeListAllocator< FREELIST_CACHE_COUNT, get_bucket_size(i)> *)m_allocators[i];
             delete(allocator);
         }
         // Allocate a default tail allocator for non-confirming sizes
-        auto *allocator = (homeds::FreeListAllocator< FREELIST_CACHE_COUNT, 0> *)m_allocators[m_allocators.size()-1];
+        auto *allocator = (sisl::FreeListAllocator< FREELIST_CACHE_COUNT, 0> *)m_allocators[m_allocators.size()-1];
         delete(allocator);
     }
 
@@ -879,7 +900,7 @@ public:
 
     static uint8_t *allocate(uint32_t size_needed)  {
         uint32_t nbucket = (size_needed - 1)/MIN_NODE_SIZE + 1;
-        if (hs_unlikely(m_impl.get() == nullptr)) {
+        if (sisl_unlikely(m_impl.get() == nullptr)) {
             m_impl.reset(new FreeListAllocatorImpl< MaxListCount, Size >());
         }
 
@@ -895,7 +916,7 @@ public:
     static std::unique_ptr< BtreeNodeAllocator > bt_node_allocator;
 
 private:
-    homeds::FreeListAllocator< FREELIST_CACHE_COUNT, sizeof(T) > *get_freelist_allocator() {
+    sisl::FreeListAllocator< FREELIST_CACHE_COUNT, sizeof(T) > *get_freelist_allocator() {
         return m_allocator.get();
     }
 
@@ -903,7 +924,7 @@ private:
     std::vector< void * > m_allocators;
 
     static ObjectAllocator< T, CacheCount > *get_obj_allocator() {
-        if (hs_unlikely((obj_allocator == nullptr))) {
+        if (sisl_unlikely((obj_allocator == nullptr))) {
             obj_allocator = std::make_unique< ObjectAllocator< T, CacheCount > >();
         }
         return obj_allocator.get();
