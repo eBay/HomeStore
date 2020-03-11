@@ -3,7 +3,7 @@
 #include "vol_crc_persist_mgr.hpp"
 
 #define MAX_DEVICES     2
-#define VOL_PREFIX      "/tmp/vol"
+#define VOL_PREFIX      "vol_load_gen/vol"
 
 // 
 // VolumeManager holds all the details about volume lifecyle:
