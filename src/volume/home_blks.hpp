@@ -192,7 +192,6 @@ public:
     static HomeBlks* instance();
     static HomeBlksSafePtr safe_instance();
 
-    ~HomeBlks() { m_thread_id.join(); }
     friend void intrusive_ptr_add_ref(HomeBlks* hb) { hb->m_usage_counter.increment(1); }
     friend void intrusive_ptr_release(HomeBlks* hb) {
         // If there is only one reference remaining after decrementing, then we are done with shutdown, cleanup the
@@ -210,14 +209,16 @@ public:
     // Read volume super block based on blkid
     vol_mem_sb* vol_sb_read(BlkId bid);
 
-    virtual vol_interface_req_ptr create_vol_hb_req() override;
-    virtual std::error_condition write(const VolumePtr& vol, uint64_t lba, uint8_t* buf, uint32_t nblks,
-                                       const vol_interface_req_ptr& req) override;
-    virtual std::error_condition read(const VolumePtr& vol, uint64_t lba, int nblks,
-                                      const vol_interface_req_ptr& req) override;
-    virtual std::error_condition sync_read(const VolumePtr& vol, uint64_t lba, int nblks,
-                                           const vol_interface_req_ptr& req) override;
-    virtual VolumePtr create_volume(const vol_params& params) override;
+    HomeBlks(const init_params& cfg);
+    ~HomeBlks() {  
+        m_thread_id.join();
+    }
+    virtual vol_interface_req_ptr  create_vol_interface_req(std::shared_ptr< Volume > vol, void *buf,
+                                                            uint64_t lba, uint32_t nlbas, bool read, bool sync) override;
+    virtual std::error_condition write(const VolumePtr& vol, const vol_interface_req_ptr& req) override;
+    virtual std::error_condition read(const VolumePtr& vol, const vol_interface_req_ptr& req) override;
+    virtual std::error_condition sync_read(const VolumePtr& vol, const vol_interface_req_ptr& req) override;
+    virtual VolumePtr            create_volume(const vol_params& params) override;
 
     virtual std::error_condition remove_volume(const boost::uuids::uuid& uuid) override;
     virtual VolumePtr lookup_volume(const boost::uuids::uuid& uuid) override;
@@ -291,7 +292,6 @@ public:
     static void verify_hs(sisl::HttpCallData cd);
 
 private:
-    HomeBlks(const init_params& cfg);
     BlkId alloc_blk();
     void process_vdev_error(vdev_info_block* vb);
     void create_blkstores();

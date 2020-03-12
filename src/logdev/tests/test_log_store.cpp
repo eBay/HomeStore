@@ -10,8 +10,7 @@
 
 using namespace homestore;
 THREAD_BUFFER_INIT;
-SDS_LOGGING_INIT(test_log_store, btree_structures, btree_nodes, btree_generics, cache, device, httpserver_lmod, iomgr,
-                 varsize_blk_alloc, VMOD_VOL_MAPPING, volume, logdev, flip)
+SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 struct test_log_data {
     uint32_t size;

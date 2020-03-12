@@ -49,15 +49,10 @@ public:
     MappingKey() : ObjLifeCounter(), m_lbaId_ptr(&m_lbaId) {}
 
     MappingKey(const MappingKey& other) :
-            ExtentBtreeKey(),
-            ObjLifeCounter(),
-            m_lbaId(other.get_lbaId()),
-            m_lbaId_ptr(&m_lbaId) {}
+            ExtentBtreeKey(), ObjLifeCounter(), m_lbaId(other.get_lbaId()), m_lbaId_ptr(&m_lbaId) {}
 
     MappingKey(uint64_t lba_start, uint64_t n_lba) :
-            ObjLifeCounter(),
-            m_lbaId(lba_start, n_lba),
-            m_lbaId_ptr(&m_lbaId) {}
+            ObjLifeCounter(), m_lbaId(lba_start, n_lba), m_lbaId_ptr(&m_lbaId) {}
 
     LbaId get_lbaId() const { return *m_lbaId_ptr; }
 
@@ -170,10 +165,7 @@ struct ValueEntryMeta {
     uint64_t nlba : NBLKS_BITS;
     uint64_t blk_offset : NBLKS_BITS; // offset based on blk store not based on vol page size
     ValueEntryMeta(uint64_t seqId, const BlkId& blkId, uint8_t blk_offset, uint8_t nlba) :
-            seqId(seqId),
-            blkId(blkId),
-            nlba(nlba),
-            blk_offset(blk_offset){};
+            seqId(seqId), blkId(blkId), nlba(nlba), blk_offset(blk_offset){};
     ValueEntryMeta() : seqId(0), blkId(0), nlba(0), blk_offset(0){};
 } __attribute__((__packed__));
 
@@ -190,10 +182,11 @@ public:
     ValueEntry() : m_meta(), m_carr() { m_ptr = (ValueEntry*)this; }
 
     // deep copy
-    ValueEntry(uint64_t seqId, const BlkId& blkId, uint8_t blk_offset, uint8_t nlba,
-               const std::array< uint16_t, CS_ARRAY_STACK_SIZE >& carr) :
-            m_meta(seqId, blkId, blk_offset, nlba),
-            m_carr(carr) {
+    ValueEntry(uint64_t seqId, const BlkId& blkId, uint8_t blk_offset, uint8_t nlba, uint16_t* carr) :
+            m_meta(seqId, blkId, blk_offset, nlba) {
+        for (int i = 0; i < nlba; ++i) {
+            m_carr[i] = carr[i];
+        }
         m_ptr = (ValueEntry*)this;
     }
 
@@ -506,11 +499,11 @@ public:
     }
 };
 
+typedef std::function< void(Free_Blk_Entry fbe) > free_blk_callback;
+typedef std::function< void(volume_req_ptr& req, BlkId& bid) > pending_read_blk_cb;
 class mapping {
     typedef function< void(struct BlkId blkid, size_t offset_size, size_t size) > alloc_blk_callback;
     typedef function< void(boost::intrusive_ptr< volume_req > cookie) > comp_callback;
-    typedef std::function< void(Free_Blk_Entry fbe) > free_blk_callback;
-    typedef std::function< void(BlkId& bid) > pending_read_blk_cb;
     constexpr static uint64_t lba_query_cnt = 1024ull;
 
 private:
@@ -538,8 +531,7 @@ private:
         boost::intrusive_ptr< volume_req > m_req;
 
         UpdateCBParam(boost::intrusive_ptr< volume_req > req, MappingKey& new_key, MappingValue& new_value) :
-                BRangeUpdateCBParam(new_key, new_value),
-                m_req(req) {}
+                BRangeUpdateCBParam(new_key, new_value), m_req(req) {}
     };
 
 public:
@@ -599,20 +591,10 @@ public:
         return 0;
     }
 
-    void process_completions(boost::intrusive_ptr< writeback_req > cookie, bool status) {
-        if (m_fix_state) {
-            // if we are in fix state, we are generating internal put requests for new btree and should not return
-            // to volume layer for callback.
-            m_outstanding_io--;
-            return;
-        }
-
-        boost::intrusive_ptr< volume_req > req = boost::static_pointer_cast< volume_req >(cookie);
-        if (req->status == no_error) { req->status = status ? no_error : btree_write_failed; }
-        m_comp_cb(req);
-    }
+    void process_completions(boost::intrusive_ptr< writeback_req > cookie, bool status) {}
 
     void process_free_blk_callback(MappingValue& mv) {
+        if (!m_free_blk_cb) { return; }
         Blob_Array< ValueEntry > array = mv.get_array();
         for (uint32_t i = 0; i < array.get_total_elements(); ++i) {
             ValueEntry ve;
@@ -753,7 +735,7 @@ public:
             search_range, bind(&mapping::match_item_cb_put, this, placeholders::_1, placeholders::_2, placeholders::_3),
             bind(&mapping::get_size_needed, this, placeholders::_1, placeholders::_2),
             (BRangeUpdateCBParam< MappingKey, MappingValue >*)&param);
-        bt->range_put(key, value, btree_put_type::APPEND_IF_EXISTS_ELSE_INSERT, to_wb_req(req), to_wb_req(req), ureq);
+        bt->range_put(key, value, btree_put_type::APPEND_IF_EXISTS_ELSE_INSERT, nullptr, nullptr, ureq);
 
 #if 0
         vector<pair<MappingKey, MappingValue>> values;
@@ -800,7 +782,8 @@ public:
         }
 
         LOGINFO("Fixing btree, start_lba: {}, end_lba: {}", start_lba, end_lba);
-
+        /* TODO : enable it later */
+#if 0
         // create a new btree
         auto btree_cfg = m_bt->get_btree_cfg();
         homeds::btree::btree_device_info bt_dev_info;
@@ -842,7 +825,6 @@ public:
                 boost::intrusive_ptr< volume_req > req = volume_req::make_request();
                 req->seqId = INVALID_SEQ_ID;
                 req->lastCommited_seqId = INVALID_SEQ_ID; // keeping only latest version always
-#if 0
                 req->lba = x.first.start();
                 req->nlbas = x.first.get_n_lba();
                 ValueEntry ve;
@@ -858,7 +840,6 @@ public:
                     LOGERROR("failed to put node with k/v: {}/{}", x.first.to_string(), x.second.to_string());
                     return false;
                 }
-#endif
                 LOGINFO("Successfully inserted K:{}, \n V:{}.", x.first.to_string(), x.second.to_string());
             }
 
@@ -886,6 +867,7 @@ public:
 
         // reset fix state to false
         m_fix_state = false;
+#endif
         return true;
     }
 
@@ -902,6 +884,7 @@ public:
      */
     bool verify_fixed_bt(uint64_t start_lba, uint64_t end_lba, MappingBtreeDeclType* old_bt,
                          MappingBtreeDeclType* new_bt) {
+#if 0
         uint64_t num_kv_verified = 0;
         auto start = start_lba, end = std::min(start_lba + lba_query_cnt, end_lba);
         while (start <= end_lba) {
@@ -951,6 +934,7 @@ public:
         }
 
         LOGINFO("Successfully verified recovered btree, total KV verified: {}", num_kv_verified);
+#endif
         return true;
     }
 
@@ -1007,7 +991,10 @@ private:
         ValueEntry new_ve; // empty
 #ifndef NDEBUG
         stringstream ss;
-        ss << "vol_uuid:" << boost::uuids::to_string(param->m_req->vol_uuid);
+        /* For map load test vol instance is null */
+        if (param->m_req && param->m_req->vol_instance) {
+            ss << "vol_uuid:" << boost::uuids::to_string(param->m_req->vol_instance->get_uuid());
+        }
         ss << ",Lba:" << param->m_req->lba << ",nlbas:" << param->m_req->nlbas << ",seqId:" << param->m_req->seqId
            << ",last_seqId:" << param->m_req->lastCommited_seqId;
         ss << ",is:" << ((MappingKey*)param->get_input_range().get_start_key())->to_string();
@@ -1041,7 +1028,7 @@ private:
                         result_kv.emplace_back(make_pair(MappingKey(*e_key), MappingValue(ve)));
                     }
                     if (m_pending_read_blk_cb) {
-                        m_pending_read_blk_cb(ve.get_blkId()); // mark this blk as pending read
+                        m_pending_read_blk_cb(param->m_req, ve.get_blkId()); // mark this blk as pending read
                     }
                     break;
                 }
@@ -1097,11 +1084,12 @@ private:
         MappingValue& new_val = param->get_new_value();
 
 #ifndef NDEBUG
-        uint16_t replace_kv_size = req->blkIds_to_free.size();
         stringstream ss;
-        ss << "vol_uuid:" << boost::uuids::to_string(param->m_req->vol_uuid);
-        ss << ",Lba:" << param->m_req->lba << ",nlbas:" << param->m_req->nlbas << ",seqId:" << param->m_req->seqId
-           << ",last_seqId:" << param->m_req->lastCommited_seqId << ",is_mod:" << param->is_state_modifiable();
+        if (param->m_req && param->m_req->vol_instance) {
+            ss << "vol_uuid:" << boost::uuids::to_string(param->m_req->vol_instance->get_uuid());
+            ss << ",Lba:" << param->m_req->lba << ",nlbas:" << param->m_req->nlbas << ",seqId:" << param->m_req->seqId
+               << ",last_seqId:" << param->m_req->lastCommited_seqId << ",is_mod:" << param->is_state_modifiable();
+        }
         ss << ",is:" << ((MappingKey*)param->get_input_range().get_start_key())->to_string();
         ss << ",ie:" << ((MappingKey*)param->get_input_range().get_end_key())->to_string();
         ss << ",ss:" << ((MappingKey*)param->get_sub_range().get_start_key())->to_string();
@@ -1144,9 +1132,6 @@ private:
             auto end_lba_overlap = e_key->end() < end_lba ? e_key->end() : end_lba;
             compute_and_add_overlap(req, start_lba, end_lba_overlap, new_val, new_val_offset, *e_value,
                                     existing_val_offset, replace_kv);
-#ifndef NDEBUG
-            ++replace_kv_size;
-#endif
             uint32_t nblks = end_lba_overlap - start_lba + 1;
             new_val_offset += nblks;
             existing_val_offset += nblks;
@@ -1159,7 +1144,6 @@ private:
             }
         }
 
-        assert(req->blkIds_to_free.size() == replace_kv_size);
         if (start_lba <= end_lba) { // add new range
             add_new_interval(start_lba, end_lba, new_val, new_val_offset, replace_kv);
         }
@@ -1185,13 +1169,22 @@ private:
                     ++i;
                     continue;
                 }
+                if (!param->m_req) {
+                    ++i;
+                    continue;
+                }
+#if 0
                 // check if replace entries dont overlap free entries
                 auto blk_start = curve.get_blkId().get_id() + curve.get_blk_offset();
-                auto blk_end = blk_start + (m_vol_page_size / m_hb->get_data_pagesz()) * curve.get_nlba() - 1;
-                for (Free_Blk_Entry& fbe : param->m_req->blkIds_to_free) {
-                    if (fbe.m_blkId.get_chunk_num() != curve.get_blkId().get_chunk_num()) { continue; }
-                    auto fblk_start = fbe.m_blkId.get_id() + fbe.m_blk_offset;
-                    auto fblk_end = fblk_start + fbe.m_nblks_to_free - 1;
+                auto blk_end =
+                    blk_start + (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * curve.get_nlba() - 1;
+                param->m_req->init_fbe_iterator();
+                while(auto fbe = param->m_req->get_next_fbe()) {
+                    if (fbe->m_blkId.get_chunk_num() != curve.get_blkId().get_chunk_num()) {
+                        continue;
+                    }
+                    auto fblk_start = fbe->m_blkId.get_id() + fbe->m_blk_offset;
+                    auto fblk_end = fblk_start + fbe->m_nblks_to_free - 1;
                     if (blk_end < fblk_start || fblk_end < blk_start) {
                     } // non overlapping
                     else {
@@ -1202,6 +1195,7 @@ private:
                         HS_SUBMOD_ASSERT(DEBUG, 0, , "vol", m_unique_name, "Error::Put_CB:,{} ", ss.str());
                     }
                 }
+#endif
                 i++;
             }
         }
@@ -1253,7 +1247,7 @@ private:
         uint16_t blk_offset = (e_val_offset * m_vol_page_size) / HomeBlks::instance()->get_data_pagesz();
         Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset() + blk_offset,
                            (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * nlba);
-        req->blkIds_to_free.emplace_back(fbe);
+        if (req) { req->push_fbe(fbe); }
 
         replace_kv.emplace_back(
             make_pair(MappingKey(s_lba, nlba), MappingValue(new_val, new_val_offset, nlba, m_vol_page_size)));

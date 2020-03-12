@@ -285,7 +285,7 @@ public:
         req->cur_vol = cur;
         outstanding_ios++;
         read_cnt++;
-        auto vreq = VolInterface::get_instance()->create_vol_hb_req();
+        auto vreq = VolInterface::get_instance()->create_vol_interface_req();
         vreq->cookie = req;
         auto ret_io = VolInterface::get_instance()->read(vol_info[cur]->vol, lba, nblks, vreq);
         if (ret_io != no_error) {
@@ -326,7 +326,7 @@ public:
         ++write_cnt;
         ret = pwrite(vol_info[cur]->staging_fd, req->buf, req->size, req->offset);
         assert(ret == req->size);
-        auto vreq = VolInterface::get_instance()->create_vol_hb_req();
+        auto vreq = VolInterface::get_instance()->create_vol_interface_req();
         vreq->cookie = req;
         auto ret_io = VolInterface::get_instance()->write(vol_info[cur]->vol, lba, buf, nblks, vreq);
         if (ret_io != no_error) {
@@ -398,7 +398,7 @@ public:
         ++outstanding_ios;
         ++write_cnt;
 
-        auto vreq = VolInterface::get_instance()->create_vol_hb_req();
+        auto vreq = VolInterface::get_instance()->create_vol_interface_req();
         vreq->cookie = req;
         auto ret_io = VolInterface::get_instance()->write(vol_info[cur]->vol, lba, buf, nblks, vreq);
         if (ret_io != no_error) {

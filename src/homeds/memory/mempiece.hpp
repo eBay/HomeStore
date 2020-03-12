@@ -6,9 +6,9 @@
 #define OMSTORE_MEMPIECE_HPP
 
 #include "tagged_ptr.hpp"
+#include <cassert>
 #include <fds/utils.hpp>
 #include <vector>
-#include <cassert>
 #include <cstdint>
 #include <boost/optional.hpp>
 #include <sstream>

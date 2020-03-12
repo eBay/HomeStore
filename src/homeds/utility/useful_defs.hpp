@@ -19,7 +19,7 @@
 
 #define HOMESTORE_LOG_MODS                                                                                             \
     btree_structures, btree_nodes, btree_generics, cache, device, httpserver_lmod, iomgr, varsize_blk_alloc,           \
-        VMOD_VOL_MAPPING, volume, logdev, flip
+        VMOD_VOL_MAPPING, volume, logdev, flip, cp
 
 using Clock = std::chrono::steady_clock;
 #define CURRENT_CLOCK(name) Clock::time_point name = Clock::now()

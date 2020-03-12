@@ -186,38 +186,39 @@ cap_attrs HomeBlks::get_vol_capacity(const VolumePtr& vol) {
     return cap;
 }
 
-vol_interface_req_ptr HomeBlks::create_vol_hb_req() { return Volume::create_vol_hb_req(); }
-
-std::error_condition HomeBlks::write(const VolumePtr& vol, uint64_t lba, uint8_t* buf, uint32_t nblks,
-                                     const vol_interface_req_ptr& req) {
-    assert(m_rdy);
-    if (!vol) {
-        assert(0);
-        throw std::invalid_argument("null vol ptr");
-    }
-    if (!m_rdy || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
-    return (vol->write(lba, buf, nblks, req));
+vol_interface_req_ptr HomeBlks::create_vol_interface_req(std::shared_ptr< Volume > vol, void *buf, 
+        uint64_t lba, uint32_t nlbas, bool read, bool sync) { 
+    return Volume::create_volume_req(vol, buf, lba, nlbas, read, sync);
 }
 
-std::error_condition HomeBlks::read(const VolumePtr& vol, uint64_t lba, int nblks, const vol_interface_req_ptr& req) {
+std::error_condition HomeBlks::write(const VolumePtr& vol, const vol_interface_req_ptr& req) {
     assert(m_rdy);
     if (!vol) {
         assert(0);
         throw std::invalid_argument("null vol ptr");
     }
     if (!m_rdy || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
-    return (vol->read(lba, nblks, req, false));
+    return (vol->write(req));
 }
 
-std::error_condition HomeBlks::sync_read(const VolumePtr& vol, uint64_t lba, int nblks,
-                                         const vol_interface_req_ptr& req) {
+std::error_condition HomeBlks::read(const VolumePtr& vol, const vol_interface_req_ptr& req) {
     assert(m_rdy);
     if (!vol) {
         assert(0);
         throw std::invalid_argument("null vol ptr");
     }
     if (!m_rdy || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
-    return (vol->read(lba, nblks, req, true));
+    return (vol->read(req));
+}
+
+std::error_condition HomeBlks::sync_read(const VolumePtr& vol, const vol_interface_req_ptr& req) {
+    assert(m_rdy);
+    if (!vol) {
+        assert(0);
+        throw std::invalid_argument("null vol ptr");
+    }
+    if (!m_rdy || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
+    return (vol->read(req));
 }
 
 VolumePtr HomeBlks::create_volume(const vol_params& params) {
@@ -920,18 +921,16 @@ void HomeBlks::init_thread() {
         cfg.server_port = SDS_OPTIONS["hb_stats_port"].as< int32_t >();
         cfg.read_write_timeout_secs = 10;
 
-        m_http_server = std::unique_ptr< sisl::HttpServer >(
-            new sisl::HttpServer(cfg,
-                                 {{
-                                     handler_info("/api/v1/version", HomeBlks::get_version, (void*)this),
-                                     handler_info("/api/v1/getMetrics", HomeBlks::get_metrics, (void*)this),
-                                     handler_info("/api/v1/getObjLife", HomeBlks::get_obj_life, (void*)this),
-                                     handler_info("/metrics", HomeBlks::get_prometheus_metrics, (void*)this),
-                                     handler_info("/api/v1/getLogLevel", HomeBlks::get_log_level, (void*)this),
-                                     handler_info("/api/v1/setLogLevel", HomeBlks::set_log_level, (void*)this),
-                                     handler_info("/api/v1/dumpStackTrace", HomeBlks::dump_stack_trace, (void*)this),
-                                     handler_info("/api/v1/verifyHS", HomeBlks::verify_hs, (void*)this),
-                                 }}));
+        m_http_server = std::unique_ptr< sisl::HttpServer >(new sisl::HttpServer(cfg, {{
+                handler_info("/api/v1/version", HomeBlks::get_version, (void *)this),
+                handler_info("/api/v1/getMetrics", HomeBlks::get_metrics, (void *)this),
+                handler_info("/api/v1/getObjLife", HomeBlks::get_obj_life, (void *)this),
+                handler_info("/metrics", HomeBlks::get_prometheus_metrics, (void *)this),
+                handler_info("/api/v1/getLogLevel", HomeBlks::get_log_level, (void *)this),
+                handler_info("/api/v1/setLogLevel", HomeBlks::set_log_level, (void *)this),
+                handler_info("/api/v1/dumpStackTrace", HomeBlks::dump_stack_trace, (void *)this),
+                handler_info("/api/v1/verifyHS", HomeBlks::verify_hs, (void *)this),
+        }}));
         m_http_server->start();
 
         /* scan volumes */

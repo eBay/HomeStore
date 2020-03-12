@@ -216,9 +216,10 @@ public:
 
         if (verify == false) { m_read_verify_skip++; }
 
-        auto vreq = VolInterface::get_instance()->create_vol_hb_req();
+        auto vreq = VolInterface::get_instance()->create_vol_interface_req(m_vols[vol_id], nullptr, lba, 
+                    nblks, true, false);
         vreq->cookie = req;
-        auto ret_io = VolInterface::get_instance()->read(m_vols[vol_id], lba, nblks, vreq);
+        auto ret_io = VolInterface::get_instance()->read(m_vols[vol_id], vreq);
         if (ret_io != no_error) {
             assert(0);
             m_outstd_ios--;
@@ -253,9 +254,10 @@ public:
             req->hash.push_back(get_hash((uint8_t*)((uint64_t)buf + get_size(i))));
         }
 
-        auto vreq = VolInterface::get_instance()->create_vol_hb_req();
+        auto vreq = VolInterface::get_instance()->create_vol_interface_req(m_vols[vol_id], buf, 
+                    lba, nblks, false, false);
         vreq->cookie = req;
-        auto ret_io = VolInterface::get_instance()->write(m_vols[vol_id], lba, buf, nblks, vreq);
+        auto ret_io = VolInterface::get_instance()->write(m_vols[vol_id], vreq);
         if (ret_io != no_error) {
             assert(0);
             m_outstd_ios--;

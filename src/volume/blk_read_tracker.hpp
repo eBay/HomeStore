@@ -9,26 +9,14 @@
 #include "homeds/hash/intrusive_hashset.hpp"
 #include <fds/obj_allocator.hpp>
 #include <metrics/metrics.hpp>
+#include <boost/intrusive_ptr.hpp>
 #include <boost/lexical_cast.hpp>
 
 namespace homestore {
 
 #define BLK_READ_MAP_SIZE 128
-struct Free_Blk_Entry {
-    BlkId m_blkId;
-    uint8_t m_blk_offset : NBLKS_BITS;
-    uint8_t m_nblks_to_free : NBLKS_BITS;
-
-    Free_Blk_Entry(){};
-    Free_Blk_Entry(const BlkId& m_blkId, uint8_t m_blk_offset, uint8_t m_nblks_to_free) :
-            m_blkId(m_blkId),
-            m_blk_offset(m_blk_offset),
-            m_nblks_to_free(m_nblks_to_free) {}
-
-    BlkId blk_id() const { return m_blkId; }
-    uint8_t blk_offset() const { return m_blk_offset; }
-    uint8_t blks_to_free() const { return m_nblks_to_free; }
-};
+struct Free_Blk_Entry;
+struct volume_req;
 
 struct BlkEvictionRecord : public homeds::HashNode, sisl::ObjLifeCounter< BlkEvictionRecord > {
     BlkId m_key;                                 // Key to access this cache
@@ -117,7 +105,7 @@ public:
     /* after overwriting blk id in write flow, its marked for safe removal if cannot be freed immediatly*/
     void safe_remove_blk_on_write(Free_Blk_Entry& fbe);
 
-    void safe_remove_blks(bool is_read, std::vector< Free_Blk_Entry >* fbes, const std::error_condition& err);
+    void safe_remove_blks(boost::intrusive_ptr< volume_req > &vreq);
     uint64_t get_size() { return m_pending_reads_map.get_size(); }
 };
 } // namespace homestore

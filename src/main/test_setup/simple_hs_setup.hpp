@@ -285,18 +285,15 @@ public:
         if (ret) { assert(0); }
         assert(buf != nullptr);
 
-        boost::intrusive_ptr< simple_store_req > req(new simple_store_req());
-        req->lba = lba;
-        req->nblks = nblks;
+        boost::intrusive_ptr< simple_store_req > req(new simple_store_req(vinfo.vol_obj, buf, lba, nblks, false, false));
         req->size = size;
         req->offset = lba * vol_interface->get_page_size(vinfo.vol_obj);
-        req->is_read = false;
         req->cur_vol = vordinal;
         m_outstanding_ios.fetch_add(1, std::memory_order_acq_rel);
         m_write_cnt.fetch_add(1, std::memory_order_relaxed);
 
         LOGDEBUG("Writing {} {} ", lba, nblks);
-        auto ret_io = vol_interface->write(vinfo.vol_obj, lba, buf, nblks, req);
+        auto ret_io = vol_interface->write(vinfo.vol_obj, req);
         if (ret_io != no_error) {
             assert(0);
             free(buf);
@@ -325,12 +322,10 @@ public:
         lba = b.start_bit;
         uint64_t size = nblks * vol_interface->get_page_size(vinfo.vol_obj);
 
-        boost::intrusive_ptr< simple_store_req > req(new simple_store_req());
-        req->lba = lba;
-        req->nblks = nblks;
+        boost::intrusive_ptr< simple_store_req > req(new simple_store_req(vinfo.vol_obj, nullptr, lba, nblks, 
+                                                     true, false));
         req->size = size;
         req->offset = lba * vol_interface->get_page_size(vinfo.vol_obj);
-        req->is_read = true;
         req->cur_vol = vordinal;
         m_outstanding_ios.fetch_add(1, std::memory_order_acq_rel);
         m_read_cnt.fetch_add(1, std::memory_order_relaxed);

@@ -449,6 +449,8 @@ public:
             }
         }
         max_io_size = params.max_io_size;
+        /* TODO :- Rishabh: remove it */
+        max_io_size = 128 * Ki;
         outstanding_ios = 0;
 
         std::unique_lock< std::mutex > lk(m_mutex);
@@ -752,9 +754,9 @@ private:
         req->cur_vol = cur;
 
         ++write_cnt;
-        auto vreq = VolInterface::get_instance()->create_vol_hb_req();
+        auto vreq = VolInterface::get_instance()->create_vol_interface_req(vol, buf, lba, nblks, false, false);
         vreq->cookie = req;
-        auto ret_io = VolInterface::get_instance()->write(vol, lba, buf, nblks, vreq);
+        auto ret_io = VolInterface::get_instance()->write(vol, vreq);
         if (ret_io != no_error) {
             assert(ret_io == std::errc::no_such_device || expect_io_error);
             process_completions(vreq);
@@ -832,9 +834,9 @@ private:
         req->buf = buf;
         req->cur_vol = cur;
         read_cnt++;
-        auto vreq = VolInterface::get_instance()->create_vol_hb_req();
+        auto vreq = VolInterface::get_instance()->create_vol_interface_req(vol, nullptr, lba, nblks, true, false);
         vreq->cookie = req;
-        auto ret_io = VolInterface::get_instance()->read(vol, lba, nblks, vreq);
+        auto ret_io = VolInterface::get_instance()->read(vol, vreq);
         if (ret_io != no_error) {
             assert(ret_io == std::errc::no_such_device || expect_io_error);
             process_completions(vreq);
@@ -958,8 +960,10 @@ private:
         bool verify_io = false;
 
         if (!vol_req->is_read && vol_req->err == no_error && read_verify) {
+#if 0
             (void)VolInterface::get_instance()->sync_read(vol_info[request->cur_vol]->vol, request->lba, request->nblks,
                                                           vol_req);
+#endif
             LOGTRACE("IO DONE, req_id={}, outstanding_ios={}", vol_req->request_id, outstanding_ios.load());
             verify_io = true;
         } else if ((vol_req->is_read && vol_req->err == no_error)) {

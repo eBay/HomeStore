@@ -77,7 +77,7 @@ public:
 
 #define HOMESTORE_LOG_MODS                                                                                             \
     btree_structures, btree_nodes, btree_generics, cache, device, httpserver_lmod, iomgr, varsize_blk_alloc,           \
-        VMOD_VOL_MAPPING, volume, flip
+        VMOD_VOL_MAPPING, volume, flip, cp
 
 template< typename T >
 std::string to_hex( T i ) {

@@ -77,20 +77,25 @@ struct _counter_generator {
 
 struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
     std::vector< buf_info > read_buf_list;
-    sisl::atomic_counter< int > outstanding_io_cnt;
-    sisl::atomic_counter< int > outstanding_data_io_cnt;
-    sisl::atomic_counter< int > refcount;
-    Clock::time_point io_start_time;
     std::error_condition err;
-    std::atomic< bool > is_fail_completed;
-    bool is_read;
     uint64_t request_id;
     void* cookie; // any tag alongs
+    sisl::atomic_counter< int > refcount;
+    std::atomic< bool > is_fail_completed;
+    uint64_t lba;
+    uint32_t nlbas;
+    bool is_read;
+    std::shared_ptr< Volume > vol_instance;
+    bool sync = false;
 
     friend void intrusive_ptr_add_ref(vol_interface_req* req) { req->refcount.increment(1); }
 
     friend void intrusive_ptr_release(vol_interface_req* req) {
         if (req->refcount.decrement_testz()) { req->free_yourself(); }
+    }
+
+    void inc_ref_cnt() {
+        intrusive_ptr_add_ref(this);
     }
 
     /* Set the error with error code,
@@ -110,27 +115,19 @@ struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
 
     std::error_condition get_status() const { return err; }
 
-    std::string to_string() {
-        std::stringstream ss;
-        ss << "vol_interface_req: request_id=" << request_id << " dir=" << (is_read ? "R" : "W")
-           << " outstanding_io_cnt=" << outstanding_io_cnt.get()
-           << " outstanding_data_io_cnt=" << outstanding_data_io_cnt.get();
-        return ss.str();
-    }
 
 public:
-    vol_interface_req() : outstanding_io_cnt(0), outstanding_data_io_cnt(0), refcount(0), is_fail_completed(false) {}
+    vol_interface_req() : refcount(0) {};
+    vol_interface_req(std::shared_ptr< Volume > vol, uint64_t lba, uint32_t nlbas, bool is_read, bool sync) : 
+                            err(no_error), request_id(counter_generator.next_request_id()), refcount(0), 
+                            is_fail_completed(false), lba(lba), nlbas(nlbas), is_read(is_read), 
+                            vol_instance(vol), sync(sync) {}
     ~vol_interface_req() = default;
 
-    void init() {
-        outstanding_io_cnt.set(0);
-        outstanding_data_io_cnt.set(0);
-        is_fail_completed.store(false);
-        request_id = counter_generator.next_request_id();
-        err = no_error;
-    }
     virtual void free_yourself() = 0;
+    virtual std::string to_string() = 0;
 };
+
 typedef boost::intrusive_ptr< vol_interface_req > vol_interface_req_ptr;
 
 ENUM(vol_state, uint32_t,
@@ -237,13 +234,11 @@ public:
     }
     static VolInterface* get_instance() { return VolInterfaceImpl::raw_instance(); }
 
-    virtual vol_interface_req_ptr create_vol_hb_req() = 0;
-    virtual std::error_condition write(const VolumePtr& vol, uint64_t lba, uint8_t* buf, uint32_t nblks,
-                                       const vol_interface_req_ptr& req) = 0;
-    virtual std::error_condition read(const VolumePtr& vol, uint64_t lba, int nblks,
-                                      const vol_interface_req_ptr& req) = 0;
-    virtual std::error_condition sync_read(const VolumePtr& vol, uint64_t lba, int nblks,
-                                           const vol_interface_req_ptr& req) = 0;
+    virtual vol_interface_req_ptr create_vol_interface_req(std::shared_ptr< Volume > vol, void *buf, 
+                                                           uint64_t lba, uint32_t nlbas, bool read, bool sync) = 0;
+    virtual std::error_condition write(const VolumePtr& vol, const vol_interface_req_ptr& req) = 0;
+    virtual std::error_condition read(const VolumePtr& vol, const vol_interface_req_ptr& req) = 0;
+    virtual std::error_condition sync_read(const VolumePtr& vol, const vol_interface_req_ptr& req) = 0;
     virtual const char* get_name(const VolumePtr& vol) = 0;
     virtual uint64_t get_page_size(const VolumePtr& vol) = 0;
     virtual boost::uuids::uuid get_uuid(std::shared_ptr< Volume > vol) = 0;
