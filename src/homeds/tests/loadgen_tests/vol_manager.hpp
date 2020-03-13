@@ -2,62 +2,57 @@
 #include "write_log_recorder.hpp"
 #include "vol_crc_persist_mgr.hpp"
 
-#define MAX_DEVICES     2
-#define VOL_PREFIX      "vol_load_gen/vol"
+#define MAX_DEVICES 2
+#define VOL_PREFIX "vol_load_gen/vol"
 
-// 
+//
 // VolumeManager holds all the details about volume lifecyle:
 // 1. init, create, delete, recovery, etc;
 //
 namespace homeds {
 namespace loadgen {
 
-constexpr uint64_t CACHE_SIZE      = (4*1024*1024*1024ul);
-constexpr uint32_t VOL_PAGE_SIZE   = 4096;
+constexpr uint64_t CACHE_SIZE = (4 * 1024 * 1024 * 1024ul);
+constexpr uint32_t VOL_PAGE_SIZE = 4096;
 constexpr uint32_t MAX_CRC_DEPTH = 3;
 
 class VolReq : public vol_interface_req {
 public:
-    ssize_t     size;
-    off_t       offset;
-    uint64_t    lba;
-    uint32_t    nblks;
-    uint8_t*    buf;   // read;
-    bool        is_read;
-    bool        verify; // only valid for read;
-    uint64_t    vol_id;
-    std::vector<uint64_t> hash; // only valid for write
+    ssize_t size;
+    off_t offset;
+    uint64_t lba;
+    uint32_t nblks;
+    uint8_t* buf; // read;
+    bool is_read;
+    bool verify; // only valid for read;
+    uint64_t vol_id;
+    std::vector< uint64_t > hash; // only valid for write
 
 public:
     VolReq() { buf = nullptr; }
 
-    virtual ~VolReq() { 
+    virtual ~VolReq() {
         if (buf) {
             free(buf);
-        } 
+        }
     }
 };
 
 struct VolumeInfo {
-    std::mutex                       m_mtx;    // lock
-    homeds::Bitset*                  m_bm;     // volume block write bitmap
-    
-    VolumeInfo(uint64_t vol_total_blks) {
-        m_bm = new homeds::Bitset(vol_total_blks);
-    }
+    std::mutex m_mtx;     // lock
+    homeds::Bitset* m_bm; // volume block write bitmap
 
-    ~VolumeInfo() {
-        delete m_bm;
-    }
+    VolumeInfo(uint64_t vol_total_blks) { m_bm = new homeds::Bitset(vol_total_blks); }
+
+    ~VolumeInfo() { delete m_bm; }
 };
 
-
-template <typename Executor>
+template < typename Executor >
 class VolumeManager {
-typedef std::function<void(std::error_condition err)> init_done_callback;
+    typedef std::function< void(std::error_condition err) > init_done_callback;
 
-public: 
-    VolumeManager() { 
+public:
+    VolumeManager() {
         // create vol loadgen folder
         mkdir(vol_loadgen_dir.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
     }
@@ -69,39 +64,40 @@ public:
 
         m_verify_mgr.reset();
         m_write_recorder.reset();
-        
+
         // remove the loadgen dir
         if (0 != rmdir(vol_loadgen_dir.c_str())) {
-            LOGERROR("Deleting dir: {} failed, error no: {}, err msg: {}", vol_loadgen_dir, errno, std::strerror(errno));
+            LOGERROR("Deleting dir: {} failed, error no: {}, err msg: {}", vol_loadgen_dir, errno,
+                     std::strerror(errno));
             assert(0);
-        }  
+        }
     }
 
     void start(bool enable_write_log, Executor& executor, init_done_callback init_done_cb) {
         m_enable_write_log = enable_write_log;
-        m_max_cap       = 0;
-        m_max_vol_size  = 0;
-        m_max_disk_cap  = 10 * Gi;
+        m_max_cap = 0;
+        m_max_vol_size = 0;
+        m_max_disk_cap = 10 * Gi;
 
         struct stat st;
-        
-        m_file_names    = {"vol_load_gen/file1", "vol_load_gen/file2", "vol_load_gen/file3", "vol_load_gen/file4"};
 
-        m_iomgr         = executor.get_iomgr();   
-        m_done_cb       = init_done_cb;
+        m_file_names = {"vol_load_gen/file1", "vol_load_gen/file2", "vol_load_gen/file3", "vol_load_gen/file4"};
+
+        m_iomgr = executor.get_iomgr();
+        m_done_cb = init_done_cb;
 
         if (m_enable_write_log) {
-            m_write_recorder = std::make_shared<WriteLogRecorder<uint64_t>>(max_vols());
+            m_write_recorder = std::make_shared< WriteLogRecorder< uint64_t > >(max_vols());
         }
 
         start_homestore();
-        
-        m_verify_mgr    = std::make_shared<VolVerifyMgr<uint64_t>>(max_vols(), max_vol_blks());
+
+        m_verify_mgr = std::make_shared< VolVerifyMgr< uint64_t > >(max_vols(), max_vol_blks());
     }
 
     void stop() {
         LOGINFO("Shuting down... outstanding IO: {}", m_outstd_ios);
-           
+
         Clock::time_point start = Clock::now();
         while (m_outstd_ios.load()) {
             if (get_elapsed_time(start) > 30) {
@@ -112,7 +108,7 @@ public:
         }
 
         shutdown();
-        
+
         start = Clock::now();
 
         while (!m_shutdown_cb_done.load()) {
@@ -126,39 +122,34 @@ public:
 
         remove_files();
     }
-   
+
     void shutdown_callback(bool success) {
         VolInterface::del_instance();
-        assert(success);       
+        assert(success);
         m_shutdown_cb_done = true;
     }
 
     void shutdown() {
         // release the ref_count to volumes;
         m_vols.clear();
-        VolInterface::get_instance()->shutdown(std::bind(&VolumeManager::shutdown_callback, this, std::placeholders::_1));
-    } 
-
-    uint64_t max_vols() {
-        return m_max_vols;
+        VolInterface::get_instance()->shutdown(
+            std::bind(&VolumeManager::shutdown_callback, this, std::placeholders::_1));
     }
+
+    uint64_t max_vols() { return m_max_vols; }
 
     // get nblks based on volume size;
-    uint64_t max_vol_blks() {
-        return m_max_vol_size / VOL_PAGE_SIZE;
-    }
+    uint64_t max_vol_blks() { return m_max_vol_size / VOL_PAGE_SIZE; }
 
     // get nblks in max io size;
-    uint64_t max_io_nblks() {
-        return m_max_io_size / VOL_PAGE_SIZE;
-    }
+    uint64_t max_io_nblks() { return m_max_io_size / VOL_PAGE_SIZE; }
 
-    static void del_instance(); 
+    static void del_instance();
 
-    static VolumeManager<Executor>* instance();
+    static VolumeManager< Executor >* instance();
 
     bool check_and_set_bm(uint64_t vol_id, uint64_t lba, uint64_t nblks) {
-        std::lock_guard<std::mutex> lk(m_vol_info[vol_id]->m_mtx);
+        std::lock_guard< std::mutex > lk(m_vol_info[vol_id]->m_mtx);
         if (m_vol_info[vol_id]->m_bm->is_bits_reset(lba, nblks)) {
             // we don't allow write on same lba if there is already a read on it.
             m_vol_info[vol_id]->m_bm->set_bits(lba, nblks);
@@ -170,11 +161,11 @@ public:
     }
 
     uint8_t* gen_value(uint64_t& nblks) {
-        uint8_t*    bytes = nullptr;
-        uint64_t    size = get_size(nblks);
-        auto        ret = posix_memalign((void **) &bytes, VOL_PAGE_SIZE, size);
+        uint8_t* bytes = nullptr;
+        uint64_t size = get_size(nblks);
+        auto ret = posix_memalign((void**)&bytes, VOL_PAGE_SIZE, size);
 
-        if(ret) {
+        if (ret) {
             assert(0);
         }
 
@@ -189,12 +180,12 @@ public:
         uint64_t try_cnt = 0;
         while (try_cnt++ < MAX_GEN_KEY_TRY_CNT) {
 
-            uint64_t t_vol_id = get_rand_vol(); 
+            uint64_t t_vol_id = get_rand_vol();
             uint64_t t_lba = get_rand_lba();
             uint64_t t_nblks = get_rand_nblks();
 
-            { 
-                std::lock_guard<std::mutex> lk(m_vol_info[t_vol_id]->m_mtx);
+            {
+                std::lock_guard< std::mutex > lk(m_vol_info[t_vol_id]->m_mtx);
                 if (m_vol_info[t_vol_id]->m_bm->is_bits_reset(t_lba, t_nblks)) {
                     m_vol_info[t_vol_id]->m_bm->set_bits(t_lba, t_nblks);
 
@@ -212,13 +203,13 @@ public:
     }
 
     std::error_condition read(uint64_t vol_id, uint64_t lba, uint64_t nblks, bool verify) {
-        uint8_t *buf = nullptr;
+        uint8_t* buf = nullptr;
         uint64_t size = get_size(nblks);
 
-        auto ret = posix_memalign((void **) &buf, VOL_PAGE_SIZE, size);
+        auto ret = posix_memalign((void**)&buf, VOL_PAGE_SIZE, size);
         assert(!ret);
 
-        boost::intrusive_ptr<VolReq> req(new struct VolReq());
+        boost::intrusive_ptr< VolReq > req(new struct VolReq());
         req->lba = lba;
         req->nblks = nblks;
         req->is_read = true;
@@ -233,27 +224,27 @@ public:
         if (verify == false) {
             m_read_verify_skip++;
         }
-        
+
         auto ret_io = VolInterface::get_instance()->read(m_vols[vol_id], lba, nblks, req);
         if (ret_io != no_error) {
             assert(0);
             m_outstd_ios--;
             m_rd_err_cnt++;
             free(buf);
-            std::lock_guard<std::mutex>     lk(m_vol_info[vol_id]->m_mtx);
+            std::lock_guard< std::mutex > lk(m_vol_info[vol_id]->m_mtx);
             reset_bm_bits(vol_id, lba, nblks);
         }
 
         return ret_io;
     }
-    
+
     std::error_condition write(uint64_t vol_id, uint64_t lba, uint8_t* buf, uint64_t nblks) {
         assert(buf);
         assert(lba < (max_vol_blks() - nblks));
         assert(vol_id < m_max_vols);
-        
+
         auto size = get_size(nblks);
-        boost::intrusive_ptr<VolReq> req(new struct VolReq());
+        boost::intrusive_ptr< VolReq > req(new struct VolReq());
         req->lba = lba;
         req->nblks = nblks;
         req->size = size;
@@ -263,7 +254,7 @@ public:
         req->vol_id = vol_id;
         m_outstd_ios++;
         m_wrt_cnt++;
-        
+
         // Generate hash per block. The write complete routine will consume them;
         for (uint64_t i = 0; i < nblks; i++) {
             req->hash.push_back(get_hash((uint8_t*)((uint64_t)buf + get_size(i))));
@@ -274,29 +265,28 @@ public:
             assert(0);
             m_outstd_ios--;
             m_wrt_err_cnt++;
-            std::lock_guard<std::mutex>   lk(m_vol_info[vol_id]->m_mtx);
+            std::lock_guard< std::mutex > lk(m_vol_info[vol_id]->m_mtx);
             reset_bm_bits(vol_id, lba, nblks);
         }
-        
+
         return ret_io;
     }
-        
-private:
 
+private:
     uint64_t get_rand_vol() {
-        std::random_device rd; 
+        std::random_device rd;
         std::default_random_engine generator(rd());
-        std::uniform_int_distribution<long long unsigned> dist(0, m_max_vols - 1);
+        std::uniform_int_distribution< long long unsigned > dist(0, m_max_vols - 1);
         return dist(generator);
     }
 
     uint64_t get_rand_lba() {
-        std::random_device rd; 
+        std::random_device rd;
         std::default_random_engine generator(rd());
         // make sure the the lba doesn't write accross max vol size;
         // MAX_KEYS is initiated as max vol size;
         // lba: [0, max_vol_blks - max_io_nblks)
-        std::uniform_int_distribution<long long unsigned> dist(0, KeySpec::MAX_KEYS - max_io_nblks() - 1);
+        std::uniform_int_distribution< long long unsigned > dist(0, KeySpec::MAX_KEYS - max_io_nblks() - 1);
         return dist(generator);
     }
 
@@ -304,7 +294,7 @@ private:
         std::random_device rd;
         std::default_random_engine generator(rd());
         // nblks: [1, max_io_nblks]
-        std::uniform_int_distribution<long long unsigned> dist(1, max_io_nblks());
+        std::uniform_int_distribution< long long unsigned > dist(1, max_io_nblks());
         return dist(generator);
     }
 
@@ -314,10 +304,10 @@ private:
 
         std::random_device rd;
         std::default_random_engine generator(rd());
-        std::uniform_int_distribution<long long unsigned> dist(std::numeric_limits<unsigned long long>::min(), 
-                std::numeric_limits<unsigned long long>::max()); 
+        std::uniform_int_distribution< long long unsigned > dist(std::numeric_limits< unsigned long long >::min(),
+                                                                 std::numeric_limits< unsigned long long >::max());
 
-        for (auto i = 0ull; i < size; i += sizeof(uint64_t)) { 
+        for (auto i = 0ull; i < size; i += sizeof(uint64_t)) {
             *(uint64_t*)(buf + i) = dist(generator);
         }
     }
@@ -338,7 +328,7 @@ private:
             dev_info temp_info;
             temp_info.dev_names = m_file_names[i];
             m_device_info.push_back(temp_info);
-            
+
             std::ofstream ofs(m_file_names[i].c_str(), std::ios::binary | std::ios::out);
             ofs.seekp(m_max_disk_cap - 1);
             ofs.write("", 1);
@@ -349,27 +339,28 @@ private:
         /* Don't populate the whole disks. Only 80 % of it */
         m_max_vol_size = (80 * m_max_cap) / (100 * m_max_vols);
 
-        init_params p; 
-        p.flag = homestore::io_flag::BUFFERED_IO;
+        init_params p;
+        p.flag = homestore::io_flag::DIRECT_IO;
         p.min_virtual_page_size = VOL_PAGE_SIZE;
-        p.cache_size            = CACHE_SIZE;
-        p.disk_init             = true;
-        p.devices               = m_device_info;
-        p.is_file               = true;
-        p.iomgr                 = m_iomgr;
+        p.cache_size = CACHE_SIZE;
+        p.disk_init = true;
+        p.devices = m_device_info;
+        p.is_file = true;
+        p.iomgr = m_iomgr;
 
-        p.init_done_cb          = std::bind(&VolumeManager::init_done_cb, this, std::placeholders::_1, std::placeholders::_2);
-        p.vol_mounted_cb        = std::bind(&VolumeManager::vol_mounted_cb, this, std::placeholders::_1, std::placeholders::_2);
-        p.vol_state_change_cb   = std::bind(&VolumeManager::vol_state_change_cb, this, std::placeholders::_1, 
-                std::placeholders::_2, std::placeholders::_3);
-        p.vol_found_cb          = std::bind(&VolumeManager::vol_found_cb, this, std::placeholders::_1);
+        p.init_done_cb = std::bind(&VolumeManager::init_done_cb, this, std::placeholders::_1, std::placeholders::_2);
+        p.vol_mounted_cb =
+            std::bind(&VolumeManager::vol_mounted_cb, this, std::placeholders::_1, std::placeholders::_2);
+        p.vol_state_change_cb = std::bind(&VolumeManager::vol_state_change_cb, this, std::placeholders::_1,
+                                          std::placeholders::_2, std::placeholders::_3);
+        p.vol_found_cb = std::bind(&VolumeManager::vol_found_cb, this, std::placeholders::_1);
 
         boost::uuids::string_generator gen;
-        p.system_uuid           = gen("01970496-0262-11e9-8eb2-f2801f1b9fd1");
+        p.system_uuid = gen("01970496-0262-11e9-8eb2-f2801f1b9fd1");
 
         VolInterface::init(p);
     }
-    
+
     void init_done_cb(std::error_condition err, const out_params& params) {
         m_max_io_size = params.max_io_size;
         for (auto vol_cnt = 0ull; vol_cnt < m_max_vols; vol_cnt++) {
@@ -377,7 +368,7 @@ private:
         }
         uint32_t vol_total_nblks = max_vol_blks();
         for (auto i = 0ull; i < m_max_vols; i++) {
-            m_vol_info.push_back(new VolumeInfo(vol_total_nblks));           
+            m_vol_info.push_back(new VolumeInfo(vol_total_nblks));
         }
 
         // IO will be triggered by loadgen
@@ -387,11 +378,11 @@ private:
     }
 
     void create_volume(int vol_index) {
-        vol_params  p;
-        p.page_size     = VOL_PAGE_SIZE;
-        p.size          = m_max_vol_size;
-        p.io_comp_cb    = ([this](const vol_interface_req_ptr& vol_req) { process_completions(vol_req); });
-        p.uuid          = boost::uuids::random_generator()();
+        vol_params p;
+        p.page_size = VOL_PAGE_SIZE;
+        p.size = m_max_vol_size;
+        p.io_comp_cb = ([this](const vol_interface_req_ptr& vol_req) { process_completions(vol_req); });
+        p.uuid = boost::uuids::random_generator()();
         std::string name = VOL_PREFIX + std::to_string(vol_index);
 
         memcpy(p.vol_name, name.c_str(), (name.length() + 1));
@@ -409,13 +400,11 @@ private:
         vol_init(vol_obj);
     }
 
-    bool vol_found_cb(boost::uuids::uuid uuid) {
-        return true;
-    }
-    
+    bool vol_found_cb(boost::uuids::uuid uuid) { return true; }
+
     void vol_mounted_cb(const VolumePtr& vol_obj, vol_state state) {
         vol_init(vol_obj);
-        auto cb = [this](boost::intrusive_ptr<vol_interface_req> vol_req) { process_completions(vol_req); };
+        auto cb = [this](boost::intrusive_ptr< vol_interface_req > vol_req) { process_completions(vol_req); };
         VolInterface::get_instance()->attach_vol_completion_cb(vol_obj, cb);
     }
 
@@ -425,14 +414,13 @@ private:
         m_vols.push_back(vol_obj);
     }
 
-    void vol_state_change_cb(const VolumePtr& vol, vol_state old_state, vol_state new_state) {
-        assert(0);
-    }
+    void vol_state_change_cb(const VolumePtr& vol, vol_state old_state, vol_state new_state) { assert(0); }
 
     void print_io_counters() {
         LOGINFO("write ios cmpled: {}", m_wrt_cnt);
         LOGINFO("read ios cmpled: {}", m_rd_cnt);
-        LOGINFO("read/write err : {}/{}, read_verify_skip: {}, write_skip: {}", m_rd_err_cnt, m_wrt_err_cnt, m_read_verify_skip, m_writes_skip);
+        LOGINFO("read/write err : {}/{}, read_verify_skip: {}, write_skip: {}", m_rd_err_cnt, m_wrt_err_cnt,
+                m_read_verify_skip, m_writes_skip);
     }
 
     uint64_t get_elapsed_time(Clock::time_point start) {
@@ -443,7 +431,7 @@ private:
     // For Read: do the verification.
     // For Write: update hash code;
     void process_completions(const vol_interface_req_ptr& vol_req) {
-        boost::intrusive_ptr<VolReq> req = boost::static_pointer_cast<struct VolReq>(vol_req);
+        boost::intrusive_ptr< VolReq > req = boost::static_pointer_cast< struct VolReq >(vol_req);
 
         static uint64_t pt = 30;
         static Clock::time_point pt_start = Clock::now();
@@ -463,24 +451,21 @@ private:
             assert(req->hash.size() == req->nblks);
             for (uint64_t i = 0; i < req->nblks; i++) {
                 m_verify_mgr->set_crc(req->vol_id, req->lba + i, req->hash[i]);
-                LOGDEBUG("vol_id: {}, lba: {}, nblks: {}, map_hash: {}, hash: {}",  
-                        req->vol_id, req->lba, req->nblks, 
-                        m_verify_mgr->get_crc(req->vol_id, req->lba + i), 
-                        req->hash[i]);
+                LOGDEBUG("vol_id: {}, lba: {}, nblks: {}, map_hash: {}, hash: {}", req->vol_id, req->lba, req->nblks,
+                         m_verify_mgr->get_crc(req->vol_id, req->lba + i), req->hash[i]);
             }
 
             // reset the bits so that key gen could pick up again
-            std::lock_guard<std::mutex> lk(m_vol_info[req->vol_id]->m_mtx);
+            std::lock_guard< std::mutex > lk(m_vol_info[req->vol_id]->m_mtx);
             reset_bm_bits(req->vol_id, req->lba, req->nblks);
         }
-
     }
-   
-    // 
+
+    //
     // verify by compare the crc in the read buffer returned in req with crc saved with write;
     //
-    void verify(boost::intrusive_ptr<VolReq> req) {
-        // if req->verify is false, we still want to process the read_buf_list to verify 
+    void verify(boost::intrusive_ptr< VolReq > req) {
+        // if req->verify is false, we still want to process the read_buf_list to verify
         // the nblks returned, just skip crc check;
         uint64_t nblks_in_buf_list = 0;
 
@@ -495,8 +480,8 @@ private:
                 auto stored_hash = m_verify_mgr->get_crc(req->vol_id, req->lba + nblks_in_buf_list);
 
                 if (req->verify && hash != stored_hash) {
-                    LOGERROR("Verify Failed: Hash Code Mismatch: vol_id: {}, lba: {}, nblks {}, hash: {} : {}", 
-                            req->vol_id, req->lba, req->nblks, hash, stored_hash);
+                    LOGERROR("Verify Failed: Hash Code Mismatch: vol_id: {}, lba: {}, nblks {}, hash: {} : {}",
+                             req->vol_id, req->lba, req->nblks, hash, stored_hash);
                     assert(0);
                 }
 
@@ -509,65 +494,61 @@ private:
         assert(nblks_in_buf_list == req->nblks);
 
         if (req->verify) {
-            std::lock_guard<std::mutex>     lk(m_vol_info[req->vol_id]->m_mtx);
+            std::lock_guard< std::mutex > lk(m_vol_info[req->vol_id]->m_mtx);
             reset_bm_bits(req->vol_id, req->lba, req->nblks);
         }
     }
 
-    uint64_t get_size(uint64_t n) {
-        return n * VOL_PAGE_SIZE;
-    }
+    uint64_t get_size(uint64_t n) { return n * VOL_PAGE_SIZE; }
 
-    uint64_t get_hash(uint8_t* bytes) {
-        return util::Hash64((const char *)bytes, VOL_PAGE_SIZE);
-    }
+    uint64_t get_hash(uint8_t* bytes) { return util::Hash64((const char*)bytes, VOL_PAGE_SIZE); }
 
 private:
-    std::vector<dev_info>           m_device_info;
-    std::shared_ptr<iomgr::ioMgr>   m_iomgr;
-    init_done_callback              m_done_cb;    // callback to loadgen test case;
-    std::vector<VolumePtr>          m_vols;       // volume instances;
-    std::vector<std::string>        m_file_names;
+    std::vector< dev_info > m_device_info;
+    std::shared_ptr< iomgr::ioMgr > m_iomgr;
+    init_done_callback m_done_cb;    // callback to loadgen test case;
+    std::vector< VolumePtr > m_vols; // volume instances;
+    std::vector< std::string > m_file_names;
 
-    uint64_t                        m_max_vol_size;
-    uint64_t                        m_max_cap;
-    uint64_t                        m_max_disk_cap;
-    const uint64_t                  m_max_vols      = 50;
-    uint64_t                        m_max_io_size;
+    uint64_t m_max_vol_size;
+    uint64_t m_max_cap;
+    uint64_t m_max_disk_cap;
+    const uint64_t m_max_vols = 50;
+    uint64_t m_max_io_size;
 
     // io count
-    std::atomic<uint64_t>           m_outstd_ios = 0;
-    std::atomic<uint64_t>           m_wrt_cnt = 0;
-    std::atomic<uint64_t>           m_rd_cnt = 0;
-    std::atomic<uint64_t>           m_rd_err_cnt = 0;
-    std::atomic<uint64_t>           m_wrt_err_cnt = 0;
-    std::atomic<uint64_t>           m_writes_skip = 0;
-    std::atomic<uint64_t>           m_read_verify_skip = 0;
-    std::atomic<bool>               m_shutdown_cb_done = false;
-    
-    static VolumeManager<Executor>*    _instance;
+    std::atomic< uint64_t > m_outstd_ios = 0;
+    std::atomic< uint64_t > m_wrt_cnt = 0;
+    std::atomic< uint64_t > m_rd_cnt = 0;
+    std::atomic< uint64_t > m_rd_err_cnt = 0;
+    std::atomic< uint64_t > m_wrt_err_cnt = 0;
+    std::atomic< uint64_t > m_writes_skip = 0;
+    std::atomic< uint64_t > m_read_verify_skip = 0;
+    std::atomic< bool > m_shutdown_cb_done = false;
 
-    std::vector<VolumeInfo*>                        m_vol_info;
-    std::shared_ptr<VolVerifyMgr<uint64_t>>         m_verify_mgr;  // crc type uint64_t
+    static VolumeManager< Executor >* _instance;
 
-    bool                                            m_enable_write_log;
-    std::shared_ptr<WriteLogRecorder<uint64_t>>     m_write_recorder;
+    std::vector< VolumeInfo* > m_vol_info;
+    std::shared_ptr< VolVerifyMgr< uint64_t > > m_verify_mgr; // crc type uint64_t
+
+    bool m_enable_write_log;
+    std::shared_ptr< WriteLogRecorder< uint64_t > > m_write_recorder;
 }; // VolumeManager
 
-template <typename T>
-VolumeManager<T>* VolumeManager<T>::_instance = nullptr;
+template < typename T >
+VolumeManager< T >* VolumeManager< T >::_instance = nullptr;
 
-template <typename T>
-VolumeManager<T>* VolumeManager<T>::instance() { 
+template < typename T >
+VolumeManager< T >* VolumeManager< T >::instance() {
     static std::once_flag f;
-    std::call_once(f, []() { _instance = new VolumeManager<T>(); });
+    std::call_once(f, []() { _instance = new VolumeManager< T >(); });
     return _instance;
 }
 
-template <typename T>
-void VolumeManager<T>::del_instance() {
+template < typename T >
+void VolumeManager< T >::del_instance() {
     delete _instance;
 }
 
-} // loadgen
-} // homeds
+} // namespace loadgen
+} // namespace homeds
