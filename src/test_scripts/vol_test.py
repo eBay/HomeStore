@@ -63,7 +63,7 @@ def load():
 def load_volume():
     print("Volume load test started")
     subprocess.check_call(dirpath + "test_load \
-            --num_io=100000000000 --num_keys=1000000 --run_time=21600 --gtest_filter=*Volume*", stderr=subprocess.STDOUT, shell=True)
+            --num_io=100000000000 --num_keys=500000 --run_time=21600 --gtest_filter=*Volume*", stderr=subprocess.STDOUT, shell=True)
     print("Volume load test completed")
 
 ## @test    recovery_nightly
