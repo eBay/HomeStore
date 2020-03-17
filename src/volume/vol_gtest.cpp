@@ -283,7 +283,7 @@ public:
         m_tgt.init();
 
         init_params params;
-        params.flag = homestore::io_flag::BUFFERED_IO;
+        params.flag = io_flags;
         params.min_virtual_page_size = vol_page_size;
         params.cache_size = 4 * 1024 * 1024 * 1024ul;
         params.disk_init = init;
@@ -883,7 +883,7 @@ private:
 
                 if (j != 0 && (!verify_data || !verify_done)) {
                     /* we will only verify the header. We write lba number in the header */
-                    j = memcmp((void*)b.bytes, (uint8_t*)((uint64_t)req->buf + tot_size_read), sizeof(uint64_t));
+                    j = memcmp((void*)b.bytes, (uint8_t*)((uint64_t)request->buf + tot_size_read), sizeof(uint64_t));
                     if (!j) {
                         /* copy the data */
                         auto ret =
@@ -895,7 +895,7 @@ private:
                 if (j) {
                     if (can_panic) {
                         /* verify the header */
-                        j = memcmp((void*)b.bytes, (uint8_t*)((uint64_t)req->buf + tot_size_read), sizeof(uint64_t));
+                        j = memcmp((void*)b.bytes, (uint8_t*)((uint64_t)request->buf + tot_size_read), sizeof(uint64_t));
                         if (j != 0) {
                             LOGINFO("header mismatch lba read {}", *((uint64_t*)b.bytes));
                         }
@@ -904,7 +904,7 @@ private:
 #ifndef NDEBUG
                         VolInterface::get_instance()->print_tree(vol);
 #endif
-                        LOGINFO("lba {} {}", req->lba, req->nblks);
+                        LOGINFO("lba {} {}", request->lba, request->nblks);
                         std::this_thread::sleep_for(std::chrono::seconds(5));
                         sleep(30);
                         assert(0);
