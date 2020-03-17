@@ -283,7 +283,7 @@ public:
         m_tgt.init();
 
         init_params params;
-        params.flag = io_flags;
+        params.flag = static_cast< enum io_flag >(io_flags);
         params.min_virtual_page_size = vol_page_size;
         params.cache_size = 4 * 1024 * 1024 * 1024ul;
         params.disk_init = init;
