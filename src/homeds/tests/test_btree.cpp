@@ -26,12 +26,12 @@ typedef std::chrono::high_resolution_clock Clock;
 class TestEntry : public BtreeKey {
 private:
     typedef struct __attribute__((packed)) {
-        uint64_t m_count :16;
-        uint64_t m_rank :10;
-        uint64_t m_blk_num :38;
+        uint64_t m_count : 16;
+        uint64_t m_rank : 10;
+        uint64_t m_blk_num : 38;
     } blob_t;
 
-    blob_t *m_blob;
+    blob_t* m_blob;
     blob_t m_inplace_blob;
 
 public:
@@ -42,35 +42,22 @@ public:
         set_blk_num(blk_num);
     }
 
-    TestEntry() : TestEntry(0, 0, 0) {
-    }
+    TestEntry() : TestEntry(0, 0, 0) {}
 
-    inline uint32_t get_count() const {
-        return (m_blob->m_count);
-    }
+    inline uint32_t get_count() const { return (m_blob->m_count); }
 
-    inline uint16_t get_rank() const {
-        return (m_blob->m_rank);
-    }
+    inline uint16_t get_rank() const { return (m_blob->m_rank); }
 
-    inline uint64_t get_blk_num() const {
-        return (m_blob->m_blk_num);
-    }
+    inline uint64_t get_blk_num() const { return (m_blob->m_blk_num); }
 
-    inline void set_count(uint32_t count) {
-        m_blob->m_count = count;
-    }
+    inline void set_count(uint32_t count) { m_blob->m_count = count; }
 
-    inline void set_rank(uint32_t rank) {
-        m_blob->m_rank = rank;
-    }
+    inline void set_rank(uint32_t rank) { m_blob->m_rank = rank; }
 
-    inline void set_blk_num(uint32_t blkNum) {
-        m_blob->m_blk_num = blkNum;
-    }
+    inline void set_blk_num(uint32_t blkNum) { m_blob->m_blk_num = blkNum; }
 
-    int compare(const BtreeKey *o) const override {
-        TestEntry *other = (TestEntry *) o;
+    int compare(const BtreeKey* o) const override {
+        TestEntry* other = (TestEntry*)o;
         if (get_count() < other->get_count()) {
             return 1;
         } else if (get_count() > other->get_count()) {
@@ -102,9 +89,9 @@ public:
         }
     }
 
-    int compare_range(BtreeKey *s, bool start_incl, BtreeKey *e, bool end_incl) {
-        TestEntry *start = (TestEntry *) s;
-        TestEntry *end = (TestEntry *) e;
+    int compare_range(BtreeKey* s, bool start_incl, BtreeKey* e, bool end_incl) {
+        TestEntry* start = (TestEntry*)s;
+        TestEntry* end = (TestEntry*)e;
 
         int ret = is_in_range(this->get_count(), start->get_count(), start_incl, end->get_count(), end_incl);
         if (ret != 0) {
@@ -125,41 +112,30 @@ public:
     }
 
     virtual homeds::blob get_blob() const override {
-        homeds::blob b = {(uint8_t *) m_blob, sizeof(blob_t)};
+        homeds::blob b = {(uint8_t*)m_blob, sizeof(blob_t)};
         return b;
     }
 
-    virtual void set_blob(const homeds::blob &b) override {
-        m_blob = (blob_t *) b.bytes;
-    }
+    virtual void set_blob(const homeds::blob& b) override { m_blob = (blob_t*)b.bytes; }
 
-    virtual void copy_blob(const homeds::blob &b) override {
-        memcpy(m_blob, b.bytes, b.size);
-    }
+    virtual void copy_blob(const homeds::blob& b) override { memcpy(m_blob, b.bytes, b.size); }
 
-    virtual uint32_t get_blob_size() const override {
-        return (sizeof(blob_t));
-    }
+    virtual uint32_t get_blob_size() const override { return (sizeof(blob_t)); }
 
-    static uint32_t get_fixed_size() {
-        return (sizeof(blob_t));
-    }
+    static uint32_t get_fixed_size() { return (sizeof(blob_t)); }
 
-    virtual void set_blob_size(uint32_t size) override {
-    }
+    virtual void set_blob_size(uint32_t size) override {}
 
-    void print() {
-        cout << "count: " << get_count() << " rank: " << get_rank() << " blknum: " << get_blk_num();
-    }
+    void print() { cout << "count: " << get_count() << " rank: " << get_rank() << " blknum: " << get_blk_num(); }
 };
 
 uint64_t get_elapsed_time(Clock::time_point startTime) {
     std::chrono::nanoseconds ns = std::chrono::duration_cast< std::chrono::nanoseconds >(Clock::now() - startTime);
-    //return ns.count();
+    // return ns.count();
     return ns.count() / 1000;
 }
 
-int64_t unformat_num(const char *str) {
+int64_t unformat_num(const char* str) {
     int64_t val;
     char unit = ' ';
 
@@ -167,33 +143,25 @@ int64_t unformat_num(const char *str) {
 
     switch (unit) {
 
-    case ' ':
-        break;
+    case ' ': break;
 
     case 'G':
-    case 'g':
-        val *= 1000; // fallthru
+    case 'g': val *= 1000; // fallthru
 
     case 'M':
-    case 'm':
-        val *= 1000; // fallthru
+    case 'm': val *= 1000; // fallthru
 
     case 'K':
-    case 'k':
-        val *= 1000;
-        break;
+    case 'k': val *= 1000; break;
 
     case 'H':
-    case 'h':
-        val *= 60;
+    case 'h': val *= 60;
 
     case 'U':
-    case 'u':
-        val *= 60;
+    case 'u': val *= 60;
 
     case 'S':
-    case 's':
-        break;
+    case 's': break;
     }
 
     return val;
@@ -219,7 +187,7 @@ struct WorkloadInfo {
 };
 
 typedef struct {
-    Btree< TestEntry, EmptyClass > *bt;
+    Btree< TestEntry, EmptyClass >* bt;
     WorkloadInfo preloadInfo;
     WorkloadInfo insertInfo;
     WorkloadInfo readInfo;
@@ -230,19 +198,19 @@ typedef struct {
 } threadarg_t;
 
 struct BtreePerfTest {
-    TestEntry **readEntries;
-    TestEntry **insertEntries;
+    TestEntry** readEntries;
+    TestEntry** insertEntries;
 };
 
 BtreePerfTest tst;
 
 void init_entries(uint32_t n_read_entries, uint32_t n_insert_entries) {
-    tst.readEntries = new TestEntry *[n_read_entries];
+    tst.readEntries = new TestEntry*[n_read_entries];
     for (auto i = 0u; i < n_read_entries; i++) {
         tst.readEntries[i] = new TestEntry(rand() % 5000, i % 1000, i);
     }
 
-    tst.insertEntries = new TestEntry *[n_insert_entries];
+    tst.insertEntries = new TestEntry*[n_insert_entries];
     for (auto i = 0u; i < n_insert_entries; i++) {
         tst.insertEntries[i] = new TestEntry(rand() % 5000, i % 1000, i + n_read_entries);
     }
@@ -257,12 +225,12 @@ void initDev(char *devName)
 }
 #endif
 
-void *preloadThread(void *arg) {
-    threadarg_t *targ = (threadarg_t *) arg;
+void* preloadThread(void* arg) {
+    threadarg_t* targ = (threadarg_t*)arg;
     EmptyClass e;
 
     for (auto i = targ->preloadInfo.start; i < (targ->preloadInfo.start + targ->preloadInfo.count); i++) {
-        TestEntry *te = tst.readEntries[i];
+        TestEntry* te = tst.readEntries[i];
 
         Clock::time_point startTime = Clock::now();
         targ->bt->put(*te, e, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
@@ -277,8 +245,8 @@ void *preloadThread(void *arg) {
     return nullptr;
 }
 
-void *readInsertThread(void *arg) {
-    threadarg_t *targ = (threadarg_t *) arg;
+void* readInsertThread(void* arg) {
+    threadarg_t* targ = (threadarg_t*)arg;
     EmptyClass e;
     uint32_t iter = 0;
 
@@ -288,13 +256,13 @@ void *readInsertThread(void *arg) {
         if ((rand() % 100) > targ->riRatio) {
             // It is an insert
             --(targ->insertInfo.count);
-            TestEntry *te = tst.insertEntries[targ->insertInfo.start + targ->insertInfo.count];
+            TestEntry* te = tst.insertEntries[targ->insertInfo.start + targ->insertInfo.count];
             Clock::time_point startTime = Clock::now();
             targ->bt->put(*te, e, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
             targ->insertInfo.time_us += get_elapsed_time(startTime);
         } else {
             --(targ->readInfo.count);
-            TestEntry *te = tst.readEntries[targ->readInfo.start + targ->readInfo.count];
+            TestEntry* te = tst.readEntries[targ->readInfo.start + targ->readInfo.count];
             Clock::time_point startTime = Clock::now();
             bool isFound = targ->bt->get(*te, &e);
             targ->readInfo.time_us += get_elapsed_time(startTime);
@@ -309,16 +277,16 @@ void *readInsertThread(void *arg) {
 
     while (targ->readInfo.count > 0) {
         --(targ->readInfo.count);
-        TestEntry *te = tst.readEntries[targ->readInfo.start + targ->readInfo.count];
+        TestEntry* te = tst.readEntries[targ->readInfo.start + targ->readInfo.count];
         Clock::time_point startTime = Clock::now();
         bool isFound = targ->bt->get(*te, &e);
         targ->readInfo.time_us += get_elapsed_time(startTime);
         assert(isFound);
-}
+    }
 
     while (targ->insertInfo.count > 0) {
         --(targ->insertInfo.count);
-        TestEntry *te = tst.insertEntries[targ->insertInfo.start + targ->insertInfo.count];
+        TestEntry* te = tst.insertEntries[targ->insertInfo.start + targ->insertInfo.count];
         Clock::time_point startTime = Clock::now();
         targ->bt->put(*te, e, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
         targ->insertInfo.time_us += get_elapsed_time(startTime);
@@ -390,7 +358,7 @@ void *trxThread(void *arg)
 }
 #endif
 
-int main(int argc, const char *argv[]) {
+int main(int argc, const char* argv[]) {
     uint32_t nTotalCount = 10000000;
     int nThreads = 50;
     uint32_t nodeSize = 8192;
@@ -399,13 +367,13 @@ int main(int argc, const char *argv[]) {
     uint32_t i = 0;
     while (++i < argc) {
         if (strcmp(argv[i], "-c") == 0) {
-            nTotalCount = (uint32_t) unformat_num(argv[++i]);
+            nTotalCount = (uint32_t)unformat_num(argv[++i]);
         } else if (strcmp(argv[i], "-t") == 0) {
             nThreads = atoi(argv[++i]);
         } else if (strcmp(argv[i], "-n") == 0) {
-            nodeSize = (uint32_t) unformat_num(argv[++i]);
+            nodeSize = (uint32_t)unformat_num(argv[++i]);
         } else if (strcmp(argv[i], "-r") == 0) {
-            readRatio = (uint32_t) unformat_num(argv[++i]);
+            readRatio = (uint32_t)unformat_num(argv[++i]);
         } else {
             cout << "Invalid option " << argv[i] << endl;
             return 1;
@@ -433,9 +401,9 @@ int main(int argc, const char *argv[]) {
     btree_cfg.set_max_key_size(sizeof(TestEntry));
     btree_cfg.set_max_value_size(0);
     btree_cfg.set_node_size(4096);
-    MemBtree< TestEntry, EmptyClass> bt(btree_cfg);
+    MemBtree< TestEntry, EmptyClass > bt(btree_cfg);
 
-    threadarg_t *targs = new threadarg_t[nThreads];
+    threadarg_t* targs = new threadarg_t[nThreads];
 
     cout << "Preloading amount = " << nPreloadCount << " of data first " << endl;
     uint32_t start = 0;
@@ -446,7 +414,7 @@ int main(int argc, const char *argv[]) {
         targs[i].myid = i + 1;
         targs[i].riRatio = 0;
         targs[i].preloadInfo.time_us = 0;
-        pthread_create(&targs[i].tid, NULL, preloadThread, (void *) &targs[i]);
+        pthread_create(&targs[i].tid, NULL, preloadThread, (void*)&targs[i]);
 
         start += targs[i].preloadInfo.count;
     }
@@ -475,14 +443,14 @@ int main(int argc, const char *argv[]) {
         targs[i].myid = i + 1;
         targs[i].riRatio = readRatio;
 
-        pthread_create(&targs[i].tid, NULL, readInsertThread, (void *) &targs[i]);
+        pthread_create(&targs[i].tid, NULL, readInsertThread, (void*)&targs[i]);
         insert_start += targs[i].insertInfo.count;
         read_start += targs[i].readInfo.count;
     }
 
     uint64_t total_insert_time_us = 0;
     uint64_t total_read_time_us = 0;
-//	uint64_t total_delete_time_us = 0;
+    //	uint64_t total_delete_time_us = 0;
     for (int i = 0; i < nThreads; i++) {
         pthread_join(targs[i].tid, NULL);
 
@@ -497,7 +465,8 @@ int main(int argc, const char *argv[]) {
          << " microseconds" << endl;
     cout << "Completed " << nReadCount << " reads during inserts in " << total_read_time_us / nThreads
          << " microseconds" << endl;
-//	cout << "Completed " << nTotalCount << " deletes in " << total_delete_time_us/nThreads << " microseconds" << endl;
+    //	cout << "Completed " << nTotalCount << " deletes in " << total_delete_time_us/nThreads << " microseconds" <<
+    //endl;
 
     double avgSecs = total_preload_time_us / nThreads / 1000000;
     double tps = nPreloadCount / avgSecs;

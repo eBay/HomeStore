@@ -39,14 +39,14 @@ DEALINGS IN THE SOFTWARE.
 #include <cstdint>
 
 namespace homeds {
-#if defined (__x86_64__) || defined (_M_X64)
+#if defined(__x86_64__) || defined(_M_X64)
 
-#define TAGGED_PTR_MASK    0x0000FFFFFFFFFFFFUL
-#define TAGGED_COUNT_MASK  0xFFFF000000000000
-#define FIRST_TAG_VALUE    0x0001000000000000UL
-#define TAGGED_PTR_BITS    48
+#define TAGGED_PTR_MASK 0x0000FFFFFFFFFFFFUL
+#define TAGGED_COUNT_MASK 0xFFFF000000000000
+#define FIRST_TAG_VALUE 0x0001000000000000UL
+#define TAGGED_PTR_BITS 48
 
-template <typename T>
+template < typename T >
 struct tagged_ptr {
     typedef uint64_t compressed_ptr_t;
     typedef uint16_t tag_t;
@@ -63,35 +63,24 @@ private:
     cast_unit m_value;
 
 public:
-    tagged_ptr() {
-        m_value.ptr = 0;
-    }
-    tagged_ptr(tagged_ptr const & o) :
-            m_value(o.m_value) {}
-    tagged_ptr(T *ptr, tag_t t) :
-            m_value(pack_value(ptr, t)) {}
-    tagged_ptr(compressed_ptr_t cp) :
-            m_value(cp) {}
+    tagged_ptr() { m_value.ptr = 0; }
+    tagged_ptr(tagged_ptr const& o) : m_value(o.m_value) {}
+    tagged_ptr(T* ptr, tag_t t) : m_value(pack_value(ptr, t)) {}
+    tagged_ptr(compressed_ptr_t cp) : m_value(cp) {}
 
-    tagged_ptr & operator= (tagged_ptr const & p) = default;
+    tagged_ptr& operator=(tagged_ptr const& p) = default;
 
-    void set(T *p, tag_t t) {
-        m_value = pack_value(p, t);
-    }
+    void set(T* p, tag_t t) { m_value = pack_value(p, t); }
 
-    bool operator== (volatile tagged_ptr const & o) const {
-        return (m_value.ptr == o.m_value.ptr);
-    }
-    bool operator!= (volatile tagged_ptr const & o) const {
-       return !operator==(o);
-    }
+    bool operator==(volatile tagged_ptr const& o) const { return (m_value.ptr == o.m_value.ptr); }
+    bool operator!=(volatile tagged_ptr const& o) const { return !operator==(o); }
 
-    T *get_ptr() const {
+    T* get_ptr() const {
         auto p = m_value.ptr;
         return (extract_ptr(p));
     }
 
-    void set_ptr(T *p) {
+    void set_ptr(T* p) {
         tag_t t = get_tag();
         m_value = pack_value(p, t);
     }
@@ -102,54 +91,37 @@ public:
     }
 
     void set_tag(tag_t t) {
-        T *p = get_ptr();
+        T* p = get_ptr();
         m_value = pack_value(p, t);
     }
 
-    void inc_tag() {
-        m_value.ptr += FIRST_TAG_VALUE;
-    }
+    void inc_tag() { m_value.ptr += FIRST_TAG_VALUE; }
 
-    void inc_tag(int count) {
-        m_value.ptr += (FIRST_TAG_VALUE * count);
-    }
+    void inc_tag(int count) { m_value.ptr += (FIRST_TAG_VALUE * count); }
 
-    void dec_tag() {
-        m_value.ptr -= FIRST_TAG_VALUE;
-    }
+    void dec_tag() { m_value.ptr -= FIRST_TAG_VALUE; }
 
-    void dec_tag(int count) {
-        m_value.ptr -= (FIRST_TAG_VALUE * count);
-    }
+    void dec_tag(int count) { m_value.ptr -= (FIRST_TAG_VALUE * count); }
 
-    T & operator*() const {
-        return *get_ptr();
-    }
+    T& operator*() const { return *get_ptr(); }
 
-    T * operator->() const {
-        return get_ptr();
-    }
+    T* operator->() const { return get_ptr(); }
 
-    operator bool(void) const {
-        return get_ptr() != 0;
-    }
+    operator bool(void) const { return get_ptr() != 0; }
 
-    compressed_ptr_t get_packed() const {
-        return m_value.ptr;
-    }
+    compressed_ptr_t get_packed() const { return m_value.ptr; }
+
 private:
-    static cast_unit pack_value(T * ptr, uint16_t tag) {
+    static cast_unit pack_value(T* ptr, uint16_t tag) {
         cast_unit ret;
         ret.ptr = compressed_ptr_t(ptr);
         ret.tag[tag_index] = tag;
         return ret;
     }
 
-    static T* extract_ptr(volatile compressed_ptr_t const & i) {
-        return (T*)(i & TAGGED_PTR_MASK);
-    }
+    static T* extract_ptr(volatile compressed_ptr_t const& i) { return (T*)(i & TAGGED_PTR_MASK); }
 
-    static tag_t extract_tag(volatile compressed_ptr_t const & i) {
+    static tag_t extract_tag(volatile compressed_ptr_t const& i) {
         cast_unit cu;
         cu.ptr = i;
         return cu.tag[tag_index];
@@ -160,4 +132,4 @@ private:
 #else
 #error unsupported platform for tagged pointer
 #endif
-} //namespace homeds
+} // namespace homeds

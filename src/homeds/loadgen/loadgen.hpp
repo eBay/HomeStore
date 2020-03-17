@@ -26,22 +26,20 @@ ENUM(generator_op_error, uint32_t, no_error, store_failed, store_timeout, data_v
 template < typename K, typename V, typename Store, typename Exector >
 class KVGenerator {
 public:
-
-    KVGenerator(uint8_t n_threads, bool verification) : m_executor(n_threads /* threads */, 1 /* priorities */, 20000 /* maxQueueSize */) {
+    KVGenerator(uint8_t n_threads, bool verification) :
+            m_executor(n_threads /* threads */, 1 /* priorities */, 20000 /* maxQueueSize */) {
         srand(time(0));
         m_store = std::make_shared< Store >();
         m_verify = verification;
     }
-    void set_max_keys(uint64_t max_keys){
-        m_key_registry.set_max_keys(max_keys);
-    }
+    void set_max_keys(uint64_t max_keys) { m_key_registry.set_max_keys(max_keys); }
 
     Exector& get_executor() { return m_executor; }
 
     void init_generator(homeds::loadgen::Param& parameters) { m_store->init_store(parameters); }
 
     typedef std::function< void(generator_op_error, const key_info< K, V >*, void*, const std::string&) >
-                                          store_error_cb_t;
+        store_error_cb_t;
     typedef std::function< void(int op) > loadgen_success_cb_t;
 
     static void handle_generic_error(generator_op_error err, const key_info< K, V >* ki, void* store_error,
@@ -150,7 +148,7 @@ public:
 
     uint64_t get_keys_count() { return this->_get_keys_count(); }
 
-    void remove_all_keys(KeyPattern       pattern = KeyPattern::SEQUENTIAL,
+    void remove_all_keys(KeyPattern pattern = KeyPattern::SEQUENTIAL,
                          store_error_cb_t error_cb = handle_generic_error) {
         reset_pattern(pattern);
         auto kc = get_keys_count();
@@ -181,12 +179,9 @@ public:
     }
 
 private:
-
     void op_start() { m_outstanding.increment(1); }
 
-    bool _verify() {
-        return m_verify;
-    }
+    bool _verify() { return m_verify; }
 
     void op_done(loadgen_success_cb_t success_cb = nullptr, int op = 1) {
         if (m_outstanding.decrement_testz()) {
@@ -209,7 +204,7 @@ private:
         auto value = m_key_registry.generate_value(value_pattern);
 
         bool success = m_store->insert(kip->m_key, value);
-        
+
         if (success != expected_success) {
             error_cb(generator_op_error::store_failed, kip.m_ki, nullptr,
                      fmt::format("Insert status expected {} got {}", expected_success, success));
@@ -217,13 +212,13 @@ private:
 
         if (!success) {
             if (new_key) {
-                m_key_registry.remove_key(kip); 
+                m_key_registry.remove_key(kip);
                 return;
             }
             kip->set_error();
             /* error happen. We move to only verify mode */
         }
-        
+
         kip->add_hash_code(value->get_hash_code());
         LOGTRACE("Insert {}", *kip);
     }
@@ -234,7 +229,7 @@ private:
         const auto kip = valid_key ? m_key_registry.get_key(pattern, false /* for_mutate */, exclusive_access)
                                    : m_key_registry.generate_invalid_key();
 
-        V    value;
+        V value;
         bool success = m_store->get(kip->m_key, &value);
         if (success != expected_success) {
             error_cb(generator_op_error::store_failed, kip.m_ki, nullptr,
@@ -250,7 +245,7 @@ private:
 
         if (_verify() && !kip->validate_hash_code(value.get_hash_code(), exclusive_access)) {
             // TODO -below log message would not be correct for non-exclusive access as we use last_hash_code
-            
+
             error_cb(generator_op_error::data_validation_failed, kip.m_ki, nullptr,
                      fmt::format("HashCode mistmatch between loadgen and store {}:{}", kip->get_last_hash_code(),
                                  value.get_hash_code()));
@@ -278,12 +273,12 @@ private:
         auto kip = valid_key ? m_key_registry.get_key(pattern, true /* for_mutate */, exclusive_access)
                              : m_key_registry.generate_invalid_key();
         assert(kip.m_ki->m_free_pending == false);
-        V value; //preassigning so as can be successful by default 
+        V value; // preassigning so as can be successful by default
 
         //  remove from store
         bool success = m_store->remove(kip->m_key, &value);
 
-        //remvoe from loadgen, no other threads can pick up this if has exclusive access
+        // remvoe from loadgen, no other threads can pick up this if has exclusive access
         m_key_registry.remove_key(kip);
 
         if (success != expected_success) {
@@ -314,12 +309,12 @@ private:
         auto value = m_key_registry.generate_value(value_pattern);
 
         bool success = m_store->update(kip->m_key, value);
-        
+
         if (success != expected_success) {
             error_cb(generator_op_error::store_failed, kip.m_ki, nullptr,
                      fmt::format("update status expected {} got {}", expected_success, success));
         }
-        
+
         if (!success) {
             kip->set_error();
         }
@@ -330,13 +325,14 @@ private:
     void _verify_all(uint32_t num_keys_in_range) {
         static bool reset = false;
         std::vector< key_info_ptr< K, V > > kis;
-        std::vector< std::pair< K, V > >    kvs;
-        
+        std::vector< std::pair< K, V > > kvs;
+
         if (!reset) {
             m_key_registry.reset_pattern(KeyPattern::SEQUENTIAL, 0);
             reset = true;
         }
-        kis = m_key_registry.get_consecutive_keys(KeyPattern::SEQUENTIAL, true, false /* is_mutate */, num_keys_in_range);
+        kis =
+            m_key_registry.get_consecutive_keys(KeyPattern::SEQUENTIAL, true, false /* is_mutate */, num_keys_in_range);
 
     retry:
         auto count = m_store->query(kis[0]->m_key, true, kis.back()->m_key, true, kvs);
@@ -363,7 +359,7 @@ private:
     void _range_query(KeyPattern pattern, uint32_t num_keys_in_range, bool valid_query, bool exclusive_access,
                       bool start_incl, bool end_incl, store_error_cb_t error_cb) {
         std::vector< key_info_ptr< K, V > > kis;
-        std::vector< std::pair< K, V > >    kvs;
+        std::vector< std::pair< K, V > > kvs;
 
         if (valid_query) {
             kis =
@@ -382,8 +378,8 @@ private:
                          fmt::format("Was expecting no result"));
             }
             return;
-        } 
-        
+        }
+
         if (!_verify()) {
             return;
         }
@@ -440,15 +436,14 @@ private:
     void _reset_pattern(KeyPattern key_pattern, int index = 0) { m_key_registry.reset_pattern(key_pattern, index); }
 
 private:
-    KeyRegistry< K, V >                                                            m_key_registry;
+    KeyRegistry< K, V > m_key_registry;
     folly::Synchronized< std::set< key_info< K, V >*, compare_key_info< K, V > > > m_data_set;
 
-    std::shared_ptr< Store >                                                       m_store;
-    Exector                                                                        m_executor;
-    sisl::atomic_counter< int64_t >                                                m_outstanding = 0;
-    folly::Baton<>                                                                 m_test_baton;
-    bool                                                                           m_verify;
-
+    std::shared_ptr< Store > m_store;
+    Exector m_executor;
+    sisl::atomic_counter< int64_t > m_outstanding = 0;
+    folly::Baton<> m_test_baton;
+    bool m_verify;
 };
 } // namespace loadgen
 } // namespace homeds

@@ -11,36 +11,29 @@
 #include <folly/ThreadLocal.h>
 
 namespace homeds {
-enum stats_type : uint8_t {
-    COUNTER = 0,
-    LATENCY,
-    ERROR_COUNTER = 2
-};
+enum stats_type : uint8_t { COUNTER = 0, LATENCY, ERROR_COUNTER = 2 };
 
 typedef uint32_t req_stats_index;
 
 struct stats_key {
-    uint32_t        index;
-    stats_type      type;
+    uint32_t index;
+    stats_type type;
     req_stats_index mean_of; // If stats cannot be added, but averaged out by some index
-    const char      *name;
+    const char* name;
 };
 
-#define STATS_INVALID_INDEX    UINT32_MAX
+#define STATS_INVALID_INDEX UINT32_MAX
 
 class Stats {
 public:
-    Stats(std::vector<stats_key> &keys) :
-            m_keys(keys) {
-        m_values = new std::atomic<uint64_t>[keys.size()];
+    Stats(std::vector< stats_key >& keys) : m_keys(keys) {
+        m_values = new std::atomic< uint64_t >[keys.size()];
         for (auto i = 0u; i < keys.size(); i++) {
             m_values[i].store(0, std::memory_order_relaxed);
         }
     }
 
-    ~Stats() {
-        delete [] (m_values);
-    }
+    ~Stats() { delete[](m_values); }
 
     void set_count(req_stats_index ind, uint64_t val) {
         assert(m_keys[ind].type == COUNTER);
@@ -72,30 +65,26 @@ public:
         m_values[ind].fetch_add(get_elapsed_time_us(t1, t2), std::memory_order_relaxed);
     }
 
-    uint64_t get(req_stats_index ind) const {
-        return m_values[ind].load(std::memory_order_relaxed);
-    }
+    uint64_t get(req_stats_index ind) const { return m_values[ind].load(std::memory_order_relaxed); }
 
     class iterator {
         friend class Stats;
 
     public:
-        iterator(const Stats *stats) :
-                m_stats(stats),
-                m_cur_ind((req_stats_index)0) {}
+        iterator(const Stats* stats) : m_stats(stats), m_cur_ind((req_stats_index)0) {}
 
         virtual void operator++() {
             // using IntType = typename std::underlying_type<req_stats_index>::type;
-            m_cur_ind = static_cast<req_stats_index>(static_cast<uint32_t>(m_cur_ind) + 1);
+            m_cur_ind = static_cast< req_stats_index >(static_cast< uint32_t >(m_cur_ind) + 1);
             //((int)m_cur_ind)++;
         }
 
         virtual void operator++(int) {
-            m_cur_ind = static_cast<req_stats_index>(static_cast<uint32_t>(m_cur_ind) + 1);
+            m_cur_ind = static_cast< req_stats_index >(static_cast< uint32_t >(m_cur_ind) + 1);
             //((int)m_cur_ind)++;
         }
 
-        virtual std::pair< const char *, uint64_t > operator*() const {
+        virtual std::pair< const char*, uint64_t > operator*() const {
             if (m_cur_ind == m_stats->m_keys.size()) {
                 return std::make_pair("sentinel", 0);
             }
@@ -108,23 +97,18 @@ public:
             return std::make_pair(m_stats->m_keys[m_cur_ind].name, val);
         }
 
-        bool operator==(const iterator &other) const {
-            return (m_cur_ind == other.m_cur_ind);
+        bool operator==(const iterator& other) const { return (m_cur_ind == other.m_cur_ind); }
 
-        }
-
-        bool operator!=(const iterator &other) const {
-            return (m_cur_ind != other.m_cur_ind);
-        }
+        bool operator!=(const iterator& other) const { return (m_cur_ind != other.m_cur_ind); }
 
     private:
-        const Stats *m_stats;
+        const Stats* m_stats;
         req_stats_index m_cur_ind;
     };
 
     iterator begin() const {
         iterator it(this);
-        it.m_cur_ind = (req_stats_index) 0;
+        it.m_cur_ind = (req_stats_index)0;
         return it;
     }
 
@@ -143,13 +127,15 @@ public:
     }
 
     void print() const {
-        std::cout << "---------------------------------" << "\n";
+        std::cout << "---------------------------------"
+                  << "\n";
         std::cout << to_string();
-        std::cout << "---------------------------------" << "\n";
+        std::cout << "---------------------------------"
+                  << "\n";
     }
 
 private:
-    std::vector<stats_key> &m_keys;
-    std::atomic<uint64_t>  *m_values;
+    std::vector< stats_key >& m_keys;
+    std::atomic< uint64_t >* m_values;
 };
-}
+} // namespace homeds

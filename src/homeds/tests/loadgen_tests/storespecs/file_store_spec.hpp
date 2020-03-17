@@ -25,16 +25,17 @@ namespace loadgen {
 class FileStoreSpec : public StoreSpec< MapKey, BlkValue > {
     typedef std::function< void(generator_op_error, const key_info< MapKey, BlkValue >*, void*, const std::string&) >
         store_error_cb_t;
-    std::vector<int> m_fd_list;
-    std::vector<ssize_t> device_size;
+    std::vector< int > m_fd_list;
+    std::vector< ssize_t > device_size;
     ssize_t m_total_size = 0;
     uint32_t m_max_seg = 0;
+
 public:
     FileStoreSpec() {}
 
-    virtual bool insert(MapKey& k, std::shared_ptr<BlkValue> v) override { return update(k, v); }
+    virtual bool insert(MapKey& k, std::shared_ptr< BlkValue > v) override { return update(k, v); }
 
-    virtual bool upsert(MapKey& k, std::shared_ptr<BlkValue> v) override { return update(k, v); }
+    virtual bool upsert(MapKey& k, std::shared_ptr< BlkValue > v) override { return update(k, v); }
 
     virtual void init_store(homeds::loadgen::Param& parameters) override {
         for (uint32_t i = 0; i < parameters.file_names.size(); ++i) {
@@ -47,10 +48,10 @@ public:
             } else {
                 ioctl(fd, BLKGETSIZE64, &devsize);
             }
-            assert(devsize > 0); 
+            assert(devsize > 0);
             devsize = devsize - (devsize % MAX_SEGMENT_SIZE);
             device_size.push_back(devsize);
-            if ( i > 0) {
+            if (i > 0) {
                 assert(device_size[i - 1] == device_size[i]);
             }
             m_total_size += devsize;
@@ -59,15 +60,15 @@ public:
     }
 
     /*Map put always appends if exists, no feature to force udpate/insert and return error*/
-    virtual bool update(MapKey& k, std::shared_ptr<BlkValue> v) override {
-        std::vector< std::shared_ptr<BlkValue> > result(0);
+    virtual bool update(MapKey& k, std::shared_ptr< BlkValue > v) override {
+        std::vector< std::shared_ptr< BlkValue > > result(0);
         result.push_back(v);
         auto end_key = (MapKey::gen_key(KeyPattern::SEQUENTIAL, &k));
-        return(range_update(k, true, end_key, false, result));
+        return (range_update(k, true, end_key, false, result));
     }
 
     virtual bool get(MapKey& k, BlkValue* out_v) override {
-        std::vector< std::pair< MapKey, BlkValue >> result;
+        std::vector< std::pair< MapKey, BlkValue > > result;
         auto end_key = (MapKey::gen_key(KeyPattern::SEQUENTIAL, &k));
         if (query(k, true, end_key, false, result)) {
             *out_v = std::move(result.back().second);
@@ -81,8 +82,8 @@ public:
         return true; // map does not have remove impl
     }
 
-    virtual bool remove_any(MapKey& start_key, bool start_incl, MapKey& end_key, 
-                            bool end_incl, MapKey* out_key, BlkValue* out_val) override {
+    virtual bool remove_any(MapKey& start_key, bool start_incl, MapKey& end_key, bool end_incl, MapKey* out_key,
+                            BlkValue* out_val) override {
         assert(0);
         return true; // map does not have remove impl
     }
@@ -97,16 +98,16 @@ public:
         } else {
             num_blks = end_offset - start_offset;
         }
-        
-        void *buf = nullptr;
+
+        void* buf = nullptr;
         ssize_t size = num_blks * BLK_SIZE;
         auto ret = posix_memalign((void**)&buf, 4096, size);
         assert(ret == 0);
 
-        std::vector<int> fd_list;
-        std::vector<uint64_t> offset;
-        std::vector<uint64_t> size_blks;
-        get_fd_and_offset(start_offset, num_blks, fd_list, offset, size_blks); 
+        std::vector< int > fd_list;
+        std::vector< uint64_t > offset;
+        std::vector< uint64_t > size_blks;
+        get_fd_and_offset(start_offset, num_blks, fd_list, offset, size_blks);
 
         for (uint32_t fd = 0; fd < fd_list.size(); ++fd) {
             uint64_t temp_size = size_blks[fd] * BLK_SIZE;
@@ -119,8 +120,9 @@ public:
             }
             for (uint64_t i = 0; i < size_blks[fd]; ++i) {
                 BlkValue v(util::Hash64((const char*)((uint64_t)buf + (i * BLK_SIZE)), BLK_SIZE));
-                result.push_back(std::make_pair(MapKey(start_offset, 1), 
-                                 BlkValue(util::Hash64((const char*)((uint64_t)buf + (i * BLK_SIZE)), BLK_SIZE))));
+                result.push_back(
+                    std::make_pair(MapKey(start_offset, 1),
+                                   BlkValue(util::Hash64((const char*)((uint64_t)buf + (i * BLK_SIZE)), BLK_SIZE))));
                 ++start_offset;
             }
         }
@@ -128,8 +130,8 @@ public:
         return true;
     }
 
-    virtual bool range_update(MapKey& start_key, bool start_incl, MapKey& end_key, bool end_incl, 
-                                std::vector< std::shared_ptr<BlkValue> > &result) {
+    virtual bool range_update(MapKey& start_key, bool start_incl, MapKey& end_key, bool end_incl,
+                              std::vector< std::shared_ptr< BlkValue > >& result) {
         static int cnt = 0;
         auto start_offset = start_key.start();
         auto end_offset = end_key.start();
@@ -137,10 +139,10 @@ public:
         if (!end_incl) {
             --num_blks;
         }
-        std::vector<int> fd_list;
-        std::vector<uint64_t> offset;
-        std::vector<uint64_t> size;
-        get_fd_and_offset(start_offset, num_blks, fd_list, offset, size); 
+        std::vector< int > fd_list;
+        std::vector< uint64_t > offset;
+        std::vector< uint64_t > size;
+        get_fd_and_offset(start_offset, num_blks, fd_list, offset, size);
         struct iovec iov[MAX_SEGMENT_BLKS];
 
         assert(num_blks == result.size());
@@ -166,14 +168,14 @@ public:
         return true;
     }
 
-    void get_fd_and_offset(uint64_t offset, uint32_t nblks, std::vector<int> &fd_list, std::vector<uint64_t> &fd_offset, 
-                          std::vector<uint64_t> &size) {
+    void get_fd_and_offset(uint64_t offset, uint32_t nblks, std::vector< int >& fd_list,
+                           std::vector< uint64_t >& fd_offset, std::vector< uint64_t >& size) {
         while (nblks != 0) {
-            uint32_t seg_num = offset/MAX_SEGMENT_BLKS;
+            uint32_t seg_num = offset / MAX_SEGMENT_BLKS;
             assert(seg_num <= m_max_seg);
             int seg_offset = offset - (seg_num * MAX_SEGMENT_BLKS);
             uint64_t io_size = MAX_SEGMENT_BLKS - seg_offset;
-            
+
             if (nblks > io_size) {
                 nblks = nblks - io_size;
                 offset = offset + io_size;
@@ -181,7 +183,7 @@ public:
                 io_size = nblks;
                 nblks = 0;
             }
-            
+
             fd_list.push_back(m_fd_list[seg_num % m_fd_list.size()]);
             fd_offset.push_back(((seg_num / m_fd_list.size()) * MAX_SEGMENT_BLKS) + seg_offset);
             size.push_back(io_size);

@@ -24,8 +24,9 @@ IOMgrExecutor::IOMgrExecutor(int num_threads, int num_priorities, uint32_t max_q
     m_write_cnt = 0;
     m_ev_fd = eventfd(0, EFD_NONBLOCK);
     m_iomgr = std::make_shared< iomgr::ioMgr >(num_ep, num_threads);
-    m_iomgr->add_fd(m_ev_fd, [this](auto fd, auto cookie, auto event) { process_ev_callback(fd, cookie, event); },
-                    EPOLLIN, 9, nullptr);
+    m_iomgr->add_fd(
+        m_ev_fd, [this](auto fd, auto cookie, auto event) { process_ev_callback(fd, cookie, event); }, EPOLLIN, 9,
+        nullptr);
     m_ep = new LoadGenEP(m_iomgr);
     m_iomgr->add_ep(m_ep);
     // exec start should be called before iomgr->start
@@ -64,7 +65,7 @@ void IOMgrExecutor::process_ev_callback(const int fd, const void* cookie, const 
 
     assert(fd == m_ev_fd);
 
-    uint64_t              temp;
+    uint64_t temp;
     [[maybe_unused]] auto rsize = read(fd, &temp, sizeof(uint64_t));
 
     m_iomgr->process_done(fd, event);

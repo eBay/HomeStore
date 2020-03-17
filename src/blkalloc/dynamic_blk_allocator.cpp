@@ -11,15 +11,11 @@
 
 namespace omstorage {
 
-void thread_func(DynamicBlkAllocator *b) {
-    b->allocator_state_machine();
-}
+void thread_func(DynamicBlkAllocator* b) { b->allocator_state_machine(); }
 
-void DynamicBlkAllocator::inited() {
-}
+void DynamicBlkAllocator::inited() {}
 
-DynamicBlkAllocator::DynamicBlkAllocator(BlkAllocConfig &cfg) :
-        BlkAllocator(cfg) {
+DynamicBlkAllocator::DynamicBlkAllocator(BlkAllocConfig& cfg) : BlkAllocator(cfg) {
     // Initialize the state to done and start the thread
     m_region_state = BLK_ALLOCATOR_DONE;
     m_wait_alloc_segment = NULL;
@@ -27,7 +23,7 @@ DynamicBlkAllocator::DynamicBlkAllocator(BlkAllocConfig &cfg) :
 
     // Allocate 2 bitmaps. Every atom gets a bit in the bitmap.
     m_allocBm = new BitMapUnsafe(cfg.getTotalPages() * cfg.getAtomsPerPage());
-    //m_cacheBm = new BitMapSafe(m_allocBm);
+    // m_cacheBm = new BitMapSafe(m_allocBm);
     m_cacheBm = new BitMapUnsafe(cfg.getTotalPages() * cfg.getAtomsPerPage());
 
     // Create blk entry table
@@ -51,7 +47,7 @@ DynamicBlkAllocator::DynamicBlkAllocator(BlkAllocConfig &cfg) :
     // Create segments with as many blk groups as configured.
     uint64_t segSize = cfg.getTotalPages() / cfg.getTotalSegments() * cfg.getAtomsPerPage();
     for (uint64_t i = 0; i < cfg.getTotalSegments(); i++) {
-        PageAllocSegment *seg = new PageAllocSegment(segSize, i);
+        PageAllocSegment* seg = new PageAllocSegment(segSize, i);
         SegQueue::handle_type segId = m_heap_segments.push(seg);
         seg->set_segment_id(segId);
     }
@@ -65,14 +61,12 @@ DynamicBlkAllocator::DynamicBlkAllocator(BlkAllocConfig &cfg) :
     btreeCfg.setMaxValueSize(0);
     m_blk_cache = new MemBtreeKVStore< DynamicPageAllocCacheEntry, EmptyClass >(btreeCfg);
 
-    //m_thread_id = std::thread(&BlkRegion::BlkRegionThreadFunc);
+    // m_thread_id = std::thread(&BlkRegion::BlkRegionThreadFunc);
     // Start a trhead which will do sweeping job of free segments
     m_thread_id = std::thread(thread_func, this);
 }
 
-std::thread *DynamicBlkAllocator::get_thread() {
-    return &m_thread_id;
-}
+std::thread* DynamicBlkAllocator::get_thread() { return &m_thread_id; }
 
 DynamicBlkAllocator::~DynamicBlkAllocator() {
     {
@@ -89,7 +83,7 @@ DynamicBlkAllocator::~DynamicBlkAllocator() {
 // Runs only in per region thread. In other words, this
 // is a single threaded state machine.
 void DynamicBlkAllocator::allocator_state_machine() {
-    PageAllocSegment *allocateSeg = NULL;
+    PageAllocSegment* allocateSeg = NULL;
     bool allocate;
 
     fprintf(stderr, "Starting new blk region thread\n");
@@ -127,25 +121,24 @@ void DynamicBlkAllocator::allocator_state_machine() {
     }
 }
 
-bool
-DynamicBlkAllocator::is_blk_alloced(BlkId &in_bid) {
+bool DynamicBlkAllocator::is_blk_alloced(BlkId& in_bid) {
     assert(0);
     return false;
 }
 
-BlkAllocStatus DynamicBlkAllocator::alloc(BlkId &out_blkid) {
+BlkAllocStatus DynamicBlkAllocator::alloc(BlkId& out_blkid) {
     assert(0);
     return BLK_ALLOC_SUCCESS;
 }
 
-BlkAllocStatus DynamicBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &hints, 
-                                 std::vector<BlkId> &out_blkid) {
+BlkAllocStatus DynamicBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& hints,
+                                          std::vector< BlkId >& out_blkid) {
     /* TODO will implement it later */
     assert(0);
     return BLK_ALLOC_SPACEFULL;
 }
 
-BlkAllocStatus DynamicBlkAllocator::alloc(uint32_t size, uint32_t desired_temp, Blk *out_blk, bool retry) {
+BlkAllocStatus DynamicBlkAllocator::alloc(uint32_t size, uint32_t desired_temp, Blk* out_blk, bool retry) {
     uint32_t nAtoms = (size - 1) / m_cfg.getAtomSize() + 1;
     BlkAllocStatus ret = BLK_ALLOC_SUCCESS;
     bool found = false;
@@ -188,10 +181,9 @@ BlkAllocStatus DynamicBlkAllocator::alloc(uint32_t size, uint32_t desired_temp, 
     uint64_t pageId = actualEntry.getPageId();
     BitStats bitStats;
 
-    PageAllocGroup *pggrp = pageid_to_group(pageId);
+    PageAllocGroup* pggrp = pageid_to_group(pageId);
     pggrp->lock();
-    m_allocBm->getResetBitStats(pageId * m_cfg.getAtomsPerPage(),
-                                (nPages * m_cfg.getAtomsPerPage()), &bitStats);
+    m_allocBm->getResetBitStats(pageId * m_cfg.getAtomsPerPage(), (nPages * m_cfg.getAtomsPerPage()), &bitStats);
     pggrp->unlock();
 
     uint32_t atomSize = m_cfg.getAtomSize();
@@ -258,9 +250,9 @@ BlkAllocStatus DynamicBlkAllocator::allocBlkSeries(uint32_t minBlks, uint32_t de
 }
 #endif
 
-void DynamicBlkAllocator::free(Blk &b) {
+void DynamicBlkAllocator::free(Blk& b) {
     for (auto i = 0; i < b.getPieces(); i++) {
-        PageAllocGroup *pggrp = pageid_to_group(b.getPageId(i));
+        PageAllocGroup* pggrp = pageid_to_group(b.getPageId(i));
         pggrp->lock();
 
         uint64_t pgid = b.getPageId(i);
@@ -273,7 +265,7 @@ void DynamicBlkAllocator::free(Blk &b) {
             assert(nBits < m_cfg.getAtomSize());
 
             BitStats bitStats;
-            DynamicPageAllocEntry *pgEntry = get_page_entry(pgid);
+            DynamicPageAllocEntry* pgEntry = get_page_entry(pgid);
 
             // Get the first bit for this blk
             uint64_t pageStartBit = pageid_to_bit(pgid, 0);
@@ -281,16 +273,13 @@ void DynamicBlkAllocator::free(Blk &b) {
 
             // We need to get the pieces neighbor and update the cache
             // with correct details or remove those entries altogether.
-            DynamicPageAllocCacheEntry cacheEntry(bitStats.nResetBitsCount,
-                                      bitStats.nMaxContigousResetCount,
-                                      pgEntry->get_temperature(),
-                                      pgid);
+            DynamicPageAllocCacheEntry cacheEntry(bitStats.nResetBitsCount, bitStats.nMaxContigousResetCount,
+                                                  pgEntry->get_temperature(), pgid);
             bool found = m_blk_cache->remove(cacheEntry);
             if (!found) {
                 cout << "Looks like cache bitmap is not in sync with "
                      << " cache btree. Its possible only if multiple threads "
-                     << " are freeing on same blk (" << pgid
-                     << ")" << endl;
+                     << " are freeing on same blk (" << pgid << ")" << endl;
             }
         }
 
@@ -360,9 +349,9 @@ void DynamicBlkAllocator::commitBlks(uint64_t blkNum, uint32_t nBlks)
 }
 #endif
 
-void DynamicBlkAllocator::commit(Blk &b) {
+void DynamicBlkAllocator::commit(Blk& b) {
     for (auto i = 0; i < b.getPieces(); i++) {
-        PageAllocGroup *pggrp = pageid_to_group(b.getPageId(i));
+        PageAllocGroup* pggrp = pageid_to_group(b.getPageId(i));
         uint64_t startBit = pageid_to_bit(b.getPageId(i), b.getOffset(i));
         uint32_t nBits = size_to_nbits(b.getSize(i));
 
@@ -377,7 +366,7 @@ void DynamicBlkAllocator::commit(Blk &b) {
 }
 
 // This runs on per region thread and is at present single threaded.
-void DynamicBlkAllocator::fill_cache(PageAllocSegment *seg) {
+void DynamicBlkAllocator::fill_cache(PageAllocSegment* seg) {
     uint64_t nAddedAtoms = 0;
     if (seg == NULL) {
         seg = m_heap_segments.top();
@@ -403,19 +392,20 @@ void DynamicBlkAllocator::fill_cache(PageAllocSegment *seg) {
     m_heap_segments.update(seg->get_segment_id(), seg);
 }
 
-uint64_t DynamicBlkAllocator::fill_cache_in_group(uint64_t grp_num, PageAllocSegment *seg) {
+uint64_t DynamicBlkAllocator::fill_cache_in_group(uint64_t grp_num, PageAllocSegment* seg) {
     DynamicPageAllocCacheEntry cEntry;
     EmptyClass dummy;
     bool entryValid = false;
     uint64_t addedAtoms = 0;
 
-    PageAllocGroup *pggrp = get_page_group(grp_num);
+    PageAllocGroup* pggrp = get_page_group(grp_num);
     pggrp->lock();
 
     uint64_t curPageId = grp_num * m_cfg.getPagesPerGroup();
     uint64_t endPageId = curPageId + m_cfg.getPagesPerGroup();
 
-    // Walk through every page until we either reach end of the pagegroup or until satisfied with number of cache entries.
+    // Walk through every page until we either reach end of the pagegroup or until satisfied with number of cache
+    // entries.
     while ((m_cache_entries < m_cfg.getMaxCachePages()) && (curPageId < endPageId)) {
         uint64_t startBit = pageid_to_bit(curPageId, 0);
         uint64_t nBits = size_to_nbits(m_cfg.getPageSize());
@@ -619,31 +609,21 @@ void DynamicBlkAllocator::setBlksFreed(uint32_t startBlk, uint32_t count)
 }
 #endif
 
-inline uint32_t DynamicBlkAllocator::pageid_to_groupid(uint64_t pgid) {
-    return pgid / m_cfg.getTotalGroups();
-}
+inline uint32_t DynamicBlkAllocator::pageid_to_groupid(uint64_t pgid) { return pgid / m_cfg.getTotalGroups(); }
 
-PageAllocGroup *DynamicBlkAllocator::pageid_to_group(uint64_t pgid) {
-    return (&m_pg_grps[pageid_to_groupid(pgid)]);
-}
+PageAllocGroup* DynamicBlkAllocator::pageid_to_group(uint64_t pgid) { return (&m_pg_grps[pageid_to_groupid(pgid)]); }
 
-PageAllocGroup *DynamicBlkAllocator::get_page_group(uint64_t grp_num) {
-    return &m_pg_grps[grp_num];
-}
+PageAllocGroup* DynamicBlkAllocator::get_page_group(uint64_t grp_num) { return &m_pg_grps[grp_num]; }
 
-DynamicPageAllocEntry *DynamicBlkAllocator::get_page_entry(uint64_t pgid) {
-    return &m_pg_entries[pgid];
-}
+DynamicPageAllocEntry* DynamicBlkAllocator::get_page_entry(uint64_t pgid) { return &m_pg_entries[pgid]; }
 
-inline uint64_t DynamicBlkAllocator::page_id_to_atom(uint64_t pgid) {
-    return (pgid * m_cfg.getAtomsPerPage());
-}
+inline uint64_t DynamicBlkAllocator::page_id_to_atom(uint64_t pgid) { return (pgid * m_cfg.getAtomsPerPage()); }
 
 // Run in non-region threads. It can be called by multiple threads simultaneously.
 // Request for more blocks from a specified segment.
 // If BlkSegment is NULL, then
 // it picks the first segment to allocate from.
-void DynamicBlkAllocator::request_more_pages(PageAllocSegment *seg) {
+void DynamicBlkAllocator::request_more_pages(PageAllocSegment* seg) {
     bool allocate = false;
     {
         // acquire lock
@@ -660,7 +640,7 @@ void DynamicBlkAllocator::request_more_pages(PageAllocSegment *seg) {
     }
 }
 
-void DynamicBlkAllocator::requestMorePagesWait(PageAllocSegment *seg) {
+void DynamicBlkAllocator::requestMorePagesWait(PageAllocSegment* seg) {
     request_more_pages(seg);
     {
         // Wait for notification that it is done
@@ -689,4 +669,4 @@ string DynamicBlkAllocator::to_string() {
     return oss.str();
 }
 
-} //namespace omstorage
+} // namespace omstorage

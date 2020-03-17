@@ -417,8 +417,9 @@ public:
         max_io_size = params.max_io_size;
         ev_fd = eventfd(0, EFD_NONBLOCK);
 
-        iomgr_obj->add_fd(ev_fd, [this](auto fd, auto cookie, auto event) { process_ev_common(fd, cookie, event); },
-                          EPOLLIN, 9, nullptr);
+        iomgr_obj->add_fd(
+            ev_fd, [this](auto fd, auto cookie, auto event) { process_ev_common(fd, cookie, event); }, EPOLLIN, 9,
+            nullptr);
         ep = new test_ep(iomgr_obj);
         iomgr_obj->add_ep(ep);
         iomgr_obj->start();

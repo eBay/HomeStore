@@ -1183,7 +1183,7 @@ std::error_condition HomeBlks::shutdown(shutdown_comp_callback shutdown_comp_cb,
             m_cv.wait(lk);
         }
     }
-    
+
     // The volume destructor should be triggered automatcially when ref_cnt drops to zero;
 
     // Sart a thread to monitor the shutdown progress, if timeout, trigger force shutdown
@@ -1194,20 +1194,16 @@ std::error_condition HomeBlks::shutdown(shutdown_comp_callback shutdown_comp_cb,
     for (auto& x : task_result) {
         x.get();
     }
-    
+
     return no_error;
 }
 
 // m_shutdown is used for I/O threads to check is_shutdown() without holding m_vol_lock;
-bool HomeBlks::is_shutdown() {
-    return m_shutdown.load();
-}
+bool HomeBlks::is_shutdown() { return m_shutdown.load(); }
 
-vol_state HomeBlks::get_state(VolumePtr vol) {
-    return vol->get_state();
-}
+vol_state HomeBlks::get_state(VolumePtr vol) { return vol->get_state(); }
 
 bool HomeBlks::fix_tree(VolumePtr vol, bool verify) {
-    std::unique_lock<std::recursive_mutex>  lg(m_vol_lock);
+    std::unique_lock< std::recursive_mutex > lg(m_vol_lock);
     return vol->fix_mapping_btree(verify);
 }

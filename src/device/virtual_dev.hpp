@@ -94,7 +94,7 @@ struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
 
 #ifndef NDEBUG
     uint64_t dev_offset;
-    uint8_t *mem;
+    uint8_t* mem;
 #endif
 
     void inc_ref() { intrusive_ptr_add_ref(this); }
@@ -494,7 +494,7 @@ public:
             req->io_start_time = Clock::now();
 #ifndef NDEBUG
             req->dev_offset = dev_offset;
-            req->mem = (uint8_t *)(iov[0].iov_base);
+            req->mem = (uint8_t*)(iov[0].iov_base);
 #endif
             pdev->writev(iov, iovcnt, size, dev_offset, (uint8_t*)req.get());
         }
