@@ -120,7 +120,8 @@ protected:
 
 class VolumeMetrics : public sisl::MetricsGroupWrapper {
 public:
-    explicit VolumeMetrics(const std::string vol_uuid) : sisl::MetricsGroupWrapper("Volume", vol_uuid.c_str()) {
+    explicit VolumeMetrics(const char* vol_uuid) :
+                    sisl::MetricsGroupWrapper("Volume", vol_uuid) {
         REGISTER_COUNTER(volume_read_count, "Total Volume read operations", "volume_op_count", {"op", "read"});
         REGISTER_COUNTER(volume_write_count, "Total Volume write operations", "volume_op_count", {"op", "write"});
         REGISTER_COUNTER(volume_outstanding_data_read_count, "Total Volume data outstanding read cnt",
