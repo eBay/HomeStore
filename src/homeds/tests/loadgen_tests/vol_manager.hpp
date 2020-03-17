@@ -276,8 +276,6 @@ public:
         return ret_io;
     }
 
-private:
-
     void set_max_vols(uint64_t num_vols) { m_max_vols = num_vols; }
 
 private:
