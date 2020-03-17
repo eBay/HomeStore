@@ -106,7 +106,7 @@ public:
                         boost::uuids::uuid vol_uuid,
                         blk_remove_cb remove_cb ) :
             m_pending_reads_map(BLK_READ_MAP_SIZE),
-            m_metrics(boost::uuids::to_string(vol_uuid)),
+            m_metrics(boost::lexical_cast<std::string>(vol_uuid)),
             m_remove_cb(remove_cb),
             m_vol_name(vol_name),
             m_vol_uuid(boost::lexical_cast<std::string>(vol_uuid)) {}
