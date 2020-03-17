@@ -27,8 +27,8 @@ public:
     // Queues this function to execute in other thread and return back.
     // If the num_entries in queue > size given in max_queue_size, block and wait until queue becomes less.
     // IOMgr thread should dequeue the requests and start executing.
-    void                            add(callback_t done_cb);
-    bool                            is_empty();
+    void add(callback_t done_cb);
+    bool is_empty();
     std::shared_ptr< iomgr::ioMgr > get_iomgr();
 
 private:
@@ -39,12 +39,12 @@ private:
 
 private:
     folly::MPMCQueue< callback_t, std::atomic, true > m_cq;
-    std::shared_ptr< iomgr::ioMgr >                   m_iomgr;
-    LoadGenEP*                                        m_ep;
-    int                                               m_ev_fd;
-    std::atomic_bool                                  m_running;
-    std::atomic_ullong                                m_read_cnt;
-    std::atomic_ullong                                m_write_cnt;
+    std::shared_ptr< iomgr::ioMgr > m_iomgr;
+    LoadGenEP* m_ep;
+    int m_ev_fd;
+    std::atomic_bool m_running;
+    std::atomic_ullong m_read_cnt;
+    std::atomic_ullong m_write_cnt;
 };
 
 } // namespace loadgen

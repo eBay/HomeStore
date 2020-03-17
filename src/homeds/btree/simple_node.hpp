@@ -18,32 +18,31 @@
 using namespace std;
 using namespace boost;
 
-namespace homeds { namespace btree {
+namespace homeds {
+namespace btree {
 
-#define SimpleNode              VariantNode<btree_node_type::SIMPLE, K, V>
+#define SimpleNode VariantNode< btree_node_type::SIMPLE, K, V >
 
-template< typename K, typename V >
-class SimpleNode : public PhysicalNode<SimpleNode, K, V> {
+template < typename K, typename V >
+class SimpleNode : public PhysicalNode< SimpleNode, K, V > {
 public:
-    SimpleNode(bnodeid_t id, bool init,const BtreeConfig &cfg) :
-            PhysicalNode<SimpleNode, K, V>(id, init) {
+    SimpleNode(bnodeid_t id, bool init, const BtreeConfig& cfg) : PhysicalNode< SimpleNode, K, V >(id, init) {
         this->set_node_type(btree_node_type::SIMPLE);
     }
-    SimpleNode(bnodeid_t* id, bool init,const BtreeConfig &cfg) :
-            PhysicalNode<SimpleNode, K, V>(id, init) {
+    SimpleNode(bnodeid_t* id, bool init, const BtreeConfig& cfg) : PhysicalNode< SimpleNode, K, V >(id, init) {
         this->set_node_type(btree_node_type::SIMPLE);
     }
-public:
 
+public:
 #ifndef NDEBUG
     void validate_sanity() {
         int i = 1;
-        std::map<int, bool> mapOfWords;
-        //validate if keys are in ascending orde
+        std::map< int, bool > mapOfWords;
+        // validate if keys are in ascending orde
         K prevKey;
         while (i < (int)this->get_total_entries()) {
             K key;
-            get_nth_key(i,&key,false);
+            get_nth_key(i, &key, false);
             uint64_t kp = *(uint64_t*)key.get_blob().bytes;
             if (i > 0 && prevKey.compare(&key) > 0) {
                 LOGDEBUG("non sorted entry : {} -> {} ", kp, this->to_string());
@@ -52,10 +51,10 @@ public:
             ++i;
             prevKey = key;
         }
-    } 
+    }
 #endif
 
-    void get(uint32_t ind, BtreeValue *outval, bool copy) const {
+    void get(uint32_t ind, BtreeValue* outval, bool copy) const {
         // Need edge index
         if (ind == this->get_total_entries()) {
             assert(!this->is_leaf());
@@ -69,9 +68,9 @@ public:
 
     // Insert the key and value in provided index
     // Assumption: Node lock is already taken
-    btree_status_t insert(uint32_t ind, const BtreeKey &key, const BtreeValue &val) {
-        //K& k = *(dynamic_cast<K *>(&key));
-        //assert(get_total_entries() < getMaxEntries());
+    btree_status_t insert(uint32_t ind, const BtreeKey& key, const BtreeValue& val) {
+        // K& k = *(dynamic_cast<K *>(&key));
+        // assert(get_total_entries() < getMaxEntries());
         uint32_t sz = (this->get_total_entries() - (ind + 1) + 1) * get_nth_obj_size(0);
 
         if (sz != 0) {
@@ -92,12 +91,13 @@ public:
         std::stringstream ss;
         ss << "###################" << endl;
         ss << "-------------------------------" << endl;
-        ss << "id=" << this->get_node_id().to_string() << " nEntries=" << this->get_total_entries() << " leaf?=" << this->is_leaf();
+        ss << "id=" << this->get_node_id().to_string() << " nEntries=" << this->get_total_entries()
+           << " leaf?=" << this->is_leaf();
 
         if (!this->is_leaf()) {
             bnodeid_t edge_id;
             edge_id = this->get_edge_id();
-            ss << " edge_id=" << static_cast<uint64_t>(edge_id.m_id);
+            ss << " edge_id=" << static_cast< uint64_t >(edge_id.m_id);
         }
         ss << "\n-------------------------------" << endl;
         for (uint32_t i = 0; i < this->get_total_entries(); i++) {
@@ -122,40 +122,38 @@ public:
         return ss.str();
     }
 
-    void remove(int ind) {
-        remove(ind,ind);
-    }
+    void remove(int ind) { remove(ind, ind); }
 
-    //ind_s and ind_e are inclusive
-    void remove(int ind_s,int ind_e)  {
+    // ind_s and ind_e are inclusive
+    void remove(int ind_s, int ind_e) {
         int total_entries = this->get_total_entries();
         assert(total_entries >= ind_s);
-        assert(total_entries >=ind_e);
+        assert(total_entries >= ind_e);
 
-        if (ind_e == total_entries) { //edge entry
+        if (ind_e == total_entries) { // edge entry
             assert(!this->is_leaf() && this->has_valid_edge());
             BtreeNodeInfo last_1_val;
 
-            // Set the last key/value as edge entry and by decrementing entry count automatically removed the last entry.
+            // Set the last key/value as edge entry and by decrementing entry count automatically removed the last
+            // entry.
             get_nth_value(ind_s - 1, &last_1_val, false);
             this->set_edge_value(last_1_val);
-            this->sub_entries(total_entries-ind_s+1);
+            this->sub_entries(total_entries - ind_s + 1);
         } else {
-            uint32_t sz = (total_entries - ind_e -1) * get_nth_obj_size(0);
+            uint32_t sz = (total_entries - ind_e - 1) * get_nth_obj_size(0);
 
             if (sz != 0) {
                 memmove(get_nth_obj(ind_s), get_nth_obj(ind_e + 1), sz);
             }
-            this->sub_entries(ind_e-ind_s+1);
+            this->sub_entries(ind_e - ind_s + 1);
         }
         this->inc_gen();
 #ifndef NDEBUG
         validate_sanity();
 #endif
-        
     }
 
-    void update(uint32_t ind, const BtreeValue &val) {
+    void update(uint32_t ind, const BtreeValue& val) {
         if (ind == this->get_total_entries()) {
             assert(!this->is_leaf());
             this->set_edge_value(val);
@@ -171,7 +169,7 @@ public:
 #endif
     }
 
-    void update(uint32_t ind, const BtreeKey &key, const BtreeValue &val) {
+    void update(uint32_t ind, const BtreeKey& key, const BtreeValue& val) {
         if (ind == this->get_total_entries()) {
             assert(!this->is_leaf());
             this->set_edge_value(val);
@@ -185,12 +183,11 @@ public:
 #endif
     }
 
-    uint32_t get_available_size(const BtreeConfig &cfg) const {
+    uint32_t get_available_size(const BtreeConfig& cfg) const {
         return (cfg.get_node_area_size() - (this->get_total_entries() * get_nth_obj_size(0)));
     }
 
-    uint32_t move_out_to_right_by_entries(const BtreeConfig &cfg, SimpleNode *other_node,
-                                          uint32_t nentries) {
+    uint32_t move_out_to_right_by_entries(const BtreeConfig& cfg, SimpleNode* other_node, uint32_t nentries) {
 
         // Minimum of whats to be moved out and how many slots available in other node
         nentries = std::min({nentries, this->get_total_entries(), other_node->get_available_entries(cfg)});
@@ -222,11 +219,11 @@ public:
         return nentries;
     }
 
-    uint32_t move_out_to_right_by_size(const BtreeConfig &cfg, SimpleNode *other_node, uint32_t size) {
-        return (get_nth_obj_size(0) * move_out_to_right_by_entries(cfg, other_node, size/get_nth_obj_size(0)));
+    uint32_t move_out_to_right_by_size(const BtreeConfig& cfg, SimpleNode* other_node, uint32_t size) {
+        return (get_nth_obj_size(0) * move_out_to_right_by_entries(cfg, other_node, size / get_nth_obj_size(0)));
     }
 
-    uint32_t move_in_from_right_by_entries(const BtreeConfig &cfg, SimpleNode *other_node, uint32_t nentries) {
+    uint32_t move_in_from_right_by_entries(const BtreeConfig& cfg, SimpleNode* other_node, uint32_t nentries) {
         // Minimum of whats to be moved and how many slots available
         nentries = std::min({nentries, other_node->get_total_entries(), get_available_entries(cfg)});
         uint32_t sz = nentries * get_nth_obj_size(0);
@@ -257,12 +254,12 @@ public:
         return nentries;
     }
 
-    uint32_t move_in_from_right_by_size(const BtreeConfig &cfg, SimpleNode *other_node, uint32_t size) {
-        return (get_nth_obj_size(0) * move_in_from_right_by_entries(cfg, other_node, size/get_nth_obj_size(0)));
+    uint32_t move_in_from_right_by_size(const BtreeConfig& cfg, SimpleNode* other_node, uint32_t size) {
+        return (get_nth_obj_size(0) * move_in_from_right_by_entries(cfg, other_node, size / get_nth_obj_size(0)));
     }
-    
-    bool is_split_needed(const BtreeConfig &cfg, const BtreeKey &key, const BtreeValue &value,
-                         int *out_ind_hint, btree_put_type &putType, BtreeUpdateRequest<K,V> *bur = nullptr) const {
+
+    bool is_split_needed(const BtreeConfig& cfg, const BtreeKey& key, const BtreeValue& value, int* out_ind_hint,
+                         btree_put_type& putType, BtreeUpdateRequest< K, V >* bur = nullptr) const {
         // TODO - add support for callback based internal/leaf nodes
         uint32_t alreadyFilledSize = cfg.get_node_area_size() - get_available_size(cfg);
 
@@ -271,61 +268,57 @@ public:
     }
 
     ////////// Overridden private methods //////////////
-    inline uint32_t get_nth_obj_size(uint32_t ind) const {
-        return (get_obj_key_size(ind) + get_obj_value_size(ind));
-    }
+    inline uint32_t get_nth_obj_size(uint32_t ind) const { return (get_obj_key_size(ind) + get_obj_value_size(ind)); }
 
-    void get_nth_key(uint32_t ind, BtreeKey *outkey, bool copykey) const {
+    void get_nth_key(uint32_t ind, BtreeKey* outkey, bool copykey) const {
         assert(ind < this->get_total_entries());
 
         homeds::blob b;
-        b.bytes = (uint8_t *)(this->get_node_area() + (get_nth_obj_size(ind) * ind));
-        b.size  = get_obj_key_size(ind);
+        b.bytes = (uint8_t*)(this->get_node_area() + (get_nth_obj_size(ind) * ind));
+        b.size = get_obj_key_size(ind);
 
         (copykey) ? outkey->copy_blob(b) : outkey->set_blob(b);
     }
 
-    void get_nth_value(uint32_t ind, BtreeValue *outval, bool copy) const {
+    void get_nth_value(uint32_t ind, BtreeValue* outval, bool copy) const {
         assert(ind < this->get_total_entries());
 
         homeds::blob b;
-        b.bytes = (uint8_t *)(this->get_node_area() + (get_nth_obj_size(ind) * ind)) + get_obj_key_size(ind);
+        b.bytes = (uint8_t*)(this->get_node_area() + (get_nth_obj_size(ind) * ind)) + get_obj_key_size(ind);
         b.size = outval->get_blob_size();
 
         (copy) ? outval->copy_blob(b) : outval->set_blob(b);
     }
 
-    int compare_nth_key(const BtreeKey &cmp_key, int ind) const {
+    int compare_nth_key(const BtreeKey& cmp_key, int ind) const {
         K nth_key;
         get_nth_key(ind, &nth_key, false /* copyKey */);
         return nth_key.compare(&cmp_key);
     }
 
-    int compare_nth_key_range(const BtreeSearchRange &range, int ind) const {
+    int compare_nth_key_range(const BtreeSearchRange& range, int ind) const {
         K nth_key;
         get_nth_key(ind, &nth_key, false /* copyKey */);
         return nth_key.compare_range(range);
     }
 
     /////////////// Other Internal Methods /////////////
-    void set_nth_obj(uint32_t ind, const BtreeKey &k, const BtreeValue &v) {
+    void set_nth_obj(uint32_t ind, const BtreeKey& k, const BtreeValue& v) {
         assert(ind <= this->get_total_entries());
 
-        uint8_t *entry = this->get_node_area_mutable() + (get_nth_obj_size(ind) * ind);
+        uint8_t* entry = this->get_node_area_mutable() + (get_nth_obj_size(ind) * ind);
         homeds::blob key_blob = k.get_blob();
-        memcpy((void *) entry, key_blob.bytes, key_blob.size);
+        memcpy((void*)entry, key_blob.bytes, key_blob.size);
 
         homeds::blob val_blob = v.get_blob();
-        memcpy((void *) (entry + key_blob.size), val_blob.bytes, val_blob.size);
+        memcpy((void*)(entry + key_blob.size), val_blob.bytes, val_blob.size);
     }
 
-    uint32_t get_available_entries(const BtreeConfig &cfg) const {
-        return get_available_size(cfg)/get_nth_obj_size(0);
+    uint32_t get_available_entries(const BtreeConfig& cfg) const {
+        return get_available_size(cfg) / get_nth_obj_size(0);
     }
 
-    inline uint32_t get_obj_key_size(uint32_t ind) const {
-        return K::get_fixed_size();
-    }
+    inline uint32_t get_obj_key_size(uint32_t ind) const { return K::get_fixed_size(); }
 
     inline uint32_t get_obj_value_size(uint32_t ind) const {
         if (this->is_leaf()) {
@@ -335,23 +328,22 @@ public:
         }
     }
 
-    uint8_t *get_nth_obj(uint32_t ind) {
-        return (this->get_node_area_mutable() + (get_nth_obj_size(ind) * ind));
-    }
+    uint8_t* get_nth_obj(uint32_t ind) { return (this->get_node_area_mutable() + (get_nth_obj_size(ind) * ind)); }
 
-    void set_nth_key(uint32_t ind, BtreeKey *key) {
-        uint8_t *entry = this->get_node_area_mutable() + (get_nth_obj_size(ind) * ind);
+    void set_nth_key(uint32_t ind, BtreeKey* key) {
+        uint8_t* entry = this->get_node_area_mutable() + (get_nth_obj_size(ind) * ind);
 
         homeds::blob b = key->get_blob();
-        memcpy((void *) entry, (void *) b.bytes, b.size);
+        memcpy((void*)entry, (void*)b.bytes, b.size);
     }
 
-    void set_nth_value(uint32_t ind, const BtreeValue &v) {
+    void set_nth_value(uint32_t ind, const BtreeValue& v) {
         assert(ind < this->get_total_entries());
-        uint8_t *entry = this->get_node_area_mutable() + (get_nth_obj_size(ind) * ind) + get_obj_key_size(ind);
+        uint8_t* entry = this->get_node_area_mutable() + (get_nth_obj_size(ind) * ind) + get_obj_key_size(ind);
 
         homeds::blob b = v.get_blob();
-        memcpy((void *) entry, b.bytes, b.size);
+        memcpy((void*)entry, b.bytes, b.size);
     }
 };
-} }
+} // namespace btree
+} // namespace homeds

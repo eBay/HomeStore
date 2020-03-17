@@ -32,7 +32,7 @@ public:
         }
     }
 
-    static constexpr bool     is_fixed_size() { return true; }
+    static constexpr bool is_fixed_size() { return true; }
     static constexpr uint32_t get_max_size() { return sizeof(uint64_t); }
 
     explicit SimpleNumberKey(uint64_t num = 0) : m_num(num) {}
@@ -40,7 +40,7 @@ public:
     SimpleNumberKey& operator=(const SimpleNumberKey& other) = default;
 
     static constexpr size_t get_fixed_size() { return sizeof(uint64_t); }
-    uint64_t                to_integer() const { return m_num; }
+    uint64_t to_integer() const { return m_num; }
 
     virtual bool operator==(const KeySpec& other) const override {
         return (compare((const BtreeKey*)&(SimpleNumberKey&)other) == 0);
@@ -76,8 +76,8 @@ public:
     }
     virtual void copy_blob(const homeds::blob& b) { set_blob(b); }
 
-    virtual uint32_t    get_blob_size() const { return sizeof(uint64_t); }
-    virtual void        set_blob_size(uint32_t size) {}
+    virtual uint32_t get_blob_size() const { return sizeof(uint64_t); }
+    virtual void set_blob_size(uint32_t size) {}
     virtual std::string to_string() const { return std::to_string(m_num); }
 
     friend ostream& operator<<(ostream& os, const SimpleNumberKey& k) {
@@ -108,7 +108,7 @@ private:
     } attr_t;
 
     attr_t* m_attr;
-    attr_t  m_inplace_attr;
+    attr_t m_inplace_attr;
 
 public:
     static CompositeNumberKey gen_key(KeyPattern spec, CompositeNumberKey* ref_key = nullptr) {
@@ -132,7 +132,7 @@ public:
         return false;
     }
 
-    static constexpr bool     is_fixed_size() { return true; }
+    static constexpr bool is_fixed_size() { return true; }
     static constexpr uint32_t get_max_size() { return sizeof(attr_t); }
 
     CompositeNumberKey(uint32_t count, uint16_t rank, uint64_t blk_num) {
@@ -161,9 +161,9 @@ public:
     uint32_t get_count() const { return (m_attr->m_count); }
     uint16_t get_rank() const { return (m_attr->m_rank); }
     uint64_t get_blk_num() const { return (m_attr->m_blk_num); }
-    void     set_count(uint32_t count) { m_attr->m_count = count; }
-    void     set_rank(uint32_t rank) { m_attr->m_rank = rank; }
-    void     set_blk_num(uint32_t blkNum) { m_attr->m_blk_num = blkNum; }
+    void set_count(uint32_t count) { m_attr->m_count = count; }
+    void set_rank(uint32_t rank) { m_attr->m_rank = rank; }
+    void set_blk_num(uint32_t blkNum) { m_attr->m_blk_num = blkNum; }
     uint64_t to_integer() const {
         uint64_t n;
         memcpy(&n, m_attr, sizeof(uint64_t));
@@ -242,12 +242,12 @@ public:
         return b;
     }
 
-    virtual void     set_blob(const homeds::blob& b) override { m_attr = (attr_t*)b.bytes; }
-    virtual void     copy_blob(const homeds::blob& b) override { memcpy(m_attr, b.bytes, b.size); }
+    virtual void set_blob(const homeds::blob& b) override { m_attr = (attr_t*)b.bytes; }
+    virtual void copy_blob(const homeds::blob& b) override { memcpy(m_attr, b.bytes, b.size); }
     virtual uint32_t get_blob_size() const override { return (sizeof(attr_t)); }
 
     static uint32_t get_fixed_size() { return (sizeof(attr_t)); }
-    virtual void    set_blob_size(uint32_t size) override {}
+    virtual void set_blob_size(uint32_t size) override {}
 
     std::string to_string() const {
         std::stringstream ss;

@@ -16,11 +16,9 @@ SDS_LOGGING_DECL(device, DEVICE_MANAGER)
 using namespace homeio;
 namespace homestore {
 
-DeviceManager::DeviceManager(NewVDevCallback vcb,
-                             uint32_t const vdev_metadata_size,
-                             std::shared_ptr<iomgr::ioMgr> iomgr,
-                             homeio::comp_callback cb, bool is_file, boost::uuids::uuid system_uuid, 
-                             vdev_error_callback vdev_error_cb) :
+DeviceManager::DeviceManager(NewVDevCallback vcb, uint32_t const vdev_metadata_size,
+                             std::shared_ptr< iomgr::ioMgr > iomgr, homeio::comp_callback cb, bool is_file,
+                             boost::uuids::uuid system_uuid, vdev_error_callback vdev_error_cb) :
         m_comp_cb(cb),
         m_new_vdev_cb(vcb),
         m_iomgr(iomgr),
@@ -29,11 +27,11 @@ DeviceManager::DeviceManager(NewVDevCallback vcb,
         m_system_uuid(system_uuid),
         m_vdev_error_cb(vdev_error_cb) {
 
-    switch(HomeStoreConfig::open_flag) {
-        case BUFFERED_IO : m_open_flags = O_RDWR; break;
-        case READ_ONLY   : m_open_flags = O_RDONLY; break;
-        case DIRECT_IO   :
-        default          : m_open_flags = O_RDWR | O_DIRECT;
+    switch (HomeStoreConfig::open_flag) {
+    case BUFFERED_IO: m_open_flags = O_RDWR; break;
+    case READ_ONLY: m_open_flags = O_RDONLY; break;
+    case DIRECT_IO:
+    default: m_open_flags = O_RDWR | O_DIRECT;
     }
     m_last_vdevid = INVALID_VDEV_ID;
     m_vdev_metadata_size = vdev_metadata_size;
@@ -92,7 +90,7 @@ void DeviceManager::init_devices(std::vector< dev_info >& devices) {
 
     size_t pdev_size = 0;
     for (auto& d : devices) {
-        bool                           is_inited;
+        bool is_inited;
         std::unique_ptr< PhysicalDev > pdev =
             std::make_unique< PhysicalDev >(this, d.dev_names, m_open_flags, m_iomgr, m_comp_cb, m_system_uuid,
                                             m_pdev_id++, max_dev_offset, m_is_file, true, m_dm_info_size, &is_inited);
@@ -136,11 +134,11 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info >& devices) {
     std::vector< std::unique_ptr< PhysicalDev > > uninit_devs;
     uninit_devs.reserve(devices.size());
     uint64_t device_id = INVALID_DEV_ID;
-    bool     rewrite = false;
+    bool rewrite = false;
 
     size_t pdev_size = 0;
     for (auto& d : devices) {
-        bool                           is_inited;
+        bool is_inited;
         std::unique_ptr< PhysicalDev > pdev =
             std::make_unique< PhysicalDev >(this, d.dev_names, m_open_flags, m_iomgr, m_comp_cb, m_system_uuid,
                                             INVALID_DEV_ID, 0, m_is_file, false, m_dm_info_size, &is_inited);
@@ -163,7 +161,7 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info >& devices) {
         if (m_gen_cnt.load() < pdev->sb_gen_cnt()) {
             m_gen_cnt = pdev->sb_gen_cnt();
             device_id = pdev->get_dev_id();
-            rewrite   = HomeStoreConfig::is_read_only ? false : true;
+            rewrite = HomeStoreConfig::is_read_only ? false : true;
         }
 
         HS_ASSERT_NULL(LOGMSG, m_pdevs[pdev->get_dev_id()].get());
@@ -215,8 +213,8 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info >& devices) {
              * larger number of chunks, we should optimize it.
              */
             for (uint32_t i = 0; i < HomeStoreConfig::max_chunks; ++i) {
-                if (m_chunk_info[i].pdev_id == dev_id && 
-                    m_chunk_info[i].slot_allocated && m_chunk_info[i].vdev_id != INVALID_VDEV_ID) {
+                if (m_chunk_info[i].pdev_id == dev_id && m_chunk_info[i].slot_allocated &&
+                    m_chunk_info[i].vdev_id != INVALID_VDEV_ID) {
                     auto vdev_id = m_chunk_info[i].vdev_id;
                     HS_ASSERT_CMP(LOGMSG, m_vdev_info[vdev_id].get_vdev_id(), ==, vdev_id);
                     /* mark this vdev failed */
@@ -412,7 +410,7 @@ void DeviceManager::free_chunk(PhysicalDevChunk* chunk) {
     chunk->set_free();
 
     PhysicalDev* pdev = chunk->get_physical_dev_mutable();
-    auto         freed_ids = pdev->merge_free_chunks(chunk);
+    auto freed_ids = pdev->merge_free_chunks(chunk);
     for (auto ids : freed_ids) {
         if (ids != INVALID_CHUNK_ID) {
             remove_chunk(ids);
@@ -492,7 +490,7 @@ PhysicalDevChunk* DeviceManager::create_new_chunk(PhysicalDev* pdev, uint64_t st
         throw homestore::homestore_exception(s, homestore_error::no_space_avail);
     }
 
-    auto              chunk = std::make_unique< PhysicalDevChunk >(pdev, slot, start_offset, size, c);
+    auto chunk = std::make_unique< PhysicalDevChunk >(pdev, slot, start_offset, size, c);
     PhysicalDevChunk* craw = chunk.get();
     pdev->attach_chunk(craw, prev_chunk);
 

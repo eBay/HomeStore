@@ -28,9 +28,9 @@ struct key_hash {
 class KeySpec {
 public:
     static uint64_t MAX_KEYS;
-    virtual bool    operator==(const KeySpec& rhs) const = 0;
-    virtual bool    operator!=(const KeySpec& rhs) const { return !(operator==(rhs)); }
-    virtual bool    is_consecutive(KeySpec& k) = 0;
+    virtual bool operator==(const KeySpec& rhs) const = 0;
+    virtual bool operator!=(const KeySpec& rhs) const { return !(operator==(rhs)); }
+    virtual bool is_consecutive(KeySpec& k) = 0;
 };
 
 uint64_t KeySpec::MAX_KEYS = 0;

@@ -1,13 +1,13 @@
 namespace homeds {
 namespace loadgen {
-    using namespace std;
+using namespace std;
 #define MAX_SIZE 7 * Gi
 typedef std::function< void(std::error_condition err, const out_params& params) > init_done_callback;
 
 template < typename Executor >
 class DiskInitializer {
-    std::vector< dev_info >         device_info;
-    boost::uuids::uuid              uuid;
+    std::vector< dev_info > device_info;
+    boost::uuids::uuid uuid;
     std::shared_ptr< iomgr::ioMgr > m_ioMgr;
 
 public:
@@ -16,10 +16,11 @@ public:
         assert(success);
     }
     ~DiskInitializer() {
-        VolInterface::get_instance()->shutdown(std::bind(&DiskInitializer::shutdown_callback, this, std::placeholders::_1));
+        VolInterface::get_instance()->shutdown(
+            std::bind(&DiskInitializer::shutdown_callback, this, std::placeholders::_1));
     }
     void cleanup() { remove("file_load_gen"); }
-    void init(Executor& executor, init_done_callback init_done_cb, size_t atomic_page_size=2048) {
+    void init(Executor& executor, init_done_callback init_done_cb, size_t atomic_page_size = 2048) {
         m_ioMgr = executor.get_iomgr();
         start_homestore(init_done_cb, atomic_page_size);
     }
@@ -79,4 +80,4 @@ public:
     void vol_state_change_cb(const VolumePtr& vol, vol_state old_state, vol_state new_state) { assert(0); }
 };
 } // namespace loadgen
-}
+} // namespace homeds

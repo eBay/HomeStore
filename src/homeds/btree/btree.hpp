@@ -95,12 +95,11 @@ private:
 public:
     btree_super_block get_btree_sb() { return m_sb; }
 
-    
-   /**
-    * @brief : return the btree cfg 
-	*
-	* @return : the btree cfg;
-	*/
+    /**
+     * @brief : return the btree cfg
+     *
+     * @return : the btree cfg;
+     */
     BtreeConfig get_btree_cfg() const { return m_btree_cfg; }
 
 #ifdef _PRERELEASE
@@ -709,7 +708,7 @@ public:
     /**
      * @brief : verify btree is consistent and no corruption;
      *
-     * @return : true if btree is not corrupted. 
+     * @return : true if btree is not corrupted.
      *           false if btree is corrupted;
      */
     bool verify_tree() {
@@ -743,12 +742,11 @@ public:
     }
 
     nlohmann::json get_metrics_in_json(bool updated = true) { return m_metrics.get_result_in_json(updated); }
-    
+
 private:
-    
     /**
      * @brief : verify the btree node is corrupted or not;
-     * 
+     *
      * Note: this function should never assert, but only return success or failure since it is in verification mode;
      *
      * @param bnodeid : node id
@@ -827,7 +825,7 @@ private:
             }
         }
 
-exit_on_error: 
+    exit_on_error:
         unlock_node(my_node, acq_lock);
         return success;
     }

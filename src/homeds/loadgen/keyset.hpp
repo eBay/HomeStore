@@ -21,14 +21,14 @@ namespace homeds {
 namespace loadgen {
 template < typename K, typename V >
 struct key_info {
-    folly::RWSpinLock                                     m_lock;
-    K                                                     m_key;
-    bool                                                  m_exclusive_access = true;
-    bool                                                  m_free_pending = false;
-    uint32_t                                              m_mutate_count = 0;
-    uint32_t                                              m_read_count = 0;
-    int32_t                                               m_slot_num;
-    bool                                                  m_err = false;
+    folly::RWSpinLock m_lock;
+    K m_key;
+    bool m_exclusive_access = true;
+    bool m_free_pending = false;
+    uint32_t m_mutate_count = 0;
+    uint32_t m_read_count = 0;
+    int32_t m_slot_num;
+    bool m_err = false;
     std::unique_ptr< boost::circular_buffer< uint64_t > > m_val_hash_codes;
 
     key_info(const K& key, int32_t slot_num = -1) : m_key(key), m_slot_num(slot_num) {}
@@ -37,17 +37,11 @@ struct key_info {
         add_hash_code(val_hash_code);
     }
 
-    void set_error() {
-        m_err = true;
-    }
+    void set_error() { m_err = true; }
 
-    bool is_error() {
-        return m_err;
-    }
+    bool is_error() { return m_err; }
 
-    void clear_error() {
-        m_err = false;
-    }
+    void clear_error() { m_err = false; }
 
     void mutation_started() {
         folly::RWSpinLock::WriteHolder guard(m_lock);
@@ -130,7 +124,7 @@ struct key_info {
                 return true;
             }
         }
-        
+
         return false;
     }
 
@@ -194,11 +188,11 @@ struct key_info_ptr {
 
     key_info< K, V >& operator*() const { return *m_ki; }
     key_info< K, V >* operator->() const { return m_ki; }
-                      operator bool(void) const { return (m_ki == nullptr); }
+    operator bool(void) const { return (m_ki == nullptr); }
 
     KeyRegistry< K, V >* m_registry;
-    key_info< K, V >*    m_ki;
-    bool                 m_is_mutate;
+    key_info< K, V >* m_ki;
+    bool m_is_mutate;
 };
 
 template < typename K, typename V >
@@ -230,7 +224,7 @@ public:
     uint64_t get_keys_count() { return m_data_set.size(); }
 
     void print_data_set() {
-        auto              itr = m_data_set.begin();
+        auto itr = m_data_set.begin();
         std::stringstream ss;
         while (itr != m_data_set.end()) {
             ss << (*itr)->m_key.to_string() << "\n";
@@ -238,16 +232,16 @@ public:
         }
         LOGERROR("key set:{}", ss.str());
     }
-    
-    int update_contigious_kv(std::vector< key_info_ptr< K, V > >& kv, std::vector< std::shared_ptr< V > > &val_vec) {
+
+    int update_contigious_kv(std::vector< key_info_ptr< K, V > >& kv, std::vector< std::shared_ptr< V > >& val_vec) {
         std::unique_lock l(m_rwlock);
         if (kv.size() == 0)
             return 0;
 
         std::shared_ptr< V > val = _generate_value(ValuePattern::RANDOM_BYTES); // GENERATE RANDOM NON-EXISTENT VALUE
-        auto                 keyit = kv.begin();
-        int                  count = 0;
-        bool                 pregenerated = true;
+        auto keyit = kv.begin();
+        int count = 0;
+        bool pregenerated = true;
 
         while (keyit != kv.end()) { // keys and values
             auto kip = *keyit;
@@ -280,8 +274,8 @@ public:
 
     key_info_ptr< K, V > generate_and_put_key(KeyPattern gen_pattern) {
         std::unique_lock l(m_rwlock);
-        key_info_ptr     kip = key_info_ptr(this, _generate_key(gen_pattern), true);
-        auto             result = m_data_set.insert(kip.m_ki);
+        key_info_ptr kip = key_info_ptr(this, _generate_key(gen_pattern), true);
+        auto result = m_data_set.insert(kip.m_ki);
         if (result.second == false) {
             LOGERROR("generated key is not unique!");
             assert(0);
@@ -328,7 +322,7 @@ public:
     // make sures contigious keys returned from data set is also consecutive
     std::vector< key_info_ptr< K, V > > get_consecutive_keys(KeyPattern pattern, bool exclusive_access, bool is_mutate,
                                                              uint32_t num_needed) {
-        std::unique_lock                    l(m_rwlock);
+        std::unique_lock l(m_rwlock);
         std::vector< key_info_ptr< K, V > > kips =
             _get_contigoous_keys(pattern, exclusive_access, is_mutate, num_needed);
         if (kips.size() <= 1)
@@ -376,7 +370,7 @@ public:
 
     void put_key(key_info_ptr< K, V >& kip) {
         std::unique_lock l(m_rwlock);
-        auto             result = m_data_set.insert(kip.m_ki);
+        auto result = m_data_set.insert(kip.m_ki);
         if (result.second == false) {
             LOGERROR("generated key is not unique!");
             assert(0);
@@ -401,7 +395,7 @@ public:
     // no locking done here, client is expected to get lock
     key_info< K, V >* find_key(K& key) {
         key_info< K, V >* ki = new key_info< K, V >(key, 0); // provide dummy slot
-        auto              it = m_data_set.find(ki);
+        auto it = m_data_set.find(ki);
         delete ki;
         if (it == m_data_set.end())
             return nullptr;
@@ -431,7 +425,7 @@ public:
 
 private:
     key_info< K, V >* _generate_key(K& key) {
-        auto              slot_num = m_keys.size();
+        auto slot_num = m_keys.size();
         key_info< K, V >* newKi = new key_info< K, V >(key, slot_num);
         assert(newKi->m_mutate_count < 1000000000);
         m_keys.emplace_back(newKi);
@@ -448,17 +442,17 @@ private:
     }
 
     std::shared_ptr< V > _generate_value(ValuePattern value_pattern) {
-        
+
         std::shared_ptr< V > nv = nullptr;
-        int                  trygen = 0;
+        int trygen = 0;
         nv = V::gen_value(value_pattern, _get_last_gen_value(value_pattern));
         return nv;
     }
 
     key_info< K, V >* _generate_key(KeyPattern gen_pattern) {
-        auto              slot_num = m_keys.size();
+        auto slot_num = m_keys.size();
         key_info< K, V >* newKi = nullptr;
-        int               trygen = 0;
+        int trygen = 0;
         do {
             if (trygen++ == MAX_KEY_RANGE) {
                 LOGERROR("Could not generate keys!!!");
@@ -481,10 +475,10 @@ private:
     key_info< K, V >* _get_key(KeyPattern pattern, bool is_mutate, bool exclusive_access) {
         assert((pattern == SEQUENTIAL) || (pattern == UNI_RANDOM) || (pattern == PSEUDO_RANDOM));
 
-        int32_t           start_slot = 0;
+        int32_t start_slot = 0;
         key_info< K, V >* ki = nullptr;
         assert(m_data_set.size() != 0);
-        bool                                                                       rotated = false, temprotate = false;
+        bool rotated = false, temprotate = false;
         typename std::set< key_info< K, V >*, compare_key_info< K, V > >::iterator it;
         if (pattern == SEQUENTIAL) {
             start_slot = m_next_read_slots[pattern].load(std::memory_order_acquire);
@@ -583,13 +577,9 @@ private:
         return &m_keys[last_slot]->m_key;
     }
 
-    V* _get_last_gen_value(ValuePattern pattern) {
-        return m_last_gen_value.get();
-    }
-    
-    void _set_last_gen_value(std::shared_ptr< V >  value) {
-        m_last_gen_value = value;
-    }
+    V* _get_last_gen_value(ValuePattern pattern) { return m_last_gen_value.get(); }
+
+    void _set_last_gen_value(std::shared_ptr< V > value) { m_last_gen_value = value; }
 
     void _set_last_gen_slot(KeyPattern pattern, size_t slot) {
         m_last_gen_slots[pattern].store(slot, std::memory_order_relaxed);
@@ -615,8 +605,8 @@ private:
         }
     }
 
-    bool _can_use_for_get(int32_t slot, bool is_mutate) { 
-        return ((m_alive_slots[slot] && !m_keys[slot]->is_exclusive()) && (!is_mutate || !m_keys[slot]->is_error())); 
+    bool _can_use_for_get(int32_t slot, bool is_mutate) {
+        return ((m_alive_slots[slot] && !m_keys[slot]->is_exclusive()) && (!is_mutate || !m_keys[slot]->is_error()));
     }
 
     void _free_key(key_info< K, V >* ki) {
@@ -690,18 +680,18 @@ private:
     };
 
 private:
-    std::shared_mutex                                  m_rwlock;
+    std::shared_mutex m_rwlock;
     std::vector< std::unique_ptr< key_info< K, V > > > m_keys;
     boost::dynamic_bitset<> m_used_slots;  // can have slots mark freed but eventually freed
     boost::dynamic_bitset<> m_alive_slots; // will only have slots which are not mark freed
     std::set< key_info< K, V >*, compare_key_info< K, V > > m_data_set;
-    int32_t                                                 m_ndirty = 0;
-    std::shared_ptr< V >                                    m_last_gen_value = nullptr;
+    int32_t m_ndirty = 0;
+    std::shared_ptr< V > m_last_gen_value = nullptr;
 
-    key_info< K, V >                                           m_invalid_ki;
+    key_info< K, V > m_invalid_ki;
     std::array< std::atomic< int32_t >, KEY_PATTERN_SENTINEL > m_last_gen_slots;
     std::array< std::atomic< int32_t >, KEY_PATTERN_SENTINEL > m_next_read_slots;
-    bool                                                       m_unique_val = false; //value generated needs to be unique
+    bool m_unique_val = false; // value generated needs to be unique
 };
 
 template < typename K, typename V >

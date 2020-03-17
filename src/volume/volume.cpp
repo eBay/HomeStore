@@ -47,8 +47,8 @@ Volume::Volume(const vol_params& params) :
     auto ret = posix_memalign((void**)&(m_sb->ondisk_sb), HomeStoreConfig::align_size, VOL_SB_SIZE);
     assert(!ret);
     assert(m_sb != nullptr);
-    
-	m_sb->ondisk_sb->btree_sb = m_map->get_btree_sb();
+
+    m_sb->ondisk_sb->btree_sb = m_map->get_btree_sb();
     m_sb->ondisk_sb->state = vol_state::ONLINE;
     m_sb->ondisk_sb->page_size = params.page_size;
     m_sb->ondisk_sb->size = params.size;
@@ -767,7 +767,7 @@ void Volume::get_allocated_blks() {
     int64_t start_lba = 0, end_lba = -1;
 
     std::vector< ThreadPool::TaskFuture< void > > v;
-    
+
     bool success = true;
     while (end_lba < max_lba) {
         // if high watermark is hit, wait for a while so that we do not consuming too
@@ -801,9 +801,9 @@ void Volume::set_recovery_error() {
 
 bool Volume::is_offline() { return (m_state == DESTROYING || m_state == FAILED || m_state == OFFLINE); }
 
-bool Volume::fix_mapping_btree(bool verify) { 
+bool Volume::fix_mapping_btree(bool verify) {
     auto ret = m_map->fix(0, get_last_lba(), verify);
-    
+
     // update new btree sb;
     if (ret) {
         m_sb->ondisk_sb->btree_sb = m_map->get_btree_sb();
