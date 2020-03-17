@@ -11,7 +11,7 @@
 #include <memory>
 #include <farmhash.h>
 #include <folly/SharedMutex.h>
-#include "homeds/utility/useful_defs.hpp"
+#include <fds/utils.hpp>
 #include <boost/intrusive/slist.hpp>
 #include <boost/optional.hpp>
 #include "main/homestore_header.hpp"
@@ -59,9 +59,7 @@ public:
                 *outv = &*it;
                 V::ref(**outv);
                 found = true;
-                if (found_cb) {
-                    found_cb(*outv);
-                }
+                if (found_cb) { found_cb(*outv); }
                 break;
             } else if (x > 0) {
                 break;
@@ -110,9 +108,7 @@ public:
             int x = K::compare(*(V::extract_key(*it)), k);
             if (x == 0) {
                 found = true;
-                if (found_cb) {
-                    found_cb(&*it);
-                }
+                if (found_cb) { found_cb(&*it); }
                 m_list.erase(it);
                 V::deref(*it);
                 break;
@@ -142,9 +138,7 @@ public:
                 ret = true;
                 if (V::test_le((const V&)*it, 1)) {
                     can_remove = true;
-                    if (found_cb) {
-                        found_cb(&*it);
-                    }
+                    if (found_cb) { found_cb(&*it); }
                     m_list.erase(it);
                     hash_write_unlock();
                     V::reset_free_state(*it);
@@ -152,9 +146,7 @@ public:
                     V::deref(*it);
                     hash_write_lock();
                 } else {
-                    if (found_cb) {
-                        found_cb(&*it);
-                    }
+                    if (found_cb) { found_cb(&*it); }
                 }
                 break;
             } else if (x > 0) {
@@ -173,13 +165,9 @@ public:
         for (auto it(m_list.begin()), itend(m_list.end()); it != itend; ++it) {
             int x = K::compare(*(V::extract_key(*it)), k);
             if (x == 0) {
-                if (dec_ref) {
-                    V::deref(*it);
-                }
+                if (dec_ref) { V::deref(*it); }
                 if (V::test_le((const V&)*it, 1)) {
-                    if (found_cb) {
-                        found_cb(&*it);
-                    }
+                    if (found_cb) { found_cb(&*it); }
                     m_list.erase(it);
                     V::deref(*it);
                     ret = true;
@@ -230,7 +218,7 @@ private:
     folly::SharedMutexReadPriority m_lock;
 #endif
     typedef boost::intrusive::slist< V > hash_node_list;
-    hash_node_list                       m_list;
+    hash_node_list m_list;
 };
 
 ////////////// hash_table implementation /////////////////
@@ -256,11 +244,10 @@ public:
 #ifdef GLOBAL_HASHSET_LOCK
         std::lock_guard< std::mutex > lk(m);
 #endif
-        const K*            pk = V::extract_key(v);
+        const K* pk = V::extract_key(v);
         HashBucket< K, V >* hb = get_bucket(*pk);
-        bool                inserted = (hb->insert(*pk, v, outv, found_cb));
-        if (inserted)
-            m_size++;
+        bool inserted = (hb->insert(*pk, v, outv, found_cb));
+        if (inserted) m_size++;
         return inserted;
     }
 
@@ -270,9 +257,8 @@ public:
 #endif
 
         HashBucket< K, V >* hb = get_bucket(hash_code);
-        bool                inserted = (hb->insert(k, v, outv, found_cb));
-        if (inserted)
-            m_size++;
+        bool inserted = (hb->insert(k, v, outv, found_cb));
+        if (inserted) m_size++;
         return inserted;
     }
 
@@ -298,9 +284,8 @@ public:
         std::lock_guard< std::mutex > lk(m);
 #endif
         HashBucket< K, V >* hb = get_bucket(hash_code);
-        bool                removed = (hb->safe_remove(k, found_cb, can_remove));
-        if (removed)
-            m_size--;
+        bool removed = (hb->safe_remove(k, found_cb, can_remove));
+        if (removed) m_size--;
         return removed;
     }
 
@@ -309,9 +294,8 @@ public:
         std::lock_guard< std::mutex > lk(m);
 #endif
         HashBucket< K, V >* hb = get_bucket(k);
-        bool                removed = (hb->remove(k, found_cb));
-        if (removed)
-            m_size--;
+        bool removed = (hb->remove(k, found_cb));
+        if (removed) m_size--;
         return removed;
     }
 
@@ -320,9 +304,8 @@ public:
         std::lock_guard< std::mutex > lk(m);
 #endif
         HashBucket< K, V >* hb = get_bucket(hash_code);
-        bool                removed = (hb->remove(k, found_cb));
-        if (removed)
-            m_size--;
+        bool removed = (hb->remove(k, found_cb));
+        if (removed) m_size--;
         return removed;
     }
 
@@ -332,9 +315,8 @@ public:
         std::lock_guard< std::mutex > lk(m);
 #endif
         HashBucket< K, V >* hb = get_bucket(hash_code);
-        bool                removed = (hb->check_and_remove(k, found_cb, dec_ref));
-        if (removed)
-            m_size--;
+        bool removed = (hb->check_and_remove(k, found_cb, dec_ref));
+        if (removed) m_size--;
         return removed;
     }
 
@@ -345,8 +327,8 @@ private:
 
 private:
     std::atomic< uint64_t > m_size;
-    uint32_t                m_nbuckets;
-    HashBucket< K, V >*     m_buckets;
+    uint32_t m_nbuckets;
+    HashBucket< K, V >* m_buckets;
 
 #ifdef GLOBAL_HASHSET_LOCK
     std::mutex m;

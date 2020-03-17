@@ -21,26 +21,19 @@ void Blk_Read_Tracker::insert(BlkId& bid) {
     if (inserted) {
         COUNTER_INCREMENT(m_metrics, blktrack_pending_blk_read_map_sz, 1);
     } else { // record exists already, some other read happened
-        homeds::ObjectAllocator< BlkEvictionRecord >::deallocate(ber);
+        sisl::ObjectAllocator< BlkEvictionRecord >::deallocate(ber);
     }
     THIS_VOL_LOG(TRACE, volume, , "Marked read pending Bid:{},{}", bid, inserted);
 }
 
-void Blk_Read_Tracker::safe_remove_blks(bool is_read, std::vector< Free_Blk_Entry >* fbes,
-                                        const std::error_condition& err) {
-    if (fbes == nullptr) {
-        return; // nothing to remove
-    }
-    if (is_read) {
-        for (Free_Blk_Entry& fbe : *fbes) {
-            safe_remove_blk_on_read(fbe);
+void Blk_Read_Tracker::safe_remove_blks(volume_req_ptr &vreq) {
+    if (vreq->is_read) {
+        for (uint32_t i = 0; i < vreq->fbe_list.size(); ++i) {
+            safe_remove_blk_on_read(vreq->fbe_list[i]);
         }
     } else {
-        if (err != no_error) {
-            return; // there was error in write, no need to erase any blks
-        }
-        for (Free_Blk_Entry& fbe : *fbes) {
-            safe_remove_blk_on_write(fbe);
+        for (uint32_t i = 0; i < vreq->fbe_list.size(); ++i) {
+            safe_remove_blk_on_write(vreq->fbe_list[i]);
         }
     }
 }

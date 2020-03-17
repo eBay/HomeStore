@@ -36,7 +36,9 @@ add_subdirectory(blkalloc)
 add_subdirectory(blkstore)
 add_subdirectory(cache)
 add_subdirectory(device)
-add_subdirectory(endpoint)
+#add_subdirectory(endpoint)
+add_subdirectory(logdev)
+add_subdirectory(journal)
 add_subdirectory(homeds)
 add_subdirectory(volume)
 add_subdirectory(error)
@@ -48,9 +50,11 @@ add_subdirectory(test_scripts)
 set(HOMESTORE_OBJECTS
         $<TARGET_OBJECTS:hs_main>
         $<TARGET_OBJECTS:hs_device>
-        $<TARGET_OBJECTS:hs_endpoint>
+        $<TARGET_OBJECTS:hs_mapping>
+        #$<TARGET_OBJECTS:hs_endpoint>
         $<TARGET_OBJECTS:hs_blkalloc>
         $<TARGET_OBJECTS:hs_error>
+        $<TARGET_OBJECTS:hs_logdev>
         )
 add_library(homestore STATIC ${HOMESTORE_OBJECTS})
 target_link_libraries(homestore ${COMMON_LIB_DEPS})

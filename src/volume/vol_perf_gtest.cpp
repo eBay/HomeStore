@@ -1,9 +1,9 @@
 #include <gtest/gtest.h>
-#include <iomgr/iomgr.hpp>
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
 #include <metrics/metrics.hpp>
 #include <main/vol_interface.hpp>
+#include <iomgr/iomgr.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <fstream>
@@ -16,6 +16,8 @@
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <linux/fs.h>
+#include "main/test_setup/simple_hs_setup.hpp"
+#include <boost/filesystem.hpp>
 extern "C" {
 #include <fcntl.h>
 #include <sys/epoll.h>
@@ -26,8 +28,11 @@ extern "C" {
 using namespace homestore;
 
 THREAD_BUFFER_INIT;
+SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
+#if 0
 /************************** GLOBAL VARIABLES ***********************/
+
 
 uint64_t preload_writes = 100000000; // with 4k write it is 400 G insertion
 
@@ -72,16 +77,21 @@ public:
 uint64_t req_cnt = 0;
 uint64_t req_free_cnt = 0;
 class IOTest : public ::testing::Test {
-    struct req : vol_interface_req {
+    // req is tagged along as cookie in vol hb req
+    struct req {
         ssize_t size;
         off_t offset;
         uint64_t lba;
         uint32_t nblks;
-        int fd;
-        bool is_read;
+        int      fd;
+        bool     is_read;
         uint64_t cur_vol;
         req() { req_cnt++; }
         virtual ~req() { req_free_cnt++; }
+    };
+
+    struct vol_info_t {
+        boost::uuids::uuid uuid;
     };
 
 protected:
@@ -104,6 +114,7 @@ protected:
     bool is_abort;
     bool preload_done;
     Clock::time_point print_startTime;
+    std::vector< std::shared_ptr< vol_info_t > > vol_info;
 
 public:
     IOTest() : vol(max_vols), m_vol_bm(max_vols), max_vol_blks(max_vols), device_info(0), is_abort(false) {
@@ -116,7 +127,20 @@ public:
 
     void print() {}
 
+    void remove_journal_files() {
+        // Remove journal folders
+        for (auto i = 0u; i < vol_info.size(); i++) {
+            std::string name = boost::lexical_cast< std::string >(vol_info[i]->uuid);
+            boost::filesystem::remove_all(name);
+            LOGINFO("Removed journal dir: {}", name);
+            remove(name.c_str());
+        }
+    }
+
     void remove_files() {
+        remove_journal_files();
+        vol_info.clear();
+
         remove("/tmp/perf_file1");
         remove("/tmp/perf_file2");
         remove("/tmp/perf_file3");
@@ -166,14 +190,19 @@ public:
     }
 
     void vol_init(int cnt, const VolumePtr& vol_obj) {
+        std::shared_ptr< vol_info_t > info = std::make_shared< vol_info_t >();
+        info->uuid = VolInterface::get_instance()->get_uuid(vol_obj);
+
         vol[cnt] = vol_obj;
         max_vol_blks[cnt] = VolInterface::get_instance()->get_vol_capacity(vol_obj).initial_total_size /
             VolInterface::get_instance()->get_page_size(vol_obj);
         m_vol_bm[cnt] = new homeds::Bitset(max_vol_blks[cnt]);
         assert(VolInterface::get_instance()->get_vol_capacity(vol_obj).initial_total_size == max_vol_size);
-    }
 
-    void vol_state_change_cb(const VolumePtr& vol, vol_state old_state, vol_state new_state) { assert(0); }
+    void vol_state_change_cb(const VolumePtr& vol, vol_state old_state, vol_state new_state) {
+        std::unique_lock< std::mutex > lk(m_mutex);
+        vol_info.push_back(info);
+    }
 
     void create_volume() {
 
@@ -214,7 +243,7 @@ public:
         iomgr_obj->add_ep(ep);
         iomgr_obj->start();
         outstanding_ios = 0;
-        uint64_t temp = 1;
+        uint64_t              temp = 1;
         [[maybe_unused]] auto wsize = write(ev_fd, &temp, sizeof(uint64_t));
         return;
     }
@@ -248,9 +277,7 @@ public:
         while (outstanding_ios < max_outstanding_ios) {
             {
                 std::unique_lock< std::mutex > lk(m_mutex);
-                if (!rdy_state) {
-                    return;
-                }
+                if (!rdy_state) { return; }
             }
 
             if (((read_cnt * 100) / (write_cnt + read_cnt)) < read_p) {
@@ -263,7 +290,7 @@ public:
 
     void random_write() {
         /* XXX: does it really matter if it is atomic or not */
-        int cur = ++cur_vol % max_vols;
+        int      cur = ++cur_vol % max_vols;
         uint64_t lba = 0;
         uint64_t nblks = 0;
         if (!io_size) {
@@ -287,7 +314,6 @@ public:
          * write to a file after ios are completed.
          */
         assert(buf != nullptr);
-
         boost::intrusive_ptr< req > req(new struct req());
         req->lba = lba;
         req->nblks = nblks;
@@ -297,7 +323,9 @@ public:
         req->cur_vol = cur;
         ++outstanding_ios;
         ++write_cnt;
-        auto ret_io = VolInterface::get_instance()->write(vol[cur], lba, buf, nblks, req);
+        auto vreq = VolInterface::get_instance()->create_vol_interface_req(vol, buf, lba, nblks, false, false););
+        vreq->cookie = req;
+        auto ret_io = VolInterface::get_instance()->write(vol[cur], vreq);
         if (ret_io != no_error) {
             assert(0);
             free(buf);
@@ -310,7 +338,7 @@ public:
 
     void random_read() {
         /* XXX: does it really matter if it is atomic or not */
-        int cur = ++cur_vol % max_vols;
+        int      cur = ++cur_vol % max_vols;
         uint64_t lba = 0;
         uint32_t nblks = 0;
         if (!io_size) {
@@ -324,9 +352,7 @@ public:
         }
         lba = rand() % (max_vol_blks[cur % max_vols] - nblks);
         auto b = m_vol_bm[cur]->get_next_contiguous_n_reset_bits(lba, nblks);
-        if (b.nbits == 0) {
-            return;
-        }
+        if (b.nbits == 0) { return; }
 
         lba = b.start_bit;
         read_vol(cur, lba, nblks);
@@ -344,7 +370,9 @@ public:
         req->cur_vol = cur;
         outstanding_ios++;
         read_cnt++;
-        auto ret_io = VolInterface::get_instance()->read(vol[cur], lba, nblks, req);
+        auto vreq = VolInterface::get_instance()->create_vol_interface_req(vol, nullptr, lba, nblks, true, false);
+        vreq->cookie = req;
+        auto ret_io = VolInterface::get_instance()->read(vol[cur], vreq);
         if (ret_io != no_error) {
             outstanding_ios--;
             read_err_cnt++;
@@ -375,9 +403,7 @@ public:
         }
         if (preload_done && get_elapsed_time(start_time) > run_time) {
             LOGINFO("ios cmpled {}. waiting for outstanding ios to be completed", write_cnt.load());
-            if (is_abort) {
-                abort();
-            }
+            if (is_abort) { abort(); }
             std::unique_lock< std::mutex > lk(m_mutex);
             rdy_state = 0;
             if (outstanding_ios.load() == 0) {
@@ -386,11 +412,11 @@ public:
             }
         } else {
             [[maybe_unused]] auto rsize = read(ev_fd, &temp, sizeof(uint64_t));
-            uint64_t size = write(ev_fd, &temp, sizeof(uint64_t));
-            if (size != sizeof(uint64_t)) {
-                assert(0);
-            }
+            uint64_t              size = write(ev_fd, &temp, sizeof(uint64_t));
+            if (size != sizeof(uint64_t)) { assert(0); }
         }
+        req* cookie = (req*)(vol_req->cookie);
+        delete cookie;
     }
 
     uint64_t get_elapsed_time(Clock::time_point start_time) {
@@ -424,6 +450,7 @@ TEST_F(IOTest, normal_random_io_test) {
     LOGINFO("total ios {}", (write_cnt + read_cnt));
     LOGINFO("iops {}", ((write_cnt + read_cnt) / time_dur));
 }
+#endif
 
 /************************* CLI options ***************************/
 
@@ -466,25 +493,13 @@ extern "C" __attribute__((no_sanitize_address)) const char* __asan_default_optio
  */
 int main(int argc, char* argv[]) {
     srand(time(0));
-    ::testing::GTEST_FLAG(filter) = "*normal_random*";
-    testing::InitGoogleTest(&argc, argv);
+    //::testing::GTEST_FLAG(filter) = "*normal_random*";
+    // testing::InitGoogleTest(&argc, argv);
     SDS_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
     sds_logging::SetLogger("perf_test_volume");
     spdlog::set_pattern("[%D %T.%f%z] [%^%l%$] [%t] %v");
 
-    run_time = SDS_OPTIONS["run_time"].as< uint32_t >();
-    num_threads = SDS_OPTIONS["num_threads"].as< uint32_t >();
-    queue_depth = SDS_OPTIONS["queue_depth"].as< uint32_t >();
-    max_outstanding_ios = num_threads * queue_depth;
-    read_p = SDS_OPTIONS["read_percent"].as< uint32_t >();
-    io_size = SDS_OPTIONS["io_size"].as< uint32_t >();
-    if (SDS_OPTIONS.count("device_list")) {
-        dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();
-    }
-    cache_size = SDS_OPTIONS["cache_size"].as< uint32_t >();
-    preload_writes = SDS_OPTIONS["preload_writes"].as< uint32_t >();
-    is_file = SDS_OPTIONS["is_file"].as< uint32_t >();
-    ref_cnt = SDS_OPTIONS["ref_count"].as< uint32_t >();
+#if 0
     disk_init = SDS_OPTIONS["init"].as< uint32_t >() ? true : false;
 
 
@@ -501,9 +516,27 @@ int main(int argc, char* argv[]) {
         }
         is_file = 1;
     }
+#endif
+    simple_store_cfg cfg;
+    cfg.m_run_time_ms = SDS_OPTIONS["run_time"].as< uint32_t >() * 1000;
+    cfg.m_nthreads = SDS_OPTIONS["num_threads"].as< uint32_t >();
+    cfg.m_qdepth = SDS_OPTIONS["queue_depth"].as< uint32_t >();
+    cfg.m_read_pct = SDS_OPTIONS["read_percent"].as< uint32_t >();
+    if (SDS_OPTIONS.count("device_list")) {
+        cfg.m_devs = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();
+    }
+    cfg.m_cache_size = SDS_OPTIONS["cache_size"].as< uint32_t >();
+    cfg.m_cache_size *= 1024 * 1024 * 1024;
+    cfg.m_is_file = SDS_OPTIONS["is_file"].as< uint32_t >();
 
-    for (uint32_t i = 0; i < dev_names.size(); ++i) {
-        auto fd = open(dev_names[0].c_str(), O_RDWR);
+    SimpleTestStore test_store(cfg);
+    test_store.start_homestore();
+    test_store.kickstart_io();
+    test_store.wait_for_io_done();
+    LOGINFO("Metrics: {}", sisl::MetricsFarm::getInstance().get_result_in_json().dump(2));
+    test_store.shutdown();
+    /*for (uint32_t i = 0; i < dev_names.size(); ++i) {
+        auto   fd = open(dev_names[0].c_str(), O_RDWR);
         size_t devsize = 0;
         if (!is_file) {
             if (ioctl(fd, BLKGETSIZE64, &devsize) < 0) {
@@ -520,6 +553,7 @@ int main(int argc, char* argv[]) {
             devsize = buf.st_size;
         }
         max_disk_capacity += devsize;
-    }
-    return RUN_ALL_TESTS();
+    }*/
+
+    // return RUN_ALL_TESTS();
 }

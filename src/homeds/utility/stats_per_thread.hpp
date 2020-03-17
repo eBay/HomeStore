@@ -10,25 +10,18 @@
 #include <folly/ThreadLocal.h>
 
 namespace homeds {
-enum stats_type : uint8_t {
-    COUNTER = 0,
-    LATENCY,
-    ERROR_COUNTER = 2
-};
+enum stats_type : uint8_t { COUNTER = 0, LATENCY, ERROR_COUNTER = 2 };
 
 typedef uint32_t req_stats_index;
 
 struct stats_key {
-    stats_type      type;
+    stats_type type;
     req_stats_index mean_of; // If stats cannot be added, but averaged out by some index
-    const char      *name;
+    const char* name;
 };
 
 struct per_thread_stats {
-    per_thread_stats(std::vector<stats_key> &keys) :
-            m_keys(keys),
-            m_values(keys.size(), 0) {
-    }
+    per_thread_stats(std::vector< stats_key >& keys) : m_keys(keys), m_values(keys.size(), 0) {}
 
     void set_count(req_stats_index ind, uint64_t val) {
         assert(m_keys[ind].type == COUNTER);
@@ -60,20 +53,15 @@ struct per_thread_stats {
         return m_values[ind];
     }
 
-    std::vector<stats_key> &m_keys;
-    std::vector<uint64_t> m_values;
+    std::vector< stats_key >& m_keys;
+    std::vector< uint64_t > m_values;
 };
 
 class Stats {
 public:
-    Stats(std::vector<stats_key> &keys) :
-            m_keys(keys) {
-        m_thr_stats.reset(nullptr);
-    }
+    Stats(std::vector< stats_key >& keys) : m_keys(keys) { m_thr_stats.reset(nullptr); }
 
-    ~Stats() {
-        m_thr_stats.reset(nullptr);
-    }
+    ~Stats() { m_thr_stats.reset(nullptr); }
 
     void set_count(req_stats_index ind, uint64_t val) {
         init_if_needed();
@@ -112,25 +100,21 @@ public:
         friend class Stats;
 
     public:
-        iterator(Stats *stats) :
-                m_stats(stats),
-                m_cur_ind((req_stats_index)0) {}
+        iterator(Stats* stats) : m_stats(stats), m_cur_ind((req_stats_index)0) {}
 
         virtual void operator++() {
             // using IntType = typename std::underlying_type<req_stats_index>::type;
-            m_cur_ind = static_cast<req_stats_index>(static_cast<uint32_t>(m_cur_ind) + 1);
+            m_cur_ind = static_cast< req_stats_index >(static_cast< uint32_t >(m_cur_ind) + 1);
             //((int)m_cur_ind)++;
         }
 
         virtual void operator++(int) {
-            m_cur_ind = static_cast<req_stats_index>(static_cast<uint32_t>(m_cur_ind) + 1);
+            m_cur_ind = static_cast< req_stats_index >(static_cast< uint32_t >(m_cur_ind) + 1);
             //((int)m_cur_ind)++;
         }
 
-        virtual std::pair< const char *, uint64_t > operator*() const {
-            if (m_cur_ind == m_stats->m_keys.size()) {
-                return std::make_pair("sentinel", 0);
-            }
+        virtual std::pair< const char*, uint64_t > operator*() const {
+            if (m_cur_ind == m_stats->m_keys.size()) { return std::make_pair("sentinel", 0); }
 
             uint64_t val = m_stats->get(m_cur_ind);
             if (m_stats->m_keys[m_cur_ind].mean_of != m_stats->m_keys.size()) {
@@ -140,23 +124,18 @@ public:
             return std::make_pair(m_stats->m_keys[m_cur_ind].name, val);
         }
 
-        bool operator==(const iterator &other) const {
-            return (m_cur_ind == other.m_cur_ind);
+        bool operator==(const iterator& other) const { return (m_cur_ind == other.m_cur_ind); }
 
-        }
-
-        bool operator!=(const iterator &other) const {
-            return (m_cur_ind != other.m_cur_ind);
-        }
+        bool operator!=(const iterator& other) const { return (m_cur_ind != other.m_cur_ind); }
 
     private:
-        Stats *m_stats;
+        Stats* m_stats;
         req_stats_index m_cur_ind;
     };
 
     iterator begin() {
         iterator it(this);
-        it.m_cur_ind = (req_stats_index) 0;
+        it.m_cur_ind = (req_stats_index)0;
         return it;
     }
 
@@ -168,14 +147,12 @@ public:
 
 private:
     void init_if_needed() {
-        if (hs_unlikely(m_thr_stats.get() == nullptr)) {
-            m_thr_stats.reset(new per_thread_stats(m_keys));
-        }
+        if (sisl_unlikely(m_thr_stats.get() == nullptr)) { m_thr_stats.reset(new per_thread_stats(m_keys)); }
     }
 
 private:
     class tlocal_tag;
-    folly::ThreadLocalPtr< per_thread_stats, tlocal_tag> m_thr_stats;
-    std::vector<stats_key> &m_keys;
+    folly::ThreadLocalPtr< per_thread_stats, tlocal_tag > m_thr_stats;
+    std::vector< stats_key >& m_keys;
 };
-}
+} // namespace homeds

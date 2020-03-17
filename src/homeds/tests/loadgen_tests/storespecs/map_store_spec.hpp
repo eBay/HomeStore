@@ -8,6 +8,7 @@
 #include "homeds/loadgen/spec/store_spec.hpp"
 
 using namespace homeds::btree;
+using namespace homestore;
 
 namespace homeds {
 namespace loadgen {
@@ -51,20 +52,16 @@ public:
             std::bind(&MapStoreSpec::process_free_blk_callback, this, std::placeholders::_1));
     }
 
-    /*Map put always appends if exists, no feature to force udpate/insert and return error*/
+    /* Map put always appends if exists, no feature to force udpate/insert and return error */
     virtual bool update(K& k, std::shared_ptr<V> v) override {
-        boost::intrusive_ptr< volume_req > req = volume_req::make_request();
+        boost::intrusive_ptr< volume_req > req(new volume_req());
         ValueEntry                         ve;
         v->get_array().get(0, ve, false);
         req->seqId = ve.get_seqId();
         req->lastCommited_seqId = req->seqId; // keeping only latest version always
         req->lba = k.start();
         req->nlbas = k.get_n_lba();
-        req->blkId = ve.get_blkId();
-#ifndef NDEBUG
-        req->vol_uuid = uuid;
-#endif
-        req->state = writeback_req_state::WB_REQ_COMPL;
+        req->push_blkid(ve.get_blkId());
         m_map->put(req, k, *(v.get()));
         return true;
     }
@@ -96,7 +93,7 @@ public:
                                         end_key.start() - start_key.start() + 1);
 
         auto                               result_count = 0U;
-        boost::intrusive_ptr< volume_req > volreq = volume_req::make_request();
+        boost::intrusive_ptr< volume_req > volreq(new volume_req());
         volreq->lba = start_key.start();
         if (!start_incl) {
             volreq->lba++;
@@ -108,9 +105,6 @@ public:
         volreq->seqId = INVALID_SEQ_ID;
         volreq->lastCommited_seqId = INVALID_SEQ_ID; // read only latest value
 
-#ifndef NDEBUG
-        volreq->vol_uuid = uuid;
-#endif
         std::vector< std::pair< MappingKey, MappingValue > > kvs;
         m_map->get(volreq, kvs, false);
         uint64_t j = 0;
@@ -130,7 +124,7 @@ public:
              int cnt = 0;
              while (lba <= kvs[j].first.end()) {
                  auto storeblk = ve.get_blkId().get_id() + ve.get_blk_offset() + cnt;
-                 ValueEntry ve(INVALID_SEQ_ID, BlkId(storeblk, 1, 0), 0, 1, carr);
+                 ValueEntry ve(INVALID_SEQ_ID, BlkId(storeblk, 1, 0), 0, 1, &carr[0]);
                  result.push_back(std::make_pair(K(lba, 1), V(ve)));
                  lba++;
                  cnt++;
@@ -146,15 +140,16 @@ public:
                                 std::vector< std::shared_ptr<V> > &result) {
         assert(start_incl);
         assert(end_incl);
-        boost::intrusive_ptr< volume_req > req = volume_req::make_request();
+        boost::intrusive_ptr< volume_req > req(new volume_req());
         V &start_value = *(result[0].get());
         V &end_value = *(result.back());
 
         req->seqId = INVALID_SEQ_ID;
         req->lastCommited_seqId = INVALID_SEQ_ID; // keeping only latest version always
 
-        req->blkId = start_value.get_blkId();
-        req->blkId.set_nblks(end_value.end() - start_value.start() + 1);
+        BlkId bid = start_value.get_blkId();
+        bid.set_nblks(end_value.end() - start_value.start() + 1);
+        req->push_blkid(bid);
 
         req->lba = start_key.start();
         req->nlbas = end_key.end() - req->lba + 1;
@@ -166,16 +161,12 @@ public:
             carr[i] = 1;
 
         // NOTE assuming data block size is same as lba-volume block size
-        ValueEntry ve(INVALID_SEQ_ID, BlkId(req->blkId.get_id(), req->blkId.get_nblks(), 0), 0, req->blkId.get_nblks(),
-                      carr);
+        ValueEntry ve(INVALID_SEQ_ID, BlkId(bid.get_id(), bid.get_nblks(), 0), 0, bid.get_nblks(),
+                      &carr[0]);
         MappingValue value(ve);
-#ifndef NDEBUG
-        req->vol_uuid = uuid;
-#endif
-        req->state = writeback_req_state::WB_REQ_COMPL;
         LOGDEBUG("Mapping range put:{} {} ", key.to_string(), value.to_string());
 
-        assert(req->nlbas == req->blkId.get_nblks());
+        assert(req->nlbas == bid.get_nblks());
         m_map->put(req, key, value);
 
         return true;

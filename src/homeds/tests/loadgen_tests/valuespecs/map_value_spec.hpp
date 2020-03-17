@@ -65,7 +65,7 @@ public:
                 std::shared_ptr< MapValue > temp = std::make_shared< MapValue >(value);
                 return temp;
             } else {
-                ValueEntry ve(INVALID_SEQ_ID, BlkId(1, 1, 0), 0, 1, carr);
+                ValueEntry ve(INVALID_SEQ_ID, BlkId(1, 1, 0), 0, 1, &carr[0]);
                 std::shared_ptr< MapValue > temp = std::make_shared< MapValue >(ve);
                 return temp;
             }
@@ -85,7 +85,7 @@ public:
 
             auto sblk = distribution(generator);
 
-            ValueEntry ve(sid, BlkId(sblk, 1, 0), 0, 1, carr);
+            ValueEntry ve(sid, BlkId(sblk, 1, 0), 0, 1, &carr[0]);
 
             std::shared_ptr< MapValue > temp = std::make_shared< MapValue >(ve);
             return temp;

@@ -13,17 +13,13 @@
 
 SDS_LOGGING_DECL(device, DEVICE_MANAGER)
 
-using namespace homeio;
+using namespace iomgr;
 namespace homestore {
 
-DeviceManager::DeviceManager(NewVDevCallback vcb,
-                             uint32_t const vdev_metadata_size,
-                             std::shared_ptr<iomgr::ioMgr> iomgr,
-                             homeio::comp_callback cb, bool is_file, boost::uuids::uuid system_uuid, 
-                             vdev_error_callback vdev_error_cb) :
-        m_comp_cb(cb),
+DeviceManager::DeviceManager(NewVDevCallback vcb, uint32_t const vdev_metadata_size,
+                             const iomgr::io_interface_comp_cb_t& io_comp_cb, bool is_file,
+                             boost::uuids::uuid system_uuid, const vdev_error_callback& vdev_error_cb) :
         m_new_vdev_cb(vcb),
-        m_iomgr(iomgr),
         m_gen_cnt(0),
         m_is_file(is_file),
         m_system_uuid(system_uuid),
@@ -50,6 +46,9 @@ DeviceManager::DeviceManager(NewVDevCallback vcb,
     m_chunk_hdr = &m_dm_info->chunk_hdr;
     m_vdev_hdr = &m_dm_info->vdev_hdr;
     m_scan_cmpltd = false;
+
+    // Attach completions to the drive end point this DeviceManager is going to use
+    iomanager.default_drive_interface()->attach_completion_cb(io_comp_cb);
 
     HS_ASSERT_CMP(LOGMSG, m_vdev_metadata_size, <=, MAX_CONTEXT_DATA_SZ);
 }
@@ -92,10 +91,10 @@ void DeviceManager::init_devices(std::vector< dev_info >& devices) {
 
     size_t pdev_size = 0;
     for (auto& d : devices) {
-        bool                           is_inited;
+        bool is_inited;
         std::unique_ptr< PhysicalDev > pdev =
-            std::make_unique< PhysicalDev >(this, d.dev_names, m_open_flags, m_iomgr, m_comp_cb, m_system_uuid,
-                                            m_pdev_id++, max_dev_offset, m_is_file, true, m_dm_info_size, &is_inited);
+            std::make_unique< PhysicalDev >(this, d.dev_names, m_open_flags, m_system_uuid, m_pdev_id++, max_dev_offset,
+                                            m_is_file, true, m_dm_info_size, &is_inited);
 
         max_dev_offset += pdev->get_size();
         if (!pdev_size) {
@@ -126,9 +125,28 @@ DeviceManager::~DeviceManager() {
     m_vdev_info = nullptr;
 }
 
-void DeviceManager::update_vb_context(uint32_t vdev_id, uint8_t* blob) {
+void DeviceManager::update_end_of_chunk(PhysicalDevChunk* chunk, off_t offset) {
     std::lock_guard< decltype(m_dev_mutex) > lock(m_dev_mutex);
-    memcpy(m_vdev_info[vdev_id].context_data, blob, m_vdev_hdr->context_data_size);
+    chunk->update_end_of_chunk(offset);
+    write_info_blocks();
+}
+
+void DeviceManager::update_vb_data_start_offset(uint32_t vdev_id, off_t offset) {
+    std::lock_guard< decltype(m_dev_mutex) > lock(m_dev_mutex);
+    m_vdev_info[vdev_id].data_start_offset = offset;
+    write_info_blocks();
+}
+
+void DeviceManager::get_vb_context(uint32_t vdev_id, const sisl::blob& ctx_data) {
+    std::lock_guard< decltype(m_dev_mutex) > lock(m_dev_mutex);
+    HS_ASSERT_CMP(LOGMSG, ctx_data.size, <=, vdev_info_block::max_context_size());
+    memcpy(ctx_data.bytes, m_vdev_info[vdev_id].context_data, ctx_data.size);
+}
+
+void DeviceManager::update_vb_context(uint32_t vdev_id, const sisl::blob& ctx_data) {
+    std::lock_guard< decltype(m_dev_mutex) > lock(m_dev_mutex);
+    HS_ASSERT_CMP(LOGMSG, ctx_data.size, <=, vdev_info_block::max_context_size());
+    memcpy(m_vdev_info[vdev_id].context_data, ctx_data.bytes, ctx_data.size);
     write_info_blocks();
 }
 
@@ -136,14 +154,14 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info >& devices) {
     std::vector< std::unique_ptr< PhysicalDev > > uninit_devs;
     uninit_devs.reserve(devices.size());
     uint64_t device_id = INVALID_DEV_ID;
-    bool     rewrite = false;
+    bool rewrite = false;
 
     size_t pdev_size = 0;
     for (auto& d : devices) {
-        bool                           is_inited;
+        bool is_inited;
         std::unique_ptr< PhysicalDev > pdev =
-            std::make_unique< PhysicalDev >(this, d.dev_names, m_open_flags, m_iomgr, m_comp_cb, m_system_uuid,
-                                            INVALID_DEV_ID, 0, m_is_file, false, m_dm_info_size, &is_inited);
+            std::make_unique< PhysicalDev >(this, d.dev_names, m_open_flags, m_system_uuid, INVALID_DEV_ID, 0,
+                                            m_is_file, false, m_dm_info_size, &is_inited);
         if (!is_inited) {
             // Super block is not present, possibly a new device, will format the device later
             HS_LOG(CRITICAL, device,
@@ -154,16 +172,14 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info >& devices) {
             continue;
         }
 
-        if (!pdev_size) {
-            pdev_size = pdev->get_size();
-        }
+        if (!pdev_size) { pdev_size = pdev->get_size(); }
 
         HS_ASSERT_CMP(LOGMSG, pdev_size, ==, pdev->get_size());
 
         if (m_gen_cnt.load() < pdev->sb_gen_cnt()) {
             m_gen_cnt = pdev->sb_gen_cnt();
             device_id = pdev->get_dev_id();
-            rewrite   = HomeStoreConfig::is_read_only ? false : true;
+            rewrite = HomeStoreConfig::is_read_only ? false : true;
         }
 
         HS_ASSERT_NULL(LOGMSG, m_pdevs[pdev->get_dev_id()].get());
@@ -215,8 +231,8 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info >& devices) {
              * larger number of chunks, we should optimize it.
              */
             for (uint32_t i = 0; i < HomeStoreConfig::max_chunks; ++i) {
-                if (m_chunk_info[i].pdev_id == dev_id && 
-                    m_chunk_info[i].slot_allocated && m_chunk_info[i].vdev_id != INVALID_VDEV_ID) {
+                if (m_chunk_info[i].pdev_id == dev_id && m_chunk_info[i].slot_allocated &&
+                    m_chunk_info[i].vdev_id != INVALID_VDEV_ID) {
                     auto vdev_id = m_chunk_info[i].vdev_id;
                     HS_ASSERT_CMP(LOGMSG, m_vdev_info[vdev_id].get_vdev_id(), ==, vdev_id);
                     /* mark this vdev failed */
@@ -301,9 +317,7 @@ void DeviceManager::add_chunks(uint32_t vid, chunk_add_callback cb) {
         uint32_t cid = m_pdevs[dev_id]->get_first_chunk_id();
         while (cid != INVALID_CHUNK_ID) {
             HS_ASSERT_NOTNULL(DEBUG, m_chunks[cid].get());
-            if (m_chunks[cid]->get_vdev_id() == vid) {
-                cb(m_chunks[cid].get());
-            }
+            if (m_chunks[cid]->get_vdev_id() == vid) { cb(m_chunks[cid].get()); }
             cid = m_chunks[cid]->get_next_chunk_id();
         }
     }
@@ -362,9 +376,7 @@ void DeviceManager::write_info_blocks() {
     /* we don't write anything until all the devices are not scanned. Only write that can
      * happen before scanning of device is completed is allocation of chunks.
      */
-    if (!m_scan_cmpltd) {
-        return;
-    }
+    if (!m_scan_cmpltd) { return; }
     m_gen_cnt++;
 
 #ifndef NO_CHECKSUM
@@ -412,11 +424,9 @@ void DeviceManager::free_chunk(PhysicalDevChunk* chunk) {
     chunk->set_free();
 
     PhysicalDev* pdev = chunk->get_physical_dev_mutable();
-    auto         freed_ids = pdev->merge_free_chunks(chunk);
+    auto freed_ids = pdev->merge_free_chunks(chunk);
     for (auto ids : freed_ids) {
-        if (ids != INVALID_CHUNK_ID) {
-            remove_chunk(ids);
-        }
+        if (ids != INVALID_CHUNK_ID) { remove_chunk(ids); }
     }
     write_info_blocks();
 }
@@ -436,6 +446,7 @@ vdev_info_block* DeviceManager::alloc_vdev(uint32_t req_size, uint32_t nmirrors,
     vb->num_mirrors = nmirrors;
     vb->page_size = page_size;
     vb->num_primary_chunks = nchunks;
+    vb->data_start_offset = 0;
     memcpy(vb->context_data, blob, req_size);
 
     vb->prev_vdev_id = m_last_vdevid;
@@ -468,8 +479,7 @@ void DeviceManager::free_vdev(vdev_info_block* vb) {
         m_vdev_hdr->first_vdev_id = vb->next_vdev_id;
     }
 
-    if (next_vb_id != INVALID_VDEV_ID)
-        m_vdev_info[next_vb_id].prev_vdev_id = prev_vb_id;
+    if (next_vb_id != INVALID_VDEV_ID) m_vdev_info[next_vb_id].prev_vdev_id = prev_vb_id;
     vb->slot_allocated = false;
 
     m_vdev_hdr->num_vdevs--;
@@ -492,7 +502,7 @@ PhysicalDevChunk* DeviceManager::create_new_chunk(PhysicalDev* pdev, uint64_t st
         throw homestore::homestore_exception(s, homestore_error::no_space_avail);
     }
 
-    auto              chunk = std::make_unique< PhysicalDevChunk >(pdev, slot, start_offset, size, c);
+    auto chunk = std::make_unique< PhysicalDevChunk >(pdev, slot, start_offset, size, c);
     PhysicalDevChunk* craw = chunk.get();
     pdev->attach_chunk(craw, prev_chunk);
 
@@ -519,8 +529,7 @@ chunk_info_block* DeviceManager::alloc_new_chunk_slot(uint32_t* pslot_num) {
             return &m_chunk_info[cur_slot];
         }
         cur_slot++;
-        if (cur_slot == HomeStoreConfig::max_chunks)
-            cur_slot = 0;
+        if (cur_slot == HomeStoreConfig::max_chunks) cur_slot = 0;
     } while (cur_slot != start_slot);
 
     return nullptr;

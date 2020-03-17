@@ -7,35 +7,23 @@
 #include "blkalloc/blk.h"
 #include <utility/obj_life_counter.hpp>
 #include "homeds/hash/intrusive_hashset.hpp"
-#include "homeds/memory/obj_allocator.hpp"
+#include <fds/obj_allocator.hpp>
 #include <metrics/metrics.hpp>
+#include <boost/intrusive_ptr.hpp>
 #include <boost/lexical_cast.hpp>
 
 namespace homestore {
 
 #define BLK_READ_MAP_SIZE 128
-struct Free_Blk_Entry {
-    BlkId   m_blkId;
-    uint8_t m_blk_offset : NBLKS_BITS;
-    uint8_t m_nblks_to_free : NBLKS_BITS;
-
-    Free_Blk_Entry(){};
-    Free_Blk_Entry(const BlkId& m_blkId, uint8_t m_blk_offset, uint8_t m_nblks_to_free) :
-            m_blkId(m_blkId),
-            m_blk_offset(m_blk_offset),
-            m_nblks_to_free(m_nblks_to_free) {}
-
-    BlkId   blk_id() const { return m_blkId; }
-    uint8_t blk_offset() const { return m_blk_offset; }
-    uint8_t blks_to_free() const { return m_nblks_to_free; }
-};
+struct Free_Blk_Entry;
+struct volume_req;
 
 struct BlkEvictionRecord : public homeds::HashNode, sisl::ObjLifeCounter< BlkEvictionRecord > {
-    BlkId                            m_key;       // Key to access this cache
-    sisl::atomic_counter< uint32_t > m_refcount;  // Refcount
-    std::atomic< bool >              m_can_free;  // mark free for erasure
-    std::vector< Free_Blk_Entry >    m_free_list; // list of pair(offset,size) to be freed when no ref left
-    std::mutex                       m_mtx;       // This mutex prevents multiple writers to free list
+    BlkId m_key;                                 // Key to access this cache
+    sisl::atomic_counter< uint32_t > m_refcount; // Refcount
+    std::atomic< bool > m_can_free;              // mark free for erasure
+    std::vector< Free_Blk_Entry > m_free_list;   // list of pair(offset,size) to be freed when no ref left
+    std::mutex m_mtx;                            // This mutex prevents multiple writers to free list
 
     BlkEvictionRecord(BlkId& key) : m_key(key), m_refcount(0), m_can_free(false), m_free_list(0), m_mtx() {}
 
@@ -44,9 +32,7 @@ struct BlkEvictionRecord : public homeds::HashNode, sisl::ObjLifeCounter< BlkEvi
     friend void intrusive_ptr_release(BlkEvictionRecord* ber) {
         int cnt = ber->m_refcount.decrement();
         assert(cnt >= 0);
-        if (cnt == 0) {
-            ber->free_yourself();
-        }
+        if (cnt == 0) { ber->free_yourself(); }
     }
 
     void add_to_free_list(Free_Blk_Entry& fbe) {
@@ -55,15 +41,15 @@ struct BlkEvictionRecord : public homeds::HashNode, sisl::ObjLifeCounter< BlkEvi
         m_mtx.unlock();
     }
 
-    BlkId&                         get_key() { return m_key; }
+    BlkId& get_key() { return m_key; }
     std::vector< Free_Blk_Entry >* get_free_list() { return &m_free_list; }
-    void                           free_yourself() { homeds::ObjectAllocator< BlkEvictionRecord >::deallocate(this); }
-    void                           set_free_state() { m_can_free = true; }
-    void                           reset_free_state() { m_can_free = false; }
-    bool                           can_free() { return (m_can_free); }
+    void free_yourself() { sisl::ObjectAllocator< BlkEvictionRecord >::deallocate(this); }
+    void set_free_state() { m_can_free = true; }
+    void reset_free_state() { m_can_free = false; }
+    bool can_free() { return (m_can_free); }
 
     static BlkEvictionRecord* make_object(BlkId& bid) {
-        return homeds::ObjectAllocator< BlkEvictionRecord >::make_object(bid);
+        return sisl::ObjectAllocator< BlkEvictionRecord >::make_object(bid);
     }
 
     //////////// Mandatory IntrusiveHashSet definitions ////////////////
@@ -94,6 +80,7 @@ public:
 
 class Blk_Read_Tracker {
     homeds::IntrusiveHashSet< BlkId, BlkEvictionRecord > m_pending_reads_map;
+
     BlkReadTrackerMetrics                                m_metrics;
     typedef std::function< void(Free_Blk_Entry) >        blk_remove_cb;
     blk_remove_cb                                        m_remove_cb;
@@ -118,7 +105,7 @@ public:
     /* after overwriting blk id in write flow, its marked for safe removal if cannot be freed immediatly*/
     void safe_remove_blk_on_write(Free_Blk_Entry& fbe);
 
-    void     safe_remove_blks(bool is_read, std::vector< Free_Blk_Entry >* fbes, const std::error_condition& err);
+    void safe_remove_blks(boost::intrusive_ptr< volume_req > &vreq);
     uint64_t get_size() { return m_pending_reads_map.get_size(); }
 };
 } // namespace homestore

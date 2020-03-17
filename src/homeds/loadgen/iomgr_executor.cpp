@@ -1,4 +1,5 @@
 #include "iomgr_executor.hpp"
+#include <iomgr/aio_drive_interface.hpp>
 #include <sds_logging/logging.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
@@ -10,45 +11,50 @@ namespace loadgen {
 #define likely(x) __builtin_expect((x), 1)
 #define unlikely(x) __builtin_expect((x), 0)
 
-LoadGenEP::LoadGenEP(std::shared_ptr< iomgr::ioMgr > iomgr_ptr) : iomgr::EndPoint(iomgr_ptr) {}
-
-void LoadGenEP::init_local() {}
-
-void LoadGenEP::print_perf() {}
-
-void LoadGenEP::shutdown_local() {}
-
 IOMgrExecutor::IOMgrExecutor(int num_threads, int num_priorities, uint32_t max_queue_size) : m_cq(max_queue_size) {
     m_running.store(false, std::memory_order_relaxed);
     m_read_cnt = 0;
     m_write_cnt = 0;
     m_ev_fd = eventfd(0, EFD_NONBLOCK);
+
+    iomanager.add_drive_interface(
+        std::dynamic_pointer_cast< iomgr::DriveInterface >(std::make_shared< iomgr::AioDriveInterface >()),
+        true /* is_default */);
+
+    m_ev_fd = eventfd(0, EFD_NONBLOCK);
+    m_ev_fdinfo = iomanager.add_fd(iomanager.default_drive_interface(), m_ev_fd,
+                                   std::bind(&IOMgrExecutor::process_ev_callback, this, std::placeholders::_1,
+                                             std::placeholders::_2, std::placeholders::_3),
+                                   EPOLLIN, 9, nullptr);
+
+#if 0
     m_iomgr = std::make_shared< iomgr::ioMgr >(num_ep, num_threads);
-    m_iomgr->add_fd(m_ev_fd, [this](auto fd, auto cookie, auto event) { process_ev_callback(fd, cookie, event); },
-                    EPOLLIN, 9, nullptr);
-    m_ep = new LoadGenEP(m_iomgr);
-    m_iomgr->add_ep(m_ep);
+    m_iomgr->add_fd(
+        m_ev_fd, [this](auto fd, auto cookie, auto event) { process_ev_callback(fd, cookie, event); }, EPOLLIN, 9,
+        nullptr);
+#endif
+
     // exec start should be called before iomgr->start
     start();
-    m_iomgr->start();
+    iomanager.start(1 /* total interfaces */, num_threads);
+
     uint64_t temp = 1;
     std::this_thread::sleep_for(std::chrono::seconds(2));
 
     [[maybe_unused]] auto wsize = write(m_ev_fd, &temp, sizeof(uint64_t));
 }
 
+// It is called everytime a loadgen test case finishes;
 IOMgrExecutor::~IOMgrExecutor() {
     //
     // m_ep will be deleted by iomgr
     //
     // put iomgr's stop here (instead of IOMgrExecutor::stop) so that
     // executor could be restarted after a IOMgrExecutor::stop();
-    stop(true);
-    m_iomgr->stop();
-    m_iomgr.reset();
+    if(m_running.load()) { stop(true); }
+    if (m_ev_fdinfo) iomanager.remove_fd(iomanager.default_drive_interface(), m_ev_fdinfo);
+    iomanager.stop();
 }
-
-std::shared_ptr< iomgr::ioMgr > IOMgrExecutor::get_iomgr() { return m_iomgr; }
 
 bool IOMgrExecutor::is_empty() { return m_cq.isEmpty(); }
 
@@ -66,8 +72,6 @@ void IOMgrExecutor::process_ev_callback(const int fd, const void* cookie, const 
 
     uint64_t              temp;
     [[maybe_unused]] auto rsize = read(fd, &temp, sizeof(uint64_t));
-
-    m_iomgr->process_done(fd, event);
 
     [[maybe_unused]] auto wsize = write(m_ev_fd, &temp, sizeof(uint64_t));
 
