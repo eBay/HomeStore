@@ -1063,6 +1063,8 @@ private:
             vol_info.clear();
             force = true;
         }
+        VolInterface::get_instance()->shutdown(force);
+   }
 
     void remove_journal_files() {
         // Remove journal folders
