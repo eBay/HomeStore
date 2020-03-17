@@ -899,7 +899,7 @@ private:
                         if (j != 0) {
                             LOGINFO("header mismatch lba read {}", *((uint64_t*)b.bytes));
                         }
-                        LOGINFO("mismatch found lba {} nlba {} total_size_read {}", req->lba, req->nblks,
+                        LOGINFO("mismatch found lba {} nlba {} total_size_read {}", request->lba, request->nblks,
                                 tot_size_read);
 #ifndef NDEBUG
                         VolInterface::get_instance()->print_tree(vol);
