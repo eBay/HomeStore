@@ -130,7 +130,7 @@ private:
      * and which internally can again call get_blob which also takes mutex.
      */
     mutable std::recursive_mutex m_mtx;
-    std::atomic< uint8_t > m_refcnt;
+    std::atomic< uint16_t > m_refcnt;
 
 public:
     MemVector(uint8_t* ptr, uint32_t size, uint32_t offset) : ObjLifeCounter(), m_refcnt(0) {
@@ -143,9 +143,9 @@ public:
     MemVector() : ObjLifeCounter(), m_refcnt(0) { m_list.reserve(1); }
     ~MemVector() { m_list.erase(m_list.begin(), m_list.end()); }
 
-    friend void intrusive_ptr_add_ref(MemVector* mvec) { 
+    friend void intrusive_ptr_add_ref(MemVector* mvec) {
         int cnt = mvec->m_refcnt.fetch_add(1);
-        HS_ASSERT_CMP(RELEASE, cnt, <= , UINT16_MAX); 
+        HS_ASSERT_CMP(RELEASE, cnt, <=, UINT16_MAX);
     }
 
     friend void intrusive_ptr_release(MemVector* mvec) {

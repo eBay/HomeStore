@@ -80,7 +80,6 @@ SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 /**************** Common class created for all tests ***************/
 
-
 uint64_t req_cnt = 0;
 uint64_t req_free_cnt = 0;
 class IOTest : public ::testing::Test {
@@ -244,9 +243,7 @@ public:
         /* start homestore */
         /* create files */
         struct stat st;
-        if (stat("test_files", &st) == -1) {
-            mkdir("test_files", 0700);
-        }
+        if (stat("test_files", &st) == -1) { mkdir("test_files", 0700); }
 
         /* create files */
         if (dev_names.size() != 0) {
@@ -662,9 +659,7 @@ private:
     start:
         /* we won't be writing more then 128 blocks in one io */
         auto vol = vol_info[cur]->vol;
-        if (vol == nullptr) {
-            return;
-        }
+        if (vol == nullptr) { return; }
         if (vol_info[cur]->num_io.fetch_add(1, std::memory_order_acquire) == 1000) {
             nblks = 200;
             lba = (vol_info[cur]->start_large_lba.fetch_add(nblks, std::memory_order_acquire)) %
@@ -674,9 +669,7 @@ private:
             lba = (vol_info[cur]->start_lba.fetch_add(nblks, std::memory_order_acquire)) %
                 (vol_info[cur]->max_vol_blks - nblks);
         }
-        if (nblks == 0) {
-            nblks = 1;
-        }
+        if (nblks == 0) { nblks = 1; }
 
         if (load_type != 2) {
             /* can not support concurrent overlapping writes if whole data need to be verified */
@@ -701,18 +694,14 @@ private:
     start:
         /* we won't be writing more then 128 blocks in one io */
         auto vol = vol_info[cur]->vol;
-        if (vol == nullptr) {
-            return;
-        }
+        if (vol == nullptr) { return; }
         uint64_t max_blks = max_io_size / VolInterface::get_instance()->get_page_size(vol);
         // lba: [0, max_vol_blks - max_blks)
 
         lba = rand() % (vol_info[cur]->max_vol_blks - max_blks);
         // nblks: [1, max_blks]
         nblks = rand() % (max_blks + 1);
-        if (nblks == 0) {
-            nblks = 1;
-        }
+        if (nblks == 0) { nblks = 1; }
 
         if (load_type != 2) {
             /* can not support concurrent overlapping writes if whole data need to be verified */
@@ -742,9 +731,7 @@ private:
         }
         uint64_t size = nblks * VolInterface::get_instance()->get_page_size(vol);
         auto ret = posix_memalign((void**)&buf, 4096, size);
-        if (ret) {
-            assert(0);
-        }
+        if (ret) { assert(0); }
         ret = posix_memalign((void**)&buf1, 4096, size);
         assert(!ret);
         /* buf will be owned by homestore after sending the IO. so we need to allocate buf1 which will be used to
@@ -799,16 +786,12 @@ private:
     start:
         /* we won't be writing more then 128 blocks in one io */
         auto vol = vol_info[cur]->vol;
-        if (vol == nullptr) {
-            return;
-        }
+        if (vol == nullptr) { return; }
         uint64_t max_blks = max_io_size / VolInterface::get_instance()->get_page_size(vol);
 
         lba = rand() % (vol_info[cur]->max_vol_blks - max_blks);
         nblks = rand() % max_blks;
-        if (nblks == 0) {
-            nblks = 1;
-        }
+        if (nblks == 0) { nblks = 1; }
 
         if (load_type != 2) {
             /* Don't send overlapping reads with pending writes if data verification is on */
@@ -895,10 +878,9 @@ private:
                 if (j) {
                     if (can_panic) {
                         /* verify the header */
-                        j = memcmp((void*)b.bytes, (uint8_t*)((uint64_t)request->buf + tot_size_read), sizeof(uint64_t));
-                        if (j != 0) {
-                            LOGINFO("header mismatch lba read {}", *((uint64_t*)b.bytes));
-                        }
+                        j = memcmp((void*)b.bytes, (uint8_t*)((uint64_t)request->buf + tot_size_read),
+                                   sizeof(uint64_t));
+                        if (j != 0) { LOGINFO("header mismatch lba read {}", *((uint64_t*)b.bytes)); }
                         LOGINFO("mismatch found lba {} nlba {} total_size_read {}", request->lba, request->nblks,
                                 tot_size_read);
 #ifndef NDEBUG
@@ -1064,7 +1046,7 @@ private:
             force = true;
         }
         VolInterface::get_instance()->shutdown(force);
-   }
+    }
 
     void remove_journal_files() {
         // Remove journal folders
@@ -1135,10 +1117,18 @@ TEST_F(IOTest, init_io_test) {
 TEST_F(IOTest, recovery_io_test) {
     this->init = false;
     switch (expected_vol_state) {
-    case 0: this->m_expected_vol_state = homestore::vol_state::ONLINE; break;
-    case 1: this->m_expected_vol_state = homestore::vol_state::OFFLINE; break;
-    case 2: this->m_expected_vol_state = homestore::vol_state::DEGRADED; break;
-    case 3: this->m_expected_vol_state = homestore::vol_state::FAILED; break;
+    case 0:
+        this->m_expected_vol_state = homestore::vol_state::ONLINE;
+        break;
+    case 1:
+        this->m_expected_vol_state = homestore::vol_state::OFFLINE;
+        break;
+    case 2:
+        this->m_expected_vol_state = homestore::vol_state::DEGRADED;
+        break;
+    case 3:
+        this->m_expected_vol_state = homestore::vol_state::FAILED;
+        break;
     }
     this->start_homestore();
     this->wait_homestore_init_done();
@@ -1376,9 +1366,7 @@ TEST_F(IOTest, btree_fix_rerun_io_test) {
     sleep(5);
     assert(outstanding_ios == 0);
 
-    if (can_delete_volume) {
-        this->delete_volumes();
-    }
+    if (can_delete_volume) { this->delete_volumes(); }
 
     this->shutdown();
     if (remove_file) { this->remove_files(); }
@@ -1468,16 +1456,10 @@ int main(int argc, char* argv[]) {
     mem_btree_page_size = SDS_OPTIONS["mem_btree_page_size"].as< uint32_t >();
     io_flags = SDS_OPTIONS["io_flags"].as< uint32_t >();
 
-    if (SDS_OPTIONS.count("device_list")) {
-        dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();
-    }
+    if (SDS_OPTIONS.count("device_list")) { dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >(); }
 
-    if (load_type == 2) {
-        verify_data = 0;
-    }
+    if (load_type == 2) { verify_data = 0; }
 
-    if (enable_crash_handler) {
-        sds_logging::install_crash_handler();
-    }
+    if (enable_crash_handler) { sds_logging::install_crash_handler(); }
     return RUN_ALL_TESTS();
 }

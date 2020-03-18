@@ -287,9 +287,7 @@ public:
         physical_node->set_checksum(get_node_area_size(impl));
 #endif
 
-        if (homestore::HomeStoreConfig::is_read_only) {
-            return btree_status_t::success;
-        }
+        if (homestore::HomeStoreConfig::is_read_only) { return btree_status_t::success; }
         req->instance = impl;
         req->ssd_buf = boost::dynamic_pointer_cast< btree_buffer_t >(bn);
         if (multinode_req) { multinode_req->writes_pending.increment(1); }
@@ -367,11 +365,9 @@ public:
     }
 
     static void free_node(SSDBtreeStore* store, boost::intrusive_ptr< SSDBtreeNode > bn,
-                            ssdbtree_multinode_req_ptr multinode_req, bool mem_only = false) {
-        
-        if (homestore::HomeStoreConfig::is_read_only) {
-            return;
-        }
+                          ssdbtree_multinode_req_ptr multinode_req, bool mem_only = false) {
+
+        if (homestore::HomeStoreConfig::is_read_only) { return; }
         homestore::BlkId blkid(bn->get_node_id().m_id);
         if (multinode_req) {
             store->m_blkstore->free_blk(blkid, boost::none, boost::none, multinode_req->dependent_req_q, mem_only);

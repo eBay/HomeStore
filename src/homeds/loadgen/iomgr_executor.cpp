@@ -51,7 +51,7 @@ IOMgrExecutor::~IOMgrExecutor() {
     //
     // put iomgr's stop here (instead of IOMgrExecutor::stop) so that
     // executor could be restarted after a IOMgrExecutor::stop();
-    if(m_running.load()) { stop(true); }
+    if (m_running.load()) { stop(true); }
     if (m_ev_fdinfo) iomanager.remove_fd(iomanager.default_drive_interface(), m_ev_fdinfo);
     iomanager.stop();
 }
@@ -70,7 +70,7 @@ void IOMgrExecutor::process_ev_callback(const int fd, const void* cookie, const 
 
     assert(fd == m_ev_fd);
 
-    uint64_t              temp;
+    uint64_t temp;
     [[maybe_unused]] auto rsize = read(fd, &temp, sizeof(uint64_t));
 
     [[maybe_unused]] auto wsize = write(m_ev_fd, &temp, sizeof(uint64_t));

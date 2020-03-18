@@ -190,7 +190,6 @@ int main(int argc, char* argv[]) {
     SDS_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
     sds_logging::SetLogger("check_btree");
     spdlog::set_pattern("[%D %T.%f] [%^%L%$] [%t] %v");
-
     vol_uuid = SDS_OPTIONS["vol_uuid"].as< std::string >();
     blkid = SDS_OPTIONS["blkid"].as< uint64_t >();
     print_tree = SDS_OPTIONS["print_tree"].as< uint32_t >();

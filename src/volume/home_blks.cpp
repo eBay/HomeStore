@@ -186,8 +186,8 @@ cap_attrs HomeBlks::get_vol_capacity(const VolumePtr& vol) {
     return cap;
 }
 
-vol_interface_req_ptr HomeBlks::create_vol_interface_req(std::shared_ptr< Volume > vol, void *buf, 
-        uint64_t lba, uint32_t nlbas, bool read, bool sync) { 
+vol_interface_req_ptr HomeBlks::create_vol_interface_req(std::shared_ptr< Volume > vol, void* buf, uint64_t lba,
+                                                         uint32_t nlbas, bool read, bool sync) {
     return Volume::create_volume_req(vol, buf, lba, nlbas, read, sync);
 }
 
@@ -921,16 +921,18 @@ void HomeBlks::init_thread() {
         cfg.server_port = SDS_OPTIONS["hb_stats_port"].as< int32_t >();
         cfg.read_write_timeout_secs = 10;
 
-        m_http_server = std::unique_ptr< sisl::HttpServer >(new sisl::HttpServer(cfg, {{
-                handler_info("/api/v1/version", HomeBlks::get_version, (void *)this),
-                handler_info("/api/v1/getMetrics", HomeBlks::get_metrics, (void *)this),
-                handler_info("/api/v1/getObjLife", HomeBlks::get_obj_life, (void *)this),
-                handler_info("/metrics", HomeBlks::get_prometheus_metrics, (void *)this),
-                handler_info("/api/v1/getLogLevel", HomeBlks::get_log_level, (void *)this),
-                handler_info("/api/v1/setLogLevel", HomeBlks::set_log_level, (void *)this),
-                handler_info("/api/v1/dumpStackTrace", HomeBlks::dump_stack_trace, (void *)this),
-                handler_info("/api/v1/verifyHS", HomeBlks::verify_hs, (void *)this),
-        }}));
+        m_http_server = std::unique_ptr< sisl::HttpServer >(
+            new sisl::HttpServer(cfg,
+                                 {{
+                                     handler_info("/api/v1/version", HomeBlks::get_version, (void*)this),
+                                     handler_info("/api/v1/getMetrics", HomeBlks::get_metrics, (void*)this),
+                                     handler_info("/api/v1/getObjLife", HomeBlks::get_obj_life, (void*)this),
+                                     handler_info("/metrics", HomeBlks::get_prometheus_metrics, (void*)this),
+                                     handler_info("/api/v1/getLogLevel", HomeBlks::get_log_level, (void*)this),
+                                     handler_info("/api/v1/setLogLevel", HomeBlks::set_log_level, (void*)this),
+                                     handler_info("/api/v1/dumpStackTrace", HomeBlks::dump_stack_trace, (void*)this),
+                                     handler_info("/api/v1/verifyHS", HomeBlks::verify_hs, (void*)this),
+                                 }}));
         m_http_server->start();
 
         /* scan volumes */
@@ -1211,21 +1213,22 @@ bool HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
 
 bool HomeBlks::do_volume_shutdown(bool force) {
     std::unique_lock< std::recursive_mutex > lg(m_vol_lock);
-    for (auto& x : m_volume_map) {
-        auto pending_ref = x.second.use_count();
+    for (auto it = m_volume_map.cbegin(); it != m_volume_map.cend();) {
+        auto pending_ref = it->second.use_count();
         if ((pending_ref != 1) && !force) {
-            LOGDEBUG("vol: {} still has ref_count {}. Waiting to be unrefed. ", x.second->get_name(), pending_ref);
+            LOGDEBUG("vol: {} still has ref_count {}. Waiting to be unrefed. ", it->second->get_name(), pending_ref);
+            ++it;
             continue;
         }
 
         if (pending_ref == 1) {
-            LOGINFO("vol: {} ref_count successfully drops to 1. Normal volume shutdown. ", x.second->get_name());
+            LOGINFO("vol: {} ref_count successfully drops to 1. Normal volume shutdown. ", it->second->get_name());
         } else if (force) {
-            LOGINFO("vol: {} still has ref_count {}, but we are forced to shutdown ", x.second->get_name(),
+            LOGINFO("vol: {} still has ref_count {}, but we are forced to shutdown ", it->second->get_name(),
                     pending_ref);
         }
-        x.second->shutdown();
-        m_volume_map.erase(x.first);
+        it->second->shutdown();
+        it = m_volume_map.erase(it);
     }
 
     return (m_volume_map.size() == 0);

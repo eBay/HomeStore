@@ -26,6 +26,7 @@ class CacheKey : public BlkId, public KeySpec {
         auto sblkid = distribution(generator);
         return CacheKey(sblkid, 1);
     }
+
 public:
     static CacheKey gen_key(KeyPattern spec, CacheKey* ref_key = nullptr) {
         switch (spec) {
@@ -74,9 +75,7 @@ public:
             return false;
     }
 
-    int compare(const CacheKey* other) const { 
-        return compare(*this, *other);
-    }
+    int compare(const CacheKey* other) const { return compare(*this, *other); }
 
     static int compare(const CacheKey& one, const CacheKey& two) {
         BlkId bid1 = *(BlkId*)&one;

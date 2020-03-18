@@ -46,7 +46,6 @@
 #include "keyspecs/logstore_key_spec.hpp"
 #include "valuespecs/logstore_value_spec.hpp"
 
-
 #include "disk_initializer.hpp"
 #include <linux/fs.h>
 #include <sys/ioctl.h>
@@ -80,14 +79,14 @@ using namespace homeds::loadgen;
 
 #define G_FileKV BtreeLoadGen< MapKey, BlkValue, FileStoreSpec, IOMgrExecutor >
 
-#define G_VDev_Test_PRW BtreeLoadGen< VDevKey, VDevValue, VDevPRWStoreSpec, IOMgrExecutor>
+#define G_VDev_Test_PRW BtreeLoadGen< VDevKey, VDevValue, VDevPRWStoreSpec, IOMgrExecutor >
 
-#define G_VDev_Test_RW BtreeLoadGen< SimpleNumberKey, VDevValue, VDevRWStoreSpec, IOMgrExecutor>
+#define G_VDev_Test_RW BtreeLoadGen< SimpleNumberKey, VDevValue, VDevRWStoreSpec, IOMgrExecutor >
 
-#define G_LogStore_Test BtreeLoadGen< LogStoreKey, LogStoreValue, LogStoreSpec, IOMgrExecutor>
+#define G_LogStore_Test BtreeLoadGen< LogStoreKey, LogStoreValue, LogStoreSpec, IOMgrExecutor >
 
 static Param parameters;
-bool         loadgen_verify_mode = false;
+bool loadgen_verify_mode = false;
 
 struct BtreeTest : public testing::Test {
     std::unique_ptr< G_SimpleKV_Mem > loadgen;
@@ -107,10 +106,10 @@ TEST_F(BtreeTest, SimpleKVMemTest) { this->execute(); }
 // TODO: combine the SimpleKVMem/SimpleKVSSD/VarKVSSD in one class
 struct SSDBtreeTest : public testing::Test {
     std::unique_ptr< G_SimpleKV_SSD > loadgen;
-    DiskInitializer< IOMgrExecutor >  di;
-    std::mutex                        m_mtx;
-    std::condition_variable           m_cv;
-    bool                              is_complete = false;
+    DiskInitializer< IOMgrExecutor > di;
+    std::mutex m_mtx;
+    std::condition_variable m_cv;
+    bool is_complete = false;
 
     void join() {
         std::unique_lock< std::mutex > lk(m_mtx);
@@ -137,11 +136,11 @@ struct SSDBtreeTest : public testing::Test {
 TEST_F(SSDBtreeTest, SimpleKVSSDTest) { this->execute(); }
 
 struct SSDBtreeVarKVTest : public testing::Test {
-    std::unique_ptr< G_VarKV_SSD >   loadgen;
+    std::unique_ptr< G_VarKV_SSD > loadgen;
     DiskInitializer< IOMgrExecutor > di;
-    std::mutex                       m_mtx;
-    std::condition_variable          m_cv;
-    bool                             is_complete = false;
+    std::mutex m_mtx;
+    std::condition_variable m_cv;
+    bool is_complete = false;
 
     void join() {
         std::unique_lock< std::mutex > lk(m_mtx);
@@ -169,10 +168,10 @@ TEST_F(SSDBtreeVarKVTest, VarKVSSDTest) { this->execute(); }
 
 struct MapTest : public testing::Test {
     DiskInitializer< IOMgrExecutor > di;
-    std::unique_ptr< G_MapKV_SSD >   loadgen;
-    std::mutex                       m_mtx;
-    std::condition_variable          m_cv;
-    bool                             is_complete = false;
+    std::unique_ptr< G_MapKV_SSD > loadgen;
+    std::mutex m_mtx;
+    std::condition_variable m_cv;
+    bool is_complete = false;
 
     void join() {
         std::unique_lock< std::mutex > lk(m_mtx);
@@ -200,11 +199,11 @@ struct MapTest : public testing::Test {
 TEST_F(MapTest, MapSSDTest) { this->execute(); }
 
 struct FileTest : public testing::Test {
-    std::unique_ptr< G_FileKV >      loadgen;
+    std::unique_ptr< G_FileKV > loadgen;
     DiskInitializer< IOMgrExecutor > di;
-    std::mutex                       m_mtx;
-    std::condition_variable          m_cv;
-    bool                             is_complete = false;
+    std::mutex m_mtx;
+    std::condition_variable m_cv;
+    bool is_complete = false;
 
     void join() {
         std::unique_lock< std::mutex > lk(m_mtx);
@@ -216,9 +215,9 @@ struct FileTest : public testing::Test {
         LOGINFO("Regression Started");
         size_t size = 0;
         for (uint32_t i = 0; i < parameters.file_names.size(); ++i) {
-            auto        fd = open(parameters.file_names[i].c_str(), O_RDWR);
+            auto fd = open(parameters.file_names[i].c_str(), O_RDWR);
             struct stat buf;
-            uint64_t    devsize = 0;
+            uint64_t devsize = 0;
             if (fstat(fd, &buf) >= 0) {
                 devsize = buf.st_size;
             } else {
@@ -247,11 +246,11 @@ struct FileTest : public testing::Test {
 TEST_F(FileTest, FileTest) { this->execute(); }
 
 struct VDevTest_RW : public testing::Test {
-    std::unique_ptr< G_VDev_Test_RW >   loadgen;
+    std::unique_ptr< G_VDev_Test_RW > loadgen;
     DiskInitializer< IOMgrExecutor > di;
-    std::mutex                       m_mtx;
-    std::condition_variable          m_cv;
-    bool                             is_complete = false;
+    std::mutex m_mtx;
+    std::condition_variable m_cv;
+    bool is_complete = false;
 
     void join() {
         std::unique_lock< std::mutex > lk(m_mtx);
@@ -259,7 +258,7 @@ struct VDevTest_RW : public testing::Test {
     }
 
     void init_done_cb(std::error_condition err, const homeds::out_params& params1) {
-        loadgen->initParam(parameters); 
+        loadgen->initParam(parameters);
         LOGINFO("Regression Started");
         loadgen->regression(true, false, false, false);
         is_complete = true;
@@ -268,8 +267,8 @@ struct VDevTest_RW : public testing::Test {
 
     void execute() {
         // disable verfication for vdev test
-        parameters.NT = 1;   // vdev APIs are not thread-safe;
-        loadgen = std::make_unique< G_VDev_Test_RW >(parameters.NT, false); 
+        parameters.NT = 1; // vdev APIs are not thread-safe;
+        loadgen = std::make_unique< G_VDev_Test_RW >(parameters.NT, false);
         di.init(loadgen->get_executor(),
                 std::bind(&VDevTest_RW::init_done_cb, this, std::placeholders::_1, std::placeholders::_2));
         join(); // sync wait for test to finish
@@ -280,11 +279,11 @@ struct VDevTest_RW : public testing::Test {
 TEST_F(VDevTest_RW, VDevTest_RW) { this->execute(); }
 
 struct VDevTest_PRW : public testing::Test {
-    std::unique_ptr< G_VDev_Test_PRW >   loadgen;
+    std::unique_ptr< G_VDev_Test_PRW > loadgen;
     DiskInitializer< IOMgrExecutor > di;
-    std::mutex                       m_mtx;
-    std::condition_variable          m_cv;
-    bool                             is_complete = false;
+    std::mutex m_mtx;
+    std::condition_variable m_cv;
+    bool is_complete = false;
 
     void join() {
         std::unique_lock< std::mutex > lk(m_mtx);
@@ -292,7 +291,7 @@ struct VDevTest_PRW : public testing::Test {
     }
 
     void init_done_cb(std::error_condition err, const homeds::out_params& params1) {
-        loadgen->initParam(parameters); 
+        loadgen->initParam(parameters);
         LOGINFO("Regression Started");
         loadgen->regression(true, false, false, false);
         is_complete = true;
@@ -301,8 +300,8 @@ struct VDevTest_PRW : public testing::Test {
 
     void execute() {
         // disable verfication for vdev test
-        parameters.NT = 1;   // vdev APIs are not thread-safe;
-        loadgen = std::make_unique< G_VDev_Test_PRW >(parameters.NT, false); 
+        parameters.NT = 1; // vdev APIs are not thread-safe;
+        loadgen = std::make_unique< G_VDev_Test_PRW >(parameters.NT, false);
         di.init(loadgen->get_executor(),
                 std::bind(&VDevTest_PRW::init_done_cb, this, std::placeholders::_1, std::placeholders::_2));
         join(); // sync wait for test to finish
@@ -328,10 +327,10 @@ TEST_F(CacheTest, CacheMemTest) { this->execute(); }
 class VolumeLoadTest : public testing::Test {
 private:
     std::unique_ptr< G_Volume_Test > m_loadgen;
-    VolumeManager< IOMgrExecutor >*  m_vol_mgr = nullptr;
-    std::mutex                       m_mtx;
-    std::condition_variable          m_cv;
-    bool                             m_is_complete = false;
+    VolumeManager< IOMgrExecutor >* m_vol_mgr = nullptr;
+    std::mutex m_mtx;
+    std::condition_variable m_cv;
+    bool m_is_complete = false;
 
 private:
     void init_done_cb(std::error_condition err) {
@@ -359,7 +358,7 @@ public:
 
         m_vol_mgr = VolumeManager< IOMgrExecutor >::instance();
 
-        uint64_t num_vols = SDS_OPTIONS["num_vols"].as< uint64_t >();  
+        uint64_t num_vols = SDS_OPTIONS["num_vols"].as< uint64_t >();
         m_vol_mgr->set_max_vols(num_vols);
 
         // start vol manager which creates a bunch of volumes;
@@ -368,7 +367,7 @@ public:
 
         // wait for loadgen to finish
         join();
-        
+
         // call executor stop here to wake up the threads blocking on reading the queue;
         // need this with new iomgr so that vol ref can be released before we call shutdown.
         m_loadgen->get_executor().stop();
@@ -382,11 +381,11 @@ public:
 TEST_F(VolumeLoadTest, VolumeTest) { this->execute(); }
 
 struct LogStoreLoadTest : public testing::Test {
-    std::unique_ptr< G_LogStore_Test>   loadgen;
-    DiskInitializer< IOMgrExecutor >    di;
-    std::mutex                          m_mtx;
-    std::condition_variable             m_cv;
-    bool                                is_complete = false;
+    std::unique_ptr< G_LogStore_Test > loadgen;
+    DiskInitializer< IOMgrExecutor > di;
+    std::mutex m_mtx;
+    std::condition_variable m_cv;
+    bool is_complete = false;
 
     void join() {
         std::unique_lock< std::mutex > lk(m_mtx);
@@ -404,7 +403,7 @@ struct LogStoreLoadTest : public testing::Test {
     void execute() {
         // disable verification because it is async write, similar as volume test load;
         // verification will be done by logstore spec;
-        loadgen = std::make_unique< G_LogStore_Test>(parameters.NT, false);
+        loadgen = std::make_unique< G_LogStore_Test >(parameters.NT, false);
         di.init(loadgen->get_executor(),
                 std::bind(&LogStoreLoadTest::init_done_cb, this, std::placeholders::_1, std::placeholders::_2));
         join(); // sync wait for test to finish
@@ -444,7 +443,8 @@ SDS_OPTION_GROUP(
      cxxopts::value< int32_t >()->default_value("5001"), "port"),
     (files, "", "input-files", "Do IO on a set of files", cxxopts::value< std::vector< std::string > >(),
      "path,[path,...]"),
-    (num_vols, "", "num_vols", "number of vols to create",  ::cxxopts::value< uint64_t >()->default_value("50"), "number"))
+    (num_vols, "", "num_vols", "number of vols to create", ::cxxopts::value< uint64_t >()->default_value("50"),
+     "number"))
 
 SDS_OPTIONS_ENABLE(logging, test_load)
 

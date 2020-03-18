@@ -42,11 +42,11 @@ struct atomwrapper {
 
 class VarsizeBlkAllocConfig : public BlkAllocConfig {
 private:
-    uint32_t                m_phys_page_size;
-    uint32_t                m_nsegments;
-    uint32_t                m_blks_per_portion;
-    uint32_t                m_blks_per_temp_group;
-    uint64_t                m_max_cache_blks;
+    uint32_t m_phys_page_size;
+    uint32_t m_nsegments;
+    uint32_t m_blks_per_portion;
+    uint32_t m_blks_per_temp_group;
+    uint64_t m_max_cache_blks;
     std::vector< uint32_t > m_slab_nblks;
     std::vector< uint32_t > m_slab_capacity;
 
@@ -258,12 +258,12 @@ public:
     typedef boost::heap::binomial_heap< BlkAllocSegment*, boost::heap::compare< CompareSegAvail > > SegQueue;
 
 private:
-    uint64_t                m_alloc_clock_hand;
+    uint64_t m_alloc_clock_hand;
     std::atomic< uint64_t > m_free_blks = 0;
-    uint64_t                m_total_blks;
-    uint64_t                m_total_portions;
-    uint32_t                m_seg_num; // Segment sequence number
-    SegmentMetrics          m_metrics;
+    uint64_t m_total_blks;
+    uint64_t m_total_portions;
+    uint32_t m_seg_num; // Segment sequence number
+    SegmentMetrics m_metrics;
 
 public:
     BlkAllocSegment(uint64_t nblks, uint32_t seg_num, uint64_t nportions, std::string seg_name) :
@@ -304,8 +304,8 @@ public:
     uint32_t get_seg_num() const { return m_seg_num; }
 
     void reportFragmentation(uint64_t nadded_blks, uint64_t nfragments) {
-        float frag_ratio = (static_cast<float>(nfragments)) / nadded_blks;
-        uint32_t scaled_frag_factor = static_cast<uint32_t>(frag_ratio * 64);
+        float frag_ratio = (static_cast< float >(nfragments)) / nadded_blks;
+        uint32_t scaled_frag_factor = static_cast< uint32_t >(frag_ratio * 64);
         HISTOGRAM_OBSERVE(m_metrics, frag_pct_distribution, scaled_frag_factor);
     }
 };
@@ -353,7 +353,7 @@ private:
     } blob_t;
 
     blob_t* m_blob;
-    blob_t  m_in_place_blob;
+    blob_t m_in_place_blob;
 
 public:
     VarsizeAllocCacheEntry() {
@@ -533,21 +533,21 @@ public:
 
     BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints& hints, BlkId* out_blkid, bool best_fit = false) override;
     BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) override;
-    void           free(const BlkId& b) override;
+    void free(const BlkId& b) override;
 
     std::string to_string() const override;
-    void        allocator_state_machine();
+    void allocator_state_machine();
 
     virtual BlkAllocStatus alloc(BlkId& out_blkid) override;
-    virtual void           inited() override;
-    virtual bool           is_blk_alloced(BlkId& in_bid) override;
+    virtual void inited() override;
+    virtual bool is_blk_alloced(BlkId& in_bid) override;
 
 private:
-    VarsizeBlkAllocConfig   m_cfg;       // Config for Varsize
-    std::thread             m_thread_id; // Thread pointer for this region
-    std::mutex              m_mutex;     // Mutex to protect regionstate & cb
-    std::condition_variable m_cv;        // CV to signal thread
-    BlkAllocatorState       m_region_state;
+    VarsizeBlkAllocConfig m_cfg;  // Config for Varsize
+    std::thread m_thread_id;      // Thread pointer for this region
+    std::mutex m_mutex;           // Mutex to protect regionstate & cb
+    std::condition_variable m_cv; // CV to signal thread
+    BlkAllocatorState m_region_state;
 
     homeds::Bitset* m_alloc_bm; // Bitset of all allocation
 
@@ -557,31 +557,31 @@ private:
 
     VarsizeBlkAllocatorBtree* m_blk_cache; // Blk Entry caches
 
-    std::vector< BlkAllocSegment* > m_segments;                     // Lookup map for segment id - segment
-    BlkAllocSegment*                m_wait_alloc_segment = nullptr; // A flag/hold variable, for caller thread
-    int                             m_wait_slab_indx = -1;
+    std::vector< BlkAllocSegment* > m_segments;      // Lookup map for segment id - segment
+    BlkAllocSegment* m_wait_alloc_segment = nullptr; // A flag/hold variable, for caller thread
+    int m_wait_slab_indx = -1;
     // to pass which segment to look for sweep
 
     // Overall page and page group tables
-    std::vector< BlkAllocPortion >          m_blk_portions;
+    std::vector< BlkAllocPortion > m_blk_portions;
     std::vector< BlkAllocTemperatureGroup > m_temp_groups;
 
-    std::atomic< uint32_t >                m_cache_n_entries; // Total number of blk entries to cache
-    std::vector< atomwrapper< uint32_t > > m_slab_entries;    // Blk cnt for each slab in cache
-    BlkAllocMetrics                        m_metrics;
-    bool                                   m_init;
+    std::atomic< uint32_t > m_cache_n_entries;             // Total number of blk entries to cache
+    std::vector< atomwrapper< uint32_t > > m_slab_entries; // Blk cnt for each slab in cache
+    BlkAllocMetrics m_metrics;
+    bool m_init;
 
 private:
     const VarsizeBlkAllocConfig& get_config() const override { return (VarsizeBlkAllocConfig&)m_cfg; }
-    uint64_t                     get_portions_per_segment();
+    uint64_t get_portions_per_segment();
 
     // Thread related functions
     std::string state_string(BlkAllocatorState state) const;
 
     // Sweep and cache related functions
-    void     request_more_blks(BlkAllocSegment* seg, int slab_indx);
-    void     request_more_blks_wait(BlkAllocSegment* seg, int slab_indx);
-    void     fill_cache(BlkAllocSegment* seg, int slab_indx);
+    void request_more_blks(BlkAllocSegment* seg, int slab_indx);
+    void request_more_blks_wait(BlkAllocSegment* seg, int slab_indx);
+    void fill_cache(BlkAllocSegment* seg, int slab_indx);
     uint64_t fill_cache_in_portion(uint64_t portion_num, BlkAllocSegment* seg);
 
     // Convenience routines
@@ -629,8 +629,8 @@ private:
         out_entry->set_temperature(get_blk_temperature(blknum));
     }
     uint64_t get_best_fit_cache(uint64_t blks_rqstd);
-    void     incr_counter(unsigned int index, unsigned int val);
-    void     decr_counter(unsigned int index, unsigned int val);
+    void incr_counter(unsigned int index, unsigned int val);
+    void decr_counter(unsigned int index, unsigned int val);
 };
 
 #define BLKID_RANGE_FIRST 0UL

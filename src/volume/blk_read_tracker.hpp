@@ -81,21 +81,19 @@ public:
 class Blk_Read_Tracker {
     homeds::IntrusiveHashSet< BlkId, BlkEvictionRecord > m_pending_reads_map;
 
-    BlkReadTrackerMetrics                                m_metrics;
-    typedef std::function< void(Free_Blk_Entry) >        blk_remove_cb;
-    blk_remove_cb                                        m_remove_cb;
-    std::string                                          m_vol_name;
-    std::string                                          m_vol_uuid;
+    BlkReadTrackerMetrics m_metrics;
+    typedef std::function< void(Free_Blk_Entry) > blk_remove_cb;
+    blk_remove_cb m_remove_cb;
+    std::string m_vol_name;
+    std::string m_vol_uuid;
 
 public:
-    Blk_Read_Tracker(   const char* vol_name,
-                        boost::uuids::uuid vol_uuid,
-                        blk_remove_cb remove_cb ) :
+    Blk_Read_Tracker(const char* vol_name, boost::uuids::uuid vol_uuid, blk_remove_cb remove_cb) :
             m_pending_reads_map(BLK_READ_MAP_SIZE),
             m_metrics(vol_name),
             m_remove_cb(remove_cb),
             m_vol_name(vol_name),
-            m_vol_uuid(boost::lexical_cast<std::string>(vol_uuid)) {}
+            m_vol_uuid(boost::lexical_cast< std::string >(vol_uuid)) {}
 
     void insert(BlkId& bid);
 
@@ -105,7 +103,7 @@ public:
     /* after overwriting blk id in write flow, its marked for safe removal if cannot be freed immediatly*/
     void safe_remove_blk_on_write(Free_Blk_Entry& fbe);
 
-    void safe_remove_blks(boost::intrusive_ptr< volume_req > &vreq);
+    void safe_remove_blks(boost::intrusive_ptr< volume_req >& vreq);
     uint64_t get_size() { return m_pending_reads_map.get_size(); }
 };
 } // namespace homestore

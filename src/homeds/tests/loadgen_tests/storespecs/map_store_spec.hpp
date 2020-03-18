@@ -31,9 +31,9 @@ public:
         assert(0);
     }
 
-    virtual bool insert(K& k, std::shared_ptr<V> v) override { return update(k, v); }
+    virtual bool insert(K& k, std::shared_ptr< V > v) override { return update(k, v); }
 
-    virtual bool upsert(K& k, std::shared_ptr<V> v) override { return update(k, v); }
+    virtual bool upsert(K& k, std::shared_ptr< V > v) override { return update(k, v); }
 
     virtual void init_store(homeds::loadgen::Param& parameters) override {
         vol_params params;
@@ -53,9 +53,9 @@ public:
     }
 
     /* Map put always appends if exists, no feature to force udpate/insert and return error */
-    virtual bool update(K& k, std::shared_ptr<V> v) override {
+    virtual bool update(K& k, std::shared_ptr< V > v) override {
         boost::intrusive_ptr< volume_req > req(new volume_req());
-        ValueEntry                         ve;
+        ValueEntry ve;
         v->get_array().get(0, ve, false);
         req->seqId = ve.get_seqId();
         req->lastCommited_seqId = req->seqId; // keeping only latest version always
@@ -70,8 +70,7 @@ public:
         std::vector< std::pair< K, V > > kvs;
         query(k, true, k, true, kvs);
         assert(kvs.size() <= 1);
-        if (kvs.size() == 0)
-            return false;
+        if (kvs.size() == 0) return false;
         out_v->copy_blob(kvs[0].second.get_blob());
         return true;
     }
@@ -88,20 +87,16 @@ public:
 
     virtual uint32_t query(K& start_key, bool start_incl, K& end_key, bool end_incl,
                            std::vector< std::pair< K, V > >& result) override {
-        auto                      search_range = BtreeSearchRange(start_key, start_incl, end_key, end_incl);
-        BtreeQueryRequest< K, V > qreq(search_range, BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, 
-                                        end_key.start() - start_key.start() + 1);
+        auto search_range = BtreeSearchRange(start_key, start_incl, end_key, end_incl);
+        BtreeQueryRequest< K, V > qreq(search_range, BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY,
+                                       end_key.start() - start_key.start() + 1);
 
-        auto                               result_count = 0U;
+        auto result_count = 0U;
         boost::intrusive_ptr< volume_req > volreq(new volume_req());
         volreq->lba = start_key.start();
-        if (!start_incl) {
-            volreq->lba++;
-        }
+        if (!start_incl) { volreq->lba++; }
         volreq->nlbas = end_key.end() - volreq->lba + 1;
-        if (!end_incl) {
-            volreq->nlbas--;
-        }
+        if (!end_incl) { volreq->nlbas--; }
         volreq->seqId = INVALID_SEQ_ID;
         volreq->lastCommited_seqId = INVALID_SEQ_ID; // read only latest value
 
@@ -115,34 +110,34 @@ public:
         }
 
         for (uint64_t lba = volreq->lba; lba < volreq->lba + volreq->nlbas;) {
-             if (kvs[j].first.start() != lba) {
+            if (kvs[j].first.start() != lba) {
                 lba++;
                 continue;
-             }
-             ValueEntry ve;
-             (kvs[j].second.get_array()).get(0, ve, false);
-             int cnt = 0;
-             while (lba <= kvs[j].first.end()) {
-                 auto storeblk = ve.get_blkId().get_id() + ve.get_blk_offset() + cnt;
-                 ValueEntry ve(INVALID_SEQ_ID, BlkId(storeblk, 1, 0), 0, 1, &carr[0]);
-                 result.push_back(std::make_pair(K(lba, 1), V(ve)));
-                 lba++;
-                 cnt++;
-             }
-             j++;
+            }
+            ValueEntry ve;
+            (kvs[j].second.get_array()).get(0, ve, false);
+            int cnt = 0;
+            while (lba <= kvs[j].first.end()) {
+                auto storeblk = ve.get_blkId().get_id() + ve.get_blk_offset() + cnt;
+                ValueEntry ve(INVALID_SEQ_ID, BlkId(storeblk, 1, 0), 0, 1, &carr[0]);
+                result.push_back(std::make_pair(K(lba, 1), V(ve)));
+                lba++;
+                cnt++;
+            }
+            j++;
         }
 
         result_count += result.size();
         return result_count;
     }
 
-    virtual bool range_update(K& start_key, bool start_incl, K& end_key, bool end_incl, 
-                                std::vector< std::shared_ptr<V> > &result) {
+    virtual bool range_update(K& start_key, bool start_incl, K& end_key, bool end_incl,
+                              std::vector< std::shared_ptr< V > >& result) {
         assert(start_incl);
         assert(end_incl);
         boost::intrusive_ptr< volume_req > req(new volume_req());
-        V &start_value = *(result[0].get());
-        V &end_value = *(result.back());
+        V& start_value = *(result[0].get());
+        V& end_value = *(result.back());
 
         req->seqId = INVALID_SEQ_ID;
         req->lastCommited_seqId = INVALID_SEQ_ID; // keeping only latest version always
@@ -161,8 +156,7 @@ public:
             carr[i] = 1;
 
         // NOTE assuming data block size is same as lba-volume block size
-        ValueEntry ve(INVALID_SEQ_ID, BlkId(bid.get_id(), bid.get_nblks(), 0), 0, bid.get_nblks(),
-                      &carr[0]);
+        ValueEntry ve(INVALID_SEQ_ID, BlkId(bid.get_id(), bid.get_nblks(), 0), 0, bid.get_nblks(), &carr[0]);
         MappingValue value(ve);
         LOGDEBUG("Mapping range put:{} {} ", key.to_string(), value.to_string());
 
@@ -174,7 +168,7 @@ public:
 
 private:
     std::unique_ptr< mapping > m_map;
-    boost::uuids::uuid         uuid;
+    boost::uuids::uuid uuid;
 };
 
 } // namespace loadgen

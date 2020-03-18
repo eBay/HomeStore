@@ -8,29 +8,25 @@
 
 using namespace std;
 
-homestore::PhysicalDev *glob_pdev = nullptr;
+homestore::PhysicalDev* glob_pdev = nullptr;
 
-void test_add_device() {
+void test_add_device() {}
 
-}
+void new_vdev_found(homestore::vdev_info_block* vb) {}
 
-void new_vdev_found(homestore::vdev_info_block *vb) {
-}
-
-void new_chunk_found(homestore::PhysicalDevChunk *chunk) {
-}
+void new_chunk_found(homestore::PhysicalDevChunk* chunk) {}
 
 int main(int argc, char** argv) {
 
-    std::vector<std::string> dev_names;
+    std::vector< std::string > dev_names;
     for (auto i : boost::irange(1, argc)) {
         dev_names.emplace_back(argv[i]);
     }
 
-    homestore::DeviceManager *dev_mgr = new homestore::DeviceManager(new_vdev_found, new_chunk_found, 0);
+    homestore::DeviceManager* dev_mgr = new homestore::DeviceManager(new_vdev_found, new_chunk_found, 0);
     try {
         dev_mgr->add_devices(dev_names);
-    } catch (std::exception &e) {
+    } catch (std::exception& e) {
         LOGCRITICAL("Exception info {}", e.what());
         exit(1);
     }
