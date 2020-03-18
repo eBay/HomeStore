@@ -210,15 +210,13 @@ public:
     vol_mem_sb* vol_sb_read(BlkId bid);
 
     HomeBlks(const init_params& cfg);
-    ~HomeBlks() {  
-        m_thread_id.join();
-    }
-    virtual vol_interface_req_ptr  create_vol_interface_req(std::shared_ptr< Volume > vol, void *buf,
-                                                            uint64_t lba, uint32_t nlbas, bool read, bool sync) override;
+    ~HomeBlks() { m_thread_id.join(); }
+    virtual vol_interface_req_ptr create_vol_interface_req(std::shared_ptr< Volume > vol, void* buf, uint64_t lba,
+                                                           uint32_t nlbas, bool read, bool sync) override;
     virtual std::error_condition write(const VolumePtr& vol, const vol_interface_req_ptr& req) override;
     virtual std::error_condition read(const VolumePtr& vol, const vol_interface_req_ptr& req) override;
     virtual std::error_condition sync_read(const VolumePtr& vol, const vol_interface_req_ptr& req) override;
-    virtual VolumePtr            create_volume(const vol_params& params) override;
+    virtual VolumePtr create_volume(const vol_params& params) override;
 
     virtual std::error_condition remove_volume(const boost::uuids::uuid& uuid) override;
     virtual VolumePtr lookup_volume(const boost::uuids::uuid& uuid) override;

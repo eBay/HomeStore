@@ -587,14 +587,16 @@ template < typename K, typename V >
 using match_item_cb_update_t = std::function< void(std::vector< std::pair< K, V > >&, std::vector< std::pair< K, V > >&,
                                                    BRangeUpdateCBParam< K, V >*) >;
 template < typename K, typename V >
-using get_size_needed_cb_t = std::function < uint32_t(std::vector< std::pair< K, V > >&, BRangeUpdateCBParam< K, V >*) >;
+using get_size_needed_cb_t = std::function< uint32_t(std::vector< std::pair< K, V > >&, BRangeUpdateCBParam< K, V >*) >;
 template < typename K, typename V >
 class BtreeUpdateRequest : public BRangeRequest {
 public:
-    BtreeUpdateRequest(BtreeSearchRange& search_range, match_item_cb_update_t< K, V > cb = nullptr, 
+    BtreeUpdateRequest(BtreeSearchRange& search_range, match_item_cb_update_t< K, V > cb = nullptr,
                        get_size_needed_cb_t< K, V > size_cb = nullptr,
                        BRangeUpdateCBParam< K, V >* cb_param = nullptr) :
-            BRangeRequest(cb_param, search_range), m_cb(cb), m_size_cb(size_cb) {}
+            BRangeRequest(cb_param, search_range),
+            m_cb(cb),
+            m_size_cb(size_cb) {}
 
     match_item_cb_update_t< K, V > callback() const { return m_cb; }
     BRangeUpdateCBParam< K, V >* get_cb_param() const { return (BRangeUpdateCBParam< K, V >*)m_cb_param; }
@@ -602,7 +604,7 @@ public:
 
 protected:
     const match_item_cb_update_t< K, V > m_cb;
-    const get_size_needed_cb_t <K, V> m_size_cb;
+    const get_size_needed_cb_t< K, V > m_size_cb;
 };
 
 #if 0

@@ -13,7 +13,7 @@ THREAD_BUFFER_INIT;
 
 using namespace homeds::loadgen;
 
-static uint64_t                   max_queue_cap = 100;
+static uint64_t max_queue_cap = 100;
 static std::atomic< std::size_t > thread_idx{0};
 
 class IOMgrExecTest : public ::testing::Test {
@@ -48,7 +48,7 @@ TEST_F(IOMgrExecTest, TEST1) {
     max_queue_cap = 2000;
     IOMgrExecutor* exec = new IOMgrExecutor(NUM_IO_THREADS, NUM_PRI, max_queue_cap);
 
-    const uint64_t          repeat_cnt = 200;
+    const uint64_t repeat_cnt = 200;
     std::atomic< uint64_t > count = 0;
     for (auto i = 0ul; i < repeat_cnt; i++) {
         exec->add([&count, this]() {
@@ -69,7 +69,7 @@ TEST_F(IOMgrExecTest, TEST2) {
     max_queue_cap = 20;
     IOMgrExecutor* exec = new IOMgrExecutor(NUM_IO_THREADS, NUM_PRI, max_queue_cap);
 
-    const uint64_t          repeat_cnt = 200;
+    const uint64_t repeat_cnt = 200;
     std::atomic< uint64_t > count = 0;
     for (auto i = 0ul; i < repeat_cnt; i++) {
         exec->add([&count, this]() {

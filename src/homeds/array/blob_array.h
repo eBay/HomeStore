@@ -78,7 +78,6 @@ private:
         is_initialized = true;
     }
 
-
     uint8_t* get_data_ptr(uint16_t offset) const { return m_data + offset; }
 
     // TODO - change malloc to something like freelist allocator which uses preallocated space from thread local
@@ -95,10 +94,8 @@ public:
 
     Blob_Array(const Blob_Array& other) { set_elements(other); }
 
-    uint16_t get_meta_size() const { 
-        return sizeof(record) * m_header->m_total_elements + sizeof(header); 
-    }
-    
+    uint16_t get_meta_size() const { return sizeof(record) * m_header->m_total_elements + sizeof(header); }
+
     // deep copy all elements from other array
     void set_elements(const Blob_Array& other) {
         free_mem_if_needed();
@@ -178,7 +175,7 @@ public:
         return size;
     }
 
-    // access elements by index.Dosent do bcopy
+    // access elements by index.Doesn't do bcopy
     void get(uint32_t index, ElementType& element, bool copy) const {
         assert(index < m_header->m_total_elements);
         assert(is_initialized);
@@ -186,10 +183,11 @@ public:
         blob b;
         b.size = curr_rec->m_size;
         b.bytes = get_data_ptr(curr_rec->m_offset);
-        if (copy)
+        if (copy) {
             element.copy_blob(b);
-        else
+        } else {
             element.set_blob(b);
+        }
     }
 
     // returns total elements in array

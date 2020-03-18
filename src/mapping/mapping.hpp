@@ -49,10 +49,15 @@ public:
     MappingKey() : ObjLifeCounter(), m_lbaId_ptr(&m_lbaId) {}
 
     MappingKey(const MappingKey& other) :
-            ExtentBtreeKey(), ObjLifeCounter(), m_lbaId(other.get_lbaId()), m_lbaId_ptr(&m_lbaId) {}
+            ExtentBtreeKey(),
+            ObjLifeCounter(),
+            m_lbaId(other.get_lbaId()),
+            m_lbaId_ptr(&m_lbaId) {}
 
     MappingKey(uint64_t lba_start, uint64_t n_lba) :
-            ObjLifeCounter(), m_lbaId(lba_start, n_lba), m_lbaId_ptr(&m_lbaId) {}
+            ObjLifeCounter(),
+            m_lbaId(lba_start, n_lba),
+            m_lbaId_ptr(&m_lbaId) {}
 
     LbaId get_lbaId() const { return *m_lbaId_ptr; }
 
@@ -165,7 +170,10 @@ struct ValueEntryMeta {
     uint64_t nlba : NBLKS_BITS;
     uint64_t blk_offset : NBLKS_BITS; // offset based on blk store not based on vol page size
     ValueEntryMeta(uint64_t seqId, const BlkId& blkId, uint8_t blk_offset, uint8_t nlba) :
-            seqId(seqId), blkId(blkId), nlba(nlba), blk_offset(blk_offset){};
+            seqId(seqId),
+            blkId(blkId),
+            nlba(nlba),
+            blk_offset(blk_offset){};
     ValueEntryMeta() : seqId(0), blkId(0), nlba(0), blk_offset(0){};
 } __attribute__((__packed__));
 
@@ -531,7 +539,8 @@ private:
         boost::intrusive_ptr< volume_req > m_req;
 
         UpdateCBParam(boost::intrusive_ptr< volume_req > req, MappingKey& new_key, MappingValue& new_value) :
-                BRangeUpdateCBParam(new_key, new_value), m_req(req) {}
+                BRangeUpdateCBParam(new_key, new_value),
+                m_req(req) {}
     };
 
 public:

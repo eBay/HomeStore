@@ -22,7 +22,7 @@ enum homestore_error {
     formatted_disk_found = 11,
     btree_read_failed = 12,
     write_failed = 13,
-    read_failed = 14, 
+    read_failed = 14,
     space_not_avail = 15,
     flip_comp_error = 16,
     invalid_chunk_size = 17
@@ -32,41 +32,36 @@ class homstore_err_category : public std::error_category {
 public:
     virtual const char* name() const noexcept override;
     std::string message(int ev) const override;
-    bool equivalent(const std::error_code &code, int condition) const noexcept { return true; };
+    bool equivalent(const std::error_code& code, int condition) const noexcept { return true; };
 };
 
 std::error_condition make_error_condition(homestore_error e);
 
-
-class homestore_exception : public std::exception 
-{
+class homestore_exception : public std::exception {
     std::error_condition m_errno;
+
 public:
     inline static std::string const& to_string(std::string const& s) { return s; }
 
-    template<typename ... Args> homestore_exception(const std::string &str, homestore_error error) {
+    template < typename... Args >
+    homestore_exception(const std::string& str, homestore_error error) {
         m_errno = make_error_condition(error);
         // using ::to_string;
         m_what = str;
 
-        //m_what.append(Backtrace());
-    }   
-
-    std::error_condition get_err() {
-        return m_errno;
+        // m_what.append(Backtrace());
     }
 
-    virtual const char* what() const noexcept {
-        return m_what.c_str();
-    }   
+    std::error_condition get_err() { return m_errno; }
 
-    virtual std::string *what_str() {
-        return &m_what;
-    }   
+    virtual const char* what() const noexcept { return m_what.c_str(); }
 
-    private:
+    virtual std::string* what_str() { return &m_what; }
+
+private:
     std::string m_what;
 };
-}
-template <> struct std::is_error_condition_enum<homestore::homestore_error>: public true_type {};
+} // namespace homestore
+template <>
+struct std::is_error_condition_enum< homestore::homestore_error > : public true_type {};
 #endif

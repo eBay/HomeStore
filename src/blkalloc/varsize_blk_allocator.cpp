@@ -256,7 +256,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(BlkId& in_bid) {
     m_alloc_bm->set_bits(in_bid.get_id(), in_bid.get_nblks());
     BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Allocated: id={}, nblks={}", in_bid.get_id(), in_bid.get_nblks());
     portion->unlock();
-    
+
     return BLK_ALLOC_SUCCESS;
 }
 

@@ -47,7 +47,7 @@ public:
         ve.get_blkId().m_id = 0;
     }
 
-    static std::shared_ptr< MapValue >  gen_value(ValuePattern spec, MapValue* ref_value = nullptr) {
+    static std::shared_ptr< MapValue > gen_value(ValuePattern spec, MapValue* ref_value = nullptr) {
         std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;
         for (auto i = 0ul; i < CS_ARRAY_STACK_SIZE; i++)
             carr[i] = 1;

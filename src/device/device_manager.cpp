@@ -25,11 +25,16 @@ DeviceManager::DeviceManager(NewVDevCallback vcb, uint32_t const vdev_metadata_s
         m_system_uuid(system_uuid),
         m_vdev_error_cb(vdev_error_cb) {
 
-    switch(HomeStoreConfig::open_flag) {
-        case BUFFERED_IO : m_open_flags = O_RDWR; break;
-        case READ_ONLY   : m_open_flags = O_RDONLY; break;
-        case DIRECT_IO   :
-        default          : m_open_flags = O_RDWR | O_DIRECT;
+    switch (HomeStoreConfig::open_flag) {
+    case BUFFERED_IO:
+        m_open_flags = O_RDWR;
+        break;
+    case READ_ONLY:
+        m_open_flags = O_RDONLY;
+        break;
+    case DIRECT_IO:
+    default:
+        m_open_flags = O_RDWR | O_DIRECT;
     }
     m_last_vdevid = INVALID_VDEV_ID;
     m_vdev_metadata_size = vdev_metadata_size;

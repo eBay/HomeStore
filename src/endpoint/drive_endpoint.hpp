@@ -92,11 +92,10 @@ private:
     static thread_local stack< struct iocb_info* > iocb_list;
     static thread_local struct io_event events[MAX_COMPLETIONS];
 
-	atomic<uint64_t> spurious_events;
-	atomic<uint64_t> cmp_err;
-	comp_callback comp_cb;
+    atomic< uint64_t > spurious_events;
+    atomic< uint64_t > cmp_err;
+    comp_callback comp_cb;
     DriveEndPointMetrics m_metrics;
-
 };
 #else
 class DriveEndPoint : public iomgr::EndPoint {

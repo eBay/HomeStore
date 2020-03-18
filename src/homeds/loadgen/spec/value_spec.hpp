@@ -9,7 +9,7 @@ namespace homeds {
 namespace loadgen {
 class ValueSpec {
 public:
-    static uint64_t  MAX_VALUES;
+    static uint64_t MAX_VALUES;
     virtual uint64_t get_hash_code() = 0;
 };
 

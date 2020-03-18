@@ -16,37 +16,35 @@ THREAD_BUFFER_INIT;
 namespace homeds {
 
 #define Ki 1024
-#define Mi 1024*Ki
-#define Gi 1024*Mi
+#define Mi 1024 * Ki
+#define Gi 1024 * Mi
 #define MIN_LOWER_LIMIT 8
 
-uint64_t    max_nbits;
-uint64_t    fixed_nbits;
+uint64_t max_nbits;
+uint64_t fixed_nbits;
 
 class RandNumGen {
 private:
     uint64_t m_lower_limit;
     uint64_t m_upper_limit;
+
 public:
-    RandNumGen(uint64_t min, uint64_t max): m_lower_limit(min), m_upper_limit(max) {
-    
-    }
-    uint64_t get() { 
+    RandNumGen(uint64_t min, uint64_t max) : m_lower_limit(min), m_upper_limit(max) {}
+    uint64_t get() {
         unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
-        std::default_random_engine              e(seed);
-        std::uniform_int_distribution<uint64_t> u(m_lower_limit, m_upper_limit);
+        std::default_random_engine e(seed);
+        std::uniform_int_distribution< uint64_t > u(m_lower_limit, m_upper_limit);
         return u(e);
     }
 };
-
 
 class BitmapTest : public ::testing::Test {
 public:
     static std::string to_string(homeds::blob& b) {
         std::string out;
         Bitword64* p = (Bitword64*)b.bytes;
-        // b.size must be rounded up to size of bitword64 
-        auto num_words = b.size/sizeof(Bitword64);
+        // b.size must be rounded up to size of bitword64
+        auto num_words = b.size / sizeof(Bitword64);
         for (auto i = 0U; i < num_words; i++) {
             out += p[i].to_string();
         }
@@ -61,18 +59,18 @@ public:
     }
 
     // return in format of <i, nbits>, in which both i and nbits are randomly generated.
-    static BitBlock gen_bitblock(uint64_t total_bits) { 
+    static BitBlock gen_bitblock(uint64_t total_bits) {
         unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
-        std::default_random_engine              e(seed);
-        std::uniform_int_distribution<uint64_t> u1(1, total_bits);
+        std::default_random_engine e(seed);
+        std::uniform_int_distribution< uint64_t > u1(1, total_bits);
 
-        std::uniform_int_distribution<uint64_t> u2(1, get_num_interval(total_bits));
+        std::uniform_int_distribution< uint64_t > u2(1, get_num_interval(total_bits));
 
         uint64_t i = 0, nbits = 0;
         do {
-            i = u1(e); 
+            i = u1(e);
             nbits = u2(e);
-        } while (i + nbits >= total_bits) ;
+        } while (i + nbits >= total_bits);
 
         BitBlock b;
         b.start_bit = i;
@@ -81,13 +79,13 @@ public:
     }
 
     static uint32_t get_num_interval(uint64_t total_bits) {
-         uint64_t range = 0;
+        uint64_t range = 0;
         if (total_bits < Ki) {
-            range = std::max(2ull, total_bits/16ull);
+            range = std::max(2ull, total_bits / 16ull);
         } else if (total_bits < Mi) {
-            range = total_bits/64;
+            range = total_bits / 64;
         } else if (total_bits < Gi) {
-            range = total_bits/256;
+            range = total_bits / 256;
         } else {
             range = 1024;
         }
@@ -96,7 +94,7 @@ public:
     }
 
     static void seq_set_bit(homeds::Bitset& bm, uint64_t start, uint64_t total_nbits) {
-        for (uint64_t i = start; i < total_nbits; i++ ) {
+        for (uint64_t i = start; i < total_nbits; i++) {
             bm.set_bit(i);
         }
     }
@@ -120,35 +118,34 @@ public:
     }
 
     // round up number of bits to number of Bitword64
-    static uint64_t bits_to_word (uint64_t total_nbits) {
+    static uint64_t bits_to_word(uint64_t total_nbits) {
         uint32_t bits_per_word = (sizeof(Bitword64) << 3);
         if (total_nbits % bits_per_word == 0) {
-            return (total_nbits/bits_per_word) * sizeof(Bitword64);
+            return (total_nbits / bits_per_word) * sizeof(Bitword64);
         } else {
-            return (total_nbits/bits_per_word + 1) * sizeof(Bitword64);
+            return (total_nbits / bits_per_word + 1) * sizeof(Bitword64);
         }
     }
-
 };
 
 // 1. Set/reset bit by bit sequencially
 TEST_F(BitmapTest, SeqSetResetTest1) {
     uint64_t total_nbits = this->get_nbits();
     LOGINFO("total_nbits: {}", total_nbits);
-    
+
     homeds::Bitset bm(total_nbits);
     EXPECT_EQ(bm.get_total_bits(), total_nbits);
 
     // 1. set bit by bit, then check
     seq_set_bit(bm, 0, total_nbits);
-    
+
     for (uint64_t i = 0; i < total_nbits; i++) {
         EXPECT_EQ(bm.get_bitval(i), true);
     }
 
     // unsert and check
     reset_all_bits(bm, total_nbits);
-    
+
     verify_all_reset(bm, total_nbits);
 }
 
@@ -156,10 +153,10 @@ TEST_F(BitmapTest, SeqSetResetTest1) {
 TEST_F(BitmapTest, SeqSetResetTest2) {
     uint64_t total_nbits = this->get_nbits();
     LOGINFO("total_nbits: {}", total_nbits);
-    
+
     homeds::Bitset bm(total_nbits);
     EXPECT_EQ(bm.get_total_bits(), total_nbits);
-    
+
     uint64_t start = 1, nbits = 7, delta = 3;
     seq_set_bits(bm, start, nbits, total_nbits, delta);
 
@@ -167,13 +164,13 @@ TEST_F(BitmapTest, SeqSetResetTest2) {
     for (uint64_t i = start; i < total_nbits - nbits; i += delta * nbits) {
         EXPECT_EQ(bm.is_bits_set(i, nbits), true);
     }
-    
+
     // reset
     for (uint64_t i = start; i < total_nbits; i += delta * nbits) {
         bm.reset_bits(i, nbits);
     }
 
-    // verify again  
+    // verify again
     verify_all_reset(bm, total_nbits);
 }
 
@@ -182,19 +179,19 @@ TEST_F(BitmapTest, SeqSetResetTest2) {
 TEST_F(BitmapTest, RandomSetResetTest) {
     uint64_t total_nbits = this->get_nbits();
     LOGINFO("total_nbits: {}", total_nbits);
-    
+
     homeds::Bitset bm(total_nbits);
     EXPECT_EQ(bm.get_total_bits(), total_nbits);
-    //std::vector<std::pair<uint64_t, uint32_t>> bits_set;
-    std::vector<BitBlock> bits_set;
-    
+    // std::vector<std::pair<uint64_t, uint32_t>> bits_set;
+    std::vector< BitBlock > bits_set;
+
     uint32_t num_attemps = this->get_num_interval(total_nbits);
-    
+
     // randomly set the bits
     for (uint32_t i = 0; i < num_attemps; i++) {
         BitBlock b = this->gen_bitblock(total_nbits);
         bm.set_bits(b.start_bit, b.nbits);
-        bits_set.push_back(b);    
+        bits_set.push_back(b);
     }
 
     // verify
@@ -218,7 +215,7 @@ TEST_F(BitmapTest, ContiguousNbitsSimpleFillTest1) {
 
     bm.set_bits(0, 8);
     bm.set_bits(18, 12);
-            
+
     BitBlock b = bm.get_next_contiguous_n_reset_bits(0, 10);
     EXPECT_EQ(b.start_bit, 8ull);
     EXPECT_EQ(b.nbits, 10ul);
@@ -227,7 +224,7 @@ TEST_F(BitmapTest, ContiguousNbitsSimpleFillTest1) {
     homeds::Bitset bm2(total_nbits);
     bm2.set_bits(0, 48);
     bm2.set_bits(96, 32);
-    
+
     // get contigous n bits *within* 64 (sizeof Bitword64) bytes boundary
     b = {0, 0};
     b = bm2.get_next_contiguous_n_reset_bits(40, 12);
@@ -236,7 +233,7 @@ TEST_F(BitmapTest, ContiguousNbitsSimpleFillTest1) {
     EXPECT_EQ(b.start_bit, 48ull);
     // Returns nbits more than 12, but 16, which is all the remaining bits in 64 Bytes;
     EXPECT_EQ(b.nbits, Bitword64::size() - 48ul);
-}    
+}
 
 // TODO: bitmap always return the first contigous zeros, even though it is less than requested n bits;
 TEST_F(BitmapTest, DISABLED_ContiguousNbitsSimpleFillTest2) {
@@ -267,19 +264,19 @@ TEST_F(BitmapTest, DISABLED_ContiguousNbitsSimpleFillTest2) {
 #endif
 }
 
-// 
+//
 // 1. Create bitmap with total nbits equal to two Bitword64
 // 2. Fill the two words, but leave free bits at the end of first word and at the begining of 2nd word.
-// 3. Verify that free bits could be allocated accross the boundary, 
+// 3. Verify that free bits could be allocated accross the boundary,
 //    e.g. some bits from the 1st word, the remaining from the 2nd;
-// 
-// TODO: Need to fix this issue, currently for the request of 48 free bits, 
-// get_next_contiguous_n_reset_bits could only return 32 free bits in the next word, 
+//
+// TODO: Need to fix this issue, currently for the request of 48 free bits,
+// get_next_contiguous_n_reset_bits could only return 32 free bits in the next word,
 // even though there are 64 free bits across two words.
 //
 TEST_F(BitmapTest, DISABLED_ContiguousNbitsAcrossBoundaryTest1) {
     // set total nbits as 2 wrods
-    uint64_t total_nbits = sizeof (Bitword64) << 3 << 1;
+    uint64_t total_nbits = sizeof(Bitword64) << 3 << 1;
 
     homeds::Bitset bm(total_nbits);
     EXPECT_EQ(bm.get_total_bits(), total_nbits);
@@ -288,7 +285,7 @@ TEST_F(BitmapTest, DISABLED_ContiguousNbitsAcrossBoundaryTest1) {
     bm.set_bits(0, 32);
     // set 32 bits in the 2nd word.
     bm.set_bits(96, 32);
-    
+
     // bit 32 ~ 96 is free.
     // get 48 bits which has to accross two words;
     BitBlock b = bm.get_next_contiguous_n_reset_bits(0, 48);
@@ -299,14 +296,14 @@ TEST_F(BitmapTest, DISABLED_ContiguousNbitsAcrossBoundaryTest1) {
     EXPECT_EQ(b.nbits, 48ul);
 }
 
-// 
+//
 // 1. Bitmap with 4 wrod, 1st and 4th word fill with 32 bits in the beginning
 // 2. Leave 2nd and 3rd word totally free.
 // 3. Allocate continous 96 bits, verfiy that we can get the free bits.
 //
 TEST_F(BitmapTest, DISABLED_ContiguousNbitsAcrossBoundaryTest2) {
     // set total nbits as 4 wrods
-    uint64_t total_nbits = sizeof (Bitword64) << 3 << 2;
+    uint64_t total_nbits = sizeof(Bitword64) << 3 << 2;
 
     LOGINFO("total bits: {}", total_nbits);
     homeds::Bitset bm(total_nbits);
@@ -315,8 +312,8 @@ TEST_F(BitmapTest, DISABLED_ContiguousNbitsAcrossBoundaryTest2) {
     // set 32 bits in 1st word
     bm.set_bits(0, 32);
     // set 32 bits in the 4th word.
-    bm.set_bits(64*3, 32);
-    
+    bm.set_bits(64 * 3, 32);
+
     // bit 32 ~ 192 is free.
     // get 128 bits which has to accross two words;
     BitBlock b = bm.get_next_contiguous_n_reset_bits(0, 96);
@@ -327,15 +324,14 @@ TEST_F(BitmapTest, DISABLED_ContiguousNbitsAcrossBoundaryTest2) {
     EXPECT_EQ(b.nbits, 96ul);
 }
 
-
-// 1. Sequencially fill the bits 
+// 1. Sequencially fill the bits
 // 2. then do verify by calling get_next_contiguous_n_reset_bits to assert on the free bits.
 TEST_F(BitmapTest, ContiguousNbitsSeqFillTest) {
     uint64_t total_nbits = this->get_nbits();
     if (total_nbits < Mi) {
         total_nbits = Mi;
     }
-    
+
     homeds::Bitset bm(total_nbits);
     EXPECT_EQ(bm.get_total_bits(), total_nbits);
 
@@ -345,7 +341,7 @@ TEST_F(BitmapTest, ContiguousNbitsSeqFillTest) {
     seq_set_bits(bm, start, nbits, total_nbits, delta);
 
     // verify
-    for (uint64_t i = start; i < total_nbits - delta*nbits; i += nbits*delta) {
+    for (uint64_t i = start; i < total_nbits - delta * nbits; i += nbits * delta) {
         BitBlock b = bm.get_next_contiguous_n_reset_bits(i, nbits);
         EXPECT_EQ(b.start_bit, i + nbits);
         EXPECT_EQ(b.nbits, nbits);
@@ -355,17 +351,17 @@ TEST_F(BitmapTest, ContiguousNbitsSeqFillTest) {
     verify_all_reset(bm, total_nbits);
 }
 
-// 
+//
 //
 //
 TEST_F(BitmapTest, SerializeSimpleTest1) {
     uint64_t total_nbits = 72;
-  
+
     homeds::Bitset bm(total_nbits);
     EXPECT_EQ(bm.get_total_bits(), total_nbits);
 
     seq_set_bits(bm, 0, 4, total_nbits, 2);
-    
+
     EXPECT_EQ(bm.size_serialized(), bits_to_word(total_nbits));
 
     homeds::blob b;
@@ -374,7 +370,7 @@ TEST_F(BitmapTest, SerializeSimpleTest1) {
 
     b.size = bm.size_serialized();
     memset(b.bytes, 0, b.size);
-    
+
     assert(b.size % sizeof(Bitword64) == 0);
 
     auto ret_b = bm.serialize(b);
@@ -389,7 +385,7 @@ TEST_F(BitmapTest, SerializeSimpleTest1) {
 
 TEST_F(BitmapTest, SerializeSimpleTest2) {
     uint64_t total_nbits = 64;
-  
+
     homeds::Bitset bm(total_nbits);
     EXPECT_EQ(bm.get_total_bits(), total_nbits);
 
@@ -404,7 +400,7 @@ TEST_F(BitmapTest, SerializeSimpleTest2) {
 
     b.size = bm.size_serialized();
     memset(b.bytes, 0, b.size);
-    
+
     assert(b.size % sizeof(Bitword64) == 0);
 
     auto ret_b = bm.serialize(b);
@@ -427,15 +423,15 @@ TEST_F(BitmapTest, DeserializeTest) {
     if (total_nbits < Ki) {
         total_nbits = Ki;
     }
-    
+
     total_nbits = 72;
-  
+
     homeds::Bitset bm(total_nbits);
     EXPECT_EQ(bm.get_total_bits(), total_nbits);
 
     // 1. fill
     seq_set_bits(bm, 0, 4, total_nbits, 2);
-    
+
     EXPECT_EQ(bm.size_serialized(), bits_to_word(total_nbits));
 
     homeds::blob b1;
@@ -443,14 +439,14 @@ TEST_F(BitmapTest, DeserializeTest) {
     EXPECT_EQ(ret, 0);
     b1.size = bm.size_serialized();
     memset(b1.bytes, 0, b1.size);
-    
+
     assert(b1.size % sizeof(Bitword64) == 0);
 
     // 2. do serialize
     bool ret_b = bm.serialize(b1);
     EXPECT_EQ(ret_b, true);
-    
-    // 3. de-serialize b1 to generate a deep copy 
+
+    // 3. de-serialize b1 to generate a deep copy
     homeds::Bitset bm_copy(b1);
 
     // 4. verify the two bitmaps bit by bit
@@ -461,8 +457,8 @@ TEST_F(BitmapTest, DeserializeTest) {
     for (uint64_t i = 0; i < total_nbits; i++) {
         EXPECT_EQ(bm.get_bitval(i), bm_copy.get_bitval(i));
     }
-     
-    // print the two bitmap which should be exactly the same;   
+
+    // print the two bitmap which should be exactly the same;
     bm.print();
     bm_copy.print();
 
@@ -477,7 +473,7 @@ TEST_F(BitmapTest, DeserializeTest) {
 
     ret_b = bm_copy.serialize(b2);
     EXPECT_EQ(ret_b, true);
-    
+
     EXPECT_STREQ(bm.to_string().c_str(), bm_copy.to_string().c_str());
 
     free(b1.bytes);
@@ -486,18 +482,20 @@ TEST_F(BitmapTest, DeserializeTest) {
 } // namespace homeds
 
 SDS_OPTION_GROUP(test_bitmap,
-(max_nbits, "", "max_nbits", "max number of bits", ::cxxopts::value<uint64_t>()->default_value("1000000"), "number"), 
-(fixed_nbits, "", "fixed_nbits", "fixed number of bits", ::cxxopts::value<uint64_t>()->default_value("0"), "number"))
+                 (max_nbits, "", "max_nbits", "max number of bits",
+                  ::cxxopts::value< uint64_t >()->default_value("1000000"), "number"),
+                 (fixed_nbits, "", "fixed_nbits", "fixed number of bits",
+                  ::cxxopts::value< uint64_t >()->default_value("0"), "number"))
 
 SDS_OPTIONS_ENABLE(logging, test_bitmap)
-int main(int argc, char *argv[]) {
+int main(int argc, char* argv[]) {
     testing::InitGoogleTest(&argc, argv);
     SDS_OPTIONS_LOAD(argc, argv, logging, test_bitmap)
     sds_logging::SetLogger("test_bitmap");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 
-    homeds::max_nbits = SDS_OPTIONS["max_nbits"].as<uint64_t>();
-    homeds::fixed_nbits = SDS_OPTIONS["fixed_nbits"].as<uint64_t>();
+    homeds::max_nbits = SDS_OPTIONS["max_nbits"].as< uint64_t >();
+    homeds::fixed_nbits = SDS_OPTIONS["fixed_nbits"].as< uint64_t >();
     assert(homeds::max_nbits >= MIN_LOWER_LIMIT);
     if (homeds::fixed_nbits) {
         assert(homeds::fixed_nbits >= MIN_LOWER_LIMIT);

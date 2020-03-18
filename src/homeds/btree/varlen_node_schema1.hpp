@@ -11,59 +11,58 @@
 #include "physical_node.hpp"
 #include <cassert>
 
-namespace homeds { namespace btree {
+namespace homeds {
+namespace btree {
 
-struct btree_obj_record {
-
-};
+struct btree_obj_record {};
 
 struct var_value_record : public btree_obj_record {
-    uint16_t m_obj_offset:14;
-    uint16_t reserved:2;
+    uint16_t m_obj_offset : 14;
+    uint16_t reserved : 2;
 } __attribute((packed));
 
 struct var_key_record : public btree_obj_record {
-    uint16_t m_obj_offset:14;
-    uint16_t reserved:2;
+    uint16_t m_obj_offset : 14;
+    uint16_t reserved : 2;
 } __attribute((packed));
 
 struct var_obj_record : public btree_obj_record {
-    uint16_t m_obj_offset:14;
-    uint16_t reserved1:2;
+    uint16_t m_obj_offset : 14;
+    uint16_t reserved1 : 2;
 
-    uint16_t m_keylen:14;
-    uint16_t reserved2:2;
+    uint16_t m_keylen : 14;
+    uint16_t reserved2 : 2;
 } __attribute((packed));
 
 struct var_node_header {
     uint16_t m_last_offset;
 } __attribute((packed));
 
-#define memrshift(ptr, size) (memmove(ptr, ptr+size, size))
-#define memlshift(ptr, size) (memmove(ptr, ptr-size, size))
+#define memrshift(ptr, size) (memmove(ptr, ptr + size, size))
+#define memlshift(ptr, size) (memmove(ptr, ptr - size, size))
 
-template< typename K, typename V >
-class VarValueNode : public AbstractNode<K, V> {
-    VarValueNode(const BtreeConfig &cfg, bnodeid_t id, bool init_pers, bool init_trans) :
+template < typename K, typename V >
+class VarValueNode : public AbstractNode< K, V > {
+    VarValueNode(const BtreeConfig& cfg, bnodeid_t id, bool init_pers, bool init_trans) :
             AbstractNode(id, init_pers, init_trans) {
         this->set_node_type(btree_node_type::VAR_VALUE);
         if (init_pers) {
-            get_node_header()->m_last_offset = (uint16_t) (this->get_node_space() + cfg.get_node_size() -
-                                                           (uint8_t *) this);
+            get_node_header()->m_last_offset =
+                (uint16_t)(this->get_node_space() + cfg.get_node_size() - (uint8_t*)this);
         }
     }
 
     // Insert the key and value in provided index
     // Assumption: Node lock is already taken
-    void insert(int ind, const BtreeKey &key, const BtreeValue &val) override {
+    void insert(int ind, const BtreeKey& key, const BtreeValue& val) override {
         // TODO: Validate the available space is present
         assert(ind <= get_total_entries());
 
         // Determine the ptr and size for moving record
-        uint8_t *rec_ptr = (uint8_t *) get_nth_record(ind);
+        uint8_t* rec_ptr = (uint8_t*)get_nth_record(ind);
         int obj_size = K::get_fixed_size() + val.get_blob_size();
 
-        uint8_t *obj_ptr;
+        uint8_t* obj_ptr;
         if (get_total_entries() == 0) {
             obj_ptr = get_node_space() + get_node_header()->m_last_offset - obj_size;
         } else if (ind == get_total_entries()) {
@@ -71,7 +70,7 @@ class VarValueNode : public AbstractNode<K, V> {
         } else {
             // Determine the current ind ptr and last ptr
             obj_ptr = get_nth_obj(ind);
-            uint8_t *last_obj_ptr = get_nth_obj(get_total_entries() - 1);
+            uint8_t* last_obj_ptr = get_nth_obj(get_total_entries() - 1);
 
             // Shift the object data to the left and then record to the right.
             memmove(last_obj_ptr - obj_size, last_obj_ptr, get_objs_len(ind, get_total_entries() - 1));
@@ -80,7 +79,7 @@ class VarValueNode : public AbstractNode<K, V> {
         }
 
         // Populate the new record
-        var_value_record *r = (var_value_record *) rec_ptr;
+        var_value_record* r = (var_value_record*)rec_ptr;
         r->m_obj_offset = obj_ptr - get_node_space();
 
         // Fill in the new key in object area
@@ -98,7 +97,7 @@ class VarValueNode : public AbstractNode<K, V> {
 
         // At this point, subsequent entries offset need to be adjusted to the left
         for (auto i = ind + 1; i < get_total_entries(); i++) {
-            var_value_record *r = get_nth_record(i);
+            var_value_record* r = get_nth_record(i);
             r->m_obj_offset -= obj_size;
         }
 
@@ -106,11 +105,11 @@ class VarValueNode : public AbstractNode<K, V> {
         inc_gen();
 
 #ifdef DEBUG
-        //print();
+        // print();
 #endif
     }
 
-    void update(uint32_t ind, BtreeValue &val) {
+    void update(uint32_t ind, BtreeValue& val) {
         assert(ind <= get_total_entries());
 
         // If we are updating the edge value, none of the other logic matter.
@@ -122,8 +121,8 @@ class VarValueNode : public AbstractNode<K, V> {
         }
 
         // Determine the current obj ptr and last object ptr.
-        uint8_t *obj_ptr = get_nth_obj(ind);
-        uint8_t *last_obj_ptr = get_nth_obj(get_total_entries() - 1);
+        uint8_t* obj_ptr = get_nth_obj(ind);
+        uint8_t* last_obj_ptr = get_nth_obj(get_total_entries() - 1);
 
         // Compute the difference between old and new lenght
         int cur_len = get_nth_obj_size(ind);
@@ -131,22 +130,21 @@ class VarValueNode : public AbstractNode<K, V> {
         int diff_len = cur_len - new_len;
 
         // Move the data to left or right based on expand or shrink space
-        memmove(last_obj_ptr + diff_len, last_obj_ptr,
-                get_objs_len(ind + 1, get_total_entries() - 1) + diff_len);
+        memmove(last_obj_ptr + diff_len, last_obj_ptr, get_objs_len(ind + 1, get_total_entries() - 1) + diff_len);
         obj_ptr += diff_len;
 
         // Update the value in the write_ptr
         uint32_t sz;
-        uint8_t *val_ptr = val.get_blob(&sz);
+        uint8_t* val_ptr = val.get_blob(&sz);
         memcpy(obj_ptr + K::get_fixed_size(), val_ptr, sz);
 
         // Update all the entries upto this with this new offset
         for (auto i = ind; i < get_total_entries(); i++) {
-            var_value_record *r = get_nth_record(i);
+            var_value_record* r = get_nth_record(i);
             r->m_obj_offset += diff_len;
         }
 
-        done:
+    done:
         // TODO: Check if we need to upgrade the gen and impact of doing
         // so with performance. It is especially needed for non similar
         // key/value pairs
@@ -160,30 +158,29 @@ class VarValueNode : public AbstractNode<K, V> {
             goto done;
         }
 
-        uint8_t *obj_ptr = get_nth_obj(ind);
-        uint8_t *last_obj_ptr = get_nth_obj(get_total_entries() - 1);
+        uint8_t* obj_ptr = get_nth_obj(ind);
+        uint8_t* last_obj_ptr = get_nth_obj(get_total_entries() - 1);
         int obj_size = get_nth_obj_size(ind);
 
-        memmove(last_obj_ptr + obj_size, last_obj_ptr,
-                get_objs_len(ind + 1, get_total_entries() - 1));
+        memmove(last_obj_ptr + obj_size, last_obj_ptr, get_objs_len(ind + 1, get_total_entries() - 1));
 
         // At this point, subsequent entries offset need to be adjusted to the left
         for (auto i = ind + 1; i < get_total_entries(); i++) {
-            var_value_record *r = get_nth_record(i);
+            var_value_record* r = get_nth_record(i);
             r->m_obj_offset += obj_size;
         }
 
         if (ind < get_total_entries() - 1) {
-            uint8_t *rec_ptr = (uint8_t *) get_nth_record(ind + 1);
+            uint8_t* rec_ptr = (uint8_t*)get_nth_record(ind + 1);
             memmove(rec_ptr - sizeof(var_value_record), rec_ptr,
                     (get_total_entries() - ind) * sizeof(var_value_record));
         }
         dec_entries();
-        done:
+    done:
         inc_gen();
     }
 
-    void get(int ind, BtreeValue *outval, bool copy) {
+    void get(int ind, BtreeValue* outval, bool copy) {
         // Need edge index
         if (ind == get_total_entries()) {
             assert(!is_leaf());
@@ -195,19 +192,15 @@ class VarValueNode : public AbstractNode<K, V> {
         }
     }
 
-    uint32_t get_occupied_size() const {
-        return this->get_node_area_size()
-    }
+    uint32_t get_occupied_size() const { return this->get_node_area_size() }
 
-    void move_out_right(AbstractNode &othern, uint32_t nentries) {
-
-    }
+    void move_out_right(AbstractNode& othern, uint32_t nentries) {}
 
     // This method verifies if we can safely insert an entry into the node.
     // It will operate on node being full/free. For range key, if there is
     // a match, but not a full match, it will assume atleast 3 such values
     // need to be inserted.
-    bool is_split_needed(BtreeConfig &cfg, BtreeKey &key, BtreeValue &value, int *out_ind_hint) {
+    bool is_split_needed(BtreeConfig& cfg, BtreeKey& key, BtreeValue& value, int* out_ind_hint) {
         V curval;
         int size_needed;
 
@@ -223,7 +216,7 @@ class VarValueNode : public AbstractNode<K, V> {
             size_needed -= curval.get_blob_size();
 
             if (key.is_range_key()) {
-                BtreeRangeKey &rkey = static_cast<BtreeRangeKey &>(key);
+                BtreeRangeKey& rkey = static_cast< BtreeRangeKey& >(key);
                 K match_key;
                 static_assert((std::is_base_of< BtreeRangeKey, K >::value),
                               "K must be a derived class of BtreeRangeKey");
@@ -255,11 +248,11 @@ private:
         }
     }
 
-    void set_nth_obj(int ind, BtreeKey &k, BtreeValue &v) {
-        uint8_t *obj = get_nth_obj(ind);
+    void set_nth_obj(int ind, BtreeKey& k, BtreeValue& v) {
+        uint8_t* obj = get_nth_obj(ind);
 
         uint32_t sz;
-        uint8_t *ptr = k.get_blob(&sz);
+        uint8_t* ptr = k.get_blob(&sz);
         memcpy(obj, ptr, sz);
 
         obj += sz;
@@ -267,10 +260,10 @@ private:
         memcpy(obj, ptr, sz);
     }
 
-    void get_nth_key(int ind, BtreeKey *outkey, bool copy) {
+    void get_nth_key(int ind, BtreeKey* outkey, bool copy) {
         assert(ind < get_total_entries());
 
-        uint8_t *obj = get_nth_obj(ind);
+        uint8_t* obj = get_nth_obj(ind);
         if (copy) {
             outkey->copy_blob(obj, K::get_fixed_size());
         } else {
@@ -278,10 +271,10 @@ private:
         }
     }
 
-    void get_nth_value(int ind, BtreeValue *outval, bool copy) {
+    void get_nth_value(int ind, BtreeValue* outval, bool copy) {
         assert(ind < get_total_entries());
 
-        uint8_t *obj = get_nth_obj(ind);
+        uint8_t* obj = get_nth_obj(ind);
         uint32_t size = get_nth_obj_size(ind);
         if (copy) {
             outval->copy_blob(obj + K::get_fixed_size(), size - K::get_fixed_size());
@@ -290,25 +283,21 @@ private:
         }
     }
 
-    var_value_record *get_nth_record(int ind) {
-        uint8_t *ptr = get_node_space() + sizeof(var_node_header) + (sizeof(var_value_record) * ind);
-        return (var_value_record *) ptr;
+    var_value_record* get_nth_record(int ind) {
+        uint8_t* ptr = get_node_space() + sizeof(var_node_header) + (sizeof(var_value_record) * ind);
+        return (var_value_record*)ptr;
     }
 
     ///////////// Other Private Methods //////////////////
-    uint8_t *get_nth_obj(int ind) {
+    uint8_t* get_nth_obj(int ind) {
         assert(ind < get_total_entries());
 
         return get_node_space() + get_nth_record(ind)->m_obj_offset;
     }
 
-    uint16_t get_last_offset() {
-        return get_node_header()->m_last_offset;
-    }
+    uint16_t get_last_offset() { return get_node_header()->m_last_offset; }
 
-    inline var_node_header *get_node_header() {
-        return (var_node_header *) (get_node_space());
-    }
+    inline var_node_header* get_node_header() { return (var_node_header*)(get_node_space()); }
 
     // Gets the length of objects between start and end index
     inline uint32_t get_objs_len(int start_ind, int end_ind) {
@@ -326,7 +315,7 @@ private:
         return (get_last_offset() - (sizeof(var_value_record) * get_total_entries()) - sizeof(var_node_header));
     }
 };
-}
-}
+} // namespace btree
+} // namespace homeds
 
 #endif /* BTREE_VARLEN_NODE_HPP_ */

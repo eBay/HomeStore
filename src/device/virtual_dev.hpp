@@ -94,7 +94,7 @@ struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
 
 #ifndef NDEBUG
     uint64_t dev_offset;
-    uint8_t *mem;
+    uint8_t* mem;
 #endif
     std::atomic< uint8_t > outstanding_cb = 0;
 
@@ -1083,7 +1083,7 @@ public:
 
     /**
      * @brief : update the tail to vdev, this API will be called during reboot and
-     * upper layer(logdev) has completed scanning all the valid records in vdev and then 
+     * upper layer(logdev) has completed scanning all the valid records in vdev and then
      * update the tail in vdev.
      *
      * @param tail : logical tail offset
@@ -1096,8 +1096,8 @@ public:
             m_write_sz_in_total.store(get_size() - start + tail, std::memory_order_relaxed);
         }
 
-        HS_ASSERT(RELEASE, get_tail_offset() == tail, "tail offset mismatch after calculation {} : {}", 
-                get_tail_offset(), tail);
+        HS_ASSERT(RELEASE, get_tail_offset() == tail, "tail offset mismatch after calculation {} : {}",
+                  get_tail_offset(), tail);
     }
 
     bool is_blk_alloced(BlkId& in_blkid) {
@@ -1394,7 +1394,6 @@ public:
 
         do_preadv_internal(pdev, primary_chunk, primary_dev_offset, iov, iovcnt, size, req);
     }
-
 
     void get_vb_context(const sisl::blob& ctx_data) const { m_mgr->get_vb_context(m_vb->vdev_id, ctx_data); }
 
