@@ -22,9 +22,7 @@ pipeline {
 
         stage('Coverage') {
             when {
-                not {
-                    branch "${STABLE_BRANCH}"
-                }
+                branch "disabled"
             }
             steps {
                 sh "docker build -f Dockerfile.sonar --rm --build-arg COVERAGE_ON='true' --build-arg BUILD_TYPE=debug --build-arg BRANCH_NAME=${BRANCH_NAME} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} ."

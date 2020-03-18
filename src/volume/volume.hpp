@@ -172,7 +172,7 @@ public:
         REGISTER_HISTOGRAM(volume_write_size_distribution, "Distribution of volume write sizes",
                            HistogramBucketsType(ExponentialOfTwoBuckets));
         REGISTER_HISTOGRAM(volume_read_size_distribution, "Distribution of volume read sizes",
-                           HistogramBucketsType(LinearUpto64Buckets));
+                           HistogramBucketsType(ExponentialOfTwoBuckets));
         register_me_to_farm();
     }
 };
@@ -309,6 +309,7 @@ public:
      *           false for fail to fix
      */
     bool fix_mapping_btree(bool verify);
+
     uint64_t get_data_used_size() { return m_used_size; }
     uint64_t get_metadata_used_size();
     const char* get_name() const { return (m_sb->ondisk_sb->vol_name); }

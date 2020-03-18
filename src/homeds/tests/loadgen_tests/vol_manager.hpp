@@ -3,8 +3,8 @@
 #include "vol_crc_persist_mgr.hpp"
 #include <logdev/log_dev.hpp>
 
-#define MAX_DEVICES     2
-#define VOL_PREFIX      "vol_load_gen/vol"
+#define MAX_DEVICES 2
+#define VOL_PREFIX "vol_load_gen/vol"
 
 //
 // VolumeManager holds all the details about volume lifecyle:
@@ -34,7 +34,9 @@ public:
     VolReq() { buf = nullptr; }
 
     virtual ~VolReq() {
-        if (buf) { free(buf); }
+        if (buf) {
+            free(buf);
+        }
     }
 };
 
@@ -80,11 +82,12 @@ public:
         m_max_disk_cap = 10 * Gi;
 
         struct stat st;
-        
-        m_file_names    = {"vol_load_gen/file1", "vol_load_gen/file2", "vol_load_gen/file3", "vol_load_gen/file4"};
+        m_file_names = {"vol_load_gen/file1", "vol_load_gen/file2", "vol_load_gen/file3", "vol_load_gen/file4"};
         m_done_cb = init_done_cb;
 
-        if (m_enable_write_log) { m_write_recorder = std::make_shared< WriteLogRecorder< uint64_t > >(max_vols()); }
+        if (m_enable_write_log) {
+            m_write_recorder = std::make_shared< WriteLogRecorder< uint64_t > >(max_vols());
+        }
 
         start_homestore();
 
@@ -160,7 +163,9 @@ public:
         uint64_t size = get_size(nblks);
         auto ret = posix_memalign((void**)&bytes, VOL_PAGE_SIZE, size);
 
-        if (ret) { assert(0); }
+        if (ret) {
+            assert(0);
+        }
 
         populate_buf(bytes, size);
         return bytes;
@@ -214,7 +219,9 @@ public:
         m_rd_cnt++;
         m_outstd_ios++;
 
-        if (verify == false) { m_read_verify_skip++; }
+        if (verify == false) { 
+          m_read_verify_skip++; 
+        }
 
         auto vreq = VolInterface::get_instance()->create_vol_interface_req(m_vols[vol_id], nullptr, lba, 
                     nblks, true, false);
@@ -459,8 +466,8 @@ private:
         /* Don't populate the whole disks. Only 80 % of it */
         m_max_vol_size = (80 * m_max_cap) / (100 * m_max_vols);
 
-        init_params p; 
-        p.flag = homestore::io_flag::BUFFERED_IO;
+        init_params p;
+        p.flag = homestore::io_flag::DIRECT_IO;
         p.min_virtual_page_size = VOL_PAGE_SIZE;
         p.cache_size = CACHE_SIZE;
         p.disk_init = true;
@@ -554,7 +561,6 @@ private:
     // For Write: update hash code;
     void process_completions(const vol_interface_req_ptr& vol_req) {
         VolReq* req = (VolReq*)vol_req->cookie;
-
         static uint64_t pt = 30;
         static Clock::time_point pt_start = Clock::now();
 
@@ -637,7 +643,6 @@ private:
     uint64_t m_max_disk_cap;
     uint64_t m_max_vols = 50;
     uint64_t m_max_io_size;
-
     // io count
     std::atomic< uint64_t > m_outstd_ios = 0;
     std::atomic< uint64_t > m_wrt_cnt = 0;

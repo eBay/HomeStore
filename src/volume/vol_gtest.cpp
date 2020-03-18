@@ -40,7 +40,8 @@ THREAD_BUFFER_INIT;
 #define STAGING_VOL_PREFIX "staging"
 #define VOL_PREFIX "test_files/vol"
 
-std::array< std::string, 4 > names = {"test_files/vol_file1", "test_files/vol_file2", "test_files/vol_file3", "test_files/vol_file4"};
+std::array< std::string, 4 > names = {"test_files/vol_file1", "test_files/vol_file2", "test_files/vol_file3",
+                                      "test_files/vol_file4"};
 uint64_t max_vols = 50;
 uint64_t max_num_writes = 100000;
 uint64_t run_time;
@@ -70,12 +71,15 @@ uint32_t vol_page_size = 4096;
 uint32_t phy_page_size = 4096;
 uint32_t mem_btree_page_size = 4096;
 bool can_delete_volume = false;
+uint32_t io_flags = 1; // 2: READ_ONLY 1: DIRECT_IO, 0: BUFFERED_IO;
+
 extern bool vol_gtest;
 std::vector< std::string > dev_names;
 #define VOL_PAGE_SIZE 4096
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 /**************** Common class created for all tests ***************/
+
 
 uint64_t req_cnt = 0;
 uint64_t req_free_cnt = 0;
@@ -279,7 +283,7 @@ public:
         m_tgt.init();
 
         init_params params;
-        params.flag = homestore::io_flag::BUFFERED_IO;
+        params.flag = static_cast< enum io_flag >(io_flags);
         params.min_virtual_page_size = vol_page_size;
         params.cache_size = 4 * 1024 * 1024 * 1024ul;
         params.disk_init = init;
@@ -658,7 +662,9 @@ private:
     start:
         /* we won't be writing more then 128 blocks in one io */
         auto vol = vol_info[cur]->vol;
-        if (vol == nullptr) { return; }
+        if (vol == nullptr) {
+            return;
+        }
         if (vol_info[cur]->num_io.fetch_add(1, std::memory_order_acquire) == 1000) {
             nblks = 200;
             lba = (vol_info[cur]->start_large_lba.fetch_add(nblks, std::memory_order_acquire)) %
@@ -668,7 +674,9 @@ private:
             lba = (vol_info[cur]->start_lba.fetch_add(nblks, std::memory_order_acquire)) %
                 (vol_info[cur]->max_vol_blks - nblks);
         }
-        if (nblks == 0) { nblks = 1; }
+        if (nblks == 0) {
+            nblks = 1;
+        }
 
         if (load_type != 2) {
             /* can not support concurrent overlapping writes if whole data need to be verified */
@@ -693,15 +701,18 @@ private:
     start:
         /* we won't be writing more then 128 blocks in one io */
         auto vol = vol_info[cur]->vol;
-
-        if (vol == nullptr) { return; }
+        if (vol == nullptr) {
+            return;
+        }
         uint64_t max_blks = max_io_size / VolInterface::get_instance()->get_page_size(vol);
         // lba: [0, max_vol_blks - max_blks)
 
         lba = rand() % (vol_info[cur]->max_vol_blks - max_blks);
         // nblks: [1, max_blks]
         nblks = rand() % (max_blks + 1);
-        if (nblks == 0) { nblks = 1; }
+        if (nblks == 0) {
+            nblks = 1;
+        }
 
         if (load_type != 2) {
             /* can not support concurrent overlapping writes if whole data need to be verified */
@@ -731,7 +742,9 @@ private:
         }
         uint64_t size = nblks * VolInterface::get_instance()->get_page_size(vol);
         auto ret = posix_memalign((void**)&buf, 4096, size);
-        if (ret) { assert(0); }
+        if (ret) {
+            assert(0);
+        }
         ret = posix_memalign((void**)&buf1, 4096, size);
         assert(!ret);
         /* buf will be owned by homestore after sending the IO. so we need to allocate buf1 which will be used to
@@ -786,12 +799,16 @@ private:
     start:
         /* we won't be writing more then 128 blocks in one io */
         auto vol = vol_info[cur]->vol;
-        if (vol == nullptr) { return; }
+        if (vol == nullptr) {
+            return;
+        }
         uint64_t max_blks = max_io_size / VolInterface::get_instance()->get_page_size(vol);
 
         lba = rand() % (vol_info[cur]->max_vol_blks - max_blks);
         nblks = rand() % max_blks;
-        if (nblks == 0) { nblks = 1; }
+        if (nblks == 0) {
+            nblks = 1;
+        }
 
         if (load_type != 2) {
             /* Don't send overlapping reads with pending writes if data verification is on */
@@ -877,11 +894,11 @@ private:
                 }
                 if (j) {
                     if (can_panic) {
-
                         /* verify the header */
-                        j = memcmp((void*)b.bytes, (uint8_t*)((uint64_t)request->buf + tot_size_read),
-                                   sizeof(uint64_t));
-                        if (j != 0) { LOGINFO("header mismatch lba read {}", *((uint64_t*)b.bytes)); }
+                        j = memcmp((void*)b.bytes, (uint8_t*)((uint64_t)request->buf + tot_size_read), sizeof(uint64_t));
+                        if (j != 0) {
+                            LOGINFO("header mismatch lba read {}", *((uint64_t*)b.bytes));
+                        }
                         LOGINFO("mismatch found lba {} nlba {} total_size_read {}", request->lba, request->nblks,
                                 tot_size_read);
 #ifndef NDEBUG
@@ -891,9 +908,9 @@ private:
                         std::this_thread::sleep_for(std::chrono::seconds(5));
                         sleep(30);
                         assert(0);
-                    } else {
-                        return false;
                     }
+                    // need to return false
+                    return false;
                 }
                 size -= size_read;
                 offset += size_read;
@@ -1047,7 +1064,7 @@ private:
             force = true;
         }
         VolInterface::get_instance()->shutdown(force);
-    }
+   }
 
     void remove_journal_files() {
         // Remove journal folders
@@ -1118,18 +1135,10 @@ TEST_F(IOTest, init_io_test) {
 TEST_F(IOTest, recovery_io_test) {
     this->init = false;
     switch (expected_vol_state) {
-    case 0:
-        this->m_expected_vol_state = homestore::vol_state::ONLINE;
-        break;
-    case 1:
-        this->m_expected_vol_state = homestore::vol_state::OFFLINE;
-        break;
-    case 2:
-        this->m_expected_vol_state = homestore::vol_state::DEGRADED;
-        break;
-    case 3:
-        this->m_expected_vol_state = homestore::vol_state::FAILED;
-        break;
+    case 0: this->m_expected_vol_state = homestore::vol_state::ONLINE; break;
+    case 1: this->m_expected_vol_state = homestore::vol_state::OFFLINE; break;
+    case 2: this->m_expected_vol_state = homestore::vol_state::DEGRADED; break;
+    case 3: this->m_expected_vol_state = homestore::vol_state::FAILED; break;
     }
     this->start_homestore();
     this->wait_homestore_init_done();
@@ -1367,7 +1376,9 @@ TEST_F(IOTest, btree_fix_rerun_io_test) {
     sleep(5);
     assert(outstanding_ios == 0);
 
-    if (can_delete_volume) { this->delete_volumes(); }
+    if (can_delete_volume) {
+        this->delete_volumes();
+    }
 
     this->shutdown();
     if (remove_file) { this->remove_files(); }
@@ -1410,6 +1421,7 @@ SDS_OPTION_GROUP(
      "path [...]"),
     (phy_page_size, "", "phy_page_size", "phy_page_size", ::cxxopts::value< uint32_t >()->default_value("4096"),
      "phy_page_size"),
+    (io_flags, "", "io_flags", "io_flags", ::cxxopts::value< uint32_t >()->default_value("1"), "0 or 1"),
     (mem_btree_page_size, "", "mem_btree_page_size", "mem_btree_page_size",
      ::cxxopts::value< uint32_t >()->default_value("8192"), "mem_btree_page_size"))
 
@@ -1422,9 +1434,9 @@ SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
 /* We can run this target either by using default options which run the normal io tests or by setting different
  * options. Format is
  *   1. ./test_volume
- *   2. ./test_volume --gtest_filter=*recovery* --run_time=120 --num_threads=16 --max_disk_capacity=10
- * --max_volume=50 Above command run all tests having a recovery keyword for 120 seconds with 16 threads , 10g disk
- * capacity and 50 volumes
+ *   2. ./test_volume --gtest_filter=*recovery* --run_time=120 --num_threads=16 --max_disk_capacity=10 --max_volume=50
+ * Above command run all tests having a recovery keyword for 120 seconds with 16 threads , 10g disk capacity and 50
+ * volumes
  */
 int main(int argc, char* argv[]) {
     srand(time(0));
@@ -1454,10 +1466,18 @@ int main(int argc, char* argv[]) {
     vol_page_size = SDS_OPTIONS["vol_page_size"].as< uint32_t >();
     phy_page_size = SDS_OPTIONS["phy_page_size"].as< uint32_t >();
     mem_btree_page_size = SDS_OPTIONS["mem_btree_page_size"].as< uint32_t >();
+    io_flags = SDS_OPTIONS["io_flags"].as< uint32_t >();
 
-    if (SDS_OPTIONS.count("device_list")) { dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >(); }
+    if (SDS_OPTIONS.count("device_list")) {
+        dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();
+    }
 
-    if (load_type == 2) { verify_data = 0; }
-    if (enable_crash_handler) sds_logging::install_crash_handler();
+    if (load_type == 2) {
+        verify_data = 0;
+    }
+
+    if (enable_crash_handler) {
+        sds_logging::install_crash_handler();
+    }
     return RUN_ALL_TESTS();
 }
