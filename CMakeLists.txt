@@ -20,6 +20,8 @@ if  (${MEMORY_SANITIZER_ON})
   include (cmake/mem_sanitizer.cmake)
 endif ()
 
+include(${CONAN_SISL_ROOT}/cmake/settings_gen.cmake)
+
 find_program(CCACHE_FOUND ccache)
 if(CCACHE_FOUND)
     set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ccache)

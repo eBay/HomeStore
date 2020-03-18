@@ -1,6 +1,6 @@
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
-#include <main/vol_interface.hpp>
+#include <api/vol_interface.hpp>
 #include <utility/thread_buffer.hpp>
 #include <iomgr/iomgr.hpp>
 #include <iomgr/aio_drive_interface.hpp>
@@ -15,7 +15,7 @@
 #include <atomic>
 #include <string>
 #include <utility/thread_buffer.hpp>
-#include <volume/volume.hpp>
+#include "volume.hpp"
 #include <chrono>
 #include <fstream>
 #include <thread>

@@ -1,6 +1,6 @@
 #pragma once
 #include <cassert>
-#include "checkpoint.hpp"
+#include "checkpoint/checkpoint.hpp"
 #include "logdev/log_store.hpp"
 
 namespace homestore {

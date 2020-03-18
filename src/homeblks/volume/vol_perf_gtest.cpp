@@ -2,7 +2,7 @@
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
 #include <metrics/metrics.hpp>
-#include <main/vol_interface.hpp>
+#include <api/vol_interface.hpp>
 #include <iomgr/iomgr.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>

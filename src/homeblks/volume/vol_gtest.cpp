@@ -5,7 +5,7 @@
 #include <gtest/gtest.h>
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
-#include <main/vol_interface.hpp>
+#include <api/vol_interface.hpp>
 #include <iomgr/iomgr.hpp>
 #include <iomgr/aio_drive_interface.hpp>
 #include <boost/uuid/uuid_generators.hpp>
@@ -523,41 +523,37 @@ public:
 #if 0
     void process_ev_common(int fd, void* cookie, int event) {
         uint64_t              temp;
-        [[maybe_unused]] auto rsize = read(ev_fd, &temp, sizeof(uint64_t));
+    [[maybe_unused]] auto rsize = read(ev_fd, &temp, sizeof(uint64_t));
 
-        iomgr_obj->process_done(fd, event);
-        if (vol_create_del_test) {
-            iomgr_obj->fd_reschedule(fd, event);
-            vol_create_del();
-            return;
-        }
-
-        if ((outstanding_ios.load() < max_outstanding_ios && io_stalled.load() == false)) {
-            /* raise an event */
-            iomgr_obj->fd_reschedule(fd, event);
-        } else {
-            return;
-        }
-
-        if (!verify_done) {
-            verify_vols();
-            return;
-        }
-        size_t cnt = 0;
-        /* send 8 IOs in one schedule */
-        while (cnt < 8 && outstanding_ios < max_outstanding_ios) {
-            {
-                if (io_stalled) {
-                    break;
-                }
-            }
-            write_io();
-            if (read_enable) {
-                read_io();
-            }
-            ++cnt;
-        }
+    iomgr_obj->process_done(fd, event);
+    if (vol_create_del_test) {
+        iomgr_obj->fd_reschedule(fd, event);
+        vol_create_del();
+        return;
     }
+
+    if ((outstanding_ios.load() < max_outstanding_ios && io_stalled.load() == false)) {
+        /* raise an event */
+        iomgr_obj->fd_reschedule(fd, event);
+    } else {
+        return;
+    }
+
+    if (!verify_done) {
+        verify_vols();
+        return;
+    }
+    size_t cnt = 0;
+    /* send 8 IOs in one schedule */
+    while (cnt < 8 && outstanding_ios < max_outstanding_ios) {
+        {
+            if (io_stalled) { break; }
+        }
+        write_io();
+        if (read_enable) { read_io(); }
+        ++cnt;
+    }
+}
 #endif
 
     void shutdown() {

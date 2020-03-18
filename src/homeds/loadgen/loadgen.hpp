@@ -14,7 +14,7 @@
 #include <folly/Synchronized.h>
 #include <utility/atomic_counter.hpp>
 #include <spdlog/fmt/fmt.h>
-#include <main/homestore_header.hpp>
+#include <common/homestore_header.hpp>
 //#include "iomgr_executor.hpp"
 
 namespace homeds {

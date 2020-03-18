@@ -7,7 +7,7 @@
 #include "blkstore/writeBack_cache.hpp"
 #include <device/blkbuffer.hpp>
 #include <blkstore/blkstore.hpp>
-#include "home_blks.hpp"
+#include <homeblks/home_blks.hpp>
 #include <metrics/metrics.hpp>
 #include <utility/atomic_counter.hpp>
 #include <utility/obj_life_counter.hpp>
@@ -15,11 +15,11 @@
 #include <fds/obj_allocator.hpp>
 #include <sds_logging/logging.h>
 #include <spdlog/fmt/fmt.h>
-#include "main/homestore_assert.hpp"
+#include "common/homestore_assert.hpp"
 #include "threadpool/thread_pool.h"
 #include "blk_read_tracker.hpp"
-#include <volume/snapshot.hpp>
-#include <mapping/indx_mgr.hpp>
+#include "snapshot.hpp"
+#include "indx_mgr.hpp"
 #include <utility/enum.hpp>
 
 using namespace std;
@@ -126,7 +126,9 @@ struct Free_Blk_Entry {
 
     Free_Blk_Entry(){};
     Free_Blk_Entry(const BlkId& m_blkId, uint8_t m_blk_offset, uint8_t m_nblks_to_free) :
-            m_blkId(m_blkId), m_blk_offset(m_blk_offset), m_nblks_to_free(m_nblks_to_free) {}
+            m_blkId(m_blkId),
+            m_blk_offset(m_blk_offset),
+            m_nblks_to_free(m_nblks_to_free) {}
 
     BlkId blk_id() const { return m_blkId; }
     uint8_t blk_offset() const { return m_blk_offset; }

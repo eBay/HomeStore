@@ -17,7 +17,7 @@
 #include <sds_logging/logging.h>
 #include <metrics/metrics.hpp>
 #include <fds/utils.hpp>
-#include "main/homestore_config.hpp"
+#include "common/homestore_config.hpp"
 #include "error/error.h"
 
 namespace homeio {
@@ -66,11 +66,14 @@ void DriveEndPoint::shutdown_local() {
 
 void DriveEndPoint::init_local() {
     ev_fd = eventfd(0, EFD_NONBLOCK);
+    events.reserve(HS_SETTINGS_VALUE(device->max_completions_process_per_event_per_thread));
+
     iomgr->add_local_fd(ev_fd,
                         std::bind(&DriveEndPoint::process_completions, this, std::placeholders::_1,
                                   std::placeholders::_2, std::placeholders::_3),
                         EPOLLIN, 0, NULL);
-    int err = io_setup(MAX_OUTSTANDING_IO, &ioctx);
+    auto max_ios = HS_SETTINGS_VALUE(device->max_outstanding_ios_per_aio_thread);
+    int err = io_setup(max_ios, &ioctx);
     if (err) {
         LOGCRITICAL("io_setup failed with ret status {} errno {}", err, errno);
         std::stringstream ss;
@@ -79,7 +82,7 @@ void DriveEndPoint::init_local() {
     }
 
     assert(ioctx);
-    for (int i = 0; i < MAX_OUTSTANDING_IO; i++) {
+    for (auto i = 0u; i < max_ios; i++) {
         struct iocb_info* info = (struct iocb_info*)malloc(sizeof(struct iocb_info));
         iocb_list.push(info);
     }

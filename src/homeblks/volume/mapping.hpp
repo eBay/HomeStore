@@ -9,9 +9,9 @@
 #include "homeds/array/blob_array.h"
 #include <math.h>
 #include <sds_logging/logging.h>
-#include <volume/volume.hpp>
+#include "volume.hpp"
 #include <utility/obj_life_counter.hpp>
-#include "volume/home_blks.hpp"
+#include "homeblks/home_blks.hpp"
 
 SDS_LOGGING_DECL(VMOD_VOL_MAPPING)
 
@@ -510,8 +510,8 @@ public:
 typedef std::function< void(Free_Blk_Entry fbe) > free_blk_callback;
 typedef std::function< void(volume_req_ptr& req, BlkId& bid) > pending_read_blk_cb;
 class mapping {
-    typedef function< void(struct BlkId blkid, size_t offset_size, size_t size) > alloc_blk_callback;
-    typedef function< void(boost::intrusive_ptr< volume_req > cookie) > comp_callback;
+    typedef std::function< void(struct BlkId blkid, size_t offset_size, size_t size) > alloc_blk_callback;
+    typedef std::function< void(boost::intrusive_ptr< volume_req > cookie) > comp_callback;
     constexpr static uint64_t lba_query_cnt = 1024ull;
 
 private:

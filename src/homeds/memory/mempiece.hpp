@@ -15,9 +15,9 @@
 #include <mutex>
 #include <utility/atomic_counter.hpp>
 #include <atomic>
-#include <main/homestore_config.hpp>
+#include <common/homestore_config.hpp>
 #include <utility/obj_life_counter.hpp>
-#include <main/homestore_assert.hpp>
+#include <common/homestore_assert.hpp>
 
 namespace homeds {
 using namespace homestore;

@@ -3,7 +3,7 @@
 /* NOTE: This file exports interface required to access homeblocks. we should try to avoid including any
  * homestore/homeblocks related hpp file.
  */
-#include "homestore_header.hpp"
+#include <common/homestore_header.hpp>
 #include <functional>
 #include <vector>
 #include <memory>

@@ -18,7 +18,7 @@
 #include <linux/fs.h>
 #include <sys/ioctl.h>
 #endif
-#include "main/homestore_assert.hpp"
+#include "common/homestore_assert.hpp"
 #include <iomgr/iomgr.hpp>
 
 SDS_LOGGING_DECL(device)
@@ -29,7 +29,6 @@ namespace homestore {
 
 static std::atomic< uint64_t > glob_phys_dev_offset(0);
 static std::atomic< uint32_t > glob_phys_dev_ids(0);
-
 
 PhysicalDev::~PhysicalDev() {
 
@@ -136,9 +135,7 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
     auto temp = m_devsize;
     m_devsize = ALIGN_SIZE_TO_LEFT(m_devsize, HomeStoreConfig::phys_page_size);
 
-    if (m_devsize != temp) {
-        LOGWARN("device size is not the multiple of physical page size old size {}", temp);
-    }
+    if (m_devsize != temp) { LOGWARN("device size is not the multiple of physical page size old size {}", temp); }
     LOGINFO("Device {} size is {}", m_devname, m_devsize);
     m_dm_chunk[0] = m_dm_chunk[1] = nullptr;
     if (is_init) {

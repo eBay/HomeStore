@@ -15,7 +15,7 @@
 #include <error/error.h>
 #include "writeBack_cache.hpp"
 #include "device/blkbuffer.hpp"
-#include "main/homestore_config.hpp"
+#include "common/homestore_config.hpp"
 #include <utility/atomic_counter.hpp>
 #include <fds/utils.hpp>
 
@@ -28,7 +28,7 @@ enum BlkStoreCacheType { PASS_THRU = 0, WRITEBACK_CACHE = 1, WRITETHRU_CACHE = 2
  * be either be discarded or copied into new buffer. This threshold dictates whats the value of (64K - N) upto which
  * it will copy. In other words ((64K - N) <= CACHE_DISCARD_THRESHOLD_SIZE) ? copy : discard
  */
-#define CACHE_DISCARD_THRESHOLD_SIZE 16384
+//#define CACHE_DISCARD_THRESHOLD_SIZE 16384
 
 class BlkStoreConfig {
 public:

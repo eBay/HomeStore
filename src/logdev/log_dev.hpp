@@ -3,8 +3,8 @@
 #include <sds_logging/logging.h>
 #include <fds/stream_tracker.hpp>
 #include <fds/utils.hpp>
-#include <volume/home_blks.hpp>
-#include <blkstore/blkstore.hpp>
+#include "homeblks/home_blks.hpp"
+#include "blkstore/blkstore.hpp"
 #include <fds/id_reserver.hpp>
 
 SDS_LOGGING_DECL(logdev)

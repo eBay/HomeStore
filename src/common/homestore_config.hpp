@@ -5,8 +5,15 @@
 #include "homestore_header.hpp"
 #include <error/error.h>
 #include <cassert>
+#include <settings/settings.hpp>
+#include "generated/homestore_config_generated.h"
+
+SETTINGS_INIT(homestorecfg::HomeStoreSettings, homestore_config);
 
 namespace homestore {
+#define HS_SETTINGS(...) SETTINGS(homestore_config, __VA_ARGS__)
+#define HS_SETTINGS_THIS(...) SETTINGS_THIS(homestore_config, __VA_ARGS__)
+#define HS_SETTINGS_VALUE(...) SETTINGS_VALUE(homestore_config, __VA_ARGS__)
 
 struct HomeStoreConfig {
     static size_t phys_page_size;        // physical block size supported by ssd

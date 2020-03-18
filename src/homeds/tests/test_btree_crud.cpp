@@ -15,7 +15,7 @@
 #include "device/virtual_dev.hpp"
 #include "homeds/btree/mem_btree.hpp"
 #include <metrics/metrics.hpp>
-#include "main/homestore_header.hpp"
+#include "common/homestore_header.hpp"
 
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 THREAD_BUFFER_INIT;

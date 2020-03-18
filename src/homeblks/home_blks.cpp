@@ -1,5 +1,5 @@
 #include "home_blks.hpp"
-#include "volume.hpp"
+#include "volume/volume.hpp"
 #include <device/device.h>
 #include <device/virtual_dev.hpp>
 #include <cassert>
@@ -79,9 +79,8 @@ HomeBlks::HomeBlks(const init_params& cfg) :
     HomeStoreConfig::max_chunks = MAX_CHUNKS;
     HomeStoreConfig::max_vdevs = MAX_VDEVS;
     HomeStoreConfig::max_pdevs = MAX_PDEVS;
-    HomeStoreConfig::min_io_size = m_cfg.min_virtual_page_size > HomeStoreConfig::atomic_phys_page_size
-        ? HomeStoreConfig::atomic_phys_page_size
-        : m_cfg.min_virtual_page_size;
+    HomeStoreConfig::min_io_size =
+        std::min(m_cfg.min_virtual_page_size, (uint32_t)HomeStoreConfig::atomic_phys_page_size);
     HomeStoreConfig::open_flag = m_cfg.flag;
     HomeStoreConfig::is_read_only = (m_cfg.is_read_only) ? true : false;
 #ifndef NDEBUG
@@ -392,7 +391,6 @@ BlkId HomeBlks::alloc_blk() {
 
 void HomeBlks::vol_sb_init(vol_mem_sb* sb) {
     /* allocate block */
-
     assert(!m_cfg.is_read_only);
     BlkId bid = alloc_blk();
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
@@ -819,7 +817,6 @@ uint32_t HomeBlks::get_data_pagesz() const { return m_data_pagesz; }
 
 void HomeBlks::create_sb_blkstore(vdev_info_block* vb) {
     if (vb == nullptr) {
-
         /* create a blkstore */
         struct sb_blkstore_blob blob;
         blob.type = blkstore_type::SB_STORE;
@@ -1164,19 +1161,19 @@ bool HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
     }
 
     auto elapsed_time_ms = get_time_since_epoch_ms() - m_shutdown_start_time.load();
-    if (elapsed_time_ms > (SHUTDOWN_TIMEOUT_NUM_SECS * 1000)) {
-        LOGERROR("Graceful shutdown of volumes took {} ms exceeds time limit, attempting forceful shutdown",
-                 elapsed_time_ms);
+    if (elapsed_time_ms > (HB_SETTINGS_VALUE(general_config->shutdown_timeout_secs) * 1000)) {
+        LOGERROR("Graceful shutdown of volumes took {} ms exceeds time limit {} seconds, attempting forceful shutdown",
+                 elapsed_time_ms, HB_SETTINGS_VALUE(general_config->shutdown_timeout_secs));
         force = true;
     }
 
     try {
         if (!do_volume_shutdown(force)) {
             LOGINFO("Not all volumes are completely shutdown yet, will check again in {} milliseconds",
-                    SHUTDOWN_STATUS_CHECK_FREQUENCY_MS);
+                    HB_SETTINGS_VALUE(general_config->shutdown_status_check_freq_ms));
             m_shutdown_timer_hdl = iomanager.schedule_thread_timer(
-                SHUTDOWN_STATUS_CHECK_FREQUENCY_MS * 1000 * 1000, false /* recurring */, nullptr,
-                [this, shutdown_done_cb, force](void* cookie) { schedule_shutdown(shutdown_done_cb, force); });
+                HB_SETTINGS_VALUE(general_config->shutdown_status_check_freq_ms) * 1000 * 1000, false /* recurring */,
+                nullptr, [this, shutdown_done_cb, force](void* cookie) { schedule_shutdown(shutdown_done_cb, force); });
             return false;
         }
         iomanager.cancel_thread_timer(m_shutdown_timer_hdl);

@@ -15,15 +15,15 @@
 #include <error/error.h>
 #include <metrics/metrics.hpp>
 #include <utility/atomic_counter.hpp>
-#include "main/homestore_header.hpp"
-#include "main/homestore_assert.hpp"
+#include "common/homestore_header.hpp"
+#include "common/homestore_assert.hpp"
 
 SDS_LOGGING_DECL(device)
 
 namespace homestore {
 
-#define VDEV_LABEL " for Homestore Virtual Device"
-#define PHYSICAL_HIST "physical"
+//#define VDEV_LABEL " for Homestore Virtual Device"
+//#define PHYSICAL_HIST "physical"
 
 class VdevFixedBlkAllocatorPolicy {
 public:

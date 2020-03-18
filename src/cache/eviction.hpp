@@ -8,8 +8,8 @@
 #include <mutex>
 #include <atomic>
 #include <boost/intrusive/list.hpp>
-#include <main/homestore_config.hpp>
-#include "main/homestore_assert.hpp"
+#include <common/homestore_config.hpp>
+#include "common/homestore_assert.hpp"
 
 namespace homestore {
 

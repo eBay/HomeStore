@@ -1,6 +1,6 @@
 #pragma once
-#include <device/blkbuffer.hpp>
-#include <blkstore/blkstore.hpp>
+#include "device/blkbuffer.hpp"
+#include "blkstore/blkstore.hpp"
 #include <urcu-call-rcu.h>
 #include <urcu.h>
 #include <atomic>
@@ -8,7 +8,7 @@
 #include <cassert>
 #include <memory>
 #include <sds_logging/logging.h>
-#include <main/homestore_header.hpp>
+#include "common/homestore_header.hpp"
 
 namespace homestore {
 SDS_LOGGING_DECL(cp)

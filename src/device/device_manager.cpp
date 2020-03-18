@@ -9,7 +9,7 @@
 #include <fcntl.h>
 #include <boost/range.hpp>
 #include <iomgr/iomgr.hpp>
-#include "main/homestore_assert.hpp"
+#include "common/homestore_assert.hpp"
 
 SDS_LOGGING_DECL(device, DEVICE_MANAGER)
 
@@ -295,12 +295,12 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info >& devices) {
 }
 
 void DeviceManager::handle_error(PhysicalDev* pdev) {
-    int cnt = pdev->inc_error_cnt();
+    auto cnt = pdev->inc_error_cnt();
 
-    /* When cnt reaches MAX_ERROR_CNT we notify only once until
+    /* When cnt reaches max_error_count we notify only once until
      * we reset the cnt to zero.
      */
-    if (cnt != MAX_ERROR_CNT
+    if (cnt < HS_SETTINGS_VALUE(device->max_error_before_marking_dev_down)
 #ifdef _PRERELEASE
         && !(homestore_flip->test_flip("device_fail", pdev->get_devname()))
 #endif

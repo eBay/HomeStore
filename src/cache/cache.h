@@ -11,16 +11,13 @@
 #include "lru_eviction.hpp"
 #include <boost/intrusive_ptr.hpp>
 #include <fds/obj_allocator.hpp>
-#include "main/homestore_config.hpp"
+#include "common/homestore_config.hpp"
 #include <execinfo.h>
 #include <utility/obj_life_counter.hpp>
 #include <metrics/metrics.hpp>
 #include <fds/utils.hpp>
 
 namespace homestore {
-
-// TODO: We need to change this to config driven at the start of the app
-#define FREELIST_CACHE_COUNT 10000
 
 #define CurrentEvictor LRUEvictor
 #define LRUEvictor Evictor< LRUEvictionPolicy >
@@ -41,7 +38,7 @@ public:
 
 /* Number of entries we ideally want to have per hash bucket. This number if small, will reduce contention and
  * speed of read/writes, but at the cost of increased memory */
-#define ENTRIES_PER_BUCKET 2
+//#define ENTRIES_PER_BUCKET 2
 
 /* Number of eviction partitions. More the partitions better the parallelization of requests, but lesser the
  * effectiveness of cache, since it could get evicted sooner than expected, if distribution of key hashing is not
