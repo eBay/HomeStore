@@ -3,7 +3,7 @@
 
 #include "cache/cache.h"
 #include <vector>
-#include <error/error.h>
+#include <common/error.h>
 #include <device/virtual_dev.hpp>
 
 extern bool vol_test_enable;

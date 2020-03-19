@@ -1,7 +1,7 @@
 #pragma once
 #include <cassert>
 #include "checkpoint/checkpoint.hpp"
-#include "logdev/log_store.hpp"
+#include "homelogstore/log_store.hpp"
 
 namespace homestore {
 struct volume_req;

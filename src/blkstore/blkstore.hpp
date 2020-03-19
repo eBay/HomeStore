@@ -12,7 +12,7 @@
 #include "device/virtual_dev.hpp"
 #include "homeds/memory/mempiece.hpp"
 #include "cache/cache.cpp"
-#include <error/error.h>
+#include <common/error.h>
 #include "writeBack_cache.hpp"
 #include "device/blkbuffer.hpp"
 #include "common/homestore_config.hpp"

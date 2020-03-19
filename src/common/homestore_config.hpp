@@ -3,7 +3,7 @@
 #define _HOMESTORE_CONFIG_HPP_
 
 #include "homestore_header.hpp"
-#include <error/error.h>
+#include <common/error.h>
 #include <cassert>
 #include <settings/settings.hpp>
 #include "generated/homestore_config_generated.h"

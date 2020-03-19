@@ -7,7 +7,7 @@
 #include <functional>
 #include <vector>
 #include <memory>
-#include <error/error.h>
+#include <common/error.h>
 #include <iomgr/iomgr.hpp>
 #include <boost/intrusive_ptr.hpp>
 #include <cassert>
@@ -94,9 +94,7 @@ struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
         if (req->refcount.decrement_testz()) { req->free_yourself(); }
     }
 
-    void inc_ref_cnt() {
-        intrusive_ptr_add_ref(this);
-    }
+    void inc_ref_cnt() { intrusive_ptr_add_ref(this); }
 
     /* Set the error with error code,
      * Returns
@@ -115,13 +113,18 @@ struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
 
     std::error_condition get_status() const { return err; }
 
-
 public:
-    vol_interface_req() : refcount(0) {};
-    vol_interface_req(std::shared_ptr< Volume > vol, uint64_t lba, uint32_t nlbas, bool is_read, bool sync) : 
-                            err(no_error), request_id(counter_generator.next_request_id()), refcount(0), 
-                            is_fail_completed(false), lba(lba), nlbas(nlbas), is_read(is_read), 
-                            vol_instance(vol), sync(sync) {}
+    vol_interface_req() : refcount(0){};
+    vol_interface_req(std::shared_ptr< Volume > vol, uint64_t lba, uint32_t nlbas, bool is_read, bool sync) :
+            err(no_error),
+            request_id(counter_generator.next_request_id()),
+            refcount(0),
+            is_fail_completed(false),
+            lba(lba),
+            nlbas(nlbas),
+            is_read(is_read),
+            vol_instance(vol),
+            sync(sync) {}
     ~vol_interface_req() = default;
 
     virtual void free_yourself() = 0;
@@ -234,8 +237,8 @@ public:
     }
     static VolInterface* get_instance() { return VolInterfaceImpl::raw_instance(); }
 
-    virtual vol_interface_req_ptr create_vol_interface_req(std::shared_ptr< Volume > vol, void *buf, 
-                                                           uint64_t lba, uint32_t nlbas, bool read, bool sync) = 0;
+    virtual vol_interface_req_ptr create_vol_interface_req(std::shared_ptr< Volume > vol, void* buf, uint64_t lba,
+                                                           uint32_t nlbas, bool read, bool sync) = 0;
     virtual std::error_condition write(const VolumePtr& vol, const vol_interface_req_ptr& req) = 0;
     virtual std::error_condition read(const VolumePtr& vol, const vol_interface_req_ptr& req) = 0;
     virtual std::error_condition sync_read(const VolumePtr& vol, const vol_interface_req_ptr& req) = 0;

@@ -6,7 +6,7 @@
 #include "homeds/loadgen/spec/store_spec.hpp"
 #include "homeds/tests/loadgen_tests/keyspecs/logstore_key_spec.hpp"
 #include "homeds/tests/loadgen_tests/valuespecs/logstore_value_spec.hpp"
-#include "logdev/log_store.hpp"
+#include "homelogstore/log_store.hpp"
 
 namespace homeds {
 namespace loadgen {

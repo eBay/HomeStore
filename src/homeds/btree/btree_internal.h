@@ -12,7 +12,7 @@
 #include <cmath>
 #include <fds/utils.hpp>
 #include <fds/freelist_allocator.hpp>
-#include "error/error.h"
+#include "common/error.h"
 #include "common/homestore_header.hpp"
 #include <metrics/metrics.hpp>
 #include <utility/enum.hpp>

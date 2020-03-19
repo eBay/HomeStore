@@ -12,7 +12,7 @@
 #include <memory>
 #include <boost/range/irange.hpp>
 #include <map>
-#include <error/error.h>
+#include <common/error.h>
 #include <metrics/metrics.hpp>
 #include <utility/atomic_counter.hpp>
 #include "common/homestore_header.hpp"

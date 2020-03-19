@@ -5,11 +5,7 @@ from conans import ConanFile, CMake, tools
 class HomestoreConan(ConanFile):
     name = "homestore"
 
-<<<<<<< HEAD
     version = "0.12.01"
-=======
-    version = "0.11.28"
->>>>>>> d4d8f6b20307ada3d305ac1bf87d32c2c4588087
     revision_mode = "scm"
 
     license = "Proprietary"

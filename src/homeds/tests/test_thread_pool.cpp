@@ -9,7 +9,7 @@
 #include <chrono>
 #include <iostream>
 #include <flip/flip.hpp>
-#include "../thread_pool.h"
+#include "homeds/thread/threadpool/thread_pool.h"
 
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 

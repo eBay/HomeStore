@@ -1,7 +1,7 @@
 #ifndef VOL_CONFIG_HPP
 #define VOL_CONFIG_HPP
 
-#include <api/vol_interface.hpp>
+#include "api/vol_interface.hpp"
 #include <memory>
 #include <homeds/btree/btree.hpp>
 #include <blkstore/blkstore.hpp>
@@ -9,7 +9,7 @@
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <async_http/http_server.hpp>
-#include <threadpool/thread_pool.h>
+#include "homeds/thread/threadpool/thread_pool.h"
 #include <utility/atomic_counter.hpp>
 #include <metrics/metrics.hpp>
 #include <settings/settings.hpp>

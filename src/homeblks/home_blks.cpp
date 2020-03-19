@@ -10,7 +10,7 @@
 #include <nlohmann/json.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/uuid/uuid_io.hpp>
-#include <logdev/log_store.hpp>
+#include <homelogstore/log_store.hpp>
 
 SDS_OPTION_GROUP(home_blks,
                  (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",

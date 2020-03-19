@@ -1,7 +1,7 @@
 #pragma once
 #include "write_log_recorder.hpp"
 #include "vol_crc_persist_mgr.hpp"
-#include <logdev/log_dev.hpp>
+#include "homelogstore/log_dev.hpp"
 
 #define MAX_DEVICES 2
 #define VOL_PREFIX "vol_load_gen/vol"
@@ -34,9 +34,7 @@ public:
     VolReq() { buf = nullptr; }
 
     virtual ~VolReq() {
-        if (buf) {
-            free(buf);
-        }
+        if (buf) { free(buf); }
     }
 };
 
@@ -85,9 +83,7 @@ public:
         m_file_names = {"vol_load_gen/file1", "vol_load_gen/file2", "vol_load_gen/file3", "vol_load_gen/file4"};
         m_done_cb = init_done_cb;
 
-        if (m_enable_write_log) {
-            m_write_recorder = std::make_shared< WriteLogRecorder< uint64_t > >(max_vols());
-        }
+        if (m_enable_write_log) { m_write_recorder = std::make_shared< WriteLogRecorder< uint64_t > >(max_vols()); }
 
         start_homestore();
 
@@ -163,9 +159,7 @@ public:
         uint64_t size = get_size(nblks);
         auto ret = posix_memalign((void**)&bytes, VOL_PAGE_SIZE, size);
 
-        if (ret) {
-            assert(0);
-        }
+        if (ret) { assert(0); }
 
         populate_buf(bytes, size);
         return bytes;
@@ -219,12 +213,10 @@ public:
         m_rd_cnt++;
         m_outstd_ios++;
 
-        if (verify == false) { 
-          m_read_verify_skip++; 
-        }
+        if (verify == false) { m_read_verify_skip++; }
 
-        auto vreq = VolInterface::get_instance()->create_vol_interface_req(m_vols[vol_id], nullptr, lba, 
-                    nblks, true, false);
+        auto vreq =
+            VolInterface::get_instance()->create_vol_interface_req(m_vols[vol_id], nullptr, lba, nblks, true, false);
         vreq->cookie = req;
         auto ret_io = VolInterface::get_instance()->read(m_vols[vol_id], vreq);
         if (ret_io != no_error) {
@@ -261,8 +253,8 @@ public:
             req->hash.push_back(get_hash((uint8_t*)((uint64_t)buf + get_size(i))));
         }
 
-        auto vreq = VolInterface::get_instance()->create_vol_interface_req(m_vols[vol_id], buf, 
-                    lba, nblks, false, false);
+        auto vreq =
+            VolInterface::get_instance()->create_vol_interface_req(m_vols[vol_id], buf, lba, nblks, false, false);
         vreq->cookie = req;
         auto ret_io = VolInterface::get_instance()->write(m_vols[vol_id], vreq);
         if (ret_io != no_error) {

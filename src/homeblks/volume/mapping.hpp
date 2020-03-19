@@ -5,7 +5,7 @@
 #include "homeds/btree/btree.hpp"
 #include <blkalloc/blk.h>
 #include <csignal>
-#include <error/error.h>
+#include <common/error.h>
 #include "homeds/array/blob_array.h"
 #include <math.h>
 #include <sds_logging/logging.h>

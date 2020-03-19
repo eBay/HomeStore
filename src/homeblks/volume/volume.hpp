@@ -16,7 +16,7 @@
 #include <sds_logging/logging.h>
 #include <spdlog/fmt/fmt.h>
 #include "common/homestore_assert.hpp"
-#include "threadpool/thread_pool.h"
+#include "homeds/thread/threadpool/thread_pool.h"
 #include "blk_read_tracker.hpp"
 #include "snapshot.hpp"
 #include "indx_mgr.hpp"
@@ -137,8 +137,7 @@ struct Free_Blk_Entry {
 
 class VolumeMetrics : public sisl::MetricsGroupWrapper {
 public:
-    explicit VolumeMetrics(const char* vol_uuid) :
-                    sisl::MetricsGroupWrapper("Volume", vol_uuid) {
+    explicit VolumeMetrics(const char* vol_uuid) : sisl::MetricsGroupWrapper("Volume", vol_uuid) {
         REGISTER_COUNTER(volume_read_count, "Total Volume read operations", "volume_op_count", {"op", "read"});
         REGISTER_COUNTER(volume_write_count, "Total Volume write operations", "volume_op_count", {"op", "write"});
         REGISTER_COUNTER(volume_outstanding_data_read_count, "Total Volume data outstanding read cnt",
