@@ -17,11 +17,10 @@ class CacheStoreSpec : public StoreSpec< K, V > {
     typedef std::function< void(generator_op_error, const key_info< K, V >*, void*, const std::string&) >
         store_error_cb_t;
 
-
 public:
     CacheStoreSpec() {}
 
-    virtual bool insert(K& k, std::shared_ptr<V> v) override {
+    virtual bool insert(K& k, std::shared_ptr< V > v) override {
 
         auto ibuf = v->get_buf();
         ibuf->set_key(k);
@@ -30,12 +29,12 @@ public:
 
         bool inserted = m_cache->insert(k, boost::static_pointer_cast< CacheBuffer< CacheKey > >(ibuf),
                                         (boost::intrusive_ptr< CacheBuffer< CacheKey > >*)&out_bbuf);
-        LOGDEBUG("Cache store inserted {}",*k.getBlkId());
-        
+        LOGDEBUG("Cache store inserted {}", *k.getBlkId());
+
         return inserted;
     }
 
-    virtual bool upsert(K& k, std::shared_ptr<V> v) override {
+    virtual bool upsert(K& k, std::shared_ptr< V > v) override {
         assert(0);
         return true;
     }
@@ -44,7 +43,7 @@ public:
         m_cache = std::make_unique< homestore::Cache< CacheKey > >(MAX_CACHE_SIZE, CACHE_ENTRY_SIZE);
     }
 
-    virtual bool update(K& k, std::shared_ptr<V> v) override {
+    virtual bool update(K& k, std::shared_ptr< V > v) override {
         assert(0);
         return true;
     }
@@ -57,8 +56,8 @@ public:
     }
 
     virtual bool remove(K& k, V* removed_v = nullptr) override {
-        m_cache->safe_erase(k, [this, &k ,removed_v](boost::intrusive_ptr< CacheBuffer< CacheKey > > erased_buf) {
-            LOGDEBUG("Cache store removed {}",*(k.getBlkId()));
+        m_cache->safe_erase(k, [this, &k, removed_v](boost::intrusive_ptr< CacheBuffer< CacheKey > > erased_buf) {
+            LOGDEBUG("Cache store removed {}", *(k.getBlkId()));
         });
         return true;
     }
@@ -74,15 +73,15 @@ public:
         return 0;
     }
 
-    virtual bool range_update(K& start_key, bool start_incl, K& end_key, bool end_incl, 
-                              std::vector< std::shared_ptr<V> > &result) {
+    virtual bool range_update(K& start_key, bool start_incl, K& end_key, bool end_incl,
+                              std::vector< std::shared_ptr< V > >& result) {
         assert(0);
         return true;
     }
 
 private:
     std::unique_ptr< homestore::Cache< CacheKey > > m_cache;
-    boost::uuids::uuid                              uuid;
+    boost::uuids::uuid uuid;
 };
 
 } // namespace loadgen

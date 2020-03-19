@@ -9,15 +9,12 @@
 namespace homeds {
 
 // A block which holds the reference count and the actual pointer. This will simply a wrapper around the tagged ptr
-template <typename T>
-struct smart_ptr_block
-{
+template < typename T >
+struct smart_ptr_block {
 public:
-    smart_ptr_block() :
-        m_ptr(0) {
-    }
+    smart_ptr_block() : m_ptr(0) {}
 
-    smart_ptr_block(T *ptr) {
+    smart_ptr_block(T* ptr) {
         homeds::tagged_ptr tp(ptr, 1);
         m_ptr = tp.get_packed();
     }
@@ -29,12 +26,10 @@ public:
     }
 #endif
 
-    smart_ptr_block(const smart_ptr_block &other) = delete;
+    smart_ptr_block(const smart_ptr_block& other) = delete;
 
     // Move constructor
-    smart_ptr_block(smart_ptr_block &&other) noexcept :
-        m_ptr(other.m_ptr) {
-    }
+    smart_ptr_block(smart_ptr_block&& other) noexcept : m_ptr(other.m_ptr) {}
 
     ~smart_ptr_block() {
         tagged_ptr tp;
@@ -54,7 +49,7 @@ public:
     }
 
     // Copy assignment operator
-    smart_ptr_block &operator=(const smart_ptr_block &other) {
+    smart_ptr_block& operator=(const smart_ptr_block& other) {
         tagged_ptr tp;
         tagged_ptr::compressed_ptr_t oldval, newval;
 
@@ -72,7 +67,7 @@ public:
     }
 
     // Move assignment operator
-    smart_ptr_block &operator=(smart_ptr_block &&other) {
+    smart_ptr_block& operator=(smart_ptr_block&& other) {
         m_ptr = std::move(other.m_ptr);
         return *this;
     }
@@ -81,85 +76,75 @@ private:
     std::atomic< homeds::tagged_ptr::compressed_ptr_t > m_ptr;
 };
 
-template <typename T>
-class atomic_smart_ptr
-{
+template < typename T >
+class atomic_smart_ptr {
 public:
-    atomic_smart_ptr(T* p) :
-            m_block(p) {}
+    atomic_smart_ptr(T* p) : m_block(p) {}
 
-    atomic_smart_ptr(smart_ptr_block &block) :
-            m_block(block) {}
+    atomic_smart_ptr(smart_ptr_block& block) : m_block(block) {}
 
     // Copy constructor
-    atomic_smart_ptr(const atomic_smart_ptr &other) = default;
+    atomic_smart_ptr(const atomic_smart_ptr& other) = default;
 
     // Move constructor
-    atomic_smart_ptr(atomic_smart_ptr &&other) noexcept = default;
+    atomic_smart_ptr(atomic_smart_ptr&& other) noexcept = default;
 
     // Copy assignment operator
-    atomic_smart_ptr<T>& operator=(const atomic_smart_ptr<T> &other) = default;
+    atomic_smart_ptr< T >& operator=(const atomic_smart_ptr< T >& other) = default;
 
     /// @brief the destructor releases its ownership and free if no one is referencing
     ~atomic_smart_ptr(void) = default;
 
-    template <typename... Args>
-    static atomic_smart_ptr<T> construct(Args&&... args) {
+    template < typename... Args >
+    static atomic_smart_ptr< T > construct(Args&&... args) {
         // Allocate memory and construct the object
-        uint8_t *mem = new uint8_t[sizeof(smart_ptr_block) + sizeof(T)];
-        T *t = new (mem + sizeof(smart_ptr_block)) T(std::forward<Args>(args)...);
+        uint8_t* mem = new uint8_t[sizeof(smart_ptr_block) + sizeof(T)];
+        T* t = new (mem + sizeof(smart_ptr_block)) T(std::forward< Args >(args)...);
 
         // Use the first portion for smart_ptr_block
-        smart_ptr_block *s = new (mem) T(t);
-        return atomic_smart_ptr<T>(*s);
+        smart_ptr_block* s = new (mem) T(t);
+        return atomic_smart_ptr< T >(*s);
     }
 
     /// @brief this reset releases its ownership
     void reset(void) noexcept {
 
         if (m_ptr->release() == true) {
-            fds::mem_allocator::instance()->free((mempool_header *)m_ptr.load());
+            fds::mem_allocator::instance()->free((mempool_header*)m_ptr.load());
         }
     }
 
     // underlying pointer operations :
-    inline T& operator*()
-    {
+    inline T& operator*() {
         // TODO: Throw excepton if m_ptr is a nullptr;
-        mempool_header *hdr = (mempool_header *)(m_ptr.load());
-        T *p = (T *)fds::mem_allocator::instance()->to_rawptr(hdr);
-        return (T &)(*p);
+        mempool_header* hdr = (mempool_header*)(m_ptr.load());
+        T* p = (T*)fds::mem_allocator::instance()->to_rawptr(hdr);
+        return (T&)(*p);
     }
 
-    inline T* operator->()
-    {
+    inline T* operator->() {
         // TODO: Throw exception if it is a nullptr;
-        mempool_header *hdr = (mempool_header *)(m_ptr.load());
-        return (T *)fds::mem_allocator::instance()->to_rawptr(hdr);
+        mempool_header* hdr = (mempool_header*)(m_ptr.load());
+        return (T*)fds::mem_allocator::instance()->to_rawptr(hdr);
     }
 
-    inline T* get(void)
-    {
+    inline T* get(void) {
         if (m_ptr == nullptr) {
             return nullptr;
         }
 
         // no assert, can return NULL
-        mempool_header *hdr = (mempool_header *)(m_ptr.load());
-        return (T *)fds::mem_allocator::instance()->to_rawptr(hdr);
+        mempool_header* hdr = (mempool_header*)(m_ptr.load());
+        return (T*)fds::mem_allocator::instance()->to_rawptr(hdr);
     }
 
-    void set_validity(bool is_valid, bool is_atomic = false)
-    {
+    void set_validity(bool is_valid, bool is_atomic = false) {
         if (m_ptr) {
             is_atomic ? m_ptr.load()->set_validity(is_valid) : m_ptr.load()->set_validity_atomically(is_valid);
         }
     }
 
-    bool is_valid()
-    {
-        return (m_ptr ? m_ptr.load()->is_valid() : false);
-    }
+    bool is_valid() { return (m_ptr ? m_ptr.load()->is_valid() : false); }
 
 #if 0
     /// @brief this reset release its ownership and re-acquire another one
@@ -201,12 +186,10 @@ public:
      }
 #endif
 
-
-    bool cas(const fds::smart_ptr<T> &oldp, const fds::smart_ptr<T> &newp)
-    {
+    bool cas(const fds::smart_ptr< T >& oldp, const fds::smart_ptr< T >& newp) {
         bool status = false;
 
-        __smart_ptr<T> *old_ptr = oldp->m_ptr.load();
+        __smart_ptr< T >* old_ptr = oldp->m_ptr.load();
 
         // Acquire the new ptr and do a atomic swap.
         newp.m_ptr->acquire();
@@ -215,7 +198,7 @@ public:
             // We need to release old_ptr and free if need be
             if (old_ptr->release() == true) {
                 cout << "Freeing memory since refcount reached 0" << endl;
-                fds::mem_allocator::instance()->free((mempool_header *)old_ptr);
+                fds::mem_allocator::instance()->free((mempool_header*)old_ptr);
             }
         } else {
             bool ret = newp.m_ptr->release();
@@ -224,6 +207,7 @@ public:
 
         return status;
     }
+
 private:
     smart_ptr_block< T > m_block;
 };

@@ -14,27 +14,22 @@
 
 namespace homeds {
 
-template< typename T, int32_t StaticCount >
+template < typename T, int32_t StaticCount >
 class FlexArray {
 public:
-    FlexArray() :
-            m_count(0) {
-    }
+    FlexArray() : m_count(0) {}
 
-    FlexArray(int32_t size) :
-            FlexArray() {
-        m_vec.reserve(size - StaticCount);
-    }
+    FlexArray(int32_t size) : FlexArray() { m_vec.reserve(size - StaticCount); }
 
     ~FlexArray() {
         auto c = m_count < StaticCount ? m_count : StaticCount;
         for (auto i = 0u; i < c; i++) {
-            T *mem = (T *) &m_arr_mem[i * sizeof(T)];
+            T* mem = (T*)&m_arr_mem[i * sizeof(T)];
             mem->~T();
         }
     }
 
-    uint32_t push_back(T &value) {
+    uint32_t push_back(T& value) {
         if (m_count < StaticCount) {
             get_in_array(m_count) = value;
         } else {
@@ -44,11 +39,11 @@ public:
         return m_count - 1;
     }
 
-    template< class... Args >
-    uint32_t emplace_back(Args &&... args) {
+    template < class... Args >
+    uint32_t emplace_back(Args&&... args) {
         if (m_count < StaticCount) {
-            void *mem = (void *) &m_arr_mem[m_count * sizeof(T)];
-            new(mem)T(std::forward< Args >(args)...);
+            void* mem = (void*)&m_arr_mem[m_count * sizeof(T)];
+            new (mem) T(std::forward< Args >(args)...);
         } else {
             m_vec.emplace_back(std::forward< Args >(args)...);
         }
@@ -56,7 +51,7 @@ public:
         return m_count - 1;
     }
 
-    const T &operator[](uint32_t n) const {
+    const T& operator[](uint32_t n) const {
         if (n < StaticCount) {
             return get_in_array(n);
         } else {
@@ -64,7 +59,7 @@ public:
         }
     }
 
-    T &operator[](uint32_t n) {
+    T& operator[](uint32_t n) {
         if (n < StaticCount) {
             return get_in_array(n);
         } else {
@@ -77,13 +72,11 @@ public:
         m_vec.clear();
     }
 
-    size_t size() const {
-        return m_count;
-    }
+    size_t size() const { return m_count; }
 
 private:
-    T &get_in_array(uint32_t ind) const {
-        T *arr = (T *) m_arr_mem;
+    T& get_in_array(uint32_t ind) const {
+        T* arr = (T*)m_arr_mem;
         return arr[ind];
     }
 
@@ -94,14 +87,12 @@ private:
     uint32_t m_count;
 };
 
-template< typename T, int32_t StaticCount >
+template < typename T, int32_t StaticCount >
 class FlexArray< std::shared_ptr< T >, StaticCount > {
 public:
-    FlexArray() :
-            m_count(0) {
-    }
+    FlexArray() : m_count(0) {}
 
-    uint32_t push_back(std::shared_ptr< T > &value) {
+    uint32_t push_back(std::shared_ptr< T >& value) {
         if (m_count < StaticCount) {
             m_arr[m_count] = value;
         } else {
@@ -111,8 +102,8 @@ public:
         return m_count - 1;
     }
 
-    template< class... Args >
-    uint32_t emplace_back(Args &&... args) {
+    template < class... Args >
+    uint32_t emplace_back(Args&&... args) {
         if (m_count < StaticCount) {
             m_arr[m_count] = std::make_shared< T >(std::forward< Args >(args)...);
         } else {
@@ -143,24 +134,20 @@ public:
         m_vec.clear();
     }
 
-    size_t size() const {
-        return m_count;
-    }
+    size_t size() const { return m_count; }
 
 private:
     std::array< std::shared_ptr< T >, StaticCount > m_arr;
-    std::vector< std::shared_ptr< T>> m_vec;
+    std::vector< std::shared_ptr< T > > m_vec;
     uint32_t m_count;
 };
 
-template< typename T, int32_t StaticCount >
+template < typename T, int32_t StaticCount >
 class FlexArray< std::unique_ptr< T >, StaticCount > {
 public:
-    FlexArray() :
-            m_count(0) {
-    }
+    FlexArray() : m_count(0) {}
 
-    uint32_t push_back(std::unique_ptr< T > &&value) {
+    uint32_t push_back(std::unique_ptr< T >&& value) {
         if (m_count < StaticCount) {
             m_arr[m_count] = std::move(value);
         } else {
@@ -170,8 +157,8 @@ public:
         return m_count - 1;
     }
 
-    template< class... Args >
-    uint32_t emplace_back(Args &&... args) {
+    template < class... Args >
+    uint32_t emplace_back(Args&&... args) {
         if (m_count < StaticCount) {
             m_arr[m_count] = std::make_unique< T >(std::forward< Args >(args)...);
         } else {
@@ -199,7 +186,7 @@ public:
         }
     }
 
-    const T *operator[](uint32_t n) const {
+    const T* operator[](uint32_t n) const {
         if (n < StaticCount) {
             return m_arr[n].get();
         } else {
@@ -207,7 +194,7 @@ public:
         }
     }
 
-    T *operator[](uint32_t n) {
+    T* operator[](uint32_t n) {
         if (n < StaticCount) {
             return m_arr[n].get();
         } else {
@@ -220,15 +207,13 @@ public:
         m_vec.clear();
     }
 
-    size_t size() const {
-        return m_count;
-    }
+    size_t size() const { return m_count; }
 
 private:
     std::array< std::unique_ptr< T >, StaticCount > m_arr;
-    std::vector< std::unique_ptr< T>> m_vec;
+    std::vector< std::unique_ptr< T > > m_vec;
     uint32_t m_count;
 };
-}
+} // namespace homeds
 
-#endif //OMSTORAGE_FLEXARRAY_HPP
+#endif // OMSTORAGE_FLEXARRAY_HPP

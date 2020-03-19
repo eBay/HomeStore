@@ -10,17 +10,17 @@ namespace loadgen {
 template < typename K, typename V >
 class StoreSpec {
 public:
-    virtual bool     insert(K& k, std::shared_ptr<V> v) = 0;
-    virtual bool     upsert(K& k, std::shared_ptr<V> v) = 0;
-    virtual bool     update(K& k, std::shared_ptr<V> v) = 0;
-    virtual bool     get(K& k, V* out_v) = 0;
-    virtual bool     remove(K& k, V* removed_v = nullptr) = 0;
-    virtual bool     remove_any(K& start_key, bool start_incl, K& end_key, bool end_incl, K* out_key, V* out_val) = 0;
-    virtual uint32_t query(K& start_key, bool start_incl, K& end_key, bool end_incl, 
+    virtual bool insert(K& k, std::shared_ptr< V > v) = 0;
+    virtual bool upsert(K& k, std::shared_ptr< V > v) = 0;
+    virtual bool update(K& k, std::shared_ptr< V > v) = 0;
+    virtual bool get(K& k, V* out_v) = 0;
+    virtual bool remove(K& k, V* removed_v = nullptr) = 0;
+    virtual bool remove_any(K& start_key, bool start_incl, K& end_key, bool end_incl, K* out_key, V* out_val) = 0;
+    virtual uint32_t query(K& start_key, bool start_incl, K& end_key, bool end_incl,
                            std::vector< std::pair< K, V > >& result) = 0;
-    virtual bool     range_update(K& start_key, bool start_incl, K& end_key, bool end_incl, 
-                                    std::vector< std::shared_ptr<V> > &result) = 0;
-    virtual void     init_store(homeds::loadgen::Param& parameters) = 0;
+    virtual bool range_update(K& start_key, bool start_incl, K& end_key, bool end_incl,
+                              std::vector< std::shared_ptr< V > >& result) = 0;
+    virtual void init_store(homeds::loadgen::Param& parameters) = 0;
 
     typedef std::function< void(generator_op_error, const key_info< K, V >*, void*, const std::string&) >
         store_error_cb_t;

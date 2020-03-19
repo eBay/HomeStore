@@ -16,14 +16,14 @@
 #include <sds_options/options.h>
 
 #define TOTAL_ALLOCS 10000
-#define ITERATIONS   100
-#define THREADS      4
+#define ITERATIONS 100
+#define THREADS 4
 
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 THREAD_BUFFER_INIT;
 
 uint32_t glob_sizes[TOTAL_ALLOCS * THREADS];
-uint8_t *glob_ptr[TOTAL_ALLOCS * THREADS];
+uint8_t* glob_ptr[TOTAL_ALLOCS * THREADS];
 
 #if 0
 homeds::CompositeMemAllocator<
@@ -57,7 +57,7 @@ homeds::CompositeMemAllocator<
         homeds::SysMemAllocator
 > glob_generic_free_and_sys_allocator;
 */
-homeds::ChunkMemAllocator< 2048, 2200 * TOTAL_ALLOCS * THREADS> glob_chunk_allocator;
+homeds::ChunkMemAllocator< 2048, 2200 * TOTAL_ALLOCS * THREADS > glob_chunk_allocator;
 homeds::GenericFreelistAllocator< TOTAL_ALLOCS * THREADS, 256 > glob_generic_free_and_sys_allocator;
 homeds::FreeListAllocator< TOTAL_ALLOCS, 256 > glob_freelist_allocator;
 
@@ -83,14 +83,14 @@ void test_malloc(benchmark::State& state) {
     // Actual test
     for (auto _ : state) { // Loops upto iteration count
         auto index = state.thread_index;
-        for (auto i = index; i < state.range(0); i+=THREADS) { // Loops for provided ranges
-            benchmark::DoNotOptimize(glob_ptr[i] = (uint8_t *)malloc(glob_sizes[i]));
+        for (auto i = index; i < state.range(0); i += THREADS) { // Loops for provided ranges
+            benchmark::DoNotOptimize(glob_ptr[i] = (uint8_t*)malloc(glob_sizes[i]));
             glob_ptr[i][0] = 'a';
             g();
-            //printf("glob_ptr[%d] = %p\n", i, glob_ptr[i]);
+            // printf("glob_ptr[%d] = %p\n", i, glob_ptr[i]);
         }
 
-        for (auto i = index; i < state.range(0); i+=THREADS) { // Loops for provided ranges
+        for (auto i = index; i < state.range(0); i += THREADS) { // Loops for provided ranges
             free(glob_ptr[i]);
         }
     }
@@ -100,45 +100,45 @@ void test_chunk_allocator(benchmark::State& state) {
     // Actual test
     for (auto _ : state) { // Loops upto iteration count
         auto index = state.thread_index;
-        for (auto i = index; i < state.range(0); i+=THREADS) { // Loops for provided ranges
+        for (auto i = index; i < state.range(0); i += THREADS) { // Loops for provided ranges
             benchmark::DoNotOptimize(glob_ptr[i] = glob_chunk_allocator.allocate(glob_sizes[i], nullptr, nullptr));
             glob_ptr[i][0] = 'a';
             g();
         }
 
-        for (auto i = index; i < state.range(0); i+=THREADS) { // Loops for provided ranges
+        for (auto i = index; i < state.range(0); i += THREADS) { // Loops for provided ranges
             glob_chunk_allocator.deallocate(glob_ptr[i], glob_sizes[i]);
         }
     }
 }
 
-void test_generic_freelist_allocator(benchmark::State &state) {
+void test_generic_freelist_allocator(benchmark::State& state) {
     // Actual test
     for (auto _ : state) { // Loops upto iteration count
         auto index = state.thread_index;
-        for (auto i = index; i < state.range(0); i+=THREADS) { // Loops for provided ranges
+        for (auto i = index; i < state.range(0); i += THREADS) { // Loops for provided ranges
             benchmark::DoNotOptimize(glob_ptr[i] = glob_generic_free_and_sys_allocator.allocate(256, nullptr, nullptr));
             glob_ptr[i][0] = 'a';
             g();
         }
 
-        for (auto i = index; i < state.range(0); i+=THREADS) { // Loops for provided ranges
+        for (auto i = index; i < state.range(0); i += THREADS) { // Loops for provided ranges
             glob_generic_free_and_sys_allocator.deallocate(glob_ptr[i], 256);
         }
     }
 }
 
-void test_freelist_allocator(benchmark::State &state) {
+void test_freelist_allocator(benchmark::State& state) {
     // Actual test
     for (auto _ : state) { // Loops upto iteration count
         auto index = state.thread_index;
-        for (auto i = index; i < state.range(0); i+=THREADS) { // Loops for provided ranges
+        for (auto i = index; i < state.range(0); i += THREADS) { // Loops for provided ranges
             benchmark::DoNotOptimize(glob_ptr[i] = glob_freelist_allocator.allocate(256));
             glob_ptr[i][0] = 'a';
             g();
         }
 
-        for (auto i = index; i < state.range(0); i+=THREADS) { // Loops for provided ranges
+        for (auto i = index; i < state.range(0); i += THREADS) { // Loops for provided ranges
             glob_freelist_allocator.deallocate(glob_ptr[i], 256);
         }
     }
@@ -148,17 +148,17 @@ void test_combo_allocator(benchmark::State& state) {
     // Actual test
     for (auto _ : state) { // Loops upto iteration count
         auto index = state.thread_index;
-        for (auto i = index; i < state.range(0); i+=THREADS) { // Loops for provided ranges
+        for (auto i = index; i < state.range(0); i += THREADS) { // Loops for provided ranges
             if (glob_sizes[i] == 256) {
                 benchmark::DoNotOptimize(glob_ptr[i] = glob_freelist_allocator.allocate(256));
             } else {
-                benchmark::DoNotOptimize(glob_ptr[i] = (uint8_t *)malloc(glob_sizes[i]));
+                benchmark::DoNotOptimize(glob_ptr[i] = (uint8_t*)malloc(glob_sizes[i]));
             }
             glob_ptr[i][0] = 'a';
             g();
         }
 
-        for (auto i = index; i < state.range(0); i+=THREADS) { // Loops for provided ranges
+        for (auto i = index; i < state.range(0); i += THREADS) { // Loops for provided ranges
             if (glob_sizes[i] == 256) {
                 glob_freelist_allocator.deallocate(glob_ptr[i], 256);
             } else {
@@ -184,8 +184,8 @@ void test_sys_only_allocator(benchmark::State& state) {
     // Actual test
     for (auto _ : state) { // Loops upto iteration count
         auto index = state.thread_index;
-        for (auto i = 0U; i < state.range(0); i+=THREADS) { // Loops for provided ranges
-            benchmark::DoNotOptimize(glob_ptr[i] = (uint8_t *) malloc(glob_sizes[i]));
+        for (auto i = 0U; i < state.range(0); i += THREADS) { // Loops for provided ranges
+            benchmark::DoNotOptimize(glob_ptr[i] = (uint8_t*)malloc(glob_sizes[i]));
         }
     }
 }
@@ -257,14 +257,14 @@ int main(int argc, char *argv[]) {
 }
 #endif
 
-//BENCHMARK(test_chunk_allocator)->Range(TOTAL_ALLOCS, TOTAL_ALLOCS)->Iterations(ITERATIONS)->Threads(THREADS);
+// BENCHMARK(test_chunk_allocator)->Range(TOTAL_ALLOCS, TOTAL_ALLOCS)->Iterations(ITERATIONS)->Threads(THREADS);
 BENCHMARK(test_malloc)->Range(TOTAL_ALLOCS, TOTAL_ALLOCS)->Iterations(ITERATIONS)->Threads(THREADS);
 BENCHMARK(test_combo_allocator)->Range(TOTAL_ALLOCS, TOTAL_ALLOCS)->Iterations(ITERATIONS)->Threads(THREADS);
 BENCHMARK(test_freelist_allocator)->Range(TOTAL_ALLOCS, TOTAL_ALLOCS)->Iterations(ITERATIONS)->Threads(THREADS);
-//BENCHMARK(test_generic_freelist_allocator)->Range(TOTAL_ALLOCS, TOTAL_ALLOCS)->Iterations(ITERATIONS)->Threads(THREADS);
+// BENCHMARK(test_generic_freelist_allocator)->Range(TOTAL_ALLOCS,
+// TOTAL_ALLOCS)->Iterations(ITERATIONS)->Threads(THREADS);
 
-int main(int argc, char** argv)
-{
+int main(int argc, char** argv) {
     setup(TOTAL_ALLOCS * THREADS);
     ::benchmark::Initialize(&argc, argv);
     ::benchmark::RunSpecifiedBenchmarks();

@@ -23,7 +23,7 @@
 struct EnumSupportBase {
     static const inline std::string UNKNOWN = "???";
 
-    static std::vector< std::string > split(std::string       s,
+    static std::vector< std::string > split(std::string s,
                                             const std::regex& delim = std::regex("\\s*(=[^\\s+]\\s*)?,\\s*")) {
         std::vector< std::string > tokens;
         copy(std::regex_token_iterator< std::string::const_iterator >(s.begin(), s.end(), delim, -1),
@@ -51,7 +51,7 @@ struct EnumSupportBase {
                                                                                                                        \
     struct EnumName##Support : EnumSupportBase {                                                                       \
         static inline const std::vector< std::string > _token_names = split(#__VA_ARGS__ /*, ','*/);                   \
-        static inline const std::string&               get_name(const EnumName enum_value) {                           \
+        static inline const std::string& get_name(const EnumName enum_value) {                                         \
             int index = (int)enum_value;                                                                               \
             if (index >= (int)EnumName::_count || index < 0)                                                           \
                 return EnumSupportBase::UNKNOWN;                                                                       \

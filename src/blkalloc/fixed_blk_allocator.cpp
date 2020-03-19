@@ -11,8 +11,7 @@ using namespace std;
 
 namespace homestore {
 
-FixedBlkAllocator::FixedBlkAllocator(BlkAllocConfig &cfg, bool init) :
-        BlkAllocator(cfg), m_init(init) {
+FixedBlkAllocator::FixedBlkAllocator(BlkAllocConfig& cfg, bool init) : BlkAllocator(cfg), m_init(init) {
     m_blk_nodes = new __fixed_blk_node[cfg.get_total_blks()];
     m_alloc_bm = new homeds::Bitset(cfg.get_total_blks());
 
@@ -22,11 +21,11 @@ FixedBlkAllocator::FixedBlkAllocator(BlkAllocConfig &cfg, bool init) :
 }
 
 FixedBlkAllocator::~FixedBlkAllocator() {
-    delete [] (m_blk_nodes);
+    delete[](m_blk_nodes);
     delete m_alloc_bm;
 }
 
-BlkAllocStatus FixedBlkAllocator::alloc(BlkId &in_bid) {
+BlkAllocStatus FixedBlkAllocator::alloc(BlkId& in_bid) {
     std::unique_lock< std::mutex > lk(m_bm_mutex);
     assert(in_bid.get_nblks() == 1);
     if (m_alloc_bm->is_bits_set_reset(in_bid.get_id(), in_bid.get_nblks(), true)) {
@@ -37,13 +36,12 @@ BlkAllocStatus FixedBlkAllocator::alloc(BlkId &in_bid) {
     return BLK_ALLOC_SUCCESS;
 }
 
-void
-FixedBlkAllocator::inited() {
+void FixedBlkAllocator::inited() {
 
     m_first_blk_id = BLKID32_INVALID;
     /* create the blkid chain */
     uint32_t prev_blkid = BLKID32_INVALID;
-    for (uint32_t i = 0; i < (uint32_t)m_cfg.get_total_blks() ; i++) {
+    for (uint32_t i = 0; i < (uint32_t)m_cfg.get_total_blks(); i++) {
 #ifndef NDEBUG
         m_blk_nodes[i].this_blk_id = i;
 #endif
@@ -52,7 +50,7 @@ FixedBlkAllocator::inited() {
             continue;
         }
         if (m_first_blk_id == BLKID32_INVALID) {
-            m_first_blk_id = i;           
+            m_first_blk_id = i;
         }
         if (prev_blkid != BLKID32_INVALID) {
             m_blk_nodes[prev_blkid].next_blk = i;
@@ -71,20 +69,17 @@ FixedBlkAllocator::inited() {
     m_init = true;
 }
 
-
-bool
-FixedBlkAllocator::is_blk_alloced(BlkId &b) {
+bool FixedBlkAllocator::is_blk_alloced(BlkId& b) {
     /* We need to take lock so we can check in non debug builds */
 #ifndef NDEBUG
     std::unique_lock< std::mutex > lk(m_bm_mutex);
-    return(m_alloc_bm->is_bits_set_reset(b.get_id(), b.get_nblks(), true));
+    return (m_alloc_bm->is_bits_set_reset(b.get_id(), b.get_nblks(), true));
 #else
     return true;
 #endif
 }
 
-BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &hints, 
-                                 std::vector<BlkId> &out_blkid) {
+BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) {
     BlkId blkid;
     assert(nblks == 1);
 
@@ -105,7 +100,7 @@ BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &hi
     return BLK_ALLOC_SPACEFULL;
 }
 
-BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &hints, BlkId *out_blkid, bool best_fit) {
+BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& hints, BlkId* out_blkid, bool best_fit) {
     uint64_t prev_val;
     uint64_t cur_val;
     uint32_t id;
@@ -140,7 +135,7 @@ BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints &hi
     return BLK_ALLOC_SUCCESS;
 }
 
-void FixedBlkAllocator::free(const BlkId &b) {
+void FixedBlkAllocator::free(const BlkId& b) {
     free_blk((uint32_t)b.get_id());
     assert(b.get_nblks() == 1);
 #ifndef NDEBUG
@@ -153,13 +148,14 @@ void FixedBlkAllocator::free(const BlkId &b) {
 void FixedBlkAllocator::free_blk(uint32_t id) {
     uint64_t prev_val;
     uint64_t cur_val;
-    __fixed_blk_node *blknode = &m_blk_nodes[id];
+    __fixed_blk_node* blknode = &m_blk_nodes[id];
 
     do {
         prev_val = m_top_blk_id.load();
         __top_blk tp(prev_val);
 
-        blknode->next_blk = tp.get_top_blk_id();;
+        blknode->next_blk = tp.get_top_blk_id();
+        ;
 
         tp.set_gen(tp.get_gen() + 1);
         tp.set_top_blk_id(id);
@@ -176,4 +172,3 @@ std::string FixedBlkAllocator::to_string() const {
     return oss.str();
 }
 } // namespace homestore
-

@@ -19,14 +19,14 @@ struct LRUEvictRecord : public boost::intrusive::list_base_hook<> {
 
 class LRUEvictionPolicy {
 public:
-    typedef LRUEvictRecord                                      RecordType;
+    typedef LRUEvictRecord RecordType;
     typedef std::function< bool(const LRUEvictRecord&, bool&) > CanEjectCallback;
 
     LRUEvictionPolicy(int num_entries) {}
 
     ~LRUEvictionPolicy() {
         std::lock_guard< decltype(m_list_guard) > guard(m_list_guard);
-        auto                                      it = m_list.begin();
+        auto it = m_list.begin();
         while (it != m_list.end()) {
             it = m_list.erase(it);
         }
@@ -39,7 +39,7 @@ public:
 
     void remove(LRUEvictRecord& rec) {
         std::lock_guard< decltype(m_list_guard) > guard(m_list_guard);
-        auto                                      it = m_list.iterator_to(rec);
+        auto it = m_list.iterator_to(rec);
         m_list.erase(it);
     }
 
@@ -89,7 +89,7 @@ public:
     }
 
 private:
-    std::mutex                               m_list_guard;
+    std::mutex m_list_guard;
     boost::intrusive::list< LRUEvictRecord > m_list;
 };
 
