@@ -84,7 +84,8 @@ struct BlkEvictionRecord : public homeds::HashNode, sisl::ObjLifeCounter< BlkEvi
 
 class BlkReadTrackerMetrics : public sisl::MetricsGroupWrapper {
 public:
-    explicit BlkReadTrackerMetrics(const char* vol_name) : sisl::MetricsGroupWrapper("BlkReadTracker", vol_name) {
+    explicit BlkReadTrackerMetrics(const char* vol_uuid) :
+                sisl::MetricsGroupWrapper("BlkReadTracker", vol_uuid) {
         REGISTER_COUNTER(blktrack_pending_blk_read_map_sz, "Size of pending blk read map",
                          sisl::_publish_as::publish_as_gauge);
         REGISTER_COUNTER(blktrack_erase_blk_rescheduled, "Erase blk rescheduled due to concurrent rw");
@@ -103,7 +104,7 @@ class Blk_Read_Tracker {
 public:
     Blk_Read_Tracker(const char* vol_name, boost::uuids::uuid vol_uuid, blk_remove_cb remove_cb) :
             m_pending_reads_map(BLK_READ_MAP_SIZE),
-            m_metrics(vol_name),
+            m_metrics(boost::lexical_cast<std::string>(vol_uuid).c_str()),
             m_remove_cb(remove_cb),
             m_vol_name(vol_name),
             m_vol_uuid(boost::lexical_cast< std::string >(vol_uuid)) {}
