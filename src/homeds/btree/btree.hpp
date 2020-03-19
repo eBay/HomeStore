@@ -18,13 +18,13 @@
 #include "physical_node.hpp"
 #include <sds_logging/logging.h>
 #include <boost/intrusive_ptr.hpp>
-#include <error/error.h>
+#include <common/error.h>
 #include <csignal>
 #include <fds/utils.hpp>
 #include <fmt/ostream.h>
 #include "homeds/array/reserve_vector.hpp"
-#include <main/homestore_header.hpp>
-#include <main/homestore_config.hpp>
+#include <common/homestore_header.hpp>
+#include <common/homestore_config.hpp>
 
 using namespace std;
 using namespace homeds::thread;
@@ -150,12 +150,8 @@ public:
 
     void process_completions(btree_status_t status, btree_multinode_req_ptr multinode_req) {
 
-        if (!multinode_req) {
-            return;
-        }
-        if (multinode_req->status == btree_status_t::success) {
-            multinode_req->status = status;
-        }
+        if (!multinode_req) { return; }
+        if (multinode_req->status == btree_status_t::success) { multinode_req->status = status; }
         if (multinode_req->writes_pending.decrement_testz()) {
             if (m_comp_cb && multinode_req->cookie) {
                 BT_LOG_ASSERT_CMP(multinode_req->is_sync, ==, false, );
@@ -252,9 +248,7 @@ public:
             m_node_size(cfg.get_node_size()) {}
 
     ~Btree() {
-        if (!m_destroy) {
-            destroy(nullptr, true);
-        }
+        if (!m_destroy) { destroy(nullptr, true); }
     }
 
     btree_status_t destroy(free_blk_callback free_blk_cb, bool mem_only) {
@@ -277,9 +271,7 @@ public:
         m_btree_lock.unlock();
         THIS_BT_LOG(DEBUG, base, , "btree nodes destroyed");
 
-        if (ret == btree_status_t::success) {
-            m_destroy = true;
-        }
+        if (ret == btree_status_t::success) { m_destroy = true; }
         return ret;
     }
 
@@ -308,9 +300,7 @@ public:
             BtreeNodeInfo child_info;
             while (i <= node->get_total_entries()) {
                 if (i == node->get_total_entries()) {
-                    if (!(node->get_edge_id().is_valid())) {
-                        break;
-                    }
+                    if (!(node->get_edge_id().is_valid())) { break; }
                     child_info.set_bnode_id(node->get_edge_id());
                 } else {
                     node->get(i, &child_info, false /* copy */);
@@ -318,9 +308,7 @@ public:
 
                 BtreeNodePtr child;
                 ret = read_and_lock_child(child_info.bnode_id(), child, node, i, acq_lock, acq_lock, multinode_req);
-                if (ret != btree_status_t::success) {
-                    return ret;
-                }
+                if (ret != btree_status_t::success) { return ret; }
                 ret = free(child, free_blk_cb, multinode_req, mem_only);
                 unlock_node(child, acq_lock);
                 i++;
@@ -339,9 +327,7 @@ public:
             }
         }
 
-        if (ret != btree_status_t::success) {
-            return ret;
-        }
+        if (ret != btree_status_t::success) { return ret; }
         try {
             free_node(node, multinode_req, mem_only);
         } catch (std::exception& e) { BT_LOG_ASSERT(false, node, "free_node returned exception: {}", e.what()); }
@@ -404,9 +390,7 @@ public:
 
         BtreeNodePtr root;
         ret = read_and_lock_root(m_root_node, root, acq_lock, acq_lock, multinode_req);
-        if (ret != btree_status_t::success) {
-            goto out;
-        }
+        if (ret != btree_status_t::success) { goto out; }
         is_leaf = root->is_leaf();
 
         if (root->is_split_needed(m_btree_cfg, k, v, &ind, put_type, bur)) {
@@ -480,9 +464,7 @@ public:
         btree_multinode_req_ptr multinode_req = btree_multinode_req< btree_req_type >::make_request(false, false);
 
         ret = read_and_lock_root(m_root_node, root, LOCKTYPE_READ, LOCKTYPE_READ, multinode_req);
-        if (ret != btree_status_t::success) {
-            goto out;
-        }
+        if (ret != btree_status_t::success) { goto out; }
 
         ret = do_get(root, range, outkey, outval, multinode_req);
     out:
@@ -507,9 +489,7 @@ public:
         }
 
         btree_status_t ret = btree_status_t::success;
-        if (query_req.get_batch_size() == 0) {
-            return ret;
-        }
+        if (query_req.get_batch_size() == 0) { return ret; }
 
         btree_multinode_req_ptr multinode_req = btree_multinode_req< btree_req_type >::make_request(false, false);
 
@@ -518,9 +498,7 @@ public:
         m_btree_lock.read_lock();
         BtreeNodePtr root = nullptr;
         ret = read_and_lock_root(m_root_node, root, LOCKTYPE_READ, LOCKTYPE_READ, multinode_req);
-        if (ret != btree_status_t::success) {
-            goto out;
-        }
+        if (ret != btree_status_t::success) { goto out; }
 
         switch (query_req.query_type()) {
         case BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY:
@@ -561,9 +539,7 @@ public:
         btree_status_t ret = btree_status_t::success;
 
         ret = read_and_lock_root(m_root_node, root, LOCKTYPE_READ, LOCKTYPE_READ, nullptr);
-        if (ret != btree_status_t::success) {
-            goto out;
-        }
+        if (ret != btree_status_t::success) { goto out; }
 
         ret = do_sweep_query(root, query_req, out_values);
     out:
@@ -589,9 +565,7 @@ public:
 
             BtreeNodePtr root;
             ret = read_and_lock_root(m_root_node, root, LOCKTYPE_READ, LOCKTYPE_READ, nullptr);
-            if (ret != btree_status_t::success) {
-                goto out;
-            }
+            if (ret != btree_status_t::success) { goto out; }
             get_tracker(query_req)->push(root); // Start tracking the locked nodes.
         } else {
             node = get_tracker(query_req)->top();
@@ -645,9 +619,7 @@ public:
 
         BtreeNodePtr root;
         status = read_and_lock_root(m_root_node, root, acq_lock, acq_lock, multinode_req);
-        if (status != btree_status_t::success) {
-            goto out;
-        }
+        if (status != btree_status_t::success) { goto out; }
         is_leaf = root->is_leaf();
 
         if (root->get_total_entries() == 0) {
@@ -719,142 +691,131 @@ public:
         return ret;
     }
 
-    void diff(Btree *other, uint32_t param, vector <pair <K, V>> *diff_kv) {
-       std::vector< pair<K,V> > my_kvs, other_kvs;
+    void diff(Btree* other, uint32_t param, vector< pair< K, V > >* diff_kv) {
+        std::vector< pair< K, V > > my_kvs, other_kvs;
 
-       get_all_kvs(&my_kvs);
-       other->get_all_kvs(&other_kvs);
-       auto it1 = my_kvs.begin();
-       auto it2 = other_kvs.begin();
+        get_all_kvs(&my_kvs);
+        other->get_all_kvs(&other_kvs);
+        auto it1 = my_kvs.begin();
+        auto it2 = other_kvs.begin();
 
-       K k1, k2;
-       V v1, v2;
+        K k1, k2;
+        V v1, v2;
 
-       if (it1 != my_kvs.end()) {
-           k1 = it1->first;
-           v1 = it1->second;
-       }
-       if (it2 != other_kvs.end()) {
-           k2 = it2->first;
-           v2 = it2->second;
-       }
+        if (it1 != my_kvs.end()) {
+            k1 = it1->first;
+            v1 = it1->second;
+        }
+        if (it2 != other_kvs.end()) {
+            k2 = it2->first;
+            v2 = it2->second;
+        }
 
-       while ((it1 != my_kvs.end()) && (it2 != other_kvs.end())) {
-           if (k1.preceeds(&k2)) {
-               /* k1 preceeds k2 - push k1 and continue */
-               diff_kv->emplace_back(make_pair(k1,v1));
-               it1++;
-               if (it1 == my_kvs.end()) {
-                   break;
-               }
-               k1 = it1->first;
-               v1 = it1->second;
-           } else if (k1.succeeds(&k2)) {
-               /* k2 preceeds k1 - push k2 and continue */
-               diff_kv->emplace_back(make_pair(k2, v2));
-               it2++;
-               if (it2 == other_kvs.end()) {
-                   break;
-               }
-               k2 = it2->first;
-               v2 = it2->second;
-           } else {
-               /* k1 and k2 overlaps */
-               std::vector< pair< K, V > > overlap_kvs;
-               diff_read_next_t            to_read = READ_BOTH;
+        while ((it1 != my_kvs.end()) && (it2 != other_kvs.end())) {
+            if (k1.preceeds(&k2)) {
+                /* k1 preceeds k2 - push k1 and continue */
+                diff_kv->emplace_back(make_pair(k1, v1));
+                it1++;
+                if (it1 == my_kvs.end()) { break; }
+                k1 = it1->first;
+                v1 = it1->second;
+            } else if (k1.succeeds(&k2)) {
+                /* k2 preceeds k1 - push k2 and continue */
+                diff_kv->emplace_back(make_pair(k2, v2));
+                it2++;
+                if (it2 == other_kvs.end()) { break; }
+                k2 = it2->first;
+                v2 = it2->second;
+            } else {
+                /* k1 and k2 overlaps */
+                std::vector< pair< K, V > > overlap_kvs;
+                diff_read_next_t to_read = READ_BOTH;
 
-               v1.get_overlap_diff_kvs(&k1, &v1, &k2, &v2, param, to_read, overlap_kvs);
-               for (auto ovr_it = overlap_kvs.begin(); ovr_it != overlap_kvs.end(); ovr_it++) {
-                   diff_kv->emplace_back(make_pair(ovr_it->first, ovr_it->second));
-               }
+                v1.get_overlap_diff_kvs(&k1, &v1, &k2, &v2, param, to_read, overlap_kvs);
+                for (auto ovr_it = overlap_kvs.begin(); ovr_it != overlap_kvs.end(); ovr_it++) {
+                    diff_kv->emplace_back(make_pair(ovr_it->first, ovr_it->second));
+                }
 
-               switch (to_read) {
-               case READ_FIRST:
-                   it1++;
-                   if (it1 == my_kvs.end()) {
-                       // Add k2,v2
-                       diff_kv->emplace_back(make_pair(k2, v2));
-                       it2++;
-                       break;
-                   }
-                   k1 = it1->first;
-                   v1 = it1->second;
-                   break;
-
-               case READ_SECOND:
-                   it2++;
-                   if (it2 == other_kvs.end()) {
-                       diff_kv->emplace_back(make_pair(k1, v1));
-                       it1++;
-                       break;
-                   }
-                   k2 = it2->first;
-                   v2 = it2->second;
-                   break;
-
-                case READ_BOTH: 
-                   /* No tail part */
-                   it1++;
-                   if (it1 == my_kvs.end()) {
-                       break;
-                   }
-                   k1 = it1->first;
-                   v1 = it1->second;
-                   it2++;
-                   if (it2 == my_kvs.end()) {
-                       break;
-                   }
-                   k2 = it2->first;
-                   v2 = it2->second;
-                   break;
-
-                default:
-                    LOGERROR("ERROR: Getting Overlapping Diff KVS for {}:{}, {}:{}, to_read {}", k1, v1, k2, v2, to_read);
-                    /* skip both */
+                switch (to_read) {
+                case READ_FIRST:
                     it1++;
                     if (it1 == my_kvs.end()) {
+                        // Add k2,v2
+                        diff_kv->emplace_back(make_pair(k2, v2));
+                        it2++;
                         break;
                     }
                     k1 = it1->first;
                     v1 = it1->second;
+                    break;
+
+                case READ_SECOND:
                     it2++;
-                    if (it2 == my_kvs.end()) {
+                    if (it2 == other_kvs.end()) {
+                        diff_kv->emplace_back(make_pair(k1, v1));
+                        it1++;
                         break;
                     }
                     k2 = it2->first;
                     v2 = it2->second;
                     break;
+
+                case READ_BOTH:
+                    /* No tail part */
+                    it1++;
+                    if (it1 == my_kvs.end()) { break; }
+                    k1 = it1->first;
+                    v1 = it1->second;
+                    it2++;
+                    if (it2 == my_kvs.end()) { break; }
+                    k2 = it2->first;
+                    v2 = it2->second;
+                    break;
+
+                default:
+                    LOGERROR("ERROR: Getting Overlapping Diff KVS for {}:{}, {}:{}, to_read {}", k1, v1, k2, v2,
+                             to_read);
+                    /* skip both */
+                    it1++;
+                    if (it1 == my_kvs.end()) { break; }
+                    k1 = it1->first;
+                    v1 = it1->second;
+                    it2++;
+                    if (it2 == my_kvs.end()) { break; }
+                    k2 = it2->first;
+                    v2 = it2->second;
+                    break;
                 }
-           }
-       }
+            }
+        }
 
-       while (it1 != my_kvs.end()) {
-           diff_kv->emplace_back(make_pair(it1->first, it1->second));
-           it1++;
-       }
+        while (it1 != my_kvs.end()) {
+            diff_kv->emplace_back(make_pair(it1->first, it1->second));
+            it1++;
+        }
 
-       while (it2 != other_kvs.end()) {
-           diff_kv->emplace_back(make_pair(it2->first, it2->second));
-           it2++;
-       }
-
+        while (it2 != other_kvs.end()) {
+            diff_kv->emplace_back(make_pair(it2->first, it2->second));
+            it2++;
+        }
     }
 
-    void merge(Btree* other, match_item_cb_update_t<K,V> merge_cb) {
+    void merge(Btree* other, match_item_cb_update_t< K, V > merge_cb) {
 
-          std::vector< pair< K, V > > other_kvs;
+        std::vector< pair< K, V > > other_kvs;
 
-          other->get_all_kvs(&other_kvs);
-          for (auto it = other_kvs.begin(); it != other_kvs.end(); it++) {
-              K                           k = it->first;
-              V                           v = it->second;
-              BRangeUpdateCBParam< K, V > local_param(k, v);
-              K                           start(k.start(), 1), end(k.end(), 1);
+        other->get_all_kvs(&other_kvs);
+        for (auto it = other_kvs.begin(); it != other_kvs.end(); it++) {
+            K k = it->first;
+            V v = it->second;
+            BRangeUpdateCBParam< K, V > local_param(k, v);
+            K start(k.start(), 1), end(k.end(), 1);
 
-              auto                       search_range = BtreeSearchRange(start, true, end, true);
-              BtreeUpdateRequest< K, V > ureq(search_range, merge_cb, nullptr, (BRangeUpdateCBParam< K, V >*)&local_param);
-              range_put(k, v, btree_put_type::APPEND_IF_EXISTS_ELSE_INSERT, nullptr, nullptr, ureq);
-          }
+            auto search_range = BtreeSearchRange(start, true, end, true);
+            BtreeUpdateRequest< K, V > ureq(search_range, merge_cb, nullptr,
+                                            (BRangeUpdateCBParam< K, V >*)&local_param);
+            range_put(k, v, btree_put_type::APPEND_IF_EXISTS_ELSE_INSERT, nullptr, nullptr, ureq);
+        }
     }
 
     void get_all_kvs(std::vector< pair< K, V > >* kvs) {
@@ -879,9 +840,7 @@ public:
         BtreeNodePtr node;
         m_btree_lock.read_lock();
         homeds::thread::locktype acq_lock = homeds::thread::locktype::LOCKTYPE_READ;
-        if (read_and_lock_node(bnodeid, node, acq_lock, acq_lock, nullptr) != btree_status_t::success) {
-            return;
-        }
+        if (read_and_lock_node(bnodeid, node, acq_lock, acq_lock, nullptr) != btree_status_t::success) { return; }
         ss << "[" << node->to_string() << "]";
         unlock_node(node, acq_lock);
         THIS_BT_LOG(INFO, base, , "Node : <{}>", ss.str());
@@ -919,9 +878,7 @@ private:
                 BtreeNodeInfo child;
                 my_node->get(i, &child, false);
                 success = verify_node(child.bnode_id(), my_node, i);
-                if (!success) {
-                    goto exit_on_error;
-                }
+                if (!success) { goto exit_on_error; }
 
                 if (i > 0) {
                     BT_LOG_ASSERT_CMP(prev_key.compare(&key), <, 0, my_node);
@@ -967,9 +924,7 @@ private:
 
         if (my_node->get_edge_id().is_valid()) {
             success = verify_node(my_node->get_edge_id(), my_node, my_node->get_total_entries());
-            if (!success) {
-                goto exit_on_error;
-            }
+            if (!success) { goto exit_on_error; }
         }
 
     exit_on_error:
@@ -982,9 +937,7 @@ private:
 
         homeds::thread::locktype acq_lock = homeds::thread::locktype::LOCKTYPE_READ;
 
-        if (read_and_lock_node(bnodeid, node, acq_lock, acq_lock, nullptr) != btree_status_t::success) {
-            return;
-        }
+        if (read_and_lock_node(bnodeid, node, acq_lock, acq_lock, nullptr) != btree_status_t::success) { return; }
         ss << "[" << node->to_string() << "]";
 
         if (!node->is_leaf()) {
@@ -995,12 +948,11 @@ private:
                 to_string(p.bnode_id(), ss);
                 i++;
             }
-            if (node->get_edge_id().is_valid())
-                to_string(node->get_edge_id(), ss);
+            if (node->get_edge_id().is_valid()) to_string(node->get_edge_id(), ss);
         }
         unlock_node(node, acq_lock);
     }
-    
+
     /*
      * Get all leaf nodes from the read-only tree (CP tree, Snap Tree etc)
      * NOTE: Doesn't take any lock
@@ -1018,11 +970,11 @@ private:
 
         if (read_and_lock_node(bnodeid, node, LOCKTYPE_READ, LOCKTYPE_READ, nullptr) != btree_status_t::success) {
             return;
-        }   
+        }
 
         if (node->is_leaf()) {
             BtreeNodePtr next_node = nullptr;
-            leaves->push_back(node); 
+            leaves->push_back(node);
             while (node->get_next_bnode().is_valid()) {
                 auto ret =
                     read_and_lock_sibling(node->get_next_bnode(), next_node, LOCKTYPE_READ, LOCKTYPE_READ, nullptr);
@@ -1031,22 +983,22 @@ private:
                 if (ret != btree_status_t::success) {
                     LOGERROR("Cannot read sibling node for {}", node);
                     return;
-                }   
+                }
                 assert(next_node->is_leaf());
                 leaves->push_back(next_node);
                 node = next_node;
-            }   
+            }
             unlock_node(node, LOCKTYPE_READ);
             return;
-        }   
+        }
 
         assert(node->get_total_entries() > 0);
         if (node->get_total_entries() > 0) {
             BtreeNodeInfo p;
             node->get(0, &p, false);
-            //XXX If we cannot get rid of locks, lock child and release parent here
+            // XXX If we cannot get rid of locks, lock child and release parent here
             get_leaf_nodes(p.bnode_id(), leaves);
-        }   
+        }
         unlock_node(node, LOCKTYPE_READ);
     }
 
@@ -1898,12 +1850,10 @@ private:
             }
             BT_DEBUG_ASSERT_CMP(curlock, ==, homeds::thread::LOCKTYPE_WRITE, my_node);
 
-#define MAX_ADJANCENT_INDEX 3
-
             // We do have the write lock and hence can remove entries. Get a list of entries around the minimal child
             // node. Use the list of child entries and merge/share the keys among them.
             vector< int > indices_list;
-            my_node->get_adjacent_indicies(ind, indices_list, MAX_ADJANCENT_INDEX);
+            my_node->get_adjacent_indicies(ind, indices_list, HS_SETTINGS_VALUE(btree->max_nodes_to_rebalance));
 
             // There has to be at least 2 nodes to merge or share. If not let the node be and proceed further down.
             if (indices_list.size() > 1) {

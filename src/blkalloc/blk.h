@@ -15,7 +15,7 @@
 #include "homeds/array/flexarray.hpp"
 #include "homeds/memory/mempiece.hpp"
 #include <fds/utils.hpp>
-#include "main/homestore_config.hpp"
+#include "common/homestore_config.hpp"
 
 //#include "device/device.h"
 

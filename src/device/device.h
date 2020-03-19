@@ -416,7 +416,6 @@ public:
     /* Initial routine to call upon bootup or everytime new physical devices to be added dynamically */
     void add_devices(std::vector< dev_info >& devices, bool is_init);
     size_t get_total_cap(void);
-#define MAX_ERROR_CNT 1000
     void handle_error(PhysicalDev* pdev);
 
     /* This is not very efficient implementation of get_all_devices(), however, this is expected to be called during

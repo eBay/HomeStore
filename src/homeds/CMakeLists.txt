@@ -72,9 +72,7 @@ set(TEST_LOAD_FILES
         )
 add_executable(test_load ${TEST_LOAD_FILES})
 target_link_libraries(test_load homestore homeblks ${COMMON_LIB_DEPS})
-
 add_test(NAME TestLoadCache COMMAND ${CMAKE_BINARY_DIR}/bin/test_load --gtest_filter=*Cache*)
-
 add_test(NAME TestLoadVDev COMMAND ${CMAKE_BINARY_DIR}/bin/test_load --gtest_filter=*VDevTest_RW* && ${CMAKE_BINARY_DIR}/bin/test_load --gtest_filter=*VDevTest_PRW*)
 SET_TESTS_PROPERTIES(TestLoadVDev PROPERTIES DEPENDS TestLoadCache)
 
@@ -93,3 +91,14 @@ set(TEST_IOMGR_EXEC_FILES
     )
 add_executable(test_iomgr_exec ${TEST_IOMGR_EXEC_FILES})
 target_link_libraries(test_iomgr_exec homestore ${COMMON_LIB_DEPS})
+
+if(CMAKE_BUILD_TYPE STREQUAL Debug)
+    set(TEST_THREAD_POOL_SOURCE_FILES
+          tests/test_thread_pool.cpp
+          )
+  add_executable(test_threadpool
+      ${TEST_THREAD_POOL_SOURCE_FILES}
+      )
+  target_link_libraries(test_threadpool ${COMMON_LIB_DEPS})
+  add_test(NAME ThreadPool COMMAND test_threadpool)
+endif()

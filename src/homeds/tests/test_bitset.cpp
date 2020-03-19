@@ -7,7 +7,7 @@
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
 #include <utility/thread_buffer.hpp>
-#include "main/homestore_header.hpp"
+#include "common/homestore_header.hpp"
 #include "homeds/bitmap/bitset.hpp"
 
 SDS_LOGGING_INIT(logging, test_bitmap)

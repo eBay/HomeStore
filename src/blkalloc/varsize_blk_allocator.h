@@ -14,7 +14,7 @@
 #include <boost/preprocessor/control/if.hpp>
 #include <boost/preprocessor/stringize.hpp>
 #include <metrics/metrics.hpp>
-#include "main/homestore_assert.hpp"
+#include "common/homestore_assert.hpp"
 
 using namespace homeds::btree;
 

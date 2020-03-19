@@ -6,7 +6,7 @@
 #include "homeds/btree/btree.hpp"
 #include "homeds/btree/btree_internal.h"
 #include "homeds/btree/ssd_btree.hpp"
-#include "volume/home_blks.hpp"
+#include "homeblks/home_blks.hpp"
 
 using namespace homeds::btree;
 

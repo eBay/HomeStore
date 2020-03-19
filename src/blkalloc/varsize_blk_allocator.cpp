@@ -178,8 +178,6 @@ VarsizeBlkAllocator::~VarsizeBlkAllocator() {
     }
 }
 
-#define MAX_BLK_ALLOC_ATTEMPT 3
-
 // Runs only in per sweep thread. In other words, this is a single threaded state machine.
 void VarsizeBlkAllocator::allocator_state_machine() {
     BLKALLOC_LOG(INFO, , "Starting new blk sweep thread");
@@ -226,8 +224,6 @@ void VarsizeBlkAllocator::allocator_state_machine() {
     }
 }
 
-#define MAX_RETRY_CNT 1000
-
 bool VarsizeBlkAllocator::is_blk_alloced(BlkId& b) {
 #ifndef NDEBUG
     BlkAllocPortion* portion = blknum_to_portion(b.get_id());
@@ -268,7 +264,7 @@ void VarsizeBlkAllocator::inited() {
 BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& hints,
                                           std::vector< BlkId >& out_blkid) {
     uint8_t blks_alloced = 0;
-    int retry_cnt = 0;
+    uint32_t retry_cnt = 0;
 
     uint8_t blks_rqstd = nblks;
 
@@ -290,7 +286,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
 #endif
 
     COUNTER_INCREMENT(m_metrics, num_alloc, 1);
-    while (blks_alloced != nblks && retry_cnt < MAX_RETRY_CNT) {
+    while (blks_alloced != nblks && retry_cnt < HS_SETTINGS_VALUE(blkallocator->max_varsize_blk_alloc_attempt)) {
         BlkId blkid;
         COUNTER_INCREMENT(m_metrics, num_split, 1);
         if (blks_rqstd > HomeStoreConfig::max_blk_cnt) {
@@ -373,7 +369,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
                            _MultiMatchSelector::BEST_FIT_TO_CLOSEST_FOR_REMOVE);
 
     EmptyClass dummy_val;
-    int attempt = 1;
+    uint32_t attempt = 1;
     while (true) {
         auto status = m_blk_cache->remove_any(regex, &actual_entry, &dummy_val);
         found = (status == btree_status_t::success);
@@ -411,9 +407,9 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
         }
 
         // Wait for cache to refill and then retry original request
-        if (attempt > MAX_BLK_ALLOC_ATTEMPT) {
+        if (attempt > HS_SETTINGS_VALUE(blkallocator->max_cache_fill_varsize_blk_alloc_attempt)) {
             BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Exceeding max retries {} to allocate. Failing the alloc",
-                         MAX_BLK_ALLOC_ATTEMPT);
+                         HS_SETTINGS_VALUE(blkallocator->max_cache_fill_varsize_blk_alloc_attempt));
             for (auto i = 0U; i < m_slab_entries.size(); i++) {
                 BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Capacity of slab {} = {}", i,
                              m_slab_entries[i]._a.load(std::memory_order_acq_rel));

@@ -15,7 +15,7 @@
 #include "valuespecs/fixedbyte_value_spec.hpp"
 #include "storespecs/membtree_store_spec.hpp"
 
-#include "mapping/mapping.hpp"
+#include "homeblks/volume/mapping.hpp"
 #include "keyspecs/map_key_spec.hpp"
 #include "storespecs/map_store_spec.hpp"
 #include "valuespecs/map_value_spec.hpp"
