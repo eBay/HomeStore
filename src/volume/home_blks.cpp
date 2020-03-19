@@ -429,6 +429,7 @@ vol_mem_sb* HomeBlks::vol_sb_read(BlkId bid) {
     std::vector< blk_buf_t > bbuf = m_sb_blk_store->read_nmirror(bid, m_cfg.devices.size() - 1);
     blk_buf_t valid_buf = get_valid_buf(bbuf, rewrite);
 
+    HS_ASSERT_CMP(RELEASE, valid_buf, !=, nullptr, "blkid :{}", bid.to_integer());
     vol_mem_sb* sb = new vol_mem_sb;
     int ret = posix_memalign((void**)&(sb->ondisk_sb), HomeStoreConfig::align_size, VOL_SB_SIZE);
     assert(!ret);
