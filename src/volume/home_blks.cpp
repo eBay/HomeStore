@@ -1069,10 +1069,13 @@ void HomeBlks::shutdown_process(shutdown_comp_callback shutdown_comp_cb, bool fo
         auto start = std::chrono::steady_clock::now();
         std::unique_lock< std::recursive_mutex > lg(m_vol_lock);
         while (m_volume_map.size()) {
-            for (auto& x : m_volume_map) {
-                if (x.second.use_count() == 1) {
-                    VOL_INFO_LOG(x.first, "ref_count successfully drops to 1. Trigger normal shutdown.");
-                    m_volume_map.erase(x.first);
+            for (auto it = m_volume_map.cbegin(); it != m_volume_map.cend();) {
+                if (it->second.use_count() == 1) {
+                    VOL_INFO_LOG(it->first, "ref_count successfully drops to 1. Trigger normal shutdown.");
+                    it = m_volume_map.erase(it);
+                } else {
+                    // move on the check other volumes. 
+                    ++it;
                 }
             }
 
