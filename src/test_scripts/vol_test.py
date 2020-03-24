@@ -55,7 +55,7 @@ def normal_flip():
 def load():
     print("load test started")
     subprocess.check_call(dirpath + "test_load \
-            --num_io=100000000000 --num_keys=1000000 --run_time=21600 --gtest_filter=Map*", stderr=subprocess.STDOUT, shell=True)
+            --num_io=100000000000 --num_keys=500000 --run_time=21600 --gtest_filter=Map*", stderr=subprocess.STDOUT, shell=True)
     print("load test completed")
 
 ## @test    load
