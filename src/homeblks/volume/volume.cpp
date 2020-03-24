@@ -171,10 +171,7 @@ boost::uuids::uuid Volume::get_uuid() { return (get_sb()->ondisk_sb->uuid); }
 
 vol_state Volume::get_state() { return m_state.load(std::memory_order_acquire); }
 
-void Volume::destroy() {
-    set_state(vol_state::DESTROYING);
-    shutdown();
-}
+void Volume::destroy() { set_state(vol_state::DESTROYING); }
 
 void Volume::shutdown() {
     auto state = get_state();
