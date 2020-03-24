@@ -3,7 +3,7 @@
 #include <sds_logging/logging.h>
 #include <fds/stream_tracker.hpp>
 #include <fds/utils.hpp>
-#include "blkstore/blkstore.hpp"
+#include "engine/blkstore/blkstore.hpp"
 #include <fds/id_reserver.hpp>
 #include <boost/intrusive_ptr.hpp>
 #include <map>
@@ -355,9 +355,9 @@ public:
     log_buffer read(const logdev_key& key);
 
     /**
-     * @brief Load the data from the blkstore starting with offset. This method loads data in bulk and then call the
-     * registered logfound_cb with key and buffer.
-     * NOTE: This method is not thread safe. It is expected to be called during recovery
+     * @brief Load the data from the blkstore starting with offset. This method loads data in bulk and then call
+     * the registered logfound_cb with key and buffer. NOTE: This method is not thread safe. It is expected to be called
+     * during recovery
      *
      * @param offset Log blkstore device offset.
      */

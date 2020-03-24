@@ -2,14 +2,14 @@
 #define VOL_CONFIG_HPP
 
 #include "api/vol_interface.hpp"
-#include "common/homestore.hpp"
+#include "engine/homestore.hpp"
 #include <memory>
-#include <homeds/btree/btree.hpp>
-#include <homeds/btree/ssd_btree.hpp>
+#include "engine/homeds/btree/btree.hpp"
+#include "engine/homeds/btree/ssd_btree.hpp"
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <async_http/http_server.hpp>
-#include "homeds/thread/threadpool/thread_pool.h"
+#include "engine/homeds/thread/threadpool/thread_pool.h"
 #include <utility/atomic_counter.hpp>
 #include <metrics/metrics.hpp>
 #include <settings/settings.hpp>

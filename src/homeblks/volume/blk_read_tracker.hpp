@@ -4,9 +4,9 @@
 #ifndef HOMESTORE_BLK_READ_TRACKER_STORE_SPEC_HPP
 #define HOMESTORE_BLK_READ_TRACKER_STORE_SPEC_HPP
 
-#include "blkalloc/blk.h"
+#include "engine/blkalloc/blk.h"
 #include <utility/obj_life_counter.hpp>
-#include "homeds/hash/intrusive_hashset.hpp"
+#include "engine/homeds/hash/intrusive_hashset.hpp"
 #include <fds/obj_allocator.hpp>
 #include <metrics/metrics.hpp>
 #include <boost/intrusive_ptr.hpp>

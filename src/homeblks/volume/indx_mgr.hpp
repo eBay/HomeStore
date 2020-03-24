@@ -1,6 +1,6 @@
 #pragma once
 #include <cassert>
-#include "checkpoint/checkpoint.hpp"
+#include "engine/checkpoint/checkpoint.hpp"
 #include "homelogstore/log_store.hpp"
 #include "api/vol_interface.hpp"
 
