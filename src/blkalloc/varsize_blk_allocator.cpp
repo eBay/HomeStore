@@ -66,7 +66,7 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig& cfg, bool init) 
         m_segments.push_back(seg);
     }
 
-    BtreeConfig btree_cfg(HomeStoreConfig::mem_btree_page_size, cfg.get_name().c_str());
+    BtreeConfig btree_cfg(HS_DYNAMIC_CONFIG(btree->mem_btree_page_size), cfg.get_name().c_str());
 
     btree_cfg.set_max_objs(cfg.get_max_cache_blks());
     btree_cfg.set_max_key_size(sizeof(VarsizeAllocCacheEntry));
@@ -286,11 +286,11 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
 #endif
 
     COUNTER_INCREMENT(m_metrics, num_alloc, 1);
-    while (blks_alloced != nblks && retry_cnt < HS_SETTINGS_VALUE(blkallocator->max_varsize_blk_alloc_attempt)) {
+    while (blks_alloced != nblks && retry_cnt < HS_DYNAMIC_CONFIG(blkallocator->max_varsize_blk_alloc_attempt)) {
         BlkId blkid;
         COUNTER_INCREMENT(m_metrics, num_split, 1);
-        if (blks_rqstd > HomeStoreConfig::max_blk_cnt) {
-            blks_rqstd = ALIGN_SIZE_TO_LEFT(HomeStoreConfig::max_blk_cnt, hints.multiplier);
+        if (blks_rqstd > HS_STATIC_CONFIG(generic.max_blk_cnt)) {
+            blks_rqstd = ALIGN_SIZE_TO_LEFT(HS_STATIC_CONFIG(generic.max_blk_cnt), hints.multiplier);
         }
         if (alloc(blks_rqstd, hints, &blkid, true) != BLK_ALLOC_SUCCESS) {
             /* check the cache to see what blocks are available and get those
@@ -407,9 +407,9 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
         }
 
         // Wait for cache to refill and then retry original request
-        if (attempt > HS_SETTINGS_VALUE(blkallocator->max_cache_fill_varsize_blk_alloc_attempt)) {
+        if (attempt > HS_DYNAMIC_CONFIG(blkallocator->max_cache_fill_varsize_blk_alloc_attempt)) {
             BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Exceeding max retries {} to allocate. Failing the alloc",
-                         HS_SETTINGS_VALUE(blkallocator->max_cache_fill_varsize_blk_alloc_attempt));
+                         HS_DYNAMIC_CONFIG(blkallocator->max_cache_fill_varsize_blk_alloc_attempt));
             for (auto i = 0U; i < m_slab_entries.size(); i++) {
                 BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Capacity of slab {} = {}", i,
                              m_slab_entries[i]._a.load(std::memory_order_acq_rel));

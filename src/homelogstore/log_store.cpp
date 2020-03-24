@@ -16,6 +16,21 @@ void HomeLogStoreMgr::start(bool format) {
 
     // Start the logdev
     m_log_dev.start(format);
+
+    // If there are any unopened storeids found, loop and check again if they are indeed open later. Unopened log store
+    // could be possible if the ids are deleted, but it is delayed to remove from store id reserver. In that case,
+    // do the remove from store id reserver now.
+    // TODO: At present we are assuming all unopened store ids could be removed. In future have a callback to this
+    // start routine, which takes the list of unopened store ids and can return a new set, which can be removed.
+    m_id_logstore_map.withWLock([&](auto& m) {
+        for (auto it = m_unopened_store_id.begin(); it != m_unopened_store_id.end();) {
+            if (m.find(*it) == m.end()) {
+                // Not opened even on second time check, simply unreserve id
+                m_log_dev.unreserve_store_id(*it);
+            }
+            it = m_unopened_store_id.erase(it);
+        }
+    });
 }
 
 void HomeLogStoreMgr::stop() {
@@ -32,6 +47,12 @@ std::shared_ptr< HomeLogStore > HomeLogStoreMgr::create_new_log_store() {
 
 void HomeLogStoreMgr::open_log_store(logstore_id_t store_id, const log_store_opened_cb_t& on_open_cb) {
     m_id_logstore_map.wlock()->insert(std::make_pair<>(store_id, logstore_info_t{nullptr, on_open_cb}));
+}
+
+void HomeLogStoreMgr::remove_log_store(logstore_id_t store_id) {
+    LOGINFO("Removing log store id {}", store_id);
+    m_id_logstore_map.wlock()->erase(store_id);
+    m_log_dev.unreserve_store_id(store_id);
 }
 
 #if 0
@@ -51,6 +72,7 @@ void HomeLogStoreMgr::__on_log_store_found(logstore_id_t store_id) {
     auto it = m->find(store_id);
     if (it == m->end()) {
         LOGERROR("Store Id {} found but not opened yet, ignoring the store", store_id);
+        m_unopened_store_id.insert(store_id);
         return;
     }
 
@@ -89,7 +111,7 @@ logdev_key HomeLogStoreMgr::device_truncate(bool dry_run) {
     LOGINFO("Request to truncate the log device, safe log dev key to truncate = {}", min_safe_ld_key);
 
     // Got the safest log id to trucate and actually truncate upto the safe log idx to the log device
-    // if (!dry_run) m_log_dev.truncate(min_safe_ld_key);
+    if (!dry_run) m_log_dev.truncate(min_safe_ld_key);
     return min_safe_ld_key;
 }
 
@@ -111,8 +133,8 @@ void HomeLogStore::write_async(logstore_seq_num_t seq_num, const sisl::blob& b, 
                                const log_write_comp_cb_t& cb) {
     // Form an internal request and issue the write
     auto* req = logstore_req::make(this, seq_num, b, true /* is_write_req */);
-    write_async(req, [cb, cookie](logstore_req* req, bool status) {
-        cb(req->seq_num, status, cookie);
+    write_async(req, [cb, cookie](logstore_req* req, logdev_key written_lkey) {
+        cb(req->seq_num, written_lkey, cookie);
         logstore_req::free(req);
     });
 }
@@ -180,11 +202,11 @@ void HomeLogStore::on_write_completion(logstore_req* req, logdev_key ld_key, log
         m_last_flush_ldkey = flush_ld_key;
     }
 #endif
-    (req->cb) ? req->cb(req, true) : m_comp_cb(req, true);
+    (req->cb) ? req->cb(req, ld_key) : m_comp_cb(req, ld_key);
 }
 
 void HomeLogStore::on_read_completion(logstore_req* req, logdev_key ld_key) {
-    (req->cb) ? req->cb(req, true) : m_comp_cb(req, true);
+    (req->cb) ? req->cb(req, ld_key) : m_comp_cb(req, ld_key);
 }
 
 void HomeLogStore::on_log_found(logstore_seq_num_t seq_num, logdev_key ld_key, log_buffer buf) {

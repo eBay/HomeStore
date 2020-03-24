@@ -3,6 +3,7 @@
 
 #include <boost/uuid/uuid.hpp>
 #include <string>
+#include <utility/enum.hpp>
 
 #ifdef _PRERELEASE
 #include <flip/flip.hpp>
@@ -17,12 +18,12 @@ struct blob {
 
 namespace homestore {
 
-enum io_flag {
-    BUFFERED_IO = 0, // should be set if file system doesn't support direct IOs and we are working on a file as a disk.
-                     // This option is enabled only on in debug build.
-    DIRECT_IO = 1,   // recommened mode
-    READ_ONLY = 2    // Read-only mode for post-mortem checks
-};
+ENUM(io_flag, uint8_t,
+     BUFFERED_IO, // should be set if file system doesn't support direct IOs and we are working on a file as a
+                  // disk. This option is enabled only on in debug build.
+     DIRECT_IO,   // recommended mode
+     READ_ONLY    // Read-only mode for post-mortem checks
+);
 
 struct dev_info {
     std::string dev_names;
@@ -79,11 +80,10 @@ public:
     btree_structures, btree_nodes, btree_generics, cache, device, httpserver_lmod, iomgr, varsize_blk_alloc,           \
         VMOD_VOL_MAPPING, volume, flip, cp
 
-template< typename T >
-std::string to_hex( T i ) {
+template < typename T >
+std::string to_hex(T i) {
     return fmt::format("{0:x}", i);
 }
-
 
 } // namespace homestore
 #endif

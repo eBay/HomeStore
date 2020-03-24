@@ -114,12 +114,12 @@ private:
 
     void set_tag(__mempiece_tag t) { m_mem.set_tag(t.to_integer()); }
 
-    uint32_t decode(uint8_t encoded_size) const { return (encoded_size * HomeStoreConfig::min_io_size); }
+    uint32_t decode(uint8_t encoded_size) const { return (encoded_size * HS_STATIC_CONFIG(generic.min_io_size)); }
 
     uint8_t encode(uint32_t size) const {
-        assert((size % HomeStoreConfig::min_io_size) == 0);
-        assert(((size / HomeStoreConfig::min_io_size) >> 8) == 0);
-        return round_off(size, HomeStoreConfig::min_io_size);
+        assert((size % HS_STATIC_CONFIG(generic.min_io_size)) == 0);
+        assert(((size / HS_STATIC_CONFIG(generic.min_io_size)) >> 8) == 0);
+        return round_off(size, HS_STATIC_CONFIG(generic.min_io_size));
     }
 } __attribute__((packed));
 

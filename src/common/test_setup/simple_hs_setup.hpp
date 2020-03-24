@@ -155,7 +155,7 @@ public:
     }
 
     virtual void setup_init_params() {
-        m_init_params.flag = homestore::io_flag::DIRECT_IO;
+        m_init_params.open_flags = homestore::io_flag::DIRECT_IO;
         m_init_params.min_virtual_page_size = 4096;
         m_init_params.cache_size = m_cfg.m_cache_size;
         m_init_params.disk_init = true;
@@ -285,7 +285,8 @@ public:
         if (ret) { assert(0); }
         assert(buf != nullptr);
 
-        boost::intrusive_ptr< simple_store_req > req(new simple_store_req(vinfo.vol_obj, buf, lba, nblks, false, false));
+        boost::intrusive_ptr< simple_store_req > req(
+            new simple_store_req(vinfo.vol_obj, buf, lba, nblks, false, false));
         req->size = size;
         req->offset = lba * vol_interface->get_page_size(vinfo.vol_obj);
         req->cur_vol = vordinal;
@@ -322,8 +323,8 @@ public:
         lba = b.start_bit;
         uint64_t size = nblks * vol_interface->get_page_size(vinfo.vol_obj);
 
-        boost::intrusive_ptr< simple_store_req > req(new simple_store_req(vinfo.vol_obj, nullptr, lba, nblks, 
-                                                     true, false));
+        boost::intrusive_ptr< simple_store_req > req(
+            new simple_store_req(vinfo.vol_obj, nullptr, lba, nblks, true, false));
         req->size = size;
         req->offset = lba * vol_interface->get_page_size(vinfo.vol_obj);
         req->cur_vol = vordinal;

@@ -295,7 +295,7 @@ public:
                  */
                 assert((wbc_buf->get_memvec()).npieces() == 1);
                 void* mem;
-                if (0 == posix_memalign((void**)&mem, HomeStoreConfig::align_size, outb.size)) {
+                if (0 == posix_memalign((void**)&mem, HS_STATIC_CONFIG(disk_attr.align_size), outb.size)) {
                     /* outb.bytes get freed when last_pending_req is completed */
                     memcpy(mem, outb.bytes, outb.size);
                     outb.bytes = (uint8_t*)mem;

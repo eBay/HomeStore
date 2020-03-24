@@ -59,7 +59,7 @@ static void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthre
 
     boost::uuids::string_generator gen;
     init_params params;
-    params.flag = homestore::io_flag::DIRECT_IO;
+    params.open_flags = homestore::io_flag::DIRECT_IO;
     params.min_virtual_page_size = 4096;
     params.cache_size = cache_size;
     params.disk_init = true;

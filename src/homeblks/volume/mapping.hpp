@@ -624,13 +624,13 @@ public:
             m_vol_page_size(page_size),
             m_unique_name(unique_name) {
         m_hb = HomeBlks::safe_instance();
-        homeds::btree::BtreeConfig btree_cfg(HomeStoreConfig::atomic_phys_page_size, unique_name.c_str());
+        homeds::btree::BtreeConfig btree_cfg(HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size), unique_name.c_str());
         btree_cfg.set_max_objs(volsize / page_size);
         btree_cfg.set_max_key_size(sizeof(uint32_t));
         btree_cfg.set_max_value_size(page_size);
 
         homeds::btree::btree_device_info bt_dev_info;
-        bt_dev_info.blkstore = (void*)m_hb->get_metadata_blkstore();
+        bt_dev_info.blkstore = (void*)m_hb->get_index_blkstore();
         bt_dev_info.new_device = false;
         m_bt = MappingBtreeDeclType::create_btree(
             btree_cfg, &bt_dev_info,
@@ -647,13 +647,13 @@ public:
             m_vol_page_size(page_size),
             m_unique_name(unique_name) {
         m_hb = HomeBlks::safe_instance();
-        homeds::btree::BtreeConfig btree_cfg(HomeStoreConfig::atomic_phys_page_size, unique_name.c_str());
+        homeds::btree::BtreeConfig btree_cfg(HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size), unique_name.c_str());
         btree_cfg.set_max_objs(volsize / page_size);
         btree_cfg.set_max_key_size(sizeof(uint32_t));
         btree_cfg.set_max_value_size(page_size);
 
         homeds::btree::btree_device_info bt_dev_info;
-        bt_dev_info.blkstore = m_hb->get_metadata_blkstore();
+        bt_dev_info.blkstore = m_hb->get_index_blkstore();
         bt_dev_info.new_device = false;
         m_bt = MappingBtreeDeclType::create_btree(
             btree_sb, btree_cfg, &bt_dev_info,
@@ -796,7 +796,7 @@ public:
         // create a new btree
         auto btree_cfg = m_bt->get_btree_cfg();
         homeds::btree::btree_device_info bt_dev_info;
-        bt_dev_info.blkstore = (void*)HomeBlks::instance()->get_metadata_blkstore();
+        bt_dev_info.blkstore = (void*)HomeBlks::instance()->get_index_blkstore();
         bt_dev_info.new_device = false;
         auto new_bt = MappingBtreeDeclType::create_btree(
             btree_cfg, &bt_dev_info,

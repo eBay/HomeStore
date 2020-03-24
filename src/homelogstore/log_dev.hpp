@@ -3,9 +3,11 @@
 #include <sds_logging/logging.h>
 #include <fds/stream_tracker.hpp>
 #include <fds/utils.hpp>
-#include "homeblks/home_blks.hpp"
 #include "blkstore/blkstore.hpp"
 #include <fds/id_reserver.hpp>
+#include <boost/intrusive_ptr.hpp>
+#include <map>
+//#include "homeblks/home_blks.hpp"
 
 SDS_LOGGING_DECL(logdev)
 
@@ -247,27 +249,9 @@ struct logdev_key {
         os << "[idx=" << k.idx << " dev_offset=" << k.dev_offset << "]";
         return os;
     }
+    operator bool() const { return is_valid(); }
+    bool is_valid() const { return (idx != -1); }
 };
-
-#if 0
-struct log_buffer {
-public:
-    log_buffer(const sisl::byte_array& base_data, uint32_t offset, uint32_t size) :
-            m_base_buffer(base_data),
-            m_log_data_view(m_base_buffer->bytes + offset, size) {}
-
-    log_buffer(const sisl::byte_array& base_data) : log_buffer(base_data, 0, base_data->size) {}
-    log_buffer(const log_buffer& other) = default;
-
-    sisl::blob blob() const { return m_log_data_view; }
-    uint8_t* data() const { return m_log_data_view.bytes; }
-    uint32_t size() const { return m_log_data_view.size; }
-
-private:
-    sisl::byte_array m_base_buffer;
-    sisl::blob m_log_data_view;
-};
-#endif
 
 typedef sisl::byte_view log_buffer;
 
@@ -288,6 +272,7 @@ struct logdev_info_block {
     uint8_t store_id_info[0];
 } __attribute__((packed));
 
+class HomeBlks;
 class log_stream_reader {
 public:
     log_stream_reader(uint64_t device_cursor);
@@ -299,7 +284,7 @@ private:
     sisl::byte_view read_next_bytes(uint64_t nbytes);
 
 private:
-    HomeBlksSafePtr m_hb;
+    boost::intrusive_ptr< HomeBlks > m_hb;
     sisl::byte_view m_cur_log_buf;
     uint64_t m_cur_group_cursor;
 };
@@ -323,8 +308,8 @@ public:
         return &_instance;
     }
 
-    LogDev() = default;
-    ~LogDev() = default;
+    LogDev();
+    ~LogDev();
 
     /**
      * @brief Start the logdev. This method reads the log virtual dev info block, loads all of the store and prepares
@@ -421,6 +406,14 @@ public:
     logstore_id_t reserve_store_id(bool persist = true);
 
     /**
+     * @brief Unreserve the logstore id. It does not immediately unregisters and persist the unregistered map, but it
+     * will add to the waiting list (garbage list) and then during truncation, it actually unreserves and persits map.
+     *
+     * @param store_id
+     */
+    void unreserve_store_id(uint32_t store_id);
+
+    /**
      * @brief Is the given store id already reserved.
      *
      * @return true or false
@@ -431,6 +424,15 @@ public:
      * @brief This method persist the store ids reserved/unreserved inside the vdev super block
      */
     void persist_store_ids();
+
+    /**
+     * @brief This method get all the store ids that are registered already and out of them which are being garbaged
+     * and waiting to be garbage collected. Predominant use of this method is for validation and testing
+     *
+     * @param registered out - Reference to the vector where all registered ids are pushed
+     * @param garbage out - Reference to the vector where all garbage ids
+     */
+    void get_registered_store_ids(std::vector< logstore_id_t >& registered, std::vector< logstore_id_t >& garbage);
 
     crc32_t get_prev_crc() const { return m_last_crc; }
 
@@ -475,14 +477,14 @@ private:
     void assert_next_pages(log_stream_reader& lstream);
 
 private:
-    HomeBlksSafePtr m_hb; // Back pointer to homeblks
+    boost::intrusive_ptr< HomeBlks > m_hb; // Back pointer to homeblks
     std::unique_ptr< sisl::StreamTracker< log_record > >
         m_log_records; // The container which stores all in-memory log records
     std::unique_ptr< sisl::IDReserver > m_id_reserver;
     std::atomic< logid_t > m_log_idx = 0;            // Generator of log idx
     std::atomic< int64_t > m_pending_flush_size = 0; // How much flushable logs are pending
     std::atomic< bool > m_is_flushing = false; // Is LogDev currently flushing (so far supports one flusher at a time)
-
+    std::map< logid_t, logstore_id_t > m_garbage_store_ids;
     Clock::time_point m_last_flush_time;
 
     logid_t m_last_flush_idx = -1; // Track last flushed and truncated log idx

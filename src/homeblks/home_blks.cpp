@@ -60,116 +60,18 @@ VolInterface* HomeBlks::init(const init_params& cfg, bool force_reinit) {
     }
 }
 
-HomeBlks::HomeBlks(const init_params& cfg) :
-        m_cfg(cfg),
-        m_rdy(false),
-        m_last_vol_sb(nullptr),
-        m_vdev_failed(false),
-        m_size_avail(0),
-        m_scan_cnt(0),
-        m_init_failed(false),
-        m_shutdown_start_time(0),
-        m_init_finished(false),
-        m_print_checksum(true),
-        m_metrics("HomeBlks") {
+HomeBlks::HomeBlks(const init_params& cfg) : m_cfg(cfg), m_metrics("HomeBlks") {
     LOGINFO("Initializing HomeBlks with Config {}", m_cfg.to_string());
-    /* set the homestore config parameters */
-    populate_disk_attrs();
-    /* If these parameters changes then we need to take care of upgrade/revert in device manager */
-    HomeStoreConfig::max_chunks = MAX_CHUNKS;
-    HomeStoreConfig::max_vdevs = MAX_VDEVS;
-    HomeStoreConfig::max_pdevs = MAX_PDEVS;
-    HomeStoreConfig::min_io_size =
-        std::min(m_cfg.min_virtual_page_size, (uint32_t)HomeStoreConfig::atomic_phys_page_size);
-    HomeStoreConfig::open_flag = m_cfg.flag;
-    HomeStoreConfig::is_read_only = (m_cfg.is_read_only) ? true : false;
-#ifndef NDEBUG
-    HomeStoreConfig::mem_btree_page_size = m_cfg.mem_btree_page_size;
-    flip::Flip::instance().start_rpc_server();
-#endif
-    /* Btree leaf node in mapping btree should accomdate minimum 2 entries to do the split. And on a average
-     * a value consume 2 bytes (for checksum) per blk and few bytes for each IO and node header.
-     * max_blk_cnt represents max number of blks blk allocator should give in a blk. We are taking
-     * conservatively 4 entries in a node with avg size of 2 for each blk.
-     * Note :- This restriction will go away once btree start supporinting higer size value.
-     */
-    HomeStoreConfig::max_blk_cnt = HomeStoreConfig::atomic_phys_page_size / (4 * 2);
-
-    m_data_pagesz = m_cfg.min_virtual_page_size;
-
-    if (m_cfg.devices.size() == 0) {
-        LOGERROR("no devices given");
-        throw std::invalid_argument("null device list");
-    }
-
-    nlohmann::json json;
-
-    json["phys_page_size"] = HomeStoreConfig::phys_page_size;
-    json["atomic_phys_page_size"] = HomeStoreConfig::atomic_phys_page_size;
-    json["align_size"] = HomeStoreConfig::align_size;
-    json["min_virtual_page_size"] = m_cfg.min_virtual_page_size;
-    json["open_flag"] = HomeStoreConfig::open_flag;
-    json["cache_size"] = m_cfg.cache_size;
-    json["system_uuid"] = boost::lexical_cast< std::string >(m_cfg.system_uuid);
-    json["is_file"] = m_cfg.is_file;
-
-    for (auto& device : m_cfg.devices) {
-        json["devices"].emplace_back(device.dev_names);
-    }
-
-    std::ofstream hs_config("hs_config.json");
-    hs_config << json;
+    HomeStore< BLKSTORE_BUFFER_TYPE >::init((const hs_input_params&)cfg);
 
     assert(VOL_SB_SIZE >= sizeof(vol_ondisk_sb));
     assert(VOL_SB_SIZE >= sizeof(homeblks_sb));
-    assert(HomeStoreConfig::phys_page_size >= HomeStoreConfig::atomic_phys_page_size);
-    assert(HomeStoreConfig::phys_page_size >= HomeStoreConfig::min_io_size);
 
     m_out_params.max_io_size = VOL_MAX_IO_SIZE;
-    m_homeblks_sb = sisl::make_aligned_unique< homeblks_sb >(HomeStoreConfig::align_size, HOMEBLKS_SB_SIZE);
-
-    /* create cache */
-    m_cache = std::make_unique< Cache< BlkId > >(m_cfg.cache_size, HomeStoreConfig::atomic_phys_page_size);
-
-    /* create device manager */
-    m_dev_mgr = std::make_unique< homestore::DeviceManager >(
-        new_vdev_found, sizeof(sb_blkstore_blob), virtual_dev_process_completions, m_cfg.is_file, m_cfg.system_uuid,
-        std::bind(&HomeBlks::process_vdev_error, this, std::placeholders::_1));
+    m_homeblks_sb = sisl::make_aligned_unique< homeblks_sb >(HS_STATIC_CONFIG(disk_attr.align_size), HOMEBLKS_SB_SIZE);
 
     /* start thread */
     m_thread_id = std::thread(&HomeBlks::init_thread, this);
-}
-
-void HomeBlks::populate_disk_attrs() {
-    if (m_cfg.disk_attr) {
-        HomeStoreConfig::phys_page_size = m_cfg.disk_attr->physical_page_size;
-        HomeStoreConfig::align_size = m_cfg.disk_attr->disk_align_size;
-        HomeStoreConfig::atomic_phys_page_size = m_cfg.disk_attr->atomic_page_size;
-    } else {
-        /* We should take these params from the config file or from the disks direectly */
-        HomeStoreConfig::phys_page_size = 4096;
-        HomeStoreConfig::align_size = 512;
-#ifndef NDEBUG
-        if (!m_cfg.is_file) {
-            HomeStoreConfig::atomic_phys_page_size = 512;
-        } else {
-            HomeStoreConfig::atomic_phys_page_size = 4096;
-        }
-#else
-        HomeStoreConfig::atomic_phys_page_size = 4096;
-#endif
-    }
-    LOGINFO("HomeBlks with config: atomic_phys_page size = {}, align size = {}, phys_page size = {}",
-            HomeStoreConfig::atomic_phys_page_size, HomeStoreConfig::align_size, HomeStoreConfig::phys_page_size);
-}
-
-cap_attrs HomeBlks::get_system_capacity() {
-    cap_attrs cap;
-    cap.used_data_size = get_data_blkstore()->get_used_size();
-    cap.used_metadata_size = get_metadata_blkstore()->get_used_size();
-    cap.used_total_size = cap.used_data_size + cap.used_metadata_size;
-    cap.initial_total_size = get_data_blkstore()->get_size() + get_metadata_blkstore()->get_size();
-    return cap;
 }
 
 cap_attrs HomeBlks::get_vol_capacity(const VolumePtr& vol) {
@@ -179,8 +81,8 @@ cap_attrs HomeBlks::get_vol_capacity(const VolumePtr& vol) {
     }
     cap_attrs cap;
     cap.used_data_size = vol->get_data_used_size();
-    cap.used_metadata_size = vol->get_metadata_used_size();
-    cap.used_total_size = cap.used_data_size + cap.used_metadata_size;
+    cap.used_index_size = vol->get_index_used_size();
+    cap.used_total_size = cap.used_data_size + cap.used_index_size;
     cap.initial_total_size = vol->get_size();
     return cap;
 }
@@ -220,8 +122,13 @@ std::error_condition HomeBlks::sync_read(const VolumePtr& vol, const vol_interfa
     return (vol->read(req));
 }
 
+const char* HomeBlks::get_name(const VolumePtr& vol) { return vol->get_name(); }
+uint64_t HomeBlks::get_page_size(const VolumePtr& vol) { return vol->get_page_size(); }
+boost::uuids::uuid HomeBlks::get_uuid(VolumePtr vol) { return vol->get_uuid(); }
+homeds::blob HomeBlks::at_offset(const blk_buf_t& buf, uint32_t offset) { return (buf->at_offset(offset)); }
+
 VolumePtr HomeBlks::create_volume(const vol_params& params) {
-    if (m_cfg.is_read_only) {
+    if (HS_STATIC_CONFIG(input.is_read_only)) {
         assert(0);
         LOGERROR("can not create vol on read only boot");
         return nullptr;
@@ -233,7 +140,7 @@ VolumePtr HomeBlks::create_volume(const vol_params& params) {
         return nullptr;
     }
 
-    if (params.size >= m_size_avail) {
+    if (params.size >= available_size()) {
         LOGINFO("there is a possibility of running out of space as total size of the volumes"
                 "created are more then maximum capacity");
     }
@@ -250,11 +157,7 @@ VolumePtr HomeBlks::create_volume(const vol_params& params) {
         // Okay, this is a new volume so let's create it
         auto new_vol = Volume::make_volume(params);
         it->second = new_vol;
-        if (m_size_avail < params.size) {
-            m_size_avail = 0;
-        } else {
-            m_size_avail -= params.size;
-        }
+        set_available_size(available_size() < params.size ? 0 : available_size() - params.size);
         VOL_INFO_LOG(params.uuid, "Create volume with params: {}", params.to_string());
 
         auto system_cap = get_system_capacity();
@@ -273,7 +176,7 @@ VolumePtr HomeBlks::create_volume(const vol_params& params) {
 //
 
 std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
-    if (m_cfg.is_read_only) {
+    if (HS_STATIC_CONFIG(input.is_read_only)) {
         assert(0);
         return std::make_error_condition(std::errc::device_or_resource_busy);
     }
@@ -375,24 +278,10 @@ SnapshotPtr HomeBlks::snap_volume(VolumePtr volptr) {
 HomeBlks* HomeBlks::instance() { return _instance.get(); }
 HomeBlksSafePtr HomeBlks::safe_instance() { return _instance; }
 
-BlkId HomeBlks::alloc_blk() {
-    BlkId bid;
-    blk_alloc_hints hints;
-    hints.desired_temp = 0;
-    hints.dev_id_hint = -1;
-    hints.is_contiguous = true;
-    auto ret = m_sb_blk_store->alloc_blk(VOL_SB_SIZE, hints, &bid);
-    if (ret != BLK_ALLOC_SUCCESS) {
-        throw homestore::homestore_exception("space not available", homestore_error::space_not_avail);
-    }
-    assert(ret == BLK_ALLOC_SUCCESS);
-    return bid;
-}
-
 void HomeBlks::vol_sb_init(vol_mem_sb* sb) {
     /* allocate block */
-    assert(!m_cfg.is_read_only);
-    BlkId bid = alloc_blk();
+    assert(!HS_STATIC_CONFIG(input.is_read_only));
+    BlkId bid = alloc_sb_blk(VOL_SB_SIZE);
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
     // No need to hold vol's sb update lock here since it is being initiated and not added to m_volume_map yet;
     sb->ondisk_sb->gen_cnt = 0;
@@ -435,7 +324,7 @@ vol_mem_sb* HomeBlks::vol_sb_read(BlkId bid) {
     std::vector< blk_buf_t > bbuf = m_sb_blk_store->read_nmirror(bid, m_cfg.devices.size() - 1);
     blk_buf_t valid_buf = get_valid_buf(bbuf, rewrite);
 
-    vol_mem_sb* sb = new vol_mem_sb(HomeStoreConfig::align_size, VOL_SB_SIZE);
+    vol_mem_sb* sb = new vol_mem_sb(HS_STATIC_CONFIG(disk_attr.align_size), VOL_SB_SIZE);
     memcpy(sb->ondisk_sb.get(), valid_buf->at_offset(0).bytes, sizeof(vol_ondisk_sb));
 
     // TODO: how do we recover this if it fails in release mode?
@@ -469,7 +358,7 @@ void HomeBlks::vol_sb_remove(vol_mem_sb* sb) {
     m_sb_blk_store->free_blk(sb->ondisk_sb->blkid, boost::none, boost::none);
 }
 
-void HomeBlks::homeblks_sb_init(BlkId& bid) {
+void HomeBlks::superblock_init(BlkId bid) {
     /* build the homeblks super block */
     m_homeblks_sb->blkid.set(bid);
     m_homeblks_sb->vol_list_head.set(BlkId::invalid_internal_id());
@@ -479,11 +368,21 @@ void HomeBlks::homeblks_sb_init(BlkId& bid) {
     m_homeblks_sb->magic = HOMEBLKS_SB_MAGIC;
     m_homeblks_sb->boot_cnt = 0;
     m_homeblks_sb->init_flag(0);
-    m_homeblks_sb->uuid = m_cfg.system_uuid;
+    m_homeblks_sb->uuid = HS_STATIC_CONFIG(input.system_uuid);
     homeblks_sb_write();
 }
 
-boost::uuids::uuid HomeBlks::get_uuid(VolumePtr vol) { return vol->get_uuid(); }
+void HomeBlks::superblock_load(const std::vector< blk_buf_t >& bbuf, BlkId sb_blk_id) {
+    bool rewrite = false;
+    blk_buf_t valid_buf = get_valid_buf(bbuf, rewrite);
+    memcpy(m_homeblks_sb.get(), valid_buf->at_offset(0).bytes, sizeof(*m_homeblks_sb));
+    assert(m_homeblks_sb->gen_cnt > 0);
+    assert(m_homeblks_sb->blkid.to_integer() == sb_blk_id.to_integer());
+    m_homeblks_sb->boot_cnt++;
+
+    /* update the homeblks super block */
+    if (!m_cfg.is_read_only) { homeblks_sb_write(); }
+}
 
 void HomeBlks::homeblks_sb_write() {
     homeds::MemVector mvec;
@@ -518,7 +417,7 @@ void HomeBlks::vol_sb_write(vol_mem_sb* sb) {
 
 void HomeBlks::process_vdev_error(vdev_info_block* vb) {
     /* For now we need to move all volumes in a failed state. Later on when we move to multiple virtual devices for
-     * data blkstoree we need to move only those volumes to failed state which  belong to this virtual device.
+     * data blkstore we need to move only those volumes to failed state which  belong to this virtual device.
      */
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
     auto it = m_volume_map.begin();
@@ -536,41 +435,7 @@ void HomeBlks::process_vdev_error(vdev_info_block* vb) {
     }
 }
 
-void HomeBlks::new_vdev_found(DeviceManager* dev_mgr, vdev_info_block* vb) {
-    /* create blkstore */
-    blkstore_blob* blob = (blkstore_blob*)vb->context_data;
-    switch (blob->type) {
-    case DATA_STORE:
-        HomeBlks::safe_instance()->create_data_blkstore(vb);
-        break;
-    case METADATA_STORE:
-        HomeBlks::safe_instance()->create_metadata_blkstore(vb);
-        break;
-    case SB_STORE:
-        HomeBlks::safe_instance()->create_sb_blkstore(vb);
-        break;
-    case LOGDEV_STORE:
-        HomeBlks::safe_instance()->create_logdev_blkstore(vb);
-        break;
-    default:
-        assert(0);
-    }
-}
-
-void HomeBlks::create_blkstores() {
-    create_data_blkstore(nullptr);
-    create_metadata_blkstore(nullptr);
-    create_sb_blkstore(nullptr);
-    create_logdev_blkstore(nullptr);
-}
-
 void HomeBlks::attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback cb) { vol->attach_completion_cb(cb); }
-
-void HomeBlks::add_devices() {
-    m_dev_mgr->add_devices(m_cfg.devices, m_cfg.disk_init);
-    assert(m_dev_mgr->get_total_cap() / m_cfg.devices.size() > MIN_DISK_CAP_SUPPORTED);
-    assert(m_dev_mgr->get_total_cap() < MAX_SUPPORTED_CAP);
-}
 
 void HomeBlks::vol_mounted(const VolumePtr& vol, vol_state state) {
     m_cfg.vol_mounted_cb(vol, state);
@@ -588,10 +453,6 @@ bool HomeBlks::vol_state_change(const VolumePtr& vol, vol_state new_state) {
     }
     return true;
 }
-
-logdev_blkstore_t* HomeBlks::get_logdev_blkstore() { return m_logdev_blk_store.get(); }
-data_blkstore_t* HomeBlks::get_data_blkstore() { return m_data_blk_store.get(); }
-metadata_blkstore_t* HomeBlks::get_metadata_blkstore() { return m_metadata_blk_store.get(); }
 
 blk_buf_t HomeBlks::get_valid_buf(const std::vector< blk_buf_t >& bbuf, bool& rewrite) {
     blk_buf_t valid_buf = nullptr;
@@ -710,7 +571,7 @@ void HomeBlks::scan_volumes() {
         /* clear the state in virtual devices as appropiate state is set in volume superblocks */
         if (m_vdev_failed) {
             m_data_blk_store->reset_vdev_failed_state();
-            m_metadata_blk_store->reset_vdev_failed_state();
+            m_index_blk_store->reset_vdev_failed_state();
             m_sb_blk_store->reset_vdev_failed_state();
             m_logdev_blk_store->reset_vdev_failed_state();
             m_vdev_failed = false;
@@ -747,134 +608,6 @@ void HomeBlks::init_done(std::error_condition err, const out_params& params) {
     m_cfg.init_done_cb(err, m_out_params);
 }
 
-void HomeBlks::create_logdev_blkstore(vdev_info_block* vb) {
-    if (vb == nullptr) {
-        struct blkstore_blob blob;
-        blob.type = blkstore_type::LOGDEV_STORE;
-        uint64_t size = (1 * m_dev_mgr->get_total_cap()) / 100;
-        size = ALIGN_SIZE(size, HomeStoreConfig::phys_page_size);
-        m_logdev_blk_store = std::make_unique< BlkStore< VdevVarSizeBlkAllocatorPolicy > >(
-            m_dev_mgr.get(), m_cache.get(), size, PASS_THRU, 0, (char*)&blob, sizeof(blkstore_blob),
-            HomeStoreConfig::atomic_phys_page_size, "logdev",
-            std::bind(&LogDev::process_logdev_completions, &HomeLogStoreMgr::logdev(), std::placeholders::_1));
-    } else {
-        m_logdev_blk_store = std::make_unique< BlkStore< VdevVarSizeBlkAllocatorPolicy > >(
-            m_dev_mgr.get(), m_cache.get(), vb, PASS_THRU, HomeStoreConfig::atomic_phys_page_size, "logdev",
-            (vb->failed ? true : false),
-            std::bind(&LogDev::process_logdev_completions, &HomeLogStoreMgr::logdev(), std::placeholders::_1));
-        if (vb->failed) {
-            m_vdev_failed = true;
-            LOGINFO("logdev block store is in failed state");
-        }
-    }
-    home_log_store_mgr.start((vb == nullptr));
-}
-
-void HomeBlks::create_data_blkstore(vdev_info_block* vb) {
-    if (vb == nullptr) {
-        /* change it to context */
-        struct blkstore_blob blob;
-        blob.type = blkstore_type::DATA_STORE;
-        uint64_t size = (90 * m_dev_mgr->get_total_cap()) / 100;
-        size = ALIGN_SIZE(size, HomeStoreConfig::phys_page_size);
-        m_size_avail = size;
-        LOGINFO("maximum capacity for data blocks is {}", m_size_avail);
-        m_data_blk_store = std::make_unique< data_blkstore_t >(m_dev_mgr.get(), m_cache.get(), size, WRITEBACK_CACHE, 0,
-                                                               (char*)&blob, sizeof(blkstore_blob), m_data_pagesz,
-                                                               "data", Volume::process_vol_data_completions);
-    } else {
-        m_data_blk_store = std::make_unique< data_blkstore_t >(m_dev_mgr.get(), m_cache.get(), vb, WRITEBACK_CACHE,
-                                                               m_data_pagesz, "data", (vb->failed ? true : false),
-                                                               Volume::process_vol_data_completions);
-        if (vb->failed) {
-            m_vdev_failed = true;
-            LOGINFO("data block store is in failed state");
-        }
-    }
-}
-
-void HomeBlks::create_metadata_blkstore(vdev_info_block* vb) {
-    if (vb == nullptr) {
-        struct blkstore_blob blob;
-        blob.type = blkstore_type::METADATA_STORE;
-        uint64_t size = (2 * m_dev_mgr->get_total_cap()) / 100;
-        size = ALIGN_SIZE(size, HomeStoreConfig::phys_page_size);
-        m_metadata_blk_store = std::make_unique< metadata_blkstore_t >(
-            m_dev_mgr.get(), m_cache.get(), size, RD_MODIFY_WRITEBACK_CACHE, 0, (char*)&blob, sizeof(blkstore_blob),
-            HomeStoreConfig::atomic_phys_page_size, "metadata");
-    } else {
-        m_metadata_blk_store = std::make_unique< metadata_blkstore_t >(
-            m_dev_mgr.get(), m_cache.get(), vb, RD_MODIFY_WRITEBACK_CACHE, HomeStoreConfig::atomic_phys_page_size,
-            "metadata", (vb->failed ? true : false));
-        if (vb->failed) {
-            m_vdev_failed = true;
-            LOGINFO("metadata block store is in failed state");
-        }
-    }
-}
-
-uint32_t HomeBlks::get_data_pagesz() const { return m_data_pagesz; }
-
-void HomeBlks::create_sb_blkstore(vdev_info_block* vb) {
-    if (vb == nullptr) {
-        /* create a blkstore */
-        struct sb_blkstore_blob blob;
-        blob.type = blkstore_type::SB_STORE;
-        blob.blkid.set(BlkId::invalid_internal_id());
-        uint64_t size = (1 * m_dev_mgr->get_total_cap()) / 100;
-        size = ALIGN_SIZE(size, HomeStoreConfig::phys_page_size);
-        m_sb_blk_store = std::make_unique< sb_blkstore_t >(
-            m_dev_mgr.get(), m_cache.get(), size, PASS_THRU, m_cfg.devices.size() - 1, (char*)&blob,
-            sizeof(sb_blkstore_blob), HomeStoreConfig::atomic_phys_page_size, "superblock");
-
-        /* allocate a new blk id */
-        BlkId bid = alloc_blk();
-        blob.type = blkstore_type::SB_STORE;
-        blob.blkid.set(bid);
-
-        /* build the homeblks super block */
-        homeblks_sb_init(bid);
-
-        /* update the context info */
-        m_sb_blk_store->update_vb_context(sisl::blob((uint8_t*)&blob, (uint32_t)sizeof(sb_blkstore_blob)));
-    } else {
-        /* create a blkstore */
-        m_sb_blk_store = std::make_unique< sb_blkstore_t >(m_dev_mgr.get(), m_cache.get(), vb, PASS_THRU,
-                                                           HomeStoreConfig::atomic_phys_page_size, "superblock", false);
-        if (vb->failed) {
-            m_vdev_failed = true;
-            LOGINFO("super block store is in failed state");
-        }
-
-        /* get the blkid of homeblks super block */
-        sb_blkstore_blob* blob = (sb_blkstore_blob*)(&(vb->context_data));
-        if (blob->blkid.to_integer() == BlkId::invalid_internal_id()) {
-            LOGINFO("init was failed last time. Should retry it with init flag");
-            throw homestore::homestore_exception("init was failed last time. Should retry it with init",
-                                                 homestore_error::init_failed);
-        }
-
-        /* read and build the homeblks super block */
-        std::vector< blk_buf_t > bbuf = m_sb_blk_store->read_nmirror(blob->blkid, m_cfg.devices.size() - 1);
-        bool rewrite = false;
-        blk_buf_t valid_buf = get_valid_buf(bbuf, rewrite);
-        memcpy(m_homeblks_sb.get(), valid_buf->at_offset(0).bytes, sizeof(*m_homeblks_sb));
-        assert(m_homeblks_sb->gen_cnt > 0);
-        assert(m_homeblks_sb->blkid.to_integer() == blob->blkid.to_integer());
-        m_homeblks_sb->boot_cnt++;
-
-        /* update the homeblks super block */
-        if (!m_cfg.is_read_only) { homeblks_sb_write(); }
-    }
-}
-
-bool HomeBlks::is_ready() { return (m_rdy); }
-
-uint64_t HomeBlks::get_boot_cnt() {
-    assert(m_homeblks_sb->boot_cnt < UINT16_MAX);
-    return (uint16_t)m_homeblks_sb->boot_cnt;
-}
-
 //
 // Handle the race between shutdown therad and init thread;
 // 1. HomeStore starts init
@@ -882,17 +615,13 @@ uint64_t HomeBlks::get_boot_cnt() {
 // 3. Init switched out after is_shutdown() return false;
 // 4. Shutdown thread set m_shutdown to true;
 //    and found nothing needs to be freed since init thread hasn't finished yet so shutdown thread completes;
-// 5. Init thread comes back and init things out with all the memory leaked since shutdown thread has already finished;
+// 5. Init thread comes back and init things out with all the memory leaked since shutdown thread has already
+// finished;
 //
 void HomeBlks::init_thread() {
     std::error_condition error = no_error;
     try {
-        bool init = m_cfg.disk_init;
-        /* attach physical devices */
-        add_devices();
-
-        /* create blkstore if it is a first time boot */
-        if (init) { create_blkstores(); }
+        init_devices();
 
         //
         // Will not resume shutdown if we reboot from an un-finished shutdown procedure.
@@ -905,7 +634,7 @@ void HomeBlks::init_thread() {
                 // the flag should be set again;
                 m_homeblks_sb->clear_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
                 if (!m_cfg.is_read_only) { homeblks_sb_write(); }
-            } else if (!init) {
+            } else if (!HS_STATIC_CONFIG(input.disk_init)) {
                 LOGCRITICAL("System experienced sudden panic since last boot!");
             } else {
                 LOGINFO("Initializing the system");
@@ -940,7 +669,6 @@ void HomeBlks::init_thread() {
         m_init_finished = true;
         m_cv.notify_all();
         return;
-
     } catch (const std::exception& e) {
         m_init_failed = true;
         LOGERROR("{}", e.what());
@@ -950,7 +678,6 @@ void HomeBlks::init_thread() {
 }
 
 void HomeBlks::vol_scan_cmpltd(const VolumePtr& vol, vol_state state, bool success) {
-
     if (success) {
         vol_mounted(vol, state);
     } else {
@@ -972,10 +699,7 @@ void HomeBlks::vol_scan_cmpltd(const VolumePtr& vol, vol_state state, bool succe
     }
 }
 
-const char* HomeBlks::get_name(const VolumePtr& vol) { return vol->get_name(); }
-uint64_t HomeBlks::get_page_size(const VolumePtr& vol) { return vol->get_page_size(); }
-
-homeds::blob HomeBlks::at_offset(const blk_buf_t& buf, uint32_t offset) { return (buf->at_offset(offset)); }
+data_blkstore_t::comp_callback HomeBlks::data_completion_cb() { return Volume::process_vol_data_completions; };
 
 #ifdef _PRERELEASE
 void HomeBlks::set_io_flip() {
@@ -1196,9 +920,9 @@ bool HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
         if (shutdown_done_cb) shutdown_done_cb(true);
 
         /*
-         * Decrement a counter which is incremented for indicating that homeblks is up and running. Once homeblks usage
-         * count is 1, which means only remaining instance is the global _instance variable, we can do the _instance
-         * cleanup
+         * Decrement a counter which is incremented for indicating that homeblks is up and running. Once homeblks
+         * usage count is 1, which means only remaining instance is the global _instance variable, we can do the
+         * _instance cleanup
          */
         intrusive_ptr_release(this);
     } catch (const std::exception& e) {
@@ -1230,9 +954,6 @@ bool HomeBlks::do_volume_shutdown(bool force) {
 
     return (m_volume_map.size() == 0);
 }
-
-// m_shutdown is used for I/O threads to check is_shutdown() without holding m_vol_lock;
-bool HomeBlks::is_shutdown() { return (m_shutdown_start_time.load() != 0); }
 
 vol_state HomeBlks::get_state(VolumePtr vol) { return vol->get_state(); }
 

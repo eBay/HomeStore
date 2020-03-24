@@ -115,7 +115,7 @@ struct vdevs_block {
     uint32_t get_first_vdev_id() const { return first_vdev_id; }
 } __attribute((packed));
 
-#define SUPERBLOCK_SIZE (HomeStoreConfig::atomic_phys_page_size)
+#define SUPERBLOCK_SIZE (HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size))
 #define SUPERBLOCK_PAYLOAD_OFFSET 10
 
 #define MAX_VDEV_INFO_BLOCK_SZ 4096
@@ -181,10 +181,10 @@ struct dm_info {
 } __attribute((packed));
 
 #define PDEV_INFO_BLK_OFFSET sizeof(dm_info)
-#define CHUNK_INFO_BLK_OFFSET (PDEV_INFO_BLK_OFFSET + (sizeof(pdev_info_block) * HomeStoreConfig::max_pdevs))
-#define VDEV_INFO_BLK_OFFSET (CHUNK_INFO_BLK_OFFSET + sizeof(chunk_info_block) * HomeStoreConfig::max_chunks)
+#define CHUNK_INFO_BLK_OFFSET (PDEV_INFO_BLK_OFFSET + (sizeof(pdev_info_block) * HS_STATIC_CONFIG(generic.max_pdevs)))
+#define VDEV_INFO_BLK_OFFSET (CHUNK_INFO_BLK_OFFSET + sizeof(chunk_info_block) * HS_STATIC_CONFIG(generic.max_chunks))
 
-#define DM_INFO_BLK_SIZE (VDEV_INFO_BLK_OFFSET + HomeStoreConfig::max_vdevs * sizeof(vdev_info_block))
+#define DM_INFO_BLK_SIZE (VDEV_INFO_BLK_OFFSET + HS_STATIC_CONFIG(generic.max_vdevs) * sizeof(vdev_info_block))
 
 #define DM_PAYLOAD_OFFSET 10
 

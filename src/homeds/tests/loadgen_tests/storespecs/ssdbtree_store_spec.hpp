@@ -58,7 +58,7 @@ public:
         btree_cfg.set_max_value_size(V::get_max_size());
 
         homeds::btree::btree_device_info bt_dev_info;
-        bt_dev_info.blkstore = HomeBlks::instance()->get_metadata_blkstore();
+        bt_dev_info.blkstore = HomeBlks::instance()->get_index_blkstore();
         bt_dev_info.new_device = false;
         m_bt = std::unique_ptr< LoadGenSSDBtree >(LoadGenSSDBtree::create_btree(
             btree_cfg, &bt_dev_info,

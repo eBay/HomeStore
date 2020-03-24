@@ -42,7 +42,6 @@ struct cp_id {
  */
 template < typename cp_id_type = cp_id >
 class CheckPoint {
-
 private:
     cp_id_type* m_cur_cp_id = nullptr;
     std::mutex m_io_cv_lk;
@@ -97,7 +96,6 @@ public:
      * @ return :- return a current cp_id
      */
     cp_id_type* cp_io_enter() {
-
         rcu_read_lock();
         auto cp_id = get_cur_cp_id();
         cp_id->enter_cnt++;

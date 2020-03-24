@@ -79,11 +79,11 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
     HS_ASSERT_CMP(LOGMSG, sizeof(super_block), <=, SUPERBLOCK_SIZE, "opening device {} device size {} inited {}",
                   devname, m_devsize, is_init);
 
-    auto ret = posix_memalign((void**)&m_super_blk, HomeStoreConfig::align_size, SUPERBLOCK_SIZE);
+    auto ret = posix_memalign((void**)&m_super_blk, HS_STATIC_CONFIG(disk_attr.align_size), SUPERBLOCK_SIZE);
 
     /* super block should always be written atomically. */
     HS_ASSERT_NOTNULL(LOGMSG, m_super_blk);
-    HS_ASSERT_CMP(LOGMSG, sizeof(super_block), <=, HomeStoreConfig::atomic_phys_page_size);
+    HS_ASSERT_CMP(LOGMSG, sizeof(super_block), <=, HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size));
 
     m_info_blk.dev_num = dev_num;
     m_info_blk.dev_offset = dev_offset;
@@ -133,15 +133,15 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
     }
 
     auto temp = m_devsize;
-    m_devsize = ALIGN_SIZE_TO_LEFT(m_devsize, HomeStoreConfig::phys_page_size);
+    m_devsize = ALIGN_SIZE_TO_LEFT(m_devsize, HS_STATIC_CONFIG(disk_attr.phys_page_size));
 
     if (m_devsize != temp) { LOGWARN("device size is not the multiple of physical page size old size {}", temp); }
     LOGINFO("Device {} size is {}", m_devname, m_devsize);
     m_dm_chunk[0] = m_dm_chunk[1] = nullptr;
     if (is_init) {
         /* create a chunk */
-        uint64_t align_size = ALIGN_SIZE(SUPERBLOCK_SIZE, HomeStoreConfig::phys_page_size);
-        HS_ASSERT_CMP(LOGMSG, get_size() % HomeStoreConfig::phys_page_size, ==, 0);
+        uint64_t align_size = ALIGN_SIZE(SUPERBLOCK_SIZE, HS_STATIC_CONFIG(disk_attr.phys_page_size));
+        HS_ASSERT_CMP(LOGMSG, get_size() % HS_STATIC_CONFIG(disk_attr.phys_page_size), ==, 0);
         m_mgr->create_new_chunk(this, align_size, get_size() - align_size, nullptr);
 
         /* check for min size */
@@ -158,7 +158,7 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
          * so at any given point only one SB chunk is valid.
          */
         for (int i = 0; i < 2; ++i) {
-            uint64_t align_size = ALIGN_SIZE(dm_info_size, HomeStoreConfig::phys_page_size);
+            uint64_t align_size = ALIGN_SIZE(dm_info_size, HS_STATIC_CONFIG(disk_attr.phys_page_size));
             HS_ASSERT_CMP(LOGMSG, align_size, ==, dm_info_size);
             m_dm_chunk[i] = m_mgr->alloc_chunk(this, INVALID_VDEV_ID, align_size, INVALID_CHUNK_ID);
             m_dm_chunk[i]->set_sb_chunk();

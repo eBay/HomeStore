@@ -12,6 +12,8 @@ table BlkAllocator {
 
 table Btree {
     max_nodes_to_rebalance: uint32 = 3; 
+
+    mem_btree_page_size : uint32 = 8192;
 }
 
 table Cache {

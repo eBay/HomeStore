@@ -313,12 +313,12 @@ public:
     bool fix_mapping_btree(bool verify);
 
     uint64_t get_data_used_size() { return m_used_size; }
-    uint64_t get_metadata_used_size();
+    uint64_t get_index_used_size();
     const char* get_name() const { return (m_sb->ondisk_sb->vol_name); }
     uint64_t get_page_size() const { return m_sb->ondisk_sb->page_size; }
     uint64_t get_size() const { return m_sb->ondisk_sb->size; }
-    boost::uuids::uuid get_uuid();
-    vol_state get_state();
+    boost::uuids::uuid get_uuid() { return m_sb->ondisk_sb->uuid; }
+    vol_state get_state() const { return m_state.load(std::memory_order_acquire); }
     void set_state(vol_state state, bool persist = true);
     bool is_offline();
 

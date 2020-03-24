@@ -42,8 +42,8 @@ void LogGroup::create_overflow_buf(uint32_t min_needed) {
 
 bool LogGroup::add_record(const log_record& record, int64_t log_idx) {
     if (m_nrecords >= m_max_records) {
-        LOGINFO("Will exceed estimated records={} if we add idx={} record. Hence stopping adding in this batch",
-                m_max_records, log_idx);
+        LOGDEBUG("Will exceed estimated records={} if we add idx={} record. Hence stopping adding in this batch",
+                 m_max_records, log_idx);
         return false;
     }
 

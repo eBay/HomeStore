@@ -16,7 +16,7 @@ namespace homestore {
 ////////////////////////////////// Intrusive Cache Section /////////////////////////////////
 template < typename K, typename V >
 IntrusiveCache< K, V >::IntrusiveCache(uint64_t max_cache_size, uint32_t avg_size_per_entry) :
-        m_hash_set((max_cache_size / avg_size_per_entry) / HS_SETTINGS_VALUE(cache->entries_per_hash_bucket)) {
+        m_hash_set((max_cache_size / avg_size_per_entry) / HS_DYNAMIC_CONFIG(cache->entries_per_hash_bucket)) {
     HS_LOG(INFO, base, "Initializing cache with cache_size = {} with {} partitions", max_cache_size,
            EVICTOR_PARTITIONS);
     for (auto i = 0; i < EVICTOR_PARTITIONS; i++) {

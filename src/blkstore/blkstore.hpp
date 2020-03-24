@@ -120,9 +120,9 @@ public:
 
 template < typename BAllocator, typename Buffer = BlkBuffer >
 class BlkStore {
+public:
     typedef std::function< void(boost::intrusive_ptr< blkstore_req< Buffer > > req) > comp_callback;
 
-public:
     BlkStore(DeviceManager* mgr,             // Device manager instance
              Cache< BlkId >* cache,          // Cache Instance
              uint64_t size,                  // Size of the blk store device
@@ -272,7 +272,7 @@ public:
 
         // Create a new block of memory for the blocks requested and set the memvec pointer to that
         uint8_t* ptr;
-        int ret = posix_memalign((void**)&ptr, HomeStoreConfig::align_size, size);
+        int ret = posix_memalign((void**)&ptr, HS_STATIC_CONFIG(disk_attr.align_size), size);
         if (ret != 0) { throw std::bad_alloc(); }
         boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector(), true);
         mvec->set(ptr, size, 0);
@@ -538,7 +538,7 @@ public:
         for (uint32_t i = 0; i < missing_mp.size(); i++) {
 
             // Create a new block of memory for the missing piece
-            int ret = posix_memalign((void**)&ptr, HomeStoreConfig::align_size, missing_mp[i].second);
+            int ret = posix_memalign((void**)&ptr, HS_STATIC_CONFIG(disk_attr.align_size), missing_mp[i].second);
             if (ret != 0) {
                 assert(0);
                 throw std::bad_alloc();
@@ -588,7 +588,8 @@ public:
 
         for (int i = 0; i < (nmirrors + 1); i++) {
             /* create the pointer */
-            auto ret = posix_memalign((void**)&mem_ptr, HomeStoreConfig::align_size, bid.data_size(m_pagesz));
+            auto ret =
+                posix_memalign((void**)&mem_ptr, HS_STATIC_CONFIG(disk_attr.align_size), bid.data_size(m_pagesz));
             assert(ret == 0);
 
             /* set the memvec */

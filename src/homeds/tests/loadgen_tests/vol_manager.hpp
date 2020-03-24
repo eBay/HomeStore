@@ -16,7 +16,7 @@ namespace loadgen {
 constexpr uint64_t CACHE_SIZE = (4 * 1024 * 1024 * 1024ul);
 constexpr uint32_t VOL_PAGE_SIZE = 4096;
 constexpr uint32_t MAX_CRC_DEPTH = 3;
-const uint64_t LOGDEV_BUF_SIZE = HomeStoreConfig::align_size * 1024;
+const uint64_t LOGDEV_BUF_SIZE = HS_STATIC_CONFIG(disk_attr.align_size) * 1024;
 
 class VolReq {
 public:
@@ -284,13 +284,13 @@ private:
         auto read_offset = m_logdev_offset.front();
 
         char* ptr = nullptr;
-        int  ret = posix_memalign((void**)&ptr, HomeStoreConfig::align_size, LOGDEV_BUF_SIZE);
+        int  ret = posix_memalign((void**)&ptr, HS_STATIC_CONFIG(disk_attr.align_size), LOGDEV_BUF_SIZE);
         if (ret != 0) {
             throw std::bad_alloc();
         }
 
         struct iovec* iov = nullptr;
-        ret = posix_memalign((void**)&iov, HomeStoreConfig::align_size, sizeof(struct iovec));
+        ret = posix_memalign((void**)&iov, HS_STATIC_CONFIG(disk_attr.align_size), sizeof(struct iovec));
         if (ret != 0) {
             throw std::bad_alloc();
         }
@@ -317,7 +317,7 @@ private:
         std::string ss = std::to_string(vol_id) + " " + std::to_string(nblks);
 
         char* ptr = nullptr;
-        int  ret = posix_memalign((void**)&ptr, HomeStoreConfig::align_size, LOGDEV_BUF_SIZE);
+        int  ret = posix_memalign((void**)&ptr, HS_STATIC_CONFIG(disk_attr.align_size), LOGDEV_BUF_SIZE);
 
         if (ret != 0) {
             throw std::bad_alloc();
@@ -325,7 +325,7 @@ private:
         strncpy(ptr, ss.c_str(), ss.size());
         
         struct iovec* iov = nullptr;
-        ret = posix_memalign((void**)&iov, HomeStoreConfig::align_size, sizeof(struct iovec));
+        ret = posix_memalign((void**)&iov, HS_STATIC_CONFIG(disk_attr.align_size), sizeof(struct iovec));
         if (ret != 0) {
             throw std::bad_alloc();
         }
@@ -459,7 +459,7 @@ private:
         m_max_vol_size = (80 * m_max_cap) / (100 * m_max_vols);
 
         init_params p;
-        p.flag = homestore::io_flag::DIRECT_IO;
+        p.open_flags = homestore::io_flag::DIRECT_IO;
         p.min_virtual_page_size = VOL_PAGE_SIZE;
         p.cache_size = CACHE_SIZE;
         p.disk_init = true;

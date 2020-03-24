@@ -15,6 +15,7 @@
 #include <common/error.h>
 #include <metrics/metrics.hpp>
 #include <utility/atomic_counter.hpp>
+#include "common/homestore_config.hpp"
 #include "common/homestore_header.hpp"
 #include "common/homestore_assert.hpp"
 
@@ -48,11 +49,11 @@ public:
         VarsizeBlkAllocConfig* vconfig = (VarsizeBlkAllocConfig*)out_config;
 
         vconfig->set_blk_size(vpage_size);
-        vconfig->set_phys_page_size(HomeStoreConfig::phys_page_size); // SSD Page size.
-        vconfig->set_blks_per_portion(BLKS_PER_PORTION);              // Have locking etc for every 1024 pages
-        vconfig->set_total_segments(TOTAL_SEGMENTS);                  // 8 Segments per chunk
+        vconfig->set_phys_page_size(HS_STATIC_CONFIG(disk_attr.phys_page_size)); // SSD Page size.
+        vconfig->set_blks_per_portion(BLKS_PER_PORTION); // Have locking etc for every 1024 pages
+        vconfig->set_total_segments(TOTAL_SEGMENTS);     // 8 Segments per chunk
 
-        HS_ASSERT_CMP(DEBUG, size % MIN_CHUNK_SIZE, ==, 0);
+        HS_ASSERT_CMP(DEBUG, (size % MIN_CHUNK_SIZE), ==, 0);
 
         vconfig->set_total_blks(((uint64_t)size) / vpage_size);
         vconfig->set_blks_per_temp_group(100); // TODO: Recalculate based on size set aside for temperature entries

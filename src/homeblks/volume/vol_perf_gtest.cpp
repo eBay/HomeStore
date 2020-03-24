@@ -159,7 +159,7 @@ public:
 
         iomgr_obj = std::make_shared< iomgr::ioMgr >(2, num_threads);
         init_params params;
-        params.flag = homestore::io_flag::DIRECT_IO;
+        params.open_flags = homestore::io_flag::DIRECT_IO;
         params.min_virtual_page_size = 4096;
         params.cache_size = cache_size * 1024 * 1024 * 1024ul;
         params.disk_init = init;

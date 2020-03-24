@@ -15,11 +15,11 @@ public:
         assert(success);
     }
     void cleanup() { remove("file_load_gen"); }
-    void init(Executor& executor, init_done_callback init_done_cb, size_t atomic_page_size = 2048) {
-        start_homestore(init_done_cb, atomic_page_size);
+    void init(Executor& executor, init_done_callback init_done_cb, size_t atomic_phys_page_size = 2048) {
+        start_homestore(init_done_cb, atomic_phys_page_size);
     }
 
-    void start_homestore(init_done_callback init_done_cb, size_t atomic_page_size) {
+    void start_homestore(init_done_callback init_done_cb, size_t atomic_phys_page_size) {
         /* start homestore */
         /* create files */
 
@@ -33,9 +33,9 @@ public:
         //                iomgr_obj = std::make_shared<iomgr::ioMgr>(2, num_threads);
         init_params params;
 #ifndef NDEBUG
-        params.flag = homestore::io_flag::BUFFERED_IO;
+        params.open_flags = homestore::io_flag::BUFFERED_IO;
 #else
-        params.flag = homestore::io_flag::DIRECT_IO;
+        params.open_flags = homestore::io_flag::DIRECT_IO;
 #endif
         params.min_virtual_page_size = 4096;
         params.cache_size = 4 * 1024 * 1024 * 1024ul;
@@ -44,9 +44,9 @@ public:
         params.is_file = true;
         params.init_done_cb = init_done_cb;
         params.disk_attr = disk_attributes();
-        params.disk_attr->physical_page_size = 4096;
-        params.disk_attr->disk_align_size = 4096;
-        params.disk_attr->atomic_page_size = atomic_page_size;
+        params.disk_attr->phys_page_size = 4096;
+        params.disk_attr->align_size = 4096;
+        params.disk_attr->atomic_phys_page_size = atomic_phys_page_size;
         params.vol_mounted_cb =
             std::bind(&DiskInitializer::vol_mounted_cb, this, std::placeholders::_1, std::placeholders::_2);
         params.vol_state_change_cb = std::bind(&DiskInitializer::vol_state_change_cb, this, std::placeholders::_1,
