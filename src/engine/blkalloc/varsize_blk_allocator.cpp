@@ -289,8 +289,8 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
     while (blks_alloced != nblks && retry_cnt < HS_DYNAMIC_CONFIG(blkallocator->max_varsize_blk_alloc_attempt)) {
         BlkId blkid;
         COUNTER_INCREMENT(m_metrics, num_split, 1);
-        if (blks_rqstd > HS_STATIC_CONFIG(generic.max_blk_cnt)) {
-            blks_rqstd = ALIGN_SIZE_TO_LEFT(HS_STATIC_CONFIG(generic.max_blk_cnt), hints.multiplier);
+        if (blks_rqstd > HS_STATIC_CONFIG(engine.max_blk_cnt)) {
+            blks_rqstd = ALIGN_SIZE_TO_LEFT(HS_STATIC_CONFIG(engine.max_blk_cnt), hints.multiplier);
         }
         if (alloc(blks_rqstd, hints, &blkid, true) != BLK_ALLOC_SUCCESS) {
             /* check the cache to see what blocks are available and get those

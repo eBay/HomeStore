@@ -51,8 +51,8 @@ public:
          * conservatively 4 entries in a node with avg size of 2 for each blk.
          * Note :- This restriction will go away once btree start supporinting higher size value.
          */
-        hs_config.generic.max_blk_cnt = hs_config.disk_attr.atomic_phys_page_size / (4 * 2);
-        hs_config.generic.min_io_size =
+        hs_config.engine.max_blk_cnt = hs_config.disk_attr.atomic_phys_page_size / (4 * 2);
+        hs_config.engine.min_io_size =
             std::min(input.min_virtual_page_size, (uint32_t)hs_config.disk_attr.atomic_phys_page_size);
         m_data_pagesz = input.min_virtual_page_size;
 

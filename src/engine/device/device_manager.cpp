@@ -86,7 +86,7 @@ void DeviceManager::init_devices(std::vector< dev_info >& devices) {
     m_chunk_hdr->num_chunks = 0;
     m_chunk_hdr->info_offset = CHUNK_INFO_BLK_OFFSET;
     m_chunk_info = (chunk_info_block*)(m_chunk_memory + m_chunk_hdr->info_offset);
-    HS_ASSERT_CMP(LOGMSG, HS_STATIC_CONFIG(generic.max_chunks), <=, MAX_CHUNK_ID);
+    HS_ASSERT_CMP(LOGMSG, HS_STATIC_CONFIG(engine.max_chunks), <=, MAX_CHUNK_ID);
 
     // create new pdev info
     m_pdev_hdr->magic = MAGIC;
@@ -206,7 +206,7 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info >& devices) {
     HS_ASSERT_CMP(LOGMSG, m_dm_info_size, ==, m_dm_info->get_size());
     HS_ASSERT_CMP(LOGMSG, m_dm_info->get_version(), ==, CURRENT_DM_INFO_VERSION);
     /* find the devices which has to be replaced */
-    HS_ASSERT_CMP(LOGMSG, m_pdev_hdr->get_num_phys_devs(), <=, HS_STATIC_CONFIG(generic.max_pdevs));
+    HS_ASSERT_CMP(LOGMSG, m_pdev_hdr->get_num_phys_devs(), <=, HS_STATIC_CONFIG(engine.max_pdevs));
     for (uint32_t dev_id = 0; dev_id < m_pdev_hdr->num_phys_devs; ++dev_id) {
         if (m_pdevs[dev_id].get() == nullptr) {
             std::unique_ptr< PhysicalDev > pdev = std::move(uninit_devs.back());
@@ -235,7 +235,7 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info >& devices) {
             /* TODO:It is ok for now as we have lesser number of chunks. Once we have
              * larger number of chunks, we should optimize it.
              */
-            for (uint32_t i = 0; i < HS_STATIC_CONFIG(generic.max_chunks); ++i) {
+            for (uint32_t i = 0; i < HS_STATIC_CONFIG(engine.max_chunks); ++i) {
                 if (m_chunk_info[i].pdev_id == dev_id && m_chunk_info[i].slot_allocated &&
                     m_chunk_info[i].vdev_id != INVALID_VDEV_ID) {
                     auto vdev_id = m_chunk_info[i].vdev_id;
@@ -258,7 +258,7 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info >& devices) {
         uint32_t cid = m_pdevs[dev_id]->get_first_chunk_id();
         while (cid != INVALID_CHUNK_ID) {
             HS_ASSERT_NULL(LOGMSG, m_chunks[cid].get());
-            HS_ASSERT_CMP(LOGMSG, cid, <, HS_STATIC_CONFIG(generic.max_chunks));
+            HS_ASSERT_CMP(LOGMSG, cid, <, HS_STATIC_CONFIG(engine.max_chunks));
             m_chunks[cid] =
                 std::make_unique< PhysicalDevChunk >(m_pdevs[m_chunk_info[cid].pdev_id].get(), &m_chunk_info[cid]);
             if (m_chunk_info[cid].is_sb_chunk) {
@@ -283,7 +283,7 @@ void DeviceManager::load_and_repair_devices(std::vector< dev_info >& devices) {
     uint32_t vid = m_vdev_hdr->first_vdev_id;
     uint32_t num_vdevs = 0;
     while (vid != INVALID_VDEV_ID) {
-        HS_ASSERT_CMP(LOGMSG, vid, <, HS_STATIC_CONFIG(generic.max_vdevs));
+        HS_ASSERT_CMP(LOGMSG, vid, <, HS_STATIC_CONFIG(engine.max_vdevs));
         m_last_vdevid = vid;
         m_new_vdev_cb(this, &m_vdev_info[vid]);
         HS_ASSERT_CMP(LOGMSG, m_vdev_info[vid].slot_allocated, ==, true);
@@ -309,7 +309,7 @@ void DeviceManager::handle_error(PhysicalDev* pdev) {
     }
 
     /* send errors on all vdev in this pdev */
-    for (uint32_t i = 0; i < HS_STATIC_CONFIG(generic.max_chunks); ++i) {
+    for (uint32_t i = 0; i < HS_STATIC_CONFIG(engine.max_chunks); ++i) {
         if (m_chunk_info[i].pdev_id == pdev->get_dev_id()) {
             auto vdev_id = m_chunk_info[i].vdev_id;
             m_vdev_error_cb(&m_vdev_info[vdev_id]);
@@ -534,7 +534,7 @@ chunk_info_block* DeviceManager::alloc_new_chunk_slot(uint32_t* pslot_num) {
             return &m_chunk_info[cur_slot];
         }
         cur_slot++;
-        if (cur_slot == HS_STATIC_CONFIG(generic.max_chunks)) cur_slot = 0;
+        if (cur_slot == HS_STATIC_CONFIG(engine.max_chunks)) cur_slot = 0;
     } while (cur_slot != start_slot);
 
     return nullptr;
@@ -543,7 +543,7 @@ chunk_info_block* DeviceManager::alloc_new_chunk_slot(uint32_t* pslot_num) {
 vdev_info_block* DeviceManager::alloc_new_vdev_slot() {
 
     vdev_info_block* vb = &m_vdev_info[0];
-    for (uint32_t id = 0; id < HS_STATIC_CONFIG(generic.max_vdevs); id++) {
+    for (uint32_t id = 0; id < HS_STATIC_CONFIG(engine.max_vdevs); id++) {
         vdev_info_block* vb = &m_vdev_info[id];
 
         if (!vb->slot_allocated) {

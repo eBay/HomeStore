@@ -94,7 +94,7 @@ public:
     }
 };
 
-struct hs_generic_config {
+struct hs_engine_config {
     size_t min_io_size = 8192; // minimum io size supported by HS
     uint64_t max_blk_cnt = 0;  // Total number of blks engine can support
 
@@ -120,13 +120,13 @@ struct HomeStoreStaticConfig {
     }
 
     disk_attributes disk_attr;
-    hs_generic_config generic;
+    hs_engine_config engine;
     hs_input_params input;
 
     nlohmann::json to_json() const {
         nlohmann::json json;
         json["DriveAttributes"] = disk_attr.to_json();
-        json["GenericConfig"] = generic.to_json();
+        json["GenericConfig"] = engine.to_json();
         json["InputParameters"] = input.to_json();
         return json;
     }
@@ -134,7 +134,7 @@ struct HomeStoreStaticConfig {
 #ifndef NDEBUG
     void validate() {
         assert(disk_attr.phys_page_size >= disk_attr.atomic_phys_page_size);
-        assert(disk_attr.phys_page_size >= generic.min_io_size);
+        assert(disk_attr.phys_page_size >= engine.min_io_size);
     }
 #endif
 };
@@ -157,10 +157,10 @@ constexpr uint32_t MAX_ID_BITS_PER_CHUNK = ((1lu << ID_BITS) - 1);
 /* NOTE: it can give size less then size passed in argument to make it aligned */
 #define ALIGN_SIZE_TO_LEFT(size, align) (((size % align) == 0) ? size : (size - (size % align)))
 
-#define MEMVEC_MAX_IO_SIZE (HS_STATIC_CONFIG(generic.min_io_size) * ((1 << MEMPIECE_ENCODE_MAX_BITS) - 1))
+#define MEMVEC_MAX_IO_SIZE (HS_STATIC_CONFIG(engine.min_io_size) * ((1 << MEMPIECE_ENCODE_MAX_BITS) - 1))
 #define MIN_CHUNK_SIZE (HS_STATIC_CONFIG(disk_attr.phys_page_size) * BLKS_PER_PORTION * TOTAL_SEGMENTS)
 #define MAX_CHUNK_SIZE                                                                                                 \
-    ALIGN_SIZE_TO_LEFT((MAX_ID_BITS_PER_CHUNK * HS_STATIC_CONFIG(generic.min_io_size)), MIN_CHUNK_SIZE) // 16T
+    ALIGN_SIZE_TO_LEFT((MAX_ID_BITS_PER_CHUNK * HS_STATIC_CONFIG(engine.min_io_size)), MIN_CHUNK_SIZE) // 16T
 
 /* TODO: we store global unique ID in blkid. Instead it we only store chunk offset then
  * max cacapity will increase from MAX_CHUNK_SIZE to MAX_CHUNKS * MAX_CHUNK_SIZE.

@@ -181,10 +181,10 @@ struct dm_info {
 } __attribute((packed));
 
 #define PDEV_INFO_BLK_OFFSET sizeof(dm_info)
-#define CHUNK_INFO_BLK_OFFSET (PDEV_INFO_BLK_OFFSET + (sizeof(pdev_info_block) * HS_STATIC_CONFIG(generic.max_pdevs)))
-#define VDEV_INFO_BLK_OFFSET (CHUNK_INFO_BLK_OFFSET + sizeof(chunk_info_block) * HS_STATIC_CONFIG(generic.max_chunks))
+#define CHUNK_INFO_BLK_OFFSET (PDEV_INFO_BLK_OFFSET + (sizeof(pdev_info_block) * HS_STATIC_CONFIG(engine.max_pdevs)))
+#define VDEV_INFO_BLK_OFFSET (CHUNK_INFO_BLK_OFFSET + sizeof(chunk_info_block) * HS_STATIC_CONFIG(engine.max_chunks))
 
-#define DM_INFO_BLK_SIZE (VDEV_INFO_BLK_OFFSET + HS_STATIC_CONFIG(generic.max_vdevs) * sizeof(vdev_info_block))
+#define DM_INFO_BLK_SIZE (VDEV_INFO_BLK_OFFSET + HS_STATIC_CONFIG(engine.max_vdevs) * sizeof(vdev_info_block))
 
 #define DM_PAYLOAD_OFFSET 10
 
