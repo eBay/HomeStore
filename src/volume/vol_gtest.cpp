@@ -1232,8 +1232,6 @@ TEST_F(IOTest, btree_fix_read_failure_test) {
     auto ret = this->fix_vol_mapping_btree();
     EXPECT_EQ(ret, false);
 
-    this->delete_volumes();
-
     this->shutdown();
     if (remove_file) {
         this->remove_files();
