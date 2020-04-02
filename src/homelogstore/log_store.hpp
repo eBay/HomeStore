@@ -15,8 +15,8 @@ struct logstore_record {
 
 class logstore_req;
 class HomeLogStore;
-using log_req_comp_cb_t = std::function< void(logstore_req*, bool) >;
-using log_write_comp_cb_t = std::function< void(logstore_seq_num_t, bool, void*) >;
+using log_req_comp_cb_t = std::function< void(logstore_req*, logdev_key) >;
+using log_write_comp_cb_t = std::function< void(logstore_seq_num_t, logdev_key, void*) >;
 using log_found_cb_t = std::function< void(logstore_seq_num_t, log_buffer, void*) >;
 using log_store_opened_cb_t = std::function< void(std::shared_ptr< HomeLogStore >) >;
 
@@ -100,6 +100,14 @@ public:
     // std::shared_ptr< HomeLogStore > open_log_store(logstore_id_t store_id);
 
     /**
+     * @brief Remove an existing log store. It removes in-memory and schedule to reuse the store id after device
+     * truncation.
+     *
+     * @param store_id
+     */
+    void remove_log_store(logstore_id_t store_id);
+
+    /**
      * @brief Truncate all the log stores physically on the device.
      *
      * @param dry_run: If the truncate is a real one or just dry run to simulate the truncation
@@ -126,6 +134,7 @@ private:
 
 private:
     folly::Synchronized< std::map< logstore_id_t, logstore_info_t > > m_id_logstore_map;
+    std::set< logstore_id_t > m_unopened_store_id;
     log_store_opened_cb_t m_log_store_opened_cb;
     LogDev m_log_dev;
 };
@@ -238,7 +247,7 @@ public:
      *
      * @param upto_seq_num: Seq num upto which logs are to be truncated
      * @param in_memory_truncate_only If set to false, it will force to truncate the device right away. Its better to
-     * set this to false on cases where there are multiple log stores, so that once all in-memory truncation is
+     * set this to true on cases where there are multiple log stores, so that once all in-memory truncation is
      * completed, a device truncation can be triggered for all the logstores. The device truncation is more expensive
      * and grouping them together yields better results.
      */

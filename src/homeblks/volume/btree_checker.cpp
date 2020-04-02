@@ -11,7 +11,7 @@
 #include <fstream>
 #include <iostream>
 #include <string>
-#include <homeds/bitmap/bitset.hpp>
+#include <engine/homeds/bitmap/bitset.hpp>
 #include <atomic>
 #include <string>
 #include <utility/thread_buffer.hpp>
@@ -124,18 +124,18 @@ void start_homestore() {
 
     // set params
     if (fix_tree) {
-        params.flag = homestore::io_flag::DIRECT_IO;
+        params.open_flags = homestore::io_flag::DIRECT_IO;
         params.is_read_only = false;
     } else {
-        params.flag = homestore::io_flag::READ_ONLY;
+        params.open_flags = homestore::io_flag::READ_ONLY;
         params.is_read_only = true;
     }
     params.min_virtual_page_size = config["min_virtual_page_size"];
     params.cache_size = config["cache_size"];
     params.disk_attr = disk_attributes();
-    params.disk_attr->physical_page_size = config["phys_page_size"];
-    params.disk_attr->disk_align_size = config["align_size"];
-    params.disk_attr->atomic_page_size = config["atomic_phys_page_size"];
+    params.disk_attr->phys_page_size = config["phys_page_size"];
+    params.disk_attr->align_size = config["align_size"];
+    params.disk_attr->atomic_phys_page_size = config["atomic_phys_page_size"];
     params.disk_init = false;
     params.is_file = config["is_file"];
     params.system_uuid = gen(std::string(config["system_uuid"]));
@@ -146,7 +146,7 @@ void start_homestore() {
     params.vol_found_cb = std::bind(vol_found_cb, std::placeholders::_1);
 
     // dump params
-    std::cout << "Configuration\nio_flag = " << params.flag << std::endl;
+    std::cout << "Configuration\nio_flag = " << params.open_flags << std::endl;
     std::cout << "min page size=" << config["min_virtual_page_size"] << std::endl;
     std::cout << "cache size=" << config["cache_size"] << std::endl;
     std::cout << "phys page size=" << config["phys_page_size"] << std::endl;

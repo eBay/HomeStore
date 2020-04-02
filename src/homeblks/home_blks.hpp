@@ -2,14 +2,14 @@
 #define VOL_CONFIG_HPP
 
 #include "api/vol_interface.hpp"
+#include "engine/homestore.hpp"
 #include <memory>
-#include <homeds/btree/btree.hpp>
-#include <blkstore/blkstore.hpp>
-#include <homeds/btree/ssd_btree.hpp>
+#include "engine/homeds/btree/btree.hpp"
+#include "engine/homeds/btree/ssd_btree.hpp"
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <async_http/http_server.hpp>
-#include "homeds/thread/threadpool/thread_pool.h"
+#include "engine/homeds/thread/threadpool/thread_pool.h"
 #include <utility/atomic_counter.hpp>
 #include <metrics/metrics.hpp>
 #include <settings/settings.hpp>
@@ -24,37 +24,17 @@ namespace homestore {
 #define VOL_MAX_IO_SIZE MEMVEC_MAX_IO_SIZE
 #define LBA_BITS 56
 
-/* 1 % of disk space is reserved for volume sb chunks. With 8k page it
- * will come out to be around 7 GB.
- */
-#define MIN_DISK_CAP_SUPPORTED (MIN_CHUNK_SIZE * 100 / 99 + MIN_CHUNK_SIZE)
-
 class MappingKey;
 class MappingValue;
-
-enum blkstore_type : uint32_t {
-    DATA_STORE = 1,
-    METADATA_STORE = 2,
-    SB_STORE = 3,
-    LOGDEV_STORE = 4,
-};
-
-struct blkstore_blob {
-    enum blkstore_type type;
-};
-
-struct sb_blkstore_blob : blkstore_blob {
-    BlkId blkid;
-};
 
 /* Note: below two structures should not be greater then ssd atomic page size. If it is
  * then we need to use double buffer.
  */
 
-#define VOL_SB_SIZE HomeStoreConfig::atomic_phys_page_size
+#define VOL_SB_SIZE HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size)
 #define VOL_SB_MAGIC 0xCEEDDEEB
 #define VOL_SB_VERSION 0x1
-#define HOMEBLKS_SB_SIZE HomeStoreConfig::atomic_phys_page_size
+#define HOMEBLKS_SB_SIZE HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size)
 #define HOMEBLKS_SB_MAGIC 0xCEEDDEEB
 #define HOMEBLKS_SB_VERSION 0x1
 
@@ -117,8 +97,6 @@ struct vol_mem_sb {
 
 using namespace homeds::btree;
 
-#define BLKSTORE_BUFFER_TYPE                                                                                           \
-    BtreeBuffer< MappingKey, MappingValue, btree_node_type::VAR_VALUE, btree_node_type::VAR_VALUE >
 #define MappingBtreeDeclType                                                                                           \
     Btree< btree_store_type::SSD_BTREE, MappingKey, MappingValue, btree_node_type::VAR_VALUE,                          \
            btree_node_type::VAR_VALUE, writeback_req >
@@ -126,12 +104,7 @@ using namespace homeds::btree;
 class HomeBlks;
 using HomeBlksSafePtr = boost::intrusive_ptr< HomeBlks >;
 
-typedef homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy > data_blkstore_t;
-typedef homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy > sb_blkstore_t;
-typedef homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy, BLKSTORE_BUFFER_TYPE > metadata_blkstore_t;
-typedef homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy > logdev_blkstore_t;
 typedef std::map< boost::uuids::uuid, std::shared_ptr< homestore::Volume > > vol_map_t;
-typedef boost::intrusive_ptr< BlkBuffer > blk_buf_t;
 
 class HomeBlksMetrics : public sisl::MetricsGroupWrapper {
 public:
@@ -140,6 +113,9 @@ public:
         register_me_to_farm();
     }
 };
+
+#define BLKSTORE_BUFFER_TYPE                                                                                           \
+    BtreeBuffer< MappingKey, MappingValue, btree_node_type::VAR_VALUE, btree_node_type::VAR_VALUE >
 
 /**
  * @brief HomeBlks - Implementor of VolInterface.
@@ -154,98 +130,64 @@ public:
  * When the main routine calls, HomeBlks::shutdown(), it simply decrements the initial reference count and wait for
  * ref count to become 1, when every subsystem starts
  */
-class HomeBlks : public VolInterface {
-    static HomeBlksSafePtr _instance;
-
-    init_params m_cfg;
-    std::thread m_thread_id;
-    std::unique_ptr< DeviceManager > m_dev_mgr;
-    std::unique_ptr< data_blkstore_t > m_data_blk_store;
-    std::unique_ptr< metadata_blkstore_t > m_metadata_blk_store;
-    std::unique_ptr< sb_blkstore_t > m_sb_blk_store;
-    std::unique_ptr< logdev_blkstore_t > m_logdev_blk_store;
-    sisl::aligned_unique_ptr< homeblks_sb > m_homeblks_sb; // the homestore super block
-    std::unique_ptr< Cache< BlkId > > m_cache;
-    bool m_rdy;
-    vol_map_t m_volume_map;
-    std::recursive_mutex m_vol_lock;
-    vol_mem_sb* m_last_vol_sb;
-    bool m_vdev_failed;
-    uint64_t m_size_avail;
-    uint32_t m_data_pagesz;
-    std::atomic< int > m_scan_cnt;
-    std::atomic< bool > m_init_failed;
-    out_params m_out_params;
-    std::unique_ptr< sisl::HttpServer > m_http_server;
-    std::atomic< uint64_t > m_shutdown_start_time;
-    std::atomic< bool > m_init_finished;
-    std::condition_variable m_cv;
-    std::mutex m_cv_mtx;
-    sisl::atomic_counter< uint64_t > m_usage_counter = 1;
-    bool m_print_checksum;
-    iomgr::timer_handle_t m_shutdown_timer_hdl = iomgr::null_timer_handle;
-    HomeBlksMetrics m_metrics;
-
+class HomeBlks : public VolInterface, public HomeStore< BLKSTORE_BUFFER_TYPE > {
 public:
     static std::string version;
+
+    friend class Volume;
+
+    /**
+     * @brief Initialize the HomeBlks. Before init called, none of the other HomeBlks methods can be used.
+     *
+     * @param cfg : Input Parameters to initialize the homeblks.
+     * @param force_reinit Do we need to forcefully reinitialize the homeblks, even if its initialized already
+     * @return Pointer to the base VolInterface
+     */
     static VolInterface* init(const init_params& cfg, bool force_reinit = false);
+
+    /**
+     * @brief Get the instance or safe instance of this object. It is expected the caller to use safe_instance() and
+     * retain the reference, to ensure that HomeBlks is the last one to be freed.
+     *
+     * @return HomeBlks*
+     */
     static HomeBlks* instance();
     static HomeBlksSafePtr safe_instance();
 
-    friend void intrusive_ptr_add_ref(HomeBlks* hb) { hb->m_usage_counter.increment(1); }
-    friend void intrusive_ptr_release(HomeBlks* hb) {
-        // If there is only one reference remaining after decrementing, then we are done with shutdown, cleanup the
-        // _instance and delete the homeblks.
-        if (hb->m_usage_counter.decrement_test_eq(1)) {
-            auto p = HomeBlks::_instance.detach();
-            assert(p == hb);
-            delete hb;
-        }
-    }
-
-    // Sanity check for sb;
-    bool vol_sb_sanity(vol_mem_sb* sb);
-
-    // Read volume super block based on blkid
-    vol_mem_sb* vol_sb_read(BlkId bid);
-
-    HomeBlks(const init_params& cfg);
     ~HomeBlks() { m_thread_id.join(); }
     virtual vol_interface_req_ptr create_vol_interface_req(std::shared_ptr< Volume > vol, void* buf, uint64_t lba,
                                                            uint32_t nlbas, bool read, bool sync) override;
     virtual std::error_condition write(const VolumePtr& vol, const vol_interface_req_ptr& req) override;
     virtual std::error_condition read(const VolumePtr& vol, const vol_interface_req_ptr& req) override;
     virtual std::error_condition sync_read(const VolumePtr& vol, const vol_interface_req_ptr& req) override;
-    virtual VolumePtr create_volume(const vol_params& params) override;
 
+    virtual VolumePtr create_volume(const vol_params& params) override;
     virtual std::error_condition remove_volume(const boost::uuids::uuid& uuid) override;
     virtual VolumePtr lookup_volume(const boost::uuids::uuid& uuid) override;
     virtual SnapshotPtr snap_volume(VolumePtr) override;
+
     virtual const char* get_name(const VolumePtr& vol) override;
     virtual uint64_t get_page_size(const VolumePtr& vol) override;
     virtual boost::uuids::uuid get_uuid(VolumePtr vol) override;
     virtual homeds::blob at_offset(const blk_buf_t& buf, uint32_t offset) override;
+
     virtual bool vol_state_change(const VolumePtr& vol, vol_state new_state) override;
-    void vol_sb_write(vol_mem_sb* sb);
-    void vol_sb_init(vol_mem_sb* sb);
-    void homeblks_sb_init(BlkId& bid);
-    void homeblks_sb_write();
+
     void vol_scan_cmpltd(const VolumePtr& vol, vol_state state, bool success);
-    void populate_disk_attrs();
     virtual void attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback cb) override;
 
     virtual bool shutdown(bool force = false) override;
     virtual bool trigger_shutdown(const shutdown_comp_callback& shutdown_done_cb = nullptr,
                                   bool force = false) override;
-    virtual cap_attrs get_system_capacity() override;
+    virtual cap_attrs get_system_capacity() override {
+        return HomeStore< BLKSTORE_BUFFER_TYPE >::get_system_capacity();
+    }
     virtual cap_attrs get_vol_capacity(const VolumePtr& vol) override;
 
-    data_blkstore_t* get_data_blkstore();
-    metadata_blkstore_t* get_metadata_blkstore();
-    logdev_blkstore_t* get_logdev_blkstore();
-    void vol_sb_remove(vol_mem_sb* sb);
-    uint32_t get_data_pagesz() const;
-    uint64_t get_boot_cnt();
+    uint64_t get_boot_cnt() const {
+        assert(m_homeblks_sb->boot_cnt < UINT16_MAX);
+        return (uint16_t)m_homeblks_sb->boot_cnt;
+    }
     void init_done(std::error_condition err, const out_params& params);
 
     void print_tree(const VolumePtr& vol, bool chksum = true);
@@ -275,8 +217,18 @@ public:
     void set_io_flip();
     void set_error_flip();
 #endif
+    virtual data_blkstore_t::comp_callback data_completion_cb() override;
 
-    bool print_checksum() { return m_print_checksum; }
+    friend void intrusive_ptr_add_ref(HomeBlks* hb) { hb->m_usage_counter.increment(1); }
+    friend void intrusive_ptr_release(HomeBlks* hb) {
+        // If there is only one reference remaining after decrementing, then we are done with shutdown, cleanup the
+        // _instance and delete the homeblks.
+        if (hb->m_usage_counter.decrement_test_eq(1)) {
+            auto p = HomeBlks::_instance.detach();
+            assert(p == hb);
+            delete hb;
+        }
+    }
 
 public:
     // All http handlers, TODO: Consider moving this to separate class
@@ -289,27 +241,61 @@ public:
     static void dump_stack_trace(sisl::HttpCallData cd);
     static void verify_hs(sisl::HttpCallData cd);
 
+protected:
+    void superblock_init(BlkId bid) override;
+    void superblock_load(const std::vector< blk_buf_t >& bbuf, BlkId sb_blk_id) override;
+    void process_vdev_error(vdev_info_block* vb) override;
+
 private:
-    BlkId alloc_blk();
-    void process_vdev_error(vdev_info_block* vb);
-    void create_blkstores();
-    void add_devices();
+    HomeBlks(const init_params& cfg);
+
+    // Read volume super block based on blkid
+    void vol_sb_write(vol_mem_sb* sb);
+    void vol_sb_init(vol_mem_sb* sb);
+    void vol_sb_remove(vol_mem_sb* sb);
+    vol_mem_sb* vol_sb_read(BlkId bid);
+    bool vol_sb_sanity(vol_mem_sb* sb);
+    void homeblks_sb_write();
+
     void vol_mounted(const VolumePtr& vol, vol_state state);
     void vol_state_change(const VolumePtr& vol, vol_state old_state, vol_state new_state);
     void scan_volumes();
-    void create_data_blkstore(vdev_info_block* vb);
-    void create_metadata_blkstore(vdev_info_block* vb);
-    void create_sb_blkstore(vdev_info_block* vb);
-    void create_logdev_blkstore(vdev_info_block* vb);
-    bool is_ready();
+
     void init_thread();
-    bool is_shutdown();
+    bool is_shutdown() const { return (m_shutdown_start_time.load() != 0); }
     void verify_vols();
     void schedule_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool force);
     bool do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool force);
     bool do_volume_shutdown(bool force);
     blk_buf_t get_valid_buf(const std::vector< blk_buf_t >& bbuf, bool& rewrite);
-    static void new_vdev_found(DeviceManager* dev_mgr, vdev_info_block* vb);
+
+private:
+    static HomeBlksSafePtr _instance;
+
+    init_params m_cfg;
+    std::thread m_thread_id;
+    sisl::aligned_unique_ptr< homeblks_sb > m_homeblks_sb; // the homestore super block
+
+    vol_map_t m_volume_map;
+    std::recursive_mutex m_vol_lock;
+    vol_mem_sb* m_last_vol_sb = nullptr;
+
+    std::atomic< int > m_scan_cnt = 0;
+    std::atomic< bool > m_init_finished = false;
+    std::atomic< bool > m_init_failed = false;
+
+    out_params m_out_params;
+    std::unique_ptr< sisl::HttpServer > m_http_server;
+
+    std::condition_variable m_cv;
+    std::mutex m_cv_mtx;
+    bool m_rdy = false;
+
+    sisl::atomic_counter< uint64_t > m_usage_counter = 1;
+
+    std::atomic< uint64_t > m_shutdown_start_time = 0;
+    iomgr::timer_handle_t m_shutdown_timer_hdl = iomgr::null_timer_handle;
+    HomeBlksMetrics m_metrics;
 };
 } // namespace homestore
 #endif // OMSTORE_OMSTORE_HPP

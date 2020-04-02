@@ -180,9 +180,9 @@ public:
 
         init_params params;
 #ifndef NDEBUG
-        params.flag = homestore::io_flag::BUFFERED_IO;
+        params.open_flags = homestore::io_flag::BUFFERED_IO;
 #else
-        params.flag = homestore::io_flag::DIRECT_IO;
+        params.open_flags = homestore::io_flag::DIRECT_IO;
 #endif
         params.min_virtual_page_size = 4096;
         params.cache_size = 4 * 1024 * 1024 * 1024ul;

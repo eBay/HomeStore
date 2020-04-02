@@ -50,9 +50,11 @@ IndxCP::IndxCP() : CheckPoint(10) {
 
 IndxCP::~IndxCP() {}
 
-void IndxCP::suspend_diff_cp() { /* TODO : implement it in snapshot */ }
+void IndxCP::suspend_diff_cp() { /* TODO : implement it in snapshot */
+}
 
-void IndxCP::resume_diff_cp() { /* TODO: implement it in snapshot */ }
+void IndxCP::resume_diff_cp() { /* TODO: implement it in snapshot */
+}
 
 void IndxCP::cp_start(indx_cp_id* id) {
     /* decrement the ref cnt */
@@ -78,7 +80,8 @@ void IndxCP::recovery_done() {}
 
 IndxMgr::IndxMgr(bool init, const vol_params& params, io_done_cb io_cb, free_blk_callback free_blk_cb,
                  pending_read_blk_cb read_blk_cb) :
-        m_io_cb(io_cb), m_pending_read_blk_cb(read_blk_cb) {
+        m_io_cb(io_cb),
+        m_pending_read_blk_cb(read_blk_cb) {
     if (!init) {
         recovery();
         return;
@@ -111,7 +114,8 @@ void IndxMgr::recovery() {}
 
 mapping* IndxMgr::get_active_indx() { return m_active_map; }
 
-void IndxMgr::journal_comp_cb(logstore_seq_num_t seq_num, bool status, void* req) {
+void IndxMgr::journal_comp_cb(logstore_seq_num_t seq_num, logdev_key ld_key, void* req) {
+    assert(ld_key.is_valid());
     auto vreq = boost::intrusive_ptr< volume_req >((volume_req*)req, false);
     journal_comp_cb_internal(vreq);
 }
@@ -119,7 +123,8 @@ void IndxMgr::journal_comp_cb(logstore_seq_num_t seq_num, bool status, void* req
 void IndxMgr::journal_comp_cb_internal(volume_req_ptr& vreq) {
     m_io_cb(vreq);
     int cnt = vreq->cp_id->ref_cnt.fetch_sub(1);
-    if (cnt == 1) { /* send signal to the thread to do cp start */ }
+    if (cnt == 1) { /* send signal to the thread to do cp start */
+    }
 }
 
 void IndxMgr::journal_write(volume_req_ptr& vreq) {

@@ -3,7 +3,8 @@
 /* NOTE: This file exports interface required to access homeblocks. we should try to avoid including any
  * homestore/homeblocks related hpp file.
  */
-#include <common/homestore_header.hpp>
+#include "engine/common/homestore_header.hpp"
+#include "engine/common/homestore_config.hpp"
 #include <functional>
 #include <vector>
 #include <memory>
@@ -40,19 +41,6 @@ public:
     static VolInterface* init(const init_params& cfg, bool force_reinit);
     static boost::intrusive_ptr< VolInterface > safe_instance();
     static VolInterface* raw_instance();
-};
-
-struct cap_attrs {
-    uint64_t used_data_size;
-    uint64_t used_metadata_size;
-    uint64_t used_total_size;
-    uint64_t initial_total_size;
-    std::string to_string() {
-        std::stringstream ss;
-        ss << "used_data_size = " << used_data_size << ", used_metadata_size = " << used_metadata_size
-           << ", used_total_size = " << used_total_size << ", initial_total_size = " << initial_total_size;
-        return ss.str();
-    }
 };
 
 struct buf_info {
@@ -170,41 +158,13 @@ struct out_params {
 typedef std::shared_ptr< Volume > VolumePtr;
 typedef std::shared_ptr< Snapshot > SnapshotPtr;
 
-/* This is the optional parameteres which should be given by its consumers only when there is no
- * system command to get these parameteres directly from disks. Or Consumer want to override
- * the default values.
- */
-struct disk_attributes {
-    uint32_t physical_page_size; // page size of ssds. It should be same for all the disks.
-                                 // It shouldn't be less then 8k
-    uint32_t disk_align_size;    // size alignment supported by disks. It should be
-                                 // same for all the disks.
-    uint32_t atomic_page_size;   // atomic page size of the disk
-};
-
-struct init_params {
+struct init_params : public hs_input_params {
 public:
     typedef std::function< void(std::error_condition err, const out_params& params) > init_done_callback;
     typedef std::function< bool(boost::uuids::uuid uuid) > vol_found_callback;
     typedef std::function< void(const VolumePtr& vol, vol_state state) > vol_mounted_callback;
     typedef std::function< void(const VolumePtr& vol, vol_state old_state, vol_state new_state) >
         vol_state_change_callback;
-
-    /* system parameters */
-    uint32_t min_virtual_page_size;  // minimum page size supported. Ideally it should be 4k.
-    uint64_t cache_size;             // memory available for cache. We should give 80 % of the whole
-    bool disk_init;                  // true if disk has to be initialized.
-    std::vector< dev_info > devices; // name of the devices.
-    bool is_file;
-    boost::uuids::uuid system_uuid;
-    io_flag flag = io_flag::DIRECT_IO;
-#ifndef NDEBUG
-    size_t mem_btree_page_size = 8192;
-#endif
-
-    /* optional parameters */
-    boost::optional< disk_attributes > disk_attr;
-    boost::optional< bool > is_read_only;
 
     /* completions callback */
     init_done_callback init_done_cb;
@@ -216,7 +176,7 @@ public:
     std::string to_string() {
         std::stringstream ss;
         ss << "min_virtual_page_size=" << min_virtual_page_size << ",cache_size=" << cache_size
-           << ",disk_init=" << disk_init << ",is_file=" << is_file << ",flag =" << flag
+           << ",disk_init=" << disk_init << ",is_file=" << is_file << ",open_flags =" << open_flags
            << ",number of devices =" << devices.size();
         ss << "device names = ";
         for (uint32_t i = 0; i < devices.size(); ++i) {

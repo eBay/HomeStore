@@ -42,8 +42,8 @@ Volume::Volume(const vol_params& params) :
         new IndxMgr(true, params, std::bind(&Volume::process_indx_completions, this, std::placeholders::_1),
                     std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1),
                     std::bind(&Volume::pending_read_blk_cb, this, std::placeholders::_1, std::placeholders::_2));
-    m_sb = std::make_unique< vol_mem_sb >(HomeStoreConfig::align_size, VOL_SB_SIZE);
-    auto ret = posix_memalign((void**)&(m_sb->ondisk_sb), HomeStoreConfig::align_size, VOL_SB_SIZE);
+    m_sb = std::make_unique< vol_mem_sb >(HS_STATIC_CONFIG(disk_attr.align_size), VOL_SB_SIZE);
+    auto ret = posix_memalign((void**)&(m_sb->ondisk_sb), HS_STATIC_CONFIG(disk_attr.align_size), VOL_SB_SIZE);
     assert(!ret);
     assert(m_sb != nullptr);
 
@@ -102,7 +102,7 @@ Volume::Volume(vol_mem_sb* sb) :
 /* it should be called during recovery */
 void Volume::recovery_start() { vol_scan_alloc_blks(); }
 
-uint64_t Volume::get_metadata_used_size() { return get_mapping_handle()->get_used_size(); }
+uint64_t Volume::get_index_used_size() { return get_mapping_handle()->get_used_size(); }
 
 #ifdef _PRERELEASE
 void Volume::set_error_flip() {
@@ -166,10 +166,6 @@ void Volume::pending_read_blk_cb(volume_req_ptr vreq, BlkId& bid) {
 #ifndef NDEBUG
 void Volume::verify_pending_blks() { assert(m_read_blk_tracker->get_size() == 0); }
 #endif
-
-boost::uuids::uuid Volume::get_uuid() { return (get_sb()->ondisk_sb->uuid); }
-
-vol_state Volume::get_state() { return m_state.load(std::memory_order_acquire); }
 
 void Volume::destroy() { set_state(vol_state::DESTROYING); }
 

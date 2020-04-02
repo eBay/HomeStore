@@ -1,13 +1,13 @@
 #pragma once
 
-#include "device/device.h"
 #include <fcntl.h>
-#include <cache/cache_common.hpp>
-#include <cache/cache.h>
-#include "blkstore/writeBack_cache.hpp"
-#include <device/blkbuffer.hpp>
-#include <blkstore/blkstore.hpp>
-#include <homeblks/home_blks.hpp>
+#include "engine/device/device.h"
+#include "engine/cache/cache_common.hpp"
+#include "engine/cache/cache.h"
+#include "engine/blkstore/writeBack_cache.hpp"
+#include "engine/device/blkbuffer.hpp"
+#include "engine/blkstore/blkstore.hpp"
+#include "homeblks/home_blks.hpp"
 #include <metrics/metrics.hpp>
 #include <utility/atomic_counter.hpp>
 #include <utility/obj_life_counter.hpp>
@@ -15,8 +15,8 @@
 #include <fds/obj_allocator.hpp>
 #include <sds_logging/logging.h>
 #include <spdlog/fmt/fmt.h>
-#include "common/homestore_assert.hpp"
-#include "homeds/thread/threadpool/thread_pool.h"
+#include "engine/common/homestore_assert.hpp"
+#include "engine/homeds/thread/threadpool/thread_pool.h"
 #include "blk_read_tracker.hpp"
 #include "snapshot.hpp"
 #include "indx_mgr.hpp"
@@ -313,12 +313,12 @@ public:
     bool fix_mapping_btree(bool verify);
 
     uint64_t get_data_used_size() { return m_used_size; }
-    uint64_t get_metadata_used_size();
+    uint64_t get_index_used_size();
     const char* get_name() const { return (m_sb->ondisk_sb->vol_name); }
     uint64_t get_page_size() const { return m_sb->ondisk_sb->page_size; }
     uint64_t get_size() const { return m_sb->ondisk_sb->size; }
-    boost::uuids::uuid get_uuid();
-    vol_state get_state();
+    boost::uuids::uuid get_uuid() { return m_sb->ondisk_sb->uuid; }
+    vol_state get_state() const { return m_state.load(std::memory_order_acquire); }
     void set_state(vol_state state, bool persist = true);
     bool is_offline();
 

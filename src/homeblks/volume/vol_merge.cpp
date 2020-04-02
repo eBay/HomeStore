@@ -7,7 +7,7 @@
 #include <fstream>
 #include <iostream>
 #include <string>
-#include <homeds/bitmap/bitset.hpp>
+#include <engine/homeds/bitmap/bitset.hpp>
 #include <atomic>
 #include <string>
 #include <utility/thread_buffer.hpp>
@@ -224,7 +224,7 @@ public:
 
         init_params params;
 
-        params.flag = homestore::io_flag::DIRECT_IO;
+        params.open_flags = homestore::io_flag::DIRECT_IO;
         params.min_virtual_page_size = 4096;
         params.cache_size = 4 * 1024 * 1024 * 1024ul;
         params.disk_init = init;

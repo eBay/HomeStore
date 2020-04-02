@@ -1,6 +1,10 @@
 #include "log_dev.hpp"
+#include "homeblks/home_blks.hpp"
 
 namespace homestore {
+LogDev::LogDev() = default;
+LogDev::~LogDev() = default;
+
 void LogDev::start(bool format) {
     HS_ASSERT(LOGMSG, (m_append_comp_cb != nullptr), "Expected Append callback to be registered");
     HS_ASSERT(LOGMSG, (m_store_found_cb != nullptr), "Expected Log store found callback to be registered");
@@ -63,80 +67,6 @@ void LogDev::stop() {
     m_block_flush_q.clear();
     m_hb = nullptr;
 }
-
-#if 0
-void LogDev::do_load(uint64_t device_cursor) {
-    auto store = m_hb->get_logdev_blkstore();
-    bool more_records = true;
-    logid_t loaded_from = -1;
-
-    store->lseek(device_cursor);
-    while (more_records) {
-        // Read the data in bulk (of say 512K) and then process each log group header
-        auto buf = sisl::make_byte_array(bulk_read_size, dma_boundary);
-        auto rbuf = buf->bytes;
-        uint32_t rbuf_offset = 0;
-        ssize_t this_read_remains;
-
-        uint64_t log_group_offset;
-        do {
-            log_group_offset = store->seeked_pos();
-            this_read_remains = store->read((void*)rbuf, bulk_read_size);
-            LOGINFO("LogDev read {} bytes from offset {} ", this_read_remains, log_group_offset);
-            if (this_read_remains != 0) { break; }
-
-            // We have come to the end of the device, seek to start, if we are already not start
-            if (log_group_offset == 0) {
-                more_records = false;
-                break;
-            }
-            store->lseek(0);
-        } while (true);
-
-        // Loop thru the entire bulk read buffer and process one log group at a time.
-        while (this_read_remains > 0) {
-            LOGINFO("LogDev still has {} remaining read data from previous read group_offset {}", this_read_remains,
-                    log_group_offset);
-            bool partial_group = false;
-            auto header = read_validate_header(rbuf, this_read_remains, &partial_group);
-            if (header == nullptr) {
-                assert(partial_group == false);
-                LOGINFO("LogDev loaded log_idx in range of [{} - {}]", loaded_from, m_log_idx - 1);
-                more_records = false;
-                break;
-            }
-
-            if (partial_group) {
-                // We have partial header, need to read more
-                LOGINFO("LogDev read partial group upto log_idx {} so far and group_offset {} reading more ",
-                        m_log_idx - 1, log_group_offset);
-                store->lseek(log_group_offset);
-                break;
-            }
-
-            if (loaded_from == -1) { loaded_from = header->start_idx(); }
-
-            // Loop through each record within the log group and do a callback
-            auto i = 0u;
-            while (i < header->nrecords()) {
-                auto* rec = header->nth_record(i);
-                uint32_t data_offset = rbuf_offset + (rec->offset + (rec->is_inlined ? 0 : header->oob_data_offset));
-
-                // Do a callback on the found log entry
-                log_buffer b(buf, data_offset, rec->size);
-                m_logfound_cb(rec->store_id, rec->store_seq_num, {header->start_idx() + i, log_group_offset}, b);
-                ++i;
-            }
-
-            m_log_idx = header->start_idx() + i;
-            log_group_offset += header->total_size();
-            rbuf += header->total_size();
-            rbuf_offset += header->total_size();
-            this_read_remains -= header->total_size();
-        }
-    }
-}
-#endif
 
 void LogDev::do_load(uint64_t device_cursor) {
     log_stream_reader lstream(device_cursor);
@@ -271,73 +201,6 @@ log_buffer LogDev::read(const logdev_key& key) {
     return b;
 }
 
-#if 0
-log_group_header* LogDev::read_validate_header(uint8_t* buf, uint32_t size, bool* partial_group) {
-    auto header = (log_group_header*)buf;
-    if (header->magic_word() != LOG_GROUP_HDR_MAGIC) {
-        auto store = m_hb->get_logdev_blkstore();
-        auto cur_pos = store->seeked_pos();
-        LOGINFO("Logdev data not seeing magic, must have come to end of logdev at pos {}", cur_pos);
-
-        // We do not have the magic, its now to determine if it is indeed corruption in the data or we reached the
-        // end of the cycle. The way to determine is keep reading all 512 block boundary and try to see if we see
-        // any valid headers and whose log_idx > our idx
-        sisl::byte_array safe_buf;
-        while ((safe_buf = read_next_header(max_blks_read_for_additional_check)) != nullptr) {
-            auto header = (log_group_header*)safe_buf.get();
-            HS_ASSERT_CMP(RELEASE, m_log_idx.load(std::memory_order_acquire), >, header->start_idx(),
-                          "Found a header with future log_idx after reaching end of log. Hence rbuf which was read "
-                          "must have been corrupted");
-        }
-
-        store->lseek(cur_pos); // Seek it back since cursor would have moved whatever we have read
-        *partial_group = false;
-        return nullptr;
-    }
-
-    // We don't have all the buffers for this group yet, try to read more later.
-    if (header->total_size() > size) {
-        *partial_group = true;
-        return header;
-    }
-
-    // Compute CRC of the data and validate
-    crc32_t crc = crc32_ieee(init_crc32, ((uint8_t*)buf) + sizeof(log_group_header),
-                             header->total_size() - sizeof(log_group_header));
-    HS_ASSERT_CMP(RELEASE, header->this_group_crc(), ==, crc, "CRC mismatch on read data");
-
-    // Validate previous CRC that we have seen
-    if (m_last_crc != INVALID_CRC32_VALUE) {
-        HS_ASSERT_CMP(RELEASE, header->prev_group_crc(), ==, m_last_crc,
-                      "Prev CRC value does not match with whats in header");
-    }
-
-    m_last_crc = crc;
-    *partial_group = false;
-    return header;
-}
-
-sisl::byte_array LogDev::read_next_header(uint32_t max_buf_reads) {
-    uint32_t read_count = 0;
-
-    auto store = m_hb->get_logdev_blkstore();
-    while (read_count < max_buf_reads) {
-        auto tmp_buf = sisl::make_byte_array(dma_boundary, dma_boundary);
-        auto read_bytes = store->read((void*)tmp_buf->bytes, dma_boundary);
-        if (read_bytes == 0) {
-            store->lseek(0);
-            continue;
-        }
-        assert(read_bytes >= (ssize_t)sizeof(log_group_header));
-        ++read_count;
-
-        auto header = (log_group_header*)tmp_buf->bytes;
-        if (header->magic_word() == LOG_GROUP_HDR_MAGIC) { return tmp_buf; }
-    }
-    return nullptr;
-}
-#endif
-
 uint32_t LogDev::reserve_store_id(bool persist) {
     std::unique_lock lg(m_store_reserve_mutex);
     auto id = m_id_reserver->reserve();
@@ -345,9 +208,33 @@ uint32_t LogDev::reserve_store_id(bool persist) {
     return id;
 }
 
+void LogDev::unreserve_store_id(uint32_t store_id) {
+    std::unique_lock lg(m_store_reserve_mutex);
+
+    /* Get the current log_idx as marker and insert into garbage store id. Upon device truncation, these ids will
+     * be reclaimed */
+    auto log_id = m_log_idx.load(std::memory_order_acquire) - 1;
+    m_garbage_store_ids.insert(std::pair< logid_t, logstore_id_t >(log_id, store_id));
+}
+
 void LogDev::persist_store_ids() {
     std::unique_lock lg(m_store_reserve_mutex);
     _persist_info_block();
+}
+
+void LogDev::get_registered_store_ids(std::vector< logstore_id_t >& registered, std::vector< logstore_id_t >& garbage) {
+    uint32_t store_id = 0;
+    std::unique_lock lg(m_store_reserve_mutex);
+    if (m_id_reserver->first_reserved_id(store_id)) {
+        registered.push_back(store_id);
+        while (m_id_reserver->next_reserved_id(store_id)) {
+            registered.push_back(store_id);
+        }
+    }
+    garbage.clear();
+    for (auto& elem : m_garbage_store_ids) {
+        garbage.push_back(elem.second);
+    }
 }
 
 void LogDev::_persist_info_block() {
@@ -380,8 +267,8 @@ LogGroup* LogDev::prepare_flush(int32_t estimated_records) {
     lg->m_log_dev_offset = m_hb->get_logdev_blkstore()->alloc_blk(lg->header()->group_size);
 
     assert(lg->header()->oob_data_offset > 0);
-    LOGINFO("Flushing upto log_idx={}", flushing_upto_idx);
-    LOGINFO("Log Group: {}", *lg);
+    LOGDEBUG("Flushing upto log_idx={}", flushing_upto_idx);
+    LOGDEBUG("Log Group: {}", *lg);
     return lg;
 }
 
@@ -485,7 +372,24 @@ void LogDev::unlock_flush() {
 void LogDev::truncate(const logdev_key& key) {
     auto store = m_hb->get_logdev_blkstore();
 
+    LOGINFO("Truncating log device upto log_id={} vdev_offset={}", key.idx, key.dev_offset);
     m_log_records->truncate(key.idx);
     store->truncate(key.dev_offset);
+
+    // Now that store is truncated, we can reclaim the store ids which are garbaged (if any) earlier
+    {
+        bool persist = false;
+        std::unique_lock lg(m_store_reserve_mutex);
+        for (auto it = m_garbage_store_ids.cbegin(); it != m_garbage_store_ids.cend();) {
+            if (it->first > key.idx) break;
+            persist = true;
+
+            LOGINFO("Garbage collecting the log store id {} log_idx={}", it->second, it->first);
+            m_id_reserver->unreserve(it->second);
+            it = m_garbage_store_ids.erase(it);
+        }
+
+        if (persist) { _persist_info_block(); }
+    }
 }
 } // namespace homestore

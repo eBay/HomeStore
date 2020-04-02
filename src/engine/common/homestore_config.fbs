@@ -1,0 +1,48 @@
+native_include "utility/non_null_ptr.hpp";
+
+namespace homestorecfg;
+
+attribute "hotswap";
+attribute "deprecated";
+
+table BlkAllocator {
+    max_cache_fill_varsize_blk_alloc_attempt: uint32 = 3 (hotswap); 
+    max_varsize_blk_alloc_attempt: uint32 = 1000 (hotswap);
+}
+
+table Btree {
+    max_nodes_to_rebalance: uint32 = 3; 
+
+    mem_btree_page_size : uint32 = 8192;
+}
+
+table Cache {
+    /* Number of entries we ideally want to have per hash bucket. This number if small, will reduce contention and
+     * speed of read/writes, but at the cost of increased memory */
+    entries_per_hash_bucket: uint32 = 2;
+
+    /* Number of eviction partitions. More the partitions better the parallelization of requests, but lesser the
+     * effectiveness of cache, since it could get evicted sooner than expected, if distribution of key hashing is not
+     * even.*/
+    num_evictor_partitions: uint32 = 32;
+}
+
+table Device {
+    max_error_before_marking_dev_down: uint32 = 100 (hotswap);
+
+    // Outstanding IOs expected per thread. Exceeding this will result in io_submit failure
+    max_outstanding_ios_per_aio_thread: uint32 = 200;
+
+    // Max completions to process per event in a thread
+    max_completions_process_per_event_per_thread: uint32 = 200;
+}
+
+table HomeStoreSettings {
+    version: uint32;
+    blkallocator: BlkAllocator;
+    cache: Cache;
+    btree: Btree;
+    device: Device;
+}
+
+root_type HomeStoreSettings;

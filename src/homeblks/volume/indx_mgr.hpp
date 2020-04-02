@@ -1,7 +1,8 @@
 #pragma once
 #include <cassert>
-#include "checkpoint/checkpoint.hpp"
+#include "engine/checkpoint/checkpoint.hpp"
 #include "homelogstore/log_store.hpp"
+#include "api/vol_interface.hpp"
 
 namespace homestore {
 struct volume_req;
@@ -82,7 +83,7 @@ private:
     void recovery();
     void journal_comp_cb_internal(volume_req_ptr& req);
     void journal_write(volume_req_ptr& vreq);
-    void journal_comp_cb(logstore_seq_num_t seq_num, bool status, void* req);
+    void journal_comp_cb(logstore_seq_num_t seq_num, logdev_key ld_key, void* req);
     void update_indx_tbl(volume_req_ptr& vreq);
 
 public:

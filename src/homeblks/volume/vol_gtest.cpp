@@ -13,7 +13,7 @@
 #include <fstream>
 #include <iostream>
 #include <string>
-#include <homeds/bitmap/bitset.hpp>
+#include <engine/homeds/bitmap/bitset.hpp>
 #include <atomic>
 #include <string>
 #include <utility/thread_buffer.hpp>
@@ -66,7 +66,7 @@ uint32_t expected_vol_state = 0;
 uint32_t verify_only = 0;
 uint32_t is_abort = 0;
 uint32_t flip_set = 0;
-uint32_t atomic_page_size = 512;
+uint32_t atomic_phys_page_size = 512;
 uint32_t vol_page_size = 4096;
 uint32_t phy_page_size = 4096;
 uint32_t mem_btree_page_size = 4096;
@@ -280,7 +280,7 @@ public:
         m_tgt.init();
 
         init_params params;
-        params.flag = static_cast< enum io_flag >(io_flags);
+        params.open_flags = static_cast< enum io_flag >(io_flags);
         params.min_virtual_page_size = vol_page_size;
         params.cache_size = 4 * 1024 * 1024 * 1024ul;
         params.disk_init = init;
@@ -293,12 +293,10 @@ public:
         params.vol_found_cb = std::bind(&IOTest::vol_found_cb, this, std::placeholders::_1);
 
         params.disk_attr = disk_attributes();
-        params.disk_attr->physical_page_size = phy_page_size;
-        params.disk_attr->disk_align_size = 4096;
-        params.disk_attr->atomic_page_size = atomic_page_size;
-#ifndef NDEBUG
-        params.mem_btree_page_size = mem_btree_page_size;
-#endif
+        params.disk_attr->phys_page_size = phy_page_size;
+        params.disk_attr->align_size = 4096;
+        params.disk_attr->atomic_phys_page_size = atomic_phys_page_size;
+
         boost::uuids::string_generator gen;
         params.system_uuid = gen("01970496-0262-11e9-8eb2-f2801f1b9fd1");
         VolInterface::init(params);
@@ -1397,8 +1395,8 @@ SDS_OPTION_GROUP(
     (abort, "", "abort", "abort", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
     (flip, "", "flip", "flip", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
     (delete_volume, "", "delete_volume", "delete_volume", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
-    (atomic_page_size, "", "atomic_page_size", "atomic_page_size",
-     ::cxxopts::value< uint32_t >()->default_value("4096"), "atomic_page_size"),
+    (atomic_phys_page_size, "", "atomic_phys_page_size", "atomic_phys_page_size",
+     ::cxxopts::value< uint32_t >()->default_value("4096"), "atomic_phys_page_size"),
     (vol_page_size, "", "vol_page_size", "vol_page_size", ::cxxopts::value< uint32_t >()->default_value("4096"),
      "vol_page_size"),
     (device_list, "", "device_list", "List of device paths", ::cxxopts::value< std::vector< std::string > >(),
@@ -1446,7 +1444,7 @@ int main(int argc, char* argv[]) {
     is_abort = SDS_OPTIONS["abort"].as< uint32_t >();
     flip_set = SDS_OPTIONS["flip"].as< uint32_t >();
     can_delete_volume = SDS_OPTIONS["delete_volume"].as< uint32_t >() ? true : false;
-    atomic_page_size = SDS_OPTIONS["atomic_page_size"].as< uint32_t >();
+    atomic_phys_page_size = SDS_OPTIONS["atomic_phys_page_size"].as< uint32_t >();
     vol_page_size = SDS_OPTIONS["vol_page_size"].as< uint32_t >();
     phy_page_size = SDS_OPTIONS["phy_page_size"].as< uint32_t >();
     mem_btree_page_size = SDS_OPTIONS["mem_btree_page_size"].as< uint32_t >();

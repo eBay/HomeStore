@@ -32,27 +32,28 @@ set(COMMON_LIB_DEPS
 
 include_directories (BEFORE .)
 
-add_subdirectory(blkalloc)
-add_subdirectory(blkstore)
-add_subdirectory(cache)
-add_subdirectory(device)
+#add_subdirectory(blkalloc)
+#add_subdirectory(blkstore)
+#add_subdirectory(cache)
+#add_subdirectory(device)
 #add_subdirectory(endpoint)
-add_subdirectory(homelogstore)
 #add_subdirectory(journal)
-add_subdirectory(homeds)
-add_subdirectory(homeblks)
+#add_subdirectory(homeds)
+#add_subdirectory(homeblks)
 #add_subdirectory(error)
-add_subdirectory(common)
+#add_subdirectory(common)
 #add_subdirectory(threadpool)
+
+add_subdirectory(engine)
+add_subdirectory(homeblks)
+add_subdirectory(homelogstore)
 add_subdirectory(test_scripts)
 
 set(HOMESTORE_OBJECTS
+        $<TARGET_OBJECTS:hs_engine>
         $<TARGET_OBJECTS:hs_common>
         $<TARGET_OBJECTS:hs_device>
-        #$<TARGET_OBJECTS:hs_mapping>
-        #$<TARGET_OBJECTS:hs_endpoint>
         $<TARGET_OBJECTS:hs_blkalloc>
-        #$<TARGET_OBJECTS:hs_error>
         $<TARGET_OBJECTS:hs_logdev>
         )
 add_library(homestore STATIC ${HOMESTORE_OBJECTS})

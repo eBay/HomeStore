@@ -1,4 +1,5 @@
 #include "log_dev.hpp"
+#include "homeblks/home_blks.hpp"
 
 namespace homestore {
 log_stream_reader::log_stream_reader(uint64_t device_cursor) {
