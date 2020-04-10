@@ -24,6 +24,7 @@ bool same_value_gen = false;
 
 HomeBlksSafePtr HomeBlks::_instance = nullptr;
 std::string HomeBlks::version = PACKAGE_VERSION;
+thread_local std::vector< std::shared_ptr< Volume > > HomeBlks::s_io_completed_volumes = {};
 
 VolInterface* VolInterfaceImpl::init(const init_params& cfg, bool force_reinit) {
     return (HomeBlks::init(cfg, force_reinit));
@@ -60,6 +61,16 @@ VolInterface* HomeBlks::init(const init_params& cfg, bool force_reinit) {
     }
 }
 
+vol_interface_req::vol_interface_req(void* wbuf, uint64_t lba, uint32_t nblks, bool is_sync) :
+        write_buf(wbuf),
+        request_id(counter_generator.next_request_id()),
+        refcount(0),
+        lba(lba),
+        nblks(nblks),
+        sync(is_sync) {}
+
+vol_interface_req::~vol_interface_req() = default;
+
 HomeBlks::HomeBlks(const init_params& cfg) : m_cfg(cfg), m_metrics("HomeBlks") {
     LOGINFO("Initializing HomeBlks with Config {}", m_cfg.to_string());
     HomeStore< BLKSTORE_BUFFER_TYPE >::init((const hs_input_params&)cfg);
@@ -87,9 +98,8 @@ cap_attrs HomeBlks::get_vol_capacity(const VolumePtr& vol) {
     return cap;
 }
 
-vol_interface_req_ptr HomeBlks::create_vol_interface_req(std::shared_ptr< Volume > vol, void* buf, uint64_t lba,
-                                                         uint32_t nlbas, bool read, bool sync) {
-    return Volume::create_volume_req(vol, buf, lba, nlbas, read, sync);
+vol_interface_req_ptr HomeBlks::create_vol_interface_req(void* buf, uint64_t lba, uint32_t nblks, bool is_sync) {
+    return vol_interface_req_ptr(new vol_interface_req(buf, lba, nblks, is_sync));
 }
 
 std::error_condition HomeBlks::write(const VolumePtr& vol, const vol_interface_req_ptr& req) {
@@ -99,6 +109,7 @@ std::error_condition HomeBlks::write(const VolumePtr& vol, const vol_interface_r
         throw std::invalid_argument("null vol ptr");
     }
     if (!m_rdy || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
+    req->vol_instance = vol;
     return (vol->write(req));
 }
 
@@ -109,6 +120,7 @@ std::error_condition HomeBlks::read(const VolumePtr& vol, const vol_interface_re
         throw std::invalid_argument("null vol ptr");
     }
     if (!m_rdy || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
+    req->vol_instance = vol;
     return (vol->read(req));
 }
 
@@ -119,6 +131,7 @@ std::error_condition HomeBlks::sync_read(const VolumePtr& vol, const vol_interfa
         throw std::invalid_argument("null vol ptr");
     }
     if (!m_rdy || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
+    req->vol_instance = vol;
     return (vol->read(req));
 }
 
@@ -435,7 +448,10 @@ void HomeBlks::process_vdev_error(vdev_info_block* vb) {
     }
 }
 
-void HomeBlks::attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback cb) { vol->attach_completion_cb(cb); }
+void HomeBlks::attach_vol_completion_cb(const VolumePtr& vol, const io_comp_callback& cb) {
+    vol->attach_completion_cb(cb);
+}
+void HomeBlks::attach_batch_sentinel_cb(const batch_sentinel_callback& cb) { m_cfg.batch_sentinel_cb = cb; }
 
 void HomeBlks::vol_mounted(const VolumePtr& vol, vol_state state) {
     m_cfg.vol_mounted_cb(vol, state);
@@ -660,6 +676,16 @@ void HomeBlks::init_thread() {
                                      handler_info("/api/v1/verifyHS", HomeBlks::verify_hs, (void*)this),
                                  }}));
         m_http_server->start();
+
+        // Attach all completions
+        iomanager.default_drive_interface()->attach_batch_sentinel_cb([this](int nevents) {
+            auto v_comp_events = 0;
+            for (auto& v : s_io_completed_volumes) {
+                v_comp_events += v->call_batch_completion_cbs();
+            }
+            s_io_completed_volumes.clear();
+            if (m_cfg.batch_sentinel_cb && v_comp_events) m_cfg.batch_sentinel_cb(v_comp_events);
+        });
 
         /* scan volumes */
         auto vol_scan_start_time = Clock::now();

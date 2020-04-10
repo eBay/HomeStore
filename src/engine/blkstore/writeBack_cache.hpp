@@ -1,10 +1,10 @@
 #ifndef WRITEBACK_CACHE_HPP
 #define WRITEBACK_CACHE_HPP
 
-#include "cache/cache.h"
+#include "engine/cache/cache.h"
 #include <vector>
-#include <common/error.h>
-#include <device/virtual_dev.hpp>
+#include "engine/common/error.h"
+#include "engine/device/virtual_dev.hpp"
 
 extern bool vol_test_enable;
 

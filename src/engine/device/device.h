@@ -16,11 +16,11 @@
 #include <string>
 #include <sds_logging/logging.h>
 #include <fcntl.h>
-#include "blkalloc/blk_allocator.h"
+#include "engine/blkalloc/blk_allocator.h"
 #include <boost/uuid/uuid.hpp>            // uuid class
 #include <boost/uuid/uuid_generators.hpp> // generators
 #include <boost/uuid/uuid_io.hpp>         // streaming operators etc.
-#include "homeds/array/sparse_vector.hpp"
+#include <fds/sparse_vector.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <fds/utils.hpp>
 #include <isa-l/crc.h>
@@ -501,9 +501,9 @@ private:
 
     std::mutex m_dev_mutex;
 
-    homeds::sparse_vector< std::unique_ptr< PhysicalDev > > m_pdevs;
-    homeds::sparse_vector< std::unique_ptr< PhysicalDevChunk > > m_chunks;
-    homeds::sparse_vector< AbstractVirtualDev* > m_vdevs;
+    sisl::sparse_vector< std::unique_ptr< PhysicalDev > > m_pdevs;
+    sisl::sparse_vector< std::unique_ptr< PhysicalDevChunk > > m_chunks;
+    sisl::sparse_vector< AbstractVirtualDev* > m_vdevs;
     uint32_t m_last_vdevid;
     uint32_t m_vdev_metadata_size; // Appln metadata size for vdev
     uint32_t m_pdev_id;

@@ -103,7 +103,7 @@ public:
     /* after overwriting blk id in write flow, its marked for safe removal if cannot be freed immediatly*/
     void safe_remove_blk_on_write(Free_Blk_Entry& fbe);
 
-    void safe_remove_blks(boost::intrusive_ptr< volume_req >& vreq);
+    void safe_remove_blks(volume_req* vreq);
     uint64_t get_size() { return m_pending_reads_map.get_size(); }
 };
 } // namespace homestore

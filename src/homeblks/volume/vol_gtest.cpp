@@ -20,6 +20,7 @@
 #include <chrono>
 #include <thread>
 #include <boost/filesystem.hpp>
+#include <fds/utils.hpp>
 extern "C" {
 #include <fcntl.h>
 #include <sys/epoll.h>
@@ -134,10 +135,8 @@ class IOTest : public ::testing::Test {
             iomanager.add_interface(m_iface);
 
             m_ev_fd = eventfd(0, EFD_NONBLOCK);
-            m_ev_fdinfo = iomanager.add_fd(m_iface.get(), m_ev_fd,
-                                           std::bind(&TestTarget::on_new_io_request, this, std::placeholders::_1,
-                                                     std::placeholders::_2, std::placeholders::_3),
-                                           EPOLLIN, 9, nullptr);
+            m_ev_fdinfo = iomanager.add_fd(m_iface.get(), m_ev_fd, bind_this(TestTarget::on_new_io_request, 3), EPOLLIN,
+                                           9, nullptr);
         }
 
         void shutdown() { iomanager.remove_fd(m_iface.get(), m_ev_fdinfo); }
@@ -200,6 +199,8 @@ protected:
     TestTarget m_tgt;
 
 public:
+    static thread_local uint32_t _n_completed_this_thread;
+
     IOTest() : vol_info(0), device_info(0), m_tgt(this) {
         vol_cnt = 0;
         cur_vol = 0;
@@ -286,11 +287,11 @@ public:
         params.disk_init = init;
         params.devices = device_info;
         params.is_file = dev_names.size() ? false : true;
-        params.init_done_cb = std::bind(&IOTest::init_done_cb, this, std::placeholders::_1, std::placeholders::_2);
-        params.vol_mounted_cb = std::bind(&IOTest::vol_mounted_cb, this, std::placeholders::_1, std::placeholders::_2);
-        params.vol_state_change_cb = std::bind(&IOTest::vol_state_change_cb, this, std::placeholders::_1,
-                                               std::placeholders::_2, std::placeholders::_3);
-        params.vol_found_cb = std::bind(&IOTest::vol_found_cb, this, std::placeholders::_1);
+        params.init_done_cb = bind_this(IOTest::init_done_cb, 2);
+        params.vol_mounted_cb = bind_this(IOTest::vol_mounted_cb, 2);
+        params.vol_state_change_cb = bind_this(IOTest::vol_state_change_cb, 3);
+        params.vol_found_cb = bind_this(IOTest::vol_found_cb, 1);
+        params.batch_sentinel_cb = bind_this(IOTest::process_batch_sentinel, 1);
 
         params.disk_attr = disk_attributes();
         params.disk_attr->phys_page_size = phy_page_size;
@@ -340,8 +341,9 @@ public:
         assert(!init);
         int cnt = vol_cnt.fetch_add(1, std::memory_order_relaxed);
         vol_init(vol_obj);
-        auto cb = std::bind(&IOTest::process_completions, this, std::placeholders::_1);
-        VolInterface::get_instance()->attach_vol_completion_cb(vol_obj, cb);
+        VolInterface::get_instance()->attach_vol_completion_cb(vol_obj,
+                                                               bind_this(IOTest::process_multi_completions, 1));
+        VolInterface::get_instance()->attach_batch_sentinel_cb(bind_this(IOTest::process_batch_sentinel, 1));
         assert(state == m_expected_vol_state);
         if (m_expected_vol_state == homestore::vol_state::DEGRADED ||
             m_expected_vol_state == homestore::vol_state::OFFLINE) {
@@ -380,7 +382,7 @@ public:
         int cnt = vol_indx.fetch_add(1, std::memory_order_acquire);
         params.page_size = vol_page_size;
         params.size = max_vol_size;
-        params.io_comp_cb = std::bind(&IOTest::process_completions, this, std::placeholders::_1);
+        params.io_comp_cb = bind_this(IOTest::process_multi_completions, 1);
         params.uuid = boost::uuids::random_generator()();
         std::string name = VOL_PREFIX + std::to_string(cnt);
         memcpy(params.vol_name, name.c_str(), (name.length() + 1));
@@ -560,9 +562,7 @@ public:
         {
             std::unique_lock< std::mutex > lk(m_mutex);
             assert(io_stalled);
-            while (outstanding_ios.load() != 0) {
-                m_cv.wait(lk);
-            }
+            m_cv.wait(lk, [this] { return (outstanding_ios.load() == 0); });
         }
         m_tgt.shutdown();
         {
@@ -748,7 +748,7 @@ private:
         req->cur_vol = cur;
 
         ++write_cnt;
-        auto vreq = VolInterface::get_instance()->create_vol_interface_req(vol, buf, lba, nblks, false, false);
+        auto vreq = VolInterface::get_instance()->create_vol_interface_req(buf, lba, nblks, false);
         vreq->cookie = req;
         auto ret_io = VolInterface::get_instance()->write(vol, vreq);
         if (ret_io != no_error) {
@@ -828,7 +828,7 @@ private:
         req->buf = buf;
         req->cur_vol = cur;
         read_cnt++;
-        auto vreq = VolInterface::get_instance()->create_vol_interface_req(vol, nullptr, lba, nblks, true, false);
+        auto vreq = VolInterface::get_instance()->create_vol_interface_req(nullptr, lba, nblks, false);
         vreq->cookie = req;
         auto ret_io = VolInterface::get_instance()->read(vol, vreq);
         if (ret_io != no_error) {
@@ -875,7 +875,7 @@ private:
                         j = memcmp((void*)b.bytes, (uint8_t*)((uint64_t)request->buf + tot_size_read),
                                    sizeof(uint64_t));
                         if (j != 0) { LOGINFO("header mismatch lba read {}", *((uint64_t*)b.bytes)); }
-                        LOGINFO("mismatch found lba {} nlba {} total_size_read {}", request->lba, request->nblks,
+                        LOGINFO("mismatch found lba {} nblks {} total_size_read {}", request->lba, request->nblks,
                                 tot_size_read);
 #ifndef NDEBUG
                         VolInterface::get_instance()->print_tree(vol);
@@ -925,7 +925,24 @@ private:
         move_verify_to_done = true;
     }
 
-    void process_completions(const vol_interface_req_ptr& vol_req) {
+    void process_multi_completions(const std::vector< vol_interface_req_ptr >& reqs) {
+        for (auto& vol_req : reqs) {
+            // Expected the entire batch to be from same volume
+            ASSERT_EQ(vol_req->vol_instance.get(), reqs[0]->vol_instance.get());
+            process_completions(vol_req, true);
+        }
+        LOGTRACE("Got {} completions for volume {} in one event", reqs.size(),
+                 VolInterface::get_instance()->get_name(reqs[0]->vol_instance));
+    }
+
+    void process_batch_sentinel(int ncompletions) {
+        LOGTRACE("Got total {} callbacks with completions = {} across multiple volumes in one event", ncompletions,
+                 _n_completed_this_thread);
+        _n_completed_this_thread = 0;
+        m_tgt.io_request_done();
+    }
+
+    void process_completions(const vol_interface_req_ptr& vol_req, bool part_of_batch = false) {
         /* raise an event */
         req* request = (req*)vol_req->cookie;
         static uint64_t print_time = 30;
@@ -988,7 +1005,7 @@ private:
                     return;
                 }
                 startTime = Clock::now();
-                m_tgt.io_request_done();
+                one_req_completed(part_of_batch);
             }
         }
 
@@ -997,7 +1014,16 @@ private:
         }
 
         if (verify_done && time_to_stop()) {
+            LOGINFO("Time to stop the IO, write_cnt={}, outstanding_ios={}", write_cnt, outstanding_ios.load());
             notify_cmpl();
+        } else {
+            one_req_completed(part_of_batch);
+        }
+    }
+
+    void one_req_completed(bool part_of_batch) {
+        if (part_of_batch) {
+            _n_completed_this_thread++;
         } else {
             m_tgt.io_request_done();
         }
@@ -1080,12 +1106,15 @@ TEST_F(IOTest, lifecycle_test) {
 
     fc.inject_retval_flip("vol_comp_delay_us", {}, freq, 100);
     this->delete_volumes();
+
     LOGINFO("All volumes are deleted, do a shutdown of homestore");
     this->shutdown();
 
     LOGINFO("Shutdown of homestore is completed, removing files");
     this->remove_files();
 }
+
+thread_local uint32_t IOTest::_n_completed_this_thread = 0;
 
 /*!
     @test   init_io_test

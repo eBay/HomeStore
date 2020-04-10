@@ -5,9 +5,9 @@
 #ifndef OMSTORE_BLKBUFFER_HPP_HPP
 #define OMSTORE_BLKBUFFER_HPP_HPP
 
-#include "blkstore/writeBack_cache.hpp"
-#include "blkalloc/blk.h"
-#include "cache/cache.h"
+#include "engine/blkstore/writeBack_cache.hpp"
+#include "engine/blkalloc/blk.h"
+#include "engine/cache/cache.h"
 
 namespace homestore {
 

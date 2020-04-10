@@ -51,7 +51,7 @@ void LogDev::start(bool format) {
 
 void LogDev::stop() {
     HS_ASSERT(LOGMSG, (m_pending_flush_size == 0), "LogDev stopped while writes to logdev are pending completion");
-    HS_ASSERT(LOGMSG, (!m_is_flushing.load()), "LogDev stopped while there is ongoing flush");
+    // HS_ASSERT(LOGMSG, (!m_is_flushing.load()), "LogDev stopped while there is ongoing flush");
 
     iomanager.cancel_global_timer(m_flush_timer_hdl);
     m_log_records = nullptr;

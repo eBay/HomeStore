@@ -5,17 +5,17 @@
 #ifndef OMSTORE_BLKSTORE_HPP
 #define OMSTORE_BLKSTORE_HPP
 
-#include "cache/cache.h"
-#include "device/device_selector.hpp"
-#include "device/device.h"
+#include "engine/cache/cache.h"
+#include "engine/device/device_selector.hpp"
+#include "engine/device/device.h"
 #include <boost/optional.hpp>
-#include "device/virtual_dev.hpp"
-#include "homeds/memory/mempiece.hpp"
-#include "cache/cache.cpp"
-#include <common/error.h>
+#include "engine/device/virtual_dev.hpp"
+#include "engine/homeds/memory/mempiece.hpp"
+#include "engine/cache/cache.cpp"
+#include "engine/common/error.h"
 #include "writeBack_cache.hpp"
-#include "device/blkbuffer.hpp"
-#include "common/homestore_config.hpp"
+#include "engine/device/blkbuffer.hpp"
+#include "engine/common/homestore_config.hpp"
 #include <utility/atomic_counter.hpp>
 #include <fds/utils.hpp>
 

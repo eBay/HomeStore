@@ -16,7 +16,7 @@
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <linux/fs.h>
-#include "main/test_setup/simple_hs_setup.hpp"
+#include "homeblks/test_setup/simple_hs_setup.hpp"
 #include <boost/filesystem.hpp>
 extern "C" {
 #include <fcntl.h>
@@ -323,7 +323,7 @@ public:
         req->cur_vol = cur;
         ++outstanding_ios;
         ++write_cnt;
-        auto vreq = VolInterface::get_instance()->create_vol_interface_req(vol, buf, lba, nblks, false, false););
+        auto vreq = VolInterface::get_instance()->create_vol_interface_req(buf, lba, nblks, false, false););
         vreq->cookie = req;
         auto ret_io = VolInterface::get_instance()->write(vol[cur], vreq);
         if (ret_io != no_error) {
@@ -370,7 +370,7 @@ public:
         req->cur_vol = cur;
         outstanding_ios++;
         read_cnt++;
-        auto vreq = VolInterface::get_instance()->create_vol_interface_req(vol, nullptr, lba, nblks, true, false);
+        auto vreq = VolInterface::get_instance()->create_vol_interface_req(nullptr, lba, nblks, true, false);
         vreq->cookie = req;
         auto ret_io = VolInterface::get_instance()->read(vol[cur], vreq);
         if (ret_io != no_error) {

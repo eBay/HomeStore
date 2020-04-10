@@ -8,6 +8,7 @@
 #ifdef _PRERELEASE
 #include <flip/flip.hpp>
 #endif
+#include <spdlog/fmt/fmt.h>
 
 namespace homeds {
 struct blob {

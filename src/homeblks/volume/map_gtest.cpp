@@ -304,7 +304,7 @@ public:
 
     void read_lba(uint64_t lba, uint64_t nlbas, std::vector< std::pair< MappingKey, MappingValue > >& kvs) {
         LOGDEBUG("Reading -> lba:{},nlbas:{}", lba, nlbas);
-        boost::intrusive_ptr< volume_req > volreq = volume_req::make_request();
+        auto volreq = std::make_unique< volume_req >();
         volreq->lba = lba;
         volreq->nlbas = nlbas;
         auto sid = seq_Id.fetch_add(1, memory_order_seq_cst);
@@ -315,7 +315,7 @@ public:
 #ifndef NDEBUG
         volreq->vol_uuid = uuid;
 #endif
-        m_map->get(volreq, kvs);
+        m_map->get(volreq.get(), kvs);
     }
 
     void verify_all() {
@@ -366,7 +366,7 @@ public:
     }
 
     void write_lba(uint64_t lba, uint64_t nlbas, BlkId bid) {
-        boost::intrusive_ptr< volume_req > req = volume_req::make_request();
+        auto req = std::make_unique< volume_req >();
 
         auto sid = seq_Id.fetch_add(1, memory_order_seq_cst);
 
@@ -388,7 +388,7 @@ public:
 
         LOGDEBUG("Writing -> seqId:{} lba:{},nlbas:{},blk:{}", sid, lba, nlbas, bid.to_string());
         req->state = writeback_req_state::WB_REQ_COMPL;
-        m_map->put(req, key, value);
+        m_map->put(req.get(), key, value);
     }
 
     void random_write() {

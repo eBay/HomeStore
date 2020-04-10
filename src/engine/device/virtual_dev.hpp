@@ -6,18 +6,19 @@
 #include <sds_logging/logging.h>
 
 #include "device.h"
-#include "blkalloc/blk_allocator.h"
-#include "blkalloc/varsize_blk_allocator.h"
+#include "engine/blkalloc/blk_allocator.h"
+#include "engine/blkalloc/varsize_blk_allocator.h"
 #include <vector>
 #include <memory>
 #include <boost/range/irange.hpp>
 #include <map>
-#include <common/error.h>
+#include "engine/common/error.h"
 #include <metrics/metrics.hpp>
+#include <fds/utils.hpp>
 #include <utility/atomic_counter.hpp>
-#include "common/homestore_config.hpp"
-#include "common/homestore_header.hpp"
-#include "common/homestore_assert.hpp"
+#include "engine/common/homestore_config.hpp"
+#include "engine/common/homestore_header.hpp"
+#include "engine/common/homestore_assert.hpp"
 
 SDS_LOGGING_DECL(device)
 
@@ -102,11 +103,11 @@ struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
     void inc_ref() { intrusive_ptr_add_ref(this); }
     void dec_ref() { intrusive_ptr_release(this); }
 
-    static boost::intrusive_ptr< virtualdev_req > make_request() {
-        return boost::intrusive_ptr< virtualdev_req >(sisl::ObjectAllocator< virtualdev_req >::make_object());
-    }
-    virtual void free_yourself() { sisl::ObjectAllocator< virtualdev_req >::deallocate(this); }
-
+    // static boost::intrusive_ptr< virtualdev_req > make_request() {
+    //    return boost::intrusive_ptr< virtualdev_req >(sisl::ObjectAllocator< virtualdev_req >::make_object());
+    //}
+    // virtual void free_yourself() { sisl::ObjectAllocator< virtualdev_req >::deallocate(this); }
+    virtual void free_yourself() = 0;
     friend void intrusive_ptr_add_ref(virtualdev_req* req) { req->refcount.increment(1); }
     friend void intrusive_ptr_release(virtualdev_req* req) {
         if (req->refcount.decrement_testz()) { req->free_yourself(); }
@@ -273,7 +274,7 @@ public:
         }
 
         if (m_chunk_size % MIN_CHUNK_SIZE) {
-            m_chunk_size = ALIGN_SIZE(m_chunk_size, MIN_CHUNK_SIZE);
+            m_chunk_size = sisl::round_up(m_chunk_size, MIN_CHUNK_SIZE);
             HS_LOG(INFO, device, "size of a chunk is resized to {}", m_chunk_size);
         }
 

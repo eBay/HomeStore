@@ -19,8 +19,8 @@ sisl::blob vol_journal_entry::create_journal_entry(volume_req* v_req) {
 
     /* store journal hdr */
     auto hdr = (journal_hdr*)m_mem;
-    hdr->lba = v_req->lba;
-    hdr->nlba = v_req->nlbas;
+    hdr->lba = v_req->lba();
+    hdr->nblks = v_req->nblks();
 
     /* store alloc blkid */
     auto blkid = (BlkId*)((uint64_t)m_mem + sizeof(journal_hdr));
@@ -116,41 +116,40 @@ mapping* IndxMgr::get_active_indx() { return m_active_map; }
 
 void IndxMgr::journal_comp_cb(logstore_seq_num_t seq_num, logdev_key ld_key, void* req) {
     assert(ld_key.is_valid());
-    auto vreq = boost::intrusive_ptr< volume_req >((volume_req*)req, false);
+    auto vreq = (volume_req*)req;
     journal_comp_cb_internal(vreq);
 }
 
-void IndxMgr::journal_comp_cb_internal(volume_req_ptr& vreq) {
+void IndxMgr::journal_comp_cb_internal(volume_req* vreq) {
     m_io_cb(vreq);
     int cnt = vreq->cp_id->ref_cnt.fetch_sub(1);
     if (cnt == 1) { /* send signal to the thread to do cp start */
     }
 }
 
-void IndxMgr::journal_write(volume_req_ptr& vreq) {
+void IndxMgr::journal_write(volume_req* vreq) {
     auto b = vreq->create_journal_entry();
-    vreq->inc_ref_cnt();
-    journal->write_async(vreq->seqId, b, vreq.get(), m_journal_comp_cb);
+    journal->write_async(vreq->seqId, b, vreq, m_journal_comp_cb);
 }
 
-void IndxMgr::update_indx_tbl(volume_req_ptr& vreq) {
+void IndxMgr::update_indx_tbl(volume_req* vreq) {
     std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;
     uint64_t offset = 0;
 
-    for (uint32_t i = 0; i < vreq->nlbas; ++i) {
+    for (uint32_t i = 0; i < vreq->iface_req->nblks; ++i) {
         carr[i] = vreq->csum_list[i];
     }
 
-    uint32_t start_lba = vreq->lba;
+    uint32_t start_lba = vreq->lba();
     int csum_indx = 0;
     for (uint32_t i = 0; i < vreq->alloc_blkid_list.size(); ++i) {
 
         /* TODO mapping should accept req so that it doesn't need to build value two times */
         auto blkid = vreq->alloc_blkid_list[i];
-        uint32_t page_size = vreq->vol_instance->get_page_size();
-        uint32_t nlbas = blkid.data_size(page_size) / page_size;
-        MappingKey key(start_lba, nlbas);
-        ValueEntry ve(vreq->seqId, blkid, 0, nlbas, &carr[csum_indx]);
+        uint32_t page_size = vreq->vol()->get_page_size();
+        uint32_t nblks = blkid.data_size(page_size) / page_size;
+        MappingKey key(start_lba, nblks);
+        ValueEntry ve(vreq->seqId, blkid, 0, nblks, &carr[csum_indx]);
         MappingValue value(ve);
 
         /* update active btree */
@@ -158,13 +157,12 @@ void IndxMgr::update_indx_tbl(volume_req_ptr& vreq) {
 
         /* update diff btree */
         m_diff_map->put(nullptr, key, value);
-        start_lba += nlbas;
-        csum_indx += nlbas;
+        start_lba += nblks;
+        csum_indx += nblks;
     }
 }
 
-void IndxMgr::update_indx(volume_req_ptr& vreq) {
-
+void IndxMgr::update_indx(volume_req* vreq) {
     /* Entered into critical section. CP is not triggered in this critical section */
     vreq->cp_id = m_cp->cp_io_enter();
 

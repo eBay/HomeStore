@@ -17,7 +17,7 @@ if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
   endif ()
 endif()
 if  (${MEMORY_SANITIZER_ON})
-  include (cmake/mem_sanitizer.cmake)
+#  include (cmake/mem_sanitizer.cmake)
 endif ()
 
 include(${CONAN_SISL_ROOT}/cmake/settings_gen.cmake)

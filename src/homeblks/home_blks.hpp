@@ -155,11 +155,12 @@ public:
     static HomeBlksSafePtr safe_instance();
 
     ~HomeBlks() { m_thread_id.join(); }
-    virtual vol_interface_req_ptr create_vol_interface_req(std::shared_ptr< Volume > vol, void* buf, uint64_t lba,
-                                                           uint32_t nlbas, bool read, bool sync) override;
     virtual std::error_condition write(const VolumePtr& vol, const vol_interface_req_ptr& req) override;
     virtual std::error_condition read(const VolumePtr& vol, const vol_interface_req_ptr& req) override;
     virtual std::error_condition sync_read(const VolumePtr& vol, const vol_interface_req_ptr& req) override;
+
+    virtual vol_interface_req_ptr create_vol_interface_req(void* buf, uint64_t lba, uint32_t nblks,
+                                                           bool sync = false) override;
 
     virtual VolumePtr create_volume(const vol_params& params) override;
     virtual std::error_condition remove_volume(const boost::uuids::uuid& uuid) override;
@@ -174,7 +175,8 @@ public:
     virtual bool vol_state_change(const VolumePtr& vol, vol_state new_state) override;
 
     void vol_scan_cmpltd(const VolumePtr& vol, vol_state state, bool success);
-    virtual void attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback cb) override;
+    virtual void attach_vol_completion_cb(const VolumePtr& vol, const io_comp_callback& cb) override;
+    virtual void attach_batch_sentinel_cb(const batch_sentinel_callback& cb) override;
 
     virtual bool shutdown(bool force = false) override;
     virtual bool trigger_shutdown(const shutdown_comp_callback& shutdown_done_cb = nullptr,
@@ -296,6 +298,8 @@ private:
     std::atomic< uint64_t > m_shutdown_start_time = 0;
     iomgr::timer_handle_t m_shutdown_timer_hdl = iomgr::null_timer_handle;
     HomeBlksMetrics m_metrics;
+
+    static thread_local std::vector< std::shared_ptr< Volume > > s_io_completed_volumes;
 };
 } // namespace homestore
 #endif // OMSTORE_OMSTORE_HPP

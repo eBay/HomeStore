@@ -10,7 +10,7 @@
 #include <cassert>
 #include <thread>
 #include <fds/utils.hpp>
-#include "homeds/btree/mem_btree.hpp"
+#include "engine/homeds/btree/mem_btree.hpp"
 #include <sds_logging/logging.h>
 
 #ifndef NDEBUG
@@ -279,7 +279,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
 
     auto split_cnt = homestore_flip->get_test_flip< int >("blkalloc_split_blk");
     if (!hints.is_contiguous && split_cnt && nblks > split_cnt.get()) {
-        blks_rqstd = ALIGN_SIZE((nblks / split_cnt.get()), hints.multiplier);
+        blks_rqstd = sisl::round_up((nblks / split_cnt.get()), hints.multiplier);
         BLKALLOC_LOG(DEBUG, varsize_blk_alloc, "blocks requested={}, nblks={}, split_cnt={}", blks_rqstd, nblks,
                      split_cnt.get());
     }
@@ -290,7 +290,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
         BlkId blkid;
         COUNTER_INCREMENT(m_metrics, num_split, 1);
         if (blks_rqstd > HS_STATIC_CONFIG(engine.max_blk_cnt)) {
-            blks_rqstd = ALIGN_SIZE_TO_LEFT(HS_STATIC_CONFIG(engine.max_blk_cnt), hints.multiplier);
+            blks_rqstd = sisl::round_down(HS_STATIC_CONFIG(engine.max_blk_cnt), hints.multiplier);
         }
         if (alloc(blks_rqstd, hints, &blkid, true) != BLK_ALLOC_SUCCESS) {
             /* check the cache to see what blocks are available and get those
@@ -308,7 +308,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
              * have the range query implemented in btree.
              */
             if (new_blks_rqstd >= blks_rqstd) {
-                blks_rqstd = ALIGN_SIZE((blks_rqstd / 2), hints.multiplier);
+                blks_rqstd = sisl::round_up((blks_rqstd / 2), hints.multiplier);
             } else {
                 blks_rqstd = new_blks_rqstd;
             }

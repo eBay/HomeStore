@@ -4,12 +4,12 @@
 
 #pragma once
 
-#include "homeds/memory/mempiece.hpp"
+#include "engine/homeds/memory/mempiece.hpp"
 #include <mutex>
 #include <atomic>
 #include <boost/intrusive/list.hpp>
-#include <common/homestore_config.hpp>
-#include "common/homestore_assert.hpp"
+#include "engine/common/homestore_config.hpp"
+#include "engine/common/homestore_assert.hpp"
 
 namespace homestore {
 

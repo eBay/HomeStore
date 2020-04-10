@@ -8,7 +8,7 @@
 #include <functional>
 #include <vector>
 #include <memory>
-#include <common/error.h>
+#include <engine/common/error.h>
 #include <iomgr/iomgr.hpp>
 #include <boost/intrusive_ptr.hpp>
 #include <cassert>
@@ -26,6 +26,7 @@
 #include <string>
 #include <iostream>
 #include <utility/enum.hpp>
+#include <variant>
 
 namespace homestore {
 class Volume;
@@ -63,23 +64,26 @@ struct _counter_generator {
 };
 #define counter_generator _counter_generator::instance()
 
+struct volume_req;
 struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
-    std::vector< buf_info > read_buf_list;
-    std::error_condition err;
-    uint64_t request_id;
-    void* cookie; // any tag alongs
-    sisl::atomic_counter< int > refcount;
-    std::atomic< bool > is_fail_completed;
-    uint64_t lba;
-    uint32_t nlbas;
-    bool is_read;
     std::shared_ptr< Volume > vol_instance;
+    std::vector< buf_info > read_buf_list;
+    void* write_buf = nullptr;
+    std::error_condition err = no_error;
+    uint64_t request_id;
+    sisl::atomic_counter< int > refcount;
+    std::atomic< bool > is_fail_completed = false;
+    uint64_t lba;
+    uint32_t nblks;
+    bool is_read = true;
     bool sync = false;
+    std::unique_ptr< volume_req > vol_req;
+    void* cookie;
 
     friend void intrusive_ptr_add_ref(vol_interface_req* req) { req->refcount.increment(1); }
 
     friend void intrusive_ptr_release(vol_interface_req* req) {
-        if (req->refcount.decrement_testz()) { req->free_yourself(); }
+        if (req->refcount.decrement_testz()) { delete req; }
     }
 
     void inc_ref_cnt() { intrusive_ptr_add_ref(this); }
@@ -102,21 +106,8 @@ struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
     std::error_condition get_status() const { return err; }
 
 public:
-    vol_interface_req() : refcount(0){};
-    vol_interface_req(std::shared_ptr< Volume > vol, uint64_t lba, uint32_t nlbas, bool is_read, bool sync) :
-            err(no_error),
-            request_id(counter_generator.next_request_id()),
-            refcount(0),
-            is_fail_completed(false),
-            lba(lba),
-            nlbas(nlbas),
-            is_read(is_read),
-            vol_instance(vol),
-            sync(sync) {}
-    ~vol_interface_req() = default;
-
-    virtual void free_yourself() = 0;
-    virtual std::string to_string() = 0;
+    vol_interface_req(void* wbuf, uint64_t lba, uint32_t nblks, bool is_sync = false);
+    ~vol_interface_req();
 };
 
 typedef boost::intrusive_ptr< vol_interface_req > vol_interface_req_ptr;
@@ -132,8 +123,11 @@ ENUM(vol_state, uint32_t,
      UNINITED    // Initial state when volume is brought up
 );
 
-typedef std::function< void(const vol_interface_req_ptr& req) > io_comp_callback;
+typedef std::function< void(const vol_interface_req_ptr& req) > io_single_comp_callback;
+typedef std::function< void(const std::vector< vol_interface_req_ptr >& reqs) > io_batch_comp_callback;
 typedef std::function< void(bool success) > shutdown_comp_callback;
+typedef std::function< void(int n_completions) > batch_sentinel_callback;
+typedef std::variant< io_single_comp_callback, io_batch_comp_callback > io_comp_callback;
 
 struct vol_params {
     uint64_t page_size;
@@ -171,6 +165,7 @@ public:
     vol_found_callback vol_found_cb;
     vol_mounted_callback vol_mounted_cb;
     vol_state_change_callback vol_state_change_cb;
+    batch_sentinel_callback batch_sentinel_cb;
 
 public:
     std::string to_string() {
@@ -197,8 +192,8 @@ public:
     }
     static VolInterface* get_instance() { return VolInterfaceImpl::raw_instance(); }
 
-    virtual vol_interface_req_ptr create_vol_interface_req(std::shared_ptr< Volume > vol, void* buf, uint64_t lba,
-                                                           uint32_t nlbas, bool read, bool sync) = 0;
+    virtual vol_interface_req_ptr create_vol_interface_req(void* buf, uint64_t lba, uint32_t nblks,
+                                                           bool sync = false) = 0;
     virtual std::error_condition write(const VolumePtr& vol, const vol_interface_req_ptr& req) = 0;
     virtual std::error_condition read(const VolumePtr& vol, const vol_interface_req_ptr& req) = 0;
     virtual std::error_condition sync_read(const VolumePtr& vol, const vol_interface_req_ptr& req) = 0;
@@ -212,7 +207,8 @@ public:
     virtual SnapshotPtr snap_volume(VolumePtr volptr) = 0;
 
     /* AM should call it in case of recovery or reboot when homestore try to mount the existing volume */
-    virtual void attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback cb) = 0;
+    virtual void attach_vol_completion_cb(const VolumePtr& vol, const io_comp_callback& cb) = 0;
+    virtual void attach_batch_sentinel_cb(const batch_sentinel_callback& cb) = 0;
 
     virtual bool shutdown(bool force = false) = 0;
     virtual bool trigger_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool force = false) = 0;

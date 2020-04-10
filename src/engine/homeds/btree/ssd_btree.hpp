@@ -14,11 +14,11 @@
 #include <vector>
 #include <atomic>
 
-#include "homeds/memory/composite_allocator.hpp"
-#include "homeds/memory/chunk_allocator.hpp"
-#include "homeds/memory/sys_allocator.hpp"
-#include "cache/cache.h"
-#include "blkstore/blkstore.hpp"
+#include "engine/homeds/memory/composite_allocator.hpp"
+#include "engine/homeds/memory/chunk_allocator.hpp"
+#include "engine/homeds/memory/sys_allocator.hpp"
+#include "engine/cache/cache.h"
+#include "engine/blkstore/blkstore.hpp"
 #include "btree_store.hpp"
 #include "btree_node.h"
 #include "physical_node.hpp"

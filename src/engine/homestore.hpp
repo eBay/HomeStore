@@ -1,10 +1,11 @@
 #pragma once
-#include "common/homestore_config.hpp"
+#include "engine/common/homestore_config.hpp"
 #include "homelogstore/log_store.hpp"
-#include "blkstore/blkstore.hpp"
-#include "homeds/btree/btree.hpp"
-#include "homeds/btree/ssd_btree.hpp"
-#include "device/device.h"
+#include "engine/blkstore/blkstore.hpp"
+#include "engine/homeds/btree/btree.hpp"
+#include "engine/homeds/btree/ssd_btree.hpp"
+#include "engine/device/device.h"
+#include <fds/utils.hpp>
 
 using namespace homeds::btree;
 
@@ -161,7 +162,7 @@ protected:
             struct blkstore_blob blob;
             blob.type = blkstore_type::DATA_STORE;
             uint64_t size = (90 * m_dev_mgr->get_total_cap()) / 100;
-            size = ALIGN_SIZE(size, HS_STATIC_CONFIG(disk_attr.phys_page_size));
+            size = sisl::round_up(size, HS_STATIC_CONFIG(disk_attr.phys_page_size));
             m_size_avail = size;
             LOGINFO("maximum capacity for data blocks is {}", m_size_avail);
             m_data_blk_store = std::make_unique< data_blkstore_t >(
@@ -183,7 +184,7 @@ protected:
             struct blkstore_blob blob;
             blob.type = blkstore_type::INDEX_STORE;
             uint64_t size = (2 * m_dev_mgr->get_total_cap()) / 100;
-            size = ALIGN_SIZE(size, HS_STATIC_CONFIG(disk_attr.phys_page_size));
+            size = sisl::round_up(size, HS_STATIC_CONFIG(disk_attr.phys_page_size));
             m_index_blk_store = std::make_unique< index_blkstore_t< IndexBuffer > >(
                 m_dev_mgr.get(), m_cache.get(), size, RD_MODIFY_WRITEBACK_CACHE, 0, (char*)&blob, sizeof(blkstore_blob),
                 HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size), "index");
@@ -205,7 +206,7 @@ protected:
             blob.type = blkstore_type::SB_STORE;
             blob.blkid.set(BlkId::invalid_internal_id());
             uint64_t size = (1 * m_dev_mgr->get_total_cap()) / 100;
-            size = ALIGN_SIZE(size, HS_STATIC_CONFIG(disk_attr.phys_page_size));
+            size = sisl::round_up(size, HS_STATIC_CONFIG(disk_attr.phys_page_size));
             m_sb_blk_store = std::make_unique< sb_blkstore_t >(
                 m_dev_mgr.get(), m_cache.get(), size, PASS_THRU, HS_STATIC_CONFIG(input.devices).size() - 1,
                 (char*)&blob, sizeof(sb_blkstore_blob), HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size),
@@ -251,7 +252,7 @@ protected:
             struct blkstore_blob blob;
             blob.type = blkstore_type::LOGDEV_STORE;
             uint64_t size = (1 * m_dev_mgr->get_total_cap()) / 100;
-            size = ALIGN_SIZE(size, HS_STATIC_CONFIG(disk_attr.phys_page_size));
+            size = sisl::round_up(size, HS_STATIC_CONFIG(disk_attr.phys_page_size));
             m_logdev_blk_store = std::make_unique< BlkStore< VdevVarSizeBlkAllocatorPolicy > >(
                 m_dev_mgr.get(), m_cache.get(), size, PASS_THRU, 0, (char*)&blob, sizeof(blkstore_blob),
                 HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size), "logdev",

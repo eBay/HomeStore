@@ -6,7 +6,6 @@
 
 namespace homestore {
 struct volume_req;
-typedef boost::intrusive_ptr< volume_req > volume_req_ptr;
 class mapping;
 struct Free_Blk_Entry;
 
@@ -17,7 +16,7 @@ struct Free_Blk_Entry;
  */
 struct journal_hdr {
     uint64_t lba;
-    int nlba;
+    int nblks;
 };
 
 class vol_journal_entry {
@@ -66,10 +65,9 @@ public:
 };
 
 class IndxMgr {
-
-    typedef std::function< void(volume_req_ptr& req) > io_done_cb;
+    typedef std::function< void(volume_req* req) > io_done_cb;
     typedef std::function< void(Free_Blk_Entry fbe) > free_blk_callback;
-    typedef std::function< void(volume_req_ptr& req, BlkId& bid) > pending_read_blk_cb;
+    typedef std::function< void(volume_req* req, BlkId& bid) > pending_read_blk_cb;
 
 private:
     mapping* m_active_map;
@@ -81,10 +79,10 @@ private:
     log_write_comp_cb_t m_journal_comp_cb;
 
     void recovery();
-    void journal_comp_cb_internal(volume_req_ptr& req);
-    void journal_write(volume_req_ptr& vreq);
+    void journal_comp_cb_internal(volume_req* req);
+    void journal_write(volume_req* vreq);
     void journal_comp_cb(logstore_seq_num_t seq_num, logdev_key ld_key, void* req);
-    void update_indx_tbl(volume_req_ptr& vreq);
+    void update_indx_tbl(volume_req* vreq);
 
 public:
     IndxMgr(bool init, const vol_params& params, io_done_cb io_cb, free_blk_callback free_blk_cb,
@@ -95,7 +93,7 @@ public:
     mapping* get_active_indx();
 
     /* write/update indx table for a IO */
-    void update_indx(volume_req_ptr& req);
+    void update_indx(volume_req* req);
     void destroy();
     void truncate();
 };
