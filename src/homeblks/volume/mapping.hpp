@@ -1,6 +1,5 @@
 #pragma once
 
-#include "blkstore/writeBack_cache.hpp"
 #include "engine/homeds/btree/ssd_btree.hpp"
 #include "engine/homeds/btree/btree.hpp"
 #include <blkalloc/blk.h>
@@ -49,15 +48,10 @@ public:
     MappingKey() : ObjLifeCounter(), m_lbaId_ptr(&m_lbaId) {}
 
     MappingKey(const MappingKey& other) :
-            ExtentBtreeKey(),
-            ObjLifeCounter(),
-            m_lbaId(other.get_lbaId()),
-            m_lbaId_ptr(&m_lbaId) {}
+            ExtentBtreeKey(), ObjLifeCounter(), m_lbaId(other.get_lbaId()), m_lbaId_ptr(&m_lbaId) {}
 
     MappingKey(uint64_t lba_start, uint64_t n_lba) :
-            ObjLifeCounter(),
-            m_lbaId(lba_start, n_lba),
-            m_lbaId_ptr(&m_lbaId) {}
+            ObjLifeCounter(), m_lbaId(lba_start, n_lba), m_lbaId_ptr(&m_lbaId) {}
 
     LbaId get_lbaId() const { return *m_lbaId_ptr; }
 
@@ -170,10 +164,7 @@ struct ValueEntryMeta {
     uint64_t nlba : NBLKS_BITS;
     uint64_t blk_offset : NBLKS_BITS; // offset based on blk store not based on vol page size
     ValueEntryMeta(uint64_t seqId, const BlkId& blkId, uint8_t blk_offset, uint8_t nlba) :
-            seqId(seqId),
-            blkId(blkId),
-            nlba(nlba),
-            blk_offset(blk_offset){};
+            seqId(seqId), blkId(blkId), nlba(nlba), blk_offset(blk_offset){};
     ValueEntryMeta() : seqId(0), blkId(0), nlba(0), blk_offset(0){};
 } __attribute__((__packed__));
 
@@ -511,7 +502,7 @@ typedef std::function< void(Free_Blk_Entry fbe) > free_blk_callback;
 typedef std::function< void(volume_req_ptr& req, BlkId& bid) > pending_read_blk_cb;
 class mapping {
     typedef std::function< void(struct BlkId blkid, size_t offset_size, size_t size) > alloc_blk_callback;
-    typedef std::function< void(boost::intrusive_ptr< volume_req > cookie) > comp_callback;
+    typedef std::function< void(btree_cp_id_ptr cp_id) > comp_callback;
     constexpr static uint64_t lba_query_cnt = 1024ull;
 
 private:
@@ -520,7 +511,6 @@ private:
     alloc_blk_callback m_alloc_blk_cb;
     free_blk_callback m_free_blk_cb;
     pending_read_blk_cb m_pending_read_blk_cb;
-    comp_callback m_comp_cb;
     uint32_t m_vol_page_size;
     const MappingValue EMPTY_MAPPING_VALUE;
     std::string m_unique_name;
@@ -539,8 +529,7 @@ private:
         boost::intrusive_ptr< volume_req > m_req;
 
         UpdateCBParam(boost::intrusive_ptr< volume_req > req, MappingKey& new_key, MappingValue& new_value) :
-                BRangeUpdateCBParam(new_key, new_value),
-                m_req(req) {}
+                BRangeUpdateCBParam(new_key, new_value), m_req(req) {}
     };
 
 public:
@@ -576,15 +565,15 @@ public:
 
     ~mapping() { delete m_bt; }
 
-    void destroy() {
+    btree_status_t destroy(btree_cp_id_ptr btree_id) {
         /* XXX: do we need to handle error condition here ?. In the next boot we will automatically recaim these blocks
          */
-        auto ret = m_bt->destroy(std::bind(&mapping::process_free_blk_callback, this, std::placeholders::_1), false);
+        auto ret =
+            m_bt->destroy(std::bind(&mapping::process_free_blk_callback, this, std::placeholders::_1), false, btree_id);
         HS_SUBMOD_ASSERT(LOGMSG, (ret == btree_status_t::success), , "vol", m_unique_name,
                          "Error in destroying mapping btree ret={} ", ret);
+        return ret;
     }
-
-    void recovery_cmpltd() { m_bt->recovery_cmpltd(); }
 
     int sweep_alloc_blks(uint64_t start_lba, uint64_t end_lba) {
         MappingKey start_key(start_lba, 1), end_key(end_lba, 1);
@@ -600,8 +589,6 @@ public:
         return 0;
     }
 
-    void process_completions(boost::intrusive_ptr< writeback_req > cookie, bool status) {}
-
     void process_free_blk_callback(MappingValue& mv) {
         if (!m_free_blk_cb) { return; }
         Blob_Array< ValueEntry > array = mv.get_array();
@@ -610,17 +597,16 @@ public:
             array.get((uint32_t)i, ve, true);
             HS_SUBMOD_LOG(DEBUG, base, , "vol", m_unique_name, "Free Blk: vol_page: {}, data_page: {}, n_lba: {}",
                           m_vol_page_size, HomeBlks::instance()->get_data_pagesz(), ve.get_nlba());
-            uint64_t nlba = (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * ve.get_nlba();
-            Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(), nlba);
+            uint64_t nblks = (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * ve.get_nlba();
+            Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(), nblks);
             m_free_blk_cb(fbe);
         }
     }
 
-    mapping(uint64_t volsize, uint32_t page_size, const std::string& unique_name, comp_callback comp_cb,
-            free_blk_callback free_blk_cb, pending_read_blk_cb pending_read_cb = nullptr) :
+    mapping(uint64_t volsize, uint32_t page_size, const std::string& unique_name, free_blk_callback free_blk_cb,
+            trigger_cp_callback trigger_cp_cb, pending_read_blk_cb pending_read_cb = nullptr) :
             m_free_blk_cb(free_blk_cb),
             m_pending_read_blk_cb(pending_read_cb),
-            m_comp_cb(comp_cb),
             m_vol_page_size(page_size),
             m_unique_name(unique_name) {
         m_hb = HomeBlks::safe_instance();
@@ -628,22 +614,19 @@ public:
         btree_cfg.set_max_objs(volsize / page_size);
         btree_cfg.set_max_key_size(sizeof(uint32_t));
         btree_cfg.set_max_value_size(page_size);
+        btree_cfg.blkstore = (void*)m_hb->get_index_blkstore();
+        btree_cfg.trigger_cp_cb = trigger_cp_cb;
 
-        homeds::btree::btree_device_info bt_dev_info;
-        bt_dev_info.blkstore = (void*)m_hb->get_index_blkstore();
-        bt_dev_info.new_device = false;
-        m_bt = MappingBtreeDeclType::create_btree(
-            btree_cfg, &bt_dev_info,
-            std::bind(&mapping::process_completions, this, std::placeholders::_1, std::placeholders::_2));
+        m_bt = MappingBtreeDeclType::create_btree(btree_cfg);
     }
 
+#if 0
     mapping(uint64_t volsize, uint32_t page_size, const std::string& unique_name, btree_super_block& btree_sb,
             comp_callback comp_cb, alloc_blk_callback alloc_blk_cb, free_blk_callback free_blk_cb,
             pending_read_blk_cb pending_read_cb = nullptr) :
             m_alloc_blk_cb(alloc_blk_cb),
             m_free_blk_cb(free_blk_cb),
             m_pending_read_blk_cb(pending_read_cb),
-            m_comp_cb(comp_cb),
             m_vol_page_size(page_size),
             m_unique_name(unique_name) {
         m_hb = HomeBlks::safe_instance();
@@ -659,9 +642,20 @@ public:
             btree_sb, btree_cfg, &bt_dev_info,
             std::bind(&mapping::process_completions, this, std::placeholders::_1, std::placeholders::_2));
     }
+#endif
 
     uint64_t get_used_size() { return m_bt->get_used_size(); }
-    btree_super_block get_btree_sb() { return (m_bt->get_btree_sb()); }
+    MappingBtreeDeclType::btree_super_block get_btree_sb() { return (m_bt->get_btree_sb()); }
+
+    btree_cp_id_ptr attach_prepare_cp(btree_cp_id_ptr cur_cp_id) { return (m_bt->attach_prepare_cp(cur_cp_id)); }
+
+    void cp_start(btree_cp_id_ptr cp_id, cp_comp_callback cb) { m_bt->cp_start(cp_id, cb); }
+
+    void truncate(btree_cp_id_ptr cp_id) { m_bt->truncate(cp_id); }
+
+    static void cp_done(trigger_cp_callback cb) { MappingBtreeDeclType::cp_done(cb); }
+
+    void destroy_done() { m_bt->destroy_done(); }
 
     error_condition get(boost::intrusive_ptr< volume_req > req, vector< pair< MappingKey, MappingValue > >& values,
                         MappingBtreeDeclType* bt) {
@@ -732,8 +726,13 @@ public:
         return no_error;
     }
 
-    error_condition put(boost::intrusive_ptr< volume_req > req, MappingKey& key, MappingValue& value,
-                        MappingBtreeDeclType* bt) {
+    /* Note :- we should not write same IO in btree multiple times. When a key is updated , it update the free blk
+     * entries in request to its last value. If we write same io multiple times then it could end up freeing the wrong
+     * blocks.
+     * @start_lba :- it updates the first lba which is not written.
+     */
+    btree_status_t put(boost::intrusive_ptr< volume_req > req, MappingKey& key, MappingValue& value,
+                       btree_cp_id_ptr cp_id, MappingBtreeDeclType* bt, uint64_t& start_lba) {
         assert(value.get_array().get_total_elements() == 1);
         UpdateCBParam param(req, key, value);
         MappingKey start(key.start(), 1);
@@ -744,21 +743,43 @@ public:
             search_range, bind(&mapping::match_item_cb_put, this, placeholders::_1, placeholders::_2, placeholders::_3),
             bind(&mapping::get_size_needed, this, placeholders::_1, placeholders::_2),
             (BRangeUpdateCBParam< MappingKey, MappingValue >*)&param);
-        bt->range_put(key, value, btree_put_type::APPEND_IF_EXISTS_ELSE_INSERT, nullptr, nullptr, ureq);
+        auto ret = bt->range_put(key, value, btree_put_type::APPEND_IF_EXISTS_ELSE_INSERT, ureq, cp_id);
+
+        /* update start_lba to which this range is updated. It is helpful in cases of partial writes. */
+        start_lba = ((MappingKey*)(ureq.get_input_range().get_start_key()))->start();
+        start_lba = ureq.get_input_range().is_start_inclusive() ? start_lba : start_lba + 1;
+
+        if (ret != btree_status_t::success) {
+            /* In range update, it can be written paritally. Find the first key in this range which is not updated */
+            return ret;
+        }
+        assert(start_lba == key.end() + 1);
 
 #if 0
         vector<pair<MappingKey, MappingValue>> values;
-        auto temp = req->lastCommited_seqId;
-        req->lastCommited_seqId = req->seqId;
+        uint64_t temp;
+        if (req) {
+            auto temp = req->lastCommited_seqId;
+            req->lastCommited_seqId = req->seqId;
+        }
         get(req, values);
-        req->lastCommited_seqId = temp;
+        if (req) {
+            req->lastCommited_seqId = temp;
+        }
         validate_get_response(key.start(), key.get_n_lba(), values, &value, req);
 #endif
-        return no_error;
+        return btree_status_t::success;
     }
 
-    error_condition put(boost::intrusive_ptr< volume_req > req, MappingKey& key, MappingValue& value) {
-        return put(req, key, value, m_bt);
+    btree_status_t put(boost::intrusive_ptr< volume_req > req, MappingKey& key, MappingValue& value,
+                       btree_cp_id_ptr cp_id) {
+        uint64_t start_lba;
+        return put(req, key, value, cp_id, m_bt, start_lba);
+    }
+
+    btree_status_t put(boost::intrusive_ptr< volume_req > req, MappingKey& key, MappingValue& value,
+                       btree_cp_id_ptr cp_id, uint64_t& start_lba) {
+        return put(req, key, value, cp_id, m_bt, start_lba);
     }
 
     MappingBtreeDeclType* get_btree(void) { return m_bt; }
@@ -784,7 +805,8 @@ public:
      * Note:
      * No need to call old btree destroy() as blocks will be freed automatically;
      */
-    bool fix(uint64_t start_lba, uint64_t end_lba, bool verify = false) {
+    bool fix(btree_cp_id_ptr cp_id, uint64_t start_lba, uint64_t end_lba, bool verify = false) {
+#if 0
         if (start_lba >= end_lba) {
             LOGERROR("Wrong input, start_lba: {}, should be smaller than end_lba: {}", start_lba, end_lba);
             return false;
@@ -792,15 +814,9 @@ public:
 
         LOGINFO("Fixing btree, start_lba: {}, end_lba: {}", start_lba, end_lba);
         /* TODO : enable it later */
-#if 0
         // create a new btree
         auto btree_cfg = m_bt->get_btree_cfg();
-        homeds::btree::btree_device_info bt_dev_info;
-        bt_dev_info.blkstore = (void*)HomeBlks::instance()->get_index_blkstore();
-        bt_dev_info.new_device = false;
-        auto new_bt = MappingBtreeDeclType::create_btree(
-            btree_cfg, &bt_dev_info,
-            std::bind(&mapping::process_completions, this, std::placeholders::_1, std::placeholders::_2));
+        auto new_bt = MappingBtreeDeclType::create_btree(btree_cfg);
 
         m_fix_state = true;
         m_outstanding_io = 0;
@@ -824,28 +840,8 @@ public:
 
             // put every KV to new btree we have got from old btree;
             for (auto& x : kvs) {
-#if 0
-                auto ret = new_bt->put(x.first, x.second, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
+                auto ret = put(nullptr, x.first, x.second, cp_id, new_bt);
                 if (ret != btree_status_t::success) {
-                    LOGERROR("failed to put node with k/v: {}/{}, status; {}", x.first.to_string(), x.second.to_string(), ret);
-                    return false;
-                }
-#else
-                boost::intrusive_ptr< volume_req > req = volume_req::make_request();
-                req->seqId = INVALID_SEQ_ID;
-                req->lastCommited_seqId = INVALID_SEQ_ID; // keeping only latest version always
-                req->lba = x.first.start();
-                req->nlbas = x.first.get_n_lba();
-                ValueEntry ve;
-                x.second.get_array().get(0, ve, false /* copy */);
-                req->blkId = ve.get_blkId();
-#endif
-                // without this line, btree is not trigging process_completions cb to mapping layer;
-                req->state = writeback_req_state::WB_REQ_COMPL;
-                m_outstanding_io++;
-
-                auto ret = put(req, x.first, x.second, new_bt);
-                if (ret != no_error) {
                     LOGERROR("failed to put node with k/v: {}/{}", x.first.to_string(), x.second.to_string());
                     return false;
                 }
@@ -893,7 +889,6 @@ public:
      */
     bool verify_fixed_bt(uint64_t start_lba, uint64_t end_lba, MappingBtreeDeclType* old_bt,
                          MappingBtreeDeclType* new_bt) {
-#if 0
         uint64_t num_kv_verified = 0;
         auto start = start_lba, end = std::min(start_lba + lba_query_cnt, end_lba);
         while (start <= end_lba) {
@@ -901,16 +896,9 @@ public:
             std::vector< std::pair< MappingKey, MappingValue > > kvs_old;
             std::vector< std::pair< MappingKey, MappingValue > > kvs_new;
 
-            // get all the KVs from existing btree;
-            boost::intrusive_ptr< volume_req > vreq = volume_req::make_request();
-            vreq->lba = start;
-            vreq->nlbas = end - start + 1;
-            vreq->seqId = INVALID_SEQ_ID;
-            vreq->lastCommited_seqId = INVALID_SEQ_ID;
-
             // now m_bt points to the new btree;
-            auto ret_old = get(vreq, kvs_old, old_bt);
-            auto ret_new = get(vreq, kvs_new, new_bt);
+            auto ret_old = get(nullptr, kvs_old, old_bt);
+            auto ret_new = get(nullptr, kvs_new, new_bt);
 
             if (ret_old != no_error || ret_new != no_error) {
                 LOGERROR("btree_fix verify failed, reason: get from btree KVs failed.");
@@ -943,7 +931,6 @@ public:
         }
 
         LOGINFO("Successfully verified recovered btree, total KV verified: {}", num_kv_verified);
-#endif
         return true;
     }
 
@@ -960,7 +947,7 @@ public:
         bnodeid_t bid(blkid);
         m_bt->print_node(bid);
     }
-
+#if 0
     void diff(mapping* other) {
         vector< pair< MappingKey, MappingValue > > diff_kv;
         m_bt->diff(other->get_btree(), m_vol_page_size, &diff_kv);
@@ -968,11 +955,13 @@ public:
             LOGINFO("Diff KV = {} {}", it->first, it->second);
         }
     }
-
+#endif
+#if 0
     void merge(mapping* other) {
         m_bt->merge(other->get_btree(),
                     bind(&mapping::mapping_merge_cb, this, placeholders::_1, placeholders::_2, placeholders::_3));
     }
+#endif
 
 private:
     void mapping_merge_cb(vector< pair< MappingKey, MappingValue > >& match_kv,
@@ -1024,7 +1013,7 @@ private:
                 ValueEntry ve;
                 array.get((uint32_t)j, ve, true);
 
-                if (ve.get_seqId() <= param->m_req->lastCommited_seqId || ve.get_seqId() == INVALID_SEQ_ID) {
+                if (ve.get_seqId() == INVALID_SEQ_ID || ve.get_seqId() <= param->m_req->lastCommited_seqId) {
                     if (i == 0 || i == match_kv.size() - 1) {
 
                         MappingKey overlap;
@@ -1036,7 +1025,7 @@ private:
                     } else {
                         result_kv.emplace_back(make_pair(MappingKey(*e_key), MappingValue(ve)));
                     }
-                    if (m_pending_read_blk_cb) {
+                    if (m_pending_read_blk_cb && param->m_req) {
                         m_pending_read_blk_cb(param->m_req, ve.get_blkId()); // mark this blk as pending read
                     }
                     break;
@@ -1112,6 +1101,22 @@ private:
         uint32_t new_val_offset = initial_val_offset;
         for (auto& existing : match_kv) {
             MappingKey* e_key = &existing.first;
+            MappingValue* e_value = &existing.second;
+            uint32_t existing_val_offset = 0;
+
+            Blob_Array< ValueEntry >& e_varray = e_value->get_array();
+            ValueEntry ve;
+            e_varray.get(0, ve, false);
+            uint64_t seq_id = ve.get_seqId();
+            if (req->seqId <= seq_id) {
+                /* it is the latest entry, we should not override it */
+                replace_kv.emplace_back(existing.first, existing.second);
+                auto nblks = ve.get_nlba();
+                start_lba += nblks;
+                new_val_offset += nblks;
+                continue;
+            }
+
             if (e_key->start() > start_lba) {
                 /* add missing interval */
                 add_new_interval(start_lba, e_key->start() - 1, new_val, new_val_offset, replace_kv);
@@ -1119,8 +1124,6 @@ private:
                 start_lba = e_key->start();
             }
 
-            MappingValue* e_value = &existing.second;
-            uint32_t existing_val_offset = 0;
             /* enable it when snapshot comes */
 #if 0
             /* Truncate the existing value based on seq ID */

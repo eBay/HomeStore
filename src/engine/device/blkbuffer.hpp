@@ -5,7 +5,6 @@
 #ifndef OMSTORE_BLKBUFFER_HPP_HPP
 #define OMSTORE_BLKBUFFER_HPP_HPP
 
-#include "blkstore/writeBack_cache.hpp"
 #include "blkalloc/blk.h"
 #include "cache/cache.h"
 
@@ -29,7 +28,7 @@ public:
 };
 #endif
 
-class BlkBuffer : public WriteBackCacheBuffer< BlkId > {
+class BlkBuffer : public CacheBuffer< BlkId > {
 public:
     static BlkBuffer* make_object() { return sisl::ObjectAllocator< BlkBuffer >::make_object(); }
 

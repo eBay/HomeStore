@@ -113,7 +113,6 @@ public:
 
 protected:
     virtual void superblock_init(BlkId bid) = 0;
-    virtual void superblock_load(const std::vector< blk_buf_t >& bbuf, BlkId sb_blk_id) = 0;
     virtual data_blkstore_t::comp_callback data_completion_cb() = 0;
     virtual void process_vdev_error(vdev_info_block* vb) = 0;
 
@@ -242,7 +241,7 @@ protected:
             /* read and build the appln super block */
             std::vector< blk_buf_t > bbuf =
                 m_sb_blk_store->read_nmirror(blob->blkid, HS_STATIC_CONFIG(input.devices).size() - 1);
-            superblock_load(bbuf, blob->blkid);
+         //   superblock_load(bbuf, blob->blkid);
         }
     }
 

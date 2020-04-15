@@ -19,6 +19,8 @@ class MapStoreSpec : public StoreSpec< K, V > {
     typedef std::function< void(generator_op_error, const key_info< K, V >*, void*, const std::string&) >
         store_error_cb_t;
 
+    btree_cp_id m_cp_id;
+
 public:
     MapStoreSpec() {}
 
@@ -48,8 +50,7 @@ public:
 
         m_map = std::make_unique< mapping >(
             params.size, params.page_size, name,
-            std::bind(&MapStoreSpec::process_metadata_completions, this, std::placeholders::_1),
-            std::bind(&MapStoreSpec::process_free_blk_callback, this, std::placeholders::_1));
+            std::bind(&MapStoreSpec::process_free_blk_callback, this, std::placeholders::_1), nullptr);
     }
 
     /* Map put always appends if exists, no feature to force udpate/insert and return error */
@@ -62,7 +63,7 @@ public:
         req->lba = k.start();
         req->nlbas = k.get_n_lba();
         req->push_blkid(ve.get_blkId());
-        m_map->put(req, k, *(v.get()));
+        m_map->put(req, k, *(v.get()), nullptr);
         return true;
     }
 
@@ -161,7 +162,7 @@ public:
         LOGDEBUG("Mapping range put:{} {} ", key.to_string(), value.to_string());
 
         assert(req->nlbas == bid.get_nblks());
-        m_map->put(req, key, value);
+        m_map->put(req, key, value, nullptr);
 
         return true;
     }

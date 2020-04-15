@@ -33,6 +33,7 @@ std::vector< std::shared_ptr< Volume > > vol_list;
 #define STAGING_VOL_PREFIX "staging"
 
 THREAD_BUFFER_INIT;
+RCU_REGISTER_INIT;
 using log_level = spdlog::level::level_enum;
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 

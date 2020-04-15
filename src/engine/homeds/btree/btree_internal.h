@@ -28,7 +28,8 @@
 #include "common/homestore_assert.hpp"
 
 ENUM(btree_status_t, uint32_t, success, not_found, item_found, closest_found, closest_removed, retry, has_more,
-     read_failed, write_failed, stale_buf, refresh_failed, put_failed, space_not_avail, split_failed, insert_failed);
+     read_failed, write_failed, stale_buf, refresh_failed, put_failed, space_not_avail, split_failed, insert_failed,
+     cp_id_mismatch, merge_not_required, merge_failed);
 
 typedef enum {
     READ_NONE = 0,
@@ -65,91 +66,44 @@ typedef enum {
 #define BT_RELEASE_ASSERT_CMP(...) BT_ASSERT_CMP(RELEASE, ##__VA_ARGS__)
 #define BT_LOG_ASSERT_CMP(...) BT_ASSERT_CMP(LOGMSG, ##__VA_ARGS__)
 
-// structure to track btree multinode operations on different nodes
-#define btree_multinode_req_ptr boost::intrusive_ptr< btree_multinode_req< btree_req_type > >
+#define MAX_ADJANCENT_INDEX 3
 
-template < typename btree_req_type >
-struct btree_multinode_req : public sisl::ObjLifeCounter< struct btree_multinode_req< btree_req_type > > {
-    // when pending writes becomes zero and is_done is true, we can callback to upper layer
-    sisl::atomic_counter< int > writes_pending;
-    sisl::atomic_counter< int > m_refcount;
-    btree_status_t status;
-    boost::intrusive_ptr< btree_req_type > cookie;
-    std::deque< boost::intrusive_ptr< btree_req_type > > dependent_req_q;
-    bool is_write_modifiable;
-    bool is_sync;
-    int retry_cnt = 0;
-    int node_read_cnt = 0;
-#ifndef NDEBUG
-    uint64_t req_id = 0;
-    std::vector< uint64_t > child_req_q;
-#endif
+// clang-format off
+/* Journal entry of a btree
+ *---------------------------------------------------------------------------------------------------------------------------------------------
+ * |  Journal_entry_hdr | list of old node IDs | list of stale node IDs | list of new node IDs | list of new node gen | list of modified keys |
+ *---------------------------------------------------------------------------------------------------------------------------------------------
+ */
+// clang-format on
+enum journal_op { BTREE_SPLIT = 1, BTREE_MERGE };
 
-    btree_multinode_req() :
-            writes_pending(0),
-            m_refcount(0),
-            status(btree_status_t::success),
-            cookie(nullptr),
-            dependent_req_q(0),
-            is_write_modifiable(false),
-            is_sync(false){};
-
-    btree_multinode_req(bool is_write_modifiable, bool is_sync) :
-            writes_pending(0),
-            m_refcount(0),
-            status(btree_status_t::success),
-            cookie(nullptr),
-            dependent_req_q(0),
-            is_write_modifiable(is_write_modifiable),
-            is_sync(is_sync){};
-
-    btree_multinode_req(boost::intrusive_ptr< btree_req_type > cookie, boost::intrusive_ptr< btree_req_type > req,
-                        bool is_write_modifiable, bool is_sync) :
-            writes_pending(0),
-            m_refcount(0),
-            status(btree_status_t::success),
-            cookie(cookie),
-            dependent_req_q(0),
-            is_write_modifiable(is_write_modifiable),
-            is_sync(is_sync) {
-        if (req.get()) { dependent_req_q.push_back(req); }
-    }
-
-    template < class... Args >
-    static btree_multinode_req_ptr make_request(Args&&... args) {
-        return (btree_multinode_req_ptr(sisl::ObjectAllocator< btree_multinode_req< btree_req_type > >::make_object(
-            std::forward< Args >(args)...)));
-    }
-
-    ~btree_multinode_req() {}
-
-    void cmpltd() {
-        while (!dependent_req_q.empty()) {
-            dependent_req_q.pop_back();
-        }
-    }
-
-    friend void intrusive_ptr_add_ref(btree_multinode_req* req) { req->m_refcount.increment(1); }
-
-    friend void intrusive_ptr_release(btree_multinode_req* req) {
-        if (req->m_refcount.decrement_testz()) {
-            sisl::ObjectAllocator< btree_multinode_req< btree_req_type > >::deallocate(req);
-        }
-    }
-
-    friend class sisl::ObjectAllocator< btree_req_type >;
+#define INVALID_SEQ_ID UINT64_MAX
+struct btree_cp_id;
+typedef std::shared_ptr< btree_cp_id > btree_cp_id_ptr;
+typedef std::function< void(btree_cp_id_ptr cp_id) > cp_comp_callback;
+struct btree_cp_id {
+    uint64_t cp_cnt;
+    std::atomic< int > ref_cnt;
+    int64_t start_seq_id;
+    int64_t end_seq_id;
+    cp_comp_callback cb;
+    btree_cp_id() : cp_cnt(0), ref_cnt(1), start_seq_id(-1), end_seq_id(-1){};
+    ~btree_cp_id() { assert(ref_cnt == 0); }
 };
 
-struct empty_writeback_req {
-    /* shouldn't contain anything */
-    std::atomic< int > m_refcount;
-    friend void intrusive_ptr_add_ref(empty_writeback_req* req) {
-        req->m_refcount.fetch_add(1, std::memory_order_acquire);
-    }
-    friend void intrusive_ptr_release(empty_writeback_req* req) {
-        if (req->m_refcount.fetch_sub(1, std::memory_order_acquire) == 1) { free(req); }
-    }
-};
+struct btree_journal_entry_hdr {
+    journal_op op;
+    bool is_root;
+    uint64_t parent_node_id;
+    uint64_t parent_node_gen;
+    uint32_t parent_indx;
+    uint64_t left_child_id;
+    uint64_t left_child_gen;
+    uint8_t old_nodes_size;
+    uint8_t deleted_nodes_size;
+    uint8_t new_nodes_size;
+    uint8_t new_key_size;
+} __attribute__((__packed__));
 
 #if 0
 struct uint48_t {
@@ -525,8 +479,7 @@ public:
 
 protected:
     BRangeRequest(BRangeCBParam* cb_param, BtreeSearchRange& search_range) :
-            m_cb_param(cb_param),
-            m_input_range(search_range) {}
+            m_cb_param(cb_param), m_input_range(search_range) {}
 
     BRangeCBParam* m_cb_param;      // additional parameters that is passed to callback
     BtreeSearchRange m_input_range; // Btree range filter originally provided
@@ -594,9 +547,7 @@ public:
     BtreeUpdateRequest(BtreeSearchRange& search_range, match_item_cb_update_t< K, V > cb = nullptr,
                        get_size_needed_cb_t< K, V > size_cb = nullptr,
                        BRangeUpdateCBParam< K, V >* cb_param = nullptr) :
-            BRangeRequest(cb_param, search_range),
-            m_cb(cb),
-            m_size_cb(size_cb) {}
+            BRangeRequest(cb_param, search_range), m_cb(cb), m_size_cb(size_cb) {}
 
     match_item_cb_update_t< K, V > callback() const { return m_cb; }
     BRangeUpdateCBParam< K, V >* get_cb_param() const { return (BRangeUpdateCBParam< K, V >*)m_cb_param; }
@@ -718,8 +669,8 @@ public:
     std::string to_string() const override { return "<Empty>"; }
 };
 
-class BtreeConfig {
-private:
+typedef std::function< void() > trigger_cp_callback;
+struct BtreeConfig {
     uint64_t m_max_objs;
     uint32_t m_max_key_size;
     uint32_t m_max_value_size;
@@ -731,8 +682,10 @@ private:
     uint8_t m_split_pct;
 
     std::string m_btree_name; // Unique name for the btree
+    uint64_t align_size;
+    trigger_cp_callback trigger_cp_cb;
+    void* blkstore;
 
-public:
     BtreeConfig(uint32_t node_size, const char* btree_name = nullptr) {
         m_max_objs = 0;
         m_max_key_size = m_max_value_size = 0;

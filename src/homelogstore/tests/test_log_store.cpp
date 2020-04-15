@@ -12,6 +12,7 @@
 
 using namespace homestore;
 THREAD_BUFFER_INIT;
+RCU_REGISTER_INIT;
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 struct test_log_data {

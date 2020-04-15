@@ -203,6 +203,7 @@ public:
     virtual std::error_condition read(const VolumePtr& vol, const vol_interface_req_ptr& req) = 0;
     virtual std::error_condition sync_read(const VolumePtr& vol, const vol_interface_req_ptr& req) = 0;
     virtual const char* get_name(const VolumePtr& vol) = 0;
+    virtual uint64_t get_size(const VolumePtr& vol) = 0;
     virtual uint64_t get_page_size(const VolumePtr& vol) = 0;
     virtual boost::uuids::uuid get_uuid(std::shared_ptr< Volume > vol) = 0;
     virtual homeds::blob at_offset(const boost::intrusive_ptr< BlkBuffer >& buf, uint32_t offset) = 0;
@@ -217,7 +218,6 @@ public:
     virtual bool shutdown(bool force = false) = 0;
     virtual bool trigger_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool force = false) = 0;
     virtual cap_attrs get_system_capacity() = 0;
-    virtual cap_attrs get_vol_capacity(const VolumePtr& vol) = 0;
     virtual bool vol_state_change(const VolumePtr& vol, vol_state new_state) = 0;
 
     virtual void print_node(const VolumePtr& vol, uint64_t blkid, bool chksum = true) = 0;

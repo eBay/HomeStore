@@ -31,6 +31,7 @@ using namespace homestore;
 using namespace flip;
 
 THREAD_BUFFER_INIT;
+RCU_REGISTER_INIT;
 
 /************************** GLOBAL VARIABLES ***********************/
 
@@ -357,14 +358,13 @@ public:
         info->vol = vol_obj;
         info->uuid = VolInterface::get_instance()->get_uuid(vol_obj);
         info->fd = open(file_name.c_str(), O_RDWR);
-        info->max_vol_blks = VolInterface::get_instance()->get_vol_capacity(vol_obj).initial_total_size /
+        info->max_vol_blks = VolInterface::get_instance()->get_size(vol_obj) /
             VolInterface::get_instance()->get_page_size(vol_obj);
         info->m_vol_bm = new homeds::Bitset(info->max_vol_blks);
         ;
         info->cur_checkpoint = 0;
 
         assert(info->fd > 0);
-        assert(VolInterface::get_instance()->get_vol_capacity(vol_obj).initial_total_size == max_vol_size);
 
         std::unique_lock< std::mutex > lk(m_mutex);
         vol_info.push_back(info);
@@ -753,7 +753,6 @@ private:
         auto ret_io = VolInterface::get_instance()->write(vol, vreq);
         if (ret_io != no_error) {
             assert(ret_io == std::errc::no_such_device || expect_io_error);
-            process_completions(vreq);
         }
 
         LOGDEBUG("Wrote lba: {}, nblks: {} ", lba, nblks);
@@ -1026,7 +1025,6 @@ private:
             vol_info[vol_indx]->vol = nullptr;
         }
         VolInterface::get_instance()->remove_volume(uuid);
-        assert(VolInterface::get_instance()->lookup_volume(uuid) == nullptr);
         return true;
     }
 
@@ -1069,7 +1067,7 @@ TEST_F(IOTest, lifecycle_test) {
     this->kickstart_io();
     this->wait_cmpl();
 
-    LOGINFO("Metrics: {}", sisl::MetricsFarm::getInstance().get_result_in_json().dump(2));
+//    LOGINFO("Metrics: {}", sisl::MetricsFarm::getInstance().get_result_in_json().dump(2));
     LOGINFO("write_cnt {}", write_cnt);
     LOGINFO("read_cnt {}", read_cnt);
 

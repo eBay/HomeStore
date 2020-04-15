@@ -19,6 +19,7 @@
 
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 THREAD_BUFFER_INIT;
+RCU_REGISTER_INIT;
 
 #define MAX_CACHE_SIZE 2 * 1024 * 1024 * 1024
 using namespace std;
@@ -266,8 +267,8 @@ struct SimpleKeyComparator {
 
 #define TOTAL_ENTRIES 100000
 #define TOTAL_OPERS_PER_TEST 500
-#define NTHREADS 4
-//#define NTHREADS               1
+//#define NTHREADS 4
+#define NTHREADS               1
 
 struct BtreeCrudTest : public testing::Test {
 protected:
@@ -282,8 +283,7 @@ public:
         btree_cfg.set_max_objs(TOTAL_ENTRIES);
         btree_cfg.set_max_key_size(sizeof(TestSimpleKey));
         btree_cfg.set_max_value_size(0);
-        // m_bt = TestBtreeDeclType::create_btree(btree_cfg, &bt_dev_info);
-        m_bt = TestBtreeDeclType::create_btree(btree_cfg, nullptr);
+        m_bt = TestBtreeDeclType::create_btree(btree_cfg);
         init_entries();
     }
 
@@ -426,7 +426,6 @@ TEST_F(BtreeCrudTest, SimpleInsert) {
 
     auto json = m_bt->get_metrics_in_json();
     EXPECT_EQ(json["Counters"]["Btree object count"], 0u);
-    EXPECT_EQ(json["Counters"]["Btree Interior node count"], 0u);
 }
 
 TEST_F(BtreeCrudTest, SimpleQuery) {

@@ -30,30 +30,27 @@ struct mem_btree_node_header {
     sisl::atomic_counter< uint16_t > refcount;
 };
 
-#define MemBtreeNode BtreeNode< btree_store_type::MEM_BTREE, K, V, InteriorNodeType, LeafNodeType, empty_writeback_req >
+#define MemBtreeNode BtreeNode< btree_store_type::MEM_BTREE, K, V, InteriorNodeType, LeafNodeType >
 #define MemBtreeStore                                                                                                  \
-    BtreeStore< btree_store_type::MEM_BTREE, K, V, InteriorNodeType, LeafNodeType, empty_writeback_req >
-#define membtree_multinode_req_ptr boost::intrusive_ptr< btree_multinode_req< empty_writeback_req > >
+    BtreeStore< btree_store_type::MEM_BTREE, K, V, InteriorNodeType, LeafNodeType >
 
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
 class MemBtreeStore {
-    typedef std::function< void(boost::intrusive_ptr< empty_writeback_req > cookie, std::error_condition status) >
-        comp_callback;
-
 public:
+    struct superblock {
+        /* there is no super block for mem btree */
+    };
     using HeaderType = mem_btree_node_header;
 
-    BtreeStore(BtreeConfig& cfg, void* btree_specific_context) : m_cfg(cfg) {
+    BtreeStore(BtreeConfig& cfg) : m_cfg(cfg) {
         m_node_size = cfg.get_node_size();
         m_cfg.set_node_area_size(m_node_size - sizeof(MemBtreeNode) - sizeof(LeafPhysicalNode));
         allocate_init();
     }
 
-    static std::unique_ptr< MemBtreeStore > init_btree(BtreeConfig& cfg, void* btree_specific_context,
-                                                       comp_callback comp_cb, bool is_in_recovery = false) {
-        return (std::make_unique< BtreeStore >(cfg, btree_specific_context));
+    static std::unique_ptr< MemBtreeStore > init_btree(BtreeConfig& cfg) {
+        return (std::make_unique< BtreeStore >(cfg));
     }
-    static void recovery_cmpltd(MemBtreeStore* store){};
 
     static uint8_t* get_physical(const MemBtreeNode* bn) { return (uint8_t*)((uint8_t*)bn + sizeof(MemBtreeNode)); }
 
@@ -62,10 +59,18 @@ public:
     }
 
     uint32_t get_node_size() const { return m_node_size; }
+    static btree_cp_id_ptr attach_prepare_cp(MemBtreeStore* store, btree_cp_id_ptr cur_cp_id) {
+        assert(0);
+        return nullptr;
+    }
+    static void update_store_sb(MemBtreeStore *store, MemBtreeStore::superblock &sb) {};
+
+    static void write_journal_entry(MemBtreeStore *store, btree_cp_id_ptr cp_id, uint8_t *mem, size_t size) {
+    }
 
     static boost::intrusive_ptr< MemBtreeNode >
     alloc_node(MemBtreeStore* store, bool is_leaf,
-               bool& is_new_allocation, // indicates if allocated node is same as copy_from
+               bool &is_new_allocation, // indicates if allocated node is same as copy_from
                boost::intrusive_ptr< MemBtreeNode > copy_from = nullptr) {
         if (copy_from != nullptr) {
             is_new_allocation = false;
@@ -114,12 +119,12 @@ public:
     }
 
     static btree_status_t write_node(MemBtreeStore* store, boost::intrusive_ptr< MemBtreeNode > bn,
-                                     membtree_multinode_req_ptr op) {
+                                     boost::intrusive_ptr< MemBtreeNode > dependent_bn, btree_cp_id_ptr cp_id) {
         return btree_status_t::success;
     }
 
-    static void free_node(MemBtreeStore* store, boost::intrusive_ptr< MemBtreeNode > bn, membtree_multinode_req_ptr op,
-                          bool mem_only = false) {
+    static void free_node(MemBtreeStore* store, boost::intrusive_ptr< MemBtreeNode > bn,
+                          bool mem_only, btree_cp_id_ptr cp_id) {
         auto mbh = (mem_btree_node_header*)bn.get();
         if (mbh->refcount.decrement_testz()) {
             // TODO: Access the VariantNode area and call its destructor as well
@@ -166,7 +171,7 @@ public:
     }
 
     static btree_status_t refresh_node(MemBtreeStore* impl, boost::intrusive_ptr< MemBtreeNode > bn,
-                                       membtree_multinode_req_ptr op, bool is_write_modifiable) {
+                                       bool is_write_modifiable, btree_cp_id_ptr cp_id) {
         return btree_status_t::success;
     }
 
@@ -186,6 +191,14 @@ public:
             bn->~MemBtreeNode();
             deallocate_mem((uint8_t*)bn);
         }
+    }
+    
+    static void cp_start(MemBtreeStore *store, btree_cp_id_ptr cp_id, cp_comp_callback cb) {}
+    static void truncate(MemBtreeStore *store, btree_cp_id_ptr cp_id) {}
+    static void cp_done(trigger_cp_callback cb) {}
+    static void destroy_done(MemBtreeStore *store) {}
+    static btree_status_t write_node_sync(MemBtreeStore* store, boost::intrusive_ptr< MemBtreeNode > bn) {
+        return btree_status_t::success;
     }
 
 private:

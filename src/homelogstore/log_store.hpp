@@ -207,8 +207,9 @@ public:
      * @param b Blob of data to append
      * @param cookie Passed as is to the completion callback
      * @param completion_cb Completion callback which contains the seqnum, status and cookie
+     * @return internally generated sequence number
      */
-    void append_async(const sisl::blob& b, void* cookie, const log_write_comp_cb_t& completion_cb);
+    logstore_seq_num_t append_async(const sisl::blob& b, void* cookie, const log_write_comp_cb_t& completion_cb);
 
     /**
      * @brief Read the log provided the sequence number synchronously. This is not the most efficient way to read

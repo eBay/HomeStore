@@ -531,7 +531,7 @@ private:
 
     void vol_init(const VolumePtr& vol_obj) {
         // we don't need to open fds since we don't handle verfication here for now.
-        assert(VolInterface::get_instance()->get_vol_capacity(vol_obj).initial_total_size == m_max_vol_size);
+        assert(VolInterface::get_instance()->get_size(vol_obj) == m_max_vol_size);
         m_vols.push_back(vol_obj);
     }
 

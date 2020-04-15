@@ -56,6 +56,7 @@ extern bool same_value_gen;
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 THREAD_BUFFER_INIT;
+RCU_REGISTER_INIT;
 
 using namespace homeds::loadgen;
 

@@ -309,7 +309,7 @@ void LogDev::do_flush(LogGroup* lg) {
 
     auto req = logdev_req::make_request();
     req->m_log_group = lg;
-    store->pwritev(lg->iovecs().data(), (int)lg->iovecs().size(), lg->m_log_dev_offset, to_wb_req(req));
+    store->pwritev(lg->iovecs().data(), (int)lg->iovecs().size(), lg->m_log_dev_offset, req);
 }
 
 void LogDev::process_logdev_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req) {
