@@ -417,9 +417,8 @@ public:
         max_io_size = params.max_io_size;
         ev_fd = eventfd(0, EFD_NONBLOCK);
 
-        iomgr_obj->add_fd(
-            ev_fd, [this](auto fd, auto cookie, auto event) { process_ev_common(fd, cookie, event); }, EPOLLIN, 9,
-            nullptr);
+        iomgr_obj->add_fd(ev_fd, [this](auto fd, auto cookie, auto event) { process_ev_common(fd, cookie, event); },
+                          EPOLLIN, 9, nullptr);
         ep = new test_ep(iomgr_obj);
         iomgr_obj->add_ep(ep);
         iomgr_obj->start();
@@ -945,12 +944,22 @@ public:
         m_init_done_cv.wait(lk);
     }
 
-    void wait_cmpl() {
-        std::unique_lock< std::mutex > lk(m_mutex);
-        if (io_stalled) {
-            return;
+    void wait_cmpl(bool wait_io_comp = false) {
+        {
+            std::unique_lock< std::mutex > lk(m_mutex);
+            if (io_stalled) {
+                return;
+            }
+            m_cv.wait(lk);
         }
-        m_cv.wait(lk);
+
+        if (wait_io_comp) {
+            // Waiting on outstanding I/Os to complete;
+            while (outstanding_ios.load() != 0) {
+                LOGINFO("Waiting on outstanding_ios: {} to complete. ", outstanding_ios.load());
+                sleep(2);
+            }
+        }
     }
 
     bool delete_volume(int vol_indx) {
@@ -1219,7 +1228,7 @@ TEST_F(IOTest, btree_fix_read_failure_test) {
     this->init = true;
     this->start_homestore();
 
-    this->wait_cmpl();
+    this->wait_cmpl(true);
     LOGINFO("write_cnt {}", write_cnt);
     LOGINFO("read_cnt {}", read_cnt);
 
@@ -1255,12 +1264,9 @@ TEST_F(IOTest, btree_fix_test) {
     this->init = true;
     this->start_homestore();
 
-    this->wait_cmpl();
+    this->wait_cmpl(true);
     LOGINFO("write_cnt {}", write_cnt);
     LOGINFO("read_cnt {}", read_cnt);
-
-    sleep(5);
-    assert(outstanding_ios == 0);
 
     this->move_vol_to_offline();
     auto ret = this->fix_vol_mapping_btree();
@@ -1293,12 +1299,9 @@ TEST_F(IOTest, btree_fix_rerun_io_test) {
     this->init = true;
     this->start_homestore();
 
-    this->wait_cmpl();
+    this->wait_cmpl(true);
     LOGINFO("write_cnt {}", write_cnt);
     LOGINFO("read_cnt {}", read_cnt);
-
-    sleep(5);
-    assert(outstanding_ios == 0);
 
     this->move_vol_to_offline();
     auto ret = this->fix_vol_mapping_btree();
@@ -1310,12 +1313,9 @@ TEST_F(IOTest, btree_fix_rerun_io_test) {
     io_stalled = false;
     this->move_vol_to_online();
 
-    this->wait_cmpl();
+    this->wait_cmpl(true);
     LOGINFO("write_cnt {}", write_cnt);
     LOGINFO("read_cnt {}", read_cnt);
-
-    sleep(5);
-    assert(outstanding_ios == 0);
 
     if (can_delete_volume) {
         this->delete_volumes();
