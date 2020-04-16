@@ -12,6 +12,7 @@
 
 SDS_LOGGING_INIT(logging, test_bitmap)
 THREAD_BUFFER_INIT;
+RCU_REGISTER_INIT;
 
 namespace homeds {
 

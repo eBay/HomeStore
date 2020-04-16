@@ -291,15 +291,14 @@ public:
     }
 
     void get_last_key(BtreeKey* out_lastkey) {
-        assert(get_total_entries() > 0);
         if (get_total_entries() == 0) { return; }
-        return to_variant_node()->get_nth_key(get_total_entries() - 1, out_lastkey, false);
+        return to_variant_node()->get_nth_key(get_total_entries() - 1, out_lastkey, true);
     }
 
-    void get_first_key(BtreeKey* out_firstkey) { return to_variant_node()->get_nth_key(0, out_firstkey, false); }
+    void get_first_key(BtreeKey* out_firstkey) { return to_variant_node()->get_nth_key(0, out_firstkey, true); }
 
     void get_var_nth_key(int i, BtreeKey* out_firstkey) {
-        return to_variant_node()->get_nth_key(i, out_firstkey, false);
+        return to_variant_node()->get_nth_key(i, out_firstkey, true);
     }
 
     uint32_t get_all(const BtreeSearchRange& range, uint32_t max_count, int& start_ind, int& end_ind,

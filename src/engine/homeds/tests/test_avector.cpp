@@ -11,6 +11,7 @@
 
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 THREAD_BUFFER_INIT;
+RCU_REGISTER_INIT;
 
 void func(const homeds::sparse_vector< int >& cvec) {
     LOGINFO("vec.at(1) = {}", cvec.at(1));

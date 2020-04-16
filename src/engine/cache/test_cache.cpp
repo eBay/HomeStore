@@ -12,6 +12,7 @@
 
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 THREAD_BUFFER_INIT;
+RCU_REGISTER_INIT;
 
 struct blk_id {
     static homeds::blob get_blob(const blk_id& id) {

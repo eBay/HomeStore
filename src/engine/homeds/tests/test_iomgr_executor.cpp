@@ -10,6 +10,7 @@
 SDS_LOGGING_INIT(iomgr)
 SDS_OPTIONS_ENABLE(logging)
 THREAD_BUFFER_INIT;
+RCU_REGISTER_INIT;
 
 using namespace homeds::loadgen;
 

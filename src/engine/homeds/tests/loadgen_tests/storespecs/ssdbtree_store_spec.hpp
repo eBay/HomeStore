@@ -19,8 +19,7 @@ namespace loadgen {
 // btree_node_type::VAR_VALUE, NodeSize, writeback_req>
 
 #define LoadGenSSDBtree                                                                                                \
-    Btree< btree_store_type::SSD_BTREE, K, V, find_interior_node_type< K >(), find_leaf_node_type< K, V >(),           \
-           writeback_req >
+    Btree< btree_store_type::SSD_BTREE, K, V, find_interior_node_type< K >(), find_leaf_node_type< K, V >() >
 
 struct ssd_loadgen_req;
 typedef boost::intrusive_ptr< ssd_loadgen_req > ssd_loadgen_req_ptr;
@@ -56,18 +55,9 @@ public:
         btree_cfg.set_max_objs(TOTAL_ENTRIES);
         btree_cfg.set_max_key_size(K::get_max_size());
         btree_cfg.set_max_value_size(V::get_max_size());
+        btree_cfg.blkstore = HomeBlks::instance()->get_index_blkstore();
 
-        homeds::btree::btree_device_info bt_dev_info;
-        bt_dev_info.blkstore = HomeBlks::instance()->get_index_blkstore();
-        bt_dev_info.new_device = false;
-        m_bt = std::unique_ptr< LoadGenSSDBtree >(LoadGenSSDBtree::create_btree(
-            btree_cfg, &bt_dev_info,
-            std::bind(&SSDBtreeStoreSpec::process_completions, this, std::placeholders::_1, std::placeholders::_2)));
-    }
-
-    void process_completions(boost::intrusive_ptr< writeback_req > cookie, bool status) {
-        boost::intrusive_ptr< ssd_loadgen_req > req = boost::static_pointer_cast< ssd_loadgen_req >(cookie);
-        if (req->status == no_error) { req->status = status ? no_error : btree_write_failed; }
+        m_bt = std::unique_ptr< LoadGenSSDBtree >(LoadGenSSDBtree::create_btree(btree_cfg));
     }
 
     virtual bool insert(K& k, std::shared_ptr< V > v) override { return update(k, v); }
@@ -75,12 +65,9 @@ public:
     virtual bool upsert(K& k, std::shared_ptr< V > v) override { return update(k, v); }
 
     virtual bool update(K& k, std::shared_ptr< V > v) override {
-        boost::intrusive_ptr< ssd_loadgen_req > req = ssd_loadgen_req::make_request();
         V existing_val;
-        req->state = writeback_req_state::WB_REQ_COMPL;
         // m_bt->put(k, v, btree_put_type::REPLACE_ONLY_IF_EXISTS, to_wb_req(req), to_wb_req(req), &existing_val);
-        m_bt->put(k, *(v.get()), btree_put_type::REPLACE_IF_EXISTS_ELSE_INSERT, to_wb_req(req), to_wb_req(req),
-                  &existing_val);
+        m_bt->put(k, *(v.get()), btree_put_type::REPLACE_IF_EXISTS_ELSE_INSERT);
         return true;
     }
 

@@ -11,11 +11,11 @@ namespace btree {
 
 #define DecBNodeType(ret)                                                                                              \
     template < btree_store_type BtreeStoreType, typename K, typename V, btree_node_type InteriorNodeType,              \
-               btree_node_type LeafNodeType, typename btree_req_type >                                                 \
+               btree_node_type LeafNodeType >                                                                          \
     ret btree_node_t::
 
 template < btree_store_type BtreeStoreType, typename K, typename V, btree_node_type InteriorNodeType,
-           btree_node_type LeafNodeType, typename btree_req_type >
+           btree_node_type LeafNodeType >
 btree_node_t::BtreeNode() : m_common_header() {}
 
 #if 0

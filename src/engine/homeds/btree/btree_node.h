@@ -117,10 +117,9 @@ private:
 #define call_physical_method_const(bn, mname, ...) (to_physical_node_const(bn)->mname(__VA_ARGS__))
 
 template < btree_store_type BtreeStoreType, typename K, typename V, btree_node_type InteriorNodeType,
-           btree_node_type LeafNodeType, typename btree_req_type >
-class BtreeNode
-        : public btree_store_t::HeaderType,
-          sisl::ObjLifeCounter< BtreeNode< BtreeStoreType, K, V, InteriorNodeType, LeafNodeType, btree_req_type > > {
+           btree_node_type LeafNodeType >
+class BtreeNode : public btree_store_t::HeaderType,
+                  sisl::ObjLifeCounter< BtreeNode< BtreeStoreType, K, V, InteriorNodeType, LeafNodeType > > {
 public:
     transient_hdr_t m_common_header;
 

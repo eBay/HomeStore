@@ -139,8 +139,10 @@ void HomeLogStore::write_async(logstore_seq_num_t seq_num, const sisl::blob& b, 
     });
 }
 
-void HomeLogStore::append_async(const sisl::blob& b, void* cookie, const log_write_comp_cb_t& cb) {
-    write_async(m_seq_num.fetch_add(1, std::memory_order_acq_rel), b, cookie, cb);
+int64_t HomeLogStore::append_async(const sisl::blob& b, void* cookie, const log_write_comp_cb_t& cb) {
+    auto seq_num = m_seq_num.fetch_add(1, std::memory_order_acq_rel);
+    write_async(seq_num, b, cookie, cb);
+    return seq_num;
 }
 
 log_buffer HomeLogStore::read_sync(logstore_seq_num_t seq_num) {
