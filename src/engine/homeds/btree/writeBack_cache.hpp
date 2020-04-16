@@ -8,6 +8,8 @@
 
 #define MAX_DIRTY_BUF 100
 
+#define wb_cache_buffer_t WriteBackCacheBuffer< K, V, InteriorNodeType, LeafNodeType >
+
 namespace homeds {
 namespace btree {
 #define SSDBtreeNode BtreeNode< btree_store_type::SSD_BTREE, K, V, InteriorNodeType, LeafNodeType >
@@ -20,7 +22,6 @@ enum writeback_req_state {
     WB_REQ_COMPL,    /* completed */
 };
 
-#define wb_cache_buffer_t WriteBackCacheBuffer< K, V, InteriorNodeType, LeafNodeType >
 #define btree_blkstore_t homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy, wb_cache_buffer_t >
 #define writeback_req_t wb_cache_buffer_t::writeback_req
 #define writeback_req_ptr boost::intrusive_ptr< typename writeback_req_t >

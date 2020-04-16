@@ -241,13 +241,13 @@ mapping* IndxMgr::get_active_indx() { return m_active_map; }
 void IndxMgr::journal_comp_cb(logstore_seq_num_t seq_num, logdev_key ld_key, void* req) {
     assert(ld_key.is_valid());
     auto vreq = (volume_req*)req;
-    uint64_t lba_written = vreq->indx_start_lba - vreq->lba;
+    uint64_t lba_written = vreq->indx_start_lba - vreq->lba();
 
-    if (lba_written == vreq->nlbas) {
+    if (lba_written == vreq->nblks()) {
         m_io_cb(vreq, no_error);
     } else {
         /* partial write */
-        assert(lba_written < vreq->nlbas);
+        assert(lba_written < vreq->nblks());
         m_io_cb(vreq, homestore_error::btree_write_failed);
     }
 
@@ -257,11 +257,10 @@ void IndxMgr::journal_comp_cb(logstore_seq_num_t seq_num, logdev_key ld_key, voi
 
 void IndxMgr::journal_write(volume_req* vreq) {
     auto b = vreq->create_journal_entry();
-    vreq->inc_ref_cnt();
     m_journal->write_async(vreq->seqId, b, vreq, m_journal_comp_cb);
 }
 
-btree_status_t IndxMgr::update_indx_tbl(volume_req_ptr& vreq) {
+btree_status_t IndxMgr::update_indx_tbl(volume_req* vreq) {
     std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;
     uint64_t offset = 0;
 

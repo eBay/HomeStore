@@ -113,7 +113,7 @@ vol_interface_req_ptr HomeBlks::create_vol_interface_req(void* buf, uint64_t lba
     return vol_interface_req_ptr(new vol_interface_req(buf, lba, nblks, is_sync));
 }
 
-std::error_condition HomeBlks::write(const VolumePtr& vol, const vol_interface_req_ptr& req) {
+std::error_condition HomeBlks::write(const VolumePtr& vol, const vol_interface_req_ptr& req, bool part_of_batch) {
     assert(m_rdy);
     if (!vol) {
         assert(0);
@@ -121,10 +121,11 @@ std::error_condition HomeBlks::write(const VolumePtr& vol, const vol_interface_r
     }
     if (!m_rdy || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
     req->vol_instance = vol;
+    req->part_of_batch = part_of_batch;
     return (vol->write(req));
 }
 
-std::error_condition HomeBlks::read(const VolumePtr& vol, const vol_interface_req_ptr& req) {
+std::error_condition HomeBlks::read(const VolumePtr& vol, const vol_interface_req_ptr& req, bool part_of_batch) {
     assert(m_rdy);
     if (!vol) {
         assert(0);
@@ -132,6 +133,7 @@ std::error_condition HomeBlks::read(const VolumePtr& vol, const vol_interface_re
     }
     if (!m_rdy || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
     req->vol_instance = vol;
+    req->part_of_batch = part_of_batch;
     return (vol->read(req));
 }
 
@@ -215,6 +217,11 @@ SnapshotPtr HomeBlks::snap_volume(VolumePtr volptr) {
     return sp;
 }
 
+void HomeBlks::submit_io_batch() {
+    iomanager.default_drive_interface()->submit_batch();
+    call_multi_vol_completions();
+}
+
 HomeBlks* HomeBlks::instance() { return _instance.get(); }
 HomeBlksSafePtr HomeBlks::safe_instance() { return _instance; }
 
@@ -258,7 +265,7 @@ void HomeBlks::process_vdev_error(vdev_info_block* vb) {
 void HomeBlks::attach_vol_completion_cb(const VolumePtr& vol, const io_comp_callback& cb) {
     vol->attach_completion_cb(cb);
 }
-void HomeBlks::attach_batch_sentinel_cb(const batch_sentinel_callback& cb) { m_cfg.batch_sentinel_cb = cb; }
+void HomeBlks::attach_end_of_batch_cb(const end_of_batch_callback& cb) { m_cfg.end_of_batch_cb = cb; }
 
 void HomeBlks::vol_mounted(const VolumePtr& vol, vol_state state) {
     m_cfg.vol_mounted_cb(vol, state);
@@ -358,14 +365,9 @@ void HomeBlks::init_thread() {
                                  }}));
         m_http_server->start();
 
-        iomanager.default_drive_interface()->attach_batch_sentinel_cb([this](int nevents) {
-            auto v_comp_events = 0;
-            for (auto& v : s_io_completed_volumes) {
-                v_comp_events += v->call_batch_completion_cbs();
-            }
-            s_io_completed_volumes.clear();
-            if (m_cfg.batch_sentinel_cb && v_comp_events) m_cfg.batch_sentinel_cb(v_comp_events);
-        });
+        // Attach all completions
+        iomanager.default_drive_interface()->attach_end_of_batch_cb(
+            [this](int nevents) { call_multi_vol_completions(); });
 
         /* TODO :- start recovery_mgr recovery with callback */
     } catch (const std::exception& e) {
@@ -685,4 +687,13 @@ vol_state HomeBlks::get_state(VolumePtr vol) { return vol->get_state(); }
 bool HomeBlks::fix_tree(VolumePtr vol, bool verify) {
     std::unique_lock< std::recursive_mutex > lg(m_vol_lock);
     return vol->fix_mapping_btree(verify);
+}
+
+void HomeBlks::call_multi_vol_completions() {
+    auto v_comp_events = 0;
+    for (auto& v : s_io_completed_volumes) {
+        v_comp_events += v->call_batch_completion_cbs();
+    }
+    s_io_completed_volumes.clear();
+    if (m_cfg.end_of_batch_cb && v_comp_events) m_cfg.end_of_batch_cb(v_comp_events);
 }

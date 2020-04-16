@@ -15,6 +15,7 @@
 // SDS_LOGGING_DECL(VMOD_VOL_MAPPING)
 SDS_LOGGING_DECL(volume)
 
+using namespace homeds;
 using namespace homeds::btree;
 
 #define LBA_MASK 0xFFFFFFFFFFFF
@@ -321,7 +322,7 @@ public:
 
     void get_overlap_diff_kvs(MappingKey* k1, MappingValue* v1, MappingKey* k2, MappingValue* v2,
                               uint32_t vol_page_size, diff_read_next_t& to_read,
-                              std::vector< pair< MappingKey, MappingValue > >& overlap_kvs) {
+                              std::vector< std::pair< MappingKey, MappingValue > >& overlap_kvs) {
         static MappingKey k;
         static MappingValue v;
 
@@ -543,8 +544,8 @@ private:
     };
 
 public:
-    void get_alloc_blks_cb(vector< pair< MappingKey, MappingValue > >& match_kv,
-                           vector< pair< MappingKey, MappingValue > >& result_kv,
+    void get_alloc_blks_cb(std::vector< std::pair< MappingKey, MappingValue > >& match_kv,
+                           std::vector< std::pair< MappingKey, MappingValue > >& result_kv,
                            BRangeQueryCBParam< MappingKey, MappingValue >* cb_param) {
         uint64_t start_lba = 0, end_lba = 0;
         get_start_end_lba(cb_param, start_lba, end_lba);
@@ -589,7 +590,7 @@ public:
         MappingKey start_key(start_lba, 1), end_key(end_lba, 1);
         auto search_range = BtreeSearchRange(start_key, true, end_key, true);
         GetCBParam param(nullptr);
-        vector< pair< MappingKey, MappingValue > > result_kv;
+        std::vector< std::pair< MappingKey, MappingValue > > result_kv;
 
         BtreeQueryRequest< MappingKey, MappingValue > qreq(
             search_range, BtreeQueryType::TREE_TRAVERSAL_QUERY, (end_lba - start_lba + 1),
@@ -667,7 +668,8 @@ public:
 
     void destroy_done() { m_bt->destroy_done(); }
 
-    error_condition get(volume_req* req, vector< pair< MappingKey, MappingValue > >& values, MappingBtreeDeclType* bt) {
+    error_condition get(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& values,
+                        MappingBtreeDeclType* bt) {
         uint64_t start_lba = req->lba();
         uint64_t num_lba = req->nblks();
         uint64_t end_lba = start_lba + req->nblks() - 1;
@@ -675,7 +677,7 @@ public:
         MappingKey end_key(end_lba, 1);
         auto search_range = BtreeSearchRange(start_key, true, end_key, true);
         GetCBParam param(req);
-        std::vector< pair< MappingKey, MappingValue > > result_kv;
+        std::vector< std::pair< MappingKey, MappingValue > > result_kv;
 
         BtreeQueryRequest< MappingKey, MappingValue > qreq(
             search_range, BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, num_lba,
@@ -689,7 +691,8 @@ public:
         return no_error;
     }
 
-    error_condition get(volume_req* req, vector< pair< MappingKey, MappingValue > >& values, bool fill_gaps = true) {
+    error_condition get(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& values,
+                        bool fill_gaps = true) {
         uint64_t start_lba = req->lba();
         uint64_t num_lba = req->nblks();
         uint64_t end_lba = start_lba + req->nblks() - 1;
@@ -779,8 +782,7 @@ public:
         return btree_status_t::success;
     }
 
-    btree_status_t put(boost::intrusive_ptr< volume_req > req, MappingKey& key, MappingValue& value,
-                       btree_cp_id_ptr cp_id) {
+    btree_status_t put(volume_req* req, MappingKey& key, MappingValue& value, btree_cp_id_ptr cp_id) {
         uint64_t start_lba;
         return put(req, key, value, cp_id, m_bt, start_lba);
     }
@@ -957,7 +959,7 @@ public:
     }
 #if 0
     void diff(mapping* other) {
-        vector< pair< MappingKey, MappingValue > > diff_kv;
+        std::vector< std::pair< MappingKey, MappingValue > > diff_kv;
         m_bt->diff(other->get_btree(), m_vol_page_size, &diff_kv);
         for (auto it = diff_kv.begin(); it != diff_kv.end(); it++) {
             LOGINFO("Diff KV = {} {}", it->first, it->second);
@@ -972,8 +974,8 @@ public:
 #endif
 
 private:
-    void mapping_merge_cb(vector< pair< MappingKey, MappingValue > >& match_kv,
-                          vector< pair< MappingKey, MappingValue > >& replace_kv,
+    void mapping_merge_cb(std::vector< std::pair< MappingKey, MappingValue > >& match_kv,
+                          std::vector< std::pair< MappingKey, MappingValue > >& replace_kv,
                           BRangeUpdateCBParam< MappingKey, MappingValue >* cb_param) {
         match_item_cb_put(match_kv, replace_kv, cb_param);
     }
@@ -984,8 +986,8 @@ private:
      * @param result_kv - All KV which are passed backed to mapping.get by btree. Btree dosent use this.
      * @param cb_param -  All parameteres provided by mapping.get can be accessed from this
      */
-    void match_item_cb_get(vector< pair< MappingKey, MappingValue > >& match_kv,
-                           vector< pair< MappingKey, MappingValue > >& result_kv,
+    void match_item_cb_get(std::vector< std::pair< MappingKey, MappingValue > >& match_kv,
+                           std::vector< std::pair< MappingKey, MappingValue > >& result_kv,
                            BRangeQueryCBParam< MappingKey, MappingValue >* cb_param) {
         uint64_t start_lba = 0, end_lba = 0;
         get_start_end_lba(cb_param, start_lba, end_lba);
@@ -1057,7 +1059,7 @@ private:
         return (start_lba - input_start_lba);
     }
 
-    uint32_t get_size_needed(vector< pair< MappingKey, MappingValue > >& match_kv,
+    uint32_t get_size_needed(std::vector< std::pair< MappingKey, MappingValue > >& match_kv,
                              BRangeUpdateCBParam< MappingKey, MappingValue >* cb_param) {
 
         UpdateCBParam* param = (UpdateCBParam*)cb_param;
@@ -1078,8 +1080,8 @@ private:
      *
      * We piggyback on put to delete old commited seq Id.
      */
-    void match_item_cb_put(vector< pair< MappingKey, MappingValue > >& match_kv,
-                           vector< pair< MappingKey, MappingValue > >& replace_kv,
+    void match_item_cb_put(std::vector< std::pair< MappingKey, MappingValue > >& match_kv,
+                           std::vector< std::pair< MappingKey, MappingValue > >& replace_kv,
                            BRangeUpdateCBParam< MappingKey, MappingValue >* cb_param) {
 
         uint64_t start_lba = 0, end_lba = 0;
@@ -1257,7 +1259,7 @@ private:
     /* result of overlap of k1/k2 is added to replace_kv */
     void compute_and_add_overlap(volume_req* req, uint64_t s_lba, uint64_t e_lba, MappingValue& new_val,
                                  uint16_t new_val_offset, MappingValue& e_val, uint16_t e_val_offset,
-                                 vector< pair< MappingKey, MappingValue > >& replace_kv) {
+                                 std::vector< std::pair< MappingKey, MappingValue > >& replace_kv) {
 
         auto nlba = e_lba - s_lba + 1;
 
@@ -1276,7 +1278,7 @@ private:
 
     /* add missing interval to replace kv */
     void add_new_interval(uint64_t s_lba, uint64_t e_lba, MappingValue& val, uint16_t lba_offset,
-                          vector< pair< MappingKey, MappingValue > >& replace_kv) {
+                          std::vector< std::pair< MappingKey, MappingValue > >& replace_kv) {
         auto nlba = e_lba - s_lba + 1;
         replace_kv.emplace_back(
             make_pair(MappingKey(s_lba, nlba), MappingValue(val, lba_offset, nlba, m_vol_page_size)));
@@ -1284,7 +1286,8 @@ private:
 
 #ifndef NDEBUG
 
-    void validate_get_response(uint64_t lba_start, uint32_t n_lba, vector< pair< MappingKey, MappingValue > >& values,
+    void validate_get_response(uint64_t lba_start, uint32_t n_lba,
+                               std::vector< std::pair< MappingKey, MappingValue > >& values,
                                MappingValue* exp_value = nullptr, volume_req* req = nullptr) {
         uint32_t i = 0;
         uint64_t last_slba = lba_start;
@@ -1301,7 +1304,7 @@ private:
                 std::this_thread::sleep_for(std::chrono::seconds(5));
 
                 if (req) { // do it again to trace
-                    vector< pair< MappingKey, MappingValue > > values;
+                    std::vector< std::pair< MappingKey, MappingValue > > values;
                     auto temp = req->lastCommited_seqId;
                     req->lastCommited_seqId = req->seqId;
                     MappingKey key(lba_start, n_lba);

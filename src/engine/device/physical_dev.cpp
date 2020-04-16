@@ -273,20 +273,22 @@ inline void PhysicalDev::read_superblock() {
     }
 }
 
-void PhysicalDev::write(const char* data, uint32_t size, uint64_t offset, uint8_t* cookie) {
-    drive_iface->async_write(get_devfd(), data, size, (off_t)offset, cookie);
+void PhysicalDev::write(const char* data, uint32_t size, uint64_t offset, uint8_t* cookie, bool part_of_batch) {
+    drive_iface->async_write(get_devfd(), data, size, (off_t)offset, cookie, part_of_batch);
 }
 
-void PhysicalDev::writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie) {
-    drive_iface->async_writev(get_devfd(), iov, iovcnt, size, offset, cookie);
+void PhysicalDev::writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie,
+                         bool part_of_batch) {
+    drive_iface->async_writev(get_devfd(), iov, iovcnt, size, offset, cookie, part_of_batch);
 }
 
-void PhysicalDev::read(char* data, uint32_t size, uint64_t offset, uint8_t* cookie) {
-    drive_iface->async_read(get_devfd(), data, size, (off_t)offset, cookie);
+void PhysicalDev::read(char* data, uint32_t size, uint64_t offset, uint8_t* cookie, bool part_of_batch) {
+    drive_iface->async_read(get_devfd(), data, size, (off_t)offset, cookie, part_of_batch);
 }
 
-void PhysicalDev::readv(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie) {
-    drive_iface->async_readv(get_devfd(), iov, iovcnt, size, (off_t)offset, cookie);
+void PhysicalDev::readv(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie,
+                        bool part_of_batch) {
+    drive_iface->async_readv(get_devfd(), iov, iovcnt, size, (off_t)offset, cookie, part_of_batch);
 }
 
 ssize_t PhysicalDev::sync_write(const char* data, uint32_t size, uint64_t offset) {

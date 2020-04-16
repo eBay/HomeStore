@@ -300,7 +300,8 @@ public:
     }
     static vol_interface_req_ptr create_volume_req(std::shared_ptr< Volume >& vol, void* buf, uint64_t lba,
                                                    uint32_t nlbas, bool read, bool sync);
-#ifdef _PRERELEASE static void set_io_flip();
+#ifdef _PRERELEASE
+    static void set_io_flip();
     static void set_error_flip();
 #endif
     static bool can_all_vols_shutdown() {
@@ -413,7 +414,8 @@ public:
      */
     IndxMgr* get_indx_mgr() { return m_indx_mgr; }
 
-#ifndef NDEBUG void verify_pending_blks();
+#ifndef NDEBUG
+    void verify_pending_blks();
 #endif
 
     std::string to_string() {
@@ -463,27 +465,28 @@ struct volume_req {
     std::vector< Free_Blk_Entry > fbe_list;
 
     /********** Constructor/Destructor **********/
-    volume_req() : csum_list(0), alloc_blkid_list(0), fbe_list(0){};
+    // volume_req() : csum_list(0), alloc_blkid_list(0), fbe_list(0){};
     volume_req(const vol_interface_req_ptr& vi_req) :
-            : iface_req(vi_req), // We explicitly create cyclic dependency to maintain lifecycle correctly
-              io_start_time(Clock::now()),
-              mvec(new homeds::MemVector()),
-              outstanding_io_cnt(1),
-              indx_start_lba(lba),
-              csum_list(0),
-              alloc_blkid_list(0),
-              fbe_list(0) {
-        assert((vol->get_page_size() * nlbas) <= VOL_MAX_IO_SIZE);
-        if (!read) { mvec->set((uint8_t*)buf, vol->get_page_size() * nlbas, 0); }
+            iface_req(vi_req), // We explicitly create cyclic dependency to maintain lifecycle correctly
+            io_start_time(Clock::now()),
+            mvec(new homeds::MemVector()),
+            outstanding_io_cnt(1),
+            indx_start_lba(vi_req->lba),
+            csum_list(0),
+            alloc_blkid_list(0),
+            fbe_list(0) {
+        assert((vi_req->vol_instance->get_page_size() * vi_req->nblks) <= VOL_MAX_IO_SIZE);
+        if (!vi_req->is_read) {
+            mvec->set((uint8_t*)vi_req->write_buf, vi_req->vol_instance->get_page_size() * vi_req->nblks, 0);
+        }
 
         /* Trying to reserve the max possible size so that memory allocation is efficient */
-        csum_list.reserve(VOL_MAX_IO_SIZE / vol->get_page_size());
-        fbe_list.reserve(VOL_MAX_IO_SIZE / vol->get_page_size());
-        alloc_blkid_list.reserve(VOL_MAX_IO_SIZE / vol->get_page_size());
-        seqId = vol->inc_and_get_seq_id();
+        csum_list.reserve(VOL_MAX_IO_SIZE / vi_req->vol_instance->get_page_size());
+        fbe_list.reserve(VOL_MAX_IO_SIZE / vi_req->vol_instance->get_page_size());
+        alloc_blkid_list.reserve(VOL_MAX_IO_SIZE / vi_req->vol_instance->get_page_size());
+        seqId = vi_req->vol_instance->inc_and_get_seq_id();
     };
     virtual ~volume_req() = default;
-    virtual void free_yourself() override { delete this; }
 
     /********** member functions **********/
     sisl::blob create_journal_entry() {
@@ -503,6 +506,7 @@ struct volume_req {
     uint32_t nblks() const { return iface_req->nblks; }
     bool is_sync() const { return iface_req->sync; }
     std::error_condition& err() const { return iface_req->err; }
+    std::vector< buf_info >& read_buf() { return iface_req->read_buf_list; }
 
     void push_blkid(BlkId& bid) { alloc_blkid_list.push_back(bid); }
 

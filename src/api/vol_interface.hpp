@@ -77,13 +77,14 @@ struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
     uint32_t nblks;
     bool is_read = true;
     bool sync = false;
+    bool part_of_batch = false;
     std::unique_ptr< volume_req > vol_req;
     void* cookie;
 
     friend void intrusive_ptr_add_ref(vol_interface_req* req) { req->refcount.increment(1); }
 
     friend void intrusive_ptr_release(vol_interface_req* req) {
-        if (req->refcount.decrement_testz()) { delete req; }
+        if (req->refcount.decrement_testz()) { req->free_yourself(); }
     }
 
     void inc_ref_cnt() { intrusive_ptr_add_ref(this); }
@@ -107,7 +108,8 @@ struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
 
 public:
     vol_interface_req(void* wbuf, uint64_t lba, uint32_t nblks, bool is_sync = false);
-    ~vol_interface_req();
+    virtual ~vol_interface_req();
+    virtual void free_yourself() { delete this; }
 };
 
 typedef boost::intrusive_ptr< vol_interface_req > vol_interface_req_ptr;
@@ -126,7 +128,7 @@ ENUM(vol_state, uint32_t,
 typedef std::function< void(const vol_interface_req_ptr& req) > io_single_comp_callback;
 typedef std::function< void(const std::vector< vol_interface_req_ptr >& reqs) > io_batch_comp_callback;
 typedef std::function< void(bool success) > shutdown_comp_callback;
-typedef std::function< void(int n_completions) > batch_sentinel_callback;
+typedef std::function< void(int n_completions) > end_of_batch_callback;
 typedef std::variant< io_single_comp_callback, io_batch_comp_callback > io_comp_callback;
 
 struct vol_params {
@@ -165,7 +167,7 @@ public:
     vol_found_callback vol_found_cb;
     vol_mounted_callback vol_mounted_cb;
     vol_state_change_callback vol_state_change_cb;
-    batch_sentinel_callback batch_sentinel_cb;
+    end_of_batch_callback end_of_batch_cb;
 
 public:
     std::string to_string() {
@@ -192,11 +194,67 @@ public:
     }
     static VolInterface* get_instance() { return VolInterfaceImpl::raw_instance(); }
 
+    /**
+     * @brief Create a vol interface request to do IO using vol interface. This is a helper method and caller are
+     * welcome to create a request derived from vol interface request and pass it along instead of calling this method.
+     *
+     * @param buf - Buffer from write needs to be written to volume. nullptr for read operation
+     * @param lba - LBA of the volume
+     * @param nblks - Number of blks to write.
+     * @param sync - Is the sync io request or async
+     *
+     * @return vol_interface_req_ptr
+     */
     virtual vol_interface_req_ptr create_vol_interface_req(void* buf, uint64_t lba, uint32_t nblks,
                                                            bool sync = false) = 0;
-    virtual std::error_condition write(const VolumePtr& vol, const vol_interface_req_ptr& req) = 0;
-    virtual std::error_condition read(const VolumePtr& vol, const vol_interface_req_ptr& req) = 0;
+
+    /**
+     * @brief Write the data to the volume asynchronously, created from the request. After completion the attached
+     * callback function will be called with this req ptr.
+     *
+     * @param vol Pointer to the volume
+     * @param req Request created which contains all the write parameters
+     * @param part_of_batch Is this request part of a batch request. If so, implementation can wait for batch_submit
+     * call before issuing the writes. IO might already be started or even completed (in case of errors) before
+     * batch_sumbit call, so application cannot assume IO will be started only after submit_batch call.
+     *
+     * @return std::error_condition no_error or error in issuing writes
+     */
+    virtual std::error_condition write(const VolumePtr& vol, const vol_interface_req_ptr& req,
+                                       bool part_of_batch = false) = 0;
+
+    /**
+     * @brief Read the data from the volume asynchronously, created from the request. After completion the attached
+     * callback function will be called with this req ptr.
+     *
+     * @param vol Pointer to the volume
+     * @param req Request created which contains all the read parameters
+     * @param part_of_batch Is this request part of a batch request. If so, implementation can wait for batch_submit
+     * call before issuing the reads. IO might already be started or even completed (in case of errors) before
+     * batch_sumbit call, so application cannot assume IO will be started only after submit_batch call.
+     *
+     * @return std::error_condition no_error or error in issuing reads
+     */
+    virtual std::error_condition read(const VolumePtr& vol, const vol_interface_req_ptr& req,
+                                      bool part_of_batch = false) = 0;
+
+    /**
+     * @brief Read the data synchronously.
+     *
+     * @param vol Pointer to the volume
+     * @param req Request created which contains all the read parameters
+     *
+     * @return std::error_condition no_error or error in issuing reads
+     */
     virtual std::error_condition sync_read(const VolumePtr& vol, const vol_interface_req_ptr& req) = 0;
+
+    /**
+     * @brief Submit the io batch, which is a mandatory method to be called if read/write are issued with part_of_batch
+     * is set to true. In those cases, without this method, IOs might not be even issued. No-op if previous io requests
+     * are not part of batch.
+     */
+    virtual void submit_io_batch() = 0;
+
     virtual const char* get_name(const VolumePtr& vol) = 0;
     virtual uint64_t get_size(const VolumePtr& vol) = 0;
     virtual uint64_t get_page_size(const VolumePtr& vol) = 0;
@@ -209,7 +267,7 @@ public:
 
     /* AM should call it in case of recovery or reboot when homestore try to mount the existing volume */
     virtual void attach_vol_completion_cb(const VolumePtr& vol, const io_comp_callback& cb) = 0;
-    virtual void attach_batch_sentinel_cb(const batch_sentinel_callback& cb) = 0;
+    virtual void attach_end_of_batch_cb(const end_of_batch_callback& cb) = 0;
 
     virtual bool shutdown(bool force = false) = 0;
     virtual bool trigger_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool force = false) = 0;

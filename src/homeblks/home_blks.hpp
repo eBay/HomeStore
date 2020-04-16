@@ -124,9 +124,12 @@ public:
     static HomeBlksSafePtr safe_instance();
 
     ~HomeBlks() { m_thread_id.join(); }
-    virtual std::error_condition write(const VolumePtr& vol, const vol_interface_req_ptr& req) override;
-    virtual std::error_condition read(const VolumePtr& vol, const vol_interface_req_ptr& req) override;
+    virtual std::error_condition write(const VolumePtr& vol, const vol_interface_req_ptr& req,
+                                       bool part_of_batch = false) override;
+    virtual std::error_condition read(const VolumePtr& vol, const vol_interface_req_ptr& req,
+                                      bool part_of_batch = false) override;
     virtual std::error_condition sync_read(const VolumePtr& vol, const vol_interface_req_ptr& req) override;
+    virtual void submit_io_batch() override;
 
     virtual vol_interface_req_ptr create_vol_interface_req(void* buf, uint64_t lba, uint32_t nblks,
                                                            bool sync = false) override;
@@ -146,7 +149,7 @@ public:
 
     void vol_scan_cmpltd(const VolumePtr& vol, vol_state state, bool success);
     virtual void attach_vol_completion_cb(const VolumePtr& vol, const io_comp_callback& cb) override;
-    virtual void attach_batch_sentinel_cb(const batch_sentinel_callback& cb) override;
+    virtual void attach_end_of_batch_cb(const end_of_batch_callback& cb) override;
 
     virtual bool shutdown(bool force = false) override;
     virtual bool trigger_shutdown(const shutdown_comp_callback& shutdown_done_cb = nullptr,
@@ -242,6 +245,8 @@ private:
     bool do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool force);
     void do_homeblks_shutdown();
     blk_buf_t get_valid_buf(const std::vector< blk_buf_t >& bbuf, bool& rewrite);
+
+    void call_multi_vol_completions();
 
 private:
     static HomeBlksSafePtr _instance;

@@ -14,12 +14,12 @@
 #include <vector>
 #include <atomic>
 
+#include "engine/homeds/btree/writeBack_cache.hpp"
 #include "engine/homeds/memory/composite_allocator.hpp"
 #include "engine/homeds/memory/chunk_allocator.hpp"
 #include "engine/homeds/memory/sys_allocator.hpp"
 #include "engine/cache/cache.h"
 #include "engine/blkstore/blkstore.hpp"
-#include "writeBack_cache.hpp"
 #include "btree_store.hpp"
 #include "btree_node.h"
 #include "physical_node.hpp"
@@ -32,7 +32,6 @@ namespace btree {
 
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
 class SSDBtreeStore {
-
 public:
     using HeaderType = wb_cache_buffer_t;
     struct superblock {

@@ -346,11 +346,13 @@ public:
     /* Find a free chunk which closestly match for the required size */
     PhysicalDevChunk* find_free_chunk(uint64_t req_size);
 
-    void write(const char* data, uint32_t size, uint64_t offset, uint8_t* cookie);
-    void writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie);
+    void write(const char* data, uint32_t size, uint64_t offset, uint8_t* cookie, bool part_of_batch = false);
+    void writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie,
+                bool part_of_batch = false);
 
-    void read(char* data, uint32_t size, uint64_t offset, uint8_t* cookie);
-    void readv(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie);
+    void read(char* data, uint32_t size, uint64_t offset, uint8_t* cookie, bool part_of_batch = false);
+    void readv(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie,
+               bool part_of_batch = false);
 
     ssize_t sync_write(const char* data, uint32_t size, uint64_t offset);
     ssize_t sync_writev(const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset);

@@ -292,7 +292,7 @@ public:
         params.vol_mounted_cb = bind_this(IOTest::vol_mounted_cb, 2);
         params.vol_state_change_cb = bind_this(IOTest::vol_state_change_cb, 3);
         params.vol_found_cb = bind_this(IOTest::vol_found_cb, 1);
-        params.batch_sentinel_cb = bind_this(IOTest::process_batch_sentinel, 1);
+        params.end_of_batch_cb = bind_this(IOTest::process_end_of_batch, 1);
 
         params.disk_attr = disk_attributes();
         params.disk_attr->phys_page_size = phy_page_size;
@@ -344,7 +344,7 @@ public:
         vol_init(vol_obj);
         VolInterface::get_instance()->attach_vol_completion_cb(vol_obj,
                                                                bind_this(IOTest::process_multi_completions, 1));
-        VolInterface::get_instance()->attach_batch_sentinel_cb(bind_this(IOTest::process_batch_sentinel, 1));
+        VolInterface::get_instance()->attach_end_of_batch_cb(bind_this(IOTest::process_end_of_batch, 1));
         assert(state == m_expected_vol_state);
         if (m_expected_vol_state == homestore::vol_state::DEGRADED ||
             m_expected_vol_state == homestore::vol_state::OFFLINE) {
@@ -934,7 +934,7 @@ private:
                  VolInterface::get_instance()->get_name(reqs[0]->vol_instance));
     }
 
-    void process_batch_sentinel(int ncompletions) {
+    void process_end_of_batch(int ncompletions) {
         LOGTRACE("Got total {} callbacks with completions = {} across multiple volumes in one event", ncompletions,
                  _n_completed_this_thread);
         _n_completed_this_thread = 0;

@@ -139,8 +139,7 @@ Volume::~Volume() {
     free(m_indx_mgr);
 }
 
-std::error_condition Volume::write(const vol_interface_req_ptr& hb_req) {
-    auto vreq = volume_req::cast(hb_req);
+std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
     std::vector< BlkId > bid;
     iface_req->is_read = false;
     iface_req->vol_req = std::make_unique< volume_req >(iface_req);
@@ -152,7 +151,7 @@ std::error_condition Volume::write(const vol_interface_req_ptr& hb_req) {
     ++home_blks_ref_cnt;
     ++vol_ref_cnt;
     // sync write is not supported
-    assert(!vreq->sync);
+    assert(!vreq->is_sync());
     if (is_offline()) {
         check_and_complete_req(vreq, std::make_error_condition(std::errc::no_such_device));
         return std::make_error_condition(std::errc::no_such_device);
@@ -232,10 +231,10 @@ std::error_condition Volume::read(const vol_interface_req_ptr& iface_req) {
         }
 
         /* create child req and read buffers */
-        vreq->read_buf_list.reserve(kvs.size());
+        vreq->read_buf().reserve(kvs.size());
         for (auto& kv : kvs) {
             if (!(kv.second.is_valid())) {
-                vreq->read_buf_list.emplace_back(get_page_size(), 0, m_only_in_mem_buff);
+                vreq->read_buf().emplace_back(get_page_size(), 0, m_only_in_mem_buff);
                 auto blob = m_only_in_mem_buff->at_offset(0);
                 vreq->push_csum(crc16_t10dif(init_crc_16, blob.bytes, get_page_size()));
             } else {
@@ -259,7 +258,7 @@ std::error_condition Volume::read(const vol_interface_req_ptr& iface_req) {
 
                 // TODO: @hkadayam There is a potential for race of read_buf_list getting emplaced after completion
                 /* Add buffer to read_buf_list. User read data from read buf list */
-                vreq->read_buf_list.emplace_back(sz, offset, bbuf);
+                vreq->read_buf().emplace_back(sz, offset, bbuf);
             }
         }
 
@@ -268,7 +267,6 @@ std::error_condition Volume::read(const vol_interface_req_ptr& iface_req) {
     } catch (const std::exception& e) {
         VOL_LOG_ASSERT(0, vreq, "Exception: {}", e.what())
         check_and_complete_req(vreq, std::make_error_condition(std::errc::device_or_resource_busy));
-        return vreq->err;
     }
     return no_error;
 }
@@ -276,7 +274,8 @@ std::error_condition Volume::read(const vol_interface_req_ptr& iface_req) {
 /* This methods check if we can complete the req and if we can do so. This is the exit point of all async volume
  * read/write operations. All read/writes must call this if it is sync or async.
  *
- * If all ios for request is completed or any one io is errored out, it will call completion if its an async completion
+ * If all ios for request is completed or any one io is errored out, it will call completion if its an async
+ * completion
  *
  * Parameters are:
  * 1) hb_req: Request which is to be checked and completed
@@ -304,7 +303,7 @@ void Volume::check_and_complete_req(volume_req* vreq, const std::error_condition
     if (!vreq->outstanding_io_cnt.decrement_testz(1)) { return; }
 
     /* It is single threaded beyond this point */
-    if (vreq->err != no_error) {
+    if (vreq->err() != no_error) {
         try_shutdown_destroy();
         return;
     }
@@ -376,45 +375,46 @@ void Volume::process_free_blk_callback(Free_Blk_Entry fbe) {
                                         m_hb->get_data_pagesz() * fbe.m_nblks_to_free);
 }
 
-/* when read happens on mapping btree, under read lock we mark blk so it does not get removed by concurrent writes */
-void Volume::pending_read_blk_cb(volume_req_ptr vreq, BlkId& bid) {
+/* when read happens on mapping btree, under read lock we mark blk so it does not get removed by concurrent writes
+ */
+void Volume::pending_read_blk_cb(volume_req* vreq, BlkId& bid) {
     m_read_blk_tracker->insert(bid);
     Free_Blk_Entry fbe(bid, 0, 0);
     vreq->push_fbe(fbe);
 }
 
-void Volume::process_indx_completions(volume_req_ptr& vreq, std::error_condition err) {
-    assert(!vreq->is_read);
-    assert(!vreq->sync);
+void Volume::process_indx_completions(volume_req* vreq, std::error_condition err) {
+    assert(!vreq->is_read_op());
+    assert(!vreq->is_sync());
 
     COUNTER_DECREMENT(m_metrics, volume_outstanding_metadata_write_count, 1);
 
-    THIS_VOL_LOG(TRACE, volume, vreq, "metadata_complete: status={}", vreq->err.message());
+    THIS_VOL_LOG(TRACE, volume, vreq, "metadata_complete: status={}", vreq->err().message());
     HISTOGRAM_OBSERVE(m_metrics, volume_map_write_latency, get_elapsed_time_us(vreq->indx_start_time));
 
     check_and_complete_req(vreq, err);
 }
 
 void Volume::process_vol_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req) {
-    volume_child_req::cast(bs_req)->parent_req->vol_instance->process_data_completions(bs_req);
+    volume_child_req::cast(bs_req)->parent_req->vol()->process_data_completions(bs_req);
 }
 
 void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req) {
     auto vc_req = volume_child_req::cast(bs_req);
-    auto& vreq = vc_req->parent_req;
+    auto vreq = vc_req->parent_req;
 
     assert(vreq != nullptr);
-    assert(!vreq->sync);
+    assert(!vreq->is_sync());
 
-    THIS_VOL_LOG(TRACE, volume, vreq, "data op complete: status={}", vreq->err.message());
+    THIS_VOL_LOG(TRACE, volume, vreq, "data op complete: status={}", vreq->err().message());
 
 #ifdef _PRERELEASE
     if (vreq->outstanding_io_cnt.get() > 2 && homestore_flip->test_flip("vol_vchild_error")) {
-        vreq->err = homestore_error::flip_comp_error;
+        vreq->iface_req->err = homestore_error::flip_comp_error;
     }
 #endif
 
-    HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, vreq->is_read, volume_data_read_latency, volume_data_write_latency,
+    HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, vreq->is_read_op(), volume_data_read_latency, volume_data_write_latency,
                               get_elapsed_time_us(vc_req->op_start_time));
     check_and_complete_req(vreq, vc_req->err);
     return;
@@ -422,11 +422,11 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
 
 void Volume::attach_completion_cb(const io_comp_callback& cb) { m_comp_cb = cb; }
 
-void Volume::verify_csum(volume_req_ptr& vreq) {
+void Volume::verify_csum(volume_req* vreq) {
     uint64_t offset = 0;
     uint32_t csum_indx = 0;
 
-    for (auto& info : vreq->read_buf_list) {
+    for (auto& info : vreq->read_buf()) {
         auto offset = info.offset;
         auto size = info.size;
         auto buf = info.buf;
@@ -467,8 +467,9 @@ volume_child_req_ptr Volume::create_vol_child_req(BlkId& bid, volume_req* vreq, 
     vc_req->op_start_time = Clock::now();
     vc_req->reqId = ++m_req_id;
     vc_req->sync = vreq->iface_req->sync;
+    vc_req->part_of_batch = vreq->iface_req->part_of_batch;
 
-    assert((bid.data_size(HomeBlks::instance()->get_data_pagesz()) % m_sb->ondisk_sb->page_size) == 0);
+    assert((bid.data_size(HomeBlks::instance()->get_data_pagesz()) % get_page_size()) == 0);
     vc_req->nblks = nblks;
 
     assert(vc_req->nblks > 0);
@@ -484,15 +485,15 @@ void Volume::print_tree() { m_indx_mgr->get_active_indx()->print_tree(); }
 bool Volume::verify_tree() { return (m_indx_mgr->get_active_indx()->verify_tree()); }
 void Volume::print_node(uint64_t blkid) { m_indx_mgr->get_active_indx()->print_node(blkid); }
 
-std::error_condition Volume::alloc_blk(volume_req_ptr& vreq, std::vector< BlkId >& bid) {
+std::error_condition Volume::alloc_blk(volume_req* vreq, std::vector< BlkId >& bid) {
     blk_alloc_hints hints;
     hints.desired_temp = 0;
     hints.dev_id_hint = -1;
     hints.multiplier = (get_page_size() / m_hb->get_data_pagesz());
 
-    THIS_VOL_LOG(TRACE, volume, vreq, "write: lba={}, nlbas={}", vreq->lba, vreq->nlbas);
+    THIS_VOL_LOG(TRACE, volume, vreq, "write: lba={}, nlbas={}", vreq->lba(), vreq->nblks());
     try {
-        BlkAllocStatus status = m_hb->get_data_blkstore()->alloc_blk(vreq->nlbas * get_page_size(), hints, bid);
+        BlkAllocStatus status = m_hb->get_data_blkstore()->alloc_blk(vreq->nblks() * get_page_size(), hints, bid);
         if (status != BLK_ALLOC_SUCCESS) {
             LOGERROR("failing IO as it is out of disk space");
             check_and_complete_req(vreq, std::make_error_condition(std::errc::no_space_on_device));

@@ -91,7 +91,8 @@ struct vol_info {
 
     explicit vol_info(const VolumePtr& obj) {
         vol_obj = obj;
-        max_vol_blks = vol_interface->get_vol_capacity(obj).initial_total_size / vol_interface->get_page_size(obj);
+        max_vol_blks =
+            VolInterface::get_instance()->get_system_capacity().initial_total_size / vol_interface->get_page_size(obj);
         blk_bits = std::make_unique< homeds::Bitset >(max_vol_blks);
     }
 
@@ -168,7 +169,7 @@ public:
             std::bind(&SimpleTestStore::vol_state_change_cb, this, std::placeholders::_1, std::placeholders::_2,
                       std::placeholders::_3);
         m_init_params.vol_found_cb = std::bind(&SimpleTestStore::vol_found_cb, this, std::placeholders::_1);
-        // m_init_params.batch_sentinel_cb = std::bind(&SimpleTestStore::multi_vol_done_cb, this,
+        // m_init_params.end_of_batch_cb = std::bind(&SimpleTestStore::multi_vol_done_cb, this,
         // std::placeholders::_1);
         boost::uuids::string_generator gen;
         m_init_params.system_uuid = gen("01970496-0262-11e9-8eb2-f2801f1b9fd1");
