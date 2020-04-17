@@ -4,6 +4,7 @@
 #include "homelogstore/log_store.hpp"
 #include "api/vol_interface.hpp"
 #include "homeblks/home_blks.hpp"
+#include <wisr/wisr_ds.hpp>
 
 namespace homestore {
 struct volume_req;
@@ -108,6 +109,7 @@ class IndxMgr {
     typedef std::function< void(volume_req_ptr& req, std::error_condition err) > io_done_cb;
     typedef std::function< void(Free_Blk_Entry fbe) > free_blk_callback;
     typedef std::function< void(volume_req_ptr& req, BlkId& bid) > pending_read_blk_cb;
+    typedef std::function< void(vol_cp_id_ptr cur_vol_id, indx_cp_id* home_blks_id) > prepare_cb;
 
 private:
     mapping* m_active_map;
@@ -115,7 +117,6 @@ private:
     pending_read_blk_cb m_pending_read_blk_cb;
     std::shared_ptr< HomeLogStore > m_journal;
     log_write_comp_cb_t m_journal_comp_cb;
-    cp_state m_flags;
 
     /* we can not add a volume in active CP. It can be added only when a new cp is created. volume keeps
      * on using this id until new cp is not created. Once a new cp is created, it will become a part of it.
@@ -124,6 +125,9 @@ private:
     boost::uuids::uuid m_uuid;
     indx_mgr_state m_state = indx_mgr_state::ONLINE;
     indxmgr_stop_cb m_stop_cb;
+    bool m_last_cp = false;
+    std::mutex prepare_cb_mtx;
+    sisl::wisr_vector< prepare_cb > prepare_cb_list;
 
     void journal_write(volume_req_ptr& vreq);
     void journal_comp_cb(logstore_seq_num_t seq_num, logdev_key ld_key, void* req);
@@ -131,13 +135,13 @@ private:
     void cp_done(btree_cp_id* btree_id);
     btree_cp_id_ptr get_btree_id(indx_cp_id* cp_id);
     vol_cp_id_ptr get_volume_id(indx_cp_id* cp_id);
-    void suspend_cp(vol_cp_id_ptr vol_id);
-    void resume_cp(vol_cp_id_ptr vol_id);
+    void destroy_indx_tbl(btree_cp_id_ptr btree_id);
+    void add_prepare_cb_list(prepare_cb cb);
 
 private:
     /*********************** static private members **********************/
-    static IndxCP* m_cp;
-    static bool m_shutdown_started;
+    static std::unique_ptr< IndxCP > m_cp;
+    static std::atomic< bool > m_shutdown_started;
     static bool m_shutdown_cmplt;
 
     static void init();
@@ -187,7 +191,7 @@ public:
     indx_mgr_active_sb get_active_sb();
 
     /* Destroy all indexes and call system level cp to persist. It assumes that all ios are stopped by volume.
-     * It is async call.
+     * It is async call. It is called only once
      * @params cb :- callback when destroy is done.
      */
     void destroy(indxmgr_stop_cb cb);
@@ -201,7 +205,7 @@ public:
 public:
     /*********************** static public functions **********************/
     /* Trigger CP to flush all outstanding IOs. It is a static function and assumes that all ios are stopped by
-     * home blks and all outstanding ios are completed.
+     * home blks , all outstanding ios and outstanding vol deletes  are completed. It is called only once.
      * @params cb :- callback when shutdown is done.
      */
     static void shutdown(indxmgr_stop_cb cb);
@@ -218,10 +222,15 @@ public:
 
     /* trigger system cp. It first trigger a volume cp followed by bitmap cp. It is async call.
      * @params cb :- callback when cp is done.
+     * @shutdown :- true if it is called by shutdown. This flag makes sure that no other cp is triggered after shutdown
+     * cp
      */
-    static void trigger_system_cp(cp_done_cb cb = nullptr);
+    static void trigger_system_cp(cp_done_cb cb = nullptr, bool shutdown = false);
 
     /* trigger volume CP. It doesn't persist bitmap */
     static void trigger_vol_cp();
+
+    /* reinitialize indx mgr. It is used in fake reboot */
+    static void reinit() { init(); }
 };
 } // namespace homestore

@@ -1112,6 +1112,15 @@ private:
                 /* it is the latest entry, we should not override it */
                 replace_kv.emplace_back(existing.first, existing.second);
                 auto nblks = ve.get_nlba();
+                if (req) {
+                    Blob_Array< ValueEntry >& new_varray = new_val.get_array();
+                    ValueEntry ve;
+                    new_varray.get(0, ve, false);
+                    /* free new blkid. it is overridden */
+                    Free_Blk_Entry fbe(ve.get_blkId(), new_val_offset,
+                                       (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * nblks);
+                    req->push_fbe(fbe);
+                }
                 start_lba += nblks;
                 new_val_offset += nblks;
                 continue;

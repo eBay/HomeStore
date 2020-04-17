@@ -66,7 +66,10 @@ void Volume::set_io_flip() {
 #endif
 
 Volume::Volume(const vol_params& params) :
-        m_params(params), m_metrics(boost::uuids::to_string(params.uuid).c_str()), m_comp_cb(params.io_comp_cb) {
+        m_params(params),
+        m_metrics(boost::uuids::to_string(params.uuid).c_str()),
+        m_comp_cb(params.io_comp_cb),
+        m_indx_mgr_destroy_started(false) {
     m_state = vol_state::UNINITED;
     m_hb = HomeBlks::safe_instance();
     seq_Id = 3;
@@ -74,7 +77,7 @@ Volume::Volume(const vol_params& params) :
         params.vol_name, params.uuid, std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
 }
 
-Volume::Volume(vol_sb_hdr& sb) : m_metrics(sb.vol_name) {
+Volume::Volume(vol_sb_hdr& sb) : m_metrics(sb.vol_name), m_indx_mgr_destroy_started(false) {
     /* TODO : add recovery code */
     /* Take care of vdev error and init cnt */
 }
@@ -96,6 +99,7 @@ void Volume::init() {
     set_state(vol_state::ONLINE, true);
 }
 
+/* This function can be called multiple times. Underline functions should be idempotent */
 void Volume::destroy(indxmgr_stop_cb cb) {
     /* we don't allow shutdown and destroy in parallel */
     ++home_blks_ref_cnt;
@@ -107,8 +111,7 @@ void Volume::destroy(indxmgr_stop_cb cb) {
     ++vol_ref_cnt;
     auto prev_state = set_state(vol_state::DESTROYING);
     if (prev_state == vol_state::DESTROYING) {
-        auto cnt = home_blks_ref_cnt.fetch_sub(1);
-        if (cnt == 1) { m_hb->do_volume_shutdown(true); }
+        try_shutdown_destroy();
         return;
     }
 
@@ -117,11 +120,17 @@ void Volume::destroy(indxmgr_stop_cb cb) {
     if (cnt == 1) { destroy_internal(); }
 }
 
+/* This function can be called multiple times. Underline functions should be idempotent */
 void Volume::destroy_internal() {
+    auto prev_state = m_indx_mgr_destroy_started.exchange(true);
+    if (prev_state) {
+        /* destroy is already triggered. so ignore this request */
+        return;
+    }
     m_indx_mgr->destroy(([this](bool success) {
         if (success) {
-            LOGINFO("volume destroyed");
             remove_sb();
+            set_state(vol_state::DESTROYED, false);
             m_indx_mgr->destroy_done();
         }
         m_destroy_done_cb(success);
@@ -130,6 +139,7 @@ void Volume::destroy_internal() {
     }));
 }
 
+/* It is called only once */
 void Volume::shutdown(indxmgr_stop_cb cb) { IndxMgr::shutdown(cb); }
 
 Volume::~Volume() {
@@ -353,6 +363,7 @@ void Volume::check_and_complete_req(volume_req_ptr& vreq, const std::error_condi
     try_shutdown_destroy();
 }
 
+/* Note that this function can be called multiple times. So underline functions should be idempotent */
 void Volume::try_shutdown_destroy() {
     auto homeblks_io_cnt = home_blks_ref_cnt.fetch_sub(1);
     auto vol_io_cnt = vol_ref_cnt.fetch_sub(1);
@@ -554,7 +565,7 @@ void Volume::verify_pending_blks() { assert(m_read_blk_tracker->get_size() == 0)
 #endif
 
 vol_state Volume::set_state(vol_state state, bool persist) {
-    LOGINFO("volume state changed from {} to {}", m_state, state);
+    LOGINFO("volume {} state changed from {} to {}", get_name(), get_state(), state);
     auto prev_state = m_state.exchange(state);
     if (prev_state == state) { return prev_state; }
     if (persist) { write_sb(); }

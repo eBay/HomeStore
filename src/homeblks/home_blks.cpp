@@ -43,6 +43,7 @@ VolInterface* HomeBlks::init(const init_params& cfg, bool force_reinit) {
     try {
         if (force_reinit) {
             _instance = HomeBlksSafePtr(new HomeBlks(cfg));
+            Volume::reinit();
         } else {
             std::call_once(flag1, [&cfg]() {
 #ifndef NDEBUG
@@ -77,6 +78,15 @@ void HomeBlks::attach_prepare_volume_cp_id(std::map< boost::uuids::uuid, vol_cp_
                                            std::map< boost::uuids::uuid, vol_cp_id_ptr >* new_id_map,
                                            indx_cp_id* home_blks_id) {
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
+
+#ifndef NDEBUG
+    if (cur_id_map) {
+        for (auto it = cur_id_map->cbegin(); it != cur_id_map->cend(); ++it) {
+            assert(m_volume_map.find(it->first) != m_volume_map.cend());
+        }
+    }
+#endif
+
     for (auto it = m_volume_map.cbegin(); it != m_volume_map.cend(); ++it) {
         auto vol = it->second;
         if (vol == nullptr) { continue; }
@@ -91,10 +101,15 @@ void HomeBlks::attach_prepare_volume_cp_id(std::map< boost::uuids::uuid, vol_cp_
         /* get the cur cp id ptr */
         auto new_cp_id_ptr = vol->attach_prepare_volume_cp_id(cur_cp_id_ptr, home_blks_id);
 
-        bool happened{false};
-        std::map< boost::uuids::uuid, vol_cp_id_ptr >::iterator temp_it;
-        std::tie(temp_it, happened) = new_id_map->emplace(std::make_pair(it->first, new_cp_id_ptr));
-        if (!happened) { throw std::runtime_error("Unknown bug"); }
+        if (new_cp_id_ptr) {
+            bool happened{false};
+            std::map< boost::uuids::uuid, vol_cp_id_ptr >::iterator temp_it;
+            std::tie(temp_it, happened) = new_id_map->emplace(std::make_pair(it->first, new_cp_id_ptr));
+            if (!happened) { throw std::runtime_error("Unknown bug"); }
+        } else {
+            /* this volume doesn't want to participate now */
+            assert(vol->get_state() == vol_state::DESTROYED || is_shutdown());
+        }
     }
 }
 
@@ -205,18 +220,13 @@ SnapshotPtr HomeBlks::snap_volume(VolumePtr volptr) {
 HomeBlks* HomeBlks::instance() { return _instance.get(); }
 HomeBlksSafePtr HomeBlks::safe_instance() { return _instance; }
 
-void HomeBlks::superblock_init(BlkId bid) {
+void HomeBlks::superblock_init() {
     /* build the homeblks super block */
-    m_homeblks_sb->blkid.set(bid);
-    m_homeblks_sb->vol_list_head.set(BlkId::invalid_internal_id());
-    m_homeblks_sb->num_vols = 0;
-    m_homeblks_sb->gen_cnt = 0;
     m_homeblks_sb->version = HOMEBLKS_SB_VERSION;
     m_homeblks_sb->magic = HOMEBLKS_SB_MAGIC;
     m_homeblks_sb->boot_cnt = 0;
     m_homeblks_sb->init_flag(0);
     m_homeblks_sb->uuid = HS_STATIC_CONFIG(input.system_uuid);
-    homeblks_sb_write();
 }
 
 void HomeBlks::homeblks_sb_write() { /* TODO :- write homeblks sb */
@@ -307,20 +317,20 @@ void HomeBlks::init_thread() {
         //
         // Will not resume shutdown if we reboot from an un-finished shutdown procedure.
         //
-        {
-            std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
-            if (m_homeblks_sb->test_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN)) {
-                LOGDEBUG("System was shutdown cleanly.");
-                // clear the flag and persist to disk, if we received a new shutdown and completed successfully,
-                // the flag should be set again;
-                m_homeblks_sb->clear_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
-                if (!m_cfg.is_read_only) { homeblks_sb_write(); }
-            } else if (!HS_STATIC_CONFIG(input.disk_init)) {
-                LOGCRITICAL("System experienced sudden panic since last boot!");
-            } else {
-                LOGINFO("Initializing the system");
-            }
+        if (m_homeblks_sb->test_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN)) {
+            LOGDEBUG("System was shutdown cleanly.");
+        } else if (!HS_STATIC_CONFIG(input.disk_init)) {
+            LOGCRITICAL("System experienced sudden panic since last boot!");
+        } else {
+            LOGINFO("Initializing the system");
+            superblock_init();
         }
+
+        // clear the flag and persist to disk, if we received a new shutdown and completed successfully,
+        // the flag should be set again;
+        m_homeblks_sb->clear_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
+        ++m_homeblks_sb->boot_cnt;
+        homeblks_sb_write();
 
         sisl::HttpServerConfig cfg;
         cfg.is_tls_enabled = false;
@@ -522,7 +532,7 @@ void HomeBlks::schedule_shutdown(const shutdown_comp_callback& shutdown_done_cb,
     do_shutdown(shutdown_done_cb, force);
 }
 
-bool HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool force) {
+void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool force) {
     //
     // Need to wait m_init_finished to be true before we create shutdown thread because:
     // 1. if init thread is running slower than shutdown thread,
@@ -544,31 +554,21 @@ bool HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
 
     m_shutdown_done_cb = shutdown_done_cb;
     m_force_shutdown = force;
-    Volume::trigger_system_cp();
-    if (!do_volume_shutdown(force)) {
+    do_volume_shutdown(force);
+
+    if (!m_vol_shutdown_cmpltd) {
         LOGINFO("Not all volumes are completely shutdown yet, will check again in {} milliseconds",
                 HB_SETTINGS_VALUE(general_config->shutdown_status_check_freq_ms));
         m_shutdown_timer_hdl = iomanager.schedule_thread_timer(
             HB_SETTINGS_VALUE(general_config->shutdown_status_check_freq_ms) * 1000 * 1000, false /* recurring */,
             nullptr, [this, shutdown_done_cb, force](void* cookie) { schedule_shutdown(shutdown_done_cb, force); });
-        return false;
+        return;
     }
-
-    /* XXX do i need to cancel the timer. It will be done automatically when io thread stop. If i cancel timer then it
-     * will race with stop.
-     */
-    return true;
-}
-
-void HomeBlks::do_homeblks_shutdown() {
-
-    LOGINFO("All volumes are shutdown successfully, proceed to bring down other subsystems");
 
     /* We set the clean shutdown flag only when it is not focefully shutdown. In clean shutdown
      * we don't replay journal on boot and assume that everything is correct.
      */
     if (!m_force_shutdown) {
-        std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
         m_homeblks_sb->set_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
         if (!m_cfg.is_read_only) { homeblks_sb_write(); }
     }
@@ -579,6 +579,8 @@ void HomeBlks::do_homeblks_shutdown() {
 
     /* XXX: can we move it to indx mgr */
     home_log_store_mgr.stop();
+    iomanager.stop_io_loop();
+
     if (m_shutdown_done_cb) m_shutdown_done_cb(true);
 
     /*
@@ -587,25 +589,28 @@ void HomeBlks::do_homeblks_shutdown() {
      * _instance cleanup
      */
     intrusive_ptr_release(this);
-    iomanager.stop_io_loop();
+    return;
 }
 
-bool HomeBlks::do_volume_shutdown(bool force) {
+void HomeBlks::do_volume_shutdown(bool force) {
     std::unique_lock< std::recursive_mutex > lg(m_vol_lock);
 
-    if (!force && Volume::can_all_vols_shutdown()) { return false; }
+    if (!force && Volume::can_all_vols_shutdown()) {
+        Volume::trigger_system_cp();
+        return;
+    }
 
     bool expected = false;
     bool desired = true;
-    if (!m_start_shutdown.compare_exchange_strong(expected, desired)) { return true; }
+    if (!m_start_shutdown.compare_exchange_strong(expected, desired)) { return; }
 
     /* XXX:- Do we need a force time here. It might get stuck in cp */
     Volume::shutdown(([this](bool success) {
         std::unique_lock< std::recursive_mutex > lg(m_vol_lock);
         m_volume_map.clear();
-        do_homeblks_shutdown();
+        LOGINFO("All volumes are shutdown successfully, proceed to bring down other subsystems");
+        m_vol_shutdown_cmpltd = true;
     }));
-    return (true);
 }
 
 //
