@@ -225,6 +225,7 @@ private:
     std::mutex m_sb_lock; // lock for updating vol's sb
     vol_sb_hdr* m_sb;
     indxmgr_stop_cb m_destroy_done_cb;
+    std::atomic< bool > m_indx_mgr_destroy_started;
 
 private:
     /* static members */
@@ -311,8 +312,15 @@ public:
 
     /* Called during shutdown. */
     static void shutdown(indxmgr_stop_cb cb);
+
+    /* called during io completions from data blk store */
     static void process_vol_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
+
+    /* used to trigger system level cp */
     static void trigger_system_cp() { IndxMgr::trigger_system_cp(); };
+
+    /* it is used in fake reboot */
+    static void reinit() { IndxMgr::reinit(); }
 
 public:
     /******************** APIs exposed to home_blks *******************/

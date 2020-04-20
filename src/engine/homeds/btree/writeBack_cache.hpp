@@ -5,6 +5,7 @@
 #include <common/error.h>
 #include <blkstore/blkstore.hpp>
 #include <homeds/btree/btree_internal.h>
+#include <wisr/wisr_ds.hpp>
 
 #define MAX_DIRTY_BUF 100
 
@@ -118,10 +119,9 @@ template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_
 class WriteBackCache {
 private:
     /* TODO :- need to have concurrent list */
-    mutex m_req_list_mtx;
-    std::vector< writeback_req_ptr > m_req_list[MAX_CP_CNT];
-    mutex m_free_list_mtx;
-    std::vector< homestore::BlkId > m_free_list[MAX_CP_CNT];
+    sisl::wisr_vector< writeback_req_ptr >* m_req_list[MAX_CP_CNT];
+    sisl::wisr_vector< homestore::BlkId >* m_free_list[MAX_CP_CNT];
+    std::unique_ptr< sisl::vector_wrapper< writeback_req_ptr > > m_copy_req_list;
     atomic< uint64_t > m_dirty_buf_cnt[MAX_CP_CNT];
     cp_comp_callback m_cp_comp_cb;
     trigger_cp_callback m_trigger_cp_cb;
@@ -129,20 +129,37 @@ private:
     static std::atomic< uint64_t > m_hs_dirty_buf_cnt;
 
 public:
-    WriteBackCache(){};
+    WriteBackCache() : m_req_list{nullptr, nullptr}, m_free_list{nullptr, nullptr} {}
     WriteBackCache(void* blkstore, uint64_t align_size, cp_comp_callback cb, trigger_cp_callback trigger_cp_cb) {
+        for (int i = 0; i < MAX_CP_CNT; ++i) {
+            m_req_list[i] = new sisl::wisr_vector< writeback_req_ptr >(100);
+            m_free_list[i] = new sisl::wisr_vector< homestore::BlkId >(100);
+            m_dirty_buf_cnt[i] = 0;
+        }
         m_cp_comp_cb = cb;
         m_blkstore = (btree_blkstore_t*)blkstore;
         m_blkstore->attach_compl(wb_cache_t::writeBack_completion);
         m_trigger_cp_cb = trigger_cp_cb;
-        m_dirty_buf_cnt[0] = 0;
-        m_dirty_buf_cnt[1] = 0;
+    }
+
+    ~WriteBackCache() {
+        for (uint32_t i = 0; i < MAX_CP_CNT; ++i) {
+#ifndef NDEBUG
+            assert(m_dirty_buf_cnt[i] == 0);
+            auto req_copy = m_req_list[i]->get_copy_and_reset();
+            assert(req_copy->size() == 0);
+            auto free_copy = m_free_list[i]->get_copy_and_reset();
+            assert(free_copy->size() == 0);
+#endif
+            if (m_req_list[i]) { delete m_req_list[i]; }
+            if (m_free_list[i]) { delete m_free_list[i]; }
+        }
     }
 
     void prepare_cp(btree_cp_id_ptr new_cp_id, btree_cp_id_ptr cur_cp_id) {
         int cp_cnt = (new_cp_id->cp_cnt) % MAX_CP_CNT;
         assert(m_dirty_buf_cnt[cp_cnt] == 0);
-        assert(m_req_list[cp_cnt].size() == 0);
+        assert(m_copy_req_list == nullptr);
 
         /* decrement it at the end after writing all pending requests */
         m_dirty_buf_cnt[cp_cnt] = 1;
@@ -175,8 +192,7 @@ public:
             bn->cp_id = cp_id;
 
             /* add it to the list */
-            std::unique_lock< std::mutex > mtx(m_req_list_mtx);
-            m_req_list[cp_cnt].push_back(wb_req);
+            m_req_list[cp_cnt]->push_back(wb_req);
 
             /* check for dirty buffers cnt */
             m_dirty_buf_cnt[cp_cnt].fetch_add(1);
@@ -201,9 +217,8 @@ public:
      */
     void free_blk(boost::intrusive_ptr< SSDBtreeNode > bn, btree_cp_id_ptr cp_id) {
         int cp_cnt = cp_id->cp_cnt % MAX_CP_CNT;
-        std::unique_lock< std::mutex > mtx(m_free_list_mtx);
         BlkId bid(bn->get_node_id().m_id);
-        m_free_list[cp_cnt].push_back(bid);
+        m_free_list[cp_cnt]->push_back(bid);
     }
 
     btree_status_t refresh_buf(boost::intrusive_ptr< SSDBtreeNode > bn, bool is_write_modifiable,
@@ -251,24 +266,24 @@ public:
     void flush_free_blk(btree_cp_id_ptr cp_id) {
         int cp_cnt = cp_id->cp_cnt % MAX_CP_CNT;
 
-        std::unique_lock< std::mutex > mtx(m_free_list_mtx);
-        for (uint32_t i = 0; i < m_free_list[cp_cnt].size(); ++i) {
-            m_blkstore->free_blk(m_free_list[cp_cnt][i], boost::none, boost::none);
+        auto copy_free_list = m_free_list[cp_cnt]->get_copy_and_reset();
+        for (uint32_t i = 0; i < copy_free_list->size(); ++i) {
+            m_blkstore->free_blk((*copy_free_list)[i], boost::none, boost::none);
         }
-        m_free_list[cp_cnt].erase(m_free_list[cp_cnt].begin(), m_free_list[cp_cnt].end());
+        copy_free_list = nullptr;
     }
 
     void cp_start(btree_cp_id_ptr cp_id) {
         int cp_cnt = cp_id->cp_cnt % MAX_CP_CNT;
-        for (uint32_t i = 0; i < m_req_list[cp_cnt].size(); ++i) {
-            auto wb_req = m_req_list[cp_cnt][i];
+        m_copy_req_list = m_req_list[cp_cnt]->get_copy_and_reset();
+        for (uint32_t i = 0; i < m_copy_req_list->size(); ++i) {
+            auto wb_req = (*m_copy_req_list)[i];
             int cnt = wb_req->dependent_cnt.fetch_sub(1);
             if (cnt == 1) {
                 wb_req->state = WB_REQ_SENT;
                 m_blkstore->write(wb_req->bid, wb_req->m_mem, 0, wb_req, false);
             }
         }
-        m_req_list[cp_cnt].erase(m_req_list[cp_cnt].begin(), m_req_list[cp_cnt].end());
         auto cnt = m_dirty_buf_cnt[cp_cnt].fetch_sub(1);
         assert(cnt >= 1);
         if (cnt == 1) { m_cp_comp_cb(cp_id); }
@@ -301,7 +316,10 @@ public:
         assert(cnt >= 1);
         cnt = m_dirty_buf_cnt[cp_cnt].fetch_sub(1);
         assert(cnt >= 1);
-        if (cnt == 1) { m_cp_comp_cb(wb_req->cp_id); }
+        if (cnt == 1) {
+            m_copy_req_list = nullptr;
+            m_cp_comp_cb(wb_req->cp_id);
+        }
     }
 };
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >

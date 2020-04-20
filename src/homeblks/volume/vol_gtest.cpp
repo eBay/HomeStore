@@ -832,7 +832,6 @@ private:
         auto ret_io = VolInterface::get_instance()->read(vol, vreq);
         if (ret_io != no_error) {
             assert(ret_io == std::errc::no_such_device || expect_io_error);
-            process_completions(vreq);
         }
     }
 

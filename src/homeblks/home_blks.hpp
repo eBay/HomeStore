@@ -42,8 +42,8 @@ typedef uint32_t homeblks_sb_flag_t;
 struct homeblks_sb {
     uint64_t magic; // deprecated
     uint64_t version;
-    uint32_t gen_cnt;
-    BlkId blkid; // depreacted
+    uint32_t gen_cnt; // deprecated
+    BlkId blkid;      // depreacted
     boost::uuids::uuid uuid;
 
     uint64_t boot_cnt;
@@ -194,7 +194,7 @@ public:
     void attach_prepare_volume_cp_id(std::map< boost::uuids::uuid, vol_cp_id_ptr >* cur_id_map,
                                      std::map< boost::uuids::uuid, vol_cp_id_ptr >* new_id_map,
                                      indx_cp_id* home_blks_id);
-    bool do_volume_shutdown(bool force);
+    void do_volume_shutdown(bool force);
 
     data_blkstore_t::comp_callback data_completion_cb() override;
 
@@ -226,7 +226,6 @@ public:
     static void verify_hs(sisl::HttpCallData cd);
 
 protected:
-    void superblock_init(BlkId bid) override;
     void process_vdev_error(vdev_info_block* vb) override;
 
 private:
@@ -234,6 +233,7 @@ private:
 
     // Read volume super block based on blkid
     void homeblks_sb_write();
+    void superblock_init();
 
     void vol_mounted(const VolumePtr& vol, vol_state state);
     void vol_state_change(const VolumePtr& vol, vol_state old_state, vol_state new_state);
@@ -242,8 +242,7 @@ private:
     void init_thread();
     void verify_vols();
     void schedule_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool force);
-    bool do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool force);
-    void do_homeblks_shutdown();
+    void do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool force);
     blk_buf_t get_valid_buf(const std::vector< blk_buf_t >& bbuf, bool& rewrite);
 
     void call_multi_vol_completions();
@@ -257,6 +256,7 @@ private:
 
     vol_map_t m_volume_map;
     std::recursive_mutex m_vol_lock;
+    std::mutex m_shutdown_lock;
 
     std::atomic< int > m_sub_system_init_cnt = 0;
     std::atomic< bool > m_init_finished = false;
@@ -276,9 +276,9 @@ private:
     shutdown_comp_callback m_shutdown_done_cb;
     bool m_force_shutdown = false;
     bool m_init_error = false;
-    std::atomic< bool > m_start_shutdown;
-
+    bool m_vol_shutdown_cmpltd = false;
     HomeBlksMetrics m_metrics;
+    std::atomic< bool > m_start_shutdown;
 
     static thread_local std::vector< std::shared_ptr< Volume > > s_io_completed_volumes;
 };

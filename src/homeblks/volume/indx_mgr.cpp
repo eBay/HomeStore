@@ -134,7 +134,8 @@ IndxMgr::IndxMgr(std::shared_ptr< Volume > vol, const vol_params& params, io_don
         m_io_cb(io_cb),
         m_pending_read_blk_cb(read_blk_cb),
         m_first_cp_id(new vol_cp_id()),
-        m_uuid(params.uuid) {
+        m_uuid(params.uuid),
+        prepare_cb_list(4) {
     static std::once_flag flag1;
     m_active_map = new mapping(params.size, params.page_size, params.vol_name, free_blk_cb, IndxMgr::trigger_vol_cp,
                                m_pending_read_blk_cb);
@@ -146,22 +147,18 @@ IndxMgr::IndxMgr(std::shared_ptr< Volume > vol, const vol_params& params, io_don
     m_first_cp_id->btree_id = m_active_map->attach_prepare_cp(nullptr);
     m_first_cp_id->vol = vol;
     std::call_once(flag1, []() { IndxMgr::init(); });
+
+    /* create two threads for checkpoint */
 }
 
 IndxMgr::IndxMgr(std::shared_ptr< Volume > vol, indx_mgr_active_sb* sb, io_done_cb io_cb, free_blk_callback free_blk_cb,
                  pending_read_blk_cb read_blk_cb) :
         m_io_cb(io_cb),
         m_pending_read_blk_cb(read_blk_cb),
-        m_first_cp_id(new vol_cp_id()) {}
+        m_first_cp_id(new vol_cp_id()),
+        prepare_cb_list(4) {}
 
-IndxMgr::~IndxMgr() {
-    if (m_shutdown_cmplt) {
-        assert(m_flags == cp_state::destroy_cp);
-        static std::once_flag flag1;
-        std::call_once(flag1, []() { delete m_cp; });
-    }
-    delete m_active_map;
-}
+IndxMgr::~IndxMgr() { delete m_active_map; }
 
 indx_mgr_active_sb IndxMgr::get_active_sb() {
     indx_mgr_active_sb sb;
@@ -170,7 +167,10 @@ indx_mgr_active_sb IndxMgr::get_active_sb() {
     return sb;
 }
 
-void IndxMgr::init() { m_cp = new IndxCP(); }
+void IndxMgr::init() {
+    m_cp = std::unique_ptr< IndxCP >(new IndxCP());
+    m_shutdown_started.store(false);
+}
 
 void IndxMgr::attach_prepare_vol_cp_id_list(std::map< boost::uuids::uuid, vol_cp_id_ptr >* cur_vols_id,
                                             std::map< boost::uuids::uuid, vol_cp_id_ptr >* new_vols_id,
@@ -178,9 +178,9 @@ void IndxMgr::attach_prepare_vol_cp_id_list(std::map< boost::uuids::uuid, vol_cp
     HomeBlks::instance()->attach_prepare_volume_cp_id(cur_vols_id, new_vols_id, home_blks_id);
 }
 
-vol_cp_id_ptr IndxMgr::attach_prepare_vol_cp(vol_cp_id_ptr vol_cur_id, indx_cp_id* home_blks_id) {
+vol_cp_id_ptr IndxMgr::attach_prepare_vol_cp(vol_cp_id_ptr cur_vol_id, indx_cp_id* home_blks_id) {
 
-    if (vol_cur_id == nullptr) {
+    if (cur_vol_id == nullptr) {
         /* this volume is just created in the last CP. return the first_cp_id created at the time of volume creation.
          * And this volume is not going to participate in the current cp. This volume is going to participate in
          * the next cp.
@@ -192,43 +192,33 @@ vol_cp_id_ptr IndxMgr::attach_prepare_vol_cp(vol_cp_id_ptr vol_cur_id, indx_cp_i
         return m_first_cp_id;
     }
 
-    if (vol_cur_id == m_first_cp_id) { m_first_cp_id = nullptr; }
+    if (cur_vol_id == m_first_cp_id) { m_first_cp_id = nullptr; }
 
-    if (vol_cur_id->flags == cp_state::suspend_cp) {
-        /* this volume is not going to participate in a current cp */
-        return vol_cur_id;
+    /* Go through the callback who is waiting for prepare to happen. Normally suspend, resume,
+     * destroy waits for it. We can not move CP to suspend, active in middle of CP.
+     */
+    auto cb_list_copy = prepare_cb_list.get_copy_and_reset();
+    for (uint32_t i = 0; i < cb_list_copy->size(); ++i) {
+        (*cb_list_copy)[i](cur_vol_id, home_blks_id);
     }
 
-    if (vol_cur_id->flags == cp_state::destroy_cp) {
-        assert(!m_shutdown_started);
-
-        /* XXX: should we wait for bitmap checkpoint timer to trigger */
-        home_blks_id->bitmap_checkpoint = true;
-
-        if (home_blks_id->bitmap_checkpoint) {
-            /* this is a bitmap checkpoint. move it to active. this is the last cp of this volume. */
-            vol_cur_id->flags = cp_state::active_cp;
-            std::unique_lock< std::mutex > lk(home_blks_id->cb_list_mtx);
-            home_blks_id->cb_list.push_back(m_stop_cb);
-            return nullptr;
-        } else {
-            return vol_cur_id;
-        }
-    }
-
-    if (m_shutdown_started) {
-        /* this is a last cp of this volume */
+    if (m_last_cp || m_shutdown_started.load()) {
+        LOGINFO("last cp of volume name {} is triggered", cur_vol_id->vol->get_name());
         return nullptr;
     }
 
-    /* create new cp */
-    vol_cp_id_ptr new_cp_id(new vol_cp_id());
-    new_cp_id->end_active_psn = m_journal->get_contiguous_issued_seq_num(vol_cur_id->start_active_psn);
-    new_cp_id->start_active_psn = vol_cur_id->end_active_psn;
-    new_cp_id->btree_id = m_active_map->attach_prepare_cp(vol_cur_id->btree_id);
-    new_cp_id->vol = vol_cur_id->vol;
+    if (cur_vol_id->flags == cp_state::suspend_cp) {
+        /* this volume is not going to participate in a current cp */
+        return cur_vol_id;
+    }
 
-    return new_cp_id;
+    /* create new cp */
+    vol_cp_id_ptr new_vol_id(new vol_cp_id());
+    new_vol_id->end_active_psn = m_journal->get_contiguous_issued_seq_num(cur_vol_id->start_active_psn);
+    new_vol_id->start_active_psn = cur_vol_id->end_active_psn;
+    new_vol_id->btree_id = m_active_map->attach_prepare_cp(cur_vol_id->btree_id);
+    new_vol_id->vol = cur_vol_id->vol;
+    return new_vol_id;
 }
 
 void IndxMgr::truncate(vol_cp_id_ptr vol_id) {
@@ -356,22 +346,24 @@ vol_cp_id_ptr IndxMgr::get_volume_id(indx_cp_id* cp_id) {
     }
 }
 
-void IndxMgr::suspend_cp(vol_cp_id_ptr vol_id) { vol_id->flags = cp_state::suspend_cp; }
-
-void IndxMgr::resume_cp(vol_cp_id_ptr vol_id) {
-    assert(vol_id->flags == cp_state::suspend_cp);
-    vol_id->flags = 0;
-}
-
 void IndxMgr::trigger_vol_cp() { m_cp->trigger_cp(); }
 
-void IndxMgr::trigger_system_cp(cp_done_cb cb) {
+void IndxMgr::trigger_system_cp(cp_done_cb cb, bool shutdown) {
     /* set bit map checkpoint , resume cp and trigger it */
     if (!m_cp) {
         if (cb) { cb(true); }
         return;
     }
+    bool expected = false;
+    bool desired = shutdown;
     auto cp_id = m_cp->cp_io_enter();
+
+    /* Make sure that no cp is triggered after shutdown is called */
+    if (!m_shutdown_started.compare_exchange_strong(expected, desired)) {
+        if (cb) { cb(false); }
+        m_cp->cp_io_exit(cp_id);
+        return;
+    }
     cp_id->bitmap_checkpoint = true;
     if (cb) {
         std::unique_lock< std::mutex > lk(cp_id->cb_list_mtx);
@@ -380,7 +372,7 @@ void IndxMgr::trigger_system_cp(cp_done_cb cb) {
             if (cb) { cb(success); }
         }));
     }
-    m_cp->trigger_cp(cp_id);
+    m_cp->trigger_cp(cp_id, desired);
     m_cp->cp_io_exit(cp_id);
 }
 
@@ -411,54 +403,55 @@ void IndxMgr::trigger_system_cp(cp_done_cb cb) {
  */
 void IndxMgr::destroy(indxmgr_stop_cb cb) {
     /* we can assume that there is no io going on this volume now */
-    LOGINFO("destroying indx mgr");
-    auto cp_id = m_cp->cp_io_enter();
-    auto vol_id = get_volume_id(cp_id);
-    suspend_cp(vol_id);
-    /* CP won't happen on this volume */
-    auto btree_id = get_btree_id(cp_id);
+
+    LOGINFO("destroying indx mgr {}", m_uuid);
 
     destroy_journal_ent* jent = (destroy_journal_ent*)malloc(sizeof(destroy_journal_ent));
     jent->state = indx_mgr_state::DESTROYING;
     sisl::blob b((uint8_t*)jent, sizeof(destroy_journal_ent));
     m_stop_cb = cb;
-    m_journal->append_async(b, b.bytes,
-                            ([this, btree_id, cp_id](logstore_seq_num_t seq_num, logdev_key key, void* cookie) {
-                                /* end the critical section */
-                                m_cp->cp_io_exit(cp_id);
+    m_journal->append_async(b, b.bytes, ([this](logstore_seq_num_t seq_num, logdev_key key, void* cookie) {
                                 free(cookie);
-
-                                /* free all blkids of btree in memory */
-                                if (m_active_map->destroy(btree_id) != btree_status_t::success) {
-                                    /* destroy is failed. We will destroy the volume in next boot */
-                                    m_stop_cb(false);
-                                }
-
-                                /* set bit map checkpoint , resume cp and trigger it */
-                                auto cur_cp_id = m_cp->cp_io_enter();
-                                auto cur_vol_id = get_volume_id(cur_cp_id);
-                                assert(cur_vol_id->btree_id == btree_id);
-
-                                /* safe to participate in bitmap checkpoint */
-                                assert(cur_vol_id->flags == cp_state::suspend_cp);
-                                cur_vol_id->flags = cp_state::destroy_cp;
-
-                                m_cp->trigger_cp(cur_cp_id);
-                                m_cp->cp_io_exit(cur_cp_id);
+                                add_prepare_cb_list(([this](vol_cp_id_ptr cur_cp_id, indx_cp_id* home_blks_id) {
+                                    /* it is called while attaching a new CP id. Suspend this cp and call
+                                     * destroy indx table.
+                                     */
+                                    cur_cp_id->flags = cp_state::suspend_cp;
+                                    destroy_indx_tbl(cur_cp_id->btree_id);
+                                }));
                             }));
 }
 
-void IndxMgr::shutdown(indxmgr_stop_cb cb) {
-    m_shutdown_started = true;
-    trigger_system_cp(cb);
+void IndxMgr::destroy_indx_tbl(btree_cp_id_ptr btree_id) {
+    /* free all blkids of btree in memory */
+    if (m_active_map->destroy(btree_id) != btree_status_t::success) {
+        /* destroy is failed. We will destroy this volume in next boot */
+        m_stop_cb(false);
+    }
+    add_prepare_cb_list(([this](vol_cp_id_ptr cur_vol_id, indx_cp_id* home_blks_id) {
+        assert(cur_vol_id->flags == cp_state::suspend_cp);
+        assert(!m_shutdown_started.load());
+        if (home_blks_id->bitmap_checkpoint) {
+            /* this is a bitmap checkpoint. move it to active. this is the last cp of this volume. */
+            cur_vol_id->flags = cp_state::active_cp;
+            std::unique_lock< std::mutex > lk(home_blks_id->cb_list_mtx);
+            home_blks_id->cb_list.push_back(m_stop_cb);
+            m_last_cp = true;
+        }
+    }));
 }
+
+void IndxMgr::add_prepare_cb_list(prepare_cb cb) {
+    std::unique_lock< std::mutex > lk(prepare_cb_mtx);
+    prepare_cb_list.push_back(cb);
+}
+
+void IndxMgr::shutdown(indxmgr_stop_cb cb) { trigger_system_cp(cb, true); }
 
 void IndxMgr::destroy_done() {
     m_active_map->destroy_done();
-    assert(!m_shutdown_cmplt);
     home_log_store_mgr.remove_log_store(m_journal->get_store_id());
 }
 
-IndxCP* IndxMgr::m_cp;
-bool IndxMgr::m_shutdown_cmplt = false;
-bool IndxMgr::m_shutdown_started = false;
+std::unique_ptr< IndxCP > IndxMgr::m_cp;
+std::atomic< bool > IndxMgr::m_shutdown_started;

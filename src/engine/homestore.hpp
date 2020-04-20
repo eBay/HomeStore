@@ -113,7 +113,6 @@ public:
     }
 
 protected:
-    virtual void superblock_init(BlkId bid) = 0;
     virtual data_blkstore_t::comp_callback data_completion_cb() = 0;
     virtual void process_vdev_error(vdev_info_block* vb) = 0;
 
@@ -215,9 +214,6 @@ protected:
             BlkId bid = alloc_sb_blk(HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size));
             blob.type = blkstore_type::SB_STORE;
             blob.blkid.set(bid);
-
-            /* build the appln super block */
-            superblock_init(bid);
 
             /* update the context info */
             m_sb_blk_store->update_vb_context(sisl::blob((uint8_t*)&blob, (uint32_t)sizeof(sb_blkstore_blob)));
