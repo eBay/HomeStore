@@ -67,7 +67,7 @@ void Volume::set_io_flip() {
 
 Volume::Volume(const vol_params& params) :
         m_params(params),
-        m_metrics(boost::uuids::to_string(params.uuid).c_str()),
+        m_metrics(params.vol_name),
         m_comp_cb(params.io_comp_cb),
         m_indx_mgr_destroy_started(false) {
     m_state = vol_state::UNINITED;

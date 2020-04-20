@@ -106,7 +106,7 @@ public:
 class IndxMgr {
     typedef std::function< void(volume_req* req, std::error_condition err) > io_done_cb;
     typedef std::function< void(Free_Blk_Entry fbe) > free_blk_callback;
-    typedef std::function< void(volume_req_ptr& req, BlkId& bid) > pending_read_blk_cb;
+    typedef std::function< void(volume_req* req, BlkId& bid) > pending_read_blk_cb;
     typedef std::function< void(vol_cp_id_ptr cur_vol_id, indx_cp_id* home_blks_id) > prepare_cb;
 
 private:

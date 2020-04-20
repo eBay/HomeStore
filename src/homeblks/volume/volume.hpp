@@ -43,12 +43,11 @@ typedef boost::intrusive_ptr< volume_child_req > volume_child_req_ptr;
 #define VOL_INFO_LOG(volname, msg, ...) HS_SUBMOD_LOG(INFO, base, , "vol", volname, msg, ##__VA_ARGS__)
 #define VOL_ERROR_LOG(volname, msg, ...) HS_SUBMOD_LOG(ERROR, base, , "vol", volname, msg, ##__VA_ARGS__)
 #define THIS_VOL_LOG(level, mod, req, msg, ...)                                                                        \
-    HS_SUBMOD_LOG(level, mod, req, "vol", boost::lexical_cast< std::string >(this->get_uuid()), msg, ##__VA_ARGS__)
+    HS_SUBMOD_LOG(level, mod, req, "vol", this->get_name(), msg, ##__VA_ARGS__)
 #define VOL_ASSERT(assert_type, cond, req, ...)                                                                        \
-    HS_SUBMOD_ASSERT(assert_type, cond, req, "vol", boost::lexical_cast< std::string >(this->get_uuid()), ##__VA_ARGS__)
+    HS_SUBMOD_ASSERT(assert_type, cond, req, "vol", this->get_name(), ##__VA_ARGS__)
 #define VOL_ASSERT_CMP(assert_type, val1, cmp, val2, req, ...)                                                         \
-    HS_SUBMOD_ASSERT_CMP(assert_type, val1, cmp, val2, req, "vol",                                                     \
-                         boost::lexical_cast< std::string >(this->get_uuid()), ##__VA_ARGS__)
+    HS_SUBMOD_ASSERT_CMP(assert_type, val1, cmp, val2, req, "vol", this->get_name(), ##__VA_ARGS__)
 
 #define VOL_DEBUG_ASSERT(...) VOL_ASSERT(DEBUG, __VA_ARGS__)
 #define VOL_RELEASE_ASSERT(...) VOL_ASSERT(RELEASE, __VA_ARGS__)
@@ -135,7 +134,7 @@ struct Free_Blk_Entry {
 
 class VolumeMetrics : public sisl::MetricsGroupWrapper {
 public:
-    explicit VolumeMetrics(const char* vol_uuid) : sisl::MetricsGroupWrapper("Volume", vol_uuid) {
+    explicit VolumeMetrics(const char* vol_name) : sisl::MetricsGroupWrapper("Volume", vol_name) {
         REGISTER_COUNTER(volume_read_count, "Total Volume read operations", "volume_op_count", {"op", "read"});
         REGISTER_COUNTER(volume_write_count, "Total Volume write operations", "volume_op_count", {"op", "write"});
         REGISTER_COUNTER(volume_outstanding_data_read_count, "Total Volume data outstanding read cnt",
