@@ -34,11 +34,11 @@ homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >* Volume::m_data_
 
 Volume::Volume(const vol_params& params) :
         m_comp_cb(params.io_comp_cb),
-        m_metrics(boost::uuids::to_string(params.uuid).c_str()),
+        m_metrics(params.vol_name),
         m_vol_name(params.vol_name),
         m_vol_uuid(boost::uuids::to_string(params.uuid)) {
     m_state = vol_state::UNINITED;
-    m_map = new mapping(params.size, params.page_size, m_vol_uuid,
+    m_map = new mapping(params.size, params.page_size, params.vol_name,
                         std::bind(&Volume::process_metadata_completions, this, std::placeholders::_1),
                         std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1),
                         std::bind(&Volume::pending_read_blk_cb, this, std::placeholders::_1));
@@ -67,7 +67,7 @@ Volume::Volume(const vol_params& params) :
 
 Volume::Volume(vol_mem_sb* sb) :
         m_sb(sb),
-        m_metrics(boost::uuids::to_string(sb->ondisk_sb->uuid).c_str()),
+        m_metrics(sb->ondisk_sb->vol_name),
         m_vol_name(sb->ondisk_sb->vol_name),
         m_vol_uuid(boost::uuids::to_string(sb->ondisk_sb->uuid)) {
     m_state = vol_state::UNINITED;
