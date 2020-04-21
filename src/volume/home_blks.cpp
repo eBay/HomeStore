@@ -833,6 +833,7 @@ void HomeBlks::create_sb_blkstore(vdev_info_block* vb) {
         if (!m_cfg.is_read_only) {
             homeblks_sb_write();
         }
+        m_sb_blk_store->alloc_blk(blob->blkid);
     }
 }
 
