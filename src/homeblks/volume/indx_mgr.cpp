@@ -165,11 +165,11 @@ indx_mgr_active_sb IndxMgr::get_active_sb() {
 void IndxMgr::init() {
     m_cp = std::unique_ptr< IndxCP >(new IndxCP());
     m_shutdown_started.store(false);
-    auto home_blks = HomeBlks::safe_instance();
     auto sthread = std::thread([home_blks]() mutable {
         IndxMgr::m_thread_num = sisl::ThreadLocalContext::my_thread_num();
-        home_blks = nullptr;
+        LOGINFO("{} thread entered", m_thread_num);
         iomanager.run_io_loop(false, nullptr, ([](const iomgr_msg& io_msg) {}));
+        LOGINFO("{} thread exit", m_thread_num);
     });
     sthread.detach();
 }
