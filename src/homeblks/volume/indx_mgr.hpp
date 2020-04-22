@@ -103,6 +103,13 @@ public:
     void bitmap_cp_done(indx_cp_id* id);
 };
 
+class IndxMgr;
+/* This message is used to delete indx tables in different thread */
+struct indxmgr_msg {
+    IndxMgr* object;
+    btree_cp_id_ptr btree_id;
+};
+
 /* This class is responsible to manage active index and snapshot indx table */
 class IndxMgr {
 
@@ -143,6 +150,7 @@ private:
     static std::unique_ptr< IndxCP > m_cp;
     static std::atomic< bool > m_shutdown_started;
     static bool m_shutdown_cmplt;
+    static int m_thread_num;
 
     static void init();
     static void write_superblock();

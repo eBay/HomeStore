@@ -147,17 +147,13 @@ IndxMgr::IndxMgr(std::shared_ptr< Volume > vol, const vol_params& params, io_don
     m_first_cp_id->btree_id = m_active_map->attach_prepare_cp(nullptr);
     m_first_cp_id->vol = vol;
     std::call_once(flag1, []() { IndxMgr::init(); });
-
-    /* create two threads for checkpoint */
 }
 
 IndxMgr::IndxMgr(std::shared_ptr< Volume > vol, indx_mgr_active_sb* sb, io_done_cb io_cb, free_blk_callback free_blk_cb,
                  pending_read_blk_cb read_blk_cb) :
         m_io_cb(io_cb), m_pending_read_blk_cb(read_blk_cb), m_first_cp_id(new vol_cp_id()), prepare_cb_list(4) {}
 
-IndxMgr::~IndxMgr() {
-    delete m_active_map;
-}
+IndxMgr::~IndxMgr() { delete m_active_map; }
 
 indx_mgr_active_sb IndxMgr::get_active_sb() {
     indx_mgr_active_sb sb;
@@ -169,6 +165,13 @@ indx_mgr_active_sb IndxMgr::get_active_sb() {
 void IndxMgr::init() {
     m_cp = std::unique_ptr< IndxCP >(new IndxCP());
     m_shutdown_started.store(false);
+    auto home_blks = HomeBlks::safe_instance();
+    auto sthread = std::thread([home_blks]() mutable {
+        IndxMgr::m_thread_num = sisl::ThreadLocalContext::my_thread_num();
+        home_blks = nullptr;
+        iomanager.run_io_loop(false, nullptr, ([](const iomgr_msg& io_msg) {}));
+    });
+    sthread.detach();
 }
 
 void IndxMgr::attach_prepare_vol_cp_id_list(std::map< boost::uuids::uuid, vol_cp_id_ptr >* cur_vols_id,
@@ -417,7 +420,13 @@ void IndxMgr::destroy(indxmgr_stop_cb cb) {
                                      * destroy indx table.
                                      */
                                     cur_cp_id->flags = cp_state::suspend_cp;
-                                    destroy_indx_tbl(cur_cp_id->btree_id);
+                                    iomgr_msg io_msg;
+                                    io_msg.m_type = RUN_METHOD;
+                                    auto btree_id = cur_cp_id->btree_id;
+                                    auto run_method = sisl::ObjectAllocator< run_method_t >::make_object();
+                                    *run_method = ([this, btree_id]() { this->destroy_indx_tbl(btree_id); });
+                                    io_msg.m_data_buf = (void*)run_method;
+                                    iomanager.send_msg(m_thread_num, io_msg);
                                 }));
                             }));
 }
@@ -455,3 +464,4 @@ void IndxMgr::destroy_done() {
 
 std::unique_ptr< IndxCP > IndxMgr::m_cp;
 std::atomic< bool > IndxMgr::m_shutdown_started;
+int IndxMgr::m_thread_num;
