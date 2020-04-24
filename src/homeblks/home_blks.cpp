@@ -25,7 +25,7 @@ bool same_value_gen = false;
 
 HomeBlksSafePtr HomeBlks::_instance = nullptr;
 std::string HomeBlks::version = PACKAGE_VERSION;
-thread_local std::vector< std::shared_ptr< Volume > > HomeBlks::s_io_completed_volumes = {};
+thread_local std::vector< std::shared_ptr< Volume > >* HomeBlks::s_io_completed_volumes = nullptr;
 
 VolInterface* VolInterfaceImpl::init(const init_params& cfg, bool force_reinit) {
     return (HomeBlks::init(cfg, force_reinit));
@@ -137,6 +137,7 @@ std::error_condition HomeBlks::write(const VolumePtr& vol, const vol_interface_r
     if (!m_rdy || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
     req->vol_instance = vol;
     req->part_of_batch = part_of_batch;
+    req->is_read = false;
     return (vol->write(req));
 }
 
@@ -149,6 +150,7 @@ std::error_condition HomeBlks::read(const VolumePtr& vol, const vol_interface_re
     if (!m_rdy || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
     req->vol_instance = vol;
     req->part_of_batch = part_of_batch;
+    req->is_read = true;
     return (vol->read(req));
 }
 
@@ -696,9 +698,12 @@ bool HomeBlks::fix_tree(VolumePtr vol, bool verify) {
 
 void HomeBlks::call_multi_vol_completions() {
     auto v_comp_events = 0;
-    for (auto& v : s_io_completed_volumes) {
+    auto comp_vols = s_io_completed_volumes;
+    s_io_completed_volumes = nullptr;
+
+    for (auto& v : *comp_vols) {
         v_comp_events += v->call_batch_completion_cbs();
     }
-    s_io_completed_volumes.clear();
+    sisl::VectorPool< std::shared_ptr< Volume > >::free(comp_vols);
     if (m_cfg.end_of_batch_cb && v_comp_events) m_cfg.end_of_batch_cb(v_comp_events);
 }

@@ -15,6 +15,7 @@
 #include <settings/settings.hpp>
 #include "homeblks_config.hpp"
 #include <homeds/btree/writeBack_cache.hpp>
+#include <fds/sparse_vector.hpp>
 
 #ifndef DEBUG
 extern bool same_value_gen;
@@ -280,7 +281,8 @@ private:
     HomeBlksMetrics m_metrics;
     std::atomic< bool > m_start_shutdown;
 
-    static thread_local std::vector< std::shared_ptr< Volume > > s_io_completed_volumes;
+    static thread_local std::vector< std::shared_ptr< Volume > >* s_io_completed_volumes;
 };
+
 } // namespace homestore
 #endif // OMSTORE_OMSTORE_HPP

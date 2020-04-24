@@ -78,7 +78,6 @@ struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
     bool is_read = true;
     bool sync = false;
     bool part_of_batch = false;
-    std::unique_ptr< volume_req > vol_req;
     void* cookie;
 
     friend void intrusive_ptr_add_ref(vol_interface_req* req) { req->refcount.increment(1); }

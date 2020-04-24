@@ -90,7 +90,7 @@ class Blk_Read_Tracker {
 public:
     Blk_Read_Tracker(const char* vol_name, boost::uuids::uuid vol_uuid, blk_remove_cb remove_cb) :
             m_pending_reads_map(HB_SETTINGS_VALUE(volume->estimated_pending_blk_reads)),
-            m_metrics(m_vol_name),
+            m_metrics(vol_name),
             m_remove_cb(remove_cb),
             m_vol_name(vol_name),
             m_vol_uuid(vol_uuid) {}
@@ -103,7 +103,7 @@ public:
     /* after overwriting blk id in write flow, its marked for safe removal if cannot be freed immediatly*/
     void safe_remove_blk_on_write(Free_Blk_Entry& fbe);
 
-    void safe_remove_blks(volume_req* vreq);
+    void safe_remove_blks(const boost::intrusive_ptr< volume_req >& vreq);
     uint64_t get_size() { return m_pending_reads_map.get_size(); }
     boost::uuids::uuid get_uuid() { return m_vol_uuid; }
     const std::string& get_name() const { return m_vol_name; }

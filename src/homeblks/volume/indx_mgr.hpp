@@ -32,6 +32,11 @@ public:
 
     /* it update the alloc blk id and checksum */
     sisl::blob create_journal_entry(volume_req* v_req);
+
+    std::string to_string() const {
+        auto hdr = (journal_hdr*)m_mem;
+        return fmt::format("lba={}, indx_start_lba={}, nblks={}", hdr->lba, hdr->indx_start_lba, hdr->nblks);
+    }
 };
 
 enum indx_mgr_state { ONLINE = 0, DESTROYING = 1 };
@@ -104,7 +109,7 @@ public:
 
 /* This class is responsible to manage active index and snapshot indx table */
 class IndxMgr {
-    typedef std::function< void(volume_req* req, std::error_condition err) > io_done_cb;
+    typedef std::function< void(const boost::intrusive_ptr< volume_req >& vreq, std::error_condition err) > io_done_cb;
     typedef std::function< void(Free_Blk_Entry fbe) > free_blk_callback;
     typedef std::function< void(volume_req* req, BlkId& bid) > pending_read_blk_cb;
     typedef std::function< void(vol_cp_id_ptr cur_vol_id, indx_cp_id* home_blks_id) > prepare_cb;
@@ -180,7 +185,7 @@ public:
     /* write/update indx table for a IO
      * @params req :- It create all information to update the indx mgr and journal
      */
-    void update_indx(volume_req* req);
+    void update_indx(const boost::intrusive_ptr< volume_req >& vreq);
 
     /* Get active superblock
      * @return :- get superblock of a active btree. It is immutable structure. It contains all infomation require to

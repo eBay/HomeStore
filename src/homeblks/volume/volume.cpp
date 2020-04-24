@@ -111,7 +111,7 @@ void Volume::destroy(indxmgr_stop_cb cb) {
     ++vol_ref_cnt;
     auto prev_state = set_state(vol_state::DESTROYING);
     if (prev_state == vol_state::DESTROYING) {
-        try_shutdown_destroy();
+        shutdown_if_needed();
         return;
     }
 
@@ -129,6 +129,7 @@ void Volume::destroy_internal() {
     }
     m_indx_mgr->destroy(([this](bool success) {
         if (success) {
+            THIS_VOL_LOG(INFO, base, , "volume destroyed");
             remove_sb();
             set_state(vol_state::DESTROYED, false);
             m_indx_mgr->destroy_done();
@@ -149,34 +150,36 @@ Volume::~Volume() {
 
 std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
     std::vector< BlkId > bid;
-    iface_req->is_read = false;
-    iface_req->vol_req = std::make_unique< volume_req >(iface_req);
-    auto vreq = iface_req->vol_req.get();
+    std::error_condition ret = no_error;
+    uint32_t offset = 0;
+    uint32_t start_lba = 0;
 
+    auto vreq = volume_req::make(iface_req);
+    THIS_VOL_LOG(TRACE, volume, vreq, "write: lba={}, nlbas={}", vreq->lba(), vreq->nblks());
     COUNTER_INCREMENT(m_metrics, volume_outstanding_data_write_count, 1);
 
     /* Sanity checks */
     ++home_blks_ref_cnt;
     ++vol_ref_cnt;
+
     // sync write is not supported
     assert(!vreq->is_sync());
     if (is_offline()) {
-        check_and_complete_req(vreq, std::make_error_condition(std::errc::no_such_device));
-        return std::make_error_condition(std::errc::no_such_device);
+        ret = std::make_error_condition(std::errc::no_such_device);
+        goto done;
     }
 
     /* Allocate blkid */
-    if (alloc_blk(vreq, bid) != no_error) {
-        check_and_complete_req(vreq, std::make_error_condition(std::errc::device_or_resource_busy));
-        return vreq->err();
-    }
+    if ((ret = alloc_blk(vreq, bid)) != no_error) { goto done; }
 
     /* Note: If we crash before we write this entry to a journal then there is a chance
      * of leaking these allocated blocks.
      */
-    uint32_t offset = 0;
-    uint32_t start_lba = vreq->lba();
+    offset = 0;
+    start_lba = vreq->lba();
     try {
+        vreq->state = volume_req_state::data_io;
+
         for (uint32_t i = 0; i < bid.size(); ++i) {
             /* Create child requests */
             int nblks = bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) / get_page_size();
@@ -202,21 +205,21 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
         }
 
         /* complete the request */
-        check_and_complete_req(vreq, no_error);
+        ret = no_error;
     } catch (const std::exception& e) {
         VOL_LOG_ASSERT(0, vreq, "Exception: {}", e.what())
-        check_and_complete_req(vreq, std::make_error_condition(std::errc::io_error));
-        return vreq->err();
+        ret = std::make_error_condition(std::errc::io_error);
     }
 
-    return no_error;
+done:
+    check_and_complete_req(vreq, ret);
+    return ret;
 }
 
 std::error_condition Volume::read(const vol_interface_req_ptr& iface_req) {
-    iface_req->is_read = true;
-    iface_req->vol_req = std::make_unique< volume_req >(iface_req);
-    auto vreq = iface_req->vol_req.get();
+    std::error_condition ret = no_error;
 
+    auto vreq = volume_req::make(iface_req);
     THIS_VOL_LOG(TRACE, volume, vreq, "read: lba={}, nblks={}, sync={}", vreq->lba(), vreq->nblks(), vreq->is_sync());
     COUNTER_INCREMENT(m_metrics, volume_read_count, 1);
     COUNTER_INCREMENT(m_metrics, volume_outstanding_data_read_count, 1);
@@ -226,19 +229,16 @@ std::error_condition Volume::read(const vol_interface_req_ptr& iface_req) {
         ++home_blks_ref_cnt;
         ++vol_ref_cnt;
         if (is_offline()) {
-            check_and_complete_req(vreq, std::make_error_condition(std::errc::no_such_device));
-            return std::make_error_condition(std::errc::no_such_device);
+            ret = std::make_error_condition(std::errc::no_such_device);
+            goto done;
         }
 
         /* read indx */
         std::vector< std::pair< MappingKey, MappingValue > > kvs;
-        auto err = read_indx(vreq, kvs);
-        if (err != no_error) {
-            check_and_complete_req(vreq, err);
-            return err;
-        }
+        if ((ret = read_indx(vreq, kvs)) != no_error) { goto done; }
 
         /* create child req and read buffers */
+        vreq->state = volume_req_state::data_io;
         vreq->read_buf().reserve(kvs.size());
         for (auto& kv : kvs) {
             if (!(kv.second.is_valid())) {
@@ -271,12 +271,15 @@ std::error_condition Volume::read(const vol_interface_req_ptr& iface_req) {
         }
 
         // Atleast 1 metadata io is completed.
-        check_and_complete_req(vreq, no_error);
+        ret = no_error;
     } catch (const std::exception& e) {
         VOL_LOG_ASSERT(0, vreq, "Exception: {}", e.what())
-        check_and_complete_req(vreq, std::make_error_condition(std::errc::device_or_resource_busy));
+        ret = std::make_error_condition(std::errc::device_or_resource_busy);
     }
-    return no_error;
+
+done:
+    check_and_complete_req(vreq, ret);
+    return ret;
 }
 
 /* This methods check if we can complete the req and if we can do so. This is the exit point of all async volume
@@ -289,10 +292,13 @@ std::error_condition Volume::read(const vol_interface_req_ptr& iface_req) {
  * 1) hb_req: Request which is to be checked and completed
  * 2) Error: Any IO error condition. Note if there is an error, the request is immediately completed.
  */
-void Volume::check_and_complete_req(volume_req* vreq, const std::error_condition& err) {
+bool Volume::check_and_complete_req(const volume_req_ptr& vreq, const std::error_condition& err) {
+    bool completed = false;
+    uint64_t size = 0;
+
     // If there is error and request is not completed yet, we need to complete it now.
-    THIS_VOL_LOG(TRACE, volume, vreq, "complete_io: status={}, outstanding_io_cnt={}, read {}, indx updated {}",
-                 err.message(), vreq->outstanding_io_cnt.get(), vreq->is_read_op(), vreq->index_updated);
+    THIS_VOL_LOG(TRACE, volume, vreq, "complete_io: status={}, outstanding_io_cnt={}, read={}, state={}", err.message(),
+                 vreq->outstanding_io_cnt.get(), vreq->is_read_op(), vreq->state);
 
     if (err) {
         if (vreq->iface_req->set_error(err)) {
@@ -301,71 +307,66 @@ void Volume::check_and_complete_req(volume_req* vreq, const std::error_condition
                                       1);
             uint64_t cnt = m_err_cnt.fetch_add(1, std::memory_order_relaxed);
             THIS_VOL_LOG(ERROR, , vreq, "Vol operation error {}", err.message());
-            m_read_blk_tracker->safe_remove_blks(vreq);
-            if (!vreq->iface_req->sync) { volume_req_done(vreq); }
+            completed = true;
         } else {
             THIS_VOL_LOG(WARN, , vreq, "Receiving completion on already completed request id={}", vreq->request_id);
         }
-    }
-
-    if (!vreq->outstanding_io_cnt.decrement_testz(1)) { return; }
-
-    /* It is single threaded beyond this point */
-    if (vreq->err() != no_error) {
-        try_shutdown_destroy();
-        return;
-    }
-
-    /* Verify checksum for read and update indx for write */
-    if (vreq->is_read_op()) {
-        /* verify checksum for read */
-        verify_csum(vreq);
-    } else if (!vreq->index_updated) {
-        /* update indx mgr */
-        vreq->index_updated = true;
-        vreq->outstanding_io_cnt.increment(1);
-        vreq->indx_start_time = Clock::now();
-        m_indx_mgr->update_indx(vreq);
-        return;
-    }
-
-    m_read_blk_tracker->safe_remove_blks(vreq);
-
-    /* update counters */
-    auto size = get_page_size() * vreq->nblks();
-    HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, vreq->is_read_op(), volume_read_latency, volume_write_latency,
-                              get_elapsed_time_us(vreq->io_start_time));
-    if (vreq->is_read_op()) {
-        COUNTER_DECREMENT(m_metrics, volume_outstanding_data_read_count, 1);
-        COUNTER_INCREMENT(m_metrics, volume_read_size_total, size);
-    } else {
-        COUNTER_DECREMENT(m_metrics, volume_outstanding_data_write_count, 1);
-        COUNTER_INCREMENT(m_metrics, volume_write_size_total, size);
-    }
-    HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, vreq->is_read_op(), volume_read_size_distribution,
-                              volume_write_size_distribution, size);
-    HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, vreq->is_read_op(), volume_pieces_per_write, volume_pieces_per_read,
-                              vreq->vc_req_cnt);
-
-    if (get_elapsed_time_ms(vreq->io_start_time) > 5000) {
-        THIS_VOL_LOG(WARN, , vreq, "vol req took time {}", get_elapsed_time_ms(vreq->io_start_time));
-    }
-
-    if (!vreq->is_sync()) {
-#ifdef _PRERELEASE
-        if (auto flip_ret = homestore_flip->get_test_flip< int >("vol_comp_delay_us")) {
-            LOGINFO("delaying completion in volume for {} us", flip_ret.get());
-            usleep(flip_ret.get());
+    } else if (vreq->state == volume_req_state::data_io) {
+        if (vreq->outstanding_io_cnt.decrement_testz(1)) {
+            if (vreq->is_read_op()) {
+                /* verify checksum for read */
+                verify_csum(vreq);
+                completed = true;
+            } else {
+                vreq->state = volume_req_state::journal_io;
+                vreq->indx_start_time = Clock::now();
+                m_indx_mgr->update_indx(vreq);
+            }
         }
-#endif
-        THIS_VOL_LOG(TRACE, volume, vreq, "IO DONE");
-        volume_req_done(vreq);
+    } else if (vreq->state == volume_req_state::journal_io) {
+        completed = true;
     }
-    try_shutdown_destroy();
+
+    if (completed) {
+        vreq->state = volume_req_state::completed;
+        m_read_blk_tracker->safe_remove_blks(vreq);
+
+        /* update counters */
+        size = get_page_size() * vreq->nblks();
+        auto latency_us = get_elapsed_time_us(vreq->io_start_time);
+        if (vreq->is_read_op()) {
+            COUNTER_DECREMENT(m_metrics, volume_outstanding_data_read_count, 1);
+            COUNTER_INCREMENT(m_metrics, volume_read_size_total, size);
+            HISTOGRAM_OBSERVE(m_metrics, volume_read_size_distribution, size);
+            HISTOGRAM_OBSERVE(m_metrics, volume_pieces_per_read, vreq->vc_req_cnt);
+            HISTOGRAM_OBSERVE(m_metrics, volume_read_latency, latency_us);
+        } else {
+            COUNTER_DECREMENT(m_metrics, volume_outstanding_data_write_count, 1);
+            COUNTER_INCREMENT(m_metrics, volume_write_size_total, size);
+            HISTOGRAM_OBSERVE(m_metrics, volume_write_size_distribution, size);
+            HISTOGRAM_OBSERVE(m_metrics, volume_pieces_per_write, vreq->vc_req_cnt);
+            HISTOGRAM_OBSERVE(m_metrics, volume_write_latency, latency_us);
+        }
+
+        if (latency_us > 5000000) { THIS_VOL_LOG(WARN, , vreq, "vol req took time {} us", latency_us); }
+
+        if (!vreq->is_sync()) {
+#ifdef _PRERELEASE
+            if (auto flip_ret = homestore_flip->get_test_flip< int >("vol_comp_delay_us")) {
+                LOGINFO("delaying completion in volume for {} us", flip_ret.get());
+                usleep(flip_ret.get());
+            }
+#endif
+            THIS_VOL_LOG(TRACE, volume, vreq, "IO DONE");
+            interface_req_done(vreq->iface_req);
+        }
+
+        shutdown_if_needed();
+    }
+    return completed;
 }
 
-/* Note that this function can be called multiple times. So underline functions should be idempotent */
-void Volume::try_shutdown_destroy() {
+void Volume::shutdown_if_needed() {
     auto homeblks_io_cnt = home_blks_ref_cnt.fetch_sub(1);
     auto vol_io_cnt = vol_ref_cnt.fetch_sub(1);
     if (homeblks_io_cnt == 1 && m_hb->is_shutdown()) { m_hb->do_volume_shutdown(true); }
@@ -392,7 +393,7 @@ void Volume::pending_read_blk_cb(volume_req* vreq, BlkId& bid) {
     vreq->push_fbe(fbe);
 }
 
-void Volume::process_indx_completions(volume_req* vreq, std::error_condition err) {
+void Volume::process_indx_completions(const volume_req_ptr& vreq, std::error_condition err) {
     assert(!vreq->is_read_op());
     assert(!vreq->is_sync());
 
@@ -410,7 +411,7 @@ void Volume::process_vol_data_completions(const boost::intrusive_ptr< blkstore_r
 
 void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req) {
     auto vc_req = volume_child_req::cast(bs_req);
-    auto vreq = vc_req->parent_req;
+    auto& vreq = vc_req->parent_req;
 
     assert(vreq != nullptr);
     assert(!vreq->is_sync());
@@ -431,7 +432,7 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
 
 void Volume::attach_completion_cb(const io_comp_callback& cb) { m_comp_cb = cb; }
 
-void Volume::verify_csum(volume_req* vreq) {
+void Volume::verify_csum(const volume_req_ptr& vreq) {
     uint64_t offset = 0;
     uint32_t csum_indx = 0;
 
@@ -453,10 +454,11 @@ void Volume::verify_csum(volume_req* vreq) {
     }
 }
 
-std::error_condition Volume::read_indx(volume_req* vreq, std::vector< std::pair< MappingKey, MappingValue > >& kvs) {
+std::error_condition Volume::read_indx(const volume_req_ptr& vreq,
+                                       std::vector< std::pair< MappingKey, MappingValue > >& kvs) {
     /* get list of key values */
     COUNTER_INCREMENT(m_metrics, volume_outstanding_metadata_read_count, 1);
-    auto err = m_indx_mgr->get_active_indx()->get(vreq, kvs);
+    auto err = m_indx_mgr->get_active_indx()->get(vreq.get(), kvs);
     COUNTER_DECREMENT(m_metrics, volume_outstanding_metadata_read_count, 1);
     HISTOGRAM_OBSERVE(m_metrics, volume_map_read_latency, get_elapsed_time_us(vreq->io_start_time));
     if (err) {
@@ -467,7 +469,8 @@ std::error_condition Volume::read_indx(volume_req* vreq, std::vector< std::pair<
 }
 
 /* It is not lock protected. It should be called only by thread for a vreq */
-volume_child_req_ptr Volume::create_vol_child_req(BlkId& bid, volume_req* vreq, uint32_t start_lba, int nblks) {
+volume_child_req_ptr Volume::create_vol_child_req(BlkId& bid, const volume_req_ptr& vreq, uint32_t start_lba,
+                                                  int nblks) {
     volume_child_req_ptr vc_req = volume_child_req::make_request();
     vc_req->parent_req = vreq;
     vc_req->is_read = vreq->is_read_op();
@@ -475,7 +478,7 @@ volume_child_req_ptr Volume::create_vol_child_req(BlkId& bid, volume_req* vreq, 
     vc_req->lba = start_lba;
     vc_req->op_start_time = Clock::now();
     vc_req->reqId = ++m_req_id;
-    vc_req->sync = vreq->iface_req->sync;
+    vc_req->sync = vreq->is_sync();
     vc_req->part_of_batch = vreq->iface_req->part_of_batch;
 
     assert((bid.data_size(HomeBlks::instance()->get_data_pagesz()) % get_page_size()) == 0);
@@ -485,7 +488,7 @@ volume_child_req_ptr Volume::create_vol_child_req(BlkId& bid, volume_req* vreq, 
 
     if (!vreq->is_sync()) { vreq->outstanding_io_cnt.increment(1); }
     ++vreq->vc_req_cnt;
-    THIS_VOL_LOG(TRACE, volume, vc_req->parent_req, "alloc_blk: bid: {}, offset: {}, nblks: {}", bid.to_string(),
+    THIS_VOL_LOG(TRACE, volume, vc_req->parent_req, "Blks to io: bid: {}, offset: {}, nblks: {}", bid.to_string(),
                  bid.data_size(HomeBlks::instance()->get_data_pagesz()), vc_req->nblks);
     return vc_req;
 }
@@ -494,18 +497,16 @@ void Volume::print_tree() { m_indx_mgr->get_active_indx()->print_tree(); }
 bool Volume::verify_tree() { return (m_indx_mgr->get_active_indx()->verify_tree()); }
 void Volume::print_node(uint64_t blkid) { m_indx_mgr->get_active_indx()->print_node(blkid); }
 
-std::error_condition Volume::alloc_blk(volume_req* vreq, std::vector< BlkId >& bid) {
+std::error_condition Volume::alloc_blk(const volume_req_ptr& vreq, std::vector< BlkId >& bid) {
     blk_alloc_hints hints;
     hints.desired_temp = 0;
     hints.dev_id_hint = -1;
     hints.multiplier = (get_page_size() / m_hb->get_data_pagesz());
 
-    THIS_VOL_LOG(TRACE, volume, vreq, "write: lba={}, nlbas={}", vreq->lba(), vreq->nblks());
     try {
         BlkAllocStatus status = m_hb->get_data_blkstore()->alloc_blk(vreq->nblks() * get_page_size(), hints, bid);
         if (status != BLK_ALLOC_SUCCESS) {
             LOGERROR("failing IO as it is out of disk space");
-            check_and_complete_req(vreq, std::make_error_condition(std::errc::no_space_on_device));
             return std::errc::no_space_on_device;
         }
         assert(status == BLK_ALLOC_SUCCESS);
@@ -515,6 +516,7 @@ std::error_condition Volume::alloc_blk(volume_req* vreq, std::vector< BlkId >& b
         VOL_LOG_ASSERT(0, vreq, "Exception: {}", e.what());
         return std::errc::device_or_resource_busy;
     }
+
     return no_error;
 }
 
@@ -551,16 +553,17 @@ bool Volume::fix_mapping_btree(bool verify) {
     return false;
 }
 
-void Volume::volume_req_done(volume_req* vreq) {
-    auto iface_req = vreq->iface_req;
-    vreq->iface_req = nullptr; // Detach volume req out of interface req (break dependency cycle)
-
+void Volume::interface_req_done(const vol_interface_req_ptr& iface_req) {
     if (std::holds_alternative< io_batch_comp_callback >(m_comp_cb)) {
-        m_completed_reqs->emplace_back(iface_req);
+        m_completed_reqs->push_back(iface_req);
         if (m_completed_reqs->size() == 1) {
             // Also add this volume to global list to batch multiple volume responses in the protocol layer
-            HomeBlks::s_io_completed_volumes.push_back(shared_from_this());
+            if (HomeBlks::s_io_completed_volumes == nullptr) {
+                HomeBlks::s_io_completed_volumes = sisl::VectorPool< std::shared_ptr< Volume > >::alloc();
+            }
+            HomeBlks::s_io_completed_volumes->push_back(shared_from_this());
         }
+        THIS_VOL_LOG(TRACE, volume, iface_req, "Added to completed req, its size now = {}", m_completed_reqs->size());
     } else if (std::holds_alternative< io_single_comp_callback >(m_comp_cb)) {
         (std::get< io_single_comp_callback >(m_comp_cb))(iface_req);
     } else {
@@ -572,8 +575,12 @@ size_t Volume::call_batch_completion_cbs() {
     auto count = 0u;
     if (std::holds_alternative< io_batch_comp_callback >(m_comp_cb)) {
         count = m_completed_reqs->size();
-        if (count) (std::get< io_batch_comp_callback >(m_comp_cb))(*m_completed_reqs);
-        m_completed_reqs->clear();
+        LOGINFO("Calling batch completion for {} reqs", count);
+        if (count) {
+            auto comp_reqs = m_completed_reqs->swap();
+            (std::get< io_batch_comp_callback >(m_comp_cb))(*comp_reqs);
+            m_completed_reqs->drop(comp_reqs);
+        }
     }
     return count;
 }
@@ -587,7 +594,7 @@ void Volume::verify_pending_blks() { assert(m_read_blk_tracker->get_size() == 0)
 #endif
 
 vol_state Volume::set_state(vol_state state, bool persist) {
-    LOGINFO("volume {} state changed from {} to {}", get_name(), get_state(), state);
+    THIS_VOL_LOG(INFO, base, , "volume state changed from {} to {}", m_state, state);
     auto prev_state = m_state.exchange(state);
     if (prev_state == state) { return prev_state; }
     if (persist) { write_sb(); }

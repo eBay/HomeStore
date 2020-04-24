@@ -26,7 +26,7 @@ void Blk_Read_Tracker::insert(BlkId& bid) {
     THIS_VOL_LOG(TRACE, volume, , "Marked read pending Bid:{},{}", bid, inserted);
 }
 
-void Blk_Read_Tracker::safe_remove_blks(volume_req* vreq) {
+void Blk_Read_Tracker::safe_remove_blks(const volume_req_ptr& vreq) {
     if (vreq->is_read_op()) {
         for (uint32_t i = 0; i < vreq->fbe_list.size(); ++i) {
             safe_remove_blk_on_read(vreq->fbe_list[i]);

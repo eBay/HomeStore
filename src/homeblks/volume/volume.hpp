@@ -19,6 +19,7 @@
 #include "snapshot.hpp"
 #include "indx_mgr.hpp"
 #include <utility/enum.hpp>
+#include <fds/vector_pool.hpp>
 
 using namespace std;
 
@@ -73,7 +74,7 @@ struct volume_child_req : public blkstore_req< BlkBuffer > {
      * break the ios update in mapping btree depending on the key range.
      */
     std::atomic< int > num_mapping_update = 0;
-    volume_req* parent_req = nullptr;
+    volume_req_ptr parent_req = nullptr;
     BlkId blkId; // used only for debugging purpose
 
 #ifndef NDEBUG
@@ -203,6 +204,25 @@ struct vol_sb_hdr {
     /* add snapshot superblock */
 };
 
+/* A simple self contained wrapper for completion list, which uses vector pool to avoid additional allocations */
+struct vol_completion_req_list {
+    vol_completion_req_list() { m_cur = sisl::VectorPool< vol_interface_req_ptr >::alloc(); }
+    ~vol_completion_req_list() { sisl::VectorPool< vol_interface_req_ptr >::free(m_cur); }
+
+    void push_back(const vol_interface_req_ptr& req) { m_cur->push_back(req); }
+    size_t size() const { return m_cur->size(); }
+    std::vector< vol_interface_req_ptr >* swap() {
+        auto ret = m_cur;
+        m_cur = sisl::VectorPool< vol_interface_req_ptr >::alloc();
+        return ret;
+    }
+
+    void drop(std::vector< vol_interface_req_ptr >* v) { sisl::VectorPool< vol_interface_req_ptr >::free(v); }
+
+private:
+    std::vector< vol_interface_req_ptr >* m_cur = nullptr;
+};
+
 class Volume : public std::enable_shared_from_this< Volume > {
 private:
     vol_params m_params;
@@ -234,15 +254,15 @@ private:
     static std::atomic< uint64_t > home_blks_ref_cnt;
 
     // Per thread buffer which holds the completed reqs which will be batched before making batch callback
-    sisl::ActiveOnlyThreadBuffer< std::vector< vol_interface_req_ptr > > m_completed_reqs;
+    sisl::ActiveOnlyThreadBuffer< vol_completion_req_list > m_completed_reqs;
 
 private:
     Volume(const vol_params& params);
     Volume(vol_sb_hdr& sb);
     void alloc_single_block_in_mem();
-    void check_and_complete_req(volume_req* vreq, const std::error_condition& err);
+    bool check_and_complete_req(const volume_req_ptr& vreq, const std::error_condition& err);
 
-    volume_child_req_ptr create_vol_child_req(BlkId& bid, volume_req* vreq, uint32_t start_lba, int nblks);
+    volume_child_req_ptr create_vol_child_req(BlkId& bid, const volume_req_ptr& vreq, uint32_t start_lba, int nblks);
 
     template < typename... Args >
     void assert_formatter(fmt::memory_buffer& buf, const char* msg, const std::string& req_str, const Args&... args) {
@@ -263,7 +283,7 @@ private:
     void alloc_blk_callback(struct BlkId bid, size_t offset_size, size_t size);
     // async call to start the multi-threaded work.
     void get_allocated_blks();
-    void process_indx_completions(volume_req* vreq, std::error_condition err);
+    void process_indx_completions(const volume_req_ptr& vreq, std::error_condition err);
     void process_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
 
     // callback from mapping layer for free leaf node(data blks) so that volume
@@ -271,10 +291,11 @@ private:
     void process_free_blk_callback(Free_Blk_Entry fbe);
 
     void pending_read_blk_cb(volume_req* vreq, BlkId& bid);
-    std::error_condition alloc_blk(volume_req* vreq, std::vector< BlkId >& bid);
-    void verify_csum(volume_req* vreq);
-    std::error_condition read_indx(volume_req* vreq, std::vector< std::pair< MappingKey, MappingValue > >& kvs);
-    void interface_req_done(const vol_interface_req_ptr& vreq);
+    std::error_condition alloc_blk(const volume_req_ptr& vreq, std::vector< BlkId >& bid);
+    void verify_csum(const volume_req_ptr& vreq);
+    std::error_condition read_indx(const volume_req_ptr& vreq,
+                                   std::vector< std::pair< MappingKey, MappingValue > >& kvs);
+    void interface_req_done(const vol_interface_req_ptr& iface_req);
 
     void recovery_start();
     uint64_t get_elapsed_time(Clock::time_point startTime);
@@ -287,7 +308,7 @@ private:
     }
     void write_sb();
     void remove_sb();
-    void try_shutdown_destroy();
+    void shutdown_if_needed();
     void destroy_internal();
 
 public:
@@ -407,7 +428,6 @@ public:
      */
     bool is_offline();
 
-    void volume_req_done(volume_req* vreq);
     size_t call_batch_completion_cbs();
 
     /* Update a new cp of this volume.
@@ -447,18 +467,24 @@ public:
 /* Note :- Any member inside this structure is not lock protected. Its caller responsibility to call it under lock
  * or make sure it is single threaded.
  */
+typedef boost::intrusive_ptr< volume_req > volume_req_ptr;
+
+ENUM(volume_req_state, uint8_t, preparing, data_io, journal_io, completed);
+
 struct volume_req {
+    /********** generic counters **********/
     vol_interface_req_ptr iface_req; // Corresponding Interface API request which has all the details about requests
+    sisl::atomic_counter< int > ref_count = 1;            // Initialize the count
+    volume_req_state state = volume_req_state::preparing; // State of the volume request
 
     /********** members used to write data blocks **********/
-    Clock::time_point io_start_time;                // start time
-    boost::intrusive_ptr< homeds::MemVector > mvec; // data
-    sisl::atomic_counter< int > outstanding_io_cnt; // how many IOs are outstanding for this request
-    int vc_req_cnt = 0;                             // how many child requests are issued.
+    Clock::time_point io_start_time;                    // start time
+    boost::intrusive_ptr< homeds::MemVector > mvec;     // data
+    sisl::atomic_counter< int > outstanding_io_cnt = 1; // how many IOs are outstanding for this request
+    int vc_req_cnt = 0;                                 // how many child requests are issued.
 
     /********** members used by indx mgr **********/
     indx_cp_id* cp_id = nullptr; // checkpoint ID of this request is part of
-    bool index_updated = false;  // if index is alrady updated
     Clock::time_point indx_start_time;
     uint64_t lastCommited_seqId = INVALID_SEQ_ID;
     uint64_t seqId = INVALID_SEQ_ID;
@@ -471,28 +497,10 @@ struct volume_req {
     std::vector< BlkId > alloc_blkid_list;
     std::vector< Free_Blk_Entry > fbe_list;
 
-    /********** Constructor/Destructor **********/
-    // volume_req() : csum_list(0), alloc_blkid_list(0), fbe_list(0){};
-    volume_req(const vol_interface_req_ptr& vi_req) :
-            iface_req(vi_req), // We explicitly create cyclic dependency to maintain lifecycle correctly
-            io_start_time(Clock::now()),
-            mvec(new homeds::MemVector()),
-            outstanding_io_cnt(1),
-            indx_start_lba(vi_req->lba),
-            csum_list(0),
-            alloc_blkid_list(0),
-            fbe_list(0) {
-        assert((vi_req->vol_instance->get_page_size() * vi_req->nblks) <= VOL_MAX_IO_SIZE);
-        if (!vi_req->is_read) {
-            mvec->set((uint8_t*)vi_req->write_buf, vi_req->vol_instance->get_page_size() * vi_req->nblks, 0);
-        }
+    static volume_req_ptr make(const vol_interface_req_ptr& iface_req) {
+        return volume_req_ptr(sisl::ObjectAllocator< volume_req >::make_object(iface_req), false);
+    }
 
-        /* Trying to reserve the max possible size so that memory allocation is efficient */
-        csum_list.reserve(VOL_MAX_IO_SIZE / vi_req->vol_instance->get_page_size());
-        fbe_list.reserve(VOL_MAX_IO_SIZE / vi_req->vol_instance->get_page_size());
-        alloc_blkid_list.reserve(VOL_MAX_IO_SIZE / vi_req->vol_instance->get_page_size());
-        seqId = vi_req->vol_instance->inc_and_get_seq_id();
-    };
     virtual ~volume_req() = default;
 
     /********** member functions **********/
@@ -522,6 +530,40 @@ struct volume_req {
 
     /* push fbe to the existing list */
     void push_fbe(Free_Blk_Entry& fbe) { fbe_list.push_back(fbe); }
+
+    void inc_ref() { intrusive_ptr_add_ref(this); }
+
+    friend void intrusive_ptr_add_ref(volume_req* req) { req->ref_count.increment(1); }
+
+    friend void intrusive_ptr_release(volume_req* req) {
+        if (req->ref_count.decrement_testz(1)) { sisl::ObjectAllocator< volume_req >::deallocate(req); }
+    }
+
+    friend class sisl::ObjectAllocator< volume_req >;
+
+private:
+    /********** Constructor/Destructor **********/
+    // volume_req() : csum_list(0), alloc_blkid_list(0), fbe_list(0){};
+    volume_req(const vol_interface_req_ptr& vi_req) :
+            iface_req(vi_req),
+            io_start_time(Clock::now()),
+            mvec(new homeds::MemVector()),
+            request_id(vi_req->request_id),
+            indx_start_lba(vi_req->lba),
+            csum_list(0),
+            alloc_blkid_list(0),
+            fbe_list(0) {
+        assert((vi_req->vol_instance->get_page_size() * vi_req->nblks) <= VOL_MAX_IO_SIZE);
+        if (!vi_req->is_read) {
+            mvec->set((uint8_t*)vi_req->write_buf, vi_req->vol_instance->get_page_size() * vi_req->nblks, 0);
+        }
+
+        /* Trying to reserve the max possible size so that memory allocation is efficient */
+        csum_list.reserve(VOL_MAX_IO_SIZE / vi_req->vol_instance->get_page_size());
+        fbe_list.reserve(VOL_MAX_IO_SIZE / vi_req->vol_instance->get_page_size());
+        alloc_blkid_list.reserve(VOL_MAX_IO_SIZE / vi_req->vol_instance->get_page_size());
+        seqId = vi_req->vol_instance->inc_and_get_seq_id();
+    }
 };
 
 #define NUM_BLKS_PER_THREAD_TO_QUERY 10000ull

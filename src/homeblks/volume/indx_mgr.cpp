@@ -40,6 +40,11 @@ sisl::blob vol_journal_entry::create_journal_entry(volume_req* v_req) {
         fbe[i] = v_req->fbe_list[i];
     }
     sisl::blob data((uint8_t*)m_mem, size);
+
+    HS_SUBMOD_LOG(TRACE, volume, v_req, "vol", v_req->vol()->get_name(),
+                  "Write to journal size={} lsn={}, journal_hdr:[{}], n_ids={}, n_csum={}, n_fbes={}", size,
+                  v_req->seqId, to_string(), v_req->alloc_blkid_list.size(), v_req->csum_list.size(),
+                  v_req->fbe_list.size());
     return data;
 }
 
@@ -230,8 +235,11 @@ mapping* IndxMgr::get_active_indx() { return m_active_map; }
 
 void IndxMgr::journal_comp_cb(logstore_seq_num_t seq_num, logdev_key ld_key, void* req) {
     assert(ld_key.is_valid());
-    auto vreq = (volume_req*)req;
+    auto vreq = volume_req_ptr((volume_req*)req, false); // Turn it back to smart ptr before doing callback.
     uint64_t lba_written = vreq->indx_start_lba - vreq->lba();
+
+    HS_SUBMOD_LOG(TRACE, volume, vreq, "vol", vreq->vol()->get_name(),
+                  "Journal write done, lsn={}, log_key=[idx={}, offset={}]", seq_num, ld_key.idx, ld_key.dev_offset);
 
     if (lba_written == vreq->nblks()) {
         m_io_cb(vreq, no_error);
@@ -302,14 +310,16 @@ btree_status_t IndxMgr::update_indx_tbl(volume_req* vreq) {
     return btree_status_t::success;
 }
 
-void IndxMgr::update_indx(volume_req* vreq) {
+void IndxMgr::update_indx(const volume_req_ptr& vreq) {
     int retry_cnt = 0;
+    vreq->inc_ref();
+
 retry:
     /* Entered into critical section. CP is not triggered in this critical section */
     vreq->cp_id = m_cp->cp_io_enter();
 
     /* update active btree */
-    auto ret = update_indx_tbl(vreq);
+    auto ret = update_indx_tbl(vreq.get());
     if (ret == btree_status_t::cp_id_mismatch) {
         m_cp->cp_io_exit(vreq->cp_id);
         assert(!retry_cnt);
@@ -319,7 +329,7 @@ retry:
 
     /* In case of failure we will still update the journal with entries of whatever is written. */
     /* update journal. Journal writes are not expected to fail */
-    journal_write(vreq);
+    journal_write(vreq.get());
 }
 
 btree_cp_id_ptr IndxMgr::get_btree_id(indx_cp_id* cp_id) {

@@ -141,7 +141,7 @@ public:
 
     virtual string to_string() const override {
         stringstream ss;
-        ss << "lba_st = " << start() << ", lba_end = " << (start() + get_n_lba() - 1);
+        ss << "[" << start() << " - " << (start() + get_n_lba() - 1) << "]";
         return ss.str();
     }
 
@@ -1000,9 +1000,6 @@ private:
 #ifndef NDEBUG
         stringstream ss;
         /* For map load test vol instance is null */
-        if (param->m_req && param->m_req->vol()) {
-            ss << "vol_uuid:" << boost::uuids::to_string(param->m_req->vol()->get_uuid());
-        }
         ss << ",Lba:" << param->m_req->lba() << ",nblks:" << param->m_req->nblks() << ",seqId:" << param->m_req->seqId
            << ",last_seqId:" << param->m_req->lastCommited_seqId;
         ss << ",is:" << ((MappingKey*)param->get_input_range().get_start_key())->to_string();
@@ -1010,8 +1007,9 @@ private:
         ss << ",ss:" << ((MappingKey*)param->get_sub_range().get_start_key())->to_string();
         ss << ",se:" << ((MappingKey*)param->get_sub_range().get_end_key())->to_string();
         ss << ",match_kv:";
-        for (auto& ptr : match_kv)
+        for (auto& ptr : match_kv) {
             ss << ptr.first.to_string() << "," << ptr.second.to_string();
+        }
 #endif
 
         for (auto i = 0u; i < match_kv.size(); i++) {
@@ -1047,9 +1045,10 @@ private:
         }
 #ifndef NDEBUG
         ss << ",result_kv:";
-        for (auto& ptr : result_kv)
+        for (auto& ptr : result_kv) {
             ss << ptr.first.to_string() << "," << ptr.second.to_string();
-        HS_SUBMOD_LOG(TRACE, volume, , "vol", m_unique_name, "Get_CB: {} ", ss.str());
+        }
+        HS_SUBMOD_LOG(TRACE, volume, param->m_req, "vol", m_unique_name, "Get_CB: {} ", ss.str());
 #endif
     }
 
@@ -1094,8 +1093,7 @@ private:
 #ifndef NDEBUG
         stringstream ss;
         if (param->m_req && param->m_req->vol()) {
-            ss << "vol_uuid:" << boost::uuids::to_string(param->m_req->vol()->get_uuid());
-            ss << ",Lba:" << param->m_req->lba() << ",nblks:" << param->m_req->nblks()
+            ss << "Lba:" << param->m_req->lba() << ",nblks:" << param->m_req->nblks()
                << ",seqId:" << param->m_req->seqId << ",last_seqId:" << param->m_req->lastCommited_seqId
                << ",is_mod:" << param->is_state_modifiable();
         }
@@ -1104,8 +1102,9 @@ private:
         ss << ",ss:" << ((MappingKey*)param->get_sub_range().get_start_key())->to_string();
         ss << ",se:" << ((MappingKey*)param->get_sub_range().get_end_key())->to_string();
         ss << ",match_kv:";
-        for (auto& ptr : match_kv)
+        for (auto& ptr : match_kv) {
             ss << ptr.first.to_string() << "," << ptr.second.to_string();
+        }
 #endif
         /* We don't change BLKID in value. Instead we store offset of lba range that we are storing */
         uint32_t initial_val_offset = compute_val_offset(cb_param, start_lba);
@@ -1235,7 +1234,7 @@ private:
         for (auto& ptr : replace_kv) {
             ss << ptr.first.to_string() << "," << ptr.second.to_string();
         }
-        LOGDEBUGMOD(volume, "{}", ss.str());
+        HS_SUBMOD_LOG(TRACE, volume, param->m_req, "vol", m_unique_name, "{}", ss.str());
 #endif
     }
 
