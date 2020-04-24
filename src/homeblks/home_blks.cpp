@@ -80,6 +80,9 @@ void HomeBlks::attach_prepare_volume_cp_id(std::map< boost::uuids::uuid, vol_cp_
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
 
 #ifndef NDEBUG
+    /* If a volume is participated in a cp then it can not be deleted without participating
+     * in a cp flush.
+     */
     if (cur_id_map) {
         for (auto it = cur_id_map->cbegin(); it != cur_id_map->cend(); ++it) {
             assert(m_volume_map.find(it->first) != m_volume_map.cend());
@@ -95,7 +98,10 @@ void HomeBlks::attach_prepare_volume_cp_id(std::map< boost::uuids::uuid, vol_cp_
         vol_cp_id_ptr cur_cp_id_ptr = nullptr;
         if (cur_id_map) {
             auto id_it = cur_id_map->find(it->first);
-            cur_cp_id_ptr = id_it->second;
+            if (id_it != cur_id_map->end()) {
+                /* It is a new volume which is created after this cp */
+                cur_cp_id_ptr = id_it->second;
+            }
         }
 
         /* get the cur cp id ptr */
