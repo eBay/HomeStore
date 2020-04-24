@@ -1,3 +1,4 @@
+
 #pragma once
 #include <cassert>
 #include "engine/checkpoint/checkpoint.hpp"
@@ -6,7 +7,7 @@
 #include "homeblks/home_blks.hpp"
 #include <wisr/wisr_ds.hpp>
 
-namespace homestore {
+    namespace homestore {
 struct volume_req;
 typedef boost::intrusive_ptr< volume_req > volume_req_ptr;
 class mapping;
@@ -144,6 +145,7 @@ private:
     vol_cp_id_ptr get_volume_id(indx_cp_id* cp_id);
     void destroy_indx_tbl(btree_cp_id_ptr btree_id);
     void add_prepare_cb_list(prepare_cb cb);
+    void volume_destroy_cp(vol_cp_id_ptr cur_vol_id, indx_cp_id* home_blks_id);
 
 private:
     /*********************** static private members **********************/
@@ -239,6 +241,7 @@ public:
     static void trigger_vol_cp();
 
     /* reinitialize indx mgr. It is used in fake reboot */
-    static void reinit() { init(); }
+    static void reinit() { m_shutdown_started.store(false); }
+    static int get_thread_num() { return m_thread_num; }
 };
 } // namespace homestore

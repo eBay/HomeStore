@@ -647,7 +647,10 @@ public:
     uint64_t get_used_size() { return m_bt->get_used_size(); }
     MappingBtreeDeclType::btree_super_block get_btree_sb() { return (m_bt->get_btree_sb()); }
 
-    btree_cp_id_ptr attach_prepare_cp(btree_cp_id_ptr cur_cp_id) { return (m_bt->attach_prepare_cp(cur_cp_id)); }
+    /* It attaches the new CP and prepare for cur cp flush */
+    btree_cp_id_ptr attach_prepare_cp(btree_cp_id_ptr cur_cp_id, bool is_last_cp) {
+        return (m_bt->attach_prepare_cp(cur_cp_id, is_last_cp));
+    }
 
     void cp_start(btree_cp_id_ptr cp_id, cp_comp_callback cb) { m_bt->cp_start(cp_id, cb); }
 
