@@ -153,6 +153,7 @@ private:
     static std::atomic< bool > m_shutdown_started;
     static bool m_shutdown_cmplt;
     static int m_thread_num;
+    static iomgr::timer_handle_t m_system_cp_timer_hdl;
 
     static void init();
     static void write_superblock();
@@ -241,7 +242,7 @@ public:
     static void trigger_vol_cp();
 
     /* reinitialize indx mgr. It is used in fake reboot */
-    static void reinit() { m_shutdown_started.store(false); }
+    static void reinit() { init(); }
     static int get_thread_num() { return m_thread_num; }
 };
 } // namespace homestore

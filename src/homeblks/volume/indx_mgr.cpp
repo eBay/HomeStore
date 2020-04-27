@@ -162,7 +162,14 @@ IndxMgr::IndxMgr(std::shared_ptr< Volume > vol, indx_mgr_active_sb* sb, io_done_
                  pending_read_blk_cb read_blk_cb) :
         m_io_cb(io_cb), m_pending_read_blk_cb(read_blk_cb), m_first_cp_id(new vol_cp_id()), prepare_cb_list(4) {}
 
-IndxMgr::~IndxMgr() { delete m_active_map; }
+IndxMgr::~IndxMgr() {
+    delete m_active_map;
+
+    if (m_shutdown_started) {
+        static std::once_flag flag1;
+        std::call_once(flag1, [this]() { iomanager.cancel_timer(m_system_cp_timer_hdl, false); });
+    }
+}
 
 indx_mgr_active_sb IndxMgr::get_active_sb() {
     indx_mgr_active_sb sb;
@@ -181,6 +188,10 @@ void IndxMgr::init() {
         LOGINFO("{} thread exit", m_thread_num);
     });
     sthread.detach();
+
+    /* start the timer for bitmap checkpoint */
+    m_system_cp_timer_hdl = iomanager.schedule_timer(60 * 1000 * 1000 * 1000ul, true, nullptr, false,
+                                                     [](void* cookie) { trigger_system_cp(nullptr, false); });
 }
 
 void IndxMgr::attach_prepare_vol_cp_id_list(std::map< boost::uuids::uuid, vol_cp_id_ptr >* cur_vols_id,
@@ -441,7 +452,6 @@ void IndxMgr::destroy(indxmgr_stop_cb cb) {
                                     auto run_method = sisl::ObjectAllocator< run_method_t >::make_object();
                                     *run_method = ([this, btree_id]() { this->destroy_indx_tbl(btree_id); });
                                     io_msg.m_data_buf = (void*)run_method;
-                                    LOGINFO("sending message");
                                     iomanager.send_msg(m_thread_num, io_msg);
                                 }));
                             }));
@@ -492,3 +502,4 @@ void IndxMgr::destroy_done() {
 std::unique_ptr< IndxCP > IndxMgr::m_cp;
 std::atomic< bool > IndxMgr::m_shutdown_started;
 int IndxMgr::m_thread_num;
+iomgr::timer_handle_t IndxMgr::m_system_cp_timer_hdl = iomgr::null_timer_handle;
