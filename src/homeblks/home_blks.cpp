@@ -106,6 +106,7 @@ void HomeBlks::attach_prepare_volume_cp_id(std::map< boost::uuids::uuid, vol_cp_
         vol_cp_id_ptr cur_cp_id_ptr = nullptr;
         if (cur_id_map) {
             auto id_it = cur_id_map->find(it->first);
+            if (id_it == cur_id_map->end()) { continue; }
             cur_cp_id_ptr = id_it->second;
         }
 
@@ -698,12 +699,19 @@ bool HomeBlks::fix_tree(VolumePtr vol, bool verify) {
 
 void HomeBlks::call_multi_vol_completions() {
     auto v_comp_events = 0;
-    auto comp_vols = s_io_completed_volumes;
-    s_io_completed_volumes = nullptr;
 
-    for (auto& v : *comp_vols) {
-        v_comp_events += v->call_batch_completion_cbs();
+    if (s_io_completed_volumes) {
+        auto comp_vols = s_io_completed_volumes;
+        s_io_completed_volumes = nullptr;
+
+        for (auto& v : *comp_vols) {
+            v_comp_events += v->call_batch_completion_cbs();
+        }
+        sisl::VectorPool< std::shared_ptr< Volume > >::free(comp_vols);
+        if (m_cfg.end_of_batch_cb && v_comp_events) {
+            LOGTRACE("Total completions across all volumes in the batch = {}. Calling end of batch callback",
+                     v_comp_events);
+            m_cfg.end_of_batch_cb(v_comp_events);
+        }
     }
-    sisl::VectorPool< std::shared_ptr< Volume > >::free(comp_vols);
-    if (m_cfg.end_of_batch_cb && v_comp_events) m_cfg.end_of_batch_cb(v_comp_events);
 }

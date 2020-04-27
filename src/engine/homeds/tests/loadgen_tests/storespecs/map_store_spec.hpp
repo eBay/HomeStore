@@ -54,7 +54,7 @@ public:
     /* Map put always appends if exists, no feature to force udpate/insert and return error */
     virtual bool update(K& k, std::shared_ptr< V > v) override {
         auto iface_req = vol_interface_req_ptr(new vol_interface_req(nullptr, k.start(), k.get_n_lba()));
-        auto req = std::make_unique< volume_req >(iface_req);
+        auto req = volume_req::make(iface_req);
         ValueEntry ve;
         v->get_array().get(0, ve, false);
         req->seqId = ve.get_seqId();
@@ -94,7 +94,7 @@ public:
         auto nblks = end_key.end() - lba + 1;
         if (!end_incl) { --nblks; }
         auto iface_req = vol_interface_req_ptr(new vol_interface_req(nullptr, lba, nblks));
-        auto volreq = std::make_unique< volume_req >(iface_req);
+        auto volreq = volume_req::make(iface_req);
 
         volreq->seqId = INVALID_SEQ_ID;
         volreq->lastCommited_seqId = INVALID_SEQ_ID; // read only latest value
@@ -138,7 +138,7 @@ public:
         auto lba = start_key.start();
         auto nblks = end_key.end() - lba + 1;
         auto iface_req = vol_interface_req_ptr(new vol_interface_req(nullptr, lba, nblks));
-        auto req = std::make_unique< volume_req >(iface_req);
+        auto req = volume_req::make(iface_req);
 
         V& start_value = *(result[0].get());
         V& end_value = *(result.back());
