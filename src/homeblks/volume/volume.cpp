@@ -8,6 +8,7 @@
 #include <fstream>
 #include <atomic>
 #include <fds/utils.hpp>
+#include "homeblks/meta/meta_blks_mgr.hpp"
 
 using namespace std;
 using namespace homestore;
@@ -591,3 +592,8 @@ void Volume::remove_sb() { /* TODO: remove super block */
 }
 
 mapping* Volume::get_mapping_handle() { return (m_indx_mgr->get_active_indx()); }
+
+void Volume::migrate_sb() {
+    // auto inst = MetaBlkMgr::instance();
+    // inst->add_sub_sb(meta_sub_type::VOLUME, (void*)(m_sb->ondisk_sb), sizeof(vol_ondisk_sb), &(m_sb->cookie));
+}

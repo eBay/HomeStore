@@ -55,6 +55,7 @@ set(HOMESTORE_OBJECTS
         $<TARGET_OBJECTS:hs_device>
         $<TARGET_OBJECTS:hs_blkalloc>
         $<TARGET_OBJECTS:hs_logdev>
+        $<TARGET_OBJECTS:hs_metablk>
         )
 add_library(homestore STATIC ${HOMESTORE_OBJECTS})
 target_link_libraries(homestore ${COMMON_LIB_DEPS})

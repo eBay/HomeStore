@@ -222,6 +222,7 @@ public:
 
 protected:
     void process_vdev_error(vdev_info_block* vb) override;
+    void metablk_init(sb_blkstore_blob* blob, bool init) override;
 
 private:
     HomeBlks(const init_params& cfg);
@@ -239,6 +240,12 @@ private:
     void schedule_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool force);
     void do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool force);
     blk_buf_t get_valid_buf(const std::vector< blk_buf_t >& bbuf, bool& rewrite);
+
+    void migrate_sb();
+    void migrate_homeblk_sb();
+    void migrate_volume_sb();
+    void migrate_logstore_sb();
+    void migrate_cp_sb();
 
 private:
     static HomeBlksSafePtr _instance;

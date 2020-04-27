@@ -12,6 +12,7 @@
 #include <boost/uuid/uuid_io.hpp>
 #include <homelogstore/log_store.hpp>
 #include <map>
+#include "meta/meta_blks_mgr.hpp"
 
 SDS_OPTION_GROUP(home_blks,
                  (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
@@ -359,6 +360,14 @@ void HomeBlks::init_thread() {
         m_http_server->start();
 
         /* TODO :- start recovery_mgr recovery with callback */
+#if 0
+        // non-disruptive upgrade handling
+        if (MetaBlkMgr::instance()->migrated() == false)  {
+            // need to call migrate after scan_volumes because volume migration needs m_volume_map;
+            migrate_sb();
+            // TODO: delete old sb blkstore (scan_volumes read nothing from next boot);
+        }
+#endif
     } catch (const std::exception& e) {
         LOGERROR("{}", e.what());
         error = std::make_error_condition(std::errc::io_error);
@@ -670,4 +679,37 @@ vol_state HomeBlks::get_state(VolumePtr vol) { return vol->get_state(); }
 bool HomeBlks::fix_tree(VolumePtr vol, bool verify) {
     std::unique_lock< std::recursive_mutex > lg(m_vol_lock);
     return vol->fix_mapping_btree(verify);
+}
+
+void HomeBlks::metablk_init(sb_blkstore_blob* blob, bool init) {
+    MetaBlkMgr::init(m_meta_blk_store.get(), blob, &m_cfg, init);
+}
+
+void HomeBlks::migrate_sb() {
+    migrate_homeblk_sb();
+    migrate_volume_sb();
+    migrate_logstore_sb();
+    migrate_cp_sb();
+            
+    MetaBlkMgr::instance()->set_migrated();
+}
+
+void HomeBlks::migrate_logstore_sb() { }
+void HomeBlks::migrate_cp_sb() {}
+
+void HomeBlks::migrate_homeblk_sb() {
+    std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
+    auto inst = MetaBlkMgr::instance();
+    void* cookie = nullptr;
+    inst->add_sub_sb(meta_sub_type::HOMEBLK, (void*) m_homeblks_sb.get(), sizeof(homeblks_sb), cookie);
+}
+
+void HomeBlks::migrate_volume_sb() {
+    std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
+    auto inst = MetaBlkMgr::instance();
+    void* cookie = nullptr;
+    for (auto it = m_volume_map.cbegin(); it != m_volume_map.end(); it++) {
+        auto vol = it->second;
+        vol->migrate_sb();
+    }
 }

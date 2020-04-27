@@ -433,6 +433,11 @@ public:
     }
 
     void truncate(vol_cp_id_ptr vol_id) { m_indx_mgr->truncate(vol_id); }
+
+    /**
+     * @brief 
+     */
+    void migrate_sb(); 
 };
 
 /* Note :- Any member inside this structure is not lock protected. Its caller responsibility to call it under lock

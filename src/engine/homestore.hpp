@@ -16,9 +16,11 @@ template < typename IndexBuffer >
 using index_blkstore_t = BlkStore< VdevFixedBlkAllocatorPolicy, IndexBuffer >;
 
 typedef BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy > logdev_blkstore_t;
+typedef BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy > meta_blkstore_t;
+
 typedef boost::intrusive_ptr< BlkBuffer > blk_buf_t;
 
-VENUM(blkstore_type, uint32_t, DATA_STORE = 1, INDEX_STORE = 2, SB_STORE = 3, LOGDEV_STORE = 4, );
+VENUM(blkstore_type, uint32_t, DATA_STORE = 1, INDEX_STORE = 2, SB_STORE = 3, LOGDEV_STORE = 4, META_STORE = 5);
 
 struct blkstore_blob {
     enum blkstore_type type;
@@ -93,6 +95,7 @@ public:
     index_blkstore_t< IndexBuffer >* get_index_blkstore() const { return m_index_blk_store.get(); }
     sb_blkstore_t* get_sb_blkstore() const { return m_sb_blk_store.get(); }
     logdev_blkstore_t* get_logdev_blkstore() const { return m_logdev_blk_store.get(); }
+    meta_blkstore_t* get_meta_blkstore() const { return m_meta_blk_store.get(); }
 
     uint32_t get_data_pagesz() const { return m_data_pagesz; }
     bool print_checksum() const { return m_print_checksum; }
@@ -112,6 +115,7 @@ public:
     }
 
 protected:
+    virtual void metablk_init(sb_blkstore_blob* blob, bool init) = 0;
     virtual data_blkstore_t::comp_callback data_completion_cb() = 0;
     virtual void process_vdev_error(vdev_info_block* vb) = 0;
 
@@ -129,6 +133,7 @@ protected:
             create_index_blkstore(nullptr);
             create_sb_blkstore(nullptr);
             create_logdev_blkstore(nullptr);
+            create_meta_blkstore(nullptr);
         }
     }
 
@@ -147,6 +152,9 @@ protected:
             break;
         case blkstore_type::LOGDEV_STORE:
             create_logdev_blkstore(vb);
+            break;
+        case blkstore_type::META_STORE:
+            create_meta_blkstore(vb);
             break;
         default:
             HS_ASSERT(LOGMSG, 0, "Unknown blkstore_type {}", blob->type);
@@ -241,6 +249,43 @@ protected:
         }
     }
 
+    void create_meta_blkstore(vdev_info_block* vb) {
+        if (vb == nullptr) {
+            struct blkstore_blob blob;
+            blob.type = blkstore_type::META_STORE;
+            uint64_t size = (1 * m_dev_mgr->get_total_cap()) / 100;
+            size = ALIGN_SIZE(size, HS_STATIC_CONFIG(disk_attr.phys_page_size));
+            m_meta_blk_store = std::make_unique< meta_blkstore_t >(
+                    m_dev_mgr.get(), m_cache.get(), size, PASS_THRU, 0, (char*)&blob, sizeof(blkstore_blob),
+                    HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size), "meta");
+
+            metablk_init(nullptr, true);
+        } else {
+            m_meta_blk_store = std::make_unique< meta_blkstore_t >(
+                    m_dev_mgr.get(), m_cache.get(), vb, PASS_THRU, 
+                    HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size),
+                    "meta", (vb->failed ? true : false));
+            if (vb->failed) {
+                m_vdev_failed = true;
+                LOGINFO("meta block store is in failed state");
+            }
+
+            /* get the blkid of homestore super block */
+            sb_blkstore_blob* blob = (sb_blkstore_blob*)(&(vb->context_data));
+            if (blob->blkid.to_integer() == BlkId::invalid_internal_id()) {
+                LOGINFO("init was failed last time. Should retry it with init flag");
+                throw homestore::homestore_exception("init was failed last time. Should retry it with init",
+                                                     homestore_error::init_failed);
+            }
+#if 0 
+            /* read and build the appln super block */
+            std::vector< blk_buf_t > bbuf =
+                m_meta_blk_store->read_nmirror(blob->blkid, HS_STATIC_CONFIG(input.devices).size() - 1);
+#endif        
+            metablk_init(blob, false);
+        }
+    }
+
     void create_logdev_blkstore(vdev_info_block* vb) {
         if (vb == nullptr) {
             struct blkstore_blob blob;
@@ -289,6 +334,7 @@ protected:
     std::unique_ptr< index_blkstore_t< IndexBuffer > > m_index_blk_store;
     std::unique_ptr< sb_blkstore_t > m_sb_blk_store;
     std::unique_ptr< logdev_blkstore_t > m_logdev_blk_store;
+    std::unique_ptr< meta_blkstore_t > m_meta_blk_store;
     std::unique_ptr< DeviceManager > m_dev_mgr;
     std::unique_ptr< Cache< BlkId > > m_cache;
 
