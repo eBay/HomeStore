@@ -585,7 +585,6 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
 
     /* XXX: can we move it to indx mgr */
     home_log_store_mgr.stop();
-    iomanager.stop_io_loop();
 
     if (m_shutdown_done_cb) m_shutdown_done_cb(true);
 
