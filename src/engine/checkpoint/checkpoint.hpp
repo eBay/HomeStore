@@ -49,8 +49,6 @@ struct cp_id_base {
     std::atomic< cp_status_t > cp_state = cp_status_t::cp_init;
     std::atomic< int > enter_cnt;
     bool cp_trigger_waiting = false; // it is waiting for previous cp to complete
-    bool is_last_cp =
-        false; // if true it means that it is the last CP. It will destroy the new CP once it is completed.
 
     cp_id_base() : enter_cnt(0){};
     std::string to_string() {
@@ -78,10 +76,7 @@ public:
 
     virtual ~CheckPoint() {
         auto cp_id = get_cur_cp_id();
-        if (cp_id) {
-            assert(cp_id->enter_cnt == 0);
-            delete (cp_id);
-        }
+        delete (cp_id);
     }
 
     /* Get current CP ID */
@@ -122,27 +117,15 @@ public:
      * thread and only once.
      */
     void cp_end(cp_id_type* id) {
-        bool is_last_cp = false;
         assert(in_cp_phase);
         HS_ASSERT_CMP(DEBUG, id->cp_state, ==, cp_status_t::cp_start);
         in_cp_phase = false;
         LOGDEBUGMOD(cp, "cp ID completed {}", id->to_string());
-        is_last_cp = id->is_last_cp;
         delete (id);
 
-        if (is_last_cp) {
-            LOGINFO("last cp of homestore is completed. No more cps will be taken now");
-            id = get_cur_cp_id(); // we will delete this CP so that it release any reference on volumes
-            assert(id->cp_trigger_waiting == false);
-            assert(id->enter_cnt == 0);
-            assert(!in_cp_phase);
-            delete (id);
-            rcu_xchg_pointer(&m_cur_cp_id, nullptr);
-        } else {
-            auto cur_cp_id = cp_io_enter();
-            if (cur_cp_id->cp_trigger_waiting) { trigger_cp(); }
-            cp_io_exit(cur_cp_id);
-        }
+        auto cur_cp_id = cp_io_enter();
+        if (cur_cp_id->cp_trigger_waiting) { trigger_cp(); }
+        cp_io_exit(cur_cp_id);
     }
 
     /* Trigger a checkpoint it is not in cp phase
@@ -172,9 +155,8 @@ public:
         cp_io_exit(prev_cp_id);
     }
 
-    void trigger_cp(cp_id_type* id, bool is_last_cp = false) {
+    void trigger_cp(cp_id_type* id) {
         id->cp_trigger_waiting = true;
-        if (!id->is_last_cp) { id->is_last_cp = is_last_cp; }
         assert(id->cp_state != cp_status_t::cp_start);
         trigger_cp();
     }

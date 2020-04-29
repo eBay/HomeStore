@@ -13,11 +13,12 @@ namespace homestore {
 /**
  * Sub system types and their priorities
  */
-enum class meta_sub_type { NOT_INIT_TYPE, HOMEBLK, VOLUME, SNAPSHOT, JOURNAL };
+enum class meta_sub_type { NOT_INIT_TYPE, HOMEBLK, VOLUME, INDX_MGR_CP, JOURNAL };
 
 typedef uint32_t crc32_t;
 
-constexpr std::initializer_list< meta_sub_type > sub_priority_list = { meta_sub_type::HOMEBLK, meta_sub_type::VOLUME, meta_sub_type::SNAPSHOT, meta_sub_type::JOURNAL };
+constexpr std::initializer_list< meta_sub_type > sub_priority_list = {
+    meta_sub_type::HOMEBLK, meta_sub_type::VOLUME, meta_sub_type::INDX_MGR_CP, meta_sub_type::JOURNAL};
 /**
  * Subsystem states
  */

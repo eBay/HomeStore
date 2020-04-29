@@ -499,6 +499,7 @@ public:
         return buf_list;
     }
 
+    void persist_blk_allocator_bitmap() { m_vdev.persist_blk_allocator_bitmap(); }
     void reset_vdev_failed_state() { m_vdev.reset_failed_state(); }
 
     uint64_t get_size() const { return m_vdev.get_size(); }

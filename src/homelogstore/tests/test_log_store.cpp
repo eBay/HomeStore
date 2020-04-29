@@ -195,7 +195,10 @@ public:
 
     void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthreads, uint32_t n_log_stores,
                          bool restart = false) {
-        if (restart) { shutdown(); }
+        if (restart) {
+            shutdown();
+            sleep(10);
+        }
 
         std::vector< dev_info > device_info;
         std::mutex start_mutex;
