@@ -1,3 +1,4 @@
+
 #pragma once
 #include <cassert>
 #include "engine/checkpoint/checkpoint.hpp"
@@ -6,7 +7,7 @@
 #include "homeblks/home_blks.hpp"
 #include <wisr/wisr_ds.hpp>
 
-namespace homestore {
+    namespace homestore {
 struct volume_req;
 class mapping;
 class Volume;
@@ -107,6 +108,13 @@ public:
     void bitmap_cp_done(indx_cp_id* id);
 };
 
+class IndxMgr;
+/* This message is used to delete indx tables in different thread */
+struct indxmgr_msg {
+    IndxMgr* object;
+    btree_cp_id_ptr btree_id;
+};
+
 /* This class is responsible to manage active index and snapshot indx table */
 class IndxMgr {
     typedef std::function< void(const boost::intrusive_ptr< volume_req >& vreq, std::error_condition err) > io_done_cb;
@@ -140,12 +148,15 @@ private:
     vol_cp_id_ptr get_volume_id(indx_cp_id* cp_id);
     void destroy_indx_tbl(btree_cp_id_ptr btree_id);
     void add_prepare_cb_list(prepare_cb cb);
+    void volume_destroy_cp(vol_cp_id_ptr cur_vol_id, indx_cp_id* home_blks_id);
 
 private:
     /*********************** static private members **********************/
     static std::unique_ptr< IndxCP > m_cp;
     static std::atomic< bool > m_shutdown_started;
     static bool m_shutdown_cmplt;
+    static int m_thread_num;
+    static iomgr::timer_handle_t m_system_cp_timer_hdl;
 
     static void init();
     static void write_superblock();
@@ -235,5 +246,6 @@ public:
 
     /* reinitialize indx mgr. It is used in fake reboot */
     static void reinit() { init(); }
+    static int get_thread_num() { return m_thread_num; }
 };
 } // namespace homestore

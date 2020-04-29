@@ -24,6 +24,7 @@ struct Param {
     uint64_t run_time;
     uint32_t per_read;
     uint32_t per_write;
+    uint32_t per_remove;
     bool fixed_wrt_sz_enabled;
     uint32_t fixed_wrt_sz;
     uint32_t min_wrt_sz;

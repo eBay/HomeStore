@@ -45,7 +45,7 @@ target_link_libraries(test_volume homeblks ${COMMON_LIB_DEPS})
 
 #target_link_libraries(test_volume ${CONAN_LIBS})
 
-#add_test(NAME TestVol COMMAND test_volume)
+add_test(NAME TestVol COMMAND test_volume)
 
 #add_test(NAME TestMapBtreeFix COMMAND test_volume --gtest_filter=*btree_fix_rerun_io* --max_num_writes=1000 --max_volume=10)
 #SET_TESTS_PROPERTIES(TestMapBtreeFix PROPERTIES DEPENDS TestVol)

@@ -58,21 +58,27 @@ public:
         cp_id->cb(cp_id);
     }
 
-    static btree_cp_id_ptr attach_prepare_cp(SSDBtreeStore* store, btree_cp_id_ptr cur_cp_id) {
-        return (store->attach_prepare_cp_store(cur_cp_id));
+    /* It attaches the new CP and prepare for cur cp flush */
+    static btree_cp_id_ptr attach_prepare_cp(SSDBtreeStore* store, btree_cp_id_ptr cur_cp_id, bool is_last_cp) {
+        return (store->attach_prepare_cp_store(cur_cp_id, is_last_cp));
     }
 
-    btree_cp_id_ptr attach_prepare_cp_store(btree_cp_id_ptr cur_cp_id) {
+    btree_cp_id_ptr attach_prepare_cp_store(btree_cp_id_ptr cur_cp_id, bool is_last_cp) {
         /* start with ref cnt = 1. We dec it when trigger is called */
-        btree_cp_id_ptr new_cp(new (btree_cp_id));
         if (cur_cp_id) {
             cur_cp_id->end_seq_id = m_journal->get_contiguous_issued_seq_num(cur_cp_id->start_seq_id);
             assert(cur_cp_id->end_seq_id >= cur_cp_id->start_seq_id);
-            new_cp->start_seq_id = cur_cp_id->end_seq_id;
-            new_cp->cp_cnt = cur_cp_id->cp_cnt + 1;
-        } else {
-            new_cp->start_seq_id = m_journal->get_contiguous_issued_seq_num(-1);
-            new_cp->cp_cnt = 1;
+        }
+        btree_cp_id_ptr new_cp(nullptr);
+        if (!is_last_cp) {
+            new_cp = btree_cp_id_ptr(new (btree_cp_id));
+            if (cur_cp_id) {
+                new_cp->start_seq_id = cur_cp_id->end_seq_id;
+                new_cp->cp_cnt = cur_cp_id->cp_cnt + 1;
+            } else {
+                new_cp->start_seq_id = m_journal->get_contiguous_issued_seq_num(-1);
+                new_cp->cp_cnt = 1;
+            }
         }
         m_wb_cache.prepare_cp(new_cp, cur_cp_id);
         return new_cp;

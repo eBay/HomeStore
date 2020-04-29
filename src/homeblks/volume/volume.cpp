@@ -8,6 +8,7 @@
 #include <fstream>
 #include <atomic>
 #include <fds/utils.hpp>
+#include "homeblks/meta/meta_blks_mgr.hpp"
 
 using namespace std;
 using namespace homestore;
@@ -575,7 +576,6 @@ size_t Volume::call_batch_completion_cbs() {
     auto count = 0u;
     if (std::holds_alternative< io_batch_comp_callback >(m_comp_cb)) {
         count = m_completed_reqs->size();
-        LOGINFO("Calling batch completion for {} reqs", count);
         if (count) {
             auto comp_reqs = m_completed_reqs->swap();
             (std::get< io_batch_comp_callback >(m_comp_cb))(*comp_reqs);
@@ -620,3 +620,8 @@ void Volume::remove_sb() { /* TODO: remove super block */
 }
 
 mapping* Volume::get_mapping_handle() { return (m_indx_mgr->get_active_indx()); }
+
+void Volume::migrate_sb() {
+    // auto inst = MetaBlkMgr::instance();
+    // inst->add_sub_sb(meta_sub_type::VOLUME, (void*)(m_sb->ondisk_sb), sizeof(vol_ondisk_sb), &(m_sb->cookie));
+}

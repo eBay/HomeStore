@@ -12,6 +12,7 @@
 #include <boost/uuid/uuid_io.hpp>
 #include <homelogstore/log_store.hpp>
 #include <map>
+#include "meta/meta_blks_mgr.hpp"
 
 SDS_OPTION_GROUP(home_blks,
                  (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
@@ -91,6 +92,9 @@ void HomeBlks::attach_prepare_volume_cp_id(std::map< boost::uuids::uuid, vol_cp_
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
 
 #ifndef NDEBUG
+    /* If a volume is participated in a cp then it can not be deleted without participating
+     * in a cp flush.
+     */
     if (cur_id_map) {
         for (auto it = cur_id_map->cbegin(); it != cur_id_map->cend(); ++it) {
             assert(m_volume_map.find(it->first) != m_volume_map.cend());
@@ -106,8 +110,10 @@ void HomeBlks::attach_prepare_volume_cp_id(std::map< boost::uuids::uuid, vol_cp_
         vol_cp_id_ptr cur_cp_id_ptr = nullptr;
         if (cur_id_map) {
             auto id_it = cur_id_map->find(it->first);
-            if (id_it == cur_id_map->end()) { continue; }
-            cur_cp_id_ptr = id_it->second;
+            if (id_it != cur_id_map->end()) {
+                /* It is a new volume which is created after this cp */
+                cur_cp_id_ptr = id_it->second;
+            }
         }
 
         /* get the cur cp id ptr */
@@ -383,6 +389,14 @@ void HomeBlks::init_thread() {
             [this](int nevents) { call_multi_vol_completions(); });
 
         /* TODO :- start recovery_mgr recovery with callback */
+#if 0
+        // non-disruptive upgrade handling
+        if (MetaBlkMgr::instance()->migrated() == false)  {
+            // need to call migrate after scan_volumes because volume migration needs m_volume_map;
+            migrate_sb();
+            // TODO: delete old sb blkstore (scan_volumes read nothing from next boot);
+        }
+#endif
     } catch (const std::exception& e) {
         LOGERROR("{}", e.what());
         error = std::make_error_condition(std::errc::io_error);
@@ -713,5 +727,38 @@ void HomeBlks::call_multi_vol_completions() {
                      v_comp_events);
             m_cfg.end_of_batch_cb(v_comp_events);
         }
+    }
+}
+
+void HomeBlks::metablk_init(sb_blkstore_blob* blob, bool init) {
+    MetaBlkMgr::init(m_meta_blk_store.get(), blob, &m_cfg, init);
+}
+
+void HomeBlks::migrate_sb() {
+    migrate_homeblk_sb();
+    migrate_volume_sb();
+    migrate_logstore_sb();
+    migrate_cp_sb();
+
+    MetaBlkMgr::instance()->set_migrated();
+}
+
+void HomeBlks::migrate_logstore_sb() {}
+void HomeBlks::migrate_cp_sb() {}
+
+void HomeBlks::migrate_homeblk_sb() {
+    std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
+    auto inst = MetaBlkMgr::instance();
+    void* cookie = nullptr;
+    inst->add_sub_sb(meta_sub_type::HOMEBLK, (void*)m_homeblks_sb.get(), sizeof(homeblks_sb), cookie);
+}
+
+void HomeBlks::migrate_volume_sb() {
+    std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
+    auto inst = MetaBlkMgr::instance();
+    void* cookie = nullptr;
+    for (auto it = m_volume_map.cbegin(); it != m_volume_map.end(); it++) {
+        auto vol = it->second;
+        vol->migrate_sb();
     }
 }

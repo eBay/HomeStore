@@ -274,8 +274,9 @@ public:
         return ret;
     }
 
-    btree_cp_id_ptr attach_prepare_cp(btree_cp_id_ptr cur_cp_id) {
-        return (btree_store_t::attach_prepare_cp(m_btree_store.get(), cur_cp_id));
+    /* It attaches the new CP and prepare for cur cp flush */
+    btree_cp_id_ptr attach_prepare_cp(btree_cp_id_ptr cur_cp_id, bool is_last_cp) {
+        return (btree_store_t::attach_prepare_cp(m_btree_store.get(), cur_cp_id, is_last_cp));
         ;
     }
 
