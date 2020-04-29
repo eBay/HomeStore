@@ -135,6 +135,7 @@ void Volume::destroy_internal() {
             m_indx_mgr->destroy_done();
         }
         m_destroy_done_cb(success);
+        m_destroy_done_cb = nullptr;
         auto cnt = home_blks_ref_cnt.fetch_sub(1);
         if (cnt == 1) { m_hb->do_volume_shutdown(true); }
     }));
@@ -145,7 +146,7 @@ void Volume::shutdown(indxmgr_stop_cb cb) { IndxMgr::shutdown(cb); }
 
 Volume::~Volume() {
     free(m_sb);
-    free(m_indx_mgr);
+    delete m_indx_mgr;
 }
 
 std::error_condition Volume::write(const vol_interface_req_ptr& hb_req) {

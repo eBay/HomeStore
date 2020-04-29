@@ -1427,6 +1427,8 @@ public:
     uint64_t get_num_chunks() const { return m_num_chunks; }
     uint64_t get_chunk_size() const { return m_chunk_size; }
 
+    void persist_blk_allocator_bitmap() {}
+
 private:
     /* Adds a primary chunk to the chunk list in pdev */
     void add_primary_chunk(PhysicalDevChunk* chunk) {

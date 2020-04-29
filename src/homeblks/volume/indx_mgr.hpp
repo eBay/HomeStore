@@ -6,8 +6,9 @@
 #include "api/vol_interface.hpp"
 #include "homeblks/home_blks.hpp"
 #include <wisr/wisr_ds.hpp>
+#include "homeblks/meta/meta_blks_mgr.hpp"
 
-    namespace homestore {
+namespace homestore {
 struct volume_req;
 typedef boost::intrusive_ptr< volume_req > volume_req_ptr;
 class mapping;
@@ -74,11 +75,15 @@ struct indx_cp_id : cp_id_base {
 };
 
 /* it contains the PSN from which journal has to be replayed. */
+#define INDX_MGR_VERSION 0x1
+struct indx_mgr_cp_sb_hdr {
+    int version;
+} __attribute__((__packed__));
+
 struct indx_mgr_cp_sb {
     boost::uuids::uuid uuid;
     int64_t active_data_psn;
     int64_t active_btree_psn;
-    ;
 } __attribute__((__packed__));
 
 struct indx_mgr_active_sb {
@@ -154,9 +159,9 @@ private:
     static bool m_shutdown_cmplt;
     static int m_thread_num;
     static iomgr::timer_handle_t m_system_cp_timer_hdl;
+    static void* m_meta_blk;
 
     static void init();
-    static void write_superblock();
 
 public:
     /* It is called in first time create.
@@ -242,7 +247,8 @@ public:
     static void trigger_vol_cp();
 
     /* reinitialize indx mgr. It is used in fake reboot */
-    static void reinit() { init(); }
+    static void reinit() { m_shutdown_started = false; }
     static int get_thread_num() { return m_thread_num; }
+    static void write_cp_super_block(indx_cp_id* id);
 };
 } // namespace homestore

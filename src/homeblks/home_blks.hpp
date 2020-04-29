@@ -189,6 +189,7 @@ public:
     void attach_prepare_volume_cp_id(std::map< boost::uuids::uuid, vol_cp_id_ptr >* cur_id_map,
                                      std::map< boost::uuids::uuid, vol_cp_id_ptr >* new_id_map,
                                      indx_cp_id* home_blks_id);
+    void persist_blk_allocator_bitmap();
     void do_volume_shutdown(bool force);
 
     data_blkstore_t::comp_callback data_completion_cb() override;

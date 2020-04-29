@@ -166,7 +166,7 @@ bool MetaBlkMgr::is_meta_blk_type_valid(meta_sub_type type) {
     switch (type) {
     case meta_sub_type::HOMEBLK:
     case meta_sub_type::VOLUME:
-    case meta_sub_type::SNAPSHOT:
+    case meta_sub_type::INDX_MGR_CP:
     case meta_sub_type::JOURNAL:
         valid = true;
         break;

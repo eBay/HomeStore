@@ -88,7 +88,7 @@ struct btree_cp_id {
     int64_t end_seq_id;
     cp_comp_callback cb;
     btree_cp_id() : cp_cnt(0), ref_cnt(1), start_seq_id(-1), end_seq_id(-1){};
-    ~btree_cp_id() { assert(ref_cnt == 0); }
+    ~btree_cp_id() {}
 };
 
 struct btree_journal_entry_hdr {

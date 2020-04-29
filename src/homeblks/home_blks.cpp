@@ -75,6 +75,11 @@ HomeBlks::HomeBlks(const init_params& cfg) : m_cfg(cfg), m_metrics("HomeBlks") {
     m_start_shutdown = false;
 }
 
+void HomeBlks::persist_blk_allocator_bitmap() {
+    get_data_blkstore()->persist_blk_allocator_bitmap();
+    get_index_blkstore()->persist_blk_allocator_bitmap();
+}
+
 void HomeBlks::attach_prepare_volume_cp_id(std::map< boost::uuids::uuid, vol_cp_id_ptr >* cur_id_map,
                                            std::map< boost::uuids::uuid, vol_cp_id_ptr >* new_id_map,
                                            indx_cp_id* home_blks_id) {

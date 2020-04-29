@@ -89,22 +89,12 @@ void IndxCP::cp_start(indx_cp_id* id) {
 void IndxCP::cp_done(indx_cp_id* id) {
     auto cnt = id->ref_cnt.fetch_sub(1);
     if (cnt != 1) { return; }
-    uint64_t size = sizeof(indx_mgr_cp_sb) * id->snt_cnt;
-    uint8_t* mem = (uint8_t*)malloc(size);
-    uint8_t* temp = mem;
-    for (auto it = id->vol_id_list.begin(); it != id->vol_id_list.end(); ++it) {
-        if (it->second == nullptr || it->second->flags != cp_state::active_cp) { continue; }
-        auto vol_id = it->second;
-        auto sb = (indx_mgr_cp_sb*)temp;
-        sb->uuid = vol_id->vol->get_uuid();
-        sb->active_data_psn = vol_id->end_active_psn;
-        sb->active_btree_psn = vol_id->btree_id->end_seq_id;
-        temp = (uint8_t*)((uint64_t)temp + sizeof(indx_mgr_cp_sb));
-    }
-    /* TODO: write super block */
 
+    /* All dirty buffers are flushed. Write super block */
+    IndxMgr::write_cp_super_block(id);
     if (id->bitmap_checkpoint) {
-        /* TODO: persist bitmap and call this function when bitmap is persisted */
+        /* persist alloc bitmap. It is a sync call */
+        HomeBlks::instance()->persist_blk_allocator_bitmap();
         bitmap_cp_done(id);
     } else {
         cp_end(id);
@@ -167,7 +157,6 @@ IndxMgr::~IndxMgr() {
 
     if (m_shutdown_started) {
         static std::once_flag flag1;
-        std::call_once(flag1, [this]() { iomanager.cancel_timer(m_system_cp_timer_hdl, false); });
     }
 }
 
@@ -192,6 +181,43 @@ void IndxMgr::init() {
     /* start the timer for bitmap checkpoint */
     m_system_cp_timer_hdl = iomanager.schedule_timer(60 * 1000 * 1000 * 1000ul, true, nullptr, false,
                                                      [](void* cookie) { trigger_system_cp(nullptr, false); });
+    write_cp_super_block(nullptr);
+}
+
+void IndxMgr::write_cp_super_block(indx_cp_id* id) {
+    LOGINFO("superblock is written");
+    uint8_t* mem = nullptr;
+    uint64_t size = (id ? (sizeof(indx_mgr_cp_sb) * id->snt_cnt) : 0) + sizeof(indx_mgr_cp_sb_hdr);
+    int ret = posix_memalign((void**)&(mem), HS_STATIC_CONFIG(disk_attr.align_size), size);
+    if (ret != 0) {
+        assert(0);
+        throw std::bad_alloc();
+    }
+
+    indx_mgr_cp_sb_hdr* hdr = (indx_mgr_cp_sb_hdr*)mem;
+    hdr->version = INDX_MGR_VERSION;
+
+    if (id) {
+        uint8_t* temp = (uint8_t*)((uint64_t)mem + sizeof(indx_mgr_cp_sb_hdr));
+        for (auto it = id->vol_id_list.begin(); it != id->vol_id_list.end(); ++it) {
+            if (it->second == nullptr || it->second->flags != cp_state::active_cp) { continue; }
+            auto vol_id = it->second;
+            auto sb = (indx_mgr_cp_sb*)temp;
+            sb->uuid = vol_id->vol->get_uuid();
+            sb->active_data_psn = vol_id->end_active_psn;
+            sb->active_btree_psn = vol_id->btree_id->end_seq_id;
+            temp = (uint8_t*)((uint64_t)temp + sizeof(indx_mgr_cp_sb));
+        }
+    }
+
+    if (m_meta_blk) {
+        MetaBlkMgr::instance()->update_sub_sb(meta_sub_type::INDX_MGR_CP, mem, size, m_meta_blk);
+    } else {
+        /* first time update */
+        MetaBlkMgr::instance()->add_sub_sb(meta_sub_type::INDX_MGR_CP, mem, size, m_meta_blk);
+    }
+    LOGINFO("superblock is written");
+    free(mem);
 }
 
 void IndxMgr::attach_prepare_vol_cp_id_list(std::map< boost::uuids::uuid, vol_cp_id_ptr >* cur_vols_id,
@@ -401,7 +427,7 @@ void IndxMgr::trigger_system_cp(cp_done_cb cb, bool shutdown) {
             if (cb) { cb(success); }
         }));
     }
-    m_cp->trigger_cp(cp_id, desired);
+    m_cp->trigger_cp(cp_id);
     m_cp->cp_io_exit(cp_id);
 }
 
@@ -492,7 +518,11 @@ void IndxMgr::add_prepare_cb_list(prepare_cb cb) {
     prepare_cb_list.push_back(cb);
 }
 
-void IndxMgr::shutdown(indxmgr_stop_cb cb) { trigger_system_cp(cb, true); }
+void IndxMgr::shutdown(indxmgr_stop_cb cb) {
+    iomanager.cancel_timer(m_system_cp_timer_hdl, false);
+    m_system_cp_timer_hdl = iomgr::null_timer_handle;
+    trigger_system_cp(cb, true);
+}
 
 void IndxMgr::destroy_done() {
     m_active_map->destroy_done();
@@ -503,3 +533,4 @@ std::unique_ptr< IndxCP > IndxMgr::m_cp;
 std::atomic< bool > IndxMgr::m_shutdown_started;
 int IndxMgr::m_thread_num;
 iomgr::timer_handle_t IndxMgr::m_system_cp_timer_hdl = iomgr::null_timer_handle;
+void* IndxMgr::m_meta_blk = nullptr;
