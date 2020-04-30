@@ -28,15 +28,17 @@ ENV ASAN_OPTIONS=detect_leaks=0
 RUN set -eux; \
     eval $(grep 'name =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,name,PKG_NAME,'); \
     eval $(grep -m 1 'version =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,version,PKG_VERSION,'); \
-    if [ "nosanitize" = "${BUILD_TYPE}" ] && [ "true" = "${COVERAGE_ON}" ]; then \
+    if [ "debug" = "${BUILD_TYPE}" ] && [ "true" = "${COVERAGE_ON}" ]; then \
       conan install --build missing -o ${PKG_NAME}:coverage=True -pr ${BUILD_TYPE} ${SOURCE_PATH}; \
       build-wrapper-linux-x86-64 --out-dir /tmp/sonar conan build ${SOURCE_PATH}; \
       find . -name "*.gcno" -exec gcov {} \; ; \
       if [ "develop" != "${BRANCH_NAME}" ]; then \
-          echo "sonar.branch.name=${BRANCH_NAME}" >> ${SOURCE_PATH}sonar-project.properties; \
-          echo "sonar.branch.target=develop" >> ${SOURCE_PATH}sonar-project.properties; \
+        echo "sonar.branch.name=${BRANCH_NAME}" >> ${SOURCE_PATH}sonar-project.properties; \
+        echo "sonar.branch.target=develop" >> ${SOURCE_PATH}sonar-project.properties; \
       fi; \
       sonar-scanner -Dsonar.projectBaseDir=${SOURCE_PATH} -Dsonar.projectVersion="${PKG_VERSION}"; \
+    if [ "sanitize" = "${BUILD_TYPE}" ]; then \
+      conan create -o homestore:sanitize=True -pr debug ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"; \  
     else \
       conan create -pr ${BUILD_TYPE} ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"; \
     fi;

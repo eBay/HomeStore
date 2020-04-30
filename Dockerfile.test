@@ -17,7 +17,11 @@ WORKDIR /output
 RUN set -eux; \
     eval $(grep 'name =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,name,PKG_NAME,'); \
     eval $(grep -m 1 'version =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,version,PKG_VERSION,'); \
-    conan install -pr ${BUILD_TYPE} ${PKG_NAME}/${PKG_VERSION}@${CONAN_USER}/${CONAN_CHANNEL}; \
+    if [ "sanitize" = "${BUILD_TYPE}" ]; then \
+      conan install -pr -o homestore:sanitize=True debug ${PKG_NAME}/${PKG_VERSION}@${CONAN_USER}/${CONAN_CHANNEL}; \
+    else \
+      conan install -pr ${BUILD_TYPE} ${PKG_NAME}/${PKG_VERSION}@${CONAN_USER}/${CONAN_CHANNEL}; \
+    fi;
     conan remove -f '*'; \
     pip install grpcio-tools
 
