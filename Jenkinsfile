@@ -46,8 +46,10 @@ pipeline {
 
         stage('TestImage') {
             when {
-                branch "develop"
-                branch "snapshot"
+                anyOf {
+                    branch "develop"
+                    branch "snapshot"
+                }
             }
             steps {
                 withDockerRegistry([credentialsId: 'sds+sds', url: "https://ecr.vip.ebayc3.com"]) {
