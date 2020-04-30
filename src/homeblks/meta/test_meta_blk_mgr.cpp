@@ -120,21 +120,21 @@ public:
             std::default_random_engine generator(rd());
             std::uniform_int_distribution< long unsigned > dist(META_BLK_ALIGN_SZ, META_BLK_ALIGN_SZ * 8);
             auto sz = dist(generator);
-            return (sz/META_BLK_ALIGN_SZ) * META_BLK_ALIGN_SZ;
+            return (sz / META_BLK_ALIGN_SZ) * META_BLK_ALIGN_SZ;
         } else {
             long unsigned start = 64;
             std::random_device rd;
             std::default_random_engine generator(rd());
             std::uniform_int_distribution< long unsigned > dist(start, META_BLK_CONTEXT_SZ);
             auto sz = dist(generator);
-            return (sz/start) * start;
+            return (sz / start) * start;
         }
     }
 
     void do_sb_write(bool overflow) {
         m_wrt_cnt++;
         auto sz_to_wrt = rand_size(overflow);
-        
+
         uint8_t* buf = nullptr;
         auto ret = posix_memalign((void**)&buf, 4096, sz_to_wrt);
         HS_ASSERT_CMP(RELEASE, ret, ==, 0);
@@ -145,21 +145,26 @@ public:
         m_mbm->add_sub_sb(meta_sub_type::VOLUME, buf, sz_to_wrt, cookie);
         assert(cookie != nullptr);
 
+        meta_blk* mblk = (meta_blk*)cookie;
+        if (overflow) {
+            assert(sz_to_wrt >= META_BLK_ALIGN_SZ);
+            assert(mblk->hdr.ovf_blkid.to_integer() != BlkId::invalid_internal_id());
+        } else {
+            assert(sz_to_wrt <= META_BLK_CONTEXT_SZ);
+            assert(mblk->hdr.ovf_blkid.to_integer() == BlkId::invalid_internal_id());
+        }
+
         // save cookie;
         std::unique_lock< std::mutex > lg(m_mtx);
         m_write_sbs.push_back(cookie);
 
-        if (!overflow) {
-            free(buf);
-        } 
-
-        // for overflow case, buf is freed by io path;
+        free(buf);
     }
 
     uint32_t get_rand_pos() {
         std::random_device rd;
         std::default_random_engine generator(rd());
-        std::uniform_int_distribution< long unsigned > dist(0, m_write_sbs.size()-1);
+        std::uniform_int_distribution< long unsigned > dist(0, m_write_sbs.size() - 1);
         return dist(generator);
     }
 
@@ -180,7 +185,7 @@ public:
 
         std::unique_lock< std::mutex > lg(m_mtx);
         auto it = m_write_sbs.begin() + get_rand_pos();
-        bool overflow = rand()%2;    
+        bool overflow = rand() % 2;
         auto sz_to_wrt = rand_size(overflow);
         uint8_t* buf = nullptr;
         auto ret = posix_memalign((void**)&buf, 4096, sz_to_wrt);
@@ -188,20 +193,9 @@ public:
 
         gen_rand_buf(buf, sz_to_wrt);
 
-        // erase old cookie
-        // m_write_sbs.erase(it);
-
-        void* cookie = nullptr;
         m_mbm->update_sub_sb(meta_sub_type::VOLUME, buf, sz_to_wrt, *it);
 
-        // save cookie;
-        // m_write_sbs.push_back(*it);
-        
-        if (!overflow) {
-            free(buf);
-        }
-
-        // for overflow case, buf is freed by io path;
+        free(buf);
     }
 
     // compare m_cb_blks with m_write_sbs;
@@ -211,16 +205,14 @@ public:
 
         for (auto it = m_write_sbs.cbegin(); it != m_write_sbs.end(); it++) {
             meta_blk* mblk = (meta_blk*)(*it);
-            int ret = memcmp((void*)&(mblk->hdr), (void*)&(m_cb_blks[mblk->hdr.blkid.to_integer()]->hdr), sizeof(meta_blk_hdr));
-            if (ret != 0) {
-                HS_ASSERT(DEBUG, false, "memory compare failed for mblk header!");
-            }
+            int ret = memcmp((void*)&(mblk->hdr), (void*)&(m_cb_blks[mblk->hdr.blkid.to_integer()]->hdr),
+                             sizeof(meta_blk_hdr));
+            if (ret != 0) { HS_ASSERT(DEBUG, false, "memory compare failed for mblk header!"); }
 
             if (mblk->hdr.context_sz <= META_BLK_CONTEXT_SZ) {
-                ret = memcmp(mblk->context_data, m_cb_blks[mblk->hdr.blkid.to_integer()]->context_data, mblk->hdr.context_sz);
-                if (ret != 0) {
-                    HS_ASSERT(DEBUG, false, "memory compare failed fore mblk context data");
-                }
+                ret = memcmp(mblk->context_data, m_cb_blks[mblk->hdr.blkid.to_integer()]->context_data,
+                             mblk->hdr.context_sz);
+                if (ret != 0) { HS_ASSERT(DEBUG, false, "memory compare failed fore mblk context data"); }
             } else {
                 // nothing to do as ovf_blkid is already compared in the hdr;
             }

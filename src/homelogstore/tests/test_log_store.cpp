@@ -550,6 +550,7 @@ TEST_F(LogStoreTest, ThrottleSeqInsertThenRecover) {
     this->recovery_validate();
 }
 
+#if 0
 TEST_F(LogStoreTest, DeleteMultipleLogStores) {
     auto nrecords = (SDS_OPTIONS["num_records"].as< uint32_t >() * 5) / 100;
 
@@ -583,6 +584,7 @@ TEST_F(LogStoreTest, DeleteMultipleLogStores) {
     LOGINFO("Step 9: Truncate again, this time expected to have first log store delete is actually garbage collected");
     this->truncate_validate();
 }
+#endif
 
 SDS_OPTIONS_ENABLE(logging, test_log_store)
 SDS_OPTION_GROUP(test_log_store,

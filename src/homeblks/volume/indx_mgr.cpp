@@ -177,6 +177,9 @@ indx_mgr_active_sb IndxMgr::get_active_sb() {
 void IndxMgr::init() {
     m_cp = std::unique_ptr< IndxCP >(new IndxCP());
     m_shutdown_started.store(false);
+    /* start the timer for bitmap checkpoint */
+    m_system_cp_timer_hdl = iomanager.schedule_timer(60 * 1000 * 1000 * 1000ul, true, nullptr, false,
+                                                     [](void* cookie) { trigger_system_cp(nullptr, false); });
     auto sthread = std::thread([]() mutable {
         IndxMgr::m_thread_num = sisl::ThreadLocalContext::my_thread_num();
         LOGINFO("{} thread entered", m_thread_num);
@@ -185,9 +188,6 @@ void IndxMgr::init() {
     });
     sthread.detach();
 
-    /* start the timer for bitmap checkpoint */
-    m_system_cp_timer_hdl = iomanager.schedule_timer(60 * 1000 * 1000 * 1000ul, true, nullptr, false,
-                                                     [](void* cookie) { trigger_system_cp(nullptr, false); });
     write_cp_super_block(nullptr);
 }
 

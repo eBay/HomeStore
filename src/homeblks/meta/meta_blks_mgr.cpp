@@ -17,7 +17,7 @@ MetaBlkMgr::MetaBlkMgr(blk_store_type* sb_blk_store, sb_blkstore_blob* blob, ini
 }
 
 MetaBlkMgr::~MetaBlkMgr() {
-    std::lock_guard< std::recursive_mutex > lg(m_meta_mtx);
+    std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
     for (auto it = m_meta_blks.cbegin(); it != m_meta_blks.cend(); it++) {
         for (auto it_m = it->second.cbegin(); it_m != it->second.cend(); it_m++) {
             free(it_m->second);
@@ -34,24 +34,30 @@ MetaBlkMgr::~MetaBlkMgr() {
 }
 
 void MetaBlkMgr::load_ssb(BlkId bid) {
-    uint8_t* buf = nullptr;
-    int ret = posix_memalign((void**)&(buf), HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_ALIGN_SZ);
-    if (ret != 0) {
-        assert(0);
-        throw std::bad_alloc();
-    }
+    auto req = blkstore_req< BlkBuffer >::make_request();
+    req->isSyncCall = true;
+    blk_buf_t bbuf = m_sb_blk_store->read(bid, 0, META_BLK_ALIGN_SZ, req);
 
-    // TODO: read blkid into m_ssb;
-    // m_ssb = m_sb_blk_store->read(bid, );
+    homeds::blob b = bbuf->at_offset(0);
+    assert(b.size == META_BLK_ALIGN_SZ);
+
+    memcpy((void*)m_ssb, b.bytes, sizeof(meta_blk_sb));
+
+    // verify magic
+    assert(m_ssb->magic == META_BLK_SB_MAGIC);
+
+    // verify crc;
+    auto crc = crc32_ieee(init_crc32, ((uint8_t*)m_ssb), sizeof(meta_blk_sb));
+    assert(m_ssb->crc == crc);
 }
 
 void MetaBlkMgr::set_migrated() {
-    std::lock_guard< std::recursive_mutex > lg(m_meta_mtx);
+    std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
     m_ssb->migrated = true;
 }
 
 bool MetaBlkMgr::migrated() {
-    std::lock_guard< std::recursive_mutex > lg(m_meta_mtx);
+    std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
     return m_ssb->migrated;
 }
 
@@ -70,16 +76,23 @@ void MetaBlkMgr::init_ssb() {
         throw std::bad_alloc();
     }
 
+    std::lock_guard< decltype(m_meta_mtx) > lk(m_meta_mtx);
     assert(m_last_mblk == nullptr);
     m_ssb->next_blkid.set(BlkId::invalid_internal_id());
     m_ssb->prev_blkid.set(BlkId::invalid_internal_id());
+    m_ssb->magic = META_BLK_SB_MAGIC;
+    m_ssb->version = META_BLK_SB_VERSION;
     m_ssb->migrated = false;
     m_ssb->blkid.set(bid);
 
     write_ssb();
 }
 
+// m_meta_lock should be while calling this function;
 void MetaBlkMgr::write_ssb() {
+    // recalculate crc before write
+    m_ssb->crc = crc32_ieee(init_crc32, ((uint8_t*)m_ssb), sizeof(meta_blk_sb));
+
     // persist to disk;
     write_blk(m_ssb->blkid, (void*)m_ssb, META_BLK_ALIGN_SZ);
 }
@@ -117,10 +130,10 @@ void MetaBlkMgr::scan_meta_blks() {
     std::vector< meta_blk* > mblks;
     extract_meta_blks(buf, total_sz, mblks);
     uint64_t mblk_cnt = 0;
-    
+
     for (auto it = mblks.begin(); it != mblks.end(); it++) {
         if ((*it)->hdr.magic == META_BLK_MAGIC) {
-            auto crc = crc32_ieee(init_crc32, ((uint8_t*)(*it)), META_BLK_ALIGN_SZ);
+            auto crc = crc32_ieee(init_crc32, ((uint8_t*)(*it)), sizeof(meta_blk));
             if (crc != (*it)->hdr.crc) { continue; }
 
             mblk_cnt++;
@@ -132,6 +145,8 @@ void MetaBlkMgr::scan_meta_blks() {
             if (false == is_meta_blk_type_valid(mblk->hdr.type)) {
                 HS_ASSERT(RELEASE, 0, "data corruption found with unrecognized subsystem type.");
             }
+
+            std::lock_guard< decltype(m_meta_mtx) > lk(m_meta_mtx);
 
             // insert this meta blk to in-memory copy;
             m_meta_blks[mblk->hdr.type][mblk->hdr.blkid.to_integer()] = mblk;
@@ -190,7 +205,7 @@ void MetaBlkMgr::extract_meta_blks(uint8_t* buf, const uint64_t size, std::vecto
 }
 
 void MetaBlkMgr::register_handler(meta_sub_type type, sub_cb cb) {
-    std::lock_guard< std::recursive_mutex > lk(m_meta_mtx);
+    std::lock_guard< decltype(m_meta_mtx) > lk(m_meta_mtx);
     m_cb_map[type] = cb;
 }
 
@@ -210,7 +225,9 @@ void MetaBlkMgr::add_sub_sb(meta_sub_type type, void* context_data, uint64_t sz,
 
 void MetaBlkMgr::write_meta_blk(meta_blk* mblk) {
     homeds::MemVector mvec;
-    std::lock_guard< std::recursive_mutex > lg(m_meta_mtx);
+
+    // recalculate crc before write to disk;
+    mblk->hdr.crc = crc32_ieee(init_crc32, ((uint8_t*)mblk), META_BLK_ALIGN_SZ);
     try {
         mvec.set((uint8_t*)mblk, META_BLK_ALIGN_SZ, 0);
         m_sb_blk_store->write(mblk->hdr.blkid, mvec);
@@ -236,9 +253,8 @@ meta_blk* MetaBlkMgr::init_meta_blk(BlkId bid, meta_sub_type type, void* context
     mblk->hdr.blkid.set(bid);
     mblk->hdr.type = type;
 
-    std::lock_guard< std::recursive_mutex > lg(m_meta_mtx);
+    std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
     mblk->hdr.magic = META_BLK_MAGIC;
-    mblk->hdr.context_sz = sz;
 
     // handle prev/next pointer linkage;
     if (m_last_mblk) {
@@ -259,8 +275,20 @@ meta_blk* MetaBlkMgr::init_meta_blk(BlkId bid, meta_sub_type type, void* context
     }
 
     mblk->hdr.next_blkid.set(BlkId::invalid_internal_id());
-    crc32_t crc = crc32_ieee(init_crc32, ((uint8_t*)mblk), META_BLK_ALIGN_SZ);
-    mblk->hdr.crc = crc;
+
+    // write this meta blk to disk
+    write_meta_blk_internal(mblk, context_data, sz);
+
+    // update in-memory data structure;
+    m_last_mblk = mblk;
+
+    m_meta_blks[type][bid.to_integer()] = mblk;
+
+    return mblk;
+}
+
+void MetaBlkMgr::write_meta_blk_internal(meta_blk* mblk, void* context_data, uint64_t sz) {
+    mblk->hdr.context_sz = sz;
 
     // within 512 Bytes
     if (sz <= META_BLK_CONTEXT_SZ) {
@@ -274,13 +302,13 @@ meta_blk* MetaBlkMgr::init_meta_blk(BlkId bid, meta_sub_type type, void* context
         BlkId obid;
         auto ret = alloc_meta_blk(obid, sz);
 
-        LOGINFO("allocating overflow bid: {}, sz: {}", obid.to_integer(), sz);
+        LOGINFO("allocating overflow bid: {}, sz: {}", obid.to_string(), sz);
 
         if (ret != no_error) {
             LOGERROR("Failed to allocate contigous overflow blk with size: {}", sz);
             HS_ASSERT(RELEASE, 0, "failed to allocate overflow blk id with size: {}", sz);
-            return nullptr;
         }
+
         mblk->hdr.ovf_blkid = obid;
 
         // write overflow block to disk;
@@ -289,18 +317,33 @@ meta_blk* MetaBlkMgr::init_meta_blk(BlkId bid, meta_sub_type type, void* context
 
     // write meta blk;
     write_meta_blk(mblk);
-
-    // update in-memory data structure;
-    m_last_mblk = mblk;
-
-    m_meta_blks[type][bid.to_integer()] = mblk;
-
-    return mblk;
 }
 
 void MetaBlkMgr::update_sub_sb(meta_sub_type type, void* context_data, uint64_t sz, void*& cookie) {
-    remove_sub_sb(cookie);
-    add_sub_sb(type, context_data, sz, cookie);
+    //
+    // Do in-place update, don't update prev/next meta blk;
+    // 1. free old ovf_blkid if there is any
+    // 2. allcate ovf_blkid if needed
+    // 3. update the meta_blk
+    //
+    std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
+    meta_blk* mblk = (meta_blk*)cookie;
+
+    LOGINFO("old sb: context_sz: {}, ovf_blkid: {}", mblk->hdr.context_sz, mblk->hdr.ovf_blkid.to_string());
+
+    // free the overflow blkid if it is there
+    if (mblk->hdr.ovf_blkid.to_integer() != BlkId::invalid_internal_id()) {
+        m_sb_blk_store->free_blk(mblk->hdr.ovf_blkid, 0, mblk->hdr.context_sz);
+        mblk->hdr.ovf_blkid.set(BlkId::invalid_internal_id());
+    }
+
+    // write this meta blk to disk
+    write_meta_blk_internal(mblk, context_data, sz);
+
+    LOGINFO("new sb: context_sz: {}, ovf_blkid: {}", mblk->hdr.context_sz, mblk->hdr.ovf_blkid.to_string());
+
+    // no need to update cookie and in-memory meta blk map since they
+    // all points to same memory address that does't change;
 }
 
 std::error_condition MetaBlkMgr::remove_sub_sb(void* cookie) {
@@ -308,10 +351,10 @@ std::error_condition MetaBlkMgr::remove_sub_sb(void* cookie) {
     BlkId bid = rm_blk->hdr.blkid;
     auto type = rm_blk->hdr.type;
 
-    std::lock_guard< std::recursive_mutex > lg(m_meta_mtx);
+    std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
 
     // type must exist
-    // assert(m_meta_blks.find(type) != m_meta_blks.end());
+    assert(m_meta_blks.find(type) != m_meta_blks.end());
 
     // remove from disk;
     auto prev_blkid = m_meta_blks[type][bid.to_integer()]->hdr.prev_blkid;
@@ -383,11 +426,11 @@ std::error_condition MetaBlkMgr::remove_sub_sb(void* cookie) {
 }
 
 void MetaBlkMgr::free_meta_blk(meta_blk* mblk) {
-    std::lock_guard< std::recursive_mutex > lg(m_meta_mtx);
     m_sb_blk_store->free_blk(mblk->hdr.blkid, boost::none, boost::none);
 
     // free the overflow blkid if it is there
     if (mblk->hdr.ovf_blkid.to_integer() != BlkId::invalid_internal_id()) {
+        assert(mblk->hdr.context_sz >= META_BLK_ALIGN_SZ);
         m_sb_blk_store->free_blk(mblk->hdr.ovf_blkid, 0, mblk->hdr.context_sz);
     }
 
