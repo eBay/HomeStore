@@ -139,6 +139,7 @@ IndxMgr::IndxMgr(std::shared_ptr< Volume > vol, const vol_params& params, io_don
         m_pending_read_blk_cb(read_blk_cb),
         m_first_cp_id(new vol_cp_id()),
         m_uuid(params.uuid),
+        m_name(params.vol_name),
         prepare_cb_list(4) {
     static std::once_flag flag1;
     m_active_map = new mapping(params.size, params.page_size, params.vol_name, free_blk_cb, IndxMgr::trigger_vol_cp,
@@ -270,7 +271,7 @@ vol_cp_id_ptr IndxMgr::attach_prepare_vol_cp(vol_cp_id_ptr cur_vol_id, indx_cp_i
     auto btree_id = m_active_map->attach_prepare_cp(cur_vol_id->btree_id, m_last_cp);
     if (m_last_cp) {
         assert(btree_id == nullptr);
-        LOGINFO("last cp of volume name {} is triggered", cur_vol_id->vol->get_name());
+        HS_SUBMOD_LOG(INFO, base, , "vol", cur_vol_id->vol->get_name(), "last cp of this volume triggered");
         return nullptr;
     }
 
@@ -470,8 +471,7 @@ void IndxMgr::trigger_system_cp(cp_done_cb cb, bool shutdown) {
  */
 void IndxMgr::destroy(indxmgr_stop_cb cb) {
     /* we can assume that there is no io going on this volume now */
-
-    LOGINFO("destroying indx mgr {}", m_uuid);
+    HS_SUBMOD_LOG(INFO, base, , "vol", m_name, "Destroying Indx Manager");
 
     destroy_journal_ent* jent = (destroy_journal_ent*)malloc(sizeof(destroy_journal_ent));
     jent->state = indx_mgr_state::DESTROYING;
@@ -497,7 +497,7 @@ void IndxMgr::destroy(indxmgr_stop_cb cb) {
 
 void IndxMgr::destroy_indx_tbl(btree_cp_id_ptr btree_id) {
     /* free all blkids of btree in memory */
-    LOGINFO("btree destroying");
+    HS_SUBMOD_LOG(INFO, base, , "vol", m_name, "Destroying Index btree");
     if (m_active_map->destroy(btree_id) != btree_status_t::success) {
         /* destroy is failed. We will destroy this volume in next boot */
         m_stop_cb(false);
@@ -510,7 +510,8 @@ void IndxMgr::destroy_indx_tbl(btree_cp_id_ptr btree_id) {
 void IndxMgr::volume_destroy_cp(vol_cp_id_ptr cur_vol_id, indx_cp_id* home_blks_id) {
     assert(cur_vol_id->flags == cp_state::suspend_cp);
     assert(!m_shutdown_started.load());
-    LOGINFO("destroy cp");
+    HS_SUBMOD_LOG(INFO, base, , "vol", m_name, "CP during destroy");
+
     if (home_blks_id->bitmap_checkpoint) {
         /* this is a bitmap checkpoint. move it to active. this is the last cp of this volume. */
         cur_vol_id->flags = cp_state::active_cp;

@@ -207,7 +207,7 @@ struct vol_sb_hdr {
 /* A simple self contained wrapper for completion list, which uses vector pool to avoid additional allocations */
 struct vol_completion_req_list {
     vol_completion_req_list() { m_cur = sisl::VectorPool< vol_interface_req_ptr >::alloc(); }
-    ~vol_completion_req_list() { sisl::VectorPool< vol_interface_req_ptr >::free(m_cur); }
+    ~vol_completion_req_list() { sisl::VectorPool< vol_interface_req_ptr >::free(m_cur, true /* no_cache */); }
 
     void push_back(const vol_interface_req_ptr& req) { m_cur->push_back(req); }
     size_t size() const { return m_cur->size(); }
@@ -464,9 +464,9 @@ public:
     void truncate(vol_cp_id_ptr vol_id) { m_indx_mgr->truncate(vol_id); }
 
     /**
-     * @brief 
+     * @brief
      */
-    void migrate_sb(); 
+    void migrate_sb();
 };
 
 /* Note :- Any member inside this structure is not lock protected. Its caller responsibility to call it under lock

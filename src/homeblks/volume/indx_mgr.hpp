@@ -139,6 +139,7 @@ private:
      */
     vol_cp_id_ptr m_first_cp_id;
     boost::uuids::uuid m_uuid;
+    std::string m_name;
     indx_mgr_state m_state = indx_mgr_state::ONLINE;
     indxmgr_stop_cb m_stop_cb;
     bool m_last_cp = false;
