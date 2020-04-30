@@ -5,6 +5,7 @@ pipeline {
         ORG = 'sds'
         CONAN_USER = 'sds'
         CONAN_PASS = credentials('CONAN_PASS')
+        ARTIFACTORY_PASS = credentials('ARTIFACTORY_PASS')
         MASTER_BRANCH = 'develop'
         STABLE_BRANCH = 'testing/*'
     }
@@ -31,8 +32,8 @@ pipeline {
 
         stage('Build') {
             steps {
-                sh "docker build --rm --build-arg BUILD_TYPE=debug --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_PASS=${CONAN_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${GIT_COMMIT}-debug ."
-                sh "docker build --rm --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_PASS=${CONAN_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${GIT_COMMIT}-release ."
+                sh "docker build --rm --build-arg BUILD_TYPE=debug --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_PASS=${CONAN_PASS} --build-arg ARTIFACTORY_PASS=${ARTIFACTORY_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${GIT_COMMIT}-debug ."
+                sh "docker build --rm --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_PASS=${CONAN_PASS} --build-arg ARTIFACTORY_PASS=${ARTIFACTORY_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${GIT_COMMIT}-release ."
             }
         }
 
