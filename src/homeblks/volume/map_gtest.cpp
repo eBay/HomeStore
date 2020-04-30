@@ -127,7 +127,7 @@ public:
                 assert(0); // less blks freed than expected
             }
             long long int bst = req->blkIds_to_free[index].m_blkId.get_id() + req->blkIds_to_free[index].m_blk_offset;
-            long long int ben = bst + (int)(req->blkIds_to_free[index].m_nblks_to_free) - 1;
+            long long int ben = bst + (int)(req->blkIds_to_free[index].m_nlbas_to_free) - 1;
             while (bst <= ben) {
                 if (st > et) assert(0);                 // more blks freeed than expected
                 if (m_blk_id_arr[st] != bst) assert(0); // blks mistmach
@@ -147,7 +147,7 @@ public:
 
         // release blkids
         for (auto& ptr : req->blkIds_to_free)
-            release_blkId_lock(ptr.m_blkId, ptr.m_blk_offset, ptr.m_nblks_to_free);
+            release_blkId_lock(ptr.m_blkId, ptr.m_blk_offset, ptr.m_nlbas_to_free);
 
         auto outstanding = outstanding_ios.fetch_sub(1);
         if (issued_ios.load() == max_issue_ios && outstanding == 1) {
@@ -249,13 +249,13 @@ public:
         m_lba_bm->reset_bits(lba, nlbas);
     }
 
-    void release_blkId_lock(BlkId& blkId, uint8_t offset, uint8_t nblks_to_free) {
+    void release_blkId_lock(BlkId& blkId, uint8_t offset, uint8_t nlbas_to_free) {
         std::unique_lock< std::mutex > lk(mutex);
-        assert(m_blk_bm->is_bits_set(blkId.get_id() + offset, nblks_to_free));
-        m_blk_bm->reset_bits(blkId.get_id() + offset, nblks_to_free);
+        assert(m_blk_bm->is_bits_set(blkId.get_id() + offset, nlbas_to_free));
+        m_blk_bm->reset_bits(blkId.get_id() + offset, nlbas_to_free);
     }
 
-    void generate_random_blkId(BlkId& blkId, uint64_t nblks) {
+    void generate_random_blkId(BlkId& blkId, uint64_t nlbas) {
         uint64_t retry = 0;
     start:
         if (retry == MAX_BLK) assert(0); // cant allocated blk anymore
@@ -265,15 +265,15 @@ public:
         {
             std::unique_lock< std::mutex > lk(mutex);
             /* check if someone is already doing writes/reads */
-            if (m_blk_bm->is_bits_reset(id, nblks))
-                m_blk_bm->set_bits(id, nblks);
+            if (m_blk_bm->is_bits_reset(id, nlbas))
+                m_blk_bm->set_bits(id, nlbas);
             else {
                 retry++;
                 goto start;
             }
         }
         blkId.set_id(id);
-        blkId.set_nblks(nblks);
+        blkId.set_nlbas(nlbas);
     }
 
     void generate_random_lba_nlbas(uint64_t& lba, uint64_t& nlbas) {

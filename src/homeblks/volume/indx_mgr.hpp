@@ -22,7 +22,7 @@ struct Free_Blk_Entry;
 struct journal_hdr {
     uint64_t lba;
     uint64_t indx_start_lba;
-    int nblks;
+    int nlbas;
 };
 
 class vol_journal_entry {
@@ -37,7 +37,7 @@ public:
 
     std::string to_string() const {
         auto hdr = (journal_hdr*)m_mem;
-        return fmt::format("lba={}, indx_start_lba={}, nblks={}", hdr->lba, hdr->indx_start_lba, hdr->nblks);
+        return fmt::format("lba={}, indx_start_lba={}, nlbas={}", hdr->lba, hdr->indx_start_lba, hdr->nlbas);
     }
 };
 

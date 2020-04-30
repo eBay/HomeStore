@@ -24,7 +24,7 @@ class MapStoreSpec : public StoreSpec< K, V > {
 public:
     MapStoreSpec() {}
 
-    void process_metadata_completions(volume_req* req) { LOGTRACE("MapInfo persisted:", req->lba(), req->nblks()); }
+    void process_metadata_completions(volume_req* req) { LOGTRACE("MapInfo persisted:", req->lba(), req->nlbas()); }
 
     void process_free_blk_callback(Free_Blk_Entry fbe) {
         // remove this assert if someone is actually calling this funciton
@@ -108,7 +108,7 @@ public:
             carr[i] = 1;
         }
 
-        for (uint64_t lba = volreq->lba(); lba < volreq->lba() + volreq->nblks();) {
+        for (uint64_t lba = volreq->lba(); lba < volreq->lba() + volreq->nlbas();) {
             if (kvs[j].first.start() != lba) {
                 lba++;
                 continue;
@@ -150,7 +150,7 @@ public:
         bid.set_nblks(end_value.end() - start_value.start() + 1);
         req->push_blkid(bid);
 
-        MappingKey key(req->lba(), req->nblks());
+        MappingKey key(req->lba(), req->nlbas());
 
         std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;
         for (auto i = 0ul; i < CS_ARRAY_STACK_SIZE; i++)
@@ -161,7 +161,7 @@ public:
         MappingValue value(ve);
         LOGDEBUG("Mapping range put:{} {} ", key.to_string(), value.to_string());
 
-        assert(req->nblks() == bid.get_nblks());
+        assert(req->nlbas() == bid.get_nblks());
         m_map->put(req.get(), key, value, nullptr);
 
         return true;

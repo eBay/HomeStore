@@ -19,7 +19,7 @@ sisl::blob vol_journal_entry::create_journal_entry(volume_req* v_req) {
     /* store journal hdr */
     auto hdr = (journal_hdr*)m_mem;
     hdr->lba = v_req->lba();
-    hdr->nblks = v_req->nblks();
+    hdr->nlbas = v_req->nlbas();
     hdr->indx_start_lba = v_req->indx_start_lba;
 
     /* store alloc blkid */
@@ -164,9 +164,7 @@ IndxMgr::IndxMgr(std::shared_ptr< Volume > vol, indx_mgr_active_sb* sb, io_done_
 IndxMgr::~IndxMgr() {
     delete m_active_map;
 
-    if (m_shutdown_started) {
-        static std::once_flag flag1;
-    }
+    if (m_shutdown_started) { static std::once_flag flag1; }
 }
 
 indx_mgr_active_sb IndxMgr::get_active_sb() {
@@ -299,11 +297,11 @@ void IndxMgr::journal_comp_cb(logstore_seq_num_t seq_num, logdev_key ld_key, voi
     HS_SUBMOD_LOG(TRACE, volume, vreq, "vol", vreq->vol()->get_name(),
                   "Journal write done, lsn={}, log_key=[idx={}, offset={}]", seq_num, ld_key.idx, ld_key.dev_offset);
 
-    if (lba_written == vreq->nblks()) {
+    if (lba_written == vreq->nlbas()) {
         m_io_cb(vreq, no_error);
     } else {
         /* partial write */
-        assert(lba_written < vreq->nblks());
+        assert(lba_written < vreq->nlbas());
         m_io_cb(vreq, homestore_error::btree_write_failed);
     }
 
@@ -320,7 +318,7 @@ btree_status_t IndxMgr::update_indx_tbl(volume_req* vreq) {
     std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;
     uint64_t offset = 0;
 
-    for (uint32_t i = 0; i < vreq->iface_req->nblks; ++i) {
+    for (uint32_t i = 0; i < vreq->iface_req->nlbas; ++i) {
         carr[i] = vreq->csum_list[i];
     }
 

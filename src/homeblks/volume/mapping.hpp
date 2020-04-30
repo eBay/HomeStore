@@ -182,7 +182,7 @@ struct ValueEntry {
 private:
     ValueEntryMeta m_meta;
     // this allocates 2^NBLKS_BITS size array for checksum on stack, however actual memory used is less on bnode
-    // as we call get_blob_size which takes into account actual nblks to determine exact size of checksum array
+    // as we call get_blob_size which takes into account actual nlbas to determine exact size of checksum array
     // TODO - can be replaced by thread local buffer in future
     std::array< uint16_t, CS_ARRAY_STACK_SIZE > m_carr;
     ValueEntry* m_ptr;
@@ -232,8 +232,8 @@ public:
         uint8_t blk_offset = (vol_page_size / HomeBlks::instance()->get_data_pagesz()) * lba_offset;
         m_ptr->m_meta.blk_offset += blk_offset;
 #ifndef NDEBUG
-        auto actual_nblks = (vol_page_size / HomeBlks::instance()->get_data_pagesz()) * nlba;
-        assert(blk_offset + actual_nblks <= get_blkId().get_nblks());
+        auto actual_nlbas = (vol_page_size / HomeBlks::instance()->get_data_pagesz()) * nlba;
+        assert(blk_offset + actual_nlbas <= get_blkId().get_nblks());
 #endif
     }
 
@@ -299,12 +299,12 @@ public:
     // creates array with  value entrys - on heap -bcopy
     MappingValue(vector< ValueEntry >& elements) : ObjLifeCounter() { m_earr.set_elements(elements); }
 
-    MappingValue(MappingValue& other, uint16_t offset, uint32_t nblks, uint32_t page_size) {
+    MappingValue(MappingValue& other, uint16_t offset, uint32_t nlbas, uint32_t page_size) {
         Blob_Array< ValueEntry >& arr = other.get_array();
         assert(arr.get_total_elements() == 1);
         ValueEntry ve;
         arr.get(0, ve, true);
-        ve.add_offset(offset, nblks, page_size);
+        ve.add_offset(offset, nlbas, page_size);
         m_earr.set_element(ve);
     }
 
@@ -490,7 +490,7 @@ public:
             if (req->lastCommited_seqId == INVALID_SEQ_ID ||    
                     ve.get_seqId() < req->lastCommited_seqId) { // eligible for removal    
 
-                LOGTRACE("Free entry:{} nblks {}", ve.to_string(),    
+                LOGTRACE("Free entry:{} nlbas {}", ve.to_string(),    
                         (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * e_key->get_n_lba());    
                 Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(),    
                         (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) *    
@@ -674,8 +674,8 @@ public:
     error_condition get(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& values,
                         MappingBtreeDeclType* bt) {
         uint64_t start_lba = req->lba();
-        uint64_t num_lba = req->nblks();
-        uint64_t end_lba = start_lba + req->nblks() - 1;
+        uint64_t num_lba = req->nlbas();
+        uint64_t end_lba = start_lba + req->nlbas() - 1;
         MappingKey start_key(start_lba, 1);
         MappingKey end_key(end_lba, 1);
         auto search_range = BtreeSearchRange(start_key, true, end_key, true);
@@ -697,8 +697,8 @@ public:
     error_condition get(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& values,
                         bool fill_gaps = true) {
         uint64_t start_lba = req->lba();
-        uint64_t num_lba = req->nblks();
-        uint64_t end_lba = start_lba + req->nblks() - 1;
+        uint64_t num_lba = req->nlbas();
+        uint64_t end_lba = start_lba + req->nlbas() - 1;
         MappingKey start_key(start_lba, 1);
         MappingKey end_key(end_lba, 1);
 
@@ -840,7 +840,7 @@ public:
             // get all the KVs from existing btree;
             volume_req* vreq = volume_req::make_request();
             vreq->lba = start;
-            vreq->nblks = end - start + 1;
+            vreq->nlbas = end - start + 1;
             vreq->seqId = INVALID_SEQ_ID;
             vreq->lastCommited_seqId = INVALID_SEQ_ID;
 
@@ -1003,7 +1003,7 @@ private:
 #ifndef NDEBUG
         stringstream ss;
         /* For map load test vol instance is null */
-        ss << ",Lba:" << param->m_req->lba() << ",nblks:" << param->m_req->nblks() << ",seqId:" << param->m_req->seqId
+        ss << ",Lba:" << param->m_req->lba() << ",nlbas:" << param->m_req->nlbas() << ",seqId:" << param->m_req->seqId
            << ",last_seqId:" << param->m_req->lastCommited_seqId;
         ss << ",is:" << ((MappingKey*)param->get_input_range().get_start_key())->to_string();
         ss << ",ie:" << ((MappingKey*)param->get_input_range().get_end_key())->to_string();
@@ -1096,7 +1096,7 @@ private:
 #ifndef NDEBUG
         stringstream ss;
         if (param->m_req && param->m_req->vol()) {
-            ss << "Lba:" << param->m_req->lba() << ",nblks:" << param->m_req->nblks()
+            ss << "Lba:" << param->m_req->lba() << ",nlbas:" << param->m_req->nlbas()
                << ",seqId:" << param->m_req->seqId << ",last_seqId:" << param->m_req->lastCommited_seqId
                << ",is_mod:" << param->is_state_modifiable();
         }
@@ -1124,18 +1124,18 @@ private:
             if (req->seqId <= seq_id) {
                 /* it is the latest entry, we should not override it */
                 replace_kv.emplace_back(existing.first, existing.second);
-                auto nblks = ve.get_nlba();
+                auto nlbas = ve.get_nlba();
                 if (req) {
                     Blob_Array< ValueEntry >& new_varray = new_val.get_array();
                     ValueEntry ve;
                     new_varray.get(0, ve, false);
                     /* free new blkid. it is overridden */
                     Free_Blk_Entry fbe(ve.get_blkId(), new_val_offset,
-                                       (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * nblks);
+                                       (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * nlbas);
                     req->push_fbe(fbe);
                 }
-                start_lba += nblks;
-                new_val_offset += nblks;
+                start_lba += nlbas;
+                new_val_offset += nlbas;
                 continue;
             }
 
@@ -1166,10 +1166,10 @@ private:
             auto end_lba_overlap = e_key->end() < end_lba ? e_key->end() : end_lba;
             compute_and_add_overlap(req, start_lba, end_lba_overlap, new_val, new_val_offset, *e_value,
                                     existing_val_offset, replace_kv);
-            uint32_t nblks = end_lba_overlap - start_lba + 1;
-            new_val_offset += nblks;
-            existing_val_offset += nblks;
-            start_lba += nblks;
+            uint32_t nlbas = end_lba_overlap - start_lba + 1;
+            new_val_offset += nlbas;
+            existing_val_offset += nlbas;
+            start_lba += nlbas;
 
             if (e_key->end() > end_lba) {
                 assert(start_lba == end_lba + 1);

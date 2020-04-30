@@ -231,11 +231,11 @@ struct io_req_t : public vol_interface_req {
     std::shared_ptr< vol_info_t > vol_info;
     bool done = false;
 
-    io_req_t(const std::shared_ptr< vol_info_t >& vinfo, void* wbuf, uint64_t lba, uint32_t nblks) :
-            vol_interface_req(wbuf, lba, nblks),
+    io_req_t(const std::shared_ptr< vol_info_t >& vinfo, void* wbuf, uint64_t lba, uint32_t nlbas) :
+            vol_interface_req(wbuf, lba, nlbas),
             vol_info(vinfo) {
         auto page_size = VolInterface::get_instance()->get_page_size(vinfo->vol);
-        size = nblks * page_size;
+        size = nlbas * page_size;
         offset = lba * page_size;
         fd = vinfo->fd;
         is_read = (wbuf == nullptr);
@@ -750,7 +750,7 @@ public:
 
         {
             std::unique_lock< std::mutex > lk(req->vol_info->vol_mutex);
-            req->vol_info->m_vol_bm->reset_bits(req->lba, req->nblks);
+            req->vol_info->m_vol_bm->reset_bits(req->lba, req->nlbas);
         }
         --m_outstanding_ios;
     }
@@ -808,32 +808,32 @@ protected:
         /* XXX: does it really matter if it is atomic or not */
         int cur = ++m_cur_vol % tcfg.max_vols;
         uint64_t lba;
-        uint64_t nblks;
+        uint64_t nlbas;
     start:
         /* we won't be writing more then 128 blocks in one io */
         auto vinfo = m_voltest->vol_info[cur];
         auto vol = vinfo->vol;
         if (vol == nullptr) { return false; }
         if (vinfo->num_io.fetch_add(1, std::memory_order_acquire) == 1000) {
-            nblks = 200;
-            lba = (vinfo->start_large_lba.fetch_add(nblks, std::memory_order_acquire)) % (vinfo->max_vol_blks - nblks);
+            nlbas = 200;
+            lba = (vinfo->start_large_lba.fetch_add(nlbas, std::memory_order_acquire)) % (vinfo->max_vol_blks - nlbas);
         } else {
-            nblks = 2;
-            lba = (vinfo->start_lba.fetch_add(nblks, std::memory_order_acquire)) % (vinfo->max_vol_blks - nblks);
+            nlbas = 2;
+            lba = (vinfo->start_lba.fetch_add(nlbas, std::memory_order_acquire)) % (vinfo->max_vol_blks - nlbas);
         }
-        if (nblks == 0) { nblks = 1; }
+        if (nlbas == 0) { nlbas = 1; }
 
         if (m_load_type != load_type_t::sequential) {
             /* can not support concurrent overlapping writes if whole data need to be verified */
             std::unique_lock< std::mutex > lk(vinfo->vol_mutex);
             /* check if someone is already doing writes/reads */
-            if (nblks && vinfo->m_vol_bm->is_bits_reset(lba, nblks)) {
-                vinfo->m_vol_bm->set_bits(lba, nblks);
+            if (nlbas && vinfo->m_vol_bm->is_bits_reset(lba, nlbas)) {
+                vinfo->m_vol_bm->set_bits(lba, nlbas);
             } else {
                 goto start;
             }
         }
-        return write_vol(cur, lba, nblks);
+        return write_vol(cur, lba, nlbas);
     }
 
     bool same_read() { return read_vol(0, 5, 100); }
@@ -842,7 +842,7 @@ protected:
         /* XXX: does it really matter if it is atomic or not */
         int cur = ++m_cur_vol % tcfg.max_vols;
         uint64_t lba;
-        uint64_t nblks;
+        uint64_t nlbas;
     start:
         /* we won't be writing more then 128 blocks in one io */
         auto vinfo = m_voltest->vol_info[cur];
@@ -852,30 +852,30 @@ protected:
         // lba: [0, max_vol_blks - max_blks)
 
         lba = rand() % (vinfo->max_vol_blks - max_blks);
-        // nblks: [1, max_blks]
-        nblks = rand() % (max_blks + 1);
-        if (nblks == 0) { nblks = 1; }
+        // nlbas: [1, max_blks]
+        nlbas = rand() % (max_blks + 1);
+        if (nlbas == 0) { nlbas = 1; }
 
         if (m_load_type != load_type_t::sequential) {
             /* can not support concurrent overlapping writes if whole data need to be verified */
             std::unique_lock< std::mutex > lk(vinfo->vol_mutex);
             /* check if someone is already doing writes/reads */
-            if (nblks && vinfo->m_vol_bm->is_bits_reset(lba, nblks)) {
-                vinfo->m_vol_bm->set_bits(lba, nblks);
+            if (nlbas && vinfo->m_vol_bm->is_bits_reset(lba, nlbas)) {
+                vinfo->m_vol_bm->set_bits(lba, nlbas);
             } else {
                 goto start;
             }
         }
-        return write_vol(cur, lba, nblks);
+        return write_vol(cur, lba, nlbas);
     }
 
-    bool write_vol(uint32_t cur, uint64_t lba, uint64_t nblks) {
+    bool write_vol(uint32_t cur, uint64_t lba, uint64_t nlbas) {
         uint8_t* wbuf;
         auto vinfo = m_voltest->vol_info[cur];
         auto vol = vinfo->vol;
         if (vol == nullptr) { return false; }
 
-        uint64_t size = nblks * VolInterface::get_instance()->get_page_size(vol);
+        uint64_t size = nlbas * VolInterface::get_instance()->get_page_size(vol);
         auto ret = posix_memalign((void**)&wbuf, 4096, size);
         assert(ret == 0);
 
@@ -883,13 +883,13 @@ protected:
          * to write to a file after ios are completed.
          */
         populate_buf(wbuf, size, lba, vinfo.get());
-        auto vreq = boost::intrusive_ptr< io_req_t >(new io_req_t(vinfo, wbuf, lba, nblks));
+        auto vreq = boost::intrusive_ptr< io_req_t >(new io_req_t(vinfo, wbuf, lba, nlbas));
         vreq->cookie = (void*)this;
 
         ++m_voltest->output.write_cnt;
         ++m_outstanding_ios;
         auto ret_io = VolInterface::get_instance()->write(vol, vreq);
-        LOGDEBUG("Wrote lba: {}, nblks: {} outstanding_ios={}", lba, nblks, m_outstanding_ios.load());
+        LOGDEBUG("Wrote lba: {}, nlbas: {} outstanding_ios={}", lba, nlbas, m_outstanding_ios.load());
         if (ret_io != no_error) { return false; }
         return true;
     }
@@ -910,7 +910,7 @@ protected:
         /* XXX: does it really matter if it is atomic or not */
         int cur = ++m_cur_vol % tcfg.max_vols;
         uint64_t lba;
-        uint64_t nblks;
+        uint64_t nlbas;
 
     start:
         /* we won't be writing more then 128 blocks in one io */
@@ -920,36 +920,36 @@ protected:
         uint64_t max_blks = tcfg.max_io_size / VolInterface::get_instance()->get_page_size(vol);
 
         lba = rand() % (vinfo->max_vol_blks - max_blks);
-        nblks = rand() % max_blks;
-        if (nblks == 0) { nblks = 1; }
+        nlbas = rand() % max_blks;
+        if (nlbas == 0) { nlbas = 1; }
 
         if (m_load_type != load_type_t::sequential) {
             /* Don't send overlapping reads with pending writes if data verification is on */
             std::unique_lock< std::mutex > lk(vinfo->vol_mutex);
             /* check if someone is already doing writes/reads */
-            if (vinfo->m_vol_bm->is_bits_reset(lba, nblks)) {
-                vinfo->m_vol_bm->set_bits(lba, nblks);
+            if (vinfo->m_vol_bm->is_bits_reset(lba, nlbas)) {
+                vinfo->m_vol_bm->set_bits(lba, nlbas);
             } else {
                 goto start;
             }
         }
 
-        auto ret = read_vol(cur, lba, nblks);
+        auto ret = read_vol(cur, lba, nlbas);
         return ret;
     }
 
-    bool read_vol(uint32_t cur, uint64_t lba, uint64_t nblks) {
+    bool read_vol(uint32_t cur, uint64_t lba, uint64_t nlbas) {
         auto vinfo = m_voltest->vol_info[cur];
         auto vol = vinfo->vol;
         if (vol == nullptr) { return false; }
 
-        auto vreq = boost::intrusive_ptr< io_req_t >(new io_req_t(vinfo, nullptr, lba, nblks));
+        auto vreq = boost::intrusive_ptr< io_req_t >(new io_req_t(vinfo, nullptr, lba, nlbas));
         vreq->cookie = (void*)this;
 
         ++m_voltest->output.read_cnt;
         ++m_outstanding_ios;
         auto ret_io = VolInterface::get_instance()->read(vol, vreq);
-        LOGDEBUG("Read lba: {}, nblks: {} outstanding_ios={}", lba, nblks, m_outstanding_ios.load());
+        LOGDEBUG("Read lba: {}, nlbas: {} outstanding_ios={}", lba, nlbas, m_outstanding_ios.load());
         if (ret_io != no_error) { return false; }
         return true;
     }
@@ -991,12 +991,12 @@ protected:
                         j = memcmp((void*)b.bytes, (uint8_t*)((uint64_t)req->validate_buf + tot_size_read),
                                    sizeof(uint64_t));
                         if (j != 0) { LOGINFO("header mismatch lba read {}", *((uint64_t*)b.bytes)); }
-                        LOGINFO("mismatch found lba {} nblks {} total_size_read {}", req->lba, req->nblks,
+                        LOGINFO("mismatch found lba {} nlbas {} total_size_read {}", req->lba, req->nlbas,
                                 tot_size_read);
 #ifndef NDEBUG
                         VolInterface::get_instance()->print_tree(req->vol_info->vol);
 #endif
-                        LOGINFO("lba {} {}", req->lba, req->nblks);
+                        LOGINFO("lba {} {}", req->lba, req->nlbas);
                         std::this_thread::sleep_for(std::chrono::seconds(5));
                         sleep(30);
                         assert(0);

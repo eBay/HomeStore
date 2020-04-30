@@ -157,7 +157,7 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
     uint32_t start_lba = 0;
 
     auto vreq = volume_req::make(iface_req);
-    THIS_VOL_LOG(TRACE, volume, vreq, "write: lba={}, nlbas={}", vreq->lba(), vreq->nblks());
+    THIS_VOL_LOG(TRACE, volume, vreq, "write: lba={}, nlbas={}", vreq->lba(), vreq->nlbas());
     COUNTER_INCREMENT(m_metrics, volume_outstanding_data_write_count, 1);
 
     /* Sanity checks */
@@ -184,9 +184,9 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
 
         for (uint32_t i = 0; i < bid.size(); ++i) {
             /* Create child requests */
-            int nblks = bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) / get_page_size();
-            auto vc_req = create_vol_child_req(bid[i], vreq, start_lba, nblks);
-            start_lba += nblks;
+            int nlbas = bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) / get_page_size();
+            auto vc_req = create_vol_child_req(bid[i], vreq, start_lba, nlbas);
+            start_lba += nlbas;
 
             /* Issue child request */
             /* store blkid which is used later to create journal entry */
@@ -197,10 +197,10 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
 
             offset += bid[i].data_size(m_hb->get_data_pagesz());
         }
-        assert((start_lba - vreq->lba()) == vreq->nblks());
+        assert((start_lba - vreq->lba()) == vreq->nlbas());
 
         /* compute checksum and store it in a request */
-        for (uint32_t i = 0; i < vreq->nblks(); ++i) {
+        for (uint32_t i = 0; i < vreq->nlbas(); ++i) {
             homeds::blob outb;
             vreq->mvec->get(&outb, i * get_page_size());
             vreq->push_csum(crc16_t10dif(init_crc_16, outb.bytes, get_page_size()));
@@ -222,7 +222,7 @@ std::error_condition Volume::read(const vol_interface_req_ptr& iface_req) {
     std::error_condition ret = no_error;
 
     auto vreq = volume_req::make(iface_req);
-    THIS_VOL_LOG(TRACE, volume, vreq, "read: lba={}, nblks={}, sync={}", vreq->lba(), vreq->nblks(), vreq->is_sync());
+    THIS_VOL_LOG(TRACE, volume, vreq, "read: lba={}, nlbas={}, sync={}", vreq->lba(), vreq->nlbas(), vreq->is_sync());
     COUNTER_INCREMENT(m_metrics, volume_read_count, 1);
     COUNTER_INCREMENT(m_metrics, volume_outstanding_data_read_count, 1);
 
@@ -334,7 +334,7 @@ bool Volume::check_and_complete_req(const volume_req_ptr& vreq, const std::error
         m_read_blk_tracker->safe_remove_blks(vreq);
 
         /* update counters */
-        size = get_page_size() * vreq->nblks();
+        size = get_page_size() * vreq->nlbas();
         auto latency_us = get_elapsed_time_us(vreq->io_start_time);
         if (vreq->is_read_op()) {
             COUNTER_DECREMENT(m_metrics, volume_outstanding_data_read_count, 1);
@@ -472,7 +472,7 @@ std::error_condition Volume::read_indx(const volume_req_ptr& vreq,
 
 /* It is not lock protected. It should be called only by thread for a vreq */
 volume_child_req_ptr Volume::create_vol_child_req(BlkId& bid, const volume_req_ptr& vreq, uint32_t start_lba,
-                                                  int nblks) {
+                                                  int nlbas) {
     volume_child_req_ptr vc_req = volume_child_req::make_request();
     vc_req->parent_req = vreq;
     vc_req->is_read = vreq->is_read_op();
@@ -484,14 +484,14 @@ volume_child_req_ptr Volume::create_vol_child_req(BlkId& bid, const volume_req_p
     vc_req->part_of_batch = vreq->iface_req->part_of_batch;
 
     assert((bid.data_size(HomeBlks::instance()->get_data_pagesz()) % get_page_size()) == 0);
-    vc_req->nblks = nblks;
+    vc_req->nlbas = nlbas;
 
-    assert(vc_req->nblks > 0);
+    assert(vc_req->nlbas > 0);
 
     if (!vreq->is_sync()) { vreq->outstanding_io_cnt.increment(1); }
     ++vreq->vc_req_cnt;
-    THIS_VOL_LOG(TRACE, volume, vc_req->parent_req, "Blks to io: bid: {}, offset: {}, nblks: {}", bid.to_string(),
-                 bid.data_size(HomeBlks::instance()->get_data_pagesz()), vc_req->nblks);
+    THIS_VOL_LOG(TRACE, volume, vc_req->parent_req, "Blks to io: bid: {}, offset: {}, nlbas: {}", bid.to_string(),
+                 bid.data_size(HomeBlks::instance()->get_data_pagesz()), vc_req->nlbas);
     return vc_req;
 }
 
@@ -506,7 +506,7 @@ std::error_condition Volume::alloc_blk(const volume_req_ptr& vreq, std::vector< 
     hints.multiplier = (get_page_size() / m_hb->get_data_pagesz());
 
     try {
-        BlkAllocStatus status = m_hb->get_data_blkstore()->alloc_blk(vreq->nblks() * get_page_size(), hints, bid);
+        BlkAllocStatus status = m_hb->get_data_blkstore()->alloc_blk(vreq->nlbas() * get_page_size(), hints, bid);
         if (status != BLK_ALLOC_SUCCESS) {
             LOGERROR("failing IO as it is out of disk space");
             return std::errc::no_space_on_device;

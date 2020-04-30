@@ -89,7 +89,7 @@ void Blk_Read_Tracker::safe_remove_blk_on_write(Free_Blk_Entry& fbe) {
         } else {
             COUNTER_INCREMENT(m_metrics, blktrack_erase_blk_rescheduled, 1);
         }
-        THIS_VOL_LOG(TRACE, volume, , "Marked erase write Bid:{},offset:{},nblks:{},status:{}", bid, fbe.blk_offset(),
+        THIS_VOL_LOG(TRACE, volume, , "Marked erase write Bid:{},offset:{},nlbas:{},status:{}", bid, fbe.blk_offset(),
                      fbe.blks_to_free(), is_removed);
     }
 }

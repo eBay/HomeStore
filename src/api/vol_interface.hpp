@@ -74,7 +74,7 @@ struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
     sisl::atomic_counter< int > refcount;
     std::atomic< bool > is_fail_completed = false;
     uint64_t lba;
-    uint32_t nblks;
+    uint32_t nlbas;
     bool is_read = true;
     bool sync = false;
     bool part_of_batch = false;
@@ -106,7 +106,7 @@ struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
     std::error_condition get_status() const { return err; }
 
 public:
-    vol_interface_req(void* wbuf, uint64_t lba, uint32_t nblks, bool is_sync = false);
+    vol_interface_req(void* wbuf, uint64_t lba, uint32_t nlbas, bool is_sync = false);
     virtual ~vol_interface_req();
     virtual void free_yourself() { delete this; }
 };
@@ -200,12 +200,12 @@ public:
      *
      * @param buf - Buffer from write needs to be written to volume. nullptr for read operation
      * @param lba - LBA of the volume
-     * @param nblks - Number of blks to write.
+     * @param nlbas - Number of blks to write.
      * @param sync - Is the sync io request or async
      *
      * @return vol_interface_req_ptr
      */
-    virtual vol_interface_req_ptr create_vol_interface_req(void* buf, uint64_t lba, uint32_t nblks,
+    virtual vol_interface_req_ptr create_vol_interface_req(void* buf, uint64_t lba, uint32_t nlbas,
                                                            bool sync = false) = 0;
 
     /**

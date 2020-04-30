@@ -60,7 +60,7 @@ typedef boost::intrusive_ptr< volume_child_req > volume_child_req_ptr;
 
 struct volume_child_req : public blkstore_req< BlkBuffer > {
     uint64_t lba;
-    int nblks;
+    int nlbas;
     bool is_read = false;
     std::vector< Free_Blk_Entry > blkIds_to_free;
     uint64_t reqId;
@@ -104,7 +104,7 @@ public:
 
     std::string to_string() {
         std::stringstream ss;
-        ss << ((is_read) ? "READ" : "WRITE") << ": lba=" << lba << " nblks=" << nblks;
+        ss << ((is_read) ? "READ" : "WRITE") << ": lba=" << lba << " nlbas=" << nlbas;
         return ss.str();
     }
 
@@ -123,10 +123,10 @@ struct Free_Blk_Entry {
     uint8_t m_nblks_to_free : NBLKS_BITS;
 
     Free_Blk_Entry(){};
-    Free_Blk_Entry(const BlkId& m_blkId, uint8_t m_blk_offset, uint8_t m_nblks_to_free) :
-            m_blkId(m_blkId),
-            m_blk_offset(m_blk_offset),
-            m_nblks_to_free(m_nblks_to_free) {}
+    Free_Blk_Entry(const BlkId& blkId, uint8_t blk_offset, uint8_t nblks_to_free) :
+            m_blkId(blkId),
+            m_blk_offset(blk_offset),
+            m_nblks_to_free(nblks_to_free) {}
 
     BlkId blk_id() const { return m_blkId; }
     uint8_t blk_offset() const { return m_blk_offset; }
@@ -262,7 +262,7 @@ private:
     void alloc_single_block_in_mem();
     bool check_and_complete_req(const volume_req_ptr& vreq, const std::error_condition& err);
 
-    volume_child_req_ptr create_vol_child_req(BlkId& bid, const volume_req_ptr& vreq, uint32_t start_lba, int nblks);
+    volume_child_req_ptr create_vol_child_req(BlkId& bid, const volume_req_ptr& vreq, uint32_t start_lba, int nlbas);
 
     template < typename... Args >
     void assert_formatter(fmt::memory_buffer& buf, const char* msg, const std::string& req_str, const Args&... args) {
@@ -523,7 +523,7 @@ struct volume_req {
     Volume* vol() { return iface_req->vol_instance.get(); }
     bool is_read_op() const { return iface_req->is_read; }
     uint64_t lba() const { return iface_req->lba; }
-    uint32_t nblks() const { return iface_req->nblks; }
+    uint32_t nlbas() const { return iface_req->nlbas; }
     bool is_sync() const { return iface_req->sync; }
     std::error_condition& err() const { return iface_req->err; }
     std::vector< buf_info >& read_buf() { return iface_req->read_buf_list; }
@@ -558,9 +558,9 @@ private:
             csum_list(0),
             alloc_blkid_list(0),
             fbe_list(0) {
-        assert((vi_req->vol_instance->get_page_size() * vi_req->nblks) <= VOL_MAX_IO_SIZE);
+        assert((vi_req->vol_instance->get_page_size() * vi_req->nlbas) <= VOL_MAX_IO_SIZE);
         if (!vi_req->is_read) {
-            mvec->set((uint8_t*)vi_req->write_buf, vi_req->vol_instance->get_page_size() * vi_req->nblks, 0);
+            mvec->set((uint8_t*)vi_req->write_buf, vi_req->vol_instance->get_page_size() * vi_req->nlbas, 0);
         }
 
         /* Trying to reserve the max possible size so that memory allocation is efficient */

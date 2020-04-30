@@ -82,7 +82,7 @@ class IOTest : public ::testing::Test {
         ssize_t size;
         off_t offset;
         uint64_t lba;
-        uint32_t nblks;
+        uint32_t nlbas;
         int      fd;
         bool     is_read;
         uint64_t cur_vol;
@@ -292,20 +292,20 @@ public:
         /* XXX: does it really matter if it is atomic or not */
         int      cur = ++cur_vol % max_vols;
         uint64_t lba = 0;
-        uint64_t nblks = 0;
+        uint64_t nlbas = 0;
         if (!io_size) {
             uint64_t max_blks = max_io_size / VolInterface::get_instance()->get_page_size(vol[cur]);
-            nblks = rand() % max_blks;
-            if (nblks == 0) {
-                nblks = 1;
+            nlbas = rand() % max_blks;
+            if (nlbas == 0) {
+                nlbas = 1;
             }
         } else {
-            nblks = (io_size * 1024) / (VolInterface::get_instance()->get_page_size(vol[cur]));
+            nlbas = (io_size * 1024) / (VolInterface::get_instance()->get_page_size(vol[cur]));
         }
-        lba = rand() % (max_vol_blks[cur % max_vols] - nblks);
-        m_vol_bm[cur]->set_bits(lba, nblks);
+        lba = rand() % (max_vol_blks[cur % max_vols] - nlbas);
+        m_vol_bm[cur]->set_bits(lba, nlbas);
         uint8_t* buf = nullptr;
-        uint64_t size = nblks * VolInterface::get_instance()->get_page_size(vol[cur]);
+        uint64_t size = nlbas * VolInterface::get_instance()->get_page_size(vol[cur]);
         auto ret = posix_memalign((void**)&buf, 4096, size);
         if (ret) {
             assert(0);
@@ -316,14 +316,14 @@ public:
         assert(buf != nullptr);
         boost::intrusive_ptr< req > req(new struct req());
         req->lba = lba;
-        req->nblks = nblks;
+        req->nlbas = nlbas;
         req->size = size;
         req->offset = lba * VolInterface::get_instance()->get_page_size(vol[cur]);
         req->is_read = false;
         req->cur_vol = cur;
         ++outstanding_ios;
         ++write_cnt;
-        auto vreq = VolInterface::get_instance()->create_vol_interface_req(buf, lba, nblks, false, false););
+        auto vreq = VolInterface::get_instance()->create_vol_interface_req(buf, lba, nlbas, false, false););
         vreq->cookie = req;
         auto ret_io = VolInterface::get_instance()->write(vol[cur], vreq);
         if (ret_io != no_error) {
@@ -331,46 +331,46 @@ public:
             free(buf);
             outstanding_ios--;
             LOGINFO("write io failure");
-            m_vol_bm[cur]->reset_bits(lba, nblks);
+            m_vol_bm[cur]->reset_bits(lba, nlbas);
         }
-        LOGDEBUG("Wrote {} {} ", lba, nblks);
+        LOGDEBUG("Wrote {} {} ", lba, nlbas);
     }
 
     void random_read() {
         /* XXX: does it really matter if it is atomic or not */
         int      cur = ++cur_vol % max_vols;
         uint64_t lba = 0;
-        uint32_t nblks = 0;
+        uint32_t nlbas = 0;
         if (!io_size) {
             uint64_t max_blks = max_io_size / VolInterface::get_instance()->get_page_size(vol[cur]);
-            nblks = rand() % max_blks;
-            if (nblks == 0) {
-                nblks = 1;
+            nlbas = rand() % max_blks;
+            if (nlbas == 0) {
+                nlbas = 1;
             }
         } else {
-            nblks = (io_size * 1024) / (VolInterface::get_instance()->get_page_size(vol[cur]));
+            nlbas = (io_size * 1024) / (VolInterface::get_instance()->get_page_size(vol[cur]));
         }
-        lba = rand() % (max_vol_blks[cur % max_vols] - nblks);
-        auto b = m_vol_bm[cur]->get_next_contiguous_n_reset_bits(lba, nblks);
+        lba = rand() % (max_vol_blks[cur % max_vols] - nlbas);
+        auto b = m_vol_bm[cur]->get_next_contiguous_n_reset_bits(lba, nlbas);
         if (b.nbits == 0) { return; }
 
         lba = b.start_bit;
-        read_vol(cur, lba, nblks);
-        LOGDEBUG("Read {} {} ", lba, nblks);
+        read_vol(cur, lba, nlbas);
+        LOGDEBUG("Read {} {} ", lba, nlbas);
     }
 
-    void read_vol(uint32_t cur, uint64_t lba, uint64_t nblks) {
-        uint64_t size = nblks * VolInterface::get_instance()->get_page_size(vol[cur]);
+    void read_vol(uint32_t cur, uint64_t lba, uint64_t nlbas) {
+        uint64_t size = nlbas * VolInterface::get_instance()->get_page_size(vol[cur]);
         boost::intrusive_ptr< req > req(new struct req());
         req->lba = lba;
-        req->nblks = nblks;
+        req->nlbas = nlbas;
         req->is_read = true;
         req->size = size;
         req->offset = lba * VolInterface::get_instance()->get_page_size(vol[cur]);
         req->cur_vol = cur;
         outstanding_ios++;
         read_cnt++;
-        auto vreq = VolInterface::get_instance()->create_vol_interface_req(nullptr, lba, nblks, true, false);
+        auto vreq = VolInterface::get_instance()->create_vol_interface_req(nullptr, lba, nlbas, true, false);
         vreq->cookie = req;
         auto ret_io = VolInterface::get_instance()->read(vol[cur], vreq);
         if (ret_io != no_error) {
