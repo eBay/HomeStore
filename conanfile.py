@@ -23,7 +23,7 @@ class HomestoreConan(ConanFile):
                         'shared=False',
                         'fPIC=True',
                         'coverage=False',
-                        'sanitize=False',
+                        'sanitize=True',
                         )
 
     requires = (
