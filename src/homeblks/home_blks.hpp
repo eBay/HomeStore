@@ -15,6 +15,7 @@
 #include <settings/settings.hpp>
 #include "homeblks_config.hpp"
 #include <homeds/btree/writeBack_cache.hpp>
+#include <fds/sparse_vector.hpp>
 
 #ifndef DEBUG
 extern bool same_value_gen;
@@ -43,7 +44,7 @@ struct homeblks_sb {
     uint64_t magic; // deprecated
     uint64_t version;
     uint32_t gen_cnt; // deprecated
-    BlkId blkid; // depreacted
+    BlkId blkid;      // depreacted
     boost::uuids::uuid uuid;
 
     uint64_t boot_cnt;
@@ -124,11 +125,15 @@ public:
     static HomeBlksSafePtr safe_instance();
 
     ~HomeBlks() { m_thread_id.join(); }
-    virtual vol_interface_req_ptr create_vol_interface_req(std::shared_ptr< Volume > vol, void* buf, uint64_t lba,
-                                                           uint32_t nlbas, bool read, bool sync) override;
-    virtual std::error_condition write(const VolumePtr& vol, const vol_interface_req_ptr& req) override;
-    virtual std::error_condition read(const VolumePtr& vol, const vol_interface_req_ptr& req) override;
+    virtual std::error_condition write(const VolumePtr& vol, const vol_interface_req_ptr& req,
+                                       bool part_of_batch = false) override;
+    virtual std::error_condition read(const VolumePtr& vol, const vol_interface_req_ptr& req,
+                                      bool part_of_batch = false) override;
     virtual std::error_condition sync_read(const VolumePtr& vol, const vol_interface_req_ptr& req) override;
+    virtual void submit_io_batch() override;
+
+    virtual vol_interface_req_ptr create_vol_interface_req(void* buf, uint64_t lba, uint32_t nlbas,
+                                                           bool sync = false) override;
 
     virtual VolumePtr create_volume(const vol_params& params) override;
     virtual std::error_condition remove_volume(const boost::uuids::uuid& uuid) override;
@@ -144,7 +149,8 @@ public:
     virtual bool vol_state_change(const VolumePtr& vol, vol_state new_state) override;
 
     void vol_scan_cmpltd(const VolumePtr& vol, vol_state state, bool success);
-    virtual void attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback cb) override;
+    virtual void attach_vol_completion_cb(const VolumePtr& vol, const io_comp_callback& cb) override;
+    virtual void attach_end_of_batch_cb(const end_of_batch_callback& cb) override;
 
     virtual bool shutdown(bool force = false) override;
     virtual bool trigger_shutdown(const shutdown_comp_callback& shutdown_done_cb = nullptr,
@@ -242,6 +248,7 @@ private:
     void do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool force);
     blk_buf_t get_valid_buf(const std::vector< blk_buf_t >& bbuf, bool& rewrite);
 
+    void call_multi_vol_completions();
     void migrate_sb();
     void migrate_homeblk_sb();
     void migrate_volume_sb();
@@ -280,6 +287,9 @@ private:
     bool m_vol_shutdown_cmpltd = false;
     HomeBlksMetrics m_metrics;
     std::atomic< bool > m_start_shutdown;
+
+    static thread_local std::vector< std::shared_ptr< Volume > >* s_io_completed_volumes;
 };
+
 } // namespace homestore
 #endif // OMSTORE_OMSTORE_HPP

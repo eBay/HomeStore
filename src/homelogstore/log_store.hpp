@@ -29,7 +29,7 @@ struct logstore_req {
     log_req_comp_cb_t cb;       // Callback upon completion of write (overridden than default)
 
     static logstore_req* make(HomeLogStore* store, logstore_seq_num_t seq_num, const sisl::blob& data,
-                              bool is_write_req) {
+                              bool is_write_req = true) {
         logstore_req* req = sisl::ObjectAllocator< logstore_req >::make_object();
         req->log_store = store;
         req->seq_num = seq_num;

@@ -12,10 +12,10 @@
 #include <cassert>
 #include <sstream>
 #include <cstring>
-#include "homeds/array/flexarray.hpp"
-#include "homeds/memory/mempiece.hpp"
+#include "engine/homeds/array/flexarray.hpp"
+#include "engine/homeds/memory/mempiece.hpp"
 #include <fds/utils.hpp>
-#include "common/homestore_config.hpp"
+#include "engine/common/homestore_config.hpp"
 
 //#include "device/device.h"
 

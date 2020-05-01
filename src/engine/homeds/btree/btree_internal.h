@@ -12,8 +12,8 @@
 #include <cmath>
 #include <fds/utils.hpp>
 #include <fds/freelist_allocator.hpp>
-#include "common/error.h"
-#include "common/homestore_header.hpp"
+#include "engine/common/error.h"
+#include "engine/common/homestore_header.hpp"
 #include <metrics/metrics.hpp>
 #include <utility/enum.hpp>
 #include <boost/intrusive_ptr.hpp>
@@ -25,7 +25,7 @@
 #include <boost/preprocessor/cat.hpp>
 #include <boost/preprocessor/control/if.hpp>
 #include <boost/preprocessor/stringize.hpp>
-#include "common/homestore_assert.hpp"
+#include "engine/common/homestore_assert.hpp"
 
 ENUM(btree_status_t, uint32_t, success, not_found, item_found, closest_found, closest_removed, retry, has_more,
      read_failed, write_failed, stale_buf, refresh_failed, put_failed, space_not_avail, split_failed, insert_failed,

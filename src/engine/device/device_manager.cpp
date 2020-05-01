@@ -9,7 +9,8 @@
 #include <fcntl.h>
 #include <boost/range.hpp>
 #include <iomgr/iomgr.hpp>
-#include "common/homestore_assert.hpp"
+#include <fds/utils.hpp>
+#include "engine/common/homestore_assert.hpp"
 
 SDS_LOGGING_DECL(device, DEVICE_MANAGER)
 
@@ -39,7 +40,7 @@ DeviceManager::DeviceManager(NewVDevCallback vcb, uint32_t const vdev_metadata_s
     m_last_vdevid = INVALID_VDEV_ID;
     m_vdev_metadata_size = vdev_metadata_size;
     m_pdev_id = 0;
-    m_dm_info_size = ALIGN_SIZE(DM_INFO_BLK_SIZE, HS_STATIC_CONFIG(disk_attr.phys_page_size));
+    m_dm_info_size = sisl::round_up(DM_INFO_BLK_SIZE, HS_STATIC_CONFIG(disk_attr.phys_page_size));
     auto ret = posix_memalign((void**)&m_chunk_memory, HS_STATIC_CONFIG(disk_attr.align_size), m_dm_info_size);
 
     HS_ASSERT_NOTNULL(LOGMSG, m_chunk_memory);

@@ -26,8 +26,8 @@ void Blk_Read_Tracker::insert(BlkId& bid) {
     THIS_VOL_LOG(TRACE, volume, , "Marked read pending Bid:{},{}", bid, inserted);
 }
 
-void Blk_Read_Tracker::safe_remove_blks(volume_req_ptr &vreq) {
-    if (vreq->is_read) {
+void Blk_Read_Tracker::safe_remove_blks(const volume_req_ptr& vreq) {
+    if (vreq->is_read_op()) {
         for (uint32_t i = 0; i < vreq->fbe_list.size(); ++i) {
             safe_remove_blk_on_read(vreq->fbe_list[i]);
         }
@@ -44,9 +44,7 @@ void Blk_Read_Tracker::safe_remove_blk_on_read(Free_Blk_Entry& fbe) {
     uint64_t hash_code = util::Hash64((const char*)b.bytes, (size_t)b.size);
 
 #ifdef _PRERELEASE
-    if (auto flip_ret = homestore_flip->get_test_flip< int >("vol_delay_read_us")) {
-        usleep(flip_ret.get());
-    }
+    if (auto flip_ret = homestore_flip->get_test_flip< int >("vol_delay_read_us")) { usleep(flip_ret.get()); }
 #endif
     bool is_removed = m_pending_reads_map.check_and_remove(
         fbe.m_blkId, hash_code,
@@ -59,9 +57,7 @@ void Blk_Read_Tracker::safe_remove_blk_on_read(Free_Blk_Entry& fbe) {
             }
         },
         true /* dec additional ref corresponding to insert by pending_read_blk_cb*/);
-    if (is_removed) {
-        COUNTER_DECREMENT(m_metrics, blktrack_pending_blk_read_map_sz, 1);
-    }
+    if (is_removed) { COUNTER_DECREMENT(m_metrics, blktrack_pending_blk_read_map_sz, 1); }
     THIS_VOL_LOG(TRACE, volume, , "UnMarked Read pending Bid:{},status:{}", fbe.blk_id(), is_removed);
 }
 
@@ -93,7 +89,7 @@ void Blk_Read_Tracker::safe_remove_blk_on_write(Free_Blk_Entry& fbe) {
         } else {
             COUNTER_INCREMENT(m_metrics, blktrack_erase_blk_rescheduled, 1);
         }
-        THIS_VOL_LOG(TRACE, volume, , "Marked erase write Bid:{},offset:{},nblks:{},status:{}", bid, fbe.blk_offset(),
+        THIS_VOL_LOG(TRACE, volume, , "Marked erase write Bid:{},offset:{},nlbas:{},status:{}", bid, fbe.blk_offset(),
                      fbe.blks_to_free(), is_removed);
     }
 }

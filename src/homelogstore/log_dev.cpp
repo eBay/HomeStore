@@ -51,7 +51,7 @@ void LogDev::start(bool format) {
 
 void LogDev::stop() {
     HS_ASSERT(LOGMSG, (m_pending_flush_size == 0), "LogDev stopped while writes to logdev are pending completion");
-    HS_ASSERT(LOGMSG, (!m_is_flushing.load()), "LogDev stopped while there is ongoing flush");
+    // HS_ASSERT(LOGMSG, (!m_is_flushing.load()), "LogDev stopped while there is ongoing flush");
 
     iomanager.cancel_global_timer(m_flush_timer_hdl);
     m_log_records = nullptr;
@@ -323,6 +323,7 @@ void LogDev::process_logdev_completions(const boost::intrusive_ptr< blkstore_req
 }
 
 void LogDev::on_flush_completion(LogGroup* lg) {
+    LOGTRACE("Flush completed for logid[{} - {}]", lg->m_flush_log_idx_from, lg->m_flush_log_idx_upto);
     m_log_records->complete(lg->m_flush_log_idx_from, lg->m_flush_log_idx_upto);
     m_last_flush_idx = lg->m_flush_log_idx_upto;
     auto flush_ld_key = logdev_key{m_last_flush_idx, lg->m_log_dev_offset};
@@ -366,6 +367,7 @@ void LogDev::unlock_flush() {
     m_is_flushing.store(false, std::memory_order_release);
 
     // Try to do chain flush if its really needed.
+    LOGTRACE("Unlocked the flush, try doing chain flushing if needed");
     flush_if_needed();
 }
 

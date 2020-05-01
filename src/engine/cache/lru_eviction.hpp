@@ -5,8 +5,7 @@
 #pragma once
 
 #include <mutex>
-#include "cache_common.hpp"
-#include "common/homestore_assert.hpp"
+#include "engine/common/homestore_assert.hpp"
 
 SDS_LOGGING_DECL(cache)
 

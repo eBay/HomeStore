@@ -1,6 +1,6 @@
 #pragma once
-#include "device/blkbuffer.hpp"
-#include "blkstore/blkstore.hpp"
+#include "engine/device/blkbuffer.hpp"
+#include "engine/blkstore/blkstore.hpp"
 #include <urcu-call-rcu.h>
 #include <urcu.h>
 #include <utility/urcu_helper.hpp>
@@ -9,7 +9,7 @@
 #include <cassert>
 #include <memory>
 #include <sds_logging/logging.h>
-#include "common/homestore_header.hpp"
+#include "engine/common/homestore_header.hpp"
 
 /*
  * These are the design requirements of this class. If we don't follow these requirements then there can be serious

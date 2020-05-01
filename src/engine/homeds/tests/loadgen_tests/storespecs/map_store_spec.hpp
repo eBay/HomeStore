@@ -24,9 +24,7 @@ class MapStoreSpec : public StoreSpec< K, V > {
 public:
     MapStoreSpec() {}
 
-    void process_metadata_completions(const volume_req_ptr& req) {
-        LOGTRACE("MapInfo persisted:", req->lba, req->nlbas);
-    }
+    void process_metadata_completions(volume_req* req) { LOGTRACE("MapInfo persisted:", req->lba(), req->nlbas()); }
 
     void process_free_blk_callback(Free_Blk_Entry fbe) {
         // remove this assert if someone is actually calling this funciton
@@ -55,15 +53,14 @@ public:
 
     /* Map put always appends if exists, no feature to force udpate/insert and return error */
     virtual bool update(K& k, std::shared_ptr< V > v) override {
-        boost::intrusive_ptr< volume_req > req(new volume_req());
+        auto iface_req = vol_interface_req_ptr(new vol_interface_req(nullptr, k.start(), k.get_n_lba()));
+        auto req = volume_req::make(iface_req);
         ValueEntry ve;
         v->get_array().get(0, ve, false);
         req->seqId = ve.get_seqId();
         req->lastCommited_seqId = req->seqId; // keeping only latest version always
-        req->lba = k.start();
-        req->nlbas = k.get_n_lba();
         req->push_blkid(ve.get_blkId());
-        m_map->put(req, k, *(v.get()), nullptr);
+        m_map->put(req.get(), k, *(v.get()), nullptr);
         return true;
     }
 
@@ -93,16 +90,17 @@ public:
                                        end_key.start() - start_key.start() + 1);
 
         auto result_count = 0U;
-        boost::intrusive_ptr< volume_req > volreq(new volume_req());
-        volreq->lba = start_key.start();
-        if (!start_incl) { volreq->lba++; }
-        volreq->nlbas = end_key.end() - volreq->lba + 1;
-        if (!end_incl) { volreq->nlbas--; }
+        auto lba = start_incl ? start_key.start() : start_key.start() + 1;
+        auto nblks = end_key.end() - lba + 1;
+        if (!end_incl) { --nblks; }
+        auto iface_req = vol_interface_req_ptr(new vol_interface_req(nullptr, lba, nblks));
+        auto volreq = volume_req::make(iface_req);
+
         volreq->seqId = INVALID_SEQ_ID;
         volreq->lastCommited_seqId = INVALID_SEQ_ID; // read only latest value
 
         std::vector< std::pair< MappingKey, MappingValue > > kvs;
-        m_map->get(volreq, kvs, false);
+        m_map->get(volreq.get(), kvs, false);
         uint64_t j = 0;
 
         std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;
@@ -110,7 +108,7 @@ public:
             carr[i] = 1;
         }
 
-        for (uint64_t lba = volreq->lba; lba < volreq->lba + volreq->nlbas;) {
+        for (uint64_t lba = volreq->lba(); lba < volreq->lba() + volreq->nlbas();) {
             if (kvs[j].first.start() != lba) {
                 lba++;
                 continue;
@@ -136,7 +134,12 @@ public:
                               std::vector< std::shared_ptr< V > >& result) {
         assert(start_incl);
         assert(end_incl);
-        boost::intrusive_ptr< volume_req > req(new volume_req());
+
+        auto lba = start_key.start();
+        auto nblks = end_key.end() - lba + 1;
+        auto iface_req = vol_interface_req_ptr(new vol_interface_req(nullptr, lba, nblks));
+        auto req = volume_req::make(iface_req);
+
         V& start_value = *(result[0].get());
         V& end_value = *(result.back());
 
@@ -147,10 +150,7 @@ public:
         bid.set_nblks(end_value.end() - start_value.start() + 1);
         req->push_blkid(bid);
 
-        req->lba = start_key.start();
-        req->nlbas = end_key.end() - req->lba + 1;
-
-        MappingKey key(req->lba, req->nlbas);
+        MappingKey key(req->lba(), req->nlbas());
 
         std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;
         for (auto i = 0ul; i < CS_ARRAY_STACK_SIZE; i++)
@@ -161,8 +161,8 @@ public:
         MappingValue value(ve);
         LOGDEBUG("Mapping range put:{} {} ", key.to_string(), value.to_string());
 
-        assert(req->nlbas == bid.get_nblks());
-        m_map->put(req, key, value, nullptr);
+        assert(req->nlbas() == bid.get_nblks());
+        m_map->put(req.get(), key, value, nullptr);
 
         return true;
     }

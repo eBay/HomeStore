@@ -197,7 +197,7 @@ public:
                          bool restart = false) {
         if (restart) {
             shutdown();
-            sleep(10);
+            sleep(5);
         }
 
         std::vector< dev_info > device_info;
