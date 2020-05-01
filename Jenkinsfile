@@ -32,8 +32,8 @@ pipeline {
 
         stage('Build') {
             steps {
-                sh "docker build --rm --build-arg BUILD_TYPE=debug --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_PASS=${CONAN_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg ARTIFACTORY_PASS=${ARTIFACTORY_PASS} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${GIT_COMMIT}-nosanitize ."
-                sh "docker build --rm --build-arg BUILD_TYPE=sanitize --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_PASS=${CONAN_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg ARTIFACTORY_PASS=${ARTIFACTORY_PASS} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${GIT_COMMIT}-debug ."
+                sh "docker build --rm --build-arg BUILD_TYPE=debug --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_PASS=${CONAN_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg ARTIFACTORY_PASS=${ARTIFACTORY_PASS} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${GIT_COMMIT}-debug ."
+                sh "docker build --rm --build-arg BUILD_TYPE=sanitize --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_PASS=${CONAN_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg ARTIFACTORY_PASS=${ARTIFACTORY_PASS} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${GIT_COMMIT}-sanitize ."
                 sh "docker build --rm --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_PASS=${CONAN_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg ARTIFACTORY_PASS=${ARTIFACTORY_PASS} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${GIT_COMMIT}-release ."
             }
         }
@@ -42,7 +42,7 @@ pipeline {
             steps {
                 sh "docker run --rm ${PROJECT}-${GIT_COMMIT}-debug"
                 sh "docker run --rm ${PROJECT}-${GIT_COMMIT}-release"
-                sh "docker run --rm ${PROJECT}-${GIT_COMMIT}-nosanitize"
+                sh "docker run --rm ${PROJECT}-${GIT_COMMIT}-sanitize"
                 slackSend channel: '#conan-pkgs', message: "*${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}* has been uploaded to conan repo."
             }
         }
@@ -82,7 +82,7 @@ pipeline {
         always {
             sh "docker rmi -f ${PROJECT}-${GIT_COMMIT}-debug"
             sh "docker rmi -f ${PROJECT}-${GIT_COMMIT}-release"
-            sh "docker rmi -f ${PROJECT}-${GIT_COMMIT}-nosanitize"
+            sh "docker rmi -f ${PROJECT}-${GIT_COMMIT}-sanitize"
             sh "docker rmi -f ${PROJECT}-${GIT_COMMIT}-test"
         }
     }
