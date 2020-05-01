@@ -21,7 +21,7 @@ RUN set -eux; \
       conan install -pr debug ${PKG_NAME}/${PKG_VERSION}@${CONAN_USER}/${CONAN_CHANNEL}; \
     else \
       conan install -pr -o homestore:sanitize=False ${BUILD_TYPE} ${PKG_NAME}/${PKG_VERSION}@${CONAN_USER}/${CONAN_CHANNEL}; \
-    fi;
+    fi; \
     conan remove -f '*'; \
     pip install grpcio-tools
 
