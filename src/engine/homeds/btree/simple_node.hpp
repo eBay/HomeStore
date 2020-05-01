@@ -178,9 +178,6 @@ public:
         }
 
         this->inc_gen();
-#ifndef NDEBUG
-        validate_sanity();
-#endif
     }
 
     uint32_t get_available_size(const BtreeConfig& cfg) const {
