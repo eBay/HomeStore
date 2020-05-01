@@ -18,7 +18,7 @@
 #include <linux/fs.h>
 #include <sys/ioctl.h>
 #endif
-#include "common/homestore_assert.hpp"
+#include "engine/common/homestore_assert.hpp"
 #include <iomgr/iomgr.hpp>
 
 SDS_LOGGING_DECL(device)
@@ -133,14 +133,14 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
     }
 
     auto temp = m_devsize;
-    m_devsize = ALIGN_SIZE_TO_LEFT(m_devsize, HS_STATIC_CONFIG(disk_attr.phys_page_size));
+    m_devsize = sisl::round_down(m_devsize, HS_STATIC_CONFIG(disk_attr.phys_page_size));
 
     if (m_devsize != temp) { LOGWARN("device size is not the multiple of physical page size old size {}", temp); }
     LOGINFO("Device {} size is {}", m_devname, m_devsize);
     m_dm_chunk[0] = m_dm_chunk[1] = nullptr;
     if (is_init) {
         /* create a chunk */
-        uint64_t align_size = ALIGN_SIZE(SUPERBLOCK_SIZE, HS_STATIC_CONFIG(disk_attr.phys_page_size));
+        uint64_t align_size = sisl::round_up(SUPERBLOCK_SIZE, HS_STATIC_CONFIG(disk_attr.phys_page_size));
         HS_ASSERT_CMP(LOGMSG, get_size() % HS_STATIC_CONFIG(disk_attr.phys_page_size), ==, 0);
         m_mgr->create_new_chunk(this, align_size, get_size() - align_size, nullptr);
 
@@ -158,7 +158,7 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
          * so at any given point only one SB chunk is valid.
          */
         for (int i = 0; i < 2; ++i) {
-            uint64_t align_size = ALIGN_SIZE(dm_info_size, HS_STATIC_CONFIG(disk_attr.phys_page_size));
+            uint64_t align_size = sisl::round_up(dm_info_size, HS_STATIC_CONFIG(disk_attr.phys_page_size));
             HS_ASSERT_CMP(LOGMSG, align_size, ==, dm_info_size);
             m_dm_chunk[i] = m_mgr->alloc_chunk(this, INVALID_VDEV_ID, align_size, INVALID_CHUNK_ID);
             m_dm_chunk[i]->set_sb_chunk();
@@ -273,20 +273,22 @@ inline void PhysicalDev::read_superblock() {
     }
 }
 
-void PhysicalDev::write(const char* data, uint32_t size, uint64_t offset, uint8_t* cookie) {
-    drive_iface->async_write(get_devfd(), data, size, (off_t)offset, cookie);
+void PhysicalDev::write(const char* data, uint32_t size, uint64_t offset, uint8_t* cookie, bool part_of_batch) {
+    drive_iface->async_write(get_devfd(), data, size, (off_t)offset, cookie, part_of_batch);
 }
 
-void PhysicalDev::writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie) {
-    drive_iface->async_writev(get_devfd(), iov, iovcnt, size, offset, cookie);
+void PhysicalDev::writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie,
+                         bool part_of_batch) {
+    drive_iface->async_writev(get_devfd(), iov, iovcnt, size, offset, cookie, part_of_batch);
 }
 
-void PhysicalDev::read(char* data, uint32_t size, uint64_t offset, uint8_t* cookie) {
-    drive_iface->async_read(get_devfd(), data, size, (off_t)offset, cookie);
+void PhysicalDev::read(char* data, uint32_t size, uint64_t offset, uint8_t* cookie, bool part_of_batch) {
+    drive_iface->async_read(get_devfd(), data, size, (off_t)offset, cookie, part_of_batch);
 }
 
-void PhysicalDev::readv(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie) {
-    drive_iface->async_readv(get_devfd(), iov, iovcnt, size, (off_t)offset, cookie);
+void PhysicalDev::readv(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie,
+                        bool part_of_batch) {
+    drive_iface->async_readv(get_devfd(), iov, iovcnt, size, (off_t)offset, cookie, part_of_batch);
 }
 
 ssize_t PhysicalDev::sync_write(const char* data, uint32_t size, uint64_t offset) {

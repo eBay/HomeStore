@@ -14,7 +14,7 @@
 #include <boost/preprocessor/control/if.hpp>
 #include <boost/preprocessor/stringize.hpp>
 #include <metrics/metrics.hpp>
-#include "common/homestore_assert.hpp"
+#include "engine/common/homestore_assert.hpp"
 
 using namespace homeds::btree;
 
@@ -288,8 +288,7 @@ public:
     void add_free_blks(uint64_t nblks) { m_free_blks.fetch_add(nblks, std::memory_order_acq_rel); }
 
     void remove_free_blks(uint64_t nblks) {
-        if (get_free_blks() < nblks)
-            return;
+        if (get_free_blks() < nblks) return;
         m_free_blks.fetch_sub(nblks, std::memory_order_acq_rel);
     }
 

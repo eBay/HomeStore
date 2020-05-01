@@ -71,7 +71,7 @@ struct BlkEvictionRecord : public homeds::HashNode, sisl::ObjLifeCounter< BlkEvi
 
 class BlkReadTrackerMetrics : public sisl::MetricsGroupWrapper {
 public:
-    explicit BlkReadTrackerMetrics(const char* vol_uuid) : sisl::MetricsGroupWrapper("BlkReadTracker", vol_uuid) {
+    explicit BlkReadTrackerMetrics(const char* vol_name) : sisl::MetricsGroupWrapper("BlkReadTracker", vol_name) {
         REGISTER_COUNTER(blktrack_pending_blk_read_map_sz, "Size of pending blk read map",
                          sisl::_publish_as::publish_as_gauge);
         REGISTER_COUNTER(blktrack_erase_blk_rescheduled, "Erase blk rescheduled due to concurrent rw");
@@ -90,7 +90,7 @@ class Blk_Read_Tracker {
 public:
     Blk_Read_Tracker(const char* vol_name, boost::uuids::uuid vol_uuid, blk_remove_cb remove_cb) :
             m_pending_reads_map(HB_SETTINGS_VALUE(volume->estimated_pending_blk_reads)),
-            m_metrics(boost::lexical_cast< std::string >(vol_uuid).c_str()),
+            m_metrics(vol_name),
             m_remove_cb(remove_cb),
             m_vol_name(vol_name),
             m_vol_uuid(vol_uuid) {}
@@ -103,9 +103,10 @@ public:
     /* after overwriting blk id in write flow, its marked for safe removal if cannot be freed immediatly*/
     void safe_remove_blk_on_write(Free_Blk_Entry& fbe);
 
-    void safe_remove_blks(boost::intrusive_ptr< volume_req >& vreq);
+    void safe_remove_blks(const boost::intrusive_ptr< volume_req >& vreq);
     uint64_t get_size() { return m_pending_reads_map.get_size(); }
     boost::uuids::uuid get_uuid() { return m_vol_uuid; }
+    const std::string& get_name() const { return m_vol_name; }
 };
 } // namespace homestore
 

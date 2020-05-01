@@ -7,15 +7,17 @@
 //#include "eviction.cpp"
 #include "eviction.hpp"
 #include <utility/atomic_counter.hpp>
-#include "homeds/hash/intrusive_hashset.hpp"
+#include "engine/homeds/hash/intrusive_hashset.hpp"
 #include "lru_eviction.hpp"
 #include <boost/intrusive_ptr.hpp>
 #include <fds/obj_allocator.hpp>
-#include "common/homestore_config.hpp"
+#include "engine/common/homestore_config.hpp"
 #include <execinfo.h>
 #include <utility/obj_life_counter.hpp>
 #include <metrics/metrics.hpp>
 #include <fds/utils.hpp>
+
+SDS_LOGGING_DECL(cache_vmod_evict, cache_vmod_read, cache_vmod_write)
 
 namespace homestore {
 

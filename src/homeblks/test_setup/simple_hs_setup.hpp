@@ -1,5 +1,5 @@
 #pragma once
-#include <main/vol_interface.hpp>
+#include "api/vol_interface.hpp"
 #include <sds_logging/logging.h>
 #include <iomgr/iomgr.hpp>
 #include <iomgr/aio_drive_interface.hpp>
@@ -72,16 +72,15 @@ struct simple_store_cfg {
 struct simple_store_req : public vol_interface_req {
     ssize_t size;
     off_t offset;
-    uint64_t lba;
-    uint32_t nblks;
-    uint8_t* buf;
-    bool is_read;
     uint64_t cur_vol;
     bool done = false;
 
-    simple_store_req() { buf = nullptr; }
-    virtual ~simple_store_req() { free(buf); }
-    virtual void free_yourself() override { delete this; }
+    simple_store_req(uint8_t* wbuf, uint64_t lba, uint32_t nlbas) : vol_interface_req(wbuf, lba, nlbas) {}
+    virtual ~simple_store_req() {
+        if (write_buf) free(write_buf);
+    }
+    // void free_yourself() override { delete this; }
+    // std::string to_string() override { return "simple_store_req"; }
 };
 
 struct vol_info {
@@ -92,7 +91,8 @@ struct vol_info {
 
     explicit vol_info(const VolumePtr& obj) {
         vol_obj = obj;
-        max_vol_blks = vol_interface->get_vol_capacity(obj).initial_total_size / vol_interface->get_page_size(obj);
+        max_vol_blks =
+            VolInterface::get_instance()->get_system_capacity().initial_total_size / vol_interface->get_page_size(obj);
         blk_bits = std::make_unique< homeds::Bitset >(max_vol_blks);
     }
 
@@ -169,6 +169,8 @@ public:
             std::bind(&SimpleTestStore::vol_state_change_cb, this, std::placeholders::_1, std::placeholders::_2,
                       std::placeholders::_3);
         m_init_params.vol_found_cb = std::bind(&SimpleTestStore::vol_found_cb, this, std::placeholders::_1);
+        // m_init_params.end_of_batch_cb = std::bind(&SimpleTestStore::multi_vol_done_cb, this,
+        // std::placeholders::_1);
         boost::uuids::string_generator gen;
         m_init_params.system_uuid = gen("01970496-0262-11e9-8eb2-f2801f1b9fd1");
     }
@@ -265,74 +267,72 @@ public:
         }
     }
 
-    virtual void write(int vordinal = -1, uint64_t lba = -1U, uint32_t nblks = -1U) {
+    virtual void write(int vordinal = -1, uint64_t lba = -1U, uint32_t nlbas = -1U) {
         static int last_write_vol = -1;
         // Pick the volume, number of blks, lbas if not specified
         if (vordinal == -1) { vordinal = ++last_write_vol % m_cfg.m_nvols; }
         auto& vinfo = m_vol_infos[vordinal];
 
-        if (nblks == -1U) {
+        if (nlbas == -1U) {
             auto max_blks = m_cfg.m_max_io_size / vol_interface->get_page_size(vinfo.vol_obj);
-            nblks = (rand() % max_blks);
-            if (nblks == 0) { nblks = 1; }
+            nlbas = (rand() % max_blks);
+            if (nlbas == 0) { nlbas = 1; }
         }
-        if (lba == -1U) { lba = rand() % (vinfo.max_vol_blks - nblks); }
-        vinfo.update_blk_bits([&](auto* bset) { bset->set_bits(lba, nblks); }); // Mark those blks as busy
+        if (lba == -1U) { lba = rand() % (vinfo.max_vol_blks - nlbas); }
+        vinfo.update_blk_bits([&](auto* bset) { bset->set_bits(lba, nlbas); }); // Mark those blks as busy
 
         uint8_t* buf = nullptr;
-        uint64_t size = nblks * vol_interface->get_page_size(vinfo.vol_obj);
+        uint64_t size = nlbas * vol_interface->get_page_size(vinfo.vol_obj);
         auto ret = posix_memalign((void**)&buf, 4096, size);
         if (ret) { assert(0); }
         assert(buf != nullptr);
 
-        boost::intrusive_ptr< simple_store_req > req(
-            new simple_store_req(vinfo.vol_obj, buf, lba, nblks, false, false));
+        boost::intrusive_ptr< simple_store_req > req(new simple_store_req(buf, lba, nlbas));
         req->size = size;
         req->offset = lba * vol_interface->get_page_size(vinfo.vol_obj);
         req->cur_vol = vordinal;
         m_outstanding_ios.fetch_add(1, std::memory_order_acq_rel);
         m_write_cnt.fetch_add(1, std::memory_order_relaxed);
 
-        LOGDEBUG("Writing {} {} ", lba, nblks);
+        LOGDEBUG("Writing {} {} ", lba, nlbas);
         auto ret_io = vol_interface->write(vinfo.vol_obj, req);
         if (ret_io != no_error) {
             assert(0);
             free(buf);
             m_outstanding_ios.fetch_sub(1, std::memory_order_acq_rel);
             LOGINFO("write io failure");
-            vinfo.update_blk_bits([&](auto* bset) { bset->reset_bits(lba, nblks); });
+            vinfo.update_blk_bits([&](auto* bset) { bset->reset_bits(lba, nlbas); });
         }
     }
 
-    virtual void read(int vordinal = -1, uint64_t lba = -1, uint64_t nblks = -1U) {
+    virtual void read(int vordinal = -1, uint64_t lba = -1, uint64_t nlbas = -1U) {
         static int last_read_vol = -1;
 
         // Pick the volume, number of blks, lbas if not specified
         if (vordinal == -1) { vordinal = ++last_read_vol % m_cfg.m_nvols; }
         auto& vinfo = m_vol_infos[vordinal];
 
-        if (nblks == -1U) {
+        if (nlbas == -1U) {
             auto max_blks = m_cfg.m_max_io_size / vol_interface->get_page_size(vinfo.vol_obj);
-            nblks = (rand() % max_blks) + 1;
+            nlbas = (rand() % max_blks) + 1;
         }
-        if (lba == -1U) { lba = rand() % (vinfo.max_vol_blks - nblks); }
+        if (lba == -1U) { lba = rand() % (vinfo.max_vol_blks - nlbas); }
 
         // Get the nearest continous set bits
-        auto b = vinfo.blk_bits->get_next_contiguous_n_reset_bits(lba, nblks);
+        auto b = vinfo.blk_bits->get_next_contiguous_n_reset_bits(lba, nlbas);
         if (b.nbits == 0) { return; }
         lba = b.start_bit;
-        uint64_t size = nblks * vol_interface->get_page_size(vinfo.vol_obj);
+        uint64_t size = nlbas * vol_interface->get_page_size(vinfo.vol_obj);
 
-        boost::intrusive_ptr< simple_store_req > req(
-            new simple_store_req(vinfo.vol_obj, nullptr, lba, nblks, true, false));
+        boost::intrusive_ptr< simple_store_req > req(new simple_store_req(nullptr, lba, nlbas));
         req->size = size;
         req->offset = lba * vol_interface->get_page_size(vinfo.vol_obj);
         req->cur_vol = vordinal;
         m_outstanding_ios.fetch_add(1, std::memory_order_acq_rel);
         m_read_cnt.fetch_add(1, std::memory_order_relaxed);
 
-        LOGDEBUG("Reading {} {} ", lba, nblks);
-        auto ret_io = vol_interface->read(vinfo.vol_obj, lba, nblks, req);
+        LOGDEBUG("Reading {} {} ", lba, nlbas);
+        auto ret_io = vol_interface->read(vinfo.vol_obj, req);
         if (ret_io != no_error) {
             m_outstanding_ios.fetch_sub(1, std::memory_order_acq_rel);
             m_read_err_cnt.fetch_add(1, std::memory_order_relaxed);
@@ -360,12 +360,12 @@ public:
         LOGTRACE("IO DONE, req_id={}, outstanding_ios={}", req->request_id,
                  m_outstanding_ios.load(std::memory_order_relaxed));
         if (!req->is_read && (req->err == no_error) && m_cfg.is_read_verify) {
-            (void)VolInterface::get_instance()->sync_read(vinfo.vol_obj, req->lba, req->nblks, req);
+            //(void)VolInterface::get_instance()->sync_read(vinfo.vol_obj, req->lba, req->nlbas, req);
             LOGTRACE("IO DONE, req_id={}, outstanding_ios={}", req->request_id,
                      m_outstanding_ios.load(std::memory_order_relaxed));
         }
 
-        vinfo.update_blk_bits([&](auto* bset) { bset->reset_bits(req->lba, req->nblks); });
+        vinfo.update_blk_bits([&](auto* bset) { bset->reset_bits(req->lba, req->nlbas); });
         m_outstanding_ios.fetch_sub(1, std::memory_order_acq_rel);
 
         if (get_elapsed_time_ms(m_start_time) > m_cfg.m_run_time_ms) {

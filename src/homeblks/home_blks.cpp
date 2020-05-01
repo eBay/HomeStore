@@ -26,6 +26,7 @@ bool same_value_gen = false;
 
 HomeBlksSafePtr HomeBlks::_instance = nullptr;
 std::string HomeBlks::version = PACKAGE_VERSION;
+thread_local std::vector< std::shared_ptr< Volume > >* HomeBlks::s_io_completed_volumes = nullptr;
 
 VolInterface* VolInterfaceImpl::init(const init_params& cfg, bool force_reinit) {
     return (HomeBlks::init(cfg, force_reinit));
@@ -62,6 +63,16 @@ VolInterface* HomeBlks::init(const init_params& cfg, bool force_reinit) {
         return nullptr;
     }
 }
+
+vol_interface_req::vol_interface_req(void* wbuf, uint64_t lba, uint32_t nlbas, bool is_sync) :
+        write_buf(wbuf),
+        request_id(counter_generator.next_request_id()),
+        refcount(0),
+        lba(lba),
+        nlbas(nlbas),
+        sync(is_sync) {}
+
+vol_interface_req::~vol_interface_req() = default;
 
 HomeBlks::HomeBlks(const init_params& cfg) : m_cfg(cfg), m_metrics("HomeBlks") {
     LOGINFO("Initializing HomeBlks with Config {}", m_cfg.to_string());
@@ -125,28 +136,33 @@ void HomeBlks::attach_prepare_volume_cp_id(std::map< boost::uuids::uuid, vol_cp_
     }
 }
 
-vol_interface_req_ptr HomeBlks::create_vol_interface_req(std::shared_ptr< Volume > vol, void* buf, uint64_t lba,
-                                                         uint32_t nlbas, bool read, bool sync) {
-    return Volume::create_volume_req(vol, buf, lba, nlbas, read, sync);
+vol_interface_req_ptr HomeBlks::create_vol_interface_req(void* buf, uint64_t lba, uint32_t nlbas, bool is_sync) {
+    return vol_interface_req_ptr(new vol_interface_req(buf, lba, nlbas, is_sync));
 }
 
-std::error_condition HomeBlks::write(const VolumePtr& vol, const vol_interface_req_ptr& req) {
+std::error_condition HomeBlks::write(const VolumePtr& vol, const vol_interface_req_ptr& req, bool part_of_batch) {
     assert(m_rdy);
     if (!vol) {
         assert(0);
         throw std::invalid_argument("null vol ptr");
     }
     if (!m_rdy || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
+    req->vol_instance = vol;
+    req->part_of_batch = part_of_batch;
+    req->is_read = false;
     return (vol->write(req));
 }
 
-std::error_condition HomeBlks::read(const VolumePtr& vol, const vol_interface_req_ptr& req) {
+std::error_condition HomeBlks::read(const VolumePtr& vol, const vol_interface_req_ptr& req, bool part_of_batch) {
     assert(m_rdy);
     if (!vol) {
         assert(0);
         throw std::invalid_argument("null vol ptr");
     }
     if (!m_rdy || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
+    req->vol_instance = vol;
+    req->part_of_batch = part_of_batch;
+    req->is_read = true;
     return (vol->read(req));
 }
 
@@ -157,6 +173,7 @@ std::error_condition HomeBlks::sync_read(const VolumePtr& vol, const vol_interfa
         throw std::invalid_argument("null vol ptr");
     }
     if (!m_rdy || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
+    req->vol_instance = vol;
     return (vol->read(req));
 }
 
@@ -229,6 +246,11 @@ SnapshotPtr HomeBlks::snap_volume(VolumePtr volptr) {
     return sp;
 }
 
+void HomeBlks::submit_io_batch() {
+    iomanager.default_drive_interface()->submit_batch();
+    call_multi_vol_completions();
+}
+
 HomeBlks* HomeBlks::instance() { return _instance.get(); }
 HomeBlksSafePtr HomeBlks::safe_instance() { return _instance; }
 
@@ -264,7 +286,10 @@ void HomeBlks::process_vdev_error(vdev_info_block* vb) {
     }
 }
 
-void HomeBlks::attach_vol_completion_cb(const VolumePtr& vol, io_comp_callback cb) { vol->attach_completion_cb(cb); }
+void HomeBlks::attach_vol_completion_cb(const VolumePtr& vol, const io_comp_callback& cb) {
+    vol->attach_completion_cb(cb);
+}
+void HomeBlks::attach_end_of_batch_cb(const end_of_batch_callback& cb) { m_cfg.end_of_batch_cb = cb; }
 
 void HomeBlks::vol_mounted(const VolumePtr& vol, vol_state state) {
     m_cfg.vol_mounted_cb(vol, state);
@@ -363,6 +388,10 @@ void HomeBlks::init_thread() {
                                      handler_info("/api/v1/verifyHS", HomeBlks::verify_hs, (void*)this),
                                  }}));
         m_http_server->start();
+
+        // Attach all completions
+        iomanager.default_drive_interface()->attach_end_of_batch_cb(
+            [this](int nevents) { call_multi_vol_completions(); });
 
         /* TODO :- start recovery_mgr recovery with callback */
 #if 0
@@ -599,6 +628,7 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
 
     /* XXX: can we move it to indx mgr */
     home_log_store_mgr.stop();
+    iomanager.stop_io_loop();
 
     if (m_shutdown_done_cb) m_shutdown_done_cb(true);
 
@@ -686,6 +716,25 @@ bool HomeBlks::fix_tree(VolumePtr vol, bool verify) {
     return vol->fix_mapping_btree(verify);
 }
 
+void HomeBlks::call_multi_vol_completions() {
+    auto v_comp_events = 0;
+
+    if (s_io_completed_volumes) {
+        auto comp_vols = s_io_completed_volumes;
+        s_io_completed_volumes = nullptr;
+
+        for (auto& v : *comp_vols) {
+            v_comp_events += v->call_batch_completion_cbs();
+        }
+        sisl::VectorPool< std::shared_ptr< Volume > >::free(comp_vols);
+        if (m_cfg.end_of_batch_cb && v_comp_events) {
+            LOGTRACE("Total completions across all volumes in the batch = {}. Calling end of batch callback",
+                     v_comp_events);
+            m_cfg.end_of_batch_cb(v_comp_events);
+        }
+    }
+}
+
 void HomeBlks::metablk_init(sb_blkstore_blob* blob, bool init) {
     MetaBlkMgr::init(m_meta_blk_store.get(), blob, &m_cfg, init);
 }
@@ -695,18 +744,18 @@ void HomeBlks::migrate_sb() {
     migrate_volume_sb();
     migrate_logstore_sb();
     migrate_cp_sb();
-            
+
     MetaBlkMgr::instance()->set_migrated();
 }
 
-void HomeBlks::migrate_logstore_sb() { }
+void HomeBlks::migrate_logstore_sb() {}
 void HomeBlks::migrate_cp_sb() {}
 
 void HomeBlks::migrate_homeblk_sb() {
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
     auto inst = MetaBlkMgr::instance();
     void* cookie = nullptr;
-    inst->add_sub_sb(meta_sub_type::HOMEBLK, (void*) m_homeblks_sb.get(), sizeof(homeblks_sb), cookie);
+    inst->add_sub_sb(meta_sub_type::HOMEBLK, (void*)m_homeblks_sb.get(), sizeof(homeblks_sb), cookie);
 }
 
 void HomeBlks::migrate_volume_sb() {

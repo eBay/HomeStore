@@ -13,7 +13,7 @@
 #include <pthread.h>
 #include "btree_internal.h"
 #include <folly/SharedMutex.h>
-#include "homeds/thread/lock.hpp"
+#include "engine/homeds/thread/lock.hpp"
 #include <isa-l/crc.h>
 #include <utility/atomic_counter.hpp>
 

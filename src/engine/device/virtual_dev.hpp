@@ -6,18 +6,19 @@
 #include <sds_logging/logging.h>
 
 #include "device.h"
-#include "blkalloc/blk_allocator.h"
-#include "blkalloc/varsize_blk_allocator.h"
+#include "engine/blkalloc/blk_allocator.h"
+#include "engine/blkalloc/varsize_blk_allocator.h"
 #include <vector>
 #include <memory>
 #include <boost/range/irange.hpp>
 #include <map>
-#include <common/error.h>
+#include "engine/common/error.h"
 #include <metrics/metrics.hpp>
+#include <fds/utils.hpp>
 #include <utility/atomic_counter.hpp>
-#include "common/homestore_config.hpp"
-#include "common/homestore_header.hpp"
-#include "common/homestore_assert.hpp"
+#include "engine/common/homestore_config.hpp"
+#include "engine/common/homestore_header.hpp"
+#include "engine/common/homestore_assert.hpp"
 
 SDS_LOGGING_DECL(device)
 
@@ -82,16 +83,17 @@ typedef std::function< void(boost::intrusive_ptr< virtualdev_req > req) > virtua
 #define to_vdev_req(req) boost::static_pointer_cast< virtualdev_req >(req)
 
 struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
-    uint64_t request_id;
+    uint64_t request_id = 0;
     uint64_t version;
     virtualdev_comp_callback cb;
     uint64_t size;
-    std::error_condition err;
-    bool is_read;
-    bool isSyncCall;
+    std::error_condition err = no_error;
+    bool is_read = false;
+    bool isSyncCall = false;
     sisl::atomic_counter< int > refcount;
     PhysicalDevChunk* chunk;
     Clock::time_point io_start_time;
+    bool part_of_batch = false;
 
 #ifndef NDEBUG
     uint64_t dev_offset;
@@ -102,11 +104,11 @@ struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
     void inc_ref() { intrusive_ptr_add_ref(this); }
     void dec_ref() { intrusive_ptr_release(this); }
 
-    static boost::intrusive_ptr< virtualdev_req > make_request() {
-        return boost::intrusive_ptr< virtualdev_req >(sisl::ObjectAllocator< virtualdev_req >::make_object());
-    }
-    virtual void free_yourself() { sisl::ObjectAllocator< virtualdev_req >::deallocate(this); }
-
+    // static boost::intrusive_ptr< virtualdev_req > make_request() {
+    //    return boost::intrusive_ptr< virtualdev_req >(sisl::ObjectAllocator< virtualdev_req >::make_object());
+    //}
+    // virtual void free_yourself() { sisl::ObjectAllocator< virtualdev_req >::deallocate(this); }
+    virtual void free_yourself() = 0;
     friend void intrusive_ptr_add_ref(virtualdev_req* req) { req->refcount.increment(1); }
     friend void intrusive_ptr_release(virtualdev_req* req) {
         if (req->refcount.decrement_testz()) { req->free_yourself(); }
@@ -115,7 +117,7 @@ struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
 
 protected:
     friend class sisl::ObjectAllocator< virtualdev_req >;
-    virtualdev_req() : request_id(0), err(no_error), is_read(false), isSyncCall(false), refcount(0) {}
+    virtualdev_req() : refcount(0) {}
 };
 
 [[maybe_unused]] static void virtual_dev_process_completions(int64_t res, uint8_t* cookie) {
@@ -273,7 +275,7 @@ public:
         }
 
         if (m_chunk_size % MIN_CHUNK_SIZE) {
-            m_chunk_size = ALIGN_SIZE(m_chunk_size, MIN_CHUNK_SIZE);
+            m_chunk_size = sisl::round_up(m_chunk_size, MIN_CHUNK_SIZE);
             HS_LOG(INFO, device, "size of a chunk is resized to {}", m_chunk_size);
         }
 
@@ -681,7 +683,7 @@ public:
             COUNTER_INCREMENT(pdev->get_metrics(), drive_async_write_count, 1);
             req->inc_ref();
             req->io_start_time = Clock::now();
-            pdev->write(buf, len, offset_in_dev, (uint8_t*)req.get());
+            pdev->write(buf, len, offset_in_dev, (uint8_t*)req.get(), req->part_of_batch);
             // we are going to get error in callback if the size being writen in aysc is not equal to the size that was
             // requested.
             bytes_written = len;
@@ -943,7 +945,7 @@ public:
             req->chunk = pchunk;
             req->io_start_time = Clock::now();
 
-            pdev->readv(iov, iovcnt, size, dev_offset, (uint8_t*)req.get());
+            pdev->readv(iov, iovcnt, size, dev_offset, (uint8_t*)req.get(), req->part_of_batch);
             bytes_read = size; // no one consumes return value for async read;
         }
 
@@ -953,7 +955,8 @@ public:
             for (auto mchunk : m_mirror_chunks.find(pchunk)->second) {
                 uint64_t dev_offset_m = mchunk->get_start_offset() + primary_chunk_offset;
                 req->inc_ref();
-                mchunk->get_physical_dev_mutable()->readv(iov, iovcnt, size, dev_offset_m, (uint8_t*)req.get());
+                mchunk->get_physical_dev_mutable()->readv(iov, iovcnt, size, dev_offset_m, (uint8_t*)req.get(),
+                                                          req->part_of_batch);
             }
         }
 
@@ -1030,7 +1033,7 @@ public:
             COUNTER_INCREMENT(pdev->get_metrics(), drive_async_write_count, 1);
             req->inc_ref();
             req->io_start_time = Clock::now();
-            pdev->writev(iov, iovcnt, len, offset_in_dev, (uint8_t*)req.get());
+            pdev->writev(iov, iovcnt, len, offset_in_dev, (uint8_t*)req.get(), req->part_of_batch);
             // we are going to get error in callback if the size being writen in aysc is not equal to the size that was
             // requested.
             bytes_written = len;
@@ -1334,7 +1337,7 @@ public:
             req->io_start_time = Clock::now();
             req->inc_ref();
 
-            pdev->read(ptr, size, primary_dev_offset, (uint8_t*)req.get());
+            pdev->read(ptr, size, primary_dev_offset, (uint8_t*)req.get(), req->part_of_batch);
             bytes_read = size;
         }
 

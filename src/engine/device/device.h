@@ -16,11 +16,11 @@
 #include <string>
 #include <sds_logging/logging.h>
 #include <fcntl.h>
-#include "blkalloc/blk_allocator.h"
+#include "engine/blkalloc/blk_allocator.h"
 #include <boost/uuid/uuid.hpp>            // uuid class
 #include <boost/uuid/uuid_generators.hpp> // generators
 #include <boost/uuid/uuid_io.hpp>         // streaming operators etc.
-#include "homeds/array/sparse_vector.hpp"
+#include <fds/sparse_vector.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <fds/utils.hpp>
 #include <isa-l/crc.h>
@@ -346,11 +346,13 @@ public:
     /* Find a free chunk which closestly match for the required size */
     PhysicalDevChunk* find_free_chunk(uint64_t req_size);
 
-    void write(const char* data, uint32_t size, uint64_t offset, uint8_t* cookie);
-    void writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie);
+    void write(const char* data, uint32_t size, uint64_t offset, uint8_t* cookie, bool part_of_batch = false);
+    void writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie,
+                bool part_of_batch = false);
 
-    void read(char* data, uint32_t size, uint64_t offset, uint8_t* cookie);
-    void readv(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie);
+    void read(char* data, uint32_t size, uint64_t offset, uint8_t* cookie, bool part_of_batch = false);
+    void readv(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie,
+               bool part_of_batch = false);
 
     ssize_t sync_write(const char* data, uint32_t size, uint64_t offset);
     ssize_t sync_writev(const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset);
@@ -501,9 +503,9 @@ private:
 
     std::mutex m_dev_mutex;
 
-    homeds::sparse_vector< std::unique_ptr< PhysicalDev > > m_pdevs;
-    homeds::sparse_vector< std::unique_ptr< PhysicalDevChunk > > m_chunks;
-    homeds::sparse_vector< AbstractVirtualDev* > m_vdevs;
+    sisl::sparse_vector< std::unique_ptr< PhysicalDev > > m_pdevs;
+    sisl::sparse_vector< std::unique_ptr< PhysicalDevChunk > > m_chunks;
+    sisl::sparse_vector< AbstractVirtualDev* > m_vdevs;
     uint32_t m_last_vdevid;
     uint32_t m_vdev_metadata_size; // Appln metadata size for vdev
     uint32_t m_pdev_id;

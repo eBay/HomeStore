@@ -12,19 +12,19 @@
 #include <vector>
 #include <atomic>
 #include <array>
-#include "homeds/thread/lock.hpp"
+#include "engine/homeds/thread/lock.hpp"
 #include "btree_internal.h"
 #include "btree_node.cpp"
 #include "physical_node.hpp"
 #include <sds_logging/logging.h>
 #include <boost/intrusive_ptr.hpp>
-#include <common/error.h>
+#include "engine/common/error.h"
 #include <csignal>
 #include <fds/utils.hpp>
 #include <fmt/ostream.h>
-#include "homeds/array/reserve_vector.hpp"
-#include <common/homestore_header.hpp>
-#include <common/homestore_config.hpp>
+#include "engine/homeds/array/reserve_vector.hpp"
+#include "engine/common/homestore_header.hpp"
+#include "engine/common/homestore_config.hpp"
 
 using namespace std;
 using namespace homeds::thread;

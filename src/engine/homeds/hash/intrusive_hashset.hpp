@@ -14,7 +14,7 @@
 #include <fds/utils.hpp>
 #include <boost/intrusive/slist.hpp>
 #include <boost/optional.hpp>
-#include "common/homestore_header.hpp"
+#include "engine/common/homestore_header.hpp"
 
 #ifdef GLOBAL_HASHSET_LOCK
 #include <mutex>

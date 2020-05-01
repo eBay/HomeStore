@@ -3,7 +3,7 @@
 #define _HOMESTORE_CONFIG_HPP_
 
 #include "homestore_header.hpp"
-#include <common/error.h>
+#include <engine/common/error.h>
 #include <cassert>
 #include <boost/intrusive_ptr.hpp>
 #include <settings/settings.hpp>
@@ -11,6 +11,7 @@
 #include <nlohmann/json.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/uuid/uuid_io.hpp>
+#include <boost/optional.hpp>
 
 SETTINGS_INIT(homestorecfg::HomeStoreSettings, homestore_config);
 
@@ -152,15 +153,15 @@ constexpr uint32_t TOTAL_SEGMENTS = 8;
 constexpr uint32_t MAX_ID_BITS_PER_CHUNK = ((1lu << ID_BITS) - 1);
 
 /* NOTE: it can give size more then the size passed in argument to make it aligned */
-#define ALIGN_SIZE(size, align) (((size % align) == 0) ? size : (size + (align - (size % align))))
+// #define ALIGN_SIZE(size, align) (((size % align) == 0) ? size : (size + (align - (size % align))))
 
 /* NOTE: it can give size less then size passed in argument to make it aligned */
-#define ALIGN_SIZE_TO_LEFT(size, align) (((size % align) == 0) ? size : (size - (size % align)))
+// #define ALIGN_SIZE_TO_LEFT(size, align) (((size % align) == 0) ? size : (size - (size % align)))
 
 #define MEMVEC_MAX_IO_SIZE (HS_STATIC_CONFIG(engine.min_io_size) * ((1 << MEMPIECE_ENCODE_MAX_BITS) - 1))
 #define MIN_CHUNK_SIZE (HS_STATIC_CONFIG(disk_attr.phys_page_size) * BLKS_PER_PORTION * TOTAL_SEGMENTS)
 #define MAX_CHUNK_SIZE                                                                                                 \
-    ALIGN_SIZE_TO_LEFT((MAX_ID_BITS_PER_CHUNK * HS_STATIC_CONFIG(engine.min_io_size)), MIN_CHUNK_SIZE) // 16T
+    sisl::round_down((MAX_ID_BITS_PER_CHUNK * HS_STATIC_CONFIG(engine.min_io_size)), MIN_CHUNK_SIZE) // 16T
 
 /* TODO: we store global unique ID in blkid. Instead it we only store chunk offset then
  * max cacapity will increase from MAX_CHUNK_SIZE to MAX_CHUNKS * MAX_CHUNK_SIZE.

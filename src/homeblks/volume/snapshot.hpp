@@ -27,6 +27,5 @@ public:
     }
 };
 
-} // namespace homestore
-
 typedef std::shared_ptr< Snapshot > SnapshotPtr;
+} // namespace homestore

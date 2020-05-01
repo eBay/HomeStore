@@ -90,7 +90,7 @@ class MinHS {
         ssize_t size;
         off_t offset;
         uint64_t lba;
-        uint32_t nblks;
+        uint32_t nlbas;
         int fd;
         uint8_t* buf;
         bool is_read;
@@ -268,15 +268,15 @@ public:
         }
     }
 
-    void read_vol(uint32_t cur, uint64_t lba, uint64_t nblks) {
+    void read_vol(uint32_t cur, uint64_t lba, uint64_t nlbas) {
         uint8_t* buf = nullptr;
-        uint64_t size = nblks * VolInterface::get_instance()->get_page_size(vol_info[cur]->vol);
+        uint64_t size = nlbas * VolInterface::get_instance()->get_page_size(vol_info[cur]->vol);
         auto ret = posix_memalign((void**)&buf, 4096, size);
         if (ret) { assert(0); }
         assert(buf != nullptr);
         req* req = new struct req();
         req->lba = lba;
-        req->nblks = nblks;
+        req->nlbas = nlbas;
         req->fd = vol_info[cur]->fd;
         req->is_read = true;
         req->size = size;
@@ -287,19 +287,19 @@ public:
         read_cnt++;
         auto vreq = VolInterface::get_instance()->create_vol_interface_req();
         vreq->cookie = req;
-        auto ret_io = VolInterface::get_instance()->read(vol_info[cur]->vol, lba, nblks, vreq);
+        auto ret_io = VolInterface::get_instance()->read(vol_info[cur]->vol, lba, nlbas, vreq);
         if (ret_io != no_error) {
             outstanding_ios--;
             read_err_cnt++;
             std::unique_lock< std::mutex > lk(vol_info[cur]->vol_mutex);
-            vol_info[cur]->m_vol_bm->reset_bits(lba, nblks);
+            vol_info[cur]->m_vol_bm->reset_bits(lba, nlbas);
         }
     }
 
-    void write_vol(uint32_t cur, uint64_t lba, uint64_t nblks) {
+    void write_vol(uint32_t cur, uint64_t lba, uint64_t nlbas) {
         uint8_t* buf = nullptr;
         uint8_t* buf1 = nullptr;
-        uint64_t size = nblks * VolInterface::get_instance()->get_page_size(vol_info[cur]->vol);
+        uint64_t size = nlbas * VolInterface::get_instance()->get_page_size(vol_info[cur]->vol);
         auto ret = posix_memalign((void**)&buf, 4096, size);
         if (ret) { assert(0); }
         ret = posix_memalign((void**)&buf1, 4096, size);
@@ -315,7 +315,7 @@ public:
 
         req* req = new struct req();
         req->lba = lba;
-        req->nblks = nblks;
+        req->nlbas = nlbas;
         req->size = size;
         req->offset = lba * VolInterface::get_instance()->get_page_size(vol_info[cur]->vol);
         req->buf = buf1;
@@ -328,29 +328,29 @@ public:
         assert(ret == req->size);
         auto vreq = VolInterface::get_instance()->create_vol_interface_req();
         vreq->cookie = req;
-        auto ret_io = VolInterface::get_instance()->write(vol_info[cur]->vol, lba, buf, nblks, vreq);
+        auto ret_io = VolInterface::get_instance()->write(vol_info[cur]->vol, lba, buf, nlbas, vreq);
         if (ret_io != no_error) {
             assert(0);
             free(buf);
             outstanding_ios--;
             std::unique_lock< std::mutex > lk(vol_info[cur]->vol_mutex);
-            vol_info[cur]->m_vol_bm->reset_bits(lba, nblks);
+            vol_info[cur]->m_vol_bm->reset_bits(lba, nlbas);
         }
-        LOGINFO("Wrote {} {} ", lba, nblks);
+        LOGINFO("Wrote {} {} ", lba, nlbas);
     }
 
     void same_write(int cur) {
         static int widx = 0;
-        struct lba_nblks_s {
+        struct lba_nlbas_s {
             uint64_t lba;
-            uint64_t nblks;
-        } lba_nblks[10] =
+            uint64_t nlbas;
+        } lba_nlbas[10] =
             //{{100, 16}, {132, 8}, {200, 8}, {220, 8}, {116, 8}, {130, 8}, {138, 8}, {142, 8}};
             /* 100-115, 116-123, 130-131, 132-137, 138-139, 140-141, 142-145, 146-149, 200-207, 220-227 */
             {{100, 16}, {132, 8}, {200, 8}, {220, 8}, {116, 8}, {120, 8}, {130, 8}, {270, 8}};
         /* 100-115, 116-119, 120-123, 124-127, 130-131, 132-137, 138-139, 200-207, 220-227, 270-277 */
 
-        write_vol(cur, lba_nblks[widx].lba, lba_nblks[widx].nblks);
+        write_vol(cur, lba_nlbas[widx].lba, lba_nlbas[widx].nlbas);
         widx++;
     }
 
@@ -358,23 +358,23 @@ public:
 
     void random_write(int cur) {
         // static uint64_t prev_lba = 0;
-        uint64_t lba, nblks;
+        uint64_t lba, nlbas;
         uint64_t max_blks = max_io_size / VolInterface::get_instance()->get_page_size(vol_info[cur]->vol);
     start:
         lba = rand() % (vol_info[cur]->max_vol_blks - max_blks);
-        nblks = rand() % max_blks;
-        if (nblks == 0) nblks = 1;
+        nlbas = rand() % max_blks;
+        if (nlbas == 0) nlbas = 1;
         {
             std::unique_lock< std::mutex > lk(vol_info[cur]->vol_mutex);
-            if (nblks && vol_info[cur]->m_vol_bm->is_bits_reset(lba, nblks)) {
-                vol_info[cur]->m_vol_bm->set_bits(lba, nblks);
+            if (nlbas && vol_info[cur]->m_vol_bm->is_bits_reset(lba, nlbas)) {
+                vol_info[cur]->m_vol_bm->set_bits(lba, nlbas);
             } else {
                 goto start;
             }
         }
 
         uint8_t *buf, *buf1;
-        uint64_t size = nblks * VolInterface::get_instance()->get_page_size(vol_info[cur]->vol);
+        uint64_t size = nlbas * VolInterface::get_instance()->get_page_size(vol_info[cur]->vol);
 
         buf = buf1 = nullptr;
         if (posix_memalign((void**)&buf, 4096, size)) { assert(0); }
@@ -387,7 +387,7 @@ public:
         req* req = new struct req();
 
         req->lba = lba;
-        req->nblks = nblks;
+        req->nlbas = nlbas;
         req->size = size;
         req->offset = lba * VolInterface::get_instance()->get_page_size(vol_info[cur]->vol);
         req->buf = buf1;
@@ -400,15 +400,15 @@ public:
 
         auto vreq = VolInterface::get_instance()->create_vol_interface_req();
         vreq->cookie = req;
-        auto ret_io = VolInterface::get_instance()->write(vol_info[cur]->vol, lba, buf, nblks, vreq);
+        auto ret_io = VolInterface::get_instance()->write(vol_info[cur]->vol, lba, buf, nlbas, vreq);
         if (ret_io != no_error) {
             assert(0);
             free(buf);
             outstanding_ios--;
             std::unique_lock< std::mutex > lk(vol_info[cur]->vol_mutex);
-            vol_info[cur]->m_vol_bm->reset_bits(lba, nblks);
+            vol_info[cur]->m_vol_bm->reset_bits(lba, nlbas);
         }
-        LOGINFO("Wrote {} {} ", lba, nblks);
+        LOGINFO("Wrote {} {} ", lba, nlbas);
     }
 
     uint64_t get_elapsed_time(Clock::time_point startTime) {

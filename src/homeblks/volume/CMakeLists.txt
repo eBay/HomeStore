@@ -12,9 +12,9 @@ add_library(hs_volume OBJECT ${VOLUME_SOURCE_FILES})
 set(TEST_VOLUME_SOURCE_FILES
        vol_gtest.cpp
       )
-#set(PERF_TEST_VOLUME_SOURCE_FILES
-#       vol_perf_gtest.cpp
-#      )
+set(PERF_TEST_VOLUME_SOURCE_FILES
+       vol_perf_gtest.cpp
+      )
 set(BTREE_CHECKER_SOURCE_FILES
        btree_checker.cpp
       )
@@ -29,23 +29,21 @@ add_executable(test_volume
 
 # Coverage doesn't like binaries that don't run...
 if (NOT ${CONAN_BUILD_COVERAGE})
-#    add_executable(perf_test_volume
-#                      ${PERF_TEST_VOLUME_SOURCE_FILES}
-#                    )
+    add_executable(perf_test_volume
+                      ${PERF_TEST_VOLUME_SOURCE_FILES}
+                    )
     add_executable(check_btree
                       ${BTREE_CHECKER_SOURCE_FILES}
                     )
     target_link_libraries(check_btree homeblks ${COMMON_LIB_DEPS})
-#    target_link_libraries(perf_test_volume homeblks ${COMMON_LIB_DEPS})
-#    TARGET_LINK_LIBRARIES(perf_test_volume ${Boost_LIBRARIES})
-    TARGET_LINK_LIBRARIES(check_btree ${Boost_LIBRARIES})
+    target_link_libraries(perf_test_volume homeblks ${COMMON_LIB_DEPS})
 endif ()
 
 #target_link_libraries(test_merge homeblks ${COMMON_LIB_DEPS})
 
 target_link_libraries(test_volume homeblks ${COMMON_LIB_DEPS})
 
-target_link_libraries(test_volume ${CONAN_LIBS})
+#target_link_libraries(test_volume ${CONAN_LIBS})
 
 add_test(NAME TestVol COMMAND test_volume)
 

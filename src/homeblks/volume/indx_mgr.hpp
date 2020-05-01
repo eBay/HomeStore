@@ -10,7 +10,6 @@
 
 namespace homestore {
 struct volume_req;
-typedef boost::intrusive_ptr< volume_req > volume_req_ptr;
 class mapping;
 class Volume;
 struct Free_Blk_Entry;
@@ -23,7 +22,7 @@ struct Free_Blk_Entry;
 struct journal_hdr {
     uint64_t lba;
     uint64_t indx_start_lba;
-    int nlba;
+    int nlbas;
 };
 
 class vol_journal_entry {
@@ -35,6 +34,11 @@ public:
 
     /* it update the alloc blk id and checksum */
     sisl::blob create_journal_entry(volume_req* v_req);
+
+    std::string to_string() const {
+        auto hdr = (journal_hdr*)m_mem;
+        return fmt::format("lba={}, indx_start_lba={}, nlbas={}", hdr->lba, hdr->indx_start_lba, hdr->nlbas);
+    }
 };
 
 enum indx_mgr_state { ONLINE = 0, DESTROYING = 1 };
@@ -118,10 +122,9 @@ struct indxmgr_msg {
 
 /* This class is responsible to manage active index and snapshot indx table */
 class IndxMgr {
-
-    typedef std::function< void(volume_req_ptr& req, std::error_condition err) > io_done_cb;
+    typedef std::function< void(const boost::intrusive_ptr< volume_req >& vreq, std::error_condition err) > io_done_cb;
     typedef std::function< void(Free_Blk_Entry fbe) > free_blk_callback;
-    typedef std::function< void(volume_req_ptr& req, BlkId& bid) > pending_read_blk_cb;
+    typedef std::function< void(volume_req* req, BlkId& bid) > pending_read_blk_cb;
     typedef std::function< void(vol_cp_id_ptr cur_vol_id, indx_cp_id* home_blks_id) > prepare_cb;
 
 private:
@@ -136,15 +139,16 @@ private:
      */
     vol_cp_id_ptr m_first_cp_id;
     boost::uuids::uuid m_uuid;
+    std::string m_name;
     indx_mgr_state m_state = indx_mgr_state::ONLINE;
     indxmgr_stop_cb m_stop_cb;
     bool m_last_cp = false;
     std::mutex prepare_cb_mtx;
     sisl::wisr_vector< prepare_cb > prepare_cb_list;
 
-    void journal_write(volume_req_ptr& vreq);
+    void journal_write(volume_req* vreq);
     void journal_comp_cb(logstore_seq_num_t seq_num, logdev_key ld_key, void* req);
-    btree_status_t update_indx_tbl(volume_req_ptr& vreq);
+    btree_status_t update_indx_tbl(volume_req* vreq);
     void cp_done(btree_cp_id* btree_id);
     btree_cp_id_ptr get_btree_id(indx_cp_id* cp_id);
     vol_cp_id_ptr get_volume_id(indx_cp_id* cp_id);
@@ -198,7 +202,7 @@ public:
     /* write/update indx table for a IO
      * @params req :- It create all information to update the indx mgr and journal
      */
-    void update_indx(volume_req_ptr& req);
+    void update_indx(const boost::intrusive_ptr< volume_req >& vreq);
 
     /* Get active superblock
      * @return :- get superblock of a active btree. It is immutable structure. It contains all infomation require to

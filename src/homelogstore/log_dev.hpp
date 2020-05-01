@@ -249,6 +249,7 @@ struct logdev_key {
         os << "[idx=" << k.idx << " dev_offset=" << k.dev_offset << "]";
         return os;
     }
+
     operator bool() const { return is_valid(); }
     bool is_valid() const { return (idx != -1); }
 };

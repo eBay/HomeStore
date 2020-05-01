@@ -3,9 +3,8 @@
 //
 
 #include "cache.h"
-#include "cache_common.hpp"
-#include "common/homestore_config.hpp"
-#include "common/homestore_assert.hpp"
+#include "engine/common/homestore_config.hpp"
+#include "engine/common/homestore_assert.hpp"
 #include <fds/obj_allocator.hpp>
 #include <memory>
 

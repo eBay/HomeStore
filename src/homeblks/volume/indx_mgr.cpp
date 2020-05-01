@@ -18,8 +18,8 @@ sisl::blob vol_journal_entry::create_journal_entry(volume_req* v_req) {
     m_mem = malloc(size);
     /* store journal hdr */
     auto hdr = (journal_hdr*)m_mem;
-    hdr->lba = v_req->lba;
-    hdr->nlba = v_req->nlbas;
+    hdr->lba = v_req->lba();
+    hdr->nlbas = v_req->nlbas();
     hdr->indx_start_lba = v_req->indx_start_lba;
 
     /* store alloc blkid */
@@ -40,6 +40,11 @@ sisl::blob vol_journal_entry::create_journal_entry(volume_req* v_req) {
         fbe[i] = v_req->fbe_list[i];
     }
     sisl::blob data((uint8_t*)m_mem, size);
+
+    HS_SUBMOD_LOG(TRACE, volume, v_req, "vol", v_req->vol()->get_name(),
+                  "Write to journal size={} lsn={}, journal_hdr:[{}], n_ids={}, n_csum={}, n_fbes={}", size,
+                  v_req->seqId, to_string(), v_req->alloc_blkid_list.size(), v_req->csum_list.size(),
+                  v_req->fbe_list.size());
     return data;
 }
 
@@ -134,6 +139,7 @@ IndxMgr::IndxMgr(std::shared_ptr< Volume > vol, const vol_params& params, io_don
         m_pending_read_blk_cb(read_blk_cb),
         m_first_cp_id(new vol_cp_id()),
         m_uuid(params.uuid),
+        m_name(params.vol_name),
         prepare_cb_list(4) {
     static std::once_flag flag1;
     m_active_map = new mapping(params.size, params.page_size, params.vol_name, free_blk_cb, IndxMgr::trigger_vol_cp,
@@ -150,14 +156,15 @@ IndxMgr::IndxMgr(std::shared_ptr< Volume > vol, const vol_params& params, io_don
 
 IndxMgr::IndxMgr(std::shared_ptr< Volume > vol, indx_mgr_active_sb* sb, io_done_cb io_cb, free_blk_callback free_blk_cb,
                  pending_read_blk_cb read_blk_cb) :
-        m_io_cb(io_cb), m_pending_read_blk_cb(read_blk_cb), m_first_cp_id(new vol_cp_id()), prepare_cb_list(4) {}
+        m_io_cb(io_cb),
+        m_pending_read_blk_cb(read_blk_cb),
+        m_first_cp_id(new vol_cp_id()),
+        prepare_cb_list(4) {}
 
 IndxMgr::~IndxMgr() {
     delete m_active_map;
 
-    if (m_shutdown_started) {
-        static std::once_flag flag1;
-    }
+    if (m_shutdown_started) { static std::once_flag flag1; }
 }
 
 indx_mgr_active_sb IndxMgr::get_active_sb() {
@@ -262,7 +269,7 @@ vol_cp_id_ptr IndxMgr::attach_prepare_vol_cp(vol_cp_id_ptr cur_vol_id, indx_cp_i
     auto btree_id = m_active_map->attach_prepare_cp(cur_vol_id->btree_id, m_last_cp);
     if (m_last_cp) {
         assert(btree_id == nullptr);
-        LOGINFO("last cp of volume name {} is triggered", cur_vol_id->vol->get_name());
+        HS_SUBMOD_LOG(INFO, base, , "vol", cur_vol_id->vol->get_name(), "last cp of this volume triggered");
         return nullptr;
     }
 
@@ -284,14 +291,17 @@ mapping* IndxMgr::get_active_indx() { return m_active_map; }
 
 void IndxMgr::journal_comp_cb(logstore_seq_num_t seq_num, logdev_key ld_key, void* req) {
     assert(ld_key.is_valid());
-    auto vreq = boost::intrusive_ptr< volume_req >((volume_req*)req, false);
-    uint64_t lba_written = vreq->indx_start_lba - vreq->lba;
+    auto vreq = volume_req_ptr((volume_req*)req, false); // Turn it back to smart ptr before doing callback.
+    uint64_t lba_written = vreq->indx_start_lba - vreq->lba();
 
-    if (lba_written == vreq->nlbas) {
+    HS_SUBMOD_LOG(TRACE, volume, vreq, "vol", vreq->vol()->get_name(),
+                  "Journal write done, lsn={}, log_key=[idx={}, offset={}]", seq_num, ld_key.idx, ld_key.dev_offset);
+
+    if (lba_written == vreq->nlbas()) {
         m_io_cb(vreq, no_error);
     } else {
         /* partial write */
-        assert(lba_written < vreq->nlbas);
+        assert(lba_written < vreq->nlbas());
         m_io_cb(vreq, homestore_error::btree_write_failed);
     }
 
@@ -299,21 +309,20 @@ void IndxMgr::journal_comp_cb(logstore_seq_num_t seq_num, logdev_key ld_key, voi
     m_cp->cp_io_exit(vreq->cp_id);
 }
 
-void IndxMgr::journal_write(volume_req_ptr& vreq) {
+void IndxMgr::journal_write(volume_req* vreq) {
     auto b = vreq->create_journal_entry();
-    vreq->inc_ref_cnt();
-    m_journal->write_async(vreq->seqId, b, vreq.get(), m_journal_comp_cb);
+    m_journal->write_async(vreq->seqId, b, vreq, m_journal_comp_cb);
 }
 
-btree_status_t IndxMgr::update_indx_tbl(volume_req_ptr& vreq) {
+btree_status_t IndxMgr::update_indx_tbl(volume_req* vreq) {
     std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;
     uint64_t offset = 0;
 
-    for (uint32_t i = 0; i < vreq->nlbas; ++i) {
+    for (uint32_t i = 0; i < vreq->iface_req->nlbas; ++i) {
         carr[i] = vreq->csum_list[i];
     }
 
-    uint64_t start_lba = vreq->lba;
+    uint64_t start_lba = vreq->lba();
     int csum_indx = 0;
 
     /* get volume cp id */
@@ -322,7 +331,7 @@ btree_status_t IndxMgr::update_indx_tbl(volume_req_ptr& vreq) {
 
         /* TODO mapping should accept req so that it doesn't need to build value two times */
         auto blkid = vreq->alloc_blkid_list[i];
-        uint32_t page_size = vreq->vol_instance->get_page_size();
+        uint32_t page_size = vreq->vol()->get_page_size();
         uint32_t nlbas = blkid.data_size(HomeBlks::instance()->get_data_pagesz()) / page_size;
         uint32_t blk_offset = 0;
 
@@ -357,14 +366,16 @@ btree_status_t IndxMgr::update_indx_tbl(volume_req_ptr& vreq) {
     return btree_status_t::success;
 }
 
-void IndxMgr::update_indx(volume_req_ptr& vreq) {
+void IndxMgr::update_indx(const volume_req_ptr& vreq) {
     int retry_cnt = 0;
+    vreq->inc_ref();
+
 retry:
     /* Entered into critical section. CP is not triggered in this critical section */
     vreq->cp_id = m_cp->cp_io_enter();
 
     /* update active btree */
-    auto ret = update_indx_tbl(vreq);
+    auto ret = update_indx_tbl(vreq.get());
     if (ret == btree_status_t::cp_id_mismatch) {
         m_cp->cp_io_exit(vreq->cp_id);
         assert(!retry_cnt);
@@ -374,7 +385,7 @@ retry:
 
     /* In case of failure we will still update the journal with entries of whatever is written. */
     /* update journal. Journal writes are not expected to fail */
-    journal_write(vreq);
+    journal_write(vreq.get());
 }
 
 btree_cp_id_ptr IndxMgr::get_btree_id(indx_cp_id* cp_id) {
@@ -458,8 +469,7 @@ void IndxMgr::trigger_system_cp(cp_done_cb cb, bool shutdown) {
  */
 void IndxMgr::destroy(indxmgr_stop_cb cb) {
     /* we can assume that there is no io going on this volume now */
-
-    LOGINFO("destroying indx mgr {}", m_uuid);
+    HS_SUBMOD_LOG(INFO, base, , "vol", m_name, "Destroying Indx Manager");
 
     destroy_journal_ent* jent = (destroy_journal_ent*)malloc(sizeof(destroy_journal_ent));
     jent->state = indx_mgr_state::DESTROYING;
@@ -485,7 +495,7 @@ void IndxMgr::destroy(indxmgr_stop_cb cb) {
 
 void IndxMgr::destroy_indx_tbl(btree_cp_id_ptr btree_id) {
     /* free all blkids of btree in memory */
-    LOGINFO("btree destroying");
+    HS_SUBMOD_LOG(INFO, base, , "vol", m_name, "Destroying Index btree");
     if (m_active_map->destroy(btree_id) != btree_status_t::success) {
         /* destroy is failed. We will destroy this volume in next boot */
         m_stop_cb(false);
@@ -498,7 +508,8 @@ void IndxMgr::destroy_indx_tbl(btree_cp_id_ptr btree_id) {
 void IndxMgr::volume_destroy_cp(vol_cp_id_ptr cur_vol_id, indx_cp_id* home_blks_id) {
     assert(cur_vol_id->flags == cp_state::suspend_cp);
     assert(!m_shutdown_started.load());
-    LOGINFO("destroy cp");
+    HS_SUBMOD_LOG(INFO, base, , "vol", m_name, "CP during destroy");
+
     if (home_blks_id->bitmap_checkpoint) {
         /* this is a bitmap checkpoint. move it to active. this is the last cp of this volume. */
         cur_vol_id->flags = cp_state::active_cp;
