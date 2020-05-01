@@ -6,6 +6,7 @@
 #include "engine/blkstore/blkstore.hpp"
 #include <fds/id_reserver.hpp>
 #include <boost/intrusive_ptr.hpp>
+#include <fmt/format.h>
 #include <map>
 //#include "homeblks/home_blks.hpp"
 
@@ -253,7 +254,24 @@ struct logdev_key {
     operator bool() const { return is_valid(); }
     bool is_valid() const { return (idx != -1); }
 };
+} // namespace homestore
 
+namespace fmt {
+template <>
+struct formatter< homestore::logdev_key > {
+    template < typename ParseContext >
+    constexpr auto parse(ParseContext& ctx) {
+        return ctx.begin();
+    }
+
+    template < typename FormatContext >
+    auto format(homestore::logdev_key const& k, FormatContext& ctx) {
+        return format_to(ctx.out(), "[idx={} dev_offset={}]", k.idx, k.dev_offset);
+    }
+};
+} // namespace fmt
+
+namespace homestore {
 typedef sisl::byte_view log_buffer;
 
 struct truncation_request_t {

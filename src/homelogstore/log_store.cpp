@@ -111,7 +111,7 @@ logdev_key HomeLogStoreMgr::device_truncate(bool dry_run) {
     LOGINFO("Request to truncate the log device, safe log dev key to truncate = {}", min_safe_ld_key);
 
     // Got the safest log id to trucate and actually truncate upto the safe log idx to the log device
-    if (!dry_run) m_log_dev.truncate(min_safe_ld_key);
+    if (!dry_run && (min_safe_ld_key.idx >= 0)) m_log_dev.truncate(min_safe_ld_key);
     return min_safe_ld_key;
 }
 
