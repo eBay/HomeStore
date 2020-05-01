@@ -25,6 +25,7 @@ COPY .git/ ${SOURCE_PATH}.git
 RUN cd ${SOURCE_PATH}; git reset --hard
 
 WORKDIR /output
+ENV ASAN_OPTIONS=detect_leaks=0
 
 RUN set -eux; \
     eval $(grep 'name =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,name,PKG_NAME,'); \
