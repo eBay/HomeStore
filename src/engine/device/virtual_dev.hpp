@@ -422,15 +422,19 @@ public:
      *
      */
     void truncate(const off_t offset) {
-        HS_LOG(INFO, device, "truncating to logical offset: {}", offset);
         const off_t ds_off = data_start_offset();
+        
+        HS_LOG(INFO, device, "truncating to logical offset: {}, start: {}, m_write_sz_in_total: {} ", to_hex(offset), to_hex(ds_off), to_hex(m_write_sz_in_total.load()));
+
         uint64_t size_to_truncate = 0;
         if (offset >= ds_off) {
             // the truncate offset is larger than current start offset
             size_to_truncate = offset - ds_off;
         } else {
             // the truncate offset is smaller than current start offset, meaning we are looping back to previous chunks;
+            HS_LOG(INFO, device, "Loop-back truncating to logical offset: {} which is smaller than current data start offset: {}, m_write_sz_in_total: {} ", to_hex(offset), to_hex(ds_off), to_hex(m_write_sz_in_total.load()));
             size_to_truncate = get_size() - (ds_off - offset);
+            HS_ASSERT_CMP(RELEASE, m_write_sz_in_total.load(), >=, size_to_truncate, "invalid truncate offset");
             HS_ASSERT_CMP(RELEASE, get_tail_offset(), >=, offset);
         }
 
@@ -439,6 +443,8 @@ public:
 
         // persist new start logical offset to sb, which is already lock protected;
         update_data_start_offset(offset);
+        
+        HS_LOG(INFO, device, "after truncate: m_write_sz_in_total: {}, start: {} ", to_hex(m_write_sz_in_total.load()), to_hex(data_start_offset()));
     }
 
     /**
@@ -724,7 +730,7 @@ public:
             PhysicalDevChunk* chunk = m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id];
             auto pdev = m_primary_pdev_chunks_list[dev_id].pdev;
 
-            HS_LOG(INFO, device, "Writing in device: {}, offset: {}", dev_id, offset_in_dev);
+            LOGDEBUG("Writing in device: {}, offset: {}, m_write_sz_in_total: {}, start off: {}", to_hex(dev_id), to_hex(offset_in_dev), to_hex(m_write_sz_in_total.load()), to_hex(data_start_offset()));
 
             bytes_written = do_pwritev_internal(pdev, chunk, iov, iovcnt, len, offset_in_dev, req);
 
@@ -1094,11 +1100,15 @@ public:
      */
     void update_tail_offset(const off_t tail) {
         off_t start = data_start_offset();
+        HS_LOG(INFO, device, "total_size: {}, tail is being updated to: {}, start: {}", to_hex(get_size()), to_hex(tail), to_hex(start));
+        
         if (tail >= start) {
             m_write_sz_in_total.store(tail - start, std::memory_order_relaxed);
         } else {
             m_write_sz_in_total.store(get_size() - start + tail, std::memory_order_relaxed);
         }
+        
+        HS_LOG(INFO, device, "m_write_sz_in_total updated to: {}", to_hex(m_write_sz_in_total.load()));
 
         HS_ASSERT(RELEASE, get_tail_offset() == tail, "tail offset mismatch after calculation {} : {}",
                   get_tail_offset(), tail);
