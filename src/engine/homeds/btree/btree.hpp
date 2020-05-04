@@ -2122,7 +2122,7 @@ private:
         }
 
         /* remove the keys which are no longer used */
-        if ((parent_insert_indx + 1) <= end_indx) { parent_node->remove((parent_insert_indx + 1), end_indx); }
+        if ((parent_insert_indx + 1) <= end_indx) { parent_node->remove(parent_insert_indx, end_indx); }
 
         /* write the journal entry */
         write_journal_entry(BTREE_MERGE, parent_node, start_indx, left_most_node, old_nodes, replace_nodes,
