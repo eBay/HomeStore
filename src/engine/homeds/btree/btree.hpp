@@ -2114,15 +2114,15 @@ private:
             last_ckey = last_pkey;
         }
 
-        /* remove the keys which are no longer used */
-        if ((parent_insert_indx + 1) <= end_indx) { parent_node->remove((parent_insert_indx + 1), end_indx); }
-
         /* update the last key */
         {
             BtreeNodeInfo ninfo(merge_node->get_node_id());
             parent_node->update(parent_insert_indx, last_ckey, ninfo);
             ++parent_insert_indx;
         }
+
+        /* remove the keys which are no longer used */
+        if ((parent_insert_indx + 1) <= end_indx) { parent_node->remove((parent_insert_indx + 1), end_indx); }
 
         /* write the journal entry */
         write_journal_entry(BTREE_MERGE, parent_node, start_indx, left_most_node, old_nodes, replace_nodes,
