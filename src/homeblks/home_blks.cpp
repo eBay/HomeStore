@@ -628,9 +628,10 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
 
     /* XXX: can we move it to indx mgr */
     home_log_store_mgr.stop();
+    iomanager.default_drive_interface()->detach_end_of_batch_cb();
     iomanager.stop_io_loop();
 
-    if (m_shutdown_done_cb) m_shutdown_done_cb(true);
+    auto cb = m_shutdown_done_cb;
 
     /*
      * Decrement a counter which is incremented for indicating that homeblks is up and running. Once homeblks
@@ -638,6 +639,8 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
      * _instance cleanup
      */
     intrusive_ptr_release(this);
+
+    if (cb) cb(true);
     return;
 }
 
