@@ -4,7 +4,6 @@ pipeline {
     environment {
         ORG = 'sds'
         CONAN_USER = 'sds'
-        CONAN_PASS = credentials('CONAN_PASS')
         ARTIFACTORY_PASS = credentials('ARTIFACTORY_PASS')
         MASTER_BRANCH = 'develop'
         STABLE_BRANCH = 'testing/*'
@@ -32,14 +31,16 @@ pipeline {
 
         stage('Build') {
             steps {
-                sh "docker build --rm --build-arg BUILD_TYPE=debug --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_PASS=${CONAN_PASS} --build-arg ARTIFACTORY_PASS=${ARTIFACTORY_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${GIT_COMMIT}-debug ."
-                sh "docker build --rm --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_PASS=${CONAN_PASS} --build-arg ARTIFACTORY_PASS=${ARTIFACTORY_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${GIT_COMMIT}-release ."
+                sh "docker build --rm --build-arg BUILD_TYPE=debug --build-arg CONAN_USER=${CONAN_USER} --build-arg ARTIFACTORY_PASS=${ARTIFACTORY_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${GIT_COMMIT}-debug ."
+                sh "docker build --rm --build-arg BUILD_TYPE=test --build-arg CONAN_USER=${CONAN_USER} --build-arg ARTIFACTORY_PASS=${ARTIFACTORY_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${GIT_COMMIT}-test ."
+                sh "docker build --rm --build-arg BUILD_TYPE=release --build-arg CONAN_USER=${CONAN_USER} --build-arg ARTIFACTORY_PASS=${ARTIFACTORY_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${GIT_COMMIT}-release ."
             }
         }
 
         stage('Deploy') {
             steps {
                 sh "docker run --rm ${PROJECT}-${GIT_COMMIT}-debug"
+                sh "docker run --rm ${PROJECT}-${GIT_COMMIT}-test"
                 sh "docker run --rm ${PROJECT}-${GIT_COMMIT}-release"
                 slackSend channel: '#conan-pkgs', message: "*${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}* has been uploaded to conan repo."
             }
@@ -51,13 +52,13 @@ pipeline {
             }
             steps {
                 withDockerRegistry([credentialsId: 'sds+sds', url: "https://ecr.vip.ebayc3.com"]) {
-                    sh "docker build -f Dockerfile.test --rm --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_PASS=${CONAN_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${GIT_COMMIT}-test ."
+                    sh "docker build -f Dockerfile.test --rm --build-arg BUILD_TYPE=test --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${GIT_COMMIT}-test ."
                     sh "docker tag ${PROJECT}-${GIT_COMMIT}-test ecr.vip.ebayc3.com/${ORG}/${PROJECT}:${CONAN_CHANNEL}-test"
                     sh "docker push ecr.vip.ebayc3.com/${ORG}/${PROJECT}:${CONAN_CHANNEL}-test"
                     sh "docker rmi ecr.vip.ebayc3.com/${ORG}/${PROJECT}:${CONAN_CHANNEL}-test"
                     slackSend channel: '#conan-pkgs', message: "*${PROJECT}:${CONAN_CHANNEL}-test* has been pushed to ECR."
 
-                    sh "docker build -f Dockerfile.test --rm --build-arg BUILD_TYPE=release --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_PASS=${CONAN_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${GIT_COMMIT}-release ."
+                    sh "docker build -f Dockerfile.test --rm --build-arg BUILD_TYPE=release --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${GIT_COMMIT}-release ."
                     sh "docker tag ${PROJECT}-${GIT_COMMIT}-release ecr.vip.ebayc3.com/${ORG}/${PROJECT}:${CONAN_CHANNEL}-release"
                     sh "docker push ecr.vip.ebayc3.com/${ORG}/${PROJECT}:${CONAN_CHANNEL}-release"
                     sh "docker rmi ecr.vip.ebayc3.com/${ORG}/${PROJECT}:${CONAN_CHANNEL}-release"
@@ -70,7 +71,6 @@ pipeline {
     post {
         always {
             sh "docker rmi -f ${PROJECT}-${GIT_COMMIT}-debug"
-            sh "docker rmi -f ${PROJECT}-${GIT_COMMIT}-release"
             sh "docker rmi -f ${PROJECT}-${GIT_COMMIT}-release"
             sh "docker rmi -f ${PROJECT}-${GIT_COMMIT}-test"
         }
