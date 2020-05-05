@@ -1,5 +1,5 @@
 # ##########   #######   ############
-FROM ecr.vip.ebayc3.com/sds/sds_develop:3.8-dev
+FROM ecr.vip.ebayc3.com/sds/sds_develop:3.9-dev
 LABEL description="Automated HomeStore compilation"
 
 ARG CONAN_CHANNEL
