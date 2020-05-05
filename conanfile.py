@@ -56,7 +56,10 @@ class HomestoreConan(ConanFile):
 
     def requirements(self):
         if not self.settings.build_type == "Debug":
-            self.requires("gperftools/2.7.0")
+            if self.settings.build_type == "RelWithDebInfo":
+                self.requires("gperftools/2.7.0")
+            else:
+                self.requires("jemalloc/5.2.1")
 
     def build(self):
         cmake = CMake(self)
