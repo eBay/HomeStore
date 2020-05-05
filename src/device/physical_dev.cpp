@@ -86,7 +86,7 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
     auto ret = posix_memalign((void**)&m_super_blk, HomeStoreConfig::align_size, SUPERBLOCK_SIZE);
     /* super block should always be written atomically. */
     HS_ASSERT_NOTNULL(LOGMSG, m_super_blk);
-    HS_ASSERT_CMP(LOGMSG, sizeof(super_block), <=, HomeStoreConfig::atomic_phys_page_size);
+    HS_ASSERT_CMP(LOGMSG, sizeof(super_block), <=, SUPERBLOCK_SIZE);
     memset(m_super_blk, 0, SUPERBLOCK_SIZE);
 
     if (!m_ep) {
