@@ -87,6 +87,7 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
     /* super block should always be written atomically. */
     HS_ASSERT_NOTNULL(LOGMSG, m_super_blk);
     HS_ASSERT_CMP(LOGMSG, sizeof(super_block), <=, HomeStoreConfig::atomic_phys_page_size);
+    memset(m_super_blk, 0, SUPERBLOCK_SIZE);
 
     if (!m_ep) {
         m_ep = new DriveEndPoint(iomgr, cb);
@@ -191,7 +192,6 @@ size_t PhysicalDev::get_total_cap() {
 }
 
 bool PhysicalDev::load_super_block() {
-    memset(m_super_blk, 0, SUPERBLOCK_SIZE);
 
     read_superblock();
 
