@@ -54,12 +54,12 @@ class HomestoreConan(ConanFile):
     def imports(self):
         self.copy(root_package="flip", pattern="*.py", dst="bin/scripts", src="python/flip/", keep_path=True)
 
-    def requirements(self):
+    def build_requirements(self):
         if not self.settings.build_type == "Debug":
             if self.settings.build_type == "RelWithDebInfo":
-                self.requires("gperftools/2.7.0")
+                self.build_requires("gperftools/2.7.0")
             else:
-                self.requires("jemalloc/5.2.1")
+                self.build_requires("jemalloc/5.2.1")
 
     def build(self):
         cmake = CMake(self)
