@@ -1,7 +1,6 @@
 include_directories (BEFORE ..)
 include_directories (BEFORE ../engine)
 add_subdirectory(volume)
-add_subdirectory(meta)
 
 set(HOMEBLKS_SOURCE_FILES
        home_blks.cpp

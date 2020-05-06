@@ -1,9 +1,9 @@
 #pragma once
 
 #include "meta_sb.hpp"
-#include "blkstore/blkstore.hpp"
+#include "engine/homestore.hpp"
+#include "engine/blkstore/blkstore.hpp"
 #include "api/vol_interface.hpp"
-#include "homestore.hpp"
 
 namespace homestore {
 

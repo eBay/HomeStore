@@ -6,7 +6,7 @@
 #include "api/vol_interface.hpp"
 #include "homeblks/home_blks.hpp"
 #include <wisr/wisr_ds.hpp>
-#include "homeblks/meta/meta_blks_mgr.hpp"
+#include "engine/meta/meta_blks_mgr.hpp"
 
 namespace homestore {
 struct volume_req;

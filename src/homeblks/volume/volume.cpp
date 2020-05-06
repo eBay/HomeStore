@@ -8,7 +8,7 @@
 #include <fstream>
 #include <atomic>
 #include <fds/utils.hpp>
-#include "homeblks/meta/meta_blks_mgr.hpp"
+#include "engine/meta/meta_blks_mgr.hpp"
 
 using namespace std;
 using namespace homestore;
