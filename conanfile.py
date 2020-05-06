@@ -18,19 +18,21 @@ class HomestoreConan(ConanFile):
                 "fPIC": ['True', 'False'],
                 "coverage": ['True', 'False'],
                 "sanitize": ['True', 'False'],
+                'malloc_impl' : ['libc', 'tcmalloc', 'jemalloc']
                 }
     default_options = (
                         'shared=False',
                         'fPIC=True',
                         'coverage=False',
                         'sanitize=False',
+                        'malloc_impl=libc',
                         )
 
     requires = (
             "flip/0.2.7@sds/develop",
             "iomgr/2.2.14@sds/develop",
             "sds_logging/7.0.0@sds/develop",
-            "sisl/1.0.6@sisl/develop",
+            "sisl/1.0.9@sisl/develop",
 
             # FOSS, rarely updated
             "benchmark/1.5.0",
@@ -58,8 +60,10 @@ class HomestoreConan(ConanFile):
         if not self.settings.build_type == "Debug":
             if self.settings.build_type == "RelWithDebInfo":
                 self.build_requires("gperftools/2.7.0")
+                self.options.malloc_impl = "tcmalloc"
             else:
                 self.build_requires("jemalloc/5.2.1")
+                self.options.malloc_impl = "jemalloc"
 
     def build(self):
         cmake = CMake(self)
@@ -78,6 +82,8 @@ class HomestoreConan(ConanFile):
 
         if self.settings.build_type == 'Debug':
             definitions['CMAKE_BUILD_TYPE'] = 'Debug'
+
+        definitions['MALLOC_IMPL'] = self.options.malloc_impl
 
         cmake.configure(defs=definitions)
         cmake.build()

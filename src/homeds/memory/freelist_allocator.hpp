@@ -56,41 +56,41 @@ public:
 
     uint8_t* allocate(uint32_t size_needed) {
         uint8_t* ptr;
-        auto& metrics = FreeListAllocatorMetrics::instance();
+        // auto& metrics = FreeListAllocatorMetrics::instance();
 
         if (m_head == nullptr) {
             ptr = (uint8_t*)malloc(size_needed);
-            COUNTER_INCREMENT(metrics, freelist_alloc_miss, 1);
+            // COUNTER_INCREMENT(metrics, freelist_alloc_miss, 1);
         } else {
             ptr = (uint8_t*)m_head;
-            COUNTER_INCREMENT(metrics, freelist_alloc_hit, 1);
+            // COUNTER_INCREMENT(metrics, freelist_alloc_hit, 1);
             m_head = m_head->next;
-            COUNTER_DECREMENT(metrics, freelist_cache_size, size_needed);
+            // COUNTER_DECREMENT(metrics, freelist_cache_size, size_needed);
             m_list_count--;
         }
 
-        COUNTER_INCREMENT(metrics, freelist_alloc_size, size_needed);
+        // COUNTER_INCREMENT(metrics, freelist_alloc_size, size_needed);
         return ptr;
     }
 
     bool deallocate(uint8_t* mem, uint32_t size_alloced) {
-        auto& metrics = FreeListAllocatorMetrics::instance();
+        // auto& metrics = FreeListAllocatorMetrics::instance();
 
-        COUNTER_DECREMENT(metrics, freelist_alloc_size, size_alloced);
+        // COUNTER_DECREMENT(metrics, freelist_alloc_size, size_alloced);
         if (
 #ifndef NDEBUG
             1 ||
 #endif
             (size_alloced != Size) || (m_list_count == MaxListCount)) {
-            if (size_alloced != Size) {
+            /*if (size_alloced != Size) {
                 COUNTER_INCREMENT(metrics, freelist_dealloc_passthru, 1);
-            }
+            } */
             free(mem);
-            COUNTER_INCREMENT(metrics, freelist_dealloc, 1);
+            // COUNTER_INCREMENT(metrics, freelist_dealloc, 1);
             return true;
         }
         auto* hdr = (free_list_header*)mem;
-        COUNTER_INCREMENT(metrics, freelist_cache_size, size_alloced);
+        // COUNTER_INCREMENT(metrics, freelist_cache_size, size_alloced);
         hdr->next = m_head;
         m_head = hdr;
         m_list_count++;

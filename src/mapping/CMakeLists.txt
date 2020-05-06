@@ -6,6 +6,6 @@ if (NOT ${CONAN_BUILD_COVERAGE})
     add_executable(test_mapping
                       ${TEST_MAP_SOURCE_FILES}
                     )
-    target_link_libraries(test_mapping homeblks ${COMMON_LIB_DEPS})
+    target_link_libraries(test_mapping ${CONAN_LIBS} homeblks)
     #add_test(NAME MappingTest COMMAND test_mapping)
 endif ()
