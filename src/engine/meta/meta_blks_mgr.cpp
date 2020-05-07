@@ -36,10 +36,9 @@ MetaBlkMgr::~MetaBlkMgr() {
 }
 
 void MetaBlkMgr::load_ssb(BlkId bid) {
-#if 0
     auto req = blkstore_req< BlkBuffer >::make_request();
     req->isSyncCall = true;
-    // TODO: fix assert in blkstore
+
     blk_buf_t bbuf = m_sb_blk_store->read(bid, 0, META_BLK_ALIGN_SZ, req);
 
     homeds::blob b = bbuf->at_offset(0);
@@ -53,7 +52,6 @@ void MetaBlkMgr::load_ssb(BlkId bid) {
     // verify crc;
     auto crc = crc32_ieee(init_crc32, ((uint8_t*)m_ssb), sizeof(meta_blk_sb));
     assert(m_ssb->crc == crc);
-#endif
 }
 
 void MetaBlkMgr::set_migrated() {
