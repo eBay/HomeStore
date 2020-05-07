@@ -89,7 +89,6 @@ struct TestCfg {
 
     homestore::vol_state expected_vol_state = homestore::vol_state::ONLINE; // TODO: Move to separate job config section
     bool init = true;
-    bool expect_io_error = false;
     bool expected_init_fail = false;
     int disk_replace_cnt = 0;
     bool precreate_volume = true;
