@@ -90,10 +90,11 @@ struct TestCfg {
 
     homestore::vol_state expected_vol_state = homestore::vol_state::ONLINE; // TODO: Move to separate job config section
     bool init = true;
-    bool expect_io_error = false;
     bool expected_init_fail = false;
     int disk_replace_cnt = 0;
     bool precreate_volume = true;
+    bool expect_io_error = false;
+    uint32_t p_volume_size = 60;
 };
 
 struct TestOutput {
@@ -1406,8 +1407,8 @@ int main(int argc, char* argv[]) {
     _gcfg.phy_page_size = SDS_OPTIONS["phy_page_size"].as< uint32_t >();
     _gcfg.mem_btree_page_size = SDS_OPTIONS["mem_btree_page_size"].as< uint32_t >();
     _gcfg.io_flags = static_cast< io_flag >(SDS_OPTIONS["io_flags"].as< uint32_t >());
-    _gcfg.p_volume_size = SDS_OPTIONS["p_volume_size"].as< uint32_t >();
     _gcfg.expect_io_error = SDS_OPTIONS["expect_io_error"].as< uint32_t >() ? true : false;
+    _gcfg.p_volume_size = SDS_OPTIONS["p_volume_size"].as< uint32_t >();
 
     if (SDS_OPTIONS.count("device_list")) {
         _gcfg.dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();
