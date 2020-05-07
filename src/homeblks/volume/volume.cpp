@@ -97,7 +97,7 @@ void Volume::init() {
     alloc_single_block_in_mem();
     assert(get_page_size() % HomeBlks::instance()->get_data_pagesz() == 0);
     set_state(vol_state::ONLINE, true);
-    
+
     vol_sb_init();
 }
 
@@ -640,5 +640,5 @@ void Volume::migrate_sb() {
 }
 
 void Volume::meta_blk_cb(meta_blk* mblk, bool has_more) {
-// TODO: Volume Recovery
+    // TODO: Volume Recovery
 }

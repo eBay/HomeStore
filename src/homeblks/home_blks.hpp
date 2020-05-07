@@ -200,9 +200,9 @@ public:
     void do_volume_shutdown(bool force);
 
     data_blkstore_t::comp_callback data_completion_cb() override;
-    
+
     /**
-     * @brief 
+     * @brief
      *
      * @param mblk
      * @param has_more

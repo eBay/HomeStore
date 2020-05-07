@@ -212,9 +212,7 @@ void MetaBlkMgr::extract_meta_blks(uint8_t* buf, const uint64_t size, std::vecto
 void MetaBlkMgr::deregister_handler(meta_sub_type type) {
     std::lock_guard< decltype(m_meta_mtx) > lk(m_meta_mtx);
     auto it = m_cb_map.find(type);
-    if (it != m_cb_map.end()) {
-        m_cb_map.erase(it);
-    }
+    if (it != m_cb_map.end()) { m_cb_map.erase(it); }
 }
 
 void MetaBlkMgr::register_handler(meta_sub_type type, sub_cb cb) {

@@ -80,7 +80,6 @@ HomeBlks::HomeBlks(const init_params& cfg) : m_cfg(cfg), m_metrics("HomeBlks") {
     m_out_params.max_io_size = VOL_MAX_IO_SIZE;
     m_homeblks_sb = sisl::make_aligned_unique< homeblks_sb >(HS_STATIC_CONFIG(disk_attr.align_size), HOMEBLKS_SB_SIZE);
 
-
     /* start thread */
     m_thread_id = std::thread(&HomeBlks::init_thread, this);
     m_start_shutdown = false;
@@ -263,13 +262,15 @@ void HomeBlks::superblock_init() {
     m_homeblks_sb->uuid = HS_STATIC_CONFIG(input.system_uuid);
 }
 
-void HomeBlks::homeblks_sb_write() { 
+void HomeBlks::homeblks_sb_write() {
     if (m_sb_cookie == nullptr) {
         // add to MetaBlkMgr
-        MetaBlkMgr::instance()->add_sub_sb(meta_sub_type::HOMEBLK, (void*)m_homeblks_sb.get(), sizeof(homeblks_sb), m_sb_cookie);
+        MetaBlkMgr::instance()->add_sub_sb(meta_sub_type::HOMEBLK, (void*)m_homeblks_sb.get(), sizeof(homeblks_sb),
+                                           m_sb_cookie);
     } else {
         // update existing homeblks sb
-        MetaBlkMgr::instance()->update_sub_sb(meta_sub_type::HOMEBLK, (void*)m_homeblks_sb.get(), sizeof(homeblks_sb), m_sb_cookie);
+        MetaBlkMgr::instance()->update_sub_sb(meta_sub_type::HOMEBLK, (void*)m_homeblks_sb.get(), sizeof(homeblks_sb),
+                                              m_sb_cookie);
     }
 }
 
@@ -374,7 +375,7 @@ void HomeBlks::init_thread() {
         // the flag should be set again;
         m_homeblks_sb->clear_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
         ++m_homeblks_sb->boot_cnt;
-        homeblks_sb_write();  
+        homeblks_sb_write();
 
         sisl::HttpServerConfig cfg;
         cfg.is_tls_enabled = false;
@@ -415,7 +416,9 @@ void HomeBlks::init_thread() {
     }
 
     auto inst = MetaBlkMgr::instance();
-    inst->register_handler(meta_sub_type::HOMEBLK, std::bind(&HomeBlks::meta_blk_cb, HomeBlks::instance(), std::placeholders::_1, std::placeholders::_2));
+    inst->register_handler(
+        meta_sub_type::HOMEBLK,
+        std::bind(&HomeBlks::meta_blk_cb, HomeBlks::instance(), std::placeholders::_1, std::placeholders::_2));
 
     inst->register_handler(meta_sub_type::VOLUME, Volume::meta_blk_cb);
 
@@ -632,9 +635,7 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
      */
     if (!m_force_shutdown) {
         m_homeblks_sb->set_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
-        if (!m_cfg.is_read_only) { 
-            homeblks_sb_write();  
-        }
+        if (!m_cfg.is_read_only) { homeblks_sb_write(); }
     }
 
     // Waiting for http server thread to join
@@ -788,6 +789,4 @@ void HomeBlks::migrate_volume_sb() {
     }
 }
 
-void HomeBlks::meta_blk_cb(meta_blk* mblk, bool has_more) {
-    m_sb_cookie = (void*) mblk;
-}
+void HomeBlks::meta_blk_cb(meta_blk* mblk, bool has_more) { m_sb_cookie = (void*)mblk; }
