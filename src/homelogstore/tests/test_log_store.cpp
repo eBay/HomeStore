@@ -498,6 +498,7 @@ TEST_F(LogStoreTest, BurstSeqInsertAndTruncateInParallel) {
     this->truncate_validate();
 }
 
+#if 0
 TEST_F(LogStoreTest, ThrottleSeqInsertThenRecover) {
     LOGINFO("Step 1: Reinit the num records to start sequential write test");
     this->init(SDS_OPTIONS["num_records"].as< uint32_t >());
@@ -549,6 +550,7 @@ TEST_F(LogStoreTest, ThrottleSeqInsertThenRecover) {
     );
     this->recovery_validate();
 }
+#endif
 
 TEST_F(LogStoreTest, DeleteMultipleLogStores) {
     auto nrecords = (SDS_OPTIONS["num_records"].as< uint32_t >() * 5) / 100;

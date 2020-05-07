@@ -27,9 +27,12 @@ private:
 
 public:
     static void init(blk_store_type* sb_blk_store, sb_blkstore_blob* blob, init_params* cfg, bool init) {
+#if 0
         static std::once_flag flag1;
         std::call_once(
             flag1, [sb_blk_store, blob, cfg, init]() { _instance = new MetaBlkMgr(sb_blk_store, blob, cfg, init); });
+#endif
+        _instance = new MetaBlkMgr(sb_blk_store, blob, cfg, init);
     }
 
     /**
@@ -38,6 +41,8 @@ public:
      * @return
      */
     static MetaBlkMgr* instance() { return _instance; }
+
+    static void del_instance() { delete _instance; }
 
     /**
      * @brief :
@@ -61,6 +66,8 @@ public:
      * @param cb : subsystem cb
      */
     void register_handler(meta_sub_type type, sub_cb cb);
+
+    void deregister_handler(meta_sub_type type);
 
     /**
      * @brief : add subsystem superblock to meta blk mgr

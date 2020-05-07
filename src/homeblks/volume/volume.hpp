@@ -20,6 +20,7 @@
 #include "indx_mgr.hpp"
 #include <utility/enum.hpp>
 #include <fds/vector_pool.hpp>
+#include "engine/meta/meta_blks_mgr.hpp"
 
 using namespace std;
 
@@ -245,6 +246,7 @@ private:
     vol_sb_hdr* m_sb;
     indxmgr_stop_cb m_destroy_done_cb;
     std::atomic< bool > m_indx_mgr_destroy_started;
+    void* m_sb_cookie = nullptr;
 
 private:
     /* static members */
@@ -311,6 +313,9 @@ private:
     void shutdown_if_needed();
     void destroy_internal();
 
+    void vol_sb_init();
+    void vol_sb_remove();
+
 public:
     /******************** static functions exposed to home_blks *******************/
     template < typename... Args >
@@ -341,6 +346,15 @@ public:
 
     /* it is used in fake reboot */
     static void reinit() { IndxMgr::reinit(); }
+
+
+    /**
+     * @brief 
+     *
+     * @param mblk
+     * @param has_more
+     */
+    static void meta_blk_cb(meta_blk* mblk, bool has_more);
 
 public:
     /******************** APIs exposed to home_blks *******************/

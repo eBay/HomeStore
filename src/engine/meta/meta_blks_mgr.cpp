@@ -31,11 +31,15 @@ MetaBlkMgr::~MetaBlkMgr() {
     m_meta_blks.clear();
 
     m_cb_map.clear();
+
+    free(m_ssb);
 }
 
 void MetaBlkMgr::load_ssb(BlkId bid) {
+#if 0
     auto req = blkstore_req< BlkBuffer >::make_request();
     req->isSyncCall = true;
+    // TODO: fix assert in blkstore
     blk_buf_t bbuf = m_sb_blk_store->read(bid, 0, META_BLK_ALIGN_SZ, req);
 
     homeds::blob b = bbuf->at_offset(0);
@@ -49,6 +53,7 @@ void MetaBlkMgr::load_ssb(BlkId bid) {
     // verify crc;
     auto crc = crc32_ieee(init_crc32, ((uint8_t*)m_ssb), sizeof(meta_blk_sb));
     assert(m_ssb->crc == crc);
+#endif
 }
 
 void MetaBlkMgr::set_migrated() {
@@ -204,8 +209,21 @@ void MetaBlkMgr::extract_meta_blks(uint8_t* buf, const uint64_t size, std::vecto
     assert(meta_blk_ptr == buf);
 }
 
+void MetaBlkMgr::deregister_handler(meta_sub_type type) {
+    std::lock_guard< decltype(m_meta_mtx) > lk(m_meta_mtx);
+    auto it = m_cb_map.find(type);
+    if (it != m_cb_map.end()) {
+        m_cb_map.erase(it);
+    }
+}
+
 void MetaBlkMgr::register_handler(meta_sub_type type, sub_cb cb) {
     std::lock_guard< decltype(m_meta_mtx) > lk(m_meta_mtx);
+    if (is_meta_blk_type_valid(type)) {
+        HS_ASSERT(DEBUG, m_cb_map.find(type) == m_cb_map.end(), "type: {} handler already registered!", type);
+    } else {
+        HS_ASSERT(RELEASE, 0, "invalide meta subsystem type: {}", type);
+    }
     m_cb_map[type] = cb;
 }
 
