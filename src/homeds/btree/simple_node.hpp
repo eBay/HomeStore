@@ -36,7 +36,7 @@ public:
 public:
 #ifndef NDEBUG
     void validate_sanity() {
-        int i = 1;
+        int i = 0;
         std::map< int, bool > mapOfWords;
         // validate if keys are in ascending orde
         K prevKey;
