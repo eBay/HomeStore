@@ -195,6 +195,13 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
         vreq->state = volume_req_state::data_io;
 
         for (uint32_t i = 0; i < bid.size(); ++i) {
+            if (bid[i].get_nblks() == 0) {
+                /* It should not happen. But it happened once so adding a safe check in case it
+                 * happens again.
+                 */
+                VOL_LOG_ASSERT(0, vreq, "{}", bid[i].to_string());
+                continue;
+            }
             /* Create child requests */
             int nlbas = bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) / get_page_size();
             auto vc_req = create_vol_child_req(bid[i], vreq, start_lba, nlbas);
