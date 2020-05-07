@@ -245,6 +245,7 @@ public:
     static void set_log_level(sisl::HttpCallData cd);
     static void dump_stack_trace(sisl::HttpCallData cd);
     static void verify_hs(sisl::HttpCallData cd);
+    static void get_malloc_stats(sisl::HttpCallData cd);
 
 private:
     BlkId alloc_blk();

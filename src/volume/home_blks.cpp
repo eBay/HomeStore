@@ -1,3 +1,4 @@
+#include <fds/malloc_helper.hpp>
 #include "home_blks.hpp"
 #include "volume.hpp"
 #include <device/device.h>
@@ -903,6 +904,7 @@ void HomeBlks::init_thread() {
                                      handler_info("/api/v1/setLogLevel", HomeBlks::set_log_level, (void*)this),
                                      handler_info("/api/v1/dumpStackTrace", HomeBlks::dump_stack_trace, (void*)this),
                                      handler_info("/api/v1/verifyHS", HomeBlks::verify_hs, (void*)this),
+                                     handler_info("/api/v1/getMallocStats", HomeBlks::get_malloc_stats, (void*)this),
                                  }}));
         m_http_server->start();
 
@@ -1042,24 +1044,49 @@ void HomeBlks::set_log_level(sisl::HttpCallData cd) {
     }
     auto new_log_level = _new_log_level->val;
 
+    std::string resp = "";
     if (logmodule == nullptr) {
         sds_logging::SetAllModuleLogLevel(spdlog::level::from_str(new_log_level));
+        resp = sds_logging::GetAllModuleLogLevel().dump(2);
     } else {
         sds_logging::SetModuleLogLevel(logmodule, spdlog::level::from_str(new_log_level));
+        resp = std::string("logmodule ") + logmodule + " level set to " +
+            spdlog::level::to_string_view(sds_logging::GetModuleLogLevel(logmodule)).data();
     }
 
-    hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, sds_logging::GetAllModuleLogLevel().dump());
+    hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, resp);
 }
 
 void HomeBlks::get_log_level(sisl::HttpCallData cd) {
     HomeBlks* hb = (HomeBlks*)(cd->cookie());
-    hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, sds_logging::GetAllModuleLogLevel().dump());
+    auto req = cd->request();
+
+    const evhtp_kv_t* _log_module = nullptr;
+    const char* logmodule = nullptr;
+    _log_module = evhtp_kvs_find_kv(req->uri->query, "logmodule");
+    if (_log_module) {
+        logmodule = _log_module->val;
+    }
+
+    std::string resp = "";
+    if (logmodule == nullptr) {
+        resp = sds_logging::GetAllModuleLogLevel().dump(2);
+    } else {
+        resp = std::string("logmodule ") + logmodule +
+            " level = " + spdlog::level::to_string_view(sds_logging::GetModuleLogLevel(logmodule)).data();
+    }
+    hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, resp);
 }
 
 void HomeBlks::dump_stack_trace(sisl::HttpCallData cd) {
     HomeBlks* hb = (HomeBlks*)(cd->cookie());
     sds_logging::log_stack_trace(true);
     hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, "Look for stack trace in the log file");
+}
+
+void HomeBlks::get_malloc_stats(sisl::HttpCallData cd) {
+    HomeBlks* hb = (HomeBlks*)(cd->cookie());
+    hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, sisl::get_malloc_stats_detailed().dump(2));
 }
 
 //
@@ -1075,7 +1102,7 @@ void HomeBlks::shutdown_process(shutdown_comp_callback shutdown_comp_cb, bool fo
                     VOL_INFO_LOG(it->first, "ref_count successfully drops to 1. Trigger normal shutdown.");
                     it = m_volume_map.erase(it);
                 } else {
-                    // move on the check other volumes. 
+                    // move on the check other volumes.
                     ++it;
                 }
             }

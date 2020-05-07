@@ -14,7 +14,7 @@
 
 namespace homeds {
 
-#define FREELIST_CACHE_COUNT 10000
+#define FREELIST_CACHE_COUNT 200
 
 template < typename T, size_t CacheCount = FREELIST_CACHE_COUNT >
 class ObjectAllocator {

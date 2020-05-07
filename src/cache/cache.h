@@ -19,7 +19,7 @@
 namespace homestore {
 
 // TODO: We need to change this to config driven at the start of the app
-#define FREELIST_CACHE_COUNT 10000
+#define FREELIST_CACHE_COUNT 200
 
 #define CurrentEvictor LRUEvictor
 #define LRUEvictor Evictor< LRUEvictionPolicy >
