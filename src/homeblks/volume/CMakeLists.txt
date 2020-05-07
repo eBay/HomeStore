@@ -18,7 +18,10 @@ set(PERF_TEST_VOLUME_SOURCE_FILES
 set(BTREE_CHECKER_SOURCE_FILES
        btree_checker.cpp
       )
-
+set(TEST_MAP_SOURCE_FILES
+      map_gtest.cpp
+     )
+     
 #add_executable(test_merge
 #                  ${TEST_MERGE_SOURCE_FILES}
 #              )
@@ -35,15 +38,15 @@ if (NOT ${CONAN_BUILD_COVERAGE})
     add_executable(check_btree
                       ${BTREE_CHECKER_SOURCE_FILES}
                     )
-    target_link_libraries(check_btree homeblks ${COMMON_LIB_DEPS})
-    target_link_libraries(perf_test_volume homeblks ${COMMON_LIB_DEPS})
+    add_executable(test_mapping
+                    ${TEST_MAP_SOURCE_FILES}
+                    )
+    target_link_libraries(check_btree ${CONAN_LIBS} aio homeblks)
+    target_link_libraries(perf_test_volume ${CONAN_LIBS} aio homeblks)
+    target_link_libraries(test_mapping ${CONAN_LIBS} homeblks)
 endif ()
 
-#target_link_libraries(test_merge homeblks ${COMMON_LIB_DEPS})
-
-target_link_libraries(test_volume homeblks ${COMMON_LIB_DEPS})
-
-#target_link_libraries(test_volume ${CONAN_LIBS})
+target_link_libraries(test_volume ${COMMON_LIB_DEPS} homeblks)
 
 add_test(NAME TestVol COMMAND test_volume)
 
