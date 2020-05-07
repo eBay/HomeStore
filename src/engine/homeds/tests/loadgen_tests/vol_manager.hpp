@@ -155,11 +155,8 @@ public:
     }
 
     uint8_t* gen_value(uint64_t& nblks) {
-        uint8_t* bytes = nullptr;
         uint64_t size = get_size(nblks);
-        auto ret = posix_memalign((void**)&bytes, VOL_PAGE_SIZE, size);
-
-        if (ret) { assert(0); }
+        uint8_t* bytes = iomanager.iobuf_alloc(512, size);
 
         populate_buf(bytes, size);
         return bytes;
@@ -195,11 +192,8 @@ public:
     }
 
     std::error_condition read(uint64_t vol_id, uint64_t lba, uint64_t nblks, bool verify) {
-        uint8_t* buf = nullptr;
         uint64_t size = get_size(nblks);
-
-        auto ret = posix_memalign((void**)&buf, VOL_PAGE_SIZE, size);
-        assert(!ret);
+        uint8_t* buf = iomanager.iobuf_alloc(512, size);
 
         VolReq* req = new VolReq();
         req->lba = lba;

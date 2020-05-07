@@ -21,7 +21,7 @@ include_directories(BEFORE ..)
 
 set(TEST_BTREE_CRUD_SOURCE_FILES tests/test_btree_crud.cpp)
 add_executable(test_btree_crud ${TEST_BTREE_CRUD_SOURCE_FILES})
-target_link_libraries(test_btree_crud  homestore ${COMMON_LIB_DEPS})
+target_link_libraries(test_btree_crud  homestore ${CONAN_LIBS})
 add_test(NAME BTreeCRUD COMMAND test_btree_crud)
 
 set(TEST_HASH_SOURCE_FILES tests/test_hashset.cpp)

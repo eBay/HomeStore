@@ -78,7 +78,7 @@ public:
 
     void update_value(size_t size) {
         assert(m_bytes == nullptr);
-        auto ret = posix_memalign((void**)&m_bytes, 4096, size);
+        m_bytes = iomanager.iobuf_alloc(512, size);
         m_size = size;
         gen_random_string(m_bytes, size);
     }

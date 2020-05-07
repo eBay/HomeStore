@@ -69,12 +69,7 @@ void MetaBlkMgr::init_ssb() {
         return;
     }
 
-    m_ssb = nullptr;
-    int aret = posix_memalign((void**)&(m_ssb), HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_ALIGN_SZ);
-    if (aret != 0) {
-        assert(0);
-        throw std::bad_alloc();
-    }
+    m_ssb = (meta_blk_sb*)iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_ALIGN_SZ);
 
     std::lock_guard< decltype(m_meta_mtx) > lk(m_meta_mtx);
     assert(m_last_mblk == nullptr);
@@ -105,13 +100,7 @@ void MetaBlkMgr::scan_meta_blks() {
     // this might not be a valid assert, but good to have blkstore size align to 512 bytes;
     assert(total_sz % META_BLK_ALIGN_SZ == 0);
 
-    uint8_t* buf = nullptr;
-    int ret = posix_memalign((void**)&(buf), HS_STATIC_CONFIG(disk_attr.align_size), total_sz);
-    if (ret != 0) {
-        assert(0);
-        throw std::bad_alloc();
-    }
-
+    uint8_t* buf = iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), total_sz);
     auto total_bytes_read = m_sb_blk_store->read(buf, total_sz);
     HS_ASSERT(RELEASE, total_bytes_read > 0, "bytes read returned: {} from blkstore.", total_bytes_read);
 
@@ -137,8 +126,8 @@ void MetaBlkMgr::scan_meta_blks() {
             if (crc != (*it)->hdr.crc) { continue; }
 
             mblk_cnt++;
-            meta_blk* mblk = nullptr;
-            int ret = posix_memalign((void**)&(mblk), HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_ALIGN_SZ);
+            meta_blk* mblk =
+                (meta_blk*)iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_ALIGN_SZ);
 
             memcpy(*it, mblk, META_BLK_ALIGN_SZ);
 
@@ -243,13 +232,7 @@ void MetaBlkMgr::write_blk(BlkId bid, void* context_data, uint32_t sz) {
 }
 
 meta_blk* MetaBlkMgr::init_meta_blk(BlkId bid, meta_sub_type type, void* context_data, size_t sz) {
-    meta_blk* mblk = nullptr;
-    int ret = posix_memalign((void**)&(mblk), HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_ALIGN_SZ);
-    if (ret != 0) {
-        assert(0);
-        throw std::bad_alloc();
-    }
-
+    meta_blk* mblk = (meta_blk*)iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_ALIGN_SZ);
     mblk->hdr.blkid.set(bid);
     mblk->hdr.type = type;
 

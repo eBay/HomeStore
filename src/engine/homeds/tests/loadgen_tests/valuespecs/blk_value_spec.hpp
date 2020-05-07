@@ -33,9 +33,7 @@ public:
         switch (spec) {
         case ValuePattern::SEQUENTIAL_VAL:
         case ValuePattern::RANDOM_BYTES: {
-            char* data = nullptr;
-            auto ret = posix_memalign((void**)&data, 4096, 4096);
-            assert(!ret);
+            char* data = (char*)iomanager.iobuf_alloc(512, BLK_SIZE);
             populate_buf((uint8_t*)data, BLK_SIZE);
             std::shared_ptr< BlkValue > temp = std::make_shared< BlkValue >(BlkValue());
             temp->set_buf(data);

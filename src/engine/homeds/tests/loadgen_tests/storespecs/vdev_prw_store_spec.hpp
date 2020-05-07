@@ -48,12 +48,9 @@ public:
 
         assert(count == k.get_alloc_size());
 
-        uint8_t* buf = nullptr;
-        auto ret = posix_memalign((void**)&buf, 4096, count);
-        assert(!ret);
+        uint8_t* buf = iomanager.iobuf_alloc(512, count);
 
         auto bytes_read = m_store->pread((void*)buf, (size_t)count, (off_t)off);
-
         verify_read(bytes_read, buf, off, count);
 
         free(buf);

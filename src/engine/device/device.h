@@ -321,7 +321,6 @@ public:
     uint64_t sb_gen_cnt();
     size_t get_total_cap();
 
-    int get_devfd() const { return m_devfd; }
     std::string get_devname() const { return m_devname; }
     uint64_t get_size() const { return m_devsize; }
     uint32_t get_first_chunk_id() const { return m_info_blk.first_chunk_id; }
@@ -382,7 +381,7 @@ private:
 
 private:
     DeviceManager* m_mgr; // Back pointer to physical device
-    int m_devfd;
+    io_device_ptr m_iodev;
     std::string m_devname;
     super_block* m_super_blk; // Persisent header block
     uint64_t m_devsize;

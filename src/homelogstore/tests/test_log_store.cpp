@@ -146,8 +146,7 @@ private:
         if ((rand() % 100) < 10) {
             // 10% of data is dma'ble aligned boundary
             auto alloc_sz = sisl::round_up((rand() % max_data_size) + sizeof(test_log_data), dma_boundary);
-            int ret = posix_memalign((void**)&raw_buf, dma_boundary, alloc_sz);
-            assert(ret == 0);
+            raw_buf = iomanager.iobuf_alloc(dma_boundary, alloc_sz);
             sz = alloc_sz - sizeof(test_log_data);
         } else {
             sz = rand() % max_data_size;
@@ -218,7 +217,7 @@ public:
         }
 
         LOGINFO("Starting iomgr with {} threads", nthreads);
-        iomanager.start(1 /* total interfaces */, nthreads,
+        iomanager.start(1 /* total interfaces */, nthreads, false,
                         std::bind(&SampleDB::on_thread_msg, this, std::placeholders::_1));
         iomanager.add_drive_interface(
             std::dynamic_pointer_cast< iomgr::DriveInterface >(std::make_shared< iomgr::AioDriveInterface >()),

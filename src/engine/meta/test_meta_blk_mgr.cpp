@@ -135,10 +135,7 @@ public:
         m_wrt_cnt++;
         auto sz_to_wrt = rand_size(overflow);
 
-        uint8_t* buf = nullptr;
-        auto ret = posix_memalign((void**)&buf, 4096, sz_to_wrt);
-        HS_ASSERT_CMP(RELEASE, ret, ==, 0);
-
+        uint8_t* buf = iomanager.iobuf_alloc(512, sz_to_wrt);
         gen_rand_buf(buf, sz_to_wrt);
 
         void* cookie = nullptr;
@@ -187,9 +184,7 @@ public:
         auto it = m_write_sbs.begin() + get_rand_pos();
         bool overflow = rand() % 2;
         auto sz_to_wrt = rand_size(overflow);
-        uint8_t* buf = nullptr;
-        auto ret = posix_memalign((void**)&buf, 4096, sz_to_wrt);
-        HS_ASSERT_CMP(RELEASE, ret, ==, 0);
+        uint8_t* buf = iomanager.iobuf_alloc(512, sz_to_wrt);
 
         gen_rand_buf(buf, sz_to_wrt);
 

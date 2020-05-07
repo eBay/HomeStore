@@ -151,7 +151,7 @@ public:
                                /* XXX : there can be race condition when message is sent before run_io_loop is called */
                                auto sthread = std::thread([i]() {
                                    wb_cache_t::m_thread_num[i] = sisl::ThreadLocalContext::my_thread_num();
-                    
+
                                    iomanager.run_io_loop(false, nullptr, ([](const iomgr_msg& io_msg) {}));
                                });
                                sthread.detach();
@@ -264,8 +264,7 @@ public:
         }
 
         /* make a copy */
-        void* mem;
-        if (posix_memalign((void**)&mem, HS_STATIC_CONFIG(disk_attr.align_size), bn->get_cache_size())) { abort(); }
+        auto mem = iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), bn->get_cache_size());
         homeds::blob outb;
         (bn->get_memvec()).get(&outb);
         memcpy(mem, outb.bytes, outb.size);

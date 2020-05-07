@@ -99,8 +99,7 @@ public:
 
         void* buf = nullptr;
         ssize_t size = num_blks * BLK_SIZE;
-        auto ret = posix_memalign((void**)&buf, 4096, size);
-        assert(ret == 0);
+        buf = iomanager.iobuf_alloc(512, size);
 
         std::vector< int > fd_list;
         std::vector< uint64_t > offset;
@@ -110,7 +109,7 @@ public:
         for (uint32_t fd = 0; fd < fd_list.size(); ++fd) {
             uint64_t temp_size = size_blks[fd] * BLK_SIZE;
             uint64_t temp_offset = offset[fd] * BLK_SIZE;
-            ret = pread(fd_list[fd], buf, temp_size, temp_offset);
+            auto ret = pread(fd_list[fd], buf, temp_size, temp_offset);
             if (ret != (int)temp_size) {
                 LOGINFO("read failed error no {}", errno);
                 free(buf);

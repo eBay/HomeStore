@@ -41,8 +41,8 @@ DeviceManager::DeviceManager(NewVDevCallback vcb, uint32_t const vdev_metadata_s
     m_vdev_metadata_size = vdev_metadata_size;
     m_pdev_id = 0;
     m_dm_info_size = sisl::round_up(DM_INFO_BLK_SIZE, HS_STATIC_CONFIG(disk_attr.phys_page_size));
-    auto ret = posix_memalign((void**)&m_chunk_memory, HS_STATIC_CONFIG(disk_attr.align_size), m_dm_info_size);
 
+    m_chunk_memory = (char*)iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), m_dm_info_size);
     HS_ASSERT_NOTNULL(LOGMSG, m_chunk_memory);
 
     bzero(m_chunk_memory, m_dm_info_size);

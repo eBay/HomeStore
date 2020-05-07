@@ -89,9 +89,7 @@ void Volume::init() {
                     std::bind(&Volume::process_indx_completions, this, std::placeholders::_1, std::placeholders::_2),
                     std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1),
                     std::bind(&Volume::pending_read_blk_cb, this, std::placeholders::_1, std::placeholders::_2));
-    vol_sb_hdr* sb;
-    auto ret = posix_memalign((void**)&(sb), HS_STATIC_CONFIG(disk_attr.align_size), sizeof(vol_sb_hdr));
-    assert(!ret);
+    vol_sb_hdr* sb = (vol_sb_hdr*)iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), sizeof(vol_sb_hdr));
     m_sb = new (sb) vol_sb_hdr(m_params.page_size, m_params.size, (char*)m_params.vol_name, m_params.uuid,
                                m_indx_mgr->get_active_sb());
     assert(sb != nullptr);

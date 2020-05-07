@@ -21,14 +21,16 @@ public:
     void stop(bool wait_io_complete = true);
 
 private:
-    void process_ev_callback(const int fd, const void* cookie, const int event);
+    // void process_ev_callback(const int fd, const void* cookie, const int event);
+    void handle_iothread_msg(const iomgr::iomgr_msg& msg);
+    void process_new_request();
     bool is_running() const;
     void start();
 
 private:
     folly::MPMCQueue< callback_t, std::atomic, true > m_cq;
-    int m_ev_fd;
-    std::shared_ptr< iomgr::fd_info > m_ev_fdinfo = nullptr;
+    // int m_ev_fd;
+    // std::shared_ptr< iomgr::fd_info > m_ev_fdinfo = nullptr;
     std::atomic_bool m_running;
     std::atomic_ullong m_read_cnt;
     std::atomic_ullong m_write_cnt;

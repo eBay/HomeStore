@@ -45,7 +45,7 @@ public:
         params.init_done_cb = init_done_cb;
         params.disk_attr = disk_attributes();
         params.disk_attr->phys_page_size = 4096;
-        params.disk_attr->align_size = 4096;
+        params.disk_attr->align_size = 512;
         params.disk_attr->atomic_phys_page_size = atomic_phys_page_size;
         params.vol_mounted_cb =
             std::bind(&DiskInitializer::vol_mounted_cb, this, std::placeholders::_1, std::placeholders::_2);

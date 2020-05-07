@@ -193,13 +193,8 @@ void IndxMgr::init() {
 
 void IndxMgr::write_cp_super_block(indx_cp_id* id) {
     LOGINFO("superblock is written");
-    uint8_t* mem = nullptr;
     uint64_t size = (id ? (sizeof(indx_mgr_cp_sb) * id->snt_cnt) : 0) + sizeof(indx_mgr_cp_sb_hdr);
-    int ret = posix_memalign((void**)&(mem), HS_STATIC_CONFIG(disk_attr.align_size), size);
-    if (ret != 0) {
-        assert(0);
-        throw std::bad_alloc();
-    }
+    uint8_t* mem = iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), size);
 
     indx_mgr_cp_sb_hdr* hdr = (indx_mgr_cp_sb_hdr*)mem;
     hdr->version = INDX_MGR_VERSION;

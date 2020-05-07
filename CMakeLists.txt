@@ -16,14 +16,30 @@ if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
     include (cmake/debug_flags.cmake)
   endif ()
 endif()
-if  (${MEMORY_SANITIZER_ON})
+
+set(ASAN_ENABLED_BUILD false)
+if ($ENV{ASAN_OPTIONS} MATCHES "detect_leaks=1") 
+  message("Running with ASAN leak detection ON")
+  set(ASAN_ENABLED_BUILD true)
+endif()
+
+if (${MEMORY_SANITIZER_ON})
   message("Running with Memory Sanitizer ON")
   include (cmake/mem_sanitizer.cmake)
-else ()
-  if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
-    message("WARNING: Running with Memory Sanitizer OFF for debug build")
-  endif()
 endif ()
+
+if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
+  if (NOT ${ASAN_ENABLED_BUILD})
+    message(AUTHOR_WARNING "********* WARNING: Running with ASAN leak detection OFF for debug build *********")
+    message("If not desired, set the env variable as follows and rerun the build")
+    message("'ASAN_OPTIONS=detect_leaks=1:abort_on_error=1:disable_coredump=0::unmap_shadow_on_exit=1'")
+  endif()
+
+  if (NOT ${MEMORY_SANITIZER_ON})
+    message(AUTHOR_WARNING "********* WARNING: Running with Memory Sanitizer OFF for debug build *********")
+  endif()
+endif()
+
 
 include(${CONAN_SISL_ROOT}/cmake/settings_gen.cmake)
 

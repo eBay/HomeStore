@@ -270,10 +270,7 @@ public:
 
         // validate_read_offset(off_to_read);
 
-        uint8_t* buf = nullptr;
-        auto ret = posix_memalign((void**)&buf, 4096, it->second.size);
-        HS_ASSERT_CMP(RELEASE, ret, ==, 0);
-
+        auto buf = iomanager.iobuf_alloc(512, it->second.size);
         auto bytes_read = m_store->pread((void*)buf, (size_t)it->second.size, (off_t)off_to_read);
 
         if (bytes_read == -1) { HS_ASSERT(DEBUG, false, "bytes_read returned -1, errno: {}", errno); }
@@ -304,10 +301,7 @@ public:
         LOGDEBUG("writing to offset: 0x{}, size: {}, start: 0x{}, tail: 0x{}", to_hex(off_to_wrt), sz_to_wrt,
                  to_hex(m_start_off), to_hex(m_store->get_tail_offset()));
 
-        uint8_t* buf = nullptr;
-        auto ret = posix_memalign((void**)&buf, 4096, sz_to_wrt);
-        HS_ASSERT_CMP(RELEASE, ret, ==, 0);
-
+        auto buf = iomanager.iobuf_alloc(512, sz_to_wrt);
         gen_rand_buf(buf, sz_to_wrt);
 
         auto bytes_written = m_store->pwrite(buf, sz_to_wrt, off_to_wrt);
