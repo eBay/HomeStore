@@ -359,7 +359,7 @@ public:
             }
         }
         /* Don't populate the whole disks. Only 80 % of it */
-        max_vol_size = (_gcfg.p_volume_size * max_capacity) / (100 * tcfg.max_vols);
+        max_vol_size = (tcfg.p_volume_size * max_capacity) / (100 * tcfg.max_vols);
 
         iomanager.start(1 /* total interfaces */, tcfg.num_threads, bind_this(VolTest::handle_iothread_msg, 1));
         iomanager.add_drive_interface(
@@ -1071,7 +1071,6 @@ thread_local std::list< vol_interface_req_ptr > VolTest::_completed_reqs_this_th
 TEST_F(VolTest, lifecycle_test) {
     this->start_homestore();
     this->start_io_job();
-    tcfg.expect_io_error = _gcfg.expect_io_error;
 
     output.print("lifecycle_test");
 
@@ -1109,7 +1108,6 @@ TEST_F(VolTest, init_io_test) {
  */
 TEST_F(VolTest, recovery_io_test) {
     tcfg.init = false;
-    tcfg.expect_io_error = _gcfg.expect_io_error;
     this->start_homestore();
 
     if (tcfg.verify_hdr || tcfg.verify_data || tcfg.verify_only) {
@@ -1130,7 +1128,6 @@ TEST_F(VolTest, recovery_io_test) {
  */
 TEST_F(VolTest, vol_create_del_test) {
     tcfg.precreate_volume = false;
-    tcfg.expect_io_error = _gcfg.expect_io_error;
     this->start_homestore();
 
     auto cdjob = std::make_unique< VolCreateDeleteJob >(this);
@@ -1146,7 +1143,6 @@ TEST_F(VolTest, one_disk_replace_test) {
     tcfg.init = false;
     tcfg.disk_replace_cnt = 1;
     tcfg.expected_vol_state = homestore::vol_state::DEGRADED;
-    tcfg.expect_io_error = _gcfg.expect_io_error;
     this->start_homestore();
 
     output.print("one_disk_replace_test");
