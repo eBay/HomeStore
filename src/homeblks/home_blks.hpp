@@ -42,15 +42,10 @@ typedef uint32_t homeblks_sb_flag_t;
 
 #define HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN 0x00000001UL
 struct homeblks_sb {
-    uint64_t magic; // deprecated
     uint64_t version;
-    uint32_t gen_cnt; // deprecated
-    BlkId blkid;      // depreacted
     boost::uuids::uuid uuid;
 
     uint64_t boot_cnt;
-    BlkId vol_list_head; // deprecated
-    int num_vols;        // deprecated
     homeblks_sb_flag_t flags;
 
     void init_flag(homeblks_sb_flag_t f) { flags = f; }

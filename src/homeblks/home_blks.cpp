@@ -256,7 +256,6 @@ HomeBlksSafePtr HomeBlks::safe_instance() { return _instance; }
 void HomeBlks::superblock_init() {
     /* build the homeblks super block */
     m_homeblks_sb->version = HOMEBLKS_SB_VERSION;
-    m_homeblks_sb->magic = HOMEBLKS_SB_MAGIC;
     m_homeblks_sb->boot_cnt = 0;
     m_homeblks_sb->init_flag(0);
     m_homeblks_sb->uuid = HS_STATIC_CONFIG(input.system_uuid);
@@ -656,8 +655,6 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
      */
     intrusive_ptr_release(this);
 
-    MetaBlkMgr::del_instance();
-
     if (cb) cb(true);
     return;
 }
@@ -789,4 +786,25 @@ void HomeBlks::migrate_volume_sb() {
     }
 }
 
-void HomeBlks::meta_blk_cb(meta_blk* mblk, bool has_more) { m_sb_cookie = (void*)mblk; }
+void HomeBlks::meta_blk_cb(meta_blk* mblk, bool has_more) { 
+    static bool meta_blk_found = false;
+    // HomeBlk layer expects to see one valid meta_blk record during reboot;
+    if (has_more == true) {
+        assert(meta_blk_found == false);
+        assert(mblk != nullptr);
+        m_sb_cookie = (void*)mblk; 
+
+        // recover from meta_blk;
+        auto sb = (homeblks_sb*)mblk->context_data;
+        m_homeblks_sb->version = sb->version;
+        m_homeblks_sb->uuid = sb->uuid;
+        m_homeblks_sb->boot_cnt = sb->boot_cnt;
+        m_homeblks_sb->flags = sb->flags;
+
+        meta_blk_found = true;
+    } else {
+        /* has_more is false */
+        assert(meta_blk_found);
+        assert(mblk == nullptr);
+    }
+}
