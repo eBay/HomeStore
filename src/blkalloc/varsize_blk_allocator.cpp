@@ -268,11 +268,6 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
              * blocks from the btree cache.
              */
             auto new_blks_rqstd = get_best_fit_cache(blks_rqstd);
-            if (new_blks_rqstd == 0) {
-                /* It should never happen. It means we are running out of space */
-                new_blks_rqstd = nblks - blks_alloced;
-                BLKALLOC_LOG(ERROR, , "Could not allocate any blocks. Running out of space");
-            }
 
             /* It is because of a bug in btree where we can keep checking for the leaf node
              * in the btree cache which doesn't have any keys. This code will go away once we
@@ -283,6 +278,11 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
             } else {
                 blks_rqstd = new_blks_rqstd;
             }
+            if (blks_rqstd == 0) {
+                /* It should never happen. It means we are running out of space */
+                blks_rqstd = nblks - blks_alloced;
+                BLKALLOC_LOG(ERROR, , "Could not allocate any blocks. Running out of space");
+            }
         } else {
             BLKALLOC_LOG(TRACE, , "Blocks allocated={}", blks_alloced);
             blks_alloced += blkid.get_nblks();
@@ -291,6 +291,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
             BLKALLOC_ASSERT_CMP(LOGMSG, blks_alloced % hints.multiplier, ==, 0);
 
             blks_rqstd = nblks - blks_alloced;
+            assert(blkid.get_nblks() != 0);
             out_blkid.push_back(blkid);
         }
         retry_cnt++;
@@ -304,13 +305,12 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
             m_blk_cache->print_tree();
         }
         BLKALLOC_LOG(ERROR, , "blks_alloced != nblks : {}  {}", blks_alloced, nblks);
-        BLKALLOC_ASSERT_CMP(LOGMSG, blks_alloced, ==, nblks);
         COUNTER_INCREMENT(m_metrics, alloc_fail, 1);
         /* free blks */
-        for (auto it = out_blkid.begin(); it != out_blkid.end();) {
-            free(*it);
-            it = out_blkid.erase(it);
+        for (uint32_t i = 0; i < out_blkid.size(); ++i) {
+            free(out_blkid[i]);
         }
+        out_blkid.clear();
         return BLK_ALLOC_SPACEFULL;
     }
     return BLK_ALLOC_SUCCESS;
@@ -469,7 +469,7 @@ void VarsizeBlkAllocator::free(const BlkId& b) {
     segment->add_free_blks(b.get_nblks());
     portion->lock();
     // Reset the bits
-    BLKALLOC_ASSERT(LOGMSG, m_alloc_bm->is_bits_set_reset(b.get_id(), b.get_nblks(), true), "Expected bits to reset");
+    BLKALLOC_ASSERT(RELEASE, m_alloc_bm->is_bits_set_reset(b.get_id(), b.get_nblks(), true), "Expected bits to reset");
 #ifndef NDEBUG
     BLKALLOC_ASSERT(DEBUG, m_alloced_bm->is_bits_set_reset(b.get_id(), b.get_nblks(), true),
                     "Expected alloced bits to reset");

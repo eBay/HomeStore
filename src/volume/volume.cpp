@@ -460,6 +460,11 @@ std::error_condition Volume::write(uint64_t lba, uint8_t* buf, uint32_t nlbas, c
 
     try {
         for (i = 0; i < bid.size(); ++i) {
+            if (bid[i].get_nblks() == 0) {
+                /* It should not happen. But it happened once so adding a safe check in case it happens again */
+                VOL_LOG_ASSERT(0, hb_req, "{}", bid[i].to_string());
+                continue;
+            }
             std::deque< writeback_req_ptr > req_q;
 
             volume_req_ptr vreq = Volume::create_vol_req(this, hb_req);
