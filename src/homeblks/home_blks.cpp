@@ -790,8 +790,8 @@ void HomeBlks::meta_blk_cb(meta_blk* mblk, bool has_more) {
     static bool meta_blk_found = false;
     // HomeBlk layer expects to see one valid meta_blk record during reboot;
     if (has_more == true) {
-        assert(meta_blk_found == false);
-        assert(mblk != nullptr);
+        HS_ASSERT_CMP(DEBUG, meta_blk_found, ==, false);
+        HS_ASSERT_CMP(RELEASE, mblk, !=, nullptr);
         m_sb_cookie = (void*)mblk; 
 
         // recover from meta_blk;
@@ -804,7 +804,7 @@ void HomeBlks::meta_blk_cb(meta_blk* mblk, bool has_more) {
         meta_blk_found = true;
     } else {
         /* has_more is false */
-        assert(meta_blk_found);
-        assert(mblk == nullptr);
+        HS_ASSERT(DEBUG, meta_blk_found);
+        HS_ASSERT(DEBUG, mblk == nullptr);
     }
 }
