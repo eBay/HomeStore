@@ -1,6 +1,7 @@
 #include "meta_sb.hpp"
 #include "meta_blks_mgr.hpp"
 
+SDS_LOGGING_DECL(metablk)
 namespace homestore {
 
 MetaBlkMgr::MetaBlkMgr(blk_store_type* sb_blk_store, sb_blkstore_blob* blob, init_params* cfg, bool init) :
@@ -227,7 +228,7 @@ void MetaBlkMgr::add_sub_sb(meta_sub_type type, void* context_data, uint64_t sz,
     BlkId meta_bid;
     auto ret = alloc_meta_blk(meta_bid);
 
-    LOGINFO("adding meta blkid: {}, type: {}", meta_bid.to_string(), type);
+    HS_LOG(INFO, metablk, "adding meta blkid: {}, type: {}", meta_bid.to_string(), type);
     if (no_error != ret) {
         HS_ASSERT(RELEASE, 0, "alloc blk failed with status: {}", ret.message());
         return;
@@ -316,10 +317,10 @@ void MetaBlkMgr::write_meta_blk_internal(meta_blk* mblk, void* context_data, uin
         BlkId obid;
         auto ret = alloc_meta_blk(obid, sz);
 
-        LOGINFO("allocating overflow bid: {}, sz: {}", obid.to_string(), sz);
+        HS_LOG(INFO, metablk, "allocating overflow bid: {}, sz: {}", obid.to_string(), sz);
 
         if (ret != no_error) {
-            LOGERROR("Failed to allocate contigous overflow blk with size: {}", sz);
+            HS_LOG(ERROR, metablk, "Failed to allocate contigous overflow blk with size: {}", sz);
             HS_ASSERT(RELEASE, 0, "failed to allocate overflow blk id with size: {}", sz);
         }
 
@@ -343,7 +344,8 @@ void MetaBlkMgr::update_sub_sb(meta_sub_type type, void* context_data, uint64_t 
     std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
     meta_blk* mblk = (meta_blk*)cookie;
 
-    LOGINFO("old sb: context_sz: {}, ovf_blkid: {}", mblk->hdr.context_sz, mblk->hdr.ovf_blkid.to_string());
+    LOGINFO("old sb: context_sz: {}, ovf_blkid: {}", (unsigned long)(mblk->hdr.context_sz),
+            mblk->hdr.ovf_blkid.to_string());
 
     // free the overflow blkid if it is there
     if (mblk->hdr.ovf_blkid.to_integer() != BlkId::invalid_internal_id()) {
@@ -374,8 +376,8 @@ std::error_condition MetaBlkMgr::remove_sub_sb(void* cookie) {
     auto prev_blkid = m_meta_blks[type][bid.to_integer()]->hdr.prev_blkid;
     auto next_blkid = m_meta_blks[type][bid.to_integer()]->hdr.next_blkid;
 
-    LOGINFO("removing meta blk id: {}, type: {}, prev_blkid: {}, next_blkid: {}", bid.to_string(), type,
-            prev_blkid.to_string(), next_blkid.to_string());
+    HS_LOG(INFO, metablk, "removing meta blk id: {}, type: {}, prev_blkid: {}, next_blkid: {}", bid.to_string(), type,
+           prev_blkid.to_string(), next_blkid.to_string());
 
     // this record must exist in-memory copy
     assert(m_meta_blks[type].find(bid.to_integer()) != m_meta_blks[type].end());
@@ -459,7 +461,7 @@ std::error_condition MetaBlkMgr::alloc_meta_blk(BlkId& bid, uint32_t alloc_sz) {
     try {
         auto ret = m_sb_blk_store->alloc_blk(alloc_sz, hints, &bid);
         if (ret != BLK_ALLOC_SUCCESS) {
-            LOGERROR("failing as it is out of disk space!");
+            HS_LOG(ERROR, metablk, "failing as it is out of disk space!");
             return std::errc::no_space_on_device;
         }
     } catch (const std::exception& e) {
