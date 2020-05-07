@@ -115,9 +115,6 @@ struct vdevs_block {
     uint32_t get_first_vdev_id() const { return first_vdev_id; }
 } __attribute((packed));
 
-#define SUPERBLOCK_SIZE (HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size))
-#define SUPERBLOCK_PAYLOAD_OFFSET 10
-
 #define MAX_VDEV_INFO_BLOCK_SZ 4096
 #define MAX_VDEV_INFO_BLOCK_HDR_SZ 512
 #define MAX_CONTEXT_DATA_SZ (MAX_VDEV_INFO_BLOCK_SZ - MAX_VDEV_INFO_BLOCK_HDR_SZ)

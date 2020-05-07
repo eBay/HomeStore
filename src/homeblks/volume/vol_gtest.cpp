@@ -93,6 +93,8 @@ struct TestCfg {
     bool expected_init_fail = false;
     int disk_replace_cnt = 0;
     bool precreate_volume = true;
+    bool expect_io_error = false;
+    uint32_t p_volume_size = 60;
 };
 
 struct TestOutput {
@@ -357,7 +359,7 @@ public:
             }
         }
         /* Don't populate the whole disks. Only 80 % of it */
-        max_vol_size = (60 * max_capacity) / (100 * tcfg.max_vols);
+        max_vol_size = (_gcfg.p_volume_size * max_capacity) / (100 * tcfg.max_vols);
 
         iomanager.start(1 /* total interfaces */, tcfg.num_threads, bind_this(VolTest::handle_iothread_msg, 1));
         iomanager.add_drive_interface(
@@ -1069,6 +1071,7 @@ thread_local std::list< vol_interface_req_ptr > VolTest::_completed_reqs_this_th
 TEST_F(VolTest, lifecycle_test) {
     this->start_homestore();
     this->start_io_job();
+    tcfg.expect_io_error = _gcfg.expect_io_error;
 
     output.print("lifecycle_test");
 
@@ -1106,6 +1109,7 @@ TEST_F(VolTest, init_io_test) {
  */
 TEST_F(VolTest, recovery_io_test) {
     tcfg.init = false;
+    tcfg.expect_io_error = _gcfg.expect_io_error;
     this->start_homestore();
 
     if (tcfg.verify_hdr || tcfg.verify_data || tcfg.verify_only) {
@@ -1126,6 +1130,7 @@ TEST_F(VolTest, recovery_io_test) {
  */
 TEST_F(VolTest, vol_create_del_test) {
     tcfg.precreate_volume = false;
+    tcfg.expect_io_error = _gcfg.expect_io_error;
     this->start_homestore();
 
     auto cdjob = std::make_unique< VolCreateDeleteJob >(this);
@@ -1141,6 +1146,7 @@ TEST_F(VolTest, one_disk_replace_test) {
     tcfg.init = false;
     tcfg.disk_replace_cnt = 1;
     tcfg.expected_vol_state = homestore::vol_state::DEGRADED;
+    tcfg.expect_io_error = _gcfg.expect_io_error;
     this->start_homestore();
 
     output.print("one_disk_replace_test");
@@ -1359,7 +1365,11 @@ SDS_OPTION_GROUP(
      "phy_page_size"),
     (io_flags, "", "io_flags", "io_flags", ::cxxopts::value< uint32_t >()->default_value("1"), "0 or 1"),
     (mem_btree_page_size, "", "mem_btree_page_size", "mem_btree_page_size",
-     ::cxxopts::value< uint32_t >()->default_value("8192"), "mem_btree_page_size"))
+     ::cxxopts::value< uint32_t >()->default_value("8192"), "mem_btree_piage_size"),
+    (expect_io_error, "", "expect_io_error", "expect_io_error", ::cxxopts::value< uint32_t >()->default_value("0"),
+     "0 or 1"),
+    (p_volume_size, "", "p_volume_size", "p_volume_size", ::cxxopts::value< uint32_t >()->default_value("60"),
+     "0 to 200"))
 
 #define ENABLED_OPTIONS logging, home_blks, test_volume
 
@@ -1405,6 +1415,8 @@ int main(int argc, char* argv[]) {
     _gcfg.phy_page_size = SDS_OPTIONS["phy_page_size"].as< uint32_t >();
     _gcfg.mem_btree_page_size = SDS_OPTIONS["mem_btree_page_size"].as< uint32_t >();
     _gcfg.io_flags = static_cast< io_flag >(SDS_OPTIONS["io_flags"].as< uint32_t >());
+    _gcfg.expect_io_error = SDS_OPTIONS["expect_io_error"].as< uint32_t >() ? true : false;
+    _gcfg.p_volume_size = SDS_OPTIONS["p_volume_size"].as< uint32_t >();
 
     if (SDS_OPTIONS.count("device_list")) {
         _gcfg.dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();
