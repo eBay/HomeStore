@@ -83,7 +83,8 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
 
     /* super block should always be written atomically. */
     HS_ASSERT_NOTNULL(LOGMSG, m_super_blk);
-    HS_ASSERT_CMP(LOGMSG, sizeof(super_block), <=, HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size));
+    HS_ASSERT_CMP(LOGMSG, sizeof(super_block), <=, SUPERBLOCK_SIZE);
+    memset(m_super_blk, 0, SUPERBLOCK_SIZE);
 
     m_info_blk.dev_num = dev_num;
     m_info_blk.dev_offset = dev_offset;
@@ -182,7 +183,6 @@ size_t PhysicalDev::get_total_cap() {
 }
 
 bool PhysicalDev::load_super_block() {
-    memset(m_super_blk, 0, SUPERBLOCK_SIZE);
 
     read_superblock();
 
