@@ -15,7 +15,7 @@ namespace homestore {
 /**
  * Sub system types and their priorities
  */
-enum class meta_sub_type { NOT_INIT_TYPE, HOMEBLK, VOLUME, INDX_MGR_CP, JOURNAL };
+enum class meta_sub_type { NOT_INIT_TYPE, HOMEBLK, VOLUME, INDX_MGR_CP, JOURNAL, BLK_ALLOC };
 
 typedef uint32_t crc32_t;
 

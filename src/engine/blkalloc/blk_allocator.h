@@ -18,6 +18,7 @@
 #include "engine/homeds/btree/btree.hpp"
 #include <folly/ThreadLocal.h>
 #include <boost/range/irange.hpp>
+#include <fds/bitset.hpp>
 
 using namespace std;
 
@@ -27,6 +28,7 @@ class BlkAllocConfig {
 private:
     uint32_t m_blk_size;
     uint64_t m_nblks;
+    uint32_t m_blks_per_portion;
     std::string m_unique_name;
 
 public:
@@ -34,9 +36,7 @@ public:
     explicit BlkAllocConfig(uint64_t nblks) : BlkAllocConfig(8192, nblks, "") {}
 
     BlkAllocConfig(uint32_t blk_size = 8192, uint64_t nblks = 0, const std::string& name = "") :
-            m_blk_size(blk_size),
-            m_nblks(nblks),
-            m_unique_name(name) {}
+            m_blk_size(blk_size), m_nblks(nblks), m_blks_per_portion(nblks), m_unique_name(name) {}
 
     void set_blk_size(uint64_t blk_size) { m_blk_size = blk_size; }
 
@@ -52,6 +52,30 @@ public:
         std::stringstream ss;
         ss << "Blksize=" << get_blk_size() << " TotalBlks=" << get_total_blks();
         return ss.str();
+    }
+
+    //! Set Blocks per Portion
+    /*!
+      \param pg_per_portion an uint32 argument signifies pages per portion
+      \return void
+    */
+    void set_blks_per_portion(uint32_t pg_per_portion) {
+        m_blks_per_portion = pg_per_portion;
+    }
+
+    //! Get Blocks per Portion
+    /*!
+      \return blocks per portion as uint64
+    */
+    uint64_t get_blks_per_portion() const { return m_blks_per_portion; }
+
+    //! Get Total Portions
+    /*!
+      \return portion count as uint64
+    */
+    uint64_t get_total_portions() const {
+        assert(get_total_blks() % get_blks_per_portion() == 0);
+        return get_total_blks() / get_blks_per_portion();
     }
 };
 
@@ -95,22 +119,53 @@ struct blk_alloc_hints {
     uint32_t multiplier; // blks allocated in a blkid should be a multiple of multiplier
 };
 
-class BlkAllocator {
-public:
-    explicit BlkAllocator(BlkAllocConfig& cfg) { m_cfg = cfg; }
+class BlkAllocPortion {
+private:
+    pthread_mutex_t m_blk_lock;
 
-    virtual ~BlkAllocator() = default;
+public:
+
+    BlkAllocPortion() { pthread_mutex_init(&m_blk_lock, NULL); }
+
+    ~BlkAllocPortion() { pthread_mutex_destroy(&m_blk_lock); }
+
+    void lock() { pthread_mutex_lock(&m_blk_lock); }
+
+    void unlock() { pthread_mutex_unlock(&m_blk_lock); }
+};
+
+class BlkAllocator {
+    std::vector< BlkAllocPortion > m_blk_portions;
+    sisl::Bitset* m_alloced_bm;
+
+public:
+    explicit BlkAllocator(BlkAllocConfig& cfg, uint32_t id = 0) : m_blk_portions(cfg.get_total_portions()) {
+        m_alloced_bm = new sisl::Bitset(cfg.get_total_blks(), id, HS_STATIC_CONFIG(disk_attr.align_size));
+        m_cfg = cfg;
+    }
+
+    virtual ~BlkAllocator() { delete m_alloced_bm; }
+    sisl::Bitset* get_alloced_bm() { return m_alloced_bm; }
+    BlkAllocPortion* get_blk_portions(uint32_t portion_num) { return &(m_blk_portions[portion_num]); }
 
     virtual void inited() = 0;
     virtual BlkAllocStatus alloc(BlkId& out_blkid) = 0;
     virtual BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) = 0;
     virtual BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints& hints, BlkId* out_blkid,
                                  bool best_fit = false) = 0;
+    sisl::byte_array serialize_alloc_blks() { return (m_alloced_bm->serialize()); }
     virtual bool is_blk_alloced(BlkId& in_bid) = 0;
     virtual void free(const BlkId& id) = 0;
     virtual std::string to_string() const = 0;
 
     virtual const BlkAllocConfig& get_config() const { return m_cfg; }
+    uint64_t blknum_to_portion_num(uint64_t blknum) const { return blknum / get_config().get_blks_per_portion(); }
+
+    BlkAllocPortion* blknum_to_portion(uint64_t blknum) { return &m_blk_portions[blknum_to_portion_num(blknum)]; }
+
+    const BlkAllocPortion* blknum_to_portion_const(uint64_t blknum) const {
+        return &m_blk_portions[blknum_to_portion_num(blknum)];
+    }
 
 protected:
     BlkAllocConfig m_cfg;
@@ -168,7 +223,7 @@ private:
     __fixed_blk_node* m_blk_nodes;
 
 public:
-    explicit FixedBlkAllocator(BlkAllocConfig& cfg, bool init);
+    explicit FixedBlkAllocator(BlkAllocConfig& cfg, bool init, uint32_t id);
     ~FixedBlkAllocator() override;
 
     BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints& hints, BlkId* out_blkid, bool best_fit = false) override;
@@ -187,7 +242,6 @@ private:
     void free_blk(uint32_t id);
     bool m_init;
     uint32_t m_first_blk_id;
-    homeds::Bitset* m_alloc_bm;
     std::mutex m_bm_mutex;
 };
 

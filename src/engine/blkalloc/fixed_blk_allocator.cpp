@@ -11,9 +11,9 @@ using namespace std;
 
 namespace homestore {
 
-FixedBlkAllocator::FixedBlkAllocator(BlkAllocConfig& cfg, bool init) : BlkAllocator(cfg), m_init(init) {
+FixedBlkAllocator::FixedBlkAllocator(BlkAllocConfig& cfg, bool init, uint32_t id) :
+        BlkAllocator(cfg, id), m_init(init) {
     m_blk_nodes = new __fixed_blk_node[cfg.get_total_blks()];
-    m_alloc_bm = new homeds::Bitset(cfg.get_total_blks());
 
     if (m_init) {
         inited();
@@ -22,17 +22,19 @@ FixedBlkAllocator::FixedBlkAllocator(BlkAllocConfig& cfg, bool init) : BlkAlloca
 
 FixedBlkAllocator::~FixedBlkAllocator() {
     delete[](m_blk_nodes);
-    delete m_alloc_bm;
 }
 
 BlkAllocStatus FixedBlkAllocator::alloc(BlkId& in_bid) {
-    std::unique_lock< std::mutex > lk(m_bm_mutex);
+    BlkAllocPortion* portion = blknum_to_portion(in_bid.get_id());
+    portion->lock();
     assert(in_bid.get_nblks() == 1);
-    if (m_alloc_bm->is_bits_set_reset(in_bid.get_id(), in_bid.get_nblks(), true)) {
+    if (get_alloced_bm()->is_bits_set(in_bid.get_id(), in_bid.get_nblks())) {
         /* XXX: We need to have better status */
+        portion->unlock();
         return BLK_ALLOC_FAILED;
     }
-    m_alloc_bm->set_bits(in_bid.get_id(), in_bid.get_nblks());
+    get_alloced_bm()->set_bits(in_bid.get_id(), in_bid.get_nblks());
+    portion->unlock();
     return BLK_ALLOC_SUCCESS;
 }
 
@@ -45,13 +47,14 @@ void FixedBlkAllocator::inited() {
 #ifndef NDEBUG
         m_blk_nodes[i].this_blk_id = i;
 #endif
-        std::unique_lock< std::mutex > lk(m_bm_mutex);
-        if (m_alloc_bm->is_bits_set_reset(i, 1, true)) {
+        BlkAllocPortion* portion = blknum_to_portion(i);
+        portion->lock();
+        if (get_alloced_bm()->is_bits_set(i, 1)) {
+            portion->unlock();
             continue;
         }
-        if (m_first_blk_id == BLKID32_INVALID) {
-            m_first_blk_id = i;
-        }
+        portion->unlock();
+        if (m_first_blk_id == BLKID32_INVALID) { m_first_blk_id = i; }
         if (prev_blkid != BLKID32_INVALID) {
             m_blk_nodes[prev_blkid].next_blk = i;
         }
@@ -72,8 +75,11 @@ void FixedBlkAllocator::inited() {
 bool FixedBlkAllocator::is_blk_alloced(BlkId& b) {
     /* We need to take lock so we can check in non debug builds */
 #ifndef NDEBUG
-    std::unique_lock< std::mutex > lk(m_bm_mutex);
-    return (m_alloc_bm->is_bits_set_reset(b.get_id(), b.get_nblks(), true));
+    BlkAllocPortion* portion = blknum_to_portion(b.get_id());
+    portion->lock();
+    bool status = get_alloced_bm()->is_bits_set(b.get_id(), b.get_nblks());
+    portion->unlock();
+    return status;
 #else
     return true;
 #endif
@@ -81,6 +87,7 @@ bool FixedBlkAllocator::is_blk_alloced(BlkId& b) {
 
 BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) {
     BlkId blkid;
+    /* TODO:If it is more then 1 then we need to make sure that we never allocate across the portions */
     assert(nblks == 1);
 
 #ifdef _PRERELEASE
@@ -89,10 +96,6 @@ BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& hi
     }
 #endif
     if (alloc(nblks, hints, &blkid) == BLK_ALLOC_SUCCESS) {
-#ifndef NDEBUG
-        std::unique_lock< std::mutex > lk(m_bm_mutex);
-        m_alloc_bm->set_bits(blkid.get_id(), blkid.get_nblks());
-#endif
         out_blkid.push_back(blkid);
         return BLK_ALLOC_SUCCESS;
     }
@@ -129,9 +132,11 @@ BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& hi
 
 #ifndef NDEBUG
     m_nfree_blks.fetch_sub(1, std::memory_order_relaxed);
-    std::unique_lock< std::mutex > lk(m_bm_mutex);
-    m_alloc_bm->set_bits(out_blkid->get_id(), out_blkid->get_nblks());
 #endif
+    BlkAllocPortion* portion = blknum_to_portion(out_blkid->get_id());
+    portion->lock();
+    get_alloced_bm()->set_bits(out_blkid->get_id(), out_blkid->get_nblks());
+    portion->unlock();
     return BLK_ALLOC_SUCCESS;
 }
 
@@ -140,9 +145,11 @@ void FixedBlkAllocator::free(const BlkId& b) {
     assert(b.get_nblks() == 1);
 #ifndef NDEBUG
     m_nfree_blks.fetch_add(1, std::memory_order_relaxed);
-    std::unique_lock< std::mutex > lk(m_bm_mutex);
-    m_alloc_bm->reset_bits(b.get_id(), b.get_nblks());
 #endif
+    BlkAllocPortion* portion = blknum_to_portion(b.get_id());
+    portion->lock();
+    get_alloced_bm()->reset_bits(b.get_id(), b.get_nblks());
+    portion->unlock();
 }
 
 void FixedBlkAllocator::free_blk(uint32_t id) {

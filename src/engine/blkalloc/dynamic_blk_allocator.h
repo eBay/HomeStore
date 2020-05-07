@@ -173,6 +173,7 @@ public:
     BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid,
                          bool retry = true) override;
     virtual bool is_blk_alloced(BlkId& in_bid) override;
+    virtual uint8_t* serialize_alloc_blks(uint64_t chunk_id, size_t& mem_size) override;
 
     void free(Blk& blk);
 

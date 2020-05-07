@@ -80,6 +80,8 @@ DynamicBlkAllocator::~DynamicBlkAllocator() {
     m_thread_id.join();
 }
 
+uint8_t* DynamicBlkAllocator::serialize_alloc_blks(uint64_t chunk_id, size_t& mem_size) { return nullptr; }
+
 // Runs only in per region thread. In other words, this
 // is a single threaded state machine.
 void DynamicBlkAllocator::allocator_state_machine() {

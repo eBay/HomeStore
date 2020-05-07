@@ -23,29 +23,23 @@ namespace homestore {
 
 void thread_func(VarsizeBlkAllocator* b) { b->allocator_state_machine(); }
 
-VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig& cfg, bool init) :
-        BlkAllocator(cfg),
+VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig& cfg, bool init, uint32_t id) :
+        BlkAllocator(cfg, id),
         m_cfg(cfg),
         m_region_state(BLK_ALLOCATOR_DONE),
-        m_blk_portions(cfg.get_total_portions()),
         m_temp_groups(cfg.get_total_temp_group()),
         m_cache_n_entries(0),
         m_metrics(cfg.get_name().c_str()),
         m_init(false) {
 
     // TODO: Raise exception when blk_size > page_size or total blks is less than some number etc...
-    m_alloc_bm = new homeds::Bitset(cfg.get_total_blks());
+    m_alloc_bm = new sisl::Bitset(cfg.get_total_blks(), id, HS_STATIC_CONFIG(disk_attr.align_size));
 
 #ifndef NDEBUG
-    m_alloced_bm = new homeds::Bitset(cfg.get_total_blks());
-
     for (auto i = 0U; i < cfg.get_total_temp_group(); i++) {
         m_temp_groups[i].m_temp_group_id = i;
     }
 
-    for (auto i = 0U; i < cfg.get_total_portions(); i++) {
-        m_blk_portions[i].m_blk_portion_id = i;
-    }
 #endif
 
     // Initialize the slab counters
@@ -169,9 +163,6 @@ VarsizeBlkAllocator::~VarsizeBlkAllocator() {
     if (m_thread_id.joinable()) { m_thread_id.join(); }
     delete (m_blk_cache);
     delete (m_alloc_bm);
-#ifndef NDEBUG
-    delete (m_alloced_bm);
-#endif
     for (auto i = 0U; i < m_cfg.get_total_segments(); i++) {
         delete (m_segments[i]);
         BLKALLOC_LOG(INFO, , "Deleted segment {}", i);
@@ -228,7 +219,7 @@ bool VarsizeBlkAllocator::is_blk_alloced(BlkId& b) {
 #ifndef NDEBUG
     BlkAllocPortion* portion = blknum_to_portion(b.get_id());
     portion->lock();
-    auto ret = m_alloced_bm->is_bits_set_reset(b.get_id(), b.get_nblks(), true);
+    auto ret = get_alloced_bm()->is_bits_set(b.get_id(), b.get_nblks());
     BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Is allocated: id={}, nblks={}, status={}", b.get_id(), b.get_nblks(), ret);
     portion->unlock();
     return ret;
@@ -241,10 +232,8 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(BlkId& in_bid) {
     BlkAllocPortion* portion = blknum_to_portion(in_bid.get_id());
 
     portion->lock();
-#ifndef NDEBUG
-    m_alloced_bm->set_bits(in_bid.get_id(), in_bid.get_nblks());
-#endif
-    if (m_alloc_bm->is_bits_set_reset(in_bid.get_id(), in_bid.get_nblks(), true)) {
+    get_alloced_bm()->set_bits(in_bid.get_id(), in_bid.get_nblks());
+    if (m_alloc_bm->is_bits_set(in_bid.get_id(), in_bid.get_nblks())) {
         /* XXX: We need to have better status */
         portion->unlock();
         return BLK_ALLOC_FAILED;
@@ -259,6 +248,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(BlkId& in_bid) {
 void VarsizeBlkAllocator::inited() {
     if (!m_init) { m_thread_id = std::thread(thread_func, this); }
     m_init = true;
+    m_alloc_bm->copy(get_alloced_bm());
 }
 
 BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& hints,
@@ -477,7 +467,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
 #ifndef NDEBUG
     BlkAllocPortion* portion = blknum_to_portion(out_blkid->get_id());
     portion->lock();
-    m_alloced_bm->set_bits(out_blkid->get_id(), out_blkid->get_nblks());
+    get_alloced_bm()->set_bits(out_blkid->get_id(), out_blkid->get_nblks());
     portion->unlock();
 #endif
 
@@ -492,12 +482,9 @@ void VarsizeBlkAllocator::free(const BlkId& b) {
     segment->add_free_blks(b.get_nblks());
     portion->lock();
     // Reset the bits
-    BLKALLOC_ASSERT(LOGMSG, m_alloc_bm->is_bits_set_reset(b.get_id(), b.get_nblks(), true), "Expected bits to reset");
-#ifndef NDEBUG
-    BLKALLOC_ASSERT(DEBUG, m_alloced_bm->is_bits_set_reset(b.get_id(), b.get_nblks(), true),
-                    "Expected alloced bits to reset");
-    m_alloced_bm->reset_bits(b.get_id(), b.get_nblks());
-#endif
+    BLKALLOC_ASSERT(LOGMSG, m_alloc_bm->is_bits_set(b.get_id(), b.get_nblks()), "Expected bits to reset");
+    BLKALLOC_ASSERT(DEBUG, get_alloced_bm()->is_bits_set(b.get_id(), b.get_nblks()), "Expected alloced bits to reset");
+    get_alloced_bm()->reset_bits(b.get_id(), b.get_nblks());
     m_alloc_bm->reset_bits(b.get_id(), b.get_nblks());
     portion->unlock();
 
@@ -587,7 +574,7 @@ uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t seg_portion_num, Bl
 
     uint64_t portion_num = seg->get_seg_num() * get_portions_per_segment() + seg_portion_num;
     BLKALLOC_ASSERT_CMP(LOGMSG, m_cfg.get_total_portions(), >, portion_num);
-    BlkAllocPortion& portion = m_blk_portions[portion_num];
+    BlkAllocPortion& portion = *(get_blk_portions(portion_num));
     auto num_blks_per_portion = get_config().get_blks_per_portion();
     auto cur_blk_id = portion_num * num_blks_per_portion;
     auto end_blk_id = cur_blk_id + num_blks_per_portion;
@@ -601,7 +588,7 @@ uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t seg_portion_num, Bl
            (cur_blk_id < end_blk_id)) {
 
         // Get next reset bits and insert to cache and then reset those bits
-        auto b = m_alloc_bm->get_next_contiguous_reset_bits(cur_blk_id);
+        auto b = m_alloc_bm->get_next_contiguous_upto_n_reset_bits(cur_blk_id, MAX_NBLKS);
         BLKALLOC_ASSERT_CMP(LOGMSG, b.nbits, <=, MAX_NBLKS);
 
         /* If there are no free blocks are none within the assigned portion */
@@ -624,10 +611,8 @@ uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t seg_portion_num, Bl
                 VarsizeAllocCacheEntry entry;
                 gen_cache_entry(b.start_bit, nbits, &entry);
 #ifndef NDEBUG
-                BLKALLOC_ASSERT(DEBUG, m_alloc_bm->is_bits_set_reset(b.start_bit, nbits, false),
-                                "Expected bits to reset");
-                BLKALLOC_ASSERT(DEBUG, m_alloced_bm->is_bits_set_reset(b.start_bit, nbits, false),
-                                "Expected bits to reset");
+                BLKALLOC_ASSERT(DEBUG, m_alloc_bm->is_bits_reset(b.start_bit, nbits), "Expected bits to reset");
+                BLKALLOC_ASSERT(DEBUG, get_alloced_bm()->is_bits_reset(b.start_bit, nbits), "Expected bits to reset");
 #endif
                 m_blk_cache->put(entry, dummy, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
                 // TODO: Trap the return status of insert
@@ -663,9 +648,8 @@ uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t seg_portion_num, Bl
                 VarsizeAllocCacheEntry entry;
                 gen_cache_entry(start, nbits, &entry);
 #ifndef NDEBUG
-                BLKALLOC_ASSERT(DEBUG, m_alloc_bm->is_bits_set_reset(start, nbits, false),
-                                "Expected alloc_bm bits to reset");
-                BLKALLOC_ASSERT(DEBUG, m_alloced_bm->is_bits_set_reset(start, nbits, false),
+                BLKALLOC_ASSERT(DEBUG, m_alloc_bm->is_bits_reset(start, nbits), "Expected alloc_bm bits to reset");
+                BLKALLOC_ASSERT(DEBUG, get_alloced_bm()->is_bits_reset(start, nbits),
                                 "Expected alloced_bm bits to reset");
 #endif
                 m_blk_cache->put(entry, dummy, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
@@ -696,9 +680,9 @@ uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t seg_portion_num, Bl
                 VarsizeAllocCacheEntry entry;
                 gen_cache_entry(b.start_bit, b.nbits, &entry);
 #ifndef NDEBUG
-                BLKALLOC_ASSERT(DEBUG, m_alloc_bm->is_bits_set_reset(b.start_bit, b.nbits, false),
+                BLKALLOC_ASSERT(DEBUG, m_alloc_bm->is_bits_reset(b.start_bit, b.nbits),
                                 "Expected alloc_bm bits to reset");
-                BLKALLOC_ASSERT(DEBUG, m_alloced_bm->is_bits_set_reset(b.start_bit, b.nbits, false),
+                BLKALLOC_ASSERT(DEBUG, get_alloced_bm()->is_bits_reset(b.start_bit, b.nbits),
                                 "Expected alloced_bm bits to reset");
 #endif
                 m_blk_cache->put(entry, dummy, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);

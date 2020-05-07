@@ -6,6 +6,7 @@
 #include <memory>
 #include "engine/homeds/btree/btree.hpp"
 #include "engine/homeds/btree/ssd_btree.hpp"
+#include <engine/blkstore/blkstore.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <async_http/http_server.hpp>

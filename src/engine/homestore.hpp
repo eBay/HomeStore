@@ -6,6 +6,7 @@
 #include "engine/homeds/btree/ssd_btree.hpp"
 #include "engine/device/device.h"
 #include <fds/utils.hpp>
+#include <engine/blkstore/blkstore.hpp>
 
 using namespace homeds::btree;
 
