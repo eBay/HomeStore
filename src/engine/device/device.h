@@ -162,7 +162,7 @@ struct super_block {
 
     uint64_t get_magic() const { return magic; }
 } __attribute((packed));
-#define SUPERBLOCK_SIZE (HomeStoreConfig::atomic_phys_page_size + SUPERBLOCK_PAYLOAD_OFFSET)
+#define SUPERBLOCK_SIZE (HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size) + SUPERBLOCK_PAYLOAD_OFFSET)
 
 struct dm_info {
     /* header of pdev, chunk and vdev */
