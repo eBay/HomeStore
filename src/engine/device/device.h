@@ -115,9 +115,6 @@ struct vdevs_block {
     uint32_t get_first_vdev_id() const { return first_vdev_id; }
 } __attribute((packed));
 
-#define SUPERBLOCK_SIZE (HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size))
-#define SUPERBLOCK_PAYLOAD_OFFSET 10
-
 #define MAX_VDEV_INFO_BLOCK_SZ 4096
 #define MAX_VDEV_INFO_BLOCK_HDR_SZ 512
 #define MAX_CONTEXT_DATA_SZ (MAX_VDEV_INFO_BLOCK_SZ - MAX_VDEV_INFO_BLOCK_HDR_SZ)
@@ -151,7 +148,9 @@ static_assert(sizeof(vdev_info_block) == MAX_VDEV_INFO_BLOCK_SZ, "vdev info bloc
 /*******************Super Block Definition*******************/
 
 /* This header should be atomically written to the disks. It should always be smaller then ssd atomic page size */
+#define SUPERBLOCK_PAYLOAD_OFFSET 4096
 struct super_block {
+    char empty_buf[SUPERBLOCK_PAYLOAD_OFFSET]; // don't write anything to first 4096 bytes.
     uint64_t magic;   // Header magic expected to be at the top of block
     uint32_t version; // Version Id of this structure
     uint64_t gen_cnt;
@@ -163,6 +162,7 @@ struct super_block {
 
     uint64_t get_magic() const { return magic; }
 } __attribute((packed));
+#define SUPERBLOCK_SIZE (HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size) + SUPERBLOCK_PAYLOAD_OFFSET)
 
 struct dm_info {
     /* header of pdev, chunk and vdev */

@@ -1,4 +1,4 @@
-include_directories (BEFORE ../../../engine)
+include_directories (BEFORE ../)
 
 set(METABLK_SOURCE_FILES
     meta_blks_mgr.cpp

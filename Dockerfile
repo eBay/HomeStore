@@ -1,5 +1,5 @@
 # ##########   #######   ############
-FROM ecr.vip.ebayc3.com/sds/sds_cpp_base:3.8-dev
+FROM ecr.vip.ebayc3.com/sds/sds_cpp_base:3.9-dev
 LABEL description="Automated SDS compilation"
 
 ARG BRANCH_NAME
@@ -8,7 +8,6 @@ ARG COVERAGE_ON
 ARG CONAN_CHANNEL
 ARG ARTIFACTORY_PASS=${ARTIFACTORY_PASS}
 ARG CONAN_USER
-ARG CONAN_PASS=${CONAN_USER}
 ARG HOMESTORE_BUILD_TAG
 
 ENV BRANCH_NAME=${BRANCH_NAME:-unknown}
@@ -17,7 +16,6 @@ ENV COVERAGE_ON=${COVERAGE_ON:-false}
 ENV ARTIFACTORY_PASS=${ARTIFACTORY_PASS:-password}
 ENV CONAN_USER=${CONAN_USER:-sds}
 ENV CONAN_CHANNEL=${CONAN_CHANNEL:-snapshot}
-ENV CONAN_PASS=${CONAN_PASS:-password}
 ENV HOMESTORE_BUILD_TAG=${HOMESTORE_BUILD_TAG:-release}
 ENV SOURCE_PATH=/tmp/source/
 
@@ -48,8 +46,6 @@ RUN set -eux; \
 CMD set -eux; \
     eval $(grep 'name =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,name,PKG_NAME,'); \
     eval $(grep 'version =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,version,PKG_VERSION,'); \
-    conan user -r ebay-sds -p "${CONAN_PASS}" sds; \
-    conan upload ${PKG_NAME}/"${PKG_VERSION}"@"${CONAN_USER}"/"${CONAN_CHANNEL}" --all -r ebay-sds; \
     conan user -r ebay-local -p "${ARTIFACTORY_PASS}" _service_sds; \
     conan upload ${PKG_NAME}/${PKG_VERSION}@"${CONAN_USER}"/"${CONAN_CHANNEL}" -c --all -r ebay-local;
 # ##########   #######   ############

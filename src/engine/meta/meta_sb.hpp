@@ -1,7 +1,7 @@
 #pragma once
 #include <initializer_list>
 #include <cstdint>
-#include <blkalloc/blk.h>
+#include "engine/blkalloc/blk.h"
 
 namespace homestore {
 
