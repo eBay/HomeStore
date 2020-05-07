@@ -336,7 +336,7 @@ public:
         // search by the end index
         sr = range.extract_end_of_range();
         sr.set_selection_option(_MultiMatchSelector::DO_NOT_CARE);
-        result = bsearch_node(sr); // doing bsearch only based on start key
+        result = bsearch_node(sr); // doing bsearch only based on end key
         end_ind = result.end_of_search_index;
 
         assert(start_ind <= end_ind);
