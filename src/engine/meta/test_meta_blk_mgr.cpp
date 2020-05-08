@@ -119,9 +119,9 @@ public:
         if (overflow) {
             std::random_device rd;
             std::default_random_engine generator(rd());
-            std::uniform_int_distribution< long unsigned > dist(META_BLK_ALIGN_SZ, META_BLK_ALIGN_SZ * 8);
+            std::uniform_int_distribution< long unsigned > dist(META_BLK_PAGE_SZ, META_BLK_PAGE_SZ * 8);
             auto sz = dist(generator);
-            return (sz / META_BLK_ALIGN_SZ) * META_BLK_ALIGN_SZ;
+            return (sz / META_BLK_PAGE_SZ) * META_BLK_PAGE_SZ;
         } else {
             long unsigned start = 64;
             std::random_device rd;
@@ -148,7 +148,7 @@ public:
 
         meta_blk* mblk = (meta_blk*)cookie;
         if (overflow) {
-            assert(sz_to_wrt >= META_BLK_ALIGN_SZ);
+            assert(sz_to_wrt >= META_BLK_PAGE_SZ);
             assert(mblk->hdr.ovf_blkid.to_integer() != BlkId::invalid_internal_id());
         } else {
             assert(sz_to_wrt <= META_BLK_CONTEXT_SZ);

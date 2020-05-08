@@ -796,10 +796,10 @@ void HomeBlks::meta_blk_cb(meta_blk* mblk, bool has_more) {
         /* has_more is false */
         HS_ASSERT(RELEASE, meta_blk_found, "No HomeBlk is received. Expecting one SB should be received!");
         return;
-    } 
+    }
 
     HS_ASSERT(RELEASE, mblk != nullptr, "null meta blk received with hash_more set to true.");
-    
+
     m_sb_cookie = (void*)mblk;
     // recover from meta_blk;
     auto sb = (homeblks_sb*)mblk->context_data;

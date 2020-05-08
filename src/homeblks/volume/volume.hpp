@@ -347,9 +347,8 @@ public:
     /* it is used in fake reboot */
     static void reinit() { IndxMgr::reinit(); }
 
-
     /**
-     * @brief 
+     * @brief
      *
      * @param mblk
      * @param has_more
