@@ -358,7 +358,6 @@ void MetaBlkMgr::update_sub_sb(meta_sub_type type, void* context_data, uint64_t 
     // 1. free old ovf_blkid if there is any
     // 2. allcate ovf_blkid if needed
     // 3. update the meta_blk
-    //
     std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
     meta_blk* mblk = (meta_blk*)cookie;
 
@@ -366,6 +365,8 @@ void MetaBlkMgr::update_sub_sb(meta_sub_type type, void* context_data, uint64_t 
             mblk->hdr.ovf_blkid.to_string());
 
     // free the overflow blkid if it is there
+    // TODO: try to remove this lock as it is not required and we don't need to hold lock for concurrent write while
+    // writing to blkstore. And if without lock, this free should happen after meta blk is updated;
     if (mblk->hdr.ovf_blkid.to_integer() != BlkId::invalid_internal_id()) {
         m_sb_blk_store->free_blk(mblk->hdr.ovf_blkid, 0, mblk->hdr.context_sz);
         mblk->hdr.ovf_blkid.set(BlkId::invalid_internal_id());
