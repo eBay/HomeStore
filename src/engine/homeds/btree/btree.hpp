@@ -1519,7 +1519,7 @@ private:
 
         auto ret = bur->get_cb_param()->get_sub_range().get_start_key()->compare(
             bur->get_cb_param()->get_sub_range().get_end_key());
-        BT_LOG_ASSERT_CMP(ret, <=, 0, my_node);
+        BT_RELEASE_ASSERT_CMP(ret, <=, 0, my_node);
         /* We don't neeed to update the start at it is updated when entries are inserted in leaf nodes */
     }
 
