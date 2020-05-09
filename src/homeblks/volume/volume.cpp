@@ -8,7 +8,6 @@
 #include <fstream>
 #include <atomic>
 #include <fds/utils.hpp>
-#include "engine/meta/meta_blks_mgr.hpp"
 
 using namespace std;
 using namespace homestore;
@@ -98,6 +97,18 @@ void Volume::init() {
     alloc_single_block_in_mem();
     assert(get_page_size() % HomeBlks::instance()->get_data_pagesz() == 0);
     set_state(vol_state::ONLINE, true);
+
+    vol_sb_init();
+}
+
+void Volume::vol_sb_remove() {
+    // remove sb from MetaBlkMgr
+    MetaBlkMgr::instance()->remove_sub_sb(m_sb_cookie);
+}
+
+void Volume::vol_sb_init() {
+    // add volume to MetaBlkMgr
+    MetaBlkMgr::instance()->add_sub_sb(meta_sub_type::VOLUME, m_sb, sizeof(vol_sb_hdr), m_sb_cookie);
 }
 
 /* This function can be called multiple times. Underline functions should be idempotent */
@@ -146,6 +157,7 @@ void Volume::destroy_internal() {
 void Volume::shutdown(indxmgr_stop_cb cb) { IndxMgr::shutdown(cb); }
 
 Volume::~Volume() {
+    vol_sb_remove();
     free(m_sb);
     delete m_indx_mgr;
 }
@@ -632,4 +644,8 @@ mapping* Volume::get_mapping_handle() { return (m_indx_mgr->get_active_indx()); 
 void Volume::migrate_sb() {
     // auto inst = MetaBlkMgr::instance();
     // inst->add_sub_sb(meta_sub_type::VOLUME, (void*)(m_sb->ondisk_sb), sizeof(vol_ondisk_sb), &(m_sb->cookie));
+}
+
+void Volume::meta_blk_cb(meta_blk* mblk, bool has_more) {
+    // TODO: Volume Recovery
 }

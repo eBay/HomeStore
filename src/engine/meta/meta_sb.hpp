@@ -5,10 +5,10 @@
 
 namespace homestore {
 
-#define META_BLK_ALIGN_SZ 4096 // all data is aligned to 512 byte boundary inside metablk
+#define META_BLK_PAGE_SZ 4096 // all data is aligned to 512 byte boundary inside metablk
 #define META_BLK_HDR_SZ 64
 #define META_BLK_HDR_RSVD_SZ 16
-#define META_BLK_CONTEXT_SZ (META_BLK_ALIGN_SZ - sizeof(meta_blk_hdr)) // meta rec context data sz
+#define META_BLK_CONTEXT_SZ (META_BLK_PAGE_SZ - sizeof(meta_blk_hdr)) // meta rec context data sz
 #define META_BLK_MAGIC 0xCEEDBEED
 #define META_BLK_SB_MAGIC 0xABCDCEED
 #define META_BLK_SB_VERSION 0x1
@@ -30,10 +30,10 @@ enum sub_state { NOT_INIT_STATE, ACTIVE, TOMBSTONE };
 // vdev: starting blkid;
 
 // meta blk super block put as 1st block in the block chain;
+// TODO: internal crc
 struct meta_blk_sb {
     uint32_t version;
     uint32_t magic;
-    crc32_t crc;
     bool migrated;
     BlkId next_blkid; // next metablk
     BlkId prev_blkid; // previous metablk
