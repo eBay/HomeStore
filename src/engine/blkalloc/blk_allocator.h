@@ -19,6 +19,7 @@
 #include <folly/ThreadLocal.h>
 #include <boost/range/irange.hpp>
 #include <fds/bitset.hpp>
+#include "engine/meta/meta_blks_mgr.hpp"
 
 using namespace std;
 

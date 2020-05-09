@@ -19,7 +19,7 @@
 #include "engine/common/homestore_config.hpp"
 #include "engine/common/homestore_header.hpp"
 #include "engine/common/homestore_assert.hpp"
-#include "homeblks/meta/meta_blks_mgr.hpp"
+#include "engine/meta/meta_blks_mgr.hpp"
 
 SDS_LOGGING_DECL(device)
 
@@ -1451,12 +1451,15 @@ public:
                 auto bitmap_mem = chunk->get_blk_allocator()->serialize_alloc_blks();
                 if (chunk->meta_blk_cookie) {
                     /* update */
-                    MetaBlkMgr::instance()->update_sub_sb(homestore::meta_sub_type::BLK_ALLOC, bitmap_mem->bytes,
-                                                          bitmap_mem->size, chunk->meta_blk_cookie);
+                    LOGINFO("updaing bitmap SB");
+                    //       MetaBlkMgr::instance()->update_sub_sb(homestore::meta_sub_type::BLK_ALLOC,
+                    //       bitmap_mem->bytes,
+                    //                                           bitmap_mem->size, chunk->meta_blk_cookie);
                 } else {
                     /* First time update. insert. */
-                    MetaBlkMgr::instance()->add_sub_sb(homestore::meta_sub_type::BLK_ALLOC, bitmap_mem->bytes,
-                                                       bitmap_mem->size, chunk->meta_blk_cookie);
+                    LOGINFO("updaing bitmap SB");
+                    //   MetaBlkMgr::instance()->add_sub_sb(homestore::meta_sub_type::BLK_ALLOC, bitmap_mem->bytes,
+                    //                                    bitmap_mem->size, chunk->meta_blk_cookie);
                 }
             }
         }
