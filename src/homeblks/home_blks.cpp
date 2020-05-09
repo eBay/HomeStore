@@ -12,7 +12,6 @@
 #include <boost/uuid/uuid_io.hpp>
 #include <homelogstore/log_store.hpp>
 #include <map>
-#include "meta/meta_blks_mgr.hpp"
 
 SDS_OPTION_GROUP(home_blks,
                  (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
@@ -257,13 +256,21 @@ HomeBlksSafePtr HomeBlks::safe_instance() { return _instance; }
 void HomeBlks::superblock_init() {
     /* build the homeblks super block */
     m_homeblks_sb->version = HOMEBLKS_SB_VERSION;
-    m_homeblks_sb->magic = HOMEBLKS_SB_MAGIC;
     m_homeblks_sb->boot_cnt = 0;
     m_homeblks_sb->init_flag(0);
     m_homeblks_sb->uuid = HS_STATIC_CONFIG(input.system_uuid);
 }
 
-void HomeBlks::homeblks_sb_write() { /* TODO :- write homeblks sb */
+void HomeBlks::homeblks_sb_write() {
+    if (m_sb_cookie == nullptr) {
+        // add to MetaBlkMgr
+        MetaBlkMgr::instance()->add_sub_sb(meta_sub_type::HOMEBLK, (void*)m_homeblks_sb.get(), sizeof(homeblks_sb),
+                                           m_sb_cookie);
+    } else {
+        // update existing homeblks sb
+        MetaBlkMgr::instance()->update_sub_sb(meta_sub_type::HOMEBLK, (void*)m_homeblks_sb.get(), sizeof(homeblks_sb),
+                                              m_sb_cookie);
+    }
 }
 
 void HomeBlks::process_vdev_error(vdev_info_block* vb) {
@@ -406,6 +413,14 @@ void HomeBlks::init_thread() {
         LOGERROR("{}", e.what());
         error = std::make_error_condition(std::errc::io_error);
     }
+
+    auto inst = MetaBlkMgr::instance();
+    inst->register_handler(
+        meta_sub_type::HOMEBLK,
+        std::bind(&HomeBlks::meta_blk_cb, HomeBlks::instance(), std::placeholders::_1, std::placeholders::_2));
+
+    inst->register_handler(meta_sub_type::VOLUME, Volume::meta_blk_cb);
+
     init_done(error);
 }
 
@@ -769,4 +784,27 @@ void HomeBlks::migrate_volume_sb() {
         auto vol = it->second;
         vol->migrate_sb();
     }
+}
+
+void HomeBlks::meta_blk_cb(meta_blk* mblk, bool has_more) {
+    static bool meta_blk_found = false;
+    // HomeBlk layer expects to see one valid meta_blk record during reboot;
+    if (has_more == true) {
+        HS_ASSERT(RELEASE, meta_blk_found == false, "More than one HomeBlk SB is received, only expecting one!");
+        meta_blk_found = true;
+    } else if (mblk == nullptr) {
+        /* has_more is false */
+        HS_ASSERT(RELEASE, meta_blk_found, "No HomeBlk is received. Expecting one SB should be received!");
+        return;
+    }
+
+    HS_ASSERT(RELEASE, mblk != nullptr, "null meta blk received with hash_more set to true.");
+
+    m_sb_cookie = (void*)mblk;
+    // recover from meta_blk;
+    auto sb = (homeblks_sb*)mblk->context_data;
+    m_homeblks_sb->version = sb->version;
+    m_homeblks_sb->uuid = sb->uuid;
+    m_homeblks_sb->boot_cnt = sb->boot_cnt;
+    m_homeblks_sb->flags = sb->flags;
 }

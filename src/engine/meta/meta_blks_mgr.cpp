@@ -1,6 +1,7 @@
 #include "meta_sb.hpp"
 #include "meta_blks_mgr.hpp"
 
+SDS_LOGGING_DECL(metablk)
 namespace homestore {
 
 MetaBlkMgr::MetaBlkMgr(blk_store_type* sb_blk_store, sb_blkstore_blob* blob, init_params* cfg, bool init) :
@@ -10,7 +11,7 @@ MetaBlkMgr::MetaBlkMgr(blk_store_type* sb_blk_store, sb_blkstore_blob* blob, ini
         // write the meta blk manager's sb;
         init_ssb();
     } else {
-        load_ssb(blob->blkid);
+        load_ssb(blob);
         scan_meta_blks();
         recover();
     }
@@ -31,24 +32,39 @@ MetaBlkMgr::~MetaBlkMgr() {
     m_meta_blks.clear();
 
     m_cb_map.clear();
+
+    free(m_ssb);
 }
 
-void MetaBlkMgr::load_ssb(BlkId bid) {
+void MetaBlkMgr::load_ssb(sb_blkstore_blob* blob) {
+    BlkId bid = blob->blkid;
+
+    m_sb_blk_store->alloc_blk(bid);
+
+    HS_ASSERT(RELEASE, blob->type == blkstore_type::META_STORE, "Invalid blkstore type: {}", blob->type);
+    HS_LOG(INFO, metablk, "Loading meta ssb blkid: {}", bid.to_string());
+
     auto req = blkstore_req< BlkBuffer >::make_request();
     req->isSyncCall = true;
-    blk_buf_t bbuf = m_sb_blk_store->read(bid, 0, META_BLK_ALIGN_SZ, req);
+
+    blk_buf_t bbuf = m_sb_blk_store->read(bid, 0, META_BLK_PAGE_SZ, req);
 
     homeds::blob b = bbuf->at_offset(0);
-    assert(b.size == META_BLK_ALIGN_SZ);
+    assert(b.size == META_BLK_PAGE_SZ);
+
+    m_ssb = nullptr;
+    int aret = posix_memalign((void**)&(m_ssb), HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_PAGE_SZ);
+    if (aret != 0) {
+        assert(0);
+        throw std::bad_alloc();
+    }
+
+    memset((void*)m_ssb, 0, META_BLK_PAGE_SZ);
 
     memcpy((void*)m_ssb, b.bytes, sizeof(meta_blk_sb));
 
     // verify magic
     assert(m_ssb->magic == META_BLK_SB_MAGIC);
-
-    // verify crc;
-    auto crc = crc32_ieee(init_crc32, ((uint8_t*)m_ssb), sizeof(meta_blk_sb));
-    assert(m_ssb->crc == crc);
 }
 
 void MetaBlkMgr::set_migrated() {
@@ -69,12 +85,18 @@ void MetaBlkMgr::init_ssb() {
         return;
     }
 
+    struct sb_blkstore_blob blob;
+    blob.type = blkstore_type::META_STORE;
+    blob.blkid.set(bid);
+    m_sb_blk_store->update_vb_context(sisl::blob((uint8_t*)&blob, (uint32_t)sizeof(sb_blkstore_blob)));
+
     m_ssb = nullptr;
-    int aret = posix_memalign((void**)&(m_ssb), HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_ALIGN_SZ);
+    int aret = posix_memalign((void**)&(m_ssb), HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_PAGE_SZ);
     if (aret != 0) {
         assert(0);
         throw std::bad_alloc();
     }
+    memset((void*)m_ssb, 0, META_BLK_PAGE_SZ);
 
     std::lock_guard< decltype(m_meta_mtx) > lk(m_meta_mtx);
     assert(m_last_mblk == nullptr);
@@ -90,11 +112,8 @@ void MetaBlkMgr::init_ssb() {
 
 // m_meta_lock should be while calling this function;
 void MetaBlkMgr::write_ssb() {
-    // recalculate crc before write
-    m_ssb->crc = crc32_ieee(init_crc32, ((uint8_t*)m_ssb), sizeof(meta_blk_sb));
-
     // persist to disk;
-    write_blk(m_ssb->blkid, (void*)m_ssb, META_BLK_ALIGN_SZ);
+    write_blk(m_ssb->blkid, (void*)m_ssb, META_BLK_PAGE_SZ);
 }
 
 // TODO: update this api by look up metablock by chain reading;
@@ -103,7 +122,7 @@ void MetaBlkMgr::scan_meta_blks() {
     const uint64_t total_sz = m_sb_blk_store->get_size();
 
     // this might not be a valid assert, but good to have blkstore size align to 512 bytes;
-    assert(total_sz % META_BLK_ALIGN_SZ == 0);
+    assert(total_sz % HS_STATIC_CONFIG(disk_attr.phys_page_size) == 0);
 
     uint8_t* buf = nullptr;
     int ret = posix_memalign((void**)&(buf), HS_STATIC_CONFIG(disk_attr.align_size), total_sz);
@@ -134,13 +153,15 @@ void MetaBlkMgr::scan_meta_blks() {
     for (auto it = mblks.begin(); it != mblks.end(); it++) {
         if ((*it)->hdr.magic == META_BLK_MAGIC) {
             auto crc = crc32_ieee(init_crc32, ((uint8_t*)(*it)), sizeof(meta_blk));
+
+            // TODO: internal crc calculation is not correct, crc will change every time it is stored;
             if (crc != (*it)->hdr.crc) { continue; }
 
             mblk_cnt++;
             meta_blk* mblk = nullptr;
-            int ret = posix_memalign((void**)&(mblk), HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_ALIGN_SZ);
+            int ret = posix_memalign((void**)&(mblk), HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_PAGE_SZ);
 
-            memcpy(*it, mblk, META_BLK_ALIGN_SZ);
+            memcpy(*it, mblk, META_BLK_PAGE_SZ);
 
             if (false == is_meta_blk_type_valid(mblk->hdr.type)) {
                 HS_ASSERT(RELEASE, 0, "data corruption found with unrecognized subsystem type.");
@@ -193,19 +214,30 @@ bool MetaBlkMgr::is_meta_blk_type_valid(meta_sub_type type) {
 
 void MetaBlkMgr::extract_meta_blks(uint8_t* buf, const uint64_t size, std::vector< meta_blk* >& mblks) {
     uint8_t* meta_blk_ptr = buf;
-    uint64_t nbytes = META_BLK_ALIGN_SZ;
+    uint64_t nbytes = META_BLK_PAGE_SZ;
 
     while (meta_blk_ptr < buf) {
         meta_blk* mblk = (meta_blk*)meta_blk_ptr;
         mblks.push_back(mblk);
-        meta_blk_ptr += META_BLK_ALIGN_SZ;
+        meta_blk_ptr += META_BLK_PAGE_SZ;
     }
 
     assert(meta_blk_ptr == buf);
 }
 
+void MetaBlkMgr::deregister_handler(meta_sub_type type) {
+    std::lock_guard< decltype(m_meta_mtx) > lk(m_meta_mtx);
+    auto it = m_cb_map.find(type);
+    if (it != m_cb_map.end()) { m_cb_map.erase(it); }
+}
+
 void MetaBlkMgr::register_handler(meta_sub_type type, sub_cb cb) {
     std::lock_guard< decltype(m_meta_mtx) > lk(m_meta_mtx);
+    if (is_meta_blk_type_valid(type)) {
+        HS_ASSERT(DEBUG, m_cb_map.find(type) == m_cb_map.end(), "type: {} handler already registered!", type);
+    } else {
+        HS_ASSERT(RELEASE, 0, "invalide meta subsystem type: {}", type);
+    }
     m_cb_map[type] = cb;
 }
 
@@ -213,7 +245,7 @@ void MetaBlkMgr::add_sub_sb(meta_sub_type type, void* context_data, uint64_t sz,
     BlkId meta_bid;
     auto ret = alloc_meta_blk(meta_bid);
 
-    LOGINFO("adding meta blkid: {}, type: {}", meta_bid.to_string(), type);
+    HS_LOG(INFO, metablk, "adding meta blkid: {}, type: {}", meta_bid.to_string(), type);
     if (no_error != ret) {
         HS_ASSERT(RELEASE, 0, "alloc blk failed with status: {}", ret.message());
         return;
@@ -227,9 +259,10 @@ void MetaBlkMgr::write_meta_blk(meta_blk* mblk) {
     homeds::MemVector mvec;
 
     // recalculate crc before write to disk;
-    mblk->hdr.crc = crc32_ieee(init_crc32, ((uint8_t*)mblk), META_BLK_ALIGN_SZ);
+    mblk->hdr.crc = crc32_ieee(init_crc32, ((uint8_t*)mblk), META_BLK_PAGE_SZ);
+
     try {
-        mvec.set((uint8_t*)mblk, META_BLK_ALIGN_SZ, 0);
+        mvec.set((uint8_t*)mblk, META_BLK_PAGE_SZ, 0);
         m_sb_blk_store->write(mblk->hdr.blkid, mvec);
     } catch (std::exception& e) { throw e; }
 }
@@ -244,7 +277,7 @@ void MetaBlkMgr::write_blk(BlkId bid, void* context_data, uint32_t sz) {
 
 meta_blk* MetaBlkMgr::init_meta_blk(BlkId bid, meta_sub_type type, void* context_data, size_t sz) {
     meta_blk* mblk = nullptr;
-    int ret = posix_memalign((void**)&(mblk), HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_ALIGN_SZ);
+    int ret = posix_memalign((void**)&(mblk), HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_PAGE_SZ);
     if (ret != 0) {
         assert(0);
         throw std::bad_alloc();
@@ -298,14 +331,14 @@ void MetaBlkMgr::write_meta_blk_internal(meta_blk* mblk, void* context_data, uin
         memcpy(mblk->context_data, context_data, sz);
     } else {
         // overflow handling
-        assert(sz % META_BLK_ALIGN_SZ == 0);
+        assert(sz % META_BLK_PAGE_SZ == 0);
         BlkId obid;
         auto ret = alloc_meta_blk(obid, sz);
 
-        LOGINFO("allocating overflow bid: {}, sz: {}", obid.to_string(), sz);
+        HS_LOG(INFO, metablk, "allocating overflow bid: {}, sz: {}", obid.to_string(), sz);
 
         if (ret != no_error) {
-            LOGERROR("Failed to allocate contigous overflow blk with size: {}", sz);
+            HS_LOG(ERROR, metablk, "Failed to allocate contigous overflow blk with size: {}", sz);
             HS_ASSERT(RELEASE, 0, "failed to allocate overflow blk id with size: {}", sz);
         }
 
@@ -325,13 +358,15 @@ void MetaBlkMgr::update_sub_sb(meta_sub_type type, void* context_data, uint64_t 
     // 1. free old ovf_blkid if there is any
     // 2. allcate ovf_blkid if needed
     // 3. update the meta_blk
-    //
     std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
     meta_blk* mblk = (meta_blk*)cookie;
 
-    LOGINFO("old sb: context_sz: {}, ovf_blkid: {}", mblk->hdr.context_sz, mblk->hdr.ovf_blkid.to_string());
+    LOGINFO("old sb: context_sz: {}, ovf_blkid: {}", (unsigned long)(mblk->hdr.context_sz),
+            mblk->hdr.ovf_blkid.to_string());
 
     // free the overflow blkid if it is there
+    // TODO: try to remove this lock as it is not required and we don't need to hold lock for concurrent write while
+    // writing to blkstore. And if without lock, this free should happen after meta blk is updated;
     if (mblk->hdr.ovf_blkid.to_integer() != BlkId::invalid_internal_id()) {
         m_sb_blk_store->free_blk(mblk->hdr.ovf_blkid, 0, mblk->hdr.context_sz);
         mblk->hdr.ovf_blkid.set(BlkId::invalid_internal_id());
@@ -360,8 +395,8 @@ std::error_condition MetaBlkMgr::remove_sub_sb(void* cookie) {
     auto prev_blkid = m_meta_blks[type][bid.to_integer()]->hdr.prev_blkid;
     auto next_blkid = m_meta_blks[type][bid.to_integer()]->hdr.next_blkid;
 
-    LOGINFO("removing meta blk id: {}, type: {}, prev_blkid: {}, next_blkid: {}", bid.to_string(), type,
-            prev_blkid.to_string(), next_blkid.to_string());
+    HS_LOG(INFO, metablk, "removing meta blk id: {}, type: {}, prev_blkid: {}, next_blkid: {}", bid.to_string(), type,
+           prev_blkid.to_string(), next_blkid.to_string());
 
     // this record must exist in-memory copy
     assert(m_meta_blks[type].find(bid.to_integer()) != m_meta_blks[type].end());
@@ -430,7 +465,7 @@ void MetaBlkMgr::free_meta_blk(meta_blk* mblk) {
 
     // free the overflow blkid if it is there
     if (mblk->hdr.ovf_blkid.to_integer() != BlkId::invalid_internal_id()) {
-        assert(mblk->hdr.context_sz >= META_BLK_ALIGN_SZ);
+        assert(mblk->hdr.context_sz >= META_BLK_PAGE_SZ);
         m_sb_blk_store->free_blk(mblk->hdr.ovf_blkid, 0, mblk->hdr.context_sz);
     }
 
@@ -445,7 +480,7 @@ std::error_condition MetaBlkMgr::alloc_meta_blk(BlkId& bid, uint32_t alloc_sz) {
     try {
         auto ret = m_sb_blk_store->alloc_blk(alloc_sz, hints, &bid);
         if (ret != BLK_ALLOC_SUCCESS) {
-            LOGERROR("failing as it is out of disk space!");
+            HS_LOG(ERROR, metablk, "failing as it is out of disk space!");
             return std::errc::no_space_on_device;
         }
     } catch (const std::exception& e) {

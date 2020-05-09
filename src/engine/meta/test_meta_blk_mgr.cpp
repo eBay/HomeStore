@@ -90,6 +90,7 @@ static Param gp;
 class VMetaBlkMgrTest : public ::testing::Test {
 
     enum class meta_op_type { write = 1, update = 2, remove = 3 };
+    const meta_sub_type mtype = meta_sub_type::VOLUME;
 
 public:
     uint64_t get_elapsed_time(Clock::time_point start) {
@@ -118,9 +119,9 @@ public:
         if (overflow) {
             std::random_device rd;
             std::default_random_engine generator(rd());
-            std::uniform_int_distribution< long unsigned > dist(META_BLK_ALIGN_SZ, META_BLK_ALIGN_SZ * 8);
+            std::uniform_int_distribution< long unsigned > dist(META_BLK_PAGE_SZ, META_BLK_PAGE_SZ * 8);
             auto sz = dist(generator);
-            return (sz / META_BLK_ALIGN_SZ) * META_BLK_ALIGN_SZ;
+            return (sz / META_BLK_PAGE_SZ) * META_BLK_PAGE_SZ;
         } else {
             long unsigned start = 64;
             std::random_device rd;
@@ -142,12 +143,12 @@ public:
         gen_rand_buf(buf, sz_to_wrt);
 
         void* cookie = nullptr;
-        m_mbm->add_sub_sb(meta_sub_type::VOLUME, buf, sz_to_wrt, cookie);
+        m_mbm->add_sub_sb(mtype, buf, sz_to_wrt, cookie);
         assert(cookie != nullptr);
 
         meta_blk* mblk = (meta_blk*)cookie;
         if (overflow) {
-            assert(sz_to_wrt >= META_BLK_ALIGN_SZ);
+            assert(sz_to_wrt >= META_BLK_PAGE_SZ);
             assert(mblk->hdr.ovf_blkid.to_integer() != BlkId::invalid_internal_id());
         } else {
             assert(sz_to_wrt <= META_BLK_CONTEXT_SZ);
@@ -193,7 +194,7 @@ public:
 
         gen_rand_buf(buf, sz_to_wrt);
 
-        m_mbm->update_sub_sb(meta_sub_type::VOLUME, buf, sz_to_wrt, *it);
+        m_mbm->update_sub_sb(mtype, buf, sz_to_wrt, *it);
 
         free(buf);
     }
@@ -223,7 +224,9 @@ public:
         m_start_time = Clock::now();
         m_mbm = MetaBlkMgr::instance();
 
-        m_mbm->register_handler(meta_sub_type::VOLUME, [this](meta_blk* mblk, bool has_more) {
+        m_mbm->deregister_handler(mtype);
+
+        m_mbm->register_handler(mtype, [this](meta_blk* mblk, bool has_more) {
             if (mblk) {
                 std::unique_lock< std::mutex > lg(m_mtx);
                 m_cb_blks[mblk->hdr.blkid.to_integer()] = mblk;
