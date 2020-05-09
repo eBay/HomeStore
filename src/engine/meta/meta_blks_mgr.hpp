@@ -29,8 +29,6 @@ private:
 
 public:
     static void init(blk_store_type* sb_blk_store, sb_blkstore_blob* blob, bool init) {
-        static std::once_flag flag1;
-        std::call_once(flag1, [sb_blk_store, blob, init]() { _instance = new MetaBlkMgr(sb_blk_store, blob, init); });
 #if 0
         static std::once_flag flag1;
         std::call_once(
