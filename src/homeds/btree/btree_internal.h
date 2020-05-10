@@ -56,7 +56,9 @@ ENUM(btree_status_t, uint32_t, success, not_found, item_found, closest_found, cl
 
 #define BT_DEBUG_ASSERT_CMP(...) BT_ASSERT_CMP(DEBUG, ##__VA_ARGS__)
 #define BT_RELEASE_ASSERT_CMP(...) BT_ASSERT_CMP(RELEASE, ##__VA_ARGS__)
-#define BT_LOG_ASSERT_CMP(...) BT_ASSERT_CMP(LOGMSG, ##__VA_ARGS__)
+
+#define BT_LOG_ASSERT_CMP(...) BT_ASSERT_CMP(RELEASE, ##__VA_ARGS__)
+//#define BT_LOG_ASSERT_CMP(...) BT_ASSERT_CMP(LOGMSG, ##__VA_ARGS__)
 
 // structure to track btree multinode operations on different nodes
 #define btree_multinode_req_ptr boost::intrusive_ptr< btree_multinode_req< btree_req_type > >

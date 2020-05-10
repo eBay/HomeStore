@@ -70,6 +70,8 @@ uint32_t phy_page_size = 4096;
 uint32_t mem_btree_page_size = 4096;
 bool can_delete_volume = false;
 uint32_t io_flags = 1; // 2: READ_ONLY 1: DIRECT_IO, 0: BUFFERED_IO;
+bool expect_io_error = false;
+uint32_t p_volume_size = 60;
 
 extern bool vol_gtest;
 std::vector< std::string > dev_names;
@@ -148,7 +150,6 @@ protected:
     bool vol_create_del_test;
     int disk_replace_cnt = 0;
     bool vol_offline = false;
-    bool expect_io_error = false;
     Clock::time_point print_startTime;
     std::atomic< uint64_t > vol_create_cnt;
     std::atomic< uint64_t > vol_del_cnt;
@@ -237,8 +238,8 @@ public:
                 max_capacity += max_disk_capacity;
             }
         }
-        /* Don't populate the whole disks. Only 80 % of it */
-        max_vol_size = (60 * max_capacity) / (100 * max_vols);
+        /* Don't populate the whole disks. Only 60 % of it */
+        max_vol_size = (p_volume_size * max_capacity) / (100 * max_vols);
 
         iomgr_obj = std::make_shared< iomgr::ioMgr >(2, num_threads);
 
@@ -1182,7 +1183,7 @@ TEST_F(IOTest, vol_offline_test) {
     this->m_expected_vol_state = OFFLINE;
     this->start_homestore();
     this->wait_homestore_init_done();
-    this->expect_io_error = true;
+    expect_io_error = true;
     this->move_vol_to_offline();
     this->wait_cmpl();
     this->shutdown();
@@ -1190,7 +1191,7 @@ TEST_F(IOTest, vol_offline_test) {
 
 TEST_F(IOTest, vol_io_fail_test) {
     this->init = true;
-    this->expect_io_error = true;
+    expect_io_error = true;
     this->start_homestore();
     this->wait_homestore_init_done();
 
@@ -1367,7 +1368,11 @@ SDS_OPTION_GROUP(
      "phy_page_size"),
     (io_flags, "", "io_flags", "io_flags", ::cxxopts::value< uint32_t >()->default_value("1"), "0 or 1"),
     (mem_btree_page_size, "", "mem_btree_page_size", "mem_btree_page_size",
-     ::cxxopts::value< uint32_t >()->default_value("8192"), "mem_btree_page_size"))
+     ::cxxopts::value< uint32_t >()->default_value("8192"), "mem_btree_page_size"),
+    (expect_io_error, "", "expect_io_error", "expect_io_error", ::cxxopts::value< uint32_t >()->default_value("0"),
+     "0 or 1"),
+    (p_volume_size, "", "p_volume_size", "p_volume_size", ::cxxopts::value< uint32_t >()->default_value("60"),
+     "0 to 200"))
 
 #define ENABLED_OPTIONS logging, home_blks, test_volume
 SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
@@ -1411,6 +1416,8 @@ int main(int argc, char* argv[]) {
     phy_page_size = SDS_OPTIONS["phy_page_size"].as< uint32_t >();
     mem_btree_page_size = SDS_OPTIONS["mem_btree_page_size"].as< uint32_t >();
     io_flags = SDS_OPTIONS["io_flags"].as< uint32_t >();
+    p_volume_size = SDS_OPTIONS["p_volume_size"].as< uint32_t >();
+    expect_io_error = SDS_OPTIONS["expect_io_error"].as< uint32_t >() ? true : false;
 
     if (SDS_OPTIONS.count("device_list")) {
         dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();
