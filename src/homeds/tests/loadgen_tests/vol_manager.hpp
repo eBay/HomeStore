@@ -12,7 +12,7 @@
 namespace homeds {
 namespace loadgen {
 
-constexpr uint64_t CACHE_SIZE = (4 * 1024 * 1024 * 1024ul);
+constexpr uint64_t APP_MEM_SIZE = (5 * 1024 * 1024 * 1024ul);
 constexpr uint32_t VOL_PAGE_SIZE = 4096;
 constexpr uint32_t MAX_CRC_DEPTH = 3;
 
@@ -342,7 +342,7 @@ private:
         init_params p;
         p.flag = homestore::io_flag::DIRECT_IO;
         p.min_virtual_page_size = VOL_PAGE_SIZE;
-        p.cache_size = CACHE_SIZE;
+        p.app_mem_size = APP_MEM_SIZE;
         p.disk_init = true;
         p.devices = m_device_info;
         p.is_file = true;

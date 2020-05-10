@@ -3,6 +3,7 @@
 // Created by Kadayam, Hari on 06/11/17.
 //
 
+#include <fds/malloc_helper.hpp>
 #include "home_blks.hpp"
 #include <mapping/mapping.hpp>
 #include <fstream>
@@ -31,6 +32,7 @@ void intrusive_ptr_release(homestore::BlkBuffer* buf) {
 
 VolInterface* VolInterface::_instance = nullptr;
 homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >* Volume::m_data_blkstore = nullptr;
+static constexpr size_t mem_free_check_frequency = 10000; // Check for every 10000 requests
 
 Volume::Volume(const vol_params& params) :
         m_comp_cb(params.io_comp_cb),
@@ -539,11 +541,12 @@ void Volume::check_and_complete_req(const vol_interface_req_ptr& hb_req, const s
     }
 
     if (hb_req->outstanding_io_cnt.decrement_testz(1)) {
-        HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, hb_req->is_read, volume_read_latency, volume_write_latency,
-                                  get_elapsed_time_us(hb_req->io_start_time));
-        if (get_elapsed_time_ms(hb_req->io_start_time) > 5000) {
-            THIS_VOL_LOG(WARN, , hb_req, "vol req took time {}", get_elapsed_time_ms(hb_req->io_start_time));
+        auto elapsed_time = get_elapsed_time_ms(hb_req->io_start_time);
+        HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, hb_req->is_read, volume_read_latency, volume_write_latency, elapsed_time);
+        if (elapsed_time > 5000) {
+            THIS_VOL_LOG(WARN, , hb_req, "vol {} req took time {}", (hb_req->is_read ? "read" : "write"), elapsed_time);
         }
+
         if (call_completion) {
 #ifdef _PRERELEASE
             if (auto flip_ret = homestore_flip->get_test_flip< int >("vol_comp_delay_us")) {
@@ -553,6 +556,10 @@ void Volume::check_and_complete_req(const vol_interface_req_ptr& hb_req, const s
 #endif
             THIS_VOL_LOG(TRACE, volume, hb_req, "IO DONE");
             m_comp_cb(hb_req);
+        }
+
+        if ((hb_req->request_id % mem_free_check_frequency) == 0) {
+            sisl::release_mem_if_needed(HomeStoreConfig::mem_release_threshold);
         }
     }
 }

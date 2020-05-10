@@ -245,7 +245,7 @@ public:
         init_params params;
         params.flag = static_cast< enum io_flag >(io_flags);
         params.min_virtual_page_size = vol_page_size;
-        params.cache_size = 4 * 1024 * 1024 * 1024ul;
+        params.app_mem_size = 1 * 1024 * 1024 * 1024ul;
         params.disk_init = init;
         params.devices = device_info;
         params.is_file = dev_names.size() ? false : true;
@@ -417,8 +417,9 @@ public:
         max_io_size = params.max_io_size;
         ev_fd = eventfd(0, EFD_NONBLOCK);
 
-        iomgr_obj->add_fd(ev_fd, [this](auto fd, auto cookie, auto event) { process_ev_common(fd, cookie, event); },
-                          EPOLLIN, 9, nullptr);
+        iomgr_obj->add_fd(
+            ev_fd, [this](auto fd, auto cookie, auto event) { process_ev_common(fd, cookie, event); }, EPOLLIN, 9,
+            nullptr);
         ep = new test_ep(iomgr_obj);
         iomgr_obj->add_ep(ep);
         iomgr_obj->start();
