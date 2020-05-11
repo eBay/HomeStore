@@ -40,14 +40,14 @@ static std::shared_ptr< iomgr::ioMgr > start_homestore(uint32_t ndevices, uint64
     LOGINFO("Creating iomgr with {} threads", nthreads);
     auto iomgr_obj = std::make_shared< iomgr::ioMgr >(2, nthreads);
 
-    uint64_t cache_size = ((ndevices * dev_size) * 10) / 100;
-    LOGINFO("Initialize and start HomeBlks with cache_size = {}", cache_size);
+    uint64_t app_mem_size = ((ndevices * dev_size) * 15) / 100;
+    LOGINFO("Initialize and start HomeBlks with app_mem_size = {}", app_mem_size);
 
     boost::uuids::string_generator gen;
     init_params params;
     params.open_flags = homestore::io_flag::DIRECT_IO;
     params.min_virtual_page_size = 4096;
-    params.cache_size = cache_size;
+    params.app_mem_size = app_mem_size;
     params.disk_init = true;
     params.devices = device_info;
     params.is_file = true;

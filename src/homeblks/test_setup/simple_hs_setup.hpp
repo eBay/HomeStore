@@ -61,7 +61,7 @@ struct simple_store_cfg {
     uint32_t m_nthreads = 4;
     uint32_t m_nvols = 1;
     uint64_t m_dev_size = 4 * 1024 * 1024 * 1024ul;
-    uint64_t m_cache_size = 2 * 1024 * 1024 * 1024ul;
+    uint64_t m_app_mem_size = 2 * 1024 * 1024 * 1024ul;
     uint64_t m_max_io_size = 1 * 1024 * 1024ul;
     bool is_shadow_vol = false;
     bool is_read_verify = false; // Should we verify the write followed by sync read
@@ -159,7 +159,7 @@ public:
     virtual void setup_init_params() {
         m_init_params.open_flags = homestore::io_flag::DIRECT_IO;
         m_init_params.min_virtual_page_size = 4096;
-        m_init_params.cache_size = m_cfg.m_cache_size;
+        m_init_params.app_mem_size = m_cfg.m_app_mem_size;
         m_init_params.disk_init = true;
         m_init_params.devices = m_dev_infos;
         m_init_params.is_file = m_cfg.m_is_file;

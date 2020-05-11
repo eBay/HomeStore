@@ -16,7 +16,7 @@ table Btree {
     mem_btree_page_size : uint32 = 8192;
 }
 
-table Cache {
+table Cache {  
     /* Number of entries we ideally want to have per hash bucket. This number if small, will reduce contention and
      * speed of read/writes, but at the cost of increased memory */
     entries_per_hash_bucket: uint32 = 2;
@@ -37,8 +37,20 @@ table Device {
     max_completions_process_per_event_per_thread: uint32 = 200;
 }
 
+table Generic {
+    /* Percentage of memory allocated for homestore cache */
+    cache_size_percent: uint32 = 65; 
+
+    /* Percentage of memory to be filled by app before we force underlying mem allocator to free it up */
+    mem_release_threshold: uint32 = 90 (hotswap);
+
+    /* Rate of memory release rate to the underlying mem allocator */
+    mem_release_rate: uint32 = 8;
+}
+
 table HomeStoreSettings {
     version: uint32;
+    generic: Generic;
     blkallocator: BlkAllocator;
     cache: Cache;
     btree: Btree;

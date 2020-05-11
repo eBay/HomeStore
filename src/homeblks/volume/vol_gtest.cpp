@@ -367,7 +367,7 @@ public:
         init_params params;
         params.open_flags = tcfg.io_flags;
         params.min_virtual_page_size = tcfg.vol_page_size;
-        params.cache_size = 4 * 1024 * 1024 * 1024ul;
+        params.app_mem_size = 5 * 1024 * 1024 * 1024ul;
         params.disk_init = tcfg.init;
         params.devices = device_info;
         params.is_file = tcfg.dev_names.size() ? false : true;

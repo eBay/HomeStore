@@ -110,14 +110,14 @@ public:
             }
         }
 
-        uint64_t cache_size = 1 * 1024 * 1024 * 1024;
-        LOGINFO("Initialize and start HomeBlks with cache_size = {}", cache_size);
+        uint64_t app_mem_size = 2 * 1024 * 1024 * 1024;
+        LOGINFO("Initialize and start HomeBlks with memory size = {}", app_mem_size);
 
         boost::uuids::string_generator gen;
         init_params params;
         params.open_flags = homestore::io_flag::DIRECT_IO;
         params.min_virtual_page_size = 4096;
-        params.cache_size = cache_size;
+        params.app_mem_size = app_mem_size;
         params.disk_init = !restart;
         params.devices = device_info;
         params.is_file = true;

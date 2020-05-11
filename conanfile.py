@@ -5,7 +5,7 @@ from conans import ConanFile, CMake, tools
 class HomestoreConan(ConanFile):
     name = "homestore"
 
-    version = "0.12.01"
+    version = "0.14.0"
     revision_mode = "scm"
 
     license = "Proprietary"
@@ -58,13 +58,13 @@ class HomestoreConan(ConanFile):
     def imports(self):
         self.copy(root_package="flip", pattern="*.py", dst="bin/scripts", src="python/flip/", keep_path=True)
 
-    def build_requirements(self):
+    def requirements(self):
         if not self.settings.build_type == "Debug":
             if self.settings.build_type == "RelWithDebInfo":
-                self.build_requires("gperftools/2.7.0")
+                self.requires("gperftools/2.7.0")
                 self.options.malloc_impl = "tcmalloc"
             else:
-                self.build_requires("jemalloc/5.2.1")
+                self.requires("jemalloc/5.2.1")
                 self.options.malloc_impl = "jemalloc"
 
     def build(self):
