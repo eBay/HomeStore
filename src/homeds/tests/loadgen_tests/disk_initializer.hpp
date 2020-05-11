@@ -44,7 +44,7 @@ public:
         params.flag = homestore::io_flag::DIRECT_IO;
 #endif
         params.min_virtual_page_size = 4096;
-        params.cache_size = 4 * 1024 * 1024 * 1024ul;
+        params.app_mem_size = 5 * 1024 * 1024 * 1024ul;
         params.disk_init = true;
         params.devices = device_info;
         params.is_file = true;

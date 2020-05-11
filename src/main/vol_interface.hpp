@@ -180,7 +180,7 @@ public:
 
     /* system parameters */
     uint32_t min_virtual_page_size;  // minimum page size supported. Ideally it should be 4k.
-    uint64_t cache_size;             // memory available for cache. We should give 80 % of the whole
+    uint64_t app_mem_size;           // memory available for the current app, including cache
     bool disk_init;                  // true if disk has to be initialized.
     std::vector< dev_info > devices; // name of the devices.
     bool is_file;
@@ -204,7 +204,7 @@ public:
 public:
     std::string to_string() {
         std::stringstream ss;
-        ss << "min_virtual_page_size=" << min_virtual_page_size << ",cache_size=" << cache_size
+        ss << "min_virtual_page_size=" << min_virtual_page_size << ",app_mem_size=" << app_mem_size
            << ",disk_init=" << disk_init << ",is_file=" << is_file << ",flag=" << flag
            << ",number of devices=" << devices.size() << ",device names=[";
         for (uint32_t i = 0; i < devices.size(); ++i) {

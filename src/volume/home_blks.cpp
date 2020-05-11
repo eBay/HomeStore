@@ -85,13 +85,18 @@ HomeBlks::HomeBlks(const init_params& cfg) :
         throw std::invalid_argument("null device list");
     }
 
+    uint64_t cache_size = (m_cfg.app_mem_size * 65) / 100; // Alloc 65% of memory to cache
+    HomeStoreConfig::mem_release_threshold = (m_cfg.app_mem_size * 90) / 100;
+    sisl::set_memory_release_rate(8); // Set aggressive memory release rate
+
     nlohmann::json json;
     json["phys_page_size"] = HomeStoreConfig::phys_page_size;
     json["atomic_phys_page_size"] = HomeStoreConfig::atomic_phys_page_size;
     json["align_size"] = HomeStoreConfig::align_size;
     json["min_virtual_page_size"] = m_cfg.min_virtual_page_size;
     json["open_flag"] = HomeStoreConfig::open_flag;
-    json["cache_size"] = m_cfg.cache_size;
+    json["app_mem_size"] = m_cfg.app_mem_size;
+    json["cache_size"] = cache_size;
     json["system_uuid"] = boost::lexical_cast< std::string >(m_cfg.system_uuid);
     json["is_file"] = m_cfg.is_file;
     for (auto& device : m_cfg.devices) {
@@ -111,7 +116,7 @@ HomeBlks::HomeBlks(const init_params& cfg) :
     assert(!ret);
 
     /* create cache */
-    m_cache = new Cache< BlkId >(m_cfg.cache_size, HomeStoreConfig::atomic_phys_page_size);
+    m_cache = new Cache< BlkId >(cache_size, HomeStoreConfig::atomic_phys_page_size);
 
     /* create device manager */
     m_dev_mgr = new homestore::DeviceManager(new_vdev_found, sizeof(sb_blkstore_blob), m_cfg.iomgr,

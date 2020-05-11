@@ -20,6 +20,7 @@ struct HomeStoreConfig {
     static uint64_t max_blk_cnt;
     static io_flag open_flag;
     static bool is_read_only;
+    static size_t mem_release_threshold; // Max mem after which we start releasing memory back to system
 };
 
 constexpr uint32_t ID_BITS = 32;
