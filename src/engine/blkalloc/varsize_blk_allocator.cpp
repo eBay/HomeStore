@@ -248,7 +248,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(BlkId& in_bid) {
 void VarsizeBlkAllocator::inited() {
     if (!m_init) { m_thread_id = std::thread(thread_func, this); }
     m_init = true;
-    m_alloc_bm->copy(get_alloced_bm());
+    m_alloc_bm->copy(*(get_alloced_bm()));
 }
 
 BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& hints,
