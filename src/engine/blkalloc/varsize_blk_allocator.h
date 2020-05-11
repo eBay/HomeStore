@@ -44,7 +44,6 @@ class VarsizeBlkAllocConfig : public BlkAllocConfig {
 private:
     uint32_t m_phys_page_size;
     uint32_t m_nsegments;
-    uint32_t m_blks_per_portion;
     uint32_t m_blks_per_temp_group;
     uint64_t m_max_cache_blks;
     std::vector< uint32_t > m_slab_nblks;
@@ -72,7 +71,6 @@ public:
     VarsizeBlkAllocConfig(uint64_t blk_size, uint64_t n_blks, const std::string& name) :
             BlkAllocConfig(blk_size, n_blks, name),
             m_nsegments(1),
-            m_blks_per_portion(n_blks),
             m_blks_per_temp_group(n_blks),
             m_max_cache_blks(0) {}
 
@@ -90,15 +88,6 @@ public:
     */
     void set_total_segments(uint32_t nsegments) { m_nsegments = nsegments; }
 
-    //! Set Blocks per Portion
-    /*!
-      \param pg_per_portion an uint32 argument signifies pages per portion
-      \return void
-    */
-    void set_blks_per_portion(uint32_t pg_per_portion) {
-        assert(pg_per_portion % get_blks_per_phys_page() == 0);
-        m_blks_per_portion = pg_per_portion;
-    }
 
     //! Set Max Cache Blocks
     /*!
@@ -140,11 +129,6 @@ public:
     */
     uint32_t get_total_segments() const { return m_nsegments; }
 
-    //! Get Blocks per Portion
-    /*!
-      \return blocks per portion as uint64
-    */
-    uint64_t get_blks_per_portion() const { return m_blks_per_portion; }
 
     //! Get Blocks per Segment
     /*!
@@ -152,14 +136,6 @@ public:
     */
     uint64_t get_blks_per_segment() const { return (uint64_t)(get_total_blks() / get_total_segments()); }
 
-    //! Get Total Portions
-    /*!
-      \return portion count as uint64
-    */
-    uint64_t get_total_portions() const {
-        assert(get_total_blks() % get_blks_per_portion() == 0);
-        return get_total_blks() / get_blks_per_portion();
-    }
 
     //! Get Max Cache Blocks
     /*!
@@ -177,7 +153,11 @@ public:
     /*!
       \return blocks per physical page as uint32
     */
-    uint32_t get_blks_per_phys_page() const { return get_phys_page_size() / get_blk_size(); }
+    uint32_t get_blks_per_phys_page() const {
+        uint32_t nblks = get_phys_page_size() / get_blk_size();
+        assert(get_blks_per_portion() % nblks == 0);
+        return nblks;
+    }
 
     //! Get Temp Group Count
     /*!
@@ -309,23 +289,6 @@ public:
     }
 };
 
-class BlkAllocPortion {
-private:
-    pthread_mutex_t m_blk_lock;
-
-public:
-#ifndef NDEBUG
-    uint32_t m_blk_portion_id;
-#endif
-
-    BlkAllocPortion() { pthread_mutex_init(&m_blk_lock, NULL); }
-
-    ~BlkAllocPortion() { pthread_mutex_destroy(&m_blk_lock); }
-
-    void lock() { pthread_mutex_lock(&m_blk_lock); }
-
-    void unlock() { pthread_mutex_unlock(&m_blk_lock); }
-};
 
 class BlkAllocTemperatureGroup {
 private:
@@ -527,7 +490,7 @@ class VarsizeBlkAllocator : public BlkAllocator {
     uint32_t m_last_indx = 0;
 
 public:
-    VarsizeBlkAllocator(VarsizeBlkAllocConfig& cfg, bool init);
+    VarsizeBlkAllocator(VarsizeBlkAllocConfig& cfg, bool init, uint32_t id);
     virtual ~VarsizeBlkAllocator();
 
     BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints& hints, BlkId* out_blkid, bool best_fit = false) override;
@@ -548,11 +511,7 @@ private:
     std::condition_variable m_cv; // CV to signal thread
     BlkAllocatorState m_region_state;
 
-    homeds::Bitset* m_alloc_bm; // Bitset of all allocation
-
-#ifndef NDEBUG
-    homeds::Bitset* m_alloced_bm; // Bitset of all allocation
-#endif
+    sisl::Bitset* m_alloc_bm; // Bitset of all allocation
 
     VarsizeBlkAllocatorBtree* m_blk_cache; // Blk Entry caches
 
@@ -562,7 +521,6 @@ private:
     // to pass which segment to look for sweep
 
     // Overall page and page group tables
-    std::vector< BlkAllocPortion > m_blk_portions;
     std::vector< BlkAllocTemperatureGroup > m_temp_groups;
 
     std::atomic< uint32_t > m_cache_n_entries;             // Total number of blk entries to cache
@@ -588,13 +546,6 @@ private:
 
     uint32_t offset_within_phys_page(uint64_t blknum) const { return blknum % get_config().get_blks_per_phys_page(); }
 
-    uint64_t blknum_to_portion_num(uint64_t blknum) const { return blknum / get_config().get_blks_per_portion(); }
-
-    BlkAllocPortion* blknum_to_portion(uint64_t blknum) { return &m_blk_portions[blknum_to_portion_num(blknum)]; }
-
-    const BlkAllocPortion* blknum_to_portion_const(uint64_t blknum) const {
-        return &m_blk_portions[blknum_to_portion_num(blknum)];
-    }
 
     uint64_t blknum_to_segment_num(uint64_t blknum) const {
         auto seg_num = blknum / get_config().get_blks_per_segment();

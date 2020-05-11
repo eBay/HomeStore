@@ -1,4 +1,5 @@
 #pragma once
+#include <fds/malloc_helper.hpp>
 #include "engine/device/blkbuffer.hpp"
 #include "engine/blkstore/blkstore.hpp"
 #include <urcu-call-rcu.h>
@@ -9,6 +10,7 @@
 #include <cassert>
 #include <memory>
 #include <sds_logging/logging.h>
+#include "engine/common/homestore_config.hpp"
 #include "engine/common/homestore_header.hpp"
 
 /*
@@ -122,6 +124,10 @@ public:
         in_cp_phase = false;
         LOGDEBUGMOD(cp, "cp ID completed {}", id->to_string());
         delete (id);
+
+        /* Once a cp is done, try to check and release exccess memory if need be */
+        size_t rel_size = HS_DYNAMIC_CONFIG(generic.mem_release_threshold) * HS_STATIC_CONFIG(input.app_mem_size) / 100;
+        sisl::release_mem_if_needed(rel_size);
 
         auto cur_cp_id = cp_io_enter();
         if (cur_cp_id->cp_trigger_waiting) { trigger_cp(); }
