@@ -5,7 +5,7 @@ if(CMAKE_BUILD_TYPE STREQUAL Debug)
   add_executable(test_threadpool
       ${TEST_THREAD_POOL_SOURCE_FILES}
       )
-  target_link_libraries(test_threadpool ${CONAN_LIBS})
+  target_link_libraries(test_threadpool)
   add_test(NAME ThreadPool COMMAND test_threadpool)
 else()
   message(WARNING "Threadpool test disabled in Release build! Fails to build.")

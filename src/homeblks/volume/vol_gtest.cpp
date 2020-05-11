@@ -74,7 +74,6 @@ struct TestCfg {
     uint32_t phy_page_size = 4096;
     uint32_t mem_btree_page_size = 4096;
 
-    uint32_t p_volume_size = 60;
     bool can_delete_volume = false;
     bool read_enable = true;
     bool enable_crash_handler = true;

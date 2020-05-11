@@ -38,15 +38,15 @@ if (NOT ${CONAN_BUILD_COVERAGE})
     add_executable(check_btree
                       ${BTREE_CHECKER_SOURCE_FILES}
                     )
-    add_executable(test_mapping
-                    ${TEST_MAP_SOURCE_FILES}
-                    )
-    target_link_libraries(check_btree ${CONAN_LIBS} aio homeblks)
-    target_link_libraries(perf_test_volume ${CONAN_LIBS} aio homeblks)
-    target_link_libraries(test_mapping ${CONAN_LIBS} homeblks)
+    #add_executable(test_mapping
+    #                ${TEST_MAP_SOURCE_FILES}
+    #                )
+    target_link_libraries(check_btree homeblks)
+    target_link_libraries(perf_test_volume homeblks)
+    #target_link_libraries(test_mapping homeblks)
 endif ()
 
-target_link_libraries(test_volume ${COMMON_LIB_DEPS} homeblks)
+target_link_libraries(test_volume homeblks)
 
 add_test(NAME TestVol COMMAND test_volume)
 

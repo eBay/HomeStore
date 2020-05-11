@@ -27,9 +27,12 @@ private:
 
 public:
     static void init(blk_store_type* sb_blk_store, sb_blkstore_blob* blob, init_params* cfg, bool init) {
+#if 0
         static std::once_flag flag1;
         std::call_once(
             flag1, [sb_blk_store, blob, cfg, init]() { _instance = new MetaBlkMgr(sb_blk_store, blob, cfg, init); });
+#endif
+        _instance = new MetaBlkMgr(sb_blk_store, blob, cfg, init);
     }
 
     /**
@@ -38,6 +41,8 @@ public:
      * @return
      */
     static MetaBlkMgr* instance() { return _instance; }
+
+    static void del_instance() { delete _instance; }
 
     /**
      * @brief :
@@ -61,6 +66,8 @@ public:
      * @param cb : subsystem cb
      */
     void register_handler(meta_sub_type type, sub_cb cb);
+
+    void deregister_handler(meta_sub_type type);
 
     /**
      * @brief : add subsystem superblock to meta blk mgr
@@ -94,7 +101,7 @@ public:
     void update_sub_sb(meta_sub_type type, void* context_data, uint64_t sz, void*& cookie);
 
     /**
-     * @brief : 
+     * @brief :
      *
      * @return
      */
@@ -124,14 +131,14 @@ private:
     /**
      * @brief : write context_data to blk id;
      *
-     * @param bid 
+     * @param bid
      * @param context_data
      * @param sz
      */
     void write_blk(BlkId bid, void* context_data, uint32_t sz);
 
     /**
-     * @brief 
+     * @brief
      *
      * @param type
      *
@@ -148,21 +155,21 @@ private:
      */
     bool sanity_check(const uint64_t total_mblks_cnt);
 
-     /**
+    /**
      * @brief : write in-memory copy of meta_blk to disk;
      *
      * @param mblk
      *
-     * @return 
+     * @return
      */
     void write_meta_blk(meta_blk* mblk);
 
     /**
-     * @brief : load meta blk super super block into memory 
+     * @brief : load meta blk super super block into memory
      *
      * @param bid : the blk id that belongs to meta ssb;
      */
-    void load_ssb(BlkId bid);
+    void load_ssb(sb_blkstore_blob* blob);
 
     /**
      * @brief : scan the blkstore to load meta blks into memory
@@ -186,12 +193,12 @@ private:
      *
      * @return : BlkId that is allcoated;
      */
-    std::error_condition alloc_meta_blk(BlkId& bid, uint32_t alloc_sz = META_BLK_ALIGN_SZ);
+    std::error_condition alloc_meta_blk(BlkId& bid, uint32_t alloc_sz = META_BLK_PAGE_SZ);
 
     void free_meta_blk(meta_blk* mblk);
 
     /**
-     * @brief : Initialize meta blk 
+     * @brief : Initialize meta blk
      *
      * @param bid
      *

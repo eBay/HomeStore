@@ -12,7 +12,6 @@
 #include <utility/obj_life_counter.hpp>
 #include "homeblks/home_blks.hpp"
 
-// SDS_LOGGING_DECL(VMOD_VOL_MAPPING)
 SDS_LOGGING_DECL(volume)
 
 using namespace homeds;

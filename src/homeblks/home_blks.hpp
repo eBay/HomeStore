@@ -16,6 +16,7 @@
 #include "homeblks_config.hpp"
 #include <homeds/btree/writeBack_cache.hpp>
 #include <fds/sparse_vector.hpp>
+#include "meta/meta_blks_mgr.hpp"
 
 #ifndef DEBUG
 extern bool same_value_gen;
@@ -41,15 +42,10 @@ typedef uint32_t homeblks_sb_flag_t;
 
 #define HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN 0x00000001UL
 struct homeblks_sb {
-    uint64_t magic; // deprecated
     uint64_t version;
-    uint32_t gen_cnt; // deprecated
-    BlkId blkid;      // depreacted
     boost::uuids::uuid uuid;
 
     uint64_t boot_cnt;
-    BlkId vol_list_head; // deprecated
-    int num_vols;        // deprecated
     homeblks_sb_flag_t flags;
 
     void init_flag(homeblks_sb_flag_t f) { flags = f; }
@@ -200,6 +196,14 @@ public:
 
     data_blkstore_t::comp_callback data_completion_cb() override;
 
+    /**
+     * @brief
+     *
+     * @param mblk
+     * @param has_more
+     */
+    void meta_blk_cb(meta_blk* mblk, bool has_more);
+
 #ifdef _PRERELEASE
     void set_io_flip();
     void set_error_flip();
@@ -262,6 +266,7 @@ private:
     init_params m_cfg;
     std::thread m_thread_id;
     sisl::aligned_unique_ptr< homeblks_sb > m_homeblks_sb; // the homestore super block
+    void* m_sb_cookie = nullptr;
 
     vol_map_t m_volume_map;
     std::recursive_mutex m_vol_lock;

@@ -7,11 +7,11 @@
 #include <api/vol_interface.hpp>
 #include <string>
 #include <malloc.h>
+#include "engine/common/homestore_header.hpp"
 
 using namespace homestore;
 THREAD_BUFFER_INIT;
-SDS_LOGGING_INIT(log_store_benchmark, btree_structures, btree_nodes, btree_generics, cache, device, httpserver_lmod,
-                 iomgr, varsize_blk_alloc, VMOD_VOL_MAPPING, volume, logdev, flip, cp)
+SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 #define ITERATIONS 100000
 #define THREADS 64

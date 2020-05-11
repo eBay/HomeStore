@@ -32,8 +32,9 @@ find_library(LIB_ISAL isal)
 
 set(COMMON_LIB_DEPS
       ${CONAN_LIBS}
+      ${LIB_AIO}
+      dpdk
       #${LIB_DOUBLE_CONVERSION}
-      #${LIB_AIO}
       #${LIB_ISAL}
     )
 
