@@ -1,4 +1,5 @@
 #pragma once
+#include <fds/malloc_helper.hpp>
 #include "engine/common/homestore_config.hpp"
 #include "homelogstore/log_store.hpp"
 #include "engine/blkstore/blkstore.hpp"

@@ -110,7 +110,7 @@ public:
             }
         }
 
-        uint64_t app_mem_size = 2 * 1024 * 1024 * 1024;
+        uint64_t app_mem_size = 2ul * 1024 * 1024 * 1024;
         LOGINFO("Initialize and start HomeBlks with memory size = {}", app_mem_size);
 
         boost::uuids::string_generator gen;

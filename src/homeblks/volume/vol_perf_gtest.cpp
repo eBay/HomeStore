@@ -523,7 +523,7 @@ int main(int argc, char* argv[]) {
     if (SDS_OPTIONS.count("device_list")) {
         cfg.m_devs = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();
     }
-    cfg.m_app_mem_size = (SDS_OPTIONS["app_mem_size"].as< uint32_t >() * 1024 * 1024 * 1024;
+    cfg.m_app_mem_size = SDS_OPTIONS["app_mem_size"].as< uint32_t >() * 1024 * 1024 * 1024;
     cfg.m_is_file = SDS_OPTIONS["is_file"].as< uint32_t >();
 
     SimpleTestStore test_store(cfg);
