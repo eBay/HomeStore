@@ -279,6 +279,8 @@ public:
     void update_end_of_chunk(off_t off) { m_chunk_info->end_of_chunk_offset = off; }
     off_t get_end_of_chunk() { return m_chunk_info->end_of_chunk_offset; }
 
+    void* meta_blk_cookie = nullptr;
+
 private:
     chunk_info_block* m_chunk_info;
     PhysicalDev* m_pdev;

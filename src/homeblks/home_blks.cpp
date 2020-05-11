@@ -753,9 +753,7 @@ void HomeBlks::call_multi_vol_completions() {
     }
 }
 
-void HomeBlks::metablk_init(sb_blkstore_blob* blob, bool init) {
-    MetaBlkMgr::init(m_meta_blk_store.get(), blob, &m_cfg, init);
-}
+void HomeBlks::metablk_init(sb_blkstore_blob* blob, bool init) { MetaBlkMgr::init(m_meta_blk_store.get(), blob, init); }
 
 void HomeBlks::migrate_sb() {
     migrate_homeblk_sb();

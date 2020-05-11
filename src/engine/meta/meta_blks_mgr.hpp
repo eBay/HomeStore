@@ -1,13 +1,16 @@
 #pragma once
 
 #include "meta_sb.hpp"
-#include "engine/homestore.hpp"
-#include "engine/blkstore/blkstore.hpp"
-#include "api/vol_interface.hpp"
 
 namespace homestore {
 
-typedef homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy > blk_store_type;
+struct sb_blkstore_blob;
+class BlkBuffer;
+template < typename BAllocator, typename Buffer >
+class BlkStore;
+class VdevVarSizeBlkAllocatorPolicy;
+
+typedef homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy, BlkBuffer > blk_store_type;
 
 // each subsystem could receive callbacks multiple times;
 typedef std::function< void(meta_blk* mblk, bool has_more) > sub_cb; // subsystem callback
@@ -18,7 +21,6 @@ class MetaBlkMgr {
 private:
     static MetaBlkMgr* _instance;
     blk_store_type* m_sb_blk_store = nullptr; // super blockstore
-    init_params* m_cfg;                       // system params
     std::mutex m_meta_mtx;                    // mutex to access to meta_map;
     meta_blks_map m_meta_blks;                // used by subsystems meta rec
     cb_map m_cb_map;                          // map of callbacks
@@ -26,13 +28,13 @@ private:
     meta_blk_sb* m_ssb = nullptr;             // meta super super blk;
 
 public:
-    static void init(blk_store_type* sb_blk_store, sb_blkstore_blob* blob, init_params* cfg, bool init) {
+    static void init(blk_store_type* sb_blk_store, sb_blkstore_blob* blob, bool init) {
 #if 0
         static std::once_flag flag1;
         std::call_once(
             flag1, [sb_blk_store, blob, cfg, init]() { _instance = new MetaBlkMgr(sb_blk_store, blob, cfg, init); });
 #endif
-        _instance = new MetaBlkMgr(sb_blk_store, blob, cfg, init);
+        _instance = new MetaBlkMgr(sb_blk_store, blob, init);
     }
 
     /**
@@ -49,11 +51,10 @@ public:
      *
      * @param sb_blk_store : superblock store
      * @param blob : super block store vb context data blob
-     * @param cfg : system config
      * @param init : true of initialized, false if recovery
      * @return
      */
-    MetaBlkMgr(blk_store_type* sb_blk_store, sb_blkstore_blob* blob, init_params* cfg, bool init);
+    MetaBlkMgr(blk_store_type* sb_blk_store, sb_blkstore_blob* blob, bool init);
 
     /**
      * @brief :

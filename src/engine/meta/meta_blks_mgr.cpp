@@ -1,12 +1,12 @@
 #include "meta_sb.hpp"
+#include "homestore.hpp"
 #include "meta_blks_mgr.hpp"
+#include "blkstore/blkstore.hpp"
 
 SDS_LOGGING_DECL(metablk)
 namespace homestore {
 
-MetaBlkMgr::MetaBlkMgr(blk_store_type* sb_blk_store, sb_blkstore_blob* blob, init_params* cfg, bool init) :
-        m_sb_blk_store(sb_blk_store),
-        m_cfg(cfg) {
+MetaBlkMgr::MetaBlkMgr(blk_store_type* sb_blk_store, sb_blkstore_blob* blob, bool init) : m_sb_blk_store(sb_blk_store) {
     if (init) {
         // write the meta blk manager's sb;
         init_ssb();

@@ -19,6 +19,7 @@
 #include "engine/common/homestore_config.hpp"
 #include "engine/common/homestore_header.hpp"
 #include "engine/common/homestore_assert.hpp"
+#include "engine/meta/meta_blks_mgr.hpp"
 
 SDS_LOGGING_DECL(device)
 
@@ -38,6 +39,7 @@ public:
          */
         out_config->set_blk_size(vpage_size);
         out_config->set_total_blks(size / vpage_size);
+        out_config->set_blks_per_portion(BLKS_PER_PORTION); // Have locking etc for every 1024 pages
     }
 };
 
@@ -1440,7 +1442,28 @@ public:
     uint64_t get_num_chunks() const { return m_num_chunks; }
     uint64_t get_chunk_size() const { return m_chunk_size; }
 
-    void persist_blk_allocator_bitmap() {}
+    void persist_blk_allocator_bitmap() {
+        for (uint32_t i = 0; i < m_primary_pdev_chunks_list.size(); ++i) {
+            for (uint32_t chunk_indx = 0; chunk_indx < m_primary_pdev_chunks_list[i].chunks_in_pdev.size();
+                 ++chunk_indx) {
+                auto chunk = m_primary_pdev_chunks_list[i].chunks_in_pdev[chunk_indx];
+                size_t bitmap_size = 0;
+                auto bitmap_mem = chunk->get_blk_allocator()->serialize_alloc_blks();
+                if (chunk->meta_blk_cookie) {
+                    /* update */
+                    LOGINFO("updaing bitmap SB");
+                    //       MetaBlkMgr::instance()->update_sub_sb(homestore::meta_sub_type::BLK_ALLOC,
+                    //       bitmap_mem->bytes,
+                    //                                           bitmap_mem->size, chunk->meta_blk_cookie);
+                } else {
+                    /* First time update. insert. */
+                    LOGINFO("updaing bitmap SB");
+                    //   MetaBlkMgr::instance()->add_sub_sb(homestore::meta_sub_type::BLK_ALLOC, bitmap_mem->bytes,
+                    //                                    bitmap_mem->size, chunk->meta_blk_cookie);
+                }
+            }
+        }
+    }
 
 private:
     /* Adds a primary chunk to the chunk list in pdev */
@@ -1516,7 +1539,8 @@ private:
         typename Allocator::AllocatorConfig cfg(std::string("chunk_") + std::to_string(unique_id));
         Allocator::get_config(size, get_page_size(), &cfg);
 
-        std::shared_ptr< BlkAllocator > allocator = std::make_shared< typename Allocator::AllocatorType >(cfg, init);
+        std::shared_ptr< BlkAllocator > allocator =
+            std::make_shared< typename Allocator::AllocatorType >(cfg, init, unique_id);
         return allocator;
     }
 
