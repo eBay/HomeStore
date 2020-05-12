@@ -12,12 +12,15 @@
 #include <boost/uuid/uuid_io.hpp>
 #include <homelogstore/log_store.hpp>
 #include <map>
+#include <engine/meta/meta_blks_mgr.hpp>
 
 SDS_OPTION_GROUP(home_blks,
                  (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
                   cxxopts::value< int32_t >()->default_value("5000"), "port"))
-
 using namespace homestore;
+
+REGISTER_METABLK_SUBSYSTEM(volume, meta_sub_type::VOLUME, Volume::meta_blk_cb)
+REGISTER_METABLK_SUBSYSTEM(homeblks, meta_sub_type::HOMEBLK, HomeBlks::meta_blk_cb)
 
 #ifndef DEBUG
 bool same_value_gen = false;
@@ -329,6 +332,8 @@ void HomeBlks::init_done(std::error_condition err) {
     if (cnt != 1) { return; }
 
     if (err == no_error) { m_rdy = true; }
+    if (!m_cfg.disk_init) { m_dev_mgr->inited(); }
+    homeblks_sb_write();
     m_cfg.init_done_cb(err, m_out_params);
     m_init_finished = true;
     m_cv.notify_all();
@@ -374,7 +379,6 @@ void HomeBlks::init_thread() {
         // the flag should be set again;
         m_homeblks_sb->clear_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
         ++m_homeblks_sb->boot_cnt;
-        homeblks_sb_write();
 
         sisl::HttpServerConfig cfg;
         cfg.is_tls_enabled = false;
@@ -414,12 +418,6 @@ void HomeBlks::init_thread() {
         error = std::make_error_condition(std::errc::io_error);
     }
 
-    auto inst = MetaBlkMgr::instance();
-    inst->register_handler(
-        meta_sub_type::HOMEBLK,
-        std::bind(&HomeBlks::meta_blk_cb, HomeBlks::instance(), std::placeholders::_1, std::placeholders::_2));
-
-    inst->register_handler(meta_sub_type::VOLUME, Volume::meta_blk_cb);
 
     init_done(error);
 }
@@ -753,8 +751,6 @@ void HomeBlks::call_multi_vol_completions() {
     }
 }
 
-void HomeBlks::metablk_init(sb_blkstore_blob* blob, bool init) { MetaBlkMgr::init(m_meta_blk_store.get(), blob, init); }
-
 void HomeBlks::migrate_sb() {
     migrate_homeblk_sb();
     migrate_volume_sb();
@@ -784,7 +780,9 @@ void HomeBlks::migrate_volume_sb() {
     }
 }
 
-void HomeBlks::meta_blk_cb(meta_blk* mblk, bool has_more) {
+void HomeBlks::meta_blk_cb(meta_blk* mblk, bool has_more) { instance()->meta_blk_cb_internal(mblk, has_more); }
+
+void HomeBlks::meta_blk_cb_internal(meta_blk* mblk, bool has_more) {
     static bool meta_blk_found = false;
     // HomeBlk layer expects to see one valid meta_blk record during reboot;
     if (has_more == true) {

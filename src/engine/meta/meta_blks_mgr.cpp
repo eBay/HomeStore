@@ -6,8 +6,9 @@
 SDS_LOGGING_DECL(metablk)
 namespace homestore {
 
-MetaBlkMgr::MetaBlkMgr(blk_store_type* sb_blk_store, sb_blkstore_blob* blob, bool init) : m_sb_blk_store(sb_blk_store) {
-    if (init) {
+void MetaBlkMgr::init(blk_store_type* sb_blk_store, sb_blkstore_blob* blob, bool is_init) {
+    m_sb_blk_store = sb_blk_store;
+    if (is_init) {
         // write the meta blk manager's sb;
         init_ssb();
     } else {
@@ -52,7 +53,6 @@ void MetaBlkMgr::load_ssb(sb_blkstore_blob* blob) {
     homeds::blob b = bbuf->at_offset(0);
     assert(b.size == META_BLK_PAGE_SZ);
 
-    m_ssb = nullptr;
     int aret = posix_memalign((void**)&(m_ssb), HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_PAGE_SZ);
     if (aret != 0) {
         assert(0);
@@ -136,7 +136,7 @@ void MetaBlkMgr::scan_meta_blks() {
 
     // set read_batch_sz to be the chunk size;
     uint64_t read_batch_sz = total_bytes_read;
-    while ((uint64_t)total_bytes_read <= total_sz) {
+    while ((uint64_t)total_bytes_read < total_sz) {
         auto bytes_read = m_sb_blk_store->read(buf, read_batch_sz);
         if (bytes_read == -1 || bytes_read == 0) { HS_ASSERT(RELEASE, 0, "read failure from blkstore."); }
         total_bytes_read += bytes_read;

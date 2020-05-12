@@ -118,7 +118,6 @@ public:
     }
 
 protected:
-    virtual void metablk_init(sb_blkstore_blob* blob, bool init) = 0;
     virtual data_blkstore_t::comp_callback data_completion_cb() = 0;
     virtual void process_vdev_error(vdev_info_block* vb) = 0;
 
@@ -150,7 +149,7 @@ protected:
         case blkstore_type::INDEX_STORE:
             create_index_blkstore(vb);
             break;
-        case blkstore_type::SB_STORE:
+        case blkstore_type::SB_STORE: // deprecated
             create_sb_blkstore(vb);
             break;
         case blkstore_type::LOGDEV_STORE:
@@ -207,7 +206,7 @@ protected:
         }
     }
 
-    void create_sb_blkstore(vdev_info_block* vb) {
+    void create_sb_blkstore(vdev_info_block* vb) { // deprecated
         if (vb == nullptr) {
             /* create a blkstore */
             struct sb_blkstore_blob blob;
@@ -253,6 +252,8 @@ protected:
     }
 
     void create_meta_blkstore(vdev_info_block* vb) {
+        sb_blkstore_blob* sb_blob = nullptr;
+        bool init = true;
         if (vb == nullptr) {
             struct blkstore_blob blob;
             blob.type = blkstore_type::META_STORE;
@@ -262,7 +263,6 @@ protected:
                 std::make_unique< meta_blkstore_t >(m_dev_mgr.get(), m_cache.get(), size, PASS_THRU, 0, (char*)&blob,
                                                     sizeof(blkstore_blob), META_BLK_PAGE_SZ, "meta");
 
-            metablk_init(nullptr, true);
         } else {
             m_meta_blk_store = std::make_unique< meta_blkstore_t >(
                 m_dev_mgr.get(), m_cache.get(), vb, PASS_THRU, META_BLK_PAGE_SZ, "meta", (vb->failed ? true : false));
@@ -272,19 +272,15 @@ protected:
             }
 
             /* get the blkid of homestore super block */
-            sb_blkstore_blob* blob = (sb_blkstore_blob*)(&(vb->context_data));
-            if (blob->blkid.to_integer() == BlkId::invalid_internal_id()) {
+            sb_blob = (sb_blkstore_blob*)(&(vb->context_data));
+            if (sb_blob->blkid.to_integer() == BlkId::invalid_internal_id()) {
                 LOGINFO("init was failed last time. Should retry it with init flag");
                 throw homestore::homestore_exception("init was failed last time. Should retry it with init",
                                                      homestore_error::init_failed);
             }
-#if 0 
-            /* read and build the appln super block */
-            std::vector< blk_buf_t > bbuf =
-                m_meta_blk_store->read_nmirror(blob->blkid, HS_STATIC_CONFIG(input.devices).size() - 1);
-#endif
-            metablk_init(blob, false);
+            init = false;
         }
+        MetaBlkMgr::instance()->init(m_meta_blk_store.get(), sb_blob, init);
     }
 
     void create_logdev_blkstore(vdev_info_block* vb) {
