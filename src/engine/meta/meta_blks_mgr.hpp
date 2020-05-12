@@ -17,6 +17,7 @@ typedef std::function< void(meta_blk* mblk, bool has_more) > sub_cb; // subsyste
 typedef std::map< meta_sub_type, sub_cb > cb_map;
 typedef std::map< meta_sub_type, std::map< uint64_t, meta_blk* > > meta_blks_map; // blkid to meta_blk map;
 
+
 class MetaBlkMgr {
 private:
     static MetaBlkMgr* _instance;
@@ -28,24 +29,6 @@ private:
     meta_blk_sb* m_ssb = nullptr;             // meta super super blk;
 
 public:
-    static void init(blk_store_type* sb_blk_store, sb_blkstore_blob* blob, bool init) {
-#if 0
-        static std::once_flag flag1;
-        std::call_once(
-            flag1, [sb_blk_store, blob, cfg, init]() { _instance = new MetaBlkMgr(sb_blk_store, blob, cfg, init); });
-#endif
-        _instance = new MetaBlkMgr(sb_blk_store, blob, init);
-    }
-
-    /**
-     * @brief
-     *
-     * @return
-     */
-    static MetaBlkMgr* instance() { return _instance; }
-
-    static void del_instance() { delete _instance; }
-
     /**
      * @brief :
      *
@@ -54,7 +37,24 @@ public:
      * @param init : true of initialized, false if recovery
      * @return
      */
-    MetaBlkMgr(blk_store_type* sb_blk_store, sb_blkstore_blob* blob, bool init);
+    void init(blk_store_type* sb_blk_store, sb_blkstore_blob* blob, bool is_init);
+
+    /**
+     * @brief
+     *
+     * @return
+     */
+    static MetaBlkMgr* instance() {
+        static std::once_flag flag1;
+        std::call_once(flag1, []() { _instance = new MetaBlkMgr(); });
+
+        return _instance;
+    }
+
+    MetaBlkMgr(){};
+
+    static void del_instance() { delete _instance; }
+
 
     /**
      * @brief :
@@ -216,4 +216,12 @@ private:
      */
     void write_meta_blk_internal(meta_blk* mblk, void* context_data, uint64_t sz);
 };
+
+class register_subsystem {
+public:
+    register_subsystem(meta_sub_type type, sub_cb cb) { MetaBlkMgr::instance()->register_handler(type, cb); }
+};
+
+/* It provides alternate way to module to register itself to metablk at the very beginning of a program */
+#define REGISTER_METABLK_SUBSYSTEM(name, type, cb) homestore::register_subsystem name##sub(type, cb);
 } // namespace homestore
