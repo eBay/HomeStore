@@ -116,7 +116,12 @@ void MetaBlkMgr::write_ssb() {
     write_blk(m_ssb->blkid, (void*)m_ssb, META_BLK_PAGE_SZ);
 }
 
-// TODO: update this api by look up metablock by chain reading;
+//
+// TODO:
+// Alternatives:
+// 1. update this api by look up metablock by chain reading;
+// 2. read per chunk;
+//
 void MetaBlkMgr::scan_meta_blks() {
     m_sb_blk_store->lseek(0, SEEK_SET);
     const uint64_t total_sz = m_sb_blk_store->get_size();
@@ -227,18 +232,24 @@ void MetaBlkMgr::extract_meta_blks(uint8_t* buf, const uint64_t size, std::vecto
 
 void MetaBlkMgr::deregister_handler(meta_sub_type type) {
     std::lock_guard< decltype(m_meta_mtx) > lk(m_meta_mtx);
+
     auto it = m_cb_map.find(type);
     if (it != m_cb_map.end()) { m_cb_map.erase(it); }
+
+    auto cit = m_comp_cb_map.find(type);
+    if (cit != m_comp_cb_map.end()) { m_comp_cb_map.erase(cit); }
 }
 
-void MetaBlkMgr::register_handler(meta_sub_type type, sub_cb cb) {
+void MetaBlkMgr::register_handler(meta_sub_type type, meta_blk_found_cb cb, meta_blk_recover_comp_cb comp_cb) {
     std::lock_guard< decltype(m_meta_mtx) > lk(m_meta_mtx);
     if (is_meta_blk_type_valid(type)) {
         HS_ASSERT(DEBUG, m_cb_map.find(type) == m_cb_map.end(), "type: {} handler already registered!", type);
     } else {
         HS_ASSERT(RELEASE, 0, "invalide meta subsystem type: {}", type);
     }
+
     m_cb_map[type] = cb;
+    m_comp_cb_map[type] = comp_cb;
 }
 
 void MetaBlkMgr::add_sub_sb(meta_sub_type type, void* context_data, uint64_t sz, void*& cookie) {
@@ -497,16 +508,26 @@ void MetaBlkMgr::recover() {
         if (it == m_meta_blks.end()) { continue; }
 
         auto cb_it = m_cb_map.find(type);
-        assert(cb_it != m_cb_map.end());
+        auto comp_cb_it = m_comp_cb_map.find(type);
+        HS_ASSERT(RELEASE, cb_it != m_cb_map.end(), "nullptr blk found cb for type: {}", type);
+        HS_ASSERT(RELEASE, comp_cb_it != m_comp_cb_map.end(), "null recover compl cb for type: {}", type);
 
-        sub_cb cb = cb_it->second;
+        meta_blk_found_cb cb = cb_it->second;
 
         for (auto& m : it->second) {
-            cb(m.second, true /* has_more */);
+            cb(m.second);
         }
+    }
 
-        // each subsystem's callback will be called at least once
-        cb(nullptr, false /* has_more */);
+    for (auto type : sub_priority_list) {
+        auto it = m_comp_cb_map.find(type);
+        
+        if (it == m_comp_cb_map.end()) { continue; }
+
+        meta_blk_recover_comp_cb comp_cb = it->second;
+
+        // notify each subsystem that recovery has completed;
+        comp_cb(true);
     }
 }
 

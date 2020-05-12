@@ -203,7 +203,8 @@ public:
      * @param mblk
      * @param has_more
      */
-    void meta_blk_cb_internal(meta_blk* mblk, bool has_more);
+    void meta_blk_cb_internal(meta_blk* mblk);
+    void meta_blk_recover_comp_cb_internal(bool success);
 
 #ifdef _PRERELEASE
     void set_io_flip();
@@ -231,7 +232,8 @@ public:
     static void set_log_level(sisl::HttpCallData cd);
     static void dump_stack_trace(sisl::HttpCallData cd);
     static void verify_hs(sisl::HttpCallData cd);
-    static void meta_blk_cb(meta_blk* mblk, bool has_more);
+    static void meta_blk_cb(meta_blk* mblk);
+    static void meta_blk_recover_comp_cb(bool success);
 
 protected:
     void process_vdev_error(vdev_info_block* vb) override;

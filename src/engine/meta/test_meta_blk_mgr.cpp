@@ -226,12 +226,14 @@ public:
 
         m_mbm->deregister_handler(mtype);
 
-        m_mbm->register_handler(mtype, [this](meta_blk* mblk, bool has_more) {
-            if (mblk) {
-                std::unique_lock< std::mutex > lg(m_mtx);
-                m_cb_blks[mblk->hdr.blkid.to_integer()] = mblk;
-            }
-        });
+        m_mbm->register_handler(mtype,
+                                [this](meta_blk* mblk) {
+                                    if (mblk) {
+                                        std::unique_lock< std::mutex > lg(m_mtx);
+                                        m_cb_blks[mblk->hdr.blkid.to_integer()] = mblk;
+                                    }
+                                },
+                                [this](bool success) { assert(success); });
 
         while (keep_running()) {
             switch (get_op()) {
