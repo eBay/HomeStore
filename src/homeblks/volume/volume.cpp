@@ -643,6 +643,9 @@ void Volume::migrate_sb() {
     // inst->add_sub_sb(meta_sub_type::VOLUME, (void*)(m_sb->ondisk_sb), sizeof(vol_ondisk_sb), &(m_sb->cookie));
 }
 
-void Volume::meta_blk_cb(meta_blk* mblk, bool has_more) {
+void Volume::meta_blk_cb(meta_blk* mblk) {
     // TODO: Volume Recovery
+}
+void Volume::meta_blk_recover_comp_cb(bool success) {
+    // TODO: To be implemented;
 }

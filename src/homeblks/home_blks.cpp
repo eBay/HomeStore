@@ -20,8 +20,8 @@ SDS_OPTION_GROUP(home_blks,
                   cxxopts::value< int32_t >()->default_value("5000"), "port"))
 using namespace homestore;
 
-REGISTER_METABLK_SUBSYSTEM(volume, meta_sub_type::VOLUME, Volume::meta_blk_cb)
-REGISTER_METABLK_SUBSYSTEM(homeblks, meta_sub_type::HOMEBLK, HomeBlks::meta_blk_cb)
+REGISTER_METABLK_SUBSYSTEM(volume, meta_sub_type::VOLUME, Volume::meta_blk_cb, Volume::meta_blk_recover_comp_cb)
+REGISTER_METABLK_SUBSYSTEM(homeblks, meta_sub_type::HOMEBLK, HomeBlks::meta_blk_cb, HomeBlks::meta_blk_recover_comp_cb)
 
 #ifndef DEBUG
 bool same_value_gen = false;
@@ -419,7 +419,6 @@ void HomeBlks::init_thread() {
         error = std::make_error_condition(std::errc::io_error);
     }
 
-
     init_done(error);
 }
 
@@ -804,21 +803,27 @@ void HomeBlks::migrate_volume_sb() {
     }
 }
 
-void HomeBlks::meta_blk_cb(meta_blk* mblk, bool has_more) { instance()->meta_blk_cb_internal(mblk, has_more); }
 
-void HomeBlks::meta_blk_cb_internal(meta_blk* mblk, bool has_more) {
+void HomeBlks::meta_blk_cb(meta_blk* mblk) { instance()->meta_blk_cb_internal(mblk); }
+void HomeBlks::meta_blk_recover_comp_cb(bool success) { instance()->meta_blk_recover_comp_cb_internal(success); }
+
+void HomeBlks::meta_blk_recover_comp_cb_internal(bool success) {
+    HS_ASSERT(RELEASE, success, "failed to recover HomeBlks SB.");
+
+    HS_ASSERT(RELEASE, m_sb_cookie, "nullptr m_sb_cookie!");
+
+    // nothing needs to be done;
+}
+
+void HomeBlks::meta_blk_cb_internal(meta_blk* mblk) {
     static bool meta_blk_found = false;
-    // HomeBlk layer expects to see one valid meta_blk record during reboot;
-    if (has_more == true) {
-        HS_ASSERT(RELEASE, meta_blk_found == false, "More than one HomeBlk SB is received, only expecting one!");
-        meta_blk_found = true;
-    } else if (mblk == nullptr) {
-        /* has_more is false */
-        HS_ASSERT(RELEASE, meta_blk_found, "No HomeBlk is received. Expecting one SB should be received!");
-        return;
-    }
 
-    HS_ASSERT(RELEASE, mblk != nullptr, "null meta blk received with hash_more set to true.");
+    // HomeBlk layer expects to see one valid meta_blk record during reboot;
+    HS_ASSERT(RELEASE, !meta_blk_found, "More than one HomeBlk SB is received, only expecting one!");
+
+    meta_blk_found = true;
+
+    HS_ASSERT(RELEASE, mblk != nullptr, "null meta blk received in meta_blk_found_callback.");
 
     m_sb_cookie = (void*)mblk;
     // recover from meta_blk;

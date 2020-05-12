@@ -347,13 +347,10 @@ public:
     /* it is used in fake reboot */
     static void reinit() { IndxMgr::reinit(); }
 
-    /**
-     * @brief
-     *
-     * @param mblk
-     * @param has_more
-     */
-    static void meta_blk_cb(meta_blk* mblk, bool has_more);
+    
+    static void meta_blk_cb(meta_blk* mblk);
+
+    static void meta_blk_recover_comp_cb(bool success);
 
 public:
     /******************** APIs exposed to home_blks *******************/
