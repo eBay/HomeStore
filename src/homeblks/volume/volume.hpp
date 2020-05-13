@@ -348,7 +348,7 @@ public:
     static void reinit() { IndxMgr::reinit(); }
 
     
-    static void meta_blk_cb(meta_blk* mblk);
+    static void meta_blk_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
 
     static void meta_blk_recover_comp_cb(bool success);
 

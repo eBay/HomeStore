@@ -779,8 +779,9 @@ void HomeBlks::migrate_volume_sb() {
     }
 }
 
-
-void HomeBlks::meta_blk_cb(meta_blk* mblk) { instance()->meta_blk_cb_internal(mblk); }
+void HomeBlks::meta_blk_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size) {
+    instance()->meta_blk_cb_internal(mblk, std::move(buf), size);
+}
 void HomeBlks::meta_blk_recover_comp_cb(bool success) { instance()->meta_blk_recover_comp_cb_internal(success); }
 
 void HomeBlks::meta_blk_recover_comp_cb_internal(bool success) {
@@ -791,7 +792,7 @@ void HomeBlks::meta_blk_recover_comp_cb_internal(bool success) {
     // nothing needs to be done;
 }
 
-void HomeBlks::meta_blk_cb_internal(meta_blk* mblk) {
+void HomeBlks::meta_blk_cb_internal(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size) {
     static bool meta_blk_found = false;
 
     // HomeBlk layer expects to see one valid meta_blk record during reboot;
@@ -802,10 +803,17 @@ void HomeBlks::meta_blk_cb_internal(meta_blk* mblk) {
     HS_ASSERT(RELEASE, mblk != nullptr, "null meta blk received in meta_blk_found_callback.");
 
     m_sb_cookie = (void*)mblk;
+
     // recover from meta_blk;
-    auto sb = (homeblks_sb*)mblk->context_data;
+    auto sb = (homeblks_sb*)buf.get();
+    
+    HS_ASSERT(RELEASE, size == sizeof(homeblks_sb), "mismatch size: {}, sizeof homeblks_sb: {}", size, sizeof(homeblks_sb));
+    HS_ASSERT(RELEASE, buf, "buf should not be nullptr");
+    
     m_homeblks_sb->version = sb->version;
     m_homeblks_sb->uuid = sb->uuid;
     m_homeblks_sb->boot_cnt = sb->boot_cnt;
     m_homeblks_sb->flags = sb->flags;
+
+    // buf freed by subsystem on exit;
 }

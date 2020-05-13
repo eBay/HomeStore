@@ -515,13 +515,24 @@ void MetaBlkMgr::recover() {
         meta_blk_found_cb cb = cb_it->second;
 
         for (auto& m : it->second) {
-            cb(m.second);
+            auto buf = sisl::make_aligned_unique< uint8_t >(dma_boundary, m.second->hdr.context_sz);
+
+            if (m.second->hdr.context_sz <= META_BLK_CONTEXT_SZ) {
+                HS_ASSERT(RELEASE, m.second->hdr.ovf_blkid.to_integer() == BlkId::invalid_internal_id(),
+                          "corrupted ovf_blkid: {}", m.second->hdr.ovf_blkid.to_string());
+                memcpy(buf.get(), (void*)m.second->context_data, m.second->hdr.context_sz);
+            } else {
+                HS_ASSERT(RELEASE, m.second->hdr.ovf_blkid.to_integer() != BlkId::invalid_internal_id(),
+                          "corrupted ovf_blkid: {}", m.second->hdr.ovf_blkid.to_string());
+                // TODO: handle ovf_blk buffer chain;
+            }
+            cb(m.second, std::move(buf), m.second->hdr.context_sz);
         }
     }
 
     for (auto type : sub_priority_list) {
         auto it = m_comp_cb_map.find(type);
-        
+
         if (it == m_comp_cb_map.end()) { continue; }
 
         meta_blk_recover_comp_cb comp_cb = it->second;
