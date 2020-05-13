@@ -13,39 +13,23 @@ class VdevVarSizeBlkAllocatorPolicy;
 typedef homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy, BlkBuffer > blk_store_type;
 
 // each subsystem could receive callbacks multiple times;
-typedef std::function< void(meta_blk* mblk, bool has_more) > sub_cb; // subsystem callback
-typedef std::map< meta_sub_type, sub_cb > cb_map;
+typedef std::function< void(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size) >
+    meta_blk_found_cb;                                                            // new blk found subsystem callback
+typedef std::function< void(bool success) > meta_blk_recover_comp_cb;             // recover complete subsystem callback
 typedef std::map< meta_sub_type, std::map< uint64_t, meta_blk* > > meta_blks_map; // blkid to meta_blk map;
 
 class MetaBlkMgr {
 private:
     static MetaBlkMgr* _instance;
-    blk_store_type* m_sb_blk_store = nullptr; // super blockstore
-    std::mutex m_meta_mtx;                    // mutex to access to meta_map;
-    meta_blks_map m_meta_blks;                // used by subsystems meta rec
-    cb_map m_cb_map;                          // map of callbacks
-    meta_blk* m_last_mblk = nullptr;          // last meta blk;
-    meta_blk_sb* m_ssb = nullptr;             // meta super super blk;
+    blk_store_type* m_sb_blk_store = nullptr;                          // super blockstore
+    std::mutex m_meta_mtx;                                             // mutex to access to meta_map;
+    meta_blks_map m_meta_blks;                                         // used by subsystems meta rec
+    std::map< meta_sub_type, meta_blk_found_cb > m_cb_map;             // map of callbacks
+    std::map< meta_sub_type, meta_blk_recover_comp_cb > m_comp_cb_map; // map of callbacks
+    meta_blk* m_last_mblk = nullptr;                                   // last meta blk;
+    meta_blk_sb* m_ssb = nullptr;                                      // meta super super blk;
 
 public:
-    static void init(blk_store_type* sb_blk_store, sb_blkstore_blob* blob, bool init) {
-#if 0
-        static std::once_flag flag1;
-        std::call_once(
-            flag1, [sb_blk_store, blob, cfg, init]() { _instance = new MetaBlkMgr(sb_blk_store, blob, cfg, init); });
-#endif
-        _instance = new MetaBlkMgr(sb_blk_store, blob, init);
-    }
-
-    /**
-     * @brief
-     *
-     * @return
-     */
-    static MetaBlkMgr* instance() { return _instance; }
-
-    static void del_instance() { delete _instance; }
-
     /**
      * @brief :
      *
@@ -54,7 +38,23 @@ public:
      * @param init : true of initialized, false if recovery
      * @return
      */
-    MetaBlkMgr(blk_store_type* sb_blk_store, sb_blkstore_blob* blob, bool init);
+    void init(blk_store_type* sb_blk_store, sb_blkstore_blob* blob, bool is_init);
+
+    /**
+     * @brief
+     *
+     * @return
+     */
+    static MetaBlkMgr* instance() {
+        static std::once_flag flag1;
+        std::call_once(flag1, []() { _instance = new MetaBlkMgr(); });
+
+        return _instance;
+    }
+
+    MetaBlkMgr(){};
+
+    static void del_instance() { delete _instance; }
 
     /**
      * @brief :
@@ -66,8 +66,13 @@ public:
      * @param type : subsystem type
      * @param cb : subsystem cb
      */
-    void register_handler(meta_sub_type type, sub_cb cb);
+    void register_handler(meta_sub_type type, meta_blk_found_cb cb, meta_blk_recover_comp_cb comp_cb);
 
+    /**
+     * @brief
+     *
+     * @param type
+     */
     void deregister_handler(meta_sub_type type);
 
     /**
@@ -216,4 +221,14 @@ private:
      */
     void write_meta_blk_internal(meta_blk* mblk, void* context_data, uint64_t sz);
 };
+
+class register_subsystem {
+public:
+    register_subsystem(meta_sub_type type, meta_blk_found_cb cb, meta_blk_recover_comp_cb comp_cb) {
+        MetaBlkMgr::instance()->register_handler(type, cb, comp_cb);
+    }
+};
+
+/* It provides alternate way to module to register itself to metablk at the very beginning of a program */
+#define REGISTER_METABLK_SUBSYSTEM(name, type, cb, comp_cb) homestore::register_subsystem name##sub(type, cb, comp_cb);
 } // namespace homestore

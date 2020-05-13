@@ -6,8 +6,9 @@
 SDS_LOGGING_DECL(metablk)
 namespace homestore {
 
-MetaBlkMgr::MetaBlkMgr(blk_store_type* sb_blk_store, sb_blkstore_blob* blob, bool init) : m_sb_blk_store(sb_blk_store) {
-    if (init) {
+void MetaBlkMgr::init(blk_store_type* sb_blk_store, sb_blkstore_blob* blob, bool is_init) {
+    m_sb_blk_store = sb_blk_store;
+    if (is_init) {
         // write the meta blk manager's sb;
         init_ssb();
     } else {
@@ -52,7 +53,6 @@ void MetaBlkMgr::load_ssb(sb_blkstore_blob* blob) {
     homeds::blob b = bbuf->at_offset(0);
     assert(b.size == META_BLK_PAGE_SZ);
 
-    m_ssb = nullptr;
     int aret = posix_memalign((void**)&(m_ssb), HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_PAGE_SZ);
     if (aret != 0) {
         assert(0);
@@ -111,7 +111,12 @@ void MetaBlkMgr::write_ssb() {
     write_blk(m_ssb->blkid, (void*)m_ssb, META_BLK_PAGE_SZ);
 }
 
-// TODO: update this api by look up metablock by chain reading;
+//
+// TODO:
+// Alternatives:
+// 1. update this api by look up metablock by chain reading;
+// 2. read per chunk;
+//
 void MetaBlkMgr::scan_meta_blks() {
     m_sb_blk_store->lseek(0, SEEK_SET);
     const uint64_t total_sz = m_sb_blk_store->get_size();
@@ -125,7 +130,7 @@ void MetaBlkMgr::scan_meta_blks() {
 
     // set read_batch_sz to be the chunk size;
     uint64_t read_batch_sz = total_bytes_read;
-    while ((uint64_t)total_bytes_read <= total_sz) {
+    while ((uint64_t)total_bytes_read < total_sz) {
         auto bytes_read = m_sb_blk_store->read(buf, read_batch_sz);
         if (bytes_read == -1 || bytes_read == 0) { HS_ASSERT(RELEASE, 0, "read failure from blkstore."); }
         total_bytes_read += bytes_read;
@@ -214,18 +219,24 @@ void MetaBlkMgr::extract_meta_blks(uint8_t* buf, const uint64_t size, std::vecto
 
 void MetaBlkMgr::deregister_handler(meta_sub_type type) {
     std::lock_guard< decltype(m_meta_mtx) > lk(m_meta_mtx);
+
     auto it = m_cb_map.find(type);
     if (it != m_cb_map.end()) { m_cb_map.erase(it); }
+
+    auto cit = m_comp_cb_map.find(type);
+    if (cit != m_comp_cb_map.end()) { m_comp_cb_map.erase(cit); }
 }
 
-void MetaBlkMgr::register_handler(meta_sub_type type, sub_cb cb) {
+void MetaBlkMgr::register_handler(meta_sub_type type, meta_blk_found_cb cb, meta_blk_recover_comp_cb comp_cb) {
     std::lock_guard< decltype(m_meta_mtx) > lk(m_meta_mtx);
     if (is_meta_blk_type_valid(type)) {
         HS_ASSERT(DEBUG, m_cb_map.find(type) == m_cb_map.end(), "type: {} handler already registered!", type);
     } else {
         HS_ASSERT(RELEASE, 0, "invalide meta subsystem type: {}", type);
     }
+
     m_cb_map[type] = cb;
+    m_comp_cb_map[type] = comp_cb;
 }
 
 void MetaBlkMgr::add_sub_sb(meta_sub_type type, void* context_data, uint64_t sz, void*& cookie) {
@@ -478,16 +489,37 @@ void MetaBlkMgr::recover() {
         if (it == m_meta_blks.end()) { continue; }
 
         auto cb_it = m_cb_map.find(type);
-        assert(cb_it != m_cb_map.end());
+        auto comp_cb_it = m_comp_cb_map.find(type);
+        HS_ASSERT(RELEASE, cb_it != m_cb_map.end(), "nullptr blk found cb for type: {}", type);
+        HS_ASSERT(RELEASE, comp_cb_it != m_comp_cb_map.end(), "null recover compl cb for type: {}", type);
 
-        sub_cb cb = cb_it->second;
+        meta_blk_found_cb cb = cb_it->second;
 
         for (auto& m : it->second) {
-            cb(m.second, true /* has_more */);
-        }
+            auto buf = sisl::make_aligned_unique< uint8_t >(dma_boundary, m.second->hdr.context_sz);
 
-        // each subsystem's callback will be called at least once
-        cb(nullptr, false /* has_more */);
+            if (m.second->hdr.context_sz <= META_BLK_CONTEXT_SZ) {
+                HS_ASSERT(RELEASE, m.second->hdr.ovf_blkid.to_integer() == BlkId::invalid_internal_id(),
+                          "corrupted ovf_blkid: {}", m.second->hdr.ovf_blkid.to_string());
+                memcpy(buf.get(), (void*)m.second->context_data, m.second->hdr.context_sz);
+            } else {
+                HS_ASSERT(RELEASE, m.second->hdr.ovf_blkid.to_integer() != BlkId::invalid_internal_id(),
+                          "corrupted ovf_blkid: {}", m.second->hdr.ovf_blkid.to_string());
+                // TODO: handle ovf_blk buffer chain;
+            }
+            cb(m.second, std::move(buf), m.second->hdr.context_sz);
+        }
+    }
+
+    for (auto type : sub_priority_list) {
+        auto it = m_comp_cb_map.find(type);
+
+        if (it == m_comp_cb_map.end()) { continue; }
+
+        meta_blk_recover_comp_cb comp_cb = it->second;
+
+        // notify each subsystem that recovery has completed;
+        comp_cb(true);
     }
 }
 

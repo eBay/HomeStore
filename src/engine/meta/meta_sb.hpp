@@ -19,6 +19,10 @@ enum class meta_sub_type { NOT_INIT_TYPE, HOMEBLK, VOLUME, INDX_MGR_CP, JOURNAL,
 
 typedef uint32_t crc32_t;
 
+//
+// TODO: no need to maintain priority list any more;
+// metablk mgr, HOMEBLK, bitmap, VOLUME, btree, logstore
+//
 constexpr std::initializer_list< meta_sub_type > sub_priority_list = {
     meta_sub_type::HOMEBLK, meta_sub_type::VOLUME, meta_sub_type::INDX_MGR_CP, meta_sub_type::JOURNAL};
 
@@ -45,6 +49,14 @@ struct meta_blk_sb {
 // 1. If overflow blkid is invalid, meaning context_sz is not larger than META_BLK_CONTEXT_SZ,
 //    context data is stored in context_data field;
 // 2. If overflow blkid is not invalid, all the context data is stored in overflow blks;
+//
+// TODO:
+// * Chain ovf_blkid (need to stay in cache) for data larger than ovf buffer can hold;
+// * Free old ovf_blkid, then create new blks for update api;
+// * Move journal sb to metablk mgr (lower priority since we've had a working version in vdev);
+// * Change meta_sub_type to unique string so that it can be dyanamically added;
+// * Only context data align to 512; ovf_header is 512 and data is 4k - 512 and needs iov to write;
+// * Enalbe bitmap code for large buffer wirte metablkmgr;
 //
 struct meta_blk_hdr {
     uint32_t magic; // magic
