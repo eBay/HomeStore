@@ -13,10 +13,10 @@ class VdevVarSizeBlkAllocatorPolicy;
 typedef homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy, BlkBuffer > blk_store_type;
 
 // each subsystem could receive callbacks multiple times;
-typedef std::function< void(meta_blk* mblk) > meta_blk_found_cb;                  // new blk found subsystem callback
+typedef std::function< void(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size) >
+    meta_blk_found_cb;                                                            // new blk found subsystem callback
 typedef std::function< void(bool success) > meta_blk_recover_comp_cb;             // recover complete subsystem callback
 typedef std::map< meta_sub_type, std::map< uint64_t, meta_blk* > > meta_blks_map; // blkid to meta_blk map;
-
 
 class MetaBlkMgr {
 private:
@@ -56,7 +56,6 @@ public:
 
     static void del_instance() { delete _instance; }
 
-
     /**
      * @brief :
      */
@@ -75,7 +74,7 @@ public:
      * @param type
      */
     void deregister_handler(meta_sub_type type);
-    
+
     /**
      * @brief : add subsystem superblock to meta blk mgr
      *
@@ -225,7 +224,9 @@ private:
 
 class register_subsystem {
 public:
-    register_subsystem(meta_sub_type type, meta_blk_found_cb cb, meta_blk_recover_comp_cb comp_cb) { MetaBlkMgr::instance()->register_handler(type, cb, comp_cb); }
+    register_subsystem(meta_sub_type type, meta_blk_found_cb cb, meta_blk_recover_comp_cb comp_cb) {
+        MetaBlkMgr::instance()->register_handler(type, cb, comp_cb);
+    }
 };
 
 /* It provides alternate way to module to register itself to metablk at the very beginning of a program */
