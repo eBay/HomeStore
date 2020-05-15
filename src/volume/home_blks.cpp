@@ -85,7 +85,7 @@ HomeBlks::HomeBlks(const init_params& cfg) :
         throw std::invalid_argument("null device list");
     }
 
-    uint64_t cache_size = (m_cfg.app_mem_size * 50) / 100; // Alloc 65% of memory to cache
+    uint64_t cache_size = (m_cfg.app_mem_size * 50) / 100; // Alloc 50% of memory to cache
     HomeStoreConfig::mem_release_soft_threshold = (m_cfg.app_mem_size * 80) / 100;
     HomeStoreConfig::mem_release_aggressive_threshold = (m_cfg.app_mem_size * 92) / 100;
     sisl::set_memory_release_rate(8); // Set aggressive memory release rate
