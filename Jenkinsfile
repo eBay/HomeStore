@@ -25,7 +25,7 @@ pipeline {
                 branch "disabled"
             }
             steps {
-                sh "docker build -f Dockerfile.sonar --rm --build-arg COVERAGE_ON='true' --build-arg BUILD_TYPE=debug --build-arg BRANCH_NAME=${BRANCH_NAME} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} ."
+                sh "docker build -f Dockerfile.sonar --rm --build-arg BRANCH_NAME=${BRANCH_NAME} ."
             }
         }
 

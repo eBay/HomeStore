@@ -1,22 +1,9 @@
 # ##########   #######   ############
-FROM ecr.vip.ebayc3.com/sds/sds_cpp_base:2.15
+FROM ecr.vip.ebayc3.com/sds/sds_cpp_base:3.10
 LABEL description="Automated SDS compilation"
 
 ARG BRANCH_NAME
-ARG BUILD_TYPE
-ARG COVERAGE_ON
-ARG CONAN_CHANNEL
-ARG CONAN_USER
-ARG CONAN_PASS=${CONAN_USER}
-ARG HOMESTORE_BUILD_TAG
-
 ENV BRANCH_NAME=${BRANCH_NAME:-unknown}
-ENV BUILD_TYPE=${BUILD_TYPE:-default}
-ENV COVERAGE_ON=${COVERAGE_ON:-false}
-ENV CONAN_USER=${CONAN_USER:-sds}
-ENV CONAN_CHANNEL=${CONAN_CHANNEL:-develop}
-ENV CONAN_PASS=${CONAN_PASS:-password}
-ENV HOMESTORE_BUILD_TAG=${HOMESTORE_BUILD_TAG:-release}
 ENV SOURCE_PATH=/tmp/source/
 
 COPY .git/ ${SOURCE_PATH}.git
@@ -30,7 +17,7 @@ RUN set -eux; \
     eval $(grep -m 1 'version =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,version,PKG_VERSION,'); \
     pip3 install -U conan; \
     conan remote add -i 0 ebay-local https://artifactory.corp.ebay.com/artifactory/api/conan/conan-local; \
-    conan install --build missing -o ${PKG_NAME}:coverage=True -pr ${BUILD_TYPE} ${SOURCE_PATH}; \
+    conan install --build missing -o ${PKG_NAME}:coverage=True -pr debug ${SOURCE_PATH}; \
     build-wrapper-linux-x86-64 --out-dir /tmp/sonar conan build ${SOURCE_PATH}; \
     find . -name "*.gcno" -exec gcov {} \; ; \
     if [ "develop" != "${BRANCH_NAME}" ]; then \
