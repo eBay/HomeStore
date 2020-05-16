@@ -564,7 +564,8 @@ void Volume::check_and_complete_req(const vol_interface_req_ptr& hb_req, const s
         }
 
         if ((hb_req->request_id % mem_free_check_frequency) == 0) {
-            sisl::release_mem_if_needed(HomeStoreConfig::mem_release_threshold);
+            sisl::release_mem_if_needed(HomeStoreConfig::mem_release_soft_threshold,
+                                        HomeStoreConfig::mem_release_aggressive_threshold);
         }
     }
 }

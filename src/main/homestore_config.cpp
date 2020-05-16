@@ -10,4 +10,5 @@ uint64_t homestore::HomeStoreConfig::max_pdevs = MAX_PDEVS;
 uint64_t homestore::HomeStoreConfig::max_blk_cnt = 0;
 homestore::io_flag homestore::HomeStoreConfig::open_flag = DIRECT_IO;
 bool homestore::HomeStoreConfig::is_read_only = false;
-size_t homestore::HomeStoreConfig::mem_release_threshold = 0;
+size_t homestore::HomeStoreConfig::mem_release_soft_threshold = 0;
+size_t homestore::HomeStoreConfig::mem_release_aggressive_threshold = 0;
