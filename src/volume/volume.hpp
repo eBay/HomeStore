@@ -158,6 +158,8 @@ public:
                            HistogramBucketsType(ExponentialOfTwoBuckets));
         register_me_to_farm();
     }
+
+    ~VolumeMetrics() { deregister_me_from_farm(); }
 };
 
 class Volume : public std::enable_shared_from_this< Volume > {
