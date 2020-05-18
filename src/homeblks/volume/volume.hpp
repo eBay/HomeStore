@@ -189,12 +189,7 @@ struct vol_sb_hdr {
     const indx_mgr_active_sb active_sb;
     vol_sb_hdr(uint64_t page_size, uint64_t size, char in_vol_name[VOL_NAME_SIZE], boost::uuids::uuid uuid,
                indx_mgr_active_sb active_sb) :
-            version(VOL_SB_VERSION),
-            page_size(page_size),
-            size(size),
-            uuid(uuid),
-            vol_name(""),
-            active_sb(active_sb) {
+            version(VOL_SB_VERSION), page_size(page_size), size(size), uuid(uuid), vol_name(""), active_sb(active_sb) {
         /* XXX : is there a better way ? */
         char* ptr = (char*)vol_name;
         strncpy(ptr, in_vol_name, VOL_NAME_SIZE);
@@ -243,7 +238,7 @@ private:
     std::atomic< uint64_t > vol_ref_cnt = 0; // volume can not be destroy/shutdown until it is not zero
 
     std::mutex m_sb_lock; // lock for updating vol's sb
-    vol_sb_hdr* m_sb;
+    sisl::aligned_unique_ptr< vol_sb_hdr > m_sb;
     indxmgr_stop_cb m_destroy_done_cb;
     std::atomic< bool > m_indx_mgr_destroy_started;
     void* m_sb_cookie = nullptr;
@@ -260,7 +255,7 @@ private:
 
 private:
     Volume(const vol_params& params);
-    Volume(vol_sb_hdr& sb);
+    Volume(meta_blk* mblk_cookie, sisl::aligned_unique_ptr< vol_sb_hdr > sb);
     void alloc_single_block_in_mem();
     bool check_and_complete_req(const volume_req_ptr& vreq, const std::error_condition& err);
 
@@ -299,7 +294,6 @@ private:
                                    std::vector< std::pair< MappingKey, MappingValue > >& kvs);
     void interface_req_done(const vol_interface_req_ptr& iface_req);
 
-    void recovery_start();
     uint64_t get_elapsed_time(Clock::time_point startTime);
     mapping* get_mapping_handle();
     void set_recovery_error();
@@ -314,7 +308,6 @@ private:
     void destroy_internal();
 
     void vol_sb_init();
-    void vol_sb_remove();
 
 public:
     /******************** static functions exposed to home_blks *******************/
@@ -342,16 +335,12 @@ public:
     static void process_vol_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
 
     /* used to trigger system level cp */
-    static void trigger_system_cp() { IndxMgr::trigger_system_cp(); };
+    static void trigger_system_cp(cp_done_cb cb = nullptr) { IndxMgr::trigger_system_cp(cb); };
 
     /* it is used in fake reboot */
     static void reinit() { IndxMgr::reinit(); }
-
     
     static void meta_blk_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
-
-    static void meta_blk_recover_comp_cb(bool success);
-
 public:
     /******************** APIs exposed to home_blks *******************/
     ~Volume();
@@ -471,12 +460,16 @@ public:
         return id;
     }
 
+    static void meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
+
     void truncate(vol_cp_id_ptr vol_id) { m_indx_mgr->truncate(vol_id); }
 
     /**
      * @brief
      */
     void migrate_sb();
+    void recovery_start_phase1();
+    void recovery_start_phase2();
 };
 
 /* Note :- Any member inside this structure is not lock protected. Its caller responsibility to call it under lock

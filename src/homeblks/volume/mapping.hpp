@@ -631,11 +631,10 @@ public:
         m_bt = MappingBtreeDeclType::create_btree(btree_cfg);
     }
 
-#if 0
-    mapping(uint64_t volsize, uint32_t page_size, const std::string& unique_name, btree_super_block& btree_sb,
-            comp_callback comp_cb, alloc_blk_callback alloc_blk_cb, free_blk_callback free_blk_cb,
-            pending_read_blk_cb pending_read_cb = nullptr) :
-            m_alloc_blk_cb(alloc_blk_cb),
+    mapping(uint64_t volsize, uint32_t page_size, const std::string& unique_name,
+            MappingBtreeDeclType::btree_super_block btree_sb, free_blk_callback free_blk_cb,
+            trigger_cp_callback trigger_cp_cb, pending_read_blk_cb pending_read_cb = nullptr,
+            int64_t start_seq_id = -1) :
             m_free_blk_cb(free_blk_cb),
             m_pending_read_blk_cb(pending_read_cb),
             m_vol_page_size(page_size),
@@ -645,15 +644,11 @@ public:
         btree_cfg.set_max_objs(volsize / page_size);
         btree_cfg.set_max_key_size(sizeof(uint32_t));
         btree_cfg.set_max_value_size(page_size);
+        btree_cfg.blkstore = (void*)m_hb->get_index_blkstore();
+        btree_cfg.trigger_cp_cb = trigger_cp_cb;
 
-        homeds::btree::btree_device_info bt_dev_info;
-        bt_dev_info.blkstore = m_hb->get_index_blkstore();
-        bt_dev_info.new_device = false;
-        m_bt = MappingBtreeDeclType::create_btree(
-            btree_sb, btree_cfg, &bt_dev_info,
-            std::bind(&mapping::process_completions, this, std::placeholders::_1, std::placeholders::_2));
+        m_bt = MappingBtreeDeclType::create_btree(btree_sb, btree_cfg, start_seq_id);
     }
-#endif
 
     uint64_t get_used_size() { return m_bt->get_used_size(); }
     MappingBtreeDeclType::btree_super_block get_btree_sb() { return (m_bt->get_btree_sb()); }

@@ -252,7 +252,7 @@ public:
         }
 
         // do recover and callbacks will be triggered;
-        m_mbm->recover();
+        m_mbm->recover(false);
 
         // verify received blks via callbaks are all good;
         verify_cb_blks();

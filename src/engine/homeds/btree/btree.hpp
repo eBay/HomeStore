@@ -158,16 +158,16 @@ public:
         return bt;
     }
 
-    static btree_t* create_btree(btree_super_block& btree_sb, BtreeConfig& cfg, void* btree_specific_context) {
-        Btree* bt = new Btree(cfg);
+    static btree_t* create_btree(btree_super_block& btree_sb, BtreeConfig& cfg, int64_t psn) {
         auto impl_ptr = btree_store_t::init_btree(cfg);
+        Btree* bt = new Btree(cfg);
         bt->m_btree_store = std::move(impl_ptr);
-        bt->init_recovery(btree_sb);
+        bt->init_recovery(btree_sb, psn);
         LOGINFO("btree recovered and created {} node size {}", cfg.get_name(), cfg.get_node_size());
         return bt;
     }
 
-    void do_common_init() {
+    void do_common_init(int64_t start_seq_id = -1, bool is_recovery = false) {
 
         // TODO: Check if node_area_size need to include persistent header
         uint32_t node_area_size = btree_store_t::get_node_area_size(m_btree_store.get());
@@ -181,7 +181,7 @@ public:
         max_leaf_nodes += (100 * max_leaf_nodes) / 60; // Assume 60% btree full
 
         m_max_nodes = max_leaf_nodes + ((double)max_leaf_nodes * 0.05) + 1; // Assume 5% for interior nodes
-        btree_store_t::update_store_sb(m_btree_store.get(), m_sb.store_sb);
+        btree_store_t::update_sb(m_btree_store.get(), m_sb.store_sb, start_seq_id, is_recovery);
     }
 
     btree_status_t init() {
@@ -189,9 +189,9 @@ public:
         return (create_root_node());
     }
 
-    void init_recovery(btree_super_block btree_sb) {
+    void init_recovery(btree_super_block btree_sb, int64_t start_seq_id) {
         m_sb = btree_sb;
-        do_common_init();
+        do_common_init(start_seq_id, true);
         m_root_node = m_sb.root_node;
     }
 

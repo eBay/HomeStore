@@ -120,7 +120,7 @@ public:
      *
      * @return :
      */
-    void recover();
+    void recover(bool do_comp_cb = true);
 
 private:
     /**

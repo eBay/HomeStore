@@ -14,8 +14,9 @@ void MetaBlkMgr::init(blk_store_type* sb_blk_store, sb_blkstore_blob* blob, bool
     } else {
         load_ssb(blob);
         scan_meta_blks();
-        recover();
+        m_sb_blk_store->recovery_done();
     }
+    recover();
 }
 
 MetaBlkMgr::~MetaBlkMgr() {
@@ -502,7 +503,7 @@ std::error_condition MetaBlkMgr::alloc_meta_blk(BlkId& bid, uint32_t alloc_sz) {
     return no_error;
 }
 
-void MetaBlkMgr::recover() {
+void MetaBlkMgr::recover(bool do_comp_cb) {
     for (auto type : sub_priority_list) {
         auto it = m_meta_blks.find(type);
         if (it == m_meta_blks.end()) { continue; }
@@ -529,16 +530,17 @@ void MetaBlkMgr::recover() {
             cb(m.second, std::move(buf), m.second->hdr.context_sz);
         }
     }
+    if (do_comp_cb) {
+        for (auto type : sub_priority_list) {
+            auto it = m_comp_cb_map.find(type);
 
-    for (auto type : sub_priority_list) {
-        auto it = m_comp_cb_map.find(type);
+            if (it == m_comp_cb_map.end() || !it->second) { continue; }
 
-        if (it == m_comp_cb_map.end()) { continue; }
+            meta_blk_recover_comp_cb comp_cb = it->second;
 
-        meta_blk_recover_comp_cb comp_cb = it->second;
-
-        // notify each subsystem that recovery has completed;
-        comp_cb(true);
+            // notify each subsystem that recovery has completed;
+            comp_cb(true);
+        }
     }
 }
 

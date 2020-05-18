@@ -30,7 +30,7 @@ class HomestoreConan(ConanFile):
             "flip/0.2.7@sds/develop",
             "iomgr/3.1.4@sds/iomgr_v3",
             "sds_logging/7.0.0@sds/develop",
-            "sisl/[>1.0.1]@sisl/develop",
+            "sisl/1.0.10@sisl/develop",
 
             # FOSS, rarely updated
             "benchmark/1.5.0",
@@ -41,7 +41,7 @@ class HomestoreConan(ConanFile):
             "folly/2020.03.02.00",
             "isa-l/2.21.0",
             "libevent/2.1.11",
-            "openssl/1.1.1g",
+            "openssl/1.1.1g"
             )
 
     generators = "cmake"

@@ -33,7 +33,7 @@ public:
     static std::unique_ptr< btree_store_t > init_btree(BtreeConfig& cfg);
     static uint8_t* get_physical(const btree_node_t* bn);
     static uint32_t get_node_area_size(btree_store_t* store);
-    static void update_store_sb(btree_store_t* store, btree_store_t::superblock& sb);
+    static void update_sb(btree_store_t* store, btree_store_t::superblock& sb, int64_t start_seq_id, bool is_recovery);
     static btree_cp_id_ptr attach_prepare_cp(btree_store_t* store, btree_cp_id_ptr cur_cp_id, bool is_last_cp);
     static void cp_start(btree_store_t* store, btree_cp_id_ptr cp_id, cp_comp_callback cb);
     static void truncate(btree_store_t* store, btree_cp_id_ptr cp_id);

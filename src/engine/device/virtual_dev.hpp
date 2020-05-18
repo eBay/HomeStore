@@ -183,6 +183,7 @@ public:
 const uint32_t VIRDEV_BLKSIZE = 512;
 const uint64_t CHUNK_EOF = 0xabcdabcd;
 const off_t INVALID_OFFSET = std::numeric_limits< unsigned long long >::max();
+// REGISTER_METABLK_SUBSYSTEM(blk_alloc, meta_sub_type::BLK_ALLOC, blk_alloc_meta_blk_cb_found, nullptr)
 
 template < typename Allocator, typename DefaultDeviceSelector >
 class VirtualDev : public AbstractVirtualDev {
@@ -1224,6 +1225,18 @@ public:
         HS_ASSERT_CMP(DEBUG, m_used_size.load(), >=, 0);
     }
 
+    void recovery_done() {
+        for (auto& pcm : m_primary_pdev_chunks_list) {
+            for (auto& pchunk : pcm.chunks_in_pdev) {
+                pchunk->get_blk_allocator()->inited();
+                auto mchunks_list = m_mirror_chunks[pchunk];
+                for (auto& mchunk : mchunks_list) {
+                    mchunk->get_blk_allocator()->inited();
+                }
+            }
+        }
+    }
+
     void write(const BlkId& bid, const homeds::MemVector& buf, boost::intrusive_ptr< virtualdev_req > req,
                uint32_t data_offset = 0) {
         BlkOpStatus ret_status = BLK_OP_SUCCESS;
@@ -1572,6 +1585,7 @@ private:
         uint64_t dev_offset = glob_uniq_id.get_id() * get_page_size() + (*chunk)->get_start_offset();
         return dev_offset;
     }
+
 
     uint32_t get_blks_per_chunk() const { return get_chunk_size() / get_page_size(); }
     uint32_t get_page_size() const { return m_vb->page_size; }
