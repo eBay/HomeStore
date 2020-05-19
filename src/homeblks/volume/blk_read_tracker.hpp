@@ -77,6 +77,8 @@ public:
         REGISTER_COUNTER(blktrack_erase_blk_rescheduled, "Erase blk rescheduled due to concurrent rw");
         register_me_to_farm();
     }
+
+    ~BlkReadTrackerMetrics() { deregister_me_from_farm(); }
 };
 
 class Blk_Read_Tracker {

@@ -82,8 +82,11 @@ HomeBlks::HomeBlks(const init_params& cfg) : m_cfg(cfg), m_metrics("HomeBlks") {
     HomeStore< BLKSTORE_BUFFER_TYPE >::init((const hs_input_params&)cfg);
 
     m_out_params.max_io_size = VOL_MAX_IO_SIZE;
-    m_homeblks_sb = sisl::make_aligned_unique< homeblks_sb >(HS_STATIC_CONFIG(disk_attr.align_size), HOMEBLKS_SB_SIZE);
+    m_homeblks_sb =
+        sisl::make_aligned_sized_unique< homeblks_sb >(HS_STATIC_CONFIG(disk_attr.align_size), HOMEBLKS_SB_SIZE);
     superblock_init();
+
+    sisl::MallocMetrics::enable();
 
     /* start thread */
 #if 0
@@ -106,8 +109,7 @@ HomeBlks::HomeBlks(const init_params& cfg) : m_cfg(cfg), m_metrics("HomeBlks") {
 #endif
     auto sthread = std::thread([this]() {
         this->init_devices();
-        iomanager.run_io_loop(false, nullptr, [&](const iomgr_msg& msg) {
-        });
+        iomanager.run_io_loop(false, nullptr, [&](const iomgr_msg& msg) {});
     });
     sthread.detach();
     m_start_shutdown = false;
@@ -809,7 +811,6 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
                                  handler_info("/api/v1/verifyHS", HomeBlks::verify_hs, (void*)this),
                              }}));
     m_http_server->start();
-
 
     // Attach all completions
     iomanager.default_drive_interface()->attach_end_of_batch_cb([this](int nevents) { call_multi_vol_completions(); });

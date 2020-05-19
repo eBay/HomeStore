@@ -232,9 +232,11 @@ public:
     static void set_log_level(sisl::HttpCallData cd);
     static void dump_stack_trace(sisl::HttpCallData cd);
     static void verify_hs(sisl::HttpCallData cd);
-    static void meta_blk_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
-    static void meta_blk_recover_comp_cb(bool success);
     static void get_malloc_stats(sisl::HttpCallData cd);
+
+    // Other static functions
+    static void meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
+    static void meta_blk_recovery_comp_cb(bool success);
 
 protected:
     void process_vdev_error(vdev_info_block* vb) override;

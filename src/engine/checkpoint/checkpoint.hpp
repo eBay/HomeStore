@@ -126,8 +126,11 @@ public:
         delete (id);
 
         /* Once a cp is done, try to check and release exccess memory if need be */
-        size_t rel_size = HS_DYNAMIC_CONFIG(generic.mem_release_threshold) * HS_STATIC_CONFIG(input.app_mem_size) / 100;
-        sisl::release_mem_if_needed(rel_size);
+        size_t soft_sz =
+            HS_DYNAMIC_CONFIG(generic.soft_mem_release_threshold) * HS_STATIC_CONFIG(input.app_mem_size) / 100;
+        size_t agg_sz =
+            HS_DYNAMIC_CONFIG(generic.aggressive_mem_release_threshold) * HS_STATIC_CONFIG(input.app_mem_size) / 100;
+        sisl::release_mem_if_needed(soft_sz, agg_sz);
 
         auto cur_cp_id = cp_io_enter();
         if (cur_cp_id->cp_trigger_waiting) { trigger_cp(); }

@@ -795,6 +795,8 @@ public:
 
         register_me_to_farm();
     }
+
+    ~BtreeMetrics() { deregister_me_from_farm(); }
 };
 
 template < size_t NodeSize, size_t CacheCount >

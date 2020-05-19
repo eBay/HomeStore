@@ -497,7 +497,7 @@ void MetaBlkMgr::recover(bool do_comp_cb) {
         meta_blk_found_cb cb = cb_it->second;
 
         for (auto& m : it->second) {
-            auto buf = sisl::make_aligned_unique< uint8_t >(dma_boundary, m.second->hdr.context_sz);
+            auto buf = sisl::make_aligned_sized_unique< uint8_t >(dma_boundary, m.second->hdr.context_sz);
 
             if (m.second->hdr.context_sz <= META_BLK_CONTEXT_SZ) {
                 HS_ASSERT(RELEASE, m.second->hdr.ovf_blkid.to_integer() == BlkId::invalid_internal_id(),

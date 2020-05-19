@@ -17,7 +17,7 @@ void LogDev::start(bool format) {
     auto bstore = m_hb->get_logdev_blkstore();
 
     // TODO: Don't create 2K as is, but query vdev_info layer to see available vb_context size
-    m_info_blk_buf = sisl::make_aligned_unique< uint8_t >(dma_boundary, logdev_info_block::size);
+    m_info_blk_buf = sisl::make_aligned_sized_unique< uint8_t >(dma_boundary, logdev_info_block::size);
     bstore->get_vb_context(sisl::blob(m_info_blk_buf.get(), logdev_info_block::size));
     m_info_blk = (logdev_info_block*)m_info_blk_buf.get();
 
@@ -136,7 +136,7 @@ log_buffer LogDev::read(const logdev_key& key) {
 
     // First read the offset and read the log_group. Then locate the log_idx within that and get the actual data
     // Read about 4K of buffer
-    if (!_read_buf) { _read_buf = sisl::make_aligned_unique< uint8_t >(dma_boundary, initial_read_size); }
+    if (!_read_buf) { _read_buf = sisl::make_aligned_sized_unique< uint8_t >(dma_boundary, initial_read_size); }
     auto rbuf = _read_buf.get();
     auto store = m_hb->get_logdev_blkstore();
     store->pread((void*)rbuf, initial_read_size, key.dev_offset);

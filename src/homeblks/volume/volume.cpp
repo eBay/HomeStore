@@ -92,8 +92,9 @@ void Volume::init() {
             std::bind(&Volume::process_indx_completions, this, std::placeholders::_1, std::placeholders::_2),
             std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1),
             std::bind(&Volume::pending_read_blk_cb, this, std::placeholders::_1, std::placeholders::_2));
-        m_sb = sisl::aligned_unique_ptr< vol_sb_hdr >(
-            m_params.page_size, m_params.size, (char*)m_params.vol_name, m_params.uuid, m_indx_mgr->get_active_sb()));
+        m_sb = sisl::make_aligned_unique< vol_sb_hdr >(HS_STATIC_CONFIG(disk_attr.align_size), m_params.page_size,
+                                                       m_params.size, (char*)m_params.vol_name, m_params.uuid,
+                                                       m_indx_mgr->get_active_sb());
 
         set_state(vol_state::ONLINE, true);
     } else {

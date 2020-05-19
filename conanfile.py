@@ -29,18 +29,18 @@ class HomestoreConan(ConanFile):
                         )
 
     requires = (
-            "flip/0.2.7@sds/develop",
+            "flip/0.2.9@sds/develop",
             "iomgr/[>=3.2.0]@sds/iomgr_v3",
-            "sds_logging/7.0.0@sds/develop",
-            "sisl/1.0.11@sisl/develop",
+            "sds_logging/7.0.2@sds/develop",
+            "sisl/[>=1.0.12]@hkadayam/develop",
 
             # FOSS, rarely updated
             "benchmark/1.5.0",
-            "boost/1.72.0",
+            "boost/1.73.0",
             "double-conversion/3.1.5",
             "evhtp/1.2.18.2",
             "farmhash/1.0.0",
-            "folly/2020.03.02.00",
+            "folly/2020.05.04.00",
             "isa-l/2.21.0",
             "libevent/2.1.11",
             "openssl/1.1.1g",

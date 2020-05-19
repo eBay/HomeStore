@@ -176,6 +176,8 @@ public:
                            HistogramBucketsType(ExponentialOfTwoBuckets));
         register_me_to_farm();
     }
+
+    ~VolumeMetrics() { deregister_me_from_farm(); }
 };
 
 #define VOL_SB_VERSION 0x2
@@ -189,7 +191,12 @@ struct vol_sb_hdr {
     const indx_mgr_active_sb active_sb;
     vol_sb_hdr(uint64_t page_size, uint64_t size, char in_vol_name[VOL_NAME_SIZE], boost::uuids::uuid uuid,
                indx_mgr_active_sb active_sb) :
-            version(VOL_SB_VERSION), page_size(page_size), size(size), uuid(uuid), vol_name(""), active_sb(active_sb) {
+            version(VOL_SB_VERSION),
+            page_size(page_size),
+            size(size),
+            uuid(uuid),
+            vol_name(""),
+            active_sb(active_sb) {
         /* XXX : is there a better way ? */
         char* ptr = (char*)vol_name;
         strncpy(ptr, in_vol_name, VOL_NAME_SIZE);
@@ -339,8 +346,9 @@ public:
 
     /* it is used in fake reboot */
     static void reinit() { IndxMgr::reinit(); }
-    
+
     static void meta_blk_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
+
 public:
     /******************** APIs exposed to home_blks *******************/
     ~Volume();
