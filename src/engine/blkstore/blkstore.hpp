@@ -547,6 +547,7 @@ public:
     void update_tail_offset(const off_t tail) { m_vdev.update_tail_offset(tail); }
 
     void truncate(const off_t offset) { m_vdev.truncate(offset); }
+    void recovery_done() { m_vdev.recovery_done(); }
 
 private:
     uint32_t m_pagesz;

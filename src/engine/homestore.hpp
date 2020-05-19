@@ -186,6 +186,7 @@ protected:
             if (vb->failed) {
                 m_vdev_failed = true;
                 LOGINFO("data block store is in failed state");
+                throw std::runtime_error("vdev in failed state");
             }
         }
     }
@@ -206,6 +207,7 @@ protected:
             if (vb->failed) {
                 m_vdev_failed = true;
                 LOGINFO("index block store is in failed state");
+                throw std::runtime_error("vdev in failed state");
             }
         }
     }
@@ -238,6 +240,7 @@ protected:
             if (vb->failed) {
                 m_vdev_failed = true;
                 LOGINFO("super block store is in failed state");
+                throw std::runtime_error("vdev in failed state");
             }
 
             /* get the blkid of homestore super block */
@@ -273,6 +276,7 @@ protected:
             if (vb->failed) {
                 m_vdev_failed = true;
                 LOGINFO("meta block store is in failed state");
+                throw std::runtime_error("vdev in failed state");
             }
 
             /* get the blkid of homestore super block */
@@ -305,13 +309,21 @@ protected:
             if (vb->failed) {
                 m_vdev_failed = true;
                 LOGINFO("logdev block store is in failed state");
+                throw std::runtime_error("vdev in failed state");
             }
         }
-        home_log_store_mgr.start((vb == nullptr));
     }
 
-    uint64_t available_size() const { return m_size_avail; }
-    void set_available_size(uint64_t sz) { m_size_avail = sz; }
+    void data_recovery_done() {
+        auto& hs_config = HomeStoreStaticConfig::instance();
+        if (!hs_config.input.disk_init) {
+            m_index_blk_store->recovery_done();
+            m_data_blk_store->recovery_done();
+        }
+    }
+
+    int64_t available_size() const { return m_size_avail; }
+    void set_available_size(int64_t sz) { m_size_avail = sz; }
 
 private:
     disk_attributes get_disk_attrs(bool is_file) {

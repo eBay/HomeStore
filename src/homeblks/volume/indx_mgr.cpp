@@ -133,6 +133,8 @@ void IndxCP::cp_attach_prepare(indx_cp_id* cur_id, indx_cp_id* new_id) {
 
 /****************************************** IndxMgr class ****************************************/
 
+REGISTER_METABLK_SUBSYSTEM(indx_mgr, meta_sub_type::INDX_MGR_CP, IndxMgr::meta_blk_found_cb, nullptr)
+
 IndxMgr::IndxMgr(std::shared_ptr< Volume > vol, const vol_params& params, io_done_cb io_cb,
                  free_blk_callback free_blk_cb, pending_read_blk_cb read_blk_cb) :
         m_io_cb(io_cb),
@@ -141,7 +143,6 @@ IndxMgr::IndxMgr(std::shared_ptr< Volume > vol, const vol_params& params, io_don
         m_uuid(params.uuid),
         m_name(params.vol_name),
         prepare_cb_list(4) {
-    static std::once_flag flag1;
     m_active_map = new mapping(params.size, params.page_size, params.vol_name, free_blk_cb, IndxMgr::trigger_vol_cp,
                                m_pending_read_blk_cb);
 
@@ -151,15 +152,25 @@ IndxMgr::IndxMgr(std::shared_ptr< Volume > vol, const vol_params& params, io_don
 
     m_first_cp_id->btree_id = m_active_map->attach_prepare_cp(nullptr, false);
     m_first_cp_id->vol = vol;
-    std::call_once(flag1, []() { IndxMgr::init(); });
+    std::call_once(m_flag, []() { IndxMgr::init(); });
 }
 
-IndxMgr::IndxMgr(std::shared_ptr< Volume > vol, indx_mgr_active_sb* sb, io_done_cb io_cb, free_blk_callback free_blk_cb,
-                 pending_read_blk_cb read_blk_cb) :
-        m_io_cb(io_cb),
-        m_pending_read_blk_cb(read_blk_cb),
-        m_first_cp_id(new vol_cp_id()),
-        prepare_cb_list(4) {}
+IndxMgr::IndxMgr(std::shared_ptr< Volume > vol, const indx_mgr_active_sb& sb, io_done_cb io_cb,
+                 free_blk_callback free_blk_cb, pending_read_blk_cb read_blk_cb) :
+        m_io_cb(io_cb), m_pending_read_blk_cb(read_blk_cb), m_first_cp_id(new vol_cp_id()), prepare_cb_list(4) {
+    m_journal = nullptr;
+    m_sb = sb;
+    m_free_blk_cb = free_blk_cb;
+    HomeLogStoreMgr::instance().open_log_store(
+        sb.journal_id, ([this](std::shared_ptr< HomeLogStore > logstore) {
+            m_journal = logstore;
+            m_journal->register_log_found_cb(
+                ([this](logstore_seq_num_t seqnum, log_buffer buf, void* mem) { this->log_found(seqnum, buf, mem); }));
+        }));
+    m_journal_comp_cb =
+        std::bind(&IndxMgr::journal_comp_cb, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
+    m_first_cp_id->vol = vol;
+}
 
 IndxMgr::~IndxMgr() {
     delete m_active_map;
@@ -191,6 +202,7 @@ void IndxMgr::init() {
     write_cp_super_block(nullptr);
 }
 
+
 void IndxMgr::write_cp_super_block(indx_cp_id* id) {
     LOGINFO("superblock is written");
     uint64_t size = (id ? (sizeof(indx_mgr_cp_sb) * id->snt_cnt) : 0) + sizeof(indx_mgr_cp_sb_hdr);
@@ -198,7 +210,7 @@ void IndxMgr::write_cp_super_block(indx_cp_id* id) {
 
     indx_mgr_cp_sb_hdr* hdr = (indx_mgr_cp_sb_hdr*)mem;
     hdr->version = INDX_MGR_VERSION;
-
+    int vol_cnt = 0;
     if (id) {
         uint8_t* temp = (uint8_t*)((uint64_t)mem + sizeof(indx_mgr_cp_sb_hdr));
         for (auto it = id->vol_id_list.begin(); it != id->vol_id_list.end(); ++it) {
@@ -209,8 +221,10 @@ void IndxMgr::write_cp_super_block(indx_cp_id* id) {
             sb->active_data_psn = vol_id->end_active_psn;
             sb->active_btree_psn = vol_id->btree_id->end_seq_id;
             temp = (uint8_t*)((uint64_t)temp + sizeof(indx_mgr_cp_sb));
+            ++vol_cnt;
         }
     }
+    hdr->vol_cnt = vol_cnt;
 
     if (m_meta_blk) {
         MetaBlkMgr::instance()->update_sub_sb(meta_sub_type::INDX_MGR_CP, mem, size, m_meta_blk);
@@ -535,8 +549,46 @@ void IndxMgr::destroy_done() {
     home_log_store_mgr.remove_log_store(m_journal->get_store_id());
 }
 
+void IndxMgr::recovery_start_phase1() {
+    auto it = cp_sb_map.find(m_first_cp_id->vol->get_uuid());
+    m_first_cp_id->start_active_psn = it->second.active_data_psn + 1;
+    auto vol = m_first_cp_id->vol;
+
+    /* Now we have all the information to create mapping btree */
+    m_active_map = new mapping(vol->get_size(), vol->get_page_size(), vol->get_name(), m_sb.btree_sb, m_free_blk_cb,
+                               IndxMgr::trigger_vol_cp, m_pending_read_blk_cb, (it->second.active_btree_psn + 1));
+    m_first_cp_id->btree_id = m_active_map->attach_prepare_cp(nullptr, false);
+}
+
+void IndxMgr::recovery_start_phase2() {
+    std::call_once(m_flag, []() { IndxMgr::init(); });
+    /* start replaying the entry */
+}
+
+void IndxMgr::log_found(logstore_seq_num_t seqnum, log_buffer log_buf, void* mem) {}
+
+void IndxMgr::meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size) {
+    m_meta_blk = mblk;
+    indx_mgr_cp_sb_hdr* hdr = (indx_mgr_cp_sb_hdr*)buf.get();
+    assert(hdr->version == INDX_MGR_VERSION);
+    indx_mgr_cp_sb* cp_sb = (indx_mgr_cp_sb*)((uint64_t)buf.get() + sizeof(indx_mgr_cp_sb_hdr));
+    assert(size == (sizeof(indx_mgr_cp_sb_hdr) + hdr->vol_cnt * sizeof(indx_mgr_cp_sb)));
+
+    for (uint32_t i = 0; i < hdr->vol_cnt; ++i) {
+        bool happened{false};
+        std::map< boost::uuids::uuid, indx_mgr_cp_sb >::iterator it;
+        std::tie(it, happened) = cp_sb_map.emplace(std::make_pair(cp_sb[i].uuid, cp_sb[i]));
+        assert(!happened);
+    }
+}
+
 std::unique_ptr< IndxCP > IndxMgr::m_cp;
 std::atomic< bool > IndxMgr::m_shutdown_started;
 int IndxMgr::m_thread_num;
 iomgr::timer_handle_t IndxMgr::m_system_cp_timer_hdl = iomgr::null_timer_handle;
 void* IndxMgr::m_meta_blk = nullptr;
+std::once_flag IndxMgr::m_flag;
+sisl::aligned_unique_ptr< uint8_t > IndxMgr::m_recovery_sb;
+std::map< boost::uuids::uuid, indx_mgr_cp_sb > IndxMgr::cp_sb_map;
+size_t IndxMgr::m_recovery_sb_size = 0;
+

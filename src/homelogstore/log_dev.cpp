@@ -264,6 +264,7 @@ LogGroup* LogDev::prepare_flush(int32_t estimated_records) {
     lg->finish();
     lg->m_flush_log_idx_from = m_last_flush_idx + 1;
     lg->m_flush_log_idx_upto = flushing_upto_idx;
+    assert(lg->m_flush_log_idx_upto >= lg->m_flush_log_idx_from);
     lg->m_log_dev_offset = m_hb->get_logdev_blkstore()->alloc_blk(lg->header()->group_size);
 
     assert(lg->header()->oob_data_offset > 0);
@@ -290,7 +291,12 @@ void LogDev::flush_if_needed(const uint32_t new_record_size, logid_t new_idx) {
                 max_time_between_flush_us);
 
             // We were able to win the flushing competition and now we gather all the flush data and reserve a slot.
-            if (new_idx == -1) new_idx = m_log_idx.load(std::memory_order_relaxed);
+            if (new_idx == -1) new_idx = m_log_idx.load(std::memory_order_relaxed) - 1;
+            if (m_last_flush_idx >= new_idx) {
+                LOGTRACE("this indx is just flushed");
+                m_is_flushing = false;
+                return;
+            }
             auto lg = prepare_flush(new_idx - m_last_flush_idx + 4); // Estimate 4 more extra in case of parallel writes
             m_pending_flush_size.fetch_sub(lg->actual_data_size(), std::memory_order_relaxed);
 

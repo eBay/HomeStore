@@ -63,7 +63,8 @@ public:
         assert(0);
         return nullptr;
     }
-    static void update_store_sb(MemBtreeStore *store, MemBtreeStore::superblock &sb) {};
+    static void update_sb(MemBtreeStore* store, MemBtreeStore::superblock& sb, int64_t start_seq_id,
+                          bool is_recovery){};
 
     static void write_journal_entry(MemBtreeStore *store, btree_cp_id_ptr cp_id, uint8_t *mem, size_t size) {
     }

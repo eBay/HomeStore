@@ -51,6 +51,7 @@ public:
         m_node_size = cfg.get_node_size();
         m_cfg.set_node_area_size(m_node_size - sizeof(LeafPhysicalNode));
         m_journal = HomeLogStoreMgr::instance().create_new_log_store();
+        m_first_cp = btree_cp_id_ptr(new (btree_cp_id));
     }
 
     void cp_done_store(btree_cp_id_ptr cp_id) {
@@ -71,12 +72,15 @@ public:
         }
         btree_cp_id_ptr new_cp(nullptr);
         if (!is_last_cp) {
-            new_cp = btree_cp_id_ptr(new (btree_cp_id));
             if (cur_cp_id) {
+                new_cp = btree_cp_id_ptr(new (btree_cp_id));
                 new_cp->start_seq_id = cur_cp_id->end_seq_id;
                 new_cp->cp_cnt = cur_cp_id->cp_cnt + 1;
             } else {
-                new_cp->start_seq_id = m_journal->get_contiguous_issued_seq_num(-1);
+                /* it is the first CP */
+                assert(m_first_cp);
+                new_cp = m_first_cp;
+                m_first_cp = nullptr;
                 new_cp->cp_cnt = 1;
             }
         }
@@ -84,8 +88,17 @@ public:
         return new_cp;
     }
 
-    static void update_store_sb(SSDBtreeStore* store, SSDBtreeStore::superblock& sb) {
-        sb.journal_id = store->get_journal_id_store();
+    static void update_sb(SSDBtreeStore* store, SSDBtreeStore::superblock& sb, int64_t start_psn, bool is_recovery) {
+        store->update_store_sb(sb, start_psn, is_recovery);
+    }
+
+    void update_store_sb(SSDBtreeStore::superblock& sb, int64_t start_seq_id, bool is_recovery) {
+        if (is_recovery) {
+            // add recovery code
+        } else {
+            sb.journal_id = get_journal_id_store();
+        }
+        m_first_cp->start_seq_id = start_seq_id;
     }
 
     logstore_id_t get_journal_id_store() { return (m_journal->get_store_id()); }
@@ -289,6 +302,7 @@ private:
     BtreeConfig m_cfg;
     uint32_t m_node_size;
     wb_cache_t m_wb_cache;
+    btree_cp_id_ptr m_first_cp;
 
 private:
     static homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy, wb_cache_buffer_t >* m_blkstore;

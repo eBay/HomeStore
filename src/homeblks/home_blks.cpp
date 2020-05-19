@@ -20,8 +20,8 @@ SDS_OPTION_GROUP(home_blks,
                   cxxopts::value< int32_t >()->default_value("5000"), "port"))
 using namespace homestore;
 
-REGISTER_METABLK_SUBSYSTEM(volume, meta_sub_type::VOLUME, Volume::meta_blk_cb, Volume::meta_blk_recover_comp_cb)
-REGISTER_METABLK_SUBSYSTEM(homeblks, meta_sub_type::HOMEBLK, HomeBlks::meta_blk_cb, HomeBlks::meta_blk_recover_comp_cb)
+REGISTER_METABLK_SUBSYSTEM(homeblks, meta_sub_type::HOMEBLK, HomeBlks::meta_blk_found_cb,
+                           HomeBlks::meta_blk_recovery_comp_cb)
 
 #ifndef DEBUG
 bool same_value_gen = false;
@@ -83,9 +83,33 @@ HomeBlks::HomeBlks(const init_params& cfg) : m_cfg(cfg), m_metrics("HomeBlks") {
 
     m_out_params.max_io_size = VOL_MAX_IO_SIZE;
     m_homeblks_sb = sisl::make_aligned_unique< homeblks_sb >(HS_STATIC_CONFIG(disk_attr.align_size), HOMEBLKS_SB_SIZE);
+    superblock_init();
 
     /* start thread */
-    m_thread_id = std::thread(&HomeBlks::init_thread, this);
+#if 0
+    auto run_method = sisl::ObjectAllocator< run_method_t >::make_object();
+    *run_method = ([this]() {
+        try {
+            this->init_devices();
+        } catch (const std::exception& e) {
+            LOGERROR("{}", e.what());
+            init_done(std::make_error_condition(std::errc::io_error));
+        }
+    });
+    iomgr_msg io_msg;
+    io_msg.m_type = RUN_METHOD;
+    io_msg.m_data_buf = (void*)run_method;
+    /* We are distributing work based on btree. Other approach is to use both threads working
+     * on same btree.
+     */
+    iomanager.send_to_least_busy_thread(-1, io_msg);
+#endif
+    auto sthread = std::thread([this]() {
+        this->init_devices();
+        iomanager.run_io_loop(false, nullptr, [&](const iomgr_msg& msg) {
+        });
+    });
+    sthread.detach();
     m_start_shutdown = false;
 }
 
@@ -186,6 +210,26 @@ uint64_t HomeBlks::get_size(const VolumePtr& vol) { return vol->get_size(); }
 boost::uuids::uuid HomeBlks::get_uuid(VolumePtr vol) { return vol->get_uuid(); }
 homeds::blob HomeBlks::at_offset(const blk_buf_t& buf, uint32_t offset) { return (buf->at_offset(offset)); }
 
+/* this function can be called during recovery also */
+void HomeBlks::create_volume(VolumePtr vol) {
+    /* add it to map */
+    decltype(m_volume_map)::iterator it;
+    // Try to add an entry for this volume
+    std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
+    if (is_shutdown()) { return; }
+    bool happened{false};
+    std::tie(it, happened) = m_volume_map.emplace(std::make_pair(vol->get_uuid(), nullptr));
+    HS_ASSERT(RELEASE, happened, "volume already exists");
+
+    // Okay, this is a new volume so let's create it
+    it->second = vol;
+
+    /* set available size and return */
+    set_available_size(available_size() - vol->get_size());
+
+    VOL_INFO_LOG(vol->get_uuid(), "Created volume: {}", vol->get_name());
+}
+
 VolumePtr HomeBlks::create_volume(const vol_params& params) {
     if (HS_STATIC_CONFIG(input.is_read_only)) {
         assert(0);
@@ -199,36 +243,18 @@ VolumePtr HomeBlks::create_volume(const vol_params& params) {
         return nullptr;
     }
 
-    if (params.size >= available_size()) {
+    if ((int64_t)params.size >= available_size()) {
         LOGINFO("there is a possibility of running out of space as total size of the volumes"
                 "created are more then maximum capacity");
     }
-    try {
-        /* create new volume */
-        auto new_vol = Volume::make_volume(params);
+    /* create new volume */
+    auto new_vol = Volume::make_volume(params);
+    create_volume(new_vol);
 
-        /* add it to map */
-        decltype(m_volume_map)::iterator it;
-        // Try to add an entry for this volume
-        std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
-        bool happened{false};
-        std::tie(it, happened) = m_volume_map.emplace(std::make_pair(params.uuid, nullptr));
-        if (!happened) {
-            if (m_volume_map.end() != it) { return it->second; }
-            throw std::runtime_error("Unknown bug");
-        }
-        // Okay, this is a new volume so let's create it
-        it->second = new_vol;
-
-        /* set available size and return */
-        set_available_size(available_size() < params.size ? 0 : available_size() - params.size);
-        VOL_INFO_LOG(params.uuid, "Create volume with params: {}", params.to_string());
-
-        auto system_cap = get_system_capacity();
-        LOGINFO("System capacity after vol create: {}", system_cap.to_string());
-        return it->second;
-    } catch (const std::exception& e) { LOGERROR("{}", e.what()); }
-    return nullptr;
+    auto system_cap = get_system_capacity();
+    LOGINFO("System capacity after vol create: {}", system_cap.to_string());
+    VOL_INFO_LOG(new_vol->get_uuid(), "Create volume with params: {}", params.to_string());
+    return new_vol;
 }
 
 VolumePtr HomeBlks::lookup_volume(const boost::uuids::uuid& uuid) {
@@ -329,12 +355,13 @@ void HomeBlks::init_done(std::error_condition err) {
         return;
     }
 
-    int cnt = m_sub_system_init_cnt.fetch_sub(1);
-    if (cnt != 1) { return; }
-
     if (err == no_error) { m_rdy = true; }
-    if (!m_cfg.disk_init) { m_dev_mgr->inited(); }
-    homeblks_sb_write();
+
+    for (auto it = m_volume_map.cbegin(); it != m_volume_map.cend(); ++it) {
+        vol_mounted(it->second, it->second->get_state());
+    }
+
+    data_recovery_done();
     m_cfg.init_done_cb(err, m_out_params);
     m_init_finished = true;
     m_cv.notify_all();
@@ -344,82 +371,6 @@ void HomeBlks::init_done(std::error_condition err) {
     /* It will trigger race conditions without generating any IO error */
     set_io_flip();
 #endif
-}
-
-void HomeBlks::inc_sub_system_init_cnt() { ++m_sub_system_init_cnt; }
-
-//
-// Handle the race between shutdown therad and init thread;
-// 1. HomeStore starts init
-// 2. AM send shutdown request immediately
-// 3. Init switched out after is_shutdown() return false;
-// 4. Shutdown thread set m_shutdown to true;
-//    and found nothing needs to be freed since init thread hasn't finished yet so shutdown thread completes;
-// 5. Init thread comes back and init things out with all the memory leaked since shutdown thread has already
-// finished;
-//
-void HomeBlks::init_thread() {
-    std::error_condition error = no_error;
-    inc_sub_system_init_cnt();
-    try {
-        init_devices();
-
-        //
-        // Will not resume shutdown if we reboot from an un-finished shutdown procedure.
-        //
-        if (m_homeblks_sb->test_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN)) {
-            LOGDEBUG("System was shutdown cleanly.");
-        } else if (!HS_STATIC_CONFIG(input.disk_init)) {
-            LOGCRITICAL("System experienced sudden panic since last boot!");
-        } else {
-            LOGINFO("Initializing the system");
-            superblock_init();
-        }
-
-        // clear the flag and persist to disk, if we received a new shutdown and completed successfully,
-        // the flag should be set again;
-        m_homeblks_sb->clear_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
-        ++m_homeblks_sb->boot_cnt;
-
-        sisl::HttpServerConfig cfg;
-        cfg.is_tls_enabled = false;
-        cfg.bind_address = "0.0.0.0";
-        cfg.server_port = SDS_OPTIONS["hb_stats_port"].as< int32_t >();
-        cfg.read_write_timeout_secs = 10;
-
-        m_http_server = std::unique_ptr< sisl::HttpServer >(
-            new sisl::HttpServer(cfg,
-                                 {{
-                                     handler_info("/api/v1/version", HomeBlks::get_version, (void*)this),
-                                     handler_info("/api/v1/getMetrics", HomeBlks::get_metrics, (void*)this),
-                                     handler_info("/api/v1/getObjLife", HomeBlks::get_obj_life, (void*)this),
-                                     handler_info("/metrics", HomeBlks::get_prometheus_metrics, (void*)this),
-                                     handler_info("/api/v1/getLogLevel", HomeBlks::get_log_level, (void*)this),
-                                     handler_info("/api/v1/setLogLevel", HomeBlks::set_log_level, (void*)this),
-                                     handler_info("/api/v1/dumpStackTrace", HomeBlks::dump_stack_trace, (void*)this),
-                                     handler_info("/api/v1/verifyHS", HomeBlks::verify_hs, (void*)this),
-                                 }}));
-        m_http_server->start();
-
-        // Attach all completions
-        iomanager.default_drive_interface()->attach_end_of_batch_cb(
-            [this](int nevents) { call_multi_vol_completions(); });
-
-        /* TODO :- start recovery_mgr recovery with callback */
-#if 0
-        // non-disruptive upgrade handling
-        if (MetaBlkMgr::instance()->migrated() == false)  {
-            // need to call migrate after scan_volumes because volume migration needs m_volume_map;
-            migrate_sb();
-            // TODO: delete old sb blkstore (scan_volumes read nothing from next boot);
-        }
-#endif
-    } catch (const std::exception& e) {
-        LOGERROR("{}", e.what());
-        error = std::make_error_condition(std::errc::io_error);
-    }
-
-    init_done(error);
 }
 
 data_blkstore_t::comp_callback HomeBlks::data_completion_cb() { return Volume::process_vol_data_completions; };
@@ -661,6 +612,7 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
     // Waiting for http server thread to join
     m_http_server->stop();
     m_http_server.reset();
+    LOGINFO("http server stopped");
 
     /* XXX: can we move it to indx mgr */
     home_log_store_mgr.stop();
@@ -803,20 +755,98 @@ void HomeBlks::migrate_volume_sb() {
     }
 }
 
-void HomeBlks::meta_blk_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size) {
-    instance()->meta_blk_cb_internal(mblk, std::move(buf), size);
-}
-void HomeBlks::meta_blk_recover_comp_cb(bool success) { instance()->meta_blk_recover_comp_cb_internal(success); }
+/* Recovery has these steps
+ * - Meta blk recovery start :- It is started when its blkstore is loaded
+ *      - Blk alloc bit map recovery start :- It is started when its superblock is read.
+ * - Meta blk recovery done :- It is done when all meta blks are read and subystems are notified
+ *          - Log store recovery start
+ *              - Btree recovery start
+ *              - Btree recovery done
+ *          - Log store recovery done
+ *               - Vol recovery start
+ *               - Vol recovery done
+ *      - Blk alloc bit map recovery done :- It is done when all the entries in journal are replayed.
+ */
 
-void HomeBlks::meta_blk_recover_comp_cb_internal(bool success) {
+void HomeBlks::meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size) {
+    instance()->meta_blk_found(mblk, std::move(buf), size);
+}
+void HomeBlks::meta_blk_recovery_comp_cb(bool success) { instance()->meta_blk_recovery_comp(success); }
+
+void HomeBlks::meta_blk_recovery_comp(bool success) {
     HS_ASSERT(RELEASE, success, "failed to recover HomeBlks SB.");
 
-    HS_ASSERT(RELEASE, m_sb_cookie, "nullptr m_sb_cookie!");
+    /* check the status of last boot */
+    if (m_homeblks_sb->test_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN)) {
+        LOGDEBUG("System was shutdown cleanly.");
+    } else if (!HS_STATIC_CONFIG(input.disk_init)) {
+        LOGCRITICAL("System experienced sudden panic since last boot!");
+    } else {
+        HS_ASSERT(RELEASE, m_cfg.disk_init, "not the first boot");
+        LOGINFO("first time boot");
+    }
+    // clear the flag and persist to disk, if we received a new shutdown and completed successfully,
+    // the flag should be set again;
+    m_homeblks_sb->clear_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
+    ++m_homeblks_sb->boot_cnt;
 
-    // nothing needs to be done;
+    sisl::HttpServerConfig cfg;
+    cfg.is_tls_enabled = false;
+    cfg.bind_address = "0.0.0.0";
+    cfg.server_port = SDS_OPTIONS["hb_stats_port"].as< int32_t >();
+    cfg.read_write_timeout_secs = 10;
+
+    m_http_server = std::unique_ptr< sisl::HttpServer >(
+        new sisl::HttpServer(cfg,
+                             {{
+                                 handler_info("/api/v1/version", HomeBlks::get_version, (void*)this),
+                                 handler_info("/api/v1/getMetrics", HomeBlks::get_metrics, (void*)this),
+                                 handler_info("/api/v1/getObjLife", HomeBlks::get_obj_life, (void*)this),
+                                 handler_info("/metrics", HomeBlks::get_prometheus_metrics, (void*)this),
+                                 handler_info("/api/v1/getLogLevel", HomeBlks::get_log_level, (void*)this),
+                                 handler_info("/api/v1/setLogLevel", HomeBlks::set_log_level, (void*)this),
+                                 handler_info("/api/v1/dumpStackTrace", HomeBlks::dump_stack_trace, (void*)this),
+                                 handler_info("/api/v1/verifyHS", HomeBlks::verify_hs, (void*)this),
+                             }}));
+    m_http_server->start();
+
+
+    // Attach all completions
+    iomanager.default_drive_interface()->attach_end_of_batch_cb([this](int nevents) { call_multi_vol_completions(); });
+
+    /* phase 1 updates a btree superblock required for btree recovery during journal replay */
+    vol_recovery_start_phase1();
+
+    // start log store recovery
+    LOGINFO("home log store recovery is started");
+    home_log_store_mgr.start(m_cfg.disk_init);
+
+    // start volume data recovery
+    LOGINFO("volume recovery is started");
+    vol_recovery_start_phase2();
+
+    LOGINFO("writing homeblks superblk in init");
+    homeblks_sb_write();
+
+    /* scan all the volumes and check if it needs to be mounted */
+    for (auto it = m_volume_map.cbegin(); it != m_volume_map.cend(); ++it) {
+        if (!m_cfg.vol_found_cb(it->second->get_uuid())) { remove_volume(it->second->get_uuid()); }
+    }
+
+    // trigger CP
+    LOGINFO("triggering system CP in init");
+    Volume::trigger_system_cp(([this](bool success) {
+        if (success) {
+            LOGINFO("system CP is taken in init");
+            init_done(no_error);
+        } else {
+            LOGERROR("{}", "system cp failed");
+            init_done(std::make_error_condition(std::errc::io_error));
+        }
+    }));
 }
 
-void HomeBlks::meta_blk_cb_internal(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size) {
+void HomeBlks::meta_blk_found(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size) {
     static bool meta_blk_found = false;
 
     // HomeBlk layer expects to see one valid meta_blk record during reboot;
@@ -829,15 +859,18 @@ void HomeBlks::meta_blk_cb_internal(meta_blk* mblk, sisl::aligned_unique_ptr< ui
     m_sb_cookie = (void*)mblk;
 
     // recover from meta_blk;
-    auto sb = (homeblks_sb*)buf.get();
-    
-    HS_ASSERT(RELEASE, size == sizeof(homeblks_sb), "mismatch size: {}, sizeof homeblks_sb: {}", size, sizeof(homeblks_sb));
-    HS_ASSERT(RELEASE, buf, "buf should not be nullptr");
-    
-    m_homeblks_sb->version = sb->version;
-    m_homeblks_sb->uuid = sb->uuid;
-    m_homeblks_sb->boot_cnt = sb->boot_cnt;
-    m_homeblks_sb->flags = sb->flags;
+    sisl::aligned_unique_ptr< homeblks_sb > sb((homeblks_sb*)(buf.release()));
+    m_homeblks_sb = std::move(sb);
+}
 
-    // buf freed by subsystem on exit;
+void HomeBlks::vol_recovery_start_phase1() {
+    for (auto it = m_volume_map.cbegin(); it != m_volume_map.cend(); ++it) {
+        it->second->recovery_start_phase1();
+    }
+}
+
+void HomeBlks::vol_recovery_start_phase2() {
+    for (auto it = m_volume_map.cbegin(); it != m_volume_map.cend(); ++it) {
+        it->second->recovery_start_phase2();
+    }
 }

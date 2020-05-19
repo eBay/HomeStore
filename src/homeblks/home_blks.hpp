@@ -121,7 +121,7 @@ public:
     static HomeBlks* instance();
     static HomeBlksSafePtr safe_instance();
 
-    ~HomeBlks() { m_thread_id.join(); }
+    ~HomeBlks() {}
     virtual std::error_condition write(const VolumePtr& vol, const vol_interface_req_ptr& req,
                                        bool part_of_batch = false) override;
     virtual std::error_condition read(const VolumePtr& vol, const vol_interface_req_ptr& req,
@@ -145,7 +145,6 @@ public:
 
     virtual bool vol_state_change(const VolumePtr& vol, vol_state new_state) override;
 
-    void vol_scan_cmpltd(const VolumePtr& vol, vol_state state, bool success);
     virtual void attach_vol_completion_cb(const VolumePtr& vol, const io_comp_callback& cb) override;
     virtual void attach_end_of_batch_cb(const end_of_batch_callback& cb) override;
 
@@ -194,6 +193,7 @@ public:
                                      indx_cp_id* home_blks_id);
     void persist_blk_allocator_bitmap();
     void do_volume_shutdown(bool force);
+    void create_volume(VolumePtr vol);
 
     data_blkstore_t::comp_callback data_completion_cb() override;
 
@@ -203,8 +203,8 @@ public:
      * @param mblk
      * @param has_more
      */
-    void meta_blk_cb_internal(meta_blk* mblk, sisl::aligned_unique_ptr<uint8_t> buf, size_t size);
-    void meta_blk_recover_comp_cb_internal(bool success);
+    void meta_blk_found(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
+    void meta_blk_recovery_comp(bool success);
 
 #ifdef _PRERELEASE
     void set_io_flip();
@@ -232,7 +232,7 @@ public:
     static void set_log_level(sisl::HttpCallData cd);
     static void dump_stack_trace(sisl::HttpCallData cd);
     static void verify_hs(sisl::HttpCallData cd);
-    static void meta_blk_cb(meta_blk* mblk, sisl::aligned_unique_ptr<uint8_t> buf, size_t size);
+    static void meta_blk_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
     static void meta_blk_recover_comp_cb(bool success);
     static void get_malloc_stats(sisl::HttpCallData cd);
 
@@ -262,12 +262,13 @@ private:
     void migrate_volume_sb();
     void migrate_logstore_sb();
     void migrate_cp_sb();
+    void vol_recovery_start_phase1();
+    void vol_recovery_start_phase2();
 
 private:
     static HomeBlksSafePtr _instance;
 
     init_params m_cfg;
-    std::thread m_thread_id;
     sisl::aligned_unique_ptr< homeblks_sb > m_homeblks_sb; // the homestore super block
     void* m_sb_cookie = nullptr;
 

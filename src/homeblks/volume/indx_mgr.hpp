@@ -79,9 +79,10 @@ struct indx_cp_id : cp_id_base {
 };
 
 /* it contains the PSN from which journal has to be replayed. */
-#define INDX_MGR_VERSION 0x1
+#define INDX_MGR_VERSION 0x101
 struct indx_mgr_cp_sb_hdr {
     int version;
+    uint32_t vol_cnt;
 } __attribute__((__packed__));
 
 struct indx_mgr_cp_sb {
@@ -131,6 +132,7 @@ private:
     mapping* m_active_map;
     io_done_cb m_io_cb;
     pending_read_blk_cb m_pending_read_blk_cb;
+    free_blk_callback m_free_blk_cb;
     std::shared_ptr< HomeLogStore > m_journal;
     log_write_comp_cb_t m_journal_comp_cb;
 
@@ -145,6 +147,7 @@ private:
     bool m_last_cp = false;
     std::mutex prepare_cb_mtx;
     sisl::wisr_vector< prepare_cb > prepare_cb_list;
+    indx_mgr_active_sb m_sb;
 
     void journal_write(volume_req* vreq);
     void journal_comp_cb(logstore_seq_num_t seq_num, logdev_key ld_key, void* req);
@@ -164,6 +167,10 @@ private:
     static int m_thread_num;
     static iomgr::timer_handle_t m_system_cp_timer_hdl;
     static void* m_meta_blk;
+    static std::once_flag m_flag;
+    static sisl::aligned_unique_ptr< uint8_t > m_recovery_sb;
+    static size_t m_recovery_sb_size;
+    static std::map< boost::uuids::uuid, indx_mgr_cp_sb > cp_sb_map;
 
     static void init();
 
@@ -183,8 +190,8 @@ public:
      *         free_blk_cb :- It is used to free the blks in case of volume destroy
      *         read_blk_cb :- It is used to notify blks that it is about the be returned in read.
      */
-    IndxMgr(std::shared_ptr< Volume > vol, indx_mgr_active_sb* sb, io_done_cb io_cb, free_blk_callback free_blk_cb,
-            pending_read_blk_cb read_blk_cb);
+    IndxMgr(std::shared_ptr< Volume > vol, const indx_mgr_active_sb& sb, io_done_cb io_cb,
+            free_blk_callback free_blk_cb, pending_read_blk_cb read_blk_cb);
     ~IndxMgr();
 
     /* create new vol cp id and decide if this volume want to participate in a current cp
@@ -222,6 +229,10 @@ public:
     /* volume is destroy successfully */
     void destroy_done();
 
+    void recovery_start_phase1();
+    void recovery_start_phase2();
+    void log_found(logstore_seq_num_t seqnum, log_buffer buf, void* mem);
+
 public:
     /*********************** static public functions **********************/
     /* Trigger CP to flush all outstanding IOs. It is a static function and assumes that all ios are stopped by
@@ -254,5 +265,6 @@ public:
     static void reinit() { m_shutdown_started = false; }
     static int get_thread_num() { return m_thread_num; }
     static void write_cp_super_block(indx_cp_id* id);
+    static void meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
 };
 } // namespace homestore

@@ -19,6 +19,7 @@ bool vol_test_enable = false;
 
 SDS_LOGGING_DECL(volume)
 std::atomic< uint64_t > Volume::home_blks_ref_cnt = 0;
+REGISTER_METABLK_SUBSYSTEM(volume, meta_sub_type::VOLUME, Volume::meta_blk_found_cb, nullptr)
 
 namespace homestore {
 void intrusive_ptr_add_ref(homestore::BlkBuffer* buf) { intrusive_ptr_add_ref((homestore::CacheBuffer< BlkId >*)buf); }
@@ -77,36 +78,44 @@ Volume::Volume(const vol_params& params) :
         params.vol_name, params.uuid, std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
 }
 
-Volume::Volume(vol_sb_hdr& sb) : m_metrics(sb.vol_name), m_indx_mgr_destroy_started(false) {
-    /* TODO : add recovery code */
-    /* Take care of vdev error and init cnt */
-}
+Volume::Volume(meta_blk* mblk_cookie, sisl::aligned_unique_ptr< vol_sb_hdr > sb) :
+        m_metrics(sb->vol_name),
+        m_sb(std::move(sb)),
+        m_indx_mgr_destroy_started(false),
+        m_sb_cookie(mblk_cookie) {}
 
 void Volume::init() {
-    m_indx_mgr =
-        new IndxMgr(shared_from_this(), m_params,
-                    std::bind(&Volume::process_indx_completions, this, std::placeholders::_1, std::placeholders::_2),
-                    std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1),
-                    std::bind(&Volume::pending_read_blk_cb, this, std::placeholders::_1, std::placeholders::_2));
-    vol_sb_hdr* sb = (vol_sb_hdr*)iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), sizeof(vol_sb_hdr));
-    m_sb = new (sb) vol_sb_hdr(m_params.page_size, m_params.size, (char*)m_params.vol_name, m_params.uuid,
-                               m_indx_mgr->get_active_sb());
-    assert(sb != nullptr);
+    if (!m_sb) {
+        /* first time create */
+        m_indx_mgr = new IndxMgr(
+            shared_from_this(), m_params,
+            std::bind(&Volume::process_indx_completions, this, std::placeholders::_1, std::placeholders::_2),
+            std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1),
+            std::bind(&Volume::pending_read_blk_cb, this, std::placeholders::_1, std::placeholders::_2));
+        m_sb = sisl::aligned_unique_ptr< vol_sb_hdr >(
+            m_params.page_size, m_params.size, (char*)m_params.vol_name, m_params.uuid, m_indx_mgr->get_active_sb()));
+
+        set_state(vol_state::ONLINE, true);
+    } else {
+        /* recovery */
+        auto active_sb = m_sb->active_sb;
+        m_indx_mgr = new IndxMgr(
+            shared_from_this(), active_sb,
+            std::bind(&Volume::process_indx_completions, this, std::placeholders::_1, std::placeholders::_2),
+            std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1),
+            std::bind(&Volume::pending_read_blk_cb, this, std::placeholders::_1, std::placeholders::_2));
+    }
     alloc_single_block_in_mem();
     assert(get_page_size() % HomeBlks::instance()->get_data_pagesz() == 0);
-    set_state(vol_state::ONLINE, true);
-
-    vol_sb_init();
 }
 
-void Volume::vol_sb_remove() {
-    // remove sb from MetaBlkMgr
-    MetaBlkMgr::instance()->remove_sub_sb(m_sb_cookie);
-}
+void Volume::meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size) {
+    sisl::aligned_unique_ptr< vol_sb_hdr > sb((vol_sb_hdr*)(buf.release()));
+    assert(sizeof(vol_sb_hdr) == size);
 
-void Volume::vol_sb_init() {
-    // add volume to MetaBlkMgr
-    MetaBlkMgr::instance()->add_sub_sb(meta_sub_type::VOLUME, m_sb, sizeof(vol_sb_hdr), m_sb_cookie);
+    auto new_vol = Volume::make_volume(mblk, std::move(sb));
+    /* add this volume in home blks */
+    HomeBlks::safe_instance()->create_volume(new_vol);
 }
 
 /* This function can be called multiple times. Underline functions should be idempotent */
@@ -154,11 +163,7 @@ void Volume::destroy_internal() {
 /* It is called only once */
 void Volume::shutdown(indxmgr_stop_cb cb) { IndxMgr::shutdown(cb); }
 
-Volume::~Volume() {
-    vol_sb_remove();
-    free(m_sb);
-    delete m_indx_mgr;
-}
+Volume::~Volume() { delete m_indx_mgr; }
 
 std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
     std::vector< BlkId > bid;
@@ -614,7 +619,10 @@ vol_state Volume::set_state(vol_state state, bool persist) {
     THIS_VOL_LOG(INFO, base, , "volume state changed from {} to {}", m_state, state);
     auto prev_state = m_state.exchange(state);
     if (prev_state == state) { return prev_state; }
-    if (persist) { write_sb(); }
+    if (persist) {
+        assert(state == vol_state::DESTROYING || state == vol_state::ONLINE || state == vol_state::OFFLINE);
+        write_sb();
+    }
     return prev_state;
 }
 
@@ -630,10 +638,17 @@ void Volume::write_sb() {
     /* update mutable params */
     m_sb->state = m_state;
 
-    /* TODO write super block */
+    if (!m_sb_cookie) {
+        // first time insert
+        MetaBlkMgr::instance()->add_sub_sb(meta_sub_type::VOLUME, m_sb.get(), sizeof(vol_sb_hdr), m_sb_cookie);
+    } else {
+        MetaBlkMgr::instance()->update_sub_sb(meta_sub_type::VOLUME, m_sb.get(), sizeof(vol_sb_hdr), m_sb_cookie);
+    }
 }
 
-void Volume::remove_sb() { /* TODO: remove super block */
+void Volume::remove_sb() {
+    // remove sb from MetaBlkMgr
+    MetaBlkMgr::instance()->remove_sub_sb(m_sb_cookie);
 }
 
 mapping* Volume::get_mapping_handle() { return (m_indx_mgr->get_active_indx()); }
@@ -643,9 +658,5 @@ void Volume::migrate_sb() {
     // inst->add_sub_sb(meta_sub_type::VOLUME, (void*)(m_sb->ondisk_sb), sizeof(vol_ondisk_sb), &(m_sb->cookie));
 }
 
-void Volume::meta_blk_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size) {
-    // TODO: Volume Recovery
-}
-void Volume::meta_blk_recover_comp_cb(bool success) {
-    // TODO: To be implemented;
-}
+void Volume::recovery_start_phase1() { m_indx_mgr->recovery_start_phase1(); }
+void Volume::recovery_start_phase2() { m_indx_mgr->recovery_start_phase2(); }
