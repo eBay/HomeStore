@@ -20,8 +20,7 @@ SDS_OPTION_GROUP(home_blks,
                   cxxopts::value< int32_t >()->default_value("5000"), "port"))
 using namespace homestore;
 
-REGISTER_METABLK_SUBSYSTEM(homeblks, meta_sub_type::HOMEBLK, HomeBlks::meta_blk_found_cb,
-                           HomeBlks::meta_blk_recovery_comp_cb)
+REGISTER_METABLK_SUBSYSTEM(homeblks, "HOMEBLK", HomeBlks::meta_blk_found_cb, HomeBlks::meta_blk_recovery_comp_cb)
 
 #ifndef DEBUG
 bool same_value_gen = false;
@@ -296,11 +295,11 @@ void HomeBlks::superblock_init() {
 void HomeBlks::homeblks_sb_write() {
     if (m_sb_cookie == nullptr) {
         // add to MetaBlkMgr
-        MetaBlkMgr::instance()->add_sub_sb(meta_sub_type::HOMEBLK, (void*)m_homeblks_sb.get(), sizeof(homeblks_sb),
+        MetaBlkMgr::instance()->add_sub_sb("HOMEBLK", (void*)m_homeblks_sb.get(), sizeof(homeblks_sb),
                                            m_sb_cookie);
     } else {
         // update existing homeblks sb
-        MetaBlkMgr::instance()->update_sub_sb(meta_sub_type::HOMEBLK, (void*)m_homeblks_sb.get(), sizeof(homeblks_sb),
+        MetaBlkMgr::instance()->update_sub_sb("HOMEBLK", (void*)m_homeblks_sb.get(), sizeof(homeblks_sb),
                                               m_sb_cookie);
     }
 }
@@ -744,7 +743,7 @@ void HomeBlks::migrate_homeblk_sb() {
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
     auto inst = MetaBlkMgr::instance();
     void* cookie = nullptr;
-    inst->add_sub_sb(meta_sub_type::HOMEBLK, (void*)m_homeblks_sb.get(), sizeof(homeblks_sb), cookie);
+    inst->add_sub_sb("HOMEBLK", (void*)m_homeblks_sb.get(), sizeof(homeblks_sb), cookie);
 }
 
 void HomeBlks::migrate_volume_sb() {

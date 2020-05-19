@@ -9,25 +9,30 @@ class BlkBuffer;
 template < typename BAllocator, typename Buffer >
 class BlkStore;
 class VdevVarSizeBlkAllocatorPolicy;
-
-typedef homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy, BlkBuffer > blk_store_type;
+using blk_store_t = homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy, BlkBuffer >;
 
 // each subsystem could receive callbacks multiple times;
-typedef std::function< void(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size) >
-    meta_blk_found_cb;                                                            // new blk found subsystem callback
-typedef std::function< void(bool success) > meta_blk_recover_comp_cb;             // recover complete subsystem callback
-typedef std::map< meta_sub_type, std::map< uint64_t, meta_blk* > > meta_blks_map; // blkid to meta_blk map;
+using meta_blk_found_cb_t = std::function< void(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf,
+                                                size_t size) >;         // new blk found subsystem callback
+using meta_blk_recover_comp_cb_t = std::function< void(bool success) >; // recover complete subsystem callbacks;
+using meta_blk_map_t = std::map< meta_sub_type, std::map< uint64_t, meta_blk* > >; // blkid to meta_blk map;
+using ovf_hdr_map_t = std::map< uint64_t, meta_blk_ovf_hdr* >;                     // ovf_blkid to ovf_blk_hdr map;
+
+struct MetaSubRegInfo {
+    meta_blk_found_cb_t cb;
+    meta_blk_recover_comp_cb_t comp_cb;
+};
 
 class MetaBlkMgr {
 private:
     static MetaBlkMgr* _instance;
-    blk_store_type* m_sb_blk_store = nullptr;                          // super blockstore
-    std::mutex m_meta_mtx;                                             // mutex to access to meta_map;
-    meta_blks_map m_meta_blks;                                         // used by subsystems meta rec
-    std::map< meta_sub_type, meta_blk_found_cb > m_cb_map;             // map of callbacks
-    std::map< meta_sub_type, meta_blk_recover_comp_cb > m_comp_cb_map; // map of callbacks
-    meta_blk* m_last_mblk = nullptr;                                   // last meta blk;
-    meta_blk_sb* m_ssb = nullptr;                                      // meta super super blk;
+    blk_store_t* m_sb_blk_store = nullptr;                               // super blockstore
+    std::mutex m_meta_mtx;                                               // mutex to access to meta_map;
+    meta_blk_map_t m_meta_blks;                                          // subsystem type to meta blk map;
+    ovf_hdr_map_t m_ovf_blk_hdrs;                                        // ovf blk map;
+    std::map< meta_sub_type, MetaSubRegInfo > m_sub_info;                // map of callbacks
+    meta_blk* m_last_mblk = nullptr;                                     // last meta blk;
+    meta_blk_sb* m_ssb = nullptr;                                        // meta super super blk;
 
 public:
     /**
@@ -38,7 +43,7 @@ public:
      * @param init : true of initialized, false if recovery
      * @return
      */
-    void init(blk_store_type* sb_blk_store, sb_blkstore_blob* blob, bool is_init);
+    void init(blk_store_t* sb_blk_store, sb_blkstore_blob* blob, bool is_init);
 
     /**
      * @brief
@@ -66,7 +71,7 @@ public:
      * @param type : subsystem type
      * @param cb : subsystem cb
      */
-    void register_handler(meta_sub_type type, meta_blk_found_cb cb, meta_blk_recover_comp_cb comp_cb);
+    void register_handler(meta_sub_type type, meta_blk_found_cb_t cb, meta_blk_recover_comp_cb_t comp_cb);
 
     /**
      * @brief
@@ -150,7 +155,7 @@ private:
      *
      * @return
      */
-    bool is_meta_blk_type_valid(meta_sub_type type);
+    bool is_sub_type_valid(meta_sub_type type);
 
     /**
      * @brief
@@ -168,7 +173,9 @@ private:
      *
      * @return
      */
-    void write_meta_blk(meta_blk* mblk);
+    void write_meta_blk_to_disk(meta_blk* mblk);
+
+    void write_ovf_blk_to_disk(meta_blk_ovf_hdr* ovf_hdr, void* context_data, uint64_t sz, uint64_t offset);
 
     /**
      * @brief : load meta blk super super block into memory
@@ -203,6 +210,8 @@ private:
 
     void free_meta_blk(meta_blk* mblk);
 
+    void free_ovf_blk_chain(meta_blk* mblk);
+
     /**
      * @brief : Initialize meta blk
      *
@@ -211,6 +220,17 @@ private:
      * @return
      */
     meta_blk* init_meta_blk(BlkId bid, meta_sub_type type, void* context_data, size_t sz);
+
+    /**
+     * @brief
+     *
+     * @param prev_id
+     * @param bid
+     * @param context_data
+     * @param sz
+     * @param offset
+     */
+    void write_meta_blk_ovf(BlkId& prev_id, BlkId& bid, void* context_data, uint64_t sz, uint64_t offset);
 
     /**
      * @brief : internal implementation of populating and writing a meta block;
@@ -224,7 +244,7 @@ private:
 
 class register_subsystem {
 public:
-    register_subsystem(meta_sub_type type, meta_blk_found_cb cb, meta_blk_recover_comp_cb comp_cb) {
+    register_subsystem(meta_sub_type type, meta_blk_found_cb_t cb, meta_blk_recover_comp_cb_t comp_cb) {
         MetaBlkMgr::instance()->register_handler(type, cb, comp_cb);
     }
 };

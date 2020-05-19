@@ -19,7 +19,7 @@ bool vol_test_enable = false;
 
 SDS_LOGGING_DECL(volume)
 std::atomic< uint64_t > Volume::home_blks_ref_cnt = 0;
-REGISTER_METABLK_SUBSYSTEM(volume, meta_sub_type::VOLUME, Volume::meta_blk_found_cb, nullptr)
+REGISTER_METABLK_SUBSYSTEM(volume, "VOLUME", Volume::meta_blk_found_cb, nullptr)
 
 namespace homestore {
 void intrusive_ptr_add_ref(homestore::BlkBuffer* buf) { intrusive_ptr_add_ref((homestore::CacheBuffer< BlkId >*)buf); }
@@ -641,9 +641,9 @@ void Volume::write_sb() {
 
     if (!m_sb_cookie) {
         // first time insert
-        MetaBlkMgr::instance()->add_sub_sb(meta_sub_type::VOLUME, m_sb.get(), sizeof(vol_sb_hdr), m_sb_cookie);
+        MetaBlkMgr::instance()->add_sub_sb("VOLUME", m_sb.get(), sizeof(vol_sb_hdr), m_sb_cookie);
     } else {
-        MetaBlkMgr::instance()->update_sub_sb(meta_sub_type::VOLUME, m_sb.get(), sizeof(vol_sb_hdr), m_sb_cookie);
+        MetaBlkMgr::instance()->update_sub_sb("VOLUME", m_sb.get(), sizeof(vol_sb_hdr), m_sb_cookie);
     }
 }
 

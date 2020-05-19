@@ -306,6 +306,11 @@ public:
 
     void write(BlkId& bid, homeds::MemVector& mvec) { m_vdev.write(bid, mvec, nullptr, 0); }
 
+    // 
+    // sync write with iov;
+    //
+    void write(BlkId& bid, struct iovec* iov, int iovcnt) { m_vdev.write(bid, iov, iovcnt); } 
+
     /* Write the buffer. The BlkStore write does not support write in place and so it does not also support
      * writing to an offset.
      *

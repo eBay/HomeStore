@@ -90,7 +90,7 @@ static Param gp;
 class VMetaBlkMgrTest : public ::testing::Test {
 
     enum class meta_op_type { write = 1, update = 2, remove = 3 };
-    const meta_sub_type mtype = meta_sub_type::VOLUME;
+    const std::string mtype = "VOLUME";
 
 public:
     uint64_t get_elapsed_time(Clock::time_point start) {
@@ -146,10 +146,10 @@ public:
         meta_blk* mblk = (meta_blk*)cookie;
         if (overflow) {
             assert(sz_to_wrt >= META_BLK_PAGE_SZ);
-            assert(mblk->hdr.ovf_blkid.to_integer() != BlkId::invalid_internal_id());
+            assert(mblk->hdr.h.ovf_blkid.to_integer() != BlkId::invalid_internal_id());
         } else {
             assert(sz_to_wrt <= META_BLK_CONTEXT_SZ);
-            assert(mblk->hdr.ovf_blkid.to_integer() == BlkId::invalid_internal_id());
+            assert(mblk->hdr.h.ovf_blkid.to_integer() == BlkId::invalid_internal_id());
         }
 
         // save cookie;
@@ -201,13 +201,13 @@ public:
 
         for (auto it = m_write_sbs.cbegin(); it != m_write_sbs.end(); it++) {
             meta_blk* mblk = (meta_blk*)(*it);
-            int ret = memcmp((void*)&(mblk->hdr), (void*)&(m_cb_blks[mblk->hdr.blkid.to_integer()]->hdr),
+            int ret = memcmp((void*)&(mblk->hdr), (void*)&(m_cb_blks[mblk->hdr.h.blkid.to_integer()]->hdr),
                              sizeof(meta_blk_hdr));
             if (ret != 0) { HS_ASSERT(DEBUG, false, "memory compare failed for mblk header!"); }
 
-            if (mblk->hdr.context_sz <= META_BLK_CONTEXT_SZ) {
-                ret = memcmp(mblk->context_data, m_cb_blks[mblk->hdr.blkid.to_integer()]->context_data,
-                             mblk->hdr.context_sz);
+            if (mblk->hdr.h.context_sz <= META_BLK_CONTEXT_SZ) {
+                ret = memcmp(mblk->context_data, m_cb_blks[mblk->hdr.h.blkid.to_integer()]->context_data,
+                             mblk->hdr.h.context_sz);
                 if (ret != 0) { HS_ASSERT(DEBUG, false, "memory compare failed fore mblk context data"); }
             } else {
                 // nothing to do as ovf_blkid is already compared in the hdr;
@@ -223,9 +223,10 @@ public:
 
         m_mbm->register_handler(mtype,
                                 [this](meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size) {
+                                // TODO: use buf, instead of mblk to compare data after meta blk mgr
                                     if (mblk) {
                                         std::unique_lock< std::mutex > lg(m_mtx);
-                                        m_cb_blks[mblk->hdr.blkid.to_integer()] = mblk;
+                                        m_cb_blks[mblk->hdr.h.blkid.to_integer()] = mblk;
                                     }
                                 },
                                 [this](bool success) { assert(success); });
