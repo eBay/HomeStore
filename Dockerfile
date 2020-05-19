@@ -26,26 +26,26 @@ WORKDIR /output
 ENV ASAN_OPTIONS=detect_leaks=0
 
 RUN set -eux; \
-  eval $(grep 'name =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,name,PKG_NAME,'); \
-  eval $(grep -m 1 'version =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,version,PKG_VERSION,'); \
-  if [ "debug" = "${BUILD_TYPE}" ] && [ "true" = "${COVERAGE_ON}" ]; then \
-  conan install --build missing -o ${PKG_NAME}:coverage=True -pr ${BUILD_TYPE} ${SOURCE_PATH}; \
-  build-wrapper-linux-x86-64 --out-dir /tmp/sonar conan build ${SOURCE_PATH}; \
-  find . -name "*.gcno" -exec gcov {} \; ; \
-  if [ "develop" != "${BRANCH_NAME}" ]; then \
-  echo "sonar.branch.name=${BRANCH_NAME}" >> ${SOURCE_PATH}sonar-project.properties; \
-  echo "sonar.branch.target=develop" >> ${SOURCE_PATH}sonar-project.properties; \
-  fi; \
-  sonar-scanner -Dsonar.projectBaseDir=${SOURCE_PATH} -Dsonar.projectVersion="${PKG_VERSION}"; \
-  elif [ "sanitize" = "${BUILD_TYPE}" ]; then \
-  conan create -pr debug ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"; \  
-  else \
-  conan create -o homestore:sanitize=False -pr ${BUILD_TYPE} ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"; \
-  fi;
+    eval $(grep 'name =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,name,PKG_NAME,'); \
+    eval $(grep -m 1 'version =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,version,PKG_VERSION,'); \
+    if [ "debug" = "${BUILD_TYPE}" ] && [ "true" = "${COVERAGE_ON}" ]; then \
+      conan install --build missing -o ${PKG_NAME}:coverage=True -pr ${BUILD_TYPE} ${SOURCE_PATH}; \
+      build-wrapper-linux-x86-64 --out-dir /tmp/sonar conan build ${SOURCE_PATH}; \
+      find . -name "*.gcno" -exec gcov {} \; ; \
+      if [ "develop" != "${BRANCH_NAME}" ]; then \
+        echo "sonar.branch.name=${BRANCH_NAME}" >> ${SOURCE_PATH}sonar-project.properties; \
+        echo "sonar.branch.target=develop" >> ${SOURCE_PATH}sonar-project.properties; \
+      fi; \
+      sonar-scanner -Dsonar.projectBaseDir=${SOURCE_PATH} -Dsonar.projectVersion="${PKG_VERSION}"; \
+    elif [ "sanitize" = "${BUILD_TYPE}" ]; then \
+      conan create -pr debug ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"; \  
+    else \
+      conan create -o homestore:sanitize=False -pr ${BUILD_TYPE} ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"; \
+    fi;
 
 CMD set -eux; \
-  eval $(grep 'name =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,name,PKG_NAME,'); \
-  eval $(grep 'version =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,version,PKG_VERSION,'); \
-  conan user -r ebay-local -p "${ARTIFACTORY_PASS}" _service_sds; \
-  conan upload ${PKG_NAME}/${PKG_VERSION}@"${CONAN_USER}"/"${CONAN_CHANNEL}" -c --all -r ebay-local;
+    eval $(grep 'name =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,name,PKG_NAME,'); \
+    eval $(grep 'version =' ${SOURCE_PATH}conanfile.py | sed 's, ,,g' | sed 's,version,PKG_VERSION,'); \
+    conan user -r ebay-local -p "${ARTIFACTORY_PASS}" _service_sds; \
+    conan upload ${PKG_NAME}/${PKG_VERSION}@"${CONAN_USER}"/"${CONAN_CHANNEL}" -c --all -r ebay-local;
 # ##########   #######   ############
