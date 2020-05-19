@@ -133,7 +133,7 @@ void IndxCP::cp_attach_prepare(indx_cp_id* cur_id, indx_cp_id* new_id) {
 
 /****************************************** IndxMgr class ****************************************/
 
-REGISTER_METABLK_SUBSYSTEM(indx_mgr, meta_sub_type::INDX_MGR_CP, IndxMgr::meta_blk_found_cb, nullptr)
+REGISTER_METABLK_SUBSYSTEM(indx_mgr, "INDX_MGR_CP", IndxMgr::meta_blk_found_cb, nullptr)
 
 IndxMgr::IndxMgr(std::shared_ptr< Volume > vol, const vol_params& params, io_done_cb io_cb,
                  free_blk_callback free_blk_cb, pending_read_blk_cb read_blk_cb) :
@@ -232,10 +232,10 @@ void IndxMgr::write_cp_super_block(indx_cp_id* id) {
     hdr->vol_cnt = vol_cnt;
 
     if (m_meta_blk) {
-        MetaBlkMgr::instance()->update_sub_sb(meta_sub_type::INDX_MGR_CP, mem, size, m_meta_blk);
+        MetaBlkMgr::instance()->update_sub_sb("INDX_MGR_CP", mem, size, m_meta_blk);
     } else {
         /* first time update */
-        MetaBlkMgr::instance()->add_sub_sb(meta_sub_type::INDX_MGR_CP, mem, size, m_meta_blk);
+        MetaBlkMgr::instance()->add_sub_sb("INDX_MGR_CP", mem, size, m_meta_blk);
     }
     LOGINFO("superblock is written");
     free(mem);

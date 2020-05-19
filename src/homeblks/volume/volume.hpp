@@ -341,6 +341,7 @@ public:
     static void reinit() { IndxMgr::reinit(); }
     
     static void meta_blk_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
+
 public:
     /******************** APIs exposed to home_blks *******************/
     ~Volume();
