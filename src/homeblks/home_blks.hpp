@@ -1,8 +1,8 @@
 #ifndef VOL_CONFIG_HPP
 #define VOL_CONFIG_HPP
 
-#include "api/vol_interface.hpp"
 #include "engine/homestore.hpp"
+#include "api/vol_interface.hpp"
 #include <memory>
 #include "engine/homeds/btree/btree.hpp"
 #include "engine/homeds/btree/ssd_btree.hpp"

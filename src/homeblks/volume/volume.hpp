@@ -1,11 +1,11 @@
 #pragma once
 
 #include <fcntl.h>
+#include "homeblks/home_blks.hpp"
 #include "engine/device/device.h"
 #include "engine/cache/cache.h"
 #include "engine/device/blkbuffer.hpp"
 #include "engine/blkstore/blkstore.hpp"
-#include "homeblks/home_blks.hpp"
 #include <metrics/metrics.hpp>
 #include <utility/atomic_counter.hpp>
 #include <utility/obj_life_counter.hpp>
@@ -189,7 +189,7 @@ struct vol_sb_hdr {
     const boost::uuids::uuid uuid;
     const char vol_name[VOL_NAME_SIZE];
     const indx_mgr_active_sb active_sb;
-    vol_sb_hdr(uint64_t page_size, uint64_t size, char in_vol_name[VOL_NAME_SIZE], boost::uuids::uuid uuid,
+    vol_sb_hdr(uint64_t page_size, uint64_t size, const char* in_vol_name, boost::uuids::uuid uuid,
                indx_mgr_active_sb active_sb) :
             version(VOL_SB_VERSION),
             page_size(page_size),
@@ -197,9 +197,7 @@ struct vol_sb_hdr {
             uuid(uuid),
             vol_name(""),
             active_sb(active_sb) {
-        /* XXX : is there a better way ? */
-        char* ptr = (char*)vol_name;
-        strncpy(ptr, in_vol_name, VOL_NAME_SIZE);
+        memcpy((char*)vol_name, in_vol_name, VOL_NAME_SIZE);
     };
 
     /* these variables are mutable. Always update these values before writing the superblock */

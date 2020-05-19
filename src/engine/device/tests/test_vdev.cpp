@@ -1,8 +1,8 @@
 //
 // Created by Yaming Kuang 1/15/2020
 //
-#include "../virtual_dev.hpp"
 #include "homeblks/home_blks.hpp"
+#include "../virtual_dev.hpp"
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
 #include <gtest/gtest.h>
