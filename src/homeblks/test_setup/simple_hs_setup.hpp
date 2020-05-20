@@ -9,6 +9,7 @@
 namespace homestore {
 #define vol_interface VolInterface::get_instance()
 
+#if 0
 /* Simulated a target that drives the workload */
 class TestTargetInterface : public iomgr::IOInterface {
 public:
@@ -52,6 +53,7 @@ private:
     std::shared_ptr< TestTargetInterface > m_iface;
     SimpleTestStore* m_test_store;
 };
+#endif
 
 struct simple_store_cfg {
     uint32_t m_ndevices = 2;
@@ -59,7 +61,7 @@ struct simple_store_cfg {
     uint32_t m_nthreads = 4;
     uint32_t m_nvols = 1;
     uint64_t m_dev_size = 4 * 1024 * 1024 * 1024ul;
-    uint64_t m_cache_size = 2 * 1024 * 1024 * 1024ul;
+    uint64_t m_app_mem_size = 2 * 1024 * 1024 * 1024ul;
     uint64_t m_max_io_size = 1 * 1024 * 1024ul;
     bool is_shadow_vol = false;
     bool is_read_verify = false; // Should we verify the write followed by sync read
@@ -115,7 +117,7 @@ struct vol_info {
 
 class SimpleTestStore {
 private:
-    TestTarget m_tgt;
+    // TestTarget m_tgt;
     simple_store_cfg m_cfg;
     init_params m_init_params;
     std::vector< dev_info > m_dev_infos;
@@ -137,7 +139,7 @@ private:
     static constexpr const char* vol_prefix = "vol";
 
 public:
-    SimpleTestStore(const simple_store_cfg& cfg) : m_tgt(this) {
+    SimpleTestStore(const simple_store_cfg& cfg) {
         m_cfg = cfg;
         if (m_cfg.m_devs.size() == 0) {
             for (uint32_t i = 0; i < m_cfg.m_ndevices; i++) {
@@ -157,7 +159,7 @@ public:
     virtual void setup_init_params() {
         m_init_params.open_flags = homestore::io_flag::DIRECT_IO;
         m_init_params.min_virtual_page_size = 4096;
-        m_init_params.cache_size = m_cfg.m_cache_size;
+        m_init_params.app_mem_size = m_cfg.m_app_mem_size;
         m_init_params.disk_init = true;
         m_init_params.devices = m_dev_infos;
         m_init_params.is_file = m_cfg.m_is_file;
@@ -186,11 +188,12 @@ public:
         }
 
         /* Start IOManager and a test target to enable doing IO */
-        iomanager.start(2 /* total interfaces */, m_cfg.m_nthreads);
+        iomanager.start(1 /* total interfaces */, m_cfg.m_nthreads, false,
+                        bind_this(SimpleTestStore::handle_iothread_msg, 1));
         iomanager.add_drive_interface(
             std::dynamic_pointer_cast< iomgr::DriveInterface >(std::make_shared< iomgr::AioDriveInterface >()),
             true /* is_default */);
-        m_tgt.init();
+        // m_tgt.init();
 
         VolInterface::init(m_init_params);
         if (wait_to_start) { wait_homestore_init_done(); }
@@ -201,7 +204,15 @@ public:
         m_init_done_cv.wait(lk);
     }
 
-    void kickstart_io() { m_tgt.kickstart_io(); }
+    void handle_iothread_msg(const iomgr::iomgr_msg& msg) {
+        LOGTRACE("Received iothread msg of type {}", msg.m_type);
+        if (msg.m_type == iomgr::iomgr_msg_type::CUSTOM_MSG) { process_new_request(); }
+    }
+
+    void kickstart_io() {
+        iomanager.send_msg(-1, iomgr::iomgr_msg(iomgr::iomgr_msg_type::CUSTOM_MSG, nullptr, -1, nullptr, 0));
+    }
+
     void wait_for_io_done() {
         std::unique_lock< std::mutex > lk(m_mutex);
         m_io_done_cv.wait(lk);
@@ -281,10 +292,8 @@ public:
         if (lba == -1U) { lba = rand() % (vinfo.max_vol_blks - nlbas); }
         vinfo.update_blk_bits([&](auto* bset) { bset->set_bits(lba, nlbas); }); // Mark those blks as busy
 
-        uint8_t* buf = nullptr;
         uint64_t size = nlbas * vol_interface->get_page_size(vinfo.vol_obj);
-        auto ret = posix_memalign((void**)&buf, 4096, size);
-        if (ret) { assert(0); }
+        uint8_t* buf = iomanager.iobuf_alloc(512, size);
         assert(buf != nullptr);
 
         boost::intrusive_ptr< simple_store_req > req(new simple_store_req(buf, lba, nlbas));
@@ -371,14 +380,16 @@ public:
         if (get_elapsed_time_ms(m_start_time) > m_cfg.m_run_time_ms) {
             m_io_done_cv.notify_all();
         } else {
-            m_tgt.io_request_done();
+            process_new_request();
         }
     }
 };
 
+#if 0
 void TestTarget::on_new_io_request(int fd, void* cookie, int event) {
     uint64_t temp;
     [[maybe_unused]] auto rsize = read(m_ev_fd, &temp, sizeof(uint64_t));
     m_test_store->process_new_request();
 }
+#endif
 } // namespace homestore

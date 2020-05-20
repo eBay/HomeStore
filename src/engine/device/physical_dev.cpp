@@ -79,7 +79,7 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
     HS_ASSERT_CMP(LOGMSG, sizeof(super_block), <=, SUPERBLOCK_SIZE, "opening device {} device size {} inited {}",
                   devname, m_devsize, is_init);
 
-    auto ret = posix_memalign((void**)&m_super_blk, HS_STATIC_CONFIG(disk_attr.align_size), SUPERBLOCK_SIZE);
+    m_super_blk = (super_block*)iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), SUPERBLOCK_SIZE);
 
     /* super block should always be written atomically. */
     HS_ASSERT_NOTNULL(LOGMSG, m_super_blk);
@@ -92,8 +92,8 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
     m_cur_indx = 0;
     m_superblock_valid = false;
 
-    m_devfd = drive_iface->open_dev(devname.c_str(), oflags);
-    if (m_devfd == -1
+    m_iodev = drive_iface->open_dev(devname.c_str(), oflags);
+    if (m_iodev == nullptr
 #ifdef _PRERELEASE
         || (homestore_flip->test_flip("device_boot_fail", devname.c_str()))
 #endif
@@ -106,23 +106,15 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
         throw std::system_error(errno, std::system_category(), "error while opening the device");
     }
 
-    LOGINFO("Device {} opened with FD {}", m_devname, m_devfd);
+    LOGINFO("Device {} opened with FD {}", m_devname, m_iodev->fd());
 
-    if (is_file) {
-        struct stat buf;
-        if (fstat(m_devfd, &buf) < 0) {
-            free(m_super_blk);
-            HS_ASSERT(LOGMSG, 0, "device stat failed errno {} dev_name {}", errno, devname.c_str());
-            throw std::system_error(errno, std::system_category(), "error while getting size of the device");
-        }
-        m_devsize = buf.st_size;
-    } else {
-        if (ioctl(m_devfd, BLKGETSIZE64, &m_devsize) < 0) {
-            free(m_super_blk);
-            HS_ASSERT(LOGMSG, 0, "device stat failed errno {} dev_name {}", errno, devname.c_str());
-            throw std::system_error(errno, std::system_category(), "error while getting size of the device");
-        }
+    try {
+        m_devsize = drive_iface->get_size(m_iodev.get(), is_file);
+    } catch (std::exception& e) {
+        free(m_super_blk);
+        throw(e);
     }
+
     m_system_uuid = system_uuid;
 
     HS_ASSERT_CMP(LOGMSG, m_devsize, >, 0);
@@ -216,12 +208,12 @@ bool PhysicalDev::load_super_block() {
 void PhysicalDev::read_dm_chunk(char* mem, uint64_t size) {
     HS_ASSERT_CMP(DEBUG, m_super_blk->dm_chunk[m_cur_indx % 2].get_chunk_size(), ==, size);
     auto offset = m_super_blk->dm_chunk[m_cur_indx % 2].chunk_start_offset;
-    drive_iface->sync_read(get_devfd(), mem, size, (off_t)offset);
+    drive_iface->sync_read(m_iodev.get(), mem, size, (off_t)offset);
 }
 
 void PhysicalDev::write_dm_chunk(uint64_t gen_cnt, char* mem, uint64_t size) {
     auto offset = m_dm_chunk[(++m_cur_indx) % 2]->get_start_offset();
-    drive_iface->sync_write(get_devfd(), mem, size, (off_t)offset);
+    drive_iface->sync_write(m_iodev.get(), mem, size, (off_t)offset);
     write_super_block(gen_cnt);
 }
 
@@ -259,7 +251,7 @@ inline bool PhysicalDev::validate_device() {
 }
 
 inline void PhysicalDev::write_superblock() {
-    ssize_t bytes = pwrite(m_devfd, m_super_blk, SUPERBLOCK_SIZE, 0);
+    ssize_t bytes = pwrite(m_iodev->fd(), m_super_blk, SUPERBLOCK_SIZE, 0);
     if (sisl_unlikely((bytes < 0) || (size_t)bytes != SUPERBLOCK_SIZE)) {
         throw std::system_error(errno, std::system_category(), "error while writing a superblock" + get_devname());
     }
@@ -267,33 +259,33 @@ inline void PhysicalDev::write_superblock() {
 
 inline void PhysicalDev::read_superblock() {
     memset(m_super_blk, 0, SUPERBLOCK_SIZE);
-    ssize_t bytes = pread(m_devfd, m_super_blk, SUPERBLOCK_SIZE, 0);
+    ssize_t bytes = pread(m_iodev->fd(), m_super_blk, SUPERBLOCK_SIZE, 0);
     if (sisl_unlikely((bytes < 0) || ((size_t)bytes != SUPERBLOCK_SIZE))) {
         throw std::system_error(errno, std::system_category(), "error while reading a superblock" + get_devname());
     }
 }
 
 void PhysicalDev::write(const char* data, uint32_t size, uint64_t offset, uint8_t* cookie, bool part_of_batch) {
-    drive_iface->async_write(get_devfd(), data, size, (off_t)offset, cookie, part_of_batch);
+    drive_iface->async_write(m_iodev.get(), data, size, (off_t)offset, cookie, part_of_batch);
 }
 
 void PhysicalDev::writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie,
                          bool part_of_batch) {
-    drive_iface->async_writev(get_devfd(), iov, iovcnt, size, offset, cookie, part_of_batch);
+    drive_iface->async_writev(m_iodev.get(), iov, iovcnt, size, offset, cookie, part_of_batch);
 }
 
 void PhysicalDev::read(char* data, uint32_t size, uint64_t offset, uint8_t* cookie, bool part_of_batch) {
-    drive_iface->async_read(get_devfd(), data, size, (off_t)offset, cookie, part_of_batch);
+    drive_iface->async_read(m_iodev.get(), data, size, (off_t)offset, cookie, part_of_batch);
 }
 
 void PhysicalDev::readv(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie,
                         bool part_of_batch) {
-    drive_iface->async_readv(get_devfd(), iov, iovcnt, size, (off_t)offset, cookie, part_of_batch);
+    drive_iface->async_readv(m_iodev.get(), iov, iovcnt, size, (off_t)offset, cookie, part_of_batch);
 }
 
 ssize_t PhysicalDev::sync_write(const char* data, uint32_t size, uint64_t offset) {
     try {
-        return drive_iface->sync_write(get_devfd(), data, size, (off_t)offset);
+        return drive_iface->sync_write(m_iodev.get(), data, size, (off_t)offset);
     } catch (const std::system_error& e) {
         std::stringstream ss;
         ss << "dev_name " << get_devname() << ":" << e.what() << "\n";
@@ -305,7 +297,7 @@ ssize_t PhysicalDev::sync_write(const char* data, uint32_t size, uint64_t offset
 
 ssize_t PhysicalDev::sync_writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset) {
     try {
-        return drive_iface->sync_writev(get_devfd(), iov, iovcnt, size, (off_t)offset);
+        return drive_iface->sync_writev(m_iodev.get(), iov, iovcnt, size, (off_t)offset);
     } catch (const std::system_error& e) {
         std::stringstream ss;
         ss << "dev_name " << get_devname() << e.what() << "\n";
@@ -317,7 +309,7 @@ ssize_t PhysicalDev::sync_writev(const iovec* iov, int iovcnt, uint32_t size, ui
 
 ssize_t PhysicalDev::sync_read(char* data, uint32_t size, uint64_t offset) {
     try {
-        return drive_iface->sync_read(get_devfd(), data, size, (off_t)offset);
+        return drive_iface->sync_read(m_iodev.get(), data, size, (off_t)offset);
     } catch (const std::system_error& e) {
         std::stringstream ss;
         ss << "dev_name " << get_devname() << e.what() << "\n";
@@ -330,7 +322,7 @@ ssize_t PhysicalDev::sync_read(char* data, uint32_t size, uint64_t offset) {
 
 ssize_t PhysicalDev::sync_readv(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset) {
     try {
-        return drive_iface->sync_readv(get_devfd(), iov, iovcnt, size, (off_t)offset);
+        return drive_iface->sync_readv(m_iodev.get(), iov, iovcnt, size, (off_t)offset);
     } catch (const std::system_error& e) {
         std::stringstream ss;
         ss << "dev_name " << get_devname() << e.what() << "\n";
@@ -411,7 +403,7 @@ PhysicalDevChunk* PhysicalDev::find_free_chunk(uint64_t req_size) {
 std::string PhysicalDev::to_string() {
     std::stringstream ss;
     ss << "Device name = " << m_devname << "\n";
-    ss << "Device fd = " << m_devfd << "\n";
+    ss << "Device fd = " << m_iodev->fd() << "\n";
     ss << "Device size = " << m_devsize << "\n";
     ss << "Super Block :\n";
     ss << "\tMagic = " << m_super_blk->magic << "\n";

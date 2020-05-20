@@ -242,8 +242,7 @@ struct io_req_t : public vol_interface_req {
         is_read = (wbuf == nullptr);
         cur_vol = vinfo->vol_idx;
 
-        auto ret = posix_memalign((void**)&validate_buf, 4096, size);
-        assert(!ret);
+        validate_buf = iomanager.iobuf_alloc(512, size);
         assert(validate_buf != nullptr);
         if (wbuf) memcpy(validate_buf, wbuf, size);
     }
@@ -357,10 +356,10 @@ public:
                 max_capacity += tcfg.max_disk_capacity;
             }
         }
-        /* Don't populate the whole disks. Only 80 % of it */
+        /* Don't populate the whole disks. Only 60 % of it */
         max_vol_size = (tcfg.p_volume_size * max_capacity) / (100 * tcfg.max_vols);
 
-        iomanager.start(1 /* total interfaces */, tcfg.num_threads, bind_this(VolTest::handle_iothread_msg, 1));
+        iomanager.start(1 /* total interfaces */, tcfg.num_threads, false, bind_this(VolTest::handle_iothread_msg, 1));
         iomanager.add_drive_interface(
             std::dynamic_pointer_cast< iomgr::DriveInterface >(std::make_shared< iomgr::AioDriveInterface >()),
             true /* is_default */);
@@ -368,7 +367,7 @@ public:
         init_params params;
         params.open_flags = tcfg.io_flags;
         params.min_virtual_page_size = tcfg.vol_page_size;
-        params.cache_size = 4 * 1024 * 1024 * 1024ul;
+        params.app_mem_size = 5 * 1024 * 1024 * 1024ul;
         params.disk_init = tcfg.init;
         params.devices = device_info;
         params.is_file = tcfg.dev_names.size() ? false : true;
@@ -380,7 +379,7 @@ public:
 
         params.disk_attr = disk_attributes();
         params.disk_attr->phys_page_size = tcfg.phy_page_size;
-        params.disk_attr->align_size = 4096;
+        params.disk_attr->align_size = 512;
         params.disk_attr->atomic_phys_page_size = tcfg.atomic_phys_page_size;
 
         boost::uuids::string_generator gen;
@@ -513,8 +512,7 @@ public:
             return;
         }
         tcfg.max_io_size = params.max_io_size;
-        auto ret = posix_memalign((void**)&init_buf, 4096, tcfg.max_io_size);
-        assert(!ret);
+        init_buf = iomanager.iobuf_alloc(512, tcfg.max_io_size);
         bzero(init_buf, tcfg.max_io_size);
         assert(!tcfg.expected_init_fail);
         if (tcfg.init) {
@@ -877,8 +875,7 @@ protected:
         if (vol == nullptr) { return false; }
 
         uint64_t size = nlbas * VolInterface::get_instance()->get_page_size(vol);
-        auto ret = posix_memalign((void**)&wbuf, 4096, size);
-        assert(ret == 0);
+        wbuf = iomanager.iobuf_alloc(512, size);
 
         /* buf will be owned by homestore after sending the IO. so we need to allocate buf1 which will be used
          * to write to a file after ios are completed.
@@ -1360,12 +1357,11 @@ SDS_OPTION_GROUP(
      "phy_page_size"),
     (io_flags, "", "io_flags", "io_flags", ::cxxopts::value< uint32_t >()->default_value("1"), "0 or 1"),
     (mem_btree_page_size, "", "mem_btree_page_size", "mem_btree_page_size",
-     ::cxxopts::value< uint32_t >()->default_value("8192"), "mem_btree_piage_size"),
+     ::cxxopts::value< uint32_t >()->default_value("8192"), "mem_btree_page_size"),
     (expect_io_error, "", "expect_io_error", "expect_io_error", ::cxxopts::value< uint32_t >()->default_value("0"),
      "0 or 1"),
     (p_volume_size, "", "p_volume_size", "p_volume_size", ::cxxopts::value< uint32_t >()->default_value("60"),
      "0 to 200"))
-
 #define ENABLED_OPTIONS logging, home_blks, test_volume
 
 SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)

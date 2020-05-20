@@ -48,8 +48,7 @@ public:
 
     LogStoreValue(uint64_t size) : m_size(size) {
         assert(m_bytes == nullptr);
-        auto ret = posix_memalign((void**)&m_bytes, 4096, m_size);
-        assert(ret == 0);
+        m_bytes = iomanager.iobuf_alloc(512, m_size);
     }
 
     LogStoreValue(const LogStoreValue& other) { copy_blob(other.get_blob()); }

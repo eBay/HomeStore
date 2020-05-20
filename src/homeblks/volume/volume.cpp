@@ -79,7 +79,10 @@ Volume::Volume(const vol_params& params) :
 }
 
 Volume::Volume(meta_blk* mblk_cookie, sisl::aligned_unique_ptr< vol_sb_hdr > sb) :
-        m_metrics(sb->vol_name), m_sb(std::move(sb)), m_indx_mgr_destroy_started(false), m_sb_cookie(mblk_cookie) {}
+        m_metrics(sb->vol_name),
+        m_sb(std::move(sb)),
+        m_indx_mgr_destroy_started(false),
+        m_sb_cookie(mblk_cookie) {}
 
 void Volume::init() {
     if (!m_sb) {
@@ -89,12 +92,9 @@ void Volume::init() {
             std::bind(&Volume::process_indx_completions, this, std::placeholders::_1, std::placeholders::_2),
             std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1),
             std::bind(&Volume::pending_read_blk_cb, this, std::placeholders::_1, std::placeholders::_2));
-        vol_sb_hdr* mem =
-            (vol_sb_hdr*)std::aligned_alloc(HS_STATIC_CONFIG(disk_attr.align_size),
-                                            sisl::round_up(sizeof(vol_sb_hdr), HS_STATIC_CONFIG(disk_attr.align_size)));
-        assert(mem != nullptr);
-        m_sb = sisl::aligned_unique_ptr< vol_sb_hdr >(new (mem) vol_sb_hdr(
-            m_params.page_size, m_params.size, (char*)m_params.vol_name, m_params.uuid, m_indx_mgr->get_active_sb()));
+        m_sb = sisl::make_aligned_unique< vol_sb_hdr >(HS_STATIC_CONFIG(disk_attr.align_size), m_params.page_size,
+                                                       m_params.size, (const char*)m_params.vol_name, m_params.uuid,
+                                                       m_indx_mgr->get_active_sb());
 
         set_state(vol_state::ONLINE, true);
     } else {
@@ -164,9 +164,7 @@ void Volume::destroy_internal() {
 /* It is called only once */
 void Volume::shutdown(indxmgr_stop_cb cb) { IndxMgr::shutdown(cb); }
 
-Volume::~Volume() {
-    delete m_indx_mgr;
-}
+Volume::~Volume() { delete m_indx_mgr; }
 
 std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
     std::vector< BlkId > bid;
@@ -202,12 +200,11 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
 
         for (uint32_t i = 0; i < bid.size(); ++i) {
             if (bid[i].get_nblks() == 0) {
-                /* It should not happen. But it happened once so adding a safe check in case it
-                 * happens again.
-                 */
+                /* It should not happen. But it happened once so adding a safe check in case it happens again */
                 VOL_LOG_ASSERT(0, vreq, "{}", bid[i].to_string());
                 continue;
             }
+
             /* Create child requests */
             int nlbas = bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) / get_page_size();
             auto vc_req = create_vol_child_req(bid[i], vreq, start_lba, nlbas);

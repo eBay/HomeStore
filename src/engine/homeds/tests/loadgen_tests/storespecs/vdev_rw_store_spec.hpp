@@ -43,10 +43,7 @@ public:
         auto off = m_off_arr[index];
 
         auto count = m_off_to_info_map[off].size;
-
-        uint8_t* buf = nullptr;
-        auto ret = posix_memalign((void**)&buf, 4096, count);
-        assert(!ret);
+        uint8_t* buf = iomanager.iobuf_alloc(512, count);
 
         auto seeked_pos = m_store->lseek(off);
         auto bytes_read = m_store->read((void*)buf, (size_t)count);

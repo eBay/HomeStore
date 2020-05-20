@@ -7,7 +7,7 @@ add_library(hs_device OBJECT ${DEVICE_SOURCE})
 
 set(TEST_VDEV_SOURCES tests/test_vdev.cpp)
 add_executable(test_virtual_device ${TEST_VDEV_SOURCES})
-target_link_libraries(test_virtual_device hs_device homeblks ${CONAN_LIBS})
+target_link_libraries(test_virtual_device hs_device homeblks)
 
 message(WARNING "PhysicalDevice test disabled due to interface change.")
 # XXX: Currently out of date with DeviceManager interface

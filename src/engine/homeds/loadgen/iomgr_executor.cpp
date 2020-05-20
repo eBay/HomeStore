@@ -15,33 +15,26 @@ IOMgrExecutor::IOMgrExecutor(int num_threads, int num_priorities, uint32_t max_q
     m_running.store(false, std::memory_order_relaxed);
     m_read_cnt = 0;
     m_write_cnt = 0;
-    m_ev_fd = eventfd(0, EFD_NONBLOCK);
+    // m_ev_fd = eventfd(0, EFD_NONBLOCK);
 
     iomanager.add_drive_interface(
         std::dynamic_pointer_cast< iomgr::DriveInterface >(std::make_shared< iomgr::AioDriveInterface >()),
         true /* is_default */);
 
-    m_ev_fd = eventfd(0, EFD_NONBLOCK);
+    /*m_ev_fd = eventfd(0, EFD_NONBLOCK);
     m_ev_fdinfo = iomanager.add_fd(iomanager.default_drive_interface(), m_ev_fd,
                                    std::bind(&IOMgrExecutor::process_ev_callback, this, std::placeholders::_1,
                                              std::placeholders::_2, std::placeholders::_3),
-                                   EPOLLIN, 9, nullptr);
-
-#if 0
-    m_iomgr = std::make_shared< iomgr::ioMgr >(num_ep, num_threads);
-    m_iomgr->add_fd(
-        m_ev_fd, [this](auto fd, auto cookie, auto event) { process_ev_callback(fd, cookie, event); }, EPOLLIN, 9,
-        nullptr);
-#endif
+                                   EPOLLIN, 9, nullptr); */
 
     // exec start should be called before iomgr->start
     start();
-    iomanager.start(1 /* total interfaces */, num_threads);
+    iomanager.start(1 /* total interfaces */, num_threads, false, bind_this(IOMgrExecutor::handle_iothread_msg, 1));
 
-    uint64_t temp = 1;
+    // uint64_t temp = 1;
     std::this_thread::sleep_for(std::chrono::seconds(2));
-
-    [[maybe_unused]] auto wsize = write(m_ev_fd, &temp, sizeof(uint64_t));
+    iomanager.send_msg(-1, iomgr::iomgr_msg(iomgr::iomgr_msg_type::CUSTOM_MSG, nullptr, -1, nullptr, 0));
+    //[[maybe_unused]] auto wsize = write(m_ev_fd, &temp, sizeof(uint64_t));
 }
 
 // It is called everytime a loadgen test case finishes;
@@ -52,7 +45,7 @@ IOMgrExecutor::~IOMgrExecutor() {
     // put iomgr's stop here (instead of IOMgrExecutor::stop) so that
     // executor could be restarted after a IOMgrExecutor::stop();
     if (m_running.load()) { stop(true); }
-    if (m_ev_fdinfo) iomanager.remove_fd(iomanager.default_drive_interface(), m_ev_fdinfo);
+    // if (m_ev_fdinfo) iomanager.remove_fd(iomanager.default_drive_interface(), m_ev_fdinfo);
     iomanager.stop();
 }
 
@@ -60,6 +53,27 @@ bool IOMgrExecutor::is_empty() { return m_cq.isEmpty(); }
 
 bool IOMgrExecutor::is_running() const { return m_running.load(std::memory_order_relaxed); }
 
+void IOMgrExecutor::handle_iothread_msg(const iomgr::iomgr_msg& msg) {
+    LOGTRACE("Received iothread msg of type {}", msg.m_type);
+    if (msg.m_type == iomgr::iomgr_msg_type::CUSTOM_MSG) { process_new_request(); }
+}
+
+void IOMgrExecutor::process_new_request() {
+    while (1) {
+        m_read_cnt.fetch_add(1, std::memory_order_relaxed);
+        if (unlikely(!is_running())) {
+            m_read_cnt.fetch_sub(1, std::memory_order_relaxed);
+            LOGINFO("{}, not running, exit...", __FUNCTION__);
+            return;
+        }
+
+        callback_t cb;
+        m_cq.blockingRead(cb);
+        cb();
+    }
+}
+
+#if 0
 void IOMgrExecutor::process_ev_callback(const int fd, const void* cookie, const int event) {
     m_read_cnt.fetch_add(1, std::memory_order_relaxed);
     if (unlikely(!is_running())) {
@@ -79,6 +93,7 @@ void IOMgrExecutor::process_ev_callback(const int fd, const void* cookie, const 
     m_cq.blockingRead(cb);
     cb();
 }
+#endif
 
 //
 // 1. Set running to false;

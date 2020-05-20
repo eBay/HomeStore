@@ -172,7 +172,7 @@ public:
 public:
     std::string to_string() {
         std::stringstream ss;
-        ss << "min_virtual_page_size=" << min_virtual_page_size << ",cache_size=" << cache_size
+        ss << "min_virtual_page_size=" << min_virtual_page_size << ",app_mem_size=" << app_mem_size
            << ",disk_init=" << disk_init << ",is_file=" << is_file << ",open_flags =" << open_flags
            << ",number of devices =" << devices.size();
         ss << "device names = ";

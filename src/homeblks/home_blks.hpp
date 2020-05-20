@@ -1,8 +1,8 @@
 #ifndef VOL_CONFIG_HPP
 #define VOL_CONFIG_HPP
 
-#include "api/vol_interface.hpp"
 #include "engine/homestore.hpp"
+#include "api/vol_interface.hpp"
 #include <memory>
 #include "engine/homeds/btree/btree.hpp"
 #include "engine/homeds/btree/ssd_btree.hpp"
@@ -232,6 +232,9 @@ public:
     static void set_log_level(sisl::HttpCallData cd);
     static void dump_stack_trace(sisl::HttpCallData cd);
     static void verify_hs(sisl::HttpCallData cd);
+    static void get_malloc_stats(sisl::HttpCallData cd);
+
+    // Other static functions
     static void meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
     static void meta_blk_recovery_comp_cb(bool success);
 

@@ -4,6 +4,7 @@
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
 #include <utility/thread_buffer.hpp>
+#include "homeblks/volume/mapping.hpp"
 #include <utility/obj_life_counter.hpp>
 
 #include <metrics/metrics.hpp>
@@ -15,7 +16,6 @@
 #include "valuespecs/fixedbyte_value_spec.hpp"
 #include "storespecs/membtree_store_spec.hpp"
 
-#include "homeblks/volume/mapping.hpp"
 #include "keyspecs/map_key_spec.hpp"
 #include "storespecs/map_store_spec.hpp"
 #include "valuespecs/map_value_spec.hpp"

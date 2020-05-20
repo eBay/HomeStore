@@ -151,8 +151,8 @@ static_assert(sizeof(vdev_info_block) == MAX_VDEV_INFO_BLOCK_SZ, "vdev info bloc
 #define SUPERBLOCK_PAYLOAD_OFFSET 4096
 struct super_block {
     char empty_buf[SUPERBLOCK_PAYLOAD_OFFSET]; // don't write anything to first 4096 bytes.
-    uint64_t magic;   // Header magic expected to be at the top of block
-    uint32_t version; // Version Id of this structure
+    uint64_t magic;                            // Header magic expected to be at the top of block
+    uint32_t version;                          // Version Id of this structure
     uint64_t gen_cnt;
     char product_name[64]; // Product name
     int cur_indx;
@@ -162,6 +162,7 @@ struct super_block {
 
     uint64_t get_magic() const { return magic; }
 } __attribute((packed));
+
 #define SUPERBLOCK_SIZE (HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size) + SUPERBLOCK_PAYLOAD_OFFSET)
 
 struct dm_info {
@@ -323,7 +324,6 @@ public:
     uint64_t sb_gen_cnt();
     size_t get_total_cap();
 
-    int get_devfd() const { return m_devfd; }
     std::string get_devname() const { return m_devname; }
     uint64_t get_size() const { return m_devsize; }
     uint32_t get_first_chunk_id() const { return m_info_blk.first_chunk_id; }
@@ -384,7 +384,7 @@ private:
 
 private:
     DeviceManager* m_mgr; // Back pointer to physical device
-    int m_devfd;
+    io_device_ptr m_iodev;
     std::string m_devname;
     super_block* m_super_blk; // Persisent header block
     uint64_t m_devsize;

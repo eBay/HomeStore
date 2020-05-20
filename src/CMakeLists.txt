@@ -1,12 +1,18 @@
 set (CPP_FLAGS "-faligned-new -Dlinux")
-#set (CPP_WARNINGS "-Wall -Wextra -Werror -Wno-unused-parameter -Wno-unused-variable -Wno-empty-body -Wno-array-bounds -Wno-cast-function-type -Wno-maybe-uninitialized -Wno-deprecated-copy -Wno-attributes")
-set (CPP_WARNINGS "-Wall -Wextra -Werror -Wno-unused-parameter -Wno-unused-variable -Wno-empty-body -Wno-array-bounds -Wno-cast-function-type -Wno-maybe-uninitialized -Wno-deprecated-copy")
+set (CPP_WARNINGS "-Wall -Wextra -Werror -Wno-unused-parameter -Wno-unused-variable -Wno-empty-body -Wno-array-bounds -Wno-cast-function-type -Wno-maybe-uninitialized -Wno-deprecated-copy -Wno-unused-function")
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CPP_FLAGS} ${CPP_WARNINGS} -DBOOST_ALLOW_DEPRECATED_HEADERS -DRCU_SIGNAL")
 
 if ("$ENV{HOMESTORE_BUILD_TAG}" STREQUAL "")
     set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DPACKAGE_VERSION=\\\"${CONAN_PACKAGE_VERSION}\\\"")
 else()
     set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DPACKAGE_VERSION=\\\"${CONAN_PACKAGE_VERSION}-$ENV{HOMESTORE_BUILD_TAG}\\\"")
+endif()
+
+
+if ("${MALLOC_IMPL}" STREQUAL "jemalloc")
+    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSING_JEMALLOC")
+elseif ("${MALLOC_IMPL}" STREQUAL "tcmalloc")
+    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSING_TCMALLOC")
 endif()
 
 if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
@@ -26,9 +32,10 @@ find_library(LIB_ISAL isal)
 
 set(COMMON_LIB_DEPS
       ${CONAN_LIBS}
-      ${LIB_DOUBLE_CONVERSION}
       ${LIB_AIO}
-      ${LIB_ISAL}
+      dpdk
+      #${LIB_DOUBLE_CONVERSION}
+      #${LIB_ISAL}
     )
 
 include_directories (BEFORE .)

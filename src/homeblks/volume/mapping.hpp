@@ -1,5 +1,6 @@
 #pragma once
 
+#include "volume.hpp"
 #include "engine/homeds/btree/ssd_btree.hpp"
 #include "engine/homeds/btree/btree.hpp"
 #include "engine/blkalloc/blk.h"
@@ -8,11 +9,9 @@
 #include "engine/homeds/array/blob_array.h"
 #include <math.h>
 #include <sds_logging/logging.h>
-#include "volume.hpp"
 #include <utility/obj_life_counter.hpp>
 #include "homeblks/home_blks.hpp"
 
-// SDS_LOGGING_DECL(VMOD_VOL_MAPPING)
 SDS_LOGGING_DECL(volume)
 
 using namespace homeds;

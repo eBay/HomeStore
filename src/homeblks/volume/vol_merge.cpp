@@ -226,7 +226,7 @@ public:
 
         params.open_flags = homestore::io_flag::DIRECT_IO;
         params.min_virtual_page_size = 4096;
-        params.cache_size = 4 * 1024 * 1024 * 1024ul;
+        params.app_mem_size = 4 * 1024 * 1024 * 1024ul;
         params.disk_init = init;
         params.devices = device_info;
         params.is_file = true;
@@ -269,11 +269,10 @@ public:
     }
 
     void read_vol(uint32_t cur, uint64_t lba, uint64_t nlbas) {
-        uint8_t* buf = nullptr;
         uint64_t size = nlbas * VolInterface::get_instance()->get_page_size(vol_info[cur]->vol);
-        auto ret = posix_memalign((void**)&buf, 4096, size);
-        if (ret) { assert(0); }
+        uint8_t* buf = iomanager.iobuf_alloc(512, size);
         assert(buf != nullptr);
+
         req* req = new struct req();
         req->lba = lba;
         req->nlbas = nlbas;
@@ -297,13 +296,10 @@ public:
     }
 
     void write_vol(uint32_t cur, uint64_t lba, uint64_t nlbas) {
-        uint8_t* buf = nullptr;
-        uint8_t* buf1 = nullptr;
         uint64_t size = nlbas * VolInterface::get_instance()->get_page_size(vol_info[cur]->vol);
-        auto ret = posix_memalign((void**)&buf, 4096, size);
-        if (ret) { assert(0); }
-        ret = posix_memalign((void**)&buf1, 4096, size);
-        assert(!ret);
+        uint8_t* buf = iomanager.iobuf_alloc(512, size);
+        uint8_t* buf1 = iomanager.iobuf_alloc(512, size);
+
         /* buf will be owned by homestore after sending the IO. so we need to allocate buf1 which will be used to
          * write to a file after ios are completed.
          */
@@ -373,13 +369,10 @@ public:
             }
         }
 
-        uint8_t *buf, *buf1;
         uint64_t size = nlbas * VolInterface::get_instance()->get_page_size(vol_info[cur]->vol);
 
-        buf = buf1 = nullptr;
-        if (posix_memalign((void**)&buf, 4096, size)) { assert(0); }
-        if (posix_memalign((void**)&buf1, 4096, size)) { assert(0); }
-
+        uint8_t* buf = iomanager.iobuf_alloc(512, size);
+        uint8_t* buf1 = iomanager.iobuf_alloc(512, size);
         assert(buf != nullptr && buf1 != nullptr);
         populate_buf(buf, size, lba, 0);
         memcpy(buf1, buf, size);
@@ -463,8 +456,7 @@ public:
             assert(vol_cnt == max_vols);
         }
         max_io_size = params.max_io_size;
-        auto ret = posix_memalign((void**)&init_buf, 4096, max_io_size);
-        assert(!ret);
+        init_buf = iomanager.iobuf_alloc(512, max_io_size);
         bzero(init_buf, max_io_size);
 
         outstanding_ios = 0;

@@ -53,14 +53,9 @@ void MetaBlkMgr::load_ssb(sb_blkstore_blob* blob) {
     homeds::blob b = bbuf->at_offset(0);
     assert(b.size == META_BLK_PAGE_SZ);
 
-    int aret = posix_memalign((void**)&(m_ssb), HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_PAGE_SZ);
-    if (aret != 0) {
-        assert(0);
-        throw std::bad_alloc();
-    }
+    m_ssb = (meta_blk_sb*)iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_PAGE_SZ);
 
     memset((void*)m_ssb, 0, META_BLK_PAGE_SZ);
-
     memcpy((void*)m_ssb, b.bytes, sizeof(meta_blk_sb));
 
     // verify magic
@@ -90,12 +85,7 @@ void MetaBlkMgr::init_ssb() {
     blob.blkid.set(bid);
     m_sb_blk_store->update_vb_context(sisl::blob((uint8_t*)&blob, (uint32_t)sizeof(sb_blkstore_blob)));
 
-    m_ssb = nullptr;
-    int aret = posix_memalign((void**)&(m_ssb), HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_PAGE_SZ);
-    if (aret != 0) {
-        assert(0);
-        throw std::bad_alloc();
-    }
+    m_ssb = (meta_blk_sb*)iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_PAGE_SZ);
     memset((void*)m_ssb, 0, META_BLK_PAGE_SZ);
 
     std::lock_guard< decltype(m_meta_mtx) > lk(m_meta_mtx);
@@ -129,13 +119,7 @@ void MetaBlkMgr::scan_meta_blks() {
     // this might not be a valid assert, but good to have blkstore size align to 512 bytes;
     assert(total_sz % HS_STATIC_CONFIG(disk_attr.phys_page_size) == 0);
 
-    uint8_t* buf = nullptr;
-    int ret = posix_memalign((void**)&(buf), HS_STATIC_CONFIG(disk_attr.align_size), total_sz);
-    if (ret != 0) {
-        assert(0);
-        throw std::bad_alloc();
-    }
-
+    uint8_t* buf = iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), total_sz);
     auto total_bytes_read = m_sb_blk_store->read(buf, total_sz);
     HS_ASSERT(RELEASE, total_bytes_read > 0, "bytes read returned: {} from blkstore.", total_bytes_read);
 
@@ -163,9 +147,7 @@ void MetaBlkMgr::scan_meta_blks() {
             if (crc != (*it)->hdr.h.crc) { continue; }
 
             mblk_cnt++;
-            meta_blk* mblk = nullptr;
-            int ret = posix_memalign((void**)&(mblk), HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_PAGE_SZ);
-
+            meta_blk* mblk = (meta_blk*)iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_PAGE_SZ);
             memcpy(*it, mblk, META_BLK_PAGE_SZ);
 
             if (false == is_sub_type_valid(mblk->hdr.h.type)) {
@@ -257,15 +239,8 @@ void MetaBlkMgr::write_blk(BlkId bid, void* context_data, uint32_t sz) {
 }
 
 meta_blk* MetaBlkMgr::init_meta_blk(BlkId bid, meta_sub_type type, void* context_data, size_t sz) {
-    meta_blk* mblk = nullptr;
-    int ret = posix_memalign((void**)&(mblk), HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_PAGE_SZ);
-    if (ret != 0) {
-        assert(0);
-        throw std::bad_alloc();
-    }
-
+    meta_blk* mblk = (meta_blk*)iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_PAGE_SZ);
     mblk->hdr.h.blkid.set(bid);
-    // mblk->hdr.h.type = type;
     memset(mblk->hdr.h.type, 0, MAX_SUBSYS_TYPE_LEN);
     memcpy(mblk->hdr.h.type, type.c_str(), type.length());
 
@@ -317,9 +292,8 @@ meta_blk* MetaBlkMgr::init_meta_blk(BlkId bid, meta_sub_type type, void* context
 void MetaBlkMgr::write_meta_blk_ovf(BlkId& prev_id, BlkId& bid, void* context_data, uint64_t sz, uint64_t offset) {
     HS_ASSERT(RELEASE, offset < sz, "offset:{} should be less than sz:{}", offset, sz);
 
-    meta_blk_ovf_hdr* ovf_hdr = nullptr;
-    int ret = posix_memalign((void**)&(ovf_hdr), HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_OVF_HDR_MAX_SZ);
-    HS_ASSERT(RELEASE, ret == 0, "alloc failed ret: {}", ret);
+    meta_blk_ovf_hdr* ovf_hdr =
+        (meta_blk_ovf_hdr*)iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_OVF_HDR_MAX_SZ);
 
     HS_ASSERT(DEBUG, m_meta_mtx.try_lock() == false, "mutex should be already be locked");
 
@@ -573,7 +547,7 @@ void MetaBlkMgr::recover(bool do_comp_cb) {
         auto cb = sub.second.cb;
         for (auto& m : it->second) {
             // TODO: replace with iobuf_alloc_unique
-            auto buf = sisl::make_aligned_unique< uint8_t >(dma_boundary, m.second->hdr.h.context_sz);
+            auto buf = sisl::make_aligned_sized_unique< uint8_t >(dma_boundary, m.second->hdr.h.context_sz);
 
             if (m.second->hdr.h.context_sz <= META_BLK_CONTEXT_SZ) {
                 HS_ASSERT(RELEASE, m.second->hdr.h.ovf_blkid.to_integer() == BlkId::invalid_internal_id(),
@@ -592,11 +566,9 @@ void MetaBlkMgr::recover(bool do_comp_cb) {
     if (do_comp_cb) {
         // for each registered subsystem, do recovery complete callback;
         for (auto& sub : m_sub_info) {
-            if (sub.second.comp_cb != nullptr) {
-                sub.second.comp_cb(true);
-            }
+            if (sub.second.comp_cb != nullptr) { sub.second.comp_cb(true); }
         }
-    } 
+    }
 }
 
 MetaBlkMgr* MetaBlkMgr::_instance = nullptr;

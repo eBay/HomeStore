@@ -5,7 +5,7 @@ from conans import ConanFile, CMake, tools
 class HomestoreConan(ConanFile):
     name = "homestore"
 
-    version = "0.12.01"
+    version = "0.14.0"
     revision_mode = "scm"
 
     license = "Proprietary"
@@ -18,30 +18,32 @@ class HomestoreConan(ConanFile):
                 "fPIC": ['True', 'False'],
                 "coverage": ['True', 'False'],
                 "sanitize": ['True', 'False'],
+                'malloc_impl' : ['libc', 'tcmalloc', 'jemalloc']
                 }
     default_options = (
                         'shared=False',
                         'fPIC=True',
                         'coverage=False',
                         'sanitize=True',
+                        'malloc_impl=libc',
                         )
 
     requires = (
-            "flip/0.2.7@sds/develop",
-            "iomgr/3.1.4@sds/iomgr_v3",
-            "sds_logging/7.0.0@sds/develop",
-            "sisl/1.0.10@sisl/develop",
+            "flip/0.2.9@sds/develop",
+            "iomgr/[>=3.2.0]@sds/iomgr_v3",
+            "sds_logging/7.0.2@sds/develop",
+            "sisl/[>=1.0.12]@sisl/develop",
 
             # FOSS, rarely updated
             "benchmark/1.5.0",
-            "boost/1.72.0",
+            "boost/1.73.0",
             "double-conversion/3.1.5",
             "evhtp/1.2.18.2",
             "farmhash/1.0.0",
-            "folly/2020.03.02.00",
+            "folly/2020.05.04.00",
             "isa-l/2.21.0",
             "libevent/2.1.11",
-            "openssl/1.1.1g"
+            "openssl/1.1.1g",
             )
 
     generators = "cmake"
@@ -55,12 +57,14 @@ class HomestoreConan(ConanFile):
     def imports(self):
         self.copy(root_package="flip", pattern="*.py", dst="bin/scripts", src="python/flip/", keep_path=True)
 
-    def build_requirements(self):
+    def requirements(self):
         if not self.settings.build_type == "Debug":
             if self.settings.build_type == "RelWithDebInfo":
-                self.build_requires("gperftools/2.7.0")
+                self.requires("gperftools/2.7.0")
+                self.options.malloc_impl = "tcmalloc"
             else:
-                self.build_requires("jemalloc/5.2.1")
+                self.requires("jemalloc/5.2.1")
+                self.options.malloc_impl = "jemalloc"
 
     def build(self):
         cmake = CMake(self)
@@ -79,6 +83,8 @@ class HomestoreConan(ConanFile):
 
         if self.settings.build_type == 'Debug':
             definitions['CMAKE_BUILD_TYPE'] = 'Debug'
+
+        definitions['MALLOC_IMPL'] = self.options.malloc_impl
 
         cmake.configure(defs=definitions)
         cmake.build()

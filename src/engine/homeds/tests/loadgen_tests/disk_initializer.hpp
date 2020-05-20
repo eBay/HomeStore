@@ -38,14 +38,14 @@ public:
         params.open_flags = homestore::io_flag::DIRECT_IO;
 #endif
         params.min_virtual_page_size = 4096;
-        params.cache_size = 4 * 1024 * 1024 * 1024ul;
+        params.app_mem_size = 5 * 1024 * 1024 * 1024ul;
         params.disk_init = true;
         params.devices = device_info;
         params.is_file = true;
         params.init_done_cb = init_done_cb;
         params.disk_attr = disk_attributes();
         params.disk_attr->phys_page_size = 4096;
-        params.disk_attr->align_size = 4096;
+        params.disk_attr->align_size = 512;
         params.disk_attr->atomic_phys_page_size = atomic_phys_page_size;
         params.vol_mounted_cb =
             std::bind(&DiskInitializer::vol_mounted_cb, this, std::placeholders::_1, std::placeholders::_2);

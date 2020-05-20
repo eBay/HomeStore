@@ -69,10 +69,10 @@ public:
     boost::uuids::uuid system_uuid;  // UUID assigned to the system
     io_flag open_flags = io_flag::DIRECT_IO;
 
-    uint32_t min_virtual_page_size = 4096;   // minimum page size supported. Ideally it should be 4k.
-    uint64_t cache_size = 512 * 1024 * 1024; // memory available for cache. We should give 80 % of the whole
-    bool disk_init = false;                  // true if disk has to be initialized.
-    bool is_read_only = false;               // Is read only
+    uint32_t min_virtual_page_size = 4096;          // minimum page size supported. Ideally it should be 4k.
+    uint64_t app_mem_size = 1 * 1024 * 1024 * 1024; // memory available for the app (including cache)
+    bool disk_init = false;                         // true if disk has to be initialized.
+    bool is_read_only = false;                      // Is read only
 
     /* optional parameters - if provided will override the startup config */
     boost::optional< disk_attributes > disk_attr;
@@ -89,7 +89,7 @@ public:
         json["is_read_only"] = is_read_only;
 
         json["min_virtual_page_size"] = min_virtual_page_size;
-        json["cache_size"] = cache_size;
+        json["app_mem_size"] = app_mem_size;
 
         return json;
     }

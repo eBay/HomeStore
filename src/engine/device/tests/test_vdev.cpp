@@ -1,8 +1,8 @@
 //
 // Created by Yaming Kuang 1/15/2020
 //
-#include "../virtual_dev.hpp"
 #include "homeblks/home_blks.hpp"
+#include "../virtual_dev.hpp"
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
 #include <gtest/gtest.h>
@@ -56,14 +56,14 @@ static void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthre
         std::dynamic_pointer_cast< iomgr::DriveInterface >(std::make_shared< iomgr::AioDriveInterface >()),
         true /* is_default */);
 
-    uint64_t cache_size = ((ndevices * dev_size) * 10) / 100;
-    LOGINFO("Initialize and start HomeBlks with cache_size = {}", cache_size);
+    uint64_t app_mem_size = ((ndevices * dev_size) * 15) / 100;
+    LOGINFO("Initialize and start HomeBlks with app_mem_size = {}", app_mem_size);
 
     boost::uuids::string_generator gen;
     init_params params;
     params.open_flags = homestore::io_flag::DIRECT_IO;
     params.min_virtual_page_size = 4096;
-    params.cache_size = cache_size;
+    params.app_mem_size = app_mem_size;
     params.disk_init = true;
     params.devices = device_info;
     params.is_file = true;
@@ -270,10 +270,7 @@ public:
 
         // validate_read_offset(off_to_read);
 
-        uint8_t* buf = nullptr;
-        auto ret = posix_memalign((void**)&buf, 4096, it->second.size);
-        HS_ASSERT_CMP(RELEASE, ret, ==, 0);
-
+        auto buf = iomanager.iobuf_alloc(512, it->second.size);
         auto bytes_read = m_store->pread((void*)buf, (size_t)it->second.size, (off_t)off_to_read);
 
         if (bytes_read == -1) { HS_ASSERT(DEBUG, false, "bytes_read returned -1, errno: {}", errno); }
@@ -304,10 +301,7 @@ public:
         LOGDEBUG("writing to offset: 0x{}, size: {}, start: 0x{}, tail: 0x{}", to_hex(off_to_wrt), sz_to_wrt,
                  to_hex(m_start_off), to_hex(m_store->get_tail_offset()));
 
-        uint8_t* buf = nullptr;
-        auto ret = posix_memalign((void**)&buf, 4096, sz_to_wrt);
-        HS_ASSERT_CMP(RELEASE, ret, ==, 0);
-
+        auto buf = iomanager.iobuf_alloc(512, sz_to_wrt);
         gen_rand_buf(buf, sz_to_wrt);
 
         auto bytes_written = m_store->pwrite(buf, sz_to_wrt, off_to_wrt);

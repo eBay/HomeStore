@@ -362,9 +362,7 @@ TEST_F(BitmapTest, SerializeSimpleTest1) {
     EXPECT_EQ(bm.size_serialized(), bits_to_word(total_nbits));
 
     homeds::blob b;
-    auto ret = posix_memalign((void**)&b.bytes, 8192, bm.size_serialized());
-    EXPECT_EQ(ret, 0);
-
+    b.bytes = (uint8_t*)std::aligned_alloc(512, sisl::round_up(bm.size_serialized(), 512));
     b.size = bm.size_serialized();
     memset(b.bytes, 0, b.size);
 
@@ -392,9 +390,7 @@ TEST_F(BitmapTest, SerializeSimpleTest2) {
     EXPECT_EQ(bm.size_serialized(), bits_to_word(total_nbits));
 
     homeds::blob b;
-    auto ret = posix_memalign((void**)&b.bytes, 8192, bm.size_serialized());
-    EXPECT_EQ(ret, 0);
-
+    b.bytes = (uint8_t*)std::aligned_alloc(512, sisl::round_up(bm.size_serialized(), 512));
     b.size = bm.size_serialized();
     memset(b.bytes, 0, b.size);
 
@@ -430,8 +426,7 @@ TEST_F(BitmapTest, DeserializeTest) {
     EXPECT_EQ(bm.size_serialized(), bits_to_word(total_nbits));
 
     homeds::blob b1;
-    auto ret = posix_memalign((void**)&b1.bytes, 8192, bm.size_serialized());
-    EXPECT_EQ(ret, 0);
+    b1.bytes = (uint8_t*)std::aligned_alloc(512, sisl::round_up(bm.size_serialized(), 512));
     b1.size = bm.size_serialized();
     memset(b1.bytes, 0, b1.size);
 
@@ -459,8 +454,7 @@ TEST_F(BitmapTest, DeserializeTest) {
 
     // Serilize again using bm_copy and compare b1 & b2
     homeds::blob b2;
-    ret = posix_memalign((void**)&b2.bytes, 8192, bm_copy.size_serialized());
-    EXPECT_EQ(ret, 0);
+    b2.bytes = (uint8_t*)std::aligned_alloc(512, sisl::round_up(bm_copy.size_serialized(), 512));
     b2.size = bm_copy.size_serialized();
     memset(b2.bytes, 0, b2.size);
 

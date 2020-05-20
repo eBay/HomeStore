@@ -13,6 +13,5 @@ add_executable(test_meta_blk_mgr
                 ${TEST_METABLK_SOURCE_FILES}
               )
 
-target_link_libraries(test_meta_blk_mgr homeblks ${COMMON_LIB_DEPS})
-target_link_libraries(test_meta_blk_mgr ${CONAN_LIBS})
+target_link_libraries(test_meta_blk_mgr homeblks)
 add_test(NAME TestMetaBlkMgr COMMAND test_meta_blk_mgr)

@@ -8,7 +8,7 @@ uint32_t LogGroup::_log_group_idx = 1;
 
 LogGroup::LogGroup() {
     m_iovecs.reserve(estimated_iovs);
-    m_log_buf = sisl::make_aligned_unique< uint8_t >(dma_boundary, inline_log_buf_size);
+    m_log_buf = sisl::make_aligned_sized_unique< uint8_t >(dma_boundary, inline_log_buf_size);
 }
 
 void LogGroup::reset(uint32_t max_records) {
@@ -29,7 +29,7 @@ void LogGroup::reset(uint32_t max_records) {
 
 void LogGroup::create_overflow_buf(uint32_t min_needed) {
     auto new_len = sisl::round_up(std::max(min_needed, m_cur_buf_len * 2), dma_boundary);
-    auto new_buf = sisl::make_aligned_unique< uint8_t >(dma_boundary, new_len);
+    auto new_buf = sisl::make_aligned_sized_unique< uint8_t >(dma_boundary, new_len);
     std::memcpy((void*)new_buf.get(), (void*)m_cur_log_buf, m_cur_buf_len);
 
     m_overflow_log_buf = std::move(new_buf);

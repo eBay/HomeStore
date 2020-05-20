@@ -55,7 +55,7 @@ constexpr auto Gi = Ki * Mi;
 constexpr uint64_t max_io_size = 1 * Mi;
 uint64_t max_outstanding_ios;
 uint64_t match_cnt = 0;
-uint64_t cache_size = 0;
+uint64_t app_mem_size = 0;
 std::atomic< uint64_t > write_cnt(0);
 std::atomic< uint64_t > read_cnt(0);
 std::atomic< uint64_t > read_err_cnt(0);
@@ -161,7 +161,7 @@ public:
         init_params params;
         params.open_flags = homestore::io_flag::DIRECT_IO;
         params.min_virtual_page_size = 4096;
-        params.cache_size = cache_size * 1024 * 1024 * 1024ul;
+        params.app_mem_size = app_mem_size * 1024 * 1024 * 1024ul;
         params.disk_init = init;
         params.devices = device_info;
         params.is_file = is_file ? true : false;
@@ -467,8 +467,8 @@ SDS_OPTION_GROUP(perf_test_volume,
                   ::cxxopts::value< std::vector< std::string > >(), "path [...]"),
                  (io_size, "", "io_size", "size of io in KB", ::cxxopts::value< uint32_t >()->default_value("64"),
                   "size of io in KB"),
-                 (cache_size, "", "cache_size", "size of cache in GB",
-                  ::cxxopts::value< uint32_t >()->default_value("4"), "size of cache in GB"),
+                 (app_mem_size, "", "app_mem_size", "size of app mem (including cache) in GB",
+                  ::cxxopts::value< uint32_t >()->default_value("4"), "size of app mem (incl cache) in GB"),
                  (is_file, "", "is_file", "is_it file", ::cxxopts::value< uint32_t >()->default_value("0"),
                   "is it file"),
                  (init, "", "init", "init", ::cxxopts::value< uint32_t >()->default_value("1"), "init"),
@@ -523,8 +523,7 @@ int main(int argc, char* argv[]) {
     if (SDS_OPTIONS.count("device_list")) {
         cfg.m_devs = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();
     }
-    cfg.m_cache_size = SDS_OPTIONS["cache_size"].as< uint32_t >();
-    cfg.m_cache_size *= 1024 * 1024 * 1024;
+    cfg.m_app_mem_size = SDS_OPTIONS["app_mem_size"].as< uint32_t >() * 1024 * 1024 * 1024;
     cfg.m_is_file = SDS_OPTIONS["is_file"].as< uint32_t >();
 
     SimpleTestStore test_store(cfg);

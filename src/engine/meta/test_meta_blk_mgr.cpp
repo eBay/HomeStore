@@ -45,14 +45,14 @@ static void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthre
         std::dynamic_pointer_cast< iomgr::DriveInterface >(std::make_shared< iomgr::AioDriveInterface >()),
         true /* is_default */);
 
-    uint64_t cache_size = ((ndevices * dev_size) * 10) / 100;
-    LOGINFO("Initialize and start HomeBlks with cache_size = {}", cache_size);
+    uint64_t app_mem_size = ((ndevices * dev_size) * 15) / 100;
+    LOGINFO("Initialize and start HomeBlks with app_mem_size = {}", app_mem_size);
 
     boost::uuids::string_generator gen;
     init_params params;
     params.open_flags = homestore::io_flag::DIRECT_IO;
     params.min_virtual_page_size = 4096;
-    params.cache_size = cache_size;
+    params.app_mem_size = app_mem_size;
     params.disk_init = true;
     params.devices = device_info;
     params.is_file = true;
@@ -136,10 +136,7 @@ public:
         m_wrt_cnt++;
         auto sz_to_wrt = rand_size(overflow);
 
-        uint8_t* buf = nullptr;
-        auto ret = posix_memalign((void**)&buf, 4096, sz_to_wrt);
-        HS_ASSERT_CMP(RELEASE, ret, ==, 0);
-
+        uint8_t* buf = iomanager.iobuf_alloc(512, sz_to_wrt);
         gen_rand_buf(buf, sz_to_wrt);
 
         void* cookie = nullptr;
@@ -188,9 +185,7 @@ public:
         auto it = m_write_sbs.begin() + get_rand_pos();
         bool overflow = rand() % 2;
         auto sz_to_wrt = rand_size(overflow);
-        uint8_t* buf = nullptr;
-        auto ret = posix_memalign((void**)&buf, 4096, sz_to_wrt);
-        HS_ASSERT_CMP(RELEASE, ret, ==, 0);
+        uint8_t* buf = iomanager.iobuf_alloc(512, sz_to_wrt);
 
         gen_rand_buf(buf, sz_to_wrt);
 

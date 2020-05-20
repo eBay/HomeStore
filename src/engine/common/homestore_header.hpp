@@ -78,8 +78,8 @@ public:
 #endif
 
 #define HOMESTORE_LOG_MODS                                                                                             \
-    btree_structures, btree_nodes, btree_generics, cache, device, httpserver_lmod, iomgr, varsize_blk_alloc,           \
-        VMOD_VOL_MAPPING, volume, flip, cp, metablk
+    btree_structures, btree_nodes, btree_generics, cache, device, httpserver_lmod, varsize_blk_alloc, iomgr, volume,   \
+        flip, cp, metablk
 
 template < typename T >
 std::string to_hex(T i) {
