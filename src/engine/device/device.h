@@ -280,13 +280,48 @@ public:
     void update_end_of_chunk(off_t off) { m_chunk_info->end_of_chunk_offset = off; }
     off_t get_end_of_chunk() { return m_chunk_info->end_of_chunk_offset; }
 
-    void* meta_blk_cookie = nullptr;
+    void recover(std::unique_ptr< sisl::Bitset > recovered_bm, meta_blk* mblk) {
+        m_meta_blk_cookie = mblk;
+        if (m_allocator) {
+            m_allocator->set_alloced_bm(std::move(recovered_bm));
+        } else {
+            m_recovered_bm = std::move(recovered_bm);
+        }
+    }
+
+    void recover() {
+        assert(m_allocator != nullptr);
+        m_allocator->set_alloced_bm(std::move(m_recovered_bm));
+    }
+
+    void cp_start(std::shared_ptr< blkalloc_cp_id > id) {
+        auto bitmap_mem = get_blk_allocator()->cp_start(id);
+        if (m_meta_blk_cookie) {
+            MetaBlkMgr::instance()->update_sub_sb("BLK_ALLOC", bitmap_mem->bytes, bitmap_mem->size, m_meta_blk_cookie);
+        } else {
+            MetaBlkMgr::instance()->add_sub_sb("BLK_ALLOC", bitmap_mem->bytes, bitmap_mem->size, m_meta_blk_cookie);
+        }
+    }
+
+    static std::shared_ptr< blkalloc_cp_id > attach_prepare_cp(std::shared_ptr< blkalloc_cp_id > cur_cp_id) {
+        std::shared_ptr< blkalloc_cp_id > cp_id(new blkalloc_cp_id());
+        if (cur_cp_id == nullptr) {
+            cp_id->cnt = 0;
+        } else {
+            cp_id->cnt = cur_cp_id->cnt + 1;
+        }
+        return cp_id;
+    }
+
+    void cp_done(std::shared_ptr< blkalloc_cp_id > id) { get_blk_allocator()->cp_done(id); }
 
 private:
     chunk_info_block* m_chunk_info;
     PhysicalDev* m_pdev;
     std::shared_ptr< BlkAllocator > m_allocator;
     uint64_t m_vdev_metadata_size;
+    void* m_meta_blk_cookie = nullptr;
+    std::unique_ptr< sisl::Bitset > m_recovered_bm;
 };
 
 class PhysicalDevMetrics : public sisl::MetricsGroupWrapper {
@@ -483,6 +518,7 @@ private:
     PhysicalDevChunk* create_new_chunk(PhysicalDev* pdev, uint64_t start_offset, uint64_t size,
                                        PhysicalDevChunk* prev_chunk);
     void remove_chunk(uint32_t chunk_id);
+    void blk_alloc_meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
 
 private:
     int m_open_flags;

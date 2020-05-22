@@ -38,6 +38,10 @@ typedef enum {
     READ_BOTH = 3,
 } diff_read_next_t;
 
+namespace homestore {
+struct blkalloc_cp_id;
+}
+
 /* We should always find the child smaller or equal then  search key in the interior nodes. */
 #ifndef NDEBUG
 #define ASSERT_IS_VALID_INTERIOR_CHILD_INDX(ret, node)                                                                 \
@@ -83,13 +87,22 @@ enum journal_op { BTREE_SPLIT = 1, BTREE_MERGE };
 struct btree_cp_id;
 typedef std::shared_ptr< btree_cp_id > btree_cp_id_ptr;
 typedef std::function< void(btree_cp_id_ptr cp_id) > cp_comp_callback;
+struct btree_cp_superblock {
+    int64_t active_psn = -1;
+    int64_t cp_cnt = -1;
+    int64_t blkalloc_cp_cnt = -1;
+    int64_t btree_size = 0;
+    /* we can add more statistics as well like number of interior nodes etc. */
+} __attribute__((__packed__));
+
 struct btree_cp_id {
-    uint64_t cp_cnt;
+    int64_t cp_cnt = -1;
     std::atomic< int > ref_cnt;
-    int64_t start_seq_id;
-    int64_t end_seq_id;
+    std::atomic< int64_t > btree_size;
+    int64_t start_psn = -1; // not inclusive
+    int64_t end_psn = -1;   // inclusive
     cp_comp_callback cb;
-    btree_cp_id() : cp_cnt(0), ref_cnt(1), start_seq_id(-1), end_seq_id(-1){};
+    btree_cp_id() : ref_cnt(1), btree_size(0){};
     ~btree_cp_id() {}
 };
 
@@ -105,6 +118,7 @@ struct btree_journal_entry_hdr {
     uint8_t deleted_nodes_size;
     uint8_t new_nodes_size;
     uint8_t new_key_size;
+    int64_t cp_cnt;
 } __attribute__((__packed__));
 
 #if 0

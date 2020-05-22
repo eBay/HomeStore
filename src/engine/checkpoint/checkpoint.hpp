@@ -26,9 +26,11 @@
  * These are the stages of CP :-
  * CP prepare :- When cp is prepared to start flush
  * CP attach :- When new cp is created
+ * Both these stages are combines in one API prepare_attach
+ *
  * CP trigger :- It trigger current cp to flush
- * cp start :- It start the flush when all ios have called cp_io_exit on that cp
- * cp end :- when cp flush is completed. It frees the CP id.
+ * CP start :- It start the flush when all ios have called cp_io_exit on that cp
+ * CP end :- when cp flush is completed. It frees the CP id.
  */
 
 namespace homestore {
@@ -100,6 +102,14 @@ public:
         rcu_read_unlock();
 
         return cp_id;
+    }
+
+    /* It exposes an API to increment the ref count on a cp id. It assumes that caller is alrady in cp_io_enter
+     * phase before calling cp_inc_ref.
+     */
+    void cp_inc_ref(cp_id_type* id, int ref_cnt) {
+        assert(id->enter_cnt > 0);
+        id->enter_cnt.fetch_add(ref_cnt);
     }
 
     /* It is called for each IO when it is completed. It trigger a checkpoint if it is pending and there

@@ -156,6 +156,7 @@ void DeviceManager::update_vb_context(uint32_t vdev_id, const sisl::blob& ctx_da
     write_info_blocks();
 }
 
+
 void DeviceManager::load_and_repair_devices(std::vector< dev_info >& devices) {
     std::vector< std::unique_ptr< PhysicalDev > > uninit_devs;
     uninit_devs.reserve(devices.size());
@@ -344,14 +345,27 @@ void DeviceManager::inited() {
     }
 }
 
+void DeviceManager::blk_alloc_meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size) {
+    auto b = std::make_shared< sisl::_byte_array >(buf.get(), size);
+    std::unique_ptr< sisl::Bitset > recovered_bm(new sisl::Bitset(b));
+    buf.release();
+    auto chunk = get_chunk(recovered_bm->get_id());
+    chunk->recover(std::move(recovered_bm), mblk);
+}
+
 /* add constant */
 void DeviceManager::add_devices(std::vector< dev_info >& devices, bool is_init) {
     uint64_t max_dev_offset = 0;
+    MetaBlkMgr::instance()->register_handler(
+        "BLK_ALLOC",
+        [this](meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size) {
+            blk_alloc_meta_blk_found_cb(mblk, std::move(buf), size);
+        },
+        nullptr);
     if (is_init) {
         init_devices(devices);
         return;
     }
-
     load_and_repair_devices(devices);
     return;
 }

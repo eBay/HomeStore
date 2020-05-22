@@ -475,6 +475,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
     return ret;
 }
 
+void VarsizeBlkAllocator::free(const BlkId& b, std::shared_ptr< blkalloc_cp_id > id) {}
 void VarsizeBlkAllocator::free(const BlkId& b) {
     BlkAllocPortion* portion = blknum_to_portion(b.get_id());
     BlkAllocSegment* segment = blknum_to_segment(b.get_id());

@@ -270,10 +270,15 @@ public:
         return;
     }
 
+    void free_blk(const BlkId& bid, boost::optional< uint32_t > size_offset, boost::optional< uint32_t > size) {
+        free_blk(bid, size_offset, size, nullptr);
+    }
+
     /* Free the block previously allocated. Blkoffset refers to number of blks to skip in the BlkId and
      * nblks refer to the total blks from offset to free.
      */
-    void free_blk(const BlkId& bid, boost::optional< uint32_t > size_offset, boost::optional< uint32_t > size) {
+    void free_blk(const BlkId& bid, boost::optional< uint32_t > size_offset, boost::optional< uint32_t > size,
+                  std::shared_ptr< blkalloc_cp_id > id) {
         boost::intrusive_ptr< Buffer > erased_buf(nullptr);
 
         assert(bid.data_size(m_pagesz) >= (size_offset.get_value_or(0) + size.get_value_or(0)));
@@ -299,8 +304,11 @@ public:
 
         uint32_t offset = size_offset.get_value_or(0);
         BlkId tmp_bid(bid.get_blkid_at(offset, free_size, m_pagesz));
-        m_vdev.free_blk(tmp_bid);
-
+        if (id != nullptr) {
+            m_vdev.free_blk(tmp_bid, id);
+        } else {
+            m_vdev.free_blk(tmp_bid);
+        }
         return;
     }
 
@@ -496,7 +504,8 @@ public:
         return buf_list;
     }
 
-    void persist_blk_allocator_bitmap() { m_vdev.persist_blk_allocator_bitmap(); }
+    void blkalloc_cp_start(std::shared_ptr< blkalloc_cp_id > id) { m_vdev.blkalloc_cp_start(id); }
+    void blkalloc_cp_done(std::shared_ptr< blkalloc_cp_id > id) { m_vdev.blkalloc_cp_done(id); }
     void reset_vdev_failed_state() { m_vdev.reset_failed_state(); }
 
     uint64_t get_size() const { return m_vdev.get_size(); }
@@ -553,6 +562,9 @@ public:
 
     void truncate(const off_t offset) { m_vdev.truncate(offset); }
     void recovery_done() { m_vdev.recovery_done(); }
+    std::shared_ptr< blkalloc_cp_id > attach_prepare_cp(std::shared_ptr< blkalloc_cp_id > cur_cp_id) {
+        return (m_vdev.attach_prepare_cp(cur_cp_id));
+    }
 
 private:
     uint32_t m_pagesz;

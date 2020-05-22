@@ -95,7 +95,6 @@ void Volume::init() {
         m_sb = sisl::make_aligned_unique< vol_sb_hdr >(HS_STATIC_CONFIG(disk_attr.align_size), m_params.page_size,
                                                        m_params.size, (const char*)m_params.vol_name, m_params.uuid,
                                                        m_indx_mgr->get_active_sb());
-
         set_state(vol_state::ONLINE, true);
     } else {
         /* recovery */
@@ -404,16 +403,14 @@ void Volume::process_free_blk_callback(Free_Blk_Entry fbe) {
     THIS_VOL_LOG(DEBUG, volume, , "Freeing blks cb - bid: {}, offset: {}, nblks: {}, get_pagesz: {}",
                  fbe.m_blkId.to_string(), fbe.blk_offset(), fbe.blks_to_free(), get_page_size());
 
-    uint64_t size = m_hb->get_data_pagesz() * fbe.m_nblks_to_free;
-    m_hb->get_data_blkstore()->free_blk(fbe.m_blkId, m_hb->get_data_pagesz() * fbe.m_blk_offset,
-                                        m_hb->get_data_pagesz() * fbe.m_nblks_to_free);
+    m_indx_mgr->free_blk(fbe);
 }
 
 /* when read happens on mapping btree, under read lock we mark blk so it does not get removed by concurrent writes
  */
 void Volume::pending_read_blk_cb(volume_req* vreq, BlkId& bid) {
     m_read_blk_tracker->insert(bid);
-    Free_Blk_Entry fbe(bid, 0, 0);
+    Free_Blk_Entry fbe(bid, 0, 0, nullptr, nullptr);
     vreq->push_fbe(fbe);
 }
 
@@ -608,8 +605,8 @@ size_t Volume::call_batch_completion_cbs() {
     return count;
 }
 
-vol_cp_id_ptr Volume::attach_prepare_volume_cp_id(vol_cp_id_ptr cur_id, indx_cp_id* home_blks_id) {
-    return (m_indx_mgr->attach_prepare_vol_cp(cur_id, home_blks_id));
+vol_cp_id_ptr Volume::attach_prepare_volume_cp_id(vol_cp_id_ptr cur_id, indx_cp_id* hb_id, indx_cp_id* new_hb_id) {
+    return (m_indx_mgr->attach_prepare_vol_cp(cur_id, hb_id, new_hb_id));
 }
 
 #ifndef NDEBUG
@@ -659,5 +656,5 @@ void Volume::migrate_sb() {
     // inst->add_sub_sb(meta_sub_type::VOLUME, (void*)(m_sb->ondisk_sb), sizeof(vol_ondisk_sb), &(m_sb->cookie));
 }
 
-void Volume::recovery_start_phase1() { m_indx_mgr->recovery_start_phase1(); }
+void Volume::recovery_start_phase1() { m_indx_mgr->recovery_start_phase1(shared_from_this()); }
 void Volume::recovery_start_phase2() { m_indx_mgr->recovery_start_phase2(); }

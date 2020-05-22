@@ -40,6 +40,7 @@ class MappingValue;
 #define HOMEBLKS_SB_VERSION 0x2
 
 typedef uint32_t homeblks_sb_flag_t;
+struct blkalloc_cp_id;
 
 #define HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN 0x00000001UL
 struct homeblks_sb {
@@ -189,9 +190,10 @@ public:
     void init_done(std::error_condition err);
     void inc_sub_system_init_cnt();
     void attach_prepare_volume_cp_id(std::map< boost::uuids::uuid, vol_cp_id_ptr >* cur_id_map,
-                                     std::map< boost::uuids::uuid, vol_cp_id_ptr >* new_id_map,
-                                     indx_cp_id* home_blks_id);
-    void persist_blk_allocator_bitmap();
+                                     std::map< boost::uuids::uuid, vol_cp_id_ptr >* new_id_map, indx_cp_id* hb_id,
+                                     indx_cp_id* new_hb_id);
+    void blkalloc_cp_start(std::shared_ptr< blkalloc_cp_id > id);
+    void blkalloc_cp_done(std::shared_ptr< blkalloc_cp_id > id);
     void do_volume_shutdown(bool force);
     void create_volume(VolumePtr vol);
 
@@ -205,6 +207,7 @@ public:
      */
     void meta_blk_found(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
     void meta_blk_recovery_comp(bool success);
+    std::shared_ptr< blkalloc_cp_id > blkalloc_attach_prepare_cp(std::shared_ptr< blkalloc_cp_id > cur_cp_id);
 
 #ifdef _PRERELEASE
     void set_io_flip();

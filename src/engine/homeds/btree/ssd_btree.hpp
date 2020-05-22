@@ -55,7 +55,6 @@ public:
     }
 
     void cp_done_store(btree_cp_id_ptr cp_id) {
-        m_wb_cache.flush_free_blk(cp_id);
         cp_id->cb(cp_id);
     }
 
@@ -67,38 +66,40 @@ public:
     btree_cp_id_ptr attach_prepare_cp_store(btree_cp_id_ptr cur_cp_id, bool is_last_cp) {
         /* start with ref cnt = 1. We dec it when trigger is called */
         if (cur_cp_id) {
-            cur_cp_id->end_seq_id = m_journal->get_contiguous_issued_seq_num(cur_cp_id->start_seq_id);
-            assert(cur_cp_id->end_seq_id >= cur_cp_id->start_seq_id);
+            cur_cp_id->end_psn = m_journal->get_contiguous_issued_seq_num(cur_cp_id->start_psn);
+            assert(cur_cp_id->end_psn >= cur_cp_id->start_psn);
         }
         btree_cp_id_ptr new_cp(nullptr);
         if (!is_last_cp) {
             if (cur_cp_id) {
                 new_cp = btree_cp_id_ptr(new (btree_cp_id));
-                new_cp->start_seq_id = cur_cp_id->end_seq_id;
+                new_cp->start_psn = cur_cp_id->end_psn;
                 new_cp->cp_cnt = cur_cp_id->cp_cnt + 1;
             } else {
                 /* it is the first CP */
                 assert(m_first_cp);
                 new_cp = m_first_cp;
                 m_first_cp = nullptr;
-                new_cp->cp_cnt = 1;
             }
         }
         m_wb_cache.prepare_cp(new_cp, cur_cp_id);
         return new_cp;
     }
 
-    static void update_sb(SSDBtreeStore* store, SSDBtreeStore::superblock& sb, int64_t start_psn, bool is_recovery) {
-        store->update_store_sb(sb, start_psn, is_recovery);
+    static void update_sb(SSDBtreeStore* store, SSDBtreeStore::superblock& sb, btree_cp_superblock* cp_sb,
+                          bool is_recovery) {
+        store->update_store_sb(sb, cp_sb, is_recovery);
     }
 
-    void update_store_sb(SSDBtreeStore::superblock& sb, int64_t start_seq_id, bool is_recovery) {
+    void update_store_sb(SSDBtreeStore::superblock& sb, btree_cp_superblock* cp_sb, bool is_recovery) {
         if (is_recovery) {
             // add recovery code
         } else {
             sb.journal_id = get_journal_id_store();
         }
-        m_first_cp->start_seq_id = start_seq_id;
+
+        m_first_cp->start_psn = cp_sb->active_psn;
+        m_first_cp->cp_cnt = cp_sb->cp_cnt + 1;
     }
 
     logstore_id_t get_journal_id_store() { return (m_journal->get_store_id()); }
@@ -117,9 +118,18 @@ public:
         if (ref_cnt == 1) { m_wb_cache.cp_start(cp_id); }
     }
 
+    static void flush_free_blks(SSDBtreeStore* store, btree_cp_id_ptr btree_id,
+                                std::shared_ptr< homestore::blkalloc_cp_id >& blkalloc_id) {
+        store->flush_free_blks(btree_id, blkalloc_id);
+    }
+
+    void flush_free_blks(btree_cp_id_ptr btree_id, std::shared_ptr< homestore::blkalloc_cp_id >& blkalloc_id) {
+        m_wb_cache.flush_free_blks(btree_id, blkalloc_id);
+    }
+
     static void truncate(SSDBtreeStore* store, btree_cp_id_ptr cp_id) { store->truncate_store(cp_id); }
 
-    void truncate_store(btree_cp_id_ptr cp_id) { m_journal->truncate(cp_id->end_seq_id); }
+    void truncate_store(btree_cp_id_ptr cp_id) { m_journal->truncate(cp_id->end_psn); }
 
     static void cp_done(trigger_cp_callback cb) { wb_cache_t::cp_done(cb); }
 
