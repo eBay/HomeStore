@@ -12,6 +12,7 @@
 #include <fds/utils.hpp>
 #include "engine/homeds/btree/mem_btree.hpp"
 #include <sds_logging/logging.h>
+#include <utility/thread_factory.hpp>
 
 #ifndef NDEBUG
 bool blk_alloc_test = false;
@@ -20,8 +21,6 @@ bool blk_alloc_test = false;
 SDS_LOGGING_DECL(varsize_blk_alloc)
 
 namespace homestore {
-
-void thread_func(VarsizeBlkAllocator* b) { b->allocator_state_machine(); }
 
 VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig& cfg, bool init, uint32_t id) :
         BlkAllocator(cfg, id),
@@ -171,7 +170,7 @@ VarsizeBlkAllocator::~VarsizeBlkAllocator() {
 
 // Runs only in per sweep thread. In other words, this is a single threaded state machine.
 void VarsizeBlkAllocator::allocator_state_machine() {
-    BLKALLOC_LOG(INFO, , "Starting new blk sweep thread");
+    BLKALLOC_LOG(INFO, , "Starting new blk sweep thread, thread num = {}", sisl::ThreadLocalContext::my_thread_num());
     BlkAllocSegment* allocate_seg = nullptr;
     int slab_indx;
     bool allocate = false;
@@ -246,7 +245,9 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(BlkId& in_bid) {
 }
 
 void VarsizeBlkAllocator::inited() {
-    if (!m_init) { m_thread_id = std::thread(thread_func, this); }
+    if (!m_init) {
+        m_thread_id = sisl::named_thread("blkalloc_sweep", bind_this(VarsizeBlkAllocator::allocator_state_machine, 0));
+    }
     m_init = true;
     m_alloc_bm->copy(*(get_alloced_bm()));
 }

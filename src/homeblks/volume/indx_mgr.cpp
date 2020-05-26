@@ -1,5 +1,6 @@
 #include "indx_mgr.hpp"
 #include "mapping.hpp"
+#include <utility/thread_factory.hpp>
 
 using namespace homestore;
 /* Journal entry
@@ -70,11 +71,7 @@ IndxCP::IndxCP() : CheckPoint(10) {
 IndxCP::~IndxCP() {}
 
 void IndxCP::cp_start(indx_cp_id* id) {
-    iomgr_msg io_msg;
-    io_msg.m_type = RUN_METHOD;
-    auto run_method = sisl::ObjectAllocator< run_method_t >::make_object();
-    /* start CP in indx mgr thread */
-    *run_method = ([this, id]() {
+    iomanager.run_in_specific_thread(IndxMgr::get_thread_id(), [this, id]() {
         ++id->ref_cnt;
         for (auto it = id->vol_id_list.begin(); it != id->vol_id_list.end(); ++it) {
             if (it->second != nullptr && it->second->flags == cp_state::active_cp) {
@@ -87,8 +84,6 @@ void IndxCP::cp_start(indx_cp_id* id) {
         }
         cp_done(id);
     });
-    io_msg.m_data_buf = (void*)run_method;
-    iomanager.send_msg(IndxMgr::get_thread_num(), io_msg);
 }
 
 void IndxCP::cp_done(indx_cp_id* id) {
@@ -157,7 +152,10 @@ IndxMgr::IndxMgr(std::shared_ptr< Volume > vol, const vol_params& params, io_don
 
 IndxMgr::IndxMgr(std::shared_ptr< Volume > vol, const indx_mgr_active_sb& sb, io_done_cb io_cb,
                  free_blk_callback free_blk_cb, pending_read_blk_cb read_blk_cb) :
-        m_io_cb(io_cb), m_pending_read_blk_cb(read_blk_cb), m_first_cp_id(new vol_cp_id()), prepare_cb_list(4) {
+        m_io_cb(io_cb),
+        m_pending_read_blk_cb(read_blk_cb),
+        m_first_cp_id(new vol_cp_id()),
+        prepare_cb_list(4) {
     m_journal = nullptr;
     m_sb = sb;
     m_free_blk_cb = free_blk_cb;
@@ -191,17 +189,15 @@ void IndxMgr::init() {
     /* start the timer for bitmap checkpoint */
     m_system_cp_timer_hdl = iomanager.schedule_timer(60 * 1000 * 1000 * 1000ul, true, nullptr, false,
                                                      [](void* cookie) { trigger_system_cp(nullptr, false); });
-    auto sthread = std::thread([]() mutable {
-        IndxMgr::m_thread_num = sisl::ThreadLocalContext::my_thread_num();
-        LOGINFO("{} thread entered", m_thread_num);
-        iomanager.run_io_loop(false, nullptr, ([](const iomgr_msg& io_msg) {}));
-        LOGINFO("{} thread exit", m_thread_num);
+    auto sthread = sisl::named_thread("indx_mgr", []() mutable {
+        iomanager.run_io_loop(false, nullptr, [](bool is_started) {
+            if (is_started) IndxMgr::m_thread_id = iomanager.my_io_thread_id();
+        });
     });
     sthread.detach();
 
     write_cp_super_block(nullptr);
 }
-
 
 void IndxMgr::write_cp_super_block(indx_cp_id* id) {
     LOGINFO("superblock is written");
@@ -491,13 +487,9 @@ void IndxMgr::destroy(indxmgr_stop_cb cb) {
                                      * destroy indx table.
                                      */
                                     cur_cp_id->flags = cp_state::suspend_cp;
-                                    iomgr_msg io_msg;
-                                    io_msg.m_type = RUN_METHOD;
                                     auto btree_id = cur_cp_id->btree_id;
-                                    auto run_method = sisl::ObjectAllocator< run_method_t >::make_object();
-                                    *run_method = ([this, btree_id]() { this->destroy_indx_tbl(btree_id); });
-                                    io_msg.m_data_buf = (void*)run_method;
-                                    iomanager.send_msg(m_thread_num, io_msg);
+                                    iomanager.run_in_specific_thread(
+                                        m_thread_id, [this, btree_id]() { this->destroy_indx_tbl(btree_id); });
                                 }));
                             }));
 }
@@ -584,11 +576,10 @@ void IndxMgr::meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_
 
 std::unique_ptr< IndxCP > IndxMgr::m_cp;
 std::atomic< bool > IndxMgr::m_shutdown_started;
-int IndxMgr::m_thread_num;
+iomgr::io_thread_id_t IndxMgr::m_thread_id;
 iomgr::timer_handle_t IndxMgr::m_system_cp_timer_hdl = iomgr::null_timer_handle;
 void* IndxMgr::m_meta_blk = nullptr;
 std::once_flag IndxMgr::m_flag;
 sisl::aligned_unique_ptr< uint8_t > IndxMgr::m_recovery_sb;
 std::map< boost::uuids::uuid, indx_mgr_cp_sb > IndxMgr::cp_sb_map;
 size_t IndxMgr::m_recovery_sb_size = 0;
-

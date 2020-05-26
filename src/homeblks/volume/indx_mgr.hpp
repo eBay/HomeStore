@@ -164,7 +164,7 @@ private:
     static std::unique_ptr< IndxCP > m_cp;
     static std::atomic< bool > m_shutdown_started;
     static bool m_shutdown_cmplt;
-    static int m_thread_num;
+    static iomgr::io_thread_id_t m_thread_id;
     static iomgr::timer_handle_t m_system_cp_timer_hdl;
     static void* m_meta_blk;
     static std::once_flag m_flag;
@@ -263,7 +263,7 @@ public:
 
     /* reinitialize indx mgr. It is used in fake reboot */
     static void reinit() { m_shutdown_started = false; }
-    static int get_thread_num() { return m_thread_num; }
+    static iomgr::io_thread_id_t get_thread_id() { return m_thread_id; }
     static void write_cp_super_block(indx_cp_id* id);
     static void meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
 };

@@ -8,6 +8,7 @@
 #include "dynamic_blk_allocator.h"
 #include <iostream>
 #include <cassert>
+#include <utility/thread_factory.hpp>
 
 namespace omstorage {
 
@@ -63,7 +64,7 @@ DynamicBlkAllocator::DynamicBlkAllocator(BlkAllocConfig& cfg) : BlkAllocator(cfg
 
     // m_thread_id = std::thread(&BlkRegion::BlkRegionThreadFunc);
     // Start a trhead which will do sweeping job of free segments
-    m_thread_id = std::thread(thread_func, this);
+    m_thread_id = sisl::named_thread("blkalloc_sweep", thread_func, this);
 }
 
 std::thread* DynamicBlkAllocator::get_thread() { return &m_thread_id; }
@@ -71,9 +72,7 @@ std::thread* DynamicBlkAllocator::get_thread() { return &m_thread_id; }
 DynamicBlkAllocator::~DynamicBlkAllocator() {
     {
         std::unique_lock< std::mutex > lk(m_mutex);
-        if (m_region_state != BLK_ALLOCATOR_EXITING) {
-            m_region_state = BLK_ALLOCATOR_EXITING;
-        }
+        if (m_region_state != BLK_ALLOCATOR_EXITING) { m_region_state = BLK_ALLOCATOR_EXITING; }
     }
 
     m_cv.notify_all();
@@ -96,9 +95,7 @@ void DynamicBlkAllocator::allocator_state_machine() {
             // acquire lock
             std::unique_lock< std::mutex > lk(m_mutex);
 
-            if (m_region_state == BLK_ALLOCATOR_DONE) {
-                m_cv.wait(lk);
-            }
+            if (m_region_state == BLK_ALLOCATOR_DONE) { m_cv.wait(lk); }
 
             if (m_region_state == BLK_ALLOCATOR_WAIT_ALLOC) {
                 m_region_state = BLK_ALLOCATOR_ALLOCATING;
@@ -154,9 +151,7 @@ BlkAllocStatus DynamicBlkAllocator::alloc(uint32_t size, uint32_t desired_temp, 
     int miss = 0;
     while (1) {
         found = m_blk_cache->removeAny(startEntry, true /*startIncl*/, endEntry, false /*endIncl*/, &actualEntry);
-        if (found) {
-            break;
-        }
+        if (found) { break; }
 
         miss++;
         if ((miss == 1) || (miss == 3)) {
@@ -174,9 +169,7 @@ BlkAllocStatus DynamicBlkAllocator::alloc(uint32_t size, uint32_t desired_temp, 
         }
     }
 
-    if (!found) {
-        return BLK_ALLOC_SPACEFULL;
-    }
+    if (!found) { return BLK_ALLOC_SPACEFULL; }
 
     // Get the bitmap for the pages.
     uint32_t nPages = (actualEntry.getMaxContigousFreeAtoms() - 1) / m_cfg.getAtomsPerPage() + 1;
@@ -370,9 +363,7 @@ void DynamicBlkAllocator::commit(Blk& b) {
 // This runs on per region thread and is at present single threaded.
 void DynamicBlkAllocator::fill_cache(PageAllocSegment* seg) {
     uint64_t nAddedAtoms = 0;
-    if (seg == NULL) {
-        seg = m_heap_segments.top();
-    }
+    if (seg == NULL) { seg = m_heap_segments.top(); }
 
     uint32_t grpsPerSeg = m_cfg.getTotalGroups() / m_cfg.getTotalSegments();
 
@@ -637,9 +628,7 @@ void DynamicBlkAllocator::request_more_pages(PageAllocSegment* seg) {
         }
     } // release lock
 
-    if (allocate) {
-        m_cv.notify_all();
-    }
+    if (allocate) { m_cv.notify_all(); }
 }
 
 void DynamicBlkAllocator::requestMorePagesWait(PageAllocSegment* seg) {

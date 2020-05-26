@@ -6,6 +6,7 @@
 #include <blkstore/blkstore.hpp>
 #include <homeds/btree/btree_internal.h>
 #include <wisr/wisr_ds.hpp>
+#include <utility/thread_factory.hpp>
 
 #define MAX_DIRTY_BUF 100
 
@@ -129,7 +130,7 @@ private:
     static btree_blkstore_t* m_blkstore;
     static std::atomic< uint64_t > m_hs_dirty_buf_cnt;
 #define WB_CACHE_THREADS 2
-    static int m_thread_num[WB_CACHE_THREADS];
+    static iomgr::io_thread_id_t m_thread_ids[WB_CACHE_THREADS];
     static std::atomic< int > m_thread_indx;
 
 public:
@@ -149,10 +150,13 @@ public:
         std::call_once(flag1, ([]() {
                            for (int i = 0; i < WB_CACHE_THREADS; ++i) {
                                /* XXX : there can be race condition when message is sent before run_io_loop is called */
-                               auto sthread = std::thread([i]() {
-                                   wb_cache_t::m_thread_num[i] = sisl::ThreadLocalContext::my_thread_num();
-
-                                   iomanager.run_io_loop(false, nullptr, ([](const iomgr_msg& io_msg) {}));
+                               auto sthread = sisl::named_thread("wbcache_flusher", [i]() {
+                                   iomanager.run_io_loop(false, nullptr, ([i](bool is_started) {
+                                                             if (is_started) {
+                                                                 wb_cache_t::m_thread_ids[i] =
+                                                                     iomanager.my_io_thread_id();
+                                                             }
+                                                         }));
                                });
                                sthread.detach();
                            }
@@ -296,15 +300,7 @@ public:
         m_copy_req_list = m_req_list[cp_cnt]->get_copy_and_reset();
         assert(m_flush_indx.load() == 0);
         for (int i = 0; i < WB_CACHE_THREADS; ++i) {
-            auto run_method = sisl::ObjectAllocator< run_method_t >::make_object();
-            *run_method = ([this, cp_id]() { this->flush_buffers(cp_id); });
-            iomgr_msg io_msg;
-            io_msg.m_type = RUN_METHOD;
-            io_msg.m_data_buf = (void*)run_method;
-            /* We are distributing work based on btree. Other approach is to use both threads working
-             * on same btree.
-             */
-            iomanager.send_msg(m_thread_num[i], io_msg);
+            iomanager.run_in_specific_thread(m_thread_ids[i], [this, cp_id]() { this->flush_buffers(cp_id); });
         }
     }
 
@@ -368,7 +364,7 @@ std::atomic< uint64_t > wb_cache_t::m_hs_dirty_buf_cnt;
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
 btree_blkstore_t* wb_cache_t::m_blkstore;
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
-int wb_cache_t::m_thread_num[WB_CACHE_THREADS];
+iomgr::io_thread_id_t wb_cache_t::m_thread_ids[WB_CACHE_THREADS];
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
 std::atomic< int > wb_cache_t::m_thread_indx;
 
