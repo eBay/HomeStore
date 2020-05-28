@@ -43,7 +43,9 @@ public:
      * @param init : true of initialized, false if recovery
      * @return
      */
-    void init(blk_store_t* sb_blk_store, sb_blkstore_blob* blob, bool is_init);
+    void start(blk_store_t* sb_blk_store, sb_blkstore_blob* blob, bool is_init);
+
+    void stop();
 
     /**
      * @brief
@@ -260,10 +262,12 @@ private:
     void read(BlkId& bid, homeds::blob& b);
 };
 
+#define meta_blk_mgr MetaBlkMgr::instance()
+
 class register_subsystem {
 public:
     register_subsystem(meta_sub_type type, meta_blk_found_cb_t cb, meta_blk_recover_comp_cb_t comp_cb) {
-        MetaBlkMgr::instance()->register_handler(type, cb, comp_cb);
+        meta_blk_mgr->register_handler(type, cb, comp_cb);
     }
 };
 

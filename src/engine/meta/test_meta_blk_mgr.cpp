@@ -100,8 +100,11 @@ public:
     }
 
     bool keep_running() {
-        if (m_wrt_cnt >= 1000) return false; // TODO: change to check total write sz to be less than blkstor size;
-        if (get_elapsed_time(m_start_time) >= gp.run_time && io_cnt() >= gp.num_io) { return false; }
+        HS_ASSERT(DEBUG, m_mbm->get_size() >= m_mbm->get_used_size(), "total size:{} less than used size: {}",
+                  m_mbm->get_size(), m_mbm->get_used_size());
+        auto free_size = m_mbm->get_size() - m_mbm->get_used_size();
+        if (free_size < gp.max_wrt_sz) { return false; }
+        if (get_elapsed_time(m_start_time) >= gp.run_time || io_cnt() >= gp.num_io) { return false; }
         return true;
     }
 
@@ -119,17 +122,14 @@ public:
     uint32_t rand_size(bool overflow) {
         if (overflow) {
             std::random_device rd;
-            std::default_random_engine generator(rd());
-            std::uniform_int_distribution< long unsigned > dist(META_BLK_PAGE_SZ, META_BLK_PAGE_SZ * 8);
-            auto sz = dist(generator);
-            return (sz / META_BLK_PAGE_SZ) * META_BLK_PAGE_SZ;
+            std::default_random_engine g(rd());
+            std::uniform_int_distribution< long unsigned > dist(gp.min_wrt_sz, gp.max_wrt_sz);
+            return sisl::round_up(dist(g), dma_boundary);
         } else {
-            long unsigned start = 64;
             std::random_device rd;
-            std::default_random_engine generator(rd());
-            std::uniform_int_distribution< long unsigned > dist(start, META_BLK_CONTEXT_SZ);
-            auto sz = dist(generator);
-            return (sz / start) * start;
+            std::default_random_engine g(rd());
+            std::uniform_int_distribution< long unsigned > dist(64, META_BLK_CONTEXT_SZ);
+            return dist(g);
         }
     }
 
@@ -166,8 +166,8 @@ public:
         }
 
         // verify context_sz
-        HS_ASSERT(RELEASE, mblk->hdr.h.context_sz == sz_to_wrt, "context_sz mismatch: {}/{}", (uint64_t)mblk->hdr.h.context_sz,
-                  sz_to_wrt);
+        HS_ASSERT(RELEASE, mblk->hdr.h.context_sz == sz_to_wrt, "context_sz mismatch: {}/{}",
+                  (uint64_t)mblk->hdr.h.context_sz, sz_to_wrt);
 
         // save cookie;
         std::unique_lock< std::mutex > lg(m_mtx);
@@ -226,8 +226,8 @@ public:
 
         // verify context_sz
         meta_blk* mblk = (meta_blk*)cookie;
-        HS_ASSERT(RELEASE, mblk->hdr.h.context_sz == sz_to_wrt, "context_sz mismatch: {}/{}", (uint64_t)mblk->hdr.h.context_sz,
-                  sz_to_wrt);
+        HS_ASSERT(RELEASE, mblk->hdr.h.context_sz == sz_to_wrt, "context_sz mismatch: {}/{}",
+                  (uint64_t)mblk->hdr.h.context_sz, sz_to_wrt);
 
         // update total size, add size of metablk back;
         m_total_wrt_sz += total_size_written(sz_to_wrt);
@@ -351,14 +351,14 @@ SDS_OPTION_GROUP(
      "number"),
     (min_write_size, "", "min_write_size", "minimum write size", ::cxxopts::value< uint32_t >()->default_value("4096"),
      "number"),
-    (max_write_size, "", "max_write_size", "maximum write size", ::cxxopts::value< uint32_t >()->default_value("16384"),
+    (max_write_size, "", "max_write_size", "maximum write size", ::cxxopts::value< uint32_t >()->default_value("65536"),
      "number"),
     (num_io, "", "num_io", "number of io", ::cxxopts::value< uint64_t >()->default_value("3000"), "number"),
     (per_update, "", "per_update", "update percentage", ::cxxopts::value< uint32_t >()->default_value("20"), "number"),
     (per_write, "", "per_write", "write percentage", ::cxxopts::value< uint32_t >()->default_value("60"), "number"),
     (per_remove, "", "per_remove", "remove percentage", ::cxxopts::value< uint32_t >()->default_value("20"), "number"),
     (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
-     cxxopts::value< int32_t >()->default_value("5003"), "port"));
+     cxxopts::value< int32_t >()->default_value("5004"), "port"));
 
 int main(int argc, char* argv[]) {
     SDS_OPTIONS_LOAD(argc, argv, logging, test_meta_blk_mgr);
@@ -384,8 +384,14 @@ int main(int argc, char* argv[]) {
         gp.per_remove = 20;
     }
 
-    LOGINFO("Testing with run_time: {}, num_io: {},  read/write percentage: {}/{}", gp.run_time, gp.num_io,
-            gp.per_update, gp.per_write);
+    if (gp.max_wrt_sz < gp.min_wrt_sz || gp.min_wrt_sz < META_BLK_CONTEXT_SZ) {
+        gp.min_wrt_sz = 4096;
+        gp.max_wrt_sz = 65536;
+        LOGINFO("Invalid input for min/max wrt sz: defaulting to {}/{}", gp.min_wrt_sz, gp.max_wrt_sz);
+    }
+
+    LOGINFO("Testing with run_time: {}, num_io: {}, write/update/remove percentage: {}/{}/{}, min/max io size: {}/{}",
+            gp.run_time, gp.num_io, gp.per_write, gp.per_update, gp.per_remove, gp.min_wrt_sz, gp.max_wrt_sz);
 
     auto res = RUN_ALL_TESTS();
     VolInterface::get_instance()->shutdown();

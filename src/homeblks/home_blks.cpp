@@ -304,11 +304,11 @@ void HomeBlks::superblock_init() {
 void HomeBlks::homeblks_sb_write() {
     if (m_sb_cookie == nullptr) {
         // add to MetaBlkMgr
-        MetaBlkMgr::instance()->add_sub_sb("HOMEBLK", (void*)m_homeblks_sb.get(), sizeof(homeblks_sb),
+        meta_blk_mgr->add_sub_sb("HOMEBLK", (void*)m_homeblks_sb.get(), sizeof(homeblks_sb),
                                            m_sb_cookie);
     } else {
         // update existing homeblks sb
-        MetaBlkMgr::instance()->update_sub_sb("HOMEBLK", (void*)m_homeblks_sb.get(), sizeof(homeblks_sb),
+        meta_blk_mgr->update_sub_sb("HOMEBLK", (void*)m_homeblks_sb.get(), sizeof(homeblks_sb),
                                               m_sb_cookie);
     }
 }
@@ -626,6 +626,7 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
 
     /* XXX: can we move it to indx mgr */
     home_log_store_mgr.stop();
+    meta_blk_mgr->stop();
     iomanager.default_drive_interface()->detach_end_of_batch_cb();
     iomanager.stop_io_loop();
 
@@ -742,7 +743,7 @@ void HomeBlks::migrate_sb() {
     migrate_logstore_sb();
     migrate_cp_sb();
 
-    MetaBlkMgr::instance()->set_migrated();
+    meta_blk_mgr->set_migrated();
 }
 
 void HomeBlks::migrate_logstore_sb() {}
@@ -750,14 +751,12 @@ void HomeBlks::migrate_cp_sb() {}
 
 void HomeBlks::migrate_homeblk_sb() {
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
-    auto inst = MetaBlkMgr::instance();
     void* cookie = nullptr;
-    inst->add_sub_sb("HOMEBLK", (void*)m_homeblks_sb.get(), sizeof(homeblks_sb), cookie);
+    meta_blk_mgr->add_sub_sb("HOMEBLK", (void*)m_homeblks_sb.get(), sizeof(homeblks_sb), cookie);
 }
 
 void HomeBlks::migrate_volume_sb() {
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
-    auto inst = MetaBlkMgr::instance();
     void* cookie = nullptr;
     for (auto it = m_volume_map.cbegin(); it != m_volume_map.end(); it++) {
         auto vol = it->second;
