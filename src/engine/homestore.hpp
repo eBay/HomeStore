@@ -8,7 +8,7 @@
 #include "engine/device/device.h"
 #include <fds/utils.hpp>
 #include <engine/blkstore/blkstore.hpp>
-#include "engine/meta/meta_sb.hpp"
+#include "engine/meta/meta_blks_mgr.hpp"
 
 using namespace homeds::btree;
 
@@ -288,7 +288,7 @@ protected:
             }
             init = false;
         }
-        MetaBlkMgr::instance()->init(m_meta_blk_store.get(), sb_blob, init);
+        meta_blk_mgr->start(m_meta_blk_store.get(), sb_blob, init);
     }
 
     void create_logdev_blkstore(vdev_info_block* vb) {
