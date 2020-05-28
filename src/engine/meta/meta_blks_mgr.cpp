@@ -6,7 +6,7 @@
 SDS_LOGGING_DECL(metablk)
 namespace homestore {
 
-void MetaBlkMgr::init(blk_store_t* sb_blk_store, sb_blkstore_blob* blob, bool is_init) {
+void MetaBlkMgr::start(blk_store_t* sb_blk_store, sb_blkstore_blob* blob, bool is_init) {
     m_sb_blk_store = sb_blk_store;
     if (is_init) {
         // write the meta blk manager's sb;
@@ -19,11 +19,13 @@ void MetaBlkMgr::init(blk_store_t* sb_blk_store, sb_blkstore_blob* blob, bool is
     recover();
 }
 
-MetaBlkMgr::~MetaBlkMgr() {
+void MetaBlkMgr::stop() { del_instance(); }
+
+void MetaBlkMgr::cache_clear() {
     std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
     for (auto it = m_meta_blks.cbegin(); it != m_meta_blks.cend(); it++) {
         for (auto it_m = it->second.cbegin(); it_m != it->second.cend(); it_m++) {
-            free(it_m->second);
+            iomanager.iobuf_free((uint8_t*)(it_m->second));
         }
     }
 
@@ -31,10 +33,26 @@ MetaBlkMgr::~MetaBlkMgr() {
         it->second.clear();
     }
 
+    for (auto it = m_ovf_blk_hdrs.cbegin(); it != m_ovf_blk_hdrs.end(); it++) {
+        iomanager.iobuf_free((uint8_t*)(it->second));
+    }
+
     m_meta_blks.clear();
     m_ovf_blk_hdrs.clear();
+}
+
+MetaBlkMgr::~MetaBlkMgr() {
+    cache_clear();
+
+    // de-register all subsystem;
+    for (auto& x : m_sub_info) {
+        deregister_handler(x.first);
+    }
+
+    std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
     m_sub_info.clear();
-    free(m_ssb);
+
+    iomanager.iobuf_free((uint8_t*)m_ssb);
 }
 
 // sync read
@@ -112,6 +130,8 @@ void MetaBlkMgr::write_ssb() {
 }
 
 void MetaBlkMgr::scan_meta_blks() {
+    cache_clear();
+
     // take a look so that before scan is complete, no add/remove/update operations will be allowed;
     std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
     auto bid = m_ssb->next_blkid;
@@ -121,8 +141,16 @@ void MetaBlkMgr::scan_meta_blks() {
         read(bid, b);
         auto mblk = (meta_blk*)b.bytes;
 
+        // TODO: add a new API in blkstore read to by pass cache;
+        // e.g. take caller's read buf to avoid this extra memory copy;
+        uint8_t* buf = iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), b.size);
+        memcpy(buf, b.bytes, b.size);
+
         // add meta blk to cache;
-        m_meta_blks[mblk->hdr.h.type][mblk->hdr.h.blkid.to_integer()] = mblk;
+        m_meta_blks[mblk->hdr.h.type][mblk->hdr.h.blkid.to_integer()] = (meta_blk*)buf;
+
+        // mark allocated for this block
+        m_sb_blk_store->alloc_blk(mblk->hdr.h.blkid);
 
         // populate overflow blk chain;
         auto obid = mblk->hdr.h.ovf_blkid;
@@ -142,6 +170,10 @@ void MetaBlkMgr::scan_meta_blks() {
 
             auto ovf_hdr = (meta_blk_ovf_hdr*)b.bytes;
 
+            uint8_t* ovf_hdr_cp =
+                iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_OVF_HDR_MAX_SZ);
+            memcpy(ovf_hdr_cp, b.bytes, META_BLK_OVF_HDR_MAX_SZ);
+
             // verify linkage;
             HS_ASSERT(RELEASE, ovf_hdr->h.blkid.to_integer() == obid.to_integer(), "Corrupted self-bid: {}/{}",
                       ovf_hdr->h.blkid.to_string(), obid.to_string());
@@ -151,7 +183,10 @@ void MetaBlkMgr::scan_meta_blks() {
             read_sz += ovf_hdr->h.context_sz;
 
             // add to ovf blk cache;
-            m_ovf_blk_hdrs[obid.to_integer()] = ovf_hdr;
+            m_ovf_blk_hdrs[obid.to_integer()] = (meta_blk_ovf_hdr*)ovf_hdr_cp;
+
+            // allocate overflow blkid;
+            m_sb_blk_store->alloc_blk(obid);
 
             prev_obid = obid;
 
@@ -168,7 +203,7 @@ void MetaBlkMgr::scan_meta_blks() {
     }
 }
 
-// 
+//
 // read per chunk is not used yet;
 //
 void MetaBlkMgr::scan_meta_blks_per_chunk() {
@@ -419,6 +454,9 @@ void MetaBlkMgr::write_meta_blk_internal(meta_blk* mblk, void* context_data, uin
 
         memcpy(mblk->context_data, context_data, sz);
     } else {
+        HS_ASSERT(RELEASE, sz % dma_boundary == 0, "context_data sz: {} needs to be dma_boundary {} aligned. ", sz,
+                  dma_boundary);
+
         // only copy context_data for the 1st metablk, the ovf blk will use iov to avoid copy;
         memcpy(mblk->context_data, context_data, META_BLK_CONTEXT_SZ);
 
@@ -558,8 +596,18 @@ void MetaBlkMgr::free_ovf_blk_chain(meta_blk* mblk) {
         HS_LOG(INFO, metablk, "free ovf blk: {}", next_obid.to_string());
         m_sb_blk_store->free_blk(next_obid, boost::none, boost::none);
 
+        auto save_old = next_obid;
+
         // get next chained ovf blk id from cache;
         next_obid = m_ovf_blk_hdrs[next_obid.to_integer()]->h.next_blkid;
+
+        auto it = m_ovf_blk_hdrs.find(save_old.to_integer());
+
+        // free the memory;
+        iomanager.iobuf_free((uint8_t*)(it->second));
+
+        // remove from ovf blk cache;
+        m_ovf_blk_hdrs.erase(it);
     }
 }
 
@@ -646,7 +694,7 @@ void MetaBlkMgr::recover(bool do_comp_cb) {
                 HS_ASSERT(RELEASE, read_offset == total_sz, "incorrect data read from disk: {}, total_sz: {}",
                           read_offset, total_sz);
             }
-            
+
             // verify crc before sending to subsystem;
             auto crc = crc32_ieee(init_crc32, (uint8_t*)(buf.get()), mblk->hdr.h.context_sz);
             HS_ASSERT(RELEASE, crc == mblk->hdr.h.crc, "CRC mismatch: {}/{}", crc, (uint32_t)mblk->hdr.h.crc);
