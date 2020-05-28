@@ -63,7 +63,7 @@ public:
         assert(0);
         return nullptr;
     }
-    static void update_sb(MemBtreeStore* store, MemBtreeStore::superblock& sb, int64_t start_seq_id,
+    static void update_sb(MemBtreeStore* store, MemBtreeStore::superblock& sb, btree_cp_superblock* cp_sb,
                           bool is_recovery){};
 
     static void write_journal_entry(MemBtreeStore *store, btree_cp_id_ptr cp_id, uint8_t *mem, size_t size) {
@@ -198,6 +198,8 @@ public:
     static void truncate(MemBtreeStore *store, btree_cp_id_ptr cp_id) {}
     static void cp_done(trigger_cp_callback cb) {}
     static void destroy_done(MemBtreeStore *store) {}
+    static void flush_free_blks(MemBtreeStore* store, btree_cp_id_ptr btree_id,
+                                std::shared_ptr< homestore::blkalloc_cp_id >& blkalloc_id) {}
     static btree_status_t write_node_sync(MemBtreeStore* store, boost::intrusive_ptr< MemBtreeNode > bn) {
         return btree_status_t::success;
     }

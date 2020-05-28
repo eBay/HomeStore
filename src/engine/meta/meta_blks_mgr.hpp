@@ -126,6 +126,10 @@ public:
      * @return :
      */
     void recover(bool do_comp_cb = true);
+    
+    uint64_t get_size();
+    
+    uint64_t get_used_size(); 
 
 private:
     /**
@@ -189,6 +193,12 @@ private:
      */
     void scan_meta_blks();
 
+    
+    /**
+     * @brief : This function is currently not used, don't delete for now;
+     */
+    void scan_meta_blks_per_chunk();
+
     /**
      * @brief : init super super block
      *
@@ -240,6 +250,14 @@ private:
      * @param sz
      */
     void write_meta_blk_internal(meta_blk* mblk, void* context_data, uint64_t sz);
+
+    /**
+     * @brief : sync read;
+     *
+     * @param bid
+     * @param b
+     */
+    void read(BlkId& bid, homeds::blob& b);
 };
 
 class register_subsystem {

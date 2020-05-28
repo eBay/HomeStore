@@ -304,11 +304,12 @@ public:
         }
 
         for (auto i : boost::irange< uint32_t >(0, m_num_chunks)) {
-            std::shared_ptr< BlkAllocator > ba = create_allocator(m_chunk_size, i, true);
             auto pdev_ind = i % pdev_list.size();
 
             // Create a chunk on selected physical device and add it to chunks in physdev list
-            auto chunk = create_dev_chunk(pdev_ind, ba, INVALID_CHUNK_ID);
+            auto chunk = create_dev_chunk(pdev_ind, nullptr, INVALID_CHUNK_ID);
+            std::shared_ptr< BlkAllocator > ba = create_allocator(m_chunk_size, chunk->get_chunk_id(), true);
+            chunk->set_blk_allocator(ba);
             m_primary_pdev_chunks_list[pdev_ind].chunks_in_pdev.push_back(chunk);
 
             // set initial value of "end of chunk offset";
@@ -828,6 +829,10 @@ public:
         return do_read_internal(pdev, pchunk, offset_in_dev, (char*)buf, count, nullptr);
     }
 
+    std::shared_ptr< blkalloc_cp_id > attach_prepare_cp(std::shared_ptr< blkalloc_cp_id > cur_cp_id) {
+        return (PhysicalDevChunk::attach_prepare_cp(cur_cp_id));
+    }
+
     /**
      * @brief : read at offset and save output to iov.
      * We don't have a use case for external caller of preadv now, meaning iov will always have only 1 element;
@@ -1232,6 +1237,16 @@ public:
         HS_ASSERT_CMP(DEBUG, m_used_size.load(), >=, 0);
     }
 
+    void free_blk(const BlkId& b, std::shared_ptr< blkalloc_cp_id > id) {
+        PhysicalDevChunk* chunk;
+
+        // Convert blk id to chunk specific id and call its allocator to free
+        BlkId cb = to_chunk_specific_id(b, &chunk);
+        chunk->get_blk_allocator()->free(cb, id);
+        m_used_size.fetch_sub(b.data_size(m_pagesz), std::memory_order_relaxed);
+        HS_ASSERT_CMP(DEBUG, m_used_size.load(), >=, 0);
+    }
+
     void recovery_done() {
         for (auto& pcm : m_primary_pdev_chunks_list) {
             for (auto& pchunk : pcm.chunks_in_pdev) {
@@ -1484,25 +1499,22 @@ public:
     uint64_t get_num_chunks() const { return m_num_chunks; }
     uint64_t get_chunk_size() const { return m_chunk_size; }
 
-    void persist_blk_allocator_bitmap() {
+    void blkalloc_cp_start(std::shared_ptr< blkalloc_cp_id > id) {
         for (uint32_t i = 0; i < m_primary_pdev_chunks_list.size(); ++i) {
             for (uint32_t chunk_indx = 0; chunk_indx < m_primary_pdev_chunks_list[i].chunks_in_pdev.size();
                  ++chunk_indx) {
                 auto chunk = m_primary_pdev_chunks_list[i].chunks_in_pdev[chunk_indx];
-                size_t bitmap_size = 0;
-                auto bitmap_mem = chunk->get_blk_allocator()->serialize_alloc_blks();
-                if (chunk->meta_blk_cookie) {
-                    /* update */
-                    LOGINFO("updaing bitmap SB");
-                    //       MetaBlkMgr::instance()->update_sub_sb(homestore::meta_sub_type::BLK_ALLOC,
-                    //       bitmap_mem->bytes,
-                    //                                           bitmap_mem->size, chunk->meta_blk_cookie);
-                } else {
-                    /* First time update. insert. */
-                    LOGINFO("updaing bitmap SB");
-                    //   MetaBlkMgr::instance()->add_sub_sb(homestore::meta_sub_type::BLK_ALLOC, bitmap_mem->bytes,
-                    //                                    bitmap_mem->size, chunk->meta_blk_cookie);
-                }
+                chunk->cp_start(id);
+            }
+        }
+    }
+
+    void blkalloc_cp_done(std::shared_ptr< blkalloc_cp_id > id) {
+        for (uint32_t i = 0; i < m_primary_pdev_chunks_list.size(); ++i) {
+            for (uint32_t chunk_indx = 0; chunk_indx < m_primary_pdev_chunks_list[i].chunks_in_pdev.size();
+                 ++chunk_indx) {
+                auto chunk = m_primary_pdev_chunks_list[i].chunks_in_pdev[chunk_indx];
+                chunk->cp_done(id);
             }
         }
     }
@@ -1540,7 +1552,7 @@ private:
         HS_ASSERT_CMP(DEBUG, m_chunk_size, <=, MAX_CHUNK_SIZE);
         std::shared_ptr< BlkAllocator > ba = create_allocator(m_chunk_size, chunk->get_chunk_id(), m_recovery_init);
         chunk->set_blk_allocator(ba);
-
+        if (!m_recovery_init) { chunk->recover(); }
         /* set the same blk allocator to other mirror chunks */
         auto it = m_mirror_chunks.find(chunk);
         if (it != m_mirror_chunks.end()) {

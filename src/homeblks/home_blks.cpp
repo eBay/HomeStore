@@ -84,7 +84,6 @@ HomeBlks::HomeBlks(const init_params& cfg) : m_cfg(cfg), m_metrics("HomeBlks") {
     m_homeblks_sb =
         sisl::make_aligned_sized_unique< homeblks_sb >(HS_STATIC_CONFIG(disk_attr.align_size), HOMEBLKS_SB_SIZE);
     superblock_init();
-
     sisl::MallocMetrics::enable();
 
     /* start thread */
@@ -114,14 +113,23 @@ HomeBlks::HomeBlks(const init_params& cfg) : m_cfg(cfg), m_metrics("HomeBlks") {
     m_start_shutdown = false;
 }
 
-void HomeBlks::persist_blk_allocator_bitmap() {
-    get_data_blkstore()->persist_blk_allocator_bitmap();
-    get_index_blkstore()->persist_blk_allocator_bitmap();
+void HomeBlks::blkalloc_cp_start(std::shared_ptr< blkalloc_cp_id > id) {
+    get_data_blkstore()->blkalloc_cp_start(id);
+    get_index_blkstore()->blkalloc_cp_start(id);
+}
+
+void HomeBlks::blkalloc_cp_done(std::shared_ptr< blkalloc_cp_id > id) {
+    get_data_blkstore()->blkalloc_cp_done(id);
+    get_index_blkstore()->blkalloc_cp_done(id);
+}
+
+std::shared_ptr< blkalloc_cp_id > HomeBlks::blkalloc_attach_prepare_cp(std::shared_ptr< blkalloc_cp_id > cur_cp_id) {
+    return (get_data_blkstore()->attach_prepare_cp(cur_cp_id));
 }
 
 void HomeBlks::attach_prepare_volume_cp_id(std::map< boost::uuids::uuid, vol_cp_id_ptr >* cur_id_map,
-                                           std::map< boost::uuids::uuid, vol_cp_id_ptr >* new_id_map,
-                                           indx_cp_id* home_blks_id) {
+                                           std::map< boost::uuids::uuid, vol_cp_id_ptr >* new_id_map, indx_cp_id* hb_id,
+                                           indx_cp_id* new_hb_id) {
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
 
 #ifndef NDEBUG
@@ -150,7 +158,7 @@ void HomeBlks::attach_prepare_volume_cp_id(std::map< boost::uuids::uuid, vol_cp_
         }
 
         /* get the cur cp id ptr */
-        auto new_cp_id_ptr = vol->attach_prepare_volume_cp_id(cur_cp_id_ptr, home_blks_id);
+        auto new_cp_id_ptr = vol->attach_prepare_volume_cp_id(cur_cp_id_ptr, hb_id, new_hb_id);
 
         if (new_cp_id_ptr) {
             bool happened{false};
@@ -635,7 +643,7 @@ void HomeBlks::do_volume_shutdown(bool force) {
     std::unique_lock< std::recursive_mutex > lg(m_vol_lock);
 
     if (!force && Volume::can_all_vols_shutdown()) {
-        Volume::trigger_system_cp();
+        Volume::trigger_homeblks_cp();
         return;
     }
 
@@ -833,7 +841,7 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
 
     // trigger CP
     LOGINFO("triggering system CP in init");
-    Volume::trigger_system_cp(([this](bool success) {
+    Volume::trigger_homeblks_cp(([this](bool success) {
         if (success) {
             LOGINFO("system CP is taken in init");
             init_done(no_error);

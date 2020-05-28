@@ -43,7 +43,7 @@ class HomestoreConan(ConanFile):
             "folly/2020.05.04.00",
             "isa-l/2.21.0",
             "libevent/2.1.11",
-            "openssl/1.1.1g",
+            "openssl/1.1.1g"
             )
 
     generators = "cmake"

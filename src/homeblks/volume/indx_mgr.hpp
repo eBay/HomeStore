@@ -13,6 +13,7 @@ struct volume_req;
 class mapping;
 class Volume;
 struct Free_Blk_Entry;
+struct free_blkid;
 
 /* Journal entry
  * --------------------------------------------------------------------
@@ -23,6 +24,7 @@ struct journal_hdr {
     uint64_t lba;
     uint64_t indx_start_lba;
     int nlbas;
+    int64_t cp_cnt;
 };
 
 class vol_journal_entry {
@@ -50,28 +52,86 @@ struct destroy_journal_ent {
 enum cp_state {
     active_cp = 0,
     suspend_cp, // cp is suspended
-    destroy_cp  // it is a destroy cp. It is moved to active only in bitmap checkpoint
+    destroy_cp  // it is a destroy cp. It is moved to active only in blkalloc checkpoint
 };
 
 typedef std::function< void(bool success) > cp_done_cb;
 typedef cp_done_cb indxmgr_stop_cb;
 
+/* Checkpoint is loosely defined demarcation of how much data is persisted. It might contain data after this checkpoint
+ * also but it defintely contains data upto demarcation line. So IOs in each checkpoint(blkalloc checkpoint,
+ * active checkpoint and diff checkpoint) should be idempotent.
+ *
+ * These are the different classes of checkpoints we have
+ *      - Homeblks CP
+ *              - Volume CP :- If it is suspended then all its sub system CPs are suspended
+ *                   - Active CP
+ *                   - Diff CP
+ *                   - Snap delete/create CP
+ *              - Blk Alloc CP  :- It is used to persist the bitmap
+ * Homeblks CP is scheduled periodically or when externally triggered. It calls prepare flush before doing actual flush.
+ * During prepare flush a individual CP can decide if it want to participate in a homeblks CP flush.
+ *
+ * When Blkid is freed in a CP it is first cached in a cp_id and then it is inserted into blkalloc staging buffer when a
+ * cp of that sussystem is taken. Blkid free of data blk can happen for active btree and snap btree. We don't free any
+ * data blks because of update in diff btree.
+ */
 struct vol_cp_id;
-struct vol_cp_id {
-    // Start PSN of different checkpoints in this ID
-    int64_t start_active_psn = -1;
-    int64_t end_active_psn = -1;
+struct vol_active_info {
+    int64_t start_psn = -1; // not inclusive
+    int64_t end_psn = -1;   // inclusive
     btree_cp_id_ptr btree_id;
+    sisl::wisr_vector< free_blkid >* free_blkid_list;
+    vol_active_info(int64_t start_psn, sisl::wisr_vector< free_blkid >* free_blkid_list) :
+            start_psn(start_psn),
+            free_blkid_list(free_blkid_list) {}
+};
+
+struct vol_diff_info {
+    int64_t start_psn = -1; // not inclusive
+    int64_t end_psn = -1;   // inclusive
+    btree_cp_id_ptr btree_id;
+};
+
+struct vol_snap_info {
+    std::vector< btree_cp_superblock > snap_delete_list;
+    std::vector< free_blkid > free_blkid_list;
+};
+
+/* During prepare flush we decide to take a CP out of active, diff or snap or all 3 cps*/
+struct vol_cp_id {
     std::shared_ptr< Volume > vol;
     int flags = cp_state::active_cp;
+
+    /* metrics */
+    int64_t cp_cnt;
+    std::atomic< int64_t > vol_size;
+
+    /* cp */
+    vol_active_info ainfo;
+    vol_diff_info dinfo;
+    vol_snap_info sinfo;
+
+    vol_cp_id(int64_t cp_cnt, int64_t start_active_psn, std::shared_ptr< Volume > vol,
+              sisl::wisr_vector< free_blkid >* free_blkid_list) :
+            vol(vol),
+            cp_cnt(cp_cnt),
+            vol_size(0),
+            ainfo(start_active_psn, free_blkid_list) {}
 };
 
 struct indx_cp_id : cp_id_base {
     /* This list is not lock protected. */
     std::map< boost::uuids::uuid, vol_cp_id_ptr > vol_id_list;
+    std::shared_ptr< blkalloc_cp_id > blkalloc_id;
+
     std::atomic< uint64_t > ref_cnt; // cnt of how many cps are triggered
     uint64_t snt_cnt;
-    bool bitmap_checkpoint = false;
+    bool blkalloc_checkpoint = false; // it is set to true in prepare flush stage
+    bool try_blkalloc_checkpoint =
+        false; // it is set to true when someone want to take blkalloc checkpoint on this id. It might happen that it is
+               // set to true after prepare flush is already called on this ID. In that case we will try to take blk
+               // alloc checkpoint in the next cp.
 
     /* callback when cp is done */
     std::mutex cb_list_mtx;
@@ -85,10 +145,19 @@ struct indx_mgr_cp_sb_hdr {
     uint32_t vol_cnt;
 } __attribute__((__packed__));
 
+struct vol_cp_superblock {
+    int64_t blkalloc_cp_cnt = -1; // cp cnt of last blkalloc checkpoint taken
+    int64_t cp_cnt = -1;
+    int64_t active_data_psn = -1;
+    int64_t vol_size = 0;
+} __attribute__((__packed__));
+
 struct indx_mgr_cp_sb {
     boost::uuids::uuid uuid;
-    int64_t active_data_psn;
-    int64_t active_btree_psn;
+    vol_cp_superblock vol_cp_sb;
+    btree_cp_superblock active_btree_cp_sb;
+    indx_mgr_cp_sb(boost::uuids::uuid uuid) : uuid(uuid){};
+    indx_mgr_cp_sb(){};
 } __attribute__((__packed__));
 
 struct indx_mgr_active_sb {
@@ -96,12 +165,6 @@ struct indx_mgr_active_sb {
     MappingBtreeDeclType::btree_super_block btree_sb;
 } __attribute__((__packed__));
 
-/* Checkpoint is loosely defined demarcation of how much data is persisted. It might contain data after this checkpoint
- * also but it defintely contains data upto demarcation line. So IOs in each checkpoint(bitmap checkpoint,
- * active checkpoint and diff checkpoint) should be idempotent.
- * We have only one checkpoint object for homeblks. Bitmap checkpoint, active checkpoint and diff checkpoint is sub set
- * of this checkpoint. We can decide in cp_attach_prepare that what we want to do and what volumes want to take part.
- */
 class IndxCP : public CheckPoint< indx_cp_id > {
 public:
     IndxCP();
@@ -110,8 +173,8 @@ public:
     virtual void cp_attach_prepare(indx_cp_id* cur_id, indx_cp_id* new_id);
     virtual ~IndxCP();
     void try_cp_start(indx_cp_id* id);
-    void cp_done(indx_cp_id* id);
-    void bitmap_cp_done(indx_cp_id* id);
+    void indx_tbl_cp_done(indx_cp_id* id);
+    void blkalloc_cp(indx_cp_id* id);
 };
 
 class IndxMgr;
@@ -126,7 +189,7 @@ class IndxMgr {
     typedef std::function< void(const boost::intrusive_ptr< volume_req >& vreq, std::error_condition err) > io_done_cb;
     typedef std::function< void(Free_Blk_Entry fbe) > free_blk_callback;
     typedef std::function< void(volume_req* req, BlkId& bid) > pending_read_blk_cb;
-    typedef std::function< void(vol_cp_id_ptr cur_vol_id, indx_cp_id* home_blks_id) > prepare_cb;
+    typedef std::function< void(vol_cp_id_ptr cur_vol_id, indx_cp_id* hb_id, indx_cp_id* new_hb_id) > prepare_cb;
 
 private:
     mapping* m_active_map;
@@ -148,16 +211,18 @@ private:
     std::mutex prepare_cb_mtx;
     sisl::wisr_vector< prepare_cb > prepare_cb_list;
     indx_mgr_active_sb m_sb;
+    sisl::wisr_vector< free_blkid >* m_free_list[MAX_CP_CNT];
+    indx_mgr_cp_sb m_last_sb;
 
     void journal_write(volume_req* vreq);
     void journal_comp_cb(logstore_seq_num_t seq_num, logdev_key ld_key, void* req);
     btree_status_t update_indx_tbl(volume_req* vreq);
-    void cp_done(btree_cp_id* btree_id);
     btree_cp_id_ptr get_btree_id(indx_cp_id* cp_id);
     vol_cp_id_ptr get_volume_id(indx_cp_id* cp_id);
-    void destroy_indx_tbl(btree_cp_id_ptr btree_id);
+    void destroy_indx_tbl(vol_cp_id_ptr vol_id);
     void add_prepare_cb_list(prepare_cb cb);
-    void volume_destroy_cp(vol_cp_id_ptr cur_vol_id, indx_cp_id* home_blks_id);
+    void volume_destroy_cp(vol_cp_id_ptr cur_vol_id, indx_cp_id* hb_id, indx_cp_id* new_hb_id);
+    void create_first_cp_id(std::shared_ptr< Volume >& vo);
 
 private:
     /*********************** static private members **********************/
@@ -165,13 +230,13 @@ private:
     static std::atomic< bool > m_shutdown_started;
     static bool m_shutdown_cmplt;
     static iomgr::io_thread_id_t m_thread_id;
-    static iomgr::timer_handle_t m_system_cp_timer_hdl;
+    static iomgr::timer_handle_t m_homeblks_cp_timer_hdl;
     static void* m_meta_blk;
     static std::once_flag m_flag;
     static sisl::aligned_unique_ptr< uint8_t > m_recovery_sb;
     static size_t m_recovery_sb_size;
     static std::map< boost::uuids::uuid, indx_mgr_cp_sb > cp_sb_map;
-
+    static HomeBlks* m_hb; // Hold onto the homeblks to maintain reference
     static void init();
 
 public:
@@ -185,7 +250,7 @@ public:
             pending_read_blk_cb read_blk_cb);
 
     /* It is called in recovery.
-     * @params sb :- sb require to recover indx mgr active file system.
+     * @params sb :- sb require to recover indx mgr active file homeblks.
      *         io_cb :- it is used to send callback with io is completed
      *         free_blk_cb :- It is used to free the blks in case of volume destroy
      *         read_blk_cb :- It is used to notify blks that it is about the be returned in read.
@@ -196,10 +261,11 @@ public:
 
     /* create new vol cp id and decide if this volume want to participate in a current cp
      * @params vol_cur_id :- current cp id of this volume
-     * @params home_blks_id :- current id of home_blks
+     * @params hb_id :- current id of home_blks
+     * @params new_hb_id :- new home blks cp id
      * @return :- return new cp id.
      */
-    vol_cp_id_ptr attach_prepare_vol_cp(vol_cp_id_ptr vol_cur_id, indx_cp_id* home_blks_id);
+    vol_cp_id_ptr attach_prepare_vol_cp(vol_cp_id_ptr vol_cur_id, indx_cp_id* hb_id, indx_cp_id* new_hb_id);
 
     /* Get the active indx table
      * @return :- active mapping instance
@@ -217,7 +283,7 @@ public:
      */
     indx_mgr_active_sb get_active_sb();
 
-    /* Destroy all indexes and call system level cp to persist. It assumes that all ios are stopped by volume.
+    /* Destroy all indexes and call homeblks level cp to persist. It assumes that all ios are stopped by volume.
      * It is async call. It is called only once
      * @params cb :- callback when destroy is done.
      */
@@ -229,9 +295,17 @@ public:
     /* volume is destroy successfully */
     void destroy_done();
 
-    void recovery_start_phase1();
+    /* It creates all the indx tables and intialize checkpoint */
+    void recovery_start_phase1(std::shared_ptr< Volume > vo);
     void recovery_start_phase2();
     void log_found(logstore_seq_num_t seqnum, log_buffer buf, void* mem);
+
+    /* it flushes free blks to blk allocator */
+    void flush_free_blks(vol_cp_id_ptr vol_id, indx_cp_id* indx_id);
+
+    /* it frees the blks and insert it in cp id free blk list. It is called when there is no read pending on this blk */
+    void free_blk(Free_Blk_Entry& fbe);
+    void update_cp_sb(vol_cp_id_ptr& vol_id, indx_cp_id* indx_id, indx_mgr_cp_sb* sb);
 
 public:
     /*********************** static public functions **********************/
@@ -244,27 +318,29 @@ public:
     /* create new vol cp id for all the volumes and also decide what volumes want to participate in a cp
      * @params cur_id :- current vol cp ids map
      *         new_id :- new new cp ids map
-     *         home_blks_id :- home blks cp id
+     *         hb_id :- home blks cp id
+     *         new_hb_id :- new home blks cp id
      */
 
     static void attach_prepare_vol_cp_id_list(std::map< boost::uuids::uuid, vol_cp_id_ptr >* cur_id,
-                                              std::map< boost::uuids::uuid, vol_cp_id_ptr >* new_id,
-                                              indx_cp_id* home_blks_id);
+                                              std::map< boost::uuids::uuid, vol_cp_id_ptr >* new_id, indx_cp_id* hb_id,
+                                              indx_cp_id* new_hb_id);
 
-    /* trigger system cp. It first trigger a volume cp followed by bitmap cp. It is async call.
+    /* trigger homeblks cp. It first trigger a volume cp followed by blkalloc cp. It is async call.
      * @params cb :- callback when cp is done.
      * @shutdown :- true if it is called by shutdown. This flag makes sure that no other cp is triggered after shutdown
      * cp
      */
-    static void trigger_system_cp(cp_done_cb cb = nullptr, bool shutdown = false);
+    static void trigger_homeblks_cp(cp_done_cb cb = nullptr, bool shutdown = false);
 
-    /* trigger volume CP. It doesn't persist bitmap */
+    /* trigger volume CP. It doesn't persist blkalloc */
     static void trigger_vol_cp();
 
     /* reinitialize indx mgr. It is used in fake reboot */
     static void reinit() { m_shutdown_started = false; }
     static iomgr::io_thread_id_t get_thread_id() { return m_thread_id; }
-    static void write_cp_super_block(indx_cp_id* id);
+    static void write_homeblks_cp_sb(indx_cp_id* indx_id);
     static void meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
+    static void flush_homeblks_free_blks(indx_cp_id* id);
 };
 } // namespace homestore

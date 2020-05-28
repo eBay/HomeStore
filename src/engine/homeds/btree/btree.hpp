@@ -79,6 +79,7 @@ private:
     bool m_destroy = false;
     std::atomic< uint64_t > m_total_nodes = 0;
     uint32_t m_node_size = 4096;
+    btree_cp_superblock m_last_cp_sb;
 #ifndef NDEBUG
     std::atomic< uint64_t > m_req_id = 0;
 #endif
@@ -158,16 +159,16 @@ public:
         return bt;
     }
 
-    static btree_t* create_btree(btree_super_block& btree_sb, BtreeConfig& cfg, int64_t psn) {
+    static btree_t* create_btree(btree_super_block& btree_sb, BtreeConfig& cfg, btree_cp_superblock* cp_sb) {
         auto impl_ptr = btree_store_t::init_btree(cfg);
         Btree* bt = new Btree(cfg);
         bt->m_btree_store = std::move(impl_ptr);
-        bt->init_recovery(btree_sb, psn);
+        bt->init_recovery(btree_sb, cp_sb);
         LOGINFO("btree recovered and created {} node size {}", cfg.get_name(), cfg.get_node_size());
         return bt;
     }
 
-    void do_common_init(int64_t start_seq_id = -1, bool is_recovery = false) {
+    void do_common_init(bool is_recovery = false) {
 
         // TODO: Check if node_area_size need to include persistent header
         uint32_t node_area_size = btree_store_t::get_node_area_size(m_btree_store.get());
@@ -181,7 +182,7 @@ public:
         max_leaf_nodes += (100 * max_leaf_nodes) / 60; // Assume 60% btree full
 
         m_max_nodes = max_leaf_nodes + ((double)max_leaf_nodes * 0.05) + 1; // Assume 5% for interior nodes
-        btree_store_t::update_sb(m_btree_store.get(), m_sb.store_sb, start_seq_id, is_recovery);
+        btree_store_t::update_sb(m_btree_store.get(), m_sb.store_sb, &m_last_cp_sb, is_recovery);
     }
 
     btree_status_t init() {
@@ -189,9 +190,10 @@ public:
         return (create_root_node());
     }
 
-    void init_recovery(btree_super_block btree_sb, int64_t start_seq_id) {
+    void init_recovery(btree_super_block btree_sb, btree_cp_superblock* cp_sb) {
         m_sb = btree_sb;
-        do_common_init(start_seq_id, true);
+        if (cp_sb) { memcpy(&m_last_cp_sb, cp_sb, sizeof(m_last_cp_sb)); }
+        do_common_init(true);
         m_root_node = m_sb.root_node;
     }
 
@@ -291,6 +293,19 @@ public:
     static void cp_done(trigger_cp_callback cb) { btree_store_t::cp_done(cb); }
 
     void destroy_done() { btree_store_t::destroy_done(m_btree_store.get()); }
+
+    void update_btree_cp_sb(btree_cp_id_ptr cp_id, btree_cp_superblock& btree_sb, bool blkalloc_cp) {
+        btree_sb.active_psn = cp_id->end_psn;
+        btree_sb.blkalloc_cp_cnt = blkalloc_cp ? cp_id->cp_cnt : m_last_cp_sb.cp_cnt;
+        btree_sb.btree_size = cp_id->btree_size.load() + m_last_cp_sb.btree_size;
+        btree_sb.cp_cnt = cp_id->cp_cnt;
+        assert(m_last_cp_sb.cp_cnt == cp_id->cp_cnt - 1);
+        memcpy(&m_last_cp_sb, &btree_sb, sizeof(m_last_cp_sb));
+    }
+
+    void flush_free_blks(btree_cp_id_ptr btree_id, std::shared_ptr< homestore::blkalloc_cp_id >& blkalloc_id) {
+        btree_store_t::flush_free_blks(m_btree_store.get(), btree_id, blkalloc_id);
+    }
 
     uint64_t get_used_size() { return m_node_size * m_total_nodes.load(); }
 
@@ -1809,21 +1824,25 @@ private:
         hdr->new_key_size = 0;
         hdr->op = op;
         hdr->is_root = is_root;
+        hdr->cp_cnt = cp_id->cp_cnt;
 
         uint64_t* old_node_id = (uint64_t*)((uint64_t)mem + sizeof(btree_journal_entry_hdr));
         for (uint32_t i = 0; i < old_nodes.size(); ++i) {
             old_node_id[i] = old_nodes[i]->get_node_id_int();
         }
+        cp_id->btree_size.fetch_sub(old_nodes.size() * m_node_size);
 
         uint64_t* deleted_node_id = (uint64_t*)(&(old_node_id[old_nodes.size()]));
         for (uint32_t i = 0; i < deleted_nodes.size(); ++i) {
             deleted_node_id[i] = deleted_nodes[i]->get_node_id_int();
         }
+        cp_id->btree_size.fetch_sub(deleted_nodes.size() * m_node_size);
 
         uint64_t* new_node_id = (uint64_t*)(&(deleted_node_id[deleted_nodes.size()]));
         for (uint32_t i = 0; i < new_nodes.size(); ++i) {
             new_node_id[i] = new_nodes[i]->get_node_id_int();
         }
+        cp_id->btree_size.fetch_add(new_nodes.size() * m_node_size);
 
         uint64_t* new_node_gen = (uint64_t*)(&(new_node_id[new_nodes.size()]));
         for (uint32_t i = 0; i < new_nodes.size(); ++i) {

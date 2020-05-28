@@ -152,6 +152,8 @@ void FixedBlkAllocator::free(const BlkId& b) {
     portion->unlock();
 }
 
+void FixedBlkAllocator::free(const BlkId& b, std::shared_ptr< blkalloc_cp_id > id) {}
+
 void FixedBlkAllocator::free_blk(uint32_t id) {
     uint64_t prev_val;
     uint64_t cur_val;

@@ -33,12 +33,15 @@ public:
     static std::unique_ptr< btree_store_t > init_btree(BtreeConfig& cfg);
     static uint8_t* get_physical(const btree_node_t* bn);
     static uint32_t get_node_area_size(btree_store_t* store);
-    static void update_sb(btree_store_t* store, btree_store_t::superblock& sb, int64_t start_seq_id, bool is_recovery);
+    static void update_sb(btree_store_t* store, btree_store_t::superblock& sb, btree_cp_superblock* cp_sb,
+                          bool is_recovery);
     static btree_cp_id_ptr attach_prepare_cp(btree_store_t* store, btree_cp_id_ptr cur_cp_id, bool is_last_cp);
     static void cp_start(btree_store_t* store, btree_cp_id_ptr cp_id, cp_comp_callback cb);
     static void truncate(btree_store_t* store, btree_cp_id_ptr cp_id);
     static void destroy_done(btree_store_t* store);
     static void write_journal_entry(btree_cp_id_ptr cp_id, uint8_t* mem, size_t size);
+    static void flush_free_blks(btree_store_t* store, btree_cp_id_ptr btree_id,
+                                std::shared_ptr< homestore::blkalloc_cp_id >& blkalloc_id);
 
     static BtreeNodePtr alloc_node(btree_store_t* store, bool is_leaf,
                                    bool& is_new_allocation, // indicates if allocated node is same as copy_from

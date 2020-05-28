@@ -575,11 +575,11 @@ public:
 
     ~mapping() { delete m_bt; }
 
-    btree_status_t destroy(btree_cp_id_ptr btree_id) {
+    btree_status_t destroy(btree_cp_id_ptr btree_id, vol_cp_id_ptr vol_id) {
         /* XXX: do we need to handle error condition here ?. In the next boot we will automatically recaim these blocks
          */
-        auto ret =
-            m_bt->destroy(std::bind(&mapping::process_free_blk_callback, this, std::placeholders::_1), false, btree_id);
+        auto ret = m_bt->destroy(([this, vol_id](MappingValue& mv) { this->process_free_blk_callback(vol_id, mv); }),
+                                 false, btree_id);
         HS_SUBMOD_ASSERT(LOGMSG, (ret == btree_status_t::success), , "vol", m_unique_name,
                          "Error in destroying mapping btree ret={} ", ret);
         return ret;
@@ -599,7 +599,7 @@ public:
         return 0;
     }
 
-    void process_free_blk_callback(MappingValue& mv) {
+    void process_free_blk_callback(vol_cp_id_ptr vol_id, MappingValue& mv) {
         if (!m_free_blk_cb) { return; }
         Blob_Array< ValueEntry > array = mv.get_array();
         for (uint32_t i = 0; i < array.get_total_elements(); ++i) {
@@ -608,7 +608,7 @@ public:
             HS_SUBMOD_LOG(DEBUG, volume, , "vol", m_unique_name, "Free Blk: vol_page: {}, data_page: {}, n_lba: {}",
                           m_vol_page_size, HomeBlks::instance()->get_data_pagesz(), ve.get_nlba());
             uint64_t nblks = (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * ve.get_nlba();
-            Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(), nblks);
+            Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(), nblks, vol_id, nullptr);
             m_free_blk_cb(fbe);
         }
     }
@@ -633,7 +633,7 @@ public:
     mapping(uint64_t volsize, uint32_t page_size, const std::string& unique_name,
             MappingBtreeDeclType::btree_super_block btree_sb, free_blk_callback free_blk_cb,
             trigger_cp_callback trigger_cp_cb, pending_read_blk_cb pending_read_cb = nullptr,
-            int64_t start_seq_id = -1) :
+            btree_cp_superblock* btree_cp_sb = nullptr) :
             m_free_blk_cb(free_blk_cb),
             m_pending_read_blk_cb(pending_read_cb),
             m_vol_page_size(page_size),
@@ -646,7 +646,7 @@ public:
         btree_cfg.blkstore = (void*)m_hb->get_index_blkstore();
         btree_cfg.trigger_cp_cb = trigger_cp_cb;
 
-        m_bt = MappingBtreeDeclType::create_btree(btree_sb, btree_cfg, start_seq_id);
+        m_bt = MappingBtreeDeclType::create_btree(btree_sb, btree_cfg, btree_cp_sb);
     }
 
     uint64_t get_used_size() { return m_bt->get_used_size(); }
@@ -664,6 +664,13 @@ public:
     static void cp_done(trigger_cp_callback cb) { MappingBtreeDeclType::cp_done(cb); }
 
     void destroy_done() { m_bt->destroy_done(); }
+    void update_btree_cp_sb(btree_cp_id_ptr cp_id, btree_cp_superblock& btree_sb, bool blkalloc_cp) {
+        m_bt->update_btree_cp_sb(cp_id, btree_sb, blkalloc_cp);
+    }
+
+    void flush_free_blks(btree_cp_id_ptr btree_id, std::shared_ptr< homestore::blkalloc_cp_id >& blkalloc_id) {
+        m_bt->flush_free_blks(btree_id, blkalloc_id);
+    }
 
     error_condition get(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& values,
                         MappingBtreeDeclType* bt) {
@@ -1125,7 +1132,8 @@ private:
                     new_varray.get(0, ve, false);
                     /* free new blkid. it is overridden */
                     Free_Blk_Entry fbe(ve.get_blkId(), new_val_offset,
-                                       (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * nlbas);
+                                       (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * nlbas, req->vol_id,
+                                       req->cp_id);
                     req->push_fbe(fbe);
                 }
                 start_lba += nlbas;
@@ -1273,9 +1281,12 @@ private:
         ValueEntry ve;
         e_varray.get(0, ve, false);
         uint16_t blk_offset = (e_val_offset * m_vol_page_size) / HomeBlks::instance()->get_data_pagesz();
-        Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset() + blk_offset,
-                           (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * nlba);
-        if (req) { req->push_fbe(fbe); }
+        if (req) {
+            Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset() + blk_offset,
+                               (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * nlba, req->vol_id,
+                               req->cp_id);
+            req->push_fbe(fbe);
+        }
 
         replace_kv.emplace_back(
             make_pair(MappingKey(s_lba, nlba), MappingValue(new_val, new_val_offset, nlba, m_vol_page_size)));

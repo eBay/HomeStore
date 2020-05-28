@@ -285,12 +285,12 @@ public:
     /* We free the block only upto the end seqid of this cp. We might have persisted the data of sequence id
      * greater then this seq_id. But we are going to replay the entry from
      */
-    void flush_free_blk(btree_cp_id_ptr cp_id) {
+    void flush_free_blks(btree_cp_id_ptr cp_id, std::shared_ptr< homestore::blkalloc_cp_id >& blkalloc_id) {
         int cp_cnt = cp_id->cp_cnt % MAX_CP_CNT;
 
         auto copy_free_list = m_free_list[cp_cnt]->get_copy_and_reset();
         for (uint32_t i = 0; i < copy_free_list->size(); ++i) {
-            m_blkstore->free_blk((*copy_free_list)[i], boost::none, boost::none);
+            m_blkstore->free_blk((*copy_free_list)[i], boost::none, boost::none, blkalloc_id);
         }
         copy_free_list = nullptr;
     }

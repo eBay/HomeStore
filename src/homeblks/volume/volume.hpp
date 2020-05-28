@@ -118,16 +118,29 @@ protected:
 
 #define CHECKSUM_SIZE 2
 
-struct Free_Blk_Entry {
+struct free_blkid {
     BlkId m_blkId;
     uint8_t m_blk_offset : NBLKS_BITS;
     uint8_t m_nblks_to_free : NBLKS_BITS;
 
-    Free_Blk_Entry(){};
-    Free_Blk_Entry(const BlkId& blkId, uint8_t blk_offset, uint8_t nblks_to_free) :
-            m_blkId(blkId),
-            m_blk_offset(blk_offset),
-            m_nblks_to_free(nblks_to_free) {}
+    free_blkid() {}
+    free_blkid(const BlkId& blkId, uint8_t blk_offset, uint8_t nblks_to_free) :
+            m_blkId(blkId), m_blk_offset(blk_offset), m_nblks_to_free(nblks_to_free) {}
+    void copy(struct free_blkid& fbe) {
+        m_blkId = fbe.m_blkId;
+        m_blk_offset = fbe.m_blk_offset;
+        m_nblks_to_free = fbe.m_nblks_to_free;
+    }
+} __attribute__((__packed__));
+
+struct Free_Blk_Entry : free_blkid {
+    indx_cp_id* m_cp_id;
+    vol_cp_id_ptr m_vol_id;
+
+    Free_Blk_Entry() {}
+    Free_Blk_Entry(const BlkId& blkId, uint8_t blk_offset, uint8_t nblks_to_free, vol_cp_id_ptr vol_id,
+                   indx_cp_id* cp_id) :
+            free_blkid(blkId, blk_offset, nblks_to_free), m_cp_id(cp_id), m_vol_id(vol_id) {}
 
     BlkId blk_id() const { return m_blkId; }
     uint8_t blk_offset() const { return m_blk_offset; }
@@ -340,12 +353,13 @@ public:
     static void process_vol_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
 
     /* used to trigger system level cp */
-    static void trigger_system_cp(cp_done_cb cb = nullptr) { IndxMgr::trigger_system_cp(cb); };
+    static void trigger_homeblks_cp(cp_done_cb cb = nullptr) { IndxMgr::trigger_homeblks_cp(cb); };
 
     /* it is used in fake reboot */
     static void reinit() { IndxMgr::reinit(); }
-
+    
     static void meta_blk_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
+    static void meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
 
 public:
     /******************** APIs exposed to home_blks *******************/
@@ -439,7 +453,7 @@ public:
      * @params vol_id :- current cp id of this volume
      * @params home_blks_id :- current cp id of home_blks
      */
-    vol_cp_id_ptr attach_prepare_volume_cp_id(vol_cp_id_ptr vol_id, indx_cp_id* home_blks_id);
+    vol_cp_id_ptr attach_prepare_volume_cp_id(vol_cp_id_ptr vol_id, indx_cp_id* hb_id, indx_cp_id* new_hb_id);
 
     /* get indx mgr
      * @return indx mgr
@@ -466,9 +480,11 @@ public:
         return id;
     }
 
-    static void meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
-
+    void flush_free_blks(vol_cp_id_ptr vol_id, indx_cp_id* indx_id) { m_indx_mgr->flush_free_blks(vol_id, indx_id); }
     void truncate(vol_cp_id_ptr vol_id) { m_indx_mgr->truncate(vol_id); }
+    void update_cp_sb(vol_cp_id_ptr& vol_id, indx_cp_id* indx_id, indx_mgr_cp_sb* sb) {
+        m_indx_mgr->update_cp_sb(vol_id, indx_id, sb);
+    }
 
     /**
      * @brief
@@ -499,6 +515,7 @@ struct volume_req {
 
     /********** members used by indx mgr **********/
     indx_cp_id* cp_id = nullptr; // checkpoint ID of this request is part of
+    vol_cp_id_ptr vol_id;
     Clock::time_point indx_start_time;
     uint64_t lastCommited_seqId = INVALID_SEQ_ID;
     uint64_t seqId = INVALID_SEQ_ID;
@@ -543,7 +560,9 @@ struct volume_req {
     void push_csum(uint16_t csum) { csum_list.push_back(csum); }
 
     /* push fbe to the existing list */
-    void push_fbe(Free_Blk_Entry& fbe) { fbe_list.push_back(fbe); }
+    void push_fbe(Free_Blk_Entry& fbe) {
+        fbe_list.push_back(fbe);
+    }
 
     void inc_ref() { intrusive_ptr_add_ref(this); }
 
@@ -576,7 +595,7 @@ private:
         csum_list.reserve(VOL_MAX_IO_SIZE / vi_req->vol_instance->get_page_size());
         fbe_list.reserve(VOL_MAX_IO_SIZE / vi_req->vol_instance->get_page_size());
         alloc_blkid_list.reserve(VOL_MAX_IO_SIZE / vi_req->vol_instance->get_page_size());
-        seqId = vi_req->vol_instance->inc_and_get_seq_id();
+        if (!vi_req->is_read) { seqId = vi_req->vol_instance->inc_and_get_seq_id(); }
     }
 };
 

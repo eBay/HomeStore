@@ -496,6 +496,7 @@ public:
     BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints& hints, BlkId* out_blkid, bool best_fit = false) override;
     BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) override;
     void free(const BlkId& b) override;
+    void free(const BlkId& b, std::shared_ptr< blkalloc_cp_id > id) override;
 
     std::string to_string() const override;
     void allocator_state_machine();

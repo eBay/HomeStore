@@ -25,6 +25,14 @@ using namespace std;
 
 namespace homestore {
 
+struct blkalloc_cp_id {
+    bool suspend = false;
+    uint64_t cnt;
+    bool is_suspend() { return suspend; }
+    void suspend_cp() { suspend = true; }
+    void resume_cp() { suspend = false; }
+};
+
 class BlkAllocConfig {
 private:
     uint32_t m_blk_size;
@@ -147,6 +155,7 @@ public:
 
     virtual ~BlkAllocator() { delete m_alloced_bm; }
     sisl::Bitset* get_alloced_bm() { return m_alloced_bm; }
+    void set_alloced_bm(std::unique_ptr< sisl::Bitset > recovered_bm) { m_alloced_bm->move(*(recovered_bm.get())); }
     BlkAllocPortion* get_blk_portions(uint32_t portion_num) { return &(m_blk_portions[portion_num]); }
 
     virtual void inited() = 0;
@@ -154,9 +163,11 @@ public:
     virtual BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) = 0;
     virtual BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints& hints, BlkId* out_blkid,
                                  bool best_fit = false) = 0;
-    sisl::byte_array serialize_alloc_blks() { return (m_alloced_bm->serialize()); }
+    sisl::byte_array cp_start(std::shared_ptr< blkalloc_cp_id > id) { return (m_alloced_bm->serialize()); }
+    void cp_done(std::shared_ptr< blkalloc_cp_id > id) {}
     virtual bool is_blk_alloced(BlkId& in_bid) = 0;
     virtual void free(const BlkId& id) = 0;
+    virtual void free(const BlkId& b, std::shared_ptr< blkalloc_cp_id > id) = 0;
     virtual std::string to_string() const = 0;
 
     virtual const BlkAllocConfig& get_config() const { return m_cfg; }
@@ -229,6 +240,7 @@ public:
 
     BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints& hints, BlkId* out_blkid, bool best_fit = false) override;
     void free(const BlkId& b) override;
+    void free(const BlkId& b, std::shared_ptr< blkalloc_cp_id > id) override;
     std::string to_string() const override;
     BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) override;
     virtual void inited() override;

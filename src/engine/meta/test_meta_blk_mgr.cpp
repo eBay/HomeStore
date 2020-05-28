@@ -79,6 +79,7 @@ struct Param {
     uint64_t run_time;
     uint32_t per_write;
     uint32_t per_update;
+    uint32_t per_remove;
     bool fixed_wrt_sz_enabled;
     uint32_t fixed_wrt_sz;
     uint32_t min_wrt_sz;
@@ -90,7 +91,7 @@ static Param gp;
 class VMetaBlkMgrTest : public ::testing::Test {
 
     enum class meta_op_type { write = 1, update = 2, remove = 3 };
-    const std::string mtype = "VOLUME";
+    const std::string mtype = "TEST";
 
 public:
     uint64_t get_elapsed_time(Clock::time_point start) {
@@ -132,6 +133,18 @@ public:
         }
     }
 
+    uint64_t total_size_written(uint64_t context_sz) {
+        if (context_sz <= META_BLK_CONTEXT_SZ) {
+            return META_BLK_PAGE_SZ;
+        } else {
+            if ((context_sz - META_BLK_CONTEXT_SZ) % META_BLK_OVF_CONTEXT_SZ == 0) {
+                return (1 + ((context_sz - META_BLK_CONTEXT_SZ) / META_BLK_OVF_CONTEXT_SZ)) * META_BLK_PAGE_SZ;
+            } else {
+                return (2 + ((context_sz - META_BLK_CONTEXT_SZ) / META_BLK_OVF_CONTEXT_SZ)) * META_BLK_PAGE_SZ;
+            }
+        }
+    }
+
     void do_sb_write(bool overflow) {
         m_wrt_cnt++;
         auto sz_to_wrt = rand_size(overflow);
@@ -152,44 +165,74 @@ public:
             assert(mblk->hdr.h.ovf_blkid.to_integer() == BlkId::invalid_internal_id());
         }
 
+        // verify context_sz
+        HS_ASSERT(RELEASE, mblk->hdr.h.context_sz == sz_to_wrt, "context_sz mismatch: {}/{}", (uint64_t)mblk->hdr.h.context_sz,
+                  sz_to_wrt);
+
         // save cookie;
         std::unique_lock< std::mutex > lg(m_mtx);
-        m_write_sbs.push_back(cookie);
+        HS_ASSERT(RELEASE, m_write_sbs.find(cookie) == m_write_sbs.end(), "cookie already in the map.");
+
+        // save to cache
+        m_write_sbs[cookie] = std::string((char*)buf, sz_to_wrt);
+
+        m_total_wrt_sz += total_size_written(sz_to_wrt);
+        HS_ASSERT(RELEASE, m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
+                  m_mbm->get_used_size());
 
         free(buf);
-    }
-
-    uint32_t get_rand_pos() {
-        std::random_device rd;
-        std::default_random_engine generator(rd());
-        std::uniform_int_distribution< long unsigned > dist(0, m_write_sbs.size() - 1);
-        return dist(generator);
     }
 
     void do_sb_remove() {
         m_rm_cnt++;
         auto sz = m_write_sbs.size();
-        auto pos = get_rand_pos();
-        assert(pos >= 0ul && pos < m_write_sbs.size());
-        auto it = m_write_sbs.begin() + pos;
-        assert(*it != nullptr);
-        m_mbm->remove_sub_sb(*it);
+        auto it = m_write_sbs.begin();
+        std::advance(it, rand() % m_write_sbs.size());
+
+        auto cookie = it->first;
+        m_total_wrt_sz -= total_size_written(((meta_blk*)cookie)->hdr.h.context_sz);
+
+        m_mbm->remove_sub_sb(cookie);
         m_write_sbs.erase(it);
         assert(sz == m_write_sbs.size() + 1);
+
+        HS_ASSERT(RELEASE, m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
+                  m_mbm->get_used_size());
     }
 
     void do_sb_update() {
         m_update_cnt++;
 
         std::unique_lock< std::mutex > lg(m_mtx);
-        auto it = m_write_sbs.begin() + get_rand_pos();
+        auto it = m_write_sbs.begin();
+        std::advance(it, rand() % m_write_sbs.size());
+
         bool overflow = rand() % 2;
         auto sz_to_wrt = rand_size(overflow);
         uint8_t* buf = iomanager.iobuf_alloc(512, sz_to_wrt);
 
         gen_rand_buf(buf, sz_to_wrt);
 
-        m_mbm->update_sub_sb(mtype, buf, sz_to_wrt, *it);
+        void* cookie = it->first;
+        m_write_sbs.erase(it);
+
+        // update is in-place, the metablk is re-used, ovf-blk is freed then re-allocated;
+        // so it is okay to decreaase at this point, then add it back after update completes;
+        m_total_wrt_sz -= total_size_written(((meta_blk*)cookie)->hdr.h.context_sz);
+
+        m_mbm->update_sub_sb(mtype, buf, sz_to_wrt, cookie);
+        HS_ASSERT(RELEASE, m_write_sbs.find(cookie) == m_write_sbs.end(), "cookie already in the map.");
+        m_write_sbs[cookie] = std::string((char*)buf, sz_to_wrt);
+
+        // verify context_sz
+        meta_blk* mblk = (meta_blk*)cookie;
+        HS_ASSERT(RELEASE, mblk->hdr.h.context_sz == sz_to_wrt, "context_sz mismatch: {}/{}", (uint64_t)mblk->hdr.h.context_sz,
+                  sz_to_wrt);
+
+        // update total size, add size of metablk back;
+        m_total_wrt_sz += total_size_written(sz_to_wrt);
+        HS_ASSERT(RELEASE, m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
+                  m_mbm->get_used_size());
 
         free(buf);
     }
@@ -200,18 +243,13 @@ public:
         HS_ASSERT_CMP(DEBUG, m_cb_blks.size(), ==, m_write_sbs.size());
 
         for (auto it = m_write_sbs.cbegin(); it != m_write_sbs.end(); it++) {
-            meta_blk* mblk = (meta_blk*)(*it);
-            int ret = memcmp((void*)&(mblk->hdr), (void*)&(m_cb_blks[mblk->hdr.h.blkid.to_integer()]->hdr),
-                             sizeof(meta_blk_hdr));
-            if (ret != 0) { HS_ASSERT(DEBUG, false, "memory compare failed for mblk header!"); }
+            auto cookie = it->first;
+            auto it_cb = m_cb_blks.find(cookie);
+            HS_ASSERT(RELEASE, it_cb != m_cb_blks.end(), "Saved cookie during write not found in recover callback.");
 
-            if (mblk->hdr.h.context_sz <= META_BLK_CONTEXT_SZ) {
-                ret = memcmp(mblk->context_data, m_cb_blks[mblk->hdr.h.blkid.to_integer()]->context_data,
-                             mblk->hdr.h.context_sz);
-                if (ret != 0) { HS_ASSERT(DEBUG, false, "memory compare failed fore mblk context data"); }
-            } else {
-                // nothing to do as ovf_blkid is already compared in the hdr;
-            }
+            // the saved buf should be equal to the buf received in the recover callback;
+            int ret = it->second.compare(it_cb->second);
+            HS_ASSERT(DEBUG, ret == 0, "Context data mismatch: Saved: {}, callback: {}.", it->second, it_cb->second);
         }
     }
 
@@ -219,14 +257,14 @@ public:
         m_start_time = Clock::now();
         m_mbm = MetaBlkMgr::instance();
 
-        m_mbm->deregister_handler(mtype);
+        // there is some overhead by MetaBlkMgr, such as meta ssb;
+        m_total_wrt_sz = m_mbm->get_used_size();
 
         m_mbm->register_handler(mtype,
                                 [this](meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size) {
-                                // TODO: use buf, instead of mblk to compare data after meta blk mgr
                                     if (mblk) {
                                         std::unique_lock< std::mutex > lg(m_mtx);
-                                        m_cb_blks[mblk->hdr.h.blkid.to_integer()] = mblk;
+                                        m_cb_blks[(void*)mblk] = std::string((char*)(buf.get()), size);
                                     }
                                 },
                                 [this](bool success) { assert(success); });
@@ -275,7 +313,6 @@ public:
     }
 
     bool do_update() {
-        // TODO: enable update
         if (update_ratio() < gp.per_update) { return true; }
         return false;
     }
@@ -292,8 +329,8 @@ private:
     uint64_t m_total_wrt_sz = 0;
     Clock::time_point m_start_time;
     MetaBlkMgr* m_mbm = nullptr;
-    std::vector< void* > m_write_sbs;          // stored records when doing write;
-    std::map< uint64_t, meta_blk* > m_cb_blks; // blkid to metablk handler;
+    std::map< void*, std::string > m_write_sbs; // during write, save cookie to buf map;
+    std::map< void*, std::string > m_cb_blks;   // during recover, save cookie to buf map;
     std::mutex m_mtx;
 };
 
@@ -317,8 +354,8 @@ SDS_OPTION_GROUP(
     (max_write_size, "", "max_write_size", "maximum write size", ::cxxopts::value< uint32_t >()->default_value("16384"),
      "number"),
     (num_io, "", "num_io", "number of io", ::cxxopts::value< uint64_t >()->default_value("3000"), "number"),
-    (per_update, "", "per_update", "update percentage", ::cxxopts::value< uint32_t >()->default_value("10"), "number"),
-    (per_write, "", "per_write", "write percentage", ::cxxopts::value< uint32_t >()->default_value("70"), "number"),
+    (per_update, "", "per_update", "update percentage", ::cxxopts::value< uint32_t >()->default_value("20"), "number"),
+    (per_write, "", "per_write", "write percentage", ::cxxopts::value< uint32_t >()->default_value("60"), "number"),
     (per_remove, "", "per_remove", "remove percentage", ::cxxopts::value< uint32_t >()->default_value("20"), "number"),
     (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
      cxxopts::value< int32_t >()->default_value("5003"), "port"));
@@ -341,9 +378,10 @@ int main(int argc, char* argv[]) {
     gp.min_wrt_sz = SDS_OPTIONS["min_write_size"].as< uint32_t >();
     gp.max_wrt_sz = SDS_OPTIONS["max_write_size"].as< uint32_t >();
 
-    if (gp.per_update == 0 || gp.per_write == 0 || (gp.per_update + gp.per_write != 100)) {
+    if (gp.per_update == 0 || gp.per_write == 0 || (gp.per_update + gp.per_write + gp.per_remove != 100)) {
         gp.per_update = 20;
-        gp.per_write = 80;
+        gp.per_write = 60;
+        gp.per_remove = 20;
     }
 
     LOGINFO("Testing with run_time: {}, num_io: {},  read/write percentage: {}/{}", gp.run_time, gp.num_io,

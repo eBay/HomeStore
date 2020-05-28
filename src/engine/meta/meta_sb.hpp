@@ -17,6 +17,7 @@ namespace homestore {
 #define META_BLK_SB_MAGIC 0xABCDCEED
 #define META_BLK_SB_VERSION 0x1
 #define MAX_SUBSYS_TYPE_LEN 32
+
 /**
  * Sub system types and their priorities
  */
@@ -24,10 +25,6 @@ using meta_sub_type = std::string;
 using crc32_t = uint32_t;
 
 // meta blk super block put as 1st block in the block chain;
-// TODO Nice-to-have:
-// 1. internal crc
-// 2. move next/prev to commom linkage structure;
-//
 struct meta_blk_sb {
     uint32_t version;
     uint32_t magic; // ssb magic
@@ -38,23 +35,9 @@ struct meta_blk_sb {
 } __attribute((packed));
 
 //
-// Note:
 // 1. If overflow blkid is invalid, meaning context_sz is not larger than META_BLK_CONTEXT_SZ,
 //    context data is stored in context_data field;
 // 2. If overflow blkid is not invalid, all the context data is stored in overflow blks;
-//
-// TODO:
-// * [done]Chain ovf_blkid (need to stay in cache) for data larger than ovf buffer can hold;
-// * [done]Free old ovf_blkid, then create new blks for update api;
-// * [done]Only context data align to 512; ovf_header is 512 and data is 4k - 512 and needs iov to write;
-// * [done]Change meta_sub_type to unique string so that it can be dyanamically added;
-// * [done]virtual dev write iov for blkid
-// * change cache to meta_blk_hdr, instead of whole meta blk which contains context_data;
-// * Move journal sb to metablk mgr (lower priority since we've had a working version in vdev);
-// * Enalbe bitmap code for large buffer wirte metablkmgr;
-// * 
-// Testing:
-// * design an longevity test case to kepp allocate and remove, to test there is no leak;
 //
 struct meta_blk_hdr_s {
     uint32_t magic; // magic
@@ -64,7 +47,7 @@ struct meta_blk_hdr_s {
     BlkId prev_blkid;    // previous metablk
     BlkId ovf_blkid;     // overflow blk id;
     BlkId blkid;         // current blk id; might not be needd;
-    uint64_t context_sz; // in case of overflow, this is the total size for all overflow buffers;
+    uint64_t context_sz; // total size of context data; 
 } __attribute((packed));
 
 struct meta_blk_hdr {
