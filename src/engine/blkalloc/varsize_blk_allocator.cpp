@@ -216,6 +216,7 @@ void VarsizeBlkAllocator::allocator_state_machine() {
 }
 
 bool VarsizeBlkAllocator::is_blk_alloced(BlkId& b) {
+    if (!m_init) { return true; }
 #ifndef NDEBUG
     BlkAllocPortion* portion = blknum_to_portion(b.get_id());
     portion->lock();

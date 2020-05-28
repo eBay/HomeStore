@@ -74,6 +74,7 @@ void FixedBlkAllocator::inited() {
 
 bool FixedBlkAllocator::is_blk_alloced(BlkId& b) {
     /* We need to take lock so we can check in non debug builds */
+    if (!m_init) { return true; }
 #ifndef NDEBUG
     BlkAllocPortion* portion = blknum_to_portion(b.get_id());
     portion->lock();
