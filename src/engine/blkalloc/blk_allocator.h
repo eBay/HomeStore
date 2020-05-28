@@ -146,6 +146,7 @@ public:
 class BlkAllocator {
     std::vector< BlkAllocPortion > m_blk_portions;
     sisl::Bitset* m_alloced_bm;
+    std::vector< BlkId > free_blkid_list;
 
 public:
     explicit BlkAllocator(BlkAllocConfig& cfg, uint32_t id = 0) : m_blk_portions(cfg.get_total_portions()) {
@@ -164,10 +165,19 @@ public:
     virtual BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints& hints, BlkId* out_blkid,
                                  bool best_fit = false) = 0;
     sisl::byte_array cp_start(std::shared_ptr< blkalloc_cp_id > id) { return (m_alloced_bm->serialize()); }
-    void cp_done(std::shared_ptr< blkalloc_cp_id > id) {}
+    void cp_done(std::shared_ptr< blkalloc_cp_id > id) {
+        for (uint32_t i = 0; i < free_blkid_list.size(); ++i) {
+            free(free_blkid_list[i], false, true);
+        }
+        free_blkid_list.clear();
+    }
     virtual bool is_blk_alloced(BlkId& in_bid) = 0;
-    virtual void free(const BlkId& id) = 0;
-    virtual void free(const BlkId& b, std::shared_ptr< blkalloc_cp_id > id) = 0;
+    void free(const BlkId& id) { free(id, true, true); }
+    virtual void free(const BlkId& id, bool set_in_use, bool set_cache) = 0;
+    void free(const BlkId& b, std::shared_ptr< blkalloc_cp_id > id) {
+        free_blkid_list.push_back(b);
+        free(b, true, false);
+    }
     virtual std::string to_string() const = 0;
 
     virtual const BlkAllocConfig& get_config() const { return m_cfg; }
@@ -239,8 +249,7 @@ public:
     ~FixedBlkAllocator() override;
 
     BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints& hints, BlkId* out_blkid, bool best_fit = false) override;
-    void free(const BlkId& b) override;
-    void free(const BlkId& b, std::shared_ptr< blkalloc_cp_id > id) override;
+    void free(const BlkId& b, bool set_in_use, bool set_cache) override;
     std::string to_string() const override;
     BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) override;
     virtual void inited() override;

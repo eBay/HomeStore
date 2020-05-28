@@ -664,7 +664,7 @@ void IndxMgr::destroy_done() {
     home_log_store_mgr.remove_log_store(m_journal->get_store_id());
 }
 
-void IndxMgr::log_found(logstore_seq_num_t seqnum, log_buffer log_buf, void* mem) {}
+void IndxMgr::log_found(logstore_seq_num_t seqnum, log_buffer log_buf, void* mem) { assert(0); }
 
 void IndxMgr::meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size) {
     m_meta_blk = mblk;
