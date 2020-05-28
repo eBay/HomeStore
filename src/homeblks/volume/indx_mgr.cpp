@@ -344,6 +344,7 @@ void IndxMgr::update_cp_sb(vol_cp_id_ptr& vol_id, indx_cp_id* indx_id, indx_mgr_
     sb->vol_cp_sb.blkalloc_cp_cnt = indx_id->blkalloc_checkpoint ? vol_id->cp_cnt : m_last_sb.vol_cp_sb.blkalloc_cp_cnt;
     sb->vol_cp_sb.vol_size = vol_id->vol_size.load() + m_last_sb.vol_cp_sb.vol_size;
     sb->vol_cp_sb.cp_cnt = vol_id->cp_cnt;
+    sb->uuid = m_uuid;
     m_active_map->update_btree_cp_sb(vol_id->ainfo.btree_id, sb->active_btree_cp_sb, indx_id->blkalloc_checkpoint);
     memcpy(&m_last_sb, sb, sizeof(m_last_sb));
 }
@@ -664,20 +665,25 @@ void IndxMgr::destroy_done() {
     home_log_store_mgr.remove_log_store(m_journal->get_store_id());
 }
 
-void IndxMgr::log_found(logstore_seq_num_t seqnum, log_buffer log_buf, void* mem) { assert(0); }
+void IndxMgr::log_found(logstore_seq_num_t seqnum, log_buffer log_buf, void* mem) {}
 
 void IndxMgr::meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size) {
     m_meta_blk = mblk;
     indx_mgr_cp_sb_hdr* hdr = (indx_mgr_cp_sb_hdr*)buf.get();
     assert(hdr->version == INDX_MGR_VERSION);
     indx_mgr_cp_sb* cp_sb = (indx_mgr_cp_sb*)((uint64_t)buf.get() + sizeof(indx_mgr_cp_sb_hdr));
-    assert(size == (sizeof(indx_mgr_cp_sb_hdr) + hdr->vol_cnt * sizeof(indx_mgr_cp_sb)));
+
+#ifndef NDEBUG
+    uint64_t temp_size = sizeof(indx_mgr_cp_sb_hdr) + hdr->vol_cnt * sizeof(indx_mgr_cp_sb);
+    temp_size = sisl::round_up(size, HS_STATIC_CONFIG(disk_attr.align_size));
+    assert(size == temp_size);
+#endif
 
     for (uint32_t i = 0; i < hdr->vol_cnt; ++i) {
         bool happened{false};
         std::map< boost::uuids::uuid, indx_mgr_cp_sb >::iterator it;
         std::tie(it, happened) = cp_sb_map.emplace(std::make_pair(cp_sb[i].uuid, cp_sb[i]));
-        assert(!happened);
+        assert(happened);
     }
 }
 

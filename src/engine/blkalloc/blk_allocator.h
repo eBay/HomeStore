@@ -156,7 +156,10 @@ public:
 
     virtual ~BlkAllocator() { delete m_alloced_bm; }
     sisl::Bitset* get_alloced_bm() { return m_alloced_bm; }
-    void set_alloced_bm(std::unique_ptr< sisl::Bitset > recovered_bm) { m_alloced_bm->move(*(recovered_bm.get())); }
+    void set_alloced_bm(std::unique_ptr< sisl::Bitset > recovered_bm) {
+        LOGINFO("bitmap found");
+        m_alloced_bm->move(*(recovered_bm.get()));
+    }
     BlkAllocPortion* get_blk_portions(uint32_t portion_num) { return &(m_blk_portions[portion_num]); }
 
     virtual void inited() = 0;
