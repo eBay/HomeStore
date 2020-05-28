@@ -19,16 +19,9 @@ void MetaBlkMgr::start(blk_store_t* sb_blk_store, sb_blkstore_blob* blob, bool i
     recover();
 }
 
-void MetaBlkMgr::stop() {
-    del_instance();
-}
+void MetaBlkMgr::stop() { del_instance(); }
 
-MetaBlkMgr::~MetaBlkMgr() {
-    // de-register all subsystem;
-    for (auto& x : m_sub_info) {
-        deregister_handler(x.first);
-    }
-
+void MetaBlkMgr::cache_clear() {
     std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
     for (auto it = m_meta_blks.cbegin(); it != m_meta_blks.cend(); it++) {
         for (auto it_m = it->second.cbegin(); it_m != it->second.cend(); it_m++) {
@@ -46,7 +39,19 @@ MetaBlkMgr::~MetaBlkMgr() {
 
     m_meta_blks.clear();
     m_ovf_blk_hdrs.clear();
+}
+
+MetaBlkMgr::~MetaBlkMgr() {
+    cache_clear();
+
+    // de-register all subsystem;
+    for (auto& x : m_sub_info) {
+        deregister_handler(x.first);
+    }
+
+    std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
     m_sub_info.clear();
+
     iomanager.iobuf_free((uint8_t*)m_ssb);
 }
 
@@ -125,6 +130,8 @@ void MetaBlkMgr::write_ssb() {
 }
 
 void MetaBlkMgr::scan_meta_blks() {
+    cache_clear();
+
     // take a look so that before scan is complete, no add/remove/update operations will be allowed;
     std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
     auto bid = m_ssb->next_blkid;
@@ -134,8 +141,16 @@ void MetaBlkMgr::scan_meta_blks() {
         read(bid, b);
         auto mblk = (meta_blk*)b.bytes;
 
+        // TODO: add a new API in blkstore read to by pass cache;
+        // e.g. take caller's read buf to avoid this extra memory copy;
+        uint8_t* buf = iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), b.size);
+        memcpy(buf, b.bytes, b.size);
+
         // add meta blk to cache;
-        m_meta_blks[mblk->hdr.h.type][mblk->hdr.h.blkid.to_integer()] = mblk;
+        m_meta_blks[mblk->hdr.h.type][mblk->hdr.h.blkid.to_integer()] = (meta_blk*)buf;
+
+        // mark allocated for this block
+        m_sb_blk_store->alloc_blk(mblk->hdr.h.blkid);
 
         // populate overflow blk chain;
         auto obid = mblk->hdr.h.ovf_blkid;
@@ -155,6 +170,10 @@ void MetaBlkMgr::scan_meta_blks() {
 
             auto ovf_hdr = (meta_blk_ovf_hdr*)b.bytes;
 
+            uint8_t* ovf_hdr_cp =
+                iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_OVF_HDR_MAX_SZ);
+            memcpy(ovf_hdr_cp, b.bytes, META_BLK_OVF_HDR_MAX_SZ);
+
             // verify linkage;
             HS_ASSERT(RELEASE, ovf_hdr->h.blkid.to_integer() == obid.to_integer(), "Corrupted self-bid: {}/{}",
                       ovf_hdr->h.blkid.to_string(), obid.to_string());
@@ -164,7 +183,10 @@ void MetaBlkMgr::scan_meta_blks() {
             read_sz += ovf_hdr->h.context_sz;
 
             // add to ovf blk cache;
-            m_ovf_blk_hdrs[obid.to_integer()] = ovf_hdr;
+            m_ovf_blk_hdrs[obid.to_integer()] = (meta_blk_ovf_hdr*)ovf_hdr_cp;
+
+            // allocate overflow blkid;
+            m_sb_blk_store->alloc_blk(obid);
 
             prev_obid = obid;
 

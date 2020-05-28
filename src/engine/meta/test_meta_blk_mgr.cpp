@@ -88,6 +88,11 @@ struct Param {
 
 static Param gp;
 
+struct sb_info_t {
+    void* cookie;
+    std::string str;
+};
+
 class VMetaBlkMgrTest : public ::testing::Test {
 
     enum class meta_op_type { write = 1, update = 2, remove = 3 };
@@ -169,12 +174,14 @@ public:
         HS_ASSERT(RELEASE, mblk->hdr.h.context_sz == sz_to_wrt, "context_sz mismatch: {}/{}",
                   (uint64_t)mblk->hdr.h.context_sz, sz_to_wrt);
 
+        auto bid = mblk->hdr.h.blkid.to_integer();
         // save cookie;
         std::unique_lock< std::mutex > lg(m_mtx);
-        HS_ASSERT(RELEASE, m_write_sbs.find(cookie) == m_write_sbs.end(), "cookie already in the map.");
+        HS_ASSERT(RELEASE, m_write_sbs.find(bid) == m_write_sbs.end(), "cookie already in the map.");
 
         // save to cache
-        m_write_sbs[cookie] = std::string((char*)buf, sz_to_wrt);
+        m_write_sbs[bid].cookie = cookie;
+        m_write_sbs[bid].str = std::string((char*)buf, sz_to_wrt);
 
         m_total_wrt_sz += total_size_written(sz_to_wrt);
         HS_ASSERT(RELEASE, m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
@@ -189,7 +196,7 @@ public:
         auto it = m_write_sbs.begin();
         std::advance(it, rand() % m_write_sbs.size());
 
-        auto cookie = it->first;
+        auto cookie = it->second.cookie;
         m_total_wrt_sz -= total_size_written(((meta_blk*)cookie)->hdr.h.context_sz);
 
         m_mbm->remove_sub_sb(cookie);
@@ -213,7 +220,7 @@ public:
 
         gen_rand_buf(buf, sz_to_wrt);
 
-        void* cookie = it->first;
+        void* cookie = it->second.cookie;
         m_write_sbs.erase(it);
 
         // update is in-place, the metablk is re-used, ovf-blk is freed then re-allocated;
@@ -221,8 +228,10 @@ public:
         m_total_wrt_sz -= total_size_written(((meta_blk*)cookie)->hdr.h.context_sz);
 
         m_mbm->update_sub_sb(mtype, buf, sz_to_wrt, cookie);
-        HS_ASSERT(RELEASE, m_write_sbs.find(cookie) == m_write_sbs.end(), "cookie already in the map.");
-        m_write_sbs[cookie] = std::string((char*)buf, sz_to_wrt);
+        auto bid = ((meta_blk*)cookie)->hdr.h.blkid.to_integer();
+        HS_ASSERT(RELEASE, m_write_sbs.find(bid) == m_write_sbs.end(), "cookie already in the map.");
+        m_write_sbs[bid].cookie = cookie;
+        m_write_sbs[bid].str = std::string((char*)buf, sz_to_wrt);
 
         // verify context_sz
         meta_blk* mblk = (meta_blk*)cookie;
@@ -243,28 +252,37 @@ public:
         HS_ASSERT_CMP(DEBUG, m_cb_blks.size(), ==, m_write_sbs.size());
 
         for (auto it = m_write_sbs.cbegin(); it != m_write_sbs.end(); it++) {
-            auto cookie = it->first;
-            auto it_cb = m_cb_blks.find(cookie);
-            HS_ASSERT(RELEASE, it_cb != m_cb_blks.end(), "Saved cookie during write not found in recover callback.");
+            auto bid = it->first;
+            auto it_cb = m_cb_blks.find(bid);
+
+            HS_ASSERT(RELEASE, it_cb != m_cb_blks.end(), "Saved bid during write not found in recover callback.");
 
             // the saved buf should be equal to the buf received in the recover callback;
-            int ret = it->second.compare(it_cb->second);
-            HS_ASSERT(DEBUG, ret == 0, "Context data mismatch: Saved: {}, callback: {}.", it->second, it_cb->second);
+            int ret = it->second.str.compare(it_cb->second);
+            HS_ASSERT(DEBUG, ret == 0, "Context data mismatch: Saved: {}, callback: {}.", it->second.str,
+                      it_cb->second);
         }
     }
 
     void execute() {
+        m_wrt_cnt = 0;
+        m_rm_cnt = 0;
+        m_update_cnt = 0;
+        m_total_wrt_sz = 0;
+
         m_start_time = Clock::now();
         m_mbm = MetaBlkMgr::instance();
 
         // there is some overhead by MetaBlkMgr, such as meta ssb;
         m_total_wrt_sz = m_mbm->get_used_size();
 
+        m_mbm->deregister_handler(mtype);
         m_mbm->register_handler(mtype,
                                 [this](meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size) {
                                     if (mblk) {
                                         std::unique_lock< std::mutex > lg(m_mtx);
-                                        m_cb_blks[(void*)mblk] = std::string((char*)(buf.get()), size);
+                                        m_cb_blks[mblk->hdr.h.blkid.to_integer()] =
+                                            std::string((char*)(buf.get()), size);
                                     }
                                 },
                                 [this](bool success) { assert(success); });
@@ -284,13 +302,19 @@ public:
                 break;
             }
         }
+    }
 
+    void recover() {
         // do recover and callbacks will be triggered;
         m_mbm->recover(false);
+    }
 
+    void validate() {
         // verify received blks via callbaks are all good;
         verify_cb_blks();
     }
+
+    void scan_blks() { m_mbm->scan_meta_blks(); }
 
     meta_op_type get_op() {
         if (do_write()) {
@@ -329,12 +353,21 @@ private:
     uint64_t m_total_wrt_sz = 0;
     Clock::time_point m_start_time;
     MetaBlkMgr* m_mbm = nullptr;
-    std::map< void*, std::string > m_write_sbs; // during write, save cookie to buf map;
-    std::map< void*, std::string > m_cb_blks;   // during recover, save cookie to buf map;
+    std::map< uint64_t, sb_info_t > m_write_sbs; // during write, save blkid to buf map;
+    std::map< uint64_t, std::string > m_cb_blks; // during recover, save blkid to buf map;
     std::mutex m_mtx;
 };
 
-TEST_F(VMetaBlkMgrTest, VMetaBlkMgrTest) { this->execute(); }
+TEST_F(VMetaBlkMgrTest, VMetaBlkMgrTest) {
+    this->execute();
+
+    // simulate reboot case that MetaBlkMgr will scan the disk for all the metablks that were written;
+    this->scan_blks();
+
+    this->recover();
+
+    this->validate();
+}
 
 SDS_OPTION_GROUP(
     test_meta_blk_mgr,

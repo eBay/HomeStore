@@ -26,13 +26,13 @@ struct MetaSubRegInfo {
 class MetaBlkMgr {
 private:
     static MetaBlkMgr* _instance;
-    blk_store_t* m_sb_blk_store = nullptr;                               // super blockstore
-    std::mutex m_meta_mtx;                                               // mutex to access to meta_map;
-    meta_blk_map_t m_meta_blks;                                          // subsystem type to meta blk map;
-    ovf_hdr_map_t m_ovf_blk_hdrs;                                        // ovf blk map;
-    std::map< meta_sub_type, MetaSubRegInfo > m_sub_info;                // map of callbacks
-    meta_blk* m_last_mblk = nullptr;                                     // last meta blk;
-    meta_blk_sb* m_ssb = nullptr;                                        // meta super super blk;
+    blk_store_t* m_sb_blk_store = nullptr;                // super blockstore
+    std::mutex m_meta_mtx;                                // mutex to access to meta_map;
+    meta_blk_map_t m_meta_blks;                           // subsystem type to meta blk map;
+    ovf_hdr_map_t m_ovf_blk_hdrs;                         // ovf blk map;
+    std::map< meta_sub_type, MetaSubRegInfo > m_sub_info; // map of callbacks
+    meta_blk* m_last_mblk = nullptr;                      // last meta blk;
+    meta_blk_sb* m_ssb = nullptr;                         // meta super super blk;
 
 public:
     /**
@@ -128,10 +128,15 @@ public:
      * @return :
      */
     void recover(bool do_comp_cb = true);
-    
+
+    /**
+     * @brief : scan the blkstore to load meta blks into memory
+     */
+    void scan_meta_blks();
+
     uint64_t get_size();
-    
-    uint64_t get_used_size(); 
+
+    uint64_t get_used_size();
 
 private:
     /**
@@ -190,12 +195,6 @@ private:
      */
     void load_ssb(sb_blkstore_blob* blob);
 
-    /**
-     * @brief : scan the blkstore to load meta blks into memory
-     */
-    void scan_meta_blks();
-
-    
     /**
      * @brief : This function is currently not used, don't delete for now;
      */
@@ -260,6 +259,8 @@ private:
      * @param b
      */
     void read(BlkId& bid, homeds::blob& b);
+
+    void cache_clear();
 };
 
 #define meta_blk_mgr MetaBlkMgr::instance()
