@@ -73,16 +73,17 @@ Volume::Volume(const vol_params& params) :
         m_indx_mgr_destroy_started(false) {
     m_state = vol_state::UNINITED;
     m_hb = HomeBlks::safe_instance();
-    seq_Id = 3;
     m_read_blk_tracker = std::make_unique< Blk_Read_Tracker >(
         params.vol_name, params.uuid, std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
 }
 
 Volume::Volume(meta_blk* mblk_cookie, sisl::aligned_unique_ptr< vol_sb_hdr > sb) :
-        m_metrics(sb->vol_name),
-        m_sb(std::move(sb)),
-        m_indx_mgr_destroy_started(false),
-        m_sb_cookie(mblk_cookie) {}
+        m_metrics(sb->vol_name), m_sb(std::move(sb)), m_indx_mgr_destroy_started(false), m_sb_cookie(mblk_cookie) {
+    m_state = m_sb->state;
+    m_hb = HomeBlks::safe_instance();
+    m_read_blk_tracker = std::make_unique< Blk_Read_Tracker >(
+        m_sb->vol_name, m_sb->uuid, std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
+}
 
 void Volume::init() {
     if (!m_sb) {
@@ -96,6 +97,7 @@ void Volume::init() {
                                                        m_params.size, (const char*)m_params.vol_name, m_params.uuid,
                                                        m_indx_mgr->get_active_sb());
         set_state(vol_state::ONLINE, true);
+        seq_Id = m_indx_mgr->get_last_psn();
     } else {
         /* recovery */
         auto active_sb = m_sb->active_sb;
@@ -657,4 +659,7 @@ void Volume::migrate_sb() {
 }
 
 void Volume::recovery_start_phase1() { m_indx_mgr->recovery_start_phase1(shared_from_this()); }
-void Volume::recovery_start_phase2() { m_indx_mgr->recovery_start_phase2(); }
+void Volume::recovery_start_phase2() {
+    m_indx_mgr->recovery_start_phase2();
+    seq_Id = m_indx_mgr->get_last_psn();
+}

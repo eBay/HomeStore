@@ -302,6 +302,7 @@ public:
     /* it frees the blks and insert it in cp id free blk list. It is called when there is no read pending on this blk */
     void free_blk(Free_Blk_Entry& fbe);
     void update_cp_sb(vol_cp_id_ptr& vol_id, indx_cp_id* indx_id, indx_mgr_cp_sb* sb);
+    uint64_t get_last_psn();
 
 public:
     /*********************** static public functions **********************/

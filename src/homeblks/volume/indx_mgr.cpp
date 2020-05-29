@@ -121,8 +121,8 @@ void IndxCP::indx_tbl_cp_done(indx_cp_id* id) {
 
 /* This function calls
  * 1. persist blkalloc superblock
- * 2. truncate  :- it truncate upto the seq number persisted in this id.
- * 3. write superblock
+ * 2. write superblock
+ * 3. truncate  :- it truncate upto the seq number persisted in this id.
  * 4. call cb_list
  * 5. notify blk alloc that cp id done
  * 6. call cp_end :- read comments over indxmgr::destroy().
@@ -131,15 +131,15 @@ void IndxCP::blkalloc_cp(indx_cp_id* id) {
     /* persist blk alloc bit maps */
     HomeBlks::instance()->blkalloc_cp_start(id->blkalloc_id);
 
+    /* All dirty buffers are flushed. Write super block */
+    IndxMgr::write_homeblks_cp_sb(id);
+
     /* Now it is safe to truncate as blkalloc bitsmaps are persisted */
     for (auto it = id->vol_id_list.begin(); it != id->vol_id_list.end(); ++it) {
         if (it->second == nullptr || it->second->flags != cp_state::active_cp) { continue; }
         it->second->vol->truncate(it->second);
     }
     home_log_store_mgr.device_truncate();
-
-    /* All dirty buffers are flushed. Write super block */
-    IndxMgr::write_homeblks_cp_sb(id);
 
     /* call all the callbacks which are waiting for this cp to be completed. One example is volume destroy */
     for (uint32_t i = 0; i < id->cb_list.size(); ++i) {
@@ -148,7 +148,7 @@ void IndxCP::blkalloc_cp(indx_cp_id* id) {
 
     /* blk alloc cp done must be called before we call cp end because we want blk alloc to start sweeping the buffers
      * from staging bitmap.
-     * Also notify all the subhomeblkss which can trigger CP. They can check if they require new cp to be triggered.
+     * Also notify all the subsystem which can trigger CP. They can check if they require new cp to be triggered.
      */
     HomeBlks::instance()->blkalloc_cp_done(id->blkalloc_id);
     mapping::cp_done(IndxMgr::trigger_vol_cp);
@@ -344,6 +344,7 @@ void IndxMgr::update_cp_sb(vol_cp_id_ptr& vol_id, indx_cp_id* indx_id, indx_mgr_
     sb->vol_cp_sb.blkalloc_cp_cnt = indx_id->blkalloc_checkpoint ? vol_id->cp_cnt : m_last_sb.vol_cp_sb.blkalloc_cp_cnt;
     sb->vol_cp_sb.vol_size = vol_id->vol_size.load() + m_last_sb.vol_cp_sb.vol_size;
     sb->vol_cp_sb.cp_cnt = vol_id->cp_cnt;
+    sb->uuid = m_uuid;
     m_active_map->update_btree_cp_sb(vol_id->ainfo.btree_id, sb->active_btree_cp_sb, indx_id->blkalloc_checkpoint);
     memcpy(&m_last_sb, sb, sizeof(m_last_sb));
 }
@@ -407,6 +408,7 @@ vol_cp_id_ptr IndxMgr::attach_prepare_vol_cp(vol_cp_id_ptr cur_vol_id, indx_cp_i
 void IndxMgr::truncate(vol_cp_id_ptr vol_id) {
     m_journal->truncate(vol_id->ainfo.end_psn);
     m_active_map->truncate(vol_id->ainfo.btree_id);
+    LOGINFO("uuid {} last psn {}", m_uuid, m_last_sb.vol_cp_sb.active_data_psn);
 }
 
 mapping* IndxMgr::get_active_indx() { return m_active_map; }
@@ -671,13 +673,18 @@ void IndxMgr::meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_
     indx_mgr_cp_sb_hdr* hdr = (indx_mgr_cp_sb_hdr*)buf.get();
     assert(hdr->version == INDX_MGR_VERSION);
     indx_mgr_cp_sb* cp_sb = (indx_mgr_cp_sb*)((uint64_t)buf.get() + sizeof(indx_mgr_cp_sb_hdr));
-    assert(size == (sizeof(indx_mgr_cp_sb_hdr) + hdr->vol_cnt * sizeof(indx_mgr_cp_sb)));
+
+#ifndef NDEBUG
+    uint64_t temp_size = sizeof(indx_mgr_cp_sb_hdr) + hdr->vol_cnt * sizeof(indx_mgr_cp_sb);
+    temp_size = sisl::round_up(size, HS_STATIC_CONFIG(disk_attr.align_size));
+    assert(size == temp_size);
+#endif
 
     for (uint32_t i = 0; i < hdr->vol_cnt; ++i) {
         bool happened{false};
         std::map< boost::uuids::uuid, indx_mgr_cp_sb >::iterator it;
         std::tie(it, happened) = cp_sb_map.emplace(std::make_pair(cp_sb[i].uuid, cp_sb[i]));
-        assert(!happened);
+        assert(happened);
     }
 }
 
@@ -696,6 +703,8 @@ void IndxMgr::free_blk(Free_Blk_Entry& fbe) {
      */
     if (cp_id) { m_cp->cp_io_exit(cp_id); }
 }
+
+uint64_t IndxMgr::get_last_psn() { return m_last_sb.vol_cp_sb.active_data_psn; }
 
 std::unique_ptr< IndxCP > IndxMgr::m_cp;
 std::atomic< bool > IndxMgr::m_shutdown_started;

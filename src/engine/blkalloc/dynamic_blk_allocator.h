@@ -175,8 +175,7 @@ public:
     virtual bool is_blk_alloced(BlkId& in_bid) override;
     virtual uint8_t* serialize_alloc_blks(uint64_t chunk_id, size_t& mem_size) override;
 
-    void free(Blk& blk);
-    void free(const BlkId& b, std::shared_ptr< blkalloc_cp_id > id) override;
+    virtual void free(Blk& blk, bool set_in_use, bool set_cache) override;
 
     // void freeBlks(uint64_t blkNum, uint32_t blkSize);
     // void commitBlks(uint64_t blkNum, uint32_t blkSize);

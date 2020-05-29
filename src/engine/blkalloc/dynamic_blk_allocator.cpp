@@ -252,8 +252,7 @@ BlkAllocStatus DynamicBlkAllocator::allocBlkSeries(uint32_t minBlks, uint32_t de
 }
 #endif
 
-void DynamicBlkAllocator::free(const BlkId& b, std::shared_ptr< blkalloc_cp_id > id) {}
-void DynamicBlkAllocator::free(Blk& b) {
+void DynamicBlkAllocator::free(Blk& b, bool set_in_use, bool set_cache) {
     for (auto i = 0; i < b.getPieces(); i++) {
         PageAllocGroup* pggrp = pageid_to_group(b.getPageId(i));
         pggrp->lock();

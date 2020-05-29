@@ -50,7 +50,6 @@ public:
                        std::bind(&SSDBtreeStore::cp_done_store, this, std::placeholders::_1), cfg.trigger_cp_cb) {
         m_node_size = cfg.get_node_size();
         m_cfg.set_node_area_size(m_node_size - sizeof(LeafPhysicalNode));
-        m_journal = HomeLogStoreMgr::instance().create_new_log_store();
         m_first_cp = btree_cp_id_ptr(new (btree_cp_id));
     }
 
@@ -94,7 +93,15 @@ public:
     void update_store_sb(SSDBtreeStore::superblock& sb, btree_cp_superblock* cp_sb, bool is_recovery) {
         if (is_recovery) {
             // add recovery code
+            HomeLogStoreMgr::instance().open_log_store(
+                sb.journal_id, ([this](std::shared_ptr< HomeLogStore > logstore) {
+                    m_journal = logstore;
+                    m_journal->register_log_found_cb(([this](logstore_seq_num_t seqnum, log_buffer buf, void* mem) {
+                        this->log_found(seqnum, buf, mem);
+                    }));
+                }));
         } else {
+            m_journal = HomeLogStoreMgr::instance().create_new_log_store();
             sb.journal_id = get_journal_id_store();
         }
 
@@ -103,6 +110,8 @@ public:
     }
 
     logstore_id_t get_journal_id_store() { return (m_journal->get_store_id()); }
+
+    void log_found(logstore_seq_num_t seqnum, log_buffer log_buf, void* mem) {}
 
     static void cp_start(SSDBtreeStore* store, btree_cp_id_ptr cp_id, cp_comp_callback cb) {
         store->cp_start_store(cp_id, cb);

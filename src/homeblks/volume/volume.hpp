@@ -477,7 +477,7 @@ public:
     }
     uint64_t inc_and_get_seq_id() {
         uint64_t id = seq_Id.fetch_add(1);
-        return id;
+        return (id + 1);
     }
 
     void flush_free_blks(vol_cp_id_ptr vol_id, indx_cp_id* indx_id) { m_indx_mgr->flush_free_blks(vol_id, indx_id); }
