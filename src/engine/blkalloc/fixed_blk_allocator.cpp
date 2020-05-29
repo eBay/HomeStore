@@ -74,6 +74,7 @@ void FixedBlkAllocator::inited() {
 
 bool FixedBlkAllocator::is_blk_alloced(BlkId& b) {
     /* We need to take lock so we can check in non debug builds */
+    if (!m_init) { return true; }
 #ifndef NDEBUG
     BlkAllocPortion* portion = blknum_to_portion(b.get_id());
     portion->lock();
@@ -140,19 +141,20 @@ BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& hi
     return BLK_ALLOC_SUCCESS;
 }
 
-void FixedBlkAllocator::free(const BlkId& b) {
-    free_blk((uint32_t)b.get_id());
+void FixedBlkAllocator::free(const BlkId& b, bool set_in_use, bool set_cache) {
     assert(b.get_nblks() == 1);
+
+    if (set_cache) { free_blk((uint32_t)b.get_id()); }
 #ifndef NDEBUG
     m_nfree_blks.fetch_add(1, std::memory_order_relaxed);
 #endif
-    BlkAllocPortion* portion = blknum_to_portion(b.get_id());
-    portion->lock();
-    get_alloced_bm()->reset_bits(b.get_id(), b.get_nblks());
-    portion->unlock();
+    if (set_in_use) {
+        BlkAllocPortion* portion = blknum_to_portion(b.get_id());
+        portion->lock();
+        get_alloced_bm()->reset_bits(b.get_id(), b.get_nblks());
+        portion->unlock();
+    }
 }
-
-void FixedBlkAllocator::free(const BlkId& b, std::shared_ptr< blkalloc_cp_id > id) {}
 
 void FixedBlkAllocator::free_blk(uint32_t id) {
     uint64_t prev_val;

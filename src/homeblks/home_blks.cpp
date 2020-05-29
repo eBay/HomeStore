@@ -369,6 +369,7 @@ void HomeBlks::init_done(std::error_condition err) {
     }
 
     data_recovery_done();
+    LOGINFO("init done");
     m_cfg.init_done_cb(err, m_out_params);
     m_init_finished = true;
     m_cv.notify_all();

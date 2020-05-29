@@ -215,6 +215,7 @@ void VarsizeBlkAllocator::allocator_state_machine() {
 }
 
 bool VarsizeBlkAllocator::is_blk_alloced(BlkId& b) {
+    if (!m_init) { return true; }
 #ifndef NDEBUG
     BlkAllocPortion* portion = blknum_to_portion(b.get_id());
     portion->lock();
@@ -326,7 +327,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
         COUNTER_INCREMENT(m_metrics, alloc_fail, 1);
         /* free blks */
         for (uint32_t i = 0; i < out_blkid.size(); ++i) {
-            free(out_blkid[i]);
+            BlkAllocator::free(out_blkid[i]);
         }
         out_blkid.clear();
         return BLK_ALLOC_SPACEFULL;
@@ -476,22 +477,26 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
     return ret;
 }
 
-void VarsizeBlkAllocator::free(const BlkId& b, std::shared_ptr< blkalloc_cp_id > id) {}
-void VarsizeBlkAllocator::free(const BlkId& b) {
+void VarsizeBlkAllocator::free(const BlkId& b, bool set_in_use, bool set_cache) {
     BlkAllocPortion* portion = blknum_to_portion(b.get_id());
     BlkAllocSegment* segment = blknum_to_segment(b.get_id());
 
-    segment->add_free_blks(b.get_nblks());
     portion->lock();
     // Reset the bits
-    BLKALLOC_ASSERT(RELEASE, m_alloc_bm->is_bits_set(b.get_id(), b.get_nblks()), "Expected bits to reset");
-    BLKALLOC_ASSERT(DEBUG, get_alloced_bm()->is_bits_set(b.get_id(), b.get_nblks()), "Expected alloced bits to reset");
-    get_alloced_bm()->reset_bits(b.get_id(), b.get_nblks());
-    m_alloc_bm->reset_bits(b.get_id(), b.get_nblks());
+    if (set_in_use) {
+        BLKALLOC_ASSERT(DEBUG, get_alloced_bm()->is_bits_set(b.get_id(), b.get_nblks()),
+                        "Expected alloced bits to reset");
+        BLKALLOC_ASSERT(RELEASE, m_alloc_bm->is_bits_set(b.get_id(), b.get_nblks()), "Expected bits to reset");
+        get_alloced_bm()->reset_bits(b.get_id(), b.get_nblks());
+    }
+    if (set_cache) {
+        BLKALLOC_ASSERT(DEBUG, !(get_alloced_bm()->is_bits_set(b.get_id(), b.get_nblks())),
+                        "Expected alloced bits to set");
+        BLKALLOC_ASSERT(RELEASE, m_alloc_bm->is_bits_set(b.get_id(), b.get_nblks()), "Expected bits to reset");
+        segment->add_free_blks(b.get_nblks());
+        m_alloc_bm->reset_bits(b.get_id(), b.get_nblks());
+    }
     portion->unlock();
-
-    // std::cout << "Resetting " << p.get_blk_id() << " for nblks = " << nblks << " Bitmap state= \n";
-    // m_alloc_bm->print();
 }
 
 // This runs on per region thread and is at present single threaded.

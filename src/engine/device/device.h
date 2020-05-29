@@ -291,7 +291,7 @@ public:
 
     void recover() {
         assert(m_allocator != nullptr);
-        m_allocator->set_alloced_bm(std::move(m_recovered_bm));
+        if (m_recovered_bm != nullptr) { m_allocator->set_alloced_bm(std::move(m_recovered_bm)); }
     }
 
     void cp_start(std::shared_ptr< blkalloc_cp_id > id) {
