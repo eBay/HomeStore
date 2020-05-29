@@ -219,6 +219,10 @@ public:
             if ((dirty_buf_cnt == MAX_DIRTY_BUF)) { m_trigger_cp_cb(); }
         } else {
             assert(bn->req[cp_cnt]->bid.to_integer() == bn->get_node_id().m_id);
+            if (bn->req[cp_cnt]->m_mem != bn->get_memvec_intrusive()) {
+                bn->req[cp_cnt]->m_mem = bn->get_memvec_intrusive();
+                assert(bn->req[cp_cnt]->m_mem != nullptr);
+            }
         }
 
         auto wb_req = bn->req[cp_cnt];

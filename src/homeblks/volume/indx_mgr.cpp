@@ -121,8 +121,8 @@ void IndxCP::indx_tbl_cp_done(indx_cp_id* id) {
 
 /* This function calls
  * 1. persist blkalloc superblock
- * 2. truncate  :- it truncate upto the seq number persisted in this id.
- * 3. write superblock
+ * 2. write superblock
+ * 3. truncate  :- it truncate upto the seq number persisted in this id.
  * 4. call cb_list
  * 5. notify blk alloc that cp id done
  * 6. call cp_end :- read comments over indxmgr::destroy().
@@ -131,15 +131,15 @@ void IndxCP::blkalloc_cp(indx_cp_id* id) {
     /* persist blk alloc bit maps */
     HomeBlks::instance()->blkalloc_cp_start(id->blkalloc_id);
 
+    /* All dirty buffers are flushed. Write super block */
+    IndxMgr::write_homeblks_cp_sb(id);
+
     /* Now it is safe to truncate as blkalloc bitsmaps are persisted */
     for (auto it = id->vol_id_list.begin(); it != id->vol_id_list.end(); ++it) {
         if (it->second == nullptr || it->second->flags != cp_state::active_cp) { continue; }
         it->second->vol->truncate(it->second);
     }
     home_log_store_mgr.device_truncate();
-
-    /* All dirty buffers are flushed. Write super block */
-    IndxMgr::write_homeblks_cp_sb(id);
 
     /* call all the callbacks which are waiting for this cp to be completed. One example is volume destroy */
     for (uint32_t i = 0; i < id->cb_list.size(); ++i) {
@@ -148,7 +148,7 @@ void IndxCP::blkalloc_cp(indx_cp_id* id) {
 
     /* blk alloc cp done must be called before we call cp end because we want blk alloc to start sweeping the buffers
      * from staging bitmap.
-     * Also notify all the subhomeblkss which can trigger CP. They can check if they require new cp to be triggered.
+     * Also notify all the subsystem which can trigger CP. They can check if they require new cp to be triggered.
      */
     HomeBlks::instance()->blkalloc_cp_done(id->blkalloc_id);
     mapping::cp_done(IndxMgr::trigger_vol_cp);
@@ -408,6 +408,7 @@ vol_cp_id_ptr IndxMgr::attach_prepare_vol_cp(vol_cp_id_ptr cur_vol_id, indx_cp_i
 void IndxMgr::truncate(vol_cp_id_ptr vol_id) {
     m_journal->truncate(vol_id->ainfo.end_psn);
     m_active_map->truncate(vol_id->ainfo.btree_id);
+    LOGINFO("uuid {} last psn {}", m_uuid, m_last_sb.vol_cp_sb.active_data_psn);
 }
 
 mapping* IndxMgr::get_active_indx() { return m_active_map; }
@@ -702,6 +703,8 @@ void IndxMgr::free_blk(Free_Blk_Entry& fbe) {
      */
     if (cp_id) { m_cp->cp_io_exit(cp_id); }
 }
+
+uint64_t IndxMgr::get_last_psn() { return m_last_sb.vol_cp_sb.active_data_psn; }
 
 std::unique_ptr< IndxCP > IndxMgr::m_cp;
 std::atomic< bool > IndxMgr::m_shutdown_started;
