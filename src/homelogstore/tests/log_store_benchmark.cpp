@@ -96,8 +96,7 @@ public:
         device_info.push_back({devname});
 
         LOGINFO("Starting iomgr with {} threads", nthreads);
-        iomanager.start(1 /* total interfaces */, nthreads, false,
-                        std::bind(&SampleDB::on_thread_msg, this, std::placeholders::_1));
+        iomanager.start(1 /* total interfaces */, nthreads, false, nullptr);
         iomanager.add_drive_interface(
             std::dynamic_pointer_cast< iomgr::DriveInterface >(std::make_shared< iomgr::AioDriveInterface >()),
             true /* is_default */);
@@ -158,17 +157,7 @@ public:
         for (auto& sc : m_log_store_clients) {
             sc->m_nth_entry.store(0);
         }
-        iomanager.send_msg(-1, iomgr_msg(iomgr_msg_type::CUSTOM_MSG));
-    }
-
-    void on_thread_msg(const iomgr_msg& msg) {
-        switch (msg.m_type) {
-        case iomgr_msg_type::CUSTOM_MSG:
-            initial_io();
-            break;
-        default:
-            break;
-        }
+        iomanager.run_on(iomgr::thread_regex::all_io, [this]() { initial_io(); });
     }
 
     void initial_io() {

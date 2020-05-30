@@ -277,6 +277,7 @@ protected:
     std::vector< dev_info > device_info;
     uint64_t max_vol_size;
     std::shared_ptr< IOTestJob > m_io_job;
+
     // bool verify_done;
     // bool move_verify_to_done;
     // bool vol_create_del_test;
@@ -359,7 +360,7 @@ public:
         /* Don't populate the whole disks. Only 60 % of it */
         max_vol_size = (tcfg.p_volume_size * max_capacity) / (100 * tcfg.max_vols);
 
-        iomanager.start(1 /* total interfaces */, tcfg.num_threads, false, bind_this(VolTest::handle_iothread_msg, 1));
+        iomanager.start(1 /* total interfaces */, tcfg.num_threads, false);
         iomanager.add_drive_interface(
             std::dynamic_pointer_cast< iomgr::DriveInterface >(std::make_shared< iomgr::AioDriveInterface >()),
             true /* is_default */);
@@ -562,8 +563,7 @@ public:
     }
 
     void start_job(TestJob* job, wait_type_t wait_type = wait_type_t::for_completion) {
-        iomanager.send_msg(-1,
-                           iomgr::iomgr_msg(iomgr::iomgr_msg_type::CUSTOM_MSG, nullptr, -1, (void*)job, sizeof(*job)));
+        iomanager.run_on(iomgr::thread_regex::all_io, [job, this]() { job->start_in_this_thread(); });
         if (wait_type == wait_type_t::for_execution) {
             job->wait_for_execution();
         } else if (wait_type == wait_type_t::for_completion) {
@@ -607,14 +607,6 @@ private:
                 assert(ret == write_size);
                 if (ret != 0) { return; }
             }
-        }
-    }
-
-    void handle_iothread_msg(const iomgr::iomgr_msg& msg) {
-        LOGTRACE("Received iothread msg of type {}", msg.m_type);
-        if (msg.m_type == iomgr::iomgr_msg_type::CUSTOM_MSG) {
-            TestJob* job = (TestJob*)msg.m_data_buf;
-            job->start_in_this_thread();
         }
     }
 

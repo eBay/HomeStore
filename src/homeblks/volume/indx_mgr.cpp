@@ -1,5 +1,6 @@
 #include "indx_mgr.hpp"
 #include "mapping.hpp"
+#include <utility/thread_factory.hpp>
 
 using namespace homestore;
 /* Journal entry
@@ -76,11 +77,7 @@ IndxCP::IndxCP() : CheckPoint(10) {
 IndxCP::~IndxCP() {}
 
 void IndxCP::cp_start(indx_cp_id* id) {
-    iomgr_msg io_msg;
-    io_msg.m_type = RUN_METHOD;
-    auto run_method = sisl::ObjectAllocator< run_method_t >::make_object();
-    /* start CP in indx mgr thread */
-    *run_method = ([this, id]() {
+    iomanager.run_in_specific_thread(IndxMgr::get_thread_id(), [this, id]() {
         ++id->ref_cnt;
         for (auto it = id->vol_id_list.begin(); it != id->vol_id_list.end(); ++it) {
             if (it->second != nullptr && it->second->flags == cp_state::active_cp) {
@@ -93,8 +90,6 @@ void IndxCP::cp_start(indx_cp_id* id) {
         }
         indx_tbl_cp_done(id);
     });
-    io_msg.m_data_buf = (void*)run_method;
-    iomanager.send_msg(IndxMgr::get_thread_num(), io_msg);
 }
 
 void IndxCP::indx_tbl_cp_done(indx_cp_id* id) {
@@ -236,11 +231,10 @@ void IndxMgr::init() {
     /* start the timer for blkalloc checkpoint */
     m_homeblks_cp_timer_hdl = iomanager.schedule_timer(60 * 1000 * 1000 * 1000ul, true, nullptr, false,
                                                        [](void* cookie) { trigger_homeblks_cp(nullptr, false); });
-    auto sthread = std::thread([]() mutable {
-        IndxMgr::m_thread_num = sisl::ThreadLocalContext::my_thread_num();
-        LOGINFO("{} thread entered", m_thread_num);
-        iomanager.run_io_loop(false, nullptr, ([](const iomgr_msg& io_msg) {}));
-        LOGINFO("{} thread exit", m_thread_num);
+    auto sthread = sisl::named_thread("indx_mgr", []() mutable {
+        iomanager.run_io_loop(false, nullptr, [](bool is_started) {
+            if (is_started) IndxMgr::m_thread_id = iomanager.my_io_thread_id();
+        });
     });
     sthread.detach();
 }
@@ -302,7 +296,7 @@ void IndxMgr::write_homeblks_cp_sb(indx_cp_id* indx_id) {
     LOGINFO("superblock is written");
     uint8_t* mem = nullptr;
     uint64_t size = sizeof(indx_mgr_cp_sb) * indx_id->vol_id_list.size() + sizeof(indx_mgr_cp_sb_hdr);
-    size = sisl::round_up(size , HS_STATIC_CONFIG(disk_attr.align_size));
+    size = sisl::round_up(size, HS_STATIC_CONFIG(disk_attr.align_size));
     int ret = posix_memalign((void**)&(mem), HS_STATIC_CONFIG(disk_attr.align_size), size);
     if (ret != 0) {
         assert(0);
@@ -600,20 +594,16 @@ void IndxMgr::destroy(indxmgr_stop_cb cb) {
     jent->state = indx_mgr_state::DESTROYING;
     sisl::blob b((uint8_t*)jent, sizeof(destroy_journal_ent));
     m_stop_cb = cb;
-    m_journal->append_async(b, b.bytes, ([this](logstore_seq_num_t seq_num, logdev_key key, void* cookie) {
-                                free(cookie);
-                                add_prepare_cb_list(
-                                    ([this](vol_cp_id_ptr cur_vol_id, indx_cp_id* indx_id, indx_cp_id* new_indx_id) {
-                                        /* suspend current cp */
-                                        cur_vol_id->flags = cp_state::suspend_cp;
-                                        iomgr_msg io_msg;
-                                        io_msg.m_type = RUN_METHOD;
-                                        auto run_method = sisl::ObjectAllocator< run_method_t >::make_object();
-                                        *run_method = ([this, cur_vol_id]() { this->destroy_indx_tbl(cur_vol_id); });
-                                        io_msg.m_data_buf = (void*)run_method;
-                                        iomanager.send_msg(m_thread_num, io_msg);
-                                    }));
-                            }));
+    m_journal->append_async(
+        b, b.bytes, ([this](logstore_seq_num_t seq_num, logdev_key key, void* cookie) {
+            free(cookie);
+            add_prepare_cb_list([this](vol_cp_id_ptr cur_vol_id, indx_cp_id* indx_id, indx_cp_id* new_indx_id) {
+                /* suspend current cp */
+                cur_vol_id->flags = cp_state::suspend_cp;
+                iomanager.run_in_specific_thread(m_thread_id,
+                                                 [this, cur_vol_id]() { this->destroy_indx_tbl(cur_vol_id); });
+            });
+        }));
 }
 
 void IndxMgr::destroy_indx_tbl(vol_cp_id_ptr vol_id) {
@@ -708,7 +698,7 @@ uint64_t IndxMgr::get_last_psn() { return m_last_sb.vol_cp_sb.active_data_psn; }
 
 std::unique_ptr< IndxCP > IndxMgr::m_cp;
 std::atomic< bool > IndxMgr::m_shutdown_started;
-int IndxMgr::m_thread_num;
+iomgr::io_thread_id_t IndxMgr::m_thread_id;
 iomgr::timer_handle_t IndxMgr::m_homeblks_cp_timer_hdl = iomgr::null_timer_handle;
 void* IndxMgr::m_meta_blk = nullptr;
 std::once_flag IndxMgr::m_flag;
@@ -716,4 +706,3 @@ sisl::aligned_unique_ptr< uint8_t > IndxMgr::m_recovery_sb;
 std::map< boost::uuids::uuid, indx_mgr_cp_sb > IndxMgr::cp_sb_map;
 size_t IndxMgr::m_recovery_sb_size = 0;
 HomeBlks* IndxMgr::m_hb;
-

@@ -83,7 +83,8 @@ struct vol_active_info {
     btree_cp_id_ptr btree_id;
     sisl::wisr_vector< free_blkid >* free_blkid_list;
     vol_active_info(int64_t start_psn, sisl::wisr_vector< free_blkid >* free_blkid_list) :
-            start_psn(start_psn), free_blkid_list(free_blkid_list) {}
+            start_psn(start_psn),
+            free_blkid_list(free_blkid_list) {}
 };
 
 struct vol_diff_info {
@@ -113,7 +114,10 @@ struct vol_cp_id {
 
     vol_cp_id(int64_t cp_cnt, int64_t start_active_psn, std::shared_ptr< Volume > vol,
               sisl::wisr_vector< free_blkid >* free_blkid_list) :
-            vol(vol), cp_cnt(cp_cnt), vol_size(0), ainfo(start_active_psn, free_blkid_list) {}
+            vol(vol),
+            cp_cnt(cp_cnt),
+            vol_size(0),
+            ainfo(start_active_psn, free_blkid_list) {}
 };
 
 struct indx_cp_id : cp_id_base {
@@ -225,7 +229,7 @@ private:
     static std::unique_ptr< IndxCP > m_cp;
     static std::atomic< bool > m_shutdown_started;
     static bool m_shutdown_cmplt;
-    static int m_thread_num;
+    static iomgr::io_thread_id_t m_thread_id;
     static iomgr::timer_handle_t m_homeblks_cp_timer_hdl;
     static void* m_meta_blk;
     static std::once_flag m_flag;
@@ -335,7 +339,7 @@ public:
 
     /* reinitialize indx mgr. It is used in fake reboot */
     static void reinit() { m_shutdown_started = false; }
-    static int get_thread_num() { return m_thread_num; }
+    static iomgr::io_thread_id_t get_thread_id() { return m_thread_id; }
     static void write_homeblks_cp_sb(indx_cp_id* indx_id);
     static void meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
     static void flush_homeblks_free_blks(indx_cp_id* id);
