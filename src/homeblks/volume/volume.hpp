@@ -342,8 +342,8 @@ public:
     static void set_error_flip();
 #endif
     static bool can_all_vols_shutdown() {
-        if (home_blks_ref_cnt.load() != 0) { return true; }
-        return false;
+        if (home_blks_ref_cnt.load() != 0) { return false; }
+        return true;
     }
 
     /* Called during shutdown. */

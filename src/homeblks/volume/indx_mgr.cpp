@@ -580,17 +580,15 @@ void IndxMgr::trigger_homeblks_cp(cp_done_cb cb, bool shutdown) {
  *       Note :- we don't want cp to be taken while we are setting suspend flag. That is why it is called in
  *       checkpoint critical section.
  * 3. We destroy btree. Btree traverses the tree
- *      a. Btree free all the volume blkids and set in a bit map
- *      b. Btree free all its blocks and set in writeback cache layer.
+ *      a. Btree free all the volume blkids and accumumlate it in a volume cp_id
+ *      b. Btree free all its blocks and accumulate in writeback cache layer.
  * 4. Resume CP when blkalloc checkpoint to true.
  * 5. Both blkalloc checkpoint and volume checkpoint happen in a same CP. It trigger volume checkpoint followed by
- * blkalloc checkpoint. Volume checkpoint flush all the blkids in btree to blkalloc. And blkalloc checkpoint persist
- * the blkalloc. checkpoint class make sure that no 2 CPs can not happen in parallel. It prevent from reusing the
- * blkids.
+ * blkalloc checkpoint. Volume checkpoint flush all the blkids in btree and volume to blkalloc. And blkalloc checkpoint
+ * persist the blkalloc.
  * 6. Free super block after bit map is persisted. CP is finished only after super block is persisted. It will
- * prevent another cp to start. Another CP might reusing the btree blocks freed by this volume. If we allow
- * other CP to happen before this volume sb is destroy then btree won't be intact and we couldn't able to free
- * volume data blocks.
+ * prevent another cp to start.
+ * 7. Make all the free blkids available to reuse in blk allocator.
  */
 void IndxMgr::destroy(indxmgr_stop_cb cb) {
     /* we can assume that there is no io going on this volume now */

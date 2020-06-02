@@ -322,11 +322,6 @@ public:
     static constexpr uint64_t flush_timer_frequency_us = 750;
     static constexpr uint64_t max_time_between_flush_us = 500;
 
-    static LogDev* instance() {
-        static LogDev _instance;
-        return &_instance;
-    }
-
     static void meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
 
     LogDev();
@@ -478,6 +473,7 @@ public:
      * @param key : the key containing log id that needs to be truncate up to;
      */
     void truncate(const logdev_key& key);
+    void meta_blk_found(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
 
 private:
     static LogGroup* new_log_group();
@@ -497,7 +493,6 @@ private:
     void _persist_info_block();
     void assert_next_pages(log_stream_reader& lstream);
     
-    void meta_blk_found(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
 
 private:
     boost::intrusive_ptr< HomeBlks > m_hb; // Back pointer to homeblks

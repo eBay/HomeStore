@@ -229,11 +229,11 @@ public:
         if (!m_auto_recovery && m_inited) { return BLK_ALLOC_FAILED; }
         BlkAllocPortion* portion = blknum_to_portion(in_bid.get_id());
         portion->lock();
-        if (get_alloced_bm()->is_bits_set(in_bid.get_id(), in_bid.get_nblks())) {
-            portion->unlock();
-            assert(!m_inited);
-            return BLK_ALLOC_FAILED;
-        }
+        /* In both recovery and post recovery phase we should never try to allocate
+         * the bid which is already allcated.
+         */
+        BLKALLOC_ASSERT(RELEASE, get_alloced_bm()->is_bits_set(in_bid.get_id(), in_bid.get_nblks()),
+                        "Expected alloced blks to reset");
         get_alloced_bm()->set_bits(in_bid.get_id(), in_bid.get_nblks());
         portion->unlock();
         return BLK_ALLOC_SUCCESS;
@@ -245,8 +245,13 @@ public:
         m_free_blkid_list.push_back(b);
         BlkAllocPortion* portion = blknum_to_portion(b.get_id());
         portion->lock();
-        BLKALLOC_ASSERT(RELEASE, get_alloced_bm()->is_bits_set(b.get_id(), b.get_nblks()),
-                        "Expected alloced bits to reset");
+        if (m_inited) {
+            /* During recovery we might try to free the entry which is already freed while replaying the journal,
+             * This assert is valid only post recovery.
+             */
+            BLKALLOC_ASSERT(RELEASE, get_alloced_bm()->is_bits_set(b.get_id(), b.get_nblks()),
+                            "Expected alloced bits to set");
+        }
         get_alloced_bm()->reset_bits(b.get_id(), b.get_nblks());
         portion->unlock();
     }
