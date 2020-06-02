@@ -176,7 +176,6 @@ public:
     virtual uint8_t* serialize_alloc_blks(uint64_t chunk_id, size_t& mem_size) override;
 
     virtual void free(Blk& blk) override;
-
     // void freeBlks(uint64_t blkNum, uint32_t blkSize);
     // void commitBlks(uint64_t blkNum, uint32_t blkSize);
     void commit(Blk& blk);

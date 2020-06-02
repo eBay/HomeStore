@@ -187,6 +187,8 @@ private:
 
 class SampleDB {
 public:
+    friend class LogStoreTest;
+
     static SampleDB& instance() {
         static SampleDB inst;
         return inst;
@@ -217,8 +219,7 @@ public:
         }
 
         LOGINFO("Starting iomgr with {} threads", nthreads);
-        iomanager.start(1 /* total interfaces */, nthreads, false,
-                        std::bind(&SampleDB::on_thread_msg, this, std::placeholders::_1));
+        iomanager.start(1 /* total interfaces */, nthreads, false);
         iomanager.add_drive_interface(
             std::dynamic_pointer_cast< iomgr::DriveInterface >(std::make_shared< iomgr::AioDriveInterface >()),
             true /* is_default */);
@@ -274,16 +275,6 @@ public:
         iomanager.stop();
     }
 
-    void on_thread_msg(const iomgr_msg& msg) {
-        switch (msg.m_type) {
-        case iomgr_msg_type::CUSTOM_MSG:
-            if (m_on_schedule_io_cb) m_on_schedule_io_cb();
-            break;
-        default:
-            break;
-        }
-    }
-
     void on_log_insert_completion(logstore_seq_num_t lsn, logdev_key ld_key) {
         atomic_update_max(m_highest_log_idx, ld_key.idx);
         if (m_io_closure) m_io_closure(lsn, ld_key);
@@ -328,7 +319,9 @@ public:
     void kickstart_inserts(uint32_t batch_size, uint32_t q_depth) {
         m_batch_size = batch_size;
         m_q_depth = q_depth;
-        iomanager.send_msg(-1, iomgr_msg(iomgr_msg_type::CUSTOM_MSG));
+        iomanager.run_on(iomgr::thread_regex::all_io, []() {
+            if (sample_db.m_on_schedule_io_cb) sample_db.m_on_schedule_io_cb();
+        });
     }
 
     void do_insert() {

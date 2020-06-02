@@ -327,6 +327,8 @@ public:
         return &_instance;
     }
 
+    static void meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
+
     LogDev();
     ~LogDev();
 
@@ -494,6 +496,8 @@ private:
 
     void _persist_info_block();
     void assert_next_pages(log_stream_reader& lstream);
+    
+    void meta_blk_found(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
 
 private:
     boost::intrusive_ptr< HomeBlks > m_hb; // Back pointer to homeblks
@@ -525,6 +529,7 @@ private:
 
     // Timer handle
     iomgr::timer_handle_t m_flush_timer_hdl;
+    void* m_sb_cookie = nullptr;
 }; // LogDev
 
 } // namespace homestore

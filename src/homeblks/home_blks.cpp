@@ -105,10 +105,9 @@ HomeBlks::HomeBlks(const init_params& cfg) : m_cfg(cfg), m_metrics("HomeBlks") {
      */
     iomanager.send_to_least_busy_thread(-1, io_msg);
 #endif
-    auto sthread = std::thread([this]() {
+    auto sthread = sisl::named_thread("hb_init", [this]() {
         this->init_devices();
-        iomanager.run_io_loop(false, nullptr, [&](const iomgr_msg& msg) {
-        });
+        iomanager.run_io_loop(false, nullptr);
     });
     sthread.detach();
     m_start_shutdown = false;
@@ -304,12 +303,10 @@ void HomeBlks::superblock_init() {
 void HomeBlks::homeblks_sb_write() {
     if (m_sb_cookie == nullptr) {
         // add to MetaBlkMgr
-        meta_blk_mgr->add_sub_sb("HOMEBLK", (void*)m_homeblks_sb.get(), sizeof(homeblks_sb),
-                                           m_sb_cookie);
+        meta_blk_mgr->add_sub_sb("HOMEBLK", (void*)m_homeblks_sb.get(), sizeof(homeblks_sb), m_sb_cookie);
     } else {
         // update existing homeblks sb
-        meta_blk_mgr->update_sub_sb("HOMEBLK", (void*)m_homeblks_sb.get(), sizeof(homeblks_sb),
-                                              m_sb_cookie);
+        meta_blk_mgr->update_sub_sb("HOMEBLK", (void*)m_homeblks_sb.get(), sizeof(homeblks_sb), m_sb_cookie);
     }
 }
 
@@ -566,9 +563,9 @@ bool HomeBlks::trigger_shutdown(const shutdown_comp_callback& shutdown_done_cb, 
     }
 
     // Execute the shutdown on the io thread, because clean shutdown will do IO (albeit sync io)
-    auto sthread = std::thread([this, shutdown_done_cb, force]() {
-        iomanager.run_io_loop(false, nullptr, [&](const iomgr_msg& msg) {
-            if (msg.m_type == iomgr::iomgr_msg_type::WAKEUP) { schedule_shutdown(shutdown_done_cb, force); }
+    auto sthread = sisl::named_thread("hb_shutdown", [this, shutdown_done_cb, force]() {
+        iomanager.run_io_loop(false, nullptr, [&](bool thread_started) {
+            if (thread_started) { schedule_shutdown(shutdown_done_cb, force); }
         });
     });
     sthread.detach();
