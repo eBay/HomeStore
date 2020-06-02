@@ -198,7 +198,9 @@ public:
     }
 
     Btree(BtreeConfig& cfg) :
-            m_btree_cfg(cfg), m_metrics(BtreeStoreType, cfg.get_name().c_str()), m_node_size(cfg.get_node_size()) {}
+            m_btree_cfg(cfg),
+            m_metrics(BtreeStoreType, cfg.get_name().c_str()),
+            m_node_size(cfg.get_node_size()) {}
 
     ~Btree() {
         if (!m_destroy) { destroy(nullptr, true); }
@@ -327,7 +329,6 @@ public:
 
     btree_status_t put(const BtreeKey& k, const BtreeValue& v, btree_put_type put_type, BtreeValue* existing_val,
                        btree_cp_id_ptr cp_id = nullptr, BtreeUpdateRequest< K, V >* bur = nullptr) {
-
         COUNTER_INCREMENT(m_metrics, btree_write_ops_count, 1);
         homeds::thread::locktype acq_lock = homeds::thread::LOCKTYPE_READ;
         int ind = -1;

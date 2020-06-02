@@ -188,6 +188,7 @@ public:
 class BlkAllocator {
     std::vector< BlkAllocPortion > m_blk_portions;
     sisl::Bitset* m_alloced_bm;
+
     std::vector< BlkId > m_free_blkid_list;
     bool m_auto_recovery = false;
 

@@ -98,3 +98,6 @@ tags
 
 bin/**
 Testing/**
+
+# Settings generated files
+generated/*

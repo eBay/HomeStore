@@ -108,7 +108,7 @@ public:
 
         while (!m_shutdown_cb_done.load()) {
             auto elapsed_time = get_elapsed_time(start);
-            if (elapsed_time > 30) {
+            if (elapsed_time > 300) {
                 LOGERROR("Wait shutdown callback timeout ...");
                 assert(0);
             }
@@ -498,7 +498,7 @@ private:
         memcpy(p.vol_name, name.c_str(), (name.length() + 1));
 
         // wait for VolInterface to run firstly to initiate instance.
-        sleep(2);
+        // sleep(2);
 
         auto vol_obj = VolInterface::get_instance()->create_volume(p);
 
@@ -625,7 +625,7 @@ private:
     uint64_t m_max_vol_size;
     uint64_t m_max_cap;
     uint64_t m_max_disk_cap;
-    uint64_t m_max_vols = 50;
+    uint64_t m_max_vols = 10;
     uint64_t m_max_io_size;
     // io count
     std::atomic< uint64_t > m_outstd_ios = 0;

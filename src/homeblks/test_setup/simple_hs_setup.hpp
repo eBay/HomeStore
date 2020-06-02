@@ -9,52 +9,6 @@
 namespace homestore {
 #define vol_interface VolInterface::get_instance()
 
-#if 0
-/* Simulated a target that drives the workload */
-class TestTargetInterface : public iomgr::IOInterface {
-public:
-    TestTargetInterface() : iomgr::IOInterface() {}
-    virtual void on_io_thread_start(iomgr::ioMgrThreadContext* ctx) override{};
-    virtual void on_io_thread_stopped(iomgr::ioMgrThreadContext* ctx) override{};
-};
-
-/* Simulating a test target - similar to SCST or NVMEoF target */
-class SimpleTestStore;
-class TestTarget {
-public:
-    TestTarget(SimpleTestStore* test) { m_test_store = test; }
-    void init() {
-        m_iface = std::make_shared< TestTargetInterface >();
-        iomanager.add_interface(m_iface);
-
-        m_ev_fd = eventfd(0, EFD_NONBLOCK);
-        m_ev_fdinfo = iomanager.add_fd(m_iface.get(), m_ev_fd,
-                                       std::bind(&TestTarget::on_new_io_request, this, std::placeholders::_1,
-                                                 std::placeholders::_2, std::placeholders::_3),
-                                       EPOLLIN, 9, nullptr);
-    }
-
-    void shutdown() { iomanager.remove_fd(m_iface.get(), m_ev_fdinfo); }
-    void kickstart_io() {
-        uint64_t temp = 1;
-        [[maybe_unused]] auto wsize = write(m_ev_fd, &temp, sizeof(uint64_t));
-    }
-
-    void on_new_io_request(int fd, void* cookie, int event);
-
-    void io_request_done() {
-        uint64_t temp = 1;
-        [[maybe_unused]] auto wsize = write(m_ev_fd, &temp, sizeof(uint64_t));
-    }
-
-private:
-    int m_ev_fd;
-    std::shared_ptr< iomgr::fd_info > m_ev_fdinfo;
-    std::shared_ptr< TestTargetInterface > m_iface;
-    SimpleTestStore* m_test_store;
-};
-#endif
-
 struct simple_store_cfg {
     uint32_t m_ndevices = 2;
     std::vector< std::string > m_devs;
@@ -188,8 +142,7 @@ public:
         }
 
         /* Start IOManager and a test target to enable doing IO */
-        iomanager.start(1 /* total interfaces */, m_cfg.m_nthreads, false,
-                        bind_this(SimpleTestStore::handle_iothread_msg, 1));
+        iomanager.start(1 /* total interfaces */, m_cfg.m_nthreads, false);
         iomanager.add_drive_interface(
             std::dynamic_pointer_cast< iomgr::DriveInterface >(std::make_shared< iomgr::AioDriveInterface >()),
             true /* is_default */);
@@ -204,13 +157,8 @@ public:
         m_init_done_cv.wait(lk);
     }
 
-    void handle_iothread_msg(const iomgr::iomgr_msg& msg) {
-        LOGTRACE("Received iothread msg of type {}", msg.m_type);
-        if (msg.m_type == iomgr::iomgr_msg_type::CUSTOM_MSG) { process_new_request(); }
-    }
-
     void kickstart_io() {
-        iomanager.send_msg(-1, iomgr::iomgr_msg(iomgr::iomgr_msg_type::CUSTOM_MSG, nullptr, -1, nullptr, 0));
+        iomanager.run_on(iomgr::thread_regex::all_io, [this]() { process_new_request(); });
     }
 
     void wait_for_io_done() {
