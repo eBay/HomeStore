@@ -81,7 +81,7 @@ struct blkalloc_cp_id;
  *---------------------------------------------------------------------------------------------------------------------------------------------
  */
 // clang-format on
-enum journal_op { BTREE_SPLIT = 1, BTREE_MERGE };
+enum journal_op { BTREE_SPLIT = 1, BTREE_MERGE, BTREE_CREATE };
 
 #define INVALID_SEQ_ID UINT64_MAX
 struct btree_cp_id;

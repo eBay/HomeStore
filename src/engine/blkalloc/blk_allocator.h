@@ -168,10 +168,14 @@ public:
  *      - Reset bits in in-use bitmap only
  *      - persist in-use bitmap
  *      - Reset bits in cache bitmap. It is available to reallocate now.
+ *  Note :- Blks can be freed directly to the cache if it is not set in-use bitmap. This can happen in scenarios like
+ *  write failure after blkid allocation.
+ *
  *  Allocation of blks also happen in two phase
  *      - Allocate blkid. This blkid will already be set in cache bitmap
  *      - Consumer will persist entry in journal
  *      - Set bit in in-use bitmap.
+ *  Note :- Allocate blk should always be done in two phase if auto recovery is set.
  *
  * Blk allocator has two recoveries auto recovery and manual recovery
  * 1. auto recovery :- in use bit map is persisted. Consumers only have to replay journal. It is used by volume and

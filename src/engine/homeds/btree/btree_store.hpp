@@ -39,7 +39,8 @@ public:
     static void cp_start(btree_store_t* store, btree_cp_id_ptr cp_id, cp_comp_callback cb);
     static void truncate(btree_store_t* store, btree_cp_id_ptr cp_id);
     static void destroy_done(btree_store_t* store);
-    static void write_journal_entry(btree_cp_id_ptr cp_id, uint8_t* mem, size_t size);
+    static void write_journal_entry_async(btree_store_t* store, btree_cp_id_ptr cp_id, uint8_t* mem, size_t size);
+    static void write_journal_entry_sync(btree_store_t* store, uint8_t* mem, size_t size);
     static void flush_free_blks(btree_store_t* store, btree_cp_id_ptr btree_id,
                                 std::shared_ptr< homestore::blkalloc_cp_id >& blkalloc_id);
 

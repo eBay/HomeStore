@@ -1804,7 +1804,7 @@ private:
 
     void write_journal_entry(journal_op op, BtreeNodePtr parent_node, uint32_t parent_indx, BtreeNodePtr left_most_node,
                              std::vector< BtreeNodePtr >& old_nodes, std::vector< BtreeNodePtr >& new_nodes,
-                             btree_cp_id_ptr cp_id, bool is_root) {
+                             btree_cp_id_ptr cp_id, bool is_root, bool is_sync = false) {
         if (BtreeStoreType != btree_store_type::SSD_BTREE) { return; }
 
         size_t size = sizeof(btree_journal_entry_hdr) + sizeof(uint64_t) * old_nodes.size() +
@@ -1822,21 +1822,21 @@ private:
         hdr->new_key_size = 0;
         hdr->op = op;
         hdr->is_root = is_root;
-        hdr->cp_cnt = cp_id->cp_cnt;
+        if (cp_id) hdr->cp_cnt = cp_id->cp_cnt;
 
         auto old_node_id_pair = btree_journal_entry::get_old_nodes_list(mem);
         uint64_t* old_node_id = old_node_id_pair.first;
         for (uint32_t i = 0; i < old_nodes.size(); ++i) {
             old_node_id[i] = old_nodes[i]->get_node_id_int();
         }
-        cp_id->btree_size.fetch_sub(old_nodes.size() * m_node_size);
+        if (cp_id) cp_id->btree_size.fetch_sub(old_nodes.size() * m_node_size);
 
         auto new_node_id_pair = btree_journal_entry::get_new_nodes_list(mem);
         uint64_t* new_node_id = new_node_id_pair.first;
         for (uint32_t i = 0; i < new_nodes.size(); ++i) {
             new_node_id[i] = new_nodes[i]->get_node_id_int();
         }
-        cp_id->btree_size.fetch_add(new_nodes.size() * m_node_size);
+        if (cp_id) cp_id->btree_size.fetch_add(new_nodes.size() * m_node_size);
 
         auto new_node_gen_pair = btree_journal_entry::get_new_node_gen(mem);
         uint64_t* new_node_gen = new_node_gen_pair.first;
@@ -1855,7 +1855,11 @@ private:
             memcpy(key, blob.bytes, blob.size);
             key = (uint8_t*)((uint64_t)key + blob.size);
         }
-        btree_store_t::write_journal_entry(m_btree_store.get(), cp_id, mem, size);
+        if (!is_sync) {
+            btree_store_t::write_journal_entry_async(m_btree_store.get(), cp_id, mem, size);
+        } else {
+            btree_store_t::write_journal_entry_sync(m_btree_store.get(), mem, size);
+        }
     }
 
     btree_status_t check_split_root(const BtreeKey& k, const BtreeValue& v, btree_put_type& putType,
@@ -1994,6 +1998,7 @@ private:
 
         std::vector< BtreeNodePtr > old_nodes;
         std::vector< BtreeNodePtr > new_nodes;
+        if (root_split) { new_nodes.push_back(child_node1); }
         new_nodes.push_back(child_node2);
 
         write_journal_entry(BTREE_SPLIT, parent_node, parent_ind, child_node1, old_nodes, new_nodes, cp_id, root_split);
@@ -2549,6 +2554,12 @@ protected:
         auto ret = write_node_sync(root);
         if (ret != btree_status_t::success) { return ret; }
         m_sb.root_node = m_root_node;
+
+        std::vector< BtreeNodePtr > old_nodes;
+        std::vector< BtreeNodePtr > new_nodes;
+        new_nodes.push_back(root);
+        write_journal_entry(BTREE_CREATE, root, 0, root, old_nodes, new_nodes, nullptr, true);
+        /* write an entry to the journal also */
         return btree_status_t::success;
     }
 

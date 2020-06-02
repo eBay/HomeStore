@@ -66,8 +66,8 @@ public:
     static void update_sb(MemBtreeStore* store, MemBtreeStore::superblock& sb, btree_cp_superblock* cp_sb,
                           bool is_recovery){};
 
-    static void write_journal_entry(MemBtreeStore *store, btree_cp_id_ptr cp_id, uint8_t *mem, size_t size) {
-    }
+    static void write_journal_entry_async(MemBtreeStore* store, btree_cp_id_ptr cp_id, uint8_t* mem, size_t size) {}
+    static void write_journal_entry_sync(MemBtreeStore* store, uint8_t* mem, size_t size) {}
 
     static boost::intrusive_ptr< MemBtreeNode >
     alloc_node(MemBtreeStore* store, bool is_leaf,

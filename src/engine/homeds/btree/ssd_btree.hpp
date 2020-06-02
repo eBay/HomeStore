@@ -146,11 +146,15 @@ public:
 
     void destroy_done_store() { home_log_store_mgr.remove_log_store(m_journal->get_store_id()); }
 
-    static void write_journal_entry(SSDBtreeStore* store, btree_cp_id_ptr cp_id, uint8_t* mem, size_t size) {
-        store->write_journal_entry_store(cp_id, mem, size);
+    static void write_journal_entry_async(SSDBtreeStore* store, btree_cp_id_ptr cp_id, uint8_t* mem, size_t size) {
+        store->write_journal_entry_async_store(cp_id, mem, size);
     }
 
-    void write_journal_entry_store(btree_cp_id_ptr cp_id, uint8_t* mem, size_t size) {
+    void write_journal_entry_async_store(btree_cp_id_ptr cp_id, uint8_t* mem, size_t size) {
+        if (!cp_id) {
+            /* it can be null if it is a write during create */
+            cp_id = m_first_cp;
+        }
         ++cp_id->ref_cnt;
         sisl::blob b(mem, size);
         m_journal->append_async(b, mem, ([this, cp_id](logstore_seq_num_t seq_num, bool status, void* cookie) {
@@ -167,6 +171,26 @@ public:
                                     free(cookie);
                                     try_cp_start(cp_id);
                                 }));
+    }
+
+    static void write_journal_entry_sync(SSDBtreeStore* store, uint8_t* mem, size_t size) {
+        store->write_journal_entry_sync_store(mem, size);
+    }
+
+    void write_journal_entry_sync_store(uint8_t* mem, size_t size) {
+        sisl::blob b(mem, size);
+        //        m_journal->append_sync(b);
+        auto pair = btree_journal_entry::get_new_nodes_list((uint8_t*)mem);
+        auto new_node_id_list = pair.first;
+        auto new_node_size = pair.second;
+        /* blk id is alloceted in in_use bitmap only after it is writing to journal. check
+         * blk_alloctor base class for further explanations.
+         */
+        for (uint32_t i = 0; i < new_node_size; ++i) {
+            auto bid = BlkId(new_node_id_list[i]);
+            m_blkstore->alloc_blk(bid);
+        }
+        free(mem);
     }
 
     static uint8_t* get_physical(const SSDBtreeNode* bn) {
