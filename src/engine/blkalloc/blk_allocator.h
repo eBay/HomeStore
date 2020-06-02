@@ -221,11 +221,12 @@ public:
     BlkAllocStatus alloc(BlkId& in_bid) {
         /* enable this assert later when reboot is supported */
         //        assert(m_auto_recovery || !m_inited);
+        if (m_auto_recovery || !m_inited) { return BLK_ALLOC_FAILED; }
         BlkAllocPortion* portion = blknum_to_portion(in_bid.get_id());
         portion->lock();
         if (get_alloced_bm()->is_bits_set(in_bid.get_id(), in_bid.get_nblks())) {
             portion->unlock();
-            //            assert(!m_inited);
+            assert(!m_inited);
             return BLK_ALLOC_FAILED;
         }
         get_alloced_bm()->set_bits(in_bid.get_id(), in_bid.get_nblks());
