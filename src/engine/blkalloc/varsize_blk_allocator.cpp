@@ -312,7 +312,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
         COUNTER_INCREMENT(m_metrics, alloc_fail, 1);
         /* free blks */
         for (uint32_t i = 0; i < out_blkid.size(); ++i) {
-            BlkAllocator::free(out_blkid[i]);
+            free(out_blkid[i]);
         }
         out_blkid.clear();
         return BLK_ALLOC_SPACEFULL;
