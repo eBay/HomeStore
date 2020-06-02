@@ -130,7 +130,7 @@ private:
     static btree_blkstore_t* m_blkstore;
     static std::atomic< uint64_t > m_hs_dirty_buf_cnt;
 #define WB_CACHE_THREADS 2
-    static iomgr::io_thread_id_t m_thread_ids[WB_CACHE_THREADS];
+    static iomgr::io_thread_t m_thread_ids[WB_CACHE_THREADS];
     static std::atomic< int > m_thread_indx;
 
 public:
@@ -154,7 +154,7 @@ public:
                                    iomanager.run_io_loop(false, nullptr, ([i](bool is_started) {
                                                              if (is_started) {
                                                                  wb_cache_t::m_thread_ids[i] =
-                                                                     iomanager.my_io_thread_id();
+                                                                     iomanager.iothread_self();
                                                              }
                                                          }));
                                });
@@ -308,7 +308,7 @@ public:
         m_copy_req_list = m_req_list[cp_cnt]->get_copy_and_reset();
         assert(m_flush_indx.load() == 0);
         for (int i = 0; i < WB_CACHE_THREADS; ++i) {
-            iomanager.run_in_specific_thread(m_thread_ids[i], [this, cp_id]() { this->flush_buffers(cp_id); });
+            iomanager.run_on(m_thread_ids[i], [this, cp_id](io_thread_addr_t addr) { this->flush_buffers(cp_id); });
         }
     }
 
@@ -372,7 +372,7 @@ std::atomic< uint64_t > wb_cache_t::m_hs_dirty_buf_cnt;
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
 btree_blkstore_t* wb_cache_t::m_blkstore;
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
-iomgr::io_thread_id_t wb_cache_t::m_thread_ids[WB_CACHE_THREADS];
+iomgr::io_thread_t wb_cache_t::m_thread_ids[WB_CACHE_THREADS];
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
 std::atomic< int > wb_cache_t::m_thread_indx;
 

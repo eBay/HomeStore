@@ -319,7 +319,7 @@ public:
     void kickstart_inserts(uint32_t batch_size, uint32_t q_depth) {
         m_batch_size = batch_size;
         m_q_depth = q_depth;
-        iomanager.run_on(iomgr::thread_regex::all_io, []() {
+        iomanager.run_on(iomgr::thread_regex::all_io, [](io_thread_addr_t addr) {
             if (sample_db.m_on_schedule_io_cb) sample_db.m_on_schedule_io_cb();
         });
     }
