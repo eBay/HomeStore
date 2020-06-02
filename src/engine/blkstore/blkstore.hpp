@@ -123,38 +123,41 @@ class BlkStore {
 public:
     typedef std::function< void(boost::intrusive_ptr< blkstore_req< Buffer > > req) > comp_callback;
 
-    BlkStore(DeviceManager* mgr,             // Device manager instance
-             Cache< BlkId >* cache,          // Cache Instance
-             uint64_t size,                  // Size of the blk store device
-             BlkStoreCacheType cache_type,   // Type of cache, writeback, writethru, none
-             uint32_t mirrors,               // Number of mirrors
-             char* blob,                     // Superblock blob for blkstore
-             uint64_t context_size,          // TODO: ???
-             uint64_t page_size,             // Block device page size
-             const char* name,               // Name for blkstore
+    BlkStore(DeviceManager* mgr,           // Device manager instance
+             Cache< BlkId >* cache,        // Cache Instance
+             uint64_t size,                // Size of the blk store device
+             BlkStoreCacheType cache_type, // Type of cache, writeback, writethru, none
+             uint32_t mirrors,             // Number of mirrors
+             char* blob,                   // Superblock blob for blkstore
+             uint64_t context_size,        // TODO: ???
+             uint64_t page_size,           // Block device page size
+             const char* name,             // Name for blkstore
+             bool auto_recovery,
              comp_callback comp_cb = nullptr // Callback on completion. It can be attached later as well.
              ) :
             m_pagesz(page_size),
             m_cache(cache),
             m_cache_type(cache_type),
             m_vdev(mgr, context_size, mirrors, true, m_pagesz, mgr->get_all_devices(),
-                   (std::bind(&BlkStore::process_completions, this, std::placeholders::_1)), blob, size),
+                   (std::bind(&BlkStore::process_completions, this, std::placeholders::_1)), blob, size, auto_recovery),
             m_comp_cb(comp_cb),
             m_metrics(name) {}
 
-    BlkStore(DeviceManager* mgr,             // Device manager instance
-             Cache< BlkId >* cache,          // Cache Instance
-             vdev_info_block* vb,            // Load vdev from this vdev_info_block
-             BlkStoreCacheType cache_type,   // Type of cache, writeback, writethru, none
-             uint64_t page_size,             // Block device page size
-             const char* name,               // Name for blkstore
-             bool recovery_init,             // do we need to initialize blk allocator in recovery
+    BlkStore(DeviceManager* mgr,           // Device manager instance
+             Cache< BlkId >* cache,        // Cache Instance
+             vdev_info_block* vb,          // Load vdev from this vdev_info_block
+             BlkStoreCacheType cache_type, // Type of cache, writeback, writethru, none
+             uint64_t page_size,           // Block device page size
+             const char* name,             // Name for blkstore
+             bool recovery_init,           // do we need to initialize blk allocator in recovery
+             bool auto_recovery,
              comp_callback comp_cb = nullptr // Callback on completion. It can be attached later as well.
              ) :
             m_pagesz(page_size),
             m_cache(cache),
             m_cache_type(cache_type),
-            m_vdev(mgr, vb, (std::bind(&BlkStore::process_completions, this, std::placeholders::_1)), recovery_init),
+            m_vdev(mgr, vb, (std::bind(&BlkStore::process_completions, this, std::placeholders::_1)), recovery_init,
+                   auto_recovery),
             m_comp_cb(comp_cb),
             m_metrics(name) {}
 

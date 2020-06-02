@@ -239,8 +239,12 @@ public:
      * to recover btree.
      */
     void free_blk(boost::intrusive_ptr< SSDBtreeNode > bn, btree_cp_id_ptr cp_id) {
-        int cp_cnt = cp_id->cp_cnt % MAX_CP_CNT;
         BlkId bid(bn->get_node_id().m_id);
+        if (!cp_id) {
+            m_blkstore->free_blk(bid, boost::none, boost::none);
+            return;
+        }
+        int cp_cnt = cp_id->cp_cnt % MAX_CP_CNT;
         m_free_list[cp_cnt]->push_back(bid);
     }
 

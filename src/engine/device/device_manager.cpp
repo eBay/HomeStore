@@ -350,6 +350,7 @@ void DeviceManager::blk_alloc_meta_blk_found_cb(meta_blk* mblk, sisl::aligned_un
     std::unique_ptr< sisl::Bitset > recovered_bm(new sisl::Bitset(b));
     buf.release();
     auto chunk = get_chunk(recovered_bm->get_id());
+    LOGINFO("get id {}", recovered_bm->get_id());
     chunk->recover(std::move(recovered_bm), mblk);
 }
 

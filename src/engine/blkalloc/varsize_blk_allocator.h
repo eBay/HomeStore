@@ -21,15 +21,6 @@ using namespace homeds::btree;
 namespace homestore {
 /****************** VarsizeBlkAllocator Section **********************/
 
-#define BLKALLOC_LOG(level, mod, msg, ...) HS_SUBMOD_LOG(level, mod, , "blkalloc", m_cfg.get_name(), msg, ##__VA_ARGS__)
-#define BLKALLOC_ASSERT(assert_type, cond, msg, ...)                                                                   \
-    HS_SUBMOD_ASSERT(assert_type, cond, , "blkalloc", m_cfg.get_name(), msg, ##__VA_ARGS__)
-#define BLKALLOC_ASSERT_CMP(assert_type, val1, cmp, val2, ...)                                                         \
-    HS_SUBMOD_ASSERT_CMP(assert_type, val1, cmp, val2, , "blkalloc", m_cfg.get_name(), ##__VA_ARGS__)
-#define BLKALLOC_ASSERT_NOTNULL(assert_type, val, ...)                                                                 \
-    HS_SUBMOD_ASSERT_NOTNULL(assert_type, val, , "blkalloc", m_cfg.get_name(), ##__VA_ARGS__)
-#define BLKALLOC_ASSERT_NULL(assert_type, val, ...)                                                                    \
-    HS_SUBMOD_ASSERT_NULL(assert_type, val, , "blkalloc", m_cfg.get_name(), ##__VA_ARGS__)
 
 template < typename T >
 struct atomwrapper {
@@ -495,14 +486,13 @@ public:
 
     BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints& hints, BlkId* out_blkid, bool best_fit = false) override;
     BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) override;
-    void free(const BlkId& b, bool set_in_use, bool set_cache) override;
+    void free(const BlkId& b) override;
 
     std::string to_string() const override;
     void allocator_state_machine();
 
-    virtual BlkAllocStatus alloc(BlkId& out_blkid) override;
     virtual void inited() override;
-    virtual bool is_blk_alloced(BlkId& in_bid) override;
+    virtual bool is_blk_alloced(BlkId& in_bid);
 
 private:
     VarsizeBlkAllocConfig m_cfg;  // Config for Varsize
@@ -526,7 +516,6 @@ private:
     std::atomic< uint32_t > m_cache_n_entries;             // Total number of blk entries to cache
     std::vector< atomwrapper< uint32_t > > m_slab_entries; // Blk cnt for each slab in cache
     BlkAllocMetrics m_metrics;
-    bool m_init;
 
 private:
     const VarsizeBlkAllocConfig& get_config() const override { return (VarsizeBlkAllocConfig&)m_cfg; }

@@ -178,11 +178,11 @@ protected:
             LOGINFO("maximum capacity for data blocks is {}", m_size_avail);
             m_data_blk_store = std::make_unique< data_blkstore_t >(
                 m_dev_mgr.get(), m_cache.get(), size, WRITEBACK_CACHE, 0, (char*)&blob, sizeof(blkstore_blob),
-                m_data_pagesz, "data", data_completion_cb());
+                m_data_pagesz, "data", true, data_completion_cb());
         } else {
             m_data_blk_store =
                 std::make_unique< data_blkstore_t >(m_dev_mgr.get(), m_cache.get(), vb, WRITEBACK_CACHE, m_data_pagesz,
-                                                    "data", (vb->failed ? true : false), data_completion_cb());
+                                                    "data", (vb->failed ? true : false), true, data_completion_cb());
             if (vb->failed) {
                 m_vdev_failed = true;
                 LOGINFO("data block store is in failed state");
@@ -199,11 +199,11 @@ protected:
             size = sisl::round_up(size, HS_STATIC_CONFIG(disk_attr.phys_page_size));
             m_index_blk_store = std::make_unique< index_blkstore_t< IndexBuffer > >(
                 m_dev_mgr.get(), m_cache.get(), size, RD_MODIFY_WRITEBACK_CACHE, 0, (char*)&blob, sizeof(blkstore_blob),
-                HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size), "index");
+                HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size), "index", true);
         } else {
             m_index_blk_store = std::make_unique< index_blkstore_t< IndexBuffer > >(
                 m_dev_mgr.get(), m_cache.get(), vb, RD_MODIFY_WRITEBACK_CACHE,
-                HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size), "index", (vb->failed ? true : false));
+                HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size), "index", (vb->failed ? true : false), true);
             if (vb->failed) {
                 m_vdev_failed = true;
                 LOGINFO("index block store is in failed state");
@@ -222,8 +222,8 @@ protected:
             size = sisl::round_up(size, HS_STATIC_CONFIG(disk_attr.phys_page_size));
             m_sb_blk_store = std::make_unique< sb_blkstore_t >(
                 m_dev_mgr.get(), m_cache.get(), size, PASS_THRU, HS_STATIC_CONFIG(input.devices).size() - 1,
-                (char*)&blob, sizeof(sb_blkstore_blob), HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size),
-                "superblock");
+                (char*)&blob, sizeof(sb_blkstore_blob), HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size), "superblock",
+                false);
 
             /* allocate a new blk id */
             BlkId bid = alloc_sb_blk(HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size));
@@ -236,7 +236,7 @@ protected:
             /* create a blkstore */
             m_sb_blk_store = std::make_unique< sb_blkstore_t >(m_dev_mgr.get(), m_cache.get(), vb, PASS_THRU,
                                                                HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size),
-                                                               "superblock", false);
+                                                               "superblock", false, false);
             if (vb->failed) {
                 m_vdev_failed = true;
                 LOGINFO("super block store is in failed state");
@@ -268,11 +268,12 @@ protected:
             size = sisl::round_up(size, HS_STATIC_CONFIG(disk_attr.phys_page_size));
             m_meta_blk_store =
                 std::make_unique< meta_blkstore_t >(m_dev_mgr.get(), m_cache.get(), size, PASS_THRU, 0, (char*)&blob,
-                                                    sizeof(blkstore_blob), META_BLK_PAGE_SZ, "meta");
+                                                    sizeof(blkstore_blob), META_BLK_PAGE_SZ, "meta", false);
 
         } else {
-            m_meta_blk_store = std::make_unique< meta_blkstore_t >(
-                m_dev_mgr.get(), m_cache.get(), vb, PASS_THRU, META_BLK_PAGE_SZ, "meta", (vb->failed ? true : false));
+            m_meta_blk_store =
+                std::make_unique< meta_blkstore_t >(m_dev_mgr.get(), m_cache.get(), vb, PASS_THRU, META_BLK_PAGE_SZ,
+                                                    "meta", (vb->failed ? true : false), false);
             if (vb->failed) {
                 m_vdev_failed = true;
                 LOGINFO("meta block store is in failed state");
@@ -299,12 +300,12 @@ protected:
             size = sisl::round_up(size, HS_STATIC_CONFIG(disk_attr.phys_page_size));
             m_logdev_blk_store = std::make_unique< BlkStore< VdevVarSizeBlkAllocatorPolicy > >(
                 m_dev_mgr.get(), m_cache.get(), size, PASS_THRU, 0, (char*)&blob, sizeof(blkstore_blob),
-                HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size), "logdev",
+                HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size), "logdev", false,
                 std::bind(&LogDev::process_logdev_completions, &HomeLogStoreMgr::logdev(), std::placeholders::_1));
         } else {
             m_logdev_blk_store = std::make_unique< BlkStore< VdevVarSizeBlkAllocatorPolicy > >(
                 m_dev_mgr.get(), m_cache.get(), vb, PASS_THRU, HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size),
-                "logdev", (vb->failed ? true : false),
+                "logdev", (vb->failed ? true : false), false,
                 std::bind(&LogDev::process_logdev_completions, &HomeLogStoreMgr::logdev(), std::placeholders::_1));
             if (vb->failed) {
                 m_vdev_failed = true;

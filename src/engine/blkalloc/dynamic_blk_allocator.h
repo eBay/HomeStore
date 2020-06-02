@@ -172,10 +172,10 @@ public:
     BlkAllocStatus alloc(uint32_t size, uint32_t desired_temp, Blk* out_blk);
     BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid,
                          bool retry = true) override;
-    virtual bool is_blk_alloced(BlkId& in_bid) override;
+    virtual bool is_blk_alloced(BlkId& in_bid);
     virtual uint8_t* serialize_alloc_blks(uint64_t chunk_id, size_t& mem_size) override;
 
-    virtual void free(Blk& blk, bool set_in_use, bool set_cache) override;
+    virtual void free(Blk& blk) override;
 
     // void freeBlks(uint64_t blkNum, uint32_t blkSize);
     // void commitBlks(uint64_t blkNum, uint32_t blkSize);
@@ -188,7 +188,6 @@ public:
     const BlkAllocConfig* get_config() const { return BlkAllocator::get_config(); }
 
     void inited();
-    override BlkAllocStatus alloc(BlkId& out_blkid);
     override private : std::thread m_thread_id; // Thread pointer for this region
     std::mutex m_mutex;                         // Mutex to protect regionstate & cb
     std::condition_variable m_cv;               // CV to signal thread

@@ -429,6 +429,12 @@ void IndxMgr::journal_comp_cb(logstore_seq_num_t seq_num, logdev_key ld_key, voi
         m_io_cb(vreq, homestore_error::btree_write_failed);
     }
 
+    /* blk id is alloceted in in_use bitmap only after it is writing to journal. check
+     * blk_alloctor base class for further explanations.
+     */
+    for (uint32_t i = 0; i < vreq->alloc_blkid_list.size(); ++i) {
+        m_hb->get_data_blkstore()->alloc_blk(vreq->alloc_blkid_list[i]);
+    }
     /* End of critical section */
     m_cp->cp_io_exit(vreq->cp_id);
 }
