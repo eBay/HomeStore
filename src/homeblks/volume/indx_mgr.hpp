@@ -72,9 +72,13 @@ typedef cp_done_cb indxmgr_stop_cb;
  * Homeblks CP is scheduled periodically or when externally triggered. It calls prepare flush before doing actual flush.
  * During prepare flush a individual CP can decide if it want to participate in a homeblks CP flush.
  *
- * When Blkid is freed in a CP it is first cached in a cp_id and then it is inserted into blkalloc staging buffer when a
- * cp of that sussystem is taken. Blkid free of data blk can happen for active btree and snap btree. We don't free any
- * data blks because of update in diff btree.
+ * Flow of freeing a blkid
+ *      - free blkid is inserted in read blk tracker while it is being read from btree in match_cb_put_param.
+ *              - Purpose of read blk tracker is to prevent freeing of Blkids it is being read in other IOs.
+ *      - When all the reads are completed then blkid is inserted in volume free blkid list.
+ *      - cache is invalidated.
+ *      - When blk alloc checkpoint is taken, these free blkid list is purged.
+ *      - For further steps check blk alloc base class.
  */
 struct vol_cp_id;
 struct vol_active_info {
@@ -307,6 +311,8 @@ public:
     void free_blk(Free_Blk_Entry& fbe);
     void update_cp_sb(vol_cp_id_ptr& vol_id, indx_cp_id* indx_id, indx_mgr_cp_sb* sb);
     uint64_t get_last_psn();
+    /* It is called when volume is sucessfully create on disk */
+    void create_done();
 
 public:
     /*********************** static public functions **********************/

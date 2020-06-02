@@ -120,11 +120,6 @@ void DynamicBlkAllocator::allocator_state_machine() {
     }
 }
 
-bool DynamicBlkAllocator::is_blk_alloced(BlkId& in_bid) {
-    assert(0);
-    return false;
-}
-
 BlkAllocStatus DynamicBlkAllocator::alloc(BlkId& out_blkid) {
     assert(0);
     return BLK_ALLOC_SUCCESS;
@@ -245,7 +240,8 @@ BlkAllocStatus DynamicBlkAllocator::allocBlkSeries(uint32_t minBlks, uint32_t de
 }
 #endif
 
-void DynamicBlkAllocator::free(Blk& b, bool set_in_use, bool set_cache) {
+void DynamicBlkAllocator::free(Blk& b) {
+
     for (auto i = 0; i < b.getPieces(); i++) {
         PageAllocGroup* pggrp = pageid_to_group(b.getPageId(i));
         pggrp->lock();

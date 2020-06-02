@@ -283,7 +283,7 @@ public:
     void recover(std::unique_ptr< sisl::Bitset > recovered_bm, meta_blk* mblk) {
         m_meta_blk_cookie = mblk;
         if (m_allocator) {
-            m_allocator->set_alloced_bm(std::move(recovered_bm));
+            m_allocator->set_disk_bm(std::move(recovered_bm));
         } else {
             m_recovered_bm = std::move(recovered_bm);
         }
@@ -291,7 +291,7 @@ public:
 
     void recover() {
         assert(m_allocator != nullptr);
-        if (m_recovered_bm != nullptr) { m_allocator->set_alloced_bm(std::move(m_recovered_bm)); }
+        if (m_recovered_bm != nullptr) { m_allocator->set_disk_bm(std::move(m_recovered_bm)); }
     }
 
     void cp_start(std::shared_ptr< blkalloc_cp_id > id) {

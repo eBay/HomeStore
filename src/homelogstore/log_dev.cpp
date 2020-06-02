@@ -6,11 +6,6 @@ namespace homestore {
 LogDev::LogDev() = default;
 LogDev::~LogDev() = default;
 
-REGISTER_METABLK_SUBSYSTEM(log_dev, "LOG_DEV", LogDev::meta_blk_found_cb, nullptr)
-
-void LogDev::meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size) {
-    LogDev::instance()->meta_blk_found(mblk, std::move(buf), size);
-}
 
 void LogDev::meta_blk_found(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size) {
     m_sb_cookie = (void*)mblk;

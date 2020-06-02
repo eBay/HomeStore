@@ -649,6 +649,8 @@ public:
         m_bt = MappingBtreeDeclType::create_btree(btree_sb, btree_cfg, btree_cp_sb);
     }
 
+    void create_done() { m_bt->create_done(); }
+
     uint64_t get_used_size() { return m_bt->get_used_size(); }
     MappingBtreeDeclType::btree_super_block get_btree_sb() { return (m_bt->get_btree_sb()); }
 

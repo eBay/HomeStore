@@ -24,6 +24,15 @@
 using namespace std;
 
 namespace homestore {
+#define BLKALLOC_LOG(level, mod, msg, ...) HS_SUBMOD_LOG(level, mod, , "blkalloc", m_cfg.get_name(), msg, ##__VA_ARGS__)
+#define BLKALLOC_ASSERT(assert_type, cond, msg, ...)                                                                   \
+    HS_SUBMOD_ASSERT(assert_type, cond, , "blkalloc", m_cfg.get_name(), msg, ##__VA_ARGS__)
+#define BLKALLOC_ASSERT_CMP(assert_type, val1, cmp, val2, ...)                                                         \
+    HS_SUBMOD_ASSERT_CMP(assert_type, val1, cmp, val2, , "blkalloc", m_cfg.get_name(), ##__VA_ARGS__)
+#define BLKALLOC_ASSERT_NOTNULL(assert_type, val, ...)                                                                 \
+    HS_SUBMOD_ASSERT_NOTNULL(assert_type, val, , "blkalloc", m_cfg.get_name(), ##__VA_ARGS__)
+#define BLKALLOC_ASSERT_NULL(assert_type, val, ...)                                                                    \
+    HS_SUBMOD_ASSERT_NULL(assert_type, val, , "blkalloc", m_cfg.get_name(), ##__VA_ARGS__)
 
 struct blkalloc_cp_id {
     bool suspend = false;
@@ -39,6 +48,7 @@ private:
     uint64_t m_nblks;
     uint32_t m_blks_per_portion;
     std::string m_unique_name;
+    bool m_auto_recovery = false;
 
 public:
     explicit BlkAllocConfig(const std::string& name) : BlkAllocConfig(8192, 0, name) {}
@@ -86,6 +96,9 @@ public:
         assert(get_total_blks() % get_blks_per_portion() == 0);
         return get_total_blks() / get_blks_per_portion();
     }
+
+    void set_auto_recovery(bool auto_recovery) { m_auto_recovery = auto_recovery; }
+    bool get_auto_recovery() { return m_auto_recovery; }
 };
 
 enum BlkAllocStatus {
@@ -143,45 +156,128 @@ public:
     void unlock() { pthread_mutex_unlock(&m_blk_lock); }
 };
 
+/* We have the following design requirement it is used in auto recovery mode
+ *  - Free BlkIDs should not be re allocated until its free status is persisted on disk. Reasons :-
+ *          - It helps is reconstructing btree in crash as it depends on old blkid to read the data
+ *          - Different volume recovery doesn't need to dependent on each other. We can volume based recovery
+ *            instead of time based recovery.
+ *  - Allocate BlkIDs should not be persisted until it is persisted in journal. If system crash after writing to
+ *    in use bm but before writing to journal then blkid will be leak forever.
+ *
+ * To acheive the above requirements we free blks in two phase
+ *      - Reset bits in disk bitmap only
+ *      - persist disk bitmap
+ *      - Reset bits in cache bitmap. It is available to reallocate now.
+ *  Note :- Blks can be freed directly to the cache if it is not set disk bitmap. This can happen in scenarios like
+ *  write failure after blkid allocation.
+ *
+ *  Allocation of blks also happen in two phase
+ *      - Allocate blkid. This blkid will already be set in cache bitmap
+ *      - Consumer will persist entry in journal
+ *      - Set bit in disk bitmap. Entry is set disk bitmap only when consumer have made sure that they are going to
+ *        replay this entry. otherwise there will be memory leak
+ *  Note :- Allocate blk should always be done in two phase if auto recovery is set.
+ *
+ * Blk allocator has two recoveries auto recovery and manual recovery
+ * 1. auto recovery :- in use bit map is persisted. Consumers only have to replay journal. It is used by volume and
+ * btree.
+ * 2. manual recovery :- in use bit map is not persisted. Consumers have to scan its index table to set blks allocated.
+ * It is used meta blk manager.
+ * Base class manages disk_bitmap as it is common to all blk allocator.
+ */
+
 class BlkAllocator {
     std::vector< BlkAllocPortion > m_blk_portions;
-    sisl::Bitset* m_alloced_bm;
-    std::vector< BlkId > free_blkid_list;
+    sisl::Bitset* m_disk_bm;
+
+    std::vector< BlkId > m_free_blkid_list;
+    bool m_auto_recovery = false;
+
+protected:
+    bool m_inited = false;
 
 public:
     explicit BlkAllocator(BlkAllocConfig& cfg, uint32_t id = 0) : m_blk_portions(cfg.get_total_portions()) {
-        m_alloced_bm = new sisl::Bitset(cfg.get_total_blks(), id, HS_STATIC_CONFIG(disk_attr.align_size));
+        m_auto_recovery = cfg.get_auto_recovery();
+        m_disk_bm = new sisl::Bitset(cfg.get_total_blks(), id, HS_STATIC_CONFIG(disk_attr.align_size));
         m_cfg = cfg;
     }
 
-    virtual ~BlkAllocator() { delete m_alloced_bm; }
-    sisl::Bitset* get_alloced_bm() { return m_alloced_bm; }
-    void set_alloced_bm(std::unique_ptr< sisl::Bitset > recovered_bm) {
+    virtual ~BlkAllocator() {
+        if (m_disk_bm) delete m_disk_bm;
+    }
+    sisl::Bitset* get_disk_bm() { return m_disk_bm; }
+    void set_disk_bm(std::unique_ptr< sisl::Bitset > recovered_bm) {
         LOGINFO("bitmap found");
-        m_alloced_bm->move(*(recovered_bm.get()));
+        m_disk_bm->move(*(recovered_bm.get()));
     }
     BlkAllocPortion* get_blk_portions(uint32_t portion_num) { return &(m_blk_portions[portion_num]); }
 
-    virtual void inited() = 0;
-    virtual BlkAllocStatus alloc(BlkId& out_blkid) = 0;
+    virtual void inited() {
+        if (!m_auto_recovery) {
+            delete m_disk_bm;
+            m_disk_bm = nullptr;
+        }
+        m_inited = true;
+    }
+
+    /* It is used during recovery in both mode :- auto recovery and manual recovery
+     * It is also used in normal IO during auto recovery mode.
+     */
+    BlkAllocStatus alloc(BlkId& in_bid) {
+        /* enable this assert later when reboot is supported */
+        //        assert(m_auto_recovery || !m_inited);
+        if (!m_auto_recovery && m_inited) { return BLK_ALLOC_FAILED; }
+        BlkAllocPortion* portion = blknum_to_portion(in_bid.get_id());
+        portion->lock();
+        /* In both recovery and post recovery phase we should never try to allocate
+         * the bid which is already allcated.
+         */
+        BLKALLOC_ASSERT(RELEASE, get_disk_bm()->is_bits_reset(in_bid.get_id(), in_bid.get_nblks()),
+                        "Expected disk blks to reset");
+        get_disk_bm()->set_bits(in_bid.get_id(), in_bid.get_nblks());
+        portion->unlock();
+        return BLK_ALLOC_SUCCESS;
+    };
+
+    void free(const BlkId& b, std::shared_ptr< blkalloc_cp_id > id) {
+        /* this api should be called only when auto recovery is enabled */
+        assert(m_auto_recovery);
+        m_free_blkid_list.push_back(b);
+        BlkAllocPortion* portion = blknum_to_portion(b.get_id());
+        portion->lock();
+        if (m_inited) {
+            /* During recovery we might try to free the entry which is already freed while replaying the journal,
+             * This assert is valid only post recovery.
+             */
+            BLKALLOC_ASSERT(RELEASE, get_disk_bm()->is_bits_set(b.get_id(), b.get_nblks()),
+                            "Expected disk bits to set");
+        }
+        get_disk_bm()->reset_bits(b.get_id(), b.get_nblks());
+        portion->unlock();
+    }
+
+    /* CP start is called when all its consumers have purged their free lists and now want to persist the
+     * disk bitmap.
+     */
+    sisl::byte_array cp_start(std::shared_ptr< blkalloc_cp_id > id) { return (m_disk_bm->serialize()); }
+
+    /* CP done is called when in use bitmap is persisted and also consumers has persisted their superblock. Not
+     * it is safe to reuse the blks.
+     */
+    void cp_done(std::shared_ptr< blkalloc_cp_id > id) {
+        for (uint32_t i = 0; i < m_free_blkid_list.size(); ++i) {
+            free(m_free_blkid_list[i]);
+        }
+        m_free_blkid_list.clear();
+    }
+
+    virtual bool is_blk_alloced(BlkId& b) = 0;
+    virtual std::string to_string() const = 0;
     virtual BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) = 0;
     virtual BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints& hints, BlkId* out_blkid,
                                  bool best_fit = false) = 0;
-    sisl::byte_array cp_start(std::shared_ptr< blkalloc_cp_id > id) { return (m_alloced_bm->serialize()); }
-    void cp_done(std::shared_ptr< blkalloc_cp_id > id) {
-        for (uint32_t i = 0; i < free_blkid_list.size(); ++i) {
-            free(free_blkid_list[i], false, true);
-        }
-        free_blkid_list.clear();
-    }
-    virtual bool is_blk_alloced(BlkId& in_bid) = 0;
-    void free(const BlkId& id) { free(id, true, true); }
-    virtual void free(const BlkId& id, bool set_in_use, bool set_cache) = 0;
-    void free(const BlkId& b, std::shared_ptr< blkalloc_cp_id > id) {
-        free_blkid_list.push_back(b);
-        free(b, true, false);
-    }
-    virtual std::string to_string() const = 0;
+    virtual void free(const BlkId& id) = 0;
 
     virtual const BlkAllocConfig& get_config() const { return m_cfg; }
     uint64_t blknum_to_portion_num(uint64_t blknum) const { return blknum / get_config().get_blks_per_portion(); }
@@ -252,12 +348,11 @@ public:
     ~FixedBlkAllocator() override;
 
     BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints& hints, BlkId* out_blkid, bool best_fit = false) override;
-    void free(const BlkId& b, bool set_in_use, bool set_cache) override;
-    std::string to_string() const override;
     BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) override;
+    void free(const BlkId& b) override;
     virtual void inited() override;
-    virtual BlkAllocStatus alloc(BlkId& out_blkid) override;
-    virtual bool is_blk_alloced(BlkId& in_bid) override;
+    std::string to_string() const override;
+    virtual bool is_blk_alloced(BlkId& in_bid);
 
 #ifndef NDEBUG
     uint32_t total_free_blks() const { return m_nfree_blks.load(std::memory_order_relaxed); }
@@ -265,7 +360,6 @@ public:
 
 private:
     void free_blk(uint32_t id);
-    bool m_init;
     uint32_t m_first_blk_id;
     std::mutex m_bm_mutex;
 };

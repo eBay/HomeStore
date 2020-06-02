@@ -225,11 +225,12 @@ private:
     uint64_t m_reserved_sz = 0;                  // write size within chunk, used to check chunk boundary;
     off_t m_seek_cursor = 0;                     // the seek cursor
     std::atomic< uint64_t > m_write_sz_in_total; // this size will be decreased by truncate and increased by append;
+    bool m_auto_recovery;
 
 public:
     static constexpr size_t context_data_size() { return MAX_CONTEXT_DATA_SZ; }
 
-    void init(DeviceManager* mgr, vdev_info_block* vb, comp_callback cb, uint32_t page_size) {
+    void init(DeviceManager* mgr, vdev_info_block* vb, comp_callback cb, uint32_t page_size, bool auto_recovery) {
         m_mgr = mgr;
         m_vb = vb;
         m_comp_cb = cb;
@@ -240,12 +241,14 @@ public:
         m_selector = std::make_unique< DefaultDeviceSelector >();
         m_recovery_init = false;
         m_reserved_sz = 0;
+        m_auto_recovery = auto_recovery;
         m_write_sz_in_total.store(0, std::memory_order_relaxed);
     }
 
     /* Load the virtual dev from vdev_info_block and create a Virtual Dev. */
-    VirtualDev(DeviceManager* mgr, vdev_info_block* vb, comp_callback cb, bool recovery_init) {
-        init(mgr, vb, cb, vb->page_size);
+    VirtualDev(DeviceManager* mgr, vdev_info_block* vb, comp_callback cb, bool recovery_init,
+               bool auto_recovery = false) {
+        init(mgr, vb, cb, vb->page_size, auto_recovery);
 
         m_recovery_init = recovery_init;
         m_mgr->add_chunks(vb->vdev_id, [this](PhysicalDevChunk* chunk) { add_chunk(chunk); });
@@ -257,8 +260,9 @@ public:
 
     /* Create a new virtual dev for these parameters */
     VirtualDev(DeviceManager* mgr, uint64_t context_size, uint32_t nmirror, bool is_stripe, uint32_t page_size,
-               const std::vector< PhysicalDev* >& pdev_list, comp_callback cb, char* blob, uint64_t size) {
-        init(mgr, nullptr, cb, page_size);
+               const std::vector< PhysicalDev* >& pdev_list, comp_callback cb, char* blob, uint64_t size,
+               bool auto_recovery = false) {
+        init(mgr, nullptr, cb, page_size, auto_recovery);
 
         // Now its time to allocate chunks as needed
         HS_ASSERT_CMP(LOGMSG, nmirror, <, pdev_list.size()); // Mirrors should be at least one less than device list.
@@ -1592,6 +1596,7 @@ private:
     std::shared_ptr< BlkAllocator > create_allocator(uint64_t size, uint32_t unique_id, bool init) {
         typename Allocator::AllocatorConfig cfg(std::string("chunk_") + std::to_string(unique_id));
         Allocator::get_config(size, get_page_size(), &cfg);
+        cfg.set_auto_recovery(m_auto_recovery);
 
         std::shared_ptr< BlkAllocator > allocator =
             std::make_shared< typename Allocator::AllocatorType >(cfg, init, unique_id);

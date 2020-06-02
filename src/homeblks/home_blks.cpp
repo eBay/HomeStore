@@ -644,7 +644,7 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
 void HomeBlks::do_volume_shutdown(bool force) {
     std::unique_lock< std::recursive_mutex > lg(m_vol_lock);
 
-    if (!force && Volume::can_all_vols_shutdown()) {
+    if (!force && !Volume::can_all_vols_shutdown()) {
         Volume::trigger_homeblks_cp();
         return;
     }

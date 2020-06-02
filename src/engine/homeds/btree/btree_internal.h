@@ -81,7 +81,7 @@ struct blkalloc_cp_id;
  *---------------------------------------------------------------------------------------------------------------------------------------------
  */
 // clang-format on
-enum journal_op { BTREE_SPLIT = 1, BTREE_MERGE };
+enum journal_op { BTREE_SPLIT = 1, BTREE_MERGE, BTREE_CREATE };
 
 #define INVALID_SEQ_ID UINT64_MAX
 struct btree_cp_id;
@@ -91,7 +91,7 @@ struct btree_cp_superblock {
     int64_t active_psn = -1;
     int64_t cp_cnt = -1;
     int64_t blkalloc_cp_cnt = -1;
-    int64_t btree_size = 0;
+    int64_t btree_size; // start with root node
     /* we can add more statistics as well like number of interior nodes etc. */
 } __attribute__((__packed__));
 
@@ -115,10 +115,40 @@ struct btree_journal_entry_hdr {
     uint64_t left_child_id;
     uint64_t left_child_gen;
     uint8_t old_nodes_size;
-    uint8_t deleted_nodes_size;
     uint8_t new_nodes_size;
     uint8_t new_key_size;
     int64_t cp_cnt;
+};
+
+struct btree_journal_entry {
+    static btree_journal_entry_hdr* get_entry_hdr(uint8_t* mem) { return ((btree_journal_entry_hdr*)mem); }
+
+    static std::pair< uint64_t*, uint32_t > get_old_nodes_list(uint8_t* mem) {
+        auto hdr = get_entry_hdr(mem);
+        uint64_t* old_node_id = (uint64_t*)((uint64_t)mem + sizeof(btree_journal_entry_hdr));
+        return (std::make_pair(old_node_id, hdr->old_nodes_size));
+    }
+
+    static std::pair< uint64_t*, uint32_t > get_new_nodes_list(uint8_t* mem) {
+        auto hdr = get_entry_hdr(mem);
+        auto old_node_id = get_old_nodes_list(mem);
+        uint64_t* new_node_id = (uint64_t*)(&(old_node_id.first[old_node_id.second]));
+        return (std::make_pair(new_node_id, hdr->new_nodes_size));
+    }
+
+    static std::pair< uint64_t*, uint32_t > get_new_node_gen(uint8_t* mem) {
+        auto hdr = get_entry_hdr(mem);
+        auto new_node_id = get_new_nodes_list(mem);
+        uint64_t* new_node_gen = (uint64_t*)(&(new_node_id.first[new_node_id.second]));
+        return (std::make_pair(new_node_gen, hdr->new_nodes_size));
+    }
+
+    static std::pair< uint8_t*, uint32_t > get_key(uint8_t* mem) {
+        auto hdr = get_entry_hdr(mem);
+        auto new_node_gen = get_new_node_gen(mem);
+        uint8_t* key = (uint8_t*)(&(new_node_gen.first[new_node_gen.second]));
+        return (std::make_pair(key, hdr->new_key_size));
+    }
 } __attribute__((__packed__));
 
 #if 0
