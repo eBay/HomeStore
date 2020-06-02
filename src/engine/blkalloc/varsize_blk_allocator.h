@@ -501,7 +501,7 @@ private:
     std::condition_variable m_cv; // CV to signal thread
     BlkAllocatorState m_region_state;
 
-    sisl::Bitset* m_alloc_bm; // Bitset of all allocation
+    sisl::Bitset* m_cache_bm; // Bitset of all allocation
 
     VarsizeBlkAllocatorBtree* m_blk_cache; // Blk Entry caches
 

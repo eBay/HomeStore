@@ -53,6 +53,14 @@ public:
         m_first_cp = btree_cp_id_ptr(new (btree_cp_id));
     }
 
+    static void create_done(SSDBtreeStore* store, bnodeid_t m_root_node) { store->create_done_store(m_root_node); }
+
+    /* It is called when its consumer has successfully persisted its superblock. */
+    void create_done_store(bnodeid_t m_root_node) {
+        auto bid = BlkId(m_root_node.m_id);
+        m_blkstore->alloc_blk(bid);
+    }
+
     void cp_done_store(btree_cp_id_ptr cp_id) {
         cp_id->cb(cp_id);
     }
@@ -68,23 +76,25 @@ public:
             cur_cp_id->end_psn = m_journal->get_contiguous_issued_seq_num(cur_cp_id->start_psn);
             assert(cur_cp_id->end_psn >= cur_cp_id->start_psn);
         }
+        if (cur_cp_id == m_first_cp) { m_first_cp = nullptr; }
+        if (!cur_cp_id) {
+            /* it can not be last cp if this volume hasn't participated yet in a cp */
+            assert(!is_last_cp);
+            assert(m_first_cp);
+            return m_first_cp;
+        }
+
         btree_cp_id_ptr new_cp(nullptr);
         if (!is_last_cp) {
-            if (cur_cp_id) {
-                new_cp = btree_cp_id_ptr(new (btree_cp_id));
-                new_cp->start_psn = cur_cp_id->end_psn;
-                new_cp->cp_cnt = cur_cp_id->cp_cnt + 1;
-            } else {
-                /* it is the first CP */
-                assert(m_first_cp);
-                new_cp = m_first_cp;
-                m_first_cp = nullptr;
-            }
+            new_cp = btree_cp_id_ptr(new (btree_cp_id));
+            new_cp->start_psn = cur_cp_id->end_psn;
+            new_cp->cp_cnt = cur_cp_id->cp_cnt + 1;
         }
         m_wb_cache.prepare_cp(new_cp, cur_cp_id);
         return new_cp;
     }
 
+    /* It is called only during first time create or after recovery */
     static void update_sb(SSDBtreeStore* store, SSDBtreeStore::superblock& sb, btree_cp_superblock* cp_sb,
                           bool is_recovery) {
         store->update_store_sb(sb, cp_sb, is_recovery);
@@ -107,6 +117,7 @@ public:
 
         m_first_cp->start_psn = cp_sb->active_psn;
         m_first_cp->cp_cnt = cp_sb->cp_cnt + 1;
+        m_wb_cache.prepare_cp(m_first_cp, nullptr);
     }
 
     logstore_id_t get_journal_id_store() { return (m_journal->get_store_id()); }
@@ -146,22 +157,25 @@ public:
 
     void destroy_done_store() { home_log_store_mgr.remove_log_store(m_journal->get_store_id()); }
 
-    static void write_journal_entry_async(SSDBtreeStore* store, btree_cp_id_ptr cp_id, uint8_t* mem, size_t size) {
-        store->write_journal_entry_async_store(cp_id, mem, size);
+    static void write_journal_entry(SSDBtreeStore* store, btree_cp_id_ptr cp_id, uint8_t* mem, size_t size) {
+        store->write_journal_entry_store(cp_id, mem, size);
     }
 
-    void write_journal_entry_async_store(btree_cp_id_ptr cp_id, uint8_t* mem, size_t size) {
-        if (!cp_id) {
-            /* it can be null if it is a write during create */
-            cp_id = m_first_cp;
-        }
+    void write_journal_entry_store(btree_cp_id_ptr cp_id, uint8_t* mem, size_t size) {
         ++cp_id->ref_cnt;
         sisl::blob b(mem, size);
         m_journal->append_async(b, mem, ([this, cp_id](logstore_seq_num_t seq_num, bool status, void* cookie) {
+                                    auto hdr = btree_journal_entry::get_entry_hdr((uint8_t*)cookie);
+                                    if (hdr->op == BTREE_CREATE) {
+                                        /* we set disk bitmap later when btree root node is persisted */
+                                        free(cookie);
+                                        try_cp_start(cp_id);
+                                        return;
+                                    }
                                     auto pair = btree_journal_entry::get_new_nodes_list((uint8_t*)cookie);
                                     auto new_node_id_list = pair.first;
                                     auto size = pair.second;
-                                    /* blk id is alloceted in in_use bitmap only after it is writing to journal. check
+                                    /* blk id is alloceted in disk bitmap only after it is writing to journal. check
                                      * blk_alloctor base class for further explanations.
                                      */
                                     for (uint32_t i = 0; i < size; ++i) {
@@ -171,26 +185,6 @@ public:
                                     free(cookie);
                                     try_cp_start(cp_id);
                                 }));
-    }
-
-    static void write_journal_entry_sync(SSDBtreeStore* store, uint8_t* mem, size_t size) {
-        store->write_journal_entry_sync_store(mem, size);
-    }
-
-    void write_journal_entry_sync_store(uint8_t* mem, size_t size) {
-        sisl::blob b(mem, size);
-        //        m_journal->append_sync(b);
-        auto pair = btree_journal_entry::get_new_nodes_list((uint8_t*)mem);
-        auto new_node_id_list = pair.first;
-        auto new_node_size = pair.second;
-        /* blk id is alloceted in in_use bitmap only after it is writing to journal. check
-         * blk_alloctor base class for further explanations.
-         */
-        for (uint32_t i = 0; i < new_node_size; ++i) {
-            auto bid = BlkId(new_node_id_list[i]);
-            m_blkstore->alloc_blk(bid);
-        }
-        free(mem);
     }
 
     static uint8_t* get_physical(const SSDBtreeNode* bn) {

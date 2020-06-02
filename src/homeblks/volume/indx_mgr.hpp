@@ -311,6 +311,8 @@ public:
     void free_blk(Free_Blk_Entry& fbe);
     void update_cp_sb(vol_cp_id_ptr& vol_id, indx_cp_id* indx_id, indx_mgr_cp_sb* sb);
     uint64_t get_last_psn();
+    /* It is called when volume is sucessfully create on disk */
+    void create_done();
 
 public:
     /*********************** static public functions **********************/

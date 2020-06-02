@@ -98,6 +98,7 @@ void Volume::init() {
                                                        m_indx_mgr->get_active_sb());
         set_state(vol_state::ONLINE, true);
         seq_Id = m_indx_mgr->get_last_psn();
+        m_indx_mgr->create_done();
     } else {
         /* recovery */
         auto active_sb = m_sb->active_sb;

@@ -224,6 +224,8 @@ IndxMgr::~IndxMgr() {
     if (m_shutdown_started) { static std::once_flag flag1; }
 }
 
+void IndxMgr::create_done() { m_active_map->create_done(); }
+
 void IndxMgr::init() {
     m_hb = HomeBlks::instance();
     m_cp = std::unique_ptr< IndxCP >(new IndxCP());
@@ -423,7 +425,7 @@ void IndxMgr::journal_comp_cb(logstore_seq_num_t seq_num, logdev_key ld_key, voi
         m_io_cb(vreq, homestore_error::btree_write_failed);
     }
 
-    /* blk id is alloceted in in_use bitmap only after it is writing to journal. check
+    /* blk id is alloceted in disk bitmap only after it is writing to journal. check
      * blk_alloctor base class for further explanations.
      */
     for (uint32_t i = 0; i < vreq->alloc_blkid_list.size(); ++i) {

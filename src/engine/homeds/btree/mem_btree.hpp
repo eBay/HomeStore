@@ -60,14 +60,13 @@ public:
 
     uint32_t get_node_size() const { return m_node_size; }
     static btree_cp_id_ptr attach_prepare_cp(MemBtreeStore* store, btree_cp_id_ptr cur_cp_id, bool is_last_cp) {
-        assert(0);
         return nullptr;
     }
+    static void create_done(MemBtreeStore* store, bnodeid_t m_root_node);
     static void update_sb(MemBtreeStore* store, MemBtreeStore::superblock& sb, btree_cp_superblock* cp_sb,
                           bool is_recovery){};
 
-    static void write_journal_entry_async(MemBtreeStore* store, btree_cp_id_ptr cp_id, uint8_t* mem, size_t size) {}
-    static void write_journal_entry_sync(MemBtreeStore* store, uint8_t* mem, size_t size) {}
+    static void write_journal_entry(MemBtreeStore* store, btree_cp_id_ptr cp_id, uint8_t* mem, size_t size) {}
 
     static boost::intrusive_ptr< MemBtreeNode >
     alloc_node(MemBtreeStore* store, bool is_leaf,

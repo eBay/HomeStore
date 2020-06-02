@@ -32,7 +32,7 @@ void FixedBlkAllocator::inited() {
 #endif
         BlkAllocPortion* portion = blknum_to_portion(i);
         portion->lock();
-        if (get_alloced_bm()->is_bits_set(i, 1)) {
+        if (get_disk_bm()->is_bits_set(i, 1)) {
             portion->unlock();
             continue;
         }
@@ -114,7 +114,7 @@ BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& hi
 void FixedBlkAllocator::free(const BlkId& b) {
     assert(b.get_nblks() == 1);
 
-    /* No need to set in cache if it is not recovered. When recovery is complete we copy the in_use_bm to
+    /* No need to set in cache if it is not recovered. When recovery is complete we copy the disk_bm to
      * cache bm.
      */
     if (m_inited) { free_blk((uint32_t)b.get_id()); }

@@ -206,6 +206,9 @@ public:
         if (!m_destroy) { destroy(nullptr, true); }
     }
 
+    /* It is called when its btree consumer has successfully stored the btree superblock */
+    void create_done() { btree_store_t::create_done(m_btree_store.get(), m_root_node); }
+
     btree_status_t destroy(free_blk_callback free_blk_cb, bool mem_only, btree_cp_id_ptr cp_id = nullptr) {
         m_btree_lock.write_lock();
         BtreeNodePtr root;
@@ -294,6 +297,7 @@ public:
 
     void destroy_done() { btree_store_t::destroy_done(m_btree_store.get()); }
 
+    /* It is called before superblock is persisted for each CP */
     void update_btree_cp_sb(btree_cp_id_ptr cp_id, btree_cp_superblock& btree_sb, bool blkalloc_cp) {
         btree_sb.active_psn = cp_id->end_psn;
         btree_sb.blkalloc_cp_cnt = blkalloc_cp ? cp_id->cp_cnt : m_last_cp_sb.cp_cnt;
@@ -1805,7 +1809,7 @@ private:
 
     void write_journal_entry(journal_op op, BtreeNodePtr parent_node, uint32_t parent_indx, BtreeNodePtr left_most_node,
                              std::vector< BtreeNodePtr >& old_nodes, std::vector< BtreeNodePtr >& new_nodes,
-                             btree_cp_id_ptr cp_id, bool is_root, bool is_sync = false) {
+                             btree_cp_id_ptr cp_id, bool is_root) {
         if (BtreeStoreType != btree_store_type::SSD_BTREE) { return; }
 
         size_t size = sizeof(btree_journal_entry_hdr) + sizeof(uint64_t) * old_nodes.size() +
@@ -1823,21 +1827,21 @@ private:
         hdr->new_key_size = 0;
         hdr->op = op;
         hdr->is_root = is_root;
-        if (cp_id) hdr->cp_cnt = cp_id->cp_cnt;
+        hdr->cp_cnt = cp_id->cp_cnt;
 
         auto old_node_id_pair = btree_journal_entry::get_old_nodes_list(mem);
         uint64_t* old_node_id = old_node_id_pair.first;
         for (uint32_t i = 0; i < old_nodes.size(); ++i) {
             old_node_id[i] = old_nodes[i]->get_node_id_int();
         }
-        if (cp_id) cp_id->btree_size.fetch_sub(old_nodes.size() * m_node_size);
+        if (cp_id) cp_id->btree_size.fetch_sub(old_nodes.size());
 
         auto new_node_id_pair = btree_journal_entry::get_new_nodes_list(mem);
         uint64_t* new_node_id = new_node_id_pair.first;
         for (uint32_t i = 0; i < new_nodes.size(); ++i) {
             new_node_id[i] = new_nodes[i]->get_node_id_int();
         }
-        if (cp_id) cp_id->btree_size.fetch_add(new_nodes.size() * m_node_size);
+        if (cp_id) cp_id->btree_size.fetch_add(new_nodes.size());
 
         auto new_node_gen_pair = btree_journal_entry::get_new_node_gen(mem);
         uint64_t* new_node_gen = new_node_gen_pair.first;
@@ -1856,11 +1860,7 @@ private:
             memcpy(key, blob.bytes, blob.size);
             key = (uint8_t*)((uint64_t)key + blob.size);
         }
-        if (!is_sync) {
-            btree_store_t::write_journal_entry_async(m_btree_store.get(), cp_id, mem, size);
-        } else {
-            btree_store_t::write_journal_entry_sync(m_btree_store.get(), mem, size);
-        }
+        btree_store_t::write_journal_entry(m_btree_store.get(), cp_id, mem, size);
     }
 
     btree_status_t check_split_root(const BtreeKey& k, const BtreeValue& v, btree_put_type& putType,
@@ -2552,14 +2552,13 @@ protected:
         if (root == nullptr) { return (btree_status_t::space_not_avail); }
         m_root_node = root->get_node_id();
 
-        auto ret = write_node_sync(root);
-        if (ret != btree_status_t::success) { return ret; }
-        m_sb.root_node = m_root_node;
-
         std::vector< BtreeNodePtr > old_nodes;
         std::vector< BtreeNodePtr > new_nodes;
         new_nodes.push_back(root);
-        write_journal_entry(BTREE_CREATE, root, 0, root, old_nodes, new_nodes, nullptr, true);
+        auto cp_id = attach_prepare_cp(nullptr, false);
+        write_journal_entry(BTREE_CREATE, root, 0, root, old_nodes, new_nodes, cp_id, true);
+        auto ret = write_node(root, nullptr, cp_id);
+        m_sb.root_node = m_root_node;
         /* write an entry to the journal also */
         return btree_status_t::success;
     }

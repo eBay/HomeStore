@@ -165,16 +165,17 @@ public:
  *    in use bm but before writing to journal then blkid will be leak forever.
  *
  * To acheive the above requirements we free blks in two phase
- *      - Reset bits in in-use bitmap only
- *      - persist in-use bitmap
+ *      - Reset bits in disk bitmap only
+ *      - persist disk bitmap
  *      - Reset bits in cache bitmap. It is available to reallocate now.
- *  Note :- Blks can be freed directly to the cache if it is not set in-use bitmap. This can happen in scenarios like
+ *  Note :- Blks can be freed directly to the cache if it is not set disk bitmap. This can happen in scenarios like
  *  write failure after blkid allocation.
  *
  *  Allocation of blks also happen in two phase
  *      - Allocate blkid. This blkid will already be set in cache bitmap
  *      - Consumer will persist entry in journal
- *      - Set bit in in-use bitmap.
+ *      - Set bit in disk bitmap. Entry is set disk bitmap only when consumer have made sure that they are going to
+ *        replay this entry. otherwise there will be memory leak
  *  Note :- Allocate blk should always be done in two phase if auto recovery is set.
  *
  * Blk allocator has two recoveries auto recovery and manual recovery
@@ -182,12 +183,12 @@ public:
  * btree.
  * 2. manual recovery :- in use bit map is not persisted. Consumers have to scan its index table to set blks allocated.
  * It is used meta blk manager.
- * Base class manages in_use_bitmap as it is common to all blk allocator.
+ * Base class manages disk_bitmap as it is common to all blk allocator.
  */
 
 class BlkAllocator {
     std::vector< BlkAllocPortion > m_blk_portions;
-    sisl::Bitset* m_alloced_bm;
+    sisl::Bitset* m_disk_bm;
 
     std::vector< BlkId > m_free_blkid_list;
     bool m_auto_recovery = false;
@@ -198,24 +199,24 @@ protected:
 public:
     explicit BlkAllocator(BlkAllocConfig& cfg, uint32_t id = 0) : m_blk_portions(cfg.get_total_portions()) {
         m_auto_recovery = cfg.get_auto_recovery();
-        m_alloced_bm = new sisl::Bitset(cfg.get_total_blks(), id, HS_STATIC_CONFIG(disk_attr.align_size));
+        m_disk_bm = new sisl::Bitset(cfg.get_total_blks(), id, HS_STATIC_CONFIG(disk_attr.align_size));
         m_cfg = cfg;
     }
 
     virtual ~BlkAllocator() {
-        if (m_alloced_bm) delete m_alloced_bm;
+        if (m_disk_bm) delete m_disk_bm;
     }
-    sisl::Bitset* get_alloced_bm() { return m_alloced_bm; }
-    void set_alloced_bm(std::unique_ptr< sisl::Bitset > recovered_bm) {
+    sisl::Bitset* get_disk_bm() { return m_disk_bm; }
+    void set_disk_bm(std::unique_ptr< sisl::Bitset > recovered_bm) {
         LOGINFO("bitmap found");
-        m_alloced_bm->move(*(recovered_bm.get()));
+        m_disk_bm->move(*(recovered_bm.get()));
     }
     BlkAllocPortion* get_blk_portions(uint32_t portion_num) { return &(m_blk_portions[portion_num]); }
 
     virtual void inited() {
         if (!m_auto_recovery) {
-            delete m_alloced_bm;
-            m_alloced_bm = nullptr;
+            delete m_disk_bm;
+            m_disk_bm = nullptr;
         }
         m_inited = true;
     }
@@ -232,9 +233,9 @@ public:
         /* In both recovery and post recovery phase we should never try to allocate
          * the bid which is already allcated.
          */
-        BLKALLOC_ASSERT(RELEASE, get_alloced_bm()->is_bits_set(in_bid.get_id(), in_bid.get_nblks()),
-                        "Expected alloced blks to reset");
-        get_alloced_bm()->set_bits(in_bid.get_id(), in_bid.get_nblks());
+        BLKALLOC_ASSERT(RELEASE, get_disk_bm()->is_bits_reset(in_bid.get_id(), in_bid.get_nblks()),
+                        "Expected disk blks to reset");
+        get_disk_bm()->set_bits(in_bid.get_id(), in_bid.get_nblks());
         portion->unlock();
         return BLK_ALLOC_SUCCESS;
     };
@@ -249,17 +250,17 @@ public:
             /* During recovery we might try to free the entry which is already freed while replaying the journal,
              * This assert is valid only post recovery.
              */
-            BLKALLOC_ASSERT(RELEASE, get_alloced_bm()->is_bits_set(b.get_id(), b.get_nblks()),
-                            "Expected alloced bits to set");
+            BLKALLOC_ASSERT(RELEASE, get_disk_bm()->is_bits_set(b.get_id(), b.get_nblks()),
+                            "Expected disk bits to set");
         }
-        get_alloced_bm()->reset_bits(b.get_id(), b.get_nblks());
+        get_disk_bm()->reset_bits(b.get_id(), b.get_nblks());
         portion->unlock();
     }
 
     /* CP start is called when all its consumers have purged their free lists and now want to persist the
-     * in-use bitmap.
+     * disk bitmap.
      */
-    sisl::byte_array cp_start(std::shared_ptr< blkalloc_cp_id > id) { return (m_alloced_bm->serialize()); }
+    sisl::byte_array cp_start(std::shared_ptr< blkalloc_cp_id > id) { return (m_disk_bm->serialize()); }
 
     /* CP done is called when in use bitmap is persisted and also consumers has persisted their superblock. Not
      * it is safe to reuse the blks.
