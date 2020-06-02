@@ -221,7 +221,7 @@ bool VarsizeBlkAllocator::is_blk_alloced(BlkId& b) {
 
 void VarsizeBlkAllocator::inited() {
     m_alloc_bm->copy(*(get_alloced_bm()));
-    m_thread_id = std::thread(thread_func, this);
+    m_thread_id = sisl::named_thread("blkalloc_sweep", bind_this(VarsizeBlkAllocator::allocator_state_machine, 0));
     LOGINFO("blk allocator inited");
     BlkAllocator::inited();
 }
