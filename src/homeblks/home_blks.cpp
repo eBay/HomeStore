@@ -651,10 +651,7 @@ void HomeBlks::do_volume_shutdown(bool force) {
 
     bool expected = false;
     bool desired = true;
-    if (!m_start_shutdown.compare_exchange_strong(expected, desired)) {
-        if (force) { m_vol_shutdown_cmpltd = true; }
-        return;
-    }
+    if (!m_start_shutdown.compare_exchange_strong(expected, desired)) { return; }
 
     /* XXX:- Do we need a force time here. It might get stuck in cp */
     Volume::shutdown(([this](bool success) {
