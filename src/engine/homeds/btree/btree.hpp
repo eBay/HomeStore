@@ -1940,6 +1940,7 @@ private:
         write_node(root, cp_id);
         BT_DEBUG_ASSERT_CMP(m_root_node, ==, root->get_node_id(), root);
 
+        old_nodes.push_back(child_node);
         write_journal_entry(BTREE_MERGE, root, 0, child_node, old_nodes, new_nodes, cp_id, true);
         unlock_node(root, locktype::LOCKTYPE_WRITE);
         free_node(child_node, false, cp_id);
