@@ -346,6 +346,10 @@ public:
         return true;
     }
 
+    static void dec_home_blks_ref_cnt() {
+        auto cnt = home_blks_ref_cnt.fetch_sub(1);
+        if (cnt == 1) { HomeBlks::instance()->do_volume_shutdown(true); }
+    }
     /* Called during shutdown. */
     static void shutdown(indxmgr_stop_cb cb);
 

@@ -71,8 +71,18 @@ Volume::Volume(const vol_params& params) :
         m_metrics(params.vol_name),
         m_comp_cb(params.io_comp_cb),
         m_indx_mgr_destroy_started(false) {
-    m_state = vol_state::UNINITED;
+
+    /* this counter is decremented later when this volume become part of a cp. until then shutdown is
+     * not allowed.
+     */
     m_hb = HomeBlks::safe_instance();
+    ++home_blks_ref_cnt;
+    if (m_hb->is_shutdown()) {
+        auto cnt = home_blks_ref_cnt.fetch_sub(1);
+        if (cnt == 1) { m_hb->do_volume_shutdown(true); }
+        throw std::runtime_error("shutdown in progress");
+    }
+    m_state = vol_state::UNINITED;
     m_read_blk_tracker = std::make_unique< Blk_Read_Tracker >(
         params.vol_name, params.uuid, std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
 }
