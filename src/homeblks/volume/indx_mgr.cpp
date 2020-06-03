@@ -363,6 +363,10 @@ vol_cp_id_ptr IndxMgr::attach_prepare_vol_cp(vol_cp_id_ptr cur_vol_id, indx_cp_i
         /* if indx_id->blkalloc_checkpoint is set to true then it means it is created/destroy in a same cp.
          * we can not resume CP in this checkpoint. A volume can never be added in a current cp.
          */
+        /* we don't allow shutdown to start until first vol cp won't become part of homeblks cp. It is incremented
+         * before volume is created in a constructor.
+         */
+        Volume::dec_home_blks_ref_cnt();
         return m_first_cp_id;
     }
 
@@ -654,7 +658,16 @@ void IndxMgr::add_prepare_cb_list(prepare_cb cb) {
 void IndxMgr::shutdown(indxmgr_stop_cb cb) {
     iomanager.cancel_timer(m_homeblks_cp_timer_hdl, false);
     m_homeblks_cp_timer_hdl = iomgr::null_timer_handle;
-    trigger_homeblks_cp(cb, true);
+    trigger_homeblks_cp(([cb](bool success) {
+                            /* verify that all the volumes have called their last cp */
+                            assert(success);
+                            if (m_cp) {
+                                auto cp_id = m_cp->cp_io_enter();
+                                assert(cp_id->vol_id_list.size() == 0);
+                            }
+                            cb(success);
+                        }),
+                        true);
 }
 
 void IndxMgr::destroy_done() {
