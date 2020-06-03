@@ -609,7 +609,7 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
         return;
     }
 
-    /* We set the clean shutdown flag only when it is not focefully shutdown. In clean shutdown
+    /* We set the clean shutdown flag only when it is not forcefully shutdown. In clean shutdown
      * we don't replay journal on boot and assume that everything is correct.
      */
     if (!m_force_shutdown) {

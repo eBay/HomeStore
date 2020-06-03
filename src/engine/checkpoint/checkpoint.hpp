@@ -36,28 +36,27 @@
 namespace homestore {
 SDS_LOGGING_DECL(cp)
 
-typedef enum {
-    cp_init = 1, // It is not inited yet.
-    cp_io_ready, // IOs can start in a CP
-    cp_trigger,  // cp is triggered
-    cp_prepare,  // waiting for enter cnt to be zero
-    cp_start,    // User can start flush data to disk
-    cp_done      // Data flush is done.
-} cp_status_t;
+ENUM(cp_status_t, uint8_t,
+     cp_init,     // It is not inited yet.
+     cp_io_ready, // IOs can start in a CP
+     cp_trigger,  // cp is triggered
+     cp_prepare,  // waiting for enter cnt to be zero
+     cp_start,    // User can start flush data to disk
+     cp_done      // Data flush is done.
+);
 
 /* It is a base class of consumer checkpoint ID. consumer checkpoint id can use it to store
  * checkpoint related info related to checkpoint. It is allocated/freed by CheckPoint class
  */
 
 struct cp_id_base {
-    std::atomic< cp_status_t > cp_state = cp_status_t::cp_init;
+    std::atomic< cp_status_t > cp_status = cp_status_t::cp_init;
     std::atomic< int > enter_cnt;
     bool cp_trigger_waiting = false; // it is waiting for previous cp to complete
 
     cp_id_base() : enter_cnt(0){};
     std::string to_string() {
-        std::string str = "cp_state:" + std::to_string(cp_state.load()) + "enter_cnt" + std::to_string(enter_cnt);
-        return str;
+        return fmt::format("[cp_status={}, enter_cnt={}]", enum_name(cp_status.load()), enter_cnt.load());
     }
 };
 
@@ -74,7 +73,7 @@ public:
     /* @timeo :- Timer in milliseconds to trigger a checkpoint. */
     CheckPoint(int timeo) {
         m_cur_cp_id = new cp_id_type();
-        m_cur_cp_id->cp_state = cp_status_t::cp_io_ready;
+        m_cur_cp_id->cp_status = cp_status_t::cp_io_ready;
         /* TODO :- integrate with io mgr to start a timer */
     }
 
@@ -98,7 +97,7 @@ public:
         rcu_read_lock();
         auto cp_id = get_cur_cp_id();
         cp_id->enter_cnt++;
-        assert(cp_id->cp_state == cp_status_t::cp_io_ready || cp_id->cp_state == cp_status_t::cp_trigger);
+        assert(cp_id->cp_status == cp_status_t::cp_io_ready || cp_id->cp_status == cp_status_t::cp_trigger);
         rcu_read_unlock();
 
         return cp_id;
@@ -117,10 +116,10 @@ public:
      * id :- cp_id returned in cp_enter()
      */
     void cp_io_exit(cp_id_type* id) {
-        assert(id->cp_state != cp_status_t::cp_start);
+        assert(id->cp_status != cp_status_t::cp_start);
         auto cnt = id->enter_cnt.fetch_sub(1);
-        if (cnt == 1 && id->cp_state == cp_status_t::cp_prepare) {
-            id->cp_state = cp_status_t::cp_start;
+        if (cnt == 1 && id->cp_status == cp_status_t::cp_prepare) {
+            id->cp_status = cp_status_t::cp_start;
             cp_start(id);
         }
     }
@@ -130,7 +129,7 @@ public:
      */
     void cp_end(cp_id_type* id) {
         assert(in_cp_phase);
-        HS_ASSERT_CMP(DEBUG, id->cp_state, ==, cp_status_t::cp_start);
+        HS_ASSERT_CMP(DEBUG, id->cp_status, ==, cp_status_t::cp_start);
         in_cp_phase = false;
         LOGDEBUGMOD(cp, "cp ID completed {}", id->to_string());
         delete (id);
@@ -158,25 +157,25 @@ public:
         if (!ret) { return; }
 
         auto prev_cp_id = cp_io_enter();
-        prev_cp_id->cp_state = cp_status_t::cp_trigger;
+        prev_cp_id->cp_status = cp_status_t::cp_trigger;
         LOGDEBUGMOD(cp, "cp ID state {}", prev_cp_id->to_string());
 
         /* allocate a new cp */
         auto new_cp_id = new cp_id_type();
         cp_attach_prepare(prev_cp_id, new_cp_id);
-        new_cp_id->cp_state = cp_status_t::cp_io_ready;
+        new_cp_id->cp_status = cp_status_t::cp_io_ready;
         rcu_xchg_pointer(&m_cur_cp_id, new_cp_id);
         synchronize_rcu();
         // At this point we are sure that there is no thread working on prev_cp_id without incrementing the cp_enter cnt
 
-        prev_cp_id->cp_state = cp_status_t::cp_prepare;
+        prev_cp_id->cp_status = cp_status_t::cp_prepare;
 
         cp_io_exit(prev_cp_id);
     }
 
     void trigger_cp(cp_id_type* id) {
         id->cp_trigger_waiting = true;
-        assert(id->cp_state != cp_status_t::cp_start);
+        assert(id->cp_status != cp_status_t::cp_start);
         trigger_cp();
     }
 

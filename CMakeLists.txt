@@ -40,6 +40,7 @@ if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
   endif()
 endif()
 
+message("Building with Malloc Impl = " ${MALLOC_IMPL})
 
 include(${CONAN_SISL_ROOT}/cmake/settings_gen.cmake)
 
