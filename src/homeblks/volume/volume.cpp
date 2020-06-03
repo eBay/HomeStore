@@ -90,6 +90,13 @@ Volume::Volume(const vol_params& params) :
 Volume::Volume(meta_blk* mblk_cookie, sisl::aligned_unique_ptr< vol_sb_hdr > sb) :
         m_metrics(sb->vol_name), m_sb(std::move(sb)), m_indx_mgr_destroy_started(false), m_sb_cookie(mblk_cookie) {
     m_state = m_sb->state;
+    /* this counter is decremented later when this volume become part of a cp. until then shutdown is
+     * not allowed.
+     */
+    ++home_blks_ref_cnt;
+    /* we don't need to check for shutdown unlike volume create. This constructor is called in recovery. We don't
+     * allow shutdown until recovery is not completed.
+     */
     m_hb = HomeBlks::safe_instance();
     m_read_blk_tracker = std::make_unique< Blk_Read_Tracker >(
         m_sb->vol_name, m_sb->uuid, std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
