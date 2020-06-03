@@ -22,7 +22,6 @@ void MetaBlkMgr::start(blk_store_t* sb_blk_store, sb_blkstore_blob* blob, bool i
 void MetaBlkMgr::stop() { del_instance(); }
 
 void MetaBlkMgr::cache_clear() {
-    std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
     for (auto it = m_meta_blks.cbegin(); it != m_meta_blks.cend(); it++) {
         for (auto it_m = it->second.cbegin(); it_m != it->second.cend(); it_m++) {
             iomanager.iobuf_free((uint8_t*)(it_m->second));
@@ -42,14 +41,14 @@ void MetaBlkMgr::cache_clear() {
 }
 
 MetaBlkMgr::~MetaBlkMgr() {
+    std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
     cache_clear();
 
     // de-register all subsystem;
-    for (auto& x : m_sub_info) {
-        deregister_handler(x.first);
+    for (auto it = m_sub_info.cbegin(); it != m_sub_info.end(); it++) {
+        m_sub_info.erase(it);
     }
 
-    std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
     m_sub_info.clear();
 
     iomanager.iobuf_free((uint8_t*)m_ssb);
@@ -130,10 +129,9 @@ void MetaBlkMgr::write_ssb() {
 }
 
 void MetaBlkMgr::scan_meta_blks() {
-    cache_clear();
-
     // take a look so that before scan is complete, no add/remove/update operations will be allowed;
     std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
+    cache_clear();
     auto bid = m_ssb->next_blkid;
 
     while (bid.to_integer() != BlkId::invalid_internal_id()) {
