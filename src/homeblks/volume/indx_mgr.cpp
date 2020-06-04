@@ -89,11 +89,11 @@ IndxCP::IndxCP() : CheckPoint(10) {
 
 IndxCP::~IndxCP() {}
 
-void IndxCP::cp_start(homeblks_cp_id* id) {
-    iomanager.run_in_specific_thread(IndxMgr::get_thread_id(), [this, id]() {
+void IndxCP::cp_start(indx_cp_id* id) {
+    iomanager.run_on(IndxMgr::get_thread_id(), [this, id](io_thread_addr_t addr) {
         ++id->ref_cnt;
         for (auto it = id->vol_id_list.begin(); it != id->vol_id_list.end(); ++it) {
-            if (it->second != nullptr && it->second->flags == cp_state::active_cp) {
+            if (it->second != nullptr && (it->second->state() == cp_state::active_cp)) {
                 ++id->snt_cnt;
                 ++id->ref_cnt;
                 auto indx_mgr = it->second->vol->get_indx_mgr();
@@ -248,7 +248,7 @@ void IndxMgr::init() {
                                                        [](void* cookie) { trigger_homeblks_cp(nullptr, false); });
     auto sthread = sisl::named_thread("indx_mgr", []() mutable {
         iomanager.run_io_loop(false, nullptr, [](bool is_started) {
-            if (is_started) IndxMgr::m_thread_id = iomanager.my_io_thread_id();
+            if (is_started) IndxMgr::m_thread_id = iomanager.iothread_self();
         });
     });
     sthread.detach();
@@ -707,8 +707,8 @@ void IndxMgr::destroy(indxmgr_stop_cb cb) {
             add_prepare_cb_list([this](vol_cp_id_ptr cur_vol_id, homeblks_cp_id* hb_id, homeblks_cp_id* new_hb_id) {
                 /* suspend current cp */
                 cur_vol_id->flags = cp_state::suspend_cp;
-                iomanager.run_in_specific_thread(m_thread_id,
-                                                 [this, cur_vol_id]() { this->destroy_indx_tbl(cur_vol_id); });
+                iomanager.run_on(m_thread_id,
+                                 [this, cur_vol_id](io_thread_addr_t addr) { this->destroy_indx_tbl(cur_vol_id); });
             });
         }));
 }
@@ -826,7 +826,7 @@ uint64_t IndxMgr::get_last_psn() { return m_last_cp_sb.vol_cp_sb.active_data_psn
 
 std::unique_ptr< IndxCP > IndxMgr::m_cp;
 std::atomic< bool > IndxMgr::m_shutdown_started;
-iomgr::io_thread_id_t IndxMgr::m_thread_id;
+iomgr::io_thread_t IndxMgr::m_thread_id;
 iomgr::timer_handle_t IndxMgr::m_homeblks_cp_timer_hdl = iomgr::null_timer_handle;
 void* IndxMgr::m_meta_blk = nullptr;
 std::once_flag IndxMgr::m_flag;

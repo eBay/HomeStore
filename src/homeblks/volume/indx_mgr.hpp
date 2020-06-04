@@ -86,11 +86,11 @@ struct destroy_journal_ent {
     indx_mgr_state state;
 };
 
-enum cp_state {
-    active_cp = 0,
-    suspend_cp, // cp is suspended
-    destroy_cp  // it is a destroy cp. It is moved to active only in blkalloc checkpoint
-};
+ENUM(cp_state, uint8_t,
+     active_cp,  // Active CP
+     suspend_cp, // cp is suspended
+     destroy_cp  // it is a destroy cp. It is moved to active only in blkalloc checkpoint
+);
 
 typedef std::function< void(bool success) > cp_done_cb;
 typedef cp_done_cb indxmgr_stop_cb;
@@ -142,7 +142,7 @@ struct vol_snap_info {
 /* During prepare flush we decide to take a CP out of active, diff or snap or all 3 cps*/
 struct vol_cp_id {
     std::shared_ptr< Volume > vol;
-    int flags = cp_state::active_cp;
+    cp_state flags = cp_state::active_cp;
 
     /* metrics */
     int64_t cp_cnt;
@@ -159,6 +159,8 @@ struct vol_cp_id {
             cp_cnt(cp_cnt),
             vol_size(0),
             ainfo(start_active_psn, free_blkid_list) {}
+
+    cp_state state() const { return flags; }
 };
 
 struct homeblks_cp_id : cp_id_base {
@@ -274,7 +276,7 @@ private:
     static std::unique_ptr< IndxCP > m_cp;
     static std::atomic< bool > m_shutdown_started;
     static bool m_shutdown_cmplt;
-    static iomgr::io_thread_id_t m_thread_id;
+    static iomgr::io_thread_t m_thread_id;
     static iomgr::timer_handle_t m_homeblks_cp_timer_hdl;
     static void* m_meta_blk;
     static std::once_flag m_flag;
@@ -387,8 +389,8 @@ public:
 
     /* reinitialize indx mgr. It is used in fake reboot */
     static void reinit() { m_shutdown_started = false; }
-    static iomgr::io_thread_id_t get_thread_id() { return m_thread_id; }
     static void write_homeblks_cp_sb(homeblks_cp_id* hb_id);
+    static const iomgr::io_thread_t& get_thread_id() { return m_thread_id; }
     static void meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
     static void flush_homeblks_free_blks(homeblks_cp_id* id);
 };

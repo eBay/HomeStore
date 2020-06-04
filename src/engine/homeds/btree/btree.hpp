@@ -169,7 +169,6 @@ public:
     }
 
     void do_common_init(bool is_recovery = false) {
-
         // TODO: Check if node_area_size need to include persistent header
         uint32_t node_area_size = btree_store_t::get_node_area_size(m_btree_store.get());
         m_btree_cfg.set_node_area_size(node_area_size);

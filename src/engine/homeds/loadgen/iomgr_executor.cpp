@@ -17,13 +17,13 @@ IOMgrExecutor::IOMgrExecutor(int num_threads, int num_priorities, uint32_t max_q
     m_write_cnt = 0;
     // m_ev_fd = eventfd(0, EFD_NONBLOCK);
 
-    iomanager.add_drive_interface(
-        std::dynamic_pointer_cast< iomgr::DriveInterface >(std::make_shared< iomgr::AioDriveInterface >()),
-        true /* is_default */);
-
     // exec start should be called before iomgr->start
     start();
     iomanager.start(1 /* total interfaces */, num_threads, false);
+
+    iomanager.add_drive_interface(
+        std::dynamic_pointer_cast< iomgr::DriveInterface >(std::make_shared< iomgr::AioDriveInterface >()),
+        true /* is_default */);
 }
 
 // It is called everytime a loadgen test case finishes;
@@ -96,7 +96,7 @@ void IOMgrExecutor::add(callback_t done_cb) {
     m_cq.blockingWrite(std::move(done_cb));
     m_write_cnt.fetch_add(1, std::memory_order_relaxed);
 
-    iomanager.run_on(iomgr::thread_regex::any_io, [this]() { process_new_request(); });
+    iomanager.run_on(iomgr::thread_regex::any_io, [this](iomgr::io_thread_addr_t addr) { process_new_request(); });
 }
 } // namespace loadgen
 } // namespace homeds

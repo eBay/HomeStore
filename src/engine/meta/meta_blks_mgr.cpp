@@ -8,6 +8,7 @@ namespace homestore {
 
 void MetaBlkMgr::start(blk_store_t* sb_blk_store, sb_blkstore_blob* blob, bool is_init) {
     m_sb_blk_store = sb_blk_store;
+    m_shutdown = false;
     if (is_init) {
         // write the meta blk manager's sb;
         init_ssb();
@@ -19,7 +20,9 @@ void MetaBlkMgr::start(blk_store_t* sb_blk_store, sb_blkstore_blob* blob, bool i
     recover();
 }
 
-void MetaBlkMgr::stop() { del_instance(); }
+void MetaBlkMgr::stop() {
+    del_instance();
+}
 
 void MetaBlkMgr::cache_clear() {
     std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
@@ -42,16 +45,11 @@ void MetaBlkMgr::cache_clear() {
 }
 
 MetaBlkMgr::~MetaBlkMgr() {
+    m_shutdown = true;
     cache_clear();
-
-    // de-register all subsystem;
-    for (auto& x : m_sub_info) {
-        deregister_handler(x.first);
-    }
 
     std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
     m_sub_info.clear();
-
     iomanager.iobuf_free((uint8_t*)m_ssb);
 }
 
@@ -298,6 +296,7 @@ void MetaBlkMgr::register_handler(meta_sub_type type, meta_blk_found_cb_t cb, me
 }
 
 void MetaBlkMgr::add_sub_sb(meta_sub_type type, void* context_data, uint64_t sz, void*& cookie) {
+    HS_ASSERT_CMP(RELEASE, m_shutdown, ==, false);
     HS_ASSERT(RELEASE, type.length() < MAX_SUBSYS_TYPE_LEN, "type len: {} should not exceed len: {}", type.length(),
               MAX_SUBSYS_TYPE_LEN);
     // not allowing add sub sb before registration
@@ -384,6 +383,7 @@ meta_blk* MetaBlkMgr::init_meta_blk(BlkId bid, meta_sub_type type, void* context
 // free after reboot
 //
 void MetaBlkMgr::write_meta_blk_ovf(BlkId& prev_bid, BlkId& bid, void* context_data, uint64_t sz, uint64_t offset) {
+    HS_ASSERT_CMP(RELEASE, m_shutdown, ==, false);
     HS_ASSERT(RELEASE, offset < sz, "offset:{} should be less than sz:{}", offset, sz);
 
     meta_blk_ovf_hdr* ovf_hdr =
@@ -487,10 +487,11 @@ void MetaBlkMgr::update_sub_sb(meta_sub_type type, void* context_data, uint64_t 
     // 2. allcate ovf_blkid if needed
     // 3. update the meta_blk
     //
+    HS_ASSERT_CMP(RELEASE, m_shutdown, ==, false);
     std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
     meta_blk* mblk = (meta_blk*)cookie;
 
-    LOGINFO("old sb: context_sz: {}, ovf_blkid: {}", (unsigned long)(mblk->hdr.h.context_sz),
+    HS_LOG(INFO, metablk, "old sb: context_sz: {}, ovf_blkid: {}", (unsigned long)(mblk->hdr.h.context_sz),
             mblk->hdr.h.ovf_blkid.to_string());
 
     // TODO: try to remove this lock as it is not required and we don't need to hold lock for concurrent write while
@@ -505,12 +506,13 @@ void MetaBlkMgr::update_sub_sb(meta_sub_type type, void* context_data, uint64_t 
     // write this meta blk to disk
     write_meta_blk_internal(mblk, context_data, sz);
 
-    LOGINFO("new sb: context_sz: {}, ovf_blkid: {}", mblk->hdr.h.context_sz, mblk->hdr.h.ovf_blkid.to_string());
+    HS_LOG(INFO, metablk, "new sb: context_sz: {}, ovf_blkid: {}", (uint64_t)mblk->hdr.h.context_sz, mblk->hdr.h.ovf_blkid.to_string());
 
     // no need to update cookie and in-memory meta blk map
 }
 
 std::error_condition MetaBlkMgr::remove_sub_sb(void* cookie) {
+    HS_ASSERT_CMP(RELEASE, m_shutdown, ==, false);
     meta_blk* rm_blk = (meta_blk*)cookie;
     BlkId bid = rm_blk->hdr.h.blkid;
     auto type = rm_blk->hdr.h.type;

@@ -158,7 +158,7 @@ public:
     }
 
     void kickstart_io() {
-        iomanager.run_on(iomgr::thread_regex::all_io, [this]() { process_new_request(); });
+        iomanager.run_on(iomgr::thread_regex::all_io, [this](iomgr::io_thread_addr_t addr) { process_new_request(); });
     }
 
     void wait_for_io_done() {

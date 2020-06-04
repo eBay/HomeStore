@@ -157,7 +157,7 @@ public:
         for (auto& sc : m_log_store_clients) {
             sc->m_nth_entry.store(0);
         }
-        iomanager.run_on(iomgr::thread_regex::all_io, [this]() { initial_io(); });
+        iomanager.run_on(iomgr::thread_regex::all_io, [this](io_thread_addr_t addr) { initial_io(); });
     }
 
     void initial_io() {
