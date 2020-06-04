@@ -69,7 +69,7 @@ class HomeBlks;
 using HomeBlksSafePtr = boost::intrusive_ptr< HomeBlks >;
 struct vol_cp_id;
 typedef std::shared_ptr< vol_cp_id > vol_cp_id_ptr;
-struct indx_cp_id;
+struct homeblks_cp_id;
 
 typedef std::map< boost::uuids::uuid, std::shared_ptr< homestore::Volume > > vol_map_t;
 
@@ -190,8 +190,8 @@ public:
     void init_done(std::error_condition err);
     void inc_sub_system_init_cnt();
     void attach_prepare_volume_cp_id(std::map< boost::uuids::uuid, vol_cp_id_ptr >* cur_id_map,
-                                     std::map< boost::uuids::uuid, vol_cp_id_ptr >* new_id_map, indx_cp_id* hb_id,
-                                     indx_cp_id* new_hb_id);
+                                     std::map< boost::uuids::uuid, vol_cp_id_ptr >* new_id_map, homeblks_cp_id* hb_id,
+                                     homeblks_cp_id* new_hb_id);
     void blkalloc_cp_start(std::shared_ptr< blkalloc_cp_id > id);
     void blkalloc_cp_done(std::shared_ptr< blkalloc_cp_id > id);
     void do_volume_shutdown(bool force);
