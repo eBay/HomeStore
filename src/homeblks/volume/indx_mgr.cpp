@@ -89,7 +89,7 @@ IndxCP::IndxCP() : CheckPoint(10) {
 
 IndxCP::~IndxCP() {}
 
-void IndxCP::cp_start(indx_cp_id* id) {
+void IndxCP::cp_start(homeblks_cp_id* id) {
     iomanager.run_on(IndxMgr::get_thread_id(), [this, id](io_thread_addr_t addr) {
         ++id->ref_cnt;
         for (auto it = id->vol_id_list.begin(); it != id->vol_id_list.end(); ++it) {
