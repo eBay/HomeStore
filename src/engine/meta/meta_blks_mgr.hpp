@@ -33,6 +33,7 @@ private:
     std::map< meta_sub_type, MetaSubRegInfo > m_sub_info; // map of callbacks
     meta_blk* m_last_mblk = nullptr;                      // last meta blk;
     meta_blk_sb* m_ssb = nullptr;                         // meta super super blk;
+    bool m_shutdown = false;
 
 public:
     /**
