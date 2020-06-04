@@ -31,8 +31,7 @@ struct mem_btree_node_header {
 };
 
 #define MemBtreeNode BtreeNode< btree_store_type::MEM_BTREE, K, V, InteriorNodeType, LeafNodeType >
-#define MemBtreeStore                                                                                                  \
-    BtreeStore< btree_store_type::MEM_BTREE, K, V, InteriorNodeType, LeafNodeType >
+#define MemBtreeStore BtreeStore< btree_store_type::MEM_BTREE, K, V, InteriorNodeType, LeafNodeType >
 
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
 class MemBtreeStore {
@@ -70,8 +69,8 @@ public:
 
     static boost::intrusive_ptr< MemBtreeNode >
     alloc_node(MemBtreeStore* store, bool is_leaf,
-               bool &is_new_allocation, // indicates if allocated node is same as copy_from
-               boost::intrusive_ptr< MemBtreeNode > copy_from = nullptr) {
+               bool& is_new_allocation, // indicates if allocated node is same as copy_from
+               const boost::intrusive_ptr< MemBtreeNode >& copy_from = nullptr) {
         if (copy_from != nullptr) {
             is_new_allocation = false;
             return copy_from;
@@ -123,8 +122,8 @@ public:
         return btree_status_t::success;
     }
 
-    static void free_node(MemBtreeStore* store, boost::intrusive_ptr< MemBtreeNode > bn,
-                          bool mem_only, btree_cp_id_ptr cp_id) {
+    static void free_node(MemBtreeStore* store, boost::intrusive_ptr< MemBtreeNode > bn, bool mem_only,
+                          btree_cp_id_ptr cp_id) {
         auto mbh = (mem_btree_node_header*)bn.get();
         if (mbh->refcount.decrement_testz()) {
             // TODO: Access the VariantNode area and call its destructor as well
@@ -192,11 +191,11 @@ public:
             deallocate_mem((uint8_t*)bn);
         }
     }
-    
-    static void cp_start(MemBtreeStore *store, btree_cp_id_ptr cp_id, cp_comp_callback cb) {}
-    static void truncate(MemBtreeStore *store, btree_cp_id_ptr cp_id) {}
+
+    static void cp_start(MemBtreeStore* store, btree_cp_id_ptr cp_id, cp_comp_callback cb) {}
+    static void truncate(MemBtreeStore* store, btree_cp_id_ptr cp_id) {}
     static void cp_done(trigger_cp_callback cb) {}
-    static void destroy_done(MemBtreeStore *store) {}
+    static void destroy_done(MemBtreeStore* store) {}
     static void flush_free_blks(MemBtreeStore* store, btree_cp_id_ptr btree_id,
                                 std::shared_ptr< homestore::blkalloc_cp_id >& blkalloc_id) {}
     static btree_status_t write_node_sync(MemBtreeStore* store, boost::intrusive_ptr< MemBtreeNode > bn) {

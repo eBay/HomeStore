@@ -61,9 +61,7 @@ public:
         m_blkstore->alloc_blk(bid);
     }
 
-    void cp_done_store(btree_cp_id_ptr cp_id) {
-        cp_id->cb(cp_id);
-    }
+    void cp_done_store(btree_cp_id_ptr cp_id) { cp_id->cb(cp_id); }
 
     /* It attaches the new CP and prepare for cur cp flush */
     static btree_cp_id_ptr attach_prepare_cp(SSDBtreeStore* store, btree_cp_id_ptr cur_cp_id, bool is_last_cp) {
@@ -106,9 +104,7 @@ public:
             HomeLogStoreMgr::instance().open_log_store(
                 sb.journal_id, ([this](std::shared_ptr< HomeLogStore > logstore) {
                     m_journal = logstore;
-                    m_journal->register_log_found_cb(([this](logstore_seq_num_t seqnum, log_buffer buf, void* mem) {
-                        this->log_found(seqnum, buf, mem);
-                    }));
+                    m_journal->register_log_found_cb(bind_this(SSDBtreeStore::log_found, 3));
                 }));
         } else {
             m_journal = HomeLogStoreMgr::instance().create_new_log_store();
@@ -166,7 +162,7 @@ public:
         sisl::blob b(mem, size);
         m_journal->append_async(b, mem, ([this, cp_id](logstore_seq_num_t seq_num, bool status, void* cookie) {
                                     auto hdr = btree_journal_entry::get_entry_hdr((uint8_t*)cookie);
-                                    if (hdr->op == BTREE_CREATE) {
+                                    if (hdr->op == journal_op::BTREE_CREATE) {
                                         /* we set disk bitmap later when btree root node is persisted */
                                         free(cookie);
                                         try_cp_start(cp_id);
@@ -299,8 +295,8 @@ public:
         return btree_status_t::success;
     }
 
-    static btree_status_t write_node(SSDBtreeStore* store, boost::intrusive_ptr< SSDBtreeNode > bn,
-                                     boost::intrusive_ptr< SSDBtreeNode > dependent_bn, btree_cp_id_ptr cp_id) {
+    static btree_status_t write_node(SSDBtreeStore* store, const boost::intrusive_ptr< SSDBtreeNode >& bn,
+                                     const boost::intrusive_ptr< SSDBtreeNode >& dependent_bn, btree_cp_id_ptr cp_id) {
         homestore::BlkId blkid(bn->get_node_id().m_id);
 
         auto physical_node = (LeafPhysicalNode*)(bn->at_offset(0).bytes);
@@ -310,7 +306,7 @@ public:
         return btree_status_t::success;
     }
 
-    static btree_status_t refresh_node(SSDBtreeStore* store, boost::intrusive_ptr< SSDBtreeNode > bn,
+    static btree_status_t refresh_node(SSDBtreeStore* store, const boost::intrusive_ptr< SSDBtreeNode >& bn,
                                        bool is_write_modifiable, btree_cp_id_ptr cp_id) {
 
         /* add the latest request pending on this node */

@@ -45,20 +45,20 @@ public:
 
     static BtreeNodePtr alloc_node(btree_store_t* store, bool is_leaf,
                                    bool& is_new_allocation, // indicates if allocated node is same as copy_from
-                                   BtreeNodePtr copy_from = nullptr);
+                                   const BtreeNodePtr& copy_from = nullptr);
     static BtreeNodePtr read_node(btree_store_t* store, bnodeid_t id);
 
-    static btree_status_t write_node(btree_store_t* store, BtreeNodePtr bn, BtreeNodePtr dependent_bn,
+    static btree_status_t write_node(btree_store_t* store, const BtreeNodePtr& bn, const BtreeNodePtr& dependent_bn,
                                      btree_cp_id_ptr cp_id);
-    static void free_node(btree_store_t* store, BtreeNodePtr bn, bool mem_only, btree_cp_id_ptr cp_id);
-    static btree_status_t refresh_node(btree_store_t* store, BtreeNodePtr bn, bool is_write_modifiable,
+    static void free_node(btree_store_t* store, const BtreeNodePtr& bn, bool mem_only, btree_cp_id_ptr cp_id);
+    static btree_status_t refresh_node(btree_store_t* store, const BtreeNodePtr& bn, bool is_write_modifiable,
                                        btree_cp_id_ptr cp_id);
 
-    static void swap_node(btree_store_t* store, BtreeNodePtr node1, BtreeNodePtr node2);
-    static void copy_node(btree_store_t* store, BtreeNodePtr copy_from, BtreeNodePtr copy_to);
+    static void swap_node(btree_store_t* store, const BtreeNodePtr& node1, const BtreeNodePtr& node2);
+    static void copy_node(btree_store_t* store, const BtreeNodePtr& copy_from, const BtreeNodePtr& copy_to);
     static void ref_node(btree_node_t* bn);
     static bool deref_node(btree_node_t* bn);
-    static btree_status_t write_node_sync(btree_store_t* store, BtreeNodePtr bn);
+    static btree_status_t write_node_sync(btree_store_t* store, const BtreeNodePtr& bn);
     static void cp_done(trigger_cp_callback cb);
     static void create_done(btree_store_t* store, bnodeid_t m_root_node);
 };

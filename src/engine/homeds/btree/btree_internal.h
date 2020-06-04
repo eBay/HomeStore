@@ -81,7 +81,7 @@ struct blkalloc_cp_id;
  *---------------------------------------------------------------------------------------------------------------------------------------------
  */
 // clang-format on
-enum journal_op { BTREE_SPLIT = 1, BTREE_MERGE, BTREE_CREATE };
+enum class journal_op : uint8_t { BTREE_SPLIT = 1, BTREE_MERGE, BTREE_CREATE };
 
 #define INVALID_SEQ_ID UINT64_MAX
 struct btree_cp_id;
@@ -118,7 +118,7 @@ struct btree_journal_entry_hdr {
     uint8_t new_nodes_size;
     uint8_t new_key_size;
     int64_t cp_cnt;
-};
+} __attribute__((__packed__));
 
 struct btree_journal_entry {
     static btree_journal_entry_hdr* get_entry_hdr(uint8_t* mem) { return ((btree_journal_entry_hdr*)mem); }
@@ -525,7 +525,8 @@ public:
 
 protected:
     BRangeRequest(BRangeCBParam* cb_param, BtreeSearchRange& search_range) :
-            m_cb_param(cb_param), m_input_range(search_range) {}
+            m_cb_param(cb_param),
+            m_input_range(search_range) {}
 
     BRangeCBParam* m_cb_param;      // additional parameters that is passed to callback
     BtreeSearchRange m_input_range; // Btree range filter originally provided
@@ -593,7 +594,9 @@ public:
     BtreeUpdateRequest(BtreeSearchRange& search_range, match_item_cb_update_t< K, V > cb = nullptr,
                        get_size_needed_cb_t< K, V > size_cb = nullptr,
                        BRangeUpdateCBParam< K, V >* cb_param = nullptr) :
-            BRangeRequest(cb_param, search_range), m_cb(cb), m_size_cb(size_cb) {}
+            BRangeRequest(cb_param, search_range),
+            m_cb(cb),
+            m_size_cb(size_cb) {}
 
     match_item_cb_update_t< K, V > callback() const { return m_cb; }
     BRangeUpdateCBParam< K, V >* get_cb_param() const { return (BRangeUpdateCBParam< K, V >*)m_cb_param; }
