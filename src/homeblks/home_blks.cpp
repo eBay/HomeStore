@@ -128,8 +128,8 @@ std::shared_ptr< blkalloc_cp_id > HomeBlks::blkalloc_attach_prepare_cp(std::shar
 }
 
 void HomeBlks::attach_prepare_volume_cp_id(std::map< boost::uuids::uuid, vol_cp_id_ptr >* cur_id_map,
-                                           std::map< boost::uuids::uuid, vol_cp_id_ptr >* new_id_map, indx_cp_id* hb_id,
-                                           indx_cp_id* new_hb_id) {
+                                           std::map< boost::uuids::uuid, vol_cp_id_ptr >* new_id_map,
+                                           homeblks_cp_id* hb_id, homeblks_cp_id* new_hb_id) {
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
 
 #ifndef NDEBUG

@@ -178,12 +178,18 @@ public:
  *        replay this entry. otherwise there will be memory leak
  *  Note :- Allocate blk should always be done in two phase if auto recovery is set.
  *
+ *
  * Blk allocator has two recoveries auto recovery and manual recovery
- * 1. auto recovery :- in use bit map is persisted. Consumers only have to replay journal. It is used by volume and
+ * 1. auto recovery :- disk bit map is persisted. Consumers only have to replay journal. It is used by volume and
  * btree.
- * 2. manual recovery :- in use bit map is not persisted. Consumers have to scan its index table to set blks allocated.
+ * 2. manual recovery :- disk bit map is not persisted. Consumers have to scan its index table to set blks allocated.
  * It is used meta blk manager.
  * Base class manages disk_bitmap as it is common to all blk allocator.
+ *
+ * Disk bitmap is persisted only during checkpoints. These two things always be true while disk bitmap is persisting
+ * 1. It contains atleast all the blks allocated upto that checkpoint. It can contain blks allocated for next
+ *    checkpoints also.
+ * 2. It contains blks freed only upto that checkpoint.
  */
 
 class BlkAllocator {
@@ -230,11 +236,10 @@ public:
         if (!m_auto_recovery && m_inited) { return BLK_ALLOC_FAILED; }
         BlkAllocPortion* portion = blknum_to_portion(in_bid.get_id());
         portion->lock();
-        /* In both recovery and post recovery phase we should never try to allocate
-         * the bid which is already allcated.
-         */
-        BLKALLOC_ASSERT(RELEASE, get_disk_bm()->is_bits_reset(in_bid.get_id(), in_bid.get_nblks()),
-                        "Expected disk blks to reset");
+        if (m_inited) {
+            BLKALLOC_ASSERT(RELEASE, get_disk_bm()->is_bits_reset(in_bid.get_id(), in_bid.get_nblks()),
+                            "Expected disk blks to reset");
+        }
         get_disk_bm()->set_bits(in_bid.get_id(), in_bid.get_nblks());
         portion->unlock();
         return BLK_ALLOC_SUCCESS;

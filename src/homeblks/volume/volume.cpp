@@ -112,15 +112,15 @@ void Volume::init() {
             std::bind(&Volume::pending_read_blk_cb, this, std::placeholders::_1, std::placeholders::_2));
         m_sb = sisl::make_aligned_unique< vol_sb_hdr >(HS_STATIC_CONFIG(disk_attr.align_size), m_params.page_size,
                                                        m_params.size, (const char*)m_params.vol_name, m_params.uuid,
-                                                       m_indx_mgr->get_active_sb());
+                                                       m_indx_mgr->get_static_sb());
         set_state(vol_state::ONLINE, true);
         seq_Id = m_indx_mgr->get_last_psn();
         m_indx_mgr->create_done();
     } else {
         /* recovery */
-        auto active_sb = m_sb->active_sb;
+        auto indx_mgr_sb = m_sb->indx_mgr_sb;
         m_indx_mgr = new IndxMgr(
-            shared_from_this(), active_sb,
+            shared_from_this(), indx_mgr_sb,
             std::bind(&Volume::process_indx_completions, this, std::placeholders::_1, std::placeholders::_2),
             std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1),
             std::bind(&Volume::pending_read_blk_cb, this, std::placeholders::_1, std::placeholders::_2));
@@ -625,7 +625,8 @@ size_t Volume::call_batch_completion_cbs() {
     return count;
 }
 
-vol_cp_id_ptr Volume::attach_prepare_volume_cp_id(vol_cp_id_ptr cur_id, indx_cp_id* hb_id, indx_cp_id* new_hb_id) {
+vol_cp_id_ptr Volume::attach_prepare_volume_cp_id(vol_cp_id_ptr cur_id, homeblks_cp_id* hb_id,
+                                                  homeblks_cp_id* new_hb_id) {
     return (m_indx_mgr->attach_prepare_vol_cp(cur_id, hb_id, new_hb_id));
 }
 
