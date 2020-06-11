@@ -1,4 +1,3 @@
-include_directories (BEFORE ../../../engine)
 set(VOLUME_SOURCE_FILES
        volume.cpp
        blk_read_tracker.cpp

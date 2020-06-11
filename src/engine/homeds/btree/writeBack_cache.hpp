@@ -2,9 +2,9 @@
 #define WRITEBACK_CACHE_HPP
 
 #include <vector>
-#include <common/error.h>
-#include <blkstore/blkstore.hpp>
-#include <homeds/btree/btree_internal.h>
+#include <engine/common/error.h>
+#include <engine/blkstore/blkstore.hpp>
+#include <engine/homeds/btree/btree_internal.h>
 #include <wisr/wisr_ds.hpp>
 #include <utility/thread_factory.hpp>
 
