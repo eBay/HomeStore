@@ -1,10 +1,10 @@
 #include <fds/malloc_helper.hpp>
 #include "home_blks.hpp"
 #include "volume/volume.hpp"
-#include <device/device.h>
-#include <device/virtual_dev.hpp>
+#include <engine/device/device.h>
+#include <engine/device/virtual_dev.hpp>
 #include <cassert>
-#include <device/blkbuffer.hpp>
+#include <engine/device/blkbuffer.hpp>
 #include <iostream>
 #include <fstream>
 #include <stdexcept>

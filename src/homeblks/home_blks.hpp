@@ -15,9 +15,9 @@
 #include <metrics/metrics.hpp>
 #include <settings/settings.hpp>
 #include "homeblks_config.hpp"
-#include <homeds/btree/writeBack_cache.hpp>
+#include <engine/homeds/btree/writeBack_cache.hpp>
 #include <fds/sparse_vector.hpp>
-#include "meta/meta_blks_mgr.hpp"
+#include "engine/meta/meta_blks_mgr.hpp"
 
 #ifndef DEBUG
 extern bool same_value_gen;
