@@ -637,7 +637,7 @@ public:
         m_bt = MappingBtreeDeclType::create_btree(btree_sb, btree_cfg, btree_cp_sb);
     }
 
-    ~mapping() { delete m_bt; }
+    virtual ~mapping() { delete m_bt; }
 
     virtual void create_done() override { m_bt->create_done(); }
 

@@ -49,7 +49,7 @@ private:
     static HomeStoreBaseSafePtr _instance;
 
 public:
-    virtual ~HomeStoreBase() = 0;
+    virtual ~HomeStoreBase() = default;
     friend void intrusive_ptr_add_ref(HomeStoreBase* hs) { hs->m_usage_counter.increment(1); }
     friend void intrusive_ptr_release(HomeStoreBase* hs) {
         // If there is only one reference remaining after decrementing, then we are done with shutdown, cleanup the
@@ -79,7 +79,7 @@ template < typename IndexBuffer >
 class HomeStore : public HomeStoreBase {
 public:
     HomeStore() = default;
-    ~HomeStore() = default;
+    virtual ~HomeStore() = default;
 
     void init(const hs_input_params& input) {
         auto& hs_config = HomeStoreStaticConfig::instance();

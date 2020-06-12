@@ -56,7 +56,7 @@ class indx_tbl {
     /* these virtual functions should be defined by the consumer */
 public:
     /* It is called when its btree consumer has successfully stored the btree superblock */
-    virtual ~indx_tbl() = 0;
+    virtual ~indx_tbl() = default;
     virtual void create_done() = 0;
     virtual btree_super_block get_btree_sb() = 0;
     virtual btree_status_t update_active_indx_tbl(indx_req* ireq, btree_cp_id_ptr btree_id) = 0;

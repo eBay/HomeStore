@@ -188,9 +188,6 @@ public:
 
     void init_done(std::error_condition err);
     void inc_sub_system_init_cnt();
-    virtual void attach_prepare_volume_cp_id(std::map< boost::uuids::uuid, vol_cp_id_ptr >* cur_id_map,
-                                             std::map< boost::uuids::uuid, vol_cp_id_ptr >* new_id_map,
-                                             homeblks_cp_id* hb_id, homeblks_cp_id* new_hb_id);
     virtual void attach_prepare_indx_cp_id(std::map< boost::uuids::uuid, indx_cp_id_ptr >* cur_id_map,
                                            std::map< boost::uuids::uuid, indx_cp_id_ptr >* new_id_map, hs_cp_id* hs_id,
                                            hs_cp_id* new_hs_id) override;
