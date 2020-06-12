@@ -1,5 +1,4 @@
 include_directories (BEFORE ..)
-include_directories (BEFORE ../engine)
 add_subdirectory(volume)
 
 set(HOMEBLKS_SOURCE_FILES
