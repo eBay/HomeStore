@@ -1,4 +1,3 @@
-#include <fds/malloc_helper.hpp>
 #include "home_blks.hpp"
 #include "volume/volume.hpp"
 #include <device/device.h>
@@ -26,7 +25,6 @@ REGISTER_METABLK_SUBSYSTEM(homeblks, "HOMEBLK", HomeBlks::meta_blk_found_cb, Hom
 bool same_value_gen = false;
 #endif
 
-HomeBlksSafePtr HomeBlks::_instance = nullptr;
 std::string HomeBlks::version = PACKAGE_VERSION;
 thread_local std::vector< std::shared_ptr< Volume > >* HomeBlks::s_io_completed_volumes = nullptr;
 
@@ -45,20 +43,17 @@ VolInterface* HomeBlks::init(const init_params& cfg, bool force_reinit) {
 
     static std::once_flag flag1;
     try {
-        if (force_reinit) {
-            _instance = HomeBlksSafePtr(new HomeBlks(cfg));
-            Volume::reinit();
-        } else {
             std::call_once(flag1, [&cfg]() {
 #ifndef NDEBUG
                 LOGINFO("HomeBlks DEBUG version: {}", HomeBlks::version);
 #else
                 LOGINFO("HomeBlks RELEASE version: {}", HomeBlks::version);
 #endif
-                _instance = HomeBlksSafePtr(new HomeBlks(cfg));
+                auto instance =
+                    boost::static_pointer_cast< homestore::HomeStoreBase >(HomeBlksSafePtr(new HomeBlks(cfg)));
+                set_instance(boost::static_pointer_cast< homestore::HomeStoreBase >(instance));
             });
-        }
-        return (VolInterface*)(_instance.get());
+            return (VolInterface*)(HomeStoreBase::instance());
     } catch (const std::exception& e) {
         LOGERROR("{}", e.what());
         assert(0);
@@ -113,23 +108,10 @@ HomeBlks::HomeBlks(const init_params& cfg) : m_cfg(cfg), m_metrics("HomeBlks") {
     m_start_shutdown = false;
 }
 
-void HomeBlks::blkalloc_cp_start(std::shared_ptr< blkalloc_cp_id > id) {
-    get_data_blkstore()->blkalloc_cp_start(id);
-    get_index_blkstore()->blkalloc_cp_start(id);
-}
+void HomeBlks::attach_prepare_indx_cp_id(std::map< boost::uuids::uuid, indx_cp_id_ptr >* cur_id_map,
+                                         std::map< boost::uuids::uuid, indx_cp_id_ptr >* new_id_map, hs_cp_id* hs_id,
+                                         hs_cp_id* new_hs_id) {
 
-void HomeBlks::blkalloc_cp_done(std::shared_ptr< blkalloc_cp_id > id) {
-    get_data_blkstore()->blkalloc_cp_done(id);
-    get_index_blkstore()->blkalloc_cp_done(id);
-}
-
-std::shared_ptr< blkalloc_cp_id > HomeBlks::blkalloc_attach_prepare_cp(std::shared_ptr< blkalloc_cp_id > cur_cp_id) {
-    return (get_data_blkstore()->attach_prepare_cp(cur_cp_id));
-}
-
-void HomeBlks::attach_prepare_volume_cp_id(std::map< boost::uuids::uuid, vol_cp_id_ptr >* cur_id_map,
-                                           std::map< boost::uuids::uuid, vol_cp_id_ptr >* new_id_map,
-                                           homeblks_cp_id* hb_id, homeblks_cp_id* new_hb_id) {
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
 
 #ifndef NDEBUG
@@ -148,7 +130,7 @@ void HomeBlks::attach_prepare_volume_cp_id(std::map< boost::uuids::uuid, vol_cp_
         if (vol == nullptr) { continue; }
 
         /* get the cur cp id ptr */
-        vol_cp_id_ptr cur_cp_id_ptr = nullptr;
+        indx_cp_id_ptr cur_cp_id_ptr = nullptr;
         if (cur_id_map) {
             auto id_it = cur_id_map->find(it->first);
             if (id_it != cur_id_map->end()) {
@@ -158,11 +140,11 @@ void HomeBlks::attach_prepare_volume_cp_id(std::map< boost::uuids::uuid, vol_cp_
         }
 
         /* get the cur cp id ptr */
-        auto new_cp_id_ptr = vol->attach_prepare_volume_cp_id(cur_cp_id_ptr, hb_id, new_hb_id);
+        auto new_cp_id_ptr = vol->attach_prepare_volume_cp(cur_cp_id_ptr, hs_id, new_hs_id);
 
         if (new_cp_id_ptr) {
             bool happened{false};
-            std::map< boost::uuids::uuid, vol_cp_id_ptr >::iterator temp_it;
+            std::map< boost::uuids::uuid, indx_cp_id_ptr >::iterator temp_it;
             std::tie(temp_it, happened) = new_id_map->emplace(std::make_pair(it->first, new_cp_id_ptr));
             if (!happened) { throw std::runtime_error("Unknown bug"); }
         } else {
@@ -289,8 +271,10 @@ void HomeBlks::submit_io_batch() {
     call_multi_vol_completions();
 }
 
-HomeBlks* HomeBlks::instance() { return _instance.get(); }
-HomeBlksSafePtr HomeBlks::safe_instance() { return _instance; }
+HomeBlks* HomeBlks::instance() { return static_cast< HomeBlks* >(HomeStoreBase::instance()); }
+HomeBlksSafePtr HomeBlks::safe_instance() {
+    return boost::static_pointer_cast< HomeBlks >(HomeStoreBase::safe_instance());
+}
 
 void HomeBlks::superblock_init() {
     /* build the homeblks super block */

@@ -61,10 +61,6 @@ class Btree {
     typedef std::function< void() > destroy_btree_comp_callback;
 
 public:
-    struct btree_super_block {
-        bnodeid root_node;
-        typename btree_store_t::superblock store_sb;
-    } __attribute((packed));
 
 private:
     bnodeid_t m_root_node;
@@ -181,7 +177,7 @@ public:
         max_leaf_nodes += (100 * max_leaf_nodes) / 60; // Assume 60% btree full
 
         m_max_nodes = max_leaf_nodes + ((double)max_leaf_nodes * 0.05) + 1; // Assume 5% for interior nodes
-        btree_store_t::update_sb(m_btree_store.get(), m_sb.store_sb, &m_last_cp_sb, is_recovery);
+        btree_store_t::update_sb(m_btree_store.get(), m_sb, &m_last_cp_sb, is_recovery);
     }
 
     btree_status_t init() {

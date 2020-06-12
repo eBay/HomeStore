@@ -206,7 +206,7 @@ struct indx_mgr_cp_sb {
 /* this superblock is never changed once indx manager is created */
 struct indx_mgr_static_sb {
     logstore_id_t journal_id;
-    MappingBtreeDeclType::btree_super_block btree_sb;
+    btree_super_block btree_sb;
 } __attribute__((__packed__));
 
 class IndxCP : public CheckPoint< homeblks_cp_id > {

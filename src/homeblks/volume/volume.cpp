@@ -105,25 +105,25 @@ Volume::Volume(meta_blk* mblk_cookie, sisl::aligned_unique_ptr< vol_sb_hdr > sb)
 void Volume::init() {
     if (!m_sb) {
         /* first time create */
-        m_indx_mgr = new IndxMgr(
-            shared_from_this(), m_params,
+        m_indx_mgr = IndxMgr::make_IndxMgr(
+            get_uuid(), std::string(get_name()),
             std::bind(&Volume::process_indx_completions, this, std::placeholders::_1, std::placeholders::_2),
-            std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1),
-            std::bind(&Volume::pending_read_blk_cb, this, std::placeholders::_1, std::placeholders::_2));
+            std::bind(&Volume::create_indx_tbl, this));
         m_sb = sisl::make_aligned_unique< vol_sb_hdr >(HS_STATIC_CONFIG(disk_attr.align_size), m_params.page_size,
                                                        m_params.size, (const char*)m_params.vol_name, m_params.uuid,
                                                        m_indx_mgr->get_static_sb());
         set_state(vol_state::ONLINE, true);
         seq_Id = m_indx_mgr->get_last_psn();
+        /* it is called after superblock is persisted by volume */
         m_indx_mgr->create_done();
     } else {
         /* recovery */
         auto indx_mgr_sb = m_sb->indx_mgr_sb;
-        m_indx_mgr = new IndxMgr(
-            shared_from_this(), indx_mgr_sb,
+        m_indx_mgr = IndxMgr::make_IndxMgr(
+            get_uuid(), std::string(get_name()),
             std::bind(&Volume::process_indx_completions, this, std::placeholders::_1, std::placeholders::_2),
-            std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1),
-            std::bind(&Volume::pending_read_blk_cb, this, std::placeholders::_1, std::placeholders::_2));
+            std::bind(&Volume::create_indx_tbl, this),
+            std::bind(&Volume::recover_indx_tbl, this, std::placeholders::_1, std::placeholders::_2), indx_mgr_sb);
     }
     alloc_single_block_in_mem();
     assert(get_page_size() % HomeBlks::instance()->get_data_pagesz() == 0);
@@ -183,7 +183,22 @@ void Volume::destroy_internal() {
 /* It is called only once */
 void Volume::shutdown(indxmgr_stop_cb cb) { IndxMgr::shutdown(cb); }
 
-Volume::~Volume() { delete m_indx_mgr; }
+Volume::~Volume() {}
+
+indx_tbl* Volume::create_indx_tbl() {
+    auto pending_read_blk_cb =
+        std::bind(&Volume::pending_read_blk_cb, this, std::placeholders::_1, std::placeholders::_2);
+    auto tbl = new mapping(get_size(), get_page_size(), get_name(), IndxMgr::trigger_indx_cp, pending_read_blk_cb);
+    return static_cast< indx_tbl* >(tbl);
+}
+
+indx_tbl* Volume::recover_indx_tbl(btree_super_block& sb, btree_cp_superblock& cp_info) {
+    auto pending_read_blk_cb =
+        std::bind(&Volume::pending_read_blk_cb, this, std::placeholders::_1, std::placeholders::_2);
+    auto tbl = new mapping(get_size(), get_page_size(), get_name(), sb, IndxMgr::trigger_indx_cp, pending_read_blk_cb,
+                           &cp_info);
+    return static_cast< indx_tbl* >(tbl);
+}
 
 std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
     std::vector< BlkId > bid;
@@ -363,7 +378,7 @@ bool Volume::check_and_complete_req(const volume_req_ptr& vreq, const std::error
             } else {
                 vreq->state = volume_req_state::journal_io;
                 vreq->indx_start_time = Clock::now();
-                m_indx_mgr->update_indx(vreq);
+                m_indx_mgr->update_indx(boost::static_pointer_cast< indx_req >(vreq));
             }
         }
     } else if (vreq->state == volume_req_state::journal_io) {
@@ -423,18 +438,19 @@ void Volume::process_free_blk_callback(Free_Blk_Entry fbe) {
     THIS_VOL_LOG(DEBUG, volume, , "Freeing blks cb - bid: {}, offset: {}, nblks: {}, get_pagesz: {}",
                  fbe.m_blkId.to_string(), fbe.blk_offset(), fbe.blks_to_free(), get_page_size());
 
-    m_indx_mgr->free_blk(fbe);
+    m_indx_mgr->free_blk(fbe.m_cp_id, fbe);
 }
 
 /* when read happens on mapping btree, under read lock we mark blk so it does not get removed by concurrent writes
  */
 void Volume::pending_read_blk_cb(volume_req* vreq, BlkId& bid) {
     m_read_blk_tracker->insert(bid);
-    Free_Blk_Entry fbe(bid, 0, 0, nullptr, nullptr);
+    Free_Blk_Entry fbe(bid, 0, 0);
     vreq->push_fbe(fbe);
 }
 
-void Volume::process_indx_completions(const volume_req_ptr& vreq, std::error_condition err) {
+void Volume::process_indx_completions(const indx_req_ptr& ireq, std::error_condition err) {
+    auto vreq = boost::static_pointer_cast< volume_req >(ireq);
     assert(!vreq->is_read_op());
     assert(!vreq->is_sync());
 
@@ -495,11 +511,16 @@ void Volume::verify_csum(const volume_req_ptr& vreq) {
     }
 }
 
+mapping* Volume::get_active_indx() {
+    auto indx_tbl = m_indx_mgr->get_active_indx();
+    return (static_cast< mapping* >(indx_tbl));
+}
+
 std::error_condition Volume::read_indx(const volume_req_ptr& vreq,
                                        std::vector< std::pair< MappingKey, MappingValue > >& kvs) {
     /* get list of key values */
     COUNTER_INCREMENT(m_metrics, volume_outstanding_metadata_read_count, 1);
-    auto err = m_indx_mgr->get_active_indx()->get(vreq.get(), kvs);
+    auto err = get_active_indx()->get(vreq.get(), kvs);
     COUNTER_DECREMENT(m_metrics, volume_outstanding_metadata_read_count, 1);
     HISTOGRAM_OBSERVE(m_metrics, volume_map_read_latency, get_elapsed_time_us(vreq->io_start_time));
     if (err) {
@@ -534,9 +555,9 @@ volume_child_req_ptr Volume::create_vol_child_req(BlkId& bid, const volume_req_p
     return vc_req;
 }
 
-void Volume::print_tree() { m_indx_mgr->get_active_indx()->print_tree(); }
-bool Volume::verify_tree() { return (m_indx_mgr->get_active_indx()->verify_tree()); }
-void Volume::print_node(uint64_t blkid) { m_indx_mgr->get_active_indx()->print_node(blkid); }
+void Volume::print_tree() { get_active_indx()->print_tree(); }
+bool Volume::verify_tree() { return (get_active_indx()->verify_tree()); }
+void Volume::print_node(uint64_t blkid) { get_active_indx()->print_node(blkid); }
 
 std::error_condition Volume::alloc_blk(const volume_req_ptr& vreq, std::vector< BlkId >& bid) {
     blk_alloc_hints hints;
@@ -625,9 +646,8 @@ size_t Volume::call_batch_completion_cbs() {
     return count;
 }
 
-vol_cp_id_ptr Volume::attach_prepare_volume_cp_id(vol_cp_id_ptr cur_id, homeblks_cp_id* hb_id,
-                                                  homeblks_cp_id* new_hb_id) {
-    return (m_indx_mgr->attach_prepare_vol_cp(cur_id, hb_id, new_hb_id));
+indx_cp_id_ptr Volume::attach_prepare_volume_cp(indx_cp_id_ptr indx_id, hs_cp_id* hs_id, hs_cp_id* new_hs_id) {
+    return (m_indx_mgr->attach_prepare_indx_cp(indx_id, hs_id, new_hs_id));
 }
 
 #ifndef NDEBUG
@@ -670,14 +690,12 @@ void Volume::remove_sb() {
     MetaBlkMgr::instance()->remove_sub_sb(m_sb_cookie);
 }
 
-mapping* Volume::get_mapping_handle() { return (m_indx_mgr->get_active_indx()); }
-
 void Volume::migrate_sb() {
     // auto inst = MetaBlkMgr::instance();
     // inst->add_sub_sb(meta_sub_type::VOLUME, (void*)(m_sb->ondisk_sb), sizeof(vol_ondisk_sb), &(m_sb->cookie));
 }
 
-void Volume::recovery_start_phase1() { m_indx_mgr->recovery_start_phase1(shared_from_this()); }
+void Volume::recovery_start_phase1() { m_indx_mgr->recovery_start_phase1(); }
 void Volume::recovery_start_phase2() {
     m_indx_mgr->recovery_start_phase2();
     seq_Id = m_indx_mgr->get_last_psn();

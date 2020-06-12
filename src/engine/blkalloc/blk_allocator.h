@@ -248,13 +248,13 @@ public:
     void free(const BlkId& b, std::shared_ptr< blkalloc_cp_id > id) {
         /* this api should be called only when auto recovery is enabled */
         assert(m_auto_recovery);
-        m_free_blkid_list.push_back(b);
         BlkAllocPortion* portion = blknum_to_portion(b.get_id());
         portion->lock();
         if (m_inited) {
             /* During recovery we might try to free the entry which is already freed while replaying the journal,
              * This assert is valid only post recovery.
              */
+            m_free_blkid_list.push_back(b);
             BLKALLOC_ASSERT(RELEASE, get_disk_bm()->is_bits_set(b.get_id(), b.get_nblks()),
                             "Expected disk bits to set");
         }

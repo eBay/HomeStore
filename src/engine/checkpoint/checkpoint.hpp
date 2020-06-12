@@ -32,7 +32,7 @@
  * CP start :- It start the flush when all ios have called cp_io_exit on that cp
  * CP end :- when cp flush is completed. It frees the CP id.
  */
-
+typedef std::function< void(bool success) > cp_done_cb;
 namespace homestore {
 SDS_LOGGING_DECL(cp)
 
@@ -58,6 +58,9 @@ struct cp_id_base {
     std::string to_string() {
         return fmt::format("[cp_status={}, enter_cnt={}]", enum_name(cp_status.load()), enter_cnt.load());
     }
+
+    /* callback when cp is done. This list is protected by trigger_cp_mtx */
+    std::vector< cp_done_cb > cb_list;
 };
 
 /* It is responsible to trigger the checkpoints when all concurrent IOs are completed.
@@ -68,6 +71,7 @@ class CheckPoint {
 private:
     cp_id_type* m_cur_cp_id = nullptr;
     std::atomic< bool > in_cp_phase = false;
+    std::mutex trigger_cp_mtx;
 
 public:
     /* @timeo :- Timer in milliseconds to trigger a checkpoint. */
@@ -132,6 +136,9 @@ public:
         HS_ASSERT_CMP(DEBUG, id->cp_status, ==, cp_status_t::cp_start);
         in_cp_phase = false;
         LOGDEBUGMOD(cp, "cp ID completed {}", id->to_string());
+        for (uint32_t i = 0; i < id->cb_list.size(); ++i) {
+            id->cb_list[i](true);
+        }
         delete (id);
 
         /* Once a cp is done, try to check and release exccess memory if need be */
@@ -146,15 +153,30 @@ public:
         cp_io_exit(cur_cp_id);
     }
 
-    /* Trigger a checkpoint it is not in cp phase
+    void attach_cb(cp_id_type* cp_id, cp_done_cb cb) {
+        std::unique_lock< std::mutex > lk(trigger_cp_mtx);
+        assert(cp_id->cp_status != cp_status_t::cp_prepare);
+        cp_id->cb_list.push_back(cb);
+    }
+
+    /* Trigger a checkpoint if it is not in cp phase. It makes sure to attach a callback to a CP who hasn't called the
+     * attach_prepare yet.
      */
-    void trigger_cp() {
+    void trigger_cp(cp_done_cb cb = nullptr) {
 
         /* check the state of previous CP */
         bool expected = false;
 
         auto ret = in_cp_phase.compare_exchange_strong(expected, true);
-        if (!ret) { return; }
+        if (!ret) {
+            std::unique_lock< std::mutex > lk(trigger_cp_mtx);
+            auto cp_id = cp_io_enter();
+            assert(cp_id->cp_status != cp_status_t::cp_prepare);
+            if (cb) { cp_id->cb_list.push_back(cb); }
+            cp_id->cp_trigger_waiting = true;
+            cp_io_exit(cp_id);
+            return;
+        }
 
         auto prev_cp_id = cp_io_enter();
         prev_cp_id->cp_status = cp_status_t::cp_trigger;
@@ -162,13 +184,16 @@ public:
 
         /* allocate a new cp */
         auto new_cp_id = new cp_id_type();
-        cp_attach_prepare(prev_cp_id, new_cp_id);
-        new_cp_id->cp_status = cp_status_t::cp_io_ready;
-        rcu_xchg_pointer(&m_cur_cp_id, new_cp_id);
-        synchronize_rcu();
+        {
+            std::unique_lock< std::mutex > lk(trigger_cp_mtx);
+            cp_attach_prepare(prev_cp_id, new_cp_id);
+            prev_cp_id->cp_status = cp_status_t::cp_prepare;
+            new_cp_id->cp_status = cp_status_t::cp_io_ready;
+            rcu_xchg_pointer(&m_cur_cp_id, new_cp_id);
+            synchronize_rcu();
+            prev_cp_id->cb_list.push_back(cb);
+        }
         // At this point we are sure that there is no thread working on prev_cp_id without incrementing the cp_enter cnt
-
-        prev_cp_id->cp_status = cp_status_t::cp_prepare;
 
         cp_io_exit(prev_cp_id);
     }

@@ -6,6 +6,7 @@ add_subdirectory(device)
 add_subdirectory(homeds)
 add_subdirectory(common)
 add_subdirectory(meta)
+add_subdirectory(index)
 
 include_directories (BEFORE .)
 include_directories (BEFORE ..)
@@ -16,6 +17,7 @@ set(HOMESTORE_OBJECTS
         $<TARGET_OBJECTS:hs_device>
         $<TARGET_OBJECTS:hs_blkalloc>
         $<TARGET_OBJECTS:hs_metablk>
+        $<TARGET_OBJECTS:indx_mgr>
         )
 
 add_library(hs_engine OBJECT ${HOMESTORE_OBJECTS})
