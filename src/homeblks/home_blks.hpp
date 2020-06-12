@@ -15,9 +15,9 @@
 #include <metrics/metrics.hpp>
 #include <settings/settings.hpp>
 #include "homeblks_config.hpp"
-#include <homeds/btree/writeBack_cache.hpp>
+#include <engine/homeds/btree/writeBack_cache.hpp>
 #include <fds/sparse_vector.hpp>
-#include "meta/meta_blks_mgr.hpp"
+#include "engine/meta/meta_blks_mgr.hpp"
 
 #ifndef DEBUG
 extern bool same_value_gen;
@@ -69,7 +69,7 @@ class HomeBlks;
 using HomeBlksSafePtr = boost::intrusive_ptr< HomeBlks >;
 struct vol_cp_id;
 typedef std::shared_ptr< vol_cp_id > vol_cp_id_ptr;
-struct indx_cp_id;
+struct homeblks_cp_id;
 
 typedef std::map< boost::uuids::uuid, std::shared_ptr< homestore::Volume > > vol_map_t;
 
@@ -181,8 +181,9 @@ public:
 public:
     /***************************** APIs exposed to homestore subsystem ***********************/
     uint64_t get_boot_cnt() const {
-        assert(m_homeblks_sb->boot_cnt < UINT16_MAX);
-        return (uint16_t)m_homeblks_sb->boot_cnt;
+        auto sb = (homeblks_sb*)m_homeblks_sb_buf.bytes();
+        assert(sb->boot_cnt < UINT16_MAX);
+        return (uint16_t)sb->boot_cnt;
     }
 
     bool is_shutdown() const { return (m_shutdown_start_time.load() != 0); }
@@ -190,8 +191,8 @@ public:
     void init_done(std::error_condition err);
     void inc_sub_system_init_cnt();
     void attach_prepare_volume_cp_id(std::map< boost::uuids::uuid, vol_cp_id_ptr >* cur_id_map,
-                                     std::map< boost::uuids::uuid, vol_cp_id_ptr >* new_id_map, indx_cp_id* hb_id,
-                                     indx_cp_id* new_hb_id);
+                                     std::map< boost::uuids::uuid, vol_cp_id_ptr >* new_id_map, homeblks_cp_id* hb_id,
+                                     homeblks_cp_id* new_hb_id);
     void blkalloc_cp_start(std::shared_ptr< blkalloc_cp_id > id);
     void blkalloc_cp_done(std::shared_ptr< blkalloc_cp_id > id);
     void do_volume_shutdown(bool force);
@@ -205,7 +206,7 @@ public:
      * @param mblk
      * @param has_more
      */
-    void meta_blk_found(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
+    void meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size);
     void meta_blk_recovery_comp(bool success);
     std::shared_ptr< blkalloc_cp_id > blkalloc_attach_prepare_cp(std::shared_ptr< blkalloc_cp_id > cur_cp_id);
 
@@ -238,7 +239,7 @@ public:
     static void get_malloc_stats(sisl::HttpCallData cd);
 
     // Other static functions
-    static void meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
+    static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size);
     static void meta_blk_recovery_comp_cb(bool success);
 
 protected:
@@ -274,7 +275,8 @@ private:
     static HomeBlksSafePtr _instance;
 
     init_params m_cfg;
-    sisl::aligned_unique_ptr< homeblks_sb > m_homeblks_sb; // the homestore super block
+    sisl::byte_view m_homeblks_sb_buf;
+    // homeblks_sb*  m_homeblks_sb = nullptr; // the homestore super block
     void* m_sb_cookie = nullptr;
 
     vol_map_t m_volume_map;

@@ -1,4 +1,3 @@
-include_directories (BEFORE ../engine)
 set(LOGDEV_SOURCE_FILES
         log_dev.cpp
         log_group.cpp

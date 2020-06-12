@@ -16,15 +16,23 @@ struct Free_Blk_Entry;
 struct free_blkid;
 
 /* Journal entry
- * --------------------------------------------------------------------
- * | Journal Hdr | alloc_blkid list | checksum list | free_blk_entry |
- * -------------------------------------------------------------------
+ * ---------------------------------------------------------------------------------------------
+ * | Journal Hdr | alloc_blkid list | checksum list | free_blk_entry | List of CP it is part of |
+ * ---------------------------------------------------------------------------------------------
  */
 struct journal_hdr {
+    uint32_t alloc_blkid_list_size;
+    uint32_t free_blk_entry_size;
+    uint32_t io_cp_info_size;
     uint64_t lba;
-    uint64_t indx_start_lba;
-    int nlbas;
+    uint32_t nlbas;
+};
+
+/* A io can be part of mutiple CPs */
+struct io_cp_info {
+    uint64_t end_lba; // inclusive
     int64_t cp_cnt;
+    uint32_t fbe_size; // size of fbe in a cp
 };
 
 class vol_journal_entry {
@@ -34,12 +42,41 @@ private:
 public:
     ~vol_journal_entry();
 
+    static journal_hdr* get_journal_hdr(void* m_mem) { return ((journal_hdr*)m_mem); }
+
+    static std::pair< BlkId*, uint32_t > get_blkid_list(void* m_mem) {
+        auto hdr = get_journal_hdr(m_mem);
+        auto blkid_list = (BlkId*)(sizeof(journal_hdr) + (uint64_t)m_mem);
+        return (std::make_pair(blkid_list, hdr->alloc_blkid_list_size));
+    }
+
+    static std::pair< uint16_t*, uint32_t > get_csum_list(void* m_mem) {
+        auto hdr = get_journal_hdr(m_mem);
+        auto blkid_list = get_blkid_list(m_mem);
+        uint16_t* csum_list = (uint16_t*)(&(blkid_list.first[blkid_list.second]));
+        return (std::make_pair(csum_list, hdr->nlbas));
+    }
+
+    static std::pair< BlkId*, uint32_t > get_fbe_list(void* m_mem) {
+        auto hdr = get_journal_hdr(m_mem);
+        auto csum_list = get_csum_list(m_mem);
+        BlkId* fbe_list = (BlkId*)(&(csum_list.first[csum_list.second]));
+        return (std::make_pair(fbe_list, hdr->free_blk_entry_size));
+    }
+
+    static std::pair< io_cp_info*, uint32_t > get_cpinfo_list(void* m_mem) {
+        auto hdr = get_journal_hdr(m_mem);
+        auto fbe_list = get_fbe_list(m_mem);
+        io_cp_info* cp_list = (io_cp_info*)(&(fbe_list.first[fbe_list.second]));
+        return (std::make_pair(cp_list, hdr->io_cp_info_size));
+    }
+
     /* it update the alloc blk id and checksum */
     sisl::blob create_journal_entry(volume_req* v_req);
 
     std::string to_string() const {
         auto hdr = (journal_hdr*)m_mem;
-        return fmt::format("lba={}, indx_start_lba={}, nlbas={}", hdr->lba, hdr->indx_start_lba, hdr->nlbas);
+        return fmt::format("nlbas={}", hdr->nlbas);
     }
 };
 
@@ -126,7 +163,7 @@ struct vol_cp_id {
     cp_state state() const { return flags; }
 };
 
-struct indx_cp_id : cp_id_base {
+struct homeblks_cp_id : cp_id_base {
     /* This list is not lock protected. */
     std::map< boost::uuids::uuid, vol_cp_id_ptr > vol_id_list;
     std::shared_ptr< blkalloc_cp_id > blkalloc_id;
@@ -146,7 +183,7 @@ struct indx_cp_id : cp_id_base {
 
 /* it contains the PSN from which journal has to be replayed. */
 #define INDX_MGR_VERSION 0x101
-struct indx_mgr_cp_sb_hdr {
+struct homeblks_cp_sb_hdr {
     int version;
     uint32_t vol_cnt;
 } __attribute__((__packed__));
@@ -166,21 +203,22 @@ struct indx_mgr_cp_sb {
     indx_mgr_cp_sb(){};
 } __attribute__((__packed__));
 
-struct indx_mgr_active_sb {
+/* this superblock is never changed once indx manager is created */
+struct indx_mgr_static_sb {
     logstore_id_t journal_id;
     MappingBtreeDeclType::btree_super_block btree_sb;
 } __attribute__((__packed__));
 
-class IndxCP : public CheckPoint< indx_cp_id > {
+class IndxCP : public CheckPoint< homeblks_cp_id > {
 public:
     IndxCP();
-    void try_cp_trigger(indx_cp_id* id);
-    virtual void cp_start(indx_cp_id* id);
-    virtual void cp_attach_prepare(indx_cp_id* cur_id, indx_cp_id* new_id);
+    void try_cp_trigger(homeblks_cp_id* id);
+    virtual void cp_start(homeblks_cp_id* id);
+    virtual void cp_attach_prepare(homeblks_cp_id* cur_id, homeblks_cp_id* new_id);
     virtual ~IndxCP();
-    void try_cp_start(indx_cp_id* id);
-    void indx_tbl_cp_done(indx_cp_id* id);
-    void blkalloc_cp(indx_cp_id* id);
+    void try_cp_start(homeblks_cp_id* id);
+    void indx_tbl_cp_done(homeblks_cp_id* id);
+    void blkalloc_cp(homeblks_cp_id* id);
 };
 
 class IndxMgr;
@@ -195,7 +233,8 @@ class IndxMgr {
     typedef std::function< void(const boost::intrusive_ptr< volume_req >& vreq, std::error_condition err) > io_done_cb;
     typedef std::function< void(Free_Blk_Entry fbe) > free_blk_callback;
     typedef std::function< void(volume_req* req, BlkId& bid) > pending_read_blk_cb;
-    typedef std::function< void(vol_cp_id_ptr cur_vol_id, indx_cp_id* hb_id, indx_cp_id* new_hb_id) > prepare_cb;
+    typedef std::function< void(vol_cp_id_ptr cur_vol_id, homeblks_cp_id* hb_id, homeblks_cp_id* new_hb_id) >
+        prepare_cb;
 
 private:
     mapping* m_active_map;
@@ -216,19 +255,21 @@ private:
     bool m_last_cp = false;
     std::mutex prepare_cb_mtx;
     sisl::wisr_vector< prepare_cb > prepare_cb_list;
-    indx_mgr_active_sb m_sb;
+    indx_mgr_static_sb m_static_sb;
     sisl::wisr_vector< free_blkid >* m_free_list[MAX_CP_CNT];
-    indx_mgr_cp_sb m_last_sb;
+    indx_mgr_cp_sb m_last_cp_sb;
+    std::map< logstore_seq_num_t, log_buffer > seq_buf_map; // used only in recovery
 
     void journal_write(volume_req* vreq);
     void journal_comp_cb(logstore_seq_num_t seq_num, logdev_key ld_key, void* req);
     btree_status_t update_indx_tbl(volume_req* vreq);
-    btree_cp_id_ptr get_btree_id(indx_cp_id* cp_id);
-    vol_cp_id_ptr get_volume_id(indx_cp_id* cp_id);
+    btree_cp_id_ptr get_btree_id(homeblks_cp_id* cp_id);
+    vol_cp_id_ptr get_volume_id(homeblks_cp_id* cp_id);
     void destroy_indx_tbl(vol_cp_id_ptr vol_id);
     void add_prepare_cb_list(prepare_cb cb);
-    void volume_destroy_cp(vol_cp_id_ptr cur_vol_id, indx_cp_id* hb_id, indx_cp_id* new_hb_id);
+    void volume_destroy_cp(vol_cp_id_ptr cur_vol_id, homeblks_cp_id* hb_id, homeblks_cp_id* new_hb_id);
     void create_first_cp_id(std::shared_ptr< Volume >& vo);
+    void retry_update_indx(const boost::intrusive_ptr< volume_req >& vreq);
 
 private:
     /*********************** static private members **********************/
@@ -244,6 +285,7 @@ private:
     static std::map< boost::uuids::uuid, indx_mgr_cp_sb > cp_sb_map;
     static HomeBlks* m_hb; // Hold onto the homeblks to maintain reference
     static void init();
+    static uint64_t memory_used_in_recovery;
 
 public:
     /* It is called in first time create.
@@ -261,7 +303,7 @@ public:
      *         free_blk_cb :- It is used to free the blks in case of volume destroy
      *         read_blk_cb :- It is used to notify blks that it is about the be returned in read.
      */
-    IndxMgr(std::shared_ptr< Volume > vol, const indx_mgr_active_sb& sb, io_done_cb io_cb,
+    IndxMgr(std::shared_ptr< Volume > vol, const indx_mgr_static_sb& sb, io_done_cb io_cb,
             free_blk_callback free_blk_cb, pending_read_blk_cb read_blk_cb);
     ~IndxMgr();
 
@@ -271,7 +313,7 @@ public:
      * @params new_hb_id :- new home blks cp id
      * @return :- return new cp id.
      */
-    vol_cp_id_ptr attach_prepare_vol_cp(vol_cp_id_ptr vol_cur_id, indx_cp_id* hb_id, indx_cp_id* new_hb_id);
+    vol_cp_id_ptr attach_prepare_vol_cp(vol_cp_id_ptr vol_cur_id, homeblks_cp_id* hb_id, homeblks_cp_id* new_hb_id);
 
     /* Get the active indx table
      * @return :- active mapping instance
@@ -283,11 +325,11 @@ public:
      */
     void update_indx(const boost::intrusive_ptr< volume_req >& vreq);
 
-    /* Get active superblock
-     * @return :- get superblock of a active btree. It is immutable structure. It contains all infomation require to
-     *            recover active indx tbl. id is zero for active indx table.
+    /* Get static superblock
+     * @return :- get static superblock of indx mgr. It is immutable structure. It contains all infomation require to
+     *            recover active and diff indx tbl.
      */
-    indx_mgr_active_sb get_active_sb();
+    indx_mgr_static_sb get_static_sb();
 
     /* Destroy all indexes and call homeblks level cp to persist. It assumes that all ios are stopped by volume.
      * It is async call. It is called only once
@@ -307,11 +349,11 @@ public:
     void log_found(logstore_seq_num_t seqnum, log_buffer buf, void* mem);
 
     /* it flushes free blks to blk allocator */
-    void flush_free_blks(vol_cp_id_ptr vol_id, indx_cp_id* indx_id);
+    void flush_free_blks(vol_cp_id_ptr vol_id, homeblks_cp_id* hb_id);
 
     /* it frees the blks and insert it in cp id free blk list. It is called when there is no read pending on this blk */
     void free_blk(Free_Blk_Entry& fbe);
-    void update_cp_sb(vol_cp_id_ptr& vol_id, indx_cp_id* indx_id, indx_mgr_cp_sb* sb);
+    void update_cp_sb(vol_cp_id_ptr& vol_id, homeblks_cp_id* hb_id, indx_mgr_cp_sb* sb);
     uint64_t get_last_psn();
     /* It is called when volume is sucessfully create on disk */
     void create_done();
@@ -332,8 +374,8 @@ public:
      */
 
     static void attach_prepare_vol_cp_id_list(std::map< boost::uuids::uuid, vol_cp_id_ptr >* cur_id,
-                                              std::map< boost::uuids::uuid, vol_cp_id_ptr >* new_id, indx_cp_id* hb_id,
-                                              indx_cp_id* new_hb_id);
+                                              std::map< boost::uuids::uuid, vol_cp_id_ptr >* new_id,
+                                              homeblks_cp_id* hb_id, homeblks_cp_id* new_hb_id);
 
     /* trigger homeblks cp. It first trigger a volume cp followed by blkalloc cp. It is async call.
      * @params cb :- callback when cp is done.
@@ -347,9 +389,9 @@ public:
 
     /* reinitialize indx mgr. It is used in fake reboot */
     static void reinit() { m_shutdown_started = false; }
+    static void write_homeblks_cp_sb(homeblks_cp_id* hb_id);
     static const iomgr::io_thread_t& get_thread_id() { return m_thread_id; }
-    static void write_homeblks_cp_sb(indx_cp_id* indx_id);
-    static void meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
-    static void flush_homeblks_free_blks(indx_cp_id* id);
+    static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size);
+    static void flush_homeblks_free_blks(homeblks_cp_id* id);
 };
 } // namespace homestore

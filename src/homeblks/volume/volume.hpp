@@ -125,7 +125,9 @@ struct free_blkid {
 
     free_blkid() {}
     free_blkid(const BlkId& blkId, uint8_t blk_offset, uint8_t nblks_to_free) :
-            m_blkId(blkId), m_blk_offset(blk_offset), m_nblks_to_free(nblks_to_free) {}
+            m_blkId(blkId),
+            m_blk_offset(blk_offset),
+            m_nblks_to_free(nblks_to_free) {}
     void copy(struct free_blkid& fbe) {
         m_blkId = fbe.m_blkId;
         m_blk_offset = fbe.m_blk_offset;
@@ -134,17 +136,20 @@ struct free_blkid {
 } __attribute__((__packed__));
 
 struct Free_Blk_Entry : free_blkid {
-    indx_cp_id* m_cp_id;
+    homeblks_cp_id* m_cp_id;
     vol_cp_id_ptr m_vol_id;
 
     Free_Blk_Entry() {}
     Free_Blk_Entry(const BlkId& blkId, uint8_t blk_offset, uint8_t nblks_to_free, vol_cp_id_ptr vol_id,
-                   indx_cp_id* cp_id) :
-            free_blkid(blkId, blk_offset, nblks_to_free), m_cp_id(cp_id), m_vol_id(vol_id) {}
+                   homeblks_cp_id* cp_id) :
+            free_blkid(blkId, blk_offset, nblks_to_free),
+            m_cp_id(cp_id),
+            m_vol_id(vol_id) {}
 
     BlkId blk_id() const { return m_blkId; }
     uint8_t blk_offset() const { return m_blk_offset; }
     uint8_t blks_to_free() const { return m_nblks_to_free; }
+    BlkId get_free_blkid() { return (m_blkId.get_blkid_at(m_blk_offset, m_nblks_to_free, 1)); }
 };
 
 class VolumeMetrics : public sisl::MetricsGroupWrapper {
@@ -196,20 +201,20 @@ public:
 #define VOL_SB_VERSION 0x2
 struct vol_sb_hdr {
     /* Immutable members */
-    const uint64_t version;
-    const uint64_t page_size;
-    const uint64_t size;
-    const boost::uuids::uuid uuid;
-    const char vol_name[VOL_NAME_SIZE];
-    const indx_mgr_active_sb active_sb;
+    uint64_t version;
+    uint64_t page_size;
+    uint64_t size;
+    boost::uuids::uuid uuid;
+    char vol_name[VOL_NAME_SIZE];
+    indx_mgr_static_sb indx_mgr_sb;
     vol_sb_hdr(uint64_t page_size, uint64_t size, const char* in_vol_name, boost::uuids::uuid uuid,
-               indx_mgr_active_sb active_sb) :
+               indx_mgr_static_sb indx_mgr_sb) :
             version(VOL_SB_VERSION),
             page_size(page_size),
             size(size),
             uuid(uuid),
             vol_name(""),
-            active_sb(active_sb) {
+            indx_mgr_sb(indx_mgr_sb) {
         memcpy((char*)vol_name, in_vol_name, VOL_NAME_SIZE);
     };
 
@@ -256,7 +261,8 @@ private:
     std::atomic< uint64_t > vol_ref_cnt = 0; // volume can not be destroy/shutdown until it is not zero
 
     std::mutex m_sb_lock; // lock for updating vol's sb
-    sisl::aligned_unique_ptr< vol_sb_hdr > m_sb;
+    // sisl::aligned_unique_ptr< vol_sb_hdr > m_sb_buf;
+    sisl::byte_view m_sb_buf;
     indxmgr_stop_cb m_destroy_done_cb;
     std::atomic< bool > m_indx_mgr_destroy_started;
     void* m_sb_cookie = nullptr;
@@ -273,7 +279,7 @@ private:
 
 private:
     Volume(const vol_params& params);
-    Volume(meta_blk* mblk_cookie, sisl::aligned_unique_ptr< vol_sb_hdr > sb);
+    Volume(meta_blk* mblk_cookie, sisl::byte_view sb_buf);
     void alloc_single_block_in_mem();
     bool check_and_complete_req(const volume_req_ptr& vreq, const std::error_condition& err);
 
@@ -361,9 +367,8 @@ public:
 
     /* it is used in fake reboot */
     static void reinit() { IndxMgr::reinit(); }
-    
-    static void meta_blk_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
-    static void meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
+
+    static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size);
 
 public:
     /******************** APIs exposed to home_blks *******************/
@@ -417,22 +422,22 @@ public:
     /* Get name of this volume.
      * @return :- name
      */
-    const char* get_name() const { return (m_sb->vol_name); }
+    const char* get_name() const { return (((vol_sb_hdr*)m_sb_buf.bytes())->vol_name); }
 
     /* Get page size of this volume.
      * @return :- page size
      */
-    uint64_t get_page_size() const { return m_sb->page_size; }
+    uint64_t get_page_size() const { return ((vol_sb_hdr*)m_sb_buf.bytes())->page_size; }
 
     /* Get size of this volume.
      * @return :- size
      */
-    uint64_t get_size() const { return m_sb->size; }
+    uint64_t get_size() const { return ((vol_sb_hdr*)m_sb_buf.bytes())->size; }
 
     /* Get uuid of this volume.
      * @return :- uuid
      */
-    boost::uuids::uuid get_uuid() { return m_sb->uuid; }
+    boost::uuids::uuid get_uuid() { return ((vol_sb_hdr*)m_sb_buf.bytes())->uuid; }
 
     /* Get state of this volume.
      * @return :- state
@@ -457,7 +462,7 @@ public:
      * @params vol_id :- current cp id of this volume
      * @params home_blks_id :- current cp id of home_blks
      */
-    vol_cp_id_ptr attach_prepare_volume_cp_id(vol_cp_id_ptr vol_id, indx_cp_id* hb_id, indx_cp_id* new_hb_id);
+    vol_cp_id_ptr attach_prepare_volume_cp_id(vol_cp_id_ptr vol_id, homeblks_cp_id* hb_id, homeblks_cp_id* new_hb_id);
 
     /* get indx mgr
      * @return indx mgr
@@ -484,9 +489,11 @@ public:
         return (id + 1);
     }
 
-    void flush_free_blks(vol_cp_id_ptr vol_id, indx_cp_id* indx_id) { m_indx_mgr->flush_free_blks(vol_id, indx_id); }
+    void flush_free_blks(vol_cp_id_ptr vol_id, homeblks_cp_id* indx_id) {
+        m_indx_mgr->flush_free_blks(vol_id, indx_id);
+    }
     void truncate(vol_cp_id_ptr vol_id) { m_indx_mgr->truncate(vol_id); }
-    void update_cp_sb(vol_cp_id_ptr& vol_id, indx_cp_id* indx_id, indx_mgr_cp_sb* sb) {
+    void update_cp_sb(vol_cp_id_ptr& vol_id, homeblks_cp_id* indx_id, indx_mgr_cp_sb* sb) {
         m_indx_mgr->update_cp_sb(vol_id, indx_id, sb);
     }
 
@@ -518,7 +525,8 @@ struct volume_req {
     int vc_req_cnt = 0;                                 // how many child requests are issued.
 
     /********** members used by indx mgr **********/
-    indx_cp_id* cp_id = nullptr; // checkpoint ID of this request is part of
+    homeblks_cp_id* first_cp_id = nullptr; // if this io is part of two checkpoints
+    homeblks_cp_id* cp_id = nullptr;       // checkpoint ID of this request is part of
     vol_cp_id_ptr vol_id;
     Clock::time_point indx_start_time;
     uint64_t lastCommited_seqId = INVALID_SEQ_ID;
@@ -527,10 +535,10 @@ struct volume_req {
 
     /********** Below entries are used for journal or to store checksum **********/
     vol_journal_entry j_ent;
-    uint64_t indx_start_lba; // it points the last lba written + 1. It is helpful if a io is written partially
     std::vector< uint16_t > csum_list;
     std::vector< BlkId > alloc_blkid_list;
     std::vector< Free_Blk_Entry > fbe_list;
+    std::vector< io_cp_info > cp_info_list;
 
     static volume_req_ptr make(const vol_interface_req_ptr& iface_req) {
         return volume_req_ptr(sisl::ObjectAllocator< volume_req >::make_object(iface_req), false);
@@ -564,9 +572,7 @@ struct volume_req {
     void push_csum(uint16_t csum) { csum_list.push_back(csum); }
 
     /* push fbe to the existing list */
-    void push_fbe(Free_Blk_Entry& fbe) {
-        fbe_list.push_back(fbe);
-    }
+    void push_fbe(Free_Blk_Entry& fbe) { fbe_list.push_back(fbe); }
 
     void inc_ref() { intrusive_ptr_add_ref(this); }
 
@@ -586,7 +592,6 @@ private:
             io_start_time(Clock::now()),
             mvec(new homeds::MemVector()),
             request_id(vi_req->request_id),
-            indx_start_lba(vi_req->lba),
             csum_list(0),
             alloc_blkid_list(0),
             fbe_list(0) {
