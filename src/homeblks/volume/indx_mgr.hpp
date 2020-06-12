@@ -32,7 +32,7 @@ struct journal_hdr {
 struct io_cp_info {
     uint64_t end_lba; // inclusive
     int64_t cp_cnt;
-    uint32_t fbe_size;     // size of fbe in a cp
+    uint32_t fbe_size; // size of fbe in a cp
 };
 
 class vol_journal_entry {
@@ -391,7 +391,7 @@ public:
     static void reinit() { m_shutdown_started = false; }
     static void write_homeblks_cp_sb(homeblks_cp_id* hb_id);
     static const iomgr::io_thread_t& get_thread_id() { return m_thread_id; }
-    static void meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
+    static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size);
     static void flush_homeblks_free_blks(homeblks_cp_id* id);
 };
 } // namespace homestore

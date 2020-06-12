@@ -344,19 +344,20 @@ void IndxMgr::flush_free_blks(vol_cp_id_ptr vol_id, homeblks_cp_id* hb_id) {
 
 void IndxMgr::write_homeblks_cp_sb(homeblks_cp_id* hb_id) {
     LOGINFO("superblock is written");
-    uint8_t* mem = nullptr;
     uint64_t size = sizeof(indx_mgr_cp_sb) * hb_id->vol_id_list.size() + sizeof(homeblks_cp_sb_hdr);
-    size = sisl::round_up(size, HS_STATIC_CONFIG(disk_attr.align_size));
-    int ret = posix_memalign((void**)&(mem), HS_STATIC_CONFIG(disk_attr.align_size), size);
-    if (ret != 0) {
-        assert(0);
-        throw std::bad_alloc();
+    uint32_t align = 0;
+
+    if (meta_blk_mgr->is_aligned_size(size)) {
+        align = HS_STATIC_CONFIG(disk_attr.align_size);
+        size = sisl::round_up(size, align);
     }
 
-    homeblks_cp_sb_hdr* hdr = (homeblks_cp_sb_hdr*)mem;
+    sisl::byte_view b(size, align);
+
+    homeblks_cp_sb_hdr* hdr = (homeblks_cp_sb_hdr*)b.bytes();
     hdr->version = INDX_MGR_VERSION;
     int vol_cnt = 0;
-    indx_mgr_cp_sb* vol_cp_sb_list = (indx_mgr_cp_sb*)((uint64_t)mem + sizeof(homeblks_cp_sb_hdr));
+    indx_mgr_cp_sb* vol_cp_sb_list = (indx_mgr_cp_sb*)((uint64_t)b.bytes() + sizeof(homeblks_cp_sb_hdr));
     for (auto it = hb_id->vol_id_list.begin(); it != hb_id->vol_id_list.end(); ++it) {
         auto vol_id = it->second;
         it->second->vol->update_cp_sb(vol_id, hb_id, &vol_cp_sb_list[vol_cnt++]);
@@ -364,13 +365,12 @@ void IndxMgr::write_homeblks_cp_sb(homeblks_cp_id* hb_id) {
     hdr->vol_cnt = vol_cnt;
 
     if (m_meta_blk) {
-        MetaBlkMgr::instance()->update_sub_sb("INDX_MGR_CP", mem, size, m_meta_blk);
+        MetaBlkMgr::instance()->update_sub_sb("INDX_MGR_CP", (void*)b.bytes(), size, m_meta_blk);
     } else {
         /* first time update */
-        MetaBlkMgr::instance()->add_sub_sb("INDX_MGR_CP", mem, size, m_meta_blk);
+        MetaBlkMgr::instance()->add_sub_sb("INDX_MGR_CP", (void*)b.bytes(), size, m_meta_blk);
     }
     LOGINFO("superblock is written");
-    free(mem);
 }
 
 void IndxMgr::update_cp_sb(vol_cp_id_ptr& vol_id, homeblks_cp_id* hb_id, indx_mgr_cp_sb* sb) {
@@ -786,11 +786,11 @@ void IndxMgr::log_found(logstore_seq_num_t seqnum, log_buffer log_buf, void* mem
     assert(happened);
 }
 
-void IndxMgr::meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size) {
+void IndxMgr::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size) {
     m_meta_blk = mblk;
-    homeblks_cp_sb_hdr* hdr = (homeblks_cp_sb_hdr*)buf.get();
+    homeblks_cp_sb_hdr* hdr = (homeblks_cp_sb_hdr*)buf.bytes();
     assert(hdr->version == INDX_MGR_VERSION);
-    indx_mgr_cp_sb* cp_sb = (indx_mgr_cp_sb*)((uint64_t)buf.get() + sizeof(homeblks_cp_sb_hdr));
+    indx_mgr_cp_sb* cp_sb = (indx_mgr_cp_sb*)((uint64_t)buf.bytes() + sizeof(homeblks_cp_sb_hdr));
 
 #ifndef NDEBUG
     uint64_t temp_size = sizeof(homeblks_cp_sb_hdr) + hdr->vol_cnt * sizeof(indx_mgr_cp_sb);

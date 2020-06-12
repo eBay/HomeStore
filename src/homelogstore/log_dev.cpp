@@ -6,11 +6,9 @@ namespace homestore {
 LogDev::LogDev() = default;
 LogDev::~LogDev() = default;
 
-
-void LogDev::meta_blk_found(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size) {
+void LogDev::meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size) {
     m_sb_cookie = (void*)mblk;
-    m_info_blk_buf = std::move(buf);
-    m_info_blk = (logdev_info_block*)m_info_blk_buf.get();
+    m_info_blk_buf = buf;
 }
 
 void LogDev::start(bool format) {
@@ -23,20 +21,30 @@ void LogDev::start(bool format) {
 
     // First read the info block
     auto bstore = m_hb->get_logdev_blkstore();
+    logdev_info_block* ib = (logdev_info_block*)m_info_blk_buf.bytes();
 
     if (format) {
-        HS_ASSERT(LOGMSG, (m_info_blk == nullptr), "Expected info blk to null");
+        HS_ASSERT(LOGMSG, (ib == nullptr), "Expected info blk to null");
         // TODO: Don't create 2K as is, but query vdev_info layer to see available vb_context size
-        m_info_blk_buf = sisl::make_aligned_sized_unique< uint8_t >(dma_boundary, logdev_info_block::size);
-        m_info_blk = (logdev_info_block*)m_info_blk_buf.get();
+        uint32_t align = 0;
+        uint32_t size = logdev_info_block::size;
+        if (meta_blk_mgr->is_aligned_size(size)) { 
+            align = HS_STATIC_CONFIG(disk_attr.align_size); 
+            size = sisl::round_up(size, align);
+        }
 
-        m_info_blk->start_dev_offset = 0;
+        sisl::byte_view b(size, align);
+        m_info_blk_buf = b;
+        ib = (logdev_info_block*)m_info_blk_buf.bytes();
+
+        ib->start_dev_offset = 0;
+        ib->blkstore_type = 4;
         m_id_reserver = std::make_unique< sisl::IDReserver >(128u); // Start with estimate of 128 stores
         _persist_info_block();
     } else {
-        HS_ASSERT(LOGMSG, (m_info_blk != nullptr), "Expected info blk not to be null");
+        HS_ASSERT(LOGMSG, (ib != nullptr), "Expected info blk not to be null");
         sisl::byte_array b = sisl::make_byte_array(logdev_info_block::store_info_size(), 0);
-        memcpy((void*)b->bytes, (void*)&m_info_blk->store_id_info[0], logdev_info_block::store_info_size());
+        memcpy((void*)b->bytes, (void*)&ib->store_id_info[0], logdev_info_block::store_info_size());
         m_id_reserver = std::make_unique< sisl::IDReserver >(b);
 
         // Notify to the caller that a new log store was reserved earlier and it is being loaded
@@ -48,7 +56,7 @@ void LogDev::start(bool format) {
             }
         }
 
-        do_load(m_info_blk->start_dev_offset);
+        do_load(ib->start_dev_offset);
         m_log_records->reinit(m_log_idx);
         m_last_flush_idx = m_log_idx - 1;
     }
@@ -71,8 +79,6 @@ void LogDev::stop() {
     m_last_flush_idx = -1;
     m_last_truncate_idx = -1;
     m_last_crc = INVALID_CRC32_VALUE;
-    m_info_blk_buf = nullptr;
-    m_info_blk = nullptr;
     m_block_flush_q.clear();
     m_hb = nullptr;
 }
@@ -250,12 +256,13 @@ void LogDev::_persist_info_block() {
     auto store = m_hb->get_logdev_blkstore();
     auto store_id_buf = m_id_reserver->serialize();
 
-    memcpy((void*)m_info_blk->store_id_info, store_id_buf->bytes, store_id_buf->size);
+    auto ib = (logdev_info_block*)m_info_blk_buf.bytes();
+    memcpy((void*)ib->store_id_info, store_id_buf->bytes, store_id_buf->size);
 
     if (m_sb_cookie) {
-        meta_blk_mgr->update_sub_sb("LOG_DEV", m_info_blk_buf.get(), logdev_info_block::size, m_sb_cookie);
+        meta_blk_mgr->update_sub_sb("LOG_DEV", (void*)ib, logdev_info_block::size, m_sb_cookie);
     } else {
-        meta_blk_mgr->add_sub_sb("LOG_DEV", m_info_blk_buf.get(), logdev_info_block::size, m_sb_cookie);
+        meta_blk_mgr->add_sub_sb("LOG_DEV", (void*)ib, logdev_info_block::size, m_sb_cookie);
     }
 }
 

@@ -81,8 +81,15 @@ HomeBlks::HomeBlks(const init_params& cfg) : m_cfg(cfg), m_metrics("HomeBlks") {
     HomeStore< BLKSTORE_BUFFER_TYPE >::init((const hs_input_params&)cfg);
 
     m_out_params.max_io_size = VOL_MAX_IO_SIZE;
-    m_homeblks_sb =
-        sisl::make_aligned_sized_unique< homeblks_sb >(HS_STATIC_CONFIG(disk_attr.align_size), HOMEBLKS_SB_SIZE);
+    uint32_t align = 0;
+    uint32_t size = HOMEBLKS_SB_SIZE;
+    if (meta_blk_mgr->is_aligned_size(size)) { 
+        align = HS_STATIC_CONFIG(disk_attr.align_size); 
+        size = sisl::round_up(size, align);
+    }
+    sisl::byte_view b(size, align);
+    m_homeblks_sb_buf = b;
+
     superblock_init();
     sisl::MallocMetrics::enable();
 
@@ -294,19 +301,20 @@ HomeBlksSafePtr HomeBlks::safe_instance() { return _instance; }
 
 void HomeBlks::superblock_init() {
     /* build the homeblks super block */
-    m_homeblks_sb->version = HOMEBLKS_SB_VERSION;
-    m_homeblks_sb->boot_cnt = 0;
-    m_homeblks_sb->init_flag(0);
-    m_homeblks_sb->uuid = HS_STATIC_CONFIG(input.system_uuid);
+    auto sb = (homeblks_sb*)m_homeblks_sb_buf.bytes();
+    sb->version = HOMEBLKS_SB_VERSION;
+    sb->boot_cnt = 0;
+    sb->init_flag(0);
+    sb->uuid = HS_STATIC_CONFIG(input.system_uuid);
 }
 
 void HomeBlks::homeblks_sb_write() {
     if (m_sb_cookie == nullptr) {
         // add to MetaBlkMgr
-        meta_blk_mgr->add_sub_sb("HOMEBLK", (void*)m_homeblks_sb.get(), sizeof(homeblks_sb), m_sb_cookie);
+        meta_blk_mgr->add_sub_sb("HOMEBLK", (void*)m_homeblks_sb_buf.bytes(), sizeof(homeblks_sb), m_sb_cookie);
     } else {
         // update existing homeblks sb
-        meta_blk_mgr->update_sub_sb("HOMEBLK", (void*)m_homeblks_sb.get(), sizeof(homeblks_sb), m_sb_cookie);
+        meta_blk_mgr->update_sub_sb("HOMEBLK", (void*)m_homeblks_sb_buf.bytes(), sizeof(homeblks_sb), m_sb_cookie);
     }
 }
 
@@ -613,7 +621,7 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
      * we don't replay journal on boot and assume that everything is correct.
      */
     if (!m_force_shutdown) {
-        m_homeblks_sb->set_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
+        ((homeblks_sb*)m_homeblks_sb_buf.bytes())->set_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
         if (!m_cfg.is_read_only) { homeblks_sb_write(); }
     }
 
@@ -750,7 +758,7 @@ void HomeBlks::migrate_cp_sb() {}
 void HomeBlks::migrate_homeblk_sb() {
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
     void* cookie = nullptr;
-    meta_blk_mgr->add_sub_sb("HOMEBLK", (void*)m_homeblks_sb.get(), sizeof(homeblks_sb), cookie);
+    meta_blk_mgr->add_sub_sb("HOMEBLK", (void*)m_homeblks_sb_buf.bytes(), sizeof(homeblks_sb), cookie);
 }
 
 void HomeBlks::migrate_volume_sb() {
@@ -775,16 +783,16 @@ void HomeBlks::migrate_volume_sb() {
  *      - Blk alloc bit map recovery done :- It is done when all the entries in journal are replayed.
  */
 
-void HomeBlks::meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size) {
-    instance()->meta_blk_found(mblk, std::move(buf), size);
+void HomeBlks::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size) {
+    instance()->meta_blk_found(mblk, buf, size);
 }
 void HomeBlks::meta_blk_recovery_comp_cb(bool success) { instance()->meta_blk_recovery_comp(success); }
 
 void HomeBlks::meta_blk_recovery_comp(bool success) {
     HS_ASSERT(RELEASE, success, "failed to recover HomeBlks SB.");
-
+    auto sb = (homeblks_sb*)m_homeblks_sb_buf.bytes();
     /* check the status of last boot */
-    if (m_homeblks_sb->test_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN)) {
+    if (sb->test_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN)) {
         LOGDEBUG("System was shutdown cleanly.");
     } else if (!HS_STATIC_CONFIG(input.disk_init)) {
         LOGCRITICAL("System experienced sudden panic since last boot!");
@@ -794,8 +802,8 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
     }
     // clear the flag and persist to disk, if we received a new shutdown and completed successfully,
     // the flag should be set again;
-    m_homeblks_sb->clear_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
-    ++m_homeblks_sb->boot_cnt;
+    sb->clear_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
+    ++sb->boot_cnt;
 
     sisl::HttpServerConfig cfg;
     cfg.is_tls_enabled = false;
@@ -852,7 +860,7 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
     }));
 }
 
-void HomeBlks::meta_blk_found(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size) {
+void HomeBlks::meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size) {
     static bool meta_blk_found = false;
 
     // HomeBlk layer expects to see one valid meta_blk record during reboot;
@@ -865,8 +873,7 @@ void HomeBlks::meta_blk_found(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t 
     m_sb_cookie = (void*)mblk;
 
     // recover from meta_blk;
-    sisl::aligned_unique_ptr< homeblks_sb > sb((homeblks_sb*)(buf.release()));
-    m_homeblks_sb = std::move(sb);
+    m_homeblks_sb_buf = buf;
 }
 
 void HomeBlks::vol_recovery_start_phase1() {

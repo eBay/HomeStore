@@ -322,8 +322,6 @@ public:
     static constexpr uint64_t flush_timer_frequency_us = 750;
     static constexpr uint64_t max_time_between_flush_us = 500;
 
-    static void meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
-
     LogDev();
     ~LogDev();
 
@@ -473,7 +471,7 @@ public:
      * @param key : the key containing log id that needs to be truncate up to;
      */
     void truncate(const logdev_key& key);
-    void meta_blk_found(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
+    void meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size);
 
 private:
     static LogGroup* new_log_group();
@@ -493,7 +491,6 @@ private:
     void _persist_info_block();
     void assert_next_pages(log_stream_reader& lstream);
     
-
 private:
     boost::intrusive_ptr< HomeBlks > m_hb; // Back pointer to homeblks
     std::unique_ptr< sisl::StreamTracker< log_record > >
@@ -515,8 +512,7 @@ private:
 
     // LogDev Info block related fields
     std::mutex m_store_reserve_mutex;
-    sisl::aligned_unique_ptr< uint8_t > m_info_blk_buf = nullptr;
-    logdev_info_block* m_info_blk = nullptr;
+    sisl::byte_view m_info_blk_buf;
 
     // Block flush Q request Q
     std::mutex m_block_flush_q_mutex;

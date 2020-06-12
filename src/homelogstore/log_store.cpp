@@ -6,8 +6,8 @@ namespace homestore {
 static constexpr logdev_key out_of_bound_ld_key = {std::numeric_limits< logid_t >::max(), 0};
 REGISTER_METABLK_SUBSYSTEM(log_dev, "LOG_DEV", HomeLogStoreMgr::meta_blk_found_cb, nullptr)
 
-void HomeLogStoreMgr::meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size) {
-    HomeLogStoreMgr::instance().m_log_dev.meta_blk_found(mblk, std::move(buf), size);
+void HomeLogStoreMgr::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size) {
+    HomeLogStoreMgr::instance().m_log_dev.meta_blk_found(mblk, buf, size);
 }
 
 /////////////////////////////////////// HomeLogStoreMgr Section ///////////////////////////////////////
