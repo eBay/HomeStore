@@ -106,7 +106,7 @@ void Volume::init() {
     if (!m_sb) {
         /* first time create */
         m_indx_mgr = IndxMgr::make_IndxMgr(
-            get_uuid(), std::string(get_name()),
+            m_params.uuid, std::string(m_params.vol_name),
             std::bind(&Volume::process_indx_completions, this, std::placeholders::_1, std::placeholders::_2),
             std::bind(&Volume::create_indx_tbl, this));
         m_sb = sisl::make_aligned_unique< vol_sb_hdr >(HS_STATIC_CONFIG(disk_attr.align_size), m_params.page_size,

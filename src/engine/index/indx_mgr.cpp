@@ -595,7 +595,10 @@ indx_cp_id_ptr IndxMgr::get_indx_id(hs_cp_id* cp_id) {
 void IndxMgr::trigger_indx_cp() { m_cp->trigger_cp(nullptr); }
 
 void IndxMgr::trigger_hs_cp(cp_done_cb cb, bool shutdown) {
-    assert(m_inited);
+    if (!m_inited) {
+        cb(true);
+        return;
+    }
     /* set bit map checkpoint , resume cp and trigger it */
     if (!m_cp) {
         if (cb) { cb(true); }

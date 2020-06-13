@@ -111,6 +111,9 @@ typedef cp_done_cb indxmgr_stop_cb;
  *      - entry is updated in a journal with a list of allocated blkid
  *      - blk id is marked allocated in disk bitmap so that it can be persisted. If writing to a journal or indx tbl is
  *        failed then these blk ids will be available to reallocate in next boot.
+ * Note :- In a checkpoint it can contain data at least upto the PSN or more. It holds true for all checkpoints/data
+ * except free blkid. In disk bm it contain exactly those blkids which are freed upto that checkpoint but it might
+ * contain blks which are allocated after this checkpoint.
  */
 struct indx_cp_id;
 ENUM(cp_state, uint8_t,
