@@ -12,7 +12,7 @@ class VdevVarSizeBlkAllocatorPolicy;
 using blk_store_t = homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy, BlkBuffer >;
 
 // each subsystem could receive callbacks multiple times;
-using meta_blk_found_cb_t = std::function< void(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf,
+using meta_blk_found_cb_t = std::function< void(meta_blk* mblk, sisl::byte_view buf,
                                                 size_t size) >;         // new blk found subsystem callback
 using meta_blk_recover_comp_cb_t = std::function< void(bool success) >; // recover complete subsystem callbacks;
 using meta_blk_map_t = std::map< meta_sub_type, std::map< uint64_t, meta_blk* > >; // blkid to meta_blk map;
@@ -138,6 +138,8 @@ public:
     uint64_t get_size();
 
     uint64_t get_used_size();
+
+    bool is_aligned_size(size_t size) { return (size <= META_BLK_CONTEXT_SZ) ? false : true; }
 
 private:
     /**

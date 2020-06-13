@@ -118,6 +118,43 @@ protected:
 
 #define CHECKSUM_SIZE 2
 
+<<<<<<< HEAD
+=======
+struct free_blkid {
+    BlkId m_blkId;
+    uint8_t m_blk_offset : NBLKS_BITS;
+    uint8_t m_nblks_to_free : NBLKS_BITS;
+
+    free_blkid() {}
+    free_blkid(const BlkId& blkId, uint8_t blk_offset, uint8_t nblks_to_free) :
+            m_blkId(blkId),
+            m_blk_offset(blk_offset),
+            m_nblks_to_free(nblks_to_free) {}
+    void copy(struct free_blkid& fbe) {
+        m_blkId = fbe.m_blkId;
+        m_blk_offset = fbe.m_blk_offset;
+        m_nblks_to_free = fbe.m_nblks_to_free;
+    }
+} __attribute__((__packed__));
+
+struct Free_Blk_Entry : free_blkid {
+    homeblks_cp_id* m_cp_id;
+    vol_cp_id_ptr m_vol_id;
+
+    Free_Blk_Entry() {}
+    Free_Blk_Entry(const BlkId& blkId, uint8_t blk_offset, uint8_t nblks_to_free, vol_cp_id_ptr vol_id,
+                   homeblks_cp_id* cp_id) :
+            free_blkid(blkId, blk_offset, nblks_to_free),
+            m_cp_id(cp_id),
+            m_vol_id(vol_id) {}
+
+    BlkId blk_id() const { return m_blkId; }
+    uint8_t blk_offset() const { return m_blk_offset; }
+    uint8_t blks_to_free() const { return m_nblks_to_free; }
+    BlkId get_free_blkid() { return (m_blkId.get_blkid_at(m_blk_offset, m_nblks_to_free, 1)); }
+};
+
+>>>>>>> 5a6e533904f2737f1db142a13b78edfa9726f126
 class VolumeMetrics : public sisl::MetricsGroupWrapper {
 public:
     explicit VolumeMetrics(const char* vol_name) : sisl::MetricsGroupWrapper("Volume", vol_name) {
@@ -167,12 +204,12 @@ public:
 #define VOL_SB_VERSION 0x2
 struct vol_sb_hdr {
     /* Immutable members */
-    const uint64_t version;
-    const uint64_t page_size;
-    const uint64_t size;
-    const boost::uuids::uuid uuid;
-    const char vol_name[VOL_NAME_SIZE];
-    const indx_mgr_static_sb indx_mgr_sb;
+    uint64_t version;
+    uint64_t page_size;
+    uint64_t size;
+    boost::uuids::uuid uuid;
+    char vol_name[VOL_NAME_SIZE];
+    indx_mgr_static_sb indx_mgr_sb;
     vol_sb_hdr(uint64_t page_size, uint64_t size, const char* in_vol_name, boost::uuids::uuid uuid,
                indx_mgr_static_sb indx_mgr_sb) :
             version(VOL_SB_VERSION),
@@ -227,7 +264,8 @@ private:
     std::atomic< uint64_t > vol_ref_cnt = 0; // volume can not be destroy/shutdown until it is not zero
 
     std::mutex m_sb_lock; // lock for updating vol's sb
-    sisl::aligned_unique_ptr< vol_sb_hdr > m_sb;
+    // sisl::aligned_unique_ptr< vol_sb_hdr > m_sb_buf;
+    sisl::byte_view m_sb_buf;
     indxmgr_stop_cb m_destroy_done_cb;
     std::atomic< bool > m_indx_mgr_destroy_started;
     void* m_sb_cookie = nullptr;
@@ -244,7 +282,7 @@ private:
 
 private:
     Volume(const vol_params& params);
-    Volume(meta_blk* mblk_cookie, sisl::aligned_unique_ptr< vol_sb_hdr > sb);
+    Volume(meta_blk* mblk_cookie, sisl::byte_view sb_buf);
     void alloc_single_block_in_mem();
     bool check_and_complete_req(const volume_req_ptr& vreq, const std::error_condition& err);
 
@@ -335,9 +373,8 @@ public:
 
     /* it is used in fake reboot */
     static void reinit() { IndxMgr::reinit(); }
-    
-    static void meta_blk_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
-    static void meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
+
+    static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size);
 
 public:
     /******************** APIs exposed to home_blks *******************/
@@ -391,22 +428,22 @@ public:
     /* Get name of this volume.
      * @return :- name
      */
-    const char* get_name() const { return (m_sb->vol_name); }
+    const char* get_name() const { return (((vol_sb_hdr*)m_sb_buf.bytes())->vol_name); }
 
     /* Get page size of this volume.
      * @return :- page size
      */
-    uint64_t get_page_size() const { return m_sb->page_size; }
+    uint64_t get_page_size() const { return ((vol_sb_hdr*)m_sb_buf.bytes())->page_size; }
 
     /* Get size of this volume.
      * @return :- size
      */
-    uint64_t get_size() const { return m_sb->size; }
+    uint64_t get_size() const { return ((vol_sb_hdr*)m_sb_buf.bytes())->size; }
 
     /* Get uuid of this volume.
      * @return :- uuid
      */
-    boost::uuids::uuid get_uuid() { return m_sb->uuid; }
+    boost::uuids::uuid get_uuid() { return ((vol_sb_hdr*)m_sb_buf.bytes())->uuid; }
 
     /* Get state of this volume.
      * @return :- state

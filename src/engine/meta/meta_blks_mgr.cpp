@@ -20,9 +20,7 @@ void MetaBlkMgr::start(blk_store_t* sb_blk_store, sb_blkstore_blob* blob, bool i
     recover();
 }
 
-void MetaBlkMgr::stop() {
-    del_instance();
-}
+void MetaBlkMgr::stop() { del_instance(); }
 
 void MetaBlkMgr::cache_clear() {
     std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
@@ -492,7 +490,7 @@ void MetaBlkMgr::update_sub_sb(meta_sub_type type, void* context_data, uint64_t 
     meta_blk* mblk = (meta_blk*)cookie;
 
     HS_LOG(INFO, metablk, "old sb: context_sz: {}, ovf_blkid: {}", (unsigned long)(mblk->hdr.h.context_sz),
-            mblk->hdr.h.ovf_blkid.to_string());
+           mblk->hdr.h.ovf_blkid.to_string());
 
     // TODO: try to remove this lock as it is not required and we don't need to hold lock for concurrent write while
     // writing to blkstore. And if without lock, this free should happen after meta blk is updated;
@@ -506,7 +504,8 @@ void MetaBlkMgr::update_sub_sb(meta_sub_type type, void* context_data, uint64_t 
     // write this meta blk to disk
     write_meta_blk_internal(mblk, context_data, sz);
 
-    HS_LOG(INFO, metablk, "new sb: context_sz: {}, ovf_blkid: {}", (uint64_t)mblk->hdr.h.context_sz, mblk->hdr.h.ovf_blkid.to_string());
+    HS_LOG(INFO, metablk, "new sb: context_sz: {}, ovf_blkid: {}", (uint64_t)mblk->hdr.h.context_sz,
+           mblk->hdr.h.ovf_blkid.to_string());
 
     // no need to update cookie and in-memory meta blk map
 }
@@ -655,16 +654,21 @@ void MetaBlkMgr::recover(bool do_comp_cb) {
         auto cb = sub.second.cb;
         for (auto& m : it->second) {
             auto mblk = m.second;
-            auto buf = sisl::make_aligned_sized_unique< uint8_t >(dma_boundary, mblk->hdr.h.context_sz);
+            sisl::byte_view buf;
+            // auto buf = sisl::make_aligned_sized_unique< uint8_t >(dma_boundary, mblk->hdr.h.context_sz);
 
             if (mblk->hdr.h.context_sz <= META_BLK_CONTEXT_SZ) {
+                sisl::byte_view b(mblk->hdr.h.context_sz);
+                buf = b;
                 HS_ASSERT(RELEASE, mblk->hdr.h.ovf_blkid.to_integer() == BlkId::invalid_internal_id(),
                           "corrupted ovf_blkid: {}", mblk->hdr.h.ovf_blkid.to_string());
-                memcpy(buf.get(), (void*)mblk->context_data, mblk->hdr.h.context_sz);
+                memcpy((void*)buf.bytes(), (void*)mblk->context_data, mblk->hdr.h.context_sz);
             } else {
                 // read through the ovf blk chain to get the buffer;
                 // first, copy the context data from meta blk context portion
-                memcpy(buf.get(), (void*)mblk->context_data, META_BLK_CONTEXT_SZ);
+                sisl::byte_view b(mblk->hdr.h.context_sz, HS_STATIC_CONFIG(disk_attr.align_size));
+                buf = b;
+                memcpy((void*)buf.bytes(), (void*)mblk->context_data, META_BLK_CONTEXT_SZ);
                 auto total_sz = mblk->hdr.h.context_sz;
                 uint64_t read_offset = META_BLK_CONTEXT_SZ;
 
@@ -686,7 +690,7 @@ void MetaBlkMgr::recover(bool do_comp_cb) {
                     HS_ASSERT(RELEASE, ovf_hdr->h.prev_blkid.to_integer() == prev_bid.to_integer(),
                               "Corrupted prev_blkid: {}/{}", ovf_hdr->h.prev_blkid.to_string(), prev_bid.to_string());
 
-                    memcpy(buf.get() + read_offset, b.bytes + META_BLK_OVF_HDR_MAX_SZ, ovf_hdr->h.context_sz);
+                    memcpy((uint8_t*)buf.bytes() + read_offset, b.bytes + META_BLK_OVF_HDR_MAX_SZ, ovf_hdr->h.context_sz);
                     read_offset += ovf_hdr->h.context_sz;
 
                     prev_bid = bid;
@@ -698,11 +702,11 @@ void MetaBlkMgr::recover(bool do_comp_cb) {
             }
 
             // verify crc before sending to subsystem;
-            auto crc = crc32_ieee(init_crc32, (uint8_t*)(buf.get()), mblk->hdr.h.context_sz);
+            auto crc = crc32_ieee(init_crc32, (uint8_t*)(buf.bytes()), mblk->hdr.h.context_sz);
             HS_ASSERT(RELEASE, crc == mblk->hdr.h.crc, "CRC mismatch: {}/{}", crc, (uint32_t)mblk->hdr.h.crc);
 
             // found a meta blk and callback to sub system;
-            cb(mblk, std::move(buf), mblk->hdr.h.context_sz);
+            cb(mblk, buf, mblk->hdr.h.context_sz);
         }
     }
 

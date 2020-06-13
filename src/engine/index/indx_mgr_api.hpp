@@ -193,7 +193,7 @@ public:
     static void register_cp_done_cb(cp_done_cb cb, bool blkalloc_cp = false);
     static void write_hs_cp_sb(hs_cp_id* hb_id);
     static const iomgr::io_thread_t& get_thread_id() { return m_thread_id; }
-    static void meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
+    static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size);
     static void flush_hs_free_blks(hs_cp_id* id);
 
 private:

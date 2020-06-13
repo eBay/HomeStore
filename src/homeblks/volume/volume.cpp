@@ -87,9 +87,14 @@ Volume::Volume(const vol_params& params) :
         params.vol_name, params.uuid, std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
 }
 
-Volume::Volume(meta_blk* mblk_cookie, sisl::aligned_unique_ptr< vol_sb_hdr > sb) :
-        m_metrics(sb->vol_name), m_sb(std::move(sb)), m_indx_mgr_destroy_started(false), m_sb_cookie(mblk_cookie) {
-    m_state = m_sb->state;
+Volume::Volume(meta_blk* mblk_cookie, sisl::byte_view sb_buf) :
+        m_metrics(((vol_sb_hdr*)sb_buf.bytes())->vol_name),
+        m_indx_mgr_destroy_started(false),
+        m_sb_cookie(mblk_cookie) {
+    m_sb_buf = sb_buf;
+    auto sb = (vol_sb_hdr*)m_sb_buf.bytes();
+    m_state = sb->state;
+
     /* this counter is decremented later when this volume become part of a cp. until then shutdown is
      * not allowed.
      */
@@ -99,26 +104,40 @@ Volume::Volume(meta_blk* mblk_cookie, sisl::aligned_unique_ptr< vol_sb_hdr > sb)
      */
     m_hb = HomeBlks::safe_instance();
     m_read_blk_tracker = std::make_unique< Blk_Read_Tracker >(
-        m_sb->vol_name, m_sb->uuid, std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
+        sb->vol_name, sb->uuid, std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
 }
 
 void Volume::init() {
-    if (!m_sb) {
+    auto sb = (vol_sb_hdr*)m_sb_buf.bytes();
+    if (!sb) {
         /* first time create */
+        /* populate superblock */
+        uint32_t align = 0;
+        if (meta_blk_mgr->is_aligned_size(sizeof(vol_sb_hdr))) { align = HS_STATIC_CONFIG(disk_attr.align_size); }
+        sisl::byte_view b(sizeof(vol_sb_hdr), align);
+        m_sb_buf = b;
+        sb = (vol_sb_hdr*)m_sb_buf.bytes();
+        sb->page_size = m_params.page_size;
+        sb->size = m_params.size;
+        memcpy((char*)sb->vol_name, (const char*)m_params.vol_name, VOL_NAME_SIZE);
+        sb->uuid = m_params.uuid;
+
+        /* create indx tbl */
         m_indx_mgr = IndxMgr::make_IndxMgr(
             m_params.uuid, std::string(m_params.vol_name),
             std::bind(&Volume::process_indx_completions, this, std::placeholders::_1, std::placeholders::_2),
             std::bind(&Volume::create_indx_tbl, this));
-        m_sb = sisl::make_aligned_unique< vol_sb_hdr >(HS_STATIC_CONFIG(disk_attr.align_size), m_params.page_size,
-                                                       m_params.size, (const char*)m_params.vol_name, m_params.uuid,
-                                                       m_indx_mgr->get_static_sb());
+
+        /* populate indx mgr super block */
+        sb->indx_mgr_sb = m_indx_mgr->get_static_sb();
+
         set_state(vol_state::ONLINE, true);
         seq_Id = m_indx_mgr->get_last_psn();
         /* it is called after superblock is persisted by volume */
         m_indx_mgr->create_done();
     } else {
         /* recovery */
-        auto indx_mgr_sb = m_sb->indx_mgr_sb;
+        auto indx_mgr_sb = sb->indx_mgr_sb;
         m_indx_mgr = IndxMgr::make_IndxMgr(
             get_uuid(), std::string(get_name()),
             std::bind(&Volume::process_indx_completions, this, std::placeholders::_1, std::placeholders::_2),
@@ -129,11 +148,10 @@ void Volume::init() {
     assert(get_page_size() % HomeBlks::instance()->get_data_pagesz() == 0);
 }
 
-void Volume::meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size) {
-    sisl::aligned_unique_ptr< vol_sb_hdr > sb((vol_sb_hdr*)(buf.release()));
+void Volume::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size) {
     assert(sizeof(vol_sb_hdr) == size);
 
-    auto new_vol = Volume::make_volume(mblk, std::move(sb));
+    auto new_vol = Volume::make_volume(mblk, buf);
     /* add this volume in home blks */
     HomeBlks::safe_instance()->create_volume(new_vol);
 }
@@ -673,15 +691,15 @@ bool Volume::is_offline() {
 
 void Volume::write_sb() {
     std::unique_lock< std::mutex > lk(m_sb_lock);
-
+    auto sb = (vol_sb_hdr*)m_sb_buf.bytes();
     /* update mutable params */
-    m_sb->state = m_state;
+    sb->state = m_state;
 
     if (!m_sb_cookie) {
         // first time insert
-        MetaBlkMgr::instance()->add_sub_sb("VOLUME", m_sb.get(), sizeof(vol_sb_hdr), m_sb_cookie);
+        MetaBlkMgr::instance()->add_sub_sb("VOLUME", (void*)m_sb_buf.bytes(), sizeof(vol_sb_hdr), m_sb_cookie);
     } else {
-        MetaBlkMgr::instance()->update_sub_sb("VOLUME", m_sb.get(), sizeof(vol_sb_hdr), m_sb_cookie);
+        MetaBlkMgr::instance()->update_sub_sb("VOLUME", (void*)m_sb_buf.bytes(), sizeof(vol_sb_hdr), m_sb_cookie);
     }
 }
 

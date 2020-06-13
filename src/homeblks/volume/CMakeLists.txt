@@ -53,5 +53,3 @@ add_test(NAME TestVol COMMAND test_volume)
 
 add_test(NAME TestVolRecovery COMMAND ${CMAKE_BINARY_DIR}/bin/scripts/vol_test.py --test_suits=recovery --dirpath=${CMAKE_BINARY_DIR}/bin/)
 SET_TESTS_PROPERTIES(TestVolRecovery PROPERTIES DEPENDS TestVol)
-
-

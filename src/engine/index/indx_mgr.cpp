@@ -341,14 +341,14 @@ void IndxMgr::write_hs_cp_sb(hs_cp_id* hs_id) {
     LOGINFO("superblock is written");
     uint8_t* mem = nullptr;
     uint64_t size = sizeof(indx_cp_sb) * hs_id->indx_id_list.size() + sizeof(hs_cp_sb_hdr);
-    size = sisl::round_up(size, HS_STATIC_CONFIG(disk_attr.align_size));
-    int ret = posix_memalign((void**)&(mem), HS_STATIC_CONFIG(disk_attr.align_size), size);
-    if (ret != 0) {
-        assert(0);
-        throw std::bad_alloc();
+    uint32_t align = 0;
+    if (meta_blk_mgr->is_aligned_size(size)) {
+        align = HS_STATIC_CONFIG(disk_attr.align_size);
+        size = sisl::round_up(size, align);
     }
+    sisl::byte_view b(size, align);
 
-    hs_cp_sb_hdr* hdr = (hs_cp_sb_hdr*)mem;
+    hs_cp_sb_hdr* hdr = (hs_cp_sb_hdr*)b.bytes();
     hdr->version = INDX_MGR_VERSION;
     int indx_cnt = 0;
     indx_cp_sb* indx_cp_sb_list = (indx_cp_sb*)((uint64_t)mem + sizeof(hs_cp_sb_hdr));
@@ -359,13 +359,12 @@ void IndxMgr::write_hs_cp_sb(hs_cp_id* hs_id) {
     hdr->indx_cnt = indx_cnt;
 
     if (m_meta_blk) {
-        MetaBlkMgr::instance()->update_sub_sb("INDX_MGR_CP", mem, size, m_meta_blk);
+        MetaBlkMgr::instance()->update_sub_sb("INDX_MGR_CP", (void*)b.bytes(), size, m_meta_blk);
     } else {
         /* first time update */
-        MetaBlkMgr::instance()->add_sub_sb("INDX_MGR_CP", mem, size, m_meta_blk);
+        MetaBlkMgr::instance()->add_sub_sb("INDX_MGR_CP", (void*)b.bytes(), size, m_meta_blk);
     }
     LOGINFO("superblock is written");
-    free(mem);
 }
 
 void IndxMgr::update_cp_sb(indx_cp_id_ptr& indx_id, hs_cp_id* hs_id, indx_cp_sb* sb) {
@@ -732,11 +731,11 @@ void IndxMgr::log_found(logstore_seq_num_t seqnum, log_buffer log_buf, void* mem
     assert(happened);
 }
 
-void IndxMgr::meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size) {
+void IndxMgr::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size) {
     m_meta_blk = mblk;
-    hs_cp_sb_hdr* hdr = (hs_cp_sb_hdr*)buf.get();
+    hs_cp_sb_hdr* hdr = (hs_cp_sb_hdr*)buf.bytes();
     assert(hdr->version == INDX_MGR_VERSION);
-    indx_cp_sb* cp_sb = (indx_cp_sb*)((uint64_t)buf.get() + sizeof(hs_cp_sb_hdr));
+    indx_cp_sb* cp_sb = (indx_cp_sb*)((uint64_t)buf.bytes() + sizeof(hs_cp_sb_hdr));
 
 #ifndef NDEBUG
     uint64_t temp_size = sizeof(hs_cp_sb_hdr) + hdr->indx_cnt * sizeof(indx_cp_sb);

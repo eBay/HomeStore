@@ -180,8 +180,9 @@ public:
 public:
     /***************************** APIs exposed to homestore subsystem ***********************/
     uint64_t get_boot_cnt() const {
-        assert(m_homeblks_sb->boot_cnt < UINT16_MAX);
-        return (uint16_t)m_homeblks_sb->boot_cnt;
+        auto sb = (homeblks_sb*)m_homeblks_sb_buf.bytes();
+        assert(sb->boot_cnt < UINT16_MAX);
+        return (uint16_t)sb->boot_cnt;
     }
 
     bool is_shutdown() const { return (m_shutdown_start_time.load() != 0); }
@@ -202,7 +203,7 @@ public:
      * @param mblk
      * @param has_more
      */
-    void meta_blk_found(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
+    void meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size);
     void meta_blk_recovery_comp(bool success);
 
 #ifdef _PRERELEASE
@@ -229,7 +230,7 @@ public:
     static void get_malloc_stats(sisl::HttpCallData cd);
 
     // Other static functions
-    static void meta_blk_found_cb(meta_blk* mblk, sisl::aligned_unique_ptr< uint8_t > buf, size_t size);
+    static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size);
     static void meta_blk_recovery_comp_cb(bool success);
 
 protected:
@@ -263,7 +264,8 @@ private:
 
 private:
     init_params m_cfg;
-    sisl::aligned_unique_ptr< homeblks_sb > m_homeblks_sb; // the homestore super block
+    sisl::byte_view m_homeblks_sb_buf;
+    // homeblks_sb*  m_homeblks_sb = nullptr; // the homestore super block
     void* m_sb_cookie = nullptr;
 
     vol_map_t m_volume_map;
