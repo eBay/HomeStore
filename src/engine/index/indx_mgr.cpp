@@ -191,9 +191,14 @@ IndxMgr::IndxMgr(boost::uuids::uuid uuid, std::string name, io_done_cb io_cb, cr
         m_create_indx_tbl(create_func),
         m_recover_indx_tbl(recover_func),
         m_static_sb(sb) {
-    m_active_tbl = m_create_indx_tbl();
 
-    m_journal = HomeLogStoreMgr::instance().create_new_log_store();
+    m_journal = nullptr;
+    HomeLogStoreMgr::instance().open_log_store(
+        sb.journal_id, ([this](std::shared_ptr< HomeLogStore > logstore) {
+            m_journal = logstore;
+            m_journal->register_log_found_cb(
+                ([this](logstore_seq_num_t seqnum, log_buffer buf, void* mem) { this->log_found(seqnum, buf, mem); }));
+        }));
     m_journal_comp_cb =
         std::bind(&IndxMgr::journal_comp_cb, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
     for (int i = 0; i < MAX_CP_CNT; ++i) {
@@ -240,12 +245,14 @@ void IndxMgr::static_init() {
                                                  [](void* cookie) { trigger_hs_cp(nullptr, false); });
     auto sthread = sisl::named_thread("indx_mgr", []() mutable {
         iomanager.run_io_loop(false, nullptr, [](bool is_started) {
-            if (is_started) IndxMgr::m_thread_id = iomanager.iothread_self();
+            if (is_started) {
+                IndxMgr::m_thread_id = iomanager.iothread_self();
+                IndxMgr::m_inited = true;
+            }
         });
     });
     sthread.detach();
-    m_inited = true;
-    while (IndxMgr::m_thread_id == -1) {}
+    while (!IndxMgr::m_inited) {}
 }
 
 void IndxMgr::recovery_start_phase1() {
