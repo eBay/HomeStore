@@ -245,7 +245,7 @@ void IndxMgr::static_init() {
     });
     sthread.detach();
     m_inited = true;
-    sleep(30);
+    while (IndxMgr::m_thread_id == -1) {}
 }
 
 void IndxMgr::recovery_start_phase1() {
