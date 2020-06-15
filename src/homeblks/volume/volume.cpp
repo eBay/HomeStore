@@ -95,13 +95,6 @@ Volume::Volume(meta_blk* mblk_cookie, sisl::byte_view sb_buf) :
     auto sb = (vol_sb_hdr*)m_sb_buf.bytes();
     m_state = sb->state;
 
-    /* this counter is decremented later when this volume become part of a cp. until then shutdown is
-     * not allowed.
-     */
-    ++home_blks_ref_cnt;
-    /* we don't need to check for shutdown unlike volume create. This constructor is called in recovery. We don't
-     * allow shutdown until recovery is not completed.
-     */
     m_hb = HomeBlks::safe_instance();
     m_read_blk_tracker = std::make_unique< Blk_Read_Tracker >(
         sb->vol_name, sb->uuid, std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
@@ -110,7 +103,7 @@ Volume::Volume(meta_blk* mblk_cookie, sisl::byte_view sb_buf) :
 void Volume::init() {
     auto sb = (vol_sb_hdr*)m_sb_buf.bytes();
     if (!sb) {
-        /* first time create */
+
         /* populate superblock */
         uint32_t align = 0;
         if (meta_blk_mgr->is_aligned_size(sizeof(vol_sb_hdr))) { align = HS_STATIC_CONFIG(disk_attr.align_size); }
@@ -135,6 +128,12 @@ void Volume::init() {
         seq_Id = m_indx_mgr->get_last_psn();
         /* it is called after superblock is persisted by volume */
         m_indx_mgr->create_done();
+
+        IndxMgr::trigger_indx_cp_with_cb(([this](bool success) {
+            /* Now it is safe to do shutdown as this volume has become a part of CP */
+            auto cnt = home_blks_ref_cnt.fetch_sub(1);
+            if (cnt == 1 && m_hb->is_shutdown()) { m_hb->do_volume_shutdown(true); }
+        }));
     } else {
         /* recovery */
         auto indx_mgr_sb = sb->indx_mgr_sb;
@@ -191,17 +190,19 @@ void Volume::destroy_internal() {
             set_state(vol_state::DESTROYED, false);
             m_indx_mgr->destroy_done();
         }
+        auto vol_ptr = shared_from_this();
         m_destroy_done_cb(success);
         m_destroy_done_cb = nullptr;
         auto cnt = home_blks_ref_cnt.fetch_sub(1);
-        if (cnt == 1) { m_hb->do_volume_shutdown(true); }
+        if (cnt == 1 && m_hb->is_shutdown()) { m_hb->do_volume_shutdown(true); };
     }));
 }
 
 /* It is called only once */
 void Volume::shutdown(indxmgr_stop_cb cb) { IndxMgr::shutdown(cb); }
 
-Volume::~Volume() {}
+Volume::~Volume() {
+}
 
 indx_tbl* Volume::create_indx_tbl() {
     auto pending_read_blk_cb =

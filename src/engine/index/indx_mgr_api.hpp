@@ -120,7 +120,7 @@ public:
      * It is async call. It is called only once
      * @params cb :- callback when destroy is done.
      */
-    void destroy(indxmgr_stop_cb cb);
+    void destroy(indxmgr_stop_cb&& cb);
 
     /* truncate journal */
     void truncate(indx_cp_id_ptr indx_id);
@@ -180,6 +180,7 @@ public:
 
     /* trigger indx mgr CP. It doesn't persist blkalloc */
     static void trigger_indx_cp();
+    static void trigger_indx_cp_with_cb(cp_done_cb cb);
 
     /* reinitialize indx mgr. It is used in fake reboot */
     static void reinit() { m_shutdown_started = false; }

@@ -739,6 +739,7 @@ public:
         uint64_t start_lba = vreq->lba();
         int csum_indx = 0;
         uint64_t next_start_lba = start_lba;
+        uint64_t original_start_lba = start_lba;
         btree_status_t ret = btree_status_t::success;
         /* We always try to write from the beginning even though it can be called multiple times in the same IO.
          * We don't update the key later if updated sequence id is greater then or equal to this sequence id.
@@ -752,8 +753,10 @@ public:
             MappingValue value(ve);
             ret = put(vreq, key, value, btree_id, next_start_lba);
             if (ret != btree_status_t::success) { break; }
+            start_lba += nlbas;
+            csum_indx += nlbas;
         }
-        auto lbas_written = next_start_lba - start_lba;
+        auto lbas_written = next_start_lba - original_start_lba;
         if (vreq->active_nlbas_written < lbas_written) { vreq->active_nlbas_written = lbas_written; }
         return ret;
     }

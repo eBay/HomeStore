@@ -118,43 +118,6 @@ protected:
 
 #define CHECKSUM_SIZE 2
 
-<<<<<<< HEAD
-=======
-struct free_blkid {
-    BlkId m_blkId;
-    uint8_t m_blk_offset : NBLKS_BITS;
-    uint8_t m_nblks_to_free : NBLKS_BITS;
-
-    free_blkid() {}
-    free_blkid(const BlkId& blkId, uint8_t blk_offset, uint8_t nblks_to_free) :
-            m_blkId(blkId),
-            m_blk_offset(blk_offset),
-            m_nblks_to_free(nblks_to_free) {}
-    void copy(struct free_blkid& fbe) {
-        m_blkId = fbe.m_blkId;
-        m_blk_offset = fbe.m_blk_offset;
-        m_nblks_to_free = fbe.m_nblks_to_free;
-    }
-} __attribute__((__packed__));
-
-struct Free_Blk_Entry : free_blkid {
-    homeblks_cp_id* m_cp_id;
-    vol_cp_id_ptr m_vol_id;
-
-    Free_Blk_Entry() {}
-    Free_Blk_Entry(const BlkId& blkId, uint8_t blk_offset, uint8_t nblks_to_free, vol_cp_id_ptr vol_id,
-                   homeblks_cp_id* cp_id) :
-            free_blkid(blkId, blk_offset, nblks_to_free),
-            m_cp_id(cp_id),
-            m_vol_id(vol_id) {}
-
-    BlkId blk_id() const { return m_blkId; }
-    uint8_t blk_offset() const { return m_blk_offset; }
-    uint8_t blks_to_free() const { return m_nblks_to_free; }
-    BlkId get_free_blkid() { return (m_blkId.get_blkid_at(m_blk_offset, m_nblks_to_free, 1)); }
-};
-
->>>>>>> 5a6e533904f2737f1db142a13b78edfa9726f126
 class VolumeMetrics : public sisl::MetricsGroupWrapper {
 public:
     explicit VolumeMetrics(const char* vol_name) : sisl::MetricsGroupWrapper("Volume", vol_name) {
@@ -526,8 +489,8 @@ struct volume_req : indx_req {
     uint64_t lastCommited_seqId = INVALID_SEQ_ID;
     uint64_t seqId = INVALID_SEQ_ID;
     uint64_t request_id; // Copy of the id from interface request
-    uint64_t active_nlbas_written; // number of lba written in active indx tabl. It can be partially written if
-                                   // btree writes failed in between.
+    uint64_t active_nlbas_written = 0; // number of lba written in active indx tabl. It can be partially written if
+                                       // btree writes failed in between.
 
     /********** Below entries are used for journal or to store checksum **********/
     std::vector< uint16_t > csum_list;
@@ -574,7 +537,8 @@ struct volume_req : indx_req {
     virtual void fill_val(void* mem, uint32_t size) override {
         /* we only populating check sum. Allocate blkids are already populated by indx mgr */
         uint16_t* j_csum = (uint16_t*)mem;
-        for (uint32_t i = 0; i < nlbas(); ++i) {
+        assert(active_nlbas_written == nlbas());
+        for (uint32_t i = 0; i < active_nlbas_written; ++i) {
             j_csum[i] = csum_list[i];
         }
     }

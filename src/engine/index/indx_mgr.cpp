@@ -230,9 +230,11 @@ void IndxMgr::init() {
 
 void IndxMgr::static_init() {
     assert(!m_inited);
-    m_cp = std::unique_ptr< HomeStoreCP >(new HomeStoreCP());
     m_hs = HomeStoreBase::instance();
     m_shutdown_started.store(false);
+    try_blkalloc_checkpoint.set(false);
+
+    m_cp = std::unique_ptr< HomeStoreCP >(new HomeStoreCP());
     /* start the timer for blkalloc checkpoint */
     m_hs_cp_timer_hdl = iomanager.schedule_timer(60 * 1000 * 1000 * 1000ul, true, nullptr, false,
                                                  [](void* cookie) { trigger_hs_cp(nullptr, false); });
@@ -242,8 +244,8 @@ void IndxMgr::static_init() {
         });
     });
     sthread.detach();
-    try_blkalloc_checkpoint.set(false);
     m_inited = true;
+    sleep(30);
 }
 
 void IndxMgr::recovery_start_phase1() {
@@ -339,7 +341,6 @@ void IndxMgr::flush_free_blks(indx_cp_id_ptr indx_id, hs_cp_id* hs_id) {
 
 void IndxMgr::write_hs_cp_sb(hs_cp_id* hs_id) {
     LOGINFO("superblock is written");
-    uint8_t* mem = nullptr;
     uint64_t size = sizeof(indx_cp_sb) * hs_id->indx_id_list.size() + sizeof(hs_cp_sb_hdr);
     uint32_t align = 0;
     if (meta_blk_mgr->is_aligned_size(size)) {
@@ -351,7 +352,7 @@ void IndxMgr::write_hs_cp_sb(hs_cp_id* hs_id) {
     hs_cp_sb_hdr* hdr = (hs_cp_sb_hdr*)b.bytes();
     hdr->version = INDX_MGR_VERSION;
     int indx_cnt = 0;
-    indx_cp_sb* indx_cp_sb_list = (indx_cp_sb*)((uint64_t)mem + sizeof(hs_cp_sb_hdr));
+    indx_cp_sb* indx_cp_sb_list = (indx_cp_sb*)((uint64_t)hdr + sizeof(hs_cp_sb_hdr));
     for (auto it = hs_id->indx_id_list.begin(); it != hs_id->indx_id_list.end(); ++it) {
         auto indx_id = it->second;
         it->second->indx_mgr->update_cp_sb(indx_id, hs_id, &indx_cp_sb_list[indx_cnt++]);
@@ -592,6 +593,7 @@ indx_cp_id_ptr IndxMgr::get_indx_id(hs_cp_id* cp_id) {
 }
 
 void IndxMgr::trigger_indx_cp() { m_cp->trigger_cp(nullptr); }
+void IndxMgr::trigger_indx_cp_with_cb(cp_done_cb cb) { m_cp->trigger_cp(cb); }
 
 void IndxMgr::trigger_hs_cp(cp_done_cb cb, bool shutdown) {
     if (!m_inited) {
@@ -636,14 +638,14 @@ void IndxMgr::trigger_hs_cp(cp_done_cb cb, bool shutdown) {
  * prevent another cp to start.
  * 7. Make all the free blkids available to reuse in blk allocator.
  */
-void IndxMgr::destroy(indxmgr_stop_cb cb) {
+void IndxMgr::destroy(indxmgr_stop_cb&& cb) {
     /* we can assume that there is no io going on this indx mgr now */
     HS_SUBMOD_LOG(INFO, base, , "indx mgr", m_name, "Destroying Indx Manager");
 
     destroy_journal_ent* jent = (destroy_journal_ent*)malloc(sizeof(destroy_journal_ent));
     jent->state = indx_mgr_state::DESTROYING;
     sisl::blob b((uint8_t*)jent, sizeof(destroy_journal_ent));
-    m_stop_cb = cb;
+    m_stop_cb = std::move(cb);
     m_journal->append_async(
         b, b.bytes, ([this](logstore_seq_num_t seq_num, logdev_key key, void* cookie) {
             free(cookie);
@@ -663,11 +665,10 @@ void IndxMgr::destroy_indx_tbl(indx_cp_id_ptr indx_id) {
     if (m_active_tbl->destroy(indx_id->ainfo.btree_id, ([this, indx_id](Free_Blk_Entry& fbe) mutable {
                                   free_blk(indx_id, fbe);
                               })) != btree_status_t::success) {
-        /* destroy is failed. We are going ahead to delete the indx mgr. Worse case scneario we are going
-         * to leak some blks. It will be recoverd by running homestore fixer.
-         */
+        /* destroy is failed. We are going to retry it in next boot */
         LOGERROR("btree destroy failed");
         assert(0);
+        m_stop_cb(false);
     }
     add_prepare_cb_list(([this](indx_cp_id_ptr cur_indx_id, hs_cp_id* hb_id, hs_cp_id* new_hb_id) {
         this->indx_destroy_cp(cur_indx_id, hb_id, new_hb_id);
@@ -681,7 +682,7 @@ void IndxMgr::indx_destroy_cp(indx_cp_id_ptr cur_indx_id, hs_cp_id* hb_id, hs_cp
 
     if (hb_id->blkalloc_checkpoint) {
         cur_indx_id->flags = cp_state::active_cp;
-        m_cp->attach_cb(hb_id, m_stop_cb);
+        m_cp->attach_cb(hb_id, std::move(m_stop_cb));
         m_last_cp = true;
     } else {
         /* add it self again to the cb list for next cp which could be blkalloc checkpoint */
@@ -697,7 +698,8 @@ void IndxMgr::add_prepare_cb_list(prepare_cb cb) {
 }
 
 void IndxMgr::shutdown(indxmgr_stop_cb cb) {
-    assert(m_inited);
+    if (!m_inited) { cb(true); }
+    LOGINFO("indx mgr shutdown started");
     iomanager.cancel_timer(m_hs_cp_timer_hdl, false);
     m_hs_cp_timer_hdl = iomgr::null_timer_handle;
     trigger_hs_cp(([cb](bool success) {

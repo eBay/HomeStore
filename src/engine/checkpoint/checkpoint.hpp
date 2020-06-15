@@ -53,14 +53,21 @@ struct cp_id_base {
     std::atomic< cp_status_t > cp_status = cp_status_t::cp_init;
     std::atomic< int > enter_cnt;
     bool cp_trigger_waiting = false; // it is waiting for previous cp to complete
+    std::mutex cb_list_mtx;
+    /* callback when cp is done. This list is protected by trigger_cp_mtx */
+    std::vector< cp_done_cb > cb_list;
 
-    cp_id_base() : enter_cnt(0){};
+    cp_id_base() : enter_cnt(0), cb_list(0){};
     std::string to_string() {
         return fmt::format("[cp_status={}, enter_cnt={}]", enum_name(cp_status.load()), enter_cnt.load());
     }
 
-    /* callback when cp is done. This list is protected by trigger_cp_mtx */
-    std::vector< cp_done_cb > cb_list;
+    void push_cb(cp_done_cb&& cb) {
+        assert(cb != nullptr);
+        std::unique_lock< std::mutex > lk(cb_list_mtx);
+        assert(cp_status != cp_status_t::cp_prepare);
+        cb_list.push_back(std::move(cb));
+    }
 };
 
 /* It is responsible to trigger the checkpoints when all concurrent IOs are completed.
@@ -134,11 +141,11 @@ public:
     void cp_end(cp_id_type* id) {
         assert(in_cp_phase);
         HS_ASSERT_CMP(DEBUG, id->cp_status, ==, cp_status_t::cp_start);
-        in_cp_phase = false;
-        LOGDEBUGMOD(cp, "cp ID completed {}", id->to_string());
         for (uint32_t i = 0; i < id->cb_list.size(); ++i) {
             id->cb_list[i](true);
         }
+        in_cp_phase = false;
+        LOGDEBUGMOD(cp, "cp ID completed {}", id->to_string());
         delete (id);
 
         /* Once a cp is done, try to check and release exccess memory if need be */
@@ -153,11 +160,7 @@ public:
         cp_io_exit(cur_cp_id);
     }
 
-    void attach_cb(cp_id_type* cp_id, cp_done_cb cb) {
-        std::unique_lock< std::mutex > lk(trigger_cp_mtx);
-        assert(cp_id->cp_status != cp_status_t::cp_prepare);
-        cp_id->cb_list.push_back(cb);
-    }
+    void attach_cb(cp_id_type* cp_id, cp_done_cb&& cb) { cp_id->push_cb(std::move(cb)); }
 
     /* Trigger a checkpoint if it is not in cp phase. It makes sure to attach a callback to a CP who hasn't called the
      * attach_prepare yet.
@@ -172,7 +175,7 @@ public:
             std::unique_lock< std::mutex > lk(trigger_cp_mtx);
             auto cp_id = cp_io_enter();
             assert(cp_id->cp_status != cp_status_t::cp_prepare);
-            if (cb) { cp_id->cb_list.push_back(cb); }
+            if (cb) { cp_id->push_cb(std::move(cb)); }
             cp_id->cp_trigger_waiting = true;
             cp_io_exit(cp_id);
             return;
@@ -187,21 +190,15 @@ public:
         {
             std::unique_lock< std::mutex > lk(trigger_cp_mtx);
             cp_attach_prepare(prev_cp_id, new_cp_id);
+            if (cb) { prev_cp_id->push_cb(std::move(cb)); }
             prev_cp_id->cp_status = cp_status_t::cp_prepare;
             new_cp_id->cp_status = cp_status_t::cp_io_ready;
             rcu_xchg_pointer(&m_cur_cp_id, new_cp_id);
             synchronize_rcu();
-            prev_cp_id->cb_list.push_back(cb);
         }
         // At this point we are sure that there is no thread working on prev_cp_id without incrementing the cp_enter cnt
 
         cp_io_exit(prev_cp_id);
-    }
-
-    void trigger_cp(cp_id_type* id) {
-        id->cp_trigger_waiting = true;
-        assert(id->cp_status != cp_status_t::cp_start);
-        trigger_cp();
     }
 
     /* CP is divided into two stages :- CP prepare and CP start */

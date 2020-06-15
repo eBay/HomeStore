@@ -92,7 +92,7 @@ struct btree_cp_superblock {
     int64_t active_psn = -1;
     int64_t cp_cnt = -1;
     int64_t blkalloc_cp_cnt = -1;
-    int64_t btree_size; // start with root node
+    int64_t btree_size = 0;
     /* we can add more statistics as well like number of interior nodes etc. */
 } __attribute__((__packed__));
 
