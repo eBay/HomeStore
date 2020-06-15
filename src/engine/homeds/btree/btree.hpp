@@ -22,6 +22,7 @@
 #include <csignal>
 #include <fds/utils.hpp>
 #include <fmt/ostream.h>
+#include <flip/flip.hpp>
 #include "engine/homeds/array/reserve_vector.hpp"
 #include "engine/common/homestore_header.hpp"
 #include "engine/common/homestore_config.hpp"
