@@ -136,7 +136,16 @@ public:
     virtual VolumePtr create_volume(const vol_params& params) override;
     virtual std::error_condition remove_volume(const boost::uuids::uuid& uuid) override;
     virtual VolumePtr lookup_volume(const boost::uuids::uuid& uuid) override;
-    virtual SnapshotPtr snap_volume(VolumePtr) override;
+   
+    virtual SnapshotPtr create_snapshot(const VolumePtr& vol);
+    virtual std::error_condition remove_snapshot(const SnapshotPtr& snap);
+    virtual SnapshotPtr clone_snapshot(const SnapshotPtr& snap);
+
+    virtual std::error_condition restore_snapshot(const SnapshotPtr& snap);
+    virtual void list_snapshot(const VolumePtr& , std::vector<SnapshotPtr> snap_list);
+    virtual void read(const SnapshotPtr& snap, const snap_interface_req_ptr& req);
+    //virtual void write(const VolumePtr& volptr, std::vector<SnapshotPtr> snap_list);
+    //virtual SnapDiffPtr diff_snapshot(const SnapshotPtr& snap1, const SnapshotPtr& snap2);
 
     virtual const char* get_name(const VolumePtr& vol) override;
     virtual uint64_t get_page_size(const VolumePtr& vol) override;
