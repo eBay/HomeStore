@@ -204,7 +204,7 @@ public:
             wb_req->cp_id = cp_id;
             wb_req->m_mem = bn->get_memvec_intrusive();
             wb_req->bn = bn;
-            wb_req->bid.set(bn->get_node_id().m_id);
+            wb_req->bid.set(bn->get_node_id());
             /* we can assume that btree is not destroyed until cp is not completed */
             wb_req->wb_cache = this;
             assert(wb_req->state == WB_REQ_INIT);
@@ -222,7 +222,7 @@ public:
             auto dirty_buf_cnt = m_hs_dirty_buf_cnt.fetch_add(1);
             if ((dirty_buf_cnt == MAX_DIRTY_BUF)) { m_trigger_cp_cb(); }
         } else {
-            assert(bn->req[cp_cnt]->bid.to_integer() == bn->get_node_id().m_id);
+            assert(bn->req[cp_cnt]->bid.to_integer() == bn->get_node_id());
             if (bn->req[cp_cnt]->m_mem != bn->get_memvec_intrusive()) {
                 bn->req[cp_cnt]->m_mem = bn->get_memvec_intrusive();
                 assert(bn->req[cp_cnt]->m_mem != nullptr);
@@ -243,7 +243,7 @@ public:
      * to recover btree.
      */
     void free_blk(boost::intrusive_ptr< SSDBtreeNode > bn, btree_cp_id_ptr cp_id) {
-        BlkId bid(bn->get_node_id().m_id);
+        BlkId bid(bn->get_node_id());
         if (!cp_id) {
             m_blkstore->free_blk(bid, boost::none, boost::none);
             return;
@@ -277,7 +277,7 @@ public:
 
         /* make a copy */
         auto mem = iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), bn->get_cache_size());
-        homeds::blob outb;
+        sisl::blob outb;
         (bn->get_memvec()).get(&outb);
         memcpy(mem, outb.bytes, outb.size);
 

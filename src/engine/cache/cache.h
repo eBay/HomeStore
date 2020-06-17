@@ -113,7 +113,7 @@ public:
     ~Cache();
     /* Put the raw buffer into the cache with key k. It returns whether put is successful and if so provides
      * the smart pointer of CacheBuffer. Upsert flag of false indicates if the data already exists, do not insert */
-    bool insert(const K& k, const homeds::blob& b, uint32_t value_offset,
+    bool insert(const K& k, const sisl::blob& b, uint32_t value_offset,
                 boost::intrusive_ptr< CacheBuffer< K > >* out_smart_buf,
                 const std::function< void(CacheBuffer< K >*) >& found_cb = nullptr);
     bool insert(const K& k, const boost::intrusive_ptr< CacheBuffer< K > > in_buf,
@@ -125,9 +125,9 @@ public:
      *
      *  Returns a named tuple of bools - key_found_already and successfully inserted/updated
      */
-    auto update(const K& k, const homeds::blob& b, uint32_t value_offset,
+    auto update(const K& k, const sisl::blob& b, uint32_t value_offset,
                 boost::intrusive_ptr< CacheBuffer< K > >* out_smart_buf);
-    bool upsert(const K& k, const homeds::blob& b, boost::intrusive_ptr< CacheBuffer< K > >* out_smart_buf);
+    bool upsert(const K& k, const sisl::blob& b, boost::intrusive_ptr< CacheBuffer< K > >* out_smart_buf);
     bool get(const K& k, boost::intrusive_ptr< CacheBuffer< K > >* out_smart_buf);
     bool erase(boost::intrusive_ptr< CacheBuffer< K > > buf);
     bool erase(const K& k, boost::intrusive_ptr< CacheBuffer< K > >* out_bbuf);
@@ -204,7 +204,7 @@ public:
 #endif
     }
 
-    CacheBuffer(const K& key, const homeds::blob& blob, Cache< K >* cache, uint32_t offset = 0) :
+    CacheBuffer(const K& key, const sisl::blob& blob, Cache< K >* cache, uint32_t offset = 0) :
             m_mem(nullptr),
             m_refcount(0),
             m_data_offset(-1),
@@ -301,9 +301,9 @@ public:
         return m_mem;
     }
 
-    homeds::blob at_offset(uint32_t offset) const {
+    sisl::blob at_offset(uint32_t offset) const {
         assert(m_data_offset >= 0);
-        homeds::blob b;
+        sisl::blob b;
         b.bytes = nullptr;
         b.size = 0;
         get_memvec().get(&b, m_data_offset + offset);

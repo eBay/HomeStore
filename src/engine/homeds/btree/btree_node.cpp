@@ -93,7 +93,7 @@ DecBNodeType(uint32_t) get_available_size(const BtreeConfig& cfg) const {
     return call_variant_method_const(this, get_available_size, cfg);
 }
 DecBNodeType(bnodeid_t) get_node_id() const { return call_variant_method_const(this, get_node_id); }
-DecBNodeType(uint64_t) get_node_id_int() const { return call_variant_method_const(this, get_node_id_int); }
+// DecBNodeType(uint64_t) get_node_id_int() const { return call_variant_method_const(this, get_node_id_int); }
 DecBNodeType(void) set_node_id(bnodeid_t id) { call_variant_method(this, set_node_id, id); }
 DecBNodeType(bnodeid_t) get_next_bnode() const { return call_variant_method_const(this, get_next_bnode); }
 DecBNodeType(void) set_next_bnode(bnodeid_t b) { call_variant_method(this, set_next_bnode, b); }
@@ -104,7 +104,7 @@ DecBNodeType(void) get_last_key(BtreeKey* out_lastkey) { call_variant_method(thi
 DecBNodeType(void) get_first_key(BtreeKey* out_firstkey) { call_variant_method(this, get_first_key, out_firstkey); }
 DecBNodeType(uint64_t) get_gen() const { return call_variant_method_const(this, get_gen); }
 DecBNodeType(void) inc_gen() { call_variant_method(this, inc_gen); }
-DecBNodeType(void) flip_pc_gen_flag() { call_variant_method(this, flip_pc_gen_flag); }
+// DecBNodeType(void) flip_pc_gen_flag() { call_variant_method(this, flip_pc_gen_flag); }
 DecBNodeType(void) set_gen(uint64_t g) { call_variant_method(this, set_gen, g); }
 DecBNodeType(void) set_valid_node(bool valid) { call_variant_method(this, set_valid_node, valid); }
 DecBNodeType(bool) is_valid_node() const { return call_variant_method_const(this, is_valid_node); }
@@ -215,5 +215,6 @@ DecBNodeType(void) get_nth_element(int n, BtreeKey* out_key, BtreeValue* out_val
     if (out_key) { get_nth_key(n, out_key, is_copy); }
     if (out_val) { get_nth_value(n, out_val, is_copy); }
 }
+DecBNodeType(bool) has_valid_edge() const { return call_physical_method_const(this, has_valid_edge); }
 } // namespace btree
 } // namespace homeds

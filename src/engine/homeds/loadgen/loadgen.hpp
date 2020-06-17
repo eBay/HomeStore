@@ -250,7 +250,7 @@ private:
         LOGTRACE("Get {}", *kip);
     }
 
-    void print_blob(homeds::blob blob) {
+    void print_blob(sisl::blob blob) {
         std::stringstream ss;
         ss << "Blob: Size-" << blob.size << ", Data -[";
         char* p = (char*)blob.bytes;

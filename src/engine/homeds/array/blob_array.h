@@ -17,9 +17,9 @@
 namespace homeds {
 /**
  * Blob array is fixed immutable array of elements which implement Blob interface:
- *      set_blob(const homeds::blob &b);
- *      homeds::blob get_blob();
- *      copy_blob(const homeds::blob &b);
+ *      set_blob(const sisl::blob &b);
+ *      sisl::blob get_blob();
+ *      copy_blob(const sisl::blob &b);
  * There are methods which makes this mutable, but internally it facade, just works on new heap memory.
  *
  * Format is
@@ -180,7 +180,7 @@ public:
         assert(index < m_header->m_total_elements);
         assert(is_initialized);
         record* curr_rec = get_record(index);
-        blob b;
+        sisl::blob b;
         b.size = curr_rec->m_size;
         b.bytes = get_data_ptr(curr_rec->m_offset);
         if (copy) {

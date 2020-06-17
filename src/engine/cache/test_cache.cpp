@@ -15,8 +15,8 @@ THREAD_BUFFER_INIT;
 RCU_REGISTER_INIT;
 
 struct blk_id {
-    static homeds::blob get_blob(const blk_id& id) {
-        homeds::blob b;
+    static sisl::blob get_blob(const blk_id& id) {
+        sisl::blob b;
         b.bytes = (uint8_t*)&id.m_id;
         b.size = sizeof(uint64_t);
 
@@ -78,8 +78,7 @@ public:
             auto blob = cbuf->at_offset(0);
             auto b = 0U;
             for (b = 0U; b < blob.size / 8; b++)
-                if (((uint64_t*)blob.bytes)[b] != id)
-                    break;
+                if (((uint64_t*)blob.bytes)[b] != id) break;
             EXPECT_EQ(b, blob.size / 8);
         }
     }

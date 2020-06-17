@@ -68,16 +68,16 @@ public:
         return 0;
     }
 
-    virtual homeds::blob get_blob() const {
-        homeds::blob b = {(uint8_t*)&m_num, sizeof(uint64_t)};
+    virtual sisl::blob get_blob() const {
+        sisl::blob b = {(uint8_t*)&m_num, sizeof(uint64_t)};
         return b;
     };
 
-    virtual void set_blob(const homeds::blob& b) {
+    virtual void set_blob(const sisl::blob& b) {
         auto n = *((uint64_t*)b.bytes);
         m_num = n;
     }
-    virtual void copy_blob(const homeds::blob& b) { set_blob(b); }
+    virtual void copy_blob(const sisl::blob& b) { set_blob(b); }
 
     virtual uint32_t get_blob_size() const { return sizeof(uint64_t); }
     virtual void set_blob_size(uint32_t size) {}
@@ -238,13 +238,13 @@ public:
         return 0;
     }
 
-    virtual homeds::blob get_blob() const override {
-        homeds::blob b = {(uint8_t*)m_attr, sizeof(attr_t)};
+    virtual sisl::blob get_blob() const override {
+        sisl::blob b = {(uint8_t*)m_attr, sizeof(attr_t)};
         return b;
     }
 
-    virtual void set_blob(const homeds::blob& b) override { m_attr = (attr_t*)b.bytes; }
-    virtual void copy_blob(const homeds::blob& b) override { memcpy(m_attr, b.bytes, b.size); }
+    virtual void set_blob(const sisl::blob& b) override { m_attr = (attr_t*)b.bytes; }
+    virtual void copy_blob(const sisl::blob& b) override { memcpy(m_attr, b.bytes, b.size); }
     virtual uint32_t get_blob_size() const override { return (sizeof(attr_t)); }
 
     static uint32_t get_fixed_size() { return (sizeof(attr_t)); }

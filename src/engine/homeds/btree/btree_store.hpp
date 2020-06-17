@@ -18,19 +18,23 @@ template < btree_store_type BtreeStoreType, typename K, typename V, btree_node_t
            btree_node_type LeafNodeType >
 class BtreeNode;
 
+template < btree_store_type BtreeStoreType, typename K, typename V, btree_node_type InteriorNodeType,
+           btree_node_type LeafNodeType >
+class Btree;
+#define btree_t Btree< BtreeStoreType, K, V, InteriorNodeType, LeafNodeType >
+
 #define btree_node_t BtreeNode< BtreeStoreType, K, V, InteriorNodeType, LeafNodeType >
 #define BtreeNodePtr boost::intrusive_ptr< btree_node_t >
 
 template < btree_store_type BtreeStoreType, typename K, typename V, btree_node_type InteriorNodeType,
            btree_node_type LeafNodeType >
 class BtreeStore {
-
     struct superblock;
 
 public:
     using HeaderType = homeds::btree::EmptyClass;
 
-    static std::unique_ptr< btree_store_t > init_btree(BtreeConfig& cfg);
+    static std::unique_ptr< btree_store_t > init_btree(btree_t* base_btree, BtreeConfig& cfg);
     static uint8_t* get_physical(const btree_node_t* bn);
     static uint32_t get_node_area_size(btree_store_t* store);
     static void update_sb(btree_store_t* store, btree_store_t::superblock& sb, btree_cp_superblock* cp_sb,

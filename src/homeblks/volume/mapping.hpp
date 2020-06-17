@@ -109,20 +109,20 @@ public:
         return false;
     }
 
-    virtual homeds::blob get_blob() const override { return {(uint8_t*)m_lbaId_ptr, get_fixed_size()}; }
+    virtual sisl::blob get_blob() const override { return {(uint8_t*)m_lbaId_ptr, get_fixed_size()}; }
 
-    virtual void set_blob(const homeds::blob& b) override {
+    virtual void set_blob(const sisl::blob& b) override {
         assert(b.size == get_fixed_size());
         m_lbaId_ptr = (LbaId*)b.bytes;
     }
 
-    virtual void copy_blob(const homeds::blob& b) override {
+    virtual void copy_blob(const sisl::blob& b) override {
         assert(b.size == get_fixed_size());
         LbaId* other = (LbaId*)b.bytes;
         set(other->m_lba_start, other->m_n_lba);
     }
 
-    virtual void copy_end_key_blob(const homeds::blob& b) override {
+    virtual void copy_end_key_blob(const sisl::blob& b) override {
         assert(b.size == get_fixed_size());
         LbaId* other = (LbaId*)b.bytes;
         set(other->end(), 1);
@@ -204,11 +204,11 @@ public:
 
     uint32_t get_blob_size() { return sizeof(m_meta) + sizeof(uint16_t) * get_nlba(); }
 
-    homeds::blob get_blob() { return {(uint8_t*)m_ptr, get_blob_size()}; }
+    sisl::blob get_blob() { return {(uint8_t*)m_ptr, get_blob_size()}; }
 
-    void set_blob(homeds::blob b) { m_ptr = (ValueEntry*)b.bytes; }
+    void set_blob(sisl::blob b) { m_ptr = (ValueEntry*)b.bytes; }
 
-    void copy_blob(homeds::blob b) {
+    void copy_blob(sisl::blob b) {
         ValueEntry ve(b.bytes);
         copy_from(ve);
     }
@@ -312,8 +312,8 @@ public:
         assert(0);
     }
 
-    virtual homeds::blob get_blob() const override {
-        homeds::blob b;
+    virtual sisl::blob get_blob() const override {
+        sisl::blob b;
         b.bytes = (uint8_t*)m_earr.get_mem();
         b.size = m_earr.get_size();
         return b;
@@ -388,9 +388,9 @@ public:
         }
     }
 
-    virtual void set_blob(const homeds::blob& b) override { m_earr.set_mem((void*)(b.bytes), b.size); }
+    virtual void set_blob(const sisl::blob& b) override { m_earr.set_mem((void*)(b.bytes), b.size); }
 
-    virtual void copy_blob(const homeds::blob& b) override {
+    virtual void copy_blob(const sisl::blob& b) override {
         Blob_Array< ValueEntry > other;
         other.set_mem((void*)b.bytes, b.size);
         m_earr.set_elements(other); // deep copy
@@ -959,10 +959,7 @@ public:
         LOGINFO("Finished Printing. ");
     }
 
-    void print_node(uint64_t blkid) {
-        bnodeid_t bid(blkid);
-        m_bt->print_node(bid);
-    }
+    void print_node(uint64_t blkid) { m_bt->print_node(blkid); }
 #if 0
     void diff(mapping* other) {
         std::vector< std::pair< MappingKey, MappingValue > > diff_kv;

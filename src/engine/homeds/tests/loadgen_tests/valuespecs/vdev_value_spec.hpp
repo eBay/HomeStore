@@ -42,7 +42,7 @@ public:
 
     VDevValue(const VDevValue& other) {}
 #if 0
-    void copy_blob(const homeds::blob& b) {
+    void copy_blob(const sisl::blob& b) {
         for (size_t i = 0; i < b.size; i++) {
             m_bytes[i] = b.bytes[i];
         }
@@ -60,15 +60,15 @@ public:
 
 #endif
 
-    homeds::blob get_blob() const {
-        homeds::blob b;
+    sisl::blob get_blob() const {
+        sisl::blob b;
         b.bytes = (uint8_t*)m_bytes;
         b.size = m_size;
         return b;
     }
 
     virtual uint64_t get_hash_code() {
-        homeds::blob b = get_blob();
+        sisl::blob b = get_blob();
         return util::Hash64((const char*)b.bytes, (size_t)b.size);
     }
 

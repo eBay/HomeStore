@@ -47,15 +47,15 @@ public:
         return *this;
     }
 
-    homeds::blob get_blob() const override {
-        homeds::blob b;
+    sisl::blob get_blob() const override {
+        sisl::blob b;
         b.bytes = (uint8_t*)m_bytes;
         b.size = Size;
         return b;
     }
 
-    void set_blob(const homeds::blob& b) override { copy_blob(b); }
-    void copy_blob(const homeds::blob& b) override { memcpy(m_bytes, b.bytes, b.size); }
+    void set_blob(const sisl::blob& b) override { copy_blob(b); }
+    void copy_blob(const sisl::blob& b) override { memcpy(m_bytes, b.bytes, b.size); }
     void append_blob(const BtreeValue& new_val, BtreeValue& existing_val) override { copy_blob(new_val.get_blob()); }
     uint32_t get_blob_size() const override { return Size; }
     void set_blob_size(uint32_t size) override { assert(size == sizeof(Size)); }
@@ -74,7 +74,7 @@ public:
     }
 
     virtual uint64_t get_hash_code() override {
-        homeds::blob b = get_blob();
+        sisl::blob b = get_blob();
         return util::Hash64((const char*)b.bytes, (size_t)b.size);
     }
 

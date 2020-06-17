@@ -52,7 +52,7 @@ MetaBlkMgr::~MetaBlkMgr() {
 }
 
 // sync read
-void MetaBlkMgr::read(BlkId& bid, homeds::blob& b) {
+void MetaBlkMgr::read(BlkId& bid, sisl::blob& b) {
     auto req = blkstore_req< BlkBuffer >::make_request();
     req->isSyncCall = true;
 
@@ -69,7 +69,7 @@ void MetaBlkMgr::load_ssb(sb_blkstore_blob* blob) {
     HS_ASSERT(RELEASE, blob->type == blkstore_type::META_STORE, "Invalid blkstore type: {}", blob->type);
     HS_LOG(INFO, metablk, "Loading meta ssb blkid: {}", bid.to_string());
 
-    homeds::blob b;
+    sisl::blob b;
     read(bid, b);
 
     m_ssb = (meta_blk_sb*)iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_PAGE_SZ);
@@ -133,7 +133,7 @@ void MetaBlkMgr::scan_meta_blks() {
     auto bid = m_ssb->next_blkid;
 
     while (bid.to_integer() != BlkId::invalid_internal_id()) {
-        homeds::blob b;
+        sisl::blob b;
         read(bid, b);
         auto mblk = (meta_blk*)b.bytes;
 
@@ -161,7 +161,7 @@ void MetaBlkMgr::scan_meta_blks() {
         uint64_t read_sz = mblk->hdr.h.context_sz >= META_BLK_CONTEXT_SZ ? META_BLK_CONTEXT_SZ : mblk->hdr.h.context_sz;
 
         while (obid.to_integer() != BlkId::invalid_internal_id()) {
-            homeds::blob b;
+            sisl::blob b;
             read(obid, b);
 
             auto ovf_hdr = (meta_blk_ovf_hdr*)b.bytes;
@@ -679,7 +679,7 @@ void MetaBlkMgr::recover(bool do_comp_cb) {
                               bid.to_string());
                     // copy the remaining data from ovf blk chain;
                     // we don't cache context data, so read from disk;
-                    homeds::blob b;
+                    sisl::blob b;
                     read(bid, b);
 
                     auto ovf_hdr = (meta_blk_ovf_hdr*)b.bytes;

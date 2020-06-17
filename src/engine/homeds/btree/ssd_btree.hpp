@@ -29,6 +29,7 @@ namespace homeds {
 namespace btree {
 
 #define SSDBtreeStore BtreeStore< btree_store_type::SSD_BTREE, K, V, InteriorNodeType, LeafNodeType >
+#define ssd_btree_t Btree< btree_store_type::SSD_BTREE, K, V, InteriorNodeType, LeafNodeType >
 
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
 class SSDBtreeStore {
@@ -38,13 +39,14 @@ public:
         logstore_id_t journal_id;
     } __attribute((packed));
 
-    static std::unique_ptr< SSDBtreeStore > init_btree(BtreeConfig& cfg) {
+    static std::unique_ptr< SSDBtreeStore > init_btree(ssd_btree_t* btree, BtreeConfig& cfg) {
         static std::once_flag flag1;
         std::call_once(flag1, [&cfg]() { m_blkstore = (btree_blkstore_t*)cfg.blkstore; });
-        return std::unique_ptr< SSDBtreeStore >(new SSDBtreeStore(cfg));
+        return std::make_unique< SSDBtreeStore >(btree, cfg);
     }
 
-    BtreeStore(BtreeConfig& cfg) :
+    BtreeStore(ssd_btree_t* btree, BtreeConfig& cfg) :
+            m_btree(btree),
             m_cfg(cfg),
             m_wb_cache(cfg.blkstore, cfg.align_size,
                        std::bind(&SSDBtreeStore::cp_done_store, this, std::placeholders::_1), cfg.trigger_cp_cb) {
@@ -57,7 +59,7 @@ public:
 
     /* It is called when its consumer has successfully persisted its superblock. */
     void create_done_store(bnodeid_t m_root_node) {
-        auto bid = BlkId(m_root_node.m_id);
+        auto bid = BlkId(m_root_node);
         m_blkstore->alloc_blk(bid);
     }
 
@@ -118,7 +120,18 @@ public:
 
     logstore_id_t get_journal_id_store() { return (m_journal->get_store_id()); }
 
-    void log_found(logstore_seq_num_t seqnum, log_buffer log_buf, void* mem) {}
+    void log_found(logstore_seq_num_t seqnum, log_buffer log_buf, void* mem) {
+#if 0
+        auto& cp_sb = m_btree->get_last_cp_cb();
+        if (seqnum >= cp_sb.active_psn) {
+            // Entry is not replayed yet
+            btree_journal_entry* jentry = (btree_journal_entry*)log_buf.bytes;
+            if (jentry->op == journal_op::BTREE_SPLIT) { m_btree->split_node_replay(jentry, m_first_cp); }
+        }
+
+        if ()
+#endif
+    }
 
     static void cp_start(SSDBtreeStore* store, btree_cp_id_ptr cp_id, cp_comp_callback cb) {
         store->cp_start_store(cp_id, cb);
@@ -153,39 +166,38 @@ public:
 
     void destroy_done_store() { home_log_store_mgr.remove_log_store(m_journal->get_store_id()); }
 
-    static void write_journal_entry(SSDBtreeStore* store, btree_cp_id_ptr cp_id, uint8_t* mem, size_t size) {
-        store->write_journal_entry_store(cp_id, mem, size);
+    static void write_journal_entry(SSDBtreeStore* store, btree_cp_id_ptr cp_id, btree_journal_entry* entry) {
+        store->write_journal_entry_store(cp_id, entry);
     }
 
-    void write_journal_entry_store(btree_cp_id_ptr cp_id, uint8_t* mem, size_t size) {
+    void write_journal_entry_store(btree_cp_id_ptr cp_id, btree_journal_entry* entry) {
         ++cp_id->ref_cnt;
-        sisl::blob b(mem, size);
-        m_journal->append_async(b, mem, ([this, cp_id](logstore_seq_num_t seq_num, bool status, void* cookie) {
-                                    auto hdr = btree_journal_entry::get_entry_hdr((uint8_t*)cookie);
-                                    if (hdr->op == journal_op::BTREE_CREATE) {
-                                        /* we set disk bitmap later when btree root node is persisted */
-                                        free(cookie);
-                                        try_cp_start(cp_id);
-                                        return;
+        sisl::blob b((uint8_t*)entry, entry->actual_size);
+        m_journal->append_async(b, (void*)entry, ([this, cp_id](logstore_seq_num_t seq_num, bool status, void* cookie) {
+                                    btree_journal_entry* jentry = (btree_journal_entry*)cookie;
+                                    LOGINFO("btree_journal_entry: {}", jentry->to_string());
+                                    if (jentry->op != journal_op::BTREE_CREATE) {
+                                        /*
+                                         * blk id is allocated for newly created nodes in disk bitmap only after it is
+                                         * writing to journal. check blk_alloctor base class for further explanations.
+                                         */
+                                        jentry->foreach_node(bt_journal_node_op::creation,
+                                                             [&](bt_node_gen_pair n, sisl::blob k) {
+                                                                 auto bid = BlkId(n.node_id);
+                                                                 m_blkstore->alloc_blk(bid);
+                                                             });
+                                        // For root node, disk bitmap is later persisted with btree root node.
                                     }
-                                    auto pair = btree_journal_entry::get_new_nodes_list((uint8_t*)cookie);
-                                    auto new_node_id_list = pair.first;
-                                    auto size = pair.second;
-                                    /* blk id is alloceted in disk bitmap only after it is writing to journal. check
-                                     * blk_alloctor base class for further explanations.
-                                     */
-                                    for (uint32_t i = 0; i < size; ++i) {
-                                        auto bid = BlkId(new_node_id_list[i]);
-                                        m_blkstore->alloc_blk(bid);
-                                    }
-                                    free(cookie);
+
+                                    jentry->~btree_journal_entry();
+                                    free(jentry);
                                     try_cp_start(cp_id);
                                 }));
     }
 
     static uint8_t* get_physical(const SSDBtreeNode* bn) {
         wb_cache_buffer_t* bbuf = (wb_cache_buffer_t*)(bn);
-        homeds::blob b = bbuf->at_offset(0);
+        sisl::blob b = bbuf->at_offset(0);
         return b.bytes;
     }
 
@@ -208,13 +220,13 @@ public:
         }
 
         // Access the physical node buffer and initialize it
-        homeds::blob b = safe_buf->at_offset(0);
+        sisl::blob b = safe_buf->at_offset(0);
         assert(b.size == store->get_node_size());
         if (is_leaf) {
-            bnodeid_t bid(blkid.to_integer(), 0);
+            bnodeid_t bid = blkid.to_integer();
             auto n = new (b.bytes) VariantNode< LeafNodeType, K, V >(&bid, true, store->m_cfg);
         } else {
-            bnodeid_t bid(blkid.to_integer(), 0);
+            bnodeid_t bid = blkid.to_integer();
             auto n = new (b.bytes) VariantNode< InteriorNodeType, K, V >(&bid, true, store->m_cfg);
         }
         boost::intrusive_ptr< SSDBtreeNode > new_node = boost::static_pointer_cast< SSDBtreeNode >(safe_buf);
@@ -231,11 +243,9 @@ public:
         // Read the data from the block store
         try {
 #ifdef _PRERELEASE
-            if (homestore_flip->test_flip("btree_read_fail", (uint64_t)(id.m_id))) {
-                folly::throwSystemError("flip error");
-            }
+            if (homestore_flip->test_flip("btree_read_fail", id)) { folly::throwSystemError("flip error"); }
 #endif
-            homestore::BlkId blkid(id.m_id);
+            homestore::BlkId blkid(id);
             auto req = writeback_req_t::make_request();
             req->is_read = true;
             req->isSyncCall = true;
@@ -251,7 +261,6 @@ public:
     static void copy_node(SSDBtreeStore* store, boost::intrusive_ptr< SSDBtreeNode > copy_from,
                           boost::intrusive_ptr< SSDBtreeNode > copy_to) {
         bnodeid_t original_to_id = copy_to->get_node_id();
-        original_to_id.m_pc_gen_flag = copy_from->get_node_id().m_pc_gen_flag; // copy pc gen flag
         boost::intrusive_ptr< wb_cache_buffer_t > to_buff = boost::dynamic_pointer_cast< wb_cache_buffer_t >(copy_to);
         boost::intrusive_ptr< wb_cache_buffer_t > frm_buff =
             boost::dynamic_pointer_cast< wb_cache_buffer_t >(copy_from);
@@ -297,7 +306,7 @@ public:
 
     static btree_status_t write_node(SSDBtreeStore* store, const boost::intrusive_ptr< SSDBtreeNode >& bn,
                                      const boost::intrusive_ptr< SSDBtreeNode >& dependent_bn, btree_cp_id_ptr cp_id) {
-        homestore::BlkId blkid(bn->get_node_id().m_id);
+        homestore::BlkId blkid(bn->get_node_id());
 
         auto physical_node = (LeafPhysicalNode*)(bn->at_offset(0).bytes);
         physical_node->set_checksum(get_node_area_size(store));
@@ -341,6 +350,7 @@ public:
     }
 
 private:
+    ssd_btree_t* m_btree;
     std::shared_ptr< HomeLogStore > m_journal;
     BtreeConfig m_cfg;
     uint32_t m_node_size;

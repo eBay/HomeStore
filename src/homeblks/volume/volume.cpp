@@ -255,7 +255,7 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
 
         /* compute checksum and store it in a request */
         for (uint32_t i = 0; i < vreq->nlbas(); ++i) {
-            homeds::blob outb;
+            sisl::blob outb;
             vreq->mvec->get(&outb, i * get_page_size());
             vreq->push_csum(crc16_t10dif(init_crc_16, outb.bytes, get_page_size()));
         }
@@ -495,7 +495,7 @@ void Volume::verify_csum(const volume_req_ptr& vreq) {
         auto size = info.size;
         auto buf = info.buf;
         while (size != 0) {
-            homeds::blob b = VolInterface::get_instance()->at_offset(buf, offset);
+            sisl::blob b = VolInterface::get_instance()->at_offset(buf, offset);
             for (uint32_t size_read = 0; size_read < b.size && size != 0; size_read += get_page_size()) {
                 uint16_t csum = crc16_t10dif(init_crc_16, b.bytes + size_read, get_page_size());
 

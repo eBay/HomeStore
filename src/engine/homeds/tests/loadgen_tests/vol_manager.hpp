@@ -588,7 +588,7 @@ private:
             auto size = info.size;
             auto buf = info.buf;
             while (size != 0) {
-                homeds::blob b = VolInterface::get_instance()->at_offset(buf, offset);
+                sisl::blob b = VolInterface::get_instance()->at_offset(buf, offset);
                 auto hash = get_hash(b.bytes);
                 auto stored_hash = m_verify_mgr->get_crc(req->vol_id, req->lba + nblks_in_buf_list);
 

@@ -33,24 +33,11 @@ find_library(LIB_ISAL isal)
 set(COMMON_LIB_DEPS
       ${CONAN_LIBS}
       ${LIB_AIO}
-      dpdk
       #${LIB_DOUBLE_CONVERSION}
       #${LIB_ISAL}
     )
 
 include_directories (BEFORE .)
-
-#add_subdirectory(blkalloc)
-#add_subdirectory(blkstore)
-#add_subdirectory(cache)
-#add_subdirectory(device)
-#add_subdirectory(endpoint)
-#add_subdirectory(journal)
-#add_subdirectory(homeds)
-#add_subdirectory(homeblks)
-#add_subdirectory(error)
-#add_subdirectory(common)
-#add_subdirectory(threadpool)
 
 add_subdirectory(engine)
 add_subdirectory(homeblks)
