@@ -214,7 +214,6 @@ void HomeBlks::create_volume(VolumePtr vol) {
     decltype(m_volume_map)::iterator it;
     // Try to add an entry for this volume
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
-    if (is_shutdown()) { return; }
     bool happened{false};
     std::tie(it, happened) = m_volume_map.emplace(std::make_pair(vol->get_uuid(), nullptr));
     HS_ASSERT(RELEASE, happened, "volume already exists");
@@ -334,7 +333,6 @@ void HomeBlks::vol_mounted(const VolumePtr& vol, vol_state state) {
 
 bool HomeBlks::vol_state_change(const VolumePtr& vol, vol_state new_state) {
     assert(new_state == vol_state::OFFLINE || new_state == vol_state::ONLINE);
-    std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
     try {
         vol->set_state(new_state);
     } catch (std::exception& e) {
@@ -634,8 +632,6 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
 }
 
 void HomeBlks::do_volume_shutdown(bool force) {
-    std::unique_lock< std::recursive_mutex > lg(m_vol_lock);
-
     if (!force && !Volume::can_all_vols_shutdown()) {
         Volume::trigger_homeblks_cp();
         return;
@@ -704,7 +700,6 @@ std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
 vol_state HomeBlks::get_state(VolumePtr vol) { return vol->get_state(); }
 
 bool HomeBlks::fix_tree(VolumePtr vol, bool verify) {
-    std::unique_lock< std::recursive_mutex > lg(m_vol_lock);
     return vol->fix_mapping_btree(verify);
 }
 
