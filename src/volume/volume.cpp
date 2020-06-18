@@ -403,7 +403,7 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
 
         if (csum_mismatch_found) {
             /* move volume to read only and panic */
-            set_state(vol_state::VOL_READ_ONLY, true);
+            set_state(vol_state::VOL_CORRUPTED, true);
             abort();
         }
 
@@ -585,7 +585,8 @@ void Volume::check_and_complete_req(const vol_interface_req_ptr& hb_req, const s
 
 void Volume::print_tree() { m_map->print_tree(); }
 bool Volume::verify_tree() {
-    return m_map->verify_tree(([this](MappingKey& k, MappingValue& v) {
+    bool is_data_consistent = true;
+    bool ret = m_map->verify_tree(([this, &is_data_consistent](MappingKey& k, MappingValue& v) {
         ValueEntry ve;
         (v.get_array()).get(0, ve, false);
         auto sz = get_page_size() * k.get_n_lba();
@@ -601,8 +602,12 @@ bool Volume::verify_tree() {
             VOL_LOG_ASSERT_CMP(ve.get_checksum_at(i), ==, csum, ,
                                "Checksum mismatch start lba {} lba offset {} blkid {}, read size {} , page size {}",
                                lba, i, bid.to_string(), bid.data_size(hb_page_size), get_page_size());
+            if (ve.get_checksum_at(i) != csum) {
+                is_data_consistent = false;
+            }
         }
     }));
+    return (ret && is_data_consistent);
 }
 
 void Volume::print_node(uint64_t blkid) { m_map->print_node(blkid); }

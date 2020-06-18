@@ -568,9 +568,15 @@ void HomeBlks::add_devices() {
 }
 
 void HomeBlks::vol_mounted(const VolumePtr& vol, vol_state state) {
-    if (state != vol_state::VOL_READ_ONLY) {
-        m_cfg.vol_mounted_cb(vol, state);
+    if (state == vol_state::VOL_CORRUPTED) {
+        if (verify_tree(vol)) {
+            VOL_INFO_LOG(vol->get_sb()->ondisk_sb->uuid, " volume data is consistent. changing its state to online");
+            vol_state_change(vol, vol_state::ONLINE);
+            state = vol_state::ONLINE;
+        }
     }
+
+    m_cfg.vol_mounted_cb(vol, state);
     VOL_INFO_LOG(vol->get_sb()->ondisk_sb->uuid, " Mounted the volume in state {}", state);
 }
 
@@ -981,7 +987,10 @@ void HomeBlks::print_tree(const VolumePtr& vol, bool chksum) {
 }
 
 bool HomeBlks::verify_tree(const VolumePtr& vol) {
-    return vol->verify_tree();
+    VOL_INFO_LOG(vol->get_uuid(), "Verifying the integrity of the index tree");
+    bool status = vol->verify_tree();
+    VOL_INFO_LOG(vol->get_uuid(), "Verify complete status {}", status);
+    return status;
 }
 
 void HomeBlks::verify_vols() {
@@ -990,9 +999,7 @@ void HomeBlks::verify_vols() {
     LOGINFO("starting verifying volume. Number of volume {}", m_volume_map.size());
     while (it != m_volume_map.end()) {
         auto vol = it->second;
-        VOL_INFO_LOG(vol->get_uuid(), "Verifying the integrity of the index tree");
         verify_tree(vol);
-        VOL_INFO_LOG(vol->get_uuid(), "Verify complete");
         ++it;
     }
 }
