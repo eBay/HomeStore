@@ -36,6 +36,11 @@ pipeline {
                         sh "docker build --rm --build-arg BUILD_TYPE=debug --build-arg CONAN_USER=${CONAN_USER} --build-arg ARTIFACTORY_PASS=${ARTIFACTORY_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${GIT_COMMIT}-debug ."
                     }
                 }
+                stage('Sanitize Build') {
+                    steps {
+                        sh "docker build --rm --build-arg BUILD_TYPE=sanitize --build-arg CONAN_USER=${CONAN_USER} --build-arg ARTIFACTORY_PASS=${ARTIFACTORY_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${GIT_COMMIT}-sanitize ."
+                    }
+                }
                 stage('Test Build') {
                     steps {
                         sh "docker build --rm --build-arg BUILD_TYPE=test --build-arg CONAN_USER=${CONAN_USER} --build-arg ARTIFACTORY_PASS=${ARTIFACTORY_PASS} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${GIT_COMMIT}-test ."
@@ -56,6 +61,11 @@ pipeline {
                         sh "docker run --rm ${PROJECT}-${GIT_COMMIT}-debug"
                     }
                 }
+                stage('Sanitize Build') {
+                    steps {
+                        sh "docker run --rm ${PROJECT}-${GIT_COMMIT}-sanitize"
+                    }
+                }
                 stage('Test Build') {
                     steps {
                         sh "docker run --rm ${PROJECT}-${GIT_COMMIT}-test"
@@ -71,7 +81,10 @@ pipeline {
 
         stage('TestImage') {
             when {
-                branch "develop"
+                anyOf {
+                    branch "develop"
+                    branch "snapshot"
+                }
             }
             parallel {
                 stage('Test Build') {
@@ -82,6 +95,17 @@ pipeline {
                             sh "docker push ecr.vip.ebayc3.com/${ORG}/${PROJECT}:${CONAN_CHANNEL}-test"
                             sh "docker rmi ecr.vip.ebayc3.com/${ORG}/${PROJECT}:${CONAN_CHANNEL}-test"
                             slackSend channel: '#conan-pkgs', message: "*${PROJECT}:${CONAN_CHANNEL}-test* has been pushed to ECR."
+                        }
+                    }
+                }
+                stage("Sanitize Build") {
+                    steps {
+                        withDockerRegistry([credentialsId: 'sds+sds', url: "https://ecr.vip.ebayc3.com"]) {
+                            sh "docker build -f Dockerfile.test --rm --build-arg BUILD_TYPE=sanitize --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${PROJECT}-${GIT_COMMIT}-sanitize ."
+                            sh "docker tag ${PROJECT}-${GIT_COMMIT}-sanitize ecr.vip.ebayc3.com/${ORG}/${PROJECT}:${CONAN_CHANNEL}-sanitize"
+                            sh "docker push ecr.vip.ebayc3.com/${ORG}/${PROJECT}:${CONAN_CHANNEL}-sanitize"
+                            sh "docker rmi ecr.vip.ebayc3.com/${ORG}/${PROJECT}:${CONAN_CHANNEL}-sanitize"
+                            slackSend channel: '#conan-pkgs', message: "*${PROJECT}:${CONAN_CHANNEL}-sanitize* has been pushed to ECR."
                         }
                     }
                 }
@@ -106,8 +130,9 @@ pipeline {
         }
         always {
             sh "docker rmi -f ${PROJECT}-${GIT_COMMIT}-debug"
-            sh "docker rmi -f ${PROJECT}-${GIT_COMMIT}-release"
+            sh "docker rmi -f ${PROJECT}-${GIT_COMMIT}-sanitize"
             sh "docker rmi -f ${PROJECT}-${GIT_COMMIT}-test"
+            sh "docker rmi -f ${PROJECT}-${GIT_COMMIT}-release"
         }
     }
 }

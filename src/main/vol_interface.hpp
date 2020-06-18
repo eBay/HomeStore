@@ -131,6 +131,7 @@ enum vol_state {
     MOUNTING = 4,
     DESTROYING = 5,
     UNINITED = 6,
+    VOL_READ_ONLY = 7
 };
 
 typedef std::function< void(const vol_interface_req_ptr& req) > io_comp_callback;

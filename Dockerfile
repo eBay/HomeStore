@@ -37,8 +37,10 @@ RUN set -eux; \
           echo "sonar.branch.target=develop" >> ${SOURCE_PATH}sonar-project.properties; \
       fi; \
       sonar-scanner -Dsonar.projectBaseDir=${SOURCE_PATH} -Dsonar.projectVersion="${PKG_VERSION}"; \
+    elif [ "sanitize" = "${BUILD_TYPE}" ]; then \
+      conan create -pr debug ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"; \  
     else \
-      conan create -pr ${BUILD_TYPE} ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"; \
+      conan create -o homestore:sanitize=False -pr ${BUILD_TYPE} ${SOURCE_PATH} "${CONAN_USER}"/"${CONAN_CHANNEL}"; \
     fi;
 
 CMD set -eux; \

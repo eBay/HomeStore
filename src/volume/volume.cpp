@@ -238,7 +238,8 @@ void Volume::alloc_blk_callback(struct BlkId bid, size_t offset_size, size_t siz
     assert(m_state == vol_state::MOUNTING);
     BlkId free_bid(bid.get_blkid_at(offset_size, size, HomeBlks::instance()->get_data_pagesz()));
     THIS_VOL_LOG(TRACE, volume, , "bid={}", free_bid.to_string());
-    m_data_blkstore->alloc_blk(free_bid);
+    auto ret = m_data_blkstore->alloc_blk(free_bid);
+    VOL_RELEASE_ASSERT_CMP(ret, ==, BLK_ALLOC_SUCCESS, , "blkid already allocated {}", free_bid.to_string());
     m_used_size.fetch_add(size, std::memory_order_relaxed);
 }
 
@@ -385,15 +386,27 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
     } else {
         std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;
         uint64_t offset = 0;
+        bool csum_mismatch_found = false;
         for (int i = 0; i < vreq->nlbas; i++) {
             carr[i] =
                 crc16_t10dif(init_crc_16, vreq->bbuf->at_offset(vreq->read_buf_offset + offset).bytes, get_page_size());
             offset += get_page_size();
 
-            VOL_RELEASE_ASSERT_CMP(vreq->checksum[i], ==, carr[i], vreq->parent_req,
-                                   "Checksum mismatch and blks from cache {}",
-                                   vreq->is_blk_from_cache(vreq->read_buf_offset + offset));
+            VOL_DEBUG_ASSERT_CMP(
+                vreq->checksum[i], ==, carr[i], vreq->parent_req,
+                "Checksum mismatch start lba {} lba offset {} blkid {} blk id offset {}, read size {} , page size {}",
+                vreq->lba, offset, vreq->bid.to_string(), vreq->read_buf_offset, vreq->read_size, get_page_size());
+            if (vreq->checksum[i] != carr[i]) {
+                csum_mismatch_found = true;
+            }
         }
+
+        if (csum_mismatch_found) {
+            /* move volume to read only and panic */
+            set_state(vol_state::VOL_READ_ONLY, true);
+            abort();
+        }
+
         COUNTER_DECREMENT(m_metrics, volume_outstanding_data_read_count, 1);
         check_and_complete_req(parent_req, no_error, true /* call_completion_cb */, &fbes);
 #ifndef NDEBUG
@@ -571,7 +584,26 @@ void Volume::check_and_complete_req(const vol_interface_req_ptr& hb_req, const s
 }
 
 void Volume::print_tree() { m_map->print_tree(); }
-bool Volume::verify_tree() { return m_map->verify_tree(); }
+bool Volume::verify_tree() {
+    return m_map->verify_tree(([this](MappingKey& k, MappingValue& v) {
+        ValueEntry ve;
+        (v.get_array()).get(0, ve, false);
+        auto sz = get_page_size() * k.get_n_lba();
+        auto offset = HomeBlks::instance()->get_data_pagesz() * ve.get_blk_offset();
+        auto hb_page_size = HomeBlks::instance()->get_data_pagesz();
+        auto bid = ve.get_blkId().get_blkid_at(offset, sz, hb_page_size);
+        auto lba = k.start();
+        /* sync read */
+        auto bbuf = m_data_blkstore->read_nmirror(bid, 0);
+        /* compare checksum */
+        for (auto i = 0ul; i < k.get_n_lba(); ++i) {
+            auto csum = crc16_t10dif(init_crc_16, bbuf[0]->at_offset(i * get_page_size()).bytes, get_page_size());
+            VOL_DEBUG_ASSERT_CMP(ve.get_checksum_at(i), ==, csum, ,
+                                 "Checksum mismatch start lba {} lba offset {} blkid {}, read size {} , page size {}",
+                                 lba, i, bid.to_string(), bid.data_size(hb_page_size), get_page_size());
+        }
+    }));
+}
 
 void Volume::print_node(uint64_t blkid) { m_map->print_node(blkid); }
 

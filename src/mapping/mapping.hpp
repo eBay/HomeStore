@@ -670,7 +670,7 @@ public:
     }
 
     void print_tree() { m_bt->print_tree(); }
-    bool verify_tree() { return m_bt->verify_tree(); }
+    bool verify_tree(MappingBtreeDeclType::verify_value_callback cb) { return m_bt->verify_tree(cb); }
 
     /**
      * @brief : Fix a btree by :

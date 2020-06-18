@@ -568,7 +568,9 @@ void HomeBlks::add_devices() {
 }
 
 void HomeBlks::vol_mounted(const VolumePtr& vol, vol_state state) {
-    m_cfg.vol_mounted_cb(vol, state);
+    if (state != vol_state::VOL_READ_ONLY) {
+        m_cfg.vol_mounted_cb(vol, state);
+    }
     VOL_INFO_LOG(vol->get_sb()->ondisk_sb->uuid, " Mounted the volume in state {}", state);
 }
 
@@ -979,15 +981,18 @@ void HomeBlks::print_tree(const VolumePtr& vol, bool chksum) {
 }
 
 bool HomeBlks::verify_tree(const VolumePtr& vol) {
-    VOL_INFO_LOG(vol->get_uuid(), "Verifying the integrity of the index tree");
     return vol->verify_tree();
 }
 
 void HomeBlks::verify_vols() {
     std::unique_lock< std::recursive_mutex > lg(m_vol_lock);
     auto it = m_volume_map.begin();
+    LOGINFO("starting verifying volume. Number of volume {}", m_volume_map.size());
     while (it != m_volume_map.end()) {
-        verify_tree(it->second);
+        auto vol = it->second;
+        VOL_INFO_LOG(vol->get_uuid(), "Verifying the integrity of the index tree");
+        verify_tree(vol);
+        VOL_INFO_LOG(vol->get_uuid(), "Verify complete");
         ++it;
     }
 }

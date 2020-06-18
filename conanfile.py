@@ -24,7 +24,7 @@ class HomestoreConan(ConanFile):
                         'shared=False',
                         'fPIC=True',
                         'coverage=False',
-                        'sanitize=False',
+                        'sanitize=True',
                         'malloc_impl=libc',
                         )
 
@@ -51,6 +51,9 @@ class HomestoreConan(ConanFile):
     keep_imports = True
 
     def configure(self):
+        if not self.settings.build_type == "Debug":
+            self.options.sanitize = False
+
         if self.options.sanitize:
             self.options.coverage = False
 

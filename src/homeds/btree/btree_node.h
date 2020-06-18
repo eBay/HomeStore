@@ -206,10 +206,10 @@ public:
     friend void intrusive_ptr_release(btree_node_t* n) { btree_store_t::deref_node(n); }
     void get_nth_key(int ind, BtreeKey* outkey, bool copy) const;
     void set_nth_key(uint32_t ind, BtreeKey* key);
+    void get_nth_value(int ind, BtreeValue* outval, bool copy) const;
 
 protected:
     uint32_t get_nth_obj_size(int ind) const;
-    void get_nth_value(int ind, BtreeValue* outval, bool copy) const;
     void get_nth_element(int ind, BtreeKey* out_key, BtreeValue* out_val, bool is_copy) const;
 
 protected:

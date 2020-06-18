@@ -93,6 +93,7 @@ private:
 
     ////////////////// Implementation /////////////////////////
 public:
+    typedef std::function< void(K& k, V& v) > verify_value_callback;
     btree_super_block get_btree_sb() { return m_sb; }
 
     /**
@@ -711,9 +712,9 @@ public:
      * @return : true if btree is not corrupted.
      *           false if btree is corrupted;
      */
-    bool verify_tree() {
+    bool verify_tree(verify_value_callback cb = nullptr) {
         m_btree_lock.read_lock();
-        bool ret = verify_node(m_root_node, nullptr, -1);
+        bool ret = verify_node(m_root_node, nullptr, -1, cb);
         m_btree_lock.unlock();
 
         return ret;
@@ -743,7 +744,6 @@ public:
 
     nlohmann::json get_metrics_in_json(bool updated = true) { return m_metrics.get_result_in_json(updated); }
 
-private:
     /**
      * @brief : verify the btree node is corrupted or not;
      *
@@ -756,7 +756,7 @@ private:
      * @return : true if this node including all its children are not corrupted;
      *           false if not;
      */
-    bool verify_node(bnodeid_t bnodeid, BtreeNodePtr parent_node, uint32_t indx) {
+    bool verify_node(bnodeid_t bnodeid, BtreeNodePtr parent_node, uint32_t indx, verify_value_callback cb) {
         homeds::thread::locktype acq_lock = homeds::thread::locktype::LOCKTYPE_READ;
         BtreeNodePtr my_node;
         if (read_and_lock_node(bnodeid, my_node, acq_lock, acq_lock, nullptr) != btree_status_t::success) {
@@ -771,7 +771,7 @@ private:
             if (!my_node->is_leaf()) {
                 BtreeNodeInfo child;
                 my_node->get(i, &child, false);
-                success = verify_node(child.bnode_id(), my_node, i);
+                success = verify_node(child.bnode_id(), my_node, i, cb);
                 if (!success) {
                     goto exit_on_error;
                 }
@@ -792,6 +792,11 @@ private:
                 }
             }
             prev_key = key;
+            if (my_node->is_leaf()) {
+                V value;
+                my_node->get_nth_value(i, &value, false);
+                cb(key, value);
+            }
         }
 
         if (parent_node && parent_node->get_total_entries() != indx) {
@@ -819,7 +824,7 @@ private:
         }
 
         if (my_node->get_edge_id().is_valid()) {
-            success = verify_node(my_node->get_edge_id(), my_node, my_node->get_total_entries());
+            success = verify_node(my_node->get_edge_id(), my_node, my_node->get_total_entries(), cb);
             if (!success) {
                 goto exit_on_error;
             }
@@ -830,6 +835,7 @@ private:
         return success;
     }
 
+private:
     void to_string(bnodeid_t bnodeid, std::stringstream& ss) {
         BtreeNodePtr node;
 
