@@ -392,7 +392,7 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
                 crc16_t10dif(init_crc_16, vreq->bbuf->at_offset(vreq->read_buf_offset + offset).bytes, get_page_size());
             offset += get_page_size();
 
-            VOL_DEBUG_ASSERT_CMP(
+            VOL_LOG_ASSERT_CMP(
                 vreq->checksum[i], ==, carr[i], vreq->parent_req,
                 "Checksum mismatch start lba {} lba offset {} blkid {} blk id offset {}, read size {} , page size {}",
                 vreq->lba, offset, vreq->bid.to_string(), vreq->read_buf_offset, vreq->read_size, get_page_size());
@@ -598,9 +598,9 @@ bool Volume::verify_tree() {
         /* compare checksum */
         for (auto i = 0ul; i < k.get_n_lba(); ++i) {
             auto csum = crc16_t10dif(init_crc_16, bbuf[0]->at_offset(i * get_page_size()).bytes, get_page_size());
-            VOL_DEBUG_ASSERT_CMP(ve.get_checksum_at(i), ==, csum, ,
-                                 "Checksum mismatch start lba {} lba offset {} blkid {}, read size {} , page size {}",
-                                 lba, i, bid.to_string(), bid.data_size(hb_page_size), get_page_size());
+            VOL_LOG_ASSERT_CMP(ve.get_checksum_at(i), ==, csum, ,
+                               "Checksum mismatch start lba {} lba offset {} blkid {}, read size {} , page size {}",
+                               lba, i, bid.to_string(), bid.data_size(hb_page_size), get_page_size());
         }
     }));
 }
