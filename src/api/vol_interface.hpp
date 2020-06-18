@@ -113,6 +113,8 @@ public:
 
 typedef boost::intrusive_ptr< vol_interface_req > vol_interface_req_ptr;
 
+typedef boost::intrusive_ptr< vol_interface_req > snap_interface_req_ptr;  // TODO: define snap_interface_req;
+
 ENUM(vol_state, uint32_t,
      ONLINE,     // Online state after loading
      FAILED,     // It moved to offline only when it find vdev in failed state during boot
@@ -263,7 +265,18 @@ public:
     virtual VolumePtr create_volume(const vol_params& params) = 0;
     virtual std::error_condition remove_volume(const boost::uuids::uuid& uuid) = 0;
     virtual VolumePtr lookup_volume(const boost::uuids::uuid& uuid) = 0;
-    virtual SnapshotPtr snap_volume(VolumePtr volptr) = 0;
+
+    /** Snapshot APIs **/
+    virtual SnapshotPtr create_snapshot(const VolumePtr& vol) = 0;
+    virtual std::error_condition remove_snapshot(const SnapshotPtr& snap) = 0;
+    virtual SnapshotPtr clone_snapshot(const SnapshotPtr& snap) = 0;
+    
+    virtual std::error_condition restore_snapshot(const SnapshotPtr& snap) = 0;
+    virtual void list_snapshot(const VolumePtr& , std::vector<SnapshotPtr> snap_list) = 0;
+    virtual void read(const SnapshotPtr& snap, const snap_interface_req_ptr& req) = 0;
+    //virtual void write(const VolumePtr& volptr, std::vector<SnapshotPtr> snap_list) = 0;
+    //virtual SnapDiffPtr diff_snapshot(const SnapshotPtr& snap1, const SnapshotPtr& snap2) = 0;
+    /** End of Snapshot APIs **/
 
     /* AM should call it in case of recovery or reboot when homestore try to mount the existing volume */
     virtual void attach_vol_completion_cb(const VolumePtr& vol, const io_comp_callback& cb) = 0;

@@ -260,7 +260,7 @@ VolumePtr HomeBlks::lookup_volume(const boost::uuids::uuid& uuid) {
     if (m_volume_map.end() != it) { return it->second; }
     return nullptr;
 }
-
+#if 0
 SnapshotPtr HomeBlks::snap_volume(VolumePtr volptr) {
     if (!m_rdy || is_shutdown()) {
         LOGINFO("Snapshot: volume not online");
@@ -271,7 +271,7 @@ SnapshotPtr HomeBlks::snap_volume(VolumePtr volptr) {
     LOGINFO("Snapshot created volume {}, Snapshot {}", volptr->to_string(), sp->to_string());
     return sp;
 }
-
+#endif
 void HomeBlks::submit_io_batch() {
     iomanager.default_drive_interface()->submit_batch();
     call_multi_vol_completions();
@@ -865,4 +865,31 @@ void HomeBlks::vol_recovery_start_phase2() {
     for (auto it = m_volume_map.cbegin(); it != m_volume_map.cend(); ++it) {
         it->second->recovery_start_phase2();
     }
+}
+
+/* * Snapshot APIs  * */
+SnapshotPtr HomeBlks::create_snapshot(const VolumePtr& vol) {
+    return nullptr;
+}
+
+std::error_condition HomeBlks::remove_snapshot(const SnapshotPtr& snap) {
+    std::error_condition ok;
+    return ok;
+}
+
+SnapshotPtr HomeBlks::clone_snapshot(const SnapshotPtr& snap) {
+    return nullptr;
+}
+
+std::error_condition HomeBlks::restore_snapshot(const SnapshotPtr& snap) {
+    std::error_condition ok;
+    return ok;
+}
+
+void HomeBlks::list_snapshot(const VolumePtr& , std::vector<SnapshotPtr> snap_list) {
+
+}
+    
+void HomeBlks::read(const SnapshotPtr& snap, const snap_interface_req_ptr& req) {
+
 }
