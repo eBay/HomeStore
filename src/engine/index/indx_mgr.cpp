@@ -252,7 +252,7 @@ void IndxMgr::static_init() {
         });
     });
     sthread.detach();
-    while (!IndxMgr::m_inited) {}
+    while (!IndxMgr::m_inited.load(std::memory_order_relaxed)) {}
 }
 
 void IndxMgr::recovery_start_phase1() {
@@ -561,10 +561,10 @@ void IndxMgr::update_indx(indx_req_ptr ireq) {
 
     if (ret != btree_status_t::success) { ireq->indx_err = btree_write_failed; }
     /* TODO update diff btree */
-    /* In case of failure we will still update the journal with entries of whatever is written. */
-    /* update journal. Journal writes are not expected to fail. It is async call/ */
     /* Update allocate blkids in indx req */
     m_active_tbl->update_indx_alloc_blkids(ireq.get());
+    /* In case of failure we will still update the journal with entries of whatever is written. */
+    /* update journal. Journal writes are not expected to fail. It is async call/ */
     journal_write(ireq.get());
 }
 
@@ -603,7 +603,7 @@ void IndxMgr::trigger_indx_cp() { m_cp->trigger_cp(nullptr); }
 void IndxMgr::trigger_indx_cp_with_cb(cp_done_cb cb) { m_cp->trigger_cp(cb); }
 
 void IndxMgr::trigger_hs_cp(cp_done_cb cb, bool shutdown) {
-    if (!m_inited) {
+    if (!m_inited.load(std::memory_order_relaxed)) {
         cb(true);
         return;
     }
@@ -705,7 +705,7 @@ void IndxMgr::add_prepare_cb_list(prepare_cb cb) {
 }
 
 void IndxMgr::shutdown(indxmgr_stop_cb cb) {
-    if (!m_inited) { cb(true); }
+    if (!m_inited.load(std::memory_order_relaxed)) { cb(true); }
     LOGINFO("indx mgr shutdown started");
     iomanager.cancel_timer(m_hs_cp_timer_hdl, false);
     m_hs_cp_timer_hdl = iomgr::null_timer_handle;
@@ -804,7 +804,7 @@ std::map< boost::uuids::uuid, indx_cp_sb > IndxMgr::cp_sb_map;
 size_t IndxMgr::m_recovery_sb_size = 0;
 HomeStoreBase* IndxMgr::m_hs;
 uint64_t IndxMgr::memory_used_in_recovery = 0;
-bool IndxMgr::m_inited = false;
+std::atomic< bool > IndxMgr::m_inited = false;
 HomeStoreBaseSafePtr HomeStoreBase::_instance;
 std::mutex IndxMgr::cb_list_mtx;
 std::vector< cp_done_cb > IndxMgr::indx_cp_done_cb_list;

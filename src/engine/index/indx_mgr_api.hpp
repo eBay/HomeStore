@@ -211,7 +211,7 @@ private:
     static std::map< boost::uuids::uuid, indx_cp_sb > cp_sb_map;
     static HomeStoreBase* m_hs; // Hold onto the home store to maintain reference
     static uint64_t memory_used_in_recovery;
-    static bool m_inited;
+    static std::atomic< bool > m_inited;
     static std::mutex cb_list_mtx;
     /* It is called for after every indx cp */
     static std::vector< cp_done_cb > indx_cp_done_cb_list;
