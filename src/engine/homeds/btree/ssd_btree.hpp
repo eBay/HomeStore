@@ -34,9 +34,6 @@ template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_
 class SSDBtreeStore {
 public:
     using HeaderType = wb_cache_buffer_t;
-    struct superblock {
-        logstore_id_t journal_id;
-    } __attribute((packed));
 
     static std::unique_ptr< SSDBtreeStore > init_btree(BtreeConfig& cfg) {
         static std::once_flag flag1;
@@ -95,12 +92,11 @@ public:
     }
 
     /* It is called only during first time create or after recovery */
-    static void update_sb(SSDBtreeStore* store, SSDBtreeStore::superblock& sb, btree_cp_superblock* cp_sb,
-                          bool is_recovery) {
+    static void update_sb(SSDBtreeStore* store, btree_super_block& sb, btree_cp_superblock* cp_sb, bool is_recovery) {
         store->update_store_sb(sb, cp_sb, is_recovery);
     }
 
-    void update_store_sb(SSDBtreeStore::superblock& sb, btree_cp_superblock* cp_sb, bool is_recovery) {
+    void update_store_sb(btree_super_block& sb, btree_cp_superblock* cp_sb, bool is_recovery) {
         if (is_recovery) {
             // add recovery code
             HomeLogStoreMgr::instance().open_log_store(

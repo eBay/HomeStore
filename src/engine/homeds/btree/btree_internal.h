@@ -87,11 +87,12 @@ enum journal_op { BTREE_SPLIT = 1, BTREE_MERGE, BTREE_CREATE };
 struct btree_cp_id;
 typedef std::shared_ptr< btree_cp_id > btree_cp_id_ptr;
 typedef std::function< void(btree_cp_id_ptr cp_id) > cp_comp_callback;
+
 struct btree_cp_superblock {
     int64_t active_psn = -1;
     int64_t cp_cnt = -1;
     int64_t blkalloc_cp_cnt = -1;
-    int64_t btree_size; // start with root node
+    int64_t btree_size = 0;
     /* we can add more statistics as well like number of interior nodes etc. */
 } __attribute__((__packed__));
 
@@ -218,6 +219,10 @@ struct bnodeid {
 } __attribute__((packed));
 
 typedef bnodeid bnodeid_t;
+struct btree_super_block {
+    bnodeid root_node;
+    uint32_t journal_id;
+} __attribute((packed));
 
 #if 0
 struct bnodeid {

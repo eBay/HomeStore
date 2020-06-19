@@ -40,7 +40,6 @@ class MappingValue;
 #define HOMEBLKS_SB_VERSION 0x2
 
 typedef uint32_t homeblks_sb_flag_t;
-struct blkalloc_cp_id;
 
 #define HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN 0x00000001UL
 struct homeblks_sb {
@@ -199,11 +198,9 @@ public:
 
     void init_done(std::error_condition err);
     void inc_sub_system_init_cnt();
-    void attach_prepare_volume_cp_id(std::map< boost::uuids::uuid, vol_cp_id_ptr >* cur_id_map,
-                                     std::map< boost::uuids::uuid, vol_cp_id_ptr >* new_id_map, homeblks_cp_id* hb_id,
-                                     homeblks_cp_id* new_hb_id);
-    void blkalloc_cp_start(std::shared_ptr< blkalloc_cp_id > id);
-    void blkalloc_cp_done(std::shared_ptr< blkalloc_cp_id > id);
+    virtual void attach_prepare_indx_cp_id(std::map< boost::uuids::uuid, indx_cp_id_ptr >* cur_id_map,
+                                           std::map< boost::uuids::uuid, indx_cp_id_ptr >* new_id_map, hs_cp_id* hs_id,
+                                           hs_cp_id* new_hs_id) override;
     void do_volume_shutdown(bool force);
     void create_volume(VolumePtr vol);
 
@@ -217,22 +214,16 @@ public:
      */
     void meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size);
     void meta_blk_recovery_comp(bool success);
-    std::shared_ptr< blkalloc_cp_id > blkalloc_attach_prepare_cp(std::shared_ptr< blkalloc_cp_id > cur_cp_id);
 
 #ifdef _PRERELEASE
     void set_io_flip();
     void set_error_flip();
 #endif
-
-    friend void intrusive_ptr_add_ref(HomeBlks* hb) { hb->m_usage_counter.increment(1); }
-    friend void intrusive_ptr_release(HomeBlks* hb) {
-        // If there is only one reference remaining after decrementing, then we are done with shutdown, cleanup the
-        // _instance and delete the homeblks.
-        if (hb->m_usage_counter.decrement_test_eq(1)) {
-            auto p = HomeBlks::_instance.detach();
-            assert(p == hb);
-            delete hb;
-        }
+    friend void intrusive_ptr_add_ref(HomeBlks* hs) {
+        intrusive_ptr_add_ref(static_cast< homestore::HomeStoreBase* >(hs));
+    }
+    friend void intrusive_ptr_release(HomeBlks* hs) {
+        intrusive_ptr_release(static_cast< homestore::HomeStoreBase* >(hs));
     }
 
 public:
@@ -281,8 +272,6 @@ private:
     void vol_recovery_start_phase2();
 
 private:
-    static HomeBlksSafePtr _instance;
-
     init_params m_cfg;
     sisl::byte_view m_homeblks_sb_buf;
     // homeblks_sb*  m_homeblks_sb = nullptr; // the homestore super block
@@ -303,8 +292,6 @@ private:
     std::mutex m_cv_mtx;
     bool m_rdy = false;
 
-    sisl::atomic_counter< uint64_t > m_usage_counter = 1;
-
     std::atomic< uint64_t > m_shutdown_start_time = 0;
     iomgr::timer_handle_t m_shutdown_timer_hdl = iomgr::null_timer_handle;
     shutdown_comp_callback m_shutdown_done_cb;
@@ -315,7 +302,7 @@ private:
     std::atomic< bool > m_start_shutdown;
 
     static thread_local std::vector< std::shared_ptr< Volume > >* s_io_completed_volumes;
-};
+    };
 
 } // namespace homestore
 #endif // OMSTORE_OMSTORE_HPP
