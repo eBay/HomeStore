@@ -303,7 +303,7 @@ public:
     void cp_start(btree_cp_id_ptr cp_id) {
         static int thread_cnt = 0;
         int cp_cnt = cp_id->cp_cnt % MAX_CP_CNT;
-        iomanager.run_on(m_thread_ids[thread_cnt % WB_CACHE_THREADS],
+        iomanager.run_on(m_thread_ids[thread_cnt++ % WB_CACHE_THREADS],
                          [this, cp_id](io_thread_addr_t addr) { this->flush_buffers(cp_id); });
     }
 
