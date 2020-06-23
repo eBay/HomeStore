@@ -28,8 +28,8 @@ void LogDev::start(bool format) {
         // TODO: Don't create 2K as is, but query vdev_info layer to see available vb_context size
         uint32_t align = 0;
         uint32_t size = logdev_info_block::size;
-        if (meta_blk_mgr->is_aligned_size(size)) { 
-            align = HS_STATIC_CONFIG(disk_attr.align_size); 
+        if (meta_blk_mgr->is_aligned_buf_needed(size)) {
+            align = HS_STATIC_CONFIG(disk_attr.align_size);
             size = sisl::round_up(size, align);
         }
 

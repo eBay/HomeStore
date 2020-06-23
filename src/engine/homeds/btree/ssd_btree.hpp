@@ -24,6 +24,7 @@
 #include "btree_node.h"
 #include "physical_node.hpp"
 #include "homelogstore/log_store.hpp"
+#include "engine/common/homestore_config.hpp"
 
 namespace homeds {
 namespace btree {
@@ -58,9 +59,7 @@ public:
         m_blkstore->alloc_blk(bid);
     }
 
-    void cp_done_store(btree_cp_id_ptr cp_id) {
-        cp_id->cb(cp_id);
-    }
+    void cp_done_store(btree_cp_id_ptr cp_id) { cp_id->cb(cp_id); }
 
     /* It attaches the new CP and prepare for cur cp flush */
     static btree_cp_id_ptr attach_prepare_cp(SSDBtreeStore* store, btree_cp_id_ptr cur_cp_id, bool is_last_cp,
@@ -154,18 +153,22 @@ public:
 
     void destroy_done_store() { home_log_store_mgr.remove_log_store(m_journal->get_store_id()); }
 
-    static void write_journal_entry(SSDBtreeStore* store, btree_cp_id_ptr cp_id, uint8_t* mem, size_t size) {
-        store->write_journal_entry_store(cp_id, mem, size);
+    static void write_journal_entry(SSDBtreeStore* store, btree_cp_id_ptr cp_id, homestore::io_blob& iob) {
+        store->write_journal_entry_store(cp_id, iob);
     }
 
-    void write_journal_entry_store(btree_cp_id_ptr cp_id, uint8_t* mem, size_t size) {
+    static bool is_aligned_buf_needed(SSDBtreeStore* store, size_t size) { return store->is_aligned_buf_needed(size); }
+
+    bool is_aligned_buf_needed(size_t size) { return m_journal->is_aligned_buf_needed(size); }
+
+    void write_journal_entry_store(btree_cp_id_ptr cp_id, homestore::io_blob& iob) {
         ++cp_id->ref_cnt;
-        sisl::blob b(mem, size);
-        m_journal->append_async(b, mem, ([this, cp_id](logstore_seq_num_t seq_num, bool status, void* cookie) {
+        m_journal->append_async(iob, iob.bytes,
+                                ([this, cp_id, iob](logstore_seq_num_t seq_num, bool status, void* cookie) mutable {
                                     auto hdr = btree_journal_entry::get_entry_hdr((uint8_t*)cookie);
                                     if (hdr->op == BTREE_CREATE) {
                                         /* we set disk bitmap later when btree root node is persisted */
-                                        free(cookie);
+                                        iob.buf_free();
                                         try_cp_start(cp_id);
                                         return;
                                     }
@@ -179,7 +182,7 @@ public:
                                         auto bid = BlkId(new_node_id_list[i]);
                                         m_blkstore->alloc_blk(bid);
                                     }
-                                    free(cookie);
+                                    iob.buf_free();
                                     try_cp_start(cp_id);
                                 }));
     }

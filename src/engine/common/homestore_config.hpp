@@ -27,7 +27,7 @@ namespace homestore {
 #define HS_DYNAMIC_CONFIG_THIS(...) SETTINGS_THIS(homestore_config, __VA_ARGS__)
 #define HS_DYNAMIC_CONFIG(...) SETTINGS_VALUE(homestore_config, __VA_ARGS__)
 
-#define HS_STATIC_CONFIG(cfg) HomeStoreStaticConfig::instance().cfg
+#define HS_STATIC_CONFIG(cfg) homestore::HomeStoreStaticConfig::instance().cfg
 
 /* This is the optional parameteres which should be given by its consumers only when there is no
  * system command to get these parameteres directly from disks. Or Consumer want to override

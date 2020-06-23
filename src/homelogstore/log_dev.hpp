@@ -75,8 +75,12 @@ struct log_record {
     size_t serialized_size() const { return sizeof(serialized_log_record) + size; }
     bool is_inlineable() const {
         // Need inlining if size is smaller or size/buffer is not in dma'ble boundary.
-        return ((size < inline_size) || ((size % dma_boundary) != 0) || (((uintptr_t)data_ptr % dma_boundary) != 0));
+        //return ((size < inline_size) || ((size % dma_boundary) != 0) || (((uintptr_t)data_ptr % dma_boundary) != 0));
+        return (is_size_inlineable(size) || (((uintptr_t)data_ptr % dma_boundary) != 0));
     }
+
+    static bool is_size_inlineable(size_t sz) { return ((sz < inline_size) || ((sz % dma_boundary) != 0)); }
+
     static size_t serialized_size(uint32_t sz) { return sizeof(serialized_log_record) + sz; }
 };
 
@@ -486,7 +490,7 @@ private:
 
     void _persist_info_block();
     void assert_next_pages(log_stream_reader& lstream);
-    
+
 private:
     boost::intrusive_ptr< HomeStoreBase > m_hb; // Back pointer to homestore
     std::unique_ptr< sisl::StreamTracker< log_record > >

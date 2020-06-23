@@ -40,6 +40,7 @@ public:
     static void truncate(btree_store_t* store, btree_cp_id_ptr cp_id);
     static void destroy_done(btree_store_t* store);
     static void write_journal_entry(btree_store_t* store, btree_cp_id_ptr cp_id, uint8_t* mem, size_t size);
+    static bool is_aligned_buf_needed(btree_store_t* store, size_t size);
     static void flush_free_blks(btree_store_t* store, btree_cp_id_ptr btree_id,
                                 std::shared_ptr< homestore::blkalloc_cp_id >& blkalloc_id);
 

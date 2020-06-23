@@ -26,6 +26,7 @@
 #include "engine/homeds/array/reserve_vector.hpp"
 #include "engine/common/homestore_header.hpp"
 #include "engine/common/homestore_config.hpp"
+#include "engine/common/homestore_io_blob.hpp"
 
 using namespace std;
 using namespace homeds::thread;
@@ -62,7 +63,6 @@ class Btree {
     typedef std::function< void() > destroy_btree_comp_callback;
 
 public:
-
 private:
     bnodeid_t m_root_node;
     homeds::thread::RWLock m_btree_lock;
@@ -1811,8 +1811,16 @@ private:
         size_t size = sizeof(btree_journal_entry_hdr) + sizeof(uint64_t) * old_nodes.size() +
             sizeof(uint64_t) * new_nodes.size() + sizeof(uint64_t) * new_nodes.size() +
             K::get_fixed_size() * (new_nodes.size() + 1);
-        uint8_t* mem = (uint8_t*)malloc(size);
-        btree_journal_entry_hdr* hdr = (btree_journal_entry_hdr*)mem;
+
+        uint8_t* mem = nullptr;
+        bool align = false;
+        if (btree_store_t::is_aligned_buf_needed(m_btree_store.get(), size)) { align = true; }
+
+        homestore::io_blob iob(align, size);
+
+        mem = iob.bytes;
+
+        btree_journal_entry_hdr* hdr = (btree_journal_entry_hdr*)(mem);
         hdr->parent_node_id = parent_node->get_node_id_int();
         hdr->parent_node_gen = parent_node->get_gen();
         hdr->parent_indx = parent_indx;
@@ -1856,7 +1864,7 @@ private:
             memcpy(key, blob.bytes, blob.size);
             key = (uint8_t*)((uint64_t)key + blob.size);
         }
-        btree_store_t::write_journal_entry(m_btree_store.get(), cp_id, mem, size);
+        btree_store_t::write_journal_entry(m_btree_store.get(), cp_id, iob);
     }
 
     btree_status_t check_split_root(const BtreeKey& k, const BtreeValue& v, btree_put_type& putType,
