@@ -32,38 +32,38 @@ struct journal_hdr {
 
 class indx_journal_entry {
 private:
-    void* m_mem = nullptr;
+    homestore::io_blob m_iob; 
 
 public:
     uint32_t size(indx_req* ireq) const;
     uint32_t size() const;
     ~indx_journal_entry();
 
-    static journal_hdr* get_journal_hdr(void* m_mem) { return ((journal_hdr*)m_mem); }
+    static journal_hdr* get_journal_hdr(void* mem) { return ((journal_hdr*)mem); }
 
-    static std::pair< BlkId*, uint32_t > get_alloc_bid_list(void* m_mem) {
-        auto hdr = get_journal_hdr(m_mem);
-        auto ab_list = (BlkId*)(sizeof(journal_hdr) + (uint64_t)m_mem);
+    static std::pair< BlkId*, uint32_t > get_alloc_bid_list(void* mem) {
+        auto hdr = get_journal_hdr(mem);
+        auto ab_list = (BlkId*)(sizeof(journal_hdr) + (uint64_t)mem);
         return (std::make_pair(ab_list, hdr->alloc_blkid_list_size));
     }
 
-    static std::pair< BlkId*, uint32_t > get_free_bid_list(void* m_mem) {
-        auto hdr = get_journal_hdr(m_mem);
-        auto ab_list = get_alloc_bid_list(m_mem);
+    static std::pair< BlkId*, uint32_t > get_free_bid_list(void* mem) {
+        auto hdr = get_journal_hdr(mem);
+        auto ab_list = get_alloc_bid_list(mem);
         BlkId* fb_list = (BlkId*)(&(ab_list.first[ab_list.second]));
         return (std::make_pair(fb_list, hdr->free_blk_entry_size));
     }
 
-    static std::pair< uint8_t*, uint32_t > get_key(void* m_mem) {
-        auto hdr = get_journal_hdr(m_mem);
-        auto cp_list = get_free_bid_list(m_mem);
+    static std::pair< uint8_t*, uint32_t > get_key(void* mem) {
+        auto hdr = get_journal_hdr(mem);
+        auto cp_list = get_free_bid_list(mem);
         uint8_t* key = (uint8_t*)(&(cp_list.first[cp_list.second]));
         return (std::make_pair(key, hdr->key_size));
     }
 
-    static std::pair< uint8_t*, uint32_t > get_val(void* m_mem) {
-        auto hdr = get_journal_hdr(m_mem);
-        auto key = get_key(m_mem);
+    static std::pair< uint8_t*, uint32_t > get_val(void* mem) {
+        auto hdr = get_journal_hdr(mem);
+        auto key = get_key(mem);
         uint8_t* val = (uint8_t*)((uint64_t)key.first + key.second);
         return (std::make_pair(val, hdr->val_size));
     }
@@ -71,9 +71,7 @@ public:
     /* it update the alloc blk id and checksum */
     sisl::blob create_journal_entry(indx_req* v_req);
 
-    std::string to_string() const {
-        return fmt::format("size= {}", size());
-    }
+    std::string to_string() const { return fmt::format("size= {}", size()); }
 };
 
 enum indx_mgr_state { ONLINE = 0, DESTROYING = 1 };
@@ -138,7 +136,8 @@ struct indx_active_info {
     btree_cp_id_ptr btree_id;
     sisl::wisr_vector< free_blkid >* free_blkid_list;
     indx_active_info(int64_t start_psn, sisl::wisr_vector< free_blkid >* free_blkid_list) :
-            start_psn(start_psn), free_blkid_list(free_blkid_list) {}
+            start_psn(start_psn),
+            free_blkid_list(free_blkid_list) {}
 };
 
 struct indx_diff_info {
@@ -168,7 +167,10 @@ struct indx_cp_id {
 
     indx_cp_id(int64_t cp_cnt, int64_t start_active_psn, indx_mgr_ptr indx_mgr,
                sisl::wisr_vector< free_blkid >* free_blkid_list) :
-            indx_mgr(indx_mgr), cp_cnt(cp_cnt), indx_size(0), ainfo(start_active_psn, free_blkid_list) {}
+            indx_mgr(indx_mgr),
+            cp_cnt(cp_cnt),
+            indx_size(0),
+            ainfo(start_active_psn, free_blkid_list) {}
 
     cp_state state() const { return flags; }
 };

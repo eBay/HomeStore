@@ -1,5 +1,6 @@
 #include "indx_mgr_api.hpp"
 #include <utility/thread_factory.hpp>
+#include "engine/common/homestore_io_blob.hpp"
 
 using namespace homestore;
 SDS_LOGGING_DECL(indx_mgr)
@@ -8,9 +9,7 @@ SDS_LOGGING_DECL(indx_mgr)
  * | Journal Hdr | alloc_blkid list | checksum list | free_blk_entry |
  * -------------------------------------------------------------------
  */
-indx_journal_entry::~indx_journal_entry() {
-    if (m_mem) { free(m_mem); }
-}
+indx_journal_entry::~indx_journal_entry() { m_iob.buf_free(); }
 
 uint32_t indx_journal_entry::size(indx_req* ireq) const {
     return (sizeof(journal_hdr) + ireq->indx_alloc_blkid_list.size() * sizeof(BlkId) +
@@ -18,8 +17,8 @@ uint32_t indx_journal_entry::size(indx_req* ireq) const {
 }
 
 uint32_t indx_journal_entry::size() const {
-    assert(m_mem != nullptr);
-    auto hdr = get_journal_hdr(m_mem);
+    assert(m_iob.bytes != nullptr);
+    auto hdr = get_journal_hdr(m_iob.bytes);
     return (sizeof(journal_hdr) + hdr->alloc_blkid_list_size * sizeof(BlkId) +
             hdr->free_blk_entry_size * sizeof(free_blkid) + hdr->key_size + hdr->val_size);
 }
@@ -28,10 +27,15 @@ uint32_t indx_journal_entry::size() const {
 sisl::blob indx_journal_entry::create_journal_entry(indx_req* ireq) {
     uint32_t size = sizeof(journal_hdr) + ireq->indx_alloc_blkid_list.size() * sizeof(BlkId) +
         ireq->fbe_list.size() * sizeof(free_blkid) + ireq->get_key_size() + ireq->get_val_size();
-    m_mem = malloc(size);
+
+    bool align = false;
+    if (HomeLogStore::is_aligned_buf_needed(size)) { align = true; }
+
+    m_iob.buf_alloc(align, size);
+    uint8_t* mem = m_iob.bytes;
 
     /* store journal hdr */
-    auto hdr = get_journal_hdr(m_mem);
+    auto hdr = get_journal_hdr(mem);
     hdr->alloc_blkid_list_size = ireq->indx_alloc_blkid_list.size();
     hdr->free_blk_entry_size = ireq->fbe_list.size();
     hdr->key_size = ireq->get_key_size();
@@ -40,28 +44,28 @@ sisl::blob indx_journal_entry::create_journal_entry(indx_req* ireq) {
     hdr->cp_cnt = ireq->indx_id->cp_cnt;
 
     /* store alloc blkid */
-    auto blkid_pair = get_alloc_bid_list(m_mem);
+    auto blkid_pair = get_alloc_bid_list(mem);
     auto blkid = blkid_pair.first;
     for (uint32_t i = 0; i < blkid_pair.second; ++i) {
         blkid[i] = ireq->indx_alloc_blkid_list[i];
     }
 
     /* store free blk entry */
-    auto fbe_pair = get_free_bid_list(m_mem);
+    auto fbe_pair = get_free_bid_list(mem);
     auto fbe = fbe_pair.first;
     for (uint32_t i = 0; i < fbe_pair.second; ++i) {
         fbe[i] = ireq->fbe_list[i].get_free_blkid();
     }
 
     /* store key */
-    auto key_pair = get_key(m_mem);
+    auto key_pair = get_key(mem);
     ireq->fill_key(key_pair.first, key_pair.second);
 
     /* store val */
-    auto val_pair = get_val(m_mem);
+    auto val_pair = get_val(mem);
     ireq->fill_val(val_pair.first, val_pair.second);
 
-    sisl::blob data((uint8_t*)m_mem, size);
+    sisl::blob data((uint8_t*)mem, size);
 
     return data;
 }
@@ -350,7 +354,7 @@ void IndxMgr::write_hs_cp_sb(hs_cp_id* hs_id) {
     LOGINFO("superblock is written");
     uint64_t size = sizeof(indx_cp_sb) * hs_id->indx_id_list.size() + sizeof(hs_cp_sb_hdr);
     uint32_t align = 0;
-    if (meta_blk_mgr->is_aligned_size(size)) {
+    if (meta_blk_mgr->is_aligned_buf_needed(size)) {
         align = HS_STATIC_CONFIG(disk_attr.align_size);
         size = sisl::round_up(size, align);
     }
@@ -649,13 +653,20 @@ void IndxMgr::destroy(indxmgr_stop_cb&& cb) {
     /* we can assume that there is no io going on this indx mgr now */
     HS_SUBMOD_LOG(INFO, base, , "indx mgr", m_name, "Destroying Indx Manager");
 
-    destroy_journal_ent* jent = (destroy_journal_ent*)malloc(sizeof(destroy_journal_ent));
+    auto size = sizeof(destroy_journal_ent);
+    destroy_journal_ent* jent = nullptr;
+    bool align = false;
+    if (m_journal->is_aligned_buf_needed(size)) { align = true; }
+
+    homestore::io_blob iob(align, size);
+    jent = (destroy_journal_ent*)(iob.bytes);
+
     jent->state = indx_mgr_state::DESTROYING;
     sisl::blob b((uint8_t*)jent, sizeof(destroy_journal_ent));
     m_stop_cb = std::move(cb);
     m_journal->append_async(
-        b, b.bytes, ([this](logstore_seq_num_t seq_num, logdev_key key, void* cookie) {
-            free(cookie);
+        b, b.bytes, ([this, iob](logstore_seq_num_t seq_num, logdev_key key, void* cookie) mutable {
+            iob.buf_free();
             add_prepare_cb_list([this](indx_cp_id_ptr cur_indx_id, hs_cp_id* hb_id, hs_cp_id* new_hb_id) {
                 /* suspend current cp */
                 cur_indx_id->flags = cp_state::suspend_cp;

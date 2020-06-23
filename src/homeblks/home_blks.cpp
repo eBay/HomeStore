@@ -78,7 +78,7 @@ HomeBlks::HomeBlks(const init_params& cfg) : m_cfg(cfg), m_metrics("HomeBlks") {
     m_out_params.max_io_size = VOL_MAX_IO_SIZE;
     uint32_t align = 0;
     uint32_t size = HOMEBLKS_SB_SIZE;
-    if (meta_blk_mgr->is_aligned_size(size)) { 
+    if (meta_blk_mgr->is_aligned_buf_needed(size)) { 
         align = HS_STATIC_CONFIG(disk_attr.align_size); 
         size = sisl::round_up(size, align);
     }

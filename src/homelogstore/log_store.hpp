@@ -314,6 +314,8 @@ public:
      */
     logstore_seq_num_t get_contiguous_completed_seq_num(logstore_seq_num_t from);
 
+    static bool is_aligned_buf_needed(size_t size) { return (log_record::is_size_inlineable(size) == false); }
+
 private:
     void on_write_completion(logstore_req* req, logdev_key ld_key, logdev_key flush_idx, uint32_t nremaining_in_batch);
     void on_read_completion(logstore_req* req, logdev_key ld_key);

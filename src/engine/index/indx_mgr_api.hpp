@@ -270,7 +270,9 @@ struct free_blkid {
     free_blkid(BlkId b) : m_blkId(b), m_blk_offset(0), m_nblks_to_free(0) {}
     free_blkid() {}
     free_blkid(const BlkId& blkId, uint8_t blk_offset, uint8_t nblks_to_free) :
-            m_blkId(blkId), m_blk_offset(blk_offset), m_nblks_to_free(nblks_to_free) {}
+            m_blkId(blkId),
+            m_blk_offset(blk_offset),
+            m_nblks_to_free(nblks_to_free) {}
     void copy(struct free_blkid& fbe) {
         m_blkId = fbe.m_blkId;
         m_blk_offset = fbe.m_blk_offset;

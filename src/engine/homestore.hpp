@@ -267,7 +267,6 @@ protected:
         }
     }
 
-
     void create_sb_blkstore(vdev_info_block* vb) { // deprecated
         if (vb == nullptr) {
             /* create a blkstore */

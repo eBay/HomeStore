@@ -106,7 +106,7 @@ void Volume::init() {
 
         /* populate superblock */
         uint32_t align = 0;
-        if (meta_blk_mgr->is_aligned_size(sizeof(vol_sb_hdr))) { align = HS_STATIC_CONFIG(disk_attr.align_size); }
+        if (meta_blk_mgr->is_aligned_buf_needed(sizeof(vol_sb_hdr))) { align = HS_STATIC_CONFIG(disk_attr.align_size); }
         sisl::byte_view b(sizeof(vol_sb_hdr), align);
         m_sb_buf = b;
         sb = (vol_sb_hdr*)m_sb_buf.bytes();

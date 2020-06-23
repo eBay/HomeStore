@@ -139,7 +139,7 @@ public:
 
     uint64_t get_used_size();
 
-    bool is_aligned_size(size_t size) { return (size <= META_BLK_CONTEXT_SZ) ? false : true; }
+    bool is_aligned_buf_needed(size_t size) { return (size <= META_BLK_CONTEXT_SZ) ? false : true; }
 
 private:
     /**
