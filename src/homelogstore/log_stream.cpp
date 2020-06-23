@@ -1,9 +1,9 @@
-#include "homeblks/home_blks.hpp"
+#include "engine/homestore_base.hpp"
 #include "log_dev.hpp"
 
 namespace homestore {
 log_stream_reader::log_stream_reader(uint64_t device_cursor) {
-    m_hb = HomeBlks::safe_instance();
+    m_hb = HomeStoreBase::safe_instance();
     m_cur_group_cursor = device_cursor;
 }
 

@@ -2,6 +2,7 @@
 #include <cassert>
 #include "engine/checkpoint/checkpoint.hpp"
 #include "homelogstore/log_store.hpp"
+#include <fds/thread_vector.hpp>
 #include <wisr/wisr_ds.hpp>
 #include "engine/meta/meta_blks_mgr.hpp"
 #include <engine/homestore.hpp>
@@ -10,7 +11,6 @@
 namespace homestore {
 
 struct Free_Blk_Entry;
-struct free_blkid;
 typedef std::function< void() > trigger_cp_callback;
 typedef std::function< void(Free_Blk_Entry& fbe) > free_blk_callback;
 
@@ -60,7 +60,7 @@ public:
     virtual void create_done() = 0;
     virtual btree_super_block get_btree_sb() = 0;
     virtual btree_status_t update_active_indx_tbl(indx_req* ireq, btree_cp_id_ptr btree_id) = 0;
-    virtual btree_cp_id_ptr attach_prepare_cp(btree_cp_id_ptr cur_cp_id, bool is_last_cp) = 0;
+    virtual btree_cp_id_ptr attach_prepare_cp(btree_cp_id_ptr cur_cp_id, bool is_last_cp, bool blkalloc_checkpoint) = 0;
     virtual void flush_free_blks(btree_cp_id_ptr btree_id,
                                  std::shared_ptr< homestore::blkalloc_cp_id >& blkalloc_id) = 0;
     virtual void update_btree_cp_sb(btree_cp_id_ptr cp_id, btree_cp_superblock& btree_sb, bool blkalloc_cp) = 0;
@@ -137,7 +137,7 @@ public:
     void flush_free_blks(indx_cp_id_ptr indx_id, hs_cp_id* hb_id);
 
     /* it frees the blks and insert it in cp id free blk list. It is called when there is no read pending on this blk */
-    void free_blk(hs_cp_id* hs_id, Free_Blk_Entry& fbe);
+    void safe_to_free_blk(hs_cp_id* hs_id, Free_Blk_Entry& fbe);
     void update_cp_sb(indx_cp_id_ptr& indx_id, hs_cp_id* hb_id, indx_cp_sb* sb);
     uint64_t get_last_psn();
     /* It is called when super block all indx tables are persisted by its consumer */
@@ -239,13 +239,14 @@ private:
     bool m_last_cp = false;
     std::mutex prepare_cb_mtx;
     sisl::wisr_vector< prepare_cb > prepare_cb_list;
-    sisl::wisr_vector< free_blkid >* m_free_list[MAX_CP_CNT];
+    blkid_list_ptr m_free_list[MAX_CP_CNT];
     indx_cp_sb m_last_cp_sb;
     std::map< logstore_seq_num_t, log_buffer > seq_buf_map; // used only in recovery
     bool m_recovery_mode = false;
     create_indx_tbl m_create_indx_tbl;
     recover_indx_tbl m_recover_indx_tbl;
     indx_mgr_static_sb m_static_sb;
+    uint64_t m_free_list_cnt = 0;
 
     /*************************************** private functions ************************/
     void journal_write(indx_req* vreq);
@@ -259,31 +260,19 @@ private:
     void create_first_cp_id();
     btree_status_t retry_update_active_indx(const boost::intrusive_ptr< indx_req >& ireq);
     void free_blk(indx_cp_id_ptr indx_id, Free_Blk_Entry& fbe);
-    void free_blk(indx_cp_id_ptr indx_id, free_blkid& fblkid);
+    void free_blk(indx_cp_id_ptr indx_id, BlkId& fblkid);
 };
 
-struct free_blkid {
+struct Free_Blk_Entry {
     BlkId m_blkId;
+    /* These entries are needed only to invalidate cache. We store the actual blkid in journal */
     uint8_t m_blk_offset : NBLKS_BITS;
     uint8_t m_nblks_to_free : NBLKS_BITS;
-
-    free_blkid(BlkId b) : m_blkId(b), m_blk_offset(0), m_nblks_to_free(0) {}
-    free_blkid() {}
-    free_blkid(const BlkId& blkId, uint8_t blk_offset, uint8_t nblks_to_free) :
-            m_blkId(blkId), m_blk_offset(blk_offset), m_nblks_to_free(nblks_to_free) {}
-    void copy(struct free_blkid& fbe) {
-        m_blkId = fbe.m_blkId;
-        m_blk_offset = fbe.m_blk_offset;
-        m_nblks_to_free = fbe.m_nblks_to_free;
-    }
-} __attribute__((__packed__));
-
-struct Free_Blk_Entry : free_blkid {
     hs_cp_id* m_cp_id = nullptr;
 
     Free_Blk_Entry() {}
     Free_Blk_Entry(const BlkId& blkId, uint8_t blk_offset, uint8_t nblks_to_free) :
-            free_blkid(blkId, blk_offset, nblks_to_free) {}
+            m_blkId(blkId), m_blk_offset(blk_offset), m_nblks_to_free(nblks_to_free) {}
 
     BlkId blk_id() const { return m_blkId; }
     uint8_t blk_offset() const { return m_blk_offset; }

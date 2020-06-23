@@ -4,7 +4,7 @@
 #include "homelogstore/log_store.hpp"
 #include <wisr/wisr_ds.hpp>
 #include "engine/meta/meta_blks_mgr.hpp"
-#include <engine/homestore.hpp>
+#include <engine/homestore_base.hpp>
 #include <engine/homeds/btree/btree.hpp>
 
 namespace homestore {
@@ -13,7 +13,6 @@ struct indx_req;
 class indx_tbl;
 class IndxMgr;
 class indx_mgr;
-struct free_blkid;
 typedef std::function< void(indx_cp_id_ptr cur_indx_id, hs_cp_id* hb_id, hs_cp_id* new_hb_id) > prepare_cb;
 #define indx_mgr_ptr std::shared_ptr< IndxMgr >
 
@@ -136,9 +135,11 @@ struct indx_active_info {
     int64_t start_psn = -1; // not inclusive
     int64_t end_psn = -1;   // inclusive
     btree_cp_id_ptr btree_id;
-    sisl::wisr_vector< free_blkid >* free_blkid_list;
-    indx_active_info(int64_t start_psn, sisl::wisr_vector< free_blkid >* free_blkid_list) :
-            start_psn(start_psn), free_blkid_list(free_blkid_list) {}
+    blkid_list_ptr free_blkid_list;
+    indx_active_info(int64_t start_psn, blkid_list_ptr& free_blkid_list) :
+            start_psn(start_psn), free_blkid_list(free_blkid_list) {
+        assert(free_blkid_list->size() == 0);
+    }
 };
 
 struct indx_diff_info {
@@ -149,7 +150,7 @@ struct indx_diff_info {
 
 struct indx_snap_info {
     std::vector< btree_cp_superblock > snap_delete_list;
-    std::vector< free_blkid > free_blkid_list;
+    blkid_list_ptr free_blkid_list;
 };
 
 /* During prepare flush we decide to take a CP out of active, diff or snap or all 3 cps*/
@@ -166,8 +167,7 @@ struct indx_cp_id {
     indx_diff_info dinfo;
     indx_snap_info sinfo;
 
-    indx_cp_id(int64_t cp_cnt, int64_t start_active_psn, indx_mgr_ptr indx_mgr,
-               sisl::wisr_vector< free_blkid >* free_blkid_list) :
+    indx_cp_id(int64_t cp_cnt, int64_t start_active_psn, indx_mgr_ptr indx_mgr, blkid_list_ptr& free_blkid_list) :
             indx_mgr(indx_mgr), cp_cnt(cp_cnt), indx_size(0), ainfo(start_active_psn, free_blkid_list) {}
 
     cp_state state() const { return flags; }

@@ -59,7 +59,8 @@ public:
     }
 
     uint32_t get_node_size() const { return m_node_size; }
-    static btree_cp_id_ptr attach_prepare_cp(MemBtreeStore* store, btree_cp_id_ptr cur_cp_id, bool is_last_cp) {
+    static btree_cp_id_ptr attach_prepare_cp(MemBtreeStore* store, btree_cp_id_ptr cur_cp_id, bool is_last_cp,
+                                             bool blkalloc_checkpoint) {
         return nullptr;
     }
     static void create_done(MemBtreeStore* store, bnodeid_t m_root_node);

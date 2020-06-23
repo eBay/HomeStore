@@ -9,21 +9,16 @@
 #include <fds/utils.hpp>
 #include <engine/blkstore/blkstore.hpp>
 #include "engine/meta/meta_blks_mgr.hpp"
+#include "homestore_base.hpp"
 
 using namespace homeds::btree;
 
 namespace homestore {
-struct blkalloc_cp_id;
-struct indx_cp_id;
-typedef std::shared_ptr< homestore::indx_cp_id > indx_cp_id_ptr;
-struct hs_cp_id;
-typedef BlkStore< VdevVarSizeBlkAllocatorPolicy > data_blkstore_t;
 typedef BlkStore< VdevVarSizeBlkAllocatorPolicy > sb_blkstore_t;
 
 template < typename IndexBuffer >
 using index_blkstore_t = BlkStore< VdevFixedBlkAllocatorPolicy, IndexBuffer >;
 
-typedef BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy > logdev_blkstore_t;
 typedef BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy > meta_blkstore_t;
 
 typedef boost::intrusive_ptr< BlkBuffer > blk_buf_t;
@@ -36,43 +31,6 @@ struct blkstore_blob {
 
 struct sb_blkstore_blob : blkstore_blob {
     BlkId blkid;
-};
-
-class HomeStoreBase;
-using HomeStoreBaseSafePtr = boost::intrusive_ptr< HomeStoreBase >;
-/* This class is introduced only to avoid template in any of its subsystem. Subsystem can get any homestore info other
- * then indx blkstore from this base class.
- */
-class HomeStoreBase {
-private:
-    sisl::atomic_counter< uint64_t > m_usage_counter = 1;
-    static HomeStoreBaseSafePtr _instance;
-
-public:
-    virtual ~HomeStoreBase() = default;
-    friend void intrusive_ptr_add_ref(HomeStoreBase* hs) { hs->m_usage_counter.increment(1); }
-    friend void intrusive_ptr_release(HomeStoreBase* hs) {
-        // If there is only one reference remaining after decrementing, then we are done with shutdown, cleanup the
-        // _instance and delete the homeblks.
-        if (hs->m_usage_counter.decrement_test_eq(1)) {
-            auto p = HomeStoreBase::_instance.detach();
-            assert(p == hs);
-            delete hs;
-        }
-    }
-
-    static void set_instance(HomeStoreBaseSafePtr instance) { _instance = instance; }
-    static HomeStoreBase* instance() { return _instance.get(); }
-    static HomeStoreBaseSafePtr safe_instance() { return _instance; }
-    virtual data_blkstore_t* get_data_blkstore() const = 0;
-    virtual void attach_prepare_indx_cp_id(std::map< boost::uuids::uuid, indx_cp_id_ptr >* cur_id_map,
-                                           std::map< boost::uuids::uuid, indx_cp_id_ptr >* new_id_map, hs_cp_id* hs_id,
-                                           hs_cp_id* new_hs_id) = 0;
-    virtual void blkalloc_cp_start(std::shared_ptr< blkalloc_cp_id > id) = 0;
-    virtual void blkalloc_cp_done(std::shared_ptr< blkalloc_cp_id > id) = 0;
-    virtual std::shared_ptr< blkalloc_cp_id >
-    blkalloc_attach_prepare_cp(std::shared_ptr< blkalloc_cp_id > cur_cp_id) = 0;
-    virtual uint32_t get_data_pagesz() const = 0;
 };
 
 template < typename IndexBuffer >
@@ -165,11 +123,6 @@ public:
     void blkalloc_cp_start(std::shared_ptr< blkalloc_cp_id > id) {
         get_data_blkstore()->blkalloc_cp_start(id);
         get_index_blkstore()->blkalloc_cp_start(id);
-    }
-
-    void blkalloc_cp_done(std::shared_ptr< blkalloc_cp_id > id) {
-        get_data_blkstore()->blkalloc_cp_done(id);
-        get_index_blkstore()->blkalloc_cp_done(id);
     }
 
     std::shared_ptr< blkalloc_cp_id > blkalloc_attach_prepare_cp(std::shared_ptr< blkalloc_cp_id > cur_cp_id) {
@@ -381,6 +334,7 @@ protected:
 
     int64_t available_size() const { return m_size_avail; }
     void set_available_size(int64_t sz) { m_size_avail = sz; }
+    virtual DeviceManager* get_device_manager() override { return m_dev_mgr.get(); }
 
 private:
     disk_attributes get_disk_attrs(bool is_file) {

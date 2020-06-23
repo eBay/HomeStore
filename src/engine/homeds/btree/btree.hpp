@@ -278,8 +278,8 @@ public:
     }
 
     /* It attaches the new CP and prepare for cur cp flush */
-    btree_cp_id_ptr attach_prepare_cp(btree_cp_id_ptr cur_cp_id, bool is_last_cp) {
-        return (btree_store_t::attach_prepare_cp(m_btree_store.get(), cur_cp_id, is_last_cp));
+    btree_cp_id_ptr attach_prepare_cp(btree_cp_id_ptr cur_cp_id, bool is_last_cp, bool blkalloc_checkpoint) {
+        return (btree_store_t::attach_prepare_cp(m_btree_store.get(), cur_cp_id, is_last_cp, blkalloc_checkpoint));
         ;
     }
 
@@ -2552,7 +2552,7 @@ protected:
         std::vector< BtreeNodePtr > old_nodes;
         std::vector< BtreeNodePtr > new_nodes;
         new_nodes.push_back(root);
-        auto cp_id = attach_prepare_cp(nullptr, false);
+        auto cp_id = attach_prepare_cp(nullptr, false, false);
         write_journal_entry(BTREE_CREATE, root, 0, root, old_nodes, new_nodes, cp_id, true);
         auto ret = write_node(root, nullptr, cp_id);
         m_sb.root_node = m_root_node;

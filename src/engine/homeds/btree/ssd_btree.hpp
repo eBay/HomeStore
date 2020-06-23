@@ -63,11 +63,12 @@ public:
     }
 
     /* It attaches the new CP and prepare for cur cp flush */
-    static btree_cp_id_ptr attach_prepare_cp(SSDBtreeStore* store, btree_cp_id_ptr cur_cp_id, bool is_last_cp) {
-        return (store->attach_prepare_cp_store(cur_cp_id, is_last_cp));
+    static btree_cp_id_ptr attach_prepare_cp(SSDBtreeStore* store, btree_cp_id_ptr cur_cp_id, bool is_last_cp,
+                                             bool blkalloc_checkpoint) {
+        return (store->attach_prepare_cp_store(cur_cp_id, is_last_cp, blkalloc_checkpoint));
     }
 
-    btree_cp_id_ptr attach_prepare_cp_store(btree_cp_id_ptr cur_cp_id, bool is_last_cp) {
+    btree_cp_id_ptr attach_prepare_cp_store(btree_cp_id_ptr cur_cp_id, bool is_last_cp, bool blkalloc_checkpoint) {
         /* start with ref cnt = 1. We dec it when trigger is called */
         if (cur_cp_id) {
             cur_cp_id->end_psn = m_journal->get_contiguous_issued_seq_num(cur_cp_id->start_psn);
@@ -87,7 +88,7 @@ public:
             new_cp->start_psn = cur_cp_id->end_psn;
             new_cp->cp_cnt = cur_cp_id->cp_cnt + 1;
         }
-        m_wb_cache.prepare_cp(new_cp, cur_cp_id);
+        m_wb_cache.prepare_cp(new_cp, cur_cp_id, blkalloc_checkpoint);
         return new_cp;
     }
 
@@ -113,7 +114,7 @@ public:
 
         m_first_cp->start_psn = cp_sb->active_psn;
         m_first_cp->cp_cnt = cp_sb->cp_cnt + 1;
-        m_wb_cache.prepare_cp(m_first_cp, nullptr);
+        m_wb_cache.prepare_cp(m_first_cp, nullptr, false);
     }
 
     logstore_id_t get_journal_id_store() { return (m_journal->get_store_id()); }

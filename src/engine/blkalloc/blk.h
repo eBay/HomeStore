@@ -16,6 +16,7 @@
 #include "engine/homeds/memory/mempiece.hpp"
 #include <fds/utils.hpp>
 #include "engine/common/homestore_config.hpp"
+#include <fds/thread_vector.hpp>
 
 //#include "device/device.h"
 
@@ -139,6 +140,7 @@ struct BlkId {
 #define BLKID32_INVALID ((uint32_t)(-1))
 #define BLKID64_INVALID ((uint64_t)(-1))
 
+using blkid_list_ptr = std::shared_ptr< sisl::ThreadVector< BlkId > >;
 #if 0
 struct SingleBlk {
     BlkId m_blk_id;
