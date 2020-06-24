@@ -1,5 +1,4 @@
 #pragma once
-#include <fds/malloc_helper.hpp>
 #include <boost/intrusive_ptr.hpp>
 #include "common/homestore_header.hpp"
 #include <metrics/metrics.hpp>
