@@ -13,24 +13,28 @@ indx_journal_entry::~indx_journal_entry() { m_iob.buf_free(); }
 
 uint32_t indx_journal_entry::size(indx_req* ireq) const {
     return (sizeof(journal_hdr) + ireq->indx_alloc_blkid_list.size() * sizeof(BlkId) +
-            ireq->fbe_list.size() * sizeof(free_blkid) + ireq->get_key_size() + ireq->get_val_size());
+            ireq->fbe_list.size() * sizeof(BlkId) + ireq->get_key_size() + ireq->get_val_size());
 }
 
 uint32_t indx_journal_entry::size() const {
     assert(m_iob.bytes != nullptr);
     auto hdr = get_journal_hdr(m_iob.bytes);
     return (sizeof(journal_hdr) + hdr->alloc_blkid_list_size * sizeof(BlkId) +
-            hdr->free_blk_entry_size * sizeof(free_blkid) + hdr->key_size + hdr->val_size);
+            hdr->free_blk_entry_size * sizeof(BlkId) + hdr->key_size + hdr->val_size);
 }
 
 /* it update the alloc blk id and checksum */
 sisl::blob indx_journal_entry::create_journal_entry(indx_req* ireq) {
     uint32_t size = sizeof(journal_hdr) + ireq->indx_alloc_blkid_list.size() * sizeof(BlkId) +
         ireq->fbe_list.size() * sizeof(BlkId) + ireq->get_key_size() + ireq->get_val_size();
-    m_mem = malloc(size);
+
+    bool align = false;
+    if (HomeLogStore::is_aligned_buf_needed(size)) { align = true; }
+    m_iob.buf_alloc(align, size);
+    uint8_t* mem = m_iob.bytes;
 
     /* store journal hdr */
-    auto hdr = get_journal_hdr(m_mem);
+    auto hdr = get_journal_hdr(mem);
     hdr->alloc_blkid_list_size = ireq->indx_alloc_blkid_list.size();
     hdr->free_blk_entry_size = ireq->fbe_list.size();
     hdr->key_size = ireq->get_key_size();
@@ -46,7 +50,7 @@ sisl::blob indx_journal_entry::create_journal_entry(indx_req* ireq) {
     }
 
     /* store free blk entry */
-    auto fbe_pair = get_free_bid_list(m_mem);
+    auto fbe_pair = get_free_bid_list(mem);
     auto fbe = fbe_pair.first;
     for (uint32_t i = 0; i < fbe_pair.second; ++i) {
         fbe[i] = ireq->fbe_list[i].get_free_blkid();
@@ -107,9 +111,9 @@ void HomeStoreCP::indx_tbl_cp_done(hs_cp_id* id) {
     auto cnt = id->ref_cnt.fetch_sub(1);
     if (cnt != 1) { return; }
 
-    /* flush all the blks that are freed in this id */
-    IndxMgr::flush_hs_free_blks(id);
     if (id->blkalloc_checkpoint) {
+        /* flush all the blks that are freed in this id */
+        IndxMgr::flush_hs_free_blks(id);
         /* persist alloc blkalloc. It is a sync call */
         blkalloc_cp(id);
     } else {

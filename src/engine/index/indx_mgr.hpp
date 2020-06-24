@@ -31,7 +31,7 @@ struct journal_hdr {
 
 class indx_journal_entry {
 private:
-    void* m_mem = nullptr;
+    homestore::io_blob m_iob;
 
 public:
     uint32_t size(indx_req* ireq) const;
@@ -138,7 +138,6 @@ struct indx_active_info {
     blkid_list_ptr free_blkid_list;
     indx_active_info(int64_t start_psn, blkid_list_ptr& free_blkid_list) :
             start_psn(start_psn), free_blkid_list(free_blkid_list) {
-        assert(free_blkid_list->size() == 0);
     }
 };
 

@@ -177,7 +177,6 @@ public:
             int cp_cnt = (new_cp_id->cp_cnt) % MAX_CP_CNT;
             assert(m_dirty_buf_cnt[cp_cnt] == 0);
             /* decrement it by all cache threads at the end after writing all pending requests */
-            m_dirty_buf_cnt[cp_cnt] = WB_CACHE_THREADS;
             assert(m_req_list[cp_cnt]->size() == 0);
             blkid_list_ptr free_list;
             if (blkalloc_checkpoint || !cur_cp_id) {
@@ -309,6 +308,7 @@ public:
 
     void flush_buffers(btree_cp_id_ptr cp_id) {
         int cp_cnt = cp_id->cp_cnt % MAX_CP_CNT;
+        m_dirty_buf_cnt[cp_cnt].fetch_add(1);
         auto list = m_req_list[cp_cnt].get();
         typename sisl::ThreadVector< writeback_req_ptr >::thread_vector_iterator it;
         auto wb_req_ptr_ref = list->begin(it);

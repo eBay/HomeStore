@@ -242,7 +242,6 @@ public:
             /* During recovery we might try to free the entry which is already freed while replaying the journal,
              * This assert is valid only post recovery.
              */
-            m_free_blkid_list.push_back(b);
             BLKALLOC_ASSERT(RELEASE, get_disk_bm()->is_bits_set(b.get_id(), b.get_nblks()),
                             "Expected disk bits to set");
         }
@@ -366,9 +365,10 @@ struct blkalloc_cp_id {
         blkid_list_vector.push_back(list);
     }
 
+    blkalloc_cp_id() = default;
     ~blkalloc_cp_id() {
         /* free all the blkids in the cache */
-        for (uint32_t i = 0; blkid_list_vector.size(); ++i) {
+        for (uint32_t i = 0; i < blkid_list_vector.size(); ++i) {
             auto list = blkid_list_vector[i];
             sisl::ThreadVector< BlkId >::thread_vector_iterator it;
             auto bid = list->begin(it);

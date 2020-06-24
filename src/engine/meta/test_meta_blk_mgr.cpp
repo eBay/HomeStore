@@ -184,8 +184,8 @@ public:
         m_write_sbs[bid].str = std::string((char*)buf, sz_to_wrt);
 
         m_total_wrt_sz += total_size_written(sz_to_wrt);
-        HS_ASSERT(RELEASE, m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
-                  m_mbm->get_used_size());
+        // HS_ASSERT(RELEASE, m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
+        //         m_mbm->get_used_size());
 
         free(buf);
     }
