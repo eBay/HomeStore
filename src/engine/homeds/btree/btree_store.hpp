@@ -34,7 +34,8 @@ public:
     static uint8_t* get_physical(const btree_node_t* bn);
     static uint32_t get_node_area_size(btree_store_t* store);
     static void update_sb(btree_store_t* store, btree_super_block& sb, btree_cp_superblock* cp_sb, bool is_recovery);
-    static btree_cp_id_ptr attach_prepare_cp(btree_store_t* store, btree_cp_id_ptr cur_cp_id, bool is_last_cp);
+    static btree_cp_id_ptr attach_prepare_cp(btree_store_t* store, btree_cp_id_ptr cur_cp_id, bool is_last_cp,
+                                             bool blkalloc_checkpoint);
     static void cp_start(btree_store_t* store, btree_cp_id_ptr cp_id, cp_comp_callback cb);
     static void truncate(btree_store_t* store, btree_cp_id_ptr cp_id);
     static void destroy_done(btree_store_t* store);

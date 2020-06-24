@@ -16,8 +16,7 @@
 #include "engine/homeds/thread/lock.hpp"
 #include <isa-l/crc.h>
 #include <utility/atomic_counter.hpp>
-
-const uint16_t init_crc_16 = 0x8005;
+#include "engine/homestore_base.hpp"
 
 #define MAGICAL_VALUE 0xab
 

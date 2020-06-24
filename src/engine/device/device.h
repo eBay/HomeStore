@@ -16,7 +16,6 @@
 #include <string>
 #include <sds_logging/logging.h>
 #include <fcntl.h>
-#include "engine/blkalloc/blk_allocator.h"
 #include <boost/uuid/uuid.hpp>            // uuid class
 #include <boost/uuid/uuid_generators.hpp> // generators
 #include <boost/uuid/uuid_io.hpp>         // streaming operators etc.
@@ -26,12 +25,14 @@
 #include <isa-l/crc.h>
 #include <iomgr/iomgr.hpp>
 #include <cstddef>
+#include <engine/homestore_base.hpp>
+#include "engine/meta/meta_blks_mgr.hpp"
 
 using namespace iomgr;
 
 namespace homestore {
-
-const uint16_t init_crc_16 = 0x8005;
+class BlkAllocator;
+struct blkalloc_cp_id;
 
 #define MAGIC 0xCEEDDEEB
 #define PRODUCT_NAME "OmStore"
@@ -213,7 +214,7 @@ public:
 
     PhysicalDev* get_physical_dev_mutable() { return m_pdev; };
 
-    void set_blk_allocator(std::shared_ptr< BlkAllocator > alloc) { m_allocator = alloc; }
+    void set_blk_allocator(std::shared_ptr< homestore::BlkAllocator > alloc) { m_allocator = alloc; }
 
     std::shared_ptr< BlkAllocator > get_blk_allocator() { return m_allocator; }
 
@@ -280,40 +281,15 @@ public:
     void update_end_of_chunk(off_t off) { m_chunk_info->end_of_chunk_offset = off; }
     off_t get_end_of_chunk() { return m_chunk_info->end_of_chunk_offset; }
 
-    void recover(std::unique_ptr< sisl::Bitset > recovered_bm, meta_blk* mblk) {
-        m_meta_blk_cookie = mblk;
-        if (m_allocator) {
-            m_allocator->set_disk_bm(std::move(recovered_bm));
-        } else {
-            m_recovered_bm = std::move(recovered_bm);
-        }
-    }
+    void recover(std::unique_ptr< sisl::Bitset > recovered_bm, meta_blk* mblk);
 
-    void recover() {
-        assert(m_allocator != nullptr);
-        if (m_recovered_bm != nullptr) { m_allocator->set_disk_bm(std::move(m_recovered_bm)); }
-    }
+    void recover();
 
-    void cp_start(std::shared_ptr< blkalloc_cp_id > id) {
-        auto bitmap_mem = get_blk_allocator()->cp_start(id);
-        if (m_meta_blk_cookie) {
-            MetaBlkMgr::instance()->update_sub_sb("BLK_ALLOC", bitmap_mem->bytes, bitmap_mem->size, m_meta_blk_cookie);
-        } else {
-            MetaBlkMgr::instance()->add_sub_sb("BLK_ALLOC", bitmap_mem->bytes, bitmap_mem->size, m_meta_blk_cookie);
-        }
-    }
+    void cp_start(std::shared_ptr< blkalloc_cp_id > id);
 
-    static std::shared_ptr< blkalloc_cp_id > attach_prepare_cp(std::shared_ptr< blkalloc_cp_id > cur_cp_id) {
-        std::shared_ptr< blkalloc_cp_id > cp_id(new blkalloc_cp_id());
-        if (cur_cp_id == nullptr) {
-            cp_id->cnt = 0;
-        } else {
-            cp_id->cnt = cur_cp_id->cnt + 1;
-        }
-        return cp_id;
-    }
+    static std::shared_ptr< blkalloc_cp_id > attach_prepare_cp(std::shared_ptr< blkalloc_cp_id > cur_cp_id);
 
-    void cp_done(std::shared_ptr< blkalloc_cp_id > id) { get_blk_allocator()->cp_done(id); }
+    void cp_done(std::shared_ptr< blkalloc_cp_id > id);
 
 private:
     chunk_info_block* m_chunk_info;

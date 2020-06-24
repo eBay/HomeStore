@@ -1,4 +1,4 @@
-#include "homeblks/home_blks.hpp"
+#include "engine/homestore_base.hpp"
 #include "log_dev.hpp"
 
 namespace homestore {
@@ -17,7 +17,7 @@ void LogDev::start(bool format) {
     HS_ASSERT(LOGMSG, (m_logfound_cb != nullptr), "Expected Logs found callback to be registered");
 
     m_log_records = std::make_unique< sisl::StreamTracker< log_record > >();
-    m_hb = HomeBlks::safe_instance();
+    m_hb = HomeStoreBase::safe_instance();
 
     // First read the info block
     auto bstore = m_hb->get_logdev_blkstore();

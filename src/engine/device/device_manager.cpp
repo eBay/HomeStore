@@ -11,11 +11,45 @@
 #include <iomgr/iomgr.hpp>
 #include <fds/utils.hpp>
 #include "engine/common/homestore_assert.hpp"
+#include "engine/blkalloc/blk_allocator.h"
 
 SDS_LOGGING_DECL(device, DEVICE_MANAGER)
 
 using namespace iomgr;
 namespace homestore {
+
+void PhysicalDevChunk::recover(std::unique_ptr< sisl::Bitset > recovered_bm, meta_blk* mblk) {
+    m_meta_blk_cookie = mblk;
+    if (m_allocator) {
+        m_allocator->set_disk_bm(std::move(recovered_bm));
+    } else {
+        m_recovered_bm = std::move(recovered_bm);
+    }
+}
+
+void PhysicalDevChunk::recover() {
+    assert(m_allocator != nullptr);
+    if (m_recovered_bm != nullptr) { m_allocator->set_disk_bm(std::move(m_recovered_bm)); }
+}
+
+void PhysicalDevChunk::cp_start(std::shared_ptr< blkalloc_cp_id > id) {
+    auto bitmap_mem = get_blk_allocator()->cp_start(id);
+    if (m_meta_blk_cookie) {
+        MetaBlkMgr::instance()->update_sub_sb("BLK_ALLOC", bitmap_mem->bytes, bitmap_mem->size, m_meta_blk_cookie);
+    } else {
+        MetaBlkMgr::instance()->add_sub_sb("BLK_ALLOC", bitmap_mem->bytes, bitmap_mem->size, m_meta_blk_cookie);
+    }
+}
+
+std::shared_ptr< blkalloc_cp_id > PhysicalDevChunk::attach_prepare_cp(std::shared_ptr< blkalloc_cp_id > cur_cp_id) {
+    std::shared_ptr< blkalloc_cp_id > cp_id(new blkalloc_cp_id());
+    if (cur_cp_id == nullptr) {
+        cp_id->cnt = 0;
+    } else {
+        cp_id->cnt = cur_cp_id->cnt + 1;
+    }
+    return cp_id;
+}
 
 DeviceManager::DeviceManager(NewVDevCallback vcb, uint32_t const vdev_metadata_size,
                              const iomgr::io_interface_comp_cb_t& io_comp_cb, bool is_file,

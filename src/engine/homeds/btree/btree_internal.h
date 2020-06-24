@@ -26,6 +26,7 @@
 #include <boost/preprocessor/control/if.hpp>
 #include <boost/preprocessor/stringize.hpp>
 #include "engine/common/homestore_assert.hpp"
+#include "engine/blkalloc/blk.h"
 
 ENUM(btree_status_t, uint32_t, success, not_found, item_found, closest_found, closest_removed, retry, has_more,
      read_failed, write_failed, stale_buf, refresh_failed, put_failed, space_not_avail, split_failed, insert_failed,
@@ -103,6 +104,7 @@ struct btree_cp_id {
     int64_t start_psn = -1; // not inclusive
     int64_t end_psn = -1;   // inclusive
     cp_comp_callback cb;
+    homestore::blkid_list_ptr free_blkid_list;
     btree_cp_id() : ref_cnt(1), btree_size(0){};
     ~btree_cp_id() {}
 };

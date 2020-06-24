@@ -273,15 +273,11 @@ public:
         return;
     }
 
-    void free_blk(const BlkId& bid, boost::optional< uint32_t > size_offset, boost::optional< uint32_t > size) {
-        free_blk(bid, size_offset, size, nullptr);
-    }
-
     /* Free the block previously allocated. Blkoffset refers to number of blks to skip in the BlkId and
      * nblks refer to the total blks from offset to free.
      */
-    void free_blk(const BlkId& bid, boost::optional< uint32_t > size_offset, boost::optional< uint32_t > size,
-                  std::shared_ptr< blkalloc_cp_id > id) {
+    void free_blk(const BlkId& bid, boost::optional< uint32_t > size_offset, boost::optional< uint32_t > size) {
+
         boost::intrusive_ptr< Buffer > erased_buf(nullptr);
 
         assert(bid.data_size(m_pagesz) >= (size_offset.get_value_or(0) + size.get_value_or(0)));
@@ -307,20 +303,16 @@ public:
 
         uint32_t offset = size_offset.get_value_or(0);
         BlkId tmp_bid(bid.get_blkid_at(offset, free_size, m_pagesz));
-        if (id != nullptr) {
-            m_vdev.free_blk(tmp_bid, id);
-        } else {
-            m_vdev.free_blk(tmp_bid);
-        }
+        m_vdev.free_blk(tmp_bid);
         return;
     }
 
     void write(BlkId& bid, homeds::MemVector& mvec) { m_vdev.write(bid, mvec, nullptr, 0); }
 
-    // 
+    //
     // sync write with iov;
     //
-    void write(BlkId& bid, struct iovec* iov, int iovcnt) { m_vdev.write(bid, iov, iovcnt); } 
+    void write(BlkId& bid, struct iovec* iov, int iovcnt) { m_vdev.write(bid, iov, iovcnt); }
 
     /* Write the buffer. The BlkStore write does not support write in place and so it does not also support
      * writing to an offset.
@@ -374,8 +366,8 @@ public:
         return req->bbuf;
     }
 
-    /* Read the data for given blk id and size. This method allocates the required memory if not present in the cache
-     * and returns an smart ptr to the Buffer */
+    /* Read the data for given blk id and size. This method allocates the required memory if not present in the
+     * cache and returns an smart ptr to the Buffer */
     boost::intrusive_ptr< Buffer > read(BlkId& bid, uint32_t offset, uint32_t size,
                                         boost::intrusive_ptr< blkstore_req< Buffer > > req) {
 
@@ -508,11 +500,11 @@ public:
     }
 
     void blkalloc_cp_start(std::shared_ptr< blkalloc_cp_id > id) { m_vdev.blkalloc_cp_start(id); }
-    void blkalloc_cp_done(std::shared_ptr< blkalloc_cp_id > id) { m_vdev.blkalloc_cp_done(id); }
     void reset_vdev_failed_state() { m_vdev.reset_failed_state(); }
 
     uint64_t get_size() const { return m_vdev.get_size(); }
 
+    /* This api is very expensive api as it goes through the entire bitmap */
     uint64_t get_used_size() const { return m_vdev.get_used_size(); }
 
     void update_vb_context(const sisl::blob& ctx_data) { m_vdev.update_vb_context(ctx_data); }

@@ -457,7 +457,7 @@ void Volume::process_free_blk_callback(Free_Blk_Entry fbe) {
     THIS_VOL_LOG(DEBUG, volume, , "Freeing blks cb - bid: {}, offset: {}, nblks: {}, get_pagesz: {}",
                  fbe.m_blkId.to_string(), fbe.blk_offset(), fbe.blks_to_free(), get_page_size());
 
-    m_indx_mgr->free_blk(fbe.m_cp_id, fbe);
+    m_indx_mgr->safe_to_free_blk(fbe.m_cp_id, fbe);
 }
 
 /* when read happens on mapping btree, under read lock we mark blk so it does not get removed by concurrent writes

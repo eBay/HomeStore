@@ -645,8 +645,9 @@ public:
     virtual btree_super_block get_btree_sb() override { return (m_bt->get_btree_sb()); }
 
     /* It attaches the new CP and prepare for cur cp flush */
-    virtual btree_cp_id_ptr attach_prepare_cp(btree_cp_id_ptr cur_cp_id, bool is_last_cp) override {
-        return (m_bt->attach_prepare_cp(cur_cp_id, is_last_cp));
+    virtual btree_cp_id_ptr attach_prepare_cp(btree_cp_id_ptr cur_cp_id, bool is_last_cp,
+                                              bool blkalloc_checkpoint) override {
+        return (m_bt->attach_prepare_cp(cur_cp_id, is_last_cp, blkalloc_checkpoint));
     }
 
     virtual void cp_start(btree_cp_id_ptr cp_id, cp_comp_callback cb) override { m_bt->cp_start(cp_id, cb); }

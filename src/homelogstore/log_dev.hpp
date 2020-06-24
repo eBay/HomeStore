@@ -8,19 +8,16 @@
 #include <boost/intrusive_ptr.hpp>
 #include <fmt/format.h>
 #include <map>
-//#include "homeblks/home_blks.hpp"
+#include "engine/homestore_base.hpp"
 
 SDS_LOGGING_DECL(logdev)
 
 namespace homestore {
 
 typedef int64_t logid_t;
-typedef uint32_t crc32_t;
 typedef uint32_t logstore_id_t;
 typedef int64_t logstore_seq_num_t;
 
-static constexpr crc32_t init_crc32 = 0x12345678;
-static constexpr crc32_t INVALID_CRC32_VALUE = 0x0u;
 static constexpr uint32_t LOG_GROUP_HDR_MAGIC = 0xDABAF00D;
 static constexpr uint32_t dma_boundary = 512; // Mininum size the dma/writes to be aligned with
 static constexpr uint32_t initial_read_size = 4096;
@@ -295,7 +292,6 @@ struct logdev_info_block {
     uint8_t store_id_info[0];
 } __attribute__((packed));
 
-class HomeBlks;
 class log_stream_reader {
 public:
     log_stream_reader(uint64_t device_cursor);
@@ -307,7 +303,7 @@ private:
     sisl::byte_view read_next_bytes(uint64_t nbytes);
 
 private:
-    boost::intrusive_ptr< HomeBlks > m_hb;
+    boost::intrusive_ptr< HomeStoreBase > m_hb;
     sisl::byte_view m_cur_log_buf;
     uint64_t m_cur_group_cursor;
 };
@@ -496,7 +492,7 @@ private:
     void assert_next_pages(log_stream_reader& lstream);
 
 private:
-    boost::intrusive_ptr< HomeBlks > m_hb; // Back pointer to homeblks
+    boost::intrusive_ptr< HomeStoreBase > m_hb; // Back pointer to homestore
     std::unique_ptr< sisl::StreamTracker< log_record > >
         m_log_records; // The container which stores all in-memory log records
     std::unique_ptr< sisl::IDReserver > m_id_reserver;
