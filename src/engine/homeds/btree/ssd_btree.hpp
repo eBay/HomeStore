@@ -327,7 +327,7 @@ public:
         return btree_status_t::success;
     }
 
-    static void free_node(SSDBtreeStore* store, boost::intrusive_ptr< SSDBtreeNode > bn, bool mem_only,
+    static void free_node(SSDBtreeStore* store, boost::intrusive_ptr< SSDBtreeNode >& bn, bool mem_only,
                           btree_cp_id_ptr cp_id) {
         if (mem_only) {
             /* it will be automatically freed */
