@@ -277,7 +277,7 @@ public:
      * nblks refer to the total blks from offset to free.
      */
     void free_blk(const BlkId& bid, boost::optional< uint32_t > size_offset, boost::optional< uint32_t > size,
-                  bool in_cache = true) {
+                  bool cache_only = false) {
 
         boost::intrusive_ptr< Buffer > erased_buf(nullptr);
 
@@ -305,7 +305,7 @@ public:
 #endif
         m_cache->erase(bid, size_offset.get_value_or(0), free_size,
                        (boost::intrusive_ptr< CacheBuffer< BlkId > >*)&erased_buf);
-        if (in_cache) { return; }
+        if (cache_only) { return; }
 
         uint32_t offset = size_offset.get_value_or(0);
         BlkId tmp_bid(bid.get_blkid_at(offset, free_size, m_pagesz));
