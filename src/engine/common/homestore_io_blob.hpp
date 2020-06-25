@@ -3,6 +3,15 @@
 #include <iomgr/iomgr.hpp>
 
 namespace homestore {
+
+struct iobuf_alloc {
+    uint8_t* operator()(size_t align_sz, size_t sz) { return iomanager.iobuf_alloc(align_sz, sz); }
+};
+
+struct iobuf_free {
+    void operator()(uint8_t* b) { iomanager.iobuf_free(b); }
+};
+
 struct io_blob : public sisl::blob {
     bool aligned = false;
 

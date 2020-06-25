@@ -1817,7 +1817,8 @@ private:
         bool align = false;
         if (btree_store_t::is_aligned_buf_needed(m_btree_store.get(), size)) { align = true; }
 
-        homestore::io_blob iob(align, size);
+        sisl::alignable_blob< homestore::iobuf_alloc, homestore::iobuf_free > iob(
+            size, align, HS_STATIC_CONFIG(disk_attr.align_size));
 
         mem = iob.bytes;
 

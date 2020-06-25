@@ -153,7 +153,7 @@ public:
 
     void destroy_done_store() { home_log_store_mgr.remove_log_store(m_journal->get_store_id()); }
 
-    static void write_journal_entry(SSDBtreeStore* store, btree_cp_id_ptr cp_id, homestore::io_blob& iob) {
+    static void write_journal_entry(SSDBtreeStore* store, btree_cp_id_ptr cp_id, sisl::alignable_blob< homestore::iobuf_alloc, homestore::iobuf_free >& iob) {
         store->write_journal_entry_store(cp_id, iob);
     }
 
@@ -161,7 +161,7 @@ public:
 
     bool is_aligned_buf_needed(size_t size) { return m_journal->is_aligned_buf_needed(size); }
 
-    void write_journal_entry_store(btree_cp_id_ptr cp_id, homestore::io_blob& iob) {
+    void write_journal_entry_store(btree_cp_id_ptr cp_id, sisl::alignable_blob< homestore::iobuf_alloc, homestore::iobuf_free >& iob) {
         ++cp_id->ref_cnt;
         m_journal->append_async(iob, iob.bytes,
                                 ([this, cp_id, iob](logstore_seq_num_t seq_num, bool status, void* cookie) mutable {

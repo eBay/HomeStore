@@ -30,7 +30,9 @@ sisl::blob indx_journal_entry::create_journal_entry(indx_req* ireq) {
 
     bool align = false;
     if (HomeLogStore::is_aligned_buf_needed(size)) { align = true; }
-    m_iob.buf_alloc(align, size);
+
+    m_iob.buf_alloc(size, align, HS_STATIC_CONFIG(disk_attr.align_size));
+
     uint8_t* mem = m_iob.bytes;
 
     /* store journal hdr */
@@ -657,7 +659,9 @@ void IndxMgr::destroy(indxmgr_stop_cb&& cb) {
     bool align = false;
     if (m_journal->is_aligned_buf_needed(size)) { align = true; }
 
-    homestore::io_blob iob(align, size);
+    sisl::alignable_blob< homestore::iobuf_alloc, homestore::iobuf_free > iob(size, align,
+                                                                              HS_STATIC_CONFIG(disk_attr.align_size));
+
     jent = (destroy_journal_ent*)(iob.bytes);
 
     jent->state = indx_mgr_state::DESTROYING;

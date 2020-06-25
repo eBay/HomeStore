@@ -31,7 +31,7 @@ struct journal_hdr {
 
 class indx_journal_entry {
 private:
-    homestore::io_blob m_iob;
+    sisl::alignable_blob< homestore::iobuf_alloc, homestore::iobuf_free > m_iob;
 
 public:
     uint32_t size(indx_req* ireq) const;

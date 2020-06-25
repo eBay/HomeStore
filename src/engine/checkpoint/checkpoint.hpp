@@ -149,6 +149,7 @@ public:
             cb_list[i](true);
         }
         LOGDEBUGMOD(cp, "cp ID completed {}", id->to_string());
+        delete (id);
         in_cp_phase = false;
 
         /* Once a cp is done, try to check and release exccess memory if need be */
