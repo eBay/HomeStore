@@ -438,7 +438,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
     } else {
         out_blkid->set(actual_entry.get_blk_num(), alloc_blks);
     }
-
+    m_alloc_blk_cnt.fetch_add(alloc_blks, std::memory_order_relaxed);
     m_cache_n_entries.fetch_sub(alloc_blks, std::memory_order_acq_rel);
     return ret;
 }
@@ -456,6 +456,8 @@ void VarsizeBlkAllocator::free(const BlkId& b) {
         BLKALLOC_ASSERT(RELEASE, m_cache_bm->is_bits_set(b.get_id(), b.get_nblks()), "Expected bits to reset");
         segment->add_free_blks(b.get_nblks());
         m_cache_bm->reset_bits(b.get_id(), b.get_nblks());
+        auto cnt = m_alloc_blk_cnt.fetch_sub(b.get_nblks(), std::memory_order_relaxed);
+        assert(cnt >= 0);
     }
     portion->unlock();
 }

@@ -1458,8 +1458,18 @@ public:
 
     void update_vb_context(const sisl::blob& ctx_data) { m_mgr->update_vb_context(m_vb->vdev_id, ctx_data); }
     uint64_t get_size() const { return m_vb->size; }
-    /* This ap is very expensive api as it goes through the entire bitmap */
-    uint64_t get_used_size() const { return 0; }
+
+    uint64_t get_used_size() const {
+        uint64_t alloc_cnt = 0;
+        for (uint32_t i = 0; i < m_primary_pdev_chunks_list.size(); ++i) {
+            for (uint32_t chunk_indx = 0; chunk_indx < m_primary_pdev_chunks_list[i].chunks_in_pdev.size();
+                 ++chunk_indx) {
+                auto chunk = m_primary_pdev_chunks_list[i].chunks_in_pdev[chunk_indx];
+                alloc_cnt += chunk->get_blk_allocator()->total_alloc_blks();
+            }
+        }
+        return (alloc_cnt * get_page_size());
+    }
 
     void expand(uint32_t addln_size) {}
 

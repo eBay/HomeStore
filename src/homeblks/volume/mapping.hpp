@@ -641,7 +641,7 @@ public:
 
     virtual void create_done() override { m_bt->create_done(); }
 
-    uint64_t get_used_size() { return m_bt->get_used_size(); }
+    virtual uint64_t get_used_size() override { return m_bt->get_used_size(); }
     virtual btree_super_block get_btree_sb() override { return (m_bt->get_btree_sb()); }
 
     /* It attaches the new CP and prepare for cur cp flush */
@@ -747,8 +747,7 @@ public:
          */
         for (uint32_t i = 0; i < vreq->alloc_blkid_list.size(); ++i) {
             auto blkid = vreq->alloc_blkid_list[i];
-            uint32_t page_size = vreq->vol()->get_page_size();
-            uint32_t nlbas = blkid.data_size(HomeBlks::instance()->get_data_pagesz()) / page_size;
+            uint32_t nlbas = blkid.data_size(HomeBlks::instance()->get_data_pagesz()) / m_vol_page_size;
             MappingKey key(start_lba, nlbas);
             ValueEntry ve(vreq->seqId, blkid, 0, nlbas, &vreq->csum_list[csum_indx]);
             MappingValue value(ve);
@@ -759,6 +758,35 @@ public:
         }
         auto lbas_written = next_start_lba - original_start_lba;
         if (vreq->active_nlbas_written < lbas_written) { vreq->active_nlbas_written = lbas_written; }
+        return ret;
+    }
+
+    btree_status_t recovery_update(logstore_seq_num_t seqnum, journal_hdr* hdr, btree_cp_id_ptr btree_id) override {
+        /* get all the values from journal entry */
+        auto key = (journal_key*)indx_journal_entry::get_key(hdr).first;
+        assert(indx_journal_entry::get_key(hdr).second == sizeof(journal_key));
+        uint64_t lba = key->lba;
+        BlkId* bid = indx_journal_entry::get_alloc_bid_list(hdr).first;
+        uint32_t nbid = indx_journal_entry::get_alloc_bid_list(hdr).second;
+        uint16_t* csum = (uint16_t*)indx_journal_entry::get_val(hdr).first;
+        uint32_t ncsum = indx_journal_entry::get_val(hdr).second / sizeof(uint16_t);
+        assert(ncsum == key->nlbas);
+
+        /* uodate btree */
+        uint32_t csum_indx = 0;
+        btree_status_t ret = btree_status_t::success;
+        for (uint32_t i = 0; i < nbid; ++i) {
+            uint32_t nlbas = bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) / m_vol_page_size;
+            MappingKey key(lba, nlbas);
+            ValueEntry ve(seqnum, bid[i], 0, nlbas, &csum[csum_indx]);
+            MappingValue value(ve);
+            uint64_t next_start_lba;
+            ret = put(nullptr, key, value, btree_id, next_start_lba);
+            if (ret != btree_status_t::success) { break; }
+            lba += nlbas;
+            csum_indx += nlbas;
+        }
+        assert(lba == key->lba + key->nlbas);
         return ret;
     }
 
@@ -785,8 +813,6 @@ public:
             ireq->push_indx_alloc_blkid(blkid);
         }
     }
-
-    void recovery_update(journal_hdr* hdr) override {}
 
     /* Note :- we should not write same IO in btree multiple times. When a key is updated , it update the free blk
      * entries in request to its last value. If we write same io multiple times then it could end up freeing the wrong
@@ -1140,6 +1166,11 @@ private:
         get_start_end_lba(cb_param, start_lba, end_lba);
         auto req = param->m_req;
         MappingValue& new_val = param->get_new_value();
+        /* get sequence ID of this value */
+        Blob_Array< ValueEntry >& new_varray = new_val.get_array();
+        ValueEntry new_ve;
+        new_varray.get(0, new_ve, false);
+        uint64_t new_seq_id = new_ve.get_seqId();
 
 #ifndef NDEBUG
         stringstream ss;
@@ -1169,7 +1200,7 @@ private:
             ValueEntry ve;
             e_varray.get(0, ve, false);
             uint64_t seq_id = ve.get_seqId();
-            if (req->seqId <= seq_id) {
+            if (new_seq_id <= seq_id) {
                 /* it is the latest entry, we should not override it */
                 replace_kv.emplace_back(existing.first, existing.second);
                 auto nlbas = ve.get_nlba();

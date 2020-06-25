@@ -178,6 +178,7 @@ public:
         max_leaf_nodes += (100 * max_leaf_nodes) / 60; // Assume 60% btree full
 
         m_max_nodes = max_leaf_nodes + ((double)max_leaf_nodes * 0.05) + 1; // Assume 5% for interior nodes
+        m_total_nodes = m_last_cp_sb.btree_size;
         btree_store_t::update_sb(m_btree_store.get(), m_sb, &m_last_cp_sb, is_recovery);
     }
 

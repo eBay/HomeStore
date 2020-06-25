@@ -125,6 +125,7 @@ public:
     /* It is called for each IO when it is completed. It trigger a checkpoint if it is pending and there
      * are no outstanding IOs.
      * id :- cp_id returned in cp_enter()
+        delete (id);
      */
     void cp_io_exit(cp_id_type* id) {
         assert(id->cp_status != cp_status_t::cp_start);
@@ -141,11 +142,13 @@ public:
     void cp_end(cp_id_type* id) {
         assert(in_cp_phase);
         HS_ASSERT_CMP(DEBUG, id->cp_status, ==, cp_status_t::cp_start);
-        for (uint32_t i = 0; i < id->cb_list.size(); ++i) {
-            id->cb_list[i](true);
+        auto cb_list = id->cb_list;
+        delete (id);
+
+        for (uint32_t i = 0; i < cb_list.size(); ++i) {
+            cb_list[i](true);
         }
         LOGDEBUGMOD(cp, "cp ID completed {}", id->to_string());
-        delete (id);
         in_cp_phase = false;
 
         /* Once a cp is done, try to check and release exccess memory if need be */

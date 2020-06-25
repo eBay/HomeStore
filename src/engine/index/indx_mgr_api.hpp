@@ -68,8 +68,9 @@ public:
     virtual btree_status_t destroy(btree_cp_id_ptr btree_id, free_blk_callback cb) = 0;
     virtual void destroy_done() = 0;
     virtual void cp_start(btree_cp_id_ptr cp_id, cp_comp_callback cb) = 0;
-    virtual void recovery_update(journal_hdr* hdr) = 0;
+    virtual btree_status_t recovery_update(logstore_seq_num_t seqnum, journal_hdr* hdr, btree_cp_id_ptr btree_id) = 0;
     virtual void update_indx_alloc_blkids(indx_req* ireq) = 0;
+    virtual uint64_t get_used_size() = 0;
 };
 
 class IndxMgr : public std::enable_shared_from_this< IndxMgr > {
@@ -144,6 +145,7 @@ public:
     void create_done();
     void init();
     std::string get_name();
+    uint64_t get_used_size();
 
 public:
     /*********************** static public functions **********************/

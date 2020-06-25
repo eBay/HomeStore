@@ -49,9 +49,6 @@ void FixedBlkAllocator::inited() {
     assert(m_first_blk_id != BLKID32_INVALID);
     __top_blk tp(0, m_first_blk_id);
     m_top_blk_id.store(tp.to_integer());
-#ifndef NDEBUG
-    m_nfree_blks.store(m_cfg.get_total_blks(), std::memory_order_relaxed);
-#endif
     BlkAllocator::inited();
 }
 
@@ -105,9 +102,7 @@ BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& hi
 
     out_blkid->set(id, 1, 0);
 
-#ifndef NDEBUG
-    m_nfree_blks.fetch_sub(1, std::memory_order_relaxed);
-#endif
+    m_alloc_blk_cnt.fetch_add(nblks, std::memory_order_relaxed);
     return BLK_ALLOC_SUCCESS;
 }
 
@@ -117,10 +112,10 @@ void FixedBlkAllocator::free(const BlkId& b) {
     /* No need to set in cache if it is not recovered. When recovery is complete we copy the disk_bm to
      * cache bm.
      */
-    if (m_inited) { free_blk((uint32_t)b.get_id()); }
-#ifndef NDEBUG
-    m_nfree_blks.fetch_add(1, std::memory_order_relaxed);
-#endif
+    if (m_inited) {
+        free_blk((uint32_t)b.get_id());
+        m_alloc_blk_cnt.fetch_sub(b.get_nblks(), std::memory_order_relaxed);
+    }
 }
 
 void FixedBlkAllocator::free_blk(uint32_t id) {
@@ -143,9 +138,7 @@ void FixedBlkAllocator::free_blk(uint32_t id) {
 
 std::string FixedBlkAllocator::to_string() const {
     ostringstream oss;
-#ifndef NDEBUG
-    oss << "Total free blks = " << m_nfree_blks.load(std::memory_order_relaxed) << " ";
-#endif
+    oss << "Total alloc blks = " << m_alloc_blk_cnt.load() << " ";
     oss << "m_top_blk_id=" << m_top_blk_id << "\n";
     return oss.str();
 }
