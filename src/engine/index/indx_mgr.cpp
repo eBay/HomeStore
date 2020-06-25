@@ -280,7 +280,7 @@ void IndxMgr::recovery_start_phase2() {
 
     /* start replaying the entry in order of seq number */
     for (auto it = seq_buf_map.cbegin(); it != seq_buf_map.cend(); ++it) {
-        auto seq_num = it->first;
+        logstore_seq_num_t seq_num = it->first;
         auto buf = it->second;
         if (buf.bytes() == nullptr) {
             /* do sync read */
@@ -304,15 +304,15 @@ void IndxMgr::recovery_start_phase2() {
             auto alloc_pair = indx_journal_entry::get_alloc_bid_list(buf.bytes());
             for (uint32_t i = 0; i < alloc_pair.second; ++i) {
                 m_hs->get_data_blkstore()->alloc_blk(alloc_pair.first[i]);
+                indx_id->indx_size += alloc_pair.first[i].data_size(m_hs->get_data_pagesz());
             }
         }
-
         if (seq_num <= m_last_cp_sb.cp_info.active_data_psn) { /* it is already persisted */
             continue;
         }
-
         /* update indx_tbl */
-        m_active_tbl->recovery_update(hdr);
+        auto ret = m_active_tbl->recovery_update(seq_num, hdr, indx_id->ainfo.btree_id);
+        if (ret != btree_status_t::success) { abort(); }
     }
 
     m_cp->cp_io_exit(hs_id);
@@ -803,6 +803,8 @@ void IndxMgr::register_cp_done_cb(cp_done_cb cb, bool blkalloc_cp) {
         hs_cp_done_cb_list.push_back(cb);
     }
 }
+
+uint64_t IndxMgr::get_used_size() { return (m_last_cp_sb.cp_info.indx_size + m_active_tbl->get_used_size()); }
 
 uint64_t IndxMgr::get_last_psn() { return m_last_cp_sb.cp_info.active_data_psn; }
 std::string IndxMgr::get_name() { return m_name; }

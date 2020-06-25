@@ -354,17 +354,20 @@ void HomeBlks::init_done(std::error_condition err) {
 
     if (err == no_error) { m_rdy = true; }
 
+    data_recovery_done();
+    uint64_t used_data_size = 0;
     for (auto it = m_volume_map.cbegin(); it != m_volume_map.cend(); ++it) {
         vol_mounted(it->second, it->second->get_state());
+        used_data_size += it->second->get_used_size();
     }
+    auto system_cap = get_system_capacity();
+    LOGINFO("{}", system_cap.to_string());
+    assert(system_cap.used_total_size == used_data_size);
 
-    data_recovery_done();
     LOGINFO("init done");
     m_cfg.init_done_cb(err, m_out_params);
     m_init_finished = true;
     m_cv.notify_all();
-    auto system_cap = get_system_capacity();
-    LOGINFO("{}", system_cap.to_string());
 #ifndef NDEBUG
     /* It will trigger race conditions without generating any IO error */
     set_io_flip();
@@ -644,6 +647,9 @@ void HomeBlks::do_volume_shutdown(bool force) {
     /* XXX:- Do we need a force time here. It might get stuck in cp */
     Volume::shutdown(([this](bool success) {
         std::unique_lock< std::recursive_mutex > lg(m_vol_lock);
+
+        auto system_cap = get_system_capacity();
+        LOGINFO("{}", system_cap.to_string());
         m_volume_map.clear();
         LOGINFO("All volumes are shutdown successfully, proceed to bring down other subsystems");
         m_vol_shutdown_cmpltd = true;
@@ -813,6 +819,9 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
     // start log store recovery
     LOGINFO("home log store recovery is started");
     home_log_store_mgr.start(m_cfg.disk_init);
+
+    /* indx would have recovered by now */
+    indx_recovery_done();
 
     // start volume data recovery
     LOGINFO("volume recovery is started");

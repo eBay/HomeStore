@@ -189,9 +189,11 @@ class BlkAllocator {
 
 protected:
     bool m_inited = false;
+    std::atomic< int64_t > m_alloc_blk_cnt;
 
 public:
-    explicit BlkAllocator(BlkAllocConfig& cfg, uint32_t id = 0) : m_blk_portions(cfg.get_total_portions()) {
+    explicit BlkAllocator(BlkAllocConfig& cfg, uint32_t id = 0) :
+            m_blk_portions(cfg.get_total_portions()), m_alloc_blk_cnt(0) {
         m_auto_recovery = cfg.get_auto_recovery();
         m_disk_bm = new sisl::Bitset(cfg.get_total_blks(), id, HS_STATIC_CONFIG(disk_attr.align_size));
         m_cfg = cfg;
@@ -208,6 +210,7 @@ public:
     BlkAllocPortion* get_blk_portions(uint32_t portion_num) { return &(m_blk_portions[portion_num]); }
 
     virtual void inited() {
+        m_alloc_blk_cnt.fetch_add(m_disk_bm->get_set_count(), std::memory_order_relaxed);
         if (!m_auto_recovery) {
             delete m_disk_bm;
             m_disk_bm = nullptr;
@@ -215,12 +218,16 @@ public:
         m_inited = true;
     }
 
+    uint32_t total_alloc_blks() const {
+        return m_alloc_blk_cnt.load();
+    }
+
     /* It is used during recovery in both mode :- auto recovery and manual recovery
      * It is also used in normal IO during auto recovery mode.
      */
     BlkAllocStatus alloc(BlkId& in_bid) {
         /* enable this assert later when reboot is supported */
-        //        assert(m_auto_recovery || !m_inited);
+        // assert(m_auto_recovery || !m_inited);
         if (!m_auto_recovery && m_inited) { return BLK_ALLOC_FAILED; }
         BlkAllocPortion* portion = blknum_to_portion(in_bid.get_id());
         portion->lock();
@@ -319,10 +326,6 @@ private:
 
     std::atomic< uint64_t > m_top_blk_id;
 
-#ifndef NDEBUG
-    std::atomic< uint32_t > m_nfree_blks;
-#endif
-
     __fixed_blk_node* m_blk_nodes;
 
 public:
@@ -335,10 +338,6 @@ public:
     virtual void inited() override;
     std::string to_string() const override;
     virtual bool is_blk_alloced(BlkId& in_bid);
-
-#ifndef NDEBUG
-    uint32_t total_free_blks() const { return m_nfree_blks.load(std::memory_order_relaxed); }
-#endif
 
 private:
     void free_blk(uint32_t id);

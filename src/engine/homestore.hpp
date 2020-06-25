@@ -326,10 +326,12 @@ protected:
 
     void data_recovery_done() {
         auto& hs_config = HomeStoreStaticConfig::instance();
-        if (!hs_config.input.disk_init) {
-            m_index_blk_store->recovery_done();
-            m_data_blk_store->recovery_done();
-        }
+        if (!hs_config.input.disk_init) { m_data_blk_store->recovery_done(); }
+    }
+
+    void indx_recovery_done() {
+        auto& hs_config = HomeStoreStaticConfig::instance();
+        if (!hs_config.input.disk_init) { m_index_blk_store->recovery_done(); }
     }
 
     int64_t available_size() const { return m_size_avail; }
