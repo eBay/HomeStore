@@ -791,7 +791,9 @@ void IndxMgr::safe_to_free_blk(hs_cp_id* hs_id, Free_Blk_Entry& fbe) {
      */
     assert(hs_id);
     /* invalidate the cache */
-    m_cp->cp_io_exit(hs_id);
+    auto page_sz = m_hs->get_data_pagesz();
+    m_hs->get_data_blkstore()->free_blk(fbe.m_blkId, (fbe.m_blk_offset * page_sz), (fbe.m_nblks_to_free * page_sz),
+                                        true);
     /* We have already free the blk after journal write is completed. We are just holding a cp for free to complete */
 }
 

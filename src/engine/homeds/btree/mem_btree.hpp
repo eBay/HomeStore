@@ -124,7 +124,7 @@ public:
         return btree_status_t::success;
     }
 
-    static void free_node(MemBtreeStore* store, boost::intrusive_ptr< MemBtreeNode > bn, bool mem_only,
+    static void free_node(MemBtreeStore* store, boost::intrusive_ptr< MemBtreeNode >& bn, bool mem_only,
                           btree_cp_id_ptr cp_id) {
         auto mbh = (mem_btree_node_header*)bn.get();
         if (mbh->refcount.decrement_testz()) {

@@ -276,7 +276,8 @@ public:
     /* Free the block previously allocated. Blkoffset refers to number of blks to skip in the BlkId and
      * nblks refer to the total blks from offset to free.
      */
-    void free_blk(const BlkId& bid, boost::optional< uint32_t > size_offset, boost::optional< uint32_t > size) {
+    void free_blk(const BlkId& bid, boost::optional< uint32_t > size_offset, boost::optional< uint32_t > size,
+                  bool in_cache = true) {
 
         boost::intrusive_ptr< Buffer > erased_buf(nullptr);
 
@@ -289,6 +290,10 @@ public:
             free_size = bid.data_size(m_pagesz);
         }
 
+        /* We don't call safe erase as we depend on the consumer to free the blkid then no body
+         * is accessing it.
+         */
+#if 0
         if (is_read_modify_cache()) {
             assert(size_offset.get_value_or(0) == 0 && free_size == bid.data_size(m_pagesz));
             m_cache->safe_erase(bid, [this, bid](boost::intrusive_ptr< CacheBuffer< BlkId > > erased_buf) {
@@ -297,9 +302,10 @@ public:
             /* cache will raise callback when ref_cnt becomes zero */
             return;
         } else {
-            m_cache->erase(bid, size_offset.get_value_or(0), free_size,
-                           (boost::intrusive_ptr< CacheBuffer< BlkId > >*)&erased_buf);
-        }
+#endif
+        m_cache->erase(bid, size_offset.get_value_or(0), free_size,
+                       (boost::intrusive_ptr< CacheBuffer< BlkId > >*)&erased_buf);
+        if (in_cache) { return; }
 
         uint32_t offset = size_offset.get_value_or(0);
         BlkId tmp_bid(bid.get_blkid_at(offset, free_size, m_pagesz));
