@@ -22,9 +22,11 @@
 #include <csignal>
 #include <fds/utils.hpp>
 #include <fmt/ostream.h>
+#include <flip/flip.hpp>
 #include "engine/homeds/array/reserve_vector.hpp"
 #include "engine/common/homestore_header.hpp"
 #include "engine/common/homestore_config.hpp"
+#include "engine/common/homestore_io_blob.hpp"
 
 using namespace std;
 using namespace homeds::thread;
@@ -61,11 +63,6 @@ class Btree {
     typedef std::function< void() > destroy_btree_comp_callback;
 
 public:
-    struct btree_super_block {
-        bnodeid root_node;
-        typename btree_store_t::superblock store_sb;
-    } __attribute((packed));
-
 private:
     bnodeid_t m_root_node;
     homeds::thread::RWLock m_btree_lock;
@@ -181,7 +178,8 @@ public:
         max_leaf_nodes += (100 * max_leaf_nodes) / 60; // Assume 60% btree full
 
         m_max_nodes = max_leaf_nodes + ((double)max_leaf_nodes * 0.05) + 1; // Assume 5% for interior nodes
-        btree_store_t::update_sb(m_btree_store.get(), m_sb.store_sb, &m_last_cp_sb, is_recovery);
+        m_total_nodes = m_last_cp_sb.btree_size;
+        btree_store_t::update_sb(m_btree_store.get(), m_sb, &m_last_cp_sb, is_recovery);
     }
 
     btree_status_t init() {
@@ -281,8 +279,8 @@ public:
     }
 
     /* It attaches the new CP and prepare for cur cp flush */
-    btree_cp_id_ptr attach_prepare_cp(btree_cp_id_ptr cur_cp_id, bool is_last_cp) {
-        return (btree_store_t::attach_prepare_cp(m_btree_store.get(), cur_cp_id, is_last_cp));
+    btree_cp_id_ptr attach_prepare_cp(btree_cp_id_ptr cur_cp_id, bool is_last_cp, bool blkalloc_checkpoint) {
+        return (btree_store_t::attach_prepare_cp(m_btree_store.get(), cur_cp_id, is_last_cp, blkalloc_checkpoint));
         ;
     }
 
@@ -1813,8 +1811,18 @@ private:
         size_t size = sizeof(btree_journal_entry_hdr) + sizeof(uint64_t) * old_nodes.size() +
             sizeof(uint64_t) * new_nodes.size() + sizeof(uint64_t) * new_nodes.size() +
             K::get_fixed_size() * (new_nodes.size() + 1);
-        uint8_t* mem = (uint8_t*)malloc(size);
-        btree_journal_entry_hdr* hdr = (btree_journal_entry_hdr*)mem;
+
+        uint8_t* mem = nullptr;
+        uint32_t align = 0;
+        if (btree_store_t::is_aligned_buf_needed(m_btree_store.get(), size)) {
+            align = HS_STATIC_CONFIG(disk_attr.align_size);
+        }
+
+        sisl::alignable_blob< homestore::iobuf_alloc, homestore::iobuf_free > iob(size, align);
+
+        mem = iob.bytes;
+
+        btree_journal_entry_hdr* hdr = (btree_journal_entry_hdr*)(mem);
         hdr->parent_node_id = parent_node->get_node_id_int();
         hdr->parent_node_gen = parent_node->get_gen();
         hdr->parent_indx = parent_indx;
@@ -1858,7 +1866,7 @@ private:
             memcpy(key, blob.bytes, blob.size);
             key = (uint8_t*)((uint64_t)key + blob.size);
         }
-        btree_store_t::write_journal_entry(m_btree_store.get(), cp_id, mem, size);
+        btree_store_t::write_journal_entry(m_btree_store.get(), cp_id, iob);
     }
 
     btree_status_t check_split_root(const BtreeKey& k, const BtreeValue& v, btree_put_type& putType,
@@ -2557,7 +2565,7 @@ protected:
         std::vector< BtreeNodePtr > old_nodes;
         std::vector< BtreeNodePtr > new_nodes;
         new_nodes.push_back(root);
-        auto cp_id = attach_prepare_cp(nullptr, false);
+        auto cp_id = attach_prepare_cp(nullptr, false, false);
         write_journal_entry(journal_op::BTREE_CREATE, root, 0, root, old_nodes, new_nodes, cp_id, true);
         auto ret = write_node(root, nullptr, cp_id);
         m_sb.root_node = m_root_node;

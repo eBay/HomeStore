@@ -9,17 +9,16 @@
 #include <fds/utils.hpp>
 #include <engine/blkstore/blkstore.hpp>
 #include "engine/meta/meta_blks_mgr.hpp"
+#include "homestore_base.hpp"
 
 using namespace homeds::btree;
 
 namespace homestore {
-typedef BlkStore< VdevVarSizeBlkAllocatorPolicy > data_blkstore_t;
 typedef BlkStore< VdevVarSizeBlkAllocatorPolicy > sb_blkstore_t;
 
 template < typename IndexBuffer >
 using index_blkstore_t = BlkStore< VdevFixedBlkAllocatorPolicy, IndexBuffer >;
 
-typedef BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy > logdev_blkstore_t;
 typedef BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy > meta_blkstore_t;
 
 typedef boost::intrusive_ptr< BlkBuffer > blk_buf_t;
@@ -35,10 +34,10 @@ struct sb_blkstore_blob : blkstore_blob {
 };
 
 template < typename IndexBuffer >
-class HomeStore {
+class HomeStore : public HomeStoreBase {
 public:
     HomeStore() = default;
-    ~HomeStore() = default;
+    virtual ~HomeStore() = default;
 
     void init(const hs_input_params& input) {
         auto& hs_config = HomeStoreStaticConfig::instance();
@@ -98,7 +97,7 @@ public:
         return cap;
     }
 
-    data_blkstore_t* get_data_blkstore() const { return m_data_blk_store.get(); }
+    virtual data_blkstore_t* get_data_blkstore() const override { return m_data_blk_store.get(); }
     index_blkstore_t< IndexBuffer >* get_index_blkstore() const { return m_index_blk_store.get(); }
     sb_blkstore_t* get_sb_blkstore() const { return m_sb_blk_store.get(); }
     logdev_blkstore_t* get_logdev_blkstore() const { return m_logdev_blk_store.get(); }
@@ -119,6 +118,15 @@ public:
         }
         assert(ret == BLK_ALLOC_SUCCESS);
         return bid;
+    }
+
+    void blkalloc_cp_start(std::shared_ptr< blkalloc_cp_id > id) {
+        get_data_blkstore()->blkalloc_cp_start(id);
+        get_index_blkstore()->blkalloc_cp_start(id);
+    }
+
+    std::shared_ptr< blkalloc_cp_id > blkalloc_attach_prepare_cp(std::shared_ptr< blkalloc_cp_id > cur_cp_id) {
+        return (get_data_blkstore()->attach_prepare_cp(cur_cp_id));
     }
 
 protected:
@@ -211,6 +219,7 @@ protected:
             }
         }
     }
+
 
     void create_sb_blkstore(vdev_info_block* vb) { // deprecated
         if (vb == nullptr) {
@@ -317,14 +326,17 @@ protected:
 
     void data_recovery_done() {
         auto& hs_config = HomeStoreStaticConfig::instance();
-        if (!hs_config.input.disk_init) {
-            m_index_blk_store->recovery_done();
-            m_data_blk_store->recovery_done();
-        }
+        if (!hs_config.input.disk_init) { m_data_blk_store->recovery_done(); }
+    }
+
+    void indx_recovery_done() {
+        auto& hs_config = HomeStoreStaticConfig::instance();
+        if (!hs_config.input.disk_init) { m_index_blk_store->recovery_done(); }
     }
 
     int64_t available_size() const { return m_size_avail; }
     void set_available_size(int64_t sz) { m_size_avail = sz; }
+    virtual DeviceManager* get_device_manager() override { return m_dev_mgr.get(); }
 
 private:
     disk_attributes get_disk_attrs(bool is_file) {
@@ -355,5 +367,6 @@ protected:
 private:
     uint64_t m_size_avail = 0;
     uint32_t m_data_pagesz = 0;
-}; // namespace homestore
+};
+
 } // namespace homestore

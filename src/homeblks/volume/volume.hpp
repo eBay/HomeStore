@@ -17,7 +17,7 @@
 #include "engine/homeds/thread/threadpool/thread_pool.h"
 #include "blk_read_tracker.hpp"
 #include "snapshot.hpp"
-#include "indx_mgr.hpp"
+#include "engine/index/indx_mgr_api.hpp"
 #include <utility/enum.hpp>
 #include <fds/vector_pool.hpp>
 #include "engine/meta/meta_blks_mgr.hpp"
@@ -118,40 +118,6 @@ protected:
 
 #define CHECKSUM_SIZE 2
 
-struct free_blkid {
-    BlkId m_blkId;
-    uint8_t m_blk_offset : NBLKS_BITS;
-    uint8_t m_nblks_to_free : NBLKS_BITS;
-
-    free_blkid() {}
-    free_blkid(const BlkId& blkId, uint8_t blk_offset, uint8_t nblks_to_free) :
-            m_blkId(blkId),
-            m_blk_offset(blk_offset),
-            m_nblks_to_free(nblks_to_free) {}
-    void copy(struct free_blkid& fbe) {
-        m_blkId = fbe.m_blkId;
-        m_blk_offset = fbe.m_blk_offset;
-        m_nblks_to_free = fbe.m_nblks_to_free;
-    }
-} __attribute__((__packed__));
-
-struct Free_Blk_Entry : free_blkid {
-    homeblks_cp_id* m_cp_id;
-    vol_cp_id_ptr m_vol_id;
-
-    Free_Blk_Entry() {}
-    Free_Blk_Entry(const BlkId& blkId, uint8_t blk_offset, uint8_t nblks_to_free, vol_cp_id_ptr vol_id,
-                   homeblks_cp_id* cp_id) :
-            free_blkid(blkId, blk_offset, nblks_to_free),
-            m_cp_id(cp_id),
-            m_vol_id(vol_id) {}
-
-    BlkId blk_id() const { return m_blkId; }
-    uint8_t blk_offset() const { return m_blk_offset; }
-    uint8_t blks_to_free() const { return m_nblks_to_free; }
-    BlkId get_free_blkid() { return (m_blkId.get_blkid_at(m_blk_offset, m_nblks_to_free, 1)); }
-};
-
 class VolumeMetrics : public sisl::MetricsGroupWrapper {
 public:
     explicit VolumeMetrics(const char* vol_name) : sisl::MetricsGroupWrapper("Volume", vol_name) {
@@ -248,7 +214,7 @@ private:
     VolumeMetrics m_metrics;
     HomeBlksSafePtr m_hb; // Hold onto the homeblks to maintain reference
     std::unique_ptr< Blk_Read_Tracker > m_read_blk_tracker;
-    IndxMgr* m_indx_mgr;
+    std::shared_ptr< IndxMgr > m_indx_mgr;
     std::map< uint64_t, SnapshotPtr > m_snapmap; // Id to Snapshot.
     boost::intrusive_ptr< BlkBuffer > m_only_in_mem_buff;
     io_comp_callback m_comp_cb;
@@ -262,7 +228,7 @@ private:
 
     std::mutex m_sb_lock; // lock for updating vol's sb
     // sisl::aligned_unique_ptr< vol_sb_hdr > m_sb_buf;
-    sisl::byte_view m_sb_buf;
+    sisl::byte_view<> m_sb_buf;
     indxmgr_stop_cb m_destroy_done_cb;
     std::atomic< bool > m_indx_mgr_destroy_started;
     void* m_sb_cookie = nullptr;
@@ -279,7 +245,7 @@ private:
 
 private:
     Volume(const vol_params& params);
-    Volume(meta_blk* mblk_cookie, sisl::byte_view sb_buf);
+    Volume(meta_blk* mblk_cookie, sisl::byte_view<> sb_buf);
     void alloc_single_block_in_mem();
     bool check_and_complete_req(const volume_req_ptr& vreq, const std::error_condition& err);
 
@@ -304,7 +270,7 @@ private:
     void alloc_blk_callback(struct BlkId bid, size_t offset_size, size_t size);
     // async call to start the multi-threaded work.
     void get_allocated_blks();
-    void process_indx_completions(const volume_req_ptr& vreq, std::error_condition err);
+    void process_indx_completions(const indx_req_ptr& ireq, std::error_condition err);
     void process_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
 
     // callback from mapping layer for free leaf node(data blks) so that volume
@@ -330,6 +296,9 @@ private:
     void remove_sb();
     void shutdown_if_needed();
     void destroy_internal();
+    indx_tbl* create_indx_tbl();
+    indx_tbl* recover_indx_tbl(btree_super_block& sb, btree_cp_superblock& cp_info);
+    mapping* get_active_indx();
 
     void vol_sb_init();
 
@@ -363,12 +332,12 @@ public:
     static void process_vol_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
 
     /* used to trigger system level cp */
-    static void trigger_homeblks_cp(cp_done_cb cb = nullptr) { IndxMgr::trigger_homeblks_cp(cb); };
+    static void trigger_homeblks_cp(cp_done_cb cb = nullptr) { IndxMgr::trigger_hs_cp(cb); };
 
     /* it is used in fake reboot */
     static void reinit() { IndxMgr::reinit(); }
 
-    static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size);
+    static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view<> buf, size_t size);
 
 public:
     /******************** APIs exposed to home_blks *******************/
@@ -433,6 +402,7 @@ public:
      * @return :- size
      */
     uint64_t get_size() const { return ((vol_sb_hdr*)m_sb_buf.bytes())->size; }
+    uint64_t get_used_size() { return m_indx_mgr->get_used_size(); }
 
     /* Get uuid of this volume.
      * @return :- uuid
@@ -462,12 +432,7 @@ public:
      * @params vol_id :- current cp id of this volume
      * @params home_blks_id :- current cp id of home_blks
      */
-    vol_cp_id_ptr attach_prepare_volume_cp_id(vol_cp_id_ptr vol_id, homeblks_cp_id* hb_id, homeblks_cp_id* new_hb_id);
-
-    /* get indx mgr
-     * @return indx mgr
-     */
-    IndxMgr* get_indx_mgr() { return m_indx_mgr; }
+    indx_cp_id_ptr attach_prepare_volume_cp(indx_cp_id_ptr indx_id, hs_cp_id* hs_id, hs_cp_id* new_hs_id);
 
 #ifndef NDEBUG
     void verify_pending_blks();
@@ -489,14 +454,6 @@ public:
         return (id + 1);
     }
 
-    void flush_free_blks(vol_cp_id_ptr vol_id, homeblks_cp_id* indx_id) {
-        m_indx_mgr->flush_free_blks(vol_id, indx_id);
-    }
-    void truncate(vol_cp_id_ptr vol_id) { m_indx_mgr->truncate(vol_id); }
-    void update_cp_sb(vol_cp_id_ptr& vol_id, homeblks_cp_id* indx_id, indx_mgr_cp_sb* sb) {
-        m_indx_mgr->update_cp_sb(vol_id, indx_id, sb);
-    }
-
     /**
      * @brief
      */
@@ -511,8 +468,12 @@ public:
 typedef boost::intrusive_ptr< volume_req > volume_req_ptr;
 
 ENUM(volume_req_state, uint8_t, preparing, data_io, journal_io, completed);
+struct journal_key {
+    uint64_t lba;
+    uint32_t nlbas;
+} __attribute__((__packed__));
 
-struct volume_req {
+struct volume_req : indx_req {
     /********** generic counters **********/
     vol_interface_req_ptr iface_req; // Corresponding Interface API request which has all the details about requests
     sisl::atomic_counter< int > ref_count = 1;            // Initialize the count
@@ -520,43 +481,37 @@ struct volume_req {
 
     /********** members used to write data blocks **********/
     Clock::time_point io_start_time;                    // start time
+    Clock::time_point indx_start_time;                  // indx start time
     boost::intrusive_ptr< homeds::MemVector > mvec;     // data
     sisl::atomic_counter< int > outstanding_io_cnt = 1; // how many IOs are outstanding for this request
     int vc_req_cnt = 0;                                 // how many child requests are issued.
 
     /********** members used by indx mgr **********/
-    homeblks_cp_id* first_cp_id = nullptr; // if this io is part of two checkpoints
-    homeblks_cp_id* cp_id = nullptr;       // checkpoint ID of this request is part of
-    vol_cp_id_ptr vol_id;
-    Clock::time_point indx_start_time;
     uint64_t lastCommited_seqId = INVALID_SEQ_ID;
     uint64_t seqId = INVALID_SEQ_ID;
     uint64_t request_id; // Copy of the id from interface request
+    uint64_t active_nlbas_written = 0; // number of lba written in active indx tabl. It can be partially written if
+                                       // btree writes failed in between.
 
     /********** Below entries are used for journal or to store checksum **********/
-    vol_journal_entry j_ent;
     std::vector< uint16_t > csum_list;
+    void push_csum(uint16_t csum) { csum_list.push_back(csum); }
     std::vector< BlkId > alloc_blkid_list;
-    std::vector< Free_Blk_Entry > fbe_list;
-    std::vector< io_cp_info > cp_info_list;
-
-    static volume_req_ptr make(const vol_interface_req_ptr& iface_req) {
-        return volume_req_ptr(sisl::ObjectAllocator< volume_req >::make_object(iface_req), false);
-    }
-
-    virtual ~volume_req() = default;
+    void push_blkid(BlkId& bid) { alloc_blkid_list.push_back(bid); }
 
     /********** member functions **********/
-    sisl::blob create_journal_entry() {
-        auto blob = j_ent.create_journal_entry(this);
-        return blob;
-    }
     virtual std::string to_string() {
         std::stringstream ss;
         ss << "vol_interface_req: request_id=" << iface_req->request_id << " dir=" << (is_read_op() ? "R" : "W")
            << " outstanding_io_cnt=" << outstanding_io_cnt.get();
         return ss.str();
     }
+
+    static volume_req_ptr make(const vol_interface_req_ptr& iface_req) {
+        return volume_req_ptr(sisl::ObjectAllocator< volume_req >::make_object(iface_req), false);
+    }
+
+    virtual ~volume_req() = default;
 
     Volume* vol() { return iface_req->vol_instance.get(); }
     bool is_read_op() const { return iface_req->is_read; }
@@ -566,23 +521,29 @@ struct volume_req {
     std::error_condition& err() const { return iface_req->err; }
     std::vector< buf_info >& read_buf() { return iface_req->read_buf_list; }
 
-    void push_blkid(BlkId& bid) { alloc_blkid_list.push_back(bid); }
+    friend class sisl::ObjectAllocator< volume_req >;
 
-    /* It push to the existing check sum list */
-    void push_csum(uint16_t csum) { csum_list.push_back(csum); }
-
-    /* push fbe to the existing list */
-    void push_fbe(Free_Blk_Entry& fbe) { fbe_list.push_back(fbe); }
-
-    void inc_ref() { intrusive_ptr_add_ref(this); }
-
-    friend void intrusive_ptr_add_ref(volume_req* req) { req->ref_count.increment(1); }
-
-    friend void intrusive_ptr_release(volume_req* req) {
-        if (req->ref_count.decrement_testz(1)) { sisl::ObjectAllocator< volume_req >::deallocate(req); }
+    /***************** Virtual functions required by indx mgr *********************/
+    virtual void free_yourself() override { sisl::ObjectAllocator< volume_req >::deallocate(this); }
+    virtual uint64_t get_seqId() override { return seqId; }
+    virtual uint32_t get_key_size() override { return (sizeof(journal_key)); }
+    virtual uint32_t get_val_size() override { return (sizeof(uint16_t) * active_nlbas_written); }
+    virtual void fill_key(void* mem, uint32_t size) override {
+        assert(size == sizeof(journal_key));
+        journal_key* key = (journal_key*)mem;
+        key->lba = lba();
+        key->nlbas = active_nlbas_written;
     }
 
-    friend class sisl::ObjectAllocator< volume_req >;
+    virtual void fill_val(void* mem, uint32_t size) override {
+        /* we only populating check sum. Allocate blkids are already populated by indx mgr */
+        uint16_t* j_csum = (uint16_t*)mem;
+        assert(active_nlbas_written == nlbas());
+        for (uint32_t i = 0; i < active_nlbas_written; ++i) {
+            j_csum[i] = csum_list[i];
+        }
+    }
+    virtual uint32_t get_io_size() override { return active_nlbas_written * vol()->get_page_size(); }
 
 private:
     /********** Constructor/Destructor **********/
@@ -591,10 +552,7 @@ private:
             iface_req(vi_req),
             io_start_time(Clock::now()),
             mvec(new homeds::MemVector()),
-            request_id(vi_req->request_id),
-            csum_list(0),
-            alloc_blkid_list(0),
-            fbe_list(0) {
+            request_id(vi_req->request_id) {
         assert((vi_req->vol_instance->get_page_size() * vi_req->nlbas) <= VOL_MAX_IO_SIZE);
         if (!vi_req->is_read) {
             mvec->set((uint8_t*)vi_req->write_buf, vi_req->vol_instance->get_page_size() * vi_req->nlbas, 0);

@@ -1,4 +1,3 @@
-#include <fds/malloc_helper.hpp>
 #include "home_blks.hpp"
 #include "volume/volume.hpp"
 #include <engine/device/device.h>
@@ -26,7 +25,6 @@ REGISTER_METABLK_SUBSYSTEM(homeblks, "HOMEBLK", HomeBlks::meta_blk_found_cb, Hom
 bool same_value_gen = false;
 #endif
 
-HomeBlksSafePtr HomeBlks::_instance = nullptr;
 std::string HomeBlks::version = PACKAGE_VERSION;
 thread_local std::vector< std::shared_ptr< Volume > >* HomeBlks::s_io_completed_volumes = nullptr;
 
@@ -45,20 +43,17 @@ VolInterface* HomeBlks::init(const init_params& cfg, bool force_reinit) {
 
     static std::once_flag flag1;
     try {
-        if (force_reinit) {
-            _instance = HomeBlksSafePtr(new HomeBlks(cfg));
-            Volume::reinit();
-        } else {
             std::call_once(flag1, [&cfg]() {
 #ifndef NDEBUG
                 LOGINFO("HomeBlks DEBUG version: {}", HomeBlks::version);
 #else
                 LOGINFO("HomeBlks RELEASE version: {}", HomeBlks::version);
 #endif
-                _instance = HomeBlksSafePtr(new HomeBlks(cfg));
+                auto instance =
+                    boost::static_pointer_cast< homestore::HomeStoreBase >(HomeBlksSafePtr(new HomeBlks(cfg)));
+                set_instance(boost::static_pointer_cast< homestore::HomeStoreBase >(instance));
             });
-        }
-        return (VolInterface*)(_instance.get());
+            return (VolInterface*)(HomeStoreBase::instance());
     } catch (const std::exception& e) {
         LOGERROR("{}", e.what());
         assert(0);
@@ -83,11 +78,11 @@ HomeBlks::HomeBlks(const init_params& cfg) : m_cfg(cfg), m_metrics("HomeBlks") {
     m_out_params.max_io_size = VOL_MAX_IO_SIZE;
     uint32_t align = 0;
     uint32_t size = HOMEBLKS_SB_SIZE;
-    if (meta_blk_mgr->is_aligned_size(size)) { 
+    if (meta_blk_mgr->is_aligned_buf_needed(size)) { 
         align = HS_STATIC_CONFIG(disk_attr.align_size); 
         size = sisl::round_up(size, align);
     }
-    sisl::byte_view b(size, align);
+    sisl::byte_view<> b(size, align);
     m_homeblks_sb_buf = b;
 
     superblock_init();
@@ -120,23 +115,10 @@ HomeBlks::HomeBlks(const init_params& cfg) : m_cfg(cfg), m_metrics("HomeBlks") {
     m_start_shutdown = false;
 }
 
-void HomeBlks::blkalloc_cp_start(std::shared_ptr< blkalloc_cp_id > id) {
-    get_data_blkstore()->blkalloc_cp_start(id);
-    get_index_blkstore()->blkalloc_cp_start(id);
-}
+void HomeBlks::attach_prepare_indx_cp_id(std::map< boost::uuids::uuid, indx_cp_id_ptr >* cur_id_map,
+                                         std::map< boost::uuids::uuid, indx_cp_id_ptr >* new_id_map, hs_cp_id* hs_id,
+                                         hs_cp_id* new_hs_id) {
 
-void HomeBlks::blkalloc_cp_done(std::shared_ptr< blkalloc_cp_id > id) {
-    get_data_blkstore()->blkalloc_cp_done(id);
-    get_index_blkstore()->blkalloc_cp_done(id);
-}
-
-std::shared_ptr< blkalloc_cp_id > HomeBlks::blkalloc_attach_prepare_cp(std::shared_ptr< blkalloc_cp_id > cur_cp_id) {
-    return (get_data_blkstore()->attach_prepare_cp(cur_cp_id));
-}
-
-void HomeBlks::attach_prepare_volume_cp_id(std::map< boost::uuids::uuid, vol_cp_id_ptr >* cur_id_map,
-                                           std::map< boost::uuids::uuid, vol_cp_id_ptr >* new_id_map,
-                                           homeblks_cp_id* hb_id, homeblks_cp_id* new_hb_id) {
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
 
 #ifndef NDEBUG
@@ -155,7 +137,7 @@ void HomeBlks::attach_prepare_volume_cp_id(std::map< boost::uuids::uuid, vol_cp_
         if (vol == nullptr) { continue; }
 
         /* get the cur cp id ptr */
-        vol_cp_id_ptr cur_cp_id_ptr = nullptr;
+        indx_cp_id_ptr cur_cp_id_ptr = nullptr;
         if (cur_id_map) {
             auto id_it = cur_id_map->find(it->first);
             if (id_it != cur_id_map->end()) {
@@ -165,11 +147,11 @@ void HomeBlks::attach_prepare_volume_cp_id(std::map< boost::uuids::uuid, vol_cp_
         }
 
         /* get the cur cp id ptr */
-        auto new_cp_id_ptr = vol->attach_prepare_volume_cp_id(cur_cp_id_ptr, hb_id, new_hb_id);
+        auto new_cp_id_ptr = vol->attach_prepare_volume_cp(cur_cp_id_ptr, hs_id, new_hs_id);
 
         if (new_cp_id_ptr) {
             bool happened{false};
-            std::map< boost::uuids::uuid, vol_cp_id_ptr >::iterator temp_it;
+            std::map< boost::uuids::uuid, indx_cp_id_ptr >::iterator temp_it;
             std::tie(temp_it, happened) = new_id_map->emplace(std::make_pair(it->first, new_cp_id_ptr));
             if (!happened) { throw std::runtime_error("Unknown bug"); }
         } else {
@@ -232,7 +214,6 @@ void HomeBlks::create_volume(VolumePtr vol) {
     decltype(m_volume_map)::iterator it;
     // Try to add an entry for this volume
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
-    if (is_shutdown()) { return; }
     bool happened{false};
     std::tie(it, happened) = m_volume_map.emplace(std::make_pair(vol->get_uuid(), nullptr));
     HS_ASSERT(RELEASE, happened, "volume already exists");
@@ -279,7 +260,7 @@ VolumePtr HomeBlks::lookup_volume(const boost::uuids::uuid& uuid) {
     if (m_volume_map.end() != it) { return it->second; }
     return nullptr;
 }
-
+#if 0
 SnapshotPtr HomeBlks::snap_volume(VolumePtr volptr) {
     if (!m_rdy || is_shutdown()) {
         LOGINFO("Snapshot: volume not online");
@@ -290,14 +271,16 @@ SnapshotPtr HomeBlks::snap_volume(VolumePtr volptr) {
     LOGINFO("Snapshot created volume {}, Snapshot {}", volptr->to_string(), sp->to_string());
     return sp;
 }
-
+#endif
 void HomeBlks::submit_io_batch() {
     iomanager.default_drive_interface()->submit_batch();
     call_multi_vol_completions();
 }
 
-HomeBlks* HomeBlks::instance() { return _instance.get(); }
-HomeBlksSafePtr HomeBlks::safe_instance() { return _instance; }
+HomeBlks* HomeBlks::instance() { return static_cast< HomeBlks* >(HomeStoreBase::instance()); }
+HomeBlksSafePtr HomeBlks::safe_instance() {
+    return boost::static_pointer_cast< HomeBlks >(HomeStoreBase::safe_instance());
+}
 
 void HomeBlks::superblock_init() {
     /* build the homeblks super block */
@@ -350,7 +333,6 @@ void HomeBlks::vol_mounted(const VolumePtr& vol, vol_state state) {
 
 bool HomeBlks::vol_state_change(const VolumePtr& vol, vol_state new_state) {
     assert(new_state == vol_state::OFFLINE || new_state == vol_state::ONLINE);
-    std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
     try {
         vol->set_state(new_state);
     } catch (std::exception& e) {
@@ -372,17 +354,20 @@ void HomeBlks::init_done(std::error_condition err) {
 
     if (err == no_error) { m_rdy = true; }
 
+    data_recovery_done();
+    uint64_t used_data_size = 0;
     for (auto it = m_volume_map.cbegin(); it != m_volume_map.cend(); ++it) {
         vol_mounted(it->second, it->second->get_state());
+        used_data_size += it->second->get_used_size();
     }
+    auto system_cap = get_system_capacity();
+    LOGINFO("{}", system_cap.to_string());
+    assert(system_cap.used_total_size == used_data_size);
 
-    data_recovery_done();
     LOGINFO("init done");
     m_cfg.init_done_cb(err, m_out_params);
     m_init_finished = true;
     m_cv.notify_all();
-    auto system_cap = get_system_capacity();
-    LOGINFO("{}", system_cap.to_string());
 #ifndef NDEBUG
     /* It will trigger race conditions without generating any IO error */
     set_io_flip();
@@ -650,8 +635,6 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
 }
 
 void HomeBlks::do_volume_shutdown(bool force) {
-    std::unique_lock< std::recursive_mutex > lg(m_vol_lock);
-
     if (!force && !Volume::can_all_vols_shutdown()) {
         Volume::trigger_homeblks_cp();
         return;
@@ -664,6 +647,9 @@ void HomeBlks::do_volume_shutdown(bool force) {
     /* XXX:- Do we need a force time here. It might get stuck in cp */
     Volume::shutdown(([this](bool success) {
         std::unique_lock< std::recursive_mutex > lg(m_vol_lock);
+
+        auto system_cap = get_system_capacity();
+        LOGINFO("{}", system_cap.to_string());
         m_volume_map.clear();
         LOGINFO("All volumes are shutdown successfully, proceed to bring down other subsystems");
         m_vol_shutdown_cmpltd = true;
@@ -720,7 +706,6 @@ std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
 vol_state HomeBlks::get_state(VolumePtr vol) { return vol->get_state(); }
 
 bool HomeBlks::fix_tree(VolumePtr vol, bool verify) {
-    std::unique_lock< std::recursive_mutex > lg(m_vol_lock);
     return vol->fix_mapping_btree(verify);
 }
 
@@ -783,7 +768,7 @@ void HomeBlks::migrate_volume_sb() {
  *      - Blk alloc bit map recovery done :- It is done when all the entries in journal are replayed.
  */
 
-void HomeBlks::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size) {
+void HomeBlks::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view<> buf, size_t size) {
     instance()->meta_blk_found(mblk, buf, size);
 }
 void HomeBlks::meta_blk_recovery_comp_cb(bool success) { instance()->meta_blk_recovery_comp(success); }
@@ -835,6 +820,9 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
     LOGINFO("home log store recovery is started");
     home_log_store_mgr.start(m_cfg.disk_init);
 
+    /* indx would have recovered by now */
+    indx_recovery_done();
+
     // start volume data recovery
     LOGINFO("volume recovery is started");
     vol_recovery_start_phase2();
@@ -860,7 +848,7 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
     }));
 }
 
-void HomeBlks::meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size) {
+void HomeBlks::meta_blk_found(meta_blk* mblk, sisl::byte_view<> buf, size_t size) {
     static bool meta_blk_found = false;
 
     // HomeBlk layer expects to see one valid meta_blk record during reboot;
@@ -886,4 +874,31 @@ void HomeBlks::vol_recovery_start_phase2() {
     for (auto it = m_volume_map.cbegin(); it != m_volume_map.cend(); ++it) {
         it->second->recovery_start_phase2();
     }
+}
+
+/* * Snapshot APIs  * */
+SnapshotPtr HomeBlks::create_snapshot(const VolumePtr& vol) {
+    return nullptr;
+}
+
+std::error_condition HomeBlks::remove_snapshot(const SnapshotPtr& snap) {
+    std::error_condition ok;
+    return ok;
+}
+
+SnapshotPtr HomeBlks::clone_snapshot(const SnapshotPtr& snap) {
+    return nullptr;
+}
+
+std::error_condition HomeBlks::restore_snapshot(const SnapshotPtr& snap) {
+    std::error_condition ok;
+    return ok;
+}
+
+void HomeBlks::list_snapshot(const VolumePtr& , std::vector<SnapshotPtr> snap_list) {
+
+}
+    
+void HomeBlks::read(const SnapshotPtr& snap, const snap_interface_req_ptr& req) {
+
 }

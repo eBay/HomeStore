@@ -1,4 +1,4 @@
-#include "homeblks/home_blks.hpp"
+#include "engine/homestore_base.hpp"
 #include "log_dev.hpp"
 
 namespace homestore {
@@ -6,7 +6,7 @@ namespace homestore {
 LogDev::LogDev() = default;
 LogDev::~LogDev() = default;
 
-void LogDev::meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size) {
+void LogDev::meta_blk_found(meta_blk* mblk, sisl::byte_view<> buf, size_t size) {
     m_sb_cookie = (void*)mblk;
     m_info_blk_buf = buf;
 }
@@ -17,7 +17,7 @@ void LogDev::start(bool format) {
     HS_ASSERT(LOGMSG, (m_logfound_cb != nullptr), "Expected Logs found callback to be registered");
 
     m_log_records = std::make_unique< sisl::StreamTracker< log_record > >();
-    m_hb = HomeBlks::safe_instance();
+    m_hb = HomeStoreBase::safe_instance();
 
     // First read the info block
     auto bstore = m_hb->get_logdev_blkstore();
@@ -28,12 +28,12 @@ void LogDev::start(bool format) {
         // TODO: Don't create 2K as is, but query vdev_info layer to see available vb_context size
         uint32_t align = 0;
         uint32_t size = logdev_info_block::size;
-        if (meta_blk_mgr->is_aligned_size(size)) { 
-            align = HS_STATIC_CONFIG(disk_attr.align_size); 
+        if (meta_blk_mgr->is_aligned_buf_needed(size)) {
+            align = HS_STATIC_CONFIG(disk_attr.align_size);
             size = sisl::round_up(size, align);
         }
 
-        sisl::byte_view b(size, align);
+        sisl::byte_view<> b(size, align);
         m_info_blk_buf = b;
         ib = (logdev_info_block*)m_info_blk_buf.bytes();
 
@@ -43,7 +43,7 @@ void LogDev::start(bool format) {
         _persist_info_block();
     } else {
         HS_ASSERT(LOGMSG, (ib != nullptr), "Expected info blk not to be null");
-        sisl::byte_array b = sisl::make_byte_array(logdev_info_block::store_info_size(), 0);
+        sisl::byte_array<> b = sisl::make_byte_array(logdev_info_block::store_info_size(), 0);
         memcpy((void*)b->bytes, (void*)&ib->store_id_info[0], logdev_info_block::store_info_size());
         m_id_reserver = std::make_unique< sisl::IDReserver >(b);
 
@@ -106,7 +106,7 @@ void LogDev::do_load(uint64_t device_cursor) {
             uint32_t data_offset = (rec->offset + (rec->is_inlined ? 0 : header->oob_data_offset));
 
             // Do a callback on the found log entry
-            sisl::byte_view b = buf;
+            sisl::byte_view<> b = buf;
             b.move_forward(data_offset);
             b.set_size(rec->size);
             m_logfound_cb(rec->store_id, rec->store_seq_num, {header->start_idx() + i, group_dev_offset}, b);

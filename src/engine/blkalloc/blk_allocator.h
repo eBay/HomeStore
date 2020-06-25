@@ -20,6 +20,8 @@
 #include <boost/range/irange.hpp>
 #include <fds/bitset.hpp>
 #include "engine/meta/meta_blks_mgr.hpp"
+#include "engine/homestore_base.hpp"
+#include "engine/device/device.h"
 
 using namespace std;
 
@@ -34,13 +36,7 @@ namespace homestore {
 #define BLKALLOC_ASSERT_NULL(assert_type, val, ...)                                                                    \
     HS_SUBMOD_ASSERT_NULL(assert_type, val, , "blkalloc", m_cfg.get_name(), ##__VA_ARGS__)
 
-struct blkalloc_cp_id {
-    bool suspend = false;
-    uint64_t cnt;
-    bool is_suspend() { return suspend; }
-    void suspend_cp() { suspend = true; }
-    void resume_cp() { suspend = false; }
-};
+struct blkalloc_cp_id;
 
 class BlkAllocConfig {
 private:
@@ -78,9 +74,7 @@ public:
       \param pg_per_portion an uint32 argument signifies pages per portion
       \return void
     */
-    void set_blks_per_portion(uint32_t pg_per_portion) {
-        m_blks_per_portion = pg_per_portion;
-    }
+    void set_blks_per_portion(uint32_t pg_per_portion) { m_blks_per_portion = pg_per_portion; }
 
     //! Get Blocks per Portion
     /*!
@@ -128,11 +122,7 @@ enum BlkAllocatorState {
 /* Hints for various allocators */
 struct blk_alloc_hints {
     blk_alloc_hints() :
-            desired_temp(0),
-            dev_id_hint(-1),
-            can_look_for_other_dev(true),
-            is_contiguous(false),
-            multiplier(1) {}
+            desired_temp(0), dev_id_hint(-1), can_look_for_other_dev(true), is_contiguous(false), multiplier(1) {}
 
     uint32_t desired_temp;       // Temperature hint for the device
     int dev_id_hint;             // which physical device to pick (hint if any) -1 for don't care
@@ -146,7 +136,6 @@ private:
     pthread_mutex_t m_blk_lock;
 
 public:
-
     BlkAllocPortion() { pthread_mutex_init(&m_blk_lock, NULL); }
 
     ~BlkAllocPortion() { pthread_mutex_destroy(&m_blk_lock); }
@@ -196,14 +185,15 @@ class BlkAllocator {
     std::vector< BlkAllocPortion > m_blk_portions;
     sisl::Bitset* m_disk_bm;
 
-    std::vector< BlkId > m_free_blkid_list;
     bool m_auto_recovery = false;
 
 protected:
     bool m_inited = false;
+    std::atomic< int64_t > m_alloc_blk_cnt;
 
 public:
-    explicit BlkAllocator(BlkAllocConfig& cfg, uint32_t id = 0) : m_blk_portions(cfg.get_total_portions()) {
+    explicit BlkAllocator(BlkAllocConfig& cfg, uint32_t id = 0) :
+            m_blk_portions(cfg.get_total_portions()), m_alloc_blk_cnt(0) {
         m_auto_recovery = cfg.get_auto_recovery();
         m_disk_bm = new sisl::Bitset(cfg.get_total_blks(), id, HS_STATIC_CONFIG(disk_attr.align_size));
         m_cfg = cfg;
@@ -220,6 +210,7 @@ public:
     BlkAllocPortion* get_blk_portions(uint32_t portion_num) { return &(m_blk_portions[portion_num]); }
 
     virtual void inited() {
+        m_alloc_blk_cnt.fetch_add(m_disk_bm->get_set_count(), std::memory_order_relaxed);
         if (!m_auto_recovery) {
             delete m_disk_bm;
             m_disk_bm = nullptr;
@@ -227,12 +218,16 @@ public:
         m_inited = true;
     }
 
+    uint32_t total_alloc_blks() const {
+        return m_alloc_blk_cnt.load();
+    }
+
     /* It is used during recovery in both mode :- auto recovery and manual recovery
      * It is also used in normal IO during auto recovery mode.
      */
     BlkAllocStatus alloc(BlkId& in_bid) {
         /* enable this assert later when reboot is supported */
-        //        assert(m_auto_recovery || !m_inited);
+        // assert(m_auto_recovery || !m_inited);
         if (!m_auto_recovery && m_inited) { return BLK_ALLOC_FAILED; }
         BlkAllocPortion* portion = blknum_to_portion(in_bid.get_id());
         portion->lock();
@@ -245,10 +240,9 @@ public:
         return BLK_ALLOC_SUCCESS;
     };
 
-    void free(const BlkId& b, std::shared_ptr< blkalloc_cp_id > id) {
+    void free_on_disk(const BlkId& b) {
         /* this api should be called only when auto recovery is enabled */
         assert(m_auto_recovery);
-        m_free_blkid_list.push_back(b);
         BlkAllocPortion* portion = blknum_to_portion(b.get_id());
         portion->lock();
         if (m_inited) {
@@ -265,17 +259,7 @@ public:
     /* CP start is called when all its consumers have purged their free lists and now want to persist the
      * disk bitmap.
      */
-    sisl::byte_array cp_start(std::shared_ptr< blkalloc_cp_id > id) { return (m_disk_bm->serialize()); }
-
-    /* CP done is called when in use bitmap is persisted and also consumers has persisted their superblock. Not
-     * it is safe to reuse the blks.
-     */
-    void cp_done(std::shared_ptr< blkalloc_cp_id > id) {
-        for (uint32_t i = 0; i < m_free_blkid_list.size(); ++i) {
-            free(m_free_blkid_list[i]);
-        }
-        m_free_blkid_list.clear();
-    }
+    sisl::byte_array<> cp_start(std::shared_ptr< blkalloc_cp_id > id) { return (m_disk_bm->serialize()); }
 
     virtual bool is_blk_alloced(BlkId& b) = 0;
     virtual std::string to_string() const = 0;
@@ -342,10 +326,6 @@ private:
 
     std::atomic< uint64_t > m_top_blk_id;
 
-#ifndef NDEBUG
-    std::atomic< uint32_t > m_nfree_blks;
-#endif
-
     __fixed_blk_node* m_blk_nodes;
 
 public:
@@ -359,14 +339,46 @@ public:
     std::string to_string() const override;
     virtual bool is_blk_alloced(BlkId& in_bid);
 
-#ifndef NDEBUG
-    uint32_t total_free_blks() const { return m_nfree_blks.load(std::memory_order_relaxed); }
-#endif
-
 private:
     void free_blk(uint32_t id);
     uint32_t m_first_blk_id;
     std::mutex m_bm_mutex;
+};
+
+struct blkalloc_cp_id {
+    bool suspend = false;
+    uint64_t cnt;
+    std::vector< blkid_list_ptr > blkid_list_vector;
+    bool is_suspend() { return suspend; }
+    void suspend_cp() { suspend = true; }
+    void resume_cp() { suspend = false; }
+    void free_blks(blkid_list_ptr list) {
+        sisl::ThreadVector< BlkId >::thread_vector_iterator it;
+        auto bid = list->begin(it);
+        while (bid != nullptr) {
+            auto chunk = HomeStoreBase::safe_instance()->get_device_manager()->get_chunk(bid->get_chunk_num());
+            auto ba = chunk->get_blk_allocator();
+            ba->free_on_disk(*bid);
+            bid = list->next(it);
+        }
+        blkid_list_vector.push_back(list);
+    }
+
+    blkalloc_cp_id() = default;
+    ~blkalloc_cp_id() {
+        /* free all the blkids in the cache */
+        for (uint32_t i = 0; i < blkid_list_vector.size(); ++i) {
+            auto list = blkid_list_vector[i];
+            sisl::ThreadVector< BlkId >::thread_vector_iterator it;
+            auto bid = list->begin(it);
+            while (bid != nullptr) {
+                auto chunk = HomeStoreBase::safe_instance()->get_device_manager()->get_chunk(bid->get_chunk_num());
+                chunk->get_blk_allocator()->free(*bid);
+                bid = list->next(it);
+            }
+            list->erase();
+        }
+    }
 };
 
 } // namespace homestore

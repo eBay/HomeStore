@@ -8,19 +8,16 @@
 #include <boost/intrusive_ptr.hpp>
 #include <fmt/format.h>
 #include <map>
-//#include "homeblks/home_blks.hpp"
+#include "engine/homestore_base.hpp"
 
 SDS_LOGGING_DECL(logdev)
 
 namespace homestore {
 
 typedef int64_t logid_t;
-typedef uint32_t crc32_t;
 typedef uint32_t logstore_id_t;
 typedef int64_t logstore_seq_num_t;
 
-static constexpr crc32_t init_crc32 = 0x12345678;
-static constexpr crc32_t INVALID_CRC32_VALUE = 0x0u;
 static constexpr uint32_t LOG_GROUP_HDR_MAGIC = 0xDABAF00D;
 static constexpr uint32_t dma_boundary = 512; // Mininum size the dma/writes to be aligned with
 static constexpr uint32_t initial_read_size = 4096;
@@ -78,8 +75,12 @@ struct log_record {
     size_t serialized_size() const { return sizeof(serialized_log_record) + size; }
     bool is_inlineable() const {
         // Need inlining if size is smaller or size/buffer is not in dma'ble boundary.
-        return ((size < inline_size) || ((size % dma_boundary) != 0) || (((uintptr_t)data_ptr % dma_boundary) != 0));
+        //return ((size < inline_size) || ((size % dma_boundary) != 0) || (((uintptr_t)data_ptr % dma_boundary) != 0));
+        return (is_size_inlineable(size) || (((uintptr_t)data_ptr % dma_boundary) != 0));
     }
+
+    static bool is_size_inlineable(size_t sz) { return ((sz < inline_size) || ((sz % dma_boundary) != 0)); }
+
     static size_t serialized_size(uint32_t sz) { return sizeof(serialized_log_record) + sz; }
 };
 
@@ -272,7 +273,7 @@ struct formatter< homestore::logdev_key > {
 } // namespace fmt
 
 namespace homestore {
-typedef sisl::byte_view log_buffer;
+typedef sisl::byte_view<> log_buffer;
 
 struct truncation_request_t {
     logstore_id_t store_id;
@@ -291,20 +292,19 @@ struct logdev_info_block {
     uint8_t store_id_info[0];
 } __attribute__((packed));
 
-class HomeBlks;
 class log_stream_reader {
 public:
     log_stream_reader(uint64_t device_cursor);
-    sisl::byte_view next_group(uint64_t* out_dev_offset);
-    sisl::byte_view group_in_next_page();
+    sisl::byte_view<> next_group(uint64_t* out_dev_offset);
+    sisl::byte_view<> group_in_next_page();
     uint64_t group_cursor() const { return m_cur_group_cursor; }
 
 private:
-    sisl::byte_view read_next_bytes(uint64_t nbytes);
+    sisl::byte_view<> read_next_bytes(uint64_t nbytes);
 
 private:
-    boost::intrusive_ptr< HomeBlks > m_hb;
-    sisl::byte_view m_cur_log_buf;
+    boost::intrusive_ptr< HomeStoreBase > m_hb;
+    sisl::byte_view<> m_cur_log_buf;
     uint64_t m_cur_group_cursor;
 };
 
@@ -471,7 +471,7 @@ public:
      * @param key : the key containing log id that needs to be truncate up to;
      */
     void truncate(const logdev_key& key);
-    void meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size);
+    void meta_blk_found(meta_blk* mblk, sisl::byte_view<> buf, size_t size);
 
 private:
     static LogGroup* new_log_group();
@@ -485,14 +485,14 @@ private:
 
 #if 0
     log_group_header* read_validate_header(uint8_t* buf, uint32_t size, bool* read_more);
-    sisl::byte_array read_next_header(uint32_t max_buf_reads);
+    sisl::byte_array<> read_next_header(uint32_t max_buf_reads);
 #endif
 
     void _persist_info_block();
     void assert_next_pages(log_stream_reader& lstream);
-    
+
 private:
-    boost::intrusive_ptr< HomeBlks > m_hb; // Back pointer to homeblks
+    boost::intrusive_ptr< HomeStoreBase > m_hb; // Back pointer to homestore
     std::unique_ptr< sisl::StreamTracker< log_record > >
         m_log_records; // The container which stores all in-memory log records
     std::unique_ptr< sisl::IDReserver > m_id_reserver;
@@ -512,7 +512,7 @@ private:
 
     // LogDev Info block related fields
     std::mutex m_store_reserve_mutex;
-    sisl::byte_view m_info_blk_buf;
+    sisl::byte_view<> m_info_blk_buf;
 
     // Block flush Q request Q
     std::mutex m_block_flush_q_mutex;

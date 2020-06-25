@@ -46,9 +46,7 @@ public:
         boost::uuids::string_generator gen;
         uuid = gen("01970496-0262-11e9-8eb2-f2801f1b9fd1");
 
-        m_map = std::make_unique< mapping >(
-            params.size, params.page_size, name,
-            std::bind(&MapStoreSpec::process_free_blk_callback, this, std::placeholders::_1), nullptr);
+        m_map = std::make_unique< mapping >(params.size, params.page_size, name, nullptr);
     }
 
     /* Map put always appends if exists, no feature to force udpate/insert and return error */

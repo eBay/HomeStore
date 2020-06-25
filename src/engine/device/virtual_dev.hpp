@@ -219,7 +219,6 @@ private:
     comp_callback m_comp_cb;
     uint32_t m_pagesz;
     bool m_recovery_init;
-    std::atomic< uint64_t > m_used_size;
 
     // data structure for append write
     uint64_t m_reserved_sz = 0;                  // write size within chunk, used to check chunk boundary;
@@ -234,7 +233,6 @@ public:
         m_mgr = mgr;
         m_vb = vb;
         m_comp_cb = cb;
-        m_used_size = 0;
         m_chunk_size = 0;
         m_num_chunks = 0;
         m_pagesz = page_size;
@@ -1146,8 +1144,6 @@ public:
         auto status = primary_chunk->get_blk_allocator()->alloc(blkid);
         if (status == BLK_ALLOC_SUCCESS) {
             /* insert it only if it is not previously allocated */
-            auto size = m_used_size.fetch_add(in_blkid.data_size(m_pagesz), std::memory_order_relaxed);
-            HS_ASSERT_CMP(DEBUG, size, <=, get_size());
         }
         return BLK_ALLOC_SUCCESS;
     }
@@ -1220,8 +1216,6 @@ public:
                     out_blkid[i] = to_glob_uniq_blkid(out_blkid[i], picked_chunk);
                     tot_size += out_blkid[i].data_size(m_pagesz);
                 }
-                auto size = m_used_size.fetch_add(tot_size, std::memory_order_relaxed);
-                HS_ASSERT_CMP(DEBUG, size, <=, get_size());
             }
             return status;
         } catch (const std::exception& e) {
@@ -1237,18 +1231,6 @@ public:
         // Convert blk id to chunk specific id and call its allocator to free
         BlkId cb = to_chunk_specific_id(b, &chunk);
         chunk->get_blk_allocator()->free(cb);
-        m_used_size.fetch_sub(b.data_size(m_pagesz), std::memory_order_relaxed);
-        HS_ASSERT_CMP(DEBUG, m_used_size.load(), >=, 0);
-    }
-
-    void free_blk(const BlkId& b, std::shared_ptr< blkalloc_cp_id > id) {
-        PhysicalDevChunk* chunk;
-
-        // Convert blk id to chunk specific id and call its allocator to free
-        BlkId cb = to_chunk_specific_id(b, &chunk);
-        chunk->get_blk_allocator()->free(cb, id);
-        m_used_size.fetch_sub(b.data_size(m_pagesz), std::memory_order_relaxed);
-        HS_ASSERT_CMP(DEBUG, m_used_size.load(), >=, 0);
     }
 
     void recovery_done() {
@@ -1477,7 +1459,17 @@ public:
     void update_vb_context(const sisl::blob& ctx_data) { m_mgr->update_vb_context(m_vb->vdev_id, ctx_data); }
     uint64_t get_size() const { return m_vb->size; }
 
-    uint64_t get_used_size() const { return m_used_size.load(); }
+    uint64_t get_used_size() const {
+        uint64_t alloc_cnt = 0;
+        for (uint32_t i = 0; i < m_primary_pdev_chunks_list.size(); ++i) {
+            for (uint32_t chunk_indx = 0; chunk_indx < m_primary_pdev_chunks_list[i].chunks_in_pdev.size();
+                 ++chunk_indx) {
+                auto chunk = m_primary_pdev_chunks_list[i].chunks_in_pdev[chunk_indx];
+                alloc_cnt += chunk->get_blk_allocator()->total_alloc_blks();
+            }
+        }
+        return (alloc_cnt * get_page_size());
+    }
 
     void expand(uint32_t addln_size) {}
 
@@ -1509,16 +1501,6 @@ public:
                  ++chunk_indx) {
                 auto chunk = m_primary_pdev_chunks_list[i].chunks_in_pdev[chunk_indx];
                 chunk->cp_start(id);
-            }
-        }
-    }
-
-    void blkalloc_cp_done(std::shared_ptr< blkalloc_cp_id > id) {
-        for (uint32_t i = 0; i < m_primary_pdev_chunks_list.size(); ++i) {
-            for (uint32_t chunk_indx = 0; chunk_indx < m_primary_pdev_chunks_list[i].chunks_in_pdev.size();
-                 ++chunk_indx) {
-                auto chunk = m_primary_pdev_chunks_list[i].chunks_in_pdev[chunk_indx];
-                chunk->cp_done(id);
             }
         }
     }

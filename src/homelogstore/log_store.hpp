@@ -67,7 +67,7 @@ public:
     }
 
     static LogDev& logdev() { return HomeLogStoreMgr::instance().m_log_dev; }
-    static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size);
+    static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view<> buf, size_t size);
 
     /**
      * @brief Start the entire HomeLogStore set and does recover the existing logstores. Really this is the first
@@ -313,6 +313,8 @@ public:
      * same as input `from`, then there are no more new contigous completed.
      */
     logstore_seq_num_t get_contiguous_completed_seq_num(logstore_seq_num_t from);
+
+    static bool is_aligned_buf_needed(size_t size) { return (log_record::is_size_inlineable(size) == false); }
 
 private:
     void on_write_completion(logstore_req* req, logdev_key ld_key, logdev_key flush_idx, uint32_t nremaining_in_batch);

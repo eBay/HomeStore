@@ -507,9 +507,8 @@ public:
     }
 };
 
-typedef std::function< void(Free_Blk_Entry fbe) > free_blk_callback;
 typedef std::function< void(volume_req* req, BlkId& bid) > pending_read_blk_cb;
-class mapping {
+class mapping : public indx_tbl {
     typedef std::function< void(struct BlkId blkid, size_t offset_size, size_t size) > alloc_blk_callback;
     typedef std::function< void(btree_cp_id_ptr cp_id) > comp_callback;
     constexpr static uint64_t lba_query_cnt = 1024ull;
@@ -518,7 +517,6 @@ private:
     HomeBlksSafePtr m_hb;
     MappingBtreeDeclType* m_bt;
     alloc_blk_callback m_alloc_blk_cb;
-    free_blk_callback m_free_blk_cb;
     pending_read_blk_cb m_pending_read_blk_cb;
     uint32_t m_vol_page_size;
     const MappingValue EMPTY_MAPPING_VALUE;
@@ -573,13 +571,10 @@ public:
         }
     }
 
-    ~mapping() { delete m_bt; }
 
-    btree_status_t destroy(btree_cp_id_ptr btree_id, vol_cp_id_ptr vol_id) {
-        /* XXX: do we need to handle error condition here ?. In the next boot we will automatically recaim these blocks
-         */
-        auto ret = m_bt->destroy(([this, vol_id](MappingValue& mv) { this->process_free_blk_callback(vol_id, mv); }),
-                                 false, btree_id);
+    btree_status_t destroy(btree_cp_id_ptr btree_id, free_blk_callback cb) {
+        auto ret =
+            m_bt->destroy(([this, cb](MappingValue& mv) { this->process_free_blk_callback(cb, mv); }), false, btree_id);
         HS_SUBMOD_ASSERT(LOGMSG, (ret == btree_status_t::success), , "vol", m_unique_name,
                          "Error in destroying mapping btree ret={} ", ret);
         return ret;
@@ -599,8 +594,8 @@ public:
         return 0;
     }
 
-    void process_free_blk_callback(vol_cp_id_ptr vol_id, MappingValue& mv) {
-        if (!m_free_blk_cb) { return; }
+    void process_free_blk_callback(free_blk_callback free_cb, MappingValue& mv) {
+        if (!free_cb) { return; }
         Blob_Array< ValueEntry > array = mv.get_array();
         for (uint32_t i = 0; i < array.get_total_elements(); ++i) {
             ValueEntry ve;
@@ -608,17 +603,14 @@ public:
             HS_SUBMOD_LOG(DEBUG, volume, , "vol", m_unique_name, "Free Blk: vol_page: {}, data_page: {}, n_lba: {}",
                           m_vol_page_size, HomeBlks::instance()->get_data_pagesz(), ve.get_nlba());
             uint64_t nblks = (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * ve.get_nlba();
-            Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(), nblks, vol_id, nullptr);
-            m_free_blk_cb(fbe);
+            Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(), nblks);
+            free_cb(fbe);
         }
     }
 
-    mapping(uint64_t volsize, uint32_t page_size, const std::string& unique_name, free_blk_callback free_blk_cb,
-            trigger_cp_callback trigger_cp_cb, pending_read_blk_cb pending_read_cb = nullptr) :
-            m_free_blk_cb(free_blk_cb),
-            m_pending_read_blk_cb(pending_read_cb),
-            m_vol_page_size(page_size),
-            m_unique_name(unique_name) {
+    mapping(uint64_t volsize, uint32_t page_size, const std::string& unique_name, trigger_cp_callback trigger_cp_cb,
+            pending_read_blk_cb pending_read_cb = nullptr) :
+            m_pending_read_blk_cb(pending_read_cb), m_vol_page_size(page_size), m_unique_name(unique_name) {
         m_hb = HomeBlks::safe_instance();
         homeds::btree::BtreeConfig btree_cfg(HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size), unique_name.c_str());
         btree_cfg.set_max_objs(volsize / page_size);
@@ -630,14 +622,10 @@ public:
         m_bt = MappingBtreeDeclType::create_btree(btree_cfg);
     }
 
-    mapping(uint64_t volsize, uint32_t page_size, const std::string& unique_name,
-            MappingBtreeDeclType::btree_super_block btree_sb, free_blk_callback free_blk_cb,
+    mapping(uint64_t volsize, uint32_t page_size, const std::string& unique_name, btree_super_block btree_sb,
             trigger_cp_callback trigger_cp_cb, pending_read_blk_cb pending_read_cb = nullptr,
             btree_cp_superblock* btree_cp_sb = nullptr) :
-            m_free_blk_cb(free_blk_cb),
-            m_pending_read_blk_cb(pending_read_cb),
-            m_vol_page_size(page_size),
-            m_unique_name(unique_name) {
+            m_pending_read_blk_cb(pending_read_cb), m_vol_page_size(page_size), m_unique_name(unique_name) {
         m_hb = HomeBlks::safe_instance();
         homeds::btree::BtreeConfig btree_cfg(HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size), unique_name.c_str());
         btree_cfg.set_max_objs(volsize / page_size);
@@ -649,28 +637,32 @@ public:
         m_bt = MappingBtreeDeclType::create_btree(btree_sb, btree_cfg, btree_cp_sb);
     }
 
-    void create_done() { m_bt->create_done(); }
+    virtual ~mapping() { delete m_bt; }
 
-    uint64_t get_used_size() { return m_bt->get_used_size(); }
-    MappingBtreeDeclType::btree_super_block get_btree_sb() { return (m_bt->get_btree_sb()); }
+    virtual void create_done() override { m_bt->create_done(); }
+
+    virtual uint64_t get_used_size() override { return m_bt->get_used_size(); }
+    virtual btree_super_block get_btree_sb() override { return (m_bt->get_btree_sb()); }
 
     /* It attaches the new CP and prepare for cur cp flush */
-    btree_cp_id_ptr attach_prepare_cp(btree_cp_id_ptr cur_cp_id, bool is_last_cp) {
-        return (m_bt->attach_prepare_cp(cur_cp_id, is_last_cp));
+    virtual btree_cp_id_ptr attach_prepare_cp(btree_cp_id_ptr cur_cp_id, bool is_last_cp,
+                                              bool blkalloc_checkpoint) override {
+        return (m_bt->attach_prepare_cp(cur_cp_id, is_last_cp, blkalloc_checkpoint));
     }
 
-    void cp_start(btree_cp_id_ptr cp_id, cp_comp_callback cb) { m_bt->cp_start(cp_id, cb); }
+    virtual void cp_start(btree_cp_id_ptr cp_id, cp_comp_callback cb) override { m_bt->cp_start(cp_id, cb); }
 
-    void truncate(btree_cp_id_ptr cp_id) { m_bt->truncate(cp_id); }
+    virtual void truncate(btree_cp_id_ptr cp_id) override { m_bt->truncate(cp_id); }
 
     static void cp_done(trigger_cp_callback cb) { MappingBtreeDeclType::cp_done(cb); }
 
-    void destroy_done() { m_bt->destroy_done(); }
+    virtual void destroy_done() override { m_bt->destroy_done(); }
     void update_btree_cp_sb(btree_cp_id_ptr cp_id, btree_cp_superblock& btree_sb, bool blkalloc_cp) {
         m_bt->update_btree_cp_sb(cp_id, btree_sb, blkalloc_cp);
     }
 
-    void flush_free_blks(btree_cp_id_ptr btree_id, std::shared_ptr< homestore::blkalloc_cp_id >& blkalloc_id) {
+    virtual void flush_free_blks(btree_cp_id_ptr btree_id,
+                                 std::shared_ptr< homestore::blkalloc_cp_id >& blkalloc_id) override {
         m_bt->flush_free_blks(btree_id, blkalloc_id);
     }
 
@@ -741,6 +733,85 @@ public:
         }
 
         return no_error;
+    }
+
+    btree_status_t update_active_indx_tbl(indx_req* ireq, btree_cp_id_ptr btree_id) override {
+        auto vreq = static_cast< volume_req* >(ireq);
+        uint64_t start_lba = vreq->lba();
+        int csum_indx = 0;
+        uint64_t next_start_lba = start_lba;
+        uint64_t original_start_lba = start_lba;
+        btree_status_t ret = btree_status_t::success;
+        /* We always try to write from the beginning even though it can be called multiple times in the same IO.
+         * We don't update the key later if updated sequence id is greater then or equal to this sequence id.
+         */
+        for (uint32_t i = 0; i < vreq->alloc_blkid_list.size(); ++i) {
+            auto blkid = vreq->alloc_blkid_list[i];
+            uint32_t nlbas = blkid.data_size(HomeBlks::instance()->get_data_pagesz()) / m_vol_page_size;
+            MappingKey key(start_lba, nlbas);
+            ValueEntry ve(vreq->seqId, blkid, 0, nlbas, &vreq->csum_list[csum_indx]);
+            MappingValue value(ve);
+            ret = put(vreq, key, value, btree_id, next_start_lba);
+            if (ret != btree_status_t::success) { break; }
+            start_lba += nlbas;
+            csum_indx += nlbas;
+        }
+        auto lbas_written = next_start_lba - original_start_lba;
+        if (vreq->active_nlbas_written < lbas_written) { vreq->active_nlbas_written = lbas_written; }
+        return ret;
+    }
+
+    btree_status_t recovery_update(logstore_seq_num_t seqnum, journal_hdr* hdr, btree_cp_id_ptr btree_id) override {
+        /* get all the values from journal entry */
+        auto key = (journal_key*)indx_journal_entry::get_key(hdr).first;
+        assert(indx_journal_entry::get_key(hdr).second == sizeof(journal_key));
+        uint64_t lba = key->lba;
+        BlkId* bid = indx_journal_entry::get_alloc_bid_list(hdr).first;
+        uint32_t nbid = indx_journal_entry::get_alloc_bid_list(hdr).second;
+        uint16_t* csum = (uint16_t*)indx_journal_entry::get_val(hdr).first;
+        uint32_t ncsum = indx_journal_entry::get_val(hdr).second / sizeof(uint16_t);
+        assert(ncsum == key->nlbas);
+
+        /* uodate btree */
+        uint32_t csum_indx = 0;
+        btree_status_t ret = btree_status_t::success;
+        for (uint32_t i = 0; i < nbid; ++i) {
+            uint32_t nlbas = bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) / m_vol_page_size;
+            MappingKey key(lba, nlbas);
+            ValueEntry ve(seqnum, bid[i], 0, nlbas, &csum[csum_indx]);
+            MappingValue value(ve);
+            uint64_t next_start_lba;
+            ret = put(nullptr, key, value, btree_id, next_start_lba);
+            if (ret != btree_status_t::success) { break; }
+            lba += nlbas;
+            csum_indx += nlbas;
+        }
+        assert(lba == key->lba + key->nlbas);
+        return ret;
+    }
+
+    /* it populats the allocated blkids in index req. It might not be the same as in volume req if entry is partially
+     * written.
+     */
+    void update_indx_alloc_blkids(indx_req* ireq) override {
+        uint32_t total_lbas = 0;
+        auto vreq = static_cast< volume_req* >(ireq);
+        auto lbas_written = vreq->active_nlbas_written;
+        for (uint32_t i = 0; i < vreq->alloc_blkid_list.size(); ++i) {
+            auto blkid = vreq->alloc_blkid_list[i];
+            uint32_t page_size = vreq->vol()->get_page_size();
+            uint32_t nlbas = blkid.data_size(HomeBlks::instance()->get_data_pagesz()) / page_size;
+            if (total_lbas + nlbas >= lbas_written) {
+                /* it is written only upto this blkid */
+                auto size_written = (lbas_written - total_lbas) * vreq->vol()->get_page_size();
+                auto offset = blkid.data_size(HomeBlks::instance()->get_data_pagesz()) - size_written;
+                auto blkid_written = blkid.get_blkid_at(offset, size_written, HomeBlks::instance()->get_data_pagesz());
+                ireq->push_indx_alloc_blkid(blkid_written);
+                break;
+            }
+            total_lbas += nlbas;
+            ireq->push_indx_alloc_blkid(blkid);
+        }
     }
 
     /* Note :- we should not write same IO in btree multiple times. When a key is updated , it update the free blk
@@ -1095,6 +1166,11 @@ private:
         get_start_end_lba(cb_param, start_lba, end_lba);
         auto req = param->m_req;
         MappingValue& new_val = param->get_new_value();
+        /* get sequence ID of this value */
+        Blob_Array< ValueEntry >& new_varray = new_val.get_array();
+        ValueEntry new_ve;
+        new_varray.get(0, new_ve, false);
+        uint64_t new_seq_id = new_ve.get_seqId();
 
 #ifndef NDEBUG
         stringstream ss;
@@ -1124,7 +1200,7 @@ private:
             ValueEntry ve;
             e_varray.get(0, ve, false);
             uint64_t seq_id = ve.get_seqId();
-            if (req->seqId <= seq_id) {
+            if (new_seq_id <= seq_id) {
                 /* it is the latest entry, we should not override it */
                 replace_kv.emplace_back(existing.first, existing.second);
                 auto nlbas = ve.get_nlba();
@@ -1134,8 +1210,7 @@ private:
                     new_varray.get(0, ve, false);
                     /* free new blkid. it is overridden */
                     Free_Blk_Entry fbe(ve.get_blkId(), new_val_offset,
-                                       (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * nlbas, req->vol_id,
-                                       req->cp_id);
+                                       (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * nlbas);
                     req->push_fbe(fbe);
                 }
                 start_lba += nlbas;
@@ -1285,8 +1360,7 @@ private:
         uint16_t blk_offset = (e_val_offset * m_vol_page_size) / HomeBlks::instance()->get_data_pagesz();
         if (req) {
             Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset() + blk_offset,
-                               (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * nlba, req->vol_id,
-                               req->cp_id);
+                               (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * nlba);
             req->push_fbe(fbe);
         }
 

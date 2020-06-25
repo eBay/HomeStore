@@ -113,7 +113,7 @@ TEST_F(FixedBlkAllocatorTest, alloc_free_test) {
     }
 
     EXPECT_EQ(m_alloced_count.load(), max_blks());
-    EXPECT_EQ(m_fixed_allocator->total_free_blks(), 0u);
+    EXPECT_EQ(m_fixed_allocator->total_alloc_blks(), max_blks());
 
     LOGINFO("Allocated {} blocks, Allocator state: {}", m_alloced_count.load(), m_fixed_allocator->to_string());
 
@@ -128,7 +128,7 @@ TEST_F(FixedBlkAllocatorTest, alloc_free_test) {
         delete (thrs[i]);
     }
     LOGINFO("Freed all blocks: Allocator state: {}", m_fixed_allocator->to_string());
-    EXPECT_EQ(m_fixed_allocator->total_free_blks(), max_blks());
+    EXPECT_EQ(m_fixed_allocator->total_alloc_blks(), 0);
     LOGINFO("FixedSizeBlkAllocator test done");
 }
 

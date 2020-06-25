@@ -26,6 +26,7 @@
 #include <boost/preprocessor/control/if.hpp>
 #include <boost/preprocessor/stringize.hpp>
 #include "engine/common/homestore_assert.hpp"
+#include "engine/blkalloc/blk.h"
 
 ENUM(btree_status_t, uint32_t, success, not_found, item_found, closest_found, closest_removed, retry, has_more,
      read_failed, write_failed, stale_buf, refresh_failed, put_failed, space_not_avail, split_failed, insert_failed,
@@ -87,11 +88,12 @@ enum class journal_op : uint8_t { BTREE_SPLIT = 1, BTREE_MERGE, BTREE_CREATE };
 struct btree_cp_id;
 typedef std::shared_ptr< btree_cp_id > btree_cp_id_ptr;
 typedef std::function< void(btree_cp_id_ptr cp_id) > cp_comp_callback;
+
 struct btree_cp_superblock {
     int64_t active_psn = -1;
     int64_t cp_cnt = -1;
     int64_t blkalloc_cp_cnt = -1;
-    int64_t btree_size; // start with root node
+    int64_t btree_size = 0;
     /* we can add more statistics as well like number of interior nodes etc. */
 } __attribute__((__packed__));
 
@@ -102,6 +104,7 @@ struct btree_cp_id {
     int64_t start_psn = -1; // not inclusive
     int64_t end_psn = -1;   // inclusive
     cp_comp_callback cb;
+    homestore::blkid_list_ptr free_blkid_list;
     btree_cp_id() : ref_cnt(1), btree_size(0){};
     ~btree_cp_id() {}
 };
@@ -218,6 +221,10 @@ struct bnodeid {
 } __attribute__((packed));
 
 typedef bnodeid bnodeid_t;
+struct btree_super_block {
+    bnodeid root_node;
+    uint32_t journal_id;
+} __attribute((packed));
 
 #if 0
 struct bnodeid {
