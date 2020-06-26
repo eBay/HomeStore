@@ -279,7 +279,7 @@ public:
 
         m_mbm->deregister_handler(mtype);
         m_mbm->register_handler(mtype,
-                                [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
+                                [this](meta_blk* mblk, sisl::byte_view<> buf, size_t size) {
                                     if (mblk) {
                                         std::unique_lock< std::mutex > lg(m_mtx);
                                         m_cb_blks[mblk->hdr.h.blkid.to_integer()] =

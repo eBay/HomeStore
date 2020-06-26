@@ -6,7 +6,7 @@ namespace homestore {
 LogDev::LogDev() = default;
 LogDev::~LogDev() = default;
 
-void LogDev::meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size) {
+void LogDev::meta_blk_found(meta_blk* mblk, sisl::byte_view<> buf, size_t size) {
     m_sb_cookie = (void*)mblk;
     m_info_blk_buf = buf;
 }
@@ -33,7 +33,7 @@ void LogDev::start(bool format) {
             size = sisl::round_up(size, align);
         }
 
-        sisl::byte_view b(size, align);
+        sisl::byte_view<> b(size, align);
         m_info_blk_buf = b;
         ib = (logdev_info_block*)m_info_blk_buf.bytes();
 
@@ -43,7 +43,7 @@ void LogDev::start(bool format) {
         _persist_info_block();
     } else {
         HS_ASSERT(LOGMSG, (ib != nullptr), "Expected info blk not to be null");
-        sisl::byte_array b = sisl::make_byte_array(logdev_info_block::store_info_size(), 0);
+        sisl::byte_array<> b = sisl::make_byte_array(logdev_info_block::store_info_size(), 0);
         memcpy((void*)b->bytes, (void*)&ib->store_id_info[0], logdev_info_block::store_info_size());
         m_id_reserver = std::make_unique< sisl::IDReserver >(b);
 
@@ -106,7 +106,7 @@ void LogDev::do_load(uint64_t device_cursor) {
             uint32_t data_offset = (rec->offset + (rec->is_inlined ? 0 : header->oob_data_offset));
 
             // Do a callback on the found log entry
-            sisl::byte_view b = buf;
+            sisl::byte_view<> b = buf;
             b.move_forward(data_offset);
             b.set_size(rec->size);
             m_logfound_cb(rec->store_id, rec->store_seq_num, {header->start_idx() + i, group_dev_offset}, b);

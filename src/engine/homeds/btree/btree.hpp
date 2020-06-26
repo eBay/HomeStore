@@ -1814,11 +1814,12 @@ private:
             K::get_fixed_size() * (new_nodes.size() + 1);
 
         uint8_t* mem = nullptr;
-        bool align = false;
-        if (btree_store_t::is_aligned_buf_needed(m_btree_store.get(), size)) { align = true; }
+        uint32_t align = 0;
+        if (btree_store_t::is_aligned_buf_needed(m_btree_store.get(), size)) {
+            align = HS_STATIC_CONFIG(disk_attr.align_size);
+        }
 
-        sisl::alignable_blob< homestore::iobuf_alloc, homestore::iobuf_free > iob(
-            size, align, HS_STATIC_CONFIG(disk_attr.align_size));
+        sisl::alignable_blob< homestore::iobuf_alloc, homestore::iobuf_free > iob(size, align);
 
         mem = iob.bytes;
 

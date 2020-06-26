@@ -259,7 +259,7 @@ public:
     /* CP start is called when all its consumers have purged their free lists and now want to persist the
      * disk bitmap.
      */
-    sisl::byte_array cp_start(std::shared_ptr< blkalloc_cp_id > id) { return (m_disk_bm->serialize()); }
+    sisl::byte_array<> cp_start(std::shared_ptr< blkalloc_cp_id > id) { return (m_disk_bm->serialize()); }
 
     virtual bool is_blk_alloced(BlkId& b) = 0;
     virtual std::string to_string() const = 0;

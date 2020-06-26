@@ -28,10 +28,10 @@ sisl::blob indx_journal_entry::create_journal_entry(indx_req* ireq) {
     uint32_t size = sizeof(journal_hdr) + ireq->indx_alloc_blkid_list.size() * sizeof(BlkId) +
         ireq->fbe_list.size() * sizeof(BlkId) + ireq->get_key_size() + ireq->get_val_size();
 
-    bool align = false;
-    if (HomeLogStore::is_aligned_buf_needed(size)) { align = true; }
+    uint32_t align = 0;
+    if (HomeLogStore::is_aligned_buf_needed(size)) { align = HS_STATIC_CONFIG(disk_attr.align_size); }
 
-    m_iob.buf_alloc(size, align, HS_STATIC_CONFIG(disk_attr.align_size));
+    m_iob.buf_alloc(size, align);
 
     uint8_t* mem = m_iob.bytes;
 
@@ -352,7 +352,7 @@ void IndxMgr::write_hs_cp_sb(hs_cp_id* hs_id) {
         align = HS_STATIC_CONFIG(disk_attr.align_size);
         size = sisl::round_up(size, align);
     }
-    sisl::byte_view b(size, align);
+    sisl::byte_view<> b(size, align);
 
     hs_cp_sb_hdr* hdr = (hs_cp_sb_hdr*)b.bytes();
     hdr->version = INDX_MGR_VERSION;
@@ -656,14 +656,12 @@ void IndxMgr::destroy(indxmgr_stop_cb&& cb) {
 
     auto size = sizeof(destroy_journal_ent);
     destroy_journal_ent* jent = nullptr;
-    bool align = false;
-    if (m_journal->is_aligned_buf_needed(size)) { align = true; }
+    uint32_t align = 0;
+    if (m_journal->is_aligned_buf_needed(size)) { align = HS_STATIC_CONFIG(disk_attr.align_size); }
 
-    sisl::alignable_blob< homestore::iobuf_alloc, homestore::iobuf_free > iob(size, align,
-                                                                              HS_STATIC_CONFIG(disk_attr.align_size));
+    sisl::alignable_blob< homestore::iobuf_alloc, homestore::iobuf_free > iob(size, align);
 
     jent = (destroy_journal_ent*)(iob.bytes);
-
     jent->state = indx_mgr_state::DESTROYING;
     sisl::blob b((uint8_t*)jent, sizeof(destroy_journal_ent));
     m_stop_cb = std::move(cb);
@@ -754,7 +752,7 @@ void IndxMgr::log_found(logstore_seq_num_t seqnum, log_buffer log_buf, void* mem
     assert(happened);
 }
 
-void IndxMgr::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size) {
+void IndxMgr::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view<> buf, size_t size) {
     m_meta_blk = mblk;
     hs_cp_sb_hdr* hdr = (hs_cp_sb_hdr*)buf.bytes();
     assert(hdr->version == INDX_MGR_VERSION);

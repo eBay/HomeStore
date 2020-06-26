@@ -82,7 +82,7 @@ HomeBlks::HomeBlks(const init_params& cfg) : m_cfg(cfg), m_metrics("HomeBlks") {
         align = HS_STATIC_CONFIG(disk_attr.align_size); 
         size = sisl::round_up(size, align);
     }
-    sisl::byte_view b(size, align);
+    sisl::byte_view<> b(size, align);
     m_homeblks_sb_buf = b;
 
     superblock_init();
@@ -768,7 +768,7 @@ void HomeBlks::migrate_volume_sb() {
  *      - Blk alloc bit map recovery done :- It is done when all the entries in journal are replayed.
  */
 
-void HomeBlks::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size) {
+void HomeBlks::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view<> buf, size_t size) {
     instance()->meta_blk_found(mblk, buf, size);
 }
 void HomeBlks::meta_blk_recovery_comp_cb(bool success) { instance()->meta_blk_recovery_comp(success); }
@@ -848,7 +848,7 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
     }));
 }
 
-void HomeBlks::meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size) {
+void HomeBlks::meta_blk_found(meta_blk* mblk, sisl::byte_view<> buf, size_t size) {
     static bool meta_blk_found = false;
 
     // HomeBlk layer expects to see one valid meta_blk record during reboot;

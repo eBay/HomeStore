@@ -494,7 +494,7 @@ private:
     PhysicalDevChunk* create_new_chunk(PhysicalDev* pdev, uint64_t start_offset, uint64_t size,
                                        PhysicalDevChunk* prev_chunk);
     void remove_chunk(uint32_t chunk_id);
-    void blk_alloc_meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size);
+    void blk_alloc_meta_blk_found_cb(meta_blk* mblk, sisl::byte_view<> buf, size_t size);
 
 private:
     int m_open_flags;

@@ -273,7 +273,7 @@ struct formatter< homestore::logdev_key > {
 } // namespace fmt
 
 namespace homestore {
-typedef sisl::byte_view log_buffer;
+typedef sisl::byte_view<> log_buffer;
 
 struct truncation_request_t {
     logstore_id_t store_id;
@@ -295,16 +295,16 @@ struct logdev_info_block {
 class log_stream_reader {
 public:
     log_stream_reader(uint64_t device_cursor);
-    sisl::byte_view next_group(uint64_t* out_dev_offset);
-    sisl::byte_view group_in_next_page();
+    sisl::byte_view<> next_group(uint64_t* out_dev_offset);
+    sisl::byte_view<> group_in_next_page();
     uint64_t group_cursor() const { return m_cur_group_cursor; }
 
 private:
-    sisl::byte_view read_next_bytes(uint64_t nbytes);
+    sisl::byte_view<> read_next_bytes(uint64_t nbytes);
 
 private:
     boost::intrusive_ptr< HomeStoreBase > m_hb;
-    sisl::byte_view m_cur_log_buf;
+    sisl::byte_view<> m_cur_log_buf;
     uint64_t m_cur_group_cursor;
 };
 
@@ -471,7 +471,7 @@ public:
      * @param key : the key containing log id that needs to be truncate up to;
      */
     void truncate(const logdev_key& key);
-    void meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size);
+    void meta_blk_found(meta_blk* mblk, sisl::byte_view<> buf, size_t size);
 
 private:
     static LogGroup* new_log_group();
@@ -485,7 +485,7 @@ private:
 
 #if 0
     log_group_header* read_validate_header(uint8_t* buf, uint32_t size, bool* read_more);
-    sisl::byte_array read_next_header(uint32_t max_buf_reads);
+    sisl::byte_array<> read_next_header(uint32_t max_buf_reads);
 #endif
 
     void _persist_info_block();
@@ -512,7 +512,7 @@ private:
 
     // LogDev Info block related fields
     std::mutex m_store_reserve_mutex;
-    sisl::byte_view m_info_blk_buf;
+    sisl::byte_view<> m_info_blk_buf;
 
     // Block flush Q request Q
     std::mutex m_block_flush_q_mutex;

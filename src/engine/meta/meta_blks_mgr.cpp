@@ -654,11 +654,11 @@ void MetaBlkMgr::recover(bool do_comp_cb) {
         auto cb = sub.second.cb;
         for (auto& m : it->second) {
             auto mblk = m.second;
-            sisl::byte_view buf;
+            sisl::byte_view<> buf;
             // auto buf = sisl::make_aligned_sized_unique< uint8_t >(dma_boundary, mblk->hdr.h.context_sz);
 
             if (mblk->hdr.h.context_sz <= META_BLK_CONTEXT_SZ) {
-                sisl::byte_view b(mblk->hdr.h.context_sz);
+                sisl::byte_view<> b(mblk->hdr.h.context_sz);
                 buf = b;
                 HS_ASSERT(RELEASE, mblk->hdr.h.ovf_blkid.to_integer() == BlkId::invalid_internal_id(),
                           "corrupted ovf_blkid: {}", mblk->hdr.h.ovf_blkid.to_string());
@@ -666,7 +666,7 @@ void MetaBlkMgr::recover(bool do_comp_cb) {
             } else {
                 // read through the ovf blk chain to get the buffer;
                 // first, copy the context data from meta blk context portion
-                sisl::byte_view b(mblk->hdr.h.context_sz, HS_STATIC_CONFIG(disk_attr.align_size));
+                sisl::byte_view<> b(mblk->hdr.h.context_sz, HS_STATIC_CONFIG(disk_attr.align_size));
                 buf = b;
                 memcpy((void*)buf.bytes(), (void*)mblk->context_data, META_BLK_CONTEXT_SZ);
                 auto total_sz = mblk->hdr.h.context_sz;

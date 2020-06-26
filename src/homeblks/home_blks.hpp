@@ -212,7 +212,7 @@ public:
      * @param mblk
      * @param has_more
      */
-    void meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size);
+    void meta_blk_found(meta_blk* mblk, sisl::byte_view<> buf, size_t size);
     void meta_blk_recovery_comp(bool success);
 
 #ifdef _PRERELEASE
@@ -239,7 +239,7 @@ public:
     static void get_malloc_stats(sisl::HttpCallData cd);
 
     // Other static functions
-    static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size);
+    static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view<> buf, size_t size);
     static void meta_blk_recovery_comp_cb(bool success);
 
 protected:
@@ -273,7 +273,7 @@ private:
 
 private:
     init_params m_cfg;
-    sisl::byte_view m_homeblks_sb_buf;
+    sisl::byte_view<> m_homeblks_sb_buf;
     // homeblks_sb*  m_homeblks_sb = nullptr; // the homestore super block
     void* m_sb_cookie = nullptr;
 
