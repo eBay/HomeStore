@@ -66,8 +66,7 @@ public:
     static void create_done(MemBtreeStore* store, bnodeid_t m_root_node);
     static void update_sb(MemBtreeStore* store, btree_super_block& sb, btree_cp_superblock* cp_sb, bool is_recovery){};
 
-    static void write_journal_entry(MemBtreeStore* store, btree_cp_id_ptr cp_id,
-                                    sisl::alignable_blob< homestore::iobuf_alloc, homestore::iobuf_free >& iob) {}
+    static void write_journal_entry(MemBtreeStore* store, btree_cp_id_ptr cp_id, const sisl::alignable_blob& iob) {}
     static bool is_aligned_buf_needed(MemBtreeStore* store, size_t size) { return true; }
 
     static boost::intrusive_ptr< MemBtreeNode >
@@ -125,7 +124,7 @@ public:
         return btree_status_t::success;
     }
 
-    static void free_node(MemBtreeStore* store, boost::intrusive_ptr< MemBtreeNode > bn, bool mem_only,
+    static void free_node(MemBtreeStore* store, const boost::intrusive_ptr< MemBtreeNode >& bn, bool mem_only,
                           btree_cp_id_ptr cp_id) {
         auto mbh = (mem_btree_node_header*)bn.get();
         if (mbh->refcount.decrement_testz()) {

@@ -26,7 +26,7 @@ IntrusiveCache< K, V >::IntrusiveCache(uint64_t max_cache_size, uint32_t avg_siz
 };
 
 template < typename K, typename V >
-bool IntrusiveCache< K, V >::insert(V& v, V** out_ptr, const std::function< void(V*) >& found_cb) {
+bool IntrusiveCache< K, V >::insert(V& v, V** out_ptr, const auto& found_cb) {
     // Get the key and compute the hash code for the key
     const K* pk = V::extract_key(v);
     auto b = K::get_blob(*pk);
@@ -61,7 +61,7 @@ bool IntrusiveCache< K, V >::insert(V& v, V** out_ptr, const std::function< void
         /* remove from the hash table */
         HS_LOG(INFO, cache, "Unable to evict any record, removing entry {} from cache", v.to_string());
         COUNTER_INCREMENT(m_metrics, cache_add_error_count, 1);
-        m_hash_set.remove(*pk, hash_code);
+        m_hash_set.remove(*pk, hash_code, [](auto* x) {});
         ret = false;
     }
     v.unlock();
@@ -114,7 +114,7 @@ bool IntrusiveCache< K, V >::erase(V& v) {
     auto b = K::get_blob(*pk);
     uint64_t hash_code = util::Hash64((const char*)b.bytes, (size_t)b.size);
 
-    bool found = m_hash_set.remove(*pk, hash_code);
+    bool found = m_hash_set.remove(*pk, hash_code, [](auto* x) {});
     if (found) {
         v.lock();
         if (v->get_cache_state() == CACHE_INSERTED) {
@@ -206,7 +206,7 @@ template < typename K >
 bool Cache< K >::insert(const K& k, const boost::intrusive_ptr< CacheBuffer< K > > in_buf,
                         boost::intrusive_ptr< CacheBuffer< K > >* out_smart_buf) {
     CacheBuffer< K >* out_buf;
-    bool inserted = IntrusiveCache< K, CacheBuffer< K > >::insert(*in_buf, &out_buf);
+    bool inserted = IntrusiveCache< K, CacheBuffer< K > >::insert(*in_buf, &out_buf, NULL_LAMBDA);
     if (out_buf != nullptr) { *out_smart_buf = boost::intrusive_ptr< CacheBuffer< K > >(out_buf, false); }
 
     (*out_smart_buf)->set_cache(this);

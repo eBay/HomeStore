@@ -196,7 +196,7 @@ public:
     static void register_cp_done_cb(cp_done_cb cb, bool blkalloc_cp = false);
     static void write_hs_cp_sb(hs_cp_id* hb_id);
     static const iomgr::io_thread_t& get_thread_id() { return m_thread_id; }
-    static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view<> buf, size_t size);
+    static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size);
     static void flush_hs_free_blks(hs_cp_id* id);
 
 private:
@@ -274,7 +274,9 @@ struct Free_Blk_Entry {
 
     Free_Blk_Entry() {}
     Free_Blk_Entry(const BlkId& blkId, uint8_t blk_offset, uint8_t nblks_to_free) :
-            m_blkId(blkId), m_blk_offset(blk_offset), m_nblks_to_free(nblks_to_free) {}
+            m_blkId(blkId),
+            m_blk_offset(blk_offset),
+            m_nblks_to_free(nblks_to_free) {}
 
     BlkId blk_id() const { return m_blkId; }
     uint8_t blk_offset() const { return m_blk_offset; }

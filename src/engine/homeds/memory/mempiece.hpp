@@ -18,6 +18,7 @@
 #include "engine/common/homestore_config.hpp"
 #include <utility/obj_life_counter.hpp>
 #include "engine/common/homestore_assert.hpp"
+#include <iomgr/iomgr.hpp>
 
 namespace homeds {
 using namespace homestore;
@@ -152,7 +153,7 @@ public:
         if (mvec->m_refcnt.fetch_sub(1, std::memory_order_relaxed) != 1) { return; }
         for (auto i = 0u; i < mvec->m_list.size(); i++) {
             if (mvec->m_list[i].ptr() != nullptr) {
-                free(mvec->m_list[i].ptr());
+                iomanager.iobuf_free(mvec->m_list[i].ptr());
             } else {
                 assert(0);
             }

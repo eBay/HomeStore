@@ -96,10 +96,7 @@ public:
         device_info.push_back({devname});
 
         LOGINFO("Starting iomgr with {} threads", nthreads);
-        iomanager.start(1 /* total interfaces */, nthreads, false, nullptr);
-        iomanager.add_drive_interface(
-            std::dynamic_pointer_cast< iomgr::DriveInterface >(std::make_shared< iomgr::AioDriveInterface >()),
-            true /* is_default */);
+        iomanager.start(nthreads);
 
         if (restart) {
             for (auto i = 0u; i < n_log_stores; ++i) {

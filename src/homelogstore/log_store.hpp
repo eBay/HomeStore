@@ -67,7 +67,7 @@ public:
     }
 
     static LogDev& logdev() { return HomeLogStoreMgr::instance().m_log_dev; }
-    static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view<> buf, size_t size);
+    static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size);
 
     /**
      * @brief Start the entire HomeLogStore set and does recover the existing logstores. Really this is the first

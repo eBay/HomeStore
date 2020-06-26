@@ -440,7 +440,6 @@ public:
 
         uint8_t* ptr;
         for (uint32_t i = 0; i < missing_mp.size(); i++) {
-
             // Create a new block of memory for the missing piece
             uint8_t* ptr = iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), missing_mp[i].second);
 
@@ -464,7 +463,7 @@ public:
                 bool inserted = bbuf->update_missing_piece(missing_mp[i].first, missing_mp[i].second, ptr);
                 if (!inserted) {
                     /* someone else has inserted it */
-                    free(ptr);
+                    iomanager.iobuf_free(ptr);
                 }
                 req->blkstore_ref_cnt.decrement(1);
             }

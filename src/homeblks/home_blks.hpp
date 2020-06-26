@@ -135,16 +135,16 @@ public:
     virtual VolumePtr create_volume(const vol_params& params) override;
     virtual std::error_condition remove_volume(const boost::uuids::uuid& uuid) override;
     virtual VolumePtr lookup_volume(const boost::uuids::uuid& uuid) override;
-   
+
     virtual SnapshotPtr create_snapshot(const VolumePtr& vol);
     virtual std::error_condition remove_snapshot(const SnapshotPtr& snap);
     virtual SnapshotPtr clone_snapshot(const SnapshotPtr& snap);
 
     virtual std::error_condition restore_snapshot(const SnapshotPtr& snap);
-    virtual void list_snapshot(const VolumePtr& , std::vector<SnapshotPtr> snap_list);
+    virtual void list_snapshot(const VolumePtr&, std::vector< SnapshotPtr > snap_list);
     virtual void read(const SnapshotPtr& snap, const snap_interface_req_ptr& req);
-    //virtual void write(const VolumePtr& volptr, std::vector<SnapshotPtr> snap_list);
-    //virtual SnapDiffPtr diff_snapshot(const SnapshotPtr& snap1, const SnapshotPtr& snap2);
+    // virtual void write(const VolumePtr& volptr, std::vector<SnapshotPtr> snap_list);
+    // virtual SnapDiffPtr diff_snapshot(const SnapshotPtr& snap1, const SnapshotPtr& snap2);
 
     virtual const char* get_name(const VolumePtr& vol) override;
     virtual uint64_t get_page_size(const VolumePtr& vol) override;
@@ -212,7 +212,7 @@ public:
      * @param mblk
      * @param has_more
      */
-    void meta_blk_found(meta_blk* mblk, sisl::byte_view<> buf, size_t size);
+    void meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size);
     void meta_blk_recovery_comp(bool success);
 
 #ifdef _PRERELEASE
@@ -239,7 +239,7 @@ public:
     static void get_malloc_stats(sisl::HttpCallData cd);
 
     // Other static functions
-    static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view<> buf, size_t size);
+    static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size);
     static void meta_blk_recovery_comp_cb(bool success);
 
 protected:
@@ -273,7 +273,7 @@ private:
 
 private:
     init_params m_cfg;
-    sisl::byte_view<> m_homeblks_sb_buf;
+    sisl::byte_view m_homeblks_sb_buf;
     // homeblks_sb*  m_homeblks_sb = nullptr; // the homestore super block
     void* m_sb_cookie = nullptr;
 
@@ -302,7 +302,7 @@ private:
     std::atomic< bool > m_start_shutdown;
 
     static thread_local std::vector< std::shared_ptr< Volume > >* s_io_completed_volumes;
-    };
+};
 
 } // namespace homestore
 #endif // OMSTORE_OMSTORE_HPP

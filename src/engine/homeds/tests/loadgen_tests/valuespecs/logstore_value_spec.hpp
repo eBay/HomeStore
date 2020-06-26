@@ -42,7 +42,7 @@ public:
         return temp;
     }
 
-    ~LogStoreValue() { free(m_bytes); }
+    ~LogStoreValue() { iomanager.iobuf_free(m_bytes); }
 
     LogStoreValue() {}
 

@@ -100,7 +100,7 @@ class MinHS {
             req_cnt++;
         }
         virtual ~req() {
-            free(buf);
+            iomanager.iobuf_free(buf);
             req_free_cnt++;
         }
     };
@@ -209,10 +209,7 @@ public:
             max_capacity += max_disk_capacity;
         }
 
-        iomanager.start(1 /* total interfaces */, num_threads);
-        iomanager.add_drive_interface(
-            std::dynamic_pointer_cast< iomgr::DriveInterface >(std::make_shared< iomgr::AioDriveInterface >()),
-            true /* is_default */);
+        iomanager.start(num_threads);
 
         m_ev_fd = eventfd(0, EFD_NONBLOCK);
         m_ev_fdinfo = iomanager.add_fd(iomanager.default_drive_interface(), m_ev_fd,
@@ -327,7 +324,7 @@ public:
         auto ret_io = VolInterface::get_instance()->write(vol_info[cur]->vol, lba, buf, nlbas, vreq);
         if (ret_io != no_error) {
             assert(0);
-            free(buf);
+            iomanager.iobuf_free(buf);
             outstanding_ios--;
             std::unique_lock< std::mutex > lk(vol_info[cur]->vol_mutex);
             vol_info[cur]->m_vol_bm->reset_bits(lba, nlbas);
@@ -396,7 +393,7 @@ public:
         auto ret_io = VolInterface::get_instance()->write(vol_info[cur]->vol, lba, buf, nlbas, vreq);
         if (ret_io != no_error) {
             assert(0);
-            free(buf);
+            iomanager.iobuf_free(buf);
             outstanding_ios--;
             std::unique_lock< std::mutex > lk(vol_info[cur]->vol_mutex);
             vol_info[cur]->m_vol_bm->reset_bits(lba, nlbas);

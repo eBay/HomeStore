@@ -39,12 +39,12 @@ if (NOT ${CONAN_BUILD_COVERAGE})
     #add_executable(test_mapping
     #                ${TEST_MAP_SOURCE_FILES}
     #                )
-    target_link_libraries(check_btree homeblks)
-    target_link_libraries(perf_test_volume homeblks)
+    target_link_libraries(check_btree homeblks ${CONAN_LIBS})
+    target_link_libraries(perf_test_volume homeblks ${CONAN_LIBS})
     #target_link_libraries(test_mapping homeblks)
 endif ()
 
-target_link_libraries(test_volume homeblks)
+target_link_libraries(test_volume homeblks ${CONAN_LIBS})
 
 add_test(NAME TestVol COMMAND test_volume)
 

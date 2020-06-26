@@ -56,7 +56,7 @@ public:
 
         verify_read(bytes_read, buf, off, count);
 
-        free(buf);
+        iomanager.iobuf_free(buf);
         m_read_cnt++;
         print_counter();
         return true;

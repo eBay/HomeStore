@@ -105,7 +105,7 @@ private:
         auto ret_io = m_vol_mgr->write(vol_id, lba, buf, nblks);
         if (ret_io != no_error) {
             assert(0);
-            free(buf);
+            iomanager.iobuf_free(buf);
             return false;
         }
 

@@ -19,11 +19,7 @@ IOMgrExecutor::IOMgrExecutor(int num_threads, int num_priorities, uint32_t max_q
 
     // exec start should be called before iomgr->start
     start();
-    iomanager.start(1 /* total interfaces */, num_threads, false);
-
-    iomanager.add_drive_interface(
-        std::dynamic_pointer_cast< iomgr::DriveInterface >(std::make_shared< iomgr::AioDriveInterface >()),
-        true /* is_default */);
+    iomanager.start(num_threads);
 }
 
 // It is called everytime a loadgen test case finishes;

@@ -87,7 +87,7 @@ Volume::Volume(const vol_params& params) :
         params.vol_name, params.uuid, std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
 }
 
-Volume::Volume(meta_blk* mblk_cookie, sisl::byte_view<> sb_buf) :
+Volume::Volume(meta_blk* mblk_cookie, sisl::byte_view sb_buf) :
         m_metrics(((vol_sb_hdr*)sb_buf.bytes())->vol_name),
         m_indx_mgr_destroy_started(false),
         m_sb_cookie(mblk_cookie) {
@@ -107,7 +107,7 @@ void Volume::init() {
         /* populate superblock */
         uint32_t align = 0;
         if (meta_blk_mgr->is_aligned_buf_needed(sizeof(vol_sb_hdr))) { align = HS_STATIC_CONFIG(disk_attr.align_size); }
-        sisl::byte_view<> b(sizeof(vol_sb_hdr), align);
+        sisl::byte_view b(sizeof(vol_sb_hdr), align);
         m_sb_buf = b;
         sb = (vol_sb_hdr*)m_sb_buf.bytes();
         sb->page_size = m_params.page_size;
@@ -147,7 +147,7 @@ void Volume::init() {
     assert(get_page_size() % HomeBlks::instance()->get_data_pagesz() == 0);
 }
 
-void Volume::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view<> buf, size_t size) {
+void Volume::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size) {
     assert(sizeof(vol_sb_hdr) == size);
 
     auto new_vol = Volume::make_volume(mblk, buf);
@@ -201,8 +201,7 @@ void Volume::destroy_internal() {
 /* It is called only once */
 void Volume::shutdown(indxmgr_stop_cb cb) { IndxMgr::shutdown(cb); }
 
-Volume::~Volume() {
-}
+Volume::~Volume() {}
 
 indx_tbl* Volume::create_indx_tbl() {
     auto pending_read_blk_cb =
@@ -611,8 +610,7 @@ void Volume::alloc_single_block_in_mem() {
     // Create a new block of memory for the blocks requested and set the memvec pointer to that
     uint8_t* ptr;
     uint32_t size = get_page_size();
-    ptr = (uint8_t*)malloc(size);
-    if (ptr == nullptr) { throw std::bad_alloc(); }
+    ptr = iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), size);
     memset(ptr, 0, size);
 
     boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector());

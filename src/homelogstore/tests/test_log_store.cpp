@@ -70,7 +70,7 @@ public:
             m_log_store->write_async(lsn, {(uint8_t*)d, d->total_size()}, nullptr,
                                      [d, this](logstore_seq_num_t seq_num, logdev_key ld_key, void* ctx) {
                                          assert(ld_key);
-                                         free(d);
+                                         iomanager.iobuf_free(d);
                                          m_comp_cb(seq_num, ld_key);
                                      });
         }
@@ -219,10 +219,7 @@ public:
         }
 
         LOGINFO("Starting iomgr with {} threads", nthreads);
-        iomanager.start(1 /* total interfaces */, nthreads, false);
-        iomanager.add_drive_interface(
-            std::dynamic_pointer_cast< iomgr::DriveInterface >(std::make_shared< iomgr::AioDriveInterface >()),
-            true /* is_default */);
+        iomanager.start(nthreads);
 
         if (restart) {
             for (auto i = 0u; i < n_log_stores; ++i) {

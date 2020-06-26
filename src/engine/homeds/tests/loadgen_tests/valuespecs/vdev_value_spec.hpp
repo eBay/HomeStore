@@ -35,7 +35,7 @@ public:
     ~VDevValue() {
         // buf won't be freed by homestore i/o path because vdev test doesn't involve cache layer.
         // in which cache layer will free the memory when cache is evicted or removed.
-        free(m_bytes);
+        iomanager.iobuf_free(m_bytes);
     }
 
     VDevValue() {}

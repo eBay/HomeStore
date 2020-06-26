@@ -80,7 +80,7 @@ public:
     /* Put the raw buffer into the cache. Returns false if insert is not successful and if the key already
      * exists, it additionally fills up the out_ptr. If insert is successful, returns true and put the
      * new V also into out_ptr. */
-    bool insert(V& v, V** out_ptr, const std::function< void(V*) >& found_cb = nullptr);
+    bool insert(V& v, V** out_ptr, const auto& found_cb);
 
     /* Update the value, if it already exists or insert if not exist. Returns true if operation is successful. In
      * additon, it also populates if the out_key exists with true if key exists or false if key does not */
@@ -172,7 +172,6 @@ public:
 #ifndef NDEBUG
     sisl::atomic_counter< int64_t > m_indx; // Refcount
 #define MAX_ENTRIES 50
-    void* arr_symbols[MAX_ENTRIES];
     /* to see if it is data buf or btree buf */
 #endif
 
@@ -196,12 +195,6 @@ public:
             m_indx(-1)
 #endif
     {
-#ifndef NDEBUG
-        for (int i = 0; i < MAX_ENTRIES; i++) {
-            arr_symbols[i] = malloc(sizeof(void*) * 10);
-            bzero(arr_symbols[i], sizeof(void*) * 10);
-        }
-#endif
     }
 
     CacheBuffer(const K& key, const homeds::blob& blob, Cache< K >* cache, uint32_t offset = 0) :
@@ -218,12 +211,6 @@ public:
             m_indx(-1)
 #endif
     {
-#ifndef NDEBUG
-        for (int i = 0; i < MAX_ENTRIES; i++) {
-            arr_symbols[i] = malloc(sizeof(void*) * 10);
-            bzero(arr_symbols[i], sizeof(void*) * 10);
-        }
-#endif
         boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector(), true);
         mvec->set(blob.bytes, blob.size, offset);
 
@@ -231,13 +218,7 @@ public:
         m_key = key;
     }
 
-    virtual ~CacheBuffer() {
-#ifndef NDEBUG
-        for (int i = 0; i < MAX_ENTRIES; i++) {
-            if (arr_symbols[i] != NULL) { free(arr_symbols[i]); }
-        }
-#endif
-    };
+    virtual ~CacheBuffer(){};
 
     const K& get_key() const { return m_key; }
 
@@ -313,7 +294,6 @@ public:
     friend void intrusive_ptr_add_ref(CacheBuffer< K >* buf) {
 #ifndef NDEBUG
         int x = buf->m_indx.increment() % MAX_ENTRIES;
-        auto size = backtrace((void**)(buf->arr_symbols[x]), 10);
 #endif
         buf->m_refcount.increment();
     }

@@ -31,7 +31,7 @@ struct journal_hdr {
 
 class indx_journal_entry {
 private:
-    sisl::alignable_blob< homestore::iobuf_alloc, homestore::iobuf_free > m_iob;
+    sisl::alignable_blob m_iob;
 
 public:
     uint32_t size(indx_req* ireq) const;
@@ -70,9 +70,7 @@ public:
     /* it update the alloc blk id and checksum */
     sisl::blob create_journal_entry(indx_req* v_req);
 
-    std::string to_string() const {
-        return fmt::format("size= {}", size());
-    }
+    std::string to_string() const { return fmt::format("size= {}", size()); }
 };
 
 enum indx_mgr_state { ONLINE = 0, DESTROYING = 1 };
@@ -137,8 +135,8 @@ struct indx_active_info {
     btree_cp_id_ptr btree_id;
     blkid_list_ptr free_blkid_list;
     indx_active_info(int64_t start_psn, blkid_list_ptr& free_blkid_list) :
-            start_psn(start_psn), free_blkid_list(free_blkid_list) {
-    }
+            start_psn(start_psn),
+            free_blkid_list(free_blkid_list) {}
 };
 
 struct indx_diff_info {
@@ -167,7 +165,10 @@ struct indx_cp_id {
     indx_snap_info sinfo;
 
     indx_cp_id(int64_t cp_cnt, int64_t start_active_psn, indx_mgr_ptr indx_mgr, blkid_list_ptr& free_blkid_list) :
-            indx_mgr(indx_mgr), cp_cnt(cp_cnt), indx_size(0), ainfo(start_active_psn, free_blkid_list) {}
+            indx_mgr(indx_mgr),
+            cp_cnt(cp_cnt),
+            indx_size(0),
+            ainfo(start_active_psn, free_blkid_list) {}
 
     cp_state state() const { return flags; }
 };

@@ -259,7 +259,7 @@ void MetaBlkMgr::scan_meta_blks_per_chunk() {
         }
     }
 
-    free(buf);
+    iomanager.iobuf_free(buf);
 }
 
 bool MetaBlkMgr::is_sub_type_valid(meta_sub_type type) { return m_sub_info.find(type) != m_sub_info.end(); }
@@ -619,7 +619,7 @@ void MetaBlkMgr::free_meta_blk(meta_blk* mblk) {
         assert(mblk->hdr.h.context_sz >= META_BLK_CONTEXT_SZ);
         free_ovf_blk_chain(mblk);
     }
-    free(mblk);
+    iomanager.iobuf_free((uint8_t*)mblk);
 }
 
 std::error_condition MetaBlkMgr::alloc_meta_blk(BlkId& bid, uint32_t alloc_sz) {
@@ -654,11 +654,10 @@ void MetaBlkMgr::recover(bool do_comp_cb) {
         auto cb = sub.second.cb;
         for (auto& m : it->second) {
             auto mblk = m.second;
-            sisl::byte_view<> buf;
-            // auto buf = sisl::make_aligned_sized_unique< uint8_t >(dma_boundary, mblk->hdr.h.context_sz);
+            sisl::byte_view buf;
 
             if (mblk->hdr.h.context_sz <= META_BLK_CONTEXT_SZ) {
-                sisl::byte_view<> b(mblk->hdr.h.context_sz);
+                sisl::byte_view b(mblk->hdr.h.context_sz);
                 buf = b;
                 HS_ASSERT(RELEASE, mblk->hdr.h.ovf_blkid.to_integer() == BlkId::invalid_internal_id(),
                           "corrupted ovf_blkid: {}", mblk->hdr.h.ovf_blkid.to_string());
@@ -666,7 +665,7 @@ void MetaBlkMgr::recover(bool do_comp_cb) {
             } else {
                 // read through the ovf blk chain to get the buffer;
                 // first, copy the context data from meta blk context portion
-                sisl::byte_view<> b(mblk->hdr.h.context_sz, HS_STATIC_CONFIG(disk_attr.align_size));
+                sisl::byte_view b(mblk->hdr.h.context_sz, HS_STATIC_CONFIG(disk_attr.align_size));
                 buf = b;
                 memcpy((void*)buf.bytes(), (void*)mblk->context_data, META_BLK_CONTEXT_SZ);
                 auto total_sz = mblk->hdr.h.context_sz;
@@ -690,7 +689,8 @@ void MetaBlkMgr::recover(bool do_comp_cb) {
                     HS_ASSERT(RELEASE, ovf_hdr->h.prev_blkid.to_integer() == prev_bid.to_integer(),
                               "Corrupted prev_blkid: {}/{}", ovf_hdr->h.prev_blkid.to_string(), prev_bid.to_string());
 
-                    memcpy((uint8_t*)buf.bytes() + read_offset, b.bytes + META_BLK_OVF_HDR_MAX_SZ, ovf_hdr->h.context_sz);
+                    memcpy((uint8_t*)buf.bytes() + read_offset, b.bytes + META_BLK_OVF_HDR_MAX_SZ,
+                           ovf_hdr->h.context_sz);
                     read_offset += ovf_hdr->h.context_sz;
 
                     prev_bid = bid;

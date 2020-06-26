@@ -1,4 +1,4 @@
-set (CPP_FLAGS "-faligned-new -Dlinux")
+set (CPP_FLAGS "-faligned-new -Dlinux -fconcepts")
 set (CPP_WARNINGS "-Wall -Wextra -Werror -Wno-unused-parameter -Wno-unused-variable -Wno-empty-body -Wno-array-bounds -Wno-cast-function-type -Wno-maybe-uninitialized -Wno-deprecated-copy -Wno-unused-function")
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CPP_FLAGS} ${CPP_WARNINGS} -DBOOST_ALLOW_DEPRECATED_HEADERS -DRCU_SIGNAL")
 
@@ -33,7 +33,6 @@ find_library(LIB_ISAL isal)
 set(COMMON_LIB_DEPS
       ${CONAN_LIBS}
       ${LIB_AIO}
-      dpdk
       #${LIB_DOUBLE_CONVERSION}
       #${LIB_ISAL}
     )
@@ -67,10 +66,10 @@ set(HOMESTORE_OBJECTS
         $<TARGET_OBJECTS:indx_mgr>
         )
 add_library(homestore STATIC ${HOMESTORE_OBJECTS})
-target_link_libraries(homestore ${COMMON_LIB_DEPS})
+#target_link_libraries(homestore ${COMMON_LIB_DEPS})
 
 add_library(homeblks STATIC
                  ${HOMESTORE_OBJECTS}
                  $<TARGET_OBJECTS:hs_homeblks>
                  $<TARGET_OBJECTS:hs_volume>)
-target_link_libraries(homeblks ${COMMON_LIB_DEPS})
+#target_link_libraries(homeblks ${COMMON_LIB_DEPS})

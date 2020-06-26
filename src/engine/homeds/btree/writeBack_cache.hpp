@@ -244,7 +244,7 @@ public:
     /* We don't want to free the blocks until cp is persisted. Because we use these blocks
      * to recover btree.
      */
-    void free_blk(boost::intrusive_ptr< SSDBtreeNode >& bn, btree_cp_id_ptr cp_id) {
+    void free_blk(const boost::intrusive_ptr< SSDBtreeNode >& bn, btree_cp_id_ptr cp_id) {
         BlkId bid(bn->get_node_id().m_id);
 
         /*  if cp_id is null then free it only from the cache. */
@@ -322,9 +322,7 @@ public:
         list->clear();
         auto cnt = m_dirty_buf_cnt[cp_cnt].fetch_sub(1);
         assert(cnt >= 1);
-        if (cnt == 1) {
-            m_cp_comp_cb(cp_id);
-        }
+        if (cnt == 1) { m_cp_comp_cb(cp_id); }
     }
 
     static void writeBack_completion(boost::intrusive_ptr< blkstore_req< wb_cache_buffer_t > > bs_req) {
@@ -354,9 +352,7 @@ public:
         assert(cnt >= 1);
         cnt = m_dirty_buf_cnt[cp_cnt].fetch_sub(1);
         assert(cnt >= 1);
-        if (cnt == 1) {
-            m_cp_comp_cb(wb_req->cp_id);
-        }
+        if (cnt == 1) { m_cp_comp_cb(wb_req->cp_id); }
     }
 };
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >

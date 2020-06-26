@@ -244,8 +244,9 @@ void IndxMgr::static_init() {
 
     m_cp = std::unique_ptr< HomeStoreCP >(new HomeStoreCP());
     /* start the timer for blkalloc checkpoint */
-    m_hs_cp_timer_hdl = iomanager.schedule_timer(60 * 1000 * 1000 * 1000ul, true, nullptr, false,
-                                                 [](void* cookie) { trigger_hs_cp(nullptr, false); });
+    m_hs_cp_timer_hdl =
+        iomanager.schedule_global_timer(60 * 1000 * 1000 * 1000ul, true, nullptr, iomgr::thread_regex::all_io,
+                                        [](void* cookie) { trigger_hs_cp(nullptr, false); });
     auto sthread = sisl::named_thread("indx_mgr", []() mutable {
         iomanager.run_io_loop(false, nullptr, [](bool is_started) {
             if (is_started) {
@@ -352,7 +353,7 @@ void IndxMgr::write_hs_cp_sb(hs_cp_id* hs_id) {
         align = HS_STATIC_CONFIG(disk_attr.align_size);
         size = sisl::round_up(size, align);
     }
-    sisl::byte_view<> b(size, align);
+    sisl::byte_view b(size, align);
 
     hs_cp_sb_hdr* hdr = (hs_cp_sb_hdr*)b.bytes();
     hdr->version = INDX_MGR_VERSION;
@@ -653,20 +654,20 @@ void IndxMgr::trigger_hs_cp(cp_done_cb cb, bool shutdown) {
 void IndxMgr::destroy(indxmgr_stop_cb&& cb) {
     /* we can assume that there is no io going on this indx mgr now */
     HS_SUBMOD_LOG(INFO, base, , "indx mgr", m_name, "Destroying Indx Manager");
-
-    auto size = sizeof(destroy_journal_ent);
     destroy_journal_ent* jent = nullptr;
     uint32_t align = 0;
-    if (m_journal->is_aligned_buf_needed(size)) { align = HS_STATIC_CONFIG(disk_attr.align_size); }
 
-    sisl::alignable_blob< homestore::iobuf_alloc, homestore::iobuf_free > iob(size, align);
+    if (m_journal->is_aligned_buf_needed(sizeof(destroy_journal_ent))) {
+        align = HS_STATIC_CONFIG(disk_attr.align_size);
+    }
 
+    sisl::alignable_blob iob(sizeof(destroy_journal_ent), align);
     jent = (destroy_journal_ent*)(iob.bytes);
     jent->state = indx_mgr_state::DESTROYING;
-    sisl::blob b((uint8_t*)jent, sizeof(destroy_journal_ent));
+
     m_stop_cb = std::move(cb);
     m_journal->append_async(
-        b, b.bytes, ([this, iob](logstore_seq_num_t seq_num, logdev_key key, void* cookie) mutable {
+        iob, nullptr, ([this, iob](logstore_seq_num_t seq_num, logdev_key key, void* cookie) mutable {
             iob.buf_free();
             add_prepare_cb_list([this](indx_cp_id_ptr cur_indx_id, hs_cp_id* hb_id, hs_cp_id* new_hb_id) {
                 /* suspend current cp */
@@ -752,7 +753,7 @@ void IndxMgr::log_found(logstore_seq_num_t seqnum, log_buffer log_buf, void* mem
     assert(happened);
 }
 
-void IndxMgr::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view<> buf, size_t size) {
+void IndxMgr::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size) {
     m_meta_blk = mblk;
     hs_cp_sb_hdr* hdr = (hs_cp_sb_hdr*)buf.bytes();
     assert(hdr->version == INDX_MGR_VERSION);

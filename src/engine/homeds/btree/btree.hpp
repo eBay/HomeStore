@@ -1818,7 +1818,7 @@ private:
             align = HS_STATIC_CONFIG(disk_attr.align_size);
         }
 
-        sisl::alignable_blob< homestore::iobuf_alloc, homestore::iobuf_free > iob(size, align);
+        sisl::alignable_blob iob(size, align);
 
         mem = iob.bytes;
 

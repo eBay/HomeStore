@@ -6,7 +6,7 @@ namespace homestore {
 LogDev::LogDev() = default;
 LogDev::~LogDev() = default;
 
-void LogDev::meta_blk_found(meta_blk* mblk, sisl::byte_view<> buf, size_t size) {
+void LogDev::meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size) {
     m_sb_cookie = (void*)mblk;
     m_info_blk_buf = buf;
 }
@@ -33,7 +33,7 @@ void LogDev::start(bool format) {
             size = sisl::round_up(size, align);
         }
 
-        sisl::byte_view<> b(size, align);
+        sisl::byte_view b(size, align);
         m_info_blk_buf = b;
         ib = (logdev_info_block*)m_info_blk_buf.bytes();
 
@@ -43,7 +43,7 @@ void LogDev::start(bool format) {
         _persist_info_block();
     } else {
         HS_ASSERT(LOGMSG, (ib != nullptr), "Expected info blk not to be null");
-        sisl::byte_array<> b = sisl::make_byte_array(logdev_info_block::store_info_size(), 0);
+        sisl::byte_array b = sisl::make_byte_array(logdev_info_block::store_info_size(), 0);
         memcpy((void*)b->bytes, (void*)&ib->store_id_info[0], logdev_info_block::store_info_size());
         m_id_reserver = std::make_unique< sisl::IDReserver >(b);
 
@@ -63,6 +63,7 @@ void LogDev::start(bool format) {
 
     // Start a recurring timer which calls flush if pending
     m_flush_timer_hdl = iomanager.schedule_global_timer(flush_timer_frequency_us * 1000, true /* recurring */, nullptr,
+                                                        iomgr::thread_regex::all_iomgr_created_io,
                                                         [this](void* cookie) { flush_if_needed(); });
 }
 
@@ -106,7 +107,7 @@ void LogDev::do_load(uint64_t device_cursor) {
             uint32_t data_offset = (rec->offset + (rec->is_inlined ? 0 : header->oob_data_offset));
 
             // Do a callback on the found log entry
-            sisl::byte_view<> b = buf;
+            sisl::byte_view b = buf;
             b.move_forward(data_offset);
             b.set_size(rec->size);
             m_logfound_cb(rec->store_id, rec->store_seq_num, {header->start_idx() + i, group_dev_offset}, b);
@@ -151,7 +152,7 @@ log_buffer LogDev::read(const logdev_key& key) {
 
     // First read the offset and read the log_group. Then locate the log_idx within that and get the actual data
     // Read about 4K of buffer
-    if (!_read_buf) { _read_buf = sisl::make_aligned_sized_unique< uint8_t >(dma_boundary, initial_read_size); }
+    if (!_read_buf) { _read_buf = sisl::aligned_unique_ptr< uint8_t >::make_sized(dma_boundary, initial_read_size); }
     auto rbuf = _read_buf.get();
     auto store = m_hb->get_logdev_blkstore();
     store->pread((void*)rbuf, initial_read_size, key.dev_offset);
@@ -186,7 +187,7 @@ log_buffer LogDev::read(const logdev_key& key) {
         auto rounded_size = sisl::round_up(b.size() + data_offset - rounded_data_offset, dma_boundary);
 
         // Allocate a fresh aligned buffer, if size cannot fit standard size
-        if (rounded_size > initial_read_size) { rbuf = (uint8_t*)std::aligned_alloc(dma_boundary, rounded_size); }
+        if (rounded_size > initial_read_size) { rbuf = iomanager.iobuf_alloc(dma_boundary, rounded_size); }
 
         LOGTRACE("Addln read as data resides outside initial_read_size={} key.idx={} key.group_dev_offset={} "
                  "data_offset={} size={} rounded_data_offset={} rounded_size={}",
@@ -195,22 +196,7 @@ log_buffer LogDev::read(const logdev_key& key) {
         memcpy((void*)b.bytes(), (void*)(rbuf + data_offset - rounded_data_offset), b.size());
 
         // Free the buffer in case we allocated above
-        if (rounded_size > initial_read_size) { std::free(rbuf); }
-
-#if 0
-        // /////////////////////////////////////////////////
-        auto first_part_size = data_offset < initial_read_size ? initial_read_size - data_offset : 0;
-        std::memcpy((void*)b.data(), (void*)(rbuf + data_offset), first_part_size);
-
-        auto second_part_size = b.size() - first_part_size;
-        auto addln_read_size = sisl::round_up(second_part_size, dma_boundary);
-        if (second_part_size > initial_read_size) {
-            rbuf = (uint8_t*)std::aligned_alloc(dma_boundary, addln_read_size);
-        }
-        store->pread((void*)rbuf, addln_read_size, key.dev_offset + data_offset + first_part_size);
-        std::memcpy((void*)(b.data() + first_part_size), (void*)rbuf, second_part_size);
-        if (second_part_size > initial_read_size) { std::free(rbuf); }
-#endif
+        if (rounded_size > initial_read_size) { iomanager.iobuf_free(rbuf); }
     }
 
     return b;

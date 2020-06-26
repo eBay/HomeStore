@@ -155,7 +155,7 @@ void DeviceManager::init_devices(std::vector< dev_info >& devices) {
 }
 
 DeviceManager::~DeviceManager() {
-    free(m_chunk_memory);
+    iomanager.iobuf_free((uint8_t*)m_chunk_memory);
     m_dm_info = nullptr;
     m_pdev_hdr = nullptr;
     m_chunk_hdr = nullptr;
@@ -378,11 +378,9 @@ void DeviceManager::inited() {
     }
 }
 
-void DeviceManager::blk_alloc_meta_blk_found_cb(meta_blk* mblk, sisl::byte_view<> buf, size_t size) {
+void DeviceManager::blk_alloc_meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size) {
     uint32_t align = 0;
-    if (meta_blk_mgr->is_aligned_buf_needed(size)) {
-        align = HS_STATIC_CONFIG(disk_attr.align_size);
-    }
+    if (meta_blk_mgr->is_aligned_buf_needed(size)) { align = HS_STATIC_CONFIG(disk_attr.align_size); }
     std::unique_ptr< sisl::Bitset > recovered_bm(new sisl::Bitset(buf.extract(align)));
     auto chunk = get_chunk(recovered_bm->get_id());
     LOGINFO("get id {}", recovered_bm->get_id());
@@ -394,7 +392,7 @@ void DeviceManager::add_devices(std::vector< dev_info >& devices, bool is_init) 
     uint64_t max_dev_offset = 0;
     MetaBlkMgr::instance()->register_handler(
         "BLK_ALLOC",
-        [this](meta_blk* mblk, sisl::byte_view<> buf, size_t size) { blk_alloc_meta_blk_found_cb(mblk, buf, size); },
+        [this](meta_blk* mblk, sisl::byte_view buf, size_t size) { blk_alloc_meta_blk_found_cb(mblk, buf, size); },
         nullptr);
     if (is_init) {
         init_devices(devices);

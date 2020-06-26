@@ -228,7 +228,7 @@ private:
 
     std::mutex m_sb_lock; // lock for updating vol's sb
     // sisl::aligned_unique_ptr< vol_sb_hdr > m_sb_buf;
-    sisl::byte_view<> m_sb_buf;
+    sisl::byte_view m_sb_buf;
     indxmgr_stop_cb m_destroy_done_cb;
     std::atomic< bool > m_indx_mgr_destroy_started;
     void* m_sb_cookie = nullptr;
@@ -245,7 +245,7 @@ private:
 
 private:
     Volume(const vol_params& params);
-    Volume(meta_blk* mblk_cookie, sisl::byte_view<> sb_buf);
+    Volume(meta_blk* mblk_cookie, sisl::byte_view sb_buf);
     void alloc_single_block_in_mem();
     bool check_and_complete_req(const volume_req_ptr& vreq, const std::error_condition& err);
 
@@ -337,7 +337,7 @@ public:
     /* it is used in fake reboot */
     static void reinit() { IndxMgr::reinit(); }
 
-    static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view<> buf, size_t size);
+    static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size);
 
 public:
     /******************** APIs exposed to home_blks *******************/
@@ -489,7 +489,7 @@ struct volume_req : indx_req {
     /********** members used by indx mgr **********/
     uint64_t lastCommited_seqId = INVALID_SEQ_ID;
     uint64_t seqId = INVALID_SEQ_ID;
-    uint64_t request_id; // Copy of the id from interface request
+    uint64_t request_id;               // Copy of the id from interface request
     uint64_t active_nlbas_written = 0; // number of lba written in active indx tabl. It can be partially written if
                                        // btree writes failed in between.
 
