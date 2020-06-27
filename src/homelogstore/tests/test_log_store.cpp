@@ -70,7 +70,7 @@ public:
             m_log_store->write_async(lsn, {(uint8_t*)d, d->total_size()}, nullptr,
                                      [d, this](logstore_seq_num_t seq_num, logdev_key ld_key, void* ctx) {
                                          assert(ld_key);
-                                         iomanager.iobuf_free(d);
+                                         iomanager.iobuf_free((uint8_t*)d);
                                          m_comp_cb(seq_num, ld_key);
                                      });
         }

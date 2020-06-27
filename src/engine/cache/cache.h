@@ -106,7 +106,7 @@ class CacheBuffer;
 
 template < typename K >
 class Cache : protected IntrusiveCache< K, CacheBuffer< K > > {
-    typedef std::function< void(const boost::intrusive_ptr< CacheBuffer< K > >& bbuf) > erase_comp_cb;
+    using erase_comp_cb = std::function< void(const boost::intrusive_ptr< CacheBuffer< K > >& bbuf) >;
 
 public:
     Cache(uint64_t max_cache_size, uint32_t avg_size_per_entry);
@@ -114,8 +114,7 @@ public:
     /* Put the raw buffer into the cache with key k. It returns whether put is successful and if so provides
      * the smart pointer of CacheBuffer. Upsert flag of false indicates if the data already exists, do not insert */
     bool insert(const K& k, const homeds::blob& b, uint32_t value_offset,
-                boost::intrusive_ptr< CacheBuffer< K > >* out_smart_buf,
-                const std::function< void(CacheBuffer< K >*) >& found_cb = nullptr);
+                boost::intrusive_ptr< CacheBuffer< K > >* out_smart_buf, const auto& found_cb);
     bool insert(const K& k, const boost::intrusive_ptr< CacheBuffer< K > > in_buf,
                 boost::intrusive_ptr< CacheBuffer< K > >* out_smart_buf);
 
@@ -132,8 +131,8 @@ public:
     bool erase(boost::intrusive_ptr< CacheBuffer< K > > buf);
     bool erase(const K& k, boost::intrusive_ptr< CacheBuffer< K > >* out_bbuf);
     bool erase(const K& k, uint32_t offset, uint32_t size, boost::intrusive_ptr< CacheBuffer< K > >* ret_removed_buf);
-    void safe_erase(boost::intrusive_ptr< CacheBuffer< K > > buf, erase_comp_cb cb);
-    void safe_erase(const K& k, erase_comp_cb cb);
+    void safe_erase(boost::intrusive_ptr< CacheBuffer< K > > buf, const erase_comp_cb& cb);
+    void safe_erase(const K& k, const erase_comp_cb& cb);
     bool insert_missing_pieces(const boost::intrusive_ptr< CacheBuffer< K > > buf, uint32_t offset,
                                uint32_t size_to_read, std::vector< std::pair< uint32_t, uint32_t > >& missing_mp);
 };
@@ -146,8 +145,7 @@ enum cache_buf_state {
 
 template < typename K >
 class CacheBuffer : public CacheRecord {
-private:
-    typedef std::function< void(const boost::intrusive_ptr< CacheBuffer< K > >& bbuf) > erase_comp_cb;
+    using erase_comp_cb = std::function< void(const boost::intrusive_ptr< CacheBuffer< K > >& bbuf) >;
 
 public:
 #ifndef NDEBUG
@@ -257,9 +255,9 @@ public:
         return inserted_size;
     }
 
-    void set_cb(erase_comp_cb& cb) { m_cb = cb; }
+    void set_cb(const erase_comp_cb& cb) { m_cb = cb; }
 
-    erase_comp_cb get_cb() { return m_cb; }
+    const erase_comp_cb& get_cb() { return m_cb; }
 
     void set_memvec(boost::intrusive_ptr< homeds::MemVector > vec, uint32_t offset, uint32_t size) {
         assert(offset >= 0);

@@ -65,7 +65,7 @@ public:
     }
 
     ~BlkValue() {
-        if (m_data) { iomanager.iobuf_free(m_data); }
+        if (m_data) { iomanager.iobuf_free((uint8_t*)m_data); }
     }
 
     virtual uint64_t get_hash_code() override { return m_hash_code; }

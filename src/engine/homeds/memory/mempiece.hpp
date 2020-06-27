@@ -356,7 +356,7 @@ public:
         return inserted_size;
     }
 
-    bool update_missing_piece(uint32_t offset, uint32_t size, uint8_t* ptr, std::function< void() > init_cb) {
+    bool update_missing_piece(uint32_t offset, uint32_t size, uint8_t* ptr, const auto& init_cb) {
         uint32_t new_ind;
         bool inserted = false;
         std::unique_lock< std::recursive_mutex > mtx(m_mtx);

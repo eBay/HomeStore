@@ -97,7 +97,7 @@ void test_insert(benchmark::State& state) {
         // LOG(INFO) << "Will insert " << index << " - " << state.range(0) << " entries in this thread";
         for (auto i = index; i < state.range(0); i += state.threads) { // Loops for provided ranges
             boost::intrusive_ptr< homestore::CacheBuffer< blk_id > > cbuf;
-            glob_cache->insert(*glob_ids[i], {(uint8_t*)glob_bufs[i], 64}, 0, &cbuf);
+            glob_cache->insert(*glob_ids[i], {(uint8_t*)glob_bufs[i], 64}, 0, &cbuf, NULL_LAMBDA);
             // LOG(INFO) << "Completed insert of index i = " << i;
         }
     }

@@ -98,7 +98,7 @@ void test_insert(benchmark::State& state) {
         auto index = state.thread_index;
         for (auto i = 0U; i < state.range(0); i++) { // Loops for provided ranges
             blk_entry* res_entry;
-            bool ret = glob_set->insert(*glob_entries[index], &res_entry);
+            bool ret = glob_set->insert(*glob_entries[index], &res_entry, NULL_LAMBDA);
             index += state.threads;
         }
     }

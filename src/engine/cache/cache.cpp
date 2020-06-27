@@ -61,7 +61,7 @@ bool IntrusiveCache< K, V >::insert(V& v, V** out_ptr, const auto& found_cb) {
         /* remove from the hash table */
         HS_LOG(INFO, cache, "Unable to evict any record, removing entry {} from cache", v.to_string());
         COUNTER_INCREMENT(m_metrics, cache_add_error_count, 1);
-        m_hash_set.remove(*pk, hash_code, [](auto* x) {});
+        m_hash_set.remove(*pk, hash_code, NULL_LAMBDA);
         ret = false;
     }
     v.unlock();
@@ -114,7 +114,7 @@ bool IntrusiveCache< K, V >::erase(V& v) {
     auto b = K::get_blob(*pk);
     uint64_t hash_code = util::Hash64((const char*)b.bytes, (size_t)b.size);
 
-    bool found = m_hash_set.remove(*pk, hash_code, [](auto* x) {});
+    bool found = m_hash_set.remove(*pk, hash_code, NULL_LAMBDA);
     if (found) {
         v.lock();
         if (v->get_cache_state() == CACHE_INSERTED) {
@@ -188,8 +188,7 @@ bool Cache< K >::upsert(const K& k, const homeds::blob& b, boost::intrusive_ptr<
 
 template < typename K >
 bool Cache< K >::insert(const K& k, const homeds::blob& b, uint32_t value_offset,
-                        boost::intrusive_ptr< CacheBuffer< K > >* out_smart_buf,
-                        const std::function< void(CacheBuffer< K >*) >& found_cb) {
+                        boost::intrusive_ptr< CacheBuffer< K > >* out_smart_buf, const auto& found_cb) {
     // Allocate a new Cachebuffer and set the blob address to it.
     auto cbuf = sisl::ObjectAllocator< CacheBuffer< K > >::make_object(k, b, this, value_offset);
 
@@ -315,7 +314,7 @@ bool Cache< K >::erase(const K& k, uint32_t offset, uint32_t size,
 };
 
 template < typename K >
-void Cache< K >::safe_erase(boost::intrusive_ptr< CacheBuffer< K > > buf, erase_comp_cb cb) {
+void Cache< K >::safe_erase(boost::intrusive_ptr< CacheBuffer< K > > buf, const erase_comp_cb& cb) {
     const K* pk = CacheBuffer< K >::extract_key(*buf);
     safe_erase(*pk, cb);
 }
@@ -326,8 +325,7 @@ void Cache< K >::safe_erase(boost::intrusive_ptr< CacheBuffer< K > > buf, erase_
  * case of safe_erase. Entry has to be fully removed.
  */
 template < typename K >
-void Cache< K >::safe_erase(const K& k, erase_comp_cb cb) {
-
+void Cache< K >::safe_erase(const K& k, const erase_comp_cb& cb) {
     /* we don't support partial cache entry for safe_erase. */
     auto b = K::get_blob(k);
     uint64_t hash_code = util::Hash64((const char*)b.bytes, (size_t)b.size);
