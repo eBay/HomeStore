@@ -199,7 +199,7 @@ void Volume::destroy_internal() {
 }
 
 /* It is called only once */
-void Volume::shutdown(indxmgr_stop_cb cb) { IndxMgr::shutdown(cb); }
+void Volume::shutdown(const indxmgr_stop_cb& cb) { IndxMgr::shutdown(cb); }
 
 Volume::~Volume() {}
 
@@ -663,7 +663,7 @@ size_t Volume::call_batch_completion_cbs() {
     return count;
 }
 
-indx_cp_id_ptr Volume::attach_prepare_volume_cp(indx_cp_id_ptr indx_id, hs_cp_id* hs_id, hs_cp_id* new_hs_id) {
+indx_cp_id_ptr Volume::attach_prepare_volume_cp(const indx_cp_id_ptr& indx_id, hs_cp_id* hs_id, hs_cp_id* new_hs_id) {
     return (m_indx_mgr->attach_prepare_indx_cp(indx_id, hs_id, new_hs_id));
 }
 

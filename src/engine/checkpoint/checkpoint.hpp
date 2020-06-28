@@ -62,7 +62,7 @@ struct cp_id_base {
         return fmt::format("[cp_status={}, enter_cnt={}]", enum_name(cp_status.load()), enter_cnt.load());
     }
 
-    void push_cb(cp_done_cb&& cb) {
+    void push_cb(const cp_done_cb& cb) {
         assert(cb != nullptr);
         std::unique_lock< std::mutex > lk(cb_list_mtx);
         assert(cp_status != cp_status_t::cp_prepare);
@@ -163,12 +163,12 @@ public:
         cp_io_exit(cur_cp_id);
     }
 
-    void attach_cb(cp_id_type* cp_id, cp_done_cb&& cb) { cp_id->push_cb(std::move(cb)); }
+    void attach_cb(cp_id_type* cp_id, const cp_done_cb& cb) { cp_id->push_cb(std::move(cb)); }
 
     /* Trigger a checkpoint if it is not in cp phase. It makes sure to attach a callback to a CP who hasn't called the
      * attach_prepare yet.
      */
-    void trigger_cp(cp_done_cb cb = nullptr) {
+    void trigger_cp(const cp_done_cb& cb = nullptr) {
 
         /* check the state of previous CP */
         bool expected = false;

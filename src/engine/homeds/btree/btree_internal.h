@@ -86,8 +86,8 @@ enum class journal_op : uint8_t { BTREE_SPLIT = 1, BTREE_MERGE, BTREE_CREATE };
 
 #define INVALID_SEQ_ID UINT64_MAX
 struct btree_cp_id;
-typedef std::shared_ptr< btree_cp_id > btree_cp_id_ptr;
-typedef std::function< void(btree_cp_id_ptr cp_id) > cp_comp_callback;
+using btree_cp_id_ptr = boost::intrusive_ptr< btree_cp_id >;
+using cp_comp_callback = std::function< void(const btree_cp_id_ptr& cp_id) >;
 
 struct btree_cp_superblock {
     int64_t active_psn = -1;
@@ -97,7 +97,7 @@ struct btree_cp_superblock {
     /* we can add more statistics as well like number of interior nodes etc. */
 } __attribute__((__packed__));
 
-struct btree_cp_id {
+struct btree_cp_id : public boost::intrusive_ref_counter< btree_cp_id > {
     int64_t cp_cnt = -1;
     std::atomic< int > ref_cnt;
     std::atomic< int64_t > btree_size;

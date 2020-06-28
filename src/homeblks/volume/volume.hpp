@@ -326,13 +326,13 @@ public:
         if (cnt == 1 && HomeBlks::instance()->is_shutdown()) { HomeBlks::instance()->do_volume_shutdown(true); }
     }
     /* Called during shutdown. */
-    static void shutdown(indxmgr_stop_cb cb);
+    static void shutdown(const indxmgr_stop_cb& cb);
 
     /* called during io completions from data blk store */
     static void process_vol_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
 
     /* used to trigger system level cp */
-    static void trigger_homeblks_cp(cp_done_cb cb = nullptr) { IndxMgr::trigger_hs_cp(cb); };
+    static void trigger_homeblks_cp(const cp_done_cb& cb = nullptr) { IndxMgr::trigger_hs_cp(cb); };
 
     /* it is used in fake reboot */
     static void reinit() { IndxMgr::reinit(); }
@@ -432,7 +432,7 @@ public:
      * @params vol_id :- current cp id of this volume
      * @params home_blks_id :- current cp id of home_blks
      */
-    indx_cp_id_ptr attach_prepare_volume_cp(indx_cp_id_ptr indx_id, hs_cp_id* hs_id, hs_cp_id* new_hs_id);
+    indx_cp_id_ptr attach_prepare_volume_cp(const indx_cp_id_ptr& indx_id, hs_cp_id* hs_id, hs_cp_id* new_hs_id);
 
 #ifndef NDEBUG
     void verify_pending_blks();

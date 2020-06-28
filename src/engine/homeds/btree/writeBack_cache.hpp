@@ -172,7 +172,7 @@ public:
         }
     }
 
-    void prepare_cp(btree_cp_id_ptr new_cp_id, btree_cp_id_ptr cur_cp_id, bool blkalloc_checkpoint) {
+    void prepare_cp(const btree_cp_id_ptr& new_cp_id, const btree_cp_id_ptr& cur_cp_id, bool blkalloc_checkpoint) {
         if (new_cp_id) {
             int cp_cnt = (new_cp_id->cp_cnt) % MAX_CP_CNT;
             assert(m_dirty_buf_cnt[cp_cnt] == 0);
@@ -196,7 +196,7 @@ public:
     }
 
     void write(boost::intrusive_ptr< SSDBtreeNode > bn, boost::intrusive_ptr< SSDBtreeNode > dependent_bn,
-               btree_cp_id_ptr cp_id) {
+               const btree_cp_id_ptr& cp_id) {
         int cp_cnt = cp_id->cp_cnt % MAX_CP_CNT;
         assert(!dependent_bn || dependent_bn->req[cp_cnt] != nullptr);
         writeback_req_ptr wbd_req = dependent_bn ? dependent_bn->req[cp_cnt] : nullptr;
@@ -244,7 +244,7 @@ public:
     /* We don't want to free the blocks until cp is persisted. Because we use these blocks
      * to recover btree.
      */
-    void free_blk(const boost::intrusive_ptr< SSDBtreeNode >& bn, btree_cp_id_ptr cp_id) {
+    void free_blk(const boost::intrusive_ptr< SSDBtreeNode >& bn, const btree_cp_id_ptr& cp_id) {
         BlkId bid(bn->get_node_id().m_id);
 
         /*  if cp_id is null then free it only from the cache. */
@@ -253,7 +253,7 @@ public:
     }
 
     btree_status_t refresh_buf(boost::intrusive_ptr< SSDBtreeNode > bn, bool is_write_modifiable,
-                               btree_cp_id_ptr cp_id) {
+                               const btree_cp_id_ptr& cp_id) {
         if (!cp_id || !bn->cp_id) { return btree_status_t::success; }
 
         if (!is_write_modifiable) {
@@ -293,18 +293,18 @@ public:
     /* We free the block only upto the end seqid of this cp. We might have persisted the data of sequence id
      * greater then this seq_id. But we are going to replay the entry from
      */
-    void flush_free_blks(btree_cp_id_ptr cp_id, std::shared_ptr< homestore::blkalloc_cp_id >& blkalloc_id) {
+    void flush_free_blks(const btree_cp_id_ptr& cp_id, std::shared_ptr< homestore::blkalloc_cp_id >& blkalloc_id) {
         blkalloc_id->free_blks(cp_id->free_blkid_list);
     }
 
-    void cp_start(btree_cp_id_ptr cp_id) {
+    void cp_start(const btree_cp_id_ptr& cp_id) {
         static int thread_cnt = 0;
         int cp_cnt = cp_id->cp_cnt % MAX_CP_CNT;
         iomanager.run_on(m_thread_ids[thread_cnt++ % WB_CACHE_THREADS],
                          [this, cp_id](io_thread_addr_t addr) { this->flush_buffers(cp_id); });
     }
 
-    void flush_buffers(btree_cp_id_ptr cp_id) {
+    void flush_buffers(const btree_cp_id_ptr& cp_id) {
         int cp_cnt = cp_id->cp_cnt % MAX_CP_CNT;
         m_dirty_buf_cnt[cp_cnt].fetch_add(1);
         auto list = m_req_list[cp_cnt].get();

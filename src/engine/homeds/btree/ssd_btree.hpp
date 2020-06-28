@@ -44,8 +44,7 @@ public:
 
     BtreeStore(BtreeConfig& cfg) :
             m_cfg(cfg),
-            m_wb_cache(cfg.blkstore, cfg.align_size,
-                       std::bind(&SSDBtreeStore::cp_done_store, this, std::placeholders::_1), cfg.trigger_cp_cb) {
+            m_wb_cache(cfg.blkstore, cfg.align_size, bind_this(SSDBtreeStore::cp_done_store, 1), cfg.trigger_cp_cb) {
         m_node_size = cfg.get_node_size();
         m_cfg.set_node_area_size(m_node_size - sizeof(LeafPhysicalNode));
         m_first_cp = btree_cp_id_ptr(new (btree_cp_id));
@@ -59,15 +58,16 @@ public:
         m_blkstore->alloc_blk(bid);
     }
 
-    void cp_done_store(btree_cp_id_ptr cp_id) { cp_id->cb(cp_id); }
+    void cp_done_store(const btree_cp_id_ptr& cp_id) { cp_id->cb(cp_id); }
 
     /* It attaches the new CP and prepare for cur cp flush */
-    static btree_cp_id_ptr attach_prepare_cp(SSDBtreeStore* store, btree_cp_id_ptr cur_cp_id, bool is_last_cp,
+    static btree_cp_id_ptr attach_prepare_cp(SSDBtreeStore* store, const btree_cp_id_ptr& cur_cp_id, bool is_last_cp,
                                              bool blkalloc_checkpoint) {
         return (store->attach_prepare_cp_store(cur_cp_id, is_last_cp, blkalloc_checkpoint));
     }
 
-    btree_cp_id_ptr attach_prepare_cp_store(btree_cp_id_ptr cur_cp_id, bool is_last_cp, bool blkalloc_checkpoint) {
+    btree_cp_id_ptr attach_prepare_cp_store(const btree_cp_id_ptr& cur_cp_id, bool is_last_cp,
+                                            bool blkalloc_checkpoint) {
         /* start with ref cnt = 1. We dec it when trigger is called */
         if (cur_cp_id) {
             cur_cp_id->end_psn = m_journal->get_contiguous_issued_seq_num(cur_cp_id->start_psn);
@@ -118,32 +118,32 @@ public:
 
     void log_found(logstore_seq_num_t seqnum, log_buffer log_buf, void* mem) {}
 
-    static void cp_start(SSDBtreeStore* store, btree_cp_id_ptr cp_id, cp_comp_callback cb) {
+    static void cp_start(SSDBtreeStore* store, const btree_cp_id_ptr& cp_id, cp_comp_callback cb) {
         store->cp_start_store(cp_id, cb);
     }
 
-    void cp_start_store(btree_cp_id_ptr cp_id, cp_comp_callback cb) {
+    void cp_start_store(const btree_cp_id_ptr& cp_id, cp_comp_callback cb) {
         cp_id->cb = cb;
         try_cp_start(cp_id);
     }
 
-    void try_cp_start(btree_cp_id_ptr cp_id) {
+    void try_cp_start(const btree_cp_id_ptr& cp_id) {
         auto ref_cnt = cp_id->ref_cnt.fetch_sub(1);
         if (ref_cnt == 1) { m_wb_cache.cp_start(cp_id); }
     }
 
-    static void flush_free_blks(SSDBtreeStore* store, btree_cp_id_ptr btree_id,
+    static void flush_free_blks(SSDBtreeStore* store, const btree_cp_id_ptr& btree_id,
                                 std::shared_ptr< homestore::blkalloc_cp_id >& blkalloc_id) {
         store->flush_free_blks(btree_id, blkalloc_id);
     }
 
-    void flush_free_blks(btree_cp_id_ptr btree_id, std::shared_ptr< homestore::blkalloc_cp_id >& blkalloc_id) {
+    void flush_free_blks(const btree_cp_id_ptr& btree_id, std::shared_ptr< homestore::blkalloc_cp_id >& blkalloc_id) {
         m_wb_cache.flush_free_blks(btree_id, blkalloc_id);
     }
 
-    static void truncate(SSDBtreeStore* store, btree_cp_id_ptr cp_id) { store->truncate_store(cp_id); }
+    static void truncate(SSDBtreeStore* store, const btree_cp_id_ptr& cp_id) { store->truncate_store(cp_id); }
 
-    void truncate_store(btree_cp_id_ptr cp_id) { m_journal->truncate(cp_id->end_psn); }
+    void truncate_store(const btree_cp_id_ptr& cp_id) { m_journal->truncate(cp_id->end_psn); }
 
     static void cp_done(trigger_cp_callback cb) { wb_cache_t::cp_done(cb); }
 
@@ -151,7 +151,8 @@ public:
 
     void destroy_done_store() { home_log_store_mgr.remove_log_store(m_journal->get_store_id()); }
 
-    static void write_journal_entry(SSDBtreeStore* store, btree_cp_id_ptr cp_id, const sisl::alignable_blob& iob) {
+    static void write_journal_entry(SSDBtreeStore* store, const btree_cp_id_ptr& cp_id,
+                                    const sisl::alignable_blob& iob) {
         store->write_journal_entry_store(cp_id, iob);
     }
 
@@ -159,7 +160,7 @@ public:
 
     bool is_aligned_buf_needed(size_t size) { return m_journal->is_aligned_buf_needed(size); }
 
-    void write_journal_entry_store(btree_cp_id_ptr cp_id, const sisl::alignable_blob& iob) {
+    void write_journal_entry_store(const btree_cp_id_ptr& cp_id, const sisl::alignable_blob& iob) {
         ++cp_id->ref_cnt;
         m_journal->append_async(iob, iob.bytes,
                                 ([this, cp_id, iob](logstore_seq_num_t seq_num, bool status, void* cookie) mutable {
@@ -298,7 +299,8 @@ public:
     }
 
     static btree_status_t write_node(SSDBtreeStore* store, const boost::intrusive_ptr< SSDBtreeNode >& bn,
-                                     const boost::intrusive_ptr< SSDBtreeNode >& dependent_bn, btree_cp_id_ptr cp_id) {
+                                     const boost::intrusive_ptr< SSDBtreeNode >& dependent_bn,
+                                     const btree_cp_id_ptr& cp_id) {
         homestore::BlkId blkid(bn->get_node_id().m_id);
 
         auto physical_node = (LeafPhysicalNode*)(bn->at_offset(0).bytes);
@@ -309,7 +311,7 @@ public:
     }
 
     static btree_status_t refresh_node(SSDBtreeStore* store, const boost::intrusive_ptr< SSDBtreeNode >& bn,
-                                       bool is_write_modifiable, btree_cp_id_ptr cp_id) {
+                                       bool is_write_modifiable, const btree_cp_id_ptr& cp_id) {
 
         /* add the latest request pending on this node */
         auto ret = store->get_wb_cache()->refresh_buf(bn, is_write_modifiable, cp_id);
@@ -326,7 +328,7 @@ public:
     }
 
     static void free_node(SSDBtreeStore* store, const boost::intrusive_ptr< SSDBtreeNode >& bn, bool mem_only,
-                          btree_cp_id_ptr cp_id) {
+                          const btree_cp_id_ptr& cp_id) {
         if (mem_only) {
             /* it will be automatically freed */
             return;

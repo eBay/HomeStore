@@ -12,7 +12,7 @@ namespace homestore {
 
 struct blkalloc_cp_id;
 struct indx_cp_id;
-typedef std::shared_ptr< homestore::indx_cp_id > indx_cp_id_ptr;
+using indx_cp_id_ptr = boost::intrusive_ptr< homestore::indx_cp_id >;
 struct hs_cp_id;
 struct DeviceManager;
 class BlkBuffer;
