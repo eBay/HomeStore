@@ -138,17 +138,18 @@ void HomeLogStore::write_async(logstore_req* req, const log_req_comp_cb_t& cb) {
     HomeLogStoreMgr::logdev().append_async(m_store_id, req->seq_num, req->data.bytes, req->data.size, (void*)req);
 }
 
-void HomeLogStore::write_async(logstore_seq_num_t seq_num, const sisl::blob& b, void* cookie,
+void HomeLogStore::write_async(logstore_seq_num_t seq_num, const sisl::io_blob& b, void* cookie,
                                const log_write_comp_cb_t& cb) {
     // Form an internal request and issue the write
     auto* req = logstore_req::make(this, seq_num, b, true /* is_write_req */);
-    write_async(req, [cb, cookie](logstore_req* req, logdev_key written_lkey) {
-        cb(req->seq_num, written_lkey, cookie);
+    req->cookie = cookie;
+    write_async(req, [cb](logstore_req* req, logdev_key written_lkey) {
+        cb(req->seq_num, req->data, written_lkey, req->cookie);
         logstore_req::free(req);
     });
 }
 
-int64_t HomeLogStore::append_async(const sisl::blob& b, void* cookie, const log_write_comp_cb_t& cb) {
+int64_t HomeLogStore::append_async(const sisl::io_blob& b, void* cookie, const log_write_comp_cb_t& cb) {
     auto seq_num = m_seq_num.fetch_add(1, std::memory_order_acq_rel);
     write_async(seq_num, b, cookie, cb);
     return seq_num;
@@ -175,7 +176,7 @@ void HomeLogStore::read_async(logstore_req* req, const log_found_cb_t& cb) {
 void HomeLogStore::read_async(logstore_seq_num_t seq_num, void* cookie, const log_found_cb_t& cb) {
     auto record = m_records.at(seq_num);
     logdev_key ld_key = record.m_dev_key;
-    sisl::blob b;
+    sisl::io_blob b;
     auto* req = logstore_req::make(this, seq_num, &b, false /* not write */);
     read_async(req, [cookie, cb](logstore_seq_num_t seq_num, log_buffer log_buf, void* cookie) {
             cb(seq, log_buf, cookie);

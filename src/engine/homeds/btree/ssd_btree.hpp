@@ -151,8 +151,7 @@ public:
 
     void destroy_done_store() { home_log_store_mgr.remove_log_store(m_journal->get_store_id()); }
 
-    static void write_journal_entry(SSDBtreeStore* store, const btree_cp_id_ptr& cp_id,
-                                    const sisl::alignable_blob& iob) {
+    static void write_journal_entry(SSDBtreeStore* store, const btree_cp_id_ptr& cp_id, const sisl::io_blob& iob) {
         store->write_journal_entry_store(cp_id, iob);
     }
 
@@ -160,30 +159,31 @@ public:
 
     bool is_aligned_buf_needed(size_t size) { return m_journal->is_aligned_buf_needed(size); }
 
-    void write_journal_entry_store(const btree_cp_id_ptr& cp_id, const sisl::alignable_blob& iob) {
+    void write_journal_entry_store(const btree_cp_id_ptr& cp_id, const sisl::io_blob& iob) {
         ++cp_id->ref_cnt;
-        m_journal->append_async(iob, iob.bytes,
-                                ([this, cp_id, iob](logstore_seq_num_t seq_num, bool status, void* cookie) mutable {
-                                    auto hdr = btree_journal_entry::get_entry_hdr((uint8_t*)cookie);
-                                    if (hdr->op == journal_op::BTREE_CREATE) {
-                                        /* we set disk bitmap later when btree root node is persisted */
-                                        iob.buf_free();
-                                        try_cp_start(cp_id);
-                                        return;
-                                    }
-                                    auto pair = btree_journal_entry::get_new_nodes_list((uint8_t*)cookie);
-                                    auto new_node_id_list = pair.first;
-                                    auto size = pair.second;
-                                    /* blk id is alloceted in disk bitmap only after it is writing to journal. check
-                                     * blk_alloctor base class for further explanations.
-                                     */
-                                    for (uint32_t i = 0; i < size; ++i) {
-                                        auto bid = BlkId(new_node_id_list[i]);
-                                        m_blkstore->alloc_blk(bid);
-                                    }
-                                    iob.buf_free();
-                                    try_cp_start(cp_id);
-                                }));
+        m_journal->append_async(
+            iob, nullptr,
+            ([this, cp_id](logstore_seq_num_t seq_num, sisl::io_blob& iob, bool status, void* cookie) mutable {
+                auto hdr = btree_journal_entry::get_entry_hdr(iob.bytes);
+                if (hdr->op == journal_op::BTREE_CREATE) {
+                    /* we set disk bitmap later when btree root node is persisted */
+                    iob.buf_free();
+                    try_cp_start(cp_id);
+                    return;
+                }
+                auto pair = btree_journal_entry::get_new_nodes_list(iob.bytes);
+                auto new_node_id_list = pair.first;
+                auto size = pair.second;
+                /* blk id is alloceted in disk bitmap only after it is writing to journal. check
+                 * blk_alloctor base class for further explanations.
+                 */
+                for (uint32_t i = 0; i < size; ++i) {
+                    auto bid = BlkId(new_node_id_list[i]);
+                    m_blkstore->alloc_blk(bid);
+                }
+                iob.buf_free();
+                try_cp_start(cp_id);
+            }));
     }
 
     static uint8_t* get_physical(const SSDBtreeNode* bn) {

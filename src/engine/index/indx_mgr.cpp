@@ -1,6 +1,5 @@
 #include "indx_mgr_api.hpp"
 #include <utility/thread_factory.hpp>
-#include "engine/common/homestore_io_blob.hpp"
 
 using namespace homestore;
 SDS_LOGGING_DECL(indx_mgr)
@@ -24,13 +23,12 @@ uint32_t indx_journal_entry::size() const {
 }
 
 /* it update the alloc blk id and checksum */
-sisl::blob indx_journal_entry::create_journal_entry(indx_req* ireq) {
+sisl::io_blob indx_journal_entry::create_journal_entry(indx_req* ireq) {
     uint32_t size = sizeof(journal_hdr) + ireq->indx_alloc_blkid_list.size() * sizeof(BlkId) +
         ireq->fbe_list.size() * sizeof(BlkId) + ireq->get_key_size() + ireq->get_val_size();
 
     uint32_t align = 0;
     if (HomeLogStore::is_aligned_buf_needed(size)) { align = HS_STATIC_CONFIG(disk_attr.align_size); }
-
     m_iob.buf_alloc(size, align);
 
     uint8_t* mem = m_iob.bytes;
@@ -66,9 +64,7 @@ sisl::blob indx_journal_entry::create_journal_entry(indx_req* ireq) {
     auto val_pair = get_val(mem);
     ireq->fill_val(val_pair.first, val_pair.second);
 
-    sisl::blob data((uint8_t*)mem, size);
-
-    return data;
+    return m_iob;
 }
 
 /****************************************** IndxCP class ****************************************/
@@ -176,8 +172,8 @@ IndxMgr::IndxMgr(boost::uuids::uuid uuid, std::string name, io_done_cb io_cb, cr
     m_active_tbl = m_create_indx_tbl();
 
     m_journal = HomeLogStoreMgr::instance().create_new_log_store();
-    m_journal_comp_cb =
-        std::bind(&IndxMgr::journal_comp_cb, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
+    m_journal_comp_cb = bind_this(IndxMgr::journal_comp_cb, 2);
+    m_journal->register_req_comp_cb(m_journal_comp_cb);
     for (int i = 0; i < MAX_CP_CNT; ++i) {
         m_free_list[i] = std::make_shared< sisl::ThreadVector< BlkId > >();
     }
@@ -202,9 +198,9 @@ IndxMgr::IndxMgr(boost::uuids::uuid uuid, std::string name, io_done_cb io_cb, cr
             m_journal = logstore;
             m_journal->register_log_found_cb(
                 ([this](logstore_seq_num_t seqnum, log_buffer buf, void* mem) { this->log_found(seqnum, buf, mem); }));
+            m_journal_comp_cb = bind_this(IndxMgr::journal_comp_cb, 2);
+            m_journal->register_req_comp_cb(m_journal_comp_cb);
         }));
-    m_journal_comp_cb =
-        std::bind(&IndxMgr::journal_comp_cb, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
     for (int i = 0; i < MAX_CP_CNT; ++i) {
         m_free_list[i] = std::make_shared< sisl::ThreadVector< BlkId > >();
     }
@@ -489,12 +485,12 @@ void IndxMgr::cp_done(bool blkalloc_cp) {
 
 indx_tbl* IndxMgr::get_active_indx() { return m_active_tbl; }
 
-void IndxMgr::journal_comp_cb(logstore_seq_num_t seq_num, logdev_key ld_key, void* req) {
+void IndxMgr::journal_comp_cb(logstore_req* lreq, logdev_key ld_key) {
     assert(ld_key.is_valid());
-    auto ireq = indx_req_ptr((indx_req*)req, false); // Turn it back to smart ptr before doing callback.
+    auto ireq = indx_req_ptr((indx_req*)lreq->cookie, false); // Turn it back to smart ptr before doing callback.
 
     HS_SUBMOD_LOG(TRACE, indx_mgr, , "indx mgr", m_name, "Journal write done, lsn={}, log_key=[idx={}, offset={}]",
-                  seq_num, ld_key.idx, ld_key.dev_offset);
+                  lreq->seq_num, ld_key.idx, ld_key.dev_offset);
 
     /* blk id is alloceted in disk bitmap only after it is writing to journal. check
      * blk_alloctor base class for further explanations. It should be done in cp critical section.
@@ -531,11 +527,14 @@ void IndxMgr::journal_comp_cb(logstore_seq_num_t seq_num, logdev_key ld_key, voi
      * take cp to free some resources.
      */
     m_io_cb(ireq, ireq->indx_err);
+    logstore_req::free(lreq);
 }
 
 void IndxMgr::journal_write(indx_req* ireq) {
     auto b = ireq->create_journal_entry();
-    m_journal->write_async(ireq->get_seqId(), b, ireq, m_journal_comp_cb);
+    auto lreq = logstore_req::make(m_journal.get(), ireq->get_seqId(), b);
+    lreq->cookie = (void*)ireq;
+    m_journal->write_async(lreq);
 }
 
 /* A io can become part of two CPs if btree node is updated with the new CP and few indx mgr IOs
@@ -544,10 +543,8 @@ void IndxMgr::journal_write(indx_req* ireq) {
  * the latest CP ids.
  */
 btree_status_t IndxMgr::update_active_indx_tbl(indx_req* ireq) {
-
     auto btree_id = ireq->indx_id->ainfo.btree_id;
     auto status = m_active_tbl->update_active_indx_tbl(ireq, btree_id);
-
     return status;
 }
 
@@ -662,13 +659,13 @@ void IndxMgr::destroy(const indxmgr_stop_cb& cb) {
         align = HS_STATIC_CONFIG(disk_attr.align_size);
     }
 
-    sisl::alignable_blob iob(sizeof(destroy_journal_ent), align);
+    sisl::io_blob iob(sizeof(destroy_journal_ent), align);
     jent = (destroy_journal_ent*)(iob.bytes);
     jent->state = indx_mgr_state::DESTROYING;
 
     m_stop_cb = std::move(cb);
     m_journal->append_async(
-        iob, nullptr, ([this, iob](logstore_seq_num_t seq_num, logdev_key key, void* cookie) mutable {
+        iob, nullptr, ([this](logstore_seq_num_t seq_num, sisl::io_blob& iob, logdev_key key, void* cookie) mutable {
             iob.buf_free();
             add_prepare_cb_list([this](const indx_cp_id_ptr& cur_indx_id, hs_cp_id* hb_id, hs_cp_id* new_hb_id) {
                 /* suspend current cp */

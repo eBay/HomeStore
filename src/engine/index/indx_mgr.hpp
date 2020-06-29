@@ -31,7 +31,7 @@ struct journal_hdr {
 
 class indx_journal_entry {
 private:
-    sisl::alignable_blob m_iob;
+    sisl::io_blob m_iob;
 
 public:
     uint32_t size(indx_req* ireq) const;
@@ -68,7 +68,7 @@ public:
     }
 
     /* it update the alloc blk id and checksum */
-    sisl::blob create_journal_entry(indx_req* v_req);
+    sisl::io_blob create_journal_entry(indx_req* v_req);
 
     std::string to_string() const { return fmt::format("size= {}", size()); }
 };

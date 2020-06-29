@@ -88,28 +88,9 @@ HomeBlks::HomeBlks(const init_params& cfg) : m_cfg(cfg), m_metrics("HomeBlks") {
     sisl::MallocMetrics::enable();
 
     /* start thread */
-#if 0
-    auto run_method = sisl::ObjectAllocator< run_method_t >::make_object();
-    *run_method = ([this]() {
-        try {
-            this->init_devices();
-        } catch (const std::exception& e) {
-            LOGERROR("{}", e.what());
-            init_done(std::make_error_condition(std::errc::io_error));
-        }
-    });
-    iomgr_msg io_msg;
-    io_msg.m_type = RUN_METHOD;
-    io_msg.m_data_buf = (void*)run_method;
-    /* We are distributing work based on btree. Other approach is to use both threads working
-     * on same btree.
-     */
-    iomanager.send_to_least_busy_thread(-1, io_msg);
-#endif
     auto sthread = sisl::named_thread("hb_init", [this]() {
         this->init_devices();
         iomanager.run_io_loop(false, nullptr);
-        LOGINFO("REMOVE_ME: Exiting hb_init thread");
     });
     sthread.detach();
     m_start_shutdown = false;

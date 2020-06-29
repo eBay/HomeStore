@@ -28,10 +28,7 @@ public:
     virtual void free_yourself() = 0;
 
 public:
-    sisl::blob create_journal_entry() {
-        auto blob = j_ent.create_journal_entry(this);
-        return blob;
-    }
+    sisl::io_blob create_journal_entry() { return j_ent.create_journal_entry(this); }
 
     void push_indx_alloc_blkid(BlkId& bid) { indx_alloc_blkid_list.push_back(bid); }
     void push_fbe(Free_Blk_Entry& fbe) { fbe_list.push_back(fbe); }
@@ -230,7 +227,7 @@ private:
     indx_tbl* m_active_tbl;
     io_done_cb m_io_cb;
     std::shared_ptr< HomeLogStore > m_journal;
-    log_write_comp_cb_t m_journal_comp_cb;
+    log_req_comp_cb_t m_journal_comp_cb;
 
     /* we can not add a indx mgr in active CP. It can be added only when a new cp is created. indx mgr keeps
      * on using this id until new cp is not created. Once a new cp is created, it will become a part of it.
@@ -254,7 +251,7 @@ private:
 
     /*************************************** private functions ************************/
     void journal_write(indx_req* vreq);
-    void journal_comp_cb(logstore_seq_num_t seq_num, logdev_key ld_key, void* req);
+    void journal_comp_cb(logstore_req* req, logdev_key ld_key);
     btree_status_t update_active_indx_tbl(indx_req* vreq);
     btree_cp_id_ptr get_btree_id(hs_cp_id* cp_id);
     indx_cp_id_ptr get_indx_id(hs_cp_id* cp_id);

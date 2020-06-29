@@ -26,7 +26,6 @@
 #include "engine/homeds/array/reserve_vector.hpp"
 #include "engine/common/homestore_header.hpp"
 #include "engine/common/homestore_config.hpp"
-#include "engine/common/homestore_io_blob.hpp"
 
 using namespace std;
 using namespace homeds::thread;
@@ -1818,7 +1817,7 @@ private:
             align = HS_STATIC_CONFIG(disk_attr.align_size);
         }
 
-        sisl::alignable_blob iob(size, align);
+        sisl::io_blob iob(size, align);
 
         mem = iob.bytes;
 

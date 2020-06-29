@@ -42,8 +42,9 @@ public:
         auto ind = m_nth_entry.fetch_add(1, std::memory_order_acq_rel);
         if (ind >= m_nentries) { return false; }
         DLOGDEBUG("Appending log entry for ind {}", ind);
-        m_log_store->append_async({(uint8_t*)m_data[ind].data(), (uint32_t)m_data[ind].size()}, nullptr,
-                                  [this](logstore_seq_num_t seq_num, bool success, void* ctx) { m_comp_cb(seq_num); });
+        m_log_store->append_async(
+            sisl::io_blob((uint8_t*)m_data[ind].data(), (uint32_t)m_data[ind].size(), false), nullptr,
+            [this](logstore_seq_num_t seq_num, sisl::io_blob& iob, bool success, void* ctx) { m_comp_cb(seq_num); });
         return true;
     }
 

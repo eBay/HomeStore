@@ -68,8 +68,8 @@ public:
         }
 
         // trigger the async write;
-        m_store->write_async(seq, {v->get_blob().bytes, v->get_blob().size}, nullptr,
-                             [this](logstore_seq_num_t seq_num, bool success, void* ctx) {
+        m_store->write_async(seq, sisl::io_blob(v->get_blob().bytes, v->get_blob().size, false), nullptr,
+                             [this](logstore_seq_num_t seq_num, sisl::blob& iob, bool success, void* ctx) {
                                  std::lock_guard< std::mutex > lg(m_mtx);
                                  LOGINFO("Completed write of seq {}", seq_num);
                                  m_wrt_map[seq_num].completed = true;
