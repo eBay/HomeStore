@@ -206,8 +206,8 @@ public:
     }
     static inline constexpr btree_journal_entry* blob_to_entry(const sisl::io_blob& b) { return nullptr; }
     static void append_node_to_journal(sisl::io_blob& j_iob, bt_journal_node_op node_op,
-                                       const boost::intrusive_ptr< MemBtreeNode >& node, bool append_last_key = false) {
-    }
+                                       const boost::intrusive_ptr< MemBtreeNode >& node, const btree_cp_id_ptr& cp_id,
+                                       bool append_last_key = false) {}
     static void write_journal_entry(MemBtreeStore* store, const btree_cp_id_ptr& cp_id, sisl::io_blob& j_iob) {}
 
     static btree_status_t write_node_sync(MemBtreeStore* store, boost::intrusive_ptr< MemBtreeNode > bn) {

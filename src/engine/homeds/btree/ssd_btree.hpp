@@ -340,7 +340,8 @@ public:
     }
 
     static void append_node_to_journal(sisl::io_blob& j_iob, bt_journal_node_op node_op,
-                                       const boost::intrusive_ptr< SSDBtreeNode >& node, bool append_last_key = false) {
+                                       const boost::intrusive_ptr< SSDBtreeNode >& node, const btree_cp_id_ptr& cp_id,
+                                       bool append_last_key = false) {
         sisl::blob key_blob;
         K key;
         if (append_last_key) {
@@ -351,6 +352,14 @@ public:
         uint16_t append_size = sizeof(bt_journal_node_info) + key_blob.size;
         auto e = realloc_if_needed(j_iob, append_size);
         e->append_node(node_op, node->get_node_id(), node->get_gen(), key_blob);
+
+        if (cp_id) {
+            if (node_op == bt_journal_node_op::creation) {
+                cp_id->btree_size.fetch_add(1);
+            } else if (node_op == bt_journal_node_op::removal) {
+                cp_id->btree_size.fetch_sub(1);
+            }
+        }
     }
 
     static void write_journal_entry(SSDBtreeStore* store, const btree_cp_id_ptr& cp_id, sisl::io_blob& j_iob) {
@@ -368,7 +377,6 @@ private:
         m_journal->append_async(
             j_iob, nullptr, ([this, cp_id](logstore_seq_num_t seq_num, sisl::io_blob& iob, bool status, void* cookie) {
                 btree_journal_entry* jentry = blob_to_entry(iob);
-                LOGINFO("btree_journal_entry: {}", jentry->to_string());
                 if (jentry->op != journal_op::BTREE_CREATE) {
                     /*
                      * blk id is allocated for newly created nodes in disk bitmap only after it is

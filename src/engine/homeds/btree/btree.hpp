@@ -1948,8 +1948,8 @@ private:
 
         if (BtreeStoreType == btree_store_type::SSD_BTREE) {
             auto j_iob = btree_store_t::make_journal_entry(journal_op::BTREE_MERGE, true /* is_root */);
-            btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::inplace_write, root, false);
-            btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::removal, child_node, false);
+            btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::inplace_write, root, cp_id, false);
+            btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::removal, child_node, cp_id, false);
             btree_store_t::write_journal_entry(m_btree_store.get(), cp_id, j_iob);
         }
         unlock_node(root, locktype::LOCKTYPE_WRITE);
@@ -2013,8 +2013,8 @@ private:
                                                            {parent_node->get_node_id(), parent_node->get_gen()});
             btree_store_t::append_node_to_journal(
                 j_iob, (root_split ? bt_journal_node_op::creation : bt_journal_node_op::inplace_write), child_node1,
-                true);
-            btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::creation, child_node2, false);
+                cp_id, true);
+            btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::creation, child_node2, cp_id, false);
             btree_store_t::write_journal_entry(m_btree_store.get(), cp_id, j_iob);
         }
 
@@ -2231,12 +2231,13 @@ private:
         if (BtreeStoreType == btree_store_type::SSD_BTREE) {
             auto j_iob = btree_store_t::make_journal_entry(journal_op::BTREE_MERGE, false /* is_root */,
                                                            {parent_node->get_node_id(), parent_node->get_gen()});
-            btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::inplace_write, left_most_node, true);
+            btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::inplace_write, left_most_node, cp_id,
+                                                  true);
             for (auto& node : old_nodes) {
-                btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::removal, node, true);
+                btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::removal, node, cp_id, true);
             }
             for (auto& node : replace_nodes) {
-                btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::creation, node, false);
+                btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::creation, node, cp_id, false);
             }
             btree_store_t::write_journal_entry(m_btree_store.get(), cp_id, j_iob);
         }
@@ -2661,7 +2662,7 @@ protected:
         auto cp_id = attach_prepare_cp(nullptr, false, false);
         if (BtreeStoreType == btree_store_type::SSD_BTREE) {
             auto j_iob = btree_store_t::make_journal_entry(journal_op::BTREE_CREATE, true /* is_root */);
-            btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::creation, root, false);
+            btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::creation, root, cp_id, false);
             btree_store_t::write_journal_entry(m_btree_store.get(), cp_id, j_iob);
         }
 

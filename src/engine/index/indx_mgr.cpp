@@ -720,9 +720,7 @@ void IndxMgr::shutdown(indxmgr_stop_cb cb) {
     trigger_hs_cp(([cb](bool success) {
                       /* verify that all the indx mgr have called their last cp */
                       assert(success);
-                      if (m_cp) {
-                          m_cp->shutdown();
-                      }
+                      if (m_cp) { m_cp->shutdown(); }
                       cb(success);
                   }),
                   true);
