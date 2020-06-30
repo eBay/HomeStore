@@ -596,7 +596,7 @@ public:
      * @return : the unique offset
      */
     off_t process_pwrite_offset(size_t len, off_t offset, uint32_t& dev_id, uint32_t& chunk_id,
-                                boost::intrusive_ptr< virtualdev_req > req) {
+                                const boost::intrusive_ptr< virtualdev_req >& req) {
         off_t offset_in_chunk = 0;
 
         if (req) { req->outstanding_cb.store(1); }
@@ -729,7 +729,7 @@ public:
      * @return : On success, number of bytes written. On error, -1 is returned
      */
     ssize_t pwritev(const struct iovec* iov, int iovcnt, off_t offset,
-                    boost::intrusive_ptr< virtualdev_req > req = nullptr) {
+                    const boost::intrusive_ptr< virtualdev_req >& req = nullptr) {
         uint32_t dev_id = 0, chunk_id = 0;
         auto len = get_len(iov, iovcnt);
         m_reserved_sz -= len;
@@ -1244,7 +1244,7 @@ public:
             }
         }
     }
-    
+
     void write(const BlkId& bid, struct iovec* iov, int iovcnt, boost::intrusive_ptr< virtualdev_req > req = nullptr) {
         PhysicalDevChunk* chunk;
         auto size = get_len(iov, iovcnt);
@@ -1273,7 +1273,7 @@ public:
         uint32_t p = 0;
         uint32_t end_offset = data_offset + bid.data_size(m_pagesz);
         while (data_offset != end_offset) {
-            homeds::blob b;
+            sisl::blob b;
             buf.get(&b, data_offset);
             iov[iovcnt].iov_base = b.bytes;
             if (data_offset + b.size > end_offset) {
@@ -1353,7 +1353,7 @@ public:
         uint64_t primary_dev_offset = to_dev_offset(bid, &primary_chunk);
         uint64_t primary_chunk_offset = primary_dev_offset - primary_chunk->get_start_offset();
 
-        homeds::blob b;
+        sisl::blob b;
         mp[cnt]->get(&b, 0);
         HS_ASSERT_CMP(DEBUG, b.size, ==, bid.data_size(m_pagesz));
         primary_chunk->get_physical_dev_mutable()->sync_read((char*)b.bytes, b.size, primary_dev_offset);
@@ -1438,7 +1438,7 @@ public:
         HS_ASSERT_CMP(DEBUG, buf.size(), ==,
                       bid.get_nblks() * get_page_size()); // Expected to be less than allocated blk originally.
         for (auto i : boost::irange< uint32_t >(0, buf.npieces())) {
-            homeds::blob b;
+            sisl::blob b;
             buf.get(&b, i);
 
             iov[iovcnt].iov_base = b.bytes;
@@ -1613,7 +1613,6 @@ private:
         uint64_t dev_offset = glob_uniq_id.get_id() * get_page_size() + (*chunk)->get_start_offset();
         return dev_offset;
     }
-
 
     uint32_t get_blks_per_chunk() const { return get_chunk_size() / get_page_size(); }
     uint32_t get_page_size() const { return m_vb->page_size; }

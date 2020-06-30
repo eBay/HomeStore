@@ -954,7 +954,7 @@ protected:
             auto buf = info.buf;
             while (size != 0) {
                 uint32_t size_read = 0;
-                homeds::blob b = VolInterface::get_instance()->at_offset(buf, offset);
+                sisl::blob b = VolInterface::get_instance()->at_offset(buf, offset);
 
                 size_read = tcfg.vol_page_size;
                 int j = 0;

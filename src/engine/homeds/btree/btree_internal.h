@@ -30,7 +30,7 @@
 
 ENUM(btree_status_t, uint32_t, success, not_found, item_found, closest_found, closest_removed, retry, has_more,
      read_failed, write_failed, stale_buf, refresh_failed, put_failed, space_not_avail, split_failed, insert_failed,
-     cp_id_mismatch, merge_not_required, merge_failed);
+     cp_id_mismatch, merge_not_required, merge_failed, replay_not_needed);
 
 typedef enum {
     READ_NONE = 0,
@@ -46,9 +46,9 @@ struct blkalloc_cp_id;
 /* We should always find the child smaller or equal then  search key in the interior nodes. */
 #ifndef NDEBUG
 #define ASSERT_IS_VALID_INTERIOR_CHILD_INDX(ret, node)                                                                 \
-    DEBUG_ASSERT(((ret.end_of_search_index < (int)node->get_total_entries()) || node->get_edge_id().is_valid()),       \
+    DEBUG_ASSERT(((ret.end_of_search_index < (int)node->get_total_entries()) || node->has_valid_edge()),               \
                  "Is_valid_interior_child_check_failed: end_of_search_index={} total_entries={}, edge_valid={}",       \
-                 ret.end_of_search_index, node->get_total_entries(), node->get_edge_id().is_valid())
+                 ret.end_of_search_index, node->get_total_entries(), node->has_valid_edge())
 #else
 #define ASSERT_IS_VALID_INTERIOR_CHILD_INDX(ret, node)
 #endif
@@ -88,6 +88,8 @@ enum class journal_op : uint8_t { BTREE_SPLIT = 1, BTREE_MERGE, BTREE_CREATE };
 struct btree_cp_id;
 using btree_cp_id_ptr = boost::intrusive_ptr< btree_cp_id >;
 using cp_comp_callback = std::function< void(const btree_cp_id_ptr& cp_id) >;
+using bnodeid_t = uint64_t;
+static constexpr bnodeid_t empty_bnodeid = std::numeric_limits< bnodeid_t >::max();
 
 struct btree_cp_superblock {
     int64_t active_psn = -1;
@@ -109,18 +111,177 @@ struct btree_cp_id : public boost::intrusive_ref_counter< btree_cp_id > {
     ~btree_cp_id() {}
 };
 
+/********************* Journal Specific Section **********************/
+struct bt_node_gen_pair {
+    bnodeid_t node_id = empty_bnodeid;
+    uint64_t node_gen = 0;
+};
+
+enum class bt_journal_node_op : uint8_t { inplace_write = 1, removal, creation };
+struct bt_journal_node_info {
+    bt_node_gen_pair node_info;
+    bt_journal_node_op type = bt_journal_node_op::inplace_write;
+    uint16_t key_size = 0;
+    uint8_t* key_area() { return ((uint8_t*)this + sizeof(bt_journal_node_info)); }
+};
+
+struct btree_journal_entry {
+#if 0
+    static constexpr size_t alloc_increment = 256;
+    static constexpr size_t min_size() { return std::max(alloc_increment, sizeof(btree_journal_entry)); }
+
+    static sisl::io_blob make(journal_op op) {
+        auto b = sisl::io_blob(
+            min_size(), HomeLogStore::is_aligned_buf_needed(min_size()) ? HS_STATIC_CONFIG(disk_attr.align_size) : 0);
+        new (b.bytes) btree_journal_entry(op);
+        return b;
+    }
+
+    static inline constexpr btree_journal_entry* get(const sisl::io_blob& b) { return (btree_journal_entry*)b.bytes; }
+
+    static btree_journal_entry* realloc_if_needed(sisl::io_blob& b, uint16_t append_size) {
+        assert(b.size > get(b)->actual_size);
+        uint16_t avail_size = b.size - get(b)->actual_size;
+        if (avail_size < append_size) {
+            auto new_size = sisl::round_up(entry->actual_size + append_size, alloc_increment);
+            b.buf_realloc(new_size,
+                          HomeLogStore::is_aligned_buf_needed(new_size) ? HS_STATIC_CONFIG(disk_attr.align_size) : 0);
+        }
+        return get(b);
+    }
+
+    static void append_node(sisl::io_blob& b, bt_journal_node_op node_op, bnodeid_t node_id, uint64_t gen,
+                            sisl::blob key = {nullptr, 0}) {
+        uint16_t append_size = sizeof(bt_journal_node_info) + key.size;
+        btree_journal_entry* entry = realloc_if_needed(b, append_size);
+        ++entry->node_count;
+
+        bt_journal_node_info* info = entry->_append_area();
+        info->node_info = {node_id, gen};
+        info->type = node_op;
+        info->key_size = key.size;
+        if (key.size) memcpy(info->key_area(), key.bytes, key.size);
+        entry->actual_size += append_size;
+    }
+#endif
+
+    void append_node(bt_journal_node_op node_op, bnodeid_t node_id, uint64_t gen, sisl::blob key = {nullptr, 0}) {
+        ++node_count;
+        bt_journal_node_info* info = _append_area();
+        info->node_info = {node_id, gen};
+        info->type = node_op;
+        info->key_size = key.size;
+        if (key.size) memcpy(info->key_area(), key.bytes, key.size);
+        actual_size += sizeof(bt_journal_node_info) + key.size;
+    }
+
+    void foreach_node(bt_journal_node_op node_op, const std::function< void(bt_node_gen_pair, sisl::blob) >& cb) const {
+        bt_journal_node_info* info = (bt_journal_node_info*)((uint8_t*)this + sizeof(btree_journal_entry));
+        for (auto i = 0u; i < node_count; ++i) {
+            if (info->type == node_op) { cb(info->node_info, sisl::blob(info->key_area(), info->key_size)); }
+            info = (bt_journal_node_info*)((uint8_t*)info + sizeof(bt_journal_node_info) + info->key_size);
+        }
+    }
+
+    std::vector< bt_journal_node_info* > get_nodes(bt_journal_node_op node_op) const {
+        std::vector< bt_journal_node_info* > result;
+        bt_journal_node_info* info = (bt_journal_node_info*)((uint8_t*)this + sizeof(btree_journal_entry));
+        for (auto i = 0u; i < node_count; ++i) {
+            if (info->type == node_op) { result.push_back(info); }
+            info = (bt_journal_node_info*)((uint8_t*)info + sizeof(bt_journal_node_info) + info->key_size);
+        }
+        return result;
+    }
+
+    bt_journal_node_info* leftmost_node() const { return get_nodes(bt_journal_node_op::inplace_write)[0]; }
+
+    std::string to_string() const {
+        auto str = fmt::format("op={} is_root={} cp_cnt={} size={} num_nodes={} ", op, is_root, cp_cnt, actual_size,
+                               node_count);
+        str += fmt::format("[parent: id={}, gen={}] ", parent_node.node_id, parent_node.node_gen);
+
+        bt_journal_node_info* info = (bt_journal_node_info*)((uint8_t*)this + sizeof(btree_journal_entry));
+        for (auto i = 0u; i < node_count; ++i) {
+            str += fmt::format("[node{}: id={} gen={} node_op={} key_size={}] ", i, info->node_info.node_id,
+                               info->node_info.node_gen, info->type, info->key_size);
+            info = (bt_journal_node_info*)((uint8_t*)info + sizeof(bt_journal_node_info) + info->key_size);
+        }
+        return str;
+    }
+
+    /************** Actual header starts here **********/
+    journal_op op;
+    bool is_root = false;
+    int64_t cp_cnt = 0;
+    uint16_t actual_size = sizeof(btree_journal_entry);
+    uint16_t node_count = 0;
+    bt_node_gen_pair parent_node; // Info about the parent node
+    // Additional node info follows this
+
+private:
+    btree_journal_entry(journal_op p, bool root, bt_node_gen_pair ninfo) : op(p), is_root(root), parent_node(ninfo) {}
+    bt_journal_node_info* _append_area() { return (bt_journal_node_info*)((uint8_t*)this + actual_size); }
+} __attribute__((__packed__));
+
+#if 0
 struct btree_journal_entry_hdr {
     journal_op op;
-    bool is_root;
+    bool is_root = false;
     uint64_t parent_node_id;
     uint64_t parent_node_gen;
     uint32_t parent_indx;
     uint64_t left_child_id;
     uint64_t left_child_gen;
-    uint8_t old_nodes_size;
-    uint8_t new_nodes_size;
+    uint8_t num_old_nodes;
+    uint8_t num_new_nodes;
     uint8_t new_key_size;
     int64_t cp_cnt;
+} __attribute__((__packed__));
+#endif
+
+#if 0
+struct btree_journal_data {
+    static btree_journal_entry* make(journal_op op) {
+        size_t size = std::max(
+            alloc_increment,
+            (sizeof(btree_journal_entry_hdr) +
+             (HS_DYNAMIC_CONFIG(btree->max_nodes_to_rebalance) * btree_journal_entry_hdr::estimated_info_size)));
+
+        btree_journal_data* entry = (btree_journal_data*)malloc(size);
+        entry->op = op;
+        entry->is_root = false;
+        entry->actual_size = sizeof(btree_journal_entry_hdr);
+        return entry;
+    }
+
+    btree_journal_entry_hdr btree_journal_entry_hdr* header() const { return &hdr; }
+
+    uint64_t* reserve_old_nodes_list(uint8_t size) {
+        hdr.old_nodes_size = size;
+        return old_node_area();
+    }
+
+    std::pair< uint64_t*, uint32_t > old_nodes_list() const {
+        return std::make_pair((uint64_t*)old_node_area(), hdr.old_nodes_size);
+    }
+
+    std::pair< uint64_t*, uint32_t > new_nodes_list() const {
+        return std::make_pair((uint64_t*)new_node_area(), hdr.new_nodes_size);
+    }
+
+    std::pair< uint64_t*, uint32_t > new_node_gen() const {
+        return std::make_pair((uint64_t*)new_node_area(), hdr.new_nodes_size);
+    }
+
+    std::pair< uint8_t*, uint32_t > new_keys() const { return std::make_pair(new_key_area(), hdr.new_key_size); }
+
+private:
+    btree_journal_entry() {}
+    uint8_t* data_area() const { return ((uint8_t*)this + sizeof(btree_journal_entry_hdr)); }
+    uint8_t* old_node_area() const { return data_area(); }
+    uint8_t* new_node_area() const { return old_node_area() + (sizeof(uint64_t) * hdr.old_nodes_size); }
+    uint8_t* new_node_gen_area() const { return new_node_area() + (sizeof(uint64_t) * hdr.new_nodes_size); }
+    uint8_t* new_key_area() const { return new_node_gen_area() + (sizeof(uint64_t) * hdr.new_nodes_size); }
 } __attribute__((__packed__));
 
 struct btree_journal_entry {
@@ -153,36 +314,6 @@ struct btree_journal_entry {
         return (std::make_pair(key, hdr->new_key_size));
     }
 } __attribute__((__packed__));
-
-#if 0
-struct uint48_t {
-    uint64_t m_x : 48;
-
-    uint48_t() { m_x = 0; }
-    uint48_t(uint64_t x) { m_x = x; }
-    uint48_t(const int& x) { m_x = x; }
-    uint48_t(uint8_t* mem) { m_x = (uint64_t)mem; }
-    uint48_t(const uint48_t& other) { m_x = other.m_x; }
-
-    uint48_t& operator=(const uint48_t& other) {
-        m_x = other.m_x;
-        return *this;
-    }
-
-    uint48_t& operator=(const uint64_t& x) {
-        m_x = x;
-        return *this;
-    }
-
-    uint48_t& operator=(const int& x) {
-        m_x = (uint64_t)x;
-        return *this;
-    }
-
-    bool operator==(const uint48_t& other) const { return (m_x == other.m_x); }
-    bool operator!=(const uint48_t& other) const { return (m_x != other.m_x); }
-    uint64_t to_integer() { return m_x; }
-} __attribute__((packed));
 #endif
 
 namespace homeds {
@@ -195,6 +326,7 @@ constexpr uint64_t set_bits() {
     return (NBits == 64) ? -1ULL : ((static_cast< uint64_t >(1) << NBits) - 1);
 }
 
+#if 0
 struct bnodeid {
     uint64_t m_id : 63; // TODO: We can reduce this if needbe later.
     uint64_t m_pc_gen_flag : 1;
@@ -219,69 +351,16 @@ struct bnodeid {
     static bnodeid empty_bnodeid() { return bnodeid(); }
     uint64_t get_int() { return (m_id << 63 | 1); };
 } __attribute__((packed));
+#endif
 
-typedef bnodeid bnodeid_t;
 struct btree_super_block {
-    bnodeid root_node;
+    bnodeid_t root_node;
     uint32_t journal_id;
 } __attribute((packed));
 
-#if 0
-struct bnodeid {
-    uint48_t m_id;
-    uint8_t m_pc_gen_flag:1;//parent child gen flag used to recover from split and merge
-    
-    bnodeid() {m_id=0;m_pc_gen_flag=0;}
-    bnodeid(const uint48_t &m_id, bool pc_gen_flag) : m_id(m_id), m_pc_gen_flag(pc_gen_flag?1:0) {}
-    bnodeid(uint64_t m_id, bool pc_gen_flag) : m_id(m_id), m_pc_gen_flag(pc_gen_flag?1:0) {}
+ENUM(btree_store_type, uint32_t, MEM_BTREE, SSD_BTREE);
 
-    bnodeid(const bnodeid &other) {
-        m_id = other.m_id;
-        m_pc_gen_flag = other.get_pc_gen_flag()?1:0;
-    }
-    
-    uint48_t get_id()  {
-        return m_id;
-    }
-
-    bool operator==(const bnodeid &other) const {
-        return (m_id == other.m_id && m_pc_gen_flag == other.m_pc_gen_flag);
-    }
-
-    void set_id(const uint48_t &id) {
-        m_id = id;
-    }
-    
-    void set_pc_gen_flag(bool pc_gen_flag) {
-        m_pc_gen_flag = pc_gen_flag?1:0;
-    }
-    
-    bool get_pc_gen_flag() const{
-        return m_pc_gen_flag;
-    }
-    
-    std::string to_string() {
-        std::stringstream ss;
-        std::string temp="0";
-        if(m_pc_gen_flag==1)
-            temp="1";
-        ss<< " Id:"<<m_id.m_x <<",pcgen:"<< temp;
-        return ss.str();
-    }
-    
-    bool is_invalidate_id() {
-        bnodeid temp(-1,0);
-        if(this->m_id.m_x == temp.m_id.m_x)return true;
-        else return false;
-    }
-    
-}__attribute__((packed));
-
-#endif
-
-ENUM(btree_store_type, uint32_t, MEM_BTREE, SSD_BTREE)
-
-ENUM(btree_node_type, uint32_t, SIMPLE, VAR_VALUE, VAR_KEY, VAR_OBJECT, PREFIX, COMPACT)
+ENUM(btree_node_type, uint32_t, SIMPLE, VAR_VALUE, VAR_KEY, VAR_OBJECT, PREFIX, COMPACT);
 
 #if 0
 enum MatchType { NO_MATCH = 0, FULL_MATCH, SUBSET_MATCH, SUPERSET_MATCH, PARTIAL_MATCH_LEFT, PARTIAL_MATCH_RIGHT };
@@ -292,7 +371,7 @@ ENUM(btree_put_type, uint16_t,
      REPLACE_ONLY_IF_EXISTS,    // Upsert
      REPLACE_IF_EXISTS_ELSE_INSERT,
      APPEND_ONLY_IF_EXISTS, // Update
-     APPEND_IF_EXISTS_ELSE_INSERT)
+     APPEND_IF_EXISTS_ELSE_INSERT);
 
 class BtreeSearchRange;
 
@@ -310,12 +389,12 @@ public:
     /* Applicable only for extent keys. It compare start key of (*other) with end key of (*this) */
     virtual int compare_start(const BtreeKey* other) const { return compare(other); };
     virtual int compare_range(const BtreeSearchRange& range) const = 0;
-    virtual homeds::blob get_blob() const = 0;
-    virtual void set_blob(const homeds::blob& b) = 0;
-    virtual void copy_blob(const homeds::blob& b) = 0;
+    virtual sisl::blob get_blob() const = 0;
+    virtual void set_blob(const sisl::blob& b) = 0;
+    virtual void copy_blob(const sisl::blob& b) = 0;
 
     /* Applicable to extent keys. It doesn't copy the entire blob. Copy only the end key of the blob */
-    virtual void copy_end_key_blob(const homeds::blob& b) { copy_blob(b); };
+    virtual void copy_end_key_blob(const sisl::blob& b) { copy_blob(b); };
 
     virtual uint32_t get_blob_size() const = 0;
     virtual void set_blob_size(uint32_t size) = 0;
@@ -415,7 +494,7 @@ public:
     virtual bool preceeds(const BtreeKey* other) const = 0;
     virtual bool succeeds(const BtreeKey* other) const = 0;
 
-    virtual void copy_end_key_blob(const homeds::blob& b) override = 0;
+    virtual void copy_end_key_blob(const sisl::blob& b) override = 0;
 
     /* we always compare the end key in case of extent */
     virtual int compare(const BtreeKey* other) const override { return (compare_end(other)); }
@@ -434,9 +513,9 @@ public:
     // BtreeValue(const BtreeValue& other) = delete; // Deleting copy constructor forces the derived class to define its
     // own copy constructor
 
-    virtual homeds::blob get_blob() const = 0;
-    virtual void set_blob(const homeds::blob& b) = 0;
-    virtual void copy_blob(const homeds::blob& b) = 0;
+    virtual sisl::blob get_blob() const = 0;
+    virtual void set_blob(const sisl::blob& b) = 0;
+    virtual void copy_blob(const sisl::blob& b) = 0;
     virtual void append_blob(const BtreeValue& new_val, BtreeValue& existing_val) = 0;
 
     virtual uint32_t get_blob_size() const = 0;
@@ -642,31 +721,30 @@ public:
 
 class BtreeNodeInfo : public BtreeValue {
 private:
-    bnodeid m_bnodeid;
+    bnodeid_t m_bnodeid;
 
 public:
-    BtreeNodeInfo() : m_bnodeid(bnodeid::empty_bnodeid()) {}
-
-    explicit BtreeNodeInfo(const bnodeid& id) : m_bnodeid(id) {}
+    BtreeNodeInfo() : BtreeNodeInfo(empty_bnodeid) {}
+    explicit BtreeNodeInfo(const bnodeid_t& id) : m_bnodeid(id) {}
     BtreeNodeInfo& operator=(const BtreeNodeInfo& other) = default;
 
-    bnodeid bnode_id() const { return m_bnodeid; }
-    void set_bnode_id(bnodeid bid) { m_bnodeid = bid; }
-    bool has_valid_bnode_id() const { return (m_bnodeid.is_valid()); }
+    bnodeid_t bnode_id() const { return m_bnodeid; }
+    void set_bnode_id(bnodeid_t bid) { m_bnodeid = bid; }
+    bool has_valid_bnode_id() const { return (m_bnodeid != empty_bnodeid); }
 
-    homeds::blob get_blob() const override {
-        homeds::blob b;
+    sisl::blob get_blob() const override {
+        sisl::blob b;
         b.size = sizeof(bnodeid_t);
         b.bytes = (uint8_t*)&m_bnodeid;
         return b;
     }
 
-    void set_blob(const homeds::blob& b) override {
+    void set_blob(const sisl::blob& b) override {
         DEBUG_ASSERT_EQ(b.size, sizeof(bnodeid_t));
         m_bnodeid = *(bnodeid_t*)b.bytes;
     }
 
-    void copy_blob(const homeds::blob& b) override { set_blob(b); }
+    void copy_blob(const sisl::blob& b) override { set_blob(b); }
 
     void append_blob(const BtreeValue& new_val, BtreeValue& existing_val) override { set_blob(new_val.get_blob()); }
 
@@ -679,14 +757,10 @@ public:
     void set_blob_size(uint32_t size) override {}
     uint32_t estimate_size_after_append(const BtreeValue& new_val) override { return sizeof(bnodeid_t); }
 
-    std::string to_string() const override {
-        std::stringstream ss;
-        ss << m_bnodeid << ", isValidId:" << has_valid_bnode_id();
-        return ss.str();
-    }
+    std::string to_string() const override { return fmt::format("{}", m_bnodeid); }
 
     friend std::ostream& operator<<(std::ostream& os, const BtreeNodeInfo& b) {
-        os << b.m_bnodeid << ", isValidPtr: " << b.has_valid_bnode_id();
+        os << b.m_bnodeid;
         return os;
     }
 };
@@ -695,16 +769,16 @@ class EmptyClass : public BtreeValue {
 public:
     EmptyClass() {}
 
-    homeds::blob get_blob() const override {
-        homeds::blob b;
+    sisl::blob get_blob() const override {
+        sisl::blob b;
         b.size = 0;
         b.bytes = (uint8_t*)this;
         return b;
     }
 
-    void set_blob(const homeds::blob& b) override {}
+    void set_blob(const sisl::blob& b) override {}
 
-    void copy_blob(const homeds::blob& b) override {}
+    void copy_blob(const sisl::blob& b) override {}
 
     void append_blob(const BtreeValue& new_val, BtreeValue& existing_val) override {}
 
@@ -859,95 +933,6 @@ std::atomic< bool > BtreeNodeAllocator< NodeSize, CacheCount >::bt_node_allocato
 template < size_t NodeSize, size_t CacheCount >
 std::unique_ptr< BtreeNodeAllocator< NodeSize, CacheCount > >
     BtreeNodeAllocator< NodeSize, CacheCount >::bt_node_allocator = nullptr;
-
-#if 0
-#define MIN_NODE_SIZE 8192
-#define MAX_NODE_SIZE 8192
-
-class BtreeNodeAllocator
-{
-public:
-    static constexpr uint32_t get_bucket_size(uint32_t count) {
-        uint32_t result = MIN_NODE_SIZE;
-        for (auto i = 0; i < count; i++) {
-            result *= MIN_NODE_SIZE;
-        }
-        return result;
-    }
-
-    static constexpr uint32_t get_nbuckets() {
-        return std::log2(MAX_NODE_SIZE) - std::log2(MIN_NODE_SIZE) + 1;
-    }
-
-    BtreeNodeAllocator() {
-        m_allocators.reserve(get_nbuckets());
-        for (auto i = 0U; i < get_nbuckets(); i++) {
-            auto *allocator = new sisl::FreeListAllocator< FREELIST_CACHE_COUNT, get_bucket_size(i)>();
-            m_allocators.push_back((void *)allocator);
-        }
-        // Allocate a default tail allocator for non-confirming sizes
-        auto *allocator = new sisl::FreeListAllocator< FREELIST_CACHE_COUNT, 0>();
-        m_allocators.push_back((void *)allocator);
-    }
-
-    ~BtreeNodeAllocator() {
-        for (auto i = 0U; i < get_nbuckets(); i++) {
-            auto *allocator = (sisl::FreeListAllocator< FREELIST_CACHE_COUNT, get_bucket_size(i)> *)m_allocators[i];
-            delete(allocator);
-        }
-        // Allocate a default tail allocator for non-confirming sizes
-        auto *allocator = (sisl::FreeListAllocator< FREELIST_CACHE_COUNT, 0> *)m_allocators[m_allocators.size()-1];
-        delete(allocator);
-    }
-
-    static BtreeNodeAllocator *create() {
-        bool initialized = bt_node_allocator_initialized.load(std::memory_order_acquire);
-        if (!initialized) {
-            std::unique_ptr< BtreeNodeAllocator > allocator = std::make_unique< BtreeNodeAllocator >();
-            if (bt_node_allocator_initialized.compare_exchange_strong(initialized, true, std::memory_order_acq_rel)) {
-                bt_node_allocator = std::move(allocator);
-            }
-        }
-        return bt_node_allocator.get();
-    }
-
-    static uint8_t *allocate(uint32_t size_needed)  {
-        uint32_t nbucket = (size_needed - 1)/MIN_NODE_SIZE + 1;
-        if (sisl_unlikely(m_impl.get() == nullptr)) {
-            m_impl.reset(new FreeListAllocatorImpl< MaxListCount, Size >());
-        }
-
-        return (m_impl->allocate(size_needed));
-    }
-
-    static void deallocate(T *mem) {
-        mem->~T();
-        get_obj_allocator()->m_allocator->deallocate((uint8_t *)mem, sizeof(T));
-    }
-
-    static std::atomic< bool > bt_node_allocator_initialized;
-    static std::unique_ptr< BtreeNodeAllocator > bt_node_allocator;
-
-private:
-    sisl::FreeListAllocator< FREELIST_CACHE_COUNT, sizeof(T) > *get_freelist_allocator() {
-        return m_allocator.get();
-    }
-
-private:
-    std::vector< void * > m_allocators;
-
-    static ObjectAllocator< T, CacheCount > *get_obj_allocator() {
-        if (sisl_unlikely((obj_allocator == nullptr))) {
-            obj_allocator = std::make_unique< ObjectAllocator< T, CacheCount > >();
-        }
-        return obj_allocator.get();
-    }
-};
-
-
-std::atomic< bool > BtreeNodeAllocator::bt_node_allocator_initialized(false);
-std::unique_ptr< BtreeNodeAllocator > BtreeNodeAllocator::bt_node_allocator = nullptr;
-#endif
 
 } // namespace btree
 } // namespace homeds

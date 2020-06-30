@@ -33,8 +33,8 @@ struct BlkId {
 
     static uint64_t constexpr max_blks_in_op() { return (uint64_t)(sisl::pow(2, NBLKS_BITS)); }
 
-    static homeds::blob get_blob(const BlkId& id) {
-        homeds::blob b;
+    static sisl::blob get_blob(const BlkId& id) {
+        sisl::blob b;
         b.bytes = (uint8_t*)&id;
         b.size = BLKID_SIZE;
 
@@ -176,7 +176,7 @@ struct SingleBlk {
         return m_mem;
     }
 
-    void set_mem(homeds::blob b) {
+    void set_mem(sisl::blob b) {
         m_mem.set_piece(b);
     }
 

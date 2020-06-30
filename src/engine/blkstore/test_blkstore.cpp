@@ -75,7 +75,7 @@ int main(int argc, char** argv) {
     // char bufs[100][8192];
     for (auto i = 0; i < 100; i++) {
         // memset(bufs[i], i, 8192);
-        // homeds::blob b = {(uint8_t *)&bufs[i], 8192};
+        // sisl::blob b = {(uint8_t *)&bufs[i], 8192};
 
         // boost::intrusive_ptr< BlkBuffer > bbuf = blk_store->write(bids[i], b);
         blk_store->write(bids[i], bbufs[i]);

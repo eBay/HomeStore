@@ -89,10 +89,10 @@ public:
             init_checksum();
             set_leaf(true);
             set_total_entries(0);
-            set_next_bnode(bnodeid_t::empty_bnodeid());
+            set_next_bnode(empty_bnodeid);
             set_gen(0);
             set_valid_node(true);
-            set_edge_id(bnodeid_t::empty_bnodeid());
+            set_edge_id(empty_bnodeid);
             set_node_id(*id);
         } else {
             assert(get_node_id() == *id);
@@ -106,10 +106,10 @@ public:
             init_checksum();
             set_leaf(true);
             set_total_entries(0);
-            set_next_bnode(bnodeid_t::empty_bnodeid());
+            set_next_bnode(empty_bnodeid);
             set_gen(0);
             set_valid_node(true);
-            set_edge_id(bnodeid_t::empty_bnodeid());
+            set_edge_id(empty_bnodeid);
             set_node_id(id);
         } else {
             assert(get_node_id() == id);
@@ -177,8 +177,6 @@ public:
 
     bnodeid_t get_node_id() const { return m_pers_header.node_id; }
 
-    uint64_t get_node_id_int() const { return m_pers_header.node_id.m_id; }
-
     bool is_leaf() const {
         return m_pers_header.leaf;
         // return get_persistent_header()->leaf;
@@ -203,10 +201,12 @@ public:
         assert(get_magic() == MAGICAL_VALUE);
     }
 
+#if 0
     void flip_pc_gen_flag() {
         get_persistent_header()->node_id.m_pc_gen_flag = get_persistent_header()->node_id.m_pc_gen_flag ? 0 : 1;
         assert(get_magic() == MAGICAL_VALUE);
     }
+#endif
 
     void set_gen(uint64_t g) {
         get_persistent_header()->node_gen = g;
@@ -347,7 +347,7 @@ public:
 
         if (is_leaf()) {
             /* Decrement the end indx if range doesn't overlap with the start of key at end indx */
-            homeds::blob blob;
+            sisl::blob blob;
             K key;
             to_variant_node()->get_nth_key(end_ind, &key, false);
 
@@ -462,7 +462,7 @@ public:
 
     //////////// Edge Related Methods ///////////////
     void invalidate_edge() {
-        set_edge_id(bnodeid::empty_bnodeid());
+        set_edge_id(empty_bnodeid);
         assert(get_magic() == MAGICAL_VALUE);
     }
 
@@ -479,8 +479,7 @@ public:
 
     bool has_valid_edge() const {
         if (is_leaf()) { return false; }
-
-        return (get_edge_id().is_valid());
+        return (get_edge_id() != empty_bnodeid);
     }
 
     void get_adjacent_indicies(uint32_t cur_ind, vector< int >& indices_list, uint32_t max_indices) const {

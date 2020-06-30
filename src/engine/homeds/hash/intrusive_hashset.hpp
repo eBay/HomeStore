@@ -27,7 +27,7 @@ namespace homeds {
 #define hash_write_lock() lock(false)
 #define hash_write_unlock() unlock(false)
 
-[[maybe_unused]] static uint64_t compute_hash_code(homeds::blob b) {
+[[maybe_unused]] static uint64_t compute_hash_code(sisl::blob b) {
     return util::Hash64((const char*)b.bytes, (size_t)b.size);
 }
 

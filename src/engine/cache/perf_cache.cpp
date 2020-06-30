@@ -30,8 +30,8 @@ using namespace std;
 #define MAX_CACHE_SIZE 2 * 1024 * 1024
 
 struct blk_id {
-    static homeds::blob get_blob(const blk_id& id) {
-        homeds::blob b;
+    static sisl::blob get_blob(const blk_id& id) {
+        sisl::blob b;
         b.bytes = (uint8_t*)&id.m_id;
         b.size = sizeof(uint64_t);
 
@@ -114,7 +114,7 @@ void test_reads(benchmark::State& state) {
 #ifndef NDEBUG
             assert(found);
             int id;
-            homeds::blob b;
+            sisl::blob b;
             cbuf->get(&b);
             sscanf((const char *)b.bytes, "Content for blk id = %d\n", &id);
             assert(id == glob_ids[i]->m_internal_id);

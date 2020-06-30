@@ -180,14 +180,14 @@ template < typename K >
 Cache< K >::~Cache() {}
 
 template < typename K >
-bool Cache< K >::upsert(const K& k, const homeds::blob& b, boost::intrusive_ptr< CacheBuffer< K > >* out_smart_buf) {
+bool Cache< K >::upsert(const K& k, const sisl::blob& b, boost::intrusive_ptr< CacheBuffer< K > >* out_smart_buf) {
     // TODO: Not supported yet
     HS_ASSERT(DEBUG, 0, "Not Supported yet!");
     return false;
 }
 
 template < typename K >
-bool Cache< K >::insert(const K& k, const homeds::blob& b, uint32_t value_offset,
+bool Cache< K >::insert(const K& k, const sisl::blob& b, uint32_t value_offset,
                         boost::intrusive_ptr< CacheBuffer< K > >* out_smart_buf, const auto& found_cb) {
     // Allocate a new Cachebuffer and set the blob address to it.
     auto cbuf = sisl::ObjectAllocator< CacheBuffer< K > >::make_object(k, b, this, value_offset);
@@ -229,7 +229,7 @@ bool Cache< K >::insert_missing_pieces(const boost::intrusive_ptr< CacheBuffer< 
 }
 
 template < typename K >
-auto Cache< K >::update(const K& k, const homeds::blob& b, uint32_t value_offset,
+auto Cache< K >::update(const K& k, const sisl::blob& b, uint32_t value_offset,
                         boost::intrusive_ptr< CacheBuffer< K > >* out_smart_buf) {
     struct {
         bool key_found_already;

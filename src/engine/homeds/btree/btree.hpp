@@ -86,6 +86,7 @@ private:
     ////////////////// Implementation /////////////////////////
 public:
     btree_super_block get_btree_sb() { return m_sb; }
+    const btree_cp_superblock& get_last_cp_cb() const { return m_last_cp_sb; }
 
     /**
      * @brief : return the btree cfg
@@ -141,12 +142,13 @@ public:
 #endif
 
     static btree_t* create_btree(BtreeConfig& cfg) {
-        auto impl_ptr = btree_store_t::init_btree(cfg);
         Btree* bt = new Btree(cfg);
+        auto impl_ptr = btree_store_t::init_btree(bt, cfg);
         bt->m_btree_store = std::move(impl_ptr);
         btree_status_t ret = bt->init();
         if (ret != btree_status_t::success) {
             LOGERROR("btree create failed. error {} name {}", ret, cfg.get_name());
+            delete (bt);
             return nullptr;
         }
 
@@ -156,8 +158,8 @@ public:
     }
 
     static btree_t* create_btree(btree_super_block& btree_sb, BtreeConfig& cfg, btree_cp_superblock* cp_sb) {
-        auto impl_ptr = btree_store_t::init_btree(cfg);
         Btree* bt = new Btree(cfg);
+        auto impl_ptr = btree_store_t::init_btree(bt, cfg);
         bt->m_btree_store = std::move(impl_ptr);
         bt->init_recovery(btree_sb, cp_sb);
         LOGINFO("btree recovered and created {} node size {}", cfg.get_name(), cfg.get_node_size());
@@ -246,7 +248,7 @@ public:
             BtreeNodeInfo child_info;
             while (i <= node->get_total_entries()) {
                 if (i == node->get_total_entries()) {
-                    if (!(node->get_edge_id().is_valid())) { break; }
+                    if (!node->has_valid_edge()) { break; }
                     child_info.set_bnode_id(node->get_edge_id());
                 } else {
                     node->get(i, &child_info, false /* copy */);
@@ -561,7 +563,7 @@ public:
                 THIS_BT_LOG(DEBUG, base, root, "entry not found in btree");
                 goto out;
             }
-            BT_LOG_ASSERT(root->get_edge_id().is_valid(), root, "Invalid edge id");
+            BT_LOG_ASSERT(root->has_valid_edge(), root, "Invalid edge id");
             unlock_node(root, acq_lock);
             m_btree_lock.unlock();
 
@@ -729,7 +731,6 @@ public:
     }
 
     void merge(Btree* other, match_item_cb_update_t< K, V > merge_cb) {
-
         std::vector< pair< K, V > > other_kvs;
 
         other->get_all_kvs(&other_kvs);
@@ -850,7 +851,7 @@ private:
             }
         }
 
-        if (my_node->get_edge_id().is_valid()) {
+        if (my_node->has_valid_edge()) {
             success = verify_node(my_node->get_edge_id(), my_node, my_node->get_total_entries());
             if (!success) { goto exit_on_error; }
         }
@@ -876,7 +877,7 @@ private:
                 to_string(p.bnode_id(), ss);
                 i++;
             }
-            if (node->get_edge_id().is_valid()) to_string(node->get_edge_id(), ss);
+            if (node->has_valid_edge()) to_string(node->get_edge_id(), ss);
         }
         unlock_node(node, acq_lock);
     }
@@ -903,7 +904,7 @@ private:
         if (node->is_leaf()) {
             BtreeNodePtr next_node = nullptr;
             leaves->push_back(node);
-            while (node->get_next_bnode().is_valid()) {
+            while (node->get_next_bnode() != empty_bnodeid) {
                 auto ret =
                     read_and_lock_sibling(node->get_next_bnode(), next_node, LOCKTYPE_READ, LOCKTYPE_READ, nullptr);
                 unlock_node(node, LOCKTYPE_READ);
@@ -1018,7 +1019,7 @@ private:
                     count += cur_count;
                 }
 
-                if ((count < query_req.get_batch_size()) && my_node->get_next_bnode().is_valid()) {
+                if ((count < query_req.get_batch_size()) && (my_node->get_next_bnode() != empty_bnodeid)) {
                     ret = read_and_lock_sibling(my_node->get_next_bnode(), next_node, LOCKTYPE_READ, LOCKTYPE_READ,
                                                 nullptr);
                     if (ret != btree_status_t::success) {
@@ -1103,11 +1104,9 @@ private:
         bool unlocked_already = false;
         int ind = -1;
 
-        if (start_ret.end_of_search_index == (int)my_node->get_total_entries() &&
-            !(my_node->get_edge_id().is_valid())) {
+        if (start_ret.end_of_search_index == (int)my_node->get_total_entries() && !(my_node->has_valid_edge())) {
             goto done; // no results found
-        } else if (end_ret.end_of_search_index == (int)my_node->get_total_entries() &&
-                   !(my_node->get_edge_id().is_valid())) {
+        } else if (end_ret.end_of_search_index == (int)my_node->get_total_entries() && !(my_node->has_valid_edge())) {
             end_ret.end_of_search_index--; // end is not valid
         }
 
@@ -1522,7 +1521,7 @@ private:
             }
         } else {
             /* it is the edge node. end key is the end of input range */
-            BT_LOG_ASSERT_CMP(my_node->get_edge_id().is_valid(), ==, true, my_node);
+            BT_LOG_ASSERT_CMP(my_node->has_valid_edge(), ==, true, my_node);
             end_key_ptr = const_cast< BtreeKey* >(bur->get_input_range().get_end_key());
             end_inc = bur->get_input_range().is_end_inclusive();
         }
@@ -1636,10 +1635,8 @@ private:
             }
 
             if (bur && child_node->is_leaf()) {
-
-                THIS_BT_LOG(DEBUG, btree_structures, my_node, "Subrange:s:{},e:{},c:{},nid:{},eidvalid?:{},sk:{},ek:{}",
-                            start_ind, end_ind, curr_ind, my_node->get_node_id().to_string(),
-                            my_node->get_edge_id().is_valid(),
+                THIS_BT_LOG(DEBUG, btree_structures, my_node, "Subrange:s:{},e:{},c:{},nid:{},edgeid:{},sk:{},ek:{}",
+                            start_ind, end_ind, curr_ind, my_node->get_node_id(), my_node->get_edge_id(),
                             bur->get_cb_param()->get_sub_range().get_start_key()->to_string(),
                             bur->get_cb_param()->get_sub_range().get_end_key()->to_string());
             }
@@ -1759,7 +1756,7 @@ private:
             BT_DEBUG_ASSERT_CMP(curlock, ==, homeds::thread::LOCKTYPE_WRITE, my_node);
 
             uint32_t node_end_indx =
-                my_node->get_edge_id().is_valid() ? my_node->get_total_entries() : my_node->get_total_entries() - 1;
+                my_node->has_valid_edge() ? my_node->get_total_entries() : my_node->get_total_entries() - 1;
             uint32_t end_ind = (ind + HS_DYNAMIC_CONFIG(btree->max_nodes_to_rebalance)) < node_end_indx
                 ? (ind + HS_DYNAMIC_CONFIG(btree->max_nodes_to_rebalance))
                 : node_end_indx;
@@ -1802,6 +1799,7 @@ private:
         // have been unlocked by the recursive function and it could also been deleted.
     }
 
+#if 0
     void write_journal_entry(journal_op op, BtreeNodePtr parent_node, uint32_t parent_indx, BtreeNodePtr left_most_node,
                              std::vector< BtreeNodePtr >& old_nodes, std::vector< BtreeNodePtr >& new_nodes,
                              const btree_cp_id_ptr& cp_id, bool is_root) {
@@ -1848,8 +1846,8 @@ private:
         }
         if (cp_id) cp_id->btree_size.fetch_add(new_nodes.size());
 
-        auto new_node_gen_pair = btree_journal_entry::get_new_node_gen(mem);
-        uint64_t* new_node_gen = new_node_gen_pair.first;
+        auto new_bt_node_gen_pair = btree_journal_entry::get_new_node_gen(mem);
+        uint64_t* new_node_gen = new_bt_node_gen_pair.first;
         for (uint32_t i = 0; i < new_nodes.size(); ++i) {
             new_node_gen[i] = new_nodes[i]->get_gen();
         }
@@ -1867,6 +1865,7 @@ private:
         }
         btree_store_t::write_journal_entry(m_btree_store.get(), cp_id, iob);
     }
+#endif
 
     btree_status_t check_split_root(const BtreeKey& k, const BtreeValue& v, btree_put_type& putType,
                                     BtreeUpdateRequest< K, V >* bur = nullptr, const btree_cp_id_ptr& cp_id = nullptr) {
@@ -1900,7 +1899,7 @@ private:
 
         THIS_BT_LOG(DEBUG, btree_structures, root,
                     "Root node is full, swapping contents with child_node {} and split that",
-                    child_node->get_node_id_int());
+                    child_node->get_node_id());
 
         BT_DEBUG_ASSERT_CMP(root->get_total_entries(), ==, 0, root);
         ret = split_node(root, child_node, root->get_total_entries(), &split_key, cp_id, true);
@@ -1932,7 +1931,7 @@ private:
             goto done;
         }
 
-        BT_DEBUG_ASSERT_CMP(root->get_edge_id().is_valid(), ==, true, root);
+        BT_DEBUG_ASSERT_CMP(root->has_valid_edge(), ==, true, root);
         child_node = read_node(root->get_edge_id());
         if (child_node == nullptr) {
             unlock_node(root, locktype::LOCKTYPE_WRITE);
@@ -1946,7 +1945,13 @@ private:
         BT_DEBUG_ASSERT_CMP(m_root_node, ==, root->get_node_id(), root);
 
         old_nodes.push_back(child_node);
-        write_journal_entry(journal_op::BTREE_MERGE, root, 0, child_node, old_nodes, new_nodes, cp_id, true);
+
+        if (BtreeStoreType == btree_store_type::SSD_BTREE) {
+            auto j_iob = btree_store_t::make_journal_entry(journal_op::BTREE_MERGE, true /* is_root */);
+            btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::inplace_write, root, false);
+            btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::removal, child_node, false);
+            btree_store_t::write_journal_entry(m_btree_store.get(), cp_id, j_iob);
+        }
         unlock_node(root, locktype::LOCKTYPE_WRITE);
         free_node(child_node, false, cp_id);
 
@@ -2001,15 +2006,16 @@ private:
         BT_DEBUG_ASSERT_CMP(split_key.compare(out_split_key), >, 0, child_node2);
 #endif
         THIS_BT_LOG(DEBUG, btree_structures, parent_node, "Split child_node={} with new_child_node={}, split_key={}",
-                    child_node1->get_node_id_int(), child_node2->get_node_id_int(), out_split_key->to_string());
+                    child_node1->get_node_id(), child_node2->get_node_id(), out_split_key->to_string());
 
-        std::vector< BtreeNodePtr > old_nodes;
-        std::vector< BtreeNodePtr > new_nodes;
-        if (root_split) { new_nodes.push_back(child_node1); }
-        new_nodes.push_back(child_node2);
+        if (BtreeStoreType == btree_store_type::SSD_BTREE) {
+            auto j_iob = btree_store_t::make_journal_entry(journal_op::BTREE_SPLIT, root_split,
+                                                           {parent_node->get_node_id(), parent_node->get_gen()});
+            btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::inplace_write, child_node1, true);
+            btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::creation, child_node2, false);
+            btree_store_t::write_journal_entry(m_btree_store.get(), cp_id, j_iob);
+        }
 
-        write_journal_entry(journal_op::BTREE_SPLIT, parent_node, parent_ind, child_node1, old_nodes, new_nodes, cp_id,
-                            root_split);
         // we write right child node, than left and than parent child
         write_node(child_node2, nullptr, cp_id);
         write_node(child_node1, child_node2, cp_id);
@@ -2020,9 +2026,81 @@ private:
         return ret;
     }
 
+    btree_status_t split_node_replay(btree_journal_entry* jentry, const btree_cp_id_ptr& cp_id) {
+        BtreeNodePtr parent_node = (jentry->is_root) ? read_node(m_root_node) : read_node(jentry->parent_node.node_id);
+
+        // Parent already went ahead of the journal entry, return done
+        if (parent_node->get_gen() >= jentry->parent_node.node_gen) { return btree_status_t::replay_not_needed; }
+
+        // Read the first inplace write node which is the leftmost child and also form child split key from journal
+        auto child_node1_jinfo = jentry->leftmost_node();
+        auto child_node1 = read_node(child_node1_jinfo->node_info.node_id);
+        BtreeNodePtr child_node2;
+        K child1_key;
+        child1_key.set_blob({child_node1_jinfo->key_area(), child_node1_jinfo->key_size});
+
+        if (jentry->is_root) {
+            // If root is not written yet, parent_node will be pointing child_node1, so create a new parent_node to be
+            // treated as root here on.
+            assert(child_node1_jinfo->node_info.node_id == m_root_node);
+            auto new_parent_node = alloc_interior_node();
+            btree_store_t::swap_node(m_btree_store.get(), parent_node, new_parent_node);
+        }
+
+        // Check if child1 is ahead of the generation
+        if (child_node1->get_gen() < child_node1_jinfo->node_info.node_gen) {
+            auto child_node2_jinfo = jentry->get_nodes(bt_journal_node_op::creation)[0];
+
+            child_node2 = child_node1->is_leaf() ? alloc_leaf_node() : alloc_interior_node();
+            if (child_node2 == nullptr) { return (btree_status_t::space_not_avail); }
+
+            // We need to do split based on entries since the left children is also not written yet.
+            // Find the split key within the child_node1. It is not always found, so we split upto that.
+            auto ret = child_node1->find(child1_key, nullptr, false);
+            auto ind = ret.found ? ret.end_of_search_index + 1 : ret.end_of_search_index;
+            child_node1->move_out_to_right_by_entries(m_btree_cfg, child_node2, child_node1->get_total_entries() - ind);
+
+            child_node2->set_next_bnode(child_node1->get_next_bnode());
+            child_node2->set_gen(child_node2_jinfo->node_info.node_gen);
+
+            child_node1->set_next_bnode(child_node2->get_node_id());
+            child_node1->set_gen(child_node1_jinfo->node_info.node_gen);
+
+            write_node(child_node2, nullptr, cp_id);
+            write_node(child_node1, child_node2, cp_id);
+        } else {
+            // leftmost_node is written, so right node must be written as well.
+            child_node2 = read_node(child_node1->get_next_bnode());
+#ifndef NDEBUG
+            auto child_node2_jinfo = jentry->get_nodes(bt_journal_node_op::creation)[0];
+            assert(child_node2->get_gen() >= child_node2_jinfo->node_info.node_gen);
+#endif
+        }
+
+        // Last key of node2 naturally forms the node2
+        K child2_key;
+        child_node2->get_last_key(&child2_key);
+
+#ifndef NDEBUG
+        // TODO: Validate 2nd child is empty in parent_node
+#endif
+
+        // Upsert the 1st child key
+        V temp_v;
+        parent_node->put(child1_key, BtreeNodeInfo(child_node1->get_node_id()),
+                         btree_put_type::REPLACE_IF_EXISTS_ELSE_INSERT, temp_v);
+
+        // Insert 2nd child into parent.
+        parent_node->insert(child2_key, BtreeNodeInfo(child_node2->get_node_id()));
+        parent_node->set_gen(jentry->parent_node.node_gen);
+
+        // Write the parent node
+        write_node(parent_node, child_node1, cp_id);
+        return btree_status_t::success;
+    }
+
     btree_status_t merge_nodes(const BtreeNodePtr& parent_node, uint32_t start_indx, uint32_t end_indx,
                                const btree_cp_id_ptr& cp_id) {
-
         btree_status_t ret = btree_status_t::merge_failed;
         std::vector< BtreeNodePtr > child_nodes;
         std::vector< BtreeNodePtr > old_nodes;
@@ -2043,12 +2121,10 @@ private:
         K new_last_debug_ckey;
         BtreeNodePtr last_node;
 #endif
-
         /* Try to take a lock on all nodes participating in merge*/
         for (auto indx = start_indx; indx <= end_indx; ++indx) {
-
             if (indx == parent_node->get_total_entries()) {
-                BT_LOG_ASSERT(parent_node->get_edge_id().is_valid(), parent_node,
+                BT_LOG_ASSERT(parent_node->has_valid_edge(), parent_node,
                               "Assertion failure, expected valid edge for parent_node: {}");
             }
 
@@ -2071,7 +2147,6 @@ private:
                     goto out;
                 }
             } else {
-
                 bool is_allocated = true;
                 /* pre allocate the new nodes. We will free the nodes which are not in use later */
                 auto new_node = btree_store_t::alloc_node(m_btree_store.get(), child->is_leaf(), is_allocated, child);
@@ -2151,8 +2226,18 @@ private:
         if ((parent_insert_indx) <= end_indx) { parent_node->remove(parent_insert_indx, end_indx); }
 
         /* write the journal entry */
-        write_journal_entry(journal_op::BTREE_MERGE, parent_node, start_indx, left_most_node, old_nodes, replace_nodes,
-                            cp_id, false);
+        if (BtreeStoreType == btree_store_type::SSD_BTREE) {
+            auto j_iob = btree_store_t::make_journal_entry(journal_op::BTREE_MERGE, false /* is_root */,
+                                                           {parent_node->get_node_id(), parent_node->get_gen()});
+            btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::inplace_write, left_most_node, true);
+            for (auto& node : old_nodes) {
+                btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::removal, node, true);
+            }
+            for (auto& node : replace_nodes) {
+                btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::creation, node, false);
+            }
+            btree_store_t::write_journal_entry(m_btree_store.get(), cp_id, j_iob);
+        }
 
         if (replace_nodes.size() > 0) {
             /* write the right most node */
@@ -2225,6 +2310,15 @@ private:
         return ret;
     }
 
+#if 0
+    btree_status_t merge_node_replay(btree_journal_entry* jentry, const btree_cp_id_ptr& cp_id) {
+        BtreeNodePtr parent_node = (jentry->is_root) ? read_node(m_root_node) : read_node(jentry->parent_node.node_id);
+
+        // Parent already went ahead of the journal entry, return done
+        if (parent_node->get_gen() >= jentry->parent_node.node_gen) { return btree_status_t::replay_not_needed; }
+    }
+#endif
+
 #ifndef NDEBUG
     void validate_sanity_child(const BtreeNodePtr& parent_node, uint32_t ind) {
         BtreeNodeInfo child_info;
@@ -2235,12 +2329,12 @@ private:
         auto child_node = read_node(child_info.bnode_id());
         if (child_node->get_total_entries() == 0) {
             auto parent_entries = parent_node->get_total_entries();
-            assert((parent_node->get_edge_id().is_valid() && ind == parent_entries) || (ind = parent_entries - 1));
+            assert((parent_node->has_valid_edge() && ind == parent_entries) || (ind = parent_entries - 1));
             return;
         }
         child_node->get_first_key(&child_key);
         if (ind == parent_node->get_total_entries()) {
-            assert(parent_node->get_edge_id().is_valid());
+            assert(parent_node->has_valid_edge());
             if (ind > 0) {
                 parent_node->get_nth_key(ind - 1, &parent_key, false);
                 assert(child_key.compare(&parent_key) > 0);
@@ -2256,7 +2350,7 @@ private:
         K child_key;
         K parent_key;
 
-        if (parent_node->get_edge_id().is_valid()) {
+        if (parent_node->has_valid_edge()) {
             if (ind == parent_node->get_total_entries()) { return; }
         } else {
             if (ind == parent_node->get_total_entries() - 1) { return; }
@@ -2562,11 +2656,13 @@ protected:
         if (root == nullptr) { return (btree_status_t::space_not_avail); }
         m_root_node = root->get_node_id();
 
-        std::vector< BtreeNodePtr > old_nodes;
-        std::vector< BtreeNodePtr > new_nodes;
-        new_nodes.push_back(root);
         auto cp_id = attach_prepare_cp(nullptr, false, false);
-        write_journal_entry(journal_op::BTREE_CREATE, root, 0, root, old_nodes, new_nodes, cp_id, true);
+        if (BtreeStoreType == btree_store_type::SSD_BTREE) {
+            auto j_iob = btree_store_t::make_journal_entry(journal_op::BTREE_CREATE, true /* is_root */);
+            btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::creation, root, false);
+            btree_store_t::write_journal_entry(m_btree_store.get(), cp_id, j_iob);
+        }
+
         auto ret = write_node(root, nullptr, cp_id);
         m_sb.root_node = m_root_node;
         /* write an entry to the journal also */
@@ -2574,7 +2670,7 @@ protected:
     }
 
     BtreeConfig* get_config() { return &m_btree_cfg; }
-};
+}; // namespace btree
 
 // static inline const char* _type_desc(const BtreeNodePtr& n) { return n->is_leaf() ? "L" : "I"; }
 

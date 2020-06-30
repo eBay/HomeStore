@@ -261,7 +261,7 @@ private:
      * @param bid
      * @param b
      */
-    void read(BlkId& bid, homeds::blob& b);
+    void read(BlkId& bid, sisl::blob& b);
 
     void cache_clear();
 };

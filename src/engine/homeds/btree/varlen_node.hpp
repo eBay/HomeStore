@@ -112,9 +112,7 @@ public:
 #ifndef NDEBUG
         validate_sanity();
 #endif
-        if (sz == 0) {
-            return btree_status_t::insert_failed;
-        }
+        if (sz == 0) { return btree_status_t::insert_failed; }
         return btree_status_t::success;
     }
 
@@ -173,7 +171,7 @@ public:
 
         if (cur_obj_size >= new_obj_size) {
             uint8_t* val_ptr = (uint8_t*)get_nth_obj(ind) + nth_key_len;
-            homeds::blob vblob = val.get_blob();
+            sisl::blob vblob = val.get_blob();
             // we can avoid memcpy if addresses of val_ptr and vblob.bytes is same. In place update
             if (val_ptr != vblob.bytes) {
                 // TODO - we can reclaim space if new obj size is lower than cur obj size
@@ -247,14 +245,9 @@ public:
         std::stringstream ss;
         ss << "###################" << endl;
         ss << "-------------------------------" << endl;
-        ss << "id=" << this->get_node_id().to_string() << " nEntries=" << this->get_total_entries()
-           << " leaf?=" << this->is_leaf();
+        ss << "id=" << this->get_node_id() << " nEntries=" << this->get_total_entries() << " leaf?=" << this->is_leaf();
 
-        if (!this->is_leaf()) {
-            bnodeid_t edge_id;
-            edge_id = this->get_edge_id();
-            ss << " edge_id=" << static_cast< uint64_t >(edge_id.m_id);
-        }
+        if (!this->is_leaf()) { ss << " edge_id=" << this->get_edge_id(); }
         ss << "\n-------------------------------" << endl;
         for (uint32_t i = 0; i < this->get_total_entries(); i++) {
             ss << "Key=";
@@ -332,18 +325,16 @@ public:
         auto ind = start_ind;
         while (ind < end_ind) {
             // Get the ith key and value blob and then remove the entry from here and insert to the other node
-            homeds::blob kb;
+            sisl::blob kb;
             kb.bytes = (uint8_t*)get_nth_obj(ind);
             kb.size = get_nth_key_len(ind);
 
-            homeds::blob vb;
+            sisl::blob vb;
             vb.bytes = kb.bytes + kb.size;
             vb.size = get_nth_value_len(ind);
 
             auto sz = other.insert(0, kb, vb);
-            if (!sz) {
-                break;
-            }
+            if (!sz) { break; }
             ind--;
         }
 
@@ -371,17 +362,16 @@ public:
 
         int ind = this->get_total_entries() - 1;
         while (ind > 0) {
-            homeds::blob kb;
+            sisl::blob kb;
             kb.bytes = (uint8_t*)get_nth_obj(ind);
             kb.size = get_nth_key_len(ind);
 
-            homeds::blob vb;
+            sisl::blob vb;
             vb.bytes = kb.bytes + kb.size;
             vb.size = get_nth_value_len(ind);
 
             auto sz = other.insert(0, kb, vb); // Keep on inserting on the first index, thus moving everything to right
-            if (!sz)
-                break;
+            if (!sz) break;
             moved_size += sz;
             ind--;
             if ((kb.size + vb.size + get_record_size()) > size_to_move) {
@@ -418,18 +408,16 @@ public:
         int other_ind = 0;
         while (nentries) {
             // Get the ith key and value blob and then remove the entry from here and insert to the other node
-            homeds::blob kb;
+            sisl::blob kb;
             kb.bytes = (uint8_t*)other.get_nth_obj(other_ind);
             kb.size = other.get_nth_key_len(other_ind);
 
-            homeds::blob vb;
+            sisl::blob vb;
             vb.bytes = kb.bytes + kb.size;
             vb.size = other.get_nth_value_len(other_ind);
 
             auto sz = insert(this->get_total_entries(), kb, vb);
-            if (!sz) {
-                break;
-            }
+            if (!sz) { break; }
             nentries--;
             other_ind++;
         }
@@ -461,11 +449,11 @@ public:
 
         int ind = 0;
         while (ind < (int)this->get_total_entries()) {
-            homeds::blob kb;
+            sisl::blob kb;
             kb.bytes = (uint8_t*)other.get_nth_obj(ind);
             kb.size = other.get_nth_key_len(ind);
 
-            homeds::blob vb;
+            sisl::blob vb;
             vb.bytes = kb.bytes + kb.size;
             vb.size = other.get_nth_value_len(ind);
 
@@ -474,14 +462,12 @@ public:
                 break;
             }
             auto sz = insert(this->get_total_entries(), kb, vb); // Keep on inserting on the last index.
-            if (!sz)
-                break;
+            if (!sz) break;
             moved_size += sz;
             ind++;
             size_to_move -= sz;
         }
-        if (ind)
-            other.remove(0, ind - 1);
+        if (ind) other.remove(0, ind - 1);
 
         if (!other.is_leaf() && (other.get_total_entries() == 0)) {
             // Incase other node is an edge node and we moved all the data into this node, move over the edge info as
@@ -561,7 +547,7 @@ public:
     }
 
 private:
-    uint32_t insert(int ind, const homeds::blob& key_blob, const homeds::blob& val_blob) {
+    uint32_t insert(int ind, const sisl::blob& key_blob, const sisl::blob& val_blob) {
         assert(ind <= (int)this->get_total_entries());
         LOGTRACEMOD(btree_generics, "{}:{}:{}:{}", ind, get_var_node_header()->m_tail_arena_offset,
                     get_arena_free_space(), get_var_node_header()->m_available_space);

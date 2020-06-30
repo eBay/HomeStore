@@ -41,7 +41,7 @@ public:
 
 class BitmapTest : public ::testing::Test {
 public:
-    static std::string to_string(homeds::blob& b) {
+    static std::string to_string(sisl::blob& b) {
         std::string out;
         Bitword64* p = (Bitword64*)b.bytes;
         // b.size must be rounded up to size of bitword64
@@ -361,7 +361,7 @@ TEST_F(BitmapTest, SerializeSimpleTest1) {
 
     EXPECT_EQ(bm.size_serialized(), bits_to_word(total_nbits));
 
-    homeds::blob b;
+    sisl::blob b;
     b.bytes = (uint8_t*)std::aligned_alloc(512, sisl::round_up(bm.size_serialized(), 512));
     b.size = bm.size_serialized();
     memset(b.bytes, 0, b.size);
@@ -389,7 +389,7 @@ TEST_F(BitmapTest, SerializeSimpleTest2) {
 
     EXPECT_EQ(bm.size_serialized(), bits_to_word(total_nbits));
 
-    homeds::blob b;
+    sisl::blob b;
     b.bytes = (uint8_t*)std::aligned_alloc(512, sisl::round_up(bm.size_serialized(), 512));
     b.size = bm.size_serialized();
     memset(b.bytes, 0, b.size);
@@ -425,7 +425,7 @@ TEST_F(BitmapTest, DeserializeTest) {
 
     EXPECT_EQ(bm.size_serialized(), bits_to_word(total_nbits));
 
-    homeds::blob b1;
+    sisl::blob b1;
     b1.bytes = (uint8_t*)std::aligned_alloc(512, sisl::round_up(bm.size_serialized(), 512));
     b1.size = bm.size_serialized();
     memset(b1.bytes, 0, b1.size);
@@ -453,7 +453,7 @@ TEST_F(BitmapTest, DeserializeTest) {
     bm_copy.print();
 
     // Serilize again using bm_copy and compare b1 & b2
-    homeds::blob b2;
+    sisl::blob b2;
     b2.bytes = (uint8_t*)std::aligned_alloc(512, sisl::round_up(bm_copy.size_serialized(), 512));
     b2.size = bm_copy.size_serialized();
     memset(b2.bytes, 0, b2.size);
