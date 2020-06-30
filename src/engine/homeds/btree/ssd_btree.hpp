@@ -376,6 +376,7 @@ private:
                      */
                     jentry->foreach_node(bt_journal_node_op::creation, [&](bt_node_gen_pair n, sisl::blob k) {
                         auto bid = BlkId(n.node_id);
+                        // LOGINFO("Allocating blk inside btree journal entry {}", bid.to_string());
                         m_blkstore->alloc_blk(bid);
                     });
                     // For root node, disk bitmap is later persisted with btree root node.

@@ -364,6 +364,7 @@ struct blkalloc_cp_id {
         while (bid != nullptr) {
             auto chunk = HomeStoreBase::safe_instance()->get_device_manager()->get_chunk(bid->get_chunk_num());
             auto ba = chunk->get_blk_allocator();
+            // LOGINFO("Freeing blk [{}]", bid->to_string());
             ba->free_on_disk(*bid);
             bid = list->next(it);
         }

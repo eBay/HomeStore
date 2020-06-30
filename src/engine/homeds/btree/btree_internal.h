@@ -82,7 +82,7 @@ struct blkalloc_cp_id;
  *---------------------------------------------------------------------------------------------------------------------------------------------
  */
 // clang-format on
-enum class journal_op : uint8_t { BTREE_SPLIT = 1, BTREE_MERGE, BTREE_CREATE };
+VENUM(journal_op, uint8_t, BTREE_SPLIT = 1, BTREE_MERGE = 2, BTREE_CREATE = 3);
 
 #define INVALID_SEQ_ID UINT64_MAX
 struct btree_cp_id;
@@ -117,7 +117,7 @@ struct bt_node_gen_pair {
     uint64_t node_gen = 0;
 };
 
-enum class bt_journal_node_op : uint8_t { inplace_write = 1, removal, creation };
+VENUM(bt_journal_node_op, uint8_t, inplace_write = 1, removal = 2, creation = 3);
 struct bt_journal_node_info {
     bt_node_gen_pair node_info;
     bt_journal_node_op type = bt_journal_node_op::inplace_write;
@@ -164,7 +164,6 @@ struct btree_journal_entry {
         entry->actual_size += append_size;
     }
 #endif
-
     void append_node(bt_journal_node_op node_op, bnodeid_t node_id, uint64_t gen, sisl::blob key = {nullptr, 0}) {
         ++node_count;
         bt_journal_node_info* info = _append_area();
@@ -196,14 +195,14 @@ struct btree_journal_entry {
     bt_journal_node_info* leftmost_node() const { return get_nodes(bt_journal_node_op::inplace_write)[0]; }
 
     std::string to_string() const {
-        auto str = fmt::format("op={} is_root={} cp_cnt={} size={} num_nodes={} ", op, is_root, cp_cnt, actual_size,
-                               node_count);
+        auto str = fmt::format("op={} is_root={} cp_cnt={} size={} num_nodes={} ", enum_name(op), is_root, cp_cnt,
+                               actual_size, node_count);
         str += fmt::format("[parent: id={}, gen={}] ", parent_node.node_id, parent_node.node_gen);
 
         bt_journal_node_info* info = (bt_journal_node_info*)((uint8_t*)this + sizeof(btree_journal_entry));
         for (auto i = 0u; i < node_count; ++i) {
             str += fmt::format("[node{}: id={} gen={} node_op={} key_size={}] ", i, info->node_info.node_id,
-                               info->node_info.node_gen, info->type, info->key_size);
+                               info->node_info.node_gen, enum_name(info->type), info->key_size);
             info = (bt_journal_node_info*)((uint8_t*)info + sizeof(bt_journal_node_info) + info->key_size);
         }
         return str;
@@ -382,8 +381,8 @@ public:
     // derived class to define its own copy constructor
     virtual ~BtreeKey() = default;
 
-    // virtual BtreeKey& operator=(const BtreeKey& other) = delete; // Deleting = overload forces the derived to define
-    // its = overload
+    // virtual BtreeKey& operator=(const BtreeKey& other) = delete; // Deleting = overload forces the derived to
+    // define its = overload
     virtual int compare(const BtreeKey* other) const = 0;
 
     /* Applicable only for extent keys. It compare start key of (*other) with end key of (*this) */
@@ -510,8 +509,8 @@ public:
     BtreeValue() {}
     virtual ~BtreeValue() {}
 
-    // BtreeValue(const BtreeValue& other) = delete; // Deleting copy constructor forces the derived class to define its
-    // own copy constructor
+    // BtreeValue(const BtreeValue& other) = delete; // Deleting copy constructor forces the derived class to define
+    // its own copy constructor
 
     virtual sisl::blob get_blob() const = 0;
     virtual void set_blob(const sisl::blob& b) = 0;

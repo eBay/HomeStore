@@ -2011,7 +2011,9 @@ private:
         if (BtreeStoreType == btree_store_type::SSD_BTREE) {
             auto j_iob = btree_store_t::make_journal_entry(journal_op::BTREE_SPLIT, root_split,
                                                            {parent_node->get_node_id(), parent_node->get_gen()});
-            btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::inplace_write, child_node1, true);
+            btree_store_t::append_node_to_journal(
+                j_iob, (root_split ? bt_journal_node_op::creation : bt_journal_node_op::inplace_write), child_node1,
+                true);
             btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::creation, child_node2, false);
             btree_store_t::write_journal_entry(m_btree_store.get(), cp_id, j_iob);
         }
