@@ -437,9 +437,6 @@ indx_cp_id_ptr IndxMgr::attach_prepare_indx_cp(const indx_cp_id_ptr& cur_indx_id
         return cur_indx_id;
     }
 
-    if (m_shutdown_started.load()) {
-        m_last_cp = true; // it is set to true even if indx mgr is deleted
-    }
     auto btree_id = m_active_tbl->attach_prepare_cp(cur_indx_id->ainfo.btree_id, m_last_cp, hs_id->blkalloc_checkpoint);
     cur_indx_id->ainfo.end_psn = m_journal->get_contiguous_issued_seq_num(cur_indx_id->ainfo.start_psn);
     if (m_last_cp) {
@@ -724,8 +721,7 @@ void IndxMgr::shutdown(indxmgr_stop_cb cb) {
                       /* verify that all the indx mgr have called their last cp */
                       assert(success);
                       if (m_cp) {
-                          auto cp_id = m_cp->cp_io_enter();
-                          assert(cp_id->indx_id_list.size() == 0);
+                          m_cp->shutdown();
                       }
                       cb(success);
                   }),
