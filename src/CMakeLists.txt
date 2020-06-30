@@ -10,7 +10,7 @@ endif()
 
 
 if ("${MALLOC_IMPL}" STREQUAL "jemalloc")
-    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSING_JEMALLOC")
+    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_JEMALLOC")
 elseif ("${MALLOC_IMPL}" STREQUAL "tcmalloc")
     set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSING_TCMALLOC")
 endif()
