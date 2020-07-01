@@ -88,9 +88,12 @@ public:
         /* TODO :- integrate with io mgr to start a timer */
     }
 
-    virtual ~CheckPoint() {
+    virtual ~CheckPoint() { assert(!m_cur_cp_id); }
+
+    void shutdown() {
         auto cp_id = get_cur_cp_id();
         delete (cp_id);
+        rcu_xchg_pointer(&m_cur_cp_id, nullptr);
     }
 
     /* Get current CP ID */
@@ -107,6 +110,7 @@ public:
 
         rcu_read_lock();
         auto cp_id = get_cur_cp_id();
+        if (!cp_id) { return nullptr; }
         cp_id->enter_cnt++;
         assert(cp_id->cp_status == cp_status_t::cp_io_ready || cp_id->cp_status == cp_status_t::cp_trigger);
         rcu_read_unlock();
@@ -159,6 +163,7 @@ public:
         sisl::release_mem_if_needed(soft_sz, agg_sz);
 
         auto cur_cp_id = cp_io_enter();
+        if (!cur_cp_id) { return; }
         if (cur_cp_id->cp_trigger_waiting) { trigger_cp(); }
         cp_io_exit(cur_cp_id);
     }
