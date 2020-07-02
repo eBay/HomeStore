@@ -179,14 +179,14 @@ public:
         return 0;
     }
 
-    virtual homeds::blob get_blob() const override {
-        homeds::blob b = {(uint8_t*)m_blob, sizeof(blob_t)};
+    virtual sisl::blob get_blob() const override {
+        sisl::blob b = {(uint8_t*)m_blob, sizeof(blob_t)};
         return b;
     }
 
-    virtual void set_blob(const homeds::blob& b) override { m_blob = (blob_t*)b.bytes; }
+    virtual void set_blob(const sisl::blob& b) override { m_blob = (blob_t*)b.bytes; }
 
-    virtual void copy_blob(const homeds::blob& b) override { memcpy(m_blob, b.bytes, b.size); }
+    virtual void copy_blob(const sisl::blob& b) override { memcpy(m_blob, b.bytes, b.size); }
 
     virtual uint32_t get_blob_size() const override { return (sizeof(blob_t)); }
 
@@ -222,16 +222,16 @@ public:
         return *this;
     }
 
-    homeds::blob get_blob() const override {
-        homeds::blob b;
+    sisl::blob get_blob() const override {
+        sisl::blob b;
         b.bytes = (uint8_t*)&m_val;
         b.size = sizeof(m_val);
         return b;
     }
 
-    void set_blob(const homeds::blob& b) override { m_val = *((uint32_t*)b.bytes); }
+    void set_blob(const sisl::blob& b) override { m_val = *((uint32_t*)b.bytes); }
 
-    void copy_blob(const homeds::blob& b) override { m_val = *((uint32_t*)b.bytes); }
+    void copy_blob(const sisl::blob& b) override { m_val = *((uint32_t*)b.bytes); }
 
     void append_blob(const BtreeValue& new_val, BtreeValue& existing_val) override {
         m_val = ((const TestSimpleValue&)new_val).m_val;
@@ -268,7 +268,7 @@ struct SimpleKeyComparator {
 #define TOTAL_ENTRIES 100000
 #define TOTAL_OPERS_PER_TEST 500
 //#define NTHREADS 4
-#define NTHREADS               1
+#define NTHREADS 1
 
 struct BtreeCrudTest : public testing::Test {
 protected:

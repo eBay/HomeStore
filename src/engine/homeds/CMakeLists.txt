@@ -21,7 +21,7 @@ include_directories(BEFORE ..)
 
 set(TEST_BTREE_CRUD_SOURCE_FILES tests/test_btree_crud.cpp)
 add_executable(test_btree_crud ${TEST_BTREE_CRUD_SOURCE_FILES})
-target_link_libraries(test_btree_crud homestore)
+target_link_libraries(test_btree_crud homestore ${CONAN_LIBS})
 add_test(NAME BTreeCRUD COMMAND test_btree_crud)
 
 set(TEST_HASH_SOURCE_FILES tests/test_hashset.cpp)
@@ -40,7 +40,7 @@ set(TEST_LOAD_FILES
         loadgen/iomgr_executor.cpp
         )
 add_executable(test_load ${TEST_LOAD_FILES})
-target_link_libraries(test_load homeblks)
+target_link_libraries(test_load homeblks ${CONAN_LIBS})
 add_test(NAME TestLoadCache COMMAND ${CMAKE_BINARY_DIR}/bin/test_load --gtest_filter=*Cache*)
 add_test(NAME TestLoadVDev COMMAND ${CMAKE_BINARY_DIR}/bin/test_load --gtest_filter=*VDevTest_RW* && ${CMAKE_BINARY_DIR}/bin/test_load --gtest_filter=*VDevTest_PRW*)
 SET_TESTS_PROPERTIES(TestLoadVDev PROPERTIES DEPENDS TestLoadCache)
@@ -59,7 +59,7 @@ set(TEST_IOMGR_EXEC_FILES
     loadgen/iomgr_executor.cpp
     )
 add_executable(test_iomgr_exec ${TEST_IOMGR_EXEC_FILES})
-target_link_libraries(test_iomgr_exec homestore)
+target_link_libraries(test_iomgr_exec homestore ${CONAN_LIBS})
 
 if(CMAKE_BUILD_TYPE STREQUAL Debug)
     set(TEST_THREAD_POOL_SOURCE_FILES

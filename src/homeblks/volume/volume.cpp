@@ -87,7 +87,7 @@ Volume::Volume(const vol_params& params) :
         params.vol_name, params.uuid, std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
 }
 
-Volume::Volume(meta_blk* mblk_cookie, sisl::byte_view<> sb_buf) :
+Volume::Volume(meta_blk* mblk_cookie, sisl::byte_view sb_buf) :
         m_metrics(((vol_sb_hdr*)sb_buf.bytes())->vol_name),
         m_indx_mgr_destroy_started(false),
         m_sb_cookie(mblk_cookie) {
@@ -107,7 +107,7 @@ void Volume::init() {
         /* populate superblock */
         uint32_t align = 0;
         if (meta_blk_mgr->is_aligned_buf_needed(sizeof(vol_sb_hdr))) { align = HS_STATIC_CONFIG(disk_attr.align_size); }
-        sisl::byte_view<> b(sizeof(vol_sb_hdr), align);
+        sisl::byte_view b(sizeof(vol_sb_hdr), align);
         m_sb_buf = b;
         sb = (vol_sb_hdr*)m_sb_buf.bytes();
         sb->page_size = m_params.page_size;
@@ -147,7 +147,7 @@ void Volume::init() {
     assert(get_page_size() % HomeBlks::instance()->get_data_pagesz() == 0);
 }
 
-void Volume::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view<> buf, size_t size) {
+void Volume::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size) {
     assert(sizeof(vol_sb_hdr) == size);
 
     auto new_vol = Volume::make_volume(mblk, buf);
@@ -199,10 +199,9 @@ void Volume::destroy_internal() {
 }
 
 /* It is called only once */
-void Volume::shutdown(indxmgr_stop_cb cb) { IndxMgr::shutdown(cb); }
+void Volume::shutdown(const indxmgr_stop_cb& cb) { IndxMgr::shutdown(cb); }
 
-Volume::~Volume() {
-}
+Volume::~Volume() {}
 
 indx_tbl* Volume::create_indx_tbl() {
     auto pending_read_blk_cb =
@@ -276,7 +275,7 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
 
         /* compute checksum and store it in a request */
         for (uint32_t i = 0; i < vreq->nlbas(); ++i) {
-            homeds::blob outb;
+            sisl::blob outb;
             vreq->mvec->get(&outb, i * get_page_size());
             vreq->push_csum(crc16_t10dif(init_crc_16, outb.bytes, get_page_size()));
         }
@@ -517,7 +516,7 @@ void Volume::verify_csum(const volume_req_ptr& vreq) {
         auto size = info.size;
         auto buf = info.buf;
         while (size != 0) {
-            homeds::blob b = VolInterface::get_instance()->at_offset(buf, offset);
+            sisl::blob b = VolInterface::get_instance()->at_offset(buf, offset);
             for (uint32_t size_read = 0; size_read < b.size && size != 0; size_read += get_page_size()) {
                 uint16_t csum = crc16_t10dif(init_crc_16, b.bytes + size_read, get_page_size());
 
@@ -611,8 +610,7 @@ void Volume::alloc_single_block_in_mem() {
     // Create a new block of memory for the blocks requested and set the memvec pointer to that
     uint8_t* ptr;
     uint32_t size = get_page_size();
-    ptr = (uint8_t*)malloc(size);
-    if (ptr == nullptr) { throw std::bad_alloc(); }
+    ptr = iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), size);
     memset(ptr, 0, size);
 
     boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector());
@@ -665,7 +663,7 @@ size_t Volume::call_batch_completion_cbs() {
     return count;
 }
 
-indx_cp_id_ptr Volume::attach_prepare_volume_cp(indx_cp_id_ptr indx_id, hs_cp_id* hs_id, hs_cp_id* new_hs_id) {
+indx_cp_id_ptr Volume::attach_prepare_volume_cp(const indx_cp_id_ptr& indx_id, hs_cp_id* hs_id, hs_cp_id* new_hs_id) {
     return (m_indx_mgr->attach_prepare_indx_cp(indx_id, hs_id, new_hs_id));
 }
 

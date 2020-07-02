@@ -21,7 +21,6 @@ using namespace homeds::btree;
 namespace homestore {
 /****************** VarsizeBlkAllocator Section **********************/
 
-
 template < typename T >
 struct atomwrapper {
     std::atomic< T > _a;
@@ -79,7 +78,6 @@ public:
     */
     void set_total_segments(uint32_t nsegments) { m_nsegments = nsegments; }
 
-
     //! Set Max Cache Blocks
     /*!
       \param ncache_entries an uint32 argument signifies max blocks in cache
@@ -120,13 +118,11 @@ public:
     */
     uint32_t get_total_segments() const { return m_nsegments; }
 
-
     //! Get Blocks per Segment
     /*!
       \return blocks per segment as uint64
     */
     uint64_t get_blks_per_segment() const { return (uint64_t)(get_total_blks() / get_total_segments()); }
-
 
     //! Get Max Cache Blocks
     /*!
@@ -280,7 +276,6 @@ public:
     }
 };
 
-
 class BlkAllocTemperatureGroup {
 private:
     uint8_t m_temperature; // Temperature of the group.
@@ -351,19 +346,19 @@ public:
     int compare(const BtreeKey* o) const override;
     int compare_range(const BtreeSearchRange& range) const override;
 
-    homeds::blob get_blob() const override {
-        homeds::blob b;
+    sisl::blob get_blob() const override {
+        sisl::blob b;
         b.bytes = (uint8_t*)m_blob;
         b.size = sizeof(blob_t);
         return b;
     }
 
-    void set_blob(const homeds::blob& b) override {
+    void set_blob(const sisl::blob& b) override {
         assert(b.size == sizeof(blob_t));
         m_blob = (blob_t*)b.bytes;
     }
 
-    void copy_blob(const homeds::blob& b) override {
+    void copy_blob(const sisl::blob& b) override {
         assert(b.size == sizeof(blob_t));
         memcpy(&m_in_place_blob, b.bytes, b.size);
         m_blob = &m_in_place_blob;
@@ -534,7 +529,6 @@ private:
     uint64_t blknum_to_phys_pageid(uint64_t blknum) const { return blknum / get_config().get_blks_per_phys_page(); }
 
     uint32_t offset_within_phys_page(uint64_t blknum) const { return blknum % get_config().get_blks_per_phys_page(); }
-
 
     uint64_t blknum_to_segment_num(uint64_t blknum) const {
         auto seg_num = blknum / get_config().get_blks_per_segment();

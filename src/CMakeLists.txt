@@ -1,4 +1,4 @@
-set (CPP_FLAGS "-faligned-new -Dlinux")
+set (CPP_FLAGS "-faligned-new -Dlinux -fconcepts")
 set (CPP_WARNINGS "-Wall -Wextra -Werror -Wno-unused-parameter -Wno-unused-variable -Wno-empty-body -Wno-array-bounds -Wno-cast-function-type -Wno-maybe-uninitialized -Wno-deprecated-copy -Wno-unused-function")
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CPP_FLAGS} ${CPP_WARNINGS} -DBOOST_ALLOW_DEPRECATED_HEADERS -DRCU_SIGNAL")
 
@@ -10,7 +10,7 @@ endif()
 
 
 if ("${MALLOC_IMPL}" STREQUAL "jemalloc")
-    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSING_JEMALLOC")
+    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_JEMALLOC")
 elseif ("${MALLOC_IMPL}" STREQUAL "tcmalloc")
     set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSING_TCMALLOC")
 endif()
@@ -33,24 +33,11 @@ find_library(LIB_ISAL isal)
 set(COMMON_LIB_DEPS
       ${CONAN_LIBS}
       ${LIB_AIO}
-      dpdk
       #${LIB_DOUBLE_CONVERSION}
       #${LIB_ISAL}
     )
 
 include_directories (BEFORE .)
-
-#add_subdirectory(blkalloc)
-#add_subdirectory(blkstore)
-#add_subdirectory(cache)
-#add_subdirectory(device)
-#add_subdirectory(endpoint)
-#add_subdirectory(journal)
-#add_subdirectory(homeds)
-#add_subdirectory(homeblks)
-#add_subdirectory(error)
-#add_subdirectory(common)
-#add_subdirectory(threadpool)
 
 add_subdirectory(engine)
 add_subdirectory(homeblks)
@@ -67,10 +54,10 @@ set(HOMESTORE_OBJECTS
         $<TARGET_OBJECTS:indx_mgr>
         )
 add_library(homestore STATIC ${HOMESTORE_OBJECTS})
-target_link_libraries(homestore ${COMMON_LIB_DEPS})
+#target_link_libraries(homestore ${COMMON_LIB_DEPS})
 
 add_library(homeblks STATIC
                  ${HOMESTORE_OBJECTS}
                  $<TARGET_OBJECTS:hs_homeblks>
                  $<TARGET_OBJECTS:hs_volume>)
-target_link_libraries(homeblks ${COMMON_LIB_DEPS})
+#target_link_libraries(homeblks ${COMMON_LIB_DEPS})

@@ -155,7 +155,6 @@ public:
     void set_total_entries(uint32_t);
     uint32_t get_available_size(const BtreeConfig& cfg) const;
     bnodeid_t get_node_id() const;
-    uint64_t get_node_id_int() const;
     void set_node_id(bnodeid_t id);
     bnodeid_t get_next_bnode() const;
     void set_next_bnode(bnodeid_t b);
@@ -163,6 +162,7 @@ public:
     void invalidate_edge();
     void set_edge_id(bnodeid_t edge);
 
+    bool has_valid_edge() const;
     void set_valid_node(bool valid);
     bool is_valid_node() const;
     void init();
@@ -174,7 +174,7 @@ public:
 
     uint64_t get_gen() const;
     void inc_gen();
-    void flip_pc_gen_flag();
+    // void flip_pc_gen_flag();
     void set_gen(uint64_t g);
 
     ///////////// Move and Delete related operations on a node //////////////

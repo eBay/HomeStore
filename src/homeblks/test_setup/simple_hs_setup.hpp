@@ -142,11 +142,7 @@ public:
         }
 
         /* Start IOManager and a test target to enable doing IO */
-        iomanager.start(1 /* total interfaces */, m_cfg.m_nthreads, false);
-        iomanager.add_drive_interface(
-            std::dynamic_pointer_cast< iomgr::DriveInterface >(std::make_shared< iomgr::AioDriveInterface >()),
-            true /* is_default */);
-        // m_tgt.init();
+        iomanager.start(m_cfg.m_nthreads);
 
         VolInterface::init(m_init_params);
         if (wait_to_start) { wait_homestore_init_done(); }
@@ -255,7 +251,7 @@ public:
         auto ret_io = vol_interface->write(vinfo.vol_obj, req);
         if (ret_io != no_error) {
             assert(0);
-            free(buf);
+            iomanager.iobuf_free(buf);
             m_outstanding_ios.fetch_sub(1, std::memory_order_acq_rel);
             LOGINFO("write io failure");
             vinfo.update_blk_bits([&](auto* bset) { bset->reset_bits(lba, nlbas); });

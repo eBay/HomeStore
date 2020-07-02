@@ -109,20 +109,20 @@ public:
         return false;
     }
 
-    virtual homeds::blob get_blob() const override { return {(uint8_t*)m_lbaId_ptr, get_fixed_size()}; }
+    virtual sisl::blob get_blob() const override { return {(uint8_t*)m_lbaId_ptr, get_fixed_size()}; }
 
-    virtual void set_blob(const homeds::blob& b) override {
+    virtual void set_blob(const sisl::blob& b) override {
         assert(b.size == get_fixed_size());
         m_lbaId_ptr = (LbaId*)b.bytes;
     }
 
-    virtual void copy_blob(const homeds::blob& b) override {
+    virtual void copy_blob(const sisl::blob& b) override {
         assert(b.size == get_fixed_size());
         LbaId* other = (LbaId*)b.bytes;
         set(other->m_lba_start, other->m_n_lba);
     }
 
-    virtual void copy_end_key_blob(const homeds::blob& b) override {
+    virtual void copy_end_key_blob(const sisl::blob& b) override {
         assert(b.size == get_fixed_size());
         LbaId* other = (LbaId*)b.bytes;
         set(other->end(), 1);
@@ -204,11 +204,11 @@ public:
 
     uint32_t get_blob_size() { return sizeof(m_meta) + sizeof(uint16_t) * get_nlba(); }
 
-    homeds::blob get_blob() { return {(uint8_t*)m_ptr, get_blob_size()}; }
+    sisl::blob get_blob() { return {(uint8_t*)m_ptr, get_blob_size()}; }
 
-    void set_blob(homeds::blob b) { m_ptr = (ValueEntry*)b.bytes; }
+    void set_blob(sisl::blob b) { m_ptr = (ValueEntry*)b.bytes; }
 
-    void copy_blob(homeds::blob b) {
+    void copy_blob(sisl::blob b) {
         ValueEntry ve(b.bytes);
         copy_from(ve);
     }
@@ -312,8 +312,8 @@ public:
         assert(0);
     }
 
-    virtual homeds::blob get_blob() const override {
-        homeds::blob b;
+    virtual sisl::blob get_blob() const override {
+        sisl::blob b;
         b.bytes = (uint8_t*)m_earr.get_mem();
         b.size = m_earr.get_size();
         return b;
@@ -388,9 +388,9 @@ public:
         }
     }
 
-    virtual void set_blob(const homeds::blob& b) override { m_earr.set_mem((void*)(b.bytes), b.size); }
+    virtual void set_blob(const sisl::blob& b) override { m_earr.set_mem((void*)(b.bytes), b.size); }
 
-    virtual void copy_blob(const homeds::blob& b) override {
+    virtual void copy_blob(const sisl::blob& b) override {
         Blob_Array< ValueEntry > other;
         other.set_mem((void*)b.bytes, b.size);
         m_earr.set_elements(other); // deep copy
@@ -509,8 +509,8 @@ public:
 
 typedef std::function< void(volume_req* req, BlkId& bid) > pending_read_blk_cb;
 class mapping : public indx_tbl {
-    typedef std::function< void(struct BlkId blkid, size_t offset_size, size_t size) > alloc_blk_callback;
-    typedef std::function< void(btree_cp_id_ptr cp_id) > comp_callback;
+    using alloc_blk_callback = std::function< void(struct BlkId blkid, size_t offset_size, size_t size) >;
+    using comp_callback = std::function< void(const btree_cp_id_ptr& cp_id) >;
     constexpr static uint64_t lba_query_cnt = 1024ull;
 
 private:
@@ -571,8 +571,7 @@ public:
         }
     }
 
-
-    btree_status_t destroy(btree_cp_id_ptr btree_id, free_blk_callback cb) {
+    btree_status_t destroy(const btree_cp_id_ptr& btree_id, free_blk_callback cb) {
         auto ret =
             m_bt->destroy(([this, cb](MappingValue& mv) { this->process_free_blk_callback(cb, mv); }), false, btree_id);
         HS_SUBMOD_ASSERT(LOGMSG, (ret == btree_status_t::success), , "vol", m_unique_name,
@@ -610,7 +609,9 @@ public:
 
     mapping(uint64_t volsize, uint32_t page_size, const std::string& unique_name, trigger_cp_callback trigger_cp_cb,
             pending_read_blk_cb pending_read_cb = nullptr) :
-            m_pending_read_blk_cb(pending_read_cb), m_vol_page_size(page_size), m_unique_name(unique_name) {
+            m_pending_read_blk_cb(pending_read_cb),
+            m_vol_page_size(page_size),
+            m_unique_name(unique_name) {
         m_hb = HomeBlks::safe_instance();
         homeds::btree::BtreeConfig btree_cfg(HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size), unique_name.c_str());
         btree_cfg.set_max_objs(volsize / page_size);
@@ -625,7 +626,9 @@ public:
     mapping(uint64_t volsize, uint32_t page_size, const std::string& unique_name, btree_super_block btree_sb,
             trigger_cp_callback trigger_cp_cb, pending_read_blk_cb pending_read_cb = nullptr,
             btree_cp_superblock* btree_cp_sb = nullptr) :
-            m_pending_read_blk_cb(pending_read_cb), m_vol_page_size(page_size), m_unique_name(unique_name) {
+            m_pending_read_blk_cb(pending_read_cb),
+            m_vol_page_size(page_size),
+            m_unique_name(unique_name) {
         m_hb = HomeBlks::safe_instance();
         homeds::btree::BtreeConfig btree_cfg(HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size), unique_name.c_str());
         btree_cfg.set_max_objs(volsize / page_size);
@@ -645,23 +648,23 @@ public:
     virtual btree_super_block get_btree_sb() override { return (m_bt->get_btree_sb()); }
 
     /* It attaches the new CP and prepare for cur cp flush */
-    virtual btree_cp_id_ptr attach_prepare_cp(btree_cp_id_ptr cur_cp_id, bool is_last_cp,
+    virtual btree_cp_id_ptr attach_prepare_cp(const btree_cp_id_ptr& cur_cp_id, bool is_last_cp,
                                               bool blkalloc_checkpoint) override {
         return (m_bt->attach_prepare_cp(cur_cp_id, is_last_cp, blkalloc_checkpoint));
     }
 
-    virtual void cp_start(btree_cp_id_ptr cp_id, cp_comp_callback cb) override { m_bt->cp_start(cp_id, cb); }
+    virtual void cp_start(const btree_cp_id_ptr& cp_id, cp_comp_callback cb) override { m_bt->cp_start(cp_id, cb); }
 
-    virtual void truncate(btree_cp_id_ptr cp_id) override { m_bt->truncate(cp_id); }
+    virtual void truncate(const btree_cp_id_ptr& cp_id) override { m_bt->truncate(cp_id); }
 
     static void cp_done(trigger_cp_callback cb) { MappingBtreeDeclType::cp_done(cb); }
 
     virtual void destroy_done() override { m_bt->destroy_done(); }
-    void update_btree_cp_sb(btree_cp_id_ptr cp_id, btree_cp_superblock& btree_sb, bool blkalloc_cp) {
+    void update_btree_cp_sb(const btree_cp_id_ptr& cp_id, btree_cp_superblock& btree_sb, bool blkalloc_cp) {
         m_bt->update_btree_cp_sb(cp_id, btree_sb, blkalloc_cp);
     }
 
-    virtual void flush_free_blks(btree_cp_id_ptr btree_id,
+    virtual void flush_free_blks(const btree_cp_id_ptr& btree_id,
                                  std::shared_ptr< homestore::blkalloc_cp_id >& blkalloc_id) override {
         m_bt->flush_free_blks(btree_id, blkalloc_id);
     }
@@ -735,7 +738,7 @@ public:
         return no_error;
     }
 
-    btree_status_t update_active_indx_tbl(indx_req* ireq, btree_cp_id_ptr btree_id) override {
+    btree_status_t update_active_indx_tbl(indx_req* ireq, const btree_cp_id_ptr& btree_id) override {
         auto vreq = static_cast< volume_req* >(ireq);
         uint64_t start_lba = vreq->lba();
         int csum_indx = 0;
@@ -761,7 +764,8 @@ public:
         return ret;
     }
 
-    btree_status_t recovery_update(logstore_seq_num_t seqnum, journal_hdr* hdr, btree_cp_id_ptr btree_id) override {
+    btree_status_t recovery_update(logstore_seq_num_t seqnum, journal_hdr* hdr,
+                                   const btree_cp_id_ptr& btree_id) override {
         /* get all the values from journal entry */
         auto key = (journal_key*)indx_journal_entry::get_key(hdr).first;
         assert(indx_journal_entry::get_key(hdr).second == sizeof(journal_key));
@@ -819,7 +823,7 @@ public:
      * blocks.
      * @start_lba :- it updates the first lba which is not written.
      */
-    btree_status_t put(volume_req* req, MappingKey& key, MappingValue& value, btree_cp_id_ptr cp_id,
+    btree_status_t put(volume_req* req, MappingKey& key, MappingValue& value, const btree_cp_id_ptr& cp_id,
                        MappingBtreeDeclType* bt, uint64_t& start_lba) {
         assert(value.get_array().get_total_elements() == 1);
         UpdateCBParam param(req, key, value);
@@ -859,12 +863,12 @@ public:
         return btree_status_t::success;
     }
 
-    btree_status_t put(volume_req* req, MappingKey& key, MappingValue& value, btree_cp_id_ptr cp_id) {
+    btree_status_t put(volume_req* req, MappingKey& key, MappingValue& value, const btree_cp_id_ptr& cp_id) {
         uint64_t start_lba;
         return put(req, key, value, cp_id, m_bt, start_lba);
     }
 
-    btree_status_t put(volume_req* req, MappingKey& key, MappingValue& value, btree_cp_id_ptr cp_id,
+    btree_status_t put(volume_req* req, MappingKey& key, MappingValue& value, const btree_cp_id_ptr& cp_id,
                        uint64_t& start_lba) {
         return put(req, key, value, cp_id, m_bt, start_lba);
     }
@@ -892,7 +896,7 @@ public:
      * Note:
      * No need to call old btree destroy() as blocks will be freed automatically;
      */
-    bool fix(btree_cp_id_ptr cp_id, uint64_t start_lba, uint64_t end_lba, bool verify = false) {
+    bool fix(const btree_cp_id_ptr& cp_id, uint64_t start_lba, uint64_t end_lba, bool verify = false) {
 #if 0
         if (start_lba >= end_lba) {
             LOGERROR("Wrong input, start_lba: {}, should be smaller than end_lba: {}", start_lba, end_lba);
@@ -1030,10 +1034,7 @@ public:
         LOGINFO("Finished Printing. ");
     }
 
-    void print_node(uint64_t blkid) {
-        bnodeid_t bid(blkid);
-        m_bt->print_node(bid);
-    }
+    void print_node(uint64_t blkid) { m_bt->print_node(blkid); }
 #if 0
     void diff(mapping* other) {
         std::vector< std::pair< MappingKey, MappingValue > > diff_kv;

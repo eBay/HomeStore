@@ -51,10 +51,7 @@ static void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthre
     }
 
     LOGINFO("Starting iomgr with {} threads", nthreads);
-    iomanager.start(1 /* total interfaces */, nthreads);
-    iomanager.add_drive_interface(
-        std::dynamic_pointer_cast< iomgr::DriveInterface >(std::make_shared< iomgr::AioDriveInterface >()),
-        true /* is_default */);
+    iomanager.start(nthreads);
 
     uint64_t app_mem_size = ((ndevices * dev_size) * 15) / 100;
     LOGINFO("Initialize and start HomeBlks with app_mem_size = {}", app_mem_size);
@@ -280,7 +277,7 @@ public:
         auto crc = util::Hash64((const char*)buf, (size_t)bytes_read);
         HS_ASSERT_CMP(DEBUG, crc, ==, it->second.crc, "CRC Mismatch: read out crc: {}, saved write: {}", crc,
                       it->second.crc);
-        free(buf);
+        iomanager.iobuf_free(buf);
         m_read_cnt++;
     }
 
@@ -314,7 +311,7 @@ public:
         m_off_to_info_map[off_to_wrt].size = sz_to_wrt;
         m_off_to_info_map[off_to_wrt].crc = util::Hash64((const char*)buf, (size_t)sz_to_wrt);
 
-        free(buf);
+        iomanager.iobuf_free(buf);
     }
 
     void gen_rand_buf(uint8_t* s, uint32_t len) {

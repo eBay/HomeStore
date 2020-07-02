@@ -172,10 +172,7 @@ public:
         ofs.seekp(MAX_SIZE - 1);
         ofs.write("", 1);
 
-        iomanager.start(1 /* total interfaces */, num_threads);
-        iomanager.add_drive_interface(
-            std::dynamic_pointer_cast< iomgr::DriveInterface >(std::make_shared< iomgr::AioDriveInterface >()),
-            true /* is_default */);
+        iomanager.start(num_threads);
         m_tgt.init();
 
         init_params params;

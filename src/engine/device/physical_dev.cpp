@@ -34,7 +34,7 @@ PhysicalDev::~PhysicalDev() {
 
     LOGINFO("device name {} superblock magic {} product name {} version {}", m_devname, m_super_blk->magic,
             m_super_blk->product_name, m_super_blk->version);
-    free(m_super_blk);
+    iomanager.iobuf_free((uint8_t*)m_super_blk);
     // m_ep will be deleted in iomgr::stop
 }
 
@@ -99,19 +99,19 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
 #endif
     ) {
 
-        free(m_super_blk);
+        iomanager.iobuf_free((uint8_t*)m_super_blk);
 
         HS_LOG(ERROR, device, "device open failed errno {} dev_name {}", errno, devname.c_str());
 
         throw std::system_error(errno, std::system_category(), "error while opening the device");
     }
 
-    LOGINFO("Device {} opened with FD {}", m_devname, m_iodev->fd());
+    LOGINFO("Device {} opened with dev_id = {}", m_devname, m_iodev->dev_id());
 
     try {
-        m_devsize = drive_iface->get_size(m_iodev.get(), is_file);
+        m_devsize = drive_iface->get_size(m_iodev.get());
     } catch (std::exception& e) {
-        free(m_super_blk);
+        iomanager.iobuf_free((uint8_t*)m_super_blk);
         throw(e);
     }
 
@@ -251,7 +251,7 @@ inline bool PhysicalDev::validate_device() {
 }
 
 inline void PhysicalDev::write_superblock() {
-    ssize_t bytes = pwrite(m_iodev->fd(), m_super_blk, SUPERBLOCK_SIZE, 0);
+    auto bytes = drive_iface->sync_write(m_iodev.get(), (const char*)m_super_blk, SUPERBLOCK_SIZE, 0);
     if (sisl_unlikely((bytes < 0) || (size_t)bytes != SUPERBLOCK_SIZE)) {
         throw std::system_error(errno, std::system_category(), "error while writing a superblock" + get_devname());
     }
@@ -259,7 +259,7 @@ inline void PhysicalDev::write_superblock() {
 
 inline void PhysicalDev::read_superblock() {
     memset(m_super_blk, 0, SUPERBLOCK_SIZE);
-    ssize_t bytes = pread(m_iodev->fd(), m_super_blk, SUPERBLOCK_SIZE, 0);
+    auto bytes = drive_iface->sync_read(m_iodev.get(), (char*)m_super_blk, SUPERBLOCK_SIZE, 0);
     if (sisl_unlikely((bytes < 0) || ((size_t)bytes != SUPERBLOCK_SIZE))) {
         throw std::system_error(errno, std::system_category(), "error while reading a superblock" + get_devname());
     }
@@ -403,7 +403,7 @@ PhysicalDevChunk* PhysicalDev::find_free_chunk(uint64_t req_size) {
 std::string PhysicalDev::to_string() {
     std::stringstream ss;
     ss << "Device name = " << m_devname << "\n";
-    ss << "Device fd = " << m_iodev->fd() << "\n";
+    ss << "Device ID = " << m_iodev->dev_id() << "\n";
     ss << "Device size = " << m_devsize << "\n";
     ss << "Super Block :\n";
     ss << "\tMagic = " << m_super_blk->magic << "\n";

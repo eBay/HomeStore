@@ -15,8 +15,8 @@ THREAD_BUFFER_INIT;
 RCU_REGISTER_INIT;
 
 struct blk_id {
-    static homeds::blob get_blob(const blk_id& id) {
-        homeds::blob b;
+    static sisl::blob get_blob(const blk_id& id) {
+        sisl::blob b;
         b.bytes = (uint8_t*)&id.m_id;
         b.size = sizeof(uint64_t);
 
@@ -67,7 +67,7 @@ public:
         uint64_t* raw_buf = (uint64_t*)malloc(sizeof(uint64_t) * size);
         for (auto b = 0U; b < size; b++)
             raw_buf[b] = id;
-        EXPECT_EQ(m_cache->insert(blk_id(id), {(uint8_t*)raw_buf, size}, 0, &cbuf), true);
+        EXPECT_EQ(m_cache->insert(blk_id(id), {(uint8_t*)raw_buf, size}, 0, &cbuf, NULL_LAMBDA), true);
     }
 
     void read_one(uint64_t id, uint32_t size, bool expected = true) {
@@ -78,8 +78,7 @@ public:
             auto blob = cbuf->at_offset(0);
             auto b = 0U;
             for (b = 0U; b < blob.size / 8; b++)
-                if (((uint64_t*)blob.bytes)[b] != id)
-                    break;
+                if (((uint64_t*)blob.bytes)[b] != id) break;
             EXPECT_EQ(b, blob.size / 8);
         }
     }

@@ -43,17 +43,16 @@ VolInterface* HomeBlks::init(const init_params& cfg, bool force_reinit) {
 
     static std::once_flag flag1;
     try {
-            std::call_once(flag1, [&cfg]() {
+        std::call_once(flag1, [&cfg]() {
 #ifndef NDEBUG
-                LOGINFO("HomeBlks DEBUG version: {}", HomeBlks::version);
+            LOGINFO("HomeBlks DEBUG version: {}", HomeBlks::version);
 #else
                 LOGINFO("HomeBlks RELEASE version: {}", HomeBlks::version);
 #endif
-                auto instance =
-                    boost::static_pointer_cast< homestore::HomeStoreBase >(HomeBlksSafePtr(new HomeBlks(cfg)));
-                set_instance(boost::static_pointer_cast< homestore::HomeStoreBase >(instance));
-            });
-            return (VolInterface*)(HomeStoreBase::instance());
+            auto instance = boost::static_pointer_cast< homestore::HomeStoreBase >(HomeBlksSafePtr(new HomeBlks(cfg)));
+            set_instance(boost::static_pointer_cast< homestore::HomeStoreBase >(instance));
+        });
+        return (VolInterface*)(HomeStoreBase::instance());
     } catch (const std::exception& e) {
         LOGERROR("{}", e.what());
         assert(0);
@@ -78,35 +77,17 @@ HomeBlks::HomeBlks(const init_params& cfg) : m_cfg(cfg), m_metrics("HomeBlks") {
     m_out_params.max_io_size = VOL_MAX_IO_SIZE;
     uint32_t align = 0;
     uint32_t size = HOMEBLKS_SB_SIZE;
-    if (meta_blk_mgr->is_aligned_buf_needed(size)) { 
-        align = HS_STATIC_CONFIG(disk_attr.align_size); 
+    if (meta_blk_mgr->is_aligned_buf_needed(size)) {
+        align = HS_STATIC_CONFIG(disk_attr.align_size);
         size = sisl::round_up(size, align);
     }
-    sisl::byte_view<> b(size, align);
+    sisl::byte_view b(size, align);
     m_homeblks_sb_buf = b;
 
     superblock_init();
     sisl::MallocMetrics::enable();
 
     /* start thread */
-#if 0
-    auto run_method = sisl::ObjectAllocator< run_method_t >::make_object();
-    *run_method = ([this]() {
-        try {
-            this->init_devices();
-        } catch (const std::exception& e) {
-            LOGERROR("{}", e.what());
-            init_done(std::make_error_condition(std::errc::io_error));
-        }
-    });
-    iomgr_msg io_msg;
-    io_msg.m_type = RUN_METHOD;
-    io_msg.m_data_buf = (void*)run_method;
-    /* We are distributing work based on btree. Other approach is to use both threads working
-     * on same btree.
-     */
-    iomanager.send_to_least_busy_thread(-1, io_msg);
-#endif
     auto sthread = sisl::named_thread("hb_init", [this]() {
         this->init_devices();
         iomanager.run_io_loop(false, nullptr);
@@ -206,7 +187,7 @@ const char* HomeBlks::get_name(const VolumePtr& vol) { return vol->get_name(); }
 uint64_t HomeBlks::get_page_size(const VolumePtr& vol) { return vol->get_page_size(); }
 uint64_t HomeBlks::get_size(const VolumePtr& vol) { return vol->get_size(); }
 boost::uuids::uuid HomeBlks::get_uuid(VolumePtr vol) { return vol->get_uuid(); }
-homeds::blob HomeBlks::at_offset(const blk_buf_t& buf, uint32_t offset) { return (buf->at_offset(offset)); }
+sisl::blob HomeBlks::at_offset(const blk_buf_t& buf, uint32_t offset) { return (buf->at_offset(offset)); }
 
 /* this function can be called during recovery also */
 void HomeBlks::create_volume(VolumePtr vol) {
@@ -705,9 +686,7 @@ std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
 
 vol_state HomeBlks::get_state(VolumePtr vol) { return vol->get_state(); }
 
-bool HomeBlks::fix_tree(VolumePtr vol, bool verify) {
-    return vol->fix_mapping_btree(verify);
-}
+bool HomeBlks::fix_tree(VolumePtr vol, bool verify) { return vol->fix_mapping_btree(verify); }
 
 void HomeBlks::call_multi_vol_completions() {
     auto v_comp_events = 0;
@@ -768,7 +747,7 @@ void HomeBlks::migrate_volume_sb() {
  *      - Blk alloc bit map recovery done :- It is done when all the entries in journal are replayed.
  */
 
-void HomeBlks::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view<> buf, size_t size) {
+void HomeBlks::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size) {
     instance()->meta_blk_found(mblk, buf, size);
 }
 void HomeBlks::meta_blk_recovery_comp_cb(bool success) { instance()->meta_blk_recovery_comp(success); }
@@ -848,7 +827,7 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
     }));
 }
 
-void HomeBlks::meta_blk_found(meta_blk* mblk, sisl::byte_view<> buf, size_t size) {
+void HomeBlks::meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size) {
     static bool meta_blk_found = false;
 
     // HomeBlk layer expects to see one valid meta_blk record during reboot;
@@ -877,28 +856,20 @@ void HomeBlks::vol_recovery_start_phase2() {
 }
 
 /* * Snapshot APIs  * */
-SnapshotPtr HomeBlks::create_snapshot(const VolumePtr& vol) {
-    return nullptr;
-}
+SnapshotPtr HomeBlks::create_snapshot(const VolumePtr& vol) { return nullptr; }
 
 std::error_condition HomeBlks::remove_snapshot(const SnapshotPtr& snap) {
     std::error_condition ok;
     return ok;
 }
 
-SnapshotPtr HomeBlks::clone_snapshot(const SnapshotPtr& snap) {
-    return nullptr;
-}
+SnapshotPtr HomeBlks::clone_snapshot(const SnapshotPtr& snap) { return nullptr; }
 
 std::error_condition HomeBlks::restore_snapshot(const SnapshotPtr& snap) {
     std::error_condition ok;
     return ok;
 }
 
-void HomeBlks::list_snapshot(const VolumePtr& , std::vector<SnapshotPtr> snap_list) {
+void HomeBlks::list_snapshot(const VolumePtr&, std::vector< SnapshotPtr > snap_list) {}
 
-}
-    
-void HomeBlks::read(const SnapshotPtr& snap, const snap_interface_req_ptr& req) {
-
-}
+void HomeBlks::read(const SnapshotPtr& snap, const snap_interface_req_ptr& req) {}

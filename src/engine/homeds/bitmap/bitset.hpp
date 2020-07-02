@@ -35,7 +35,7 @@ public:
 
     explicit Bitset(std::vector< Bitword64 >& words) : m_words(words) { m_nbits = words.size() * Bitword64::size(); }
 
-    explicit Bitset(const homeds::blob& b) {
+    explicit Bitset(const sisl::blob& b) {
         auto nwords = 0U;
 
         if (b.size % sizeof(Bitword64) == 0) {
@@ -57,7 +57,7 @@ public:
 
     // Serialize the bitset into the blob provided upto blob bytes.
     // Returns if it able completely serialize within the bytes specified.
-    bool serialize(const homeds::blob& b) {
+    bool serialize(const sisl::blob& b) {
         if (b.size < size_serialized()) { return false; }
 
         uint64_t j = 0ULL;

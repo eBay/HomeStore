@@ -112,7 +112,7 @@ public:
             auto ret = pread(fd_list[fd], buf, temp_size, temp_offset);
             if (ret != (int)temp_size) {
                 LOGINFO("read failed error no {}", errno);
-                free(buf);
+                iomanager.iobuf_free((uint8_t*)buf);
                 return false;
             }
             for (uint64_t i = 0; i < size_blks[fd]; ++i) {
@@ -123,7 +123,7 @@ public:
                 ++start_offset;
             }
         }
-        free(buf);
+        iomanager.iobuf_free((uint8_t*)buf);
         return true;
     }
 

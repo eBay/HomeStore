@@ -6,7 +6,7 @@ namespace homestore {
 static constexpr logdev_key out_of_bound_ld_key = {std::numeric_limits< logid_t >::max(), 0};
 REGISTER_METABLK_SUBSYSTEM(log_dev, "LOG_DEV", HomeLogStoreMgr::meta_blk_found_cb, nullptr)
 
-void HomeLogStoreMgr::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view<> buf, size_t size) {
+void HomeLogStoreMgr::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size) {
     HomeLogStoreMgr::instance().m_log_dev.meta_blk_found(mblk, buf, size);
 }
 
@@ -138,17 +138,18 @@ void HomeLogStore::write_async(logstore_req* req, const log_req_comp_cb_t& cb) {
     HomeLogStoreMgr::logdev().append_async(m_store_id, req->seq_num, req->data.bytes, req->data.size, (void*)req);
 }
 
-void HomeLogStore::write_async(logstore_seq_num_t seq_num, const sisl::blob& b, void* cookie,
+void HomeLogStore::write_async(logstore_seq_num_t seq_num, const sisl::io_blob& b, void* cookie,
                                const log_write_comp_cb_t& cb) {
     // Form an internal request and issue the write
     auto* req = logstore_req::make(this, seq_num, b, true /* is_write_req */);
-    write_async(req, [cb, cookie](logstore_req* req, logdev_key written_lkey) {
-        cb(req->seq_num, written_lkey, cookie);
+    req->cookie = cookie;
+    write_async(req, [cb](logstore_req* req, logdev_key written_lkey) {
+        cb(req->seq_num, req->data, written_lkey, req->cookie);
         logstore_req::free(req);
     });
 }
 
-int64_t HomeLogStore::append_async(const sisl::blob& b, void* cookie, const log_write_comp_cb_t& cb) {
+int64_t HomeLogStore::append_async(const sisl::io_blob& b, void* cookie, const log_write_comp_cb_t& cb) {
     auto seq_num = m_seq_num.fetch_add(1, std::memory_order_acq_rel);
     write_async(seq_num, b, cookie, cb);
     return seq_num;
@@ -175,7 +176,7 @@ void HomeLogStore::read_async(logstore_req* req, const log_found_cb_t& cb) {
 void HomeLogStore::read_async(logstore_seq_num_t seq_num, void* cookie, const log_found_cb_t& cb) {
     auto record = m_records.at(seq_num);
     logdev_key ld_key = record.m_dev_key;
-    sisl::blob b;
+    sisl::io_blob b;
     auto* req = logstore_req::make(this, seq_num, &b, false /* not write */);
     read_async(req, [cookie, cb](logstore_seq_num_t seq_num, log_buffer log_buf, void* cookie) {
             cb(seq, log_buf, cookie);
@@ -291,7 +292,7 @@ int HomeLogStore::search_max_le(logstore_seq_num_t input_sn) {
     return (end - 1);
 }
 
-void HomeLogStore::foreach (int64_t start_idx, const std::function< bool(int64_t, log_buffer&) >& cb) {
+void HomeLogStore::foreach (int64_t start_idx, const auto& cb) {
     m_records.foreach_completed(0, [&](long int cur_idx, long int max_idx, homestore::logstore_record& record) -> bool {
         // do a sync read
         auto log_buf = HomeLogStoreMgr::logdev().read(record.m_dev_key);

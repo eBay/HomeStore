@@ -81,7 +81,7 @@ int main(int argc, char** argv) {
 
         LOG(INFO) << "Read from " << bids[i].to_string() << " for 8192 bytes";
 
-        homeds::blob b;
+        sisl::blob b;
         mvector.get(&b, 0);
         assert(b.size == 8192);
         for (auto j = 0; j < b.size; j++) {

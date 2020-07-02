@@ -42,8 +42,9 @@ public:
         auto ind = m_nth_entry.fetch_add(1, std::memory_order_acq_rel);
         if (ind >= m_nentries) { return false; }
         DLOGDEBUG("Appending log entry for ind {}", ind);
-        m_log_store->append_async({(uint8_t*)m_data[ind].data(), (uint32_t)m_data[ind].size()}, nullptr,
-                                  [this](logstore_seq_num_t seq_num, bool success, void* ctx) { m_comp_cb(seq_num); });
+        m_log_store->append_async(
+            sisl::io_blob((uint8_t*)m_data[ind].data(), (uint32_t)m_data[ind].size(), false), nullptr,
+            [this](logstore_seq_num_t seq_num, sisl::io_blob& iob, bool success, void* ctx) { m_comp_cb(seq_num); });
         return true;
     }
 
@@ -96,10 +97,7 @@ public:
         device_info.push_back({devname});
 
         LOGINFO("Starting iomgr with {} threads", nthreads);
-        iomanager.start(1 /* total interfaces */, nthreads, false, nullptr);
-        iomanager.add_drive_interface(
-            std::dynamic_pointer_cast< iomgr::DriveInterface >(std::make_shared< iomgr::AioDriveInterface >()),
-            true /* is_default */);
+        iomanager.start(nthreads);
 
         if (restart) {
             for (auto i = 0u; i < n_log_stores; ++i) {

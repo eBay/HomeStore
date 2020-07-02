@@ -51,7 +51,10 @@ public:
     explicit BlkAllocConfig(uint64_t nblks) : BlkAllocConfig(8192, nblks, "") {}
 
     BlkAllocConfig(uint32_t blk_size = 8192, uint64_t nblks = 0, const std::string& name = "") :
-            m_blk_size(blk_size), m_nblks(nblks), m_blks_per_portion(nblks), m_unique_name(name) {}
+            m_blk_size(blk_size),
+            m_nblks(nblks),
+            m_blks_per_portion(nblks),
+            m_unique_name(name) {}
 
     void set_blk_size(uint64_t blk_size) { m_blk_size = blk_size; }
 
@@ -122,7 +125,11 @@ enum BlkAllocatorState {
 /* Hints for various allocators */
 struct blk_alloc_hints {
     blk_alloc_hints() :
-            desired_temp(0), dev_id_hint(-1), can_look_for_other_dev(true), is_contiguous(false), multiplier(1) {}
+            desired_temp(0),
+            dev_id_hint(-1),
+            can_look_for_other_dev(true),
+            is_contiguous(false),
+            multiplier(1) {}
 
     uint32_t desired_temp;       // Temperature hint for the device
     int dev_id_hint;             // which physical device to pick (hint if any) -1 for don't care
@@ -193,7 +200,8 @@ protected:
 
 public:
     explicit BlkAllocator(BlkAllocConfig& cfg, uint32_t id = 0) :
-            m_blk_portions(cfg.get_total_portions()), m_alloc_blk_cnt(0) {
+            m_blk_portions(cfg.get_total_portions()),
+            m_alloc_blk_cnt(0) {
         m_auto_recovery = cfg.get_auto_recovery();
         m_disk_bm = new sisl::Bitset(cfg.get_total_blks(), id, HS_STATIC_CONFIG(disk_attr.align_size));
         m_cfg = cfg;
@@ -218,9 +226,7 @@ public:
         m_inited = true;
     }
 
-    uint32_t total_alloc_blks() const {
-        return m_alloc_blk_cnt.load();
-    }
+    uint32_t total_alloc_blks() const { return m_alloc_blk_cnt.load(); }
 
     /* It is used during recovery in both mode :- auto recovery and manual recovery
      * It is also used in normal IO during auto recovery mode.
@@ -259,7 +265,7 @@ public:
     /* CP start is called when all its consumers have purged their free lists and now want to persist the
      * disk bitmap.
      */
-    sisl::byte_array<> cp_start(std::shared_ptr< blkalloc_cp_id > id) { return (m_disk_bm->serialize()); }
+    sisl::byte_array cp_start(std::shared_ptr< blkalloc_cp_id > id) { return (m_disk_bm->serialize()); }
 
     virtual bool is_blk_alloced(BlkId& b) = 0;
     virtual std::string to_string() const = 0;
@@ -358,6 +364,7 @@ struct blkalloc_cp_id {
         while (bid != nullptr) {
             auto chunk = HomeStoreBase::safe_instance()->get_device_manager()->get_chunk(bid->get_chunk_num());
             auto ba = chunk->get_blk_allocator();
+            // LOGINFO("Freeing blk [{}]", bid->to_string());
             ba->free_on_disk(*bid);
             bid = list->next(it);
         }

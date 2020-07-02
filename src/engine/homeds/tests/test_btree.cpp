@@ -105,14 +105,14 @@ public:
         return 0;
     }
 
-    virtual homeds::blob get_blob() const override {
-        homeds::blob b = {(uint8_t*)m_blob, sizeof(blob_t)};
+    virtual sisl::blob get_blob() const override {
+        sisl::blob b = {(uint8_t*)m_blob, sizeof(blob_t)};
         return b;
     }
 
-    virtual void set_blob(const homeds::blob& b) override { m_blob = (blob_t*)b.bytes; }
+    virtual void set_blob(const sisl::blob& b) override { m_blob = (blob_t*)b.bytes; }
 
-    virtual void copy_blob(const homeds::blob& b) override { memcpy(m_blob, b.bytes, b.size); }
+    virtual void copy_blob(const sisl::blob& b) override { memcpy(m_blob, b.bytes, b.size); }
 
     virtual uint32_t get_blob_size() const override { return (sizeof(blob_t)); }
 

@@ -73,9 +73,7 @@ public:
         // assert(get_total_entries() < getMaxEntries());
         uint32_t sz = (this->get_total_entries() - (ind + 1) + 1) * get_nth_obj_size(0);
 
-        if (sz != 0) {
-            memmove(get_nth_obj(ind + 1), get_nth_obj(ind), sz);
-        }
+        if (sz != 0) { memmove(get_nth_obj(ind + 1), get_nth_obj(ind), sz); }
 
         set_nth_obj(ind, key, val);
         this->inc_entries();
@@ -91,14 +89,9 @@ public:
         std::stringstream ss;
         ss << "###################" << endl;
         ss << "-------------------------------" << endl;
-        ss << "id=" << this->get_node_id().to_string() << " nEntries=" << this->get_total_entries()
-           << " leaf?=" << this->is_leaf();
+        ss << "id=" << this->get_node_id() << " nEntries=" << this->get_total_entries() << " leaf?=" << this->is_leaf();
 
-        if (!this->is_leaf()) {
-            bnodeid_t edge_id;
-            edge_id = this->get_edge_id();
-            ss << " edge_id=" << static_cast< uint64_t >(edge_id.m_id);
-        }
+        if (!this->is_leaf()) { ss << " edge_id=" << this->get_edge_id(); }
         ss << "\n-------------------------------" << endl;
         for (uint32_t i = 0; i < this->get_total_entries(); i++) {
             ss << "Key=";
@@ -142,9 +135,7 @@ public:
         } else {
             uint32_t sz = (total_entries - ind_e - 1) * get_nth_obj_size(0);
 
-            if (sz != 0) {
-                memmove(get_nth_obj(ind_s), get_nth_obj(ind_e + 1), sz);
-            }
+            if (sz != 0) { memmove(get_nth_obj(ind_s), get_nth_obj(ind_e + 1), sz); }
             this->sub_entries(ind_e - ind_s + 1);
         }
         this->inc_gen();
@@ -270,7 +261,7 @@ public:
     void get_nth_key(uint32_t ind, BtreeKey* outkey, bool copykey) const {
         assert(ind < this->get_total_entries());
 
-        homeds::blob b;
+        sisl::blob b;
         b.bytes = (uint8_t*)(this->get_node_area() + (get_nth_obj_size(ind) * ind));
         b.size = get_obj_key_size(ind);
 
@@ -280,7 +271,7 @@ public:
     void get_nth_value(uint32_t ind, BtreeValue* outval, bool copy) const {
         assert(ind < this->get_total_entries());
 
-        homeds::blob b;
+        sisl::blob b;
         b.bytes = (uint8_t*)(this->get_node_area() + (get_nth_obj_size(ind) * ind)) + get_obj_key_size(ind);
         b.size = outval->get_blob_size();
 
@@ -309,10 +300,10 @@ public:
         assert(ind <= this->get_total_entries());
 
         uint8_t* entry = this->get_node_area_mutable() + (get_nth_obj_size(ind) * ind);
-        homeds::blob key_blob = k.get_blob();
+        sisl::blob key_blob = k.get_blob();
         memcpy((void*)entry, key_blob.bytes, key_blob.size);
 
-        homeds::blob val_blob = v.get_blob();
+        sisl::blob val_blob = v.get_blob();
         memcpy((void*)(entry + key_blob.size), val_blob.bytes, val_blob.size);
     }
 
@@ -335,7 +326,7 @@ public:
     void set_nth_key(uint32_t ind, BtreeKey* key) {
         uint8_t* entry = this->get_node_area_mutable() + (get_nth_obj_size(ind) * ind);
 
-        homeds::blob b = key->get_blob();
+        sisl::blob b = key->get_blob();
         memcpy((void*)entry, (void*)b.bytes, b.size);
     }
 
@@ -343,7 +334,7 @@ public:
         assert(ind < this->get_total_entries());
         uint8_t* entry = this->get_node_area_mutable() + (get_nth_obj_size(ind) * ind) + get_obj_key_size(ind);
 
-        homeds::blob b = v.get_blob();
+        sisl::blob b = v.get_blob();
         memcpy((void*)entry, b.bytes, b.size);
     }
 };

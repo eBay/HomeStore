@@ -19,7 +19,6 @@ struct LRUEvictRecord : public boost::intrusive::list_base_hook<> {
 class LRUEvictionPolicy {
 public:
     typedef LRUEvictRecord RecordType;
-    typedef std::function< bool(const LRUEvictRecord&, bool&) > CanEjectCallback;
 
     LRUEvictionPolicy(int num_entries) {}
 
@@ -42,7 +41,7 @@ public:
         m_list.erase(it);
     }
 
-    void eject_next_candidate(const CanEjectCallback& cb) {
+    void eject_next_candidate(const auto& cb) {
         std::lock_guard< decltype(m_list_guard) > guard(m_list_guard);
 
         auto count = 0U;

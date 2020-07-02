@@ -33,8 +33,8 @@ struct BlkId {
 
     static uint64_t constexpr max_blks_in_op() { return (uint64_t)(sisl::pow(2, NBLKS_BITS)); }
 
-    static homeds::blob get_blob(const BlkId& id) {
-        homeds::blob b;
+    static sisl::blob get_blob(const BlkId& id) {
+        sisl::blob b;
         b.bytes = (uint8_t*)&id;
         b.size = BLKID_SIZE;
 
@@ -126,11 +126,8 @@ struct BlkId {
     /* A blkID represent a page size which is assigned to a blk allocator */
     uint32_t data_size(uint32_t page_size) const { return (m_nblks * page_size); }
 
-    std::string to_string() const {
-        std::stringstream ss;
-        ss << "Bid=" << m_id << " nblks=" << (uint32_t)m_nblks << " chunk=" << (uint32_t)m_chunk_num;
-        return ss.str();
-    }
+    std::string to_string() const { return fmt::format("Id={} nblks={} chunk={}", m_id, m_nblks, m_chunk_num); }
+
     friend std::ostream& operator<<(std::ostream& os, const BlkId& ve) {
         os << ve.to_string();
         return os;
@@ -176,7 +173,7 @@ struct SingleBlk {
         return m_mem;
     }
 
-    void set_mem(homeds::blob b) {
+    void set_mem(sisl::blob b) {
         m_mem.set_piece(b);
     }
 

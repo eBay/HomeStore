@@ -80,7 +80,7 @@ public:
     /* Put the raw buffer into the cache. Returns false if insert is not successful and if the key already
      * exists, it additionally fills up the out_ptr. If insert is successful, returns true and put the
      * new V also into out_ptr. */
-    bool insert(V& v, V** out_ptr, const std::function< void(V*) >& found_cb = nullptr);
+    bool insert(V& v, V** out_ptr, const auto& found_cb);
 
     /* Update the value, if it already exists or insert if not exist. Returns true if operation is successful. In
      * additon, it also populates if the out_key exists with true if key exists or false if key does not */
@@ -106,16 +106,15 @@ class CacheBuffer;
 
 template < typename K >
 class Cache : protected IntrusiveCache< K, CacheBuffer< K > > {
-    typedef std::function< void(const boost::intrusive_ptr< CacheBuffer< K > >& bbuf) > erase_comp_cb;
+    using erase_comp_cb = std::function< void(const boost::intrusive_ptr< CacheBuffer< K > >& bbuf) >;
 
 public:
     Cache(uint64_t max_cache_size, uint32_t avg_size_per_entry);
     ~Cache();
     /* Put the raw buffer into the cache with key k. It returns whether put is successful and if so provides
      * the smart pointer of CacheBuffer. Upsert flag of false indicates if the data already exists, do not insert */
-    bool insert(const K& k, const homeds::blob& b, uint32_t value_offset,
-                boost::intrusive_ptr< CacheBuffer< K > >* out_smart_buf,
-                const std::function< void(CacheBuffer< K >*) >& found_cb = nullptr);
+    bool insert(const K& k, const sisl::blob& b, uint32_t value_offset,
+                boost::intrusive_ptr< CacheBuffer< K > >* out_smart_buf, const auto& found_cb);
     bool insert(const K& k, const boost::intrusive_ptr< CacheBuffer< K > > in_buf,
                 boost::intrusive_ptr< CacheBuffer< K > >* out_smart_buf);
 
@@ -125,15 +124,15 @@ public:
      *
      *  Returns a named tuple of bools - key_found_already and successfully inserted/updated
      */
-    auto update(const K& k, const homeds::blob& b, uint32_t value_offset,
+    auto update(const K& k, const sisl::blob& b, uint32_t value_offset,
                 boost::intrusive_ptr< CacheBuffer< K > >* out_smart_buf);
-    bool upsert(const K& k, const homeds::blob& b, boost::intrusive_ptr< CacheBuffer< K > >* out_smart_buf);
+    bool upsert(const K& k, const sisl::blob& b, boost::intrusive_ptr< CacheBuffer< K > >* out_smart_buf);
     bool get(const K& k, boost::intrusive_ptr< CacheBuffer< K > >* out_smart_buf);
     bool erase(boost::intrusive_ptr< CacheBuffer< K > > buf);
     bool erase(const K& k, boost::intrusive_ptr< CacheBuffer< K > >* out_bbuf);
     bool erase(const K& k, uint32_t offset, uint32_t size, boost::intrusive_ptr< CacheBuffer< K > >* ret_removed_buf);
-    void safe_erase(boost::intrusive_ptr< CacheBuffer< K > > buf, erase_comp_cb cb);
-    void safe_erase(const K& k, erase_comp_cb cb);
+    void safe_erase(boost::intrusive_ptr< CacheBuffer< K > > buf, const erase_comp_cb& cb);
+    void safe_erase(const K& k, const erase_comp_cb& cb);
     bool insert_missing_pieces(const boost::intrusive_ptr< CacheBuffer< K > > buf, uint32_t offset,
                                uint32_t size_to_read, std::vector< std::pair< uint32_t, uint32_t > >& missing_mp);
 };
@@ -146,8 +145,7 @@ enum cache_buf_state {
 
 template < typename K >
 class CacheBuffer : public CacheRecord {
-private:
-    typedef std::function< void(const boost::intrusive_ptr< CacheBuffer< K > >& bbuf) > erase_comp_cb;
+    using erase_comp_cb = std::function< void(const boost::intrusive_ptr< CacheBuffer< K > >& bbuf) >;
 
 public:
 #ifndef NDEBUG
@@ -172,7 +170,6 @@ public:
 #ifndef NDEBUG
     sisl::atomic_counter< int64_t > m_indx; // Refcount
 #define MAX_ENTRIES 50
-    void* arr_symbols[MAX_ENTRIES];
     /* to see if it is data buf or btree buf */
 #endif
 
@@ -196,15 +193,9 @@ public:
             m_indx(-1)
 #endif
     {
-#ifndef NDEBUG
-        for (int i = 0; i < MAX_ENTRIES; i++) {
-            arr_symbols[i] = malloc(sizeof(void*) * 10);
-            bzero(arr_symbols[i], sizeof(void*) * 10);
-        }
-#endif
     }
 
-    CacheBuffer(const K& key, const homeds::blob& blob, Cache< K >* cache, uint32_t offset = 0) :
+    CacheBuffer(const K& key, const sisl::blob& blob, Cache< K >* cache, uint32_t offset = 0) :
             m_mem(nullptr),
             m_refcount(0),
             m_data_offset(-1),
@@ -218,12 +209,6 @@ public:
             m_indx(-1)
 #endif
     {
-#ifndef NDEBUG
-        for (int i = 0; i < MAX_ENTRIES; i++) {
-            arr_symbols[i] = malloc(sizeof(void*) * 10);
-            bzero(arr_symbols[i], sizeof(void*) * 10);
-        }
-#endif
         boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector(), true);
         mvec->set(blob.bytes, blob.size, offset);
 
@@ -231,13 +216,7 @@ public:
         m_key = key;
     }
 
-    virtual ~CacheBuffer() {
-#ifndef NDEBUG
-        for (int i = 0; i < MAX_ENTRIES; i++) {
-            if (arr_symbols[i] != NULL) { free(arr_symbols[i]); }
-        }
-#endif
-    };
+    virtual ~CacheBuffer(){};
 
     const K& get_key() const { return m_key; }
 
@@ -276,9 +255,9 @@ public:
         return inserted_size;
     }
 
-    void set_cb(erase_comp_cb& cb) { m_cb = cb; }
+    void set_cb(const erase_comp_cb& cb) { m_cb = cb; }
 
-    erase_comp_cb get_cb() { return m_cb; }
+    const erase_comp_cb& get_cb() { return m_cb; }
 
     void set_memvec(boost::intrusive_ptr< homeds::MemVector > vec, uint32_t offset, uint32_t size) {
         assert(offset >= 0);
@@ -301,9 +280,9 @@ public:
         return m_mem;
     }
 
-    homeds::blob at_offset(uint32_t offset) const {
+    sisl::blob at_offset(uint32_t offset) const {
         assert(m_data_offset >= 0);
-        homeds::blob b;
+        sisl::blob b;
         b.bytes = nullptr;
         b.size = 0;
         get_memvec().get(&b, m_data_offset + offset);
@@ -313,7 +292,6 @@ public:
     friend void intrusive_ptr_add_ref(CacheBuffer< K >* buf) {
 #ifndef NDEBUG
         int x = buf->m_indx.increment() % MAX_ENTRIES;
-        auto size = backtrace((void**)(buf->arr_symbols[x]), 10);
 #endif
         buf->m_refcount.increment();
     }

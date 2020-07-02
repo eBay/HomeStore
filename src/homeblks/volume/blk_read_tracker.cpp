@@ -11,13 +11,13 @@ SDS_LOGGING_DECL(volume)
 namespace homestore {
 
 void Blk_Read_Tracker::insert(BlkId& bid) {
-    homeds::blob b = BlkId::get_blob(bid);
+    sisl::blob b = BlkId::get_blob(bid);
     uint64_t hash_code = util::Hash64((const char*)b.bytes, (size_t)b.size);
     BlkEvictionRecord* ber = BlkEvictionRecord::make_object(bid);
     BlkEvictionRecord* outber = nullptr;
     // insert into pending read map and set ref of value to 2(one for hashmap and one for client)
     // If value already present , insert() will just increase ref count of value by 1.
-    bool inserted = m_pending_reads_map.insert(bid, *ber, &outber, hash_code);
+    bool inserted = m_pending_reads_map.insert(bid, *ber, &outber, hash_code, NULL_LAMBDA);
     if (inserted) {
         COUNTER_INCREMENT(m_metrics, blktrack_pending_blk_read_map_sz, 1);
     } else { // record exists already, some other read happened
@@ -40,7 +40,7 @@ void Blk_Read_Tracker::safe_remove_blks(const volume_req_ptr& vreq) {
 
 /* after read is finished, tis marked for safe removal*/
 void Blk_Read_Tracker::safe_remove_blk_on_read(Free_Blk_Entry& fbe) {
-    homeds::blob b = BlkId::get_blob(fbe.m_blkId);
+    sisl::blob b = BlkId::get_blob(fbe.m_blkId);
     uint64_t hash_code = util::Hash64((const char*)b.bytes, (size_t)b.size);
 
 #ifdef _PRERELEASE
@@ -64,7 +64,7 @@ void Blk_Read_Tracker::safe_remove_blk_on_read(Free_Blk_Entry& fbe) {
 /* after overwriting blk id in write flow, its marked for safe removal if cannot be freed immediatly*/
 void Blk_Read_Tracker::safe_remove_blk_on_write(Free_Blk_Entry& fbe) {
     BlkId bid = fbe.m_blkId;
-    homeds::blob b = BlkId::get_blob(bid);
+    sisl::blob b = BlkId::get_blob(bid);
     uint64_t hash_code = util::Hash64((const char*)b.bytes, (size_t)b.size);
     BlkEvictionRecord* outber = nullptr;
     bool found = m_pending_reads_map.get(bid, &outber, hash_code); // get increases ref if found

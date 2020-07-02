@@ -23,8 +23,8 @@ using namespace std;
 #define ENTRIES_PER_BUCKET 4
 
 struct blk_id {
-    static homeds::blob get_blob(const blk_id& id) {
-        homeds::blob b;
+    static sisl::blob get_blob(const blk_id& id) {
+        sisl::blob b;
         b.bytes = (uint8_t*)&id.m_id;
         b.size = sizeof(uint64_t);
 
@@ -98,7 +98,7 @@ void test_insert(benchmark::State& state) {
         auto index = state.thread_index;
         for (auto i = 0U; i < state.range(0); i++) { // Loops for provided ranges
             blk_entry* res_entry;
-            bool ret = glob_set->insert(*glob_entries[index], &res_entry);
+            bool ret = glob_set->insert(*glob_entries[index], &res_entry, NULL_LAMBDA);
             index += state.threads;
         }
     }

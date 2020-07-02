@@ -13,7 +13,7 @@ struct indx_req;
 class indx_tbl;
 class IndxMgr;
 class indx_mgr;
-typedef std::function< void(indx_cp_id_ptr cur_indx_id, hs_cp_id* hb_id, hs_cp_id* new_hb_id) > prepare_cb;
+using prepare_cb = std::function< void(const indx_cp_id_ptr& cur_indx_id, hs_cp_id* hb_id, hs_cp_id* new_hb_id) >;
 #define indx_mgr_ptr std::shared_ptr< IndxMgr >
 
 /* Journal entry
@@ -31,7 +31,7 @@ struct journal_hdr {
 
 class indx_journal_entry {
 private:
-    sisl::alignable_blob< homestore::iobuf_alloc, homestore::iobuf_free > m_iob;
+    sisl::io_blob m_iob;
 
 public:
     uint32_t size(indx_req* ireq) const;
@@ -68,11 +68,9 @@ public:
     }
 
     /* it update the alloc blk id and checksum */
-    sisl::blob create_journal_entry(indx_req* v_req);
+    sisl::io_blob create_journal_entry(indx_req* v_req);
 
-    std::string to_string() const {
-        return fmt::format("size= {}", size());
-    }
+    std::string to_string() const { return fmt::format("size= {}", size()); }
 };
 
 enum indx_mgr_state { ONLINE = 0, DESTROYING = 1 };
@@ -80,7 +78,7 @@ struct destroy_journal_ent {
     indx_mgr_state state;
 };
 
-typedef cp_done_cb indxmgr_stop_cb;
+using indxmgr_stop_cb = cp_done_cb;
 
 /* Checkpoint is loosely defined demarcation of how much data is persisted. It might contain data after this checkpoint
  * also but it defintely contains data upto demarcation line. So IOs in each checkpoint(blkalloc checkpoint,
@@ -137,8 +135,8 @@ struct indx_active_info {
     btree_cp_id_ptr btree_id;
     blkid_list_ptr free_blkid_list;
     indx_active_info(int64_t start_psn, blkid_list_ptr& free_blkid_list) :
-            start_psn(start_psn), free_blkid_list(free_blkid_list) {
-    }
+            start_psn(start_psn),
+            free_blkid_list(free_blkid_list) {}
 };
 
 struct indx_diff_info {
@@ -153,7 +151,7 @@ struct indx_snap_info {
 };
 
 /* During prepare flush we decide to take a CP out of active, diff or snap or all 3 cps*/
-struct indx_cp_id {
+struct indx_cp_id : public boost::intrusive_ref_counter< indx_cp_id > {
     indx_mgr_ptr indx_mgr;
     cp_state flags = cp_state::active_cp;
 
@@ -167,7 +165,10 @@ struct indx_cp_id {
     indx_snap_info sinfo;
 
     indx_cp_id(int64_t cp_cnt, int64_t start_active_psn, indx_mgr_ptr indx_mgr, blkid_list_ptr& free_blkid_list) :
-            indx_mgr(indx_mgr), cp_cnt(cp_cnt), indx_size(0), ainfo(start_active_psn, free_blkid_list) {}
+            indx_mgr(indx_mgr),
+            cp_cnt(cp_cnt),
+            indx_size(0),
+            ainfo(start_active_psn, free_blkid_list) {}
 
     cp_state state() const { return flags; }
 };

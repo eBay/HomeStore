@@ -34,7 +34,7 @@ public:
     VolReq() { buf = nullptr; }
 
     virtual ~VolReq() {
-        if (buf) { free(buf); }
+        if (buf) { iomanager.iobuf_free(buf); }
     }
 };
 
@@ -216,7 +216,7 @@ public:
             assert(0);
             m_outstd_ios--;
             m_rd_err_cnt++;
-            free(buf);
+            iomanager.iobuf_free(buf);
             std::lock_guard< std::mutex > lk(m_vol_info[vol_id]->m_mtx);
             reset_bm_bits(vol_id, lba, nblks);
         }
@@ -588,7 +588,7 @@ private:
             auto size = info.size;
             auto buf = info.buf;
             while (size != 0) {
-                homeds::blob b = VolInterface::get_instance()->at_offset(buf, offset);
+                sisl::blob b = VolInterface::get_instance()->at_offset(buf, offset);
                 auto hash = get_hash(b.bytes);
                 auto stored_hash = m_verify_mgr->get_crc(req->vol_id, req->lba + nblks_in_buf_list);
 

@@ -18,6 +18,7 @@
 #include "engine/common/homestore_config.hpp"
 #include <utility/obj_life_counter.hpp>
 #include "engine/common/homestore_assert.hpp"
+#include <iomgr/iomgr.hpp>
 
 namespace homeds {
 using namespace homestore;
@@ -152,7 +153,7 @@ public:
         if (mvec->m_refcnt.fetch_sub(1, std::memory_order_relaxed) != 1) { return; }
         for (auto i = 0u; i < mvec->m_list.size(); i++) {
             if (mvec->m_list[i].ptr() != nullptr) {
-                free(mvec->m_list[i].ptr());
+                iomanager.iobuf_free(mvec->m_list[i].ptr());
             } else {
                 assert(0);
             }
@@ -174,9 +175,9 @@ public:
         m_list.push_back(m);
     }
 
-    void set(const homeds::blob& b, uint32_t offset = 0) { set(b.bytes, b.size, offset); }
+    void set(const sisl::blob& b, uint32_t offset = 0) { set(b.bytes, b.size, offset); }
 
-    void get(homeds::blob* outb, uint32_t offset = 0) const {
+    void get(sisl::blob* outb, uint32_t offset = 0) const {
         uint32_t ind = 0;
         std::unique_lock< std::recursive_mutex > mtx(m_mtx);
         if ((m_list.size() && bsearch(offset, -1, &ind))) {
@@ -355,7 +356,7 @@ public:
         return inserted_size;
     }
 
-    bool update_missing_piece(uint32_t offset, uint32_t size, uint8_t* ptr, std::function< void() > init_cb) {
+    bool update_missing_piece(uint32_t offset, uint32_t size, uint8_t* ptr, const auto& init_cb) {
         uint32_t new_ind;
         bool inserted = false;
         std::unique_lock< std::recursive_mutex > mtx(m_mtx);

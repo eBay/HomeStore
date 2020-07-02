@@ -67,12 +67,13 @@ public:
         ASSERT_LT(m_log_store->get_contiguous_completed_seq_num(0), start_lsn + nparallel_count);
         for (auto lsn : lsns) {
             auto d = prepare_data(lsn);
-            m_log_store->write_async(lsn, {(uint8_t*)d, d->total_size()}, nullptr,
-                                     [d, this](logstore_seq_num_t seq_num, logdev_key ld_key, void* ctx) {
-                                         assert(ld_key);
-                                         free(d);
-                                         m_comp_cb(seq_num, ld_key);
-                                     });
+            m_log_store->write_async(
+                lsn, {(uint8_t*)d, d->total_size(), false}, nullptr,
+                [d, this](logstore_seq_num_t seq_num, const sisl::io_blob& b, logdev_key ld_key, void* ctx) {
+                    assert(ld_key);
+                    iomanager.iobuf_free((uint8_t*)d);
+                    m_comp_cb(seq_num, ld_key);
+                });
         }
     }
 
@@ -219,10 +220,7 @@ public:
         }
 
         LOGINFO("Starting iomgr with {} threads", nthreads);
-        iomanager.start(1 /* total interfaces */, nthreads, false);
-        iomanager.add_drive_interface(
-            std::dynamic_pointer_cast< iomgr::DriveInterface >(std::make_shared< iomgr::AioDriveInterface >()),
-            true /* is_default */);
+        iomanager.start(nthreads);
 
         if (restart) {
             for (auto i = 0u; i < n_log_stores; ++i) {

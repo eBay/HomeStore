@@ -113,7 +113,7 @@ public:
     //            }
     //
     virtual uint64_t get_hash_code() override {
-        homeds::blob b = get_blob();
+        sisl::blob b = get_blob();
         return util::Hash64((const char*)b.bytes, (size_t)b.size);
     }
 };

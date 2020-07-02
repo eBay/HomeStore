@@ -30,8 +30,8 @@ using namespace std;
 #define MAX_CACHE_SIZE 2 * 1024 * 1024
 
 struct blk_id {
-    static homeds::blob get_blob(const blk_id& id) {
-        homeds::blob b;
+    static sisl::blob get_blob(const blk_id& id) {
+        sisl::blob b;
         b.bytes = (uint8_t*)&id.m_id;
         b.size = sizeof(uint64_t);
 
@@ -97,7 +97,7 @@ void test_insert(benchmark::State& state) {
         // LOG(INFO) << "Will insert " << index << " - " << state.range(0) << " entries in this thread";
         for (auto i = index; i < state.range(0); i += state.threads) { // Loops for provided ranges
             boost::intrusive_ptr< homestore::CacheBuffer< blk_id > > cbuf;
-            glob_cache->insert(*glob_ids[i], {(uint8_t*)glob_bufs[i], 64}, 0, &cbuf);
+            glob_cache->insert(*glob_ids[i], {(uint8_t*)glob_bufs[i], 64}, 0, &cbuf, NULL_LAMBDA);
             // LOG(INFO) << "Completed insert of index i = " << i;
         }
     }
@@ -114,7 +114,7 @@ void test_reads(benchmark::State& state) {
 #ifndef NDEBUG
             assert(found);
             int id;
-            homeds::blob b;
+            sisl::blob b;
             cbuf->get(&b);
             sscanf((const char *)b.bytes, "Content for blk id = %d\n", &id);
             assert(id == glob_ids[i]->m_internal_id);

@@ -126,8 +126,8 @@ public:
 
     std::string to_string() const { return std::to_string(m_nblks) + " " + std::to_string(m_crc); }
 
-    homeds::blob get_blob() const {
-        homeds::blob b;
+    sisl::blob get_blob() const {
+        sisl::blob b;
         b.size = sizeof(uint64_t);
         b.bytes = (uint8_t*)&m_crc;
         return b;

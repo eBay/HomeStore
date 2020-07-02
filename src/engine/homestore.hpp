@@ -341,7 +341,7 @@ protected:
 private:
     disk_attributes get_disk_attrs(bool is_file) {
         disk_attributes attr;
-        /* We should take these params from the config file or from the disks direectly */
+        /* We should take these params from the config file or from the disks directly */
         attr.phys_page_size = 4096;
         attr.align_size = 512;
 #ifndef NDEBUG

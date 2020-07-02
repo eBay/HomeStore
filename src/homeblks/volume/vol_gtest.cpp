@@ -8,6 +8,7 @@
 #include <api/vol_interface.hpp>
 #include <iomgr/iomgr.hpp>
 #include <iomgr/aio_drive_interface.hpp>
+#include <iomgr/spdk_drive_interface.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <fstream>
@@ -94,6 +95,7 @@ struct TestCfg {
     bool precreate_volume = true;
     bool expect_io_error = false;
     uint32_t p_volume_size = 60;
+    bool is_spdk = false;
 };
 
 struct TestOutput {
@@ -247,7 +249,7 @@ struct io_req_t : public vol_interface_req {
         if (wbuf) memcpy(validate_buf, wbuf, size);
     }
 
-    virtual ~io_req_t() { free(validate_buf); }
+    virtual ~io_req_t() { iomanager.iobuf_free(validate_buf); }
 };
 
 TestCfg tcfg;            // Config for each VolTest
@@ -305,7 +307,7 @@ public:
     }
 
     ~VolTest() {
-        if (init_buf) { free(init_buf); }
+        if (init_buf) { iomanager.iobuf_free((uint8_t*)init_buf); }
     }
 
     void remove_files() {
@@ -360,10 +362,7 @@ public:
         /* Don't populate the whole disks. Only 60 % of it */
         max_vol_size = (tcfg.p_volume_size * max_capacity) / (100 * tcfg.max_vols);
 
-        iomanager.start(1 /* total interfaces */, tcfg.num_threads, false);
-        iomanager.add_drive_interface(
-            std::dynamic_pointer_cast< iomgr::DriveInterface >(std::make_shared< iomgr::AioDriveInterface >()),
-            true /* is_default */);
+        iomanager.start(tcfg.num_threads, tcfg.is_spdk);
 
         init_params params;
         params.open_flags = tcfg.io_flags;
@@ -563,7 +562,7 @@ public:
     }
 
     void start_job(TestJob* job, wait_type_t wait_type = wait_type_t::for_completion) {
-        iomanager.run_on(iomgr::thread_regex::all_io,
+        iomanager.run_on(iomgr::thread_regex::all_iomgr_created_io,
                          [job, this](iomgr::io_thread_addr_t a) { job->start_in_this_thread(); });
         if (wait_type == wait_type_t::for_execution) {
             job->wait_for_execution();
@@ -718,7 +717,7 @@ public:
 
     virtual void run_one_iteration() override {
         int cnt = 0;
-        while ((cnt++ < 8) && m_outstanding_ios < (int64_t)tcfg.max_outstanding_ios) {
+        while ((cnt++ < 1) && m_outstanding_ios < (int64_t)tcfg.max_outstanding_ios) {
             write_io();
             if (tcfg.read_enable) { read_io(); }
         }
@@ -955,7 +954,7 @@ protected:
             auto buf = info.buf;
             while (size != 0) {
                 uint32_t size_read = 0;
-                homeds::blob b = VolInterface::get_instance()->at_offset(buf, offset);
+                sisl::blob b = VolInterface::get_instance()->at_offset(buf, offset);
 
                 size_read = tcfg.vol_page_size;
                 int j = 0;
@@ -1354,7 +1353,8 @@ SDS_OPTION_GROUP(
     (expect_io_error, "", "expect_io_error", "expect_io_error", ::cxxopts::value< uint32_t >()->default_value("0"),
      "0 or 1"),
     (p_volume_size, "", "p_volume_size", "p_volume_size", ::cxxopts::value< uint32_t >()->default_value("60"),
-     "0 to 200"))
+     "0 to 200"),
+    (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"))
 #define ENABLED_OPTIONS logging, home_blks, test_volume
 
 SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
@@ -1401,6 +1401,7 @@ int main(int argc, char* argv[]) {
     _gcfg.io_flags = static_cast< io_flag >(SDS_OPTIONS["io_flags"].as< uint32_t >());
     _gcfg.expect_io_error = SDS_OPTIONS["expect_io_error"].as< uint32_t >() ? true : false;
     _gcfg.p_volume_size = SDS_OPTIONS["p_volume_size"].as< uint32_t >();
+    _gcfg.is_spdk = SDS_OPTIONS["spdk"].as< bool >();
 
     if (SDS_OPTIONS.count("device_list")) {
         _gcfg.dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();

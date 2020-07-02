@@ -1,6 +1,6 @@
 
 //
-// Created by Yaming Kuang 1/15/2020 
+// Created by Yaming Kuang 1/15/2020
 //
 
 #include "meta_blks_mgr.hpp"
@@ -40,10 +40,7 @@ static void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthre
     }
 
     LOGINFO("Starting iomgr with {} threads", nthreads);
-    iomanager.start(1 /* total interfaces */, nthreads);
-    iomanager.add_drive_interface(
-        std::dynamic_pointer_cast< iomgr::DriveInterface >(std::make_shared< iomgr::AioDriveInterface >()),
-        true /* is_default */);
+    iomanager.start(nthreads);
 
     uint64_t app_mem_size = ((ndevices * dev_size) * 15) / 100;
     LOGINFO("Initialize and start HomeBlks with app_mem_size = {}", app_mem_size);
@@ -187,7 +184,7 @@ public:
         // HS_ASSERT(RELEASE, m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
         //         m_mbm->get_used_size());
 
-        free(buf);
+        iomanager.iobuf_free(buf);
     }
 
     void do_sb_remove() {
@@ -244,7 +241,7 @@ public:
         //        m_total_wrt_sz,
         //                m_mbm->get_used_size());
 
-        free(buf);
+        iomanager.iobuf_free(buf);
     }
 
     // compare m_cb_blks with m_write_sbs;
@@ -278,15 +275,15 @@ public:
         m_total_wrt_sz = m_mbm->get_used_size();
 
         m_mbm->deregister_handler(mtype);
-        m_mbm->register_handler(mtype,
-                                [this](meta_blk* mblk, sisl::byte_view<> buf, size_t size) {
-                                    if (mblk) {
-                                        std::unique_lock< std::mutex > lg(m_mtx);
-                                        m_cb_blks[mblk->hdr.h.blkid.to_integer()] =
-                                            std::string((char*)(buf.bytes()), size);
-                                    }
-                                },
-                                [this](bool success) { assert(success); });
+        m_mbm->register_handler(
+            mtype,
+            [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
+                if (mblk) {
+                    std::unique_lock< std::mutex > lg(m_mtx);
+                    m_cb_blks[mblk->hdr.h.blkid.to_integer()] = std::string((char*)(buf.bytes()), size);
+                }
+            },
+            [this](bool success) { assert(success); });
 
         while (keep_running()) {
             switch (get_op()) {

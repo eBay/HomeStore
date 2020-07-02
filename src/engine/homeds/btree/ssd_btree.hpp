@@ -30,22 +30,23 @@ namespace homeds {
 namespace btree {
 
 #define SSDBtreeStore BtreeStore< btree_store_type::SSD_BTREE, K, V, InteriorNodeType, LeafNodeType >
+#define ssd_btree_t Btree< btree_store_type::SSD_BTREE, K, V, InteriorNodeType, LeafNodeType >
 
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
 class SSDBtreeStore {
 public:
     using HeaderType = wb_cache_buffer_t;
 
-    static std::unique_ptr< SSDBtreeStore > init_btree(BtreeConfig& cfg) {
+    static std::unique_ptr< SSDBtreeStore > init_btree(ssd_btree_t* btree, BtreeConfig& cfg) {
         static std::once_flag flag1;
         std::call_once(flag1, [&cfg]() { m_blkstore = (btree_blkstore_t*)cfg.blkstore; });
-        return std::unique_ptr< SSDBtreeStore >(new SSDBtreeStore(cfg));
+        return std::make_unique< SSDBtreeStore >(btree, cfg);
     }
 
-    BtreeStore(BtreeConfig& cfg) :
+    BtreeStore(ssd_btree_t* btree, BtreeConfig& cfg) :
+            m_btree(btree),
             m_cfg(cfg),
-            m_wb_cache(cfg.blkstore, cfg.align_size,
-                       std::bind(&SSDBtreeStore::cp_done_store, this, std::placeholders::_1), cfg.trigger_cp_cb) {
+            m_wb_cache(cfg.blkstore, cfg.align_size, bind_this(SSDBtreeStore::cp_done_store, 1), cfg.trigger_cp_cb) {
         m_node_size = cfg.get_node_size();
         m_cfg.set_node_area_size(m_node_size - sizeof(LeafPhysicalNode));
         m_first_cp = btree_cp_id_ptr(new (btree_cp_id));
@@ -55,19 +56,20 @@ public:
 
     /* It is called when its consumer has successfully persisted its superblock. */
     void create_done_store(bnodeid_t m_root_node) {
-        auto bid = BlkId(m_root_node.m_id);
+        auto bid = BlkId(m_root_node);
         m_blkstore->alloc_blk(bid);
     }
 
-    void cp_done_store(btree_cp_id_ptr cp_id) { cp_id->cb(cp_id); }
+    void cp_done_store(const btree_cp_id_ptr& cp_id) { cp_id->cb(cp_id); }
 
     /* It attaches the new CP and prepare for cur cp flush */
-    static btree_cp_id_ptr attach_prepare_cp(SSDBtreeStore* store, btree_cp_id_ptr cur_cp_id, bool is_last_cp,
+    static btree_cp_id_ptr attach_prepare_cp(SSDBtreeStore* store, const btree_cp_id_ptr& cur_cp_id, bool is_last_cp,
                                              bool blkalloc_checkpoint) {
         return (store->attach_prepare_cp_store(cur_cp_id, is_last_cp, blkalloc_checkpoint));
     }
 
-    btree_cp_id_ptr attach_prepare_cp_store(btree_cp_id_ptr cur_cp_id, bool is_last_cp, bool blkalloc_checkpoint) {
+    btree_cp_id_ptr attach_prepare_cp_store(const btree_cp_id_ptr& cur_cp_id, bool is_last_cp,
+                                            bool blkalloc_checkpoint) {
         /* start with ref cnt = 1. We dec it when trigger is called */
         if (cur_cp_id) {
             cur_cp_id->end_psn = m_journal->get_contiguous_issued_seq_num(cur_cp_id->start_psn);
@@ -102,9 +104,7 @@ public:
             HomeLogStoreMgr::instance().open_log_store(
                 sb.journal_id, ([this](std::shared_ptr< HomeLogStore > logstore) {
                     m_journal = logstore;
-                    m_journal->register_log_found_cb(([this](logstore_seq_num_t seqnum, log_buffer buf, void* mem) {
-                        this->log_found(seqnum, buf, mem);
-                    }));
+                    m_journal->register_log_found_cb(bind_this(SSDBtreeStore::log_found, 3));
                 }));
         } else {
             m_journal = HomeLogStoreMgr::instance().create_new_log_store();
@@ -118,34 +118,45 @@ public:
 
     logstore_id_t get_journal_id_store() { return (m_journal->get_store_id()); }
 
-    void log_found(logstore_seq_num_t seqnum, log_buffer log_buf, void* mem) {}
+    void log_found(logstore_seq_num_t seqnum, log_buffer log_buf, void* mem) {
+#if 0
+        auto& cp_sb = m_btree->get_last_cp_cb();
+        if (seqnum >= cp_sb.active_psn) {
+            // Entry is not replayed yet
+            btree_journal_entry* jentry = (btree_journal_entry*)log_buf.bytes;
+            if (jentry->op == journal_op::BTREE_SPLIT) { m_btree->split_node_replay(jentry, m_first_cp); }
+        }
 
-    static void cp_start(SSDBtreeStore* store, btree_cp_id_ptr cp_id, cp_comp_callback cb) {
+        if ()
+#endif
+    }
+
+    static void cp_start(SSDBtreeStore* store, const btree_cp_id_ptr& cp_id, cp_comp_callback cb) {
         store->cp_start_store(cp_id, cb);
     }
 
-    void cp_start_store(btree_cp_id_ptr cp_id, cp_comp_callback cb) {
+    void cp_start_store(const btree_cp_id_ptr& cp_id, cp_comp_callback cb) {
         cp_id->cb = cb;
         try_cp_start(cp_id);
     }
 
-    void try_cp_start(btree_cp_id_ptr cp_id) {
+    void try_cp_start(const btree_cp_id_ptr& cp_id) {
         auto ref_cnt = cp_id->ref_cnt.fetch_sub(1);
         if (ref_cnt == 1) { m_wb_cache.cp_start(cp_id); }
     }
 
-    static void flush_free_blks(SSDBtreeStore* store, btree_cp_id_ptr btree_id,
+    static void flush_free_blks(SSDBtreeStore* store, const btree_cp_id_ptr& btree_id,
                                 std::shared_ptr< homestore::blkalloc_cp_id >& blkalloc_id) {
         store->flush_free_blks(btree_id, blkalloc_id);
     }
 
-    void flush_free_blks(btree_cp_id_ptr btree_id, std::shared_ptr< homestore::blkalloc_cp_id >& blkalloc_id) {
+    void flush_free_blks(const btree_cp_id_ptr& btree_id, std::shared_ptr< homestore::blkalloc_cp_id >& blkalloc_id) {
         m_wb_cache.flush_free_blks(btree_id, blkalloc_id);
     }
 
-    static void truncate(SSDBtreeStore* store, btree_cp_id_ptr cp_id) { store->truncate_store(cp_id); }
+    static void truncate(SSDBtreeStore* store, const btree_cp_id_ptr& cp_id) { store->truncate_store(cp_id); }
 
-    void truncate_store(btree_cp_id_ptr cp_id) { m_journal->truncate(cp_id->end_psn); }
+    void truncate_store(const btree_cp_id_ptr& cp_id) { m_journal->truncate(cp_id->end_psn); }
 
     static void cp_done(trigger_cp_callback cb) { wb_cache_t::cp_done(cb); }
 
@@ -153,43 +164,15 @@ public:
 
     void destroy_done_store() { home_log_store_mgr.remove_log_store(m_journal->get_store_id()); }
 
-    static void write_journal_entry(SSDBtreeStore* store, btree_cp_id_ptr cp_id, sisl::alignable_blob< homestore::iobuf_alloc, homestore::iobuf_free >& iob) {
-        store->write_journal_entry_store(cp_id, iob);
+    static bool is_aligned_buf_needed(SSDBtreeStore* store, size_t size) {
+        return HomeLogStore::is_aligned_buf_needed(size);
     }
 
-    static bool is_aligned_buf_needed(SSDBtreeStore* store, size_t size) { return store->is_aligned_buf_needed(size); }
-
-    bool is_aligned_buf_needed(size_t size) { return m_journal->is_aligned_buf_needed(size); }
-
-    void write_journal_entry_store(btree_cp_id_ptr cp_id, sisl::alignable_blob< homestore::iobuf_alloc, homestore::iobuf_free >& iob) {
-        ++cp_id->ref_cnt;
-        m_journal->append_async(iob, iob.bytes,
-                                ([this, cp_id, iob](logstore_seq_num_t seq_num, bool status, void* cookie) mutable {
-                                    auto hdr = btree_journal_entry::get_entry_hdr((uint8_t*)cookie);
-                                    if (hdr->op == BTREE_CREATE) {
-                                        /* we set disk bitmap later when btree root node is persisted */
-                                        iob.buf_free();
-                                        try_cp_start(cp_id);
-                                        return;
-                                    }
-                                    auto pair = btree_journal_entry::get_new_nodes_list((uint8_t*)cookie);
-                                    auto new_node_id_list = pair.first;
-                                    auto size = pair.second;
-                                    /* blk id is alloceted in disk bitmap only after it is writing to journal. check
-                                     * blk_alloctor base class for further explanations.
-                                     */
-                                    for (uint32_t i = 0; i < size; ++i) {
-                                        auto bid = BlkId(new_node_id_list[i]);
-                                        m_blkstore->alloc_blk(bid);
-                                    }
-                                    iob.buf_free();
-                                    try_cp_start(cp_id);
-                                }));
-    }
+    // bool is_aligned_buf_needed(size_t size) { return m_journal->is_aligned_buf_needed(size); }
 
     static uint8_t* get_physical(const SSDBtreeNode* bn) {
         wb_cache_buffer_t* bbuf = (wb_cache_buffer_t*)(bn);
-        homeds::blob b = bbuf->at_offset(0);
+        sisl::blob b = bbuf->at_offset(0);
         return b.bytes;
     }
 
@@ -212,13 +195,13 @@ public:
         }
 
         // Access the physical node buffer and initialize it
-        homeds::blob b = safe_buf->at_offset(0);
+        sisl::blob b = safe_buf->at_offset(0);
         assert(b.size == store->get_node_size());
         if (is_leaf) {
-            bnodeid_t bid(blkid.to_integer(), 0);
+            bnodeid_t bid = blkid.to_integer();
             auto n = new (b.bytes) VariantNode< LeafNodeType, K, V >(&bid, true, store->m_cfg);
         } else {
-            bnodeid_t bid(blkid.to_integer(), 0);
+            bnodeid_t bid = blkid.to_integer();
             auto n = new (b.bytes) VariantNode< InteriorNodeType, K, V >(&bid, true, store->m_cfg);
         }
         boost::intrusive_ptr< SSDBtreeNode > new_node = boost::static_pointer_cast< SSDBtreeNode >(safe_buf);
@@ -235,11 +218,9 @@ public:
         // Read the data from the block store
         try {
 #ifdef _PRERELEASE
-            if (homestore_flip->test_flip("btree_read_fail", (uint64_t)(id.m_id))) {
-                folly::throwSystemError("flip error");
-            }
+            if (homestore_flip->test_flip("btree_read_fail", id)) { folly::throwSystemError("flip error"); }
 #endif
-            homestore::BlkId blkid(id.m_id);
+            homestore::BlkId blkid(id);
             auto req = writeback_req_t::make_request();
             req->is_read = true;
             req->isSyncCall = true;
@@ -255,7 +236,6 @@ public:
     static void copy_node(SSDBtreeStore* store, boost::intrusive_ptr< SSDBtreeNode > copy_from,
                           boost::intrusive_ptr< SSDBtreeNode > copy_to) {
         bnodeid_t original_to_id = copy_to->get_node_id();
-        original_to_id.m_pc_gen_flag = copy_from->get_node_id().m_pc_gen_flag; // copy pc gen flag
         boost::intrusive_ptr< wb_cache_buffer_t > to_buff = boost::dynamic_pointer_cast< wb_cache_buffer_t >(copy_to);
         boost::intrusive_ptr< wb_cache_buffer_t > frm_buff =
             boost::dynamic_pointer_cast< wb_cache_buffer_t >(copy_from);
@@ -299,9 +279,10 @@ public:
         return btree_status_t::success;
     }
 
-    static btree_status_t write_node(SSDBtreeStore* store, boost::intrusive_ptr< SSDBtreeNode > bn,
-                                     boost::intrusive_ptr< SSDBtreeNode > dependent_bn, btree_cp_id_ptr cp_id) {
-        homestore::BlkId blkid(bn->get_node_id().m_id);
+    static btree_status_t write_node(SSDBtreeStore* store, const boost::intrusive_ptr< SSDBtreeNode >& bn,
+                                     const boost::intrusive_ptr< SSDBtreeNode >& dependent_bn,
+                                     const btree_cp_id_ptr& cp_id) {
+        homestore::BlkId blkid(bn->get_node_id());
 
         auto physical_node = (LeafPhysicalNode*)(bn->at_offset(0).bytes);
         physical_node->set_checksum(get_node_area_size(store));
@@ -310,8 +291,8 @@ public:
         return btree_status_t::success;
     }
 
-    static btree_status_t refresh_node(SSDBtreeStore* store, boost::intrusive_ptr< SSDBtreeNode > bn,
-                                       bool is_write_modifiable, btree_cp_id_ptr cp_id) {
+    static btree_status_t refresh_node(SSDBtreeStore* store, const boost::intrusive_ptr< SSDBtreeNode >& bn,
+                                       bool is_write_modifiable, const btree_cp_id_ptr& cp_id) {
 
         /* add the latest request pending on this node */
         auto ret = store->get_wb_cache()->refresh_buf(bn, is_write_modifiable, cp_id);
@@ -327,8 +308,8 @@ public:
         return btree_status_t::success;
     }
 
-    static void free_node(SSDBtreeStore* store, boost::intrusive_ptr< SSDBtreeNode >& bn, bool mem_only,
-                          btree_cp_id_ptr cp_id) {
+    static void free_node(SSDBtreeStore* store, const boost::intrusive_ptr< SSDBtreeNode >& bn, bool mem_only,
+                          const btree_cp_id_ptr& cp_id) {
         if (mem_only) {
             /* it will be automatically freed */
             return;
@@ -344,7 +325,96 @@ public:
         homestore::CacheBuffer< homestore::BlkId >::deref((homestore::CacheBuffer< homestore::BlkId >&)*bn);
     }
 
+    /************************** Journal entry section **********************/
+    static sisl::io_blob make_journal_entry(journal_op op, bool is_root, bt_node_gen_pair pair = {empty_bnodeid, 0}) {
+        auto b = sisl::io_blob(journal_entry_initial_size(),
+                               HomeLogStore::is_aligned_buf_needed(journal_entry_initial_size())
+                                   ? HS_STATIC_CONFIG(disk_attr.align_size)
+                                   : 0);
+        new (b.bytes) btree_journal_entry(op, is_root, pair);
+        return b;
+    }
+
+    static inline constexpr btree_journal_entry* blob_to_entry(const sisl::io_blob& b) {
+        return (btree_journal_entry*)b.bytes;
+    }
+
+    static void append_node_to_journal(sisl::io_blob& j_iob, bt_journal_node_op node_op,
+                                       const boost::intrusive_ptr< SSDBtreeNode >& node, const btree_cp_id_ptr& cp_id,
+                                       bool append_last_key = false) {
+        sisl::blob key_blob;
+        K key;
+        if (append_last_key) {
+            node->get_last_key(&key);
+            key_blob = key.get_blob();
+        }
+
+        uint16_t append_size = sizeof(bt_journal_node_info) + key_blob.size;
+        auto e = realloc_if_needed(j_iob, append_size);
+        e->append_node(node_op, node->get_node_id(), node->get_gen(), key_blob);
+
+        if (cp_id) {
+            if (node_op == bt_journal_node_op::creation) {
+                cp_id->btree_size.fetch_add(1);
+            } else if (node_op == bt_journal_node_op::removal) {
+                cp_id->btree_size.fetch_sub(1);
+            }
+        }
+    }
+
+    static void write_journal_entry(SSDBtreeStore* store, const btree_cp_id_ptr& cp_id, sisl::io_blob& j_iob) {
+        store->write_journal_entry_store(cp_id, j_iob);
+    }
+
 private:
+    void write_journal_entry_store(const btree_cp_id_ptr& cp_id, sisl::io_blob& j_iob) {
+        ++cp_id->ref_cnt;
+
+        // Update the size to actual size for unaligned buffer. For aligned we have to write entire buffer (since it
+        // will avoid a copy and write directly)
+        if (!j_iob.aligned) j_iob.size = blob_to_entry(j_iob)->actual_size;
+
+        m_journal->append_async(
+            j_iob, nullptr, ([this, cp_id](logstore_seq_num_t seq_num, sisl::io_blob& iob, bool status, void* cookie) {
+                btree_journal_entry* jentry = blob_to_entry(iob);
+                if (jentry->op != journal_op::BTREE_CREATE) {
+                    /*
+                     * blk id is allocated for newly created nodes in disk bitmap only after it is
+                     * writing to journal. check blk_alloctor base class for further explanations.
+                     */
+                    jentry->foreach_node(bt_journal_node_op::creation, [&](bt_node_gen_pair n, sisl::blob k) {
+                        auto bid = BlkId(n.node_id);
+                        // LOGINFO("Allocating blk inside btree journal entry {}", bid.to_string());
+                        m_blkstore->alloc_blk(bid);
+                    });
+                    // For root node, disk bitmap is later persisted with btree root node.
+                }
+                jentry->~btree_journal_entry();
+                iob.buf_free();
+
+                try_cp_start(cp_id);
+            }));
+    }
+
+    static constexpr size_t journal_entry_alloc_increment = 256;
+    static constexpr size_t journal_entry_initial_size() {
+        return std::max(journal_entry_alloc_increment, sizeof(btree_journal_entry));
+    }
+
+    static btree_journal_entry* realloc_if_needed(sisl::io_blob& b, uint16_t append_size) {
+        auto entry = blob_to_entry(b);
+        assert(b.size > entry->actual_size);
+        uint16_t avail_size = b.size - entry->actual_size;
+        if (avail_size < append_size) {
+            auto new_size = sisl::round_up(entry->actual_size + append_size, journal_entry_alloc_increment);
+            b.buf_realloc(new_size,
+                          HomeLogStore::is_aligned_buf_needed(new_size) ? HS_STATIC_CONFIG(disk_attr.align_size) : 0);
+        }
+        return blob_to_entry(b); // Get the revised entry from blob before returning
+    }
+
+private:
+    ssd_btree_t* m_btree;
     std::shared_ptr< HomeLogStore > m_journal;
     BtreeConfig m_cfg;
     uint32_t m_node_size;
