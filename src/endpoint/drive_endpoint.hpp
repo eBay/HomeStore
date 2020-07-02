@@ -24,8 +24,8 @@
 using namespace std;
 namespace homeio {
 #define MAX_OUTSTANDING_IO                                                                                             \
-    200                                      // if max outstanding IO is more then
-                                             //  200 then io_submit will fail.
+    500                                      // if max outstanding IO is more then
+                                             //  500 then io_submit will fail.
 #define MAX_COMPLETIONS (MAX_OUTSTANDING_IO) // how many completions to process in one shot
 
 typedef std::function< void(int64_t res, uint8_t* cookie) > comp_callback;
