@@ -138,7 +138,7 @@ public:
             m_pagesz(page_size),
             m_cache(cache),
             m_cache_type(cache_type),
-            m_vdev(mgr, context_size, mirrors, true, m_pagesz, mgr->get_all_devices(),
+            m_vdev(mgr, name, context_size, mirrors, true, m_pagesz, mgr->get_all_devices(),
                    (std::bind(&BlkStore::process_completions, this, std::placeholders::_1)), blob, size, auto_recovery),
             m_comp_cb(comp_cb),
             m_metrics(name) {}
@@ -156,7 +156,7 @@ public:
             m_pagesz(page_size),
             m_cache(cache),
             m_cache_type(cache_type),
-            m_vdev(mgr, vb, (std::bind(&BlkStore::process_completions, this, std::placeholders::_1)), recovery_init,
+            m_vdev(mgr, name, vb, (std::bind(&BlkStore::process_completions, this, std::placeholders::_1)), recovery_init,
                    auto_recovery),
             m_comp_cb(comp_cb),
             m_metrics(name) {}
