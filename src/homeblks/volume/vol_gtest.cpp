@@ -739,6 +739,10 @@ public:
             }
         }
 
+        if (tcfg.is_abort) {
+            if (get_elapsed_time_sec(m_start_time) > (random() % tcfg.run_time)) { abort(); }
+        }
+
         {
             std::unique_lock< std::mutex > lk(req->vol_info->vol_mutex);
             req->vol_info->m_vol_bm->reset_bits(req->lba, req->nlbas);
