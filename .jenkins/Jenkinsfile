@@ -113,7 +113,7 @@ pipeline {
                     }
                     steps {
                         withDockerRegistry([credentialsId: 'sds+sds', url: "https://ecr.vip.ebayc3.com"]) {
-                            sh "docker build --build-arg BUILD_TYPE=test --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${ECR_PATH}:${CONAN_CHANNEL}-test .jenkins"
+                            sh "docker build --build-arg BUILD_TYPE=test --build-arg PKG_NAME=${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL} -t ${ECR_PATH}:${CONAN_CHANNEL}-test .jenkins"
                             sh "docker push ${ECR_PATH}:${CONAN_CHANNEL}-test"
                             slackSend channel: '#conan-pkgs', message: "*${PROJECT}:${CONAN_CHANNEL}-test* has been pushed to ECR."
                         }
@@ -125,7 +125,7 @@ pipeline {
                     }
                     steps {
                         withDockerRegistry([credentialsId: 'sds+sds', url: "https://ecr.vip.ebayc3.com"]) {
-                            sh "docker build --build-arg BUILD_TYPE=sanitize --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${ECR_PATH}:${CONAN_CHANNEL}-sanitize .jenkins"
+                            sh "docker build --build-arg BUILD_TYPE=sanitize --build-arg PKG_NAME=${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL} -t ${ECR_PATH}:${CONAN_CHANNEL}-sanitize .jenkins"
                             sh "docker push ${ECR_PATH}:${CONAN_CHANNEL}-sanitize"
                             slackSend channel: '#conan-pkgs', message: "*${PROJECT}:${CONAN_CHANNEL}-sanitize* has been pushed to ECR."
                         }
@@ -137,7 +137,7 @@ pipeline {
                     }
                     steps {
                         withDockerRegistry([credentialsId: 'sds+sds', url: "https://ecr.vip.ebayc3.com"]) {
-                            sh "docker build --build-arg BUILD_TYPE=release --build-arg CONAN_USER=${CONAN_USER} --build-arg CONAN_CHANNEL=${CONAN_CHANNEL} --build-arg HOMESTORE_BUILD_TAG=${GIT_COMMIT} -t ${ECR_PATH}:${CONAN_CHANNEL}-release .jenkins"
+                            sh "docker build --build-arg BUILD_TYPE=release --build-arg PKG_NAME=${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL} -t ${ECR_PATH}:${CONAN_CHANNEL}-release .jenkins"
                             sh "docker push ${ECR_PATH}:${CONAN_CHANNEL}-release"
                             slackSend channel: '#conan-pkgs', message: "*${PROJECT}:${CONAN_CHANNEL}-release* has been pushed to ECR."
                         }
