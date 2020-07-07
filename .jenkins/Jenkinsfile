@@ -48,7 +48,7 @@ pipeline {
                     stages {
                         stage("Build") {
                             steps {
-                                sh "conan create -pr debug . ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}"
+                                sh "conan create -o homestore:sanitize=False -pr debug . ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}"
                             }
                         }
                         stage("Deploy") {
@@ -66,7 +66,7 @@ pipeline {
                     stages {
                         stage("Build") {
                             steps {
-                                sh "conan create -pr test . ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}"
+                                sh "conan create -o homestore:sanitize=False -pr test . ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}"
                             }
                         }
                         stage("Deploy") {
@@ -84,7 +84,7 @@ pipeline {
                     stages {
                         stage("Build") {
                             steps {
-                                sh "conan create -pr release . ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}"
+                                sh "conan create -o homestore:sanitize=False -pr release . ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}"
                             }
                         }
                         stage("Deploy") {
