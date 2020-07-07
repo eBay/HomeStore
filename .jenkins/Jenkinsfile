@@ -25,15 +25,17 @@ pipeline {
                     agent {
                         label 'sds-builder'
                     }
-                    stages("Build") {
-                        steps {
-                            sh "conan create -pr debug . ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}"
+                    stages {
+                        stage("Build") {
+                            steps {
+                                sh "conan create -pr debug . ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}"
+                            }
                         }
-                    }
-                    stages("Deploy") {
-                        steps {
-                            sh "conan user -r ebay-local -p ${ARTIFACTORY_PASS} _service_sds"
-                            sh "conan upload ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL} -c --all -r ebay-local"
+                        stage("Deploy") {
+                            steps {
+                                sh "conan user -r ebay-local -p ${ARTIFACTORY_PASS} _service_sds"
+                                sh "conan upload ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL} -c --all -r ebay-local"
+                            }
                         }
                     }
                 }
@@ -41,15 +43,17 @@ pipeline {
                     agent {
                         label 'sds-builder'
                     }
-                    stages("Build") {
-                        steps {
-                            sh "conan create -pr debug . ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}"
+                    stages {
+                        stage("Build") {
+                            steps {
+                                sh "conan create -pr debug . ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}"
+                            }
                         }
-                    }
-                    stages("Deploy") {
-                        steps {
-                            sh "conan user -r ebay-local -p ${ARTIFACTORY_PASS} _service_sds"
-                            sh "conan upload ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL} -c --all -r ebay-local"
+                        stage("Deploy") {
+                            steps {
+                                sh "conan user -r ebay-local -p ${ARTIFACTORY_PASS} _service_sds"
+                                sh "conan upload ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL} -c --all -r ebay-local"
+                            }
                         }
                     }
                 }
@@ -57,15 +61,17 @@ pipeline {
                     agent {
                         label 'sds-builder'
                     }
-                    stages("Build") {
-                        steps {
-                            sh "conan create -pr test . ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}"
+                    stages {
+                        stage("Build") {
+                            steps {
+                                sh "conan create -pr test . ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}"
+                            }
                         }
-                    }
-                    stages("Deploy") {
-                        steps {
-                            sh "conan user -r ebay-local -p ${ARTIFACTORY_PASS} _service_sds"
-                            sh "conan upload ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL} -c --all -r ebay-local"
+                        stage("Deploy") {
+                            steps {
+                                sh "conan user -r ebay-local -p ${ARTIFACTORY_PASS} _service_sds"
+                                sh "conan upload ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL} -c --all -r ebay-local"
+                            }
                         }
                     }
                 }
@@ -73,15 +79,17 @@ pipeline {
                     agent {
                         label 'sds-builder'
                     }
-                    stages("Build") {
-                        steps {
-                            sh "conan create -pr release . ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}"
+                    stages {
+                        stage("Build") {
+                            steps {
+                                sh "conan create -pr release . ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}"
+                            }
                         }
-                    }
-                    stages("Deploy") {
-                        steps {
-                            sh "conan user -r ebay-local -p ${ARTIFACTORY_PASS} _service_sds"
-                            sh "conan upload ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL} -c --all -r ebay-local"
+                        stage("Deploy") {
+                            steps {
+                                sh "conan user -r ebay-local -p ${ARTIFACTORY_PASS} _service_sds"
+                                sh "conan upload ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL} -c --all -r ebay-local"
+                            }
                         }
                     }
                 }
