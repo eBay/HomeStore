@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         ARTIFACTORY_PASS = credentials('ARTIFACTORY_PASS')
-        HOMESTORE_BUILD_TAG = ${GIT_COMMIT}
+        HOMESTORE_BUILD_TAG = "${GIT_COMMIT}"
         CONAN_USER = 'sds'
     }
 
