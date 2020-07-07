@@ -99,7 +99,7 @@ pipeline {
 
     post {
         failure {
-            slackSend color: '#E43237', channel: '#conan-pkgs', message: "*${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}* has been uploaded to conan repo."
+            slackSend color: '#E43237', channel: '#conan-pkgs', message: "*${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}* has had a failure : ${BUILD_URL}"
         }
         success {
             slackSend color: '#85B717', channel: '#conan-pkgs', message: "*${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}* has been uploaded to conan repo."
