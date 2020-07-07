@@ -101,6 +101,7 @@ pipeline {
         stage('TestImage') {
             when {
                 anyOf {
+                    branch "PR-500"
                     branch "develop"
                     branch "snapshot"
                 }
