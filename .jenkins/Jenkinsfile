@@ -1,0 +1,108 @@
+pipeline {
+    agent any
+
+    environment {
+        ARTIFACTORY_PASS = credentials('ARTIFACTORY_PASS')
+        HOMESTORE_BUILD_TAG = "${GIT_COMMIT}"
+        CONAN_USER = 'sds'
+    }
+
+    stages {
+        stage('Get Version') {
+            steps {
+                script {
+                    PROJECT = sh(script: "grep -m 1 'name =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
+                    TAG = sh(script: "grep -m 1 'version =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
+                    CONAN_CHANNEL = sh(script: "echo ${BRANCH_NAME} | sed -E 's,(\\w-+\\d).*,\\1,' | sed -E 's,-,_,' | tr -d '\n'", returnStdout: true)
+                    slackSend color: '#0063D1', channel: '#conan-pkgs', message: "*${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}* is building."
+                }
+            }
+        }
+
+        stage('Build') {
+            parallel {
+                stage("Sanitized") {
+                    agent {
+                        label 'sds-builder'
+                    }
+                    stages {
+                        stage("Build") {
+                            steps {
+                                sh "conan create -pr debug . ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}"
+                            }
+                        }
+                        stage("Deploy") {
+                            steps {
+                                sh "conan user -r ebay-local -p ${ARTIFACTORY_PASS} _service_sds"
+                                sh "conan upload ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL} -c --all -r ebay-local"
+                            }
+                        }
+                    }
+                }
+                stage("Debug") {
+                    agent {
+                        label 'sds-builder'
+                    }
+                    stages {
+                        stage("Build") {
+                            steps {
+                                sh "conan create -pr debug . ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}"
+                            }
+                        }
+                        stage("Deploy") {
+                            steps {
+                                sh "conan user -r ebay-local -p ${ARTIFACTORY_PASS} _service_sds"
+                                sh "conan upload ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL} -c --all -r ebay-local"
+                            }
+                        }
+                    }
+                }
+                stage("Release") {
+                    agent {
+                        label 'sds-builder'
+                    }
+                    stages {
+                        stage("Build") {
+                            steps {
+                                sh "conan create -pr test . ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}"
+                            }
+                        }
+                        stage("Deploy") {
+                            steps {
+                                sh "conan user -r ebay-local -p ${ARTIFACTORY_PASS} _service_sds"
+                                sh "conan upload ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL} -c --all -r ebay-local"
+                            }
+                        }
+                    }
+                }
+                stage("Performance") {
+                    agent {
+                        label 'sds-builder'
+                    }
+                    stages {
+                        stage("Build") {
+                            steps {
+                                sh "conan create -pr release . ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}"
+                            }
+                        }
+                        stage("Deploy") {
+                            steps {
+                                sh "conan user -r ebay-local -p ${ARTIFACTORY_PASS} _service_sds"
+                                sh "conan upload ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL} -c --all -r ebay-local"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        failure {
+            slackSend color: '#E43237', channel: '#conan-pkgs', message: "*${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}* has had a failure : ${BUILD_URL}"
+        }
+        success {
+            slackSend color: '#85B717', channel: '#conan-pkgs', message: "*${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}* has been uploaded to conan repo."
+        }
+    }
+}
