@@ -114,9 +114,10 @@ using indxmgr_stop_cb = cp_done_cb;
  */
 struct indx_cp_id;
 ENUM(cp_state, uint8_t,
-     active_cp,  // Active CP
-     suspend_cp, // cp is suspended
-     destroy_cp  // it is a destroy cp. It is moved to active only in blkalloc checkpoint
+     active_cp,      // Active CP
+     active_diff_cp, // take both active/diff cp. There is no state like diff cp. We always take active CP when diff cp
+                     // is taken.
+     suspend_cp,     // cp is suspended
 );
 
 struct hs_cp_id : cp_id_base {
@@ -133,22 +134,20 @@ struct indx_active_info {
     int64_t start_psn = -1; // not inclusive
     int64_t end_psn = -1;   // inclusive
     btree_cp_id_ptr btree_id;
-    blkid_list_ptr free_blkid_list;
     indx_active_info(int64_t start_psn, blkid_list_ptr& free_blkid_list) :
-            start_psn(start_psn),
-            free_blkid_list(free_blkid_list) {}
+            start_psn(start_psn), free_blkid_list(free_blkid_list) {}
 };
 
 struct indx_diff_info {
     int64_t start_psn = -1; // not inclusive
     int64_t end_psn = -1;   // inclusive
+    int64_t max_psn = -1;   // max psn sent on this id
+    indx_tbl* diff_tbl = nullptr;
+    uint64_t snap_id = 0;
     btree_cp_id_ptr btree_id;
+    indx_diff_info(int64_t start_psn) : start_psn(start_psn) {}
 };
 
-struct indx_snap_info {
-    std::vector< btree_cp_superblock > snap_delete_list;
-    blkid_list_ptr free_blkid_list;
-};
 
 /* During prepare flush we decide to take a CP out of active, diff or snap or all 3 cps*/
 struct indx_cp_id : public boost::intrusive_ref_counter< indx_cp_id > {
@@ -162,13 +161,14 @@ struct indx_cp_id : public boost::intrusive_ref_counter< indx_cp_id > {
     /* cp */
     indx_active_info ainfo;
     indx_diff_info dinfo;
-    indx_snap_info sinfo;
 
-    indx_cp_id(int64_t cp_cnt, int64_t start_active_psn, indx_mgr_ptr indx_mgr, blkid_list_ptr& free_blkid_list) :
+    indx_cp_id(int64_t cp_cnt, int64_t start_active_psn, int64_t start_diff_psn, indx_mgr_ptr indx_mgr,
+               blkid_list_ptr& free_blkid_list) :
             indx_mgr(indx_mgr),
             cp_cnt(cp_cnt),
             indx_size(0),
-            ainfo(start_active_psn, free_blkid_list) {}
+            ainfo(start_active_psn, free_blkid_list),
+            dinfo(start_diff_psn) {}
 
     cp_state state() const { return flags; }
 };
@@ -183,7 +183,8 @@ struct hs_cp_sb_hdr {
 
 struct indx_cp_info {
     int64_t blkalloc_cp_cnt = -1; // cp cnt of last blkalloc checkpoint taken
-    int64_t cp_cnt = -1;
+    int64_t active_cp_cnt = -1;
+    int64_t diff_cp_cnt = -1;
     int64_t active_data_psn = -1;
     int64_t diff_data_psn = -1;
     int64_t indx_size = 0;
@@ -193,6 +194,7 @@ struct indx_cp_sb {
     boost::uuids::uuid uuid;
     indx_cp_info cp_info;
     btree_cp_superblock active_btree_info;
+    btree_cp_superblock diff_btree_info;
     indx_cp_sb(boost::uuids::uuid uuid) : uuid(uuid){};
     indx_cp_sb(){};
 } __attribute__((__packed__));
@@ -201,6 +203,7 @@ struct indx_cp_sb {
 struct indx_mgr_static_sb {
     logstore_id_t journal_id;
     btree_super_block btree_sb;
+    bool is_snap_enabled;
 } __attribute__((__packed__));
 
 class HomeStoreCP : public CheckPoint< hs_cp_id > {

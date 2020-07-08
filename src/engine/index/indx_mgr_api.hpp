@@ -57,6 +57,7 @@ public:
     virtual void create_done() = 0;
     virtual btree_super_block get_btree_sb() = 0;
     virtual btree_status_t update_active_indx_tbl(indx_req* ireq, const btree_cp_id_ptr& btree_id) = 0;
+    virtual btree_status_t update_diff_indx_tbl(indx_req* ireq, const btree_cp_id_ptr& btree_id) = 0;
     virtual btree_cp_id_ptr attach_prepare_cp(const btree_cp_id_ptr& cur_cp_id, bool is_last_cp,
                                               bool blkalloc_checkpoint) = 0;
     virtual void flush_free_blks(const btree_cp_id_ptr& btree_id,
@@ -84,13 +85,13 @@ public:
      *                          false :- it is first time create
      * @params func :- function to create indx table
      */
-    IndxMgr(boost::uuids::uuid uuid, std::string name, io_done_cb io_cb, create_indx_tbl func);
+    IndxMgr(boost::uuids::uuid uuid, std::string name, io_done_cb io_cb, create_indx_tbl func, bool is_snap_enabled);
 
     /* constructor for recovery */
     IndxMgr(boost::uuids::uuid uuid, std::string name, io_done_cb io_cb, create_indx_tbl create_func,
             recover_indx_tbl recover_func, indx_mgr_static_sb sb);
 
-    ~IndxMgr();
+    virtual ~IndxMgr();
 
     /* create new indx cp id and decide if this indx mgr want to participate in a current cp
      * @params indx_cur_id :- current cp id of this indx mgr
@@ -141,8 +142,8 @@ public:
     void update_cp_sb(indx_cp_id_ptr& indx_id, hs_cp_id* hb_id, indx_cp_sb* sb);
     uint64_t get_last_psn();
     /* It is called when super block all indx tables are persisted by its consumer */
-    void create_done();
-    void init();
+    void indx_create_done(indx_tbl* indx_tbl = nullptr);
+    void indx_init();
     std::string get_name();
     uint64_t get_used_size();
 
@@ -152,7 +153,6 @@ public:
     template < typename... Args >
     static std::shared_ptr< IndxMgr > make_IndxMgr(Args&&... args) {
         auto indx_ptr = std::make_shared< IndxMgr >(std::forward< Args >(args)...);
-        indx_ptr->init();
         return indx_ptr;
     }
 
@@ -197,6 +197,13 @@ public:
     static const iomgr::io_thread_t& get_thread_id() { return m_thread_id; }
     static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size);
     static void flush_hs_free_blks(hs_cp_id* id);
+
+protected:
+    /*********************** virtual functions required to support snapshot  **********************/
+    virtual void snap_create(indx_tbl* m_diff_tbl, int64_t cp_cnt) = 0;
+    virtual indx_tbl* snap_get_diff_tbl() = 0;
+    virtual uint64_t snap_get_diff_id() = 0;
+    virtual void snap_create_done(uint64_t snap_id, int64_t max_psn, int64_t contiguous_psn) = 0;
 
 private:
     /*********************** static private members **********************/
@@ -248,6 +255,8 @@ private:
     recover_indx_tbl m_recover_indx_tbl;
     indx_mgr_static_sb m_static_sb;
     uint64_t m_free_list_cnt = 0;
+    bool m_is_snap_enabled = false;
+    bool m_is_snap_started = false;
 
     /*************************************** private functions ************************/
     void journal_write(indx_req* vreq);
@@ -262,6 +271,7 @@ private:
     btree_status_t retry_update_active_indx(const boost::intrusive_ptr< indx_req >& ireq);
     void free_blk(const indx_cp_id_ptr& indx_id, Free_Blk_Entry& fbe);
     void free_blk(const indx_cp_id_ptr& indx_id, BlkId& fblkid);
+    void create_new_diff_tbl(indx_cp_id_ptr& indx_id);
 };
 
 struct Free_Blk_Entry {

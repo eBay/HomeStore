@@ -127,7 +127,7 @@ void Volume::init() {
         set_state(vol_state::ONLINE, true);
         seq_Id = m_indx_mgr->get_last_psn();
         /* it is called after superblock is persisted by volume */
-        m_indx_mgr->create_done();
+        m_indx_mgr->indx_init();
 
         IndxMgr::trigger_indx_cp_with_cb(([this](bool success) {
             /* Now it is safe to do shutdown as this volume has become a part of CP */
