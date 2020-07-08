@@ -119,16 +119,12 @@ public:
     logstore_id_t get_journal_id_store() { return (m_journal->get_store_id()); }
 
     void log_found(logstore_seq_num_t seqnum, log_buffer log_buf, void* mem) {
-#if 0
         auto& cp_sb = m_btree->get_last_cp_cb();
         if (seqnum >= cp_sb.active_psn) {
             // Entry is not replayed yet
-            btree_journal_entry* jentry = (btree_journal_entry*)log_buf.bytes;
+            btree_journal_entry* jentry = (btree_journal_entry*)log_buf.bytes();
             if (jentry->op == journal_op::BTREE_SPLIT) { m_btree->split_node_replay(jentry, m_first_cp); }
         }
-
-        if ()
-#endif
     }
 
     static void cp_start(SSDBtreeStore* store, const btree_cp_id_ptr& cp_id, cp_comp_callback cb) {
@@ -293,7 +289,6 @@ public:
 
     static btree_status_t refresh_node(SSDBtreeStore* store, const boost::intrusive_ptr< SSDBtreeNode >& bn,
                                        bool is_write_modifiable, const btree_cp_id_ptr& cp_id) {
-
         /* add the latest request pending on this node */
         auto ret = store->get_wb_cache()->refresh_buf(bn, is_write_modifiable, cp_id);
         if (ret != btree_status_t::success) { return ret; }
