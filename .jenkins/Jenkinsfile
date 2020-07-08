@@ -53,7 +53,7 @@ pipeline {
                 stages {
                     stage("Build") {
                         steps {
-                            sh "conan create -homestore:sanitize=${SANITIZE} -pr ${BUILD_TYPE} . ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}"
+                            sh "conan create -o homestore:sanitize=${SANITIZE} -pr ${BUILD_TYPE} . ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}"
                         }
                     }
                     stage("Deploy") {
