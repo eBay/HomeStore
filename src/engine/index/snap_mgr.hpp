@@ -1,5 +1,7 @@
+#pragma once
 #include "indx_mgr_api.hpp"
 
+namespace homestore {
 struct snap_sb {
     boost::uuids::uuid indx_mgr_uuid;
     uint64_t snap_id;
@@ -10,13 +12,13 @@ struct snap_sb {
                     // cp_cnt of next snapshot.
 } __attribute__((__packed__));
 
-class SnapMgr::public IndxMgr {
+class SnapMgr : public IndxMgr {
 public:
     /* static public members */
     template < typename... Args >
-    static std::shared_ptr< IndxMgr > make_SnapMgr(Args && ... args) {
+    static std::shared_ptr< SnapMgr > make_SnapMgr(Args&&... args) {
         auto snap_ptr = std::make_shared< SnapMgr >(std::forward< Args >(args)...);
-        snap_ptr->indx_init();
+        return snap_ptr;
     }
 
 public:
@@ -35,18 +37,19 @@ public:
             recover_indx_tbl recover_func, indx_mgr_static_sb sb);
 
 protected:
-    virtual void snap_create(indx_tbl * m_diff_tbl) override;
+    virtual uint64_t snap_create(indx_tbl * m_diff_tbl, int64_t cp_cnt) override;
     virtual indx_tbl* snap_get_diff_tbl() override;
+    virtual void snap_create_done(uint64_t snap_id, int64_t max_psn, int64_t contiguous_psn) override;
+    virtual btree_super_block snap_get_diff_tbl_sb() override;
     virtual uint64_t snap_get_diff_id() override;
-    virtual void snap_created(uint64_t snap_id, uint64_t max_psn, uint64_t contiguous_psn) override;
 
 private:
     /* static private members */
-    static std::atomic< uint64_t > snap_id = 0;
-    static std::map< boost::uuids::uuid, std::pair< meta_blk* > > hs_snap_map; // It is used only in recovery
+    //    static std::atomic< uint64_t > snap_id = 0;
+    //   static std::map< boost::uuids::uuid, std::pair< meta_blk* > > hs_snap_map; // It is used only in recovery
 
 private:
     /* private members */
-    std::map< uint64_t, meta_blk* > snap_map;
-}
-
+    // std::map< uint64_t, meta_blk* > snap_map;
+};
+} // namespace homestore

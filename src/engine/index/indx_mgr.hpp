@@ -117,7 +117,7 @@ ENUM(cp_state, uint8_t,
      active_cp,      // Active CP
      active_diff_cp, // take both active/diff cp. There is no state like diff cp. We always take active CP when diff cp
                      // is taken.
-     suspend_cp,     // cp is suspended
+     suspend_cp      // cp is suspended
 );
 
 struct hs_cp_id : cp_id_base {
@@ -134,6 +134,7 @@ struct indx_active_info {
     int64_t start_psn = -1; // not inclusive
     int64_t end_psn = -1;   // inclusive
     btree_cp_id_ptr btree_id;
+    blkid_list_ptr free_blkid_list;
     indx_active_info(int64_t start_psn, blkid_list_ptr& free_blkid_list) :
             start_psn(start_psn), free_blkid_list(free_blkid_list) {}
 };
