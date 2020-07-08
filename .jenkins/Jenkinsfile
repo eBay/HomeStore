@@ -41,7 +41,7 @@ pipeline {
                     exclude {
                         axis {
                             name 'SANITIZE'
-                            value 'True'
+                            values 'True'
                         }
                         axis {
                             name 'BUILD_TYPE'
@@ -83,15 +83,14 @@ pipeline {
                         values 'debug', 'release', 'sanitize'
                     }
                 }
-                stage('Build') {
-                    agent {
-                        label 'sds-builder'
-                    }
-                    steps {
-                        withDockerRegistry([credentialsId: 'sds+sds', url: "https://ecr.vip.ebayc3.com"]) {
-                            sh "docker build --build-arg BUILD_TYPE=${BUILD_TYPE} --build-arg PKG_NAME=${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL} -t ${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE} .jenkins"
-                            sh "docker push ${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE}"
-                            slackSend channel: '#conan-pkgs', message: "*${PROJECT}:${CONAN_CHANNEL}-${BUILD_TYPE}* has been pushed to ECR."
+                stages {
+                    stage('Build') {
+                        steps {
+                            withDockerRegistry([credentialsId: 'sds+sds', url: "https://ecr.vip.ebayc3.com"]) {
+                                sh "docker build --build-arg BUILD_TYPE=${BUILD_TYPE} --build-arg PKG_NAME=${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL} -t ${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE} .jenkins"
+                                sh "docker push ${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE}"
+                                slackSend channel: '#conan-pkgs', message: "*${PROJECT}:${CONAN_CHANNEL}-${BUILD_TYPE}* has been pushed to ECR."
+                            }
                         }
                     }
                 }
