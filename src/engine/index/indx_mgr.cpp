@@ -152,7 +152,7 @@ void HomeStoreCP::blkalloc_cp(hs_cp_id* id) {
 
     /* Now it is safe to truncate as blkalloc bitsmaps are persisted */
     for (auto it = id->indx_id_list.begin(); it != id->indx_id_list.end(); ++it) {
-        if (it->second == nullptr || it->second->flags != cp_state::active_diff_cp) { continue; }
+        if (it->second == nullptr || it->second->flags == cp_state::suspend_cp) { continue; }
         it->second->indx_mgr->truncate(it->second);
     }
     home_log_store_mgr.device_truncate();
@@ -362,7 +362,7 @@ indx_mgr_static_sb IndxMgr::get_static_sb() {
 
 void IndxMgr::flush_hs_free_blks(hs_cp_id* hs_id) {
     for (auto it = hs_id->indx_id_list.begin(); it != hs_id->indx_id_list.end(); ++it) {
-        if (it->second == nullptr || it->second->flags != cp_state::active_diff_cp) {
+        if (it->second == nullptr || it->second->flags == cp_state::suspend_cp) {
             /* nothing to free. */
             continue;
         }

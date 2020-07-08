@@ -73,10 +73,11 @@ public:
     virtual uint64_t get_used_size() = 0;
 };
 
+typedef std::function< void(const boost::intrusive_ptr< indx_req >& ireq, std::error_condition err) > io_done_cb;
+typedef std::function< indx_tbl*() > create_indx_tbl;
+typedef std::function< indx_tbl*(btree_super_block& sb, btree_cp_superblock& cp_info) > recover_indx_tbl;
+
 class IndxMgr : public std::enable_shared_from_this< IndxMgr > {
-    typedef std::function< void(const boost::intrusive_ptr< indx_req >& ireq, std::error_condition err) > io_done_cb;
-    typedef std::function< indx_tbl*() > create_indx_tbl;
-    typedef std::function< indx_tbl*(btree_super_block& sb, btree_cp_superblock& cp_info) > recover_indx_tbl;
 
 public:
     /* It is called in first time create.
@@ -110,6 +111,9 @@ public:
      * @params req :- It create all information to update the indx mgr and journal
      */
     void update_indx(boost::intrusive_ptr< indx_req > ireq);
+
+    /* Create snapshot. */
+    void indx_snap_create();
 
     /* Get static superblock
      * @return :- get static superblock of indx mgr. It is immutable structure. It contains all infomation require to
@@ -200,10 +204,11 @@ public:
 
 protected:
     /*********************** virtual functions required to support snapshot  **********************/
-    virtual void snap_create(indx_tbl* m_diff_tbl, int64_t cp_cnt) = 0;
+    virtual uint64_t snap_create(indx_tbl* m_diff_tbl, int64_t cp_cnt) = 0;
     virtual indx_tbl* snap_get_diff_tbl() = 0;
-    virtual uint64_t snap_get_diff_id() = 0;
     virtual void snap_create_done(uint64_t snap_id, int64_t max_psn, int64_t contiguous_psn) = 0;
+    virtual btree_super_block snap_get_diff_tbl_sb() = 0;
+    virtual uint64_t snap_get_diff_id() = 0;
 
 private:
     /*********************** static private members **********************/
@@ -261,14 +266,14 @@ private:
     /*************************************** private functions ************************/
     void journal_write(indx_req* vreq);
     void journal_comp_cb(logstore_req* req, logdev_key ld_key);
-    btree_status_t update_active_indx_tbl(indx_req* vreq);
+    btree_status_t update_indx_tbl(indx_req* vreq, bool is_active);
     btree_cp_id_ptr get_btree_id(hs_cp_id* cp_id);
     indx_cp_id_ptr get_indx_id(hs_cp_id* cp_id);
     void destroy_indx_tbl(const indx_cp_id_ptr& indx_id);
     void add_prepare_cb_list(prepare_cb cb);
     void indx_destroy_cp(const indx_cp_id_ptr& cur_indx_id, hs_cp_id* hb_id, hs_cp_id* new_hb_id);
     void create_first_cp_id();
-    btree_status_t retry_update_active_indx(const boost::intrusive_ptr< indx_req >& ireq);
+    btree_status_t retry_update_indx(const boost::intrusive_ptr< indx_req >& ireq, bool is_active);
     void free_blk(const indx_cp_id_ptr& indx_id, Free_Blk_Entry& fbe);
     void free_blk(const indx_cp_id_ptr& indx_id, BlkId& fblkid);
     void create_new_diff_tbl(indx_cp_id_ptr& indx_id);
