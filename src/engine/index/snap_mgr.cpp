@@ -22,11 +22,10 @@ int64_t SnapMgr::snap_create(indx_tbl* diff_tbl, int64_t cp_cnt) {
     return -1;
 }
 
-indx_tbl* SnapMgr::snap_get_diff_tbl() { return nullptr; }
+int64_t SnapMgr::snap_get_diff_id() { return -1; }
 void SnapMgr::snap_create_done(uint64_t snap_id, int64_t max_psn, int64_t contiguous_psn, int64_t end_cp_cnt) {}
 btree_super_block SnapMgr::snap_get_diff_tbl_sb() {
     btree_super_block sb;
     return sb;
 }
 
-uint64_t SnapMgr::snap_get_diff_id() { return 0; }

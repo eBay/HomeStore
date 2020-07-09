@@ -38,11 +38,10 @@ public:
 
 protected:
     virtual int64_t snap_create(indx_tbl* m_diff_tbl, int64_t cp_cnt) override;
-    virtual indx_tbl* snap_get_diff_tbl() override;
+    virtual int64_t snap_get_diff_id() override;
     virtual void snap_create_done(uint64_t snap_id, int64_t max_psn, int64_t contiguous_psn,
                                   int64_t end_cp_cnt) override;
     virtual btree_super_block snap_get_diff_tbl_sb() override;
-    virtual uint64_t snap_get_diff_id() override;
 
 private:
     /* static private members */

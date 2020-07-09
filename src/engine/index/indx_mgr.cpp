@@ -235,9 +235,24 @@ void IndxMgr::create_first_cp_id() {
     /* create new diff table */
     if (!m_is_snap_enabled) { return; }
     if (m_recovery_mode) {
-        auto sb = snap_get_diff_tbl_sb();
-        m_first_cp_id->dinfo.diff_tbl = m_recover_indx_tbl(sb, m_last_cp_sb.diff_btree_info);
-        m_first_cp_id->dinfo.snap_id = snap_get_diff_id();
+        btree_cp_superblock diff_cp_info; // set it to default if last cp is snap cp
+        int64_t diff_snap_id;
+        if (m_last_cp_sb.cp_info.snap_cp) {
+            /* if snapshot is taken in last cp then we just call snap create done again. Worse
+             * case we end up calling two times. But it cover the crash case where it paniced just after
+             * cp superblock is updated and before snap create done is called.
+             */
+            snap_create_done(m_last_cp_sb.cp_info.diff_snap_id, m_last_cp_sb.cp_info.diff_max_psn,
+                             m_last_cp_sb.cp_info.diff_data_psn, m_last_cp_sb.cp_info.diff_cp_cnt);
+            diff_snap_id = snap_get_diff_id();
+        } else {
+            diff_cp_info = m_last_cp_sb.diff_btree_info;
+            diff_snap_id = m_last_cp_sb.cp_info.diff_snap_id;
+            assert(diff_snap_id == snap_get_diff_id());
+        }
+        auto diff_btree_sb = snap_get_diff_tbl_sb();
+        m_first_cp_id->dinfo.diff_tbl = m_recover_indx_tbl(diff_btree_sb, diff_cp_info);
+        m_first_cp_id->dinfo.diff_snap_id = diff_snap_id;
         m_first_cp_id->dinfo.btree_id = m_first_cp_id->dinfo.diff_tbl->attach_prepare_cp(nullptr, false, false);
     } else {
         create_new_diff_tbl(m_first_cp_id);
@@ -261,6 +276,12 @@ void IndxMgr::indx_snap_create() {
         if (hb_id->blkalloc_checkpoint) {
             /* We start snapshot create only if it is a blk alloc checkpoint */
             m_is_snap_started = true;
+            m_cp->attach_cb(hb_id, ([this](bool success) {
+                                /* it is called when CP is completed */
+                                snap_create_done(m_last_cp_sb.cp_info.diff_snap_id, m_last_cp_sb.cp_info.diff_max_psn,
+                                                 m_last_cp_sb.cp_info.diff_data_psn, m_last_cp_sb.cp_info.diff_cp_cnt);
+                                m_is_snap_started = false;
+                            }));
         } else {
             /* it is not blk alloc checkpoint. Push this callback again */
             indx_snap_create();
@@ -340,11 +361,18 @@ void IndxMgr::recovery_start_phase2() {
                 indx_id->indx_size += alloc_pair.first[i].data_size(m_hs->get_data_pagesz());
             }
         }
-        if (seq_num <= m_last_cp_sb.cp_info.active_data_psn) { /* it is already persisted */
+        if (hdr->cp_cnt <= m_last_cp_sb.cp_info.active_cp_cnt) { /* it is already persisted */
             continue;
         }
-        /* update indx_tbl */
+
+        /* update active indx_tbl */
         auto ret = m_active_tbl->recovery_update(seq_num, hdr, indx_id->ainfo.btree_id);
+        if (ret != btree_status_t::success) { abort(); }
+
+        if (!m_is_snap_enabled) { continue; }
+
+        /* update diff indx tbl */
+        ret = indx_id->dinfo.diff_tbl->recovery_update(seq_num, hdr, indx_id->dinfo.btree_id);
         if (ret != btree_status_t::success) { abort(); }
     }
 
@@ -411,9 +439,11 @@ void IndxMgr::write_hs_cp_sb(hs_cp_id* hs_id) {
 }
 
 void IndxMgr::update_cp_sb(indx_cp_id_ptr& indx_id, hs_cp_id* hs_id, indx_cp_sb* sb) {
+    /* copy the last superblock and then override the change values */
+    memcpy(sb, &m_last_cp_sb, sizeof(m_last_cp_sb));
+
     if (indx_id->flags == cp_state::suspend_cp) {
         /* nothing changed since last superblock */
-        memcpy(sb, &m_last_cp_sb, sizeof(m_last_cp_sb));
         return;
     }
 
@@ -421,38 +451,32 @@ void IndxMgr::update_cp_sb(indx_cp_id_ptr& indx_id, hs_cp_id* hs_id, indx_cp_sb*
     assert(indx_id->cp_cnt > m_last_cp_sb.cp_info.blkalloc_cp_cnt);
     assert(indx_id->cp_cnt == m_last_cp_sb.cp_info.active_cp_cnt + 1);
 
-    /* update common info to both diff and active cp */
-    sb->cp_info.blkalloc_cp_cnt =
-        (indx_id->flags & cp_state::blkalloc_cp) ? indx_id->cp_cnt : m_last_cp_sb.cp_info.blkalloc_cp_cnt;
-    sb->cp_info.indx_size = indx_id->indx_size.load() + m_last_cp_sb.cp_info.indx_size;
     sb->uuid = m_uuid;
+
+    /* update blk alloc cp */
+    if (indx_id->flags & cp_state::blkalloc_cp) { sb->cp_info.blkalloc_cp_cnt = indx_id->cp_cnt; }
+
+    sb->cp_info.indx_size = indx_id->indx_size.load() + m_last_cp_sb.cp_info.indx_size;
 
     /* update active checkpoint info */
     sb->cp_info.active_data_psn = indx_id->ainfo.end_psn;
     sb->cp_info.active_cp_cnt = indx_id->cp_cnt;
-    m_active_tbl->update_btree_cp_sb(indx_id->ainfo.btree_id, sb->active_btree_info,
-                                     (indx_id->flags & cp_state::blkalloc_cp));
 
     /* update diff checkpoint info */
     if (indx_id->flags & cp_state::diff_cp) {
-        sb->cp_info.diff_data_psn = indx_id->dinfo.end_psn;
         sb->cp_info.diff_cp_cnt = indx_id->cp_cnt;
-        sb->cp_info.snap_id = indx_id->dinfo.snap_id;
-        if (!m_is_snap_started) {
-            indx_id->dinfo.diff_tbl->update_btree_cp_sb(indx_id->dinfo.btree_id, sb->diff_btree_info,
-                                                        (indx_id->flags & cp_state::blkalloc_cp));
-        } else {
-            snap_create_done(indx_id->dinfo.snap_id, indx_id->dinfo.max_psn, indx_id->dinfo.end_psn, indx_id->cp_cnt);
-            m_is_snap_started = false;
-            /* we store the default superblock if snapshot is created in this checkpoint */
-            btree_cp_superblock default_sb;
-            sb->diff_btree_info = default_sb;
-        }
-    } else {
-        sb->cp_info.diff_data_psn = m_last_cp_sb.cp_info.diff_data_psn;
-        sb->cp_info.diff_cp_cnt = m_last_cp_sb.cp_info.diff_cp_cnt;
-        sb->cp_info.snap_id = m_last_cp_sb.cp_info.snap_id;
-        sb->diff_btree_info = m_last_cp_sb.diff_btree_info;
+        sb->cp_info.diff_data_psn = indx_id->dinfo.end_psn;
+        sb->cp_info.diff_max_psn = indx_id->get_max_psn();
+        sb->cp_info.diff_snap_id = indx_id->dinfo.diff_snap_id;
+        sb->cp_info.snap_cp = m_is_snap_started;
+    }
+
+    m_active_tbl->update_btree_cp_sb(indx_id->ainfo.btree_id, sb->active_btree_info,
+                                     (indx_id->flags & cp_state::blkalloc_cp));
+
+    if (indx_id->flags & cp_state::diff_cp) {
+        indx_id->dinfo.diff_tbl->update_btree_cp_sb(indx_id->dinfo.btree_id, sb->diff_btree_info,
+                                                    (indx_id->flags & cp_state::blkalloc_cp));
     }
     memcpy(&m_last_cp_sb, sb, sizeof(m_last_cp_sb));
 }
@@ -556,25 +580,23 @@ indx_cp_id_ptr IndxMgr::attach_prepare_indx_cp(const indx_cp_id_ptr& cur_indx_id
          * 2. We create a new diff btree if it is blk alloc checkpoint.
          * 3. We persist a new diff btree information in snapshot. At this point we have two diff btree active. One is
          *    the old CP wich is still active and other in the new CP where new IOs are going on.
-         * 4. After all the buffers are persisted and bitmap is persisted, we call snap_created() api.
+         * 4. Persist CP superblock with new diff tree cp information and snap id.
+         * 5. After all the buffers are persisted and bitmap is persisted, we call snap_created() api.
          *          - Snap create persist superblock of this snapshot with the updated information.i
          *          - It calls snapshot close which closes the journal for that snapshot and move it into
          *            read only mode.
          *          - User can open it either in read only mode or write only mode. If it is open in write only mode it
          *            will create a new journal
-         * 5. Persist CP superblock with new diff tree cp information and snap id.
          *
          * Recovery :-
-         * 1. If it is crashed before step 3 and before step 4, it is going to destroy new diff btree after recovering
+         * 1. If it is crashed between step 3 and step 4, it is going to destroy new diff btree after recovering
          *    it. Recovering of new diff btree is very important otherwise it lead to blkid leak.
-         * 2. If it is creashed after step 4 then cp still has information for old diff CP but snap mgr has latest diff
-         *    btree information. Snap mgr informs about the latest diff btree to indx mgr along with CP cnt. indx mgr
-         *    replay all ios with that cp cnt to new diff btree.
+         * 2. If it is crashed after step 4 then cp has all the information to execute step 5
          */
         create_new_diff_tbl(new_indx_id);
     } else {
         new_indx_id->dinfo.diff_tbl = cur_indx_id->dinfo.diff_tbl;
-        new_indx_id->dinfo.snap_id = cur_indx_id->dinfo.snap_id;
+        new_indx_id->dinfo.diff_snap_id = cur_indx_id->dinfo.diff_snap_id;
         new_indx_id->dinfo.btree_id = diff_btree_id;
     }
 
@@ -583,7 +605,7 @@ indx_cp_id_ptr IndxMgr::attach_prepare_indx_cp(const indx_cp_id_ptr& cur_indx_id
 
 void IndxMgr::create_new_diff_tbl(indx_cp_id_ptr& indx_id) {
     indx_id->dinfo.diff_tbl = m_create_indx_tbl();
-    indx_id->dinfo.snap_id = snap_create(indx_id->dinfo.diff_tbl, indx_id->cp_cnt);
+    indx_id->dinfo.diff_snap_id = snap_create(indx_id->dinfo.diff_tbl, indx_id->cp_cnt);
     indx_id->dinfo.btree_id = indx_id->dinfo.diff_tbl->attach_prepare_cp(nullptr, false, false);
     indx_create_done(indx_id->dinfo.diff_tbl);
 }

@@ -205,10 +205,9 @@ public:
 protected:
     /*********************** virtual functions required to support snapshot  **********************/
     virtual int64_t snap_create(indx_tbl* m_diff_tbl, int64_t start_cp_cnt) = 0;
-    virtual indx_tbl* snap_get_diff_tbl() = 0;
+    virtual int64_t snap_get_diff_id() = 0;
     virtual void snap_create_done(uint64_t snap_id, int64_t max_psn, int64_t contiguous_psn, int64_t end_cp_cnt) = 0;
     virtual btree_super_block snap_get_diff_tbl_sb() = 0;
-    virtual uint64_t snap_get_diff_id() = 0;
 
 private:
     /*********************** static private members **********************/
