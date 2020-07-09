@@ -437,11 +437,12 @@ void IndxMgr::update_cp_sb(indx_cp_id_ptr& indx_id, hs_cp_id* hs_id, indx_cp_sb*
     if (indx_id->flags & cp_state::diff_cp) {
         sb->cp_info.diff_data_psn = indx_id->dinfo.end_psn;
         sb->cp_info.diff_cp_cnt = indx_id->cp_cnt;
+        sb->cp_info.snap_id = indx_id->dinfo.snap_id;
         if (!m_is_snap_started) {
             indx_id->dinfo.diff_tbl->update_btree_cp_sb(indx_id->dinfo.btree_id, sb->diff_btree_info,
                                                         (indx_id->flags & cp_state::blkalloc_cp));
         } else {
-            snap_create_done(indx_id->dinfo.snap_id, indx_id->dinfo.max_psn, indx_id->dinfo.end_psn);
+            snap_create_done(indx_id->dinfo.snap_id, indx_id->dinfo.max_psn, indx_id->dinfo.end_psn, indx_id->cp_cnt);
             m_is_snap_started = false;
             /* we store the default superblock if snapshot is created in this checkpoint */
             btree_cp_superblock default_sb;
@@ -450,6 +451,7 @@ void IndxMgr::update_cp_sb(indx_cp_id_ptr& indx_id, hs_cp_id* hs_id, indx_cp_sb*
     } else {
         sb->cp_info.diff_data_psn = m_last_cp_sb.cp_info.diff_data_psn;
         sb->cp_info.diff_cp_cnt = m_last_cp_sb.cp_info.diff_cp_cnt;
+        sb->cp_info.snap_id = m_last_cp_sb.cp_info.snap_id;
         sb->diff_btree_info = m_last_cp_sb.diff_btree_info;
     }
     memcpy(&m_last_cp_sb, sb, sizeof(m_last_cp_sb));

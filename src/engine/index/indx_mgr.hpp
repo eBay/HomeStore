@@ -149,7 +149,7 @@ struct indx_diff_info {
     int64_t end_psn = -1;   // inclusive
     int64_t max_psn = -1;   // max psn sent on this id
     indx_tbl* diff_tbl = nullptr;
-    uint64_t snap_id = 0;
+    int64_t snap_id = -1;
     btree_cp_id_ptr btree_id;
     indx_diff_info(int64_t start_psn) : start_psn(start_psn) {}
 };
@@ -196,6 +196,7 @@ struct indx_cp_info {
     int64_t active_data_psn = -1;
     int64_t diff_data_psn = -1;
     int64_t indx_size = 0;
+    int64_t snap_id = -1;
 } __attribute__((__packed__));
 
 struct indx_cp_sb {
