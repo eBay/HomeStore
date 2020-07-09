@@ -100,7 +100,7 @@ void HomeStoreCP::cp_start(hs_cp_id* id) {
                 indx_mgr->get_active_indx()->cp_start(
                     it->second->ainfo.btree_id,
                     ([this, id](const btree_cp_id_ptr& btree_id) { indx_tbl_cp_done(id); }));
-                if (it->second->state() == cp_state::active_diff_cp) {
+                if (it->second->state() & cp_state::diff_cp) {
                     ++id->snt_cnt;
                     ++id->ref_cnt;
                     it->second->dinfo.diff_tbl->cp_start(
@@ -362,7 +362,7 @@ indx_mgr_static_sb IndxMgr::get_static_sb() {
 
 void IndxMgr::flush_hs_free_blks(hs_cp_id* hs_id) {
     for (auto it = hs_id->indx_id_list.begin(); it != hs_id->indx_id_list.end(); ++it) {
-        if (it->second == nullptr || it->second->flags == cp_state::suspend_cp) {
+        if (it->second == nullptr || !(it->second->flags & cp_state::blkalloc_cp)) {
             /* nothing to free. */
             continue;
         }
@@ -373,9 +373,12 @@ void IndxMgr::flush_hs_free_blks(hs_cp_id* hs_id) {
 
 void IndxMgr::flush_free_blks(const indx_cp_id_ptr& indx_id, hs_cp_id* hs_id) {
     /* free blks in a indx mgr */
-    hs_id->blkalloc_id->free_blks(indx_id->ainfo.free_blkid_list);
+    hs_id->blkalloc_id->free_blks(indx_id->free_blkid_list);
     /* free blks in a btree */
     m_active_tbl->flush_free_blks(indx_id->ainfo.btree_id, hs_id->blkalloc_id);
+    if (indx_id->flags & cp_state::diff_cp) {
+        indx_id->dinfo.diff_tbl->flush_free_blks(indx_id->dinfo.btree_id, hs_id->blkalloc_id);
+    }
 }
 
 void IndxMgr::write_hs_cp_sb(hs_cp_id* hs_id) {
@@ -419,22 +422,24 @@ void IndxMgr::update_cp_sb(indx_cp_id_ptr& indx_id, hs_cp_id* hs_id, indx_cp_sb*
     assert(indx_id->cp_cnt == m_last_cp_sb.cp_info.active_cp_cnt + 1);
 
     /* update common info to both diff and active cp */
-    sb->cp_info.blkalloc_cp_cnt = hs_id->blkalloc_checkpoint ? indx_id->cp_cnt : m_last_cp_sb.cp_info.blkalloc_cp_cnt;
+    sb->cp_info.blkalloc_cp_cnt =
+        (indx_id->flags & cp_state::blkalloc_cp) ? indx_id->cp_cnt : m_last_cp_sb.cp_info.blkalloc_cp_cnt;
     sb->cp_info.indx_size = indx_id->indx_size.load() + m_last_cp_sb.cp_info.indx_size;
     sb->uuid = m_uuid;
 
     /* update active checkpoint info */
     sb->cp_info.active_data_psn = indx_id->ainfo.end_psn;
     sb->cp_info.active_cp_cnt = indx_id->cp_cnt;
-    m_active_tbl->update_btree_cp_sb(indx_id->ainfo.btree_id, sb->active_btree_info, hs_id->blkalloc_checkpoint);
+    m_active_tbl->update_btree_cp_sb(indx_id->ainfo.btree_id, sb->active_btree_info,
+                                     (indx_id->flags & cp_state::blkalloc_cp));
 
     /* update diff checkpoint info */
-    if (indx_id->flags == cp_state::active_diff_cp) {
+    if (indx_id->flags & cp_state::diff_cp) {
         sb->cp_info.diff_data_psn = indx_id->dinfo.end_psn;
         sb->cp_info.diff_cp_cnt = indx_id->cp_cnt;
         if (!m_is_snap_started) {
             indx_id->dinfo.diff_tbl->update_btree_cp_sb(indx_id->dinfo.btree_id, sb->diff_btree_info,
-                                                        hs_id->blkalloc_checkpoint);
+                                                        (indx_id->flags & cp_state::blkalloc_cp));
         } else {
             snap_create_done(indx_id->dinfo.snap_id, indx_id->dinfo.max_psn, indx_id->dinfo.end_psn);
             m_is_snap_started = false;
@@ -496,18 +501,25 @@ indx_cp_id_ptr IndxMgr::attach_prepare_indx_cp(const indx_cp_id_ptr& cur_indx_id
         return cur_indx_id;
     }
 
-    auto active_btree_id =
-        m_active_tbl->attach_prepare_cp(cur_indx_id->ainfo.btree_id, m_last_cp, hs_id->blkalloc_checkpoint);
+    /* We have to make a decision here to take blk alloc cp or not. We can not reverse our
+     * decision beyond this point. */
+    bool blkalloc_cp = hs_id->blkalloc_checkpoint;
+    if (m_last_cp || m_is_snap_started) {
+        assert(blkalloc_cp);
+    } // blkalloc_cp should be true if it is last cp or snapshot is started in this cp.
+    if (blkalloc_cp) { cur_indx_id->flags |= cp_state::blkalloc_cp; }
+
+    auto active_btree_id = m_active_tbl->attach_prepare_cp(cur_indx_id->ainfo.btree_id, m_last_cp, blkalloc_cp);
     cur_indx_id->ainfo.end_psn = m_journal->get_contiguous_issued_seq_num(cur_indx_id->ainfo.start_psn);
 
     btree_cp_id_ptr diff_btree_id;
     if (m_is_snap_enabled) {
         /* TODO : add check if we want to take diff cp now or not */
-        if (m_is_snap_started || hs_id->blkalloc_checkpoint || 1) {
-            diff_btree_id = cur_indx_id->dinfo.diff_tbl->attach_prepare_cp(cur_indx_id->dinfo.btree_id, m_last_cp,
-                                                                           hs_id->blkalloc_checkpoint);
+        if (m_is_snap_started || blkalloc_cp || 1) {
+            diff_btree_id =
+                cur_indx_id->dinfo.diff_tbl->attach_prepare_cp(cur_indx_id->dinfo.btree_id, m_last_cp, blkalloc_cp);
             cur_indx_id->dinfo.end_psn = cur_indx_id->ainfo.end_psn;
-            cur_indx_id->flags = cp_state::active_diff_cp;
+            cur_indx_id->flags |= cp_state::diff_cp;
         } else {
             diff_btree_id = cur_indx_id->dinfo.btree_id;
         }
@@ -523,19 +535,19 @@ indx_cp_id_ptr IndxMgr::attach_prepare_indx_cp(const indx_cp_id_ptr& cur_indx_id
 
     /* create new cp */
     blkid_list_ptr free_list;
-    if (hs_id->blkalloc_checkpoint) {
+    if (blkalloc_cp) {
         free_list = m_free_list[++m_free_list_cnt % MAX_CP_CNT];
         assert(free_list->size() == 0);
     } else {
         /* we keep accumulating the free blks until blk checkpoint is not taken */
-        free_list = cur_indx_id->ainfo.free_blkid_list;
+        free_list = cur_indx_id->free_blkid_list;
     }
     int64_t cp_cnt = cur_indx_id->cp_cnt + 1;
     indx_cp_id_ptr new_indx_id(new indx_cp_id(cp_cnt, cur_indx_id->ainfo.end_psn, cur_indx_id->dinfo.end_psn,
                                               cur_indx_id->indx_mgr, free_list));
     new_indx_id->ainfo.btree_id = active_btree_id;
     if (m_is_snap_started) {
-        assert(hs_id->blkalloc_checkpoint);
+        assert(blkalloc_cp);
         /* create new diff table */
         /* Here are the steps to create snapshot
          * 1. HS CP trigger is called
@@ -563,6 +575,7 @@ indx_cp_id_ptr IndxMgr::attach_prepare_indx_cp(const indx_cp_id_ptr& cur_indx_id
         new_indx_id->dinfo.snap_id = cur_indx_id->dinfo.snap_id;
         new_indx_id->dinfo.btree_id = diff_btree_id;
     }
+
     return new_indx_id;
 }
 
@@ -900,7 +913,7 @@ void IndxMgr::free_blk(const indx_cp_id_ptr& indx_id, Free_Blk_Entry& fbe) {
 }
 
 void IndxMgr::free_blk(const indx_cp_id_ptr& indx_id, BlkId& fblkid) {
-    indx_id->ainfo.free_blkid_list->push_back(fblkid);
+    indx_id->free_blkid_list->push_back(fblkid);
     indx_id->indx_size.fetch_sub(fblkid.get_nblks() * m_hs->get_data_pagesz());
 }
 

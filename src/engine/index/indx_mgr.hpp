@@ -113,12 +113,19 @@ using indxmgr_stop_cb = cp_done_cb;
  * contain blks which are allocated after this checkpoint.
  */
 struct indx_cp_id;
-ENUM(cp_state, uint8_t,
-     active_cp,      // Active CP
-     active_diff_cp, // take both active/diff cp. There is no state like diff cp. We always take active CP when diff cp
-                     // is taken.
-     suspend_cp      // cp is suspended
-);
+
+/* CP will always be in this timeline order
+ * blkalloc cp ------> diff cp ------> active cp
+ * active CP is always ahead or equal to Diff cp. Diff cp is always ahead or equal to blk alloc cp. If active CP is
+ * suspended then all cps are suspended.
+ */
+
+enum cp_state {
+    suspend_cp = 0x0,  // cp is suspended
+    active_cp = 0x1,   // Active CP
+    diff_cp = 0x2,     // Diff CP.
+    blkalloc_cp = 0x4, // blkalloc cp.
+};
 
 struct hs_cp_id : cp_id_base {
     /* This list is not lock protected. */
@@ -134,9 +141,7 @@ struct indx_active_info {
     int64_t start_psn = -1; // not inclusive
     int64_t end_psn = -1;   // inclusive
     btree_cp_id_ptr btree_id;
-    blkid_list_ptr free_blkid_list;
-    indx_active_info(int64_t start_psn, blkid_list_ptr& free_blkid_list) :
-            start_psn(start_psn), free_blkid_list(free_blkid_list) {}
+    indx_active_info(int64_t start_psn) : start_psn(start_psn) {}
 };
 
 struct indx_diff_info {
@@ -153,7 +158,7 @@ struct indx_diff_info {
 /* During prepare flush we decide to take a CP out of active, diff or snap or all 3 cps*/
 struct indx_cp_id : public boost::intrusive_ref_counter< indx_cp_id > {
     indx_mgr_ptr indx_mgr;
-    cp_state flags = cp_state::active_cp;
+    int flags = cp_state::active_cp;
 
     /* metrics */
     int64_t cp_cnt;
@@ -163,15 +168,17 @@ struct indx_cp_id : public boost::intrusive_ref_counter< indx_cp_id > {
     indx_active_info ainfo;
     indx_diff_info dinfo;
 
+    blkid_list_ptr free_blkid_list;
     indx_cp_id(int64_t cp_cnt, int64_t start_active_psn, int64_t start_diff_psn, indx_mgr_ptr indx_mgr,
                blkid_list_ptr& free_blkid_list) :
             indx_mgr(indx_mgr),
             cp_cnt(cp_cnt),
             indx_size(0),
-            ainfo(start_active_psn, free_blkid_list),
-            dinfo(start_diff_psn) {}
+            ainfo(start_active_psn),
+            dinfo(start_diff_psn),
+            free_blkid_list(free_blkid_list) {}
 
-    cp_state state() const { return flags; }
+    int state() const { return flags; }
 };
 
 /* super block persisted for each CP */
