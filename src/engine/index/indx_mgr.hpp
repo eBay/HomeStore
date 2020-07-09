@@ -147,9 +147,8 @@ struct indx_active_info {
 struct indx_diff_info {
     int64_t start_psn = -1; // not inclusive
     int64_t end_psn = -1;   // inclusive
-    int64_t max_psn = -1;   // max psn sent on this id
     indx_tbl* diff_tbl = nullptr;
-    int64_t snap_id = -1;
+    int64_t diff_snap_id = -1;
     btree_cp_id_ptr btree_id;
     indx_diff_info(int64_t start_psn) : start_psn(start_psn) {}
 };
@@ -159,6 +158,7 @@ struct indx_diff_info {
 struct indx_cp_id : public boost::intrusive_ref_counter< indx_cp_id > {
     indx_mgr_ptr indx_mgr;
     int flags = cp_state::active_cp;
+    int64_t max_psn = -1; // max psn sent on this id
 
     /* metrics */
     int64_t cp_cnt;
@@ -179,6 +179,8 @@ struct indx_cp_id : public boost::intrusive_ref_counter< indx_cp_id > {
             free_blkid_list(free_blkid_list) {}
 
     int state() const { return flags; }
+    int64_t get_max_psn() { return 0; }
+    void set_max_psn(int64_t psn){};
 };
 
 /* super block persisted for each CP */
@@ -191,12 +193,18 @@ struct hs_cp_sb_hdr {
 
 struct indx_cp_info {
     int64_t blkalloc_cp_cnt = -1; // cp cnt of last blkalloc checkpoint taken
-    int64_t active_cp_cnt = -1;
-    int64_t diff_cp_cnt = -1;
-    int64_t active_data_psn = -1;
-    int64_t diff_data_psn = -1;
     int64_t indx_size = 0;
-    int64_t snap_id = -1;
+
+    /* active cp info */
+    int64_t active_cp_cnt = -1;
+    int64_t active_data_psn = -1;
+
+    /* diff cp info */
+    int64_t diff_cp_cnt = -1;
+    int64_t diff_data_psn = -1;
+    int64_t diff_max_psn = -1;
+    int64_t diff_snap_id = -1;
+    bool snap_cp = false;
 } __attribute__((__packed__));
 
 struct indx_cp_sb {
