@@ -738,6 +738,9 @@ public:
         return no_error;
     }
 
+    btree_status_t update_diff_indx_tbl(indx_req* ireq, const btree_cp_id_ptr& btree_id) override {
+        return btree_status_t::success;
+    }
     btree_status_t update_active_indx_tbl(indx_req* ireq, const btree_cp_id_ptr& btree_id) override {
         auto vreq = static_cast< volume_req* >(ireq);
         uint64_t start_lba = vreq->lba();

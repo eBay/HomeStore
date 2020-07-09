@@ -116,10 +116,10 @@ void Volume::init() {
         sb->uuid = m_params.uuid;
 
         /* create indx tbl */
-        m_indx_mgr = IndxMgr::make_IndxMgr(
+        m_indx_mgr = SnapMgr::make_SnapMgr(
             m_params.uuid, std::string(m_params.vol_name),
             std::bind(&Volume::process_indx_completions, this, std::placeholders::_1, std::placeholders::_2),
-            std::bind(&Volume::create_indx_tbl, this));
+            std::bind(&Volume::create_indx_tbl, this), false);
 
         /* populate indx mgr super block */
         sb->indx_mgr_sb = m_indx_mgr->get_static_sb();
@@ -127,9 +127,9 @@ void Volume::init() {
         set_state(vol_state::ONLINE, true);
         seq_Id = m_indx_mgr->get_last_psn();
         /* it is called after superblock is persisted by volume */
-        m_indx_mgr->create_done();
+        m_indx_mgr->indx_init();
 
-        IndxMgr::trigger_indx_cp_with_cb(([this](bool success) {
+        SnapMgr::trigger_indx_cp_with_cb(([this](bool success) {
             /* Now it is safe to do shutdown as this volume has become a part of CP */
             auto cnt = home_blks_ref_cnt.fetch_sub(1);
             if (cnt == 1 && m_hb->is_shutdown()) { m_hb->do_volume_shutdown(true); }
@@ -137,7 +137,7 @@ void Volume::init() {
     } else {
         /* recovery */
         auto indx_mgr_sb = sb->indx_mgr_sb;
-        m_indx_mgr = IndxMgr::make_IndxMgr(
+        m_indx_mgr = SnapMgr::make_SnapMgr(
             get_uuid(), std::string(get_name()),
             std::bind(&Volume::process_indx_completions, this, std::placeholders::_1, std::placeholders::_2),
             std::bind(&Volume::create_indx_tbl, this),
@@ -199,21 +199,21 @@ void Volume::destroy_internal() {
 }
 
 /* It is called only once */
-void Volume::shutdown(const indxmgr_stop_cb& cb) { IndxMgr::shutdown(cb); }
+void Volume::shutdown(const indxmgr_stop_cb& cb) { SnapMgr::shutdown(cb); }
 
 Volume::~Volume() {}
 
 indx_tbl* Volume::create_indx_tbl() {
     auto pending_read_blk_cb =
         std::bind(&Volume::pending_read_blk_cb, this, std::placeholders::_1, std::placeholders::_2);
-    auto tbl = new mapping(get_size(), get_page_size(), get_name(), IndxMgr::trigger_indx_cp, pending_read_blk_cb);
+    auto tbl = new mapping(get_size(), get_page_size(), get_name(), SnapMgr::trigger_indx_cp, pending_read_blk_cb);
     return static_cast< indx_tbl* >(tbl);
 }
 
 indx_tbl* Volume::recover_indx_tbl(btree_super_block& sb, btree_cp_superblock& cp_info) {
     auto pending_read_blk_cb =
         std::bind(&Volume::pending_read_blk_cb, this, std::placeholders::_1, std::placeholders::_2);
-    auto tbl = new mapping(get_size(), get_page_size(), get_name(), sb, IndxMgr::trigger_indx_cp, pending_read_blk_cb,
+    auto tbl = new mapping(get_size(), get_page_size(), get_name(), sb, SnapMgr::trigger_indx_cp, pending_read_blk_cb,
                            &cp_info);
     return static_cast< indx_tbl* >(tbl);
 }

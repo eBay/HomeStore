@@ -353,8 +353,8 @@ struct bnodeid {
 #endif
 
 struct btree_super_block {
-    bnodeid_t root_node;
-    uint32_t journal_id;
+    bnodeid_t root_node = 0;
+    uint32_t journal_id = 0;
 } __attribute((packed));
 
 ENUM(btree_store_type, uint32_t, MEM_BTREE, SSD_BTREE);
