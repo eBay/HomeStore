@@ -14,7 +14,7 @@ pipeline {
                 script {
                     PROJECT = sh(script: "grep -m 1 'name =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
                     TAG = sh(script: "grep -m 1 'version =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
-                    CONAN_CHANNEL = sh(script: "echo ${BRANCH_NAME} | sed -E 's,(\\w-+\\d).*,\\1,' | sed -E 's,-,_,' | tr -d '\n'", returnStdout: true)
+                    CONAN_CHANNEL = sh(script: "echo ${BRANCH_NAME} | sed -E 's,(\\w+-?\\d*)/.*,\\1,' | sed -E 's,-,_,' | tr -d '\n'", returnStdout: true)
                     ECR_PATH = "ecr.vip.ebayc3.com/${ORG}/${PROJECT}"
                     slackSend color: '#0063D1', channel: '#conan-pkgs', message: "*${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}* is building."
                 }
