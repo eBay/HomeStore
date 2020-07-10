@@ -137,7 +137,7 @@ void HomeBlks::attach_prepare_indx_cp_id(std::map< boost::uuids::uuid, indx_cp_i
             if (!happened) { throw std::runtime_error("Unknown bug"); }
         } else {
             /* this volume doesn't want to participate now */
-            assert(vol->get_state() == vol_state::DESTROYED || is_shutdown());
+            assert(vol->get_state() == vol_state::DESTROYING);
         }
     }
 }
