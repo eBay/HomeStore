@@ -324,7 +324,7 @@ void IndxMgr::static_init() {
     sthread2.detach();
     expected_thread_cnt++;
 
-    while (thread_cnt.load() != expected_thread_cnt) {}
+    while (thread_cnt.load(std::memory_order_rel) != expected_thread_cnt) {}
     IndxMgr::m_inited = true;
 }
 
