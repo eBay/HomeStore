@@ -304,20 +304,18 @@ void IndxMgr::static_init() {
                                         [](void* cookie) { trigger_hs_cp(nullptr, false); });
     auto sthread = sisl::named_thread("indx_mgr", []() mutable {
         iomanager.run_io_loop(false, nullptr, [](bool is_started) {
-            if (is_started) {
-                IndxMgr::m_thread_id = iomanager.iothread_self();
-                thread_cnt++;
-            }
+            assert(is_started);
+            IndxMgr::m_thread_id = iomanager.iothread_self();
+            thread_cnt++;
         });
     });
     sthread.detach();
 
     auto sthread2 = sisl::named_thread("indx_mgr_btree_slow", []() {
         iomanager.run_io_loop(false, nullptr, [](bool is_started) {
-            if (is_started) {
-                IndxMgr::m_slow_path_thread_id = iomanager.iothread_self();
-                thread_cnt++;
-            }
+            assert(is_started);
+            IndxMgr::m_slow_path_thread_id = iomanager.iothread_self();
+            thread_cnt++;
         });
     });
 
