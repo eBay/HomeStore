@@ -47,6 +47,7 @@ public:
     indx_cp_id_ptr indx_id = nullptr;
     sisl::atomic_counter< int > ref_count = 1; // Initialize the count
     error_condition indx_err = no_error;
+    indx_req_state state = indx_req_state::active_btree;
 };
 
 class indx_tbl {
@@ -215,6 +216,7 @@ private:
     static std::atomic< bool > m_shutdown_started;
     static bool m_shutdown_cmplt;
     static iomgr::io_thread_t m_thread_id;
+    static iomgr::io_thread_t m_slow_path_thread_id;
     static iomgr::timer_handle_t m_hs_cp_timer_hdl;
     static void* m_meta_blk;
     static std::once_flag m_flag;
@@ -263,6 +265,7 @@ private:
     bool m_is_snap_started = false;
 
     /*************************************** private functions ************************/
+    void update_indx_internal(boost::intrusive_ptr< indx_req > ireq);
     void journal_write(indx_req* vreq);
     void journal_comp_cb(logstore_req* req, logdev_key ld_key);
     btree_status_t update_indx_tbl(indx_req* vreq, bool is_active);
@@ -275,7 +278,9 @@ private:
     btree_status_t retry_update_indx(const boost::intrusive_ptr< indx_req >& ireq, bool is_active);
     void free_blk(const indx_cp_id_ptr& indx_id, Free_Blk_Entry& fbe);
     void free_blk(const indx_cp_id_ptr& indx_id, BlkId& fblkid);
+    void run_slow_path_thread();
     void create_new_diff_tbl(indx_cp_id_ptr& indx_id);
+
 };
 
 struct Free_Blk_Entry {

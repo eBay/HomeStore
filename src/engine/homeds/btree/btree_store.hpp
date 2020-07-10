@@ -49,7 +49,7 @@ public:
     static BtreeNodePtr alloc_node(btree_store_t* store, bool is_leaf,
                                    bool& is_new_allocation, // indicates if allocated node is same as copy_from
                                    const BtreeNodePtr& copy_from = nullptr);
-    static BtreeNodePtr read_node(btree_store_t* store, bnodeid_t id);
+    static btree_status_t read_node(btree_store_t* store, bnodeid_t id, BtreeNodePtr& node);
 
     static btree_status_t write_node(btree_store_t* store, const BtreeNodePtr& bn, const BtreeNodePtr& dependent_bn,
                                      const btree_cp_id_ptr& cp_id);
