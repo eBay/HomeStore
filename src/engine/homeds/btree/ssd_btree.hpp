@@ -210,7 +210,8 @@ public:
     uint32_t get_node_size() { return m_node_size; }
     wb_cache_t* get_wb_cache() { return &m_wb_cache; }
 
-    static boost::intrusive_ptr< SSDBtreeNode > read_node(SSDBtreeStore* store, bnodeid_t id) {
+    static btree_status_t read_node(SSDBtreeStore* store, bnodeid_t id, boost::intrusive_ptr< SSDBtreeNode >& bnode) {
+        auto ret = btree_status_t::success;
         // Read the data from the block store
         try {
 #ifdef _PRERELEASE
@@ -220,13 +221,25 @@ public:
             auto req = writeback_req_t::make_request();
             req->is_read = true;
             req->isSyncCall = true;
-            auto safe_buf = m_blkstore->read(blkid, 0, store->get_node_size(), req);
+            auto cache_only = iomanager.am_i_tight_loop_reactor();
+        
+            auto safe_buf = m_blkstore->read(blkid, 0, store->get_node_size(), req, cache_only);
+            
+            if (safe_buf == nullptr) {
+                // only expect to see null buf when we are in spdk reactor;
+                HS_ASSERT_CMP(DEBUG, iomanager.am_i_tight_loop_reactor(), ==, true);
+                bnode = nullptr;
+                return btree_status_t::fast_path_not_possible;
+            } 
 
-            return boost::static_pointer_cast< SSDBtreeNode >(safe_buf);
+            bnode = boost::static_pointer_cast< SSDBtreeNode >(safe_buf);
         } catch (std::exception& e) {
             LOGERROR("{}", e.what());
-            return nullptr;
+            ret = btree_status_t::read_failed;
+            bnode = nullptr;
         }
+
+        return ret;
     }
 
     static void copy_node(SSDBtreeStore* store, boost::intrusive_ptr< SSDBtreeNode > copy_from,

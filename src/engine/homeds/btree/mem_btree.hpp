@@ -115,9 +115,9 @@ public:
 
     static void deallocate_mem(uint8_t* mem) { free(mem); }
 
-    static boost::intrusive_ptr< MemBtreeNode > read_node(MemBtreeStore* store, bnodeid_t id) {
-        auto bn = reinterpret_cast< MemBtreeNode* >(id);
-        return boost::intrusive_ptr< MemBtreeNode >(bn);
+    static btree_status_t read_node(MemBtreeStore* store, bnodeid_t id,  boost::intrusive_ptr< MemBtreeNode >& bnode) {
+        bnode = reinterpret_cast< MemBtreeNode* >(id);
+        return btree_status_t::success;
     }
 
     static btree_status_t write_node(MemBtreeStore* store, boost::intrusive_ptr< MemBtreeNode > bn,

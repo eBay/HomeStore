@@ -303,13 +303,22 @@ void IndxMgr::static_init() {
                                         [](void* cookie) { trigger_hs_cp(nullptr, false); });
     auto sthread = sisl::named_thread("indx_mgr", []() mutable {
         iomanager.run_io_loop(false, nullptr, [](bool is_started) {
+            if (is_started) { IndxMgr::m_thread_id = iomanager.iothread_self(); }
+        });
+    });
+    sthread.detach();
+
+    auto sthread2 = sisl::named_thread("indx_mgr_btree_slow", []() {
+        iomanager.run_io_loop(false, nullptr, [](bool is_started) {
             if (is_started) {
-                IndxMgr::m_thread_id = iomanager.iothread_self();
+                IndxMgr::m_slow_path_thread_id = iomanager.iothread_self();
                 IndxMgr::m_inited = true;
             }
         });
     });
-    sthread.detach();
+
+    sthread2.detach();
+
     while (!IndxMgr::m_inited.load(std::memory_order_relaxed)) {}
 }
 
@@ -501,9 +510,9 @@ void IndxMgr::attach_prepare_indx_cp_id_list(std::map< boost::uuids::uuid, indx_
 indx_cp_id_ptr IndxMgr::attach_prepare_indx_cp(const indx_cp_id_ptr& cur_indx_id, hs_cp_id* hs_id,
                                                hs_cp_id* new_hs_id) {
     if (cur_indx_id == nullptr) {
-        /* this indx mgr is just created in the last CP. return the first_cp_id created at the timeof indx mgr creation.
-         * And this indx mgr is not going to participate in the current cp. This indx mgr is going to participate in
-         * the next cp.
+        /* this indx mgr is just created in the last CP. return the first_cp_id created at the timeof indx mgr
+         * creation. And this indx mgr is not going to participate in the current cp. This indx mgr is going to
+         * participate in the next cp.
          */
         assert(m_first_cp_id != nullptr);
         /* if hs_id->blkalloc_checkpoint is set to true then it means it is created/destroy in a same cp.
@@ -643,14 +652,14 @@ void IndxMgr::journal_comp_cb(logstore_req* lreq, logdev_key ld_key) {
      * Otherwise bitmap won't reflect all the blks allocated in a cp.
      *
      * It is also possible that indx_alloc_blkis list contain the less number of blkids that allocated because of
-     * partial writes. We are not freeing it in cache right away. There is no reason to not do it. We are not setting it
-     * in disk bitmap so in next reboot it will be available to use.
+     * partial writes. We are not freeing it in cache right away. There is no reason to not do it. We are not
+     * setting it in disk bitmap so in next reboot it will be available to use.
      */
 
-        for (uint32_t i = 0; i < ireq->indx_alloc_blkid_list.size(); ++i) {
-            m_hs->get_data_blkstore()->alloc_blk(ireq->indx_alloc_blkid_list[i]);
-            /* update size */
-            ireq->indx_id->indx_size += ireq->indx_alloc_blkid_list[i].data_size(m_hs->get_data_pagesz());
+    for (uint32_t i = 0; i < ireq->indx_alloc_blkid_list.size(); ++i) {
+        m_hs->get_data_blkstore()->alloc_blk(ireq->indx_alloc_blkid_list[i]);
+        /* update size */
+        ireq->indx_id->indx_size += ireq->indx_alloc_blkid_list[i].data_size(m_hs->get_data_pagesz());
     }
 
     /* free the blkids */
@@ -659,8 +668,8 @@ void IndxMgr::journal_comp_cb(logstore_req* lreq, logdev_key ld_key) {
         ireq->fbe_list[i].m_cp_id = ireq->hs_id;
     }
 
-    /* Increment the reference count by the number of free blk entries. Freing of blk is an async process. So we don't
-     * want to take a checkpoint until these blkids by its consumer. Blk ids are freed in IndxMgr::free_blk.
+    /* Increment the reference count by the number of free blk entries. Freing of blk is an async process. So we
+     * don't want to take a checkpoint until these blkids by its consumer. Blk ids are freed in IndxMgr::free_blk.
      */
     m_cp->cp_inc_ref(ireq->hs_id, ireq->fbe_list.size());
 
@@ -687,23 +696,46 @@ void IndxMgr::journal_write(indx_req* ireq) {
  * is still being done in old CP. Indx is always updated in a mapping sequentially start from
  * lba_start. We keep track of all the CP in a req but update journal with only with
  * the latest CP ids.
- */
+ *
+ * if fast path not possible:
+ * 1. let spdk thread exit;
+ * 2. send message to slow-path thread to do the write, and in this slow-path thread, after write completes, do
+ * journal write;
+ * 3. after jouranl write completes, in journal completion callback, do io callback to caller;
+ * */
 btree_status_t IndxMgr::update_indx_tbl(indx_req* ireq, bool is_active) {
     if (is_active) {
         auto btree_id = ireq->indx_id->ainfo.btree_id;
         auto status = m_active_tbl->update_active_indx_tbl(ireq, btree_id);
+        if (status == btree_status_t::fast_path_not_possible) {
+            /* call run_on in async mode */
+            iomanager.run_on(m_slow_path_thread_id, [this, ireq](io_thread_addr_t addr) mutable {
+                HS_LOG(INFO, indx_mgr, "Slow path write triggered.");
+                HS_ASSERT_CMP(DEBUG, ireq->state, ==, indx_req_state::active_btree);
+                update_indx_internal(ireq);
+            });
+        }
         return status;
     } else {
+        // we are here only when active btree write is in fast path;
         auto btree_id = ireq->indx_id->dinfo.btree_id;
         auto diff_tbl = ireq->indx_id->dinfo.diff_tbl;
         assert(diff_tbl != nullptr);
         auto status = diff_tbl->update_diff_indx_tbl(ireq, btree_id);
+
+        if (status == btree_status_t::fast_path_not_possible) {
+            /* call run_on in async mode */
+            iomanager.run_on(m_slow_path_thread_id, [this, ireq](io_thread_addr_t addr) mutable {
+                HS_LOG(INFO, indx_mgr, "Slow path write triggered.");
+                HS_ASSERT_CMP(DEBUG, ireq->state, ==, indx_req_state::diff_btree);
+                update_indx_internal(ireq);
+            });
+        }
         return status;
     }
 }
 
 void IndxMgr::update_indx(indx_req_ptr ireq) {
-    int retry_cnt = 0;
     /* Journal write is async call. So incrementing the ref on indx req */
     ireq->inc_ref();
 
@@ -712,23 +744,53 @@ void IndxMgr::update_indx(indx_req_ptr ireq) {
     ireq->indx_id = get_indx_id(ireq->hs_id);
     if (!ireq->indx_id) { ireq->indx_id = m_first_cp_id; }
 
-    /* update active btree */
-    auto ret = update_indx_tbl(ireq.get(), true);
-    /* we call cp exit on both the CPs only when journal is written otherwise there could be blkid leak */
-    if (ret == btree_status_t::cp_id_mismatch) { ret = retry_update_indx(ireq, true); }
-    /* TODO : we don't allow partial failure for now. If we have to allow that we have to support undo */
-    assert(ret == btree_status_t::success);
+    ireq->state = indx_req_state::active_btree;
+    update_indx_internal(ireq);
+}
 
-    /* update diff btree */
-    if (m_is_snap_enabled) {
-        ret = update_indx_tbl(ireq.get(), false);
+/* * this function can be called either in fast path or slow path * */
+void IndxMgr::update_indx_internal(indx_req_ptr ireq) {
+    auto ret = btree_status_t::success;
+    switch (ireq->state) {
+    case indx_req_state::active_btree:
+        /* update active btree */
+        ret = update_indx_tbl(ireq.get(), true /* is_active */);
         /* we call cp exit on both the CPs only when journal is written otherwise there could be blkid leak */
-        if (ret == btree_status_t::cp_id_mismatch) { ret = retry_update_indx(ireq, false); }
-        assert(ret != btree_status_t::success);
+        if (ret == btree_status_t::cp_id_mismatch) { ret = retry_update_indx(ireq, true /* is_active */); }
+        /* TODO : we don't allow partial failure for now. If we have to allow that we have to support undo */
+        if (ret != btree_status_t::success && ret != btree_status_t::fast_path_not_possible) {
+            HS_ASSERT(DEBUG, false, "return val unexpected: {}", ret);
+        }
+
+        if (ret == btree_status_t::fast_path_not_possible) { return; }
+
+        /* fall through */
+    case indx_req_state::diff_btree:
+        ireq->state = indx_req_state::diff_btree;
+        /* update diff btree. */
+        if (m_is_snap_enabled) {
+            auto ret = update_indx_tbl(ireq.get(), false);
+            /* we call cp exit on both the CPs only when journal is written otherwise there could be blkid leak */
+            if (ret == btree_status_t::cp_id_mismatch) { ret = retry_update_indx(ireq.get(), false); }
+            if (ret != btree_status_t::success && ret != btree_status_t::fast_path_not_possible) {
+                HS_ASSERT(DEBUG, false, "return val unexpected: {}", ret);
+            }
+        }
+
+        if (ret == btree_status_t::fast_path_not_possible) { return; }
+
+        break;
+
+    default:
+        HS_ASSERT(RELEASE, false, "Unsupported ireq state: ", ireq->state);
     }
 
+    if (ret != btree_status_t::success) { ireq->indx_err = btree_write_failed; }
+
+    /* TODO update diff btree */
     /* Update allocate blkids in indx req */
     m_active_tbl->update_indx_alloc_blkids(ireq.get());
+
     /* In case of failure we will still update the journal with entries of whatever is written. */
     /* update journal. Journal writes are not expected to fail. It is async call/ */
     journal_write(ireq.get());
@@ -942,8 +1004,8 @@ void IndxMgr::free_blk(const indx_cp_id_ptr& indx_id, BlkId& fblkid) {
 }
 
 void IndxMgr::safe_to_free_blk(hs_cp_id* hs_id, Free_Blk_Entry& fbe) {
-    /* We don't allow cp to complete until all required blkids are freed. We increment the ref count in update_indx_tbl
-     * by number of free blk entries.
+    /* We don't allow cp to complete until all required blkids are freed. We increment the ref count in
+     * update_indx_tbl by number of free blk entries.
      */
     assert(hs_id);
     /* invalidate the cache */
@@ -951,7 +1013,8 @@ void IndxMgr::safe_to_free_blk(hs_cp_id* hs_id, Free_Blk_Entry& fbe) {
     m_hs->get_data_blkstore()->free_blk(fbe.m_blkId, (fbe.m_blk_offset * page_sz), (fbe.m_nblks_to_free * page_sz),
                                         true);
     m_cp->cp_io_exit(hs_id);
-    /* We have already free the blk after journal write is completed. We are just holding a cp for free to complete */
+    /* We have already free the blk after journal write is completed. We are just holding a cp for free to complete
+     */
 }
 
 void IndxMgr::register_cp_done_cb(const cp_done_cb& cb, bool blkalloc_cp) {
@@ -971,6 +1034,7 @@ std::string IndxMgr::get_name() { return m_name; }
 std::unique_ptr< HomeStoreCP > IndxMgr::m_cp;
 std::atomic< bool > IndxMgr::m_shutdown_started;
 iomgr::io_thread_t IndxMgr::m_thread_id;
+iomgr::io_thread_t IndxMgr::m_slow_path_thread_id;
 iomgr::timer_handle_t IndxMgr::m_hs_cp_timer_hdl = iomgr::null_timer_handle;
 void* IndxMgr::m_meta_blk = nullptr;
 std::once_flag IndxMgr::m_flag;

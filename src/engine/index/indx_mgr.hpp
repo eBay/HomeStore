@@ -127,6 +127,8 @@ enum cp_state {
     blkalloc_cp = 0x4, // blkalloc cp.
 };
 
+ENUM(indx_req_state, uint32_t, active_btree, diff_btree);
+
 struct hs_cp_id : cp_id_base {
     /* This list is not lock protected. */
     std::map< boost::uuids::uuid, indx_cp_id_ptr > indx_id_list;
