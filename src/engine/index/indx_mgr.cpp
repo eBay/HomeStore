@@ -291,6 +291,8 @@ void IndxMgr::indx_snap_create() {
 }
 
 void IndxMgr::static_init() {
+    static std::atomic< int64_t > thread_cnt = 0;
+    int expected_thread_cnt = 0;
     assert(!m_inited);
     m_hs = HomeStoreBase::instance();
     m_shutdown_started.store(false);
@@ -303,23 +305,29 @@ void IndxMgr::static_init() {
                                         [](void* cookie) { trigger_hs_cp(nullptr, false); });
     auto sthread = sisl::named_thread("indx_mgr", []() mutable {
         iomanager.run_io_loop(false, nullptr, [](bool is_started) {
-            if (is_started) { IndxMgr::m_thread_id = iomanager.iothread_self(); }
+            if (is_started) {
+                IndxMgr::m_thread_id = iomanager.iothread_self();
+                thread_cnt++;
+            }
         });
     });
     sthread.detach();
+    expected_thread_cnt++;
 
     auto sthread2 = sisl::named_thread("indx_mgr_btree_slow", []() {
         iomanager.run_io_loop(false, nullptr, [](bool is_started) {
             if (is_started) {
                 IndxMgr::m_slow_path_thread_id = iomanager.iothread_self();
-                IndxMgr::m_inited = true;
+                thread_cnt++;
             }
         });
     });
 
     sthread2.detach();
+    expected_thread_cnt++;
 
-    while (!IndxMgr::m_inited.load(std::memory_order_relaxed)) {}
+    while (thread_cnt.load(std::memory_order_release) != expected_thread_cnt) {}
+    IndxMgr::m_inited = true;
 }
 
 void IndxMgr::recovery_start_phase1() {
