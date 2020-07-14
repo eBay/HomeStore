@@ -503,7 +503,7 @@ public:
      * write_at_offset(offset_2);
      * write_at_offset(offset_1);
      */
-    off_t alloc_blk(size_t size, bool chunk_overlap_ok = false) {
+    off_t alloc_blk(const size_t size, const bool chunk_overlap_ok = false) {
         HS_ASSERT_CMP(DEBUG, chunk_overlap_ok, ==, false);
 
         if (get_used_space() + size > get_size()) {
