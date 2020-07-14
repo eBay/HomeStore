@@ -30,7 +30,7 @@
 
 ENUM(btree_status_t, uint32_t, success, not_found, item_found, closest_found, closest_removed, retry, has_more,
      read_failed, write_failed, stale_buf, refresh_failed, put_failed, space_not_avail, split_failed, insert_failed,
-     cp_id_mismatch, merge_not_required, merge_failed, replay_not_needed);
+     cp_id_mismatch, merge_not_required, merge_failed, replay_not_needed, fast_path_not_possible);
 
 typedef enum {
     READ_NONE = 0,
@@ -360,8 +360,8 @@ struct bnodeid {
 #endif
 
 struct btree_super_block {
-    bnodeid_t root_node;
-    uint32_t journal_id;
+    bnodeid_t root_node = 0;
+    uint32_t journal_id = 0;
 } __attribute((packed));
 
 ENUM(btree_store_type, uint32_t, MEM_BTREE, SSD_BTREE);

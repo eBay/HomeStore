@@ -6,9 +6,8 @@
 SDS_LOGGING_DECL(metablk)
 namespace homestore {
 
-void MetaBlkMgr::start(blk_store_t* sb_blk_store, sb_blkstore_blob* blob, bool is_init) {
+void MetaBlkMgr::start(blk_store_t* sb_blk_store, const sb_blkstore_blob* blob, const bool is_init) {
     m_sb_blk_store = sb_blk_store;
-    m_shutdown = false;
     if (is_init) {
         // write the meta blk manager's sb;
         init_ssb();
@@ -43,7 +42,7 @@ void MetaBlkMgr::cache_clear() {
 }
 
 MetaBlkMgr::~MetaBlkMgr() {
-    m_shutdown = true;
+    std::lock_guard< decltype(m_meta_mtx) > lg_shutdown(m_shutdown_mtx);
     cache_clear();
 
     std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
@@ -61,7 +60,7 @@ void MetaBlkMgr::read(BlkId& bid, sisl::blob& b) {
     assert(b.size == META_BLK_PAGE_SZ);
 }
 
-void MetaBlkMgr::load_ssb(sb_blkstore_blob* blob) {
+void MetaBlkMgr::load_ssb(const sb_blkstore_blob* blob) {
     BlkId bid = blob->blkid;
 
     m_sb_blk_store->alloc_blk(bid);
@@ -262,7 +261,7 @@ void MetaBlkMgr::scan_meta_blks_per_chunk() {
     iomanager.iobuf_free(buf);
 }
 
-bool MetaBlkMgr::is_sub_type_valid(meta_sub_type type) { return m_sub_info.find(type) != m_sub_info.end(); }
+bool MetaBlkMgr::is_sub_type_valid(const meta_sub_type type) { return m_sub_info.find(type) != m_sub_info.end(); }
 
 void MetaBlkMgr::extract_meta_blks(uint8_t* buf, const uint64_t size, std::vector< meta_blk* >& mblks) {
     uint8_t* meta_blk_ptr = buf;
@@ -277,14 +276,14 @@ void MetaBlkMgr::extract_meta_blks(uint8_t* buf, const uint64_t size, std::vecto
     assert(meta_blk_ptr == buf);
 }
 
-void MetaBlkMgr::deregister_handler(meta_sub_type type) {
+void MetaBlkMgr::deregister_handler(const meta_sub_type type) {
     std::lock_guard< decltype(m_meta_mtx) > lk(m_meta_mtx);
 
     auto it = m_sub_info.find(type);
     if (it != m_sub_info.end()) { m_sub_info.erase(it); }
 }
 
-void MetaBlkMgr::register_handler(meta_sub_type type, meta_blk_found_cb_t cb, meta_blk_recover_comp_cb_t comp_cb) {
+void MetaBlkMgr::register_handler(const meta_sub_type type, const meta_blk_found_cb_t& cb, const meta_blk_recover_comp_cb_t& comp_cb) {
     std::lock_guard< decltype(m_meta_mtx) > lk(m_meta_mtx);
     HS_ASSERT(RELEASE, type.length() < MAX_SUBSYS_TYPE_LEN, "type len: {} should not exceed len: {}", type.length(),
               MAX_SUBSYS_TYPE_LEN);
@@ -293,8 +292,7 @@ void MetaBlkMgr::register_handler(meta_sub_type type, meta_blk_found_cb_t cb, me
     m_sub_info[type].comp_cb = comp_cb;
 }
 
-void MetaBlkMgr::add_sub_sb(meta_sub_type type, void* context_data, uint64_t sz, void*& cookie) {
-    HS_ASSERT_CMP(RELEASE, m_shutdown, ==, false);
+void MetaBlkMgr::add_sub_sb(const meta_sub_type type, const void* context_data, const uint64_t sz, void*& cookie) {
     HS_ASSERT(RELEASE, type.length() < MAX_SUBSYS_TYPE_LEN, "type len: {} should not exceed len: {}", type.length(),
               MAX_SUBSYS_TYPE_LEN);
     // not allowing add sub sb before registration
@@ -321,7 +319,7 @@ void MetaBlkMgr::write_meta_blk_to_disk(meta_blk* mblk) {
     } catch (std::exception& e) { throw e; }
 }
 
-void MetaBlkMgr::write_blk(BlkId bid, void* context_data, uint32_t sz) {
+void MetaBlkMgr::write_blk(BlkId& bid, const void* context_data, const uint32_t sz) {
     homeds::MemVector mvec;
     try {
         mvec.set((uint8_t*)context_data, sz, 0);
@@ -329,7 +327,7 @@ void MetaBlkMgr::write_blk(BlkId bid, void* context_data, uint32_t sz) {
     } catch (std::exception& e) { throw e; }
 }
 
-meta_blk* MetaBlkMgr::init_meta_blk(BlkId bid, meta_sub_type type, void* context_data, size_t sz) {
+meta_blk* MetaBlkMgr::init_meta_blk(BlkId& bid, const meta_sub_type type, const void* context_data, const size_t sz) {
     meta_blk* mblk = (meta_blk*)iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_PAGE_SZ);
     mblk->hdr.h.blkid.set(bid);
     memset(mblk->hdr.h.type, 0, MAX_SUBSYS_TYPE_LEN);
@@ -380,8 +378,7 @@ meta_blk* MetaBlkMgr::init_meta_blk(BlkId bid, meta_sub_type type, void* context
 // If crash happens at any point before the head ovf blk is written to disk, we are fine because those blks will be
 // free after reboot
 //
-void MetaBlkMgr::write_meta_blk_ovf(BlkId& prev_bid, BlkId& bid, void* context_data, uint64_t sz, uint64_t offset) {
-    HS_ASSERT_CMP(RELEASE, m_shutdown, ==, false);
+void MetaBlkMgr::write_meta_blk_ovf(BlkId& prev_bid, BlkId& bid, const void* context_data, const uint64_t sz, const uint64_t offset) {
     HS_ASSERT(RELEASE, offset < sz, "offset:{} should be less than sz:{}", offset, sz);
 
     meta_blk_ovf_hdr* ovf_hdr =
@@ -425,7 +422,7 @@ void MetaBlkMgr::write_meta_blk_ovf(BlkId& prev_bid, BlkId& bid, void* context_d
     write_ovf_blk_to_disk(ovf_hdr, context_data, sz, offset);
 }
 
-void MetaBlkMgr::write_ovf_blk_to_disk(meta_blk_ovf_hdr* ovf_hdr, void* context_data, uint64_t sz, uint64_t offset) {
+void MetaBlkMgr::write_ovf_blk_to_disk(meta_blk_ovf_hdr* ovf_hdr, const void* context_data, const uint64_t sz, const uint64_t offset) {
     HS_ASSERT_CMP(DEBUG, ovf_hdr->h.context_sz + offset, <=, sz);
     HS_ASSERT_CMP(DEBUG, ovf_hdr->h.context_sz + META_BLK_OVF_HDR_MAX_SZ, <=, META_BLK_PAGE_SZ);
 
@@ -442,7 +439,7 @@ void MetaBlkMgr::write_ovf_blk_to_disk(meta_blk_ovf_hdr* ovf_hdr, void* context_
     } catch (std::exception& e) { throw e; }
 }
 
-void MetaBlkMgr::write_meta_blk_internal(meta_blk* mblk, void* context_data, uint64_t sz) {
+void MetaBlkMgr::write_meta_blk_internal(meta_blk* mblk, const void* context_data, const uint64_t sz) {
     mblk->hdr.h.context_sz = sz;
 
     // within block context size;
@@ -478,14 +475,13 @@ void MetaBlkMgr::write_meta_blk_internal(meta_blk* mblk, void* context_data, uin
     write_meta_blk_to_disk(mblk);
 }
 
-void MetaBlkMgr::update_sub_sb(meta_sub_type type, void* context_data, uint64_t sz, void*& cookie) {
+void MetaBlkMgr::update_sub_sb(const meta_sub_type type, const void* context_data, const uint64_t sz, void*& cookie) {
     //
     // Do in-place update:
     // 1. free old ovf_blkid if there is any
     // 2. allcate ovf_blkid if needed
     // 3. update the meta_blk
     //
-    HS_ASSERT_CMP(RELEASE, m_shutdown, ==, false);
     std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
     meta_blk* mblk = (meta_blk*)cookie;
 
@@ -510,8 +506,7 @@ void MetaBlkMgr::update_sub_sb(meta_sub_type type, void* context_data, uint64_t 
     // no need to update cookie and in-memory meta blk map
 }
 
-std::error_condition MetaBlkMgr::remove_sub_sb(void* cookie) {
-    HS_ASSERT_CMP(RELEASE, m_shutdown, ==, false);
+std::error_condition MetaBlkMgr::remove_sub_sb(const void* cookie) {
     meta_blk* rm_blk = (meta_blk*)cookie;
     BlkId bid = rm_blk->hdr.h.blkid;
     auto type = rm_blk->hdr.h.type;
@@ -641,8 +636,13 @@ std::error_condition MetaBlkMgr::alloc_meta_blk(BlkId& bid, uint32_t alloc_sz) {
     return no_error;
 }
 
-void MetaBlkMgr::recover(bool do_comp_cb) {
+// m_meta_mtx is used for concurrency between add/remove/update APIs and shutdown threads;
+// m_shutdown_mtx is used for concurrency between recover and shutdown threads; 
+//
+// Note: Client will call add/remove/update APIs in recover function (in complete_cb);
+void MetaBlkMgr::recover(const bool do_comp_cb) {
     // for each registered subsystem, look up in cache for their meta blks;
+    std::lock_guard< decltype(m_meta_mtx) > lg(m_shutdown_mtx);
     for (auto& sub : m_sub_info) {
         auto type = sub.first;
         auto it = m_meta_blks.find(type);

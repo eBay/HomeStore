@@ -54,7 +54,7 @@ struct cp_id_base {
     std::atomic< int > enter_cnt;
     bool cp_trigger_waiting = false; // it is waiting for previous cp to complete
     std::mutex cb_list_mtx;
-    /* callback when cp is done. This list is protected by trigger_cp_mtx */
+    /* callback when cp is done */
     std::vector< cp_done_cb > cb_list;
 
     cp_id_base() : enter_cnt(0), cb_list(0){};

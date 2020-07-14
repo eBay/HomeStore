@@ -106,6 +106,7 @@ public:
                 sb.journal_id, ([this](std::shared_ptr< HomeLogStore > logstore) {
                     m_journal = logstore;
                     m_journal->register_log_found_cb(bind_this(SSDBtreeStore::log_found, 3));
+                    m_journal->register_log_replay_done_cb(bind_this(SSDBtreeStore::replay_done, 1));
                 }));
         } else {
             m_journal = HomeLogStoreMgr::instance().create_new_log_store();
@@ -129,7 +130,14 @@ public:
             } else if (jentry->op == journal_op::BTREE_SPLIT) {
                 m_btree->split_node_replay(jentry, m_first_cp);
             }
+            ++m_replayed_count;
         }
+    }
+
+    void replay_done(std::shared_ptr< HomeLogStore > store) {
+        HS_SUBMOD_LOG(INFO, base, , "btree", m_cfg.get_name(), "Replay of btree completed and replayed {} entries",
+                      m_replayed_count);
+        m_is_recovering = false;
     }
 
     static void cp_start(SSDBtreeStore* store, const btree_cp_id_ptr& cp_id, cp_comp_callback cb) {
@@ -233,7 +241,8 @@ public:
     uint32_t get_node_size() { return m_node_size; }
     wb_cache_t* get_wb_cache() { return &m_wb_cache; }
 
-    static boost::intrusive_ptr< SSDBtreeNode > read_node(SSDBtreeStore* store, bnodeid_t id) {
+    static btree_status_t read_node(SSDBtreeStore* store, bnodeid_t id, boost::intrusive_ptr< SSDBtreeNode >& bnode) {
+        auto ret = btree_status_t::success;
         // Read the data from the block store
         try {
 #ifdef _PRERELEASE
@@ -243,13 +252,25 @@ public:
             auto req = writeback_req_t::make_request();
             req->is_read = true;
             req->isSyncCall = true;
-            auto safe_buf = m_blkstore->read(blkid, 0, store->get_node_size(), req);
+            auto cache_only = iomanager.am_i_tight_loop_reactor();
 
-            return boost::static_pointer_cast< SSDBtreeNode >(safe_buf);
+            auto safe_buf = m_blkstore->read(blkid, 0, store->get_node_size(), req, cache_only);
+
+            if (safe_buf == nullptr) {
+                // only expect to see null buf when we are in spdk reactor;
+                HS_ASSERT_CMP(DEBUG, iomanager.am_i_tight_loop_reactor(), ==, true);
+                bnode = nullptr;
+                return btree_status_t::fast_path_not_possible;
+            }
+
+            bnode = boost::static_pointer_cast< SSDBtreeNode >(safe_buf);
         } catch (std::exception& e) {
             LOGERROR("{}", e.what());
-            return nullptr;
+            ret = btree_status_t::read_failed;
+            bnode = nullptr;
         }
+
+        return ret;
     }
 
     static void copy_node(SSDBtreeStore* store, boost::intrusive_ptr< SSDBtreeNode > copy_from,
@@ -446,6 +467,7 @@ private:
     wb_cache_t m_wb_cache;
     btree_cp_id_ptr m_first_cp;
     bool m_is_recovering = false;
+    uint64_t m_replayed_count = 0;
 
 private:
     static homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy, wb_cache_buffer_t >* m_blkstore;

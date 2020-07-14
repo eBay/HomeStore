@@ -16,8 +16,7 @@
 #include "engine/common/homestore_assert.hpp"
 #include "engine/homeds/thread/threadpool/thread_pool.h"
 #include "blk_read_tracker.hpp"
-#include "snapshot.hpp"
-#include "engine/index/indx_mgr_api.hpp"
+#include "engine/index/snap_mgr.hpp"
 #include <utility/enum.hpp>
 #include <fds/vector_pool.hpp>
 #include "engine/meta/meta_blks_mgr.hpp"
@@ -186,7 +185,6 @@ struct vol_sb_hdr {
 
     /* these variables are mutable. Always update these values before writing the superblock */
     vol_state state;
-    /* add snapshot superblock */
 };
 
 /* A simple self contained wrapper for completion list, which uses vector pool to avoid additional allocations */
@@ -214,8 +212,7 @@ private:
     VolumeMetrics m_metrics;
     HomeBlksSafePtr m_hb; // Hold onto the homeblks to maintain reference
     std::unique_ptr< Blk_Read_Tracker > m_read_blk_tracker;
-    std::shared_ptr< IndxMgr > m_indx_mgr;
-    std::map< uint64_t, SnapshotPtr > m_snapmap; // Id to Snapshot.
+    std::shared_ptr< SnapMgr > m_indx_mgr;
     boost::intrusive_ptr< BlkBuffer > m_only_in_mem_buff;
     io_comp_callback m_comp_cb;
 
@@ -223,7 +220,6 @@ private:
     std::atomic< int64_t > seq_Id;
     std::atomic< uint64_t > m_err_cnt = 0;
     std::atomic< uint64_t > m_req_id = 0;
-    std::atomic< uint64_t > m_snap_id = 0;   // Next snapshot Id for this vol. Always grows
     std::atomic< uint64_t > vol_ref_cnt = 0; // volume can not be destroy/shutdown until it is not zero
 
     std::mutex m_sb_lock; // lock for updating vol's sb
@@ -332,10 +328,10 @@ public:
     static void process_vol_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
 
     /* used to trigger system level cp */
-    static void trigger_homeblks_cp(const cp_done_cb& cb = nullptr) { IndxMgr::trigger_hs_cp(cb); };
+    static void trigger_homeblks_cp(const cp_done_cb& cb = nullptr) { SnapMgr::trigger_hs_cp(cb); };
 
     /* it is used in fake reboot */
-    static void reinit() { IndxMgr::reinit(); }
+    static void reinit() { SnapMgr::reinit(); }
 
     static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size);
 
@@ -443,11 +439,6 @@ public:
         ss << "Name :" << get_name() << ", UUID :" << boost::lexical_cast< std::string >(get_uuid())
            << ", Size:" << get_size() << ((is_offline()) ? ", Offline" : ", Not Offline") << ", State :" << get_state();
         return ss.str();
-    }
-    std::shared_ptr< Snapshot > make_snapshot() {
-        auto sp = std::shared_ptr< Snapshot >(new Snapshot(this, m_snap_id, seq_Id));
-        m_snapmap[m_snap_id++] = sp;
-        return sp;
     }
     uint64_t inc_and_get_seq_id() {
         uint64_t id = seq_Id.fetch_add(1);

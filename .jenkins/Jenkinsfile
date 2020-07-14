@@ -1,0 +1,109 @@
+pipeline {
+    agent any
+
+    environment {
+        ORG = 'sds'
+        ARTIFACTORY_PASS = credentials('ARTIFACTORY_PASS')
+        HOMESTORE_BUILD_TAG = "${GIT_COMMIT}"
+        CONAN_USER = 'sds'
+    }
+
+    stages {
+        stage('Get Version') {
+            steps {
+                script {
+                    PROJECT = sh(script: "grep -m 1 'name =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
+                    TAG = sh(script: "grep -m 1 'version =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
+                    CONAN_CHANNEL = sh(script: "echo ${BRANCH_NAME} | sed -E 's,(\\w-+\\d).*,\\1,' | sed -E 's,-,_,' | tr -d '\n'", returnStdout: true)
+                    ECR_PATH = "ecr.vip.ebayc3.com/${ORG}/${PROJECT}"
+                    slackSend color: '#0063D1', channel: '#conan-pkgs', message: "*${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}* is building."
+                }
+            }
+        }
+
+        stage('Build') {
+            failFast true
+            matrix {
+                agent {
+                    label 'sds-builder'
+                }
+                axes {
+                    axis {
+                        name 'BUILD_TYPE'
+                        values 'debug', 'release', 'test'
+                    }
+                    axis {
+                        name 'SANITIZE'
+                        values 'False', 'True'
+                    }
+                }
+                excludes {
+                    exclude {
+                        axis {
+                            name 'SANITIZE'
+                            values 'True'
+                        }
+                        axis {
+                            name 'BUILD_TYPE'
+                            values 'release', 'test'
+                        }
+                    }
+                }
+
+                stages {
+                    stage("Build") {
+                        steps {
+                            sh "conan create -o homestore:sanitize=${SANITIZE} -pr ${BUILD_TYPE} . ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}"
+                        }
+                    }
+                    stage("Deploy") {
+                        steps {
+                            sh "conan user -r ebay-local -p ${ARTIFACTORY_PASS} _service_sds"
+                            sh "conan upload ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL} -c --all -r ebay-local"
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('TestImage') {
+            when {
+                anyOf {
+                    branch "develop"
+                    branch "snapshot"
+                }
+            }
+            matrix {
+                agent {
+                    label 'sds-builder'
+                }
+                axes {
+                    axis {
+                        name 'BUILD_TYPE'
+                        values 'debug', 'release', 'sanitize'
+                    }
+                }
+                stages {
+                    stage('Build') {
+                        steps {
+                            withDockerRegistry([credentialsId: 'sds+sds', url: "https://ecr.vip.ebayc3.com"]) {
+                                sh "docker build --build-arg BUILD_TYPE=${BUILD_TYPE} --build-arg PKG_NAME=${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL} -t ${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE} .jenkins"
+                                sh "docker push ${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE}"
+                                slackSend channel: '#conan-pkgs', message: "*${PROJECT}:${CONAN_CHANNEL}-${BUILD_TYPE}* has been pushed to ECR."
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        failure {
+            slackSend color: '#E43237', channel: '#conan-pkgs', message: "*${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}* has had a failure : ${BUILD_URL}"
+        }
+        success {
+            slackSend color: '#85B717', channel: '#conan-pkgs', message: "*${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}* has been uploaded to conan repo."
+        }
+    }
+}

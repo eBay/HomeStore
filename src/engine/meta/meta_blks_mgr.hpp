@@ -28,13 +28,13 @@ private:
     static MetaBlkMgr* _instance;
     blk_store_t* m_sb_blk_store = nullptr;                // super blockstore
     std::mutex m_meta_mtx;                                // mutex to access to meta_map;
+    std::mutex m_shutdown_mtx;                            // protects concurrent operations between recover and shutdown;
     meta_blk_map_t m_meta_blks;                           // subsystem type to meta blk map;
     ovf_hdr_map_t m_ovf_blk_hdrs;                         // ovf blk map;
     std::map< meta_sub_type, MetaSubRegInfo > m_sub_info; // map of callbacks
     meta_blk* m_last_mblk = nullptr;                      // last meta blk;
     meta_blk_sb* m_ssb = nullptr;                         // meta super super blk;
-    bool m_shutdown = false;
-
+    
 public:
     /**
      * @brief :
@@ -44,7 +44,7 @@ public:
      * @param init : true of initialized, false if recovery
      * @return
      */
-    void start(blk_store_t* sb_blk_store, sb_blkstore_blob* blob, bool is_init);
+    void start(blk_store_t* sb_blk_store, const sb_blkstore_blob* blob, const bool is_init);
 
     void stop();
 
@@ -74,14 +74,14 @@ public:
      * @param type : subsystem type
      * @param cb : subsystem cb
      */
-    void register_handler(meta_sub_type type, meta_blk_found_cb_t cb, meta_blk_recover_comp_cb_t comp_cb);
+    void register_handler(const meta_sub_type type, const meta_blk_found_cb_t& cb, const meta_blk_recover_comp_cb_t& comp_cb);
 
     /**
      * @brief
      *
      * @param type
      */
-    void deregister_handler(meta_sub_type type);
+    void deregister_handler(const meta_sub_type type);
 
     /**
      * @brief : add subsystem superblock to meta blk mgr
@@ -93,7 +93,7 @@ public:
      *                 Subsystem is supposed to use this cookie to do update and remove of the sb;
      *
      */
-    void add_sub_sb(meta_sub_type type, void* context_data, uint64_t sz, void*& cookie);
+    void add_sub_sb(const meta_sub_type type, const void* context_data, const uint64_t sz, void*& cookie);
 
     /**
      * @brief : remove subsystem sb based on cookie
@@ -102,7 +102,7 @@ public:
      *
      * @return : ok on success, not-ok on failure;
      */
-    std::error_condition remove_sub_sb(void* cookie);
+    std::error_condition remove_sub_sb(const void* cookie);
 
     /**
      * @brief : update metablk in-place
@@ -112,7 +112,7 @@ public:
      * @param sz : size of context_data
      * @param cookie : handle to address the unique subsytem sb that is being updated;
      */
-    void update_sub_sb(meta_sub_type type, void* context_data, uint64_t sz, void*& cookie);
+    void update_sub_sb(const meta_sub_type type, const void* context_data, const uint64_t sz, void*& cookie);
 
     /**
      * @brief :
@@ -128,7 +128,7 @@ public:
      *
      * @return :
      */
-    void recover(bool do_comp_cb = true);
+    void recover(const bool do_comp_cb = true);
 
     /**
      * @brief : scan the blkstore to load meta blks into memory
@@ -139,7 +139,7 @@ public:
 
     uint64_t get_used_size();
 
-    bool is_aligned_buf_needed(size_t size) { return (size <= META_BLK_CONTEXT_SZ) ? false : true; }
+    bool is_aligned_buf_needed(const size_t size) { return (size <= META_BLK_CONTEXT_SZ) ? false : true; }
 
 private:
     /**
@@ -160,7 +160,7 @@ private:
      * @param context_data
      * @param sz
      */
-    void write_blk(BlkId bid, void* context_data, uint32_t sz);
+    void write_blk(BlkId& bid, const void* context_data, const uint32_t sz);
 
     /**
      * @brief
@@ -169,7 +169,7 @@ private:
      *
      * @return
      */
-    bool is_sub_type_valid(meta_sub_type type);
+    bool is_sub_type_valid(const meta_sub_type type);
 
     /**
      * @brief
@@ -189,14 +189,14 @@ private:
      */
     void write_meta_blk_to_disk(meta_blk* mblk);
 
-    void write_ovf_blk_to_disk(meta_blk_ovf_hdr* ovf_hdr, void* context_data, uint64_t sz, uint64_t offset);
+    void write_ovf_blk_to_disk(meta_blk_ovf_hdr* ovf_hdr, const void* context_data, const uint64_t sz, const uint64_t offset);
 
     /**
      * @brief : load meta blk super super block into memory
      *
      * @param bid : the blk id that belongs to meta ssb;
      */
-    void load_ssb(sb_blkstore_blob* blob);
+    void load_ssb(const sb_blkstore_blob* blob);
 
     /**
      * @brief : This function is currently not used, don't delete for now;
@@ -233,7 +233,7 @@ private:
      *
      * @return
      */
-    meta_blk* init_meta_blk(BlkId bid, meta_sub_type type, void* context_data, size_t sz);
+    meta_blk* init_meta_blk(BlkId& bid, const meta_sub_type type, const void* context_data, const size_t sz);
 
     /**
      * @brief
@@ -244,7 +244,7 @@ private:
      * @param sz
      * @param offset
      */
-    void write_meta_blk_ovf(BlkId& prev_id, BlkId& bid, void* context_data, uint64_t sz, uint64_t offset);
+    void write_meta_blk_ovf(BlkId& prev_id, BlkId& bid, const void* context_data, const uint64_t sz, const uint64_t offset);
 
     /**
      * @brief : internal implementation of populating and writing a meta block;
@@ -253,7 +253,7 @@ private:
      * @param context_data
      * @param sz
      */
-    void write_meta_blk_internal(meta_blk* mblk, void* context_data, uint64_t sz);
+    void write_meta_blk_internal(meta_blk* mblk, const void* context_data, const uint64_t sz);
 
     /**
      * @brief : sync read;
@@ -270,7 +270,7 @@ private:
 
 class register_subsystem {
 public:
-    register_subsystem(meta_sub_type type, meta_blk_found_cb_t cb, meta_blk_recover_comp_cb_t comp_cb) {
+    register_subsystem(meta_sub_type type, const meta_blk_found_cb_t& cb, const meta_blk_recover_comp_cb_t& comp_cb) {
         meta_blk_mgr->register_handler(type, cb, comp_cb);
     }
 };

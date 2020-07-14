@@ -138,7 +138,7 @@ public:
             m_pagesz(page_size),
             m_cache(cache),
             m_cache_type(cache_type),
-            m_vdev(mgr, context_size, mirrors, true, m_pagesz, mgr->get_all_devices(),
+            m_vdev(mgr, name, context_size, mirrors, true, m_pagesz, mgr->get_all_devices(),
                    (std::bind(&BlkStore::process_completions, this, std::placeholders::_1)), blob, size, auto_recovery),
             m_comp_cb(comp_cb),
             m_metrics(name) {}
@@ -156,8 +156,8 @@ public:
             m_pagesz(page_size),
             m_cache(cache),
             m_cache_type(cache_type),
-            m_vdev(mgr, vb, (std::bind(&BlkStore::process_completions, this, std::placeholders::_1)), recovery_init,
-                   auto_recovery),
+            m_vdev(mgr, name, vb, (std::bind(&BlkStore::process_completions, this, std::placeholders::_1)),
+                   recovery_init, auto_recovery),
             m_comp_cb(comp_cb),
             m_metrics(name) {}
 
@@ -379,7 +379,7 @@ public:
     /* Read the data for given blk id and size. This method allocates the required memory if not present in the
      * cache and returns an smart ptr to the Buffer */
     boost::intrusive_ptr< Buffer > read(BlkId& bid, uint32_t offset, uint32_t size,
-                                        boost::intrusive_ptr< blkstore_req< Buffer > > req) {
+                                        boost::intrusive_ptr< blkstore_req< Buffer > > req, bool cache_only = false) {
 
         int cur_ind = 0;
         uint32_t cur_offset = offset;
@@ -393,6 +393,9 @@ public:
         // Check if the entry exists in the cache.
         boost::intrusive_ptr< Buffer > bbuf;
         bool cache_found = m_cache->get(bid, (boost::intrusive_ptr< CacheBuffer< BlkId > >*)&bbuf);
+
+        if (!cache_found && cache_only) { return nullptr; }
+
         req->blkstore_ref_cnt.increment(1);
         if (!cache_found
 #ifdef _PRERELEASE
@@ -522,7 +525,7 @@ public:
 
     VirtualDev< BAllocator, RoundRobinDeviceSelector >* get_vdev() { return &m_vdev; };
 
-    off_t alloc_blk(size_t size, bool chunk_overlap_ok = false) { return m_vdev.alloc_blk(size, chunk_overlap_ok); }
+    off_t alloc_blk(const size_t size, const bool chunk_overlap_ok = false) { return m_vdev.alloc_blk(size, chunk_overlap_ok); }
 
     ssize_t pwrite(const void* buf, size_t count, off_t offset, boost::intrusive_ptr< virtualdev_req > req = nullptr) {
         return m_vdev.pwrite(buf, count, offset, req);
