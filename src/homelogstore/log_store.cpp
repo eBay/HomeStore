@@ -35,6 +35,14 @@ void HomeLogStoreMgr::start(bool format) {
             }
             it = m_unopened_store_id.erase(it);
         }
+
+        // Also call the logstore to inform that start/replay is completed.
+        if (!format) {
+            for (auto& p : m) {
+                auto& lstore = p.second.m_log_store;
+                if (lstore && lstore->m_replay_done_cb) { lstore->m_replay_done_cb(lstore); }
+            }
+        }
     });
 }
 

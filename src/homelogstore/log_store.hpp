@@ -19,6 +19,7 @@ using log_req_comp_cb_t = std::function< void(logstore_req*, logdev_key) >;
 using log_write_comp_cb_t = std::function< void(logstore_seq_num_t, sisl::io_blob&, logdev_key, void*) >;
 using log_found_cb_t = std::function< void(logstore_seq_num_t, log_buffer, void*) >;
 using log_store_opened_cb_t = std::function< void(std::shared_ptr< HomeLogStore >) >;
+using log_replay_done_cb_t = std::function< void(std::shared_ptr< HomeLogStore >) >;
 
 struct logstore_req {
     HomeLogStore* log_store;    // Backpointer to the log store
@@ -163,6 +164,14 @@ public:
      * @param cb
      */
     void register_log_found_cb(const log_found_cb_t& cb) { m_found_cb = cb; }
+
+    /**
+     * @brief Register callback to indicate the replay is done during recovery. Failing to register for log_replay
+     * callback is ok as long as user of the log store knows when all logs are replayed.
+     *
+     * @param cb
+     */
+    void register_log_replay_done_cb(const log_replay_done_cb_t& cb) { m_replay_done_cb = cb; }
 
     /**
      * @brief Write the blob at the user specified seq number in sync manner. Under the covers it will call async
@@ -330,6 +339,7 @@ private:
     sisl::StreamTracker< logstore_record > m_records;
     log_req_comp_cb_t m_comp_cb;
     log_found_cb_t m_found_cb;
+    log_replay_done_cb_t m_replay_done_cb;
     std::atomic< logstore_seq_num_t > m_seq_num = 0;
 
     logdev_key m_last_flush_ldkey = {0, 0};              // The log id of the last flushed batch.
