@@ -64,6 +64,13 @@ struct _counter_generator {
 };
 #define counter_generator _counter_generator::instance()
 
+// Operation Type for vol_interface_req
+ENUM(Op_type, uint8_t,
+    READ,
+    WRITE,
+    UNMAP
+    );
+
 struct volume_req;
 struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
     std::shared_ptr< Volume > vol_instance;
@@ -75,11 +82,15 @@ struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
     std::atomic< bool > is_fail_completed = false;
     uint64_t lba;
     uint32_t nlbas;
-    bool is_read = true;
+    Op_type op_type = Op_type::READ; 
     bool sync = false;
     bool part_of_batch = false;
     void* cookie;
 
+    bool is_read() { return op_type == Op_type::READ; }
+    bool is_write() { return op_type == Op_type::WRITE; }
+    bool is_unmap() { return op_type == Op_type::UNMAP; }
+    
     friend void intrusive_ptr_add_ref(vol_interface_req* req) { req->refcount.increment(1); }
 
     friend void intrusive_ptr_release(vol_interface_req* req) {
@@ -250,6 +261,14 @@ public:
      */
     virtual std::error_condition sync_read(const VolumePtr& vol, const vol_interface_req_ptr& req) = 0;
 
+    /**
+     * @brief unmap the given block range
+     *
+     * @param vol Pointer to the volume
+     * @param req Request created which contains all the read parameters
+     */
+    virtual std::error_condition unmap(const VolumePtr& vol, const vol_interface_req_ptr& req) = 0;
+    
     /**
      * @brief Submit the io batch, which is a mandatory method to be called if read/write are issued with part_of_batch
      * is set to true. In those cases, without this method, IOs might not be even issued. No-op if previous io requests
