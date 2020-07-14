@@ -247,20 +247,24 @@ public:
         auto ret_blk = alloc_blk(size, hints, out_blkid);
         if (ret_blk != BLK_ALLOC_SUCCESS) { return nullptr; }
 
+        return alloc_blk_cached(size, *out_blkid);
+    }
+
+    boost::intrusive_ptr< Buffer > alloc_blk_cached(uint32_t size, const BlkId& blkid) {
         // Create an object for the buffer
         auto buf = Buffer::make_object();
-        buf->set_key(*out_blkid);
+        buf->set_key(blkid);
 
         // Create a new block of memory for the blocks requested and set the memvec pointer to that
         uint8_t* ptr = iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), size);
         boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector(), true);
         mvec->set(ptr, size, 0);
 
-        buf->set_memvec(mvec, 0, out_blkid->data_size(m_pagesz));
+        buf->set_memvec(mvec, 0, blkid.data_size(m_pagesz));
         // Insert this buffer to the cache.
         auto ibuf = boost::intrusive_ptr< Buffer >(buf);
         boost::intrusive_ptr< Buffer > out_bbuf;
-        bool inserted = m_cache->insert(*out_blkid, boost::static_pointer_cast< CacheBuffer< BlkId > >(ibuf),
+        bool inserted = m_cache->insert(blkid, boost::static_pointer_cast< CacheBuffer< BlkId > >(ibuf),
                                         (boost::intrusive_ptr< CacheBuffer< BlkId > >*)&out_bbuf);
         assert(inserted);
 

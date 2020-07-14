@@ -1988,6 +1988,7 @@ private:
         }
 
         // Update the existing parent node entry to point to second child ptr.
+        bool edge_split = (parent_ind == parent_node->get_total_entries());
         ninfo.set_bnode_id(child_node2->get_node_id());
         parent_node->update(parent_ind, ninfo);
 
@@ -2014,7 +2015,16 @@ private:
             btree_store_t::append_node_to_journal(
                 j_iob, (root_split ? bt_journal_node_op::creation : bt_journal_node_op::inplace_write), child_node1,
                 cp_id, true);
-            btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::creation, child_node2, cp_id, false);
+
+            // For root split or split around the edge, we don't write the key, which will cause replay to insert edge
+            if (edge_split) {
+                btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::creation, child_node2, cp_id, false);
+            } else {
+                K child2_key;
+                child_node2->get_last_key(&child2_key);
+                btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::creation, child_node2, cp_id,
+                                                      child2_key.get_blob());
+            }
             btree_store_t::write_journal_entry(m_btree_store.get(), cp_id, j_iob);
         }
 
@@ -2028,72 +2038,131 @@ private:
         return ret;
     }
 
+    btree_status_t create_btree_replay(btree_journal_entry* jentry, const btree_cp_id_ptr& cp_id) {
+        BT_DEBUG_ASSERT_CMP(jentry->is_root, ==, true, , "Expected create_btree_replay entry to be root journal entry");
+        BT_DEBUG_ASSERT_CMP(jentry->parent_node.get_id(), ==, m_root_node, , "Root node journal entry mismatch");
+
+        // Create a root node by reserving the leaf node
+        BtreeNodePtr root = reserve_leaf_node(BlkId(m_root_node));
+        if (root == nullptr) { return (btree_status_t::space_not_avail); }
+        return btree_status_t::success;
+    }
+
     btree_status_t split_node_replay(btree_journal_entry* jentry, const btree_cp_id_ptr& cp_id) {
         BtreeNodePtr parent_node = (jentry->is_root) ? read_node(m_root_node) : read_node(jentry->parent_node.node_id);
 
         // Parent already went ahead of the journal entry, return done
-        if (parent_node->get_gen() >= jentry->parent_node.node_gen) { return btree_status_t::replay_not_needed; }
+        if (parent_node->get_gen() >= jentry->parent_node.node_gen) {
+            THIS_BT_LOG(INFO, base, , "Journal replay: parent_node gen {} ahead of jentry gen {}, skipping ",
+                        parent_node->get_gen(), jentry->parent_node.get_gen());
+            return btree_status_t::replay_not_needed;
+        }
 
         // Read the first inplace write node which is the leftmost child and also form child split key from journal
-        auto child_node1_jinfo = jentry->leftmost_node();
-        auto child_node1 = read_node(child_node1_jinfo->node_info.node_id);
-        BtreeNodePtr child_node2;
-        K child1_key;
-        child1_key.set_blob({child_node1_jinfo->key_area(), child_node1_jinfo->key_size});
+        auto j_child_nodes = jentry->get_nodes();
+#ifndef NDEBUG
+        if (jentry->is_root) {
+            BT_DEBUG_ASSERT_CMP(j_child_nodes[0]->type, ==, bt_journal_node_op::creation, ,
+                                "Expected first node in journal entry to be new creation for root split");
+        } else {
+            BT_DEBUG_ASSERT_CMP(j_child_nodes[0]->type, ==, bt_journal_node_op::inplace_write, ,
+                                "Expected first node in journal entry to be in-place write");
+        }
+        BT_DEBUG_ASSERT_CMP(j_child_nodes[1]->type, ==, bt_journal_node_op::creation, ,
+                            "Expected second node in journal entry to be new node creation");
+#endif
 
+        BtreeNodePtr child_node1;
         if (jentry->is_root) {
             // If root is not written yet, parent_node will be pointing child_node1, so create a new parent_node to be
             // treated as root here on.
-            assert(child_node1_jinfo->node_info.node_id == m_root_node);
-            auto new_parent_node = alloc_interior_node();
-            btree_store_t::swap_node(m_btree_store.get(), parent_node, new_parent_node);
+            // child_node1 = parent_node->is_leaf() ? reserve_leaf_node(BlkId(j_child_nodes[0]->node_id()))
+            //                                     : reserve_interior_node(BlkId(j_child_nodes[0]->node_id()));
+            child_node1 = reserve_interior_node(BlkId(j_child_nodes[0]->node_id()));
+            btree_store_t::swap_node(m_btree_store.get(), parent_node, child_node1);
+
+            THIS_BT_LOG(INFO, base, ,
+                        "Journal replay: root split, so creating child_node id={} and swapping the node with "
+                        "parent_node id={} ",
+                        child_node1->get_node_id(), parent_node->get_node_id());
+
+        } else {
+            child_node1 = read_node(j_child_nodes[0]->node_id());
         }
+        K split_key;
+        split_key.set_blob({j_child_nodes[0]->key_area(), j_child_nodes[0]->key_size});
+
+        THIS_BT_LOG(INFO, base, , "Journal replay: child_node1 => jentry: [id={} gen={}], ondisk: [id={} gen={}] ",
+                    j_child_nodes[0]->node_id(), j_child_nodes[0]->node_gen(), child_node1->get_node_id(),
+                    child_node1->get_gen());
 
         // Check if child1 is ahead of the generation
-        if (child_node1->get_gen() < child_node1_jinfo->node_info.node_gen) {
-            auto child_node2_jinfo = jentry->get_nodes(bt_journal_node_op::creation)[0];
-
-            child_node2 = child_node1->is_leaf() ? alloc_leaf_node() : alloc_interior_node();
+        BtreeNodePtr child_node2;
+        if (child_node1->get_gen() < j_child_nodes[0]->node_gen()) {
+            child_node2 = child_node1->is_leaf() ? reserve_leaf_node(BlkId(j_child_nodes[1]->node_id()))
+                                                 : reserve_interior_node(BlkId(j_child_nodes[1]->node_id()));
             if (child_node2 == nullptr) { return (btree_status_t::space_not_avail); }
 
             // We need to do split based on entries since the left children is also not written yet.
             // Find the split key within the child_node1. It is not always found, so we split upto that.
-            auto ret = child_node1->find(child1_key, nullptr, false);
+            auto ret = child_node1->find(split_key, nullptr, false);
             auto ind = ret.found ? ret.end_of_search_index + 1 : ret.end_of_search_index;
             child_node1->move_out_to_right_by_entries(m_btree_cfg, child_node2, child_node1->get_total_entries() - ind);
 
             child_node2->set_next_bnode(child_node1->get_next_bnode());
-            child_node2->set_gen(child_node2_jinfo->node_info.node_gen);
+            child_node2->set_gen(j_child_nodes[1]->node_gen());
 
             child_node1->set_next_bnode(child_node2->get_node_id());
-            child_node1->set_gen(child_node1_jinfo->node_info.node_gen);
+            child_node1->set_gen(j_child_nodes[0]->node_gen());
 
             write_node(child_node2, nullptr, cp_id);
             write_node(child_node1, child_node2, cp_id);
         } else {
-            // leftmost_node is written, so right node must be written as well.
+            // leftmost_node is written, so right node must have been written as well.
             child_node2 = read_node(child_node1->get_next_bnode());
 #ifndef NDEBUG
-            auto child_node2_jinfo = jentry->get_nodes(bt_journal_node_op::creation)[0];
-            assert(child_node2->get_gen() >= child_node2_jinfo->node_info.node_gen);
+            assert(child_node2->get_gen() >= j_child_nodes[1]->node_gen());
 #endif
         }
 
-        // Last key of node2 naturally forms the node2
-        K child2_key;
-        child_node2->get_last_key(&child2_key);
-
+        // Insert 2nd child into parent.
+        if (j_child_nodes[1]->key_size == 0) {
+            // There is no key for the second child, then the second child has to be an edge key. So update the parent's
+            // edge with second child id.
 #ifndef NDEBUG
-        // TODO: Validate 2nd child is empty in parent_node
+            if (parent_node->get_total_entries()) {
+                BT_DEBUG_ASSERT_CMP(parent_node->get_edge_id(), ==, j_child_nodes[0]->node_id(), ,
+                                    "Non-empty parent node, expected original edge to be pointing to child1");
+            } else {
+                BT_DEBUG_ASSERT_CMP(parent_node->get_edge_id(), ==, empty_bnodeid, ,
+                                    "Empty parent node, edge is expected to be empty as well");
+            }
 #endif
+
+            THIS_BT_LOG(INFO, base, ,
+                        "Journal replay: Updating parent: [id={} gen={}] with child1: [split_key=<{}>, node_id={}], "
+                        "child2: [<edge>, node_id={}]",
+                        parent_node->get_node_id(), jentry->parent_node.get_gen(), split_key.to_string(),
+                        child_node1->get_node_id(), child_node2->get_node_id());
+            parent_node->update(parent_node->get_total_entries(), BtreeNodeInfo(child_node2->get_node_id()));
+        } else {
+            K child2_key;
+            child2_key.set_blob({j_child_nodes[1]->key_area(), j_child_nodes[1]->key_size});
+
+            THIS_BT_LOG(INFO, base, ,
+                        "Journal replay: Updating parent: [id={} gen={}] with child1: [split_key=<{}>, node_id={}], "
+                        "child2: [<{}>, node_id={}]",
+                        parent_node->get_node_id(), jentry->parent_node.get_gen(), split_key.to_string(),
+                        child_node1->get_node_id(), child2_key.to_string(), child_node2->get_node_id());
+            V temp_v2;
+            parent_node->put(child2_key, BtreeNodeInfo(child_node2->get_node_id()),
+                             btree_put_type::REPLACE_IF_EXISTS_ELSE_INSERT, temp_v2);
+        }
 
         // Upsert the 1st child key
         V temp_v;
-        parent_node->put(child1_key, BtreeNodeInfo(child_node1->get_node_id()),
+        parent_node->put(split_key, BtreeNodeInfo(child_node1->get_node_id()),
                          btree_put_type::REPLACE_IF_EXISTS_ELSE_INSERT, temp_v);
-
-        // Insert 2nd child into parent.
-        parent_node->insert(child2_key, BtreeNodeInfo(child_node2->get_node_id()));
         parent_node->set_gen(jentry->parent_node.node_gen);
 
         // Write the parent node
@@ -2389,6 +2458,24 @@ private:
         return n;
     }
 
+    BtreeNodePtr reserve_leaf_node(const BlkId& blkid) {
+        BtreeNodePtr n = btree_store_t::reserve_node(m_btree_store.get(), true /* is_leaf */, blkid);
+        if (n == nullptr) { return nullptr; }
+        n->set_leaf(true);
+        COUNTER_INCREMENT(m_metrics, btree_leaf_node_count, 1);
+        m_total_nodes++;
+        return n;
+    }
+
+    BtreeNodePtr reserve_interior_node(const BlkId& blkid) {
+        BtreeNodePtr n = btree_store_t::reserve_node(m_btree_store.get(), false /* is_leaf */, blkid);
+        if (n == nullptr) { return nullptr; }
+        n->set_leaf(false);
+        COUNTER_INCREMENT(m_metrics, btree_int_node_count, 1);
+        m_total_nodes++;
+        return n;
+    }
+
     /* Note:- This function assumes that access of this node is thread safe. */
     void free_node(const BtreeNodePtr& node, bool mem_only = false, const btree_cp_id_ptr& cp_id = nullptr) {
         THIS_BT_LOG(DEBUG, btree_generics, node, "Freeing node");
@@ -2661,7 +2748,8 @@ protected:
 
         auto cp_id = attach_prepare_cp(nullptr, false, false);
         if (BtreeStoreType == btree_store_type::SSD_BTREE) {
-            auto j_iob = btree_store_t::make_journal_entry(journal_op::BTREE_CREATE, true /* is_root */);
+            auto j_iob = btree_store_t::make_journal_entry(journal_op::BTREE_CREATE, true /* is_root */,
+                                                           {m_root_node, root->get_gen()});
             btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::creation, root, cp_id, false);
             btree_store_t::write_journal_entry(m_btree_store.get(), cp_id, j_iob);
         }

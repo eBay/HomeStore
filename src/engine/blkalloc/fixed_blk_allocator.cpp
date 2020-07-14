@@ -17,12 +17,9 @@ FixedBlkAllocator::FixedBlkAllocator(BlkAllocConfig& cfg, bool init, uint32_t id
     if (init) { inited(); }
 }
 
-FixedBlkAllocator::~FixedBlkAllocator() {
-    delete[](m_blk_nodes);
-}
+FixedBlkAllocator::~FixedBlkAllocator() { delete[](m_blk_nodes); }
 
 void FixedBlkAllocator::inited() {
-
     m_first_blk_id = BLKID32_INVALID;
     /* create the blkid chain */
     uint32_t prev_blkid = BLKID32_INVALID;
@@ -38,9 +35,7 @@ void FixedBlkAllocator::inited() {
         }
         portion->unlock();
         if (m_first_blk_id == BLKID32_INVALID) { m_first_blk_id = i; }
-        if (prev_blkid != BLKID32_INVALID) {
-            m_blk_nodes[prev_blkid].next_blk = i;
-        }
+        if (prev_blkid != BLKID32_INVALID) { m_blk_nodes[prev_blkid].next_blk = i; }
         prev_blkid = i;
     }
     assert(prev_blkid != BLKID32_INVALID);
@@ -63,9 +58,7 @@ BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& hi
     assert(nblks == 1);
 
 #ifdef _PRERELEASE
-    if (homestore_flip->test_flip("fixed_blkalloc_no_blks", nblks)) {
-        return BLK_ALLOC_SPACEFULL;
-    }
+    if (homestore_flip->test_flip("fixed_blkalloc_no_blks", nblks)) { return BLK_ALLOC_SPACEFULL; }
 #endif
     if (alloc(nblks, hints, &blkid) == BLK_ALLOC_SUCCESS) {
         out_blkid.push_back(blkid);
@@ -88,9 +81,7 @@ BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& hi
 
         // Get the __top_blk blk and replace the __top_blk blk id with next id
         id = tp.get_top_blk_id();
-        if (id == BLKID32_INVALID) {
-            return BLK_ALLOC_SPACEFULL;
-        }
+        if (id == BLKID32_INVALID) { return BLK_ALLOC_SPACEFULL; }
 
         __fixed_blk_node blknode = m_blk_nodes[id];
 

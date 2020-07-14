@@ -220,7 +220,7 @@ public:
 
     const K& get_key() const { return m_key; }
 
-    void set_key(K& k) { m_key = k; }
+    void set_key(const K& k) { m_key = k; }
 
     void lock() { m_mtx.lock(); }
 

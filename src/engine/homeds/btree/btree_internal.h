@@ -115,6 +115,9 @@ struct btree_cp_id : public boost::intrusive_ref_counter< btree_cp_id > {
 struct bt_node_gen_pair {
     bnodeid_t node_id = empty_bnodeid;
     uint64_t node_gen = 0;
+
+    bnodeid_t get_id() const { return node_id; }
+    uint64_t get_gen() const { return node_gen; }
 };
 
 VENUM(bt_journal_node_op, uint8_t, inplace_write = 1, removal = 2, creation = 3);
@@ -123,6 +126,8 @@ struct bt_journal_node_info {
     bt_journal_node_op type = bt_journal_node_op::inplace_write;
     uint16_t key_size = 0;
     uint8_t* key_area() { return ((uint8_t*)this + sizeof(bt_journal_node_info)); }
+    bnodeid_t node_id() const { return node_info.node_id; }
+    uint64_t node_gen() const { return node_info.node_gen; }
 };
 
 struct btree_journal_entry {
@@ -182,17 +187,19 @@ struct btree_journal_entry {
         }
     }
 
-    std::vector< bt_journal_node_info* > get_nodes(bt_journal_node_op node_op) const {
+    std::vector< bt_journal_node_info* > get_nodes(const std::optional< bt_journal_node_op >& node_op = {}) const {
         std::vector< bt_journal_node_info* > result;
         bt_journal_node_info* info = (bt_journal_node_info*)((uint8_t*)this + sizeof(btree_journal_entry));
         for (auto i = 0u; i < node_count; ++i) {
-            if (info->type == node_op) { result.push_back(info); }
+            if (!node_op || (info->type == *node_op)) { result.push_back(info); }
             info = (bt_journal_node_info*)((uint8_t*)info + sizeof(bt_journal_node_info) + info->key_size);
         }
         return result;
     }
 
-    bt_journal_node_info* leftmost_node() const { return get_nodes(bt_journal_node_op::inplace_write)[0]; }
+    bt_journal_node_info* leftmost_node() const {
+        return get_nodes(is_root ? bt_journal_node_op::creation : bt_journal_node_op::inplace_write)[0];
+    }
 
     std::string to_string() const {
         auto str = fmt::format("op={} is_root={} cp_cnt={} size={} num_nodes={} ", enum_name(op), is_root, cp_cnt,

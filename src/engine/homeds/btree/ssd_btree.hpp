@@ -99,6 +99,7 @@ public:
     }
 
     void update_store_sb(btree_super_block& sb, btree_cp_superblock* cp_sb, bool is_recovery) {
+        m_is_recovering = is_recovery;
         if (is_recovery) {
             // add recovery code
             HomeLogStoreMgr::instance().open_log_store(
@@ -123,7 +124,11 @@ public:
         if (seqnum >= cp_sb.active_psn) {
             // Entry is not replayed yet
             btree_journal_entry* jentry = (btree_journal_entry*)log_buf.bytes();
-            if (jentry->op == journal_op::BTREE_SPLIT) { m_btree->split_node_replay(jentry, m_first_cp); }
+            if (jentry->op == journal_op::BTREE_CREATE) {
+                m_btree->create_btree_replay(jentry, m_first_cp);
+            } else if (jentry->op == journal_op::BTREE_SPLIT) {
+                m_btree->split_node_replay(jentry, m_first_cp);
+            }
         }
     }
 
@@ -179,8 +184,7 @@ public:
     static boost::intrusive_ptr< SSDBtreeNode >
     alloc_node(SSDBtreeStore* store, bool is_leaf,
                bool& is_new_allocation, // indicates if allocated node is same as copy_from
-               boost::intrusive_ptr< SSDBtreeNode > copy_from = nullptr) {
-
+               const boost::intrusive_ptr< SSDBtreeNode >& copy_from = nullptr) {
         is_new_allocation = true;
         homestore::blk_alloc_hints hints;
         homestore::BlkId blkid;
@@ -189,7 +193,23 @@ public:
             LOGERROR("btree alloc failed. No space avail");
             return nullptr;
         }
+        return _init_node(store, safe_buf, is_leaf, blkid, copy_from);
+    }
 
+    static boost::intrusive_ptr< SSDBtreeNode >
+    reserve_node(SSDBtreeStore* store, bool is_leaf, const BlkId& blkid,
+                 const boost::intrusive_ptr< SSDBtreeNode >& copy_from = nullptr) {
+        auto safe_buf = m_blkstore->alloc_blk_cached(store->get_node_size(), blkid);
+        if (safe_buf == nullptr) {
+            LOGERROR("btree alloc failed. No space avail");
+            return nullptr;
+        }
+        return _init_node(store, safe_buf, is_leaf, blkid, copy_from);
+    }
+
+    static boost::intrusive_ptr< SSDBtreeNode >
+    _init_node(SSDBtreeStore* store, auto& safe_buf, bool is_leaf, const BlkId& blkid,
+               const boost::intrusive_ptr< SSDBtreeNode >& copy_from = nullptr) {
         // Access the physical node buffer and initialize it
         sisl::blob b = safe_buf->at_offset(0);
         assert(b.size == store->get_node_size());
@@ -202,8 +222,11 @@ public:
         }
         boost::intrusive_ptr< SSDBtreeNode > new_node = boost::static_pointer_cast< SSDBtreeNode >(safe_buf);
 
-        if (copy_from != nullptr) { copy_node(store, copy_from, new_node); }
-        new_node->init();
+        if (copy_from != nullptr) {
+            copy_node(store, copy_from, new_node);
+        } else {
+            new_node->init();
+        }
         return new_node;
     }
 
@@ -344,6 +367,12 @@ public:
             key_blob = key.get_blob();
         }
 
+        append_node_to_journal(j_iob, node_op, node, cp_id, key_blob);
+    }
+
+    static void append_node_to_journal(sisl::io_blob& j_iob, bt_journal_node_op node_op,
+                                       const boost::intrusive_ptr< SSDBtreeNode >& node, const btree_cp_id_ptr& cp_id,
+                                       const sisl::blob& key_blob) {
         uint16_t append_size = sizeof(bt_journal_node_info) + key_blob.size;
         auto e = realloc_if_needed(j_iob, append_size);
         e->append_node(node_op, node->get_node_id(), node->get_gen(), key_blob);
@@ -372,6 +401,7 @@ private:
         m_journal->append_async(
             j_iob, nullptr, ([this, cp_id](logstore_seq_num_t seq_num, sisl::io_blob& iob, bool status, void* cookie) {
                 btree_journal_entry* jentry = blob_to_entry(iob);
+                LOGINFO("btree journal entry = {}", jentry->to_string());
                 if (jentry->op != journal_op::BTREE_CREATE) {
                     /*
                      * blk id is allocated for newly created nodes in disk bitmap only after it is
@@ -415,6 +445,7 @@ private:
     uint32_t m_node_size;
     wb_cache_t m_wb_cache;
     btree_cp_id_ptr m_first_cp;
+    bool m_is_recovering = false;
 
 private:
     static homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy, wb_cache_buffer_t >* m_blkstore;
