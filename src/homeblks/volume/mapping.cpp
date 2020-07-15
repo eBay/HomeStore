@@ -739,15 +739,8 @@ void mapping::compute_and_add_overlap(op_type update_op, std::vector< Free_Blk_E
         make_pair(MappingKey(s_lba, nlba), MappingValue(new_val, new_val_offset, nlba, m_vol_page_size)));
 }
 
-/* add missing interval to replace kv */
-void mapping::add_new_interval(uint64_t s_lba, uint64_t e_lba, MappingValue & val, uint16_t lba_offset,
-                               std::vector< std::pair< MappingKey, MappingValue > > & replace_kv) {
-    auto nlba = get_nlbas(e_lba, s_lba);
-    replace_kv.emplace_back(make_pair(MappingKey(s_lba, nlba), MappingValue(val, lba_offset, nlba, m_vol_page_size)));
-}
 
 #ifndef NDEBUG
-
 void mapping::validate_get_response(uint64_t lba_start, uint32_t n_lba,
                                     std::vector< std::pair< MappingKey, MappingValue > >& values,
                                     MappingValue* exp_value, volume_req* req) {
@@ -794,6 +787,7 @@ void mapping::validate_get_response(uint64_t lba_start, uint32_t n_lba,
     }
     assert(last_slba == lba_start + n_lba);
 }
+#endif
 
 void mapping::create_done() { m_bt->create_done(); }
 uint64_t mapping::get_used_size() { return m_bt->get_used_size(); }
@@ -963,4 +957,10 @@ btree_status_t mapping::recovery_update(logstore_seq_num_t seqnum, journal_hdr* 
     assert(lba == key->lba + key->nlbas);
     return ret;
 }
-#endif
+
+/* add missing interval to replace kv */
+void mapping::add_new_interval(uint64_t s_lba, uint64_t e_lba, MappingValue& val, uint16_t lba_offset,
+                               std::vector< std::pair< MappingKey, MappingValue > >& replace_kv) {
+    auto nlba = get_nlbas(e_lba, s_lba);
+    replace_kv.emplace_back(make_pair(MappingKey(s_lba, nlba), MappingValue(val, lba_offset, nlba, m_vol_page_size)));
+}
