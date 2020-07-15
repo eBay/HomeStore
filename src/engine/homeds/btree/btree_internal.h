@@ -30,7 +30,7 @@
 
 ENUM(btree_status_t, uint32_t, success, not_found, item_found, closest_found, closest_removed, retry, has_more,
      read_failed, write_failed, stale_buf, refresh_failed, put_failed, space_not_avail, split_failed, insert_failed,
-     cp_id_mismatch, merge_not_required, merge_failed, replay_not_needed, fast_path_not_possible);
+     cp_id_mismatch, merge_not_required, merge_failed, replay_not_needed, fast_path_not_possible, resource_full);
 
 typedef enum {
     READ_NONE = 0,
@@ -669,8 +669,8 @@ protected:
     const match_item_cb_get_t< K, V > m_cb;
 };
 template < typename K, typename V >
-using match_item_cb_update_t = std::function< void(std::vector< std::pair< K, V > >&, std::vector< std::pair< K, V > >&,
-                                                   BRangeUpdateCBParam< K, V >*) >;
+using match_item_cb_update_t = std::function< btree_status_t(
+    std::vector< std::pair< K, V > >&, std::vector< std::pair< K, V > >&, BRangeUpdateCBParam< K, V >*) >;
 template < typename K, typename V >
 using get_size_needed_cb_t = std::function< uint32_t(std::vector< std::pair< K, V > >&, BRangeUpdateCBParam< K, V >*) >;
 template < typename K, typename V >

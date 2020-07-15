@@ -483,6 +483,8 @@ struct volume_req : indx_req {
     uint64_t request_id;               // Copy of the id from interface request
     uint64_t active_nlbas_written = 0; // number of lba written in active indx tabl. It can be partially written if
                                        // btree writes failed in between.
+    uint64_t diff_nlbas_written = 0;   // number of lba written in diff indx tabl. It can be partially written if
+                                       // btree writes failed in between.
 
     /********** Below entries are used for journal or to store checksum **********/
     std::vector< uint16_t > csum_list;
@@ -551,7 +553,7 @@ private:
 
         /* Trying to reserve the max possible size so that memory allocation is efficient */
         csum_list.reserve(VOL_MAX_IO_SIZE / vi_req->vol_instance->get_page_size());
-        fbe_list.reserve(VOL_MAX_IO_SIZE / vi_req->vol_instance->get_page_size());
+        indx_fbe_list.reserve(VOL_MAX_IO_SIZE / vi_req->vol_instance->get_page_size());
         alloc_blkid_list.reserve(VOL_MAX_IO_SIZE / vi_req->vol_instance->get_page_size());
         if (!vi_req->is_read) { seqId = vi_req->vol_instance->inc_and_get_seq_id(); }
     }
