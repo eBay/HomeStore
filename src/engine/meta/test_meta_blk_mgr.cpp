@@ -156,32 +156,32 @@ public:
 
         void* cookie = nullptr;
         m_mbm->add_sub_sb(mtype, buf, sz_to_wrt, cookie);
-        assert(cookie != nullptr);
+        HS_ASSERT_CMP(DEBUG, cookie, !=, nullptr);
 
         meta_blk* mblk = (meta_blk*)cookie;
         if (overflow) {
-            assert(sz_to_wrt >= META_BLK_PAGE_SZ);
-            assert(mblk->hdr.h.ovf_blkid.to_integer() != BlkId::invalid_internal_id());
+            HS_ASSERT_CMP(DEBUG, sz_to_wrt, >=, META_BLK_PAGE_SZ);
+            HS_ASSERT_CMP(DEBUG, mblk->hdr.h.ovf_blkid.to_integer(), !=, BlkId::invalid_internal_id());
         } else {
-            assert(sz_to_wrt <= META_BLK_CONTEXT_SZ);
-            assert(mblk->hdr.h.ovf_blkid.to_integer() == BlkId::invalid_internal_id());
+            HS_ASSERT_CMP(DEBUG, sz_to_wrt, <=, META_BLK_CONTEXT_SZ);
+            HS_ASSERT_CMP(DEBUG, mblk->hdr.h.ovf_blkid.to_integer(), ==, BlkId::invalid_internal_id());
         }
 
         // verify context_sz
-        HS_ASSERT(RELEASE, mblk->hdr.h.context_sz == sz_to_wrt, "context_sz mismatch: {}/{}",
+        HS_ASSERT(DEBUG, mblk->hdr.h.context_sz == sz_to_wrt, "context_sz mismatch: {}/{}",
                   (uint64_t)mblk->hdr.h.context_sz, sz_to_wrt);
 
         auto bid = mblk->hdr.h.blkid.to_integer();
         // save cookie;
         std::unique_lock< std::mutex > lg(m_mtx);
-        HS_ASSERT(RELEASE, m_write_sbs.find(bid) == m_write_sbs.end(), "cookie already in the map.");
+        HS_ASSERT(DEBUG, m_write_sbs.find(bid) == m_write_sbs.end(), "cookie already in the map.");
 
         // save to cache
         m_write_sbs[bid].cookie = cookie;
         m_write_sbs[bid].str = std::string((char*)buf, sz_to_wrt);
 
         m_total_wrt_sz += total_size_written(sz_to_wrt);
-        // HS_ASSERT(RELEASE, m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
+        // HS_ASSERT(DEBUG, m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
         //         m_mbm->get_used_size());
 
         iomanager.iobuf_free(buf);
@@ -198,9 +198,9 @@ public:
 
         m_mbm->remove_sub_sb(cookie);
         m_write_sbs.erase(it);
-        assert(sz == m_write_sbs.size() + 1);
+        HS_ASSERT_CMP(DEBUG, sz, ==, m_write_sbs.size() + 1);
 
-        //    HS_ASSERT(RELEASE, m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
+        //    HS_ASSERT(DEBUG, m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
         //            m_mbm->get_used_size());
     }
 
@@ -226,18 +226,18 @@ public:
 
         m_mbm->update_sub_sb(mtype, buf, sz_to_wrt, cookie);
         auto bid = ((meta_blk*)cookie)->hdr.h.blkid.to_integer();
-        HS_ASSERT(RELEASE, m_write_sbs.find(bid) == m_write_sbs.end(), "cookie already in the map.");
+        HS_ASSERT(DEBUG, m_write_sbs.find(bid) == m_write_sbs.end(), "cookie already in the map.");
         m_write_sbs[bid].cookie = cookie;
         m_write_sbs[bid].str = std::string((char*)buf, sz_to_wrt);
 
         // verify context_sz
         meta_blk* mblk = (meta_blk*)cookie;
-        HS_ASSERT(RELEASE, mblk->hdr.h.context_sz == sz_to_wrt, "context_sz mismatch: {}/{}",
+        HS_ASSERT(DEBUG, mblk->hdr.h.context_sz == sz_to_wrt, "context_sz mismatch: {}/{}",
                   (uint64_t)mblk->hdr.h.context_sz, sz_to_wrt);
 
         // update total size, add size of metablk back;
         m_total_wrt_sz += total_size_written(sz_to_wrt);
-        //        HS_ASSERT(RELEASE, m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}",
+        //        HS_ASSERT(DEBUG, m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}",
         //        m_total_wrt_sz,
         //                m_mbm->get_used_size());
 
@@ -253,7 +253,7 @@ public:
             auto bid = it->first;
             auto it_cb = m_cb_blks.find(bid);
 
-            HS_ASSERT(RELEASE, it_cb != m_cb_blks.end(), "Saved bid during write not found in recover callback.");
+            HS_ASSERT(DEBUG, it_cb != m_cb_blks.end(), "Saved bid during write not found in recover callback.");
 
             // the saved buf should be equal to the buf received in the recover callback;
             int ret = it->second.str.compare(it_cb->second);
@@ -283,7 +283,7 @@ public:
                     m_cb_blks[mblk->hdr.h.blkid.to_integer()] = std::string((char*)(buf.bytes()), size);
                 }
             },
-            [this](bool success) { assert(success); });
+            [this](bool success) { HS_ASSERT_CMP(DEBUG, success, ==, true); });
 
         while (keep_running()) {
             switch (get_op()) {
