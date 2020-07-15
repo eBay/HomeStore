@@ -16,39 +16,8 @@ typedef std::function< void(Free_Blk_Entry& fbe) > free_blk_callback;
 
 typedef boost::intrusive_ptr< indx_req > indx_req_ptr;
 
-/* any consumer req should be derived from indx_mgr_req. Indx mgr use this as a context to call consumer APIs */
-struct indx_req {
-public:
-    virtual uint32_t get_key_size() = 0;
-    virtual uint32_t get_val_size() = 0;
-    virtual void fill_key(void* mem, uint32_t size) = 0;
-    virtual void fill_val(void* mem, uint32_t size) = 0;
-    virtual uint64_t get_seqId() = 0;
-    virtual uint32_t get_io_size() = 0;
-    virtual void free_yourself() = 0;
-
-public:
-    sisl::io_blob create_journal_entry() { return j_ent.create_journal_entry(this); }
-
-    void push_indx_alloc_blkid(BlkId& bid) { indx_alloc_blkid_list.push_back(bid); }
-    void push_fbe(Free_Blk_Entry& fbe) { fbe_list.push_back(fbe); }
-    friend void intrusive_ptr_add_ref(indx_req* req) { req->ref_count.increment(1); }
-    friend void intrusive_ptr_release(indx_req* req) {
-        if (req->ref_count.decrement_testz(1)) { req->free_yourself(); }
-    };
-    void inc_ref() { intrusive_ptr_add_ref(this); }
-
-public:
-    indx_journal_entry j_ent;
-    std::vector< BlkId > indx_alloc_blkid_list;
-    std::vector< Free_Blk_Entry > fbe_list;
-    hs_cp_id* first_hs_id = nullptr;
-    hs_cp_id* hs_id = nullptr;
-    indx_cp_id_ptr indx_id = nullptr;
-    sisl::atomic_counter< int > ref_count = 1; // Initialize the count
-    error_condition indx_err = no_error;
-    indx_req_state state = indx_req_state::active_btree;
-};
+#define MAX_FBE_SIZE 1 * 1024 * 1024 // 1 MB
+struct indx_req;
 
 class indx_tbl {
     /* these virtual functions should be defined by the consumer */
@@ -302,4 +271,68 @@ struct Free_Blk_Entry {
     BlkId get_free_blkid() { return (m_blkId.get_blkid_at(m_blk_offset, m_nblks_to_free, 1)); }
 };
 
+/* any consumer req should be derived from indx_mgr_req. Indx mgr use this as a context to call consumer APIs */
+struct indx_req {
+public:
+    virtual uint32_t get_key_size() = 0;
+    virtual uint32_t get_val_size() = 0;
+    virtual void fill_key(void* mem, uint32_t size) = 0;
+    virtual void fill_val(void* mem, uint32_t size) = 0;
+    virtual uint64_t get_seqId() = 0;
+    virtual uint32_t get_io_size() = 0;
+    virtual void free_yourself() = 0;
+
+public:
+    sisl::io_blob create_journal_entry() { return j_ent.create_journal_entry(this); }
+
+    void push_indx_alloc_blkid(BlkId& bid) { indx_alloc_blkid_list.push_back(bid); }
+
+    btree_status_t indx_push_fbe(Free_Blk_Entry& in_fbe_list) {
+        indx_fbe_list.push_back(in_fbe_list);
+        if (hs_fbe_size.fetch_add(1, std::memory_order_relaxed) == MAX_FBE_SIZE) {
+            // trigger cp
+            IndxMgr::trigger_hs_cp();
+        }
+        return btree_status_t::success;
+    }
+
+    /* it is used by mapping/consumer to push fbe to free list. These  blkds will be freed when entry is completed */
+    btree_status_t indx_push_fbe(std::vector< Free_Blk_Entry >& in_fbe_list) {
+        if (resource_full_check && ((hs_fbe_size.load() + in_fbe_list.size()) > MAX_FBE_SIZE)) {
+            /* caller will trigger homestore cp */
+            return btree_status_t::resource_full;
+        }
+
+        for (uint32_t i = 0; i < in_fbe_list.size(); ++i) {
+            indx_fbe_list.push_back(in_fbe_list[i]);
+            if (hs_fbe_size.fetch_add(1, std::memory_order_relaxed) == MAX_FBE_SIZE) {
+                // trigger cp
+                IndxMgr::trigger_hs_cp();
+            }
+        }
+        return btree_status_t::success;
+    }
+
+    void erase_fbe_list() { hs_fbe_size.fetch_sub(indx_fbe_list.size(), std::memory_order_relaxed); }
+
+    friend void intrusive_ptr_add_ref(indx_req* req) { req->ref_count.increment(1); }
+    friend void intrusive_ptr_release(indx_req* req) {
+        if (req->ref_count.decrement_testz(1)) { req->free_yourself(); }
+    };
+    void inc_ref() { intrusive_ptr_add_ref(this); }
+
+public:
+    bool resource_full_check = false; // we don't return error for all ios. we set it for trim,
+                                      // destroy which can handle io failures and retry
+    indx_journal_entry j_ent;
+    std::vector< BlkId > indx_alloc_blkid_list;
+    std::vector< Free_Blk_Entry > indx_fbe_list;
+    hs_cp_id* first_hs_id = nullptr;
+    hs_cp_id* hs_id = nullptr;
+    indx_cp_id_ptr indx_id = nullptr;
+    sisl::atomic_counter< int > ref_count = 1; // Initialize the count
+    error_condition indx_err = no_error;
+    indx_req_state state = indx_req_state::active_btree;
+    std::atomic< uint64_t > hs_fbe_size;
+};
 } // namespace homestore

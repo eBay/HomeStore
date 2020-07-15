@@ -464,7 +464,7 @@ void Volume::process_free_blk_callback(Free_Blk_Entry fbe) {
 void Volume::pending_read_blk_cb(volume_req* vreq, BlkId& bid) {
     m_read_blk_tracker->insert(bid);
     Free_Blk_Entry fbe(bid, 0, 0);
-    vreq->push_fbe(fbe);
+    vreq->indx_push_fbe(fbe);
 }
 
 void Volume::process_indx_completions(const indx_req_ptr& ireq, std::error_condition err) {

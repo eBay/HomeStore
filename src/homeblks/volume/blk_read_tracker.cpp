@@ -28,12 +28,15 @@ void Blk_Read_Tracker::insert(BlkId& bid) {
 
 void Blk_Read_Tracker::safe_remove_blks(const volume_req_ptr& vreq) {
     if (vreq->is_read_op()) {
-        for (uint32_t i = 0; i < vreq->fbe_list.size(); ++i) {
-            safe_remove_blk_on_read(vreq->fbe_list[i]);
+        for (uint32_t i = 0; i < vreq->indx_fbe_list.size(); ++i) {
+            safe_remove_blk_on_read(vreq->indx_fbe_list[i]);
         }
+        /* these fbes are not in use after read is completed. However, it will be still tracked by indx mgr for writes.
+         */
+        vreq->erase_fbe_list();
     } else {
-        for (uint32_t i = 0; i < vreq->fbe_list.size(); ++i) {
-            safe_remove_blk_on_write(vreq->fbe_list[i]);
+        for (uint32_t i = 0; i < vreq->indx_fbe_list.size(); ++i) {
+            safe_remove_blk_on_write(vreq->indx_fbe_list[i]);
         }
     }
 }
