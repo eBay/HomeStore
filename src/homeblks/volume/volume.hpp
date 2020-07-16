@@ -160,7 +160,7 @@ public:
         register_me_to_farm();
     }
 
-    ~VolumeMetrics() { deregister_me_from_farm(); }
+    //~VolumeMetrics() { deregister_me_from_farm(); }
 };
 
 #define VOL_SB_VERSION 0x2

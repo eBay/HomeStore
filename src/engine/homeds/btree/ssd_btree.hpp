@@ -57,7 +57,7 @@ public:
     /* It is called when its consumer has successfully persisted its superblock. */
     void create_done_store(bnodeid_t m_root_node) {
         auto bid = BlkId(m_root_node);
-        m_blkstore->alloc_blk(bid);
+        m_blkstore->reserve_blk(bid);
     }
 
     void cp_done_store(const btree_cp_id_ptr& cp_id) { cp_id->cb(cp_id); }
@@ -207,7 +207,7 @@ public:
     static boost::intrusive_ptr< SSDBtreeNode >
     reserve_node(SSDBtreeStore* store, bool is_leaf, const BlkId& blkid,
                  const boost::intrusive_ptr< SSDBtreeNode >& copy_from = nullptr) {
-        auto safe_buf = m_blkstore->alloc_blk_cached(store->get_node_size(), blkid);
+        auto safe_buf = m_blkstore->reserve_blk_cached(store->get_node_size(), blkid);
         if (safe_buf == nullptr) {
             LOGERROR("btree alloc failed. No space avail");
             return nullptr;
@@ -431,7 +431,7 @@ private:
                     jentry->foreach_node(bt_journal_node_op::creation, [&](bt_node_gen_pair n, sisl::blob k) {
                         auto bid = BlkId(n.node_id);
                         // LOGINFO("Allocating blk inside btree journal entry {}", bid.to_string());
-                        m_blkstore->alloc_blk(bid);
+                        m_blkstore->reserve_blk(bid);
                     });
                     // For root node, disk bitmap is later persisted with btree root node.
                 }

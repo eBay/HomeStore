@@ -209,6 +209,8 @@ public:
                            HistogramBucketsType(LinearUpto64Buckets));
         register_me_to_farm();
     }
+
+    //~SegmentMetrics() { deregister_me_from_farm(); }
 };
 
 class BlkAllocSegment {
@@ -422,6 +424,8 @@ public:
         REGISTER_COUNTER(num_attempts_failed, "number of times it fail to get entry from cache after max retry");
         register_me_to_farm();
     }
+
+    ~BlkAllocMetrics() { deregister_me_from_farm(); }
 };
 
 #if 0

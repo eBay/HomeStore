@@ -116,6 +116,8 @@ public:
 
         register_me_to_farm();
     }
+
+    ~BlkStoreMetrics() { deregister_me_from_farm(); }
 };
 
 template < typename BAllocator, typename Buffer = BlkBuffer >
@@ -219,21 +221,19 @@ public:
         HISTOGRAM_OBSERVE(m_metrics, blkstore_cache_read_latency, get_elapsed_time_us(start_time));
     }
 
+    BlkAllocStatus alloc_contiguous_blk(uint32_t size, blk_alloc_hints& hints, BlkId* out_blkid) {
+        // Allocate a block from the device manager
+        assert(size % m_pagesz == 0);
+        auto nblks = size / m_pagesz;
+        hints.is_contiguous = true;
+        return (m_vdev.alloc_contiguous_blk(nblks, hints, out_blkid));
+    }
+
     /* Allocate a new block of the size based on the hints provided */
     BlkAllocStatus alloc_blk(uint32_t size, blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) {
         // Allocate a block from the device manager
         assert(size % m_pagesz == 0);
         auto nblks = size / m_pagesz;
-        return (m_vdev.alloc_blk(nblks, hints, out_blkid));
-    }
-
-    BlkAllocStatus alloc_blk(BlkId& in_blkid) { return (m_vdev.alloc_blk(in_blkid)); }
-
-    BlkAllocStatus alloc_blk(uint32_t size, blk_alloc_hints& hints, BlkId* out_blkid) {
-        // Allocate a block from the device manager
-        assert(size % m_pagesz == 0);
-        auto nblks = size / m_pagesz;
-        hints.is_contiguous = true;
         return (m_vdev.alloc_blk(nblks, hints, out_blkid));
     }
 
@@ -244,13 +244,25 @@ public:
         // Allocate a block from the device manager
         hints.is_contiguous = true;
         assert(size % m_pagesz == 0);
-        auto ret_blk = alloc_blk(size, hints, out_blkid);
+        auto ret_blk = alloc_contiguous_blk(size, hints, out_blkid);
         if (ret_blk != BLK_ALLOC_SUCCESS) { return nullptr; }
 
-        return alloc_blk_cached(size, *out_blkid);
+        return init_blk_cached(size, *out_blkid);
     }
 
-    boost::intrusive_ptr< Buffer > alloc_blk_cached(uint32_t size, const BlkId& blkid) {
+    off_t alloc_seq_blk(const size_t size, const bool chunk_overlap_ok = false) {
+        return m_vdev.alloc_seq_blk(size, chunk_overlap_ok);
+    }
+
+    BlkAllocStatus reserve_blk(const BlkId& in_blkid) { return (m_vdev.reserve_blk(in_blkid)); }
+
+    boost::intrusive_ptr< Buffer > reserve_blk_cached(uint32_t size, const BlkId& blkid) {
+        auto ret_blk = reserve_blk(blkid);
+        if (ret_blk != BLK_ALLOC_SUCCESS) { return nullptr; }
+        return init_blk_cached(size, blkid);
+    }
+
+    boost::intrusive_ptr< Buffer > init_blk_cached(uint32_t size, const BlkId& blkid) {
         // Create an object for the buffer
         auto buf = Buffer::make_object();
         buf->set_key(blkid);
@@ -524,8 +536,6 @@ public:
     void get_vb_context(const sisl::blob& ctx_data) const { m_vdev.get_vb_context(ctx_data); }
 
     VirtualDev< BAllocator, RoundRobinDeviceSelector >* get_vdev() { return &m_vdev; };
-
-    off_t alloc_blk(const size_t size, const bool chunk_overlap_ok = false) { return m_vdev.alloc_blk(size, chunk_overlap_ok); }
 
     ssize_t pwrite(const void* buf, size_t count, off_t offset, boost::intrusive_ptr< virtualdev_req > req = nullptr) {
         return m_vdev.pwrite(buf, count, offset, req);

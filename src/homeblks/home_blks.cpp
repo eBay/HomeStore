@@ -343,7 +343,8 @@ void HomeBlks::init_done(std::error_condition err) {
     }
     auto system_cap = get_system_capacity();
     LOGINFO("{}", system_cap.to_string());
-    assert(system_cap.used_total_size == used_data_size);
+    HS_DEBUG_ASSERT_EQ(system_cap.used_total_size, used_data_size,
+                       "System cap from sb and vol cumulative used size mismatch");
 
     LOGINFO("init done");
     m_cfg.init_done_cb(err, m_out_params);

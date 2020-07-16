@@ -272,7 +272,7 @@ LogGroup* LogDev::prepare_flush(int32_t estimated_records) {
     lg->m_flush_log_idx_from = m_last_flush_idx + 1;
     lg->m_flush_log_idx_upto = flushing_upto_idx;
     assert(lg->m_flush_log_idx_upto >= lg->m_flush_log_idx_from);
-    lg->m_log_dev_offset = m_hb->get_logdev_blkstore()->alloc_blk(lg->header()->group_size);
+    lg->m_log_dev_offset = m_hb->get_logdev_blkstore()->alloc_seq_blk(lg->header()->group_size);
 
     assert(lg->header()->oob_data_offset > 0);
     LOGDEBUG("Flushing upto log_idx={}", flushing_upto_idx);

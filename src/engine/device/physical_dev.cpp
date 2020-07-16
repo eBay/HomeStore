@@ -20,6 +20,7 @@
 #endif
 #include "engine/common/homestore_assert.hpp"
 #include <iomgr/iomgr.hpp>
+#include <utility/thread_factory.hpp>
 
 SDS_LOGGING_DECL(device)
 
@@ -31,7 +32,6 @@ static std::atomic< uint64_t > glob_phys_dev_offset(0);
 static std::atomic< uint32_t > glob_phys_dev_ids(0);
 
 PhysicalDev::~PhysicalDev() {
-
     LOGINFO("device name {} superblock magic {} product name {} version {}", m_devname, m_super_blk->magic,
             m_super_blk->product_name, m_super_blk->version);
     iomanager.iobuf_free((uint8_t*)m_super_blk);
@@ -39,7 +39,6 @@ PhysicalDev::~PhysicalDev() {
 }
 
 void PhysicalDev::update(uint32_t dev_num, uint64_t dev_offset, uint32_t first_chunk_id) {
-
     HS_ASSERT_CMP(DEBUG, m_info_blk.get_dev_num(), ==, INVALID_DEV_ID);
     HS_ASSERT_CMP(DEBUG, m_info_blk.get_first_chunk_id(), ==, INVALID_CHUNK_ID);
 
@@ -71,7 +70,6 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
         m_mgr(mgr),
         m_devname(devname),
         m_metrics(devname) {
-
     struct stat stat_buf;
     stat(devname.c_str(), &stat_buf);
     m_devsize = (uint64_t)stat_buf.st_size;
@@ -175,7 +173,6 @@ size_t PhysicalDev::get_total_cap() {
 }
 
 bool PhysicalDev::load_super_block() {
-
     read_superblock();
 
     // Validate if its homestore formatted device
@@ -220,7 +217,6 @@ void PhysicalDev::write_dm_chunk(uint64_t gen_cnt, char* mem, uint64_t size) {
 uint64_t PhysicalDev::sb_gen_cnt() { return m_super_blk->gen_cnt; }
 
 void PhysicalDev::write_super_block(uint64_t gen_cnt) {
-
     // Format the super block and this device info structure
     m_super_blk->magic = MAGIC;
     strcpy(m_super_blk->product_name, PRODUCT_NAME);
@@ -271,6 +267,19 @@ void PhysicalDev::write(const char* data, uint32_t size, uint64_t offset, uint8_
 
 void PhysicalDev::writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie,
                          bool part_of_batch) {
+    static uint64_t count = 0;
+    if ((++count % 10000) == 1) {
+        auto t = sisl::named_thread("dummy", [this]() mutable {
+            DummyMetrics* dm = new DummyMetrics();
+            COUNTER_INCREMENT(*dm, dummy_counter, 1);
+            sleep(1);
+            COUNTER_INCREMENT(*dm, dummy_counter, 1);
+            sleep(1);
+            LOGINFO("Exiting dummy thread {}", sisl::ThreadLocalContext::my_thread_num());
+            delete dm;
+        });
+        t.detach();
+    }
     drive_iface->async_writev(m_iodev.get(), iov, iovcnt, size, offset, cookie, part_of_batch);
 }
 

@@ -64,6 +64,8 @@ public:
 
         register_me_to_farm();
     }
+
+    //~CacheMetrics() { deregister_me_from_farm(); }
 };
 
 template < typename K, typename V >

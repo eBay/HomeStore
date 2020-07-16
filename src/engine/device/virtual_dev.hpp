@@ -167,7 +167,7 @@ public:
         register_me_to_farm();
     }
 
-    ~VirtualDevMetrics() { deregister_me_from_farm(); }
+    //~VirtualDevMetrics() { deregister_me_from_farm(); }
 };
 
 /*
@@ -251,7 +251,8 @@ public:
 
     /* Load the virtual dev from vdev_info_block and create a Virtual Dev. */
     VirtualDev(DeviceManager* mgr, const char* name, vdev_info_block* vb, vdev_comp_cb_t cb, bool recovery_init,
-               bool auto_recovery = false, vdev_high_watermark_cb_t hwm_cb = nullptr) : m_metrics(name) {
+               bool auto_recovery = false, vdev_high_watermark_cb_t hwm_cb = nullptr) :
+            m_metrics(name) {
         init(mgr, vb, cb, vb->page_size, auto_recovery, hwm_cb);
 
         m_recovery_init = recovery_init;
@@ -263,9 +264,10 @@ public:
     }
 
     /* Create a new virtual dev for these parameters */
-    VirtualDev(DeviceManager* mgr, const char* name, uint64_t context_size, uint32_t nmirror, bool is_stripe, uint32_t page_size,
-               const std::vector< PhysicalDev* >& pdev_list, vdev_comp_cb_t cb, char* blob, uint64_t size,
-               bool auto_recovery = false, vdev_high_watermark_cb_t hwm_cb = nullptr) : m_metrics(name) {
+    VirtualDev(DeviceManager* mgr, const char* name, uint64_t context_size, uint32_t nmirror, bool is_stripe,
+               uint32_t page_size, const std::vector< PhysicalDev* >& pdev_list, vdev_comp_cb_t cb, char* blob,
+               uint64_t size, bool auto_recovery = false, vdev_high_watermark_cb_t hwm_cb = nullptr) :
+            m_metrics(name) {
         init(mgr, nullptr, cb, page_size, auto_recovery, hwm_cb);
 
         // Now its time to allocate chunks as needed
@@ -503,7 +505,7 @@ public:
      * write_at_offset(offset_2);
      * write_at_offset(offset_1);
      */
-    off_t alloc_blk(const size_t size, const bool chunk_overlap_ok = false) {
+    off_t alloc_seq_blk(const size_t size, const bool chunk_overlap_ok = false) {
         HS_ASSERT_CMP(DEBUG, chunk_overlap_ok, ==, false);
 
         if (get_used_space() + size > get_size()) {
@@ -581,7 +583,7 @@ public:
                    m_write_sz_in_total.load(), m_reserved_sz);
             return -1;
         }
-        
+
         COUNTER_INCREMENT(m_metrics, vdev_write_count, 1);
 
         if (m_reserved_sz != 0) {
@@ -601,9 +603,9 @@ public:
     /**
      * @brief : writes up to count bytes from the buffer starting at buf at offset offset.
      * The cursor is not changed.
-     * pwrite always use offset returned from alloc_blk to do the write;
-     * pwrite should not across chunk boundaries because alloc_blk garunteens offset
-     * returned always doesn't across chunk boundary;
+     * pwrite always use offset returned from alloc_seq_blk to do the write;
+     * pwrite should not across chunk boundaries because alloc_seq_blk guarantees offset returned always doesn't across
+     * chunk boundary;
      *
      * @param buf : buffer pointing to the data being written
      * @param count : size of buffer to be written
@@ -615,17 +617,17 @@ public:
     ssize_t pwrite(const void* buf, size_t count, off_t offset, boost::intrusive_ptr< virtualdev_req > req = nullptr) {
         HS_ASSERT_CMP(RELEASE, count, <=, m_reserved_sz, "Write size:{} larger then reserved size: {} is not allowed!",
                       count, m_reserved_sz);
-         
+
         COUNTER_INCREMENT(m_metrics, vdev_write_count, 1);
 
         // update reserved size
         m_reserved_sz -= count;
 
-        // pwrite works with alloc_blk which already do watermark check;
-        
+        // pwrite works with alloc_seq_blk which already do watermark check;
+
         return do_pwrite(buf, count, offset, req);
     }
-    
+
     /**
      * @brief : writes iovcnt buffers of data described by iov to the offset.
      * pwritev doesn't advance curosr;
@@ -647,7 +649,7 @@ public:
         COUNTER_INCREMENT(m_metrics, vdev_write_count, 1);
 
         // if len is smaller than reserved size, it means write will never be overlapping start offset;
-        // it is garunteened by alloc_blk api;
+        // it is guaranteed by alloc_seq_blk api;
         HS_ASSERT_CMP(RELEASE, len, <=, m_reserved_sz, "Write size:{} larger then reserved size: {} is not allowed!",
                       len, m_reserved_sz);
 
@@ -665,7 +667,7 @@ public:
 
             bytes_written = do_pwritev_internal(pdev, chunk, iov, iovcnt, len, offset_in_dev, req);
 
-            // bytes written should always equal to requested write size, since alloc_blk handles offset
+            // bytes written should always equal to requested write size, since alloc_seq_blk handles offset
             // which will never across chunk boundary;
             HS_ASSERT_CMP(DEBUG, (uint64_t)bytes_written, ==, len, "Bytes written not equal to input len!");
 
@@ -802,7 +804,7 @@ public:
 
         return do_preadv_internal(pdev, chunk, offset_in_dev, iov, iovcnt, len, req);
     }
-    
+
     /**
      * @brief : repositions the cusor of the device to the argument offset
      * according to the directive whence as follows:
@@ -843,7 +845,7 @@ public:
      * @return : current curosr offset
      */
     off_t seeked_pos() const { return m_seek_cursor; }
-    
+
     /**
      * @brief : update the tail to vdev, this API will be called during reboot and
      * upper layer(logdev) has completed scanning all the valid records in vdev and then
@@ -874,7 +876,7 @@ public:
         return (primary_chunk->get_blk_allocator()->is_blk_alloced(blkid));
     }
 
-    BlkAllocStatus alloc_blk(BlkId& in_blkid) {
+    BlkAllocStatus reserve_blk(const BlkId& in_blkid) {
         PhysicalDevChunk* primary_chunk;
         auto blkid = to_chunk_specific_id(in_blkid, &primary_chunk);
 
@@ -884,7 +886,7 @@ public:
         return BLK_ALLOC_SUCCESS;
     }
 
-    BlkAllocStatus alloc_blk(uint8_t nblks, const blk_alloc_hints& hints, BlkId* out_blkid) {
+    BlkAllocStatus alloc_contiguous_blk(uint8_t nblks, const blk_alloc_hints& hints, BlkId* out_blkid) {
         BlkAllocStatus ret;
         try {
             std::vector< BlkId > blkid;
@@ -1090,7 +1092,6 @@ public:
         }
     }
 
-    
     /* Read the data for a given BlkId. With this method signature, virtual dev can read only in block boundary
      * and nothing in-between offsets (say if blk size is 8K it cannot read 4K only, rather as full 8K. It does not
      * have offset as one of the parameter. Reason for that is its actually ok and make the interface and also
@@ -1182,7 +1183,6 @@ public:
     }
 
 private:
-
     /**
      * @brief : convert logical offset to physicall offset for pwrite/pwritev;
      *
@@ -1203,7 +1203,7 @@ private:
         // convert logical offset to dev offset
         uint64_t offset_in_dev = logical_to_dev_offset(offset, dev_id, chunk_id, offset_in_chunk);
 
-        // this assert only valid for pwrite/pwritev, which calls alloc_blk to get the offset to do the write, which
+        // this assert only valid for pwrite/pwritev, which calls alloc_seq_blk to get the offset to do the write, which
         // garunteens write will with the returned offset will not accross chunk boundary.
         HS_ASSERT_CMP(RELEASE, m_chunk_size - offset_in_chunk, >=, len,
                       "Writing size: {} crossing chunk is not allowed!", len);
@@ -1239,7 +1239,7 @@ private:
 
             bytes_written = do_pwrite_internal(pdev, chunk, (const char*)buf, count, offset_in_dev, req);
 
-            // bytes written should always equal to requested write size, since alloc_blk handles offset
+            // bytes written should always equal to requested write size, since alloc_seq_blk handles offset
             // which will never across chunk boundary;
             HS_ASSERT_CMP(DEBUG, (size_t)bytes_written, ==, count, "Bytes written not equal to input len!");
 
@@ -1265,7 +1265,6 @@ private:
             }
         }
     }
-
 
     /**
      * @brief : convert logical offset in chunk to the physical device offset

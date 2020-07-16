@@ -374,7 +374,7 @@ void IndxMgr::recovery_start_phase2() {
             /* allocate blkids */
             auto alloc_pair = indx_journal_entry::get_alloc_bid_list(buf.bytes());
             for (uint32_t i = 0; i < alloc_pair.second; ++i) {
-                m_hs->get_data_blkstore()->alloc_blk(alloc_pair.first[i]);
+                m_hs->get_data_blkstore()->reserve_blk(alloc_pair.first[i]);
                 indx_id->indx_size += alloc_pair.first[i].data_size(m_hs->get_data_pagesz());
             }
         }
@@ -665,7 +665,7 @@ void IndxMgr::journal_comp_cb(logstore_req* lreq, logdev_key ld_key) {
      */
 
     for (uint32_t i = 0; i < ireq->indx_alloc_blkid_list.size(); ++i) {
-        m_hs->get_data_blkstore()->alloc_blk(ireq->indx_alloc_blkid_list[i]);
+        m_hs->get_data_blkstore()->reserve_blk(ireq->indx_alloc_blkid_list[i]);
         /* update size */
         ireq->indx_id->indx_size += ireq->indx_alloc_blkid_list[i].data_size(m_hs->get_data_pagesz());
     }

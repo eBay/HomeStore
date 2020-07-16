@@ -38,10 +38,10 @@ void FixedBlkAllocator::inited() {
         if (prev_blkid != BLKID32_INVALID) { m_blk_nodes[prev_blkid].next_blk = i; }
         prev_blkid = i;
     }
-    assert(prev_blkid != BLKID32_INVALID);
+    HS_DEBUG_ASSERT_NE(prev_blkid, BLKID32_INVALID, "Have invalid prev_blkid");
     m_blk_nodes[prev_blkid].next_blk = BLKID32_INVALID;
 
-    assert(m_first_blk_id != BLKID32_INVALID);
+    HS_DEBUG_ASSERT_NE(m_first_blk_id, BLKID32_INVALID, "Have invalid first_blk_id");
     __top_blk tp(0, m_first_blk_id);
     m_top_blk_id.store(tp.to_integer());
     BlkAllocator::inited();
@@ -55,7 +55,7 @@ bool FixedBlkAllocator::is_blk_alloced(BlkId& b) {
 BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) {
     BlkId blkid;
     /* TODO:If it is more then 1 then we need to make sure that we never allocate across the portions */
-    assert(nblks == 1);
+    HS_DEBUG_ASSERT_EQ(nblks, 1, "FixedBlkAllocator does not support multiple blk allocation yet");
 
 #ifdef _PRERELEASE
     if (homestore_flip->test_flip("fixed_blkalloc_no_blks", nblks)) { return BLK_ALLOC_SPACEFULL; }
@@ -73,8 +73,9 @@ BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& hi
     uint64_t cur_val;
     uint32_t id;
 
-    assert(nblks == 1);
-    assert(m_inited);
+    HS_DEBUG_ASSERT_EQ(nblks, 1, "FixedBlkAllocator does not support multiple blk allocation yet");
+    HS_DEBUG_ASSERT_EQ(m_inited, true, "Allocation before FixedBlkAllocator is initialized");
+
     do {
         prev_val = m_top_blk_id.load();
         __top_blk tp(prev_val);
@@ -98,7 +99,7 @@ BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& hi
 }
 
 void FixedBlkAllocator::free(const BlkId& b) {
-    assert(b.get_nblks() == 1);
+    HS_DEBUG_ASSERT_EQ(b.get_nblks(), 1, "Multiple blk free for FixedBlkAllocator? allocated by different allocator?");
 
     /* No need to set in cache if it is not recovered. When recovery is complete we copy the disk_bm to
      * cache bm.
@@ -119,7 +120,6 @@ void FixedBlkAllocator::free_blk(uint32_t id) {
         __top_blk tp(prev_val);
 
         blknode->next_blk = tp.get_top_blk_id();
-        ;
 
         tp.set_gen(tp.get_gen() + 1);
         tp.set_top_blk_id(id);
