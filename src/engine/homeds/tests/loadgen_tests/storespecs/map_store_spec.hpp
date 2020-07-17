@@ -58,7 +58,7 @@ public:
         req->seqId = ve.get_seqId();
         req->lastCommited_seqId = req->seqId; // keeping only latest version always
         req->push_blkid(ve.get_blkId());
-        mapping_write_cntx cntx;
+        mapping_op_cntx cntx;
         cntx.op = UPDATE_VAL_AND_FREE_BLKS;
         cntx.u.vreq = req.get();
         m_map->put(cntx, k, *(v.get()), nullptr);
@@ -163,7 +163,7 @@ public:
         LOGDEBUG("Mapping range put:{} {} ", key.to_string(), value.to_string());
 
         assert(req->nlbas() == bid.get_nblks());
-        mapping_write_cntx cntx;
+        mapping_op_cntx cntx;
         cntx.op = UPDATE_VAL_AND_FREE_BLKS;
         cntx.u.vreq = req.get();
         m_map->put(cntx, key, value, nullptr);

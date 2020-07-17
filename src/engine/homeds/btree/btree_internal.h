@@ -540,6 +540,8 @@ public:
 struct BtreeQueryCursor {
     std::unique_ptr< BtreeKey > m_last_key;
     std::unique_ptr< BtreeLockTracker > m_locked_nodes;
+    uint32_t serialize_size() { return 0; };
+    void serialize(uint8_t* data){};
 };
 
 ENUM(BtreeQueryType, uint8_t,
@@ -618,8 +620,8 @@ protected:
 };
 
 template < typename K, typename V >
-using match_item_cb_get_t = std::function< void(std::vector< std::pair< K, V > >&, std::vector< std::pair< K, V > >&,
-                                                BRangeQueryCBParam< K, V >*) >;
+using match_item_cb_get_t = std::function< btree_status_t(
+    std::vector< std::pair< K, V > >&, std::vector< std::pair< K, V > >&, BRangeQueryCBParam< K, V >*) >;
 template < typename K, typename V >
 class BtreeQueryRequest : public BRangeRequest {
 public:

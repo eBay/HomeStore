@@ -1003,7 +1003,8 @@ private:
                     // TODO - support accurate sub ranges in future instead of setting input range
                     query_req.get_cb_param()->set_sub_range(query_req.get_input_range());
                     std::vector< std::pair< K, V > > result_kv;
-                    query_req.callback()(match_kv, result_kv, query_req.get_cb_param());
+                    auto ret = query_req.callback()(match_kv, result_kv, query_req.get_cb_param());
+                    if (ret != btree_status_t::success) { return ret; }
                     auto ele_to_add = result_kv.size();
                     if (count + ele_to_add > query_req.get_batch_size()) {
                         ele_to_add = query_req.get_batch_size() - count;
@@ -1077,7 +1078,8 @@ private:
                 // TODO - support accurate sub ranges in future instead of setting input range
                 query_req.get_cb_param()->set_sub_range(query_req.get_input_range());
                 std::vector< std::pair< K, V > > result_kv;
-                query_req.callback()(match_kv, result_kv, query_req.get_cb_param());
+                auto ret = query_req.callback()(match_kv, result_kv, query_req.get_cb_param());
+                if (ret != btree_status_t::success) { return ret; }
                 auto ele_to_add = result_kv.size();
                 if (ele_to_add > 0) {
                     out_values.insert(out_values.end(), result_kv.begin(), result_kv.begin() + ele_to_add);

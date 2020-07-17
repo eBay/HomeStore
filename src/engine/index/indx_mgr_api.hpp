@@ -30,17 +30,19 @@ public:
     virtual btree_status_t update_diff_indx_tbl(indx_req* ireq, const btree_cp_id_ptr& btree_id) = 0;
     virtual btree_cp_id_ptr attach_prepare_cp(const btree_cp_id_ptr& cur_cp_id, bool is_last_cp,
                                               bool blkalloc_checkpoint) = 0;
-    virtual void flush_free_blks(const btree_cp_id_ptr& btree_id,
-                                 std::shared_ptr< homestore::blkalloc_cp_id >& blkalloc_id) = 0;
+    virtual void flush_free_blks(const btree_cp_id_ptr& btree_id, std::shared_ptr< blkalloc_cp_id >& blkalloc_id) = 0;
     virtual void update_btree_cp_sb(const btree_cp_id_ptr& cp_id, btree_cp_superblock& btree_sb, bool blkalloc_cp) = 0;
     virtual void truncate(const btree_cp_id_ptr& cp_id) = 0;
-    virtual btree_status_t destroy(const btree_cp_id_ptr& btree_id, free_blk_callback cb) = 0;
+    virtual btree_status_t destroy(blkid_list_ptr& free_blkid_list) = 0;
     virtual void destroy_done() = 0;
     virtual void cp_start(const btree_cp_id_ptr& cp_id, cp_comp_callback cb) = 0;
     virtual btree_status_t recovery_update(logstore_seq_num_t seqnum, journal_hdr* hdr,
                                            const btree_cp_id_ptr& btree_id) = 0;
     virtual void update_indx_alloc_blkids(indx_req* ireq) = 0;
     virtual uint64_t get_used_size() = 0;
+    virtual btree_status_t free_user_blkids(blkid_list_ptr free_list, BtreeQueryCursor& cur) = 0;
+    virtual btree_status_t unmap(blkid_list_ptr free_list, BtreeQueryCursor& cur) = 0;
+    virtual void get_btreequery_cur(uint8_t* data, BtreeQueryCursor& cur) = 0;
 };
 
 typedef std::function< void(const boost::intrusive_ptr< indx_req >& ireq, std::error_condition err) > io_done_cb;
@@ -113,7 +115,7 @@ public:
 
     /* it frees the blks and insert it in cp id free blk list. It is called when there is no read pending on this blk */
     void safe_to_free_blk(hs_cp_id* hs_id, Free_Blk_Entry& fbe);
-    void update_cp_sb(indx_cp_id_ptr& indx_id, hs_cp_id* hb_id, indx_cp_sb* sb);
+    void update_cp_sb(indx_cp_id_ptr& indx_id, hs_cp_id* hb_id, indx_cp_io_sb* sb);
     uint64_t get_last_psn();
     /* It is called when super block all indx tables are persisted by its consumer */
     void indx_create_done(indx_tbl* indx_tbl = nullptr);
@@ -171,13 +173,27 @@ public:
     static const iomgr::io_thread_t& get_thread_id() { return m_thread_id; }
     static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size);
     static void flush_hs_free_blks(hs_cp_id* id);
+    static void write_meta_blk(void*& mblk, sisl::byte_view buf);
 
 protected:
     /*********************** virtual functions required to support snapshot  **********************/
-    virtual int64_t snap_create(indx_tbl* m_diff_tbl, int64_t start_cp_cnt) = 0;
-    virtual int64_t snap_get_diff_id() = 0;
-    virtual void snap_create_done(uint64_t snap_id, int64_t max_psn, int64_t contiguous_psn, int64_t end_cp_cnt) = 0;
-    virtual btree_super_block snap_get_diff_tbl_sb() = 0;
+    /* These functions are defined so that indx mgr can be used without snapmagr */
+    virtual int64_t snap_create(indx_tbl* m_diff_tbl, int64_t start_cp_cnt) {
+        assert(0);
+        return -1;
+    }
+    virtual int64_t snap_get_diff_id() {
+        assert(0);
+        return -1;
+    }
+    virtual void snap_create_done(uint64_t snap_id, int64_t max_psn, int64_t contiguous_psn, int64_t end_cp_cnt) {
+        assert(0);
+    }
+    virtual btree_super_block snap_get_diff_tbl_sb() {
+        assert(0);
+        btree_super_block sb;
+        return sb;
+    }
 
 private:
     /*********************** static private members **********************/
@@ -187,11 +203,12 @@ private:
     static iomgr::io_thread_t m_thread_id;
     static iomgr::io_thread_t m_slow_path_thread_id;
     static iomgr::timer_handle_t m_hs_cp_timer_hdl;
-    static void* m_meta_blk;
+    static void* m_cp_meta_blk;
     static std::once_flag m_flag;
     static sisl::aligned_unique_ptr< uint8_t > m_recovery_sb;
     static size_t m_recovery_sb_size;
-    static std::map< boost::uuids::uuid, indx_cp_sb > cp_sb_map;
+    static std::map< boost::uuids::uuid, indx_cp_io_sb > cp_sb_map;
+    static std::map< boost::uuids::uuid, std::vector< std::pair< void*, sisl::byte_view > > > indx_meta_map;
     static HomeStoreBase* m_hs; // Hold onto the home store to maintain reference
     static uint64_t memory_used_in_recovery;
     static std::atomic< bool > m_inited;
@@ -223,7 +240,7 @@ private:
     std::mutex prepare_cb_mtx;
     sisl::wisr_vector< prepare_cb > prepare_cb_list;
     blkid_list_ptr m_free_list[MAX_CP_CNT];
-    indx_cp_sb m_last_cp_sb;
+    indx_cp_io_sb m_last_cp_sb;
     std::map< logstore_seq_num_t, log_buffer > seq_buf_map; // used only in recovery
     bool m_recovery_mode = false;
     create_indx_tbl m_create_indx_tbl;
@@ -232,6 +249,8 @@ private:
     uint64_t m_free_list_cnt = 0;
     bool m_is_snap_enabled = false;
     bool m_is_snap_started = false;
+    void* m_destroy_meta_blk = nullptr;
+    BtreeQueryCursor m_destroy_btree_cur;
 
     /*************************************** private functions ************************/
     void update_indx_internal(boost::intrusive_ptr< indx_req > ireq);
@@ -240,7 +259,7 @@ private:
     btree_status_t update_indx_tbl(indx_req* vreq, bool is_active);
     btree_cp_id_ptr get_btree_id(hs_cp_id* cp_id);
     indx_cp_id_ptr get_indx_id(hs_cp_id* cp_id);
-    void destroy_indx_tbl(const indx_cp_id_ptr& indx_id);
+    void destroy_indx_tbl();
     void add_prepare_cb_list(prepare_cb cb);
     void indx_destroy_cp(const indx_cp_id_ptr& cur_indx_id, hs_cp_id* hb_id, hs_cp_id* new_hb_id);
     void create_first_cp_id();
@@ -249,7 +268,8 @@ private:
     void free_blk(const indx_cp_id_ptr& indx_id, BlkId& fblkid);
     void run_slow_path_thread();
     void create_new_diff_tbl(indx_cp_id_ptr& indx_id);
-
+    void recover_meta_ops();
+    void free_blks(blkid_list_ptr& free_blkid_list, const cp_done_cb& free_blks_cb, bool last_cp = false);
 };
 
 struct Free_Blk_Entry {

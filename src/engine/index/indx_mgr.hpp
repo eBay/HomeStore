@@ -161,6 +161,9 @@ struct indx_cp_id : public boost::intrusive_ref_counter< indx_cp_id > {
     indx_mgr_ptr indx_mgr;
     int flags = cp_state::active_cp;
     int64_t max_psn = -1; // max psn sent on this id
+    std::vector< blkid_list_ptr >
+        user_free_blkid_list; // this blkid list is freed by the user. It is not part of any cp.
+                              // user first collect it and then later it attaches the list to a cp.
 
     /* metrics */
     int64_t cp_cnt;
@@ -170,7 +173,8 @@ struct indx_cp_id : public boost::intrusive_ref_counter< indx_cp_id > {
     indx_active_info ainfo;
     indx_diff_info dinfo;
 
-    blkid_list_ptr free_blkid_list;
+    blkid_list_ptr free_blkid_list; // list of blk ids freed in a cp
+
     indx_cp_id(int64_t cp_cnt, int64_t start_active_psn, int64_t start_diff_psn, indx_mgr_ptr indx_mgr,
                blkid_list_ptr& free_blkid_list) :
             indx_mgr(indx_mgr),
@@ -188,7 +192,13 @@ struct indx_cp_id : public boost::intrusive_ref_counter< indx_cp_id > {
 /* super block persisted for each CP */
 /* it contains the PSN from which journal has to be replayed. */
 #define INDX_MGR_VERSION 0x101
-struct hs_cp_sb_hdr {
+enum meta_hdr_type { INDX_CP, INDX_DESTROY, INDX_UNMAP, SNAP_DESTROY };
+struct hs_cp_meta_sb {
+    boost::uuids::uuid uuid; // Don't populate if it is hs indx meta blk
+    meta_hdr_type type;
+} __attribute__((__packed__));
+
+struct hs_cp_io_sb : hs_cp_meta_sb {
     int version;
     uint32_t indx_cnt;
 } __attribute__((__packed__));
@@ -209,13 +219,13 @@ struct indx_cp_info {
     bool snap_cp = false;
 } __attribute__((__packed__));
 
-struct indx_cp_sb {
+struct indx_cp_io_sb {
     boost::uuids::uuid uuid;
     indx_cp_info cp_info;
     btree_cp_superblock active_btree_info;
     btree_cp_superblock diff_btree_info;
-    indx_cp_sb(boost::uuids::uuid uuid) : uuid(uuid){};
-    indx_cp_sb(){};
+    indx_cp_io_sb(boost::uuids::uuid uuid) : uuid(uuid){};
+    indx_cp_io_sb(){};
 } __attribute__((__packed__));
 
 /* this superblock is never changed once indx manager is created */

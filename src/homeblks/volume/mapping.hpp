@@ -27,14 +27,17 @@ uint64_t get_blkid_offset(uint64_t end_lba, uint64_t start_lba, uint64_t vol_pag
 uint64_t get_next_start_lba(uint64_t start_lba, uint64_t nlba);
 
 enum op_type {
-    UPDATE_VAL_ONLY = 0,     // it only update the value
-    UPDATE_VAL_AND_FREE_BLKS // it update the value and also update the free blks
+    UPDATE_VAL_ONLY = 0,      // it only update the value
+    UPDATE_VAL_AND_FREE_BLKS, // it update the value and also update the free blks
+    READ_VAL,
+    READ_FREE_BLKID
 };
 
-struct mapping_write_cntx {
+struct mapping_op_cntx {
     op_type op = UPDATE_VAL_ONLY;
     union {
-        struct volume_req* vreq = nullptr;
+        struct volume_req* vreq;
+        sisl::ThreadVector< BlkId >* free_list;
     } u;
 };
 
@@ -550,9 +553,9 @@ private:
 
     class UpdateCBParam : public BRangeUpdateCBParam< MappingKey, MappingValue > {
     public:
-        mapping_write_cntx m_cntx;
+        mapping_op_cntx m_cntx;
 
-        UpdateCBParam(mapping_write_cntx cntx, MappingKey& new_key, MappingValue& new_value) :
+        UpdateCBParam(mapping_op_cntx cntx, MappingKey& new_key, MappingValue& new_value) :
                 BRangeUpdateCBParam(new_key, new_value), m_cntx(cntx) {}
     };
 
@@ -563,7 +566,6 @@ public:
             trigger_cp_callback trigger_cp_cb, pending_read_blk_cb pending_read_cb = nullptr,
             btree_cp_superblock* btree_cp_sb = nullptr);
     virtual ~mapping();
-    btree_status_t destroy(const btree_cp_id_ptr& btree_id, free_blk_callback cb);
     int sweep_alloc_blks(uint64_t start_lba, uint64_t end_lba);
     error_condition get(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& values,
                         MappingBtreeDeclType* bt);
@@ -574,12 +576,12 @@ public:
      * blocks.
      * @start_lba :- it updates the first lba which is not written.
      */
-    btree_status_t put(mapping_write_cntx cntx, MappingKey& key, MappingValue& value, const btree_cp_id_ptr& cp_id,
+    btree_status_t put(mapping_op_cntx cntx, MappingKey& key, MappingValue& value, const btree_cp_id_ptr& cp_id,
                        MappingBtreeDeclType* bt, uint64_t& start_lba);
 
-    btree_status_t put(mapping_write_cntx cntx, MappingKey& key, MappingValue& value, const btree_cp_id_ptr& cp_id);
+    btree_status_t put(mapping_op_cntx cntx, MappingKey& key, MappingValue& value, const btree_cp_id_ptr& cp_id);
 
-    btree_status_t put(mapping_write_cntx cntx, MappingKey& key, MappingValue& value, const btree_cp_id_ptr& cp_id,
+    btree_status_t put(mapping_op_cntx cntx, MappingKey& key, MappingValue& value, const btree_cp_id_ptr& cp_id,
                        uint64_t& start_lba);
     MappingBtreeDeclType* get_btree(void);
 
@@ -654,6 +656,10 @@ public:
     virtual btree_status_t update_active_indx_tbl(indx_req* ireq, const btree_cp_id_ptr& btree_id) override;
     virtual btree_status_t recovery_update(logstore_seq_num_t seqnum, journal_hdr* hdr,
                                            const btree_cp_id_ptr& btree_id) override;
+    virtual btree_status_t free_user_blkids(blkid_list_ptr free_list, BtreeQueryCursor& cur) override;
+    virtual btree_status_t unmap(blkid_list_ptr free_list, BtreeQueryCursor& cur) override;
+    virtual void get_btreequery_cur(uint8_t* data, BtreeQueryCursor& cur) override;
+    virtual btree_status_t destroy(blkid_list_ptr& free_blkid_list) override;
 
 public:
     /* static functions */
@@ -661,9 +667,9 @@ public:
 
 private:
     btree_status_t update_indx_tbl(indx_req* ireq, const btree_cp_id_ptr& btree_id, bool active_btree_update = true);
-    void get_alloc_blks_cb(std::vector< std::pair< MappingKey, MappingValue > >& match_kv,
-                           std::vector< std::pair< MappingKey, MappingValue > >& result_kv,
-                           BRangeQueryCBParam< MappingKey, MappingValue >* cb_param);
+    btree_status_t get_alloc_blks_cb(std::vector< std::pair< MappingKey, MappingValue > >& match_kv,
+                                     std::vector< std::pair< MappingKey, MappingValue > >& result_kv,
+                                     BRangeQueryCBParam< MappingKey, MappingValue >* cb_param);
     void process_free_blk_callback(free_blk_callback free_cb, MappingValue& mv);
     void mapping_merge_cb(std::vector< std::pair< MappingKey, MappingValue > >& match_kv,
                           std::vector< std::pair< MappingKey, MappingValue > >& replace_kv,
