@@ -267,19 +267,6 @@ void PhysicalDev::write(const char* data, uint32_t size, uint64_t offset, uint8_
 
 void PhysicalDev::writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie,
                          bool part_of_batch) {
-    static uint64_t count = 0;
-    if ((++count % 10000) == 1) {
-        auto t = sisl::named_thread("dummy", [this]() mutable {
-            DummyMetrics* dm = new DummyMetrics();
-            COUNTER_INCREMENT(*dm, dummy_counter, 1);
-            sleep(1);
-            COUNTER_INCREMENT(*dm, dummy_counter, 1);
-            sleep(1);
-            LOGINFO("Exiting dummy thread {}", sisl::ThreadLocalContext::my_thread_num());
-            delete dm;
-        });
-        t.detach();
-    }
     drive_iface->async_writev(m_iodev.get(), iov, iovcnt, size, offset, cookie, part_of_batch);
 }
 

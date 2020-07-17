@@ -79,7 +79,7 @@ public:
         register_me_to_farm();
     }
 
-    //~HomeBlksMetrics() { deregister_me_from_farm(); }
+    ~HomeBlksMetrics() { deregister_me_from_farm(); }
 };
 
 #define BLKSTORE_BUFFER_TYPE                                                                                           \

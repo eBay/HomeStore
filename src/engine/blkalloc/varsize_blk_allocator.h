@@ -210,7 +210,7 @@ public:
         register_me_to_farm();
     }
 
-    //~SegmentMetrics() { deregister_me_from_farm(); }
+    ~SegmentMetrics() { deregister_me_from_farm(); }
 };
 
 class BlkAllocSegment {

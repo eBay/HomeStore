@@ -319,17 +319,7 @@ public:
         register_me_to_farm();
     }
 
-    //~PhysicalDevMetrics() { deregister_me_from_farm(); }
-};
-
-class DummyMetrics : public sisl::MetricsGroupWrapper {
-public:
-    explicit DummyMetrics() : sisl::MetricsGroupWrapper("Dummy") {
-        REGISTER_COUNTER(dummy_counter, "Dummy counter");
-        register_me_to_farm();
-    }
-
-    ~DummyMetrics() { deregister_me_from_farm(); }
+    ~PhysicalDevMetrics() { deregister_me_from_farm(); }
 };
 
 class PhysicalDev {

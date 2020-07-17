@@ -167,7 +167,7 @@ public:
         register_me_to_farm();
     }
 
-    //~VirtualDevMetrics() { deregister_me_from_farm(); }
+    ~VirtualDevMetrics() { deregister_me_from_farm(); }
 };
 
 /*
