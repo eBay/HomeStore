@@ -168,9 +168,10 @@ void HomeStoreCP::cp_attach_prepare(hs_cp_id* cur_id, hs_cp_id* new_id) {
 
 REGISTER_METABLK_SUBSYSTEM(indx_mgr, "INDX_MGR_CP", IndxMgr::meta_blk_found_cb, nullptr)
 
-IndxMgr::IndxMgr(boost::uuids::uuid uuid, std::string name, io_done_cb io_cb, create_indx_tbl func,
-                 bool is_snap_enabled) :
+IndxMgr::IndxMgr(boost::uuids::uuid uuid, std::string name, io_done_cb io_cb, const read_indx_comp_cb_t& read_cb,
+                 create_indx_tbl func, bool is_snap_enabled) :
         m_io_cb(io_cb),
+        m_read_cb(read_cb),
         m_uuid(uuid),
         m_name(name),
         prepare_cb_list(4),
@@ -189,9 +190,10 @@ IndxMgr::IndxMgr(boost::uuids::uuid uuid, std::string name, io_done_cb io_cb, cr
 }
 
 /* Constructor for recovery */
-IndxMgr::IndxMgr(boost::uuids::uuid uuid, std::string name, io_done_cb io_cb, create_indx_tbl create_func,
-                 recover_indx_tbl recover_func, indx_mgr_static_sb sb) :
+IndxMgr::IndxMgr(boost::uuids::uuid uuid, std::string name, io_done_cb io_cb, const read_indx_comp_cb_t& read_cb,
+                 create_indx_tbl create_func, recover_indx_tbl recover_func, indx_mgr_static_sb sb) :
         m_io_cb(io_cb),
+        m_read_cb(read_cb),
         m_uuid(uuid),
         m_name(name),
         prepare_cb_list(4),
@@ -1032,6 +1034,30 @@ void IndxMgr::register_cp_done_cb(const cp_done_cb& cb, bool blkalloc_cp) {
     } else {
         hs_cp_done_cb_list.push_back(cb);
     }
+}
+
+std::error_condition IndxMgr::read_indx(const boost::intrusive_ptr< indx_req >& ireq, bool fill_gaps) {
+    auto ret = m_active_tbl->read_indx(ireq.get(), m_read_cb, fill_gaps);
+    if (ret == btree_status_t::fast_path_not_possible) {
+        iomanager.run_on(m_slow_path_thread_id, [this, ireq, fill_gaps](io_thread_addr_t addr) mutable {
+                HS_LOG(INFO, indx_mgr, "Slow path read triggered.");
+                auto status = m_active_tbl->read_indx(ireq.get(), m_read_cb, fill_gaps);
+                
+                // callback to client;
+                std::error_condition err = no_error;
+                if (status != btree_status_t::success && status != btree_status_t::has_more) { err = btree_read_failed; }
+
+                //m_read_cb(ireq, kvs, err);
+            });
+
+    } else {
+        // we are in fast path, send callback to client;
+        std::error_condition err = no_error;
+        if (ret != btree_status_t::success && ret != btree_status_t::has_more) { err = btree_read_failed; }
+        //m_read_cb(ireq, kvs, err);
+    }
+
+    return no_error;
 }
 
 uint64_t IndxMgr::get_used_size() { return (m_last_cp_sb.cp_info.indx_size + m_active_tbl->get_used_size()); }

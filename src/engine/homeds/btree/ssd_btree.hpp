@@ -222,15 +222,24 @@ public:
             req->is_read = true;
             req->isSyncCall = true;
             auto cache_only = iomanager.am_i_tight_loop_reactor();
-        
+#if 0
+#ifndef NDEBUG /* testing slow path */
+            static std::atomic< uint64_t > read_cnt = 0;
+            if (++read_cnt % 100 == 0) {
+                bnode = nullptr;
+                LOGINFO("Trigginer slow path intentionally.");
+                return btree_status_t::fast_path_not_possible;
+            }
+#endif
+#endif
             auto safe_buf = m_blkstore->read(blkid, 0, store->get_node_size(), req, cache_only);
-            
+
             if (safe_buf == nullptr) {
                 // only expect to see null buf when we are in spdk reactor;
                 HS_ASSERT_CMP(DEBUG, iomanager.am_i_tight_loop_reactor(), ==, true);
                 bnode = nullptr;
                 return btree_status_t::fast_path_not_possible;
-            } 
+            }
 
             bnode = boost::static_pointer_cast< SSDBtreeNode >(safe_buf);
         } catch (std::exception& e) {

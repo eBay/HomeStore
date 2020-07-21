@@ -525,6 +525,7 @@ public:
 };
 
 typedef std::function< void(volume_req* req, BlkId& bid) > pending_read_blk_cb;
+
 class mapping : public indx_tbl {
     using alloc_blk_callback = std::function< void(struct BlkId blkid, size_t offset_size, size_t size) >;
     using comp_callback = std::function< void(const btree_cp_id_ptr& cp_id) >;
@@ -553,7 +554,8 @@ private:
         mapping_write_cntx m_cntx;
 
         UpdateCBParam(mapping_write_cntx cntx, MappingKey& new_key, MappingValue& new_value) :
-                BRangeUpdateCBParam(new_key, new_value), m_cntx(cntx) {}
+                BRangeUpdateCBParam(new_key, new_value),
+                m_cntx(cntx) {}
     };
 
 public:
@@ -569,6 +571,8 @@ public:
                         MappingBtreeDeclType* bt);
     error_condition get(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& values,
                         bool fill_gaps = true);
+
+
     /* Note :- we should not write same IO in btree multiple times. When a key is updated , it update the free blk
      * entries in request to its last value. If we write same io multiple times then it could end up freeing the wrong
      * blocks.
@@ -654,6 +658,7 @@ public:
     virtual btree_status_t update_active_indx_tbl(indx_req* ireq, const btree_cp_id_ptr& btree_id) override;
     virtual btree_status_t recovery_update(logstore_seq_num_t seqnum, journal_hdr* hdr,
                                            const btree_cp_id_ptr& btree_id) override;
+    virtual btree_status_t read_indx(indx_req* req, const read_indx_comp_cb_t& read_cb, bool fill_gaps) override;
 
 public:
     /* static functions */
@@ -717,5 +722,7 @@ private:
                                std::vector< std::pair< MappingKey, MappingValue > >& values,
                                MappingValue* exp_value = nullptr, volume_req* req = nullptr);
 #endif
+
+    //btree_status_t get_internal(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& result_kv);
 };
 } // namespace homestore

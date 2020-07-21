@@ -20,7 +20,9 @@ uint64_t homestore::get_next_start_lba(uint64_t start_lba, uint64_t nlba) { retu
 
 mapping::mapping(uint64_t volsize, uint32_t page_size, const std::string& unique_name,
                  trigger_cp_callback trigger_cp_cb, pending_read_blk_cb pending_read_cb) :
-        m_pending_read_blk_cb(pending_read_cb), m_vol_page_size(page_size), m_unique_name(unique_name) {
+        m_pending_read_blk_cb(pending_read_cb),
+        m_vol_page_size(page_size),
+        m_unique_name(unique_name) {
     m_hb = HomeBlks::safe_instance();
     homeds::btree::BtreeConfig btree_cfg(HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size), unique_name.c_str());
     btree_cfg.set_max_objs(volsize / page_size);
@@ -35,7 +37,9 @@ mapping::mapping(uint64_t volsize, uint32_t page_size, const std::string& unique
 mapping::mapping(uint64_t volsize, uint32_t page_size, const std::string& unique_name, btree_super_block btree_sb,
                  trigger_cp_callback trigger_cp_cb, pending_read_blk_cb pending_read_cb,
                  btree_cp_superblock* btree_cp_sb) :
-        m_pending_read_blk_cb(pending_read_cb), m_vol_page_size(page_size), m_unique_name(unique_name) {
+        m_pending_read_blk_cb(pending_read_cb),
+        m_vol_page_size(page_size),
+        m_unique_name(unique_name) {
     m_hb = HomeBlks::safe_instance();
     homeds::btree::BtreeConfig btree_cfg(HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size), unique_name.c_str());
     btree_cfg.set_max_objs(volsize / page_size);
@@ -72,6 +76,78 @@ error_condition mapping::get(volume_req* req, std::vector< std::pair< MappingKey
     return no_error;
 }
 
+btree_status_t mapping::read_indx(indx_req* ireq, const read_indx_comp_cb_t& read_cb, bool fill_gaps) { 
+    auto req = static_cast< volume_req* >(ireq);
+    uint64_t start_lba = req->lba();
+
+    uint64_t num_lba = req->nlbas();
+    uint64_t end_lba = get_end_lba(start_lba, req->nlbas());
+    MappingKey start_key(start_lba, 1);
+    MappingKey end_key(end_lba, 1);
+
+    auto search_range = BtreeSearchRange(start_key, true, end_key, true);
+    GetCBParam param(req);
+    std::vector< pair< MappingKey, MappingValue > > result_kv;
+
+    BtreeQueryRequest< MappingKey, MappingValue > qreq(
+        search_range, BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, num_lba,
+        std::bind(&mapping::match_item_cb_get, this, placeholders::_1, placeholders::_2, placeholders::_3),
+        (BRangeQueryCBParam< MappingKey, MappingValue >*)&param);
+    auto ret = m_bt->query(qreq, result_kv);
+
+    std::vector< pair< MappingKey, MappingValue > > values;
+
+    if (fill_gaps) {
+        // fill the gaps
+        auto last_lba = start_lba;
+        for (auto i = 0u; i < result_kv.size(); i++) {
+            int nl = result_kv[i].first.start() - last_lba;
+            while (nl-- > 0) {
+                values.emplace_back(make_pair(MappingKey(last_lba, 1), EMPTY_MAPPING_VALUE));
+                last_lba++;
+            }
+            values.emplace_back(result_kv[i]);
+            last_lba = result_kv[i].first.end() + 1;
+        }
+        while (last_lba <= end_lba) {
+            values.emplace_back(make_pair(MappingKey(last_lba, 1), EMPTY_MAPPING_VALUE));
+            last_lba++;
+        }
+#ifndef NDEBUG
+        validate_get_response(start_lba, num_lba, values);
+#endif
+    } else {
+        values.insert(values.begin(), result_kv.begin(), result_kv.end());
+    }
+
+    if (ret != btree_status_t::fast_path_not_possible) {
+        for (auto& x : values) {
+            read_cb(ireq, x.first, x.second, true, no_error);
+        }
+        read_cb(ireq, MappingKey(), MappingValue(), false, no_error);
+    }
+    
+    return ret;
+}
+#if 0
+btree_status_t mapping::get_internal(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& result_kv) {
+    uint64_t start_lba = req->lba();
+    uint64_t num_lba = req->nlbas();
+    uint64_t end_lba = get_end_lba(start_lba, req->nlbas());
+    MappingKey start_key(start_lba, 1);
+    MappingKey end_key(end_lba, 1);
+
+    auto search_range = BtreeSearchRange(start_key, true, end_key, true);
+    GetCBParam param(req);
+
+    BtreeQueryRequest< MappingKey, MappingValue > qreq(
+        search_range, BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, num_lba,
+        std::bind(&mapping::match_item_cb_get, this, placeholders::_1, placeholders::_2, placeholders::_3),
+        (BRangeQueryCBParam< MappingKey, MappingValue >*)&param);
+
+    return m_bt->query(qreq, result_kv);
+}
+#endif
 error_condition mapping::get(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& values,
                              bool fill_gaps) {
     uint64_t start_lba = req->lba();
@@ -695,7 +771,7 @@ btree_status_t mapping::match_item_cb_put(std::vector< std::pair< MappingKey, Ma
  * input_range is original client provided start/end, its always inclusive for mapping layer
  * Resulting start/end lba is always inclusive
  */
-void mapping::get_start_end_lba(BRangeCBParam * param, uint64_t & start_lba, uint64_t & end_lba) {
+void mapping::get_start_end_lba(BRangeCBParam* param, uint64_t& start_lba, uint64_t& end_lba) {
 
     // pick higher start of subrange/inputrange
     MappingKey* s_subrange = (MappingKey*)param->get_sub_range().get_start_key();
@@ -718,9 +794,9 @@ void mapping::get_start_end_lba(BRangeCBParam * param, uint64_t & start_lba, uin
 
 /* result of overlap of k1/k2 is added to replace_kv */
 void mapping::compute_and_add_overlap(op_type update_op, std::vector< Free_Blk_Entry > fbe_list, uint64_t s_lba,
-                                      uint64_t e_lba, MappingValue & new_val, uint16_t new_val_offset,
-                                      MappingValue & e_val, uint16_t e_val_offset,
-                                      std::vector< std::pair< MappingKey, MappingValue > > & replace_kv) {
+                                      uint64_t e_lba, MappingValue& new_val, uint16_t new_val_offset,
+                                      MappingValue& e_val, uint16_t e_val_offset,
+                                      std::vector< std::pair< MappingKey, MappingValue > >& replace_kv) {
 
     auto nlba = get_nlbas(e_lba, s_lba);
 
@@ -738,7 +814,6 @@ void mapping::compute_and_add_overlap(op_type update_op, std::vector< Free_Blk_E
     replace_kv.emplace_back(
         make_pair(MappingKey(s_lba, nlba), MappingValue(new_val, new_val_offset, nlba, m_vol_page_size)));
 }
-
 
 #ifndef NDEBUG
 void mapping::validate_get_response(uint64_t lba_start, uint32_t n_lba,
