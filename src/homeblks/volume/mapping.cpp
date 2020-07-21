@@ -49,8 +49,9 @@ mapping::mapping(uint64_t volsize, uint32_t page_size, const std::string& unique
 
 mapping::~mapping() { delete m_bt; }
 
-error_condition mapping::get(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& values,
-                             MappingBtreeDeclType* bt) {
+error_condition mapping::get(mapping_op_cntx cntx, MappingKey& key,
+                             std::vector< std::pair< MappingKey, MappingValue > >& values, MappingBtreeDeclType* bt) {
+    volume_req* req;
     uint64_t start_lba = req->lba();
     uint64_t num_lba = req->nlbas();
     uint64_t end_lba = get_end_lba(start_lba, req->nlbas());
@@ -72,17 +73,9 @@ error_condition mapping::get(volume_req* req, std::vector< std::pair< MappingKey
     return no_error;
 }
 
-error_condition mapping::get(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& values,
-                             bool fill_gaps) {
-    uint64_t start_lba = req->lba();
-    uint64_t num_lba = req->nlbas();
-    uint64_t end_lba = get_end_lba(start_lba, req->nlbas());
-    MappingKey start_key(start_lba, 1);
-    MappingKey end_key(end_lba, 1);
-
+error_condition mapping::get(mapping_op_cntx cntx, MappingKey& start_key, MappingKey& end_key, bool fill_gaps) {
     auto search_range = BtreeSearchRange(start_key, true, end_key, true);
-    GetCBParam param(req);
-    std::vector< pair< MappingKey, MappingValue > > result_kv;
+    GetCBParam param(cntx);
 
     BtreeQueryRequest< MappingKey, MappingValue > qreq(
         search_range, BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, num_lba,
@@ -225,13 +218,6 @@ void mapping::process_free_blk_callback(free_blk_callback free_cb, MappingValue&
     if (!free_cb) { return; }
     Blob_Array< ValueEntry > array = mv.get_array();
     for (uint32_t i = 0; i < array.get_total_elements(); ++i) {
-        ValueEntry ve;
-        array.get((uint32_t)i, ve, true);
-        HS_SUBMOD_LOG(DEBUG, volume, , "vol", m_unique_name, "Free Blk: vol_page: {}, data_page: {}, n_lba: {}",
-                      m_vol_page_size, HomeBlks::instance()->get_data_pagesz(), ve.get_nlba());
-        uint64_t nblks = (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * ve.get_nlba();
-        Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(), nblks);
-        free_cb(fbe);
     }
 }
 
@@ -424,15 +410,13 @@ btree_status_t mapping::match_item_cb_get(std::vector< std::pair< MappingKey, Ma
     get_start_end_lba(cb_param, start_lba, end_lba);
     GetCBParam* param = (GetCBParam*)cb_param;
 
-    assert((param->m_req->lastCommited_seqId == INVALID_SEQ_ID) ||
-           (param->m_req->lastCommited_seqId <= param->m_req->seqId));
+    assert((param->m_cntx->lastCommited_seqId == INVALID_SEQ_ID) ||
+           (param->m_cntx->lastCommited_seqId <= param->m_ctx->seqId));
 
     ValueEntry new_ve; // empty
 #ifndef NDEBUG
     stringstream ss;
     /* For map load test vol instance is null */
-    ss << ",Lba:" << param->m_req->lba() << ",nlbas:" << param->m_req->nlbas() << ",seqId:" << param->m_req->seqId
-       << ",last_seqId:" << param->m_req->lastCommited_seqId;
     ss << ",is:" << ((MappingKey*)param->get_input_range().get_start_key())->to_string();
     ss << ",ie:" << ((MappingKey*)param->get_input_range().get_end_key())->to_string();
     ss << ",ss:" << ((MappingKey*)param->get_sub_range().get_start_key())->to_string();
@@ -447,31 +431,44 @@ btree_status_t mapping::match_item_cb_get(std::vector< std::pair< MappingKey, Ma
         auto& existing = match_kv[i];
         MappingKey* e_key = &existing.first;
         Blob_Array< ValueEntry > array = (&existing.second)->get_array();
+        std::vector< Free_Blk_Entry >& fbe_list;
+        MappingKey overlap;
+        e_key->get_overlap(start_lba, end_lba, overlap);
+        auto lba_offset = overlap.get_start_offset(*e_key);
+
         for (int j = array.get_total_elements() - 1; j >= 0; j--) {
             // seqId use to filter out KVs with higher seqIds and put only latest seqid entry in result_kv
             ValueEntry ve;
             array.get((uint32_t)j, ve, true);
 
-            if (ve.get_seqId() == INVALID_SEQ_ID || ve.get_seqId() <= param->m_req->lastCommited_seqId) {
-                if (i == 0 || i == match_kv.size() - 1) {
-
-                    MappingKey overlap;
-                    e_key->get_overlap(start_lba, end_lba, overlap);
-
-                    auto lba_offset = overlap.get_start_offset(*e_key);
-                    ve.add_offset(lba_offset, overlap.get_n_lba(), m_vol_page_size);
+            ve.add_offset(lba_offset, overlap.get_n_lba(), m_vol_page_size);
+            if (param->m_ctx.op == READ_VAL) {
+                if (ve.get_seqId() == INVALID_SEQ_ID || ve.get_seqId() <= param->m_ctx->lastCommited_seqId) {
                     result_kv.emplace_back(make_pair(overlap, MappingValue(ve)));
-                } else {
-                    result_kv.emplace_back(make_pair(MappingKey(*e_key), MappingValue(ve)));
+                    if (m_pending_read_blk_cb && param->u.vreq) {
+                        m_pending_read_blk_cb(param->u.vreq, ve.get_blkId()); // mark this blk as pending read
+                    }
+                    break;
                 }
-                if (m_pending_read_blk_cb && param->m_req) {
-                    m_pending_read_blk_cb(param->m_req, ve.get_blkId()); // mark this blk as pending read
-                }
-                break;
+            } else if (param->m_ctx.op == READ_FREE_BLKID) {
+                /* free all the blkids */
+                HS_SUBMOD_LOG(DEBUG, volume, , "vol", m_unique_name, "Free Blk: vol_page: {}, data_page: {}, n_lba: {}",
+                              m_vol_page_size, HomeBlks::instance()->get_data_pagesz(), ve.get_nlba());
+                uint64_t nblks = (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * ve.get_nlba();
+                Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(), nblks);
+                fbe_list.push_back(fbe);
+            } else {
+                assert(0);
             }
-            // else {
-            //     assert(0);// for now, we are always returning latest write
-            // }
+        }
+
+        if (param->m_ctx.op == READ_FREE_BLKID) {
+            if (IndxMgr::free_blk(param->m_ctx.u.free_list, fbe_list)) {
+                ValueEntry ve; // create a default value
+                result_kv.emplace_back(make_pair(overlap, MappingValue(ve)));
+            } else {
+                return btree_status_t::resource_full;
+            }
         }
     }
 #ifndef NDEBUG

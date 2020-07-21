@@ -161,9 +161,10 @@ struct indx_cp_id : public boost::intrusive_ref_counter< indx_cp_id > {
     indx_mgr_ptr indx_mgr;
     int flags = cp_state::active_cp;
     int64_t max_psn = -1; // max psn sent on this id
-    std::vector< blkid_list_ptr >
-        user_free_blkid_list; // this blkid list is freed by the user. It is not part of any cp.
-                              // user first collect it and then later it attaches the list to a cp.
+    std::vector< blkid_list_ptr > user_free_blkid_list; // this blkid list is freed by the user. It is not part of any
+                                                        // cp. user first collect it and then later it attaches the list
+                                                        // to a cp.
+    blkid_list_ptr free_blkid_list; // list of blk ids freed in a cp
 
     /* metrics */
     int64_t cp_cnt;
@@ -173,7 +174,6 @@ struct indx_cp_id : public boost::intrusive_ref_counter< indx_cp_id > {
     indx_active_info ainfo;
     indx_diff_info dinfo;
 
-    blkid_list_ptr free_blkid_list; // list of blk ids freed in a cp
 
     indx_cp_id(int64_t cp_cnt, int64_t start_active_psn, int64_t start_diff_psn, indx_mgr_ptr indx_mgr,
                blkid_list_ptr& free_blkid_list) :

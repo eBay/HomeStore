@@ -211,7 +211,6 @@ private:
     vol_params m_params;
     VolumeMetrics m_metrics;
     HomeBlksSafePtr m_hb; // Hold onto the homeblks to maintain reference
-    std::unique_ptr< Blk_Read_Tracker > m_read_blk_tracker;
     std::shared_ptr< SnapMgr > m_indx_mgr;
     boost::intrusive_ptr< BlkBuffer > m_only_in_mem_buff;
     io_comp_callback m_comp_cb;
@@ -273,7 +272,6 @@ private:
     // layer could do blk free.
     void process_free_blk_callback(Free_Blk_Entry fbe);
 
-    void pending_read_blk_cb(volume_req* vreq, BlkId& bid);
     std::error_condition alloc_blk(const volume_req_ptr& vreq, std::vector< BlkId >& bid);
     void verify_csum(const volume_req_ptr& vreq);
     std::error_condition read_indx(const volume_req_ptr& vreq,
@@ -430,10 +428,6 @@ public:
      */
     indx_cp_id_ptr attach_prepare_volume_cp(const indx_cp_id_ptr& indx_id, hs_cp_id* hs_id, hs_cp_id* new_hs_id);
 
-#ifndef NDEBUG
-    void verify_pending_blks();
-#endif
-
     std::string to_string() {
         std::stringstream ss;
         ss << "Name :" << get_name() << ", UUID :" << boost::lexical_cast< std::string >(get_uuid())
@@ -480,7 +474,6 @@ struct volume_req : indx_req {
     /********** members used by indx mgr **********/
     uint64_t lastCommited_seqId = INVALID_SEQ_ID;
     uint64_t seqId = INVALID_SEQ_ID;
-    uint64_t request_id;               // Copy of the id from interface request
     uint64_t active_nlbas_written = 0; // number of lba written in active indx tabl. It can be partially written if
                                        // btree writes failed in between.
     uint64_t diff_nlbas_written = 0;   // number of lba written in diff indx tabl. It can be partially written if

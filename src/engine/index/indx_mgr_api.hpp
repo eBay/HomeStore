@@ -113,8 +113,6 @@ public:
     /* it flushes free blks to blk allocator */
     void flush_free_blks(const indx_cp_id_ptr& indx_id, hs_cp_id* hb_id);
 
-    /* it frees the blks and insert it in cp id free blk list. It is called when there is no read pending on this blk */
-    void safe_to_free_blk(hs_cp_id* hs_id, Free_Blk_Entry& fbe);
     void update_cp_sb(indx_cp_id_ptr& indx_id, hs_cp_id* hb_id, indx_cp_io_sb* sb);
     uint64_t get_last_psn();
     /* It is called when super block all indx tables are persisted by its consumer */
@@ -175,6 +173,37 @@ public:
     static void flush_hs_free_blks(hs_cp_id* id);
     static void write_meta_blk(void*& mblk, sisl::byte_view buf);
 
+    /* This api insert the free blkids in out_free_list.
+     * 1. This api only make sure that  we are not accumulating more then the threshhold.
+     * 2. It make sure that CP doesn't happen if there is a pending read on the same blkid.
+     *
+     * User can fail freeing blkid even after calling this api as it doesn't actually free the blkids.
+     *
+     * @params
+     * @hs_id :- homestore ID to which out_free_list is supposed to attached. If hs_id is null then it takes the latest
+     *           one by doing cp_io_enter because it assumes that out_fbe_list will be attached to the cur_cp_id or
+     *           later.
+     * @out_free_list :- A list which user is using to accumulate free blkids. It will be attached later to a cp.
+     * @in_fbe_list :- incoming free blkids that user want to free. This API either free all the blkids in this list or
+     *                 none of them.
+     * @force :-  true :- it doesn't check the resource usage. It always insert it in out_free_list. It trigger CP if i
+     *                    reaches the threshhold.
+     *            false :- it fails if resource has reached its threshold. User should trigger cp.
+     *
+     * @return :- return number of blks freed.
+     */
+    static uint32_t free_blk(hs_cp_id* hs_id, blkid_list_ptr& out_fblk_list, std::vector< Free_Blk_Entry >& in_fbe_list,
+                             bool force);
+    static uint32_t free_blk(hs_cp_id* hs_id, blkid_list_ptr& out_fblk_list, Free_Blk_Entry& fbe, bool force);
+
+    /* it erase the free_blkid list and free up the resources. It is called after a free list is attached to a CP
+     * and that CP is persisted.
+     */
+    static void erase_blkid_list(std::vector< BlkId >& fblk_list);
+    static void erase_blkid_list(blkid_list_ptr fblk_list);
+    static void add_read_tracker(Free_Blk_Entry& bid);
+    static void remove_read_tracker(Free_Blk_Entry& fbe);
+
 protected:
     /*********************** virtual functions required to support snapshot  **********************/
     /* These functions are defined so that indx mgr can be used without snapmagr */
@@ -218,9 +247,13 @@ private:
     /* it is  called after every homestore cp */
     static std::vector< cp_done_cb > hs_cp_done_cb_list;
     static sisl::atomic_counter< bool > try_blkalloc_checkpoint; // set to true if next checkpoint should be blkalloc
+    static std::atomic< uint64_t > hs_fbe_size;
+    static std::unique_ptr< Blk_Read_Tracker > m_read_blk_tracker;
 
     /************************ static private functions **************/
     static void static_init();
+    /* it frees the blks and insert it in cp id free blk list. It is called when there is no read pending on this blk */
+    static void safe_to_free_blk(Free_Blk_Entry& fbe);
 
 private:
     indx_tbl* m_active_tbl;
@@ -264,8 +297,6 @@ private:
     void indx_destroy_cp(const indx_cp_id_ptr& cur_indx_id, hs_cp_id* hb_id, hs_cp_id* new_hb_id);
     void create_first_cp_id();
     btree_status_t retry_update_indx(const boost::intrusive_ptr< indx_req >& ireq, bool is_active);
-    void free_blk(const indx_cp_id_ptr& indx_id, Free_Blk_Entry& fbe);
-    void free_blk(const indx_cp_id_ptr& indx_id, BlkId& fblkid);
     void run_slow_path_thread();
     void create_new_diff_tbl(indx_cp_id_ptr& indx_id);
     void recover_meta_ops();
@@ -307,33 +338,8 @@ public:
 
     void push_indx_alloc_blkid(BlkId& bid) { indx_alloc_blkid_list.push_back(bid); }
 
-    btree_status_t indx_push_fbe(Free_Blk_Entry& in_fbe_list) {
-        indx_fbe_list.push_back(in_fbe_list);
-        if (hs_fbe_size.fetch_add(1, std::memory_order_relaxed) == MAX_FBE_SIZE) {
-            // trigger cp
-            IndxMgr::trigger_hs_cp();
-        }
-        return btree_status_t::success;
-    }
-
-    /* it is used by mapping/consumer to push fbe to free list. These  blkds will be freed when entry is completed */
-    btree_status_t indx_push_fbe(std::vector< Free_Blk_Entry >& in_fbe_list) {
-        if (resource_full_check && ((hs_fbe_size.load() + in_fbe_list.size()) > MAX_FBE_SIZE)) {
-            /* caller will trigger homestore cp */
-            return btree_status_t::resource_full;
-        }
-
-        for (uint32_t i = 0; i < in_fbe_list.size(); ++i) {
-            indx_fbe_list.push_back(in_fbe_list[i]);
-            if (hs_fbe_size.fetch_add(1, std::memory_order_relaxed) == MAX_FBE_SIZE) {
-                // trigger cp
-                IndxMgr::trigger_hs_cp();
-            }
-        }
-        return btree_status_t::success;
-    }
-
-    void erase_fbe_list() { hs_fbe_size.fetch_sub(indx_fbe_list.size(), std::memory_order_relaxed); }
+    /* it is used by mapping/consumer to push fbe to free list. These blkds will be freed when entry is completed */
+    void indx_push_fbe(Free_Blk_Entry& fbe) { indx_fbe_list.push_back(fbe); }
 
     friend void intrusive_ptr_add_ref(indx_req* req) { req->ref_count.increment(1); }
     friend void intrusive_ptr_release(indx_req* req) {
@@ -346,13 +352,13 @@ public:
                                       // destroy which can handle io failures and retry
     indx_journal_entry j_ent;
     std::vector< BlkId > indx_alloc_blkid_list;
-    std::vector< Free_Blk_Entry > indx_fbe_list;
+    std::vector< BlkId > indx_fbe_list;
     hs_cp_id* first_hs_id = nullptr;
     hs_cp_id* hs_id = nullptr;
     indx_cp_id_ptr indx_id = nullptr;
     sisl::atomic_counter< int > ref_count = 1; // Initialize the count
     error_condition indx_err = no_error;
     indx_req_state state = indx_req_state::active_btree;
-    std::atomic< uint64_t > hs_fbe_size;
+    uint64_t request_id; // Copy of the id from interface request
 };
 } // namespace homestore

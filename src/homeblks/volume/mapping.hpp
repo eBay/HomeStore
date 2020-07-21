@@ -39,6 +39,7 @@ struct mapping_op_cntx {
         struct volume_req* vreq;
         sisl::ThreadVector< BlkId >* free_list;
     } u;
+    uint64_t lastCommited_seqId;
 };
 
 struct LbaId {
@@ -527,7 +528,7 @@ public:
     }
 };
 
-typedef std::function< void(volume_req* req, BlkId& bid) > pending_read_blk_cb;
+typedef std::function< void(Free_Blk_Entry& fbe) > pending_read_blk_cb;
 class mapping : public indx_tbl {
     using alloc_blk_callback = std::function< void(struct BlkId blkid, size_t offset_size, size_t size) >;
     using comp_callback = std::function< void(const btree_cp_id_ptr& cp_id) >;
@@ -546,9 +547,9 @@ private:
 
     class GetCBParam : public BRangeQueryCBParam< MappingKey, MappingValue > {
     public:
-        volume_req* m_req;
+        mapping_op_cntx m_ctx;
 
-        GetCBParam(volume_req* req) : m_req(req) {}
+        GetCBParam(mapping_op_cntx cntx) : m_ctx(cntx) {}
     };
 
     class UpdateCBParam : public BRangeUpdateCBParam< MappingKey, MappingValue > {

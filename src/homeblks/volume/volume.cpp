@@ -83,8 +83,6 @@ Volume::Volume(const vol_params& params) :
         throw std::runtime_error("shutdown in progress");
     }
     m_state = vol_state::UNINITED;
-    m_read_blk_tracker = std::make_unique< Blk_Read_Tracker >(
-        params.vol_name, params.uuid, std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
 }
 
 Volume::Volume(meta_blk* mblk_cookie, sisl::byte_view sb_buf) :
@@ -96,8 +94,6 @@ Volume::Volume(meta_blk* mblk_cookie, sisl::byte_view sb_buf) :
     m_state = sb->state;
 
     m_hb = HomeBlks::safe_instance();
-    m_read_blk_tracker = std::make_unique< Blk_Read_Tracker >(
-        sb->vol_name, sb->uuid, std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
 }
 
 void Volume::init() {
@@ -206,15 +202,16 @@ Volume::~Volume() {}
 indx_tbl* Volume::create_indx_tbl() {
     auto pending_read_blk_cb =
         std::bind(&Volume::pending_read_blk_cb, this, std::placeholders::_1, std::placeholders::_2);
-    auto tbl = new mapping(get_size(), get_page_size(), get_name(), SnapMgr::trigger_indx_cp, pending_read_blk_cb);
+    auto tbl =
+        new mapping(get_size(), get_page_size(), get_name(), SnapMgr::trigger_indx_cp, SnapMgr::add_read_tracker);
     return static_cast< indx_tbl* >(tbl);
 }
 
 indx_tbl* Volume::recover_indx_tbl(btree_super_block& sb, btree_cp_superblock& cp_info) {
     auto pending_read_blk_cb =
         std::bind(&Volume::pending_read_blk_cb, this, std::placeholders::_1, std::placeholders::_2);
-    auto tbl = new mapping(get_size(), get_page_size(), get_name(), sb, SnapMgr::trigger_indx_cp, pending_read_blk_cb,
-                           &cp_info);
+    auto tbl = new mapping(get_size(), get_page_size(), get_name(), sb, SnapMgr::trigger_indx_cp,
+                           SnapMgr::add_read_tracker, &cp_info);
     return static_cast< indx_tbl* >(tbl);
 }
 
@@ -405,7 +402,6 @@ bool Volume::check_and_complete_req(const volume_req_ptr& vreq, const std::error
 
     if (completed) {
         vreq->state = volume_req_state::completed;
-        m_read_blk_tracker->safe_remove_blks(vreq);
 
         /* update counters */
         size = get_page_size() * vreq->nlbas();
@@ -457,14 +453,6 @@ void Volume::process_free_blk_callback(Free_Blk_Entry fbe) {
                  fbe.m_blkId.to_string(), fbe.blk_offset(), fbe.blks_to_free(), get_page_size());
 
     m_indx_mgr->safe_to_free_blk(fbe.m_cp_id, fbe);
-}
-
-/* when read happens on mapping btree, under read lock we mark blk so it does not get removed by concurrent writes
- */
-void Volume::pending_read_blk_cb(volume_req* vreq, BlkId& bid) {
-    m_read_blk_tracker->insert(bid);
-    Free_Blk_Entry fbe(bid, 0, 0);
-    vreq->indx_push_fbe(fbe);
 }
 
 void Volume::process_indx_completions(const indx_req_ptr& ireq, std::error_condition err) {
@@ -666,10 +654,6 @@ size_t Volume::call_batch_completion_cbs() {
 indx_cp_id_ptr Volume::attach_prepare_volume_cp(const indx_cp_id_ptr& indx_id, hs_cp_id* hs_id, hs_cp_id* new_hs_id) {
     return (m_indx_mgr->attach_prepare_indx_cp(indx_id, hs_id, new_hs_id));
 }
-
-#ifndef NDEBUG
-void Volume::verify_pending_blks() { assert(m_read_blk_tracker->get_size() == 0); }
-#endif
 
 vol_state Volume::set_state(vol_state state, bool persist) {
     THIS_VOL_LOG(INFO, base, , "volume state changed from {} to {}", m_state, state);
