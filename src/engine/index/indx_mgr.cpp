@@ -369,10 +369,13 @@ void IndxMgr::recovery_start_phase2() {
             auto fbe_pair = indx_journal_entry::get_free_bid_list(buf.bytes());
             for (uint32_t i = 0; i < fbe_pair.second; ++i) {
                 BlkId fbid(fbe_pair.first[i]);
-                if (hdr->cp_cnt <= m_last_cp_sb.cp_info.active_cp_cnt) { /* it is already persisted */
-                    indx_id->indx_size.fetch_sub(fblkid.get_nblks() * m_hs->get_data_pagesz(),
-                                                 std::memory_order_relaxed);
-                    free_blk(nullptr, indx_id->free_blkid_list, fblkid, true);
+                auto cnt = free_blk(nullptr, indx_id->free_blkid_list, fblkid, true);
+                assert(cnt > 0);
+                if (hdr->cp_cnt <= m_last_cp_sb.cp_info.active_cp_cnt) {
+                    /* TODO: we update size in superblock with each checkpoint. Ideally it
+                     * has to be updated only for blk alloc checkpoint.
+                     */
+                    indx_id->indx_size.fetch_sub(cnt, std::memory_order_relaxed);
                 }
             }
 
@@ -380,7 +383,10 @@ void IndxMgr::recovery_start_phase2() {
             auto alloc_pair = indx_journal_entry::get_alloc_bid_list(buf.bytes());
             for (uint32_t i = 0; i < alloc_pair.second; ++i) {
                 m_hs->get_data_blkstore()->alloc_blk(alloc_pair.first[i]);
-                if (hdr->cp_cnt <= m_last_cp_sb.cp_info.active_cp_cnt) { /* it is already persisted */
+                if (hdr->cp_cnt <= m_last_cp_sb.cp_info.active_cp_cnt) {
+                    /* TODO: we update size in superblock with each checkpoint. Ideally it
+                     * has to be updated only for blk alloc checkpoint.
+                     */
                     indx_id->indx_size.fetch_add(
                         alloc_pair.first[i].data_size(m_hs->get_data_pagesz(), std::memory_order_relaxed));
                 }
@@ -450,10 +456,15 @@ void IndxMgr::flush_hs_free_blks(hs_cp_id* hs_id) {
 
 void IndxMgr::flush_free_blks(const indx_cp_id_ptr& indx_id, hs_cp_id* hs_id) {
     /* free blks in a indx mgr */
+    /* TODO: we should free up the resources when cp is persisted. And we should also take into account
+     * the free blk accumulated by btree.
+     */
+    free_blkid_list_flushed(indx_id->free_blkid_list);
     hs_id->blkalloc_id->free_blks(indx_id->free_blkid_list);
 
     /* free all the user free blkid */
     for (uint32_t i = 0; i < indx_id->user_free_blkid_list.size(); ++i) {
+        free_blkid_list_flushed(indx_id->user_free_blkid_list[i]);
         hs_id->blkalloc_id->free_blks(indx_id->user_free_blkid_list[i]);
     }
 
@@ -705,10 +716,9 @@ void IndxMgr::journal_comp_cb(logstore_req* lreq, logdev_key ld_key) {
     }
 
     /* free the blkids */
-    for (uint32_t i = 0; i < ireq->indx_fbe_list.size(); ++i) {
-        ireq->indx_id->indx_size.fetch_sub(ireq->indx_fbe_list[i].get_nblks() * m_hs->get_data_pagesz());
-        free_blk(ireq->hs_id, ireq->indx_id->free_blkid_list, ireq->indx_fbe_list[i], true);
-    }
+    auto free_size = free_blk(ireq->hs_id, ireq->indx_id->free_blkid_list, ireq->indx_fbe_list, true);
+    assert(free_size >= 0);
+    ireq->indx_id->indx_size.fetch_sub(free_size);
 
     /* Increment the reference count by the number of free blk entries. Freing of blk is an async process. So we
      * don't want to take a checkpoint until these blkids by its consumer. Blk ids are freed in IndxMgr::free_blk.
@@ -922,48 +932,55 @@ void IndxMgr::destroy(const indxmgr_stop_cb& cb) {
 void IndxMgr::destroy_indx_tbl() {
     /* free all blkids of btree in memory */
     blkid_list_ptr free_list = std::make_shared< sisl::ThreadVector< BlkId > >();
-    btree_status_t ret = m_active_tbl->free_user_blkids(free_list, m_destroy_btree_cur);
+    int64_t free_size = 0;
+    btree_status_t ret = m_active_tbl->free_user_blkids(free_list, m_destroy_btree_cur, free_size);
     if (ret != btree_status_t::success) {
         assert(ret == btree_status_t::resource_full);
-        free_blks(free_list, ([this](bool success) {
-                      /* persist superblock */
-                      uint64_t size = m_destroy_btree_cur.serialize_size() + sizeof(hs_cp_meta_sb);
-                      uint32_t align = 0;
-                      if (meta_blk_mgr->is_aligned_buf_needed(size)) {
-                          align = HS_STATIC_CONFIG(disk_attr.align_size);
-                          size = sisl::round_up(size, align);
-                      }
-                      sisl::byte_view b(size, align);
-                      hs_cp_meta_sb* mhdr = (hs_cp_meta_sb*)b.bytes();
-                      mhdr->uuid = m_uuid;
-                      mhdr->type = INDX_DESTROY;
-                      m_destroy_btree_cur.serialize((uint8_t*)((uint64_t)b.bytes() + sizeof(hs_cp_meta_sb)));
-                      write_meta_blk(m_destroy_meta_blk, b);
+        attach_user_fblkid_list(
+            free_list, ([this](bool success) {
+                /* persist superblock */
+                sisl::blob cursor_blob = m_destroy_btree_cur.serialize();
+                uint64_t size = cursor_blob.size() + sizeof(hs_cp_meta_sb);
+                uint32_t align = 0;
+                if (meta_blk_mgr->is_aligned_buf_needed(size)) {
+                    align = HS_STATIC_CONFIG(disk_attr.align_size);
+                    size = sisl::round_up(size, align);
+                }
+                sisl::byte_view b(size, align);
+                hs_cp_meta_sb* mhdr = (hs_cp_meta_sb*)b.bytes();
+                mhdr->uuid = m_uuid;
+                mhdr->type = INDX_DESTROY;
+                memcpy((uint8_t*)((uint64_t)b.bytes() + sizeof(hs_cp_meta_sb)), cursor_blob.bytes(),
+                       cursor_blob.size());
+                write_meta_blk(m_destroy_meta_blk, b);
 
-                      /* send message to thread to start freeing the blkid */
-                      iomanager.run_on(m_thread_id, [this](io_thread_addr_t addr) { this->destroy_indx_tbl(); });
-                  }));
+                /* send message to thread to start freeing the blkid */
+                iomanager.run_on(m_thread_id, [this](io_thread_addr_t addr) { this->destroy_indx_tbl(); });
+            }),
+            free_size);
     }
     HS_SUBMOD_LOG(INFO, base, , "indx", m_name, "all user logs collected");
     m_active_tbl->destroy(free_list);
-    free_blks(free_list, ([this](bool success) {
-                  /* remove the meta blk which is used to track vol destroy progress */
-                  MetaBlkMgr::instance()->remove_sub_sb(m_destroy_meta_blk);
-                  m_stop_cb(success);
-              }),
-              true);
+    attach_user_fblkid_list(free_list, ([this](bool success) {
+                                /* remove the meta blk which is used to track vol destroy progress */
+                                MetaBlkMgr::instance()->remove_sub_sb(m_destroy_meta_blk);
+                                m_stop_cb(success);
+                            }),
+                            free_size, true);
 }
 
-void IndxMgr::attach_user_fblkid_list(blkid_list_ptr& free_blkid_list, const cp_done_cb& free_blks_cb, bool last_cp) {
-    add_prepare_cb_list(([this, free_blkid_list, free_blks_cb, last_cp](const indx_cp_id_ptr& cur_indx_id,
-                                                                        hs_cp_id* hb_id, hs_cp_id* new_hb_id) mutable {
+void IndxMgr::attach_user_fblkid_list(blkid_list_ptr& free_blkid_list, const cp_done_cb& free_blks_cb,
+                                      int64_t free_size, bool last_cp) {
+    add_prepare_cb_list(([this, free_blkid_list, free_blks_cb, free_size,
+                          last_cp](const indx_cp_id_ptr& cur_indx_id, hs_cp_id* hb_id, hs_cp_id* new_hb_id) mutable {
         if (hb_id->blkalloc_checkpoint) {
             cur_indx_id->user_free_blkid_list.push_back(free_blkid_list);
+            cur_indx_id->indx_size.fetch_sub(free_size, std::memory_order_relaxed);
             m_cp->attach_cb(hb_id, std::move(free_blks_cb));
             if (last_cp) { m_last_cp = true; }
         } else {
             /* try again in the next cp */
-            free_blks(free_blkid_list, free_blks_cb, last_cp);
+            free_blks(free_blkid_list, free_blks_cb, free_size, last_cp);
         }
     }));
 }
@@ -1056,10 +1073,10 @@ void IndxMgr::register_cp_done_cb(const cp_done_cb& cb, bool blkalloc_cp) {
     }
 }
 
-uint32_t IndxMgr::free_blk(hs_cp_id* hs_id, blkid_list_ptr& out_fblk_list, Free_Blk_Entry& fbe, bool force) {
+int64_t IndxMgr::free_blk(hs_cp_id* hs_id, blkid_list_ptr& out_fblk_list, Free_Blk_Entry& fbe, bool force) {
     if (!force && ((hs_fbe_size.load() + 1) > MAX_FBE_SIZE)) {
         /* caller will trigger homestore cp */
-        return btree_status_t::resource_full;
+        return -1;
     }
 
     /* incrementing the ref count. It will be decremented later when read blk tracker is ready to free the blk */
@@ -1077,28 +1094,32 @@ uint32_t IndxMgr::free_blk(hs_cp_id* hs_id, blkid_list_ptr& out_fblk_list, Free_
     out_fbe_list.push_back(fbe.get_free_blkid());
     m_read_blk_tracker->safe_free_blks(fbe);
 
-    return btree_status_t::success;
+    uint64_t free_blk_size = fbe.get_nblks() * m_hs->get_data_pagesz();
+    assert(free_blk_size > 0);
+    return free_blk_size;
 }
 
-uint32_t IndxMgr::free_blk(hs_cp_id* hs_id, blkid_list_ptr& out_fblk_list, std::vector< Free_Blk_Entry >& in_fbe_list,
-                           bool force) {
+int64_t IndxMgr::free_blk(hs_cp_id* hs_id, blkid_list_ptr& out_fblk_list, std::vector< Free_Blk_Entry >& in_fbe_list,
+                          bool force) {
     if (!force && ((hs_fbe_size.load() + in_fbe_list.size()) > MAX_FBE_SIZE)) {
         /* caller will trigger homestore cp */
         return btree_status_t::resource_full;
     }
 
+    uint64_t free_blk_size = 0;
     for (uint32_t i = 0; i < in_fbe_list.size(); ++i) {
-        free_blk(hs_id, out_fblk_list, in_fbe_list[i], true);
+        free_blk_size += free_blk(hs_id, out_fblk_list, in_fbe_list[i], true);
     }
+    return free_blk_size;
 }
 
-void IndxMgr::erase_blkid_list(blkid_list_ptr fblk_list) {
+void IndxMgr::free_blkid_list_flushed(blkid_list_ptr fblk_list) {
     uint64_t cnt = hs_fbe_size.fetch_sub(fblk_list->size(), std::memory_order_relaxed);
     assert(cnt >= 0);
     hs_fbe_size->erase();
 }
 
-void IndxMgr::erase_blkid_list(std::vector< BlkId >& fblk_list) {
+void IndxMgr::free_blkid_list_flushed(std::vector< BlkId >& fblk_list) {
     uint64_t cnt = hs_fbe_size.fetch_sub(fblk_list->size(), std::memory_order_relaxed);
     assert(cnt >= 0);
     fblk_list.erase();

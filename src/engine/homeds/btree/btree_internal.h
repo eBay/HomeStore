@@ -540,8 +540,7 @@ public:
 struct BtreeQueryCursor {
     std::unique_ptr< BtreeKey > m_last_key;
     std::unique_ptr< BtreeLockTracker > m_locked_nodes;
-    uint32_t serialize_size() { return 0; };
-    void serialize(uint8_t* data){};
+    sisl::blob serialize() { return (m_last_key->get_blob()); };
 };
 
 ENUM(BtreeQueryType, uint8_t,
@@ -578,8 +577,7 @@ public:
 
 private:
     BtreeSearchRange m_input_range; // Btree range filter originally provided
-    BtreeSearchRange m_sub_range;   // Btree sub range used during callbacks. start
-                                    // non-inclusive, but end inclusive.
+    BtreeSearchRange m_sub_range;   // Btree sub range used during callbacks.
 };
 
 // class for range query callback param

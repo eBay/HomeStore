@@ -207,7 +207,7 @@ public:
     /* It is called when its btree consumer has successfully stored the btree superblock */
     void create_done() { btree_store_t::create_done(m_btree_store.get(), m_root_node); }
 
-    btree_status_t destroy(free_blk_callback free_blk_cb, bool mem_only, const btree_cp_id_ptr& cp_id = nullptr) {
+    btree_status_t destroy(blkid_list_ptr free_blkid_list, bool mem_only) {
         m_btree_lock.write_lock();
         BtreeNodePtr root;
         homeds::thread::locktype acq_lock = LOCKTYPE_WRITE;
@@ -218,7 +218,7 @@ public:
             return ret;
         }
 
-        ret = free(root, free_blk_cb, mem_only, cp_id);
+        ret = free(free_blkid_list, mem_only);
 
         unlock_node(root, acq_lock);
         m_btree_lock.unlock();
@@ -233,8 +233,7 @@ public:
     // 2. If free_blk_cb is not null, callback to caller for leaf node's blk_id;
     // Assumption is that there are no pending IOs when it is called.
     //
-    btree_status_t free(const BtreeNodePtr& node, free_blk_callback free_blk_cb, bool mem_only,
-                        const btree_cp_id_ptr& cp_id) {
+    btree_status_t free(blkid_list_ptr free_blkid_list) {
         // TODO - this calls free node on mem_tree and ssd_tree.
         // In ssd_tree we free actual block id, which is not correct behavior
         // we shouldnt really free any blocks on free node, just reclaim any memory
@@ -257,26 +256,14 @@ public:
                 BtreeNodePtr child;
                 ret = read_and_lock_child(child_info.bnode_id(), child, node, i, acq_lock, acq_lock, cp_id);
                 if (ret != btree_status_t::success) { return ret; }
-                ret = free(child, free_blk_cb, mem_only, cp_id);
+                ret = free(free_blkid_list, mem_only);
                 unlock_node(child, acq_lock);
                 i++;
-            }
-        } else if (free_blk_cb) {
-            // get value from leaf node and return to caller via callback;
-            for (uint32_t i = 0; i < node->get_total_entries(); i++) {
-                V val;
-                node->get(i, &val, false);
-                // Caller will free the blk in blkstore in sync mode, which is fine since it is in-memory operation;
-                try {
-                    free_blk_cb(val);
-                } catch (std::exception& e) {
-                    BT_LOG_ASSERT(false, node, "free_blk_cb returned exception: {}", e.what());
-                }
             }
         }
 
         if (ret != btree_status_t::success) { return ret; }
-        free_node(node, mem_only, cp_id);
+        free_node(node, free_blkid_list);
         return ret;
     }
 
@@ -459,6 +446,19 @@ public:
             unlock_node(root, homeds::thread::locktype::LOCKTYPE_READ);
             LOGERROR("Query type {} is not supported yet", query_req.query_type());
             break;
+        }
+
+        if (ret != btree_status_t::success &&
+            (query_req.query_type() == BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY ||
+             query_req.query_type() == BtreeQueryType::TREE_TRAVERSAL_QUERY)) {
+            /* if return is not success then set the cursor to last read */
+            query_req.cursor().m_last_key =
+                (out_values.size()) ? std::make_unique< K >(out_values.back().first) : nullptr;
+            if (query_req.cursor().m_last_key &&
+                query_req.get_input_range().get_end_key()->compare(query_req.cursor().m_last_key.get()) == 0) {
+                /* we finished just at the last key */
+                ret = btree_status_t::success;
+            }
         }
 
     out:
@@ -986,7 +986,6 @@ private:
                          * if it overlaps
                          */
                         if (query_req.get_input_range().get_end_key()->compare_start(&ekey) < 0) { // early lookup end
-                            query_req.cursor().m_last_key = nullptr;
                             break;
                         }
                     }
@@ -1003,8 +1002,7 @@ private:
                     // TODO - support accurate sub ranges in future instead of setting input range
                     query_req.get_cb_param()->set_sub_range(query_req.get_input_range());
                     std::vector< std::pair< K, V > > result_kv;
-                    auto ret = query_req.callback()(match_kv, result_kv, query_req.get_cb_param());
-                    if (ret != btree_status_t::success) { return ret; }
+                    ret = query_req.callback()(match_kv, result_kv, query_req.get_cb_param());
                     auto ele_to_add = result_kv.size();
                     if (count + ele_to_add > query_req.get_batch_size()) {
                         ele_to_add = query_req.get_batch_size() - count;
@@ -1020,34 +1018,22 @@ private:
                     count += cur_count;
                 }
 
-                if ((count < query_req.get_batch_size()) && (my_node->get_next_bnode() != empty_bnodeid)) {
+                if (ret == btree_status_t::success && (count < query_req.get_batch_size())) {
+                    if (my_node->get_next_bnode() == empty_bnodeid) { break; }
                     ret = read_and_lock_sibling(my_node->get_next_bnode(), next_node, LOCKTYPE_READ, LOCKTYPE_READ,
                                                 nullptr);
                     if (ret != btree_status_t::success) {
                         LOGERROR("read failed btree name {}", m_btree_cfg.get_name());
-                        ret = btree_status_t::read_failed;
                         break;
                     }
                 } else {
-                    // If we are here because our count is full, then setup the last key as cursor, otherwise, it
-                    // would mean count is 0, but this is the rightmost leaf node in the tree. So no more cursors.
-                    query_req.cursor().m_last_key = (count) ? std::make_unique< K >(out_values.back().first) : nullptr;
+                    if (count >= query_req.get_batch_size()) { ret = btree_status_t::has_more; }
                     break;
                 }
             } while (true);
 
             unlock_node(my_node, homeds::thread::locktype::LOCKTYPE_READ);
-            if (ret != btree_status_t::success) { return ret; }
-            if (query_req.cursor().m_last_key != nullptr) {
-                if (query_req.get_input_range().get_end_key()->compare(query_req.cursor().m_last_key.get()) == 0) {
-                    /* we finished just at the last key */
-                    return btree_status_t::success;
-                } else {
-                    return btree_status_t::has_more;
-                }
-            } else {
-                return btree_status_t::success;
-            }
+            return ret;
         }
 
         BtreeNodeInfo start_child_info;
@@ -1078,8 +1064,7 @@ private:
                 // TODO - support accurate sub ranges in future instead of setting input range
                 query_req.get_cb_param()->set_sub_range(query_req.get_input_range());
                 std::vector< std::pair< K, V > > result_kv;
-                auto ret = query_req.callback()(match_kv, result_kv, query_req.get_cb_param());
-                if (ret != btree_status_t::success) { return ret; }
+                ret = query_req.callback()(match_kv, result_kv, query_req.get_cb_param());
                 auto ele_to_add = result_kv.size();
                 if (ele_to_add > 0) {
                     out_values.insert(out_values.end(), result_kv.begin(), result_kv.begin() + ele_to_add);
@@ -1088,14 +1073,10 @@ private:
             out_values.insert(std::end(out_values), std::begin(match_kv), std::end(match_kv));
 
             unlock_node(my_node, homeds::thread::locktype::LOCKTYPE_READ);
-            if (out_values.size() >= query_req.get_batch_size()) {
-                BT_DEBUG_ASSERT_CMP(out_values.size(), ==, query_req.get_batch_size(), my_node);
-                query_req.cursor().m_last_key = std::make_unique< K >(out_values.back().first);
-                if (query_req.get_input_range().get_end_key()->compare(query_req.cursor().m_last_key.get()) == 0) {
-                    /* we finished just at the last key */
-                    return btree_status_t::success;
+            if (ret != btree_status_t::success || out_values.size() >= query_req.get_batch_size()) {
+                if (out_values.size() >= query_req.get_batch_size()) {
+                    ret = btree_status_t::has_more;
                 }
-                return btree_status_t::has_more;
             }
 
             return ret;
@@ -1959,7 +1940,7 @@ private:
             btree_store_t::write_journal_entry(m_btree_store.get(), cp_id, j_iob);
         }
         unlock_node(root, locktype::LOCKTYPE_WRITE);
-        free_node(child_node, false, cp_id);
+        free_node(child_node, cp_id->free_blkid_list);
 
         if (ret == btree_status_t::success) { COUNTER_DECREMENT(m_metrics, btree_depth, 1); }
     done:
@@ -2314,7 +2295,7 @@ private:
 #endif
         /* free nodes. It actually gets freed after cp is completed */
         for (uint32_t i = 0; i < old_nodes.size(); ++i) {
-            free_node(old_nodes[i], false, cp_id);
+            free_node(old_nodes[i], cp_id->free_blkid_list);
         }
         for (uint32_t i = 0; i < deleted_nodes.size(); ++i) {
             free_node(deleted_nodes[i]);
@@ -2426,14 +2407,14 @@ private:
     }
 
     /* Note:- This function assumes that access of this node is thread safe. */
-    void free_node(const BtreeNodePtr& node, bool mem_only = false, const btree_cp_id_ptr& cp_id = nullptr) {
+    void free_node(const BtreeNodePtr& node, const blkid_list_ptr& free_blkid_list = nullptr) {
         THIS_BT_LOG(DEBUG, btree_generics, node, "Freeing node");
 
         COUNTER_DECREMENT_IF_ELSE(m_metrics, node->is_leaf(), btree_leaf_node_count, btree_int_node_count, 1);
         BT_LOG_ASSERT_CMP(node->is_valid_node(), ==, true, node);
         node->set_valid_node(false);
         m_total_nodes--;
-        btree_store_t::free_node(m_btree_store.get(), node, mem_only, cp_id);
+        btree_store_t::free_node(m_btree_store.get(), free_blkid_list);
     }
 
     /* Recovery process is different for root node, child node and sibling node depending on how the node

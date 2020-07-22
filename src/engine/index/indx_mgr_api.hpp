@@ -40,9 +40,9 @@ public:
                                            const btree_cp_id_ptr& btree_id) = 0;
     virtual void update_indx_alloc_blkids(indx_req* ireq) = 0;
     virtual uint64_t get_used_size() = 0;
-    virtual btree_status_t free_user_blkids(blkid_list_ptr free_list, BtreeQueryCursor& cur) = 0;
+    virtual btree_status_t free_user_blkids(blkid_list_ptr free_list, BtreeQueryCursor& cur, int64_t& size) = 0;
     virtual btree_status_t unmap(blkid_list_ptr free_list, BtreeQueryCursor& cur) = 0;
-    virtual void get_btreequery_cur(uint8_t* data, BtreeQueryCursor& cur) = 0;
+    virtual void get_btreequery_cur(const sisl::blob& b, BtreeQueryCursor& cur) = 0;
 };
 
 typedef std::function< void(const boost::intrusive_ptr< indx_req >& ireq, std::error_condition err) > io_done_cb;
@@ -120,6 +120,8 @@ public:
     void indx_init();
     std::string get_name();
     uint64_t get_used_size();
+    void attach_user_fblkid_list(blkid_list_ptr& free_blkid_list, const cp_done_cb& free_blks_cb, int64_t free_size,
+                                 bool last_cp = false);
 
 public:
     /*********************** static public functions **********************/
@@ -190,17 +192,17 @@ public:
      *                    reaches the threshhold.
      *            false :- it fails if resource has reached its threshold. User should trigger cp.
      *
-     * @return :- return number of blks freed.
+     * @return :- return number of blks freed. return -1 if it can not add more
      */
-    static uint32_t free_blk(hs_cp_id* hs_id, blkid_list_ptr& out_fblk_list, std::vector< Free_Blk_Entry >& in_fbe_list,
-                             bool force);
-    static uint32_t free_blk(hs_cp_id* hs_id, blkid_list_ptr& out_fblk_list, Free_Blk_Entry& fbe, bool force);
+    static int64_t free_blk(hs_cp_id* hs_id, blkid_list_ptr& out_fblk_list, std::vector< Free_Blk_Entry >& in_fbe_list,
+                            bool force);
+    static int64_t free_blk(hs_cp_id* hs_id, blkid_list_ptr& out_fblk_list, Free_Blk_Entry& fbe, bool force);
 
     /* it erase the free_blkid list and free up the resources. It is called after a free list is attached to a CP
      * and that CP is persisted.
      */
-    static void erase_blkid_list(std::vector< BlkId >& fblk_list);
-    static void erase_blkid_list(blkid_list_ptr fblk_list);
+    static void free_blkid_list_flushed(std::vector< BlkId >& fblk_list);
+    static void free_blkid_list_flushed(blkid_list_ptr fblk_list);
     static void add_read_tracker(Free_Blk_Entry& bid);
     static void remove_read_tracker(Free_Blk_Entry& fbe);
 
@@ -300,7 +302,6 @@ private:
     void run_slow_path_thread();
     void create_new_diff_tbl(indx_cp_id_ptr& indx_id);
     void recover_meta_ops();
-    void free_blks(blkid_list_ptr& free_blkid_list, const cp_done_cb& free_blks_cb, bool last_cp = false);
 };
 
 struct Free_Blk_Entry {
@@ -339,7 +340,7 @@ public:
     void push_indx_alloc_blkid(BlkId& bid) { indx_alloc_blkid_list.push_back(bid); }
 
     /* it is used by mapping/consumer to push fbe to free list. These blkds will be freed when entry is completed */
-    void indx_push_fbe(Free_Blk_Entry& fbe) { indx_fbe_list.push_back(fbe); }
+    void indx_push_fbe(std::vector< Free_Blk_Entry >& fbe) { indx_fbe_list.push_back(fbe); }
 
     friend void intrusive_ptr_add_ref(indx_req* req) { req->ref_count.increment(1); }
     friend void intrusive_ptr_release(indx_req* req) {
@@ -360,5 +361,7 @@ public:
     error_condition indx_err = no_error;
     indx_req_state state = indx_req_state::active_btree;
     uint64_t request_id; // Copy of the id from interface request
+    BtreeQueryCursor active_btree_cur;
+    BtreeQueryCursor diff_btree_cur;
 };
 } // namespace homestore

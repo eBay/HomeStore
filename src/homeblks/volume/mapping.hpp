@@ -29,8 +29,9 @@ uint64_t get_next_start_lba(uint64_t start_lba, uint64_t nlba);
 enum op_type {
     UPDATE_VAL_ONLY = 0,      // it only update the value
     UPDATE_VAL_AND_FREE_BLKS, // it update the value and also update the free blks
-    READ_VAL,
-    READ_FREE_BLKID
+    READ_VAL_WITH_SEQID,
+    FREE_ALL_USER_BLKID,
+    READ_VAL
 };
 
 struct mapping_op_cntx {
@@ -39,7 +40,8 @@ struct mapping_op_cntx {
         struct volume_req* vreq;
         sisl::ThreadVector< BlkId >* free_list;
     } u;
-    uint64_t lastCommited_seqId;
+    int64_t seqId = -1;
+    int64_t free_blk_size = 0;
 };
 
 struct LbaId {
@@ -568,23 +570,16 @@ public:
             btree_cp_superblock* btree_cp_sb = nullptr);
     virtual ~mapping();
     int sweep_alloc_blks(uint64_t start_lba, uint64_t end_lba);
-    error_condition get(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& values,
-                        MappingBtreeDeclType* bt);
-    error_condition get(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& values,
-                        bool fill_gaps = true);
+    btree_status_t get(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& values);
+    btree_status_t get(mapping_op_cntx& cntx, MappingKey& key, BtreeQueryCursor& cur,
+                       std::vector< std::pair< MappingKey, MappingValue > >& values, bool fill_gaps);
     /* Note :- we should not write same IO in btree multiple times. When a key is updated , it update the free blk
      * entries in request to its last value. If we write same io multiple times then it could end up freeing the wrong
      * blocks.
-     * @start_lba :- it updates the first lba which is not written.
+     * @cur :- if multiple calls made for the same key then it points to first lba which is not written.
      */
-    btree_status_t put(mapping_op_cntx cntx, MappingKey& key, MappingValue& value, const btree_cp_id_ptr& cp_id,
-                       MappingBtreeDeclType* bt, uint64_t& start_lba);
-
-    btree_status_t put(mapping_op_cntx cntx, MappingKey& key, MappingValue& value, const btree_cp_id_ptr& cp_id);
-
-    btree_status_t put(mapping_op_cntx cntx, MappingKey& key, MappingValue& value, const btree_cp_id_ptr& cp_id,
-                       uint64_t& start_lba);
-    MappingBtreeDeclType* get_btree(void);
+    btree_status_t put(mapping_op_cntx& cntx, MappingKey& key, MappingValue& value, const btree_cp_id_ptr& cp_id,
+                       BtreeQueryCursor& cur);
 
     void print_tree();
     bool verify_tree();
@@ -624,10 +619,6 @@ public:
     void print_kv(std::vector< std::pair< MappingKey, MappingValue > >& kvs);
 
     void print_node(uint64_t blkid);
-#if 0
-    void diff(mapping* other);
-    void merge(mapping* other);
-#endif
 
 public:
     /* virtual functions required by indx tbl */
@@ -657,9 +648,9 @@ public:
     virtual btree_status_t update_active_indx_tbl(indx_req* ireq, const btree_cp_id_ptr& btree_id) override;
     virtual btree_status_t recovery_update(logstore_seq_num_t seqnum, journal_hdr* hdr,
                                            const btree_cp_id_ptr& btree_id) override;
-    virtual btree_status_t free_user_blkids(blkid_list_ptr free_list, BtreeQueryCursor& cur) override;
+    virtual btree_status_t free_user_blkids(blkid_list_ptr free_list, BtreeQueryCursor& cur, int64_t& size) override;
     virtual btree_status_t unmap(blkid_list_ptr free_list, BtreeQueryCursor& cur) override;
-    virtual void get_btreequery_cur(uint8_t* data, BtreeQueryCursor& cur) override;
+    virtual void get_btreequery_cur(const sisl::blob& b, BtreeQueryCursor& cur) override;
     virtual btree_status_t destroy(blkid_list_ptr& free_blkid_list) override;
 
 public:

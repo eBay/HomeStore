@@ -474,10 +474,6 @@ struct volume_req : indx_req {
     /********** members used by indx mgr **********/
     uint64_t lastCommited_seqId = INVALID_SEQ_ID;
     uint64_t seqId = INVALID_SEQ_ID;
-    uint64_t active_nlbas_written = 0; // number of lba written in active indx tabl. It can be partially written if
-                                       // btree writes failed in between.
-    uint64_t diff_nlbas_written = 0;   // number of lba written in diff indx tabl. It can be partially written if
-                                       // btree writes failed in between.
 
     /********** Below entries are used for journal or to store checksum **********/
     std::vector< uint16_t > csum_list;

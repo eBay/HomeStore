@@ -53,7 +53,7 @@ public:
 
     static btree_status_t write_node(btree_store_t* store, const BtreeNodePtr& bn, const BtreeNodePtr& dependent_bn,
                                      const btree_cp_id_ptr& cp_id);
-    static void free_node(btree_store_t* store, const BtreeNodePtr& bn, bool mem_only, const btree_cp_id_ptr& cp_id);
+    static void free_node(btree_store_t* store, const BtreeNodePtr& bn, const blkid_list_ptr& free_blkid_list);
     static btree_status_t refresh_node(btree_store_t* store, const BtreeNodePtr& bn, bool is_write_modifiable,
                                        const btree_cp_id_ptr& cp_id);
 

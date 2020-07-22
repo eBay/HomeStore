@@ -529,9 +529,8 @@ std::error_condition Volume::read_indx(const volume_req_ptr& vreq,
     auto err = get_active_indx()->get(vreq.get(), kvs);
     COUNTER_DECREMENT(m_metrics, volume_outstanding_metadata_read_count, 1);
     HISTOGRAM_OBSERVE(m_metrics, volume_map_read_latency, get_elapsed_time_us(vreq->io_start_time));
-    if (err) {
-        if (err != homestore_error::lba_not_exist) { COUNTER_INCREMENT(m_metrics, volume_read_error_count, 1); }
-        return err;
+    if (err != btree_status_t::success) {
+        return homestore_error::btree_read_failed;
     }
     return no_error;
 }

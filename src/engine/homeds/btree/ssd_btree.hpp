@@ -316,13 +316,9 @@ public:
         return btree_status_t::success;
     }
 
-    static void free_node(SSDBtreeStore* store, const boost::intrusive_ptr< SSDBtreeNode >& bn, bool mem_only,
-                          const btree_cp_id_ptr& cp_id) {
-        if (mem_only) {
-            /* it will be automatically freed */
-            return;
-        }
-        store->get_wb_cache()->free_blk(bn, cp_id);
+    static void free_node(SSDBtreeStore* store, const boost::intrusive_ptr< SSDBtreeNode >& bn,
+                          const blkid_list_ptr& free_blkid_list) {
+        store->get_wb_cache()->free_blk(bn, free_blkid_list);
     }
 
     static void ref_node(SSDBtreeNode* bn) {
