@@ -29,7 +29,7 @@ public:
     virtual void create_done() = 0;
     virtual btree_super_block get_btree_sb() = 0;
     virtual btree_status_t update_active_indx_tbl(indx_req* ireq, const btree_cp_id_ptr& btree_id) = 0;
-    virtual btree_status_t read_indx(indx_req* ireq, const read_indx_comp_cb_t& cb, bool fill_gaps) = 0;
+    virtual btree_status_t read_indx(indx_req* ireq, const read_indx_comp_cb_t& cb) = 0;
     virtual btree_status_t update_diff_indx_tbl(indx_req* ireq, const btree_cp_id_ptr& btree_id) = 0;
     virtual btree_cp_id_ptr attach_prepare_cp(const btree_cp_id_ptr& cur_cp_id, bool is_last_cp,
                                               bool blkalloc_checkpoint) = 0;
@@ -93,7 +93,7 @@ public:
      * The cb will be passed by mapping layer and triggered after read completes;
      * @return : error condition whether read is success or not;
      */
-    std::error_condition read_indx(const boost::intrusive_ptr< indx_req >& ireq, bool fill_gaps);
+    std::error_condition read_indx(const boost::intrusive_ptr< indx_req >& ireq);
 
     /* Create snapshot. */
     void indx_snap_create();

@@ -570,7 +570,7 @@ std::error_condition Volume::read_indx(const volume_req_ptr& vreq) {
     /* get list of key values */
     COUNTER_INCREMENT(m_metrics, volume_outstanding_metadata_read_count, 1);
 
-    auto err = m_indx_mgr->read_indx(boost::static_pointer_cast< indx_req >(vreq), true /* fill_gaps */);
+    auto err = m_indx_mgr->read_indx(boost::static_pointer_cast< indx_req >(vreq));
 
     // auto err = get_active_indx()->get(vreq.get(), kvs);
     COUNTER_DECREMENT(m_metrics, volume_outstanding_metadata_read_count, 1);

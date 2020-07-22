@@ -76,37 +76,34 @@ error_condition mapping::get(volume_req* req, std::vector< std::pair< MappingKey
     return no_error;
 }
 
-btree_status_t mapping::read_indx(indx_req* ireq, const read_indx_comp_cb_t& read_cb, bool fill_gaps) {
-
+btree_status_t mapping::read_indx(indx_req* ireq, const read_indx_comp_cb_t& read_cb) {
     auto req = static_cast< volume_req* >(ireq);
-    std::vector< pair< MappingKey, MappingValue > > values;
+    std::vector< std::pair< MappingKey, MappingValue > > values;
 
-    auto ret = get(req, values, fill_gaps);
+    auto ret = get(req, values);
 
     // don't expect to see "has_more" return value in read path;
     HS_ASSERT_CMP(DEBUG, ret, !=, btree_status_t::has_more);
+    
+    if (ret == btree_status_t::success) {
+        // otherwise send callbacks to client for each K/V;
+        for (auto& x : values) {
+            read_cb(ireq, x.first, x.second, true /* has_more */, no_error);
+        }
 
-    if (ret == btree_status_t::fast_path_not_possible) { 
+        // notify client complete
+        read_cb(ireq, MappingKey(), MappingValue(), false /* has_more */, no_error);
+        
+        return btree_status_t::success;
+    } else if (ret == btree_status_t::fast_path_not_possible) {
         // in slow path, return to caller to trigger slow path;
-        return ret; 
-    }
-
-    if (ret != btree_status_t::success) {
+        return ret;
+    } else {
         // callback to volume for this read failure;
         // could be here for both fast and slow path;
         read_cb(ireq, MappingKey(), MappingValue(), false /* has_more */, btree_read_failed);
         return ret;
     }
-
-    // otherwise send callbacks to client for each K/V;
-    for (auto& x : values) {
-        read_cb(ireq, x.first, x.second, true /* has_more */, no_error);
-    }
-
-    // notify client complete
-    read_cb(ireq, MappingKey(), MappingValue(), false /* has_more */, no_error);
-
-    return btree_status_t::success;
 }
 
 btree_status_t mapping::get(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& values,

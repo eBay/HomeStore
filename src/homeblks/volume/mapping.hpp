@@ -657,7 +657,7 @@ public:
     virtual btree_status_t update_active_indx_tbl(indx_req* ireq, const btree_cp_id_ptr& btree_id) override;
     virtual btree_status_t recovery_update(logstore_seq_num_t seqnum, journal_hdr* hdr,
                                            const btree_cp_id_ptr& btree_id) override;
-    virtual btree_status_t read_indx(indx_req* req, const read_indx_comp_cb_t& read_cb, bool fill_gaps) override;
+    virtual btree_status_t read_indx(indx_req* req, const read_indx_comp_cb_t& read_cb) override;
 
 public:
     /* static functions */

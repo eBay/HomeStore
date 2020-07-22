@@ -720,7 +720,7 @@ btree_status_t IndxMgr::update_indx_tbl(indx_req* ireq, bool is_active) {
         if (status == btree_status_t::fast_path_not_possible) {
             /* call run_on in async mode */
             iomanager.run_on(m_slow_path_thread_id, [this, ireq](io_thread_addr_t addr) mutable {
-                HS_LOG(INFO, indx_mgr, "Slow path write triggered.");
+                HS_SUBMOD_LOG(INFO, base, , "indx", m_name, "Slow path write triggered.");
                 HS_ASSERT_CMP(DEBUG, ireq->state, ==, indx_req_state::active_btree);
                 update_indx_internal(ireq);
             });
@@ -736,7 +736,7 @@ btree_status_t IndxMgr::update_indx_tbl(indx_req* ireq, bool is_active) {
         if (status == btree_status_t::fast_path_not_possible) {
             /* call run_on in async mode */
             iomanager.run_on(m_slow_path_thread_id, [this, ireq](io_thread_addr_t addr) mutable {
-                HS_LOG(INFO, indx_mgr, "Slow path write triggered.");
+                HS_SUBMOD_LOG(INFO, base, , "indx", m_name, "Slow path write triggered.");
                 HS_ASSERT_CMP(DEBUG, ireq->state, ==, indx_req_state::diff_btree);
                 update_indx_internal(ireq);
             });
@@ -918,7 +918,7 @@ void IndxMgr::destroy_indx_tbl(const indx_cp_id_ptr& indx_id) {
 
     if (ret == btree_status_t::fast_path_not_possible) {
         iomanager.run_on(m_slow_path_thread_id, [this, indx_id](io_thread_addr_t addr) mutable {
-            HS_LOG(INFO, indx_mgr, "Slow path destroy triggered.");
+            HS_SUBMOD_LOG(INFO, base, , "indx", m_name, "Slow path destroy triggered.");
             auto status = m_active_tbl->destroy(
                 indx_id->ainfo.btree_id, ([this, indx_id](Free_Blk_Entry& fbe) mutable { free_blk(indx_id, fbe); }));
             HS_ASSERT_CMP(DEBUG, status, ==, btree_status_t::success);
@@ -1044,25 +1044,26 @@ void IndxMgr::register_cp_done_cb(const cp_done_cb& cb, bool blkalloc_cp) {
     }
 }
 
-std::error_condition IndxMgr::read_indx(const boost::intrusive_ptr< indx_req >& ireq, bool fill_gaps) {
-    auto ret = m_active_tbl->read_indx(ireq.get(), m_read_cb, fill_gaps);
+std::error_condition IndxMgr::read_indx(const boost::intrusive_ptr< indx_req >& ireq) {
+    auto ret = m_active_tbl->read_indx(ireq.get(), m_read_cb);
 
-    if (ret != btree_status_t::success && ret != btree_status_t::fast_path_not_possible) { return btree_read_failed; }
-
-    if (ret == btree_status_t::fast_path_not_possible) {
-        iomanager.run_on(m_slow_path_thread_id, [this, ireq, fill_gaps](io_thread_addr_t addr) mutable {
-            HS_LOG(INFO, indx_mgr, "Slow path read triggered.");
-            auto status = m_active_tbl->read_indx(ireq.get(), m_read_cb, fill_gaps);
+    if (ret == btree_status_t::success) {
+        // read indx callback will be sent by mapping layer;
+        return no_error;
+    } else if (ret == btree_status_t::fast_path_not_possible) {
+        iomanager.run_on(m_slow_path_thread_id, [this, ireq](io_thread_addr_t addr) mutable {
+            HS_SUBMOD_LOG(INFO, base, , "indx", m_name, "Slow path read triggered.");
+            auto status = m_active_tbl->read_indx(ireq.get(), m_read_cb);
 
             // no expect has_more in read case;
             HS_ASSERT_CMP(DEBUG, status, !=, btree_status_t::has_more);
-            
+
             // this read could either fail or succeed, in either case, mapping layer will callback to client;
         });
-    } 
-
-    // read indx callback sent to client in mapping layer;
-    return no_error;
+        return no_error;
+    } else {
+        return btree_read_failed;
+    }
 }
 
 uint64_t IndxMgr::get_used_size() { return (m_last_cp_sb.cp_info.indx_size + m_active_tbl->get_used_size()); }
