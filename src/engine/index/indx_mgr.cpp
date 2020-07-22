@@ -918,7 +918,7 @@ void IndxMgr::destroy_indx_tbl(const indx_cp_id_ptr& indx_id) {
 
     if (ret == btree_status_t::fast_path_not_possible) {
         iomanager.run_on(m_slow_path_thread_id, [this, indx_id](io_thread_addr_t addr) mutable {
-            HS_LOG(INFO, indx_mgr, "Slow path read triggered.");
+            HS_LOG(INFO, indx_mgr, "Slow path destroy triggered.");
             auto status = m_active_tbl->destroy(
                 indx_id->ainfo.btree_id, ([this, indx_id](Free_Blk_Entry& fbe) mutable { free_blk(indx_id, fbe); }));
             HS_ASSERT_CMP(DEBUG, status, ==, btree_status_t::success);
