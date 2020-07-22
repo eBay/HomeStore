@@ -86,8 +86,17 @@ btree_status_t mapping::read_indx(indx_req* ireq, const read_indx_comp_cb_t& rea
     // don't expect to see "has_more" return value in read path;
     HS_ASSERT_CMP(DEBUG, ret, !=, btree_status_t::has_more);
 
-    // return immediately if we are in slow path or error code was returned;
-    if ((ret == btree_status_t::fast_path_not_possible) || ret != btree_status_t::success) { return ret; }
+    if (ret == btree_status_t::fast_path_not_possible) { 
+        // in slow path, return to caller to trigger slow path;
+        return ret; 
+    }
+
+    if (ret != btree_status_t::success) {
+        // callback to volume for this read failure;
+        // could be here for both fast and slow path;
+        read_cb(ireq, MappingKey(), MappingValue(), false /* has_more */, btree_read_failed);
+        return ret;
+    }
 
     // otherwise send callbacks to client for each K/V;
     for (auto& x : values) {
@@ -207,8 +216,8 @@ bool mapping::verify_tree() { return m_bt->verify_tree(); }
 btree_status_t mapping::destroy(const btree_cp_id_ptr& btree_id, free_blk_callback cb) {
     auto ret =
         m_bt->destroy(([this, cb](MappingValue& mv) { this->process_free_blk_callback(cb, mv); }), false, btree_id);
-    HS_SUBMOD_ASSERT(LOGMSG, (ret == btree_status_t::success || ret == btree_status_t::fast_path_not_possible), , "vol", m_unique_name,
-                     "Error in destroying mapping btree ret={} ", ret);
+    HS_SUBMOD_ASSERT(LOGMSG, (ret == btree_status_t::success || ret == btree_status_t::fast_path_not_possible), , "vol",
+                     m_unique_name, "Error in destroying mapping btree ret={} ", ret);
     return ret;
 }
 

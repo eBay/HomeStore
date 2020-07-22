@@ -15,13 +15,11 @@ typedef std::function< void() > trigger_cp_callback;
 typedef std::function< void(Free_Blk_Entry& fbe) > free_blk_callback;
 typedef boost::intrusive_ptr< indx_req > indx_req_ptr;
 
-class MappingKey;
-class MappingValue;
-
 #define MAX_FBE_SIZE 1 * 1024 * 1024 // 1 MB
 struct indx_req;
 
-using read_indx_comp_cb_t = std::function< void(const indx_req_ptr& ireq, const BtreeKey& k, const BtreeValue& v, bool has_more, std::error_condition ret) >;
+using read_indx_comp_cb_t = std::function< void(const indx_req_ptr& ireq, const BtreeKey& k, const BtreeValue& v,
+                                                bool has_more, std::error_condition ret) >;
 
 class indx_tbl {
     /* these virtual functions should be defined by the consumer */
@@ -91,7 +89,8 @@ public:
     /**
      * @brief : read and return indx mapping for a IO
      * @param ireq
-     * @param cb : it is used to send callback when read is completed
+     * @param cb : it is used to send callback when read is completed.
+     * The cb will be passed by mapping layer and triggered after read completes;
      * @return : error condition whether read is success or not;
      */
     std::error_condition read_indx(const boost::intrusive_ptr< indx_req >& ireq, bool fill_gaps);

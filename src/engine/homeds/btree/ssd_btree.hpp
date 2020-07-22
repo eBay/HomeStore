@@ -223,7 +223,7 @@ public:
             req->isSyncCall = true;
             auto cache_only = iomanager.am_i_tight_loop_reactor();
 
-#ifndef NDEBUG 
+#ifndef NDEBUG
             /* testing slow path */
             static std::atomic< uint64_t > read_cnt = 0;
             if (++read_cnt % 100 == 0 && iomanager.am_i_tight_loop_reactor()) {

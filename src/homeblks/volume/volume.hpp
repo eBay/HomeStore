@@ -267,7 +267,8 @@ private:
     // async call to start the multi-threaded work.
     void get_allocated_blks();
     void process_indx_completions(const indx_req_ptr& ireq, std::error_condition err);
-    void process_read_indx_completions(const boost::intrusive_ptr< indx_req >& ireq, const BtreeKey& k, const BtreeValue& v, bool has_more, std::error_condition err);
+    void process_read_indx_completions(const boost::intrusive_ptr< indx_req >& ireq, const BtreeKey& k,
+                                       const BtreeValue& v, bool has_more, std::error_condition err);
     void process_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
 
     // callback from mapping layer for free leaf node(data blks) so that volume
@@ -335,7 +336,6 @@ public:
     static void reinit() { SnapMgr::reinit(); }
 
     static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size);
-
 
 public:
     /******************** APIs exposed to home_blks *******************/

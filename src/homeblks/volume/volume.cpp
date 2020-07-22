@@ -324,47 +324,6 @@ std::error_condition Volume::read(const vol_interface_req_ptr& iface_req) {
         ret = std::make_error_condition(std::errc::device_or_resource_busy);
     }
 
-#if 0
-        /* create child req and read buffers */
-        vreq->state = volume_req_state::data_io;
-        vreq->read_buf().reserve(kvs.size());
-        for (auto& kv : kvs) {
-            if (!(kv.second.is_valid())) {
-                vreq->read_buf().emplace_back(get_page_size(), 0, m_only_in_mem_buff);
-                auto blob = m_only_in_mem_buff->at_offset(0);
-                vreq->push_csum(crc16_t10dif(init_crc_16, blob.bytes, get_page_size()));
-            } else {
-                ValueEntry ve;
-                (kv.second.get_array()).get(0, ve, false);
-                assert(kv.second.get_array().get_total_elements() == 1);
-
-                volume_child_req_ptr vc_req =
-                    Volume::create_vol_child_req(ve.get_blkId(), vreq, kv.first.start(), kv.first.get_n_lba());
-
-                /* store csum read so that we can verify it later after data is read */
-                for (auto i = 0ul; i < kv.first.get_n_lba(); i++) {
-                    vreq->push_csum(ve.get_checksum_at(i));
-                }
-
-                /* Read data */
-                auto sz = get_page_size() * kv.first.get_n_lba();
-                auto offset = m_hb->get_data_pagesz() * ve.get_blk_offset();
-                boost::intrusive_ptr< BlkBuffer > bbuf = m_hb->get_data_blkstore()->read(
-                    ve.get_blkId(), offset, sz, boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vc_req));
-
-                // TODO: @hkadayam There is a potential for race of read_buf_list getting emplaced after completion
-                /* Add buffer to read_buf_list. User read data from read buf list */
-                vreq->read_buf().emplace_back(sz, offset, bbuf);
-            }
-        }
-
-        // Atleast 1 metadata io is completed.
-        ret = no_error;
-    } catch (const std::exception& e) {
-        VOL_LOG_ASSERT(0, vreq, "Exception: {}", e.what())
-        ret = std::make_error_condition(std::errc::device_or_resource_busy);
-    }
-#endif
 done:
     check_and_complete_req(vreq, ret);
     return ret;
@@ -555,9 +514,10 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
     MappingValue* mv = const_cast< MappingValue* >(dynamic_cast< const MappingValue* >(&v));
 
     // if there is error or nothing to read anymore, complete this req;
-    if (err != no_error || !has_more) { 
+    if (err != no_error || !has_more) {
         vreq->state = volume_req_state::data_io;
-        goto read_done; 
+        ret = err;
+        goto read_done;
     }
 
     try {

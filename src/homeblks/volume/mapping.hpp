@@ -570,8 +570,7 @@ public:
     error_condition get(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& values,
                         MappingBtreeDeclType* bt);
     btree_status_t get(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& values,
-                        bool fill_gaps = true);
-
+                       bool fill_gaps = true);
 
     /* Note :- we should not write same IO in btree multiple times. When a key is updated , it update the free blk
      * entries in request to its last value. If we write same io multiple times then it could end up freeing the wrong
