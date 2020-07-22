@@ -1414,5 +1414,8 @@ int main(int argc, char* argv[]) {
     if (_gcfg.load_type == load_type_t::sequential) { _gcfg.verify_data = 0; }
 
     if (_gcfg.enable_crash_handler) { sds_logging::install_crash_handler(); }
+
+    if (_gcfg.is_spdk) { _gcfg.num_threads = 2; }   /* default to 2 to avoid high cpu usage with spdk */
+
     return RUN_ALL_TESTS();
 }

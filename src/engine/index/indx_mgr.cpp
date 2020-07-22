@@ -913,22 +913,17 @@ void IndxMgr::destroy(const indxmgr_stop_cb& cb) {
 void IndxMgr::destroy_indx_tbl(const indx_cp_id_ptr& indx_id) {
     /* free all blkids of btree in memory */
     HS_SUBMOD_LOG(INFO, base, , "indx", m_name, "Destroying Index btree");
+
     auto ret = m_active_tbl->destroy(indx_id->ainfo.btree_id,
                                      ([this, indx_id](Free_Blk_Entry& fbe) mutable { free_blk(indx_id, fbe); }));
-
-    if (ret == btree_status_t::fast_path_not_possible) {
-        iomanager.run_on(m_slow_path_thread_id, [this, indx_id](io_thread_addr_t addr) mutable {
-            HS_SUBMOD_LOG(INFO, base, , "indx", m_name, "Slow path destroy triggered.");
-            auto status = m_active_tbl->destroy(
-                indx_id->ainfo.btree_id, ([this, indx_id](Free_Blk_Entry& fbe) mutable { free_blk(indx_id, fbe); }));
-            HS_ASSERT_CMP(DEBUG, status, ==, btree_status_t::success);
-        });
-    } else if (ret != btree_status_t::success) {
+    if (ret != btree_status_t::success) {
         /* destroy is failed. We are going to retry it in next boot */
         LOGERROR("btree destroy failed");
         assert(0);
         m_stop_cb(false);
     }
+
+    HS_ASSERT_CMP(DEBUG, ret, !=, btree_status_t::fast_path_not_possible);
 
     add_prepare_cb_list(([this](const indx_cp_id_ptr& cur_indx_id, hs_cp_id* hb_id, hs_cp_id* new_hb_id) {
         this->indx_destroy_cp(cur_indx_id, hb_id, new_hb_id);

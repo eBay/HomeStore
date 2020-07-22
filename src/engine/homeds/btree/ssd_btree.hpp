@@ -230,7 +230,7 @@ public:
                 ++read_cnt;
                 if (read_cnt % 100 == 0) {
                     bnode = nullptr;
-                    LOGINFO("Trigginer slow path intentionally.");
+                    LOGINFO("Trigger slow path intentionally.");
                     return btree_status_t::fast_path_not_possible;
                 }
             }
