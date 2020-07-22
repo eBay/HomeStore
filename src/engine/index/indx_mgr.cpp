@@ -12,7 +12,7 @@ indx_journal_entry::~indx_journal_entry() { m_iob.buf_free(); }
 
 uint32_t indx_journal_entry::size(indx_req* ireq) const {
     return (sizeof(journal_hdr) + ireq->indx_alloc_blkid_list.size() * sizeof(BlkId) +
-            ireq->fbe_list.size() * sizeof(BlkId) + ireq->get_key_size() + ireq->get_val_size());
+            ireq->indx_fbe_list.size() * sizeof(BlkId) + ireq->get_key_size() + ireq->get_val_size());
 }
 
 uint32_t indx_journal_entry::size() const {
@@ -25,7 +25,7 @@ uint32_t indx_journal_entry::size() const {
 /* it update the alloc blk id and checksum */
 sisl::io_blob indx_journal_entry::create_journal_entry(indx_req* ireq) {
     uint32_t size = sizeof(journal_hdr) + ireq->indx_alloc_blkid_list.size() * sizeof(BlkId) +
-        ireq->fbe_list.size() * sizeof(BlkId) + ireq->get_key_size() + ireq->get_val_size();
+        ireq->indx_fbe_list.size() * sizeof(BlkId) + ireq->get_key_size() + ireq->get_val_size();
 
     uint32_t align = 0;
     if (HomeLogStore::is_aligned_buf_needed(size)) { align = HS_STATIC_CONFIG(disk_attr.align_size); }
@@ -36,7 +36,7 @@ sisl::io_blob indx_journal_entry::create_journal_entry(indx_req* ireq) {
     /* store journal hdr */
     auto hdr = get_journal_hdr(mem);
     hdr->alloc_blkid_list_size = ireq->indx_alloc_blkid_list.size();
-    hdr->free_blk_entry_size = ireq->fbe_list.size();
+    hdr->free_blk_entry_size = ireq->indx_fbe_list.size();
     hdr->key_size = ireq->get_key_size();
     hdr->val_size = ireq->get_val_size();
     /* store cp related info */
@@ -53,7 +53,7 @@ sisl::io_blob indx_journal_entry::create_journal_entry(indx_req* ireq) {
     auto fbe_pair = get_free_bid_list(mem);
     auto fbe = fbe_pair.first;
     for (uint32_t i = 0; i < fbe_pair.second; ++i) {
-        fbe[i] = ireq->fbe_list[i].get_free_blkid();
+        fbe[i] = ireq->indx_fbe_list[i].get_free_blkid();
     }
 
     /* store key */
@@ -671,15 +671,15 @@ void IndxMgr::journal_comp_cb(logstore_req* lreq, logdev_key ld_key) {
     }
 
     /* free the blkids */
-    for (uint32_t i = 0; i < ireq->fbe_list.size(); ++i) {
-        free_blk(ireq->indx_id, ireq->fbe_list[i]);
-        ireq->fbe_list[i].m_cp_id = ireq->hs_id;
+    for (uint32_t i = 0; i < ireq->indx_fbe_list.size(); ++i) {
+        free_blk(ireq->indx_id, ireq->indx_fbe_list[i]);
+        ireq->indx_fbe_list[i].m_cp_id = ireq->hs_id;
     }
 
     /* Increment the reference count by the number of free blk entries. Freing of blk is an async process. So we
      * don't want to take a checkpoint until these blkids by its consumer. Blk ids are freed in IndxMgr::free_blk.
      */
-    m_cp->cp_inc_ref(ireq->hs_id, ireq->fbe_list.size());
+    m_cp->cp_inc_ref(ireq->hs_id, ireq->indx_fbe_list.size());
 
     /* End of critical section */
     if (ireq->first_hs_id) { m_cp->cp_io_exit(ireq->first_hs_id); }

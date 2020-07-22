@@ -1337,7 +1337,8 @@ private:
             my_node->get_all(bur->get_cb_param()->get_sub_range(), UINT32_MAX, start_ind, end_ind, &match);
 
             vector< pair< K, V > > replace_kv;
-            bur->callback()(match, replace_kv, bur->get_cb_param());
+            ret = bur->callback()(match, replace_kv, bur->get_cb_param());
+            if (ret != btree_status_t::success) { return ret; }
             HS_ASSERT_CMP(DEBUG, start_ind, <=, end_ind);
             if (match.size() > 0) { my_node->remove(start_ind, end_ind); }
             BT_DEBUG_ASSERT_CMP(replace_kv.size(), >=, match.size(), my_node);

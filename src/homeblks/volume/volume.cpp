@@ -358,6 +358,42 @@ done:
     return ret;
 }
 
+std::error_condition Volume::unmap(const vol_interface_req_ptr& iface_req) {
+    std::error_condition ret = no_error;
+
+    auto vreq = volume_req::make(iface_req);
+    THIS_VOL_LOG(TRACE, volume, vreq, "unmap: lba={}, nlbas={}", vreq->lba(), vreq->nlbas());
+
+    /* Sanity checks */
+    ++home_blks_ref_cnt;
+    ++vol_ref_cnt;
+
+    if (is_offline()) {
+        ret = std::make_error_condition(std::errc::no_such_device);
+        goto done;
+    }
+    
+    try {
+        THIS_VOL_LOG(TRACE, volume, vreq, "unmap: not yet supported");
+        
+        vreq->state = volume_req_state::data_io;
+        BlkId bid_invalid {BlkId::invalid_internal_id()};
+
+        /* store blkid which is used later to create journal entry */
+        vreq->push_blkid(bid_invalid);
+
+        /* complete the request */
+        ret = no_error;
+    } catch (const std::exception& e) {
+        VOL_LOG_ASSERT(0, vreq, "Exception: {}", e.what())
+        ret = std::make_error_condition(std::errc::io_error);
+    }
+
+done:
+    check_and_complete_req(vreq, ret);
+    return ret;
+}
+
 /* This methods check if we can complete the req and if we can do so. This is the exit point of all async volume
  * read/write operations. All read/writes must call this if it is sync or async.
  *
@@ -464,7 +500,7 @@ void Volume::process_free_blk_callback(Free_Blk_Entry fbe) {
 void Volume::pending_read_blk_cb(volume_req* vreq, BlkId& bid) {
     m_read_blk_tracker->insert(bid);
     Free_Blk_Entry fbe(bid, 0, 0);
-    vreq->push_fbe(fbe);
+    vreq->indx_push_fbe(fbe);
 }
 
 void Volume::process_indx_completions(const indx_req_ptr& ireq, std::error_condition err) {

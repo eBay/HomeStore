@@ -11,6 +11,7 @@
 #include <boost/uuid/uuid_io.hpp>
 #include <async_http/http_server.hpp>
 #include "engine/homeds/thread/threadpool/thread_pool.h"
+#include <system_error>
 #include <utility/atomic_counter.hpp>
 #include <metrics/metrics.hpp>
 #include <settings/settings.hpp>
@@ -129,6 +130,7 @@ public:
     virtual std::error_condition read(const VolumePtr& vol, const vol_interface_req_ptr& req,
                                       bool part_of_batch = false) override;
     virtual std::error_condition sync_read(const VolumePtr& vol, const vol_interface_req_ptr& req) override;
+    virtual std::error_condition unmap(const VolumePtr& vol, const vol_interface_req_ptr& req) override;
     virtual void submit_io_batch() override;
 
     virtual vol_interface_req_ptr create_vol_interface_req(void* buf, uint64_t lba, uint32_t nlbas,

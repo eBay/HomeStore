@@ -58,7 +58,10 @@ public:
         req->seqId = ve.get_seqId();
         req->lastCommited_seqId = req->seqId; // keeping only latest version always
         req->push_blkid(ve.get_blkId());
-        m_map->put(req.get(), k, *(v.get()), nullptr);
+        mapping_write_cntx cntx;
+        cntx.op = UPDATE_VAL_AND_FREE_BLKS;
+        cntx.u.vreq = req.get();
+        m_map->put(cntx, k, *(v.get()), nullptr);
         return true;
     }
 
@@ -160,7 +163,10 @@ public:
         LOGDEBUG("Mapping range put:{} {} ", key.to_string(), value.to_string());
 
         assert(req->nlbas() == bid.get_nblks());
-        m_map->put(req.get(), key, value, nullptr);
+        mapping_write_cntx cntx;
+        cntx.op = UPDATE_VAL_AND_FREE_BLKS;
+        cntx.u.vreq = req.get();
+        m_map->put(cntx, key, value, nullptr);
 
         return true;
     }

@@ -312,7 +312,7 @@ public:
 
         LOGTRACE("IO DONE, req_id={}, outstanding_ios={}", req->request_id,
                  m_outstanding_ios.load(std::memory_order_relaxed));
-        if (!req->is_read && (req->err == no_error) && m_cfg.is_read_verify) {
+        if (req->is_write() && (req->err == no_error) && m_cfg.is_read_verify) {
             //(void)VolInterface::get_instance()->sync_read(vinfo.vol_obj, req->lba, req->nlbas, req);
             LOGTRACE("IO DONE, req_id={}, outstanding_ios={}", req->request_id,
                      m_outstanding_ios.load(std::memory_order_relaxed));
