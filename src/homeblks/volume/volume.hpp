@@ -352,6 +352,12 @@ public:
      */
     std::error_condition read(const vol_interface_req_ptr& hb_req);
 
+    /* Trim lba
+     * @param hb_req :- it expects this request to be created
+     * @return :- no_error if there is no error. It doesn't throw any exception
+     */
+    std::error_condition unmap(const vol_interface_req_ptr& hb_req);
+    
     /* shutdown the volume. It assumes caller has ensure that there are no outstanding ios. */
     void shutdown();
 
@@ -496,7 +502,7 @@ struct volume_req : indx_req {
     virtual ~volume_req() = default;
 
     Volume* vol() { return iface_req->vol_instance.get(); }
-    bool is_read_op() const { return iface_req->is_read; }
+    bool is_read_op() const { return iface_req->is_read(); }
     uint64_t lba() const { return iface_req->lba; }
     uint32_t nlbas() const { return iface_req->nlbas; }
     bool is_sync() const { return iface_req->sync; }
@@ -536,7 +542,7 @@ private:
             mvec(new homeds::MemVector()),
             request_id(vi_req->request_id) {
         assert((vi_req->vol_instance->get_page_size() * vi_req->nlbas) <= VOL_MAX_IO_SIZE);
-        if (!vi_req->is_read) {
+        if (vi_req->is_write()) {
             mvec->set((uint8_t*)vi_req->write_buf, vi_req->vol_instance->get_page_size() * vi_req->nlbas, 0);
         }
 
@@ -544,7 +550,7 @@ private:
         csum_list.reserve(VOL_MAX_IO_SIZE / vi_req->vol_instance->get_page_size());
         indx_fbe_list.reserve(VOL_MAX_IO_SIZE / vi_req->vol_instance->get_page_size());
         alloc_blkid_list.reserve(VOL_MAX_IO_SIZE / vi_req->vol_instance->get_page_size());
-        if (!vi_req->is_read) { seqId = vi_req->vol_instance->inc_and_get_seq_id(); }
+        if (vi_req->is_write()) { seqId = vi_req->vol_instance->inc_and_get_seq_id(); }
     }
 };
 

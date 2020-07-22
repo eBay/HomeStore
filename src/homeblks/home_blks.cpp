@@ -155,7 +155,7 @@ std::error_condition HomeBlks::write(const VolumePtr& vol, const vol_interface_r
     if (!m_rdy || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
     req->vol_instance = vol;
     req->part_of_batch = part_of_batch;
-    req->is_read = false;
+    req->op_type = Op_type::WRITE;
     return (vol->write(req));
 }
 
@@ -168,7 +168,7 @@ std::error_condition HomeBlks::read(const VolumePtr& vol, const vol_interface_re
     if (!m_rdy || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
     req->vol_instance = vol;
     req->part_of_batch = part_of_batch;
-    req->is_read = true;
+    req->op_type = Op_type::READ;
     return (vol->read(req));
 }
 
@@ -181,6 +181,18 @@ std::error_condition HomeBlks::sync_read(const VolumePtr& vol, const vol_interfa
     if (!m_rdy || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
     req->vol_instance = vol;
     return (vol->read(req));
+}
+
+std::error_condition HomeBlks::unmap(const VolumePtr& vol, const vol_interface_req_ptr& req) {
+    assert(m_rdy);
+    if (!vol) {
+        assert(0);
+        throw std::invalid_argument("null vol ptr");
+    }
+    if (!m_rdy || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
+    req->vol_instance = vol;
+    req->op_type = Op_type::UNMAP;
+    return (vol->unmap(req));
 }
 
 const char* HomeBlks::get_name(const VolumePtr& vol) { return vol->get_name(); }

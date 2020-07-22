@@ -57,7 +57,7 @@ void MetaBlkMgr::read(BlkId& bid, sisl::blob& b) {
 
     auto bbuf = m_sb_blk_store->read(bid, 0, META_BLK_PAGE_SZ, req);
     b = bbuf->at_offset(0);
-    assert(b.size == META_BLK_PAGE_SZ);
+    HS_ASSERT_CMP(DEBUG, b.size, ==, META_BLK_PAGE_SZ);
 }
 
 void MetaBlkMgr::load_ssb(const sb_blkstore_blob* blob) {
@@ -77,7 +77,7 @@ void MetaBlkMgr::load_ssb(const sb_blkstore_blob* blob) {
     memcpy((void*)m_ssb, b.bytes, sizeof(meta_blk_sb));
 
     // verify magic
-    assert(m_ssb->magic == META_BLK_SB_MAGIC);
+    HS_ASSERT_CMP(DEBUG, (uint32_t)m_ssb->magic, ==, META_BLK_SB_MAGIC);
 }
 
 void MetaBlkMgr::set_migrated() {
@@ -107,7 +107,7 @@ void MetaBlkMgr::init_ssb() {
     memset((void*)m_ssb, 0, META_BLK_PAGE_SZ);
 
     std::lock_guard< decltype(m_meta_mtx) > lk(m_meta_mtx);
-    assert(m_last_mblk == nullptr);
+    HS_ASSERT(DEBUG, m_last_mblk == nullptr, "last mblk is not null, memory corruption!");
     m_ssb->next_blkid.set(BlkId::invalid_internal_id());
     m_ssb->prev_blkid.set(BlkId::invalid_internal_id());
     m_ssb->magic = META_BLK_SB_MAGIC;
@@ -135,6 +135,8 @@ void MetaBlkMgr::scan_meta_blks() {
         sisl::blob b;
         read(bid, b);
         auto mblk = (meta_blk*)b.bytes;
+
+        m_last_mblk = mblk;
 
         // TODO: add a new API in blkstore read to by pass cache;
         // e.g. take caller's read buf to avoid this extra memory copy;
@@ -206,7 +208,7 @@ void MetaBlkMgr::scan_meta_blks_per_chunk() {
     const uint64_t total_sz = m_sb_blk_store->get_size();
 
     // this might not be a valid assert, but good to have blkstore size align to 512 bytes;
-    assert(total_sz % HS_STATIC_CONFIG(disk_attr.phys_page_size) == 0);
+    HS_ASSERT_CMP(DEBUG, total_sz % HS_STATIC_CONFIG(disk_attr.phys_page_size), ==, 0);
 
     uint8_t* buf = iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), total_sz);
     auto total_bytes_read = m_sb_blk_store->read(buf, total_sz);
@@ -273,7 +275,7 @@ void MetaBlkMgr::extract_meta_blks(uint8_t* buf, const uint64_t size, std::vecto
         meta_blk_ptr += META_BLK_PAGE_SZ;
     }
 
-    assert(meta_blk_ptr == buf);
+    HS_ASSERT_CMP(DEBUG, meta_blk_ptr, ==, buf);
 }
 
 void MetaBlkMgr::deregister_handler(const meta_sub_type type) {
@@ -342,7 +344,7 @@ meta_blk* MetaBlkMgr::init_meta_blk(BlkId& bid, const meta_sub_type type, const 
     // handle prev/next pointer linkage;
     if (m_last_mblk) {
         mblk->hdr.h.prev_blkid.set(m_last_mblk->hdr.h.blkid);
-        assert(m_last_mblk->hdr.h.next_blkid.to_integer() == BlkId::invalid_internal_id());
+        HS_ASSERT_CMP(DEBUG, m_last_mblk->hdr.h.next_blkid.to_integer(), ==, BlkId::invalid_internal_id());
         m_last_mblk->hdr.h.next_blkid.set(bid);
 
         // persist the changes;
@@ -350,7 +352,7 @@ meta_blk* MetaBlkMgr::init_meta_blk(BlkId& bid, const meta_sub_type type, const 
     } else {
         // this is the first sub sb being added;
         mblk->hdr.h.prev_blkid.set(m_ssb->blkid);
-        assert(m_ssb->next_blkid.to_integer() == BlkId::invalid_internal_id());
+        HS_ASSERT_CMP(DEBUG, m_ssb->next_blkid.to_integer(), ==, BlkId::invalid_internal_id());
         m_ssb->next_blkid.set(bid);
 
         // persiste the changes;
@@ -514,7 +516,7 @@ std::error_condition MetaBlkMgr::remove_sub_sb(const void* cookie) {
     std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
 
     // type must exist
-    assert(m_meta_blks.find(type) != m_meta_blks.end());
+    HS_ASSERT(DEBUG, m_meta_blks.find(type) != m_meta_blks.end(), "Un-registered type: {} received, which is not supported!", type);
 
     // remove from disk;
     auto prev_blkid = m_meta_blks[type][bid.to_integer()]->hdr.h.prev_blkid;
@@ -524,13 +526,12 @@ std::error_condition MetaBlkMgr::remove_sub_sb(const void* cookie) {
            prev_blkid.to_string(), next_blkid.to_string());
 
     // this record must exist in-memory copy
-    assert(m_meta_blks[type].find(bid.to_integer()) != m_meta_blks[type].end());
+    HS_ASSERT(DEBUG, m_meta_blks[type].find(bid.to_integer()) != m_meta_blks[type].end(), "Blk type: {}, id: {} not found!", type, bid.to_string());
 
-    assert(m_meta_blks[type][bid.to_integer()] == rm_blk);
+    HS_ASSERT(DEBUG, m_meta_blks[type][bid.to_integer()] == rm_blk, "Received blk pointer not equal to cache, memory corruption!");
 
     // remove the in-memory handle from meta blk map;
     m_meta_blks[rm_blk->hdr.h.type].erase(bid.to_integer());
-    assert(m_meta_blks[type].find(bid.to_integer()) == m_meta_blks[type].end());
 
     // 1. update prev-blk's next pointer
     if (prev_blkid.to_integer() == m_ssb->blkid.to_integer()) {
@@ -611,7 +612,7 @@ void MetaBlkMgr::free_meta_blk(meta_blk* mblk) {
     m_sb_blk_store->free_blk(mblk->hdr.h.blkid, boost::none, boost::none);
     // free the overflow blkid if it is there
     if (mblk->hdr.h.ovf_blkid.to_integer() != BlkId::invalid_internal_id()) {
-        assert(mblk->hdr.h.context_sz >= META_BLK_CONTEXT_SZ);
+        HS_ASSERT_CMP(DEBUG, (uint64_t)(mblk->hdr.h.context_sz), >=, META_BLK_CONTEXT_SZ);
         free_ovf_blk_chain(mblk);
     }
     iomanager.iobuf_free((uint8_t*)mblk);
