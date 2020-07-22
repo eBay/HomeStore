@@ -100,6 +100,11 @@ public:
 
     void update_store_sb(btree_super_block& sb, btree_cp_superblock* cp_sb, bool is_recovery) {
         m_is_recovering = is_recovery;
+
+        // Need to set this before opening log store, since log_found depends on cp_cnt
+        m_first_cp->start_psn = cp_sb->active_psn;
+        m_first_cp->cp_cnt = cp_sb->cp_cnt + 1;
+
         if (is_recovery) {
             // add recovery code
             HomeLogStoreMgr::instance().open_log_store(
@@ -113,8 +118,6 @@ public:
             sb.journal_id = get_journal_id_store();
         }
 
-        m_first_cp->start_psn = cp_sb->active_psn;
-        m_first_cp->cp_cnt = cp_sb->cp_cnt + 1;
         m_wb_cache.prepare_cp(m_first_cp, nullptr, false);
     }
 
@@ -125,12 +128,14 @@ public:
         if (seqnum >= cp_sb.active_psn) {
             // Entry is not replayed yet
             btree_journal_entry* jentry = (btree_journal_entry*)log_buf.bytes();
-            if (jentry->op == journal_op::BTREE_CREATE) {
-                m_btree->create_btree_replay(jentry, m_first_cp);
-            } else if (jentry->op == journal_op::BTREE_SPLIT) {
-                m_btree->split_node_replay(jentry, m_first_cp);
+            if (jentry->cp_cnt >= m_first_cp->cp_cnt) {
+                if (jentry->op == journal_op::BTREE_CREATE) {
+                    m_btree->create_btree_replay(jentry, m_first_cp);
+                } else if (jentry->op == journal_op::BTREE_SPLIT) {
+                    m_btree->split_node_replay(jentry, m_first_cp);
+                }
+                ++m_replayed_count;
             }
-            ++m_replayed_count;
         }
     }
 
