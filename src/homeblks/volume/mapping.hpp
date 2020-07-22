@@ -569,7 +569,7 @@ public:
     int sweep_alloc_blks(uint64_t start_lba, uint64_t end_lba);
     error_condition get(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& values,
                         MappingBtreeDeclType* bt);
-    error_condition get(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& values,
+    btree_status_t get(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& values,
                         bool fill_gaps = true);
 
 
@@ -722,7 +722,5 @@ private:
                                std::vector< std::pair< MappingKey, MappingValue > >& values,
                                MappingValue* exp_value = nullptr, volume_req* req = nullptr);
 #endif
-
-    //btree_status_t get_internal(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& result_kv);
 };
 } // namespace homestore

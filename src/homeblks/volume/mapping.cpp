@@ -76,80 +76,32 @@ error_condition mapping::get(volume_req* req, std::vector< std::pair< MappingKey
     return no_error;
 }
 
-btree_status_t mapping::read_indx(indx_req* ireq, const read_indx_comp_cb_t& read_cb, bool fill_gaps) { 
+btree_status_t mapping::read_indx(indx_req* ireq, const read_indx_comp_cb_t& read_cb, bool fill_gaps) {
+
     auto req = static_cast< volume_req* >(ireq);
-    uint64_t start_lba = req->lba();
-
-    uint64_t num_lba = req->nlbas();
-    uint64_t end_lba = get_end_lba(start_lba, req->nlbas());
-    MappingKey start_key(start_lba, 1);
-    MappingKey end_key(end_lba, 1);
-
-    auto search_range = BtreeSearchRange(start_key, true, end_key, true);
-    GetCBParam param(req);
-    std::vector< pair< MappingKey, MappingValue > > result_kv;
-
-    BtreeQueryRequest< MappingKey, MappingValue > qreq(
-        search_range, BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, num_lba,
-        std::bind(&mapping::match_item_cb_get, this, placeholders::_1, placeholders::_2, placeholders::_3),
-        (BRangeQueryCBParam< MappingKey, MappingValue >*)&param);
-    auto ret = m_bt->query(qreq, result_kv);
-
     std::vector< pair< MappingKey, MappingValue > > values;
 
-    if (fill_gaps) {
-        // fill the gaps
-        auto last_lba = start_lba;
-        for (auto i = 0u; i < result_kv.size(); i++) {
-            int nl = result_kv[i].first.start() - last_lba;
-            while (nl-- > 0) {
-                values.emplace_back(make_pair(MappingKey(last_lba, 1), EMPTY_MAPPING_VALUE));
-                last_lba++;
-            }
-            values.emplace_back(result_kv[i]);
-            last_lba = result_kv[i].first.end() + 1;
-        }
-        while (last_lba <= end_lba) {
-            values.emplace_back(make_pair(MappingKey(last_lba, 1), EMPTY_MAPPING_VALUE));
-            last_lba++;
-        }
-#ifndef NDEBUG
-        validate_get_response(start_lba, num_lba, values);
-#endif
-    } else {
-        values.insert(values.begin(), result_kv.begin(), result_kv.end());
+    auto ret = get(req, values, fill_gaps);
+
+    // don't expect to see "has_more" return value in read path;
+    HS_ASSERT_CMP(DEBUG, ret, !=, btree_status_t::has_more);
+
+    // return immediately if we are in slow path or error code was returned;
+    if ((ret == btree_status_t::fast_path_not_possible) || ret != btree_status_t::success) { return ret; }
+
+    // otherwise send callbacks to client for each K/V;
+    for (auto& x : values) {
+        read_cb(ireq, x.first, x.second, true /* has_more */, no_error);
     }
 
-    if (ret != btree_status_t::fast_path_not_possible) {
-        for (auto& x : values) {
-            read_cb(ireq, x.first, x.second, true, no_error);
-        }
-        read_cb(ireq, MappingKey(), MappingValue(), false, no_error);
-    }
-    
-    return ret;
+    // notify client complete
+    read_cb(ireq, MappingKey(), MappingValue(), false /* has_more */, no_error);
+
+    return btree_status_t::success;
 }
-#if 0
-btree_status_t mapping::get_internal(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& result_kv) {
-    uint64_t start_lba = req->lba();
-    uint64_t num_lba = req->nlbas();
-    uint64_t end_lba = get_end_lba(start_lba, req->nlbas());
-    MappingKey start_key(start_lba, 1);
-    MappingKey end_key(end_lba, 1);
 
-    auto search_range = BtreeSearchRange(start_key, true, end_key, true);
-    GetCBParam param(req);
-
-    BtreeQueryRequest< MappingKey, MappingValue > qreq(
-        search_range, BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, num_lba,
-        std::bind(&mapping::match_item_cb_get, this, placeholders::_1, placeholders::_2, placeholders::_3),
-        (BRangeQueryCBParam< MappingKey, MappingValue >*)&param);
-
-    return m_bt->query(qreq, result_kv);
-}
-#endif
-error_condition mapping::get(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& values,
-                             bool fill_gaps) {
+btree_status_t mapping::get(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& values,
+                            bool fill_gaps) {
     uint64_t start_lba = req->lba();
     uint64_t num_lba = req->nlbas();
     uint64_t end_lba = get_end_lba(start_lba, req->nlbas());
@@ -166,7 +118,7 @@ error_condition mapping::get(volume_req* req, std::vector< std::pair< MappingKey
         (BRangeQueryCBParam< MappingKey, MappingValue >*)&param);
     auto ret = m_bt->query(qreq, result_kv);
 
-    if (ret != btree_status_t::success && ret != btree_status_t::has_more) { return btree_read_failed; }
+    if (ret != btree_status_t::success && ret != btree_status_t::has_more) { return ret; }
 
     if (fill_gaps) {
         // fill the gaps
@@ -191,7 +143,7 @@ error_condition mapping::get(volume_req* req, std::vector< std::pair< MappingKey
         values.insert(values.begin(), result_kv.begin(), result_kv.end());
     }
 
-    return no_error;
+    return btree_status_t::success;
 }
 
 /* Note :- we should not write same IO in btree multiple times. When a key is updated , it update the free blk
@@ -255,7 +207,7 @@ bool mapping::verify_tree() { return m_bt->verify_tree(); }
 btree_status_t mapping::destroy(const btree_cp_id_ptr& btree_id, free_blk_callback cb) {
     auto ret =
         m_bt->destroy(([this, cb](MappingValue& mv) { this->process_free_blk_callback(cb, mv); }), false, btree_id);
-    HS_SUBMOD_ASSERT(LOGMSG, (ret == btree_status_t::success), , "vol", m_unique_name,
+    HS_SUBMOD_ASSERT(LOGMSG, (ret == btree_status_t::success || ret == btree_status_t::fast_path_not_possible), , "vol", m_unique_name,
                      "Error in destroying mapping btree ret={} ", ret);
     return ret;
 }
@@ -991,6 +943,8 @@ btree_status_t mapping::update_indx_tbl(indx_req* ireq, const btree_cp_id_ptr& b
         if (ret != btree_status_t::success || start_lba > expected_end_lba) { break; }
         assert(start_lba == next_start_lba);
     }
+
+    if (ret == btree_status_t::fast_path_not_possible) { return ret; }
 
     assert(ret != btree_status_t::success || (start_lba == (expected_end_lba + 1)));
     auto lbas_written = get_nlbas((next_start_lba - 1), vreq->lba());

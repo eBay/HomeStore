@@ -390,7 +390,7 @@ public:
 #ifndef NDEBUG
         check_lock_debug();
 #endif
-        if (ret != btree_status_t::success) {
+        if (ret != btree_status_t::success && ret != btree_status_t::fast_path_not_possible) {
             THIS_BT_LOG(INFO, base, , "btree put failed {}", ret);
             COUNTER_INCREMENT(m_metrics, write_err_cnt, 1);
         }
