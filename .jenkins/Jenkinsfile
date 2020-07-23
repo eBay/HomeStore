@@ -57,7 +57,7 @@ pipeline {
                         }
                         post {
                             failure {
-                                archiveArtifacts artifacts: "**/*_log", fingerprint: true
+                                archiveArtifacts artifacts: "*", fingerprint: false
                             }
                         }
                     }
