@@ -59,12 +59,12 @@ public:
      *                          false :- it is first time create
      * @params func :- function to create indx table
      */
-    IndxMgr(boost::uuids::uuid uuid, std::string name, io_done_cb io_cb, const read_indx_comp_cb_t& read_cb,
-            create_indx_tbl func, bool is_snap_enabled);
+    IndxMgr(boost::uuids::uuid uuid, std::string name, const io_done_cb& io_cb, const read_indx_comp_cb_t& read_cb,
+            const create_indx_tbl& func, bool is_snap_enabled);
 
     /* constructor for recovery */
-    IndxMgr(boost::uuids::uuid uuid, std::string name, io_done_cb io_cb, const read_indx_comp_cb_t& read_cb,
-            create_indx_tbl create_func, recover_indx_tbl recover_func, indx_mgr_static_sb sb);
+    IndxMgr(boost::uuids::uuid uuid, std::string name, const io_done_cb& io_cb, const read_indx_comp_cb_t& read_cb,
+            const create_indx_tbl& create_func, const recover_indx_tbl& recover_func, indx_mgr_static_sb sb);
 
     virtual ~IndxMgr();
 

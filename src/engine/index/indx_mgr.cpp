@@ -168,8 +168,8 @@ void HomeStoreCP::cp_attach_prepare(hs_cp_id* cur_id, hs_cp_id* new_id) {
 
 REGISTER_METABLK_SUBSYSTEM(indx_mgr, "INDX_MGR_CP", IndxMgr::meta_blk_found_cb, nullptr)
 
-IndxMgr::IndxMgr(boost::uuids::uuid uuid, std::string name, io_done_cb io_cb, const read_indx_comp_cb_t& read_cb,
-                 create_indx_tbl func, bool is_snap_enabled) :
+IndxMgr::IndxMgr(boost::uuids::uuid uuid, std::string name, const io_done_cb& io_cb, const read_indx_comp_cb_t& read_cb,
+                 const create_indx_tbl& func, bool is_snap_enabled) :
         m_io_cb(io_cb),
         m_read_cb(read_cb),
         m_uuid(uuid),
@@ -190,8 +190,8 @@ IndxMgr::IndxMgr(boost::uuids::uuid uuid, std::string name, io_done_cb io_cb, co
 }
 
 /* Constructor for recovery */
-IndxMgr::IndxMgr(boost::uuids::uuid uuid, std::string name, io_done_cb io_cb, const read_indx_comp_cb_t& read_cb,
-                 create_indx_tbl create_func, recover_indx_tbl recover_func, indx_mgr_static_sb sb) :
+IndxMgr::IndxMgr(boost::uuids::uuid uuid, std::string name, const io_done_cb& io_cb, const read_indx_comp_cb_t& read_cb,
+                 const create_indx_tbl& create_func, const recover_indx_tbl& recover_func, indx_mgr_static_sb sb) :
         m_io_cb(io_cb),
         m_read_cb(read_cb),
         m_uuid(uuid),
@@ -919,11 +919,9 @@ void IndxMgr::destroy_indx_tbl(const indx_cp_id_ptr& indx_id) {
     if (ret != btree_status_t::success) {
         /* destroy is failed. We are going to retry it in next boot */
         LOGERROR("btree destroy failed");
-        assert(0);
+        HS_ASSERT(DEBUG, false, "btree destroy failed: ret: {}", ret);
         m_stop_cb(false);
     }
-
-    HS_ASSERT_CMP(DEBUG, ret, !=, btree_status_t::fast_path_not_possible);
 
     add_prepare_cb_list(([this](const indx_cp_id_ptr& cur_indx_id, hs_cp_id* hb_id, hs_cp_id* new_hb_id) {
         this->indx_destroy_cp(cur_indx_id, hb_id, new_hb_id);
