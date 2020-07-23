@@ -121,6 +121,7 @@ public:
         fc->inject_noreturn_flip("btree_leaf_node_split", {null_cond}, freq);
         fc->inject_retval_flip("btree_upgrade_delay", {null_cond}, freq, 20);
         fc->inject_retval_flip("writeBack_completion_req_delay_us", {null_cond}, freq, 20);
+        fc->inject_noreturn_flip("btree_read_fast_path_not_possible", {null_cond}, freq);
     }
 
     static void set_error_flip() {

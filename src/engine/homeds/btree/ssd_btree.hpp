@@ -225,14 +225,10 @@ public:
 
 #ifndef NDEBUG
             /* testing slow path */
-            static std::atomic< uint64_t > read_cnt = 0;
-            if (iomanager.am_i_tight_loop_reactor()) {
-                ++read_cnt;
-                if (read_cnt % 100 == 0) {
-                    bnode = nullptr;
-                    LOGINFO("Trigger slow path intentionally.");
-                    return btree_status_t::fast_path_not_possible;
-                }
+            if (iomanager.am_i_tight_loop_reactor() && homestore_flip->test_flip("btree_read_fast_path_not_possible")) {
+                bnode = nullptr;
+                LOGINFO("Trigger slow path intentionally.");
+                return btree_status_t::fast_path_not_possible;
             }
 #endif
             auto safe_buf = m_blkstore->read(blkid, 0, store->get_node_size(), req, cache_only);
