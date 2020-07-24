@@ -212,7 +212,7 @@ public:
     static boost::intrusive_ptr< SSDBtreeNode >
     reserve_node(SSDBtreeStore* store, bool is_leaf, const BlkId& blkid,
                  const boost::intrusive_ptr< SSDBtreeNode >& copy_from = nullptr) {
-        auto safe_buf = m_blkstore->reserve_blk_cached(store->get_node_size(), blkid);
+        auto safe_buf = m_blkstore->reserve_blk_cached(blkid);
         if (safe_buf == nullptr) {
             LOGERROR("btree alloc failed. No space avail");
             return nullptr;

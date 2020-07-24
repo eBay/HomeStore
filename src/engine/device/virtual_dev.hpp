@@ -505,7 +505,7 @@ public:
      * write_at_offset(offset_2);
      * write_at_offset(offset_1);
      */
-    off_t alloc_seq_blk(const size_t size, const bool chunk_overlap_ok = false) {
+    off_t alloc_next_append_blk(const size_t size, const bool chunk_overlap_ok = false) {
         HS_ASSERT_CMP(DEBUG, chunk_overlap_ok, ==, false);
 
         if (get_used_space() + size > get_size()) {
@@ -603,9 +603,9 @@ public:
     /**
      * @brief : writes up to count bytes from the buffer starting at buf at offset offset.
      * The cursor is not changed.
-     * pwrite always use offset returned from alloc_seq_blk to do the write;
-     * pwrite should not across chunk boundaries because alloc_seq_blk guarantees offset returned always doesn't across
-     * chunk boundary;
+     * pwrite always use offset returned from alloc_next_append_blk to do the write;
+     * pwrite should not across chunk boundaries because alloc_next_append_blk guarantees offset returned always doesn't
+     * across chunk boundary;
      *
      * @param buf : buffer pointing to the data being written
      * @param count : size of buffer to be written
@@ -623,7 +623,7 @@ public:
         // update reserved size
         m_reserved_sz -= count;
 
-        // pwrite works with alloc_seq_blk which already do watermark check;
+        // pwrite works with alloc_next_append_blk which already do watermark check;
 
         return do_pwrite(buf, count, offset, req);
     }
@@ -649,7 +649,7 @@ public:
         COUNTER_INCREMENT(m_metrics, vdev_write_count, 1);
 
         // if len is smaller than reserved size, it means write will never be overlapping start offset;
-        // it is guaranteed by alloc_seq_blk api;
+        // it is guaranteed by alloc_next_append_blk api;
         HS_ASSERT_CMP(RELEASE, len, <=, m_reserved_sz, "Write size:{} larger then reserved size: {} is not allowed!",
                       len, m_reserved_sz);
 
@@ -667,7 +667,7 @@ public:
 
             bytes_written = do_pwritev_internal(pdev, chunk, iov, iovcnt, len, offset_in_dev, req);
 
-            // bytes written should always equal to requested write size, since alloc_seq_blk handles offset
+            // bytes written should always equal to requested write size, since alloc_next_append_blk handles offset
             // which will never across chunk boundary;
             HS_ASSERT_CMP(DEBUG, (uint64_t)bytes_written, ==, len, "Bytes written not equal to input len!");
 
@@ -1203,8 +1203,8 @@ private:
         // convert logical offset to dev offset
         uint64_t offset_in_dev = logical_to_dev_offset(offset, dev_id, chunk_id, offset_in_chunk);
 
-        // this assert only valid for pwrite/pwritev, which calls alloc_seq_blk to get the offset to do the write, which
-        // garunteens write will with the returned offset will not accross chunk boundary.
+        // this assert only valid for pwrite/pwritev, which calls alloc_next_append_blk to get the offset to do the
+        // write, which guarantees write will with the returned offset will not accross chunk boundary.
         HS_ASSERT_CMP(RELEASE, m_chunk_size - offset_in_chunk, >=, len,
                       "Writing size: {} crossing chunk is not allowed!", len);
 
@@ -1239,7 +1239,7 @@ private:
 
             bytes_written = do_pwrite_internal(pdev, chunk, (const char*)buf, count, offset_in_dev, req);
 
-            // bytes written should always equal to requested write size, since alloc_seq_blk handles offset
+            // bytes written should always equal to requested write size, since alloc_next_append_blk handles offset
             // which will never across chunk boundary;
             HS_ASSERT_CMP(DEBUG, (size_t)bytes_written, ==, count, "Bytes written not equal to input len!");
 

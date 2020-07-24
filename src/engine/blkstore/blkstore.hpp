@@ -247,32 +247,33 @@ public:
         auto ret_blk = alloc_contiguous_blk(size, hints, out_blkid);
         if (ret_blk != BLK_ALLOC_SUCCESS) { return nullptr; }
 
-        return init_blk_cached(size, *out_blkid);
+        return init_blk_cached(*out_blkid);
     }
 
-    off_t alloc_seq_blk(const size_t size, const bool chunk_overlap_ok = false) {
-        return m_vdev.alloc_seq_blk(size, chunk_overlap_ok);
+    off_t alloc_next_append_blk(const size_t size, const bool chunk_overlap_ok = false) {
+        return m_vdev.alloc_next_append_blk(size, chunk_overlap_ok);
     }
 
     BlkAllocStatus reserve_blk(const BlkId& in_blkid) { return (m_vdev.reserve_blk(in_blkid)); }
 
-    boost::intrusive_ptr< Buffer > reserve_blk_cached(uint32_t size, const BlkId& blkid) {
+    boost::intrusive_ptr< Buffer > reserve_blk_cached(const BlkId& blkid) {
         auto ret_blk = reserve_blk(blkid);
         if (ret_blk != BLK_ALLOC_SUCCESS) { return nullptr; }
-        return init_blk_cached(size, blkid);
+        return init_blk_cached(blkid);
     }
 
-    boost::intrusive_ptr< Buffer > init_blk_cached(uint32_t size, const BlkId& blkid) {
+    boost::intrusive_ptr< Buffer > init_blk_cached(const BlkId& blkid) {
         // Create an object for the buffer
         auto buf = Buffer::make_object();
         buf->set_key(blkid);
 
         // Create a new block of memory for the blocks requested and set the memvec pointer to that
+        auto size = blkid.data_size(m_pagesz);
         uint8_t* ptr = iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), size);
         boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector(), true);
         mvec->set(ptr, size, 0);
+        buf->set_memvec(mvec, 0, size);
 
-        buf->set_memvec(mvec, 0, blkid.data_size(m_pagesz));
         // Insert this buffer to the cache.
         auto ibuf = boost::intrusive_ptr< Buffer >(buf);
         boost::intrusive_ptr< Buffer > out_bbuf;
