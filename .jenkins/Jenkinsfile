@@ -57,7 +57,7 @@ pipeline {
                         }
                         post {
                             failure {
-                                archiveArtifacts artifacts: "/root/.conan/data/${PROJECT}/${TAG}/${CONAN_USER}/${CONAN_PASS}/build/*/src/logs/**", fingerprint: false
+                                archiveArtifacts artifacts: "/root/.conan/data/${PROJECT}/${TAG}/${CONAN_USER}/${CONAN_PASS}/build/*/src/logs/*", fingerprint: true
                             }
                         }
                     }
