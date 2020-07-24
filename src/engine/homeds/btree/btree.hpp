@@ -201,13 +201,14 @@ public:
             m_node_size(cfg.get_node_size()) {}
 
     ~Btree() {
-        if (!m_destroy) { destroy(nullptr, true); }
+        uint64_t free_node_cnt;
+        if (!m_destroy) { destroy(nullptr, free_node_cnt, true); }
     }
 
     /* It is called when its btree consumer has successfully stored the btree superblock */
     void create_done() { btree_store_t::create_done(m_btree_store.get(), m_root_node); }
 
-    btree_status_t destroy(blkid_list_ptr free_blkid_list, bool mem_only) {
+    btree_status_t destroy(blkid_list_ptr free_blkid_list, uint64_t& free_node_cnt, bool in_mem = false) {
         m_btree_lock.write_lock();
         BtreeNodePtr root;
         homeds::thread::locktype acq_lock = LOCKTYPE_WRITE;
@@ -218,7 +219,8 @@ public:
             return ret;
         }
 
-        ret = free(free_blkid_list, mem_only);
+        free_node_cnt = 0;
+        ret = free(root, free_blkid_list, in_mem, free_node_cnt);
 
         unlock_node(root, acq_lock);
         m_btree_lock.unlock();
@@ -230,10 +232,8 @@ public:
 
     //
     // 1. free nodes in post order traversal of tree to free non-leaf node
-    // 2. If free_blk_cb is not null, callback to caller for leaf node's blk_id;
-    // Assumption is that there are no pending IOs when it is called.
     //
-    btree_status_t free(blkid_list_ptr free_blkid_list) {
+    btree_status_t free(BtreeNodePtr node, blkid_list_ptr free_blkid_list, bool in_mem, uint64_t& free_node_cnt) {
         // TODO - this calls free node on mem_tree and ssd_tree.
         // In ssd_tree we free actual block id, which is not correct behavior
         // we shouldnt really free any blocks on free node, just reclaim any memory
@@ -254,16 +254,17 @@ public:
                 }
 
                 BtreeNodePtr child;
-                ret = read_and_lock_child(child_info.bnode_id(), child, node, i, acq_lock, acq_lock, cp_id);
+                ret = read_and_lock_child(child_info.bnode_id(), child, node, i, acq_lock, acq_lock, nullptr);
                 if (ret != btree_status_t::success) { return ret; }
-                ret = free(free_blkid_list, mem_only);
+                ret = free(child, free_blkid_list, in_mem, free_node_cnt);
                 unlock_node(child, acq_lock);
                 i++;
             }
         }
 
         if (ret != btree_status_t::success) { return ret; }
-        free_node(node, free_blkid_list);
+        free_node(node, free_blkid_list, in_mem);
+        ++free_node_cnt;
         return ret;
     }
 
@@ -448,8 +449,7 @@ public:
             break;
         }
 
-        if (ret != btree_status_t::success &&
-            (query_req.query_type() == BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY ||
+        if ((query_req.query_type() == BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY ||
              query_req.query_type() == BtreeQueryType::TREE_TRAVERSAL_QUERY)) {
             /* if return is not success then set the cursor to last read */
             query_req.cursor().m_last_key =
@@ -1940,7 +1940,7 @@ private:
             btree_store_t::write_journal_entry(m_btree_store.get(), cp_id, j_iob);
         }
         unlock_node(root, locktype::LOCKTYPE_WRITE);
-        free_node(child_node, cp_id->free_blkid_list);
+        free_node(child_node, (cp_id ? cp_id->free_blkid_list : nullptr));
 
         if (ret == btree_status_t::success) { COUNTER_DECREMENT(m_metrics, btree_depth, 1); }
     done:
@@ -2295,7 +2295,7 @@ private:
 #endif
         /* free nodes. It actually gets freed after cp is completed */
         for (uint32_t i = 0; i < old_nodes.size(); ++i) {
-            free_node(old_nodes[i], cp_id->free_blkid_list);
+            free_node(old_nodes[i], (cp_id ? cp_id->free_blkid_list : nullptr));
         }
         for (uint32_t i = 0; i < deleted_nodes.size(); ++i) {
             free_node(deleted_nodes[i]);
@@ -2407,14 +2407,14 @@ private:
     }
 
     /* Note:- This function assumes that access of this node is thread safe. */
-    void free_node(const BtreeNodePtr& node, const blkid_list_ptr& free_blkid_list = nullptr) {
+    void free_node(const BtreeNodePtr& node, const blkid_list_ptr& free_blkid_list = nullptr, bool in_mem = false) {
         THIS_BT_LOG(DEBUG, btree_generics, node, "Freeing node");
 
         COUNTER_DECREMENT_IF_ELSE(m_metrics, node->is_leaf(), btree_leaf_node_count, btree_int_node_count, 1);
         BT_LOG_ASSERT_CMP(node->is_valid_node(), ==, true, node);
         node->set_valid_node(false);
         m_total_nodes--;
-        btree_store_t::free_node(m_btree_store.get(), free_blkid_list);
+        btree_store_t::free_node(m_btree_store.get(), node, free_blkid_list, in_mem);
     }
 
     /* Recovery process is different for root node, child node and sibling node depending on how the node

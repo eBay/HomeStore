@@ -15,18 +15,16 @@
 #include <spdlog/fmt/fmt.h>
 #include "engine/common/homestore_assert.hpp"
 #include "engine/homeds/thread/threadpool/thread_pool.h"
-#include "blk_read_tracker.hpp"
 #include "engine/index/snap_mgr.hpp"
 #include <utility/enum.hpp>
 #include <fds/vector_pool.hpp>
 #include "engine/meta/meta_blks_mgr.hpp"
+#include "mapping.hpp"
 
 using namespace std;
 
 namespace homestore {
 
-#define MAX_NUM_LBA ((1 << NBLKS_BITS) - 1)
-class mapping;
 class VolumeJournal;
 enum vol_state;
 
@@ -267,10 +265,6 @@ private:
     void get_allocated_blks();
     void process_indx_completions(const indx_req_ptr& ireq, std::error_condition err);
     void process_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
-
-    // callback from mapping layer for free leaf node(data blks) so that volume
-    // layer could do blk free.
-    void process_free_blk_callback(Free_Blk_Entry fbe);
 
     std::error_condition alloc_blk(const volume_req_ptr& vreq, std::vector< BlkId >& bid);
     void verify_csum(const volume_req_ptr& vreq);
@@ -515,8 +509,12 @@ struct volume_req : indx_req {
     virtual void free_yourself() override { sisl::ObjectAllocator< volume_req >::deallocate(this); }
     virtual uint64_t get_seqId() override { return seqId; }
     virtual uint32_t get_key_size() override { return (sizeof(journal_key)); }
-    virtual uint32_t get_val_size() override { return (sizeof(uint16_t) * active_nlbas_written); }
+    virtual uint32_t get_val_size() override {
+        uint64_t active_nlbas_written = mapping::get_nlbas_from_cursor(lba(), active_btree_cur);
+        return (sizeof(uint16_t) * active_nlbas_written);
+    }
     virtual void fill_key(void* mem, uint32_t size) override {
+        uint64_t active_nlbas_written = mapping::get_nlbas_from_cursor(lba(), active_btree_cur);
         assert(size == sizeof(journal_key));
         journal_key* key = (journal_key*)mem;
         key->lba = lba();
@@ -524,6 +522,7 @@ struct volume_req : indx_req {
     }
 
     virtual void fill_val(void* mem, uint32_t size) override {
+        uint64_t active_nlbas_written = mapping::get_nlbas_from_cursor(lba(), active_btree_cur);
         /* we only populating check sum. Allocate blkids are already populated by indx mgr */
         uint16_t* j_csum = (uint16_t*)mem;
         assert(active_nlbas_written == nlbas());
@@ -531,16 +530,19 @@ struct volume_req : indx_req {
             j_csum[i] = csum_list[i];
         }
     }
-    virtual uint32_t get_io_size() override { return active_nlbas_written * vol()->get_page_size(); }
+    virtual uint32_t get_io_size() override {
+        uint64_t active_nlbas_written = mapping::get_nlbas_from_cursor(lba(), active_btree_cur);
+        return active_nlbas_written * vol()->get_page_size();
+    }
 
 private:
     /********** Constructor/Destructor **********/
     // volume_req() : csum_list(0), alloc_blkid_list(0), fbe_list(0){};
     volume_req(const vol_interface_req_ptr& vi_req) :
+            indx_req(vi_req->request_id),
             iface_req(vi_req),
             io_start_time(Clock::now()),
-            mvec(new homeds::MemVector()),
-            request_id(vi_req->request_id) {
+            mvec(new homeds::MemVector()) {
         assert((vi_req->vol_instance->get_page_size() * vi_req->nlbas) <= VOL_MAX_IO_SIZE);
         if (vi_req->is_write()) {
             mvec->set((uint8_t*)vi_req->write_buf, vi_req->vol_instance->get_page_size() * vi_req->nlbas, 0);

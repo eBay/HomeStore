@@ -6,6 +6,7 @@
 #define HOMESTORE_MAP_STORE_SPEC_HPP
 
 #include "homeds/loadgen/spec/store_spec.hpp"
+#include "homeblks/volume/volume.hpp"
 
 using namespace homeds::btree;
 using namespace homestore;
@@ -61,7 +62,8 @@ public:
         mapping_op_cntx cntx;
         cntx.op = UPDATE_VAL_AND_FREE_BLKS;
         cntx.u.vreq = req.get();
-        m_map->put(cntx, k, *(v.get()), nullptr);
+        BtreeQueryCursor cur;
+        m_map->put(cntx, k, *(v.get()), nullptr, cur);
         return true;
     }
 
@@ -166,7 +168,8 @@ public:
         mapping_op_cntx cntx;
         cntx.op = UPDATE_VAL_AND_FREE_BLKS;
         cntx.u.vreq = req.get();
-        m_map->put(cntx, key, value, nullptr);
+        BtreeQueryCursor cur;
+        m_map->put(cntx, key, value, nullptr, cur);
 
         return true;
     }

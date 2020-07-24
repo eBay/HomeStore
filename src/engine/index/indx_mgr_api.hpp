@@ -9,7 +9,7 @@
 #include "indx_mgr.hpp"
 
 namespace homestore {
-
+class Blk_Read_Tracker;
 struct Free_Blk_Entry;
 typedef std::function< void() > trigger_cp_callback;
 typedef std::function< void(Free_Blk_Entry& fbe) > free_blk_callback;
@@ -33,7 +33,7 @@ public:
     virtual void flush_free_blks(const btree_cp_id_ptr& btree_id, std::shared_ptr< blkalloc_cp_id >& blkalloc_id) = 0;
     virtual void update_btree_cp_sb(const btree_cp_id_ptr& cp_id, btree_cp_superblock& btree_sb, bool blkalloc_cp) = 0;
     virtual void truncate(const btree_cp_id_ptr& cp_id) = 0;
-    virtual btree_status_t destroy(blkid_list_ptr& free_blkid_list) = 0;
+    virtual btree_status_t destroy(blkid_list_ptr& free_blkid_list, uint64_t& free_node_cnt) = 0;
     virtual void destroy_done() = 0;
     virtual void cp_start(const btree_cp_id_ptr& cp_id, cp_comp_callback cb) = 0;
     virtual btree_status_t recovery_update(logstore_seq_num_t seqnum, journal_hdr* hdr,
@@ -117,7 +117,7 @@ public:
     uint64_t get_last_psn();
     /* It is called when super block all indx tables are persisted by its consumer */
     void indx_create_done(indx_tbl* indx_tbl = nullptr);
-    void indx_init();
+    void indx_init(); // private api
     std::string get_name();
     uint64_t get_used_size();
     void attach_user_fblkid_list(blkid_list_ptr& free_blkid_list, const cp_done_cb& free_blks_cb, int64_t free_size,
@@ -194,9 +194,13 @@ public:
      *
      * @return :- return number of blks freed. return -1 if it can not add more
      */
-    static int64_t free_blk(hs_cp_id* hs_id, blkid_list_ptr& out_fblk_list, std::vector< Free_Blk_Entry >& in_fbe_list,
-                            bool force);
-    static int64_t free_blk(hs_cp_id* hs_id, blkid_list_ptr& out_fblk_list, Free_Blk_Entry& fbe, bool force);
+    static uint64_t free_blk(hs_cp_id* hs_id, blkid_list_ptr& out_fblk_list, std::vector< Free_Blk_Entry >& in_fbe_list,
+                             bool force);
+    static uint64_t free_blk(hs_cp_id* hs_id, sisl::ThreadVector< homestore::BlkId >* out_fblk_list,
+                             std::vector< Free_Blk_Entry >& in_fbe_list, bool force);
+    static uint64_t free_blk(hs_cp_id* hs_id, blkid_list_ptr& out_fblk_list, Free_Blk_Entry& fbe, bool force);
+    static uint64_t free_blk(hs_cp_id* hs_id, sisl::ThreadVector< homestore::BlkId >* out_fblk_list,
+                             Free_Blk_Entry& fbe, bool force);
 
     /* it erase the free_blkid list and free up the resources. It is called after a free list is attached to a CP
      * and that CP is persisted.
@@ -312,6 +316,7 @@ struct Free_Blk_Entry {
     hs_cp_id* m_cp_id = nullptr;
 
     Free_Blk_Entry() {}
+    Free_Blk_Entry(const BlkId& blkId) : m_blkId(blkId), m_blk_offset(0), m_nblks_to_free(0) {}
     Free_Blk_Entry(const BlkId& blkId, uint8_t blk_offset, uint8_t nblks_to_free) :
             m_blkId(blkId),
             m_blk_offset(blk_offset),
@@ -335,12 +340,15 @@ public:
     virtual void free_yourself() = 0;
 
 public:
+    indx_req(uint64_t request_id) : request_id(request_id) {}
     sisl::io_blob create_journal_entry() { return j_ent.create_journal_entry(this); }
 
     void push_indx_alloc_blkid(BlkId& bid) { indx_alloc_blkid_list.push_back(bid); }
 
     /* it is used by mapping/consumer to push fbe to free list. These blkds will be freed when entry is completed */
-    void indx_push_fbe(std::vector< Free_Blk_Entry >& fbe) { indx_fbe_list.push_back(fbe); }
+    void indx_push_fbe(std::vector< Free_Blk_Entry >& in_fbe_list) {
+        indx_fbe_list.insert(indx_fbe_list.end(), in_fbe_list.begin(), in_fbe_list.end());
+    }
 
     friend void intrusive_ptr_add_ref(indx_req* req) { req->ref_count.increment(1); }
     friend void intrusive_ptr_release(indx_req* req) {
@@ -353,7 +361,7 @@ public:
                                       // destroy which can handle io failures and retry
     indx_journal_entry j_ent;
     std::vector< BlkId > indx_alloc_blkid_list;
-    std::vector< BlkId > indx_fbe_list;
+    std::vector< Free_Blk_Entry > indx_fbe_list;
     hs_cp_id* first_hs_id = nullptr;
     hs_cp_id* hs_id = nullptr;
     indx_cp_id_ptr indx_id = nullptr;

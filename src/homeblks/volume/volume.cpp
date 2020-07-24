@@ -4,7 +4,7 @@
 //
 
 #include <homeblks/home_blks.hpp>
-#include "mapping.hpp"
+#include "volume.hpp"
 #include <fstream>
 #include <atomic>
 #include <fds/utils.hpp>
@@ -200,16 +200,12 @@ void Volume::shutdown(const indxmgr_stop_cb& cb) { SnapMgr::shutdown(cb); }
 Volume::~Volume() {}
 
 indx_tbl* Volume::create_indx_tbl() {
-    auto pending_read_blk_cb =
-        std::bind(&Volume::pending_read_blk_cb, this, std::placeholders::_1, std::placeholders::_2);
     auto tbl =
         new mapping(get_size(), get_page_size(), get_name(), SnapMgr::trigger_indx_cp, SnapMgr::add_read_tracker);
     return static_cast< indx_tbl* >(tbl);
 }
 
 indx_tbl* Volume::recover_indx_tbl(btree_super_block& sb, btree_cp_superblock& cp_info) {
-    auto pending_read_blk_cb =
-        std::bind(&Volume::pending_read_blk_cb, this, std::placeholders::_1, std::placeholders::_2);
     auto tbl = new mapping(get_size(), get_page_size(), get_name(), sb, SnapMgr::trigger_indx_cp,
                            SnapMgr::add_read_tracker, &cp_info);
     return static_cast< indx_tbl* >(tbl);
@@ -481,16 +477,6 @@ void Volume::shutdown_if_needed() {
     if (vol_io_cnt == 1 && m_state == vol_state::DESTROYING) { destroy_internal(); }
 }
 
-//
-// No need to do it in multi-threading since blkstore.free_blk is in-mem operation.
-//
-void Volume::process_free_blk_callback(Free_Blk_Entry fbe) {
-    THIS_VOL_LOG(DEBUG, volume, , "Freeing blks cb - bid: {}, offset: {}, nblks: {}, get_pagesz: {}",
-                 fbe.m_blkId.to_string(), fbe.blk_offset(), fbe.blks_to_free(), get_page_size());
-
-    m_indx_mgr->safe_to_free_blk(fbe.m_cp_id, fbe);
-}
-
 void Volume::process_indx_completions(const indx_req_ptr& ireq, std::error_condition err) {
     auto vreq = boost::static_pointer_cast< volume_req >(ireq);
     assert(!vreq->is_read_op());
@@ -525,6 +511,10 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
 
     HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, vreq->is_read_op(), volume_data_read_latency, volume_data_write_latency,
                               get_elapsed_time_us(vc_req->op_start_time));
+
+    Free_Blk_Entry fbe(vc_req->bid);
+    IndxMgr::remove_read_tracker(fbe); // entry is added into read tracker by mapping when key value is
+                                       // read under the lock
     check_and_complete_req(vreq, vc_req->err);
     return;
 }

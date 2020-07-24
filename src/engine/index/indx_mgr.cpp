@@ -1,4 +1,5 @@
 #include "indx_mgr_api.hpp"
+#include "blk_read_tracker.hpp"
 #include <utility/thread_factory.hpp>
 
 using namespace homestore;
@@ -299,7 +300,7 @@ void IndxMgr::static_init() {
     try_blkalloc_checkpoint.set(false);
 
     m_cp = std::unique_ptr< HomeStoreCP >(new HomeStoreCP());
-    m_read_blk_tracker std::unique_ptr< Blk_Read_Tracker >(new Blk_Read_Tracker(IndxMgr::safe_to_free_blk));
+    m_read_blk_tracker = std::unique_ptr< Blk_Read_Tracker >(new Blk_Read_Tracker(IndxMgr::safe_to_free_blk));
     /* start the timer for blkalloc checkpoint */
     m_hs_cp_timer_hdl =
         iomanager.schedule_global_timer(60 * 1000 * 1000 * 1000ul, true, nullptr, iomgr::thread_regex::all_io,
@@ -366,10 +367,11 @@ void IndxMgr::recovery_start_phase2() {
         if (hdr->cp_cnt > m_last_cp_sb.cp_info.blkalloc_cp_cnt) {
 
             /* free blkids */
-            auto fbe_pair = indx_journal_entry::get_free_bid_list(buf.bytes());
-            for (uint32_t i = 0; i < fbe_pair.second; ++i) {
-                BlkId fbid(fbe_pair.first[i]);
-                auto cnt = free_blk(nullptr, indx_id->free_blkid_list, fblkid, true);
+            auto fblkid_pair = indx_journal_entry::get_free_bid_list(buf.bytes());
+            for (uint32_t i = 0; i < fblkid_pair.second; ++i) {
+                BlkId fbid(fblkid_pair.first[i]);
+                Free_Blk_Entry fbe(fbid, 0, fbid.get_nblks());
+                auto cnt = free_blk(nullptr, indx_id->free_blkid_list, fbe, true);
                 assert(cnt > 0);
                 if (hdr->cp_cnt <= m_last_cp_sb.cp_info.active_cp_cnt) {
                     /* TODO: we update size in superblock with each checkpoint. Ideally it
@@ -387,8 +389,8 @@ void IndxMgr::recovery_start_phase2() {
                     /* TODO: we update size in superblock with each checkpoint. Ideally it
                      * has to be updated only for blk alloc checkpoint.
                      */
-                    indx_id->indx_size.fetch_add(
-                        alloc_pair.first[i].data_size(m_hs->get_data_pagesz(), std::memory_order_relaxed));
+                    indx_id->indx_size.fetch_add(alloc_pair.first[i].data_size(m_hs->get_data_pagesz()),
+                                                 std::memory_order_relaxed);
                 }
             }
         }
@@ -421,13 +423,23 @@ void IndxMgr::recover_meta_ops() {
     for (uint32_t i = 0; i < meta_blk_list.size(); ++i) {
         auto hdr = (hs_cp_meta_sb*)(meta_blk_list[i].second.bytes());
         switch (hdr->type) {
-        case INDX_DESTROY:
-            m_active_tbl->get_btreequery_cur((meta_blk_list[i].second.bytes() + sizeof(hs_cp_meta_sb)),
-                                             m_destroy_btree_cur);
+        case INDX_CP:
+            assert(0);
+            break;
+        case INDX_DESTROY: {
+            uint64_t cur_bytes = (uint64_t)(meta_blk_list[i].second.bytes()) + sizeof(hs_cp_meta_sb);
+            uint64_t size = meta_blk_list[i].second.size() - sizeof(hs_cp_meta_sb);
+            sisl::blob b((uint8_t*)cur_bytes, size);
+            m_active_tbl->get_btreequery_cur(b, m_destroy_btree_cur);
             m_destroy_meta_blk = meta_blk_list[i].first;
             /* it will be destroyed when destroy is called from volume */
             break;
+        }
         case INDX_UNMAP:
+            assert(0);
+            break;
+        case SNAP_DESTROY:
+            assert(0);
             break;
         default:
             assert(0);
@@ -717,7 +729,7 @@ void IndxMgr::journal_comp_cb(logstore_req* lreq, logdev_key ld_key) {
 
     /* free the blkids */
     auto free_size = free_blk(ireq->hs_id, ireq->indx_id->free_blkid_list, ireq->indx_fbe_list, true);
-    assert(free_size >= 0);
+    assert(ireq->indx_fbe_list.size() == 0 || free_size > 0);
     ireq->indx_id->indx_size.fetch_sub(free_size);
 
     /* Increment the reference count by the number of free blk entries. Freing of blk is an async process. So we
@@ -939,8 +951,8 @@ void IndxMgr::destroy_indx_tbl() {
         attach_user_fblkid_list(
             free_list, ([this](bool success) {
                 /* persist superblock */
-                sisl::blob cursor_blob = m_destroy_btree_cur.serialize();
-                uint64_t size = cursor_blob.size() + sizeof(hs_cp_meta_sb);
+                const sisl::blob& cursor_blob = m_destroy_btree_cur.serialize();
+                uint64_t size = cursor_blob.size + sizeof(hs_cp_meta_sb);
                 uint32_t align = 0;
                 if (meta_blk_mgr->is_aligned_buf_needed(size)) {
                     align = HS_STATIC_CONFIG(disk_attr.align_size);
@@ -950,8 +962,7 @@ void IndxMgr::destroy_indx_tbl() {
                 hs_cp_meta_sb* mhdr = (hs_cp_meta_sb*)b.bytes();
                 mhdr->uuid = m_uuid;
                 mhdr->type = INDX_DESTROY;
-                memcpy((uint8_t*)((uint64_t)b.bytes() + sizeof(hs_cp_meta_sb)), cursor_blob.bytes(),
-                       cursor_blob.size());
+                memcpy((uint8_t*)((uint64_t)b.bytes() + sizeof(hs_cp_meta_sb)), cursor_blob.bytes, cursor_blob.size);
                 write_meta_blk(m_destroy_meta_blk, b);
 
                 /* send message to thread to start freeing the blkid */
@@ -960,10 +971,12 @@ void IndxMgr::destroy_indx_tbl() {
             free_size);
     }
     HS_SUBMOD_LOG(INFO, base, , "indx", m_name, "all user logs collected");
-    m_active_tbl->destroy(free_list);
+    uint64_t free_node_cnt = 0;
+    m_active_tbl->destroy(free_list, free_node_cnt);
+    hs_fbe_size.fetch_add(free_node_cnt); // TODO: it will be incremented later directly by btree
     attach_user_fblkid_list(free_list, ([this](bool success) {
                                 /* remove the meta blk which is used to track vol destroy progress */
-                                MetaBlkMgr::instance()->remove_sub_sb(m_destroy_meta_blk);
+                                if (m_destroy_meta_blk) { MetaBlkMgr::instance()->remove_sub_sb(m_destroy_meta_blk); }
                                 m_stop_cb(success);
                             }),
                             free_size, true);
@@ -980,7 +993,7 @@ void IndxMgr::attach_user_fblkid_list(blkid_list_ptr& free_blkid_list, const cp_
             if (last_cp) { m_last_cp = true; }
         } else {
             /* try again in the next cp */
-            free_blks(free_blkid_list, free_blks_cb, free_size, last_cp);
+            attach_user_fblkid_list(free_blkid_list, free_blks_cb, free_size, last_cp);
         }
     }));
 }
@@ -999,6 +1012,7 @@ void IndxMgr::shutdown(indxmgr_stop_cb cb) {
                       /* verify that all the indx mgr have called their last cp */
                       assert(success);
                       if (m_cp) { m_cp->shutdown(); }
+                      m_read_blk_tracker = nullptr;
                       cb(success);
                   }),
                   true);
@@ -1073,56 +1087,64 @@ void IndxMgr::register_cp_done_cb(const cp_done_cb& cb, bool blkalloc_cp) {
     }
 }
 
-int64_t IndxMgr::free_blk(hs_cp_id* hs_id, blkid_list_ptr& out_fblk_list, Free_Blk_Entry& fbe, bool force) {
+uint64_t IndxMgr::free_blk(hs_cp_id* hs_id, blkid_list_ptr& out_fblk_list, Free_Blk_Entry& fbe, bool force) {
+    return free_blk(hs_id, out_fblk_list.get(), fbe, force);
+}
+
+uint64_t IndxMgr::free_blk(hs_cp_id* hs_id, sisl::ThreadVector< homestore::BlkId >* out_fblk_list, Free_Blk_Entry& fbe,
+                           bool force) {
     if (!force && ((hs_fbe_size.load() + 1) > MAX_FBE_SIZE)) {
         /* caller will trigger homestore cp */
-        return -1;
+        return 0;
     }
 
     /* incrementing the ref count. It will be decremented later when read blk tracker is ready to free the blk */
     if (!hs_id) {
         hs_id = m_cp->cp_io_enter();
     } else {
-        m_cp->cp_inc_ref(hs_id);
+        m_cp->cp_inc_ref(hs_id, 1);
     }
 
     if (hs_fbe_size.fetch_add(1, std::memory_order_relaxed) == MAX_FBE_SIZE) {
         // trigger cp
         IndxMgr::trigger_hs_cp();
     }
-    in_fbe_list[i].m_cp_id = hs_id;
-    out_fbe_list.push_back(fbe.get_free_blkid());
+    fbe.m_cp_id = hs_id;
+    out_fblk_list->push_back(fbe.get_free_blkid());
     m_read_blk_tracker->safe_free_blks(fbe);
 
-    uint64_t free_blk_size = fbe.get_nblks() * m_hs->get_data_pagesz();
+    uint64_t free_blk_size = fbe.blks_to_free() * m_hs->get_data_pagesz();
     assert(free_blk_size > 0);
     return free_blk_size;
 }
 
-int64_t IndxMgr::free_blk(hs_cp_id* hs_id, blkid_list_ptr& out_fblk_list, std::vector< Free_Blk_Entry >& in_fbe_list,
-                          bool force) {
+uint64_t IndxMgr::free_blk(hs_cp_id* hs_id, blkid_list_ptr& out_fblk_list, std::vector< Free_Blk_Entry >& in_fbe_list,
+                           bool force) {
+    return (free_blk(hs_id, out_fblk_list.get(), in_fbe_list, force));
+}
+
+uint64_t IndxMgr::free_blk(hs_cp_id* hs_id, sisl::ThreadVector< homestore::BlkId >* out_fblk_list,
+                           std::vector< Free_Blk_Entry >& in_fbe_list, bool force) {
     if (!force && ((hs_fbe_size.load() + in_fbe_list.size()) > MAX_FBE_SIZE)) {
         /* caller will trigger homestore cp */
-        return btree_status_t::resource_full;
+        return 0;
     }
 
     uint64_t free_blk_size = 0;
     for (uint32_t i = 0; i < in_fbe_list.size(); ++i) {
-        free_blk_size += free_blk(hs_id, out_fblk_list, in_fbe_list[i], true);
+        free_blk_size += free_blk(hs_id, out_fblk_list, in_fbe_list[i], force);
     }
     return free_blk_size;
 }
 
 void IndxMgr::free_blkid_list_flushed(blkid_list_ptr fblk_list) {
     uint64_t cnt = hs_fbe_size.fetch_sub(fblk_list->size(), std::memory_order_relaxed);
-    assert(cnt >= 0);
-    hs_fbe_size->erase();
+    assert(cnt >= fblk_list->size());
 }
 
 void IndxMgr::free_blkid_list_flushed(std::vector< BlkId >& fblk_list) {
-    uint64_t cnt = hs_fbe_size.fetch_sub(fblk_list->size(), std::memory_order_relaxed);
-    assert(cnt >= 0);
-    fblk_list.erase();
+    uint64_t cnt = hs_fbe_size.fetch_sub(fblk_list.size(), std::memory_order_relaxed);
+    assert(cnt >= fblk_list.size());
 }
 
 void IndxMgr::remove_read_tracker(Free_Blk_Entry& fbe) { m_read_blk_tracker->remove(fbe); }
@@ -1168,5 +1190,5 @@ std::vector< cp_done_cb > IndxMgr::indx_cp_done_cb_list;
 std::vector< cp_done_cb > IndxMgr::hs_cp_done_cb_list;
 sisl::atomic_counter< bool > IndxMgr::try_blkalloc_checkpoint;
 std::map< boost::uuids::uuid, std::vector< std::pair< void*, sisl::byte_view > > > IndxMgr::indx_meta_map;
-std::atomic< uint64_t > IndxMgr::hs_fbe_size;
-std::unique_ptr< Blk_Read_Tracker > m_read_blk_tracker;
+std::atomic< uint64_t > IndxMgr::hs_fbe_size = 0;
+std::unique_ptr< Blk_Read_Tracker > IndxMgr::m_read_blk_tracker;

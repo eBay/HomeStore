@@ -84,7 +84,7 @@ public:
 class Blk_Read_Tracker {
     homeds::IntrusiveHashSet< BlkId, BlkEvictionRecord > m_pending_reads_map;
     BlkReadTrackerMetrics m_metrics;
-    typedef std::function< void(Free_Blk_Entry) > blk_remove_cb;
+    typedef std::function< void(Free_Blk_Entry&) > blk_remove_cb;
     blk_remove_cb m_remove_cb;
 
 public:
@@ -96,7 +96,7 @@ public:
     void remove(Free_Blk_Entry& fbe);
 
     /* safely free these blkids. If a blkid is already in a tracker then it wait for it to remove */
-    void safe_free_blks(bool is_read, Free_Blk_Entry& fbe);
+    void safe_free_blks(Free_Blk_Entry& fbe);
 
     uint64_t get_size() { return m_pending_reads_map.get_size(); }
 };

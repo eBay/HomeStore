@@ -1,6 +1,5 @@
 #pragma once
 
-#include "volume.hpp"
 #include "engine/homeds/btree/ssd_btree.hpp"
 #include "engine/homeds/btree/btree.hpp"
 #include "engine/blkalloc/blk.h"
@@ -11,20 +10,19 @@
 #include <sds_logging/logging.h>
 #include <utility/obj_life_counter.hpp>
 #include "homeblks/home_blks.hpp"
+#include "engine/index/indx_mgr_api.hpp"
+#include <cstring>
 
 SDS_LOGGING_DECL(volume)
 
 using namespace homeds;
 using namespace homeds::btree;
+#define MAX_NUM_LBA ((1 << NBLKS_BITS) - 1)
 
 #define LBA_MASK 0xFFFFFFFFFFFF
 #define CS_ARRAY_STACK_SIZE 256 // equals 2^N_LBA_BITS //TODO - put static assert
 namespace homestore {
-uint64_t get_end_lba(uint64_t start_lba, uint64_t nlba);
-uint64_t get_nlbas(uint64_t end_lba, uint64_t start_lba);
-uint64_t get_blkid_offset(uint64_t lba_offset, uint64_t vol_page_size);
-uint64_t get_blkid_offset(uint64_t end_lba, uint64_t start_lba, uint64_t vol_page_size);
-uint64_t get_next_start_lba(uint64_t start_lba, uint64_t nlba);
+struct volume_req;
 
 enum op_type {
     UPDATE_VAL_ONLY = 0,      // it only update the value
@@ -40,8 +38,8 @@ struct mapping_op_cntx {
         struct volume_req* vreq;
         sisl::ThreadVector< BlkId >* free_list;
     } u;
-    int64_t seqId = -1;
-    int64_t free_blk_size = 0;
+    uint64_t seqId = INVALID_SEQ_ID;
+    uint64_t free_blk_size = 0;
 };
 
 struct LbaId {
@@ -57,7 +55,7 @@ struct LbaId {
 
     LbaId(uint64_t lba_start, uint64_t n_lba) : m_lba_start(lba_start), m_n_lba(n_lba) { assert(n_lba < MAX_NUM_LBA); }
 
-    uint64_t end() { return (get_end_lba(m_lba_start, m_n_lba)); }
+    uint64_t end() { return m_lba_start + m_n_lba - 1; }
 
     bool is_invalid() { return m_lba_start == 0 && m_n_lba == 0; }
 
@@ -86,7 +84,7 @@ public:
 
     uint64_t start() const { return m_lbaId_ptr->m_lba_start; }
 
-    uint64_t end() const { return get_end_lba(start(), get_n_lba()); }
+    uint64_t end() const { return start() + get_n_lba() - 1; }
 
     uint16_t get_n_lba() const { return m_lbaId_ptr->m_n_lba; }
 
@@ -163,10 +161,11 @@ public:
 
     virtual string to_string() const override {
         stringstream ss;
-        ss << "[" << start() << " - " << get_end_lba(start(), get_n_lba()) << "]";
+        ss << "[" << start() << " - " << end() << "]";
         return ss.str();
     }
 
+    uint64_t get_nlbas(uint64_t end_lba, uint64_t start_lba) { return (end_lba - start_lba + 1); }
     void get_overlap(uint64_t lba_start, uint64_t lba_end, MappingKey& overlap) {
         auto start_lba = std::max(start(), lba_start);
         auto end_lba = std::min(end(), lba_end);
@@ -244,6 +243,10 @@ public:
         for (auto i = 0; i < ve.get_nlba(); i++)
             m_carr[i] = ve.get_checksum_at(i);
         m_ptr = (ValueEntry*)this;
+    }
+
+    uint64_t get_blkid_offset(uint64_t lba_offset, uint64_t vol_page_size) {
+        return ((vol_page_size / HomeBlks::instance()->get_data_pagesz()) * lba_offset);
     }
 
     void add_offset(uint8_t lba_offset, uint8_t nlba, uint32_t vol_page_size) {
@@ -342,6 +345,7 @@ public:
         return b;
     }
 
+    uint64_t get_nlbas(uint64_t end_lba, uint64_t start_lba) { return (end_lba - start_lba + 1); }
     void get_overlap_diff_kvs(MappingKey* k1, MappingValue* v1, MappingKey* k2, MappingValue* v2,
                               uint32_t vol_page_size, diff_read_next_t& to_read,
                               std::vector< std::pair< MappingKey, MappingValue > >& overlap_kvs) {
@@ -546,6 +550,7 @@ private:
     std::string m_unique_name;
     bool m_fix_state = false;
     uint64_t m_outstanding_io = 0;
+    uint64_t m_vol_size = 0;
 
     class GetCBParam : public BRangeQueryCBParam< MappingKey, MappingValue > {
     public:
@@ -557,9 +562,10 @@ private:
     class UpdateCBParam : public BRangeUpdateCBParam< MappingKey, MappingValue > {
     public:
         mapping_op_cntx m_cntx;
+        uint64_t m_start_lba;
 
         UpdateCBParam(mapping_op_cntx cntx, MappingKey& new_key, MappingValue& new_value) :
-                BRangeUpdateCBParam(new_key, new_value), m_cntx(cntx) {}
+                BRangeUpdateCBParam(new_key, new_value), m_cntx(cntx), m_start_lba(new_key.start()){};
     };
 
 public:
@@ -570,7 +576,8 @@ public:
             btree_cp_superblock* btree_cp_sb = nullptr);
     virtual ~mapping();
     int sweep_alloc_blks(uint64_t start_lba, uint64_t end_lba);
-    btree_status_t get(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& values);
+    btree_status_t get(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& values,
+                       bool fill_gaps = true);
     btree_status_t get(mapping_op_cntx& cntx, MappingKey& key, BtreeQueryCursor& cur,
                        std::vector< std::pair< MappingKey, MappingValue > >& values, bool fill_gaps);
     /* Note :- we should not write same IO in btree multiple times. When a key is updated , it update the free blk
@@ -651,11 +658,18 @@ public:
     virtual btree_status_t free_user_blkids(blkid_list_ptr free_list, BtreeQueryCursor& cur, int64_t& size) override;
     virtual btree_status_t unmap(blkid_list_ptr free_list, BtreeQueryCursor& cur) override;
     virtual void get_btreequery_cur(const sisl::blob& b, BtreeQueryCursor& cur) override;
-    virtual btree_status_t destroy(blkid_list_ptr& free_blkid_list) override;
+    virtual btree_status_t destroy(blkid_list_ptr& free_blkid_list, uint64_t& free_node_cnt) override;
 
 public:
     /* static functions */
     static void cp_done(trigger_cp_callback cb);
+    static uint64_t get_end_lba(uint64_t start_lba, uint64_t nlba);
+    static uint64_t get_nlbas(uint64_t end_lba, uint64_t start_lba);
+    static uint64_t get_blkid_offset(uint64_t lba_offset, uint64_t vol_page_size);
+    static uint64_t get_next_start_lba(uint64_t start_lba, uint64_t nlba);
+    static uint64_t get_nlbas_from_cursor(uint64_t start_lba, BtreeQueryCursor& cur);
+    static uint64_t get_next_start_key_from_cursor(BtreeQueryCursor& cur);
+    static uint64_t get_end_key_from_cursor(BtreeQueryCursor& cur);
 
 private:
     btree_status_t update_indx_tbl(indx_req* ireq, const btree_cp_id_ptr& btree_id, bool active_btree_update = true);

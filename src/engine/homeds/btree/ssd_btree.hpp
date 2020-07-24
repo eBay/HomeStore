@@ -317,7 +317,8 @@ public:
     }
 
     static void free_node(SSDBtreeStore* store, const boost::intrusive_ptr< SSDBtreeNode >& bn,
-                          const blkid_list_ptr& free_blkid_list) {
+                          const blkid_list_ptr& free_blkid_list, bool in_mem = false) {
+        if (in_mem) { return; }
         store->get_wb_cache()->free_blk(bn, free_blkid_list);
     }
 

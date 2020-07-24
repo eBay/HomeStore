@@ -540,7 +540,7 @@ public:
 struct BtreeQueryCursor {
     std::unique_ptr< BtreeKey > m_last_key;
     std::unique_ptr< BtreeLockTracker > m_locked_nodes;
-    sisl::blob serialize() { return (m_last_key->get_blob()); };
+    const sisl::blob serialize() { return (m_last_key->get_blob()); };
 };
 
 ENUM(BtreeQueryType, uint8_t,
