@@ -32,7 +32,7 @@ class HomestoreConan(ConanFile):
             "flip/1.0.0@sds/develop",
             "iomgr/[~=3.6]@sds/master",
             "sds_logging/[~=7.1]@sds/master",
-            "sisl/[~=2.0]@sisl/develop",
+            "sisl/[~=2.0]@sisl/master",
 
             # FOSS, rarely updated
             "benchmark/1.5.0",
