@@ -23,13 +23,11 @@ uint64_t mapping::get_nlbas_from_cursor(uint64_t start_lba, BtreeQueryCursor& cu
 
 uint64_t mapping::get_end_key_from_cursor(BtreeQueryCursor& cur) {
     auto mapping_key = (MappingKey*)(cur.m_last_key.get());
-    assert(mapping_key->start() == mapping_key->end());
     return (mapping_key->end());
 }
 
 uint64_t mapping::get_next_start_key_from_cursor(BtreeQueryCursor& cur) {
     auto mapping_key = (MappingKey*)(cur.m_last_key.get());
-    assert(mapping_key->start() == mapping_key->end());
     return (mapping_key->end() + 1);
 }
 
@@ -92,6 +90,7 @@ btree_status_t mapping::get(mapping_op_cntx& cntx, MappingKey& key, BtreeQueryCu
     } else {
         end_lba = key.end();
     }
+    HS_SUBMOD_LOG(DEBUG, volume, , "vol", m_unique_name, "GET : start_lba {} end lba {}", start_lba, end_lba);
     auto start_key = MappingKey(start_lba, 1);
     auto end_key = MappingKey(end_lba, 1);
     auto search_range = BtreeSearchRange(start_key, true, end_key, true); // it doesn't accept the extent key
@@ -111,9 +110,10 @@ btree_status_t mapping::get(mapping_op_cntx& cntx, MappingKey& key, BtreeQueryCu
     if (ret != btree_status_t::success) {
         assert(ret == btree_status_t::resource_full || ret == btree_status_t::fast_path_not_possible);
         if (qreq.cursor().m_last_key) {
-            /* partial read happened */
+            /* partial read happened. Update the cursor */
             end_lba = get_end_key_from_cursor(qreq.cursor());
             assert(get_end_key_from_cursor(qreq.cursor()) == result_kv.back().first.end());
+            cur = std::move(qreq.cursor());
         } else {
             /* it means no read has happened */
             assert(result_kv.size() == 0);
@@ -121,7 +121,7 @@ btree_status_t mapping::get(mapping_op_cntx& cntx, MappingKey& key, BtreeQueryCu
         }
     }
 
-    cur = std::move(qreq.cursor());
+    HS_SUBMOD_LOG(DEBUG, volume, , "vol", m_unique_name, "GET complete : end key from cursor {}", end_lba);
     if (fill_gaps && end_lba != UINT64_MAX) {
         // fill the gaps
         auto last_lba = start_lba;
@@ -424,8 +424,10 @@ btree_status_t mapping::match_item_cb_get(std::vector< std::pair< MappingKey, Ma
                 }
             } else if (param->m_ctx.op == FREE_ALL_USER_BLKID) {
                 /* free all the blkids */
-                HS_SUBMOD_LOG(DEBUG, volume, , "vol", m_unique_name, "Free Blk: vol_page: {}, data_page: {}, n_lba: {}",
-                              m_vol_page_size, HomeBlks::instance()->get_data_pagesz(), ve.get_nlba());
+                HS_SUBMOD_LOG(DEBUG, volume, , "vol", m_unique_name,
+                              "Free Blk: vol_page: {}, data_page: {}, n_lba: {} start lba {} end lba {} lba offset {}",
+                              m_vol_page_size, HomeBlks::instance()->get_data_pagesz(), ve.get_nlba(), overlap.start(),
+                              overlap.end(), lba_offset);
                 uint64_t nblks = (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * ve.get_nlba();
                 Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(), nblks);
                 fbe_list.push_back(fbe);
@@ -436,7 +438,7 @@ btree_status_t mapping::match_item_cb_get(std::vector< std::pair< MappingKey, Ma
 
         if (param->m_ctx.op == FREE_ALL_USER_BLKID && fbe_list.size() > 0) {
             uint64_t size = IndxMgr::free_blk(nullptr, param->m_ctx.u.free_list, fbe_list, false);
-            assert(size != 0);
+            HS_SUBMOD_LOG(DEBUG, volume, , "vol", m_unique_name, "size : {}", size);
             if (size > 0) {
                 param->m_ctx.free_blk_size += size;
                 ValueEntry ve; // create a default value
@@ -837,7 +839,6 @@ btree_status_t mapping::update_indx_tbl(indx_req* ireq, const btree_cp_id_ptr& b
     uint64_t end_lba;
     auto btree_cur_ptr = (active_btree_update ? &vreq->active_btree_cur : &vreq->diff_btree_cur);
 
-    /* we will start from the same place where it is left last time */
     if (active_btree_update) {
         end_lba = get_end_lba(start_lba, vreq->nlbas());
     } else {
@@ -847,6 +848,8 @@ btree_status_t mapping::update_indx_tbl(indx_req* ireq, const btree_cp_id_ptr& b
         end_lba = get_end_key_from_cursor(vreq->active_btree_cur);
         assert(end_lba >= start_lba);
     }
+
+    /* we will start from the same place where it is left last time */
     if (btree_cur_ptr->m_last_key) { next_start_lba = get_next_start_key_from_cursor(*btree_cur_ptr); }
     assert(end_lba <= get_end_lba(start_lba, vreq->nlbas()));
 
@@ -930,7 +933,6 @@ btree_status_t mapping::recovery_update(logstore_seq_num_t seqnum, journal_hdr* 
 
 btree_status_t mapping::free_user_blkids(blkid_list_ptr free_list, BtreeQueryCursor& cur, int64_t& size) {
     uint64_t start_lba = 0;
-    if (cur.m_last_key) { start_lba = get_next_start_key_from_cursor(cur); }
     mapping_op_cntx cntx;
     cntx.op = FREE_ALL_USER_BLKID;
     cntx.u.free_list = free_list.get();

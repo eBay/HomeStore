@@ -952,23 +952,27 @@ void IndxMgr::destroy_indx_tbl() {
             free_list, ([this](bool success) {
                 /* persist superblock */
                 const sisl::blob& cursor_blob = m_destroy_btree_cur.serialize();
-                uint64_t size = cursor_blob.size + sizeof(hs_cp_meta_sb);
-                uint32_t align = 0;
-                if (meta_blk_mgr->is_aligned_buf_needed(size)) {
-                    align = HS_STATIC_CONFIG(disk_attr.align_size);
-                    size = sisl::round_up(size, align);
+                if (cursor_blob.size) {
+                    uint64_t size = cursor_blob.size + sizeof(hs_cp_meta_sb);
+                    uint32_t align = 0;
+                    if (meta_blk_mgr->is_aligned_buf_needed(size)) {
+                        align = HS_STATIC_CONFIG(disk_attr.align_size);
+                        size = sisl::round_up(size, align);
+                    }
+                    sisl::byte_view b(size, align);
+                    hs_cp_meta_sb* mhdr = (hs_cp_meta_sb*)b.bytes();
+                    mhdr->uuid = m_uuid;
+                    mhdr->type = INDX_DESTROY;
+                    memcpy((uint8_t*)((uint64_t)b.bytes() + sizeof(hs_cp_meta_sb)), cursor_blob.bytes,
+                           cursor_blob.size);
+                    write_meta_blk(m_destroy_meta_blk, b);
                 }
-                sisl::byte_view b(size, align);
-                hs_cp_meta_sb* mhdr = (hs_cp_meta_sb*)b.bytes();
-                mhdr->uuid = m_uuid;
-                mhdr->type = INDX_DESTROY;
-                memcpy((uint8_t*)((uint64_t)b.bytes() + sizeof(hs_cp_meta_sb)), cursor_blob.bytes, cursor_blob.size);
-                write_meta_blk(m_destroy_meta_blk, b);
 
                 /* send message to thread to start freeing the blkid */
                 iomanager.run_on(m_thread_id, [this](io_thread_addr_t addr) { this->destroy_indx_tbl(); });
             }),
             free_size);
+        return;
     }
     HS_SUBMOD_LOG(INFO, base, , "indx", m_name, "all user logs collected");
     uint64_t free_node_cnt = 0;
@@ -1111,6 +1115,7 @@ uint64_t IndxMgr::free_blk(hs_cp_id* hs_id, sisl::ThreadVector< homestore::BlkId
     }
     fbe.m_cp_id = hs_id;
     out_fblk_list->push_back(fbe.get_free_blkid());
+    LOGINFO("free blkid {}", fbe.get_free_blkid());
     m_read_blk_tracker->safe_free_blks(fbe);
 
     uint64_t free_blk_size = fbe.blks_to_free() * m_hs->get_data_pagesz();
@@ -1132,7 +1137,7 @@ uint64_t IndxMgr::free_blk(hs_cp_id* hs_id, sisl::ThreadVector< homestore::BlkId
 
     uint64_t free_blk_size = 0;
     for (uint32_t i = 0; i < in_fbe_list.size(); ++i) {
-        free_blk_size += free_blk(hs_id, out_fblk_list, in_fbe_list[i], force);
+        free_blk_size += free_blk(hs_id, out_fblk_list, in_fbe_list[i], true);
     }
     return free_blk_size;
 }

@@ -16,7 +16,7 @@ typedef std::function< void(Free_Blk_Entry& fbe) > free_blk_callback;
 
 typedef boost::intrusive_ptr< indx_req > indx_req_ptr;
 
-#define MAX_FBE_SIZE 1 * 1024 * 1024 // 1 MB
+#define MAX_FBE_SIZE 1000 // 1  million
 struct indx_req;
 
 class indx_tbl {
