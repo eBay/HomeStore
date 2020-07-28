@@ -64,18 +64,45 @@ mapping::mapping(uint64_t volsize, uint32_t page_size, const std::string& unique
 
 mapping::~mapping() { delete m_bt; }
 
-btree_status_t mapping::get(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& values,
-                            bool fill_gaps) {
+btree_status_t mapping::read_indx(indx_req* ireq, const read_indx_comp_cb_t& read_cb) {
+    auto vreq = static_cast< volume_req* >(ireq);
+    std::vector< std::pair< MappingKey, MappingValue > > values;
+
+    auto ret = get(vreq, vreq->result_kv);
+
+    if (!vreq->first_read_indx_call) {
+        /* it should not be incremented multiple times */
+        vreq->first_read_indx_call = true;
+        vreq->outstanding_io_cnt.decrement(1); // it will be decremented in read_cb
+    }
+
+    // don't expect to see "has_more" return value in read path;
+    HS_ASSERT_CMP(DEBUG, ret, !=, btree_status_t::has_more);
+
+    if (ret == btree_status_t::success) {
+        // otherwise send callbacks to client for each K/V;
+        read_cb(ireq, no_error);
+    } else if (ret == btree_status_t::fast_path_not_possible) {
+        // in slow path, return to caller to trigger slow path;
+    } else {
+        // callback to volume for this read failure;
+        // could be here for both fast and slow path;
+        assert(0);
+        read_cb(ireq, btree_read_failed);
+    }
+    return ret;
+}
+
+btree_status_t mapping::get(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& values) {
     mapping_op_cntx cntx;
     cntx.op = READ_VAL_WITH_SEQID;
     cntx.u.vreq = req;
     MappingKey key(req->lba(), req->nlbas());
-    BtreeQueryCursor cur;
-    return (get(cntx, key, cur, values, fill_gaps));
+    return (get(cntx, key, req->read_cur, values));
 }
 
 btree_status_t mapping::get(mapping_op_cntx& cntx, MappingKey& key, BtreeQueryCursor& cur,
-                            std::vector< std::pair< MappingKey, MappingValue > >& values, bool fill_gaps) {
+                            std::vector< std::pair< MappingKey, MappingValue > >& result_kv) {
     uint64_t start_lba;
     if (cur.m_last_key != nullptr) { // last key will be null for first read or if no read happened in the last read
         start_lba = get_next_start_key_from_cursor(cur);
@@ -85,7 +112,6 @@ btree_status_t mapping::get(mapping_op_cntx& cntx, MappingKey& key, BtreeQueryCu
 
     uint64_t end_lba;
     if (cntx.op == FREE_ALL_USER_BLKID) {
-        assert(!fill_gaps);
         end_lba = m_vol_size / m_vol_page_size;
     } else {
         end_lba = key.end();
@@ -95,7 +121,6 @@ btree_status_t mapping::get(mapping_op_cntx& cntx, MappingKey& key, BtreeQueryCu
     auto end_key = MappingKey(end_lba, 1);
     auto search_range = BtreeSearchRange(start_key, true, end_key, true); // it doesn't accept the extent key
     GetCBParam param(cntx);
-    std::vector< pair< MappingKey, MappingValue > > result_kv;
 
     BtreeQueryRequest< MappingKey, MappingValue > qreq(
         search_range, BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, get_nlbas(end_lba, start_lba),
@@ -122,28 +147,6 @@ btree_status_t mapping::get(mapping_op_cntx& cntx, MappingKey& key, BtreeQueryCu
     }
 
     HS_SUBMOD_LOG(DEBUG, volume, , "vol", m_unique_name, "GET complete : end key from cursor {}", end_lba);
-    if (fill_gaps && end_lba != UINT64_MAX) {
-        // fill the gaps
-        auto last_lba = start_lba;
-        for (auto i = 0u; i < result_kv.size(); i++) {
-            int nl = result_kv[i].first.start() - last_lba;
-            while (nl-- > 0) {
-                values.emplace_back(make_pair(MappingKey(last_lba, 1), EMPTY_MAPPING_VALUE));
-                last_lba++;
-            }
-            values.emplace_back(result_kv[i]);
-            last_lba = result_kv[i].first.end() + 1;
-        }
-        while (last_lba <= end_lba) {
-            values.emplace_back(make_pair(MappingKey(last_lba, 1), EMPTY_MAPPING_VALUE));
-            last_lba++;
-        }
-#ifndef NDEBUG
-        validate_get_response(start_lba, get_nlbas(end_lba, start_lba), values);
-#endif
-    } else {
-        values.insert(values.begin(), result_kv.begin(), result_kv.end());
-    }
     return ret;
 }
 
@@ -671,7 +674,7 @@ btree_status_t mapping::match_item_cb_put(std::vector< std::pair< MappingKey, Ma
  * input_range is original client provided start/end, its always inclusive for mapping layer
  * Resulting start/end lba is always inclusive
  */
-void mapping::get_start_end_lba(BRangeCBParam * param, uint64_t & start_lba, uint64_t & end_lba) {
+void mapping::get_start_end_lba(BRangeCBParam* param, uint64_t& start_lba, uint64_t& end_lba) {
 
     // pick higher start of subrange/inputrange
     MappingKey* s_subrange = (MappingKey*)param->get_sub_range().get_start_key();
@@ -701,9 +704,9 @@ void mapping::add_new_interval(uint64_t s_lba, uint64_t e_lba, MappingValue& val
 
 /* result of overlap of k1/k2 is added to replace_kv */
 void mapping::compute_and_add_overlap(op_type update_op, std::vector< Free_Blk_Entry > fbe_list, uint64_t s_lba,
-                                      uint64_t e_lba, MappingValue & new_val, uint16_t new_val_offset,
-                                      MappingValue & e_val, uint16_t e_val_offset,
-                                      std::vector< std::pair< MappingKey, MappingValue > > & replace_kv) {
+                                      uint64_t e_lba, MappingValue& new_val, uint16_t new_val_offset,
+                                      MappingValue& e_val, uint16_t e_val_offset,
+                                      std::vector< std::pair< MappingKey, MappingValue > >& replace_kv) {
 
     auto nlba = get_nlbas(e_lba, s_lba);
 
@@ -721,7 +724,6 @@ void mapping::compute_and_add_overlap(op_type update_op, std::vector< Free_Blk_E
     replace_kv.emplace_back(
         make_pair(MappingKey(s_lba, nlba), MappingValue(new_val, new_val_offset, nlba, m_vol_page_size)));
 }
-
 
 #ifndef NDEBUG
 void mapping::validate_get_response(uint64_t lba_start, uint32_t n_lba,
@@ -939,7 +941,7 @@ btree_status_t mapping::free_user_blkids(blkid_list_ptr free_list, BtreeQueryCur
 
     MappingKey key(start_lba, 1);
     std::vector< std::pair< MappingKey, MappingValue > > values;
-    auto ret = get(cntx, key, cur, values, false);
+    auto ret = get(cntx, key, cur, values);
     size = cntx.free_blk_size;
     return ret;
 }

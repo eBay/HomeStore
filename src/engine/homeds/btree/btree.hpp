@@ -121,6 +121,7 @@ public:
         fc->inject_noreturn_flip("btree_leaf_node_split", {null_cond}, freq);
         fc->inject_retval_flip("btree_upgrade_delay", {null_cond}, freq, 20);
         fc->inject_retval_flip("writeBack_completion_req_delay_us", {null_cond}, freq, 20);
+        fc->inject_noreturn_flip("btree_read_fast_path_not_possible", {null_cond}, freq);
     }
 
     static void set_error_flip() {
@@ -378,7 +379,7 @@ public:
 #ifndef NDEBUG
         check_lock_debug();
 #endif
-        if (ret != btree_status_t::success) {
+        if (ret != btree_status_t::success && ret != btree_status_t::fast_path_not_possible) {
             THIS_BT_LOG(INFO, base, , "btree put failed {}", ret);
             COUNTER_INCREMENT(m_metrics, write_err_cnt, 1);
         }
@@ -466,7 +467,8 @@ public:
 #ifndef NDEBUG
         check_lock_debug();
 #endif
-        if (ret != btree_status_t::success && ret != btree_status_t::has_more) {
+        if (ret != btree_status_t::success && ret != btree_status_t::has_more &&
+            ret != btree_status_t::fast_path_not_possible) {
             COUNTER_INCREMENT(m_metrics, query_err_cnt, 1);
         }
         return ret;
@@ -979,16 +981,6 @@ private:
                 if (next_node) {
                     unlock_node(my_node, homeds::thread::locktype::LOCKTYPE_READ);
                     my_node = next_node;
-                    if (my_node->get_total_entries() > 0) {
-                        K ekey;
-                        next_node->get_nth_key(0, &ekey, false);
-                        /* comparing the end key of the input rangee with the start key of the next interval to see
-                         * if it overlaps
-                         */
-                        if (query_req.get_input_range().get_end_key()->compare_start(&ekey) < 0) { // early lookup end
-                            break;
-                        }
-                    }
                 }
 
                 THIS_BT_LOG(TRACE, btree_nodes, my_node, "Query leaf node:\n {}", my_node->to_string());
@@ -997,6 +989,7 @@ private:
                 std::vector< std::pair< K, V > > match_kv;
                 auto cur_count = my_node->get_all(query_req.this_batch_range(), query_req.get_batch_size() - count,
                                                   start_ind, end_ind, &match_kv);
+                if (cur_count == 0) { break; }
 
                 if (query_req.callback()) {
                     // TODO - support accurate sub ranges in future instead of setting input range
@@ -1022,6 +1015,8 @@ private:
                     if (my_node->get_next_bnode() == empty_bnodeid) { break; }
                     ret = read_and_lock_sibling(my_node->get_next_bnode(), next_node, LOCKTYPE_READ, LOCKTYPE_READ,
                                                 nullptr);
+                    if (ret == btree_status_t::fast_path_not_possible) { break; }
+
                     if (ret != btree_status_t::success) {
                         LOGERROR("read failed btree name {}", m_btree_cfg.get_name());
                         break;
@@ -1057,10 +1052,11 @@ private:
 
             int start_ind = 0, end_ind = 0;
             std::vector< std::pair< K, V > > match_kv;
-            my_node->get_all(query_req.this_batch_range(), query_req.get_batch_size() - (uint32_t)out_values.size(),
-                             start_ind, end_ind, &match_kv);
+            auto cur_count =
+                my_node->get_all(query_req.this_batch_range(), query_req.get_batch_size() - (uint32_t)out_values.size(),
+                                 start_ind, end_ind, &match_kv);
 
-            if (query_req.callback()) {
+            if (cur_count && query_req.callback()) {
                 // TODO - support accurate sub ranges in future instead of setting input range
                 query_req.get_cb_param()->set_sub_range(query_req.get_input_range());
                 std::vector< std::pair< K, V > > result_kv;

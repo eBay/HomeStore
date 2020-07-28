@@ -264,12 +264,12 @@ private:
     // async call to start the multi-threaded work.
     void get_allocated_blks();
     void process_indx_completions(const indx_req_ptr& ireq, std::error_condition err);
+    void process_read_indx_completions(const boost::intrusive_ptr< indx_req >& ireq, std::error_condition err);
     void process_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
 
     std::error_condition alloc_blk(const volume_req_ptr& vreq, std::vector< BlkId >& bid);
     void verify_csum(const volume_req_ptr& vreq);
-    std::error_condition read_indx(const volume_req_ptr& vreq,
-                                   std::vector< std::pair< MappingKey, MappingValue > >& kvs);
+
     void interface_req_done(const vol_interface_req_ptr& iface_req);
 
     uint64_t get_elapsed_time(Clock::time_point startTime);
@@ -471,7 +471,11 @@ struct volume_req : indx_req {
     sisl::atomic_counter< int > outstanding_io_cnt = 1; // how many IOs are outstanding for this request
     int vc_req_cnt = 0;                                 // how many child requests are issued.
 
-    /********** members used by indx mgr **********/
+    /********* members used by read ***********/
+    bool first_read_indx_call = false;
+    std::vector< std::pair< MappingKey, MappingValue > > result_kv;
+
+    /********** members used by indx_mgr and mapping **********/
     uint64_t lastCommited_seqId = INVALID_SEQ_ID;
     uint64_t seqId = INVALID_SEQ_ID;
 

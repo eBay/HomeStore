@@ -576,10 +576,9 @@ public:
             btree_cp_superblock* btree_cp_sb = nullptr);
     virtual ~mapping();
     int sweep_alloc_blks(uint64_t start_lba, uint64_t end_lba);
-    btree_status_t get(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& values,
-                       bool fill_gaps = true);
+    btree_status_t get(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& values);
     btree_status_t get(mapping_op_cntx& cntx, MappingKey& key, BtreeQueryCursor& cur,
-                       std::vector< std::pair< MappingKey, MappingValue > >& values, bool fill_gaps);
+                       std::vector< std::pair< MappingKey, MappingValue > >& values);
     /* Note :- we should not write same IO in btree multiple times. When a key is updated , it update the free blk
      * entries in request to its last value. If we write same io multiple times then it could end up freeing the wrong
      * blocks.
@@ -659,6 +658,7 @@ public:
     virtual btree_status_t unmap(blkid_list_ptr free_list, BtreeQueryCursor& cur) override;
     virtual void get_btreequery_cur(const sisl::blob& b, BtreeQueryCursor& cur) override;
     virtual btree_status_t destroy(blkid_list_ptr& free_blkid_list, uint64_t& free_node_cnt) override;
+    virtual btree_status_t read_indx(indx_req* req, const read_indx_comp_cb_t& read_cb) override;
 
 public:
     /* static functions */

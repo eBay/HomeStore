@@ -169,9 +169,10 @@ void HomeStoreCP::cp_attach_prepare(hs_cp_id* cur_id, hs_cp_id* new_id) {
 
 REGISTER_METABLK_SUBSYSTEM(indx_mgr, "INDX_MGR_CP", IndxMgr::meta_blk_found_cb, nullptr)
 
-IndxMgr::IndxMgr(boost::uuids::uuid uuid, std::string name, io_done_cb io_cb, create_indx_tbl func,
-                 bool is_snap_enabled) :
+IndxMgr::IndxMgr(boost::uuids::uuid uuid, std::string name, const io_done_cb& io_cb, const read_indx_comp_cb_t& read_cb,
+                 const create_indx_tbl& func, bool is_snap_enabled) :
         m_io_cb(io_cb),
+        m_read_cb(read_cb),
         m_uuid(uuid),
         m_name(name),
         prepare_cb_list(4),
@@ -190,9 +191,10 @@ IndxMgr::IndxMgr(boost::uuids::uuid uuid, std::string name, io_done_cb io_cb, cr
 }
 
 /* Constructor for recovery */
-IndxMgr::IndxMgr(boost::uuids::uuid uuid, std::string name, io_done_cb io_cb, create_indx_tbl create_func,
-                 recover_indx_tbl recover_func, indx_mgr_static_sb sb) :
+IndxMgr::IndxMgr(boost::uuids::uuid uuid, std::string name, const io_done_cb& io_cb, const read_indx_comp_cb_t& read_cb,
+                 const create_indx_tbl& create_func, const recover_indx_tbl& recover_func, indx_mgr_static_sb sb) :
         m_io_cb(io_cb),
+        m_read_cb(read_cb),
         m_uuid(uuid),
         m_name(name),
         prepare_cb_list(4),
@@ -774,7 +776,7 @@ btree_status_t IndxMgr::update_indx_tbl(indx_req* ireq, bool is_active) {
         if (status == btree_status_t::fast_path_not_possible) {
             /* call run_on in async mode */
             iomanager.run_on(m_slow_path_thread_id, [this, ireq](io_thread_addr_t addr) mutable {
-                HS_LOG(INFO, indx_mgr, "Slow path write triggered.");
+                HS_SUBMOD_LOG(INFO, base, , "indx", m_name, "Slow path write triggered.");
                 HS_ASSERT_CMP(DEBUG, ireq->state, ==, indx_req_state::active_btree);
                 update_indx_internal(ireq);
             });
@@ -790,7 +792,7 @@ btree_status_t IndxMgr::update_indx_tbl(indx_req* ireq, bool is_active) {
         if (status == btree_status_t::fast_path_not_possible) {
             /* call run_on in async mode */
             iomanager.run_on(m_slow_path_thread_id, [this, ireq](io_thread_addr_t addr) mutable {
-                HS_LOG(INFO, indx_mgr, "Slow path write triggered.");
+                HS_SUBMOD_LOG(INFO, base, , "indx", m_name, "Slow path write triggered.");
                 HS_ASSERT_CMP(DEBUG, ireq->state, ==, indx_req_state::diff_btree);
                 update_indx_internal(ireq);
             });
@@ -1169,6 +1171,22 @@ void IndxMgr::safe_to_free_blk(Free_Blk_Entry& fbe) {
     m_cp->cp_io_exit(hs_id);
     /* We have already free the blk after journal write is completed. We are just holding a cp for free to complete
      */
+}
+
+void IndxMgr::read_indx(const boost::intrusive_ptr< indx_req >& ireq) {
+    auto ret = m_active_tbl->read_indx(ireq.get(), m_read_cb);
+
+    if (ret == btree_status_t::fast_path_not_possible) {
+        iomanager.run_on(m_slow_path_thread_id, [this, ireq](io_thread_addr_t addr) mutable {
+            HS_SUBMOD_LOG(INFO, base, , "indx", m_name, "Slow path read triggered.");
+            auto status = m_active_tbl->read_indx(ireq.get(), m_read_cb);
+
+            // no expect has_more in read case;
+            HS_ASSERT_CMP(DEBUG, status, !=, btree_status_t::has_more);
+
+            // this read could either fail or succeed, in either case, mapping layer will callback to client;
+        });
+    }
 }
 
 uint64_t IndxMgr::get_used_size() { return (m_last_cp_sb.cp_info.indx_size + m_active_tbl->get_used_size()); }

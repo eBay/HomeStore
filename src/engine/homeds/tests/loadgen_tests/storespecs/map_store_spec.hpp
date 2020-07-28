@@ -103,7 +103,7 @@ public:
         volreq->lastCommited_seqId = INVALID_SEQ_ID; // read only latest value
 
         std::vector< std::pair< MappingKey, MappingValue > > kvs;
-        m_map->get(volreq.get(), kvs, false);
+        m_map->get(volreq.get(), kvs);
         uint64_t j = 0;
 
         std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;

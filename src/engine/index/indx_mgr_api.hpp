@@ -13,11 +13,12 @@ class Blk_Read_Tracker;
 struct Free_Blk_Entry;
 typedef std::function< void() > trigger_cp_callback;
 typedef std::function< void(Free_Blk_Entry& fbe) > free_blk_callback;
-
 typedef boost::intrusive_ptr< indx_req > indx_req_ptr;
 
 #define MAX_FBE_SIZE 1000 // 1  million
 struct indx_req;
+
+using read_indx_comp_cb_t = std::function< void(const indx_req_ptr& ireq, std::error_condition ret) >;
 
 class indx_tbl {
     /* these virtual functions should be defined by the consumer */
@@ -27,6 +28,7 @@ public:
     virtual void create_done() = 0;
     virtual btree_super_block get_btree_sb() = 0;
     virtual btree_status_t update_active_indx_tbl(indx_req* ireq, const btree_cp_id_ptr& btree_id) = 0;
+    virtual btree_status_t read_indx(indx_req* ireq, const read_indx_comp_cb_t& cb) = 0;
     virtual btree_status_t update_diff_indx_tbl(indx_req* ireq, const btree_cp_id_ptr& btree_id) = 0;
     virtual btree_cp_id_ptr attach_prepare_cp(const btree_cp_id_ptr& cur_cp_id, bool is_last_cp,
                                               bool blkalloc_checkpoint) = 0;
@@ -58,11 +60,12 @@ public:
      *                          false :- it is first time create
      * @params func :- function to create indx table
      */
-    IndxMgr(boost::uuids::uuid uuid, std::string name, io_done_cb io_cb, create_indx_tbl func, bool is_snap_enabled);
+    IndxMgr(boost::uuids::uuid uuid, std::string name, const io_done_cb& io_cb, const read_indx_comp_cb_t& read_cb,
+            const create_indx_tbl& func, bool is_snap_enabled);
 
     /* constructor for recovery */
-    IndxMgr(boost::uuids::uuid uuid, std::string name, io_done_cb io_cb, create_indx_tbl create_func,
-            recover_indx_tbl recover_func, indx_mgr_static_sb sb);
+    IndxMgr(boost::uuids::uuid uuid, std::string name, const io_done_cb& io_cb, const read_indx_comp_cb_t& read_cb,
+            const create_indx_tbl& create_func, const recover_indx_tbl& recover_func, indx_mgr_static_sb sb);
 
     virtual ~IndxMgr();
 
@@ -83,6 +86,15 @@ public:
      * @params req :- It create all information to update the indx mgr and journal
      */
     void update_indx(boost::intrusive_ptr< indx_req > ireq);
+
+    /**
+     * @brief : read and return indx mapping for a IO
+     * @param ireq
+     * @param cb : it is used to send callback when read is completed.
+     * The cb will be passed by mapping layer and triggered after read completes;
+     * @return : error condition whether read is success or not;
+     */
+    void read_indx(const boost::intrusive_ptr< indx_req >& ireq);
 
     /* Create snapshot. */
     void indx_snap_create();
@@ -264,6 +276,7 @@ private:
 private:
     indx_tbl* m_active_tbl;
     io_done_cb m_io_cb;
+    read_indx_comp_cb_t m_read_cb;
     std::shared_ptr< HomeLogStore > m_journal;
     log_req_comp_cb_t m_journal_comp_cb;
 
@@ -371,5 +384,6 @@ public:
     uint64_t request_id; // Copy of the id from interface request
     BtreeQueryCursor active_btree_cur;
     BtreeQueryCursor diff_btree_cur;
+    BtreeQueryCursor read_cur;
 };
 } // namespace homestore

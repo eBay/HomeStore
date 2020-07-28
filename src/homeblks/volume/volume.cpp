@@ -116,6 +116,7 @@ void Volume::init() {
         m_indx_mgr = SnapMgr::make_SnapMgr(
             m_params.uuid, std::string(m_params.vol_name),
             std::bind(&Volume::process_indx_completions, this, std::placeholders::_1, std::placeholders::_2),
+            std::bind(&Volume::process_read_indx_completions, this, std::placeholders::_1, std::placeholders::_2),
             std::bind(&Volume::create_indx_tbl, this), false);
 
         /* populate indx mgr super block */
@@ -137,6 +138,7 @@ void Volume::init() {
         m_indx_mgr = SnapMgr::make_SnapMgr(
             get_uuid(), std::string(get_name()),
             std::bind(&Volume::process_indx_completions, this, std::placeholders::_1, std::placeholders::_2),
+            std::bind(&Volume::process_read_indx_completions, this, std::placeholders::_1, std::placeholders::_2),
             std::bind(&Volume::create_indx_tbl, this),
             std::bind(&Volume::recover_indx_tbl, this, std::placeholders::_1, std::placeholders::_2), indx_mgr_sb);
     }
@@ -294,54 +296,19 @@ std::error_condition Volume::read(const vol_interface_req_ptr& iface_req) {
     COUNTER_INCREMENT(m_metrics, volume_read_count, 1);
     COUNTER_INCREMENT(m_metrics, volume_outstanding_data_read_count, 1);
 
+    ++home_blks_ref_cnt;
+    ++vol_ref_cnt;
+    if (is_offline()) {
+        ret = std::make_error_condition(std::errc::no_such_device);
+        goto done;
+    }
+
     try {
         /* add sanity checks */
-        ++home_blks_ref_cnt;
-        ++vol_ref_cnt;
-        if (is_offline()) {
-            ret = std::make_error_condition(std::errc::no_such_device);
-            goto done;
-        }
-
-        /* read indx */
-        std::vector< std::pair< MappingKey, MappingValue > > kvs;
-        if ((ret = read_indx(vreq, kvs)) != no_error) { goto done; }
-
-        /* create child req and read buffers */
         vreq->state = volume_req_state::data_io;
-        vreq->read_buf().reserve(kvs.size());
-        for (auto& kv : kvs) {
-            if (!(kv.second.is_valid())) {
-                vreq->read_buf().emplace_back(get_page_size(), 0, m_only_in_mem_buff);
-                auto blob = m_only_in_mem_buff->at_offset(0);
-                vreq->push_csum(crc16_t10dif(init_crc_16, blob.bytes, get_page_size()));
-            } else {
-                ValueEntry ve;
-                (kv.second.get_array()).get(0, ve, false);
-                assert(kv.second.get_array().get_total_elements() == 1);
-
-                volume_child_req_ptr vc_req =
-                    Volume::create_vol_child_req(ve.get_blkId(), vreq, kv.first.start(), kv.first.get_n_lba());
-
-                /* store csum read so that we can verify it later after data is read */
-                for (auto i = 0ul; i < kv.first.get_n_lba(); i++) {
-                    vreq->push_csum(ve.get_checksum_at(i));
-                }
-
-                /* Read data */
-                auto sz = get_page_size() * kv.first.get_n_lba();
-                auto offset = m_hb->get_data_pagesz() * ve.get_blk_offset();
-                boost::intrusive_ptr< BlkBuffer > bbuf = m_hb->get_data_blkstore()->read(
-                    ve.get_blkId(), offset, sz, boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vc_req));
-
-                // TODO: @hkadayam There is a potential for race of read_buf_list getting emplaced after completion
-                /* Add buffer to read_buf_list. User read data from read buf list */
-                vreq->read_buf().emplace_back(sz, offset, bbuf);
-            }
-        }
-
-        // Atleast 1 metadata io is completed.
-        ret = no_error;
+        /* read indx */
+        COUNTER_INCREMENT(m_metrics, volume_outstanding_metadata_read_count, 1);
+        m_indx_mgr->read_indx(boost::static_pointer_cast< indx_req >(vreq));
     } catch (const std::exception& e) {
         VOL_LOG_ASSERT(0, vreq, "Exception: {}", e.what())
         ret = std::make_error_condition(std::errc::device_or_resource_busy);
@@ -414,6 +381,9 @@ bool Volume::check_and_complete_req(const volume_req_ptr& vreq, const std::error
             uint64_t cnt = m_err_cnt.fetch_add(1, std::memory_order_relaxed);
             THIS_VOL_LOG(ERROR, , vreq, "Vol operation error {}", err.message());
             completed = true;
+            /* outstanding io cnt is not decremented. So it never going to do another completion callback if other
+             * child requests are completed successfully
+             */
         } else {
             THIS_VOL_LOG(WARN, , vreq, "Receiving completion on already completed request id={}", vreq->request_id);
         }
@@ -549,17 +519,85 @@ mapping* Volume::get_active_indx() {
     return (static_cast< mapping* >(indx_tbl));
 }
 
-std::error_condition Volume::read_indx(const volume_req_ptr& vreq,
-                                       std::vector< std::pair< MappingKey, MappingValue > >& kvs) {
-    /* get list of key values */
-    COUNTER_INCREMENT(m_metrics, volume_outstanding_metadata_read_count, 1);
-    auto err = get_active_indx()->get(vreq.get(), kvs);
+void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req >& ireq, std::error_condition err) {
+    auto ret = no_error;
+    auto vreq = boost::static_pointer_cast< volume_req >(ireq);
+
+    // if there is error or nothing to read anymore, complete this req;
+    if (err != no_error) {
+        vreq->state = volume_req_state::data_io;
+        ret = err;
+        goto read_done;
+    }
+
+    if (vreq->result_kv.size() == 0) {
+        /* no lba found */
+        ret = homestore_error::lba_not_exist;
+        goto read_done;
+    }
+    try {
+        uint64_t next_start_lba = vreq->lba();
+        for (uint32_t i = 0; i < vreq->result_kv.size(); ++i) {
+            /* create child req and read buffers */
+            MappingKey* mk = &(vreq->result_kv[i].first);
+            MappingValue* mv = &(vreq->result_kv[i].second);
+            uint64_t start_lba = mk->start();
+            uint64_t end_lba = mk->end();
+            VOL_RELEASE_ASSERT_CMP(next_start_lba, <=, start_lba, vreq, "mismatch start lba and next start lba");
+            VOL_RELEASE_ASSERT_CMP(mapping::get_end_lba(vreq->lba(), vreq->nlbas()), <=, end_lba, vreq,
+                                   "mismatch end lba and end lba in req");
+            while (next_start_lba < start_lba) {
+                vreq->read_buf().emplace_back(get_page_size(), 0, m_only_in_mem_buff);
+                auto blob = m_only_in_mem_buff->at_offset(0);
+                vreq->push_csum(crc16_t10dif(init_crc_16, blob.bytes, get_page_size()));
+                ++next_start_lba;
+            }
+            next_start_lba = end_lba + 1;
+
+            ValueEntry ve;
+            (mv->get_array()).get(0, ve, false);
+            assert(mv->get_array().get_total_elements() == 1);
+
+            volume_child_req_ptr vc_req =
+                Volume::create_vol_child_req(ve.get_blkId(), vreq, mk->start(), mk->get_n_lba());
+
+            /* store csum read so that we can verify it later after data is read */
+            for (auto i = 0ul; i < mk->get_n_lba(); i++) {
+                vreq->push_csum(ve.get_checksum_at(i));
+            }
+
+            /* Read data */
+            auto sz = get_page_size() * mk->get_n_lba();
+            auto offset = m_hb->get_data_pagesz() * ve.get_blk_offset();
+            boost::intrusive_ptr< BlkBuffer > bbuf = m_hb->get_data_blkstore()->read(
+                ve.get_blkId(), offset, sz, boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vc_req));
+
+            // TODO: @hkadayam There is a potential for race of read_buf_list getting emplaced after completion
+            /* Add buffer to read_buf_list. User read data from read buf list */
+            vreq->read_buf().emplace_back(sz, offset, bbuf);
+
+            // Atleast 1 metadata io is completed.
+            ret = no_error;
+        }
+
+        while (next_start_lba <= mapping::get_end_lba(vreq->lba(), vreq->nlbas())) {
+            vreq->read_buf().emplace_back(get_page_size(), 0, m_only_in_mem_buff);
+            auto blob = m_only_in_mem_buff->at_offset(0);
+            vreq->push_csum(crc16_t10dif(init_crc_16, blob.bytes, get_page_size()));
+            ++next_start_lba;
+        }
+        VOL_RELEASE_ASSERT_CMP(next_start_lba, ==, mapping::get_end_lba(vreq->lba(), vreq->nlbas()) + 1, vreq,
+                               "mismatch start lba and next start lba");
+    } catch (const std::exception& e) {
+        VOL_LOG_ASSERT(0, vreq, "Exception: {}", e.what())
+        ret = std::make_error_condition(std::errc::device_or_resource_busy);
+    }
+
     COUNTER_DECREMENT(m_metrics, volume_outstanding_metadata_read_count, 1);
     HISTOGRAM_OBSERVE(m_metrics, volume_map_read_latency, get_elapsed_time_us(vreq->io_start_time));
-    if (err != btree_status_t::success) {
-        return homestore_error::btree_read_failed;
-    }
-    return no_error;
+read_done:
+    check_and_complete_req(vreq, ret);
+    return;
 }
 
 /* It is not lock protected. It should be called only by thread for a vreq */
@@ -621,7 +659,8 @@ void Volume::alloc_single_block_in_mem() {
     m_only_in_mem_buff = BlkBuffer::make_object();
     m_only_in_mem_buff->set_key(out_blkid);
 
-    // Create a new block of memory for the blocks requested and set the memvec pointer to that
+    // Create a new block of memory for the blocks requested and set the memvec
+    // pointer to that
     uint8_t* ptr;
     uint32_t size = get_page_size();
     ptr = iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), size);
@@ -650,7 +689,8 @@ void Volume::interface_req_done(const vol_interface_req_ptr& iface_req) {
     if (std::holds_alternative< io_batch_comp_callback >(m_comp_cb)) {
         m_completed_reqs->push_back(iface_req);
         if (m_completed_reqs->size() == 1) {
-            // Also add this volume to global list to batch multiple volume responses in the protocol layer
+            // Also add this volume to global list to batch multiple volume
+            // responses in the protocol layer
             if (HomeBlks::s_io_completed_volumes == nullptr) {
                 HomeBlks::s_io_completed_volumes = sisl::VectorPool< std::shared_ptr< Volume > >::alloc();
             }
@@ -719,7 +759,8 @@ void Volume::remove_sb() {
 
 void Volume::migrate_sb() {
     // auto inst = MetaBlkMgr::instance();
-    // inst->add_sub_sb(meta_sub_type::VOLUME, (void*)(m_sb->ondisk_sb), sizeof(vol_ondisk_sb), &(m_sb->cookie));
+    // inst->add_sub_sb(meta_sub_type::VOLUME, (void*)(m_sb->ondisk_sb),
+    // sizeof(vol_ondisk_sb), &(m_sb->cookie));
 }
 
 void Volume::recovery_start_phase1() { m_indx_mgr->recovery_start_phase1(); }
