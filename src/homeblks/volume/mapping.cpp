@@ -73,7 +73,7 @@ btree_status_t mapping::read_indx(indx_req* ireq, const read_indx_comp_cb_t& rea
     if (!vreq->first_read_indx_call) {
         /* it should not be incremented multiple times */
         vreq->first_read_indx_call = true;
-        vreq->outstanding_io_cnt.decrement(1); // it will be decremented in read_cb
+        vreq->outstanding_io_cnt.increment(1); // it will be decremented in read_cb
     }
 
     // don't expect to see "has_more" return value in read path;

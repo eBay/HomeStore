@@ -530,11 +530,6 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
         goto read_done;
     }
 
-    if (vreq->result_kv.size() == 0) {
-        /* no lba found */
-        ret = homestore_error::lba_not_exist;
-        goto read_done;
-    }
     try {
         uint64_t next_start_lba = vreq->lba();
         for (uint32_t i = 0; i < vreq->result_kv.size(); ++i) {
@@ -544,7 +539,7 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
             uint64_t start_lba = mk->start();
             uint64_t end_lba = mk->end();
             VOL_RELEASE_ASSERT_CMP(next_start_lba, <=, start_lba, vreq, "mismatch start lba and next start lba");
-            VOL_RELEASE_ASSERT_CMP(mapping::get_end_lba(vreq->lba(), vreq->nlbas()), <=, end_lba, vreq,
+            VOL_RELEASE_ASSERT_CMP(mapping::get_end_lba(vreq->lba(), vreq->nlbas()), >=, end_lba, vreq,
                                    "mismatch end lba and end lba in req");
             while (next_start_lba < start_lba) {
                 vreq->read_buf().emplace_back(get_page_size(), 0, m_only_in_mem_buff);
