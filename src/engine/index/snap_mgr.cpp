@@ -1,13 +1,13 @@
 #include "snap_mgr.hpp"
 
 using namespace homestore;
-SnapMgr::SnapMgr(boost::uuids::uuid uuid, std::string name, io_done_cb io_cb, create_indx_tbl func,
+SnapMgr::SnapMgr(boost::uuids::uuid uuid, std::string name, io_done_cb io_cb, const read_indx_comp_cb_t& read_cb, create_indx_tbl func,
                  bool is_snap_enabled) :
-        IndxMgr(uuid, name, io_cb, func, is_snap_enabled) {}
+        IndxMgr(uuid, name, io_cb, read_cb, func, is_snap_enabled) {}
 
-SnapMgr::SnapMgr(boost::uuids::uuid uuid, std::string name, io_done_cb io_cb, create_indx_tbl create_func,
+SnapMgr::SnapMgr(boost::uuids::uuid uuid, std::string name, io_done_cb io_cb, const read_indx_comp_cb_t& read_cb, create_indx_tbl create_func,
                  recover_indx_tbl recover_func, indx_mgr_static_sb sb) :
-        IndxMgr(uuid, name, io_cb, create_func, recover_func, sb) {}
+        IndxMgr(uuid, name, io_cb, read_cb, create_func, recover_func, sb) {}
 
 int64_t SnapMgr::snap_create(indx_tbl* diff_tbl, int64_t cp_cnt) {
 #if 0
