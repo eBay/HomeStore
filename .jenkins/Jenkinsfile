@@ -6,9 +6,22 @@ pipeline {
         ARTIFACTORY_PASS = credentials('ARTIFACTORY_PASS')
         HOMESTORE_BUILD_TAG = "${GIT_COMMIT}"
         CONAN_USER = 'sds'
+        MASTER_BRANCH = 'master'
+        DEVELOP_BRANCH = 'develop/v*'
+        STABLE_BRANCH = 'testing/v*'
     }
 
     stages {
+        stage('Adjust Tag for Master/PR') {
+            when { not { anyOf {
+                branch "${DEVELOP_BRANCH}"
+                branch "${STABLE_BRANCH}"
+            } } }
+            steps {
+                sh(script: "sed -Ei 's,version = .*([[:digit:]]+\\.[[:digit:]]+\\.[[:digit:]]+).*,version = \"\\1+b${env.BUILD_NUMBER}\",' conanfile.py")
+            }
+        }
+
         stage('Get Version') {
             steps {
                 script {
@@ -46,6 +59,15 @@ pipeline {
                         label 'sds-builder'
                     }
                     stages {
+                        stage('Adjust Tag for Master/PR') {
+                            when { not { anyOf {
+                                branch "${DEVELOP_BRANCH}"
+                                branch "${STABLE_BRANCH}"
+                            } } }
+                            steps {
+                                sh(script: "sed -Ei 's,version = .*([[:digit:]]+\\.[[:digit:]]+\\.[[:digit:]]+).*,version = \"\\1+b${env.BUILD_NUMBER}\",' conanfile.py")
+                            }
+                        }
                         stage("Build") {
                             steps {
                                 sh "conan create -o homestore:sanitize=False -pr debug . ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}"
@@ -64,6 +86,15 @@ pipeline {
                         label 'sds-builder'
                     }
                     stages {
+                        stage('Adjust Tag for Master/PR') {
+                            when { not { anyOf {
+                                branch "${DEVELOP_BRANCH}"
+                                branch "${STABLE_BRANCH}"
+                            } } }
+                            steps {
+                                sh(script: "sed -Ei 's,version = .*([[:digit:]]+\\.[[:digit:]]+\\.[[:digit:]]+).*,version = \"\\1+b${env.BUILD_NUMBER}\",' conanfile.py")
+                            }
+                        }
                         stage("Build") {
                             steps {
                                 sh "conan create -o homestore:sanitize=False -pr test . ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}"
@@ -82,6 +113,15 @@ pipeline {
                         label 'sds-builder'
                     }
                     stages {
+                        stage('Adjust Tag for Master/PR') {
+                            when { not { anyOf {
+                                branch "${DEVELOP_BRANCH}"
+                                branch "${STABLE_BRANCH}"
+                            } } }
+                            steps {
+                                sh(script: "sed -Ei 's,version = .*([[:digit:]]+\\.[[:digit:]]+\\.[[:digit:]]+).*,version = \"\\1+b${env.BUILD_NUMBER}\",' conanfile.py")
+                            }
+                        }
                         stage("Build") {
                             steps {
                                 sh "conan create -o homestore:sanitize=False -pr release . ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}"
