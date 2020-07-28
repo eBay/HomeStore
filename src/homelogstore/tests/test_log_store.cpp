@@ -488,7 +488,7 @@ TEST_F(LogStoreTest, BurstSeqInsertAndTruncateInParallel) {
     this->truncate_validate();
 }
 
-// TODO: enable this after volume/homeblks reovery code is finished;
+// TODO: enable this after volume/homeblks recovery code is finished;
 #if 0 
 TEST_F(LogStoreTest, ThrottleSeqInsertThenRecover) {
     LOGINFO("Step 1: Reinit the num records to start sequential write test");

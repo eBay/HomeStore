@@ -35,6 +35,14 @@ void HomeLogStoreMgr::start(bool format) {
             }
             it = m_unopened_store_id.erase(it);
         }
+
+        // Also call the logstore to inform that start/replay is completed.
+        if (!format) {
+            for (auto& p : m) {
+                auto& lstore = p.second.m_log_store;
+                if (lstore && lstore->m_replay_done_cb) { lstore->m_replay_done_cb(lstore); }
+            }
+        }
     });
 }
 
@@ -119,7 +127,7 @@ logdev_key HomeLogStoreMgr::device_truncate(bool dry_run) {
         /* XXX: not sure if this check should be here or in device truncate */
         return min_safe_ld_key;
     }
-    // Got the safest log id to trucate and actually truncate upto the safe log idx to the log device
+    // Got the safest log id to truncate and actually truncate upto the safe log idx to the log device
     if (!dry_run && (min_safe_ld_key.idx >= 0)) m_log_dev.truncate(min_safe_ld_key);
     return min_safe_ld_key;
 }

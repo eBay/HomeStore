@@ -32,7 +32,7 @@ public:
 
             if (total_allocated_size + alloc_size > store->get_size()) { return VDevKey((uint64_t)-1, alloc_size); }
 
-            auto off = store->alloc_blk(alloc_size);
+            auto off = store->alloc_next_append_blk(alloc_size);
             total_allocated_size += alloc_size;
             return VDevKey(off, alloc_size);
         }

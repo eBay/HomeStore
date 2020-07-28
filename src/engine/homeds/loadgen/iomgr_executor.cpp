@@ -79,7 +79,7 @@ void IOMgrExecutor::stop(bool wait_io_complete) {
         // reschedule event so that I/O threads can exit block reading;
         // m_cq.blockingWrite([=] {});
         // t--;
-        iomanager.run_on(iomgr::thread_regex::any_io, [this]() { process_new_request(); });
+        iomanager.run_on(iomgr::thread_regex::least_busy_io, [this]() { process_new_request(); });
     }
 #endif
 }
@@ -92,7 +92,8 @@ void IOMgrExecutor::add(callback_t done_cb) {
     m_cq.blockingWrite(std::move(done_cb));
     m_write_cnt.fetch_add(1, std::memory_order_relaxed);
 
-    iomanager.run_on(iomgr::thread_regex::any_io, [this](iomgr::io_thread_addr_t addr) { process_new_request(); });
+    iomanager.run_on(iomgr::thread_regex::least_busy_worker,
+                     [this](iomgr::io_thread_addr_t addr) { process_new_request(); });
 }
 } // namespace loadgen
 } // namespace homeds

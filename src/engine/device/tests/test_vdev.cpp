@@ -283,7 +283,7 @@ public:
 
     void random_write() {
         auto sz_to_wrt = rand_size();
-        auto off_to_wrt = m_store->alloc_blk(sz_to_wrt);
+        auto off_to_wrt = m_store->alloc_next_append_blk(sz_to_wrt);
 
         auto it = m_off_to_info_map.find(off_to_wrt);
         if (it != m_off_to_info_map.end()) {

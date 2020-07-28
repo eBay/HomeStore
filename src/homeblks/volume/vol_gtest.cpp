@@ -562,7 +562,7 @@ public:
     }
 
     void start_job(TestJob* job, wait_type_t wait_type = wait_type_t::for_completion) {
-        iomanager.run_on(iomgr::thread_regex::all_iomgr_created_io,
+        iomanager.run_on(iomgr::thread_regex::all_worker,
                          [job, this](iomgr::io_thread_addr_t a) { job->start_in_this_thread(); });
         if (wait_type == wait_type_t::for_execution) {
             job->wait_for_execution();
