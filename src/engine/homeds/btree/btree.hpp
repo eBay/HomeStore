@@ -467,7 +467,8 @@ public:
 #ifndef NDEBUG
         check_lock_debug();
 #endif
-        if (ret != btree_status_t::success && ret != btree_status_t::has_more) {
+        if (ret != btree_status_t::success && ret != btree_status_t::has_more &&
+            ret != btree_status_t::fast_path_not_possible) {
             COUNTER_INCREMENT(m_metrics, query_err_cnt, 1);
         }
         return ret;
@@ -1023,6 +1024,8 @@ private:
                 if ((count < query_req.get_batch_size()) && (my_node->get_next_bnode() != empty_bnodeid)) {
                     ret = read_and_lock_sibling(my_node->get_next_bnode(), next_node, LOCKTYPE_READ, LOCKTYPE_READ,
                                                 nullptr);
+                    if (ret == btree_status_t::fast_path_not_possible) { break; }
+
                     if (ret != btree_status_t::success) {
                         LOGERROR("read failed btree name {}", m_btree_cfg.get_name());
                         ret = btree_status_t::read_failed;
