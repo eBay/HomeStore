@@ -16,7 +16,7 @@ pipeline {
                     TAG = sh(script: "grep -m 1 'version =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
                     CONAN_CHANNEL = sh(script: "echo ${BRANCH_NAME} | sed -E 's,(\\w+-?\\d*)/.*,\\1,' | sed -E 's,-,_,' | tr -d '\n'", returnStdout: true)
                     ECR_PATH = "ecr.vip.ebayc3.com/${ORG}/${PROJECT}"
-                    slackSend color: '#0063D1', channel: '#conan-pkgs', message: "*${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}* is building."
+                    slackSend color: '#0063D1', channel: '#sds-ci', message: "*${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}* is building."
                 }
             }
         }
@@ -89,7 +89,7 @@ pipeline {
                             withDockerRegistry([credentialsId: 'sds-sds', url: "https://ecr.vip.ebayc3.com"]) {
                                 sh "docker build --build-arg BUILD_TYPE=${BUILD_TYPE} --build-arg PKG_NAME=${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL} -t ${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE} .jenkins"
                                 sh "docker push ${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE}"
-                                slackSend channel: '#conan-pkgs', message: "*${PROJECT}:${CONAN_CHANNEL}-${BUILD_TYPE}* has been pushed to ECR."
+                                slackSend channel: '#sds-ci', message: "*${PROJECT}:${CONAN_CHANNEL}-${BUILD_TYPE}* has been pushed to ECR."
                             }
                         }
                     }
@@ -100,10 +100,10 @@ pipeline {
 
     post {
         failure {
-            slackSend color: '#E43237', channel: '#conan-pkgs', message: "*${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}* has had a failure : ${BUILD_URL}"
+            slackSend color: '#E43237', channel: '#sds-ci', message: "*${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}* has had a failure : ${BUILD_URL}"
         }
         success {
-            slackSend color: '#85B717', channel: '#conan-pkgs', message: "*${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}* has been uploaded to conan repo."
+            slackSend color: '#85B717', channel: '#sds-ci', message: "*${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}* has been uploaded to conan repo."
         }
     }
 }
