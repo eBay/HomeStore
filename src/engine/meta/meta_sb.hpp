@@ -16,6 +16,7 @@ static constexpr uint32_t MAX_SUBSYS_TYPE_LEN = 32;
 static constexpr uint32_t META_BLK_CONTEXT_SZ = (META_BLK_PAGE_SZ - META_BLK_HDR_MAX_SZ); // meta blk context data sz
 static constexpr uint32_t META_BLK_OVF_CONTEXT_SZ =
     (META_BLK_PAGE_SZ - META_BLK_OVF_HDR_MAX_SZ); // meta ovf blk context data sz
+static constexpr uint64_t MAX_NUM_BLKS_ALLOC = 64;
 /**
  * Sub system types and their priorities
  */
