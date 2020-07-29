@@ -107,12 +107,12 @@ public:
      * @ return :- return a current cp_id
      */
     cp_id_type* cp_io_enter() {
-
         rcu_read_lock();
         auto cp_id = get_cur_cp_id();
         if (!cp_id) { return nullptr; }
         cp_id->enter_cnt++;
-        assert(cp_id->cp_status == cp_status_t::cp_io_ready || cp_id->cp_status == cp_status_t::cp_trigger);
+        assert(cp_id->cp_status == cp_status_t::cp_io_ready || cp_id->cp_status == cp_status_t::cp_trigger ||
+               cp_id->cp_status == cp_status_t::cp_prepare);
         rcu_read_unlock();
 
         return cp_id;

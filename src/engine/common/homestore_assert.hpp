@@ -162,3 +162,24 @@
 #define HS_ASSERT_NULL(assert_type, val1, ...) HS_REQ_ASSERT_NULL(assert_type, val1, , ##__VA_ARGS__)
 #define HS_SUBMOD_ASSERT_NULL(assert_type, val1, req, submod_name, submod_val, ...)                                    \
     HS_SUBMOD_ASSERT_CMP(assert_type, (void*)val1, ==, (void*)nullptr, req, submod_name, submod_val, ##__VA_ARGS__)
+
+#define HS_DEBUG_ASSERT_EQ(val1, val2, ...) HS_ASSERT_CMP(DEBUG, val1, ==, val2, ##__VA_ARGS__)
+#define HS_DEBUG_ASSERT_NE(val1, val2, ...) HS_ASSERT_CMP(DEBUG, val1, !=, val2, ##__VA_ARGS__)
+#define HS_DEBUG_ASSERT_LT(val1, val2, ...) HS_ASSERT_CMP(DEBUG, val1, <, val2, ##__VA_ARGS__)
+#define HS_DEBUG_ASSERT_LE(val1, val2, ...) HS_ASSERT_CMP(DEBUG, val1, <=, val2, ##__VA_ARGS__)
+#define HS_DEBUG_ASSERT_GT(val1, val2, ...) HS_ASSERT_CMP(DEBUG, val1, >, val2, ##__VA_ARGS__)
+#define HS_DEBUG_ASSERT_GE(val1, val2, ...) HS_ASSERT_CMP(DEBUG, val1, >=, val2, ##__VA_ARGS__)
+
+#define HS_LOG_ASSERT_EQ(val1, val2, ...) HS_ASSERT_CMP(LOGMSG, val1, ==, val2, ##__VA_ARGS__)
+#define HS_LOG_ASSERT_NE(val1, val2, ...) HS_ASSERT_CMP(LOGMSG, val1, !=, val2, ##__VA_ARGS__)
+#define HS_LOG_ASSERT_LT(val1, val2, ...) HS_ASSERT_CMP(LOGMSG, val1, <, val2, ##__VA_ARGS__)
+#define HS_LOG_ASSERT_LE(val1, val2, ...) HS_ASSERT_CMP(LOGMSG, val1, <=, val2, ##__VA_ARGS__)
+#define HS_LOG_ASSERT_GT(val1, val2, ...) HS_ASSERT_CMP(LOGMSG, val1, >, val2, ##__VA_ARGS__)
+#define HS_LOG_ASSERT_GE(val1, val2, ...) HS_ASSERT_CMP(LOGMSG, val1, >=, val2, ##__VA_ARGS__)
+
+#define HS_RELEASE_ASSERT_EQ(val1, val2, ...) HS_ASSERT_CMP(RELEASE, val1, ==, val2, ##__VA_ARGS__)
+#define HS_RELEASE_ASSERT_NE(val1, val2, ...) HS_ASSERT_CMP(RELEASE, val1, !=, val2, ##__VA_ARGS__)
+#define HS_RELEASE_ASSERT_LT(val1, val2, ...) HS_ASSERT_CMP(RELEASE, val1, <, val2, ##__VA_ARGS__)
+#define HS_RELEASE_ASSERT_LE(val1, val2, ...) HS_ASSERT_CMP(RELEASE, val1, <=, val2, ##__VA_ARGS__)
+#define HS_RELEASE_ASSERT_GT(val1, val2, ...) HS_ASSERT_CMP(RELEASE, val1, >, val2, ##__VA_ARGS__)
+#define HS_RELEASE_ASSERT_GE(val1, val2, ...) HS_ASSERT_CMP(RELEASE, val1, >=, val2, ##__VA_ARGS__)

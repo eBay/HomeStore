@@ -303,7 +303,7 @@ void IndxMgr::static_init() {
     m_cp = std::unique_ptr< HomeStoreCP >(new HomeStoreCP());
     /* start the timer for blkalloc checkpoint */
     m_hs_cp_timer_hdl =
-        iomanager.schedule_global_timer(60 * 1000 * 1000 * 1000ul, true, nullptr, iomgr::thread_regex::all_io,
+        iomanager.schedule_global_timer(60 * 1000 * 1000 * 1000ul, true, nullptr, iomgr::thread_regex::all_user,
                                         [](void* cookie) { trigger_hs_cp(nullptr, false); });
     auto sthread = sisl::named_thread("indx_mgr", []() mutable {
         iomanager.run_io_loop(false, nullptr, [](bool is_started) {
@@ -328,7 +328,7 @@ void IndxMgr::static_init() {
     sthread2.detach();
     expected_thread_cnt++;
 
-    while (thread_cnt.load(std::memory_order_release) != expected_thread_cnt) {}
+    while (thread_cnt.load(std::memory_order_acquire) != expected_thread_cnt) {}
     IndxMgr::m_inited = true;
 }
 
@@ -376,7 +376,7 @@ void IndxMgr::recovery_start_phase2() {
             /* allocate blkids */
             auto alloc_pair = indx_journal_entry::get_alloc_bid_list(buf.bytes());
             for (uint32_t i = 0; i < alloc_pair.second; ++i) {
-                m_hs->get_data_blkstore()->alloc_blk(alloc_pair.first[i]);
+                m_hs->get_data_blkstore()->reserve_blk(alloc_pair.first[i]);
                 indx_id->indx_size += alloc_pair.first[i].data_size(m_hs->get_data_pagesz());
             }
         }
@@ -667,7 +667,7 @@ void IndxMgr::journal_comp_cb(logstore_req* lreq, logdev_key ld_key) {
      */
 
     for (uint32_t i = 0; i < ireq->indx_alloc_blkid_list.size(); ++i) {
-        m_hs->get_data_blkstore()->alloc_blk(ireq->indx_alloc_blkid_list[i]);
+        m_hs->get_data_blkstore()->reserve_blk(ireq->indx_alloc_blkid_list[i]);
         /* update size */
         ireq->indx_id->indx_size += ireq->indx_alloc_blkid_list[i].data_size(m_hs->get_data_pagesz());
     }
@@ -841,7 +841,7 @@ void IndxMgr::trigger_indx_cp() { m_cp->trigger_cp(nullptr); }
 void IndxMgr::trigger_indx_cp_with_cb(const cp_done_cb& cb) { m_cp->trigger_cp(cb); }
 
 void IndxMgr::trigger_hs_cp(const cp_done_cb& cb, bool shutdown) {
-    if (!m_inited.load(std::memory_order_relaxed)) {
+    if (!m_inited.load(std::memory_order_acquire)) {
         cb(true);
         return;
     }
@@ -951,9 +951,13 @@ void IndxMgr::add_prepare_cb_list(prepare_cb cb) {
 }
 
 void IndxMgr::shutdown(indxmgr_stop_cb cb) {
-    if (!m_inited.load(std::memory_order_relaxed)) { cb(true); }
+    if (!m_inited.load(std::memory_order_acquire)) {
+        LOGINFO("indx mgr shutdown started");
+        cb(true);
+        return;
+    }
     LOGINFO("indx mgr shutdown started");
-    iomanager.cancel_timer(m_hs_cp_timer_hdl, false);
+    iomanager.cancel_timer(m_hs_cp_timer_hdl);
     m_hs_cp_timer_hdl = iomgr::null_timer_handle;
     trigger_hs_cp(([cb](bool success) {
                       /* verify that all the indx mgr have called their last cp */
@@ -990,9 +994,9 @@ void IndxMgr::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size
     indx_cp_sb* cp_sb = (indx_cp_sb*)((uint64_t)buf.bytes() + sizeof(hs_cp_sb_hdr));
 
 #ifndef NDEBUG
-    uint64_t temp_size = sizeof(hs_cp_sb_hdr) + hdr->indx_cnt * sizeof(indx_cp_sb);
-    temp_size = sisl::round_up(size, HS_STATIC_CONFIG(disk_attr.align_size));
-    assert(size == temp_size);
+    // uint64_t temp_size = sizeof(hs_cp_sb_hdr) + hdr->indx_cnt * sizeof(indx_cp_sb);
+    // temp_size = sisl::round_up(size, HS_STATIC_CONFIG(disk_attr.align_size));
+    // assert(size == temp_size);
 #endif
 
     for (uint32_t i = 0; i < hdr->indx_cnt; ++i) {

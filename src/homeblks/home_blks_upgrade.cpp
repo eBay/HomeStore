@@ -154,7 +154,7 @@ void HomeBlks::scan_volumes() {
                 it->second = new_vol;
 
                 /* allocate this blkid in the sb blkstore */
-                m_sb_blk_store->alloc_blk(blkid);
+                m_sb_blk_store->reserve_blk(blkid);
                 m_last_vol_sb = sb;
             }
             blkid = sb->ondisk_sb->next_blkid;
@@ -300,6 +300,6 @@ void Volume::alloc_blk_callback(struct BlkId bid, size_t offset_size, size_t siz
     assert(get_state() == vol_state::MOUNTING);
     BlkId free_bid(bid.get_blkid_at(offset_size, size, m_hb->get_data_pagesz()));
     THIS_VOL_LOG(TRACE, volume, , "bid={}", free_bid.to_string());
-    m_hb->get_data_blkstore()->alloc_blk(free_bid);
+    m_hb->get_data_blkstore()->reserve_blk(free_bid);
     m_used_size.fetch_add(size, std::memory_order_relaxed);
 }

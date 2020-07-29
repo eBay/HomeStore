@@ -1,6 +1,7 @@
 #pragma once
 #include <boost/intrusive_ptr.hpp>
 #include "common/homestore_header.hpp"
+#include "common/homestore_assert.hpp"
 #include <metrics/metrics.hpp>
 
 const uint16_t init_crc_16 = 0x8005;
@@ -41,7 +42,7 @@ public:
         // _instance and delete the homeblks.
         if (hs->m_usage_counter.decrement_test_eq(1)) {
             auto p = HomeStoreBase::_instance.detach();
-            assert(p == hs);
+            HS_DEBUG_ASSERT_EQ((void*)p, (void*)hs);
             delete hs;
         }
     }

@@ -318,7 +318,7 @@ public:
         auto this_gen = this->get_gen();
         auto other_gen = other.get_gen();
 
-        assert(nentries > 0);
+        if (nentries == 0) { return 0; /* Nothing to move */ }
         int start_ind = this->get_total_entries() - 1;
         int end_ind = this->get_total_entries() - nentries - 1;
 
@@ -404,7 +404,7 @@ public:
         auto other_gen = other.get_gen();
         nentries = std::min(nentries, other.get_total_entries());
 
-        assert(nentries > 0);
+        if (nentries == 0) { return 0; /* Nothing to move */ }
         int other_ind = 0;
         while (nentries) {
             // Get the ith key and value blob and then remove the entry from here and insert to the other node

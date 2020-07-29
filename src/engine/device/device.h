@@ -318,6 +318,8 @@ public:
 
         register_me_to_farm();
     }
+
+    ~PhysicalDevMetrics() { deregister_me_from_farm(); }
 };
 
 class PhysicalDev {
