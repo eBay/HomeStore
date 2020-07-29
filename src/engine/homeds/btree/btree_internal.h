@@ -547,6 +547,11 @@ public:
 struct BtreeQueryCursor {
     std::unique_ptr< BtreeKey > m_last_key;
     std::unique_ptr< BtreeLockTracker > m_locked_nodes;
+    const sisl::blob serialize() {
+        sisl::blob b(nullptr, 0);
+        if (m_last_key) { return (m_last_key->get_blob()); }
+        return b;
+    };
 };
 
 ENUM(BtreeQueryType, uint8_t,
@@ -583,8 +588,7 @@ public:
 
 private:
     BtreeSearchRange m_input_range; // Btree range filter originally provided
-    BtreeSearchRange m_sub_range;   // Btree sub range used during callbacks. start
-                                    // non-inclusive, but end inclusive.
+    BtreeSearchRange m_sub_range;   // Btree sub range used during callbacks.
 };
 
 // class for range query callback param
@@ -625,8 +629,8 @@ protected:
 };
 
 template < typename K, typename V >
-using match_item_cb_get_t = std::function< void(std::vector< std::pair< K, V > >&, std::vector< std::pair< K, V > >&,
-                                                BRangeQueryCBParam< K, V >*) >;
+using match_item_cb_get_t = std::function< btree_status_t(
+    std::vector< std::pair< K, V > >&, std::vector< std::pair< K, V > >&, BRangeQueryCBParam< K, V >*) >;
 template < typename K, typename V >
 class BtreeQueryRequest : public BRangeRequest {
 public:

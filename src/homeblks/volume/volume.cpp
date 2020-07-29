@@ -3,8 +3,9 @@
 // Created by Kadayam, Hari on 06/11/17.
 //
 
+/* volume file */
 #include <homeblks/home_blks.hpp>
-#include "mapping.hpp"
+#include "volume.hpp"
 #include <fstream>
 #include <atomic>
 #include <fds/utils.hpp>
@@ -83,8 +84,6 @@ Volume::Volume(const vol_params& params) :
         throw std::runtime_error("shutdown in progress");
     }
     m_state = vol_state::UNINITED;
-    m_read_blk_tracker = std::make_unique< Blk_Read_Tracker >(
-        params.vol_name, params.uuid, std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
 }
 
 Volume::Volume(meta_blk* mblk_cookie, sisl::byte_view sb_buf) :
@@ -96,8 +95,6 @@ Volume::Volume(meta_blk* mblk_cookie, sisl::byte_view sb_buf) :
     m_state = sb->state;
 
     m_hb = HomeBlks::safe_instance();
-    m_read_blk_tracker = std::make_unique< Blk_Read_Tracker >(
-        sb->vol_name, sb->uuid, std::bind(&Volume::process_free_blk_callback, this, std::placeholders::_1));
 }
 
 void Volume::init() {
@@ -119,8 +116,7 @@ void Volume::init() {
         m_indx_mgr = SnapMgr::make_SnapMgr(
             m_params.uuid, std::string(m_params.vol_name),
             std::bind(&Volume::process_indx_completions, this, std::placeholders::_1, std::placeholders::_2),
-            std::bind(&Volume::process_read_indx_completions, this, std::placeholders::_1, std::placeholders::_2,
-                      std::placeholders::_3, std::placeholders::_4, std::placeholders::_5),
+            std::bind(&Volume::process_read_indx_completions, this, std::placeholders::_1, std::placeholders::_2),
             std::bind(&Volume::create_indx_tbl, this), false);
 
         /* populate indx mgr super block */
@@ -142,8 +138,7 @@ void Volume::init() {
         m_indx_mgr = SnapMgr::make_SnapMgr(
             get_uuid(), std::string(get_name()),
             std::bind(&Volume::process_indx_completions, this, std::placeholders::_1, std::placeholders::_2),
-            std::bind(&Volume::process_read_indx_completions, this, std::placeholders::_1, std::placeholders::_2,
-                      std::placeholders::_3, std::placeholders::_4, std::placeholders::_5),
+            std::bind(&Volume::process_read_indx_completions, this, std::placeholders::_1, std::placeholders::_2),
             std::bind(&Volume::create_indx_tbl, this),
             std::bind(&Volume::recover_indx_tbl, this, std::placeholders::_1, std::placeholders::_2), indx_mgr_sb);
     }
@@ -208,17 +203,14 @@ void Volume::shutdown(const indxmgr_stop_cb& cb) { SnapMgr::shutdown(cb); }
 Volume::~Volume() {}
 
 indx_tbl* Volume::create_indx_tbl() {
-    auto pending_read_blk_cb =
-        std::bind(&Volume::pending_read_blk_cb, this, std::placeholders::_1, std::placeholders::_2);
-    auto tbl = new mapping(get_size(), get_page_size(), get_name(), SnapMgr::trigger_indx_cp, pending_read_blk_cb);
+    auto tbl =
+        new mapping(get_size(), get_page_size(), get_name(), SnapMgr::trigger_indx_cp, SnapMgr::add_read_tracker);
     return static_cast< indx_tbl* >(tbl);
 }
 
 indx_tbl* Volume::recover_indx_tbl(btree_super_block& sb, btree_cp_superblock& cp_info) {
-    auto pending_read_blk_cb =
-        std::bind(&Volume::pending_read_blk_cb, this, std::placeholders::_1, std::placeholders::_2);
-    auto tbl = new mapping(get_size(), get_page_size(), get_name(), sb, SnapMgr::trigger_indx_cp, pending_read_blk_cb,
-                           &cp_info);
+    auto tbl = new mapping(get_size(), get_page_size(), get_name(), sb, SnapMgr::trigger_indx_cp,
+                           SnapMgr::add_read_tracker, &cp_info);
     return static_cast< indx_tbl* >(tbl);
 }
 
@@ -304,21 +296,19 @@ std::error_condition Volume::read(const vol_interface_req_ptr& iface_req) {
     COUNTER_INCREMENT(m_metrics, volume_read_count, 1);
     COUNTER_INCREMENT(m_metrics, volume_outstanding_data_read_count, 1);
 
+    ++home_blks_ref_cnt;
+    ++vol_ref_cnt;
+    if (is_offline()) {
+        ret = std::make_error_condition(std::errc::no_such_device);
+        goto done;
+    }
+
     try {
         /* add sanity checks */
-        ++home_blks_ref_cnt;
-        ++vol_ref_cnt;
-        if (is_offline()) {
-            ret = std::make_error_condition(std::errc::no_such_device);
-            goto done;
-        }
-
+        vreq->state = volume_req_state::data_io;
         /* read indx */
-        if ((ret = read_indx(vreq)) != no_error) {
-            goto done;
-        } else {
-            return ret;
-        }
+        COUNTER_INCREMENT(m_metrics, volume_outstanding_metadata_read_count, 1);
+        m_indx_mgr->read_indx(boost::static_pointer_cast< indx_req >(vreq));
     } catch (const std::exception& e) {
         VOL_LOG_ASSERT(0, vreq, "Exception: {}", e.what())
         ret = std::make_error_condition(std::errc::device_or_resource_busy);
@@ -391,6 +381,9 @@ bool Volume::check_and_complete_req(const volume_req_ptr& vreq, const std::error
             uint64_t cnt = m_err_cnt.fetch_add(1, std::memory_order_relaxed);
             THIS_VOL_LOG(ERROR, , vreq, "Vol operation error {}", err.message());
             completed = true;
+            /* outstanding io cnt is not decremented. So it never going to do another completion callback if other
+             * child requests are completed successfully
+             */
         } else {
             THIS_VOL_LOG(WARN, , vreq, "Receiving completion on already completed request id={}", vreq->request_id);
         }
@@ -412,7 +405,6 @@ bool Volume::check_and_complete_req(const volume_req_ptr& vreq, const std::error
 
     if (completed) {
         vreq->state = volume_req_state::completed;
-        m_read_blk_tracker->safe_remove_blks(vreq);
 
         /* update counters */
         size = get_page_size() * vreq->nlbas();
@@ -456,24 +448,6 @@ void Volume::shutdown_if_needed() {
     if (vol_io_cnt == 1 && m_state == vol_state::DESTROYING) { destroy_internal(); }
 }
 
-//
-// No need to do it in multi-threading since blkstore.free_blk is in-mem operation.
-//
-void Volume::process_free_blk_callback(Free_Blk_Entry fbe) {
-    THIS_VOL_LOG(DEBUG, volume, , "Freeing blks cb - bid: {}, offset: {}, nblks: {}, get_pagesz: {}",
-                 fbe.m_blkId.to_string(), fbe.blk_offset(), fbe.blks_to_free(), get_page_size());
-
-    m_indx_mgr->safe_to_free_blk(fbe.m_cp_id, fbe);
-}
-
-/* when read happens on mapping btree, under read lock we mark blk so it does not get removed by concurrent writes
- */
-void Volume::pending_read_blk_cb(volume_req* vreq, BlkId& bid) {
-    m_read_blk_tracker->insert(bid);
-    Free_Blk_Entry fbe(bid, 0, 0);
-    vreq->indx_push_fbe(fbe);
-}
-
 void Volume::process_indx_completions(const indx_req_ptr& ireq, std::error_condition err) {
     auto vreq = boost::static_pointer_cast< volume_req >(ireq);
     assert(!vreq->is_read_op());
@@ -508,6 +482,10 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
 
     HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, vreq->is_read_op(), volume_data_read_latency, volume_data_write_latency,
                               get_elapsed_time_us(vc_req->op_start_time));
+
+    Free_Blk_Entry fbe(vc_req->bid);
+    IndxMgr::remove_read_tracker(fbe); // entry is added into read tracker by mapping when key value is
+                                       // read under the lock
     check_and_complete_req(vreq, vc_req->err);
     return;
 }
@@ -541,30 +519,36 @@ mapping* Volume::get_active_indx() {
     return (static_cast< mapping* >(indx_tbl));
 }
 
-void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req >& ireq, const BtreeKey& k,
-                                           const BtreeValue& v, bool has_more, std::error_condition err) {
+void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req >& ireq, std::error_condition err) {
     auto ret = no_error;
     auto vreq = boost::static_pointer_cast< volume_req >(ireq);
 
-    MappingKey* mk = const_cast< MappingKey* >(dynamic_cast< const MappingKey* >(&k));
-    MappingValue* mv = const_cast< MappingValue* >(dynamic_cast< const MappingValue* >(&v));
-
     // if there is error or nothing to read anymore, complete this req;
-    if (err != no_error || !has_more) {
+    if (err != no_error) {
         vreq->state = volume_req_state::data_io;
         ret = err;
         goto read_done;
     }
 
     try {
-        /* create child req and read buffers */
-        vreq->state = volume_req_state::data_io;
+        uint64_t next_start_lba = vreq->lba();
+        for (uint32_t i = 0; i < vreq->result_kv.size(); ++i) {
+            /* create child req and read buffers */
+            MappingKey* mk = &(vreq->result_kv[i].first);
+            MappingValue* mv = &(vreq->result_kv[i].second);
+            uint64_t start_lba = mk->start();
+            uint64_t end_lba = mk->end();
+            VOL_RELEASE_ASSERT_CMP(next_start_lba, <=, start_lba, vreq, "mismatch start lba and next start lba");
+            VOL_RELEASE_ASSERT_CMP(mapping::get_end_lba(vreq->lba(), vreq->nlbas()), >=, end_lba, vreq,
+                                   "mismatch end lba and end lba in req");
+            while (next_start_lba < start_lba) {
+                vreq->read_buf().emplace_back(get_page_size(), 0, m_only_in_mem_buff);
+                auto blob = m_only_in_mem_buff->at_offset(0);
+                vreq->push_csum(crc16_t10dif(init_crc_16, blob.bytes, get_page_size()));
+                ++next_start_lba;
+            }
+            next_start_lba = end_lba + 1;
 
-        if (!(mv->is_valid())) {
-            vreq->read_buf().emplace_back(get_page_size(), 0, m_only_in_mem_buff);
-            auto blob = m_only_in_mem_buff->at_offset(0);
-            vreq->push_csum(crc16_t10dif(init_crc_16, blob.bytes, get_page_size()));
-        } else {
             ValueEntry ve;
             (mv->get_array()).get(0, ve, false);
             assert(mv->get_array().get_total_elements() == 1);
@@ -586,36 +570,29 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
             // TODO: @hkadayam There is a potential for race of read_buf_list getting emplaced after completion
             /* Add buffer to read_buf_list. User read data from read buf list */
             vreq->read_buf().emplace_back(sz, offset, bbuf);
+
+            // Atleast 1 metadata io is completed.
+            ret = no_error;
         }
 
-        // Atleast 1 metadata io is completed.
-        ret = no_error;
+        while (next_start_lba <= mapping::get_end_lba(vreq->lba(), vreq->nlbas())) {
+            vreq->read_buf().emplace_back(get_page_size(), 0, m_only_in_mem_buff);
+            auto blob = m_only_in_mem_buff->at_offset(0);
+            vreq->push_csum(crc16_t10dif(init_crc_16, blob.bytes, get_page_size()));
+            ++next_start_lba;
+        }
+        VOL_RELEASE_ASSERT_CMP(next_start_lba, ==, mapping::get_end_lba(vreq->lba(), vreq->nlbas()) + 1, vreq,
+                               "mismatch start lba and next start lba");
     } catch (const std::exception& e) {
         VOL_LOG_ASSERT(0, vreq, "Exception: {}", e.what())
         ret = std::make_error_condition(std::errc::device_or_resource_busy);
     }
 
-    return;
-
+    COUNTER_DECREMENT(m_metrics, volume_outstanding_metadata_read_count, 1);
+    HISTOGRAM_OBSERVE(m_metrics, volume_map_read_latency, get_elapsed_time_us(vreq->io_start_time));
 read_done:
     check_and_complete_req(vreq, ret);
     return;
-}
-
-std::error_condition Volume::read_indx(const volume_req_ptr& vreq) {
-    /* get list of key values */
-    COUNTER_INCREMENT(m_metrics, volume_outstanding_metadata_read_count, 1);
-
-    auto err = m_indx_mgr->read_indx(boost::static_pointer_cast< indx_req >(vreq));
-
-    // auto err = get_active_indx()->get(vreq.get(), kvs);
-    COUNTER_DECREMENT(m_metrics, volume_outstanding_metadata_read_count, 1);
-    HISTOGRAM_OBSERVE(m_metrics, volume_map_read_latency, get_elapsed_time_us(vreq->io_start_time));
-    if (err) {
-        if (err != homestore_error::lba_not_exist) { COUNTER_INCREMENT(m_metrics, volume_read_error_count, 1); }
-        return err;
-    }
-    return no_error;
 }
 
 /* It is not lock protected. It should be called only by thread for a vreq */
@@ -738,10 +715,6 @@ size_t Volume::call_batch_completion_cbs() {
 indx_cp_id_ptr Volume::attach_prepare_volume_cp(const indx_cp_id_ptr& indx_id, hs_cp_id* hs_id, hs_cp_id* new_hs_id) {
     return (m_indx_mgr->attach_prepare_indx_cp(indx_id, hs_id, new_hs_id));
 }
-
-#ifndef NDEBUG
-void Volume::verify_pending_blks() { assert(m_read_blk_tracker->get_size() == 0); }
-#endif
 
 vol_state Volume::set_state(vol_state state, bool persist) {
     THIS_VOL_LOG(INFO, base, , "volume state changed from {} to {}", m_state, state);

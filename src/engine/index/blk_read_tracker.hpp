@@ -17,7 +17,7 @@ namespace homestore {
 
 #define BLK_READ_MAP_SIZE 128
 struct Free_Blk_Entry;
-struct volume_req;
+struct indx_req;
 
 struct BlkEvictionRecord : public homeds::HashNode, sisl::ObjLifeCounter< BlkEvictionRecord > {
     BlkId m_key;                                 // Key to access this cache
@@ -71,7 +71,7 @@ struct BlkEvictionRecord : public homeds::HashNode, sisl::ObjLifeCounter< BlkEvi
 
 class BlkReadTrackerMetrics : public sisl::MetricsGroupWrapper {
 public:
-    explicit BlkReadTrackerMetrics(const char* vol_name) : sisl::MetricsGroupWrapper("BlkReadTracker", vol_name) {
+    explicit BlkReadTrackerMetrics(const char* indx_name) : sisl::MetricsGroupWrapper("BlkReadTracker", indx_name) {
         REGISTER_COUNTER(blktrack_pending_blk_read_map_sz, "Size of pending blk read map",
                          sisl::_publish_as::publish_as_gauge);
         REGISTER_COUNTER(blktrack_erase_blk_rescheduled, "Erase blk rescheduled due to concurrent rw");
@@ -84,31 +84,21 @@ public:
 class Blk_Read_Tracker {
     homeds::IntrusiveHashSet< BlkId, BlkEvictionRecord > m_pending_reads_map;
     BlkReadTrackerMetrics m_metrics;
-    typedef std::function< void(Free_Blk_Entry) > blk_remove_cb;
+    typedef std::function< void(Free_Blk_Entry&) > blk_remove_cb;
     blk_remove_cb m_remove_cb;
-    std::string m_vol_name;
-    boost::uuids::uuid m_vol_uuid;
 
 public:
-    Blk_Read_Tracker(const char* vol_name, boost::uuids::uuid vol_uuid, blk_remove_cb remove_cb) :
-            m_pending_reads_map(HB_SETTINGS_VALUE(volume->estimated_pending_blk_reads)),
-            m_metrics(vol_name),
-            m_remove_cb(remove_cb),
-            m_vol_name(vol_name),
-            m_vol_uuid(vol_uuid) {}
+    Blk_Read_Tracker(blk_remove_cb remove_cb) :
+            m_pending_reads_map(1000), m_metrics("blk_read_tracker"), m_remove_cb(remove_cb) {}
 
-    void insert(BlkId& bid);
+    void insert(Free_Blk_Entry& fbe);
+    /* after a read is finished, remove this blkid from the tracker */
+    void remove(Free_Blk_Entry& fbe);
 
-    /* after read is finished, tis marked for safe removal*/
-    void safe_remove_blk_on_read(Free_Blk_Entry& fbe);
+    /* safely free these blkids. If a blkid is already in a tracker then it wait for it to remove */
+    void safe_free_blks(Free_Blk_Entry& fbe);
 
-    /* after overwriting blk id in write flow, its marked for safe removal if cannot be freed immediatly*/
-    void safe_remove_blk_on_write(Free_Blk_Entry& fbe);
-
-    void safe_remove_blks(const boost::intrusive_ptr< volume_req >& vreq);
     uint64_t get_size() { return m_pending_reads_map.get_size(); }
-    boost::uuids::uuid get_uuid() { return m_vol_uuid; }
-    const std::string& get_name() const { return m_vol_name; }
 };
 } // namespace homestore
 

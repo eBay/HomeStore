@@ -125,8 +125,8 @@ public:
         return btree_status_t::success;
     }
 
-    static void free_node(MemBtreeStore* store, const boost::intrusive_ptr< MemBtreeNode >& bn, bool mem_only,
-                          const btree_cp_id_ptr& cp_id) {
+    static void free_node(MemBtreeStore* store, const boost::intrusive_ptr< MemBtreeNode >& bn,
+                          const blkid_list_ptr& free_blkid_list, bool in_mem) {
         auto mbh = (mem_btree_node_header*)bn.get();
         if (mbh->refcount.decrement_testz()) {
             // TODO: Access the VariantNode area and call its destructor as well

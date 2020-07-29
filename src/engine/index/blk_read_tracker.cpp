@@ -2,47 +2,31 @@
 // Created by Amit Desai on 07/15/19.
 //
 
-#include "volume.hpp"
+#include "indx_mgr_api.hpp"
 #include "blk_read_tracker.hpp"
 #include <sds_logging/logging.h>
 
-SDS_LOGGING_DECL(volume)
+SDS_LOGGING_DECL(indx_mgr)
 
 namespace homestore {
 
-void Blk_Read_Tracker::insert(BlkId& bid) {
-    sisl::blob b = BlkId::get_blob(bid);
+void Blk_Read_Tracker::insert(Free_Blk_Entry& fbe) {
+    sisl::blob b = BlkId::get_blob(fbe.m_blkId);
     uint64_t hash_code = util::Hash64((const char*)b.bytes, (size_t)b.size);
-    BlkEvictionRecord* ber = BlkEvictionRecord::make_object(bid);
+    BlkEvictionRecord* ber = BlkEvictionRecord::make_object(fbe.m_blkId);
     BlkEvictionRecord* outber = nullptr;
     // insert into pending read map and set ref of value to 2(one for hashmap and one for client)
     // If value already present , insert() will just increase ref count of value by 1.
-    bool inserted = m_pending_reads_map.insert(bid, *ber, &outber, hash_code, NULL_LAMBDA);
+    bool inserted = m_pending_reads_map.insert(fbe.m_blkId, *ber, &outber, hash_code, NULL_LAMBDA);
     if (inserted) {
         COUNTER_INCREMENT(m_metrics, blktrack_pending_blk_read_map_sz, 1);
     } else { // record exists already, some other read happened
         sisl::ObjectAllocator< BlkEvictionRecord >::deallocate(ber);
     }
-    THIS_VOL_LOG(TRACE, volume, , "Marked read pending Bid:{},{}", bid, inserted);
+    //    THIS_VOL_LOG(TRACE, indx_mgr, , "Marked read pending Bid:{},{}", fbe.m_blkId, inserted);
 }
 
-void Blk_Read_Tracker::safe_remove_blks(const volume_req_ptr& vreq) {
-    if (vreq->is_read_op()) {
-        for (uint32_t i = 0; i < vreq->indx_fbe_list.size(); ++i) {
-            safe_remove_blk_on_read(vreq->indx_fbe_list[i]);
-        }
-        /* these fbes are not in use after read is completed. However, it will be still tracked by indx mgr for writes.
-         */
-        vreq->erase_fbe_list();
-    } else {
-        for (uint32_t i = 0; i < vreq->indx_fbe_list.size(); ++i) {
-            safe_remove_blk_on_write(vreq->indx_fbe_list[i]);
-        }
-    }
-}
-
-/* after read is finished, tis marked for safe removal*/
-void Blk_Read_Tracker::safe_remove_blk_on_read(Free_Blk_Entry& fbe) {
+void Blk_Read_Tracker::remove(Free_Blk_Entry& fbe) {
     sisl::blob b = BlkId::get_blob(fbe.m_blkId);
     uint64_t hash_code = util::Hash64((const char*)b.bytes, (size_t)b.size);
 
@@ -61,11 +45,10 @@ void Blk_Read_Tracker::safe_remove_blk_on_read(Free_Blk_Entry& fbe) {
         },
         true /* dec additional ref corresponding to insert by pending_read_blk_cb*/);
     if (is_removed) { COUNTER_DECREMENT(m_metrics, blktrack_pending_blk_read_map_sz, 1); }
-    THIS_VOL_LOG(TRACE, volume, , "UnMarked Read pending Bid:{},status:{}", fbe.blk_id(), is_removed);
+    //    THIS_VOL_LOG(TRACE, indx_mgr, , "UnMarked Read pending Bid:{},status:{}", fbe.blk_id(), is_removed);
 }
 
-/* after overwriting blk id in write flow, its marked for safe removal if cannot be freed immediatly*/
-void Blk_Read_Tracker::safe_remove_blk_on_write(Free_Blk_Entry& fbe) {
+void Blk_Read_Tracker::safe_free_blks(Free_Blk_Entry& fbe) {
     BlkId bid = fbe.m_blkId;
     sisl::blob b = BlkId::get_blob(bid);
     uint64_t hash_code = util::Hash64((const char*)b.bytes, (size_t)b.size);
@@ -92,8 +75,9 @@ void Blk_Read_Tracker::safe_remove_blk_on_write(Free_Blk_Entry& fbe) {
         } else {
             COUNTER_INCREMENT(m_metrics, blktrack_erase_blk_rescheduled, 1);
         }
-        THIS_VOL_LOG(TRACE, volume, , "Marked erase write Bid:{},offset:{},nlbas:{},status:{}", bid, fbe.blk_offset(),
-                     fbe.blks_to_free(), is_removed);
+        //       THIS_VOL_LOG(TRACE, indx_mgr, , "Marked erase write Bid:{},offset:{},nlbas:{},status:{}", bid,
+        //       fbe.blk_offset(),
+        //                  fbe.blks_to_free(), is_removed);
     }
 }
 } // namespace homestore

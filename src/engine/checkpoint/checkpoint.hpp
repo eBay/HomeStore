@@ -40,8 +40,8 @@ ENUM(cp_status_t, uint8_t,
      cp_init,     // It is not inited yet.
      cp_io_ready, // IOs can start in a CP
      cp_trigger,  // cp is triggered
-     cp_prepare,  // waiting for enter cnt to be zero
-     cp_start,    // User can start flush data to disk
+     cp_prepare,  // after attach prepare is called
+     cp_start,    // Waiting for enter cnt to be zero.User can start flush data to disk
      cp_done      // Data flush is done.
 );
 
@@ -109,10 +109,14 @@ public:
     cp_id_type* cp_io_enter() {
         rcu_read_lock();
         auto cp_id = get_cur_cp_id();
-        if (!cp_id) { return nullptr; }
-        cp_id->enter_cnt++;
-        assert(cp_id->cp_status == cp_status_t::cp_io_ready || cp_id->cp_status == cp_status_t::cp_trigger ||
-               cp_id->cp_status == cp_status_t::cp_prepare);
+
+        if (!cp_id) {
+            rcu_read_unlock();
+            return nullptr;
+        }
+        ++cp_id->enter_cnt;
+        assert(cp_id->cp_status == cp_status_t::cp_io_ready || cp_id->cp_status == cp_status_t::cp_trigger || cp_id->cp_status == cp_status_t::cp_prepare);
+        
         rcu_read_unlock();
 
         return cp_id;

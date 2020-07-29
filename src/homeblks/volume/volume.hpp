@@ -15,18 +15,16 @@
 #include <spdlog/fmt/fmt.h>
 #include "engine/common/homestore_assert.hpp"
 #include "engine/homeds/thread/threadpool/thread_pool.h"
-#include "blk_read_tracker.hpp"
 #include "engine/index/snap_mgr.hpp"
 #include <utility/enum.hpp>
 #include <fds/vector_pool.hpp>
 #include "engine/meta/meta_blks_mgr.hpp"
+#include "mapping.hpp"
 
 using namespace std;
 
 namespace homestore {
 
-#define MAX_NUM_LBA ((1 << NBLKS_BITS) - 1)
-class mapping;
 class VolumeJournal;
 enum vol_state;
 
@@ -211,7 +209,6 @@ private:
     vol_params m_params;
     VolumeMetrics m_metrics;
     HomeBlksSafePtr m_hb; // Hold onto the homeblks to maintain reference
-    std::unique_ptr< Blk_Read_Tracker > m_read_blk_tracker;
     std::shared_ptr< SnapMgr > m_indx_mgr;
     boost::intrusive_ptr< BlkBuffer > m_only_in_mem_buff;
     io_comp_callback m_comp_cb;
@@ -267,18 +264,11 @@ private:
     // async call to start the multi-threaded work.
     void get_allocated_blks();
     void process_indx_completions(const indx_req_ptr& ireq, std::error_condition err);
-    void process_read_indx_completions(const boost::intrusive_ptr< indx_req >& ireq, const BtreeKey& k,
-                                       const BtreeValue& v, bool has_more, std::error_condition err);
+    void process_read_indx_completions(const boost::intrusive_ptr< indx_req >& ireq, std::error_condition err);
     void process_data_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
 
-    // callback from mapping layer for free leaf node(data blks) so that volume
-    // layer could do blk free.
-    void process_free_blk_callback(Free_Blk_Entry fbe);
-
-    void pending_read_blk_cb(volume_req* vreq, BlkId& bid);
     std::error_condition alloc_blk(const volume_req_ptr& vreq, std::vector< BlkId >& bid);
     void verify_csum(const volume_req_ptr& vreq);
-    std::error_condition read_indx(const volume_req_ptr& vreq);
 
     void interface_req_done(const vol_interface_req_ptr& iface_req);
 
@@ -438,10 +428,6 @@ public:
      */
     indx_cp_id_ptr attach_prepare_volume_cp(const indx_cp_id_ptr& indx_id, hs_cp_id* hs_id, hs_cp_id* new_hs_id);
 
-#ifndef NDEBUG
-    void verify_pending_blks();
-#endif
-
     std::string to_string() {
         std::stringstream ss;
         ss << "Name :" << get_name() << ", UUID :" << boost::lexical_cast< std::string >(get_uuid())
@@ -485,14 +471,13 @@ struct volume_req : indx_req {
     sisl::atomic_counter< int > outstanding_io_cnt = 1; // how many IOs are outstanding for this request
     int vc_req_cnt = 0;                                 // how many child requests are issued.
 
-    /********** members used by indx mgr **********/
+    /********* members used by read ***********/
+    bool first_read_indx_call = false;
+    std::vector< std::pair< MappingKey, MappingValue > > result_kv;
+
+    /********** members used by indx_mgr and mapping **********/
     uint64_t lastCommited_seqId = INVALID_SEQ_ID;
     uint64_t seqId = INVALID_SEQ_ID;
-    uint64_t request_id;               // Copy of the id from interface request
-    uint64_t active_nlbas_written = 0; // number of lba written in active indx tabl. It can be partially written if
-                                       // btree writes failed in between.
-    uint64_t diff_nlbas_written = 0;   // number of lba written in diff indx tabl. It can be partially written if
-                                       // btree writes failed in between.
 
     /********** Below entries are used for journal or to store checksum **********/
     std::vector< uint16_t > csum_list;
@@ -528,8 +513,12 @@ struct volume_req : indx_req {
     virtual void free_yourself() override { sisl::ObjectAllocator< volume_req >::deallocate(this); }
     virtual uint64_t get_seqId() override { return seqId; }
     virtual uint32_t get_key_size() override { return (sizeof(journal_key)); }
-    virtual uint32_t get_val_size() override { return (sizeof(uint16_t) * active_nlbas_written); }
+    virtual uint32_t get_val_size() override {
+        uint64_t active_nlbas_written = mapping::get_nlbas_from_cursor(lba(), active_btree_cur);
+        return (sizeof(uint16_t) * active_nlbas_written);
+    }
     virtual void fill_key(void* mem, uint32_t size) override {
+        uint64_t active_nlbas_written = mapping::get_nlbas_from_cursor(lba(), active_btree_cur);
         assert(size == sizeof(journal_key));
         journal_key* key = (journal_key*)mem;
         key->lba = lba();
@@ -537,6 +526,7 @@ struct volume_req : indx_req {
     }
 
     virtual void fill_val(void* mem, uint32_t size) override {
+        uint64_t active_nlbas_written = mapping::get_nlbas_from_cursor(lba(), active_btree_cur);
         /* we only populating check sum. Allocate blkids are already populated by indx mgr */
         uint16_t* j_csum = (uint16_t*)mem;
         assert(active_nlbas_written == nlbas());
@@ -544,16 +534,19 @@ struct volume_req : indx_req {
             j_csum[i] = csum_list[i];
         }
     }
-    virtual uint32_t get_io_size() override { return active_nlbas_written * vol()->get_page_size(); }
+    virtual uint32_t get_io_size() override {
+        uint64_t active_nlbas_written = mapping::get_nlbas_from_cursor(lba(), active_btree_cur);
+        return active_nlbas_written * vol()->get_page_size();
+    }
 
 private:
     /********** Constructor/Destructor **********/
     // volume_req() : csum_list(0), alloc_blkid_list(0), fbe_list(0){};
     volume_req(const vol_interface_req_ptr& vi_req) :
+            indx_req(vi_req->request_id),
             iface_req(vi_req),
             io_start_time(Clock::now()),
-            mvec(new homeds::MemVector()),
-            request_id(vi_req->request_id) {
+            mvec(new homeds::MemVector()) {
         assert((vi_req->vol_instance->get_page_size() * vi_req->nlbas) <= VOL_MAX_IO_SIZE);
         if (vi_req->is_write()) {
             mvec->set((uint8_t*)vi_req->write_buf, vi_req->vol_instance->get_page_size() * vi_req->nlbas, 0);

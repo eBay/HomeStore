@@ -6,6 +6,7 @@
 #define HOMESTORE_MAP_STORE_SPEC_HPP
 
 #include "homeds/loadgen/spec/store_spec.hpp"
+#include "homeblks/volume/volume.hpp"
 
 using namespace homeds::btree;
 using namespace homestore;
@@ -58,10 +59,11 @@ public:
         req->seqId = ve.get_seqId();
         req->lastCommited_seqId = req->seqId; // keeping only latest version always
         req->push_blkid(ve.get_blkId());
-        mapping_write_cntx cntx;
+        mapping_op_cntx cntx;
         cntx.op = UPDATE_VAL_AND_FREE_BLKS;
         cntx.u.vreq = req.get();
-        m_map->put(cntx, k, *(v.get()), nullptr);
+        BtreeQueryCursor cur;
+        m_map->put(cntx, k, *(v.get()), nullptr, cur);
         return true;
     }
 
@@ -101,7 +103,7 @@ public:
         volreq->lastCommited_seqId = INVALID_SEQ_ID; // read only latest value
 
         std::vector< std::pair< MappingKey, MappingValue > > kvs;
-        m_map->get(volreq.get(), kvs, false);
+        m_map->get(volreq.get(), kvs);
         uint64_t j = 0;
 
         std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;
@@ -163,10 +165,11 @@ public:
         LOGDEBUG("Mapping range put:{} {} ", key.to_string(), value.to_string());
 
         assert(req->nlbas() == bid.get_nblks());
-        mapping_write_cntx cntx;
+        mapping_op_cntx cntx;
         cntx.op = UPDATE_VAL_AND_FREE_BLKS;
         cntx.u.vreq = req.get();
-        m_map->put(cntx, key, value, nullptr);
+        BtreeQueryCursor cur;
+        m_map->put(cntx, key, value, nullptr, cur);
 
         return true;
     }

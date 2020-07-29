@@ -155,12 +155,13 @@ public:
 /* We have the following design requirement it is used in auto recovery mode
  *  - Free BlkIDs should not be re allocated until its free status is persisted on disk. Reasons :-
  *          - It helps is reconstructing btree in crash as it depends on old blkid to read the data
- *          - Different volume recovery doesn't need to dependent on each other. We can volume based recovery
+ *          - Different volume recovery doesn't need to dependent on each other. We can sequence based recovery
  *            instead of time based recovery.
  *  - Allocate BlkIDs should not be persisted until it is persisted in journal. If system crash after writing to
  *    in use bm but before writing to journal then blkid will be leak forever.
  *
- * To acheive the above requirements we free blks in two phase
+ * To acheive the above requirements we free blks in three phase
+ *      - accumulate all the blkids in the consumer
  *      - Reset bits in disk bitmap only
  *      - persist disk bitmap
  *      - Reset bits in cache bitmap. It is available to reallocate now.
@@ -171,7 +172,7 @@ public:
  *      - Allocate blkid. This blkid will already be set in cache bitmap
  *      - Consumer will persist entry in journal
  *      - Set bit in disk bitmap. Entry is set disk bitmap only when consumer have made sure that they are going to
- *        replay this entry. otherwise there will be memory leak
+ *        replay this entry. otherwise there will be disk leak
  *  Note :- Allocate blk should always be done in two phase if auto recovery is set.
  *
  *
