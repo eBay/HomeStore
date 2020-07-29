@@ -62,16 +62,16 @@ void LogDev::start(bool format) {
     }
 
     // Start a recurring timer which calls flush if pending
-    m_flush_timer_hdl = iomanager.schedule_global_timer(flush_timer_frequency_us * 1000, true /* recurring */, nullptr,
-                                                        iomgr::thread_regex::all_iomgr_created_io,
-                                                        [this](void* cookie) { flush_if_needed(); });
+    m_flush_timer_hdl =
+        iomanager.schedule_global_timer(flush_timer_frequency_us * 1000, true /* recurring */, nullptr,
+                                        iomgr::thread_regex::all_worker, [this](void* cookie) { flush_if_needed(); });
 }
 
 void LogDev::stop() {
     HS_ASSERT(LOGMSG, (m_pending_flush_size == 0), "LogDev stopped while writes to logdev are pending completion");
     // HS_ASSERT(LOGMSG, (!m_is_flushing.load()), "LogDev stopped while there is ongoing flush");
 
-    iomanager.cancel_global_timer(m_flush_timer_hdl);
+    iomanager.cancel_timer(m_flush_timer_hdl);
     m_log_records = nullptr;
     m_id_reserver = nullptr;
     m_log_idx.store(0);
@@ -272,7 +272,7 @@ LogGroup* LogDev::prepare_flush(int32_t estimated_records) {
     lg->m_flush_log_idx_from = m_last_flush_idx + 1;
     lg->m_flush_log_idx_upto = flushing_upto_idx;
     assert(lg->m_flush_log_idx_upto >= lg->m_flush_log_idx_from);
-    lg->m_log_dev_offset = m_hb->get_logdev_blkstore()->alloc_blk(lg->header()->group_size);
+    lg->m_log_dev_offset = m_hb->get_logdev_blkstore()->alloc_next_append_blk(lg->header()->group_size);
 
     assert(lg->header()->oob_data_offset > 0);
     LOGDEBUG("Flushing upto log_idx={}", flushing_upto_idx);
@@ -287,8 +287,10 @@ void LogDev::flush_if_needed(const uint32_t new_record_size, logid_t new_idx) {
     // If after adding the record size, if we have enough to flush or if its been too much time before we actually
     // flushed, attempt to flush by setting the atomic bool variable.
     auto pending_sz = m_pending_flush_size.fetch_add(new_record_size, std::memory_order_relaxed) + new_record_size;
-    if ((pending_sz >= flush_data_threshold_size) ||
-        (pending_sz && (get_elapsed_time_us(m_last_flush_time) > max_time_between_flush_us))) {
+
+    if (iomanager.am_i_worker_reactor() &&
+        ((pending_sz >= flush_data_threshold_size) ||
+         (pending_sz && (get_elapsed_time_us(m_last_flush_time) > max_time_between_flush_us)))) {
         bool expected_flushing = false;
         if (m_is_flushing.compare_exchange_strong(expected_flushing, true, std::memory_order_acq_rel)) {
             LOGTRACE(

@@ -63,7 +63,7 @@ void MetaBlkMgr::read(BlkId& bid, sisl::blob& b) {
 void MetaBlkMgr::load_ssb(const sb_blkstore_blob* blob) {
     BlkId bid = blob->blkid;
 
-    m_sb_blk_store->alloc_blk(bid);
+    m_sb_blk_store->reserve_blk(bid);
 
     HS_ASSERT(RELEASE, blob->type == blkstore_type::META_STORE, "Invalid blkstore type: {}", blob->type);
     HS_LOG(INFO, metablk, "Loading meta ssb blkid: {}", bid.to_string());
@@ -147,7 +147,7 @@ void MetaBlkMgr::scan_meta_blks() {
         m_meta_blks[mblk->hdr.h.type][mblk->hdr.h.blkid.to_integer()] = (meta_blk*)buf;
 
         // mark allocated for this block
-        m_sb_blk_store->alloc_blk(mblk->hdr.h.blkid);
+        m_sb_blk_store->reserve_blk(mblk->hdr.h.blkid);
 
         // populate overflow blk chain;
         auto obid = mblk->hdr.h.ovf_blkid;
@@ -183,7 +183,7 @@ void MetaBlkMgr::scan_meta_blks() {
             m_ovf_blk_hdrs[obid.to_integer()] = (meta_blk_ovf_hdr*)ovf_hdr_cp;
 
             // allocate overflow blkid;
-            m_sb_blk_store->alloc_blk(obid);
+            m_sb_blk_store->reserve_blk(obid);
 
             prev_obid = obid;
 
@@ -251,11 +251,11 @@ void MetaBlkMgr::scan_meta_blks_per_chunk() {
             m_meta_blks[mblk->hdr.h.type][mblk->hdr.h.blkid.to_integer()] = mblk;
 
             // alloc this blk id in bitmap
-            m_sb_blk_store->alloc_blk(mblk->hdr.h.blkid);
+            m_sb_blk_store->reserve_blk(mblk->hdr.h.blkid);
 
             // if overflow bid is valid, allocate the overflow bid;
             if (mblk->hdr.h.ovf_blkid.to_integer() != BlkId::invalid_internal_id()) {
-                m_sb_blk_store->alloc_blk(mblk->hdr.h.ovf_blkid);
+                m_sb_blk_store->reserve_blk(mblk->hdr.h.ovf_blkid);
             }
         }
     }
@@ -285,7 +285,8 @@ void MetaBlkMgr::deregister_handler(const meta_sub_type type) {
     if (it != m_sub_info.end()) { m_sub_info.erase(it); }
 }
 
-void MetaBlkMgr::register_handler(const meta_sub_type type, const meta_blk_found_cb_t& cb, const meta_blk_recover_comp_cb_t& comp_cb) {
+void MetaBlkMgr::register_handler(const meta_sub_type type, const meta_blk_found_cb_t& cb,
+                                  const meta_blk_recover_comp_cb_t& comp_cb) {
     std::lock_guard< decltype(m_meta_mtx) > lk(m_meta_mtx);
     HS_ASSERT(RELEASE, type.length() < MAX_SUBSYS_TYPE_LEN, "type len: {} should not exceed len: {}", type.length(),
               MAX_SUBSYS_TYPE_LEN);
@@ -380,7 +381,8 @@ meta_blk* MetaBlkMgr::init_meta_blk(BlkId& bid, const meta_sub_type type, const 
 // If crash happens at any point before the head ovf blk is written to disk, we are fine because those blks will be
 // free after reboot
 //
-void MetaBlkMgr::write_meta_blk_ovf(BlkId& prev_bid, BlkId& bid, const void* context_data, const uint64_t sz, const uint64_t offset) {
+void MetaBlkMgr::write_meta_blk_ovf(BlkId& prev_bid, BlkId& bid, const void* context_data, const uint64_t sz,
+                                    const uint64_t offset) {
     HS_ASSERT(RELEASE, offset < sz, "offset:{} should be less than sz:{}", offset, sz);
 
     meta_blk_ovf_hdr* ovf_hdr =
@@ -424,7 +426,8 @@ void MetaBlkMgr::write_meta_blk_ovf(BlkId& prev_bid, BlkId& bid, const void* con
     write_ovf_blk_to_disk(ovf_hdr, context_data, sz, offset);
 }
 
-void MetaBlkMgr::write_ovf_blk_to_disk(meta_blk_ovf_hdr* ovf_hdr, const void* context_data, const uint64_t sz, const uint64_t offset) {
+void MetaBlkMgr::write_ovf_blk_to_disk(meta_blk_ovf_hdr* ovf_hdr, const void* context_data, const uint64_t sz,
+                                       const uint64_t offset) {
     HS_ASSERT_CMP(DEBUG, ovf_hdr->h.context_sz + offset, <=, sz);
     HS_ASSERT_CMP(DEBUG, ovf_hdr->h.context_sz + META_BLK_OVF_HDR_MAX_SZ, <=, META_BLK_PAGE_SZ);
 
@@ -624,7 +627,7 @@ std::error_condition MetaBlkMgr::alloc_meta_blk(BlkId& bid, uint32_t alloc_sz) {
     hints.dev_id_hint = -1;
     hints.is_contiguous = true;
     try {
-        auto ret = m_sb_blk_store->alloc_blk(alloc_sz, hints, &bid);
+        auto ret = m_sb_blk_store->alloc_contiguous_blk(alloc_sz, hints, &bid);
         if (ret != BLK_ALLOC_SUCCESS) {
             HS_LOG(ERROR, metablk, "failing as it is out of disk space!");
             return std::errc::no_space_on_device;
@@ -638,7 +641,7 @@ std::error_condition MetaBlkMgr::alloc_meta_blk(BlkId& bid, uint32_t alloc_sz) {
 }
 
 // m_meta_mtx is used for concurrency between add/remove/update APIs and shutdown threads;
-// m_shutdown_mtx is used for concurrency between recover and shutdown threads; 
+// m_shutdown_mtx is used for concurrency between recover and shutdown threads;
 //
 // Note: Client will call add/remove/update APIs in recover function (in complete_cb);
 void MetaBlkMgr::recover(const bool do_comp_cb) {

@@ -112,7 +112,7 @@ public:
         hints.desired_temp = 0;
         hints.dev_id_hint = -1;
         hints.is_contiguous = true;
-        auto ret = m_sb_blk_store->alloc_blk(sz, hints, &bid);
+        auto ret = m_sb_blk_store->alloc_contiguous_blk(sz, hints, &bid);
         if (ret != BLK_ALLOC_SUCCESS) {
             throw homestore::homestore_exception("space not available", homestore_error::space_not_avail);
         }
@@ -219,7 +219,6 @@ protected:
             }
         }
     }
-
 
     void create_sb_blkstore(vdev_info_block* vb) { // deprecated
         if (vb == nullptr) {

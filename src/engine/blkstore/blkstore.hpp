@@ -116,6 +116,8 @@ public:
 
         register_me_to_farm();
     }
+
+    ~BlkStoreMetrics() { deregister_me_from_farm(); }
 };
 
 template < typename BAllocator, typename Buffer = BlkBuffer >
@@ -219,21 +221,19 @@ public:
         HISTOGRAM_OBSERVE(m_metrics, blkstore_cache_read_latency, get_elapsed_time_us(start_time));
     }
 
+    BlkAllocStatus alloc_contiguous_blk(uint32_t size, blk_alloc_hints& hints, BlkId* out_blkid) {
+        // Allocate a block from the device manager
+        assert(size % m_pagesz == 0);
+        auto nblks = size / m_pagesz;
+        hints.is_contiguous = true;
+        return (m_vdev.alloc_contiguous_blk(nblks, hints, out_blkid));
+    }
+
     /* Allocate a new block of the size based on the hints provided */
     BlkAllocStatus alloc_blk(uint32_t size, blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) {
         // Allocate a block from the device manager
         assert(size % m_pagesz == 0);
         auto nblks = size / m_pagesz;
-        return (m_vdev.alloc_blk(nblks, hints, out_blkid));
-    }
-
-    BlkAllocStatus alloc_blk(BlkId& in_blkid) { return (m_vdev.alloc_blk(in_blkid)); }
-
-    BlkAllocStatus alloc_blk(uint32_t size, blk_alloc_hints& hints, BlkId* out_blkid) {
-        // Allocate a block from the device manager
-        assert(size % m_pagesz == 0);
-        auto nblks = size / m_pagesz;
-        hints.is_contiguous = true;
         return (m_vdev.alloc_blk(nblks, hints, out_blkid));
     }
 
@@ -244,23 +244,40 @@ public:
         // Allocate a block from the device manager
         hints.is_contiguous = true;
         assert(size % m_pagesz == 0);
-        auto ret_blk = alloc_blk(size, hints, out_blkid);
+        auto ret_blk = alloc_contiguous_blk(size, hints, out_blkid);
         if (ret_blk != BLK_ALLOC_SUCCESS) { return nullptr; }
 
+        return init_blk_cached(*out_blkid);
+    }
+
+    off_t alloc_next_append_blk(const size_t size, const bool chunk_overlap_ok = false) {
+        return m_vdev.alloc_next_append_blk(size, chunk_overlap_ok);
+    }
+
+    BlkAllocStatus reserve_blk(const BlkId& in_blkid) { return (m_vdev.reserve_blk(in_blkid)); }
+
+    boost::intrusive_ptr< Buffer > reserve_blk_cached(const BlkId& blkid) {
+        auto ret_blk = reserve_blk(blkid);
+        if (ret_blk != BLK_ALLOC_SUCCESS) { return nullptr; }
+        return init_blk_cached(blkid);
+    }
+
+    boost::intrusive_ptr< Buffer > init_blk_cached(const BlkId& blkid) {
         // Create an object for the buffer
         auto buf = Buffer::make_object();
-        buf->set_key(*out_blkid);
+        buf->set_key(blkid);
 
         // Create a new block of memory for the blocks requested and set the memvec pointer to that
+        auto size = blkid.data_size(m_pagesz);
         uint8_t* ptr = iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), size);
         boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector(), true);
         mvec->set(ptr, size, 0);
+        buf->set_memvec(mvec, 0, size);
 
-        buf->set_memvec(mvec, 0, out_blkid->data_size(m_pagesz));
         // Insert this buffer to the cache.
         auto ibuf = boost::intrusive_ptr< Buffer >(buf);
         boost::intrusive_ptr< Buffer > out_bbuf;
-        bool inserted = m_cache->insert(*out_blkid, boost::static_pointer_cast< CacheBuffer< BlkId > >(ibuf),
+        bool inserted = m_cache->insert(blkid, boost::static_pointer_cast< CacheBuffer< BlkId > >(ibuf),
                                         (boost::intrusive_ptr< CacheBuffer< BlkId > >*)&out_bbuf);
         assert(inserted);
 
@@ -520,8 +537,6 @@ public:
     void get_vb_context(const sisl::blob& ctx_data) const { m_vdev.get_vb_context(ctx_data); }
 
     VirtualDev< BAllocator, RoundRobinDeviceSelector >* get_vdev() { return &m_vdev; };
-
-    off_t alloc_blk(const size_t size, const bool chunk_overlap_ok = false) { return m_vdev.alloc_blk(size, chunk_overlap_ok); }
 
     ssize_t pwrite(const void* buf, size_t count, off_t offset, boost::intrusive_ptr< virtualdev_req > req = nullptr) {
         return m_vdev.pwrite(buf, count, offset, req);
