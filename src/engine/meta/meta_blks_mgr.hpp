@@ -26,15 +26,15 @@ struct MetaSubRegInfo {
 class MetaBlkMgr {
 private:
     static MetaBlkMgr* _instance;
-    blk_store_t* m_sb_blk_store = nullptr;                // super blockstore
-    std::mutex m_meta_mtx;                                // mutex to access to meta_map;
-    std::mutex m_shutdown_mtx;                            // protects concurrent operations between recover and shutdown;
-    meta_blk_map_t m_meta_blks;                           // subsystem type to meta blk map;
-    ovf_hdr_map_t m_ovf_blk_hdrs;                         // ovf blk map;
+    blk_store_t* m_sb_blk_store = nullptr; // super blockstore
+    std::mutex m_meta_mtx;                 // mutex to access to meta_map;
+    std::mutex m_shutdown_mtx;             // protects concurrent operations between recover and shutdown;
+    meta_blk_map_t m_meta_blks;            // subsystem type to meta blk map;
+    ovf_hdr_map_t m_ovf_blk_hdrs;          // ovf blk map;
     std::map< meta_sub_type, MetaSubRegInfo > m_sub_info; // map of callbacks
     meta_blk* m_last_mblk = nullptr;                      // last meta blk;
     meta_blk_sb* m_ssb = nullptr;                         // meta super super blk;
-    
+
 public:
     /**
      * @brief :
@@ -74,7 +74,8 @@ public:
      * @param type : subsystem type
      * @param cb : subsystem cb
      */
-    void register_handler(const meta_sub_type type, const meta_blk_found_cb_t& cb, const meta_blk_recover_comp_cb_t& comp_cb);
+    void register_handler(const meta_sub_type type, const meta_blk_found_cb_t& cb,
+                          const meta_blk_recover_comp_cb_t& comp_cb);
 
     /**
      * @brief
@@ -189,7 +190,8 @@ private:
      */
     void write_meta_blk_to_disk(meta_blk* mblk);
 
-    void write_ovf_blk_to_disk(meta_blk_ovf_hdr* ovf_hdr, const void* context_data, const uint64_t sz, const uint64_t offset);
+    void write_ovf_blk_to_disk(meta_blk_ovf_hdr* ovf_hdr, const void* context_data, const uint64_t sz,
+                               const uint64_t offset);
 
     /**
      * @brief : load meta blk super super block into memory
@@ -222,6 +224,8 @@ private:
      */
     std::error_condition alloc_meta_blk(BlkId& bid, uint32_t alloc_sz = META_BLK_PAGE_SZ);
 
+    std::error_condition alloc_meta_blk(const uint64_t nblks, std::vector< BlkId >& bid);
+
     void free_meta_blk(meta_blk* mblk);
 
     void free_ovf_blk_chain(meta_blk* mblk);
@@ -244,7 +248,8 @@ private:
      * @param sz
      * @param offset
      */
-    void write_meta_blk_ovf(BlkId& prev_id, BlkId& bid, const void* context_data, const uint64_t sz, const uint64_t offset);
+    void write_meta_blk_ovf(BlkId& prev_id, BlkId& bid, const void* context_data, const uint64_t sz,
+                            const uint64_t offset);
 
     /**
      * @brief : internal implementation of populating and writing a meta block;

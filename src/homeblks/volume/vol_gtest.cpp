@@ -1320,7 +1320,7 @@ SDS_OPTION_GROUP(
     (run_time, "", "run_time", "run time for io", ::cxxopts::value< uint32_t >()->default_value("30"), "seconds"),
     (load_type, "", "load_type", "load_type", ::cxxopts::value< uint32_t >()->default_value("0"),
      "random_write_read:0, same_write_read:1, overlap_write=2"),
-    (num_threads, "", "num_threads", "num threads for io", ::cxxopts::value< uint32_t >()->default_value("8"),
+    (num_threads, "", "num_threads", "num_threads - default 2 for spdk and 8 for non-spdk", ::cxxopts::value< uint32_t >()->default_value("8"),
      "number"),
     (read_enable, "", "read_enable", "read enable 0 or 1", ::cxxopts::value< uint32_t >()->default_value("1"), "flag"),
     (max_disk_capacity, "", "max_disk_capacity", "max disk capacity",

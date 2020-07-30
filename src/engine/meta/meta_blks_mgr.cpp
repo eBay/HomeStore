@@ -385,45 +385,60 @@ void MetaBlkMgr::write_meta_blk_ovf(BlkId& prev_bid, BlkId& bid, const void* con
                                     const uint64_t offset) {
     HS_ASSERT(RELEASE, offset < sz, "offset:{} should be less than sz:{}", offset, sz);
 
-    meta_blk_ovf_hdr* ovf_hdr =
-        (meta_blk_ovf_hdr*)iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_OVF_HDR_MAX_SZ);
-
     HS_ASSERT(DEBUG, m_meta_mtx.try_lock() == false, "mutex should be already be locked");
 
-    // add to ovf blk cache;
-    HS_ASSERT(DEBUG, m_ovf_blk_hdrs.find(bid.to_integer()) == m_ovf_blk_hdrs.end(), "ovf_blks: {} already assigned",
-              bid.to_string());
-    m_ovf_blk_hdrs[bid.to_integer()] = ovf_hdr;
+    // allocate ovf bids first, then write to disk in reverse order;
+    std::vector< BlkId > bids;
 
-    ovf_hdr->h.magic = META_BLK_OVF_MAGIC;
-    ovf_hdr->h.prev_blkid = prev_bid;
-    ovf_hdr->h.blkid = bid;
+    // one ovf bid is already allocated by caller;
+    uint64_t nblks = ((sz - offset) % META_BLK_OVF_CONTEXT_SZ) ? ((sz - offset) / META_BLK_OVF_CONTEXT_SZ + 1)
+                                                               : ((sz - offset) / META_BLK_OVF_CONTEXT_SZ);
+    bids.reserve(nblks);
 
-    if ((offset + META_BLK_OVF_CONTEXT_SZ) < sz) {
-        // can't hold all the portion, need to write to next blk;
-        ovf_hdr->h.context_sz = META_BLK_OVF_CONTEXT_SZ;
-
-        BlkId obid;
-        auto ret = alloc_meta_blk(obid);
-        HS_LOG(INFO, metablk, "allocating overflow bid: {}", obid.to_string());
-        if (ret != no_error) {
-            HS_LOG(ERROR, metablk, "Failed to allocate contigous overflow blk with size: {}", sz);
-            HS_ASSERT(RELEASE, 0, "failed to allocate overflow blk id with size: {}", sz);
-        }
-        ovf_hdr->h.next_blkid = obid;
-
-        // keep writing next ovf blk
-        write_meta_blk_ovf(bid, obid, context_data, sz, offset + META_BLK_OVF_CONTEXT_SZ);
-    } else {
-        // current ovf blk can hold all the remaining portion, we are done;
-        ovf_hdr->h.context_sz = sz - offset;
-
-        // set the tail to invalid id;
-        ovf_hdr->h.next_blkid.set(BlkId::invalid_internal_id());
+    for (size_t i = 0; i < nblks - 1; i++) {
+        auto ret = alloc_meta_blk(bids[i]);
+        if (ret != no_error) { HS_ASSERT(RELEASE, false, "failed to allocate overflow blk id with size: {}", sz); }
     }
 
-    // write current ovf blk to disk
-    write_ovf_blk_to_disk(ovf_hdr, context_data, sz, offset);
+    // push bid which is allocated by caller to the last bid;
+    bids[nblks - 1] = bid;
+
+    uint64_t total_sz_written = 0;
+    // write ovf blks in reverse order;
+    for (size_t i = 0; i < nblks; i++) {
+        uint64_t off_in_ctx = offset + META_BLK_OVF_CONTEXT_SZ * (nblks - 1 - i);
+        HS_ASSERT_CMP(DEBUG, off_in_ctx, <, sz);
+        HS_ASSERT_CMP(DEBUG, off_in_ctx, >=, offset);
+        auto obid = bids[i];
+        auto next_obid = i > 0 ? bids[i - 1] : BlkId(BlkId::invalid_internal_id());
+        auto prev_obid = i < nblks - 1 ? bids[i + 1] : prev_bid;
+
+        meta_blk_ovf_hdr* ovf_hdr =
+            (meta_blk_ovf_hdr*)iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_OVF_HDR_MAX_SZ);
+
+        // add to ovf blk cache;
+        HS_ASSERT(DEBUG, m_ovf_blk_hdrs.find(obid.to_integer()) == m_ovf_blk_hdrs.end(),
+                  "ovf_blks: {} already assigned", obid.to_string());
+        m_ovf_blk_hdrs[obid.to_integer()] = ovf_hdr;
+
+        ovf_hdr->h.magic = META_BLK_OVF_MAGIC;
+        ovf_hdr->h.prev_blkid = prev_obid;
+        ovf_hdr->h.blkid = obid;
+        ovf_hdr->h.next_blkid = next_obid;
+
+        // can't hold all the portion, need to write to next blk;
+        ovf_hdr->h.context_sz = off_in_ctx + META_BLK_OVF_CONTEXT_SZ < sz ? META_BLK_OVF_CONTEXT_SZ : sz - off_in_ctx;
+
+        // write ovf blk to disk
+        write_ovf_blk_to_disk(ovf_hdr, context_data, sz, off_in_ctx);
+
+        HS_ASSERT_CMP(DEBUG, off_in_ctx, <, sz);
+        HS_ASSERT_CMP(DEBUG, off_in_ctx, >=, offset);
+
+        total_sz_written += ovf_hdr->h.context_sz;
+    }
+
+    HS_ASSERT_CMP(DEBUG, total_sz_written + offset, ==, sz);
 }
 
 void MetaBlkMgr::write_ovf_blk_to_disk(meta_blk_ovf_hdr* ovf_hdr, const void* context_data, const uint64_t sz,
@@ -519,7 +534,8 @@ std::error_condition MetaBlkMgr::remove_sub_sb(const void* cookie) {
     std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
 
     // type must exist
-    HS_ASSERT(DEBUG, m_meta_blks.find(type) != m_meta_blks.end(), "Un-registered type: {} received, which is not supported!", type);
+    HS_ASSERT(DEBUG, m_meta_blks.find(type) != m_meta_blks.end(),
+              "Un-registered type: {} received, which is not supported!", type);
 
     // remove from disk;
     auto prev_blkid = m_meta_blks[type][bid.to_integer()]->hdr.h.prev_blkid;
@@ -529,9 +545,11 @@ std::error_condition MetaBlkMgr::remove_sub_sb(const void* cookie) {
            prev_blkid.to_string(), next_blkid.to_string());
 
     // this record must exist in-memory copy
-    HS_ASSERT(DEBUG, m_meta_blks[type].find(bid.to_integer()) != m_meta_blks[type].end(), "Blk type: {}, id: {} not found!", type, bid.to_string());
+    HS_ASSERT(DEBUG, m_meta_blks[type].find(bid.to_integer()) != m_meta_blks[type].end(),
+              "Blk type: {}, id: {} not found!", type, bid.to_string());
 
-    HS_ASSERT(DEBUG, m_meta_blks[type][bid.to_integer()] == rm_blk, "Received blk pointer not equal to cache, memory corruption!");
+    HS_ASSERT(DEBUG, m_meta_blks[type][bid.to_integer()] == rm_blk,
+              "Received blk pointer not equal to cache, memory corruption!");
 
     // remove the in-memory handle from meta blk map;
     m_meta_blks[rm_blk->hdr.h.type].erase(bid.to_integer());
@@ -619,6 +637,27 @@ void MetaBlkMgr::free_meta_blk(meta_blk* mblk) {
         free_ovf_blk_chain(mblk);
     }
     iomanager.iobuf_free((uint8_t*)mblk);
+}
+
+std::error_condition MetaBlkMgr::alloc_meta_blk(const uint64_t nblks, std::vector< BlkId >& bid) {
+    blk_alloc_hints hints;
+    hints.desired_temp = 0;
+    hints.dev_id_hint = -1;
+    hints.is_contiguous = false;
+
+    try {
+        auto ret = m_sb_blk_store->alloc_blk(nblks * META_BLK_PAGE_SZ, hints, bid);
+        if (ret != BLK_ALLOC_SUCCESS) {
+            HS_LOG(ERROR, metablk, "failing as it is out of disk space!");
+            return std::errc::no_space_on_device;
+        }
+        HS_ASSERT_CMP(DEBUG, ret, ==, BLK_ALLOC_SUCCESS);
+    } catch (const std::exception& e) {
+        HS_ASSERT(RELEASE, 0, "{}", e.what());
+        return std::errc::device_or_resource_busy;
+    }
+
+    return no_error;
 }
 
 std::error_condition MetaBlkMgr::alloc_meta_blk(BlkId& bid, uint32_t alloc_sz) {
