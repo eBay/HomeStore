@@ -375,7 +375,7 @@ void IndxMgr::recovery_start_phase2() {
                 Free_Blk_Entry fbe(fbid, 0, fbid.get_nblks());
                 auto cnt = free_blk(nullptr, indx_id->free_blkid_list, fbe, true);
                 assert(cnt > 0);
-                if (hdr->cp_cnt <= m_last_cp_sb.cp_info.active_cp_cnt) {
+                if (hdr->cp_cnt > m_last_cp_sb.cp_info.active_cp_cnt) {
                     /* TODO: we update size in superblock with each checkpoint. Ideally it
                      * has to be updated only for blk alloc checkpoint.
                      */
@@ -387,14 +387,13 @@ void IndxMgr::recovery_start_phase2() {
             auto alloc_pair = indx_journal_entry::get_alloc_bid_list(buf.bytes());
             for (uint32_t i = 0; i < alloc_pair.second; ++i) {
                  m_hs->get_data_blkstore()->reserve_blk(alloc_pair.first[i]);
-                if (hdr->cp_cnt <= m_last_cp_sb.cp_info.active_cp_cnt) {
-                    /* TODO: we update size in superblock with each checkpoint. Ideally it
-                     * has to be updated only for blk alloc checkpoint.
-                     */
-                    indx_id->indx_size.fetch_add(alloc_pair.first[i].data_size(m_hs->get_data_pagesz()),
-                                                 std::memory_order_relaxed);
-                }
-
+                 if (hdr->cp_cnt > m_last_cp_sb.cp_info.active_cp_cnt) {
+                     /* TODO: we update size in superblock with each checkpoint. Ideally it
+                      * has to be updated only for blk alloc checkpoint.
+                      */
+                     indx_id->indx_size.fetch_add(alloc_pair.first[i].data_size(m_hs->get_data_pagesz()),
+                                                  std::memory_order_relaxed);
+                 }
             }
         }
         if (hdr->cp_cnt <= m_last_cp_sb.cp_info.active_cp_cnt) { /* it is already persisted */
@@ -735,11 +734,6 @@ void IndxMgr::journal_comp_cb(logstore_req* lreq, logdev_key ld_key) {
     assert(ireq->indx_fbe_list.size() == 0 || free_size > 0);
     ireq->indx_id->indx_size.fetch_sub(free_size);
 
-    /* Increment the reference count by the number of free blk entries. Freing of blk is an async process. So we
-     * don't want to take a checkpoint until these blkids by its consumer. Blk ids are freed in IndxMgr::free_blk.
-     */
-    m_cp->cp_inc_ref(ireq->hs_id, ireq->indx_fbe_list.size());
-
     /* End of critical section */
     if (ireq->first_hs_id) { m_cp->cp_io_exit(ireq->first_hs_id); }
     m_cp->cp_io_exit(ireq->hs_id);
@@ -1045,6 +1039,7 @@ void IndxMgr::log_found(logstore_seq_num_t seqnum, log_buffer log_buf, void* mem
         std::tie(it, happened) = seq_buf_map.emplace(std::make_pair(seqnum, log_buf));
         memory_used_in_recovery += log_buf.size();
     }
+    if (seqnum > m_max_psn_in_recovery) { m_max_psn_in_recovery = seqnum; }
     assert(happened);
 }
 
@@ -1122,7 +1117,6 @@ uint64_t IndxMgr::free_blk(hs_cp_id* hs_id, sisl::ThreadVector< homestore::BlkId
     }
     fbe.m_cp_id = hs_id;
     out_fblk_list->push_back(fbe.get_free_blkid());
-    LOGINFO("free blkid {}", fbe.get_free_blkid());
     m_read_blk_tracker->safe_free_blks(fbe);
 
     uint64_t free_blk_size = fbe.blks_to_free() * m_hs->get_data_pagesz();
@@ -1196,7 +1190,7 @@ void IndxMgr::read_indx(const boost::intrusive_ptr< indx_req >& ireq) {
 
 uint64_t IndxMgr::get_used_size() { return (m_last_cp_sb.cp_info.indx_size + m_active_tbl->get_used_size()); }
 
-uint64_t IndxMgr::get_last_psn() { return m_last_cp_sb.cp_info.active_data_psn; }
+int64_t IndxMgr::get_max_psn_found_in_recovery() { return m_max_psn_in_recovery; }
 std::string IndxMgr::get_name() { return m_name; }
 
 std::unique_ptr< HomeStoreCP > IndxMgr::m_cp;

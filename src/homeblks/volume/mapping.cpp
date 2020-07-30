@@ -417,7 +417,7 @@ btree_status_t mapping::match_item_cb_get(std::vector< std::pair< MappingKey, Ma
 
             ve.add_offset(lba_offset, overlap.get_n_lba(), m_vol_page_size);
             if (param->m_ctx.op == READ_VAL_WITH_SEQID) {
-                if (ve.get_seqId() == INVALID_SEQ_ID || ve.get_seqId() <= param->m_ctx.seqId) {
+                if (param->m_ctx.seqId == INVALID_SEQ_ID || ve.get_seqId() <= param->m_ctx.seqId) {
                     result_kv.emplace_back(make_pair(overlap, MappingValue(ve)));
                     if (m_pending_read_blk_cb && param->m_ctx.u.vreq) {
                         Free_Blk_Entry fbe(ve.get_blkId());
@@ -536,28 +536,6 @@ btree_status_t mapping::match_item_cb_put(std::vector< std::pair< MappingKey, Ma
         MappingValue* e_value = &existing.second;
         uint32_t existing_val_offset = 0;
 
-        Blob_Array< ValueEntry >& e_varray = e_value->get_array();
-        ValueEntry ve;
-        e_varray.get(0, ve, false);
-        uint64_t seq_id = ve.get_seqId();
-        if (new_seq_id <= seq_id) {
-            /* it is the latest entry, we should not override it */
-            replace_kv.emplace_back(existing.first, existing.second);
-            auto nlbas = ve.get_nlba();
-            if (cntx.op == op_type::UPDATE_VAL_AND_FREE_BLKS) {
-                Blob_Array< ValueEntry >& new_varray = new_val.get_array();
-                ValueEntry ve;
-                new_varray.get(0, ve, false);
-                /* free new blkid. it is overridden */
-                Free_Blk_Entry fbe(ve.get_blkId(), new_val_offset,
-                                   (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * nlbas);
-                fbe_list.push_back(fbe);
-            }
-            start_lba += nlbas;
-            new_val_offset += nlbas;
-            continue;
-        }
-
         if (e_key->start() > start_lba) {
             /* add missing interval */
             add_new_interval(start_lba, e_key->start() - 1, new_val, new_val_offset, replace_kv);
@@ -582,8 +560,8 @@ btree_status_t mapping::match_item_cb_put(std::vector< std::pair< MappingKey, Ma
         /* Now both intervals have the same start */
         // compute overlap
         auto end_lba_overlap = e_key->end() < end_lba ? e_key->end() : end_lba;
-        compute_and_add_overlap(cntx.op, fbe_list, start_lba, end_lba_overlap, new_val, new_val_offset, *e_value,
-                                existing_val_offset, replace_kv);
+        compute_and_add_overlap(fbe_list, start_lba, end_lba_overlap, new_val, new_val_offset, *e_value,
+                                existing_val_offset, replace_kv, new_seq_id);
         uint32_t nlbas = get_nlbas(end_lba_overlap, start_lba);
         new_val_offset += nlbas;
         existing_val_offset += nlbas;
@@ -703,26 +681,39 @@ void mapping::add_new_interval(uint64_t s_lba, uint64_t e_lba, MappingValue& val
 }
 
 /* result of overlap of k1/k2 is added to replace_kv */
-void mapping::compute_and_add_overlap(op_type update_op, std::vector< Free_Blk_Entry > fbe_list, uint64_t s_lba,
-                                      uint64_t e_lba, MappingValue& new_val, uint16_t new_val_offset,
-                                      MappingValue& e_val, uint16_t e_val_offset,
-                                      std::vector< std::pair< MappingKey, MappingValue > >& replace_kv) {
+void mapping::compute_and_add_overlap(std::vector< Free_Blk_Entry >& fbe_list, uint64_t s_lba, uint64_t e_lba,
+                                      MappingValue& new_val, uint16_t new_val_offset, MappingValue& e_val,
+                                      uint16_t e_val_offset,
+                                      std::vector< std::pair< MappingKey, MappingValue > >& replace_kv,
+                                      uint64_t new_seq_id) {
 
     auto nlba = get_nlbas(e_lba, s_lba);
 
     /* This code assumes that there is only one value entry */
     Blob_Array< ValueEntry >& e_varray = e_val.get_array();
-    ValueEntry ve;
-    e_varray.get(0, ve, false);
-    uint16_t blk_offset = (e_val_offset * m_vol_page_size) / HomeBlks::instance()->get_data_pagesz();
-    if (update_op == op_type::UPDATE_VAL_AND_FREE_BLKS) {
-        Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset() + blk_offset,
+    ValueEntry e_ve;
+    e_varray.get(0, e_ve, false);
+    uint64_t e_seq_id = e_ve.get_seqId();
+
+    if (new_seq_id > e_seq_id) {
+        /* override */
+        uint16_t e_blk_offset = (e_val_offset * m_vol_page_size) / HomeBlks::instance()->get_data_pagesz();
+        Free_Blk_Entry fbe(e_ve.get_blkId(), e_ve.get_blk_offset() + e_blk_offset,
                            (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * nlba);
         fbe_list.push_back(fbe);
+        replace_kv.emplace_back(
+            make_pair(MappingKey(s_lba, nlba), MappingValue(new_val, new_val_offset, nlba, m_vol_page_size)));
+    } else {
+        /* don't override. free new blks */
+        Blob_Array< ValueEntry >& new_varray = new_val.get_array();
+        ValueEntry new_ve;
+        new_varray.get(0, new_ve, false);
+        Free_Blk_Entry fbe(new_ve.get_blkId(), new_ve.get_blk_offset() + new_val_offset,
+                           (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * nlba);
+        fbe_list.push_back(fbe);
+        replace_kv.emplace_back(
+            make_pair(MappingKey(s_lba, nlba), MappingValue(e_val, e_val_offset, nlba, m_vol_page_size)));
     }
-
-    replace_kv.emplace_back(
-        make_pair(MappingKey(s_lba, nlba), MappingValue(new_val, new_val_offset, nlba, m_vol_page_size)));
 }
 
 #ifndef NDEBUG
@@ -877,7 +868,7 @@ btree_status_t mapping::update_indx_tbl(indx_req* ireq, const btree_cp_id_ptr& b
             nlbas = get_nlbas(end_lba, start_lba);
         }
         MappingKey key(start_lba, nlbas);
-        ValueEntry ve(vreq->seqId, blkid, 0 /* blk offset */, nlbas, &vreq->csum_list[csum_indx]);
+        ValueEntry ve(vreq->seqId, blkid, 0 /* blk offset */, nlbas, &vreq->csum_list[csum_indx], m_vol_page_size);
         MappingValue value(ve);
 
         /* if snapshot is disabled then cntx would be different. XXX : do we need to suppprt snapshot disable */
@@ -918,7 +909,7 @@ btree_status_t mapping::recovery_update(logstore_seq_num_t seqnum, journal_hdr* 
     for (uint32_t i = 0; i < nbid; ++i) {
         uint32_t nlbas = bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) / m_vol_page_size;
         MappingKey key(lba, nlbas);
-        ValueEntry ve(seqnum, bid[i], 0, nlbas, &csum[csum_indx]);
+        ValueEntry ve(seqnum, bid[i], 0, nlbas, &csum[csum_indx], m_vol_page_size);
         MappingValue value(ve);
         uint64_t next_start_lba;
         mapping_op_cntx cntx;

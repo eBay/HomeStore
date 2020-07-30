@@ -114,9 +114,10 @@ public:
             rcu_read_unlock();
             return nullptr;
         }
-        ++cp_id->enter_cnt;
-        assert(cp_id->cp_status == cp_status_t::cp_io_ready || cp_id->cp_status == cp_status_t::cp_trigger || cp_id->cp_status == cp_status_t::cp_prepare);
-        
+        auto cnt = cp_id->enter_cnt.fetch_add(1);
+        assert(cp_id->cp_status == cp_status_t::cp_io_ready || cp_id->cp_status == cp_status_t::cp_trigger ||
+               cp_id->cp_status == cp_status_t::cp_prepare);
+
         rcu_read_unlock();
 
         return cp_id;
@@ -127,7 +128,7 @@ public:
      */
     void cp_inc_ref(cp_id_type* id, int ref_cnt) {
         assert(id->enter_cnt > 0);
-        id->enter_cnt.fetch_add(ref_cnt);
+        auto cnt = id->enter_cnt.fetch_add(ref_cnt);
     }
 
     /* It is called for each IO when it is completed. It trigger a checkpoint if it is pending and there

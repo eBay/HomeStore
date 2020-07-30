@@ -20,7 +20,7 @@ using namespace homeds::btree;
 
 namespace homeds {
 namespace loadgen {
-#define INVALID_SEQ_ID UINT64_MAX
+#define INVALID_SEQ_ID -1
 
 class FileStoreSpec : public StoreSpec< MapKey, BlkValue > {
     typedef std::function< void(generator_op_error, const key_info< MapKey, BlkValue >*, void*, const std::string&) >

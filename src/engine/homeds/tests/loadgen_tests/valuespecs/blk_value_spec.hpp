@@ -13,8 +13,6 @@
 namespace homeds {
 namespace loadgen {
 class BlkValue : public ValueSpec {
-
-#define INVALID_SEQ_ID UINT64_MAX
     char* m_data;
     uint64_t m_hash_code;
 

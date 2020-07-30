@@ -13,7 +13,7 @@ using namespace homestore;
 
 namespace homeds {
 namespace loadgen {
-#define INVALID_SEQ_ID UINT64_MAX
+#define INVALID_SEQ_ID -1
 
 template < typename K, typename V, size_t NodeSize = 8192 >
 class MapStoreSpec : public StoreSpec< K, V > {
@@ -121,7 +121,7 @@ public:
             int cnt = 0;
             while (lba <= kvs[j].first.end()) {
                 auto storeblk = ve.get_blkId().get_id() + ve.get_blk_offset() + cnt;
-                ValueEntry ve(INVALID_SEQ_ID, BlkId(storeblk, 1, 0), 0, 1, &carr[0]);
+                ValueEntry ve(INVALID_SEQ_ID, BlkId(storeblk, 1, 0), 0, 1, &carr[0], 1);
                 result.push_back(std::make_pair(K(lba, 1), V(ve)));
                 lba++;
                 cnt++;
@@ -160,7 +160,7 @@ public:
             carr[i] = 1;
 
         // NOTE assuming data block size is same as lba-volume block size
-        ValueEntry ve(INVALID_SEQ_ID, BlkId(bid.get_id(), bid.get_nblks(), 0), 0, bid.get_nblks(), &carr[0]);
+        ValueEntry ve(INVALID_SEQ_ID, BlkId(bid.get_id(), bid.get_nblks(), 0), 0, bid.get_nblks(), &carr[0], 1);
         MappingValue value(ve);
         LOGDEBUG("Mapping range put:{} {} ", key.to_string(), value.to_string());
 

@@ -126,7 +126,7 @@ public:
     void flush_free_blks(const indx_cp_id_ptr& indx_id, hs_cp_id* hb_id);
 
     void update_cp_sb(indx_cp_id_ptr& indx_id, hs_cp_id* hb_id, indx_cp_io_sb* sb);
-    uint64_t get_last_psn();
+    int64_t get_max_psn_found_in_recovery();
     /* It is called when super block all indx tables are persisted by its consumer */
     void indx_create_done(indx_tbl* indx_tbl = nullptr);
     void indx_init(); // private api
@@ -303,6 +303,7 @@ private:
     bool m_is_snap_started = false;
     void* m_destroy_meta_blk = nullptr;
     BtreeQueryCursor m_destroy_btree_cur;
+    int64_t m_max_psn_in_recovery = -1;
 
     /*************************************** private functions ************************/
     void update_indx_internal(boost::intrusive_ptr< indx_req > ireq);
@@ -331,9 +332,11 @@ struct Free_Blk_Entry {
     Free_Blk_Entry() {}
     Free_Blk_Entry(const BlkId& blkId) : m_blkId(blkId), m_blk_offset(0), m_nblks_to_free(0) {}
     Free_Blk_Entry(const BlkId& blkId, uint8_t blk_offset, uint8_t nblks_to_free) :
-            m_blkId(blkId),
-            m_blk_offset(blk_offset),
-            m_nblks_to_free(nblks_to_free) {}
+            m_blkId(blkId), m_blk_offset(blk_offset), m_nblks_to_free(nblks_to_free) {
+#ifndef NDEBUG
+        assert(blk_offset + m_nblks_to_free <= m_blkId.get_nblks());
+#endif
+    }
 
     BlkId blk_id() const { return m_blkId; }
     uint8_t blk_offset() const { return m_blk_offset; }

@@ -476,8 +476,8 @@ struct volume_req : indx_req {
     std::vector< std::pair< MappingKey, MappingValue > > result_kv;
 
     /********** members used by indx_mgr and mapping **********/
-    uint64_t lastCommited_seqId = INVALID_SEQ_ID;
-    uint64_t seqId = INVALID_SEQ_ID;
+    int64_t lastCommited_seqId = INVALID_SEQ_ID;
+    int64_t seqId = INVALID_SEQ_ID;
 
     /********** Below entries are used for journal or to store checksum **********/
     std::vector< uint16_t > csum_list;
