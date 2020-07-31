@@ -7,8 +7,8 @@ pipeline {
         HOMESTORE_BUILD_TAG = "${GIT_COMMIT}"
         CONAN_USER = 'sds'
         MASTER_BRANCH = 'master'
-        DEVELOP_BRANCH = 'develop/v*'
-        STABLE_BRANCH = 'testing/v*'
+        DEVELOP_BRANCH = 'testing/v*'
+        STABLE_BRANCH = 'stable/v*'
     }
 
     stages {
