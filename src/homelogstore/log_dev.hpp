@@ -183,16 +183,6 @@ public:
     }
 
 private:
-    static LogGroup* make_log_group(uint32_t estimated_records) {
-        _log_group_idx = !_log_group_idx;
-        _log_group[_log_group_idx].reset(estimated_records);
-        return &_log_group[_log_group_idx];
-    }
-
-private:
-    static LogGroup _log_group[2];
-    static uint32_t _log_group_idx;
-
     sisl::aligned_unique_ptr< uint8_t > m_log_buf;
     sisl::aligned_unique_ptr< uint8_t > m_overflow_log_buf;
 
@@ -474,7 +464,11 @@ public:
     void meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size);
 
 private:
-    static LogGroup* new_log_group();
+    LogGroup* make_log_group(uint32_t estimated_records) {
+        m_log_group_idx = !m_log_group_idx;
+        m_log_group_pool[m_log_group_idx].reset(estimated_records);
+        return &m_log_group_pool[m_log_group_idx];
+    }
 
     LogGroup* prepare_flush(int32_t estimated_record);
     void do_flush(LogGroup* lg);
@@ -521,6 +515,10 @@ private:
     // Timer handle
     iomgr::timer_handle_t m_flush_timer_hdl;
     void* m_sb_cookie = nullptr;
+
+    // Pool for creating log group
+    LogGroup m_log_group_pool[2];
+    uint32_t m_log_group_idx = 1;
 }; // LogDev
 
 } // namespace homestore
