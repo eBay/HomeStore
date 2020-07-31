@@ -203,25 +203,7 @@ void HomeLogStore::on_write_completion(logstore_req* req, logdev_key ld_key, log
     });
     // assert(flush_ld_key.idx >= m_last_flush_ldkey.idx);
 
-    if (req->seq_num > m_flush_batch_max.seq_num) { m_flush_batch_max = {req->seq_num, flush_ld_key}; }
-    if (nremaining_in_batch == 0) {
-        // We are the last in batch, create a truncation barrier
-        assert(m_flush_batch_max.seq_num != -1);
-        create_truncation_barrier();
-        m_flush_batch_max = {-1, {-1, 0}}; // Reset the flush batch for next batch.
-    }
-
-#if 0
-    if (flush_ld_key == m_last_flush_ldkey) {
-        // We are still in the same flush idx, so keep updating the maximum sn's and its log_idx
-        if (req->seq_num > m_flush_batch_max.seq_num) { m_flush_batch_max = {req->seq_num, flush_ld_key}; }
-    } else {
-        // We have a new flush sequence, create a truncation barrier on old flush batch and start the new batch
-        create_truncation_barrier();
-        m_flush_batch_max = {req->seq_num, flush_ld_key};
-        m_last_flush_ldkey = flush_ld_key;
-    }
-#endif
+    update_truncation_barrier(req->seq_num, ld_key, nremaining_in_batch);
     (req->cb) ? req->cb(req, ld_key) : m_comp_cb(req, ld_key);
 }
 
@@ -234,7 +216,21 @@ void HomeLogStore::on_log_found(logstore_seq_num_t seq_num, logdev_key ld_key, l
     m_records.create_and_complete(seq_num, ld_key);
     atomic_update_max(m_seq_num, seq_num + 1, std::memory_order_acq_rel);
     atomic_update_min(m_last_truncated_seq_num, seq_num - 1, std::memory_order_acq_rel);
+
+    update_truncation_barrier(seq_num, ld_key, 0 /* nremaining_in_batch */);
     if (m_found_cb != nullptr) m_found_cb(seq_num, buf, nullptr);
+}
+
+void HomeLogStore::update_truncation_barrier(logstore_seq_num_t seq_num, logdev_key flush_ld_key,
+                                             uint32_t nremaining_in_batch) {
+    if (seq_num > m_flush_batch_max.seq_num) { m_flush_batch_max = {seq_num, flush_ld_key}; }
+
+    if (nremaining_in_batch == 0) {
+        // We are the last in batch, create a truncation barrier
+        assert(m_flush_batch_max.seq_num != -1);
+        create_truncation_barrier();
+        m_flush_batch_max = {-1, {-1, 0}}; // Reset the flush batch for next batch.
+    }
 }
 
 void HomeLogStore::create_truncation_barrier() {
