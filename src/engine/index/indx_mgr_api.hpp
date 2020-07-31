@@ -131,7 +131,7 @@ public:
     void indx_create_done(indx_tbl* indx_tbl = nullptr);
     void indx_init(); // private api
     std::string get_name();
-    uint64_t get_used_size();
+    cap_attrs get_used_size();
     void attach_user_fblkid_list(blkid_list_ptr& free_blkid_list, const cp_done_cb& free_blks_cb, int64_t free_size,
                                  bool last_cp = false);
 

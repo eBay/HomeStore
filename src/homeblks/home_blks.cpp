@@ -348,15 +348,15 @@ void HomeBlks::init_done(std::error_condition err) {
     if (err == no_error) { m_rdy = true; }
 
     data_recovery_done();
-    uint64_t used_data_size = 0;
+    cap_attrs used_size;
     for (auto it = m_volume_map.cbegin(); it != m_volume_map.cend(); ++it) {
         vol_mounted(it->second, it->second->get_state());
-        used_data_size += it->second->get_used_size();
+        used_size.add(it->second->get_used_size());
     }
     auto system_cap = get_system_capacity();
     LOGINFO("{}", system_cap.to_string());
-    HS_DEBUG_ASSERT_EQ(system_cap.used_total_size, used_data_size,
-                       "System cap from sb and vol cumulative used size mismatch");
+    HS_RELEASE_ASSERT_EQ(system_cap.used_data_size, used_size.used_data_size, "vol data used size mismatch");
+    HS_RELEASE_ASSERT_EQ(system_cap.used_index_size, used_size.used_index_size, "index used size mismatch");
 
     LOGINFO("init done");
     m_cfg.init_done_cb(err, m_out_params);

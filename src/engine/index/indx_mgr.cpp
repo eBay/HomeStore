@@ -490,7 +490,6 @@ void IndxMgr::flush_free_blks(const indx_cp_id_ptr& indx_id, hs_cp_id* hs_id) {
 }
 
 void IndxMgr::write_hs_cp_sb(hs_cp_id* hs_id) {
-    LOGINFO("superblock is written");
     uint64_t size = sizeof(indx_cp_io_sb) * hs_id->indx_id_list.size() + sizeof(hs_cp_io_sb);
     uint32_t align = 0;
     if (meta_blk_mgr->is_aligned_buf_needed(size)) {
@@ -511,7 +510,6 @@ void IndxMgr::write_hs_cp_sb(hs_cp_id* hs_id) {
     hdr->indx_cnt = indx_cnt;
 
     write_meta_blk(m_cp_meta_blk, b);
-    LOGINFO("superblock is written");
 }
 
 void IndxMgr::update_cp_sb(indx_cp_id_ptr& indx_id, hs_cp_id* hs_id, indx_cp_io_sb* sb) {
@@ -1188,7 +1186,13 @@ void IndxMgr::read_indx(const boost::intrusive_ptr< indx_req >& ireq) {
     }
 }
 
-uint64_t IndxMgr::get_used_size() { return (m_last_cp_sb.cp_info.indx_size + m_active_tbl->get_used_size()); }
+cap_attrs IndxMgr::get_used_size() {
+    cap_attrs attrs;
+    attrs.used_data_size = m_last_cp_sb.cp_info.indx_size;
+    attrs.used_index_size = m_active_tbl->get_used_size();
+    attrs.used_total_size = attrs.used_data_size + attrs.used_index_size;
+    return attrs;
+}
 
 int64_t IndxMgr::get_max_psn_found_in_recovery() { return m_max_psn_in_recovery; }
 std::string IndxMgr::get_name() { return m_name; }

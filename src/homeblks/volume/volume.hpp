@@ -396,7 +396,7 @@ public:
      * @return :- size
      */
     uint64_t get_size() const { return ((vol_sb_hdr*)m_sb_buf.bytes())->size; }
-    uint64_t get_used_size() { return m_indx_mgr->get_used_size(); }
+    cap_attrs get_used_size() { return m_indx_mgr->get_used_size(); }
 
     /* Get uuid of this volume.
      * @return :- uuid

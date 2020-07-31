@@ -113,6 +113,9 @@ public:
                     m_journal->register_log_found_cb(bind_this(SSDBtreeStore::log_found, 3));
                     m_journal->register_log_replay_done_cb(bind_this(SSDBtreeStore::replay_done, 1));
                 }));
+            // reserve this blk unconditionally as root node never changes
+            BlkId bid(sb.root_node);
+            m_blkstore->reserve_blk(bid);
         } else {
             m_journal = HomeLogStoreMgr::instance().create_new_log_store();
             sb.journal_id = get_journal_id_store();
@@ -126,26 +129,7 @@ public:
     void log_found(logstore_seq_num_t seqnum, log_buffer log_buf, void* mem) {
         auto& cp_sb = m_btree->get_last_cp_cb();
         btree_journal_entry* jentry = (btree_journal_entry*)log_buf.bytes();
-
-        if (jentry->cp_cnt > cp_sb.blkalloc_cp_cnt) {
-            /* get all the free blks and allocated blks and set it in a bitmap. These entries are not persisted yet in a
-             * bitmap.
-             */
-            /* getting all the free blks */
-            jentry->foreach_node(bt_journal_node_op::removal, ([this](bt_node_gen_pair node_info, sisl::blob key_blob) {
-                                     get_wb_cache()->free_blk(node_info.node_id, m_first_cp->free_blkid_list);
-                                     m_first_cp->btree_size.fetch_sub(1);
-                                 }));
-
-            /* getting all the allocated blks */
-            jentry->foreach_node(bt_journal_node_op::creation,
-                                 ([this](bt_node_gen_pair node_info, sisl::blob key_blob) {
-                                     assert(node_info.node_id != empty_bnodeid);
-                                     BlkId bid(node_info.node_id);
-                                     m_blkstore->reserve_blk(bid);
-                                     m_first_cp->btree_size.fetch_add(1);
-                                 }));
-        }
+        bool is_replayed = false;
 
         if (jentry->cp_cnt > cp_sb.cp_cnt) {
             // Entry is not replayed yet
@@ -157,6 +141,29 @@ public:
                 }
             }
             ++m_replayed_count;
+            is_replayed = true;
+        }
+
+        if (jentry->cp_cnt > cp_sb.blkalloc_cp_cnt) {
+            /* get all the free blks and allocated blks and set it in a bitmap. These entries are not persisted yet in a
+             * bitmap.
+             */
+            /* getting all the free blks */
+
+            jentry->foreach_node(bt_journal_node_op::removal,
+                                 ([this, is_replayed](bt_node_gen_pair node_info, sisl::blob key_blob) {
+                                     get_wb_cache()->free_blk(node_info.node_id, m_first_cp->free_blkid_list);
+                                     if (is_replayed) { m_first_cp->btree_size.fetch_sub(1); }
+                                 }));
+
+            /* getting all the allocated blks */
+            jentry->foreach_node(bt_journal_node_op::creation,
+                                 ([this, is_replayed](bt_node_gen_pair node_info, sisl::blob key_blob) {
+                                     assert(node_info.node_id != empty_bnodeid);
+                                     BlkId bid(node_info.node_id);
+                                     m_blkstore->reserve_blk(bid);
+                                     if (is_replayed) { m_first_cp->btree_size.fetch_add(1); }
+                                 }));
         }
     }
 
@@ -165,7 +172,10 @@ public:
                       m_replayed_count);
         m_is_recovering = false;
         auto& cp_sb = m_btree->get_last_cp_cb();
-        if (cp_sb.cp_cnt == -1 && m_replayed_count == 0) { m_btree->create_btree_replay(nullptr, m_first_cp); }
+        if (cp_sb.cp_cnt == -1 && m_replayed_count == 0) {
+            m_btree->create_btree_replay(nullptr, m_first_cp);
+            m_first_cp->btree_size.fetch_add(1);
+        }
     }
 
     static void cp_start(SSDBtreeStore* store, const btree_cp_id_ptr& cp_id, cp_comp_callback cb) {

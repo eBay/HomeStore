@@ -1101,8 +1101,9 @@ TEST_F(VolTest, recovery_io_test) {
     tcfg.init = false;
     this->start_homestore();
 
+    std::unique_ptr< VolVerifyJob > verify_job;
     if (tcfg.verify_hdr || tcfg.verify_data || tcfg.verify_only) {
-        auto verify_job = std::make_unique< VolVerifyJob >(this);
+        verify_job = std::make_unique< VolVerifyJob >(this);
         this->start_job(verify_job.get(), wait_type_t::for_completion);
     }
 

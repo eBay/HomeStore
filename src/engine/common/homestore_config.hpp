@@ -50,15 +50,21 @@ struct disk_attributes {
 };
 
 struct cap_attrs {
-    uint64_t used_data_size;
-    uint64_t used_index_size;
-    uint64_t used_total_size;
-    uint64_t initial_total_size;
+    uint64_t used_data_size = 0;
+    uint64_t used_index_size = 0;
+    uint64_t used_total_size = 0;
+    uint64_t initial_total_size = 0;
     std::string to_string() {
         std::stringstream ss;
         ss << "used_data_size = " << used_data_size << ", used_index_size = " << used_index_size
            << ", used_total_size = " << used_total_size << ", initial_total_size = " << initial_total_size;
         return ss.str();
+    }
+    void add(const cap_attrs& other) {
+        used_data_size += other.used_data_size;
+        used_index_size += other.used_index_size;
+        used_total_size += other.used_total_size;
+        initial_total_size += other.initial_total_size;
     }
 };
 
