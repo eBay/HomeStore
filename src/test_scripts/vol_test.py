@@ -30,7 +30,7 @@ def recovery():
     stderr=subprocess.STDOUT, shell=True)
     
     subprocess.check_call(dirpath + "test_volume \
-            --gtest_filter=VolTest.recovery_io_test --verify_hdr=0 --verify_data=0 --run_time=30 --enable_crash_handler=1 \
+            --gtest_filter=VolTest.recovery_io_test --verify_hdr=0 --verify_data=0 --verify_csum=0 --run_time=30 --enable_crash_handler=1 \
     --remove_file=1 --delete_volume=1", stderr=subprocess.STDOUT, shell=True)
     print("recovery passed")
 
@@ -43,7 +43,7 @@ def recovery_crash():
         print("test aborted")
     
     subprocess.check_call(dirpath + "test_volume \
-            --gtest_filter=VolTest.recovery_io_test --verify_hdr=0 --log_mods metablk:0 --verify_data=0 --run_time=30 --enable_crash_handler=1 \
+            --gtest_filter=VolTest.recovery_io_test --verify_hdr=0 --log_mods metablk:0 --verify_data=0 --verify_csum=0 --run_time=30 --enable_crash_handler=1 \
     --remove_file=1 --delete_volume=1", stderr=subprocess.STDOUT, shell=True)
     print("recovery crash passed")
 
