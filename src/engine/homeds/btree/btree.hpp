@@ -1931,8 +1931,8 @@ private:
 
         if (BtreeStoreType == btree_store_type::SSD_BTREE) {
             auto j_iob = btree_store_t::make_journal_entry(journal_op::BTREE_MERGE, true /* is_root */);
-            btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::inplace_write, root, cp_id, false);
-            btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::removal, child_node, cp_id, false);
+            btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::inplace_write, root, cp_id);
+            btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::removal, child_node, cp_id);
             btree_store_t::write_journal_entry(m_btree_store.get(), cp_id, j_iob);
         }
         unlock_node(root, locktype::LOCKTYPE_WRITE);
@@ -1997,16 +1997,16 @@ private:
                                                            {parent_node->get_node_id(), parent_node->get_gen()});
             btree_store_t::append_node_to_journal(
                 j_iob, (root_split ? bt_journal_node_op::creation : bt_journal_node_op::inplace_write), child_node1,
-                cp_id, true);
+                cp_id, out_split_end_key.get_blob());
 
             // For root split or split around the edge, we don't write the key, which will cause replay to insert edge
             if (edge_split) {
-                btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::creation, child_node2, cp_id, false);
+                btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::creation, child_node2, cp_id);
             } else {
-                K child2_key;
-                child_node2->get_last_key(&child2_key);
+                K child2_pkey;
+                parent_node->get_nth_key(parent_ind, &child2_pkey, true);
                 btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::creation, child_node2, cp_id,
-                                                      child2_key.get_blob());
+                                                      child2_pkey.get_blob());
             }
             btree_store_t::write_journal_entry(m_btree_store.get(), cp_id, j_iob);
         }
@@ -2040,7 +2040,7 @@ private:
         BtreeNodePtr parent_node;
 
         // read parent node
-        read_node(id, parent_node);
+        read_node_or_fail(id, parent_node);
 
         // Parent already went ahead of the journal entry, return done
         if (parent_node->get_gen() >= jentry->parent_node.node_gen) {
@@ -2065,7 +2065,7 @@ private:
                         child_node1->get_node_id(), parent_node->get_node_id());
 
         } else {
-            read_node(j_child_nodes[0]->node_id(), child_node1);
+            read_node_or_fail(j_child_nodes[0]->node_id(), child_node1);
         }
 
 
@@ -2093,17 +2093,17 @@ private:
     }
 
     void recover_child_nodes_in_split(const BtreeNodePtr& child_node1,
-                                      std::vector< bt_journal_node_info* >& j_child_nodes,
+                                      const std::vector< bt_journal_node_info* >& j_child_nodes,
                                       const btree_cp_id_ptr& cp_id) {
 
         BtreeNodePtr child_node2;
         // Check if child1 is ahead of the generation
         if (child_node1->get_gen() >= j_child_nodes[0]->node_gen()) {
             // leftmost_node is written, so right node must have been written as well.
-            read_node(child_node1->get_next_bnode(), child_node2);
+            read_node_or_fail(child_node1->get_next_bnode(), child_node2);
 
             // sanity check for right node
-            BT_RELEASE_ASSERT_CMP(child_node2->get_gen(), >=, j_child_nodes[1]->node_gen(), ,
+            BT_RELEASE_ASSERT_CMP(child_node2->get_gen(), >=, j_child_nodes[1]->node_gen(), child_node2,
                                   "gen cnt should be more than the journal entry");
             // no need to recover child nodes
             return;
@@ -2122,7 +2122,8 @@ private:
         {
             if (!ret.found) {
                 if (child_node1->is_leaf()) {
-                    BT_RELEASE_ASSERT_CMP(ret.end_of_search_index, ==, (int)child_node1->get_total_entries(), ,
+                    BT_RELEASE_ASSERT_CMP(ret.end_of_search_index, ==, (int)child_node1->get_total_entries(),
+                                          child_node1,
                                           "there should not be any entry more then this key if it can not be found "
                                           "in this leaf node");
                 } else {
@@ -2323,14 +2324,29 @@ private:
         if (BtreeStoreType == btree_store_type::SSD_BTREE) {
             auto j_iob = btree_store_t::make_journal_entry(journal_op::BTREE_MERGE, false /* is_root */,
                                                            {parent_node->get_node_id(), parent_node->get_gen()});
+            K child_pkey;
+            if (start_indx < parent_node->get_total_entries()) {
+                parent_node->get_nth_key(start_indx, &child_pkey, true);
+                BT_RELEASE_ASSERT_CMP(start_indx, ==, (parent_insert_indx - 1), parent_node, "it should be last index");
+            }
             btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::inplace_write, left_most_node, cp_id,
-                                                  true);
+                                                  child_pkey.get_blob());
             for (auto& node : old_nodes) {
-                btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::removal, node, cp_id, true);
+                btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::removal, node, cp_id);
             }
+            uint32_t insert_indx = 0;
             for (auto& node : replace_nodes) {
-                btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::creation, node, cp_id, false);
+                K child_pkey;
+                if ((start_indx + insert_indx) < parent_node->get_total_entries()) {
+                    parent_node->get_nth_key(start_indx + insert_indx, &child_pkey, true);
+                    BT_RELEASE_ASSERT_CMP((start_indx + insert_indx), ==, (parent_insert_indx - 1), parent_node,
+                                          "it should be last index");
+                }
+                btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::creation, node, cp_id,
+                                                      child_pkey.get_blob());
+                ++insert_indx;
             }
+            BT_RELEASE_ASSERT_CMP((start_indx + insert_indx), ==, parent_insert_indx, parent_node, "it should be same");
             btree_store_t::write_journal_entry(m_btree_store.get(), cp_id, j_iob);
         }
 
@@ -2629,6 +2645,12 @@ private:
         return (btree_store_t::write_node(m_btree_store.get(), node, dependent_node, cp_id));
     }
 
+    /* Caller of this api doesn't expect read to fail in any circumstance */
+    void read_node_or_fail(bnodeid_t id, BtreeNodePtr& node) {
+        auto ret = btree_store_t::read_node(m_btree_store.get(), id, node);
+        BT_RELEASE_ASSERT_CMP(ret, ==, btree_status_t::success, );
+    }
+
     btree_status_t read_node(bnodeid_t id, BtreeNodePtr& node) {
         return (btree_store_t::read_node(m_btree_store.get(), id, node));
     }
@@ -2793,7 +2815,7 @@ protected:
         if (BtreeStoreType == btree_store_type::SSD_BTREE) {
             auto j_iob = btree_store_t::make_journal_entry(journal_op::BTREE_CREATE, true /* is_root */,
                                                            {m_root_node, root->get_gen()});
-            btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::creation, root, cp_id, false);
+            btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::creation, root, cp_id);
             btree_store_t::write_journal_entry(m_btree_store.get(), cp_id, j_iob);
         }
 

@@ -431,15 +431,9 @@ public:
     }
 
     static void append_node_to_journal(sisl::io_blob& j_iob, bt_journal_node_op node_op,
-                                       const boost::intrusive_ptr< SSDBtreeNode >& node, const btree_cp_id_ptr& cp_id,
-                                       bool append_last_key = false) {
+                                       const boost::intrusive_ptr< SSDBtreeNode >& node, const btree_cp_id_ptr& cp_id) {
         sisl::blob key_blob;
         K key;
-        if (append_last_key) {
-            node->get_last_key(&key);
-            key_blob = key.get_blob();
-        }
-
         append_node_to_journal(j_iob, node_op, node, cp_id, key_blob);
     }
 
