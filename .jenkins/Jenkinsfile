@@ -18,7 +18,7 @@ pipeline {
                 branch "${STABLE_BRANCH}"
             } } }
             steps {
-                sh(script: "sed -Ei 's,version = .*([[:digit:]]+\\.[[:digit:]]+\\.[[:digit:]]+).*,version = \"\\1+b${env.BUILD_NUMBER}\",' conanfile.py")
+                sh(script: "sed -Ei 's,version = .*\"([[:digit:]]+\\.[[:digit:]]+\\.[[:digit:]]+).*,version = \"\\1-${env.BUILD_NUMBER}\",' conanfile.py")
             }
         }
 
@@ -70,7 +70,7 @@ pipeline {
                             branch "${STABLE_BRANCH}"
                         } } }
                         steps {
-                            sh(script: "sed -Ei 's,version = .*([[:digit:]]+\\.[[:digit:]]+\\.[[:digit:]]+).*,version = \"\\1+b${env.BUILD_NUMBER}\",' conanfile.py")
+                            sh(script: "sed -Ei 's,version = .*\"([[:digit:]]+\\.[[:digit:]]+\\.[[:digit:]]+).*,version = \"\\1-${env.BUILD_NUMBER}\",' conanfile.py")
                         }
                     }
                     stage("Build") {
