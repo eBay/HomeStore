@@ -153,7 +153,10 @@ void HomeStoreCP::blkalloc_cp(hs_cp_id* id) {
 
     /* Now it is safe to truncate as blkalloc bitsmaps are persisted */
     for (auto it = id->indx_id_list.begin(); it != id->indx_id_list.end(); ++it) {
-        if (it->second == nullptr || it->second->flags == cp_state::suspend_cp) { continue; }
+        if (it->second == nullptr || it->second->flags == cp_state::suspend_cp ||
+            !(it->second->flags & cp_state::blkalloc_cp)) {
+            continue;
+        }
         it->second->indx_mgr->truncate(it->second);
     }
     home_log_store_mgr.device_truncate();
@@ -232,8 +235,8 @@ void IndxMgr::create_first_cp_id() {
     auto cp_info = &(m_last_cp_sb.cp_info);
     int64_t cp_cnt = cp_info->active_cp_cnt + 1;
     int64_t psn = cp_info->active_data_psn;
-    m_first_cp_id = indx_cp_id_ptr(
-        new indx_cp_id(cp_cnt, psn, cp_info->diff_data_psn, shared_from_this(), m_free_list[cp_cnt % MAX_CP_CNT]));
+    m_first_cp_id = indx_cp_id_ptr(new indx_cp_id(cp_cnt, psn, cp_info->diff_data_psn, shared_from_this(),
+                                                  m_free_list[++m_free_list_cnt % MAX_CP_CNT]));
     m_first_cp_id->ainfo.btree_id = m_active_tbl->attach_prepare_cp(nullptr, false, false);
     /* create new diff table */
     if (!m_is_snap_enabled) { return; }
@@ -257,6 +260,7 @@ void IndxMgr::create_first_cp_id() {
         m_first_cp_id->dinfo.diff_tbl = m_recover_indx_tbl(diff_btree_sb, diff_cp_info);
         m_first_cp_id->dinfo.diff_snap_id = diff_snap_id;
         m_first_cp_id->dinfo.btree_id = m_first_cp_id->dinfo.diff_tbl->attach_prepare_cp(nullptr, false, false);
+        m_first_cp_id->flags = cp_state::suspend_cp; // it becomes active after all the journal entries are replayed
     } else {
         create_new_diff_tbl(m_first_cp_id);
     }
@@ -351,7 +355,7 @@ void IndxMgr::recovery_start_phase2() {
     /* get the indx id */
     auto hs_id = m_cp->cp_io_enter();
     auto indx_id = get_indx_id(hs_id);
-    assert(indx_id != nullptr);
+    assert(indx_id == m_first_cp_id);
 
     /* start replaying the entry in order of seq number */
     for (auto it = seq_buf_map.cbegin(); it != seq_buf_map.cend(); ++it) {
@@ -411,6 +415,8 @@ void IndxMgr::recovery_start_phase2() {
         if (ret != btree_status_t::success) { abort(); }
     }
 
+    m_recovery_mode = false;
+    indx_id->flags = cp_state::active_cp;
     m_cp->cp_io_exit(hs_id);
     seq_buf_map.erase(seq_buf_map.begin(), seq_buf_map.end());
 
@@ -801,7 +807,6 @@ void IndxMgr::update_indx(indx_req_ptr ireq) {
     /* Entered into critical section. CP is not triggered in this critical section */
     ireq->hs_id = m_cp->cp_io_enter();
     ireq->indx_id = get_indx_id(ireq->hs_id);
-    if (!ireq->indx_id) { ireq->indx_id = m_first_cp_id; }
 
     ireq->state = indx_req_state::active_btree;
     update_indx_internal(ireq);
@@ -878,7 +883,8 @@ indx_cp_id_ptr IndxMgr::get_indx_id(hs_cp_id* cp_id) {
     indx_cp_id_ptr btree_id;
     if (it == cp_id->indx_id_list.end()) {
         /* indx mgr is just created. So take the first id. */
-        return (nullptr);
+        assert(m_first_cp_id != nullptr);
+        return (m_first_cp_id);
     } else {
         assert(it->second != nullptr);
         return (it->second);
