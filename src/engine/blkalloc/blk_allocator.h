@@ -228,6 +228,16 @@ public:
     }
 
     uint32_t total_alloc_blks() const { return m_alloc_blk_cnt.load(); }
+    bool is_blk_alloced_on_disk(BlkId& b) {
+        if (!m_auto_recovery) {
+            return true; // nothing to compare. So always return true
+        }
+        if (!m_disk_bm->is_bits_set(b.get_id(), b.get_nblks())) {
+            BLKALLOC_ASSERT(RELEASE, 0, "Expected bits to reset");
+            return false;
+        }
+        return true;
+    }
 
     /* It is used during recovery in both mode :- auto recovery and manual recovery
      * It is also used in normal IO during auto recovery mode.

@@ -49,7 +49,8 @@ void FixedBlkAllocator::inited() {
 
 bool FixedBlkAllocator::is_blk_alloced(BlkId& b) {
     /* We need to take lock so we can check in non debug builds */
-    return true;
+    if (!m_inited) { return true; }
+    return (BlkAllocator::is_blk_alloced_on_disk(b));
 }
 
 BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) {

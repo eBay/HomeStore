@@ -441,12 +441,6 @@ public:
         bool ret = m_cache->insert_missing_pieces(bbuf, offset, size, missing_mp);
         BlkId read_blkid(bid.get_blkid_at(offset, size, m_pagesz));
 
-        /* It might be a false assert if there is a race between read and write but keeping
-         * it for now as it can be good check to see that we have recovered all the blocks
-         * after boot.
-         */
-        assert(m_vdev.is_blk_alloced(read_blkid));
-
         if (missing_mp.size()) {
             HISTOGRAM_OBSERVE(m_metrics, blkstore_partial_cache_distribution, missing_mp.size());
             COUNTER_INCREMENT(m_metrics, blkstore_drive_read_count, missing_mp.size());
@@ -472,6 +466,7 @@ public:
                 req->missing_pieces.push_back(missing_piece);
             }
 
+            HS_ASSERT_CMP(RELEASE, m_vdev.is_blk_alloced(tmp_bid), ==, true, "blk is not allocted");
             m_vdev.read(tmp_bid, mp, to_vdev_req(req));
             if (req->isSyncCall) {
                 bool inserted = bbuf->update_missing_piece(missing_mp[i].first, missing_mp[i].second, ptr);

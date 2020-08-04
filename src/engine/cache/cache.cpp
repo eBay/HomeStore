@@ -32,7 +32,7 @@ bool IntrusiveCache< K, V >::insert(V& v, V** out_ptr, const auto& found_cb) {
     auto b = K::get_blob(*pk);
     uint64_t hash_code = util::Hash64((const char*)b.bytes, (size_t)b.size);
 
-    HS_LOG(DEBUG, cache, "Attemping to insert in cache: {}", v.to_string());
+    HS_LOG(DEBUG, cache, "Attemping to insert in cache: {} key {}", v.to_string(), pk->to_string());
 
     // Try adding the record into the hash set.
     bool inserted = m_hash_set.insert(*pk, v, out_ptr, hash_code, found_cb);
