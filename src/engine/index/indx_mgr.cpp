@@ -356,6 +356,9 @@ void IndxMgr::recovery_start_phase2() {
     auto hs_id = m_cp->cp_io_enter();
     auto indx_id = get_indx_id(hs_id);
     assert(indx_id == m_first_cp_id);
+    uint64_t diff_replay_cnt = 0;
+    uint64_t blk_alloc_replay_cnt = 0;
+    uint64_t active_replay_cnt = 0;
 
     /* start replaying the entry in order of seq number */
     for (auto it = seq_buf_map.cbegin(); it != seq_buf_map.cend(); ++it) {
@@ -399,22 +402,28 @@ void IndxMgr::recovery_start_phase2() {
                                                   std::memory_order_relaxed);
                  }
             }
-        }
-        if (hdr->cp_cnt <= m_last_cp_sb.cp_info.active_cp_cnt) { /* it is already persisted */
-            continue;
+            ++blk_alloc_replay_cnt;
         }
 
         /* update active indx_tbl */
-        auto ret = m_active_tbl->recovery_update(seq_num, hdr, indx_id->ainfo.btree_id);
-        if (ret != btree_status_t::success) { abort(); }
+        if (hdr->cp_cnt > m_last_cp_sb.cp_info.active_cp_cnt) {
+            auto ret = m_active_tbl->recovery_update(seq_num, hdr, indx_id->ainfo.btree_id);
+            if (ret != btree_status_t::success) { abort(); }
+            ++active_replay_cnt;
+        }
 
         if (!m_is_snap_enabled) { continue; }
 
         /* update diff indx tbl */
-        ret = indx_id->dinfo.diff_tbl->recovery_update(seq_num, hdr, indx_id->dinfo.btree_id);
-        if (ret != btree_status_t::success) { abort(); }
+        if (hdr->cp_cnt > m_last_cp_sb.cp_info.diff_cp_cnt) {
+            ret = indx_id->dinfo.diff_tbl->recovery_update(seq_num, hdr, indx_id->dinfo.btree_id);
+            if (ret != btree_status_t::success) { abort(); }
+            ++diff_replay_cnt;
+        }
     }
 
+    LOGINFO("m_name {} blk alloc replay cnt {} active_replay_cnt {} diff_replay_cnt{}", m_name, blk_alloc_replay_cnt,
+            active_replay_cnt, diff_replay_cnt);
     m_recovery_mode = false;
     indx_id->flags = cp_state::active_cp;
     m_cp->cp_io_exit(hs_id);
