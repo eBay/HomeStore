@@ -377,13 +377,13 @@ void IndxMgr::recovery_start_phase2() {
             for (uint32_t i = 0; i < fblkid_pair.second; ++i) {
                 BlkId fbid(fblkid_pair.first[i]);
                 Free_Blk_Entry fbe(fbid, 0, fbid.get_nblks());
-                auto cnt = free_blk(nullptr, indx_id->free_blkid_list, fbe, true);
-                assert(cnt > 0);
+                auto size = free_blk(nullptr, indx_id->free_blkid_list, fbe, true);
+                assert(size > 0);
                 if (hdr->cp_cnt > m_last_cp_sb.cp_info.active_cp_cnt) {
                     /* TODO: we update size in superblock with each checkpoint. Ideally it
                      * has to be updated only for blk alloc checkpoint.
                      */
-                    indx_id->indx_size.fetch_sub(cnt, std::memory_order_relaxed);
+                    indx_id->indx_size.fetch_sub(size, std::memory_order_relaxed);
                 }
             }
 
