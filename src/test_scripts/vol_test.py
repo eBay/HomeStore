@@ -34,6 +34,19 @@ def recovery():
     --remove_file=1 --delete_volume=1", stderr=subprocess.STDOUT, shell=True)
     print("recovery passed")
 
+def recovery_crash():
+    try:
+        subprocess.call(dirpath + "test_volume \
+            --gtest_filter=VolTest.init_io_test --run_time=30 --enable_crash_handler=0 --remove_file=0 --abort=1", \
+            stderr=subprocess.STDOUT, shell=True)
+    except:
+        print("test aborted")
+    
+    subprocess.check_call(dirpath + "test_volume \
+    --gtest_filter=VolTest.recovery_io_test --verify_hdr=0 --verify_data=0 --run_time=30 --enable_crash_handler=1 \
+    --remove_file=1 --delete_volume=1", stderr=subprocess.STDOUT, shell=True)
+    print("recovery crash passed")
+
 ## @test    normal
 #  @brief   Normal IO test
 def normal():
@@ -256,6 +269,9 @@ if test_suits == "normal":
     
 if test_suits == "recovery":
     recovery()
+
+if test_suits == "recovery_crash":
+    recovery_crash()
     
 if test_suits == "mapping":
     mapping()

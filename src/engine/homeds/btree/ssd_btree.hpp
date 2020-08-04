@@ -113,6 +113,9 @@ public:
                     m_journal->register_log_found_cb(bind_this(SSDBtreeStore::log_found, 3));
                     m_journal->register_log_replay_done_cb(bind_this(SSDBtreeStore::replay_done, 1));
                 }));
+            // reserve this blk unconditionally as root node never changes
+            BlkId bid(sb.root_node);
+            m_blkstore->reserve_blk(bid);
         } else {
             m_journal = HomeLogStoreMgr::instance().create_new_log_store();
             sb.journal_id = get_journal_id_store();
@@ -125,17 +128,42 @@ public:
 
     void log_found(logstore_seq_num_t seqnum, log_buffer log_buf, void* mem) {
         auto& cp_sb = m_btree->get_last_cp_cb();
-        if (seqnum >= cp_sb.active_psn) {
+        btree_journal_entry* jentry = (btree_journal_entry*)log_buf.bytes();
+        bool is_replayed = false;
+
+        if (jentry->cp_cnt > cp_sb.cp_cnt) {
             // Entry is not replayed yet
-            btree_journal_entry* jentry = (btree_journal_entry*)log_buf.bytes();
             if (jentry->cp_cnt >= m_first_cp->cp_cnt) {
                 if (jentry->op == journal_op::BTREE_CREATE) {
                     m_btree->create_btree_replay(jentry, m_first_cp);
                 } else if (jentry->op == journal_op::BTREE_SPLIT) {
                     m_btree->split_node_replay(jentry, m_first_cp);
                 }
-                ++m_replayed_count;
             }
+            ++m_replayed_count;
+            is_replayed = true;
+        }
+
+        if (jentry->cp_cnt > cp_sb.blkalloc_cp_cnt) {
+            /* get all the free blks and allocated blks and set it in a bitmap. These entries are not persisted yet in a
+             * bitmap.
+             */
+            /* getting all the free blks */
+
+            jentry->foreach_node(bt_journal_node_op::removal,
+                                 ([this, is_replayed](bt_node_gen_pair node_info, sisl::blob key_blob) {
+                                     get_wb_cache()->free_blk(node_info.node_id, m_first_cp->free_blkid_list);
+                                     if (is_replayed) { m_first_cp->btree_size.fetch_sub(1); }
+                                 }));
+
+            /* getting all the allocated blks */
+            jentry->foreach_node(bt_journal_node_op::creation,
+                                 ([this, is_replayed](bt_node_gen_pair node_info, sisl::blob key_blob) {
+                                     assert(node_info.node_id != empty_bnodeid);
+                                     BlkId bid(node_info.node_id);
+                                     m_blkstore->reserve_blk(bid);
+                                     if (is_replayed) { m_first_cp->btree_size.fetch_add(1); }
+                                 }));
         }
     }
 
@@ -143,6 +171,11 @@ public:
         HS_SUBMOD_LOG(INFO, base, , "btree", m_cfg.get_name(), "Replay of btree completed and replayed {} entries",
                       m_replayed_count);
         m_is_recovering = false;
+        auto& cp_sb = m_btree->get_last_cp_cb();
+        if (cp_sb.cp_cnt == -1 && m_replayed_count == 0) {
+            m_btree->create_btree_replay(nullptr, m_first_cp);
+            m_first_cp->btree_size.fetch_add(1);
+        }
     }
 
     static void cp_start(SSDBtreeStore* store, const btree_cp_id_ptr& cp_id, cp_comp_callback cb) {
@@ -212,7 +245,7 @@ public:
     static boost::intrusive_ptr< SSDBtreeNode >
     reserve_node(SSDBtreeStore* store, bool is_leaf, const BlkId& blkid,
                  const boost::intrusive_ptr< SSDBtreeNode >& copy_from = nullptr) {
-        auto safe_buf = m_blkstore->reserve_blk_cached(blkid);
+        auto safe_buf = m_blkstore->init_blk_cached(blkid);
         if (safe_buf == nullptr) {
             LOGERROR("btree alloc failed. No space avail");
             return nullptr;
@@ -302,6 +335,8 @@ public:
                           boost::intrusive_ptr< SSDBtreeNode > node2) {
         bnodeid_t id1 = node1->get_node_id();
         bnodeid_t id2 = node2->get_node_id();
+        auto gen1 = node1->get_gen();
+        auto gen2 = node2->get_gen();
         auto mvec1 = node1->get_memvec_intrusive();
         auto mvec2 = node2->get_memvec_intrusive();
 
@@ -310,10 +345,16 @@ public:
         /* move the underneath memory */
         node1->set_memvec(mvec2, node1->get_data_offset(), node1->get_cache_size());
         node2->set_memvec(mvec1, node2->get_data_offset(), node2->get_cache_size());
-        /* restore the node ids */
+        /* restore the node ids and gen */
         node1->set_node_id(id1);
+        node1->set_gen(gen1);
+        node1->inc_gen(); // we are incrementing the gen since contents are changed.
         node1->init();
+
+        /* restore the node ids and gen */
         node2->set_node_id(id2);
+        node2->set_gen(gen2);
+        node2->inc_gen(); // we are incrementing the gen since contents are changed.
         node2->init();
     }
 
@@ -364,7 +405,7 @@ public:
     static void free_node(SSDBtreeStore* store, const boost::intrusive_ptr< SSDBtreeNode >& bn,
                           const blkid_list_ptr& free_blkid_list, bool in_mem = false) {
         if (in_mem) { return; }
-        store->get_wb_cache()->free_blk(bn, free_blkid_list);
+        store->get_wb_cache()->free_blk(bn->get_node_id(), free_blkid_list);
     }
 
     static void ref_node(SSDBtreeNode* bn) {
@@ -390,15 +431,9 @@ public:
     }
 
     static void append_node_to_journal(sisl::io_blob& j_iob, bt_journal_node_op node_op,
-                                       const boost::intrusive_ptr< SSDBtreeNode >& node, const btree_cp_id_ptr& cp_id,
-                                       bool append_last_key = false) {
+                                       const boost::intrusive_ptr< SSDBtreeNode >& node, const btree_cp_id_ptr& cp_id) {
         sisl::blob key_blob;
         K key;
-        if (append_last_key) {
-            node->get_last_key(&key);
-            key_blob = key.get_blob();
-        }
-
         append_node_to_journal(j_iob, node_op, node, cp_id, key_blob);
     }
 
@@ -433,7 +468,6 @@ private:
         m_journal->append_async(
             j_iob, nullptr, ([this, cp_id](logstore_seq_num_t seq_num, sisl::io_blob& iob, bool status, void* cookie) {
                 btree_journal_entry* jentry = blob_to_entry(iob);
-                LOGINFO("btree journal entry = {}", jentry->to_string());
                 if (jentry->op != journal_op::BTREE_CREATE) {
                     /*
                      * blk id is allocated for newly created nodes in disk bitmap only after it is

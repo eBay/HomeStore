@@ -965,14 +965,13 @@ protected:
                 if (tcfg.verify_data) {
                     j = memcmp((void*)b.bytes, (uint8_t*)((uint64_t)req->validate_buf + tot_size_read), size_read);
                     m_voltest->output.match_cnt++;
-                }
-
-                if ((j != 0) && !tcfg.verify_data) {
+                } else {
                     /* we will only verify the header. We write lba number in the header */
-                    j = memcmp((void*)b.bytes, (uint8_t*)((uint64_t)req->validate_buf + tot_size_read),
-                               sizeof(uint64_t));
-                    if (!j) {
+                    uint64_t validate_lba = *((uint64_t*)((uint64_t)req->validate_buf + tot_size_read));
+
+                    if (validate_lba == 0 || validate_lba == *((uint64_t*)b.bytes)) {
                         /* copy the data */
+                        j = 0;
                         auto ret = pwrite(req->fd, b.bytes, b.size, tot_size_read + req->offset);
                         assert(ret == b.size);
                     }
@@ -1035,7 +1034,7 @@ public:
     }
 
     bool time_to_stop() const override { return m_is_job_done; }
-    bool is_job_done() const override { return m_is_job_done; }
+    bool is_job_done() const override { return (m_outstanding_ios == 0); }
     bool is_async_job() const override { return true; };
     std::string job_name() const override { return "VerifyJob"; }
 
@@ -1102,8 +1101,9 @@ TEST_F(VolTest, recovery_io_test) {
     tcfg.init = false;
     this->start_homestore();
 
+    std::unique_ptr< VolVerifyJob > verify_job;
     if (tcfg.verify_hdr || tcfg.verify_data || tcfg.verify_only) {
-        auto verify_job = std::make_unique< VolVerifyJob >(this);
+        verify_job = std::make_unique< VolVerifyJob >(this);
         this->start_job(verify_job.get(), wait_type_t::for_completion);
     }
 

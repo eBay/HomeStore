@@ -28,7 +28,6 @@ class CacheValue : public ValueSpec {
 
     boost::intrusive_ptr< CacheValueBuffer > m_buf;
 
-#define INVALID_SEQ_ID UINT64_MAX
 public:
     static std::shared_ptr< CacheValue > gen_value(ValuePattern spec, CacheValue* ref_value = nullptr) {
         std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;

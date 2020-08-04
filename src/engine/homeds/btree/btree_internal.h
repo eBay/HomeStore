@@ -84,7 +84,7 @@ struct blkalloc_cp_id;
 // clang-format on
 VENUM(journal_op, uint8_t, BTREE_SPLIT = 1, BTREE_MERGE = 2, BTREE_CREATE = 3);
 
-#define INVALID_SEQ_ID UINT64_MAX
+#define INVALID_SEQ_ID -1
 struct btree_cp_id;
 using btree_cp_id_ptr = boost::intrusive_ptr< btree_cp_id >;
 using cp_comp_callback = std::function< void(const btree_cp_id_ptr& cp_id) >;

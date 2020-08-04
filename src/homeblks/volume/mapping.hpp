@@ -38,7 +38,7 @@ struct mapping_op_cntx {
         struct volume_req* vreq;
         sisl::ThreadVector< BlkId >* free_list;
     } u;
-    uint64_t seqId = INVALID_SEQ_ID;
+    int64_t seqId = INVALID_SEQ_ID;
     uint64_t free_blk_size = 0;
 };
 
@@ -187,7 +187,7 @@ public:
 #define VALUE_ENTRY_VERSION 0x1
 struct ValueEntryMeta {
     uint8_t magic = VALUE_ENTRY_VERSION;
-    uint64_t seqId;
+    int64_t seqId;
     BlkId blkId;
     uint64_t nlba : NBLKS_BITS;
     uint64_t blk_offset : NBLKS_BITS; // offset based on blk store not based on vol page size
@@ -212,12 +212,17 @@ public:
     ValueEntry() : m_meta(), m_carr() { m_ptr = (ValueEntry*)this; }
 
     // deep copy
-    ValueEntry(uint64_t seqId, const BlkId& blkId, uint8_t blk_offset, uint8_t nlba, uint16_t* carr) :
+    ValueEntry(int64_t seqId, const BlkId& blkId, uint8_t blk_offset, uint8_t nlba, uint16_t* carr,
+               uint64_t vol_page_size) :
             m_meta(seqId, blkId, blk_offset, nlba) {
         for (int i = 0; i < nlba; ++i) {
             m_carr[i] = carr[i];
         }
         m_ptr = (ValueEntry*)this;
+#ifndef NDEBUG
+        auto actual_nblks = (vol_page_size / HomeBlks::instance()->get_data_pagesz()) * nlba;
+        assert(blk_offset + actual_nblks <= get_blkId().get_nblks());
+#endif
     }
 
     ValueEntry(const ValueEntry& ve) { copy_from(ve); }
@@ -257,20 +262,18 @@ public:
         uint8_t blk_offset = get_blkid_offset(lba_offset, vol_page_size);
         m_ptr->m_meta.blk_offset += blk_offset;
 #ifndef NDEBUG
-        auto actual_nlbas = (vol_page_size / HomeBlks::instance()->get_data_pagesz()) * nlba;
-        assert(blk_offset + actual_nlbas <= get_blkId().get_nblks());
+        auto actual_nblks = (vol_page_size / HomeBlks::instance()->get_data_pagesz()) * nlba;
+        assert(blk_offset + actual_nblks <= get_blkId().get_nblks());
 #endif
     }
 
-    uint64_t get_seqId() const { return m_ptr->m_meta.seqId; }
+    int64_t get_seqId() const { return m_ptr->m_meta.seqId; }
 
     BlkId& get_blkId() const { return m_ptr->m_meta.blkId; }
 
     uint8_t get_blk_offset() const { return (uint8_t)m_ptr->m_meta.blk_offset; }
 
     uint8_t get_nlba() const { return (uint8_t)m_ptr->m_meta.nlba; }
-
-    void set_nlba(uint8_t nlba) { m_ptr->m_meta.nlba = nlba; }
 
     uint16_t& get_checksum_at(uint8_t index) const {
         assert(index < get_nlba());
@@ -715,10 +718,10 @@ private:
     void get_start_end_lba(BRangeCBParam* param, uint64_t& start_lba, uint64_t& end_lba);
 
     /* result of overlap of k1/k2 is added to replace_kv */
-    void compute_and_add_overlap(op_type update_op, std::vector< Free_Blk_Entry > fbe_list, uint64_t s_lba,
-                                 uint64_t e_lba, MappingValue& new_val, uint16_t new_val_offset, MappingValue& e_val,
+    void compute_and_add_overlap(std::vector< Free_Blk_Entry >& fbe_list, uint64_t s_lba, uint64_t e_lba,
+                                 MappingValue& new_val, uint16_t new_val_offset, MappingValue& e_val,
                                  uint16_t e_val_offset,
-                                 std::vector< std::pair< MappingKey, MappingValue > >& replace_kv);
+                                 std::vector< std::pair< MappingKey, MappingValue > >& replace_kv, uint64_t new_seq_id);
 
     /* add missing interval to replace kv */
     void add_new_interval(uint64_t s_lba, uint64_t e_lba, MappingValue& val, uint16_t lba_offset,

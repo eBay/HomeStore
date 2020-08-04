@@ -244,8 +244,9 @@ public:
     /* We don't want to free the blocks until cp is persisted. Because we use these blocks
      * to recover btree.
      */
-    void free_blk(const boost::intrusive_ptr< SSDBtreeNode >& bn, const blkid_list_ptr& free_blkid_list) {
-        BlkId bid(bn->get_node_id());
+    void free_blk(bnodeid_t node_id, const blkid_list_ptr& free_blkid_list) {
+        assert(node_id != empty_bnodeid);
+        BlkId bid(node_id);
 
         /*  if cp_id is null then free it only from the cache. */
         m_blkstore->free_blk(bid, boost::none, boost::none, free_blkid_list ? true : false);

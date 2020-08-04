@@ -256,12 +256,6 @@ public:
 
     BlkAllocStatus reserve_blk(const BlkId& in_blkid) { return (m_vdev.reserve_blk(in_blkid)); }
 
-    boost::intrusive_ptr< Buffer > reserve_blk_cached(const BlkId& blkid) {
-        auto ret_blk = reserve_blk(blkid);
-        if (ret_blk != BLK_ALLOC_SUCCESS) { return nullptr; }
-        return init_blk_cached(blkid);
-    }
-
     boost::intrusive_ptr< Buffer > init_blk_cached(const BlkId& blkid) {
         // Create an object for the buffer
         auto buf = Buffer::make_object();

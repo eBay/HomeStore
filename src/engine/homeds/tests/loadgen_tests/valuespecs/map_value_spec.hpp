@@ -14,7 +14,6 @@ namespace homeds {
 namespace loadgen {
 class MapValue : public MappingValue, public ValueSpec {
 
-#define INVALID_SEQ_ID UINT64_MAX
 public:
     BlkId get_blkId() {
         ValueEntry ve;
@@ -65,7 +64,7 @@ public:
                 std::shared_ptr< MapValue > temp = std::make_shared< MapValue >(value);
                 return temp;
             } else {
-                ValueEntry ve(INVALID_SEQ_ID, BlkId(1, 1, 0), 0, 1, &carr[0]);
+                ValueEntry ve(INVALID_SEQ_ID, BlkId(1, 1, 0), 0, 1, &carr[0], 1);
                 std::shared_ptr< MapValue > temp = std::make_shared< MapValue >(ve);
                 return temp;
             }
@@ -85,7 +84,7 @@ public:
 
             auto sblk = distribution(generator);
 
-            ValueEntry ve(sid, BlkId(sblk, 1, 0), 0, 1, &carr[0]);
+            ValueEntry ve(sid, BlkId(sblk, 1, 0), 0, 1, &carr[0], 1);
 
             std::shared_ptr< MapValue > temp = std::make_shared< MapValue >(ve);
             return temp;
