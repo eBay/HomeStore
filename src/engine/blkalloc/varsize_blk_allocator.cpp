@@ -215,8 +215,11 @@ void VarsizeBlkAllocator::allocator_state_machine() {
 
 bool VarsizeBlkAllocator::is_blk_alloced(BlkId& b) {
     if (!m_inited) { return true; }
-    BLKALLOC_ASSERT(DEBUG, m_cache_bm->is_bits_set(b.get_id(), b.get_nblks()), "Expected bits to reset");
-    return true;
+    if (!m_cache_bm->is_bits_set(b.get_id(), b.get_nblks())) {
+        BLKALLOC_ASSERT(RELEASE, 0, "Expected bits to reset");
+        return false;
+    }
+    return (BlkAllocator::is_blk_alloced_on_disk(b));
 }
 
 void VarsizeBlkAllocator::inited() {
