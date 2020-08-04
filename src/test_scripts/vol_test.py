@@ -26,11 +26,11 @@ for opt,arg in opts:
 
 def recovery():
     subprocess.check_call(dirpath + "test_volume \
-    --gtest_filter=VolTest.init_io_test --run_time=30 --enable_crash_handler=0 --remove_file=0", \
+            --gtest_filter=VolTest.init_io_test --run_time=30 --enable_crash_handler=0 --remove_file=0", \
     stderr=subprocess.STDOUT, shell=True)
     
     subprocess.check_call(dirpath + "test_volume \
-    --gtest_filter=VolTest.recovery_io_test --verify_hdr=0 --verify_data=0 --run_time=30 --enable_crash_handler=1 \
+            --gtest_filter=VolTest.recovery_io_test --verify_hdr=0 --verify_data=0 --run_time=30 --enable_crash_handler=1 \
     --remove_file=1 --delete_volume=1", stderr=subprocess.STDOUT, shell=True)
     print("recovery passed")
 

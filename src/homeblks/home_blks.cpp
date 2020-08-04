@@ -771,11 +771,13 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
     /* check the status of last boot */
     if (sb->test_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN)) {
         LOGDEBUG("System was shutdown cleanly.");
+        HS_ASSERT_CMP(DEBUG, MetaBlkMgr::is_self_recovered(), ==, false);
     } else if (!HS_STATIC_CONFIG(input.disk_init)) {
         LOGCRITICAL("System experienced sudden panic since last boot!");
     } else {
         HS_ASSERT(RELEASE, m_cfg.disk_init, "not the first boot");
         LOGINFO("first time boot");
+        HS_ASSERT_CMP(DEBUG, MetaBlkMgr::is_self_recovered(), ==, false);
     }
     // clear the flag and persist to disk, if we received a new shutdown and completed successfully,
     // the flag should be set again;

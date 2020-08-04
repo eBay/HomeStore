@@ -8,6 +8,7 @@ namespace homestore {
 
 void MetaBlkMgr::start(blk_store_t* sb_blk_store, const sb_blkstore_blob* blob, const bool is_init) {
     m_sb_blk_store = sb_blk_store;
+    MetaBlkMgr::reset_self_recover();
     if (is_init) {
         // write the meta blk manager's sb;
         init_ssb();
@@ -24,13 +25,7 @@ void MetaBlkMgr::stop() { del_instance(); }
 void MetaBlkMgr::cache_clear() {
     std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
     for (auto it = m_meta_blks.cbegin(); it != m_meta_blks.cend(); it++) {
-        for (auto it_m = it->second.cbegin(); it_m != it->second.cend(); it_m++) {
-            iomanager.iobuf_free((uint8_t*)(it_m->second));
-        }
-    }
-
-    for (auto it = m_meta_blks.begin(); it != m_meta_blks.end(); it++) {
-        it->second.clear();
+        iomanager.iobuf_free((uint8_t*)(it->second));
     }
 
     for (auto it = m_ovf_blk_hdrs.cbegin(); it != m_ovf_blk_hdrs.end(); it++) {
@@ -97,7 +92,7 @@ void MetaBlkMgr::init_ssb() {
         HS_ASSERT(RELEASE, 0, "alloc blk failed with status: {}", ret.message());
         return;
     }
-
+    HS_LOG(INFO, metablk, "allocated ssb blk: {}", bid.to_string());
     struct sb_blkstore_blob blob;
     blob.type = blkstore_type::META_STORE;
     blob.blkid.set(bid);
@@ -107,9 +102,9 @@ void MetaBlkMgr::init_ssb() {
     memset((void*)m_ssb, 0, META_BLK_PAGE_SZ);
 
     std::lock_guard< decltype(m_meta_mtx) > lk(m_meta_mtx);
-    HS_ASSERT(DEBUG, m_last_mblk == nullptr, "last mblk is not null, memory corruption!");
-    m_ssb->next_blkid.set(BlkId::invalid_internal_id());
-    m_ssb->prev_blkid.set(BlkId::invalid_internal_id());
+    m_last_mblk_id.set(invalid_bid);
+    m_ssb->next_blkid.set(invalid_bid);
+    m_ssb->prev_blkid.set(invalid_bid);
     m_ssb->magic = META_BLK_SB_MAGIC;
     m_ssb->version = META_BLK_SB_VERSION;
     m_ssb->migrated = false;
@@ -130,13 +125,14 @@ void MetaBlkMgr::scan_meta_blks() {
     // take a look so that before scan is complete, no add/remove/update operations will be allowed;
     std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
     auto bid = m_ssb->next_blkid;
+    auto prev_meta_bid = m_ssb->blkid;
 
-    while (bid.to_integer() != BlkId::invalid_internal_id()) {
+    while (bid.to_integer() != invalid_bid) {
         sisl::blob b;
         read(bid, b);
         auto mblk = (meta_blk*)b.bytes;
 
-        m_last_mblk = mblk;
+        m_last_mblk_id.set(bid);
 
         // TODO: add a new API in blkstore read to by pass cache;
         // e.g. take caller's read buf to avoid this extra memory copy;
@@ -144,7 +140,19 @@ void MetaBlkMgr::scan_meta_blks() {
         memcpy(buf, b.bytes, b.size);
 
         // add meta blk to cache;
-        m_meta_blks[mblk->hdr.h.type][mblk->hdr.h.blkid.to_integer()] = (meta_blk*)buf;
+        m_meta_blks[bid.to_integer()] = (meta_blk*)buf;
+
+        HS_ASSERT_CMP(DEBUG, mblk->hdr.h.blkid.to_integer(), ==, bid.to_integer(), "bid mismatch: {} : {} ",
+                      mblk->hdr.h.blkid.to_string(), bid.to_string());
+
+        if (prev_meta_bid.to_integer() != mblk->hdr.h.prev_blkid.to_integer()) {
+            // recover from previous crash during remove_sub_sb;
+            HS_LOG(INFO, metablk, "Recovering fromp previous crash. Fixing prev linkage.");
+            mblk->hdr.h.prev_blkid = prev_meta_bid;
+            MetaBlkMgr::set_self_recover();
+        }
+
+        prev_meta_bid = bid;
 
         // mark allocated for this block
         m_sb_blk_store->reserve_blk(mblk->hdr.h.blkid);
@@ -161,7 +169,7 @@ void MetaBlkMgr::scan_meta_blks() {
 
         uint64_t read_sz = mblk->hdr.h.context_sz >= META_BLK_CONTEXT_SZ ? META_BLK_CONTEXT_SZ : mblk->hdr.h.context_sz;
 
-        while (obid.to_integer() != BlkId::invalid_internal_id()) {
+        while (obid.to_integer() != invalid_bid) {
             sisl::blob b;
             read(obid, b);
 
@@ -248,13 +256,13 @@ void MetaBlkMgr::scan_meta_blks_per_chunk() {
             std::lock_guard< decltype(m_meta_mtx) > lk(m_meta_mtx);
 
             // insert this meta blk to in-memory copy;
-            m_meta_blks[mblk->hdr.h.type][mblk->hdr.h.blkid.to_integer()] = mblk;
+            m_meta_blks[mblk->hdr.h.blkid.to_integer()] = mblk;
 
             // alloc this blk id in bitmap
             m_sb_blk_store->reserve_blk(mblk->hdr.h.blkid);
 
             // if overflow bid is valid, allocate the overflow bid;
-            if (mblk->hdr.h.ovf_blkid.to_integer() != BlkId::invalid_internal_id()) {
+            if (mblk->hdr.h.ovf_blkid.to_integer() != invalid_bid) {
                 m_sb_blk_store->reserve_blk(mblk->hdr.h.ovf_blkid);
             }
         }
@@ -296,6 +304,7 @@ void MetaBlkMgr::register_handler(const meta_sub_type type, const meta_blk_found
 }
 
 void MetaBlkMgr::add_sub_sb(const meta_sub_type type, const void* context_data, const uint64_t sz, void*& cookie) {
+    std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
     HS_ASSERT(RELEASE, type.length() < MAX_SUBSYS_TYPE_LEN, "type len: {} should not exceed len: {}", type.length(),
               MAX_SUBSYS_TYPE_LEN);
     // not allowing add sub sb before registration
@@ -330,47 +339,61 @@ void MetaBlkMgr::write_blk(BlkId& bid, const void* context_data, const uint32_t 
     } catch (std::exception& e) { throw e; }
 }
 
+//
+// write blks to disks in reverse order
+// 1. write meta blk chain to disk;
+// 2. update in-memory m_last_mblk and write to disk or
+//    update in-memory m_ssb and write to disk;
+// 3. update in-memory meta blks map;
+//
 meta_blk* MetaBlkMgr::init_meta_blk(BlkId& bid, const meta_sub_type type, const void* context_data, const size_t sz) {
     meta_blk* mblk = (meta_blk*)iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_PAGE_SZ);
     mblk->hdr.h.blkid.set(bid);
     memset(mblk->hdr.h.type, 0, MAX_SUBSYS_TYPE_LEN);
     memcpy(mblk->hdr.h.type, type.c_str(), type.length());
 
-    std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
     mblk->hdr.h.magic = META_BLK_MAGIC;
 
-    // for both in-band and ovf buffer, we store crc in meta blk header;
-    mblk->hdr.h.crc = crc32_ieee(init_crc32, ((uint8_t*)context_data), sz);
-
     // handle prev/next pointer linkage;
-    if (m_last_mblk) {
-        mblk->hdr.h.prev_blkid.set(m_last_mblk->hdr.h.blkid);
-        HS_ASSERT_CMP(DEBUG, m_last_mblk->hdr.h.next_blkid.to_integer(), ==, BlkId::invalid_internal_id());
-        m_last_mblk->hdr.h.next_blkid.set(bid);
+    if (m_last_mblk_id.to_integer() != invalid_bid) {
+        // update this mblk's prev bid to last mblk;
+        mblk->hdr.h.prev_blkid.set(m_last_mblk_id);
 
-        // persist the changes;
-        write_meta_blk_to_disk(m_last_mblk);
+        // update last mblk's next to this mblk;
+        m_meta_blks[m_last_mblk_id.to_integer()]->hdr.h.next_blkid.set(bid);
     } else {
         // this is the first sub sb being added;
         mblk->hdr.h.prev_blkid.set(m_ssb->blkid);
-        HS_ASSERT_CMP(DEBUG, m_ssb->next_blkid.to_integer(), ==, BlkId::invalid_internal_id());
+        HS_ASSERT_CMP(DEBUG, m_ssb->next_blkid.to_integer(), ==, invalid_bid);
+        HS_LOG(INFO, metablk, "Changing meta ssb bid: {}'s next_blkid to {}", m_ssb->blkid, bid.to_string());
         m_ssb->next_blkid.set(bid);
-
-        // persiste the changes;
-        write_ssb();
     }
 
-    mblk->hdr.h.next_blkid.set(BlkId::invalid_internal_id());
+    // this mblk is now the last;
+    mblk->hdr.h.next_blkid.set(invalid_bid);
 
     // write this meta blk to disk
     write_meta_blk_internal(mblk, context_data, sz);
 
-    // update in-memory data structure;
-    m_last_mblk = mblk;
+    // now update previous last mblk or ssb. They can only be updated after meta blk is written to disk;
+    if (m_last_mblk_id.to_integer() != invalid_bid) {
+        // persist the changes to last mblk;
+        write_meta_blk_to_disk(m_meta_blks[m_last_mblk_id.to_integer()]);
+    } else {
+        // persiste the changes;
+        write_ssb();
+    }
+
+    // point last mblk to this mblk;
+    m_last_mblk_id.set(bid);
 
     // add to cache;
-    m_meta_blks[type][bid.to_integer()] = mblk;
+    HS_ASSERT(DEBUG, m_meta_blks.find(bid.to_integer()) == m_meta_blks.end(),
+              "memory corruption, bid: {} already added to cache.", bid.to_string());
+    m_meta_blks[bid.to_integer()] = mblk;
 
+    HS_LOG(INFO, metablk, "Done adding blkid: {}, prev: {}, next: {}", mblk->hdr.h.blkid, mblk->hdr.h.prev_blkid,
+           mblk->hdr.h.next_blkid);
     return mblk;
 }
 
@@ -398,6 +421,7 @@ void MetaBlkMgr::write_meta_blk_ovf(BlkId& prev_bid, BlkId& bid, const void* con
     for (size_t i = 0; i < nblks - 1; i++) {
         auto ret = alloc_meta_blk(bids[i]);
         if (ret != no_error) { HS_ASSERT(RELEASE, false, "failed to allocate overflow blk id with size: {}", sz); }
+        HS_LOG(DEBUG, metablk, "allocated ovf blk: {}", bids[i].to_string());
     }
 
     // push bid which is allocated by caller to the last bid;
@@ -410,7 +434,7 @@ void MetaBlkMgr::write_meta_blk_ovf(BlkId& prev_bid, BlkId& bid, const void* con
         HS_ASSERT_CMP(DEBUG, off_in_ctx, <, sz);
         HS_ASSERT_CMP(DEBUG, off_in_ctx, >=, offset);
         auto obid = bids[i];
-        auto next_obid = i > 0 ? bids[i - 1] : BlkId(BlkId::invalid_internal_id());
+        auto next_obid = i > 0 ? bids[i - 1] : BlkId(invalid_bid);
         auto prev_obid = i < nblks - 1 ? bids[i + 1] : prev_bid;
 
         meta_blk_ovf_hdr* ovf_hdr =
@@ -465,7 +489,7 @@ void MetaBlkMgr::write_meta_blk_internal(meta_blk* mblk, const void* context_dat
     // within block context size;
     if (sz <= META_BLK_CONTEXT_SZ) {
         // for inline case, set ovf_blkid to invalid
-        mblk->hdr.h.ovf_blkid.set(BlkId::invalid_internal_id());
+        mblk->hdr.h.ovf_blkid.set(invalid_bid);
 
         memcpy(mblk->context_data, context_data, sz);
     } else {
@@ -491,34 +515,35 @@ void MetaBlkMgr::write_meta_blk_internal(meta_blk* mblk, const void* context_dat
         write_meta_blk_ovf(mblk->hdr.h.blkid, obid, context_data, sz, offset);
     }
 
+    // for both in-band and ovf buffer, we store crc in meta blk header;
+    mblk->hdr.h.crc = crc32_ieee(init_crc32, ((uint8_t*)context_data), sz);
+
     // write meta blk;
     write_meta_blk_to_disk(mblk);
 }
 
+//
+// Do in-place update:
+// 1. allcate ovf_blkid if needed
+// 2. update the meta_blk
+// 3. free old ovf_blkid if there is any
+//
 void MetaBlkMgr::update_sub_sb(const meta_sub_type type, const void* context_data, const uint64_t sz, void*& cookie) {
-    //
-    // Do in-place update:
-    // 1. free old ovf_blkid if there is any
-    // 2. allcate ovf_blkid if needed
-    // 3. update the meta_blk
-    //
-    std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
+    std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx); // TODO: see if this lock can be removed;
     meta_blk* mblk = (meta_blk*)cookie;
 
     HS_LOG(INFO, metablk, "old sb: context_sz: {}, ovf_blkid: {}", (unsigned long)(mblk->hdr.h.context_sz),
            mblk->hdr.h.ovf_blkid.to_string());
 
-    // TODO: try to remove this lock as it is not required and we don't need to hold lock for concurrent write while
-    // writing to blkstore. And if without lock, this free should happen after meta blk is updated;
+    auto ovf_blkid_to_free = mblk->hdr.h.ovf_blkid;
 
-    // free the overflow blkid if it is there
-    free_ovf_blk_chain(mblk);
-    mblk->hdr.h.ovf_blkid.set(BlkId::invalid_internal_id());
-
-    mblk->hdr.h.crc = crc32_ieee(init_crc32, ((uint8_t*)context_data), sz);
+    mblk->hdr.h.ovf_blkid.set(invalid_bid);
 
     // write this meta blk to disk
     write_meta_blk_internal(mblk, context_data, sz);
+
+    // free the overflow blkid if it is there
+    free_ovf_blk_chain(ovf_blkid_to_free);
 
     HS_LOG(INFO, metablk, "new sb: context_sz: {}, ovf_blkid: {}", (uint64_t)mblk->hdr.h.context_sz,
            mblk->hdr.h.ovf_blkid.to_string());
@@ -527,79 +552,67 @@ void MetaBlkMgr::update_sub_sb(const meta_sub_type type, const void* context_dat
 }
 
 std::error_condition MetaBlkMgr::remove_sub_sb(const void* cookie) {
-    meta_blk* rm_blk = (meta_blk*)cookie;
-    BlkId bid = rm_blk->hdr.h.blkid;
-    auto type = rm_blk->hdr.h.type;
-
     std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
-
-    // type must exist
-    HS_ASSERT(DEBUG, m_meta_blks.find(type) != m_meta_blks.end(),
-              "Un-registered type: {} received, which is not supported!", type);
-
-    // remove from disk;
-    auto prev_blkid = m_meta_blks[type][bid.to_integer()]->hdr.h.prev_blkid;
-    auto next_blkid = m_meta_blks[type][bid.to_integer()]->hdr.h.next_blkid;
-
-    HS_LOG(INFO, metablk, "removing meta blk id: {}, type: {}, prev_blkid: {}, next_blkid: {}", bid.to_string(), type,
-           prev_blkid.to_string(), next_blkid.to_string());
+    meta_blk* rm_blk = (meta_blk*)cookie;
+    const BlkId rm_bid = rm_blk->hdr.h.blkid;
+    const auto type = rm_blk->hdr.h.type;
 
     // this record must exist in-memory copy
-    HS_ASSERT(DEBUG, m_meta_blks[type].find(bid.to_integer()) != m_meta_blks[type].end(),
-              "Blk type: {}, id: {} not found!", type, bid.to_string());
+    HS_ASSERT(DEBUG, m_meta_blks.find(rm_bid.to_integer()) != m_meta_blks.end(), "Blk type: {}, id: {} not found!",
+              type, rm_bid.to_string());
 
-    HS_ASSERT(DEBUG, m_meta_blks[type][bid.to_integer()] == rm_blk,
-              "Received blk pointer not equal to cache, memory corruption!");
+    // remove from disk;
+    const auto rm_blk_in_cache = m_meta_blks[rm_bid.to_integer()];
+    auto prev_blkid = rm_blk_in_cache->hdr.h.prev_blkid;
+    auto next_blkid = rm_blk_in_cache->hdr.h.next_blkid;
 
-    // remove the in-memory handle from meta blk map;
-    m_meta_blks[rm_blk->hdr.h.type].erase(bid.to_integer());
+    HS_LOG(INFO, metablk, "Removing meta blk id: {}, type: {}, prev_blkid: {}, next_blkid: {}", rm_bid.to_string(),
+           type, prev_blkid.to_string(), next_blkid.to_string());
 
-    // 1. update prev-blk's next pointer
+    // validate bid/prev/next with cache data;
+    if (rm_blk != rm_blk_in_cache) {
+        HS_ASSERT(DEBUG, false, "cookie doesn't match with cached blk, memory corruption.");
+    }
+
+    HS_ASSERT_CMP(DEBUG, rm_bid.to_integer(), ==, rm_blk_in_cache->hdr.h.blkid.to_integer());
+    HS_ASSERT_CMP(DEBUG, rm_blk->hdr.h.prev_blkid.to_integer(), ==, prev_blkid.to_integer());
+    HS_ASSERT_CMP(DEBUG, rm_blk->hdr.h.next_blkid.to_integer(), ==, next_blkid.to_integer());
+
+    // update prev-blk's next pointer
     if (prev_blkid.to_integer() == m_ssb->blkid.to_integer()) {
         m_ssb->next_blkid.set(next_blkid);
         // persist m_ssb to disk;
         write_ssb();
-
-        if (m_last_mblk == rm_blk) { m_last_mblk = nullptr; }
+        if (m_last_mblk_id.to_integer() == rm_bid.to_integer()) { m_last_mblk_id.set(invalid_bid); }
     } else {
-        auto found = false;
         // find the in-memory copy of prev meta block;
-        for (auto& x : m_meta_blks) {
-            if (x.second.find(prev_blkid.to_integer()) != x.second.end()) {
-                found = true;
-                auto prev_mblk = x.second[prev_blkid.to_integer()];
+        HS_ASSERT(DEBUG, m_meta_blks.find(prev_blkid.to_integer()) != m_meta_blks.end(), "prev: {} not found!",
+                  prev_blkid.to_string());
 
-                // update prev meta blk's both in-memory and on-disk copy;
-                prev_mblk->hdr.h.next_blkid.set(next_blkid);
-                write_meta_blk_to_disk(prev_mblk);
-
-                // if we are removing the last meta blk, update m_last_mblk to its previous blk;
-                if (m_last_mblk == rm_blk) { m_last_mblk = prev_mblk; }
-
-                break;
-            }
-        }
-
-        if (!found) { HS_ASSERT(DEBUG, found, "prev_blkid: {} not found", prev_blkid.to_string()); }
+        // update prev meta blk's both in-memory and on-disk copy;
+        m_meta_blks[prev_blkid.to_integer()]->hdr.h.next_blkid.set(next_blkid);
+        write_meta_blk_to_disk(m_meta_blks[prev_blkid.to_integer()]);
     }
 
-    // 2. update next-blk's prev pointer
-    if (next_blkid.to_integer() != BlkId::invalid_internal_id()) {
-        auto found = false;
-        for (auto& x : m_meta_blks) {
-            if (x.second.find(next_blkid.to_integer()) != x.second.end()) {
-                found = true;
-                auto next_mblk = x.second[next_blkid.to_integer()];
+    // update next-blk's prev pointer
+    if (next_blkid.to_integer() != invalid_bid) {
+        HS_ASSERT(DEBUG, m_meta_blks.find(next_blkid.to_integer()) != m_meta_blks.end(),
+                  "next_blkid: {} not found in cache", next_blkid.to_string());
+        auto next_mblk = m_meta_blks[next_blkid.to_integer()];
 
-                // update next meta blk's both in-memory and on-disk copy;
-                next_mblk->hdr.h.prev_blkid.set(prev_blkid);
-                write_meta_blk_to_disk(next_mblk);
-                break;
-            }
-        }
+        // update next meta blk's both in-memory and on-disk copy;
+        next_mblk->hdr.h.prev_blkid.set(prev_blkid);
+        write_meta_blk_to_disk(next_mblk);
+    } else {
+        // if we are removing the last meta blk, update last to its previous blk;
+        HS_ASSERT_CMP(DEBUG, m_last_mblk_id.to_integer(), ==, rm_bid.to_integer());
 
-        if (!found) { HS_ASSERT(DEBUG, true, "next_blkid: {} not found", next_blkid.to_string()); }
+        HS_LOG(INFO, metablk, "removing last mblk, change m_last_mblk to bid: {}", prev_blkid.to_string());
+        m_last_mblk_id.set(prev_blkid);
     }
+
+    // remove the in-memory handle from meta blk map;
+    m_meta_blks.erase(rm_bid.to_integer());
 
     // free the on-disk meta blk
     free_meta_blk(rm_blk);
@@ -608,9 +621,9 @@ std::error_condition MetaBlkMgr::remove_sub_sb(const void* cookie) {
 }
 
 // if we crash in the middle, after reboot the ovf blk will be treaded as free automatically;
-void MetaBlkMgr::free_ovf_blk_chain(meta_blk* mblk) {
-    auto next_obid = mblk->hdr.h.ovf_blkid;
-    while (next_obid.to_integer() != BlkId::invalid_internal_id()) {
+void MetaBlkMgr::free_ovf_blk_chain(BlkId& obid) {
+    auto next_obid = obid;
+    while (next_obid.to_integer() != invalid_bid) {
         HS_LOG(INFO, metablk, "free ovf blk: {}", next_obid.to_string());
         m_sb_blk_store->free_blk(next_obid, boost::none, boost::none);
 
@@ -630,11 +643,12 @@ void MetaBlkMgr::free_ovf_blk_chain(meta_blk* mblk) {
 }
 
 void MetaBlkMgr::free_meta_blk(meta_blk* mblk) {
+    HS_LOG(INFO, metablk, "freeing blk id: {}", mblk->hdr.h.blkid.to_string());
     m_sb_blk_store->free_blk(mblk->hdr.h.blkid, boost::none, boost::none);
     // free the overflow blkid if it is there
-    if (mblk->hdr.h.ovf_blkid.to_integer() != BlkId::invalid_internal_id()) {
+    if (mblk->hdr.h.ovf_blkid.to_integer() != invalid_bid) {
         HS_ASSERT_CMP(DEBUG, (uint64_t)(mblk->hdr.h.context_sz), >=, META_BLK_CONTEXT_SZ);
-        free_ovf_blk_chain(mblk);
+        free_ovf_blk_chain(mblk->hdr.h.ovf_blkid);
     }
     iomanager.iobuf_free((uint8_t*)mblk);
 }
@@ -686,71 +700,63 @@ std::error_condition MetaBlkMgr::alloc_meta_blk(BlkId& bid, uint32_t alloc_sz) {
 void MetaBlkMgr::recover(const bool do_comp_cb) {
     // for each registered subsystem, look up in cache for their meta blks;
     std::lock_guard< decltype(m_meta_mtx) > lg(m_shutdown_mtx);
-    for (auto& sub : m_sub_info) {
-        auto type = sub.first;
-        auto it = m_meta_blks.find(type);
-        if (it == m_meta_blks.end()) {
-            // some subsystem registered but don't have active blks, which is fine;
-            continue;
-        }
+    for (auto& m : m_meta_blks) {
+        auto mblk = m.second;
+        sisl::byte_view buf;
 
-        auto cb = sub.second.cb;
-        for (auto& m : it->second) {
-            auto mblk = m.second;
-            sisl::byte_view buf;
+        if (mblk->hdr.h.context_sz <= META_BLK_CONTEXT_SZ) {
+            sisl::byte_view b(mblk->hdr.h.context_sz);
+            buf = b;
+            HS_ASSERT(RELEASE, mblk->hdr.h.ovf_blkid.to_integer() == invalid_bid, "corrupted ovf_blkid: {}",
+                      mblk->hdr.h.ovf_blkid.to_string());
+            memcpy((void*)buf.bytes(), (void*)mblk->context_data, mblk->hdr.h.context_sz);
+        } else {
+            // read through the ovf blk chain to get the buffer;
+            // first, copy the context data from meta blk context portion
+            sisl::byte_view b(mblk->hdr.h.context_sz, HS_STATIC_CONFIG(disk_attr.align_size));
+            buf = b;
+            memcpy((void*)buf.bytes(), (void*)mblk->context_data, META_BLK_CONTEXT_SZ);
+            auto total_sz = mblk->hdr.h.context_sz;
+            uint64_t read_offset = META_BLK_CONTEXT_SZ;
 
-            if (mblk->hdr.h.context_sz <= META_BLK_CONTEXT_SZ) {
-                sisl::byte_view b(mblk->hdr.h.context_sz);
-                buf = b;
-                HS_ASSERT(RELEASE, mblk->hdr.h.ovf_blkid.to_integer() == BlkId::invalid_internal_id(),
-                          "corrupted ovf_blkid: {}", mblk->hdr.h.ovf_blkid.to_string());
-                memcpy((void*)buf.bytes(), (void*)mblk->context_data, mblk->hdr.h.context_sz);
-            } else {
-                // read through the ovf blk chain to get the buffer;
-                // first, copy the context data from meta blk context portion
-                sisl::byte_view b(mblk->hdr.h.context_sz, HS_STATIC_CONFIG(disk_attr.align_size));
-                buf = b;
-                memcpy((void*)buf.bytes(), (void*)mblk->context_data, META_BLK_CONTEXT_SZ);
-                auto total_sz = mblk->hdr.h.context_sz;
-                uint64_t read_offset = META_BLK_CONTEXT_SZ;
+            auto bid = mblk->hdr.h.ovf_blkid;
+            auto prev_bid = mblk->hdr.h.blkid;
+            while (read_offset < total_sz) {
+                HS_ASSERT(RELEASE, bid.to_integer() != invalid_bid, "corrupted ovf_blkid: {}", bid.to_string());
+                // copy the remaining data from ovf blk chain;
+                // we don't cache context data, so read from disk;
+                sisl::blob b;
+                read(bid, b);
 
-                auto bid = mblk->hdr.h.ovf_blkid;
-                auto prev_bid = mblk->hdr.h.blkid;
-                while (read_offset < total_sz) {
-                    HS_ASSERT(RELEASE, bid.to_integer() != BlkId::invalid_internal_id(), "corrupted ovf_blkid: {}",
-                              bid.to_string());
-                    // copy the remaining data from ovf blk chain;
-                    // we don't cache context data, so read from disk;
-                    sisl::blob b;
-                    read(bid, b);
+                auto ovf_hdr = (meta_blk_ovf_hdr*)b.bytes;
 
-                    auto ovf_hdr = (meta_blk_ovf_hdr*)b.bytes;
+                // verify linkage;
+                HS_ASSERT(RELEASE, ovf_hdr->h.blkid.to_integer() == bid.to_integer(), "Corrupted self-bid: {}/{}",
+                          ovf_hdr->h.blkid.to_string(), bid.to_string());
+                HS_ASSERT(RELEASE, ovf_hdr->h.prev_blkid.to_integer() == prev_bid.to_integer(),
+                          "Corrupted prev_blkid: {}/{}", ovf_hdr->h.prev_blkid.to_string(), prev_bid.to_string());
 
-                    // verify linkage;
-                    HS_ASSERT(RELEASE, ovf_hdr->h.blkid.to_integer() == bid.to_integer(), "Corrupted self-bid: {}/{}",
-                              ovf_hdr->h.blkid.to_string(), bid.to_string());
-                    HS_ASSERT(RELEASE, ovf_hdr->h.prev_blkid.to_integer() == prev_bid.to_integer(),
-                              "Corrupted prev_blkid: {}/{}", ovf_hdr->h.prev_blkid.to_string(), prev_bid.to_string());
+                memcpy((uint8_t*)buf.bytes() + read_offset, b.bytes + META_BLK_OVF_HDR_MAX_SZ, ovf_hdr->h.context_sz);
+                read_offset += ovf_hdr->h.context_sz;
 
-                    memcpy((uint8_t*)buf.bytes() + read_offset, b.bytes + META_BLK_OVF_HDR_MAX_SZ,
-                           ovf_hdr->h.context_sz);
-                    read_offset += ovf_hdr->h.context_sz;
-
-                    prev_bid = bid;
-                    bid = ovf_hdr->h.next_blkid;
-                }
-
-                HS_ASSERT(RELEASE, read_offset == total_sz, "incorrect data read from disk: {}, total_sz: {}",
-                          read_offset, total_sz);
+                prev_bid = bid;
+                bid = ovf_hdr->h.next_blkid;
             }
 
-            // verify crc before sending to subsystem;
-            auto crc = crc32_ieee(init_crc32, (uint8_t*)(buf.bytes()), mblk->hdr.h.context_sz);
-            HS_ASSERT(RELEASE, crc == mblk->hdr.h.crc, "CRC mismatch: {}/{}", crc, (uint32_t)mblk->hdr.h.crc);
-
-            // found a meta blk and callback to sub system;
-            cb(mblk, buf, mblk->hdr.h.context_sz);
+            HS_ASSERT(RELEASE, read_offset == total_sz, "incorrect data read from disk: {}, total_sz: {}", read_offset,
+                      total_sz);
         }
+
+        // verify crc before sending to subsystem;
+        auto crc = crc32_ieee(init_crc32, (uint8_t*)(buf.bytes()), mblk->hdr.h.context_sz);
+        HS_ASSERT(RELEASE, crc == mblk->hdr.h.crc, "CRC mismatch: {}/{}", crc, (uint32_t)mblk->hdr.h.crc);
+
+        // found a meta blk and callback to sub system;
+        HS_ASSERT(DEBUG, m_sub_info.find(mblk->hdr.h.type) != m_sub_info.end(), "type: {} not found in cache",
+                  mblk->hdr.h.type);
+        // send the callbck;
+        auto cb = m_sub_info[mblk->hdr.h.type].cb;
+        cb(mblk, buf, mblk->hdr.h.context_sz);
     }
 
     if (do_comp_cb) {
@@ -766,4 +772,5 @@ uint64_t MetaBlkMgr::get_size() { return m_sb_blk_store->get_size(); }
 uint64_t MetaBlkMgr::get_used_size() { return m_sb_blk_store->get_used_size(); }
 
 MetaBlkMgr* MetaBlkMgr::_instance = nullptr;
+bool MetaBlkMgr::m_self_recover = false;
 } // namespace homestore

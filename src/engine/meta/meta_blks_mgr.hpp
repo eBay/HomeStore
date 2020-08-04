@@ -15,8 +15,10 @@ using blk_store_t = homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolic
 using meta_blk_found_cb_t = std::function< void(meta_blk* mblk, sisl::byte_view buf,
                                                 size_t size) >;         // new blk found subsystem callback
 using meta_blk_recover_comp_cb_t = std::function< void(bool success) >; // recover complete subsystem callbacks;
-using meta_blk_map_t = std::map< meta_sub_type, std::map< uint64_t, meta_blk* > >; // blkid to meta_blk map;
-using ovf_hdr_map_t = std::map< uint64_t, meta_blk_ovf_hdr* >;                     // ovf_blkid to ovf_blk_hdr map;
+using meta_blk_map_t = std::map< uint64_t, meta_blk* >;                 // blkid to meta_blk map;
+using ovf_hdr_map_t = std::map< uint64_t, meta_blk_ovf_hdr* >;          // ovf_blkid to ovf_blk_hdr map;
+
+static const uint64_t invalid_bid = BlkId::invalid_internal_id();
 
 struct MetaSubRegInfo {
     meta_blk_found_cb_t cb;
@@ -26,13 +28,14 @@ struct MetaSubRegInfo {
 class MetaBlkMgr {
 private:
     static MetaBlkMgr* _instance;
+    static bool m_self_recover;
     blk_store_t* m_sb_blk_store = nullptr; // super blockstore
     std::mutex m_meta_mtx;                 // mutex to access to meta_map;
     std::mutex m_shutdown_mtx;             // protects concurrent operations between recover and shutdown;
     meta_blk_map_t m_meta_blks;            // subsystem type to meta blk map;
     ovf_hdr_map_t m_ovf_blk_hdrs;          // ovf blk map;
     std::map< meta_sub_type, MetaSubRegInfo > m_sub_info; // map of callbacks
-    meta_blk* m_last_mblk = nullptr;                      // last meta blk;
+    BlkId m_last_mblk_id;                                 // last meta blk;
     meta_blk_sb* m_ssb = nullptr;                         // meta super super blk;
 
 public:
@@ -142,6 +145,14 @@ public:
 
     bool is_aligned_buf_needed(const size_t size) { return (size <= META_BLK_CONTEXT_SZ) ? false : true; }
 
+public:
+    /*********************** static public function **********************/
+    static void set_self_recover() { m_self_recover = true; }
+
+    static void reset_self_recover() { m_self_recover = false; }
+
+    static bool is_self_recovered() { return m_self_recover; }
+
 private:
     /**
      * @brief
@@ -228,7 +239,7 @@ private:
 
     void free_meta_blk(meta_blk* mblk);
 
-    void free_ovf_blk_chain(meta_blk* mblk);
+    void free_ovf_blk_chain(BlkId& obid);
 
     /**
      * @brief : Initialize meta blk
