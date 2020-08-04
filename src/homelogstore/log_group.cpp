@@ -3,9 +3,6 @@
 
 namespace homestore {
 
-LogGroup LogGroup::_log_group[2];
-uint32_t LogGroup::_log_group_idx = 1;
-
 LogGroup::LogGroup() {
     m_iovecs.reserve(estimated_iovs);
     m_log_buf = sisl::aligned_unique_ptr< uint8_t >::make_sized(dma_boundary, inline_log_buf_size);

@@ -29,7 +29,12 @@ struct logstore_req {
     bool is_write;              // Directon of IO
     bool is_internal_req;       // If the req is created internally by HomeLogStore itself
     log_req_comp_cb_t cb;       // Callback upon completion of write (overridden than default)
-
+    
+    //Get the size of the read or written record
+    size_t size() const {
+        //TODO: Implement this method
+        return 0;
+    }
     static logstore_req* make(HomeLogStore* store, logstore_seq_num_t seq_num, const sisl::io_blob& data,
                               bool is_write_req = true) {
         logstore_req* req = sisl::ObjectAllocator< logstore_req >::make_object();
@@ -103,6 +108,17 @@ public:
     // std::shared_ptr< HomeLogStore > open_log_store(logstore_id_t store_id);
 
     /**
+     * @brief Close the log store instance and free-up the resources
+     *
+     * @param store_id: Store ID of the log store to close
+     * @return true on success
+     */
+    bool close_log_store(const logstore_id_t store_id){
+        //TODO: Implement this method
+        return true;
+    }
+
+    /**
      * @brief Remove an existing log store. It removes in-memory and schedule to reuse the store id after device
      * truncation.
      *
@@ -126,6 +142,7 @@ public:
      * @param cb
      */
     void register_log_store_opened_cb(const log_store_opened_cb_t& cb) { m_log_store_opened_cb = cb; }
+
 
 private:
     void __on_log_store_found(logstore_id_t store_id);
@@ -324,6 +341,39 @@ public:
      */
     logstore_seq_num_t get_contiguous_completed_seq_num(logstore_seq_num_t from);
 
+    /**
+     * @brief Flush this log store (write/sync to disk) up to the suquence number
+     *  
+     * @param seqNum Sequence number upto which logs are to be flushed
+     * @return True on success
+     */
+    bool flush_logs(const logstore_seq_num_t seqNum) { 
+        //TODO: Implement this method
+        return true;
+    }
+
+    /**
+     * @brief Sync the log store to disk
+     *  
+     * @param 
+     * @return True on success
+     */
+    bool sync() { 
+        //TODO: Implement this method
+        return true;
+    }
+
+    /**
+     * @brief Rollback the given instance to the given sequence number
+     *  
+     * @param seqNum Sequence number back which logs are to be rollbacked
+     * @return True on success
+     */
+    bool rollback(const logstore_seq_num_t seqNum) { 
+        //TODO: Implement this method
+        return true;
+    }
+
     static bool is_aligned_buf_needed(size_t size) { return (log_record::is_size_inlineable(size) == false); }
 
 private:
@@ -331,6 +381,7 @@ private:
     void on_read_completion(logstore_req* req, logdev_key ld_key);
     void on_log_found(logstore_seq_num_t seq_num, logdev_key ld_key, log_buffer buf);
     void do_truncate(logstore_seq_num_t upto_seq_num);
+    void update_truncation_barrier(logstore_seq_num_t seq_num, logdev_key flush_ld_key, uint32_t nremaining_in_batch);
     void create_truncation_barrier(void);
     int search_max_le(logstore_seq_num_t input_sn);
 

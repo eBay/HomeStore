@@ -259,7 +259,7 @@ LogGroup* LogDev::prepare_flush(int32_t estimated_records) {
     int64_t flushing_upto_idx = 0u;
 
     assert(estimated_records > 0);
-    auto lg = LogGroup::make_log_group((uint32_t)estimated_records);
+    auto lg = make_log_group((uint32_t)estimated_records);
     m_log_records->foreach_active(m_last_flush_idx + 1, [&](int64_t idx, int64_t upto_idx, log_record& record) -> bool {
         if (lg->add_record(record, idx)) {
             flushing_upto_idx = idx;
