@@ -416,7 +416,7 @@ void IndxMgr::recovery_start_phase2() {
 
         /* update diff indx tbl */
         if (hdr->cp_cnt > m_last_cp_sb.cp_info.diff_cp_cnt) {
-            ret = indx_id->dinfo.diff_tbl->recovery_update(seq_num, hdr, indx_id->dinfo.btree_id);
+            auto ret = indx_id->dinfo.diff_tbl->recovery_update(seq_num, hdr, indx_id->dinfo.btree_id);
             if (ret != btree_status_t::success) { abort(); }
             ++diff_replay_cnt;
         }
