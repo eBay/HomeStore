@@ -381,6 +381,7 @@ private:
     void on_read_completion(logstore_req* req, logdev_key ld_key);
     void on_log_found(logstore_seq_num_t seq_num, logdev_key ld_key, log_buffer buf);
     void do_truncate(logstore_seq_num_t upto_seq_num);
+    void update_truncation_barrier(logstore_seq_num_t seq_num, logdev_key flush_ld_key, uint32_t nremaining_in_batch);
     void create_truncation_barrier(void);
     int search_max_le(logstore_seq_num_t input_sn);
 
