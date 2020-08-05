@@ -86,26 +86,37 @@ public:
         }
 
         auto upto = expect_all_completed ? m_cur_lsn.load() - 1 : m_log_store->get_contiguous_completed_seq_num(0);
-        for (auto i = m_log_store->truncated_upto() + 1; i < upto; ++i) {
-            try {
-                auto b = m_log_store->read_sync(i);
-                auto tl = (test_log_data*)b.bytes();
-                ASSERT_EQ(tl->total_size(), b.size())
-                    << "Size Mismatch for lsn=" << m_log_store->get_store_id() << ":" << i;
-                validate_data(tl, i);
-            } catch (const std::exception& e) {
-                if (!expect_all_completed) {
-                    // In case we run truncation in parallel to read, it is possible truncate moved, so adjust the
-                    // truncated_upto accordingly.
-                    auto trunc_upto = m_log_store->truncated_upto();
-                    if (i <= trunc_upto) {
-                        i = trunc_upto;
-                        continue;
-                    }
-                }
-                LOGFATAL("Unexpected out_of_range exception for lsn={}:{}", m_log_store->get_store_id(), i);
-            }
-        }
+        // for (auto i = m_log_store->truncated_upto() + 1; i < upto; ++i) {
+        //     try {
+        //         auto b = m_log_store->read_sync(i);
+        //         auto tl = (test_log_data*)b.bytes();
+        //         ASSERT_EQ(tl->total_size(), b.size())
+        //             << "Size Mismatch for lsn=" << m_log_store->get_store_id() << ":" << i;
+        //         validate_data(tl, i);
+        //     } catch (const std::exception& e) {
+        //         if (!expect_all_completed) {
+        //             // In case we run truncation in parallel to read, it is possible truncate moved, so adjust the
+        //             // truncated_upto accordingly.
+        //             auto trunc_upto = m_log_store->truncated_upto();
+        //             if (i <= trunc_upto) {
+        //                 i = trunc_upto;
+        //                 continue;
+        //             }
+        //         }
+        //         LOGFATAL("Unexpected out_of_range exception for lsn={}:{}", m_log_store->get_store_id(), i);
+        //     }
+        // }
+
+        m_log_store->foreach(
+        (int64_t)m_log_store->truncated_upto() + 1, 
+        [upto, this] (int64_t seq_num, const homestore::log_buffer& b) -> bool {            
+            // auto tl = (test_log_data*)b.bytes();
+            // validate_data(tl, seq_num);                        
+            if(seq_num+1 >= upto)
+                return false;
+            else
+                return true;
+        });
     }
 
     void recovery_validate() {

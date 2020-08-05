@@ -312,7 +312,7 @@ public:
      * @param cb called with current idx and log buffer.
      * Return value of the cb: true means proceed, false means stop;
      */
-    void foreach (int64_t start_idx, const auto& cb);
+    void foreach (int64_t start_idx, const std::function< bool(logstore_seq_num_t, log_buffer) >& cb);
 
     /**
      * @brief Get the store id of this HomeLogStore
