@@ -466,7 +466,10 @@ public:
                 req->missing_pieces.push_back(missing_piece);
             }
 
-            HS_ASSERT_CMP(RELEASE, m_vdev.is_blk_alloced(tmp_bid), ==, true, "blk is not allocted");
+            /* This assert won't be valid for volume reads if user is doing overlap writes/reads because we set the blks
+             * allocated only after journal write is completed.
+             */
+            HS_ASSERT_CMP(DEBUG, m_vdev.is_blk_alloced(tmp_bid), ==, true, "blk is not allocted");
             m_vdev.read(tmp_bid, mp, to_vdev_req(req));
             if (req->isSyncCall) {
                 bool inserted = bbuf->update_missing_piece(missing_mp[i].first, missing_mp[i].second, ptr);

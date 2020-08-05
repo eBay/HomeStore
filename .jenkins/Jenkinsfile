@@ -101,7 +101,7 @@ pipeline {
             when {
                 anyOf {
                     branch "develop"
-                    branch "snapshot"
+                    branch "master"
                 }
             }
             matrix {
