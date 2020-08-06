@@ -296,7 +296,7 @@ int HomeLogStore::search_max_le(logstore_seq_num_t input_sn) {
     return (end - 1);
 }
 
-void HomeLogStore::foreach (int64_t start_idx, const auto& cb) {
+void HomeLogStore::foreach (int64_t start_idx, const std::function< bool(logstore_seq_num_t, log_buffer) >& cb) {
     m_records.foreach_completed(0, [&](long int cur_idx, long int max_idx, homestore::logstore_record& record) -> bool {
         // do a sync read
         auto log_buf = HomeLogStoreMgr::logdev().read(record.m_dev_key);

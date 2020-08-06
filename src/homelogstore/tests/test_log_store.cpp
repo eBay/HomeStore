@@ -77,6 +77,36 @@ public:
         }
     }
 
+    void iterate_validate(bool expect_all_completed = false){
+        auto upto = expect_all_completed ? m_cur_lsn.load() - 1 : m_log_store->get_contiguous_completed_seq_num(0);
+        auto trunc_upto = m_log_store->truncated_upto();
+        int64_t idx = trunc_upto + 1;
+
+    start_iterate:    
+        try {
+            m_log_store->foreach(
+            idx,
+            [upto, &idx, this] (int64_t seq_num, const homestore::log_buffer& b) -> bool {            
+                auto tl = (test_log_data*)b.bytes();
+                validate_data(tl, seq_num);
+                idx++;                      
+                return (seq_num +1 < upto) ? true : false;
+            });
+        } catch (const std::exception& e) {
+                if (!expect_all_completed) {
+                    // In case we run truncation in parallel to read, it is possible truncate moved, so adjust the
+                    // truncated_upto accordingly.
+                    auto trunc_upto = m_log_store->truncated_upto();
+                    if (idx <= trunc_upto) {
+                        idx = trunc_upto;
+                        goto start_iterate;
+                    }
+                }
+                LOGFATAL("Unexpected out_of_range exception for lsn={}:{}", m_log_store->get_store_id(), idx);
+        }
+
+    }
+
     void read_validate(bool expect_all_completed = false) {
         auto trunc_upto = m_log_store->truncated_upto();
         for (auto i = 0; i <= trunc_upto; ++i) {
@@ -355,6 +385,12 @@ public:
         }
     }
 
+    void iterate_validate(bool expect_all_completed = false) {
+        for (auto& lsc : sample_db.m_log_store_clients) {
+            lsc->iterate_validate(expect_all_completed);
+        }
+    }
+
     int find_garbage_upto(logid_t idx) {
         int count = 0;
         auto it = m_garbage_stores_upto.begin();
@@ -455,6 +491,9 @@ TEST_F(LogStoreTest, BurstRandInsertThenTruncate) {
 
     LOGINFO("Step 4: Read all the inserts one by one for each log store to validate if what is written is valid");
     this->read_validate(true);
+
+    LOGINFO("Step 4.1: Iterate all inserts one by one for each log store and validate if what is written is valid");
+    this->iterate_validate(true);
 
     LOGINFO("Step 5: Truncate all of the inserts one log store at a time and validate log dev truncation is marked "
             "correctly and also validate if all data prior to truncation return exception");
