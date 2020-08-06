@@ -571,12 +571,8 @@ std::error_condition MetaBlkMgr::remove_sub_sb(const void* cookie) {
 
     // validate bid/prev/next with cache data;
     if (rm_blk != rm_blk_in_cache) {
-        HS_ASSERT(DEBUG, false, "cookie doesn't match with cached blk, memory corruption.");
+        HS_ASSERT(DEBUG, false, "cookie doesn't match with cached blk, invalid cookie!");
     }
-
-    HS_ASSERT_CMP(DEBUG, rm_bid.to_integer(), ==, rm_blk_in_cache->hdr.h.blkid.to_integer());
-    HS_ASSERT_CMP(DEBUG, rm_blk->hdr.h.prev_blkid.to_integer(), ==, prev_blkid.to_integer());
-    HS_ASSERT_CMP(DEBUG, rm_blk->hdr.h.next_blkid.to_integer(), ==, next_blkid.to_integer());
 
     // update prev-blk's next pointer
     if (prev_blkid.to_integer() == m_ssb->blkid.to_integer()) {
@@ -707,7 +703,7 @@ void MetaBlkMgr::recover(const bool do_comp_cb) {
         if (mblk->hdr.h.context_sz <= META_BLK_CONTEXT_SZ) {
             sisl::byte_view b(mblk->hdr.h.context_sz);
             buf = b;
-            HS_ASSERT(RELEASE, mblk->hdr.h.ovf_blkid.to_integer() == invalid_bid, "corrupted ovf_blkid: {}",
+            HS_ASSERT(DEBUG, mblk->hdr.h.ovf_blkid.to_integer() == invalid_bid, "corrupted ovf_blkid: {}",
                       mblk->hdr.h.ovf_blkid.to_string());
             memcpy((void*)buf.bytes(), (void*)mblk->context_data, mblk->hdr.h.context_sz);
         } else {
