@@ -7,15 +7,14 @@ pipeline {
         HOMESTORE_BUILD_TAG = "${GIT_COMMIT}"
         CONAN_USER = 'sds'
         MASTER_BRANCH = 'master'
-        DEVELOP_BRANCH = 'testing/v*'
+        TESTING_BRANCH = 'testing/v*'
         STABLE_BRANCH = 'stable/v*'
-        BUILD_MISSING = ""
     }
 
     stages {
         stage('Adjust Tag for Master/PR') {
             when { not { anyOf {
-                branch "${DEVELOP_BRANCH}"
+                branch "${TESTING_BRANCH}"
                 branch "${STABLE_BRANCH}"
             } } }
             steps {
@@ -25,15 +24,36 @@ pipeline {
                 }
             }
         }
+        stage('Adjust for Testing/Stable') {
+            when { anyOf {
+                branch "${TESTING_BRANCH}"
+                branch "${STABLE_BRANCH}"
+            } }
+            steps {
+                script {
+                    BUILD_MISSING = ""
+                }
+            }
+        }
 
         stage('Get Version') {
             steps {
                 script {
                     PROJECT = sh(script: "grep -m 1 'name =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
-                    TAG = sh(script: "grep -m 1 'version =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
+                    VER = sh(script: "grep -m 1 'version =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
                     CONAN_CHANNEL = sh(script: "echo ${BRANCH_NAME} | sed -E 's,(\\w+-?\\d*)/.*,\\1,' | sed -E 's,-,_,' | tr -d '\n'", returnStdout: true)
                     ECR_PATH = "ecr.vip.ebayc3.com/${ORG}/${PROJECT}"
+                    TAG = "${VER}@${CONAN_USER}/${CONAN_CHANNEL}"
                     slackSend color: '#0063D1', channel: '#sds-ci', message: "*${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}* is building."
+                }
+            }
+        }
+
+        stage('Tag Stable Build') {
+            when { branch "${STABLE_BRANCH}" }
+            steps {
+                script {
+                    TAG = "${VER}@"
                 }
             }
         }
@@ -41,9 +61,7 @@ pipeline {
         stage('Build') {
             failFast true
             matrix {
-                agent {
-                    label 'sds-builder'
-                }
+                agent { label 'sds-builder' }
                 axes {
                     axis {
                         name 'BUILD_TYPE'
@@ -70,7 +88,7 @@ pipeline {
                 stages {
                     stage('Adjust Tag for Master/PR') {
                         when { not { anyOf {
-                            branch "${DEVELOP_BRANCH}"
+                            branch "${TESTING_BRANCH}"
                             branch "${STABLE_BRANCH}"
                         } } }
                         steps {
@@ -88,6 +106,9 @@ pipeline {
                         }
                     }
                     stage("Deploy") {
+                        when {
+                            expression { not { branch "PR_*" } }
+                        }
                         steps {
                             sh "conan user -r ebay-local -p ${ARTIFACTORY_PASS} _service_sds"
                             sh "conan upload ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL} -c --all -r ebay-local"
