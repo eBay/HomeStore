@@ -134,7 +134,7 @@ public:
     virtual void submit_io_batch() override;
 
     virtual vol_interface_req_ptr create_vol_interface_req(void* buf, uint64_t lba, uint32_t nlbas,
-                                                           bool sync = false) override;
+                                                           bool sync = false, const bool noCache = false) override;
 
     virtual VolumePtr create_volume(const vol_params& params) override;
     virtual std::error_condition remove_volume(const boost::uuids::uuid& uuid) override;

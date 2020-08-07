@@ -1,27 +1,29 @@
 #pragma once
 
-#include <fcntl.h>
-#include "homeblks/home_blks.hpp"
-#include "engine/device/device.h"
-#include "engine/cache/cache.h"
-#include "engine/device/blkbuffer.hpp"
-#include "engine/blkstore/blkstore.hpp"
-#include <metrics/metrics.hpp>
-#include <utility/atomic_counter.hpp>
-#include <utility/obj_life_counter.hpp>
+#include <cstdint>
 #include <memory>
-#include <fds/obj_allocator.hpp>
-#include <sds_logging/logging.h>
-#include <spdlog/fmt/fmt.h>
+#include <sstream>
+
+#include <fcntl.h>
+
+#include "homeblks/home_blks.hpp"
+#include "engine/blkstore/blkstore.hpp"
+#include "engine/cache/cache.h"
 #include "engine/common/homestore_assert.hpp"
+#include "engine/device/blkbuffer.hpp"
+#include "engine/device/device.h"
 #include "engine/homeds/thread/threadpool/thread_pool.h"
 #include "engine/index/snap_mgr.hpp"
-#include <utility/enum.hpp>
-#include <fds/vector_pool.hpp>
 #include "engine/meta/meta_blks_mgr.hpp"
+#include "fds/obj_allocator.hpp"
+#include "fds/vector_pool.hpp"
 #include "mapping.hpp"
-
-using namespace std;
+#include "metrics/metrics.hpp"
+#include "sds_logging/logging.h"
+#include "spdlog/fmt/fmt.h"
+#include "utility/atomic_counter.hpp"
+#include "utility/enum.hpp"
+#include "utility/obj_life_counter.hpp"
 
 namespace homestore {
 
@@ -67,6 +69,7 @@ struct volume_child_req : public blkstore_req< BlkBuffer > {
     uint64_t read_buf_offset;
     uint64_t read_size;
     bool sync = false;
+    bool cache{true};
 
     /* number of times mapping table need to be updated for this req. It can
      * break the ios update in mapping btree depending on the key range.
@@ -101,7 +104,7 @@ public:
     friend class Volume;
 
     std::string to_string() {
-        std::stringstream ss;
+        std::ostringstream ss;
         ss << ((is_read) ? "READ" : "WRITE") << ": lba=" << lba << " nlbas=" << nlbas;
         return ss.str();
     }
@@ -178,7 +181,7 @@ struct vol_sb_hdr {
             uuid(uuid),
             vol_name(""),
             indx_mgr_sb(indx_mgr_sb) {
-        memcpy((char*)vol_name, in_vol_name, VOL_NAME_SIZE);
+        ::memcpy((char*)vol_name, in_vol_name, VOL_NAME_SIZE);
     };
 
     /* these variables are mutable. Always update these values before writing the superblock */
@@ -504,6 +507,7 @@ struct volume_req : indx_req {
     uint64_t lba() const { return iface_req->lba; }
     uint32_t nlbas() const { return iface_req->nlbas; }
     bool is_sync() const { return iface_req->sync; }
+    bool cache() const { return !(iface_req->cache); }
     std::error_condition& err() const { return iface_req->err; }
     std::vector< buf_info >& read_buf() { return iface_req->read_buf_list; }
 

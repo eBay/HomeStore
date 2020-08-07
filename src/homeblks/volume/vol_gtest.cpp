@@ -2,33 +2,35 @@
     @file   vol_gtest.cpp
     Volume Google Tests
  */
-#include <gtest/gtest.h>
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
-#include <api/vol_interface.hpp>
-#include <iomgr/iomgr.hpp>
-#include <iomgr/aio_drive_interface.hpp>
-#include <iomgr/spdk_drive_interface.hpp>
-#include <boost/uuid/uuid_generators.hpp>
-#include <boost/uuid/uuid_io.hpp>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <fstream>
 #include <iostream>
 #include <string>
-#include <engine/homeds/bitmap/bitset.hpp>
-#include <atomic>
-#include <string>
-#include <utility/thread_buffer.hpp>
-#include <chrono>
 #include <thread>
-#include <boost/filesystem.hpp>
-#include <fds/utils.hpp>
-#include <fds/atomic_status_counter.hpp>
+
 extern "C" {
 #include <fcntl.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <sys/timeb.h>
-}
+};
+
+#include <gtest/gtest.h>
+
+#include "api/vol_interface.hpp"
+#include "boost/uuid/uuid_generators.hpp"
+#include "boost/uuid/uuid_io.hpp"
+#include "engine/homeds/bitmap/bitset.hpp"
+#include "fds/utils.hpp"
+#include "fds/atomic_status_counter.hpp"
+#include "iomgr/aio_drive_interface.hpp"
+#include "iomgr/iomgr.hpp"
+#include "iomgr/spdk_drive_interface.hpp"
+#include "sds_logging/logging.h"
+#include "sds_options/options.h"
+#include "utility/thread_buffer.hpp"
 
 using namespace homestore;
 using namespace flip;
@@ -96,6 +98,8 @@ struct TestCfg {
     bool expect_io_error = false;
     uint32_t p_volume_size = 60;
     bool is_spdk = false;
+    bool readCache{false};
+    bool writeCache{false};
 };
 
 struct TestOutput {
@@ -234,8 +238,9 @@ struct io_req_t : public vol_interface_req {
     std::shared_ptr< vol_info_t > vol_info;
     bool done = false;
 
-    io_req_t(const std::shared_ptr< vol_info_t >& vinfo, void* wbuf, uint64_t lba, uint32_t nlbas) :
-            vol_interface_req(wbuf, lba, nlbas),
+    io_req_t(const std::shared_ptr< vol_info_t >& vinfo, void* wbuf, uint64_t lba, uint32_t nlbas, 
+             const bool cache) :
+            vol_interface_req(wbuf, lba, nlbas, false, cache),
             vol_info(vinfo) {
         auto page_size = VolInterface::get_instance()->get_page_size(vinfo->vol);
         size = nlbas * page_size;
@@ -877,7 +882,7 @@ protected:
          * to write to a file after ios are completed.
          */
         populate_buf(wbuf, size, lba, vinfo.get());
-        auto vreq = boost::intrusive_ptr< io_req_t >(new io_req_t(vinfo, wbuf, lba, nlbas));
+        auto vreq = boost::intrusive_ptr< io_req_t >(new io_req_t(vinfo, wbuf, lba, nlbas, tcfg.writeCache));
         vreq->cookie = (void*)this;
 
         ++m_voltest->output.write_cnt;
@@ -937,7 +942,7 @@ protected:
         auto vol = vinfo->vol;
         if (vol == nullptr) { return false; }
 
-        auto vreq = boost::intrusive_ptr< io_req_t >(new io_req_t(vinfo, nullptr, lba, nlbas));
+        auto vreq = boost::intrusive_ptr< io_req_t >(new io_req_t(vinfo, nullptr, lba, nlbas, tcfg.readCache));
         vreq->cookie = (void*)this;
 
         ++m_voltest->output.read_cnt;
@@ -1406,6 +1411,8 @@ int main(int argc, char* argv[]) {
     _gcfg.expect_io_error = SDS_OPTIONS["expect_io_error"].as< uint32_t >() ? true : false;
     _gcfg.p_volume_size = SDS_OPTIONS["p_volume_size"].as< uint32_t >();
     _gcfg.is_spdk = SDS_OPTIONS["spdk"].as< bool >();
+    _gcfg.readCache = SDS_OPTIONS["readCache"].as< bool >();
+    _gcfg.writeCache = SDS_OPTIONS["writeCache"].as< bool >();
 
     if (SDS_OPTIONS.count("device_list")) {
         _gcfg.dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();

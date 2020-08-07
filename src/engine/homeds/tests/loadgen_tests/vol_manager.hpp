@@ -1,7 +1,14 @@
 #pragma once
-#include "write_log_recorder.hpp"
-#include "vol_crc_persist_mgr.hpp"
+
+#include <cassert>
+#include <cstdint>
+#include <mutex>
+
+#include "engine/homeds/bitmap/bitset.hpp"
+#include "engine/common/homestore_config.hpp"
 #include "homelogstore/log_dev.hpp"
+#include "vol_crc_persist_mgr.hpp"
+#include "write_log_recorder.hpp"
 
 #define MAX_DEVICES 2
 #define VOL_PREFIX "vol_load_gen/vol"

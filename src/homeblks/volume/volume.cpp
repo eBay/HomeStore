@@ -4,11 +4,17 @@
 //
 
 /* volume file */
-#include <homeblks/home_blks.hpp>
-#include "volume.hpp"
-#include <fstream>
 #include <atomic>
-#include <fds/utils.hpp>
+#include <fstream>
+
+// the following are needed because of lacking includes in fds/utils.hpp
+#include <cassert>
+#include <cstring>
+
+
+#include "fds/utils.hpp"
+#include "homeblks/home_blks.hpp"
+#include "volume.hpp"
 
 using namespace std;
 using namespace homestore;
@@ -221,7 +227,8 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
     uint32_t start_lba = 0;
 
     auto vreq = volume_req::make(iface_req);
-    THIS_VOL_LOG(TRACE, volume, vreq, "write: lba={}, nlbas={}", vreq->lba(), vreq->nlbas());
+    THIS_VOL_LOG(TRACE, volume, vreq, "write: lba={}, nlbas={}, cache=", vreq->lba(), vreq->nlbas(),
+                 vreq->cache());
     COUNTER_INCREMENT(m_metrics, volume_outstanding_data_write_count, 1);
 
     /* Sanity checks */
@@ -246,7 +253,7 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
     try {
         vreq->state = volume_req_state::data_io;
 
-        for (uint32_t i = 0; i < bid.size(); ++i) {
+        for (size_t i = 0; i < bid.size(); ++i) {
             if (bid[i].get_nblks() == 0) {
                 /* It should not happen. But it happened once so adding a safe check in case it happens again */
                 VOL_LOG_ASSERT(0, vreq, "{}", bid[i].to_string());
@@ -254,7 +261,7 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
             }
 
             /* Create child requests */
-            int nlbas = bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) / get_page_size();
+            const uint32_t nlbas = bid[i].data_size(HomeBlks::instance()->get_data_pagesz()) / get_page_size();
             auto vc_req = create_vol_child_req(bid[i], vreq, start_lba, nlbas);
             start_lba += nlbas;
 
@@ -263,7 +270,7 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
             vreq->push_blkid(bid[i]);
             boost::intrusive_ptr< BlkBuffer > bbuf = m_hb->get_data_blkstore()->write(
                 vc_req->bid, vreq->mvec, offset, boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vc_req),
-                false);
+                false, vreq->cache());
 
             offset += bid[i].data_size(m_hb->get_data_pagesz());
         }
@@ -607,6 +614,7 @@ volume_child_req_ptr Volume::create_vol_child_req(BlkId& bid, const volume_req_p
     vc_req->op_start_time = Clock::now();
     vc_req->reqId = ++m_req_id;
     vc_req->sync = vreq->is_sync();
+    vc_req->cache = vreq->cache();
     vc_req->part_of_batch = vreq->iface_req->part_of_batch;
 
     assert((bid.data_size(HomeBlks::instance()->get_data_pagesz()) % get_page_size()) == 0);
