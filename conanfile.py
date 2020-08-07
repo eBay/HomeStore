@@ -116,7 +116,7 @@ class HomestoreConan(ConanFile):
             self.cpp_info.exelinkflags.append("-fsanitize=address")
             self.cpp_info.sharedlinkflags.append("-fsanitize=undefined")
             self.cpp_info.exelinkflags.append("-fsanitize=undefined")
-        elif self.options.coverage == 'True':
+        elif self.options.testing == 'coverage':
             self.cpp_info.libs.append('gcov')
         if self.settings.os == "Linux":
             self.cpp_info.libs.extend(["aio"])
