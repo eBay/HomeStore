@@ -4,7 +4,6 @@ pipeline {
     environment {
         ORG = 'sds'
         ARTIFACTORY_PASS = credentials('ARTIFACTORY_PASS')
-        HOMESTORE_BUILD_TAG = "${GIT_COMMIT}"
         CONAN_USER = 'sds'
         MASTER_BRANCH = 'master'
         TESTING_BRANCH = 'testing/v*'

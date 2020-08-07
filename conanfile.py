@@ -16,16 +16,16 @@ class HomestoreConan(ConanFile):
     options = {
                 "shared": ['True', 'False'],
                 "fPIC": ['True', 'False'],
-                "coverage": ['True', 'False'],
                 "sanitize": ['True', 'False'],
-                'malloc_impl' : ['libc', 'tcmalloc', 'jemalloc']
+                'malloc_impl' : ['libc', 'tcmalloc', 'jemalloc'],
+                'testing' : ['coverage', 'full', 'min', 'off'],
                 }
     default_options = (
                         'shared=False',
                         'fPIC=True',
-                        'coverage=False',
                         'sanitize=True',
                         'malloc_impl=libc',
+                        'testing=full',
                         )
 
     requires = (
@@ -54,9 +54,6 @@ class HomestoreConan(ConanFile):
         if not self.settings.build_type == "Debug":
             self.options.sanitize = False
 
-        if self.options.sanitize:
-            self.options.coverage = False
-
     def imports(self):
         self.copy(root_package="flip", pattern="*.py", dst="bin/scripts", src="python/flip/", keep_path=True)
 
@@ -72,7 +69,7 @@ class HomestoreConan(ConanFile):
     def build(self):
         cmake = CMake(self)
 
-        definitions = {'CONAN_BUILD_COVERAGE': 'OFF',
+        definitions = {'CONAN_TEST_TARGET': 'off',
                        'CMAKE_EXPORT_COMPILE_COMMANDS': 'ON',
                        'MEMORY_SANITIZER_ON': 'OFF'}
         test_target = None
@@ -80,9 +77,9 @@ class HomestoreConan(ConanFile):
         if self.options.sanitize:
             definitions['MEMORY_SANITIZER_ON'] = 'ON'
 
-        if self.options.coverage:
-            definitions['CONAN_BUILD_COVERAGE'] = 'ON'
-            test_target = 'coverage'
+        definitions['CONAN_TEST_TARGET'] = self.options.testing
+        if self.options.testing == 'coverage':
+            test_target = test_target
 
         if self.settings.build_type == 'Debug':
             definitions['CMAKE_BUILD_TYPE'] = 'Debug'
@@ -91,7 +88,8 @@ class HomestoreConan(ConanFile):
 
         cmake.configure(defs=definitions)
         cmake.build()
-        cmake.test(target=test_target, output_on_failure=True)
+        if not self.options.testing == 'off':
+            cmake.test(target=test_target, output_on_failure=True)
 
     def package(self):
         self.copy("*.h", dst="include", src="src", keep_path=True)
