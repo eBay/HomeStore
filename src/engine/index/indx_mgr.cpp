@@ -477,9 +477,17 @@ void IndxMgr::recover_meta_ops() {
             /* it will be destroyed when destroy is called from volume */
             break;
         }
-        case INDX_UNMAP:
-            HS_ASSERT(DEBUG, 0, "invalid op");
+        case INDX_UNMAP: {
+            auto buf = meta_blk_list[i].second;
+            uint64_t cur_bytes = (uint64_t)(buf.bytes()) + sizeof(hs_cp_unmap_sb);
+            assert(buf.size() >= hdr->size);
+            uint64_t size = hdr->size - sizeof(hs_cp_unmap_sb);
+            sisl::blob b((uint8_t*)cur_bytes, size);
+            m_active_tbl->get_btreequery_cur(b, m_unmap_btree_cur);
+            m_unmap_meta_blk = meta_blk_list[i].first;
+            iomanager.run_on(m_thread_id, [this, buf](io_thread_addr_t addr) { this->unmap_start(buf); });
             break;
+        }
         case SNAP_DESTROY:
             HS_ASSERT(DEBUG, 0, "invalid op");
             break;
@@ -733,41 +741,48 @@ void IndxMgr::journal_comp_cb(logstore_req* lreq, logdev_key ld_key) {
     THIS_INDX_LOG(TRACE, indx_mgr, ireq, "Journal write done, lsn={}, log_key=[idx={}, offset={}]", lreq->seq_num,
                   ld_key.idx, ld_key.dev_offset);
 
-    /* blk id is alloceted in disk bitmap only after it is writing to journal. check
-     * blk_alloctor base class for further explanations. It should be done in cp critical section.
-     * Otherwise bitmap won't reflect all the blks allocated in a cp.
-     *
-     * It is also possible that indx_alloc_blkis list contain the less number of blkids that allocated because of
-     * partial writes. We are not freeing it in cache right away. There is no reason to not do it. We are not
-     * setting it in disk bitmap so in next reboot it will be available to use.
-     */
+    if (ireq->is_unmap()) {
+        /* write information to superblock, start unmap, and then call m_io_cb */
+        iomanager.run_on(m_thread_id, [this, ireq](io_thread_addr_t addr) { this->unmap_indx(ireq); });
+    } else {
+        /* blk id is alloceted in disk bitmap only after it is writing to journal. check
+        * blk_alloctor base class for further explanations. It should be done in cp critical section.
+        * Otherwise bitmap won't reflect all the blks allocated in a cp.
+        *
+        * It is also possible that indx_alloc_blkis list contain the less number of blkids that allocated because of
+        * partial writes. We are not freeing it in cache right away. There is no reason to not do it. We are not
+        * setting it in disk bitmap so in next reboot it will be available to use.
+        */
 
-    for (uint32_t i = 0; i < ireq->indx_alloc_blkid_list.size(); ++i) {
-        m_hs->get_data_blkstore()->reserve_blk(ireq->indx_alloc_blkid_list[i]);
-        /* update size */
-        ireq->icp->indx_size.fetch_add(ireq->indx_alloc_blkid_list[i].data_size(m_hs->get_data_pagesz()),
-                                       std::memory_order_relaxed);
+        for (uint32_t i = 0; i < ireq->indx_alloc_blkid_list.size(); ++i) {
+            m_hs->get_data_blkstore()->reserve_blk(ireq->indx_alloc_blkid_list[i]);
+            /* update size */
+            ireq->icp->indx_size.fetch_add(ireq->indx_alloc_blkid_list[i].data_size(m_hs->get_data_pagesz()),
+                                        std::memory_order_relaxed);
+        }
+
+        /* free the blkids */
+        auto free_size = free_blk(ireq->hcp, ireq->icp->io_free_blkid_list, ireq->indx_fbe_list, true);
+        HS_ASSERT(DEBUG, (ireq->indx_fbe_list.size() == 0 || free_size > 0),
+                " ireq->indx_fbe_list.size {}, free_size{}, ireq->indx_fbe_list.size", free_size);
+        ireq->icp->indx_size.fetch_sub(free_size, std::memory_order_relaxed);
+
+        /* End of critical section */
+        if (ireq->first_hcp) { m_cp_mgr->cp_io_exit(ireq->first_hcp); }
+        m_cp_mgr->cp_io_exit(ireq->hcp);
+
+        /* XXX: should we do completion before ending the critical section. We might get some better latency in doing
+        * that but my worry is that we might end up in deadlock if we pick new IOs in completion and those IOs need to
+        * take cp to free some resources.
+        */
+        m_io_cb(ireq, ireq->indx_err);
     }
-
-    /* free the blkids */
-    auto free_size = free_blk(ireq->hcp, ireq->icp->io_free_blkid_list, ireq->indx_fbe_list, true);
-    HS_ASSERT(DEBUG, (ireq->indx_fbe_list.size() == 0 || free_size > 0),
-              " ireq->indx_fbe_list.size {}, free_size{}, ireq->indx_fbe_list.size", free_size);
-    ireq->icp->indx_size.fetch_sub(free_size, std::memory_order_relaxed);
-
-    /* End of critical section */
-    if (ireq->first_hcp) { m_cp_mgr->cp_io_exit(ireq->first_hcp); }
-    m_cp_mgr->cp_io_exit(ireq->hcp);
-
-    /* XXX: should we do completion before ending the critical section. We might get some better latency in doing
-     * that but my worry is that we might end up in deadlock if we pick new IOs in completion and those IOs need to
-     * take cp to free some resources.
-     */
-    m_io_cb(ireq, ireq->indx_err);
     logstore_req::free(lreq);
 }
 
 void IndxMgr::journal_write(indx_req* ireq) {
+    /* Journal write is async call. So incrementing the ref on indx req */
+    ireq->inc_ref();
     auto b = ireq->create_journal_entry();
     auto lreq = logstore_req::make(m_journal.get(), ireq->get_seqid(), b);
     lreq->cookie = (void*)ireq;
@@ -817,10 +832,73 @@ btree_status_t IndxMgr::update_indx_tbl(indx_req* ireq, bool is_active) {
     }
 }
 
-void IndxMgr::update_indx(indx_req_ptr ireq) {
-    /* Journal write is async call. So incrementing the ref on indx req */
-    ireq->inc_ref();
+/* TODO: trigger this based on timer to do it in multiple CPs */
+void IndxMgr::unmap_start(sisl::byte_view buf) {
+    auto hcp = m_cp_mgr->cp_io_enter();
 
+    auto btree_id = get_indx_cp(hcp)->acp.bcp;
+    blkid_list_ptr free_list = std::make_shared< sisl::ThreadVector< BlkId > >();
+    int64_t free_size = 0;
+    hs_cp_unmap_sb* mhdr = (hs_cp_unmap_sb*)buf.bytes();
+    journal_key key;
+    key.lba = mhdr->lba;
+    key.nlbas = mhdr->nlbas;
+    btree_status_t ret = m_active_tbl->update_unmap_active_indx_tbl(free_list, key, m_unmap_btree_cur, btree_id, free_size);
+    if (ret != btree_status_t::success) {
+        auto seq_id = mhdr->seq_id;
+        assert(ret == btree_status_t::resource_full);
+        THIS_INDX_LOG(TRACE, indx_mgr, , "unmap btree ret status resource_full");
+        attach_user_fblkid_list(
+            free_list, ([this, seq_id, key](bool success) {
+                /* persist superblock */
+                auto b = write_cp_unmap_sb(seq_id, key.lba, key.nlbas);
+                iomanager.run_on(m_thread_id, [this, b](io_thread_addr_t addr) { this->unmap_start(b); });
+            }),
+            free_size);
+    } else {
+        attach_user_fblkid_list(free_list, ([this](bool success) {
+                                    /* remove the meta blk which is used to track unmap progress */
+                                    if (m_unmap_meta_blk) { MetaBlkMgr::instance()->remove_sub_sb(m_unmap_meta_blk); }
+                                }),
+                                free_size, true);
+    }
+
+    m_cp_mgr->cp_io_exit(hcp);
+}
+
+sisl::byte_view IndxMgr::write_cp_unmap_sb(uint64_t seq_id, uint64_t lba, uint32_t nlbas) {
+    const sisl::blob& cursor_blob = m_unmap_btree_cur.serialize();
+    uint64_t size = cursor_blob.size + sizeof(hs_cp_unmap_sb);
+    sisl::byte_view b = alloc_sb_bytes(size);
+    hs_cp_unmap_sb* mhdr = (hs_cp_unmap_sb*)b.bytes();
+    mhdr->uuid = m_uuid;
+    mhdr->type = INDX_UNMAP;
+    mhdr->seq_id = seq_id;
+    mhdr->lba = lba;
+    mhdr->nlbas = nlbas;
+    mhdr->size = size;
+    memcpy((uint8_t*)((uint64_t)b.bytes() + sizeof(hs_cp_unmap_sb)), cursor_blob.bytes,
+            cursor_blob.size);
+    write_meta_blk(m_unmap_meta_blk, b);
+    return b;
+}
+
+void IndxMgr::unmap_indx(indx_req_ptr ireq) {
+    /* persist superblock */
+    auto b = write_cp_unmap_sb(ireq->get_seqid(), ireq->get_lba(), ireq->get_nlbas());
+    
+    /* call completion cb */
+    m_io_cb(ireq, ireq->indx_err);
+
+    /* start unmap */
+    unmap_start(b);
+}
+
+void IndxMgr::unmap(indx_req_ptr ireq) {
+    journal_write(ireq.get());
+}
+
+void IndxMgr::update_indx(indx_req_ptr ireq) {
     /* Entered into critical section. CP is not triggered in this critical section */
     ireq->hcp = m_cp_mgr->cp_io_enter();
     ireq->icp = get_indx_cp(ireq->hcp);
@@ -913,6 +991,16 @@ indx_cp_ptr IndxMgr::get_indx_cp(hs_cp* hcp) {
     }
 }
 
+sisl::byte_view IndxMgr::alloc_sb_bytes(uint64_t size) {
+    uint32_t align = 0;
+    if (meta_blk_mgr->is_aligned_buf_needed(size)) {
+        align = HS_STATIC_CONFIG(disk_attr.align_size);
+        size = sisl::round_up(size, align);
+    }
+    sisl::byte_view b(size, align);
+    return b;
+}
+
 /* Steps involved in indx destroy. Note that blkids is available to allocate as soon as it is set in blkalloc. So we
  * need to make sure that blkids of btree won't be resued until indx mgr is not destroy and until its data blkids
  * and btree blkids are not persisted. indx mgr destroye is different that IO because there is no journal entry of free
@@ -951,12 +1039,7 @@ void IndxMgr::destroy_indx_tbl() {
                                     const sisl::blob& cursor_blob = m_destroy_btree_cur.serialize();
                                     if (cursor_blob.size) {
                                         uint64_t size = cursor_blob.size + sizeof(hs_cp_base_sb);
-                                        uint32_t align = 0;
-                                        if (meta_blk_mgr->is_aligned_buf_needed(size)) {
-                                            align = HS_STATIC_CONFIG(disk_attr.align_size);
-                                            size = sisl::round_up(size, align);
-                                        }
-                                        sisl::byte_view b(size, align);
+                                        sisl::byte_view b = alloc_sb_bytes(size);
                                         hs_cp_base_sb* mhdr = (hs_cp_base_sb*)b.bytes();
                                         mhdr->uuid = m_uuid;
                                         mhdr->type = INDX_DESTROY;

@@ -660,10 +660,10 @@ public:
     virtual btree_status_t recovery_update(logstore_seq_num_t seqnum, journal_hdr* hdr,
                                            const btree_cp_ptr& bcp) override;
     virtual btree_status_t free_user_blkids(blkid_list_ptr free_list, BtreeQueryCursor& cur, int64_t& size) override;
-    virtual btree_status_t unmap(blkid_list_ptr free_list, BtreeQueryCursor& cur) override;
     virtual void get_btreequery_cur(const sisl::blob& b, BtreeQueryCursor& cur) override;
     virtual btree_status_t destroy(blkid_list_ptr& free_blkid_list, uint64_t& free_node_cnt) override;
     virtual btree_status_t read_indx(indx_req* req, const read_indx_comp_cb_t& read_cb) override;
+    virtual btree_status_t update_unmap_active_indx_tbl(blkid_list_ptr free_list, journal_key& key, BtreeQueryCursor& cur, const btree_cp_ptr& bcp, int64_t& size) override;
 
 public:
     /* static functions */

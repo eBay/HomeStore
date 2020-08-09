@@ -912,8 +912,6 @@ btree_status_t mapping::free_user_blkids(blkid_list_ptr free_list, BtreeQueryCur
     return ret;
 }
 
-btree_status_t mapping::unmap(blkid_list_ptr free_list, BtreeQueryCursor& cur) { return btree_status_t::success; }
-
 void mapping::get_btreequery_cur(const sisl::blob& b, BtreeQueryCursor& cur) {
     if (b.size == 0) { return; }
     cur.m_last_key = std::make_unique< MappingKey >(MappingKey());
@@ -926,5 +924,9 @@ btree_status_t mapping::destroy(blkid_list_ptr& free_blkid_list, uint64_t& free_
                      "Error in destroying mapping btree ret={} ", ret);
     ret = m_bt->destroy(free_blkid_list, free_node_cnt);
     HS_ASSERT_CMP(RELEASE, ret, ==, btree_status_t::success);
+    return btree_status_t::success;
+}
+
+btree_status_t mapping::update_unmap_active_indx_tbl(blkid_list_ptr free_list, journal_key& key, BtreeQueryCursor& cur, const btree_cp_ptr& bcp, int64_t& size) {
     return btree_status_t::success;
 }
