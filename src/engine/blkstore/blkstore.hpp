@@ -342,9 +342,8 @@ public:
      * same buffer but different offsets.
      */
     boost::intrusive_ptr< Buffer > write(BlkId& bid, boost::intrusive_ptr< homeds::MemVector > mvec, int data_offset,
-                                         boost::intrusive_ptr< blkstore_req< Buffer > > req, bool in_cache,
-                                         const bool cache) {
-        if (in_cache) {
+                                         boost::intrusive_ptr< blkstore_req< Buffer > > req, const bool cache) {
+        if (cache) {
             /* TODO: add try and catch exception */
             auto buf = Buffer::make_object();
             buf->set_key(bid);

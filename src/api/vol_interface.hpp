@@ -91,9 +91,10 @@ struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
     bool part_of_batch = false;
     void* cookie;
 
-    bool is_read() { return op_type == Op_type::READ; }
-    bool is_write() { return op_type == Op_type::WRITE; }
-    bool is_unmap() { return op_type == Op_type::UNMAP; }
+    bool use_cache() const { return cache; }
+    bool is_read() const { return op_type == Op_type::READ; }
+    bool is_write() const { return op_type == Op_type::WRITE; }
+    bool is_unmap() const { return op_type == Op_type::UNMAP; }
     
     friend void intrusive_ptr_add_ref(vol_interface_req* req) { req->refcount.increment(1); }
 

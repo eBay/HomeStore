@@ -98,8 +98,8 @@ struct TestCfg {
     bool expect_io_error = false;
     uint32_t p_volume_size = 60;
     bool is_spdk = false;
-    bool readCache{false};
-    bool writeCache{false};
+    bool read_cache{false};
+    bool write_cache{false};
 };
 
 struct TestOutput {
@@ -882,7 +882,7 @@ protected:
          * to write to a file after ios are completed.
          */
         populate_buf(wbuf, size, lba, vinfo.get());
-        auto vreq = boost::intrusive_ptr< io_req_t >(new io_req_t(vinfo, wbuf, lba, nlbas, tcfg.writeCache));
+        auto vreq = boost::intrusive_ptr< io_req_t >(new io_req_t(vinfo, wbuf, lba, nlbas, tcfg.write_cache));
         vreq->cookie = (void*)this;
 
         ++m_voltest->output.write_cnt;
@@ -942,7 +942,7 @@ protected:
         auto vol = vinfo->vol;
         if (vol == nullptr) { return false; }
 
-        auto vreq = boost::intrusive_ptr< io_req_t >(new io_req_t(vinfo, nullptr, lba, nlbas, tcfg.readCache));
+        auto vreq = boost::intrusive_ptr< io_req_t >(new io_req_t(vinfo, nullptr, lba, nlbas, tcfg.read_cache));
         vreq->cookie = (void*)this;
 
         ++m_voltest->output.read_cnt;
@@ -1363,7 +1363,11 @@ SDS_OPTION_GROUP(
      "0 or 1"),
     (p_volume_size, "", "p_volume_size", "p_volume_size", ::cxxopts::value< uint32_t >()->default_value("60"),
      "0 to 200"),
-    (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"))
+    (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
+    (write_cache, "", "write_cache", "write_cache", ::cxxopts::value< bool >()->default_value("true"),
+     "true or false"),
+    (read_cache, "", "read_cache", "read_cache", ::cxxopts::value< bool >()->default_value("true"),
+     "true or false"))
 #define ENABLED_OPTIONS logging, home_blks, test_volume
 
 SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
@@ -1411,8 +1415,8 @@ int main(int argc, char* argv[]) {
     _gcfg.expect_io_error = SDS_OPTIONS["expect_io_error"].as< uint32_t >() ? true : false;
     _gcfg.p_volume_size = SDS_OPTIONS["p_volume_size"].as< uint32_t >();
     _gcfg.is_spdk = SDS_OPTIONS["spdk"].as< bool >();
-    _gcfg.readCache = SDS_OPTIONS["readCache"].as< bool >();
-    _gcfg.writeCache = SDS_OPTIONS["writeCache"].as< bool >();
+    _gcfg.read_cache = SDS_OPTIONS["read_cache"].as< bool >();
+    _gcfg.write_cache = SDS_OPTIONS["write_cache"].as< bool >();
 
     if (SDS_OPTIONS.count("device_list")) {
         _gcfg.dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();

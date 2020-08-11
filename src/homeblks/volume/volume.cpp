@@ -227,8 +227,8 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
     uint32_t start_lba = 0;
 
     auto vreq = volume_req::make(iface_req);
-    THIS_VOL_LOG(TRACE, volume, vreq, "write: lba={}, nlbas={}, cache=", vreq->lba(), vreq->nlbas(),
-                 vreq->cache());
+    THIS_VOL_LOG(TRACE, volume, vreq, "write: lba={}, nlbas={}, use->cache=", vreq->lba(), vreq->nlbas(),
+                 vreq->use_cache());
     COUNTER_INCREMENT(m_metrics, volume_outstanding_data_write_count, 1);
 
     /* Sanity checks */
@@ -268,20 +268,39 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
             /* Issue child request */
             /* store blkid which is used later to create journal entry */
             vreq->push_blkid(bid[i]);
-            boost::intrusive_ptr< BlkBuffer > bbuf = m_hb->get_data_blkstore()->write(
-                vc_req->bid, vreq->mvec, offset, boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vc_req),
-                false, vreq->cache());
+            if (vreq->use_cache()) {
+                // managed memory write
+                boost::intrusive_ptr< BlkBuffer > bbuf = m_hb->get_data_blkstore()->write(
+                    vc_req->bid, std::get< volume_req::MemVecData >(vreq->data), offset,
+                    boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vc_req), vreq->use_cache());
+            } else {
+                // scatter/gather write
+
+            }
 
             offset += bid[i].data_size(m_hb->get_data_pagesz());
         }
         VOL_DEBUG_ASSERT_CMP((start_lba - vreq->lba()), ==, vreq->nlbas(), vreq, "lba don't match");
 
         /* compute checksum and store it in a request */
-        for (uint32_t i = 0; i < vreq->nlbas(); ++i) {
-            sisl::blob outb;
-            vreq->mvec->get(&outb, i * get_page_size());
-            vreq->push_csum(crc16_t10dif(init_crc_16, outb.bytes, get_page_size()));
+        if (vreq->use_cache()) {
+            for (uint32_t i = 0; i < vreq->nlbas(); ++i) {
+                sisl::blob outb;
+                std::get<volume_req::MemVecData>(vreq->data)->get(&outb, i * get_page_size());
+                vreq->push_csum(crc16_t10dif(init_crc_16, outb.bytes, get_page_size()));
+            }
+        } else
+        {
+            // scatter/gather write
+            for (const auto& buffer : std::get< volume_req::IoVecData >(vreq->data)) {
+                for (uint32_t i{0}; i < vreq->nlbas(); ++i) {
+                    const sisl::blob outb{static_cast<uint8_t*>(buffer.iov_base) + i * get_page_size(),
+                                          static_cast<uint32_t>(get_page_size())};
+                    vreq->push_csum(crc16_t10dif(init_crc_16, outb.bytes, get_page_size()));
+                }
+            }
         }
+
 
         /* complete the request */
         ret = no_error;
@@ -614,7 +633,7 @@ volume_child_req_ptr Volume::create_vol_child_req(BlkId& bid, const volume_req_p
     vc_req->op_start_time = Clock::now();
     vc_req->reqId = ++m_req_id;
     vc_req->sync = vreq->is_sync();
-    vc_req->cache = vreq->cache();
+    vc_req->cache = vreq->use_cache();
     vc_req->part_of_batch = vreq->iface_req->part_of_batch;
 
     assert((bid.data_size(HomeBlks::instance()->get_data_pagesz()) % get_page_size()) == 0);

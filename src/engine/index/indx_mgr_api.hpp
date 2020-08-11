@@ -347,6 +347,13 @@ struct Free_Blk_Entry {
 /* any consumer req should be derived from indx_mgr_req. Indx mgr use this as a context to call consumer APIs */
 struct indx_req {
 public:
+    indx_req() = default;
+    virtual ~indx_req() = default;
+    indx_req(const indx_req&) = delete;
+    indx_req(indx_req&&) noexcept = delete;
+    indx_req& operator=(const indx_req&) = delete;
+    indx_req& operator=(indx_req&&) noexcept = delete;
+
     virtual uint32_t get_key_size() = 0;
     virtual uint32_t get_val_size() = 0;
     virtual void fill_key(void* mem, uint32_t size) = 0;
