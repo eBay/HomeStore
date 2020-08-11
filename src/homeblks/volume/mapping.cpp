@@ -17,7 +17,6 @@ uint64_t mapping::get_next_start_lba(uint64_t start_lba, uint64_t nlba) { return
 
 uint64_t mapping::get_nlbas_from_cursor(uint64_t start_lba, BtreeQueryCursor& cur) {
     auto mapping_key = (MappingKey*)(cur.m_last_key.get());
-    if (!mapping_key->end()) { return 0; }
     return get_nlbas(mapping_key->end(), start_lba);
 }
 
@@ -36,6 +35,13 @@ mapping::mapping(uint64_t volsize, uint32_t page_size, const std::string& unique
         m_pending_read_blk_cb(pending_read_cb), m_vol_page_size(page_size), m_unique_name(unique_name) {
     m_vol_size = volsize;
     m_hb = HomeBlks::safe_instance();
+    m_match_item_cb_put =
+        bind(&mapping::match_item_cb_put, this, placeholders::_1, placeholders::_2, placeholders::_3, placeholders::_4);
+    m_match_item_cb_get =
+        bind(&mapping::match_item_cb_get, this, placeholders::_1, placeholders::_2, placeholders::_3, placeholders::_4);
+    m_get_size_needed = bind(&mapping::get_size_needed, this, placeholders::_1, placeholders::_2);
+
+    // create btree
     homeds::btree::BtreeConfig btree_cfg(HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size), unique_name.c_str());
     btree_cfg.set_max_objs(volsize / page_size);
     btree_cfg.set_max_key_size(sizeof(uint32_t));
@@ -52,6 +58,13 @@ mapping::mapping(uint64_t volsize, uint32_t page_size, const std::string& unique
         m_pending_read_blk_cb(pending_read_cb), m_vol_page_size(page_size), m_unique_name(unique_name) {
     m_vol_size = volsize;
     m_hb = HomeBlks::safe_instance();
+    m_match_item_cb_put =
+        bind(&mapping::match_item_cb_put, this, placeholders::_1, placeholders::_2, placeholders::_3, placeholders::_4);
+    m_match_item_cb_get =
+        bind(&mapping::match_item_cb_get, this, placeholders::_1, placeholders::_2, placeholders::_3, placeholders::_4);
+    m_get_size_needed = bind(&mapping::get_size_needed, this, placeholders::_1, placeholders::_2);
+
+    // create btree
     homeds::btree::BtreeConfig btree_cfg(HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size), unique_name.c_str());
     btree_cfg.set_max_objs(volsize / page_size);
     btree_cfg.set_max_key_size(sizeof(uint32_t));
@@ -103,48 +116,30 @@ btree_status_t mapping::get(volume_req* req, std::vector< std::pair< MappingKey,
 
 btree_status_t mapping::get(mapping_op_cntx& cntx, MappingKey& key, BtreeQueryCursor& cur,
                             std::vector< std::pair< MappingKey, MappingValue > >& result_kv) {
-    uint64_t start_lba;
-    if (cur.m_last_key != nullptr) { // last key will be null for first read or if no read happened in the last read
-        start_lba = get_next_start_key_from_cursor(cur);
-    } else {
-        start_lba = key.start();
-    }
 
+    /* initialize the search range */
     uint64_t end_lba;
     if (cntx.op == FREE_ALL_USER_BLKID) {
         end_lba = m_vol_size / m_vol_page_size;
     } else {
         end_lba = key.end();
     }
-    HS_SUBMOD_LOG(DEBUG, volume, , "vol", m_unique_name, "GET : start_lba {} end lba {}", start_lba, end_lba);
-    auto start_key = MappingKey(start_lba, 1);
+    HS_SUBMOD_LOG(DEBUG, volume, , "vol", m_unique_name, "GET : start_lba {} end lba {}", key.start(), end_lba);
+    auto start_key = MappingKey(key.start(), 1);
     auto end_key = MappingKey(end_lba, 1);
-    auto search_range = BtreeSearchRange(start_key, true, end_key, true); // it doesn't accept the extent key
-    GetCBParam param(cntx);
+    auto search_range = BtreeSearchRange(start_key, true, end_key, true, &cur); // it doesn't accept the extent key
 
-    BtreeQueryRequest< MappingKey, MappingValue > qreq(
-        search_range, BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, get_nlbas(end_lba, start_lba),
-        bind(&mapping::match_item_cb_get, this, placeholders::_1, placeholders::_2, placeholders::_3),
-        (BRangeQueryCBParam< MappingKey, MappingValue >*)&param);
+    /* create query */
+    GetCBParam param(cntx);
+    BtreeQueryRequest< MappingKey, MappingValue > qreq(search_range,
+                                                       BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, UINT32_MAX,
+                                                       m_match_item_cb_get, (BRangeCBParam*)&param);
+
+    /* run query */
     auto ret = m_bt->query(qreq, result_kv);
 
-    /* TODO : we should store the pointer inside cb_param */
-    cntx = param.m_ctx;
-
-    /* Note : btree returns the last key it read. */
-    if (ret != btree_status_t::success) {
-        assert(ret == btree_status_t::resource_full || ret == btree_status_t::fast_path_not_possible);
-        if (qreq.cursor().m_last_key) {
-            /* partial read happened. Update the cursor */
-            end_lba = get_end_key_from_cursor(qreq.cursor());
-            assert(get_end_key_from_cursor(qreq.cursor()) == result_kv.back().first.end());
-            cur = std::move(qreq.cursor());
-        } else {
-            /* it means no read has happened */
-            assert(result_kv.size() == 0);
-            end_lba = UINT64_MAX; // end lba is invalid
-        }
-    }
+    assert(ret == btree_status_t::resource_full || ret == btree_status_t::fast_path_not_possible ||
+           ret == btree_status_t::success);
 
     HS_SUBMOD_LOG(DEBUG, volume, , "vol", m_unique_name, "GET complete : end key from cursor {}", end_lba);
     return ret;
@@ -159,11 +154,7 @@ btree_status_t mapping::put(mapping_op_cntx& cntx, MappingKey& key, MappingValue
                             BtreeQueryCursor& cur) {
     assert(value.get_array().get_total_elements() == 1);
 
-    /* value is stored in updateCBParam and actual range is also stored in cb param. range stored in here
-     * is not same as search range. search range is taken from the cur and range here is taken from
-     * the actual key.
-     */
-    UpdateCBParam param(cntx, key, value);
+    /* create search range */
     uint64_t start_lba;
     if (cur.m_last_key != nullptr) { // last key will be null for first read or if no read happened in the last read
         start_lba = get_next_start_key_from_cursor(cur);
@@ -172,32 +163,22 @@ btree_status_t mapping::put(mapping_op_cntx& cntx, MappingKey& key, MappingValue
     }
     MappingKey start(start_lba, 1);
     MappingKey end(key.end(), 1);
+    auto search_range = BtreeSearchRange(start, true, end, true, &cur); // range key is store here
 
-    auto search_range = BtreeSearchRange(start, true, end, true); // range key is store here
-    BtreeUpdateRequest< MappingKey, MappingValue > ureq(
-        search_range, bind(&mapping::match_item_cb_put, this, placeholders::_1, placeholders::_2, placeholders::_3),
-        bind(&mapping::get_size_needed, this, placeholders::_1, placeholders::_2),
-        (BRangeUpdateCBParam< MappingKey, MappingValue >*)&param);
-    auto ret = m_bt->range_put(key, value, btree_put_type::APPEND_IF_EXISTS_ELSE_INSERT, ureq, cp_id);
+    /* create update req */
+    UpdateCBParam param(cntx, key, value);
+    BtreeUpdateRequest< MappingKey, MappingValue > ureq(search_range, m_match_item_cb_put, m_get_size_needed,
+                                                        (BRangeCBParam*)&param);
 
+    /* start range put */
+    auto ret = m_bt->range_put(btree_put_type::APPEND_IF_EXISTS_ELSE_INSERT, ureq, cp_id);
+
+    /* we should not get resource full error */
     assert(ret == btree_status_t::success || ret == btree_status_t::fast_path_not_possible ||
-           ret == btree_status_t::resource_full || ret == btree_status_t::cp_id_mismatch);
+           ret == btree_status_t::cp_id_mismatch);
 
-    /* update start_lba to which this range is updated. It is helpful in cases of partial writes. */
-    uint64_t next_start_lba = ((MappingKey*)(ureq.get_input_range().get_start_key()))->start();
-    next_start_lba = ureq.get_input_range().is_start_inclusive() ? next_start_lba : next_start_lba + 1;
-
-    if (next_start_lba != start_lba) { // don't update cursor if nothing is written
-        assert(next_start_lba > start_lba);
-        cur.m_last_key = std::make_unique< MappingKey >(MappingKey(next_start_lba - 1, 1)); // cursor always points to
-                                                                                            // the last updated key
-    }
-
-    if (ret != btree_status_t::success) {
-        /* In range update, it can be written paritally. Find the first key in this range which is not updated */
-        return ret;
-    }
-    assert(next_start_lba == key.end() + 1);
+    /* In range update, it can be written paritally. Find the first key in this range which is not updated */
+    return ret;
 #if 0
     vector< pair< MappingKey, MappingValue > > values;
     uint64_t temp;
@@ -209,7 +190,6 @@ btree_status_t mapping::put(mapping_op_cntx& cntx, MappingKey& key, MappingValue
     if (req) { req->lastCommited_seqId = temp; }
     validate_get_response(key.start(), key.get_n_lba(), values, &value, req);
 #endif
-    return btree_status_t::success;
 }
 
 void mapping::print_tree() { m_bt->print_tree(); }
@@ -382,19 +362,17 @@ void mapping::print_node(uint64_t blkid) { m_bt->print_node(blkid); }
  */
 btree_status_t mapping::match_item_cb_get(std::vector< std::pair< MappingKey, MappingValue > >& match_kv,
                                           std::vector< std::pair< MappingKey, MappingValue > >& result_kv,
-                                          BRangeQueryCBParam< MappingKey, MappingValue >* cb_param) {
+                                          BRangeCBParam* cb_param, BtreeSearchRange& subrange) {
     uint64_t start_lba = 0, end_lba = 0;
-    get_start_end_lba(cb_param, start_lba, end_lba);
+    get_start_end_lba(subrange, start_lba, end_lba);
     GetCBParam* param = (GetCBParam*)cb_param;
 
     ValueEntry new_ve; // empty
 #ifndef NDEBUG
     stringstream ss;
     /* For map load test vol instance is null */
-    ss << ",is:" << ((MappingKey*)param->get_input_range().get_start_key())->to_string();
-    ss << ",ie:" << ((MappingKey*)param->get_input_range().get_end_key())->to_string();
-    ss << ",ss:" << ((MappingKey*)param->get_sub_range().get_start_key())->to_string();
-    ss << ",se:" << ((MappingKey*)param->get_sub_range().get_end_key())->to_string();
+    ss << ",ss:" << ((MappingKey*)subrange.get_start_key())->to_string();
+    ss << ",se:" << ((MappingKey*)subrange.get_end_key())->to_string();
     ss << ",match_kv:";
     for (auto& ptr : match_kv) {
         ss << ptr.first.to_string() << "," << ptr.second.to_string();
@@ -416,16 +394,16 @@ btree_status_t mapping::match_item_cb_get(std::vector< std::pair< MappingKey, Ma
             array.get((uint32_t)j, ve, true);
 
             ve.add_offset(lba_offset, overlap.get_n_lba(), m_vol_page_size);
-            if (param->m_ctx.op == READ_VAL_WITH_SEQID) {
-                if (param->m_ctx.seqId == INVALID_SEQ_ID || ve.get_seqId() <= param->m_ctx.seqId) {
+            if (param->m_ctx->op == READ_VAL_WITH_SEQID) {
+                if (param->m_ctx->seqId == INVALID_SEQ_ID || ve.get_seqId() <= param->m_ctx->seqId) {
                     result_kv.emplace_back(make_pair(overlap, MappingValue(ve)));
-                    if (m_pending_read_blk_cb && param->m_ctx.u.vreq) {
+                    if (m_pending_read_blk_cb && param->m_ctx->u.vreq) {
                         Free_Blk_Entry fbe(ve.get_blkId());
                         m_pending_read_blk_cb(fbe); // mark this blk as pending read
                     }
                     break;
                 }
-            } else if (param->m_ctx.op == FREE_ALL_USER_BLKID) {
+            } else if (param->m_ctx->op == FREE_ALL_USER_BLKID) {
                 /* free all the blkids */
                 HS_SUBMOD_LOG(DEBUG, volume, , "vol", m_unique_name,
                               "Free Blk: vol_page: {}, data_page: {}, n_lba: {} start lba {} end lba {} lba offset {}",
@@ -439,11 +417,11 @@ btree_status_t mapping::match_item_cb_get(std::vector< std::pair< MappingKey, Ma
             }
         }
 
-        if (param->m_ctx.op == FREE_ALL_USER_BLKID && fbe_list.size() > 0) {
-            uint64_t size = IndxMgr::free_blk(nullptr, param->m_ctx.u.free_list, fbe_list, false);
+        if (param->m_ctx->op == FREE_ALL_USER_BLKID && fbe_list.size() > 0) {
+            uint64_t size = IndxMgr::free_blk(nullptr, param->m_ctx->u.free_list, fbe_list, false);
             HS_SUBMOD_LOG(DEBUG, volume, , "vol", m_unique_name, "size : {}", size);
             if (size > 0) {
-                param->m_ctx.free_blk_size += size;
+                param->m_ctx->free_blk_size += size;
                 ValueEntry ve; // create a default value
                 /* TODO : we should only add last key */
                 result_kv.emplace_back(make_pair(overlap, MappingValue(ve)));
@@ -457,8 +435,8 @@ btree_status_t mapping::match_item_cb_get(std::vector< std::pair< MappingKey, Ma
     for (auto& ptr : result_kv) {
         ss << ptr.first.to_string() << "," << ptr.second.to_string();
     }
-    if (param->m_ctx.u.vreq) {
-        HS_SUBMOD_LOG(TRACE, volume, param->m_ctx.u.vreq, "vol", m_unique_name, "Get_CB: {} ", ss.str());
+    if (param->m_ctx->u.vreq) {
+        HS_SUBMOD_LOG(TRACE, volume, param->m_ctx->u.vreq, "vol", m_unique_name, "Get_CB: {} ", ss.str());
     } else {
         HS_SUBMOD_LOG(TRACE, volume, , "vol", m_unique_name, "Get_CB: {} ", ss.str());
     }
@@ -467,16 +445,16 @@ btree_status_t mapping::match_item_cb_get(std::vector< std::pair< MappingKey, Ma
 }
 
 /* It calculate the offset in a value by looking at start lba */
-uint32_t mapping::compute_val_offset(BRangeUpdateCBParam< MappingKey, MappingValue >* cb_param, uint64_t start_lba) {
+uint32_t mapping::compute_val_offset(BRangeCBParam* cb_param, uint64_t start_lba) {
     uint64_t input_start_lba = ((UpdateCBParam*)cb_param)->m_start_lba;
     return (start_lba - input_start_lba);
 }
 
 uint32_t mapping::get_size_needed(std::vector< std::pair< MappingKey, MappingValue > >& match_kv,
-                                  BRangeUpdateCBParam< MappingKey, MappingValue >* cb_param) {
+                                  BRangeCBParam* cb_param) {
 
     UpdateCBParam* param = (UpdateCBParam*)cb_param;
-    MappingValue& new_val = param->get_new_value();
+    const MappingValue& new_val = param->get_new_value();
     int overlap_entries = match_kv.size();
 
     /* In worse case, one value is divided into (2 * overlap_entries + 1). Same meta data of a value (it is
@@ -495,19 +473,19 @@ uint32_t mapping::get_size_needed(std::vector< std::pair< MappingKey, MappingVal
  */
 btree_status_t mapping::match_item_cb_put(std::vector< std::pair< MappingKey, MappingValue > >& match_kv,
                                           std::vector< std::pair< MappingKey, MappingValue > >& replace_kv,
-                                          BRangeUpdateCBParam< MappingKey, MappingValue >* cb_param) {
+                                          BRangeCBParam* cb_param, BtreeSearchRange& subrange) {
 
     uint64_t start_lba = 0, end_lba = 0;
     UpdateCBParam* param = (UpdateCBParam*)cb_param;
     std::vector< Free_Blk_Entry > fbe_list;
 
-    get_start_end_lba(cb_param, start_lba, end_lba);
+    get_start_end_lba(subrange, start_lba, end_lba);
     auto cntx = param->m_cntx;
     struct volume_req* req = nullptr;
-    if (cntx.op == op_type::UPDATE_VAL_AND_FREE_BLKS) { req = cntx.u.vreq; }
-    MappingValue& new_val = param->get_new_value();
+    if (cntx->op == op_type::UPDATE_VAL_AND_FREE_BLKS) { req = cntx->u.vreq; }
+    const MappingValue& new_val = param->get_new_value();
     /* get sequence ID of this value */
-    Blob_Array< ValueEntry >& new_varray = new_val.get_array();
+    const Blob_Array< ValueEntry >& new_varray = new_val.get_array_const();
     ValueEntry new_ve;
     new_varray.get(0, new_ve, false);
     uint64_t new_seq_id = new_ve.get_seqId();
@@ -516,12 +494,10 @@ btree_status_t mapping::match_item_cb_put(std::vector< std::pair< MappingKey, Ma
     stringstream ss;
     if (req) {
         ss << "Lba:" << req->lba() << ",nlbas:" << req->nlbas() << ",seqId:" << req->seqId
-           << ",last_seqId:" << req->lastCommited_seqId << ",is_mod:" << param->is_state_modifiable();
+           << ",last_seqId:" << req->lastCommited_seqId;
     }
-    ss << ",is:" << ((MappingKey*)param->get_input_range().get_start_key())->to_string();
-    ss << ",ie:" << ((MappingKey*)param->get_input_range().get_end_key())->to_string();
-    ss << ",ss:" << ((MappingKey*)param->get_sub_range().get_start_key())->to_string();
-    ss << ",se:" << ((MappingKey*)param->get_sub_range().get_end_key())->to_string();
+    ss << ",ss:" << ((MappingKey*)subrange.get_start_key())->to_string();
+    ss << ",se:" << ((MappingKey*)subrange.get_end_key())->to_string();
     ss << ",match_kv:";
     for (auto& ptr : match_kv) {
         ss << ptr.first.to_string() << "," << ptr.second.to_string();
@@ -579,7 +555,7 @@ btree_status_t mapping::match_item_cb_put(std::vector< std::pair< MappingKey, Ma
     }
 
     btree_status_t ret = btree_status_t::success;
-    if (cntx.op == op_type::UPDATE_VAL_AND_FREE_BLKS) {
+    if (cntx->op == op_type::UPDATE_VAL_AND_FREE_BLKS) {
         req->indx_push_fbe(fbe_list);
     } else {
         /* add trim code */
@@ -652,21 +628,20 @@ btree_status_t mapping::match_item_cb_put(std::vector< std::pair< MappingKey, Ma
  * input_range is original client provided start/end, its always inclusive for mapping layer
  * Resulting start/end lba is always inclusive
  */
-void mapping::get_start_end_lba(BRangeCBParam* param, uint64_t& start_lba, uint64_t& end_lba) {
+void mapping::get_start_end_lba(BtreeSearchRange& subrange, uint64_t& start_lba, uint64_t& end_lba) {
 
-    // pick higher start of subrange/inputrange
-    MappingKey* s_subrange = (MappingKey*)param->get_sub_range().get_start_key();
+    MappingKey* s_subrange = (MappingKey*)subrange.get_start_key();
     assert(s_subrange->start() == s_subrange->end());
 
-    if (param->get_sub_range().is_start_inclusive()) {
+    if (subrange.is_start_inclusive()) {
         start_lba = s_subrange->start();
     } else {
         start_lba = s_subrange->start() + 1;
     }
 
-    MappingKey* e_subrange = (MappingKey*)param->get_sub_range().get_end_key();
+    MappingKey* e_subrange = (MappingKey*)subrange.get_end_key();
     assert(e_subrange->start() == e_subrange->end());
-    if (param->get_sub_range().is_end_inclusive()) {
+    if (subrange.is_end_inclusive()) {
         end_lba = e_subrange->end();
     } else {
         end_lba = e_subrange->end() - 1;
@@ -674,7 +649,7 @@ void mapping::get_start_end_lba(BRangeCBParam* param, uint64_t& start_lba, uint6
 }
 
 /* add missing interval to replace kv */
-void mapping::add_new_interval(uint64_t s_lba, uint64_t e_lba, MappingValue& val, uint16_t lba_offset,
+void mapping::add_new_interval(uint64_t s_lba, uint64_t e_lba, const MappingValue& val, uint16_t lba_offset,
                                std::vector< std::pair< MappingKey, MappingValue > >& replace_kv) {
     auto nlba = get_nlbas(e_lba, s_lba);
     replace_kv.emplace_back(make_pair(MappingKey(s_lba, nlba), MappingValue(val, lba_offset, nlba, m_vol_page_size)));
@@ -682,7 +657,7 @@ void mapping::add_new_interval(uint64_t s_lba, uint64_t e_lba, MappingValue& val
 
 /* result of overlap of k1/k2 is added to replace_kv */
 void mapping::compute_and_add_overlap(std::vector< Free_Blk_Entry >& fbe_list, uint64_t s_lba, uint64_t e_lba,
-                                      MappingValue& new_val, uint16_t new_val_offset, MappingValue& e_val,
+                                      const MappingValue& new_val, uint16_t new_val_offset, MappingValue& e_val,
                                       uint16_t e_val_offset,
                                       std::vector< std::pair< MappingKey, MappingValue > >& replace_kv,
                                       uint64_t new_seq_id) {
@@ -705,7 +680,7 @@ void mapping::compute_and_add_overlap(std::vector< Free_Blk_Entry >& fbe_list, u
             make_pair(MappingKey(s_lba, nlba), MappingValue(new_val, new_val_offset, nlba, m_vol_page_size)));
     } else {
         /* don't override. free new blks */
-        Blob_Array< ValueEntry >& new_varray = new_val.get_array();
+        const Blob_Array< ValueEntry >& new_varray = new_val.get_array_const();
         ValueEntry new_ve;
         new_varray.get(0, new_ve, false);
         Free_Blk_Entry fbe(new_ve.get_blkId(), new_ve.get_blk_offset() + new_val_offset,
@@ -940,6 +915,7 @@ btree_status_t mapping::free_user_blkids(blkid_list_ptr free_list, BtreeQueryCur
 btree_status_t mapping::unmap(blkid_list_ptr free_list, BtreeQueryCursor& cur) { return btree_status_t::success; }
 
 void mapping::get_btreequery_cur(const sisl::blob& b, BtreeQueryCursor& cur) {
+    if (b.size == 0) { return; }
     cur.m_last_key = std::make_unique< MappingKey >(MappingKey());
     cur.m_last_key->set_blob(b);
 };

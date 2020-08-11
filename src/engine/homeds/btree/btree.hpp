@@ -300,17 +300,18 @@ public:
 
     uint64_t get_used_size() { return m_node_size * m_total_nodes.load(); }
 
-    btree_status_t range_put(const BtreeKey& k, const BtreeValue& v, btree_put_type put_type,
-                             BtreeUpdateRequest< K, V >& bur, const btree_cp_id_ptr& cp_id) {
-        V temp_v;
-        // initialize cb param
-        K sub_st(*(K*)bur.get_input_range().get_start_key()), sub_en(*(K*)bur.get_input_range().get_end_key()); // cpy
-        K in_st(*(K*)bur.get_input_range().get_start_key()), in_en(*(K*)bur.get_input_range().get_end_key());   // cpy
-        bur.get_cb_param()->get_input_range().set(in_st, bur.get_input_range().is_start_inclusive(), in_en,
-                                                  bur.get_input_range().is_end_inclusive());
-        bur.get_cb_param()->get_sub_range().set(sub_st, bur.get_input_range().is_start_inclusive(), sub_en,
-                                                bur.get_input_range().is_end_inclusive());
-        return (put(k, v, put_type, &temp_v, cp_id, &bur));
+    btree_status_t range_put(btree_put_type put_type, BtreeUpdateRequest< K, V >& bur, const btree_cp_id_ptr& cp_id) {
+        K k; // these key/values are not used. It takes key/value from update request
+        V v;
+        BtreeQueryCursor cur;
+        bool reset_cur = false;
+        if (!bur.get_input_range().is_cursor_valid()) {
+            bur.get_input_range().set_cursor(&cur);
+            reset_cur = true;
+        }
+        auto ret = put(k, v, put_type, &v, cp_id, &bur);
+        if (reset_cur) { bur.get_input_range().reset_cursor(); }
+        return ret;
     }
 
     btree_status_t put(const BtreeKey& k, const BtreeValue& v, btree_put_type put_type) {
@@ -363,7 +364,13 @@ public:
             acq_lock = homeds::thread::LOCKTYPE_WRITE;
             goto retry;
         } else {
-            ret = do_put(root, acq_lock, k, v, ind, put_type, *existing_val, bur, cp_id);
+            K subrange_start_key, subrange_end_key;
+            bool start_incl = false, end_incl = false;
+            if (bur) {
+                bur->get_input_range().copy_start_end_blob(subrange_start_key, start_incl, subrange_end_key, end_incl);
+            }
+            BtreeSearchRange subrange(subrange_start_key, start_incl, subrange_end_key, end_incl);
+            ret = do_put(root, acq_lock, k, v, ind, put_type, *existing_val, bur, cp_id, subrange);
             if (ret == btree_status_t::retry) {
                 // Need to start from top down again, since there is a race between 2 inserts or deletes.
                 acq_lock = homeds::thread::LOCKTYPE_READ;
@@ -416,19 +423,18 @@ public:
     }
 
     btree_status_t query(BtreeQueryRequest< K, V >& query_req, std::vector< std::pair< K, V > >& out_values) {
-        // initialize cb param
-        K in_st(*(K*)query_req.get_input_range().get_start_key());
-        K in_en(*(K*)query_req.get_input_range().get_end_key()); // cpy
         COUNTER_INCREMENT(m_metrics, btree_query_ops_count, 1);
-        if (query_req.get_cb_param()) {
-            query_req.get_cb_param()->get_input_range().set(in_st, query_req.get_input_range().is_start_inclusive(),
-                                                            in_en, query_req.get_input_range().is_end_inclusive());
-        }
 
         btree_status_t ret = btree_status_t::success;
         if (query_req.get_batch_size() == 0) { return ret; }
 
-        query_req.init_batch_range();
+        /* set cursor if it is invalid. User is not interested in the cursor but we need it for internal logic */
+        BtreeQueryCursor cur;
+        bool reset_cur = false;
+        if (!query_req.get_input_range().is_cursor_valid()) {
+            query_req.get_input_range().set_cursor(&cur);
+            reset_cur = true;
+        }
 
         m_btree_lock.read_lock();
         BtreeNodePtr root = nullptr;
@@ -441,7 +447,7 @@ public:
             break;
 
         case BtreeQueryType::TREE_TRAVERSAL_QUERY:
-            ret = do_traversal_query(root, query_req, out_values, nullptr);
+            ret = do_traversal_query(root, query_req, out_values);
             break;
 
         default:
@@ -451,13 +457,22 @@ public:
         }
 
         if ((query_req.query_type() == BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY ||
-             query_req.query_type() == BtreeQueryType::TREE_TRAVERSAL_QUERY)) {
-            /* if return is not success then set the cursor to last read */
-            query_req.cursor().m_last_key =
-                (out_values.size()) ? std::make_unique< K >(out_values.back().first) : nullptr;
-            if (query_req.cursor().m_last_key &&
-                query_req.get_input_range().get_end_key()->compare(query_req.cursor().m_last_key.get()) == 0) {
-                /* we finished just at the last key */
+             query_req.query_type() == BtreeQueryType::TREE_TRAVERSAL_QUERY) &&
+            out_values.size() > 0) {
+
+            /* if return is not success then set the cursor to last read. No need to set cursor if user is not
+             * interested in it.
+             */
+            if (!reset_cur) {
+                query_req.get_input_range().set_cursor_key(&out_values.back().first, ([](BtreeKey* key) {
+                    K end_key;
+                    end_key.copy_end_key_blob(key->get_blob());
+                    return std::move(std::make_unique< K >(end_key));
+                }));
+            }
+
+            /* check if we finished just at the last key */
+            if (out_values.back().first.compare(query_req.get_input_range().get_end_key()) == 0) {
                 ret = btree_status_t::success;
             }
         }
@@ -471,6 +486,7 @@ public:
             ret != btree_status_t::fast_path_not_possible) {
             COUNTER_INCREMENT(m_metrics, query_err_cnt, 1);
         }
+        if (reset_cur) { query_req.get_input_range().reset_cursor(); }
         return ret;
     }
 
@@ -536,15 +552,22 @@ public:
 #endif
 
     /* It doesn't support async */
-    btree_status_t remove_any(const BtreeSearchRange& range, BtreeKey* outkey, BtreeValue* outval) {
+    btree_status_t remove_any(BtreeSearchRange& range, BtreeKey* outkey, BtreeValue* outval) {
         return (remove_any(range, outkey, outval, nullptr));
     }
 
-    btree_status_t remove_any(const BtreeSearchRange& range, BtreeKey* outkey, BtreeValue* outval,
+    btree_status_t remove_any(BtreeSearchRange& range, BtreeKey* outkey, BtreeValue* outval,
                               const btree_cp_id_ptr& cp_id) {
         homeds::thread::locktype acq_lock = homeds::thread::locktype::LOCKTYPE_READ;
         bool is_found = false;
         bool is_leaf = false;
+        /* set cursor if it is invalid. User is not interested in the cursor but we need it for internal logic */
+        BtreeQueryCursor cur;
+        bool reset_cur = false;
+        if (!range.is_cursor_valid()) {
+            range.set_cursor(&cur);
+            reset_cur = true;
+        }
 
         m_btree_lock.read_lock();
 
@@ -600,13 +623,15 @@ public:
 #ifndef NDEBUG
         check_lock_debug();
 #endif
+        if (reset_cur) { range.reset_cursor(); }
         return status;
     }
 
     btree_status_t remove(const BtreeKey& key, BtreeValue* outval) { return (remove(key, outval, nullptr)); }
 
     btree_status_t remove(const BtreeKey& key, BtreeValue* outval, const btree_cp_id_ptr& cp_id) {
-        return remove_any(BtreeSearchRange(key), nullptr, outval, cp_id);
+        auto range = BtreeSearchRange(key);
+        return remove_any(range, nullptr, outval, cp_id);
     }
 
     /**
@@ -732,19 +757,18 @@ public:
         }
     }
 
-    void merge(Btree* other, match_item_cb_update_t< K, V > merge_cb) {
+    void merge(Btree* other, match_item_cb_t< K, V > merge_cb) {
         std::vector< pair< K, V > > other_kvs;
 
         other->get_all_kvs(&other_kvs);
         for (auto it = other_kvs.begin(); it != other_kvs.end(); it++) {
             K k = it->first;
             V v = it->second;
-            BRangeUpdateCBParam< K, V > local_param(k, v);
+            BRangeCBParam local_param(k, v);
             K start(k.start(), 1), end(k.end(), 1);
 
             auto search_range = BtreeSearchRange(start, true, end, true);
-            BtreeUpdateRequest< K, V > ureq(search_range, merge_cb, nullptr,
-                                            (BRangeUpdateCBParam< K, V >*)&local_param);
+            BtreeUpdateRequest< K, V > ureq(search_range, merge_cb, nullptr, (BRangeCBParam*)&local_param);
             range_put(k, v, btree_put_type::APPEND_IF_EXISTS_ELSE_INSERT, nullptr, nullptr, ureq);
         }
     }
@@ -987,15 +1011,18 @@ private:
 
                 int start_ind = 0, end_ind = 0;
                 std::vector< std::pair< K, V > > match_kv;
-                auto cur_count = my_node->get_all(query_req.this_batch_range(), query_req.get_batch_size() - count,
+                auto cur_count = my_node->get_all(query_req.get_input_range(), query_req.get_batch_size() - count,
                                                   start_ind, end_ind, &match_kv);
                 if (cur_count == 0) { break; }
 
                 if (query_req.callback()) {
-                    // TODO - support accurate sub ranges in future instead of setting input range
-                    query_req.get_cb_param()->set_sub_range(query_req.get_input_range());
+                    K subrange_start_key, subrange_end_key;
+                    bool start_incl = false, end_incl = false;
+                    query_req.get_input_range().copy_start_end_blob(subrange_start_key, start_incl, subrange_end_key,
+                                                                    end_incl);
+                    BtreeSearchRange subrange(subrange_start_key, start_incl, subrange_end_key, end_incl);
                     std::vector< std::pair< K, V > > result_kv;
-                    ret = query_req.callback()(match_kv, result_kv, query_req.get_cb_param());
+                    ret = query_req.callback()(match_kv, result_kv, query_req.get_cb_param(), subrange);
                     auto ele_to_add = result_kv.size();
                     if (count + ele_to_add > query_req.get_batch_size()) {
                         ele_to_add = query_req.get_batch_size() - count;
@@ -1032,7 +1059,7 @@ private:
         }
 
         BtreeNodeInfo start_child_info;
-        auto result = my_node->find(query_req.get_start_of_range(), nullptr, &start_child_info);
+        auto result = my_node->find(query_req.get_input_range().get_start_of_range(), nullptr, &start_child_info);
         ASSERT_IS_VALID_INTERIOR_CHILD_INDX(result, my_node);
 
         BtreeNodePtr child_node;
@@ -1044,7 +1071,7 @@ private:
     }
 
     btree_status_t do_traversal_query(const BtreeNodePtr& my_node, BtreeQueryRequest< K, V >& query_req,
-                                      std::vector< std::pair< K, V > >& out_values, BtreeSearchRange* sub_range) {
+                                      std::vector< std::pair< K, V > >& out_values) {
         btree_status_t ret = btree_status_t::success;
 
         if (my_node->is_leaf()) {
@@ -1053,14 +1080,17 @@ private:
             int start_ind = 0, end_ind = 0;
             std::vector< std::pair< K, V > > match_kv;
             auto cur_count =
-                my_node->get_all(query_req.this_batch_range(), query_req.get_batch_size() - (uint32_t)out_values.size(),
+                my_node->get_all(query_req.get_input_range(), query_req.get_batch_size() - (uint32_t)out_values.size(),
                                  start_ind, end_ind, &match_kv);
 
             if (cur_count && query_req.callback()) {
-                // TODO - support accurate sub ranges in future instead of setting input range
-                query_req.get_cb_param()->set_sub_range(query_req.get_input_range());
                 std::vector< std::pair< K, V > > result_kv;
-                ret = query_req.callback()(match_kv, result_kv, query_req.get_cb_param());
+                K subrange_start_key, subrange_end_key;
+                bool start_incl = false, end_incl = false;
+                query_req.get_input_range().copy_start_end_blob(subrange_start_key, start_incl, subrange_end_key,
+                                                                end_incl);
+                BtreeSearchRange subrange(subrange_start_key, start_incl, subrange_end_key, end_incl);
+                ret = query_req.callback()(match_kv, result_kv, query_req.get_cb_param(), subrange);
                 auto ele_to_add = result_kv.size();
                 if (ele_to_add > 0) {
                     out_values.insert(out_values.end(), result_kv.begin(), result_kv.begin() + ele_to_add);
@@ -1078,8 +1108,8 @@ private:
             return ret;
         }
 
-        auto start_ret = my_node->find(query_req.get_start_of_range(), nullptr, nullptr);
-        auto end_ret = my_node->find(query_req.get_end_of_range(), nullptr, nullptr);
+        auto start_ret = my_node->find(query_req.get_input_range().get_start_of_range(), nullptr, nullptr);
+        auto end_ret = my_node->find(query_req.get_input_range().get_end_of_range(), nullptr, nullptr);
         bool unlocked_already = false;
         int ind = -1;
 
@@ -1108,7 +1138,7 @@ private:
                 unlocked_already = true;
             }
             // TODO - pass sub range if child is leaf
-            ret = do_traversal_query(child_node, query_req, out_values, nullptr);
+            ret = do_traversal_query(child_node, query_req, out_values);
             if (ret == btree_status_t::has_more) { break; }
             ind++;
         }
@@ -1305,7 +1335,7 @@ private:
 
     btree_status_t update_leaf_node(const BtreeNodePtr& my_node, const BtreeKey& k, const BtreeValue& v,
                                     btree_put_type put_type, BtreeValue& existing_val, BtreeUpdateRequest< K, V >* bur,
-                                    const btree_cp_id_ptr& cp_id) {
+                                    const btree_cp_id_ptr& cp_id, BtreeSearchRange& subrange) {
 
         btree_status_t ret = btree_status_t::success;
         if (bur != nullptr) {
@@ -1313,10 +1343,10 @@ private:
             // callback implementation
             std::vector< std::pair< K, V > > match;
             int start_ind = 0, end_ind = 0;
-            my_node->get_all(bur->get_cb_param()->get_sub_range(), UINT32_MAX, start_ind, end_ind, &match);
+            my_node->get_all(bur->get_input_range(), UINT32_MAX, start_ind, end_ind, &match);
 
             vector< pair< K, V > > replace_kv;
-            ret = bur->callback()(match, replace_kv, bur->get_cb_param());
+            ret = bur->callback()(match, replace_kv, bur->get_cb_param(), subrange);
             if (ret != btree_status_t::success) { return ret; }
             HS_ASSERT_CMP(DEBUG, start_ind, <=, end_ind);
             if (match.size() > 0) { my_node->remove(start_ind, end_ind); }
@@ -1326,18 +1356,10 @@ private:
                 BT_RELEASE_ASSERT((status == btree_status_t::success), my_node, "unexpected insert failure");
             }
 
-            /* update ranges */
-            auto end_key_ptr = const_cast< BtreeKey* >(bur->get_cb_param()->get_sub_range().get_end_key());
-            auto blob = end_key_ptr->get_blob();
-
-            /* update the start indx of both sub range and input range */
-            const_cast< BtreeKey* >(bur->get_cb_param()->get_sub_range().get_start_key())->copy_blob(blob); // copy
-            bur->get_cb_param()->get_sub_range().set_start_incl(
-                !bur->get_cb_param()->get_sub_range().is_end_inclusive());
-
-            // update input range for checkpointing
-            const_cast< BtreeKey* >(bur->get_input_range().get_start_key())->copy_blob(blob); // copy
-            bur->get_input_range().set_start_incl(!bur->get_cb_param()->get_sub_range().is_end_inclusive());
+            /* update cursor in input range */
+            auto end_key_ptr = const_cast< BtreeKey* >(subrange.get_end_key());
+            bur->get_input_range().set_cursor_key(
+                end_key_ptr, ([](BtreeKey* end_key) { return std::move(std::make_unique< K >(*((K*)end_key))); }));
         } else {
             if (!my_node->put(k, v, put_type, existing_val)) { ret = btree_status_t::put_failed; }
         }
@@ -1366,7 +1388,7 @@ private:
              */
             my_node->get_all(bur->get_input_range(), UINT32_MAX, start_ind, end_ind);
         } else {
-            auto result = my_node->find(k, nullptr, nullptr);
+            auto result = my_node->find(k, nullptr, nullptr, true, true);
             end_ind = start_ind = result.end_of_search_index;
             ASSERT_IS_VALID_INTERIOR_CHILD_INDX(result, my_node);
         }
@@ -1470,9 +1492,8 @@ private:
     }
 
     /* This function is called for the interior nodes whose childs are leaf nodes to calculate the sub range */
-    void get_subrange(const BtreeNodePtr& my_node, BtreeUpdateRequest< K, V >* bur, int curr_ind) {
-
-        if (!bur) { return; }
+    void get_subrange(const BtreeNodePtr& my_node, BtreeUpdateRequest< K, V >* bur, int curr_ind, K& subrange_start_key,
+                      K& subrange_end_key, bool& subrange_start_inc, bool& subrange_end_inc) {
 
 #ifndef NDEBUG
         if (curr_ind > 0) {
@@ -1481,7 +1502,7 @@ private:
             BtreeKey* start_key_ptr = &start_key;
 
             my_node->get_nth_key(curr_ind - 1, start_key_ptr, false);
-            HS_ASSERT_CMP(DEBUG, start_key_ptr->compare(bur->get_cb_param()->get_sub_range().get_start_key()), <=, 0);
+            HS_ASSERT_CMP(DEBUG, start_key_ptr->compare(bur->get_input_range().get_start_key()), <=, 0);
         }
 #endif
 
@@ -1506,12 +1527,16 @@ private:
             end_inc = bur->get_input_range().is_end_inclusive();
         }
 
-        auto blob = end_key_ptr->get_blob();
-        const_cast< BtreeKey* >(bur->get_cb_param()->get_sub_range().get_end_key())->copy_blob(blob); // copy
-        bur->get_cb_param()->get_sub_range().set_end_incl(end_inc);
+        BtreeSearchRange& input_range = bur->get_input_range();
+        auto start_key_ptr = input_range.get_start_key();
+        subrange_start_key.copy_blob(start_key_ptr->get_blob());
+        subrange_end_key.copy_blob(end_key_ptr->get_blob());
+        subrange_start_inc = input_range.is_start_inclusive();
+        subrange_end_inc = end_inc;
 
-        auto ret = bur->get_cb_param()->get_sub_range().get_start_key()->compare(
-            bur->get_cb_param()->get_sub_range().get_end_key());
+        auto ret = subrange_start_key.compare(&subrange_end_key);
+        BT_RELEASE_ASSERT_CMP(ret, <=, 0, my_node);
+        ret = subrange_start_key.compare(bur->get_input_range().get_end_key());
         BT_RELEASE_ASSERT_CMP(ret, <=, 0, my_node);
         /* We don't neeed to update the start at it is updated when entries are inserted in leaf nodes */
     }
@@ -1533,7 +1558,8 @@ private:
      */
     btree_status_t do_put(const BtreeNodePtr& my_node, homeds::thread::locktype curlock, const BtreeKey& k,
                           const BtreeValue& v, int ind_hint, btree_put_type put_type, BtreeValue& existing_val,
-                          BtreeUpdateRequest< K, V >* bur, const btree_cp_id_ptr& cp_id) {
+                          BtreeUpdateRequest< K, V >* bur, const btree_cp_id_ptr& cp_id,
+                          BtreeSearchRange& child_subrange) {
 
         btree_status_t ret = btree_status_t::success;
         bool unlocked_already = false;
@@ -1542,7 +1568,7 @@ private:
         if (my_node->is_leaf()) {
             /* update the leaf node */
             BT_LOG_ASSERT_CMP(curlock, ==, LOCKTYPE_WRITE, my_node);
-            ret = update_leaf_node(my_node, k, v, put_type, existing_val, bur, cp_id);
+            ret = update_leaf_node(my_node, k, v, put_type, existing_val, bur, cp_id, child_subrange);
             unlock_node(my_node, curlock);
             return ret;
         }
@@ -1550,11 +1576,6 @@ private:
         bool is_any_child_splitted = false;
 
     retry:
-        HS_ASSERT_CMP(DEBUG,
-                      (!bur ||
-                       const_cast< BtreeKey* >(bur->get_cb_param()->get_sub_range().get_start_key())
-                               ->compare(bur->get_input_range().get_start_key()) == 0),
-                      ==, true);
         int start_ind = 0, end_ind = -1;
 
         /* Get the start and end ind in a parent node for the range updates. For
@@ -1599,12 +1620,15 @@ private:
             child_cur_lock = (child_node->is_leaf()) ? LOCKTYPE_WRITE : LOCKTYPE_READ;
 
             /* Get subrange if it is a range update */
+            K start_key, end_key;
+            bool start_incl, end_incl;
             if (bur && child_node->is_leaf()) {
                 /* We get the subrange only for leaf because this is where we will be inserting keys. In interior nodes,
                  * keys are always propogated from the lower nodes.
                  */
-                get_subrange(my_node, bur, curr_ind);
+                get_subrange(my_node, bur, curr_ind, start_key, end_key, start_incl, end_incl);
             }
+            BtreeSearchRange subrange(start_key, start_incl, end_key, end_incl);
 
             /* check if child node is needed to split */
             bool split_occured = false;
@@ -1619,8 +1643,7 @@ private:
             if (bur && child_node->is_leaf()) {
                 THIS_BT_LOG(DEBUG, btree_structures, my_node, "Subrange:s:{},e:{},c:{},nid:{},edgeid:{},sk:{},ek:{}",
                             start_ind, end_ind, curr_ind, my_node->get_node_id(), my_node->get_edge_id(),
-                            bur->get_cb_param()->get_sub_range().get_start_key()->to_string(),
-                            bur->get_cb_param()->get_sub_range().get_end_key()->to_string());
+                            subrange.get_start_key()->to_string(), subrange.get_end_key()->to_string());
             }
 
 #ifndef NDEBUG
@@ -1659,7 +1682,7 @@ private:
             }
 #endif
 
-            ret = do_put(child_node, child_cur_lock, k, v, ind_hint, put_type, existing_val, bur, cp_id);
+            ret = do_put(child_node, child_cur_lock, k, v, ind_hint, put_type, existing_val, bur, cp_id, subrange);
 
             if (ret != btree_status_t::success) { goto out; }
 
@@ -1930,7 +1953,7 @@ private:
         old_nodes.push_back(child_node);
 
         if (BtreeStoreType == btree_store_type::SSD_BTREE) {
-            auto j_iob = btree_store_t::make_journal_entry(journal_op::BTREE_MERGE, true /* is_root */);
+            auto j_iob = btree_store_t::make_journal_entry(journal_op::BTREE_MERGE, true /* is_root */, cp_id);
             btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::inplace_write, root, cp_id);
             btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::removal, child_node, cp_id);
             btree_store_t::write_journal_entry(m_btree_store.get(), cp_id, j_iob);
@@ -1993,7 +2016,7 @@ private:
                     child_node1->get_node_id(), child_node2->get_node_id(), out_split_key->to_string());
 
         if (BtreeStoreType == btree_store_type::SSD_BTREE) {
-            auto j_iob = btree_store_t::make_journal_entry(journal_op::BTREE_SPLIT, root_split,
+            auto j_iob = btree_store_t::make_journal_entry(journal_op::BTREE_SPLIT, root_split, cp_id,
                                                            {parent_node->get_node_id(), parent_node->get_gen()});
             btree_store_t::append_node_to_journal(
                 j_iob, (root_split ? bt_journal_node_op::creation : bt_journal_node_op::inplace_write), child_node1,
@@ -2322,7 +2345,7 @@ private:
 
         /* write the journal entry */
         if (BtreeStoreType == btree_store_type::SSD_BTREE) {
-            auto j_iob = btree_store_t::make_journal_entry(journal_op::BTREE_MERGE, false /* is_root */,
+            auto j_iob = btree_store_t::make_journal_entry(journal_op::BTREE_MERGE, false /* is_root */, cp_id,
                                                            {parent_node->get_node_id(), parent_node->get_gen()});
             K child_pkey;
             if (start_indx < parent_node->get_total_entries()) {
@@ -2813,7 +2836,7 @@ protected:
 
         auto cp_id = attach_prepare_cp(nullptr, false, false);
         if (BtreeStoreType == btree_store_type::SSD_BTREE) {
-            auto j_iob = btree_store_t::make_journal_entry(journal_op::BTREE_CREATE, true /* is_root */,
+            auto j_iob = btree_store_t::make_journal_entry(journal_op::BTREE_CREATE, true /* is_root */, cp_id,
                                                            {m_root_node, root->get_gen()});
             btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::creation, root, cp_id);
             btree_store_t::write_journal_entry(m_btree_store.get(), cp_id, j_iob);

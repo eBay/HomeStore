@@ -360,6 +360,7 @@ void IndxMgr::recovery_start_phase2() {
     uint64_t blk_alloc_replay_cnt = 0;
     uint64_t active_replay_cnt = 0;
 
+    LOGINFO("m_name {} last cp {} ", m_name, m_last_cp_sb.to_string());
     /* start replaying the entry in order of seq number */
     for (auto it = seq_buf_map.cbegin(); it != seq_buf_map.cend(); ++it) {
         logstore_seq_num_t seq_num = it->first;
@@ -445,7 +446,8 @@ void IndxMgr::recover_meta_ops() {
             break;
         case INDX_DESTROY: {
             uint64_t cur_bytes = (uint64_t)(meta_blk_list[i].second.bytes()) + sizeof(hs_cp_meta_sb);
-            uint64_t size = meta_blk_list[i].second.size() - sizeof(hs_cp_meta_sb);
+            assert(meta_blk_list[i].second.size() >= hdr->size);
+            uint64_t size = hdr->size - sizeof(hs_cp_meta_sb);
             sisl::blob b((uint8_t*)cur_bytes, size);
             m_active_tbl->get_btreequery_cur(b, m_destroy_btree_cur);
             m_destroy_meta_blk = meta_blk_list[i].first;
@@ -702,7 +704,7 @@ void IndxMgr::create_new_diff_tbl(indx_cp_id_ptr& indx_id) {
 void IndxMgr::truncate(const indx_cp_id_ptr& indx_id) {
     m_journal->truncate(indx_id->ainfo.end_psn);
     m_active_tbl->truncate(indx_id->ainfo.btree_id);
-    LOGINFO("uuid {} last psn {}", m_uuid, m_last_cp_sb.cp_info.active_data_psn);
+    LOGDEBUG("uuid {} last psn {}", m_uuid, m_last_cp_sb.cp_info.active_data_psn);
 }
 
 void IndxMgr::cp_done(bool blkalloc_cp) {
@@ -973,6 +975,7 @@ void IndxMgr::destroy_indx_tbl() {
                     hs_cp_meta_sb* mhdr = (hs_cp_meta_sb*)b.bytes();
                     mhdr->uuid = m_uuid;
                     mhdr->type = INDX_DESTROY;
+                    mhdr->size = cursor_blob.size + sizeof(hs_cp_meta_sb);
                     memcpy((uint8_t*)((uint64_t)b.bytes() + sizeof(hs_cp_meta_sb)), cursor_blob.bytes,
                            cursor_blob.size);
                     write_meta_blk(m_destroy_meta_blk, b);

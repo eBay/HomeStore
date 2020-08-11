@@ -355,8 +355,10 @@ void HomeBlks::init_done(std::error_condition err) {
     }
     auto system_cap = get_system_capacity();
     LOGINFO("{}", system_cap.to_string());
-    HS_RELEASE_ASSERT_EQ(system_cap.used_data_size, used_size.used_data_size, "vol data used size mismatch");
-    HS_RELEASE_ASSERT_EQ(system_cap.used_index_size, used_size.used_index_size, "index used size mismatch");
+    HS_RELEASE_ASSERT_EQ(system_cap.used_data_size, used_size.used_data_size,
+                         "vol data used size mismatch. used size {}", used_size.to_string());
+    HS_RELEASE_ASSERT_EQ(system_cap.used_index_size, used_size.used_index_size,
+                         "index used size mismatch. used size {}", used_size.to_string());
 
     LOGINFO("init done");
     m_cfg.init_done_cb(err, m_out_params);

@@ -284,7 +284,7 @@ protected:
     // bool move_verify_to_done;
     // bool vol_create_del_test;
 
-    // Clock::time_point print_startTime;
+    Clock::time_point print_startTime;
 
     // std::atomic< bool > io_stalled = false;
     // bool expected_init_fail = false;
@@ -300,7 +300,7 @@ public:
         // verify_done = false;
         // vol_create_del_test = false;
         // move_verify_to_done = false;
-        // print_startTime = Clock::now();
+        print_startTime = Clock::now();
 
         // outstanding_ios = 0;
         srandom(time(NULL));
@@ -748,6 +748,13 @@ public:
             req->vol_info->m_vol_bm->reset_bits(req->lba, req->nlbas);
         }
         --m_outstanding_ios;
+        static Clock::time_point print_startTime = Clock::now();
+        auto elapsed_time = get_elapsed_time_ms(print_startTime);
+        static uint64_t print_time = 120000;
+        if (elapsed_time > print_time) {
+            print_startTime = Clock::now();
+            m_voltest->output.print("volume completion");
+        }
     }
 
     bool time_to_stop() const override {
@@ -797,7 +804,7 @@ protected:
         return ret;
     }
 
-    bool same_write() { return write_vol(0, 5, 100); }
+    bool same_write() { return write_vol(0, 1, 100); }
 
     bool seq_write() {
         /* XXX: does it really matter if it is atomic or not */

@@ -196,6 +196,7 @@ enum meta_hdr_type { INDX_CP, INDX_DESTROY, INDX_UNMAP, SNAP_DESTROY };
 struct hs_cp_meta_sb {
     boost::uuids::uuid uuid; // Don't populate if it is hs indx meta blk
     meta_hdr_type type;
+    uint32_t size;
 } __attribute__((__packed__));
 
 struct hs_cp_io_sb : hs_cp_meta_sb {
@@ -226,6 +227,13 @@ struct indx_cp_io_sb {
     btree_cp_superblock diff_btree_info;
     indx_cp_io_sb(boost::uuids::uuid uuid) : uuid(uuid){};
     indx_cp_io_sb(){};
+    std::string to_string() {
+        stringstream ss;
+        ss << "active_cp_cnt " << cp_info.active_cp_cnt << " active_data_psn " << cp_info.active_data_psn
+           << " diff_cp_cnt " << cp_info.diff_cp_cnt << " diff_Data_psn " << cp_info.diff_data_psn << " blkalloc cp cp "
+           << cp_info.blkalloc_cp_cnt;
+        return ss.str();
+    }
 } __attribute__((__packed__));
 
 /* this superblock is never changed once indx manager is created */
