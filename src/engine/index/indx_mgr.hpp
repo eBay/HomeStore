@@ -155,7 +155,6 @@ struct indx_diff_info {
     indx_diff_info(int64_t start_psn) : start_psn(start_psn) {}
 };
 
-
 /* During prepare flush we decide to take a CP out of active, diff or snap or all 3 cps*/
 struct indx_cp_id : public boost::intrusive_ref_counter< indx_cp_id > {
     indx_mgr_ptr indx_mgr;
@@ -173,7 +172,7 @@ struct indx_cp_id : public boost::intrusive_ref_counter< indx_cp_id > {
     std::vector< blkid_list_ptr > user_free_blkid_list; // this blkid list is freed by the user. It is not part of any
                                                         // cp. user first collect it and then later it attaches the list
                                                         // to a cp.
-    blkid_list_ptr free_blkid_list; // list of blk ids freed in a cp
+    blkid_list_ptr free_blkid_list;                     // list of blk ids freed in a cp
 
     indx_cp_id(int64_t cp_cnt, int64_t start_active_psn, int64_t start_diff_psn, indx_mgr_ptr indx_mgr,
                blkid_list_ptr& free_blkid_list) :
@@ -218,6 +217,8 @@ struct indx_cp_info {
     int64_t diff_max_psn = -1;
     int64_t diff_snap_id = -1;
     bool snap_cp = false;
+
+    int64_t get_active_data_psn() const { return active_data_psn; }
 } __attribute__((__packed__));
 
 struct indx_cp_io_sb {

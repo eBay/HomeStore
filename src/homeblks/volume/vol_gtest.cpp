@@ -494,7 +494,7 @@ public:
         staging_ofs.write("", 1);
         staging_ofs.close();
 
-        LOGINFO("Created volume of size: {}", max_vol_size);
+        LOGINFO("Created volume {} of size: {}", name, max_vol_size);
         output.vol_create_cnt++;
 
         /* open a corresponding file */
@@ -543,7 +543,7 @@ public:
             tcfg.expect_io_error = true;
             VolInterface::get_instance()->set_io_flip();
             VolInterface::get_instance()->set_error_flip();
-        } 
+        }
 #endif
         return;
     }
@@ -1328,8 +1328,8 @@ SDS_OPTION_GROUP(
     (run_time, "", "run_time", "run time for io", ::cxxopts::value< uint32_t >()->default_value("30"), "seconds"),
     (load_type, "", "load_type", "load_type", ::cxxopts::value< uint32_t >()->default_value("0"),
      "random_write_read:0, same_write_read:1, overlap_write=2"),
-    (num_threads, "", "num_threads", "num_threads - default 2 for spdk and 8 for non-spdk", ::cxxopts::value< uint32_t >()->default_value("8"),
-     "number"),
+    (num_threads, "", "num_threads", "num_threads - default 2 for spdk and 8 for non-spdk",
+     ::cxxopts::value< uint32_t >()->default_value("8"), "number"),
     (read_enable, "", "read_enable", "read enable 0 or 1", ::cxxopts::value< uint32_t >()->default_value("1"), "flag"),
     (max_disk_capacity, "", "max_disk_capacity", "max disk capacity",
      ::cxxopts::value< uint64_t >()->default_value("7"), "GB"),
@@ -1422,7 +1422,7 @@ int main(int argc, char* argv[]) {
 
     if (_gcfg.enable_crash_handler) { sds_logging::install_crash_handler(); }
 
-    if (_gcfg.is_spdk) { _gcfg.num_threads = 2; }   /* default to 2 to avoid high cpu usage with spdk */
+    if (_gcfg.is_spdk) { _gcfg.num_threads = 2; } /* default to 2 to avoid high cpu usage with spdk */
 
     return RUN_ALL_TESTS();
 }

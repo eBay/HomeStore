@@ -32,7 +32,6 @@ class HomestoreConan(ConanFile):
             "flip/[~=0, include_prerelease=True]@sds/master",
             "iomgr/[~=3, include_prerelease=True]@sds/master",
             "sds_logging/[~=7, include_prerelease=True]@sds/master",
-
             "sisl/[~=3, include_prerelease=True]@sisl/master",
 
             # FOSS, rarely updated

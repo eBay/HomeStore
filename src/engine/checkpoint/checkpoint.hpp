@@ -141,6 +141,7 @@ public:
         auto cnt = id->enter_cnt.fetch_sub(1);
         if (cnt == 1 && id->cp_status == cp_status_t::cp_prepare) {
             id->cp_status = cp_status_t::cp_start;
+            LOGDEBUGMOD(cp, "Outside of CP critical section, ref_count is 0, starting CP");
             cp_start(id);
         }
     }
@@ -157,7 +158,7 @@ public:
         for (uint32_t i = 0; i < cb_list.size(); ++i) {
             cb_list[i](true);
         }
-        LOGDEBUGMOD(cp, "cp ID completed {}", id->to_string());
+        LOGDEBUGMOD(cp, ">>>>>>>>>>>> cp ID completed {}, notified {} callbacks", id->to_string(), cb_list.size());
         in_cp_phase = false;
 
         /* Once a cp is done, try to check and release exccess memory if need be */
@@ -169,7 +170,10 @@ public:
 
         auto cur_cp_id = cp_io_enter();
         if (!cur_cp_id) { return; }
-        if (cur_cp_id->cp_trigger_waiting) { trigger_cp(); }
+        if (cur_cp_id->cp_trigger_waiting) {
+            LOGINFOMOD(cp, "Triggering back to back CP");
+            trigger_cp();
+        }
         cp_io_exit(cur_cp_id);
     }
 
@@ -196,13 +200,16 @@ public:
 
         auto prev_cp_id = cp_io_enter();
         prev_cp_id->cp_status = cp_status_t::cp_trigger;
-        LOGDEBUGMOD(cp, "cp ID state {}", prev_cp_id->to_string());
+        LOGDEBUGMOD(cp, "<<<<<<<<<<< Triggering new CP {}", prev_cp_id->to_string());
 
         /* allocate a new cp */
         auto new_cp_id = new cp_id_type();
         {
             std::unique_lock< std::mutex > lk(trigger_cp_mtx);
+            LOGDEBUGMOD(cp, "About to attach and prepare into the CP");
             cp_attach_prepare(prev_cp_id, new_cp_id);
+
+            LOGDEBUGMOD(cp, "CP Attached completed, proceed to exit cp critical section");
             if (cb) { prev_cp_id->push_cb(std::move(cb)); }
             prev_cp_id->cp_status = cp_status_t::cp_prepare;
             new_cp_id->cp_status = cp_status_t::cp_io_ready;
@@ -210,7 +217,7 @@ public:
             synchronize_rcu();
         }
         // At this point we are sure that there is no thread working on prev_cp_id without incrementing the cp_enter cnt
-
+        LOGDEBUGMOD(cp, "CP critical section done, doing cp_io_exit");
         cp_io_exit(prev_cp_id);
     }
 
