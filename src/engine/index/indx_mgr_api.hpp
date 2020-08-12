@@ -15,8 +15,11 @@ typedef std::function< void() > trigger_cp_callback;
 typedef std::function< void(Free_Blk_Entry& fbe) > free_blk_callback;
 typedef boost::intrusive_ptr< indx_req > indx_req_ptr;
 
-#define MAX_FBE_SIZE 1000 // 1  million
+#define MAX_FBE_SIZE 25000 // 1  million
 struct indx_req;
+
+#define THIS_INDX_LOG(level, mod, req, msg, ...)                                                                       \
+    HS_SUBMOD_LOG(level, mod, req, "indx_tbl", this->get_name(), msg, ##__VA_ARGS__)
 
 using read_indx_comp_cb_t = std::function< void(const indx_req_ptr& ireq, std::error_condition ret) >;
 
@@ -289,8 +292,8 @@ private:
     indx_mgr_state m_state = indx_mgr_state::ONLINE;
     indxmgr_stop_cb m_stop_cb;
     bool m_last_cp = false;
-    std::mutex prepare_cb_mtx;
-    sisl::wisr_vector< prepare_cb > prepare_cb_list;
+    std::shared_mutex m_prepare_cb_mtx;
+    std::unique_ptr< std::vector< prepare_cb > > m_prepare_cb_list;
     blkid_list_ptr m_free_list[MAX_CP_CNT];
     indx_cp_io_sb m_last_cp_sb;
     std::map< logstore_seq_num_t, log_buffer > seq_buf_map; // used only in recovery
@@ -332,7 +335,9 @@ struct Free_Blk_Entry {
     Free_Blk_Entry() {}
     Free_Blk_Entry(const BlkId& blkId) : m_blkId(blkId), m_blk_offset(0), m_nblks_to_free(0) {}
     Free_Blk_Entry(const BlkId& blkId, uint8_t blk_offset, uint8_t nblks_to_free) :
-            m_blkId(blkId), m_blk_offset(blk_offset), m_nblks_to_free(nblks_to_free) {
+            m_blkId(blkId),
+            m_blk_offset(blk_offset),
+            m_nblks_to_free(nblks_to_free) {
 #ifndef NDEBUG
         assert(blk_offset + m_nblks_to_free <= m_blkId.get_nblks());
 #endif

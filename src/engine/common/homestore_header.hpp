@@ -79,7 +79,7 @@ public:
 
 #define HOMESTORE_LOG_MODS                                                                                             \
     btree_structures, btree_nodes, btree_generics, cache, device, httpserver_lmod, varsize_blk_alloc, iomgr, volume,   \
-        flip, cp, metablk, indx_mgr
+        flip, cp, metablk, indx_mgr, logstore
 
 template < typename T >
 std::string to_hex(T i) {

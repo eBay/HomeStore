@@ -10,8 +10,6 @@
 #include <map>
 #include "engine/homestore_base.hpp"
 
-SDS_LOGGING_DECL(logdev)
-
 namespace homestore {
 
 typedef int64_t logid_t;
@@ -520,5 +518,4 @@ private:
     LogGroup m_log_group_pool[2];
     uint32_t m_log_group_idx = 1;
 }; // LogDev
-
 } // namespace homestore

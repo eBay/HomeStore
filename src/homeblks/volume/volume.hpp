@@ -356,7 +356,7 @@ public:
      * @return :- no_error if there is no error. It doesn't throw any exception
      */
     std::error_condition unmap(const vol_interface_req_ptr& hb_req);
-    
+
     /* shutdown the volume. It assumes caller has ensure that there are no outstanding ios. */
     void shutdown();
 

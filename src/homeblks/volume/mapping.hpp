@@ -32,6 +32,7 @@ enum op_type {
     READ_VAL
 };
 
+// std::variant
 struct mapping_op_cntx {
     op_type op = UPDATE_VAL_ONLY;
     union {
@@ -327,8 +328,8 @@ public:
     // creates array with  value entrys - on heap -bcopy
     MappingValue(vector< ValueEntry >& elements) : ObjLifeCounter() { m_earr.set_elements(elements); }
 
-    MappingValue(MappingValue& other, uint16_t offset, uint32_t nlbas, uint32_t page_size) {
-        Blob_Array< ValueEntry >& arr = other.get_array();
+    MappingValue(const MappingValue& other, uint16_t offset, uint32_t nlbas, uint32_t page_size) {
+        const Blob_Array< ValueEntry >& arr = other.get_array_const();
         assert(arr.get_total_elements() == 1);
         ValueEntry ve;
         arr.get(0, ve, true);
@@ -439,9 +440,10 @@ public:
 
     virtual string to_string() const override { return m_earr.to_string(); }
 
+    const Blob_Array< ValueEntry >& get_array_const() const { return m_earr; }
     Blob_Array< ValueEntry >& get_array() { return m_earr; }
 
-    uint32_t meta_size() {
+    uint32_t meta_size() const {
         uint32_t size = 0;
         size = sizeof(ValueEntryMeta) + m_earr.get_meta_size();
         return size;
@@ -554,21 +556,26 @@ private:
     bool m_fix_state = false;
     uint64_t m_outstanding_io = 0;
     uint64_t m_vol_size = 0;
+    match_item_cb_t< MappingKey, MappingValue > m_match_item_cb_get;
+    match_item_cb_t< MappingKey, MappingValue > m_match_item_cb_put;
+    get_size_needed_cb_t< MappingKey, MappingValue > m_get_size_needed;
 
-    class GetCBParam : public BRangeQueryCBParam< MappingKey, MappingValue > {
+    class GetCBParam : public BRangeCBParam {
     public:
-        mapping_op_cntx m_ctx;
+        mapping_op_cntx* m_ctx;
 
-        GetCBParam(mapping_op_cntx cntx) : m_ctx(cntx) {}
+        GetCBParam(mapping_op_cntx& cntx) : m_ctx(&cntx) {}
     };
 
-    class UpdateCBParam : public BRangeUpdateCBParam< MappingKey, MappingValue > {
+    class UpdateCBParam : public BRangeCBParam {
     public:
-        mapping_op_cntx m_cntx;
+        mapping_op_cntx* m_cntx;
         uint64_t m_start_lba;
+        MappingValue* m_value;
 
-        UpdateCBParam(mapping_op_cntx cntx, MappingKey& new_key, MappingValue& new_value) :
-                BRangeUpdateCBParam(new_key, new_value), m_cntx(cntx), m_start_lba(new_key.start()){};
+        UpdateCBParam(mapping_op_cntx& cntx, MappingKey& new_key, MappingValue& new_value) :
+                BRangeCBParam(), m_cntx(&cntx), m_start_lba(new_key.start()), m_value(&new_value){};
+        MappingValue& get_new_value() { return *m_value; }
     };
 
 public:
@@ -678,11 +685,10 @@ private:
     btree_status_t update_indx_tbl(indx_req* ireq, const btree_cp_id_ptr& btree_id, bool active_btree_update = true);
     btree_status_t get_alloc_blks_cb(std::vector< std::pair< MappingKey, MappingValue > >& match_kv,
                                      std::vector< std::pair< MappingKey, MappingValue > >& result_kv,
-                                     BRangeQueryCBParam< MappingKey, MappingValue >* cb_param);
+                                     BRangeCBParam* cb_param);
     void process_free_blk_callback(free_blk_callback free_cb, MappingValue& mv);
     void mapping_merge_cb(std::vector< std::pair< MappingKey, MappingValue > >& match_kv,
-                          std::vector< std::pair< MappingKey, MappingValue > >& replace_kv,
-                          BRangeUpdateCBParam< MappingKey, MappingValue >* cb_param);
+                          std::vector< std::pair< MappingKey, MappingValue > >& replace_kv, BRangeCBParam* cb_param);
 
     /**
      * Callback called once for each bnode
@@ -692,12 +698,11 @@ private:
      */
     btree_status_t match_item_cb_get(std::vector< std::pair< MappingKey, MappingValue > >& match_kv,
                                      std::vector< std::pair< MappingKey, MappingValue > >& result_kv,
-                                     BRangeQueryCBParam< MappingKey, MappingValue >* cb_param);
+                                     BRangeCBParam* cb_param, BtreeSearchRange& subrange);
     /* It calculate the offset in a value by looking at start lba */
-    uint32_t compute_val_offset(BRangeUpdateCBParam< MappingKey, MappingValue >* cb_param, uint64_t start_lba);
+    uint32_t compute_val_offset(BRangeCBParam* cb_param, uint64_t start_lba);
 
-    uint32_t get_size_needed(std::vector< std::pair< MappingKey, MappingValue > >& match_kv,
-                             BRangeUpdateCBParam< MappingKey, MappingValue >* cb_param);
+    uint32_t get_size_needed(std::vector< std::pair< MappingKey, MappingValue > >& match_kv, BRangeCBParam* cb_param);
 
     /* Callback called onces for each eligible bnode
      * @param match_kv - list of all match K/V for bnode (based on key.compare/compare_range)
@@ -708,23 +713,23 @@ private:
      */
     btree_status_t match_item_cb_put(std::vector< std::pair< MappingKey, MappingValue > >& match_kv,
                                      std::vector< std::pair< MappingKey, MappingValue > >& replace_kv,
-                                     BRangeUpdateCBParam< MappingKey, MappingValue >* cb_param);
+                                     BRangeCBParam* cb_param, BtreeSearchRange& subrange);
 
     /** derieves current range of lba's based on input/sub range
         subrange means current bnodes start/end boundaries
         input_range is original client provided start/end, its always inclusive for mapping layer
         Resulting start/end lba is always inclusive
         **/
-    void get_start_end_lba(BRangeCBParam* param, uint64_t& start_lba, uint64_t& end_lba);
+    void get_start_end_lba(BtreeSearchRange& subrange, uint64_t& start_lba, uint64_t& end_lba);
 
     /* result of overlap of k1/k2 is added to replace_kv */
     void compute_and_add_overlap(std::vector< Free_Blk_Entry >& fbe_list, uint64_t s_lba, uint64_t e_lba,
-                                 MappingValue& new_val, uint16_t new_val_offset, MappingValue& e_val,
+                                 const MappingValue& new_val, uint16_t new_val_offset, MappingValue& e_val,
                                  uint16_t e_val_offset,
                                  std::vector< std::pair< MappingKey, MappingValue > >& replace_kv, uint64_t new_seq_id);
 
     /* add missing interval to replace kv */
-    void add_new_interval(uint64_t s_lba, uint64_t e_lba, MappingValue& val, uint16_t lba_offset,
+    void add_new_interval(uint64_t s_lba, uint64_t e_lba, const MappingValue& val, uint16_t lba_offset,
                           std::vector< std::pair< MappingKey, MappingValue > >& replace_kv);
 
 #ifndef NDEBUG

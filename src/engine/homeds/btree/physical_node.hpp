@@ -308,7 +308,7 @@ public:
         auto count = 0U;
 
         // Get the start index of the search range.
-        BtreeSearchRange sr = range.extract_start_of_range();
+        BtreeSearchRange sr = range.get_start_of_range();
         sr.set_selection_option(_MultiMatchSelector::DO_NOT_CARE);
 
         auto result = bsearch_node(sr); // doing bsearch only based on start key
@@ -333,9 +333,9 @@ public:
         assert((start_ind < (int)get_total_entries()) || has_valid_edge());
 
         // search by the end index
-        sr = range.extract_end_of_range();
-        sr.set_selection_option(_MultiMatchSelector::DO_NOT_CARE);
-        result = bsearch_node(sr); // doing bsearch only based on end key
+        BtreeSearchRange er = range.get_end_of_range();
+        er.set_selection_option(_MultiMatchSelector::DO_NOT_CARE);
+        result = bsearch_node(er); // doing bsearch only based on end key
         end_ind = result.end_of_search_index;
 
         assert(start_ind <= end_ind);

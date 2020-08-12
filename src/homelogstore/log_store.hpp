@@ -283,6 +283,15 @@ public:
     void truncate(logstore_seq_num_t upto_seq_num, bool in_memory_truncate_only = true);
 
     /**
+     * @brief Fill the gap in the seq_num with a dummy value. This ensures that get_contiguous_issued and completed
+     * seq_num methods move forward. The filled data is not readable and any attempt to read this seq_num will result
+     * in out_of_range exception.
+     *
+     * @param seq_num: Seq_num to fill to.
+     */
+    void fill_gap(logstore_seq_num_t seq_num);
+
+    /**
      * @brief Get the safe truncation log dev key from this log store perspective. Please note that the safe idx is not
      * globally safe, but it is safe from this log store perspective only. To get global safe id, one should access all
      * log stores and get the minimum of them before truncating.
@@ -383,7 +392,7 @@ private:
     void do_truncate(logstore_seq_num_t upto_seq_num);
     void update_truncation_barrier(logstore_seq_num_t seq_num, logdev_key flush_ld_key, uint32_t nremaining_in_batch);
     void create_truncation_barrier(void);
-    int search_max_le(logstore_seq_num_t input_sn);
+    int search_max_lt(logstore_seq_num_t input_sn);
 
 private:
     logstore_id_t m_store_id;
@@ -393,7 +402,6 @@ private:
     log_replay_done_cb_t m_replay_done_cb;
     std::atomic< logstore_seq_num_t > m_seq_num = 0;
 
-    logdev_key m_last_flush_ldkey = {0, 0};              // The log id of the last flushed batch.
     truncation_entry_t m_flush_batch_max = {-1, {0, 0}}; // The maximum seqnum we have seen in the prev flushed batch
 
     // Logdev key determined to be safe to truncate from this log store perspective.

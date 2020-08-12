@@ -155,7 +155,6 @@ struct indx_diff_info {
     indx_diff_info(int64_t start_psn) : start_psn(start_psn) {}
 };
 
-
 /* During prepare flush we decide to take a CP out of active, diff or snap or all 3 cps*/
 struct indx_cp_id : public boost::intrusive_ref_counter< indx_cp_id > {
     indx_mgr_ptr indx_mgr;
@@ -173,7 +172,7 @@ struct indx_cp_id : public boost::intrusive_ref_counter< indx_cp_id > {
     std::vector< blkid_list_ptr > user_free_blkid_list; // this blkid list is freed by the user. It is not part of any
                                                         // cp. user first collect it and then later it attaches the list
                                                         // to a cp.
-    blkid_list_ptr free_blkid_list; // list of blk ids freed in a cp
+    blkid_list_ptr free_blkid_list;                     // list of blk ids freed in a cp
 
     indx_cp_id(int64_t cp_cnt, int64_t start_active_psn, int64_t start_diff_psn, indx_mgr_ptr indx_mgr,
                blkid_list_ptr& free_blkid_list) :
@@ -196,6 +195,7 @@ enum meta_hdr_type { INDX_CP, INDX_DESTROY, INDX_UNMAP, SNAP_DESTROY };
 struct hs_cp_meta_sb {
     boost::uuids::uuid uuid; // Don't populate if it is hs indx meta blk
     meta_hdr_type type;
+    uint32_t size;
 } __attribute__((__packed__));
 
 struct hs_cp_io_sb : hs_cp_meta_sb {
@@ -217,6 +217,8 @@ struct indx_cp_info {
     int64_t diff_max_psn = -1;
     int64_t diff_snap_id = -1;
     bool snap_cp = false;
+
+    int64_t get_active_data_psn() const { return active_data_psn; }
 } __attribute__((__packed__));
 
 struct indx_cp_io_sb {
@@ -226,6 +228,13 @@ struct indx_cp_io_sb {
     btree_cp_superblock diff_btree_info;
     indx_cp_io_sb(boost::uuids::uuid uuid) : uuid(uuid){};
     indx_cp_io_sb(){};
+    std::string to_string() {
+        stringstream ss;
+        ss << "active_cp_cnt " << cp_info.active_cp_cnt << " active_data_psn " << cp_info.active_data_psn
+           << " diff_cp_cnt " << cp_info.diff_cp_cnt << " diff_Data_psn " << cp_info.diff_data_psn << " blkalloc cp cp "
+           << cp_info.blkalloc_cp_cnt;
+        return ss.str();
+    }
 } __attribute__((__packed__));
 
 /* this superblock is never changed once indx manager is created */
