@@ -477,8 +477,8 @@ struct volume_req : indx_req {
     /********** members used to write data blocks **********/
     Clock::time_point io_start_time;                    // start time
     Clock::time_point indx_start_time;                  // indx start time
-    typedef boost::intrusive_ptr< homeds::MemVector > MemVecData;
-    typedef std::vector< iovec > IoVecData;
+    typedef boost::intrusive_ptr< homeds::MemVector > MemVecData; // HomeStore memory managed data
+    typedef std::vector< iovec > IoVecData; // External scatter/gather data
     std::variant<MemVecData, IoVecData>  data;
 
     sisl::atomic_counter< int > outstanding_io_cnt = 1; // how many IOs are outstanding for this request

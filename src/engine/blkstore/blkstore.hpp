@@ -329,7 +329,7 @@ public:
     //
     // sync write with iov;
     //
-    void write(BlkId& bid, struct iovec* iov, int iovcnt) { m_vdev.write(bid, iov, iovcnt); }
+    void write(BlkId& bid, const iovec* const iov, const int iovcnt) { m_vdev.write(bid, iov, iovcnt); }
 
     /* Write the buffer. The BlkStore write does not support write in place and so it does not also support
      * writing to an offset.

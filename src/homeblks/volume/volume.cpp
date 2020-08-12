@@ -253,7 +253,7 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
     try {
         vreq->state = volume_req_state::data_io;
 
-        for (size_t i = 0; i < bid.size(); ++i) {
+        for (size_t i{0}; i < bid.size(); ++i) {
             if (bid[i].get_nblks() == 0) {
                 /* It should not happen. But it happened once so adding a safe check in case it happens again */
                 VOL_LOG_ASSERT(0, vreq, "{}", bid[i].to_string());
@@ -268,13 +268,17 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
             /* Issue child request */
             /* store blkid which is used later to create journal entry */
             vreq->push_blkid(bid[i]);
-            if (vreq->use_cache()) {
+            if (std::holds_alternative< volume_req::MemVecData >(vreq->data))
+            {
                 // managed memory write
                 boost::intrusive_ptr< BlkBuffer > bbuf = m_hb->get_data_blkstore()->write(
                     vc_req->bid, std::get< volume_req::MemVecData >(vreq->data), offset,
                     boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vc_req), vreq->use_cache());
-            } else {
+            } else 
+            {
                 // scatter/gather write
+                const auto& iovecs{std::get< volume_req::IoVecData >(vreq->data)};
+                m_hb->get_data_blkstore()->write(vc_req->bid, iovecs.data(), iovecs.size());
 
             }
 
@@ -283,8 +287,9 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
         VOL_DEBUG_ASSERT_CMP((start_lba - vreq->lba()), ==, vreq->nlbas(), vreq, "lba don't match");
 
         /* compute checksum and store it in a request */
-        if (vreq->use_cache()) {
-            for (uint32_t i = 0; i < vreq->nlbas(); ++i) {
+        if (std::holds_alternative< volume_req::MemVecData >(vreq->data))
+        {
+            for (uint32_t i{0}; i < vreq->nlbas(); ++i) {
                 sisl::blob outb;
                 std::get<volume_req::MemVecData>(vreq->data)->get(&outb, i * get_page_size());
                 vreq->push_csum(crc16_t10dif(init_crc_16, outb.bytes, get_page_size()));

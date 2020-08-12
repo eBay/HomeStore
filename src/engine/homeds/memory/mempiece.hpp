@@ -230,11 +230,11 @@ public:
 
     std::string to_string() const {
         auto n = npieces();
-        std::stringstream ss;
+        std::ostringstream ss;
 
         if (n > 1) ss << "Pieces = " << n << "\n";
-        for (auto i = 0U; i < n; i++) {
-            auto& p = get_nth_piece(i);
+        for (decltype(n) i{0}; i < n; ++i) {
+            const auto& p = get_nth_piece(i);
             ss << "MemPiece[" << i << "]: " << p.to_string() << ((n > 1) ? "\n" : "");
         }
         return ss.str();
