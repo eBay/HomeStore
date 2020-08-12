@@ -96,9 +96,9 @@ HomeBlks::HomeBlks(const init_params& cfg) : m_cfg(cfg), m_metrics("HomeBlks") {
     m_start_shutdown = false;
 }
 
-void HomeBlks::attach_prepare_indx_cp_id(std::map< boost::uuids::uuid, indx_cp_id_ptr >* cur_id_map,
-                                         std::map< boost::uuids::uuid, indx_cp_id_ptr >* new_id_map, hs_cp_id* hs_id,
-                                         hs_cp_id* new_hs_id) {
+void HomeBlks::attach_prepare_indx_cp(std::map< boost::uuids::uuid, indx_cp_ptr >* cur_icp_map,
+                                      std::map< boost::uuids::uuid, indx_cp_ptr >* new_icp_map, hs_cp* cur_hcp,
+                                      hs_cp* new_hcp) {
 
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
 
@@ -106,8 +106,8 @@ void HomeBlks::attach_prepare_indx_cp_id(std::map< boost::uuids::uuid, indx_cp_i
     /* If a volume is participated in a cp then it can not be deleted without participating
      * in a cp flush.
      */
-    if (cur_id_map) {
-        for (auto it = cur_id_map->cbegin(); it != cur_id_map->cend(); ++it) {
+    if (cur_icp_map) {
+        for (auto it = cur_icp_map->cbegin(); it != cur_icp_map->cend(); ++it) {
             assert(m_volume_map.find(it->first) != m_volume_map.cend());
         }
     }
@@ -118,22 +118,22 @@ void HomeBlks::attach_prepare_indx_cp_id(std::map< boost::uuids::uuid, indx_cp_i
         if (vol == nullptr) { continue; }
 
         /* get the cur cp id ptr */
-        indx_cp_id_ptr cur_cp_id_ptr = nullptr;
-        if (cur_id_map) {
-            auto id_it = cur_id_map->find(it->first);
-            if (id_it != cur_id_map->end()) {
+        indx_cp_ptr cur_icp = nullptr;
+        if (cur_icp_map) {
+            auto id_it = cur_icp_map->find(it->first);
+            if (id_it != cur_icp_map->end()) {
                 /* It is a new volume which is created after this cp */
-                cur_cp_id_ptr = id_it->second;
+                cur_icp = id_it->second;
             }
         }
 
         /* get the cur cp id ptr */
-        auto new_cp_id_ptr = vol->attach_prepare_volume_cp(cur_cp_id_ptr, hs_id, new_hs_id);
+        auto new_icp = vol->attach_prepare_volume_cp(cur_icp, cur_hcp, new_hcp);
 
-        if (new_cp_id_ptr) {
+        if (new_icp) {
             bool happened{false};
-            std::map< boost::uuids::uuid, indx_cp_id_ptr >::iterator temp_it;
-            std::tie(temp_it, happened) = new_id_map->emplace(std::make_pair(it->first, new_cp_id_ptr));
+            std::map< boost::uuids::uuid, indx_cp_ptr >::iterator temp_it;
+            std::tie(temp_it, happened) = new_icp_map->emplace(std::make_pair(it->first, new_icp));
             if (!happened) { throw std::runtime_error("Unknown bug"); }
         } else {
             /* this volume doesn't want to participate now */

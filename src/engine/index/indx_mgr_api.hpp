@@ -30,19 +30,17 @@ public:
     virtual ~indx_tbl() = default;
     virtual void create_done() = 0;
     virtual btree_super_block get_btree_sb() = 0;
-    virtual btree_status_t update_active_indx_tbl(indx_req* ireq, const btree_cp_id_ptr& btree_id) = 0;
+    virtual btree_status_t update_active_indx_tbl(indx_req* ireq, const btree_cp_ptr& bcp) = 0;
     virtual btree_status_t read_indx(indx_req* ireq, const read_indx_comp_cb_t& cb) = 0;
-    virtual btree_status_t update_diff_indx_tbl(indx_req* ireq, const btree_cp_id_ptr& btree_id) = 0;
-    virtual btree_cp_id_ptr attach_prepare_cp(const btree_cp_id_ptr& cur_cp_id, bool is_last_cp,
-                                              bool blkalloc_checkpoint) = 0;
-    virtual void flush_free_blks(const btree_cp_id_ptr& btree_id, std::shared_ptr< blkalloc_cp_id >& blkalloc_id) = 0;
-    virtual void update_btree_cp_sb(const btree_cp_id_ptr& cp_id, btree_cp_superblock& btree_sb, bool blkalloc_cp) = 0;
-    virtual void truncate(const btree_cp_id_ptr& cp_id) = 0;
+    virtual btree_status_t update_diff_indx_tbl(indx_req* ireq, const btree_cp_ptr& bcp) = 0;
+    virtual btree_cp_ptr attach_prepare_cp(const btree_cp_ptr& cur_bcp, bool is_last_cp, bool blkalloc_checkpoint) = 0;
+    virtual void flush_free_blks(const btree_cp_ptr& bcp, std::shared_ptr< blkalloc_cp >& ba_cp) = 0;
+    virtual void update_btree_cp_sb(const btree_cp_ptr& bcp, btree_cp_superblock& btree_sb, bool is_blkalloc_cp) = 0;
+    virtual void truncate(const btree_cp_ptr& bcp) = 0;
     virtual btree_status_t destroy(blkid_list_ptr& free_blkid_list, uint64_t& free_node_cnt) = 0;
     virtual void destroy_done() = 0;
-    virtual void cp_start(const btree_cp_id_ptr& cp_id, cp_comp_callback cb) = 0;
-    virtual btree_status_t recovery_update(logstore_seq_num_t seqnum, journal_hdr* hdr,
-                                           const btree_cp_id_ptr& btree_id) = 0;
+    virtual void cp_start(const btree_cp_ptr& bcp, cp_comp_callback cb) = 0;
+    virtual btree_status_t recovery_update(logstore_seq_num_t seqnum, journal_hdr* hdr, const btree_cp_ptr& bcp) = 0;
     virtual void update_indx_alloc_blkids(indx_req* ireq) = 0;
     virtual uint64_t get_used_size() = 0;
     virtual btree_status_t free_user_blkids(blkid_list_ptr free_list, BtreeQueryCursor& cur, int64_t& size) = 0;
@@ -73,12 +71,12 @@ public:
     virtual ~IndxMgr();
 
     /* create new indx cp id and decide if this indx mgr want to participate in a current cp
-     * @params indx_cur_id :- current cp id of this indx mgr
-     * @params hs_id :- current id of home_blks
-     * @params new_hs_id :- new home blks cp id
-     * @return :- return new cp id.
+     * @params cur_icp :- current cp id of this indx mgr
+     * @params cur_hcp :- current cp of home_blks
+     * @params new_hcp :- new home blks cp cp
+     * @return :- return new cp cp.
      */
-    indx_cp_id_ptr attach_prepare_indx_cp(const indx_cp_id_ptr& indx_cur_id, hs_cp_id* hs_id, hs_cp_id* new_hs_id);
+    indx_cp_ptr attach_prepare_indx_cp(const indx_cp_ptr& cur_icp, hs_cp* cur_hcp, hs_cp* new_hcp);
 
     /* Get the active indx table
      * @return :- active indx_tbl instance
@@ -115,7 +113,7 @@ public:
     void destroy(const indxmgr_stop_cb& cb);
 
     /* truncate journal */
-    void truncate(const indx_cp_id_ptr& indx_id);
+    void truncate(const indx_cp_ptr& icp);
 
     /* indx mgr is destroy successfully */
     void destroy_done();
@@ -126,9 +124,9 @@ public:
     void log_found(logstore_seq_num_t seqnum, log_buffer buf, void* mem);
 
     /* it flushes free blks to blk allocator */
-    void flush_free_blks(const indx_cp_id_ptr& indx_id, hs_cp_id* hb_id);
+    void flush_free_blks(const indx_cp_ptr& icp, hs_cp* hcp);
 
-    void update_cp_sb(indx_cp_id_ptr& indx_id, hs_cp_id* hb_id, indx_cp_io_sb* sb);
+    void update_cp_sb(indx_cp_ptr& icp, hs_cp* hcp, indx_cp_io_sb* sb);
     int64_t get_max_psn_found_in_recovery();
     /* It is called when super block all indx tables are persisted by its consumer */
     void indx_create_done(indx_tbl* indx_tbl = nullptr);
@@ -153,16 +151,16 @@ public:
      */
     static void shutdown(indxmgr_stop_cb cb);
 
-    /* create new indx mgr cp id for all the indx mgr and also decide what indx mgr want to participate in a cp
-     * @params cur_id :- current indxmgr cp ids map
-     *         new_id :- new new cp ids map
-     *         hb_id :- home blks cp id
-     *         new_hb_id :- new home blks cp id
+    /* create new indx mgr cp for all the indx mgr and also decide what indx mgr want to participate in a cp
+     * @params cur_icp :- current indxmgr cp map
+     *         new_icp :- new cp map
+     *         cur_hcp :- home blks cp
+     *         new_hcp :- new home blks cp
      */
 
-    static void attach_prepare_indx_cp_id_list(std::map< boost::uuids::uuid, indx_cp_id_ptr >* cur_id,
-                                               std::map< boost::uuids::uuid, indx_cp_id_ptr >* new_id, hs_cp_id* hb_id,
-                                               hs_cp_id* new_hb_id);
+    static void attach_prepare_indx_cp_list(std::map< boost::uuids::uuid, indx_cp_ptr >* cur_icp,
+                                            std::map< boost::uuids::uuid, indx_cp_ptr >* new_icp, hs_cp* cur_hcp,
+                                            hs_cp* new_hcp);
     /* trigger hs cp. It first trigger a indx mgr cp followed by blkalloc cp. It is async call.
      * @params cb :- callback when cp is done.
      * @shutdown :- true if it is called by shutdown. This flag makes sure that no other cp is triggered after shutdown
@@ -184,10 +182,10 @@ public:
      *                        false :- it is called for every indx cp.
      */
     static void register_cp_done_cb(const cp_done_cb& cb, bool blkalloc_cp = false);
-    static void write_hs_cp_sb(hs_cp_id* hb_id);
+    static void write_hs_cp_sb(hs_cp* hcp);
     static const iomgr::io_thread_t& get_thread_id() { return m_thread_id; }
     static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size);
-    static void flush_hs_free_blks(hs_cp_id* id);
+    static void flush_hs_free_blks(hs_cp* hcp);
     static void write_meta_blk(void*& mblk, sisl::byte_view buf);
 
     /* This api insert the free blkids in out_free_list.
@@ -197,7 +195,7 @@ public:
      * User can fail freeing blkid even after calling this api as it doesn't actually free the blkids.
      *
      * @params
-     * @hs_id :- homestore ID to which out_free_list is supposed to attached. If hs_id is null then it takes the latest
+     * @hcp :- homestore ID to which out_free_list is supposed to attached. If hcp is null then it takes the latest
      *           one by doing cp_io_enter because it assumes that out_fbe_list will be attached to the cur_cp_id or
      *           later.
      * @out_free_list :- A list which user is using to accumulate free blkids. It will be attached later to a cp.
@@ -209,13 +207,13 @@ public:
      *
      * @return :- return number of blks freed. return -1 if it can not add more
      */
-    static uint64_t free_blk(hs_cp_id* hs_id, blkid_list_ptr& out_fblk_list, std::vector< Free_Blk_Entry >& in_fbe_list,
+    static uint64_t free_blk(hs_cp* hcp, blkid_list_ptr& out_fblk_list, std::vector< Free_Blk_Entry >& in_fbe_list,
                              bool force);
-    static uint64_t free_blk(hs_cp_id* hs_id, sisl::ThreadVector< homestore::BlkId >* out_fblk_list,
+    static uint64_t free_blk(hs_cp* hcp, sisl::ThreadVector< homestore::BlkId >* out_fblk_list,
                              std::vector< Free_Blk_Entry >& in_fbe_list, bool force);
-    static uint64_t free_blk(hs_cp_id* hs_id, blkid_list_ptr& out_fblk_list, Free_Blk_Entry& fbe, bool force);
-    static uint64_t free_blk(hs_cp_id* hs_id, sisl::ThreadVector< homestore::BlkId >* out_fblk_list,
-                             Free_Blk_Entry& fbe, bool force);
+    static uint64_t free_blk(hs_cp* hcp, blkid_list_ptr& out_fblk_list, Free_Blk_Entry& fbe, bool force);
+    static uint64_t free_blk(hs_cp* hcp, sisl::ThreadVector< homestore::BlkId >* out_fblk_list, Free_Blk_Entry& fbe,
+                             bool force);
 
     /* it erase the free_blkid list and free up the resources. It is called after a free list is attached to a CP
      * and that CP is persisted.
@@ -228,7 +226,7 @@ public:
 protected:
     /*********************** virtual functions required to support snapshot  **********************/
     /* These functions are defined so that indx mgr can be used without snapmagr */
-    virtual int64_t snap_create(indx_tbl* m_diff_tbl, int64_t start_cp_cnt) {
+    virtual int64_t snap_create(indx_tbl* m_diff_tbl, int64_t start_cp_id) {
         assert(0);
         return -1;
     }
@@ -236,7 +234,7 @@ protected:
         assert(0);
         return -1;
     }
-    virtual void snap_create_done(uint64_t snap_id, int64_t max_psn, int64_t contiguous_psn, int64_t end_cp_cnt) {
+    virtual void snap_create_done(uint64_t snap_id, int64_t max_psn, int64_t contiguous_psn, int64_t end_cp_id) {
         assert(0);
     }
     virtual btree_super_block snap_get_diff_tbl_sb() {
@@ -247,7 +245,7 @@ protected:
 
 private:
     /*********************** static private members **********************/
-    static std::unique_ptr< HomeStoreCP > m_cp;
+    static std::unique_ptr< HomeStoreCPMgr > m_cp_mgr;
     static std::atomic< bool > m_shutdown_started;
     static bool m_shutdown_cmplt;
     static iomgr::io_thread_t m_thread_id;
@@ -273,7 +271,7 @@ private:
 
     /************************ static private functions **************/
     static void static_init();
-    /* it frees the blks and insert it in cp id free blk list. It is called when there is no read pending on this blk */
+    /* it frees the blks and insert it in cp free blk list. It is called when there is no read pending on this blk */
     static void safe_to_free_blk(Free_Blk_Entry& fbe);
 
 private:
@@ -284,9 +282,9 @@ private:
     log_req_comp_cb_t m_journal_comp_cb;
 
     /* we can not add a indx mgr in active CP. It can be added only when a new cp is created. indx mgr keeps
-     * on using this id until new cp is not created. Once a new cp is created, it will become a part of it.
+     * on using this cp until new cp is not created. Once a new cp is created, it will become a part of it.
      */
-    indx_cp_id_ptr m_first_cp_id;
+    indx_cp_ptr m_first_icp;
     boost::uuids::uuid m_uuid;
     std::string m_name;
     indx_mgr_state m_state = indx_mgr_state::ONLINE;
@@ -313,15 +311,15 @@ private:
     void journal_write(indx_req* vreq);
     void journal_comp_cb(logstore_req* req, logdev_key ld_key);
     btree_status_t update_indx_tbl(indx_req* vreq, bool is_active);
-    btree_cp_id_ptr get_btree_id(hs_cp_id* cp_id);
-    indx_cp_id_ptr get_indx_id(hs_cp_id* cp_id);
+    btree_cp_ptr get_btree_cp(hs_cp* hcp);
+    indx_cp_ptr get_indx_cp(hs_cp* hcp);
     void destroy_indx_tbl();
     void add_prepare_cb_list(prepare_cb cb);
-    void indx_destroy_cp(const indx_cp_id_ptr& cur_indx_id, hs_cp_id* hb_id, hs_cp_id* new_hb_id);
-    void create_first_cp_id();
+    void indx_destroy_cp(const indx_cp_ptr& cur_icp, hs_cp* cur_hcp, hs_cp* new_hcp);
+    void create_first_cp();
     btree_status_t retry_update_indx(const boost::intrusive_ptr< indx_req >& ireq, bool is_active);
     void run_slow_path_thread();
-    void create_new_diff_tbl(indx_cp_id_ptr& indx_id);
+    void create_new_diff_tbl(indx_cp_ptr& icp);
     void recover_meta_ops();
 };
 
@@ -330,7 +328,7 @@ struct Free_Blk_Entry {
     /* These entries are needed only to invalidate cache. We store the actual blkid in journal */
     uint8_t m_blk_offset : NBLKS_BITS;
     uint8_t m_nblks_to_free : NBLKS_BITS;
-    hs_cp_id* m_cp_id = nullptr;
+    hs_cp* m_hcp = nullptr;
 
     Free_Blk_Entry() {}
     Free_Blk_Entry(const BlkId& blkId) : m_blkId(blkId), m_blk_offset(0), m_nblks_to_free(0) {}
@@ -383,9 +381,9 @@ public:
     indx_journal_entry j_ent;
     std::vector< BlkId > indx_alloc_blkid_list;
     std::vector< Free_Blk_Entry > indx_fbe_list;
-    hs_cp_id* first_hs_id = nullptr;
-    hs_cp_id* hs_id = nullptr;
-    indx_cp_id_ptr indx_id = nullptr;
+    hs_cp* first_hcp = nullptr;
+    hs_cp* hcp = nullptr;
+    indx_cp_ptr icp = nullptr;
     sisl::atomic_counter< int > ref_count = 1; // Initialize the count
     error_condition indx_err = no_error;
     indx_req_state state = indx_req_state::active_btree;

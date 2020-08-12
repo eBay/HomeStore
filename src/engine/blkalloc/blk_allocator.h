@@ -36,7 +36,7 @@ namespace homestore {
 #define BLKALLOC_ASSERT_NULL(assert_type, val, ...)                                                                    \
     HS_SUBMOD_ASSERT_NULL(assert_type, val, , "blkalloc", m_cfg.get_name(), ##__VA_ARGS__)
 
-struct blkalloc_cp_id;
+struct blkalloc_cp;
 
 class BlkAllocConfig {
 private:
@@ -276,7 +276,7 @@ public:
     /* CP start is called when all its consumers have purged their free lists and now want to persist the
      * disk bitmap.
      */
-    sisl::byte_array cp_start(std::shared_ptr< blkalloc_cp_id > id) { return (m_disk_bm->serialize()); }
+    sisl::byte_array cp_start(std::shared_ptr< blkalloc_cp > id) { return (m_disk_bm->serialize()); }
 
     virtual bool is_blk_alloced(BlkId& b) = 0;
     virtual std::string to_string() const = 0;
@@ -362,9 +362,8 @@ private:
     std::mutex m_bm_mutex;
 };
 
-struct blkalloc_cp_id {
+struct blkalloc_cp {
     bool suspend = false;
-    uint64_t cnt;
     std::vector< blkid_list_ptr > blkid_list_vector;
     bool is_suspend() { return suspend; }
     void suspend_cp() { suspend = true; }
@@ -382,8 +381,8 @@ struct blkalloc_cp_id {
         blkid_list_vector.push_back(list);
     }
 
-    blkalloc_cp_id() = default;
-    ~blkalloc_cp_id() {
+    blkalloc_cp() = default;
+    ~blkalloc_cp() {
         /* free all the blkids in the cache */
         for (uint32_t i = 0; i < blkid_list_vector.size(); ++i) {
             auto list = blkid_list_vector[i];

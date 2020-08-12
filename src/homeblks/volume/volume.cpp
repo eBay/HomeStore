@@ -715,8 +715,8 @@ size_t Volume::call_batch_completion_cbs() {
     return count;
 }
 
-indx_cp_id_ptr Volume::attach_prepare_volume_cp(const indx_cp_id_ptr& indx_id, hs_cp_id* hs_id, hs_cp_id* new_hs_id) {
-    return (m_indx_mgr->attach_prepare_indx_cp(indx_id, hs_id, new_hs_id));
+indx_cp_ptr Volume::attach_prepare_volume_cp(const indx_cp_ptr& icp, hs_cp* cur_hcp, hs_cp* new_hcp) {
+    return (m_indx_mgr->attach_prepare_indx_cp(icp, cur_hcp, new_hcp));
 }
 
 vol_state Volume::set_state(vol_state state, bool persist) {

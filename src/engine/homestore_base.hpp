@@ -11,10 +11,10 @@ static constexpr crc32_t INVALID_CRC32_VALUE = 0x0u;
 
 namespace homestore {
 
-struct blkalloc_cp_id;
-struct indx_cp_id;
-using indx_cp_id_ptr = boost::intrusive_ptr< homestore::indx_cp_id >;
-struct hs_cp_id;
+struct blkalloc_cp;
+struct indx_cp;
+using indx_cp_ptr = boost::intrusive_ptr< homestore::indx_cp >;
+struct hs_cp;
 struct DeviceManager;
 class BlkBuffer;
 template < typename BAllocator, typename Buffer >
@@ -51,12 +51,11 @@ public:
     static HomeStoreBase* instance() { return _instance.get(); }
     static HomeStoreBaseSafePtr safe_instance() { return _instance; }
     virtual data_blkstore_t* get_data_blkstore() const = 0;
-    virtual void attach_prepare_indx_cp_id(std::map< boost::uuids::uuid, indx_cp_id_ptr >* cur_id_map,
-                                           std::map< boost::uuids::uuid, indx_cp_id_ptr >* new_id_map, hs_cp_id* hs_id,
-                                           hs_cp_id* new_hs_id) = 0;
-    virtual void blkalloc_cp_start(std::shared_ptr< blkalloc_cp_id > id) = 0;
-    virtual std::shared_ptr< blkalloc_cp_id >
-    blkalloc_attach_prepare_cp(std::shared_ptr< blkalloc_cp_id > cur_cp_id) = 0;
+    virtual void attach_prepare_indx_cp(std::map< boost::uuids::uuid, indx_cp_ptr >* cur_icp_map,
+                                        std::map< boost::uuids::uuid, indx_cp_ptr >* new_icp_map, hs_cp* cur_hcp,
+                                        hs_cp* new_hcp) = 0;
+    virtual void blkalloc_cp_start(std::shared_ptr< blkalloc_cp > cp) = 0;
+    virtual std::shared_ptr< blkalloc_cp > blkalloc_attach_prepare_cp(std::shared_ptr< blkalloc_cp > cur_ba_cp) = 0;
     virtual uint32_t get_data_pagesz() const = 0;
     virtual DeviceManager* get_device_manager() = 0;
     virtual logdev_blkstore_t* get_logdev_blkstore() const = 0;
