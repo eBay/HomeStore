@@ -329,7 +329,9 @@ public:
     //
     // sync write with iov;
     //
-    void write(BlkId& bid, const iovec* const iov, const int iovcnt) { m_vdev.write(bid, iov, iovcnt); }
+    void write(BlkId& bid, const iovec* const iov, const int iovcnt) {
+            m_vdev.write(bid, const_cast<iovec* const>(iov), iovcnt);
+    }
 
     /* Write the buffer. The BlkStore write does not support write in place and so it does not also support
      * writing to an offset.
@@ -341,8 +343,8 @@ public:
      * Here data_offset is offset inside memvec. If a write is split then both the writes will point to
      * same buffer but different offsets.
      */
-    boost::intrusive_ptr< Buffer > write(BlkId& bid, boost::intrusive_ptr< homeds::MemVector > mvec, int data_offset,
-                                         boost::intrusive_ptr< blkstore_req< Buffer > > req, const bool cache) {
+    boost::intrusive_ptr< Buffer > write(BlkId& bid, boost::intrusive_ptr< homeds::MemVector > mvec, const uint32_t data_offset,
+                                         const boost::intrusive_ptr< blkstore_req< Buffer > >& req, const bool cache) {
         if (cache) {
             /* TODO: add try and catch exception */
             auto buf = Buffer::make_object();
@@ -381,6 +383,17 @@ public:
                               get_elapsed_time_us(req->blkstore_op_start_time));
         }
         return req->bbuf;
+    }
+
+    void write(const BlkId& bid, const std::vector<iovec>& iovecs, const uint32_t data_offset,
+               const boost::intrusive_ptr< blkstore_req< Buffer > >& req) {
+        // Now write data to the device
+        req->start_time();
+        m_vdev.write(bid, iovecs, to_vdev_req(req), data_offset);
+        if (req->isSyncCall) {
+            HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_write_latency,
+                              get_elapsed_time_us(req->blkstore_op_start_time));
+        }
     }
 
     /* Read the data for given blk id and size. This method allocates the required memory if not present in the

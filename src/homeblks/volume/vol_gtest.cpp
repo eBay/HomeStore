@@ -1371,10 +1371,10 @@ SDS_OPTION_GROUP(
     (p_volume_size, "", "p_volume_size", "p_volume_size", ::cxxopts::value< uint32_t >()->default_value("60"),
      "0 to 200"),
     (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
-    (write_cache, "", "write_cache", "write_cache", ::cxxopts::value< bool >()->default_value("true"),
-     "true or false"),
-    (read_cache, "", "read_cache", "read_cache", ::cxxopts::value< bool >()->default_value("true"),
-     "true or false"))
+    (write_cache, "", "write_cache", "write cache", ::cxxopts::value< uint32_t >()->default_value("1"),
+     "flag"),
+    (read_cache, "", "read_cache", "read cache", ::cxxopts::value< uint32_t >()->default_value("1"),
+     "flag"))
 #define ENABLED_OPTIONS logging, home_blks, test_volume
 
 SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
@@ -1422,8 +1422,8 @@ int main(int argc, char* argv[]) {
     _gcfg.expect_io_error = SDS_OPTIONS["expect_io_error"].as< uint32_t >() ? true : false;
     _gcfg.p_volume_size = SDS_OPTIONS["p_volume_size"].as< uint32_t >();
     _gcfg.is_spdk = SDS_OPTIONS["spdk"].as< bool >();
-    _gcfg.read_cache = SDS_OPTIONS["read_cache"].as< bool >();
-    _gcfg.write_cache = SDS_OPTIONS["write_cache"].as< bool >();
+    _gcfg.read_cache = SDS_OPTIONS["read_cache"].as< uint32_t >() ? true : false;
+    _gcfg.write_cache = SDS_OPTIONS["write_cache"].as< uint32_t >() ? true : false;
 
     if (SDS_OPTIONS.count("device_list")) {
         _gcfg.dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();

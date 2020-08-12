@@ -229,7 +229,7 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
     uint32_t start_lba = 0;
 
     auto vreq = volume_req::make(iface_req);
-    THIS_VOL_LOG(TRACE, volume, vreq, "write: lba={}, nlbas={}, use->cache=", vreq->lba(), vreq->nlbas(),
+    THIS_VOL_LOG(TRACE, volume, vreq, "write: lba={}, nlbas={}, cache={}", vreq->lba(), vreq->nlbas(),
                  vreq->use_cache());
     COUNTER_INCREMENT(m_metrics, volume_outstanding_data_write_count, 1);
 
@@ -273,15 +273,16 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
             if (std::holds_alternative< volume_req::MemVecData >(vreq->data))
             {
                 // managed memory write
+                const auto& mem_vec{std::get< volume_req::MemVecData >(vreq->data)};
                 boost::intrusive_ptr< BlkBuffer > bbuf = m_hb->get_data_blkstore()->write(
-                    vc_req->bid, std::get< volume_req::MemVecData >(vreq->data), offset,
+                    vc_req->bid, mem_vec, offset,
                     boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vc_req), vreq->use_cache());
             } else 
             {
                 // scatter/gather write
                 const auto& iovecs{std::get< volume_req::IoVecData >(vreq->data)};
-                m_hb->get_data_blkstore()->write(vc_req->bid, iovecs.data(), iovecs.size());
-
+                m_hb->get_data_blkstore()->write(vc_req->bid, iovecs, offset,
+                                                 boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vc_req));
             }
 
             offset += bid[i].data_size(m_hb->get_data_pagesz());

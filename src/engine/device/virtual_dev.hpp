@@ -3,6 +3,7 @@
 //
 #pragma once
 
+#include <array>
 #include <memory>
 #include <map>
 #include <vector>
@@ -1026,6 +1027,38 @@ public:
         HS_ASSERT_CMP(DEBUG, data_offset, ==, end_offset);
 
         write(bid, iov, iovcnt, req);
+    }
+
+    void write(const BlkId& bid, const std::vector< iovec >& iovecs,
+               boost::intrusive_ptr< virtualdev_req > req, const uint32_t data_offset = 0) {
+        BlkOpStatus ret_status{BLK_OP_SUCCESS};
+        const uint32_t size{bid.get_nblks() * get_page_size()};
+        std::array<iovec, BlkId::max_blks_in_op()> iov;
+        int iovcnt{0};
+
+        uint32_t current_offset{data_offset};
+        const uint32_t end_offset{current_offset + bid.data_size(m_pagesz)};
+        uint32_t iovec_offset{0};
+        for (const auto& iovec : iovecs) {
+            if (current_offset < iovec_offset + iovec.iov_len) {
+                const uint32_t start_offset{current_offset - iovec_offset};
+                iov[iovcnt].iov_base = static_cast<uint8_t*>(iovec.iov_base) + start_offset;
+                const uint32_t remaining{static_cast< uint32_t >(iovec.iov_len - start_offset)};
+                if (current_offset + remaining > end_offset) {
+                    iov[iovcnt].iov_len = end_offset - current_offset;
+                } else {
+                    iov[iovcnt].iov_len = remaining;
+                }
+                current_offset += iov[iovcnt].iov_len;
+                ++iovcnt;
+            }
+            iovec_offset += iovec.iov_len;
+            if (current_offset == end_offset) break;
+        }
+
+        HS_ASSERT_CMP(DEBUG, current_offset, ==, end_offset);
+
+        write(bid, iov.data(), iovcnt, req);
     }
 
     void write_nmirror(const char* buf, uint32_t size, PhysicalDevChunk* chunk, uint64_t dev_offset) {
