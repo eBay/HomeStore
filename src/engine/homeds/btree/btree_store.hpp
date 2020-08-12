@@ -67,7 +67,8 @@ public:
     static void create_done(btree_store_t* store, bnodeid_t m_root_node);
 
     // Journal entry section
-    static sisl::io_blob make_journal_entry(journal_op op, bool is_root, bt_node_gen_pair pair);
+    static sisl::io_blob make_journal_entry(journal_op op, bool is_root, const btree_cp_id_ptr& cp_id,
+                                            bt_node_gen_pair pair);
     static inline constexpr btree_journal_entry* blob_to_entry(const sisl::io_blob& b);
     static void append_node_to_journal(sisl::io_blob& j_iob, bt_journal_node_op node_op, const BtreeNodePtr& node,
                                        const btree_cp_id_ptr& cp_id, bool append_last_key = false);

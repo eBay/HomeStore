@@ -4,6 +4,7 @@
 #include <sds_options/options.h>
 #include <iomgr/iomgr.hpp>
 #include <iomgr/aio_drive_interface.hpp>
+#include <folly/Synchronized.h>
 #include "api/vol_interface.hpp"
 #include <algorithm> // std::shuffle
 #include <random>    // std::default_random_engine
@@ -47,33 +48,39 @@ public:
         m_n_recovered_truncated_lsns = 0;
     }
 
-    void insert_next_batch(uint32_t batch_size) {
-        auto cur_lsn = m_cur_lsn.fetch_add(batch_size);
-        insert(cur_lsn, batch_size, false);
+    void insert_next_batch(uint32_t batch_size, uint32_t nholes = 0) {
+        auto cur_lsn = m_cur_lsn.fetch_add(batch_size + nholes);
+        insert(cur_lsn, batch_size, nholes, false);
     }
 
-    void insert(logstore_seq_num_t start_lsn, int64_t nparallel_count, bool wait_for_completion = true) {
+    void insert(logstore_seq_num_t start_lsn, int64_t nparallel_count, int64_t nholes = 0,
+                bool wait_for_completion = true) {
         std::vector< logstore_seq_num_t > lsns;
-        lsns.reserve(nparallel_count);
+        lsns.reserve(nparallel_count + nholes);
 
         // Shuffle ids within the range for count
-        for (auto lsn = start_lsn; lsn < start_lsn + nparallel_count; ++lsn) {
+        for (auto lsn = start_lsn; lsn < start_lsn + nparallel_count + nholes; ++lsn) {
             lsns.push_back(lsn);
         }
         uint32_t seed = std::chrono::system_clock::now().time_since_epoch().count();
         std::shuffle(lsns.begin(), lsns.end(), std::default_random_engine(seed));
 
-        ASSERT_LT(m_log_store->get_contiguous_issued_seq_num(0), start_lsn + nparallel_count);
-        ASSERT_LT(m_log_store->get_contiguous_completed_seq_num(0), start_lsn + nparallel_count);
+        ASSERT_LT(m_log_store->get_contiguous_issued_seq_num(0), start_lsn + nparallel_count + nholes);
+        ASSERT_LT(m_log_store->get_contiguous_completed_seq_num(0), start_lsn + nparallel_count + nholes);
         for (auto lsn : lsns) {
-            auto d = prepare_data(lsn);
-            m_log_store->write_async(
-                lsn, {(uint8_t*)d, d->total_size(), false}, nullptr,
-                [d, this](logstore_seq_num_t seq_num, const sisl::io_blob& b, logdev_key ld_key, void* ctx) {
-                    assert(ld_key);
-                    iomanager.iobuf_free((uint8_t*)d);
-                    m_comp_cb(seq_num, ld_key);
-                });
+            if (nholes) {
+                m_hole_lsns.wlock()->insert(std::make_pair<>(lsn, false));
+                --nholes;
+            } else {
+                auto d = prepare_data(lsn);
+                m_log_store->write_async(
+                    lsn, {(uint8_t*)d, d->total_size(), false}, nullptr,
+                    [d, this](logstore_seq_num_t seq_num, const sisl::io_blob& b, logdev_key ld_key, void* ctx) {
+                        assert(ld_key);
+                        iomanager.iobuf_free((uint8_t*)d);
+                        m_comp_cb(seq_num, ld_key);
+                    });
+            }
         }
     }
 
@@ -115,27 +122,64 @@ public:
                 << " but not thrown";
         }
 
+        const auto& hole_end = m_hole_lsns.rlock()->end();
         auto upto = expect_all_completed ? m_cur_lsn.load() - 1 : m_log_store->get_contiguous_completed_seq_num(0);
         for (auto i = m_log_store->truncated_upto() + 1; i < upto; ++i) {
-            try {
-                auto b = m_log_store->read_sync(i);
-                auto tl = (test_log_data*)b.bytes();
-                ASSERT_EQ(tl->total_size(), b.size())
-                    << "Size Mismatch for lsn=" << m_log_store->get_store_id() << ":" << i;
-                validate_data(tl, i);
-            } catch (const std::exception& e) {
-                if (!expect_all_completed) {
-                    // In case we run truncation in parallel to read, it is possible truncate moved, so adjust the
-                    // truncated_upto accordingly.
-                    auto trunc_upto = m_log_store->truncated_upto();
-                    if (i <= trunc_upto) {
-                        i = trunc_upto;
-                        continue;
+            auto hole_entry = m_hole_lsns.rlock()->find(i);
+            if ((hole_entry != hole_end) && !hole_entry->second) { // Hole entry exists and not filled
+                ASSERT_THROW(m_log_store->read_sync(i), std::out_of_range)
+                    << "Expected std::out_of_range exception for read of hole lsn=" << m_log_store->get_store_id()
+                    << ":" << i << " but not thrown";
+            } else {
+                try {
+                    auto b = m_log_store->read_sync(i);
+                    if ((hole_entry != hole_end) && hole_entry->second) { // Hole entry exists, but filled
+                        ASSERT_EQ(b.size(), 0ul)
+                            << "Expected null entry for lsn=" << m_log_store->get_store_id() << ":" << i;
+                    } else {
+                        auto tl = (test_log_data*)b.bytes();
+                        ASSERT_EQ(tl->total_size(), b.size())
+                            << "Size Mismatch for lsn=" << m_log_store->get_store_id() << ":" << i;
+                        validate_data(tl, i);
                     }
+                } catch (const std::exception& e) {
+                    if (!expect_all_completed) {
+                        // In case we run truncation in parallel to read, it is possible truncate moved, so adjust the
+                        // truncated_upto accordingly.
+                        auto trunc_upto = m_log_store->truncated_upto();
+                        if (i <= trunc_upto) {
+                            i = trunc_upto;
+                            continue;
+                        }
+                    }
+                    LOGFATAL("Unexpected out_of_range exception for lsn={}:{}", m_log_store->get_store_id(), i);
                 }
-                LOGFATAL("Unexpected out_of_range exception for lsn={}:{}", m_log_store->get_store_id(), i);
             }
         }
+    }
+
+    void fill_hole_and_validate() {
+        auto start = m_log_store->truncated_upto();
+        m_hole_lsns.withWLock([&](auto& holes_list) {
+            try {
+                for (auto& hole_entry : holes_list) {
+                    if (!hole_entry.second) { // Not filled already
+                        ASSERT_EQ(m_log_store->get_contiguous_completed_seq_num(start) + 1, hole_entry.first)
+                            << "Expected next hole at the location for lsn=" << m_log_store->get_store_id() << ":"
+                            << hole_entry.first;
+                        m_log_store->fill_gap(hole_entry.first);
+                        hole_entry.second = true;
+                    }
+                }
+
+                if (holes_list.size()) {
+                    ASSERT_GE(m_log_store->get_contiguous_completed_seq_num(start), holes_list.crbegin()->first)
+                        << "After all holes are filled, expected contiguous seq_num to be moved ahead for store_id "
+                        << m_log_store->get_store_id();
+                }
+
+            } catch (std::exception& e) { LOGFATAL("Caught exception e {}", e.what()); }
+        });
     }
 
     void recovery_validate() {
@@ -209,6 +253,7 @@ private:
     std::atomic< logstore_seq_num_t > m_truncated_upto_lsn = -1;
     std::atomic< logstore_seq_num_t > m_cur_lsn = 0;
     std::shared_ptr< HomeLogStore > m_log_store;
+    folly::Synchronized< std::map< logstore_seq_num_t, bool > > m_hole_lsns;
     int64_t m_n_recovered_lsns = 0;
     int64_t m_n_recovered_truncated_lsns = 0;
     static constexpr uint32_t max_data_size = 1024;
@@ -344,9 +389,10 @@ public:
         }
     }
 
-    void kickstart_inserts(uint32_t batch_size, uint32_t q_depth) {
+    void kickstart_inserts(uint32_t batch_size, uint32_t q_depth, uint32_t holes_per_batch = 0) {
         m_batch_size = batch_size;
         m_q_depth = q_depth;
+        m_holes_per_batch = holes_per_batch;
         iomanager.run_on(iomgr::thread_regex::all_io, [](io_thread_addr_t addr) {
             if (sample_db.m_on_schedule_io_cb) sample_db.m_on_schedule_io_cb();
         });
@@ -358,7 +404,7 @@ public:
             m_nrecords_waiting_to_issue.fetch_sub(m_batch_size);
             m_nrecords_waiting_to_complete.fetch_add(m_batch_size);
             sample_db.m_log_store_clients[rand() % sample_db.m_log_store_clients.size()]->insert_next_batch(
-                m_batch_size);
+                m_batch_size, std::min(m_batch_size, m_holes_per_batch));
         }
     }
 
@@ -401,6 +447,13 @@ public:
             ++count;
         }
         return count;
+    }
+
+    void fill_hole_and_validate() {
+        for (auto i = 0u; i < sample_db.m_log_store_clients.size(); ++i) {
+            auto& lsc = sample_db.m_log_store_clients[i];
+            lsc->fill_hole_and_validate();
+        }
     }
 
     void truncate_validate() {
@@ -477,6 +530,7 @@ protected:
 
     uint32_t m_q_depth = 64;
     uint32_t m_batch_size = 1;
+    uint32_t m_holes_per_batch = 0;
 };
 
 TEST_F(LogStoreTest, BurstRandInsertThenTruncate) {
@@ -524,6 +578,26 @@ TEST_F(LogStoreTest, BurstSeqInsertAndTruncateInParallel) {
     this->wait_for_inserts();
 
     LOGINFO("Step 5: Do a final truncation and validate");
+    this->truncate_validate();
+}
+
+TEST_F(LogStoreTest, RandInsertsWithHoles) {
+    LOGINFO("Step 1: Reinit the num records to start sequential write test");
+    this->init(SDS_OPTIONS["num_records"].as< uint32_t >());
+
+    LOGINFO("Step 2: Issue randomy within a batch of 10 with 1 hole per batch");
+    this->kickstart_inserts(10, 5000, 1);
+
+    LOGINFO("Step 3: Wait for the Inserts to complete");
+    this->wait_for_inserts();
+
+    LOGINFO("Step 4: Read all the inserts one by one for each log store to validate if what is written is valid");
+    this->read_validate(true);
+
+    LOGINFO("Step 5: Fill the hole and do validation if they are indeed filled");
+    this->fill_hole_and_validate();
+
+    LOGINFO("Step 6: Do a final truncation and validate");
     this->truncate_validate();
 }
 

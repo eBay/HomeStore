@@ -16,7 +16,6 @@
 namespace homeds {
 namespace btree {
 #define SSDBtreeNode BtreeNode< btree_store_type::SSD_BTREE, K, V, InteriorNodeType, LeafNodeType >
-using namespace std;
 
 enum writeback_req_state {
     WB_REQ_INIT = 0, /* init */
@@ -195,7 +194,7 @@ public:
         if (m_hs_dirty_buf_cnt > MAX_DIRTY_BUF) { cb(); }
     }
 
-    void write(boost::intrusive_ptr< SSDBtreeNode > bn, boost::intrusive_ptr< SSDBtreeNode > dependent_bn,
+    void write(const boost::intrusive_ptr< SSDBtreeNode >& bn, const boost::intrusive_ptr< SSDBtreeNode >& dependent_bn,
                const btree_cp_id_ptr& cp_id) {
         int cp_cnt = cp_id->cp_cnt % MAX_CP_CNT;
         assert(!dependent_bn || dependent_bn->req[cp_cnt] != nullptr);

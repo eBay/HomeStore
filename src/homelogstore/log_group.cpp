@@ -2,6 +2,7 @@
 #include "log_store.hpp"
 
 namespace homestore {
+SDS_LOGGING_DECL(logstore)
 
 LogGroup::LogGroup() {
     m_iovecs.reserve(estimated_iovs);
@@ -39,8 +40,9 @@ void LogGroup::create_overflow_buf(uint32_t min_needed) {
 
 bool LogGroup::add_record(const log_record& record, int64_t log_idx) {
     if (m_nrecords >= m_max_records) {
-        LOGDEBUG("Will exceed estimated records={} if we add idx={} record. Hence stopping adding in this batch",
-                 m_max_records, log_idx);
+        LOGDEBUGMOD(logstore,
+                    "Will exceed estimated records={} if we add idx={} record. Hence stopping adding in this batch",
+                    m_max_records, log_idx);
         return false;
     }
 

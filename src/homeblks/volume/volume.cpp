@@ -189,6 +189,8 @@ void Volume::destroy_internal() {
         return;
     }
     m_indx_mgr->destroy(([this](bool success) {
+        HS_RELEASE_ASSERT_NE(get_state(), vol_state::DESTROYED, "Volume {} is already in destroyed state",
+                             m_params.vol_name);
         if (success) {
             THIS_VOL_LOG(INFO, base, , "volume destroyed");
             remove_sb();
@@ -364,12 +366,12 @@ std::error_condition Volume::unmap(const vol_interface_req_ptr& iface_req) {
         ret = std::make_error_condition(std::errc::no_such_device);
         goto done;
     }
-    
+
     try {
         THIS_VOL_LOG(TRACE, volume, vreq, "unmap: not yet supported");
-        
+
         vreq->state = volume_req_state::data_io;
-        BlkId bid_invalid {BlkId::invalid_internal_id()};
+        BlkId bid_invalid{BlkId::invalid_internal_id()};
 
         /* store blkid which is used later to create journal entry */
         vreq->push_blkid(bid_invalid);

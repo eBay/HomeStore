@@ -116,6 +116,7 @@ public:
             // reserve this blk unconditionally as root node never changes
             BlkId bid(sb.root_node);
             m_blkstore->reserve_blk(bid);
+            HS_SUBMOD_LOG(INFO, base, , "btree", m_cfg.get_name(), "{}", cp_sb->to_string());
         } else {
             m_journal = HomeLogStoreMgr::instance().create_new_log_store();
             sb.journal_id = get_journal_id_store();
@@ -131,14 +132,14 @@ public:
         btree_journal_entry* jentry = (btree_journal_entry*)log_buf.bytes();
         bool is_replayed = false;
 
+        auto cp_cnt = jentry->cp_cnt;
+        HS_SUBMOD_LOG(TRACE, base, , "btree", m_cfg.get_name(), "seqnum {} entry cp cnt {}", seqnum, cp_cnt);
         if (jentry->cp_cnt > cp_sb.cp_cnt) {
             // Entry is not replayed yet
-            if (jentry->cp_cnt >= m_first_cp->cp_cnt) {
-                if (jentry->op == journal_op::BTREE_CREATE) {
-                    m_btree->create_btree_replay(jentry, m_first_cp);
-                } else if (jentry->op == journal_op::BTREE_SPLIT) {
-                    m_btree->split_node_replay(jentry, m_first_cp);
-                }
+            if (jentry->op == journal_op::BTREE_CREATE) {
+                m_btree->create_btree_replay(jentry, m_first_cp);
+            } else if (jentry->op == journal_op::BTREE_SPLIT) {
+                m_btree->split_node_replay(jentry, m_first_cp);
             }
             ++m_replayed_count;
             is_replayed = true;
@@ -417,12 +418,13 @@ public:
     }
 
     /************************** Journal entry section **********************/
-    static sisl::io_blob make_journal_entry(journal_op op, bool is_root, bt_node_gen_pair pair = {empty_bnodeid, 0}) {
+    static sisl::io_blob make_journal_entry(journal_op op, bool is_root, const btree_cp_id_ptr& cp_id,
+                                            bt_node_gen_pair pair = {empty_bnodeid, 0}) {
         auto b = sisl::io_blob(journal_entry_initial_size(),
                                HomeLogStore::is_aligned_buf_needed(journal_entry_initial_size())
                                    ? HS_STATIC_CONFIG(disk_attr.align_size)
                                    : 0);
-        new (b.bytes) btree_journal_entry(op, is_root, pair);
+        new (b.bytes) btree_journal_entry(op, is_root, pair, cp_id->cp_cnt);
         return b;
     }
 
@@ -444,12 +446,10 @@ public:
         auto e = realloc_if_needed(j_iob, append_size);
         e->append_node(node_op, node->get_node_id(), node->get_gen(), key_blob);
 
-        if (cp_id) {
-            if (node_op == bt_journal_node_op::creation) {
-                cp_id->btree_size.fetch_add(1);
-            } else if (node_op == bt_journal_node_op::removal) {
-                cp_id->btree_size.fetch_sub(1);
-            }
+        if (node_op == bt_journal_node_op::creation) {
+            cp_id->btree_size.fetch_add(1);
+        } else if (node_op == bt_journal_node_op::removal) {
+            cp_id->btree_size.fetch_sub(1);
         }
     }
 
