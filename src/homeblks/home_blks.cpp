@@ -290,7 +290,7 @@ void HomeBlks::homeblks_sb_write() {
         meta_blk_mgr->add_sub_sb("HOMEBLK", (void*)m_homeblks_sb_buf.bytes(), sizeof(homeblks_sb), m_sb_cookie);
     } else {
         // update existing homeblks sb
-        meta_blk_mgr->update_sub_sb("HOMEBLK", (void*)m_homeblks_sb_buf.bytes(), sizeof(homeblks_sb), m_sb_cookie);
+        meta_blk_mgr->update_sub_sb((void*)m_homeblks_sb_buf.bytes(), sizeof(homeblks_sb), m_sb_cookie);
     }
 }
 

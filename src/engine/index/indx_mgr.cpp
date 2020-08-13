@@ -1107,7 +1107,7 @@ void IndxMgr::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size
 
 void IndxMgr::write_meta_blk(void*& write_mblk, sisl::byte_view buf) {
     if (write_mblk) {
-        MetaBlkMgr::instance()->update_sub_sb("INDX_MGR_CP", (void*)buf.bytes(), buf.size(), write_mblk);
+        MetaBlkMgr::instance()->update_sub_sb((void*)buf.bytes(), buf.size(), write_mblk);
     } else {
         /* first time update */
         MetaBlkMgr::instance()->add_sub_sb("INDX_MGR_CP", (void*)buf.bytes(), buf.size(), write_mblk);

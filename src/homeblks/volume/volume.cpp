@@ -747,7 +747,7 @@ void Volume::write_sb() {
         // first time insert
         MetaBlkMgr::instance()->add_sub_sb("VOLUME", (void*)m_sb_buf.bytes(), sizeof(vol_sb_hdr), m_sb_cookie);
     } else {
-        MetaBlkMgr::instance()->update_sub_sb("VOLUME", (void*)m_sb_buf.bytes(), sizeof(vol_sb_hdr), m_sb_cookie);
+        MetaBlkMgr::instance()->update_sub_sb((void*)m_sb_buf.bytes(), sizeof(vol_sb_hdr), m_sb_cookie);
     }
 }
 
