@@ -27,7 +27,7 @@ struct volume_req;
 enum op_type {
     UPDATE_VAL_ONLY = 0,      // it only update the value
     UPDATE_VAL_AND_FREE_BLKS, // it update the value and also update the free blks
-    READ_VAL_WITH_SEQID,
+    READ_VAL_WITH_seqid,
     FREE_ALL_USER_BLKID,
     READ_VAL
 };
@@ -39,7 +39,7 @@ struct mapping_op_cntx {
         struct volume_req* vreq;
         sisl::ThreadVector< BlkId >* free_list;
     } u;
-    int64_t seqId = INVALID_SEQ_ID;
+    int64_t seqid = INVALID_SEQ_ID;
     uint64_t free_blk_size = 0;
 };
 
@@ -188,16 +188,13 @@ public:
 #define VALUE_ENTRY_VERSION 0x1
 struct ValueEntryMeta {
     uint8_t magic = VALUE_ENTRY_VERSION;
-    int64_t seqId;
+    int64_t seqid;
     BlkId blkId;
     uint64_t nlba : NBLKS_BITS;
     uint64_t blk_offset : NBLKS_BITS; // offset based on blk store not based on vol page size
-    ValueEntryMeta(uint64_t seqId, const BlkId& blkId, uint8_t blk_offset, uint8_t nlba) :
-            seqId(seqId),
-            blkId(blkId),
-            nlba(nlba),
-            blk_offset(blk_offset){};
-    ValueEntryMeta() : seqId(0), blkId(0), nlba(0), blk_offset(0){};
+    ValueEntryMeta(uint64_t seqid, const BlkId& blkId, uint8_t blk_offset, uint8_t nlba) :
+            seqid(seqid), blkId(blkId), nlba(nlba), blk_offset(blk_offset){};
+    ValueEntryMeta() : seqid(0), blkId(0), nlba(0), blk_offset(0){};
 } __attribute__((__packed__));
 
 struct ValueEntry {
@@ -213,9 +210,9 @@ public:
     ValueEntry() : m_meta(), m_carr() { m_ptr = (ValueEntry*)this; }
 
     // deep copy
-    ValueEntry(int64_t seqId, const BlkId& blkId, uint8_t blk_offset, uint8_t nlba, uint16_t* carr,
+    ValueEntry(int64_t seqid, const BlkId& blkId, uint8_t blk_offset, uint8_t nlba, uint16_t* carr,
                uint64_t vol_page_size) :
-            m_meta(seqId, blkId, blk_offset, nlba) {
+            m_meta(seqid, blkId, blk_offset, nlba) {
         for (int i = 0; i < nlba; ++i) {
             m_carr[i] = carr[i];
         }
@@ -242,7 +239,7 @@ public:
     }
 
     void copy_from(const ValueEntry& ve) {
-        m_meta.seqId = ve.get_seqId();
+        m_meta.seqid = ve.get_seqid();
         m_meta.blkId = ve.get_blkId();
         m_meta.blk_offset = ve.get_blk_offset();
         m_meta.nlba = ve.get_nlba();
@@ -268,7 +265,7 @@ public:
 #endif
     }
 
-    int64_t get_seqId() const { return m_ptr->m_meta.seqId; }
+    int64_t get_seqid() const { return m_ptr->m_meta.seqid; }
 
     BlkId& get_blkId() const { return m_ptr->m_meta.blkId; }
 
@@ -282,9 +279,9 @@ public:
     }
 
     int compare(const ValueEntry* other) const {
-        if (get_seqId() == other->get_seqId())
+        if (get_seqid() == other->get_seqid())
             return 0;
-        else if (get_seqId() < other->get_seqId())
+        else if (get_seqid() < other->get_seqid())
             return 1; // other is higher
         else
             return -1; // other is lower
@@ -299,7 +296,7 @@ public:
 
     string to_string() const {
         stringstream ss;
-        ss << "Seq: " << get_seqId() << ", " << get_blkId() << ", Boff: " << unsigned(get_blk_offset());
+        ss << "Seq: " << get_seqid() << ", " << get_blkId() << ", Boff: " << unsigned(get_blk_offset());
         ss << ", v_nlba: " << unsigned(get_nlba());
 
         if (HomeBlks::instance()->print_checksum()) { ss << ", cs: " << get_checksums_string(); }
@@ -479,11 +476,11 @@ public:
         /* If other size is not 0 and my value is 0, my value is old */
         if (my_v_array.size() <= 0) { return false; }
 
-        /* If other seqId is invalid, my value is new */
-        if (other_v_array[0].get_seqId() == INVALID_SEQ_ID) { return true; }
+        /* If other seqid is invalid, my value is new */
+        if (other_v_array[0].get_seqid() == INVALID_SEQ_ID) { return true; }
 
-        /* If my seqId is invalid and other is not, my value is old */
-        if (my_v_array[0].get_seqId() == INVALID_SEQ_ID) { return false; }
+        /* If my seqid is invalid and other is not, my value is old */
+        if (my_v_array[0].get_seqid() == INVALID_SEQ_ID) { return false; }
 
         /* If my value is greater than other, my value is new */
         if (my_v_array[0].compare(&other_v_array[0]) > 0) { return true; }
@@ -491,7 +488,7 @@ public:
         return false;
     }
 
-    // insert entry to this mapping value, maintaing it sorted by seqId - deep copy
+    // insert entry to this mapping value, maintaing it sorted by seqid - deep copy
     void add_copy(ValueEntry& ve, MappingValue& out) {
         vector< ValueEntry > v_array;
         get_array().get_all(v_array, true);
@@ -501,7 +498,7 @@ public:
                 ++i;
             if (i < v_array.size() && v_array[i].compare(&ve) == 0) {
                 /* every sequence ID is invalid until jorunaling comes */
-                assert(ve.get_seqId() == INVALID_SEQ_ID);
+                assert(ve.get_seqid() == INVALID_SEQ_ID);
                 ++i;
             }
         }
@@ -518,8 +515,8 @@ public:
             ValueEntry ve;    
             e_varray.get(i, ve, false);    
             uint32_t total = e_varray.get_total_elements();    
-            if (req->lastCommited_seqId == INVALID_SEQ_ID ||    
-                    ve.get_seqId() < req->lastCommited_seqId) { // eligible for removal    
+            if (req->lastCommited_seqid == INVALID_SEQ_ID ||    
+                    ve.get_seqid() < req->lastCommited_seqid) { // eligible for removal    
 
                 LOGTRACE("Free entry:{} nlbas {}", ve.to_string(),    
                         (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * e_key->get_n_lba());    
@@ -583,7 +580,7 @@ public:
             pending_read_blk_cb pending_read_cb = nullptr);
     mapping(uint64_t volsize, uint32_t page_size, const std::string& unique_name, btree_super_block btree_sb,
             trigger_cp_callback trigger_cp_cb, pending_read_blk_cb pending_read_cb = nullptr,
-            btree_cp_superblock* btree_cp_sb = nullptr);
+            btree_cp_sb* btree_cp_sb = nullptr);
     virtual ~mapping();
     int sweep_alloc_blks(uint64_t start_lba, uint64_t end_lba);
     btree_status_t get(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& values);
@@ -651,8 +648,7 @@ public:
 
     virtual void truncate(const btree_cp_ptr& bcp) override;
     virtual void destroy_done() override;
-    virtual void update_btree_cp_sb(const btree_cp_ptr& bcp, btree_cp_superblock& btree_sb,
-                                    bool is_blkalloc_cp) override;
+    virtual void update_btree_cp_sb(const btree_cp_ptr& bcp, btree_cp_sb& btree_sb, bool is_blkalloc_cp) override;
     virtual void flush_free_blks(const btree_cp_ptr& bcp, std::shared_ptr< homestore::blkalloc_cp >& ba_cp) override;
     /* it populats the allocated blkids in index req. It might not be the same as in volume req if entry is partially
      * written.

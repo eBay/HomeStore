@@ -56,8 +56,8 @@ public:
         auto req = volume_req::make(iface_req);
         ValueEntry ve;
         v->get_array().get(0, ve, false);
-        req->seqId = ve.get_seqId();
-        req->lastCommited_seqId = req->seqId; // keeping only latest version always
+        req->seqid = ve.get_seqid();
+        req->lastCommited_seqid = req->seqid; // keeping only latest version always
         req->push_blkid(ve.get_blkId());
         mapping_op_cntx cntx;
         cntx.op = UPDATE_VAL_AND_FREE_BLKS;
@@ -99,8 +99,8 @@ public:
         auto iface_req = vol_interface_req_ptr(new vol_interface_req(nullptr, lba, nblks));
         auto volreq = volume_req::make(iface_req);
 
-        volreq->seqId = INVALID_SEQ_ID;
-        volreq->lastCommited_seqId = INVALID_SEQ_ID; // read only latest value
+        volreq->seqid = INVALID_SEQ_ID;
+        volreq->lastCommited_seqid = INVALID_SEQ_ID; // read only latest value
 
         std::vector< std::pair< MappingKey, MappingValue > > kvs;
         m_map->get(volreq.get(), kvs);
@@ -146,8 +146,8 @@ public:
         V& start_value = *(result[0].get());
         V& end_value = *(result.back());
 
-        req->seqId = INVALID_SEQ_ID;
-        req->lastCommited_seqId = INVALID_SEQ_ID; // keeping only latest version always
+        req->seqid = INVALID_SEQ_ID;
+        req->lastCommited_seqid = INVALID_SEQ_ID; // keeping only latest version always
 
         BlkId bid = start_value.get_blkId();
         bid.set_nblks(end_value.end() - start_value.start() + 1);
