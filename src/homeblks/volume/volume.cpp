@@ -326,7 +326,8 @@ std::error_condition Volume::read(const vol_interface_req_ptr& iface_req) {
     std::error_condition ret = no_error;
 
     auto vreq = volume_req::make(iface_req);
-    THIS_VOL_LOG(TRACE, volume, vreq, "read: lba={}, nlbas={}, sync={}", vreq->lba(), vreq->nlbas(), vreq->is_sync());
+    THIS_VOL_LOG(TRACE, volume, vreq, "read: lba={}, nlbas={}, sync={}, cache={}", vreq->lba(), vreq->nlbas(),
+                 vreq->is_sync(), vreq->use_cache());
     COUNTER_INCREMENT(m_metrics, volume_read_count, 1);
     COUNTER_INCREMENT(m_metrics, volume_outstanding_data_read_count, 1);
 
