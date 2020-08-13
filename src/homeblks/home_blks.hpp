@@ -202,9 +202,9 @@ public:
 
     void init_done(std::error_condition err);
     void inc_sub_system_init_cnt();
-    virtual void attach_prepare_indx_cp_id(std::map< boost::uuids::uuid, indx_cp_id_ptr >* cur_id_map,
-                                           std::map< boost::uuids::uuid, indx_cp_id_ptr >* new_id_map, hs_cp_id* hs_id,
-                                           hs_cp_id* new_hs_id) override;
+    virtual void attach_prepare_indx_cp(std::map< boost::uuids::uuid, indx_cp_ptr >* cur_icp_map,
+                                        std::map< boost::uuids::uuid, indx_cp_ptr >* new_icp_map, hs_cp* hcp,
+                                        hs_cp* new_hcp) override;
     void do_volume_shutdown(bool force);
     void create_volume(VolumePtr vol);
 

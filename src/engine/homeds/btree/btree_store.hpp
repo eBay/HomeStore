@@ -38,13 +38,13 @@ public:
     static uint8_t* get_physical(const btree_node_t* bn);
     static uint32_t get_node_area_size(btree_store_t* store);
     static void update_sb(btree_store_t* store, btree_super_block& sb, btree_cp_superblock* cp_sb, bool is_recovery);
-    static btree_cp_id_ptr attach_prepare_cp(btree_store_t* store, const btree_cp_id_ptr& cur_cp_id, bool is_last_cp,
-                                             bool blkalloc_checkpoint);
-    static void cp_start(btree_store_t* store, const btree_cp_id_ptr& cp_id, cp_comp_callback cb);
-    static void truncate(btree_store_t* store, const btree_cp_id_ptr& cp_id);
+    static btree_cp_ptr attach_prepare_cp(btree_store_t* store, const btree_cp_ptr& cur_bcp, bool is_last_cp,
+                                          bool blkalloc_checkpoint);
+    static void cp_start(btree_store_t* store, const btree_cp_ptr& bcp, cp_comp_callback cb);
+    static void truncate(btree_store_t* store, const btree_cp_ptr& bcp);
     static void destroy_done(btree_store_t* store);
-    static void flush_free_blks(btree_store_t* store, const btree_cp_id_ptr& btree_id,
-                                std::shared_ptr< homestore::blkalloc_cp_id >& blkalloc_id);
+    static void flush_free_blks(btree_store_t* store, const btree_cp_ptr& bcp,
+                                std::shared_ptr< homestore::blkalloc_cp >& ba_cp);
 
     static BtreeNodePtr alloc_node(btree_store_t* store, bool is_leaf,
                                    bool& is_new_allocation, // indicates if allocated node is same as copy_from
@@ -52,11 +52,11 @@ public:
     static btree_status_t read_node(btree_store_t* store, bnodeid_t id, BtreeNodePtr& node);
 
     static btree_status_t write_node(btree_store_t* store, const BtreeNodePtr& bn, const BtreeNodePtr& dependent_bn,
-                                     const btree_cp_id_ptr& cp_id);
+                                     const btree_cp_ptr& bcp);
     static void free_node(btree_store_t* store, const BtreeNodePtr& bn, const blkid_list_ptr& free_blkid_list,
                           bool in_mem);
     static btree_status_t refresh_node(btree_store_t* store, const BtreeNodePtr& bn, bool is_write_modifiable,
-                                       const btree_cp_id_ptr& cp_id);
+                                       const btree_cp_ptr& bcp);
 
     static void swap_node(btree_store_t* store, const BtreeNodePtr& node1, const BtreeNodePtr& node2);
     static void copy_node(btree_store_t* store, const BtreeNodePtr& copy_from, const BtreeNodePtr& copy_to);
@@ -67,12 +67,12 @@ public:
     static void create_done(btree_store_t* store, bnodeid_t m_root_node);
 
     // Journal entry section
-    static sisl::io_blob make_journal_entry(journal_op op, bool is_root, const btree_cp_id_ptr& cp_id,
+    static sisl::io_blob make_journal_entry(journal_op op, bool is_root, const btree_cp_ptr& bcp,
                                             bt_node_gen_pair pair);
     static inline constexpr btree_journal_entry* blob_to_entry(const sisl::io_blob& b);
     static void append_node_to_journal(sisl::io_blob& j_iob, bt_journal_node_op node_op, const BtreeNodePtr& node,
-                                       const btree_cp_id_ptr& cp_id, bool append_last_key = false);
-    static void write_journal_entry(btree_store_t* store, const btree_cp_id_ptr& cp_id, sisl::io_blob& j_iob);
+                                       const btree_cp_ptr& bcp, bool append_last_key = false);
+    static void write_journal_entry(btree_store_t* store, const btree_cp_ptr& bcp, sisl::io_blob& j_iob);
 };
 
 } // namespace btree

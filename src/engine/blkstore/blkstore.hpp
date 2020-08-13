@@ -529,7 +529,7 @@ public:
         return buf_list;
     }
 
-    void blkalloc_cp_start(std::shared_ptr< blkalloc_cp_id > id) { m_vdev.blkalloc_cp_start(id); }
+    void blkalloc_cp_start(std::shared_ptr< blkalloc_cp > id) { m_vdev.blkalloc_cp_start(id); }
     void reset_vdev_failed_state() { m_vdev.reset_failed_state(); }
 
     uint64_t get_size() const { return m_vdev.get_size(); }
@@ -585,8 +585,8 @@ public:
 
     void truncate(const off_t offset) { m_vdev.truncate(offset); }
     void recovery_done() { m_vdev.recovery_done(); }
-    std::shared_ptr< blkalloc_cp_id > attach_prepare_cp(std::shared_ptr< blkalloc_cp_id > cur_cp_id) {
-        return (m_vdev.attach_prepare_cp(cur_cp_id));
+    std::shared_ptr< blkalloc_cp > attach_prepare_cp(std::shared_ptr< blkalloc_cp > cur_ba_cp) {
+        return (m_vdev.attach_prepare_cp(cur_ba_cp));
     }
 
 private:
