@@ -13,7 +13,7 @@ struct indx_req;
 class indx_tbl;
 class IndxMgr;
 class indx_mgr;
-using prepare_cb = std::function< void(const indx_cp_id_ptr& cur_indx_id, hs_cp_id* hb_id, hs_cp_id* new_hb_id) >;
+using prepare_cb = std::function< void(const indx_cp_ptr& cur_icp, hs_cp* cur_hcp, hs_cp* new_hcp) >;
 #define indx_mgr_ptr std::shared_ptr< IndxMgr >
 
 /* Journal entry
@@ -26,7 +26,7 @@ struct journal_hdr {
     uint32_t free_blk_entry_size;   // number of entries
     uint32_t key_size;              // actual size in bytes
     uint32_t val_size;              // actual size in bytes
-    int64_t cp_cnt;
+    int64_t cp_id;
 };
 
 class indx_journal_entry {
@@ -112,7 +112,7 @@ using indxmgr_stop_cb = cp_done_cb;
  * except free blkid. In disk bm it contain exactly those blkids which are freed upto that checkpoint but it might
  * contain blks which are allocated after this checkpoint.
  */
-struct indx_cp_id;
+struct indx_cp;
 
 /* CP will always be in this timeline order
  * blkalloc cp ------> diff cp ------> active cp
@@ -121,18 +121,18 @@ struct indx_cp_id;
  */
 
 enum cp_state {
-    suspend_cp = 0x0,  // cp is suspended
-    active_cp = 0x1,   // Active CP
-    diff_cp = 0x2,     // Diff CP.
-    blkalloc_cp = 0x4, // blkalloc cp.
+    suspend_cp = 0x0, // cp is suspended
+    active_cp = 0x1,  // Active CP
+    diff_cp = 0x2,    // Diff CP.
+    ba_cp = 0x4,      // blkalloc cp.
 };
 
 ENUM(indx_req_state, uint32_t, active_btree, diff_btree);
 
-struct hs_cp_id : cp_id_base {
+struct hs_cp : cp_base {
     /* This list is not lock protected. */
-    std::map< boost::uuids::uuid, indx_cp_id_ptr > indx_id_list;
-    std::shared_ptr< blkalloc_cp_id > blkalloc_id;
+    std::map< boost::uuids::uuid, indx_cp_ptr > indx_cp_list;
+    std::shared_ptr< blkalloc_cp > ba_cp;
 
     std::atomic< uint64_t > ref_cnt; // cnt of how many cps are triggered
     uint64_t snt_cnt;
@@ -142,7 +142,7 @@ struct hs_cp_id : cp_id_base {
 struct indx_active_info {
     int64_t start_psn = -1; // not inclusive
     int64_t end_psn = -1;   // inclusive
-    btree_cp_id_ptr btree_id;
+    btree_cp_ptr bcp;
     indx_active_info(int64_t start_psn) : start_psn(start_psn) {}
 };
 
@@ -151,18 +151,18 @@ struct indx_diff_info {
     int64_t end_psn = -1;   // inclusive
     indx_tbl* diff_tbl = nullptr;
     int64_t diff_snap_id = -1;
-    btree_cp_id_ptr btree_id;
+    btree_cp_ptr bcp;
     indx_diff_info(int64_t start_psn) : start_psn(start_psn) {}
 };
 
 /* During prepare flush we decide to take a CP out of active, diff or snap or all 3 cps*/
-struct indx_cp_id : public boost::intrusive_ref_counter< indx_cp_id > {
+struct indx_cp : public boost::intrusive_ref_counter< indx_cp > {
     indx_mgr_ptr indx_mgr;
     int flags = cp_state::active_cp;
     int64_t max_psn = -1; // max psn sent on this id
 
     /* metrics */
-    int64_t cp_cnt;
+    int64_t cp_id;
     std::atomic< int64_t > indx_size;
 
     /* cp */
@@ -174,10 +174,10 @@ struct indx_cp_id : public boost::intrusive_ref_counter< indx_cp_id > {
                                                         // to a cp.
     blkid_list_ptr free_blkid_list;                     // list of blk ids freed in a cp
 
-    indx_cp_id(int64_t cp_cnt, int64_t start_active_psn, int64_t start_diff_psn, indx_mgr_ptr indx_mgr,
-               blkid_list_ptr& free_blkid_list) :
+    indx_cp(int64_t cp_id, int64_t start_active_psn, int64_t start_diff_psn, indx_mgr_ptr indx_mgr,
+            blkid_list_ptr& free_blkid_list) :
             indx_mgr(indx_mgr),
-            cp_cnt(cp_cnt),
+            cp_id(cp_id),
             indx_size(0),
             ainfo(start_active_psn),
             dinfo(start_diff_psn),
@@ -204,15 +204,15 @@ struct hs_cp_io_sb : hs_cp_meta_sb {
 } __attribute__((__packed__));
 
 struct indx_cp_info {
-    int64_t blkalloc_cp_cnt = -1; // cp cnt of last blkalloc checkpoint taken
+    int64_t blkalloc_cp_id = -1; // cp cnt of last blkalloc checkpoint taken
     int64_t indx_size = 0;
 
     /* active cp info */
-    int64_t active_cp_cnt = -1;
+    int64_t active_cp_id = -1;
     int64_t active_data_psn = -1;
 
     /* diff cp info */
-    int64_t diff_cp_cnt = -1;
+    int64_t diff_cp_id = -1;
     int64_t diff_data_psn = -1;
     int64_t diff_max_psn = -1;
     int64_t diff_snap_id = -1;
@@ -230,9 +230,9 @@ struct indx_cp_io_sb {
     indx_cp_io_sb(){};
     std::string to_string() {
         stringstream ss;
-        ss << "active_cp_cnt " << cp_info.active_cp_cnt << " active_data_psn " << cp_info.active_data_psn
-           << " diff_cp_cnt " << cp_info.diff_cp_cnt << " diff_Data_psn " << cp_info.diff_data_psn << " blkalloc cp cp "
-           << cp_info.blkalloc_cp_cnt;
+        ss << "active_cp_cnt " << cp_info.active_cp_id << " active_data_psn " << cp_info.active_data_psn
+           << " diff_cp_cnt " << cp_info.diff_cp_id << " diff_Data_psn " << cp_info.diff_data_psn << " blkalloc cp cp "
+           << cp_info.blkalloc_cp_id;
         return ss.str();
     }
 } __attribute__((__packed__));
@@ -244,16 +244,16 @@ struct indx_mgr_static_sb {
     bool is_snap_enabled;
 } __attribute__((__packed__));
 
-class HomeStoreCP : public CheckPoint< hs_cp_id > {
+class HomeStoreCPMgr : public CPMgr< hs_cp > {
 public:
-    HomeStoreCP();
-    void try_cp_trigger(hs_cp_id* id);
-    virtual void cp_start(hs_cp_id* id);
-    virtual void cp_attach_prepare(hs_cp_id* cur_id, hs_cp_id* new_id);
-    virtual ~HomeStoreCP();
-    void try_cp_start(hs_cp_id* id);
-    void indx_tbl_cp_done(hs_cp_id* id);
-    void blkalloc_cp(hs_cp_id* id);
+    HomeStoreCPMgr();
+    void try_cp_trigger(hs_cp* hcp);
+    virtual void cp_start(hs_cp* hcp);
+    virtual void cp_attach_prepare(hs_cp* cur_hcp, hs_cp* new_hcp);
+    virtual ~HomeStoreCPMgr();
+    void try_cp_start(hs_cp* hcp);
+    void indx_tbl_cp_done(hs_cp* hcp);
+    void blkalloc_cp_start(hs_cp* hcp);
 };
 
 } // namespace homestore

@@ -116,7 +116,7 @@ public:
      * @param sz : size of context_data
      * @param cookie : handle to address the unique subsytem sb that is being updated;
      */
-    void update_sub_sb(const meta_sub_type type, const void* context_data, const uint64_t sz, void*& cookie);
+    void update_sub_sb(const void* context_data, const uint64_t sz, void*& cookie);
 
     /**
      * @brief :
@@ -277,7 +277,7 @@ private:
      * @param bid
      * @param b
      */
-    void read(BlkId& bid, sisl::blob& b);
+    void read(BlkId& bid, void* dest, size_t start = 0, size_t sz = META_BLK_PAGE_SZ);
 
     void cache_clear();
 };

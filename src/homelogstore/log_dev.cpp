@@ -250,7 +250,7 @@ void LogDev::_persist_info_block() {
     memcpy((void*)ib->store_id_info, store_id_buf->bytes, store_id_buf->size);
 
     if (m_sb_cookie) {
-        meta_blk_mgr->update_sub_sb("LOG_DEV", (void*)ib, logdev_info_block::size, m_sb_cookie);
+        meta_blk_mgr->update_sub_sb((void*)ib, logdev_info_block::size, m_sb_cookie);
     } else {
         meta_blk_mgr->add_sub_sb("LOG_DEV", (void*)ib, logdev_info_block::size, m_sb_cookie);
     }

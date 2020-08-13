@@ -150,7 +150,7 @@ btree_status_t mapping::get(mapping_op_cntx& cntx, MappingKey& key, BtreeQueryCu
  * blocks.
  * @cur :-  points to first lba which is not written.
  */
-btree_status_t mapping::put(mapping_op_cntx& cntx, MappingKey& key, MappingValue& value, const btree_cp_id_ptr& cp_id,
+btree_status_t mapping::put(mapping_op_cntx& cntx, MappingKey& key, MappingValue& value, const btree_cp_ptr& bcp,
                             BtreeQueryCursor& cur) {
     assert(value.get_array().get_total_elements() == 1);
 
@@ -171,11 +171,11 @@ btree_status_t mapping::put(mapping_op_cntx& cntx, MappingKey& key, MappingValue
                                                         (BRangeCBParam*)&param);
 
     /* start range put */
-    auto ret = m_bt->range_put(btree_put_type::APPEND_IF_EXISTS_ELSE_INSERT, ureq, cp_id);
+    auto ret = m_bt->range_put(btree_put_type::APPEND_IF_EXISTS_ELSE_INSERT, ureq, bcp);
 
     /* we should not get resource full error */
     assert(ret == btree_status_t::success || ret == btree_status_t::fast_path_not_possible ||
-           ret == btree_status_t::cp_id_mismatch);
+           ret == btree_status_t::cp_mismatch);
 
     /* In range update, it can be written paritally. Find the first key in this range which is not updated */
     return ret;
@@ -213,7 +213,7 @@ bool mapping::verify_tree() { return m_bt->verify_tree(); }
  * Note:
  * No need to call old btree destroy() as blocks will be freed automatically;
  */
-bool mapping::fix(const btree_cp_id_ptr& cp_id, uint64_t start_lba, uint64_t end_lba, bool verify) {
+bool mapping::fix(const btree_cp_ptr& bcp, uint64_t start_lba, uint64_t end_lba, bool verify) {
 #if 0
     if (start_lba >= end_lba) {
         LOGERROR("Wrong input, start_lba: {}, should be smaller than end_lba: {}", start_lba, end_lba);
@@ -744,32 +744,30 @@ void mapping::create_done() { m_bt->create_done(); }
 uint64_t mapping::get_used_size() { return m_bt->get_used_size(); }
 btree_super_block mapping::get_btree_sb() { return (m_bt->get_btree_sb()); }
 
-btree_cp_id_ptr mapping::attach_prepare_cp(const btree_cp_id_ptr& cur_cp_id, bool is_last_cp,
-                                           bool blkalloc_checkpoint) {
-    return (m_bt->attach_prepare_cp(cur_cp_id, is_last_cp, blkalloc_checkpoint));
+btree_cp_ptr mapping::attach_prepare_cp(const btree_cp_ptr& cur_bcp, bool is_last_cp, bool blkalloc_checkpoint) {
+    return (m_bt->attach_prepare_cp(cur_bcp, is_last_cp, blkalloc_checkpoint));
 }
 
-void mapping::cp_start(const btree_cp_id_ptr& cp_id, cp_comp_callback cb) { m_bt->cp_start(cp_id, cb); }
+void mapping::cp_start(const btree_cp_ptr& bcp, cp_comp_callback cb) { m_bt->cp_start(bcp, cb); }
 
-void mapping::truncate(const btree_cp_id_ptr& cp_id) { m_bt->truncate(cp_id); }
+void mapping::truncate(const btree_cp_ptr& bcp) { m_bt->truncate(bcp); }
 
 void mapping::cp_done(trigger_cp_callback cb) { MappingBtreeDeclType::cp_done(cb); }
 
 void mapping::destroy_done() { m_bt->destroy_done(); }
-void mapping::flush_free_blks(const btree_cp_id_ptr& btree_id,
-                              std::shared_ptr< homestore::blkalloc_cp_id >& blkalloc_id) {
-    m_bt->flush_free_blks(btree_id, blkalloc_id);
+void mapping::flush_free_blks(const btree_cp_ptr& bcp, std::shared_ptr< homestore::blkalloc_cp >& ba_cp) {
+    m_bt->flush_free_blks(bcp, ba_cp);
 }
-void mapping::update_btree_cp_sb(const btree_cp_id_ptr& cp_id, btree_cp_superblock& btree_sb, bool blkalloc_cp) {
-    m_bt->update_btree_cp_sb(cp_id, btree_sb, blkalloc_cp);
-}
-
-btree_status_t mapping::update_diff_indx_tbl(indx_req* ireq, const btree_cp_id_ptr& btree_id) {
-    return (update_indx_tbl(ireq, btree_id, false));
+void mapping::update_btree_cp_sb(const btree_cp_ptr& bcp, btree_cp_superblock& btree_sb, bool is_blkalloc_cp) {
+    m_bt->update_btree_cp_sb(bcp, btree_sb, is_blkalloc_cp);
 }
 
-btree_status_t mapping::update_active_indx_tbl(indx_req* ireq, const btree_cp_id_ptr& btree_id) {
-    return (update_indx_tbl(ireq, btree_id, true));
+btree_status_t mapping::update_diff_indx_tbl(indx_req* ireq, const btree_cp_ptr& bcp) {
+    return (update_indx_tbl(ireq, bcp, false));
+}
+
+btree_status_t mapping::update_active_indx_tbl(indx_req* ireq, const btree_cp_ptr& bcp) {
+    return (update_indx_tbl(ireq, bcp, true));
 }
 
 /* it populats the allocated blkids in index req. It might not be the same as in volume req if entry is partially
@@ -799,7 +797,7 @@ void mapping::update_indx_alloc_blkids(indx_req* ireq) {
     }
 }
 
-btree_status_t mapping::update_indx_tbl(indx_req* ireq, const btree_cp_id_ptr& btree_id, bool active_btree_update) {
+btree_status_t mapping::update_indx_tbl(indx_req* ireq, const btree_cp_ptr& bcp, bool active_btree_update) {
     auto vreq = static_cast< volume_req* >(ireq);
     uint64_t start_lba = vreq->lba();
     int csum_indx = 0;
@@ -855,7 +853,7 @@ btree_status_t mapping::update_indx_tbl(indx_req* ireq, const btree_cp_id_ptr& b
             cntx.u.vreq = vreq;
         }
 
-        ret = put(cntx, key, value, btree_id, *btree_cur_ptr);
+        ret = put(cntx, key, value, bcp, *btree_cur_ptr);
 
         start_lba += nlbas;
         csum_indx += nlbas;
@@ -867,7 +865,7 @@ btree_status_t mapping::update_indx_tbl(indx_req* ireq, const btree_cp_id_ptr& b
     return ret;
 }
 
-btree_status_t mapping::recovery_update(logstore_seq_num_t seqnum, journal_hdr* hdr, const btree_cp_id_ptr& btree_id) {
+btree_status_t mapping::recovery_update(logstore_seq_num_t seqnum, journal_hdr* hdr, const btree_cp_ptr& bcp) {
     /* get all the values from journal entry */
     auto key = (journal_key*)indx_journal_entry::get_key(hdr).first;
     assert(indx_journal_entry::get_key(hdr).second == sizeof(journal_key));
@@ -890,7 +888,7 @@ btree_status_t mapping::recovery_update(logstore_seq_num_t seqnum, journal_hdr* 
         mapping_op_cntx cntx;
         cntx.op = UPDATE_VAL_ONLY;
         BtreeQueryCursor cur;
-        ret = put(cntx, key, value, btree_id, cur);
+        ret = put(cntx, key, value, bcp, cur);
         assert(ret == btree_status_t::success);
         lba += nlbas;
         csum_indx += nlbas;

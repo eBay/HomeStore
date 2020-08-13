@@ -224,7 +224,7 @@ public:
         // so it is okay to decreaase at this point, then add it back after update completes;
         m_total_wrt_sz -= total_size_written(((meta_blk*)cookie)->hdr.h.context_sz);
 
-        m_mbm->update_sub_sb(mtype, buf, sz_to_wrt, cookie);
+        m_mbm->update_sub_sb(buf, sz_to_wrt, cookie);
         auto bid = ((meta_blk*)cookie)->hdr.h.blkid.to_integer();
         HS_ASSERT(DEBUG, m_write_sbs.find(bid) == m_write_sbs.end(), "cookie already in the map.");
         m_write_sbs[bid].cookie = cookie;
@@ -275,15 +275,15 @@ public:
         m_total_wrt_sz = m_mbm->get_used_size();
 
         m_mbm->deregister_handler(mtype);
-        m_mbm->register_handler(
-            mtype,
-            [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
-                if (mblk) {
-                    std::unique_lock< std::mutex > lg(m_mtx);
-                    m_cb_blks[mblk->hdr.h.blkid.to_integer()] = std::string((char*)(buf.bytes()), size);
-                }
-            },
-            [this](bool success) { HS_ASSERT_CMP(DEBUG, success, ==, true); });
+        m_mbm->register_handler(mtype,
+                                [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
+                                    if (mblk) {
+                                        std::unique_lock< std::mutex > lg(m_mtx);
+                                        m_cb_blks[mblk->hdr.h.blkid.to_integer()] =
+                                            std::string((char*)(buf.bytes()), size);
+                                    }
+                                },
+                                [this](bool success) { HS_ASSERT_CMP(DEBUG, success, ==, true); });
 
         while (keep_running()) {
             switch (get_op()) {

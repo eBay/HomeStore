@@ -30,7 +30,7 @@
 
 ENUM(btree_status_t, uint32_t, success, not_found, item_found, closest_found, closest_removed, retry, has_more,
      read_failed, write_failed, stale_buf, refresh_failed, put_failed, space_not_avail, split_failed, insert_failed,
-     cp_id_mismatch, merge_not_required, merge_failed, replay_not_needed, fast_path_not_possible, resource_full);
+     cp_mismatch, merge_not_required, merge_failed, replay_not_needed, fast_path_not_possible, resource_full);
 
 typedef enum {
     READ_NONE = 0,
@@ -85,36 +85,36 @@ struct blkalloc_cp_id;
 VENUM(journal_op, uint8_t, BTREE_SPLIT = 1, BTREE_MERGE = 2, BTREE_CREATE = 3);
 
 #define INVALID_SEQ_ID -1
-struct btree_cp_id;
-using btree_cp_id_ptr = boost::intrusive_ptr< btree_cp_id >;
-using cp_comp_callback = std::function< void(const btree_cp_id_ptr& cp_id) >;
+struct btree_cp;
+using btree_cp_ptr = boost::intrusive_ptr< btree_cp >;
+using cp_comp_callback = std::function< void(const btree_cp_ptr& bcp) >;
 using bnodeid_t = uint64_t;
 static constexpr bnodeid_t empty_bnodeid = std::numeric_limits< bnodeid_t >::max();
 
 struct btree_cp_superblock {
     int64_t active_psn = -1;
-    int64_t cp_cnt = -1;
-    int64_t blkalloc_cp_cnt = -1;
+    int64_t cp_id = -1;
+    int64_t blkalloc_cp_id = -1;
     int64_t btree_size = 0;
     /* we can add more statistics as well like number of interior nodes etc. */
     std::string to_string() const {
         std::stringstream ss;
-        ss << "active psn " << active_psn << " cp_cnt " << cp_cnt << " blkalloc_cp_cnt " << blkalloc_cp_cnt
+        ss << "active psn " << active_psn << " cp_id " << cp_id << " blkalloc_cp_id " << blkalloc_cp_id
            << " btree_size " << btree_size;
         return ss.str();
     }
 } __attribute__((__packed__));
 
-struct btree_cp_id : public boost::intrusive_ref_counter< btree_cp_id > {
-    int64_t cp_cnt = -1;
+struct btree_cp : public boost::intrusive_ref_counter< btree_cp > {
+    int64_t cp_id = -1;
     std::atomic< int > ref_cnt;
     std::atomic< int64_t > btree_size;
     int64_t start_psn = -1; // not inclusive
     int64_t end_psn = -1;   // inclusive
     cp_comp_callback cb;
     homestore::blkid_list_ptr free_blkid_list;
-    btree_cp_id() : ref_cnt(1), btree_size(0){};
-    ~btree_cp_id() {}
+    btree_cp() : ref_cnt(1), btree_size(0){};
+    ~btree_cp() {}
 };
 
 /********************* Journal Specific Section **********************/
@@ -137,44 +137,6 @@ struct bt_journal_node_info {
 };
 
 struct btree_journal_entry {
-#if 0
-    static constexpr size_t alloc_increment = 256;
-    static constexpr size_t min_size() { return std::max(alloc_increment, sizeof(btree_journal_entry)); }
-
-    static sisl::io_blob make(journal_op op) {
-        auto b = sisl::io_blob(
-            min_size(), HomeLogStore::is_aligned_buf_needed(min_size()) ? HS_STATIC_CONFIG(disk_attr.align_size) : 0);
-        new (b.bytes) btree_journal_entry(op);
-        return b;
-    }
-
-    static inline constexpr btree_journal_entry* get(const sisl::io_blob& b) { return (btree_journal_entry*)b.bytes; }
-
-    static btree_journal_entry* realloc_if_needed(sisl::io_blob& b, uint16_t append_size) {
-        assert(b.size > get(b)->actual_size);
-        uint16_t avail_size = b.size - get(b)->actual_size;
-        if (avail_size < append_size) {
-            auto new_size = sisl::round_up(entry->actual_size + append_size, alloc_increment);
-            b.buf_realloc(new_size,
-                          HomeLogStore::is_aligned_buf_needed(new_size) ? HS_STATIC_CONFIG(disk_attr.align_size) : 0);
-        }
-        return get(b);
-    }
-
-    static void append_node(sisl::io_blob& b, bt_journal_node_op node_op, bnodeid_t node_id, uint64_t gen,
-                            sisl::blob key = {nullptr, 0}) {
-        uint16_t append_size = sizeof(bt_journal_node_info) + key.size;
-        btree_journal_entry* entry = realloc_if_needed(b, append_size);
-        ++entry->node_count;
-
-        bt_journal_node_info* info = entry->_append_area();
-        info->node_info = {node_id, gen};
-        info->type = node_op;
-        info->key_size = key.size;
-        if (key.size) memcpy(info->key_area(), key.bytes, key.size);
-        entry->actual_size += append_size;
-    }
-#endif
     void append_node(bt_journal_node_op node_op, bnodeid_t node_id, uint64_t gen, sisl::blob key = {nullptr, 0}) {
         ++node_count;
         bt_journal_node_info* info = _append_area();
@@ -208,7 +170,7 @@ struct btree_journal_entry {
     }
 
     std::string to_string() const {
-        auto str = fmt::format("op={} is_root={} cp_cnt={} size={} num_nodes={} ", enum_name(op), is_root, cp_cnt,
+        auto str = fmt::format("op={} is_root={} cp_id={} size={} num_nodes={} ", enum_name(op), is_root, cp_id,
                                actual_size, node_count);
         str += fmt::format("[parent: id={}, gen={}] ", parent_node.node_id, parent_node.node_gen);
 
@@ -224,15 +186,15 @@ struct btree_journal_entry {
     /************** Actual header starts here **********/
     journal_op op;
     bool is_root = false;
-    int64_t cp_cnt = 0;
+    int64_t cp_id = 0;
     uint16_t actual_size = sizeof(btree_journal_entry);
     uint16_t node_count = 0;
     bt_node_gen_pair parent_node; // Info about the parent node
     // Additional node info follows this
 
 private:
-    btree_journal_entry(journal_op p, bool root, bt_node_gen_pair ninfo, int64_t cp_cnt) :
-            op(p), is_root(root), cp_cnt(cp_cnt), parent_node(ninfo) {}
+    btree_journal_entry(journal_op p, bool root, bt_node_gen_pair ninfo, int64_t cp_id) :
+            op(p), is_root(root), cp_id(cp_id), parent_node(ninfo) {}
     bt_journal_node_info* _append_area() { return (bt_journal_node_info*)((uint8_t*)this + actual_size); }
 } __attribute__((__packed__));
 
@@ -248,7 +210,7 @@ struct btree_journal_entry_hdr {
     uint8_t num_old_nodes;
     uint8_t num_new_nodes;
     uint8_t new_key_size;
-    int64_t cp_cnt;
+    int64_t cp_id;
 } __attribute__((__packed__));
 #endif
 

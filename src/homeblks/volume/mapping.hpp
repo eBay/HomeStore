@@ -542,7 +542,7 @@ public:
 typedef std::function< void(Free_Blk_Entry& fbe) > pending_read_blk_cb;
 class mapping : public indx_tbl {
     using alloc_blk_callback = std::function< void(struct BlkId blkid, size_t offset_size, size_t size) >;
-    using comp_callback = std::function< void(const btree_cp_id_ptr& cp_id) >;
+    using comp_callback = std::function< void(const btree_cp_ptr& bcp) >;
     constexpr static uint64_t lba_query_cnt = 1024ull;
 
 private:
@@ -594,7 +594,7 @@ public:
      * blocks.
      * @cur :- if multiple calls made for the same key then it points to first lba which is not written.
      */
-    btree_status_t put(mapping_op_cntx& cntx, MappingKey& key, MappingValue& value, const btree_cp_id_ptr& cp_id,
+    btree_status_t put(mapping_op_cntx& cntx, MappingKey& key, MappingValue& value, const btree_cp_ptr& cp_id,
                        BtreeQueryCursor& cur);
 
     void print_tree();
@@ -617,7 +617,7 @@ public:
      * Note:
      * No need to call old btree destroy() as blocks will be freed automatically;
      */
-    bool fix(const btree_cp_id_ptr& cp_id, uint64_t start_lba, uint64_t end_lba, bool verify = false);
+    bool fix(const btree_cp_ptr& bcp, uint64_t start_lba, uint64_t end_lba, bool verify = false);
 
     /**
      * @brief : verify that the all the KVs in range [start_lba, end_lba] are the same between old_bt and new_bt
@@ -644,26 +644,25 @@ public:
     virtual btree_super_block get_btree_sb() override;
 
     /* It attaches the new CP and prepare for cur cp flush */
-    virtual btree_cp_id_ptr attach_prepare_cp(const btree_cp_id_ptr& cur_cp_id, bool is_last_cp,
-                                              bool blkalloc_checkpoint) override;
+    virtual btree_cp_ptr attach_prepare_cp(const btree_cp_ptr& cur_bcp, bool is_last_cp,
+                                           bool blkalloc_checkpoint) override;
 
-    virtual void cp_start(const btree_cp_id_ptr& cp_id, cp_comp_callback cb) override;
+    virtual void cp_start(const btree_cp_ptr& bcp, cp_comp_callback cb) override;
 
-    virtual void truncate(const btree_cp_id_ptr& cp_id) override;
+    virtual void truncate(const btree_cp_ptr& bcp) override;
     virtual void destroy_done() override;
-    virtual void update_btree_cp_sb(const btree_cp_id_ptr& cp_id, btree_cp_superblock& btree_sb,
-                                    bool blkalloc_cp) override;
-    virtual void flush_free_blks(const btree_cp_id_ptr& btree_id,
-                                 std::shared_ptr< homestore::blkalloc_cp_id >& blkalloc_id) override;
+    virtual void update_btree_cp_sb(const btree_cp_ptr& bcp, btree_cp_superblock& btree_sb,
+                                    bool is_blkalloc_cp) override;
+    virtual void flush_free_blks(const btree_cp_ptr& bcp, std::shared_ptr< homestore::blkalloc_cp >& ba_cp) override;
     /* it populats the allocated blkids in index req. It might not be the same as in volume req if entry is partially
      * written.
      */
     virtual void update_indx_alloc_blkids(indx_req* ireq) override;
-    virtual btree_status_t update_diff_indx_tbl(indx_req* ireq, const btree_cp_id_ptr& btree_id) override;
+    virtual btree_status_t update_diff_indx_tbl(indx_req* ireq, const btree_cp_ptr& bcp) override;
 
-    virtual btree_status_t update_active_indx_tbl(indx_req* ireq, const btree_cp_id_ptr& btree_id) override;
+    virtual btree_status_t update_active_indx_tbl(indx_req* ireq, const btree_cp_ptr& bcp) override;
     virtual btree_status_t recovery_update(logstore_seq_num_t seqnum, journal_hdr* hdr,
-                                           const btree_cp_id_ptr& btree_id) override;
+                                           const btree_cp_ptr& bcp) override;
     virtual btree_status_t free_user_blkids(blkid_list_ptr free_list, BtreeQueryCursor& cur, int64_t& size) override;
     virtual btree_status_t unmap(blkid_list_ptr free_list, BtreeQueryCursor& cur) override;
     virtual void get_btreequery_cur(const sisl::blob& b, BtreeQueryCursor& cur) override;
@@ -682,7 +681,7 @@ public:
     static uint64_t get_end_key_from_cursor(BtreeQueryCursor& cur);
 
 private:
-    btree_status_t update_indx_tbl(indx_req* ireq, const btree_cp_id_ptr& btree_id, bool active_btree_update = true);
+    btree_status_t update_indx_tbl(indx_req* ireq, const btree_cp_ptr& bcp, bool active_btree_update = true);
     btree_status_t get_alloc_blks_cb(std::vector< std::pair< MappingKey, MappingValue > >& match_kv,
                                      std::vector< std::pair< MappingKey, MappingValue > >& result_kv,
                                      BRangeCBParam* cb_param);

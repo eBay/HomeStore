@@ -5,7 +5,6 @@
 #include <engine/common/error.h>
 #include <engine/blkstore/blkstore.hpp>
 #include <engine/homeds/btree/btree_internal.h>
-#include <wisr/wisr_ds.hpp>
 #include <utility/thread_factory.hpp>
 #include "engine/homestore.hpp"
 
@@ -60,7 +59,7 @@ struct WriteBackCacheBuffer : public CacheBuffer< homestore::BlkId > {
         mutex mtx;
         writeback_req_state state;
         BlkId bid;
-        btree_cp_id_ptr cp_id;
+        btree_cp_ptr bcp;
         void* wb_cache;
         boost::intrusive_ptr< SSDBtreeNode > bn;
 
@@ -86,12 +85,12 @@ struct WriteBackCacheBuffer : public CacheBuffer< homestore::BlkId > {
 
     protected:
         friend class sisl::ObjectAllocator< writeback_req >;
-        writeback_req() : state(WB_REQ_INIT), bid(0), cp_id(nullptr), req_q(), dependent_cnt(1), m_mem(nullptr){};
+        writeback_req() : state(WB_REQ_INIT), bid(0), bcp(nullptr), req_q(), dependent_cnt(1), m_mem(nullptr){};
     };
 
     /*************************************************** WriteBackCacheBuffer *******************************/
 
-    btree_cp_id_ptr cp_id = nullptr;
+    btree_cp_ptr bcp = nullptr;
     writeback_req_ptr req[MAX_CP_CNT];
 
     static wb_cache_buffer_t* make_object() { return sisl::ObjectAllocator< SSDBtreeNode >::make_object(); }
@@ -171,21 +170,21 @@ public:
         }
     }
 
-    void prepare_cp(const btree_cp_id_ptr& new_cp_id, const btree_cp_id_ptr& cur_cp_id, bool blkalloc_checkpoint) {
-        if (new_cp_id) {
-            int cp_cnt = (new_cp_id->cp_cnt) % MAX_CP_CNT;
-            assert(m_dirty_buf_cnt[cp_cnt] == 0);
+    void prepare_cp(const btree_cp_ptr& new_bcp, const btree_cp_ptr& cur_bcp, bool blkalloc_checkpoint) {
+        if (new_bcp) {
+            int cp_id = (new_bcp->cp_id) % MAX_CP_CNT;
+            assert(m_dirty_buf_cnt[cp_id] == 0);
             /* decrement it by all cache threads at the end after writing all pending requests */
-            assert(m_req_list[cp_cnt]->size() == 0);
+            assert(m_req_list[cp_id]->size() == 0);
             blkid_list_ptr free_list;
-            if (blkalloc_checkpoint || !cur_cp_id) {
+            if (blkalloc_checkpoint || !cur_bcp) {
                 free_list = m_free_list[++m_free_list_cnt % MAX_CP_CNT];
                 assert(free_list->size() == 0);
             } else {
                 /* we keep accumulating the free blks until blk checkpoint is not taken */
-                free_list = cur_cp_id->free_blkid_list;
+                free_list = cur_bcp->free_blkid_list;
             }
-            new_cp_id->free_blkid_list = free_list;
+            new_bcp->free_blkid_list = free_list;
         }
     }
 
@@ -195,14 +194,14 @@ public:
     }
 
     void write(const boost::intrusive_ptr< SSDBtreeNode >& bn, const boost::intrusive_ptr< SSDBtreeNode >& dependent_bn,
-               const btree_cp_id_ptr& cp_id) {
-        int cp_cnt = cp_id->cp_cnt % MAX_CP_CNT;
-        assert(!dependent_bn || dependent_bn->req[cp_cnt] != nullptr);
-        writeback_req_ptr wbd_req = dependent_bn ? dependent_bn->req[cp_cnt] : nullptr;
-        if (!bn->req[cp_cnt]) {
+               const btree_cp_ptr& bcp) {
+        int cp_id = bcp->cp_id % MAX_CP_CNT;
+        assert(!dependent_bn || dependent_bn->req[cp_id] != nullptr);
+        writeback_req_ptr wbd_req = dependent_bn ? dependent_bn->req[cp_id] : nullptr;
+        if (!bn->req[cp_id]) {
             /* create wb request */
             auto wb_req = writeback_req_t::make_request();
-            wb_req->cp_id = cp_id;
+            wb_req->bcp = bcp;
             wb_req->m_mem = bn->get_memvec_intrusive();
             wb_req->bn = bn;
             wb_req->bid.set(bn->get_node_id());
@@ -212,25 +211,25 @@ public:
             wb_req->state = WB_REQ_WAITING;
 
             /* update buffer */
-            bn->req[cp_cnt] = wb_req;
-            bn->cp_id = cp_id;
+            bn->req[cp_id] = wb_req;
+            bn->bcp = bcp;
 
             /* add it to the list */
-            m_req_list[cp_cnt]->push_back(wb_req);
+            m_req_list[cp_id]->push_back(wb_req);
 
             /* check for dirty buffers cnt */
-            m_dirty_buf_cnt[cp_cnt].fetch_add(1);
+            m_dirty_buf_cnt[cp_id].fetch_add(1);
             auto dirty_buf_cnt = m_hs_dirty_buf_cnt.fetch_add(1);
             if ((dirty_buf_cnt == MAX_DIRTY_BUF)) { m_trigger_cp_cb(); }
         } else {
-            assert(bn->req[cp_cnt]->bid.to_integer() == bn->get_node_id());
-            if (bn->req[cp_cnt]->m_mem != bn->get_memvec_intrusive()) {
-                bn->req[cp_cnt]->m_mem = bn->get_memvec_intrusive();
-                assert(bn->req[cp_cnt]->m_mem != nullptr);
+            assert(bn->req[cp_id]->bid.to_integer() == bn->get_node_id());
+            if (bn->req[cp_id]->m_mem != bn->get_memvec_intrusive()) {
+                bn->req[cp_id]->m_mem = bn->get_memvec_intrusive();
+                assert(bn->req[cp_id]->m_mem != nullptr);
             }
         }
 
-        auto wb_req = bn->req[cp_cnt];
+        auto wb_req = bn->req[cp_id];
         assert(wb_req->state == WB_REQ_WAITING);
 
         if (wbd_req) {
@@ -247,29 +246,29 @@ public:
         assert(node_id != empty_bnodeid);
         BlkId bid(node_id);
 
-        /*  if cp_id is null then free it only from the cache. */
+        /*  if bcp is null then free it only from the cache. */
         m_blkstore->free_blk(bid, boost::none, boost::none, free_blkid_list ? true : false);
         if (free_blkid_list) { free_blkid_list->push_back(bid); }
     }
 
     btree_status_t refresh_buf(boost::intrusive_ptr< SSDBtreeNode > bn, bool is_write_modifiable,
-                               const btree_cp_id_ptr& cp_id) {
-        if (!cp_id || !bn->cp_id) { return btree_status_t::success; }
+                               const btree_cp_ptr& bcp) {
+        if (!bcp || !bn->bcp) { return btree_status_t::success; }
 
         if (!is_write_modifiable) {
-            if (bn->cp_id->cp_cnt > cp_id->cp_cnt) { return btree_status_t::cp_id_mismatch; }
+            if (bn->bcp->cp_id > bcp->cp_id) { return btree_status_t::cp_mismatch; }
             return btree_status_t::success;
         }
 
-        if (bn->cp_id->cp_cnt == cp_id->cp_cnt) {
+        if (bn->bcp->cp_id == bcp->cp_id) {
             /* modifying the buffer multiple times in a same cp */
             return btree_status_t::success;
         }
 
-        if (bn->cp_id->cp_cnt > cp_id->cp_cnt) { return btree_status_t::cp_id_mismatch; }
+        if (bn->bcp->cp_id > bcp->cp_id) { return btree_status_t::cp_mismatch; }
 
-        int prev_cp_cnt = (cp_id->cp_cnt - 1) % MAX_CP_CNT;
-        auto req = bn->req[prev_cp_cnt];
+        int prev_cp_id = (bcp->cp_id - 1) % MAX_CP_CNT;
+        auto req = bn->req[prev_cp_id];
         if (!req || req->state == WB_REQ_COMPL) {
             /* req on last cp is already completed. No need to make copy */
             return btree_status_t::success;
@@ -293,21 +292,21 @@ public:
     /* We free the block only upto the end seqid of this cp. We might have persisted the data of sequence id
      * greater then this seq_id. But we are going to replay the entry from
      */
-    void flush_free_blks(const btree_cp_id_ptr& cp_id, std::shared_ptr< homestore::blkalloc_cp_id >& blkalloc_id) {
-        blkalloc_id->free_blks(cp_id->free_blkid_list);
+    void flush_free_blks(const btree_cp_ptr& bcp, std::shared_ptr< homestore::blkalloc_cp >& ba_cp) {
+        ba_cp->free_blks(bcp->free_blkid_list);
     }
 
-    void cp_start(const btree_cp_id_ptr& cp_id) {
+    void cp_start(const btree_cp_ptr& bcp) {
         static int thread_cnt = 0;
-        int cp_cnt = cp_id->cp_cnt % MAX_CP_CNT;
+        int cp_id = bcp->cp_id % MAX_CP_CNT;
         iomanager.run_on(m_thread_ids[thread_cnt++ % WB_CACHE_THREADS],
-                         [this, cp_id](io_thread_addr_t addr) { this->flush_buffers(cp_id); });
+                         [this, bcp](io_thread_addr_t addr) { this->flush_buffers(bcp); });
     }
 
-    void flush_buffers(const btree_cp_id_ptr& cp_id) {
-        int cp_cnt = cp_id->cp_cnt % MAX_CP_CNT;
-        m_dirty_buf_cnt[cp_cnt].fetch_add(1);
-        auto list = m_req_list[cp_cnt].get();
+    void flush_buffers(const btree_cp_ptr& bcp) {
+        int cp_id = bcp->cp_id % MAX_CP_CNT;
+        m_dirty_buf_cnt[cp_id].fetch_add(1);
+        auto list = m_req_list[cp_id].get();
         typename sisl::ThreadVector< writeback_req_ptr >::thread_vector_iterator it;
         auto wb_req_ptr_ref = list->begin(it);
         while (wb_req_ptr_ref) {
@@ -320,9 +319,9 @@ public:
             wb_req_ptr_ref = list->next(it);
         }
         list->clear();
-        auto cnt = m_dirty_buf_cnt[cp_cnt].fetch_sub(1);
+        auto cnt = m_dirty_buf_cnt[cp_id].fetch_sub(1);
         assert(cnt >= 1);
-        if (cnt == 1) { m_cp_comp_cb(cp_id); }
+        if (cnt == 1) { m_cp_comp_cb(bcp); }
     }
 
     static void writeBack_completion(boost::intrusive_ptr< blkstore_req< wb_cache_buffer_t > > bs_req) {
@@ -333,7 +332,7 @@ public:
 
     void writeBack_completion_internal(boost::intrusive_ptr< blkstore_req< wb_cache_buffer_t > > bs_req) {
         auto wb_req = to_wb_req(bs_req);
-        int cp_cnt = wb_req->cp_id->cp_cnt % MAX_CP_CNT;
+        int cp_id = wb_req->bcp->cp_id % MAX_CP_CNT;
         wb_req->state = WB_REQ_COMPL;
 
         /* Scan if it has any req depending on this req */
@@ -347,12 +346,12 @@ public:
                 m_blkstore->write(depend_req->bid, depend_req->m_mem, 0, depend_req, false);
             }
         }
-        wb_req->bn->req[cp_cnt] = nullptr;
+        wb_req->bn->req[cp_id] = nullptr;
         auto cnt = m_hs_dirty_buf_cnt.fetch_sub(1);
         assert(cnt >= 1);
-        cnt = m_dirty_buf_cnt[cp_cnt].fetch_sub(1);
+        cnt = m_dirty_buf_cnt[cp_id].fetch_sub(1);
         assert(cnt >= 1);
-        if (cnt == 1) { m_cp_comp_cb(wb_req->cp_id); }
+        if (cnt == 1) { m_cp_comp_cb(wb_req->bcp); }
     }
 };
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >

@@ -32,7 +32,7 @@ using namespace iomgr;
 
 namespace homestore {
 class BlkAllocator;
-struct blkalloc_cp_id;
+struct blkalloc_cp;
 
 #define MAGIC 0xCEEDDEEB
 #define PRODUCT_NAME "OmStore"
@@ -285,11 +285,11 @@ public:
 
     void recover();
 
-    void cp_start(std::shared_ptr< blkalloc_cp_id > id);
+    void cp_start(std::shared_ptr< blkalloc_cp > ba_cp);
 
-    static std::shared_ptr< blkalloc_cp_id > attach_prepare_cp(std::shared_ptr< blkalloc_cp_id > cur_cp_id);
+    static std::shared_ptr< blkalloc_cp > attach_prepare_cp(std::shared_ptr< blkalloc_cp > cur_ba_cp);
 
-    void cp_done(std::shared_ptr< blkalloc_cp_id > id);
+    void cp_done(std::shared_ptr< blkalloc_cp > ba_cp);
 
 private:
     chunk_info_block* m_chunk_info;
