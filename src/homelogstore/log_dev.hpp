@@ -170,6 +170,7 @@ public:
     iovec_array& iovecs() { return m_iovecs; }
     // uint32_t data_size() const { return header()->group_size - sizeof(log_group_header); }
     uint32_t actual_data_size() const { return m_actual_data_size; }
+    uint32_t nrecords() const { return m_nrecords; }
 
     friend std::ostream& operator<<(std::ostream& os, const LogGroup& lg) {
         auto s = fmt::format("Header:[{}]\nLog_idx_range: [{} - {}] DevOffset: {} Max_Records: {} IOVecSize: {}\n"

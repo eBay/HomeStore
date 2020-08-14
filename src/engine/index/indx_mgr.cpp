@@ -94,6 +94,8 @@ HomeStoreCPMgr::~HomeStoreCPMgr() {}
 void HomeStoreCPMgr::cp_start(hs_cp* hcp) {
     iomanager.run_on(IndxMgr::get_thread_id(), [this, hcp](io_thread_addr_t addr) {
         ++hcp->ref_cnt;
+        HS_LOG(INFO, cp, "Starting cp of type {}, number of indexes in cp={}",
+               (hcp->blkalloc_checkpoint ? "blkalloc" : "Index"), hcp->indx_cp_list.size());
         for (auto it = hcp->indx_cp_list.begin(); it != hcp->indx_cp_list.end(); ++it) {
             if (it->second != nullptr && (it->second->state() != cp_state::suspend_cp)) {
                 ++hcp->snt_cnt;
@@ -117,10 +119,11 @@ void HomeStoreCPMgr::indx_tbl_cp_done(hs_cp* hcp) {
     auto cnt = hcp->ref_cnt.fetch_sub(1);
     if (cnt != 1) { return; }
 
+    HS_LOG(INFO, cp, "Cp of type {} is completed", (hcp->blkalloc_checkpoint ? "blkalloc" : "Index"));
     if (hcp->blkalloc_checkpoint) {
         /* flush all the blks that are freed in this hcp */
-        HS_LOG(INFO, cp, "Cp of type {} is completed", (hcp->blkalloc_checkpoint ? "blkalloc" : "Index"));
         StaticIndxMgr::flush_hs_free_blks(hcp);
+
         /* persist alloc blkalloc. It is a sync call */
         blkalloc_cp_start(hcp);
     } else {
@@ -146,6 +149,7 @@ void HomeStoreCPMgr::indx_tbl_cp_done(hs_cp* hcp) {
  */
 void HomeStoreCPMgr::blkalloc_cp_start(hs_cp* hcp) {
     HS_LOG(INFO, indx_mgr, "Cp of type blkalloc, writing super block about cp");
+
     /* persist blk alloc bit maps */
     HomeStoreBase::instance()->blkalloc_cp_start(hcp->ba_cp);
 

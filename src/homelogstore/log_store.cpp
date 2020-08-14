@@ -59,10 +59,12 @@ std::shared_ptr< HomeLogStore > HomeLogStoreMgr::create_new_log_store() {
     auto store_id = m_log_dev.reserve_store_id(true /* persist */);
     auto lstore = std::make_shared< HomeLogStore >(store_id);
     m_id_logstore_map.wlock()->insert(std::make_pair<>(store_id, logstore_info_t{lstore, nullptr}));
+    COUNTER_INCREMENT(m_metrics, logstores_count, 1);
     return lstore;
 }
 
 void HomeLogStoreMgr::open_log_store(logstore_id_t store_id, const log_store_opened_cb_t& on_open_cb) {
+    COUNTER_INCREMENT(m_metrics, logstores_count, 1);
     m_id_logstore_map.wlock()->insert(std::make_pair<>(store_id, logstore_info_t{nullptr, on_open_cb}));
 }
 
@@ -70,6 +72,7 @@ void HomeLogStoreMgr::remove_log_store(logstore_id_t store_id) {
     LOGINFO("Removing log store id {}", store_id);
     m_id_logstore_map.wlock()->erase(store_id);
     m_log_dev.unreserve_store_id(store_id);
+    COUNTER_DECREMENT(m_metrics, logstores_count, 1);
 }
 
 #if 0
@@ -146,7 +149,10 @@ void HomeLogStore::write_async(logstore_req* req, const log_req_comp_cb_t& cb) {
     HS_ASSERT(LOGMSG, ((cb != nullptr) || (m_comp_cb != nullptr)),
               "Expected either cb is not null or default cb registered");
     req->cb = cb;
+    req->start_time = Clock::now();
     m_records.create(req->seq_num);
+    COUNTER_INCREMENT(home_log_store_mgr.m_metrics, logstore_append_count, 1);
+    HISTOGRAM_OBSERVE(home_log_store_mgr.m_metrics, logstore_record_size, req->data.size);
     HomeLogStoreMgr::logdev().append_async(m_store_id, req->seq_num, req->data.bytes, req->data.size, (void*)req);
 }
 
@@ -172,9 +178,13 @@ log_buffer HomeLogStore::read_sync(logstore_seq_num_t seq_num) {
     logdev_key ld_key = record.m_dev_key;
     if (ld_key.idx == -1) { return log_buffer(); }
 
+    auto start_time = Clock::now();
     THIS_LOGSTORE_LOG(TRACE, "Reading lsn={}:{} mapped to logdev_key=[idx={} dev_offset={}]", seq_num, ld_key.idx,
                       ld_key.dev_offset);
-    return HomeLogStoreMgr::logdev().read(ld_key);
+    COUNTER_INCREMENT(home_log_store_mgr.m_metrics, logstore_read_count, 1);
+    auto b = HomeLogStoreMgr::logdev().read(ld_key);
+    HISTOGRAM_OBSERVE(home_log_store_mgr.m_metrics, logstore_read_latency, get_elapsed_time_us(start_time));
+    return b;
 }
 #if 0
 void HomeLogStore::read_async(logstore_req* req, const log_found_cb_t& cb) {
@@ -209,6 +219,7 @@ void HomeLogStore::on_write_completion(logstore_req* req, logdev_key ld_key, log
     // assert(flush_ld_key.idx >= m_last_flush_ldkey.idx);
 
     update_truncation_barrier(req->seq_num, ld_key, nremaining_in_batch);
+    HISTOGRAM_OBSERVE(home_log_store_mgr.m_metrics, logstore_append_latency, get_elapsed_time_us(req->start_time));
     (req->cb) ? req->cb(req, ld_key) : m_comp_cb(req, ld_key);
 }
 

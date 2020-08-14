@@ -197,7 +197,7 @@ public:
 
         auto prev_cp = cp_io_enter();
         prev_cp->cp_status = cp_status_t::cp_trigger;
-        LOGDEBUGMOD(cp, "cp  state {}", prev_cp->to_string());
+        LOGDEBUGMOD(cp, "<<<<<<<<<<< Triggering new CP {}", prev_cp->to_string());
 
         /* allocate a new cp */
         auto new_cp = new cp_type();

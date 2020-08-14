@@ -1,5 +1,6 @@
 #include "engine/homestore_base.hpp"
 #include "log_dev.hpp"
+#include "log_store.hpp"
 
 namespace homestore {
 
@@ -291,10 +292,11 @@ void LogDev::flush_if_needed(const uint32_t new_record_size, logid_t new_idx) {
     // If after adding the record size, if we have enough to flush or if its been too much time before we actually
     // flushed, attempt to flush by setting the atomic bool variable.
     auto pending_sz = m_pending_flush_size.fetch_add(new_record_size, std::memory_order_relaxed) + new_record_size;
+    bool flush_by_size = (pending_sz >= flush_data_threshold_size);
+    bool flush_by_time =
+        !flush_by_size && pending_sz && (get_elapsed_time_us(m_last_flush_time) > max_time_between_flush_us);
 
-    if (iomanager.am_i_worker_reactor() &&
-        ((pending_sz >= flush_data_threshold_size) ||
-         (pending_sz && (get_elapsed_time_us(m_last_flush_time) > max_time_between_flush_us)))) {
+    if (iomanager.am_i_worker_reactor() && (flush_by_size || flush_by_time)) {
         bool expected_flushing = false;
         if (m_is_flushing.compare_exchange_strong(expected_flushing, true, std::memory_order_acq_rel)) {
             LOGTRACEMOD(
@@ -314,11 +316,14 @@ void LogDev::flush_if_needed(const uint32_t new_record_size, logid_t new_idx) {
             auto lg = prepare_flush(new_idx - m_last_flush_idx + 4); // Estimate 4 more extra in case of parallel writes
             m_pending_flush_size.fetch_sub(lg->actual_data_size(), std::memory_order_relaxed);
 
+            COUNTER_INCREMENT_IF_ELSE(home_log_store_mgr.m_metrics, flush_by_size, logdev_flush_by_size_count,
+                                      logdev_flush_by_timer_count, 1);
             m_last_flush_time = Clock::now();
             LOGTRACEMOD(logstore, "Flush prepared, flushing data size={}", lg->actual_data_size());
             do_flush(lg);
         } else {
             LOGTRACEMOD(logstore, "Back to back flushing, will let the current flush to finish and perform this flush");
+            COUNTER_INCREMENT(home_log_store_mgr.m_metrics, logdev_back_to_back_flushing, 1);
         }
     }
 }
@@ -327,6 +332,8 @@ void LogDev::do_flush(LogGroup* lg) {
     auto* store = m_hb->get_logdev_blkstore();
     // auto offset = store->reserve(lg->data_size() + sizeof(log_group_header));
 
+    HISTOGRAM_OBSERVE(home_log_store_mgr.m_metrics, logdev_flush_records_distribution, lg->nrecords());
+    HISTOGRAM_OBSERVE(home_log_store_mgr.m_metrics, logdev_flush_size_distribution, lg->actual_data_size());
     auto req = logdev_req::make_request();
     req->m_log_group = lg;
     store->pwritev(lg->iovecs().data(), (int)lg->iovecs().size(), lg->m_log_dev_offset, req);
