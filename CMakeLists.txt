@@ -19,20 +19,20 @@ endif()
 
 set(ASAN_ENABLED_BUILD false)
 if ($ENV{ASAN_OPTIONS} MATCHES "detect_leaks=1") 
-  message("Running with ASAN leak detection ON")
+  message(STATUS "Running with ASAN leak detection ON")
   set(ASAN_ENABLED_BUILD true)
 endif()
 
 if (${MEMORY_SANITIZER_ON})
-  message("Running with Memory Sanitizer ON")
+  message(STATUS "Running with Memory Sanitizer ON")
   include (cmake/mem_sanitizer.cmake)
 endif ()
 
 if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
   if (NOT ${ASAN_ENABLED_BUILD})
     message(AUTHOR_WARNING "********* WARNING: Running with ASAN leak detection OFF for debug build *********")
-    message("If not desired, set the env variable as follows and rerun the build")
-    message("'ASAN_OPTIONS=detect_leaks=1:abort_on_error=1:disable_coredump=0::unmap_shadow_on_exit=1'")
+    message(STATUS "If not desired, set the env variable as follows and rerun the build")
+    message(STATUS "'ASAN_OPTIONS=detect_leaks=1:abort_on_error=1:disable_coredump=0::unmap_shadow_on_exit=1'")
   endif()
 
   if (NOT ${MEMORY_SANITIZER_ON})
@@ -40,7 +40,7 @@ if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
   endif()
 endif()
 
-message("Building with Malloc Impl = " ${MALLOC_IMPL})
+message(STATUS "Building with Malloc Impl = ${MALLOC_IMPL}")
 
 include(${CONAN_SISL_ROOT}/cmake/settings_gen.cmake)
 
