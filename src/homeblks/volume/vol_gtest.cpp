@@ -5,19 +5,16 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <string>
 #include <thread>
 
-extern "C" {
 #include <fcntl.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <sys/timeb.h>
-};
-
-#include <gtest/gtest.h>
 
 #include "api/vol_interface.hpp"
 #include "boost/uuid/uuid_generators.hpp"
@@ -31,6 +28,8 @@ extern "C" {
 #include "sds_logging/logging.h"
 #include "sds_options/options.h"
 #include "utility/thread_buffer.hpp"
+
+#include "gtest/gtest.h"
 
 using namespace homestore;
 using namespace flip;
@@ -238,29 +237,50 @@ struct io_req_t : public vol_interface_req {
     ssize_t size;
     off_t offset;
     int fd;
-    uint8_t* validate_buf;
+    uint8_t* buffer{nullptr};
+    uint8_t* validate_buffer{nullptr};
     bool is_read;
     uint64_t cur_vol;
     std::shared_ptr< vol_info_t > vol_info;
     bool done = false;
 
-    io_req_t(const std::shared_ptr< vol_info_t >& vinfo, void* wbuf, uint64_t lba, uint32_t nlbas, 
-             const bool cache) :
-            vol_interface_req(wbuf, lba, nlbas, false, cache),
+    io_req_t(const std::shared_ptr< vol_info_t >& vinfo, const bool write, uint8_t* const buf,
+    		 const uint64_t lba, const uint32_t nlbas, const bool cache) :
+            vol_interface_req(buf, lba, nlbas, false, cache),
             vol_info(vinfo) {
         auto page_size = VolInterface::get_instance()->get_page_size(vinfo->vol);
         size = nlbas * page_size;
         offset = lba * page_size;
         fd = vinfo->fd;
-        is_read = (wbuf == nullptr);
+        is_read = !write;
         cur_vol = vinfo->vol_idx;
+        buffer = buf;
 
-        validate_buf = iomanager.iobuf_alloc(512, size);
-        assert(validate_buf != nullptr);
-        if (wbuf) memcpy(validate_buf, wbuf, size);
+        validate_buffer = iomanager.iobuf_alloc(512, size);
+        assert(validate_buffer != nullptr);
+            
+        if (write)
+        {
+            // make copy of buffer so validation works properly
+            ::memcpy(static_cast<void*>(validate_buffer), static_cast<const void*>(buffer), size);
+        }
+
     }
 
-    virtual ~io_req_t() override { iomanager.iobuf_free(validate_buf); }
+    virtual ~io_req_t() override
+    {
+        iomanager.iobuf_free(validate_buffer);
+        if (!cache)
+        {
+            // buffer not owned by homestore
+            iomanager.iobuf_free(buffer); 
+        }
+    }
+
+    io_req_t(const io_req_t&) = delete;
+    io_req_t(io_req_t&&) noexcept = delete;
+    io_req_t& operator=(const io_req_t&) = delete;
+    io_req_t& operator=(io_req_t&&) noexcept = delete;
 };
 
 TestCfg tcfg;            // Config for each VolTest
@@ -752,12 +772,12 @@ public:
         } else {
             if (req->is_read && (tcfg.read_verify || tcfg.verify_hdr || tcfg.verify_data)) {
                 /* read from the file and verify it */
-                auto ret = pread(req->fd, req->validate_buf, req->size, req->offset);
+                auto ret = pread(req->fd, req->validate_buffer, req->size, req->offset);
                 assert(ret == req->size);
                 verify(req);
             } else if (!req->is_read) {
                 /* write to a file */
-                auto ret = pwrite(req->fd, req->validate_buf, req->size, req->offset);
+                auto ret = pwrite(req->fd, req->validate_buffer, req->size, req->offset);
                 assert(ret == req->size);
             }
         }
@@ -895,19 +915,18 @@ protected:
     }
 
     bool write_vol(uint32_t cur, uint64_t lba, uint64_t nlbas) {
-        uint8_t* wbuf;
         auto vinfo = m_voltest->vol_info[cur];
         auto vol = vinfo->vol;
         if (vol == nullptr) { return false; }
 
-        uint64_t size = nlbas * VolInterface::get_instance()->get_page_size(vol);
-        wbuf = iomanager.iobuf_alloc(512, size);
+        const uint64_t size{nlbas * VolInterface::get_instance()->get_page_size(vol)};
+        uint8_t* const wbuf{iomanager.iobuf_alloc(512, size)};
 
         /* buf will be owned by homestore after sending the IO. so we need to allocate buf1 which will be used
          * to write to a file after ios are completed.
          */
         populate_buf(wbuf, size, lba, vinfo.get());
-        auto vreq = boost::intrusive_ptr< io_req_t >(new io_req_t(vinfo, wbuf, lba, nlbas, tcfg.write_cache));
+        auto vreq = boost::intrusive_ptr< io_req_t >(new io_req_t(vinfo, true, wbuf, lba, nlbas, tcfg.write_cache));
         vreq->cookie = (void*)this;
 
         ++m_voltest->output.write_cnt;
@@ -968,7 +987,14 @@ protected:
         auto vol = vinfo->vol;
         if (vol == nullptr) { return false; }
 
-        auto vreq = boost::intrusive_ptr< io_req_t >(new io_req_t(vinfo, nullptr, lba, nlbas, tcfg.read_cache));
+        uint8_t* rbuf{nullptr};
+        if (!(tcfg.read_cache)) {
+            // if using iovec mode must allocate memory directly
+            const uint64_t size{nlbas * VolInterface::get_instance()->get_page_size(vol)};
+            rbuf = iomanager.iobuf_alloc(512, size);
+        }
+
+        auto vreq = boost::intrusive_ptr< io_req_t >(new io_req_t(vinfo, false, rbuf, lba, nlbas, tcfg.read_cache));
         vreq->cookie = (void*)this;
 
         ++m_voltest->output.read_cnt;
@@ -995,11 +1021,11 @@ protected:
                 size_read = tcfg.vol_page_size;
                 int j = 0;
                 if (tcfg.verify_data) {
-                    j = memcmp((void*)b.bytes, (uint8_t*)((uint64_t)req->validate_buf + tot_size_read), size_read);
+                    j = memcmp((void*)b.bytes, (uint8_t*)((uint64_t)req->validate_buffer + tot_size_read), size_read);
                     m_voltest->output.match_cnt++;
                 } else {
                     /* we will only verify the header. We write lba number in the header */
-                    uint64_t validate_lba = *((uint64_t*)((uint64_t)req->validate_buf + tot_size_read));
+                    uint64_t validate_lba = *((uint64_t*)((uint64_t)req->validate_buffer + tot_size_read));
 
                     if (validate_lba == 0 || validate_lba == *((uint64_t*)b.bytes)) {
                         /* copy the data */
@@ -1013,7 +1039,7 @@ protected:
                 if (j) {
                     if (can_panic) {
                         /* verify the header */
-                        j = memcmp((void*)b.bytes, (uint8_t*)((uint64_t)req->validate_buf + tot_size_read),
+                        j = memcmp((void*)b.bytes, (uint8_t*)((uint64_t)req->validate_buffer + tot_size_read),
                                    sizeof(uint64_t));
                         if (j != 0) { LOGINFO("header mismatch lba read {}", *((uint64_t*)b.bytes)); }
                         LOGINFO("mismatch found lba {} nlbas {} total_size_read {}", req->lba, req->nlbas,
