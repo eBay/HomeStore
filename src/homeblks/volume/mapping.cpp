@@ -53,8 +53,7 @@ mapping::mapping(uint64_t volsize, uint32_t page_size, const std::string& unique
 }
 
 mapping::mapping(uint64_t volsize, uint32_t page_size, const std::string& unique_name, btree_super_block btree_sb,
-                 trigger_cp_callback trigger_cp_cb, pending_read_blk_cb pending_read_cb,
-                 btree_cp_superblock* btree_cp_sb) :
+                 trigger_cp_callback trigger_cp_cb, pending_read_blk_cb pending_read_cb, btree_cp_sb* btree_cp_sb) :
         m_pending_read_blk_cb(pending_read_cb), m_vol_page_size(page_size), m_unique_name(unique_name) {
     m_vol_size = volsize;
     m_hb = HomeBlks::safe_instance();
@@ -108,7 +107,7 @@ btree_status_t mapping::read_indx(indx_req* ireq, const read_indx_comp_cb_t& rea
 
 btree_status_t mapping::get(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& values) {
     mapping_op_cntx cntx;
-    cntx.op = READ_VAL_WITH_SEQID;
+    cntx.op = READ_VAL_WITH_seqid;
     cntx.u.vreq = req;
     MappingKey key(req->lba(), req->nlbas());
     return (get(cntx, key, req->read_cur, values));
@@ -183,11 +182,11 @@ btree_status_t mapping::put(mapping_op_cntx& cntx, MappingKey& key, MappingValue
     vector< pair< MappingKey, MappingValue > > values;
     uint64_t temp;
     if (req) {
-        auto temp = req->lastCommited_seqId;
-        req->lastCommited_seqId = req->seqId;
+        auto temp = req->lastCommited_seqid;
+        req->lastCommited_seqid = req->seqid;
     }
     get(req, values);
-    if (req) { req->lastCommited_seqId = temp; }
+    if (req) { req->lastCommited_seqid = temp; }
     validate_get_response(key.start(), key.get_n_lba(), values, &value, req);
 #endif
 }
@@ -236,8 +235,8 @@ bool mapping::fix(const btree_cp_ptr& bcp, uint64_t start_lba, uint64_t end_lba,
         volume_req* vreq = volume_req::make_request();
         vreq->lba = start;
         vreq->nlbas = num_lba(end, start);
-        vreq->seqId = INVALID_SEQ_ID;
-        vreq->lastCommited_seqId = INVALID_SEQ_ID;
+        vreq->seqid = INVALID_SEQ_ID;
+        vreq->lastCommited_seqid = INVALID_SEQ_ID;
 
         std::vector< std::pair< MappingKey, MappingValue > > kvs;
         auto ret = get(vreq, kvs, false /* fill_gaps */);
@@ -389,13 +388,13 @@ btree_status_t mapping::match_item_cb_get(std::vector< std::pair< MappingKey, Ma
         auto lba_offset = overlap.get_start_offset(*e_key);
 
         for (int j = array.get_total_elements() - 1; j >= 0; j--) {
-            // seqId use to filter out KVs with higher seqIds and put only latest seqid entry in result_kv
+            // seqid use to filter out KVs with higher seqids and put only latest seqid entry in result_kv
             ValueEntry ve;
             array.get((uint32_t)j, ve, true);
 
             ve.add_offset(lba_offset, overlap.get_n_lba(), m_vol_page_size);
-            if (param->m_ctx->op == READ_VAL_WITH_SEQID) {
-                if (param->m_ctx->seqId == INVALID_SEQ_ID || ve.get_seqId() <= param->m_ctx->seqId) {
+            if (param->m_ctx->op == READ_VAL_WITH_seqid) {
+                if (param->m_ctx->seqid == INVALID_SEQ_ID || ve.get_seqid() <= param->m_ctx->seqid) {
                     result_kv.emplace_back(make_pair(overlap, MappingValue(ve)));
                     if (m_pending_read_blk_cb && param->m_ctx->u.vreq) {
                         Free_Blk_Entry fbe(ve.get_blkId());
@@ -488,13 +487,13 @@ btree_status_t mapping::match_item_cb_put(std::vector< std::pair< MappingKey, Ma
     const Blob_Array< ValueEntry >& new_varray = new_val.get_array_const();
     ValueEntry new_ve;
     new_varray.get(0, new_ve, false);
-    uint64_t new_seq_id = new_ve.get_seqId();
+    uint64_t new_seq_id = new_ve.get_seqid();
 
 #ifndef NDEBUG
     stringstream ss;
     if (req) {
-        ss << "Lba:" << req->lba() << ",nlbas:" << req->nlbas() << ",seqId:" << req->seqId
-           << ",last_seqId:" << req->lastCommited_seqId;
+        ss << "Lba:" << req->lba() << ",nlbas:" << req->nlbas() << ",seqid:" << req->seqid
+           << ",last_seqid:" << req->lastCommited_seqid;
     }
     ss << ",ss:" << ((MappingKey*)subrange.get_start_key())->to_string();
     ss << ",se:" << ((MappingKey*)subrange.get_end_key())->to_string();
@@ -668,7 +667,7 @@ void mapping::compute_and_add_overlap(std::vector< Free_Blk_Entry >& fbe_list, u
     Blob_Array< ValueEntry >& e_varray = e_val.get_array();
     ValueEntry e_ve;
     e_varray.get(0, e_ve, false);
-    uint64_t e_seq_id = e_ve.get_seqId();
+    uint64_t e_seq_id = e_ve.get_seqid();
 
     if (new_seq_id > e_seq_id) {
         /* override */
@@ -711,11 +710,11 @@ void mapping::validate_get_response(uint64_t lba_start, uint32_t n_lba,
 
             if (req) { // do it again to trace
                 std::vector< std::pair< MappingKey, MappingValue > > values;
-                auto temp = req->lastCommited_seqId;
-                req->lastCommited_seqId = req->seqId;
+                auto temp = req->lastCommited_seqid;
+                req->lastCommited_seqid = req->seqid;
                 MappingKey key(lba_start, n_lba);
                 get(req, values);
-                req->lastCommited_seqId = temp;
+                req->lastCommited_seqid = temp;
             }
 
             assert(0); // gaps found
@@ -758,7 +757,7 @@ void mapping::destroy_done() { m_bt->destroy_done(); }
 void mapping::flush_free_blks(const btree_cp_ptr& bcp, std::shared_ptr< homestore::blkalloc_cp >& ba_cp) {
     m_bt->flush_free_blks(bcp, ba_cp);
 }
-void mapping::update_btree_cp_sb(const btree_cp_ptr& bcp, btree_cp_superblock& btree_sb, bool is_blkalloc_cp) {
+void mapping::update_btree_cp_sb(const btree_cp_ptr& bcp, btree_cp_sb& btree_sb, bool is_blkalloc_cp) {
     m_bt->update_btree_cp_sb(bcp, btree_sb, is_blkalloc_cp);
 }
 
@@ -841,7 +840,7 @@ btree_status_t mapping::update_indx_tbl(indx_req* ireq, const btree_cp_ptr& bcp,
             nlbas = get_nlbas(end_lba, start_lba);
         }
         MappingKey key(start_lba, nlbas);
-        ValueEntry ve(vreq->seqId, blkid, 0 /* blk offset */, nlbas, &vreq->csum_list[csum_indx], m_vol_page_size);
+        ValueEntry ve(vreq->seqid, blkid, 0 /* blk offset */, nlbas, &vreq->csum_list[csum_indx], m_vol_page_size);
         MappingValue value(ve);
 
         /* if snapshot is disabled then cntx would be different. XXX : do we need to suppprt snapshot disable */

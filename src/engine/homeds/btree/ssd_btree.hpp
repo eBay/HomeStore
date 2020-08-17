@@ -71,8 +71,8 @@ public:
     btree_cp_ptr attach_prepare_cp_store(const btree_cp_ptr& cur_bcp, bool is_last_cp, bool blkalloc_checkpoint) {
         /* start with ref cnt = 1. We dec it when trigger is called */
         if (cur_bcp) {
-            cur_bcp->end_psn = m_journal->get_contiguous_issued_seq_num(cur_bcp->start_psn);
-            assert(cur_bcp->end_psn >= cur_bcp->start_psn);
+            cur_bcp->end_seqid = m_journal->get_contiguous_issued_seq_num(cur_bcp->start_seqid);
+            assert(cur_bcp->end_seqid >= cur_bcp->start_seqid);
         }
         if (cur_bcp == m_first_cp) { m_first_cp = nullptr; }
         if (!cur_bcp) {
@@ -85,7 +85,7 @@ public:
         btree_cp_ptr new_cp(nullptr);
         if (!is_last_cp) {
             new_cp = btree_cp_ptr(new (btree_cp));
-            new_cp->start_psn = cur_bcp->end_psn;
+            new_cp->start_seqid = cur_bcp->end_seqid;
             new_cp->cp_id = cur_bcp->cp_id + 1;
         }
         m_wb_cache.prepare_cp(new_cp, cur_bcp, blkalloc_checkpoint);
@@ -93,15 +93,15 @@ public:
     }
 
     /* It is called only during first time create or after recovery */
-    static void update_sb(SSDBtreeStore* store, btree_super_block& sb, btree_cp_superblock* cp_sb, bool is_recovery) {
+    static void update_sb(SSDBtreeStore* store, btree_super_block& sb, btree_cp_sb* cp_sb, bool is_recovery) {
         store->update_store_sb(sb, cp_sb, is_recovery);
     }
 
-    void update_store_sb(btree_super_block& sb, btree_cp_superblock* cp_sb, bool is_recovery) {
+    void update_store_sb(btree_super_block& sb, btree_cp_sb* cp_sb, bool is_recovery) {
         m_is_recovering = is_recovery;
 
         // Need to set this before opening log store, since log_found depends on cp_id
-        m_first_cp->start_psn = cp_sb->active_psn;
+        m_first_cp->start_seqid = cp_sb->active_seqid;
         m_first_cp->cp_id = cp_sb->cp_id + 1;
 
         if (is_recovery) {
@@ -203,7 +203,7 @@ public:
 
     static void truncate(SSDBtreeStore* store, const btree_cp_ptr& bcp) { store->truncate_store(bcp); }
 
-    void truncate_store(const btree_cp_ptr& bcp) { m_journal->truncate(bcp->end_psn); }
+    void truncate_store(const btree_cp_ptr& bcp) { m_journal->truncate(bcp->end_seqid); }
 
     static void cp_done(trigger_cp_callback cb) { wb_cache_t::cp_done(cb); }
 

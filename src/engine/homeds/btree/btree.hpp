@@ -75,7 +75,7 @@ private:
     bool m_destroy = false;
     std::atomic< uint64_t > m_total_nodes = 0;
     uint32_t m_node_size = 4096;
-    btree_cp_superblock m_last_cp_sb;
+    btree_cp_sb m_last_cp_sb;
 #ifndef NDEBUG
     std::atomic< uint64_t > m_req_id = 0;
 #endif
@@ -86,7 +86,7 @@ private:
     ////////////////// Implementation /////////////////////////
 public:
     btree_super_block get_btree_sb() { return m_sb; }
-    const btree_cp_superblock& get_last_cp_cb() const { return m_last_cp_sb; }
+    const btree_cp_sb& get_last_cp_cb() const { return m_last_cp_sb; }
 
     /**
      * @brief : return the btree cfg
@@ -158,7 +158,7 @@ public:
         return bt;
     }
 
-    static btree_t* create_btree(btree_super_block& btree_sb, BtreeConfig& cfg, btree_cp_superblock* cp_sb) {
+    static btree_t* create_btree(btree_super_block& btree_sb, BtreeConfig& cfg, btree_cp_sb* cp_sb) {
         Btree* bt = new Btree(cfg);
         auto impl_ptr = btree_store_t::init_btree(bt, cfg);
         bt->m_btree_store = std::move(impl_ptr);
@@ -189,7 +189,7 @@ public:
         return (create_root_node());
     }
 
-    void init_recovery(btree_super_block btree_sb, btree_cp_superblock* cp_sb) {
+    void init_recovery(btree_super_block btree_sb, btree_cp_sb* cp_sb) {
         m_sb = btree_sb;
         if (cp_sb) { memcpy(&m_last_cp_sb, cp_sb, sizeof(m_last_cp_sb)); }
         do_common_init(true);
@@ -285,8 +285,8 @@ public:
     void destroy_done() { btree_store_t::destroy_done(m_btree_store.get()); }
 
     /* It is called before superblock is persisted for each CP */
-    void update_btree_cp_sb(const btree_cp_ptr& bcp, btree_cp_superblock& btree_sb, bool is_blkalloc_cp) {
-        btree_sb.active_psn = bcp->end_psn;
+    void update_btree_cp_sb(const btree_cp_ptr& bcp, btree_cp_sb& btree_sb, bool is_blkalloc_cp) {
+        btree_sb.active_seqid = bcp->end_seqid;
         btree_sb.blkalloc_cp_id = is_blkalloc_cp ? bcp->cp_id : m_last_cp_sb.cp_id;
         btree_sb.btree_size = bcp->btree_size.load() + m_last_cp_sb.btree_size;
         btree_sb.cp_id = bcp->cp_id;
@@ -1619,7 +1619,7 @@ private:
 
             /* Get subrange if it is a range update */
             K start_key, end_key;
-            bool start_incl, end_incl;
+            bool start_incl = false, end_incl = false;
             if (bur && child_node->is_leaf()) {
                 /* We get the subrange only for leaf because this is where we will be inserting keys. In interior nodes,
                  * keys are always propogated from the lower nodes.

@@ -29,10 +29,11 @@ struct logstore_req {
     bool is_write;              // Directon of IO
     bool is_internal_req;       // If the req is created internally by HomeLogStore itself
     log_req_comp_cb_t cb;       // Callback upon completion of write (overridden than default)
-    
-    //Get the size of the read or written record
+    Clock::time_point start_time;
+
+    // Get the size of the read or written record
     size_t size() const {
-        //TODO: Implement this method
+        // TODO: Implement this method
         return 0;
     }
     static logstore_req* make(HomeLogStore* store, logstore_seq_num_t seq_num, const sisl::io_blob& data,
@@ -61,6 +62,28 @@ struct truncation_entry_t {
 struct logstore_info_t {
     std::shared_ptr< HomeLogStore > m_log_store;
     log_store_opened_cb_t m_on_log_store_opened;
+};
+
+class HomeLogStoreMgrMetrics : public sisl::MetricsGroup {
+public:
+    explicit HomeLogStoreMgrMetrics() : sisl::MetricsGroup("LogStores", "AllLogStores") {
+        REGISTER_COUNTER(logstores_count, "Total number of log stores", sisl::_publish_as::publish_as_gauge);
+        REGISTER_COUNTER(logstore_append_count, "Total number of append requests to log stores", "logstore_op_count",
+                         {"op", "write"});
+        REGISTER_COUNTER(logstore_read_count, "Total number of read requests to log stores", "logstore_op_count",
+                         {"op", "read"});
+        REGISTER_COUNTER(logdev_flush_by_size_count, "Total flushing attempted because of filled buffer");
+        REGISTER_COUNTER(logdev_flush_by_timer_count, "Total flushing attempted because of expired timer");
+        REGISTER_COUNTER(logdev_back_to_back_flushing, "Number of attempts to do back to back flush prepare");
+
+        REGISTER_HISTOGRAM(logstore_append_latency, "Logstore append latency", "logstore_op_latency", {"op", "write"});
+        REGISTER_HISTOGRAM(logstore_read_latency, "Logstore read latency", "logstore_op_latency", {"op", "read"});
+        REGISTER_HISTOGRAM(logdev_flush_size_distribution, "Distribution of flush data size");
+        REGISTER_HISTOGRAM(logdev_flush_records_distribution, "Distribution of num records to flush");
+        REGISTER_HISTOGRAM(logstore_record_size, "Distribution of log record size");
+
+        register_me_to_farm();
+    }
 };
 
 class HomeLogStore;
@@ -113,8 +136,8 @@ public:
      * @param store_id: Store ID of the log store to close
      * @return true on success
      */
-    bool close_log_store(const logstore_id_t store_id){
-        //TODO: Implement this method
+    bool close_log_store(const logstore_id_t store_id) {
+        // TODO: Implement this method
         return true;
     }
 
@@ -143,7 +166,6 @@ public:
      */
     void register_log_store_opened_cb(const log_store_opened_cb_t& cb) { m_log_store_opened_cb = cb; }
 
-
 private:
     void __on_log_store_found(logstore_id_t store_id);
     void __on_io_completion(logstore_id_t id, logdev_key ld_key, logdev_key flush_idx, uint32_t nremaining_in_batch,
@@ -157,6 +179,7 @@ private:
     std::set< logstore_id_t > m_unopened_store_id;
     log_store_opened_cb_t m_log_store_opened_cb;
     LogDev m_log_dev;
+    HomeLogStoreMgrMetrics m_metrics;
 };
 
 #define home_log_store_mgr HomeLogStoreMgr::instance()
@@ -352,34 +375,34 @@ public:
 
     /**
      * @brief Flush this log store (write/sync to disk) up to the suquence number
-     *  
+     *
      * @param seqNum Sequence number upto which logs are to be flushed
      * @return True on success
      */
-    bool flush_logs(const logstore_seq_num_t seqNum) { 
-        //TODO: Implement this method
+    bool flush_logs(const logstore_seq_num_t seqNum) {
+        // TODO: Implement this method
         return true;
     }
 
     /**
      * @brief Sync the log store to disk
-     *  
-     * @param 
+     *
+     * @param
      * @return True on success
      */
-    bool sync() { 
-        //TODO: Implement this method
+    bool sync() {
+        // TODO: Implement this method
         return true;
     }
 
     /**
      * @brief Rollback the given instance to the given sequence number
-     *  
+     *
      * @param seqNum Sequence number back which logs are to be rollbacked
      * @return True on success
      */
-    bool rollback(const logstore_seq_num_t seqNum) { 
-        //TODO: Implement this method
+    bool rollback(const logstore_seq_num_t seqNum) {
+        // TODO: Implement this method
         return true;
     }
 

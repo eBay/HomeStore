@@ -35,7 +35,7 @@ public:
     virtual btree_status_t update_diff_indx_tbl(indx_req* ireq, const btree_cp_ptr& bcp) = 0;
     virtual btree_cp_ptr attach_prepare_cp(const btree_cp_ptr& cur_bcp, bool is_last_cp, bool blkalloc_checkpoint) = 0;
     virtual void flush_free_blks(const btree_cp_ptr& bcp, std::shared_ptr< blkalloc_cp >& ba_cp) = 0;
-    virtual void update_btree_cp_sb(const btree_cp_ptr& bcp, btree_cp_superblock& btree_sb, bool is_blkalloc_cp) = 0;
+    virtual void update_btree_cp_sb(const btree_cp_ptr& bcp, btree_cp_sb& btree_sb, bool is_blkalloc_cp) = 0;
     virtual void truncate(const btree_cp_ptr& bcp) = 0;
     virtual btree_status_t destroy(blkid_list_ptr& free_blkid_list, uint64_t& free_node_cnt) = 0;
     virtual void destroy_done() = 0;
@@ -50,92 +50,11 @@ public:
 
 typedef std::function< void(const boost::intrusive_ptr< indx_req >& ireq, std::error_condition err) > io_done_cb;
 typedef std::function< indx_tbl*() > create_indx_tbl;
-typedef std::function< indx_tbl*(btree_super_block& sb, btree_cp_superblock& cp_info) > recover_indx_tbl;
+typedef std::function< indx_tbl*(btree_super_block& sb, btree_cp_sb& cp_info) > recover_indx_tbl;
+enum indx_recovery_state { create_sb_st, create_indx_tbl_st, create_first_cp_st, io_replay_st, meta_ops_replay_st };
 
-class IndxMgr : public std::enable_shared_from_this< IndxMgr > {
-
-public:
-    /* It is called in first time create.
-     * @params io_cb :- it is used to send callback with io is completed
-     * @params recovery_mode :- true :- it is recovery
-     *                          false :- it is first time create
-     * @params func :- function to create indx table
-     */
-    IndxMgr(boost::uuids::uuid uuid, std::string name, const io_done_cb& io_cb, const read_indx_comp_cb_t& read_cb,
-            const create_indx_tbl& func, bool is_snap_enabled);
-
-    /* constructor for recovery */
-    IndxMgr(boost::uuids::uuid uuid, std::string name, const io_done_cb& io_cb, const read_indx_comp_cb_t& read_cb,
-            const create_indx_tbl& create_func, const recover_indx_tbl& recover_func, indx_mgr_static_sb sb);
-
-    virtual ~IndxMgr();
-
-    /* create new indx cp id and decide if this indx mgr want to participate in a current cp
-     * @params cur_icp :- current cp id of this indx mgr
-     * @params cur_hcp :- current cp of home_blks
-     * @params new_hcp :- new home blks cp cp
-     * @return :- return new cp cp.
-     */
-    indx_cp_ptr attach_prepare_indx_cp(const indx_cp_ptr& cur_icp, hs_cp* cur_hcp, hs_cp* new_hcp);
-
-    /* Get the active indx table
-     * @return :- active indx_tbl instance
-     */
-    indx_tbl* get_active_indx();
-
-    /* write/update indx table for a IO
-     * @params req :- It create all information to update the indx mgr and journal
-     */
-    void update_indx(boost::intrusive_ptr< indx_req > ireq);
-
-    /**
-     * @brief : read and return indx mapping for a IO
-     * @param ireq
-     * @param cb : it is used to send callback when read is completed.
-     * The cb will be passed by mapping layer and triggered after read completes;
-     * @return : error condition whether read is success or not;
-     */
-    void read_indx(const boost::intrusive_ptr< indx_req >& ireq);
-
-    /* Create snapshot. */
-    void indx_snap_create();
-
-    /* Get static superblock
-     * @return :- get static superblock of indx mgr. It is immutable structure. It contains all infomation require to
-     *            recover active and diff indx tbl.
-     */
-    indx_mgr_static_sb get_static_sb();
-
-    /* Destroy all indexes and call homestore level cp to persist. It assumes that all ios are stopped by indx mgr.
-     * It is async call. It is called only once
-     * @params cb :- callback when destroy is done.
-     */
-    void destroy(const indxmgr_stop_cb& cb);
-
-    /* truncate journal */
-    void truncate(const indx_cp_ptr& icp);
-
-    /* indx mgr is destroy successfully */
-    void destroy_done();
-
-    /* It creates all the indx tables and intialize checkpoint */
-    void recovery_start_phase1();
-    void recovery_start_phase2();
-    void log_found(logstore_seq_num_t seqnum, log_buffer buf, void* mem);
-
-    /* it flushes free blks to blk allocator */
-    void flush_free_blks(const indx_cp_ptr& icp, hs_cp* hcp);
-
-    void update_cp_sb(indx_cp_ptr& icp, hs_cp* hcp, indx_cp_io_sb* sb);
-    int64_t get_max_psn_found_in_recovery();
-    /* It is called when super block all indx tables are persisted by its consumer */
-    void indx_create_done(indx_tbl* indx_tbl = nullptr);
-    void indx_init(); // private api
-    std::string get_name();
-    cap_attrs get_used_size();
-    void attach_user_fblkid_list(blkid_list_ptr& free_blkid_list, const cp_done_cb& free_blks_cb, int64_t free_size,
-                                 bool last_cp = false);
-
+/* this class defines all the static members of indx_mgr */
+class StaticIndxMgr {
 public:
     /*********************** static public functions **********************/
 
@@ -224,26 +143,6 @@ public:
     static void remove_read_tracker(Free_Blk_Entry& fbe);
 
 protected:
-    /*********************** virtual functions required to support snapshot  **********************/
-    /* These functions are defined so that indx mgr can be used without snapmagr */
-    virtual int64_t snap_create(indx_tbl* m_diff_tbl, int64_t start_cp_id) {
-        assert(0);
-        return -1;
-    }
-    virtual int64_t snap_get_diff_id() {
-        assert(0);
-        return -1;
-    }
-    virtual void snap_create_done(uint64_t snap_id, int64_t max_psn, int64_t contiguous_psn, int64_t end_cp_id) {
-        assert(0);
-    }
-    virtual btree_super_block snap_get_diff_tbl_sb() {
-        assert(0);
-        btree_super_block sb;
-        return sb;
-    }
-
-private:
     /*********************** static private members **********************/
     static std::unique_ptr< HomeStoreCPMgr > m_cp_mgr;
     static std::atomic< bool > m_shutdown_started;
@@ -255,7 +154,7 @@ private:
     static std::once_flag m_flag;
     static sisl::aligned_unique_ptr< uint8_t > m_recovery_sb;
     static size_t m_recovery_sb_size;
-    static std::map< boost::uuids::uuid, indx_cp_io_sb > cp_sb_map;
+    static std::map< boost::uuids::uuid, indx_cp_base_sb > cp_sb_map;
     static std::map< boost::uuids::uuid, std::vector< std::pair< void*, sisl::byte_view > > > indx_meta_map;
     static HomeStoreBase* m_hs; // Hold onto the home store to maintain reference
     static uint64_t memory_used_in_recovery;
@@ -270,9 +169,114 @@ private:
     static std::unique_ptr< Blk_Read_Tracker > m_read_blk_tracker;
 
     /************************ static private functions **************/
-    static void static_init();
+    static void init();
     /* it frees the blks and insert it in cp free blk list. It is called when there is no read pending on this blk */
     static void safe_to_free_blk(Free_Blk_Entry& fbe);
+};
+
+class IndxMgr : public StaticIndxMgr,
+                public std::enable_shared_from_this< IndxMgr > {
+
+public:
+    /* It is called in first time create.
+     * @params io_cb :- it is used to send callback with io is completed
+     * @params recovery_mode :- true :- it is recovery
+     *                          false :- it is first time create
+     * @params func :- function to create indx table
+     */
+    IndxMgr(boost::uuids::uuid uuid, std::string name, const io_done_cb& io_cb, const read_indx_comp_cb_t& read_cb,
+            const create_indx_tbl& func, bool is_snap_enabled);
+
+    /* constructor for recovery */
+    IndxMgr(boost::uuids::uuid uuid, std::string name, const io_done_cb& io_cb, const read_indx_comp_cb_t& read_cb,
+            const create_indx_tbl& create_func, const recover_indx_tbl& recover_func, indx_mgr_sb sb);
+
+    virtual ~IndxMgr();
+
+    /* create new indx cp id and decide if this indx mgr want to participate in a current cp
+     * @params cur_icp :- current cp id of this indx mgr
+     * @params cur_hcp :- current cp of home_blks
+     * @params new_hcp :- new home blks cp cp
+     * @return :- return new cp cp.
+     */
+    indx_cp_ptr attach_prepare_indx_cp(const indx_cp_ptr& cur_icp, hs_cp* cur_hcp, hs_cp* new_hcp);
+
+    /* Get the active indx table
+     * @return :- active indx_tbl instance
+     */
+    indx_tbl* get_active_indx();
+
+    /* write/update indx table for a IO
+     * @params req :- It create all information to update the indx mgr and journal
+     */
+    void update_indx(boost::intrusive_ptr< indx_req > ireq);
+
+    /**
+     * @brief : read and return indx mapping for a IO
+     * @param ireq
+     * @param cb : it is used to send callback when read is completed.
+     * The cb will be passed by mapping layer and triggered after read completes;
+     * @return : error condition whether read is success or not;
+     */
+    void read_indx(const boost::intrusive_ptr< indx_req >& ireq);
+
+    /* Create snapshot. */
+    void indx_snap_create();
+
+    /* Get immutable superblock
+     * @return :- get static superblock of indx mgr. It is immutable structure. It contains all infomation require to
+     *            recover active and diff indx tbl.
+     */
+    indx_mgr_sb get_immutable_sb();
+
+    /* Destroy all indexes and call homestore level cp to persist. It assumes that all ios are stopped by indx mgr.
+     * It is async call. It is called only once
+     * @params cb :- callback when destroy is done.
+     */
+    void destroy(const indxmgr_stop_cb& cb);
+
+    /* truncate journal */
+    void truncate(const indx_cp_ptr& icp);
+
+    /* indx mgr is destroy successfully */
+    void destroy_done();
+
+    /* It creates all the indx tables and intialize checkpoint */
+    void recovery();
+    void io_replay();
+
+    /* it flushes free blks to blk allocator */
+    void flush_free_blks(const indx_cp_ptr& icp, hs_cp* hcp);
+
+    void update_cp_sb(indx_cp_ptr& icp, hs_cp* hcp, indx_cp_base_sb* sb);
+    int64_t get_max_seqid_found_in_recovery();
+    /* It is called when super block all indx tables are persisted by its consumer */
+    void indx_create_done(indx_tbl* indx_tbl = nullptr);
+    void indx_init(); // private api
+    std::string get_name();
+    cap_attrs get_used_size();
+    void attach_user_fblkid_list(blkid_list_ptr& free_blkid_list, const cp_done_cb& free_blks_cb, int64_t free_size,
+                                 bool last_cp = false);
+
+protected:
+    /*********************** virtual functions required to support snapshot  **********************/
+    /* These functions are defined so that indx mgr can be used without snapmagr */
+    virtual int64_t snap_create(indx_tbl* m_diff_tbl, int64_t start_cp_id) {
+        assert(0);
+        return -1;
+    }
+    virtual int64_t snap_get_diff_id() {
+        assert(0);
+        return -1;
+    }
+    virtual void snap_create_done(uint64_t snap_id, int64_t max_seqid, int64_t contiguous_seqid, int64_t end_cp_id) {
+        assert(0);
+    }
+    virtual btree_super_block snap_get_diff_tbl_sb() {
+        assert(0);
+        btree_super_block sb;
+        return sb;
+    }
 
 private:
     indx_tbl* m_active_tbl;
@@ -293,18 +297,19 @@ private:
     std::shared_mutex m_prepare_cb_mtx;
     std::unique_ptr< std::vector< prepare_cb > > m_prepare_cb_list;
     blkid_list_ptr m_free_list[MAX_CP_CNT];
-    indx_cp_io_sb m_last_cp_sb;
+    indx_cp_base_sb m_last_cp_sb;
     std::map< logstore_seq_num_t, log_buffer > seq_buf_map; // used only in recovery
     bool m_recovery_mode = false;
+    indx_recovery_state m_recovery_state = indx_recovery_state::create_sb_st;
     create_indx_tbl m_create_indx_tbl;
     recover_indx_tbl m_recover_indx_tbl;
-    indx_mgr_static_sb m_static_sb;
+    indx_mgr_sb m_immutable_sb;
     uint64_t m_free_list_cnt = 0;
     bool m_is_snap_enabled = false;
     bool m_is_snap_started = false;
     void* m_destroy_meta_blk = nullptr;
     BtreeQueryCursor m_destroy_btree_cur;
-    int64_t m_max_psn_in_recovery = -1;
+    int64_t m_max_seqid_in_recovery = -1;
 
     /*************************************** private functions ************************/
     void update_indx_internal(boost::intrusive_ptr< indx_req > ireq);
@@ -321,6 +326,7 @@ private:
     void run_slow_path_thread();
     void create_new_diff_tbl(indx_cp_ptr& icp);
     void recover_meta_ops();
+    void log_found(logstore_seq_num_t seqnum, log_buffer buf, void* mem);
 };
 
 struct Free_Blk_Entry {
@@ -361,7 +367,7 @@ public:
     virtual uint32_t get_val_size() = 0;
     virtual void fill_key(void* mem, uint32_t size) = 0;
     virtual void fill_val(void* mem, uint32_t size) = 0;
-    virtual uint64_t get_seqId() = 0;
+    virtual uint64_t get_seqid() = 0;
     virtual uint32_t get_io_size() = 0;
     virtual void free_yourself() = 0;
 

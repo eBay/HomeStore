@@ -112,11 +112,10 @@ void Volume::init() {
         if (meta_blk_mgr->is_aligned_buf_needed(sizeof(vol_sb_hdr))) { align = HS_STATIC_CONFIG(disk_attr.align_size); }
         sisl::byte_view b(sizeof(vol_sb_hdr), align);
         m_sb_buf = b;
-        sb = (vol_sb_hdr*)m_sb_buf.bytes();
-        sb->page_size = m_params.page_size;
-        sb->size = m_params.size;
-        memcpy((char*)sb->vol_name, (const char*)m_params.vol_name, VOL_NAME_SIZE);
-        sb->uuid = m_params.uuid;
+
+        /* populate superblock */
+        sb = new (m_sb_buf.bytes())
+            vol_sb_hdr(m_params.page_size, m_params.size, (const char*)m_params.vol_name, m_params.uuid);
 
         /* create indx tbl */
         m_indx_mgr = SnapMgr::make_SnapMgr(
@@ -125,11 +124,9 @@ void Volume::init() {
             std::bind(&Volume::process_read_indx_completions, this, std::placeholders::_1, std::placeholders::_2),
             std::bind(&Volume::create_indx_tbl, this), false);
 
-        /* populate indx mgr super block */
-        sb->indx_mgr_sb = m_indx_mgr->get_static_sb();
-
+        sb->indx_sb = m_indx_mgr->get_immutable_sb();
         set_state(vol_state::ONLINE, true);
-        seq_Id = m_indx_mgr->get_max_psn_found_in_recovery();
+        seq_Id = m_indx_mgr->get_max_seqid_found_in_recovery();
         /* it is called after superblock is persisted by volume */
         m_indx_mgr->indx_init();
 
@@ -140,13 +137,13 @@ void Volume::init() {
         }));
     } else {
         /* recovery */
-        auto indx_mgr_sb = sb->indx_mgr_sb;
+        auto indx_sb = sb->indx_sb;
         m_indx_mgr = SnapMgr::make_SnapMgr(
             get_uuid(), std::string(get_name()),
             std::bind(&Volume::process_indx_completions, this, std::placeholders::_1, std::placeholders::_2),
             std::bind(&Volume::process_read_indx_completions, this, std::placeholders::_1, std::placeholders::_2),
             std::bind(&Volume::create_indx_tbl, this),
-            std::bind(&Volume::recover_indx_tbl, this, std::placeholders::_1, std::placeholders::_2), indx_mgr_sb);
+            std::bind(&Volume::recover_indx_tbl, this, std::placeholders::_1, std::placeholders::_2), indx_sb);
     }
     alloc_single_block_in_mem();
     HS_ASSERT_CMP(RELEASE, get_page_size() % HomeBlks::instance()->get_data_pagesz(), ==, 0);
@@ -216,7 +213,7 @@ indx_tbl* Volume::create_indx_tbl() {
     return static_cast< indx_tbl* >(tbl);
 }
 
-indx_tbl* Volume::recover_indx_tbl(btree_super_block& sb, btree_cp_superblock& cp_info) {
+indx_tbl* Volume::recover_indx_tbl(btree_super_block& sb, btree_cp_sb& cp_info) {
     auto tbl = new mapping(get_size(), get_page_size(), get_name(), sb, SnapMgr::trigger_indx_cp,
                            SnapMgr::add_read_tracker, &cp_info);
     return static_cast< indx_tbl* >(tbl);
@@ -796,8 +793,8 @@ void Volume::migrate_sb() {
     // sizeof(vol_ondisk_sb), &(m_sb->cookie));
 }
 
-void Volume::recovery_start_phase1() { m_indx_mgr->recovery_start_phase1(); }
+void Volume::recovery_start_phase1() { m_indx_mgr->recovery(); }
 void Volume::recovery_start_phase2() {
-    m_indx_mgr->recovery_start_phase2();
-    seq_Id = m_indx_mgr->get_max_psn_found_in_recovery();
+    m_indx_mgr->recovery();
+    seq_Id = m_indx_mgr->get_max_seqid_found_in_recovery();
 }

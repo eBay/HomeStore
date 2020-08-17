@@ -91,15 +91,15 @@ using cp_comp_callback = std::function< void(const btree_cp_ptr& bcp) >;
 using bnodeid_t = uint64_t;
 static constexpr bnodeid_t empty_bnodeid = std::numeric_limits< bnodeid_t >::max();
 
-struct btree_cp_superblock {
-    int64_t active_psn = -1;
+struct btree_cp_sb {
+    int64_t active_seqid = -1;
     int64_t cp_id = -1;
     int64_t blkalloc_cp_id = -1;
     int64_t btree_size = 0;
     /* we can add more statistics as well like number of interior nodes etc. */
     std::string to_string() const {
         std::stringstream ss;
-        ss << "active psn " << active_psn << " cp_id " << cp_id << " blkalloc_cp_id " << blkalloc_cp_id
+        ss << "active seqid " << active_seqid << " cp_id " << cp_id << " blkalloc_cp_id " << blkalloc_cp_id
            << " btree_size " << btree_size;
         return ss.str();
     }
@@ -109,8 +109,8 @@ struct btree_cp : public boost::intrusive_ref_counter< btree_cp > {
     int64_t cp_id = -1;
     std::atomic< int > ref_cnt;
     std::atomic< int64_t > btree_size;
-    int64_t start_psn = -1; // not inclusive
-    int64_t end_psn = -1;   // inclusive
+    int64_t start_seqid = -1; // not inclusive
+    int64_t end_seqid = -1;   // inclusive
     cp_comp_callback cb;
     homestore::blkid_list_ptr free_blkid_list;
     btree_cp() : ref_cnt(1), btree_size(0){};

@@ -33,8 +33,8 @@ public:
     SnapMgr(boost::uuids::uuid uuid, std::string name, io_done_cb io_cb, const read_indx_comp_cb_t& read_cb, create_indx_tbl func, bool is_snap_enabled);
 
     /* constructor for recovery */
-    SnapMgr(boost::uuids::uuid uuid, std::string name, io_done_cb io_cb, const read_indx_comp_cb_t& read_cb, create_indx_tbl create_func,
-            recover_indx_tbl recover_func, indx_mgr_static_sb sb);
+    SnapMgr(boost::uuids::uuid uuid, std::string name, io_done_cb io_cb, const read_indx_comp_cb_t& read_cb,
+            create_indx_tbl create_func, recover_indx_tbl recover_func, indx_mgr_sb sb);
 
 protected:
     virtual int64_t snap_create(indx_tbl* m_diff_tbl, int64_t cp_cnt) override;

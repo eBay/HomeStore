@@ -108,7 +108,7 @@ using indxmgr_stop_cb = cp_done_cb;
  *      - entry is updated in a journal with a list of allocated blkid
  *      - blk id is marked allocated in disk bitmap so that it can be persisted. If writing to a journal or indx tbl is
  *        failed then these blk ids will be available to reallocate in next boot.
- * Note :- In a checkpoint it can contain data at least upto the PSN or more. It holds true for all checkpoints/data
+ * Note :- In a checkpoint it can contain data at least upto the seqId or more. It holds true for all checkpoints/data
  * except free blkid. In disk bm it contain exactly those blkids which are freed upto that checkpoint but it might
  * contain blks which are allocated after this checkpoint.
  */
@@ -139,109 +139,112 @@ struct hs_cp : cp_base {
     bool blkalloc_checkpoint = false; // it is set to true in prepare flush stage
 };
 
-struct indx_active_info {
-    int64_t start_psn = -1; // not inclusive
-    int64_t end_psn = -1;   // inclusive
+struct indx_active_cp {
+    int64_t start_seqid = -1; // not inclusive
+    int64_t end_seqid = -1;   // inclusive
     btree_cp_ptr bcp;
-    indx_active_info(int64_t start_psn) : start_psn(start_psn) {}
+    indx_active_cp(int64_t start_seqid) : start_seqid(start_seqid) {}
 };
 
-struct indx_diff_info {
-    int64_t start_psn = -1; // not inclusive
-    int64_t end_psn = -1;   // inclusive
+struct indx_diff_cp {
+    int64_t start_seqid = -1; // not inclusive
+    int64_t end_seqid = -1;   // inclusive
     indx_tbl* diff_tbl = nullptr;
     int64_t diff_snap_id = -1;
     btree_cp_ptr bcp;
-    indx_diff_info(int64_t start_psn) : start_psn(start_psn) {}
+    indx_diff_cp(int64_t start_seqid) : start_seqid(start_seqid) {}
 };
 
 /* During prepare flush we decide to take a CP out of active, diff or snap or all 3 cps*/
 struct indx_cp : public boost::intrusive_ref_counter< indx_cp > {
     indx_mgr_ptr indx_mgr;
     int flags = cp_state::active_cp;
-    int64_t max_psn = -1; // max psn sent on this id
+    int64_t max_seqid = -1; // max seqid sent on this id
 
     /* metrics */
     int64_t cp_id;
     std::atomic< int64_t > indx_size;
 
     /* cp */
-    indx_active_info ainfo;
-    indx_diff_info dinfo;
+    indx_active_cp acp;
+    indx_diff_cp dcp;
 
     std::vector< blkid_list_ptr > user_free_blkid_list; // this blkid list is freed by the user. It is not part of any
                                                         // cp. user first collect it and then later it attaches the list
                                                         // to a cp.
-    blkid_list_ptr free_blkid_list;                     // list of blk ids freed in a cp
+    blkid_list_ptr io_free_blkid_list;                  // list of blk ids freed in a cp
 
-    indx_cp(int64_t cp_id, int64_t start_active_psn, int64_t start_diff_psn, indx_mgr_ptr indx_mgr,
-            blkid_list_ptr& free_blkid_list) :
+    indx_cp(int64_t cp_id, int64_t start_active_seqid, int64_t start_diff_seqid, indx_mgr_ptr indx_mgr,
+            blkid_list_ptr& io_free_blkid_list) :
             indx_mgr(indx_mgr),
             cp_id(cp_id),
             indx_size(0),
-            ainfo(start_active_psn),
-            dinfo(start_diff_psn),
-            free_blkid_list(free_blkid_list) {}
+            acp(start_active_seqid),
+            dcp(start_diff_seqid),
+            io_free_blkid_list(io_free_blkid_list) {}
 
     int state() const { return flags; }
-    int64_t get_max_psn() { return 0; }
-    void set_max_psn(int64_t psn){};
+    int64_t get_max_seqid() { return 0; }
+    void set_max_seqid(int64_t seqid){};
 };
 
-/* super block persisted for each CP */
-/* it contains the PSN from which journal has to be replayed. */
+/* super bcp persisted for each CP */
+/* it contains the seqid from which journal has to be replayed. */
 #define INDX_MGR_VERSION 0x101
 enum meta_hdr_type { INDX_CP, INDX_DESTROY, INDX_UNMAP, SNAP_DESTROY };
-struct hs_cp_meta_sb {
+struct hs_cp_base_sb {
     boost::uuids::uuid uuid; // Don't populate if it is hs indx meta blk
     meta_hdr_type type;
     uint32_t size;
 } __attribute__((__packed__));
 
-struct hs_cp_io_sb : hs_cp_meta_sb {
+struct hs_cp_sb : hs_cp_base_sb {
     int version;
     uint32_t indx_cnt;
 } __attribute__((__packed__));
 
-struct indx_cp_info {
+struct indx_cp_sb {
     int64_t blkalloc_cp_id = -1; // cp cnt of last blkalloc checkpoint taken
     int64_t indx_size = 0;
 
     /* active cp info */
     int64_t active_cp_id = -1;
-    int64_t active_data_psn = -1;
+    int64_t active_data_seqid = -1;
 
     /* diff cp info */
     int64_t diff_cp_id = -1;
-    int64_t diff_data_psn = -1;
-    int64_t diff_max_psn = -1;
+    int64_t diff_data_seqid = -1;
+    int64_t diff_max_seqid = -1;
     int64_t diff_snap_id = -1;
     bool snap_cp = false;
 
-    int64_t get_active_data_psn() const { return active_data_psn; }
+    int64_t get_active_data_seqid() const { return active_data_seqid; }
 } __attribute__((__packed__));
 
-struct indx_cp_io_sb {
+struct indx_cp_base_sb {
     boost::uuids::uuid uuid;
-    indx_cp_info cp_info;
-    btree_cp_superblock active_btree_info;
-    btree_cp_superblock diff_btree_info;
-    indx_cp_io_sb(boost::uuids::uuid uuid) : uuid(uuid){};
-    indx_cp_io_sb(){};
+    indx_cp_sb icp_sb;  // indx cp superblock
+    btree_cp_sb acp_sb; // active cp superblock
+    btree_cp_sb dcp_sb; // diff cp_superblock
+    indx_cp_base_sb(boost::uuids::uuid uuid) : uuid(uuid){};
+    indx_cp_base_sb(){};
     std::string to_string() {
         stringstream ss;
-        ss << "active_cp_cnt " << cp_info.active_cp_id << " active_data_psn " << cp_info.active_data_psn
-           << " diff_cp_cnt " << cp_info.diff_cp_id << " diff_Data_psn " << cp_info.diff_data_psn << " blkalloc cp cp "
-           << cp_info.blkalloc_cp_id;
+        ss << "active_cp_cnt " << icp_sb.active_cp_id << " active_data_seqid " << icp_sb.active_data_seqid
+           << " diff_cp_cnt " << icp_sb.diff_cp_id << " diff_Data_seqid " << icp_sb.diff_data_seqid
+           << " blkalloc cp cp " << icp_sb.blkalloc_cp_id;
         return ss.str();
     }
 } __attribute__((__packed__));
 
 /* this superblock is never changed once indx manager is created */
-struct indx_mgr_static_sb {
-    logstore_id_t journal_id;
+struct indx_mgr_sb {
+    logstore_id_t journal_id = 0;
     btree_super_block btree_sb;
-    bool is_snap_enabled;
+    bool is_snap_enabled = false;
+    indx_mgr_sb(btree_super_block btree_sb, logstore_id_t journal_id, bool is_snap_enabled) :
+            journal_id(journal_id), btree_sb(btree_sb), is_snap_enabled(is_snap_enabled) {}
+    indx_mgr_sb() {}
 } __attribute__((__packed__));
 
 class HomeStoreCPMgr : public CPMgr< hs_cp > {

@@ -169,21 +169,16 @@ public:
 #define VOL_SB_VERSION 0x2
 struct vol_sb_hdr {
     /* Immutable members */
-    uint64_t version;
-    uint64_t page_size;
-    uint64_t size;
-    boost::uuids::uuid uuid;
-    char vol_name[VOL_NAME_SIZE];
-    indx_mgr_static_sb indx_mgr_sb;
-    vol_sb_hdr(uint64_t page_size, uint64_t size, const char* in_vol_name, boost::uuids::uuid uuid,
-               indx_mgr_static_sb indx_mgr_sb) :
-            version(VOL_SB_VERSION),
-            page_size(page_size),
-            size(size),
-            uuid(uuid),
-            vol_name(""),
-            indx_mgr_sb(indx_mgr_sb) {
-        ::memcpy((char*)vol_name, in_vol_name, VOL_NAME_SIZE);
+    const uint64_t version;
+    const uint64_t page_size;
+    const uint64_t size;
+    const boost::uuids::uuid uuid;
+    const char vol_name[VOL_NAME_SIZE];
+    indx_mgr_sb indx_sb;
+    vol_sb_hdr(const uint64_t& page_size, const uint64_t& size, const char* in_vol_name,
+               const boost::uuids::uuid& uuid) :
+            version(VOL_SB_VERSION), page_size(page_size), size(size), uuid(uuid), vol_name("") {
+        memcpy((char*)vol_name, in_vol_name, VOL_NAME_SIZE);
     };
 
     /* these variables are mutable. Always update these values before writing the superblock */
@@ -290,7 +285,7 @@ private:
     void shutdown_if_needed();
     void destroy_internal();
     indx_tbl* create_indx_tbl();
-    indx_tbl* recover_indx_tbl(btree_super_block& sb, btree_cp_superblock& cp_info);
+    indx_tbl* recover_indx_tbl(btree_super_block& sb, btree_cp_sb& cp_sb);
     mapping* get_active_indx();
 
     void vol_sb_init();
@@ -489,8 +484,8 @@ struct volume_req : indx_req {
     std::vector< std::pair< MappingKey, MappingValue > > result_kv;
 
     /********** members used by indx_mgr and mapping **********/
-    int64_t lastCommited_seqId = INVALID_SEQ_ID;
-    int64_t seqId = INVALID_SEQ_ID;
+    int64_t lastCommited_seqid = INVALID_SEQ_ID;
+    int64_t seqid = INVALID_SEQ_ID;
 
     /********** Below entries are used for journal or to store checksum **********/
     std::vector< uint16_t > csum_list;
@@ -525,7 +520,7 @@ struct volume_req : indx_req {
 
     /***************** Virtual functions required by indx mgr *********************/
     virtual void free_yourself() override { sisl::ObjectAllocator< volume_req >::deallocate(this); }
-    virtual uint64_t get_seqId() override { return seqId; }
+    virtual uint64_t get_seqid() override { return seqid; }
     virtual uint32_t get_key_size() override { return (sizeof(journal_key)); }
     virtual uint32_t get_val_size() override {
         uint64_t active_nlbas_written = mapping::get_nlbas_from_cursor(lba(), active_btree_cur);
@@ -585,7 +580,7 @@ private:
         csum_list.reserve(VOL_MAX_IO_SIZE / vi_req->vol_instance->get_page_size());
         indx_fbe_list.reserve(VOL_MAX_IO_SIZE / vi_req->vol_instance->get_page_size());
         alloc_blkid_list.reserve(VOL_MAX_IO_SIZE / vi_req->vol_instance->get_page_size());
-        if (vi_req->is_write()) { seqId = vi_req->vol_instance->inc_and_get_seq_id(); }
+        if (vi_req->is_write()) { seqid = vi_req->vol_instance->inc_and_get_seq_id(); }
     }
 };
 
