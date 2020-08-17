@@ -60,14 +60,14 @@ public:
     }
 
     uint32_t get_node_size() const { return m_node_size; }
-    static btree_cp_id_ptr attach_prepare_cp(MemBtreeStore* store, const btree_cp_id_ptr& cur_cp_id, bool is_last_cp,
-                                             bool blkalloc_checkpoint) {
+    static btree_cp_ptr attach_prepare_cp(MemBtreeStore* store, const btree_cp_ptr& cur_bcp, bool is_last_cp,
+                                          bool blkalloc_checkpoint) {
         return nullptr;
     }
     static void create_done(MemBtreeStore* store, bnodeid_t m_root_node);
     static void update_sb(MemBtreeStore* store, btree_super_block& sb, btree_cp_superblock* cp_sb, bool is_recovery){};
 
-    // static void write_journal_entry(MemBtreeStore* store, const btree_cp_id_ptr& cp_id, sisl::io_blob& j_iob) {}
+    // static void write_journal_entry(MemBtreeStore* store, const btree_cp_ptr& bcp, sisl::io_blob& j_iob) {}
     // static bool is_aligned_buf_needed(MemBtreeStore* store, size_t size) { return true; }
 
     static boost::intrusive_ptr< MemBtreeNode >
@@ -121,7 +121,7 @@ public:
     }
 
     static btree_status_t write_node(MemBtreeStore* store, boost::intrusive_ptr< MemBtreeNode > bn,
-                                     boost::intrusive_ptr< MemBtreeNode > dependent_bn, const btree_cp_id_ptr& cp_id) {
+                                     boost::intrusive_ptr< MemBtreeNode > dependent_bn, const btree_cp_ptr& bcp) {
         return btree_status_t::success;
     }
 
@@ -172,7 +172,7 @@ public:
     }
 
     static btree_status_t refresh_node(MemBtreeStore* impl, boost::intrusive_ptr< MemBtreeNode > bn,
-                                       bool is_write_modifiable, const btree_cp_id_ptr& cp_id) {
+                                       bool is_write_modifiable, const btree_cp_ptr& bcp) {
         return btree_status_t::success;
     }
 
@@ -194,24 +194,25 @@ public:
         }
     }
 
-    static void cp_start(MemBtreeStore* store, const btree_cp_id_ptr& cp_id, cp_comp_callback cb) {}
-    static void truncate(MemBtreeStore* store, const btree_cp_id_ptr& cp_id) {}
+    static void cp_start(MemBtreeStore* store, const btree_cp_ptr& bcp, cp_comp_callback cb) {}
+    static void truncate(MemBtreeStore* store, const btree_cp_ptr& bcp) {}
     static void cp_done(trigger_cp_callback cb) {}
     static void destroy_done(MemBtreeStore* store) {}
-    static void flush_free_blks(MemBtreeStore* store, const btree_cp_id_ptr& btree_id,
-                                std::shared_ptr< homestore::blkalloc_cp_id >& blkalloc_id) {}
+    static void flush_free_blks(MemBtreeStore* store, const btree_cp_ptr& bcp,
+                                std::shared_ptr< homestore::blkalloc_cp >& ba_cp) {}
 
-    static sisl::io_blob make_journal_entry(journal_op op, bool is_root, bt_node_gen_pair pair = {}) {
+    static sisl::io_blob make_journal_entry(journal_op op, bool is_root, const btree_cp_ptr& bcp,
+                                            bt_node_gen_pair pair = {}) {
         return sisl::io_blob();
     }
     static inline constexpr btree_journal_entry* blob_to_entry(const sisl::io_blob& b) { return nullptr; }
     static void append_node_to_journal(sisl::io_blob& j_iob, bt_journal_node_op node_op,
-                                       const boost::intrusive_ptr< MemBtreeNode >& node, const btree_cp_id_ptr& cp_id,
+                                       const boost::intrusive_ptr< MemBtreeNode >& node, const btree_cp_ptr& bcp,
                                        bool append_last_key = false) {}
     static void append_node_to_journal(sisl::io_blob& j_iob, bt_journal_node_op node_op,
-                                       const boost::intrusive_ptr< MemBtreeNode >& node, const btree_cp_id_ptr& cp_id,
+                                       const boost::intrusive_ptr< MemBtreeNode >& node, const btree_cp_ptr& bcp,
                                        const sisl::blob& key_blob) {}
-    static void write_journal_entry(MemBtreeStore* store, const btree_cp_id_ptr& cp_id, sisl::io_blob& j_iob) {}
+    static void write_journal_entry(MemBtreeStore* store, const btree_cp_ptr& bcp, sisl::io_blob& j_iob) {}
 
     static btree_status_t write_node_sync(MemBtreeStore* store, boost::intrusive_ptr< MemBtreeNode > bn) {
         return btree_status_t::success;

@@ -351,7 +351,7 @@ public:
      * @return :- no_error if there is no error. It doesn't throw any exception
      */
     std::error_condition unmap(const vol_interface_req_ptr& hb_req);
-    
+
     /* shutdown the volume. It assumes caller has ensure that there are no outstanding ios. */
     void shutdown();
 
@@ -423,10 +423,10 @@ public:
     size_t call_batch_completion_cbs();
 
     /* Update a new cp of this volume.
-     * @params vol_id :- current cp id of this volume
-     * @params home_blks_id :- current cp id of home_blks
+     * @params icp :- current cp of this volume
+     * @params cur_hcp :- current cp of home_blks
      */
-    indx_cp_id_ptr attach_prepare_volume_cp(const indx_cp_id_ptr& indx_id, hs_cp_id* hs_id, hs_cp_id* new_hs_id);
+    indx_cp_ptr attach_prepare_volume_cp(const indx_cp_ptr& icp, hs_cp* cur_hcp, hs_cp* new_hcp);
 
     std::string to_string() {
         std::stringstream ss;

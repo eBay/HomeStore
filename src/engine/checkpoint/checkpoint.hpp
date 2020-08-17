@@ -30,7 +30,7 @@
  *
  * CP trigger :- It trigger current cp to flush
  * CP start :- It start the flush when all ios have called cp_io_exit on that cp
- * CP end :- when cp flush is completed. It frees the CP id.
+ * CP end :- when cp flush is completed. It frees the CP.
  */
 typedef std::function< void(bool success) > cp_done_cb;
 namespace homestore {
@@ -45,11 +45,11 @@ ENUM(cp_status_t, uint8_t,
      cp_done      // Data flush is done.
 );
 
-/* It is a base class of consumer checkpoint ID. consumer checkpoint id can use it to store
- * checkpoint related info related to checkpoint. It is allocated/freed by CheckPoint class
+/* It is a base class of consumer checkpoint. consumer checkpoint can use it to store
+ * checkpoint related info related to checkpoint. It is allocated/freed by CPMgr class
  */
 
-struct cp_id_base {
+struct cp_base {
     std::atomic< cp_status_t > cp_status = cp_status_t::cp_init;
     std::atomic< int > enter_cnt;
     bool cp_trigger_waiting = false; // it is waiting for previous cp to complete
@@ -57,7 +57,7 @@ struct cp_id_base {
     /* callback when cp is done */
     std::vector< cp_done_cb > cb_list;
 
-    cp_id_base() : enter_cnt(0), cb_list(0){};
+    cp_base() : enter_cnt(0), cb_list(0){};
     std::string to_string() {
         return fmt::format("[cp_status={}, enter_cnt={}]", enum_name(cp_status.load()), enter_cnt.load());
     }
@@ -71,93 +71,91 @@ struct cp_id_base {
 };
 
 /* It is responsible to trigger the checkpoints when all concurrent IOs are completed.
- * @ cp_id_type :- It is a consumer checkpoint ID with a base class of cp_id
+ * @ cp_type :- It is a consumer checkpoint with a base class of cp
  */
-template < typename cp_id_type = cp_id_base >
-class CheckPoint {
+template < typename cp_type = cp_base >
+class CPMgr {
 private:
-    cp_id_type* m_cur_cp_id = nullptr;
+    cp_type* m_cur_cp = nullptr;
     std::atomic< bool > in_cp_phase = false;
     std::mutex trigger_cp_mtx;
 
 public:
-    /* @timeo :- Timer in milliseconds to trigger a checkpoint. */
-    CheckPoint(int timeo) {
-        m_cur_cp_id = new cp_id_type();
-        m_cur_cp_id->cp_status = cp_status_t::cp_io_ready;
-        /* TODO :- integrate with io mgr to start a timer */
+    CPMgr() {
+        m_cur_cp = new cp_type();
+        m_cur_cp->cp_status = cp_status_t::cp_io_ready;
     }
 
-    virtual ~CheckPoint() { assert(!m_cur_cp_id); }
+    virtual ~CPMgr() { assert(!m_cur_cp); }
 
     void shutdown() {
-        auto cp_id = get_cur_cp_id();
-        delete (cp_id);
-        rcu_xchg_pointer(&m_cur_cp_id, nullptr);
+        auto cp = get_cur_cp();
+        delete (cp);
+        rcu_xchg_pointer(&m_cur_cp, nullptr);
     }
 
-    /* Get current CP ID */
-    cp_id_type* get_cur_cp_id() {
-        cp_id_type* p = rcu_dereference(m_cur_cp_id);
+    /* Get current CP */
+    cp_type* get_cur_cp() {
+        cp_type* p = rcu_dereference(m_cur_cp);
         return p;
     }
 
     /* It is called for each IO. It doesn't trigger a CP until cp_exit() is not called for this IO
-     * and CP id.
-     * @ return :- return a current cp_id
+     * and CP.
+     * @ return :- return a current cp
      */
-    cp_id_type* cp_io_enter() {
+    cp_type* cp_io_enter() {
         rcu_read_lock();
-        auto cp_id = get_cur_cp_id();
+        auto cp = get_cur_cp();
 
-        if (!cp_id) {
+        if (!cp) {
             rcu_read_unlock();
             return nullptr;
         }
-        auto cnt = cp_id->enter_cnt.fetch_add(1);
-        assert(cp_id->cp_status == cp_status_t::cp_io_ready || cp_id->cp_status == cp_status_t::cp_trigger ||
-               cp_id->cp_status == cp_status_t::cp_prepare);
+        auto cnt = cp->enter_cnt.fetch_add(1);
+        assert(cp->cp_status == cp_status_t::cp_io_ready || cp->cp_status == cp_status_t::cp_trigger ||
+               cp->cp_status == cp_status_t::cp_prepare);
 
         rcu_read_unlock();
 
-        return cp_id;
+        return cp;
     }
 
-    /* It exposes an API to increment the ref count on a cp id. It assumes that caller is alrady in cp_io_enter
+    /* It exposes an API to increment the ref count on a cp. It assumes that caller is alrady in cp_io_enter
      * phase before calling cp_inc_ref.
      */
-    void cp_inc_ref(cp_id_type* id, int ref_cnt) {
-        assert(id->enter_cnt > 0);
-        auto cnt = id->enter_cnt.fetch_add(ref_cnt);
+    void cp_inc_ref(cp_type* cp, int ref_cnt) {
+        assert(cp->enter_cnt > 0);
+        auto cnt = cp->enter_cnt.fetch_add(ref_cnt);
     }
 
     /* It is called for each IO when it is completed. It trigger a checkpoint if it is pending and there
      * are no outstanding IOs.
-     * id :- cp_id returned in cp_enter()
-        delete (id);
+     * cp :- cp returned in cp_enter()
      */
-    void cp_io_exit(cp_id_type* id) {
-        assert(id->cp_status != cp_status_t::cp_start);
-        auto cnt = id->enter_cnt.fetch_sub(1);
-        if (cnt == 1 && id->cp_status == cp_status_t::cp_prepare) {
-            id->cp_status = cp_status_t::cp_start;
-            cp_start(id);
+    void cp_io_exit(cp_type* cp) {
+        assert(cp->cp_status != cp_status_t::cp_start);
+        auto cnt = cp->enter_cnt.fetch_sub(1);
+        if (cnt == 1 && cp->cp_status == cp_status_t::cp_prepare) {
+            cp->cp_status = cp_status_t::cp_start;
+            LOGDEBUGMOD(cp, "Outside of CP critical section, ref_count is 0, starting CP");
+            cp_start(cp);
         }
     }
 
     /* It should be called when all IOs are persisted in a checkpoint. It is assumed that it is called by only one
      * thread and only once.
      */
-    void cp_end(cp_id_type* id) {
+    void cp_end(cp_type* cp) {
         assert(in_cp_phase);
-        HS_ASSERT_CMP(DEBUG, id->cp_status, ==, cp_status_t::cp_start);
-        auto cb_list = id->cb_list;
-        delete (id);
+        HS_ASSERT_CMP(DEBUG, cp->cp_status, ==, cp_status_t::cp_start);
+        auto cb_list = cp->cb_list;
+        delete (cp);
 
         for (uint32_t i = 0; i < cb_list.size(); ++i) {
             cb_list[i](true);
         }
-        LOGDEBUGMOD(cp, "cp ID completed {}", id->to_string());
+        LOGDEBUGMOD(cp, ">>>>>>>>>>>> cp ID completed {}, notified {} callbacks", cp->to_string(), cb_list.size());
         in_cp_phase = false;
 
         /* Once a cp is done, try to check and release exccess memory if need be */
@@ -167,13 +165,16 @@ public:
             HS_DYNAMIC_CONFIG(generic.aggressive_mem_release_threshold) * HS_STATIC_CONFIG(input.app_mem_size) / 100;
         sisl::release_mem_if_needed(soft_sz, agg_sz);
 
-        auto cur_cp_id = cp_io_enter();
-        if (!cur_cp_id) { return; }
-        if (cur_cp_id->cp_trigger_waiting) { trigger_cp(); }
-        cp_io_exit(cur_cp_id);
+        auto cur_cp = cp_io_enter();
+        if (!cur_cp) { return; }
+        if (cur_cp->cp_trigger_waiting) {
+            LOGINFOMOD(cp, "Triggering back to back CP");
+            trigger_cp();
+        }
+        cp_io_exit(cur_cp);
     }
 
-    void attach_cb(cp_id_type* cp_id, const cp_done_cb& cb) { cp_id->push_cb(std::move(cb)); }
+    void attach_cb(cp_type* cp, const cp_done_cb& cb) { cp->push_cb(std::move(cb)); }
 
     /* Trigger a checkpoint if it is not in cp phase. It makes sure to attach a callback to a CP who hasn't called the
      * attach_prepare yet.
@@ -186,32 +187,35 @@ public:
         auto ret = in_cp_phase.compare_exchange_strong(expected, true);
         if (!ret) {
             std::unique_lock< std::mutex > lk(trigger_cp_mtx);
-            auto cp_id = cp_io_enter();
-            assert(cp_id->cp_status != cp_status_t::cp_prepare);
-            if (cb) { cp_id->push_cb(std::move(cb)); }
-            cp_id->cp_trigger_waiting = true;
-            cp_io_exit(cp_id);
+            auto cp = cp_io_enter();
+            assert(cp->cp_status != cp_status_t::cp_prepare);
+            if (cb) { cp->push_cb(std::move(cb)); }
+            cp->cp_trigger_waiting = true;
+            cp_io_exit(cp);
             return;
         }
 
-        auto prev_cp_id = cp_io_enter();
-        prev_cp_id->cp_status = cp_status_t::cp_trigger;
-        LOGDEBUGMOD(cp, "cp ID state {}", prev_cp_id->to_string());
+        auto prev_cp = cp_io_enter();
+        prev_cp->cp_status = cp_status_t::cp_trigger;
+        LOGDEBUGMOD(cp, "cp  state {}", prev_cp->to_string());
 
         /* allocate a new cp */
-        auto new_cp_id = new cp_id_type();
+        auto new_cp = new cp_type();
         {
             std::unique_lock< std::mutex > lk(trigger_cp_mtx);
-            cp_attach_prepare(prev_cp_id, new_cp_id);
-            if (cb) { prev_cp_id->push_cb(std::move(cb)); }
-            prev_cp_id->cp_status = cp_status_t::cp_prepare;
-            new_cp_id->cp_status = cp_status_t::cp_io_ready;
-            rcu_xchg_pointer(&m_cur_cp_id, new_cp_id);
+            LOGDEBUGMOD(cp, "About to attach and prepare into the CP");
+            cp_attach_prepare(prev_cp, new_cp);
+            LOGDEBUGMOD(cp, "CP Attached completed, proceed to exit cp critical section");
+            if (cb) { prev_cp->push_cb(std::move(cb)); }
+            prev_cp->cp_status = cp_status_t::cp_prepare;
+            new_cp->cp_status = cp_status_t::cp_io_ready;
+            rcu_xchg_pointer(&m_cur_cp, new_cp);
             synchronize_rcu();
         }
-        // At this point we are sure that there is no thread working on prev_cp_id without incrementing the cp_enter cnt
+        // At this point we are sure that there is no thread working on prev_cp without incrementing the cp_enter cnt
 
-        cp_io_exit(prev_cp_id);
+        LOGDEBUGMOD(cp, "CP critical section done, doing cp_io_exit");
+        cp_io_exit(prev_cp);
     }
 
     /* CP is divided into two stages :- CP prepare and CP start */
@@ -219,11 +223,11 @@ public:
     /* It is called when cp is moving to prepare state. It is called under the lock and is called only once for a given
      * CP.
      */
-    virtual void cp_attach_prepare(cp_id_type* prev_id, cp_id_type* cur_id) = 0;
+    virtual void cp_attach_prepare(cp_type* prev_cp, cp_type* cur_cp) = 0;
 
     /* It should be defined by the derived class and is called when checkpoint is triggerd and all outstanding
      * IOs have called cp_io_exit.
      */
-    virtual void cp_start(cp_id_type* id) = 0;
+    virtual void cp_start(cp_type* cp) = 0;
 };
 } // namespace homestore

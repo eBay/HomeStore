@@ -756,8 +756,8 @@ public:
         return do_read_internal(pdev, pchunk, offset_in_dev, (char*)buf, count, nullptr);
     }
 
-    std::shared_ptr< blkalloc_cp_id > attach_prepare_cp(std::shared_ptr< blkalloc_cp_id > cur_cp_id) {
-        return (PhysicalDevChunk::attach_prepare_cp(cur_cp_id));
+    std::shared_ptr< blkalloc_cp > attach_prepare_cp(std::shared_ptr< blkalloc_cp > cur_ba_cp) {
+        return (PhysicalDevChunk::attach_prepare_cp(cur_ba_cp));
     }
 
     /**
@@ -1172,12 +1172,12 @@ public:
     uint64_t get_num_chunks() const { return m_num_chunks; }
     uint64_t get_chunk_size() const { return m_chunk_size; }
 
-    void blkalloc_cp_start(std::shared_ptr< blkalloc_cp_id > id) {
+    void blkalloc_cp_start(std::shared_ptr< blkalloc_cp > ba_cp) {
         for (uint32_t i = 0; i < m_primary_pdev_chunks_list.size(); ++i) {
             for (uint32_t chunk_indx = 0; chunk_indx < m_primary_pdev_chunks_list[i].chunks_in_pdev.size();
                  ++chunk_indx) {
                 auto chunk = m_primary_pdev_chunks_list[i].chunks_in_pdev[chunk_indx];
-                chunk->cp_start(id);
+                chunk->cp_start(ba_cp);
             }
         }
     }

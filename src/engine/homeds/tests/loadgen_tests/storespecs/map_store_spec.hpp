@@ -20,7 +20,7 @@ class MapStoreSpec : public StoreSpec< K, V > {
     typedef std::function< void(generator_op_error, const key_info< K, V >*, void*, const std::string&) >
         store_error_cb_t;
 
-    btree_cp_id m_cp_id;
+    btree_cp m_cp_id;
 
 public:
     MapStoreSpec() {}

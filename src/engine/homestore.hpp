@@ -120,13 +120,13 @@ public:
         return bid;
     }
 
-    void blkalloc_cp_start(std::shared_ptr< blkalloc_cp_id > id) {
-        get_data_blkstore()->blkalloc_cp_start(id);
-        get_index_blkstore()->blkalloc_cp_start(id);
+    void blkalloc_cp_start(std::shared_ptr< blkalloc_cp > ba_cp) {
+        get_data_blkstore()->blkalloc_cp_start(ba_cp);
+        get_index_blkstore()->blkalloc_cp_start(ba_cp);
     }
 
-    std::shared_ptr< blkalloc_cp_id > blkalloc_attach_prepare_cp(std::shared_ptr< blkalloc_cp_id > cur_cp_id) {
-        return (get_data_blkstore()->attach_prepare_cp(cur_cp_id));
+    std::shared_ptr< blkalloc_cp > blkalloc_attach_prepare_cp(std::shared_ptr< blkalloc_cp > cur_ba_cp) {
+        return (get_data_blkstore()->attach_prepare_cp(cur_ba_cp));
     }
 
 protected:

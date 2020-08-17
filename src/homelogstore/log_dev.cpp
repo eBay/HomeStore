@@ -3,6 +3,7 @@
 
 namespace homestore {
 
+SDS_LOGGING_DECL(logstore)
 LogDev::LogDev() = default;
 LogDev::~LogDev() = default;
 
@@ -93,7 +94,7 @@ void LogDev::do_load(uint64_t device_cursor) {
         auto buf = lstream.next_group(&group_dev_offset);
         if (buf.size() == 0) {
             assert_next_pages(lstream);
-            LOGINFO("LogDev loaded log_idx in range of [{} - {}]", loaded_from, m_log_idx - 1);
+            LOGINFOMOD(logstore, "LogDev loaded log_idx in range of [{} - {}]", loaded_from, m_log_idx - 1);
             break;
         }
 
@@ -122,8 +123,9 @@ void LogDev::do_load(uint64_t device_cursor) {
 }
 
 void LogDev::assert_next_pages(log_stream_reader& lstream) {
-    LOGINFO("Logdev reached offset, which has invalid header, because of end of stream. Validating if it is "
-            "indeed the case or there is any corruption");
+    LOGINFOMOD(logstore,
+               "Logdev reached offset, which has invalid header, because of end of stream. Validating if it is "
+               "indeed the case or there is any corruption");
 
     auto cursor = lstream.group_cursor();
     for (auto i = 0u; i < max_blks_read_for_additional_check; i++) {
@@ -189,9 +191,11 @@ log_buffer LogDev::read(const logdev_key& key) {
         // Allocate a fresh aligned buffer, if size cannot fit standard size
         if (rounded_size > initial_read_size) { rbuf = iomanager.iobuf_alloc(dma_boundary, rounded_size); }
 
-        LOGTRACE("Addln read as data resides outside initial_read_size={} key.idx={} key.group_dev_offset={} "
-                 "data_offset={} size={} rounded_data_offset={} rounded_size={}",
-                 initial_read_size, key.idx, key.dev_offset, data_offset, b.size(), rounded_data_offset, rounded_size);
+        LOGTRACEMOD(logstore,
+                    "Addln read as data resides outside initial_read_size={} key.idx={} key.group_dev_offset={} "
+                    "data_offset={} size={} rounded_data_offset={} rounded_size={}",
+                    initial_read_size, key.idx, key.dev_offset, data_offset, b.size(), rounded_data_offset,
+                    rounded_size);
         store->pread((void*)rbuf, rounded_size, key.dev_offset + rounded_data_offset);
         memcpy((void*)b.bytes(), (void*)(rbuf + data_offset - rounded_data_offset), b.size());
 
@@ -246,7 +250,7 @@ void LogDev::_persist_info_block() {
     memcpy((void*)ib->store_id_info, store_id_buf->bytes, store_id_buf->size);
 
     if (m_sb_cookie) {
-        meta_blk_mgr->update_sub_sb("LOG_DEV", (void*)ib, logdev_info_block::size, m_sb_cookie);
+        meta_blk_mgr->update_sub_sb((void*)ib, logdev_info_block::size, m_sb_cookie);
     } else {
         meta_blk_mgr->add_sub_sb("LOG_DEV", (void*)ib, logdev_info_block::size, m_sb_cookie);
     }
@@ -275,8 +279,8 @@ LogGroup* LogDev::prepare_flush(int32_t estimated_records) {
     lg->m_log_dev_offset = m_hb->get_logdev_blkstore()->alloc_next_append_blk(lg->header()->group_size);
 
     assert(lg->header()->oob_data_offset > 0);
-    LOGDEBUG("Flushing upto log_idx={}", flushing_upto_idx);
-    LOGDEBUG("Log Group: {}", *lg);
+    LOGDEBUGMOD(logstore, "Flushing upto log_idx={}", flushing_upto_idx);
+    LOGDEBUGMOD(logstore, "Log Group: {}", *lg);
     return lg;
 }
 
@@ -293,7 +297,8 @@ void LogDev::flush_if_needed(const uint32_t new_record_size, logid_t new_idx) {
          (pending_sz && (get_elapsed_time_us(m_last_flush_time) > max_time_between_flush_us)))) {
         bool expected_flushing = false;
         if (m_is_flushing.compare_exchange_strong(expected_flushing, true, std::memory_order_acq_rel)) {
-            LOGTRACE(
+            LOGTRACEMOD(
+                logstore,
                 "Flushing now because either pending_size={} is greater than data_threshold={} or elapsed time since "
                 "last flush={} us is greater than max_time_between_flush={} us",
                 pending_sz, flush_data_threshold_size, get_elapsed_time_us(m_last_flush_time),
@@ -302,7 +307,7 @@ void LogDev::flush_if_needed(const uint32_t new_record_size, logid_t new_idx) {
             // We were able to win the flushing competition and now we gather all the flush data and reserve a slot.
             if (new_idx == -1) new_idx = m_log_idx.load(std::memory_order_relaxed) - 1;
             if (m_last_flush_idx >= new_idx) {
-                LOGTRACE("this indx is just flushed");
+                LOGTRACEMOD(logstore, "Log idx {} is just flushed", new_idx);
                 m_is_flushing = false;
                 return;
             }
@@ -310,10 +315,10 @@ void LogDev::flush_if_needed(const uint32_t new_record_size, logid_t new_idx) {
             m_pending_flush_size.fetch_sub(lg->actual_data_size(), std::memory_order_relaxed);
 
             m_last_flush_time = Clock::now();
-            LOGTRACE("Flush prepared, flushing data size={}", lg->actual_data_size());
+            LOGTRACEMOD(logstore, "Flush prepared, flushing data size={}", lg->actual_data_size());
             do_flush(lg);
         } else {
-            LOGTRACE("Back to back flushing, will let the current flush to finish and perform this flush");
+            LOGTRACEMOD(logstore, "Back to back flushing, will let the current flush to finish and perform this flush");
         }
     }
 }
@@ -338,7 +343,7 @@ void LogDev::process_logdev_completions(const boost::intrusive_ptr< blkstore_req
 }
 
 void LogDev::on_flush_completion(LogGroup* lg) {
-    LOGTRACE("Flush completed for logid[{} - {}]", lg->m_flush_log_idx_from, lg->m_flush_log_idx_upto);
+    LOGTRACEMOD(logstore, "Flush completed for logid[{} - {}]", lg->m_flush_log_idx_from, lg->m_flush_log_idx_upto);
     m_log_records->complete(lg->m_flush_log_idx_from, lg->m_flush_log_idx_upto);
     m_last_flush_idx = lg->m_flush_log_idx_upto;
     auto flush_ld_key = logdev_key{m_last_flush_idx, lg->m_log_dev_offset};
@@ -382,14 +387,14 @@ void LogDev::unlock_flush() {
     m_is_flushing.store(false, std::memory_order_release);
 
     // Try to do chain flush if its really needed.
-    LOGTRACE("Unlocked the flush, try doing chain flushing if needed");
+    LOGTRACEMOD(logstore, "Unlocked the flush, try doing chain flushing if needed");
     flush_if_needed();
 }
 
 void LogDev::truncate(const logdev_key& key) {
     auto store = m_hb->get_logdev_blkstore();
 
-    LOGINFO("Truncating log device upto log_id={} vdev_offset={}", key.idx, key.dev_offset);
+    LOGINFOMOD(logstore, "Truncating log device upto log_id={} vdev_offset={}", key.idx, key.dev_offset);
     m_log_records->truncate(key.idx);
     store->truncate(key.dev_offset);
 
@@ -401,7 +406,7 @@ void LogDev::truncate(const logdev_key& key) {
             if (it->first > key.idx) break;
             persist = true;
 
-            LOGINFO("Garbage collecting the log store id {} log_idx={}", it->second, it->first);
+            LOGINFOMOD(logstore, "Garbage collecting the log store id {} log_idx={}", it->second, it->first);
             m_id_reserver->unreserve(it->second);
             it = m_garbage_store_ids.erase(it);
         }

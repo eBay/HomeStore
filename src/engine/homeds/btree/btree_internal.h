@@ -30,7 +30,7 @@
 
 ENUM(btree_status_t, uint32_t, success, not_found, item_found, closest_found, closest_removed, retry, has_more,
      read_failed, write_failed, stale_buf, refresh_failed, put_failed, space_not_avail, split_failed, insert_failed,
-     cp_id_mismatch, merge_not_required, merge_failed, replay_not_needed, fast_path_not_possible, resource_full);
+     cp_mismatch, merge_not_required, merge_failed, replay_not_needed, fast_path_not_possible, resource_full);
 
 typedef enum {
     READ_NONE = 0,
@@ -85,30 +85,36 @@ struct blkalloc_cp_id;
 VENUM(journal_op, uint8_t, BTREE_SPLIT = 1, BTREE_MERGE = 2, BTREE_CREATE = 3);
 
 #define INVALID_SEQ_ID -1
-struct btree_cp_id;
-using btree_cp_id_ptr = boost::intrusive_ptr< btree_cp_id >;
-using cp_comp_callback = std::function< void(const btree_cp_id_ptr& cp_id) >;
+struct btree_cp;
+using btree_cp_ptr = boost::intrusive_ptr< btree_cp >;
+using cp_comp_callback = std::function< void(const btree_cp_ptr& bcp) >;
 using bnodeid_t = uint64_t;
 static constexpr bnodeid_t empty_bnodeid = std::numeric_limits< bnodeid_t >::max();
 
 struct btree_cp_superblock {
     int64_t active_psn = -1;
-    int64_t cp_cnt = -1;
-    int64_t blkalloc_cp_cnt = -1;
+    int64_t cp_id = -1;
+    int64_t blkalloc_cp_id = -1;
     int64_t btree_size = 0;
     /* we can add more statistics as well like number of interior nodes etc. */
+    std::string to_string() const {
+        std::stringstream ss;
+        ss << "active psn " << active_psn << " cp_id " << cp_id << " blkalloc_cp_id " << blkalloc_cp_id
+           << " btree_size " << btree_size;
+        return ss.str();
+    }
 } __attribute__((__packed__));
 
-struct btree_cp_id : public boost::intrusive_ref_counter< btree_cp_id > {
-    int64_t cp_cnt = -1;
+struct btree_cp : public boost::intrusive_ref_counter< btree_cp > {
+    int64_t cp_id = -1;
     std::atomic< int > ref_cnt;
     std::atomic< int64_t > btree_size;
     int64_t start_psn = -1; // not inclusive
     int64_t end_psn = -1;   // inclusive
     cp_comp_callback cb;
     homestore::blkid_list_ptr free_blkid_list;
-    btree_cp_id() : ref_cnt(1), btree_size(0){};
-    ~btree_cp_id() {}
+    btree_cp() : ref_cnt(1), btree_size(0){};
+    ~btree_cp() {}
 };
 
 /********************* Journal Specific Section **********************/
@@ -131,44 +137,6 @@ struct bt_journal_node_info {
 };
 
 struct btree_journal_entry {
-#if 0
-    static constexpr size_t alloc_increment = 256;
-    static constexpr size_t min_size() { return std::max(alloc_increment, sizeof(btree_journal_entry)); }
-
-    static sisl::io_blob make(journal_op op) {
-        auto b = sisl::io_blob(
-            min_size(), HomeLogStore::is_aligned_buf_needed(min_size()) ? HS_STATIC_CONFIG(disk_attr.align_size) : 0);
-        new (b.bytes) btree_journal_entry(op);
-        return b;
-    }
-
-    static inline constexpr btree_journal_entry* get(const sisl::io_blob& b) { return (btree_journal_entry*)b.bytes; }
-
-    static btree_journal_entry* realloc_if_needed(sisl::io_blob& b, uint16_t append_size) {
-        assert(b.size > get(b)->actual_size);
-        uint16_t avail_size = b.size - get(b)->actual_size;
-        if (avail_size < append_size) {
-            auto new_size = sisl::round_up(entry->actual_size + append_size, alloc_increment);
-            b.buf_realloc(new_size,
-                          HomeLogStore::is_aligned_buf_needed(new_size) ? HS_STATIC_CONFIG(disk_attr.align_size) : 0);
-        }
-        return get(b);
-    }
-
-    static void append_node(sisl::io_blob& b, bt_journal_node_op node_op, bnodeid_t node_id, uint64_t gen,
-                            sisl::blob key = {nullptr, 0}) {
-        uint16_t append_size = sizeof(bt_journal_node_info) + key.size;
-        btree_journal_entry* entry = realloc_if_needed(b, append_size);
-        ++entry->node_count;
-
-        bt_journal_node_info* info = entry->_append_area();
-        info->node_info = {node_id, gen};
-        info->type = node_op;
-        info->key_size = key.size;
-        if (key.size) memcpy(info->key_area(), key.bytes, key.size);
-        entry->actual_size += append_size;
-    }
-#endif
     void append_node(bt_journal_node_op node_op, bnodeid_t node_id, uint64_t gen, sisl::blob key = {nullptr, 0}) {
         ++node_count;
         bt_journal_node_info* info = _append_area();
@@ -202,7 +170,7 @@ struct btree_journal_entry {
     }
 
     std::string to_string() const {
-        auto str = fmt::format("op={} is_root={} cp_cnt={} size={} num_nodes={} ", enum_name(op), is_root, cp_cnt,
+        auto str = fmt::format("op={} is_root={} cp_id={} size={} num_nodes={} ", enum_name(op), is_root, cp_id,
                                actual_size, node_count);
         str += fmt::format("[parent: id={}, gen={}] ", parent_node.node_id, parent_node.node_gen);
 
@@ -218,14 +186,15 @@ struct btree_journal_entry {
     /************** Actual header starts here **********/
     journal_op op;
     bool is_root = false;
-    int64_t cp_cnt = 0;
+    int64_t cp_id = 0;
     uint16_t actual_size = sizeof(btree_journal_entry);
     uint16_t node_count = 0;
     bt_node_gen_pair parent_node; // Info about the parent node
     // Additional node info follows this
 
 private:
-    btree_journal_entry(journal_op p, bool root, bt_node_gen_pair ninfo) : op(p), is_root(root), parent_node(ninfo) {}
+    btree_journal_entry(journal_op p, bool root, bt_node_gen_pair ninfo, int64_t cp_id) :
+            op(p), is_root(root), cp_id(cp_id), parent_node(ninfo) {}
     bt_journal_node_info* _append_area() { return (bt_journal_node_info*)((uint8_t*)this + actual_size); }
 } __attribute__((__packed__));
 
@@ -241,7 +210,7 @@ struct btree_journal_entry_hdr {
     uint8_t num_old_nodes;
     uint8_t num_new_nodes;
     uint8_t new_key_size;
-    int64_t cp_cnt;
+    int64_t cp_id;
 } __attribute__((__packed__));
 #endif
 
@@ -418,72 +387,122 @@ ENUM(_MultiMatchSelector, uint16_t, DO_NOT_CARE, LEFT_MOST, RIGHT_MOST,
                                     // range query is supported in remove
 )
 
+struct BtreeLockTracker;
+
+struct BtreeQueryCursor {
+    std::unique_ptr< BtreeKey > m_last_key;
+    std::unique_ptr< BtreeLockTracker > m_locked_nodes;
+    const sisl::blob serialize() {
+        sisl::blob b(nullptr, 0);
+        if (m_last_key) { return (m_last_key->get_blob()); }
+        return b;
+    };
+};
+
+using create_key_func = std::function< std::unique_ptr< BtreeKey >(BtreeKey* start_key) >;
 class BtreeSearchRange {
     friend struct BtreeQueryCursor;
     // friend class  BtreeQueryRequest;
 
 private:
-    const BtreeKey* m_start_key = nullptr;
-    const BtreeKey* m_end_key = nullptr;
+    const BtreeKey* const m_start_key = nullptr;
+    const BtreeKey* const m_end_key = nullptr;
 
     bool m_start_incl = false;
     bool m_end_incl = false;
     _MultiMatchSelector m_multi_selector;
+    BtreeQueryCursor* m_cur = nullptr;
 
 public:
-    BtreeSearchRange() {}
+    /* Note :- we don't allow default constructor. User should always create a range with start_key and end_key */
+    /* TODO : reduce number of constructors */
+    BtreeSearchRange(const BtreeKey& start_key, BtreeQueryCursor* cur = nullptr) :
+            BtreeSearchRange(start_key, true, start_key, true, cur) {}
 
-    BtreeSearchRange(const BtreeKey& start_key) : BtreeSearchRange(start_key, true, start_key, true) {}
+    BtreeSearchRange(const BtreeKey& start_key, const BtreeKey& end_key, BtreeQueryCursor* cur = nullptr) :
+            BtreeSearchRange(start_key, true, end_key, true, cur) {}
 
-    BtreeSearchRange(const BtreeKey& start_key, const BtreeKey& end_key) :
-            BtreeSearchRange(start_key, true, end_key, true) {}
-
-    BtreeSearchRange(const BtreeKey& start_key, bool start_incl, _MultiMatchSelector option) :
-            BtreeSearchRange(start_key, start_incl, start_key, start_incl, option) {}
-
-    BtreeSearchRange(const BtreeKey& start_key, bool start_incl, const BtreeKey& end_key, bool end_incl) :
-            BtreeSearchRange(start_key, start_incl, end_key, end_incl, _MultiMatchSelector::DO_NOT_CARE) {}
+    BtreeSearchRange(const BtreeKey& start_key, bool start_incl, _MultiMatchSelector option,
+                     BtreeQueryCursor* cur = nullptr) :
+            BtreeSearchRange(start_key, start_incl, start_key, start_incl, option, cur) {}
 
     BtreeSearchRange(const BtreeKey& start_key, bool start_incl, const BtreeKey& end_key, bool end_incl,
-                     _MultiMatchSelector option) :
+                     BtreeQueryCursor* cur = nullptr) :
+            BtreeSearchRange(start_key, start_incl, end_key, end_incl, _MultiMatchSelector::DO_NOT_CARE, cur) {}
+
+    BtreeSearchRange(const BtreeKey& start_key, bool start_incl, const BtreeKey& end_key, bool end_incl,
+                     _MultiMatchSelector option, BtreeQueryCursor* cur = nullptr) :
             m_start_key(&start_key),
             m_end_key(&end_key),
             m_start_incl(start_incl),
             m_end_incl(end_incl),
-            m_multi_selector(option) {}
+            m_multi_selector(option),
+            m_cur(cur) {}
 
-    void set(const BtreeKey& start_key, bool start_incl, const BtreeKey& end_key, bool end_incl) {
-        m_start_key = &start_key;
-        m_end_key = &end_key;
-        m_start_incl = start_incl;
-        m_end_incl = end_incl;
+    void set_selection_option(_MultiMatchSelector o) { m_multi_selector = o; }
+    void set_cursor(BtreeQueryCursor* cur) { m_cur = cur; }
+    void reset_cursor() { m_cur = nullptr; }
+
+    /******************* all functions are constant *************/
+    BtreeQueryCursor* get_cur() const { return m_cur; }
+    bool is_cursor_valid() const {
+        if (m_cur) {
+            return true;
+        } else {
+            return false;
+        }
     }
 
-    void set_start_key(BtreeKey* m_start_key) { BtreeSearchRange::m_start_key = m_start_key; }
-    void set_start_incl(bool m_start_incl) { BtreeSearchRange::m_start_incl = m_start_incl; }
-    void set_end_key(const BtreeKey* m_end_key) { BtreeSearchRange::m_end_key = m_end_key; }
-    void set_end_incl(bool m_end_incl) { BtreeSearchRange::m_end_incl = m_end_incl; }
+    void copy_start_end_blob(BtreeKey& start_key, bool& start_incl, BtreeKey& end_key, bool& end_incl) const {
+        start_key.copy_blob(get_start_key()->get_blob());
+        end_key.copy_blob(get_end_key()->get_blob());
+        start_incl = is_start_inclusive();
+        end_incl = is_end_inclusive();
+    }
 
-    const BtreeKey* get_start_key() const { return m_start_key; }
+    void set_cursor_key(BtreeKey* end_key, const create_key_func& func) {
+        if (!m_cur) {
+            /* no need to set cursor as user doesn't want to keep track of it */
+            return;
+        }
+        if (m_cur->m_last_key) {
+            m_cur->m_last_key->copy_end_key_blob(end_key->get_blob());
+        } else {
+            m_cur->m_last_key = std::move(func(end_key));
+        }
+    }
+
+    const BtreeKey* get_start_key() const {
+        if (m_cur && m_cur->m_last_key) {
+            return m_cur->m_last_key.get();
+        } else {
+            return m_start_key;
+        }
+    }
     const BtreeKey* get_end_key() const { return m_end_key; }
 
-    BtreeSearchRange extract_start_of_range() const {
-        return BtreeSearchRange(*m_start_key, m_start_incl, m_multi_selector);
+    BtreeSearchRange get_start_of_range() const {
+        return BtreeSearchRange(*get_start_key(), is_start_inclusive(), m_multi_selector);
     }
-    BtreeSearchRange extract_end_of_range() const { return BtreeSearchRange(*m_end_key, m_end_incl, m_multi_selector); }
 
-    // Is the key provided and current key completely matches.
-    // i.e If say a range = [8 to 12] and rkey is [9 - 11], then compare will return 0,
-    // but this method will return false. It will return true only if range exactly matches.
-    // virtual bool is_full_match(BtreeRangeKey *rkey) const = 0;
+    BtreeSearchRange get_end_of_range() const {
+        return BtreeSearchRange(*get_end_key(), is_end_inclusive(), m_multi_selector);
+    }
 
-    bool is_start_inclusive() const { return m_start_incl; }
+    bool is_start_inclusive() const {
+        if (m_cur && m_cur->m_last_key) {
+            // cursor always have the last key not included
+            return false;
+        } else {
+            return m_start_incl;
+        }
+    }
+
     bool is_end_inclusive() const { return m_end_incl; }
 
     bool is_simple_search() const { return ((get_start_key() == get_end_key()) && (m_start_incl == m_end_incl)); }
 
     _MultiMatchSelector selection_option() const { return m_multi_selector; }
-    void set_selection_option(_MultiMatchSelector o) { m_multi_selector = o; }
 };
 
 /* This type is for keys which is range in itself i.e each key is having its own
@@ -544,15 +563,6 @@ public:
     virtual ~BtreeLockTracker() = default;
 };
 
-struct BtreeQueryCursor {
-    std::unique_ptr< BtreeKey > m_last_key;
-    std::unique_ptr< BtreeLockTracker > m_locked_nodes;
-    const sisl::blob serialize() {
-        sisl::blob b(nullptr, 0);
-        if (m_last_key) { return (m_last_key->get_blob()); }
-        return b;
-    };
-};
 
 ENUM(BtreeQueryType, uint8_t,
      // This is default query which walks to first element in range, and then sweeps/walks
@@ -577,129 +587,75 @@ ENUM(BtreeQueryType, uint8_t,
 
 // Base class for range callback params
 class BRangeCBParam {
-
 public:
     BRangeCBParam() {}
-    BtreeSearchRange& get_input_range() { return m_input_range; }
-    BtreeSearchRange& get_sub_range() { return m_sub_range; }
-    // TODO - make setters private and make Query/Update req as friends to access these
-    void set_sub_range(const BtreeSearchRange& sub_range) { m_sub_range = sub_range; }
-    void set_input_range(const BtreeSearchRange& sub_range) { m_input_range = sub_range; }
-
-private:
-    BtreeSearchRange m_input_range; // Btree range filter originally provided
-    BtreeSearchRange m_sub_range;   // Btree sub range used during callbacks.
 };
 
-// class for range query callback param
 template < typename K, typename V >
-class BRangeQueryCBParam : public BRangeCBParam {
-public:
-    BRangeQueryCBParam() {}
-};
-
-// class for range update callback param
+using match_item_cb_t = std::function< btree_status_t(
+    std::vector< std::pair< K, V > >&, std::vector< std::pair< K, V > >&, BRangeCBParam*, BtreeSearchRange& subrange) >;
 template < typename K, typename V >
-class BRangeUpdateCBParam : public BRangeCBParam {
-public:
-    BRangeUpdateCBParam(K& key, V& value) : m_new_key(key), m_new_value(value), m_state_modifiable(true) {}
-    K& get_new_key() { return m_new_key; }
-    V& get_new_value() { return m_new_value; }
-    bool is_state_modifiable() const { return m_state_modifiable; }
-    void set_state_modifiable(bool state_modifiable) { BRangeUpdateCBParam::m_state_modifiable = state_modifiable; }
-
-private:
-    K m_new_key;
-    V m_new_value;
-    bool m_state_modifiable;
-};
+using get_size_needed_cb_t = std::function< uint32_t(std::vector< std::pair< K, V > >&, BRangeCBParam*) >;
 
 // Base class for range requests
 class BRangeRequest {
 public:
-    BtreeSearchRange& get_input_range() { return m_input_range; }
-
-protected:
-    BRangeRequest(BRangeCBParam* cb_param, BtreeSearchRange& search_range) :
-            m_cb_param(cb_param),
-            m_input_range(search_range) {}
-
-    BRangeCBParam* m_cb_param;      // additional parameters that is passed to callback
-    BtreeSearchRange m_input_range; // Btree range filter originally provided
-};
-
-template < typename K, typename V >
-using match_item_cb_get_t = std::function< btree_status_t(
-    std::vector< std::pair< K, V > >&, std::vector< std::pair< K, V > >&, BRangeQueryCBParam< K, V >*) >;
-template < typename K, typename V >
-class BtreeQueryRequest : public BRangeRequest {
-public:
-    BtreeQueryRequest(BtreeSearchRange& search_range,
-                      BtreeQueryType query_type = BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY,
-                      uint32_t batch_size = 1000, match_item_cb_get_t< K, V > cb = nullptr,
-                      BRangeQueryCBParam< K, V >* cb_param = nullptr) :
-            BRangeRequest(cb_param, search_range),
-            m_batch_search_range(search_range),
-            m_start_range(search_range.extract_start_of_range()),
-            m_end_range(search_range.extract_end_of_range()),
-            m_query_type(query_type),
-            m_batch_size(batch_size),
-            m_cb(cb) {}
-
-    ~BtreeQueryRequest() = default;
-
-    void init_batch_range() {
-        if (!is_empty_cursor()) {
-            m_batch_search_range = BtreeSearchRange(*m_cursor.m_last_key, false, *m_input_range.get_end_key(),
-                                                    m_input_range.is_end_inclusive(), m_input_range.selection_option());
-            m_start_range = BtreeSearchRange(*m_cursor.m_last_key, false, m_input_range.selection_option());
-        }
-    }
-
-    BtreeSearchRange& this_batch_range() { return m_batch_search_range; }
-    BtreeQueryCursor& cursor() { return m_cursor; }
-    BtreeSearchRange& get_start_of_range() { return m_start_range; }
-    BtreeSearchRange& get_end_of_range() { return m_end_range; }
-
-    bool is_empty_cursor() const { return ((m_cursor.m_last_key == nullptr) && (m_cursor.m_locked_nodes == nullptr)); }
-    // virtual bool is_serializable() const = 0;
-    BtreeQueryType query_type() const { return m_query_type; }
+    BtreeSearchRange& get_input_range() { return *m_input_range; }
     uint32_t get_batch_size() const { return m_batch_size; }
     void set_batch_size(uint32_t count) { m_batch_size = count; }
 
-    match_item_cb_get_t< K, V > callback() const { return m_cb; }
-    BRangeQueryCBParam< K, V >* get_cb_param() const { return (BRangeQueryCBParam< K, V >*)m_cb_param; }
+    bool is_empty_cursor() const {
+        return ((m_input_range->get_cur()->m_last_key == nullptr) &&
+                (m_input_range->get_cur()->m_locked_nodes == nullptr));
+    }
 
 protected:
-    BtreeSearchRange m_batch_search_range; // Adjusted filter for current batch
-    BtreeSearchRange m_start_range;        // Search Range contaning only start key
-    BtreeSearchRange m_end_range;          // Search Range containing only end key
-    BtreeQueryCursor m_cursor;             // An opaque cursor object for pagination
-    BtreeQueryType m_query_type;           // Type of the query
-    uint32_t m_batch_size; // Count of items needed in this batch. This value can be changed on every cursor iteration
-    const match_item_cb_get_t< K, V > m_cb;
+    BRangeRequest(BRangeCBParam* cb_param, BtreeSearchRange& search_range, uint32_t batch_size = UINT32_MAX) :
+            m_cb_param(cb_param), m_input_range(&search_range), m_batch_size(UINT32_MAX) {}
+
+private:
+    BRangeCBParam* m_cb_param;      // additional parameters that is passed to callback
+    BtreeSearchRange* m_input_range; // Btree range filter originally provided
+    uint32_t m_batch_size;
 };
+
 template < typename K, typename V >
-using match_item_cb_update_t = std::function< btree_status_t(
-    std::vector< std::pair< K, V > >&, std::vector< std::pair< K, V > >&, BRangeUpdateCBParam< K, V >*) >;
-template < typename K, typename V >
-using get_size_needed_cb_t = std::function< uint32_t(std::vector< std::pair< K, V > >&, BRangeUpdateCBParam< K, V >*) >;
+class BtreeQueryRequest : public BRangeRequest {
+public:
+    /* TODO :- uint32_max to c++. pass reference */
+    BtreeQueryRequest(BtreeSearchRange& search_range,
+                      BtreeQueryType query_type = BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY,
+                      uint32_t batch_size = UINT32_MAX, match_item_cb_t< K, V > cb = nullptr,
+                      BRangeCBParam* cb_param = nullptr) :
+            BRangeRequest(cb_param, search_range, batch_size), m_query_type(query_type), m_cb(cb) {}
+
+    ~BtreeQueryRequest() = default;
+
+    // virtual bool is_serializable() const = 0;
+    BtreeQueryType query_type() const { return m_query_type; }
+
+    match_item_cb_t< K, V > callback() const { return m_cb; }
+    BRangeCBParam* get_cb_param() const { return (BRangeCBParam*)m_cb_param; }
+
+protected:
+    BtreeQueryType m_query_type;           // Type of the query
+    const match_item_cb_t< K, V > m_cb;
+};
+
 template < typename K, typename V >
 class BtreeUpdateRequest : public BRangeRequest {
 public:
-    BtreeUpdateRequest(BtreeSearchRange& search_range, match_item_cb_update_t< K, V > cb = nullptr,
-                       get_size_needed_cb_t< K, V > size_cb = nullptr,
-                       BRangeUpdateCBParam< K, V >* cb_param = nullptr) :
-            BRangeRequest(cb_param, search_range),
-            m_cb(cb),
-            m_size_cb(size_cb) {}
+    BtreeUpdateRequest(BtreeSearchRange& search_range, match_item_cb_t< K, V > cb = nullptr,
+                       get_size_needed_cb_t< K, V > size_cb = nullptr, BRangeCBParam* cb_param = nullptr,
+                       uint32_t batch_size = UINT32_MAX) :
+            BRangeRequest(cb_param, search_range, batch_size), m_cb(cb), m_size_cb(size_cb) {}
 
-    match_item_cb_update_t< K, V > callback() const { return m_cb; }
-    BRangeUpdateCBParam< K, V >* get_cb_param() const { return (BRangeUpdateCBParam< K, V >*)m_cb_param; }
+    match_item_cb_t< K, V > callback() const { return m_cb; }
+    BRangeCBParam* get_cb_param() const { return (BRangeCBParam*)m_cb_param; }
     get_size_needed_cb_t< K, V > get_size_needed_callback() { return m_size_cb; }
 
 protected:
-    const match_item_cb_update_t< K, V > m_cb;
+    const match_item_cb_t< K, V > m_cb;
     const get_size_needed_cb_t< K, V > m_size_cb;
 };
 

@@ -1,10 +1,14 @@
+#include "engine/common/homestore_assert.hpp"
 #include "log_dev.hpp"
 #include "log_store.hpp"
 
 namespace homestore {
+SDS_LOGGING_DECL(logstore)
 
 static constexpr logdev_key out_of_bound_ld_key = {std::numeric_limits< logid_t >::max(), 0};
 REGISTER_METABLK_SUBSYSTEM(log_dev, "LOG_DEV", HomeLogStoreMgr::meta_blk_found_cb, nullptr)
+
+#define THIS_LOGSTORE_LOG(level, msg, ...) HS_SUBMOD_LOG(level, logstore, , "store", m_store_id, msg, __VA_ARGS__)
 
 void HomeLogStoreMgr::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size) {
     HomeLogStoreMgr::instance().m_log_dev.meta_blk_found(mblk, buf, size);
@@ -121,7 +125,7 @@ logdev_key HomeLogStoreMgr::device_truncate(bool dry_run) {
             if (store_key.idx < min_safe_ld_key.idx) { min_safe_ld_key = store_key; }
         }
     });
-    LOGINFO("Request to truncate the log device, safe log dev key to truncate = {}", min_safe_ld_key);
+    LOGINFOMOD(logstore, "Request to truncate the log device, safe log dev key to truncate = {}", min_safe_ld_key);
 
     if (min_safe_ld_key == out_of_bound_ld_key) {
         /* XXX: not sure if this check should be here or in device truncate */
@@ -166,9 +170,10 @@ int64_t HomeLogStore::append_async(const sisl::io_blob& b, void* cookie, const l
 log_buffer HomeLogStore::read_sync(logstore_seq_num_t seq_num) {
     auto record = m_records.at(seq_num);
     logdev_key ld_key = record.m_dev_key;
+    if (ld_key.idx == -1) { return log_buffer(); }
 
-    LOGTRACE("Reading store/lsn={}:{} mapped to logdev_key=[idx={} dev_offset={}]", m_store_id, seq_num, ld_key.idx,
-             ld_key.dev_offset);
+    THIS_LOGSTORE_LOG(TRACE, "Reading lsn={}:{} mapped to logdev_key=[idx={} dev_offset={}]", seq_num, ld_key.idx,
+                      ld_key.dev_offset);
     return HomeLogStoreMgr::logdev().read(ld_key);
 }
 #if 0
@@ -198,7 +203,7 @@ void HomeLogStore::on_write_completion(logstore_req* req, logdev_key ld_key, log
     // Upon completion, create the mapping between seq_num and log dev key
     m_records.update(req->seq_num, [&](logstore_record& rec) -> bool {
         rec.m_dev_key = ld_key;
-        LOGDEBUG("Completed write of lsn {}:{} logdev_key={}", m_store_id, req->seq_num, ld_key);
+        THIS_LOGSTORE_LOG(DEBUG, "Completed write of lsn {} logdev_key={}", req->seq_num, ld_key);
         return true;
     });
     // assert(flush_ld_key.idx >= m_last_flush_ldkey.idx);
@@ -249,6 +254,9 @@ void HomeLogStore::truncate(logstore_seq_num_t upto_seq_num, bool in_memory_trun
     }
 #endif
 
+    HS_LOG_ASSERT_LE(upto_seq_num, get_contiguous_completed_seq_num(0),
+                     "Logstore {} expects truncation to be contiguously completed", m_store_id);
+
     // First try to block the flushing of logdevice and if we are successfully able to do, then
     auto shared_this = shared_from_this();
     bool locked_now = HomeLogStoreMgr::logdev().try_lock_flush([shared_this, upto_seq_num, in_memory_truncate_only]() {
@@ -260,22 +268,31 @@ void HomeLogStore::truncate(logstore_seq_num_t upto_seq_num, bool in_memory_trun
 }
 
 void HomeLogStore::do_truncate(logstore_seq_num_t upto_seq_num) {
-    int ind = search_max_le(upto_seq_num);
+    int ind = search_max_lt(upto_seq_num);
     if (ind < 0) {
-        LOGINFO("Truncate req for lsn={}:{}, possibly already truncated, ignoring", m_store_id, upto_seq_num);
+        THIS_LOGSTORE_LOG(INFO, "Truncate req for lsn={}, possibly already truncated, ignoring", upto_seq_num);
         return;
     }
 
     *m_safe_truncate_ld_key.wlock() = m_truncation_barriers[ind].ld_key;
-    LOGINFO("Truncate req for lsn={}:{}, truncating upto the nearest safe truncate barrier <ind={} lsn={} log_id={}>, ",
-            m_store_id, upto_seq_num, ind, m_truncation_barriers[ind].seq_num, *m_safe_truncate_ld_key.rlock());
+    THIS_LOGSTORE_LOG(
+        INFO, "Truncate req for lsn={}, truncating upto the nearest safe truncate barrier <ind={} lsn={} log_id={}>, ",
+        upto_seq_num, ind, m_truncation_barriers[ind].seq_num, *m_safe_truncate_ld_key.rlock());
 
     m_last_truncated_seq_num.store(m_truncation_barriers[ind].seq_num, std::memory_order_release);
     m_records.truncate(m_truncation_barriers[ind].seq_num);
     m_truncation_barriers.erase(m_truncation_barriers.begin(), m_truncation_barriers.begin() + ind + 1);
 }
 
-int HomeLogStore::search_max_le(logstore_seq_num_t input_sn) {
+void HomeLogStore::fill_gap(logstore_seq_num_t seq_num) {
+    HS_DEBUG_ASSERT_EQ(m_records.status(seq_num).is_hole, true, "Attempted to fill gap lsn={} which has valid data",
+                       seq_num);
+
+    logdev_key empty_ld_key;
+    m_records.create_and_complete(seq_num, empty_ld_key);
+}
+
+int HomeLogStore::search_max_lt(logstore_seq_num_t input_sn) {
     int mid = 0;
     int start = -1;
     int end = m_truncation_barriers.size();
@@ -285,7 +302,7 @@ int HomeLogStore::search_max_le(logstore_seq_num_t input_sn) {
         auto& mid_entry = m_truncation_barriers[mid];
 
         if (mid_entry.seq_num == input_sn) {
-            return mid;
+            return mid - 1;
         } else if (mid_entry.seq_num > input_sn) {
             end = mid;
         } else {

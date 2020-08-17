@@ -196,7 +196,7 @@ public:
         return m_header->m_total_elements;
     }
 
-    void get_all(std::vector< ElementType >& vector, bool copy) {
+    void get_all(std::vector< ElementType >& vector, bool copy) const {
         if (!is_initialized) return;
         for (auto i = 0u; i < get_total_elements(); i++) {
             ElementType e;

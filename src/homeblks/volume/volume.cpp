@@ -183,6 +183,8 @@ void Volume::destroy_internal() {
         return;
     }
     m_indx_mgr->destroy(([this](bool success) {
+        HS_RELEASE_ASSERT_NE(get_state(), vol_state::DESTROYED, "Volume {} is already in destroyed state",
+                             m_params.vol_name);
         if (success) {
             THIS_VOL_LOG(INFO, base, , "volume destroyed");
             remove_sb();
@@ -333,12 +335,12 @@ std::error_condition Volume::unmap(const vol_interface_req_ptr& iface_req) {
         ret = std::make_error_condition(std::errc::no_such_device);
         goto done;
     }
-    
+
     try {
         THIS_VOL_LOG(TRACE, volume, vreq, "unmap: not yet supported");
-        
+
         vreq->state = volume_req_state::data_io;
-        BlkId bid_invalid {BlkId::invalid_internal_id()};
+        BlkId bid_invalid{BlkId::invalid_internal_id()};
 
         /* store blkid which is used later to create journal entry */
         vreq->push_blkid(bid_invalid);
@@ -713,8 +715,8 @@ size_t Volume::call_batch_completion_cbs() {
     return count;
 }
 
-indx_cp_id_ptr Volume::attach_prepare_volume_cp(const indx_cp_id_ptr& indx_id, hs_cp_id* hs_id, hs_cp_id* new_hs_id) {
-    return (m_indx_mgr->attach_prepare_indx_cp(indx_id, hs_id, new_hs_id));
+indx_cp_ptr Volume::attach_prepare_volume_cp(const indx_cp_ptr& icp, hs_cp* cur_hcp, hs_cp* new_hcp) {
+    return (m_indx_mgr->attach_prepare_indx_cp(icp, cur_hcp, new_hcp));
 }
 
 vol_state Volume::set_state(vol_state state, bool persist) {
@@ -745,7 +747,7 @@ void Volume::write_sb() {
         // first time insert
         MetaBlkMgr::instance()->add_sub_sb("VOLUME", (void*)m_sb_buf.bytes(), sizeof(vol_sb_hdr), m_sb_cookie);
     } else {
-        MetaBlkMgr::instance()->update_sub_sb("VOLUME", (void*)m_sb_buf.bytes(), sizeof(vol_sb_hdr), m_sb_cookie);
+        MetaBlkMgr::instance()->update_sub_sb((void*)m_sb_buf.bytes(), sizeof(vol_sb_hdr), m_sb_cookie);
     }
 }
 

@@ -32,23 +32,18 @@ void PhysicalDevChunk::recover() {
     if (m_recovered_bm != nullptr) { m_allocator->set_disk_bm(std::move(m_recovered_bm)); }
 }
 
-void PhysicalDevChunk::cp_start(std::shared_ptr< blkalloc_cp_id > id) {
-    auto bitmap_mem = get_blk_allocator()->cp_start(id);
+void PhysicalDevChunk::cp_start(std::shared_ptr< blkalloc_cp > ba_cp) {
+    auto bitmap_mem = get_blk_allocator()->cp_start(ba_cp);
     if (m_meta_blk_cookie) {
-        MetaBlkMgr::instance()->update_sub_sb("BLK_ALLOC", bitmap_mem->bytes, bitmap_mem->size, m_meta_blk_cookie);
+        MetaBlkMgr::instance()->update_sub_sb(bitmap_mem->bytes, bitmap_mem->size, m_meta_blk_cookie);
     } else {
         MetaBlkMgr::instance()->add_sub_sb("BLK_ALLOC", bitmap_mem->bytes, bitmap_mem->size, m_meta_blk_cookie);
     }
 }
 
-std::shared_ptr< blkalloc_cp_id > PhysicalDevChunk::attach_prepare_cp(std::shared_ptr< blkalloc_cp_id > cur_cp_id) {
-    std::shared_ptr< blkalloc_cp_id > cp_id(new blkalloc_cp_id());
-    if (cur_cp_id == nullptr) {
-        cp_id->cnt = 0;
-    } else {
-        cp_id->cnt = cur_cp_id->cnt + 1;
-    }
-    return cp_id;
+std::shared_ptr< blkalloc_cp > PhysicalDevChunk::attach_prepare_cp(std::shared_ptr< blkalloc_cp > cur_ba_cp) {
+    std::shared_ptr< blkalloc_cp > new_ba_cp(new blkalloc_cp());
+    return new_ba_cp;
 }
 
 DeviceManager::DeviceManager(NewVDevCallback vcb, uint32_t const vdev_metadata_size,
