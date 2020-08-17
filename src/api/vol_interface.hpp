@@ -123,7 +123,7 @@ struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
 
 public:
     vol_interface_req(void* wbuf, uint64_t lba, uint32_t nlbas, bool is_sync = false, const bool cache = false);
-    virtual ~vol_interface_req();
+    virtual ~vol_interface_req(); // override; sisl::ObjLifeCounter should have virtual destructor
     virtual void free_yourself() { delete this; }
 };
 
