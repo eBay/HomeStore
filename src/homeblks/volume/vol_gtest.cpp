@@ -141,6 +141,12 @@ public:
     enum class job_status_t { not_started = 0, running = 1, stopped = 2, completed = 3 };
 
     TestJob(VolTest* test) : m_voltest(test), m_start_time(Clock::now()) {}
+    virtual ~TestJob() = default;
+    TestJob(const TestJob&) = delete;
+    TestJob(TestJob&&) noexcept = delete;
+    TestJob& operator=(const TestJob&) = delete;
+    TestJob& operator=(TestJob&&) noexcept = delete;
+
     virtual void run_one_iteration() = 0;
     virtual void on_one_iteration_completed(const boost::intrusive_ptr< io_req_t >& req) = 0;
     virtual bool time_to_stop() const = 0;
@@ -254,7 +260,7 @@ struct io_req_t : public vol_interface_req {
         if (wbuf) memcpy(validate_buf, wbuf, size);
     }
 
-    virtual ~io_req_t() { iomanager.iobuf_free(validate_buf); }
+    virtual ~io_req_t() override { iomanager.iobuf_free(validate_buf); }
 };
 
 TestCfg tcfg;            // Config for each VolTest
@@ -311,9 +317,17 @@ public:
         srandom(time(NULL));
     }
 
-    ~VolTest() {
+    virtual ~VolTest() override {
         if (init_buf) { iomanager.iobuf_free((uint8_t*)init_buf); }
     }
+
+    VolTest(const VolTest&) = delete;
+    VolTest(VolTest&&) noexcept = delete;
+    VolTest& operator=(const VolTest&) = delete;
+    VolTest& operator=(VolTest&&) noexcept = delete;
+
+    virtual void SetUp() override{};
+    virtual void TearDown() override{};
 
     void remove_files() {
         /* no need to delete the user created file/disk */
@@ -718,7 +732,11 @@ private:
 class IOTestJob : public TestJob {
 public:
     IOTestJob(VolTest* test, load_type_t type = tcfg.load_type) : TestJob(test), m_load_type(type) {}
-    virtual ~IOTestJob() = default;
+    virtual ~IOTestJob() override = default;
+    IOTestJob(const IOTestJob&) = delete;
+    IOTestJob(IOTestJob&&) noexcept = delete;
+    IOTestJob& operator=(const IOTestJob&) = delete;
+    IOTestJob& operator=(IOTestJob&&) noexcept = delete;
 
     virtual void run_one_iteration() override {
         int cnt = 0;
@@ -895,7 +913,8 @@ protected:
         ++m_voltest->output.write_cnt;
         ++m_outstanding_ios;
         auto ret_io = VolInterface::get_instance()->write(vol, vreq);
-        LOGDEBUG("Wrote lba: {}, nlbas: {} outstanding_ios={}", lba, nlbas, m_outstanding_ios.load());
+        LOGDEBUG("Wrote lba: {}, nlbas: {} outstanding_ios={}, cache={}", lba, nlbas, m_outstanding_ios.load(),
+                 (tcfg.write_cache != 0 ? true : false) );
         if (ret_io != no_error) { return false; }
         return true;
     }
@@ -955,7 +974,8 @@ protected:
         ++m_voltest->output.read_cnt;
         ++m_outstanding_ios;
         auto ret_io = VolInterface::get_instance()->read(vol, vreq);
-        LOGDEBUG("Read lba: {}, nlbas: {} outstanding_ios={}", lba, nlbas, m_outstanding_ios.load());
+        LOGDEBUG("Read lba: {}, nlbas: {} outstanding_ios={}, cache={}", lba, nlbas, m_outstanding_ios.load(),
+                 (tcfg.read_cache !=0 ? true : false));
         if (ret_io != no_error) { return false; }
         return true;
     }
@@ -1025,6 +1045,11 @@ public:
         m_start_time = Clock::now();
         LOGINFO("verifying vols");
     }
+    virtual ~VolVerifyJob() override = default;
+    VolVerifyJob(const VolVerifyJob&) = delete;
+    VolVerifyJob(VolVerifyJob&&) noexcept = delete;
+    VolVerifyJob& operator=(const VolVerifyJob&) = delete;
+    VolVerifyJob& operator=(VolVerifyJob&&) noexcept = delete;
 
     void run_one_iteration() override {
         for (uint32_t cur = 0u; cur < tcfg.max_vols; ++cur) {
@@ -1422,8 +1447,8 @@ int main(int argc, char* argv[]) {
     _gcfg.expect_io_error = SDS_OPTIONS["expect_io_error"].as< uint32_t >() ? true : false;
     _gcfg.p_volume_size = SDS_OPTIONS["p_volume_size"].as< uint32_t >();
     _gcfg.is_spdk = SDS_OPTIONS["spdk"].as< bool >();
-    _gcfg.read_cache = SDS_OPTIONS["read_cache"].as< uint32_t >() ? true : false;
-    _gcfg.write_cache = SDS_OPTIONS["write_cache"].as< uint32_t >() ? true : false;
+    _gcfg.read_cache = SDS_OPTIONS["read_cache"].as< uint32_t >() != 0 ? true : false;
+    _gcfg.write_cache = SDS_OPTIONS["write_cache"].as< uint32_t >() != 0 ? true : false;
 
     if (SDS_OPTIONS.count("device_list")) {
         _gcfg.dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();
