@@ -1010,28 +1010,79 @@ protected:
         auto& vol_req = (vol_interface_req_ptr&)req;
 
         int64_t tot_size_read = 0;
-        for (auto& info : vol_req->read_buf_list) {
-            auto offset = info.offset;
-            auto size = info.size;
-            auto buf = info.buf;
-            while (size != 0) {
-                uint32_t size_read = 0;
-                sisl::blob b = VolInterface::get_instance()->at_offset(buf, offset);
+        if (tcfg.read_cache) {
+            for (auto& info : vol_req->read_buf_list) {
+                auto offset = info.offset;
+                auto size = info.size;
+                auto buf = info.buf;
+                while (size != 0) {
+                    uint32_t size_read = 0;
+                    sisl::blob b = VolInterface::get_instance()->at_offset(buf, offset);
+                    const uint8_t* const validate_buffer{req->validate_buffer + tot_size_read};
+                    size_read = tcfg.vol_page_size;
+                    int j = 0;
+                    if (tcfg.verify_data) {
+                        j = ::memcmp(static_cast<const void*>(b.bytes), static_cast< const void* >(validate_buffer),
+                                   size_read);
+                        m_voltest->output.match_cnt++;
+                    } else {
+                        /* we will only verify the header. We write lba number in the header */
+                        const uint64_t validate_lba{*reinterpret_cast< const uint64_t* >(validate_buffer)};
+                        if ((validate_lba == 0) || (validate_lba == *reinterpret_cast< const uint64_t* >(b.bytes))) {
+                            /* copy the data */
+                            j = 0;
+                            auto ret = pwrite(req->fd, b.bytes, b.size, tot_size_read + req->offset);
+                            assert(ret == b.size);
+                        }
+                        m_voltest->output.hdr_only_match_cnt++;
+                    }
 
-                size_read = tcfg.vol_page_size;
+                    if (j) {
+                        if (can_panic) {
+                            /* verify the header */
+                            j = ::memcmp(static_cast< const void* >(b.bytes),
+                                         static_cast< const void* >(validate_buffer), size_read);
+                            if (j != 0) { LOGINFO("header mismatch lba read {}", *reinterpret_cast< const uint64_t* >(b.bytes)); }
+                            LOGINFO("mismatch found lba {} nlbas {} total_size_read {}", req->lba, req->nlbas,
+                                    tot_size_read);
+#ifndef NDEBUG
+                            VolInterface::get_instance()->print_tree(req->vol_info->vol);
+#endif
+                            LOGINFO("lba {} {}", req->lba, req->nlbas);
+                            std::this_thread::sleep_for(std::chrono::seconds(5));
+                            sleep(30);
+                            assert(0);
+                        }
+                        // need to return false
+                        return false;
+                    }
+                    size -= size_read;
+                    offset += size_read;
+                    tot_size_read += size_read;
+                }
+            }
+        } else
+        {
+            const uint32_t size_read{tcfg.vol_page_size};
+            uint64_t size{static_cast<uint64_t>(req->size)};
+            while (size != 0) {
+                const uint8_t* const read_buffer{req->buffer + tot_size_read};
+                const uint8_t* const validate_buffer{req->validate_buffer + tot_size_read};
                 int j = 0;
                 if (tcfg.verify_data) {
-                    j = memcmp((void*)b.bytes, (uint8_t*)((uint64_t)req->validate_buffer + tot_size_read), size_read);
+                    j = ::memcmp(static_cast< const void* >(read_buffer), static_cast< const void* >(validate_buffer),
+                                 size_read);
                     m_voltest->output.match_cnt++;
                 } else {
                     /* we will only verify the header. We write lba number in the header */
-                    uint64_t validate_lba = *((uint64_t*)((uint64_t)req->validate_buffer + tot_size_read));
-
-                    if (validate_lba == 0 || validate_lba == *((uint64_t*)b.bytes)) {
+                    const uint64_t validate_lba{*reinterpret_cast< const uint64_t* >(validate_buffer)};
+                    if ((validate_lba == 0) ||
+                        (validate_lba == *reinterpret_cast< const uint64_t* >(read_buffer))) {
                         /* copy the data */
                         j = 0;
-                        auto ret = pwrite(req->fd, b.bytes, b.size, tot_size_read + req->offset);
-                        assert(ret == b.size);
+                        auto ret = pwrite(req->fd, read_buffer, req->size - tot_size_read,
+                                          tot_size_read + req->offset);
+                        assert(ret == req->size - tot_size_read);
                     }
                     m_voltest->output.hdr_only_match_cnt++;
                 }
@@ -1039,9 +1090,11 @@ protected:
                 if (j) {
                     if (can_panic) {
                         /* verify the header */
-                        j = memcmp((void*)b.bytes, (uint8_t*)((uint64_t)req->validate_buffer + tot_size_read),
-                                   sizeof(uint64_t));
-                        if (j != 0) { LOGINFO("header mismatch lba read {}", *((uint64_t*)b.bytes)); }
+                        j = ::memcmp(static_cast< const void* >(read_buffer),
+                                     static_cast< const void* >(validate_buffer), size_read);
+                        if (j != 0) {
+                            LOGINFO("header mismatch lba read {}", *reinterpret_cast< const uint64_t* >(read_buffer));
+                        }
                         LOGINFO("mismatch found lba {} nlbas {} total_size_read {}", req->lba, req->nlbas,
                                 tot_size_read);
 #ifndef NDEBUG
@@ -1056,9 +1109,9 @@ protected:
                     return false;
                 }
                 size -= size_read;
-                offset += size_read;
                 tot_size_read += size_read;
             }
+
         }
         assert(tot_size_read == req->size);
         return true;

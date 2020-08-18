@@ -1032,18 +1032,18 @@ public:
     void write(const BlkId& bid, const std::vector< iovec >& iovecs,
                boost::intrusive_ptr< virtualdev_req > req, const uint32_t data_offset = 0) {
         BlkOpStatus ret_status{BLK_OP_SUCCESS};
-        const uint32_t size{bid.get_nblks() * get_page_size()};
+        const uint64_t size{bid.get_nblks() * get_page_size()};
         std::array<iovec, BlkId::max_blks_in_op()> iov;
         int iovcnt{0};
 
-        uint32_t current_offset{data_offset};
-        const uint32_t end_offset{current_offset + bid.data_size(m_pagesz)};
-        uint32_t iovec_offset{0};
-        for (const auto& iovec : iovecs) {
-            if (current_offset < iovec_offset + iovec.iov_len) {
-                const uint32_t start_offset{current_offset - iovec_offset};
-                iov[iovcnt].iov_base = static_cast<uint8_t*>(iovec.iov_base) + start_offset;
-                const uint32_t remaining{static_cast< uint32_t >(iovec.iov_len - start_offset)};
+        uint64_t current_offset{data_offset};
+        const uint64_t end_offset{current_offset + bid.data_size(m_pagesz)};
+        uint64_t iovec_offset{0};
+        for (const auto& write_iovec : iovecs) {
+            if (current_offset < iovec_offset + write_iovec.iov_len) {
+                const uint64_t start_offset{current_offset - iovec_offset};
+                iov[iovcnt].iov_base = static_cast< uint8_t* >(write_iovec.iov_base) + start_offset;
+                const uint64_t remaining{static_cast< uint64_t >(write_iovec.iov_len - start_offset)};
                 if (current_offset + remaining > end_offset) {
                     iov[iovcnt].iov_len = end_offset - current_offset;
                 } else {
@@ -1052,7 +1052,7 @@ public:
                 current_offset += iov[iovcnt].iov_len;
                 ++iovcnt;
             }
-            iovec_offset += iovec.iov_len;
+            iovec_offset += write_iovec.iov_len;
             if (current_offset == end_offset) break;
         }
 
@@ -1135,8 +1135,19 @@ public:
 
         uint64_t primary_dev_offset = to_dev_offset(bid, &primary_chunk);
 
-        do_read_internal(primary_chunk->get_physical_dev_mutable(), primary_chunk, primary_dev_offset, (char*)mp.ptr(),
-                         mp.size(), req);
+        do_read_internal(primary_chunk->get_physical_dev_mutable(), primary_chunk, primary_dev_offset,
+                         (char*)mp.ptr(), mp.size(), req);
+    }
+
+    void read(const BlkId& bid, std::vector<iovec>& iovecs, boost::intrusive_ptr< virtualdev_req > req) {
+        PhysicalDevChunk* primary_chunk;
+
+        uint64_t primary_dev_offset = to_dev_offset(bid, &primary_chunk);
+
+        for (auto& iovec : iovecs) {
+            do_read_internal(primary_chunk->get_physical_dev_mutable(), primary_chunk, primary_dev_offset,
+                             static_cast<char*>(iovec.iov_base), iovec.iov_len, req);
+        }
     }
 
     void readv(const BlkId& bid, const homeds::MemVector& buf, boost::intrusive_ptr< virtualdev_req > req) {

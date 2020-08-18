@@ -565,6 +565,7 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
     try {
         /* we populate the entire LBA range asked even if it is not populated by the user */
         uint64_t next_start_lba = vreq->lba();
+        uint32_t data_offset{0};
         for (uint32_t i = 0; i < vreq->result_kv.size(); ++i) {
             /* create child req and read buffers */
             MappingKey* mk = &(vreq->result_kv[i].first);
@@ -597,20 +598,38 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
             }
 
             /* Read data */
-            auto sz = get_page_size() * mk->get_n_lba();
-            auto offset = m_hb->get_data_pagesz() * ve.get_blk_offset();
-            boost::intrusive_ptr< BlkBuffer > bbuf = m_hb->get_data_blkstore()->read(
-                ve.get_blkId(), offset, sz, boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vc_req));
+            const auto sz{get_page_size() * mk->get_n_lba()};
+            const auto blkid_offset{m_hb->get_data_pagesz() * ve.get_blk_offset()};
+            if (std::holds_alternative< volume_req::IoVecData >(vreq->data))
+            {
+                // scatter/gather read
+                auto& iovecs{std::get< volume_req::IoVecData >(vreq->data)};
+                const BlkId read_blkid(ve.get_blkId().get_blkid_at(blkid_offset, sz, m_hb->get_data_pagesz()));
+                m_hb->get_data_blkstore()->read(read_blkid, iovecs, data_offset, sz,
+                                                boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vc_req));
 
-            // TODO: @hkadayam There is a potential for race of read_buf_list getting emplaced after completion
-            /* Add buffer to read_buf_list. User read data from read buf list */
-            vreq->read_buf().emplace_back(sz, offset, bbuf);
+            } else {
+                boost::intrusive_ptr< BlkBuffer > bbuf = m_hb->get_data_blkstore()->read(
+                    ve.get_blkId(), blkid_offset, sz, boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vc_req));
+                // TODO: @hkadayam There is a potential for race of read_buf_list getting emplaced after complevtion
+                /* Add buffer to read_buf_list. User read data from read buf list */
+                vreq->read_buf().emplace_back(sz, blkid_offset, std::move(bbuf));
+            }
+            data_offset += sz;
         }
 
         /* check if there are any holes at the end */
         while (next_start_lba <= mapping::get_end_lba(vreq->lba(), vreq->nlbas())) {
-            vreq->read_buf().emplace_back(get_page_size(), 0, m_only_in_mem_buff);
-            auto blob = m_only_in_mem_buff->at_offset(0);
+            const auto blob{m_only_in_mem_buff->at_offset(0)};
+            if (!std::holds_alternative< volume_req::IoVecData >(vreq->data)) {
+                vreq->read_buf().emplace_back(get_page_size(), 0, m_only_in_mem_buff);
+            } else {
+                // scatter/gather read
+                assert(data_offset == 0);
+                auto& iovecs{std::get< volume_req::IoVecData >(vreq->data)};
+                ::memcpy(iovecs.back().iov_base, blob.bytes, get_page_size());
+                iovecs.back().iov_len = get_page_size();
+            }
             vreq->push_csum(crc16_t10dif(init_crc_16, blob.bytes, get_page_size()));
             ++next_start_lba;
         }
@@ -639,7 +658,7 @@ volume_child_req_ptr Volume::create_vol_child_req(BlkId& bid, const volume_req_p
     vc_req->op_start_time = Clock::now();
     vc_req->reqId = ++m_req_id;
     vc_req->sync = vreq->is_sync();
-    vc_req->cache = vreq->use_cache();
+    vc_req->use_cache = vreq->use_cache();
     vc_req->part_of_batch = vreq->iface_req->part_of_batch;
 
     assert((bid.data_size(HomeBlks::instance()->get_data_pagesz()) % get_page_size()) == 0);

@@ -60,13 +60,14 @@ VolInterface* HomeBlks::init(const init_params& cfg, bool force_reinit) {
     }
 }
 
-vol_interface_req::vol_interface_req(void* wbuf, uint64_t lba, uint32_t nlbas, bool is_sync, const bool cache) :
-        write_buf(wbuf),
-        request_id(counter_generator.next_request_id()),
-        refcount(0),
-        lba(lba),
-        nlbas(nlbas),
-        sync(is_sync),
+vol_interface_req::vol_interface_req(void* const buf, const uint64_t lba, const uint32_t nlbas, bool is_sync,
+                                     const bool cache) :
+        buffer{buf},
+        request_id{counter_generator.next_request_id()},
+        refcount{0},
+        lba{lba},
+        nlbas{nlbas},
+        sync{is_sync},
         cache{cache} {}
 
 vol_interface_req::~vol_interface_req() = default;

@@ -21,6 +21,8 @@
 
 namespace homestore {
 
+struct volume_child_req;
+
 enum BlkStoreCacheType { PASS_THRU = 0, WRITEBACK_CACHE = 1, WRITETHRU_CACHE = 2, RD_MODIFY_WRITEBACK_CACHE = 3 };
 
 /* Threshold of size upto when there is overlap in the cache entry, that it will discard instead of copying. Say
@@ -398,18 +400,16 @@ public:
 
     /* Read the data for given blk id and size. This method allocates the required memory if not present in the
      * cache and returns an smart ptr to the Buffer */
-    boost::intrusive_ptr< Buffer > read(BlkId& bid, uint32_t offset, uint32_t size,
-                                        boost::intrusive_ptr< blkstore_req< Buffer > > req, bool cache_only = false) {
-
-        int cur_ind = 0;
-        uint32_t cur_offset = offset;
-
+    boost::intrusive_ptr< Buffer > read(const BlkId& bid, const uint32_t offset, const uint32_t size,
+                                        boost::intrusive_ptr< blkstore_req< Buffer > > req,
+                                        const bool cache_only = false) {
         assert(req->err == no_error);
 
         COUNTER_INCREMENT(m_metrics, blkstore_read_op_count, 1);
         COUNTER_INCREMENT(m_metrics, blkstore_read_data_size, size);
 
         req->start_time();
+
         // Check if the entry exists in the cache.
         boost::intrusive_ptr< Buffer > bbuf;
         bool cache_found = m_cache->get(bid, (boost::intrusive_ptr< CacheBuffer< BlkId > >*)&bbuf);
@@ -503,6 +503,60 @@ public:
             HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_read_latency, get_elapsed_time_us(req->blkstore_op_start_time));
         }
         return bbuf;
+    }
+
+
+     /* Read the data for given blk id and size. This method stores the read in the iovecs starting at the
+        the given offset */
+     void read(const BlkId& bid, std::vector<iovec>& iovecs, const uint32_t data_offset, const uint32_t size,
+               boost::intrusive_ptr< blkstore_req< Buffer > > req) {
+        assert(req->err == no_error);
+
+        COUNTER_INCREMENT(m_metrics, blkstore_read_op_count, 1);
+        COUNTER_INCREMENT(m_metrics, blkstore_read_data_size, size);
+
+        req->start_time();
+        req->is_read = true;
+
+        /* This assert won't be valid for volume reads if user is doing overlap writes/reads because we set the blks
+         * allocated only after journal write is completed.
+         */
+        HS_ASSERT_CMP(DEBUG, m_vdev.is_blk_alloced(const_cast<BlkId&>(bid)), ==, true, "blk is not allocted");
+
+
+        std::vector< iovec > iov(1, iovec{});
+        iov.reserve(2);
+        uint64_t current_offset{data_offset};
+        const uint64_t end_offset{current_offset + size};
+        uint64_t iovec_offset{0};
+        for (const auto& read_iovec : iovecs) {
+            if (current_offset < iovec_offset + read_iovec.iov_len) {
+                const uint64_t start_offset{current_offset - iovec_offset};
+                iov.back().iov_base = static_cast< uint8_t* >(read_iovec.iov_base) + start_offset;
+                const uint64_t remaining{static_cast< uint64_t >(read_iovec.iov_len - start_offset)};
+                if (current_offset + remaining > end_offset) {
+                    iov.back().iov_len = end_offset - current_offset;
+                } else {
+                    iov.back().iov_len = remaining;
+                }
+                current_offset += iov.back().iov_len;
+                if (current_offset != end_offset)
+                {
+                    iov.emplace_back(iovec{});
+                };
+            }
+            iovec_offset += read_iovec.iov_len;
+            if (current_offset == end_offset) break;
+        }
+        m_vdev.read(bid, iov, to_vdev_req(req));
+
+        assert(req->err == no_error);
+        if (!req->isSyncCall) {
+            /* issue the completion */
+            process_completions(to_vdev_req(req));
+        } else {
+            HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_read_latency, get_elapsed_time_us(req->blkstore_op_start_time));
+        }
     }
 
     std::vector< boost::intrusive_ptr< BlkBuffer > > read_nmirror(BlkId& bid, int nmirrors) {

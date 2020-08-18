@@ -53,6 +53,8 @@ struct buf_info {
     boost::intrusive_ptr< BlkBuffer > buf;
 
     buf_info(uint64_t sz, int off, boost::intrusive_ptr< BlkBuffer >& bbuf) : size(sz), offset(off), buf(bbuf) {}
+    buf_info(const uint64_t sz, const int off, boost::intrusive_ptr< BlkBuffer >&& bbuf) :
+            size{sz}, offset{off}, buf{std::move(bbuf)} {}
 };
 
 struct _counter_generator {
@@ -78,7 +80,7 @@ struct volume_req;
 struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
     std::shared_ptr< Volume > vol_instance;
     std::vector< buf_info > read_buf_list;
-    void* write_buf = nullptr;
+    void* buffer = nullptr;
     std::error_condition err = no_error;
     uint64_t request_id;
     sisl::atomic_counter< int > refcount;
@@ -122,7 +124,8 @@ struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
     std::error_condition get_status() const { return err; }
 
 public:
-    vol_interface_req(void* wbuf, uint64_t lba, uint32_t nlbas, bool is_sync = false, const bool cache = false);
+    vol_interface_req(void* const buf, const uint64_t lba, const uint32_t nlbas, const bool is_sync = false,
+                      const bool cache = false);
     virtual ~vol_interface_req(); // override; sisl::ObjLifeCounter should have virtual destructor
     virtual void free_yourself() { delete this; }
 };

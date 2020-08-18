@@ -71,7 +71,7 @@ struct volume_child_req : public blkstore_req< BlkBuffer > {
     uint64_t read_buf_offset;
     uint64_t read_size;
     bool sync = false;
-    bool cache{true};
+    bool use_cache{false};
 
     /* number of times mapping table need to be updated for this req. It can
      * break the ios update in mapping btree depending on the key range.
@@ -560,20 +560,17 @@ private:
             // a cached request is assumed to have lifetime managed by HomeStore
             if (vi_req->is_write()) {
                 data.emplace<MemVecData>(new homeds::MemVector{
-                    static_cast< uint8_t* >(vi_req->write_buf),
+                    static_cast< uint8_t* >(vi_req->buffer),
                     static_cast< uint32_t >(vi_req->vol_instance->get_page_size() * vi_req->nlbas), 0});
             }
         } else {
             // a non-cached request is assume to have lifetime managed external to HomeStore
-            if (vi_req->is_write())
-            {
-                // convert write to single scatter/gather
-                iovec buffer{};
-                buffer.iov_base = vi_req->write_buf;
-                buffer.iov_len = static_cast< size_t >(vi_req->vol_instance->get_page_size() * vi_req->nlbas);
-                data.emplace<IoVecData>();
-                std::get< IoVecData >(data).emplace_back(std::move(buffer));
-            }
+            // convert read/write to single scatter/gather
+            iovec buffer{};
+            buffer.iov_base = vi_req->buffer;
+            buffer.iov_len = static_cast< size_t >(vi_req->vol_instance->get_page_size() * vi_req->nlbas);
+            data.emplace<IoVecData>();
+            std::get< IoVecData >(data).emplace_back(std::move(buffer));
         }
 
         /* Trying to reserve the max possible size so that memory allocation is efficient */
