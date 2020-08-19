@@ -10,6 +10,7 @@ add_subdirectory(index)
 
 include_directories (BEFORE .)
 include_directories (BEFORE ..)
+include_directories (BEFORE ${CMAKE_CURRENT_BINARY_DIR})
 #include_directories (BEFORE ${CMAKE_CURRENT_SOURCE_DIR}/engine)
 
 set(HOMESTORE_OBJECTS

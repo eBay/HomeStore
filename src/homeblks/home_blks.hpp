@@ -9,16 +9,16 @@
 #include <engine/blkstore/blkstore.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
-#include <async_http/http_server.hpp>
 #include "engine/homeds/thread/threadpool/thread_pool.h"
 #include <system_error>
 #include <utility/atomic_counter.hpp>
 #include <metrics/metrics.hpp>
 #include <settings/settings.hpp>
-#include "homeblks_config.hpp"
 #include <engine/homeds/btree/writeBack_cache.hpp>
 #include <fds/sparse_vector.hpp>
 #include "engine/meta/meta_blks_mgr.hpp"
+#include "homeblks_config.hpp"
+#include "homeblks_http_server.hpp"
 
 #ifndef DEBUG
 extern bool same_value_gen;
@@ -231,17 +231,6 @@ public:
     }
 
 public:
-    // All http handlers, TODO: Consider moving this to separate class
-    static void get_version(sisl::HttpCallData cd);
-    static void get_metrics(sisl::HttpCallData cd);
-    static void get_obj_life(sisl::HttpCallData cd);
-    static void get_prometheus_metrics(sisl::HttpCallData cd);
-    static void get_log_level(sisl::HttpCallData cd);
-    static void set_log_level(sisl::HttpCallData cd);
-    static void dump_stack_trace(sisl::HttpCallData cd);
-    static void verify_hs(sisl::HttpCallData cd);
-    static void get_malloc_stats(sisl::HttpCallData cd);
-
     // Other static functions
     static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size);
     static void meta_blk_recovery_comp_cb(bool success);
@@ -290,7 +279,7 @@ private:
     std::error_condition m_init_failed = no_error;
 
     out_params m_out_params;
-    std::unique_ptr< sisl::HttpServer > m_http_server;
+    std::unique_ptr< HomeBlksHttpServer > m_hb_http_server;
 
     std::condition_variable m_cv;
     std::mutex m_cv_mtx;

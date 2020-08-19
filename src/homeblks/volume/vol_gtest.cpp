@@ -1365,7 +1365,8 @@ SDS_OPTION_GROUP(
      "0 or 1"),
     (p_volume_size, "", "p_volume_size", "p_volume_size", ::cxxopts::value< uint32_t >()->default_value("60"),
      "0 to 200"),
-    (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"))
+    (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
+    (config_path, "", "config_path", "Path to dynamic config of app", cxxopts::value< std::string >(), ""))
 #define ENABLED_OPTIONS logging, home_blks, test_volume
 
 SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)

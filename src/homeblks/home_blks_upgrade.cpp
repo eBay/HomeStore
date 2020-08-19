@@ -282,7 +282,7 @@ void Volume::get_allocated_blks() {
         }
 
         start_lba = end_lba + 1;
-        end_lba = std::min((uint64_t)max_lba, end_lba + HB_SETTINGS_VALUE(volume->blks_scan_query_batch_size));
+        end_lba = std::min((uint64_t)max_lba, end_lba + HB_DYNAMIC_CONFIG(volume->blks_scan_query_batch_size));
         v.push_back(submit_job([this, start_lba, end_lba, mp]() {
             if (mp->sweep_alloc_blks(start_lba, end_lba)) { this->set_recovery_error(); }
         }));

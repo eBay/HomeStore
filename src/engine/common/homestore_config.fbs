@@ -13,7 +13,7 @@ table BlkAllocator {
 table Btree {
     max_nodes_to_rebalance: uint32 = 3; 
 
-    mem_btree_page_size : uint32 = 8192;
+    mem_btree_page_size: uint32 = 8192;
 }
 
 table Cache {  
@@ -37,6 +37,27 @@ table Device {
     max_completions_process_per_event_per_thread: uint32 = 200;
 }
 
+table LogStore {
+    // Size it needs to group upto before it flushes
+    flush_threshold_size: uint64 = 512 (hotswap);
+
+    // Time interval to wake up to check if flush is needed
+    flush_timer_frequency_us: uint64 = 500 (hotswap);
+
+    // Max time between 2 flushes. while it wakes up every flush timer, it checks if it needs to force a flush of
+    // logs if it exceeds this limit
+    max_time_between_flush_us: uint64 = 300 (hotswap);
+
+    // Bulk read size to load during initial recovery
+    bulk_read_size: uint64 = 524288 (hotswap);
+
+    // How blks we need to read before confirming that we have not seen a corrupted block
+    recovery_max_blks_read_for_additional_check: uint32 = 20;
+
+    // Max size upto which data will be inlined instead of creating a separate value
+    optimal_inline_data_size : uint64 = 512 (hotswap);
+}
+
 table Generic {
     /* Percentage of memory allocated for homestore cache */
     cache_size_percent: uint32 = 65; 
@@ -52,12 +73,13 @@ table Generic {
 }
 
 table HomeStoreSettings {
-    version: uint32;
+    version: uint32 = 1;
     generic: Generic;
     blkallocator: BlkAllocator;
     cache: Cache;
     btree: Btree;
     device: Device;
+    logstore: LogStore;
 }
 
 root_type HomeStoreSettings;

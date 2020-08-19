@@ -488,8 +488,9 @@ void MetaBlkMgr::write_meta_blk_internal(meta_blk* mblk, const void* context_dat
 
         memcpy(mblk->context_data, context_data, sz);
     } else {
-        HS_RELEASE_ASSERT_EQ(sz % dma_boundary, 0, "{}, context_data sz: {} needs to be dma_boundary {} aligned. ",
-                             mblk->hdr.h.type, sz, dma_boundary);
+        HS_RELEASE_ASSERT_EQ(sz % HS_STATIC_CONFIG(disk_attr.align_size), 0,
+                             "{}, context_data sz: {} needs to be dma_boundary {} aligned. ", mblk->hdr.h.type, sz,
+                             HS_STATIC_CONFIG(disk_attr.align_size));
 
         // only copy context_data for the 1st metablk, the ovf blk will use iov to avoid copy;
         memcpy(mblk->context_data, context_data, META_BLK_CONTEXT_SZ);

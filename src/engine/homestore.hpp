@@ -69,7 +69,8 @@ public:
         std::ofstream hs_config_stream("hs_static_config.json");
         auto j = hs_config.to_json();
         hs_config_stream << j.dump(4);
-        LOGINFO("HomeStore starting with config: {}", j.dump(4));
+        LOGINFO("HomeStore starting with dynamic config version: {} static config: {}", HS_DYNAMIC_CONFIG(version),
+                j.dump(4));
 
 #ifndef NDEBUG
         hs_config.validate();

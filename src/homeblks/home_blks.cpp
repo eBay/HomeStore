@@ -51,6 +51,8 @@ VolInterface* HomeBlks::init(const init_params& cfg, bool force_reinit) {
 #endif
             auto instance = boost::static_pointer_cast< homestore::HomeStoreBase >(HomeBlksSafePtr(new HomeBlks(cfg)));
             set_instance(boost::static_pointer_cast< homestore::HomeStoreBase >(instance));
+
+            LOGINFO("HomeBlks Dynamic config verssion: {}", HB_DYNAMIC_CONFIG(version));
         });
         return (VolInterface*)(HomeStoreBase::instance());
     } catch (const std::exception& e) {
@@ -403,105 +405,9 @@ void HomeBlks::verify_vols() {
     }
 }
 
-void HomeBlks::verify_hs(sisl::HttpCallData cd) {
-    HomeBlks* hb = (HomeBlks*)(cd->cookie());
-    hb->verify_vols();
-    hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, std::string("HomeBlks verified"));
-}
-
 void HomeBlks::print_node(const VolumePtr& vol, uint64_t blkid, bool chksum) {
     m_print_checksum = chksum;
     vol->print_node(blkid);
-}
-
-void HomeBlks::get_version(sisl::HttpCallData cd) {
-    HomeBlks* hb = (HomeBlks*)(cd->cookie());
-    hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, std::string("HomeBlks: ") + HomeBlks::version);
-}
-
-void HomeBlks::get_metrics(sisl::HttpCallData cd) {
-    HomeBlks* hb = (HomeBlks*)(cd->cookie());
-    std::string msg = sisl::MetricsFarm::getInstance().get_result_in_json_string();
-    hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, msg);
-}
-
-void HomeBlks::get_prometheus_metrics(sisl::HttpCallData cd) {
-    HomeBlks* hb = (HomeBlks*)(cd->cookie());
-    std::string msg = sisl::MetricsFarm::getInstance().report(sisl::ReportFormat::kTextFormat);
-    hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, msg);
-}
-
-void HomeBlks::get_obj_life(sisl::HttpCallData cd) {
-    HomeBlks* hb = (HomeBlks*)(cd->cookie());
-    nlohmann::json j;
-    sisl::ObjCounterRegistry::foreach ([&j](const std::string& name, int64_t created, int64_t alive) {
-        std::stringstream ss;
-        ss << "created=" << created << " alive=" << alive;
-        j[name] = ss.str();
-    });
-    hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, j.dump());
-}
-
-void HomeBlks::set_log_level(sisl::HttpCallData cd) {
-    HomeBlks* hb = (HomeBlks*)(cd->cookie());
-    auto req = cd->request();
-
-    const evhtp_kv_t* _new_log_level = nullptr;
-    const evhtp_kv_t* _new_log_module = nullptr;
-    const char* logmodule = nullptr;
-    char* endptr = nullptr;
-
-    _new_log_module = evhtp_kvs_find_kv(req->uri->query, "logmodule");
-    if (_new_log_module) { logmodule = _new_log_module->val; }
-
-    _new_log_level = evhtp_kvs_find_kv(req->uri->query, "loglevel");
-    if (!_new_log_level) {
-        hb->m_http_server->respond_NOTOK(cd, EVHTP_RES_BADREQ, "Invalid loglevel param!");
-        return;
-    }
-    auto new_log_level = _new_log_level->val;
-
-    std::string resp = "";
-    if (logmodule == nullptr) {
-        sds_logging::SetAllModuleLogLevel(spdlog::level::from_str(new_log_level));
-        resp = sds_logging::GetAllModuleLogLevel().dump(2);
-    } else {
-        sds_logging::SetModuleLogLevel(logmodule, spdlog::level::from_str(new_log_level));
-        resp = std::string("logmodule ") + logmodule + " level set to " +
-            spdlog::level::to_string_view(sds_logging::GetModuleLogLevel(logmodule)).data();
-    }
-
-    hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, resp);
-}
-
-void HomeBlks::get_log_level(sisl::HttpCallData cd) {
-    HomeBlks* hb = (HomeBlks*)(cd->cookie());
-    auto req = cd->request();
-
-    const evhtp_kv_t* _log_module = nullptr;
-    const char* logmodule = nullptr;
-    _log_module = evhtp_kvs_find_kv(req->uri->query, "logmodule");
-    if (_log_module) { logmodule = _log_module->val; }
-
-    std::string resp = "";
-    if (logmodule == nullptr) {
-        resp = sds_logging::GetAllModuleLogLevel().dump(2);
-    } else {
-        resp = std::string("logmodule ") + logmodule +
-            " level = " + spdlog::level::to_string_view(sds_logging::GetModuleLogLevel(logmodule)).data();
-    }
-    hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, resp);
-}
-
-void HomeBlks::dump_stack_trace(sisl::HttpCallData cd) {
-    HomeBlks* hb = (HomeBlks*)(cd->cookie());
-    sds_logging::log_stack_trace(true);
-    hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, "Look for stack trace in the log file");
-}
-
-void HomeBlks::get_malloc_stats(sisl::HttpCallData cd) {
-    HomeBlks* hb = (HomeBlks*)(cd->cookie());
-    hb->m_http_server->respond_OK(cd, EVHTP_RES_OK, sisl::get_malloc_stats_detailed().dump(2));
 }
 
 bool HomeBlks::shutdown(bool force) {
@@ -579,9 +485,9 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
     }
 
     auto elapsed_time_ms = get_time_since_epoch_ms() - m_shutdown_start_time.load();
-    if (elapsed_time_ms > (HB_SETTINGS_VALUE(general_config->shutdown_timeout_secs) * 1000)) {
+    if (elapsed_time_ms > (HB_DYNAMIC_CONFIG(general_config->shutdown_timeout_secs) * 1000)) {
         LOGERROR("Graceful shutdown of volumes took {} ms exceeds time limit {} seconds, attempting forceful shutdown",
-                 elapsed_time_ms, HB_SETTINGS_VALUE(general_config->shutdown_timeout_secs));
+                 elapsed_time_ms, HB_DYNAMIC_CONFIG(general_config->shutdown_timeout_secs));
         force = true;
     }
 
@@ -591,9 +497,9 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
 
     if (!m_vol_shutdown_cmpltd) {
         LOGINFO("Not all volumes are completely shutdown yet, will check again in {} milliseconds",
-                HB_SETTINGS_VALUE(general_config->shutdown_status_check_freq_ms));
+                HB_DYNAMIC_CONFIG(general_config->shutdown_status_check_freq_ms));
         m_shutdown_timer_hdl = iomanager.schedule_thread_timer(
-            HB_SETTINGS_VALUE(general_config->shutdown_status_check_freq_ms) * 1000 * 1000, false /* recurring */,
+            HB_DYNAMIC_CONFIG(general_config->shutdown_status_check_freq_ms) * 1000 * 1000, false /* recurring */,
             nullptr, [this, shutdown_done_cb, force](void* cookie) { schedule_shutdown(shutdown_done_cb, force); });
         return;
     }
@@ -607,8 +513,8 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
     }
 
     // Waiting for http server thread to join
-    m_http_server->stop();
-    m_http_server.reset();
+    m_hb_http_server->stop();
+    m_hb_http_server.reset();
     LOGINFO("http server stopped");
 
     /* XXX: can we move it to indx mgr */
@@ -786,25 +692,8 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
     sb->clear_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
     ++sb->boot_cnt;
 
-    sisl::HttpServerConfig cfg;
-    cfg.is_tls_enabled = false;
-    cfg.bind_address = "0.0.0.0";
-    cfg.server_port = SDS_OPTIONS["hb_stats_port"].as< int32_t >();
-    cfg.read_write_timeout_secs = 10;
-
-    m_http_server = std::unique_ptr< sisl::HttpServer >(
-        new sisl::HttpServer(cfg,
-                             {{
-                                 handler_info("/api/v1/version", HomeBlks::get_version, (void*)this),
-                                 handler_info("/api/v1/getMetrics", HomeBlks::get_metrics, (void*)this),
-                                 handler_info("/api/v1/getObjLife", HomeBlks::get_obj_life, (void*)this),
-                                 handler_info("/metrics", HomeBlks::get_prometheus_metrics, (void*)this),
-                                 handler_info("/api/v1/getLogLevel", HomeBlks::get_log_level, (void*)this),
-                                 handler_info("/api/v1/setLogLevel", HomeBlks::set_log_level, (void*)this),
-                                 handler_info("/api/v1/dumpStackTrace", HomeBlks::dump_stack_trace, (void*)this),
-                                 handler_info("/api/v1/verifyHS", HomeBlks::verify_hs, (void*)this),
-                             }}));
-    m_http_server->start();
+    m_hb_http_server = std::make_unique< HomeBlksHttpServer >(this);
+    m_hb_http_server->start();
 
     // Attach all completions
     iomanager.default_drive_interface()->attach_end_of_batch_cb([this](int nevents) { call_multi_vol_completions(); });

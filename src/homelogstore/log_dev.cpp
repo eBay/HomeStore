@@ -64,9 +64,9 @@ void LogDev::start(bool format) {
     }
 
     // Start a recurring timer which calls flush if pending
-    m_flush_timer_hdl =
-        iomanager.schedule_global_timer(flush_timer_frequency_us * 1000, true /* recurring */, nullptr,
-                                        iomgr::thread_regex::all_worker, [this](void* cookie) { flush_if_needed(); });
+    m_flush_timer_hdl = iomanager.schedule_global_timer(HS_DYNAMIC_CONFIG(logstore.flush_timer_frequency_us) * 1000,
+                                                        true /* recurring */, nullptr, iomgr::thread_regex::all_worker,
+                                                        [this](void* cookie) { flush_if_needed(); });
 }
 
 void LogDev::stop() {
@@ -129,7 +129,7 @@ void LogDev::assert_next_pages(log_stream_reader& lstream) {
                "indeed the case or there is any corruption");
 
     auto cursor = lstream.group_cursor();
-    for (auto i = 0u; i < max_blks_read_for_additional_check; i++) {
+    for (auto i = 0u; i < HS_DYNAMIC_CONFIG(logstore->recovery_max_blks_read_for_additional_check); ++i) {
         auto buf = lstream.group_in_next_page();
         if (buf.size() != 0) {
             log_group_header* header = (log_group_header*)buf.bytes();
@@ -186,8 +186,9 @@ log_buffer LogDev::read(const logdev_key& key) {
     } else {
         // Round them data offset to dma boundary in-order to make sure pread on direct io succeed. We need to skip
         // the rounded portion while copying to user buffer
-        auto rounded_data_offset = sisl::round_down(data_offset, dma_boundary);
-        auto rounded_size = sisl::round_up(b.size() + data_offset - rounded_data_offset, dma_boundary);
+        auto rounded_data_offset = sisl::round_down(data_offset, HS_STATIC_CONFIG(disk_attr.align_size));
+        auto rounded_size =
+            sisl::round_up(b.size() + data_offset - rounded_data_offset, HS_STATIC_CONFIG(disk_attr.align_size));
 
         // Allocate a fresh aligned buffer, if size cannot fit standard size
         if (rounded_size > initial_read_size) { rbuf = iomanager.iobuf_alloc(dma_boundary, rounded_size); }
@@ -292,9 +293,9 @@ void LogDev::flush_if_needed(const uint32_t new_record_size, logid_t new_idx) {
     // If after adding the record size, if we have enough to flush or if its been too much time before we actually
     // flushed, attempt to flush by setting the atomic bool variable.
     auto pending_sz = m_pending_flush_size.fetch_add(new_record_size, std::memory_order_relaxed) + new_record_size;
-    bool flush_by_size = (pending_sz >= flush_data_threshold_size);
-    bool flush_by_time =
-        !flush_by_size && pending_sz && (get_elapsed_time_us(m_last_flush_time) > max_time_between_flush_us);
+    bool flush_by_size = (pending_sz >= LogDev::flush_data_threshold_size());
+    bool flush_by_time = !flush_by_size && pending_sz &&
+        (get_elapsed_time_us(m_last_flush_time) > HS_DYNAMIC_CONFIG(logstore.max_time_between_flush_us));
 
     if (iomanager.am_i_worker_reactor() && (flush_by_size || flush_by_time)) {
         bool expected_flushing = false;
@@ -303,8 +304,8 @@ void LogDev::flush_if_needed(const uint32_t new_record_size, logid_t new_idx) {
                 logstore,
                 "Flushing now because either pending_size={} is greater than data_threshold={} or elapsed time since "
                 "last flush={} us is greater than max_time_between_flush={} us",
-                pending_sz, flush_data_threshold_size, get_elapsed_time_us(m_last_flush_time),
-                max_time_between_flush_us);
+                pending_sz, LogDev::flush_data_threshold_size(), get_elapsed_time_us(m_last_flush_time),
+                HS_DYNAMIC_CONFIG(logstore.max_time_between_flush_us));
 
             // We were able to win the flushing competition and now we gather all the flush data and reserve a slot.
             if (new_idx == -1) new_idx = m_log_idx.load(std::memory_order_relaxed) - 1;

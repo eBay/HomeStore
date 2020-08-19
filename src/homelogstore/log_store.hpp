@@ -78,9 +78,12 @@ public:
 
         REGISTER_HISTOGRAM(logstore_append_latency, "Logstore append latency", "logstore_op_latency", {"op", "write"});
         REGISTER_HISTOGRAM(logstore_read_latency, "Logstore read latency", "logstore_op_latency", {"op", "read"});
-        REGISTER_HISTOGRAM(logdev_flush_size_distribution, "Distribution of flush data size");
-        REGISTER_HISTOGRAM(logdev_flush_records_distribution, "Distribution of num records to flush");
-        REGISTER_HISTOGRAM(logstore_record_size, "Distribution of log record size");
+        REGISTER_HISTOGRAM(logdev_flush_size_distribution, "Distribution of flush data size",
+                           HistogramBucketsType(ExponentialOfTwoBuckets));
+        REGISTER_HISTOGRAM(logdev_flush_records_distribution, "Distribution of num records to flush",
+                           HistogramBucketsType(LinearUpto128Buckets));
+        REGISTER_HISTOGRAM(logstore_record_size, "Distribution of log record size",
+                           HistogramBucketsType(ExponentialOfTwoBuckets));
 
         register_me_to_farm();
     }

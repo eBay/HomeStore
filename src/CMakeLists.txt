@@ -32,6 +32,7 @@ set(COMMON_LIB_DEPS
     )
 
 include_directories (BEFORE .)
+include_directories (BEFORE ${CMAKE_CURRENT_BINARY_DIR})
 
 add_subdirectory(engine)
 add_subdirectory(homeblks)

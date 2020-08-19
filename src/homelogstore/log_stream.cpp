@@ -17,7 +17,7 @@ sisl::byte_view log_stream_reader::next_group(uint64_t* out_dev_offset) {
 read_again:
     if (m_cur_log_buf.size() < min_needed) {
         m_hb->get_logdev_blkstore()->lseek(m_cur_group_cursor);
-        m_cur_log_buf = read_next_bytes(std::max(min_needed, bulk_read_size));
+        m_cur_log_buf = read_next_bytes(std::max(min_needed, HS_DYNAMIC_CONFIG(logstore.bulk_read_size)));
     }
     if (m_cur_log_buf.size() == 0) { return m_cur_log_buf; } // No more data available.
 
