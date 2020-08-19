@@ -21,7 +21,7 @@ SDS_OPTION_GROUP(test_hs_vol,
                  (addr, "", "addr", "Do IO on a PCIe address", cxxopts::value< std::string >(), "0000:02:00.0"))
 
 
-#define ENABLED_OPTIONS logging, iomgr, home_blks
+#define ENABLED_OPTIONS logging, iomgr, home_blks, test_hs_vol
 #define SPDK_LOG_MODS HOMESTORE_LOG_MODS
 
 SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
