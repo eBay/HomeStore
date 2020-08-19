@@ -1,5 +1,5 @@
 # Coverage doesn't like binaries that don't run...
-if (NOT ${CONAN_BUILD_COVERAGE})
+if (NOT "${CONAN_TEST_TARGET}" STREQUAL "coverage")
     set(PERF_CACHE_SOURCE_FILES
             perf_cache.cpp
             )
@@ -21,4 +21,6 @@ add_executable(test_cache
                   ${TEST_CACHE_SOURCE_FILES}
                 )
 target_link_libraries(test_cache homestore iberty ${CONAN_LIBS})
-add_test(NAME TestCache COMMAND test_cache)
+if (NOT "${CONAN_TEST_TARGET}" STREQUAL "off")
+    add_test(NAME TestCache COMMAND test_cache)
+endif()
