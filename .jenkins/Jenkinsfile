@@ -97,6 +97,12 @@ pipeline {
                     stage("Build") {
                         steps {
                             sh "conan create ${BUILD_MISSING} -o homestore:sanitize=${SANITIZE} -pr ${BUILD_TYPE} . ${PROJECT}/${TAG}"
+                            sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_load' -exec cp {} .jenkins/test_load \\;"
+                            sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_mapping' -exec cp {} .jenkins/test_mapping \\;"
+                            sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_volume' -exec cp {} .jenkins/test_volume \\;"
+                            sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/check_btree' -exec cp {} .jenkins/check_btree \\;"
+                            sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/vol_test.py' -exec cp -a {} .jenkins/vol_test.py \\;"
+                            sh "find ${CONAN_USER_HOME} -type d -wholename '*bin/scripts' -exec cp -a {} .jenkins/scripts \\;"
                         }
                         post {
                             failure {
@@ -104,7 +110,7 @@ pipeline {
                             }
                         }
                     }
-                    stage("Deploy") {
+                    stage("Deploy Package") {
                         when {
                             expression { not { branch "PR_*" } }
                         }
@@ -113,37 +119,32 @@ pipeline {
                             sh "conan upload ${PROJECT}/${TAG} -c --all -r ebay-local"
                         }
                     }
-                }
-            }
-        }
-
-        stage('TestImage') {
-            when {
-                anyOf {
-                    branch "develop"
-                    branch "master"
-                }
-            }
-            matrix {
-                agent {
-                    label 'sds-builder'
-                }
-                axes {
-                    axis {
-                        name 'BUILD_TYPE'
-                        values 'debug', 'release', 'sanitize'
-                    }
-                }
-                stages {
-                    stage('Build') {
+                    stage("Image") {
                         steps {
-                            withDockerRegistry([credentialsId: 'sds-sds', url: "https://ecr.vip.ebayc3.com"]) {
-                                sh "docker build --build-arg BUILD_TYPE=${BUILD_TYPE} --build-arg PKG_NAME=${PROJECT}/${TAG} -t ${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE} .jenkins"
-                                sh "docker push ${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE}"
-                                slackSend channel: '#sds-ci', message: "*${PROJECT}:${CONAN_CHANNEL}-${BUILD_TYPE}* has been pushed to ECR."
+                            withDockerRegistry([credentialsId: 'sds-sds', url: "https://${ECR_URL}"]) {
+                                sh "docker build -t ${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE} .jenkins/"
                             }
                         }
                     }
+                    stage("Deploy Image") {
+                        when { allOf {
+			    anyOf {
+				branch "testing/v*"
+				branch "master"
+			    }
+                            branch "${DEPLOY_BRANCH}"
+                        } }
+                        steps {
+                            withDockerRegistry([credentialsId: 'sds-sds', url: "https://${ECR_URL}"]) {
+                                sh "docker push ${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE}"
+                            }
+                        }
+                        post {
+                            success {
+                                slackSend color: '#85B717', channel: '#sds-ci', message: "*${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE}* has been uploaded to ECR."
+                            }
+			}
+		    }
                 }
             }
         }

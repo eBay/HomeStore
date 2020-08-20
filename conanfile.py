@@ -97,12 +97,6 @@ class HomestoreConan(ConanFile):
         self.copy("*homeblks.dylib", dst="lib", keep_path=False)
         self.copy("*homeblks.lib", dst="lib", keep_path=False)
         self.copy("*homeblks.a", dst="lib", keep_path=False)
-        if self.settings.build_type != 'Debug':
-            self.copy("*test_load", dst="bin", keep_path=False)
-            self.copy("*test_mapping", dst="bin", keep_path=False)
-            self.copy("*test_volume", dst="bin", keep_path=False)
-            self.copy("*check_btree", dst="bin", keep_path=False)
-            self.copy("*", dst="bin/scripts", src="bin/scripts", keep_path=True)
 
     def package_info(self):
         self.cpp_info.libs = tools.collect_libs(self)
@@ -116,11 +110,3 @@ class HomestoreConan(ConanFile):
             self.cpp_info.libs.append('gcov')
         if self.settings.os == "Linux":
             self.cpp_info.libs.extend(["aio"])
-
-    def deploy(self):
-        self.copy("*test_load", dst="/usr/local/bin", keep_path=False)
-        self.copy("*test_mapping", dst="/usr/local/bin", keep_path=False)
-        self.copy("*test_volume", dst="/usr/local/bin", keep_path=False)
-        self.copy("*check_btree", dst="/usr/local/bin", keep_path=False)
-        self.copy("vol_test.py", dst="/usr/local/bin", src="bin/scripts", keep_path=False)
-        self.copy("*", dst="/usr/local/bin/home_blks_scripts", src="bin/scripts", keep_path=True)
