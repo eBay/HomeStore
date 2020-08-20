@@ -1,7 +1,6 @@
 #pragma once
 #include <cassert>
 #include "engine/checkpoint/checkpoint.hpp"
-#include "homelogstore/log_store.hpp"
 #include <fds/thread_vector.hpp>
 #include <wisr/wisr_ds.hpp>
 #include "engine/meta/meta_blks_mgr.hpp"
@@ -14,6 +13,7 @@ struct Free_Blk_Entry;
 typedef std::function< void() > trigger_cp_callback;
 typedef std::function< void(Free_Blk_Entry& fbe) > free_blk_callback;
 typedef boost::intrusive_ptr< indx_req > indx_req_ptr;
+class HomeLogStore;
 
 #define MAX_FBE_SIZE 25000 // 1  million
 struct indx_req;
@@ -83,9 +83,10 @@ public:
     /* trigger hs cp. It first trigger a indx mgr cp followed by blkalloc cp. It is async call.
      * @params cb :- callback when cp is done.
      * @shutdown :- true if it is called by shutdown. This flag makes sure that no other cp is triggered after shutdown
-     * cp
+     * cp.
+     * @force :- it force another CP if a cp is in progress
      */
-    static void trigger_hs_cp(const cp_done_cb& cb = nullptr, bool shutdown = false);
+    static void trigger_hs_cp(const cp_done_cb& cb = nullptr, bool shutdown = false, bool force = false);
 
     /* trigger indx mgr CP. It doesn't persist blkalloc */
     static void trigger_indx_cp();
@@ -100,7 +101,7 @@ public:
      * @params blkalloc_cp :- true :- it is called for every blkalloc cp
      *                        false :- it is called for every indx cp.
      */
-    static void register_cp_done_cb(const cp_done_cb& cb, bool blkalloc_cp = false);
+    static void register_hs_cp_done_cb(const cp_done_cb& cb, bool blkalloc_cp = false);
     static void write_hs_cp_sb(hs_cp* hcp);
     static const iomgr::io_thread_t& get_thread_id() { return m_thread_id; }
     static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size);
@@ -258,6 +259,13 @@ public:
     void attach_user_fblkid_list(blkid_list_ptr& free_blkid_list, const cp_done_cb& free_blks_cb, int64_t free_size,
                                  bool last_cp = false);
 
+    /* It registers a callback which is triggered at the end of cp.
+     * @params cp_done_cb :- callback
+     * @params blkalloc_cp :- true :- it is called for every blkalloc cp
+     *                        false :- it is called for every indx cp.
+     */
+    void register_indx_cp_done_cb(const cp_done_cb& cb, bool blkalloc_cp = false);
+
 protected:
     /*********************** virtual functions required to support snapshot  **********************/
     /* These functions are defined so that indx mgr can be used without snapmagr */
@@ -310,6 +318,7 @@ private:
     void* m_destroy_meta_blk = nullptr;
     BtreeQueryCursor m_destroy_btree_cur;
     int64_t m_max_seqid_in_recovery = -1;
+    std::atomic< bool > m_active_cp_suspend = false;
 
     /*************************************** private functions ************************/
     void update_indx_internal(boost::intrusive_ptr< indx_req > ireq);
@@ -319,7 +328,13 @@ private:
     btree_cp_ptr get_btree_cp(hs_cp* hcp);
     indx_cp_ptr get_indx_cp(hs_cp* hcp);
     void destroy_indx_tbl();
-    void add_prepare_cb_list(prepare_cb cb);
+    void add_prepare_cb_list(const prepare_cb& cb);
+    /* It registers a callback which is triggered at the end of cp.
+     * @params cp_done_cb :- callback
+     * @params blkalloc_cp :- true :- it is called for every blkalloc cp
+     *                        false :- it is called for every indx cp.
+     */
+    static void register_hs_cp_done_cb(const cp_done_cb& cb, bool blkalloc_cp = false);
     void indx_destroy_cp(const indx_cp_ptr& cur_icp, hs_cp* cur_hcp, hs_cp* new_hcp);
     void create_first_cp();
     btree_status_t retry_update_indx(const boost::intrusive_ptr< indx_req >& ireq, bool is_active);
@@ -327,6 +342,11 @@ private:
     void create_new_diff_tbl(indx_cp_ptr& icp);
     void recover_meta_ops();
     void log_found(logstore_seq_num_t seqnum, log_buffer buf, void* mem);
+    void set_indx_cp_state(const indx_cp_ptr& cur_icp, hs_cp* cur_hcp);
+    void call_prepare_cb(const indx_cp_ptr& cur_icp, hs_cp* cur_hcp, hs_cp* new_hcp);
+    indx_cp_ptr create_new_indx_cp(const indx_cp_ptr& cur_icp);
+    void resume_active_cp();
+    void suspend_active_cp();
 };
 
 struct Free_Blk_Entry {

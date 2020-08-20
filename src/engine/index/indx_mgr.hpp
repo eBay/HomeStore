@@ -1,7 +1,6 @@
 #pragma once
 #include <cassert>
 #include "engine/checkpoint/checkpoint.hpp"
-#include "homelogstore/log_store.hpp"
 #include <wisr/wisr_ds.hpp>
 #include "engine/meta/meta_blks_mgr.hpp"
 #include <engine/homestore_base.hpp>
@@ -144,6 +143,13 @@ struct indx_active_cp {
     int64_t end_seqid = -1;   // inclusive
     btree_cp_ptr bcp;
     indx_active_cp(int64_t start_seqid) : start_seqid(start_seqid) {}
+    std::string to_string() {
+        stringstream ss;
+        ss << " start_seqid " << start_seqid << " end_seqid " << end_seqid << " btree checkpoint info "
+           << "\n"
+           << bcp->to_string();
+        return ss.str();
+    }
 };
 
 struct indx_diff_cp {
@@ -153,6 +159,14 @@ struct indx_diff_cp {
     int64_t diff_snap_id = -1;
     btree_cp_ptr bcp;
     indx_diff_cp(int64_t start_seqid) : start_seqid(start_seqid) {}
+    std::string to_string() {
+        stringstream ss;
+        ss << " start_seqid " << start_seqid << " end_seqid " << end_seqid << " diff_snap_id " << diff_snap_id
+           << " btree checkpoint info "
+           << "\n"
+           << bcp->to_string();
+        return ss.str();
+    }
 };
 
 /* During prepare flush we decide to take a CP out of active, diff or snap or all 3 cps*/
@@ -186,6 +200,18 @@ struct indx_cp : public boost::intrusive_ref_counter< indx_cp > {
     int state() const { return flags; }
     int64_t get_max_seqid() { return 0; }
     void set_max_seqid(int64_t seqid){};
+
+    std::string to_string() {
+        stringstream ss;
+        ss << "flags " << flags << " indx cp_id " << cp_id << " indx_size " << indx_size << " active checkpoint "
+           << "\n"
+           << acp.to_string() << "\n"
+           << " diff checkpoint "
+           << "\n"
+           << dcp.to_string() << "\n"
+           << " size freed " << io_free_blkid_list->size() << " user size freed " << user_free_blkid_list.size();
+        return ss.str();
+    }
 };
 
 /* super bcp persisted for each CP */
