@@ -3,6 +3,7 @@ pipeline {
 
     environment {
         ORG = 'sds'
+        ECR_URL = 'ecr.vip.ebayc3.com'
         ARTIFACTORY_PASS = credentials('ARTIFACTORY_PASS')
         CONAN_USER = 'sds'
         MASTER_BRANCH = 'master'
@@ -41,7 +42,7 @@ pipeline {
                     PROJECT = sh(script: "grep -m 1 'name =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
                     VER = sh(script: "grep -m 1 'version =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
                     CONAN_CHANNEL = sh(script: "echo ${BRANCH_NAME} | sed -E 's,(\\w+-?\\d*)/.*,\\1,' | sed -E 's,-,_,' | tr -d '\n'", returnStdout: true)
-                    ECR_PATH = "ecr.vip.ebayc3.com/${ORG}/${PROJECT}"
+                    ECR_PATH = "${ECR_URL}/${ORG}/${PROJECT}"
                     TAG = "${VER}@${CONAN_USER}/${CONAN_CHANNEL}"
                     slackSend color: '#0063D1', channel: '#sds-ci', message: "*${PROJECT}/${TAG}* is building."
                 }
