@@ -7,7 +7,6 @@
 #include "engine/homeds/btree/btree_internal.h"
 #include "checkpoint.hpp"
 #include "homelogstore/logstore_header.hpp"
-#include "api/vol_interface.hpp"
 
 namespace homestore {
 
@@ -343,7 +342,7 @@ public:
     virtual btree_status_t free_user_blkids(blkid_list_ptr free_list, homeds::btree::BtreeQueryCursor& cur,
                                             int64_t& size) = 0;
     virtual void get_btreequery_cur(const sisl::blob& b, homeds::btree::BtreeQueryCursor& cur) = 0;
-    virtual btree_status_t update_unmap_active_indx_tbl(blkid_list_ptr free_list, journal_key& key, homeds::btree::BtreeQueryCursor& cur, const btree_cp_ptr& bcp, int64_t& size) = 0;
+    virtual btree_status_t update_unmap_active_indx_tbl(blkid_list_ptr free_list, uint64_t& seq_id, journal_key& key, homeds::btree::BtreeQueryCursor& cur, const btree_cp_ptr& bcp, int64_t& size) = 0;
 };
 
 typedef std::function< void(const boost::intrusive_ptr< indx_req >& ireq, std::error_condition err) > io_done_cb;

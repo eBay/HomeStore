@@ -843,7 +843,8 @@ void IndxMgr::unmap_start(sisl::byte_view buf) {
     journal_key key;
     key.lba = mhdr->lba;
     key.nlbas = mhdr->nlbas;
-    btree_status_t ret = m_active_tbl->update_unmap_active_indx_tbl(free_list, key, m_unmap_btree_cur, btree_id, free_size);
+    auto seq_id = mhdr->seq_id;
+    btree_status_t ret = m_active_tbl->update_unmap_active_indx_tbl(free_list, seq_id, key, m_unmap_btree_cur, btree_id, free_size);
     if (ret != btree_status_t::success) {
         auto seq_id = mhdr->seq_id;
         assert(ret == btree_status_t::resource_full);
