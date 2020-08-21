@@ -101,7 +101,7 @@ pipeline {
                             sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_load' -exec cp {} .jenkins/test_load \\;"
                             sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_volume' -exec cp {} .jenkins/test_volume \\;"
                             sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/check_btree' -exec cp {} .jenkins/check_btree \\;"
-                            sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/vol_test.py' -exec cp -a {} .jenkins/vol_test.py \\;"
+                            sh "find . -type f -wholename '*test_scripts/vol_test.py' -exec cp -a {} .jenkins/vol_test.py \\;"
                             sh "find ${CONAN_USER_HOME} -type d -wholename '*bin/scripts' -exec cp -a {} .jenkins/scripts \\;"
                         }
                         post {
