@@ -98,6 +98,7 @@ tags
 
 bin/**
 Testing/**
+test_package/build
 
 # Settings generated files
 generated/*
