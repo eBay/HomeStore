@@ -99,7 +99,6 @@ pipeline {
                         steps {
                             sh "conan create ${BUILD_MISSING} -o homestore:sanitize=${SANITIZE} -pr ${BUILD_TYPE} . ${PROJECT}/${TAG}"
                             sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_load' -exec cp {} .jenkins/test_load \\;"
-                            sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_mapping' -exec cp {} .jenkins/test_mapping \\;"
                             sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_volume' -exec cp {} .jenkins/test_volume \\;"
                             sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/check_btree' -exec cp {} .jenkins/check_btree \\;"
                             sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/vol_test.py' -exec cp -a {} .jenkins/vol_test.py \\;"

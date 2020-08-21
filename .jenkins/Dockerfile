@@ -12,10 +12,9 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*;
 
 COPY scripts /usr/local/bin/home_blks_scripts
-COPY test_load /usr/local/bin/test_load
-COPY test_mapping /usr/local/bin/test_mapping
-COPY test_volume /usr/local/bin/test_volume
 COPY check_btree /usr/local/bin/check_btree
+COPY test_load /usr/local/bin/test_load
+COPY test_volume /usr/local/bin/test_volume
 COPY vol_test.py /usr/local/bin/vol_test.py
 
 EXPOSE 5000
