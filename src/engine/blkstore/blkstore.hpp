@@ -515,6 +515,7 @@ public:
         COUNTER_INCREMENT(m_metrics, blkstore_read_op_count, 1);
         COUNTER_INCREMENT(m_metrics, blkstore_read_data_size, size);
 
+        req->blkstore_ref_cnt.increment(1);
         req->start_time();
         req->is_read = true;
 
@@ -523,13 +524,12 @@ public:
          */
         HS_ASSERT_CMP(DEBUG, m_vdev.is_blk_alloced(const_cast<BlkId&>(bid)), ==, true, "blk is not allocted");
 
-
         std::vector< iovec > iov(1, iovec{});
         iov.reserve(2);
         uint64_t current_offset{data_offset};
         const uint64_t end_offset{current_offset + size};
         uint64_t iovec_offset{0};
-        for (const auto& read_iovec : iovecs) {
+        for (auto& read_iovec : iovecs) {
             if (current_offset < iovec_offset + read_iovec.iov_len) {
                 const uint64_t start_offset{current_offset - iovec_offset};
                 iov.back().iov_base = static_cast< uint8_t* >(read_iovec.iov_base) + start_offset;
@@ -540,21 +540,27 @@ public:
                     iov.back().iov_len = remaining;
                 }
                 current_offset += iov.back().iov_len;
-                if (current_offset != end_offset)
-                {
-                    iov.emplace_back(iovec{});
-                };
             }
             iovec_offset += read_iovec.iov_len;
-            if (current_offset == end_offset) break;
+            if (current_offset == end_offset) {
+                break;
+            }
+            else  {
+                // prepare next iovec
+                iov.emplace_back(iovec{});
+            };
         }
-        m_vdev.read(bid, iov, to_vdev_req(req));
+        assert(current_offset == end_offset);
+        req->blkstore_ref_cnt.increment(1);
+        m_vdev.read(bid, iov, size, to_vdev_req(req));
+        if (req->isSyncCall) { req->blkstore_ref_cnt.decrement(1); }
 
         assert(req->err == no_error);
         if (!req->isSyncCall) {
             /* issue the completion */
             process_completions(to_vdev_req(req));
         } else {
+            req->blkstore_ref_cnt.decrement(1);
             HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_read_latency, get_elapsed_time_us(req->blkstore_op_start_time));
         }
     }

@@ -1139,15 +1139,13 @@ public:
                          (char*)mp.ptr(), mp.size(), req);
     }
 
-    void read(const BlkId& bid, std::vector<iovec>& iovecs, boost::intrusive_ptr< virtualdev_req > req) {
+    void read(const BlkId& bid, std::vector<iovec>& iovecs, const uint64_t size, 
+              boost::intrusive_ptr< virtualdev_req > req) {
         PhysicalDevChunk* primary_chunk;
 
         uint64_t primary_dev_offset = to_dev_offset(bid, &primary_chunk);
-
-        for (auto& iovec : iovecs) {
-            do_read_internal(primary_chunk->get_physical_dev_mutable(), primary_chunk, primary_dev_offset,
-                             static_cast<char*>(iovec.iov_base), iovec.iov_len, req);
-        }
+        do_preadv_internal(primary_chunk->get_physical_dev_mutable(), primary_chunk, primary_dev_offset,
+                               iovecs.data(), iovecs.size(), size, req);
     }
 
     void readv(const BlkId& bid, const homeds::MemVector& buf, boost::intrusive_ptr< virtualdev_req > req) {
