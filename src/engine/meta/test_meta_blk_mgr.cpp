@@ -139,11 +139,15 @@ public:
         if (context_sz <= META_BLK_CONTEXT_SZ) {
             return META_BLK_PAGE_SZ;
         } else {
+            return META_BLK_PAGE_SZ;
+            // TODO: FIXME;
+#if 0
             if ((context_sz - META_BLK_CONTEXT_SZ) % META_BLK_OVF_CONTEXT_SZ == 0) {
                 return (1 + ((context_sz - META_BLK_CONTEXT_SZ) / META_BLK_OVF_CONTEXT_SZ)) * META_BLK_PAGE_SZ;
             } else {
                 return (2 + ((context_sz - META_BLK_CONTEXT_SZ) / META_BLK_OVF_CONTEXT_SZ)) * META_BLK_PAGE_SZ;
             }
+#endif
         }
     }
 
@@ -161,17 +165,17 @@ public:
         meta_blk* mblk = (meta_blk*)cookie;
         if (overflow) {
             HS_ASSERT_CMP(DEBUG, sz_to_wrt, >=, META_BLK_PAGE_SZ);
-            HS_ASSERT_CMP(DEBUG, mblk->hdr.h.ovf_blkid.to_integer(), !=, BlkId::invalid_internal_id());
+            HS_ASSERT_CMP(DEBUG, mblk->hdr.h.ovf_bid.to_integer(), !=, BlkId::invalid_internal_id());
         } else {
             HS_ASSERT_CMP(DEBUG, sz_to_wrt, <=, META_BLK_CONTEXT_SZ);
-            HS_ASSERT_CMP(DEBUG, mblk->hdr.h.ovf_blkid.to_integer(), ==, BlkId::invalid_internal_id());
+            HS_ASSERT_CMP(DEBUG, mblk->hdr.h.ovf_bid.to_integer(), ==, BlkId::invalid_internal_id());
         }
 
         // verify context_sz
         HS_ASSERT(DEBUG, mblk->hdr.h.context_sz == sz_to_wrt, "context_sz mismatch: {}/{}",
                   (uint64_t)mblk->hdr.h.context_sz, sz_to_wrt);
 
-        auto bid = mblk->hdr.h.blkid.to_integer();
+        auto bid = mblk->hdr.h.bid.to_integer();
         // save cookie;
         std::unique_lock< std::mutex > lg(m_mtx);
         HS_ASSERT(DEBUG, m_write_sbs.find(bid) == m_write_sbs.end(), "cookie already in the map.");
@@ -225,7 +229,7 @@ public:
         m_total_wrt_sz -= total_size_written(((meta_blk*)cookie)->hdr.h.context_sz);
 
         m_mbm->update_sub_sb(buf, sz_to_wrt, cookie);
-        auto bid = ((meta_blk*)cookie)->hdr.h.blkid.to_integer();
+        auto bid = ((meta_blk*)cookie)->hdr.h.bid.to_integer();
         HS_ASSERT(DEBUG, m_write_sbs.find(bid) == m_write_sbs.end(), "cookie already in the map.");
         m_write_sbs[bid].cookie = cookie;
         m_write_sbs[bid].str = std::string((char*)buf, sz_to_wrt);
@@ -279,7 +283,7 @@ public:
                                 [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
                                     if (mblk) {
                                         std::unique_lock< std::mutex > lg(m_mtx);
-                                        m_cb_blks[mblk->hdr.h.blkid.to_integer()] =
+                                        m_cb_blks[mblk->hdr.h.bid.to_integer()] =
                                             std::string((char*)(buf.bytes()), size);
                                     }
                                 },
