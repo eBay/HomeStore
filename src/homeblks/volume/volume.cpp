@@ -19,7 +19,7 @@ bool vol_test_enable = false;
 #endif
 
 SDS_LOGGING_DECL(volume)
-std::atomic< uint64_t > Volume::home_blks_ref_cnt = 0;
+sisl::atomic_counter< uint64_t > Volume::home_blks_ref_cnt = 0;
 REGISTER_METABLK_SUBSYSTEM(volume, "VOLUME", Volume::meta_blk_found_cb, nullptr)
 
 namespace homestore {
@@ -77,10 +77,9 @@ Volume::Volume(const vol_params& params) :
      * not allowed.
      */
     m_hb = HomeBlks::safe_instance();
-    ++home_blks_ref_cnt;
+    home_blks_ref_cnt.increment(1);
     if (m_hb->is_shutdown()) {
-        auto cnt = home_blks_ref_cnt.fetch_sub(1);
-        if (cnt == 1) { m_hb->do_volume_shutdown(true); }
+        if (home_blks_ref_cnt.decrement_testz(1)) { m_hb->do_volume_shutdown(true); }
         throw std::runtime_error("shutdown in progress");
     }
     m_state = vol_state::UNINITED;
@@ -126,8 +125,7 @@ void Volume::init() {
 
         SnapMgr::trigger_indx_cp_with_cb(([this](bool success) {
             /* Now it is safe to do shutdown as this volume has become a part of CP */
-            auto cnt = home_blks_ref_cnt.fetch_sub(1);
-            if (cnt == 1 && m_hb->is_shutdown()) { m_hb->do_volume_shutdown(true); }
+            if (home_blks_ref_cnt.decrement_testz(1) && m_hb->is_shutdown()) { m_hb->do_volume_shutdown(true); }
         }));
     } else {
         /* recovery */
@@ -154,13 +152,12 @@ void Volume::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size)
 /* This function can be called multiple times. Underline functions should be idempotent */
 void Volume::destroy(indxmgr_stop_cb cb) {
     /* we don't allow shutdown and destroy in parallel */
-    ++home_blks_ref_cnt;
+    home_blks_ref_cnt.increment();
     if (m_hb->is_shutdown()) {
-        auto cnt = home_blks_ref_cnt.fetch_sub(1);
-        if (cnt == 1) { m_hb->do_volume_shutdown(true); }
+        if (home_blks_ref_cnt.decrement_testz(1)) { m_hb->do_volume_shutdown(true); }
     }
 
-    ++vol_ref_cnt;
+    vol_ref_cnt.increment(1);
     auto prev_state = set_state(vol_state::DESTROYING);
     if (prev_state == vol_state::DESTROYING) {
         shutdown_if_needed();
@@ -168,8 +165,7 @@ void Volume::destroy(indxmgr_stop_cb cb) {
     }
 
     m_destroy_done_cb = cb;
-    auto cnt = vol_ref_cnt.fetch_sub(1);
-    if (cnt == 1) { destroy_internal(); }
+    if (vol_ref_cnt.decrement_testz(1)) { destroy_internal(); }
 }
 
 /* This function can be called multiple times. Underline functions should be idempotent */
@@ -191,8 +187,7 @@ void Volume::destroy_internal() {
         auto vol_ptr = shared_from_this();
         m_destroy_done_cb(success);
         m_destroy_done_cb = nullptr;
-        auto cnt = home_blks_ref_cnt.fetch_sub(1);
-        if (cnt == 1 && m_hb->is_shutdown()) { m_hb->do_volume_shutdown(true); };
+        if (home_blks_ref_cnt.decrement_testz(1) && m_hb->is_shutdown()) { m_hb->do_volume_shutdown(true); };
     }));
 }
 
@@ -224,8 +219,8 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
     COUNTER_INCREMENT(m_metrics, volume_outstanding_data_write_count, 1);
 
     /* Sanity checks */
-    ++home_blks_ref_cnt;
-    ++vol_ref_cnt;
+    home_blks_ref_cnt.increment();
+    vol_ref_cnt.increment();
 
     // sync write is not supported
     VOL_DEBUG_ASSERT_CMP(vreq->is_sync(), ==, false, vreq, "sync not supported");
@@ -295,8 +290,8 @@ std::error_condition Volume::read(const vol_interface_req_ptr& iface_req) {
     COUNTER_INCREMENT(m_metrics, volume_read_count, 1);
     COUNTER_INCREMENT(m_metrics, volume_outstanding_data_read_count, 1);
 
-    ++home_blks_ref_cnt;
-    ++vol_ref_cnt;
+    home_blks_ref_cnt.increment();
+    vol_ref_cnt.increment();
     if (is_offline()) {
         ret = std::make_error_condition(std::errc::no_such_device);
         goto done;
@@ -325,8 +320,8 @@ std::error_condition Volume::unmap(const vol_interface_req_ptr& iface_req) {
     THIS_VOL_LOG(TRACE, volume, vreq, "unmap: lba={}, nlbas={}", vreq->lba(), vreq->nlbas());
 
     /* Sanity checks */
-    ++home_blks_ref_cnt;
-    ++vol_ref_cnt;
+    home_blks_ref_cnt.increment();
+    vol_ref_cnt.increment();
 
     if (is_offline()) {
         ret = std::make_error_condition(std::errc::no_such_device);
@@ -441,10 +436,10 @@ bool Volume::check_and_complete_req(const volume_req_ptr& vreq, const std::error
 }
 
 void Volume::shutdown_if_needed() {
-    auto homeblks_io_cnt = home_blks_ref_cnt.fetch_sub(1);
-    auto vol_io_cnt = vol_ref_cnt.fetch_sub(1);
-    if (homeblks_io_cnt == 1 && m_hb->is_shutdown()) { m_hb->do_volume_shutdown(true); }
-    if (vol_io_cnt == 1 && m_state == vol_state::DESTROYING) { destroy_internal(); }
+    if (vol_ref_cnt.decrement_testz(1) && m_state.load(std::memory_order_acquire) == vol_state::DESTROYING) {
+        destroy_internal();
+    }
+    if (home_blks_ref_cnt.decrement_testz(1) && m_hb->is_shutdown()) { m_hb->do_volume_shutdown(true); }
 }
 
 void Volume::process_indx_completions(const indx_req_ptr& ireq, std::error_condition err) {
@@ -604,7 +599,7 @@ volume_child_req_ptr Volume::create_vol_child_req(BlkId& bid, const volume_req_p
     vc_req->bid = bid;
     vc_req->lba = start_lba;
     vc_req->op_start_time = Clock::now();
-    vc_req->reqId = ++m_req_id;
+    vc_req->reqId = m_req_id.fetch_add(std::memory_order_relaxed);
     vc_req->sync = vreq->is_sync();
     vc_req->part_of_batch = vreq->iface_req->part_of_batch;
 
@@ -718,7 +713,7 @@ indx_cp_ptr Volume::attach_prepare_volume_cp(const indx_cp_ptr& icp, hs_cp* cur_
 
 vol_state Volume::set_state(vol_state state, bool persist) {
     THIS_VOL_LOG(INFO, base, , "volume state changed from {} to {}", m_state, state);
-    auto prev_state = m_state.exchange(state);
+    auto prev_state = m_state.exchange(state, std::memory_order_acquire);
     if (prev_state == state) { return prev_state; }
     if (persist) {
         VOL_ASSERT(DEBUG, (state == vol_state::DESTROYING || state == vol_state::ONLINE || state == vol_state::OFFLINE),
@@ -738,7 +733,7 @@ void Volume::write_sb() {
     std::unique_lock< std::mutex > lk(m_sb_lock);
     auto sb = (vol_sb_hdr*)m_sb_buf.bytes();
     /* update mutable params */
-    sb->state = m_state;
+    sb->state = m_state.load(std::memory_order_release);
 
     if (!m_sb_cookie) {
         // first time insert

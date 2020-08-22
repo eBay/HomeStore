@@ -1,7 +1,5 @@
 #pragma once
 #include <fds/malloc_helper.hpp>
-#include "engine/device/blkbuffer.hpp"
-#include "engine/blkstore/blkstore.hpp"
 #include <urcu-call-rcu.h>
 #include <urcu.h>
 #include <utility/urcu_helper.hpp>
@@ -12,6 +10,7 @@
 #include <sds_logging/logging.h>
 #include "engine/common/homestore_config.hpp"
 #include "engine/common/homestore_header.hpp"
+#include "engine/common/homestore_assert.hpp"
 
 /*
  * These are the design requirements of this class. If we don't follow these requirements then there can be serious

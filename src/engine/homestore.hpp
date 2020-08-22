@@ -77,7 +77,7 @@ public:
 #endif
 
         /* create cache */
-        uint64_t cache_size = (input.app_mem_size * HS_DYNAMIC_CONFIG(generic.cache_size_percent)) / 100;
+        uint64_t cache_size = ResourceMgr::get_cache_size();
         sisl::set_memory_release_rate(HS_DYNAMIC_CONFIG(generic.mem_release_rate));
 
         m_cache = std::make_unique< Cache< BlkId > >(cache_size, hs_config.disk_attr.atomic_phys_page_size);
@@ -150,6 +150,7 @@ protected:
             create_logdev_blkstore(nullptr);
             create_meta_blkstore(nullptr);
         }
+        ResourceMgr::set_total_cap(m_dev_mgr->get_total_cap());
     }
 
     void new_vdev_found(DeviceManager* dev_mgr, vdev_info_block* vb) {

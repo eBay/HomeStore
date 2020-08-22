@@ -757,6 +757,7 @@ void HomeBlks::vol_recovery_start_phase1() {
 
 void HomeBlks::vol_recovery_start_phase2() {
     for (auto it = m_volume_map.cbegin(); it != m_volume_map.cend(); ++it) {
+        HS_ASSERT(RELEASE, (it->second->verify_tree() == true), "true");
         it->second->recovery_start_phase2();
     }
 }

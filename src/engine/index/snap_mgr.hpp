@@ -1,11 +1,11 @@
 #pragma once
-#include "indx_mgr_api.hpp"
+#include "indx_mgr.hpp"
 
 namespace homestore {
 struct snap_sb {
     boost::uuids::uuid indx_mgr_uuid;
     uint64_t snap_id;
-    btree_super_block btree_sb;
+    homeds::btree::btree_super_block btree_sb;
     bool is_diff = true; // we set it to false when snapshot is created successfully
     uint64_t indx_tbl_size; // it is used to calculate the size used in reboot.
     int64_t cp_cnt; // start cp_cnt of this snapshot. It means contain all the ios starting from this cp_cnt till the
@@ -41,7 +41,7 @@ protected:
     virtual int64_t snap_get_diff_id() override;
     virtual void snap_create_done(uint64_t snap_id, int64_t max_psn, int64_t contiguous_psn,
                                   int64_t end_cp_cnt) override;
-    virtual btree_super_block snap_get_diff_tbl_sb() override;
+    virtual homeds::btree::btree_super_block snap_get_diff_tbl_sb() override;
 
 private:
     /* static private members */

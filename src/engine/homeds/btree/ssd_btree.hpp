@@ -150,11 +150,11 @@ public:
              */
             /* getting all the free blks */
 
-            jentry->foreach_node(bt_journal_node_op::removal,
-                                 ([this, is_replayed](bt_node_gen_pair node_info, sisl::blob key_blob) {
-                                     get_wb_cache()->free_blk(node_info.node_id, m_first_cp->free_blkid_list);
-                                     if (is_replayed) { m_first_cp->btree_size.fetch_sub(1); }
-                                 }));
+            jentry->foreach_node(
+                bt_journal_node_op::removal, ([this, is_replayed](bt_node_gen_pair node_info, sisl::blob key_blob) {
+                    get_wb_cache()->free_blk(node_info.node_id, m_first_cp->free_blkid_list, m_node_size);
+                    if (is_replayed) { m_first_cp->btree_size.fetch_sub(1); }
+                }));
 
             /* getting all the allocated blks */
             jentry->foreach_node(bt_journal_node_op::creation,
@@ -204,8 +204,6 @@ public:
     static void truncate(SSDBtreeStore* store, const btree_cp_ptr& bcp) { store->truncate_store(bcp); }
 
     void truncate_store(const btree_cp_ptr& bcp) { m_journal->truncate(bcp->end_seqid); }
-
-    static void cp_done(trigger_cp_callback cb) { wb_cache_t::cp_done(cb); }
 
     static void destroy_done(SSDBtreeStore* store) { store->destroy_done_store(); }
 
@@ -405,7 +403,7 @@ public:
     static void free_node(SSDBtreeStore* store, const boost::intrusive_ptr< SSDBtreeNode >& bn,
                           const blkid_list_ptr& free_blkid_list, bool in_mem = false) {
         if (in_mem) { return; }
-        store->get_wb_cache()->free_blk(bn->get_node_id(), free_blkid_list);
+        store->get_wb_cache()->free_blk(bn->get_node_id(), free_blkid_list, store->get_node_size());
     }
 
     static void ref_node(SSDBtreeNode* bn) {

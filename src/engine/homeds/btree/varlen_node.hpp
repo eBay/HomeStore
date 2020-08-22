@@ -323,7 +323,7 @@ public:
         int end_ind = this->get_total_entries() - nentries - 1;
 
         auto ind = start_ind;
-        while (ind < end_ind) {
+        while (ind > end_ind) {
             // Get the ith key and value blob and then remove the entry from here and insert to the other node
             sisl::blob kb;
             kb.bytes = (uint8_t*)get_nth_obj(ind);

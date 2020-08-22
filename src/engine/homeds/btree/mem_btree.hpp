@@ -196,7 +196,6 @@ public:
 
     static void cp_start(MemBtreeStore* store, const btree_cp_ptr& bcp, cp_comp_callback cb) {}
     static void truncate(MemBtreeStore* store, const btree_cp_ptr& bcp) {}
-    static void cp_done(trigger_cp_callback cb) {}
     static void destroy_done(MemBtreeStore* store) {}
     static void flush_free_blks(MemBtreeStore* store, const btree_cp_ptr& bcp,
                                 std::shared_ptr< homestore::blkalloc_cp >& ba_cp) {}

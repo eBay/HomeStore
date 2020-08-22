@@ -198,7 +198,7 @@ public:
         return (uint16_t)sb->boot_cnt;
     }
 
-    bool is_shutdown() const { return (m_shutdown_start_time.load() != 0); }
+    bool is_shutdown() const { return (m_shutdown_start_time.load(std::memory_order_acquire) != 0); }
 
     void init_done(std::error_condition err);
     void inc_sub_system_init_cnt();

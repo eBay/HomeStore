@@ -755,8 +755,6 @@ void mapping::cp_start(const btree_cp_ptr& bcp, cp_comp_callback cb) { m_bt->cp_
 
 void mapping::truncate(const btree_cp_ptr& bcp) { m_bt->truncate(bcp); }
 
-void mapping::cp_done(trigger_cp_callback cb) { MappingBtreeDeclType::cp_done(cb); }
-
 void mapping::destroy_done() { m_bt->destroy_done(); }
 void mapping::flush_free_blks(const btree_cp_ptr& bcp, std::shared_ptr< homestore::blkalloc_cp >& ba_cp) {
     m_bt->flush_free_blks(bcp, ba_cp);

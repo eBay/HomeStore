@@ -59,8 +59,6 @@ table LogStore {
 }
 
 table Generic {
-    /* Percentage of memory allocated for homestore cache */
-    cache_size_percent: uint32 = 65; 
 
     /* Percentage of memory to be filled by app before we ask underlying mem allocator to free it up */
     soft_mem_release_threshold: uint32 = 85 (hotswap);
@@ -70,6 +68,27 @@ table Generic {
 
     /* Rate of memory release rate to the underlying mem allocator */
     mem_release_rate: uint32 = 8;
+
+    // blk alloc cp timer in us
+    blkalloc_cp_timer_us: uint64 = 1000000 (hotswap);
+
+    // writeback cache flush threads
+    cache_flush_threads : int32 = 2;
+}
+
+table ResourceLimits {
+    /* it is going to use 2 times of this space because of two concurrent cps */
+    dirty_buf_percent: uint32 = 5 (hotswap);
+    
+    /* it is going to use 2 times of this space because of two concurrent cps */
+    free_blk_cnt: uint32 = 1000000 (hotswap);
+    free_blk_size: uint32 = 2 (hotswap);
+    
+    /* Percentage of memory allocated for homestore cache */
+    cache_size_percent: uint32 = 65; 
+
+    /* precentage of memory used during recovery */
+    memory_in_recovery_precent: uint32 = 40;
 }
 
 table HomeStoreSettings {
@@ -80,6 +99,7 @@ table HomeStoreSettings {
     btree: Btree;
     device: Device;
     logstore: LogStore;
+    resource_limits: ResourceLimits;
 }
 
 root_type HomeStoreSettings;
