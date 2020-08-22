@@ -563,9 +563,37 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
     }
 
     try {
+        auto insertIntoIovec{
+            [&vreq, this](std::vector< iovec >& iovecs, const uint64_t data_offset, const uint8_t* const data,
+                          const uint64_t size) {
+                uint64_t current_offset{data_offset};
+                const uint64_t end_offset{current_offset + size};
+                uint64_t iovec_offset{0};
+                uint64_t source_offset{0};
+                for (auto& read_iovec : iovecs) {
+                    if (current_offset < iovec_offset + read_iovec.iov_len) {
+                        const uint64_t start_offset{current_offset - iovec_offset};
+                        const uint64_t remaining{static_cast< uint64_t >(read_iovec.iov_len - start_offset)};
+                        uint32_t data_length{0};
+                        if (current_offset + remaining > end_offset) {
+                            data_length = end_offset - current_offset;
+                        } else {
+                            data_length = remaining;
+                        }
+                        ::memcpy(static_cast< void* >(static_cast< uint8_t* >(read_iovec.iov_base) + start_offset),
+                                 static_cast< const void* >(data + source_offset), data_length);
+                        current_offset += data_length;
+                        source_offset += data_length;
+                    }
+                    iovec_offset += read_iovec.iov_len;
+                    if (current_offset == end_offset) break;
+                }
+                assert(current_offset == end_offset);
+                VOL_RELEASE_ASSERT_CMP(current_offset, ==, end_offset, vreq, "Insufficient iovec storage space");            }};
+
         /* we populate the entire LBA range asked even if it is not populated by the user */
+        uint64_t iovec_data_offset{0};
         uint64_t next_start_lba = vreq->lba();
-        uint32_t data_offset{0};
         for (uint32_t i = 0; i < vreq->result_kv.size(); ++i) {
             /* create child req and read buffers */
             MappingKey* mk = &(vreq->result_kv[i].first);
@@ -577,8 +605,15 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
                                    "mismatch end lba and end lba in req");
             /* check if there are any holes in the beginning or in the middle */
             while (next_start_lba < start_lba) {
-                vreq->read_buf().emplace_back(get_page_size(), 0, m_only_in_mem_buff);
-                auto blob = m_only_in_mem_buff->at_offset(0);
+                const auto blob{m_only_in_mem_buff->at_offset(0)};
+                if (!std::holds_alternative< volume_req::IoVecData >(vreq->data)) {
+                    vreq->read_buf().emplace_back(get_page_size(), 0, m_only_in_mem_buff);
+                } else {
+                    // scatter/gather read
+                    auto& iovecs{std::get< volume_req::IoVecData >(vreq->data)};
+                    insertIntoIovec(iovecs, iovec_data_offset, blob.bytes, get_page_size());
+                    iovec_data_offset += get_page_size();
+                }
                 vreq->push_csum(crc16_t10dif(init_crc_16, blob.bytes, get_page_size()));
                 ++next_start_lba;
             }
@@ -602,17 +637,12 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
             const auto blkid_offset{m_hb->get_data_pagesz() * ve.get_blk_offset()};
             if (std::holds_alternative< volume_req::IoVecData >(vreq->data))
             {
-                boost::intrusive_ptr< BlkBuffer > bbuf = m_hb->get_data_blkstore()->read(
-                    ve.get_blkId(), blkid_offset, sz, boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vc_req));
-                // TODO: @hkadayam There is a potential for race of read_buf_list getting emplaced after complevtion
-                /* Add buffer to read_buf_list. User read data from read buf list */
-                vreq->read_buf().emplace_back(sz, blkid_offset, std::move(bbuf));
-
                 // scatter/gather read
                 auto& iovecs{std::get< volume_req::IoVecData >(vreq->data)};
                 const BlkId read_blkid(ve.get_blkId().get_blkid_at(blkid_offset, sz, m_hb->get_data_pagesz()));
-                m_hb->get_data_blkstore()->read(read_blkid, iovecs, data_offset, sz,
+                m_hb->get_data_blkstore()->read(read_blkid, iovecs, iovec_data_offset, sz,
                                                 boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vc_req));
+                iovec_data_offset += sz;
 
             } else {
                 boost::intrusive_ptr< BlkBuffer > bbuf = m_hb->get_data_blkstore()->read(
@@ -621,37 +651,7 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
                 /* Add buffer to read_buf_list. User read data from read buf list */
                 vreq->read_buf().emplace_back(sz, blkid_offset, std::move(bbuf));
             }
-            data_offset += sz;
         }
-
-        auto insertIntoIovec{[&data_offset, &vreq, this]
-                             (std::vector<iovec>& iovecs, const uint8_t* const data, const uint64_t size) {
-            uint64_t current_offset{data_offset};
-            const uint64_t end_offset{current_offset + size};
-            uint64_t iovec_offset{0};
-            uint64_t source_offset{0};
-            for (auto& read_iovec : iovecs) {
-                if (current_offset < iovec_offset + read_iovec.iov_len) {
-                    const uint64_t start_offset{current_offset - iovec_offset};
-                    const uint64_t remaining{static_cast< uint64_t >(read_iovec.iov_len - start_offset)};
-                    uint32_t data_length{0};
-                    if (current_offset + remaining > end_offset) {
-                        data_length = end_offset - current_offset;
-                    } else {
-                        data_length = remaining;
-                    }
-                    ::memcpy(static_cast< void* >(static_cast< uint8_t* >(read_iovec.iov_base) + start_offset),
-                             static_cast< const void*>(data + source_offset), data_length);
-                    current_offset += data_length;
-                    source_offset += data_length;
-                }
-                iovec_offset += read_iovec.iov_len;
-                if (current_offset == end_offset) break;
-            }
-            assert(current_offset == end_offset);
-            VOL_RELEASE_ASSERT_CMP(current_offset, ==, end_offset, vreq, "Insufficient iovec storage space");
-            data_offset += size;
-        }};
 
         /* check if there are any holes at the end */
         while (next_start_lba <= mapping::get_end_lba(vreq->lba(), vreq->nlbas())) {
@@ -661,7 +661,8 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
             } else {
                 // scatter/gather read
                 auto& iovecs{std::get< volume_req::IoVecData >(vreq->data)};
-                insertIntoIovec(iovecs, blob.bytes, get_page_size());
+                insertIntoIovec(iovecs, iovec_data_offset, blob.bytes, get_page_size());
+                iovec_data_offset += get_page_size();
             }
             vreq->push_csum(crc16_t10dif(init_crc_16, blob.bytes, get_page_size()));
             ++next_start_lba;

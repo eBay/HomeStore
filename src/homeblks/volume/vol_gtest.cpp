@@ -811,7 +811,7 @@ public:
 
 protected:
     load_type_t m_load_type;
-    uint64_t m_cur_vol = 0;
+    std::atomic< int64_t > m_cur_vol = 0;
     std::atomic< int64_t > m_outstanding_ios = 0;
 
 protected:
