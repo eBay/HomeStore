@@ -78,7 +78,7 @@ class HomestoreConan(ConanFile):
             definitions['CMAKE_BUILD_TYPE'] = 'Debug'
 
         definitions['MALLOC_IMPL'] = self.options.malloc_impl
-
+test_target
         cmake.configure(defs=definitions)
         return cmake
 
@@ -90,7 +90,7 @@ class HomestoreConan(ConanFile):
         if self.options.testing == 'coverage':
             test_target = test_target
         if not self.options.testing == 'off':
-            cmake.test(target=self.options.testing, output_on_failure=True)
+            cmake.test(target=test_target, output_on_failure=True)
 
     def package(self):
         self.copy("*.h", dst="include", src="src", keep_path=True)
