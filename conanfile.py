@@ -86,6 +86,9 @@ class HomestoreConan(ConanFile):
         cmake = self.configure_cmake()
         cmake.build()
        
+        target = None
+        if self.options.testing == 'coverage':
+            test_target = test_target
         if not self.options.testing == 'off':
             cmake.test(target=self.options.testing, output_on_failure=True)
 
