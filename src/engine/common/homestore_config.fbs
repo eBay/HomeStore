@@ -89,6 +89,9 @@ table ResourceLimits {
 
     /* precentage of memory used during recovery */
     memory_in_recovery_precent: uint32 = 40;
+
+    /* journal size used percentage */
+    journal_size_percent: uint32 = 50;
 }
 
 table HomeStoreSettings {

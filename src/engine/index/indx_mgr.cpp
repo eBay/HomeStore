@@ -1188,7 +1188,7 @@ void StaticIndxMgr::trigger_indx_cp() { m_cp_mgr->trigger_cp(); }
 void StaticIndxMgr::trigger_indx_cp_with_cb(const cp_done_cb& cb) { m_cp_mgr->trigger_cp(cb); }
 void StaticIndxMgr::trigger_hs_cp(const cp_done_cb& cb, bool shutdown, bool force) {
     if (!m_inited.load(std::memory_order_acquire)) {
-        cb(true);
+        if (cb) { cb(true); }
         return;
     }
     /* set bit map checkpoint , resume cp and trigger it */
