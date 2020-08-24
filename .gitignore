@@ -107,4 +107,5 @@ src/engine/common/generated/*
 .vscode/*
 
 # Visual Studio
+CMakeSettings.json
 .vs/**
