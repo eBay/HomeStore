@@ -78,7 +78,7 @@ class HomestoreConan(ConanFile):
             definitions['CMAKE_BUILD_TYPE'] = 'Debug'
 
         definitions['MALLOC_IMPL'] = self.options.malloc_impl
-test_target
+        
         cmake.configure(defs=definitions)
         return cmake
 
