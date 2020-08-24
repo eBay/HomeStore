@@ -664,7 +664,7 @@ public:
     virtual void get_btreequery_cur(const sisl::blob& b, BtreeQueryCursor& cur) override;
     virtual btree_status_t destroy(blkid_list_ptr& free_blkid_list, uint64_t& free_node_cnt) override;
     virtual btree_status_t read_indx(indx_req* req, const read_indx_comp_cb_t& read_cb) override;
-    virtual btree_status_t update_unmap_active_indx_tbl(blkid_list_ptr free_list, uint64_t& seq_id, journal_key& key, BtreeQueryCursor& cur, const btree_cp_ptr& bcp, int64_t& size) override;
+    virtual btree_status_t update_unmap_active_indx_tbl(blkid_list_ptr free_list, uint64_t& seq_id, void* key, BtreeQueryCursor& cur, const btree_cp_ptr& bcp, int64_t& size) override;
 
 public:
     /* static functions */

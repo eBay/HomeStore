@@ -25,10 +25,7 @@ typedef std::function< void() > trigger_cp_callback;
 typedef std::function< void(Free_Blk_Entry& fbe) > free_blk_callback;
 typedef boost::intrusive_ptr< indx_req > indx_req_ptr;
 class HomeLogStore;
-struct journal_key {
-    uint64_t lba;
-    uint32_t nlbas;
-} __attribute__((__packed__));
+
 struct indx_req;
 
 #define THIS_INDX_LOG(level, mod, req, msg, ...)                                                                       \
@@ -253,8 +250,7 @@ struct hs_cp_base_sb {
 
 struct hs_cp_unmap_sb : hs_cp_base_sb {
     uint64_t seq_id;
-    uint64_t lba;
-    uint32_t nlbas;
+    uint32_t key_size;
 } __attribute__((__packed__));
 
 struct hs_cp_sb : hs_cp_base_sb {
@@ -342,7 +338,7 @@ public:
     virtual btree_status_t free_user_blkids(blkid_list_ptr free_list, homeds::btree::BtreeQueryCursor& cur,
                                             int64_t& size) = 0;
     virtual void get_btreequery_cur(const sisl::blob& b, homeds::btree::BtreeQueryCursor& cur) = 0;
-    virtual btree_status_t update_unmap_active_indx_tbl(blkid_list_ptr free_list, uint64_t& seq_id, journal_key& key, homeds::btree::BtreeQueryCursor& cur, const btree_cp_ptr& bcp, int64_t& size) = 0;
+    virtual btree_status_t update_unmap_active_indx_tbl(blkid_list_ptr free_list, uint64_t& seq_id, void* key, homeds::btree::BtreeQueryCursor& cur, const btree_cp_ptr& bcp, int64_t& size) = 0;
 };
 
 typedef std::function< void(const boost::intrusive_ptr< indx_req >& ireq, std::error_condition err) > io_done_cb;
@@ -642,10 +638,12 @@ private:
     indx_cp_ptr create_new_indx_cp(const indx_cp_ptr& cur_icp);
     void resume_active_cp();
     void suspend_active_cp();
+    sisl::byte_view alloc_unmap_sb(const uint32_t key_size, const uint64_t seq_id);
     sisl::byte_view alloc_sb_bytes(uint64_t size_);
     void unmap_indx(indx_req_ptr ireq);
     void unmap_start(sisl::byte_view buf);
-    sisl::byte_view write_cp_unmap_sb(uint64_t seq_id, uint64_t lba, uint32_t nlbas);
+    sisl::byte_view write_cp_unmap_sb(const indx_req_ptr ireq);
+    sisl::byte_view write_cp_unmap_sb(const uint32_t key_size, const uint64_t seq_id, const void* key);
 };
 
 /*************************************************** indx request ***********************************/
@@ -681,8 +679,6 @@ public:
     virtual void fill_val(void* mem, uint32_t size) = 0;
     virtual uint64_t get_seqid() = 0;
     virtual uint32_t get_io_size() = 0;
-    virtual uint64_t get_lba() = 0;
-    virtual uint32_t get_nlbas() = 0;
     virtual void free_yourself() = 0;
 
 public:

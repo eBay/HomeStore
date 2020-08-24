@@ -478,10 +478,11 @@ void IndxMgr::recover_meta_ops() {
             break;
         }
         case INDX_UNMAP: {
-            auto buf = meta_blk_list[i].second;
-            uint64_t cur_bytes = (uint64_t)(buf.bytes()) + sizeof(hs_cp_unmap_sb);
-            assert(buf.size() >= hdr->size);
-            uint64_t size = hdr->size - sizeof(hs_cp_unmap_sb);
+            sisl::byte_view buf = meta_blk_list[i].second;
+            auto unmap_hdr = (hs_cp_unmap_sb*)buf.bytes();
+            uint64_t cur_bytes = (uint64_t)(buf.bytes()) + sizeof(hs_cp_unmap_sb) + unmap_hdr->key_size;
+            HS_ASSERT_CMP(RELEASE, buf.size(), >=, (uint32_t)hdr->size);
+            uint64_t size = hdr->size - sizeof(hs_cp_unmap_sb) - unmap_hdr->key_size;
             sisl::blob b((uint8_t*)cur_bytes, size);
             m_active_tbl->get_btreequery_cur(b, m_unmap_btree_cur);
             m_unmap_meta_blk = meta_blk_list[i].first;
@@ -840,19 +841,17 @@ void IndxMgr::unmap_start(sisl::byte_view buf) {
     blkid_list_ptr free_list = std::make_shared< sisl::ThreadVector< BlkId > >();
     int64_t free_size = 0;
     hs_cp_unmap_sb* mhdr = (hs_cp_unmap_sb*)buf.bytes();
-    journal_key key;
-    key.lba = mhdr->lba;
-    key.nlbas = mhdr->nlbas;
+    void* key = (void*)((uint64_t)buf.bytes() + sizeof(hs_cp_unmap_sb));
     auto seq_id = mhdr->seq_id;
+    auto key_size = mhdr->key_size;
     btree_status_t ret = m_active_tbl->update_unmap_active_indx_tbl(free_list, seq_id, key, m_unmap_btree_cur, btree_id, free_size);
     if (ret != btree_status_t::success) {
-        auto seq_id = mhdr->seq_id;
         assert(ret == btree_status_t::resource_full);
         THIS_INDX_LOG(TRACE, indx_mgr, , "unmap btree ret status resource_full");
         attach_user_fblkid_list(
-            free_list, ([this, seq_id, key](bool success) {
+            free_list, ([this, key_size, seq_id, key](bool success) {
                 /* persist superblock */
-                auto b = write_cp_unmap_sb(seq_id, key.lba, key.nlbas);
+                auto b = write_cp_unmap_sb(key_size, seq_id, key);
                 iomanager.run_on(m_thread_id, [this, b](io_thread_addr_t addr) { this->unmap_start(b); });
             }),
             free_size);
@@ -867,26 +866,40 @@ void IndxMgr::unmap_start(sisl::byte_view buf) {
     m_cp_mgr->cp_io_exit(hcp);
 }
 
-sisl::byte_view IndxMgr::write_cp_unmap_sb(uint64_t seq_id, uint64_t lba, uint32_t nlbas) {
+sisl::byte_view IndxMgr::alloc_unmap_sb(const uint32_t key_size, const uint64_t seq_id) {
     const sisl::blob& cursor_blob = m_unmap_btree_cur.serialize();
-    uint64_t size = cursor_blob.size + sizeof(hs_cp_unmap_sb);
+    uint64_t size = cursor_blob.size + sizeof(hs_cp_unmap_sb) + key_size; 
     sisl::byte_view b = alloc_sb_bytes(size);
     hs_cp_unmap_sb* mhdr = (hs_cp_unmap_sb*)b.bytes();
     mhdr->uuid = m_uuid;
     mhdr->type = INDX_UNMAP;
     mhdr->seq_id = seq_id;
-    mhdr->lba = lba;
-    mhdr->nlbas = nlbas;
     mhdr->size = size;
-    memcpy((uint8_t*)((uint64_t)b.bytes() + sizeof(hs_cp_unmap_sb)), cursor_blob.bytes,
+    mhdr->key_size = key_size;
+    memcpy((uint8_t*)((uint64_t)b.bytes() + sizeof(hs_cp_unmap_sb)) + key_size, cursor_blob.bytes,
             cursor_blob.size);
+    return b;
+}
+
+sisl::byte_view IndxMgr::write_cp_unmap_sb(const indx_req_ptr ireq) {
+    auto b = alloc_unmap_sb(ireq->get_key_size(), ireq->get_seqid());
+    ireq->fill_key((uint8_t*)((uint64_t)b.bytes() + sizeof(hs_cp_unmap_sb)), ireq->get_key_size());
+    write_meta_blk(m_unmap_meta_blk, b);
+    return b;
+}
+
+sisl::byte_view IndxMgr::write_cp_unmap_sb(const uint32_t key_size, const uint64_t seq_id, const void* key) {
+    const sisl::blob& cursor_blob = m_unmap_btree_cur.serialize();
+    uint64_t size = cursor_blob.size + sizeof(hs_cp_unmap_sb) + key_size; 
+    auto b = alloc_unmap_sb(key_size, seq_id);
+    memcpy((uint8_t*)((uint64_t)b.bytes() + sizeof(hs_cp_unmap_sb)), key, key_size);
     write_meta_blk(m_unmap_meta_blk, b);
     return b;
 }
 
 void IndxMgr::unmap_indx(indx_req_ptr ireq) {
     /* persist superblock */
-    auto b = write_cp_unmap_sb(ireq->get_seqid(), ireq->get_lba(), ireq->get_nlbas());
+    auto b = write_cp_unmap_sb(ireq);
     
     /* call completion cb */
     m_io_cb(ireq, ireq->indx_err);

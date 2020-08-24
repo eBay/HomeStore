@@ -440,6 +440,10 @@ public:
 typedef boost::intrusive_ptr< volume_req > volume_req_ptr;
 
 ENUM(volume_req_state, uint8_t, preparing, data_io, journal_io, completed);
+struct journal_key {
+    uint64_t lba;
+    uint32_t nlbas;
+} __attribute__((__packed__));
 
 struct volume_req : indx_req {
     /********** generic counters **********/
@@ -520,14 +524,6 @@ struct volume_req : indx_req {
     virtual uint32_t get_io_size() override {
         uint64_t active_nlbas_written = mapping::get_nlbas_from_cursor(lba(), active_btree_cur);
         return active_nlbas_written * vol()->get_page_size();
-    }
-
-    virtual uint64_t get_lba() override {
-        return lba();
-    }
-
-    virtual uint32_t get_nlbas() override {
-        return mapping::get_nlbas_from_cursor(lba(), active_btree_cur);
     }
 
 private:
