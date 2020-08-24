@@ -87,9 +87,7 @@ class HomestoreConan(ConanFile):
         cmake = self.configure_cmake()
         cmake.build()
         
-        test_target = "off"
-        if self.options.testing:
-            test_target = self.options.testing
+        test_target = self.options.testing
 
         if not self.options.testing == 'off':
             cmake.test(target=test_target, output_on_failure=True)
