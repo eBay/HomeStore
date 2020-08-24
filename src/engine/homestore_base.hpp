@@ -2,7 +2,9 @@
 #include <boost/intrusive_ptr.hpp>
 #include "common/homestore_header.hpp"
 #include "common/homestore_assert.hpp"
+#include "common/homestore_config.hpp"
 #include <metrics/metrics.hpp>
+#include <iomgr/iomgr.hpp>
 
 const uint16_t init_crc_16 = 0x8005;
 typedef uint32_t crc32_t;
@@ -60,4 +62,9 @@ public:
     virtual DeviceManager* get_device_manager() = 0;
     virtual logdev_blkstore_t* get_logdev_blkstore() const = 0;
 };
+
+static inline auto hs_iobuf_alloc(size_t size) {
+    return iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), size);
+}
+
 } // namespace homestore

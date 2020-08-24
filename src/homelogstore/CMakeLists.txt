@@ -14,4 +14,7 @@ set(TEST_LOGSTORE_BENCHMARK_SOURCES tests/log_store_benchmark.cpp)
 add_executable(log_store_benchmark ${TEST_LOGSTORE_BENCHMARK_SOURCES})
 target_link_libraries(log_store_benchmark hs_logdev homeblks ${CONAN_LIBS})
 
-add_test(NAME TestLogStore COMMAND test_log_store)
+if (NOT "${CONAN_TEST_TARGET}" STREQUAL "off")
+    add_test(NAME TestLogStore COMMAND test_log_store)
+    #add_test(NAME TestLogBench COMMAND test_log_benchmark)
+endif()

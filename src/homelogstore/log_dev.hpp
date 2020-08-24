@@ -9,20 +9,13 @@
 #include <fmt/format.h>
 #include <map>
 #include "engine/homestore_base.hpp"
+#include "homelogstore/logstore_header.hpp"
 
 namespace homestore {
-
-typedef int64_t logid_t;
-typedef uint32_t logstore_id_t;
-typedef int64_t logstore_seq_num_t;
 
 static constexpr uint32_t LOG_GROUP_HDR_MAGIC = 0xDABAF00D;
 static constexpr uint32_t dma_boundary = 512; // Mininum size the dma/writes to be aligned with
 static constexpr uint32_t initial_read_size = 4096;
-static constexpr uint64_t bulk_read_size = 512 * 1024;
-
-// Extra blks read during recovery to validate if indeed there is no corruption.
-static constexpr uint32_t max_blks_read_for_additional_check = 20;
 
 // clang-format off
 /*
@@ -52,8 +45,6 @@ struct serialized_log_record {
 
 /* This structure represents the in-memory representation of a log record */
 struct log_record {
-    static constexpr uint32_t inline_size = dma_boundary;
-
     serialized_log_record* pers_record = nullptr;
     uint8_t* data_ptr;
     uint32_t size;
@@ -77,7 +68,9 @@ struct log_record {
         return (is_size_inlineable(size) || (((uintptr_t)data_ptr % dma_boundary) != 0));
     }
 
-    static bool is_size_inlineable(size_t sz) { return ((sz < inline_size) || ((sz % dma_boundary) != 0)); }
+    static bool is_size_inlineable(size_t sz) {
+        return ((sz < HS_DYNAMIC_CONFIG(logstore.optimal_inline_data_size)) || ((sz % dma_boundary) != 0));
+    }
 
     static size_t serialized_size(uint32_t sz) { return sizeof(serialized_log_record) + sz; }
 };
@@ -147,9 +140,11 @@ typedef std::vector< iovec_wrapper > iovec_array;
 /* In memory representation of a log group which will be written as a group together */
 class LogGroup {
 public:
+    /* These are going to be compile time constants to build the inline array, so they are not using dynamic
+     * settings to change them */
     static constexpr uint32_t optimal_num_records = 16;
     static constexpr uint32_t estimated_iovs = 10;
-    static constexpr size_t inline_log_buf_size = log_record::inline_size * optimal_num_records;
+    static constexpr size_t inline_log_buf_size = 512 * optimal_num_records;
     static constexpr uint32_t max_records_in_a_batch =
         (initial_read_size - sizeof(log_group_header)) / sizeof(serialized_log_record);
 
@@ -305,11 +300,9 @@ public:
     typedef std::function< void(logstore_id_t) > store_found_callback;
     typedef std::function< void(void) > flush_blocked_callback;
 
-    static constexpr int64_t flush_threshold_size = 4096;
-    // static constexpr int64_t flush_threshold_size = 512;
-    static constexpr int64_t flush_data_threshold_size = flush_threshold_size - sizeof(log_group_header);
-    static constexpr uint64_t flush_timer_frequency_us = 750;
-    static constexpr uint64_t max_time_between_flush_us = 500;
+    static inline int64_t flush_data_threshold_size() {
+        return HS_DYNAMIC_CONFIG(logstore.flush_threshold_size) - sizeof(log_group_header);
+    }
 
     LogDev();
     ~LogDev();

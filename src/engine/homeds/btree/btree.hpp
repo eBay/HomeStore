@@ -280,8 +280,6 @@ public:
 
     void truncate(const btree_cp_ptr& bcp) { btree_store_t::truncate(m_btree_store.get(), bcp); }
 
-    static void cp_done(trigger_cp_callback cb) { btree_store_t::cp_done(cb); }
-
     void destroy_done() { btree_store_t::destroy_done(m_btree_store.get()); }
 
     /* It is called before superblock is persisted for each CP */
@@ -852,16 +850,32 @@ private:
             prev_key = key;
         }
 
+        if (my_node->is_leaf() && my_node->get_total_entries() == 0) {
+            /* this node has zero entries */
+            goto exit_on_error;
+        }
         if (parent_node && parent_node->get_total_entries() != indx) {
             K parent_key;
             parent_node->get_nth_key(indx, &parent_key, false);
 
             K last_key;
             my_node->get_nth_key(my_node->get_total_entries() - 1, &last_key, false);
-            BT_LOG_ASSERT_CMP(last_key.compare(&parent_key), ==, 0, parent_node);
-            if (last_key.compare(&parent_key) != 0) {
-                success = false;
-                goto exit_on_error;
+            if (!my_node->is_leaf()) {
+                BT_LOG_ASSERT_CMP(last_key.compare(&parent_key), ==, 0, parent_node,
+                                  "last key {} parent_key {} child {}", last_key.to_string(), parent_key.to_string(),
+                                  my_node->to_string());
+                if (last_key.compare(&parent_key) != 0) {
+                    success = false;
+                    goto exit_on_error;
+                }
+            } else {
+                BT_LOG_ASSERT_CMP(last_key.compare(&parent_key), <=, 0, parent_node,
+                                  "last key {} parent_key {} child {}", last_key.to_string(), parent_key.to_string(),
+                                  my_node->to_string());
+                if (last_key.compare(&parent_key) > 0) {
+                    success = false;
+                    goto exit_on_error;
+                }
             }
         } else if (parent_node) {
             K parent_key;
@@ -869,7 +883,7 @@ private:
 
             K first_key;
             my_node->get_nth_key(0, &first_key, false);
-            BT_LOG_ASSERT_CMP(first_key.compare(&parent_key), >, 0, parent_node);
+            BT_LOG_ASSERT_CMP(first_key.compare(&parent_key), >, 0, parent_node, "my node {}", my_node->to_string());
             if (first_key.compare(&parent_key) <= 0) {
                 success = false;
                 goto exit_on_error;
@@ -2080,19 +2094,19 @@ private:
             child_node1 = reserve_interior_node(BlkId(j_child_nodes[0]->node_id()));
             btree_store_t::swap_node(m_btree_store.get(), parent_node, child_node1);
 
-            THIS_BT_LOG(TRACE, base, ,
+            THIS_BT_LOG(TRACE, btree_generics, ,
                         "Journal replay: root split, so creating child_node id={} and swapping the node with "
-                        "parent_node id={} ",
-                        child_node1->get_node_id(), parent_node->get_node_id());
+                        "parent_node id={} names {}",
+                        child_node1->get_node_id(), parent_node->get_node_id(), m_btree_cfg.get_name());
 
         } else {
             read_node_or_fail(j_child_nodes[0]->node_id(), child_node1);
         }
 
-
-        THIS_BT_LOG(TRACE, base, , "Journal replay: child_node1 => jentry: [id={} gen={}], ondisk: [id={} gen={}] ",
+        THIS_BT_LOG(TRACE, btree_generics, ,
+                    "Journal replay: child_node1 => jentry: [id={} gen={}], ondisk: [id={} gen={}] names {}",
                     j_child_nodes[0]->node_id(), j_child_nodes[0]->node_gen(), child_node1->get_node_id(),
-                    child_node1->get_gen());
+                    child_node1->get_gen(), m_btree_cfg.get_name());
 #ifndef NDEBUG
         if (jentry->is_root) {
             BT_DEBUG_ASSERT_CMP(j_child_nodes[0]->type, ==, bt_journal_node_op::creation, ,
@@ -2142,18 +2156,17 @@ private:
         // sanity check for left mode node before recovery
         {
             if (!ret.found) {
-                if (child_node1->is_leaf()) {
-                    BT_RELEASE_ASSERT_CMP(ret.end_of_search_index, ==, (int)child_node1->get_total_entries(),
-                                          child_node1,
-                                          "there should not be any entry more then this key if it can not be found "
-                                          "in this leaf node");
-                } else {
+                if (!child_node1->is_leaf()) {
                     BT_RELEASE_ASSERT(0, , "interior nodes should always have this key if it is written yet");
                 }
             }
         }
 
+        THIS_BT_LOG(TRACE, btree_generics, , "Journal replay: split key {}, split indx {} child_node1 {}",
+                    split_key.to_string(), ret.end_of_search_index, child_node1->to_string());
+        /* if it is not found than end_of_search_index points to first ind which is greater than split key */
         auto ind = ret.end_of_search_index;
+        if (ret.found) { ind = ind + 1; } // we don't want to move split key */
         child_node1->move_out_to_right_by_entries(m_btree_cfg, child_node2, child_node1->get_total_entries() - ind);
 
         child_node2->set_next_bnode(child_node1->get_next_bnode());
@@ -2162,6 +2175,7 @@ private:
         child_node1->set_next_bnode(child_node2->get_node_id());
         child_node1->set_gen(j_child_nodes[0]->node_gen());
 
+        THIS_BT_LOG(TRACE, btree_generics, , "Journal replay: child_node2 {}", child_node2->to_string());
         write_node(child_node2, nullptr, bcp);
         write_node(child_node1, child_node2, bcp);
     }
@@ -2452,32 +2466,38 @@ private:
 
     void validate_sanity_child(const BtreeNodePtr& parent_node, uint32_t ind) {
         BtreeNodeInfo child_info;
-        K child_key;
+        K child_first_key;
+        K child_last_key;
         K parent_key;
 
         parent_node->get(ind, &child_info, false /* copy */);
         BtreeNodePtr child_node = nullptr;
         auto ret = read_node(child_info.bnode_id(), child_node);
-        HS_ASSERT_CMP(DEBUG, ret, ==, btree_status_t::success, "read failed, reason: {}", ret);
+        HS_ASSERT_CMP(RELEASE, ret, ==, btree_status_t::success, "read failed, reason: {}", ret);
         if (child_node->get_total_entries() == 0) {
             auto parent_entries = parent_node->get_total_entries();
-            if (!child_node->is_leaf()) { // leaf node can have 0 entries
-                HS_ASSERT_CMP(DEBUG,
-                              ((parent_node->has_valid_edge() && ind == parent_entries) || (ind = parent_entries - 1)),
-                              ==, true);
+            if (!child_node->is_leaf()) { // leaf node or edge node can have 0 entries
+                HS_ASSERT_CMP(RELEASE, ((parent_node->has_valid_edge() && ind == parent_entries)), ==, true);
             }
             return;
         }
-        child_node->get_first_key(&child_key);
+        child_node->get_first_key(&child_first_key);
+        child_node->get_last_key(&child_last_key);
+        HS_ASSERT_CMP(RELEASE, child_first_key.compare(&child_last_key), <=, 0);
         if (ind == parent_node->get_total_entries()) {
-            HS_ASSERT_CMP(DEBUG, parent_node->has_valid_edge(), ==, true);
+            HS_ASSERT_CMP(RELEASE, parent_node->has_valid_edge(), ==, true);
             if (ind > 0) {
                 parent_node->get_nth_key(ind - 1, &parent_key, false);
-                HS_ASSERT_CMP(DEBUG, child_key.compare(&parent_key), >, 0);
+                HS_ASSERT_CMP(RELEASE, child_first_key.compare(&parent_key), >, 0);
             }
         } else {
             parent_node->get_nth_key(ind, &parent_key, false);
-            HS_ASSERT_CMP(DEBUG, child_key.compare(&parent_key), <=, 0);
+            HS_ASSERT_CMP(RELEASE, child_first_key.compare(&parent_key), <=, 0);
+            HS_ASSERT_CMP(RELEASE, child_last_key.compare(&parent_key), <=, 0);
+            if (ind != 0) {
+                parent_node->get_nth_key(ind - 1, &parent_key, false);
+                HS_ASSERT_CMP(RELEASE, child_first_key.compare(&parent_key), >, 0);
+            }
         }
     }
 
@@ -2494,21 +2514,21 @@ private:
         parent_node->get(ind + 1, &child_info, false /* copy */);
         BtreeNodePtr child_node = nullptr;
         auto ret = read_node(child_info.bnode_id(), child_node);
-        HS_ASSERT(DEBUG, ret == btree_status_t::success, "read failed, reason: {}", ret);
+        HS_ASSERT(RELEASE, ret == btree_status_t::success, "read failed, reason: {}", ret);
         if (child_node->get_total_entries() == 0) {
             auto parent_entries = parent_node->get_total_entries();
             if (!child_node->is_leaf()) { // leaf node can have 0 entries
-                HS_ASSERT_CMP(DEBUG,
+                HS_ASSERT_CMP(RELEASE,
                               ((parent_node->has_valid_edge() && ind == parent_entries) || (ind = parent_entries - 1)),
                               ==, true);
             }
             return;
         }
         /* in case of merge next child will never have zero entries otherwise it would have been merged */
-        HS_ASSERT_CMP(DEBUG, child_node->get_total_entries(), !=, 0);
+        HS_ASSERT_CMP(RELEASE, child_node->get_total_entries(), !=, 0);
         child_node->get_first_key(&child_key);
         parent_node->get_nth_key(ind, &parent_key, false);
-        HS_ASSERT_CMP(DEBUG, child_key.compare(&parent_key), >, 0);
+        HS_ASSERT_CMP(RELEASE, child_key.compare(&parent_key), >, 0);
     }
 
     BtreeNodePtr alloc_leaf_node() {

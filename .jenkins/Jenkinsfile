@@ -3,8 +3,8 @@ pipeline {
 
     environment {
         ORG = 'sds'
+        ECR_URL = 'ecr.vip.ebayc3.com'
         ARTIFACTORY_PASS = credentials('ARTIFACTORY_PASS')
-        HOMESTORE_BUILD_TAG = "${GIT_COMMIT}"
         CONAN_USER = 'sds'
         MASTER_BRANCH = 'master'
         TESTING_BRANCH = 'testing/v*'
@@ -42,7 +42,7 @@ pipeline {
                     PROJECT = sh(script: "grep -m 1 'name =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
                     VER = sh(script: "grep -m 1 'version =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
                     CONAN_CHANNEL = sh(script: "echo ${BRANCH_NAME} | sed -E 's,(\\w+-?\\d*)/.*,\\1,' | sed -E 's,-,_,' | tr -d '\n'", returnStdout: true)
-                    ECR_PATH = "ecr.vip.ebayc3.com/${ORG}/${PROJECT}"
+                    ECR_PATH = "${ECR_URL}/${ORG}/${PROJECT}"
                     TAG = "${VER}@${CONAN_USER}/${CONAN_CHANNEL}"
                     slackSend color: '#0063D1', channel: '#sds-ci', message: "*${PROJECT}/${TAG}* is building."
                 }
@@ -98,6 +98,11 @@ pipeline {
                     stage("Build") {
                         steps {
                             sh "conan create ${BUILD_MISSING} -o homestore:sanitize=${SANITIZE} -pr ${BUILD_TYPE} . ${PROJECT}/${TAG}"
+                            sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_load' -exec cp {} .jenkins/test_load \\;"
+                            sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_volume' -exec cp {} .jenkins/test_volume \\;"
+                            sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/check_btree' -exec cp {} .jenkins/check_btree \\;"
+                            sh "find . -type f -wholename '*test_scripts/vol_test.py' -exec cp -a {} .jenkins/vol_test.py \\;"
+                            sh "find ${CONAN_USER_HOME} -type d -wholename '*bin/scripts' -exec cp -a {} .jenkins/scripts \\;"
                         }
                         post {
                             failure {
@@ -105,7 +110,7 @@ pipeline {
                             }
                         }
                     }
-                    stage("Deploy") {
+                    stage("Deploy Package") {
                         when {
                             expression { not { branch "PR_*" } }
                         }
@@ -114,37 +119,29 @@ pipeline {
                             sh "conan upload ${PROJECT}/${TAG} -c --all -r ebay-local"
                         }
                     }
-                }
-            }
-        }
-
-        stage('TestImage') {
-            when {
-                anyOf {
-                    branch "develop"
-                    branch "master"
-                }
-            }
-            matrix {
-                agent {
-                    label 'sds-builder'
-                }
-                axes {
-                    axis {
-                        name 'BUILD_TYPE'
-                        values 'debug', 'release', 'sanitize'
-                    }
-                }
-                stages {
-                    stage('Build') {
+                    stage("Image") {
                         steps {
-                            withDockerRegistry([credentialsId: 'sds-sds', url: "https://ecr.vip.ebayc3.com"]) {
-                                sh "docker build --build-arg BUILD_TYPE=${BUILD_TYPE} --build-arg PKG_NAME=${PROJECT}/${TAG} -t ${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE} .jenkins"
-                                sh "docker push ${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE}"
-                                slackSend channel: '#sds-ci', message: "*${PROJECT}:${CONAN_CHANNEL}-${BUILD_TYPE}* has been pushed to ECR."
+                            withDockerRegistry([credentialsId: 'sds-sds', url: "https://${ECR_URL}"]) {
+                                sh "docker build -t ${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE} .jenkins/"
                             }
                         }
                     }
+                    stage("Deploy Image") {
+                        when { anyOf {
+				branch "testing/v*"
+				branch "master"
+                        } }
+                        steps {
+                            withDockerRegistry([credentialsId: 'sds-sds', url: "https://${ECR_URL}"]) {
+                                sh "docker push ${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE}"
+                            }
+                        }
+                        post {
+                            success {
+                                slackSend color: '#85B717', channel: '#sds-ci', message: "*${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE}* has been uploaded to ECR."
+                            }
+			}
+		    }
                 }
             }
         }
@@ -155,7 +152,7 @@ pipeline {
             slackSend color: '#E43237', channel: '#sds-ci', message: "*${PROJECT}/${TAG}* has had a failure : ${BUILD_URL}"
         }
         success {
-            slackSend color: '#85B717', channel: '#sds-ci', message: "*${PROJECT}/${TAG}* has been uploaded to conan repo."
+            slackSend color: '#85B717', channel: '#sds-ci', message: "*${PROJECT}/${TAG}* has completed successfully."
         }
     }
 }

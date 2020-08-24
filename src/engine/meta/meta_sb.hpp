@@ -5,18 +5,14 @@
 #include "engine/blkalloc/blk.h"
 
 namespace homestore {
-static constexpr uint32_t META_BLK_PAGE_SZ = 4096;                       // meta block page size
-static constexpr uint32_t META_BLK_HDR_MAX_SZ = 512;                     // max meta_blk_hdr size
-static constexpr uint32_t META_BLK_OVF_HDR_MAX_SZ = META_BLK_HDR_MAX_SZ; // max meta_blk_ovf_hdr size
+static constexpr uint32_t META_BLK_PAGE_SZ = 4096;   // meta block page size
+static constexpr uint32_t META_BLK_HDR_MAX_SZ = 512; // max meta_blk_hdr size
 static constexpr uint32_t META_BLK_MAGIC = 0xCEEDBEED;
 static constexpr uint32_t META_BLK_OVF_MAGIC = 0xDEADBEEF;
 static constexpr uint32_t META_BLK_SB_MAGIC = 0xABCDCEED;
 static constexpr uint32_t META_BLK_SB_VERSION = 0x1;
 static constexpr uint32_t MAX_SUBSYS_TYPE_LEN = 32;
 static constexpr uint32_t META_BLK_CONTEXT_SZ = (META_BLK_PAGE_SZ - META_BLK_HDR_MAX_SZ); // meta blk context data sz
-static constexpr uint32_t META_BLK_OVF_CONTEXT_SZ =
-    (META_BLK_PAGE_SZ - META_BLK_OVF_HDR_MAX_SZ); // meta ovf blk context data sz
-static constexpr uint64_t MAX_NUM_BLKS_ALLOC = 64;
 /**
  * Sub system types and their priorities
  */
@@ -48,6 +44,22 @@ using crc32_t = uint32_t;
  *                                 |---> | Next Meta Blk | ---> ... --> null
  *                                       |---------------|
  *
+ * 3. For any Overflow Blk
+ *
+ *    Note: Al the context data will be stored in ovf blk chain's data blks, 
+ *    nothing will be written in meta blk's context data portion (address won't be dma_boundary aligned)
+ *
+ *                          Overflow Header Blk           Overflow Header Blk
+ *   |----------|            |--------------|              |--------------|
+ *   | Meta Blk | ---------> |   next_bid   | -----------> |   next_bid   | -----------> ...
+ *   |----------|            |--------------|              |--------------|
+ *                           |  data_blkid  |              |  data_blkid  |
+ *                           |--------------|              |--------------|
+ *                                   |                            |
+ *                                   |     Overflow Data Blk      |    Overflow Data Blk
+ *                                   |      |-------------|       |     |-------------|
+ *                                   |--->  | data buffer |       |---> | data buffer |
+ *                                          | ------------|             |-------------|
  * */
 // clang-format on
 
@@ -56,10 +68,10 @@ struct meta_blk_sb {
     uint32_t version;
     uint32_t magic; // ssb magic
     bool migrated;
-    BlkId next_blkid; // next metablk
-    BlkId prev_blkid; // previous metablk
-    BlkId blkid;
-} __attribute((packed));
+    BlkId next_bid; // next metablk
+    BlkId prev_bid; // previous metablk
+    BlkId bid;
+};
 
 //
 // 1. If overflow blkid is invalid, meaning context_sz is not larger than META_BLK_CONTEXT_SZ,
@@ -70,12 +82,12 @@ struct meta_blk_hdr_s {
     uint32_t magic; // magic
     crc32_t crc;
     char type[MAX_SUBSYS_TYPE_LEN]; // sub system type;
-    BlkId next_blkid;               // next metablk
-    BlkId prev_blkid;               // previous metablk
-    BlkId ovf_blkid;                // overflow blk id;
-    BlkId blkid;                    // current blk id; might not be needd;
+    BlkId next_bid;                 // next metablk
+    BlkId prev_bid;                 // previous metablk
+    BlkId ovf_bid;                  // overflow blk id;
+    BlkId bid;                      // current blk id; might not be needd;
     uint64_t context_sz;            // total size of context data;
-} __attribute((packed));
+};
 
 static constexpr uint32_t META_BLK_HDR_RSVD_SZ =
     (META_BLK_HDR_MAX_SZ - sizeof(meta_blk_hdr_s)); // reserved size for header
@@ -83,7 +95,7 @@ static constexpr uint32_t META_BLK_HDR_RSVD_SZ =
 struct meta_blk_hdr {
     meta_blk_hdr_s h;
     char padding[META_BLK_HDR_RSVD_SZ];
-} __attribute((packed));
+};
 
 static_assert(sizeof(meta_blk_hdr) == META_BLK_HDR_MAX_SZ);
 
@@ -91,31 +103,16 @@ static_assert(sizeof(meta_blk_hdr) == META_BLK_HDR_MAX_SZ);
 struct meta_blk {
     meta_blk_hdr hdr;                          // meta record header
     uint8_t context_data[META_BLK_CONTEXT_SZ]; // Subsystem dependent context data
-} __attribute((packed));
+};
 
-struct meta_blk_ovf_hdr_s {
-    uint32_t magic; // ovf magic
-    BlkId next_blkid;
-    BlkId prev_blkid;
-    BlkId blkid;
-    uint64_t context_sz;
-} __attribute((packed));
-
-static constexpr uint32_t META_BLK_OVF_HDR_RSVD_SZ =
-    (META_BLK_OVF_HDR_MAX_SZ - sizeof(meta_blk_ovf_hdr_s)); // reserved size for ovf header
-
-// overflow blk header
+// single list overflow block chain
 struct meta_blk_ovf_hdr {
-    meta_blk_ovf_hdr_s h;
-    char padding[META_BLK_OVF_HDR_RSVD_SZ];
-} __attribute((packed));
+    uint32_t magic; // ovf magic
+    BlkId next_bid; // next ovf blk id;
+    BlkId bid;      // self blkid
+    BlkId data_bid; // contigous blks that holds context data;
+    uint64_t context_sz;
+};
 
-static_assert(sizeof(meta_blk_ovf_hdr) == META_BLK_OVF_HDR_MAX_SZ);
-#if 0
-// overflow block
-struct meta_blk_ovf {
-    meta_blk_ovf_hdr hdr; // meta overflow record header
-    uint8_t context_data[META_BLK_OVF_CONTEXT_SZ];
-} __attribute((packed));
-#endif
+static_assert(sizeof(meta_blk_ovf_hdr) <= META_BLK_PAGE_SZ);
 } // namespace homestore

@@ -263,7 +263,7 @@ public:
 
         // Create a new block of memory for the blocks requested and set the memvec pointer to that
         auto size = blkid.data_size(m_pagesz);
-        uint8_t* ptr = iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), size);
+        uint8_t* ptr = hs_iobuf_alloc(size);
         boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector(), true);
         mvec->set(ptr, size, 0);
         buf->set_memvec(mvec, 0, size);

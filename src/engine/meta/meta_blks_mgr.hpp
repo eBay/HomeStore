@@ -166,15 +166,6 @@ private:
     void extract_meta_blks(uint8_t* buf, const uint64_t size, std::vector< meta_blk* >& mblks);
 
     /**
-     * @brief : write context_data to blk id;
-     *
-     * @param bid
-     * @param context_data
-     * @param sz
-     */
-    void write_blk(BlkId& bid, const void* context_data, const uint32_t sz);
-
-    /**
      * @brief
      *
      * @param type
@@ -233,12 +224,20 @@ private:
      *
      * @return : BlkId that is allcoated;
      */
-    std::error_condition alloc_meta_blk(BlkId& bid, uint32_t alloc_sz = META_BLK_PAGE_SZ);
+    std::error_condition alloc_meta_blk(BlkId& bid, uint32_t nblks = 1);
 
     std::error_condition alloc_meta_blk(const uint64_t nblks, std::vector< BlkId >& bid);
 
     void free_meta_blk(meta_blk* mblk);
 
+    /**
+     * @brief : free the overflow blk chain
+     *  1. free on-disk overflow blk header
+     *  2. free on-disk data blk
+     *  3. free in-memory copy of ovf blk header;
+     *  4. remove from ovf hdr map;
+     * @param obid : the start ovf blk id in the chain;
+     */
     void free_ovf_blk_chain(BlkId& obid);
 
     /**
@@ -259,8 +258,7 @@ private:
      * @param sz
      * @param offset
      */
-    void write_meta_blk_ovf(BlkId& prev_id, BlkId& bid, const void* context_data, const uint64_t sz,
-                            const uint64_t offset);
+    void write_meta_blk_ovf(BlkId& prev_id, BlkId& bid, const void* context_data, const uint64_t sz);
 
     /**
      * @brief : internal implementation of populating and writing a meta block;
@@ -277,7 +275,7 @@ private:
      * @param bid
      * @param b
      */
-    void read(BlkId& bid, void* dest, size_t start = 0, size_t sz = META_BLK_PAGE_SZ);
+    void read(BlkId& bid, void* dest, size_t sz = META_BLK_PAGE_SZ);
 
     void cache_clear();
 };

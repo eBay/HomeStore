@@ -2,7 +2,7 @@
 // Created by Amit Desai on 07/15/19.
 //
 
-#include "indx_mgr_api.hpp"
+#include "indx_mgr.hpp"
 #include "blk_read_tracker.hpp"
 #include <sds_logging/logging.h>
 
