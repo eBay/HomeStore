@@ -75,7 +75,8 @@ class HomestoreConan(ConanFile):
         if self.options.coverage:
             definitions['CONAN_BUILD_COVERAGE'] = 'ON'
             
-        definitions['CONAN_TEST_TARGET'] = self.options.testing
+        if self.options.testing:
+            definitions['CONAN_TEST_TARGET'] = self.options.testing
 
         if self.settings.build_type == 'Debug':
             definitions['CMAKE_BUILD_TYPE'] = 'Debug'
