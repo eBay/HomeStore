@@ -85,11 +85,9 @@ class HomestoreConan(ConanFile):
     def build(self):
         cmake = self.configure_cmake()
         cmake.build()
-        
-        test_target = self.options.testing
-
+       
         if not self.options.testing == 'off':
-            cmake.test(target=test_target, output_on_failure=True)
+            cmake.test(target=self.options.testing, output_on_failure=True)
 
     def package(self):
         self.copy("*.h", dst="include", src="src", keep_path=True)
