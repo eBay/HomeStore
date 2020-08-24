@@ -105,3 +105,6 @@ src/engine/common/generated/*
 
 # vscode
 .vscode/*
+
+# Visual Studio
+.vs/**
