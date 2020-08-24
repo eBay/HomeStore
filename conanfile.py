@@ -62,33 +62,28 @@ class HomestoreConan(ConanFile):
             self.requires("jemalloc/5.2.1")
             self.options.malloc_impl = "jemalloc"
 
-    def configure_cmake(self):
+    def build(self):
         cmake = CMake(self)
 
         definitions = {'CONAN_TEST_TARGET': 'off',
                        'CMAKE_EXPORT_COMPILE_COMMANDS': 'ON',
                        'MEMORY_SANITIZER_ON': 'OFF'}
+        test_target = None
 
         if self.options.sanitize:
             definitions['MEMORY_SANITIZER_ON'] = 'ON'
-            
+
         definitions['CONAN_TEST_TARGET'] = self.options.testing
+        if self.options.testing == 'coverage':
+            test_target = test_target
 
         if self.settings.build_type == 'Debug':
             definitions['CMAKE_BUILD_TYPE'] = 'Debug'
 
         definitions['MALLOC_IMPL'] = self.options.malloc_impl
-        
-        cmake.configure(defs=definitions)
-        return cmake
 
-    def build(self):       
-        target = None
-        if self.options.testing == 'coverage':
-            test_target = test_target
- 
-        cmake = self.configure_cmake()
-        cmake.build()    
+        cmake.configure(defs=definitions)
+        cmake.build()
         if not self.options.testing == 'off':
             cmake.test(target=test_target, output_on_failure=True)
 
