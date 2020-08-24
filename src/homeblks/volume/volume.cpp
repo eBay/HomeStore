@@ -271,6 +271,10 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
                     boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vc_req), vreq->use_cache());
             } else 
             {
+                // NOTE:  This can be made faster by pre-calculating the division of the iovecs into the
+                // page size std::vector<std::vector<iovecs>> by a single pass through the iovecs and
+                // moving the logic here from the write command.  We can do that once this is cleaned up
+
                 // scatter/gather write
                 const auto& iovecs{std::get< volume_req::IoVecData >(vreq->data)};
                 m_hb->get_data_blkstore()->write(vc_req->bid, iovecs, offset,
@@ -292,12 +296,9 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
         } else
         {
             // scatter/gather write
-            for (const auto& buffer : std::get< volume_req::IoVecData >(vreq->data)) {
-                for (uint32_t i{0}; i < vreq->nlbas(); ++i) {
-                    const sisl::blob outb{static_cast<uint8_t*>(buffer.iov_base) + i * get_page_size(),
-                                          static_cast<uint32_t>(get_page_size())};
-                    vreq->push_csum(crc16_t10dif(init_crc_16, outb.bytes, get_page_size()));
-                }
+            for (const auto& iovec : std::get< volume_req::IoVecData >(vreq->data)) {
+                vreq->push_csum(crc16_t10dif(init_crc_16, reinterpret_cast<unsigned char*>(iovec.iov_base),
+                                             iovec.iov_len));
             }
         }
 
@@ -558,6 +559,10 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
     }
 
     try {
+        // NOTE:  This can be made faster by pre-calculating the division of the iovecs into the
+        // page size std::vector<std::vector<iovecs>> by a single pass through the iovecs and
+        // moving the logic here from the read command.  We can do that once this is cleaned up
+
         auto insertIntoIovec{
             [&vreq, this](std::vector< iovec >& iovecs, const uint64_t data_offset, const uint8_t* const data,
                           const uint64_t size) {

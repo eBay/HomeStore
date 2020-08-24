@@ -26,7 +26,7 @@
 #include "engine/common/homestore_header.hpp"
 #include "fds/utils.hpp"
 #include "iomgr/iomgr.hpp"
-#include <sds_logging/logging.h>
+#include "sds_logging/logging.h"
 #include "utility/atomic_counter.hpp"
 #include "utility/enum.hpp"
 #include "utility/obj_life_counter.hpp"
@@ -80,7 +80,7 @@ struct volume_req;
 struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
     std::shared_ptr< Volume > vol_instance;
     std::vector< buf_info > read_buf_list;
-    void* buffer = nullptr;
+    void* buffer{nullptr};
     std::error_condition err = no_error;
     uint64_t request_id;
     sisl::atomic_counter< int > refcount;

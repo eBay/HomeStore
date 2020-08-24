@@ -506,8 +506,8 @@ public:
     }
 
 
-     /* Read the data for given blk id and size. This method stores the read in the iovecs starting at the
-        the given offset */
+     // Read the data for given blk id and size. This method stores the read in the iovecs starting at the
+     // the given offset
      void read(const BlkId& bid, std::vector<iovec>& iovecs, const uint32_t data_offset, const uint32_t size,
                boost::intrusive_ptr< blkstore_req< Buffer > > req) {
         assert(req->err == no_error);
@@ -519,9 +519,9 @@ public:
         req->start_time();
         req->is_read = true;
 
-        /* This assert won't be valid for volume reads if user is doing overlap writes/reads because we set the blks
-         * allocated only after journal write is completed.
-         */
+        // This assert won't be valid for volume reads if user is doing overlap writes/reads because we set the blks
+        // allocated only after journal write is completed.
+        ///
         HS_ASSERT_CMP(DEBUG, m_vdev.is_blk_alloced(const_cast<BlkId&>(bid)), ==, true, "blk is not allocted");
 
         std::vector< iovec > iov(1, iovec{});
