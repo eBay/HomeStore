@@ -72,8 +72,7 @@ class HomestoreConan(ConanFile):
         if self.options.sanitize:
             definitions['MEMORY_SANITIZER_ON'] = 'ON'
             
-        if self.options.testing:
-            definitions['CONAN_TEST_TARGET'] = self.options.testing
+        definitions['CONAN_TEST_TARGET'] = self.options.testing
 
         if self.settings.build_type == 'Debug':
             definitions['CMAKE_BUILD_TYPE'] = 'Debug'
