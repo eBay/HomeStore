@@ -3,6 +3,7 @@
 #include "log_dev.hpp"
 #include <fds/utils.hpp>
 #include <folly/Synchronized.h>
+#include "homelogstore/logstore_header.hpp"
 
 namespace homestore {
 
@@ -12,14 +13,6 @@ struct logstore_record {
     logstore_record() = default;
     logstore_record(const logdev_key& key) : m_dev_key(key) {}
 };
-
-class logstore_req;
-class HomeLogStore;
-using log_req_comp_cb_t = std::function< void(logstore_req*, logdev_key) >;
-using log_write_comp_cb_t = std::function< void(logstore_seq_num_t, sisl::io_blob&, logdev_key, void*) >;
-using log_found_cb_t = std::function< void(logstore_seq_num_t, log_buffer, void*) >;
-using log_store_opened_cb_t = std::function< void(std::shared_ptr< HomeLogStore >) >;
-using log_replay_done_cb_t = std::function< void(std::shared_ptr< HomeLogStore >) >;
 
 struct logstore_req {
     HomeLogStore* log_store;    // Backpointer to the log store
@@ -78,9 +71,12 @@ public:
 
         REGISTER_HISTOGRAM(logstore_append_latency, "Logstore append latency", "logstore_op_latency", {"op", "write"});
         REGISTER_HISTOGRAM(logstore_read_latency, "Logstore read latency", "logstore_op_latency", {"op", "read"});
-        REGISTER_HISTOGRAM(logdev_flush_size_distribution, "Distribution of flush data size");
-        REGISTER_HISTOGRAM(logdev_flush_records_distribution, "Distribution of num records to flush");
-        REGISTER_HISTOGRAM(logstore_record_size, "Distribution of log record size");
+        REGISTER_HISTOGRAM(logdev_flush_size_distribution, "Distribution of flush data size",
+                           HistogramBucketsType(ExponentialOfTwoBuckets));
+        REGISTER_HISTOGRAM(logdev_flush_records_distribution, "Distribution of num records to flush",
+                           HistogramBucketsType(LinearUpto128Buckets));
+        REGISTER_HISTOGRAM(logstore_record_size, "Distribution of log record size",
+                           HistogramBucketsType(ExponentialOfTwoBuckets));
 
         register_me_to_farm();
     }

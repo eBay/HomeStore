@@ -1478,7 +1478,8 @@ SDS_OPTION_GROUP(
     (write_cache, "", "write_cache", "write cache", ::cxxopts::value< uint32_t >()->default_value("1"),
      "flag"),
     (read_cache, "", "read_cache", "read cache", ::cxxopts::value< uint32_t >()->default_value("1"),
-     "flag"))
+     "flag"),
+    (config_path, "", "config_path", "Path to dynamic config of app", cxxopts::value< std::string >(), ""))
 #define ENABLED_OPTIONS logging, home_blks, test_volume
 
 SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)

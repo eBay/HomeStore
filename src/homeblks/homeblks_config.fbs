@@ -22,7 +22,7 @@ table GeneralConfig {
 }
 
 table HomeBlksSettings {
-    version: uint32;
+    version: uint32 = 1;
     volume: Volume;
     general_config: GeneralConfig;
 }

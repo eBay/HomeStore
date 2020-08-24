@@ -6,7 +6,8 @@ SDS_LOGGING_DECL(logstore)
 
 LogGroup::LogGroup() {
     m_iovecs.reserve(estimated_iovs);
-    m_log_buf = sisl::aligned_unique_ptr< uint8_t >::make_sized(dma_boundary, inline_log_buf_size);
+    m_log_buf =
+        sisl::aligned_unique_ptr< uint8_t >::make_sized(HS_STATIC_CONFIG(disk_attr.align_size), inline_log_buf_size);
 }
 
 void LogGroup::reset(uint32_t max_records) {

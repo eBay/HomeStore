@@ -1,10 +1,17 @@
 #pragma once
+
+#include <condition_variable>
+#include <cstdint>
+#include <memory>
+#include <mutex>
+#include <vector>
+
 #include "api/vol_interface.hpp"
-#include <sds_logging/logging.h>
-#include <iomgr/iomgr.hpp>
-#include <iomgr/aio_drive_interface.hpp>
-#include <folly/SharedMutex.h>
-#include <fds/utils.hpp>
+#include "fds/utils.hpp"
+#include "folly/SharedMutex.h"
+#include "iomgr/aio_drive_interface.hpp"
+#include "iomgr/iomgr.hpp"
+#include "sds_logging/logging.h"
 
 namespace homestore {
 #define vol_interface VolInterface::get_instance()
@@ -31,10 +38,16 @@ struct simple_store_req : public vol_interface_req {
     uint64_t cur_vol;
     bool done = false;
 
-    simple_store_req(uint8_t* wbuf, uint64_t lba, uint32_t nlbas) : vol_interface_req(wbuf, lba, nlbas) {}
-    virtual ~simple_store_req() {
-        if (write_buf) free(write_buf);
+    simple_store_req(uint8_t* const buffer, const uint64_t lba, const uint32_t nlbas) :
+        vol_interface_req(buffer, lba, nlbas) {}
+    virtual ~simple_store_req() override {
+        if (buffer) free(buffer);
     }
+    simple_store_req(const simple_store_req&) = delete;
+    simple_store_req(simple_store_req&&) noexcept = delete;
+    simple_store_req& operator=(const simple_store_req&) = delete;
+    simple_store_req& operator=(simple_store_req&&) noexcept = delete;
+
     // void free_yourself() override { delete this; }
     // std::string to_string() override { return "simple_store_req"; }
 };

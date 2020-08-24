@@ -115,6 +115,12 @@ struct btree_cp : public boost::intrusive_ref_counter< btree_cp > {
     homestore::blkid_list_ptr free_blkid_list;
     btree_cp() : ref_cnt(1), btree_size(0){};
     ~btree_cp() {}
+    std::string to_string() {
+        std::stringstream ss;
+        ss << " cp_id " << cp_id << " start_seqid " << start_seqid << " end_seqid " << end_seqid
+           << " free_blkid_list size " << free_blkid_list->size();
+        return ss.str();
+    }
 };
 
 /********************* Journal Specific Section **********************/

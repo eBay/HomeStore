@@ -3,17 +3,19 @@
 #define _HOMESTORE_CONFIG_HPP_
 
 #include "homestore_header.hpp"
+#include <sds_options/options.h>
 #include <engine/common/error.h>
 #include <cassert>
 #include <boost/intrusive_ptr.hpp>
 #include <settings/settings.hpp>
-#include "generated/homestore_config_generated.h"
+#include "engine/common/generated/homestore_config_generated.h"
 #include <nlohmann/json.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <boost/optional.hpp>
 
-SETTINGS_INIT(homestorecfg::HomeStoreSettings, homestore_config);
+SETTINGS_INIT(homestorecfg::HomeStoreSettings, homestore_config,
+              SDS_OPTIONS.count("config_path") ? SDS_OPTIONS["config_path"].as< std::string >() : "");
 
 /* DM info size depends on these three parameters. If below parameter changes then we have to add
  * the code for upgrade/revert.
@@ -26,6 +28,8 @@ namespace homestore {
 #define HS_DYNAMIC_CONFIG_WITH(...) SETTINGS(homestore_config, __VA_ARGS__)
 #define HS_DYNAMIC_CONFIG_THIS(...) SETTINGS_THIS(homestore_config, __VA_ARGS__)
 #define HS_DYNAMIC_CONFIG(...) SETTINGS_VALUE(homestore_config, __VA_ARGS__)
+
+#define HS_SETTINGS_FACTORY() SETTINGS_FACTORY(homestore_config)
 
 #define HS_STATIC_CONFIG(cfg) homestore::HomeStoreStaticConfig::instance().cfg
 

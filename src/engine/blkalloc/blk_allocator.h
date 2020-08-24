@@ -22,6 +22,7 @@
 #include "engine/meta/meta_blks_mgr.hpp"
 #include "engine/homestore_base.hpp"
 #include "engine/device/device.h"
+#include "engine/index/resource_mgr.hpp"
 
 using namespace std;
 
@@ -391,6 +392,8 @@ struct blkalloc_cp {
             while (bid != nullptr) {
                 auto chunk = HomeStoreBase::safe_instance()->get_device_manager()->get_chunk(bid->get_chunk_num());
                 chunk->get_blk_allocator()->free(*bid);
+                auto page_size = chunk->get_blk_allocator()->get_config().get_blk_size();
+                ResourceMgr::dec_free_blk(bid->data_size(page_size));
                 bid = list->next(it);
             }
             list->erase();

@@ -63,7 +63,6 @@ public:
     static void ref_node(btree_node_t* bn);
     static bool deref_node(btree_node_t* bn);
     static btree_status_t write_node_sync(btree_store_t* store, const BtreeNodePtr& bn);
-    static void cp_done(trigger_cp_callback cb);
     static void create_done(btree_store_t* store, bnodeid_t m_root_node);
 
     // Journal entry section

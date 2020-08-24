@@ -73,10 +73,6 @@ struct volume_child_req : public blkstore_req< BlkBuffer > {
     bool sync = false;
     bool use_cache{false};
 
-    /* number of times mapping table need to be updated for this req. It can
-     * break the ios update in mapping btree depending on the key range.
-     */
-    std::atomic< int > num_mapping_update = 0;
     volume_req_ptr parent_req = nullptr;
     BlkId blkId; // used only for debugging purpose
 
@@ -217,7 +213,7 @@ private:
     std::atomic< int64_t > seq_Id;
     std::atomic< uint64_t > m_err_cnt = 0;
     std::atomic< uint64_t > m_req_id = 0;
-    std::atomic< uint64_t > vol_ref_cnt = 0; // volume can not be destroy/shutdown until it is not zero
+    sisl::atomic_counter< uint64_t > vol_ref_cnt = 0; // volume can not be destroy/shutdown until it is not zero
 
     std::mutex m_sb_lock; // lock for updating vol's sb
     // sisl::aligned_unique_ptr< vol_sb_hdr > m_sb_buf;
@@ -231,7 +227,7 @@ private:
     /* home_blks can not be shutdown until it is not zero. It is the superset of vol_ref_cnt. If it is zero then
      * volume_ref count has to zero. But it is not true other way round.
      */
-    static std::atomic< uint64_t > home_blks_ref_cnt;
+    static sisl::atomic_counter< uint64_t > home_blks_ref_cnt;
 
     // Per thread buffer which holds the completed reqs which will be batched before making batch callback
     sisl::ActiveOnlyThreadBuffer< vol_completion_req_list > m_completed_reqs;
@@ -305,14 +301,10 @@ public:
     static void set_error_flip();
 #endif
     static bool can_all_vols_shutdown() {
-        if (home_blks_ref_cnt.load() != 0) { return false; }
+        if (home_blks_ref_cnt.get() != 0) { return false; }
         return true;
     }
 
-    static void dec_home_blks_ref_cnt() {
-        auto cnt = home_blks_ref_cnt.fetch_sub(1);
-        if (cnt == 1 && HomeBlks::instance()->is_shutdown()) { HomeBlks::instance()->do_volume_shutdown(true); }
-    }
     /* Called during shutdown. */
     static void shutdown(const indxmgr_stop_cb& cb);
 
@@ -435,7 +427,7 @@ public:
         return ss.str();
     }
     uint64_t inc_and_get_seq_id() {
-        uint64_t id = seq_Id.fetch_add(1);
+        uint64_t id = seq_Id.fetch_add(1, std::memory_order_relaxed);
         return (id + 1);
     }
 

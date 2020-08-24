@@ -10,7 +10,7 @@
 #include <sds_logging/logging.h>
 #include <utility/obj_life_counter.hpp>
 #include "homeblks/home_blks.hpp"
-#include "engine/index/indx_mgr_api.hpp"
+#include "engine/index/indx_mgr.hpp"
 #include <cstring>
 
 SDS_LOGGING_DECL(volume)
@@ -667,7 +667,6 @@ public:
 
 public:
     /* static functions */
-    static void cp_done(trigger_cp_callback cb);
     static uint64_t get_end_lba(uint64_t start_lba, uint64_t nlba);
     static uint64_t get_nlbas(uint64_t end_lba, uint64_t start_lba);
     static uint64_t get_blkid_offset(uint64_t lba_offset, uint64_t vol_page_size);
