@@ -71,9 +71,6 @@ class HomestoreConan(ConanFile):
 
         if self.options.sanitize:
             definitions['MEMORY_SANITIZER_ON'] = 'ON'
-
-        if self.options.coverage:
-            definitions['CONAN_BUILD_COVERAGE'] = 'ON'
             
         if self.options.testing:
             definitions['CONAN_TEST_TARGET'] = self.options.testing
@@ -91,8 +88,8 @@ class HomestoreConan(ConanFile):
         cmake.build()
         
         test_target = None
-        if self.options.testing == 'coverage':
-            test_target = 'coverage'
+        if self.options.testing:
+            test_target = self.options.testing
 
         if not self.options.testing == 'off':
             cmake.test(target=test_target, output_on_failure=True)
