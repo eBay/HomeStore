@@ -82,13 +82,13 @@ class HomestoreConan(ConanFile):
         cmake.configure(defs=definitions)
         return cmake
 
-    def build(self):
-        cmake = self.configure_cmake()
-        cmake.build()
-       
+    def build(self):       
         target = None
         if self.options.testing == 'coverage':
             test_target = test_target
+ 
+        cmake = self.configure_cmake()
+        cmake.build()    
         if not self.options.testing == 'off':
             cmake.test(target=test_target, output_on_failure=True)
 
