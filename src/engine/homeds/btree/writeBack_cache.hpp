@@ -144,15 +144,24 @@ public:
         static std::once_flag flag1;
         std::call_once(flag1, ([]() {
                            for (int i = 0; i < HS_DYNAMIC_CONFIG(generic.cache_flush_threads); ++i) {
+                               bool thread_inited = false;
+                               std::condition_variable cv;
+                               std::mutex cv_m;
                                /* XXX : there can be race condition when message is sent before run_io_loop is called */
-                               auto sthread = sisl::named_thread("wbcache_flusher", [i]() {
-                                   iomanager.run_io_loop(false, nullptr, ([i](bool is_started) {
+                               auto sthread = sisl::named_thread("wbcache_flusher", [i, &cv, &cv_m, &thread_inited]() {
+                                   iomanager.run_io_loop(false, nullptr,
+                                                         ([i, &cv, &cv_m, &thread_inited](bool is_started) {
                                                              if (is_started) {
                                                                  wb_cache_t::m_thread_ids.push_back(
                                                                      iomanager.iothread_self());
+                                                                 std::unique_lock< std::mutex > lk(cv_m);
+                                                                 thread_inited = true;
+                                                                 cv.notify_all();
                                                              }
                                                          }));
                                });
+                               std::unique_lock< std::mutex > lk(cv_m);
+                               if (!thread_inited) { cv.wait(lk); }
                                sthread.detach();
                            }
                        }));
