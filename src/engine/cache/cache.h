@@ -262,7 +262,6 @@ public:
     const erase_comp_cb& get_cb() { return m_cb; }
 
     void set_memvec(boost::intrusive_ptr< homeds::MemVector > vec, uint32_t offset, uint32_t size) {
-        assert(offset >= 0);
         m_mem = vec;
         m_data_offset = offset;
         m_cache_size = size;
@@ -283,7 +282,6 @@ public:
     }
 
     sisl::blob at_offset(uint32_t offset) const {
-        assert(m_data_offset >= 0);
         sisl::blob b;
         b.bytes = nullptr;
         b.size = 0;

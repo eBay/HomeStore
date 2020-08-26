@@ -2056,6 +2056,7 @@ private:
         return ret;
     }
 
+public:
     btree_status_t create_btree_replay(btree_journal_entry* jentry, const btree_cp_ptr& bcp) {
         if (jentry) {
             BT_DEBUG_ASSERT_CMP(jentry->is_root, ==, true, ,
@@ -2127,6 +2128,7 @@ private:
         return btree_status_t::success;
     }
 
+private:
     void recover_child_nodes_in_split(const BtreeNodePtr& child_node1,
                                       const std::vector< bt_journal_node_info* >& j_child_nodes,
                                       const btree_cp_ptr& bcp) {
