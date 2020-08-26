@@ -90,7 +90,12 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
     m_cur_indx = 0;
     m_superblock_valid = false;
 
-    m_iodev = drive_iface->open_dev(devname.c_str(), oflags);
+    int oflags_used{oflags};
+    if (devname.find("/tmp") == 0) {
+        // tmp directory in general does not allow Direct I/O
+        oflags_used &= ~O_DIRECT;
+    }
+    m_iodev = drive_iface->open_dev(devname.c_str(), oflags_used);
     if (m_iodev == nullptr
 #ifdef _PRERELEASE
         || (homestore_flip->test_flip("device_boot_fail", devname.c_str()))

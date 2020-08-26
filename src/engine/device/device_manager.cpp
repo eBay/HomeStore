@@ -5,13 +5,17 @@
  *      Author: hkadayam
  */
 
-#include "device.h"
 #include <fcntl.h>
-#include <boost/range.hpp>
-#include <iomgr/iomgr.hpp>
-#include <fds/utils.hpp>
-#include "engine/common/homestore_assert.hpp"
+#include <sys/stat.h>
+#include <sys/types.h>
+
+#include "boost/range.hpp"
 #include "engine/blkalloc/blk_allocator.h"
+#include "engine/common/homestore_assert.hpp"
+#include "fds/utils.hpp"
+#include "iomgr/iomgr.hpp"
+
+#include "device.h"
 
 SDS_LOGGING_DECL(device, DEVICE_MANAGER)
 
@@ -57,14 +61,16 @@ DeviceManager::DeviceManager(NewVDevCallback vcb, uint32_t const vdev_metadata_s
 
     switch (HS_STATIC_CONFIG(input.open_flags)) {
     case io_flag::BUFFERED_IO:
-        m_open_flags = O_RDWR;
+        m_open_flags = O_RDWR | O_CREAT;
         break;
     case io_flag::READ_ONLY:
         m_open_flags = O_RDONLY;
         break;
     case io_flag::DIRECT_IO:
+        m_open_flags = O_RDWR | O_CREAT | O_DIRECT;
+        break;
     default:
-        m_open_flags = O_RDWR | O_DIRECT;
+        m_open_flags = O_RDWR | O_CREAT;
     }
     m_last_vdevid = INVALID_VDEV_ID;
     m_vdev_metadata_size = vdev_metadata_size;
