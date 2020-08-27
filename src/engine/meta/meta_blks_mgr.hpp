@@ -21,6 +21,7 @@ using ovf_hdr_map_t = std::map< uint64_t, meta_blk_ovf_hdr* >;          // ovf_b
 static const uint64_t invalid_bid = BlkId::invalid_internal_id();
 
 struct MetaSubRegInfo {
+    bool do_crc{true};
     meta_blk_found_cb_t cb;
     meta_blk_recover_comp_cb_t comp_cb;
 };
@@ -29,14 +30,14 @@ class MetaBlkMgr {
 private:
     static MetaBlkMgr* _instance;
     static bool m_self_recover;
-    blk_store_t* m_sb_blk_store = nullptr; // super blockstore
-    std::mutex m_meta_mtx;                 // mutex to access to meta_map;
-    std::mutex m_shutdown_mtx;             // protects concurrent operations between recover and shutdown;
-    meta_blk_map_t m_meta_blks;            // subsystem type to meta blk map;
-    ovf_hdr_map_t m_ovf_blk_hdrs;          // ovf blk map;
+    blk_store_t* m_sb_blk_store{nullptr}; // super blockstore
+    std::mutex m_meta_mtx;                // mutex to access to meta_map;
+    std::mutex m_shutdown_mtx;            // protects concurrent operations between recover and shutdown;
+    meta_blk_map_t m_meta_blks;           // subsystem type to meta blk map;
+    ovf_hdr_map_t m_ovf_blk_hdrs;         // ovf blk map;
     std::map< meta_sub_type, MetaSubRegInfo > m_sub_info; // map of callbacks
     BlkId m_last_mblk_id;                                 // last meta blk;
-    meta_blk_sb* m_ssb = nullptr;                         // meta super super blk;
+    meta_blk_sb* m_ssb{nullptr};                          // meta super super blk;
 
 public:
     /**
@@ -78,7 +79,7 @@ public:
      * @param cb : subsystem cb
      */
     void register_handler(const meta_sub_type type, const meta_blk_found_cb_t& cb,
-                          const meta_blk_recover_comp_cb_t& comp_cb);
+                          const meta_blk_recover_comp_cb_t& comp_cb, const bool do_crc = true);
 
     /**
      * @brief
@@ -284,8 +285,9 @@ private:
 
 class register_subsystem {
 public:
-    register_subsystem(meta_sub_type type, const meta_blk_found_cb_t& cb, const meta_blk_recover_comp_cb_t& comp_cb) {
-        meta_blk_mgr->register_handler(type, cb, comp_cb);
+    register_subsystem(meta_sub_type type, const meta_blk_found_cb_t& cb, const meta_blk_recover_comp_cb_t& comp_cb,
+                       const bool do_crc = true) {
+        meta_blk_mgr->register_handler(type, cb, comp_cb, do_crc);
     }
 };
 

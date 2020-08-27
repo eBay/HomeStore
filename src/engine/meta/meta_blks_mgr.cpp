@@ -209,9 +209,9 @@ void MetaBlkMgr::scan_meta_blks() {
             obid = ovf_hdr->h.next_bid;
         }
 
-        HS_RELEASE_ASSERT_EQ(read_sz, (uint64_t)mblk->hdr.h.context_sz,
+        HS_RELEASE_ASSERT_EQ(read_sz, mblk->hdr.h.context_sz,
                              "{}, total size read: {} mismatch from meta blk context_sz: {}", mblk->hdr.h.type, read_sz,
-                             (uint64_t)mblk->hdr.h.context_sz);
+                             mblk->hdr.h.context_sz);
 
         // move on to next meta blk;
         bid = mblk->hdr.h.next_bid;
@@ -305,13 +305,15 @@ void MetaBlkMgr::deregister_handler(const meta_sub_type type) {
 }
 
 void MetaBlkMgr::register_handler(const meta_sub_type type, const meta_blk_found_cb_t& cb,
-                                  const meta_blk_recover_comp_cb_t& comp_cb) {
+                                  const meta_blk_recover_comp_cb_t& comp_cb, const bool do_crc) {
     std::lock_guard< decltype(m_meta_mtx) > lk(m_meta_mtx);
     HS_RELEASE_ASSERT_LT(type.length(), MAX_SUBSYS_TYPE_LEN, "type len: {} should not exceed len: {}", type.length(),
                          MAX_SUBSYS_TYPE_LEN);
     HS_ASSERT(DEBUG, m_sub_info.find(type) == m_sub_info.end(), "type: {} handler has already registered!", type);
+    HS_LOG(DEBUG, metablk, "type: {} registered with do_crc: {}", type, do_crc);
     m_sub_info[type].cb = cb;
     m_sub_info[type].comp_cb = comp_cb;
+    m_sub_info[type].do_crc = do_crc;
 }
 
 void MetaBlkMgr::add_sub_sb(const meta_sub_type type, const void* context_data, const uint64_t sz, void*& cookie) {
@@ -324,13 +326,27 @@ void MetaBlkMgr::add_sub_sb(const meta_sub_type type, const void* context_data, 
     BlkId meta_bid;
     auto ret = alloc_meta_blk(meta_bid);
 
-    HS_LOG(INFO, metablk, "{}, adding meta bid: {}", type, meta_bid.to_string());
+#ifndef NDEBUG
+    uint32_t crc = 0;
+    if (m_sub_info[type].do_crc) { crc = crc32_ieee(init_crc32, static_cast< const uint8_t* >(context_data), sz); }
+#endif
+
+    HS_LOG(INFO, metablk, "{}, adding meta bid: {}, sz: {}", type, meta_bid.to_string(), sz);
     if (no_error != ret) {
         HS_ASSERT(RELEASE, 0, "{}, alloc blk failed with status: {}", type, ret.message());
         return;
     }
 
     meta_blk* mblk = init_meta_blk(meta_bid, type, context_data, sz);
+
+#ifndef NDEBUG
+    if (m_sub_info[type].do_crc) {
+        HS_DEBUG_ASSERT_EQ(crc, mblk->hdr.h.crc,
+                           "Input context data has been changed since received, crc mismatch: {}/{}", crc,
+                           mblk->hdr.h.crc);
+    }
+#endif
+
     cookie = (void*)mblk;
 }
 
@@ -542,7 +558,9 @@ void MetaBlkMgr::write_meta_blk_internal(meta_blk* mblk, const void* context_dat
     }
 
     // for both in-band and ovf buffer, we store crc in meta blk header;
-    mblk->hdr.h.crc = crc32_ieee(init_crc32, ((uint8_t*)context_data), sz);
+    if (m_sub_info[mblk->hdr.h.type].do_crc) {
+        mblk->hdr.h.crc = crc32_ieee(init_crc32, static_cast< const uint8_t* >(context_data), sz);
+    }
 
     // write meta blk;
     write_meta_blk_to_disk(mblk);
@@ -563,16 +581,30 @@ void MetaBlkMgr::update_sub_sb(const void* context_data, const uint64_t sz, void
 
     auto ovf_bid_to_free = mblk->hdr.h.ovf_bid;
 
-    mblk->hdr.h.ovf_bid.set(invalid_bid);
+#ifndef NDEBUG
+    uint32_t crc = 0;
+    const auto it = m_sub_info.find(mblk->hdr.h.type);
+    HS_ASSERT(DEBUG, it != m_sub_info.end(), "type: {} not registered yet!", mblk->hdr.h.type);
+    if (it->second.do_crc) { crc = crc32_ieee(init_crc32, static_cast< const uint8_t* >(context_data), sz); }
+#endif
 
+    mblk->hdr.h.ovf_bid.set(invalid_bid);
     // write this meta blk to disk
     write_meta_blk_internal(mblk, context_data, sz);
 
     // free the overflow bid if it is there
     free_ovf_blk_chain(ovf_bid_to_free);
 
-    HS_LOG(INFO, metablk, "{}, new sb: context_sz: {}, ovf_bid: {}", mblk->hdr.h.type, (uint64_t)mblk->hdr.h.context_sz,
+    HS_LOG(INFO, metablk, "{}, new sb: context_sz: {}, ovf_bid: {}", mblk->hdr.h.type, mblk->hdr.h.context_sz,
            mblk->hdr.h.ovf_bid.to_string());
+
+#ifndef NDEBUG
+    if (it->second.do_crc) {
+        HS_DEBUG_ASSERT_EQ(crc, mblk->hdr.h.crc,
+                           "Input context data has been changed since received, crc mismatch: {}/{}", crc,
+                           mblk->hdr.h.crc);
+    }
+#endif
 
     // no need to update cookie and in-memory meta blk map
 }
@@ -678,7 +710,9 @@ void MetaBlkMgr::free_ovf_blk_chain(BlkId& obid) {
 
 void MetaBlkMgr::free_meta_blk(meta_blk* mblk) {
     HS_LOG(INFO, metablk, "{}, freeing blk id: {}", mblk->hdr.h.type, mblk->hdr.h.bid.to_string());
+
     m_sb_blk_store->free_blk(mblk->hdr.h.bid, boost::none, boost::none);
+
     // free the overflow bid if it is there
     if (mblk->hdr.h.ovf_bid.to_integer() != invalid_bid) {
         HS_DEBUG_ASSERT_GE((uint64_t)(mblk->hdr.h.context_sz), META_BLK_CONTEXT_SZ,
@@ -686,6 +720,7 @@ void MetaBlkMgr::free_meta_blk(meta_blk* mblk) {
                            (uint64_t)(mblk->hdr.h.context_sz), META_BLK_CONTEXT_SZ);
         free_ovf_blk_chain(mblk->hdr.h.ovf_bid);
     }
+
     iomanager.iobuf_free((uint8_t*)mblk);
 }
 
@@ -786,18 +821,27 @@ void MetaBlkMgr::recover(const bool do_comp_cb) {
                                  mblk->hdr.h.type, read_offset, total_sz);
         }
 
-        // verify crc before sending to subsystem;
-        auto crc = crc32_ieee(init_crc32, (uint8_t*)(buf.bytes()), mblk->hdr.h.context_sz);
-        HS_RELEASE_ASSERT_EQ(crc, (uint32_t)mblk->hdr.h.crc, "{}, CRC mismatch: {}/{}, on mblk bid: {}, context_sz: {}",
-                             mblk->hdr.h.type, crc, (uint32_t)mblk->hdr.h.crc, mblk->hdr.h.bid.to_string(),
-                             (uint64_t)mblk->hdr.h.context_sz);
-
         // found a meta blk and callback to sub system;
-        HS_ASSERT(DEBUG, m_sub_info.find(mblk->hdr.h.type) != m_sub_info.end(), "type: {} not found in cache",
-                  mblk->hdr.h.type);
-        // send the callbck;
-        auto cb = m_sub_info[mblk->hdr.h.type].cb;
-        cb(mblk, buf, mblk->hdr.h.context_sz);
+        const auto itr{m_sub_info.find(mblk->hdr.h.type)};
+        if (itr != m_sub_info.end()) {
+            // if subsystem registered crc protection, verify crc before sending to subsystem;
+            if (itr->second.do_crc) {
+                auto crc = crc32_ieee(init_crc32, static_cast< uint8_t* >(buf.bytes()), mblk->hdr.h.context_sz);
+                HS_RELEASE_ASSERT_EQ(crc, mblk->hdr.h.crc, "{}, CRC mismatch: {}/{}, on mblk bid: {}, context_sz: {}",
+                                     mblk->hdr.h.type, crc, mblk->hdr.h.crc, mblk->hdr.h.bid.to_string(),
+                                     mblk->hdr.h.context_sz);
+            } else {
+                HS_LOG(DEBUG, metablk, "type: {} meta blk found with bypassing crc.", mblk->hdr.h.type);
+            }
+
+            // send the callbck;
+            auto cb = itr->second.cb;
+            cb(mblk, buf, mblk->hdr.h.context_sz);
+        } else {
+            // should never arrive here since we do assert on type before write to disk;
+            HS_ASSERT(LOGMSG, false, "type: {} not registered for mblk found on disk. Skip this meta blk. ",
+                      mblk->hdr.h.type);
+        }
     }
 
     if (do_comp_cb) {

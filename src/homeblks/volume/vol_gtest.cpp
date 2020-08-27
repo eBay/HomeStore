@@ -740,7 +740,7 @@ public:
         }
 
         if (tcfg.is_abort) {
-            if (get_elapsed_time_sec(m_start_time) > (random() % tcfg.run_time)) { abort(); }
+            if (get_elapsed_time_sec(m_start_time) > (random() % tcfg.run_time)) { raise(SIGKILL); }
         }
 
         {
