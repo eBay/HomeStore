@@ -198,6 +198,7 @@ std::error_condition HomeBlks::unmap(const VolumePtr& vol, const vol_interface_r
 }
 
 const char* HomeBlks::get_name(const VolumePtr& vol) { return vol->get_name(); }
+uint32_t HomeBlks::get_align_size() { return HS_STATIC_CONFIG(disk_attr.align_size); }
 uint64_t HomeBlks::get_page_size(const VolumePtr& vol) { return vol->get_page_size(); }
 uint64_t HomeBlks::get_size(const VolumePtr& vol) { return vol->get_size(); }
 boost::uuids::uuid HomeBlks::get_uuid(VolumePtr vol) { return vol->get_uuid(); }

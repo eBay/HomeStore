@@ -151,6 +151,7 @@ public:
     // virtual SnapDiffPtr diff_snapshot(const SnapshotPtr& snap1, const SnapshotPtr& snap2);
 
     virtual const char* get_name(const VolumePtr& vol) override;
+    virtual uint32_t get_align_size() override;
     virtual uint64_t get_page_size(const VolumePtr& vol) override;
     virtual uint64_t get_size(const VolumePtr& vol) override;
     virtual boost::uuids::uuid get_uuid(VolumePtr vol) override;

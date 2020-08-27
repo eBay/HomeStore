@@ -278,6 +278,7 @@ public:
 
     virtual const char* get_name(const VolumePtr& vol) = 0;
     virtual uint64_t get_size(const VolumePtr& vol) = 0;
+    virtual uint32_t get_align_size() = 0;
     virtual uint64_t get_page_size(const VolumePtr& vol) = 0;
     virtual boost::uuids::uuid get_uuid(std::shared_ptr< Volume > vol) = 0;
     virtual sisl::blob at_offset(const boost::intrusive_ptr< BlkBuffer >& buf, uint32_t offset) = 0;
