@@ -238,7 +238,7 @@ private:
     void alloc_single_block_in_mem();
     bool check_and_complete_req(const volume_req_ptr& vreq, const std::error_condition& err);
 
-    volume_child_req_ptr create_vol_child_req(BlkId& bid, const volume_req_ptr& vreq, uint32_t start_lba, int nlbas);
+    volume_child_req_ptr create_vol_child_req(BlkId& bid, const volume_req_ptr& vreq, const uint64_t start_lba, int nlbas);
 
     template < typename... Args >
     void assert_formatter(fmt::memory_buffer& buf, const char* msg, const std::string& req_str, const Args&... args) {

@@ -387,11 +387,11 @@ public:
         return req->bbuf;
     }
 
-    void write(const BlkId& bid, const std::vector<iovec>& iovecs, const uint32_t data_offset,
+    void write(const BlkId& bid, const std::vector<iovec>& iovecs,
                const boost::intrusive_ptr< blkstore_req< Buffer > >& req) {
         // Now write data to the device
         req->start_time();
-        m_vdev.write(bid, iovecs, to_vdev_req(req), data_offset);
+        m_vdev.write(bid, const_cast<iovec*>(iovecs.data()), iovecs.size(), to_vdev_req(req));
         if (req->isSyncCall) {
             HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_write_latency,
                               get_elapsed_time_us(req->blkstore_op_start_time));
@@ -508,7 +508,7 @@ public:
 
      // Read the data for given blk id and size. This method stores the read in the iovecs starting at the
      // the given offset
-     void read(const BlkId& bid, std::vector<iovec>& iovecs, const uint32_t data_offset, const uint32_t size,
+     void read(const BlkId& bid, std::vector<iovec>& iovecs, const uint32_t size,
                boost::intrusive_ptr< blkstore_req< Buffer > > req) {
         assert(req->err == no_error);
 
@@ -524,35 +524,8 @@ public:
         ///
         HS_ASSERT_CMP(DEBUG, m_vdev.is_blk_alloced(const_cast<BlkId&>(bid)), ==, true, "blk is not allocted");
 
-        std::vector< iovec > iov(1, iovec{});
-        iov.reserve(2);
-        uint64_t current_offset{data_offset};
-        const uint64_t end_offset{current_offset + size};
-        uint64_t iovec_offset{0};
-        for (auto& read_iovec : iovecs) {
-            if (current_offset < iovec_offset + read_iovec.iov_len) {
-                const uint64_t start_offset{current_offset - iovec_offset};
-                iov.back().iov_base = static_cast< uint8_t* >(read_iovec.iov_base) + start_offset;
-                const uint64_t remaining{static_cast< uint64_t >(read_iovec.iov_len - start_offset)};
-                if (current_offset + remaining > end_offset) {
-                    iov.back().iov_len = end_offset - current_offset;
-                } else {
-                    iov.back().iov_len = remaining;
-                }
-                current_offset += iov.back().iov_len;
-            }
-            iovec_offset += read_iovec.iov_len;
-            if (current_offset == end_offset) {
-                break;
-            }
-            else  {
-                // prepare next iovec
-                iov.emplace_back(iovec{});
-            };
-        }
-        assert(current_offset == end_offset);
         req->blkstore_ref_cnt.increment(1);
-        m_vdev.read(bid, iov, size, to_vdev_req(req));
+        m_vdev.read(bid, iovecs, size, to_vdev_req(req));
         if (req->isSyncCall) { req->blkstore_ref_cnt.decrement(1); }
 
         assert(req->err == no_error);
