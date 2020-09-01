@@ -3,22 +3,36 @@ pipeline {
 
     environment {
         ORG = 'sds'
+        ECR_URL = 'ecr.vip.ebayc3.com'
         ARTIFACTORY_PASS = credentials('ARTIFACTORY_PASS')
-        HOMESTORE_BUILD_TAG = "${GIT_COMMIT}"
         CONAN_USER = 'sds'
         MASTER_BRANCH = 'master'
-        DEVELOP_BRANCH = 'testing/v*'
+        TESTING_BRANCH = 'testing/v*'
         STABLE_BRANCH = 'stable/v*'
     }
 
     stages {
         stage('Adjust Tag for Master/PR') {
             when { not { anyOf {
-                branch "${DEVELOP_BRANCH}"
+                branch "${TESTING_BRANCH}"
                 branch "${STABLE_BRANCH}"
             } } }
             steps {
-                sh(script: "sed -Ei 's,version = .*([[:digit:]]+\\.[[:digit:]]+\\.[[:digit:]]+).*,version = \"\\1+b${env.BUILD_NUMBER}\",' conanfile.py")
+                script {
+                    sh(script: "sed -Ei 's,version = .*\"([[:digit:]]+\\.[[:digit:]]+\\.[[:digit:]]+).*,version = \"\\1-${env.BUILD_NUMBER}\",' conanfile.py")
+                    BUILD_MISSING = "--build cascade --build missing"
+                }
+            }
+        }
+        stage('Adjust for Testing/Stable') {
+            when { anyOf {
+                branch "${TESTING_BRANCH}"
+                branch "${STABLE_BRANCH}"
+            } }
+            steps {
+                script {
+                    BUILD_MISSING = ""
+                }
             }
         }
 
@@ -26,161 +40,108 @@ pipeline {
             steps {
                 script {
                     PROJECT = sh(script: "grep -m 1 'name =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
-                    TAG = sh(script: "grep -m 1 'version =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
+                    VER = sh(script: "grep -m 1 'version =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
                     CONAN_CHANNEL = sh(script: "echo ${BRANCH_NAME} | sed -E 's,(\\w+-?\\d*)/.*,\\1,' | sed -E 's,-,_,' | tr -d '\n'", returnStdout: true)
-                    ECR_PATH = "ecr.vip.ebayc3.com/${ORG}/${PROJECT}"
-                    slackSend color: '#0063D1', channel: '#sds-ci', message: "*${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}* is building."
+                    ECR_PATH = "${ECR_URL}/${ORG}/${PROJECT}"
+                    TAG = "${VER}@${CONAN_USER}/${CONAN_CHANNEL}"
+                    slackSend color: '#0063D1', channel: '#sds-ci', message: "*${PROJECT}/${TAG}* is building."
+                }
+            }
+        }
+
+        stage('Tag Stable Build') {
+            when { branch "${STABLE_BRANCH}" }
+            steps {
+                script {
+                    TAG = "${VER}@"
                 }
             }
         }
 
         stage('Build') {
-            parallel {
-                stage("Sanitized") {
-                    agent {
-                        label 'sds-builder'
+            failFast true
+            matrix {
+                agent { label 'sds-builder' }
+                axes {
+                    axis {
+                        name 'BUILD_TYPE'
+                        values 'debug', 'release', 'test'
                     }
-                    stages {
-                        stage("Build") {
-                            steps {
-                                sh "conan create -pr debug . ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}"
-                            }
+                    axis {
+                        name 'SANITIZE'
+                        values 'False', 'True'
+                    }
+                }
+                excludes {
+                    exclude {
+                        axis {
+                            name 'SANITIZE'
+                            values 'True'
                         }
-                        stage("Deploy") {
-                            steps {
-                                sh "conan user -r ebay-local -p ${ARTIFACTORY_PASS} _service_sds"
-                                sh "conan upload ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL} -c --all -r ebay-local"
-                            }
+                        axis {
+                            name 'BUILD_TYPE'
+                            values 'release', 'test'
                         }
                     }
                 }
-                stage("Debug") {
-                    agent {
-                        label 'sds-builder'
-                    }
-                    stages {
-                        stage('Adjust Tag for Master/PR') {
-                            when { not { anyOf {
-                                branch "${DEVELOP_BRANCH}"
-                                branch "${STABLE_BRANCH}"
-                            } } }
-                            steps {
-                                sh(script: "sed -Ei 's,version = .*([[:digit:]]+\\.[[:digit:]]+\\.[[:digit:]]+).*,version = \"\\1+b${env.BUILD_NUMBER}\",' conanfile.py")
-                            }
-                        }
-                        stage("Build") {
-                            steps {
-                                sh "conan create -o homestore:sanitize=False -pr debug . ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}"
-                            }
-                        }
-                        stage("Deploy") {
-                            steps {
-                                sh "conan user -r ebay-local -p ${ARTIFACTORY_PASS} _service_sds"
-                                sh "conan upload ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL} -c --all -r ebay-local"
-                            }
-                        }
-                    }
-                }
-                stage("Release") {
-                    agent {
-                        label 'sds-builder'
-                    }
-                    stages {
-                        stage('Adjust Tag for Master/PR') {
-                            when { not { anyOf {
-                                branch "${DEVELOP_BRANCH}"
-                                branch "${STABLE_BRANCH}"
-                            } } }
-                            steps {
-                                sh(script: "sed -Ei 's,version = .*([[:digit:]]+\\.[[:digit:]]+\\.[[:digit:]]+).*,version = \"\\1+b${env.BUILD_NUMBER}\",' conanfile.py")
-                            }
-                        }
-                        stage("Build") {
-                            steps {
-                                sh "conan create -o homestore:sanitize=False -pr test . ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}"
-                            }
-                        }
-                        stage("Deploy") {
-                            steps {
-                                sh "conan user -r ebay-local -p ${ARTIFACTORY_PASS} _service_sds"
-                                sh "conan upload ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL} -c --all -r ebay-local"
-                            }
-                        }
-                    }
-                }
-                stage("Performance") {
-                    agent {
-                        label 'sds-builder'
-                    }
-                    stages {
-                        stage('Adjust Tag for Master/PR') {
-                            when { not { anyOf {
-                                branch "${DEVELOP_BRANCH}"
-                                branch "${STABLE_BRANCH}"
-                            } } }
-                            steps {
-                                sh(script: "sed -Ei 's,version = .*([[:digit:]]+\\.[[:digit:]]+\\.[[:digit:]]+).*,version = \"\\1+b${env.BUILD_NUMBER}\",' conanfile.py")
-                            }
-                        }
-                        stage("Build") {
-                            steps {
-                                sh "conan create -o homestore:sanitize=False -pr release . ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}"
-                            }
-                        }
-                        stage("Deploy") {
-                            steps {
-                                sh "conan user -r ebay-local -p ${ARTIFACTORY_PASS} _service_sds"
-                                sh "conan upload ${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL} -c --all -r ebay-local"
-                            }
-                        }
-                    }
-                }
-            }
-        }
 
-        stage('TestImage') {
-            when {
-                anyOf {
-                    branch "develop"
-                    branch "snapshot"
-                }
-            }
-            parallel {
-                stage('Test Build') {
-                    agent {
-                        label 'sds-builder'
-                    }
-                    steps {
-                        withDockerRegistry([credentialsId: 'sds-sds', url: "https://ecr.vip.ebayc3.com"]) {
-                            sh "docker build --build-arg BUILD_TYPE=test --build-arg PKG_NAME=${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL} -t ${ECR_PATH}:${CONAN_CHANNEL}-test .jenkins"
-                            sh "docker push ${ECR_PATH}:${CONAN_CHANNEL}-test"
-                            slackSend channel: '#sds-ci', message: "*${PROJECT}:${CONAN_CHANNEL}-test* has been pushed to ECR."
+                stages {
+                    stage('Adjust Tag for Master/PR') {
+                        when { not { anyOf {
+                            branch "${TESTING_BRANCH}"
+                            branch "${STABLE_BRANCH}"
+                        } } }
+                        steps {
+                            sh(script: "sed -Ei 's,version = .*\"([[:digit:]]+\\.[[:digit:]]+\\.[[:digit:]]+).*,version = \"\\1-${env.BUILD_NUMBER}\",' conanfile.py")
                         }
                     }
-                }
-                stage("Sanitize Build") {
-                    agent {
-                        label 'sds-builder'
-                    }
-                    steps {
-                        withDockerRegistry([credentialsId: 'sds-sds', url: "https://ecr.vip.ebayc3.com"]) {
-                            sh "docker build --build-arg BUILD_TYPE=sanitize --build-arg PKG_NAME=${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL} -t ${ECR_PATH}:${CONAN_CHANNEL}-sanitize .jenkins"
-                            sh "docker push ${ECR_PATH}:${CONAN_CHANNEL}-sanitize"
-                            slackSend channel: '#sds-ci', message: "*${PROJECT}:${CONAN_CHANNEL}-sanitize* has been pushed to ECR."
+                    stage("Build") {
+                        steps {
+                            sh "conan create ${BUILD_MISSING} -o homestore:sanitize=${SANITIZE} -pr ${BUILD_TYPE} . ${PROJECT}/${TAG}"
+                            sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_load' -exec cp {} .jenkins/test_load \\;"
+                            sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_volume' -exec cp {} .jenkins/test_volume \\;"
+                            sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/check_btree' -exec cp {} .jenkins/check_btree \\;"
+                            sh "find . -type f -wholename '*test_scripts/vol_test.py' -exec cp -a {} .jenkins/vol_test.py \\;"
+                            sh "find ${CONAN_USER_HOME} -type d -wholename '*bin/scripts' -exec cp -a {} .jenkins/scripts \\;"
+                        }
+                        post {
+                            failure {
+                                archiveArtifacts artifacts: "/root/.conan/data/${PROJECT}/${VER}/${CONAN_USER}/${CONAN_PASS}/build/*/src/logs/*", fingerprint: true
+                            }
                         }
                     }
-                }
-                stage('Release Build') {
-                    agent {
-                        label 'sds-builder'
-                    }
-                    steps {
-                        withDockerRegistry([credentialsId: 'sds-sds', url: "https://ecr.vip.ebayc3.com"]) {
-                            sh "docker build --build-arg BUILD_TYPE=release --build-arg PKG_NAME=${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL} -t ${ECR_PATH}:${CONAN_CHANNEL}-release .jenkins"
-                            sh "docker push ${ECR_PATH}:${CONAN_CHANNEL}-release"
-                            slackSend channel: '#sds-ci', message: "*${PROJECT}:${CONAN_CHANNEL}-release* has been pushed to ECR."
+                    stage("Deploy Package") {
+                        when {
+                            expression { not { branch "PR_*" } }
+                        }
+                        steps {
+                            sh "conan user -r ebay-local -p ${ARTIFACTORY_PASS} _service_sds"
+                            sh "conan upload ${PROJECT}/${TAG} -c --all -r ebay-local"
                         }
                     }
+                    stage("Image") {
+                        steps {
+                            withDockerRegistry([credentialsId: 'sds-sds', url: "https://${ECR_URL}"]) {
+                                sh "docker build -t ${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE} .jenkins/"
+                            }
+                        }
+                    }
+                    stage("Deploy Image") {
+                        when { anyOf {
+				branch "testing/v*"
+				branch "master"
+                        } }
+                        steps {
+                            withDockerRegistry([credentialsId: 'sds-sds', url: "https://${ECR_URL}"]) {
+                                sh "docker push ${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE}"
+                            }
+                        }
+                        post {
+                            success {
+                                slackSend color: '#85B717', channel: '#sds-ci', message: "*${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE}* has been uploaded to ECR."
+                            }
+			}
+		    }
                 }
             }
         }
@@ -188,10 +149,10 @@ pipeline {
 
     post {
         failure {
-            slackSend color: '#E43237', channel: '#sds-ci', message: "*${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}* has had a failure : ${BUILD_URL}"
+            slackSend color: '#E43237', channel: '#sds-ci', message: "*${PROJECT}/${TAG}* has had a failure : ${BUILD_URL}"
         }
         success {
-            slackSend color: '#85B717', channel: '#sds-ci', message: "*${PROJECT}/${TAG}@${CONAN_USER}/${CONAN_CHANNEL}* has been uploaded to Artifactory."
+            slackSend color: '#85B717', channel: '#sds-ci', message: "*${PROJECT}/${TAG}* has completed successfully."
         }
     }
 }
