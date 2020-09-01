@@ -11,6 +11,7 @@ static constexpr uint32_t META_BLK_MAGIC = 0xCEEDBEED;
 static constexpr uint32_t META_BLK_OVF_MAGIC = 0xDEADBEEF;
 static constexpr uint32_t META_BLK_SB_MAGIC = 0xABCDCEED;
 static constexpr uint32_t META_BLK_SB_VERSION = 0x1;
+static constexpr uint32_t META_BLK_VERSION = 0x1;
 static constexpr uint32_t MAX_SUBSYS_TYPE_LEN = 32;
 static constexpr uint32_t META_BLK_CONTEXT_SZ = (META_BLK_PAGE_SZ - META_BLK_HDR_MAX_SZ); // meta blk context data sz
 
@@ -80,6 +81,7 @@ struct meta_blk_sb {
 // 2. If overflow blkid is not invalid, all the context data is stored in overflow blks;
 //
 struct meta_blk_hdr_s {
+    uint32_t version;
     uint32_t magic; // magic
     crc32_t crc;
     char type[MAX_SUBSYS_TYPE_LEN]; // sub system type;
