@@ -146,6 +146,16 @@ public:
 
     bool is_aligned_buf_needed(const size_t size) { return (size <= META_BLK_CONTEXT_SZ) ? false : true; }
 
+    /**
+     * @brief : Return the total space used in bytes that was occupied by this meta blk;
+     *          Currently used for testing only.
+     *
+     * @param cookie : hanlde to meta blk;
+     *
+     * @return : size of space occupied by this meta blk;
+     */
+    uint64_t get_meta_size(const void* cookie);
+
 public:
     /*********************** static public function **********************/
     static void set_self_recover() { m_self_recover = true; }
@@ -158,31 +168,11 @@ private:
     /**
      * @brief
      *
-     * @param buf
-     * @param size
-     * @param mblks
-     *
-     * @return
-     */
-    void extract_meta_blks(uint8_t* buf, const uint64_t size, std::vector< meta_blk* >& mblks);
-
-    /**
-     * @brief
-     *
      * @param type
      *
      * @return
      */
     bool is_sub_type_valid(const meta_sub_type type);
-
-    /**
-     * @brief
-     *
-     * @param total_mblks_cnt
-     *
-     * @return
-     */
-    bool sanity_check(const uint64_t total_mblks_cnt);
 
     /**
      * @brief : write in-memory copy of meta_blk to disk;
@@ -202,11 +192,6 @@ private:
      * @param bid : the blk id that belongs to meta ssb;
      */
     void load_ssb(const sb_blkstore_blob* blob);
-
-    /**
-     * @brief : This function is currently not used, don't delete for now;
-     */
-    void scan_meta_blks_per_chunk();
 
     /**
      * @brief : init super super block
