@@ -526,6 +526,7 @@ private:
     // Sweep and cache related functions
     void request_more_blks(BlkAllocSegment* seg, int slab_indx);
     void request_more_blks_wait(BlkAllocSegment* seg, int slab_indx);
+    void try_add_blks_to_cache(const BlkId& b);
     void fill_cache(BlkAllocSegment* seg, int slab_indx);
     uint64_t fill_cache_in_portion(uint64_t portion_num, BlkAllocSegment* seg);
 
