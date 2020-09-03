@@ -446,7 +446,48 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
     return ret;
 }
 
+bool VarsizeBlkAllocator::try_add_blks_to_cache(const BlkId& b) {
+    BlkAllocPortion* portion = blknum_to_portion(b.get_id());
+    portion.lock();
+    /* Check if cache is full */
+    if (m_cache_n_entries.load(std::memory_order_acq_rel) >=
+                                get_config().get_max_cache_blks()) {
+        BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Cache is full. Entry count = {}",
+                                    m_cache_n_entries.load(std::memory_order_acq_rel));
+        portion.unlock();
+        return false;
+    }
+    /* Check if relevant slab is empty */
+    auto slab_index = get_config().get_slab(b.get_nblks()).first;
+    if (m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel) >=
+                                get_config().get_slab_capacity(slab_index)) {
+        BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Slab {} is full, capacity = {}",
+            slab_index, m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
+        portion.unlock();
+        return false;
+    }
+    /* Create cache entry */
+    VarsizeAllocCacheEntry entry;
+    gen_cache_entry(b.get_id(), b.get_nblks(), &entry);
+    EmptyClass dummy;
+    m_blk_cache->put(entry, dummy, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
+    m_slab_entries[slab_index]._a.fetch_add(b.get_nblks(), std::memory_order_acq_rel);
+    incr_counter(slab_index, b.get_nblks());
+    BLKALLOC_LOG(TRACE, varsize_blk_alloc,
+            "Freed {} blocks for slab {}, remaining slab capacity = {}",
+            b.get_nblks(), slab_index,
+            m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
+
+    m_cache_n_entries.fetch_add(b.get_nblks(), std::memory_order_acq_rel);
+    portion.unlock();
+    seg->reportFragmentation(b.get_nblks(), 1);
+    return true;
+}
+
 void VarsizeBlkAllocator::free(const BlkId& b) {
+
+    if (try_add_blks_to_cache(b)) return;
+
     BlkAllocPortion* portion = blknum_to_portion(b.get_id());
     BlkAllocSegment* segment = blknum_to_segment(b.get_id());
 
