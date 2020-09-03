@@ -448,13 +448,14 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
 
 bool VarsizeBlkAllocator::try_add_blks_to_cache(const BlkId& b) {
     BlkAllocPortion* portion = blknum_to_portion(b.get_id());
-    portion.lock();
+    BlkAllocSegment* segment = blknum_to_segment(b.get_id());
+    portion->lock();
     /* Check if cache is full */
     if (m_cache_n_entries.load(std::memory_order_acq_rel) >=
                                 get_config().get_max_cache_blks()) {
         BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Cache is full. Entry count = {}",
                                     m_cache_n_entries.load(std::memory_order_acq_rel));
-        portion.unlock();
+        portion->unlock();
         return false;
     }
     /* Check if relevant slab is empty */
@@ -463,7 +464,7 @@ bool VarsizeBlkAllocator::try_add_blks_to_cache(const BlkId& b) {
                                 get_config().get_slab_capacity(slab_index)) {
         BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Slab {} is full, capacity = {}",
             slab_index, m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
-        portion.unlock();
+        portion->unlock();
         return false;
     }
     /* Create cache entry */
@@ -479,8 +480,8 @@ bool VarsizeBlkAllocator::try_add_blks_to_cache(const BlkId& b) {
             m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
 
     m_cache_n_entries.fetch_add(b.get_nblks(), std::memory_order_acq_rel);
-    portion.unlock();
-    seg->reportFragmentation(b.get_nblks(), 1);
+    portion->unlock();
+    segment->reportFragmentation(b.get_nblks(), 1);
     return true;
 }
 
