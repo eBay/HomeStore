@@ -16,7 +16,8 @@
 
 SDS_OPTION_GROUP(home_blks,
                  (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
-                  cxxopts::value< int32_t >()->default_value("5000"), "port"))
+                  cxxopts::value< int32_t >()->default_value("5000"), "port"),
+                 (config_path, "", "config_path", "Path to dynamic config of app", cxxopts::value< std::string >(), ""))
 using namespace homestore;
 
 REGISTER_METABLK_SUBSYSTEM(homeblks, "HOMEBLK", HomeBlks::meta_blk_found_cb, HomeBlks::meta_blk_recovery_comp_cb)

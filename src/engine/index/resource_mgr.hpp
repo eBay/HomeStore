@@ -72,8 +72,12 @@ public:
     }
 
     /* monitor journal size */
-    static void check_journal_size_and_trigger_cp(uint64_t used_size);
+    static void check_journal_size_and_trigger_cp(uint64_t used_size, uint64_t total_size) {
+        uint32_t used_per = (100 * used_size / total_size);
+        if (used_per >= HS_DYNAMIC_CONFIG(resource_limits.journal_size_percent)) { IndxMgr::trigger_hs_cp(); }
+    }
 
+    static uint32_t get_journal_size_limit() { return HS_DYNAMIC_CONFIG(resource_limits.journal_size_percent); }
     /* monitor chunk size */
     static void check_chunk_free_size_and_trigger_cp(uint64_t free_size, uint64_t alloc_size);
 

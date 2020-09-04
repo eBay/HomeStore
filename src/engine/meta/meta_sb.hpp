@@ -11,8 +11,10 @@ static constexpr uint32_t META_BLK_MAGIC = 0xCEEDBEED;
 static constexpr uint32_t META_BLK_OVF_MAGIC = 0xDEADBEEF;
 static constexpr uint32_t META_BLK_SB_MAGIC = 0xABCDCEED;
 static constexpr uint32_t META_BLK_SB_VERSION = 0x1;
+static constexpr uint32_t META_BLK_VERSION = 0x1;
 static constexpr uint32_t MAX_SUBSYS_TYPE_LEN = 32;
 static constexpr uint32_t META_BLK_CONTEXT_SZ = (META_BLK_PAGE_SZ - META_BLK_HDR_MAX_SZ); // meta blk context data sz
+
 /**
  * Sub system types and their priorities
  */
@@ -79,6 +81,7 @@ struct meta_blk_sb {
 // 2. If overflow blkid is not invalid, all the context data is stored in overflow blks;
 //
 struct meta_blk_hdr_s {
+    uint32_t version;
     uint32_t magic; // magic
     crc32_t crc;
     char type[MAX_SUBSYS_TYPE_LEN]; // sub system type;
@@ -106,12 +109,24 @@ struct meta_blk {
 };
 
 // single list overflow block chain
-struct meta_blk_ovf_hdr {
+struct meta_blk_ovf_hdr_s {
     uint32_t magic; // ovf magic
     BlkId next_bid; // next ovf blk id;
     BlkId bid;      // self blkid
-    BlkId data_bid; // contigous blks that holds context data;
     uint64_t context_sz;
+};
+
+static constexpr uint32_t MAX_BLK_OVF_HDR_MAX_SZ = 512;
+static constexpr uint32_t META_BLK_OVF_HDR_RSVD_SZ =
+    (MAX_BLK_OVF_HDR_MAX_SZ - sizeof(meta_blk_hdr_s)); // reserved size for ovf header
+static constexpr uint32_t MAX_NUM_DATA_BLKID = (META_BLK_PAGE_SZ - MAX_BLK_OVF_HDR_MAX_SZ) / sizeof(BlkId);
+
+// single list overflow block chain
+struct meta_blk_ovf_hdr {
+    meta_blk_ovf_hdr_s h;
+    char padding[META_BLK_OVF_HDR_RSVD_SZ];
+    uint32_t nbids;
+    BlkId data_bid[MAX_NUM_DATA_BLKID]; // contigous blks that holds context data;
 };
 
 static_assert(sizeof(meta_blk_ovf_hdr) <= META_BLK_PAGE_SZ);

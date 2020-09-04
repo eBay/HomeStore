@@ -28,22 +28,23 @@ class HomestoreConan(ConanFile):
                         'testing=full',
                         )
 
+    build_requires = (
+            "benchmark/1.5.0",
+            "gtest/1.10.0",
+            )
     requires = (
-            "flip/[~=0, include_prerelease=True]@sds/master",
+            "flip/[~=1, include_prerelease=True]@sds/master",
             "iomgr/[~=3, include_prerelease=True]@sds/master",
             "sds_logging/[~=7, include_prerelease=True]@sds/master",
+            "sds_options/[~=1, include_prerelease=True]@sds/master",
             "sisl/[~=3, include_prerelease=True]@sisl/master",
 
             # FOSS, rarely updated
-            "benchmark/1.5.0",
             "boost/1.73.0",
-            "double-conversion/3.1.5",
             "evhtp/1.2.18.2",
             "farmhash/1.0.0",
             "folly/2020.05.04.00",
             "isa-l/2.21.0",
-            "libevent/2.1.11",
-            "openssl/1.1.1g"
             )
 
     generators = "cmake"

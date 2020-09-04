@@ -394,7 +394,7 @@ void DeviceManager::add_devices(std::vector< dev_info >& devices, bool is_init) 
     MetaBlkMgr::instance()->register_handler(
         "BLK_ALLOC",
         [this](meta_blk* mblk, sisl::byte_view buf, size_t size) { blk_alloc_meta_blk_found_cb(mblk, buf, size); },
-        nullptr);
+        nullptr, false /* do_crc */);
     if (is_init) {
         init_devices(devices);
         return;

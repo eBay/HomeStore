@@ -401,7 +401,7 @@ public:
      * @return : the logical tail offset;
      */
     off_t get_tail_offset(bool reserve_space_include = true) const {
-        auto tail = data_start_offset() + m_write_sz_in_total.load();
+        auto tail = data_start_offset() + m_write_sz_in_total.load(std::memory_order_relaxed);
         if (reserve_space_include) { tail += m_reserved_sz; }
         if (tail >= get_size()) { tail -= get_size(); }
 
@@ -413,7 +413,7 @@ public:
      *
      * @return : the used space in vdev
      */
-    uint64_t get_used_space() const { return m_write_sz_in_total.load() + m_reserved_sz; }
+    uint64_t get_used_space() const { return m_write_sz_in_total.load(std::memory_order_relaxed) + m_reserved_sz; }
 
     /**
      * @brief : get the free space left in vdev
@@ -1263,7 +1263,8 @@ private:
      */
     void high_watermark_check() {
         uint32_t used_per = (100 * get_used_space() / get_size());
-        if (used_per >= vdev_high_watermark_per) {
+        ResourceMgr::check_journal_size_and_trigger_cp(get_used_space(), get_size());
+        if (used_per >= ResourceMgr::get_journal_size_limit()) {
             COUNTER_INCREMENT(m_metrics, vdev_high_watermark_count, 1);
             HS_LOG(WARN, device, "high watermark hit, used percentage: {}, high watermark percentage: {}", used_per,
                    vdev_high_watermark_per)

@@ -783,7 +783,7 @@ public:
         }
 
         if (tcfg.is_abort) {
-            if (get_elapsed_time_sec(m_start_time) > (random() % tcfg.run_time)) { abort(); }
+            if (get_elapsed_time_sec(m_start_time) > (random() % tcfg.run_time)) { raise(SIGKILL); }
         }
 
         {
@@ -1474,12 +1474,11 @@ SDS_OPTION_GROUP(
      "0 or 1"),
     (p_volume_size, "", "p_volume_size", "p_volume_size", ::cxxopts::value< uint32_t >()->default_value("60"),
      "0 to 200"),
-    (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
     (write_cache, "", "write_cache", "write cache", ::cxxopts::value< uint32_t >()->default_value("1"),
      "flag"),
     (read_cache, "", "read_cache", "read cache", ::cxxopts::value< uint32_t >()->default_value("1"),
      "flag"),
-    (config_path, "", "config_path", "Path to dynamic config of app", cxxopts::value< std::string >(), ""))
+    (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"))
 #define ENABLED_OPTIONS logging, home_blks, test_volume
 
 SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)

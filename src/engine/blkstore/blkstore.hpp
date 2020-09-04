@@ -345,9 +345,13 @@ public:
      * Here data_offset is offset inside memvec. If a write is split then both the writes will point to
      * same buffer but different offsets.
      */
+
     boost::intrusive_ptr< Buffer > write(BlkId& bid, boost::intrusive_ptr< homeds::MemVector > mvec, const uint32_t data_offset,
-                                         const boost::intrusive_ptr< blkstore_req< Buffer > >& req, const bool cache) {
-        if (cache) {
+                                         const boost::intrusive_ptr< blkstore_req< Buffer > > req, const bool in_cache) {
+        req->start_time();
+        COUNTER_INCREMENT(m_metrics, blkstore_write_op_count, 1);
+
+        if (in_cache) {
             /* TODO: add try and catch exception */
             auto buf = Buffer::make_object();
             buf->set_key(bid);
@@ -359,8 +363,6 @@ public:
              * First try to create/insert a record for this blk id in the cache.
              * If it already exists, it will simply upvote the item.
              */
-            COUNTER_INCREMENT(m_metrics, blkstore_write_op_count, 1);
-
             CURRENT_CLOCK(cache_start_time);
             uint8_t* ptr;
 
@@ -378,7 +380,6 @@ public:
         }
 
         // Now write data to the device
-        req->start_time();
         m_vdev.write(bid, *(mvec.get()), to_vdev_req(req), data_offset);
         if (req->isSyncCall) {
             HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_write_latency,

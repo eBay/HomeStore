@@ -91,7 +91,6 @@ struct sb_info_t {
 };
 
 class VMetaBlkMgrTest : public ::testing::Test {
-
     enum class meta_op_type { write = 1, update = 2, remove = 3 };
     const std::string mtype = "TEST";
 
@@ -135,21 +134,7 @@ public:
         }
     }
 
-    uint64_t total_size_written(uint64_t context_sz) {
-        if (context_sz <= META_BLK_CONTEXT_SZ) {
-            return META_BLK_PAGE_SZ;
-        } else {
-            return META_BLK_PAGE_SZ;
-            // TODO: FIXME;
-#if 0
-            if ((context_sz - META_BLK_CONTEXT_SZ) % META_BLK_OVF_CONTEXT_SZ == 0) {
-                return (1 + ((context_sz - META_BLK_CONTEXT_SZ) / META_BLK_OVF_CONTEXT_SZ)) * META_BLK_PAGE_SZ;
-            } else {
-                return (2 + ((context_sz - META_BLK_CONTEXT_SZ) / META_BLK_OVF_CONTEXT_SZ)) * META_BLK_PAGE_SZ;
-            }
-#endif
-        }
-    }
+    uint64_t total_size_written(const void* cookie) { return m_mbm->get_meta_size(cookie); }
 
     void do_sb_write(bool overflow) {
         m_wrt_cnt++;
@@ -184,9 +169,9 @@ public:
         m_write_sbs[bid].cookie = cookie;
         m_write_sbs[bid].str = std::string((char*)buf, sz_to_wrt);
 
-        m_total_wrt_sz += total_size_written(sz_to_wrt);
-        // HS_ASSERT(DEBUG, m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
-        //         m_mbm->get_used_size());
+        m_total_wrt_sz += total_size_written(cookie);
+        HS_ASSERT(DEBUG, m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
+                  m_mbm->get_used_size());
 
         iomanager.iobuf_free(buf);
     }
@@ -198,14 +183,14 @@ public:
         std::advance(it, rand() % m_write_sbs.size());
 
         auto cookie = it->second.cookie;
-        m_total_wrt_sz -= total_size_written(((meta_blk*)cookie)->hdr.h.context_sz);
+        m_total_wrt_sz -= total_size_written(cookie);
 
         m_mbm->remove_sub_sb(cookie);
         m_write_sbs.erase(it);
         HS_ASSERT_CMP(DEBUG, sz, ==, m_write_sbs.size() + 1);
 
-        //    HS_ASSERT(DEBUG, m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
-        //            m_mbm->get_used_size());
+        HS_ASSERT(DEBUG, m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
+                  m_mbm->get_used_size());
     }
 
     void do_sb_update() {
@@ -226,7 +211,7 @@ public:
 
         // update is in-place, the metablk is re-used, ovf-blk is freed then re-allocated;
         // so it is okay to decreaase at this point, then add it back after update completes;
-        m_total_wrt_sz -= total_size_written(((meta_blk*)cookie)->hdr.h.context_sz);
+        m_total_wrt_sz -= total_size_written(cookie);
 
         m_mbm->update_sub_sb(buf, sz_to_wrt, cookie);
         auto bid = ((meta_blk*)cookie)->hdr.h.bid.to_integer();
@@ -240,10 +225,9 @@ public:
                   (uint64_t)mblk->hdr.h.context_sz, sz_to_wrt);
 
         // update total size, add size of metablk back;
-        m_total_wrt_sz += total_size_written(sz_to_wrt);
-        //        HS_ASSERT(DEBUG, m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}",
-        //        m_total_wrt_sz,
-        //                m_mbm->get_used_size());
+        m_total_wrt_sz += total_size_written(cookie);
+        HS_ASSERT(DEBUG, m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
+                  m_mbm->get_used_size());
 
         iomanager.iobuf_free(buf);
     }

@@ -297,7 +297,7 @@ void LogDev::flush_if_needed(const uint32_t new_record_size, logid_t new_idx) {
     bool flush_by_time = !flush_by_size && pending_sz &&
         (get_elapsed_time_us(m_last_flush_time) > HS_DYNAMIC_CONFIG(logstore.max_time_between_flush_us));
 
-    if (iomanager.am_i_worker_reactor() && (flush_by_size || flush_by_time)) {
+    if ((iomanager.am_i_worker_reactor() || iomanager.am_i_tight_loop_reactor()) && (flush_by_size || flush_by_time)) {
         bool expected_flushing = false;
         if (m_is_flushing.compare_exchange_strong(expected_flushing, true, std::memory_order_acq_rel)) {
             LOGTRACEMOD(
