@@ -21,7 +21,6 @@ endif()
 include (CTest)
 find_package (Threads REQUIRED)
 find_library(LIB_AIO aio)
-find_library(LIB_DOUBLE_CONVERSION double-conversion)
 find_library(LIB_ISAL isal)
 
 set(COMMON_LIB_DEPS

@@ -21,6 +21,7 @@ using ovf_hdr_map_t = std::map< uint64_t, meta_blk_ovf_hdr* >;          // ovf_b
 static const uint64_t invalid_bid = BlkId::invalid_internal_id();
 
 struct MetaSubRegInfo {
+    bool do_crc{true};
     meta_blk_found_cb_t cb;
     meta_blk_recover_comp_cb_t comp_cb;
 };
@@ -29,14 +30,14 @@ class MetaBlkMgr {
 private:
     static MetaBlkMgr* _instance;
     static bool m_self_recover;
-    blk_store_t* m_sb_blk_store = nullptr; // super blockstore
-    std::mutex m_meta_mtx;                 // mutex to access to meta_map;
-    std::mutex m_shutdown_mtx;             // protects concurrent operations between recover and shutdown;
-    meta_blk_map_t m_meta_blks;            // subsystem type to meta blk map;
-    ovf_hdr_map_t m_ovf_blk_hdrs;          // ovf blk map;
+    blk_store_t* m_sb_blk_store{nullptr}; // super blockstore
+    std::mutex m_meta_mtx;                // mutex to access to meta_map;
+    std::mutex m_shutdown_mtx;            // protects concurrent operations between recover and shutdown;
+    meta_blk_map_t m_meta_blks;           // subsystem type to meta blk map;
+    ovf_hdr_map_t m_ovf_blk_hdrs;         // ovf blk map;
     std::map< meta_sub_type, MetaSubRegInfo > m_sub_info; // map of callbacks
     BlkId m_last_mblk_id;                                 // last meta blk;
-    meta_blk_sb* m_ssb = nullptr;                         // meta super super blk;
+    meta_blk_sb* m_ssb{nullptr};                          // meta super super blk;
 
 public:
     /**
@@ -78,7 +79,7 @@ public:
      * @param cb : subsystem cb
      */
     void register_handler(const meta_sub_type type, const meta_blk_found_cb_t& cb,
-                          const meta_blk_recover_comp_cb_t& comp_cb);
+                          const meta_blk_recover_comp_cb_t& comp_cb, const bool do_crc = true);
 
     /**
      * @brief
@@ -145,6 +146,16 @@ public:
 
     bool is_aligned_buf_needed(const size_t size) { return (size <= META_BLK_CONTEXT_SZ) ? false : true; }
 
+    /**
+     * @brief : Return the total space used in bytes that was occupied by this meta blk;
+     *          Currently used for testing only.
+     *
+     * @param cookie : hanlde to meta blk;
+     *
+     * @return : size of space occupied by this meta blk;
+     */
+    uint64_t get_meta_size(const void* cookie);
+
 public:
     /*********************** static public function **********************/
     static void set_self_recover() { m_self_recover = true; }
@@ -157,31 +168,11 @@ private:
     /**
      * @brief
      *
-     * @param buf
-     * @param size
-     * @param mblks
-     *
-     * @return
-     */
-    void extract_meta_blks(uint8_t* buf, const uint64_t size, std::vector< meta_blk* >& mblks);
-
-    /**
-     * @brief
-     *
      * @param type
      *
      * @return
      */
     bool is_sub_type_valid(const meta_sub_type type);
-
-    /**
-     * @brief
-     *
-     * @param total_mblks_cnt
-     *
-     * @return
-     */
-    bool sanity_check(const uint64_t total_mblks_cnt);
 
     /**
      * @brief : write in-memory copy of meta_blk to disk;
@@ -201,11 +192,6 @@ private:
      * @param bid : the blk id that belongs to meta ssb;
      */
     void load_ssb(const sb_blkstore_blob* blob);
-
-    /**
-     * @brief : This function is currently not used, don't delete for now;
-     */
-    void scan_meta_blks_per_chunk();
 
     /**
      * @brief : init super super block
@@ -284,8 +270,9 @@ private:
 
 class register_subsystem {
 public:
-    register_subsystem(meta_sub_type type, const meta_blk_found_cb_t& cb, const meta_blk_recover_comp_cb_t& comp_cb) {
-        meta_blk_mgr->register_handler(type, cb, comp_cb);
+    register_subsystem(meta_sub_type type, const meta_blk_found_cb_t& cb, const meta_blk_recover_comp_cb_t& comp_cb,
+                       const bool do_crc = true) {
+        meta_blk_mgr->register_handler(type, cb, comp_cb, do_crc);
     }
 };
 

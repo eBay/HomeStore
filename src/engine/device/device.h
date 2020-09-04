@@ -316,6 +316,11 @@ public:
         REGISTER_HISTOGRAM(drive_write_latency, "BlkStore drive write latency in us");
         REGISTER_HISTOGRAM(drive_read_latency, "BlkStore drive read latency in us");
 
+        REGISTER_HISTOGRAM(write_io_sizes, "Write IO Sizes", "io_sizes", {"io_direction", "write"},
+                           HistogramBucketsType(ExponentialOfTwoBuckets));
+        REGISTER_HISTOGRAM(read_io_sizes, "Read IO Sizes", "io_sizes", {"io_direction", "read"},
+                           HistogramBucketsType(ExponentialOfTwoBuckets));
+
         register_me_to_farm();
     }
 

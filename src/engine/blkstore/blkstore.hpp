@@ -343,6 +343,9 @@ public:
      */
     boost::intrusive_ptr< Buffer > write(BlkId& bid, boost::intrusive_ptr< homeds::MemVector > mvec, int data_offset,
                                          boost::intrusive_ptr< blkstore_req< Buffer > > req, bool in_cache) {
+        req->start_time();
+        COUNTER_INCREMENT(m_metrics, blkstore_write_op_count, 1);
+
         if (in_cache) {
             /* TODO: add try and catch exception */
             auto buf = Buffer::make_object();
@@ -355,8 +358,6 @@ public:
              * First try to create/insert a record for this blk id in the cache.
              * If it already exists, it will simply upvote the item.
              */
-            COUNTER_INCREMENT(m_metrics, blkstore_write_op_count, 1);
-
             CURRENT_CLOCK(cache_start_time);
             uint8_t* ptr;
 
@@ -374,7 +375,6 @@ public:
         }
 
         // Now write data to the device
-        req->start_time();
         m_vdev.write(bid, *(mvec.get()), to_vdev_req(req), data_offset);
         if (req->isSyncCall) {
             HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_write_latency,
