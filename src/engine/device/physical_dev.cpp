@@ -262,25 +262,30 @@ inline void PhysicalDev::read_superblock() {
 }
 
 void PhysicalDev::write(const char* data, uint32_t size, uint64_t offset, uint8_t* cookie, bool part_of_batch) {
+    HISTOGRAM_OBSERVE(m_metrics, write_io_sizes, (((size - 1) / 1024) + 1));
     drive_iface->async_write(m_iodev.get(), data, size, (off_t)offset, cookie, part_of_batch);
 }
 
 void PhysicalDev::writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie,
                          bool part_of_batch) {
+    HISTOGRAM_OBSERVE(m_metrics, write_io_sizes, (((size - 1) / 1024) + 1));
     drive_iface->async_writev(m_iodev.get(), iov, iovcnt, size, offset, cookie, part_of_batch);
 }
 
 void PhysicalDev::read(char* data, uint32_t size, uint64_t offset, uint8_t* cookie, bool part_of_batch) {
+    HISTOGRAM_OBSERVE(m_metrics, read_io_sizes, (((size - 1) / 1024) + 1));
     drive_iface->async_read(m_iodev.get(), data, size, (off_t)offset, cookie, part_of_batch);
 }
 
 void PhysicalDev::readv(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie,
                         bool part_of_batch) {
+    HISTOGRAM_OBSERVE(m_metrics, read_io_sizes, (((size - 1) / 1024) + 1));
     drive_iface->async_readv(m_iodev.get(), iov, iovcnt, size, (off_t)offset, cookie, part_of_batch);
 }
 
 ssize_t PhysicalDev::sync_write(const char* data, uint32_t size, uint64_t offset) {
     try {
+        HISTOGRAM_OBSERVE(m_metrics, write_io_sizes, (((size - 1) / 1024) + 1));
         return drive_iface->sync_write(m_iodev.get(), data, size, (off_t)offset);
     } catch (const std::system_error& e) {
         std::stringstream ss;
@@ -293,6 +298,7 @@ ssize_t PhysicalDev::sync_write(const char* data, uint32_t size, uint64_t offset
 
 ssize_t PhysicalDev::sync_writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset) {
     try {
+        HISTOGRAM_OBSERVE(m_metrics, write_io_sizes, (((size - 1) / 1024) + 1));
         return drive_iface->sync_writev(m_iodev.get(), iov, iovcnt, size, (off_t)offset);
     } catch (const std::system_error& e) {
         std::stringstream ss;
@@ -305,6 +311,7 @@ ssize_t PhysicalDev::sync_writev(const iovec* iov, int iovcnt, uint32_t size, ui
 
 ssize_t PhysicalDev::sync_read(char* data, uint32_t size, uint64_t offset) {
     try {
+        HISTOGRAM_OBSERVE(m_metrics, read_io_sizes, (((size - 1) / 1024) + 1));
         return drive_iface->sync_read(m_iodev.get(), data, size, (off_t)offset);
     } catch (const std::system_error& e) {
         std::stringstream ss;
@@ -318,6 +325,7 @@ ssize_t PhysicalDev::sync_read(char* data, uint32_t size, uint64_t offset) {
 
 ssize_t PhysicalDev::sync_readv(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset) {
     try {
+        HISTOGRAM_OBSERVE(m_metrics, read_io_sizes, (((size - 1) / 1024) + 1));
         return drive_iface->sync_readv(m_iodev.get(), iov, iovcnt, size, (off_t)offset);
     } catch (const std::system_error& e) {
         std::stringstream ss;
