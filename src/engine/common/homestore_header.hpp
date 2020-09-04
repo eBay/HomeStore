@@ -26,6 +26,12 @@ ENUM(io_flag, uint8_t,
      READ_ONLY    // Read-only mode for post-mortem checks
 );
 
+ENUM(Op_type, uint8_t,
+    READ,
+    WRITE,
+    UNMAP
+);
+
 struct dev_info {
     std::string dev_names;
 };

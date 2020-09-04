@@ -390,7 +390,8 @@ bool Volume::check_and_complete_req(const volume_req_ptr& vreq, const std::error
             } else {
                 vreq->state = volume_req_state::journal_io;
                 vreq->indx_start_time = Clock::now();
-                m_indx_mgr->update_indx(boost::static_pointer_cast< indx_req >(vreq));
+                auto ireq = boost::static_pointer_cast< indx_req >(vreq);
+                (vreq->is_unmap()) ? m_indx_mgr->unmap(ireq) : m_indx_mgr->update_indx(ireq);
             }
         }
     } else if (vreq->state == volume_req_state::journal_io) {

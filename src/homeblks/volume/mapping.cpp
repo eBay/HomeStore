@@ -108,7 +108,7 @@ btree_status_t mapping::read_indx(indx_req* ireq, const read_indx_comp_cb_t& rea
 btree_status_t mapping::get(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& values) {
     mapping_op_cntx cntx;
     cntx.op = READ_VAL_WITH_seqid;
-    cntx.u.vreq = req;
+    cntx.vreq = req;
     MappingKey key(req->lba(), req->nlbas());
     return (get(cntx, key, req->read_cur, values));
 }
@@ -400,7 +400,7 @@ btree_status_t mapping::match_item_cb_get(std::vector< std::pair< MappingKey, Ma
             if (param->m_ctx->op == READ_VAL_WITH_seqid) {
                 if (param->m_ctx->seqid == INVALID_SEQ_ID || ve.get_seqid() <= param->m_ctx->seqid) {
                     result_kv.emplace_back(make_pair(overlap, MappingValue(ve)));
-                    if (m_pending_read_blk_cb && param->m_ctx->u.vreq) {
+                    if (m_pending_read_blk_cb && param->m_ctx->vreq) {
                         Free_Blk_Entry fbe(ve.get_blkId());
                         m_pending_read_blk_cb(fbe); // mark this blk as pending read
                     }
@@ -421,7 +421,7 @@ btree_status_t mapping::match_item_cb_get(std::vector< std::pair< MappingKey, Ma
         }
 
         if (param->m_ctx->op == FREE_ALL_USER_BLKID && fbe_list.size() > 0) {
-            uint64_t size = IndxMgr::free_blk(nullptr, param->m_ctx->u.free_list, fbe_list, false);
+            uint64_t size = IndxMgr::free_blk(nullptr, param->m_ctx->free_list, fbe_list, false);
             HS_SUBMOD_LOG(DEBUG, volume, , "vol", m_unique_name, "size : {}", size);
             if (size > 0) {
                 param->m_ctx->free_blk_size += size;
@@ -438,8 +438,8 @@ btree_status_t mapping::match_item_cb_get(std::vector< std::pair< MappingKey, Ma
     for (auto& ptr : result_kv) {
         ss << ptr.first.to_string() << "," << ptr.second.to_string();
     }
-    if (param->m_ctx->u.vreq) {
-        HS_SUBMOD_LOG(TRACE, volume, param->m_ctx->u.vreq, "vol", m_unique_name, "Get_CB: {} ", ss.str());
+    if (param->m_ctx->vreq) {
+        HS_SUBMOD_LOG(TRACE, volume, param->m_ctx->vreq, "vol", m_unique_name, "Get_CB: {} ", ss.str());
     } else {
         HS_SUBMOD_LOG(TRACE, volume, , "vol", m_unique_name, "Get_CB: {} ", ss.str());
     }
@@ -485,7 +485,7 @@ btree_status_t mapping::match_item_cb_put(std::vector< std::pair< MappingKey, Ma
     get_start_end_lba(subrange, start_lba, end_lba);
     auto cntx = param->m_cntx;
     struct volume_req* req = nullptr;
-    if (cntx->op == op_type::UPDATE_VAL_AND_FREE_BLKS) { req = cntx->u.vreq; }
+    if (cntx->op == op_type::UPDATE_VAL_AND_FREE_BLKS) { req = cntx->vreq; }
     const MappingValue& new_val = param->get_new_value();
     /* get sequence ID of this value */
     const Blob_Array< ValueEntry >& new_varray = new_val.get_array_const();
@@ -560,8 +560,12 @@ btree_status_t mapping::match_item_cb_put(std::vector< std::pair< MappingKey, Ma
     btree_status_t ret = btree_status_t::success;
     if (cntx->op == op_type::UPDATE_VAL_AND_FREE_BLKS) {
         req->indx_push_fbe(fbe_list);
-    } else {
-        /* add trim code */
+    } else if (cntx->op == op_type::UPDATE_UNMAP) {
+        if (fbe_list.size() > 0) {
+            uint64_t size = IndxMgr::free_blk(nullptr, cntx->free_list, fbe_list, false);
+            cntx->free_blk_size += size;
+            if (size == 0) { ret = btree_status_t::resource_full; }
+        }
     }
 
 // TODO - merge kv which have contigous lba and BlkIds - may be not that useful for performance
@@ -851,7 +855,7 @@ btree_status_t mapping::update_indx_tbl(indx_req* ireq, const btree_cp_ptr& bcp,
             cntx.op = UPDATE_VAL_ONLY;
         } else {
             cntx.op = UPDATE_VAL_AND_FREE_BLKS;
-            cntx.u.vreq = vreq;
+            cntx.vreq = vreq;
         }
 
         ret = put(cntx, key, value, bcp, *btree_cur_ptr);
@@ -903,7 +907,7 @@ btree_status_t mapping::free_user_blkids(blkid_list_ptr free_list, BtreeQueryCur
     uint64_t start_lba = 0;
     mapping_op_cntx cntx;
     cntx.op = FREE_ALL_USER_BLKID;
-    cntx.u.free_list = free_list.get();
+    cntx.free_list = free_list.get();
 
     MappingKey key(start_lba, 1);
     std::vector< std::pair< MappingKey, MappingValue > > values;
@@ -911,8 +915,6 @@ btree_status_t mapping::free_user_blkids(blkid_list_ptr free_list, BtreeQueryCur
     size = cntx.free_blk_size;
     return ret;
 }
-
-btree_status_t mapping::unmap(blkid_list_ptr free_list, BtreeQueryCursor& cur) { return btree_status_t::success; }
 
 void mapping::get_btreequery_cur(const sisl::blob& b, BtreeQueryCursor& cur) {
     if (b.size == 0) { return; }
@@ -927,4 +929,35 @@ btree_status_t mapping::destroy(blkid_list_ptr& free_blkid_list, uint64_t& free_
     ret = m_bt->destroy(free_blkid_list, free_node_cnt);
     HS_ASSERT_CMP(RELEASE, ret, ==, btree_status_t::success);
     return btree_status_t::success;
+}
+
+btree_status_t mapping::update_unmap_active_indx_tbl(blkid_list_ptr free_list, uint64_t& seq_id, void* key, BtreeQueryCursor& cur, const btree_cp_ptr& bcp, int64_t& size) {
+    journal_key* j_key = (journal_key*)key;
+    uint32_t nlbas_rem = j_key->nlbas;
+    uint8_t nlbas_cur;
+    uint64_t start_lba;
+    btree_status_t ret = btree_status_t::success;
+    BlkId bid_invalid{BlkId::invalid_internal_id()};
+    mapping_op_cntx cntx;
+    cntx.op = UPDATE_UNMAP;
+    cntx.free_list = free_list.get();
+
+    while (nlbas_rem > 0) {
+        nlbas_cur = (nlbas_rem > MAX_NUM_LBA) ? MAX_NUM_LBA : nlbas_rem;
+        start_lba = (cur.m_last_key) ? get_next_start_key_from_cursor(cur) : j_key->lba;
+        MappingKey m_key(start_lba, nlbas_cur);
+        ValueEntry ve(seq_id, bid_invalid, 0 /* blk offset */, nlbas_cur, nullptr /* csum ptr */, m_vol_page_size);
+        MappingValue value(ve);
+
+        ret = put(cntx, m_key, value, bcp, cur);
+        if (ret != btree_status_t::success) {
+            break;
+        }
+        nlbas_rem -= nlbas_cur;
+        /* update key with remaining lbas */
+        j_key->nlbas = nlbas_rem;
+    }
+    size = cntx.free_blk_size;
+    return ret;
+    
 }
