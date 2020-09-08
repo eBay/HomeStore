@@ -25,6 +25,7 @@ typedef std::function< void() > trigger_cp_callback;
 typedef std::function< void(Free_Blk_Entry& fbe) > free_blk_callback;
 typedef boost::intrusive_ptr< indx_req > indx_req_ptr;
 class HomeLogStore;
+
 struct indx_req;
 
 #define THIS_INDX_LOG(level, mod, req, msg, ...)                                                                       \
@@ -247,6 +248,11 @@ struct hs_cp_base_sb {
     uint32_t size;
 } __attribute__((__packed__));
 
+struct hs_cp_unmap_sb : hs_cp_base_sb {
+    uint64_t seq_id;
+    uint32_t key_size;
+} __attribute__((__packed__));
+
 struct hs_cp_sb : hs_cp_base_sb {
     int version;
     uint32_t indx_cnt;
@@ -331,8 +337,8 @@ public:
     virtual uint64_t get_used_size() = 0;
     virtual btree_status_t free_user_blkids(blkid_list_ptr free_list, homeds::btree::BtreeQueryCursor& cur,
                                             int64_t& size) = 0;
-    virtual btree_status_t unmap(blkid_list_ptr free_list, homeds::btree::BtreeQueryCursor& cur) = 0;
     virtual void get_btreequery_cur(const sisl::blob& b, homeds::btree::BtreeQueryCursor& cur) = 0;
+    virtual btree_status_t update_unmap_active_indx_tbl(blkid_list_ptr free_list, uint64_t& seq_id, void* key, homeds::btree::BtreeQueryCursor& cur, const btree_cp_ptr& bcp, int64_t& size) = 0;
 };
 
 typedef std::function< void(const boost::intrusive_ptr< indx_req >& ireq, std::error_condition err) > io_done_cb;
@@ -546,6 +552,8 @@ public:
      *                        false :- it is called for every indx cp.
      */
     void register_indx_cp_done_cb(const cp_done_cb& cb, bool blkalloc_cp = false);
+    /* unmap api called by volume layer */
+    void unmap(boost::intrusive_ptr< indx_req > ireq);
 
 protected:
     /*********************** virtual functions required to support snapshot  **********************/
@@ -597,9 +605,11 @@ private:
     bool m_is_snap_enabled = false;
     bool m_is_snap_started = false;
     void* m_destroy_meta_blk = nullptr;
+    void* m_unmap_meta_blk = nullptr;
     homeds::btree::BtreeQueryCursor m_destroy_btree_cur;
     int64_t m_max_seqid_in_recovery = -1;
     std::atomic< bool > m_active_cp_suspend = false;
+    homeds::btree::BtreeQueryCursor m_unmap_btree_cur;
 
     /*************************************** private functions ************************/
     void update_indx_internal(boost::intrusive_ptr< indx_req > ireq);
@@ -628,6 +638,12 @@ private:
     indx_cp_ptr create_new_indx_cp(const indx_cp_ptr& cur_icp);
     void resume_active_cp();
     void suspend_active_cp();
+    sisl::byte_view alloc_unmap_sb(const uint32_t key_size, const uint64_t seq_id);
+    sisl::byte_view alloc_sb_bytes(uint64_t size_);
+    void unmap_indx(indx_req_ptr ireq);
+    void unmap_start(sisl::byte_view buf);
+    sisl::byte_view write_cp_unmap_sb(const indx_req_ptr ireq);
+    sisl::byte_view write_cp_unmap_sb(const uint32_t key_size, const uint64_t seq_id, const void* key);
 };
 
 /*************************************************** indx request ***********************************/
@@ -666,7 +682,7 @@ public:
     virtual void free_yourself() = 0;
 
 public:
-    indx_req(uint64_t request_id) : request_id(request_id) {}
+    indx_req(uint64_t request_id, Op_type op_type_) : request_id(request_id), op_type(op_type_) {}
     sisl::io_blob create_journal_entry() { return j_ent.create_journal_entry(this); }
 
     void push_indx_alloc_blkid(BlkId& bid) { indx_alloc_blkid_list.push_back(bid); }
@@ -682,6 +698,11 @@ public:
     };
     void inc_ref() { intrusive_ptr_add_ref(this); }
 
+    /* Op type getters */
+    bool is_read() { return op_type == Op_type::READ; }
+    bool is_write() { return op_type == Op_type::WRITE; }
+    bool is_unmap() { return op_type == Op_type::UNMAP; }
+
 public:
     bool resource_full_check = false; // we don't return error for all ios. we set it for trim,
                                       // destroy which can handle io failures and retry
@@ -695,6 +716,7 @@ public:
     std::error_condition indx_err = no_error;
     indx_req_state state = indx_req_state::active_btree;
     uint64_t request_id; // Copy of the id from interface request
+    Op_type op_type; // Copy of the op type (read/write/unmap) from interface request
     homeds::btree::BtreeQueryCursor active_btree_cur;
     homeds::btree::BtreeQueryCursor diff_btree_cur;
     homeds::btree::BtreeQueryCursor read_cur;

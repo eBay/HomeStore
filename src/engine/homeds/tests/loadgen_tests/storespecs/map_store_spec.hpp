@@ -61,7 +61,7 @@ public:
         req->push_blkid(ve.get_blkId());
         mapping_op_cntx cntx;
         cntx.op = UPDATE_VAL_AND_FREE_BLKS;
-        cntx.u.vreq = req.get();
+        cntx.vreq = req.get();
         BtreeQueryCursor cur;
         m_map->put(cntx, k, *(v.get()), nullptr, cur);
         return true;
@@ -167,7 +167,7 @@ public:
         assert(req->nlbas() == bid.get_nblks());
         mapping_op_cntx cntx;
         cntx.op = UPDATE_VAL_AND_FREE_BLKS;
-        cntx.u.vreq = req.get();
+        cntx.vreq = req.get();
         BtreeQueryCursor cur;
         m_map->put(cntx, key, value, nullptr, cur);
 

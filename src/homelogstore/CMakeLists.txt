@@ -15,6 +15,6 @@ if (NOT "${CONAN_TEST_TARGET}" STREQUAL "off")
     add_executable(log_store_benchmark ${TEST_LOGSTORE_BENCHMARK_SOURCES})
     target_link_libraries(log_store_benchmark hs_logdev homeblks ${CONAN_LIBS})
 
-    add_test(NAME TestLogStore COMMAND test_log_store)
+    add_test(NAME TestLogStore COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_log_store)
     #add_test(NAME TestLogBench COMMAND test_log_benchmark)
 endif()

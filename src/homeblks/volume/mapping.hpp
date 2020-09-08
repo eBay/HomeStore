@@ -29,16 +29,15 @@ enum op_type {
     UPDATE_VAL_AND_FREE_BLKS, // it update the value and also update the free blks
     READ_VAL_WITH_seqid,
     FREE_ALL_USER_BLKID,
-    READ_VAL
+    READ_VAL,
+    UPDATE_UNMAP
 };
 
 // std::variant
 struct mapping_op_cntx {
     op_type op = UPDATE_VAL_ONLY;
-    union {
-        struct volume_req* vreq;
-        sisl::ThreadVector< BlkId >* free_list;
-    } u;
+    volume_req* vreq;
+    sisl::ThreadVector< BlkId >* free_list;
     int64_t seqid = INVALID_SEQ_ID;
     uint64_t free_blk_size = 0;
 };
@@ -213,8 +212,10 @@ public:
     ValueEntry(int64_t seqid, const BlkId& blkId, uint8_t blk_offset, uint8_t nlba, uint16_t* carr,
                uint64_t vol_page_size) :
             m_meta(seqid, blkId, blk_offset, nlba) {
-        for (int i = 0; i < nlba; ++i) {
-            m_carr[i] = carr[i];
+        if (carr) {
+            for (int i = 0; i < nlba; ++i) {
+                m_carr[i] = carr[i];
+            }
         }
         m_ptr = (ValueEntry*)this;
 #ifndef NDEBUG
@@ -660,10 +661,10 @@ public:
     virtual btree_status_t recovery_update(logstore_seq_num_t seqnum, journal_hdr* hdr,
                                            const btree_cp_ptr& bcp) override;
     virtual btree_status_t free_user_blkids(blkid_list_ptr free_list, BtreeQueryCursor& cur, int64_t& size) override;
-    virtual btree_status_t unmap(blkid_list_ptr free_list, BtreeQueryCursor& cur) override;
     virtual void get_btreequery_cur(const sisl::blob& b, BtreeQueryCursor& cur) override;
     virtual btree_status_t destroy(blkid_list_ptr& free_blkid_list, uint64_t& free_node_cnt) override;
     virtual btree_status_t read_indx(indx_req* req, const read_indx_comp_cb_t& read_cb) override;
+    virtual btree_status_t update_unmap_active_indx_tbl(blkid_list_ptr free_list, uint64_t& seq_id, void* key, BtreeQueryCursor& cur, const btree_cp_ptr& bcp, int64_t& size) override;
 
 public:
     /* static functions */

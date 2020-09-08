@@ -530,7 +530,7 @@ private:
     /********** Constructor/Destructor **********/
     // volume_req() : csum_list(0), alloc_blkid_list(0), fbe_list(0){};
     volume_req(const vol_interface_req_ptr& vi_req) :
-            indx_req(vi_req->request_id),
+            indx_req(vi_req->request_id, vi_req->op_type),
             iface_req(vi_req),
             io_start_time(Clock::now()),
             mvec(new homeds::MemVector()) {
