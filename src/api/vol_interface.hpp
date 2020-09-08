@@ -69,13 +69,6 @@ struct _counter_generator {
 };
 #define counter_generator _counter_generator::instance()
 
-// Operation Type for vol_interface_req
-ENUM(Op_type, uint8_t,
-    READ,
-    WRITE,
-    UNMAP
-    );
-
 struct volume_req;
 struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
     std::shared_ptr< Volume > vol_instance;

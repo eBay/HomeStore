@@ -24,5 +24,5 @@ if (NOT "${CONAN_TEST_TARGET}" STREQUAL "off")
                   ${TEST_CACHE_SOURCE_FILES}
                 )
     target_link_libraries(test_cache homestore iberty ${CONAN_LIBS})
-    add_test(NAME TestCache COMMAND test_cache)
+    add_test(NAME TestCache COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_cache)
 endif()
