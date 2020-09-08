@@ -177,7 +177,6 @@ void HomeStoreCPMgr::cp_attach_prepare(hs_cp* cur_cp, hs_cp* new_cp) {
 
 /****************************************** IndxMgr class ****************************************/
 
-
 IndxMgr::IndxMgr(boost::uuids::uuid uuid, std::string name, const io_done_cb& io_cb, const read_indx_comp_cb_t& read_cb,
                  const create_indx_tbl& func, bool is_snap_enabled) :
         m_io_cb(io_cb),
@@ -292,24 +291,23 @@ void IndxMgr::indx_init() {
  */
 void IndxMgr::indx_snap_create() {
     THIS_INDX_LOG(TRACE, indx_mgr, , "snapshot create triggered indx name {}", m_name);
-    add_prepare_cb_list(
-        [this](const indx_cp_ptr& cur_icp, hs_cp* cur_hcp, hs_cp* new_hcp) {
-            if (cur_icp->flags & cp_state::ba_cp) {
-                HS_ASSERT(RELEASE, (cur_icp->flags & cp_state::diff_cp), "should be diff cp");
-                /* We start snapshot create only if it is a blk alloc checkpoint */
-                m_is_snap_started = true;
-                m_cp_mgr->attach_cb(cur_hcp, ([this](bool success) {
-                                        /* it is called when CP is completed */
-                                        snap_create_done(
-                                            m_last_cp_sb.icp_sb.diff_snap_id, m_last_cp_sb.icp_sb.diff_max_seqid,
-                                            m_last_cp_sb.icp_sb.diff_data_seqid, m_last_cp_sb.icp_sb.diff_cp_id);
-                                        m_is_snap_started = false;
-                                    }));
-            } else {
-                /* it is not blk alloc checkpoint. Push this callback again */
-                indx_snap_create();
-            }
-        });
+    add_prepare_cb_list([this](const indx_cp_ptr& cur_icp, hs_cp* cur_hcp, hs_cp* new_hcp) {
+        if (cur_icp->flags & cp_state::ba_cp) {
+            HS_ASSERT(RELEASE, (cur_icp->flags & cp_state::diff_cp), "should be diff cp");
+            /* We start snapshot create only if it is a blk alloc checkpoint */
+            m_is_snap_started = true;
+            m_cp_mgr->attach_cb(cur_hcp, ([this](bool success) {
+                                    /* it is called when CP is completed */
+                                    snap_create_done(
+                                        m_last_cp_sb.icp_sb.diff_snap_id, m_last_cp_sb.icp_sb.diff_max_seqid,
+                                        m_last_cp_sb.icp_sb.diff_data_seqid, m_last_cp_sb.icp_sb.diff_cp_id);
+                                    m_is_snap_started = false;
+                                }));
+        } else {
+            /* it is not blk alloc checkpoint. Push this callback again */
+            indx_snap_create();
+        }
+    });
     trigger_hs_cp(nullptr, false /* shutdown */, true /* force */);
 }
 
@@ -517,7 +515,6 @@ void IndxMgr::flush_free_blks(const indx_cp_ptr& icp, hs_cp* hcp) {
     m_active_tbl->flush_free_blks(icp->acp.bcp, hcp->ba_cp);
     if (icp->flags & cp_state::diff_cp) { icp->dcp.diff_tbl->flush_free_blks(icp->dcp.bcp, hcp->ba_cp); }
 }
-
 
 void IndxMgr::update_cp_sb(indx_cp_ptr& icp, hs_cp* hcp, indx_cp_base_sb* sb) {
     /* copy the last superblock and then override the change values */

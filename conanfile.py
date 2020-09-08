@@ -48,7 +48,7 @@ class HomestoreConan(ConanFile):
             )
 
     generators = "cmake"
-    exports_sources = "cmake/*", "src/*", "CMakeLists.txt"
+    exports_sources = "cmake/*", "src/*", "CMakeLists.txt", "test_wrap.sh"
     keep_imports = True
 
     def configure(self):

@@ -10,7 +10,7 @@ if (NOT "${CONAN_TEST_TARGET}" STREQUAL "off")
     add_executable(test_virtual_device ${TEST_VDEV_SOURCES})
     target_link_libraries(test_virtual_device hs_device homeblks ${CONAN_LIBS})
 
-    add_test(NAME TestVDev COMMAND test_virtual_device)
+    add_test(NAME TestVDev COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_virtual_device)
 endif()
 
 message(WARNING "PhysicalDevice test disabled due to interface change.")
