@@ -222,6 +222,13 @@ private:
     std::atomic< bool > m_indx_mgr_destroy_started;
     void* m_sb_cookie = nullptr;
 
+    typedef struct IoVecTransversal
+    {
+        uint64_t current_iovecs_offset{0};
+        uint64_t iovecs_total_offset{0};
+        size_t iovecs_index{0};
+    } IoVecTransversal;
+    
 private:
     /* static members */
     /* home_blks can not be shutdown until it is not zero. It is the superset of vol_ref_cnt. If it is zero then
@@ -286,7 +293,10 @@ private:
 
     void vol_sb_init();
 
-public:
+    std::vector< iovec > get_next_iovecs(IoVecTransversal& iovec_transversal, const std::vector< iovec >& data_iovecs,
+                                         const uint64_t size);
+
+ public:
     /******************** static functions exposed to home_blks *******************/
     template < typename... Args >
     static std::shared_ptr< Volume > make_volume(Args&&... args) {
@@ -558,11 +568,10 @@ private:
         } else {
             // a non-cached request is assume to have lifetime managed external to HomeStore
             // convert read/write to single scatter/gather
-            iovec buffer{};
+            data.emplace<IoVecData>();
+            auto& buffer{std::get< IoVecData >(data).back()};
             buffer.iov_base = vi_req->buffer;
             buffer.iov_len = static_cast< size_t >(vi_req->vol_instance->get_page_size() * vi_req->nlbas);
-            data.emplace<IoVecData>();
-            std::get< IoVecData >(data).emplace_back(std::move(buffer));
         }
 
         /* Trying to reserve the max possible size so that memory allocation is efficient */

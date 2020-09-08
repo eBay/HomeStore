@@ -8,10 +8,6 @@
 #include <fstream>
 #include <iterator>
 
-// the following are needed because of lacking includes in fds/utils.hpp
-#include <cassert>
-#include <cstring>
-
 
 #include "fds/utils.hpp"
 #include "homeblks/home_blks.hpp"
@@ -242,46 +238,7 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
      * of leaking these allocated blocks.
      */
     try {
-        uint64_t current_iovecs_offset{0};
-        uint64_t iovecs_total_offset{0};
-        size_t iovecs_index{0};
-        auto getNextWriteIovecs{[&vreq, this, &current_iovecs_offset, &iovecs_total_offset,
-                                &iovecs_index](const std::vector< iovec >& iovecs, const uint64_t size) {
-            // scatter/gather read
-            std::vector< iovec > write_iovecs{};
-            write_iovecs.reserve(2);
-            write_iovecs.emplace_back();
-            auto iov_ptr{std::rbegin(write_iovecs)};
-
-            const uint64_t end_iovecs_offset{current_iovecs_offset + size};
-            for (; iovecs_index < iovecs.size(); ++iovecs_index) {
-                auto& read_iovec{iovecs[iovecs_index]};
-                if (current_iovecs_offset < iovecs_total_offset + read_iovec.iov_len) {
-                    const uint64_t start_offset{current_iovecs_offset - iovecs_total_offset};
-                    iov_ptr->iov_base = static_cast< uint8_t* >(read_iovec.iov_base) + start_offset;
-                    const uint64_t remaining{static_cast< uint64_t >(read_iovec.iov_len - start_offset)};
-                    if (current_iovecs_offset + remaining > end_iovecs_offset) {
-                        iov_ptr->iov_len = end_iovecs_offset - current_iovecs_offset;
-                    } else {
-                        iov_ptr->iov_len = remaining;
-                    }
-                    current_iovecs_offset += iov_ptr->iov_len;
-                }
-                if (current_iovecs_offset == end_iovecs_offset) {
-                    break;
-                } else {
-                    // prepare next iovec
-                    write_iovecs.emplace_back();
-                    iov_ptr = std::rbegin(write_iovecs);
-                    iovecs_total_offset += read_iovec.iov_len;
-                };
-            }
-            assert(current_iovecs_offset == end_iovecs_offset);
-            VOL_RELEASE_ASSERT_CMP(current_iovecs_offset, ==, end_iovecs_offset, vreq,
-                                   "Insufficient iovec storage space");
-            return write_iovecs;
-        }};
-
+        IoVecTransversal write_transversal{};
         uint64_t data_offset{0};
         uint64_t start_lba{vreq->lba()};
         vreq->state = volume_req_state::data_io;
@@ -313,7 +270,7 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
             {
                 // scatter/gather write
                 const auto& iovecs{std::get< volume_req::IoVecData >(vreq->data)};
-                const auto write_iovecs{getNextWriteIovecs(iovecs, data_size)};
+                auto write_iovecs{get_next_iovecs(write_transversal, iovecs, data_size)};
                 m_hb->get_data_blkstore()->write(vc_req->bid, write_iovecs, 
                                                  boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vc_req));
             }
@@ -596,47 +553,7 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
     }
 
     try {
-        uint64_t current_iovecs_offset{0};
-        uint64_t iovecs_total_offset{0};
-        size_t iovecs_index{0};
-        auto getNextReadIovecs{
-            [&vreq, this, &current_iovecs_offset, &iovecs_total_offset, &iovecs_index]
-            (std::vector< iovec >& iovecs, const uint64_t size){
-            // scatter/gather read
-            std::vector< iovec > read_iovecs{};
-            read_iovecs.reserve(2);
-            read_iovecs.emplace_back();
-            auto iov_ptr{std::rbegin(read_iovecs)};
-
-            const uint64_t end_iovecs_offset{current_iovecs_offset + size};
-            for (; iovecs_index < iovecs.size(); ++iovecs_index) {
-                auto& read_iovec{iovecs[iovecs_index]};
-                if (current_iovecs_offset < iovecs_total_offset + read_iovec.iov_len) {
-                    const uint64_t start_offset{current_iovecs_offset - iovecs_total_offset};
-                    iov_ptr->iov_base = static_cast< uint8_t* >(read_iovec.iov_base) + start_offset;
-                    const uint64_t remaining{static_cast< uint64_t >(read_iovec.iov_len - start_offset)};
-                    if (current_iovecs_offset + remaining > end_iovecs_offset) {
-                        iov_ptr->iov_len = end_iovecs_offset - current_iovecs_offset;
-                    } else {
-                        iov_ptr->iov_len = remaining;
-                    }
-                    current_iovecs_offset += iov_ptr->iov_len;
-                }
-                if (current_iovecs_offset == end_iovecs_offset) {
-                    break;
-                } else {
-                    // prepare next iovec
-                    read_iovecs.emplace_back();
-                    iov_ptr = std::rbegin(read_iovecs);
-                    iovecs_total_offset += read_iovec.iov_len;
-                };
-            }
-            assert(current_iovecs_offset == end_iovecs_offset);
-            VOL_RELEASE_ASSERT_CMP(current_iovecs_offset, ==, end_iovecs_offset, vreq,
-                                   "Insufficient iovec storage space");
-            return read_iovecs;
-            }};
-
+        IoVecTransversal read_transversal{};
         auto insertIntoIovecs{
             [&vreq, this](std::vector< iovec >& iovecs, const uint8_t* const data, const uint64_t size) {
                 uint64_t source_offset{0};
@@ -673,7 +590,7 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
                 } else {
                     // scatter/gather read
                     auto& iovecs{std::get< volume_req::IoVecData >(vreq->data)};
-                    auto read_iovecs{getNextReadIovecs(iovecs, get_page_size())};
+                    auto read_iovecs{get_next_iovecs(read_transversal,iovecs, get_page_size())};
                     insertIntoIovecs(read_iovecs, blob.bytes, get_page_size());
                 }
                 vreq->push_csum(crc16_t10dif(init_crc_16, blob.bytes, get_page_size()));
@@ -702,7 +619,7 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
                 // scatter/gather read
                 const BlkId read_blkid(ve.get_blkId().get_blkid_at(blkid_offset, sz, m_hb->get_data_pagesz()));
                 auto& iovecs{std::get< volume_req::IoVecData >(vreq->data)};
-                auto read_iovecs{getNextReadIovecs(iovecs, sz)};
+                auto read_iovecs{get_next_iovecs(read_transversal, iovecs, sz)};
                 m_hb->get_data_blkstore()->read(read_blkid, read_iovecs, sz,
                                                 boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vc_req));
 
@@ -723,7 +640,7 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
             } else {
                 // scatter/gather read
                 auto& iovecs{std::get< volume_req::IoVecData >(vreq->data)};
-                auto read_iovecs{getNextReadIovecs(iovecs, get_page_size())};
+                auto read_iovecs{get_next_iovecs(read_transversal, iovecs, get_page_size())};
                 insertIntoIovecs(read_iovecs, blob.bytes, get_page_size());
             }
             vreq->push_csum(crc16_t10dif(init_crc_16, blob.bytes, get_page_size()));
@@ -912,4 +829,43 @@ void Volume::recovery_start_phase1() { m_indx_mgr->recovery(); }
 void Volume::recovery_start_phase2() {
     m_indx_mgr->recovery();
     seq_Id = m_indx_mgr->get_max_seqid_found_in_recovery();
+}
+
+std::vector< iovec > Volume::get_next_iovecs(IoVecTransversal& iovec_transversal, const std::vector< iovec >& data_iovecs,
+                                             const uint64_t size)
+{
+    // scatter/gather read
+    std::vector< iovec > iovecs{};
+    iovecs.reserve(2);
+    iovecs.emplace_back();
+    auto iov_ptr{std::rbegin(iovecs)};
+
+    const uint64_t end_iovecs_offset{iovec_transversal.current_iovecs_offset + size};
+    for (; iovec_transversal.iovecs_index < data_iovecs.size(); ++iovec_transversal.iovecs_index) {
+        auto& read_iovec{data_iovecs[iovec_transversal.iovecs_index]};
+        if (iovec_transversal.current_iovecs_offset < iovec_transversal.iovecs_total_offset + read_iovec.iov_len) {
+            const uint64_t start_offset{iovec_transversal.current_iovecs_offset - iovec_transversal.iovecs_total_offset};
+            iov_ptr->iov_base = static_cast< uint8_t* >(read_iovec.iov_base) + start_offset;
+            const uint64_t remaining{static_cast< uint64_t >(read_iovec.iov_len - start_offset)};
+            if (iovec_transversal.current_iovecs_offset + remaining > end_iovecs_offset) {
+                iov_ptr->iov_len = end_iovecs_offset - iovec_transversal.current_iovecs_offset;
+            } else {
+                iov_ptr->iov_len = remaining;
+            }
+            iovec_transversal.current_iovecs_offset += iov_ptr->iov_len;
+        }
+        if (iovec_transversal.current_iovecs_offset == end_iovecs_offset) {
+            break;
+        } else {
+            // prepare next iovec
+            iovecs.emplace_back();
+            iov_ptr = std::rbegin(iovecs);
+            iovec_transversal.iovecs_total_offset += read_iovec.iov_len;
+        };
+    }
+    assert(iovec_transversal.current_iovecs_offset == end_iovecs_offset);
+    if (iovec_transversal.current_iovecs_offset != end_iovecs_offset) {
+        throw std::runtime_error("Insufficient data iovecs");
+    }
+    return iovecs;
 }
