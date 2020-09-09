@@ -64,6 +64,9 @@ public:
         return _instance;
     }
 
+    /* Note: it assumes that it is called in a single thread */
+    static void force_reinit() { _instance = new MetaBlkMgr(); }
+
     MetaBlkMgr(){};
 
     static void del_instance() { delete _instance; }
