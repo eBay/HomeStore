@@ -30,7 +30,7 @@ def recovery():
     stderr=subprocess.STDOUT, shell=True)
     
     subprocess.check_call(dirpath + "test_volume \
-            --gtest_filter=VolTest.recovery_io_test --verify_hdr=0 --verify_data=0 --verify_csum=0 --run_time=30 --enable_crash_handler=1 \
+            --gtest_filter=VolTest.recovery_io_test --verify_type=3 --run_time=30 --enable_crash_handler=1 \
     --remove_file=1 --delete_volume=1", stderr=subprocess.STDOUT, shell=True)
     print("recovery passed")
 
@@ -43,7 +43,7 @@ def recovery_crash():
         print("test aborted")
     
     subprocess.check_call(dirpath + "test_volume \
-            --gtest_filter=VolTest.recovery_io_test --verify_hdr=0 --log_mods metablk:0 --verify_data=0 --verify_csum=0 --run_time=30 --enable_crash_handler=1 \
+            --gtest_filter=VolTest.recovery_io_test --verify_type=3 --run_time=30 --enable_crash_handler=1 \
     --remove_file=1 --delete_volume=1", stderr=subprocess.STDOUT, shell=True)
     print("recovery crash passed")
 
@@ -59,7 +59,7 @@ def normal():
 def normal_flip():
     print("normal test started with flip = 2")
     subprocess.check_call(dirpath + "test_volume \
-            --run_time=3600 --max_num_writes=5000000 --gtest_filter=VolTest.init_io_test --remove_file=0 --verify_data=0 \
+            --run_time=3600 --max_num_writes=5000000 --gtest_filter=VolTest.init_io_test --remove_file=0 --verify_type=3 \
             --flip=1", stderr=subprocess.STDOUT, shell=True)
     print("normal test completed with flip =  2")
 
@@ -91,7 +91,7 @@ def recovery_nightly():
         stderr=subprocess.STDOUT, shell=True)
         
         subprocess.call(dirpath + "test_volume \
-        --gtest_filter=VolTest.recovery_io_test --run_time=300 --enable_crash_handler=0 --verify_data=0 --verify_hdr=0 \
+        --gtest_filter=VolTest.recovery_io_test --run_time=300 --enable_crash_handler=0 --verify_type=3 \
         --abort=1 --flip=1 --remove_file=0", shell=True)
         s = "recovery test iteration" + repr(i) + "passed" 
         print(s)
@@ -106,7 +106,7 @@ def recovery_nightly():
 def one_disk_replace():
     print("one disk replace test started");
     subprocess.check_call(dirpath + "test_volume --gtest_filter=VolTest.one_disk_replace_test \
-            --run_time=300 --remove_file=0 --verify_hdr=0 --verify_data=0", stderr=subprocess.STDOUT, shell=True)
+            --run_time=300 --remove_file=0 --verify_type=3", stderr=subprocess.STDOUT, shell=True)
     print("recovery test with one disk replace passed")
 
 ## @test    one_disk_replace_abort
@@ -114,9 +114,9 @@ def one_disk_replace():
 def one_disk_replace_abort():
     print("recovery abort with one disk replace started")
     subprocess.call(dirpath + "test_volume --gtest_filter=VolTest.one_disk_replace_abort_test \
-          --run_time=300 --remove_file=0 --verify_hdr=0 --verify_data=0 --enable_crash_handler=0", shell=True)
+          --run_time=300 --remove_file=0 --verify_type=3 --enable_crash_handler=0", shell=True)
     subprocess.check_call(dirpath + "test_volume --gtest_filter=VolTest.recovery_io_test \
-          --run_time=300 --remove_file=0 --verify_hdr=0 --verify_data=0 --expected_vol_state=2", \
+          --run_time=300 --remove_file=0 --verify_type=3 --expected_vol_state=2", \
           stderr=subprocess.STDOUT, shell=True)
     print("recovery abort with one disk replace passed")
 
@@ -167,7 +167,7 @@ def vol_io_fail_test():
     
     print("vol io fail test recovery started")
     subprocess.check_call(dirpath + "test_volume \
-           --gtest_filter=VolTest.recovery_io_test --run_time=300 --verify_data=0", shell=True, stderr=subprocess.STDOUT)
+           --gtest_filter=VolTest.recovery_io_test --run_time=300 --verify_type=3", shell=True, stderr=subprocess.STDOUT)
     print("vol io fail test recovery passed")
 
 ##  @test   vol_create_del_test
