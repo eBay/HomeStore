@@ -270,9 +270,14 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
             {
                 // scatter/gather write
                 const auto& iovecs{std::get< volume_req::IoVecData >(vreq->data)};
-                auto write_iovecs{get_next_iovecs(write_transversal, iovecs, data_size)};
+                const auto write_iovecs{get_next_iovecs(write_transversal, iovecs, data_size)};
                 m_hb->get_data_blkstore()->write(vc_req->bid, write_iovecs, 
                                                  boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vc_req));
+
+                for (const auto& iovec : write_iovecs) {
+                    vreq->push_csum(
+                        crc16_t10dif(init_crc_16, reinterpret_cast< unsigned char* >(iovec.iov_base), iovec.iov_len));
+                }
             }
 
             data_offset += data_size;
@@ -287,15 +292,7 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
                 std::get<volume_req::MemVecData>(vreq->data)->get(&outb, i * get_page_size());
                 vreq->push_csum(crc16_t10dif(init_crc_16, outb.bytes, get_page_size()));
             }
-        } else
-        {
-            // scatter/gather write
-            for (const auto& iovec : std::get< volume_req::IoVecData >(vreq->data)) {
-                vreq->push_csum(crc16_t10dif(init_crc_16, reinterpret_cast<unsigned char*>(iovec.iov_base),
-                                             iovec.iov_len));
-            }
-        }
-
+        } 
 
         /* complete the request */
         ret = no_error;

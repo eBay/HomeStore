@@ -566,10 +566,9 @@ private:
         } else {
             // a non-cached request is assume to have lifetime managed external to HomeStore
             // convert read/write to single scatter/gather
-            data.emplace<IoVecData>();
-            auto& buffer{std::get< IoVecData >(data).back()};
-            buffer.iov_base = vi_req->buffer;
-            buffer.iov_len = static_cast< size_t >(vi_req->vol_instance->get_page_size() * vi_req->nlbas);
+            iovec buffer{vi_req->buffer, static_cast< size_t >(vi_req->vol_instance->get_page_size() * vi_req->nlbas)};
+            data.emplace< IoVecData >();
+            std::get< IoVecData >(data).emplace_back(std::move(buffer));
         }
 
         /* Trying to reserve the max possible size so that memory allocation is efficient */
