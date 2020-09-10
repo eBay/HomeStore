@@ -35,7 +35,7 @@ class HomestoreConan(ConanFile):
     requires = (
             "flip/[~=1, include_prerelease=True]@sds/master",
             "iomgr/[~=3, include_prerelease=True]@sds/master",
-            "sds_logging/[~=7, include_prerelease=True]@sds/master",
+            "sds_logging/[~=8, include_prerelease=True]@sds/master",
             "sds_options/[~=1, include_prerelease=True]@sds/master",
             "sisl/[~=3, include_prerelease=True]@sisl/master",
 
@@ -43,6 +43,7 @@ class HomestoreConan(ConanFile):
             "boost/1.73.0",
             "evhtp/1.2.18.2",
             "farmhash/1.0.0",
+            ("fmt/7.0.3", "override"),
             "folly/2020.05.04.00",
             "isa-l/2.21.0",
             )

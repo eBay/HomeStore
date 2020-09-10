@@ -154,6 +154,12 @@ protected:
         ResourceMgr::set_total_cap(m_dev_mgr->get_total_cap());
     }
 
+    static void force_reinit() {
+        MetaBlkMgr::force_reinit();
+        IndxMgr::force_reinit();
+        meta_blk_mgr->register_handler("LOG_DEV", HomeLogStoreMgr::meta_blk_found_cb, nullptr);
+    }
+
     void new_vdev_found(DeviceManager* dev_mgr, vdev_info_block* vb) {
         /* create blkstore */
         blkstore_blob* blob = (blkstore_blob*)vb->context_data;

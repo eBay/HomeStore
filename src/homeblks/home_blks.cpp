@@ -44,6 +44,16 @@ VolInterface* HomeBlks::init(const init_params& cfg, bool force_reinit) {
 
     static std::once_flag flag1;
     try {
+
+        /* Note :- it is not thread safe. We only support it for testing */
+        if (force_reinit) {
+            HomeStore::force_reinit();
+            meta_blk_mgr->register_handler("HOMEBLK", HomeBlks::meta_blk_found_cb, HomeBlks::meta_blk_recovery_comp_cb);
+            Volume::force_reinit();
+            m_meta_blk_found = false;
+            auto instance = boost::static_pointer_cast< homestore::HomeStoreBase >(HomeBlksSafePtr(new HomeBlks(cfg)));
+            set_instance(boost::static_pointer_cast< homestore::HomeStoreBase >(instance));
+        }
         std::call_once(flag1, [&cfg]() {
 #ifndef NDEBUG
             LOGINFO("HomeBlks DEBUG version: {}", HomeBlks::version);
@@ -737,12 +747,11 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
 }
 
 void HomeBlks::meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size) {
-    static bool meta_blk_found = false;
 
     // HomeBlk layer expects to see one valid meta_blk record during reboot;
-    HS_ASSERT(RELEASE, !meta_blk_found, "More than one HomeBlk SB is received, only expecting one!");
+    HS_ASSERT(RELEASE, !m_meta_blk_found, "More than one HomeBlk SB is received, only expecting one!");
 
-    meta_blk_found = true;
+    m_meta_blk_found = true;
 
     HS_ASSERT(RELEASE, mblk != nullptr, "null meta blk received in meta_blk_found_callback.");
 
@@ -783,3 +792,5 @@ std::error_condition HomeBlks::restore_snapshot(const SnapshotPtr& snap) {
 void HomeBlks::list_snapshot(const VolumePtr&, std::vector< SnapshotPtr > snap_list) {}
 
 void HomeBlks::read(const SnapshotPtr& snap, const snap_interface_req_ptr& req) {}
+
+bool HomeBlks::m_meta_blk_found = false;
