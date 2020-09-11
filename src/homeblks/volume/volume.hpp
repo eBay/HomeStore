@@ -309,9 +309,6 @@ public:
     /* used to trigger system level cp */
     static void trigger_homeblks_cp(const cp_done_cb& cb = nullptr) { SnapMgr::trigger_hs_cp(cb); };
 
-    /* it is used in fake reboot */
-    static void reinit() { SnapMgr::reinit(); }
-
     static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size);
 
 public:
@@ -432,6 +429,7 @@ public:
     void migrate_sb();
     void recovery_start_phase1();
     void recovery_start_phase2();
+    static void force_reinit(){};
 };
 
 /* Note :- Any member inside this structure is not lock protected. Its caller responsibility to call it under lock

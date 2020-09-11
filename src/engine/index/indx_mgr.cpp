@@ -778,12 +778,12 @@ void IndxMgr::journal_comp_cb(logstore_req* lreq, logdev_key ld_key) {
     logstore_req::free(lreq);
 }
 
-void IndxMgr::journal_write(indx_req* ireq) {
+void IndxMgr::journal_write(const indx_req_ptr& ireq) {
     /* Journal write is async call. So incrementing the ref on indx req */
     ireq->inc_ref();
     auto b = ireq->create_journal_entry();
     auto lreq = logstore_req::make(m_journal.get(), ireq->get_seqid(), b);
-    lreq->cookie = (void*)ireq;
+    lreq->cookie = (void*)(ireq.get());
     m_journal->write_async(lreq);
 }
 
@@ -798,7 +798,7 @@ void IndxMgr::journal_write(indx_req* ireq) {
  * journal write;
  * 3. after jouranl write completes, in journal completion callback, do io callback to caller;
  * */
-btree_status_t IndxMgr::update_indx_tbl(indx_req* ireq, bool is_active) {
+btree_status_t IndxMgr::update_indx_tbl(const indx_req_ptr& ireq, bool is_active) {
     if (is_active) {
         auto bcp = ireq->icp->acp.bcp;
         auto status = m_active_tbl->update_active_indx_tbl(ireq, bcp);
@@ -878,7 +878,7 @@ sisl::byte_view IndxMgr::alloc_unmap_sb(const uint32_t key_size, const uint64_t 
     return b;
 }
 
-sisl::byte_view IndxMgr::write_cp_unmap_sb(const indx_req_ptr ireq) {
+sisl::byte_view IndxMgr::write_cp_unmap_sb(const indx_req_ptr& ireq) {
     auto b = alloc_unmap_sb(ireq->get_key_size(), ireq->get_seqid());
     ireq->fill_key((uint8_t*)((uint64_t)b.bytes() + sizeof(hs_cp_unmap_sb)), ireq->get_key_size());
     write_meta_blk(m_unmap_meta_blk, b);
@@ -894,7 +894,7 @@ sisl::byte_view IndxMgr::write_cp_unmap_sb(const uint32_t key_size, const uint64
     return b;
 }
 
-void IndxMgr::unmap_indx(indx_req_ptr ireq) {
+void IndxMgr::unmap_indx(const indx_req_ptr& ireq) {
     /* persist superblock */
     auto b = write_cp_unmap_sb(ireq);
     
@@ -905,11 +905,9 @@ void IndxMgr::unmap_indx(indx_req_ptr ireq) {
     unmap_start(b);
 }
 
-void IndxMgr::unmap(indx_req_ptr ireq) {
-    journal_write(ireq.get());
-}
+void IndxMgr::unmap(const indx_req_ptr& ireq) { journal_write(ireq); }
 
-void IndxMgr::update_indx(indx_req_ptr ireq) {
+void IndxMgr::update_indx(const indx_req_ptr& ireq) {
     /* Entered into critical section. CP is not triggered in this critical section */
     ireq->hcp = m_cp_mgr->cp_io_enter();
     ireq->icp = get_indx_cp(ireq->hcp);
@@ -919,13 +917,13 @@ void IndxMgr::update_indx(indx_req_ptr ireq) {
 }
 
 /* * this function can be called either in fast path or slow path * */
-void IndxMgr::update_indx_internal(indx_req_ptr ireq) {
+void IndxMgr::update_indx_internal(const indx_req_ptr& ireq) {
     auto ret = btree_status_t::success;
     switch (ireq->state) {
     case indx_req_state::active_btree:
         /* update active btree */
         THIS_INDX_LOG(TRACE, indx_mgr, ireq, "updating active btree");
-        ret = update_indx_tbl(ireq.get(), true /* is_active */);
+        ret = update_indx_tbl(ireq, true /* is_active */);
         /* we call cp exit on both the CPs only when journal is written otherwise there could be blkid leak */
         if (ret == btree_status_t::cp_mismatch) { ret = retry_update_indx(ireq, true /* is_active */); }
         /* TODO : we don't allow partial failure for now. If we have to allow that we have to support undo */
@@ -942,7 +940,7 @@ void IndxMgr::update_indx_internal(indx_req_ptr ireq) {
         ireq->state = indx_req_state::diff_btree;
         /* update diff btree. */
         if (m_is_snap_enabled) {
-            auto ret = update_indx_tbl(ireq.get(), false);
+            auto ret = update_indx_tbl(ireq, false);
             /* we call cp exit on both the CPs only when journal is written otherwise there could be blkid leak */
             if (ret == btree_status_t::cp_mismatch) { ret = retry_update_indx(ireq.get(), false); }
             if (ret != btree_status_t::success && ret != btree_status_t::fast_path_not_possible) {
@@ -962,11 +960,11 @@ void IndxMgr::update_indx_internal(indx_req_ptr ireq) {
     if (ret != btree_status_t::success) { ireq->indx_err = btree_write_failed; }
 
     /* Update allocate blkids in indx req */
-    m_active_tbl->update_indx_alloc_blkids(ireq.get());
+    m_active_tbl->update_indx_alloc_blkids(ireq);
 
     /* In case of failure we will still update the journal with entries of whatever is written. */
     /* update journal. Journal writes are not expected to fail. It is async call/ */
-    journal_write(ireq.get());
+    journal_write(ireq);
 }
 
 /* It is called when first update failed because btree is updated by latest CP and indx mgr got old cp */

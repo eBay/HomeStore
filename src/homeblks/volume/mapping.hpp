@@ -654,16 +654,16 @@ public:
     /* it populats the allocated blkids in index req. It might not be the same as in volume req if entry is partially
      * written.
      */
-    virtual void update_indx_alloc_blkids(indx_req* ireq) override;
-    virtual btree_status_t update_diff_indx_tbl(indx_req* ireq, const btree_cp_ptr& bcp) override;
+    virtual void update_indx_alloc_blkids(const indx_req_ptr& ireq) override;
+    virtual btree_status_t update_diff_indx_tbl(const indx_req_ptr& ireq, const btree_cp_ptr& bcp) override;
 
-    virtual btree_status_t update_active_indx_tbl(indx_req* ireq, const btree_cp_ptr& bcp) override;
+    virtual btree_status_t update_active_indx_tbl(const indx_req_ptr& ireq, const btree_cp_ptr& bcp) override;
     virtual btree_status_t recovery_update(logstore_seq_num_t seqnum, journal_hdr* hdr,
                                            const btree_cp_ptr& bcp) override;
     virtual btree_status_t free_user_blkids(blkid_list_ptr free_list, BtreeQueryCursor& cur, int64_t& size) override;
     virtual void get_btreequery_cur(const sisl::blob& b, BtreeQueryCursor& cur) override;
     virtual btree_status_t destroy(blkid_list_ptr& free_blkid_list, uint64_t& free_node_cnt) override;
-    virtual btree_status_t read_indx(indx_req* req, const read_indx_comp_cb_t& read_cb) override;
+    virtual btree_status_t read_indx(const indx_req_ptr& ireq, const read_indx_comp_cb_t& read_cb) override;
     virtual btree_status_t update_unmap_active_indx_tbl(blkid_list_ptr free_list, uint64_t& seq_id, void* key, BtreeQueryCursor& cur, const btree_cp_ptr& bcp, int64_t& size) override;
 
 public:
@@ -677,7 +677,7 @@ public:
     static uint64_t get_end_key_from_cursor(BtreeQueryCursor& cur);
 
 private:
-    btree_status_t update_indx_tbl(indx_req* ireq, const btree_cp_ptr& bcp, bool active_btree_update = true);
+    btree_status_t update_indx_tbl(const indx_req_ptr& ireq, const btree_cp_ptr& bcp, bool active_btree_update = true);
     btree_status_t get_alloc_blks_cb(std::vector< std::pair< MappingKey, MappingValue > >& match_kv,
                                      std::vector< std::pair< MappingKey, MappingValue > >& result_kv,
                                      BRangeCBParam* cb_param);

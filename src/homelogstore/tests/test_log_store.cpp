@@ -601,8 +601,7 @@ TEST_F(LogStoreTest, RandInsertsWithHoles) {
     this->truncate_validate();
 }
 
-// TODO: enable this after volume/homeblks recovery code is finished;
-#if 0 
+#if 0
 TEST_F(LogStoreTest, ThrottleSeqInsertThenRecover) {
     LOGINFO("Step 1: Reinit the num records to start sequential write test");
     this->init(SDS_OPTIONS["num_records"].as< uint32_t >());
