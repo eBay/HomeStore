@@ -76,8 +76,8 @@ mapping::mapping(uint64_t volsize, uint32_t page_size, const std::string& unique
 
 mapping::~mapping() { delete m_bt; }
 
-btree_status_t mapping::read_indx(indx_req* ireq, const read_indx_comp_cb_t& read_cb) {
-    auto vreq = static_cast< volume_req* >(ireq);
+btree_status_t mapping::read_indx(const indx_req_ptr& ireq, const read_indx_comp_cb_t& read_cb) {
+    auto vreq = static_cast< volume_req* >(ireq.get());
     std::vector< std::pair< MappingKey, MappingValue > > values;
 
     auto ret = get(vreq, vreq->result_kv);
@@ -767,20 +767,20 @@ void mapping::update_btree_cp_sb(const btree_cp_ptr& bcp, btree_cp_sb& btree_sb,
     m_bt->update_btree_cp_sb(bcp, btree_sb, is_blkalloc_cp);
 }
 
-btree_status_t mapping::update_diff_indx_tbl(indx_req* ireq, const btree_cp_ptr& bcp) {
+btree_status_t mapping::update_diff_indx_tbl(const indx_req_ptr& ireq, const btree_cp_ptr& bcp) {
     return (update_indx_tbl(ireq, bcp, false));
 }
 
-btree_status_t mapping::update_active_indx_tbl(indx_req* ireq, const btree_cp_ptr& bcp) {
+btree_status_t mapping::update_active_indx_tbl(const indx_req_ptr& ireq, const btree_cp_ptr& bcp) {
     return (update_indx_tbl(ireq, bcp, true));
 }
 
 /* it populats the allocated blkids in index req. It might not be the same as in volume req if entry is partially
  * written.
  */
-void mapping::update_indx_alloc_blkids(indx_req* ireq) {
+void mapping::update_indx_alloc_blkids(const indx_req_ptr& ireq) {
     uint32_t total_lbas = 0;
-    auto vreq = static_cast< volume_req* >(ireq);
+    auto vreq = static_cast< volume_req* >(ireq.get());
     /* XXX: Can this assert be hit. it means nothing is written to active btree */
     assert(vreq->active_btree_cur.m_last_key);
     auto end_lba = get_end_key_from_cursor(vreq->active_btree_cur);
@@ -802,8 +802,8 @@ void mapping::update_indx_alloc_blkids(indx_req* ireq) {
     }
 }
 
-btree_status_t mapping::update_indx_tbl(indx_req* ireq, const btree_cp_ptr& bcp, bool active_btree_update) {
-    auto vreq = static_cast< volume_req* >(ireq);
+btree_status_t mapping::update_indx_tbl(const indx_req_ptr& ireq, const btree_cp_ptr& bcp, bool active_btree_update) {
+    auto vreq = static_cast< volume_req* >(ireq.get());
     uint64_t start_lba = vreq->lba();
     int csum_indx = 0;
     uint64_t next_start_lba = start_lba;
