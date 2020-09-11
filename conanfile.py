@@ -103,6 +103,8 @@ class HomestoreConan(ConanFile):
     def package_info(self):
         self.cpp_info.libs = tools.collect_libs(self)
         self.cpp_info.cxxflags.append("-DBOOST_ALLOW_DEPRECATED_HEADERS")
+        if not self.settings.build_type == 'Debug':
+            self.cpp_info.cxxflags.append("-DUSE_JEMALLOC")
         if self.options.sanitize:
             self.cpp_info.sharedlinkflags.append("-fsanitize=address")
             self.cpp_info.exelinkflags.append("-fsanitize=address")
