@@ -267,10 +267,14 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
                     vc_req->bid, mem_vec, data_offset,
                     boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vc_req), vreq->use_cache());
 
-                // update checksum
+                // update checksum which must be done in page size increments to match read
                 sisl::blob outb{};
-                mem_vec->get(&outb, data_offset);
-                vreq->push_csum(crc16_t10dif(init_crc_16, outb.bytes, data_size));
+                uint64_t checksum_offset{data_offset};
+                for (uint32_t count{0}; count < nlbas; ++count, checksum_offset+=get_page_size()) {
+                    mem_vec->get(&outb, checksum_offset);
+                    vreq->push_csum(
+                        crc16_t10dif(init_crc_16, static_cast< unsigned char* >(outb.bytes), get_page_size()));
+                }
             } else 
             {
                 // scatter/gather write
