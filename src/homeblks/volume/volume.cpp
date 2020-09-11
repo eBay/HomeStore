@@ -270,7 +270,7 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
                 // update checksum
                 sisl::blob outb{};
                 mem_vec->get(&outb, data_offset);
-                vreq->push_csum(crc16_t10dif(init_crc_16, outb.bytes, get_page_size()));
+                vreq->push_csum(crc16_t10dif(init_crc_16, outb.bytes, data_size));
             } else 
             {
                 // scatter/gather write
