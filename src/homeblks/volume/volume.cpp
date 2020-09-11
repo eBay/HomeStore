@@ -266,6 +266,11 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
                 boost::intrusive_ptr< BlkBuffer > bbuf = m_hb->get_data_blkstore()->write(
                     vc_req->bid, mem_vec, data_offset,
                     boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vc_req), vreq->use_cache());
+
+                // update checksum
+                sisl::blob outb{};
+                mem_vec->get(&outb, data_offset);
+                vreq->push_csum(crc16_t10dif(init_crc_16, outb.bytes, get_page_size()));
             } else 
             {
                 // scatter/gather write
@@ -274,25 +279,16 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
                 m_hb->get_data_blkstore()->write(vc_req->bid, write_iovecs, 
                                                  boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vc_req));
 
+                // update checksum
                 for (const auto& iovec : write_iovecs) {
                     vreq->push_csum(
-                        crc16_t10dif(init_crc_16, reinterpret_cast< unsigned char* >(iovec.iov_base), iovec.iov_len));
+                        crc16_t10dif(init_crc_16, static_cast< unsigned char* >(iovec.iov_base), iovec.iov_len));
                 }
             }
 
             data_offset += data_size;
         }
         VOL_DEBUG_ASSERT_CMP((start_lba - vreq->lba()), ==, vreq->nlbas(), vreq, "lba don't match");
-
-        /* compute checksum and store it in a request */
-        if (std::holds_alternative< volume_req::MemVecData >(vreq->data))
-        {
-            for (uint32_t i{0}; i < vreq->nlbas(); ++i) {
-                sisl::blob outb;
-                std::get<volume_req::MemVecData>(vreq->data)->get(&outb, i * get_page_size());
-                vreq->push_csum(crc16_t10dif(init_crc_16, outb.bytes, get_page_size()));
-            }
-        } 
 
         /* complete the request */
         ret = no_error;
