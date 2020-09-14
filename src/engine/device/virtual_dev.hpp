@@ -996,7 +996,7 @@ public:
 
         auto pdev = chunk->get_physical_dev_mutable();
 
-        HS_LOG(INFO, device, "Writing in device: {}, offset = {}", pdev->get_dev_id(), dev_offset);
+        HS_LOG(DEBUG, device, "Writing in device: {}, offset = {}", pdev->get_dev_id(), dev_offset);
 
         do_pwritev_internal(pdev, chunk, iov, iovcnt, size, dev_offset, req);
     }
