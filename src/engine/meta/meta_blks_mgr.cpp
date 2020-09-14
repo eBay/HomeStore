@@ -559,7 +559,7 @@ std::error_condition MetaBlkMgr::remove_sub_sb(const void* cookie) {
     auto prev_bid = rm_blk_in_cache->hdr.h.prev_bid;
     auto next_bid = rm_blk_in_cache->hdr.h.next_bid;
 
-    HS_LOG(INFO, metablk, "{}, removing meta blk id: {}, prev_bid: {}, next_bid: {}", type, rm_bid.to_string(),
+    HS_LOG(DEBUG, metablk, "{}, removing meta blk id: {}, prev_bid: {}, next_bid: {}", type, rm_bid.to_string(),
            prev_bid.to_string(), next_bid.to_string());
 
     // validate bid/prev/next with cache data;
@@ -616,7 +616,7 @@ std::error_condition MetaBlkMgr::remove_sub_sb(const void* cookie) {
 void MetaBlkMgr::free_ovf_blk_chain(BlkId& obid) {
     auto cur_obid = obid;
     while (cur_obid.to_integer() != invalid_bid) {
-        HS_LOG(INFO, metablk, "free ovf blk: {}", cur_obid.to_string());
+        HS_LOG(DEBUG, metablk, "free ovf blk: {}", cur_obid.to_string());
 
         auto ovf_hdr = m_ovf_blk_hdrs[cur_obid.to_integer()];
 
@@ -644,7 +644,7 @@ void MetaBlkMgr::free_ovf_blk_chain(BlkId& obid) {
 }
 
 void MetaBlkMgr::free_meta_blk(meta_blk* mblk) {
-    HS_LOG(INFO, metablk, "{}, freeing blk id: {}", mblk->hdr.h.type, mblk->hdr.h.bid.to_string());
+    HS_LOG(DEBUG, metablk, "{}, freeing blk id: {}", mblk->hdr.h.type, mblk->hdr.h.bid.to_string());
 
     m_sb_blk_store->free_blk(mblk->hdr.h.bid, boost::none, boost::none);
 
@@ -772,6 +772,7 @@ void MetaBlkMgr::recover(const bool do_comp_cb) {
             // send the callbck;
             auto cb = itr->second.cb;
             cb(mblk, buf, mblk->hdr.h.context_sz);
+            HS_LOG(DEBUG, metablk, "type: {} meta blk sent with size: {}.", mblk->hdr.h.type, mblk->hdr.h.context_sz);
         } else {
             // should never arrive here since we do assert on type before write to disk;
             HS_ASSERT(LOGMSG, false, "type: {} not registered for mblk found on disk. Skip this meta blk. ",
@@ -782,7 +783,10 @@ void MetaBlkMgr::recover(const bool do_comp_cb) {
     if (do_comp_cb) {
         // for each registered subsystem, do recovery complete callback;
         for (auto& sub : m_sub_info) {
-            if (sub.second.comp_cb != nullptr) { sub.second.comp_cb(true); }
+            if (sub.second.comp_cb != nullptr) {
+                sub.second.comp_cb(true);
+                HS_LOG(DEBUG, metablk, "type: {} completion callback sent.", sub.first);
+            }
         }
     }
 }
