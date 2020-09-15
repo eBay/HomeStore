@@ -4,16 +4,16 @@ set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CPP_FLAGS} ${CPP_WARNINGS} -DBOOST_AL
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DPACKAGE_VERSION=\\\"${CONAN_PACKAGE_VERSION}\\\"")
 
 if ("${MALLOC_IMPL}" STREQUAL "jemalloc")
-    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_JEMALLOC")
+    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_JEMALLOC=1")
 elseif ("${MALLOC_IMPL}" STREQUAL "tcmalloc")
-    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSING_TCMALLOC")
+    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSING_TCMALLOC=1")
 endif()
 
 if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
-    message("Debug build")
+    message(STATUS "Debug build")
     add_compile_options(-D_DEBUG=1 -O0 -DDEBUG_RCU -D_PRERELEASE=1)
 else()
-    message("Release build")
+    message(STATUS "Release build")
     add_compile_options(-DNDEBUG=1 -O2 -D_PRERELEASE=1)
 endif()
 

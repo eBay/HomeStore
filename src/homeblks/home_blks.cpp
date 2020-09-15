@@ -73,13 +73,15 @@ VolInterface* HomeBlks::init(const init_params& cfg, bool force_reinit) {
     }
 }
 
-vol_interface_req::vol_interface_req(void* wbuf, uint64_t lba, uint32_t nlbas, bool is_sync) :
-        write_buf(wbuf),
-        request_id(counter_generator.next_request_id()),
-        refcount(0),
-        lba(lba),
-        nlbas(nlbas),
-        sync(is_sync) {}
+vol_interface_req::vol_interface_req(void* const buf, const uint64_t lba, const uint32_t nlbas, bool is_sync,
+                                     const bool cache) :
+        buffer{buf},
+        request_id{counter_generator.next_request_id()},
+        refcount{0},
+        lba{lba},
+        nlbas{nlbas},
+        sync{is_sync},
+        cache{cache} {}
 
 vol_interface_req::~vol_interface_req() = default;
 
@@ -155,8 +157,8 @@ void HomeBlks::attach_prepare_indx_cp(std::map< boost::uuids::uuid, indx_cp_ptr 
     }
 }
 
-vol_interface_req_ptr HomeBlks::create_vol_interface_req(void* buf, uint64_t lba, uint32_t nlbas, bool is_sync) {
-    return vol_interface_req_ptr(new vol_interface_req(buf, lba, nlbas, is_sync));
+vol_interface_req_ptr HomeBlks::create_vol_interface_req(void* buf, uint64_t lba, uint32_t nlbas, bool is_sync, const bool noCache) {
+    return vol_interface_req_ptr(new vol_interface_req(buf, lba, nlbas, is_sync, noCache));
 }
 
 std::error_condition HomeBlks::write(const VolumePtr& vol, const vol_interface_req_ptr& req, bool part_of_batch) {

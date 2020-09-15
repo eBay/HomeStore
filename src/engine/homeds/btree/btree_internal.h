@@ -143,6 +143,9 @@ struct bt_journal_node_info {
 };
 
 struct btree_journal_entry {
+    btree_journal_entry(journal_op p, bool root, bt_node_gen_pair ninfo, int64_t cp_id) :
+            op(p), is_root(root), cp_id(cp_id), parent_node(ninfo) {}
+
     void append_node(bt_journal_node_op node_op, bnodeid_t node_id, uint64_t gen, sisl::blob key = {nullptr, 0}) {
         ++node_count;
         bt_journal_node_info* info = _append_area();
@@ -199,8 +202,6 @@ struct btree_journal_entry {
     // Additional node info follows this
 
 private:
-    btree_journal_entry(journal_op p, bool root, bt_node_gen_pair ninfo, int64_t cp_id) :
-            op(p), is_root(root), cp_id(cp_id), parent_node(ninfo) {}
     bt_journal_node_info* _append_area() { return (bt_journal_node_info*)((uint8_t*)this + actual_size); }
 } __attribute__((__packed__));
 
@@ -619,8 +620,10 @@ protected:
     BRangeRequest(BRangeCBParam* cb_param, BtreeSearchRange& search_range, uint32_t batch_size = UINT32_MAX) :
             m_cb_param(cb_param), m_input_range(&search_range), m_batch_size(UINT32_MAX) {}
 
-private:
+protected:
     BRangeCBParam* m_cb_param;      // additional parameters that is passed to callback
+
+private:
     BtreeSearchRange* m_input_range; // Btree range filter originally provided
     uint32_t m_batch_size;
 };

@@ -3,30 +3,33 @@
 /* NOTE: This file exports interface required to access homeblocks. we should try to avoid including any
  * homestore/homeblocks related hpp file.
  */
-#include "engine/common/homestore_header.hpp"
-#include "engine/common/homestore_config.hpp"
-#include <functional>
-#include <vector>
-#include <memory>
-#include <engine/common/error.h>
-#include <iomgr/iomgr.hpp>
-#include <boost/intrusive_ptr.hpp>
-#include <cassert>
-#include <sds_logging/logging.h>
-#include <mutex>
-#include <utility/atomic_counter.hpp>
-//#include <fds/utils.hpp>
-#include <fds/utils.hpp>
-#include <utility/obj_life_counter.hpp>
+
 #include <atomic>
-#include <boost/optional.hpp>
-#include <boost/lexical_cast.hpp>
-#include <boost/uuid/uuid_io.hpp>
+#include <cassert>
+#include <cstdint>
+#include <functional>
+#include <iostream>
+#include <memory>
+#include <mutex>
 #include <sstream>
 #include <string>
-#include <iostream>
-#include <utility/enum.hpp>
+#include <system_error>
 #include <variant>
+#include <vector>
+
+#include "boost/intrusive_ptr.hpp"
+#include "boost/lexical_cast.hpp"
+#include "boost/optional.hpp"
+#include "boost/uuid/uuid_io.hpp"
+#include "engine/common/error.h"
+#include "engine/common/homestore_config.hpp"
+#include "engine/common/homestore_header.hpp"
+#include "fds/utils.hpp"
+#include "iomgr/iomgr.hpp"
+#include "sds_logging/logging.h"
+#include "utility/atomic_counter.hpp"
+#include "utility/enum.hpp"
+#include "utility/obj_life_counter.hpp"
 
 namespace homestore {
 class Volume;
@@ -50,6 +53,8 @@ struct buf_info {
     boost::intrusive_ptr< BlkBuffer > buf;
 
     buf_info(uint64_t sz, int off, boost::intrusive_ptr< BlkBuffer >& bbuf) : size(sz), offset(off), buf(bbuf) {}
+    buf_info(const uint64_t sz, const int off, boost::intrusive_ptr< BlkBuffer >&& bbuf) :
+            size{sz}, offset{off}, buf{std::move(bbuf)} {}
 };
 
 struct _counter_generator {
@@ -68,7 +73,7 @@ struct volume_req;
 struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
     std::shared_ptr< Volume > vol_instance;
     std::vector< buf_info > read_buf_list;
-    void* write_buf = nullptr;
+    void* buffer{nullptr};
     std::error_condition err = no_error;
     uint64_t request_id;
     sisl::atomic_counter< int > refcount;
@@ -77,12 +82,14 @@ struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
     uint32_t nlbas;
     Op_type op_type = Op_type::READ; 
     bool sync = false;
+    bool cache{false};
     bool part_of_batch = false;
     void* cookie;
 
-    bool is_read() { return op_type == Op_type::READ; }
-    bool is_write() { return op_type == Op_type::WRITE; }
-    bool is_unmap() { return op_type == Op_type::UNMAP; }
+    bool use_cache() const { return cache; }
+    bool is_read() const { return op_type == Op_type::READ; }
+    bool is_write() const { return op_type == Op_type::WRITE; }
+    bool is_unmap() const { return op_type == Op_type::UNMAP; }
     
     friend void intrusive_ptr_add_ref(vol_interface_req* req) { req->refcount.increment(1); }
 
@@ -110,8 +117,9 @@ struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
     std::error_condition get_status() const { return err; }
 
 public:
-    vol_interface_req(void* wbuf, uint64_t lba, uint32_t nlbas, bool is_sync = false);
-    virtual ~vol_interface_req();
+    vol_interface_req(void* const buf, const uint64_t lba, const uint32_t nlbas, const bool is_sync = false,
+                      const bool cache = false);
+    virtual ~vol_interface_req(); // override; sisl::ObjLifeCounter should have virtual destructor
     virtual void free_yourself() { delete this; }
 };
 
@@ -200,19 +208,19 @@ public:
     }
     static VolInterface* get_instance() { return VolInterfaceImpl::raw_instance(); }
 
-    /**
-     * @brief Create a vol interface request to do IO using vol interface. This is a helper method and caller are
-     * welcome to create a request derived from vol interface request and pass it along instead of calling this method.
-     *
-     * @param buf - Buffer from write needs to be written to volume. nullptr for read operation
-     * @param lba - LBA of the volume
-     * @param nlbas - Number of blks to write.
-     * @param sync - Is the sync io request or async
-     *
-     * @return vol_interface_req_ptr
-     */
+    //
+    // @brief Create a vol interface request to do IO using vol interface. This is a helper method and caller are
+    // welcome to create a request derived from vol interface request and pass it along instead of calling this method.
+    //
+    // @param buf - Buffer from write needs to be written to volume. nullptr for read operation
+    // @param lba - LBA of the volume
+    // @param nlbas - Number of blks to write.
+    // @param sync - Is the sync io request or async
+    // @param cache - whether to cache writes and try to read from cache
+    // @return vol_interface_req_ptr
+    //
     virtual vol_interface_req_ptr create_vol_interface_req(void* buf, uint64_t lba, uint32_t nlbas,
-                                                           bool sync = false) = 0;
+                                                           bool sync = false, const bool cache = false) = 0;
 
     /**
      * @brief Write the data to the volume asynchronously, created from the request. After completion the attached

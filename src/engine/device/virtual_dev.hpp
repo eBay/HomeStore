@@ -3,23 +3,24 @@
 //
 #pragma once
 
-#include <sds_logging/logging.h>
+#include <array>
+#include <memory>
+#include <map>
+#include <vector>
 
+#include "boost/range/irange.hpp"
 #include "device.h"
 #include "engine/blkalloc/blk_allocator.h"
 #include "engine/blkalloc/varsize_blk_allocator.h"
-#include <vector>
-#include <memory>
-#include <boost/range/irange.hpp>
-#include <map>
 #include "engine/common/error.h"
-#include <metrics/metrics.hpp>
-#include <fds/utils.hpp>
-#include <utility/atomic_counter.hpp>
+#include "engine/common/homestore_assert.hpp"
 #include "engine/common/homestore_config.hpp"
 #include "engine/common/homestore_header.hpp"
-#include "engine/common/homestore_assert.hpp"
 #include "engine/meta/meta_blks_mgr.hpp"
+#include "fds/utils.hpp"
+#include "metrics/metrics.hpp"
+#include "sds_logging/logging.h"
+#include "utility/atomic_counter.hpp"
 
 SDS_LOGGING_DECL(device)
 
@@ -1102,8 +1103,17 @@ public:
 
         uint64_t primary_dev_offset = to_dev_offset(bid, &primary_chunk);
 
-        do_read_internal(primary_chunk->get_physical_dev_mutable(), primary_chunk, primary_dev_offset, (char*)mp.ptr(),
-                         mp.size(), req);
+        do_read_internal(primary_chunk->get_physical_dev_mutable(), primary_chunk, primary_dev_offset,
+                         (char*)mp.ptr(), mp.size(), req);
+    }
+
+    void read(const BlkId& bid, std::vector<iovec>& iovecs, const uint64_t size, 
+              boost::intrusive_ptr< virtualdev_req > req) {
+        PhysicalDevChunk* primary_chunk;
+
+        uint64_t primary_dev_offset = to_dev_offset(bid, &primary_chunk);
+        do_preadv_internal(primary_chunk->get_physical_dev_mutable(), primary_chunk, primary_dev_offset,
+                               iovecs.data(), iovecs.size(), size, req);
     }
 
     void readv(const BlkId& bid, const homeds::MemVector& buf, boost::intrusive_ptr< virtualdev_req > req) {
