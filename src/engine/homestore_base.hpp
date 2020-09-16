@@ -64,7 +64,20 @@ public:
 };
 
 static inline auto hs_iobuf_alloc(size_t size) {
-    return iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), size);
+    return iomanager.iobuf_alloc(HS_STATIC_CONFIG(drive_attr.align_size), size);
 }
 
+static inline uint64_t hs_aligned_size(size_t size) {
+    return sisl::round_up(size, HS_STATIC_CONFIG(drive_attr.align_size));
+}
+
+static inline sisl::byte_view hs_create_byte_view(uint64_t size, bool is_aligned_needed) {
+    return (is_aligned_needed)
+        ? sisl::byte_view{(uint32_t)hs_aligned_size(size), HS_STATIC_CONFIG(drive_attr.align_size)}
+        : sisl::byte_view{(uint32_t)size};
+}
+
+static inline sisl::io_blob hs_create_io_blob(uint64_t size, bool is_aligned_needed) {
+    return (is_aligned_needed) ? sisl::io_blob{size, HS_STATIC_CONFIG(drive_attr.align_size)} : sisl::io_blob{size, 0};
+}
 } // namespace homestore

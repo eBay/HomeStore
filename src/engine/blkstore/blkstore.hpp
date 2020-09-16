@@ -463,7 +463,7 @@ public:
         uint8_t* ptr;
         for (uint32_t i = 0; i < missing_mp.size(); i++) {
             // Create a new block of memory for the missing piece
-            uint8_t* ptr = iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), missing_mp[i].second);
+            uint8_t* ptr = hs_iobuf_alloc(missing_mp[i].second);
 
             int64_t sz = (int64_t)missing_mp[i].second;
             COUNTER_INCREMENT(m_metrics, blkstore_cache_miss_size, sz);
@@ -546,7 +546,7 @@ public:
 
         for (int i = 0; i < (nmirrors + 1); i++) {
             /* create the pointer */
-            uint8_t* mem_ptr = iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), bid.data_size(m_pagesz));
+            uint8_t* mem_ptr = hs_iobuf_alloc(bid.data_size(m_pagesz));
 
             /* set the memvec */
             boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector());

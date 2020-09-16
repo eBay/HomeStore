@@ -90,15 +90,6 @@ HomeBlks::HomeBlks(const init_params& cfg) : m_cfg(cfg), m_metrics("HomeBlks") {
     HomeStore< BLKSTORE_BUFFER_TYPE >::init((const hs_input_params&)cfg);
 
     m_out_params.max_io_size = VOL_MAX_IO_SIZE;
-    uint32_t align = 0;
-    uint32_t size = HOMEBLKS_SB_SIZE;
-    if (meta_blk_mgr->is_aligned_buf_needed(size)) {
-        align = HS_STATIC_CONFIG(disk_attr.align_size);
-        size = sisl::round_up(size, align);
-    }
-    sisl::byte_view b(size, align);
-    m_homeblks_sb_buf = b;
-
     superblock_init();
     sisl::MallocMetrics::enable();
 
@@ -290,13 +281,18 @@ HomeBlksSafePtr HomeBlks::safe_instance() {
     return boost::static_pointer_cast< HomeBlks >(HomeStoreBase::safe_instance());
 }
 
-void HomeBlks::superblock_init() {
+homeblks_sb* HomeBlks::superblock_init() {
+    HS_RELEASE_ASSERT_EQ(m_homeblks_sb_buf.bytes(), nullptr, "Reinit already initialized super block");
+
     /* build the homeblks super block */
+    m_homeblks_sb_buf = hs_create_byte_view(HOMEBLKS_SB_SIZE, meta_blk_mgr->is_aligned_buf_needed(HOMEBLKS_SB_SIZE));
+
     auto sb = (homeblks_sb*)m_homeblks_sb_buf.bytes();
     sb->version = HOMEBLKS_SB_VERSION;
     sb->boot_cnt = 0;
     sb->init_flag(0);
     sb->uuid = HS_STATIC_CONFIG(input.system_uuid);
+    return sb;
 }
 
 void HomeBlks::homeblks_sb_write() {
@@ -688,6 +684,7 @@ void HomeBlks::meta_blk_recovery_comp_cb(bool success) { instance()->meta_blk_re
 
 void HomeBlks::meta_blk_recovery_comp(bool success) {
     HS_ASSERT(RELEASE, success, "failed to recover HomeBlks SB.");
+
     auto sb = (homeblks_sb*)m_homeblks_sb_buf.bytes();
     /* check the status of last boot */
     if (sb->test_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN)) {
@@ -700,6 +697,7 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
         LOGINFO("first time boot");
         HS_ASSERT_CMP(DEBUG, MetaBlkMgr::is_self_recovered(), ==, false);
     }
+
     // clear the flag and persist to disk, if we received a new shutdown and completed successfully,
     // the flag should be set again;
     sb->clear_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);

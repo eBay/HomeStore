@@ -32,9 +32,7 @@ sisl::io_blob indx_journal_entry::create_journal_entry(indx_req* ireq) {
     uint32_t size = sizeof(journal_hdr) + ireq->indx_alloc_blkid_list.size() * sizeof(BlkId) +
         ireq->indx_fbe_list.size() * sizeof(BlkId) + ireq->get_key_size() + ireq->get_val_size();
 
-    uint32_t align = 0;
-    if (HomeLogStore::is_aligned_buf_needed(size)) { align = HS_STATIC_CONFIG(disk_attr.align_size); }
-    m_iob.buf_alloc(size, align);
+    m_iob = hs_create_io_blob(size, HomeLogStore::is_aligned_buf_needed(size));
 
     uint8_t* mem = m_iob.bytes;
 
@@ -744,25 +742,25 @@ void IndxMgr::journal_comp_cb(logstore_req* lreq, logdev_key ld_key) {
         iomanager.run_on(m_thread_id, [this, ireq](io_thread_addr_t addr) { this->unmap_indx(ireq); });
     } else {
         /* blk id is alloceted in disk bitmap only after it is writing to journal. check
-        * blk_alloctor base class for further explanations. It should be done in cp critical section.
-        * Otherwise bitmap won't reflect all the blks allocated in a cp.
-        *
-        * It is also possible that indx_alloc_blkis list contain the less number of blkids that allocated because of
-        * partial writes. We are not freeing it in cache right away. There is no reason to not do it. We are not
-        * setting it in disk bitmap so in next reboot it will be available to use.
-        */
+         * blk_alloctor base class for further explanations. It should be done in cp critical section.
+         * Otherwise bitmap won't reflect all the blks allocated in a cp.
+         *
+         * It is also possible that indx_alloc_blkis list contain the less number of blkids that allocated because of
+         * partial writes. We are not freeing it in cache right away. There is no reason to not do it. We are not
+         * setting it in disk bitmap so in next reboot it will be available to use.
+         */
 
         for (uint32_t i = 0; i < ireq->indx_alloc_blkid_list.size(); ++i) {
             m_hs->get_data_blkstore()->reserve_blk(ireq->indx_alloc_blkid_list[i]);
             /* update size */
             ireq->icp->indx_size.fetch_add(ireq->indx_alloc_blkid_list[i].data_size(m_hs->get_data_pagesz()),
-                                        std::memory_order_relaxed);
+                                           std::memory_order_relaxed);
         }
 
         /* free the blkids */
         auto free_size = free_blk(ireq->hcp, ireq->icp->io_free_blkid_list, ireq->indx_fbe_list, true);
         HS_ASSERT(DEBUG, (ireq->indx_fbe_list.size() == 0 || free_size > 0),
-                " ireq->indx_fbe_list.size {}, free_size{}, ireq->indx_fbe_list.size", free_size);
+                  " ireq->indx_fbe_list.size {}, free_size{}, ireq->indx_fbe_list.size", free_size);
         ireq->icp->indx_size.fetch_sub(free_size, std::memory_order_relaxed);
 
         /* End of critical section */
@@ -770,9 +768,9 @@ void IndxMgr::journal_comp_cb(logstore_req* lreq, logdev_key ld_key) {
         m_cp_mgr->cp_io_exit(ireq->hcp);
 
         /* XXX: should we do completion before ending the critical section. We might get some better latency in doing
-        * that but my worry is that we might end up in deadlock if we pick new IOs in completion and those IOs need to
-        * take cp to free some resources.
-        */
+         * that but my worry is that we might end up in deadlock if we pick new IOs in completion and those IOs need to
+         * take cp to free some resources.
+         */
         m_io_cb(ireq, ireq->indx_err);
     }
     logstore_req::free(lreq);
@@ -841,17 +839,18 @@ void IndxMgr::unmap_start(sisl::byte_view buf) {
     void* key = (void*)((uint64_t)buf.bytes() + sizeof(hs_cp_unmap_sb));
     auto seq_id = mhdr->seq_id;
     auto key_size = mhdr->key_size;
-    btree_status_t ret = m_active_tbl->update_unmap_active_indx_tbl(free_list, seq_id, key, m_unmap_btree_cur, btree_id, free_size);
+    btree_status_t ret =
+        m_active_tbl->update_unmap_active_indx_tbl(free_list, seq_id, key, m_unmap_btree_cur, btree_id, free_size);
     if (ret != btree_status_t::success) {
         assert(ret == btree_status_t::resource_full);
         THIS_INDX_LOG(TRACE, indx_mgr, , "unmap btree ret status resource_full");
-        attach_user_fblkid_list(
-            free_list, ([this, key_size, seq_id, key](bool success) {
-                /* persist superblock */
-                auto b = write_cp_unmap_sb(key_size, seq_id, key);
-                iomanager.run_on(m_thread_id, [this, b](io_thread_addr_t addr) { this->unmap_start(b); });
-            }),
-            free_size);
+        attach_user_fblkid_list(free_list, ([this, key_size, seq_id, key](bool success) {
+                                    /* persist superblock */
+                                    auto b = write_cp_unmap_sb(key_size, seq_id, key);
+                                    iomanager.run_on(m_thread_id,
+                                                     [this, b](io_thread_addr_t addr) { this->unmap_start(b); });
+                                }),
+                                free_size);
     } else {
         attach_user_fblkid_list(free_list, ([this](bool success) {
                                     /* remove the meta blk which is used to track unmap progress */
@@ -865,7 +864,7 @@ void IndxMgr::unmap_start(sisl::byte_view buf) {
 
 sisl::byte_view IndxMgr::alloc_unmap_sb(const uint32_t key_size, const uint64_t seq_id) {
     const sisl::blob& cursor_blob = m_unmap_btree_cur.serialize();
-    uint64_t size = cursor_blob.size + sizeof(hs_cp_unmap_sb) + key_size; 
+    uint64_t size = cursor_blob.size + sizeof(hs_cp_unmap_sb) + key_size;
     sisl::byte_view b = alloc_sb_bytes(size);
     hs_cp_unmap_sb* mhdr = (hs_cp_unmap_sb*)b.bytes();
     mhdr->uuid = m_uuid;
@@ -873,8 +872,7 @@ sisl::byte_view IndxMgr::alloc_unmap_sb(const uint32_t key_size, const uint64_t 
     mhdr->seq_id = seq_id;
     mhdr->size = size;
     mhdr->key_size = key_size;
-    memcpy((uint8_t*)((uint64_t)b.bytes() + sizeof(hs_cp_unmap_sb)) + key_size, cursor_blob.bytes,
-            cursor_blob.size);
+    memcpy((uint8_t*)((uint64_t)b.bytes() + sizeof(hs_cp_unmap_sb)) + key_size, cursor_blob.bytes, cursor_blob.size);
     return b;
 }
 
@@ -887,7 +885,7 @@ sisl::byte_view IndxMgr::write_cp_unmap_sb(const indx_req_ptr& ireq) {
 
 sisl::byte_view IndxMgr::write_cp_unmap_sb(const uint32_t key_size, const uint64_t seq_id, const void* key) {
     const sisl::blob& cursor_blob = m_unmap_btree_cur.serialize();
-    uint64_t size = cursor_blob.size + sizeof(hs_cp_unmap_sb) + key_size; 
+    uint64_t size = cursor_blob.size + sizeof(hs_cp_unmap_sb) + key_size;
     auto b = alloc_unmap_sb(key_size, seq_id);
     memcpy((uint8_t*)((uint64_t)b.bytes() + sizeof(hs_cp_unmap_sb)), key, key_size);
     write_meta_blk(m_unmap_meta_blk, b);
@@ -897,7 +895,7 @@ sisl::byte_view IndxMgr::write_cp_unmap_sb(const uint32_t key_size, const uint64
 void IndxMgr::unmap_indx(const indx_req_ptr& ireq) {
     /* persist superblock */
     auto b = write_cp_unmap_sb(ireq);
-    
+
     /* call completion cb */
     m_io_cb(ireq, ireq->indx_err);
 
@@ -1001,13 +999,7 @@ indx_cp_ptr IndxMgr::get_indx_cp(hs_cp* hcp) {
 }
 
 sisl::byte_view IndxMgr::alloc_sb_bytes(uint64_t size) {
-    uint32_t align = 0;
-    if (meta_blk_mgr->is_aligned_buf_needed(size)) {
-        align = HS_STATIC_CONFIG(disk_attr.align_size);
-        size = sisl::round_up(size, align);
-    }
-    sisl::byte_view b(size, align);
-    return b;
+    return hs_create_byte_view(size, meta_blk_mgr->is_aligned_buf_needed(size));
 }
 
 /* Steps involved in indx destroy. Note that blkids is available to allocate as soon as it is set in blkalloc. So we
@@ -1227,13 +1219,8 @@ void StaticIndxMgr::flush_hs_free_blks(hs_cp* hcp) {
 
 void StaticIndxMgr::write_hs_cp_sb(hs_cp* hcp) {
     uint64_t size = sizeof(indx_cp_base_sb) * hcp->indx_cp_list.size() + sizeof(hs_cp_sb);
-    uint32_t align = 0;
-    if (meta_blk_mgr->is_aligned_buf_needed(size)) {
-        align = HS_STATIC_CONFIG(disk_attr.align_size);
-        size = sisl::round_up(size, align);
-    }
-    sisl::byte_view b(size, align);
 
+    sisl::byte_view b = hs_create_byte_view(size, meta_blk_mgr->is_aligned_buf_needed(size));
     hs_cp_sb* hdr = (hs_cp_sb*)b.bytes();
     hdr->version = INDX_MGR_VERSION;
     hdr->type = meta_hdr_type::INDX_CP;
@@ -1329,7 +1316,7 @@ void StaticIndxMgr::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_
 
 #ifndef NDEBUG
         // uint64_t temp_size = sizeof(hs_cp_sb_hdr) + hdr->indx_cnt * sizeof(indx_cp_sb);
-        // temp_size = sisl::round_up(size, HS_STATIC_CONFIG(disk_attr.align_size));
+        // temp_size = sisl::round_up(size, HS_STATIC_CONFIG(drive_attr.align_size));
         // assert(size == temp_size);
 #endif
 

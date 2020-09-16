@@ -23,7 +23,7 @@ namespace loadgen {
 constexpr uint64_t APP_MEM_SIZE = (5 * 1024 * 1024 * 1024ul);
 constexpr uint32_t VOL_PAGE_SIZE = 4096;
 constexpr uint32_t MAX_CRC_DEPTH = 3;
-const uint64_t LOGDEV_BUF_SIZE = HS_STATIC_CONFIG(disk_attr.align_size) * 1024;
+const uint64_t LOGDEV_BUF_SIZE = HS_STATIC_CONFIG(drive_attr.align_size) * 1024;
 
 class VolReq {
 public:
@@ -283,13 +283,13 @@ private:
         auto read_offset = m_logdev_offset.front();
 
         char* ptr = nullptr;
-        int  ret = posix_memalign((void**)&ptr, HS_STATIC_CONFIG(disk_attr.align_size), LOGDEV_BUF_SIZE);
+        int  ret = posix_memalign((void**)&ptr, HS_STATIC_CONFIG(drive_attr.align_size), LOGDEV_BUF_SIZE);
         if (ret != 0) {
             throw std::bad_alloc();
         }
 
         struct iovec* iov = nullptr;
-        ret = posix_memalign((void**)&iov, HS_STATIC_CONFIG(disk_attr.align_size), sizeof(struct iovec));
+        ret = posix_memalign((void**)&iov, HS_STATIC_CONFIG(drive_attr.align_size), sizeof(struct iovec));
         if (ret != 0) {
             throw std::bad_alloc();
         }
@@ -316,7 +316,7 @@ private:
         std::string ss = std::to_string(vol_id) + " " + std::to_string(nblks);
 
         char* ptr = nullptr;
-        int  ret = posix_memalign((void**)&ptr, HS_STATIC_CONFIG(disk_attr.align_size), LOGDEV_BUF_SIZE);
+        int  ret = posix_memalign((void**)&ptr, HS_STATIC_CONFIG(drive_attr.align_size), LOGDEV_BUF_SIZE);
 
         if (ret != 0) {
             throw std::bad_alloc();
@@ -324,7 +324,7 @@ private:
         strncpy(ptr, ss.c_str(), ss.size());
         
         struct iovec* iov = nullptr;
-        ret = posix_memalign((void**)&iov, HS_STATIC_CONFIG(disk_attr.align_size), sizeof(struct iovec));
+        ret = posix_memalign((void**)&iov, HS_STATIC_CONFIG(drive_attr.align_size), sizeof(struct iovec));
         if (ret != 0) {
             throw std::bad_alloc();
         }
@@ -463,7 +463,6 @@ private:
         p.app_mem_size = APP_MEM_SIZE;
         p.disk_init = true;
         p.devices = m_device_info;
-        p.is_file = true;
 
         p.init_done_cb = std::bind(&VolumeManager::init_done_cb, this, std::placeholders::_1, std::placeholders::_2);
         p.vol_mounted_cb =

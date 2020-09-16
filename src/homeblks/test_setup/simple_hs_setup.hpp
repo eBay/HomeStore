@@ -29,7 +29,6 @@ struct simple_store_cfg {
     uint64_t m_run_time_ms = 30 * 1000;
     uint32_t m_qdepth = 64;
     uint8_t m_read_pct = 50;
-    bool m_is_file = true;
 };
 
 struct simple_store_req : public vol_interface_req {
@@ -112,7 +111,6 @@ public:
             for (uint32_t i = 0; i < m_cfg.m_ndevices; i++) {
                 m_cfg.m_devs.push_back(std::string("/tmp/file") + std::to_string(i));
             }
-            m_cfg.m_is_file = true;
         } else {
             m_cfg.m_ndevices = m_cfg.m_devs.size();
         }
@@ -129,7 +127,6 @@ public:
         m_init_params.app_mem_size = m_cfg.m_app_mem_size;
         m_init_params.disk_init = true;
         m_init_params.devices = m_dev_infos;
-        m_init_params.is_file = m_cfg.m_is_file;
         m_init_params.init_done_cb =
             std::bind(&SimpleTestStore::init_done_cb, this, std::placeholders::_1, std::placeholders::_2);
         m_init_params.vol_mounted_cb =

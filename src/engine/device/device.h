@@ -164,7 +164,7 @@ struct super_block {
     uint64_t get_magic() const { return magic; }
 } __attribute((packed));
 
-#define SUPERBLOCK_SIZE (HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size) + SUPERBLOCK_PAYLOAD_OFFSET)
+#define SUPERBLOCK_SIZE (HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size) + SUPERBLOCK_PAYLOAD_OFFSET)
 
 struct dm_info {
     /* header of pdev, chunk and vdev */
@@ -333,8 +333,8 @@ class PhysicalDev {
 
 public:
     PhysicalDev(DeviceManager* mgr, const std::string& devname, int const oflags, boost::uuids::uuid& uuid,
-                uint32_t dev_num, uint64_t dev_offset, uint32_t is_file, bool is_init, uint64_t dm_info_size,
-                bool* is_inited);
+                uint32_t dev_num, uint64_t dev_offset, iomgr::iomgr_drive_type drive_type, bool is_init,
+                uint64_t dm_info_size, bool* is_inited);
     ~PhysicalDev();
 
     void update(uint32_t dev_num, uint64_t dev_offset, uint32_t first_chunk_id);
@@ -404,15 +404,15 @@ private:
     DeviceManager* m_mgr; // Back pointer to physical device
     io_device_ptr m_iodev;
     std::string m_devname;
-    super_block* m_super_blk; // Persisent header block
-    uint64_t m_devsize;
+    super_block* m_super_blk{nullptr}; // Persisent header block
+    uint64_t m_devsize{0ul};
     struct pdev_info_block m_info_blk;
     PhysicalDevChunk* m_dm_chunk[2];
     PhysicalDevMetrics m_metrics; // Metrics instance per physical device
-    int m_cur_indx;
-    bool m_superblock_valid;
+    int m_cur_indx{0};
+    bool m_superblock_valid{false};
     boost::uuids::uuid m_system_uuid;
-    sisl::atomic_counter< uint64_t > m_error_cnt;
+    sisl::atomic_counter< uint64_t > m_error_cnt{0};
 };
 
 class AbstractVirtualDev {
@@ -430,13 +430,13 @@ class DeviceManager {
 
 public:
     DeviceManager(NewVDevCallback vcb, uint32_t const vdev_metadata_size,
-                  const iomgr::io_interface_comp_cb_t& io_comp_cb, bool is_file, boost::uuids::uuid system_uuid,
-                  const vdev_error_callback& vdev_error_cb);
+                  const iomgr::io_interface_comp_cb_t& io_comp_cb, iomgr::iomgr_drive_type drive_type,
+                  boost::uuids::uuid system_uuid, const vdev_error_callback& vdev_error_cb);
 
     ~DeviceManager();
 
     /* Initial routine to call upon bootup or everytime new physical devices to be added dynamically */
-    void add_devices(std::vector< dev_info >& devices, bool is_init);
+    void add_devices(const std::vector< dev_info >& devices, bool is_init);
     size_t get_total_cap(void);
     void handle_error(PhysicalDev* pdev);
 
@@ -490,9 +490,8 @@ public:
     void update_vb_data_start_offset(uint32_t vdev_id, off_t offset);
 
 private:
-    void load_and_repair_devices(std::vector< dev_info >& devices);
-    void init_devices(std::vector< dev_info >& devices);
-
+    void load_and_repair_devices(const std::vector< dev_info >& devices);
+    void init_devices(const std::vector< dev_info >& devices);
     void read_info_blocks(uint32_t dev_id);
 
     chunk_info_block* alloc_new_chunk_slot(uint32_t* pslot_num);
@@ -506,32 +505,32 @@ private:
 private:
     int m_open_flags;
     NewVDevCallback m_new_vdev_cb;
-    std::atomic< uint64_t > m_gen_cnt;
-    bool m_is_file;
+    std::atomic< uint64_t > m_gen_cnt{0};
+    iomgr::iomgr_drive_type m_drive_type;
 
-    char* m_chunk_memory;
+    char* m_chunk_memory{nullptr};
 
     /* This memory is carved out of chunk memory. Any changes in any of the block should end up writing all the blocks
      * on disk.
      */
-    dm_info* m_dm_info;
-    pdevs_block* m_pdev_hdr;
-    chunks_block* m_chunk_hdr;
-    vdevs_block* m_vdev_hdr;
-    pdev_info_block* m_pdev_info;
-    chunk_info_block* m_chunk_info;
-    vdev_info_block* m_vdev_info;
+    dm_info* m_dm_info{nullptr};
+    pdevs_block* m_pdev_hdr{nullptr};
+    chunks_block* m_chunk_hdr{nullptr};
+    vdevs_block* m_vdev_hdr{nullptr};
+    pdev_info_block* m_pdev_info{nullptr};
+    chunk_info_block* m_chunk_info{nullptr};
+    vdev_info_block* m_vdev_info{nullptr};
 
     std::mutex m_dev_mutex;
 
     sisl::sparse_vector< std::unique_ptr< PhysicalDev > > m_pdevs;
     sisl::sparse_vector< std::unique_ptr< PhysicalDevChunk > > m_chunks;
     sisl::sparse_vector< AbstractVirtualDev* > m_vdevs;
-    uint32_t m_last_vdevid;
+    uint32_t m_last_vdevid{INVALID_VDEV_ID};
     uint32_t m_vdev_metadata_size; // Appln metadata size for vdev
-    uint32_t m_pdev_id;
-    bool m_scan_cmpltd;
-    uint64_t m_dm_info_size;
+    uint32_t m_pdev_id{0};
+    bool m_scan_cmpltd{false};
+    uint64_t m_dm_info_size{0};
     boost::uuids::uuid m_system_uuid;
     vdev_error_callback m_vdev_error_cb;
 };

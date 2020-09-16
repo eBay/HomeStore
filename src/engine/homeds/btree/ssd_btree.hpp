@@ -213,8 +213,6 @@ public:
         return HomeLogStore::is_aligned_buf_needed(size);
     }
 
-    // bool is_aligned_buf_needed(size_t size) { return m_journal->is_aligned_buf_needed(size); }
-
     static uint8_t* get_physical(const SSDBtreeNode* bn) {
         wb_cache_buffer_t* bbuf = (wb_cache_buffer_t*)(bn);
         sisl::blob b = bbuf->at_offset(0);
@@ -417,10 +415,8 @@ public:
     /************************** Journal entry section **********************/
     static sisl::io_blob make_journal_entry(journal_op op, bool is_root, const btree_cp_ptr& bcp,
                                             bt_node_gen_pair pair = {empty_bnodeid, 0}) {
-        auto b = sisl::io_blob(journal_entry_initial_size(),
-                               HomeLogStore::is_aligned_buf_needed(journal_entry_initial_size())
-                                   ? HS_STATIC_CONFIG(disk_attr.align_size)
-                                   : 0);
+        auto b = hs_create_io_blob(journal_entry_initial_size(),
+                                   HomeLogStore::is_aligned_buf_needed(journal_entry_initial_size()));
         new (b.bytes) btree_journal_entry(op, is_root, pair, bcp->cp_id);
         return b;
     }
@@ -496,7 +492,7 @@ private:
         if (avail_size < append_size) {
             auto new_size = sisl::round_up(entry->actual_size + append_size, journal_entry_alloc_increment);
             b.buf_realloc(new_size,
-                          HomeLogStore::is_aligned_buf_needed(new_size) ? HS_STATIC_CONFIG(disk_attr.align_size) : 0);
+                          HomeLogStore::is_aligned_buf_needed(new_size) ? HS_STATIC_CONFIG(drive_attr.align_size) : 0);
         }
         return blob_to_entry(b); // Get the revised entry from blob before returning
     }

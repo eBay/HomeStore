@@ -35,12 +35,11 @@ PhysicalDev::~PhysicalDev() {
     LOGINFO("device name {} superblock magic {} product name {} version {}", m_devname, m_super_blk->magic,
             m_super_blk->product_name, m_super_blk->version);
     iomanager.iobuf_free((uint8_t*)m_super_blk);
-    // m_ep will be deleted in iomgr::stop
 }
 
 void PhysicalDev::update(uint32_t dev_num, uint64_t dev_offset, uint32_t first_chunk_id) {
-    HS_ASSERT_CMP(DEBUG, m_info_blk.get_dev_num(), ==, INVALID_DEV_ID);
-    HS_ASSERT_CMP(DEBUG, m_info_blk.get_first_chunk_id(), ==, INVALID_CHUNK_ID);
+    HS_DEBUG_ASSERT_EQ(m_info_blk.get_dev_num(), INVALID_DEV_ID);
+    HS_DEBUG_ASSERT_EQ(m_info_blk.get_first_chunk_id(), INVALID_CHUNK_ID);
 
     m_info_blk.dev_num = dev_num;
     m_info_blk.dev_offset = dev_offset;
@@ -50,7 +49,7 @@ void PhysicalDev::update(uint32_t dev_num, uint64_t dev_offset, uint32_t first_c
 void PhysicalDev::attach_superblock_chunk(PhysicalDevChunk* chunk) {
     if (!m_superblock_valid) {
         HS_ASSERT_NULL(DEBUG, m_dm_chunk[m_cur_indx]);
-        HS_ASSERT_CMP(DEBUG, m_cur_indx, <, 2);
+        HS_DEBUG_ASSERT_LT(m_cur_indx, 2);
         m_dm_chunk[m_cur_indx++] = chunk;
         return;
     }
@@ -58,44 +57,35 @@ void PhysicalDev::attach_superblock_chunk(PhysicalDevChunk* chunk) {
         HS_ASSERT_NULL(DEBUG, m_dm_chunk[0]);
         m_dm_chunk[0] = chunk;
     } else {
-        HS_ASSERT_CMP(DEBUG, chunk->get_chunk_id(), ==, m_super_blk->dm_chunk[1].get_chunk_id());
+        HS_DEBUG_ASSERT_EQ(chunk->get_chunk_id(), m_super_blk->dm_chunk[1].get_chunk_id());
         HS_ASSERT_NULL(DEBUG, m_dm_chunk[1]);
         m_dm_chunk[1] = chunk;
     }
 }
 
 PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int const oflags,
-                         boost::uuids::uuid& system_uuid, uint32_t dev_num, uint64_t dev_offset, uint32_t is_file,
-                         bool is_init, uint64_t dm_info_size, bool* is_inited) :
-        m_mgr(mgr),
-        m_devname(devname),
-        m_metrics(devname) {
-    struct stat stat_buf;
-    stat(devname.c_str(), &stat_buf);
-    m_devsize = (uint64_t)stat_buf.st_size;
-
-    HS_ASSERT_CMP(LOGMSG, sizeof(super_block), <=, SUPERBLOCK_SIZE, "opening device {} device size {} inited {}",
-                  devname, m_devsize, is_init);
-
-    m_super_blk = (super_block*)iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), SUPERBLOCK_SIZE);
-
+                         boost::uuids::uuid& system_uuid, uint32_t dev_num, uint64_t dev_offset,
+                         iomgr::iomgr_drive_type drive_type, bool is_init, uint64_t dm_info_size, bool* is_inited) :
+        m_mgr{mgr},
+        m_devname{devname},
+        m_metrics{devname},
+        m_system_uuid{system_uuid} {
     /* super block should always be written atomically. */
-    HS_ASSERT_NOTNULL(LOGMSG, m_super_blk);
-    HS_ASSERT_CMP(LOGMSG, sizeof(super_block), <=, SUPERBLOCK_SIZE);
+    HS_LOG_ASSERT_LE(sizeof(super_block), SUPERBLOCK_SIZE, "Device {} Ondisk Superblock size not enough to hold in-mem",
+                     devname);
+    m_super_blk = (super_block*)hs_iobuf_alloc(SUPERBLOCK_SIZE);
     memset(m_super_blk, 0, SUPERBLOCK_SIZE);
 
     m_info_blk.dev_num = dev_num;
     m_info_blk.dev_offset = dev_offset;
     m_info_blk.first_chunk_id = INVALID_CHUNK_ID;
-    m_cur_indx = 0;
-    m_superblock_valid = false;
 
     int oflags_used{oflags};
     if (devname.find("/tmp") == 0) {
         // tmp directory in general does not allow Direct I/O
         oflags_used &= ~O_DIRECT;
     }
-    m_iodev = drive_iface->open_dev(devname.c_str(), oflags_used);
+    m_iodev = drive_iface->open_dev(devname.c_str(), drive_type, oflags_used);
     if (m_iodev == nullptr
 #ifdef _PRERELEASE
         || (homestore_flip->test_flip("device_boot_fail", devname.c_str()))
@@ -105,12 +95,10 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
         iomanager.iobuf_free((uint8_t*)m_super_blk);
 
         HS_LOG(ERROR, device, "device open failed errno {} dev_name {}", errno, devname.c_str());
-
         throw std::system_error(errno, std::system_category(), "error while opening the device");
     }
 
-    LOGINFO("Device {} opened with dev_id = {}", m_devname, m_iodev->dev_id());
-
+    // Get the device size
     try {
         m_devsize = drive_iface->get_size(m_iodev.get());
     } catch (std::exception& e) {
@@ -118,35 +106,29 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
         throw(e);
     }
 
-    m_system_uuid = system_uuid;
-
-    HS_ASSERT_CMP(LOGMSG, m_devsize, >, 0);
     if (m_devsize == 0) {
-        std::stringstream ss;
-        ss << "disk size is " << m_devsize;
-        const std::string s = ss.str();
+        auto s = fmt::format("Device {} drive_type={} size={} is too small", devname, enum_name(drive_type), m_devsize);
+        HS_ASSERT(LOGMSG, 0, s.c_str());
         throw homestore::homestore_exception(s, homestore_error::min_size_not_avail);
     }
 
     auto temp = m_devsize;
-    m_devsize = sisl::round_down(m_devsize, HS_STATIC_CONFIG(disk_attr.phys_page_size));
-
+    m_devsize = sisl::round_down(m_devsize, HS_STATIC_CONFIG(drive_attr.phys_page_size));
     if (m_devsize != temp) { LOGWARN("device size is not the multiple of physical page size old size {}", temp); }
-    LOGINFO("Device {} size is {}", m_devname, m_devsize);
+    LOGINFO("Device {} opened with dev_id={} size={}", m_devname, m_iodev->dev_id(), m_devsize);
     m_dm_chunk[0] = m_dm_chunk[1] = nullptr;
     if (is_init) {
         /* create a chunk */
-        uint64_t align_size = sisl::round_up(SUPERBLOCK_SIZE, HS_STATIC_CONFIG(disk_attr.phys_page_size));
-        HS_ASSERT_CMP(LOGMSG, get_size() % HS_STATIC_CONFIG(disk_attr.phys_page_size), ==, 0);
-        m_mgr->create_new_chunk(this, align_size, get_size() - align_size, nullptr);
+        uint64_t sb_size = sisl::round_up(SUPERBLOCK_SIZE, HS_STATIC_CONFIG(drive_attr.phys_page_size));
+        HS_LOG_ASSERT_EQ(get_size() % HS_STATIC_CONFIG(drive_attr.phys_page_size), 0,
+                         "Expected drive size to be aligned with physical page size");
+        m_mgr->create_new_chunk(this, sb_size, get_size() - sb_size, nullptr);
 
         /* check for min size */
         uint64_t min_size = SUPERBLOCK_SIZE + 2 * dm_info_size;
         if (m_devsize <= min_size) {
-            std::stringstream ss;
-            ss << "Min size requiired is " << min_size << " and disk size is " << m_devsize;
-            const std::string s = ss.str();
-            HS_LOG(ERROR, device, "{}", ss.str());
+            auto s = fmt::format("Device {} size={} is too small min_size={}", m_devname, m_devsize, min_size);
+            HS_ASSERT(LOGMSG, 0, s.c_str());
             throw homestore::homestore_exception(s, homestore_error::min_size_not_avail);
         }
 
@@ -154,8 +136,8 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
          * so at any given point only one SB chunk is valid.
          */
         for (int i = 0; i < 2; ++i) {
-            uint64_t align_size = sisl::round_up(dm_info_size, HS_STATIC_CONFIG(disk_attr.phys_page_size));
-            HS_ASSERT_CMP(LOGMSG, align_size, ==, dm_info_size);
+            uint64_t align_size = sisl::round_up(dm_info_size, HS_STATIC_CONFIG(drive_attr.phys_page_size));
+            HS_LOG_ASSERT_EQ(align_size, dm_info_size);
             m_dm_chunk[i] = m_mgr->alloc_chunk(this, INVALID_VDEV_ID, align_size, INVALID_CHUNK_ID);
             m_dm_chunk[i]->set_sb_chunk();
         }
@@ -167,8 +149,8 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
         *is_inited = load_super_block();
         if (*is_inited) {
             /* If it is different then it mean it require upgrade/revert handling */
-            HS_ASSERT_CMP(LOGMSG, m_super_blk->dm_chunk[0].get_chunk_size(), ==, dm_info_size);
-            HS_ASSERT_CMP(LOGMSG, m_super_blk->dm_chunk[1].get_chunk_size(), ==, dm_info_size);
+            HS_LOG_ASSERT_EQ(m_super_blk->dm_chunk[0].get_chunk_size(), dm_info_size);
+            HS_LOG_ASSERT_EQ(m_super_blk->dm_chunk[1].get_chunk_size(), dm_info_size);
         }
     }
 }
@@ -208,7 +190,7 @@ bool PhysicalDev::load_super_block() {
 }
 
 void PhysicalDev::read_dm_chunk(char* mem, uint64_t size) {
-    HS_ASSERT_CMP(DEBUG, m_super_blk->dm_chunk[m_cur_indx % 2].get_chunk_size(), ==, size);
+    HS_DEBUG_ASSERT_EQ(m_super_blk->dm_chunk[m_cur_indx % 2].get_chunk_size(), size);
     auto offset = m_super_blk->dm_chunk[m_cur_indx % 2].chunk_start_offset;
     drive_iface->sync_read(m_iodev.get(), mem, size, (off_t)offset);
 }
@@ -227,8 +209,8 @@ void PhysicalDev::write_super_block(uint64_t gen_cnt) {
     strcpy(m_super_blk->product_name, PRODUCT_NAME);
     m_super_blk->version = CURRENT_SUPERBLOCK_VERSION;
 
-    HS_ASSERT_CMP(DEBUG, m_info_blk.get_dev_num(), !=, INVALID_DEV_ID);
-    HS_ASSERT_CMP(DEBUG, m_info_blk.get_first_chunk_id(), !=, INVALID_CHUNK_ID);
+    HS_DEBUG_ASSERT_NE(m_info_blk.get_dev_num(), INVALID_DEV_ID);
+    HS_DEBUG_ASSERT_NE(m_info_blk.get_first_chunk_id(), INVALID_CHUNK_ID);
 
     m_super_blk->system_uuid = m_system_uuid;
     m_super_blk->this_dev_info.dev_num = m_info_blk.dev_num;
@@ -351,7 +333,7 @@ void PhysicalDev::attach_chunk(PhysicalDevChunk* chunk, PhysicalDevChunk* after)
         if (next) next->set_prev_chunk(chunk);
         after->set_next_chunk(chunk);
     } else {
-        HS_ASSERT_CMP(DEBUG, m_info_blk.get_first_chunk_id(), ==, INVALID_CHUNK_ID);
+        HS_DEBUG_ASSERT_EQ(m_info_blk.get_first_chunk_id(), INVALID_CHUNK_ID);
         m_info_blk.first_chunk_id = chunk->get_chunk_id();
     }
 }

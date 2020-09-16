@@ -50,7 +50,6 @@ static std::shared_ptr< iomgr::ioMgr > start_homestore(uint32_t ndevices, uint64
     params.cache_size = cache_size;
     params.disk_init = true;
     params.devices = device_info;
-    params.is_file = true;
     params.iomgr = iomgr_obj;
     params.init_done_cb = [&](std::error_condition err, const out_params& params) {
         iomgr_obj->start();

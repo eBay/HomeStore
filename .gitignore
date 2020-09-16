@@ -102,7 +102,8 @@ test_package/build
 
 # Settings generated files
 generated/*
-src/engine/common/generated/*
+debug/*
+release/*
 
 # vscode
 .vscode/*

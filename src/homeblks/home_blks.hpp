@@ -36,7 +36,7 @@ class MappingValue;
  * then we need to use double buffer.
  */
 
-#define HOMEBLKS_SB_SIZE HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size)
+#define HOMEBLKS_SB_SIZE HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size)
 #define HOMEBLKS_SB_MAGIC 0xCEEDDEEB
 #define HOMEBLKS_SB_VERSION 0x2
 
@@ -245,7 +245,7 @@ private:
 
     // Read volume super block based on blkid
     void homeblks_sb_write();
-    void superblock_init();
+    homeblks_sb* superblock_init();
 
     void vol_mounted(const VolumePtr& vol, vol_state state);
     void vol_state_change(const VolumePtr& vol, vol_state old_state, vol_state new_state);

@@ -53,7 +53,7 @@ public:
         VarsizeBlkAllocConfig* vconfig = (VarsizeBlkAllocConfig*)out_config;
 
         vconfig->set_blk_size(vpage_size);
-        vconfig->set_phys_page_size(HS_STATIC_CONFIG(disk_attr.phys_page_size)); // SSD Page size.
+        vconfig->set_phys_page_size(HS_STATIC_CONFIG(drive_attr.phys_page_size)); // SSD Page size.
         vconfig->set_blks_per_portion(BLKS_PER_PORTION); // Have locking etc for every 1024 pages
         vconfig->set_total_segments(TOTAL_SEGMENTS);     // 8 Segments per chunk
 
@@ -997,7 +997,7 @@ public:
 
         auto pdev = chunk->get_physical_dev_mutable();
 
-        HS_LOG(DEBUG, device, "Writing in device: {}, offset = {}", pdev->get_dev_id(), dev_offset);
+        HS_LOG(TRACE, device, "Writing in device: {}, offset = {}", pdev->get_dev_id(), dev_offset);
 
         do_pwritev_internal(pdev, chunk, iov, iovcnt, size, dev_offset, req);
     }
@@ -1103,17 +1103,17 @@ public:
 
         uint64_t primary_dev_offset = to_dev_offset(bid, &primary_chunk);
 
-        do_read_internal(primary_chunk->get_physical_dev_mutable(), primary_chunk, primary_dev_offset,
-                         (char*)mp.ptr(), mp.size(), req);
+        do_read_internal(primary_chunk->get_physical_dev_mutable(), primary_chunk, primary_dev_offset, (char*)mp.ptr(),
+                         mp.size(), req);
     }
 
-    void read(const BlkId& bid, std::vector<iovec>& iovecs, const uint64_t size, 
+    void read(const BlkId& bid, std::vector< iovec >& iovecs, const uint64_t size,
               boost::intrusive_ptr< virtualdev_req > req) {
         PhysicalDevChunk* primary_chunk;
 
         uint64_t primary_dev_offset = to_dev_offset(bid, &primary_chunk);
-        do_preadv_internal(primary_chunk->get_physical_dev_mutable(), primary_chunk, primary_dev_offset,
-                               iovecs.data(), iovecs.size(), size, req);
+        do_preadv_internal(primary_chunk->get_physical_dev_mutable(), primary_chunk, primary_dev_offset, iovecs.data(),
+                           iovecs.size(), size, req);
     }
 
     void readv(const BlkId& bid, const homeds::MemVector& buf, boost::intrusive_ptr< virtualdev_req > req) {

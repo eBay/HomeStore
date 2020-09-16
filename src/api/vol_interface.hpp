@@ -54,7 +54,9 @@ struct buf_info {
 
     buf_info(uint64_t sz, int off, boost::intrusive_ptr< BlkBuffer >& bbuf) : size(sz), offset(off), buf(bbuf) {}
     buf_info(const uint64_t sz, const int off, boost::intrusive_ptr< BlkBuffer >&& bbuf) :
-            size{sz}, offset{off}, buf{std::move(bbuf)} {}
+            size{sz},
+            offset{off},
+            buf{std::move(bbuf)} {}
 };
 
 struct _counter_generator {
@@ -80,7 +82,7 @@ struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
     std::atomic< bool > is_fail_completed = false;
     uint64_t lba;
     uint32_t nlbas;
-    Op_type op_type = Op_type::READ; 
+    Op_type op_type = Op_type::READ;
     bool sync = false;
     bool cache{false};
     bool part_of_batch = false;
@@ -90,7 +92,7 @@ struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
     bool is_read() const { return op_type == Op_type::READ; }
     bool is_write() const { return op_type == Op_type::WRITE; }
     bool is_unmap() const { return op_type == Op_type::UNMAP; }
-    
+
     friend void intrusive_ptr_add_ref(vol_interface_req* req) { req->refcount.increment(1); }
 
     friend void intrusive_ptr_release(vol_interface_req* req) {
@@ -125,7 +127,7 @@ public:
 
 typedef boost::intrusive_ptr< vol_interface_req > vol_interface_req_ptr;
 
-typedef boost::intrusive_ptr< vol_interface_req > snap_interface_req_ptr;  // TODO: define snap_interface_req;
+typedef boost::intrusive_ptr< vol_interface_req > snap_interface_req_ptr; // TODO: define snap_interface_req;
 
 ENUM(vol_state, uint32_t,
      ONLINE,     // Online state after loading
@@ -187,7 +189,7 @@ public:
     std::string to_string() {
         std::stringstream ss;
         ss << "min_virtual_page_size=" << min_virtual_page_size << ",app_mem_size=" << app_mem_size
-           << ",disk_init=" << disk_init << ",is_file=" << is_file << ",open_flags =" << open_flags
+           << ",disk_init=" << disk_init << ",dev_type=" << enum_name(device_type) << ",open_flags =" << open_flags
            << ",number of devices =" << devices.size();
         ss << "device names = ";
         for (uint32_t i = 0; i < devices.size(); ++i) {
@@ -219,8 +221,8 @@ public:
     // @param cache - whether to cache writes and try to read from cache
     // @return vol_interface_req_ptr
     //
-    virtual vol_interface_req_ptr create_vol_interface_req(void* buf, uint64_t lba, uint32_t nlbas,
-                                                           bool sync = false, const bool cache = false) = 0;
+    virtual vol_interface_req_ptr create_vol_interface_req(void* buf, uint64_t lba, uint32_t nlbas, bool sync = false,
+                                                           const bool cache = false) = 0;
 
     /**
      * @brief Write the data to the volume asynchronously, created from the request. After completion the attached
@@ -269,7 +271,7 @@ public:
      * @param req Request created which contains all the read parameters
      */
     virtual std::error_condition unmap(const VolumePtr& vol, const vol_interface_req_ptr& req) = 0;
-    
+
     /**
      * @brief Submit the io batch, which is a mandatory method to be called if read/write are issued with part_of_batch
      * is set to true. In those cases, without this method, IOs might not be even issued. No-op if previous io requests
@@ -290,12 +292,12 @@ public:
     virtual SnapshotPtr create_snapshot(const VolumePtr& vol) = 0;
     virtual std::error_condition remove_snapshot(const SnapshotPtr& snap) = 0;
     virtual SnapshotPtr clone_snapshot(const SnapshotPtr& snap) = 0;
-    
+
     virtual std::error_condition restore_snapshot(const SnapshotPtr& snap) = 0;
-    virtual void list_snapshot(const VolumePtr& , std::vector<SnapshotPtr> snap_list) = 0;
+    virtual void list_snapshot(const VolumePtr&, std::vector< SnapshotPtr > snap_list) = 0;
     virtual void read(const SnapshotPtr& snap, const snap_interface_req_ptr& req) = 0;
-    //virtual void write(const VolumePtr& volptr, std::vector<SnapshotPtr> snap_list) = 0;
-    //virtual SnapDiffPtr diff_snapshot(const SnapshotPtr& snap1, const SnapshotPtr& snap2) = 0;
+    // virtual void write(const VolumePtr& volptr, std::vector<SnapshotPtr> snap_list) = 0;
+    // virtual SnapDiffPtr diff_snapshot(const SnapshotPtr& snap1, const SnapshotPtr& snap2) = 0;
     /** End of Snapshot APIs **/
 
     /* AM should call it in case of recovery or reboot when homestore try to mount the existing volume */

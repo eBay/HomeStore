@@ -149,16 +149,15 @@ public:
                                std::mutex cv_m;
                                /* XXX : there can be race condition when message is sent before run_io_loop is called */
                                auto sthread = sisl::named_thread("wbcache_flusher", [i, &cv, &cv_m, &thread_inited]() {
-                                   iomanager.run_io_loop(false, nullptr,
-                                                         ([i, &cv, &cv_m, &thread_inited](bool is_started) {
-                                                             if (is_started) {
-                                                                 wb_cache_t::m_thread_ids.push_back(
-                                                                     iomanager.iothread_self());
-                                                                 std::unique_lock< std::mutex > lk(cv_m);
-                                                                 thread_inited = true;
-                                                                 cv.notify_all();
-                                                             }
-                                                         }));
+                                   iomanager.run_io_loop(
+                                       false, nullptr, ([i, &cv, &cv_m, &thread_inited](bool is_started) {
+                                           if (is_started) {
+                                               wb_cache_t::m_thread_ids.push_back(iomanager.iothread_self());
+                                               std::unique_lock< std::mutex > lk(cv_m);
+                                               thread_inited = true;
+                                               cv.notify_all();
+                                           }
+                                       }));
                                });
                                std::unique_lock< std::mutex > lk(cv_m);
                                if (!thread_inited) { cv.wait(lk); }
@@ -279,7 +278,7 @@ public:
         }
 
         /* make a copy */
-        auto mem = iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), bn->get_cache_size());
+        auto mem = hs_iobuf_alloc(bn->get_cache_size());
         sisl::blob outb;
         (bn->get_memvec()).get(&outb);
         memcpy(mem, outb.bytes, outb.size);

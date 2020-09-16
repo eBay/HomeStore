@@ -205,7 +205,7 @@ public:
             m_blk_portions(cfg.get_total_portions()),
             m_alloc_blk_cnt(0) {
         m_auto_recovery = cfg.get_auto_recovery();
-        m_disk_bm = new sisl::Bitset(cfg.get_total_blks(), id, HS_STATIC_CONFIG(disk_attr.align_size));
+        m_disk_bm = new sisl::Bitset(cfg.get_total_blks(), id, HS_STATIC_CONFIG(drive_attr.align_size));
         m_cfg = cfg;
     }
 

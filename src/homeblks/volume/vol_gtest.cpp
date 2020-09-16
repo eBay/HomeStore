@@ -409,17 +409,16 @@ public:
         params.app_mem_size = 5 * 1024 * 1024 * 1024ul;
         params.disk_init = tcfg.init;
         params.devices = device_info;
-        params.is_file = tcfg.dev_names.size() ? false : true;
         params.init_done_cb = bind_this(VolTest::init_done_cb, 2);
         params.vol_mounted_cb = bind_this(VolTest::vol_mounted_cb, 2);
         params.vol_state_change_cb = bind_this(VolTest::vol_state_change_cb, 3);
         params.vol_found_cb = bind_this(VolTest::vol_found_cb, 1);
         params.end_of_batch_cb = bind_this(VolTest::process_end_of_batch, 1);
 
-        params.disk_attr = disk_attributes();
-        params.disk_attr->phys_page_size = tcfg.phy_page_size;
-        params.disk_attr->align_size = 512;
-        params.disk_attr->atomic_phys_page_size = tcfg.atomic_phys_page_size;
+        params.drive_attr = iomgr::drive_attributes();
+        params.drive_attr->phys_page_size = tcfg.phy_page_size;
+        params.drive_attr->align_size = 512;
+        params.drive_attr->atomic_phys_page_size = tcfg.atomic_phys_page_size;
 
         boost::uuids::string_generator gen;
         params.system_uuid = gen("01970496-0262-11e9-8eb2-f2801f1b9fd1");
