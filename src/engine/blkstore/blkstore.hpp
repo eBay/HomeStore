@@ -21,6 +21,8 @@
 
 namespace homestore {
 
+struct volume_child_req;
+
 enum BlkStoreCacheType { PASS_THRU = 0, WRITEBACK_CACHE = 1, WRITETHRU_CACHE = 2, RD_MODIFY_WRITEBACK_CACHE = 3 };
 
 /* Threshold of size upto when there is overlap in the cache entry, that it will discard instead of copying. Say
@@ -329,7 +331,9 @@ public:
     //
     // sync write with iov;
     //
-    void write(BlkId& bid, struct iovec* iov, int iovcnt) { m_vdev.write(bid, iov, iovcnt); }
+    void write(BlkId& bid, const iovec* const iov, const int iovcnt) {
+            m_vdev.write(bid, const_cast<iovec* const>(iov), iovcnt);
+    }
 
     /* Write the buffer. The BlkStore write does not support write in place and so it does not also support
      * writing to an offset.
@@ -341,8 +345,9 @@ public:
      * Here data_offset is offset inside memvec. If a write is split then both the writes will point to
      * same buffer but different offsets.
      */
-    boost::intrusive_ptr< Buffer > write(BlkId& bid, boost::intrusive_ptr< homeds::MemVector > mvec, int data_offset,
-                                         boost::intrusive_ptr< blkstore_req< Buffer > > req, bool in_cache) {
+
+    boost::intrusive_ptr< Buffer > write(BlkId& bid, boost::intrusive_ptr< homeds::MemVector > mvec, const uint32_t data_offset,
+                                         const boost::intrusive_ptr< blkstore_req< Buffer > > req, const bool in_cache) {
         req->start_time();
         COUNTER_INCREMENT(m_metrics, blkstore_write_op_count, 1);
 
@@ -383,20 +388,29 @@ public:
         return req->bbuf;
     }
 
+    void write(const BlkId& bid, const std::vector<iovec>& iovecs,
+               const boost::intrusive_ptr< blkstore_req< Buffer > >& req) {
+        // Now write data to the device
+        req->start_time();
+        m_vdev.write(bid, const_cast<iovec*>(iovecs.data()), iovecs.size(), to_vdev_req(req));
+        if (req->isSyncCall) {
+            HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_write_latency,
+                              get_elapsed_time_us(req->blkstore_op_start_time));
+        }
+    }
+
     /* Read the data for given blk id and size. This method allocates the required memory if not present in the
      * cache and returns an smart ptr to the Buffer */
-    boost::intrusive_ptr< Buffer > read(BlkId& bid, uint32_t offset, uint32_t size,
-                                        boost::intrusive_ptr< blkstore_req< Buffer > > req, bool cache_only = false) {
-
-        int cur_ind = 0;
-        uint32_t cur_offset = offset;
-
+    boost::intrusive_ptr< Buffer > read(const BlkId& bid, const uint32_t offset, const uint32_t size,
+                                        boost::intrusive_ptr< blkstore_req< Buffer > > req,
+                                        const bool cache_only = false) {
         assert(req->err == no_error);
 
         COUNTER_INCREMENT(m_metrics, blkstore_read_op_count, 1);
         COUNTER_INCREMENT(m_metrics, blkstore_read_data_size, size);
 
         req->start_time();
+
         // Check if the entry exists in the cache.
         boost::intrusive_ptr< Buffer > bbuf;
         bool cache_found = m_cache->get(bid, (boost::intrusive_ptr< CacheBuffer< BlkId > >*)&bbuf);
@@ -449,7 +463,7 @@ public:
         uint8_t* ptr;
         for (uint32_t i = 0; i < missing_mp.size(); i++) {
             // Create a new block of memory for the missing piece
-            uint8_t* ptr = iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), missing_mp[i].second);
+            uint8_t* ptr = hs_iobuf_alloc(missing_mp[i].second);
 
             int64_t sz = (int64_t)missing_mp[i].second;
             COUNTER_INCREMENT(m_metrics, blkstore_cache_miss_size, sz);
@@ -492,6 +506,39 @@ public:
         return bbuf;
     }
 
+
+     // Read the data for given blk id and size. This method stores the read in the iovecs starting at the
+     // the given offset
+     void read(const BlkId& bid, std::vector<iovec>& iovecs, const uint32_t size,
+               boost::intrusive_ptr< blkstore_req< Buffer > > req) {
+        assert(req->err == no_error);
+
+        COUNTER_INCREMENT(m_metrics, blkstore_read_op_count, 1);
+        COUNTER_INCREMENT(m_metrics, blkstore_read_data_size, size);
+
+        req->blkstore_ref_cnt.increment(1);
+        req->start_time();
+        req->is_read = true;
+
+        // This assert won't be valid for volume reads if user is doing overlap writes/reads because we set the blks
+        // allocated only after journal write is completed.
+        ///
+        HS_ASSERT_CMP(DEBUG, m_vdev.is_blk_alloced(const_cast<BlkId&>(bid)), ==, true, "blk is not allocted");
+
+        req->blkstore_ref_cnt.increment(1);
+        m_vdev.read(bid, iovecs, size, to_vdev_req(req));
+        if (req->isSyncCall) { req->blkstore_ref_cnt.decrement(1); }
+
+        assert(req->err == no_error);
+        if (!req->isSyncCall) {
+            /* issue the completion */
+            process_completions(to_vdev_req(req));
+        } else {
+            req->blkstore_ref_cnt.decrement(1);
+            HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_read_latency, get_elapsed_time_us(req->blkstore_op_start_time));
+        }
+    }
+
     std::vector< boost::intrusive_ptr< BlkBuffer > > read_nmirror(BlkId& bid, int nmirrors) {
         std::vector< boost::intrusive_ptr< BlkBuffer > > buf_list;
         std::vector< boost::intrusive_ptr< homeds::MemVector > > mp;
@@ -499,7 +546,7 @@ public:
 
         for (int i = 0; i < (nmirrors + 1); i++) {
             /* create the pointer */
-            uint8_t* mem_ptr = iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), bid.data_size(m_pagesz));
+            uint8_t* mem_ptr = hs_iobuf_alloc(bid.data_size(m_pagesz));
 
             /* set the memvec */
             boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector());

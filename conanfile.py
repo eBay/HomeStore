@@ -5,7 +5,7 @@ from conans import ConanFile, CMake, tools
 class HomestoreConan(ConanFile):
     name = "homestore"
 
-    version = "0.14.0"
+    version = "1.0.2"
     revision_mode = "scm"
 
     license = "Proprietary"
@@ -34,10 +34,10 @@ class HomestoreConan(ConanFile):
             )
     requires = (
             "flip/[~=1, include_prerelease=True]@sds/master",
-            "iomgr/[~=3, include_prerelease=True]@sds/master",
+            "iomgr/[~=4, include_prerelease=True]@sds/master",
             "sds_logging/[~=8, include_prerelease=True]@sds/master",
             "sds_options/[~=1, include_prerelease=True]@sds/master",
-            "sisl/[~=3, include_prerelease=True]@sisl/master",
+            "sisl/[~=4, include_prerelease=True]@sisl/master",
 
             # FOSS, rarely updated
             "boost/1.73.0",
@@ -103,6 +103,8 @@ class HomestoreConan(ConanFile):
     def package_info(self):
         self.cpp_info.libs = tools.collect_libs(self)
         self.cpp_info.cxxflags.append("-DBOOST_ALLOW_DEPRECATED_HEADERS")
+        if not self.settings.build_type == 'Debug':
+            self.cpp_info.cxxflags.append("-DUSE_JEMALLOC")
         if self.options.sanitize:
             self.cpp_info.sharedlinkflags.append("-fsanitize=address")
             self.cpp_info.exelinkflags.append("-fsanitize=address")

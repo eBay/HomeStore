@@ -13,6 +13,7 @@
 #include <boost/lexical_cast.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <boost/optional.hpp>
+#include <iomgr/iomgr.hpp>
 
 SETTINGS_INIT(homestorecfg::HomeStoreSettings, homestore_config,
               SDS_OPTIONS.count("config_path") ? SDS_OPTIONS["config_path"].as< std::string >() : "");
@@ -37,21 +38,6 @@ namespace homestore {
  * system command to get these parameteres directly from disks. Or Consumer want to override
  * the default values.
  */
-struct disk_attributes {
-    uint32_t phys_page_size;        // page size of ssds. It should be same for all the disks.
-                                    // It shouldn't be less then 8k
-    uint32_t align_size;            // size alignment supported by disks. It should be
-                                    // same for all the disks.
-    uint32_t atomic_phys_page_size; // atomic page size of the disk
-
-    nlohmann::json to_json() const {
-        nlohmann::json json;
-        json["phys_page_size"] = phys_page_size;
-        json["align_size"] = align_size;
-        json["atomic_phys_page_size"] = atomic_phys_page_size;
-        return json;
-    }
-};
 
 struct cap_attrs {
     uint64_t used_data_size = 0;
@@ -74,9 +60,10 @@ struct cap_attrs {
 
 struct hs_input_params {
 public:
-    std::vector< dev_info > devices; // name of the devices.
-    bool is_file = false;            // Is the devices a file or raw device
-    boost::uuids::uuid system_uuid;  // UUID assigned to the system
+    std::vector< dev_info > devices;                                       // name of the devices.
+    iomgr::iomgr_drive_type device_type{iomgr::iomgr_drive_type::unknown}; // Type of the device
+    bool is_file{false};                                                   // Is the devices a file or raw device
+    boost::uuids::uuid system_uuid;                                        // UUID assigned to the system
     io_flag open_flags = io_flag::DIRECT_IO;
 
     uint32_t min_virtual_page_size = 4096;          // minimum page size supported. Ideally it should be 4k.
@@ -85,7 +72,7 @@ public:
     bool is_read_only = false;                      // Is read only
 
     /* optional parameters - if provided will override the startup config */
-    boost::optional< disk_attributes > disk_attr;
+    boost::optional< iomgr::drive_attributes > drive_attr;
 
     nlohmann::json to_json() const {
         nlohmann::json json;
@@ -95,7 +82,7 @@ public:
             json["devices"].push_back(d.dev_names);
         }
         json["open_flags"] = open_flags;
-        json["is_file"] = is_file;
+        json["device_type"] = enum_name(device_type);
         json["is_read_only"] = is_read_only;
 
         json["min_virtual_page_size"] = min_virtual_page_size;
@@ -130,13 +117,13 @@ struct HomeStoreStaticConfig {
         return s_inst;
     }
 
-    disk_attributes disk_attr;
+    iomgr::drive_attributes drive_attr;
     hs_engine_config engine;
     hs_input_params input;
 
     nlohmann::json to_json() const {
         nlohmann::json json;
-        json["DriveAttributes"] = disk_attr.to_json();
+        json["DriveAttributes"] = drive_attr.to_json();
         json["GenericConfig"] = engine.to_json();
         json["InputParameters"] = input.to_json();
         return json;
@@ -144,8 +131,8 @@ struct HomeStoreStaticConfig {
 
 #ifndef NDEBUG
     void validate() {
-        assert(disk_attr.phys_page_size >= disk_attr.atomic_phys_page_size);
-        assert(disk_attr.phys_page_size >= engine.min_io_size);
+        assert(drive_attr.phys_page_size >= drive_attr.atomic_phys_page_size);
+        assert(drive_attr.phys_page_size >= engine.min_io_size);
     }
 #endif
 };
@@ -169,7 +156,7 @@ constexpr uint32_t MAX_ID_BITS_PER_CHUNK = ((1lu << ID_BITS) - 1);
 // #define ALIGN_SIZE_TO_LEFT(size, align) (((size % align) == 0) ? size : (size - (size % align)))
 
 #define MEMVEC_MAX_IO_SIZE (HS_STATIC_CONFIG(engine.min_io_size) * ((1 << MEMPIECE_ENCODE_MAX_BITS) - 1))
-#define MIN_CHUNK_SIZE (HS_STATIC_CONFIG(disk_attr.phys_page_size) * BLKS_PER_PORTION * TOTAL_SEGMENTS)
+#define MIN_CHUNK_SIZE (HS_STATIC_CONFIG(drive_attr.phys_page_size) * BLKS_PER_PORTION * TOTAL_SEGMENTS)
 #define MAX_CHUNK_SIZE                                                                                                 \
     sisl::round_down((MAX_ID_BITS_PER_CHUNK * HS_STATIC_CONFIG(engine.min_io_size)), MIN_CHUNK_SIZE) // 16T
 

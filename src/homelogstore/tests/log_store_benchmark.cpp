@@ -117,7 +117,6 @@ public:
         params.app_mem_size = app_mem_size;
         params.disk_init = !restart;
         params.devices = device_info;
-        params.is_file = true;
         params.init_done_cb = [&](std::error_condition err, const out_params& params) {
             LOGINFO("HomeBlks Init completed");
             {

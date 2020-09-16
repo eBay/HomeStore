@@ -85,7 +85,7 @@ private:
     static int64_t get_dirty_buf_limit() {
         return (int64_t)(
             (HS_DYNAMIC_CONFIG(resource_limits.dirty_buf_percent) * HS_STATIC_CONFIG(input.app_mem_size) / 100) /
-            HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size));
+            HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size));
     }
 
     static std::atomic< int64_t > m_hs_dirty_buf_cnt;

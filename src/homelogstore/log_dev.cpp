@@ -28,15 +28,8 @@ void LogDev::start(bool format) {
     if (format) {
         HS_ASSERT(LOGMSG, (ib == nullptr), "Expected info blk to null");
         // TODO: Don't create 2K as is, but query vdev_info layer to see available vb_context size
-        uint32_t align = 0;
-        uint32_t size = logdev_info_block::size;
-        if (meta_blk_mgr->is_aligned_buf_needed(size)) {
-            align = HS_STATIC_CONFIG(disk_attr.align_size);
-            size = sisl::round_up(size, align);
-        }
-
-        sisl::byte_view b(size, align);
-        m_info_blk_buf = b;
+        m_info_blk_buf =
+            hs_create_byte_view(logdev_info_block::size, meta_blk_mgr->is_aligned_buf_needed(logdev_info_block::size));
         ib = (logdev_info_block*)m_info_blk_buf.bytes();
 
         ib->start_dev_offset = 0;
@@ -186,12 +179,12 @@ log_buffer LogDev::read(const logdev_key& key) {
     } else {
         // Round them data offset to dma boundary in-order to make sure pread on direct io succeed. We need to skip
         // the rounded portion while copying to user buffer
-        auto rounded_data_offset = sisl::round_down(data_offset, HS_STATIC_CONFIG(disk_attr.align_size));
+        auto rounded_data_offset = sisl::round_down(data_offset, HS_STATIC_CONFIG(drive_attr.align_size));
         auto rounded_size =
-            sisl::round_up(b.size() + data_offset - rounded_data_offset, HS_STATIC_CONFIG(disk_attr.align_size));
+            sisl::round_up(b.size() + data_offset - rounded_data_offset, HS_STATIC_CONFIG(drive_attr.align_size));
 
         // Allocate a fresh aligned buffer, if size cannot fit standard size
-        if (rounded_size > initial_read_size) { rbuf = iomanager.iobuf_alloc(dma_boundary, rounded_size); }
+        if (rounded_size > initial_read_size) { rbuf = hs_iobuf_alloc(rounded_size); }
 
         LOGTRACEMOD(logstore,
                     "Addln read as data resides outside initial_read_size={} key.idx={} key.group_dev_offset={} "

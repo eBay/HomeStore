@@ -185,7 +185,6 @@ public:
         params.app_mem_size = 5 * 1024 * 1024 * 1024ul;
         params.disk_init = true;
         params.devices = device_info;
-        params.is_file = true;
         params.init_done_cb = std::bind(&MapTest::init_done_cb, this, std::placeholders::_1, std::placeholders::_2);
         params.vol_mounted_cb = std::bind(&MapTest::vol_mounted_cb, this, std::placeholders::_1, std::placeholders::_2);
         params.vol_state_change_cb = std::bind(&MapTest::vol_state_change_cb, this, std::placeholders::_1,

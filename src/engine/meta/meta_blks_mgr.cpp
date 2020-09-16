@@ -66,7 +66,7 @@ void MetaBlkMgr::load_ssb(const sb_blkstore_blob* blob) {
     HS_RELEASE_ASSERT_EQ(blob->type, blkstore_type::META_STORE, "Invalid blkstore type: {}", blob->type);
     HS_LOG(INFO, metablk, "Loading meta ssb blkid: {}", bid.to_string());
 
-    m_ssb = (meta_blk_sb*)iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_PAGE_SZ);
+    m_ssb = (meta_blk_sb*)hs_iobuf_alloc(META_BLK_PAGE_SZ);
     memset((void*)m_ssb, 0, META_BLK_PAGE_SZ);
 
     read(bid, (void*)m_ssb, sizeof(meta_blk_sb));
@@ -98,7 +98,7 @@ void MetaBlkMgr::init_ssb() {
     blob.blkid.set(bid);
     m_sb_blk_store->update_vb_context(sisl::blob((uint8_t*)&blob, (uint32_t)sizeof(sb_blkstore_blob)));
 
-    m_ssb = (meta_blk_sb*)iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_PAGE_SZ);
+    m_ssb = (meta_blk_sb*)hs_iobuf_alloc(META_BLK_PAGE_SZ);
     memset((void*)m_ssb, 0, META_BLK_PAGE_SZ);
 
     std::lock_guard< decltype(m_meta_mtx) > lk(m_meta_mtx);
@@ -139,7 +139,7 @@ void MetaBlkMgr::scan_meta_blks() {
 
         // TODO: add a new API in blkstore read to by pass cache;
         // e.g. take caller's read buf to avoid this extra memory copy;
-        auto mblk = (meta_blk*)iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_PAGE_SZ);
+        auto mblk = (meta_blk*)hs_iobuf_alloc(META_BLK_PAGE_SZ);
         read(bid, mblk);
 
         // add meta blk to cache;
@@ -192,8 +192,7 @@ void MetaBlkMgr::scan_meta_blks() {
 
         while (obid.to_integer() != invalid_bid) {
             // ovf blk header occupies whole blk;
-            auto ovf_hdr =
-                (meta_blk_ovf_hdr*)iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_PAGE_SZ);
+            auto ovf_hdr = (meta_blk_ovf_hdr*)hs_iobuf_alloc(META_BLK_PAGE_SZ);
             read(obid, ovf_hdr, META_BLK_PAGE_SZ);
 
             // verify self bid
@@ -344,7 +343,7 @@ void MetaBlkMgr::write_meta_blk_to_disk(meta_blk* mblk) {
 // 3. update in-memory meta blks map;
 //
 meta_blk* MetaBlkMgr::init_meta_blk(BlkId& bid, const meta_sub_type type, const void* context_data, const size_t sz) {
-    meta_blk* mblk = (meta_blk*)iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_PAGE_SZ);
+    meta_blk* mblk = (meta_blk*)hs_iobuf_alloc(META_BLK_PAGE_SZ);
     mblk->hdr.h.bid.set(bid);
     memset(mblk->hdr.h.type, 0, MAX_SUBSYS_TYPE_LEN);
     memcpy(mblk->hdr.h.type, type.c_str(), type.length());
@@ -440,8 +439,7 @@ void MetaBlkMgr::write_meta_blk_ovf(BlkId& prev_bid, BlkId& out_obid, const void
     uint64_t offset_in_ctx = 0;
     for (size_t i = 0; i < ovf_blk_ids.size(); ++i) {
         auto obid = std::get< 0 >(ovf_blk_ids[i]);
-        meta_blk_ovf_hdr* ovf_hdr =
-            (meta_blk_ovf_hdr*)iomanager.iobuf_alloc(HS_STATIC_CONFIG(disk_attr.align_size), META_BLK_PAGE_SZ);
+        meta_blk_ovf_hdr* ovf_hdr = (meta_blk_ovf_hdr*)hs_iobuf_alloc(META_BLK_PAGE_SZ);
 
         m_ovf_blk_hdrs[obid.to_integer()] = ovf_hdr;
 
@@ -478,9 +476,9 @@ void MetaBlkMgr::write_meta_blk_internal(meta_blk* mblk, const void* context_dat
 
         memcpy(mblk->context_data, context_data, sz);
     } else {
-        HS_RELEASE_ASSERT_EQ(sz % HS_STATIC_CONFIG(disk_attr.align_size), 0,
+        HS_RELEASE_ASSERT_EQ(sz % HS_STATIC_CONFIG(drive_attr.align_size), 0,
                              "{}, context_data sz: {} needs to be dma_boundary {} aligned. ", mblk->hdr.h.type, sz,
-                             HS_STATIC_CONFIG(disk_attr.align_size));
+                             HS_STATIC_CONFIG(drive_attr.align_size));
 
         // all context data will be in overflow buffer to avoid data copy and non dma_boundary aligned write;
         BlkId obid(invalid_bid);
@@ -559,7 +557,7 @@ std::error_condition MetaBlkMgr::remove_sub_sb(const void* cookie) {
     auto prev_bid = rm_blk_in_cache->hdr.h.prev_bid;
     auto next_bid = rm_blk_in_cache->hdr.h.next_bid;
 
-    HS_LOG(INFO, metablk, "{}, removing meta blk id: {}, prev_bid: {}, next_bid: {}", type, rm_bid.to_string(),
+    HS_LOG(DEBUG, metablk, "{}, removing meta blk id: {}, prev_bid: {}, next_bid: {}", type, rm_bid.to_string(),
            prev_bid.to_string(), next_bid.to_string());
 
     // validate bid/prev/next with cache data;
@@ -616,7 +614,7 @@ std::error_condition MetaBlkMgr::remove_sub_sb(const void* cookie) {
 void MetaBlkMgr::free_ovf_blk_chain(BlkId& obid) {
     auto cur_obid = obid;
     while (cur_obid.to_integer() != invalid_bid) {
-        HS_LOG(INFO, metablk, "free ovf blk: {}", cur_obid.to_string());
+        HS_LOG(DEBUG, metablk, "free ovf blk: {}", cur_obid.to_string());
 
         auto ovf_hdr = m_ovf_blk_hdrs[cur_obid.to_integer()];
 
@@ -644,7 +642,7 @@ void MetaBlkMgr::free_ovf_blk_chain(BlkId& obid) {
 }
 
 void MetaBlkMgr::free_meta_blk(meta_blk* mblk) {
-    HS_LOG(INFO, metablk, "{}, freeing blk id: {}", mblk->hdr.h.type, mblk->hdr.h.bid.to_string());
+    HS_LOG(DEBUG, metablk, "{}, freeing blk id: {}", mblk->hdr.h.type, mblk->hdr.h.bid.to_string());
 
     m_sb_blk_store->free_blk(mblk->hdr.h.bid, boost::none, boost::none);
 
@@ -711,8 +709,7 @@ void MetaBlkMgr::recover(const bool do_comp_cb) {
         sisl::byte_view buf;
 
         if (mblk->hdr.h.context_sz <= META_BLK_CONTEXT_SZ) {
-            sisl::byte_view b(mblk->hdr.h.context_sz);
-            buf = b;
+            buf = hs_create_byte_view(mblk->hdr.h.context_sz, false /* aligned_byte_view */);
             HS_DEBUG_ASSERT_EQ(mblk->hdr.h.ovf_bid.to_integer(), invalid_bid, "{}, corrupted ovf_bid: {}",
                                mblk->hdr.h.type, mblk->hdr.h.ovf_bid.to_string());
             memcpy((void*)buf.bytes(), (void*)mblk->context_data, mblk->hdr.h.context_sz);
@@ -721,8 +718,7 @@ void MetaBlkMgr::recover(const bool do_comp_cb) {
             // read through the ovf blk chain to get the buffer;
             // all the context data was stored in ovf blk chain, nothing in meta blk context data portion;
             //
-            sisl::byte_view b(mblk->hdr.h.context_sz, HS_STATIC_CONFIG(disk_attr.align_size));
-            buf = b;
+            buf = hs_create_byte_view(mblk->hdr.h.context_sz, true /* aligned byte_view */);
 
             auto total_sz = mblk->hdr.h.context_sz;
             uint64_t read_offset = 0;
@@ -772,6 +768,7 @@ void MetaBlkMgr::recover(const bool do_comp_cb) {
             // send the callbck;
             auto cb = itr->second.cb;
             cb(mblk, buf, mblk->hdr.h.context_sz);
+            HS_LOG(DEBUG, metablk, "type: {} meta blk sent with size: {}.", mblk->hdr.h.type, mblk->hdr.h.context_sz);
         } else {
             // should never arrive here since we do assert on type before write to disk;
             HS_ASSERT(LOGMSG, false, "type: {} not registered for mblk found on disk. Skip this meta blk. ",
@@ -782,7 +779,10 @@ void MetaBlkMgr::recover(const bool do_comp_cb) {
     if (do_comp_cb) {
         // for each registered subsystem, do recovery complete callback;
         for (auto& sub : m_sub_info) {
-            if (sub.second.comp_cb != nullptr) { sub.second.comp_cb(true); }
+            if (sub.second.comp_cb != nullptr) {
+                sub.second.comp_cb(true);
+                HS_LOG(DEBUG, metablk, "type: {} completion callback sent.", sub.first);
+            }
         }
     }
 }

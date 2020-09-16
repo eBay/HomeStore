@@ -322,9 +322,9 @@ public:
     virtual ~indx_tbl() = default;
     virtual void create_done() = 0;
     virtual homeds::btree::btree_super_block get_btree_sb() = 0;
-    virtual btree_status_t update_active_indx_tbl(indx_req* ireq, const btree_cp_ptr& bcp) = 0;
-    virtual btree_status_t read_indx(indx_req* ireq, const read_indx_comp_cb_t& cb) = 0;
-    virtual btree_status_t update_diff_indx_tbl(indx_req* ireq, const btree_cp_ptr& bcp) = 0;
+    virtual btree_status_t update_active_indx_tbl(const indx_req_ptr& ireq, const btree_cp_ptr& bcp) = 0;
+    virtual btree_status_t read_indx(const indx_req_ptr& ireq, const read_indx_comp_cb_t& cb) = 0;
+    virtual btree_status_t update_diff_indx_tbl(const indx_req_ptr& ireq, const btree_cp_ptr& bcp) = 0;
     virtual btree_cp_ptr attach_prepare_cp(const btree_cp_ptr& cur_bcp, bool is_last_cp, bool blkalloc_checkpoint) = 0;
     virtual void flush_free_blks(const btree_cp_ptr& bcp, std::shared_ptr< blkalloc_cp >& ba_cp) = 0;
     virtual void update_btree_cp_sb(const btree_cp_ptr& bcp, btree_cp_sb& btree_sb, bool is_blkalloc_cp) = 0;
@@ -333,7 +333,7 @@ public:
     virtual void destroy_done() = 0;
     virtual void cp_start(const btree_cp_ptr& bcp, cp_comp_callback cb) = 0;
     virtual btree_status_t recovery_update(logstore_seq_num_t seqnum, journal_hdr* hdr, const btree_cp_ptr& bcp) = 0;
-    virtual void update_indx_alloc_blkids(indx_req* ireq) = 0;
+    virtual void update_indx_alloc_blkids(const indx_req_ptr& ireq) = 0;
     virtual uint64_t get_used_size() = 0;
     virtual btree_status_t free_user_blkids(blkid_list_ptr free_list, homeds::btree::BtreeQueryCursor& cur,
                                             int64_t& size) = 0;
@@ -498,7 +498,7 @@ public:
     /* write/update indx table for a IO
      * @params req :- It create all information to update the indx mgr and journal
      */
-    void update_indx(boost::intrusive_ptr< indx_req > ireq);
+    void update_indx(const indx_req_ptr& ireq);
 
     /**
      * @brief : read and return indx mapping for a IO
@@ -507,7 +507,7 @@ public:
      * The cb will be passed by mapping layer and triggered after read completes;
      * @return : error condition whether read is success or not;
      */
-    void read_indx(const boost::intrusive_ptr< indx_req >& ireq);
+    void read_indx(const indx_req_ptr& ireq);
 
     /* Create snapshot. */
     void indx_snap_create();
@@ -553,7 +553,7 @@ public:
      */
     void register_indx_cp_done_cb(const cp_done_cb& cb, bool blkalloc_cp = false);
     /* unmap api called by volume layer */
-    void unmap(boost::intrusive_ptr< indx_req > ireq);
+    void unmap(const indx_req_ptr& ireq);
 
 protected:
     /*********************** virtual functions required to support snapshot  **********************/
@@ -612,10 +612,10 @@ private:
     homeds::btree::BtreeQueryCursor m_unmap_btree_cur;
 
     /*************************************** private functions ************************/
-    void update_indx_internal(boost::intrusive_ptr< indx_req > ireq);
-    void journal_write(indx_req* vreq);
+    void update_indx_internal(const indx_req_ptr& ireq);
+    void journal_write(const indx_req_ptr& ireq);
     void journal_comp_cb(logstore_req* req, logdev_key ld_key);
-    btree_status_t update_indx_tbl(indx_req* vreq, bool is_active);
+    btree_status_t update_indx_tbl(const indx_req_ptr& ireq, bool is_active);
     btree_cp_ptr get_btree_cp(hs_cp* hcp);
     indx_cp_ptr get_indx_cp(hs_cp* hcp);
     void destroy_indx_tbl();
@@ -628,7 +628,7 @@ private:
     static void register_hs_cp_done_cb(const cp_done_cb& cb, bool blkalloc_cp = false);
     void indx_destroy_cp(const indx_cp_ptr& cur_icp, hs_cp* cur_hcp, hs_cp* new_hcp);
     void create_first_cp();
-    btree_status_t retry_update_indx(const boost::intrusive_ptr< indx_req >& ireq, bool is_active);
+    btree_status_t retry_update_indx(const indx_req_ptr& ireq, bool is_active);
     void run_slow_path_thread();
     void create_new_diff_tbl(indx_cp_ptr& icp);
     void recover_meta_ops();
@@ -640,9 +640,9 @@ private:
     void suspend_active_cp();
     sisl::byte_view alloc_unmap_sb(const uint32_t key_size, const uint64_t seq_id);
     sisl::byte_view alloc_sb_bytes(uint64_t size_);
-    void unmap_indx(indx_req_ptr ireq);
+    void unmap_indx(const indx_req_ptr& ireq);
     void unmap_start(sisl::byte_view buf);
-    sisl::byte_view write_cp_unmap_sb(const indx_req_ptr ireq);
+    sisl::byte_view write_cp_unmap_sb(const indx_req_ptr& ireq);
     sisl::byte_view write_cp_unmap_sb(const uint32_t key_size, const uint64_t seq_id, const void* key);
 };
 
@@ -683,6 +683,12 @@ public:
 
 public:
     indx_req(uint64_t request_id, Op_type op_type_) : request_id(request_id), op_type(op_type_) {}
+    virtual ~indx_req() = default;
+    indx_req(const indx_req&) = delete;
+    indx_req(indx_req&&) noexcept = delete;
+    indx_req& operator=(const indx_req&) = delete;
+    indx_req& operator=(indx_req&&) noexcept = delete;
+  
     sisl::io_blob create_journal_entry() { return j_ent.create_journal_entry(this); }
 
     void push_indx_alloc_blkid(BlkId& bid) { indx_alloc_blkid_list.push_back(bid); }
