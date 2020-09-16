@@ -63,7 +63,6 @@ static void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthre
     params.app_mem_size = app_mem_size;
     params.disk_init = true;
     params.devices = device_info;
-    params.is_file = true;
     params.init_done_cb = [&](std::error_condition err, const out_params& params) {
         LOGINFO("HomeBlks Init completed");
         {

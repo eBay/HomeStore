@@ -31,7 +31,7 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig& cfg, bool init, 
         m_metrics(cfg.get_name().c_str()) {
 
     // TODO: Raise exception when blk_size > page_size or total blks is less than some number etc...
-    m_cache_bm = new sisl::Bitset(cfg.get_total_blks(), id, HS_STATIC_CONFIG(disk_attr.align_size));
+    m_cache_bm = new sisl::Bitset(cfg.get_total_blks(), id, HS_STATIC_CONFIG(drive_attr.align_size));
 
 #ifndef NDEBUG
     for (auto i = 0U; i < cfg.get_total_temp_group(); i++) {

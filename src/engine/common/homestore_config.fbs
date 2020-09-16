@@ -16,7 +16,7 @@ table Btree {
     mem_btree_page_size: uint32 = 8192;
 }
 
-table Cache {  
+table Cache {
     /* Number of entries we ideally want to have per hash bucket. This number if small, will reduce contention and
      * speed of read/writes, but at the cost of increased memory */
     entries_per_hash_bucket: uint32 = 2;
@@ -59,7 +59,6 @@ table LogStore {
 }
 
 table Generic {
-
     /* Percentage of memory to be filled by app before we ask underlying mem allocator to free it up */
     soft_mem_release_threshold: uint32 = 85 (hotswap);
 

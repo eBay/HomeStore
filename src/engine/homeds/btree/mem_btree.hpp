@@ -67,9 +67,6 @@ public:
     static void create_done(MemBtreeStore* store, bnodeid_t m_root_node);
     static void update_sb(MemBtreeStore* store, btree_super_block& sb, btree_cp_sb* cp_sb, bool is_recovery){};
 
-    // static void write_journal_entry(MemBtreeStore* store, const btree_cp_ptr& bcp, sisl::io_blob& j_iob) {}
-    // static bool is_aligned_buf_needed(MemBtreeStore* store, size_t size) { return true; }
-
     static boost::intrusive_ptr< MemBtreeNode >
     alloc_node(MemBtreeStore* store, bool is_leaf,
                bool& is_new_allocation, // indicates if allocated node is same as copy_from
@@ -115,7 +112,7 @@ public:
 
     static void deallocate_mem(uint8_t* mem) { free(mem); }
 
-    static btree_status_t read_node(MemBtreeStore* store, bnodeid_t id,  boost::intrusive_ptr< MemBtreeNode >& bnode) {
+    static btree_status_t read_node(MemBtreeStore* store, bnodeid_t id, boost::intrusive_ptr< MemBtreeNode >& bnode) {
         bnode = reinterpret_cast< MemBtreeNode* >(id);
         return btree_status_t::success;
     }

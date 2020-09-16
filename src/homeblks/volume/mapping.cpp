@@ -32,7 +32,9 @@ uint64_t mapping::get_next_start_key_from_cursor(BtreeQueryCursor& cur) {
 
 mapping::mapping(uint64_t volsize, uint32_t page_size, const std::string& unique_name,
                  trigger_cp_callback trigger_cp_cb, pending_read_blk_cb pending_read_cb) :
-        m_pending_read_blk_cb(pending_read_cb), m_vol_page_size(page_size), m_unique_name(unique_name) {
+        m_pending_read_blk_cb{pending_read_cb},
+        m_vol_page_size{page_size},
+        m_unique_name{unique_name} {
     m_vol_size = volsize;
     m_hb = HomeBlks::safe_instance();
     m_match_item_cb_put =
@@ -42,7 +44,7 @@ mapping::mapping(uint64_t volsize, uint32_t page_size, const std::string& unique
     m_get_size_needed = bind(&mapping::get_size_needed, this, placeholders::_1, placeholders::_2);
 
     // create btree
-    homeds::btree::BtreeConfig btree_cfg(HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size), unique_name.c_str());
+    homeds::btree::BtreeConfig btree_cfg(HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size), unique_name.c_str());
     btree_cfg.set_max_objs(volsize / page_size);
     btree_cfg.set_max_key_size(sizeof(uint32_t));
     btree_cfg.set_max_value_size(page_size);
@@ -54,7 +56,9 @@ mapping::mapping(uint64_t volsize, uint32_t page_size, const std::string& unique
 
 mapping::mapping(uint64_t volsize, uint32_t page_size, const std::string& unique_name, btree_super_block btree_sb,
                  trigger_cp_callback trigger_cp_cb, pending_read_blk_cb pending_read_cb, btree_cp_sb* btree_cp_sb) :
-        m_pending_read_blk_cb(pending_read_cb), m_vol_page_size(page_size), m_unique_name(unique_name) {
+        m_pending_read_blk_cb{pending_read_cb},
+        m_vol_page_size{page_size},
+        m_unique_name{unique_name} {
     m_vol_size = volsize;
     m_hb = HomeBlks::safe_instance();
     m_match_item_cb_put =
@@ -64,7 +68,7 @@ mapping::mapping(uint64_t volsize, uint32_t page_size, const std::string& unique
     m_get_size_needed = bind(&mapping::get_size_needed, this, placeholders::_1, placeholders::_2);
 
     // create btree
-    homeds::btree::BtreeConfig btree_cfg(HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size), unique_name.c_str());
+    homeds::btree::BtreeConfig btree_cfg(HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size), unique_name.c_str());
     btree_cfg.set_max_objs(volsize / page_size);
     btree_cfg.set_max_key_size(sizeof(uint32_t));
     btree_cfg.set_max_value_size(page_size);
@@ -931,7 +935,8 @@ btree_status_t mapping::destroy(blkid_list_ptr& free_blkid_list, uint64_t& free_
     return btree_status_t::success;
 }
 
-btree_status_t mapping::update_unmap_active_indx_tbl(blkid_list_ptr free_list, uint64_t& seq_id, void* key, BtreeQueryCursor& cur, const btree_cp_ptr& bcp, int64_t& size) {
+btree_status_t mapping::update_unmap_active_indx_tbl(blkid_list_ptr free_list, uint64_t& seq_id, void* key,
+                                                     BtreeQueryCursor& cur, const btree_cp_ptr& bcp, int64_t& size) {
     journal_key* j_key = (journal_key*)key;
     uint32_t nlbas_rem = j_key->nlbas;
     uint8_t nlbas_cur;
@@ -950,14 +955,11 @@ btree_status_t mapping::update_unmap_active_indx_tbl(blkid_list_ptr free_list, u
         MappingValue value(ve);
 
         ret = put(cntx, m_key, value, bcp, cur);
-        if (ret != btree_status_t::success) {
-            break;
-        }
+        if (ret != btree_status_t::success) { break; }
         nlbas_rem -= nlbas_cur;
         /* update key with remaining lbas */
         j_key->nlbas = nlbas_rem;
     }
     size = cntx.free_blk_size;
     return ret;
-    
 }

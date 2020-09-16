@@ -683,6 +683,12 @@ public:
 
 public:
     indx_req(uint64_t request_id, Op_type op_type_) : request_id(request_id), op_type(op_type_) {}
+    virtual ~indx_req() = default;
+    indx_req(const indx_req&) = delete;
+    indx_req(indx_req&&) noexcept = delete;
+    indx_req& operator=(const indx_req&) = delete;
+    indx_req& operator=(indx_req&&) noexcept = delete;
+  
     sisl::io_blob create_journal_entry() { return j_ent.create_journal_entry(this); }
 
     void push_indx_alloc_blkid(BlkId& bid) { indx_alloc_blkid_list.push_back(bid); }

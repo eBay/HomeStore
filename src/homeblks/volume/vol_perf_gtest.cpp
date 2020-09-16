@@ -47,8 +47,6 @@ SDS_OPTION_GROUP(perf_test_volume,
                   "size of io in KB"),
                  (app_mem_size, "", "app_mem_size", "size of app mem (including cache) in GB",
                   ::cxxopts::value< uint32_t >()->default_value("4"), "size of app mem (incl cache) in GB"),
-                 (is_file, "", "is_file", "is_it file", ::cxxopts::value< uint32_t >()->default_value("0"),
-                  "is it file"),
                  (init, "", "init", "init", ::cxxopts::value< uint32_t >()->default_value("1"), "init"),
                  (preload_writes, "", "preload_writes", "preload_writes",
                   ::cxxopts::value< uint32_t >()->default_value("100000000"), "preload_writes"),
@@ -90,7 +88,6 @@ int main(int argc, char* argv[]) {
             }
             dev_names.push_back(names[i]);
         }
-        is_file = 1;
     }
 #endif
     simple_store_cfg cfg;
@@ -102,7 +99,6 @@ int main(int argc, char* argv[]) {
         cfg.m_devs = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();
     }
     cfg.m_app_mem_size = SDS_OPTIONS["app_mem_size"].as< uint32_t >() * 1024 * 1024 * 1024;
-    cfg.m_is_file = SDS_OPTIONS["is_file"].as< uint32_t >();
 
     SimpleTestStore test_store(cfg);
     test_store.start_homestore();

@@ -36,7 +36,7 @@ class MappingValue;
  * then we need to use double buffer.
  */
 
-#define HOMEBLKS_SB_SIZE HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size)
+#define HOMEBLKS_SB_SIZE HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size)
 #define HOMEBLKS_SB_MAGIC 0xCEEDDEEB
 #define HOMEBLKS_SB_VERSION 0x2
 
@@ -134,7 +134,7 @@ public:
     virtual void submit_io_batch() override;
 
     virtual vol_interface_req_ptr create_vol_interface_req(void* buf, uint64_t lba, uint32_t nlbas,
-                                                           bool sync = false) override;
+                                                           bool sync = false, const bool noCache = false) override;
 
     virtual VolumePtr create_volume(const vol_params& params) override;
     virtual std::error_condition remove_volume(const boost::uuids::uuid& uuid) override;
@@ -220,6 +220,8 @@ public:
     void meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size);
     void meta_blk_recovery_comp(bool success);
 
+    void verify_vols();
+
 #ifdef _PRERELEASE
     void set_io_flip();
     void set_error_flip();
@@ -244,14 +246,13 @@ private:
 
     // Read volume super block based on blkid
     void homeblks_sb_write();
-    void superblock_init();
+    homeblks_sb* superblock_init();
 
     void vol_mounted(const VolumePtr& vol, vol_state state);
     void vol_state_change(const VolumePtr& vol, vol_state old_state, vol_state new_state);
     void scan_volumes();
 
     void init_thread();
-    void verify_vols();
     void schedule_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool force);
     void do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool force);
     blk_buf_t get_valid_buf(const std::vector< blk_buf_t >& bbuf, bool& rewrite);

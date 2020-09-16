@@ -1113,9 +1113,7 @@ private:
 
             unlock_node(my_node, homeds::thread::locktype::LOCKTYPE_READ);
             if (ret != btree_status_t::success || out_values.size() >= query_req.get_batch_size()) {
-                if (out_values.size() >= query_req.get_batch_size()) {
-                    ret = btree_status_t::has_more;
-                }
+                if (out_values.size() >= query_req.get_batch_size()) { ret = btree_status_t::has_more; }
             }
 
             return ret;
@@ -1818,74 +1816,6 @@ private:
         // have been unlocked by the recursive function and it could also been deleted.
     }
 
-#if 0
-    void write_journal_entry(journal_op op, BtreeNodePtr parent_node, uint32_t parent_indx, BtreeNodePtr left_most_node,
-                             std::vector< BtreeNodePtr >& old_nodes, std::vector< BtreeNodePtr >& new_nodes,
-                             const btree_cp_ptr& bcp, bool is_root) {
-        if (BtreeStoreType != btree_store_type::SSD_BTREE) { return; }
-
-        size_t size = sizeof(btree_journal_entry_hdr) + sizeof(uint64_t) * old_nodes.size() +
-            sizeof(uint64_t) * new_nodes.size() + sizeof(uint64_t) * new_nodes.size() +
-            K::get_fixed_size() * (new_nodes.size() + 1);
-
-        uint8_t* mem = nullptr;
-        uint32_t align = 0;
-        if (btree_store_t::is_aligned_buf_needed(m_btree_store.get(), size)) {
-            align = HS_STATIC_CONFIG(disk_attr.align_size);
-        }
-
-        sisl::io_blob iob(size, align);
-
-        mem = iob.bytes;
-
-        btree_journal_entry_hdr* hdr = (btree_journal_entry_hdr*)(mem);
-        hdr->parent_node_id = parent_node->get_node_id_int();
-        hdr->parent_node_gen = parent_node->get_gen();
-        hdr->parent_indx = parent_indx;
-        hdr->left_child_id = left_most_node->get_node_id_int();
-        hdr->left_child_gen = left_most_node->get_node_id_int();
-        hdr->old_nodes_size = old_nodes.size();
-        hdr->new_nodes_size = new_nodes.size();
-        hdr->new_key_size = 0;
-        hdr->op = op;
-        hdr->is_root = is_root;
-        hdr->cp_id = bcp->cp_id;
-
-        auto old_node_id_pair = btree_journal_entry::get_old_nodes_list(mem);
-        uint64_t* old_node_id = old_node_id_pair.first;
-        for (uint32_t i = 0; i < old_nodes.size(); ++i) {
-            old_node_id[i] = old_nodes[i]->get_node_id_int();
-        }
-        if (bcp) bcp->btree_size.fetch_sub(old_nodes.size());
-
-        auto new_node_id_pair = btree_journal_entry::get_new_nodes_list(mem);
-        uint64_t* new_node_id = new_node_id_pair.first;
-        for (uint32_t i = 0; i < new_nodes.size(); ++i) {
-            new_node_id[i] = new_nodes[i]->get_node_id_int();
-        }
-        if (bcp) bcp->btree_size.fetch_add(new_nodes.size());
-
-        auto new_bt_node_gen_pair = btree_journal_entry::get_new_node_gen(mem);
-        uint64_t* new_node_gen = new_bt_node_gen_pair.first;
-        for (uint32_t i = 0; i < new_nodes.size(); ++i) {
-            new_node_gen[i] = new_nodes[i]->get_gen();
-        }
-
-        auto key_pair = btree_journal_entry::get_key(mem);
-        uint8_t* key = key_pair.first;
-        for (uint32_t indx = parent_indx; indx <= parent_indx + new_nodes.size(); ++indx) {
-            if (indx == parent_node->get_total_entries()) { break; }
-            K pkey;
-            parent_node->get_nth_key(indx, &pkey, false);
-            auto blob = pkey.get_blob();
-            assert(K::get_fixed_size() == blob.size);
-            memcpy(key, blob.bytes, blob.size);
-            key = (uint8_t*)((uint64_t)key + blob.size);
-        }
-        btree_store_t::write_journal_entry(m_btree_store.get(), bcp, iob);
-    }
-#endif
-
     btree_status_t check_split_root(const BtreeKey& k, const BtreeValue& v, btree_put_type& putType,
                                     BtreeUpdateRequest< K, V >* bur = nullptr, const btree_cp_ptr& bcp = nullptr) {
         int ind;
@@ -2056,6 +1986,7 @@ private:
         return ret;
     }
 
+public:
     btree_status_t create_btree_replay(btree_journal_entry* jentry, const btree_cp_ptr& bcp) {
         if (jentry) {
             BT_DEBUG_ASSERT_CMP(jentry->is_root, ==, true, ,
@@ -2127,6 +2058,7 @@ private:
         return btree_status_t::success;
     }
 
+private:
     void recover_child_nodes_in_split(const BtreeNodePtr& child_node1,
                                       const std::vector< bt_journal_node_info* >& j_child_nodes,
                                       const btree_cp_ptr& bcp) {

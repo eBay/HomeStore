@@ -5,20 +5,22 @@
 #ifndef OMSTORE_MEMPIECE_HPP
 #define OMSTORE_MEMPIECE_HPP
 
-#include "tagged_ptr.hpp"
-#include <cassert>
-#include <fds/utils.hpp>
-#include <vector>
-#include <cstdint>
-#include <boost/optional.hpp>
-#include <sstream>
-#include <mutex>
-#include <utility/atomic_counter.hpp>
+
 #include <atomic>
-#include "engine/common/homestore_config.hpp"
-#include <utility/obj_life_counter.hpp>
+#include <cassert>
+#include <cstdint>
+#include <mutex>
+#include <sstream>
+#include <vector>
+
+#include "boost/optional.hpp"
 #include "engine/common/homestore_assert.hpp"
-#include <iomgr/iomgr.hpp>
+#include "engine/common/homestore_config.hpp"
+#include "fds/utils.hpp"
+#include "iomgr/iomgr.hpp"
+#include "tagged_ptr.hpp"
+#include "utility/atomic_counter.hpp"
+#include "utility/obj_life_counter.hpp"
 
 namespace homeds {
 using namespace homestore;
@@ -95,7 +97,7 @@ struct MemPiece : public sisl::ObjLifeCounter< MemPiece > {
     }
 
     std::string to_string() const {
-        std::stringstream ss;
+        std::ostringstream ss;
         ss << "ptr = " << (void*)ptr() << " size = " << size() << " offset = " << offset();
         return ss.str();
     }
@@ -141,8 +143,14 @@ public:
         assert(size || (ptr == nullptr));
     }
 
-    MemVector() : ObjLifeCounter(), m_refcnt(0) { m_list.reserve(1); }
-    ~MemVector() { m_list.erase(m_list.begin(), m_list.end()); }
+    MemVector() : ObjLifeCounter(), m_refcnt(0)
+    {
+        m_list.reserve(1);
+    }
+    ~MemVector() {
+        std::unique_lock< std::recursive_mutex > mtx(m_mtx);
+        m_list.clear();
+    }
 
     friend void intrusive_ptr_add_ref(MemVector* mvec) {
         int cnt = mvec->m_refcnt.fetch_add(1);
@@ -151,26 +159,34 @@ public:
 
     friend void intrusive_ptr_release(MemVector* mvec) {
         if (mvec->m_refcnt.fetch_sub(1, std::memory_order_relaxed) != 1) { return; }
-        for (auto i = 0u; i < mvec->m_list.size(); i++) {
-            if (mvec->m_list[i].ptr() != nullptr) {
-                iomanager.iobuf_free(mvec->m_list[i].ptr());
-            } else {
-                assert(0);
+        {
+            std::unique_lock< std::recursive_mutex > mtx(mvec->m_mtx);
+            for (size_t i{0}; i < mvec->m_list.size(); i++) {
+                if (mvec->m_list[i].ptr() != nullptr) {
+                    iomanager.iobuf_free(mvec->m_list[i].ptr());
+                } else {
+                    assert(0);
+                }
             }
         }
         delete (mvec);
     }
 
-    std::vector< MemPiece > get_m_list() const { return m_list; }
+    std::vector< MemPiece > get_m_list() const
+    {
+        std::unique_lock< std::recursive_mutex > mtx(m_mtx);
+        return m_list;
+    }
     void copy(const MemVector& other) {
         assert(other.m_refcnt > 0);
+        std::unique_lock< std::recursive_mutex > mtx(m_mtx);
         m_list = other.get_m_list();
     }
     uint32_t npieces() const { return (m_list.size()); }
 
     void set(uint8_t* ptr, uint32_t size, uint32_t offset) {
         std::unique_lock< std::recursive_mutex > mtx(m_mtx);
-        m_list.erase(m_list.begin(), m_list.end());
+        m_list.clear();
         MemPiece m(ptr, size, offset);
         m_list.push_back(m);
     }
@@ -193,6 +209,7 @@ public:
     }
 
     const MemPiece& get_nth_piece(uint8_t nth) const {
+        std::unique_lock< std::recursive_mutex > mtx(m_mtx);
         if (nth < m_list.size()) {
             return m_list.at(nth);
         } else {
@@ -202,6 +219,7 @@ public:
     }
 
     MemPiece& get_nth_piece_mutable(uint8_t nth) {
+        std::unique_lock< std::recursive_mutex > mtx(m_mtx);
         if (nth < m_list.size()) {
             return m_list[nth];
         } else {
@@ -212,11 +230,11 @@ public:
 
     std::string to_string() const {
         auto n = npieces();
-        std::stringstream ss;
+        std::ostringstream ss;
 
         if (n > 1) ss << "Pieces = " << n << "\n";
-        for (auto i = 0U; i < n; i++) {
-            auto& p = get_nth_piece(i);
+        for (decltype(n) i{0}; i < n; ++i) {
+            const auto& p = get_nth_piece(i);
             ss << "MemPiece[" << i << "]: " << p.to_string() << ((n > 1) ? "\n" : "");
         }
         return ss.str();
@@ -232,9 +250,14 @@ public:
         return added;
     }
 
-    void push_back(const MemPiece& piece) { m_list.push_back(piece); }
+    void push_back(const MemPiece& piece)
+    {
+        std::unique_lock< std::recursive_mutex > mtx(m_mtx);
+        m_list.push_back(piece);
+    }
 
     MemPiece& insert_at(uint32_t ind, const MemPiece& piece) {
+        std::unique_lock< std::recursive_mutex > mtx(m_mtx);
         assert(ind <= m_list.size());
         auto it = m_list.emplace((m_list.begin() + ind), piece);
         return *it;
@@ -377,6 +400,7 @@ private:
 
         uint32_t ind;
         // If we found an offset in search we got to fail the add
+        std::unique_lock< std::recursive_mutex > mtx(m_mtx);
         if (bsearch(mp.offset(), -1, &ind)) { return false; }
 
         // If we overlap with the next entry where it is to be inserted, fail the add
@@ -403,6 +427,7 @@ private:
      * zero.
      */
     bool bsearch(uint32_t offset, int start, uint32_t* out_ind) const {
+        std::unique_lock< std::recursive_mutex > mtx(m_mtx);
         int end = m_list.size();
         uint32_t mid = 0;
 

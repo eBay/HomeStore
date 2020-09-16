@@ -226,7 +226,6 @@ public:
         params.app_mem_size = 4 * 1024 * 1024 * 1024ul;
         params.disk_init = init;
         params.devices = device_info;
-        params.is_file = true;
         params.init_done_cb = std::bind(&MinHS::init_done_cb, this, std::placeholders::_1, std::placeholders::_2);
         params.vol_mounted_cb = std::bind(&MinHS::vol_mounted_cb, this, std::placeholders::_1, std::placeholders::_2);
         params.vol_state_change_cb = std::bind(&MinHS::vol_state_change_cb, this, std::placeholders::_1,

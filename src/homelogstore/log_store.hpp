@@ -85,6 +85,7 @@ public:
 class HomeLogStore;
 class HomeLogStoreMgr {
     friend class HomeLogStore;
+    friend class LogDev;
 
 public:
     static HomeLogStoreMgr& instance() {

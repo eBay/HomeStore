@@ -1,14 +1,15 @@
 #pragma once
-#include <fds/malloc_helper.hpp>
-#include "engine/common/homestore_config.hpp"
-#include "homelogstore/log_store.hpp"
+
 #include "engine/blkstore/blkstore.hpp"
+#include "engine/common/homestore_config.hpp"
+#include "engine/device/device.h"
 #include "engine/homeds/btree/btree.hpp"
 #include "engine/homeds/btree/ssd_btree.hpp"
-#include "engine/device/device.h"
-#include <fds/utils.hpp>
-#include <engine/blkstore/blkstore.hpp>
 #include "engine/meta/meta_blks_mgr.hpp"
+#include "fds/malloc_helper.hpp"
+#include "fds/utils.hpp"
+#include "homelogstore/log_store.hpp"
+
 #include "homestore_base.hpp"
 
 using namespace homeds::btree;
@@ -40,11 +41,16 @@ public:
     virtual ~HomeStore() = default;
 
     void init(const hs_input_params& input) {
-        auto& hs_config = HomeStoreStaticConfig::instance();
+        if (input.devices.size() == 0) {
+            LOGERROR("no devices given");
+            throw std::invalid_argument("null device list");
+        }
 
         /* set the homestore static config parameters */
+        auto& hs_config = HomeStoreStaticConfig::instance();
         hs_config.input = input;
-        hs_config.disk_attr = (input.disk_attr) ? *input.disk_attr : get_disk_attrs(input.is_file);
+        hs_config.drive_attr =
+            (input.drive_attr) ? *input.drive_attr : get_drive_attrs(input.devices, input.device_type);
 
 #ifndef NDEBUG
         flip::Flip::instance().start_rpc_server();
@@ -56,21 +62,13 @@ public:
          * conservatively 4 entries in a node with avg size of 2 for each blk.
          * Note :- This restriction will go away once btree start supporinting higher size value.
          */
-        hs_config.engine.max_blk_cnt = hs_config.disk_attr.atomic_phys_page_size / (4 * 2);
+        hs_config.engine.max_blk_cnt = hs_config.drive_attr.atomic_phys_page_size / (4 * 2);
         hs_config.engine.min_io_size =
-            std::min(input.min_virtual_page_size, (uint32_t)hs_config.disk_attr.atomic_phys_page_size);
+            std::min(input.min_virtual_page_size, (uint32_t)hs_config.drive_attr.atomic_phys_page_size);
         m_data_pagesz = input.min_virtual_page_size;
 
-        if (input.devices.size() == 0) {
-            LOGERROR("no devices given");
-            throw std::invalid_argument("null device list");
-        }
-
-        std::ofstream hs_config_stream("hs_static_config.json");
-        auto j = hs_config.to_json();
-        hs_config_stream << j.dump(4);
         LOGINFO("HomeStore starting with dynamic config version: {} static config: {}", HS_DYNAMIC_CONFIG(version),
-                j.dump(4));
+                hs_config.to_json().dump(4));
 
 #ifndef NDEBUG
         hs_config.validate();
@@ -80,12 +78,12 @@ public:
         uint64_t cache_size = ResourceMgr::get_cache_size();
         sisl::set_memory_release_rate(HS_DYNAMIC_CONFIG(generic.mem_release_rate));
 
-        m_cache = std::make_unique< Cache< BlkId > >(cache_size, hs_config.disk_attr.atomic_phys_page_size);
+        m_cache = std::make_unique< Cache< BlkId > >(cache_size, hs_config.drive_attr.atomic_phys_page_size);
 
         /* create device manager */
         m_dev_mgr = std::make_unique< DeviceManager >(
             std::bind(&HomeStore::new_vdev_found, this, std::placeholders::_1, std::placeholders::_2),
-            sizeof(sb_blkstore_blob), virtual_dev_process_completions, input.is_file, input.system_uuid,
+            sizeof(sb_blkstore_blob), virtual_dev_process_completions, input.device_type, input.system_uuid,
             std::bind(&HomeStore::process_vdev_error, this, std::placeholders::_1));
     }
 
@@ -189,7 +187,7 @@ protected:
             struct blkstore_blob blob;
             blob.type = blkstore_type::DATA_STORE;
             uint64_t size = (90 * m_dev_mgr->get_total_cap()) / 100;
-            size = sisl::round_up(size, HS_STATIC_CONFIG(disk_attr.phys_page_size));
+            size = sisl::round_up(size, HS_STATIC_CONFIG(drive_attr.phys_page_size));
             m_size_avail = size;
             LOGINFO("maximum capacity for data blocks is {}", m_size_avail);
             m_data_blk_store = std::make_unique< data_blkstore_t >(
@@ -212,14 +210,14 @@ protected:
             struct blkstore_blob blob;
             blob.type = blkstore_type::INDEX_STORE;
             uint64_t size = (2 * m_dev_mgr->get_total_cap()) / 100;
-            size = sisl::round_up(size, HS_STATIC_CONFIG(disk_attr.phys_page_size));
+            size = sisl::round_up(size, HS_STATIC_CONFIG(drive_attr.phys_page_size));
             m_index_blk_store = std::make_unique< index_blkstore_t< IndexBuffer > >(
                 m_dev_mgr.get(), m_cache.get(), size, RD_MODIFY_WRITEBACK_CACHE, 0, (char*)&blob, sizeof(blkstore_blob),
-                HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size), "index", true);
+                HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size), "index", true);
         } else {
             m_index_blk_store = std::make_unique< index_blkstore_t< IndexBuffer > >(
                 m_dev_mgr.get(), m_cache.get(), vb, RD_MODIFY_WRITEBACK_CACHE,
-                HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size), "index", (vb->failed ? true : false), true);
+                HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size), "index", (vb->failed ? true : false), true);
             if (vb->failed) {
                 m_vdev_failed = true;
                 LOGINFO("index block store is in failed state");
@@ -235,14 +233,14 @@ protected:
             blob.type = blkstore_type::SB_STORE;
             blob.blkid.set(BlkId::invalid_internal_id());
             uint64_t size = (1 * m_dev_mgr->get_total_cap()) / 100;
-            size = sisl::round_up(size, HS_STATIC_CONFIG(disk_attr.phys_page_size));
+            size = sisl::round_up(size, HS_STATIC_CONFIG(drive_attr.phys_page_size));
             m_sb_blk_store = std::make_unique< sb_blkstore_t >(
                 m_dev_mgr.get(), m_cache.get(), size, PASS_THRU, HS_STATIC_CONFIG(input.devices).size() - 1,
-                (char*)&blob, sizeof(sb_blkstore_blob), HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size), "superblock",
-                false);
+                (char*)&blob, sizeof(sb_blkstore_blob), HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size),
+                "superblock", false);
 
             /* allocate a new blk id */
-            BlkId bid = alloc_sb_blk(HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size));
+            BlkId bid = alloc_sb_blk(HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size));
             blob.type = blkstore_type::SB_STORE;
             blob.blkid.set(bid);
 
@@ -251,7 +249,7 @@ protected:
         } else {
             /* create a blkstore */
             m_sb_blk_store = std::make_unique< sb_blkstore_t >(m_dev_mgr.get(), m_cache.get(), vb, PASS_THRU,
-                                                               HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size),
+                                                               HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size),
                                                                "superblock", false, false);
             if (vb->failed) {
                 m_vdev_failed = true;
@@ -281,7 +279,7 @@ protected:
             struct blkstore_blob blob;
             blob.type = blkstore_type::META_STORE;
             uint64_t size = (1 * m_dev_mgr->get_total_cap()) / 100;
-            size = sisl::round_up(size, HS_STATIC_CONFIG(disk_attr.phys_page_size));
+            size = sisl::round_up(size, HS_STATIC_CONFIG(drive_attr.phys_page_size));
             m_meta_blk_store =
                 std::make_unique< meta_blkstore_t >(m_dev_mgr.get(), m_cache.get(), size, PASS_THRU, 0, (char*)&blob,
                                                     sizeof(blkstore_blob), META_BLK_PAGE_SZ, "meta", false);
@@ -313,14 +311,14 @@ protected:
             struct blkstore_blob blob;
             blob.type = blkstore_type::LOGDEV_STORE;
             uint64_t size = (1 * m_dev_mgr->get_total_cap()) / 100;
-            size = sisl::round_up(size, HS_STATIC_CONFIG(disk_attr.phys_page_size));
+            size = sisl::round_up(size, HS_STATIC_CONFIG(drive_attr.phys_page_size));
             m_logdev_blk_store = std::make_unique< BlkStore< VdevVarSizeBlkAllocatorPolicy > >(
                 m_dev_mgr.get(), m_cache.get(), size, PASS_THRU, 0, (char*)&blob, sizeof(blkstore_blob),
-                HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size), "logdev", false,
+                HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size), "logdev", false,
                 std::bind(&LogDev::process_logdev_completions, &HomeLogStoreMgr::logdev(), std::placeholders::_1));
         } else {
             m_logdev_blk_store = std::make_unique< BlkStore< VdevVarSizeBlkAllocatorPolicy > >(
-                m_dev_mgr.get(), m_cache.get(), vb, PASS_THRU, HS_STATIC_CONFIG(disk_attr.atomic_phys_page_size),
+                m_dev_mgr.get(), m_cache.get(), vb, PASS_THRU, HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size),
                 "logdev", (vb->failed ? true : false), false,
                 std::bind(&LogDev::process_logdev_completions, &HomeLogStoreMgr::logdev(), std::placeholders::_1));
             if (vb->failed) {
@@ -346,16 +344,20 @@ protected:
     virtual DeviceManager* get_device_manager() override { return m_dev_mgr.get(); }
 
 private:
-    disk_attributes get_disk_attrs(bool is_file) {
-        disk_attributes attr;
-        /* We should take these params from the config file or from the disks directly */
-        attr.phys_page_size = 4096;
-        attr.align_size = 512;
+    iomgr::drive_attributes get_drive_attrs(const std::vector< dev_info >& devices, const iomgr_drive_type drive_type) {
+        auto drive_iface = iomgr::IOManager::instance().default_drive_interface();
+        iomgr::drive_attributes attr = drive_iface->get_attributes(devices[0].dev_names, drive_type);
 #ifndef NDEBUG
-        attr.atomic_phys_page_size = is_file ? 4096 : 512;
-#else
-        attr.atomic_phys_page_size = 4096;
+        for (auto i{1u}; i < devices.size(); ++i) {
+            auto observed_attr = drive_iface->get_attributes(devices[i].dev_names, drive_type);
+            if (attr != observed_attr) {
+                HS_ASSERT(DEBUG, 0,
+                          "Expected all phys dev have same attributes, prev device attr={}, this device attr={}",
+                          attr.to_json().dump(4), observed_attr.to_json().dump(4));
+            }
+        }
 #endif
+
         return attr;
     }
 

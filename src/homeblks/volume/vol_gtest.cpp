@@ -2,33 +2,34 @@
     @file   vol_gtest.cpp
     Volume Google Tests
  */
-#include <gtest/gtest.h>
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
-#include <api/vol_interface.hpp>
-#include <iomgr/iomgr.hpp>
-#include <iomgr/aio_drive_interface.hpp>
-#include <iomgr/spdk_drive_interface.hpp>
-#include <boost/uuid/uuid_generators.hpp>
-#include <boost/uuid/uuid_io.hpp>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <string>
-#include <engine/homeds/bitmap/bitset.hpp>
-#include <atomic>
-#include <string>
-#include <utility/thread_buffer.hpp>
-#include <chrono>
 #include <thread>
-#include <boost/filesystem.hpp>
-#include <fds/utils.hpp>
-#include <fds/atomic_status_counter.hpp>
-extern "C" {
+
 #include <fcntl.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <sys/timeb.h>
-}
+
+#include "api/vol_interface.hpp"
+#include "boost/uuid/uuid_generators.hpp"
+#include "boost/uuid/uuid_io.hpp"
+#include "engine/homeds/bitmap/bitset.hpp"
+#include "fds/utils.hpp"
+#include "fds/atomic_status_counter.hpp"
+#include "iomgr/aio_drive_interface.hpp"
+#include "iomgr/iomgr.hpp"
+#include "iomgr/spdk_drive_interface.hpp"
+#include "sds_logging/logging.h"
+#include "sds_options/options.h"
+#include "utility/thread_buffer.hpp"
+
+#include "gtest/gtest.h"
 
 using namespace homestore;
 using namespace flip;
@@ -96,6 +97,8 @@ struct TestCfg {
     bool expect_io_error = false;
     uint32_t p_volume_size = 60;
     bool is_spdk = false;
+    bool read_cache{false};
+    bool write_cache{false};
 };
 
 struct TestOutput {
@@ -137,6 +140,12 @@ public:
     enum class job_status_t { not_started = 0, running = 1, stopped = 2, completed = 3 };
 
     TestJob(VolTest* test) : m_voltest(test), m_start_time(Clock::now()) {}
+    virtual ~TestJob() = default;
+    TestJob(const TestJob&) = delete;
+    TestJob(TestJob&&) noexcept = delete;
+    TestJob& operator=(const TestJob&) = delete;
+    TestJob& operator=(TestJob&&) noexcept = delete;
+
     virtual void run_one_iteration() = 0;
     virtual void on_one_iteration_completed(const boost::intrusive_ptr< io_req_t >& req) = 0;
     virtual bool time_to_stop() const = 0;
@@ -228,28 +237,50 @@ struct io_req_t : public vol_interface_req {
     ssize_t size;
     off_t offset;
     int fd;
-    uint8_t* validate_buf;
+    uint8_t* buffer{nullptr};
+    uint8_t* validate_buffer{nullptr};
     bool is_read;
     uint64_t cur_vol;
     std::shared_ptr< vol_info_t > vol_info;
     bool done = false;
 
-    io_req_t(const std::shared_ptr< vol_info_t >& vinfo, void* wbuf, uint64_t lba, uint32_t nlbas) :
-            vol_interface_req(wbuf, lba, nlbas),
+    io_req_t(const std::shared_ptr< vol_info_t >& vinfo, const bool write, uint8_t* const buf,
+    		 const uint64_t lba, const uint32_t nlbas, const bool cache) :
+            vol_interface_req(buf, lba, nlbas, false, cache),
             vol_info(vinfo) {
         auto page_size = VolInterface::get_instance()->get_page_size(vinfo->vol);
         size = nlbas * page_size;
         offset = lba * page_size;
         fd = vinfo->fd;
-        is_read = (wbuf == nullptr);
+        is_read = !write;
         cur_vol = vinfo->vol_idx;
+        buffer = buf;
 
-        validate_buf = iomanager.iobuf_alloc(512, size);
-        assert(validate_buf != nullptr);
-        if (wbuf) memcpy(validate_buf, wbuf, size);
+        validate_buffer = iomanager.iobuf_alloc(512, size);
+        assert(validate_buffer != nullptr);
+            
+        if (write)
+        {
+            // make copy of buffer so validation works properly
+            ::memcpy(static_cast<void*>(validate_buffer), static_cast<const void*>(buffer), size);
+        }
+
     }
 
-    virtual ~io_req_t() { iomanager.iobuf_free(validate_buf); }
+    virtual ~io_req_t() override
+    {
+        iomanager.iobuf_free(validate_buffer);
+        if (!cache)
+        {
+            // buffer not owned by homestore
+            iomanager.iobuf_free(buffer); 
+        }
+    }
+
+    io_req_t(const io_req_t&) = delete;
+    io_req_t(io_req_t&&) noexcept = delete;
+    io_req_t& operator=(const io_req_t&) = delete;
+    io_req_t& operator=(io_req_t&&) noexcept = delete;
 };
 
 TestCfg tcfg;            // Config for each VolTest
@@ -306,9 +337,17 @@ public:
         srandom(time(NULL));
     }
 
-    ~VolTest() {
+    virtual ~VolTest() override {
         if (init_buf) { iomanager.iobuf_free((uint8_t*)init_buf); }
     }
+
+    VolTest(const VolTest&) = delete;
+    VolTest(VolTest&&) noexcept = delete;
+    VolTest& operator=(const VolTest&) = delete;
+    VolTest& operator=(VolTest&&) noexcept = delete;
+
+    virtual void SetUp() override{};
+    virtual void TearDown() override{};
 
     void remove_files() {
         /* no need to delete the user created file/disk */
@@ -370,17 +409,16 @@ public:
         params.app_mem_size = 5 * 1024 * 1024 * 1024ul;
         params.disk_init = tcfg.init;
         params.devices = device_info;
-        params.is_file = tcfg.dev_names.size() ? false : true;
         params.init_done_cb = bind_this(VolTest::init_done_cb, 2);
         params.vol_mounted_cb = bind_this(VolTest::vol_mounted_cb, 2);
         params.vol_state_change_cb = bind_this(VolTest::vol_state_change_cb, 3);
         params.vol_found_cb = bind_this(VolTest::vol_found_cb, 1);
         params.end_of_batch_cb = bind_this(VolTest::process_end_of_batch, 1);
 
-        params.disk_attr = disk_attributes();
-        params.disk_attr->phys_page_size = tcfg.phy_page_size;
-        params.disk_attr->align_size = 512;
-        params.disk_attr->atomic_phys_page_size = tcfg.atomic_phys_page_size;
+        params.drive_attr = iomgr::drive_attributes();
+        params.drive_attr->phys_page_size = tcfg.phy_page_size;
+        params.drive_attr->align_size = 512;
+        params.drive_attr->atomic_phys_page_size = tcfg.atomic_phys_page_size;
 
         boost::uuids::string_generator gen;
         params.system_uuid = gen("01970496-0262-11e9-8eb2-f2801f1b9fd1");
@@ -713,7 +751,11 @@ private:
 class IOTestJob : public TestJob {
 public:
     IOTestJob(VolTest* test, load_type_t type = tcfg.load_type) : TestJob(test), m_load_type(type) {}
-    virtual ~IOTestJob() = default;
+    virtual ~IOTestJob() override = default;
+    IOTestJob(const IOTestJob&) = delete;
+    IOTestJob(IOTestJob&&) noexcept = delete;
+    IOTestJob& operator=(const IOTestJob&) = delete;
+    IOTestJob& operator=(IOTestJob&&) noexcept = delete;
 
     virtual void run_one_iteration() override {
         int cnt = 0;
@@ -729,12 +771,12 @@ public:
         } else {
             if (req->is_read && (tcfg.read_verify || tcfg.verify_hdr || tcfg.verify_data)) {
                 /* read from the file and verify it */
-                auto ret = pread(req->fd, req->validate_buf, req->size, req->offset);
+                auto ret = pread(req->fd, req->validate_buffer, req->size, req->offset);
                 assert(ret == req->size);
                 verify(req);
             } else if (!req->is_read) {
                 /* write to a file */
-                auto ret = pwrite(req->fd, req->validate_buf, req->size, req->offset);
+                auto ret = pwrite(req->fd, req->validate_buffer, req->size, req->offset);
                 assert(ret == req->size);
             }
         }
@@ -768,7 +810,7 @@ public:
 
 protected:
     load_type_t m_load_type;
-    uint64_t m_cur_vol = 0;
+    std::atomic< int64_t > m_cur_vol = 0;
     std::atomic< int64_t > m_outstanding_ios = 0;
 
 protected:
@@ -872,25 +914,25 @@ protected:
     }
 
     bool write_vol(uint32_t cur, uint64_t lba, uint64_t nlbas) {
-        uint8_t* wbuf;
         auto vinfo = m_voltest->vol_info[cur];
         auto vol = vinfo->vol;
         if (vol == nullptr) { return false; }
 
-        uint64_t size = nlbas * VolInterface::get_instance()->get_page_size(vol);
-        wbuf = iomanager.iobuf_alloc(512, size);
+        const uint64_t size{nlbas * VolInterface::get_instance()->get_page_size(vol)};
+        uint8_t* const wbuf{iomanager.iobuf_alloc(512, size)};
 
         /* buf will be owned by homestore after sending the IO. so we need to allocate buf1 which will be used
          * to write to a file after ios are completed.
          */
         populate_buf(wbuf, size, lba, vinfo.get());
-        auto vreq = boost::intrusive_ptr< io_req_t >(new io_req_t(vinfo, wbuf, lba, nlbas));
+        auto vreq = boost::intrusive_ptr< io_req_t >(new io_req_t(vinfo, true, wbuf, lba, nlbas, tcfg.write_cache));
         vreq->cookie = (void*)this;
 
         ++m_voltest->output.write_cnt;
         ++m_outstanding_ios;
         auto ret_io = VolInterface::get_instance()->write(vol, vreq);
-        LOGDEBUG("Wrote lba: {}, nlbas: {} outstanding_ios={}", lba, nlbas, m_outstanding_ios.load());
+        LOGDEBUG("Wrote lba: {}, nlbas: {} outstanding_ios={}, cache={}", lba, nlbas, m_outstanding_ios.load(),
+                 (tcfg.write_cache != 0 ? true : false) );
         if (ret_io != no_error) { return false; }
         return true;
     }
@@ -944,13 +986,21 @@ protected:
         auto vol = vinfo->vol;
         if (vol == nullptr) { return false; }
 
-        auto vreq = boost::intrusive_ptr< io_req_t >(new io_req_t(vinfo, nullptr, lba, nlbas));
+        uint8_t* rbuf{nullptr};
+        if (!(tcfg.read_cache)) {
+            // if using iovec mode must allocate memory directly
+            const uint64_t size{nlbas * VolInterface::get_instance()->get_page_size(vol)};
+            rbuf = iomanager.iobuf_alloc(512, size);
+        }
+
+        auto vreq = boost::intrusive_ptr< io_req_t >(new io_req_t(vinfo, false, rbuf, lba, nlbas, tcfg.read_cache));
         vreq->cookie = (void*)this;
 
         ++m_voltest->output.read_cnt;
         ++m_outstanding_ios;
         auto ret_io = VolInterface::get_instance()->read(vol, vreq);
-        LOGDEBUG("Read lba: {}, nlbas: {} outstanding_ios={}", lba, nlbas, m_outstanding_ios.load());
+        LOGDEBUG("Read lba: {}, nlbas: {} outstanding_ios={}, cache={}", lba, nlbas, m_outstanding_ios.load(),
+                 (tcfg.read_cache !=0 ? true : false));
         if (ret_io != no_error) { return false; }
         return true;
     }
@@ -959,28 +1009,79 @@ protected:
         auto& vol_req = (vol_interface_req_ptr&)req;
 
         int64_t tot_size_read = 0;
-        for (auto& info : vol_req->read_buf_list) {
-            auto offset = info.offset;
-            auto size = info.size;
-            auto buf = info.buf;
-            while (size != 0) {
-                uint32_t size_read = 0;
-                sisl::blob b = VolInterface::get_instance()->at_offset(buf, offset);
+        if (tcfg.read_cache) {
+            for (auto& info : vol_req->read_buf_list) {
+                auto offset = info.offset;
+                auto size = info.size;
+                auto buf = info.buf;
+                while (size != 0) {
+                    uint32_t size_read = 0;
+                    sisl::blob b = VolInterface::get_instance()->at_offset(buf, offset);
+                    const uint8_t* const validate_buffer{req->validate_buffer + tot_size_read};
+                    size_read = tcfg.vol_page_size;
+                    int j = 0;
+                    if (tcfg.verify_data) {
+                        j = ::memcmp(static_cast<const void*>(b.bytes), static_cast< const void* >(validate_buffer),
+                                   size_read);
+                        m_voltest->output.match_cnt++;
+                    } else {
+                        /* we will only verify the header. We write lba number in the header */
+                        const uint64_t validate_lba{*reinterpret_cast< const uint64_t* >(validate_buffer)};
+                        if ((validate_lba == 0) || (validate_lba == *reinterpret_cast< const uint64_t* >(b.bytes))) {
+                            /* copy the data */
+                            j = 0;
+                            auto ret = pwrite(req->fd, b.bytes, b.size, tot_size_read + req->offset);
+                            assert(ret == b.size);
+                        }
+                        m_voltest->output.hdr_only_match_cnt++;
+                    }
 
-                size_read = tcfg.vol_page_size;
+                    if (j) {
+                        if (can_panic) {
+                            /* verify the header */
+                            j = ::memcmp(static_cast< const void* >(b.bytes),
+                                         static_cast< const void* >(validate_buffer), size_read);
+                            if (j != 0) { LOGINFO("header mismatch lba read {}", *reinterpret_cast< const uint64_t* >(b.bytes)); }
+                            LOGINFO("mismatch found lba {} nlbas {} total_size_read {}", req->lba, req->nlbas,
+                                    tot_size_read);
+#ifndef NDEBUG
+                            VolInterface::get_instance()->print_tree(req->vol_info->vol);
+#endif
+                            LOGINFO("lba {} {}", req->lba, req->nlbas);
+                            std::this_thread::sleep_for(std::chrono::seconds(5));
+                            sleep(30);
+                            assert(0);
+                        }
+                        // need to return false
+                        return false;
+                    }
+                    size -= size_read;
+                    offset += size_read;
+                    tot_size_read += size_read;
+                }
+            }
+        } else
+        {
+            const uint32_t size_read{tcfg.vol_page_size};
+            uint64_t size{static_cast<uint64_t>(req->size)};
+            while (size != 0) {
+                const uint8_t* const read_buffer{req->buffer + tot_size_read};
+                const uint8_t* const validate_buffer{req->validate_buffer + tot_size_read};
                 int j = 0;
                 if (tcfg.verify_data) {
-                    j = memcmp((void*)b.bytes, (uint8_t*)((uint64_t)req->validate_buf + tot_size_read), size_read);
+                    j = ::memcmp(static_cast< const void* >(read_buffer), static_cast< const void* >(validate_buffer),
+                                 size_read);
                     m_voltest->output.match_cnt++;
                 } else {
                     /* we will only verify the header. We write lba number in the header */
-                    uint64_t validate_lba = *((uint64_t*)((uint64_t)req->validate_buf + tot_size_read));
-
-                    if (validate_lba == 0 || validate_lba == *((uint64_t*)b.bytes)) {
+                    const uint64_t validate_lba{*reinterpret_cast< const uint64_t* >(validate_buffer)};
+                    if ((validate_lba == 0) ||
+                        (validate_lba == *reinterpret_cast< const uint64_t* >(read_buffer))) {
                         /* copy the data */
                         j = 0;
-                        auto ret = pwrite(req->fd, b.bytes, b.size, tot_size_read + req->offset);
-                        assert(ret == b.size);
+                        auto ret = pwrite(req->fd, read_buffer, req->size - tot_size_read,
+                                          tot_size_read + req->offset);
+                        assert(ret == req->size - tot_size_read);
                     }
                     m_voltest->output.hdr_only_match_cnt++;
                 }
@@ -988,9 +1089,11 @@ protected:
                 if (j) {
                     if (can_panic) {
                         /* verify the header */
-                        j = memcmp((void*)b.bytes, (uint8_t*)((uint64_t)req->validate_buf + tot_size_read),
-                                   sizeof(uint64_t));
-                        if (j != 0) { LOGINFO("header mismatch lba read {}", *((uint64_t*)b.bytes)); }
+                        j = ::memcmp(static_cast< const void* >(read_buffer),
+                                     static_cast< const void* >(validate_buffer), size_read);
+                        if (j != 0) {
+                            LOGINFO("header mismatch lba read {}", *reinterpret_cast< const uint64_t* >(read_buffer));
+                        }
                         LOGINFO("mismatch found lba {} nlbas {} total_size_read {}", req->lba, req->nlbas,
                                 tot_size_read);
 #ifndef NDEBUG
@@ -1005,9 +1108,9 @@ protected:
                     return false;
                 }
                 size -= size_read;
-                offset += size_read;
                 tot_size_read += size_read;
             }
+
         }
         assert(tot_size_read == req->size);
         return true;
@@ -1020,6 +1123,11 @@ public:
         m_start_time = Clock::now();
         LOGINFO("verifying vols");
     }
+    virtual ~VolVerifyJob() override = default;
+    VolVerifyJob(const VolVerifyJob&) = delete;
+    VolVerifyJob(VolVerifyJob&&) noexcept = delete;
+    VolVerifyJob& operator=(const VolVerifyJob&) = delete;
+    VolVerifyJob& operator=(VolVerifyJob&&) noexcept = delete;
 
     void run_one_iteration() override {
         for (uint32_t cur = 0u; cur < tcfg.max_vols; ++cur) {
@@ -1365,6 +1473,10 @@ SDS_OPTION_GROUP(
      "0 or 1"),
     (p_volume_size, "", "p_volume_size", "p_volume_size", ::cxxopts::value< uint32_t >()->default_value("60"),
      "0 to 200"),
+    (write_cache, "", "write_cache", "write cache", ::cxxopts::value< uint32_t >()->default_value("1"),
+     "flag"),
+    (read_cache, "", "read_cache", "read cache", ::cxxopts::value< uint32_t >()->default_value("1"),
+     "flag"),
     (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"))
 #define ENABLED_OPTIONS logging, home_blks, test_volume
 
@@ -1413,6 +1525,8 @@ int main(int argc, char* argv[]) {
     _gcfg.expect_io_error = SDS_OPTIONS["expect_io_error"].as< uint32_t >() ? true : false;
     _gcfg.p_volume_size = SDS_OPTIONS["p_volume_size"].as< uint32_t >();
     _gcfg.is_spdk = SDS_OPTIONS["spdk"].as< bool >();
+    _gcfg.read_cache = SDS_OPTIONS["read_cache"].as< uint32_t >() != 0 ? true : false;
+    _gcfg.write_cache = SDS_OPTIONS["write_cache"].as< uint32_t >() != 0 ? true : false;
 
     if (SDS_OPTIONS.count("device_list")) {
         _gcfg.dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();
