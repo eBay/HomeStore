@@ -32,6 +32,7 @@
 #include "gtest/gtest.h"
 #include "engine/homestore_base.hpp"
 #include <isa-l/crc.h>
+#include <functional>
 
 using namespace homestore;
 using namespace flip;
@@ -53,6 +54,8 @@ constexpr auto Gi = Ki * Mi;
 
 using log_level = spdlog::level::level_enum;
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
+
+using namespace std::placeholders; /* for _1, _2,... */
 
 enum class load_type_t {
     random = 0,
@@ -876,28 +879,30 @@ protected:
 protected:
     bool write_io() {
         bool ret = false;
+        std::function<bool(uint32_t, uint64_t, uint64_t)> write_function = std::bind(&IOTestJob::write_vol, this, _1, _2, _3);
         switch (m_load_type) {
         case load_type_t::random:
-            ret = random_write();
+            ret = run_io(load_type_t::random, write_function);
             break;
         case load_type_t::same:
-            ret = same_write();
+            ret = run_io(load_type_t::same, write_function);
             break;
         case load_type_t::sequential:
-            ret = seq_write();
+            ret = run_io(load_type_t::sequential, write_function);
             break;
         }
         return ret;
     }
 
     bool read_io() {
+        std::function<bool(uint32_t, uint64_t, uint64_t)> read_function = std::bind(&IOTestJob::read_vol, this, _1, _2, _3);
         bool ret = false;
         switch (m_load_type) {
         case load_type_t::random:
-            ret = random_read();
+            ret = run_io(load_type_t::random, read_function);
             break;
         case load_type_t::same:
-            ret = same_read();
+            ret = run_io(load_type_t::same, read_function);
             break;
         case load_type_t::sequential:
             assert(0);
@@ -906,71 +911,51 @@ protected:
         return ret;
     }
 
-    bool same_write() { return write_vol(0, 1, 100); }
-
-    bool seq_write() {
-        /* XXX: does it really matter if it is atomic or not */
-        int cur = ++m_cur_vol % tcfg.max_vols;
+    bool run_io(load_type_t load_type, std::function<bool(uint32_t, uint64_t, uint64_t)>& io_function) {
         uint64_t lba;
         uint64_t nlbas;
-    start:
-        /* we won't be writing more then 128 blocks in one io */
-        auto vinfo = m_voltest->vol_info[cur];
-        auto vol = vinfo->vol;
-        if (vol == nullptr) { return false; }
-        if (vinfo->num_io.fetch_add(1, std::memory_order_acquire) == 1000) {
-            nlbas = 200;
-            lba = (vinfo->start_large_lba.fetch_add(nlbas, std::memory_order_acquire)) % (vinfo->max_vol_blks - nlbas);
+        int cur;
+        if (load_type == load_type_t::same) {
+            cur = 0;
+            lba = 1;
+            nlbas = 100;
         } else {
-            nlbas = 2;
-            lba = (vinfo->start_lba.fetch_add(nlbas, std::memory_order_acquire)) % (vinfo->max_vol_blks - nlbas);
-        }
-        if (nlbas == 0) { nlbas = 1; }
+            /* XXX: does it really matter if it is atomic or not */
+            cur = ++m_cur_vol % tcfg.max_vols;
+        start:
+            /* we won't be writing more then 128 blocks in one io */
+            auto vinfo = m_voltest->vol_info[cur];
+            auto vol = vinfo->vol;
+            if (vol == nullptr) { return false; }
 
-        if (m_load_type != load_type_t::sequential) {
-            /* can not support concurrent overlapping writes if whole data need to be verified */
-            std::unique_lock< std::mutex > lk(vinfo->vol_mutex);
-            /* check if someone is already doing writes/reads */
-            if (nlbas && vinfo->m_vol_bm->is_bits_reset(lba, nlbas)) {
-                vinfo->m_vol_bm->set_bits(lba, nlbas);
+            if (load_type == load_type_t::sequential) {
+                if (vinfo->num_io.fetch_add(1, std::memory_order_acquire) == 1000) {
+                    nlbas = 200;
+                    lba = (vinfo->start_large_lba.fetch_add(nlbas, std::memory_order_acquire)) % (vinfo->max_vol_blks - nlbas);
+                } else {
+                    nlbas = 2;
+                    lba = (vinfo->start_lba.fetch_add(nlbas, std::memory_order_acquire)) % (vinfo->max_vol_blks - nlbas);
+                }
+                if (nlbas == 0) { nlbas = 1; }
             } else {
-                goto start;
+                uint64_t max_blks = tcfg.max_io_size / VolInterface::get_instance()->get_page_size(vol);
+                // lba: [0, max_vol_blks - max_blks)
+                lba = rand() % (vinfo->max_vol_blks - max_blks);
+                // nlbas: [1, max_blks]
+                nlbas = rand() % (max_blks + 1);
+                if (nlbas == 0) { nlbas = 1; }
+
+                /* can not support concurrent overlapping writes if whole data need to be verified */
+                std::unique_lock< std::mutex > lk(vinfo->vol_mutex);
+                /* check if someone is already doing writes/reads */
+                if (nlbas && vinfo->m_vol_bm->is_bits_reset(lba, nlbas)) {
+                    vinfo->m_vol_bm->set_bits(lba, nlbas);
+                } else {
+                    goto start;
+                }
             }
         }
-        return write_vol(cur, lba, nlbas);
-    }
-
-    bool same_read() { return read_vol(0, 5, 100); }
-
-    bool random_write() {
-        /* XXX: does it really matter if it is atomic or not */
-        int cur = ++m_cur_vol % tcfg.max_vols;
-        uint64_t lba;
-        uint64_t nlbas;
-    start:
-        /* we won't be writing more then 128 blocks in one io */
-        auto vinfo = m_voltest->vol_info[cur];
-        auto vol = vinfo->vol;
-        if (vol == nullptr) { return false; }
-        uint64_t max_blks = tcfg.max_io_size / VolInterface::get_instance()->get_page_size(vol);
-        // lba: [0, max_vol_blks - max_blks)
-
-        lba = rand() % (vinfo->max_vol_blks - max_blks);
-        // nlbas: [1, max_blks]
-        nlbas = rand() % (max_blks + 1);
-        if (nlbas == 0) { nlbas = 1; }
-
-        if (m_load_type != load_type_t::sequential) {
-            /* can not support concurrent overlapping writes if whole data need to be verified */
-            std::unique_lock< std::mutex > lk(vinfo->vol_mutex);
-            /* check if someone is already doing writes/reads */
-            if (nlbas && vinfo->m_vol_bm->is_bits_reset(lba, nlbas)) {
-                vinfo->m_vol_bm->set_bits(lba, nlbas);
-            } else {
-                goto start;
-            }
-        }
-        return write_vol(cur, lba, nlbas);
+        return io_function(cur, lba, nlbas);
     }
 
     bool write_vol(uint32_t cur, uint64_t lba, uint64_t nlbas) {
@@ -1009,38 +994,6 @@ protected:
                 *((uint64_t*)(buf + write_sz)) = random();
             }
         }
-    }
-
-    bool random_read() {
-        /* XXX: does it really matter if it is atomic or not */
-        int cur = ++m_cur_vol % tcfg.max_vols;
-        uint64_t lba;
-        uint64_t nlbas;
-
-    start:
-        /* we won't be writing more then 128 blocks in one io */
-        auto vinfo = m_voltest->vol_info[cur];
-        auto vol = vinfo->vol;
-        if (vol == nullptr) { return false; }
-        uint64_t max_blks = tcfg.max_io_size / VolInterface::get_instance()->get_page_size(vol);
-
-        lba = rand() % (vinfo->max_vol_blks - max_blks);
-        nlbas = rand() % max_blks;
-        if (nlbas == 0) { nlbas = 1; }
-
-        if (m_load_type != load_type_t::sequential) {
-            /* Don't send overlapping reads with pending writes if data verification is on */
-            std::unique_lock< std::mutex > lk(vinfo->vol_mutex);
-            /* check if someone is already doing writes/reads */
-            if (vinfo->m_vol_bm->is_bits_reset(lba, nlbas)) {
-                vinfo->m_vol_bm->set_bits(lba, nlbas);
-            } else {
-                goto start;
-            }
-        }
-
-        auto ret = read_vol(cur, lba, nlbas);
-        return ret;
     }
 
     bool read_vol(uint32_t cur, uint64_t lba, uint64_t nlbas) {
