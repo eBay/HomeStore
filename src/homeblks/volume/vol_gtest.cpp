@@ -33,9 +33,11 @@
 #include "engine/homestore_base.hpp"
 #include <isa-l/crc.h>
 #include <functional>
+#include "engine/common/homestore_header.hpp"
 
 using namespace homestore;
 using namespace flip;
+using namespace std::placeholders; /* for _1, _2,... */
 
 THREAD_BUFFER_INIT;
 RCU_REGISTER_INIT;
@@ -54,8 +56,6 @@ constexpr auto Gi = Ki * Mi;
 
 using log_level = spdlog::level::level_enum;
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
-
-using namespace std::placeholders; /* for _1, _2,... */
 
 enum class load_type_t {
     random = 0,
@@ -78,6 +78,7 @@ struct TestCfg {
     uint64_t max_num_writes = 100000;
     uint64_t run_time = 60;
     uint64_t num_threads = 8;
+    uint64_t unmap_frequency = 1000;
 
     uint64_t max_io_size = 1 * Mi;
     uint64_t max_outstanding_ios = 64u;
@@ -90,6 +91,7 @@ struct TestCfg {
 
     bool can_delete_volume = false;
     bool read_enable = true;
+    bool unmap_enable = false;
     bool enable_crash_handler = true;
     bool read_verify = false;
     bool remove_file = true;
@@ -125,6 +127,7 @@ struct TestOutput {
 
     std::atomic< uint64_t > write_cnt = 0;
     std::atomic< uint64_t > read_cnt = 0;
+    std::atomic< uint64_t > unmap_cnt = 0;
     std::atomic< uint64_t > read_err_cnt = 0;
     std::atomic< uint64_t > vol_create_cnt = 0;
     std::atomic< uint64_t > vol_del_cnt = 0;
@@ -136,6 +139,7 @@ struct TestOutput {
         fmt::memory_buffer buf;
         if ((v = write_cnt.load())) fmt::format_to(buf, "write_cnt={} ", v);
         if ((v = read_cnt.load())) fmt::format_to(buf, "read_cnt={} ", v);
+        if ((v = unmap_cnt.load())) fmt::format_to(buf, "unmap_cnt={} ", v);
         if ((v = read_err_cnt.load())) fmt::format_to(buf, "read_err_cnt={} ", v);
         if ((v = data_match_cnt.load())) fmt::format_to(buf, "data_match_cnt={} ", v);
         if ((v = csum_match_cnt.load())) fmt::format_to(buf, "csum_match_cnt={} ", v);
@@ -258,14 +262,15 @@ struct io_req_t : public vol_interface_req {
     int fd;
     uint8_t* buffer{nullptr};
     uint8_t* validate_buffer{nullptr};
-    bool is_read;
+    Op_type op_type;
     uint64_t cur_vol;
     std::shared_ptr< vol_info_t > vol_info;
     bool done = false;
 
-    io_req_t(const std::shared_ptr< vol_info_t >& vinfo, const bool write, uint8_t* const buf,
+    io_req_t(const std::shared_ptr< vol_info_t >& vinfo, const Op_type op, uint8_t* const buf,
     		 const uint64_t lba, const uint32_t nlbas, const bool cache, bool is_csum) :
             vol_interface_req(buf, lba, nlbas, false, cache),
+            op_type(op),
             vol_info(vinfo) {
 
         if (is_csum) {
@@ -277,14 +282,13 @@ struct io_req_t : public vol_interface_req {
             offset = lba * page_size;
         }
         fd = vinfo->fd;
-        is_read = !write;
         cur_vol = vinfo->vol_idx;
         buffer = buf;
 
         validate_buffer = iomanager.iobuf_alloc(512, size);
         assert(validate_buffer != nullptr);
             
-        if (write)
+        if (op == Op_type::WRITE)
         {
             // make copy of buffer so validation works properly
             if (is_csum) { populate_csum_buf(validate_buffer, buffer, size, vinfo.get()); }
@@ -292,6 +296,10 @@ struct io_req_t : public vol_interface_req {
 
         }
     }
+
+    bool is_read() const { return op_type == Op_type::READ; }
+    bool is_write() const { return op_type == Op_type::WRITE; }
+    bool is_unmap() const { return op_type == Op_type::UNMAP; }
 
     virtual ~io_req_t() override
     {
@@ -821,10 +829,15 @@ public:
     IOTestJob& operator=(IOTestJob&&) noexcept = delete;
 
     virtual void run_one_iteration() override {
+        static thread_local uint32_t num_rw_this_thread = tcfg.unmap_frequency;
         int cnt = 0;
         while ((cnt++ < 1) && m_outstanding_ios < (int64_t)tcfg.max_outstanding_ios) {
             write_io();
             if (tcfg.read_enable) { read_io(); }
+            if ((++num_rw_this_thread >= tcfg.unmap_frequency) && (tcfg.unmap_enable)) { 
+                unmap_io();
+                num_rw_this_thread = 0;
+            }
         }
     }
 
@@ -832,12 +845,12 @@ public:
         if (req->err != no_error) {
             assert((req->err == std::errc::no_such_device) || tcfg.expect_io_error);
         } else {
-            if (req->is_read && (tcfg.read_verify || tcfg.verify_type_set())) {
+            if (req->is_read() && (tcfg.read_verify || tcfg.verify_type_set())) {
                 /* read from the file and verify it */
                 auto ret = pread(req->fd, req->validate_buffer, req->size, req->offset);
                 assert(ret == req->size);
                 verify(req);
-            } else if (!req->is_read) {
+            } else if (!req->is_read()) {
                 /* write to a file */
                 auto ret = pwrite(req->fd, req->validate_buffer, req->size, req->offset);
                 assert(ret == req->size);
@@ -911,6 +924,23 @@ protected:
         return ret;
     }
 
+    bool unmap_io() {
+        std::function<bool(uint32_t, uint64_t, uint64_t)> unmap_function = std::bind(&IOTestJob::unmap_vol, this, _1, _2, _3);
+        bool ret = false;
+        switch (m_load_type) {
+        case load_type_t::random:
+            ret = run_io(load_type_t::random, unmap_function);
+            break;
+        case load_type_t::same:
+            assert(0);
+            break;
+        case load_type_t::sequential:
+            assert(0);
+            break;
+        }
+        return ret;
+    }
+
     bool run_io(load_type_t load_type, std::function<bool(uint32_t, uint64_t, uint64_t)>& io_function) {
         uint64_t lba;
         uint64_t nlbas;
@@ -971,7 +1001,7 @@ protected:
          */
         populate_buf(wbuf, size, lba, vinfo.get());
         
-        auto vreq = boost::intrusive_ptr< io_req_t >(new io_req_t(vinfo, true, wbuf, lba, nlbas, tcfg.write_cache, tcfg.verify_csum()));
+        auto vreq = boost::intrusive_ptr< io_req_t >(new io_req_t(vinfo, Op_type::WRITE, wbuf, lba, nlbas, tcfg.write_cache, tcfg.verify_csum()));
         
         vreq->cookie = (void*)this;
 
@@ -1008,7 +1038,7 @@ protected:
             rbuf = iomanager.iobuf_alloc(512, size);
         }
 
-        auto vreq = boost::intrusive_ptr< io_req_t >(new io_req_t(vinfo, false, rbuf, lba, nlbas, tcfg.read_cache, tcfg.verify_csum()));
+        auto vreq = boost::intrusive_ptr< io_req_t >(new io_req_t(vinfo, Op_type::READ, rbuf, lba, nlbas, tcfg.read_cache, tcfg.verify_csum()));
         vreq->cookie = (void*)this;
 
         ++m_voltest->output.read_cnt;
@@ -1016,6 +1046,27 @@ protected:
         auto ret_io = VolInterface::get_instance()->read(vol, vreq);
         LOGDEBUG("Read lba: {}, nlbas: {} outstanding_ios={}, cache={}", lba, nlbas, m_outstanding_ios.load(),
                  (tcfg.read_cache !=0 ? true : false));
+        if (ret_io != no_error) { return false; }
+        return true;
+    }
+
+    bool unmap_vol(uint32_t cur, uint64_t lba, uint64_t nlbas) {
+        auto vinfo = m_voltest->vol_info[cur];
+        auto vol = vinfo->vol;
+        if (vol == nullptr) { return false; }
+
+        const uint64_t size{nlbas * VolInterface::get_instance()->get_page_size(vol)};
+        uint8_t* const wbuf{iomanager.iobuf_alloc(512, size)};
+
+        auto vreq = boost::intrusive_ptr< io_req_t >(new io_req_t(vinfo, Op_type::UNMAP, wbuf, lba, nlbas, tcfg.write_cache, tcfg.verify_csum()));
+        
+        vreq->cookie = (void*)this;
+
+        ++m_voltest->output.unmap_cnt;
+        ++m_outstanding_ios;
+        auto ret_io = VolInterface::get_instance()->unmap(vol, vreq);
+        LOGDEBUG("Unmapped lba: {}, nlbas: {} outstanding_ios={}, cache={}", lba, nlbas, m_outstanding_ios.load(),
+                 (tcfg.write_cache != 0 ? true : false) );
         if (ret_io != no_error) { return false; }
         return true;
     }
@@ -1456,6 +1507,7 @@ TEST_F(VolTest, btree_fix_rerun_io_test) {
 
     output.write_cnt = 0;
     output.read_cnt = 0;
+    output.unmap_cnt = 0;
     this->move_vol_to_online();
     this->start_io_job(wait_type_t::for_execution);
     output.print("btree_fix_rerun_io_test");
@@ -1475,6 +1527,7 @@ SDS_OPTION_GROUP(
     (num_threads, "", "num_threads", "num_threads - default 2 for spdk and 8 for non-spdk",
      ::cxxopts::value< uint32_t >()->default_value("8"), "number"),
     (read_enable, "", "read_enable", "read enable 0 or 1", ::cxxopts::value< uint32_t >()->default_value("1"), "flag"),
+    (unmap_enable, "", "unmap_enable", "unmap enable 0 or 1", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
     (max_disk_capacity, "", "max_disk_capacity", "max disk capacity",
      ::cxxopts::value< uint64_t >()->default_value("7"), "GB"),
     (max_volume, "", "max_volume", "max volume", ::cxxopts::value< uint64_t >()->default_value("50"), "number"),
@@ -1539,6 +1592,7 @@ int main(int argc, char* argv[]) {
     _gcfg.run_time = SDS_OPTIONS["run_time"].as< uint32_t >();
     _gcfg.num_threads = SDS_OPTIONS["num_threads"].as< uint32_t >();
     _gcfg.read_enable = SDS_OPTIONS["read_enable"].as< uint32_t >();
+    _gcfg.unmap_enable = SDS_OPTIONS["unmap_enable"].as< uint32_t >();
     _gcfg.max_disk_capacity = ((SDS_OPTIONS["max_disk_capacity"].as< uint64_t >()) * (1ul << 30));
     _gcfg.max_vols = SDS_OPTIONS["max_volume"].as< uint64_t >();
     _gcfg.max_num_writes = SDS_OPTIONS["max_num_writes"].as< uint64_t >();
