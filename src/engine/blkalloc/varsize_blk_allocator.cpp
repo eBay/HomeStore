@@ -7,7 +7,6 @@
 
 #include "varsize_blk_allocator.h"
 #include <iostream>
-#include <cassert>
 #include <thread>
 #include <fds/utils.hpp>
 #include "engine/homeds/btree/mem_btree.hpp"
@@ -300,7 +299,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
             BLKALLOC_ASSERT_CMP(LOGMSG, blks_alloced % hints.multiplier, ==, 0);
 
             blks_rqstd = nblks - blks_alloced;
-            assert(blkid.get_nblks() != 0);
+            BLKALLOC_ASSERT_CMP(LOGMSG, blkid.get_nblks(), !=, 0);
             out_blkid.push_back(blkid);
         }
         retry_cnt++;
@@ -467,17 +466,24 @@ bool VarsizeBlkAllocator::try_add_blks_to_cache(const BlkId& b) {
         portion->unlock();
         return false;
     }
+
     /* Create cache entry */
+    set_blk_temperature(b.get_id(), 1);
     VarsizeAllocCacheEntry entry;
     gen_cache_entry(b.get_id(), b.get_nblks(), &entry);
+
     EmptyClass dummy;
     m_blk_cache->put(entry, dummy, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
+    auto cnt = m_alloc_blk_cnt.fetch_sub(b.get_nblks(), std::memory_order_relaxed);
+    BLKALLOC_ASSERT_CMP(LOGMSG, cnt, >=, 0);
+
     m_slab_entries[slab_index]._a.fetch_add(b.get_nblks(), std::memory_order_acq_rel);
     incr_counter(slab_index, b.get_nblks());
     BLKALLOC_LOG(TRACE, varsize_blk_alloc,
-            "Freed {} blocks for slab {}, remaining slab capacity = {}",
+            "Added {} blocks to slab {}, slab capacity = {}, temp = {}",
             b.get_nblks(), slab_index,
-            m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
+            m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel),
+            get_blk_temperature(b.get_id()));
 
     m_cache_n_entries.fetch_add(b.get_nblks(), std::memory_order_acq_rel);
     portion->unlock();
@@ -487,23 +493,25 @@ bool VarsizeBlkAllocator::try_add_blks_to_cache(const BlkId& b) {
 
 void VarsizeBlkAllocator::free(const BlkId& b) {
 
+    if (!m_inited) {
+        BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Free not required for blk id = {}", b.get_id());
+        return;
+    }
     if (try_add_blks_to_cache(b)) return;
 
     BlkAllocPortion* portion = blknum_to_portion(b.get_id());
     BlkAllocSegment* segment = blknum_to_segment(b.get_id());
 
-    portion->lock();
-
-    /* No need to set in cache if it is not recovered. When recovery is complete we copy the disk_bm to
-     * cache bm.
+    /* No need to set in cache if it is not recovered. When recovery is complete we copy the
+     * disk_bm to cache bm.
      */
-    if (m_inited) {
-        BLKALLOC_ASSERT(RELEASE, m_cache_bm->is_bits_set(b.get_id(), b.get_nblks()), "Expected bits to reset");
-        segment->add_free_blks(b.get_nblks());
-        m_cache_bm->reset_bits(b.get_id(), b.get_nblks());
-        auto cnt = m_alloc_blk_cnt.fetch_sub(b.get_nblks(), std::memory_order_relaxed);
-        assert(cnt >= 0);
-    }
+    portion->lock();
+    BLKALLOC_ASSERT(RELEASE, m_cache_bm->is_bits_set(b.get_id(), b.get_nblks()),
+                                                        "Expected bits to reset");
+    segment->add_free_blks(b.get_nblks());
+    m_cache_bm->reset_bits(b.get_id(), b.get_nblks());
+    auto cnt = m_alloc_blk_cnt.fetch_sub(b.get_nblks(), std::memory_order_relaxed);
+    BLKALLOC_ASSERT_CMP(LOGMSG, cnt, >=, 0);
     portion->unlock();
 }
 
@@ -535,7 +543,7 @@ void VarsizeBlkAllocator::fill_cache(BlkAllocSegment* seg, int slab_indx) {
     while (m_cache_n_entries.load(std::memory_order_acquire) < get_config().get_max_cache_blks()) {
 
         bool refill_needed = true;
-        assert(slab_indx >= 0);
+        BLKALLOC_ASSERT_CMP(LOGMSG, slab_indx, >=, 0);
         if (slab_indx < 0) { slab_indx = 0; }
         for (auto i = slab_indx; i < (int)m_slab_entries.size(); ++i) {
             // Low water mark for cache slabs is half of full capacity
