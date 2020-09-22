@@ -71,7 +71,7 @@ struct volume_child_req : public blkstore_req< BlkBuffer > {
     uint64_t read_buf_offset;
     uint64_t read_size;
     bool sync = false;
-    bool use_cache{false};
+    bool use_cache{true};
 
     volume_req_ptr parent_req = nullptr;
     BlkId blkId; // used only for debugging purpose
@@ -173,7 +173,11 @@ struct vol_sb_hdr {
     indx_mgr_sb indx_sb;
     vol_sb_hdr(const uint64_t& page_size, const uint64_t& size, const char* in_vol_name,
                const boost::uuids::uuid& uuid) :
-            version(VOL_SB_VERSION), page_size(page_size), size(size), uuid(uuid), vol_name("") {
+            version(VOL_SB_VERSION),
+            page_size(page_size),
+            size(size),
+            uuid(uuid),
+            vol_name("") {
         memcpy((char*)vol_name, in_vol_name, VOL_NAME_SIZE);
     };
 
@@ -222,13 +226,12 @@ private:
     std::atomic< bool > m_indx_mgr_destroy_started;
     void* m_sb_cookie = nullptr;
 
-    typedef struct IoVecTransversal
-    {
+    typedef struct IoVecTransversal {
         uint64_t current_iovecs_offset{0};
         uint64_t iovecs_total_offset{0};
         size_t iovecs_index{0};
     } IoVecTransversal;
-    
+
 private:
     /* static members */
     /* home_blks can not be shutdown until it is not zero. It is the superset of vol_ref_cnt. If it is zero then
@@ -245,7 +248,8 @@ private:
     void alloc_single_block_in_mem();
     bool check_and_complete_req(const volume_req_ptr& vreq, const std::error_condition& err);
 
-    volume_child_req_ptr create_vol_child_req(BlkId& bid, const volume_req_ptr& vreq, const uint64_t start_lba, int nlbas);
+    volume_child_req_ptr create_vol_child_req(BlkId& bid, const volume_req_ptr& vreq, const uint64_t start_lba,
+                                              int nlbas);
 
     template < typename... Args >
     void assert_formatter(fmt::memory_buffer& buf, const char* msg, const std::string& req_str, const Args&... args) {
@@ -296,7 +300,7 @@ private:
     std::vector< iovec > get_next_iovecs(IoVecTransversal& iovec_transversal, const std::vector< iovec >& data_iovecs,
                                          const uint64_t size);
 
- public:
+public:
     /******************** static functions exposed to home_blks *******************/
     template < typename... Args >
     static std::shared_ptr< Volume > make_volume(Args&&... args) {
@@ -470,11 +474,11 @@ struct volume_req : indx_req {
     volume_req_state state = volume_req_state::preparing; // State of the volume request
 
     /********** members used to write data blocks **********/
-    Clock::time_point io_start_time;                    // start time
-    Clock::time_point indx_start_time;                  // indx start time
+    Clock::time_point io_start_time;                              // start time
+    Clock::time_point indx_start_time;                            // indx start time
     typedef boost::intrusive_ptr< homeds::MemVector > MemVecData; // HomeStore memory managed data
-    typedef std::vector< iovec > IoVecData; // External scatter/gather data
-    std::variant<MemVecData, IoVecData>  data;
+    typedef std::vector< iovec > IoVecData;                       // External scatter/gather data
+    std::variant< MemVecData, IoVecData > data;
 
     sisl::atomic_counter< int > outstanding_io_cnt = 1; // how many IOs are outstanding for this request
     int vc_req_cnt = 0;                                 // how many child requests are issued.
@@ -559,7 +563,7 @@ private:
         if (vi_req->use_cache()) {
             // a cached request is assumed to have lifetime managed by HomeStore
             if (vi_req->is_write()) {
-                data.emplace<MemVecData>(new homeds::MemVector{
+                data.emplace< MemVecData >(new homeds::MemVector{
                     static_cast< uint8_t* >(vi_req->buffer),
                     static_cast< uint32_t >(vi_req->vol_instance->get_page_size() * vi_req->nlbas), 0});
             }
