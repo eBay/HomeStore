@@ -11,11 +11,11 @@ using namespace std;
 
 namespace homestore {
 
-FixedBlkAllocator::FixedBlkAllocator(BlkAllocConfig& cfg, bool init) : BlkAllocator(cfg), m_init(init) {
+FixedBlkAllocator::FixedBlkAllocator(BlkAllocConfig& cfg, bool init) : BlkAllocator(cfg), m_init(false) {
     m_blk_nodes = new __fixed_blk_node[cfg.get_total_blks()];
     m_alloc_bm = new homeds::Bitset(cfg.get_total_blks());
 
-    if (m_init) {
+    if (init) {
         inited();
     }
 }
@@ -38,6 +38,9 @@ BlkAllocStatus FixedBlkAllocator::alloc(BlkId& in_bid) {
 
 void FixedBlkAllocator::inited() {
 
+    if (m_init) {
+        return;
+    }
     m_first_blk_id = BLKID32_INVALID;
     /* create the blkid chain */
     uint32_t prev_blkid = BLKID32_INVALID;
