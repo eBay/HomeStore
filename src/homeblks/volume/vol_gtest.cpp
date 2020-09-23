@@ -37,7 +37,6 @@
 
 using namespace homestore;
 using namespace flip;
-using namespace std::placeholders; /* for _1, _2,... */
 
 THREAD_BUFFER_INIT;
 RCU_REGISTER_INIT;
@@ -829,14 +828,14 @@ public:
     IOTestJob& operator=(IOTestJob&&) noexcept = delete;
 
     virtual void run_one_iteration() override {
-        static thread_local uint32_t num_rw_this_thread = tcfg.unmap_frequency;
+        static thread_local uint32_t num_rw_without_unmap = tcfg.unmap_frequency;
         int cnt = 0;
         while ((cnt++ < 1) && m_outstanding_ios < (int64_t)tcfg.max_outstanding_ios) {
             write_io();
             if (tcfg.read_enable) { read_io(); }
-            if ((++num_rw_this_thread >= tcfg.unmap_frequency) && (tcfg.unmap_enable)) { 
+            if ((++num_rw_without_unmap >= tcfg.unmap_frequency) && (tcfg.unmap_enable)) { 
                 unmap_io();
-                num_rw_this_thread = 0;
+                num_rw_without_unmap = 0;
             }
         }
     }
@@ -892,7 +891,7 @@ protected:
 protected:
     bool write_io() {
         bool ret = false;
-        std::function<bool(uint32_t, uint64_t, uint64_t)> write_function = std::bind(&IOTestJob::write_vol, this, _1, _2, _3);
+        std::function<bool(uint32_t, uint64_t, uint64_t)> write_function = bind_this(IOTestJob::write_vol, 3);
         switch (m_load_type) {
         case load_type_t::random:
             ret = run_io(load_type_t::random, write_function);
@@ -908,7 +907,7 @@ protected:
     }
 
     bool read_io() {
-        std::function<bool(uint32_t, uint64_t, uint64_t)> read_function = std::bind(&IOTestJob::read_vol, this, _1, _2, _3);
+        std::function<bool(uint32_t, uint64_t, uint64_t)> read_function = bind_this(IOTestJob::read_vol, 3);
         bool ret = false;
         switch (m_load_type) {
         case load_type_t::random:
@@ -925,7 +924,7 @@ protected:
     }
 
     bool unmap_io() {
-        std::function<bool(uint32_t, uint64_t, uint64_t)> unmap_function = std::bind(&IOTestJob::unmap_vol, this, _1, _2, _3);
+        std::function<bool(uint32_t, uint64_t, uint64_t)> unmap_function = bind_this(IOTestJob::unmap_vol, 3);
         bool ret = false;
         switch (m_load_type) {
         case load_type_t::random:
@@ -941,7 +940,7 @@ protected:
         return ret;
     }
 
-    bool run_io(load_type_t load_type, std::function<bool(uint32_t, uint64_t, uint64_t)>& io_function) {
+    bool run_io(load_type_t load_type, const std::function<bool(uint32_t, uint64_t, uint64_t)>& io_function) {
         uint64_t lba;
         uint64_t nlbas;
         int cur;
