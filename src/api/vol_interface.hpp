@@ -84,7 +84,7 @@ struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
     uint32_t nlbas;
     Op_type op_type = Op_type::READ;
     bool sync = false;
-    bool cache{false};
+    bool cache{true};
     bool part_of_batch = false;
     void* cookie;
 
@@ -222,7 +222,7 @@ public:
     // @return vol_interface_req_ptr
     //
     virtual vol_interface_req_ptr create_vol_interface_req(void* buf, uint64_t lba, uint32_t nlbas, bool sync = false,
-                                                           const bool cache = false) = 0;
+                                                           const bool cache = true) = 0;
 
     /**
      * @brief Write the data to the volume asynchronously, created from the request. After completion the attached

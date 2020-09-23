@@ -7,6 +7,8 @@ SDS_LOGGING_DECL(metablk)
 namespace homestore {
 
 void MetaBlkMgr::start(blk_store_t* sb_blk_store, const sb_blkstore_blob* blob, const bool is_init) {
+    HS_LOG(DEBUG, metablk, "Initialize MetaBlkStore with total size: {}, used size: {}", sb_blk_store->get_size(),
+           sb_blk_store->get_used_size());
     m_sb_blk_store = sb_blk_store;
     MetaBlkMgr::reset_self_recover();
     if (is_init) {
@@ -264,7 +266,8 @@ void MetaBlkMgr::add_sub_sb(const meta_sub_type type, const void* context_data, 
     if (m_sub_info[type].do_crc) { crc = crc32_ieee(init_crc32, static_cast< const uint8_t* >(context_data), sz); }
 #endif
 
-    HS_LOG(INFO, metablk, "{}, adding meta bid: {}, sz: {}", type, meta_bid.to_string(), sz);
+    HS_LOG(DEBUG, metablk, "{}, adding meta bid: {}, sz: {}, mstore used/total size: {}/{}", type, meta_bid.to_string(),
+           sz, m_sb_blk_store->get_used_size(), m_sb_blk_store->get_size());
     if (no_error != ret) {
         HS_ASSERT(RELEASE, 0, "{}, alloc blk failed with status: {}", type, ret.message());
         return;
@@ -389,8 +392,9 @@ meta_blk* MetaBlkMgr::init_meta_blk(BlkId& bid, const meta_sub_type type, const 
               "{}, memory corruption, bid: {} already added to cache.", type, bid.to_string());
     m_meta_blks[bid.to_integer()] = mblk;
 
-    HS_LOG(INFO, metablk, "{}, Done adding bid: {}, prev: {}, next: {}", type, mblk->hdr.h.bid, mblk->hdr.h.prev_bid,
-           mblk->hdr.h.next_bid);
+    HS_LOG(DEBUG, metablk, "{}, Done adding bid: {}, prev: {}, next: {}, mstore used/total size: {}/{}", type,
+           mblk->hdr.h.bid, mblk->hdr.h.prev_bid, mblk->hdr.h.next_bid, m_sb_blk_store->get_used_size(),
+           m_sb_blk_store->get_size());
     return mblk;
 }
 
@@ -509,8 +513,9 @@ void MetaBlkMgr::update_sub_sb(const void* context_data, const uint64_t sz, void
     std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx); // TODO: see if this lock can be removed;
     meta_blk* mblk = static_cast< meta_blk* >(cookie);
 
-    HS_LOG(INFO, metablk, "{}, old sb: context_sz: {}, ovf_bid: {}", mblk->hdr.h.type,
-           (unsigned long)(mblk->hdr.h.context_sz), mblk->hdr.h.ovf_bid.to_string());
+    HS_LOG(DEBUG, metablk, "{}, old sb: context_sz: {}, ovf_bid: {}, mstore used/total size: {}/{}", mblk->hdr.h.type,
+           (unsigned long)(mblk->hdr.h.context_sz), mblk->hdr.h.ovf_bid.to_string(), m_sb_blk_store->get_used_size(),
+           m_sb_blk_store->get_size());
 
     auto ovf_bid_to_free = mblk->hdr.h.ovf_bid;
 
@@ -528,8 +533,9 @@ void MetaBlkMgr::update_sub_sb(const void* context_data, const uint64_t sz, void
     // free the overflow bid if it is there
     free_ovf_blk_chain(ovf_bid_to_free);
 
-    HS_LOG(INFO, metablk, "{}, new sb: context_sz: {}, ovf_bid: {}", mblk->hdr.h.type, mblk->hdr.h.context_sz,
-           mblk->hdr.h.ovf_bid.to_string());
+    HS_LOG(DEBUG, metablk, "{}, new sb: context_sz: {}, ovf_bid: {}, mstore used/total size: {}/{}", mblk->hdr.h.type,
+           mblk->hdr.h.context_sz, mblk->hdr.h.ovf_bid.to_string(), m_sb_blk_store->get_used_size(),
+           m_sb_blk_store->get_size());
 
 #ifndef NDEBUG
     if (it->second.do_crc) {
@@ -557,8 +563,9 @@ std::error_condition MetaBlkMgr::remove_sub_sb(const void* cookie) {
     auto prev_bid = rm_blk_in_cache->hdr.h.prev_bid;
     auto next_bid = rm_blk_in_cache->hdr.h.next_bid;
 
-    HS_LOG(DEBUG, metablk, "{}, removing meta blk id: {}, prev_bid: {}, next_bid: {}", type, rm_bid.to_string(),
-           prev_bid.to_string(), next_bid.to_string());
+    HS_LOG(DEBUG, metablk, "{}, removing meta blk id: {}, prev_bid: {}, next_bid: {}, mstore used/total size: {}/{}",
+           type, rm_bid.to_string(), prev_bid.to_string(), next_bid.to_string(), m_sb_blk_store->get_used_size(),
+           m_sb_blk_store->get_size());
 
     // validate bid/prev/next with cache data;
     if (rm_blk != rm_blk_in_cache) {
@@ -605,6 +612,8 @@ std::error_condition MetaBlkMgr::remove_sub_sb(const void* cookie) {
     // free the on-disk meta blk
     free_meta_blk(rm_blk);
 
+    HS_LOG(DEBUG, metablk, "after remove, mstore used/total size: {}/{}", m_sb_blk_store->get_used_size(),
+           m_sb_blk_store->get_size());
     return no_error;
 }
 
