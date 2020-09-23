@@ -1933,9 +1933,12 @@ private:
                 if (result.end_of_search_index != (int)child_node1->get_total_entries()) {
                     child_node1->invalidate_edge(); // incase was valid edge
                     child_node1->remove(result.end_of_search_index + 1, child_node1->get_total_entries() - 1);
+                } else {
+                    BT_RELEASE_ASSERT(0, child_node1, "can not be edge node");
                 }
                 // else its an edge entry, do nothing
             } else {
+                BT_RELEASE_ASSERT(0, child_node1, "merge is not supported");
                 bool borrowKeys = true;
                 BtreeNodePtr old_sibbling = nullptr;
                 do {
