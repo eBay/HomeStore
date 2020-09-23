@@ -26,11 +26,7 @@ ENUM(io_flag, uint8_t,
      READ_ONLY    // Read-only mode for post-mortem checks
 );
 
-ENUM(Op_type, uint8_t,
-    READ,
-    WRITE,
-    UNMAP
-);
+ENUM(Op_type, uint8_t, READ, WRITE, UNMAP);
 
 struct dev_info {
     std::string dev_names;
@@ -84,8 +80,8 @@ public:
 #endif
 
 #define HOMESTORE_LOG_MODS                                                                                             \
-    btree_structures, btree_nodes, btree_generics, cache, device, httpserver_lmod, varsize_blk_alloc, iomgr, volume,   \
-        flip, cp, metablk, indx_mgr, logstore
+    btree_structures, btree_nodes, btree_generics, cache, device, httpserver_lmod, varsize_blk_alloc, volume, flip,    \
+        cp, metablk, indx_mgr, logstore, IOMGR_LOG_MODS
 
 template < typename T >
 std::string to_hex(T i) {

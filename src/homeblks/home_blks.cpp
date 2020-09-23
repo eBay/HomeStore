@@ -148,8 +148,9 @@ void HomeBlks::attach_prepare_indx_cp(std::map< boost::uuids::uuid, indx_cp_ptr 
     }
 }
 
-vol_interface_req_ptr HomeBlks::create_vol_interface_req(void* buf, uint64_t lba, uint32_t nlbas, bool is_sync, const bool noCache) {
-    return vol_interface_req_ptr(new vol_interface_req(buf, lba, nlbas, is_sync, noCache));
+vol_interface_req_ptr HomeBlks::create_vol_interface_req(void* buf, uint64_t lba, uint32_t nlbas, bool is_sync,
+                                                         const bool cache) {
+    return vol_interface_req_ptr(new vol_interface_req(buf, lba, nlbas, is_sync, cache));
 }
 
 std::error_condition HomeBlks::write(const VolumePtr& vol, const vol_interface_req_ptr& req, bool part_of_batch) {
