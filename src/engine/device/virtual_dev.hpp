@@ -891,6 +891,8 @@ public:
             HS_ASSERT_CMP(DEBUG, hints.is_contiguous, ==, true);
             ret = alloc_blk(nblks, hints, blkid);
             if (ret == BLK_ALLOC_SUCCESS) {
+                HS_RELEASE_ASSERT_EQ(blkid.size(), 1, "out blkid more than 1 entries({}) will lead to blk leak!",
+                                     blkid.size());
                 *out_blkid = blkid[0];
             } else {
                 HS_ASSERT_CMP(DEBUG, blkid.size(), ==, 0);

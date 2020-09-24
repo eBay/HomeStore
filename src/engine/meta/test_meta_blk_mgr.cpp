@@ -80,6 +80,7 @@ struct Param {
     uint32_t fixed_wrt_sz;
     uint32_t min_wrt_sz;
     uint32_t max_wrt_sz;
+    bool always_do_overflow;
 };
 
 static Param gp;
@@ -146,6 +147,8 @@ public:
         m_mbm->add_sub_sb(mtype, buf, sz_to_wrt, cookie);
         HS_ASSERT_CMP(DEBUG, cookie, !=, nullptr);
 
+        // LOGINFO("buf written: size: {}, data: {}", sz_to_wrt, (char*)buf);
+
         meta_blk* mblk = (meta_blk*)cookie;
         if (overflow) {
             HS_ASSERT_CMP(DEBUG, sz_to_wrt, >=, META_BLK_PAGE_SZ);
@@ -199,8 +202,7 @@ public:
         auto it = m_write_sbs.begin();
         std::advance(it, rand() % m_write_sbs.size());
 
-        bool overflow = rand() % 2;
-        auto sz_to_wrt = rand_size(overflow);
+        auto sz_to_wrt = rand_size(do_overflow());
         uint8_t* buf = iomanager.iobuf_alloc(512, sz_to_wrt);
 
         gen_rand_buf(buf, sz_to_wrt);
@@ -262,20 +264,20 @@ public:
         m_total_wrt_sz = m_mbm->get_used_size();
 
         m_mbm->deregister_handler(mtype);
-        m_mbm->register_handler(
-            mtype,
-            [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
-                if (mblk) {
-                    std::unique_lock< std::mutex > lg(m_mtx);
-                    m_cb_blks[mblk->hdr.h.bid.to_integer()] = std::string((char*)(buf.bytes()), size);
-                }
-            },
-            [this](bool success) { HS_ASSERT_CMP(DEBUG, success, ==, true); });
+        m_mbm->register_handler(mtype,
+                                [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
+                                    if (mblk) {
+                                        std::unique_lock< std::mutex > lg(m_mtx);
+                                        m_cb_blks[mblk->hdr.h.bid.to_integer()] =
+                                            std::string((char*)(buf.bytes()), size);
+                                    }
+                                },
+                                [this](bool success) { HS_ASSERT_CMP(DEBUG, success, ==, true); });
 
         while (keep_running()) {
             switch (get_op()) {
             case meta_op_type::write:
-                do_sb_write(rand() % 2);
+                do_sb_write(do_overflow());
                 break;
             case meta_op_type::remove:
                 do_sb_remove();
@@ -287,6 +289,11 @@ public:
                 break;
             }
         }
+    }
+
+    bool do_overflow() {
+        if (gp.always_do_overflow) { return true; }
+        return rand() % 2;
     }
 
     void recover() {
@@ -363,15 +370,16 @@ SDS_OPTION_GROUP(
      ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
     (fixed_write_size, "", "fixed_write_size", "fixed write size", ::cxxopts::value< uint32_t >()->default_value("512"),
      "number"),
-    (dev_size_mb, "", "dev_size_mb", "size of each device in MB", ::cxxopts::value< uint64_t >()->default_value("5120"),
+    (dev_size_gb, "", "dev_size_gb", "size of each device in GB", ::cxxopts::value< uint64_t >()->default_value("10"),
      "number"),
     (run_time, "", "run_time", "running time in seconds", ::cxxopts::value< uint64_t >()->default_value("30"),
      "number"),
     (min_write_size, "", "min_write_size", "minimum write size", ::cxxopts::value< uint32_t >()->default_value("4096"),
      "number"),
-    (max_write_size, "", "max_write_size", "maximum write size", ::cxxopts::value< uint32_t >()->default_value("65536"),
-     "number"),
-    (num_io, "", "num_io", "number of io", ::cxxopts::value< uint64_t >()->default_value("3000"), "number"),
+    (max_write_size, "", "max_write_size", "maximum write size",
+     ::cxxopts::value< uint32_t >()->default_value("524288"), "number"),
+    (num_io, "", "num_io", "number of io", ::cxxopts::value< uint64_t >()->default_value("300"), "number"),
+    (overflow, "", "overflow", "always do overflow", ::cxxopts::value< uint32_t >()->default_value("0"), "number"),
     (per_update, "", "per_update", "update percentage", ::cxxopts::value< uint32_t >()->default_value("20"), "number"),
     (per_write, "", "per_write", "write percentage", ::cxxopts::value< uint32_t >()->default_value("60"), "number"),
     (per_remove, "", "per_remove", "remove percentage", ::cxxopts::value< uint32_t >()->default_value("20"), "number"),
@@ -384,7 +392,8 @@ int main(int argc, char* argv[]) {
     sds_logging::SetLogger("test_meta_blk_mgr");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 
-    start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(), SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024,
+    start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),
+                    SDS_OPTIONS["dev_size_gb"].as< uint64_t >() * 1024 * 1024 * 1024,
                     SDS_OPTIONS["num_threads"].as< uint32_t >());
 
     gp.num_io = SDS_OPTIONS["num_io"].as< uint64_t >();
@@ -395,6 +404,7 @@ int main(int argc, char* argv[]) {
     gp.fixed_wrt_sz = SDS_OPTIONS["fixed_write_size"].as< uint32_t >();
     gp.min_wrt_sz = SDS_OPTIONS["min_write_size"].as< uint32_t >();
     gp.max_wrt_sz = SDS_OPTIONS["max_write_size"].as< uint32_t >();
+    gp.always_do_overflow = SDS_OPTIONS["overflow"].as< uint32_t >();
 
     if (gp.per_update == 0 || gp.per_write == 0 || (gp.per_update + gp.per_write + gp.per_remove != 100)) {
         gp.per_update = 20;
@@ -408,8 +418,10 @@ int main(int argc, char* argv[]) {
         LOGINFO("Invalid input for min/max wrt sz: defaulting to {}/{}", gp.min_wrt_sz, gp.max_wrt_sz);
     }
 
-    LOGINFO("Testing with run_time: {}, num_io: {}, write/update/remove percentage: {}/{}/{}, min/max io size: {}/{}",
-            gp.run_time, gp.num_io, gp.per_write, gp.per_update, gp.per_remove, gp.min_wrt_sz, gp.max_wrt_sz);
+    LOGINFO("Testing with run_time: {}, num_io: {}, overflow: {}, write/update/remove percentage: {}/{}/{}, min/max io "
+            "size: {}/{}",
+            gp.run_time, gp.num_io, gp.always_do_overflow, gp.per_write, gp.per_update, gp.per_remove, gp.min_wrt_sz,
+            gp.max_wrt_sz);
 
     auto res = RUN_ALL_TESTS();
     VolInterface::get_instance()->shutdown();
