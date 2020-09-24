@@ -14,5 +14,5 @@ using log_req_comp_cb_t = std::function< void(logstore_req*, logdev_key) >;
 using log_write_comp_cb_t = std::function< void(logstore_seq_num_t, sisl::io_blob&, logdev_key, void*) >;
 using log_found_cb_t = std::function< void(logstore_seq_num_t, log_buffer, void*) >;
 using log_store_opened_cb_t = std::function< void(std::shared_ptr< HomeLogStore >) >;
-using log_replay_done_cb_t = std::function< void(std::shared_ptr< HomeLogStore >) >;
+using log_replay_done_cb_t = std::function< void(std::shared_ptr< HomeLogStore >, logstore_seq_num_t) >;
 } // namespace homestore
