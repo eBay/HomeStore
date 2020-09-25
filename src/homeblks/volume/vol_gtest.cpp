@@ -371,7 +371,6 @@ public:
         print_startTime = Clock::now();
 
         // outstanding_ios = 0;
-        srandom(time(NULL));
     }
 
     virtual ~VolTest() override {
@@ -765,9 +764,13 @@ public:
     VolCreateDeleteJob(VolTest* test) : TestJob(test) {}
 
     void run_one_iteration() override {
+        static thread_local std::random_device rd{};
+        static thread_local std::default_random_engine engine{rd()};
+        static thread_local std::uniform_int_distribution< uint64_t > dist{0, RAND_MAX};
+
         while (!time_to_stop()) {
             m_voltest->create_volume();
-            m_voltest->delete_volume(random() % tcfg.max_vols);
+            m_voltest->delete_volume(dist(engine) % tcfg.max_vols);
         }
         m_is_job_done = true;
     }
@@ -1576,7 +1579,6 @@ SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
  * disk capacity and 50 volumes
  */
 int main(int argc, char* argv[]) {
-    srand(time(0));
     ::testing::GTEST_FLAG(filter) = "*lifecycle_test*";
     testing::InitGoogleTest(&argc, argv);
     SDS_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
