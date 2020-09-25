@@ -225,6 +225,7 @@ private:
     // data structure for append write
     uint64_t m_reserved_sz = 0;                  // write size within chunk, used to check chunk boundary;
     off_t m_seek_cursor = 0;                     // the seek cursor
+    off_t m_data_start_offset{0};                // Start offset of where actual data begin for this vdev
     std::atomic< uint64_t > m_write_sz_in_total; // this size will be decreased by truncate and increased by append;
     bool m_auto_recovery;
     bool m_truncate_done = true;
@@ -379,7 +380,7 @@ public:
      *
      * @return : the start logical offset where data starts;
      */
-    off_t data_start_offset() const { return m_vb->data_start_offset; }
+    off_t data_start_offset() const { return m_data_start_offset; }
 
     /**
      * @brief : persist start logical offset to vdev's super block
@@ -387,11 +388,7 @@ public:
      *
      * @param offset : the start logical offset to be persisted
      */
-    void update_data_start_offset(off_t offset) {
-        m_vb->data_start_offset = offset;
-        // call device manager to update it's in-memory copy and persist this field to disk;
-        m_mgr->update_vb_data_start_offset(m_vb->vdev_id, offset);
-    }
+    void update_data_start_offset(off_t offset) { m_data_start_offset = offset; }
 
     /**
      * @brief : get the logcial tail offset;
@@ -462,7 +459,7 @@ public:
         // update in-memory total write size counter;
         m_write_sz_in_total.fetch_sub(size_to_truncate, std::memory_order_relaxed);
 
-        // persist new start logical offset to sb, which is already lock protected;
+        // Update our start offset, to keep track of actual size
         update_data_start_offset(offset);
 
         HS_LOG(INFO, device, "after truncate: m_write_sz_in_total: {}, start: {} ", to_hex(m_write_sz_in_total.load()),
@@ -894,6 +891,8 @@ public:
             HS_ASSERT_CMP(DEBUG, hints.is_contiguous, ==, true);
             ret = alloc_blk(nblks, hints, blkid);
             if (ret == BLK_ALLOC_SUCCESS) {
+                HS_RELEASE_ASSERT_EQ(blkid.size(), 1, "out blkid more than 1 entries({}) will lead to blk leak!",
+                                     blkid.size());
                 *out_blkid = blkid[0];
             } else {
                 HS_ASSERT_CMP(DEBUG, blkid.size(), ==, 0);
@@ -1245,7 +1244,7 @@ private:
 
             auto pdev = m_primary_pdev_chunks_list[dev_id].pdev;
 
-            HS_LOG(INFO, device, "Writing in device: {}, offset: {}", dev_id, offset_in_dev);
+            HS_LOG(TRACE, device, "Writing in device: {}, offset: {}", dev_id, offset_in_dev);
 
             bytes_written = do_pwrite_internal(pdev, chunk, (const char*)buf, count, offset_in_dev, req);
 

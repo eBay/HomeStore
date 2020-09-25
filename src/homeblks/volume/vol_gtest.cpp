@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -35,6 +36,7 @@
 #include <gtest/gtest.h>
 
 #include "api/vol_interface.hpp"
+#include "engine/common/homestore_header.hpp"
 #include "engine/homeds/bitmap/bitset.hpp"
 #include "engine/homestore_base.hpp"
 
@@ -80,6 +82,7 @@ struct TestCfg {
     uint64_t max_num_writes = 100000;
     uint64_t run_time = 60;
     uint64_t num_threads = 8;
+    uint64_t unmap_frequency = 1000;
 
     uint64_t max_io_size = 1 * Mi;
     uint64_t max_outstanding_ios = 64u;
@@ -92,6 +95,7 @@ struct TestCfg {
 
     bool can_delete_volume = false;
     bool read_enable = true;
+    bool unmap_enable = false;
     bool enable_crash_handler = true;
     bool read_verify = false;
     bool remove_file = true;
@@ -127,6 +131,7 @@ struct TestOutput {
 
     std::atomic< uint64_t > write_cnt = 0;
     std::atomic< uint64_t > read_cnt = 0;
+    std::atomic< uint64_t > unmap_cnt = 0;
     std::atomic< uint64_t > read_err_cnt = 0;
     std::atomic< uint64_t > vol_create_cnt = 0;
     std::atomic< uint64_t > vol_del_cnt = 0;
@@ -138,6 +143,7 @@ struct TestOutput {
         fmt::memory_buffer buf;
         if ((v = write_cnt.load())) fmt::format_to(buf, "write_cnt={} ", v);
         if ((v = read_cnt.load())) fmt::format_to(buf, "read_cnt={} ", v);
+        if ((v = unmap_cnt.load())) fmt::format_to(buf, "unmap_cnt={} ", v);
         if ((v = read_err_cnt.load())) fmt::format_to(buf, "read_err_cnt={} ", v);
         if ((v = data_match_cnt.load())) fmt::format_to(buf, "data_match_cnt={} ", v);
         if ((v = csum_match_cnt.load())) fmt::format_to(buf, "csum_match_cnt={} ", v);
@@ -261,27 +267,26 @@ struct io_req_t : public vol_interface_req {
     uint8_t* buffer{nullptr};
     uint8_t* validate_buffer{nullptr};
     uint8_t* checksum_buffer{nullptr};
-    bool is_read;
-    uint64_t vol_index;
+    Op_type op_type;
     uint64_t cur_vol;
     std::shared_ptr< vol_info_t > vol_info;
     bool done = false;
 
-    io_req_t(const std::shared_ptr< vol_info_t >& vinfo, const bool write, uint8_t* const buf, const uint64_t lba,
-             const uint32_t nlbas, const bool cache, const bool is_csum) :
-            vol_interface_req(buf, lba, nlbas, false, cache), vol_index{vol_index}, vol_info(vinfo) {
+    io_req_t(const std::shared_ptr< vol_info_t >& vinfo, const Op_type op, uint8_t* const buf, const uint64_t lba,
+             const uint32_t nlbas, const bool cache, bool is_csum) :
+            vol_interface_req{buf, lba, nlbas, false, cache}, op_type{op}, vol_info{vinfo} {
 
         const auto page_size{VolInterface::get_instance()->get_page_size(vinfo->vol)};
         size = nlbas * page_size;
         offset = lba * page_size;
         fd = vinfo->fd;
-        is_read = !write;
+        cur_vol = vinfo->vol_idx;
         buffer = buf;
 
         validate_buffer = iomanager.iobuf_alloc(512, size);
         assert(validate_buffer != nullptr);
 
-        if (write) {
+        if (op == Op_type::WRITE) {
             if (is_csum) {
                 checksum_buffer = iomanager.iobuf_alloc(512, nlbas * sizeof(uint16_t));
                 assert(checksum_buffer != nullptr);
@@ -292,6 +297,10 @@ struct io_req_t : public vol_interface_req {
             ::memcpy(static_cast< void* >(validate_buffer), static_cast< const void* >(buffer), size);
         }
     }
+
+    bool is_read() const { return op_type == Op_type::READ; }
+    bool is_write() const { return op_type == Op_type::WRITE; }
+    bool is_unmap() const { return op_type == Op_type::UNMAP; }
 
     virtual ~io_req_t() override {
         if (checksum_buffer) { iomanager.iobuf_free(checksum_buffer); }
@@ -589,7 +598,7 @@ public:
         const uint64_t init_buf_size{tcfg.max_io_size};
 
         init_buf = iomanager.iobuf_alloc(512, init_buf_size);
-        bzero(init_buf, init_buf_size);
+        ::memset(static_cast< void* >(init_buf), 0, init_buf_size);
         assert(!tcfg.expected_init_fail);
         if (tcfg.init) {
             if (tcfg.precreate_volume) {
@@ -801,10 +810,15 @@ public:
     IOTestJob& operator=(IOTestJob&&) noexcept = delete;
 
     virtual void run_one_iteration() override {
+        static thread_local uint32_t num_rw_without_unmap = tcfg.unmap_frequency;
         int cnt = 0;
         while ((cnt++ < 1) && (m_outstanding_ios < tcfg.max_outstanding_ios)) {
             write_io();
             if (tcfg.read_enable) { read_io(); }
+            if ((++num_rw_without_unmap >= tcfg.unmap_frequency) && (tcfg.unmap_enable)) {
+                unmap_io();
+                num_rw_without_unmap = 0;
+            }
         }
     }
 
@@ -816,12 +830,12 @@ public:
         if (req->err != no_error) {
             assert((req->err == std::errc::no_such_device) || tcfg.expect_io_error);
         } else {
-            if (req->is_read && (tcfg.read_verify || tcfg.verify_type_set())) {
+            if (req->is_read() && (tcfg.read_verify || tcfg.verify_type_set())) {
                 /* read from the file and verify it */
                 auto ret = pread(req->fd, req->validate_buffer, req->size, req->offset);
                 assert(ret == req->size);
                 verify(req);
-            } else if (!req->is_read) {
+            } else if (!req->is_read()) {
                 /* write to a file */
                 auto ret = pwrite(req->fd, req->validate_buffer, req->size, req->offset);
                 assert(ret == req->size);
@@ -859,32 +873,34 @@ protected:
     load_type_t m_load_type;
     std::atomic< uint64_t > m_cur_vol{0};
     std::atomic< uint64_t > m_outstanding_ios{0};
+    typedef std::function< bool(const uint32_t, const uint64_t, const uint32_t) > IoFuncType;
 
-protected:
     bool write_io() {
         bool ret = false;
+        const IoFuncType write_function{bind_this(IOTestJob::write_vol, 3)};
         switch (m_load_type) {
         case load_type_t::random:
-            ret = random_write();
+            ret = run_io(load_type_t::random, write_function);
             break;
         case load_type_t::same:
-            ret = same_write();
+            ret = run_io(load_type_t::same, write_function);
             break;
         case load_type_t::sequential:
-            ret = seq_write();
+            ret = run_io(load_type_t::sequential, write_function);
             break;
         }
         return ret;
     }
 
     bool read_io() {
+        const IoFuncType read_function{bind_this(IOTestJob::read_vol, 3)};
         bool ret = false;
         switch (m_load_type) {
         case load_type_t::random:
-            ret = random_read();
+            ret = run_io(load_type_t::random, read_function);
             break;
         case load_type_t::same:
-            ret = same_read();
+            ret = run_io(load_type_t::same, read_function);
             break;
         case load_type_t::sequential:
             assert(0);
@@ -893,76 +909,81 @@ protected:
         return ret;
     }
 
-    bool same_write() { return write_vol(0, 1, 100); }
-
-    bool seq_write() {
-        /* XXX: does it really matter if it is atomic or not */
-        const uint64_t cur{++m_cur_vol % tcfg.max_vols};
-        uint64_t lba;
-        uint64_t nlbas;
-    start:
-        /* we won't be writing more then 128 blocks in one io */
-        auto vinfo = m_voltest->vol_info[cur];
-        auto vol = vinfo->vol;
-        if (vol == nullptr) { return false; }
-        if (vinfo->num_io.fetch_add(1, std::memory_order_acquire) == 1000) {
-            nlbas = 200;
-            lba = (vinfo->start_large_lba.fetch_add(nlbas, std::memory_order_acquire)) % (vinfo->max_vol_blks - nlbas);
-        } else {
-            nlbas = 2;
-            lba = (vinfo->start_lba.fetch_add(nlbas, std::memory_order_acquire)) % (vinfo->max_vol_blks - nlbas);
+    bool unmap_io() {
+        const IoFuncType unmap_function{bind_this(IOTestJob::unmap_vol, 3)};
+        bool ret = false;
+        switch (m_load_type) {
+        case load_type_t::random:
+            ret = run_io(load_type_t::random, unmap_function);
+            break;
+        case load_type_t::same:
+            assert(0);
+            break;
+        case load_type_t::sequential:
+            assert(0);
+            break;
         }
-        if (nlbas == 0) { nlbas = 1; }
-
-        if (m_load_type != load_type_t::sequential) {
-            /* can not support concurrent overlapping writes if whole data need to be verified */
-            std::unique_lock< std::mutex > lk(vinfo->vol_mutex);
-            /* check if someone is already doing writes/reads */
-            if (nlbas && vinfo->m_vol_bm->is_bits_reset(lba, nlbas)) {
-                vinfo->m_vol_bm->set_bits(lba, nlbas);
-            } else {
-                goto start;
-            }
-        }
-        return write_vol(cur, lba, nlbas);
+        return ret;
     }
 
-    bool same_read() { return read_vol(0, 5, 100); }
-
-    bool random_write() {
+    bool run_io(load_type_t load_type, const IoFuncType& io_function) {
         static thread_local random_device rd{};
         static thread_local default_random_engine engine{rd()};
 
-        const uint64_t cur{++m_cur_vol % tcfg.max_vols};
-        const auto vinfo{m_voltest->vol_info[cur]};
-        const auto vol{vinfo->vol};
-        if (vol == nullptr) { return false; }
-        const uint32_t max_blks{
-            static_cast< uint32_t >(tcfg.max_io_size / VolInterface::get_instance()->get_page_size(vol))};
-        // lba: [0, max_vol_blks - max_blks)
-        std::uniform_int_distribution< uint64_t > lba_random{0, vinfo->max_vol_blks - max_blks - 1};
-        // nlbas: [1, max_blks]
-        std::uniform_int_distribution< uint32_t > nlbas_random{1, max_blks};
+        uint64_t lba{};
+        uint32_t nlbas{};
+        uint64_t cur{};
+        if (load_type == load_type_t::same) {
+            cur = 0;
+            lba = 1;
+            nlbas = 100;
+        } else {
+            cur = ++m_cur_vol % tcfg.max_vols;
+            // we won't be writing more then 128 blocks in one io
+            const auto vinfo{m_voltest->vol_info[cur]};
+            const auto vol{vinfo->vol};
+            if (vol == nullptr) { return false; }
 
-        // we won't be writing more then 128 blocks in one io
-        for (;;) {
-            const uint64_t lba{lba_random(engine)};
-            const uint32_t nlbas{nlbas_random(engine)};
+            if (load_type == load_type_t::sequential) {
+                if (vinfo->num_io.fetch_add(1, std::memory_order_acquire) == 1000) {
+                    nlbas = 200;
+                    lba = (vinfo->start_large_lba.fetch_add(nlbas, std::memory_order_acquire)) %
+                        (vinfo->max_vol_blks - nlbas);
+                } else {
+                    nlbas = 2;
+                    lba =
+                        (vinfo->start_lba.fetch_add(nlbas, std::memory_order_acquire)) % (vinfo->max_vol_blks - nlbas);
+                }
+                if (nlbas == 0) { nlbas = 1; }
+            } else {
+                const uint32_t max_blks{
+                    static_cast< uint32_t >(tcfg.max_io_size / VolInterface::get_instance()->get_page_size(vol))};
+                // lba: [0, max_vol_blks - max_blks)
+                std::uniform_int_distribution< uint64_t > lba_random{0, vinfo->max_vol_blks - max_blks - 1};
+                // nlbas: [1, max_blks]
+                std::uniform_int_distribution< uint32_t > nlbas_random{1, max_blks};
 
-            if (m_load_type != load_type_t::sequential) {
-                // can not support concurrent overlapping writes if whole data need to be verified
-                std::unique_lock< std::mutex > lk(vinfo->vol_mutex);
-                // check if someone is already doing writes/reads
-                if (nlbas && vinfo->m_vol_bm->is_bits_reset(lba, nlbas)) {
-                    vinfo->m_vol_bm->set_bits(lba, nlbas);
-                    lk.unlock();
-                    return write_vol(cur, lba, nlbas);
+                // we won't be writing more then 128 blocks in one io
+                for (;;) {
+                    lba = lba_random(engine);
+                    nlbas = nlbas_random(engine);
+
+                    if (m_load_type != load_type_t::sequential) {
+                        // can not support concurrent overlapping writes if whole data need to be verified
+                        std::unique_lock< std::mutex > lk(vinfo->vol_mutex);
+                        // check if someone is already doing writes/reads
+                        if (nlbas && vinfo->m_vol_bm->is_bits_reset(lba, nlbas)) {
+                            vinfo->m_vol_bm->set_bits(lba, nlbas);
+                            break;
+                        }
+                    }
                 }
             }
         }
+        return io_function(cur, lba, nlbas);
     }
 
-    bool write_vol(const uint32_t cur, const uint64_t lba, const uint64_t nlbas) {
+    bool write_vol(const uint32_t cur, const uint64_t lba, const uint32_t nlbas) {
         const auto vinfo{m_voltest->vol_info[cur]};
         const auto vol{vinfo->vol};
         if (vol == nullptr) { return false; }
@@ -974,7 +995,7 @@ protected:
         populate_buf(wbuf, size, lba, vinfo.get());
 
         const auto vreq{boost::intrusive_ptr< io_req_t >(
-            new io_req_t(vinfo, true, wbuf, lba, nlbas, tcfg.write_cache, tcfg.verify_csum()))};
+            new io_req_t(vinfo, Op_type::WRITE, wbuf, lba, nlbas, tcfg.write_cache, tcfg.verify_csum()))};
 
         vreq->cookie = static_cast< void* >(this);
 
@@ -1005,40 +1026,7 @@ protected:
         }
     }
 
-    bool random_read() {
-        static thread_local random_device rd{};
-        static thread_local default_random_engine engine{rd()};
-
-        const uint64_t cur{++m_cur_vol % tcfg.max_vols};
-        const auto vinfo{m_voltest->vol_info[cur]};
-        const auto vol{vinfo->vol};
-        if (vol == nullptr) { return false; }
-        const uint32_t max_blks{
-            static_cast< uint32_t >(tcfg.max_io_size / VolInterface::get_instance()->get_page_size(vol))};
-        // lba: [0, max_vol_blks - max_blks)
-        std::uniform_int_distribution< uint64_t > lba_random{0, vinfo->max_vol_blks - max_blks - 1};
-        // nlbas: [1, max_blks]
-        std::uniform_int_distribution< uint32_t > nlbas_random{1, max_blks};
-
-        // we won't be writing more then 128 blocks in one io
-        for (;;) {
-            const uint64_t lba{lba_random(engine)};
-            const uint32_t nlbas{nlbas_random(engine)};
-
-            if (m_load_type != load_type_t::sequential) {
-                // can not support concurrent overlapping writes if whole data need to be verified
-                std::unique_lock< std::mutex > lk(vinfo->vol_mutex);
-                // check if someone is already doing writes/reads
-                if (nlbas && vinfo->m_vol_bm->is_bits_reset(lba, nlbas)) {
-                    vinfo->m_vol_bm->set_bits(lba, nlbas);
-                    lk.unlock();
-                    return read_vol(cur, lba, nlbas);
-                }
-            }
-        }
-    }
-
-    bool read_vol(const uint32_t cur, const uint64_t lba, const uint64_t nlbas) {
+    bool read_vol(const uint32_t cur, const uint64_t lba, const uint32_t nlbas) {
         const auto vinfo{m_voltest->vol_info[cur]};
         const auto vol{vinfo->vol};
         if (vol == nullptr) { return false; }
@@ -1051,8 +1039,9 @@ protected:
         }
 
         const auto vreq{boost::intrusive_ptr< io_req_t >(
-            new io_req_t(vinfo, false, rbuf, lba, nlbas, tcfg.read_cache, tcfg.verify_csum()))};
-        vreq->cookie = (void*)this;
+            new io_req_t(vinfo, Op_type::READ, rbuf, lba, nlbas, tcfg.read_cache, tcfg.verify_csum()))};
+
+        vreq->cookie = static_cast< void* >(this);
 
         ++m_voltest->output.read_cnt;
         ++m_outstanding_ios;
@@ -1063,7 +1052,29 @@ protected:
         return true;
     }
 
-    bool verify(const boost::intrusive_ptr< io_req_t >& req, const bool can_panic = true) {
+    bool unmap_vol(const uint32_t cur, const uint64_t lba, const uint32_t nlbas) {
+        const auto vinfo{m_voltest->vol_info[cur]};
+        const auto vol{vinfo->vol};
+        if (vol == nullptr) { return false; }
+
+        const uint64_t size{nlbas * VolInterface::get_instance()->get_page_size(vol)};
+        uint8_t* const wbuf{iomanager.iobuf_alloc(512, size)};
+
+        const auto vreq{boost::intrusive_ptr< io_req_t >(
+            new io_req_t(vinfo, Op_type::UNMAP, wbuf, lba, nlbas, tcfg.write_cache, tcfg.verify_csum()))};
+
+        vreq->cookie = static_cast< void* >(this);
+
+        ++m_voltest->output.unmap_cnt;
+        ++m_outstanding_ios;
+        const auto ret_io{VolInterface::get_instance()->unmap(vol, vreq)};
+        LOGDEBUG("Unmapped lba: {}, nlbas: {} outstanding_ios={}, cache={}", lba, nlbas, m_outstanding_ios.load(),
+                 (tcfg.write_cache != 0 ? true : false));
+        if (ret_io != no_error) { return false; }
+        return true;
+    }
+
+    bool verify(const boost::intrusive_ptr< io_req_t >& req, const bool can_panic = true) const {
         auto& vol_req = (vol_interface_req_ptr&)req;
 
         uint64_t tot_size_read{0};
@@ -1080,13 +1091,15 @@ protected:
                     bool j{false};
                     if (tcfg.verify_csum()) {
                         const uint16_t csum1{
-                            req->is_read ? crc16_t10dif(init_crc_16, validate_buffer, size_read)
-                                         : *(reinterpret_cast< const uint16_t* >(req->checksum_buffer) + csums_read)};
+                            req->op_type == Op_type::READ
+                                ? crc16_t10dif(init_crc_16, validate_buffer, size_read)
+                                : *(reinterpret_cast< const uint16_t* >(req->checksum_buffer) + csums_read)};
                         const uint16_t csum2{crc16_t10dif(init_crc_16, b.bytes, size_read)};
                         j = (csum1 != csum2);
                         if (j) {
                             LOGINFO("checksum mismatch operation {} volume {} lba {} csum1 {} csum2 {}",
-                                    (req->is_read ? "read" : "write"), req->cur_vol, req->lba, csum1, csum2);
+                                    (req->op_type == Op_type::READ ? "read" : "write"), req->cur_vol, req->lba, csum1,
+                                    csum2);
                         } else {
                             ++m_voltest->output.csum_match_cnt;
                         }
@@ -1147,13 +1160,15 @@ protected:
                 bool j{false};
                 if (tcfg.verify_csum()) {
                     const uint16_t csum1{
-                        req->is_read ? crc16_t10dif(init_crc_16, validate_buffer, size_read)
-                                     : *(reinterpret_cast< const uint16_t* >(req->checksum_buffer) + csums_read)};
+                        req->op_type == Op_type::READ
+                            ? crc16_t10dif(init_crc_16, validate_buffer, size_read)
+                            : *(reinterpret_cast< const uint16_t* >(req->checksum_buffer) + csums_read)};
                     const uint16_t csum2{crc16_t10dif(init_crc_16, buffer, size_read)};
                     j = (csum1 != csum2);
                     if (j) {
                         LOGINFO("checksum mismatch operation {} volume {} lba {} csum1 {} csum2 {}",
-                                (req->is_read ? "read" : "write"), req->cur_vol, req->lba, csum1, csum2);
+                                (req->op_type == Op_type::READ ? "read" : "write"), req->cur_vol, req->lba, csum1,
+                                csum2);
                     } else {
                         ++m_voltest->output.csum_match_cnt;
                     }
@@ -1509,6 +1524,7 @@ TEST_F(VolTest, btree_fix_rerun_io_test) {
 
     output.write_cnt = 0;
     output.read_cnt = 0;
+    output.unmap_cnt = 0;
     this->move_vol_to_online();
     this->start_io_job(wait_type_t::for_execution);
     output.print("btree_fix_rerun_io_test");
@@ -1528,6 +1544,8 @@ SDS_OPTION_GROUP(
     (num_threads, "", "num_threads", "num_threads - default 2 for spdk and 8 for non-spdk",
      ::cxxopts::value< uint32_t >()->default_value("8"), "number"),
     (read_enable, "", "read_enable", "read enable 0 or 1", ::cxxopts::value< uint32_t >()->default_value("1"), "flag"),
+    (unmap_enable, "", "unmap_enable", "unmap enable 0 or 1", ::cxxopts::value< uint32_t >()->default_value("0"),
+     "flag"),
     (max_disk_capacity, "", "max_disk_capacity", "max disk capacity",
      ::cxxopts::value< uint64_t >()->default_value("7"), "GB"),
     (max_volume, "", "max_volume", "max volume", ::cxxopts::value< uint64_t >()->default_value("50"), "number"),
@@ -1589,6 +1607,7 @@ int main(int argc, char* argv[]) {
     _gcfg.run_time = SDS_OPTIONS["run_time"].as< uint32_t >();
     _gcfg.num_threads = SDS_OPTIONS["num_threads"].as< uint32_t >();
     _gcfg.read_enable = SDS_OPTIONS["read_enable"].as< uint32_t >();
+    _gcfg.unmap_enable = SDS_OPTIONS["unmap_enable"].as< uint32_t >();
     _gcfg.max_disk_capacity = ((SDS_OPTIONS["max_disk_capacity"].as< uint64_t >()) * (1ul << 30));
     _gcfg.max_vols = SDS_OPTIONS["max_volume"].as< uint64_t >();
     _gcfg.max_num_writes = SDS_OPTIONS["max_num_writes"].as< uint64_t >();

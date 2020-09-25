@@ -29,7 +29,7 @@ public:
     }
 
     explicit SampleLogStoreClient(uint64_t nentries, const test_log_store_comp_cb_t& cb) :
-            SampleLogStoreClient(home_log_store_mgr.create_new_log_store(), nentries, cb) {}
+            SampleLogStoreClient(home_log_store_mgr.create_new_log_store(false /* append_mode */), nentries, cb) {}
 
     void init(std::shared_ptr< HomeLogStore > store) {
         m_log_store = store;
@@ -101,9 +101,9 @@ public:
 
         if (restart) {
             for (auto i = 0u; i < n_log_stores; ++i) {
-                home_log_store_mgr.open_log_store(i, [i, this](std::shared_ptr< HomeLogStore > log_store) {
-                    m_log_store_clients[i]->init(log_store);
-                });
+                home_log_store_mgr.open_log_store(
+                    i, false /* append_mode */,
+                    [i, this](std::shared_ptr< HomeLogStore > log_store) { m_log_store_clients[i]->init(log_store); });
             }
         }
 

@@ -105,7 +105,7 @@ enum BlkAllocStatus {
     BLK_ALLOC_FAILED = 1 << 1,  // Failed
     BLK_ALLOC_REQMORE = 1 << 2, // Indicate that we need more
     BLK_ALLOC_SPACEFULL = 1 << 3,
-    BLK_ALLOC_INVALID_DEV = 1 << 4
+    BLK_ALLOC_INVALID_DEV = 1 << 4,
 };
 
 enum BlkOpStatus {

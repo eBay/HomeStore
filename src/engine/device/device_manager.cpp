@@ -167,12 +167,6 @@ void DeviceManager::update_end_of_chunk(PhysicalDevChunk* chunk, off_t offset) {
     write_info_blocks();
 }
 
-void DeviceManager::update_vb_data_start_offset(uint32_t vdev_id, off_t offset) {
-    std::lock_guard< decltype(m_dev_mutex) > lock(m_dev_mutex);
-    m_vdev_info[vdev_id].data_start_offset = offset;
-    write_info_blocks();
-}
-
 void DeviceManager::get_vb_context(uint32_t vdev_id, const sisl::blob& ctx_data) {
     std::lock_guard< decltype(m_dev_mutex) > lock(m_dev_mutex);
     HS_LOG_ASSERT_LE(ctx_data.size, vdev_info_block::max_context_size());
@@ -490,7 +484,6 @@ vdev_info_block* DeviceManager::alloc_vdev(uint32_t req_size, uint32_t nmirrors,
     vb->num_mirrors = nmirrors;
     vb->page_size = page_size;
     vb->num_primary_chunks = nchunks;
-    vb->data_start_offset = 0;
     memcpy(vb->context_data, blob, req_size);
 
     vb->prev_vdev_id = m_last_vdevid;

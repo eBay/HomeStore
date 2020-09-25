@@ -189,7 +189,7 @@ IndxMgr::IndxMgr(boost::uuids::uuid uuid, std::string name, const io_done_cb& io
     m_prepare_cb_list->reserve(4);
     m_active_tbl = m_create_indx_tbl();
 
-    m_journal = HomeLogStoreMgr::instance().create_new_log_store();
+    m_journal = HomeLogStoreMgr::instance().create_new_log_store(false /* append_mode */);
     m_journal_comp_cb = bind_this(IndxMgr::journal_comp_cb, 2);
     m_journal->register_req_comp_cb(m_journal_comp_cb);
     for (int i = 0; i < MAX_CP_CNT; ++i) {
@@ -215,13 +215,16 @@ IndxMgr::IndxMgr(boost::uuids::uuid uuid, std::string name, const io_done_cb& io
 
     m_is_snap_enabled = sb.is_snap_enabled;
     HomeLogStoreMgr::instance().open_log_store(
-        sb.journal_id, ([this](std::shared_ptr< HomeLogStore > logstore) {
+        sb.journal_id,
+        false, // Append mode,
+        [this](std::shared_ptr< HomeLogStore > logstore) {
             m_journal = logstore;
             m_journal->register_log_found_cb(
                 ([this](logstore_seq_num_t seqnum, log_buffer buf, void* mem) { this->log_found(seqnum, buf, mem); }));
             m_journal_comp_cb = bind_this(IndxMgr::journal_comp_cb, 2);
             m_journal->register_req_comp_cb(m_journal_comp_cb);
-        }));
+            m_journal->register_log_replay_done_cb(bind_this(IndxMgr::on_replay_done, 2));
+        });
     for (int i = 0; i < MAX_CP_CNT; ++i) {
         m_free_list[i] = std::make_shared< sisl::ThreadVector< BlkId > >();
     }
@@ -1117,6 +1120,10 @@ void IndxMgr::log_found(logstore_seq_num_t seqnum, log_buffer log_buf, void* mem
     }
     if (seqnum > m_max_seqid_in_recovery) { m_max_seqid_in_recovery = seqnum; }
     HS_ASSERT(RELEASE, happened, "happened");
+}
+
+void IndxMgr::on_replay_done([[maybe_unused]] std::shared_ptr< HomeLogStore > store, logstore_seq_num_t upto_lsn) {
+    m_max_seqid_in_recovery = std::max(m_max_seqid_in_recovery, upto_lsn);
 }
 
 void IndxMgr::read_indx(const boost::intrusive_ptr< indx_req >& ireq) {

@@ -332,7 +332,7 @@ public:
     // sync write with iov;
     //
     void write(BlkId& bid, const iovec* const iov, const int iovcnt) {
-            m_vdev.write(bid, const_cast<iovec* const>(iov), iovcnt);
+        m_vdev.write(bid, const_cast< iovec* const >(iov), iovcnt);
     }
 
     /* Write the buffer. The BlkStore write does not support write in place and so it does not also support
@@ -346,8 +346,10 @@ public:
      * same buffer but different offsets.
      */
 
-    boost::intrusive_ptr< Buffer > write(BlkId& bid, boost::intrusive_ptr< homeds::MemVector > mvec, const uint32_t data_offset,
-                                         const boost::intrusive_ptr< blkstore_req< Buffer > > req, const bool in_cache) {
+    boost::intrusive_ptr< Buffer > write(BlkId& bid, boost::intrusive_ptr< homeds::MemVector > mvec,
+                                         const uint32_t data_offset,
+                                         const boost::intrusive_ptr< blkstore_req< Buffer > > req,
+                                         const bool in_cache) {
         req->start_time();
         COUNTER_INCREMENT(m_metrics, blkstore_write_op_count, 1);
 
@@ -388,11 +390,11 @@ public:
         return req->bbuf;
     }
 
-    void write(const BlkId& bid, const std::vector<iovec>& iovecs,
+    void write(const BlkId& bid, const std::vector< iovec >& iovecs,
                const boost::intrusive_ptr< blkstore_req< Buffer > >& req) {
         // Now write data to the device
         req->start_time();
-        m_vdev.write(bid, const_cast<iovec*>(iovecs.data()), iovecs.size(), to_vdev_req(req));
+        m_vdev.write(bid, const_cast< iovec* >(iovecs.data()), iovecs.size(), to_vdev_req(req));
         if (req->isSyncCall) {
             HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_write_latency,
                               get_elapsed_time_us(req->blkstore_op_start_time));
@@ -506,11 +508,10 @@ public:
         return bbuf;
     }
 
-
-     // Read the data for given blk id and size. This method stores the read in the iovecs starting at the
-     // the given offset
-     void read(const BlkId& bid, std::vector<iovec>& iovecs, const uint32_t size,
-               boost::intrusive_ptr< blkstore_req< Buffer > > req) {
+    // Read the data for given blk id and size. This method stores the read in the iovecs starting at the
+    // the given offset
+    void read(const BlkId& bid, std::vector< iovec >& iovecs, const uint32_t size,
+              boost::intrusive_ptr< blkstore_req< Buffer > > req) {
         assert(req->err == no_error);
 
         COUNTER_INCREMENT(m_metrics, blkstore_read_op_count, 1);
@@ -523,7 +524,7 @@ public:
         // This assert won't be valid for volume reads if user is doing overlap writes/reads because we set the blks
         // allocated only after journal write is completed.
         ///
-        HS_ASSERT_CMP(DEBUG, m_vdev.is_blk_alloced(const_cast<BlkId&>(bid)), ==, true, "blk is not allocted");
+        HS_ASSERT_CMP(DEBUG, m_vdev.is_blk_alloced(const_cast< BlkId& >(bid)), ==, true, "blk is not allocted");
 
         req->blkstore_ref_cnt.increment(1);
         m_vdev.read(bid, iovecs, size, to_vdev_req(req));
@@ -615,6 +616,7 @@ public:
 
     void readv(const uint64_t offset, struct iovec* iov, int iovcnt) { m_vdev.readv(offset, iov, iovcnt); }
 
+    void update_data_start_offset(const off_t start) { m_vdev.update_data_start_offset(start); }
     void update_tail_offset(const off_t tail) { m_vdev.update_tail_offset(tail); }
 
     void truncate(const off_t offset) { m_vdev.truncate(offset); }

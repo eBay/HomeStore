@@ -96,6 +96,9 @@ struct btree_cp_sb {
     int64_t cp_id = -1;
     int64_t blkalloc_cp_id = -1;
     int64_t btree_size = 0;
+
+    int64_t get_active_seqid() const { return active_seqid; }
+
     /* we can add more statistics as well like number of interior nodes etc. */
     std::string to_string() const {
         std::stringstream ss;
@@ -144,7 +147,10 @@ struct bt_journal_node_info {
 
 struct btree_journal_entry {
     btree_journal_entry(journal_op p, bool root, bt_node_gen_pair ninfo, int64_t cp_id) :
-            op(p), is_root(root), cp_id(cp_id), parent_node(ninfo) {}
+            op(p),
+            is_root(root),
+            cp_id(cp_id),
+            parent_node(ninfo) {}
 
     void append_node(bt_journal_node_op node_op, bnodeid_t node_id, uint64_t gen, sisl::blob key = {nullptr, 0}) {
         ++node_count;
@@ -570,7 +576,6 @@ public:
     virtual ~BtreeLockTracker() = default;
 };
 
-
 ENUM(BtreeQueryType, uint8_t,
      // This is default query which walks to first element in range, and then sweeps/walks
      // across the leaf nodes. However, if upon pagination, it again walks down the query from
@@ -618,10 +623,12 @@ public:
 
 protected:
     BRangeRequest(BRangeCBParam* cb_param, BtreeSearchRange& search_range, uint32_t batch_size = UINT32_MAX) :
-            m_cb_param(cb_param), m_input_range(&search_range), m_batch_size(UINT32_MAX) {}
+            m_cb_param(cb_param),
+            m_input_range(&search_range),
+            m_batch_size(UINT32_MAX) {}
 
 protected:
-    BRangeCBParam* m_cb_param;      // additional parameters that is passed to callback
+    BRangeCBParam* m_cb_param; // additional parameters that is passed to callback
 
 private:
     BtreeSearchRange* m_input_range; // Btree range filter originally provided
@@ -636,7 +643,9 @@ public:
                       BtreeQueryType query_type = BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY,
                       uint32_t batch_size = UINT32_MAX, match_item_cb_t< K, V > cb = nullptr,
                       BRangeCBParam* cb_param = nullptr) :
-            BRangeRequest(cb_param, search_range, batch_size), m_query_type(query_type), m_cb(cb) {}
+            BRangeRequest(cb_param, search_range, batch_size),
+            m_query_type(query_type),
+            m_cb(cb) {}
 
     ~BtreeQueryRequest() = default;
 
@@ -647,7 +656,7 @@ public:
     BRangeCBParam* get_cb_param() const { return (BRangeCBParam*)m_cb_param; }
 
 protected:
-    BtreeQueryType m_query_type;           // Type of the query
+    BtreeQueryType m_query_type; // Type of the query
     const match_item_cb_t< K, V > m_cb;
 };
 
@@ -657,7 +666,9 @@ public:
     BtreeUpdateRequest(BtreeSearchRange& search_range, match_item_cb_t< K, V > cb = nullptr,
                        get_size_needed_cb_t< K, V > size_cb = nullptr, BRangeCBParam* cb_param = nullptr,
                        uint32_t batch_size = UINT32_MAX) :
-            BRangeRequest(cb_param, search_range, batch_size), m_cb(cb), m_size_cb(size_cb) {}
+            BRangeRequest(cb_param, search_range, batch_size),
+            m_cb(cb),
+            m_size_cb(size_cb) {}
 
     match_item_cb_t< K, V > callback() const { return m_cb; }
     BRangeCBParam* get_cb_param() const { return (BRangeCBParam*)m_cb_param; }
