@@ -227,8 +227,8 @@ protected:
 
 typedef int64_t logid_t;
 struct logdev_key {
-    logid_t idx = -1;
-    uint64_t dev_offset = 0;
+    logid_t idx = std::numeric_limits< logid_t >::min();
+    uint64_t dev_offset = std::numeric_limits< uint64_t >::min();
 
     bool operator==(const logdev_key& other) { return (other.idx == idx) && (other.dev_offset == dev_offset); }
     friend std::ostream& operator<<(std::ostream& os, const logdev_key& k) {
@@ -237,7 +237,20 @@ struct logdev_key {
     }
 
     operator bool() const { return is_valid(); }
-    bool is_valid() const { return (idx != -1); }
+    bool is_valid() const { return !is_lowest() && !is_highest(); }
+
+    bool is_lowest() const { return (idx == std::numeric_limits< logid_t >::min()); }
+    bool is_highest() const { return (idx == std::numeric_limits< logid_t >::max()); }
+
+    void set_lowest() {
+        idx = std::numeric_limits< logid_t >::min();
+        dev_offset = std::numeric_limits< uint64_t >::min();
+    }
+
+    void set_highest() {
+        idx = std::numeric_limits< logid_t >::max();
+        dev_offset = std::numeric_limits< uint64_t >::max();
+    }
 };
 } // namespace homestore
 
@@ -264,17 +277,58 @@ struct truncation_request_t {
     logstore_seq_num_t upto_seq_num;
 };
 
-/* This structure represents the logdevice super block which will sit inside the user_context block of the
- * vdev_info_block. */
-struct logdev_info_block {
-    static constexpr uint32_t size = 2048;
-    static constexpr uint32_t store_info_size() { return size - sizeof(logdev_info_block); }
+/* This structure represents the logdevice super block which will be loaded upto start of the homestore */
+struct logdev_superblk {
+    static constexpr uint32_t LOGDEV_SB_VERSION = 1;
 
-    uint32_t blkstore_type = 4; // TODO: Padding. Once this persistent area is moved to recovery mgr, this 4 bytes
-                                // padding can be removed.
+    uint32_t version = LOGDEV_SB_VERSION;
+    uint32_t num_stores = 0;
     uint64_t start_dev_offset = 0;
-    uint8_t store_id_info[0];
+    uint8_t store_meta[0];
+
+    uint32_t get_version() const { return version; }
 } __attribute__((packed));
+
+class logstore_meta;
+// This class represents the metadata of logdev providing methods to change/access log dev super block.
+class LogDevMetadata {
+public:
+    logdev_superblk* create();
+    void reset();
+    void meta_buf_found(const sisl::byte_view& buf, void* meta_cookie);
+    std::vector< std::pair< logstore_id_t, logstore_meta > > load();
+    void persist();
+
+    bool is_empty() const { return (m_sb == nullptr); }
+    inline uint64_t get_start_dev_offset() const { return m_sb->start_dev_offset; }
+    void update_start_dev_offset(uint64_t offset, bool persist_now);
+
+    logstore_id_t reserve_store(bool persist_now);
+    void unreserve_store(logstore_id_t idx, bool persist_now);
+    const std::set< logstore_id_t >& reserved_store_ids() const { return m_store_info; }
+
+    void update_store_meta(const logstore_id_t idx, const logstore_meta& meta, bool persist_now);
+    logstore_meta& mutable_store_meta(const logstore_id_t idx);
+
+private:
+    bool resize_if_needed();
+
+    uint32_t required_sb_size(uint32_t nstores) const {
+        return sisl::round_up(size_needed(nstores), HS_STATIC_CONFIG(drive_attr.phys_page_size));
+    }
+
+    uint32_t size_needed(uint32_t nstores) const {
+        return sizeof(logdev_superblk) + (nstores * sizeof(logstore_seq_num_t));
+    }
+
+    uint32_t store_capacity() const;
+
+    sisl::byte_view m_raw_buf;
+    logdev_superblk* m_sb = nullptr;
+    void* m_meta_mgr_cookie = nullptr;
+    std::unique_ptr< sisl::IDReserver > m_id_reserver;
+    std::set< logstore_id_t > m_store_info;
+};
 
 class log_stream_reader {
 public:
@@ -297,7 +351,7 @@ public:
     typedef std::function< void(logstore_id_t, logdev_key, logdev_key, uint32_t nremaining_in_batch, void*) >
         log_append_comp_callback;
     typedef std::function< void(logstore_id_t, logstore_seq_num_t, logdev_key, log_buffer) > log_found_callback;
-    typedef std::function< void(logstore_id_t) > store_found_callback;
+    typedef std::function< void(logstore_id_t, const logstore_meta&) > store_found_callback;
     typedef std::function< void(void) > flush_blocked_callback;
 
     static inline int64_t flush_data_threshold_size() {
@@ -396,10 +450,9 @@ public:
     /**
      * @brief Reserve logstore id and persist if needed. It persists the entire map about the logstore id inside the
      *
-     * @param persist : Need to persist the reserved id or not
      * @return uint32_t : Return the reserved id
      */
-    logstore_id_t reserve_store_id(bool persist = true);
+    logstore_id_t reserve_store_id();
 
     /**
      * @brief Unreserve the logstore id. It does not immediately unregisters and persist the unregistered map, but it
@@ -455,6 +508,8 @@ public:
     void truncate(const logdev_key& key);
     void meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size);
 
+    void update_store_meta(const logstore_id_t idx, const logstore_meta& meta, bool persist_now);
+
 private:
     LogGroup* make_log_group(uint32_t estimated_records) {
         m_log_group_idx = !m_log_group_idx;
@@ -480,11 +535,11 @@ private:
 private:
     boost::intrusive_ptr< HomeStoreBase > m_hb; // Back pointer to homestore
     std::unique_ptr< sisl::StreamTracker< log_record > >
-        m_log_records; // The container which stores all in-memory log records
-    std::unique_ptr< sisl::IDReserver > m_id_reserver;
+        m_log_records;                               // The container which stores all in-memory log records
     std::atomic< logid_t > m_log_idx = 0;            // Generator of log idx
     std::atomic< int64_t > m_pending_flush_size = 0; // How much flushable logs are pending
     std::atomic< bool > m_is_flushing = false; // Is LogDev currently flushing (so far supports one flusher at a time)
+    bool m_stopped = false; // Is Logdev stopped. We don't need lock here, because it is updated under flush lock
     std::map< logid_t, logstore_id_t > m_garbage_store_ids;
     Clock::time_point m_last_flush_time;
 
@@ -497,8 +552,8 @@ private:
     store_found_callback m_store_found_cb = nullptr;
 
     // LogDev Info block related fields
-    std::mutex m_store_reserve_mutex;
-    sisl::byte_view m_info_blk_buf;
+    std::mutex m_meta_mutex;
+    LogDevMetadata m_logdev_meta;
 
     // Block flush Q request Q
     std::mutex m_block_flush_q_mutex;

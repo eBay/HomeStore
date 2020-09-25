@@ -8,7 +8,6 @@
 #include <fstream>
 #include <iterator>
 
-
 #include "fds/utils.hpp"
 #include "homeblks/home_blks.hpp"
 #include "volume.hpp"
@@ -248,35 +247,33 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
 
             /* Create child requests */
             const uint64_t data_size{bid[i].data_size(m_hb->get_data_pagesz())};
-            const uint32_t nlbas{static_cast<uint32_t>(data_size / get_page_size())};
+            const uint32_t nlbas{static_cast< uint32_t >(data_size / get_page_size())};
             auto vc_req = create_vol_child_req(bid[i], vreq, start_lba, nlbas);
             start_lba += nlbas;
 
             /* Issue child request */
             /* store blkid which is used later to create journal entry */
             vreq->push_blkid(bid[i]);
-            if (std::holds_alternative< volume_req::MemVecData >(vreq->data))
-            {
+            if (std::holds_alternative< volume_req::MemVecData >(vreq->data)) {
                 // managed memory write
                 const auto& mem_vec{std::get< volume_req::MemVecData >(vreq->data)};
                 boost::intrusive_ptr< BlkBuffer > bbuf = m_hb->get_data_blkstore()->write(
-                    vc_req->bid, mem_vec, data_offset,
-                    boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vc_req), vreq->use_cache());
+                    vc_req->bid, mem_vec, data_offset, boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vc_req),
+                    vreq->use_cache());
 
                 // update checksum which must be done in page size increments to match read
                 sisl::blob outb{};
                 uint64_t checksum_offset{data_offset};
-                for (uint32_t count{0}; count < nlbas; ++count, checksum_offset+=get_page_size()) {
+                for (uint32_t count{0}; count < nlbas; ++count, checksum_offset += get_page_size()) {
                     mem_vec->get(&outb, checksum_offset);
                     vreq->push_csum(
                         crc16_t10dif(init_crc_16, static_cast< unsigned char* >(outb.bytes), get_page_size()));
                 }
-            } else 
-            {
+            } else {
                 // scatter/gather write
                 const auto& iovecs{std::get< volume_req::IoVecData >(vreq->data)};
                 const auto write_iovecs{get_next_iovecs(write_transversal, iovecs, data_size)};
-                m_hb->get_data_blkstore()->write(vc_req->bid, write_iovecs, 
+                m_hb->get_data_blkstore()->write(vc_req->bid, write_iovecs,
                                                  boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vc_req));
 
                 // update checksum
@@ -548,22 +545,21 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
 
     try {
         IoVecTransversal read_transversal{};
-        auto insertIntoIovecs{
-            [&vreq, this](std::vector< iovec >& iovecs, const uint8_t* const data, const uint64_t size) {
-                uint64_t source_offset{0};
-                uint64_t data_remaining{size};
-                for (auto& read_iovec : iovecs) {
-                    const uint64_t data_length{data_remaining > read_iovec.iov_len ? read_iovec.iov_len : data_remaining};
-                    ::memcpy(read_iovec.iov_base,
-                             static_cast< const void* >(data + source_offset), data_length);
-                    source_offset += data_length;
-                    data_remaining -= data_length;
-                    if (data_remaining == static_cast< uint64_t >(0)) break;
-                }
-                assert(data_remaining == static_cast<uint64_t>(0));
-                VOL_RELEASE_ASSERT_CMP(data_remaining, ==, static_cast< uint64_t >(0), vreq,
-                                       "Insufficient iovec storage space");
-            }};
+        auto insertIntoIovecs{[&vreq, this](std::vector< iovec >& iovecs, const uint8_t* const data,
+                                            const uint64_t size) {
+            uint64_t source_offset{0};
+            uint64_t data_remaining{size};
+            for (auto& read_iovec : iovecs) {
+                const uint64_t data_length{data_remaining > read_iovec.iov_len ? read_iovec.iov_len : data_remaining};
+                ::memcpy(read_iovec.iov_base, static_cast< const void* >(data + source_offset), data_length);
+                source_offset += data_length;
+                data_remaining -= data_length;
+                if (data_remaining == static_cast< uint64_t >(0)) break;
+            }
+            assert(data_remaining == static_cast< uint64_t >(0));
+            VOL_RELEASE_ASSERT_CMP(data_remaining, ==, static_cast< uint64_t >(0), vreq,
+                                   "Insufficient iovec storage space");
+        }};
 
         /* we populate the entire LBA range asked even if it is not populated by the user */
         uint64_t next_start_lba = vreq->lba();
@@ -584,7 +580,7 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
                 } else {
                     // scatter/gather read
                     auto& iovecs{std::get< volume_req::IoVecData >(vreq->data)};
-                    auto read_iovecs{get_next_iovecs(read_transversal,iovecs, get_page_size())};
+                    auto read_iovecs{get_next_iovecs(read_transversal, iovecs, get_page_size())};
                     insertIntoIovecs(read_iovecs, blob.bytes, get_page_size());
                 }
                 vreq->push_csum(crc16_t10dif(init_crc_16, blob.bytes, get_page_size()));
@@ -608,8 +604,7 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
             /* Read data */
             const auto sz{get_page_size() * mk->get_n_lba()};
             const auto blkid_offset{m_hb->get_data_pagesz() * ve.get_blk_offset()};
-            if (std::holds_alternative< volume_req::IoVecData >(vreq->data))
-            {
+            if (std::holds_alternative< volume_req::IoVecData >(vreq->data)) {
                 // scatter/gather read
                 const BlkId read_blkid(ve.get_blkId().get_blkid_at(blkid_offset, sz, m_hb->get_data_pagesz()));
                 auto& iovecs{std::get< volume_req::IoVecData >(vreq->data)};
@@ -825,9 +820,8 @@ void Volume::recovery_start_phase2() {
     seq_Id = m_indx_mgr->get_max_seqid_found_in_recovery();
 }
 
-std::vector< iovec > Volume::get_next_iovecs(IoVecTransversal& iovec_transversal, const std::vector< iovec >& data_iovecs,
-                                             const uint64_t size)
-{
+std::vector< iovec > Volume::get_next_iovecs(IoVecTransversal& iovec_transversal,
+                                             const std::vector< iovec >& data_iovecs, const uint64_t size) {
     // scatter/gather read
     std::vector< iovec > iovecs{};
     iovecs.reserve(2);
@@ -838,7 +832,8 @@ std::vector< iovec > Volume::get_next_iovecs(IoVecTransversal& iovec_transversal
     for (; iovec_transversal.iovecs_index < data_iovecs.size(); ++iovec_transversal.iovecs_index) {
         auto& read_iovec{data_iovecs[iovec_transversal.iovecs_index]};
         if (iovec_transversal.current_iovecs_offset < iovec_transversal.iovecs_total_offset + read_iovec.iov_len) {
-            const uint64_t start_offset{iovec_transversal.current_iovecs_offset - iovec_transversal.iovecs_total_offset};
+            const uint64_t start_offset{iovec_transversal.current_iovecs_offset -
+                                        iovec_transversal.iovecs_total_offset};
             iov_ptr->iov_base = static_cast< uint8_t* >(read_iovec.iov_base) + start_offset;
             const uint64_t remaining{static_cast< uint64_t >(read_iovec.iov_len - start_offset)};
             if (iovec_transversal.current_iovecs_offset + remaining > end_iovecs_offset) {
