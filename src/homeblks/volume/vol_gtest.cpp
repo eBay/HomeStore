@@ -1,4 +1,4 @@
-/*!
+﻿/*!
     @file   vol_gtest.cpp
     Volume Google Tests
  */
@@ -8,6 +8,8 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <memory>
+#include <mutex>
 #include <random>
 #include <string>
 #include <thread>
@@ -17,6 +19,7 @@
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <sys/timeb.h>
+#include <unistd.h>
 
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
@@ -259,23 +262,23 @@ struct io_req_t : public vol_interface_req {
     uint8_t* validate_buffer{nullptr};
     uint8_t* checksum_buffer{nullptr};
     bool is_read;
+    uint64_t vol_index;
     uint64_t cur_vol;
     std::shared_ptr< vol_info_t > vol_info;
     bool done = false;
 
     io_req_t(const std::shared_ptr< vol_info_t >& vinfo, const bool write, uint8_t* const buf, const uint64_t lba,
              const uint32_t nlbas, const bool cache, const bool is_csum) :
-            vol_interface_req(buf, lba, nlbas, false, cache), vol_info(vinfo) {
+            vol_interface_req(buf, lba, nlbas, false, cache), vol_index{vol_index}, vol_info(vinfo) {
 
         const auto page_size{VolInterface::get_instance()->get_page_size(vinfo->vol)};
         size = nlbas * page_size;
         offset = lba * page_size;
         fd = vinfo->fd;
         is_read = !write;
-        cur_vol = vinfo->vol_idx;
         buffer = buf;
 
-        validate_buffer = iomanager.iobuf_alloc(512,  size);
+        validate_buffer = iomanager.iobuf_alloc(512, size);
         assert(validate_buffer != nullptr);
 
         if (write) {
@@ -283,10 +286,10 @@ struct io_req_t : public vol_interface_req {
                 checksum_buffer = iomanager.iobuf_alloc(512, nlbas * sizeof(uint16_t));
                 assert(checksum_buffer != nullptr);
                 populate_csum_buf(reinterpret_cast< uint16_t* >(checksum_buffer), buffer, size, vinfo.get());
-            } else {
-                // make copy of buffer so validation works properly
-                ::memcpy(static_cast< void* >(validate_buffer), static_cast< const void* >(buffer), size);
             }
+            // make copy of buffer since this is what is written to the test file which may later
+            // be read back
+            ::memcpy(static_cast< void* >(validate_buffer), static_cast< const void* >(buffer), size);
         }
     }
 
@@ -552,7 +555,7 @@ public:
         }
         assert(VolInterface::get_instance()->lookup_volume(params.uuid) == vol_obj);
         /* create file for verification */
-        std::ofstream ofs(name, std::ios::binary | std::ios::out);
+        std::ofstream ofs(name, std::ios::binary | std::ios::out | std::ios::trunc);
         ofs.seekp(max_vol_size);
         ofs.write("", 1);
         ofs.close();
@@ -561,7 +564,7 @@ public:
          * if mismatch fails from main file.
          */
         std::string staging_name = name + STAGING_VOL_PREFIX;
-        std::ofstream staging_ofs(staging_name, std::ios::binary | std::ios::out);
+        std::ofstream staging_ofs(name, std::ios::binary | std::ios::out | std::ios::trunc);
         staging_ofs.seekp(max_vol_size);
         staging_ofs.write("", 1);
         staging_ofs.close();
@@ -787,7 +790,7 @@ private:
 
 class IOTestJob : public TestJob {
 public:
-    IOTestJob(VolTest* test, load_type_t type = tcfg.load_type) : TestJob(test), m_load_type(type) {}
+    IOTestJob(VolTest* const test, const load_type_t type = tcfg.load_type) : TestJob{test}, m_load_type{type} {}
     virtual ~IOTestJob() override = default;
     IOTestJob(const IOTestJob&) = delete;
     IOTestJob(IOTestJob&&) noexcept = delete;
@@ -803,6 +806,10 @@ public:
     }
 
     void on_one_iteration_completed(const boost::intrusive_ptr< io_req_t >& req) override {
+        static thread_local std::random_device rd{};
+        static thread_local std::default_random_engine engine{rd()};
+        static thread_local std::uniform_int_distribution< uint64_t > dist{0, RAND_MAX};
+
         if (req->err != no_error) {
             assert((req->err == std::errc::no_such_device) || tcfg.expect_io_error);
         } else {
@@ -819,7 +826,7 @@ public:
         }
 
         if (tcfg.is_abort) {
-            if (get_elapsed_time_sec(m_start_time) > (random() % tcfg.run_time)) { raise(SIGKILL); }
+            if (get_elapsed_time_sec(m_start_time) > (dist(engine) % tcfg.run_time)) { raise(SIGKILL); }
         }
 
         {
@@ -847,8 +854,8 @@ public:
 
 protected:
     load_type_t m_load_type;
-    std::atomic< uint64_t > m_cur_vol = 0;
-    std::atomic< uint64_t > m_outstanding_ios = 0;
+    std::atomic< uint64_t > m_cur_vol{0};
+    std::atomic< uint64_t > m_outstanding_ios{0};
 
 protected:
     bool write_io() {
@@ -887,7 +894,7 @@ protected:
 
     bool seq_write() {
         /* XXX: does it really matter if it is atomic or not */
-        int cur = ++m_cur_vol % tcfg.max_vols;
+        const uint64_t cur{++m_cur_vol % tcfg.max_vols};
         uint64_t lba;
         uint64_t nlbas;
     start:
@@ -920,39 +927,41 @@ protected:
     bool same_read() { return read_vol(0, 5, 100); }
 
     bool random_write() {
-        /* XXX: does it really matter if it is atomic or not */
-        int cur = ++m_cur_vol % tcfg.max_vols;
-        uint64_t lba;
-        uint64_t nlbas;
-    start:
-        /* we won't be writing more then 128 blocks in one io */
-        auto vinfo = m_voltest->vol_info[cur];
-        auto vol = vinfo->vol;
+        static thread_local random_device rd{};
+        static thread_local default_random_engine engine{rd()};
+
+        const uint64_t cur{++m_cur_vol % tcfg.max_vols};
+        const auto vinfo{m_voltest->vol_info[cur]};
+        const auto vol{vinfo->vol};
         if (vol == nullptr) { return false; }
-        uint64_t max_blks = tcfg.max_io_size / VolInterface::get_instance()->get_page_size(vol);
+        const uint32_t max_blks{
+            static_cast< uint32_t >(tcfg.max_io_size / VolInterface::get_instance()->get_page_size(vol))};
         // lba: [0, max_vol_blks - max_blks)
-
-        lba = rand() % (vinfo->max_vol_blks - max_blks);
+        std::uniform_int_distribution< uint64_t > lba_random{0, vinfo->max_vol_blks - max_blks - 1};
         // nlbas: [1, max_blks]
-        nlbas = rand() % (max_blks + 1);
-        if (nlbas == 0) { nlbas = 1; }
+        std::uniform_int_distribution< uint32_t > nlbas_random{1, max_blks};
 
-        if (m_load_type != load_type_t::sequential) {
-            /* can not support concurrent overlapping writes if whole data need to be verified */
-            std::unique_lock< std::mutex > lk(vinfo->vol_mutex);
-            /* check if someone is already doing writes/reads */
-            if (nlbas && vinfo->m_vol_bm->is_bits_reset(lba, nlbas)) {
-                vinfo->m_vol_bm->set_bits(lba, nlbas);
-            } else {
-                goto start;
+        // we won't be writing more then 128 blocks in one io
+        for (;;) {
+            const uint64_t lba{lba_random(engine)};
+            const uint32_t nlbas{nlbas_random(engine)};
+
+            if (m_load_type != load_type_t::sequential) {
+                // can not support concurrent overlapping writes if whole data need to be verified
+                std::unique_lock< std::mutex > lk(vinfo->vol_mutex);
+                // check if someone is already doing writes/reads
+                if (nlbas && vinfo->m_vol_bm->is_bits_reset(lba, nlbas)) {
+                    vinfo->m_vol_bm->set_bits(lba, nlbas);
+                    lk.unlock();
+                    return write_vol(cur, lba, nlbas);
+                }
             }
         }
-        return write_vol(cur, lba, nlbas);
     }
 
-    bool write_vol(uint32_t cur, uint64_t lba, uint64_t nlbas) {
-        auto vinfo = m_voltest->vol_info[cur];
-        auto vol = vinfo->vol;
+    bool write_vol(const uint32_t cur, const uint64_t lba, const uint64_t nlbas) {
+        const auto vinfo{m_voltest->vol_info[cur]};
+        const auto vol{vinfo->vol};
         if (vol == nullptr) { return false; }
 
         const uint64_t size{nlbas * VolInterface::get_instance()->get_page_size(vol)};
@@ -961,14 +970,14 @@ protected:
 
         populate_buf(wbuf, size, lba, vinfo.get());
 
-        auto vreq = boost::intrusive_ptr< io_req_t >(
-            new io_req_t(vinfo, true, wbuf, lba, nlbas, tcfg.write_cache, tcfg.verify_csum()));
+        const auto vreq{boost::intrusive_ptr< io_req_t >(
+            new io_req_t(vinfo, true, wbuf, lba, nlbas, tcfg.write_cache, tcfg.verify_csum()))};
 
-        vreq->cookie = (void*)this;
+        vreq->cookie = static_cast< void* >(this);
 
         ++m_voltest->output.write_cnt;
         ++m_outstanding_ios;
-        auto ret_io = VolInterface::get_instance()->write(vol, vreq);
+        const auto ret_io{VolInterface::get_instance()->write(vol, vreq)};
         LOGDEBUG("Wrote lba: {}, nlbas: {} outstanding_ios={}, cache={}", lba, nlbas, m_outstanding_ios.load(),
                  (tcfg.write_cache != 0 ? true : false));
         if (ret_io != no_error) { return false; }
@@ -982,7 +991,7 @@ protected:
 
         uint64_t current_lba{lba};
         for (uint64_t write_sz{0}; write_sz < size; write_sz += sizeof(uint64_t)) {
-            uint64_t* const write_buf {reinterpret_cast< uint64_t* >(buf + write_sz)};
+            uint64_t* const write_buf{reinterpret_cast< uint64_t* >(buf + write_sz)};
             if (!(write_sz % tcfg.vol_page_size)) {
                 *write_buf = current_lba;
                 if (vinfo->vol == nullptr) { return; }
@@ -994,40 +1003,41 @@ protected:
     }
 
     bool random_read() {
-        /* XXX: does it really matter if it is atomic or not */
+        static thread_local random_device rd{};
+        static thread_local default_random_engine engine{rd()};
+
         const uint64_t cur{++m_cur_vol % tcfg.max_vols};
-        uint64_t lba;
-        uint64_t nlbas;
-
-    start:
-        /* we won't be writing more then 128 blocks in one io */
-        auto vinfo = m_voltest->vol_info[cur];
-        auto vol = vinfo->vol;
+        const auto vinfo{m_voltest->vol_info[cur]};
+        const auto vol{vinfo->vol};
         if (vol == nullptr) { return false; }
-        uint64_t max_blks = tcfg.max_io_size / VolInterface::get_instance()->get_page_size(vol);
+        const uint32_t max_blks{
+            static_cast< uint32_t >(tcfg.max_io_size / VolInterface::get_instance()->get_page_size(vol))};
+        // lba: [0, max_vol_blks - max_blks)
+        std::uniform_int_distribution< uint64_t > lba_random{0, vinfo->max_vol_blks - max_blks - 1};
+        // nlbas: [1, max_blks]
+        std::uniform_int_distribution< uint32_t > nlbas_random{1, max_blks};
 
-        lba = rand() % (vinfo->max_vol_blks - max_blks);
-        nlbas = rand() % max_blks;
-        if (nlbas == 0) { nlbas = 1; }
+        // we won't be writing more then 128 blocks in one io
+        for (;;) {
+            const uint64_t lba{lba_random(engine)};
+            const uint32_t nlbas{nlbas_random(engine)};
 
-        if (m_load_type != load_type_t::sequential) {
-            /* Don't send overlapping reads with pending writes if data verification is on */
-            std::unique_lock< std::mutex > lk(vinfo->vol_mutex);
-            /* check if someone is already doing writes/reads */
-            if (vinfo->m_vol_bm->is_bits_reset(lba, nlbas)) {
-                vinfo->m_vol_bm->set_bits(lba, nlbas);
-            } else {
-                goto start;
+            if (m_load_type != load_type_t::sequential) {
+                // can not support concurrent overlapping writes if whole data need to be verified
+                std::unique_lock< std::mutex > lk(vinfo->vol_mutex);
+                // check if someone is already doing writes/reads
+                if (nlbas && vinfo->m_vol_bm->is_bits_reset(lba, nlbas)) {
+                    vinfo->m_vol_bm->set_bits(lba, nlbas);
+                    lk.unlock();
+                    return read_vol(cur, lba, nlbas);
+                }
             }
         }
-
-        auto ret = read_vol(cur, lba, nlbas);
-        return ret;
     }
 
-    bool read_vol(uint32_t cur, uint64_t lba, uint64_t nlbas) {
-        auto vinfo = m_voltest->vol_info[cur];
-        auto vol = vinfo->vol;
+    bool read_vol(const uint32_t cur, const uint64_t lba, const uint64_t nlbas) {
+        const auto vinfo{m_voltest->vol_info[cur]};
+        const auto vol{vinfo->vol};
         if (vol == nullptr) { return false; }
 
         uint8_t* rbuf{nullptr};
@@ -1037,20 +1047,20 @@ protected:
             rbuf = iomanager.iobuf_alloc(512, size);
         }
 
-        auto vreq = boost::intrusive_ptr< io_req_t >(
-            new io_req_t(vinfo, false, rbuf, lba, nlbas, tcfg.read_cache, tcfg.verify_csum()));
+        const auto vreq{boost::intrusive_ptr< io_req_t >(
+            new io_req_t(vinfo, false, rbuf, lba, nlbas, tcfg.read_cache, tcfg.verify_csum()))};
         vreq->cookie = (void*)this;
 
         ++m_voltest->output.read_cnt;
         ++m_outstanding_ios;
-        auto ret_io = VolInterface::get_instance()->read(vol, vreq);
+        const auto ret_io{VolInterface::get_instance()->read(vol, vreq)};
         LOGDEBUG("Read lba: {}, nlbas: {} outstanding_ios={}, cache={}", lba, nlbas, m_outstanding_ios.load(),
                  (tcfg.read_cache != 0 ? true : false));
         if (ret_io != no_error) { return false; }
         return true;
     }
 
-    bool verify(const boost::intrusive_ptr< io_req_t >& req, bool can_panic = true) {
+    bool verify(const boost::intrusive_ptr< io_req_t >& req, const bool can_panic = true) {
         auto& vol_req = (vol_interface_req_ptr&)req;
 
         uint64_t tot_size_read{0};
@@ -1068,19 +1078,19 @@ protected:
                     if (tcfg.verify_csum()) {
                         const uint16_t csum1{
                             req->is_read ? crc16_t10dif(init_crc_16, validate_buffer, size_read)
-                                           : *(reinterpret_cast< const uint16_t* >(req->checksum_buffer) + csums_read)};
+                                         : *(reinterpret_cast< const uint16_t* >(req->checksum_buffer) + csums_read)};
                         const uint16_t csum2{crc16_t10dif(init_crc_16, b.bytes, size_read)};
                         j = (csum1 != csum2);
                         if (j) {
-                            LOGINFO("checksum mismatch operation {} lba {} csum1 {} csum2 {}",
-                                    req->is_read ? "read" : "write", req->lba, csum1, csum2);
+                            LOGINFO("checksum mismatch operation {} volume {} lba {} csum1 {} csum2 {}",
+                                    (req->is_read ? "read" : "write"), req->cur_vol, req->lba, csum1, csum2);
                         } else {
                             ++m_voltest->output.csum_match_cnt;
                         }
                     } else if (tcfg.verify_data()) {
                         j = ::memcmp(static_cast< const void* >(b.bytes), static_cast< const void* >(validate_buffer),
                                      size_read) != 0;
-                        if(!j) ++m_voltest->output.data_match_cnt;
+                        if (!j) ++m_voltest->output.data_match_cnt;
                     } else {
                         /* we will only verify the header. We write lba number in the header */
                         const uint64_t validate_lba{*reinterpret_cast< const uint64_t* >(validate_buffer)};
@@ -1139,8 +1149,8 @@ protected:
                     const uint16_t csum2{crc16_t10dif(init_crc_16, buffer, size_read)};
                     j = (csum1 != csum2);
                     if (j) {
-                        LOGINFO("checksum mismatch operation {} lba {} csum1 {} csum2 {} shit {}",
-                                req->is_read ? "read" : "write", req->lba, csum1, csum2);
+                        LOGINFO("checksum mismatch operation {} volume {} lba {} csum1 {} csum2 {}",
+                                (req->is_read ? "read" : "write"), req->cur_vol, req->lba, csum1, csum2);
                     } else {
                         ++m_voltest->output.csum_match_cnt;
                     }
