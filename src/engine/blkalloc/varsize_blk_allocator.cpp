@@ -266,7 +266,8 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
 #endif
 
     COUNTER_INCREMENT(m_metrics, num_alloc, 1);
-    while (blks_alloced != nblks && retry_cnt < HS_DYNAMIC_CONFIG(blkallocator->max_varsize_blk_alloc_attempt)) {
+
+    do {
         BlkId blkid;
         COUNTER_INCREMENT(m_metrics, num_split, 1);
         if (blks_rqstd > HS_STATIC_CONFIG(engine.max_blk_cnt)) {
@@ -303,23 +304,35 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
             assert(blkid.get_nblks() != 0);
             out_blkid.push_back(blkid);
         }
+
         retry_cnt++;
         BLKALLOC_LOG(TRACE, , "Retry count={}", retry_cnt);
-    }
+    } while (blks_alloced != nblks &&
+             !hints.is_contiguous && // fail immediately if this is a request for contiguous blks;
+             retry_cnt < HS_DYNAMIC_CONFIG(blkallocator->max_varsize_blk_alloc_attempt));
 
     BLKALLOC_LOG(TRACE, varsize_blk_alloc, "blks_alloced={}, blocks requested={}", blks_alloced, nblks);
 
     if (blks_alloced != nblks) {
-        if (m_cache_n_entries.load(std::memory_order_acquire) != 0) { m_blk_cache->print_tree(); }
-        BLKALLOC_LOG(ERROR, , "blks_alloced != nblks : {}  {}", blks_alloced, nblks);
+        if (hints.is_contiguous) {
+            BLKALLOC_LOG(ERROR, , "Not enough contiguous requested blks available, blks_alloced != nblks : {}  {}",
+                         blks_alloced, nblks);
+        } else {
+            if (m_cache_n_entries.load(std::memory_order_acquire) != 0) { m_blk_cache->print_tree(); }
+            BLKALLOC_LOG(ERROR, , "Blk allocation failed. blks_alloced != nblks : {}  {}", blks_alloced, nblks);
+        }
+
         COUNTER_INCREMENT(m_metrics, alloc_fail, 1);
+
         /* free blks */
         for (uint32_t i = 0; i < out_blkid.size(); ++i) {
             free(out_blkid[i]);
         }
+
         out_blkid.clear();
         return BLK_ALLOC_SPACEFULL;
     }
+
     return BLK_ALLOC_SUCCESS;
 }
 
@@ -467,8 +480,8 @@ void VarsizeBlkAllocator::free(const BlkId& b) {
 
 // This runs on per region thread and is at present single threaded.
 /* we are going through the segments which has maximum free blks so that we can ensure that all slabs are populated.
- * We might need to find a efficient way of doing it later. It stop processing the segment when any slab greater then
- * slab_indx is full.
+ * We might need to find a efficient way of doing it later. It stop processing the segment when any slab greater
+ * then slab_indx is full.
  */
 void VarsizeBlkAllocator::fill_cache(BlkAllocSegment* seg, int slab_indx) {
     uint64_t nadded_blks = 0;
@@ -680,8 +693,8 @@ uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t seg_portion_num, Bl
 }
 
 // Run in non-region threads. It can be called by multiple threads simultaneously.
-// Request for more blocks from a specified segment. If BlkSegment is NULL, then it picks the 1st segment to allocate
-// from.
+// Request for more blocks from a specified segment. If BlkSegment is NULL, then it picks the 1st segment to
+// allocate from.
 void VarsizeBlkAllocator::request_more_blks(BlkAllocSegment* seg, int slab_indx) {
     bool allocate = false;
     {

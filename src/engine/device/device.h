@@ -130,8 +130,7 @@ struct vdev_info_block {
     bool slot_allocated;         // 28: Is this current slot allocated
     bool failed;                 // 29: set to true if disk is replaced
     uint32_t num_primary_chunks; // 30: number of primary chunks
-    off_t data_start_offset;     // 34: Logical offset for the 1st written data;
-    uint8_t padding[MAX_VDEV_INFO_BLOCK_HDR_SZ - 42]; // Ugly hardcode will be removed after moving to superblk blkstore
+    uint8_t padding[MAX_VDEV_INFO_BLOCK_HDR_SZ - 34]; // Ugly hardcode will be removed after moving to superblk blkstore
     char context_data[MAX_CONTEXT_DATA_SZ];
 
     uint32_t get_vdev_id() const { return vdev_id; }
@@ -487,7 +486,6 @@ public:
     void get_vb_context(uint32_t vdev_id, const sisl::blob& ctx_data);
 
     void update_end_of_chunk(PhysicalDevChunk* chunk, off_t offset);
-    void update_vb_data_start_offset(uint32_t vdev_id, off_t offset);
 
 private:
     void load_and_repair_devices(const std::vector< dev_info >& devices);

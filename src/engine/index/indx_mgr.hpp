@@ -298,7 +298,9 @@ struct indx_mgr_sb {
     homeds::btree::btree_super_block btree_sb;
     bool is_snap_enabled = false;
     indx_mgr_sb(homeds::btree::btree_super_block btree_sb, logstore_id_t journal_id, bool is_snap_enabled) :
-            journal_id(journal_id), btree_sb(btree_sb), is_snap_enabled(is_snap_enabled) {}
+            journal_id(journal_id),
+            btree_sb(btree_sb),
+            is_snap_enabled(is_snap_enabled) {}
     indx_mgr_sb() {}
 } __attribute__((__packed__));
 
@@ -338,7 +340,9 @@ public:
     virtual btree_status_t free_user_blkids(blkid_list_ptr free_list, homeds::btree::BtreeQueryCursor& cur,
                                             int64_t& size) = 0;
     virtual void get_btreequery_cur(const sisl::blob& b, homeds::btree::BtreeQueryCursor& cur) = 0;
-    virtual btree_status_t update_unmap_active_indx_tbl(blkid_list_ptr free_list, uint64_t& seq_id, void* key, homeds::btree::BtreeQueryCursor& cur, const btree_cp_ptr& bcp, int64_t& size) = 0;
+    virtual btree_status_t update_unmap_active_indx_tbl(blkid_list_ptr free_list, uint64_t& seq_id, void* key,
+                                                        homeds::btree::BtreeQueryCursor& cur, const btree_cp_ptr& bcp,
+                                                        int64_t& size) = 0;
 };
 
 typedef std::function< void(const boost::intrusive_ptr< indx_req >& ireq, std::error_condition err) > io_done_cb;
@@ -633,6 +637,7 @@ private:
     void create_new_diff_tbl(indx_cp_ptr& icp);
     void recover_meta_ops();
     void log_found(logstore_seq_num_t seqnum, log_buffer buf, void* mem);
+    void on_replay_done(std::shared_ptr< HomeLogStore > store, logstore_seq_num_t upto_lsn);
     void set_indx_cp_state(const indx_cp_ptr& cur_icp, hs_cp* cur_hcp);
     void call_prepare_cb(const indx_cp_ptr& cur_icp, hs_cp* cur_hcp, hs_cp* new_hcp);
     indx_cp_ptr create_new_indx_cp(const indx_cp_ptr& cur_icp);
@@ -658,7 +663,9 @@ struct Free_Blk_Entry {
     Free_Blk_Entry() {}
     Free_Blk_Entry(const BlkId& blkId) : m_blkId(blkId), m_blk_offset(0), m_nblks_to_free(0) {}
     Free_Blk_Entry(const BlkId& blkId, uint8_t blk_offset, uint8_t nblks_to_free) :
-            m_blkId(blkId), m_blk_offset(blk_offset), m_nblks_to_free(nblks_to_free) {
+            m_blkId(blkId),
+            m_blk_offset(blk_offset),
+            m_nblks_to_free(nblks_to_free) {
 #ifndef NDEBUG
         assert(blk_offset + m_nblks_to_free <= m_blkId.get_nblks());
 #endif
@@ -688,7 +695,7 @@ public:
     indx_req(indx_req&&) noexcept = delete;
     indx_req& operator=(const indx_req&) = delete;
     indx_req& operator=(indx_req&&) noexcept = delete;
-  
+
     sisl::io_blob create_journal_entry() { return j_ent.create_journal_entry(this); }
 
     void push_indx_alloc_blkid(BlkId& bid) { indx_alloc_blkid_list.push_back(bid); }
@@ -722,7 +729,7 @@ public:
     std::error_condition indx_err = no_error;
     indx_req_state state = indx_req_state::active_btree;
     uint64_t request_id; // Copy of the id from interface request
-    Op_type op_type; // Copy of the op type (read/write/unmap) from interface request
+    Op_type op_type;     // Copy of the op type (read/write/unmap) from interface request
     homeds::btree::BtreeQueryCursor active_btree_cur;
     homeds::btree::BtreeQueryCursor diff_btree_cur;
     homeds::btree::BtreeQueryCursor read_cur;

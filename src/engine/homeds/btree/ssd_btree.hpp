@@ -107,17 +107,19 @@ public:
         if (is_recovery) {
             // add recovery code
             HomeLogStoreMgr::instance().open_log_store(
-                sb.journal_id, ([this](std::shared_ptr< HomeLogStore > logstore) {
+                sb.journal_id, // My logstore id
+                true,          // Is Append Mode
+                [this](std::shared_ptr< HomeLogStore > logstore) {
                     m_journal = logstore;
                     m_journal->register_log_found_cb(bind_this(SSDBtreeStore::log_found, 3));
-                    m_journal->register_log_replay_done_cb(bind_this(SSDBtreeStore::replay_done, 1));
-                }));
+                    m_journal->register_log_replay_done_cb(bind_this(SSDBtreeStore::replay_done, 2));
+                });
             // reserve this blk unconditionally as root node never changes
             BlkId bid(sb.root_node);
             m_blkstore->reserve_blk(bid);
             HS_SUBMOD_LOG(INFO, base, , "btree", m_cfg.get_name(), "{}", cp_sb->to_string());
         } else {
-            m_journal = HomeLogStoreMgr::instance().create_new_log_store();
+            m_journal = HomeLogStoreMgr::instance().create_new_log_store(true /* append_mode */);
             sb.journal_id = get_journal_id_store();
         }
 
@@ -167,7 +169,7 @@ public:
         }
     }
 
-    void replay_done(std::shared_ptr< HomeLogStore > store) {
+    void replay_done(std::shared_ptr< HomeLogStore > store, [[maybe_unused]] logstore_seq_num_t upto_lsn) {
         HS_SUBMOD_LOG(INFO, base, , "btree", m_cfg.get_name(), "Replay of btree completed and replayed {} entries",
                       m_replayed_count);
         m_is_recovering = false;

@@ -9,6 +9,7 @@
 #include <algorithm> // std::shuffle
 #include <random>    // std::default_random_engine
 #include <chrono>    // std::chrono::system_clock
+#include <optional>
 #include <fds/utils.hpp>
 
 using namespace homestore;
@@ -35,7 +36,7 @@ public:
     }
 
     explicit SampleLogStoreClient(const test_log_store_comp_cb_t& cb) :
-            SampleLogStoreClient(home_log_store_mgr.create_new_log_store(), cb) {}
+            SampleLogStoreClient(home_log_store_mgr.create_new_log_store(false /* append_mode */), cb) {}
 
     void set_log_store(std::shared_ptr< HomeLogStore > store) {
         m_log_store = store;
@@ -209,6 +210,8 @@ public:
         m_truncated_upto_lsn = lsn;
     }
 
+    bool has_all_lsns_truncated() const { return (m_truncated_upto_lsn.load() == (m_cur_lsn.load() - 1)); }
+
 private:
     test_log_data* prepare_data(logstore_seq_num_t lsn) {
         uint32_t sz;
@@ -296,9 +299,10 @@ public:
 
         if (restart) {
             for (auto i = 0u; i < n_log_stores; ++i) {
-                home_log_store_mgr.open_log_store(i, [i, this](std::shared_ptr< HomeLogStore > log_store) {
-                    m_log_store_clients[i]->set_log_store(log_store);
-                });
+                home_log_store_mgr.open_log_store(i, false /* append_mode */,
+                                                  [i, this](std::shared_ptr< HomeLogStore > log_store) {
+                                                      m_log_store_clients[i]->set_log_store(log_store);
+                                                  });
             }
         }
 
@@ -372,7 +376,7 @@ public:
 
 struct LogStoreTest : public testing::Test {
 public:
-    void init(uint64_t n_total_records) {
+    void init(uint64_t n_total_records, const std::vector< std::pair< size_t, int > >& inp_freqs = {}) {
         // m_nrecords_waiting_to_issue = std::lround(n_total_records / _batch_size) * _batch_size;
         m_nrecords_waiting_to_issue = n_total_records;
         m_nrecords_waiting_to_complete = 0;
@@ -383,6 +387,7 @@ public:
         for (auto& lsc : sample_db.m_log_store_clients) {
             lsc->reset_recovery();
         }
+        set_store_workload_freq(inp_freqs); // Equal distribution by default
     }
 
     void kickstart_inserts(uint32_t batch_size, uint32_t q_depth, uint32_t holes_per_batch = 0) {
@@ -399,8 +404,7 @@ public:
         while ((m_nrecords_waiting_to_issue.load() > 0) && (m_nrecords_waiting_to_complete.load() < m_q_depth)) {
             m_nrecords_waiting_to_issue.fetch_sub(m_batch_size);
             m_nrecords_waiting_to_complete.fetch_add(m_batch_size);
-            sample_db.m_log_store_clients[rand() % sample_db.m_log_store_clients.size()]->insert_next_batch(
-                m_batch_size, std::min(m_batch_size, m_holes_per_batch));
+            _pick_log_store()->insert_next_batch(m_batch_size, std::min(m_batch_size, m_holes_per_batch));
         }
     }
 
@@ -438,7 +442,7 @@ public:
         auto it = m_garbage_stores_upto.begin();
 
         while (it != m_garbage_stores_upto.end()) {
-            if (it->first >= idx) { return count; }
+            if (it->first > idx) { return count; }
             ++it;
             ++count;
         }
@@ -452,28 +456,40 @@ public:
         }
     }
 
-    void truncate_validate() {
+    void truncate_validate(bool is_parallel_to_write = false) {
         for (auto i = 0u; i < sample_db.m_log_store_clients.size(); ++i) {
             auto& lsc = sample_db.m_log_store_clients[i];
 
             // lsc->truncate(lsc->m_cur_lsn.load() - 1);
             lsc->truncate(lsc->m_log_store->get_contiguous_completed_seq_num(0));
             lsc->read_validate();
-
-            auto tres = home_log_store_mgr.device_truncate();
-#if 0
-            if (parallel_to_writes) {
-                if (i < m_log_store_clients.size() - 1) {
-                    ASSERT_EQ(tres.idx, m_truncate_log_idx.load());
-                } else {
-                    // Last one should move the device truncation log idx
-                    ASSERT_GT(tres.idx, m_truncate_log_idx.load());
-                    m_truncate_log_idx.store(tres.idx);
-                }
-#endif
-            ASSERT_GE(tres.idx, m_truncate_log_idx.load());
-            m_truncate_log_idx.store(tres.idx);
         }
+
+        home_log_store_mgr.device_truncate(
+            [this, is_parallel_to_write](const logdev_key& trunc_loc) {
+                bool expect_forward_progress = true;
+                uint32_t n_fully_truncated = 0;
+                if (is_parallel_to_write) {
+                    for (auto& lsc : sample_db.m_log_store_clients) {
+                        if (lsc->has_all_lsns_truncated()) ++n_fully_truncated;
+                    }
+
+                    // While inserts are going on, truncation can guaranteed to be forward progressed if none of the log
+                    // stores are fully truncated. If all stores are fully truncated, its obvious no progress, but even
+                    // if one of the store is fully truncated, then it might be possible that logstore is holding lowest
+                    // logdev location and waiting for next flush to finish to move the safe logdev location.
+                    expect_forward_progress = (n_fully_truncated == 0);
+                }
+
+                if (expect_forward_progress) {
+                    // Validate the truncation is actually moving forward
+                    ASSERT_GT(trunc_loc.idx, m_truncate_log_idx.load());
+                    m_truncate_log_idx.store(trunc_loc.idx);
+                } else {
+                    LOGINFO("Do not expect forward progress for device truncation");
+                }
+            },
+            true /* wait_till_done */);
 
         auto upto_count = find_garbage_upto(m_truncate_log_idx.load());
         auto count = 0;
@@ -516,6 +532,39 @@ public:
         validate_num_stores();
     }
 
+    void set_store_workload_freq(const std::vector< std::pair< size_t, int > >& inp_freqs) {
+        auto cum_freqs = 0;
+        sisl::sparse_vector< std::optional< int > > store_freqs;
+
+        for (auto& f : inp_freqs) {
+            // No duplication
+            ASSERT_EQ(store_freqs[f.first].has_value(), false) << "Input error, frequency list cannot be duplicate";
+            store_freqs[f.first] = f.second;
+            cum_freqs += f.second;
+        }
+
+        ASSERT_LE(cum_freqs, 100) << "Input error, frequency pct cannot exceed 100";
+        int default_freq = (100 - cum_freqs) / (sample_db.m_log_store_clients.size() - inp_freqs.size());
+
+        int d = 0;
+        for (auto s{0u}; s < sample_db.m_log_store_clients.size(); ++s) {
+            auto upto = store_freqs[s].has_value() ? *store_freqs[s] : default_freq;
+            for (int i{0}; i < upto; ++i) {
+                m_store_distribution[d++] = s;
+            }
+            LOGINFO("LogStore Client: {} distribution pct = {}", s, upto);
+        }
+        // Fill in the last reminder with last store
+        while (d < 100) {
+            m_store_distribution[d++] = sample_db.m_log_store_clients.size() - 1;
+        }
+    }
+
+private:
+    SampleLogStoreClient* _pick_log_store() {
+        return sample_db.m_log_store_clients[m_store_distribution[rand() % 100]].get();
+    }
+
 protected:
     std::atomic< int64_t > m_nrecords_waiting_to_issue = 0;
     std::atomic< int64_t > m_nrecords_waiting_to_complete = 0;
@@ -523,6 +572,7 @@ protected:
     std::condition_variable m_pending_cv;
     std::atomic< logid_t > m_truncate_log_idx = -1;
     std::map< logid_t, uint32_t > m_garbage_stores_upto;
+    std::array< uint32_t, 100 > m_store_distribution;
 
     uint32_t m_q_depth = 64;
     uint32_t m_batch_size = 1;
@@ -561,7 +611,7 @@ TEST_F(LogStoreTest, BurstSeqInsertAndTruncateInParallel) {
     LOGINFO("Step 3: In parallel to writes issue truncation upto completion");
     do {
         usleep(1000);
-        this->truncate_validate();
+        this->truncate_validate(true /* is_parallel_to_write */);
         ++trunc_attempt;
         ASSERT_LT(trunc_attempt, 30);
         LOGINFO("Still pending completions = {}, pending issued = {}", this->m_nrecords_waiting_to_complete.load(),
@@ -597,7 +647,60 @@ TEST_F(LogStoreTest, RandInsertsWithHoles) {
     this->truncate_validate();
 }
 
-#if 0
+TEST_F(LogStoreTest, VarRateInsertThenTruncate) {
+    auto nrecords = SDS_OPTIONS["num_records"].as< uint32_t >();
+    LOGINFO("Step 1: Reinit the num records={} and insert them as batch of 10 with qdepth=500 and wait for all records "
+            "to be inserted and then validate them",
+            nrecords);
+    this->init(nrecords);
+    this->kickstart_inserts(10, 500);
+    this->wait_for_inserts();
+    this->read_validate(true);
+    this->truncate_validate();
+
+    LOGINFO("Step 2: Stop the workload on stores 0,1 and write num records={} on other stores, wait for their "
+            "completion, validate it is readable, then truncate - all in a loop for 3 times",
+            nrecords);
+    for (auto i = 0u; i < 3; ++i) {
+        LOGINFO("Step 2.{}.1: Write and wait for {}", i + 1, nrecords);
+        this->init(nrecords, {{0, 0}, {1, 0}});
+        this->kickstart_inserts(10, 500);
+        this->wait_for_inserts();
+        this->read_validate(true);
+
+        LOGINFO("Step 2.{}.2: Do a truncation on all log stores and validate", i + 1);
+        this->truncate_validate();
+    }
+
+    LOGINFO("Step 3: Change data rate on stores 0,1 but still slower than other stores, write num_records={} wait for "
+            "their completion, validate it is readable, then truncate - all in a loop for 3 times",
+            nrecords);
+    for (auto i = 0u; i < 3u; ++i) {
+        LOGINFO("Step 3.{}.1: Write and wait for {}", i + 1, nrecords);
+        this->init(nrecords, {{0, 5}, {1, 20}});
+        this->kickstart_inserts(10, 500);
+        this->wait_for_inserts();
+        this->read_validate(true);
+
+        LOGINFO("Step 3.{}.2: Do a truncation on all log stores and validate", i + 1);
+        this->truncate_validate();
+    }
+
+    LOGINFO("Step 4: Write the data with similar variable data rate, but truncate run in parallel to writes");
+    this->init(nrecords, {{0, 20}, {1, 20}});
+    this->kickstart_inserts(10, 10);
+
+    for (auto i = 0; i < 5; ++i) {
+        usleep(300);
+        LOGINFO("Step 4.{}: Truncating ith time with 200us delay between each truncation", i + 1);
+        this->truncate_validate(true);
+    }
+
+    this->wait_for_inserts();
+    this->read_validate(true);
+    this->truncate_validate();
+}
+
 TEST_F(LogStoreTest, ThrottleSeqInsertThenRecover) {
     LOGINFO("Step 1: Reinit the num records to start sequential write test");
     this->init(SDS_OPTIONS["num_records"].as< uint32_t >());
@@ -649,7 +752,6 @@ TEST_F(LogStoreTest, ThrottleSeqInsertThenRecover) {
     );
     this->recovery_validate();
 }
-#endif
 
 TEST_F(LogStoreTest, DeleteMultipleLogStores) {
     auto nrecords = (SDS_OPTIONS["num_records"].as< uint32_t >() * 5) / 100;
@@ -738,9 +840,14 @@ int main(int argc, char* argv[]) {
     sds_logging::SetLogger("test_log_store");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 
-    sample_db.start_homestore(
-        SDS_OPTIONS["num_devs"].as< uint32_t >(), SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024,
-        SDS_OPTIONS["num_threads"].as< uint32_t >(), SDS_OPTIONS["num_logstores"].as< uint32_t >());
+    auto n_log_stores = SDS_OPTIONS["num_logstores"].as< uint32_t >();
+    if (n_log_stores < 4u) {
+        LOGINFO("Log store test needs minimum 4 log stores for testing, setting them to 4");
+        n_log_stores = 4u;
+    }
+    sample_db.start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),
+                              SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024,
+                              SDS_OPTIONS["num_threads"].as< uint32_t >(), n_log_stores);
     auto ret = RUN_ALL_TESTS();
     sample_db.shutdown();
 
