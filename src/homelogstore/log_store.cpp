@@ -206,7 +206,7 @@ logdev_key HomeLogStoreMgr::do_device_truncate(bool dry_run) {
 }
 
 /////////////////////////////////////// HomeLogStore Section ///////////////////////////////////////
-HomeLogStore::HomeLogStore(logstore_id_t id, bool append_mode, logstore_seq_num_t start_lsn) :
+HomeLogStore::HomeLogStore(const logstore_id_t id, const bool append_mode, const logstore_seq_num_t start_lsn) :
         m_store_id{id},
         m_records{"HomeLogStoreRecords", start_lsn - 1},
         m_append_mode{append_mode},

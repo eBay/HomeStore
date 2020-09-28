@@ -49,9 +49,9 @@ private:
     MetaBlkMgr() = default;
 
 public:
-    MetaBlkMgr(MetaBlkMgr&) = delete;
+    MetaBlkMgr(const MetaBlkMgr&) = delete;
     MetaBlkMgr(MetaBlkMgr&&) noexcept = delete;
-    MetaBlkMgr& operator=(MetaBlkMgr&) = delete;
+    MetaBlkMgr& operator=(const MetaBlkMgr&) = delete;
     MetaBlkMgr& operator=(MetaBlkMgr&&) noexcept = delete;
 
     /**

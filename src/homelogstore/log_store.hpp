@@ -101,9 +101,9 @@ public:
         register_me_to_farm();
     }
 
-    HomeLogStoreMgrMetrics(HomeLogStoreMgrMetrics&) = delete;
+    HomeLogStoreMgrMetrics(const HomeLogStoreMgrMetrics&) = delete;
     HomeLogStoreMgrMetrics(HomeLogStoreMgrMetrics&&) noexcept = delete;
-    HomeLogStoreMgrMetrics& operator=(HomeLogStoreMgrMetrics&) = delete;
+    HomeLogStoreMgrMetrics& operator=(const HomeLogStoreMgrMetrics&) = delete;
     HomeLogStoreMgrMetrics& operator=(HomeLogStoreMgrMetrics&&) noexcept = delete;
 };
 
@@ -115,9 +115,9 @@ class HomeLogStoreMgr {
     HomeLogStoreMgr() { REGISTER_METABLK_SUBSYSTEM(log_dev, "LOG_DEV", HomeLogStoreMgr::meta_blk_found_cb, nullptr) }
 
 public:
-    HomeLogStoreMgr(HomeLogStoreMgr&) = delete;
+    HomeLogStoreMgr(const HomeLogStoreMgr&) = delete;
     HomeLogStoreMgr(HomeLogStoreMgr&&) noexcept = delete;
-    HomeLogStoreMgr& operator=(HomeLogStoreMgr&) = delete;
+    HomeLogStoreMgr& operator=(const HomeLogStoreMgr&) = delete;
     HomeLogStoreMgr& operator=(HomeLogStoreMgr&&) noexcept = delete;
 
     static HomeLogStoreMgr& instance() {
@@ -223,9 +223,9 @@ public:
     friend class HomeLogStoreMgr;
 
     HomeLogStore(const logstore_id_t id, const bool append_mode, const logstore_seq_num_t start_lsn);
-    HomeLogStore(HomeLogStore&) = delete;
+    HomeLogStore(const HomeLogStore&) = delete;
     HomeLogStore(HomeLogStore&&) noexcept = delete;
-    HomeLogStore& operator=(HomeLogStore&) = delete;
+    HomeLogStore& operator=(const HomeLogStore&) = delete;
     HomeLogStore& operator=(HomeLogStore&&) noexcept = delete;
 
     /**
