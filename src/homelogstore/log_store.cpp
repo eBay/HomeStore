@@ -6,7 +6,6 @@ namespace homestore {
 SDS_LOGGING_DECL(logstore)
 
 static constexpr logdev_key out_of_bound_ld_key = {std::numeric_limits< logid_t >::max(), 0};
-REGISTER_METABLK_SUBSYSTEM(log_dev, "LOG_DEV", HomeLogStoreMgr::meta_blk_found_cb, nullptr)
 
 #define THIS_LOGSTORE_LOG(level, msg, ...) HS_SUBMOD_LOG(level, logstore, , "store", m_store_id, msg, __VA_ARGS__)
 
