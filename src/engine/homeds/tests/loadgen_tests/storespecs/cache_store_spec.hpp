@@ -6,6 +6,7 @@
 #define HOMESTORE_CACHE_STORE_SPEC_HPP
 
 #include "homeds/loadgen/spec/store_spec.hpp"
+#include "../valuespecs/cache_value_spec.hpp"
 
 namespace homeds {
 namespace loadgen {
