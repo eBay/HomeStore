@@ -54,14 +54,14 @@ struct simple_store_req : public vol_interface_req {
 struct vol_info {
     VolumePtr vol_obj;
     uint64_t max_vol_blks = 0;
-    std::shared_ptr< homeds::Bitset > blk_bits;
+    std::shared_ptr< sisl::Bitset > blk_bits;
     folly::SharedMutexWritePriority bitset_rwlock;
 
     explicit vol_info(const VolumePtr& obj) {
         vol_obj = obj;
         max_vol_blks =
             VolInterface::get_instance()->get_system_capacity().initial_total_size / vol_interface->get_page_size(obj);
-        blk_bits = std::make_unique< homeds::Bitset >(max_vol_blks);
+        blk_bits = std::make_unique< sisl::Bitset >(max_vol_blks);
     }
 
     vol_info(const vol_info& other) {
@@ -70,12 +70,12 @@ struct vol_info {
         blk_bits = other.blk_bits;
     }
 
-    void update_blk_bits(std::function< void(homeds::Bitset*) >&& cb) {
+    void update_blk_bits(std::function< void(sisl::Bitset*) >&& cb) {
         folly::SharedMutexWritePriority::WriteHolder holder(bitset_rwlock);
         cb(blk_bits.get());
     }
 
-    void read_blk_bits(std::function< void(homeds::Bitset*) >&& cb) {
+    void read_blk_bits(std::function< void(sisl::Bitset*) >&& cb) {
         folly::SharedMutexWritePriority::ReadHolder holder(bitset_rwlock);
         cb(blk_bits.get());
     }

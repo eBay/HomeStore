@@ -1,54 +1,49 @@
-#include <gtest/gtest.h>
 #include <iostream>
 #include <thread>
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
-#include <utility/thread_buffer.hpp>
-#include "homeblks/volume/mapping.hpp"
-#include <utility/obj_life_counter.hpp>
+
+#include <linux/fs.h>
+#include <sys/ioctl.h>
 
 #include <metrics/metrics.hpp>
+#include <sds_logging/logging.h>
+#include <sds_options/options.h>
+#include <utility/obj_life_counter.hpp>
+#include <utility/thread_buffer.hpp>
+
+#include <gtest/gtest.h>
+
+#include "disk_initializer.hpp"
+#include "homeblks/volume/mapping.hpp"
+#include "homeds/loadgen/iomgr_executor.hpp"
 #include "homeds/loadgen/loadgen.hpp"
 #include "homeds/loadgen/keyset.hpp"
 #include "homeds/loadgen/loadgen_common.hpp"
-
-#include "keyspecs/simple_key_spec.hpp"
-#include "valuespecs/fixedbyte_value_spec.hpp"
-#include "storespecs/membtree_store_spec.hpp"
-
-#include "keyspecs/map_key_spec.hpp"
-#include "storespecs/map_store_spec.hpp"
-#include "valuespecs/map_value_spec.hpp"
-#include "storespecs/ssdbtree_store_spec.hpp"
-#include "keyspecs/var_key_spec.hpp"
-#include "valuespecs/var_value_spec.hpp"
-
-#include "keyspecs/cache_key_spec.hpp"
-#include "valuespecs/cache_value_spec.hpp"
-#include "storespecs/cache_store_spec.hpp"
-
 #include "loadgen_crud_suite.hpp"
-#include "homeds/loadgen/iomgr_executor.hpp"
-
-#include "storespecs/volume_store_spec.hpp"
+#include "keyspecs/cache_key_spec.hpp"
+#include "keyspecs/logstore_key_spec.hpp"
+#include "keyspecs/map_key_spec.hpp"
+#include "keyspecs/simple_key_spec.hpp"
+#include "keyspecs/var_key_spec.hpp"
+#include "keyspecs/vdev_key_spec.hpp"
 #include "keyspecs/vol_key_spec.hpp"
-#include "valuespecs/vol_value_spec.hpp"
-
+#include "storespecs/cache_store_spec.hpp"
 #include "storespecs/file_store_spec.hpp"
-#include "valuespecs/blk_value_spec.hpp"
-
+#include "storespecs/log_store_spec.hpp"
+#include "storespecs/map_store_spec.hpp"
+#include "storespecs/membtree_store_spec.hpp"
+#include "storespecs/ssdbtree_store_spec.hpp"
 #include "storespecs/vdev_prw_store_spec.hpp"
 #include "storespecs/vdev_rw_store_spec.hpp"
-#include "keyspecs/vdev_key_spec.hpp"
-#include "valuespecs/vdev_value_spec.hpp"
-
-#include "storespecs/log_store_spec.hpp"
-#include "keyspecs/logstore_key_spec.hpp"
+#include "storespecs/volume_store_spec.hpp"
+#include "valuespecs/blk_value_spec.hpp"
+#include "valuespecs/cache_value_spec.hpp"
+#include "valuespecs/fixedbyte_value_spec.hpp"
 #include "valuespecs/logstore_value_spec.hpp"
+#include "valuespecs/map_value_spec.hpp"
+#include "valuespecs/var_value_spec.hpp"
+#include "valuespecs/vdev_value_spec.hpp"
+#include "valuespecs/vol_value_spec.hpp"
 
-#include "disk_initializer.hpp"
-#include <linux/fs.h>
-#include <sys/ioctl.h>
 
 #ifndef DEBUG
 extern bool same_value_gen;
