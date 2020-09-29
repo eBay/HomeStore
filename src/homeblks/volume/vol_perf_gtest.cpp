@@ -1,29 +1,28 @@
-#include <gtest/gtest.h>
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
-#include <metrics/metrics.hpp>
-#include <api/vol_interface.hpp>
-#include <iomgr/iomgr.hpp>
-#include <boost/uuid/uuid_generators.hpp>
-#include <boost/uuid/uuid_io.hpp>
+#include <atomic>
 #include <fstream>
 #include <iostream>
 #include <string>
-#include <engine/homeds/bitmap/bitset.hpp>
-#include <atomic>
-#include <string>
-#include <utility/thread_buffer.hpp>
+
 #include <fcntl.h>
-#include <sys/ioctl.h>
 #include <linux/fs.h>
-#include "homeblks/test_setup/simple_hs_setup.hpp"
-#include <boost/filesystem.hpp>
-extern "C" {
-#include <fcntl.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
+#include <sys/ioctl.h>
 #include <sys/timeb.h>
-}
+
+#include <boost/uuid/uuid_generators.hpp>
+#include <boost/uuid/uuid_io.hpp>
+#include <fds/bitset.hpp>
+#include <iomgr/iomgr.hpp>
+#include <metrics/metrics.hpp>
+#include <sds_logging/logging.h>
+#include <sds_options/options.h>
+#include <utility/thread_buffer.hpp>
+
+#include <gtest/gtest.h>
+
+#include "api/vol_interface.hpp"
+#include "homeblks/test_setup/simple_hs_setup.hpp"
 
 using namespace homestore;
 

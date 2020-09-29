@@ -8,15 +8,17 @@
 #ifndef SRC_BLKALLOC_BLK_H_
 #define SRC_BLKALLOC_BLK_H_
 
-#include <iostream>
 #include <cassert>
-#include <sstream>
 #include <cstring>
+#include <iostream>
+#include <sstream>
+
+#include <fds/thread_vector.hpp>
+#include <fds/utils.hpp>
+
+#include "engine/common/homestore_config.hpp"
 #include "engine/homeds/array/flexarray.hpp"
 #include "engine/homeds/memory/mempiece.hpp"
-#include <fds/utils.hpp>
-#include "engine/common/homestore_config.hpp"
-#include <fds/thread_vector.hpp>
 
 //#include "device/device.h"
 
