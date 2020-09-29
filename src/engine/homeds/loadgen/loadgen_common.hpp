@@ -6,15 +6,16 @@
 #define HOMESTORE_LOADGEN_COMMON_HPP
 
 #include <chrono>
+#include <cstdint>
 #include <ctime>
 #include <string>
 
 namespace homeds {
 namespace loadgen {
 
-constexpr auto Ki = 1024ull;
-constexpr auto Mi = Ki * Ki;
-constexpr auto Gi = Ki * Mi;
+constexpr uint64_t Ki{1024};
+constexpr uint64_t Mi = Ki * Ki;
+constexpr uint64_t Gi = Ki * Mi;
 using Clock = std::chrono::steady_clock;
 class Param {
 public:

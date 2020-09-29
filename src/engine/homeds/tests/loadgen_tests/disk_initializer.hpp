@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <system_error>
 #include <vector>
@@ -8,12 +9,14 @@
 #include <boost/uuid/uuid.hpp>
 
 #include "api/vol_interface.hpp"
+#include "homeds/loadgen/loadgen_common.hpp"
 
 namespace homeds {
 namespace loadgen {
-using namespace std;
-#define MAX_SIZE 7 * Gi
-typedef std::function< void(std::error_condition spdlog::level::err, const homestore::out_params& params) > init_done_callback;
+
+static constexpr uint64_t DISK_MAX_SIZE{7 * Gi};
+
+typedef std::function< void(std::error_condition err, const homestore::out_params& params) > init_done_callback;
 
 template < typename Executor >
 class DiskInitializer {
@@ -38,7 +41,7 @@ public:
         temp_info.dev_names = "file_load_gen";
         device_info.push_back(temp_info);
         std::ofstream ofs(temp_info.dev_names.c_str(), std::ios::binary | std::ios::out);
-        ofs.seekp(MAX_SIZE - 1);
+        ofs.seekp(DISK_MAX_SIZE - 1);
         ofs.write("", 1);
 
         //                iomgr_obj = std::make_shared<iomgr::ioMgr>(2, num_threads);
@@ -65,7 +68,7 @@ public:
         boost::uuids::string_generator gen;
         params.system_uuid = gen("01970496-0262-11e9-8eb2-f2801f1b9fd1");
         uuid = params.system_uuid;
-        VolInterface::init(params);
+        homestore::VolInterface::init(params);
     }
 
     bool vol_found_cb(boost::uuids::uuid uuid) { return true; }
@@ -75,7 +78,7 @@ public:
     void vol_mounted_cb(const homestore::VolumePtr& vol_obj, homestore::vol_state state) {
         vol_init(vol_obj);
         auto cb = [this](const homestore::vol_interface_req_ptr& vol_req) { process_completions(vol_req); };
-        VolInterface::get_instance()->attach_vol_completion_cb(vol_obj, cb);
+        homestore::VolInterface::get_instance()->attach_vol_completion_cb(vol_obj, cb);
     }
 
     void vol_init(const homestore::VolumePtr& vol_obj) {
