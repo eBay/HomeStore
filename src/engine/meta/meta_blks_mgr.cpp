@@ -856,6 +856,7 @@ uint64_t MetaBlkMgr::get_size() { return m_sb_blk_store->get_size(); }
 
 uint64_t MetaBlkMgr::get_used_size() { return m_sb_blk_store->get_used_size(); }
 
-MetaBlkMgr* MetaBlkMgr::_instance = nullptr;
-bool MetaBlkMgr::m_self_recover = false;
+std::unique_ptr< MetaBlkMgr > MetaBlkMgr::s_instance{};
+
+bool MetaBlkMgr::m_self_recover{false};
 } // namespace homestore
