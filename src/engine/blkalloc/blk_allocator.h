@@ -8,23 +8,24 @@
 #ifndef ALLOCATOR_H
 #define ALLOCATOR_H
 
-#include "blk.h"
 #include <cassert>
-#include <vector>
+#include <cstdint>
+#include <sstream>
 #include <string>
 #include <thread>
-#include <sstream>
-#include "engine/homeds/bitmap/bitset.hpp"
-#include "engine/homeds/btree/btree.hpp"
-#include <folly/ThreadLocal.h>
+#include <vector>
+
 #include <boost/range/irange.hpp>
 #include <fds/bitset.hpp>
-#include "engine/meta/meta_blks_mgr.hpp"
-#include "engine/homestore_base.hpp"
-#include "engine/device/device.h"
-#include "engine/index/resource_mgr.hpp"
+#include <folly/ThreadLocal.h>
 
-using namespace std;
+#include "engine/device/device.h"
+#include "engine/homeds/btree/btree.hpp"
+#include "engine/homestore_base.hpp"
+#include "engine/index/resource_mgr.hpp"
+#include "engine/meta/meta_blks_mgr.hpp"
+
+#include "blk.h"
 
 namespace homestore {
 #define BLKALLOC_LOG(level, mod, msg, ...) HS_SUBMOD_LOG(level, mod, , "blkalloc", m_cfg.get_name(), msg, ##__VA_ARGS__)
@@ -68,9 +69,9 @@ public:
     const std::string& get_name() const { return m_unique_name; }
 
     virtual std::string to_string() const {
-        std::stringstream ss;
-        ss << "Blksize=" << get_blk_size() << " TotalBlks=" << get_total_blks();
-        return ss.str();
+        std::stringstream oss{};
+        oss << "Blksize=" << get_blk_size() << " TotalBlks=" << get_total_blks();
+        return oss.str();
     }
 
     //! Set Blocks per Portion
@@ -141,16 +142,17 @@ struct blk_alloc_hints {
 
 class BlkAllocPortion {
 private:
-    pthread_mutex_t m_blk_lock;
+    std::mutex m_blk_lock;
 
 public:
-    BlkAllocPortion() { pthread_mutex_init(&m_blk_lock, NULL); }
+    BlkAllocPortion() = default;
+    ~BlkAllocPortion() = default;
+    BlkAllocPortion(const BlkAllocPortion&) = delete;
+    BlkAllocPortion(BlkAllocPortion&&) noexcept = delete;
+    BlkAllocPortion& operator=(const BlkAllocPortion&) = delete;
+    BlkAllocPortion& operator=(BlkAllocPortion&&) noexcept = delete;
 
-    ~BlkAllocPortion() { pthread_mutex_destroy(&m_blk_lock); }
-
-    void lock() { pthread_mutex_lock(&m_blk_lock); }
-
-    void unlock() { pthread_mutex_unlock(&m_blk_lock); }
+    auto auto_lock() { return std::scoped_lock<std::mutex>(m_blk_lock); }
 };
 
 /* We have the following design requirement it is used in auto recovery mode
@@ -192,7 +194,7 @@ public:
 
 class BlkAllocator {
     std::vector< BlkAllocPortion > m_blk_portions;
-    sisl::Bitset* m_disk_bm;
+    sisl::Bitset* m_disk_bm;  // NOTE: This can be a unique_ptr but requires changes to sisl
 
     bool m_auto_recovery = false;
 
@@ -248,13 +250,14 @@ public:
         // assert(m_auto_recovery || !m_inited);
         if (!m_auto_recovery && m_inited) { return BLK_ALLOC_FAILED; }
         BlkAllocPortion* portion = blknum_to_portion(in_bid.get_id());
-        portion->lock();
-        if (m_inited) {
-            BLKALLOC_ASSERT(RELEASE, get_disk_bm()->is_bits_reset(in_bid.get_id(), in_bid.get_nblks()),
-                            "Expected disk blks to reset");
+        {
+            auto lock{portion->auto_lock()};
+            if (m_inited) {
+                BLKALLOC_ASSERT(RELEASE, get_disk_bm()->is_bits_reset(in_bid.get_id(), in_bid.get_nblks()),
+                                "Expected disk blks to reset");
+            }
+            get_disk_bm()->set_bits(in_bid.get_id(), in_bid.get_nblks());
         }
-        get_disk_bm()->set_bits(in_bid.get_id(), in_bid.get_nblks());
-        portion->unlock();
         return BLK_ALLOC_SUCCESS;
     };
 
@@ -262,16 +265,17 @@ public:
         /* this api should be called only when auto recovery is enabled */
         assert(m_auto_recovery);
         BlkAllocPortion* portion = blknum_to_portion(b.get_id());
-        portion->lock();
-        if (m_inited) {
-            /* During recovery we might try to free the entry which is already freed while replaying the journal,
-             * This assert is valid only post recovery.
-             */
-            BLKALLOC_ASSERT(RELEASE, get_disk_bm()->is_bits_set(b.get_id(), b.get_nblks()),
-                            "Expected disk bits to set");
+        {
+            auto lock{portion->auto_lock()};
+            if (m_inited) {
+                /* During recovery we might try to free the entry which is already freed while replaying the journal,
+                 * This assert is valid only post recovery.
+                 */
+                BLKALLOC_ASSERT(RELEASE, get_disk_bm()->is_bits_set(b.get_id(), b.get_nblks()),
+                                "Expected disk bits to set");
+            }
+            get_disk_bm()->reset_bits(b.get_id(), b.get_nblks());
         }
-        get_disk_bm()->reset_bits(b.get_id(), b.get_nblks());
-        portion->unlock();
     }
 
     /* CP start is called when all its consumers have purged their free lists and now want to persist the

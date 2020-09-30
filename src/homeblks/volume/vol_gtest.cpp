@@ -7,33 +7,34 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <string>
 #include <thread>
 
 #include <fcntl.h>
+#include <isa-l/crc.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <sys/timeb.h>
 
-#include "api/vol_interface.hpp"
-#include "boost/uuid/uuid_generators.hpp"
-#include "boost/uuid/uuid_io.hpp"
-#include "engine/homeds/bitmap/bitset.hpp"
-#include "fds/utils.hpp"
-#include "fds/atomic_status_counter.hpp"
-#include "iomgr/aio_drive_interface.hpp"
-#include "iomgr/iomgr.hpp"
-#include "iomgr/spdk_drive_interface.hpp"
-#include "sds_logging/logging.h"
-#include "sds_options/options.h"
-#include "utility/thread_buffer.hpp"
+#include <boost/uuid/uuid_generators.hpp>
+#include <boost/uuid/uuid_io.hpp>
+#include <fds/atomic_status_counter.hpp>
+#include <fds/bitset.hpp>
+#include <fds/utils.hpp>
+#include <iomgr/aio_drive_interface.hpp>
+#include <iomgr/iomgr.hpp>
+#include <iomgr/spdk_drive_interface.hpp>
+#include <sds_logging/logging.h>
+#include <sds_options/options.h>
+#include <utility/thread_buffer.hpp>
 
-#include "gtest/gtest.h"
-#include "engine/homestore_base.hpp"
-#include <isa-l/crc.h>
-#include <functional>
+#include <gtest/gtest.h>
+
+#include "api/vol_interface.hpp"
 #include "engine/common/homestore_header.hpp"
+#include "engine/homestore_base.hpp"
 
 using namespace homestore;
 using namespace flip;
@@ -243,7 +244,7 @@ struct vol_info_t {
     boost::uuids::uuid uuid;
     int fd;
     std::mutex vol_mutex;
-    std::unique_ptr< homeds::Bitset > m_vol_bm;
+    std::unique_ptr< sisl::Bitset > m_vol_bm;
     uint64_t max_vol_blks;
     uint64_t cur_checkpoint;
     std::atomic< uint64_t > start_lba = 0;
@@ -535,7 +536,7 @@ public:
         info->fd = open(file_name.c_str(), O_RDWR);
         info->max_vol_blks =
             VolInterface::get_instance()->get_size(vol_obj) / VolInterface::get_instance()->get_page_size(vol_obj);
-        info->m_vol_bm = std::make_unique< homeds::Bitset >(info->max_vol_blks);
+        info->m_vol_bm = std::make_unique< sisl::Bitset >(info->max_vol_blks);
         info->cur_checkpoint = 0;
 
         assert(info->fd > 0);

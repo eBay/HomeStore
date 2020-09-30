@@ -27,7 +27,7 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig& cfg, bool init, 
         m_region_state(BLK_ALLOCATOR_DONE),
         m_temp_groups(cfg.get_total_temp_group()),
         m_cache_n_entries(0),
-        m_metrics(cfg.get_name().c_str()) {
+        m_metrics(cfg.get_name().c_str(), cfg.get_slab_cnt()) {
 
     // TODO: Raise exception when blk_size > page_size or total blks is less than some number etc...
     m_cache_bm = new sisl::Bitset(cfg.get_total_blks(), id, HS_STATIC_CONFIG(drive_attr.align_size));
@@ -66,80 +66,6 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig& cfg, bool init, 
 
     // Start a thread which will do sweeping job of free segments
     if (init) { inited(); }
-}
-
-void VarsizeBlkAllocator::incr_counter(unsigned int index, unsigned int val) {
-    switch (index) {
-    case 0:
-        COUNTER_INCREMENT(m_metrics, blkalloc_slab0_capacity, val);
-        break;
-    case 1:
-        COUNTER_INCREMENT(m_metrics, blkalloc_slab1_capacity, val);
-        break;
-    case 2:
-        COUNTER_INCREMENT(m_metrics, blkalloc_slab2_capacity, val);
-        break;
-    case 3:
-        COUNTER_INCREMENT(m_metrics, blkalloc_slab3_capacity, val);
-        break;
-    case 4:
-        COUNTER_INCREMENT(m_metrics, blkalloc_slab4_capacity, val);
-        break;
-    case 5:
-        COUNTER_INCREMENT(m_metrics, blkalloc_slab5_capacity, val);
-        break;
-    case 6:
-        COUNTER_INCREMENT(m_metrics, blkalloc_slab6_capacity, val);
-        break;
-    case 7:
-        COUNTER_INCREMENT(m_metrics, blkalloc_slab7_capacity, val);
-        break;
-    case 8:
-        COUNTER_INCREMENT(m_metrics, blkalloc_slab8_capacity, val);
-        break;
-    case 9:
-        COUNTER_INCREMENT(m_metrics, blkalloc_slab9_capacity, val);
-        break;
-    default:
-        BLKALLOC_LOG(DEBUG, varsize_blk_alloc, "Invalid index={} for slab counter increment", index);
-    }
-}
-
-void VarsizeBlkAllocator::decr_counter(unsigned int index, unsigned int val) {
-    switch (index) {
-    case 0:
-        COUNTER_DECREMENT(m_metrics, blkalloc_slab0_capacity, val);
-        break;
-    case 1:
-        COUNTER_DECREMENT(m_metrics, blkalloc_slab1_capacity, val);
-        break;
-    case 2:
-        COUNTER_DECREMENT(m_metrics, blkalloc_slab2_capacity, val);
-        break;
-    case 3:
-        COUNTER_DECREMENT(m_metrics, blkalloc_slab3_capacity, val);
-        break;
-    case 4:
-        COUNTER_DECREMENT(m_metrics, blkalloc_slab4_capacity, val);
-        break;
-    case 5:
-        COUNTER_DECREMENT(m_metrics, blkalloc_slab5_capacity, val);
-        break;
-    case 6:
-        COUNTER_DECREMENT(m_metrics, blkalloc_slab6_capacity, val);
-        break;
-    case 7:
-        COUNTER_DECREMENT(m_metrics, blkalloc_slab7_capacity, val);
-        break;
-    case 8:
-        COUNTER_DECREMENT(m_metrics, blkalloc_slab8_capacity, val);
-        break;
-    case 9:
-        COUNTER_DECREMENT(m_metrics, blkalloc_slab9_capacity, val);
-        break;
-    default:
-        BLKALLOC_LOG(DEBUG, varsize_blk_alloc, "Invalid index={} for slab counter decrement", index);
-    }
 }
 
 uint64_t VarsizeBlkAllocator::get_portions_per_segment() {
@@ -421,7 +347,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
 
     auto slab_index = get_config().get_slab(actual_entry.get_blk_count()).first;
     m_slab_entries[slab_index]._a.fetch_sub(actual_entry.get_blk_count(), std::memory_order_acq_rel);
-    // decr_counter(slab_index, actual_entry.get_blk_count());
+    decr_slab_counter(slab_index, actual_entry.get_blk_count());
 
     /* If we have more blks than what we need, insert the remaining blks to
        the bitmap. We can give either the leading blocks or trailing blocks.
@@ -448,7 +374,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
 
         auto slab_index = get_config().get_slab(excess_nblks).first;
         m_slab_entries[slab_index]._a.fetch_add(excess_nblks, std::memory_order_acq_rel);
-        // incr_counter(slab_index, excess_nblks);
+        incr_slab_counter(slab_index, excess_nblks);
 
     } else {
         out_blkid->set(actual_entry.get_blk_num(), alloc_blks);
@@ -491,7 +417,7 @@ bool VarsizeBlkAllocator::try_add_blks_to_cache(const BlkId& b) {
     BLKALLOC_ASSERT_CMP(LOGMSG, cnt, >=, 0);
 
     m_slab_entries[slab_index]._a.fetch_add(b.get_nblks(), std::memory_order_acq_rel);
-    incr_counter(slab_index, b.get_nblks());
+    incr_slab_counter(slab_index, b.get_nblks());
     BLKALLOC_LOG(TRACE, varsize_blk_alloc,
             "Added {} blocks to slab {}, slab capacity = {}, temp = {}",
             b.get_nblks(), slab_index,
@@ -518,14 +444,15 @@ void VarsizeBlkAllocator::free(const BlkId& b) {
     /* No need to set in cache if it is not recovered. When recovery is complete we copy the
      * disk_bm to cache bm.
      */
-    portion->lock();
-    BLKALLOC_ASSERT(RELEASE, m_cache_bm->is_bits_set(b.get_id(), b.get_nblks()),
+    {
+        auto lock{portion->auto_lock()};
+        BLKALLOC_ASSERT(RELEASE, m_cache_bm->is_bits_set(b.get_id(), b.get_nblks()),
                                                         "Expected bits to reset");
-    segment->add_free_blks(b.get_nblks());
-    m_cache_bm->reset_bits(b.get_id(), b.get_nblks());
-    auto cnt = m_alloc_blk_cnt.fetch_sub(b.get_nblks(), std::memory_order_relaxed);
-    BLKALLOC_ASSERT_CMP(LOGMSG, cnt, >=, 0);
-    portion->unlock();
+        segment->add_free_blks(b.get_nblks());
+        m_cache_bm->reset_bits(b.get_id(), b.get_nblks());
+        auto cnt = m_alloc_blk_cnt.fetch_sub(b.get_nblks(), std::memory_order_relaxed);
+        BLKALLOC_ASSERT_CMP(LOGMSG, cnt, >=, 0);
+    }
 }
 
 // This runs on per region thread and is at present single threaded.
@@ -616,128 +543,129 @@ uint64_t VarsizeBlkAllocator::fill_cache_in_portion(uint64_t seg_portion_num, Bl
     auto end_blk_id = cur_blk_id + num_blks_per_portion;
     uint32_t num_blks_per_phys_page = get_config().get_blks_per_phys_page();
 
-    portion.lock();
-    /* TODO: Consider caching the m_cache_n_entries and give some leeway
-     *       to max cache blks and thus avoid atomic operations
-     */
-    while ((m_cache_n_entries.load(std::memory_order_acq_rel) < get_config().get_max_cache_blks()) &&
-           (cur_blk_id < end_blk_id)) {
-
-        // Get next reset bits and insert to cache and then reset those bits
-        auto b = m_cache_bm->get_next_contiguous_upto_n_reset_bits(cur_blk_id, MAX_NBLKS);
-        BLKALLOC_ASSERT_CMP(LOGMSG, b.nbits, <=, MAX_NBLKS);
-
-        /* If there are no free blocks are none within the assigned portion */
-        if (!b.nbits || b.start_bit >= end_blk_id) { break; }
-
-        /* Limit cache update to within portion boundary */
-        if (b.start_bit + b.nbits > end_blk_id) { b.nbits = end_blk_id - b.start_bit; }
-
-        /* Create cache entry for start till end or upto next page boundary,
-           whichever is earlier. This will be used if start is not aligned
-           with a page boundary
+    {
+        auto lock{portion.auto_lock()};
+        /* TODO: Consider caching the m_cache_n_entries and give some leeway
+         *       to max cache blks and thus avoid atomic operations
          */
-        uint64_t total_bits = 0;
-        unsigned int nbits = b.start_bit % num_blks_per_phys_page;
-        if (nbits) {
-            nbits = std::min(num_blks_per_phys_page - nbits, b.nbits);
-            auto slab_index = get_config().get_slab(nbits).first;
-            if (m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel) <
-                get_config().get_slab_capacity(slab_index)) {
-                VarsizeAllocCacheEntry entry;
-                gen_cache_entry(b.start_bit, nbits, &entry);
-#ifndef NDEBUG
-                BLKALLOC_ASSERT(DEBUG, m_cache_bm->is_bits_reset(b.start_bit, nbits), "Expected bits to reset");
-#endif
-                m_blk_cache->put(entry, dummy, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
-                // TODO: Trap the return status of insert
-                m_cache_bm->set_bits(b.start_bit, nbits);
-                total_bits += nbits;
-                m_slab_entries[slab_index]._a.fetch_add(nbits, std::memory_order_acq_rel);
-                // incr_counter(slab_index, nbits);
-                BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Freed {} blocks for slab {}, remaining slab capacity = {}",
-                             nbits, slab_index, m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
-            } else {
-                BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Slab {} is full, capacity = {}", slab_index,
-                             m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
-            }
-            b.nbits -= nbits;
-            b.start_bit += nbits;
-        }
+        while ((m_cache_n_entries.load(std::memory_order_acq_rel) < get_config().get_max_cache_blks()) &&
+               (cur_blk_id < end_blk_id)) {
 
-        /* Create cache entry for end page, if end page has partial entry */
-        /* At this point start is aligned with blks end point or page boundary,
-           whichever occurs earlier
-         */
-        cur_blk_id = b.start_bit + b.nbits;
-        nbits = cur_blk_id % num_blks_per_phys_page;
-        if (b.nbits && nbits) {
-            /* If code enters this section, it means that start is aligned to a page
-               boundary
+            // Get next reset bits and insert to cache and then reset those bits
+            auto b = m_cache_bm->get_next_contiguous_upto_n_reset_bits(cur_blk_id, MAX_NBLKS);
+            BLKALLOC_ASSERT_CMP(LOGMSG, b.nbits, <=, MAX_NBLKS);
+
+            /* If there are no free blocks are none within the assigned portion */
+            if (!b.nbits || b.start_bit >= end_blk_id) { break; }
+
+            /* Limit cache update to within portion boundary */
+            if (b.start_bit + b.nbits > end_blk_id) { b.nbits = end_blk_id - b.start_bit; }
+
+            /* Create cache entry for start till end or upto next page boundary,
+               whichever is earlier. This will be used if start is not aligned
+               with a page boundary
              */
-            BLKALLOC_ASSERT_CMP(LOGMSG, b.start_bit % num_blks_per_phys_page, ==, 0);
-            auto start = cur_blk_id - nbits;
-            auto slab_index = get_config().get_slab(nbits).first;
-            if (m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel) <
-                get_config().get_slab_capacity(slab_index)) {
-                VarsizeAllocCacheEntry entry;
-                gen_cache_entry(start, nbits, &entry);
+            uint64_t total_bits = 0;
+            unsigned int nbits = b.start_bit % num_blks_per_phys_page;
+            if (nbits) {
+                nbits = std::min(num_blks_per_phys_page - nbits, b.nbits);
+                auto slab_index = get_config().get_slab(nbits).first;
+                if (m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel) <
+                    get_config().get_slab_capacity(slab_index)) {
+                    VarsizeAllocCacheEntry entry;
+                    gen_cache_entry(b.start_bit, nbits, &entry);
 #ifndef NDEBUG
-                BLKALLOC_ASSERT(DEBUG, m_cache_bm->is_bits_reset(start, nbits), "Expected cache_bm bits to reset");
+                    BLKALLOC_ASSERT(DEBUG, m_cache_bm->is_bits_reset(b.start_bit, nbits), "Expected bits to reset");
 #endif
-                m_blk_cache->put(entry, dummy, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
-                // TODO: Trap the return status of insert
-                m_cache_bm->set_bits(start, nbits);
-                total_bits += nbits;
-                m_slab_entries[slab_index]._a.fetch_add(nbits, std::memory_order_acq_rel);
-                // incr_counter(slab_index, nbits);
-                BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Freed {} blocks for slab {}, remaining slab capacity = {}",
-                             nbits, slab_index, m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
-            } else {
-                BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Slab {} is full, capacity = {}", slab_index,
-                             m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
+                    m_blk_cache->put(entry, dummy, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
+                    // TODO: Trap the return status of insert
+                    m_cache_bm->set_bits(b.start_bit, nbits);
+                    total_bits += nbits;
+                    m_slab_entries[slab_index]._a.fetch_add(nbits, std::memory_order_acq_rel);
+                    incr_slab_counter(slab_index, nbits);
+                    BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Freed {} blocks for slab {}, remaining slab capacity = {}",
+                                 nbits, slab_index, m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
+                } else {
+                    BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Slab {} is full, capacity = {}", slab_index,
+                                 m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
+                }
+                b.nbits -= nbits;
+                b.start_bit += nbits;
             }
-            b.nbits -= nbits;
-        }
 
-        /* Create cache entry for complete pages between start and end */
-        if (b.nbits) {
-            /* If code enters this section, it means that start is aligned to a page
-               boundary and nbits left is a multiple of page size
+            /* Create cache entry for end page, if end page has partial entry */
+            /* At this point start is aligned with blks end point or page boundary,
+               whichever occurs earlier
              */
-            BLKALLOC_ASSERT_CMP(LOGMSG, b.start_bit % num_blks_per_phys_page, ==, 0);
-            BLKALLOC_ASSERT_CMP(LOGMSG, b.nbits % num_blks_per_phys_page, ==, 0);
-            auto slab_index = get_config().get_slab(b.nbits).first;
-            if (m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel) <
-                get_config().get_slab_capacity(slab_index)) {
-                VarsizeAllocCacheEntry entry;
-                gen_cache_entry(b.start_bit, b.nbits, &entry);
+            cur_blk_id = b.start_bit + b.nbits;
+            nbits = cur_blk_id % num_blks_per_phys_page;
+            if (b.nbits && nbits) {
+                /* If code enters this section, it means that start is aligned to a page
+                   boundary
+                 */
+                BLKALLOC_ASSERT_CMP(LOGMSG, b.start_bit % num_blks_per_phys_page, ==, 0);
+                auto start = cur_blk_id - nbits;
+                auto slab_index = get_config().get_slab(nbits).first;
+                if (m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel) <
+                    get_config().get_slab_capacity(slab_index)) {
+                    VarsizeAllocCacheEntry entry;
+                    gen_cache_entry(start, nbits, &entry);
 #ifndef NDEBUG
-                BLKALLOC_ASSERT(DEBUG, m_cache_bm->is_bits_reset(b.start_bit, b.nbits),
-                                "Expected cache_bm bits to reset");
+                    BLKALLOC_ASSERT(DEBUG, m_cache_bm->is_bits_reset(start, nbits), "Expected cache_bm bits to reset");
 #endif
-                m_blk_cache->put(entry, dummy, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
-                // TODO: Trap the return status of insert
-                m_cache_bm->set_bits(b.start_bit, b.nbits);
-                total_bits += b.nbits;
-                m_slab_entries[slab_index]._a.fetch_add(b.nbits, std::memory_order_acq_rel);
-                // incr_counter(slab_index, b.nbits);
-                BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Freed {} blocks for slab {}, remaining slab capacity = {}",
-                             b.nbits, slab_index, m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
-            } else {
-                BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Slab {} is full, capacity = {}", slab_index,
-                             m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
+                    m_blk_cache->put(entry, dummy, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
+                    // TODO: Trap the return status of insert
+                    m_cache_bm->set_bits(start, nbits);
+                    total_bits += nbits;
+                    m_slab_entries[slab_index]._a.fetch_add(nbits, std::memory_order_acq_rel);
+                    incr_slab_counter(slab_index, nbits);
+                    BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Freed {} blocks for slab {}, remaining slab capacity = {}",
+                                 nbits, slab_index, m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
+                } else {
+                    BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Slab {} is full, capacity = {}", slab_index,
+                                 m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
+                }
+                b.nbits -= nbits;
             }
-        }
 
-        // Update the counters
-        if (total_bits) {
-            n_added_blks += total_bits;
-            n_fragments++;
-            m_cache_n_entries.fetch_add(total_bits, std::memory_order_acq_rel);
+            /* Create cache entry for complete pages between start and end */
+            if (b.nbits) {
+                /* If code enters this section, it means that start is aligned to a page
+                   boundary and nbits left is a multiple of page size
+                 */
+                BLKALLOC_ASSERT_CMP(LOGMSG, b.start_bit % num_blks_per_phys_page, ==, 0);
+                BLKALLOC_ASSERT_CMP(LOGMSG, b.nbits % num_blks_per_phys_page, ==, 0);
+                auto slab_index = get_config().get_slab(b.nbits).first;
+                if (m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel) <
+                    get_config().get_slab_capacity(slab_index)) {
+                    VarsizeAllocCacheEntry entry;
+                    gen_cache_entry(b.start_bit, b.nbits, &entry);
+#ifndef NDEBUG
+                    BLKALLOC_ASSERT(DEBUG, m_cache_bm->is_bits_reset(b.start_bit, b.nbits),
+                                    "Expected cache_bm bits to reset");
+#endif
+                    m_blk_cache->put(entry, dummy, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
+                    // TODO: Trap the return status of insert
+                    m_cache_bm->set_bits(b.start_bit, b.nbits);
+                    total_bits += b.nbits;
+                    m_slab_entries[slab_index]._a.fetch_add(b.nbits, std::memory_order_acq_rel);
+                    incr_slab_counter(slab_index, b.nbits);
+                    BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Freed {} blocks for slab {}, remaining slab capacity = {}",
+                                 b.nbits, slab_index, m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
+                } else {
+                    BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Slab {} is full, capacity = {}", slab_index,
+                                 m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
+                }
+            }
+
+            // Update the counters
+            if (total_bits) {
+                n_added_blks += total_bits;
+                n_fragments++;
+                m_cache_n_entries.fetch_add(total_bits, std::memory_order_acq_rel);
+            }
         }
     }
-    portion.unlock();
     seg->reportFragmentation(n_added_blks, n_fragments);
     return n_added_blks;
 }

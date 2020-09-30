@@ -1,17 +1,31 @@
+#pragma once
+
+#include <cstdint>
+#include <functional>
+#include <system_error>
+#include <vector>
+
+#include <boost/uuid/string_generator.hpp>
+#include <boost/uuid/uuid.hpp>
+
+#include "api/vol_interface.hpp"
+#include "homeds/loadgen/loadgen_common.hpp"
+
 namespace homeds {
 namespace loadgen {
-using namespace std;
-#define MAX_SIZE 7 * Gi
-typedef std::function< void(std::error_condition err, const out_params& params) > init_done_callback;
+
+static constexpr uint64_t DISK_MAX_SIZE{7 * Gi};
+
+typedef std::function< void(std::error_condition err, const homestore::out_params& params) > init_done_callback;
 
 template < typename Executor >
 class DiskInitializer {
-    std::vector< dev_info > device_info;
+    std::vector< homestore::dev_info > device_info;
     boost::uuids::uuid uuid;
 
 public:
     ~DiskInitializer() {
-        auto success = VolInterface::get_instance()->shutdown();
+        auto success = homestore::VolInterface::get_instance()->shutdown();
         assert(success);
     }
     void cleanup() { remove("file_load_gen"); }
@@ -23,15 +37,15 @@ public:
         /* start homestore */
         /* create files */
 
-        dev_info temp_info;
+        homestore::dev_info temp_info;
         temp_info.dev_names = "file_load_gen";
         device_info.push_back(temp_info);
         std::ofstream ofs(temp_info.dev_names.c_str(), std::ios::binary | std::ios::out);
-        ofs.seekp(MAX_SIZE - 1);
+        ofs.seekp(DISK_MAX_SIZE - 1);
         ofs.write("", 1);
 
         //                iomgr_obj = std::make_shared<iomgr::ioMgr>(2, num_threads);
-        init_params params;
+        homestore::init_params params;
 #ifndef NDEBUG
         params.open_flags = homestore::io_flag::BUFFERED_IO;
 #else
@@ -54,22 +68,27 @@ public:
         boost::uuids::string_generator gen;
         params.system_uuid = gen("01970496-0262-11e9-8eb2-f2801f1b9fd1");
         uuid = params.system_uuid;
-        VolInterface::init(params);
+        homestore::VolInterface::init(params);
     }
 
     bool vol_found_cb(boost::uuids::uuid uuid) { return true; }
 
-    void process_completions(const vol_interface_req_ptr& hb_req) {}
+    void process_completions(const homestore::vol_interface_req_ptr& hb_req) {}
 
-    void vol_mounted_cb(const VolumePtr& vol_obj, vol_state state) {
+    void vol_mounted_cb(const homestore::VolumePtr& vol_obj, homestore::vol_state state) {
         vol_init(vol_obj);
-        auto cb = [this](const vol_interface_req_ptr& vol_req) { process_completions(vol_req); };
-        VolInterface::get_instance()->attach_vol_completion_cb(vol_obj, cb);
+        auto cb = [this](const homestore::vol_interface_req_ptr& vol_req) { process_completions(vol_req); };
+        homestore::VolInterface::get_instance()->attach_vol_completion_cb(vol_obj, cb);
     }
 
-    void vol_init(const VolumePtr& vol_obj) { open(VolInterface::get_instance()->get_name(vol_obj), O_RDWR); }
+    void vol_init(const homestore::VolumePtr& vol_obj) {
+        open(homestore::VolInterface::get_instance()->get_name(vol_obj), O_RDWR);
+    }
 
-    void vol_state_change_cb(const VolumePtr& vol, vol_state old_state, vol_state new_state) { assert(0); }
+    void vol_state_change_cb(const homestore::VolumePtr& vol, homestore::vol_state old_state,
+                             homestore::vol_state new_state) {
+        assert(0);
+    }
 };
 } // namespace loadgen
 } // namespace homeds

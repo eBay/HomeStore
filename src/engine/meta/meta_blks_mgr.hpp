@@ -1,5 +1,12 @@
 #pragma once
 
+#include <cstdint>
+#include <functional>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <system_error>
+
 #include "meta_sb.hpp"
 
 namespace homestore {
@@ -28,7 +35,7 @@ struct MetaSubRegInfo {
 
 class MetaBlkMgr {
 private:
-    static MetaBlkMgr* _instance;
+    static std::unique_ptr<MetaBlkMgr> s_instance;
     static bool m_self_recover;
     blk_store_t* m_sb_blk_store{nullptr}; // super blockstore
     std::mutex m_meta_mtx;                // mutex to access to meta_map;
@@ -39,7 +46,14 @@ private:
     BlkId m_last_mblk_id;                                 // last meta blk;
     meta_blk_sb* m_ssb{nullptr};                          // meta super super blk;
 
+    MetaBlkMgr() = default;
+
 public:
+    MetaBlkMgr(const MetaBlkMgr&) = delete;
+    MetaBlkMgr(MetaBlkMgr&&) noexcept = delete;
+    MetaBlkMgr& operator=(const MetaBlkMgr&) = delete;
+    MetaBlkMgr& operator=(MetaBlkMgr&&) noexcept = delete;
+
     /**
      * @brief :
      *
@@ -59,17 +73,15 @@ public:
      */
     static MetaBlkMgr* instance() {
         static std::once_flag flag1;
-        std::call_once(flag1, []() { _instance = new MetaBlkMgr(); });
+        std::call_once(flag1, []() { s_instance.reset(new MetaBlkMgr()); });
 
-        return _instance;
+        return s_instance.get();
     }
 
     /* Note: it assumes that it is called in a single thread */
-    static void force_reinit() { _instance = new MetaBlkMgr(); }
+    static void force_reinit() { s_instance.reset(new MetaBlkMgr()); }
 
-    MetaBlkMgr(){};
-
-    static void del_instance() { delete _instance; }
+    static void del_instance() { s_instance.reset(); }
 
     /**
      * @brief :

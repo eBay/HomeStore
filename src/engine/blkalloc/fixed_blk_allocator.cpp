@@ -28,12 +28,12 @@ void FixedBlkAllocator::inited() {
         m_blk_nodes[i].this_blk_id = i;
 #endif
         BlkAllocPortion* portion = blknum_to_portion(i);
-        portion->lock();
-        if (get_disk_bm()->is_bits_set(i, 1)) {
-            portion->unlock();
-            continue;
+        {
+            auto lock{portion->auto_lock()};
+            if (get_disk_bm()->is_bits_set(i, 1)) {
+                continue;
+            }
         }
-        portion->unlock();
         if (m_first_blk_id == BLKID32_INVALID) { m_first_blk_id = i; }
         if (prev_blkid != BLKID32_INVALID) { m_blk_nodes[prev_blkid].next_blk = i; }
         prev_blkid = i;
