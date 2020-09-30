@@ -7,8 +7,8 @@ SDS_LOGGING_DECL(metablk)
 namespace homestore {
 
 void MetaBlkMgr::start(blk_store_t* sb_blk_store, const sb_blkstore_blob* blob, const bool is_init) {
-    HS_LOG(DEBUG, metablk, "Initialize MetaBlkStore with total size: {}, used size: {}", sb_blk_store->get_size(),
-           sb_blk_store->get_used_size());
+    LOGINFO("Initialize MetaBlkStore with total size: {}, used size: {}", sb_blk_store->get_size(),
+            sb_blk_store->get_used_size());
     m_sb_blk_store = sb_blk_store;
     MetaBlkMgr::reset_self_recover();
     if (is_init) {
@@ -441,7 +441,13 @@ void MetaBlkMgr::write_meta_blk_ovf(BlkId& prev_bid, BlkId& out_obid, const void
 
             // TODO: contigous nblks 32 will cause read assert in mempiece;
             ret = alloc_meta_blk(bid, std::min(static_cast< uint64_t >(16), nblks - nblks_alloc));
-            if (ret != no_error) { HS_ASSERT(RELEASE, false, "failed to allocate blk with status: {}", ret.message()); }
+            if (ret != no_error) {
+                // fall back to allocate 1 single blk if not enough contigous blks;
+                ret = alloc_meta_blk(bid, std::min(static_cast< uint64_t >(1), nblks - nblks_alloc));
+                if (ret != no_error) {
+                    HS_ASSERT(RELEASE, false, "failed to allocate blk with status: {}", ret.message());
+                }
+            }
 
             nblks_alloc += bid.get_nblks();
             std::get< 1 >(ovf_blk_ids[ovf_blk_ids.size() - 1]).push_back(bid);
