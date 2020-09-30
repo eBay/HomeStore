@@ -43,14 +43,15 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig& cfg, bool init, 
     for (auto i = 0U; i < cfg.get_slab_cnt(); i++) {
         atomwrapper< uint32_t > a_i(0);
         m_slab_entries.push_back(a_i);
-        BLKALLOC_LOG(INFO, , "Capacity of slab {} = {}", i, m_slab_entries[i]._a.load(std::memory_order_acq_rel));
+        BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Capacity of slab {} = {}", i,
+                            m_slab_entries[i]._a.load(std::memory_order_acq_rel));
     }
 
     // Create segments with as many blk groups as configured.
     uint64_t seg_nblks = cfg.get_total_blks() / cfg.get_total_segments();
     uint64_t portions_per_seg = get_portions_per_segment();
-    BLKALLOC_LOG(INFO, , "Segment Count = {}, Blocks per segment = {}, portions={}", cfg.get_total_segments(),
-                 seg_nblks, portions_per_seg);
+    BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Segment Count = {}, Blocks per segment = {}, portions={}",
+                                                cfg.get_total_segments(), seg_nblks, portions_per_seg);
     for (auto i = 0U; i < cfg.get_total_segments(); i++) {
         std::string seg_name = cfg.get_name() + "_seg_" + std::to_string(i);
         BlkAllocSegment* seg = new BlkAllocSegment(seg_nblks, i, portions_per_seg, seg_name);
@@ -88,13 +89,14 @@ VarsizeBlkAllocator::~VarsizeBlkAllocator() {
     delete (m_cache_bm);
     for (auto i = 0U; i < m_cfg.get_total_segments(); i++) {
         delete (m_segments[i]);
-        BLKALLOC_LOG(INFO, , "Deleted segment {}", i);
+        BLKALLOC_LOG(INFO, varsize_blk_alloc, "Deleted segment {}", i);
     }
 }
 
 // Runs only in per sweep thread. In other words, this is a single threaded state machine.
 void VarsizeBlkAllocator::allocator_state_machine() {
-    BLKALLOC_LOG(INFO, , "Starting new blk sweep thread, thread num = {}", sisl::ThreadLocalContext::my_thread_num());
+    BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Starting new blk sweep thread, thread num = {}",
+                                                    sisl::ThreadLocalContext::my_thread_num());
     BlkAllocSegment* allocate_seg = nullptr;
     int slab_indx;
     bool allocate = false;
@@ -119,7 +121,7 @@ void VarsizeBlkAllocator::allocator_state_machine() {
                 BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Region state : wait-alloc -> allocating");
 
             } else if (m_region_state == BLK_ALLOCATOR_EXITING) {
-                BLKALLOC_LOG(INFO, varsize_blk_alloc, "TODO: Handle exiting message more periodically");
+                BLKALLOC_LOG(TRACE, varsize_blk_alloc, "TODO: Handle exiting message more periodically");
                 break;
             }
         }
@@ -173,10 +175,8 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
 
     uint8_t blks_rqstd = nblks;
 
-    BLKALLOC_LOG(DEBUG, varsize_blk_alloc, "init status={}", m_inited);
     BLKALLOC_ASSERT(LOGMSG, m_inited, "Alloc before initialized");
-
-    BLKALLOC_LOG(DEBUG, varsize_blk_alloc, "nblks={}, hints multiplier={}", nblks, hints.multiplier);
+    BLKALLOC_LOG(TRACE, varsize_blk_alloc, "nblks={}, hints multiplier={}", nblks, hints.multiplier);
     BLKALLOC_ASSERT_CMP(LOGMSG, nblks % hints.multiplier, ==, 0);
 
 #ifdef _PRERELEASE
@@ -185,7 +185,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
     auto split_cnt = homestore_flip->get_test_flip< int >("blkalloc_split_blk");
     if (!hints.is_contiguous && split_cnt && nblks > split_cnt.get()) {
         blks_rqstd = sisl::round_up((nblks / split_cnt.get()), hints.multiplier);
-        BLKALLOC_LOG(DEBUG, varsize_blk_alloc, "blocks requested={}, nblks={}, split_cnt={}", blks_rqstd, nblks,
+        BLKALLOC_LOG(TRACE, varsize_blk_alloc, "blocks requested={}, nblks={}, split_cnt={}", blks_rqstd, nblks,
                      split_cnt.get());
     }
 #endif
@@ -216,12 +216,11 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
             if (blks_rqstd == 0) {
                 /* It should never happen. It means we are running out of space */
                 blks_rqstd = nblks - blks_alloced;
-                BLKALLOC_LOG(ERROR, , "Could not allocate any blocks. Running out of space");
+                BLKALLOC_LOG(ERROR, varsize_blk_alloc, "Could not allocate any blocks. Running out of space");
             }
         } else {
-            BLKALLOC_LOG(TRACE, , "Blocks allocated={}", blks_alloced);
             blks_alloced += blkid.get_nblks();
-            BLKALLOC_LOG(DEBUG, varsize_blk_alloc, "blks_alloced={}, hints multiplier={}", blks_alloced,
+            BLKALLOC_LOG(TRACE, varsize_blk_alloc, "blks_alloced={}, hints multiplier={}", blks_alloced,
                          hints.multiplier);
             BLKALLOC_ASSERT_CMP(LOGMSG, blks_alloced % hints.multiplier, ==, 0);
 
@@ -231,7 +230,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
         }
 
         retry_cnt++;
-        BLKALLOC_LOG(TRACE, , "Retry count={}", retry_cnt);
+        BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Retry count={}", retry_cnt);
     } while (blks_alloced != nblks &&
              !hints.is_contiguous && // fail immediately if this is a request for contiguous blks;
              retry_cnt < HS_DYNAMIC_CONFIG(blkallocator->max_varsize_blk_alloc_attempt));
@@ -240,11 +239,13 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
 
     if (blks_alloced != nblks) {
         if (hints.is_contiguous) {
-            BLKALLOC_LOG(ERROR, , "Not enough contiguous requested blks available, blks_alloced != nblks : {}  {}",
-                         blks_alloced, nblks);
+            BLKALLOC_LOG(ERROR, varsize_blk_alloc,
+                    "Not enough contiguous requested blks available, blks_alloced != nblks : {}  {}",
+                    blks_alloced, nblks);
         } else {
             if (m_cache_n_entries.load(std::memory_order_acquire) != 0) { m_blk_cache->print_tree(); }
-            BLKALLOC_LOG(ERROR, , "Blk allocation failed. blks_alloced != nblks : {}  {}", blks_alloced, nblks);
+            BLKALLOC_LOG(ERROR, varsize_blk_alloc,
+                    "Blk allocation failed. blks_alloced != nblks : {}  {}", blks_alloced, nblks);
         }
 
         COUNTER_INCREMENT(m_metrics, alloc_fail, 1);
