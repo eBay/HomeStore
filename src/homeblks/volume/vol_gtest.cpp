@@ -1188,6 +1188,7 @@ protected:
             for (auto& info : vol_req->read_buf_list) {
                 uint32_t offset{static_cast< uint32_t >(info.offset)};
                 uint64_t size{info.size};
+                assert(size % size_read == 0);
                 const auto buf{info.buf};
                 while (size != 0) {
                     const sisl::blob b{VolInterface::get_instance()->at_offset(buf, offset)};
@@ -1202,6 +1203,7 @@ protected:
             }
         } else {
             uint64_t size{static_cast< uint64_t >(req->original_size)};
+            assert(size % size_read == 0);
             while (size != 0) {
                 const uint8_t* const buffer{req->buffer + total_size_read};
                 const uint8_t* const validate_buffer{req->validate_buffer +
