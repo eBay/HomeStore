@@ -67,9 +67,9 @@ RCU_REGISTER_INIT;
 #define STAGING_VOL_PREFIX "staging"
 #define VOL_PREFIX "test_files/vol"
 
-constexpr auto Ki = 1024ull;
-constexpr auto Mi = Ki * Ki;
-constexpr auto Gi = Ki * Mi;
+constexpr uint64_t Ki{1024};
+constexpr uint64_t Mi{Ki * Ki};
+constexpr uint64_t Gi{Ki * Mi};
 
 using log_level = spdlog::level::level_enum;
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
