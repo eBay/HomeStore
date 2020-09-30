@@ -1017,14 +1017,12 @@ protected:
                     lba = lba_random(engine);
                     nlbas = nlbas_random(engine);
 
-                    if (m_load_type != load_type_t::sequential) {
-                        // can not support concurrent overlapping writes if whole data need to be verified
-                        std::unique_lock< std::mutex > lk(vinfo->vol_mutex);
-                        // check if someone is already doing writes/reads
-                        if (nlbas && vinfo->m_vol_bm->is_bits_reset(lba, nlbas)) {
-                            vinfo->m_vol_bm->set_bits(lba, nlbas);
-                            break;
-                        }
+                    // can not support concurrent overlapping writes if whole data need to be verified
+                    std::unique_lock< std::mutex > lk{vinfo->vol_mutex};
+                    // check if someone is already doing writes/reads
+                    if (nlbas && vinfo->m_vol_bm->is_bits_reset(lba, nlbas)) {
+                        vinfo->m_vol_bm->set_bits(lba, nlbas);
+                        break;
                     }
                 }
             }
@@ -1124,145 +1122,98 @@ protected:
     }
 
     bool verify(const boost::intrusive_ptr< io_req_t >& req, const bool can_panic = true) const {
-        auto& vol_req = (vol_interface_req_ptr&)req;
+        const auto& vol_req{static_cast< vol_interface_req_ptr >(req)};
 
-        uint64_t tot_size_read{0};
-        uint64_t tot_size_read_csum{0};
+        const auto verify_buffer{[this, &req, &can_panic](const uint8_t* const validate_buffer,
+                                                          const uint8_t* const data_buffer, const uint64_t data_size,
+                                                          const uint64_t total_size_read) {
+            bool error{false};
+            if (tcfg.verify_csum()) {
+                const uint16_t csum1{*reinterpret_cast< const uint16_t* >(validate_buffer)};
+                const uint16_t csum2{crc16_t10dif(init_crc_16, data_buffer, data_size)};
+                error = (csum1 != csum2);
+                if (error) {
+                    LOGINFO("checksum mismatch operation {} volume {} lba {} csum1 {} csum2 {}",
+                            (req->op_type == Op_type::READ ? "read" : "write"), req->cur_vol, req->lba, csum1, csum2);
+                } else {
+                    ++m_voltest->output.csum_match_cnt;
+                }
+            } else if (tcfg.verify_data()) {
+                error = ::memcmp(static_cast< const void* >(data_buffer), static_cast< const void* >(validate_buffer),
+                                 data_size) != 0;
+                if (!error) ++m_voltest->output.data_match_cnt;
+            } else {
+                // we will only verify the header. We write lba number in the header
+                const uint64_t validate_lba{*reinterpret_cast< const uint64_t* >(validate_buffer)};
+                if ((validate_lba == 0) || (validate_lba == *reinterpret_cast< const uint64_t* >(data_buffer))) {
+                    // const auto ret{pwrite(req->fd, data_buffer, data_size, total_size_read + req->original_offset)};
+                    // assert(static_cast<uint64_t>(ret) == data_size);
+                } else {
+                    error = true;
+                }
+                if (!error) ++m_voltest->output.hdr_only_match_cnt;
+            }
+
+            if (error) {
+                if (can_panic) {
+                    if (!tcfg.verify_csum()) {
+                        // verify the data
+                        error = ::memcmp(static_cast< const void* >(data_buffer),
+                                         static_cast< const void* >(validate_buffer), data_size) != 0;
+                        if (error) {
+                            LOGINFO("data mismatch lba read {}", *reinterpret_cast< const uint64_t* >(data_buffer));
+                        }
+                    }
+
+                    LOGINFO("mismatch found lba {} nlbas {} total_size_read {}", req->lba, req->nlbas, total_size_read);
+#ifndef NDEBUG
+                    VolInterface::get_instance()->print_tree(req->vol_info->vol);
+#endif
+                    LOGINFO("lba {} {}", req->lba, req->nlbas);
+                    std::this_thread::sleep_for(std::chrono::seconds(5));
+                    sleep(30);
+                    assert(0);
+                }
+                // need to return false
+                return false;
+            }
+
+            return true;
+        }};
+
+        uint64_t total_size_read{0};
+        uint64_t total_size_read_csum{0};
+        const uint32_t size_read{tcfg.vol_page_size};
         if (tcfg.read_cache) {
             for (auto& info : vol_req->read_buf_list) {
-                auto offset = info.offset;
-                auto size = info.size;
-                auto buf = info.buf;
-                const uint32_t size_read{tcfg.vol_page_size};
+                uint32_t offset{static_cast< uint32_t >(info.offset)};
+                uint64_t size{info.size};
+                const auto buf{info.buf};
                 while (size != 0) {
                     const sisl::blob b{VolInterface::get_instance()->at_offset(buf, offset)};
                     const uint8_t* const validate_buffer{req->validate_buffer +
-                                                         (tcfg.verify_csum() ? tot_size_read_csum : tot_size_read)};
-                    bool j{false};
-                    if (tcfg.verify_csum()) {
-                        const uint16_t csum1{*reinterpret_cast< const uint16_t* >(validate_buffer)};
-                        const uint16_t csum2{crc16_t10dif(init_crc_16, b.bytes, size_read)};
-                        j = (csum1 != csum2);
-                        if (j) {
-                            LOGINFO("checksum mismatch operation {} volume {} lba {} csum1 {} csum2 {}",
-                                    (req->op_type == Op_type::READ ? "read" : "write"), req->cur_vol, req->lba, csum1,
-                                    csum2);
-                        } else {
-                            ++m_voltest->output.csum_match_cnt;
-                        }
-                    } else if (tcfg.verify_data()) {
-                        j = ::memcmp(static_cast< const void* >(b.bytes), static_cast< const void* >(validate_buffer),
-                                     size_read) != 0;
-                        if (!j) ++m_voltest->output.data_match_cnt;
-                    } else {
-                        /* we will only verify the header. We write lba number in the header */
-                        const uint64_t validate_lba{*reinterpret_cast< const uint64_t* >(validate_buffer)};
-                        if ((validate_lba == 0) || (validate_lba == *reinterpret_cast< const uint64_t* >(b.bytes))) {
-                            // copy the data
-                            j = false;
-                            const auto ret{pwrite(req->fd, b.bytes, b.size, tot_size_read + req->original_offset)};
-                            assert(ret == b.size);
-                        }
-                        if (!j) ++m_voltest->output.hdr_only_match_cnt;
-                    }
-
-                    if (j) {
-                        if (can_panic) {
-                            if (!tcfg.verify_csum()) {
-                                // verify the data
-                                j = ::memcmp(static_cast< const void* >(b.bytes),
-                                             static_cast< const void* >(validate_buffer), size_read) != 0;
-                                if (j) {
-                                    LOGINFO("header mismatch lba read {}",
-                                            *reinterpret_cast< const uint64_t* >(b.bytes));
-                                }
-                            }
-
-                            LOGINFO("mismatch found lba {} nlbas {} total_size_read {}", req->lba, req->nlbas,
-                                    tot_size_read);
-#ifndef NDEBUG
-                            VolInterface::get_instance()->print_tree(req->vol_info->vol);
-#endif
-                            LOGINFO("lba {} {}", req->lba, req->nlbas);
-                            std::this_thread::sleep_for(std::chrono::seconds(5));
-                            sleep(30);
-                            assert(0);
-                        }
-                        // need to return false
-                        return false;
-                    }
+                                                         (tcfg.verify_csum() ? total_size_read_csum : total_size_read)};
+                    if (!verify_buffer(validate_buffer, b.bytes, size_read, total_size_read)) return false;
                     size -= size_read;
                     offset += size_read;
-                    tot_size_read += size_read;
-                    tot_size_read_csum += sizeof(uint16_t);
+                    total_size_read += size_read;
+                    total_size_read_csum += sizeof(uint16_t);
                 }
             }
         } else {
-            const uint32_t size_read{tcfg.vol_page_size};
             uint64_t size{static_cast< uint64_t >(req->original_size)};
             while (size != 0) {
-                const uint8_t* const buffer{req->buffer + tot_size_read};
+                const uint8_t* const buffer{req->buffer + total_size_read};
                 const uint8_t* const validate_buffer{req->validate_buffer +
-                                                     (tcfg.verify_csum() ? tot_size_read_csum : tot_size_read)};
-                bool j{false};
-                if (tcfg.verify_csum()) {
-                    const uint16_t csum1{*reinterpret_cast< const uint16_t* >(validate_buffer)};
-                    const uint16_t csum2{crc16_t10dif(init_crc_16, buffer, size_read)};
-                    j = (csum1 != csum2);
-                    if (j) {
-                        LOGINFO("checksum mismatch operation {} volume {} lba {} csum1 {} csum2 {}",
-                                (req->op_type == Op_type::READ ? "read" : "write"), req->cur_vol, req->lba, csum1,
-                                csum2);
-                    } else {
-                        ++m_voltest->output.csum_match_cnt;
-                    }
-                } else if (tcfg.verify_data()) {
-                    j = ::memcmp(static_cast< const void* >(buffer), static_cast< const void* >(validate_buffer),
-                                 size_read) != 0;
-                    if (!j) ++m_voltest->output.data_match_cnt;
-                } else {
-                    // we will only verify the header. We write lba number in the header
-                    const uint64_t validate_lba{*reinterpret_cast< const uint64_t* >(validate_buffer)};
-                    if ((validate_lba == 0) || (validate_lba == *reinterpret_cast< const uint64_t* >(buffer))) {
-                        // copy the data
-                        j = false;
-                        const auto ret{pwrite(req->fd, buffer, req->original_size - tot_size_read,
-                                              tot_size_read + req->original_offset)};
-                        assert(static_cast< uint64_t >(ret) == req->original_size - tot_size_read);
-                    }
-                    if (!j) ++m_voltest->output.hdr_only_match_cnt;
-                }
-
-                if (j) {
-                    if (can_panic) {
-                        if (!tcfg.verify_csum()) {
-                            // verify the data
-                            j = ::memcmp(static_cast< const void* >(buffer),
-                                         static_cast< const void* >(validate_buffer), size_read) != 0;
-                            if (j) {
-                                LOGINFO("data mismatch lba read {}", *reinterpret_cast< const uint64_t* >(buffer));
-                            }
-                        }
-
-                        LOGINFO("mismatch found lba {} nlbas {} total_size_read {}", req->lba, req->nlbas,
-                                tot_size_read);
-#ifndef NDEBUG
-                        VolInterface::get_instance()->print_tree(req->vol_info->vol);
-#endif
-                        std::this_thread::sleep_for(std::chrono::seconds(5));
-                        sleep(30);
-                        assert(0);
-                    }
-                    // need to return false
-                    return false;
-                }
+                                                     (tcfg.verify_csum() ? total_size_read_csum : total_size_read)};
+                if (!verify_buffer(validate_buffer, buffer, size_read, total_size_read)) return false;
                 size -= size_read;
-                tot_size_read += size_read;
-                tot_size_read_csum += sizeof(uint16_t);
+                total_size_read += size_read;
+                total_size_read_csum += sizeof(uint16_t);
             }
         }
-        tcfg.verify_csum() ? assert(tot_size_read_csum == req->verify_size)
-                           : assert(tot_size_read == req->original_size);
+        tcfg.verify_csum() ? assert(total_size_read_csum == req->verify_size)
+                           : assert(total_size_read == req->original_size);
         return true;
     }
 };
