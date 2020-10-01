@@ -10,6 +10,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -152,7 +153,7 @@ public:
     BlkAllocPortion& operator=(const BlkAllocPortion&) = delete;
     BlkAllocPortion& operator=(BlkAllocPortion&&) noexcept = delete;
 
-    auto auto_lock() { return std::scoped_lock<std::mutex>(m_blk_lock); }
+    auto portion_auto_lock() { return std::scoped_lock<std::mutex>(m_blk_lock); }
 };
 
 /* We have the following design requirement it is used in auto recovery mode
@@ -251,7 +252,7 @@ public:
         if (!m_auto_recovery && m_inited) { return BLK_ALLOC_FAILED; }
         BlkAllocPortion* portion = blknum_to_portion(in_bid.get_id());
         {
-            auto lock{portion->auto_lock()};
+            auto lock{portion->portion_auto_lock()};
             if (m_inited) {
                 BLKALLOC_ASSERT(RELEASE, get_disk_bm()->is_bits_reset(in_bid.get_id(), in_bid.get_nblks()),
                                 "Expected disk blks to reset");
@@ -266,7 +267,7 @@ public:
         assert(m_auto_recovery);
         BlkAllocPortion* portion = blknum_to_portion(b.get_id());
         {
-            auto lock{portion->auto_lock()};
+            auto lock{portion->portion_auto_lock()};
             if (m_inited) {
                 /* During recovery we might try to free the entry which is already freed while replaying the journal,
                  * This assert is valid only post recovery.
