@@ -1,4 +1,4 @@
-
+﻿
 //
 // Created by Kadayam, Hari on 06/11/17.
 //
@@ -70,10 +70,7 @@ void Volume::set_io_flip() {
 #endif
 
 Volume::Volume(const vol_params& params) :
-        m_params(params),
-        m_metrics(params.vol_name),
-        m_comp_cb(params.io_comp_cb),
-        m_indx_mgr_destroy_started(false) {
+        m_params(params), m_metrics(params.vol_name), m_comp_cb(params.io_comp_cb), m_indx_mgr_destroy_started(false) {
 
     /* this counter is decremented later when this volume become part of a cp. until then shutdown is
      * not allowed.
@@ -261,7 +258,7 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
                     vc_req->bid, mem_vec, data_offset, boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vc_req),
                     vreq->use_cache());
 
-                // update checksum which must be done in page size increments to match read
+                // update checksums which must be done in page size increments
                 sisl::blob outb{};
                 uint64_t checksum_offset{data_offset};
                 for (uint32_t count{0}; count < nlbas; ++count, checksum_offset += get_page_size()) {
@@ -276,10 +273,26 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
                 m_hb->get_data_blkstore()->write(vc_req->bid, write_iovecs,
                                                  boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vc_req));
 
-                // update checksum
-                for (const auto& iovec : write_iovecs) {
-                    vreq->push_csum(
-                        crc16_t10dif(init_crc_16, static_cast< unsigned char* >(iovec.iov_base), iovec.iov_len));
+                // update checksums which must be done in page size increments
+                auto iovec_itr{std::cbegin(write_iovecs)};
+                const uint8_t* buffer{static_cast< uint8_t* >(iovec_itr->iov_base)};
+                size_t iovec_remaining{iovec_itr->iov_len};
+                for (uint32_t count{0}; count < nlbas; ++count) {
+                    auto csum{init_crc_16};
+                    uint32_t csum_remaining{static_cast< uint32_t >(get_page_size())};
+                    while (csum_remaining > 0) {
+                        if (iovec_remaining == 0) {
+                            ++iovec_itr;
+                            buffer = static_cast< uint8_t* >(iovec_itr->iov_base);
+                            iovec_remaining = iovec_itr->iov_len;
+                        }
+                        const uint32_t len{std::min< uint32_t >(iovec_remaining, csum_remaining)};
+                        csum = crc16_t10dif(csum, buffer, len);
+                        csum_remaining -= len;
+                        iovec_remaining -= len;
+                        buffer += len;
+                    }
+                    vreq->push_csum(csum);
                 }
             }
 
