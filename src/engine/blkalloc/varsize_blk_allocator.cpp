@@ -185,7 +185,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& 
     auto split_cnt = homestore_flip->get_test_flip< int >("blkalloc_split_blk");
     if (!hints.is_contiguous && split_cnt && nblks > split_cnt.get()) {
         blks_rqstd = sisl::round_up((nblks / split_cnt.get()), hints.multiplier);
-        BLKALLOC_LOG(TRACE, varsize_blk_alloc, "blocks requested={}, nblks={}, split_cnt={}", blks_rqstd, nblks,
+        BLKALLOC_LOG(DEBUG, varsize_blk_alloc, "blocks requested={}, nblks={}, split_cnt={}", blks_rqstd, nblks,
                      split_cnt.get());
     }
 #endif
