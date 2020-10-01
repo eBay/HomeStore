@@ -2,8 +2,10 @@
 #include "homestore.hpp"
 #include "meta_blks_mgr.hpp"
 #include "blkstore/blkstore.hpp"
+#include "engine/blkalloc/blk_allocator.h"
 
 SDS_LOGGING_DECL(metablk)
+
 namespace homestore {
 
 void MetaBlkMgr::start(blk_store_t* sb_blk_store, const sb_blkstore_blob* blob, const bool is_init) {
@@ -719,11 +721,11 @@ std::error_condition MetaBlkMgr::alloc_meta_blk(const uint64_t nblks, std::vecto
 
     try {
         auto ret = m_sb_blk_store->alloc_blk(nblks * META_BLK_PAGE_SZ, hints, bid);
-        if (ret != BLK_ALLOC_SUCCESS) {
+        if (ret != BlkAllocStatus::BLK_ALLOC_SUCCESS) {
             HS_LOG(ERROR, metablk, "failing as it is out of disk space!");
             return std::errc::no_space_on_device;
         }
-        HS_DEBUG_ASSERT_EQ(ret, BLK_ALLOC_SUCCESS);
+        HS_DEBUG_ASSERT_EQ(ret, BlkAllocStatus::BLK_ALLOC_SUCCESS);
     } catch (const std::exception& e) {
         HS_ASSERT(RELEASE, 0, "{}", e.what());
         return std::errc::device_or_resource_busy;
@@ -739,7 +741,7 @@ std::error_condition MetaBlkMgr::alloc_meta_blk(BlkId& bid, uint32_t nblks) {
     hints.is_contiguous = true;
     try {
         auto ret = m_sb_blk_store->alloc_contiguous_blk(nblks * META_BLK_PAGE_SZ, hints, &bid);
-        if (ret != BLK_ALLOC_SUCCESS) {
+        if (ret != BlkAllocStatus::BLK_ALLOC_SUCCESS) {
             HS_LOG(ERROR, metablk, "failing as it is out of disk space!");
             return std::errc::no_space_on_device;
         }

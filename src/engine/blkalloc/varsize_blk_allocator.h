@@ -1,20 +1,23 @@
-//
+﻿//
 // Created by Kadayam, Hari on 14/10/17.
 //
 #pragma once
 
-#include "blk_allocator.h"
-#include <boost/heap/binomial_heap.hpp>
+#include <atomic>
 #include <condition_variable>
 #include <vector>
-#include <atomic>
-#include <flip/flip.hpp>
-#include <sds_logging/logging.h>
+
+#include <boost/heap/binomial_heap.hpp>
 #include <boost/preprocessor/cat.hpp>
 #include <boost/preprocessor/control/if.hpp>
 #include <boost/preprocessor/stringize.hpp>
+#include <flip/flip.hpp>
 #include <metrics/metrics.hpp>
+#include <sds_logging/logging.h>
+
 #include "engine/common/homestore_assert.hpp"
+
+#include "blk_allocator.h"
 
 using namespace homeds::btree;
 
@@ -58,32 +61,46 @@ public:
       \param n_blks as uint64 argument signifies number of blocks
       \param name as std::string argument signifies name of block allocator
     */
-    VarsizeBlkAllocConfig(uint64_t blk_size, uint64_t n_blks, const std::string& name) :
+    VarsizeBlkAllocConfig(const uint64_t blk_size, const uint64_t n_blks, const std::string& name) :
             BlkAllocConfig(blk_size, n_blks, name),
             m_nsegments(1),
             m_blks_per_temp_group(n_blks),
             m_max_cache_blks(0) {}
+
+    VarsizeBlkAllocConfig(const VarsizeBlkAllocConfig& other) :
+            BlkAllocConfig{other},
+            m_phys_page_size{other.m_phys_page_size},
+            m_nsegments{other.m_nsegments},
+            m_blks_per_temp_group{other.m_blks_per_temp_group},
+            m_max_cache_blks{other.m_max_cache_blks},
+            m_slab_nblks{other.m_slab_nblks},
+            m_slab_capacity{other.m_slab_capacity} {}
+
+    VarsizeBlkAllocConfig(VarsizeBlkAllocConfig&&) noexcept = delete;
+    VarsizeBlkAllocConfig& operator=(const VarsizeBlkAllocConfig&) = delete;
+    VarsizeBlkAllocConfig& operator=(VarsizeBlkAllocConfig&&) noexcept = delete;
+    virtual ~VarsizeBlkAllocConfig() override = default;
 
     //! Set Physical Page Size
     /*!
       \param page_size an uint32 argument
       \return void
     */
-    void set_phys_page_size(uint32_t page_size) { m_phys_page_size = page_size; }
+    void set_phys_page_size(const uint32_t page_size) { m_phys_page_size = page_size; }
 
     //! Set Total Segments
     /*!
       \param nsegments an uint32 argument signifies number of segments
       \return void
     */
-    void set_total_segments(uint32_t nsegments) { m_nsegments = nsegments; }
+    void set_total_segments(const uint32_t nsegments) { m_nsegments = nsegments; }
 
     //! Set Max Cache Blocks
     /*!
       \param ncache_entries an uint32 argument signifies max blocks in cache
       \return void
     */
-    void set_max_cache_blks(uint64_t ncache_entries) { m_max_cache_blks = ncache_entries; }
+    void set_max_cache_blks(const uint64_t ncache_entries) { m_max_cache_blks = ncache_entries; }
 
     //! Set Block Count per Slab
     /*!
@@ -91,7 +108,7 @@ public:
       \param weights a float vector argument signifies weights for all slabs
       \return void
     */
-    void set_slab(std::vector< uint32_t > nblks, std::vector< float > weights) {
+    void set_slab(std::vector< uint32_t >& nblks, const std::vector< float >& weights) {
         assert(nblks.size() + 1 == weights.size());
         m_slab_nblks.swap(nblks);
         for (auto i = 0U; i < weights.size(); i++) {
@@ -104,43 +121,43 @@ public:
       \param npgs_per_temp_group an uint64 argument signifies number of pages per temp group
       \return void
     */
-    void set_blks_per_temp_group(uint64_t npgs_per_temp_group) { m_blks_per_temp_group = npgs_per_temp_group; }
+    void set_blks_per_temp_group(const uint64_t npgs_per_temp_group) { m_blks_per_temp_group = npgs_per_temp_group; }
 
     //! Get Physical Page Size
     /*!
       \return physical page size as uint32
     */
-    uint32_t get_phys_page_size() const { return m_phys_page_size; }
+    [[nodiscard]] uint32_t get_phys_page_size() const { return m_phys_page_size; }
 
     //! Get Total Segments
     /*!
       \return number of segments as uint32
     */
-    uint32_t get_total_segments() const { return m_nsegments; }
+    [[nodiscard]] uint32_t get_total_segments() const { return m_nsegments; }
 
     //! Get Blocks per Segment
     /*!
       \return blocks per segment as uint64
     */
-    uint64_t get_blks_per_segment() const { return (uint64_t)(get_total_blks() / get_total_segments()); }
+    [[nodiscard]] uint64_t get_blks_per_segment() const { return (uint64_t)(get_total_blks() / get_total_segments()); }
 
     //! Get Max Cache Blocks
     /*!
       \return max cache blocks as uint64
     */
-    uint64_t get_max_cache_blks() const { return m_max_cache_blks; }
+    [[nodiscard]] uint64_t get_max_cache_blks() const { return m_max_cache_blks; }
 
     //! Get Blocks per Temp Group
     /*!
       \return blocks per temp group as uint64
     */
-    uint64_t get_blks_per_temp_group() const { return m_blks_per_temp_group; }
+    [[nodiscard]] uint64_t get_blks_per_temp_group() const { return m_blks_per_temp_group; }
 
     //! Get Blocks per Physical Page
     /*!
       \return blocks per physical page as uint32
     */
-    uint32_t get_blks_per_phys_page() const {
+    [[nodiscard]] uint32_t get_blks_per_phys_page() const {
         uint32_t nblks = get_phys_page_size() / get_blk_size();
         assert(get_blks_per_portion() % nblks == 0);
         return nblks;
@@ -150,7 +167,7 @@ public:
     /*!
       \return temp group count as uint32
     */
-    uint32_t get_total_temp_group() const {
+    [[nodiscard]] uint32_t get_total_temp_group() const {
         if (get_total_blks() % get_blks_per_temp_group() == 0) {
             return (uint32_t)(get_total_blks() / get_blks_per_temp_group());
         } else {
@@ -162,20 +179,20 @@ public:
     /*!
       \return slab count as uint32
     */
-    uint32_t get_slab_cnt() const { return m_slab_capacity.size(); }
+    [[nodiscard]] uint32_t get_slab_cnt() const { return m_slab_capacity.size(); }
 
     //! Get Slab Capacity
     /*!
       \return slab capacity as uint32
     */
-    uint32_t get_slab_capacity(uint32_t index) const { return m_slab_capacity[index]; }
+    [[nodiscard]] uint32_t get_slab_capacity(const uint32_t index) const { return m_slab_capacity[index]; }
 
     //! Get slab
     /*!
       \param nblks an uint32 argument signifies number of blocks
       \return slab index and capacity as a std::pair of uint32s
     */
-    std::pair< uint32_t, uint32_t > get_slab(uint32_t nblks) const {
+    [[nodiscard]] std::pair< uint32_t, uint32_t > get_slab(const uint32_t nblks) const {
         uint32_t i = m_slab_nblks.size();
         for (; i > 0 && nblks < m_slab_nblks[i - 1]; i--)
             ;
@@ -187,17 +204,17 @@ public:
       \param indx an uint32 argument signifies slab index
       \return lower bound of slab pointed by indx as uint32
     */
-    uint32_t get_slab_lower_bound(uint32_t indx) const {
+    [[nodiscard]] uint32_t get_slab_lower_bound(const uint32_t indx) const {
         /* m_slab_nblks[i] has the blocks from m_slab_nblks[i - 1] to m_slab_nblks[i] */
         return (m_slab_nblks[indx - 1]);
     }
 
-    std::string to_string() {
-        std::stringstream ss;
-        ss << BlkAllocConfig::to_string() << " Pagesize=" << get_phys_page_size()
-           << " Totalsegments=" << get_total_segments() << " BlksPerPortion=" << get_blks_per_portion()
-           << " MaxCacheBlks=" << get_max_cache_blks();
-        return ss.str();
+    [[nodiscard]] std::string to_string() const {
+        std::stringstream oSS{};
+        oSS << BlkAllocConfig::to_string() << " Pagesize=" << get_phys_page_size()
+            << " Totalsegments=" << get_total_segments() << " BlksPerPortion=" << get_blks_per_portion()
+            << " MaxCacheBlks=" << get_max_cache_blks();
+        return oSS.str();
     }
 };
 
@@ -210,6 +227,10 @@ public:
         register_me_to_farm();
     }
 
+    SegmentMetrics(const SegmentMetrics&) = delete;
+    SegmentMetrics(SegmentMetrics&&) noexcept = delete;
+    SegmentMetrics& operator=(const SegmentMetrics&) = delete;
+    SegmentMetrics& operator=(SegmentMetrics&&) noexcept = delete;
     ~SegmentMetrics() { deregister_me_from_farm(); }
 };
 
@@ -217,7 +238,7 @@ class BlkAllocSegment {
 public:
     class CompareSegAvail {
     public:
-        bool operator()(BlkAllocSegment* seg1, BlkAllocSegment* seg2) const {
+        bool operator()(const BlkAllocSegment* const seg1, const BlkAllocSegment* const seg2) const {
             return (seg1->get_free_blks() < seg2->get_free_blks());
         }
     };
@@ -235,43 +256,49 @@ private:
     SegmentMetrics m_metrics;
 
 public:
-    BlkAllocSegment(uint64_t nblks, uint32_t seg_num, uint64_t nportions, std::string seg_name) :
-            m_total_portions(nportions),
-            m_metrics(seg_name.c_str()) {
+    BlkAllocSegment(const uint64_t nblks, const uint32_t seg_num, const uint64_t nportions,
+                    const std::string& seg_name) :
+            m_total_portions(nportions), m_metrics(seg_name.c_str()) {
         set_total_blks(nblks);
         add_free_blks(nblks);
         set_seg_num(seg_num);
         set_clock_hand(0);
     }
 
+    BlkAllocSegment(const BlkAllocSegment&) = delete;
+    BlkAllocSegment(BlkAllocSegment&&) noexcept = delete;
+    BlkAllocSegment& operator=(const BlkAllocSegment&) = delete;
+    BlkAllocSegment& operator=(BlkAllocSegment&&) noexcept = delete;
     virtual ~BlkAllocSegment() {}
 
-    uint64_t get_clock_hand() const { return m_alloc_clock_hand % m_total_portions; }
+    [[nodiscard]] uint64_t get_clock_hand() const { return m_alloc_clock_hand % m_total_portions; }
 
     void set_clock_hand(uint64_t hand) { m_alloc_clock_hand = hand; }
 
     void inc_clock_hand() { ++m_alloc_clock_hand; }
 
-    bool operator<(BlkAllocSegment& other_seg) const { return (this->get_free_blks() < other_seg.get_free_blks()); }
+    bool operator<(const BlkAllocSegment& other_seg) const {
+        return (this->get_free_blks() < other_seg.get_free_blks());
+    }
 
-    void add_free_blks(uint64_t nblks) { m_free_blks.fetch_add(nblks, std::memory_order_acq_rel); }
+    void add_free_blks(const uint64_t nblks) { m_free_blks.fetch_add(nblks, std::memory_order_acq_rel); }
 
-    void remove_free_blks(uint64_t nblks) {
+    void remove_free_blks(const uint64_t nblks) {
         if (get_free_blks() < nblks) return;
         m_free_blks.fetch_sub(nblks, std::memory_order_acq_rel);
     }
 
-    uint64_t get_free_blks() const { return m_free_blks.load(std::memory_order_acq_rel); }
+    [[nodiscard]] uint64_t get_free_blks() const { return m_free_blks.load(std::memory_order_acq_rel); }
 
-    void set_total_blks(uint64_t a) { m_total_blks = a; }
+    void set_total_blks(const uint64_t a) { m_total_blks = a; }
 
-    uint64_t get_total_blks() const { return m_total_blks; }
+    [[nodiscard]] uint64_t get_total_blks() const { return m_total_blks; }
 
-    void set_seg_num(uint32_t n) { m_seg_num = n; }
+    void set_seg_num(const uint32_t n) { m_seg_num = n; }
 
-    uint32_t get_seg_num() const { return m_seg_num; }
+    [[nodiscard]] uint32_t get_seg_num() const { return m_seg_num; }
 
-    void reportFragmentation(uint64_t nadded_blks, uint64_t nfragments) {
+    void reportFragmentation(const uint64_t nadded_blks, const uint64_t nfragments) {
         float frag_ratio = (static_cast< float >(nfragments)) / nadded_blks;
         uint32_t scaled_frag_factor = static_cast< uint32_t >(frag_ratio * 64);
         HISTOGRAM_OBSERVE(m_metrics, frag_pct_distribution, scaled_frag_factor);
@@ -280,7 +307,7 @@ public:
 
 class BlkAllocTemperatureGroup {
 private:
-    uint8_t m_temperature; // Temperature of the group.
+    uint8_t m_temperature{0}; // Temperature of the group.
 
 public:
 #ifndef NDEBUG
@@ -288,9 +315,15 @@ public:
 #endif
 
 public:
-    void set_temperature(uint8_t t) { m_temperature = t; }
+    BlkAllocTemperatureGroup() = default;
+    BlkAllocTemperatureGroup(const BlkAllocTemperatureGroup&) = delete;
+    BlkAllocTemperatureGroup(BlkAllocTemperatureGroup&&) noexcept = delete;
+    BlkAllocTemperatureGroup& operator=(const BlkAllocTemperatureGroup&) = delete;
+    BlkAllocTemperatureGroup& operator=(BlkAllocTemperatureGroup&&) noexcept = delete;
 
-    uint8_t get_temperature() const { return m_temperature; }
+    void set_temperature(const uint8_t t) { m_temperature = t; }
+
+    [[nodiscard]] uint8_t get_temperature() const { return m_temperature; }
 } __attribute__((packed));
 
 class VarsizeAllocCacheEntry : public BtreeKey {
@@ -323,32 +356,36 @@ public:
     }
 
     explicit VarsizeAllocCacheEntry(const VarsizeAllocCacheEntry& other) { copy_blob(other.get_blob()); }
-
     VarsizeAllocCacheEntry& operator=(const VarsizeAllocCacheEntry& other) {
         copy_blob(other.get_blob());
         return *this;
     }
 
-    void set_blk_num(uint64_t blknum) { m_blob->m_blk_num = blknum; }
+    VarsizeAllocCacheEntry(VarsizeAllocCacheEntry&&) noexcept = delete;
+    VarsizeAllocCacheEntry& operator=(VarsizeAllocCacheEntry&&) noexcept = delete;
 
-    void set_blk_count(uint32_t blkcount) { m_blob->m_nblks = blkcount; }
+    virtual ~VarsizeAllocCacheEntry() override = default;
 
-    void set_temperature(uint32_t temp) { m_blob->m_temp = temp; }
+    void set_blk_num(const uint64_t blknum) { m_blob->m_blk_num = blknum; }
 
-    void set_phys_page_id(uint64_t page_id) { m_blob->m_phys_page_id = page_id; }
+    void set_blk_count(const uint32_t blkcount) { m_blob->m_nblks = blkcount; }
 
-    uint64_t get_blk_num() const { return (m_blob->m_blk_num); }
+    void set_temperature(const uint32_t temp) { m_blob->m_temp = temp; }
 
-    uint32_t get_blk_count() const { return (uint32_t)(m_blob->m_nblks); }
+    void set_phys_page_id(const uint64_t page_id) { m_blob->m_phys_page_id = page_id; }
 
-    uint32_t get_temperature() const { return (uint32_t)(m_blob->m_temp); }
+    [[nodiscard]] uint64_t get_blk_num() const { return (m_blob->m_blk_num); }
 
-    uint64_t get_phys_page_id() const { return (uint32_t)(m_blob->m_phys_page_id); }
+    [[nodiscard]] uint32_t get_blk_count() const { return (uint32_t)(m_blob->m_nblks); }
 
-    int compare(const BtreeKey* o) const override;
-    int compare_range(const BtreeSearchRange& range) const override;
+    [[nodiscard]] uint32_t get_temperature() const { return (uint32_t)(m_blob->m_temp); }
 
-    sisl::blob get_blob() const override {
+    [[nodiscard]] uint64_t get_phys_page_id() const { return (uint32_t)(m_blob->m_phys_page_id); }
+
+    [[nodiscard]] int compare(const BtreeKey* const o) const override;
+    [[nodiscard]] int compare_range(const BtreeSearchRange& range) const override;
+
+    [[nodiscard]] sisl::blob get_blob() const override {
         sisl::blob b;
         b.bytes = (uint8_t*)m_blob;
         b.size = sizeof(blob_t);
@@ -366,28 +403,29 @@ public:
         m_blob = &m_in_place_blob;
     }
 
-    uint32_t get_blob_size() const override { return (sizeof(blob_t)); }
+    [[nodiscard]] uint32_t get_blob_size() const override { return (sizeof(blob_t)); }
 
-    static uint32_t get_fixed_size() { return (sizeof(blob_t)); }
+    [[nodiscard]] static uint32_t get_fixed_size() { return (sizeof(blob_t)); }
 
-    void set_blob_size(uint32_t size) override {}
+    void set_blob_size(const uint32_t size) override {}
 
-    void print() {
+    void print() const {
         cout << "free blk count: " << get_blk_count() << " temp: " << get_temperature() << " blknum: " << get_blk_num();
     }
 
-    std::string to_string() const {
-        std::stringstream ss;
-        ss << "free blk count: " << get_blk_count() << " temp: " << get_temperature() << " blknum: " << get_blk_num();
-        return ss.str();
+    [[nodiscard]] std::string to_string() const {
+        std::stringstream oSS{};
+        oSS << "free blk count: " << get_blk_count() << " temp: " << get_temperature() << " blknum: " << get_blk_num();
+        return oSS.str();
     }
 
 private:
-    int is_in_range(uint64_t val, uint64_t start, bool start_incl, uint64_t end, bool end_incl) const;
+    [[nodiscard]] int is_in_range(const uint64_t val, const uint64_t start, const bool start_incl, const uint64_t end,
+                                  const bool end_incl) const;
 
 #if 0
-    int compare_range(const VarsizeAllocCacheEntry *start, bool start_incl, const VarsizeAllocCacheEntry *end,
-                      bool end_incl) const;
+    [[nodiscard]]int compare_range(const VarsizeAllocCacheEntry *start, const bool start_incl, const VarsizeAllocCacheEntry *end,
+                      const bool end_incl) const;
 #endif
 };
 
@@ -425,6 +463,10 @@ public:
         register_me_to_farm();
     }
 
+    BlkAllocMetrics(const BlkAllocMetrics&) = delete;
+    BlkAllocMetrics(BlkAllocMetrics&&) noexcept = delete;
+    BlkAllocMetrics& operator=(const BlkAllocMetrics&) = delete;
+    BlkAllocMetrics& operator=(BlkAllocMetrics&&) noexcept = delete;
     ~BlkAllocMetrics() { deregister_me_from_farm(); }
 };
 
@@ -480,18 +522,23 @@ class VarsizeBlkAllocator : public BlkAllocator {
     uint32_t m_last_indx = 0;
 
 public:
-    VarsizeBlkAllocator(VarsizeBlkAllocConfig& cfg, bool init, uint32_t id);
-    virtual ~VarsizeBlkAllocator();
+    VarsizeBlkAllocator(const VarsizeBlkAllocConfig& cfg, const bool init, const uint32_t id);
+    VarsizeBlkAllocator(const VarsizeBlkAllocator&) = delete;
+    VarsizeBlkAllocator(VarsizeBlkAllocator&&) noexcept = delete;
+    VarsizeBlkAllocator& operator=(const VarsizeBlkAllocator&) = delete;
+    VarsizeBlkAllocator& operator=(VarsizeBlkAllocator&&) noexcept = delete;
+    virtual ~VarsizeBlkAllocator() override;
 
-    BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints& hints, BlkId* out_blkid, bool best_fit = false) override;
-    BlkAllocStatus alloc(uint8_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) override;
+    BlkAllocStatus alloc(const uint8_t nblks, const blk_alloc_hints& hints, BlkId* const out_blkid,
+                         const bool best_fit = false) override;
+    BlkAllocStatus alloc(const uint8_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) override;
     void free(const BlkId& b) override;
 
-    std::string to_string() const override;
+    [[nodiscard]] std::string to_string() const override;
     void allocator_state_machine();
 
     virtual void inited() override;
-    virtual bool is_blk_alloced(BlkId& in_bid);
+    [[nodiscard]] virtual bool is_blk_alloced(const BlkId& in_bid) const;
 
 private:
     VarsizeBlkAllocConfig m_cfg;  // Config for Varsize
@@ -518,66 +565,76 @@ private:
 
 private:
     const VarsizeBlkAllocConfig& get_config() const override { return (VarsizeBlkAllocConfig&)m_cfg; }
-    uint64_t get_portions_per_segment();
+    [[nodiscard]] uint64_t get_portions_per_segment();
 
     // Thread related functions
     std::string state_string(BlkAllocatorState state) const;
 
     // Sweep and cache related functions
-    void request_more_blks(BlkAllocSegment* seg, int slab_indx);
-    void request_more_blks_wait(BlkAllocSegment* seg, int slab_indx);
-    void fill_cache(BlkAllocSegment* seg, int slab_indx);
-    uint64_t fill_cache_in_portion(uint64_t portion_num, BlkAllocSegment* seg);
+    void request_more_blks(BlkAllocSegment* const seg, const int slab_indx);
+    void request_more_blks_wait(BlkAllocSegment* const seg, const int slab_indx);
+    void fill_cache(BlkAllocSegment** const pSeg, const int slab_indx);
+    [[nodiscard]] uint64_t fill_cache_in_portion(const uint64_t portion_num, BlkAllocSegment* const seg);
 
     // Convenience routines
-    uint64_t blknum_to_phys_pageid(uint64_t blknum) const { return blknum / get_config().get_blks_per_phys_page(); }
+    [[nodiscard]] uint64_t blknum_to_phys_pageid(const uint64_t blknum) const {
+        return blknum / get_config().get_blks_per_phys_page();
+    }
 
-    uint32_t offset_within_phys_page(uint64_t blknum) const { return blknum % get_config().get_blks_per_phys_page(); }
+    [[nodiscard]] uint32_t offset_within_phys_page(const uint64_t blknum) const {
+        return blknum % get_config().get_blks_per_phys_page();
+    }
 
-    uint64_t blknum_to_segment_num(uint64_t blknum) const {
+    [[nodiscard]] uint64_t blknum_to_segment_num(const uint64_t blknum) const {
         auto seg_num = blknum / get_config().get_blks_per_segment();
         assert(seg_num < m_cfg.get_total_segments());
         return seg_num;
     }
 
-    BlkAllocSegment* blknum_to_segment(uint64_t blknum) const { return m_segments[blknum_to_segment_num(blknum)]; }
+    [[nodiscard]] BlkAllocSegment* blknum_to_segment(const uint64_t blknum) const {
+        return m_segments[blknum_to_segment_num(blknum)];
+    }
 
-    uint32_t blknum_to_tempgroup_num(uint64_t blknum) const {
+    [[nodiscard]] uint32_t blknum_to_tempgroup_num(const uint64_t blknum) const {
         return ((uint32_t)blknum / get_config().get_blks_per_temp_group());
     }
 
-    const BlkAllocTemperatureGroup* blknum_to_tempgroup_const(uint64_t blknum) const {
+    [[nodiscard]] const BlkAllocTemperatureGroup* blknum_to_tempgroup_const(const uint64_t blknum) const {
         return &m_temp_groups[blknum_to_tempgroup_num(blknum)];
     }
 
-    BlkAllocTemperatureGroup* blknum_to_tempgroup(uint64_t blknum) {
+    [[nodiscard]] BlkAllocTemperatureGroup* blknum_to_tempgroup(const uint64_t blknum) {
         return &m_temp_groups[blknum_to_tempgroup_num(blknum)];
     }
 
-    uint8_t get_blk_temperature(uint64_t blknum) const { return blknum_to_tempgroup_const(blknum)->get_temperature(); }
+    [[nodiscard]] uint8_t get_blk_temperature(const uint64_t blknum) const {
+        return blknum_to_tempgroup_const(blknum)->get_temperature();
+    }
 
-    void set_blk_temperature(uint64_t blknum, uint8_t t) { blknum_to_tempgroup(blknum)->set_temperature(t); }
+    void set_blk_temperature(const uint64_t blknum, const uint8_t t) {
+        blknum_to_tempgroup(blknum)->set_temperature(t);
+    }
 
     // This method generates a cache entry based on given blknumber and count.
-    void gen_cache_entry(uint64_t blknum, uint32_t blk_count, VarsizeAllocCacheEntry* out_entry) {
+    void gen_cache_entry(const uint64_t blknum, const uint32_t blk_count, VarsizeAllocCacheEntry* const out_entry) {
         out_entry->set_blk_num(blknum);
         out_entry->set_blk_count(blk_count);
         out_entry->set_phys_page_id(blknum_to_phys_pageid(blknum));
         out_entry->set_temperature(get_blk_temperature(blknum));
     }
-    uint64_t get_best_fit_cache(uint64_t blks_rqstd);
-    void incr_counter(unsigned int index, unsigned int val);
-    void decr_counter(unsigned int index, unsigned int val);
+    [[nodiscard]] uint64_t get_best_fit_cache(const uint64_t blks_rqstd) const;
+    void incr_counter(const unsigned int index, const unsigned int val);
+    void decr_counter(const unsigned int index, const unsigned int val);
 };
 
-#define BLKID_RANGE_FIRST 0UL
-#define PAGEID_RANGE_FIRST 0UL
-#define BLKCOUNT_RANGE_FIRST 0U
-#define TEMP_RANGE_FIRST 0U
+constexpr uint64_t BLKID_RANGE_FIRST{std::numeric_limits< uint64_t >::min()};
+constexpr uint32_t PAGEID_RANGE_FIRST{std::numeric_limits< uint32_t >::min()};
+constexpr uint32_t BLKCOUNT_RANGE_FIRST{std::numeric_limits< uint32_t >::min()};
+constexpr uint32_t TEMP_RANGE_FIRST{std::numeric_limits< uint32_t >::min()};
 
-#define BLKID_RANGE_LAST (uint64_t) - 1
-#define PAGEID_RANGE_LAST (uint32_t) - 1
-#define BLKCOUNT_RANGE_LAST (uint32_t) - 1
-#define TEMP_RANGE_LAST (uint32_t) - 1
+constexpr uint64_t BLKID_RANGE_LAST{std::numeric_limits< uint64_t >::max()};
+constexpr uint32_t PAGEID_RANGE_LAST{std::numeric_limits< uint32_t >::max()};
+constexpr uint32_t BLKCOUNT_RANGE_LAST{std::numeric_limits< uint32_t >::max()};
+constexpr uint32_t TEMP_RANGE_LAST{std::numeric_limits< uint32_t >::max()};
 
 } // namespace homestore

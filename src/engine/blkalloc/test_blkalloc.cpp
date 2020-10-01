@@ -1,11 +1,16 @@
 //#include "BitMap.h"
+
 #include <iostream>
+#include <random>
+#include <thread>
+
 #include <unistd.h>
-#include <gtest/gtest.h>
+
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
-#include <thread>
-#include <random>
+
+#include <gtest/gtest.h>
+
 #include "blk_allocator.h"
 #include "varsize_blk_allocator.h"
 
@@ -29,7 +34,7 @@ void allocate_blocks(BlkAllocator* allocator) {
             hints.desired_temp = 0;
             BlkAllocStatus ret = allocator->alloc(1, hints, &blks[i]);
 
-            if (ret == BLK_ALLOC_SUCCESS) {
+            if (ret == BlkAllocStatus::BLK_ALLOC_SUCCESS) {
                 fprintf(stderr, "Allocated block num = %lu size = %d chunk_num = %d\n", blks[i].get_id(),
                         blks[i].get_nblks(), blks[i].get_chunk_num());
             } else {
@@ -60,7 +65,14 @@ public:
         m_fixed_allocator = new FixedBlkAllocator(fixed_cfg, true);
     }
 
-    ~FixedBlkAllocatorTest() { delete (m_fixed_allocator); }
+    FixedBlkAllocatorTest(const FixedBlkAllocatorTest&) = default;
+    FixedBlkAllocatorTest(FixedBlkAllocatorTest&&) noexcept = delete;
+    FixedBlkAllocatorTest& operator=(const FixedBlkAllocatorTest&) = default;
+    FixedBlkAllocatorTest& operator=(FixedBlkAllocatorTest&&) noexcept = delete;
+    virtual ~BlkAllocConfig() override = default;
+
+    virtual ~FixedBlkAllocatorTest() { delete (m_fixed_allocator); }
+
     uint32_t max_blks() const { return m_total_space / m_blk_size; }
 
     static void alloc_fixed_blocks(FixedBlkAllocatorTest* test, std::vector< BlkId >* out_blist) {
@@ -74,8 +86,8 @@ public:
             hints.desired_temp = 0;
 
             BlkAllocStatus ret = test->m_fixed_allocator->alloc(1, hints, &bid);
-            EXPECT_TRUE((ret == BLK_ALLOC_SUCCESS) || (ret == BLK_ALLOC_SPACEFULL));
-            if (ret == BLK_ALLOC_SPACEFULL) {
+            EXPECT_TRUE((ret == BlkAllocStatus::BLK_ALLOC_SUCCESS) || (ret == BlkAllocStatus::BLK_ALLOC_SPACEFULL));
+            if (ret == BlkAllocStatus::BLK_ALLOC_SPACEFULL) {
                 break;
             }
             out_blist->push_back(bid);
@@ -157,7 +169,12 @@ public:
         m_varsize_allocator = new VarsizeBlkAllocator(var_cfg, true);
     }
 
-    ~VarsizeBlkAllocatorTest() { delete (m_varsize_allocator); }
+    VarsizeBlkAllocatorTest(const VarsizeBlkAllocatorTest&) = default;
+    VarsizeBlkAllocatorTest(VarsizeBlkAllocatorTest&&) noexcept = delete;
+    VarsizeBlkAllocatorTest& operator=(const VarsizeBlkAllocatorTest&) = default;
+    VarsizeBlkAllocatorTest& operator=(VarsizeBlkAllocatorTest&&) noexcept = delete;
+
+    ~VarsizeBlkAllocatorTest() override { delete (m_varsize_allocator); }
 
     uint32_t max_blks() const { return m_total_space / m_blk_size; }
 

@@ -29,7 +29,7 @@ template < typename K, typename V >
 bool IntrusiveCache< K, V >::insert(V& v, V** out_ptr, const auto& found_cb) {
     // Get the key and compute the hash code for the key
     const K* pk = V::extract_key(v);
-    auto b = K::get_blob(*pk);
+    const auto b{K::get_blob(*pk)};
     uint64_t hash_code = util::Hash64((const char*)b.bytes, (size_t)b.size);
 
     HS_LOG(DEBUG, cache, "Attemping to insert in cache: {} key {}", v.to_string(), pk->to_string());
@@ -72,7 +72,7 @@ bool IntrusiveCache< K, V >::insert(V& v, V** out_ptr, const auto& found_cb) {
 template < typename K, typename V >
 bool IntrusiveCache< K, V >::modify_size(V& v, uint32_t size) {
     const K* pk = V::extract_key(v);
-    auto b = K::get_blob(*pk);
+    const auto b{K::get_blob(*pk)};
     uint64_t hash_code = util::Hash64((const char*)b.bytes, (size_t)b.size);
     auto ret = (m_evictors[hash_code % EVICTOR_PARTITIONS]->modify_size(size));
 
@@ -91,7 +91,7 @@ bool IntrusiveCache< K, V >::upsert(const V& v, bool* out_key_exists) {
 template < typename K, typename V >
 V* IntrusiveCache< K, V >::get(const K& k) {
     V* v{nullptr};
-    auto b = K::get_blob(k);
+    const auto b{K::get_blob(k)};
     uint64_t hash_code = util::Hash64((const char*)b.bytes, (size_t)b.size);
 
     bool found = m_hash_set.get(k, &v, hash_code);
@@ -111,7 +111,7 @@ V* IntrusiveCache< K, V >::get(const K& k) {
 template < typename K, typename V >
 bool IntrusiveCache< K, V >::erase(V& v) {
     const K* pk = V::extract_key(v);
-    auto b = K::get_blob(*pk);
+    const auto b{K::get_blob(*pk)};
     uint64_t hash_code = util::Hash64((const char*)b.bytes, (size_t)b.size);
 
     bool found = m_hash_set.remove(*pk, hash_code, NULL_LAMBDA);
@@ -286,7 +286,7 @@ bool Cache< K >::erase(const K& k, boost::intrusive_ptr< CacheBuffer< K > >* out
 template < typename K >
 bool Cache< K >::erase(const K& k, uint32_t offset, uint32_t size,
                        boost::intrusive_ptr< CacheBuffer< K > >* ret_removed_buf) {
-    auto b = K::get_blob(k);
+    const auto b{K::get_blob(k)};
     uint64_t hash_code = util::Hash64((const char*)b.bytes, (size_t)b.size);
     boost::intrusive_ptr< CacheBuffer< K > > out_removed_buf(nullptr);
 
@@ -327,7 +327,7 @@ void Cache< K >::safe_erase(boost::intrusive_ptr< CacheBuffer< K > > buf, const 
 template < typename K >
 void Cache< K >::safe_erase(const K& k, const erase_comp_cb& cb) {
     /* we don't support partial cache entry for safe_erase. */
-    auto b = K::get_blob(k);
+    const auto b{K::get_blob(k)};
     uint64_t hash_code = util::Hash64((const char*)b.bytes, (size_t)b.size);
     boost::intrusive_ptr< CacheBuffer< K > > out_buf(nullptr);
     bool can_remove = false;
