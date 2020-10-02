@@ -272,6 +272,7 @@ SnapshotPtr HomeBlks::snap_volume(VolumePtr volptr) {
     return sp;
 }
 #endif
+
 void HomeBlks::submit_io_batch() {
     iomanager.default_drive_interface()->submit_batch();
     call_multi_vol_completions();
@@ -329,7 +330,11 @@ void HomeBlks::process_vdev_error(vdev_info_block* vb) {
 void HomeBlks::attach_vol_completion_cb(const VolumePtr& vol, const io_comp_callback& cb) {
     vol->attach_completion_cb(cb);
 }
-void HomeBlks::attach_end_of_batch_cb(const end_of_batch_callback& cb) { m_cfg.end_of_batch_cb = cb; }
+
+void HomeBlks::attach_end_of_batch_cb(const end_of_batch_callback& cb) {
+    m_cfg.end_of_batch_cb = cb;
+    iomanager.default_drive_interface()->attach_end_of_batch_cb([this](int nevents) { call_multi_vol_completions(); });
+}
 
 void HomeBlks::vol_mounted(const VolumePtr& vol, vol_state state) {
     m_cfg.vol_mounted_cb(vol, state);
@@ -706,9 +711,6 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
 
     m_hb_http_server = std::make_unique< HomeBlksHttpServer >(this);
     m_hb_http_server->start();
-
-    // Attach all completions
-    iomanager.default_drive_interface()->attach_end_of_batch_cb([this](int nevents) { call_multi_vol_completions(); });
 
     /* phase 1 updates a btree superblock required for btree recovery during journal replay */
     vol_recovery_start_phase1();

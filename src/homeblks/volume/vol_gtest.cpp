@@ -137,6 +137,7 @@ struct TestCfg {
     bool is_spdk = false;
     bool read_cache{false};
     bool write_cache{false};
+    bool batch_completion{false};
 
     bool verify_csum() { return verify_type == verify_type_t::csum; }
     bool verify_data() { return verify_type == verify_type_t::data; }
@@ -305,7 +306,9 @@ struct io_req_t : public vol_interface_req {
 
     io_req_t(const std::shared_ptr< vol_info_t >& vinfo, const Op_type op, uint8_t* const buf, const uint64_t lba,
              const uint32_t nlbas, const bool cache, bool is_csum) :
-            vol_interface_req{buf, lba, nlbas, false, cache}, op_type{op}, vol_info{vinfo} {
+            vol_interface_req{buf, lba, nlbas, false, cache},
+            op_type{op},
+            vol_info{vinfo} {
 
         const auto page_size{VolInterface::get_instance()->get_page_size(vinfo->vol)};
         original_size = nlbas * page_size;
@@ -541,9 +544,14 @@ public:
         assert(!tcfg.init);
         int cnt = output.vol_mounted_cnt.fetch_add(1, std::memory_order_relaxed);
         vol_init(vol_obj);
-        VolInterface::get_instance()->attach_vol_completion_cb(vol_obj,
-                                                               bind_this(VolTest::process_multi_completions, 1));
-        VolInterface::get_instance()->attach_end_of_batch_cb(bind_this(VolTest::process_end_of_batch, 1));
+
+        VolInterface* viface = VolInterface::get_instance();
+        if (tcfg.batch_completion) {
+            viface->attach_vol_completion_cb(vol_obj, bind_this(VolTest::process_multi_completions, 1));
+            viface->attach_end_of_batch_cb(bind_this(VolTest::process_end_of_batch, 1));
+        } else {
+            viface->attach_vol_completion_cb(vol_obj, bind_this(VolTest::process_single_completion, 1));
+        }
         assert(state == tcfg.expected_vol_state);
         if (tcfg.expected_vol_state == homestore::vol_state::DEGRADED ||
             tcfg.expected_vol_state == homestore::vol_state::OFFLINE) {
@@ -584,7 +592,8 @@ public:
         vol_params params;
         params.page_size = tcfg.vol_page_size;
         params.size = max_vol_size;
-        params.io_comp_cb = bind_this(VolTest::process_multi_completions, 1);
+        params.io_comp_cb = tcfg.batch_completion ? io_comp_callback(bind_this(VolTest::process_multi_completions, 1))
+                                                  : io_comp_callback(bind_this(VolTest::process_single_completion, 1));
         params.uuid = boost::uuids::random_generator()();
         const std::string name{VOL_PREFIX + std::to_string(_vol_counter.fetch_add(1))};
         ::strcpy(params.vol_name, name.c_str());
@@ -751,6 +760,12 @@ private:
         }
         LOGTRACE("Got {} completions for volume {} in one event", reqs.size(),
                  VolInterface::get_instance()->get_name(reqs[0]->vol_instance));
+    }
+
+    void process_single_completion(const vol_interface_req_ptr& vol_req) {
+        LOGTRACE("vol req id = {} is completed", vol_req->request_id);
+        _completed_reqs_this_thread.push_back(vol_req);
+        process_end_of_batch(1);
     }
 
     void process_end_of_batch(int ncompletions) {
@@ -1581,6 +1596,8 @@ SDS_OPTION_GROUP(
      "0 to 200"),
     (write_cache, "", "write_cache", "write cache", ::cxxopts::value< uint32_t >()->default_value("1"), "flag"),
     (read_cache, "", "read_cache", "read cache", ::cxxopts::value< uint32_t >()->default_value("1"), "flag"),
+    (batch_completion, "", "batch_completion", "batch completion", ::cxxopts::value< bool >()->default_value("false"),
+     "true or false"),
     (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"))
 #define ENABLED_OPTIONS logging, home_blks, test_volume
 
@@ -1630,6 +1647,7 @@ int main(int argc, char* argv[]) {
     _gcfg.is_spdk = SDS_OPTIONS["spdk"].as< bool >();
     _gcfg.read_cache = SDS_OPTIONS["read_cache"].as< uint32_t >() != 0 ? true : false;
     _gcfg.write_cache = SDS_OPTIONS["write_cache"].as< uint32_t >() != 0 ? true : false;
+    _gcfg.batch_completion = SDS_OPTIONS["batch_completion"].as< bool >();
 
     if (SDS_OPTIONS.count("device_list")) {
         _gcfg.dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();
