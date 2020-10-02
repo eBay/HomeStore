@@ -133,8 +133,10 @@ public:
     virtual std::error_condition unmap(const VolumePtr& vol, const vol_interface_req_ptr& req) override;
     virtual void submit_io_batch() override;
 
-    virtual vol_interface_req_ptr create_vol_interface_req(void* buf, uint64_t lba, uint32_t nlbas, bool sync = false,
-                                                           const bool cache = true) override;
+    virtual vol_interface_req_ptr create_vol_interface_req(void* const buf, const uint64_t lba, const uint32_t nlbas, 
+                                                           const bool sync = false, const bool cache = true) override;
+    virtual vol_interface_req_ptr create_vol_interface_req(std::vector< iovec > iovecs, const uint64_t lba,
+                                                           const uint32_t nlbas, const bool sync = false) override;
 
     virtual VolumePtr create_volume(const vol_params& params) override;
     virtual std::error_condition remove_volume(const boost::uuids::uuid& uuid) override;

@@ -563,6 +563,7 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
             uint64_t source_offset{0};
             uint64_t data_remaining{size};
             for (auto& read_iovec : iovecs) {
+                assert(read_iovec.iov_base != nullptr);
                 const uint64_t data_length{data_remaining > read_iovec.iov_len ? read_iovec.iov_len : data_remaining};
                 ::memcpy(read_iovec.iov_base, static_cast< const void* >(data + source_offset), data_length);
                 source_offset += data_length;
@@ -650,10 +651,10 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
         }
         VOL_RELEASE_ASSERT_CMP(next_start_lba, ==, mapping::get_end_lba(vreq->lba(), vreq->nlbas()) + 1, vreq,
                                "mismatch start lba and next start lba");
-    } catch (const std::exception& e) {
+    }  catch (const std::exception& e) {
         VOL_LOG_ASSERT(0, vreq, "Exception: {}", e.what())
         ret = std::make_error_condition(std::errc::device_or_resource_busy);
-    }
+    } 
 
     COUNTER_DECREMENT(m_metrics, volume_outstanding_metadata_read_count, 1);
     HISTOGRAM_OBSERVE(m_metrics, volume_map_read_latency, get_elapsed_time_us(vreq->io_start_time));
@@ -838,33 +839,38 @@ std::vector< iovec > Volume::get_next_iovecs(IoVecTransversal& iovec_transversal
                                              const std::vector< iovec >& data_iovecs, const uint64_t size) {
     // scatter/gather read
     std::vector< iovec > iovecs{};
+    if (size == 0) return iovecs;
+
     iovecs.reserve(2);
     iovecs.emplace_back();
     auto iov_ptr{std::rbegin(iovecs)};
 
     const uint64_t end_iovecs_offset{iovec_transversal.current_iovecs_offset + size};
-    for (; iovec_transversal.iovecs_index < data_iovecs.size(); ++iovec_transversal.iovecs_index) {
-        auto& read_iovec{data_iovecs[iovec_transversal.iovecs_index]};
-        if (iovec_transversal.current_iovecs_offset < iovec_transversal.iovecs_total_offset + read_iovec.iov_len) {
+    while (iovec_transversal.iovecs_index < data_iovecs.size()) {
+        auto& iov{data_iovecs[iovec_transversal.iovecs_index]};
+        if (iovec_transversal.current_iovecs_offset < iovec_transversal.iovecs_total_offset + iov.iov_len) {
             const uint64_t start_offset{iovec_transversal.current_iovecs_offset -
                                         iovec_transversal.iovecs_total_offset};
-            iov_ptr->iov_base = static_cast< uint8_t* >(read_iovec.iov_base) + start_offset;
-            const uint64_t remaining{static_cast< uint64_t >(read_iovec.iov_len - start_offset)};
+            iov_ptr->iov_base = static_cast< uint8_t* >(iov.iov_base) + start_offset;
+            const uint64_t remaining{static_cast< uint64_t >(iov.iov_len - start_offset)};
             if (iovec_transversal.current_iovecs_offset + remaining > end_iovecs_offset) {
                 iov_ptr->iov_len = end_iovecs_offset - iovec_transversal.current_iovecs_offset;
             } else {
+                // consume iovec
                 iov_ptr->iov_len = remaining;
+                iovec_transversal.iovecs_total_offset += iov.iov_len;
+                ++iovec_transversal.iovecs_index;
             }
             iovec_transversal.current_iovecs_offset += iov_ptr->iov_len;
         }
+
         if (iovec_transversal.current_iovecs_offset == end_iovecs_offset) {
             break;
         } else {
             // prepare next iovec
             iovecs.emplace_back();
             iov_ptr = std::rbegin(iovecs);
-            iovec_transversal.iovecs_total_offset += read_iovec.iov_len;
-        };
+        }
     }
     assert(iovec_transversal.current_iovecs_offset == end_iovecs_offset);
     if (iovec_transversal.current_iovecs_offset != end_iovecs_offset) {

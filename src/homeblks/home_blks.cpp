@@ -83,6 +83,16 @@ vol_interface_req::vol_interface_req(void* const buf, const uint64_t lba, const 
         sync{is_sync},
         cache{cache} {}
 
+vol_interface_req::vol_interface_req(std::vector< iovec > iovecs, const uint64_t lba, const uint32_t nlbas,
+                                     bool is_sync) :
+        iovecs{std::move(iovecs)},
+        request_id{counter_generator.next_request_id()},
+        refcount{0},
+        lba{lba},
+        nlbas{nlbas},
+        sync{is_sync},
+        cache{false} {}
+
 vol_interface_req::~vol_interface_req() = default;
 
 HomeBlks::HomeBlks(const init_params& cfg) : m_cfg(cfg), m_metrics("HomeBlks") {
@@ -148,9 +158,14 @@ void HomeBlks::attach_prepare_indx_cp(std::map< boost::uuids::uuid, indx_cp_ptr 
     }
 }
 
-vol_interface_req_ptr HomeBlks::create_vol_interface_req(void* buf, uint64_t lba, uint32_t nlbas, bool is_sync,
-                                                         const bool cache) {
+vol_interface_req_ptr HomeBlks::create_vol_interface_req(void* const buf, const uint64_t lba, const uint32_t nlbas,
+                                                         const bool is_sync, const bool cache) {
     return vol_interface_req_ptr(new vol_interface_req(buf, lba, nlbas, is_sync, cache));
+}
+
+vol_interface_req_ptr HomeBlks::create_vol_interface_req(std::vector< iovec > iovecs, const uint64_t lba,
+                                                         const uint32_t nlbas, const bool is_sync) {
+    return vol_interface_req_ptr(new vol_interface_req(iovecs, lba, nlbas, is_sync));
 }
 
 std::error_condition HomeBlks::write(const VolumePtr& vol, const vol_interface_req_ptr& req, bool part_of_batch) {
