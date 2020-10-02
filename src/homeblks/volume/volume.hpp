@@ -253,7 +253,6 @@ private:
 
     typedef struct IoVecTransversal {
         uint64_t current_iovecs_offset{0};
-        uint64_t iovecs_total_offset{0};
         size_t iovecs_index{0};
     } IoVecTransversal;
 
