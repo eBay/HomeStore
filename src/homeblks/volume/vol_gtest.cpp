@@ -293,9 +293,9 @@ struct io_req_t : public vol_interface_req {
     std::shared_ptr< vol_info_t > vol_info;
     bool done = false;
 
-    io_req_t(const std::shared_ptr< vol_info_t >& vinfo, const Op_type op, std::vector< iovec > iovecs,
+    io_req_t(const std::shared_ptr< vol_info_t >& vinfo, const Op_type op, std::vector< iovec >&& iovecs,
              const uint64_t lba, const uint32_t nlbas, const bool is_csum, const bool cache = false) :
-            vol_interface_req{iovecs, lba, nlbas, false, cache},
+            vol_interface_req{std::move(iovecs), lba, nlbas, false, cache},
             buffer{nullptr},
             op_type{op},
             vol_info{vinfo}
