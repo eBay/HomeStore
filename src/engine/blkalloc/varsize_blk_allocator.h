@@ -431,28 +431,14 @@ private:
 
 class BlkAllocMetrics : public sisl::MetricsGroupWrapper {
 public:
-    explicit BlkAllocMetrics(const char* inst_name) : sisl::MetricsGroupWrapper("BlkAlloc", inst_name) {
-        REGISTER_COUNTER(blkalloc_slab0_capacity, "Block allocator slab 0 capacity",
-                         sisl::_publish_as::publish_as_gauge);
-        REGISTER_COUNTER(blkalloc_slab1_capacity, "Block allocator slab 1 capacity",
-                         sisl::_publish_as::publish_as_gauge);
-        REGISTER_COUNTER(blkalloc_slab2_capacity, "Block allocator slab 2 capacity",
-                         sisl::_publish_as::publish_as_gauge);
-        REGISTER_COUNTER(blkalloc_slab3_capacity, "Block allocator slab 3 capacity",
-                         sisl::_publish_as::publish_as_gauge);
-        REGISTER_COUNTER(blkalloc_slab4_capacity, "Block allocator slab 4 capacity",
-                         sisl::_publish_as::publish_as_gauge);
-        REGISTER_COUNTER(blkalloc_slab5_capacity, "Block allocator slab 5 capacity",
-                         sisl::_publish_as::publish_as_gauge);
-        REGISTER_COUNTER(blkalloc_slab6_capacity, "Block allocator slab 6 capacity",
-                         sisl::_publish_as::publish_as_gauge);
-        REGISTER_COUNTER(blkalloc_slab7_capacity, "Block allocator slab 7 capacity",
-                         sisl::_publish_as::publish_as_gauge);
-        REGISTER_COUNTER(blkalloc_slab8_capacity, "Block allocator slab 8 capacity",
-                         sisl::_publish_as::publish_as_gauge);
-        REGISTER_COUNTER(blkalloc_slab9_capacity, "Block allocator slab 9 capacity",
-                         sisl::_publish_as::publish_as_gauge);
+    explicit BlkAllocMetrics(const char* inst_name, uint32_t nslabs) :
+                        sisl::MetricsGroupWrapper("BlkAlloc", inst_name) {
 
+        for (auto i = 0U; i < nslabs; i++) {
+            std::string name = "slab_" + std::to_string(i);
+            std::string desc = "Counter for Slab " + std::to_string(i);
+            m_impl_ptr->register_counter(name, desc, sisl::_publish_as::publish_as_gauge);
+        }
         REGISTER_COUNTER(num_alloc, "number of times alloc called");
         REGISTER_COUNTER(alloc_fail, "number of times alloc failed");
         /* In ideal scnario if there are no splits then it should be same as num_alloc */
@@ -460,6 +446,7 @@ public:
         /* It should be zero in ideal scenario */
         REGISTER_COUNTER(num_retry, "number of times it retry because of cache of no blks");
         REGISTER_COUNTER(num_attempts_failed, "number of times it fail to get entry from cache after max retry");
+
         register_me_to_farm();
     }
 
@@ -573,8 +560,9 @@ private:
     // Sweep and cache related functions
     void request_more_blks(BlkAllocSegment* const seg, const int slab_indx);
     void request_more_blks_wait(BlkAllocSegment* const seg, const int slab_indx);
-    void fill_cache(BlkAllocSegment** const pSeg, const int slab_indx);
-    [[nodiscard]] uint64_t fill_cache_in_portion(const uint64_t portion_num, BlkAllocSegment* const seg);
+    bool try_add_blks_to_cache(const BlkId& b);
+    void fill_cache(BlkAllocSegment* const seg, const int slab_indx);
+    [[nodiscard]] uint64_t fill_cache_in_portion(uint64_t portion_num, BlkAllocSegment* seg);
 
     // Convenience routines
     [[nodiscard]] uint64_t blknum_to_phys_pageid(const uint64_t blknum) const {
@@ -622,9 +610,16 @@ private:
         out_entry->set_phys_page_id(blknum_to_phys_pageid(blknum));
         out_entry->set_temperature(get_blk_temperature(blknum));
     }
-    [[nodiscard]] uint64_t get_best_fit_cache(const uint64_t blks_rqstd) const;
-    void incr_counter(const unsigned int index, const unsigned int val);
-    void decr_counter(const unsigned int index, const unsigned int val);
+
+    [[nodiscard]] uint64_t get_best_fit_cache(const uint64_t blks_rqstd);
+
+    inline void incr_slab_counter(const unsigned int index, const unsigned int val) {
+        m_metrics.m_impl_ptr->counter_increment(index, val);
+    }
+
+    inline void decr_slab_counter(const unsigned int index, const unsigned int val) {
+        m_metrics.m_impl_ptr->counter_decrement(index, val);
+    }
 };
 
 constexpr uint64_t BLKID_RANGE_FIRST{std::numeric_limits< uint64_t >::min()};
