@@ -773,6 +773,7 @@ size_t Volume::call_batch_completion_cbs() {
         count = m_completed_reqs->size();
         if (count) {
             auto comp_reqs = m_completed_reqs->swap();
+            THIS_VOL_LOG(TRACE, volume, , "Calling batch completion for {} reqs", comp_reqs->size());
             (std::get< io_batch_comp_callback >(m_comp_cb))(*comp_reqs);
             m_completed_reqs->drop(comp_reqs);
         }
