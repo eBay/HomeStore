@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -510,10 +511,10 @@ struct volume_req : indx_req {
     volume_req_state state = volume_req_state::preparing; // State of the volume request
 
     /********** members used to write data blocks **********/
-    Clock::time_point io_start_time;                              // start time
-    Clock::time_point indx_start_time;                            // indx start time
-    typedef boost::intrusive_ptr< homeds::MemVector > MemVecData; // HomeStore memory managed data
-    typedef std::reference_wrapper<std::vector< iovec >> IoVecData;                       // External scatter/gather data
+    Clock::time_point io_start_time;                                      // start time
+    Clock::time_point indx_start_time;                                    // indx start time
+    typedef boost::intrusive_ptr< homeds::MemVector > MemVecData;         // HomeStore memory managed data
+    typedef std::reference_wrapper<const std::vector< iovec >> IoVecData; // External scatter/gather data
     std::variant< MemVecData, IoVecData > data;
 
     sisl::atomic_counter< int > outstanding_io_cnt = 1; // how many IOs are outstanding for this request

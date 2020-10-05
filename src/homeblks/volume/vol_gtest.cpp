@@ -366,7 +366,7 @@ struct io_req_t : public vol_interface_req {
 private:
     void init(const uint64_t lba, const uint32_t nlbas, const bool is_csum)
     {
-        const auto page_size{VolInterface::get_instance()->get_page_size(vol_info->vol)};
+        const uint64_t page_size{VolInterface::get_instance()->get_page_size(vol_info->vol)};
         original_size = nlbas * page_size;
         original_offset = lba * page_size;
         verify_size = is_csum ? nlbas * sizeof(uint16_t) : original_size;
