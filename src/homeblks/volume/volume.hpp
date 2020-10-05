@@ -333,12 +333,14 @@ public:
         vol_ptr->init();
         return vol_ptr;
     }
+/*
     static vol_interface_req_ptr create_volume_req(const std::shared_ptr< Volume >& vol, void* const buf,
                                                    const uint64_t lba,
                                                    const uint32_t nlbas, const bool read, const bool sync);
     static vol_interface_req_ptr create_volume_req(const std::shared_ptr< Volume >& vol,
                                                    const std::vector< iovec >& iovecs, const uint64_t lba,
                                                    const uint32_t nlbas, const bool read, const bool sync);
+*/
 
 #ifdef _PRERELEASE
     static void set_io_flip();
@@ -511,7 +513,7 @@ struct volume_req : indx_req {
     Clock::time_point io_start_time;                              // start time
     Clock::time_point indx_start_time;                            // indx start time
     typedef boost::intrusive_ptr< homeds::MemVector > MemVecData; // HomeStore memory managed data
-    typedef std::vector< iovec > IoVecData;                       // External scatter/gather data
+    typedef std::reference_wrapper<std::vector< iovec >> IoVecData;                       // External scatter/gather data
     std::variant< MemVecData, IoVecData > data;
 
     sisl::atomic_counter< int > outstanding_io_cnt = 1; // how many IOs are outstanding for this request
@@ -594,28 +596,16 @@ private:
             iface_req(vi_req),
             io_start_time(Clock::now()) {
         assert((vi_req->vol_instance->get_page_size() * vi_req->nlbas) <= VOL_MAX_IO_SIZE);
-        if (vi_req->use_cache() && vi_req->iovecs.empty()) {
-            // a cached request is assumed to have lifetime managed by HomeStore
+        if (vi_req->iovecs.empty()) {
+            // lifetime managed by HomeStore
             if (vi_req->is_write()) {
                 data.emplace< MemVecData >(new homeds::MemVector{
                     static_cast< uint8_t* >(vi_req->buffer),
                     static_cast< uint32_t >(vi_req->vol_instance->get_page_size() * vi_req->nlbas), 0});
             }
         } else {
-            if (vi_req->iovecs.empty()) {
-                // a non-cached request is assume to have lifetime managed external to HomeStore
-                // convert read/write to single scatter/gather
-                iovec buffer{vi_req->buffer,
-                             static_cast< size_t >(vi_req->vol_instance->get_page_size() * vi_req->nlbas)};
-                data.emplace< IoVecData >();
-                std::get< IoVecData >(data).emplace_back(std::move(buffer));
-            }
-            else
-            {
-                // used passed in iovecs
-                data.emplace< IoVecData >();
-                std::get< IoVecData >(data) = vi_req->iovecs;
-            }
+            // used passed in iovecs
+            data.emplace< IoVecData >(vi_req->iovecs);
         }
 
         /* Trying to reserve the max possible size so that memory allocation is efficient */

@@ -270,6 +270,10 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
                 // scatter/gather write
                 const auto& iovecs{std::get< volume_req::IoVecData >(vreq->data)};
                 const auto write_iovecs{get_next_iovecs(write_transversal, iovecs, data_size)};
+
+                // TO DO: Add option to insert into cache if write cache option true
+
+                // write data
                 m_hb->get_data_blkstore()->write(vc_req->bid, write_iovecs,
                                                  boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vc_req));
 
@@ -625,9 +629,12 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
                 const BlkId read_blkid(ve.get_blkId().get_blkid_at(blkid_offset, sz, m_hb->get_data_pagesz()));
                 auto& iovecs{std::get< volume_req::IoVecData >(vreq->data)};
                 auto read_iovecs{get_next_iovecs(read_transversal, iovecs, sz)};
+
+                // TO DO: Add option to read from cache if read cache option true
+
+                // read from disk
                 m_hb->get_data_blkstore()->read(read_blkid, read_iovecs, sz,
                                                 boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vc_req));
-
             } else {
                 boost::intrusive_ptr< BlkBuffer > bbuf = m_hb->get_data_blkstore()->read(
                     ve.get_blkId(), blkid_offset, sz, boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vc_req));

@@ -121,8 +121,9 @@ struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
 
 public:
     vol_interface_req(void* const buf, const uint64_t lba, const uint32_t nlbas, const bool is_sync = false,
+                      const bool cache = true);
+    vol_interface_req(std::vector< iovec > iovecs, const uint64_t lba, const uint32_t nlbas, bool is_sync,
                       const bool cache = false);
-    vol_interface_req(std::vector< iovec > iovecs, const uint64_t lba, const uint32_t nlbas, bool is_sync);
     virtual ~vol_interface_req(); // override; sisl::ObjLifeCounter should have virtual destructor
     virtual void free_yourself() { delete this; }
 };
@@ -226,7 +227,7 @@ public:
     virtual vol_interface_req_ptr create_vol_interface_req(void* const buf, const uint64_t lba, const uint32_t nlbas, 
                                                            const bool sync = false, const bool cache = true) = 0;
 
-        ///
+    ///
     /// @brief Create a vol interface request to do IO using vol interface. This is a helper method and caller are
     /// welcome to create a request derived from vol interface request and pass it along instead of calling this method.
     ///
@@ -234,11 +235,12 @@ public:
     /// @param lba - LBA of the volume
     /// @param nlbas - Number of blks to write.
     /// @param sync - Is the sync io request or async
+    /// @param cache - whether to cache writes and try to read from cache
     /// @return vol_interface_req_ptr
     //
     virtual vol_interface_req_ptr create_vol_interface_req(std::vector<iovec> iovecs,
                                                            const uint64_t lba, const uint32_t nlbas,
-                                                           const bool sync = false) = 0;
+                                                           const bool sync = false, const bool cache = false) = 0;
 
     /**
      * @brief Write the data to the volume asynchronously, created from the request. After completion the attached

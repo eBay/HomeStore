@@ -124,6 +124,8 @@ struct TestCfg {
     bool is_spdk = false;
     bool read_cache{false};
     bool write_cache{false};
+    bool read_iovec{false};
+    bool write_iovec{false};
     bool batch_completion{false};
 
     bool verify_csum() { return verify_type == verify_type_t::csum; }
@@ -292,8 +294,8 @@ struct io_req_t : public vol_interface_req {
     bool done = false;
 
     io_req_t(const std::shared_ptr< vol_info_t >& vinfo, const Op_type op, std::vector< iovec > iovecs,
-             const uint64_t lba, const uint32_t nlbas, bool is_csum) :
-            vol_interface_req{iovecs, lba, nlbas, false},
+             const uint64_t lba, const uint32_t nlbas, const bool is_csum, const bool cache = false) :
+            vol_interface_req{iovecs, lba, nlbas, false, cache},
             buffer{nullptr},
             op_type{op},
             vol_info{vinfo}
@@ -325,8 +327,8 @@ struct io_req_t : public vol_interface_req {
     }
 
     io_req_t(const std::shared_ptr< vol_info_t >& vinfo, const Op_type op, uint8_t* const buf, const uint64_t lba,
-             const uint32_t nlbas, bool is_csum) :
-            vol_interface_req{buf, lba, nlbas, false, true},
+             const uint32_t nlbas, const bool is_csum, const bool cache = false) :
+            vol_interface_req{buf, lba, nlbas, false, cache},
 
             buffer{buf}, op_type{op},
             vol_info{vinfo}
@@ -1079,14 +1081,14 @@ protected:
         const uint64_t page_size{VolInterface::get_instance()->get_page_size(vol)};
         const uint64_t size{nlbas * page_size};
         boost::intrusive_ptr< io_req_t > vreq{};
-        if (tcfg.write_cache) {
+        if (!tcfg.write_iovec) {
             uint8_t* const wbuf{iomanager.iobuf_alloc(512, size)};
             assert(wbuf != nullptr);
 
             populate_buf(wbuf, size, lba, vinfo.get());
 
             vreq = boost::intrusive_ptr< io_req_t >(
-                new io_req_t(vinfo, Op_type::WRITE, wbuf, lba, nlbas, tcfg.verify_csum()));
+                new io_req_t(vinfo, Op_type::WRITE, wbuf, lba, nlbas, tcfg.verify_csum(), tcfg.write_cache));
         } else
         {
             std::vector< iovec > iovecs{};
@@ -1100,7 +1102,7 @@ protected:
             }
 
             vreq = boost::intrusive_ptr< io_req_t >(
-                new io_req_t(vinfo, Op_type::WRITE, std::move(iovecs), lba, nlbas, tcfg.verify_csum()));
+                new io_req_t(vinfo, Op_type::WRITE, std::move(iovecs), lba, nlbas, tcfg.verify_csum(), tcfg.write_cache));
 
         }
         vreq->cookie = static_cast< void* >(this);
@@ -1108,8 +1110,8 @@ protected:
         ++m_voltest->output.write_cnt;
         ++m_outstanding_ios;
         const auto ret_io{VolInterface::get_instance()->write(vol, vreq)};
-        LOGDEBUG("Wrote lba: {}, nlbas: {} outstanding_ios={}, cache={}", lba, nlbas, m_outstanding_ios.load(),
-                 (tcfg.write_cache != 0 ? true : false));
+        LOGDEBUG("Wrote lba: {}, nlbas: {} outstanding_ios={}, iovec(s)={}, cache={}", lba, nlbas, m_outstanding_ios.load(),
+                 (tcfg.write_iovec != 0 ? true : false), (tcfg.write_cache != 0 ? true : false));
         if (ret_io != no_error) { return false; }
         return true;
     }
@@ -1139,9 +1141,9 @@ protected:
 
         const uint64_t page_size{VolInterface::get_instance()->get_page_size(vol)};
         boost::intrusive_ptr< io_req_t > vreq{};
-        if (tcfg.read_cache) {
+        if (!tcfg.read_iovec) {
             vreq = boost::intrusive_ptr< io_req_t >(
-                new io_req_t{vinfo, Op_type::READ, nullptr, lba, nlbas, tcfg.verify_csum()});
+                new io_req_t{vinfo, Op_type::READ, nullptr, lba, nlbas, tcfg.verify_csum(), tcfg.read_cache});
         } else {
             std::vector< iovec > iovecs{};
             for (uint32_t lba_num{0}; lba_num < nlbas; ++lba_num) {
@@ -1151,16 +1153,16 @@ protected:
                 iovecs.emplace_back(std::move(iov));
             }
 
-            vreq = boost::intrusive_ptr< io_req_t >(
-                new io_req_t{vinfo, Op_type::READ, std::move(iovecs), lba, nlbas, tcfg.verify_csum()});
+            vreq = boost::intrusive_ptr< io_req_t >(new io_req_t{vinfo, Op_type::READ, std::move(iovecs), lba, nlbas,
+                                                                 tcfg.verify_csum(), tcfg.read_cache});
         }
         vreq->cookie = static_cast< void* >(this);
 
         ++m_voltest->output.read_cnt;
         ++m_outstanding_ios;
         const auto ret_io{VolInterface::get_instance()->read(vol, vreq)};
-        LOGDEBUG("Read lba: {}, nlbas: {} outstanding_ios={}, cache={}", lba, nlbas, m_outstanding_ios.load(),
-                 (tcfg.read_cache != 0 ? true : false));
+        LOGDEBUG("Read lba: {}, nlbas: {} outstanding_ios={}, iovec(s)={}, cache={}", lba, nlbas, m_outstanding_ios.load(), 
+                 (tcfg.read_iovec != 0 ? true : false), (tcfg.read_cache != 0 ? true : false));
         if (ret_io != no_error) { return false; }
         return true;
     }
@@ -1254,7 +1256,7 @@ protected:
         uint64_t total_size_read{0};
         uint64_t total_size_read_csum{0};
         const uint32_t size_read{tcfg.vol_page_size};
-        if (tcfg.read_cache) {
+        if (!tcfg.read_iovec) {
             for (auto& info : vol_req->read_buf_list) {
                 uint32_t offset{static_cast< uint32_t >(info.offset)};
                 uint64_t size{info.size};
@@ -1655,6 +1657,8 @@ SDS_OPTION_GROUP(
      "0 to 200"),
     (write_cache, "", "write_cache", "write cache", ::cxxopts::value< uint32_t >()->default_value("1"), "flag"),
     (read_cache, "", "read_cache", "read cache", ::cxxopts::value< uint32_t >()->default_value("1"), "flag"),
+    (write_iovec, "", "write_iovec", "write iovec(s)", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
+    (read_iovec, "", "read_iovec", "read iovec(s)", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
     (batch_completion, "", "batch_completion", "batch completion", ::cxxopts::value< bool >()->default_value("false"),
      "true or false"),
     (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"))
@@ -1706,6 +1710,8 @@ int main(int argc, char* argv[]) {
     _gcfg.is_spdk = SDS_OPTIONS["spdk"].as< bool >();
     _gcfg.read_cache = SDS_OPTIONS["read_cache"].as< uint32_t >() != 0 ? true : false;
     _gcfg.write_cache = SDS_OPTIONS["write_cache"].as< uint32_t >() != 0 ? true : false;
+    _gcfg.read_iovec = SDS_OPTIONS["read_iovec"].as< uint32_t >() != 0 ? true : false;
+    _gcfg.write_iovec = SDS_OPTIONS["write_iovec"].as< uint32_t >() != 0 ? true : false;
     _gcfg.batch_completion = SDS_OPTIONS["batch_completion"].as< bool >();
 
     if (SDS_OPTIONS.count("device_list")) {

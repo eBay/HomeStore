@@ -84,14 +84,14 @@ vol_interface_req::vol_interface_req(void* const buf, const uint64_t lba, const 
         cache{cache} {}
 
 vol_interface_req::vol_interface_req(std::vector< iovec > iovecs, const uint64_t lba, const uint32_t nlbas,
-                                     bool is_sync) :
+                                     bool is_sync, const bool cache) :
         iovecs{std::move(iovecs)},
         request_id{counter_generator.next_request_id()},
         refcount{0},
         lba{lba},
         nlbas{nlbas},
         sync{is_sync},
-        cache{false} {}
+        cache{cache} {}
 
 vol_interface_req::~vol_interface_req() = default;
 
@@ -164,8 +164,8 @@ vol_interface_req_ptr HomeBlks::create_vol_interface_req(void* const buf, const 
 }
 
 vol_interface_req_ptr HomeBlks::create_vol_interface_req(std::vector< iovec > iovecs, const uint64_t lba,
-                                                         const uint32_t nlbas, const bool is_sync) {
-    return vol_interface_req_ptr(new vol_interface_req(iovecs, lba, nlbas, is_sync));
+                                                         const uint32_t nlbas, const bool is_sync, const bool cache) {
+    return vol_interface_req_ptr(new vol_interface_req(iovecs, lba, nlbas, is_sync, cache));
 }
 
 std::error_condition HomeBlks::write(const VolumePtr& vol, const vol_interface_req_ptr& req, bool part_of_batch) {
