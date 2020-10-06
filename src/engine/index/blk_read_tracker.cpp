@@ -11,8 +11,7 @@ SDS_LOGGING_DECL(indx_mgr)
 namespace homestore {
 
 void Blk_Read_Tracker::insert(Free_Blk_Entry& fbe) {
-    sisl::blob b = BlkId::get_blob(fbe.m_blkId);
-    uint64_t hash_code = util::Hash64((const char*)b.bytes, (size_t)b.size);
+    const uint64_t hash_code{static_cast<uint64_t>(std::hash< BlkId >()(fbe.m_blkId))};
     BlkEvictionRecord* ber = BlkEvictionRecord::make_object(fbe.m_blkId);
     BlkEvictionRecord* outber = nullptr;
     // insert into pending read map and set ref of value to 2(one for hashmap and one for client)
@@ -27,8 +26,7 @@ void Blk_Read_Tracker::insert(Free_Blk_Entry& fbe) {
 }
 
 void Blk_Read_Tracker::remove(Free_Blk_Entry& fbe) {
-    sisl::blob b = BlkId::get_blob(fbe.m_blkId);
-    uint64_t hash_code = util::Hash64((const char*)b.bytes, (size_t)b.size);
+    const uint64_t hash_code{static_cast< uint64_t >(std::hash< BlkId >()(fbe.m_blkId))};
 
 #ifdef _PRERELEASE
     if (auto flip_ret = homestore_flip->get_test_flip< int >("vol_delay_read_us")) { usleep(flip_ret.get()); }
@@ -49,9 +47,8 @@ void Blk_Read_Tracker::remove(Free_Blk_Entry& fbe) {
 }
 
 void Blk_Read_Tracker::safe_free_blks(Free_Blk_Entry& fbe) {
-    BlkId bid = fbe.m_blkId;
-    sisl::blob b = BlkId::get_blob(bid);
-    uint64_t hash_code = util::Hash64((const char*)b.bytes, (size_t)b.size);
+    BlkId bid{fbe.m_blkId};
+    const uint64_t hash_code{static_cast< uint64_t >(std::hash< BlkId >()(bid))};
     BlkEvictionRecord* outber = nullptr;
     bool found = m_pending_reads_map.get(bid, &outber, hash_code); // get increases ref if found
     if (!found) {                                                  // no read pending

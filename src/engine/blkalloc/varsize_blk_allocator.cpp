@@ -447,7 +447,7 @@ void VarsizeBlkAllocator::free(const BlkId& b) {
      * disk_bm to cache bm.
      */
     {
-        auto lock{portion->auto_lock()};
+        auto lock{portion->portion_auto_lock()};
         BLKALLOC_ASSERT(RELEASE, m_cache_bm->is_bits_set(b.get_id(), b.get_nblks()),
                                                         "Expected bits to reset");
         segment->add_free_blks(b.get_nblks());
@@ -486,8 +486,7 @@ void VarsizeBlkAllocator::fill_cache(BlkAllocSegment** const pSeg, const int sla
 
         bool refill_needed = true;
         BLKALLOC_ASSERT_CMP(LOGMSG, slab_indx, >=, 0);
-        if (slab_indx < 0) { slab_indx = 0; }
-        for (auto i = slab_indx; i < (int)m_slab_entries.size(); ++i) {
+        for (auto i{std::max(slab_indx, 0)}; i < static_cast< int >(m_slab_entries.size()); ++i) {
             // Low water mark for cache slabs is half of full capacity
             auto count = m_slab_entries[i]._a.load(std::memory_order_acq_rel);
             if (count <= get_config().get_slab_capacity(i) / 2) {

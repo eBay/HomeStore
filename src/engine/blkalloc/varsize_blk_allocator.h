@@ -561,7 +561,7 @@ private:
     void request_more_blks(BlkAllocSegment* const seg, const int slab_indx);
     void request_more_blks_wait(BlkAllocSegment* const seg, const int slab_indx);
     bool try_add_blks_to_cache(const BlkId& b);
-    void fill_cache(BlkAllocSegment* const seg, const int slab_indx);
+    void fill_cache(BlkAllocSegment** const pSeg, const int slab_indx);
     [[nodiscard]] uint64_t fill_cache_in_portion(uint64_t portion_num, BlkAllocSegment* seg);
 
     // Convenience routines
@@ -611,13 +611,13 @@ private:
         out_entry->set_temperature(get_blk_temperature(blknum));
     }
 
-    [[nodiscard]] uint64_t get_best_fit_cache(const uint64_t blks_rqstd);
+    [[nodiscard]] uint64_t get_best_fit_cache(const uint64_t blks_rqstd) const;
 
-    inline void incr_slab_counter(const unsigned int index, const unsigned int val) {
+    inline void incr_slab_counter(const uint64_t index, const int64_t val) {
         m_metrics.m_impl_ptr->counter_increment(index, val);
     }
 
-    inline void decr_slab_counter(const unsigned int index, const unsigned int val) {
+    inline void decr_slab_counter(const uint64_t index, const int64_t val) {
         m_metrics.m_impl_ptr->counter_decrement(index, val);
     }
 };

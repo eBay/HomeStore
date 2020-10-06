@@ -11,6 +11,7 @@
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -43,37 +44,11 @@ public:
     uint64_t m_rest : 64 - ID_BITS - NBLKS_BITS - CHUNK_NUM_BITS;
 
     // make these constexpr after rolling in sisl update
-    [[nodicard]] static uint64_t constexpr invalid_internal_id() {
+    [[nodicard]] static constexpr uint64_t invalid_internal_id() {
         return (static_cast< uint64_t >(1) << (ID_BITS + NBLKS_BITS + CHUNK_NUM_BITS)) - 1;
     }
 
-    [[nodicard]] static uint64_t constexpr max_blks_in_op() { return s_nblks_mask; }
-
-    // NOTE:  These functions below should be replace by a std::hash operator since that is their purpose
-    [[nodicard]] static sisl::blob get_blob(BlkId& id) {
-        static thread_local std::array< uint8_t, BLKID_SIZE > blob_array;
-        const uint64_t val{id.to_integer()};
-        uint8_t shift{0};
-        for (uint8_t byte_num{0}; byte_num < BLKID_SIZE; ++byte_num, shift += 8) {
-            blob_array[byte_num] = static_cast< uint8_t >((val >> shift) & 0xFF);
-        }
-        sisl::blob b{blob_array.data(), blob_array.size()};
-        return b;
-    }
-
-    [[nodicard]] static sisl::blob get_blob(const BlkId& id) {
-        static thread_local std::array< uint8_t, BLKID_SIZE > blob_array;
-        const uint64_t val{id.to_integer()};
-        uint8_t shift{0};
-        for (uint8_t byte_num{0}; byte_num < BLKID_SIZE; ++byte_num, shift += 8) {
-            blob_array[byte_num] = static_cast< uint8_t >((val >> shift) & 0xFF);
-        }
-        sisl::blob b{blob_array.data(), blob_array.size()};
-        return b;
-    }
-
-#define begin_of(b) (b.m_id)
-#define end_of(b) (b.m_id + b.m_nblks)
+    [[nodicard]] static constexpr uint64_t max_blks_in_op() { return s_nblks_mask; }
 
     [[nodicard]] static int compare(const BlkId& one, const BlkId& two) {
         if (one.m_chunk_num > two.m_chunk_num) {
@@ -97,13 +72,15 @@ public:
         return 0;
     }
 
+
     [[nodicard]] uint64_t to_integer() const {
         const uint64_t val{m_id | (static_cast< uint64_t >(m_nblks) << ID_BITS) |
                            (static_cast< uint64_t >(m_chunk_num) << (ID_BITS + NBLKS_BITS))};
         return val;
     }
 
-    explicit BlkId(const uint64_t id) {
+    explicit BlkId(const uint64_t id) 
+    {
         set(id & s_id_mask, (id >> ID_BITS) & s_nblks_mask, id >> (ID_BITS + NBLKS_BITS) & s_chuck_num_mask);
     }
 
@@ -116,7 +93,7 @@ public:
 
     [[nodiscard]] BlkId get_blkid_at(const uint32_t offset, const uint32_t pagesz) const {
         assert(offset % pagesz == 0);
-        uint32_t remaining_size = ((m_nblks - (offset / pagesz)) * pagesz);
+        const uint32_t remaining_size{((m_nblks - (offset / pagesz)) * pagesz)};
         return (get_blkid_at(offset, remaining_size, pagesz));
     }
 
@@ -169,6 +146,9 @@ public:
 
 } // namespace homestore
 __attribute__((__packed__));
+
+[[nodiscard]] inline uint64_t begin_of(const BlkId& bid) { return bid.get_id(); }
+[[nodiscard]] inline uint64_t end_of(const BlkId& bid) { return bid.get_id() + bid.get_nblks(); }
 
 template < typename charT, typename traits >
 std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, traits >& outStream, const BlkId& blk) {
@@ -366,4 +346,17 @@ public:
 };
 #endif
 } // namespace homestore
+
+// hash function definitions
+namespace std {
+template <>
+struct hash<homestore::BlkId > {
+    typedef homestore::BlkId argument_type;
+    typedef size_t           result_type;
+    result_type operator()(const argument_type& bid) const noexcept {
+        return std::hash<uint64_t>()(bid.to_integer());
+    }
+};
+} // namespace std
+
 #endif /* SRC_BLKALLOC_BLK_H_ */

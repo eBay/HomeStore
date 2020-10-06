@@ -9,6 +9,7 @@
 #include "homeds/loadgen/spec/key_spec.hpp"
 #include <fmt/ostream.h>
 #include <random>
+
 namespace homeds {
 namespace loadgen {
 class CacheKey : public BlkId, public KeySpec {
@@ -98,4 +99,17 @@ public:
 }; // namespace loadgen
 
 } // namespace homeds
+
+// hash function definitions
+namespace std {
+template <>
+struct hash<homeds::loadgen::CacheKey > {
+    typedef homeds::loadgen::CacheKey argument_type;
+    typedef size_t result_type;
+    result_type operator()(const argument_type& cache_key) const noexcept {
+        return std::hash< uint64_t >()(static_cast<const homestore::BlkId&>(cache_key).to_integer());
+    }
+};
+} // namespace std
+
 #endif // HOMESTORE_CACHE_KEY_SPEC_HPP
