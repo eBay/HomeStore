@@ -59,7 +59,6 @@ struct log_record {
         size = sz;
         context = ctx;
     }
-
     size_t inlined_size() const { return sizeof(serialized_log_record) + (is_inlineable() ? size : 0); }
     size_t serialized_size() const { return sizeof(serialized_log_record) + size; }
     bool is_inlineable() const {
@@ -509,6 +508,9 @@ public:
     void meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size);
 
     void update_store_meta(const logstore_id_t idx, const logstore_meta& meta, bool persist_now);
+
+    int read_as_json(const logdev_key& key, nlohmann::json & json_val, bool print_content = false);
+
 
 private:
     LogGroup* make_log_group(uint32_t estimated_records) {

@@ -247,6 +247,28 @@ logdev_key HomeLogStoreMgr::do_device_truncate(bool dry_run) {
     return min_safe_ld_key;
 }
 
+void HomeLogStoreMgr::dump_log_store(const log_dump_req& dump_req, nlohmann::json& json_dump){
+    
+    json_dump = nlohmann::json::array();
+    if(dump_req.log_store == nullptr)
+    {
+        m_id_logstore_map.withRLock([&](auto& id_logstore_map) {
+            for (auto& id_logstore : id_logstore_map) {
+                auto& store_ptr = id_logstore.second.m_log_store;
+                nlohmann::json val;
+                store_ptr->dump_log_store(val);
+                json_dump.push_back(val);
+            }
+        });
+    } else{
+        nlohmann::json val;
+        dump_req.log_store->dump_log_store(val, dump_req);
+        json_dump.push_back(val);
+    }
+}
+
+
+
 /////////////////////////////////////// HomeLogStore Section ///////////////////////////////////////
 HomeLogStore::HomeLogStore(const logstore_id_t id, const bool append_mode, const logstore_seq_num_t start_lsn) :
         m_store_id{id},
@@ -483,6 +505,27 @@ int HomeLogStore::search_max_le(logstore_seq_num_t input_sn) {
     }
 
     return (end - 1);
+}
+
+int HomeLogStore::dump_log_store(nlohmann::json& json_dump, const log_dump_req dump_req){
+    json_dump = nlohmann::json::object();
+    json_dump ["store_id"] = this->m_store_id;
+
+    auto trunc_upto = this->truncated_upto();
+    int64_t idx = trunc_upto + 1;
+    nlohmann::json json_records = nlohmann::json::object();
+
+    m_records.foreach_completed(idx, [&](long int cur_idx, long int max_idx, homestore::logstore_record& record) -> bool {
+        // do a sync read
+        nlohmann::json val;
+        auto ret = HomeLogStoreMgr::logdev().read_as_json(record.m_dev_key, val);
+        if(ret ==0)
+            json_records.push_back(val);
+            
+        return (cur_idx < max_idx) ? true : false;
+        //return cb(cur_idx, log_buf);
+    });
+    return 0;
 }
 
 void HomeLogStore::foreach (int64_t start_idx, const std::function< bool(logstore_seq_num_t, log_buffer) >& cb) {
