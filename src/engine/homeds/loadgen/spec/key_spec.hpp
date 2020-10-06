@@ -4,6 +4,8 @@
 #ifndef HOMESTORE_WORKLOAD_GENERATOR_HPP
 #define HOMESTORE_WORKLOAD_GENERATOR_HPP
 
+#include <cstdint>
+
 #include "homeds/loadgen/loadgen_common.hpp"
 #include <fmt/ostream.h>
 #include <farmhash.h>
@@ -11,6 +13,8 @@
 namespace homeds {
 namespace loadgen {
 
+
+/*
 template < typename K >
 struct compare_keys {
 public:
@@ -24,6 +28,8 @@ struct key_hash {
         return util::Hash32((const char*)b.bytes, (size_t)b.size);
     }
 };
+
+*/
 
 class KeySpec {
 public:

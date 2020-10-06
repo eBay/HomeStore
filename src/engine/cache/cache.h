@@ -4,18 +4,27 @@
 
 #pragma once
 
-//#include "eviction.cpp"
-#include "eviction.hpp"
-#include <utility/atomic_counter.hpp>
-#include "engine/homeds/hash/intrusive_hashset.hpp"
-#include "lru_eviction.hpp"
+#include <array>
+#include <atomic>
+#include <cassert>
+#include <cstdint>
+#include <memory>
+#include <mutex>
+#include <sstream>
+
+#include <execinfo.h>
+
 #include <boost/intrusive_ptr.hpp>
 #include <fds/obj_allocator.hpp>
-#include "engine/common/homestore_config.hpp"
-#include <execinfo.h>
-#include <utility/obj_life_counter.hpp>
-#include <metrics/metrics.hpp>
 #include <fds/utils.hpp>
+#include <metrics/metrics.hpp>
+#include <utility/atomic_counter.hpp>
+#include <utility/obj_life_counter.hpp>
+
+#include "engine/common/homestore_config.hpp"
+#include "engine/homeds/hash/intrusive_hashset.hpp"
+#include "eviction.hpp"
+#include "lru_eviction.hpp"
 
 SDS_LOGGING_DECL(cache_vmod_evict, cache_vmod_read, cache_vmod_write)
 
@@ -27,15 +36,13 @@ namespace homestore {
 
 class CacheRecord : public homeds::HashNode, sisl::ObjLifeCounter< CacheRecord > {
 public:
+    CacheRecord(void* const cache_buffer) : m_evict_record{cache_buffer} {};
+
     typename CurrentEvictor::EvictRecordType m_evict_record; // Information about the eviction record itself.
 
     const CurrentEvictor::EvictRecordType& get_evict_record() const { return m_evict_record; }
 
     CurrentEvictor::EvictRecordType& get_evict_record_mutable() { return m_evict_record; }
-
-    static CacheRecord* evict_to_cache_record(const CurrentEvictor::EvictRecordType* p_erec) {
-        return (p_erec ? container_of(p_erec, &CacheRecord::m_evict_record) : nullptr);
-    }
 };
 
 /* Number of entries we ideally want to have per hash bucket. This number if small, will reduce contention and
@@ -45,7 +52,7 @@ public:
 /* Number of eviction partitions. More the partitions better the parallelization of requests, but lesser the
  * effectiveness of cache, since it could get evicted sooner than expected, if distribution of key hashing is not
  * even.*/
-#define EVICTOR_PARTITIONS 32
+constexpr uint64_t EVICTOR_PARTITIONS{32};
 
 class CacheMetrics : public sisl::MetricsGroupWrapper {
 public:
@@ -65,17 +72,25 @@ public:
         register_me_to_farm();
     }
 
+    CacheMetrics(const CacheMetrics&) = delete;
+    CacheMetrics(CacheMetrics&&) noexcept = delete;
+    CacheMetrics& operator=(const CacheMetrics&) = delete;
+    CacheMetrics& operator=(CacheMetrics&&) noexcept = delete;
+
     ~CacheMetrics() { deregister_me_from_farm(); }
 };
+
+template < typename K >
+class CacheBuffer;
 
 template < typename K, typename V >
 class IntrusiveCache {
 public:
-    static_assert(std::is_base_of< CacheRecord, V >::value, "IntrusiveCache Value must be derived from CacheRecord");
+    static_assert(std::is_base_of< CacheBuffer<K>, V >::value, "IntrusiveCache Value must be derived from CacheBuffer<K>");
 
     IntrusiveCache(uint64_t max_cache_size, uint32_t avg_size_per_entry);
     ~IntrusiveCache() {
-        for (auto i = 0; i < EVICTOR_PARTITIONS; i++)
+        for (uint64_t i{0}; i < EVICTOR_PARTITIONS; ++i)
             m_evictors[i].reset();
     }
 
@@ -98,13 +113,10 @@ public:
     bool modify_size(V& v, uint32_t size);
 
 protected:
-    std::unique_ptr< CurrentEvictor > m_evictors[EVICTOR_PARTITIONS];
+    std::array< std::unique_ptr< CurrentEvictor >, EVICTOR_PARTITIONS > m_evictors;
     homeds::IntrusiveHashSet< K, V > m_hash_set;
     CacheMetrics m_metrics;
 };
-
-template < typename K >
-class CacheBuffer;
 
 template < typename K >
 class Cache : protected IntrusiveCache< K, CacheBuffer< K > > {
@@ -181,7 +193,7 @@ public:
 #endif
 
     typedef CacheBuffer< K > CacheBufferType;
-    CacheBuffer() :
+    CacheBuffer() : CacheRecord{this},
             m_mem(nullptr),
             m_refcount(0),
             m_data_offset(-1),
@@ -198,6 +210,7 @@ public:
     }
 
     CacheBuffer(const K& key, const sisl::blob& blob, Cache< K >* cache, uint32_t offset = 0) :
+            CacheRecord{this},
             m_mem(nullptr),
             m_refcount(0),
             m_data_offset(-1),
@@ -218,6 +231,11 @@ public:
         m_key = key;
     }
 
+    CacheBuffer(const CacheBuffer&) = delete;
+    CacheBuffer(CacheBuffer&&) noexcept = delete;
+    CacheBuffer& operator=(const CacheBuffer&) = delete;
+    CacheBuffer& operator=(CacheBuffer&&) noexcept = delete;
+
     virtual ~CacheBuffer(){};
 
     const K& get_key() const { return m_key; }
@@ -234,7 +252,7 @@ public:
 
     void on_cache_evict() { m_state = CACHE_EVICTED; }
 
-    cache_buf_state get_cache_state() { return m_state; }
+    cache_buf_state get_cache_state() const { return m_state; }
 
     void set_cache(Cache< K >* cache) { m_cache = cache; }
 
@@ -323,7 +341,7 @@ public:
     void reset_free_state() { m_can_free = false; }
     bool can_free() { return (m_can_free); }
     std::string to_string() const {
-        std::stringstream ss;
+        std::ostringstream ss;
         ss << "Cache Key = " << m_key.to_string() << " Cache Mem = " << m_mem->to_string()
            << " Cache refcount = " << m_refcount.get();
         return ss.str();
@@ -348,7 +366,7 @@ public:
     static const K* extract_key(const CacheBuffer< K >& b) { return &(b.m_key); }
 
     static uint32_t get_size(const CurrentEvictor::EvictRecordType* rec) {
-        const CacheBuffer< K >* cbuf = static_cast< const CacheBuffer< K >* >(CacheRecord::evict_to_cache_record(rec));
+        const CacheBuffer< K >* cbuf{static_cast< CacheBuffer< K >* >(rec->cache_buffer)};
         return cbuf->m_cache_size;
     }
 };

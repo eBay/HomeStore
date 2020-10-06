@@ -57,7 +57,7 @@ IntrusiveCache< K, V >::IntrusiveCache(uint64_t max_cache_size, uint32_t avg_siz
         m_hash_set((max_cache_size / avg_size_per_entry) / HS_DYNAMIC_CONFIG(cache->entries_per_hash_bucket)) {
     HS_LOG(INFO, base, "Initializing cache with cache_size = {} with {} partitions", max_cache_size,
            EVICTOR_PARTITIONS);
-    for (auto i = 0; i < EVICTOR_PARTITIONS; i++) {
+    for (uint64_t i{0}; i < EVICTOR_PARTITIONS; ++i) {
         m_evictors[i] = std::make_unique< CurrentEvictor >(
             i, max_cache_size / EVICTOR_PARTITIONS,
             (std::bind(&IntrusiveCache< K, V >::is_safe_to_evict, this, std::placeholders::_1)), V::get_size);
@@ -169,11 +169,10 @@ bool IntrusiveCache< K, V >::is_safe_to_evict(const CurrentEvictor::EvictRecordT
     /* Should not evict the record if anyone is using it. It would break the btree locking logic
      * which depends on cache not freeing the object if it is using it.
      */
-    const CacheRecord* crec = CacheRecord::evict_to_cache_record(erec);
-    V* v = (V*)crec;
-    bool safe_to_evict = false;
+    CacheBuffer< K >* const v{static_cast < CacheBuffer< K > *>(erec->cache_buffer)};
+    bool safe_to_evict{false};
 
-    if (V::test_le(reinterpret_cast< const V& >(*crec), 1)) { // Ensure reference count is atmost one (one that is stored in hashset for)
+    if (V::test_le(*v, 1)) { // Ensure reference count is atmost one (one that is stored in hashset for)
         /* we can not wait for the lock if there is contention as it can lead to
          * deadlock. This API is called under the eviction lock. Normally, eviction
          * lock is taken after taking this lock in case of insert and erase.
@@ -183,7 +182,7 @@ bool IntrusiveCache< K, V >::is_safe_to_evict(const CurrentEvictor::EvictRecordT
             boost::intrusive_ptr< CacheBuffer< K > > out_removed_buf(nullptr);
             HS_ASSERT_CMP(LOGMSG, v->get_cache_state(), ==, CACHE_INSERTED);
             /* It remove the entry only if ref cnt is one */
-            const K* const pk { V::extract_key(reinterpret_cast<const V&>(*crec)) };
+            const K* const pk { V::extract_key(*v) };
             const uint64_t hash_code{compute_hash< K >(*pk)};
             auto ret =
                 m_hash_set.check_and_remove(*pk, hash_code, [&out_removed_buf](CacheBuffer< K >* about_to_remove_ptr) {

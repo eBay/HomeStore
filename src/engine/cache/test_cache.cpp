@@ -2,12 +2,20 @@
 // Created by Kadayam, Hari on 22/04/18.
 //
 
-#include <gtest/gtest.h>
+#include <cstring>
+#include <cstdint>
+#include <sstream>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include <boost/intrusive_ptr.hpp>
+#include <boost/range/irange.hpp>
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
-#include <boost/range/irange.hpp>
-#include <boost/intrusive_ptr.hpp>
-#include <cstring>
+
+#include <gtest/gtest.h>
+
 #include "cache.cpp"
 
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
@@ -15,14 +23,6 @@ THREAD_BUFFER_INIT;
 RCU_REGISTER_INIT;
 
 struct blk_id {
-    static sisl::blob get_blob(const blk_id& id) {
-        sisl::blob b;
-        b.bytes = (uint8_t*)&id.m_id;
-        b.size = sizeof(uint64_t);
-
-        return b;
-    }
-
     static int compare(const blk_id& one, const blk_id& two) {
         if (one.m_id == two.m_id) {
             return 0;
@@ -33,8 +33,8 @@ struct blk_id {
         }
     }
 
-    blk_id(uint64_t id) : m_id(id) {}
-    blk_id() : blk_id(-1) {}
+    blk_id(const uint64_t id) : m_id(id) {}
+    blk_id() : blk_id(std::numeric_limits<uint64_t>::max()) {}
     blk_id(const blk_id& other) { m_id = other.m_id; }
 
     blk_id& operator=(const blk_id& other) {
@@ -43,15 +43,27 @@ struct blk_id {
     }
 
     std::string to_string() const {
-        std::stringstream ss;
+        std::ostringstream ss;
         ss << m_id;
         return ss.str();
     }
     uint64_t m_id;
 };
 
-#define MAX_CACHE_SIZE 2 * 1024 * 1024
-#define NTHREADS 4U
+namespace std {
+template <>
+struct hash< blk_id > {
+    typedef blk_id argument_type;
+    typedef size_t result_type;
+    result_type operator()(const argument_type& bid) const noexcept {
+        return std::hash< uint64_t >()(bid.m_id);
+    }
+};
+} // namespace std
+
+
+constexpr uint64_t MAX_CACHE_SIZE{2 * 1024 * 1024};
+constexpr size_t NTHREADS{1};
 
 struct CacheTest : public testing::Test {
 protected:
@@ -59,67 +71,70 @@ protected:
 
 public:
     CacheTest() { m_cache = std::make_unique< homestore::Cache< blk_id > >(MAX_CACHE_SIZE, 8192); }
+    CacheTest(const CacheTest&) = delete;
+    CacheTest(CacheTest&&) noexcept = delete;
+    CacheTest& operator=(const CacheTest&) = delete;
+    CacheTest& operator=(CacheTest&&) noexcept = delete;
 
-    ~CacheTest() { m_cache.reset(); }
+    virtual ~CacheTest() override { m_cache.reset(); }
 
-    void insert_one(uint64_t id, uint32_t size) {
+    virtual void SetUp() override{};
+
+    virtual void TearDown() override{};
+
+    void insert_one(const uint64_t id, const uint32_t size) {
         boost::intrusive_ptr< homestore::CacheBuffer< blk_id > > cbuf;
-        uint64_t* raw_buf = (uint64_t*)malloc(sizeof(uint64_t) * size);
-        for (auto b = 0U; b < size; b++)
+        const size_t num_entries{size / sizeof(uint64_t)};
+        uint64_t* const raw_buf = static_cast<uint64_t*>(malloc(size));
+        for (size_t b{0} ; b < num_entries; ++b)
             raw_buf[b] = id;
-        EXPECT_EQ(m_cache->insert(blk_id(id), {(uint8_t*)raw_buf, size}, 0, &cbuf, NULL_LAMBDA), true);
+        ASSERT_EQ(m_cache->insert(blk_id(id), {reinterpret_cast<uint8_t*>(raw_buf), size}, 0, &cbuf, NULL_LAMBDA), true);
     }
 
-    void read_one(uint64_t id, uint32_t size, bool expected = true) {
+    void read_one(const uint64_t id, const uint32_t size, const bool expected = true) {
         boost::intrusive_ptr< homestore::CacheBuffer< blk_id > > cbuf;
-        bool found = m_cache->get(blk_id(id), &cbuf);
+        const bool found{m_cache->get(blk_id(id), &cbuf)};
 
         if (found) {
-            auto blob = cbuf->at_offset(0);
-            auto b = 0U;
-            for (b = 0U; b < blob.size / 8; b++)
-                if (((uint64_t*)blob.bytes)[b] != id) break;
-            EXPECT_EQ(b, blob.size / 8);
+            const auto blob{cbuf->at_offset(0)};
+            for (uint32_t b{0}; b < blob.size / sizeof(uint64_t); ++b)
+                EXPECT_EQ(reinterpret_cast< const uint64_t* >(blob.bytes)[b], id);
         }
     }
 
     // Fix Sanitizer reported memory leak.
-    void erase_one(uint64_t id, uint32_t size) {
+    void erase_one(const uint64_t id, const uint32_t size) {
         boost::intrusive_ptr< homestore::CacheBuffer< blk_id > > cbuf;
         m_cache->erase(blk_id(id), &cbuf);
     }
 
-    void fixed_insert_and_get(uint64_t start, uint32_t count, uint32_t size) {
-        for (auto i = start; i < start + count; i++) {
+    void fixed_insert_and_get(const uint64_t start, const uint32_t count, const uint32_t size) {
+        for (auto i{start}; i < start + count; ++i) {
             insert_one(i, size);
             read_one(i, size);
         }
 
-        for (auto i = start; i < start + count; i++) {
+        for (auto i{start}; i < start + count; ++i) {
             erase_one(i, size);
         }
     }
 
-    uint32_t fixed_total_entries(uint32_t size) { return (MAX_CACHE_SIZE * 3) / size; }
+    static uint32_t fixed_total_entries(const uint32_t size) { return (MAX_CACHE_SIZE * 3) / size; }
 };
 
-static void insert_and_get_thread(CacheTest* ctest, uint32_t tnum) {
-    auto total_entries = ctest->fixed_total_entries(8192);
+static void insert_and_get_thread(CacheTest* const ctest, const uint32_t tnum) {
+    const auto total_entries{ctest->fixed_total_entries(8192)};
     ctest->fixed_insert_and_get(tnum * total_entries / NTHREADS, total_entries / NTHREADS, 8192);
 }
 
 TEST_F(CacheTest, InsertGet) {
-    std::array< std::thread*, NTHREADS > thrs;
-    for (auto i = 0u; i < NTHREADS; i++) {
-        thrs[i] = new std::thread(insert_and_get_thread, this, i);
+    std::vector< std::thread> thrs;
+    for (size_t i{0}; i < NTHREADS; ++i) {
+        thrs.emplace_back(insert_and_get_thread, this, i);
     }
 
-    for (auto i = 0u; i < NTHREADS; i++) {
-        thrs[i]->join();
-    }
-
-    for (auto i = 0u; i < NTHREADS; i++) {
-        delete (thrs[i]);
+    for (size_t i{0}; i < NTHREADS; ++i) {
+        if (thrs[i].joinable()) thrs[i].join();
     }
 }
 
