@@ -257,13 +257,13 @@ void HomeLogStoreMgr::dump_log_store(const log_dump_req& dump_req, nlohmann::jso
                 auto& store_ptr = id_logstore.second.m_log_store;
                 nlohmann::json val;
                 store_ptr->dump_log_store(val);
-                json_dump.push_back(val);
+                json_dump.emplace_back(val);
             }
         });
     } else{
         nlohmann::json val;
         dump_req.log_store->dump_log_store(val, dump_req);
-        json_dump.push_back(val);
+        json_dump.emplace_back(val);
     }
 }
 
@@ -513,18 +513,29 @@ int HomeLogStore::dump_log_store(nlohmann::json& json_dump, const log_dump_req d
 
     auto trunc_upto = this->truncated_upto();
     int64_t idx = trunc_upto + 1;
-    nlohmann::json json_records = nlohmann::json::object();
-
-    m_records.foreach_completed(idx, [&](long int cur_idx, long int max_idx, homestore::logstore_record& record) -> bool {
+    nlohmann::json json_records = nlohmann::json::array();
+    std::mutex _mtx;
+    std::condition_variable _cv;
+    bool end_iterate = false;
+    m_records.foreach_completed(idx, [&json_records, &end_iterate](long int cur_idx, long int max_idx, homestore::logstore_record& record) -> bool {
         // do a sync read
         nlohmann::json val;
         auto ret = HomeLogStoreMgr::logdev().read_as_json(record.m_dev_key, val);
         if(ret ==0)
-            json_records.push_back(val);
-            
-        return (cur_idx < max_idx) ? true : false;
-        //return cb(cur_idx, log_buf);
+            json_records.emplace_back(val);
+        end_iterate = (cur_idx < max_idx) ? true : false; 
+        // if(end_iterate) 
+        // {
+        //     std::unique_lock< std::mutex > lk(_mtx);
+        //     _cv.notify_all();
+        // }  
+        return end_iterate;
     });
+    // {
+    //     std::unique_lock< std::mutex > lk(_mtx);
+    //     _cv.wait(lk, [end_iterate, this] { return end_iterate; });
+    // }
+    json_dump["log_records"] = json_records;
     return 0;
 }
 

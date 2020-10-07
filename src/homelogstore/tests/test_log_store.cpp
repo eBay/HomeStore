@@ -442,7 +442,16 @@ public:
             lsc->iterate_validate(expect_all_completed);
         }
     }
+    void dump_validate()
+    {
+        nlohmann::json json_dump;
+        homestore::log_dump_req dump_req = homestore::log_dump_req();
+        home_log_store_mgr.dump_log_store(dump_req, json_dump);
 
+        LOGINFO("Printing json dump of all logstores {}", json_dump.dump());
+
+
+    }
     int find_garbage_upto(logid_t idx) {
         int count = 0;
         auto it = m_garbage_stores_upto.begin();
@@ -600,6 +609,9 @@ TEST_F(LogStoreTest, BurstRandInsertThenTruncate) {
 
     LOGINFO("Step 4.1: Iterate all inserts one by one for each log store and validate if what is written is valid");
     this->iterate_validate(true);
+    
+    LOGINFO("Step 4.2: Read all inserts and dump it into a json");
+    this->dump_validate();
 
     LOGINFO("Step 5: Truncate all of the inserts one log store at a time and validate log dev truncation is marked "
             "correctly and also validate if all data prior to truncation return exception");
