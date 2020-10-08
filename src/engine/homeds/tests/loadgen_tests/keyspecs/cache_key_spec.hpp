@@ -7,13 +7,12 @@
 
 #include <cassert>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <random>
 #include <sstream>
 #include <string>
 #include <vector>
-
-#include <fmt/ostream.h>
 
 #include "homeds/loadgen/loadgen_common.hpp"
 #include "homeds/loadgen/spec/key_spec.hpp"
@@ -67,15 +66,25 @@ public:
     CacheKey(const CacheKey& key) : BlkId{key} {}
 
     virtual bool operator==(const KeySpec& other) const override {
-        CacheKey otherKey = (CacheKey&)other;
-        return compare(*this, otherKey);
+        // this is hokey down casting
+#ifdef NDEBUG
+        const CacheKey& cache_key{reinterpret_cast< const CacheKey& >(other)};
+#else
+        const CacheKey& cache_key{dynamic_cast< const CacheKey& >(other)};
+#endif
+        return compare(*this, cache_key);
     }
 
     BlkId* getBlkId() { return static_cast<BlkId*>(this); }
 
     virtual bool is_consecutive(KeySpec& k) override {
-        CacheKey* nk = (CacheKey*)&k;
-        if (get_id() + get_nblks() == nk->get_id())
+        // this is hokey down casting
+#ifdef NDEBUG
+        const CacheKey& cache_key{reinterpret_cast< const CacheKey& >(k)};
+#else
+        const CacheKey& cache_key{dynamic_cast< const CacheKey& >(k)};
+#endif
+        if (get_id() + get_nblks() == cache_key.get_id())
             return true;
         else
             return false;

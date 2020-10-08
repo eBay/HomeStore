@@ -3,6 +3,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <functional>
 #include <sstream>
 #include <string>
 
@@ -15,6 +16,8 @@
 namespace homeds {
 namespace loadgen {
 class VarBytesKey : public homeds::btree::BtreeKey, public KeySpec {
+    friend struct std::hash< VarBytesKey >;
+
 private:
     uint64_t m_num;
 
@@ -48,11 +51,22 @@ public:
     uint64_t to_integer() const { return m_num; }
 
     virtual bool operator==(const KeySpec& other) const override {
-        return (compare((const BtreeKey*)&(VarBytesKey&)other) == 0);
+        // this is hokey down casting
+#ifdef NDEBUG
+        const VarBytesKey& var_key{reinterpret_cast< const VarBytesKey& >(other)};
+#else
+        const VarBytesKey& var_key{dynamic_cast< const VarBytesKey& >(other)};
+#endif
+        return (compare(static_cast<const BtreeKey*>(&var_key)) == 0);
     }
 
     int compare(const BtreeKey* o) const override {
-        VarBytesKey* other = (VarBytesKey*)o;
+        // this is hokey down casting
+#ifdef NDEBUG
+        const VarBytesKey* other{reinterpret_cast< const VarBytesKey* >(o)};
+#else
+        const VarBytesKey* other{dynamic_cast< const VarBytesKey* >(o)};
+#endif
         if (m_num < other->m_num) {
             return -1;
         } else if (m_num > other->m_num) {
@@ -63,20 +77,22 @@ public:
     }
 
     int compare_range(const homeds::btree::BtreeSearchRange& range) const override {
-        auto other_start = (VarBytesKey*)range.get_start_key();
-        auto other_end = (VarBytesKey*)range.get_end_key();
+        auto other_start = range.get_start_key();
+        auto other_end = range.get_end_key();
 
         assert(0); // Do not support it yet
         return 0;
     }
 
     virtual sisl::blob get_blob() const {
-        sisl::blob b = {(uint8_t*)&m_num, sizeof(uint64_t)};
+        // this assumes endianess is same on systems
+        sisl::blob b{reinterpret_cast<uint8_t*>(const_cast<uint64_t*>(&m_num)), sizeof(uint64_t)};
         return b;
     };
 
     virtual void set_blob(const sisl::blob& b) {
-        auto n = *((uint64_t*)b.bytes);
+        // this assumes endianess is same on systems
+        const auto n{*reinterpret_cast<uint64_t*>(b.bytes)};
         m_num = n;
     }
     virtual void copy_blob(const sisl::blob& b) { set_blob(b); }
@@ -90,8 +106,13 @@ public:
     }
 
     virtual bool is_consecutive(KeySpec& k) override {
-        VarBytesKey* nk = (VarBytesKey*)&k;
-        if (m_num + 1 == nk->m_num)
+        // this is hokey downcasting
+#ifdef NDEBUG
+        const VarBytesKey& var_key{reinterpret_cast< const VarBytesKey& >(k)};
+#else
+        const VarBytesKey& var_key{dynamic_cast< const VarBytesKey& >(k)};
+#endif
+        if (m_num + 1 == var_key.m_num)
             return true;
         else
             return false;
@@ -114,4 +135,17 @@ std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, trait
 
 } // namespace loadgen
 } // namespace homeds
+
+// hash function definitions
+namespace std {
+template <>
+struct hash< homeds::loadgen::VarBytesKey > {
+    typedef homeds::loadgen::VarBytesKey argument_type;
+    typedef size_t result_type;
+    result_type operator()(const argument_type& var_key) const noexcept {
+        return std::hash< uint64_t >()(var_key.m_num);
+    }
+};
+} // namespace std
+
 #endif // HOMESTORE_BTREE_KEY_SPEC_HPP

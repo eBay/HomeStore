@@ -7,11 +7,10 @@
 
 #include <cassert>
 #include <cstdint>
+#include <functional>
 #include <random>
 #include <sstream>
 #include <string>
-
-#include <fmt/ostream.h>
 
 #include "homeds/loadgen/loadgen_common.hpp"
 #include "homeds/loadgen/spec/key_spec.hpp"

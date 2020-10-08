@@ -6,6 +6,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <functional>
 #include <random>
 #include <sstream>
 #include <string>
@@ -17,8 +18,6 @@
 namespace homeds {
 namespace loadgen {
 
-//
-//
 class VDevKey : public KeySpec {
 #define MAX_VDEV_ALLOC_SIZE 8192
 #define VDEV_BLK_SIZE 512
@@ -71,12 +70,17 @@ public:
     }
 
     virtual int compare(KeySpec* other) const {
-        VDevKey* k = dynamic_cast< VDevKey* >(other);
-        return to_string().compare(k->to_string());
+        // this is hokey down casting
+#ifdef NDEBUG
+        const VDevKey* vdev_key{reinterpret_cast< const VDevKey* >(other)};
+#else
+        const VDevKey* vdev_key{dynamic_cast< const VDevKey* >(other)};
+#endif
+        return to_string().compare(vdev_key->to_string());
     }
 
     std::string to_string() const {
-        ostringstream os;
+        std::ostringstream os;
         os << m_off << ", " << m_alloc_size;
         return os.str();
     }
@@ -112,3 +116,15 @@ std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, trait
 
 } // namespace loadgen
 } // namespace homeds
+
+// hash function definitions
+namespace std {
+template <>
+struct hash< homeds::loadgen::VDevKey > {
+    typedef homeds::loadgen::VDevKey argument_type;
+    typedef size_t result_type;
+    result_type operator()(const argument_type& vdev_key) const noexcept {
+        return std::hash< uint64_t >()(vdev_key.get_offset()) ^ std::hash< uint64_t >()(vdev_key.get_alloc_size());
+    }
+};
+} // namespace std

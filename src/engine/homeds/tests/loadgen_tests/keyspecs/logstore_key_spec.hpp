@@ -6,6 +6,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <functional>
 #include <random>
 #include <sstream>
 #include <string>
@@ -16,8 +17,6 @@
 namespace homeds {
 namespace loadgen {
 
-//
-//
 class LogStoreKey : public KeySpec {
 #define MAX_VDEV_ALLOC_SIZE 8192
 #define VDEV_BLK_SIZE 512
