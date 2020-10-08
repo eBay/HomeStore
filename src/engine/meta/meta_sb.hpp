@@ -116,7 +116,7 @@ struct meta_blk_ovf_hdr_s {
     uint64_t context_sz;
 };
 
-static constexpr uint32_t MAX_BLK_OVF_HDR_MAX_SZ = 512;
+static constexpr uint32_t MAX_BLK_OVF_HDR_MAX_SZ = META_BLK_HDR_MAX_SZ;
 static constexpr uint32_t META_BLK_OVF_HDR_RSVD_SZ =
     (MAX_BLK_OVF_HDR_MAX_SZ - sizeof(meta_blk_hdr_s)); // reserved size for ovf header
 static constexpr uint32_t MAX_NUM_DATA_BLKID = (META_BLK_PAGE_SZ - MAX_BLK_OVF_HDR_MAX_SZ) / sizeof(BlkId);

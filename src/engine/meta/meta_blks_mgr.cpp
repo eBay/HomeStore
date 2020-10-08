@@ -51,15 +51,15 @@ MetaBlkMgr::~MetaBlkMgr() {
 
 // sync read
 void MetaBlkMgr::read(BlkId& bid, void* dest, size_t sz) {
-    sisl::blob b;
     auto req = blkstore_req< BlkBuffer >::make_request();
     req->isSyncCall = true;
+    struct iovec iov;
+    iov.iov_base = dest;
+    iov.iov_len = sisl::round_up(sz, HS_STATIC_CONFIG(drive_attr.align_size));
+    std::vector< iovec > iov_vector = {iov};
 
-    auto bbuf = m_sb_blk_store->read(bid, 0, bid.get_nblks() * META_BLK_PAGE_SZ, req);
-    b = bbuf->at_offset(0);
+    m_sb_blk_store->read(bid, iov_vector, sz, req);
     HS_DEBUG_ASSERT_LE(sz, bid.get_nblks() * META_BLK_PAGE_SZ);
-    HS_DEBUG_ASSERT_EQ(b.size, bid.get_nblks() * META_BLK_PAGE_SZ);
-    memcpy((void*)dest, b.bytes, sz);
 }
 
 void MetaBlkMgr::load_ssb(const sb_blkstore_blob* blob) {
@@ -73,7 +73,7 @@ void MetaBlkMgr::load_ssb(const sb_blkstore_blob* blob) {
     m_ssb = (meta_blk_sb*)hs_iobuf_alloc(META_BLK_PAGE_SZ);
     memset((void*)m_ssb, 0, META_BLK_PAGE_SZ);
 
-    read(bid, (void*)m_ssb, sizeof(meta_blk_sb));
+    read(bid, (void*)m_ssb, META_BLK_PAGE_SZ);
 
     // verify magic
     HS_DEBUG_ASSERT_EQ((uint32_t)m_ssb->magic, META_BLK_SB_MAGIC);
@@ -308,13 +308,7 @@ void MetaBlkMgr::write_ovf_blk_to_disk(meta_blk_ovf_hdr* ovf_hdr, const void* co
 
     // write data blk to disk;
     size_t size_written = 0;
-#ifndef NDEBUG
-    size_t total_nblks = 0;
-#endif
     for (size_t i = 0; i < ovf_hdr->nbids; ++i) {
-#ifndef NDEBUG
-        total_nblks += ovf_hdr->data_bid[i].get_nblks();
-#endif
         struct iovec iovd[1];
         int iovcntd = 1;
         iovd[0].iov_base = (uint8_t*)context_data + offset + size_written;
@@ -329,7 +323,6 @@ void MetaBlkMgr::write_ovf_blk_to_disk(meta_blk_ovf_hdr* ovf_hdr, const void* co
     }
 
     HS_DEBUG_ASSERT_EQ(size_written, ovf_hdr->h.context_sz);
-    HS_DEBUG_ASSERT_LE(ovf_hdr->h.context_sz, total_nblks * META_BLK_PAGE_SZ);
 }
 
 void MetaBlkMgr::write_meta_blk_to_disk(meta_blk* mblk) {
@@ -408,87 +401,49 @@ meta_blk* MetaBlkMgr::init_meta_blk(BlkId& bid, const meta_sub_type type, const 
 // If crash happens at any point before the head ovf blk is written to disk, we are fine because those blks will be
 // free after reboot
 //
-void MetaBlkMgr::write_meta_blk_ovf(BlkId& prev_bid, BlkId& out_obid, const void* context_data, const uint64_t sz) {
+void MetaBlkMgr::write_meta_blk_ovf(BlkId& out_obid, const void* context_data, const uint64_t sz) {
     HS_ASSERT(DEBUG, m_meta_mtx.try_lock() == false, "mutex should be already be locked");
 
-    // calculte how many data blocks needed;
-    uint64_t nblks = (sz % META_BLK_PAGE_SZ) ? (sz / META_BLK_PAGE_SZ + 1) : (sz / META_BLK_PAGE_SZ);
+    // allocate data blocks
+    std::vector< BlkId > context_data_blkids;
+    auto ret = alloc_meta_blk(sisl::round_up(sz, META_BLK_PAGE_SZ), context_data_blkids);
+    if (ret != no_error) { HS_ASSERT(RELEASE, false, "failed to allocate blk with status: {}", ret.message()); }
 
-    HS_LOG(DEBUG, metablk, "Start to allocate nblks(data): {}, mstore used size: {}", nblks,
+    HS_LOG(DEBUG, metablk, "Start to allocate nblks(data): {}, mstore used size: {}", context_data_blkids.size(),
            m_sb_blk_store->get_used_size());
 
-#ifndef NDEBUG
-    uint64_t used_size_before_alloc = m_sb_blk_store->get_used_size();
-#endif
-
-    std::vector< std::tuple< BlkId, std::vector< BlkId >, uint64_t > >
-        ovf_blk_ids;          // pair: (ovf_hdr_bid, data_bid, size)
-    uint64_t nblks_alloc = 0; // number data blks allocated
-    while (nblks_alloc < nblks) {
-        // allocate header blk
-        BlkId obid;
-        auto ret = alloc_meta_blk(obid);
-        if (ret != no_error) { HS_ASSERT(RELEASE, false, "failed to allocate blk with status: {}", ret.message()); }
-
-        ovf_blk_ids.push_back(std::make_tuple(obid, std::vector< BlkId >{}, 0));
-
-        // allocate data blk ids;
-        size_t i = 0, sz_tmp = 0;
-        while (nblks_alloc < nblks && i++ < MAX_NUM_DATA_BLKID) {
-            // alloc contigous blks
-            BlkId bid;
-#ifndef NDEBUG
-            uint64_t used_size = m_sb_blk_store->get_used_size();
-#endif
-
-            // TODO: contigous nblks 32 will cause read assert in mempiece;
-            ret = alloc_meta_blk(bid, std::min(static_cast< uint64_t >(16), nblks - nblks_alloc));
-            if (ret != no_error) {
-                // fall back to allocate 1 single blk if not enough contigous blks;
-                ret = alloc_meta_blk(bid, std::min(static_cast< uint64_t >(1), nblks - nblks_alloc));
-                if (ret != no_error) {
-                    HS_ASSERT(RELEASE, false, "failed to allocate blk with status: {}", ret.message());
-                }
-            }
-
-            nblks_alloc += bid.get_nblks();
-            std::get< 1 >(ovf_blk_ids[ovf_blk_ids.size() - 1]).push_back(bid);
-            sz_tmp += (bid.get_nblks() * META_BLK_PAGE_SZ);
-
-            HS_DEBUG_ASSERT_EQ(m_sb_blk_store->get_used_size() - used_size, bid.get_nblks() * META_BLK_PAGE_SZ);
-        }
-
-        std::get< 2 >(ovf_blk_ids[ovf_blk_ids.size() - 1]) = sz_tmp;
-    }
-
-    HS_LOG(DEBUG, metablk, "After allocation, ovf blks: {}, nblks(data): {}, mstore used size: {}", ovf_blk_ids.size(),
-           nblks, m_sb_blk_store->get_used_size());
-
-    HS_DEBUG_ASSERT_EQ(m_sb_blk_store->get_used_size() - used_size_before_alloc,
-                       (ovf_blk_ids.size() + nblks) * META_BLK_PAGE_SZ);
-
     // return the 1st ovf header blk id to caller;
-    out_obid = std::get< 0 >(ovf_blk_ids[0]);
+    alloc_meta_blk(out_obid);
+    BlkId next_bid = out_obid;
     uint64_t offset_in_ctx = 0;
-    for (size_t i = 0; i < ovf_blk_ids.size(); ++i) {
-        auto obid = std::get< 0 >(ovf_blk_ids[i]);
+    uint32_t data_blkid_indx = 0;
+    while (next_bid.to_integer() != invalid_bid) {
+
         meta_blk_ovf_hdr* ovf_hdr = (meta_blk_ovf_hdr*)hs_iobuf_alloc(META_BLK_PAGE_SZ);
-
-        m_ovf_blk_hdrs[obid.to_integer()] = ovf_hdr;
-
+        BlkId cur_bid = next_bid;
         ovf_hdr->h.magic = META_BLK_OVF_MAGIC;
-        ovf_hdr->h.bid = obid;
-        ovf_hdr->h.next_bid = (i < ovf_blk_ids.size() - 1 ? std::get< 0 >(ovf_blk_ids[i + 1]) : BlkId(invalid_bid));
+        ovf_hdr->h.bid = cur_bid;
+
+        if ((context_data_blkids.size() - (data_blkid_indx + 1)) <= MAX_NUM_DATA_BLKID) {
+            ovf_hdr->h.next_bid.set(invalid_bid);
+        } else {
+            alloc_meta_blk(ovf_hdr->h.next_bid);
+            if (ret != no_error) { HS_ASSERT(RELEASE, false, "failed to allocate blk with status: {}", ret.message()); }
+        }
+        next_bid = ovf_hdr->h.next_bid;
 
         // save data bids to ovf hdr block;
-        ovf_hdr->nbids = std::get< 1 >(ovf_blk_ids[i]).size();
-        HS_DEBUG_ASSERT_LE(ovf_hdr->nbids, MAX_NUM_DATA_BLKID);
-        for (size_t j = 0; j < ovf_hdr->nbids; ++j) {
-            ovf_hdr->data_bid[j] = std::get< 1 >(ovf_blk_ids[i])[j];
+        uint32_t j = 0;
+        uint64_t data_size = 0;
+        for (j = 0; j < MAX_NUM_DATA_BLKID && data_blkid_indx < context_data_blkids.size(); ++j) {
+            data_size += context_data_blkids[data_blkid_indx].data_size(META_BLK_PAGE_SZ);
+            ovf_hdr->data_bid[j] = context_data_blkids[data_blkid_indx++];
         }
 
+        ovf_hdr->nbids = j;
         // context_sz points to the actual context data written into data_bid;
-        ovf_hdr->h.context_sz = (i < ovf_blk_ids.size() - 1) ? std::get< 2 >(ovf_blk_ids[i]) : (sz - offset_in_ctx);
+        ovf_hdr->h.context_sz = (data_blkid_indx < context_data_blkids.size() - 1) ? data_size : (sz - offset_in_ctx);
+        m_ovf_blk_hdrs[cur_bid.to_integer()] = ovf_hdr;
 
         // write ovf header blk to disk
         write_ovf_blk_to_disk(ovf_hdr, context_data, sz, offset_in_ctx);
@@ -517,7 +472,7 @@ void MetaBlkMgr::write_meta_blk_internal(meta_blk* mblk, const void* context_dat
         BlkId obid(invalid_bid);
 
         // write overflow block to disk;
-        write_meta_blk_ovf(mblk->hdr.h.bid, obid, context_data, sz);
+        write_meta_blk_ovf(obid, context_data, sz);
 
         HS_DEBUG_ASSERT_NE(obid.to_integer(), invalid_bid);
         mblk->hdr.h.ovf_bid = obid;
@@ -713,15 +668,15 @@ void MetaBlkMgr::free_meta_blk(meta_blk* mblk) {
     iomanager.iobuf_free((uint8_t*)mblk);
 }
 
-std::error_condition MetaBlkMgr::alloc_meta_blk(const uint64_t nblks, std::vector< BlkId >& bid) {
+std::error_condition MetaBlkMgr::alloc_meta_blk(const uint64_t size, std::vector< BlkId >& bid) {
     blk_alloc_hints hints;
     hints.desired_temp = 0;
     hints.dev_id_hint = -1;
     hints.is_contiguous = false;
 
     try {
-        auto ret = m_sb_blk_store->alloc_blk(nblks * META_BLK_PAGE_SZ, hints, bid);
-        if (ret != BlkAllocStatus::BLK_ALLOC_SUCCESS) {
+        auto ret = m_sb_blk_store->alloc_blk(size, hints, bid);
+        if (ret != BLK_ALLOC_SUCCESS) {
             HS_LOG(ERROR, metablk, "failing as it is out of disk space!");
             return std::errc::no_space_on_device;
         }
@@ -734,17 +689,19 @@ std::error_condition MetaBlkMgr::alloc_meta_blk(const uint64_t nblks, std::vecto
     return no_error;
 }
 
-std::error_condition MetaBlkMgr::alloc_meta_blk(BlkId& bid, uint32_t nblks) {
+std::error_condition MetaBlkMgr::alloc_meta_blk(BlkId& bid) {
     blk_alloc_hints hints;
     hints.desired_temp = 0;
     hints.dev_id_hint = -1;
     hints.is_contiguous = true;
+
     try {
-        auto ret = m_sb_blk_store->alloc_contiguous_blk(nblks * META_BLK_PAGE_SZ, hints, &bid);
-        if (ret != BlkAllocStatus::BLK_ALLOC_SUCCESS) {
+        auto ret = m_sb_blk_store->alloc_contiguous_blk(META_BLK_PAGE_SZ, hints, &bid);
+        if (ret != BLK_ALLOC_SUCCESS) {
             HS_LOG(ERROR, metablk, "failing as it is out of disk space!");
             return std::errc::no_space_on_device;
         }
+        HS_DEBUG_ASSERT_EQ(ret, BLK_ALLOC_SUCCESS);
     } catch (const std::exception& e) {
         HS_ASSERT(RELEASE, 0, "{}", e.what());
         return std::errc::device_or_resource_busy;
@@ -790,7 +747,8 @@ void MetaBlkMgr::recover(const bool do_comp_cb) {
                 for (size_t i = 0; i < ovf_hdr->nbids; ++i) {
                     read_sz_per_db = (i < ovf_hdr->nbids - 1 ? ovf_hdr->data_bid[i].get_nblks() * META_BLK_PAGE_SZ
                                                              : ovf_hdr->h.context_sz - read_offset);
-                    read(ovf_hdr->data_bid[i], buf.bytes() + read_offset, read_sz_per_db);
+                    read(ovf_hdr->data_bid[i], buf.bytes() + read_offset,
+                         sisl::round_up(read_sz_per_db, HS_STATIC_CONFIG(drive_attr.align_size)));
                     read_offset += read_sz_per_db;
                 }
 
