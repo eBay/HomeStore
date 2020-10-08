@@ -345,6 +345,11 @@ private:
     uint64_t m_cur_group_cursor;
 };
 
+enum log_dump_verbosity{
+    CONTENT,
+    HEADER
+};
+
 class LogDev {
 public:
     typedef std::function< void(logstore_id_t, logdev_key, logdev_key, uint32_t nremaining_in_batch, void*) >
@@ -509,7 +514,7 @@ public:
 
     void update_store_meta(const logstore_id_t idx, const logstore_meta& meta, bool persist_now);
 
-    int read_as_json(const logdev_key& key, nlohmann::json & json_val, bool print_content = false);
+    int read_as_json(const logdev_key& key, nlohmann::json & json_val, const log_dump_verbosity print_level = log_dump_verbosity::HEADER);
 
 
 private:
@@ -569,4 +574,5 @@ private:
     LogGroup m_log_group_pool[2];
     uint32_t m_log_group_idx = 1;
 }; // LogDev
+
 } // namespace homestore

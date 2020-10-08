@@ -11,24 +11,19 @@
 
 namespace homestore {
 
-enum log_dump_verbosity{
-    CONTENT,
-    HEADER
-};
-
 struct log_dump_req{
     log_dump_req(log_dump_verbosity level = log_dump_verbosity::HEADER, std::shared_ptr< HomeLogStore > logstore = nullptr,
-    logdev_key s_key = {std::numeric_limits< logid_t >::min(), std::numeric_limits< uint64_t >::min()}, 
-    logdev_key e_key = {std::numeric_limits< logid_t >::max(), std::numeric_limits< logid_t >::max()}) 
+    logstore_seq_num_t s_seq = 0, 
+    logstore_seq_num_t e_seq = std::numeric_limits<int64_t>::max()) 
         : verbosity_level(level),
         log_store(logstore),
-        start_logdev_key(s_key),
-        end_logdev_key(e_key)
+        start_seq_num(s_seq),
+        end_seq_num(e_seq)
     {}
     log_dump_verbosity verbosity_level; // How much information we need of log file (entire content or header)
     std::shared_ptr< HomeLogStore > log_store; // if null all log stores are dumped
-    logdev_key start_logdev_key; // empty_key if from start of log file
-    logdev_key end_logdev_key;  // empty_key if till last log entry
+    logstore_seq_num_t start_seq_num; // empty_key if from start of log file
+    logstore_seq_num_t end_seq_num;  // empty_key if till last log entry
 };
 
 struct logstore_record {
@@ -481,7 +476,7 @@ public:
         return true;
     }
 
-    int dump_log_store(nlohmann::json& json_dump, const log_dump_req dump_req = log_dump_req());
+    int dump_log_store(nlohmann::json& json_dump, const log_dump_req& dump_req = log_dump_req());
 
     static bool is_aligned_buf_needed(size_t size) { return (log_record::is_size_inlineable(size) == false); }
 

@@ -203,7 +203,7 @@ log_buffer LogDev::read(const logdev_key& key) {
     return b;
 }
 
-int LogDev::read_as_json(const logdev_key& key, nlohmann::json & json_val, bool print_content) {
+int LogDev::read_as_json(const logdev_key& key, nlohmann::json & json_val, const log_dump_verbosity print_level) {
     static thread_local sisl::aligned_unique_ptr< uint8_t > _read_buf;
 
     // First read the offset and read the log_group. Then locate the log_idx within that and get the actual data
@@ -246,7 +246,7 @@ int LogDev::read_as_json(const logdev_key& key, nlohmann::json & json_val, bool 
         return -1;
     }
 
-    if(!print_content)
+    if(print_level == log_dump_verbosity::HEADER)
         return 0;
 
     log_buffer b((size_t)rec->size);

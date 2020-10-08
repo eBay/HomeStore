@@ -507,23 +507,29 @@ int HomeLogStore::search_max_le(logstore_seq_num_t input_sn) {
     return (end - 1);
 }
 
-int HomeLogStore::dump_log_store(nlohmann::json& json_dump, const log_dump_req dump_req){
+int HomeLogStore::dump_log_store(nlohmann::json& json_dump, const log_dump_req& dump_req){
     json_dump = nlohmann::json::object();
     json_dump ["store_id"] = this->m_store_id;
 
     auto trunc_upto = this->truncated_upto();
     int64_t idx = trunc_upto + 1;
+    if(dump_req.start_seq_num != 0)
+        idx = dump_req.start_seq_num;
+
     nlohmann::json json_records = nlohmann::json::array();
     std::mutex _mtx;
     std::condition_variable _cv;
     bool end_iterate = false;
-    m_records.foreach_completed(idx, [&json_records, &end_iterate](long int cur_idx, long int max_idx, homestore::logstore_record& record) -> bool {
+    m_records.foreach_completed(idx, [&json_records, &dump_req, &end_iterate](long int cur_idx, long int max_idx, homestore::logstore_record& record) -> bool {
         // do a sync read
         nlohmann::json val;
-        auto ret = HomeLogStoreMgr::logdev().read_as_json(record.m_dev_key, val);
+        auto ret = HomeLogStoreMgr::logdev().read_as_json(record.m_dev_key, val, dump_req.verbosity_level);
         if(ret ==0)
             json_records.emplace_back(val);
-        end_iterate = (cur_idx < max_idx) ? true : false; 
+        int64_t end_idx = std::min(max_idx, dump_req.end_seq_num);
+        // LOGINFO("cur_idx {} end_idx {} max_idx {} dump_req.end_seq_num {}", cur_idx, end_idx, max_idx, dump_req.end_seq_num);
+
+        end_iterate = (cur_idx < end_idx) ? true : false; 
         // if(end_iterate) 
         // {
         //     std::unique_lock< std::mutex > lk(_mtx);
