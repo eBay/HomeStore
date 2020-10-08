@@ -67,6 +67,8 @@ static inline auto hs_iobuf_alloc(size_t size) {
     return iomanager.iobuf_alloc(HS_STATIC_CONFIG(drive_attr.align_size), size);
 }
 
+static inline void hs_iobuf_free(uint8_t* ptr) { iomanager.iobuf_free(ptr); }
+
 static inline uint64_t hs_aligned_size(size_t size) {
     return sisl::round_up(size, HS_STATIC_CONFIG(drive_attr.align_size));
 }
