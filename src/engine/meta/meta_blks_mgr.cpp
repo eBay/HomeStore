@@ -415,7 +415,7 @@ void MetaBlkMgr::write_meta_blk_ovf(BlkId& out_obid, const void* context_data, c
     BlkId next_bid = out_obid;
     uint64_t offset_in_ctx = 0;
     uint32_t data_blkid_indx = 0;
-    while (next_bid != invalid_bid) {
+    while (next_bid.to_integer() != invalid_bid) {
 
         meta_blk_ovf_hdr* ovf_hdr = (meta_blk_ovf_hdr*)hs_iobuf_alloc(META_BLK_PAGE_SZ);
         BlkId cur_bid = next_bid;
