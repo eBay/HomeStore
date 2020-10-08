@@ -64,7 +64,7 @@ public:
 
     int compare(const BtreeKey* o) const override {
 #ifdef NDEBUG
-        const SimpleNumberKey* other{reinterpret_cast< const SimpleNumberKey& >(o)};
+        const SimpleNumberKey* other{reinterpret_cast< const SimpleNumberKey* >(o)};
 #else
         const SimpleNumberKey* other{dynamic_cast< const SimpleNumberKey* >(o)};
 #endif
