@@ -17,7 +17,6 @@
 
 #include "homeds/loadgen/loadgen_common.hpp"
 #include "homeds/loadgen/spec/key_spec.hpp"
-#include "loadgen/spec/key_spec.hpp"
 
 namespace homeds {
 namespace loadgen {
