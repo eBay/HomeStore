@@ -37,6 +37,10 @@ namespace homestore {
 class CacheRecord : public homeds::HashNode, sisl::ObjLifeCounter< CacheRecord > {
 public:
     CacheRecord(void* const cache_buffer) : m_evict_record{cache_buffer} {};
+    CacheRecord(const CacheRecord&) = delete;
+    CacheRecord(CacheRecord&&) noexcept = delete;
+    CacheRecord& operator=(const CacheRecord&) = delete;
+    CacheRecord& operator=(CacheRecord&&) noexcept = delete;
 
     typename CurrentEvictor::EvictRecordType m_evict_record; // Information about the eviction record itself.
 

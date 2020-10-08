@@ -5,10 +5,17 @@
 #ifndef HOMESTORE_MAP_KEY_SPEC_HPP
 #define HOMESTORE_MAP_KEY_SPEC_HPP
 
+#include <cassert>
+#include <cstdint>
+#include <random>
+#include <sstream>
+#include <string>
+
+#include <fmt/ostream.h>
+
 #include "homeds/loadgen/loadgen_common.hpp"
 #include "homeds/loadgen/spec/key_spec.hpp"
-#include <fmt/ostream.h>
-#include <random>
+
 namespace homeds {
 namespace loadgen {
 class MapKey : public MappingKey, public KeySpec {
@@ -61,11 +68,6 @@ public:
         return (compare((const BtreeKey*)&(MapKey&)other) == 0);
     }
 
-    friend ostream& operator<<(ostream& os, const MapKey& k) {
-        os << k.to_string();
-        return os;
-    }
-
     virtual bool is_consecutive(KeySpec& k) override {
         MapKey* nk = (MapKey*)&k;
         if (end() + 1 == nk->start())
@@ -83,6 +85,20 @@ public:
         }
     }
 };
+
+template < typename charT, typename traits >
+std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, traits >& outStream,
+                                                const MapKey& map_key) {
+    // copy the stream formatting
+    std::basic_ostringstream< charT, traits > outStringStream;
+    outStringStream.copyfmt(outStream);
+
+    // print the stream
+    outStringStream << map_key.to_string();
+    outStream << outStringStream.str();
+
+    return outStream;
+}
 
 }; // namespace loadgen
 

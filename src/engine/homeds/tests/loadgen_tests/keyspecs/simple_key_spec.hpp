@@ -5,10 +5,16 @@
 #ifndef HOMESTORE_BTREE_KEY_SPEC_HPP
 #define HOMESTORE_BTREE_KEY_SPEC_HPP
 
+#include <cassert>
+#include <cstdint>
+#include <sstream>
+#include <string>
+
+#include <fmt/ostream.h>
+
+#include "homeds/btree/btree.hpp"
 #include "homeds/loadgen/loadgen_common.hpp"
 #include "homeds/loadgen/spec/key_spec.hpp"
-#include "homeds/btree/btree.hpp"
-#include <fmt/ostream.h>
 
 namespace homeds {
 namespace loadgen {
@@ -83,11 +89,6 @@ public:
     virtual void set_blob_size(uint32_t size) {}
     virtual std::string to_string() const { return std::to_string(m_num); }
 
-    friend ostream& operator<<(ostream& os, const SimpleNumberKey& k) {
-        os << std::to_string(k.m_num);
-        return os;
-    }
-
     static void gen_keys_in_range(SimpleNumberKey& k1, uint32_t num_of_keys,
                                   std::vector< SimpleNumberKey > keys_inrange) {
         assert(0);
@@ -101,6 +102,20 @@ public:
             return false;
     }
 };
+
+template < typename charT, typename traits >
+std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, traits >& outStream,
+                                                const SimpleNumberKey& key) {
+    // copy the stream formatting
+    std::basic_ostringstream< charT, traits > outStringStream;
+    outStringStream.copyfmt(outStream);
+
+    // print the stream
+    outStringStream << key.to_string();
+    outStream << outStringStream.str();
+
+    return outStream;
+}
 
 class CompositeNumberKey : public homeds::btree::BtreeKey, public KeySpec {
 private:
@@ -256,14 +271,23 @@ public:
         return ss.str();
     }
 
-    friend ostream& operator<<(ostream& os, const CompositeNumberKey& k) {
-        os << "count: " << k.get_count() << " rank: " << k.get_rank() << " blknum: " << k.get_blk_num();
-        return os;
-    }
-
     bool operator<(const CompositeNumberKey& o) const { return (compare(&o) < 0); }
     bool operator==(const CompositeNumberKey& other) const { return (compare(&other) == 0); }
 };
+
+template < typename charT, typename traits >
+std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, traits >& outStream,
+                                                const CompositeNumberKey& key) {
+    // copy the stream formatting
+    std::basic_ostringstream< charT, traits > outStringStream;
+    outStringStream.copyfmt(outStream);
+
+    // print the stream
+    outStringStream << key.to_string();
+    outStream << outStringStream.str();
+
+    return outStream;
+}
 
 } // namespace loadgen
 } // namespace homeds

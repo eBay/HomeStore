@@ -29,7 +29,7 @@ class LRUEvictionPolicy {
 public:
     typedef LRUEvictRecord RecordType;
 
-    LRUEvictionPolicy(const size_t [[maybe_unused]] num_entries) {}
+    LRUEvictionPolicy([[maybe_unused]] const size_t num_entries) {}
     LRUEvictionPolicy(const LRUEvictionPolicy&) = delete;
     LRUEvictionPolicy(LRUEvictionPolicy&&) noexcept = delete;
     LRUEvictionPolicy& operator=(const LRUEvictionPolicy&) = delete;

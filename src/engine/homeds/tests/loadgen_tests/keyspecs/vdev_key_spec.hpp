@@ -4,12 +4,15 @@
 
 #pragma once
 
+#include <cassert>
+#include <cstdint>
+#include <random>
+#include <sstream>
+#include <string>
+
 #include "homeds/loadgen/loadgen_common.hpp"
 #include "homeds/loadgen/spec/key_spec.hpp"
 #include "homeds/loadgen/iomgr_executor.hpp"
-
-#include <random>
-#include <sstream>
 
 namespace homeds {
 namespace loadgen {
@@ -62,8 +65,6 @@ public:
         return true;
     }
 
-    friend ostream& operator<<(ostream& os, const VDevKey& k) { return os; }
-
     virtual bool is_consecutive(KeySpec& k) override {
         assert(0);
         return false;
@@ -95,6 +96,19 @@ private:
     uint64_t m_off = 0;
     uint64_t m_alloc_size = 0;
 };
+
+template < typename charT, typename traits >
+std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, traits >& outStream, const VDevKey& key) {
+    // copy the stream formatting
+    std::basic_ostringstream< charT, traits > outStringStream;
+    outStringStream.copyfmt(outStream);
+
+    // print the stream
+    outStringStream << key.to_string();
+    outStream << outStringStream.str();
+
+    return outStream;
+}
 
 } // namespace loadgen
 } // namespace homeds

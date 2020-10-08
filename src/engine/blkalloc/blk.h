@@ -44,13 +44,13 @@ public:
     uint64_t m_rest : 64 - ID_BITS - NBLKS_BITS - CHUNK_NUM_BITS;
 
     // make these constexpr after rolling in sisl update
-    [[nodicard]] static constexpr uint64_t invalid_internal_id() {
+    [[nodiscard]] static constexpr uint64_t invalid_internal_id() {
         return (static_cast< uint64_t >(1) << (ID_BITS + NBLKS_BITS + CHUNK_NUM_BITS)) - 1;
     }
 
-    [[nodicard]] static constexpr uint64_t max_blks_in_op() { return s_nblks_mask; }
+    [[nodiscard]] static constexpr uint64_t max_blks_in_op() { return s_nblks_mask; }
 
-    [[nodicard]] static int compare(const BlkId& one, const BlkId& two) {
+    [[nodiscard]] static int compare(const BlkId& one, const BlkId& two) {
         if (one.m_chunk_num > two.m_chunk_num) {
             return -1;
         } else if (one.m_chunk_num < two.m_chunk_num) {
@@ -73,7 +73,7 @@ public:
     }
 
 
-    [[nodicard]] uint64_t to_integer() const {
+    [[nodiscard]] uint64_t to_integer() const {
         const uint64_t val{m_id | (static_cast< uint64_t >(m_nblks) << ID_BITS) |
                            (static_cast< uint64_t >(m_chunk_num) << (ID_BITS + NBLKS_BITS))};
         return val;

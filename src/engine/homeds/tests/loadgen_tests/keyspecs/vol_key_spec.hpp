@@ -5,13 +5,16 @@
 #ifndef __HOMESTORE_VOLUME_KEY_SPEC_HPP__
 #define __HOMESTORE_VOLUME_KEY_SPEC_HPP__
 
-#include "homeds/loadgen/loadgen_common.hpp"
-#include "homeds/loadgen/spec/key_spec.hpp"
-#include "homeds/loadgen/iomgr_executor.hpp"
-#include "homeds/tests/loadgen_tests/vol_manager.hpp"
-
+#include <cassert>
+#include <cstdint>
 #include <random>
 #include <sstream>
+#include <string>
+
+#include "homeds/loadgen/iomgr_executor.hpp"
+#include "homeds/loadgen/loadgen_common.hpp"
+#include "homeds/loadgen/spec/key_spec.hpp"
+#include "homeds/tests/loadgen_tests/vol_manager.hpp"
 
 namespace homeds {
 namespace loadgen {
@@ -61,11 +64,6 @@ public:
             (((const VolumeKey*)&(VolumeKey&)other)->vol_id() == m_vol_id);
     }
 
-    friend ostream& operator<<(ostream& os, const VolumeKey& k) {
-        os << k.vol_id() << k.lba();
-        return os;
-    }
-
     virtual bool is_consecutive(KeySpec& k) override {
         assert(0);
         return false;
@@ -87,6 +85,19 @@ private:
     uint64_t m_lba;
     uint64_t m_nblks;
 };
+
+template < typename charT, typename traits >
+std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, traits >& outStream, const VolumeKey& key) {
+    // copy the stream formatting
+    std::basic_ostringstream< charT, traits > outStringStream;
+    outStringStream.copyfmt(outStream);
+
+    // print the stream
+    outStringStream << key.to_string();
+    outStream << outStringStream.str();
+
+    return outStream;
+}
 
 } // namespace loadgen
 } // namespace homeds
