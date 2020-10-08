@@ -676,7 +676,7 @@ std::error_condition MetaBlkMgr::alloc_meta_blk(const uint64_t size, std::vector
 
     try {
         auto ret = m_sb_blk_store->alloc_blk(size, hints, bid);
-        if (ret != BLK_ALLOC_SUCCESS) {
+        if (ret != BlkAllocStatus::BLK_ALLOC_SUCCESS) {
             HS_LOG(ERROR, metablk, "failing as it is out of disk space!");
             return std::errc::no_space_on_device;
         }
@@ -697,11 +697,11 @@ std::error_condition MetaBlkMgr::alloc_meta_blk(BlkId& bid) {
 
     try {
         auto ret = m_sb_blk_store->alloc_contiguous_blk(META_BLK_PAGE_SZ, hints, &bid);
-        if (ret != BLK_ALLOC_SUCCESS) {
+        if (ret != BlkAllocStatus::BLK_ALLOC_SUCCESS) {
             HS_LOG(ERROR, metablk, "failing as it is out of disk space!");
             return std::errc::no_space_on_device;
         }
-        HS_DEBUG_ASSERT_EQ(ret, BLK_ALLOC_SUCCESS);
+        HS_DEBUG_ASSERT_EQ(ret, BlkAllocStatus::BLK_ALLOC_SUCCESS);
     } catch (const std::exception& e) {
         HS_ASSERT(RELEASE, 0, "{}", e.what());
         return std::errc::device_or_resource_busy;
