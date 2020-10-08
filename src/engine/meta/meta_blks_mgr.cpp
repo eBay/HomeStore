@@ -415,18 +415,18 @@ void MetaBlkMgr::write_meta_blk_ovf(BlkId& out_obid, const void* context_data, c
     BlkId next_bid = out_obid;
     uint64_t offset_in_ctx = 0;
     uint32_t data_blkid_indx = 0;
-    while (data_blkid_indx < context_data_blkids.size()) {
+    while (next_bid != invalid_bid) {
 
         meta_blk_ovf_hdr* ovf_hdr = (meta_blk_ovf_hdr*)hs_iobuf_alloc(META_BLK_PAGE_SZ);
         BlkId cur_bid = next_bid;
         ovf_hdr->h.magic = META_BLK_OVF_MAGIC;
         ovf_hdr->h.bid = cur_bid;
 
-        if ((context_data_blkids.size() - (data_blkid_indx + 1)) > MAX_NUM_DATA_BLKID) {
+        if ((context_data_blkids.size() - (data_blkid_indx + 1)) <= MAX_NUM_DATA_BLKID) {
+            ovf_hdr->h.next_bid.set(invalid_bid);
+        } else {
             alloc_meta_blk(ovf_hdr->h.next_bid);
             if (ret != no_error) { HS_ASSERT(RELEASE, false, "failed to allocate blk with status: {}", ret.message()); }
-        } else {
-            ovf_hdr->h.next_bid.set(invalid_bid);
         }
         next_bid = ovf_hdr->h.next_bid;
 
