@@ -213,9 +213,8 @@ private:
      *
      * @return : BlkId that is allcoated;
      */
-    std::error_condition alloc_meta_blk(BlkId& bid, uint32_t nblks = 1);
-
-    std::error_condition alloc_meta_blk(const uint64_t nblks, std::vector< BlkId >& bid);
+    std::error_condition alloc_meta_blk(BlkId& bid);
+    std::error_condition alloc_meta_blk(const uint64_t size, std::vector< BlkId >& bid);
 
     void free_meta_blk(meta_blk* mblk);
 
@@ -241,13 +240,12 @@ private:
     /**
      * @brief
      *
-     * @param prev_id
      * @param bid
      * @param context_data
      * @param sz
      * @param offset
      */
-    void write_meta_blk_ovf(BlkId& prev_id, BlkId& bid, const void* context_data, const uint64_t sz);
+    void write_meta_blk_ovf(BlkId& bid, const void* context_data, const uint64_t sz);
 
     /**
      * @brief : internal implementation of populating and writing a meta block;
