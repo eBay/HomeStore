@@ -286,7 +286,7 @@ public:
     /* CP start is called when all its consumers have purged their free lists and now want to persist the
      * disk bitmap.
      */
-    [[nodiscard]] sisl::byte_array cp_start(const std::shared_ptr< blkalloc_cp >& [[maybe_unused]] id) {
+    [[nodiscard]] sisl::byte_array cp_start([[maybe_unused]] const std::shared_ptr< blkalloc_cp >& id) {
         return (m_disk_bm->serialize());
     }
 
