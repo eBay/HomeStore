@@ -1,30 +1,30 @@
-#include "volume.hpp"
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
-#include <api/vol_interface.hpp>
-#include <utility/thread_buffer.hpp>
-#include <iomgr/iomgr.hpp>
-#include <iomgr/aio_drive_interface.hpp>
-#include <boost/uuid/uuid_generators.hpp>
-#include <boost/uuid/string_generator.hpp>
-#include <boost/uuid/uuid_io.hpp>
-#include <boost/lexical_cast.hpp>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <fstream>
 #include <iostream>
 #include <string>
-#include <engine/homeds/bitmap/bitset.hpp>
-#include <atomic>
-#include <string>
-#include <utility/thread_buffer.hpp>
-#include <chrono>
-#include <fstream>
 #include <thread>
-extern "C" {
+#include <vector>
+
 #include <fcntl.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <sys/timeb.h>
-}
+
+#include <boost/lexical_cast.hpp>
+#include <boost/uuid/string_generator.hpp>
+#include <boost/uuid/uuid_generators.hpp>
+#include <boost/uuid/uuid_io.hpp>
+#include <fds/bitset.hpp>
+#include <iomgr/aio_drive_interface.hpp>
+#include <iomgr/iomgr.hpp>
+#include <sds_logging/logging.h>
+#include <sds_options/options.h>
+#include <utility/thread_buffer.hpp>
+
+#include "api/vol_interface.hpp"
+#include "volume.hpp"
 
 using namespace homestore;
 

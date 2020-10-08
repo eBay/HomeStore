@@ -1,12 +1,15 @@
 #include "engine/common/homestore_assert.hpp"
 #include "log_dev.hpp"
 #include "log_store.hpp"
+#include <utility/thread_factory.hpp>
+#include <iomgr/iomgr.hpp>
+#include <string>
+#include <fmt/format.h>
 
 namespace homestore {
 SDS_LOGGING_DECL(logstore)
 
 static constexpr logdev_key out_of_bound_ld_key = {std::numeric_limits< logid_t >::max(), 0};
-REGISTER_METABLK_SUBSYSTEM(log_dev, "LOG_DEV", HomeLogStoreMgr::meta_blk_found_cb, nullptr)
 
 #define THIS_LOGSTORE_LOG(level, msg, ...) HS_SUBMOD_LOG(level, logstore, , "store", m_store_id, msg, __VA_ARGS__)
 
@@ -22,6 +25,9 @@ void HomeLogStoreMgr::start(bool format) {
 
     // Start the logdev
     m_log_dev.start(format);
+
+    // Create an truncate thread loop which handles truncation which does sync IO
+    start_truncate_thread();
 
     // If there are any unopened storeids found, loop and check again if they are indeed open later. Unopened log store
     // could be possible if the ids are deleted, but it is delayed to remove from store id reserver. In that case,
@@ -75,6 +81,25 @@ void HomeLogStoreMgr::remove_log_store(logstore_id_t store_id) {
     m_id_logstore_map.wlock()->erase(store_id);
     m_log_dev.unreserve_store_id(store_id);
     COUNTER_DECREMENT(m_metrics, logstores_count, 1);
+}
+
+void HomeLogStoreMgr::start_truncate_thread() {
+    std::condition_variable _cv;
+    std::mutex _mtx;
+
+    m_truncate_thread = nullptr;
+    auto sthread = sisl::named_thread("logstore_truncater", [this, &_cv, &_mtx]() {
+        iomanager.run_io_loop(false, nullptr, ([this, &_cv, &_mtx](bool is_started) {
+                                  if (is_started) {
+                                      std::unique_lock< std::mutex > lk(_mtx);
+                                      m_truncate_thread = iomanager.iothread_self();
+                                      _cv.notify_all();
+                                  }
+                              }));
+    });
+    std::unique_lock< std::mutex > lk(_mtx);
+    _cv.wait(lk, [this] { return (m_truncate_thread != nullptr); });
+    sthread.detach();
 }
 
 void HomeLogStoreMgr::__on_log_store_found(logstore_id_t store_id, const logstore_meta& meta) {
@@ -131,26 +156,37 @@ void HomeLogStoreMgr::__on_logfound(logstore_id_t id, logstore_seq_num_t seq_num
 }
 
 void HomeLogStoreMgr::device_truncate(const device_truncate_cb_t& cb, bool wait_till_done, bool dry_run) {
-    std::mutex _mtx;
-    std::condition_variable _cv;
-    bool trunc_done = false;
+    auto treq = std::make_shared< truncate_req >();
+    treq->wait_till_done = wait_till_done;
+    treq->dry_run = dry_run;
+    treq->cb = cb;
 
-    bool locked_now = m_log_dev.try_lock_flush([this, cb, dry_run, wait_till_done, &_mtx, &_cv, &trunc_done]() {
-        logdev_key trunc_upto = do_device_truncate(dry_run);
-        if (cb) { cb(trunc_upto); }
+    device_truncate_in_user_reactor(treq);
 
-        if (wait_till_done) {
-            std::lock_guard< std::mutex > lk(_mtx);
-            trunc_done = true;
-            _cv.notify_one();
+    if (treq->wait_till_done) {
+        std::unique_lock< std::mutex > lk(treq->mtx);
+        treq->cv.wait(lk, [&] { return treq->trunc_done; });
+    }
+}
+
+void HomeLogStoreMgr::device_truncate_in_user_reactor(const std::shared_ptr< truncate_req >& treq) {
+    bool locked_now = m_log_dev.try_lock_flush([this, treq]() {
+        if (iomanager.am_i_tight_loop_reactor()) {
+            iomanager.run_on(m_truncate_thread, [this, treq]([[maybe_unused]] io_thread_addr_t addr) {
+                device_truncate_in_user_reactor(treq);
+            });
+        } else {
+            logdev_key trunc_upto = do_device_truncate(treq->dry_run);
+            if (treq->cb) { treq->cb(trunc_upto); }
+
+            if (treq->wait_till_done) {
+                std::lock_guard< std::mutex > lk(treq->mtx);
+                treq->trunc_done = true;
+                treq->cv.notify_one();
+            }
         }
     });
     if (locked_now) { m_log_dev.unlock_flush(); }
-
-    if (wait_till_done) {
-        std::unique_lock< std::mutex > lk(_mtx);
-        _cv.wait(lk, [&] { return trunc_done; });
-    }
 }
 
 logdev_key HomeLogStoreMgr::do_device_truncate(bool dry_run) {
@@ -161,6 +197,7 @@ logdev_key HomeLogStoreMgr::do_device_truncate(bool dry_run) {
     m_non_participating_stores.clear();
     logdev_key min_safe_ld_key = out_of_bound_ld_key;
 
+    std::string dbg_str = "Format [store_id:trunc_lsn:logidx:dev_trunc_pending?:active_writes_in_trucate?] ";
     m_id_logstore_map.withRLock([&](auto& id_logstore_map) {
         for (auto& id_logstore : id_logstore_map) {
             auto& store_ptr = id_logstore.second.m_log_store;
@@ -168,12 +205,14 @@ logdev_key HomeLogStoreMgr::do_device_truncate(bool dry_run) {
             if (!trunc_info.pending_dev_truncation && !trunc_info.active_writes_not_part_of_truncation) {
                 // This log store neither have any pending device truncation nor active logstore io going on for now.
                 // Ignore this log store for min safe boundary calculation.
-                LOGINFOMOD(logstore, "Logstore id={} is not participating in the current truncation",
-                           store_ptr->get_store_id())
+                fmt::format_to(std::back_inserter(dbg_str), "[{}:None] ", store_ptr->get_store_id());
                 m_non_participating_stores.push_back(store_ptr);
                 continue;
             }
 
+            fmt::format_to(std::back_inserter(dbg_str), "[{}:{}:{}:{}:{}] ", store_ptr->get_store_id(),
+                           trunc_info.seq_num, trunc_info.ld_key.idx, trunc_info.pending_dev_truncation,
+                           trunc_info.active_writes_not_part_of_truncation);
             if (trunc_info.ld_key.idx > min_safe_ld_key.idx) { continue; }
 
             if (trunc_info.ld_key.idx < min_safe_ld_key.idx) {
@@ -189,7 +228,9 @@ logdev_key HomeLogStoreMgr::do_device_truncate(bool dry_run) {
         LOGINFOMOD(logstore, "No log store append on any log stores, skipping device truncation");
         return min_safe_ld_key;
     } else {
-        LOGINFOMOD(logstore, "Request to truncate the log device, safe log dev key to truncate = {}", min_safe_ld_key);
+        LOGINFOMOD(logstore, "LogDevice truncate, all_logstore_info:<{}> safe log dev key to truncate={}", dbg_str,
+                   min_safe_ld_key);
+
         // We call post device truncation only to the log stores whose prepared truncation points are fully truncated or
         // to stores which didn't particpate in this device truncation.
         for (auto& store_ptr : m_min_trunc_stores) {
@@ -207,7 +248,7 @@ logdev_key HomeLogStoreMgr::do_device_truncate(bool dry_run) {
 }
 
 /////////////////////////////////////// HomeLogStore Section ///////////////////////////////////////
-HomeLogStore::HomeLogStore(logstore_id_t id, bool append_mode, logstore_seq_num_t start_lsn) :
+HomeLogStore::HomeLogStore(const logstore_id_t id, const bool append_mode, const logstore_seq_num_t start_lsn) :
         m_store_id{id},
         m_records{"HomeLogStoreRecords", start_lsn - 1},
         m_append_mode{append_mode},
@@ -379,7 +420,7 @@ void HomeLogStore::do_truncate(logstore_seq_num_t upto_seq_num) {
     int ind = search_max_le(upto_seq_num);
     if (ind < 0) {
         // m_safe_truncation_boundary.pending_dev_truncation = false;
-        THIS_LOGSTORE_LOG(INFO,
+        THIS_LOGSTORE_LOG(DEBUG,
                           "Truncate upto lsn={}, possibly already truncated so ignoring. Current safe device "
                           "truncation barrier=<log_id={}>",
                           upto_seq_num, m_safe_truncation_boundary.ld_key);
@@ -387,7 +428,7 @@ void HomeLogStore::do_truncate(logstore_seq_num_t upto_seq_num) {
     }
 
     THIS_LOGSTORE_LOG(
-        INFO, "Truncate upto lsn={}, nearest safe device truncation barrier <ind={} log_id={}>, is_last_barrier={}",
+        DEBUG, "Truncate upto lsn={}, nearest safe device truncation barrier <ind={} log_id={}>, is_last_barrier={}",
         upto_seq_num, ind, m_truncation_barriers[ind].ld_key, (ind == (int)m_truncation_barriers.size() - 1));
 
     m_safe_truncation_boundary.ld_key = m_truncation_barriers[ind].ld_key;

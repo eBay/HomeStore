@@ -7,8 +7,8 @@ SDS_LOGGING_DECL(metablk)
 namespace homestore {
 
 void MetaBlkMgr::start(blk_store_t* sb_blk_store, const sb_blkstore_blob* blob, const bool is_init) {
-    HS_LOG(DEBUG, metablk, "Initialize MetaBlkStore with total size: {}, used size: {}", sb_blk_store->get_size(),
-           sb_blk_store->get_used_size());
+    LOGINFO("Initialize MetaBlkStore with total size: {}, used size: {}", sb_blk_store->get_size(),
+            sb_blk_store->get_used_size());
     m_sb_blk_store = sb_blk_store;
     MetaBlkMgr::reset_self_recover();
     if (is_init) {
@@ -409,7 +409,6 @@ void MetaBlkMgr::write_meta_blk_ovf(BlkId& out_obid, const void* context_data, c
 
     HS_LOG(DEBUG, metablk, "Start to allocate nblks(data): {}, mstore used size: {}", context_data_blkids.size(),
            m_sb_blk_store->get_used_size());
-
 
     // return the 1st ovf header blk id to caller;
     alloc_meta_blk(out_obid);
@@ -821,6 +820,7 @@ uint64_t MetaBlkMgr::get_size() { return m_sb_blk_store->get_size(); }
 
 uint64_t MetaBlkMgr::get_used_size() { return m_sb_blk_store->get_used_size(); }
 
-MetaBlkMgr* MetaBlkMgr::_instance = nullptr;
-bool MetaBlkMgr::m_self_recover = false;
+std::unique_ptr< MetaBlkMgr > MetaBlkMgr::s_instance{};
+
+bool MetaBlkMgr::m_self_recover{false};
 } // namespace homestore

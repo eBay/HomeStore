@@ -4,7 +4,8 @@
 #include <cstdint>
 #include <mutex>
 
-#include "engine/homeds/bitmap/bitset.hpp"
+#include <fds/bitset.hpp>
+
 #include "engine/common/homestore_config.hpp"
 #include "homelogstore/log_dev.hpp"
 #include "vol_crc_persist_mgr.hpp"
@@ -47,9 +48,9 @@ public:
 
 struct VolumeInfo {
     std::mutex m_mtx;     // lock
-    homeds::Bitset* m_bm; // volume block write bitmap
+    sisl::Bitset* m_bm; // volume block write bitmap
 
-    VolumeInfo(uint64_t vol_total_blks) { m_bm = new homeds::Bitset(vol_total_blks); }
+    VolumeInfo(uint64_t vol_total_blks) { m_bm = new sisl::Bitset(vol_total_blks); }
 
     ~VolumeInfo() { delete m_bm; }
 };

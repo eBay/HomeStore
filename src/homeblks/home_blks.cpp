@@ -73,9 +73,19 @@ VolInterface* HomeBlks::init(const init_params& cfg, bool force_reinit) {
     }
 }
 
-vol_interface_req::vol_interface_req(void* const buf, const uint64_t lba, const uint32_t nlbas, bool is_sync,
+vol_interface_req::vol_interface_req(void* const buf, const uint64_t lba, const uint32_t nlbas, const bool is_sync,
                                      const bool cache) :
         buffer{buf},
+        request_id{counter_generator.next_request_id()},
+        refcount{0},
+        lba{lba},
+        nlbas{nlbas},
+        sync{is_sync},
+        cache{cache} {}
+
+vol_interface_req::vol_interface_req(std::vector< iovec > iovecs, const uint64_t lba, const uint32_t nlbas,
+                                     const bool is_sync, const bool cache) :
+        iovecs{std::move(iovecs)},
         request_id{counter_generator.next_request_id()},
         refcount{0},
         lba{lba},
@@ -148,9 +158,14 @@ void HomeBlks::attach_prepare_indx_cp(std::map< boost::uuids::uuid, indx_cp_ptr 
     }
 }
 
-vol_interface_req_ptr HomeBlks::create_vol_interface_req(void* buf, uint64_t lba, uint32_t nlbas, bool is_sync,
-                                                         const bool cache) {
+vol_interface_req_ptr HomeBlks::create_vol_interface_req(void* const buf, const uint64_t lba, const uint32_t nlbas,
+                                                         const bool is_sync, const bool cache) {
     return vol_interface_req_ptr(new vol_interface_req(buf, lba, nlbas, is_sync, cache));
+}
+
+vol_interface_req_ptr HomeBlks::create_vol_interface_req(std::vector< iovec > iovecs, const uint64_t lba,
+                                                         const uint32_t nlbas, const bool is_sync, const bool cache) {
+    return vol_interface_req_ptr(new vol_interface_req(iovecs, lba, nlbas, is_sync, cache));
 }
 
 std::error_condition HomeBlks::write(const VolumePtr& vol, const vol_interface_req_ptr& req, bool part_of_batch) {
@@ -203,6 +218,7 @@ std::error_condition HomeBlks::unmap(const VolumePtr& vol, const vol_interface_r
 }
 
 const char* HomeBlks::get_name(const VolumePtr& vol) { return vol->get_name(); }
+uint32_t HomeBlks::get_align_size() { return HS_STATIC_CONFIG(drive_attr.align_size); }
 uint64_t HomeBlks::get_page_size(const VolumePtr& vol) { return vol->get_page_size(); }
 uint64_t HomeBlks::get_size(const VolumePtr& vol) { return vol->get_size(); }
 boost::uuids::uuid HomeBlks::get_uuid(VolumePtr vol) { return vol->get_uuid(); }
@@ -272,6 +288,7 @@ SnapshotPtr HomeBlks::snap_volume(VolumePtr volptr) {
     return sp;
 }
 #endif
+
 void HomeBlks::submit_io_batch() {
     iomanager.default_drive_interface()->submit_batch();
     call_multi_vol_completions();
@@ -329,7 +346,11 @@ void HomeBlks::process_vdev_error(vdev_info_block* vb) {
 void HomeBlks::attach_vol_completion_cb(const VolumePtr& vol, const io_comp_callback& cb) {
     vol->attach_completion_cb(cb);
 }
-void HomeBlks::attach_end_of_batch_cb(const end_of_batch_callback& cb) { m_cfg.end_of_batch_cb = cb; }
+
+void HomeBlks::attach_end_of_batch_cb(const end_of_batch_callback& cb) {
+    m_cfg.end_of_batch_cb = cb;
+    iomanager.default_drive_interface()->attach_end_of_batch_cb([this](int nevents) { call_multi_vol_completions(); });
+}
 
 void HomeBlks::vol_mounted(const VolumePtr& vol, vol_state state) {
     m_cfg.vol_mounted_cb(vol, state);
@@ -706,9 +727,6 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
 
     m_hb_http_server = std::make_unique< HomeBlksHttpServer >(this);
     m_hb_http_server->start();
-
-    // Attach all completions
-    iomanager.default_drive_interface()->attach_end_of_batch_cb([this](int nevents) { call_multi_vol_completions(); });
 
     /* phase 1 updates a btree superblock required for btree recovery during journal replay */
     vol_recovery_start_phase1();
