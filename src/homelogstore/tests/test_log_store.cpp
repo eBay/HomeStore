@@ -442,42 +442,36 @@ public:
             lsc->iterate_validate(expect_all_completed);
         }
     }
-    void dump_validate(int64_t expected_num_records, bool print_content = false)
-    {
-        nlohmann::json json_dump;
+    void dump_validate(int64_t expected_num_records, bool print_content = false) {
         homestore::log_dump_req dump_req = homestore::log_dump_req();
-        if(print_content)
-            dump_req.verbosity_level = log_dump_verbosity::CONTENT;
-        home_log_store_mgr.dump_log_store(dump_req, json_dump);
+        if (print_content) dump_req.verbosity_level = log_dump_verbosity::CONTENT;
+        nlohmann::json json_dump = home_log_store_mgr.dump_log_store(dump_req);
         LOGINFO("Printing json dump of all logstores. \n {}", json_dump.dump());
-        EXPECT_EQ( sample_db.m_log_store_clients.size() , json_dump.size());
+        EXPECT_EQ(sample_db.m_log_store_clients.size(), json_dump.size());
         int64_t count = 0;
         for (auto& logdump : json_dump) {
             count += (int64_t)logdump["log_records"].size();
         }
         EXPECT_EQ(expected_num_records, count);
     }
-    void dump_validate_filter(logstore_id_t id, logstore_seq_num_t start_seq, logstore_seq_num_t end_seq, bool print_content = false)
-    {
+    void dump_validate_filter(logstore_id_t id, logstore_seq_num_t start_seq, logstore_seq_num_t end_seq,
+                              bool print_content = false) {
         for (auto& lsc : sample_db.m_log_store_clients) {
-            if(lsc->m_log_store->get_store_id() == id){
-                nlohmann::json json_dump;
+            if (lsc->m_log_store->get_store_id() == id) {
                 homestore::log_dump_req dump_req = homestore::log_dump_req();
-                
-                if(print_content)
-                    dump_req.verbosity_level = log_dump_verbosity::CONTENT;
+
+                if (print_content) dump_req.verbosity_level = log_dump_verbosity::CONTENT;
                 dump_req.log_store = lsc->m_log_store;
                 dump_req.start_seq_num = start_seq;
                 dump_req.end_seq_num = end_seq;
 
-                home_log_store_mgr.dump_log_store(dump_req, json_dump);
-                LOGINFO("Printing json dump of logstore id {}, start_seq {}, end_seq {}, \n\n {}", id, start_seq, end_seq, json_dump.dump());
-                EXPECT_EQ(end_seq-start_seq+1, (int64_t)json_dump[0]["log_records"].size());
+                nlohmann::json json_dump = home_log_store_mgr.dump_log_store(dump_req);
+                LOGINFO("Printing json dump of logstore id {}, start_seq {}, end_seq {}, \n\n {}", id, start_seq,
+                        end_seq, json_dump.dump());
+                EXPECT_EQ(end_seq - start_seq + 1, (int64_t)json_dump[0]["log_records"].size());
                 return;
             }
         }
-
-
     }
     int find_garbage_upto(logid_t idx) {
         int count = 0;
@@ -636,7 +630,7 @@ TEST_F(LogStoreTest, BurstRandInsertThenTruncate) {
 
     LOGINFO("Step 4.1: Iterate all inserts one by one for each log store and validate if what is written is valid");
     this->iterate_validate(true);
-    
+
     LOGINFO("Step 4.2: Read all inserts and dump all logstore records into json");
     this->dump_validate(SDS_OPTIONS["num_records"].as< uint32_t >());
 

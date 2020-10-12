@@ -345,10 +345,7 @@ private:
     uint64_t m_cur_group_cursor;
 };
 
-enum log_dump_verbosity{
-    CONTENT,
-    HEADER
-};
+enum log_dump_verbosity { CONTENT, HEADER };
 
 class LogDev {
 public:
@@ -403,10 +400,12 @@ public:
      * @param dev_offset device offset of the log id which was provided upon append. This is needed to locate the log
      * idx within the device. A log data can be looked up only by pair of log_id and dev_offset.
      *
+     * @param record_header Pass the pointer to the header of the read record
+     * 
      * @return log_buffer : Opaque structure which contains the data blob and its size. It is safe buffer and hence it
      * need not be freed and can be cheaply passed it around.
      */
-    log_buffer read(const logdev_key& key);
+    log_buffer read(const logdev_key& key, serialized_log_record* record_header = nullptr);
 
     /**
      * @brief Load the data from the blkstore starting with offset. This method loads data in bulk and then call
@@ -513,9 +512,6 @@ public:
     void meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size);
 
     void update_store_meta(const logstore_id_t idx, const logstore_meta& meta, bool persist_now);
-
-    int read_as_json(const logdev_key& key, nlohmann::json & json_val, const log_dump_verbosity print_level = log_dump_verbosity::HEADER);
-
 
 private:
     LogGroup* make_log_group(uint32_t estimated_records) {

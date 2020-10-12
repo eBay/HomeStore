@@ -145,7 +145,7 @@ int64_t LogDev::append_async(logstore_id_t store_id, logstore_seq_num_t seq_num,
     return idx;
 }
 
-log_buffer LogDev::read(const logdev_key& key) {
+log_buffer LogDev::read(const logdev_key& key, serialized_log_record* record_header) {
     static thread_local sisl::aligned_unique_ptr< uint8_t > _read_buf;
 
     // First read the offset and read the log_group. Then locate the log_idx within that and get the actual data
@@ -171,10 +171,10 @@ log_buffer LogDev::read(const logdev_key& key) {
         HS_ASSERT_CMP(RELEASE, header->this_group_crc(), ==, crc, "CRC mismatch on read data");
     }
 
-    serialized_log_record* rec = header->nth_record(key.idx - header->start_log_idx);
-    uint32_t data_offset = (rec->offset + (rec->is_inlined ? 0 : header->oob_data_offset));
+    record_header = header->nth_record(key.idx - header->start_log_idx);
+    uint32_t data_offset = (record_header->offset + (record_header->is_inlined ? 0 : header->oob_data_offset));
 
-    log_buffer b((size_t)rec->size);
+    log_buffer b((size_t)record_header->size);
     if ((data_offset + b.size()) < initial_read_size) {
         std::memcpy((void*)b.bytes(), (void*)(rbuf + data_offset),
                     b.size()); // Already read them enough, copy the data
@@ -201,85 +201,6 @@ log_buffer LogDev::read(const logdev_key& key) {
     }
 
     return b;
-}
-
-int LogDev::read_as_json(const logdev_key& key, nlohmann::json & json_val, const log_dump_verbosity print_level) {
-    static thread_local sisl::aligned_unique_ptr< uint8_t > _read_buf;
-
-    // First read the offset and read the log_group. Then locate the log_idx within that and get the actual data
-    // Read about 4K of buffer
-    if (!_read_buf) { _read_buf = sisl::aligned_unique_ptr< uint8_t >::make_sized(dma_boundary, initial_read_size); }
-    auto rbuf = _read_buf.get();
-    auto store = m_hb->get_logdev_blkstore();
-    store->pread((void*)rbuf, initial_read_size, key.dev_offset);
-
-    auto header = (log_group_header*)rbuf;
-    HS_ASSERT_CMP(RELEASE, header->magic_word(), ==, LOG_GROUP_HDR_MAGIC, "Log header corrupted with magic mismatch!");
-    HS_ASSERT_CMP(RELEASE, header->start_idx(), <=, key.idx, "log key offset does not match with log_idx");
-    HS_ASSERT_CMP(RELEASE, (header->start_idx() + header->nrecords()), >, key.idx,
-                  "log key offset does not match with log_idx");
-    HS_ASSERT_CMP(LOGMSG, header->total_size(), >=, header->_inline_data_offset(),
-                  "Inconsistent size data in log group");
-
-    // We can only do crc match in read if we have read all the blocks. We don't want to aggressively read more data
-    // than we need to just to compare CRC for read operation. It can be done during recovery.
-    if (header->total_size() <= initial_read_size) {
-        crc32_t crc = crc32_ieee(init_crc32, ((uint8_t*)rbuf) + sizeof(log_group_header),
-                                 header->total_size() - sizeof(log_group_header));
-        HS_ASSERT_CMP(RELEASE, header->this_group_crc(), ==, crc, "CRC mismatch on read data");
-    }
-
-    serialized_log_record* rec = header->nth_record(key.idx - header->start_log_idx);
-    uint32_t data_offset = (rec->offset + (rec->is_inlined ? 0 : header->oob_data_offset));
-    
-    json_val = nlohmann::json::object();
-
-    try{
-        json_val["size"] = (uint32_t)rec->size;
-        json_val["offset"] = (uint32_t)rec->offset;
-        json_val["is_inlined"] = (uint32_t)rec->is_inlined;
-        json_val["store_seq_num"] = (uint64_t)rec->store_seq_num;
-        json_val["store_id"] = (logstore_id_t)rec->store_id;
-    }
-    catch(const std::exception& ex){
-        LOGERRORMOD(logstore, "Exception in json dump- {}", ex.what());
-        return -1;
-    }
-
-    if(print_level == log_dump_verbosity::HEADER)
-        return 0;
-
-    log_buffer b((size_t)rec->size);
-    if ((data_offset + b.size()) < initial_read_size) {
-        std::memcpy((void*)b.bytes(), (void*)(rbuf + data_offset),
-                    b.size()); // Already read them enough, copy the data
-    } else {
-        // Round them data offset to dma boundary in-order to make sure pread on direct io succeed. We need to skip
-        // the rounded portion while copying to user buffer
-        auto rounded_data_offset = sisl::round_down(data_offset, HS_STATIC_CONFIG(drive_attr.align_size));
-        auto rounded_size =
-            sisl::round_up(b.size() + data_offset - rounded_data_offset, HS_STATIC_CONFIG(drive_attr.align_size));
-
-        // Allocate a fresh aligned buffer, if size cannot fit standard size
-        if (rounded_size > initial_read_size) { rbuf = hs_iobuf_alloc(rounded_size); }
-
-        LOGTRACEMOD(logstore,
-                    "Addln read as data resides outside initial_read_size={} key.idx={} key.group_dev_offset={} "
-                    "data_offset={} size={} rounded_data_offset={} rounded_size={}",
-                    initial_read_size, key.idx, key.dev_offset, data_offset, b.size(), rounded_data_offset,
-                    rounded_size);
-        store->pread((void*)rbuf, rounded_size, key.dev_offset + rounded_data_offset);
-        memcpy((void*)b.bytes(), (void*)(rbuf + data_offset - rounded_data_offset), b.size());
-
-        // Free the buffer in case we allocated above
-        if (rounded_size > initial_read_size) { iomanager.iobuf_free(rbuf); }
-    }
-    std::vector<uint8_t> v(b.bytes(), b.bytes()+b.size());
-    nlohmann::json content_json = nlohmann::json::from_msgpack(v);
-
-    json_val["content"] = content_json;
-
-    return 0;
 }
 
 uint32_t LogDev::reserve_store_id() {
