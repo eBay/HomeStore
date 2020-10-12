@@ -1,14 +1,28 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
+#include <mutex>
 #include <sstream>
+#include <string>
+#include <system_error>
 #include <variant>
+#include <vector>
 
 #include <fcntl.h>
 #include <sys/uio.h>
 
-#include "homeblks/home_blks.hpp"
+#include <fds/obj_allocator.hpp>
+#include <fds/vector_pool.hpp>
+#include <metrics/metrics.hpp>
+#include <sds_logging/logging.h>
+#include <spdlog/fmt/fmt.h>
+#include <utility/atomic_counter.hpp>
+#include <utility/enum.hpp>
+#include <utility/obj_life_counter.hpp>
+
 #include "engine/blkstore/blkstore.hpp"
 #include "engine/cache/cache.h"
 #include "engine/common/homestore_assert.hpp"
@@ -17,15 +31,8 @@
 #include "engine/homeds/thread/threadpool/thread_pool.h"
 #include "engine/index/snap_mgr.hpp"
 #include "engine/meta/meta_blks_mgr.hpp"
-#include "fds/obj_allocator.hpp"
-#include "fds/vector_pool.hpp"
+#include "homeblks/home_blks.hpp"
 #include "mapping.hpp"
-#include "metrics/metrics.hpp"
-#include "sds_logging/logging.h"
-#include "spdlog/fmt/fmt.h"
-#include "utility/atomic_counter.hpp"
-#include "utility/enum.hpp"
-#include "utility/obj_life_counter.hpp"
 
 namespace homestore {
 
@@ -39,8 +46,8 @@ typedef boost::intrusive_ptr< volume_req > volume_req_ptr;
 typedef boost::intrusive_ptr< volume_child_req > volume_child_req_ptr;
 
 /* first 48 bits are actual sequence ID and last 16 bits are boot cnt */
-#define SEQ_ID_BIT_CNT 48ul
-#define BOOT_CNT_MASK 0x0000fffffffffffful
+constexpr uint8_t SEQ_ID_BIT_CNT{48};
+constexpr uint64_t BOOT_CNT_MASK{0x0000ffffffffffff};
 #define GET_IO_SEQ_ID(sid) ((m_hb->get_boot_cnt() << SEQ_ID_BIT_CNT) | (sid & BOOT_CNT_MASK))
 
 #define VOL_INFO_LOG(volname, msg, ...) HS_SUBMOD_LOG(INFO, base, , "vol", volname, msg, ##__VA_ARGS__)
@@ -81,6 +88,11 @@ struct volume_child_req : public blkstore_req< BlkBuffer > {
 #endif
 
 public:
+    volume_child_req(const volume_child_req&) = delete;
+    volume_child_req(volume_child_req&&) noexcept = delete;
+    volume_child_req& operator=(const volume_child_req&) = delete;
+    volume_child_req& operator=(volume_child_req&&) noexcept = delete;
+
     static boost::intrusive_ptr< volume_child_req > make_request() {
         return boost::intrusive_ptr< volume_child_req >(sisl::ObjectAllocator< volume_child_req >::make_object());
     }
@@ -90,7 +102,7 @@ public:
     /* any derived class should have the virtual destructor to prevent
      * memory leak because pointer can be free with the base class.
      */
-    virtual ~volume_child_req() = default;
+    virtual ~volume_child_req() override = default;
 
     // virtual size_t get_your_size() const override { return
     // sizeof(volume_child_req); }
@@ -101,7 +113,7 @@ public:
 
     friend class Volume;
 
-    std::string to_string() {
+    std::string to_string() const {
         std::ostringstream ss;
         ss << ((is_read) ? "READ" : "WRITE") << ": lba=" << lba << " nlbas=" << nlbas;
         return ss.str();
@@ -159,6 +171,10 @@ public:
         register_me_to_farm();
     }
 
+    VolumeMetrics(const VolumeMetrics&) = delete;
+    VolumeMetrics(VolumeMetrics&&) noexcept = delete;
+    VolumeMetrics& operator=(const VolumeMetrics&) = delete;
+    VolumeMetrics& operator=(VolumeMetrics&&) noexcept = delete;
     ~VolumeMetrics() { deregister_me_from_farm(); }
 };
 
@@ -181,6 +197,11 @@ struct vol_sb_hdr {
         memcpy((char*)vol_name, in_vol_name, VOL_NAME_SIZE);
     };
 
+    vol_sb_hdr(const vol_sb_hdr&) = delete;
+    vol_sb_hdr(vol_sb_hdr&&) noexcept = delete;
+    vol_sb_hdr& operator=(const vol_sb_hdr&) = delete;
+    vol_sb_hdr& operator=(vol_sb_hdr&&) noexcept = delete;
+
     /* these variables are mutable. Always update these values before writing the superblock */
     vol_state state;
 };
@@ -189,6 +210,11 @@ struct vol_sb_hdr {
 struct vol_completion_req_list {
     vol_completion_req_list() { m_cur = sisl::VectorPool< vol_interface_req_ptr >::alloc(); }
     ~vol_completion_req_list() { sisl::VectorPool< vol_interface_req_ptr >::free(m_cur, true /* no_cache */); }
+
+    vol_completion_req_list(const vol_completion_req_list&) = delete;
+    vol_completion_req_list(vol_completion_req_list&&) noexcept = delete;
+    vol_completion_req_list& operator=(const vol_completion_req_list&) = delete;
+    vol_completion_req_list& operator=(vol_completion_req_list&&) noexcept = delete;
 
     void push_back(const vol_interface_req_ptr& req) { m_cur->push_back(req); }
     size_t size() const { return m_cur->size(); }
@@ -228,7 +254,6 @@ private:
 
     typedef struct IoVecTransversal {
         uint64_t current_iovecs_offset{0};
-        uint64_t iovecs_total_offset{0};
         size_t iovecs_index{0};
     } IoVecTransversal;
 
@@ -245,6 +270,7 @@ private:
 private:
     Volume(const vol_params& params);
     Volume(meta_blk* mblk_cookie, sisl::byte_view sb_buf);
+
     void alloc_single_block_in_mem();
     bool check_and_complete_req(const volume_req_ptr& vreq, const std::error_condition& err);
 
@@ -308,8 +334,15 @@ public:
         vol_ptr->init();
         return vol_ptr;
     }
-    static vol_interface_req_ptr create_volume_req(std::shared_ptr< Volume >& vol, void* buf, uint64_t lba,
-                                                   uint32_t nlbas, bool read, bool sync);
+/*
+    static vol_interface_req_ptr create_volume_req(const std::shared_ptr< Volume >& vol, void* const buf,
+                                                   const uint64_t lba,
+                                                   const uint32_t nlbas, const bool read, const bool sync);
+    static vol_interface_req_ptr create_volume_req(const std::shared_ptr< Volume >& vol,
+                                                   const std::vector< iovec >& iovecs, const uint64_t lba,
+                                                   const uint32_t nlbas, const bool read, const bool sync);
+*/
+
 #ifdef _PRERELEASE
     static void set_io_flip();
     static void set_error_flip();
@@ -332,6 +365,10 @@ public:
 
 public:
     /******************** APIs exposed to home_blks *******************/
+    Volume(const Volume&) = delete;
+    Volume(Volume&&) noexcept = delete;
+    Volume& operator=(const Volume&) = delete;
+    Volume& operator=(Volume&&) noexcept = delete;
     ~Volume();
 
     /* should be called after volume is created. It initialize indx mgr */
@@ -474,10 +511,10 @@ struct volume_req : indx_req {
     volume_req_state state = volume_req_state::preparing; // State of the volume request
 
     /********** members used to write data blocks **********/
-    Clock::time_point io_start_time;                              // start time
-    Clock::time_point indx_start_time;                            // indx start time
-    typedef boost::intrusive_ptr< homeds::MemVector > MemVecData; // HomeStore memory managed data
-    typedef std::vector< iovec > IoVecData;                       // External scatter/gather data
+    Clock::time_point io_start_time;                                      // start time
+    Clock::time_point indx_start_time;                                    // indx start time
+    typedef boost::intrusive_ptr< homeds::MemVector > MemVecData;         // HomeStore memory managed data
+    typedef std::reference_wrapper<const std::vector< iovec >> IoVecData; // External scatter/gather data
     std::variant< MemVecData, IoVecData > data;
 
     sisl::atomic_counter< int > outstanding_io_cnt = 1; // how many IOs are outstanding for this request
@@ -498,8 +535,8 @@ struct volume_req : indx_req {
     void push_blkid(BlkId& bid) { alloc_blkid_list.push_back(bid); }
 
     /********** member functions **********/
-    virtual std::string to_string() {
-        std::ostringstream ss;
+    virtual std::string to_string() const {
+        std::ostringstream ss{};
         ss << "vol_interface_req: request_id=" << iface_req->request_id << " dir=" << (is_read_op() ? "R" : "W")
            << " outstanding_io_cnt=" << outstanding_io_cnt.get();
         return ss.str();
@@ -560,19 +597,16 @@ private:
             iface_req(vi_req),
             io_start_time(Clock::now()) {
         assert((vi_req->vol_instance->get_page_size() * vi_req->nlbas) <= VOL_MAX_IO_SIZE);
-        if (vi_req->use_cache()) {
-            // a cached request is assumed to have lifetime managed by HomeStore
+        if (vi_req->iovecs.empty()) {
+            // lifetime managed by HomeStore
             if (vi_req->is_write()) {
                 data.emplace< MemVecData >(new homeds::MemVector{
                     static_cast< uint8_t* >(vi_req->buffer),
                     static_cast< uint32_t >(vi_req->vol_instance->get_page_size() * vi_req->nlbas), 0});
             }
         } else {
-            // a non-cached request is assume to have lifetime managed external to HomeStore
-            // convert read/write to single scatter/gather
-            iovec buffer{vi_req->buffer, static_cast< size_t >(vi_req->vol_instance->get_page_size() * vi_req->nlbas)};
-            data.emplace< IoVecData >();
-            std::get< IoVecData >(data).emplace_back(std::move(buffer));
+            // used passed in iovecs
+            data.emplace< IoVecData >(vi_req->iovecs);
         }
 
         /* Trying to reserve the max possible size so that memory allocation is efficient */

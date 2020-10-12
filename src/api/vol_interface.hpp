@@ -76,16 +76,17 @@ struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
     std::shared_ptr< Volume > vol_instance;
     std::vector< buf_info > read_buf_list;
     void* buffer{nullptr};
-    std::error_condition err = no_error;
+    std::vector<iovec> iovecs{};
+    std::error_condition err{no_error};
     uint64_t request_id;
     sisl::atomic_counter< int > refcount;
-    std::atomic< bool > is_fail_completed = false;
+    std::atomic< bool > is_fail_completed{false};
     uint64_t lba;
     uint32_t nlbas;
-    Op_type op_type = Op_type::READ;
-    bool sync = false;
+    Op_type op_type{Op_type::READ};
+    bool sync{false};
     bool cache{true};
-    bool part_of_batch = false;
+    bool part_of_batch{false};
     void* cookie;
 
     bool use_cache() const { return cache; }
@@ -120,6 +121,8 @@ struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
 
 public:
     vol_interface_req(void* const buf, const uint64_t lba, const uint32_t nlbas, const bool is_sync = false,
+                      const bool cache = true);
+    vol_interface_req(std::vector< iovec > iovecs, const uint64_t lba, const uint32_t nlbas, bool is_sync,
                       const bool cache = false);
     virtual ~vol_interface_req(); // override; sisl::ObjLifeCounter should have virtual destructor
     virtual void free_yourself() { delete this; }
@@ -156,7 +159,7 @@ struct vol_params {
     char vol_name[VOL_NAME_SIZE];
 
     std::string to_string() const {
-        std::stringstream ss;
+        std::ostringstream ss;
         ss << "page_size=" << page_size << ",size=" << size << ",vol_name=" << vol_name
            << ",uuid=" << boost::lexical_cast< std::string >(uuid);
         return ss.str();
@@ -186,18 +189,18 @@ public:
     end_of_batch_callback end_of_batch_cb;
 
 public:
-    std::string to_string() {
-        std::stringstream ss;
-        ss << "min_virtual_page_size=" << min_virtual_page_size << ",app_mem_size=" << app_mem_size
+    std::string to_string() const {
+        std::ostringstream oss;
+        oss << "min_virtual_page_size=" << min_virtual_page_size << ",app_mem_size=" << app_mem_size
            << ",disk_init=" << disk_init << ",dev_type=" << enum_name(device_type) << ",open_flags =" << open_flags
            << ",number of devices =" << devices.size();
-        ss << "device names = ";
-        for (uint32_t i = 0; i < devices.size(); ++i) {
-            ss << devices[i].dev_names;
-            ss << ",";
+        oss << "device names = ";
+        for (size_t i{0}; i < devices.size(); ++i) {
+            oss << devices[i].dev_names;
+            oss << ",";
         }
-        ss << "]";
-        return ss.str();
+        oss << "]";
+        return oss.str();
     }
     init_params() = default;
 };
@@ -210,19 +213,34 @@ public:
     }
     static VolInterface* get_instance() { return VolInterfaceImpl::raw_instance(); }
 
+    ///
+    /// @brief Create a vol interface request to do IO using vol interface. This is a helper method and caller are
+    /// welcome to create a request derived from vol interface request and pass it along instead of calling this method.
+    ///
+    /// @param buf - Buffer from write needs to be written to volume. nullptr for read operation
+    /// @param lba - LBA of the volume
+    /// @param nlbas - Number of blks to write.
+    /// @param sync - Is the sync io request or async
+    /// @param cache - whether to cache writes and try to read from cache
+    /// @return vol_interface_req_ptr
     //
-    // @brief Create a vol interface request to do IO using vol interface. This is a helper method and caller are
-    // welcome to create a request derived from vol interface request and pass it along instead of calling this method.
+    virtual vol_interface_req_ptr create_vol_interface_req(void* const buf, const uint64_t lba, const uint32_t nlbas, 
+                                                           const bool sync = false, const bool cache = true) = 0;
+
+    ///
+    /// @brief Create a vol interface request to do IO using vol interface. This is a helper method and caller are
+    /// welcome to create a request derived from vol interface request and pass it along instead of calling this method.
+    ///
+    /// @param iovecs - The iovecs array for read into or writing from
+    /// @param lba - LBA of the volume
+    /// @param nlbas - Number of blks to write.
+    /// @param sync - Is the sync io request or async
+    /// @param cache - whether to cache writes and try to read from cache
+    /// @return vol_interface_req_ptr
     //
-    // @param buf - Buffer from write needs to be written to volume. nullptr for read operation
-    // @param lba - LBA of the volume
-    // @param nlbas - Number of blks to write.
-    // @param sync - Is the sync io request or async
-    // @param cache - whether to cache writes and try to read from cache
-    // @return vol_interface_req_ptr
-    //
-    virtual vol_interface_req_ptr create_vol_interface_req(void* buf, uint64_t lba, uint32_t nlbas, bool sync = false,
-                                                           const bool cache = true) = 0;
+    virtual vol_interface_req_ptr create_vol_interface_req(std::vector<iovec> iovecs,
+                                                           const uint64_t lba, const uint32_t nlbas,
+                                                           const bool sync = false, const bool cache = false) = 0;
 
     /**
      * @brief Write the data to the volume asynchronously, created from the request. After completion the attached
@@ -281,6 +299,7 @@ public:
 
     virtual const char* get_name(const VolumePtr& vol) = 0;
     virtual uint64_t get_size(const VolumePtr& vol) = 0;
+    virtual uint32_t get_align_size() = 0;
     virtual uint64_t get_page_size(const VolumePtr& vol) = 0;
     virtual boost::uuids::uuid get_uuid(std::shared_ptr< Volume > vol) = 0;
     virtual sisl::blob at_offset(const boost::intrusive_ptr< BlkBuffer >& buf, uint32_t offset) = 0;
