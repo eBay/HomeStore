@@ -19,6 +19,7 @@
 #include "api/meta_interface.hpp"
 #include "homeblks_config.hpp"
 #include "homeblks_http_server.hpp"
+#include "homeblks_status_mgr.hpp"
 
 #ifndef DEBUG
 extern bool same_value_gen;
@@ -225,6 +226,8 @@ public:
 
     void verify_vols();
 
+    HomeBlksStatusMgr* get_status_mgr();
+
 #ifdef _PRERELEASE
     void set_io_flip();
     void set_error_flip();
@@ -285,6 +288,7 @@ private:
 
     out_params m_out_params;
     std::unique_ptr< HomeBlksHttpServer > m_hb_http_server;
+    std::unique_ptr< HomeBlksStatusMgr > m_hb_status_mgr;
 
     std::condition_variable m_cv;
     std::mutex m_cv_mtx;

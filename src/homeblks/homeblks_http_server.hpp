@@ -23,10 +23,12 @@ public:
     static void get_malloc_stats(sisl::HttpCallData cd);
     static void get_config(sisl::HttpCallData cd);
     static void reload_dynamic_config(sisl::HttpCallData cd);
+    static void get_status(sisl::HttpCallData cd);
 
 private:
     static HomeBlks* to_homeblks(sisl::HttpCallData cd);
     static HomeBlksHttpServer* pThis(sisl::HttpCallData cd);
+    static bool verify_and_get_verbosity(const evhtp_request_t* req, std::string& failure_resp, int& verbosity_level);
 
 private:
     HomeBlks* m_hb;
