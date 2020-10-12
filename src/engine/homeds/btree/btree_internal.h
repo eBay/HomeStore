@@ -413,20 +413,6 @@ struct BtreeQueryCursor {
 
     BtreeQueryCursor(){};
 
-#if 0
-    BtreeQueryCursor& operator=(BtreeQueryCursor&& other) noexcept {
-        m_last_key = std::move(other.m_last_key);
-        m_locked_nodes = std::move(other.m_locked_nodes);
-        return *this;
-    }
-
-    BtreeQueryCursor& operator=(BtreeQueryCursor& other) = delete;
-    BtreeQueryCursor& operator=(BtreeQueryCursor& other) {
-        m_last_key = std::move(other.m_last_key);
-        m_locked_nodes = std::move(other.m_locked_nodes);
-        return *this;
-    }
-#endif
 };
 
 using create_key_func = std::function< std::unique_ptr< BtreeKey >(BtreeKey* start_key) >;
