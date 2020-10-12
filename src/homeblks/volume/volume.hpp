@@ -589,6 +589,11 @@ struct volume_req : indx_req {
         return active_nlbas_written * vol()->get_page_size();
     }
 
+    virtual bool is_io_completed() override {
+        uint64_t active_nlbas_written = mapping::get_nlbas_from_cursor(lba(), active_btree_cur);
+        return (active_nlbas_written == nlbas());
+    }
+
 private:
     /********** Constructor/Destructor **********/
     // volume_req() : csum_list(0), alloc_blkid_list(0), fbe_list(0){};

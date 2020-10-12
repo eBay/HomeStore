@@ -830,6 +830,20 @@ btree_status_t mapping::update_indx_tbl(const indx_req_ptr& ireq, const btree_cp
 
     btree_status_t ret = btree_status_t::success;
 
+    if (vreq->is_unmap()) {
+        BlkId bid_invalid{BlkId::invalid_internal_id()};
+        uint64_t nlbas_rem = end_lba - next_start_lba;
+        uint64_t nlbas_cur = (nlbas_rem > MAX_NUM_LBA) ? MAX_NUM_LBA : nlbas_rem;
+        MappingKey m_key(next_start_lba, nlbas_cur);
+        ValueEntry ve(vreq->seqid, bid_invalid, 0 /* blk offset */, nlbas_cur, nullptr /* csum ptr */, m_vol_page_size);
+        MappingValue value(ve);
+        mapping_op_cntx cntx;
+        cntx.op = UPDATE_VAL_AND_FREE_BLKS;
+        cntx.vreq = vreq;
+        ret = put(cntx, m_key, value, bcp, *btree_cur_ptr);
+        return ret;
+    }
+
     for (uint32_t i = 0; i < vreq->alloc_blkid_list.size(); ++i) {
         auto blkid = vreq->alloc_blkid_list[i];
         uint32_t nlbas = blkid.data_size(HomeBlks::instance()->get_data_pagesz()) / m_vol_page_size;
