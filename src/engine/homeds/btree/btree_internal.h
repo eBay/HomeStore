@@ -410,6 +410,9 @@ struct BtreeQueryCursor {
         if (m_last_key) { return (m_last_key->get_blob()); }
         return b;
     };
+
+    BtreeQueryCursor(){};
+
 };
 
 using create_key_func = std::function< std::unique_ptr< BtreeKey >(BtreeKey* start_key) >;

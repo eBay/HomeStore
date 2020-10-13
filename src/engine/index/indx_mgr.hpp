@@ -49,10 +49,8 @@ struct journal_hdr {
 };
 
 class indx_journal_entry {
-private:
-    sisl::io_blob m_iob;
-
 public:
+    sisl::io_blob m_iob;
     uint32_t size(indx_req* ireq) const;
     uint32_t size() const;
     ~indx_journal_entry();
@@ -225,6 +223,7 @@ struct indx_cp : public boost::intrusive_ref_counter< indx_cp > {
 
     std::string to_string() {
         std::stringstream ss;
+        HS_ASSERT(RELEASE, (io_free_blkid_list.get() == nullptr), "");
         ss << "flags " << flags << " indx cp_id " << cp_id << " indx_size " << indx_size << " active checkpoint "
            << "\n"
            << acp.to_string() << "\n"
@@ -342,7 +341,7 @@ public:
     virtual void get_btreequery_cur(const sisl::blob& b, homeds::btree::BtreeQueryCursor& cur) = 0;
     virtual btree_status_t update_unmap_active_indx_tbl(blkid_list_ptr free_list, uint64_t& seq_id, void* key,
                                                         homeds::btree::BtreeQueryCursor& cur, const btree_cp_ptr& bcp,
-                                                        int64_t& size) = 0;
+                                                        int64_t& size, bool force) = 0;
 };
 
 typedef std::function< void(const boost::intrusive_ptr< indx_req >& ireq, std::error_condition err) > io_done_cb;
@@ -609,11 +608,9 @@ private:
     bool m_is_snap_enabled = false;
     bool m_is_snap_started = false;
     void* m_destroy_meta_blk = nullptr;
-    void* m_unmap_meta_blk = nullptr;
     homeds::btree::BtreeQueryCursor m_destroy_btree_cur;
     int64_t m_max_seqid_in_recovery = -1;
     std::atomic< bool > m_active_cp_suspend = false;
-    homeds::btree::BtreeQueryCursor m_unmap_btree_cur;
 
     /*************************************** private functions ************************/
     void update_indx_internal(const indx_req_ptr& ireq);
@@ -643,12 +640,16 @@ private:
     indx_cp_ptr create_new_indx_cp(const indx_cp_ptr& cur_icp);
     void resume_active_cp();
     void suspend_active_cp();
-    sisl::byte_view alloc_unmap_sb(const uint32_t key_size, const uint64_t seq_id);
+    sisl::byte_view alloc_unmap_sb(const uint32_t key_size, const uint64_t seq_id,
+                                   homeds::btree::BtreeQueryCursor& unmap_btree_cur);
     sisl::byte_view alloc_sb_bytes(uint64_t size_);
-    void unmap_indx(const indx_req_ptr& ireq);
-    void unmap_start(sisl::byte_view buf);
-    sisl::byte_view write_cp_unmap_sb(const indx_req_ptr& ireq);
-    sisl::byte_view write_cp_unmap_sb(const uint32_t key_size, const uint64_t seq_id, const void* key);
+    void unmap_indx_async(const indx_req_ptr& ireq);
+    void do_remaining_unmap_internal(const indx_req_ptr& ireq, void* unmap_meta_blk_cntx, void* key, uint64_t seqid,
+                                     homeds::btree::BtreeQueryCursor& btree_cur);
+    void do_remaining_unmap(const indx_req_ptr& ireq, void* unmap_meta_blk_cntx);
+    sisl::byte_view write_cp_unmap_sb(void* unmap_meta_blk_cntx, const indx_req_ptr& ireq);
+    sisl::byte_view write_cp_unmap_sb(void* unmap_meta_blk_cntx, const uint32_t key_size, const uint64_t seq_id,
+                                      const void* key, homeds::btree::BtreeQueryCursor& unmap_btree_cur);
 };
 
 /*************************************************** indx request ***********************************/
@@ -687,6 +688,7 @@ public:
     virtual uint64_t get_seqid() = 0;
     virtual uint32_t get_io_size() = 0;
     virtual void free_yourself() = 0;
+    virtual bool is_io_completed() = 0;
 
 public:
     indx_req(uint64_t request_id, Op_type op_type_) : request_id(request_id), op_type(op_type_) {}
@@ -715,6 +717,10 @@ public:
     bool is_read() { return op_type == Op_type::READ; }
     bool is_write() { return op_type == Op_type::WRITE; }
     bool is_unmap() { return op_type == Op_type::UNMAP; }
+    void get_btree_cursor(homeds::btree::BtreeQueryCursor& unmap_btree_cur) {
+        unmap_btree_cur.m_last_key = std::move(active_btree_cur.m_last_key);
+        unmap_btree_cur.m_locked_nodes = std::move(active_btree_cur.m_locked_nodes);
+    }
 
 public:
     bool resource_full_check = false; // we don't return error for all ios. we set it for trim,
