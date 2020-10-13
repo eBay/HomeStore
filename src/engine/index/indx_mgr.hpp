@@ -649,8 +649,7 @@ private:
                                      std::shared_ptr< homeds::btree::BtreeQueryCursor >& unmap_btree_cur);
     void do_remaining_unmap(sisl::byte_view& buf, void* unmap_meta_blk_cntx,
                             std::shared_ptr< homeds::btree::BtreeQueryCursor >& unmap_btree_cur);
-    sisl::byte_view write_cp_unmap_sb(void* unmap_meta_blk_cntx, const indx_req_ptr& ireq,
-                                      homeds::btree::BtreeQueryCursor& unmap_btree_cur);
+    sisl::byte_view write_cp_unmap_sb(void* unmap_meta_blk_cntx, const indx_req_ptr& ireq);
     sisl::byte_view write_cp_unmap_sb(void* unmap_meta_blk_cntx, const uint32_t key_size, const uint64_t seq_id,
                                       const void* key, homeds::btree::BtreeQueryCursor& unmap_btree_cur);
 };
@@ -722,7 +721,7 @@ public:
     bool is_unmap() { return op_type == Op_type::UNMAP; }
     void get_btree_cursor(homeds::btree::BtreeQueryCursor& unmap_btree_cur) {
         unmap_btree_cur.m_last_key = std::move(active_btree_cur.m_last_key);
-        unmap_btree_cur.m_locked_nodes = std::move(unmap_btree_cur.m_locked_nodes);
+        unmap_btree_cur.m_locked_nodes = std::move(active_btree_cur.m_locked_nodes);
     }
 
 public:

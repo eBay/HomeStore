@@ -371,9 +371,6 @@ std::error_condition Volume::unmap(const vol_interface_req_ptr& iface_req) {
         vreq->state = volume_req_state::data_io;
         BlkId bid_invalid{BlkId::invalid_internal_id()};
 
-        /* store blkid which is used later to create journal entry */
-        vreq->push_blkid(bid_invalid);
-
         /* complete the request */
         ret = no_error;
     } catch (const std::exception& e) {
@@ -592,7 +589,13 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
             VOL_RELEASE_ASSERT_CMP(next_start_lba, <=, start_lba, vreq, "mismatch start lba and next start lba");
             VOL_RELEASE_ASSERT_CMP(mapping::get_end_lba(vreq->lba(), vreq->nlbas()), >=, end_lba, vreq,
                                    "mismatch end lba and end lba in req");
-            // check if there are any holes in the beginning or in the middle 
+            // check if there are any holes in the beginning or in the middle
+            ValueEntry ve;
+            (mv->get_array()).get(0, ve, false);
+            if (ve.get_blkId().to_integer() == BlkId::invalid_internal_id()) {
+                // it is trimmed.
+                continue;
+            }
             while (next_start_lba < start_lba) {
                 const auto blob{m_only_in_mem_buff->at_offset(0)};
                 if (!std::holds_alternative< volume_req::IoVecData >(vreq->data)) {
@@ -608,7 +611,6 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
             }
             next_start_lba = end_lba + 1;
 
-            ValueEntry ve;
             (mv->get_array()).get(0, ve, false);
             VOL_DEBUG_ASSERT_CMP(mv->get_array().get_total_elements(), ==, 1, vreq,
                                  "array number of elements not valid");

@@ -166,6 +166,7 @@ btree_status_t mapping::put(mapping_op_cntx& cntx, MappingKey& key, MappingValue
     } else {
         start_lba = key.start();
     }
+    uint64_t end_lba = key.end();
     MappingKey start(start_lba, 1);
     MappingKey end(key.end(), 1);
     auto search_range = BtreeSearchRange(start, true, end, true, &cur); // range key is store here
@@ -178,6 +179,8 @@ btree_status_t mapping::put(mapping_op_cntx& cntx, MappingKey& key, MappingValue
     /* start range put */
     auto ret = m_bt->range_put(btree_put_type::APPEND_IF_EXISTS_ELSE_INSERT, ureq, bcp);
 
+    HS_ASSERT_CMP(RELEASE, get_next_start_key_from_cursor(cur), >=, start_lba);
+    HS_ASSERT_CMP(RELEASE, get_next_start_key_from_cursor(cur), <=, (end_lba + 1));
     /* we should not get resource full error */
     HS_ASSERT(RELEASE,
               (ret == btree_status_t::success || ret == btree_status_t::fast_path_not_possible ||
@@ -832,7 +835,7 @@ btree_status_t mapping::update_indx_tbl(const indx_req_ptr& ireq, const btree_cp
 
     if (vreq->is_unmap()) {
         BlkId bid_invalid{BlkId::invalid_internal_id()};
-        uint64_t nlbas_rem = end_lba - next_start_lba;
+        uint64_t nlbas_rem = get_nlbas(end_lba, next_start_lba);
         uint64_t nlbas_cur = (nlbas_rem > MAX_NUM_LBA) ? MAX_NUM_LBA : nlbas_rem;
         MappingKey m_key(next_start_lba, nlbas_cur);
         ValueEntry ve(vreq->seqid, bid_invalid, 0 /* blk offset */, nlbas_cur, nullptr /* csum ptr */, m_vol_page_size);
@@ -954,25 +957,27 @@ btree_status_t mapping::update_unmap_active_indx_tbl(blkid_list_ptr free_list, u
     journal_key* j_key = (journal_key*)key;
     uint32_t nlbas_rem = j_key->nlbas;
     uint8_t nlbas_cur;
-    uint64_t start_lba;
+    uint64_t next_start_lba;
+    uint64_t start_lba = j_key->lba;
+    uint64_t end_lba = get_end_lba(start_lba, j_key->nlbas);
     btree_status_t ret = btree_status_t::success;
     BlkId bid_invalid{BlkId::invalid_internal_id()};
     mapping_op_cntx cntx;
     cntx.op = UPDATE_UNMAP;
     cntx.free_list = free_list.get();
 
+    next_start_lba = (cur.m_last_key) ? get_next_start_key_from_cursor(cur) : j_key->lba;
+    nlbas_rem = get_nlbas(end_lba, next_start_lba);
     while (nlbas_rem > 0) {
         nlbas_cur = (nlbas_rem > MAX_NUM_LBA) ? MAX_NUM_LBA : nlbas_rem;
-        start_lba = (cur.m_last_key) ? get_next_start_key_from_cursor(cur) : j_key->lba;
         MappingKey m_key(start_lba, nlbas_cur);
         ValueEntry ve(seq_id, bid_invalid, 0 /* blk offset */, nlbas_cur, nullptr /* csum ptr */, m_vol_page_size);
         MappingValue value(ve);
 
         ret = put(cntx, m_key, value, bcp, cur);
         if (ret != btree_status_t::success) { break; }
+        next_start_lba = (cur.m_last_key) ? get_next_start_key_from_cursor(cur) : j_key->lba;
         nlbas_rem -= nlbas_cur;
-        /* update key with remaining lbas */
-        j_key->nlbas = nlbas_rem;
     }
     size = cntx.free_blk_size;
     return ret;

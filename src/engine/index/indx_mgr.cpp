@@ -887,9 +887,8 @@ sisl::byte_view IndxMgr::alloc_unmap_sb(const uint32_t key_size, const uint64_t 
     return b;
 }
 
-sisl::byte_view IndxMgr::write_cp_unmap_sb(void* unmap_meta_blk_cntx, const indx_req_ptr& ireq,
-                                           homeds::btree::BtreeQueryCursor& unmap_btree_cur) {
-    auto b = alloc_unmap_sb(ireq->get_key_size(), ireq->get_seqid(), unmap_btree_cur);
+sisl::byte_view IndxMgr::write_cp_unmap_sb(void* unmap_meta_blk_cntx, const indx_req_ptr& ireq) {
+    auto b = alloc_unmap_sb(ireq->get_key_size(), ireq->get_seqid(), ireq->active_btree_cur);
     ireq->fill_key((uint8_t*)((uint64_t)b.bytes() + sizeof(hs_cp_unmap_sb)), ireq->get_key_size());
     write_meta_blk(unmap_meta_blk_cntx, b);
     return b;
@@ -907,11 +906,12 @@ sisl::byte_view IndxMgr::write_cp_unmap_sb(void* unmap_meta_blk_cntx, const uint
 
 void IndxMgr::unmap_indx_async(const indx_req_ptr& ireq) {
     /* persist superblock */
-    void* unmap_meta_blk_cntx;
+    void* unmap_meta_blk_cntx = nullptr;
+
+    auto b = write_cp_unmap_sb(unmap_meta_blk_cntx, ireq);
+
     std::shared_ptr< homeds::btree::BtreeQueryCursor > unmap_btree_cur(new homeds::btree::BtreeQueryCursor());
     ireq->get_btree_cursor(*(unmap_btree_cur.get()));
-
-    auto b = write_cp_unmap_sb(unmap_meta_blk_cntx, ireq, *(unmap_btree_cur.get()));
 
     /* call completion cb */
     m_io_cb(ireq, ireq->indx_err);
