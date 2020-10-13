@@ -579,7 +579,7 @@ struct volume_req : indx_req {
         uint64_t active_nlbas_written = mapping::get_nlbas_from_cursor(lba(), active_btree_cur);
         /* we only populating check sum. Allocate blkids are already populated by indx mgr */
         uint16_t* j_csum = (uint16_t*)mem;
-        assert(active_nlbas_written == nlbas());
+        assert(is_unmap() || active_nlbas_written == nlbas());
         for (uint32_t i = 0; i < active_nlbas_written; ++i) {
             j_csum[i] = csum_list[i];
         }
@@ -587,6 +587,11 @@ struct volume_req : indx_req {
     virtual uint32_t get_io_size() override {
         uint64_t active_nlbas_written = mapping::get_nlbas_from_cursor(lba(), active_btree_cur);
         return active_nlbas_written * vol()->get_page_size();
+    }
+
+    virtual bool is_io_completed() override {
+        uint64_t active_nlbas_written = mapping::get_nlbas_from_cursor(lba(), active_btree_cur);
+        return (active_nlbas_written == nlbas());
     }
 
 private:
@@ -613,7 +618,7 @@ private:
         csum_list.reserve(VOL_MAX_IO_SIZE / vi_req->vol_instance->get_page_size());
         indx_fbe_list.reserve(VOL_MAX_IO_SIZE / vi_req->vol_instance->get_page_size());
         alloc_blkid_list.reserve(VOL_MAX_IO_SIZE / vi_req->vol_instance->get_page_size());
-        if (vi_req->is_write()) { seqid = vi_req->vol_instance->inc_and_get_seq_id(); }
+        if (vi_req->is_write() || vi_req->is_unmap()) { seqid = vi_req->vol_instance->inc_and_get_seq_id(); }
     }
 };
 
