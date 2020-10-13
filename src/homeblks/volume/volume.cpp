@@ -433,39 +433,46 @@ bool Volume::check_and_complete_req(const volume_req_ptr& vreq, const std::error
     }
 
     if (completed) {
-        vreq->state = volume_req_state::completed;
+        if (vreq->state != volume_req_state::completed) {
+            vreq->state = volume_req_state::completed;
 
-        /* update counters */
-        size = get_page_size() * vreq->nlbas();
-        auto latency_us = get_elapsed_time_us(vreq->io_start_time);
-        if (vreq->is_read_op()) {
-            COUNTER_DECREMENT(m_metrics, volume_outstanding_data_read_count, 1);
-            COUNTER_INCREMENT(m_metrics, volume_read_size_total, size);
-            HISTOGRAM_OBSERVE(m_metrics, volume_read_size_distribution, size);
-            HISTOGRAM_OBSERVE(m_metrics, volume_pieces_per_read, vreq->vc_req_cnt);
-            HISTOGRAM_OBSERVE(m_metrics, volume_read_latency, latency_us);
-        } else {
-            COUNTER_DECREMENT(m_metrics, volume_outstanding_data_write_count, 1);
-            COUNTER_INCREMENT(m_metrics, volume_write_size_total, size);
-            HISTOGRAM_OBSERVE(m_metrics, volume_write_size_distribution, size);
-            HISTOGRAM_OBSERVE(m_metrics, volume_pieces_per_write, vreq->vc_req_cnt);
-            HISTOGRAM_OBSERVE(m_metrics, volume_write_latency, latency_us);
-        }
-
-        if (latency_us > 5000000) { THIS_VOL_LOG(WARN, , vreq, "vol req took time {} us", latency_us); }
-
-        if (!vreq->is_sync()) {
-#ifdef _PRERELEASE
-            if (auto flip_ret = homestore_flip->get_test_flip< int >("vol_comp_delay_us")) {
-                LOGINFO("delaying completion in volume for {} us", flip_ret.get());
-                usleep(flip_ret.get());
+            /* update counters */
+            size = get_page_size() * vreq->nlbas();
+            auto latency_us = get_elapsed_time_us(vreq->io_start_time);
+            if (vreq->is_read_op()) {
+                COUNTER_DECREMENT(m_metrics, volume_outstanding_data_read_count, 1);
+                COUNTER_INCREMENT(m_metrics, volume_read_size_total, size);
+                HISTOGRAM_OBSERVE(m_metrics, volume_read_size_distribution, size);
+                HISTOGRAM_OBSERVE(m_metrics, volume_pieces_per_read, vreq->vc_req_cnt);
+                HISTOGRAM_OBSERVE(m_metrics, volume_read_latency, latency_us);
+            } else {
+                COUNTER_DECREMENT(m_metrics, volume_outstanding_data_write_count, 1);
+                COUNTER_INCREMENT(m_metrics, volume_write_size_total, size);
+                HISTOGRAM_OBSERVE(m_metrics, volume_write_size_distribution, size);
+                HISTOGRAM_OBSERVE(m_metrics, volume_pieces_per_write, vreq->vc_req_cnt);
+                HISTOGRAM_OBSERVE(m_metrics, volume_write_latency, latency_us);
             }
+
+            if (latency_us > 5000000) { THIS_VOL_LOG(WARN, , vreq, "vol req took time {} us", latency_us); }
+
+            if (!vreq->is_sync()) {
+#ifdef _PRERELEASE
+                if (auto flip_ret = homestore_flip->get_test_flip< int >("vol_comp_delay_us")) {
+                    LOGINFO("delaying completion in volume for {} us", flip_ret.get());
+                    usleep(flip_ret.get());
+                }
 #endif
-            THIS_VOL_LOG(TRACE, volume, vreq, "IO DONE");
-            interface_req_done(vreq->iface_req);
+                THIS_VOL_LOG(TRACE, volume, vreq, "IO DONE");
+                interface_req_done(vreq->iface_req);
+            }
+        } else {
+            VOL_DEBUG_ASSERT_CMP(vreq->is_unmap(), ==, true, vreq, "this operation is allowed only for unmap");
         }
 
-        shutdown_if_needed();
+        if (err || !vreq->is_unmap() || vreq->is_io_completed()) {
+            /* we wait for unmap to complete before shutdown/destroy starts */
+            shutdown_if_needed();
+        }
     }
     return completed;
 }

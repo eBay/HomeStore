@@ -49,10 +49,8 @@ struct journal_hdr {
 };
 
 class indx_journal_entry {
-private:
-    sisl::io_blob m_iob;
-
 public:
+    sisl::io_blob m_iob;
     uint32_t size(indx_req* ireq) const;
     uint32_t size() const;
     ~indx_journal_entry();
@@ -342,7 +340,7 @@ public:
     virtual void get_btreequery_cur(const sisl::blob& b, homeds::btree::BtreeQueryCursor& cur) = 0;
     virtual btree_status_t update_unmap_active_indx_tbl(blkid_list_ptr free_list, uint64_t& seq_id, void* key,
                                                         homeds::btree::BtreeQueryCursor& cur, const btree_cp_ptr& bcp,
-                                                        int64_t& size) = 0;
+                                                        int64_t& size, bool force) = 0;
 };
 
 typedef std::function< void(const boost::intrusive_ptr< indx_req >& ireq, std::error_condition err) > io_done_cb;
@@ -645,10 +643,9 @@ private:
                                    homeds::btree::BtreeQueryCursor& unmap_btree_cur);
     sisl::byte_view alloc_sb_bytes(uint64_t size_);
     void unmap_indx_async(const indx_req_ptr& ireq);
-    void do_remaining_unmap_internal(sisl::byte_view buf, void* unmap_meta_blk_cntx,
-                                     std::shared_ptr< homeds::btree::BtreeQueryCursor >& unmap_btree_cur);
-    void do_remaining_unmap(sisl::byte_view& buf, void* unmap_meta_blk_cntx,
-                            std::shared_ptr< homeds::btree::BtreeQueryCursor >& unmap_btree_cur);
+    void do_remaining_unmap_internal(const indx_req_ptr& ireq, void* unmap_meta_blk_cntx, void* key, uint64_t seqid,
+                                     homeds::btree::BtreeQueryCursor& btree_cur);
+    void do_remaining_unmap(const indx_req_ptr& ireq, void* unmap_meta_blk_cntx);
     sisl::byte_view write_cp_unmap_sb(void* unmap_meta_blk_cntx, const indx_req_ptr& ireq);
     sisl::byte_view write_cp_unmap_sb(void* unmap_meta_blk_cntx, const uint32_t key_size, const uint64_t seq_id,
                                       const void* key, homeds::btree::BtreeQueryCursor& unmap_btree_cur);

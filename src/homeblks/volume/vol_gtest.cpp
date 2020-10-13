@@ -1186,6 +1186,7 @@ protected:
         const auto ret_io{VolInterface::get_instance()->unmap(vol, vreq)};
         LOGDEBUG("Unmapped lba: {}, nlbas: {} outstanding_ios={}, cache={}", lba, nlbas, m_outstanding_ios.load(),
                  (tcfg.write_cache != 0 ? true : false));
+        iomanager.iobuf_free(wbuf); // this buffer is not used in unmap
         if (ret_io != no_error) { return false; }
         return true;
     }
