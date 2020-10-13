@@ -80,7 +80,7 @@ table ResourceLimits {
     dirty_buf_percent: uint32 = 5 (hotswap);
     
     /* it is going to use 2 times of this space because of two concurrent cps */
-    free_blk_cnt: uint32 = 100000 (hotswap);
+    free_blk_cnt: uint32 = 1000000 (hotswap);
     free_blk_size: uint32 = 2 (hotswap);
     
     /* Percentage of memory allocated for homestore cache */
