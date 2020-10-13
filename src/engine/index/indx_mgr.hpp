@@ -223,7 +223,7 @@ struct indx_cp : public boost::intrusive_ref_counter< indx_cp > {
 
     std::string to_string() {
         std::stringstream ss;
-        HS_ASSERT(RELEASE, (io_free_blkid_list.get() == nullptr), "");
+        HS_ASSERT(RELEASE, (io_free_blkid_list.get() != nullptr), "");
         ss << "flags " << flags << " indx cp_id " << cp_id << " indx_size " << indx_size << " active checkpoint "
            << "\n"
            << acp.to_string() << "\n"
