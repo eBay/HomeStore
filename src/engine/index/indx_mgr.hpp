@@ -183,8 +183,8 @@ struct indx_diff_cp {
         std::stringstream ss;
         ss << " start_seqid " << start_seqid << " end_seqid " << end_seqid << " diff_snap_id " << diff_snap_id
            << " btree checkpoint info "
-           << "\n"
-           << bcp->to_string();
+           << "\n";
+        if (bcp) { ss << bcp->to_string(); }
         return ss.str();
     }
 };
@@ -223,7 +223,6 @@ struct indx_cp : public boost::intrusive_ref_counter< indx_cp > {
 
     std::string to_string() {
         std::stringstream ss;
-        HS_ASSERT(RELEASE, (io_free_blkid_list.get() != nullptr), "");
         ss << "flags " << flags << " indx cp_id " << cp_id << " indx_size " << indx_size << " active checkpoint "
            << "\n"
            << acp.to_string() << "\n"
