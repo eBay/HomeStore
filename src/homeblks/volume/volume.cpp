@@ -426,6 +426,7 @@ bool Volume::check_and_complete_req(const volume_req_ptr& vreq, const std::error
                 vreq->indx_start_time = Clock::now();
                 auto ireq = boost::static_pointer_cast< indx_req >(vreq);
                 (vreq->is_unmap()) ? m_indx_mgr->unmap(ireq) : m_indx_mgr->update_indx(ireq);
+                COUNTER_INCREMENT(m_metrics, volume_outstanding_metadata_write_count, 1);
             }
         }
     } else if (vreq->state == volume_req_state::journal_io) {
