@@ -83,7 +83,7 @@ public:
             static_cast<uint16_t>((id >> (ID_BITS + NBLKS_BITS)) & s_chuck_num_mask));
     }
 
-    BlkId(const uint64_t id, const uint8_t nblks, const uint16_t chunk_num = 0) { set(id, nblks, chunk_num); }
+    BlkId(const uint64_t id, const uint8_t nblks, const uint16_t chunk_num = 0) { set(id & s_id_mask, nblks, chunk_num); }
 
     BlkId() {
         set(s_id_mask, static_cast<uint8_t>(s_nblks_mask), static_cast<uint16_t>(s_chuck_num_mask));
