@@ -303,7 +303,7 @@ struct io_req_t : public vol_interface_req {
         init(lba, nlbas, is_csum);
 
         const auto req_ptr{static_cast< vol_interface_req* >(this)};
-        if (op == Op_type::WRITE) {
+        if (op == Op_type::WRITE || op == Op_type::UNMAP) {
             // make copy of buffer so validation works properly
             if (is_csum) {
                 uint8_t* validate_ptr{validate_buffer};
@@ -335,7 +335,7 @@ struct io_req_t : public vol_interface_req {
     {
         init(lba, nlbas, is_csum);
 
-        if (op == Op_type::WRITE) {
+        if (op == Op_type::WRITE || op == Op_type::UNMAP) {
             // make copy of buffer so validation works properly
             if (is_csum) {
                 populate_csum_buf(reinterpret_cast< uint16_t* >(validate_buffer), buffer, original_size, vinfo.get());
@@ -1174,6 +1174,7 @@ protected:
 
         const uint64_t size{nlbas * VolInterface::get_instance()->get_page_size(vol)};
         uint8_t* const wbuf{iomanager.iobuf_alloc(512, size)};
+        bzero(wbuf, size);
 
         const auto vreq{boost::intrusive_ptr< io_req_t >(
             new io_req_t(vinfo, Op_type::UNMAP, wbuf, lba, nlbas, tcfg.verify_csum()))};
@@ -1185,6 +1186,7 @@ protected:
         const auto ret_io{VolInterface::get_instance()->unmap(vol, vreq)};
         LOGDEBUG("Unmapped lba: {}, nlbas: {} outstanding_ios={}, cache={}", lba, nlbas, m_outstanding_ios.load(),
                  (tcfg.write_cache != 0 ? true : false));
+        iomanager.iobuf_free(wbuf); // this buffer is not used in unmap
         if (ret_io != no_error) { return false; }
         return true;
     }
