@@ -78,7 +78,9 @@ public:
         }
 
         // No available candidate to evict
-        // TODO: Throw no space available exception.
+        // TODO: Throw no space available exception.  It is possible that this bucket does not contain enough
+        // entries for eviction in which case we might want to look at evicting from other buckets before
+        // throwing failure
         return;
     }
 

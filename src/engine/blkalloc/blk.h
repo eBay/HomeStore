@@ -38,10 +38,9 @@ private:
     static constexpr uint64_t s_chuck_num_mask{(static_cast< uint64_t >(1) << CHUNK_NUM_BITS) - 1};
 
 public:
-    uint64_t m_id : ID_BITS;               // Block number which is unique within the chunk
-    uint64_t m_nblks : NBLKS_BITS;         // Total number of blocks starting from previous block number
-    uint64_t m_chunk_num : CHUNK_NUM_BITS; // Chunk number - which is unique for the entire application
-    uint64_t m_rest : 64 - ID_BITS - NBLKS_BITS - CHUNK_NUM_BITS;
+    uint32_t m_id;       // Block number which is unique within the chunk
+    uint8_t m_nblks;     // Total number of blocks starting from previous block number
+    uint8_t m_chunk_num; // Chunk number - which is unique for the entire application
 
     // make these constexpr after rolling in sisl update
     [[nodiscard]] static constexpr uint64_t invalid_internal_id() {
@@ -81,7 +80,8 @@ public:
 
     explicit BlkId(const uint64_t id) 
     {
-        set(id & s_id_mask, (id >> ID_BITS) & s_nblks_mask, id >> (ID_BITS + NBLKS_BITS) & s_chuck_num_mask);
+        set(id & s_id_mask, static_cast<uint8_t>((id >> ID_BITS) & s_nblks_mask),
+            static_cast<uint16_t>((id >> (ID_BITS + NBLKS_BITS)) & s_chuck_num_mask));
     }
 
     BlkId(const uint64_t id, const uint8_t nblks, const uint16_t chunk_num = 0) { set(id, nblks, chunk_num); }
@@ -118,9 +118,12 @@ public:
     BlkId& operator=(BlkId&&) noexcept = default;
 
     void set(const uint64_t id, const uint8_t nblks, const uint16_t chunk_num = 0) {
+        ASSERT(id <= s_id_mask);
+        ASSERT(nblks <= s_nblks_mask);
+        ASSERT(chunk_num <= s_chuck_num_mask);
         m_id = id;
         m_nblks = nblks;
-        m_chunk_num = chunk_num;
+        m_chunk_num = static_cast<uint8_t>(chunk_num);
     }
 
     void set(const BlkId& bid) { set(bid.get_id(), bid.get_nblks(), bid.get_chunk_num()); }
@@ -143,9 +146,7 @@ public:
     [[nodiscard]] std::string to_string() const {
         return fmt::format("Id={} nblks={} chunk={}", m_id, m_nblks, m_chunk_num);
     }
-
-} // namespace homestore
-__attribute__((__packed__));
+} __attribute__((__packed__));
 
 [[nodiscard]] inline uint64_t begin_of(const BlkId& bid) { return bid.get_id(); }
 [[nodiscard]] inline uint64_t end_of(const BlkId& bid) { return bid.get_id() + bid.get_nblks(); }
@@ -167,184 +168,6 @@ constexpr uint32_t BLKID32_INVALID{std::numeric_limits< uint32_t >::max()};
 constexpr uint64_t BLKID64_INVALID{std::numeric_limits< uint64_t >::max()};
 
 using blkid_list_ptr = std::shared_ptr< sisl::ThreadVector< BlkId > >;
-#if 0
-struct SingleBlk {
-    BlkId m_blk_id;
-    uint32_t  m_nblks;
-    homeds::MemVector < 1 > m_mem;
-
-    SingleBlk(uint64_t id, uint16_t chunk_num, uint32_t size) :
-            m_blk_id(id, chunk_num),
-            m_nblks(size) {}
-    explicit SingleBlk(BlkId bid) :
-            m_blk_id(bid),
-            m_nblks(0) {
-    }
-    SingleBlk() : SingleBlk((uint64_t)-1, (uint16_t)-1, 0) {}
-
-    BlkId get_id() const {
-        return m_blk_id;
-    }
-
-    void set_id(uint64_t id, uint16_t chunk_num) {
-        m_blk_id.set(id, chunk_num);
-    }
-
-    void set_id(const BlkId bid) {
-        m_blk_id.m_internal_id = bid.m_internal_id;
-    }
-
-    homeds::MemVector<1> &get_mem() {
-        return m_mem;
-    }
-
-    const homeds::MemVector<1> &get_mem_const() const {
-        return m_mem;
-    }
-
-    void set_mem(sisl::blob b) {
-        m_mem.set_piece(b);
-    }
-
-    uint32_t get_size() const {
-        return m_nblks;
-    }
-
-    void set_size(uint32_t size) {
-        m_nblks = size;
-    }
-};
-
-#define EXPECTED_BLK_PIECES 1
-#define EXPECTED_MEM_PIECE_PER_BLK 2
-
-struct MemPiece {
-    const uint8_t *m_mem;
-    uint32_t m_nblks;
-
-    MemPiece(const uint8_t *mem, uint32_t sz) {
-        m_mem = mem; m_nblks = sz;
-    }
-};
-
-class BlkPiece {
-private:
-    blkid64_t m_blk_id;
-    uint32_t  m_nblks;   // Its actual size in this piece. Note: This can be more than pageSize
-
-    uint32_t m_bufsize;
-    homeds::FlexArray< MemPiece, EXPECTED_MEM_PIECE_PER_BLK > m_bufs;
-
-public:
-    BlkPiece(blkid64_t id, uint32_t size, uint8_t *mem) :
-            m_blk_id(id),
-            m_nblks(size),
-            m_bufsize(size) {
-        MemPiece m(mem, size);
-        m_bufs.push_back(m);
-    }
-
-    BlkPiece(blkid64_t id, uint32_t size) :
-            m_blk_id(id),
-            m_nblks(size) {
-        m_bufsize = 0;
-    }
-
-    BlkPiece() : BlkPiece(BLKID64_INVALID, 0, nullptr) {}
-
-    void set_blk_id(blkid64_t id) {
-        m_blk_id = id;
-    }
-
-    void set_size(uint32_t size) {
-        m_nblks = size;
-    }
-
-    void set_buf(const uint8_t *mem, uint32_t mem_size) {
-        assert(mem_size == m_nblks);
-        assert(m_bufs.size() == 0);
-
-        MemPiece m(mem, mem_size);
-        m_bufs.push_back(m);
-    }
-
-    void add_buf(uint8_t *mem, uint32_t mem_size) {
-        m_bufsize += mem_size;
-
-        MemPiece m(mem, mem_size);
-        m_bufs.push_back(m);
-    }
-
-    uint32_t get_size() const {
-        return m_nblks;
-    }
-
-    blkid64_t get_blk_id() const {
-        return m_blk_id;
-    }
-
-    uint32_t get_buf(uint8_t **mem) const {
-        return 0;
-    }
-};
-
-//#define toDynPieceNum(np) (np - MAX_STATIC_BLK_PIECES)
-#define total_piece_size(np, b) ((np)*b->getSizeofPiece())
-
-//#define dynPieceSize(np)  ((toDynPieceNum(np) - 1)/DYNAMIC_BLK_PIECE_CHUNK + 1) *
-
-
-/* A Blk class represents a single cohesive unit of data we exchange. It could be
- * either in memory or ssd or anything in future. Underneath it can have multiple
- * pieces to form one unit, however allocation and freeing all happens as one unit.
- */
-class Blk {
-private:
-    homeds::FlexArray< BlkPiece, EXPECTED_BLK_PIECES > m_pieces;
-
-protected:
-    homeds::FlexArray< BlkPiece, EXPECTED_BLK_PIECES > &get_pieces() {
-        return m_pieces;
-    }
-
-public:
-    Blk() = default;
-    Blk(BlkPiece &piece) {
-        add_piece(piece);
-    }
-
-    uint16_t get_npieces() {
-        return m_pieces.size();
-    }
-
-    template< class... Args >
-    uint32_t emplace_piece(Args &&... args) {
-        return m_pieces.emplace_back(std::forward<Args>(args)...);
-    }
-
-    uint32_t add_piece(BlkPiece &piece) {
-        return m_pieces.push_back(piece);
-    }
-
-    void merge(Blk &other) {
-        for (auto i = 0; i < other.get_npieces(); i++) {
-            add_piece(other.get_piece(i));
-        }
-    }
-
-    virtual uint32_t get_total_size() {
-        uint32_t size = 0;
-        for (auto i = 0; i < m_pieces.size(); i++) {
-            size += get_piece(i).get_size();
-        }
-        return size;
-    }
-
-    BlkPiece &get_piece(uint32_t num) {
-        return m_pieces[num];
-    }
-};
-#endif
 } // namespace homestore
 
 // hash function definitions

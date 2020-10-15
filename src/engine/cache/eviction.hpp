@@ -15,6 +15,8 @@
 #include "engine/common/homestore_config.hpp"
 #include "engine/homeds/memory/mempiece.hpp"
 
+SDS_LOGGING_DECL(cache)
+
 namespace homestore {
 
 template < typename EvictionPolicy >
@@ -117,11 +119,17 @@ private:
             });
 
         if (dealloc_size > 0) {
-            HS_ASSERT_CMP(LOGMSG, dealloc_size, >=, needed_size);
-            int64_t size = m_cur_size.fetch_sub(dealloc_size, std::memory_order_acq_rel);
+            const int64_t size{m_cur_size.fetch_sub(dealloc_size, std::memory_order_acq_rel)};
             HS_ASSERT_CMP(LOGMSG, size, >=, 0);
+            if (dealloc_size < needed_size)
+            {
+                HS_LOG(DEBUG, cache, "Unable to evict enough entries to meet needed size - needed {} evicted {}",
+                       needed_size, dealloc_size);
+                return false;
+            }
             return true;
         } else {
+            HS_LOG(DEBUG, cache, "Unable to evict any entries.", needed_size, dealloc_size);
             return false;
         }
     }
