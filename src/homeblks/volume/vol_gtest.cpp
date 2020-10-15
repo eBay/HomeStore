@@ -1662,7 +1662,7 @@ SDS_OPTION_GROUP(
     (batch_completion, "", "batch_completion", "batch completion", ::cxxopts::value< bool >()->default_value("false"),
      "true or false"),
     (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"))
-#define ENABLED_OPTIONS logging, home_blks, test_volume
+#define ENABLED_OPTIONS logging, home_blks, test_volume, iomgr
 
 SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
 

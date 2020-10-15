@@ -42,7 +42,6 @@ public:
     uint8_t m_nblks;     // Total number of blocks starting from previous block number
     uint8_t m_chunk_num; // Chunk number - which is unique for the entire application
 
-    // make these constexpr after rolling in sisl update
     [[nodiscard]] static constexpr uint64_t invalid_internal_id() {
         return (static_cast< uint64_t >(1) << (ID_BITS + NBLKS_BITS + CHUNK_NUM_BITS)) - 1;
     }
@@ -87,8 +86,7 @@ public:
     BlkId(const uint64_t id, const uint8_t nblks, const uint16_t chunk_num = 0) { set(id, nblks, chunk_num); }
 
     BlkId() {
-        set(std::numeric_limits< uint64_t >::max(), std::numeric_limits< uint8_t >::max(),
-            std::numeric_limits< uint16_t >::max());
+        set(s_id_mask, static_cast<uint8_t>(s_nblks_mask), static_cast<uint16_t>(s_chuck_num_mask));
     }
 
     [[nodiscard]] BlkId get_blkid_at(const uint32_t offset, const uint32_t pagesz) const {
@@ -128,9 +126,12 @@ public:
 
     void set(const BlkId& bid) { set(bid.get_id(), bid.get_nblks(), bid.get_chunk_num()); }
 
-    void set(const uint64_t bid) { set(bid, bid >> ID_BITS, bid >> (ID_BITS + CHUNK_NUM_BITS)); }
+    void set(const uint64_t bid) { set(bid & s_id_mask, static_cast<uint8_t>((bid >> ID_BITS) & s_nblks_mask), static_cast<uint16_t>((bid >> (ID_BITS + CHUNK_NUM_BITS)) & s_chuck_num_mask)); }
 
-    void set_id(const uint64_t id) { m_id = id; }
+    void set_id(const uint64_t id) { 
+        ASSERT(id <= s_id_mask);
+        m_id = id;
+    }
 
     [[nodiscard]] uint64_t get_id() const { return m_id; }
 
