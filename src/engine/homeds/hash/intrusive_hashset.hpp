@@ -27,8 +27,36 @@ namespace homeds {
 #define hash_write_lock() lock(false)
 #define hash_write_unlock() unlock(false)
 
-[[maybe_unused]] static uint64_t compute_hash_code(sisl::blob b) {
-    return util::Hash64((const char*)b.bytes, (size_t)b.size);
+//////////////////////////////////// SFINAE Hash Selection /////////////////////////////////
+
+namespace {
+template < typename T, typename = std::void_t<> >
+struct is_std_hashable : std::false_type {};
+
+template < typename T >
+struct is_std_hashable< T, std::void_t< decltype(std::declval< std::hash< T > >()(std::declval< T >())) > >
+        : std::true_type {};
+
+template < typename T >
+constexpr bool is_std_hashable_v{is_std_hashable< T >::value};
+
+template < typename KeyType >
+uint64_t compute_hash_imp(const KeyType& key, std::true_type) {
+    return static_cast< uint64_t >(std::hash< KeyType >()(key));
+}
+
+template < typename KeyType >
+uint64_t compute_hash_imp(const KeyType& key, std::false_type) {
+    const auto b{KeyType::get_blob(key)};
+    const uint64_t hash_code{util::Hash64(reinterpret_cast< const char* >(b.bytes), static_cast< size_t >(b.size))};
+    return hash_code;
+}
+
+// range by data helper templates that does tag dispatching based on multivalued
+template < typename KeyType >
+uint64_t compute_hash(const KeyType& key) {
+    return compute_hash_imp< KeyType >(key, is_std_hashable< KeyType >{});
+}
 }
 
 class HashNode : public boost::intrusive::slist_base_hook<> {};
@@ -319,7 +347,7 @@ public:
     }
 
 private:
-    HashBucket< K, V >* get_bucket(const K& k) { return &(m_buckets[compute_hash_code(K::get_blob(k)) % m_nbuckets]); }
+    HashBucket< K, V >* get_bucket(const K& k) { return &(m_buckets[compute_hash(k) % m_nbuckets]); }
 
     HashBucket< K, V >* get_bucket(uint64_t hash_code) { return &(m_buckets[hash_code % m_nbuckets]); }
 

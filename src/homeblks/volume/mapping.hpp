@@ -40,6 +40,7 @@ struct mapping_op_cntx {
     sisl::ThreadVector< BlkId >* free_list;
     int64_t seqid = INVALID_SEQ_ID;
     uint64_t free_blk_size = 0;
+    bool force = false;
 };
 
 struct LbaId {
@@ -664,7 +665,9 @@ public:
     virtual void get_btreequery_cur(const sisl::blob& b, BtreeQueryCursor& cur) override;
     virtual btree_status_t destroy(blkid_list_ptr& free_blkid_list, uint64_t& free_node_cnt) override;
     virtual btree_status_t read_indx(const indx_req_ptr& ireq, const read_indx_comp_cb_t& read_cb) override;
-    virtual btree_status_t update_unmap_active_indx_tbl(blkid_list_ptr free_list, uint64_t& seq_id, void* key, BtreeQueryCursor& cur, const btree_cp_ptr& bcp, int64_t& size) override;
+    virtual btree_status_t update_unmap_active_indx_tbl(blkid_list_ptr free_list, uint64_t& seq_id, void* key,
+                                                        BtreeQueryCursor& cur, const btree_cp_ptr& bcp, int64_t& size,
+                                                        bool force) override;
 
 public:
     /* static functions */

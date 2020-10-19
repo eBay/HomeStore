@@ -4,17 +4,19 @@
 
 #pragma once
 
-#include "homeds/loadgen/loadgen_common.hpp"
-#include "homeds/loadgen/spec/key_spec.hpp"
-
+#include <cassert>
+#include <cstdint>
+#include <functional>
 #include <random>
 #include <sstream>
+#include <string>
+
+#include "homeds/loadgen/loadgen_common.hpp"
+#include "homeds/loadgen/spec/key_spec.hpp"
 
 namespace homeds {
 namespace loadgen {
 
-//
-//
 class LogStoreKey : public KeySpec {
 #define MAX_VDEV_ALLOC_SIZE 8192
 #define VDEV_BLK_SIZE 512
@@ -40,8 +42,6 @@ public:
         return false;
     }
 
-    friend ostream& operator<<(ostream& os, const LogStoreKey& k) { return os; }
-
     virtual int compare(KeySpec* other) const {
         LogStoreKey* k = dynamic_cast< LogStoreKey* >(other);
         return to_string().compare(k->to_string());
@@ -58,6 +58,20 @@ public:
 private:
     uint64_t m_seq_num = 0;
 };
+
+template < typename charT, typename traits >
+std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, traits >& outStream,
+                                                const LogStoreKey& log_store_key) {
+    // copy the stream formatting
+    std::basic_ostringstream< charT, traits > outStringStream;
+    outStringStream.copyfmt(outStream);
+
+    // print the stream
+    outStringStream << log_store_key.to_string();
+    outStream << outStringStream.str();
+
+    return outStream;
+}
 
 } // namespace loadgen
 } // namespace homeds

@@ -217,45 +217,45 @@ def nightly():
     sleep(5)
     
     # normal IO test
-    normal_flip()
-    sleep(5)
+    #normal_flip()
+    #sleep(5)
 
-    one_disk_replace()
-    sleep(5)
+    #one_disk_replace()
+    #sleep(5)
 
-    one_disk_replace_abort()
-    sleep(5)
+    #one_disk_replace_abort()
+    #sleep(5)
 
-    both_disk_replace()
-    sleep(5)
+    #both_disk_replace()
+    #sleep(5)
 
-    one_disk_fail()
-    sleep(5)
+    #one_disk_fail()
+    #sleep(5)
 
-    vol_offline_test()
-    sleep(5)
+    #vol_offline_test()
+    #sleep(5)
 
   #  vol_io_fail_test()
     sleep(5)
 
-    vol_create_del_test()
-    sleep(5)
+    #vol_create_del_test()
+    #sleep(5)
     print("nightly test passed")
     
-    load_volume()
-    sleep(5)
+    #load_volume()
+    #sleep(5)
 
-    load()
-    sleep(5)
+    #load()
+    #sleep(5)
 
-    btree_fix()
-    sleep(5)
+    #btree_fix()
+    #sleep(5)
 
-    btree_fix_on_read_failure()
-    sleep(5)
+    #btree_fix_on_read_failure()
+    #sleep(5)
     
-    vdev_nightly()
-    sleep(5)
+    #vdev_nightly()
+    #sleep(5)
 
 if test_suits == "normal":
     normal()

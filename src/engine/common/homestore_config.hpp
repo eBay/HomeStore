@@ -1,4 +1,4 @@
-
+﻿
 #ifndef _HOMESTORE_CONFIG_HPP_
 #define _HOMESTORE_CONFIG_HPP_
 
@@ -144,7 +144,7 @@ constexpr uint32_t BLKID_SIZE_BITS = ID_BITS + NBLKS_BITS + CHUNK_NUM_BITS;
 constexpr uint32_t MEMPIECE_ENCODE_MAX_BITS = 8;
 constexpr uint64_t MAX_NBLKS = ((1 << NBLKS_BITS) - 1);
 constexpr uint64_t MAX_CHUNK_ID = ((1 << CHUNK_NUM_BITS) - 1);
-constexpr uint64_t BLKID_SIZE = ((ID_BITS + NBLKS_BITS + CHUNK_NUM_BITS) / 8);
+constexpr uint64_t BLKID_SIZE = (BLKID_SIZE_BITS / 8) + (((BLKID_SIZE_BITS % 8) != 0) ? 1 : 0);
 constexpr uint32_t BLKS_PER_PORTION = 1024;
 constexpr uint32_t TOTAL_SEGMENTS = 8;
 constexpr uint32_t MAX_ID_BITS_PER_CHUNK = ((1lu << ID_BITS) - 1);

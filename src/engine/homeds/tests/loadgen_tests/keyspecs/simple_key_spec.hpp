@@ -5,14 +5,22 @@
 #ifndef HOMESTORE_BTREE_KEY_SPEC_HPP
 #define HOMESTORE_BTREE_KEY_SPEC_HPP
 
+#include <cassert>
+#include <cstdint>
+#include <functional>
+#include <sstream>
+#include <string>
+#include <vector>
+
+#include "homeds/btree/btree.hpp"
 #include "homeds/loadgen/loadgen_common.hpp"
 #include "homeds/loadgen/spec/key_spec.hpp"
-#include "homeds/btree/btree.hpp"
-#include <fmt/ostream.h>
 
 namespace homeds {
 namespace loadgen {
 class SimpleNumberKey : public homeds::btree::BtreeKey, public KeySpec {
+    friend struct std::hash< SimpleNumberKey >;
+
 private:
     uint64_t m_num;
 
@@ -46,11 +54,20 @@ public:
     uint64_t to_integer() const { return m_num; }
 
     virtual bool operator==(const KeySpec& other) const override {
-        return (compare((const BtreeKey*)&(SimpleNumberKey&)other) == 0);
+#ifdef NDEBUG
+        const SimpleNumberKey& simple_key{reinterpret_cast< const SimpleNumberKey& >(other)};
+#else
+        const SimpleNumberKey& simple_key{dynamic_cast< const SimpleNumberKey& >(other)};
+#endif
+        return (compare(static_cast<const BtreeKey*>(&simple_key)) == 0);
     }
 
     int compare(const BtreeKey* o) const override {
-        SimpleNumberKey* other = (SimpleNumberKey*)o;
+#ifdef NDEBUG
+        const SimpleNumberKey* other{reinterpret_cast< const SimpleNumberKey* >(o)};
+#else
+        const SimpleNumberKey* other{dynamic_cast< const SimpleNumberKey* >(o)};
+#endif
         if (m_num < other->m_num) {
             return -1;
         } else if (m_num > other->m_num) {
@@ -61,20 +78,23 @@ public:
     }
 
     int compare_range(const homeds::btree::BtreeSearchRange& range) const override {
-        auto other_start = (SimpleNumberKey*)range.get_start_key();
-        auto other_end = (SimpleNumberKey*)range.get_end_key();
+        // this is hokey down casting
+        auto other_start = range.get_start_key();
+        auto other_end = range.get_end_key();
 
         assert(0); // Do not support it yet
         return 0;
     }
 
     virtual sisl::blob get_blob() const {
-        sisl::blob b = {(uint8_t*)&m_num, sizeof(uint64_t)};
+        // this assume that endian ordering is the same for all operations
+        sisl::blob b{reinterpret_cast<uint8_t*>(const_cast<uint64_t*>(&m_num)), sizeof(uint64_t)};
         return b;
     };
 
     virtual void set_blob(const sisl::blob& b) {
-        auto n = *((uint64_t*)b.bytes);
+        // this assume that endian ordering is the same for all operations
+        const auto n = *(reinterpret_cast<const uint64_t*>(b.bytes));
         m_num = n;
     }
     virtual void copy_blob(const sisl::blob& b) { set_blob(b); }
@@ -83,28 +103,46 @@ public:
     virtual void set_blob_size(uint32_t size) {}
     virtual std::string to_string() const { return std::to_string(m_num); }
 
-    friend ostream& operator<<(ostream& os, const SimpleNumberKey& k) {
-        os << std::to_string(k.m_num);
-        return os;
-    }
-
     static void gen_keys_in_range(SimpleNumberKey& k1, uint32_t num_of_keys,
                                   std::vector< SimpleNumberKey > keys_inrange) {
         assert(0);
     }
 
     virtual bool is_consecutive(KeySpec& k) override {
-        SimpleNumberKey* nk = (SimpleNumberKey*)&k;
-        if (m_num + 1 == nk->m_num)
+#ifdef NDEBUG
+        const SimpleNumberKey& simple_key{reinterpret_cast< const SimpleNumberKey& >(k)};
+#else
+        const SimpleNumberKey& simple_key{dynamic_cast< const SimpleNumberKey& >(k)};
+#endif
+        if (m_num + 1 == simple_key.m_num)
             return true;
         else
             return false;
     }
 };
 
+template < typename charT, typename traits >
+std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, traits >& outStream,
+                                                const SimpleNumberKey& key) {
+    // copy the stream formatting
+    std::basic_ostringstream< charT, traits > outStringStream;
+    outStringStream.copyfmt(outStream);
+
+    // print the stream
+    outStringStream << key.to_string();
+    outStream << outStringStream.str();
+
+    return outStream;
+}
+
 class CompositeNumberKey : public homeds::btree::BtreeKey, public KeySpec {
 private:
+    static constexpr uint64_t s_count_mask{(static_cast< uint64_t >(1) << 16) - 1};
+    static constexpr uint64_t s_rank_mask{(static_cast< uint64_t >(1) << 10) - 1};
+    static constexpr uint64_t s_blk_num_mask{(static_cast< uint64_t >(1) << 38) - 1};
+
     typedef struct __attribute__((packed)) {
+        // if these did not add to 64 there would be issues with the use of blobs
         uint64_t m_count : 16;
         uint64_t m_rank : 10;
         uint64_t m_blk_num : 38;
@@ -134,7 +172,11 @@ public:
     }
 
     virtual bool is_consecutive(KeySpec& k) override {
-        CompositeNumberKey* nk = (CompositeNumberKey*)&k;
+#ifdef NDEBUG
+        [[maybe_unused]] const CompositeNumberKey& composite_key{reinterpret_cast< const CompositeNumberKey& >(k)};
+#else
+        [[maybe_unused]] const CompositeNumberKey& composite_key{dynamic_cast< const CompositeNumberKey& >(k)};
+#endif
         assert(0); // to implement
         return false;
     }
@@ -155,14 +197,20 @@ public:
             CompositeNumberKey(other.get_count(), other.get_rank(), other.get_blk_num()) {}
 
     CompositeNumberKey& operator=(const CompositeNumberKey& other) {
-        m_attr = &m_inplace_attr;
-        copy_blob(other.get_blob());
+        if (this != &other) {
+            m_inplace_attr.m_count = other.m_inplace_attr.m_count;
+            m_inplace_attr.m_rank = other.m_inplace_attr.m_rank;
+            m_inplace_attr.m_blk_num = other.m_inplace_attr.m_blk_num;
+            m_attr = &m_inplace_attr;
+        }
         return *this;
     }
 
     explicit CompositeNumberKey(uint64_t num) {
         m_attr = &m_inplace_attr;
-        memcpy(&m_inplace_attr, &num, sizeof(uint64_t));
+        set_count(static_cast<uint32_t>(num & s_count_mask));
+        set_rank(static_cast< uint16_t >((num >> 16) & s_rank_mask));
+        set_blk_num((num >> (16+10)) & s_blk_num_mask);
     }
 
     uint32_t get_count() const { return (m_attr->m_count); }
@@ -170,19 +218,28 @@ public:
     uint64_t get_blk_num() const { return (m_attr->m_blk_num); }
     void set_count(uint32_t count) { m_attr->m_count = count; }
     void set_rank(uint32_t rank) { m_attr->m_rank = rank; }
-    void set_blk_num(uint32_t blkNum) { m_attr->m_blk_num = blkNum; }
+    void set_blk_num(uint64_t blkNum) { m_attr->m_blk_num = blkNum; }
     uint64_t to_integer() const {
-        uint64_t n;
-        memcpy(&n, m_attr, sizeof(uint64_t));
-        return n;
+        const uint64_t val{m_inplace_attr.m_count | (m_inplace_attr.m_rank << 16) | (m_inplace_attr.m_blk_num << (16 + 10))};
+        return val;
     }
 
     virtual bool operator==(const KeySpec& rhs) const override {
-        return (compare((const BtreeKey*)&(CompositeNumberKey&)rhs) == 0);
+#ifdef NDEBUG
+       const CompositeNumberKey& composite_key{reinterpret_cast< const CompositeNumberKey& >(rhs)};
+#else
+       const CompositeNumberKey& composite_key{dynamic_cast< const CompositeNumberKey& >(rhs)};
+#endif
+        return (compare(static_cast<const BtreeKey*>(&composite_key)) == 0);
     }
 
     int compare(const BtreeKey* o) const override {
-        CompositeNumberKey* other = (CompositeNumberKey*)o;
+        // this is hokey down casting
+#ifdef NDEBUG
+        const CompositeNumberKey* other{reinterpret_cast< const CompositeNumberKey* >(o)};
+#else
+        const CompositeNumberKey* other{dynamic_cast< const CompositeNumberKey* >(o)};
+#endif
         if (get_count() < other->get_count()) {
             return -1;
         } else if (get_count() > other->get_count()) {
@@ -201,8 +258,8 @@ public:
     }
 
     int compare_range(const homeds::btree::BtreeSearchRange& range) const override {
-        auto other_start = (CompositeNumberKey*)range.get_start_key();
-        auto other_end = (CompositeNumberKey*)range.get_end_key();
+        auto other_start = range.get_start_key();
+        auto other_end = range.get_end_key();
 
         assert(0); // Do not support it yet
         return 0;
@@ -223,8 +280,14 @@ public:
     }
 
     int compare_range(BtreeKey* s, bool start_incl, BtreeKey* e, bool end_incl) {
-        CompositeNumberKey* start = (CompositeNumberKey*)s;
-        CompositeNumberKey* end = (CompositeNumberKey*)e;
+        // this is hokey down casting
+#ifdef NDEBUG
+        const CompositeNumberKey* start{reinterpret_cast< const CompositeNumberKey* >(s)};
+        const CompositeNumberKey* end{reinterpret_cast< const CompositeNumberKey* >(e)};
+#else
+        const CompositeNumberKey* start{dynamic_cast< const CompositeNumberKey* >(e)};
+        const CompositeNumberKey* end{dynamic_cast< const CompositeNumberKey* >(e)};
+#endif
 
         int ret = is_in_range(this->get_count(), start->get_count(), start_incl, end->get_count(), end_incl);
         if (ret != 0) { return ret; }
@@ -239,32 +302,72 @@ public:
     }
 
     virtual sisl::blob get_blob() const override {
-        sisl::blob b = {(uint8_t*)m_attr, sizeof(attr_t)};
+        // this assumes same endianess on all operations
+        sisl::blob b{reinterpret_cast< uint8_t* >(m_attr), sizeof(attr_t)};
         return b;
     }
 
-    virtual void set_blob(const sisl::blob& b) override { m_attr = (attr_t*)b.bytes; }
-    virtual void copy_blob(const sisl::blob& b) override { memcpy(m_attr, b.bytes, b.size); }
+    virtual void set_blob(const sisl::blob& b) override {
+        // this assumes same endianess on all operations
+        m_inplace_attr = *reinterpret_cast< attr_t* >(b.bytes);
+    }
+    virtual void copy_blob(const sisl::blob& b) override
+    {
+        // this assumes same endianess on all operations
+        set_blob(b);
+    }
     virtual uint32_t get_blob_size() const override { return (sizeof(attr_t)); }
 
     static uint32_t get_fixed_size() { return (sizeof(attr_t)); }
     virtual void set_blob_size(uint32_t size) override {}
 
     std::string to_string() const {
-        std::stringstream ss;
+        std::ostringstream ss;
         ss << "count: " << get_count() << " rank: " << get_rank() << " blknum: " << get_blk_num();
         return ss.str();
-    }
-
-    friend ostream& operator<<(ostream& os, const CompositeNumberKey& k) {
-        os << "count: " << k.get_count() << " rank: " << k.get_rank() << " blknum: " << k.get_blk_num();
-        return os;
     }
 
     bool operator<(const CompositeNumberKey& o) const { return (compare(&o) < 0); }
     bool operator==(const CompositeNumberKey& other) const { return (compare(&other) == 0); }
 };
 
+template < typename charT, typename traits >
+std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, traits >& outStream,
+                                                const CompositeNumberKey& key) {
+    // copy the stream formatting
+    std::basic_ostringstream< charT, traits > outStringStream;
+    outStringStream.copyfmt(outStream);
+
+    // print the stream
+    outStringStream << key.to_string();
+    outStream << outStringStream.str();
+
+    return outStream;
+}
+
 } // namespace loadgen
 } // namespace homeds
+
+// hash function definitions
+namespace std {
+template <>
+struct hash< homeds::loadgen::SimpleNumberKey > {
+    typedef homeds::loadgen::SimpleNumberKey argument_type;
+    typedef size_t result_type;
+    result_type operator()(const argument_type& simple_key) const noexcept {
+        return std::hash< uint64_t >()(simple_key.m_num);
+    }
+};
+
+template <>
+struct hash< homeds::loadgen::CompositeNumberKey > {
+    typedef homeds::loadgen::CompositeNumberKey argument_type;
+    typedef size_t result_type;
+    result_type operator()(const argument_type& composite_key) const noexcept {
+        return std::hash< uint64_t >()(composite_key.to_integer());
+    }
+};
+
+} // namespace std
+
 #endif // HOMESTORE_BTREE_KEY_SPEC_HPP

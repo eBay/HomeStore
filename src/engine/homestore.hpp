@@ -112,10 +112,10 @@ public:
         hints.dev_id_hint = -1;
         hints.is_contiguous = true;
         auto ret = m_sb_blk_store->alloc_contiguous_blk(sz, hints, &bid);
-        if (ret != BLK_ALLOC_SUCCESS) {
+        if (ret != BlkAllocStatus::BLK_ALLOC_SUCCESS) {
             throw homestore::homestore_exception("space not available", homestore_error::space_not_avail);
         }
-        assert(ret == BLK_ALLOC_SUCCESS);
+        assert(ret == BlkAllocStatus::BLK_ALLOC_SUCCESS);
         return bid;
     }
 

@@ -1,14 +1,16 @@
-/*
+﻿/*
  * dymanic_blk_allocator.cpp
  *
  *  Created on: Jun 17, 2015
  *      Author: Hari Kadayam
  */
 
-#include "dynamic_blk_allocator.h"
-#include <iostream>
 #include <cassert>
+#include <iostream>
+
 #include <utility/thread_factory.hpp>
+
+#include "dynamic_blk_allocator.h"
 
 namespace omstorage {
 
@@ -16,20 +18,19 @@ void thread_func(DynamicBlkAllocator* b) { b->allocator_state_machine(); }
 
 void DynamicBlkAllocator::inited() {}
 
-DynamicBlkAllocator::DynamicBlkAllocator(BlkAllocConfig& cfg) : BlkAllocator(cfg) {
+DynamicBlkAllocator::DynamicBlkAllocator(const homestore::BlkAllocConfig& cfg) : BlkAllocator(cfg) {
     // Initialize the state to done and start the thread
-    m_region_state = BLK_ALLOCATOR_DONE;
+    m_region_state = homestore::BlkAllocatorState::BLK_ALLOCATOR_DONE;
     m_wait_alloc_segment = NULL;
     m_cache_entries.store(0);
 
     // Allocate 2 bitmaps. Every atom gets a bit in the bitmap.
-    m_allocBm = new BitMapUnsafe(cfg.getTotalPages() * cfg.getAtomsPerPage());
+    m_allocBm.reset(new BitMapUnsafe(cfg.getTotalPages() * cfg.getAtomsPerPage()));
     // m_cacheBm = new BitMapSafe(m_allocBm);
-    m_cacheBm = new BitMapUnsafe(cfg.getTotalPages() * cfg.getAtomsPerPage());
+    m_cacheBm.reset(new BitMapUnsafe(cfg.getTotalPages() * cfg.getAtomsPerPage()));
 
     // Create blk entry table
-    m_pg_entries = new DynamicPageAllocEntry[cfg.getTotalPages()];
-    bzero(m_pg_entries, cfg.getTotalPages() * sizeof(DynamicPageAllocEntry));
+    m_pg_entries.reset(new DynamicPageAllocEntry[cfg.getTotalPages()]);
 #ifdef DEBUG
     for (uint64_t i = 0; i < cfg.getTotalPages(); i++) {
         m_pg_entries[i].m_pageid = i;
@@ -38,7 +39,7 @@ DynamicBlkAllocator::DynamicBlkAllocator(BlkAllocConfig& cfg) : BlkAllocator(cfg
 
     // Create blk group entry table.
     uint64_t nPageGroups = cfg.getTotalPages() / cfg.getPagesPerGroup();
-    m_pg_grps = new PageAllocGroup[nPageGroups];
+    m_pg_grps.reset(PageAllocGroup[nPageGroups]);
 #ifdef DEBUG
     for (uint64_t i = 0; i < nPageGroups; i++) {
         m_pg_grps->m_pgGroupId = i;
@@ -48,19 +49,19 @@ DynamicBlkAllocator::DynamicBlkAllocator(BlkAllocConfig& cfg) : BlkAllocator(cfg
     // Create segments with as many blk groups as configured.
     uint64_t segSize = cfg.getTotalPages() / cfg.getTotalSegments() * cfg.getAtomsPerPage();
     for (uint64_t i = 0; i < cfg.getTotalSegments(); i++) {
-        PageAllocSegment* seg = new PageAllocSegment(segSize, i);
-        SegQueue::handle_type segId = m_heap_segments.push(seg);
+        auto seg{std::make_unique< PageAllocSegment >(segSize, i)};
+        SegQueue::handle_type segId = m_heap_segments.push(std::move(seg));
         seg->set_segment_id(segId);
     }
 
     // Create the store to cache temperature, freeblks within page etc.
-    BtreeConfig btreeCfg;
+    homeds::btree::BtreeConfig btreeCfg;
     btreeCfg.setLeafNodeType(btree_node_type::SIMPLE);
     btreeCfg.setInteriorNodeType(btree_node_type::SIMPLE);
     btreeCfg.setMaxObjs(cfg.getMaxCachePages());
     btreeCfg.setMaxKeySize(sizeof(DynamicPageAllocCacheEntry));
     btreeCfg.setMaxValueSize(0);
-    m_blk_cache = new MemBtreeKVStore< DynamicPageAllocCacheEntry, EmptyClass >(btreeCfg);
+    m_blk_cache.reset(MemBtreeKVStore< DynamicPageAllocCacheEntry, EmptyClass >(btreeCfg));
 
     // m_thread_id = std::thread(&BlkRegion::BlkRegionThreadFunc);
     // Start a trhead which will do sweeping job of free segments
@@ -72,14 +73,19 @@ std::thread* DynamicBlkAllocator::get_thread() { return &m_thread_id; }
 DynamicBlkAllocator::~DynamicBlkAllocator() {
     {
         std::unique_lock< std::mutex > lk(m_mutex);
-        if (m_region_state != BLK_ALLOCATOR_EXITING) { m_region_state = BLK_ALLOCATOR_EXITING; }
+        if (m_region_state != homestore::BlkAllocatorState::BLK_ALLOCATOR_EXITING) {
+            m_region_state = homestore::BlkAllocatorState::BLK_ALLOCATOR_EXITING;
+        }
     }
 
     m_cv.notify_all();
     m_thread_id.join();
 }
 
-uint8_t* DynamicBlkAllocator::serialize_alloc_blks(uint64_t chunk_id, size_t& mem_size) { return nullptr; }
+uint8_t* DynamicBlkAllocator::serialize_alloc_blks(const uint64_t [[maybe_unused]] chunk_id,
+                                                   const size_t& [[maybe_unused]] mem_size) {
+    return nullptr;
+}
 
 // Runs only in per region thread. In other words, this
 // is a single threaded state machine.
@@ -95,13 +101,13 @@ void DynamicBlkAllocator::allocator_state_machine() {
             // acquire lock
             std::unique_lock< std::mutex > lk(m_mutex);
 
-            if (m_region_state == BLK_ALLOCATOR_DONE) { m_cv.wait(lk); }
+            if (m_region_state == homestore::BlkAllocatorState::BLK_ALLOCATOR_DONE) { m_cv.wait(lk); }
 
-            if (m_region_state == BLK_ALLOCATOR_WAIT_ALLOC) {
-                m_region_state = BLK_ALLOCATOR_ALLOCATING;
+            if (m_region_state == homestore::BlkAllocatorState::BLK_ALLOCATOR_WAIT_ALLOC) {
+                m_region_state = homestore::BlkAllocatorState::BLK_ALLOCATOR_ALLOCATING;
                 allocateSeg = m_wait_alloc_segment;
                 allocate = true;
-            } else if (m_region_state == BLK_ALLOCATOR_EXITING) {
+            } else if (m_region_state == homestore::BlkAllocatorState::BLK_ALLOCATOR_EXITING) {
                 // TODO: Handle exiting message more periodically.
                 break;
             }
@@ -112,29 +118,30 @@ void DynamicBlkAllocator::allocator_state_machine() {
             {
                 // acquire lock
                 std::unique_lock< std::mutex > lk(m_mutex);
-                m_wait_alloc_segment = NULL;
-                m_region_state = BLK_ALLOCATOR_DONE;
+                m_wait_alloc_segment = nullptr;
+                m_region_state = homestore::BlkAllocatorState::BLK_ALLOCATOR_DONE;
             }
             m_cv.notify_all();
         }
     }
 }
 
-BlkAllocStatus DynamicBlkAllocator::alloc(BlkId& out_blkid) {
+homestore::BlkAllocStatus DynamicBlkAllocator::alloc(const BlkId& out_blkid) {
     assert(0);
-    return BLK_ALLOC_SUCCESS;
+    return homestore::BlkAllocStatus::BLK_ALLOC_SUCCESS;
 }
 
-BlkAllocStatus DynamicBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& hints,
-                                          std::vector< BlkId >& out_blkid) {
+homestore::BlkAllocStatus DynamicBlkAllocator::alloc(const uint8_t nblks, const homestore::blk_alloc_hints& hints,
+                                                     std::vector< BlkId >& out_blkid) {
     /* TODO will implement it later */
     assert(0);
-    return BLK_ALLOC_SPACEFULL;
+    return homestore::BlkAllocStatus::BLK_ALLOC_SPACEFULL;
 }
 
-BlkAllocStatus DynamicBlkAllocator::alloc(uint32_t size, uint32_t desired_temp, Blk* out_blk, bool retry) {
+homestore::BlkAllocStatus DynamicBlkAllocator::alloc(const uint32_t size, const uint32_t desired_temp,
+                                                     Blk* const out_blk, const bool retry) {
     uint32_t nAtoms = (size - 1) / m_cfg.getAtomSize() + 1;
-    BlkAllocStatus ret = BLK_ALLOC_SUCCESS;
+    homestore::BlkAllocStatus ret = homestore::BlkAllocStatus::BLK_ALLOC_SUCCESS;
     bool found = false;
 
     // TODO: Instead of given value, try to have leeway like 10% of both sides as range for desired_temp or bkt.
@@ -164,7 +171,7 @@ BlkAllocStatus DynamicBlkAllocator::alloc(uint32_t size, uint32_t desired_temp, 
         }
     }
 
-    if (!found) { return BLK_ALLOC_SPACEFULL; }
+    if (!found) { return homestore::BlkAllocStatus::BLK_ALLOC_SPACEFULL; }
 
     // Get the bitmap for the pages.
     uint32_t nPages = (actualEntry.getMaxContigousFreeAtoms() - 1) / m_cfg.getAtomsPerPage() + 1;
@@ -240,45 +247,46 @@ BlkAllocStatus DynamicBlkAllocator::allocBlkSeries(uint32_t minBlks, uint32_t de
 }
 #endif
 
-void DynamicBlkAllocator::free(Blk& b) {
+void DynamicBlkAllocator::free(const Blk& b) {
 
     for (auto i = 0; i < b.getPieces(); i++) {
         PageAllocGroup* pggrp = pageid_to_group(b.getPageId(i));
-        pggrp->lock();
+        {
+            auto lock{pggrp->pagealloc_auto_lock()};
 
-        uint64_t pgid = b.getPageId(i);
-        uint64_t startBit = pageid_to_bit(pgid, b.getOffset(i));
-        uint32_t nBits = size_to_nbits(b.getSize(i));
+            uint64_t pgid = b.getPageId(i);
+            uint64_t startBit = pageid_to_bit(pgid, b.getOffset(i));
+            uint32_t nBits = size_to_nbits(b.getSize(i));
 
-        if ((b.getSize(i) % m_cfg.getPageSize()) == 0) {
-            assert(b.getOffset(i) == 0);
-        } else {
-            assert(nBits < m_cfg.getAtomSize());
+            if ((b.getSize(i) % m_cfg.getPageSize()) == 0) {
+                assert(b.getOffset(i) == 0);
+            } else {
+                assert(nBits < m_cfg.getAtomSize());
 
-            BitStats bitStats;
-            DynamicPageAllocEntry* pgEntry = get_page_entry(pgid);
+                BitStats bitStats;
+                DynamicPageAllocEntry* pgEntry = get_page_entry(pgid);
 
-            // Get the first bit for this blk
-            uint64_t pageStartBit = pageid_to_bit(pgid, 0);
-            m_cacheBm->getResetBitStats(pageStartBit, m_cfg.getAtomsPerPage(), &bitStats);
+                // Get the first bit for this blk
+                uint64_t pageStartBit = pageid_to_bit(pgid, 0);
+                m_cacheBm->getResetBitStats(pageStartBit, m_cfg.getAtomsPerPage(), &bitStats);
 
-            // We need to get the pieces neighbor and update the cache
-            // with correct details or remove those entries altogether.
-            DynamicPageAllocCacheEntry cacheEntry(bitStats.nResetBitsCount, bitStats.nMaxContigousResetCount,
-                                                  pgEntry->get_temperature(), pgid);
-            bool found = m_blk_cache->remove(cacheEntry);
-            if (!found) {
-                cout << "Looks like cache bitmap is not in sync with "
-                     << " cache btree. Its possible only if multiple threads "
-                     << " are freeing on same blk (" << pgid << ")" << endl;
+                // We need to get the pieces neighbor and update the cache
+                // with correct details or remove those entries altogether.
+                DynamicPageAllocCacheEntry cacheEntry(bitStats.nResetBitsCount, bitStats.nMaxContigousResetCount,
+                                                      pgEntry->get_temperature(), pgid);
+                bool found = m_blk_cache->remove(cacheEntry);
+                if (!found) {
+                    cout << "Looks like cache bitmap is not in sync with "
+                         << " cache btree. Its possible only if multiple threads "
+                         << " are freeing on same blk (" << pgid << ")" << endl;
+                }
             }
-        }
 
-        assert(m_cacheBm->isMultiBitSet(startBit, nBits));
-        assert(m_allocBm->isMultiBitSet(startBit, nBits));
-        m_cacheBm->resetMultiBit(startBit, nBits);
-        m_allocBm->resetMultiBit(startBit, nBits);
-        pggrp->unlock();
+            assert(m_cacheBm->isMultiBitSet(startBit, nBits));
+            assert(m_allocBm->isMultiBitSet(startBit, nBits));
+            m_cacheBm->resetMultiBit(startBit, nBits);
+            m_allocBm->resetMultiBit(startBit, nBits);
+        }
     }
 }
 
@@ -340,24 +348,25 @@ void DynamicBlkAllocator::commitBlks(uint64_t blkNum, uint32_t nBlks)
 }
 #endif
 
-void DynamicBlkAllocator::commit(Blk& b) {
+void DynamicBlkAllocator::commit(const Blk& b) {
     for (auto i = 0; i < b.getPieces(); i++) {
         PageAllocGroup* pggrp = pageid_to_group(b.getPageId(i));
         uint64_t startBit = pageid_to_bit(b.getPageId(i), b.getOffset(i));
         uint32_t nBits = size_to_nbits(b.getSize(i));
 
-        pggrp->lock();
-        // Cache is expected to be set and persistent bitmap should be unset
-        assert(m_cacheBm->isMultiBitSet(startBit, nBits));
-        assert(!m_allocBm->isMultiBitSet(startBit, nBits));
+        {
+            auto lock{pggrp->pagealloc_auto_lock()};
+            // Cache is expected to be set and persistent bitmap should be unset
+            assert(m_cacheBm->isMultiBitSet(startBit, nBits));
+            assert(!m_allocBm->isMultiBitSet(startBit, nBits));
 
-        m_allocBm->setMultiBit(startBit, nBits);
-        pggrp->unlock();
+            m_allocBm->setMultiBit(startBit, nBits);
+        }
     }
 }
 
 // This runs on per region thread and is at present single threaded.
-void DynamicBlkAllocator::fill_cache(PageAllocSegment* seg) {
+void DynamicBlkAllocator::fill_cache(PageAllocSegment* const seg) {
     uint64_t nAddedAtoms = 0;
     if (seg == NULL) { seg = m_heap_segments.top(); }
 
@@ -381,73 +390,74 @@ void DynamicBlkAllocator::fill_cache(PageAllocSegment* seg) {
     m_heap_segments.update(seg->get_segment_id(), seg);
 }
 
-uint64_t DynamicBlkAllocator::fill_cache_in_group(uint64_t grp_num, PageAllocSegment* seg) {
+uint64_t DynamicBlkAllocator::fill_cache_in_group(const uint64_t grp_num, PageAllocSegment* const seg) {
     DynamicPageAllocCacheEntry cEntry;
     EmptyClass dummy;
     bool entryValid = false;
     uint64_t addedAtoms = 0;
 
     PageAllocGroup* pggrp = get_page_group(grp_num);
-    pggrp->lock();
+    {
+        auto lock{pggrp->pagealloc_auto_lock()};
 
-    uint64_t curPageId = grp_num * m_cfg.getPagesPerGroup();
-    uint64_t endPageId = curPageId + m_cfg.getPagesPerGroup();
+        uint64_t curPageId = grp_num * m_cfg.getPagesPerGroup();
+        uint64_t endPageId = curPageId + m_cfg.getPagesPerGroup();
 
-    // Walk through every page until we either reach end of the pagegroup or until satisfied with number of cache
-    // entries.
-    while ((m_cache_entries < m_cfg.getMaxCachePages()) && (curPageId < endPageId)) {
-        uint64_t startBit = pageid_to_bit(curPageId, 0);
-        uint64_t nBits = size_to_nbits(m_cfg.getPageSize());
+        // Walk through every page until we either reach end of the pagegroup or until satisfied with number of cache
+        // entries.
+        while ((m_cache_entries < m_cfg.getMaxCachePages()) && (curPageId < endPageId)) {
+            uint64_t startBit = pageid_to_bit(curPageId, 0);
+            uint64_t nBits = size_to_nbits(m_cfg.getPageSize());
 
-        // Find out how many bits are free.
-        BitStats bitStats;
-        m_cacheBm->getResetBitStats(startBit, nBits, &bitStats);
+            // Find out how many bits are free.
+            BitStats bitStats;
+            m_cacheBm->getResetBitStats(startBit, nBits, &bitStats);
 
-        if (bitStats.nResetBitsCount > 0) {
-            if (bitStats.nResetBitsCount < m_cfg.getAtomsPerPage()) {
-                // If not all bits in a blk is not free, write the previous entry
-                if (entryValid == true) {
-                    // Previous entry is valid. Write it to cache before updating current entry.
+            if (bitStats.nResetBitsCount > 0) {
+                if (bitStats.nResetBitsCount < m_cfg.getAtomsPerPage()) {
+                    // If not all bits in a blk is not free, write the previous entry
+                    if (entryValid == true) {
+                        // Previous entry is valid. Write it to cache before updating current entry.
+                        m_blk_cache->insert(cEntry, dummy);
+                        m_cache_entries++;
+                        addedAtoms += cEntry.getFreeAtomsCount();
+                    }
+
+                    // Create a new entry
+                    cEntry.setFreeAtomsCount(bitStats.nResetBitsCount);
+                    cEntry.setMaxContigousFreeAtoms(bitStats.nMaxContigousResetCount);
+                    cEntry.setPageId(curPageId);
+                    cEntry.setTemperature(get_page_entry(curPageId)->get_temperature());
                     m_blk_cache->insert(cEntry, dummy);
                     m_cache_entries++;
                     addedAtoms += cEntry.getFreeAtomsCount();
-                }
 
-                // Create a new entry
-                cEntry.setFreeAtomsCount(bitStats.nResetBitsCount);
-                cEntry.setMaxContigousFreeAtoms(bitStats.nMaxContigousResetCount);
-                cEntry.setPageId(curPageId);
-                cEntry.setTemperature(get_page_entry(curPageId)->get_temperature());
-                m_blk_cache->insert(cEntry, dummy);
-                m_cache_entries++;
-                addedAtoms += cEntry.getFreeAtomsCount();
-
-                entryValid = false;
-            } else {
-                // If all atoms in a page are free
-                if (entryValid == true) {
-                    // If we are already have an entry, maintain the same page
-                    cEntry.setFreeAtomsCount(cEntry.getFreeAtomsCount() + bitStats.nResetBitsCount);
-                    cEntry.setMaxContigousFreeAtoms(cEntry.getMaxContigousFreeAtoms() + bitStats.nResetBitsCount);
+                    entryValid = false;
                 } else {
-                    cEntry.setFreeAtomsCount(bitStats.nResetBitsCount);
-                    cEntry.setMaxContigousFreeAtoms(bitStats.nResetBitsCount);
-                    cEntry.setPageId(curPageId);
-                    cEntry.setTemperature(get_page_entry(curPageId)->get_temperature());
-                    entryValid = true;
+                    // If all atoms in a page are free
+                    if (entryValid == true) {
+                        // If we are already have an entry, maintain the same page
+                        cEntry.setFreeAtomsCount(cEntry.getFreeAtomsCount() + bitStats.nResetBitsCount);
+                        cEntry.setMaxContigousFreeAtoms(cEntry.getMaxContigousFreeAtoms() + bitStats.nResetBitsCount);
+                    } else {
+                        cEntry.setFreeAtomsCount(bitStats.nResetBitsCount);
+                        cEntry.setMaxContigousFreeAtoms(bitStats.nResetBitsCount);
+                        cEntry.setPageId(curPageId);
+                        cEntry.setTemperature(get_page_entry(curPageId)->get_temperature());
+                        entryValid = true;
+                    }
                 }
+                m_cacheBm->setMultiBit(startBit, nBits);
             }
-            m_cacheBm->setMultiBit(startBit, nBits);
+            curPageId++;
         }
-        curPageId++;
-    }
 
-    if (entryValid == true) {
-        m_blk_cache->insert(cEntry, dummy);
-        m_cache_entries++;
-        addedAtoms += cEntry.getFreeAtomsCount();
+        if (entryValid == true) {
+            m_blk_cache->insert(cEntry, dummy);
+            m_cache_entries++;
+            addedAtoms += cEntry.getFreeAtomsCount();
+        }
     }
-    pggrp->unlock();
 
     return addedAtoms;
 }
@@ -565,7 +575,7 @@ uint64_t DynamicBlkAllocator::fillCacheInGroup(uint64_t grpNum, PageAllocSegment
 
 bool DynamicBlkAllocator::canAllocBlock(uint64_t b)
 {
-    //	return (m_allocBm->isBitSet(b) && m_cacheBm->isBitSet(b));
+    //  return (m_allocBm->isBitSet(b) && m_cacheBm->isBitSet(b));
     return (!m_cacheBm->isBitSet(b));
 }
 
@@ -598,28 +608,30 @@ void DynamicBlkAllocator::setBlksFreed(uint32_t startBlk, uint32_t count)
 }
 #endif
 
-inline uint32_t DynamicBlkAllocator::pageid_to_groupid(uint64_t pgid) { return pgid / m_cfg.getTotalGroups(); }
+inline uint32_t DynamicBlkAllocator::pageid_to_groupid(const uint64_t pgid) { return pgid / m_cfg.getTotalGroups(); }
 
-PageAllocGroup* DynamicBlkAllocator::pageid_to_group(uint64_t pgid) { return (&m_pg_grps[pageid_to_groupid(pgid)]); }
+PageAllocGroup* DynamicBlkAllocator::pageid_to_group(const uint64_t pgid) {
+    return (&m_pg_grps[pageid_to_groupid(pgid)]);
+}
 
-PageAllocGroup* DynamicBlkAllocator::get_page_group(uint64_t grp_num) { return &m_pg_grps[grp_num]; }
+PageAllocGroup* DynamicBlkAllocator::get_page_group(const uint64_t grp_num) { return &m_pg_grps[grp_num]; }
 
-DynamicPageAllocEntry* DynamicBlkAllocator::get_page_entry(uint64_t pgid) { return &m_pg_entries[pgid]; }
+DynamicPageAllocEntry* DynamicBlkAllocator::get_page_entry(const uint64_t pgid) { return &m_pg_entries[pgid]; }
 
-inline uint64_t DynamicBlkAllocator::page_id_to_atom(uint64_t pgid) { return (pgid * m_cfg.getAtomsPerPage()); }
+inline uint64_t DynamicBlkAllocator::page_id_to_atom(const uint64_t pgid) { return (pgid * m_cfg.getAtomsPerPage()); }
 
 // Run in non-region threads. It can be called by multiple threads simultaneously.
 // Request for more blocks from a specified segment.
 // If BlkSegment is NULL, then
 // it picks the first segment to allocate from.
-void DynamicBlkAllocator::request_more_pages(PageAllocSegment* seg) {
+void DynamicBlkAllocator::request_more_pages(PageAllocSegment* const seg) {
     bool allocate = false;
     {
         // acquire lock
         std::unique_lock< std::mutex > lk(m_mutex);
-        if (m_region_state == BLK_ALLOCATOR_DONE) {
+        if (m_region_state == homestore::BlkAllocatorState::BLK_ALLOCATOR_DONE) {
             m_wait_alloc_segment = seg;
-            m_region_state = BLK_ALLOCATOR_WAIT_ALLOC;
+            m_region_state = homestore::BlkAllocatorState::BLK_ALLOCATOR_WAIT_ALLOC;
             allocate = true;
         }
     } // release lock
@@ -636,22 +648,22 @@ void DynamicBlkAllocator::requestMorePagesWait(PageAllocSegment* seg) {
     } // release lock
 }
 
-string DynamicBlkAllocator::state_string(BlkAllocatorState state) {
-    if (state == BLK_ALLOCATOR_DONE) {
+string DynamicBlkAllocator::state_string(homestore::BlkAllocatorState state) {
+    if (state == homestore::BlkAllocatorState::BLK_ALLOCATOR_DONE) {
         return "BLK_REGION_DONE";
-    } else if (state == BLK_ALLOCATOR_WAIT_ALLOC) {
+    } else if (state == homestore::BlkAllocatorState::BLK_ALLOCATOR_WAIT_ALLOC) {
         return "BLK_REGION_WAIT_ALLOC";
-    } else if (state == BLK_ALLOCATOR_ALLOCATING) {
+    } else if (state == homestore::BlkAllocatorState::BLK_ALLOCATOR_ALLOCATING) {
         return "BLK_REGION_ALLOCATING";
-    } else if (state == BLK_ALLOCATOR_EXITING) {
+    } else if (state == homestore::BlkAllocatorState::BLK_ALLOCATOR_EXITING) {
         return "BLK_REGION_EXITING";
     } else {
         return "STATUS_UNKNOWN";
     }
 }
 
-string DynamicBlkAllocator::to_string() {
-    ostringstream oss;
+string DynamicBlkAllocator::to_string() const {
+    ostringstream oss{};
     oss << "ThreadId=" << m_thread_id.get_id() << " RegionState=" << state_string(m_region_state) << endl;
     return oss.str();
 }

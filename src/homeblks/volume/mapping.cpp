@@ -166,6 +166,7 @@ btree_status_t mapping::put(mapping_op_cntx& cntx, MappingKey& key, MappingValue
     } else {
         start_lba = key.start();
     }
+    uint64_t end_lba = key.end();
     MappingKey start(start_lba, 1);
     MappingKey end(key.end(), 1);
     auto search_range = BtreeSearchRange(start, true, end, true, &cur); // range key is store here
@@ -178,6 +179,8 @@ btree_status_t mapping::put(mapping_op_cntx& cntx, MappingKey& key, MappingValue
     /* start range put */
     auto ret = m_bt->range_put(btree_put_type::APPEND_IF_EXISTS_ELSE_INSERT, ureq, bcp);
 
+    HS_ASSERT_CMP(RELEASE, get_next_start_key_from_cursor(cur), >=, start_lba);
+    HS_ASSERT_CMP(RELEASE, get_next_start_key_from_cursor(cur), <=, (end_lba + 1));
     /* we should not get resource full error */
     HS_ASSERT(RELEASE,
               (ret == btree_status_t::success || ret == btree_status_t::fast_path_not_possible ||
@@ -404,7 +407,8 @@ btree_status_t mapping::match_item_cb_get(std::vector< std::pair< MappingKey, Ma
             if (param->m_ctx->op == READ_VAL_WITH_seqid) {
                 if (param->m_ctx->seqid == INVALID_SEQ_ID || ve.get_seqid() <= param->m_ctx->seqid) {
                     result_kv.emplace_back(make_pair(overlap, MappingValue(ve)));
-                    if (m_pending_read_blk_cb && param->m_ctx->vreq) {
+                    if (m_pending_read_blk_cb && param->m_ctx->vreq &&
+                        ve.get_blkId().to_integer() != BlkId::invalid_internal_id()) {
                         Free_Blk_Entry fbe(ve.get_blkId());
                         m_pending_read_blk_cb(fbe); // mark this blk as pending read
                     }
@@ -417,8 +421,10 @@ btree_status_t mapping::match_item_cb_get(std::vector< std::pair< MappingKey, Ma
                               m_vol_page_size, HomeBlks::instance()->get_data_pagesz(), ve.get_nlba(), overlap.start(),
                               overlap.end(), lba_offset);
                 uint64_t nblks = (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * ve.get_nlba();
-                Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(), nblks);
-                fbe_list.push_back(fbe);
+                if (ve.get_blkId().to_integer() != BlkId::invalid_internal_id()) {
+                    Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(), nblks);
+                    fbe_list.push_back(fbe);
+                }
             } else {
                 assert(0);
             }
@@ -566,7 +572,7 @@ btree_status_t mapping::match_item_cb_put(std::vector< std::pair< MappingKey, Ma
         req->indx_push_fbe(fbe_list);
     } else if (cntx->op == op_type::UPDATE_UNMAP) {
         if (fbe_list.size() > 0) {
-            uint64_t size = IndxMgr::free_blk(nullptr, cntx->free_list, fbe_list, false);
+            uint64_t size = IndxMgr::free_blk(nullptr, cntx->free_list, fbe_list, cntx->force);
             cntx->free_blk_size += size;
             if (size == 0) { ret = btree_status_t::resource_full; }
         }
@@ -684,9 +690,11 @@ void mapping::compute_and_add_overlap(std::vector< Free_Blk_Entry >& fbe_list, u
     if (new_seq_id > e_seq_id) {
         /* override */
         uint16_t e_blk_offset = (e_val_offset * m_vol_page_size) / HomeBlks::instance()->get_data_pagesz();
-        Free_Blk_Entry fbe(e_ve.get_blkId(), e_ve.get_blk_offset() + e_blk_offset,
-                           (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * nlba);
-        fbe_list.push_back(fbe);
+        if (e_ve.get_blkId().to_integer() != BlkId::invalid_internal_id()) {
+            Free_Blk_Entry fbe(e_ve.get_blkId(), e_ve.get_blk_offset() + e_blk_offset,
+                               (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * nlba);
+            fbe_list.push_back(fbe);
+        }
         replace_kv.emplace_back(
             make_pair(MappingKey(s_lba, nlba), MappingValue(new_val, new_val_offset, nlba, m_vol_page_size)));
     } else {
@@ -694,9 +702,11 @@ void mapping::compute_and_add_overlap(std::vector< Free_Blk_Entry >& fbe_list, u
         const Blob_Array< ValueEntry >& new_varray = new_val.get_array_const();
         ValueEntry new_ve;
         new_varray.get(0, new_ve, false);
-        Free_Blk_Entry fbe(new_ve.get_blkId(), new_ve.get_blk_offset() + new_val_offset,
-                           (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * nlba);
-        fbe_list.push_back(fbe);
+        if (new_ve.get_blkId().to_integer() != BlkId::invalid_internal_id()) {
+            Free_Blk_Entry fbe(new_ve.get_blkId(), new_ve.get_blk_offset() + new_val_offset,
+                               (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * nlba);
+            fbe_list.push_back(fbe);
+        }
         replace_kv.emplace_back(
             make_pair(MappingKey(s_lba, nlba), MappingValue(e_val, e_val_offset, nlba, m_vol_page_size)));
     }
@@ -830,6 +840,20 @@ btree_status_t mapping::update_indx_tbl(const indx_req_ptr& ireq, const btree_cp
 
     btree_status_t ret = btree_status_t::success;
 
+    if (vreq->is_unmap()) {
+        BlkId bid_invalid{BlkId::invalid_internal_id()};
+        uint64_t nlbas_rem = get_nlbas(end_lba, next_start_lba);
+        uint64_t nlbas_cur = (nlbas_rem > MAX_NUM_LBA) ? MAX_NUM_LBA : nlbas_rem;
+        MappingKey m_key(next_start_lba, nlbas_cur);
+        ValueEntry ve(vreq->seqid, bid_invalid, 0 /* blk offset */, nlbas_cur, nullptr /* csum ptr */, m_vol_page_size);
+        MappingValue value(ve);
+        mapping_op_cntx cntx;
+        cntx.op = UPDATE_VAL_AND_FREE_BLKS;
+        cntx.vreq = vreq;
+        ret = put(cntx, m_key, value, bcp, *btree_cur_ptr);
+        return ret;
+    }
+
     for (uint32_t i = 0; i < vreq->alloc_blkid_list.size(); ++i) {
         auto blkid = vreq->alloc_blkid_list[i];
         uint32_t nlbas = blkid.data_size(HomeBlks::instance()->get_data_pagesz()) / m_vol_page_size;
@@ -936,29 +960,33 @@ btree_status_t mapping::destroy(blkid_list_ptr& free_blkid_list, uint64_t& free_
 }
 
 btree_status_t mapping::update_unmap_active_indx_tbl(blkid_list_ptr free_list, uint64_t& seq_id, void* key,
-                                                     BtreeQueryCursor& cur, const btree_cp_ptr& bcp, int64_t& size) {
+                                                     BtreeQueryCursor& cur, const btree_cp_ptr& bcp, int64_t& size,
+                                                     bool force) {
     journal_key* j_key = (journal_key*)key;
     uint32_t nlbas_rem = j_key->nlbas;
     uint8_t nlbas_cur;
-    uint64_t start_lba;
+    uint64_t next_start_lba;
+    uint64_t start_lba = j_key->lba;
+    uint64_t end_lba = get_end_lba(start_lba, j_key->nlbas);
     btree_status_t ret = btree_status_t::success;
     BlkId bid_invalid{BlkId::invalid_internal_id()};
     mapping_op_cntx cntx;
     cntx.op = UPDATE_UNMAP;
     cntx.free_list = free_list.get();
+    cntx.force = force;
 
+    next_start_lba = (cur.m_last_key) ? get_next_start_key_from_cursor(cur) : j_key->lba;
+    nlbas_rem = get_nlbas(end_lba, next_start_lba);
     while (nlbas_rem > 0) {
         nlbas_cur = (nlbas_rem > MAX_NUM_LBA) ? MAX_NUM_LBA : nlbas_rem;
-        start_lba = (cur.m_last_key) ? get_next_start_key_from_cursor(cur) : j_key->lba;
         MappingKey m_key(start_lba, nlbas_cur);
         ValueEntry ve(seq_id, bid_invalid, 0 /* blk offset */, nlbas_cur, nullptr /* csum ptr */, m_vol_page_size);
         MappingValue value(ve);
 
         ret = put(cntx, m_key, value, bcp, cur);
         if (ret != btree_status_t::success) { break; }
+        next_start_lba = (cur.m_last_key) ? get_next_start_key_from_cursor(cur) : j_key->lba;
         nlbas_rem -= nlbas_cur;
-        /* update key with remaining lbas */
-        j_key->nlbas = nlbas_rem;
     }
     size = cntx.free_blk_size;
     return ret;

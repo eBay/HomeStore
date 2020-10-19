@@ -371,9 +371,6 @@ std::error_condition Volume::unmap(const vol_interface_req_ptr& iface_req) {
         vreq->state = volume_req_state::data_io;
         BlkId bid_invalid{BlkId::invalid_internal_id()};
 
-        /* store blkid which is used later to create journal entry */
-        vreq->push_blkid(bid_invalid);
-
         /* complete the request */
         ret = no_error;
     } catch (const std::exception& e) {
@@ -429,6 +426,7 @@ bool Volume::check_and_complete_req(const volume_req_ptr& vreq, const std::error
                 vreq->indx_start_time = Clock::now();
                 auto ireq = boost::static_pointer_cast< indx_req >(vreq);
                 (vreq->is_unmap()) ? m_indx_mgr->unmap(ireq) : m_indx_mgr->update_indx(ireq);
+                COUNTER_INCREMENT(m_metrics, volume_outstanding_metadata_write_count, 1);
             }
         }
     } else if (vreq->state == volume_req_state::journal_io) {
@@ -436,39 +434,46 @@ bool Volume::check_and_complete_req(const volume_req_ptr& vreq, const std::error
     }
 
     if (completed) {
-        vreq->state = volume_req_state::completed;
+        if (vreq->state != volume_req_state::completed) {
+            vreq->state = volume_req_state::completed;
 
-        /* update counters */
-        size = get_page_size() * vreq->nlbas();
-        auto latency_us = get_elapsed_time_us(vreq->io_start_time);
-        if (vreq->is_read_op()) {
-            COUNTER_DECREMENT(m_metrics, volume_outstanding_data_read_count, 1);
-            COUNTER_INCREMENT(m_metrics, volume_read_size_total, size);
-            HISTOGRAM_OBSERVE(m_metrics, volume_read_size_distribution, size);
-            HISTOGRAM_OBSERVE(m_metrics, volume_pieces_per_read, vreq->vc_req_cnt);
-            HISTOGRAM_OBSERVE(m_metrics, volume_read_latency, latency_us);
-        } else {
-            COUNTER_DECREMENT(m_metrics, volume_outstanding_data_write_count, 1);
-            COUNTER_INCREMENT(m_metrics, volume_write_size_total, size);
-            HISTOGRAM_OBSERVE(m_metrics, volume_write_size_distribution, size);
-            HISTOGRAM_OBSERVE(m_metrics, volume_pieces_per_write, vreq->vc_req_cnt);
-            HISTOGRAM_OBSERVE(m_metrics, volume_write_latency, latency_us);
-        }
-
-        if (latency_us > 5000000) { THIS_VOL_LOG(WARN, , vreq, "vol req took time {} us", latency_us); }
-
-        if (!vreq->is_sync()) {
-#ifdef _PRERELEASE
-            if (auto flip_ret = homestore_flip->get_test_flip< int >("vol_comp_delay_us")) {
-                LOGINFO("delaying completion in volume for {} us", flip_ret.get());
-                usleep(flip_ret.get());
+            /* update counters */
+            size = get_page_size() * vreq->nlbas();
+            auto latency_us = get_elapsed_time_us(vreq->io_start_time);
+            if (vreq->is_read_op()) {
+                COUNTER_DECREMENT(m_metrics, volume_outstanding_data_read_count, 1);
+                COUNTER_INCREMENT(m_metrics, volume_read_size_total, size);
+                HISTOGRAM_OBSERVE(m_metrics, volume_read_size_distribution, size);
+                HISTOGRAM_OBSERVE(m_metrics, volume_pieces_per_read, vreq->vc_req_cnt);
+                HISTOGRAM_OBSERVE(m_metrics, volume_read_latency, latency_us);
+            } else {
+                COUNTER_DECREMENT(m_metrics, volume_outstanding_data_write_count, 1);
+                COUNTER_INCREMENT(m_metrics, volume_write_size_total, size);
+                HISTOGRAM_OBSERVE(m_metrics, volume_write_size_distribution, size);
+                HISTOGRAM_OBSERVE(m_metrics, volume_pieces_per_write, vreq->vc_req_cnt);
+                HISTOGRAM_OBSERVE(m_metrics, volume_write_latency, latency_us);
             }
+
+            if (latency_us > 5000000) { THIS_VOL_LOG(WARN, , vreq, "vol req took time {} us", latency_us); }
+
+            if (!vreq->is_sync()) {
+#ifdef _PRERELEASE
+                if (auto flip_ret = homestore_flip->get_test_flip< int >("vol_comp_delay_us")) {
+                    LOGINFO("delaying completion in volume for {} us", flip_ret.get());
+                    usleep(flip_ret.get());
+                }
 #endif
-            THIS_VOL_LOG(TRACE, volume, vreq, "IO DONE");
-            interface_req_done(vreq->iface_req);
+                THIS_VOL_LOG(TRACE, volume, vreq, "IO DONE");
+                interface_req_done(vreq->iface_req);
+            }
+        } else {
+            VOL_DEBUG_ASSERT_CMP(vreq->is_unmap(), ==, true, vreq, "this operation is allowed only for unmap");
         }
 
-        shutdown_if_needed();
+        if (err || !vreq->is_unmap() || vreq->is_io_completed()) {
+            /* we wait for unmap to complete before shutdown/destroy starts */
+            shutdown_if_needed();
+        }
     }
     return completed;
 }
@@ -592,7 +597,13 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
             VOL_RELEASE_ASSERT_CMP(next_start_lba, <=, start_lba, vreq, "mismatch start lba and next start lba");
             VOL_RELEASE_ASSERT_CMP(mapping::get_end_lba(vreq->lba(), vreq->nlbas()), >=, end_lba, vreq,
                                    "mismatch end lba and end lba in req");
-            // check if there are any holes in the beginning or in the middle 
+            // check if there are any holes in the beginning or in the middle
+            ValueEntry ve;
+            (mv->get_array()).get(0, ve, false);
+            if (ve.get_blkId().to_integer() == BlkId::invalid_internal_id()) {
+                // it is trimmed.
+                continue;
+            }
             while (next_start_lba < start_lba) {
                 const auto blob{m_only_in_mem_buff->at_offset(0)};
                 if (!std::holds_alternative< volume_req::IoVecData >(vreq->data)) {
@@ -608,7 +619,6 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
             }
             next_start_lba = end_lba + 1;
 
-            ValueEntry ve;
             (mv->get_array()).get(0, ve, false);
             VOL_DEBUG_ASSERT_CMP(mv->get_array().get_total_elements(), ==, 1, vreq,
                                  "array number of elements not valid");
@@ -710,11 +720,11 @@ std::error_condition Volume::alloc_blk(const volume_req_ptr& vreq, std::vector< 
 
     try {
         BlkAllocStatus status = m_hb->get_data_blkstore()->alloc_blk(vreq->nlbas() * get_page_size(), hints, bid);
-        if (status != BLK_ALLOC_SUCCESS) {
+        if (status != BlkAllocStatus::BLK_ALLOC_SUCCESS) {
             LOGERROR("failing IO as it is out of disk space");
             return std::errc::no_space_on_device;
         }
-        VOL_LOG_ASSERT((status == BLK_ALLOC_SUCCESS), vreq, "blk alloc status not valid");
+        VOL_LOG_ASSERT((status == BlkAllocStatus::BLK_ALLOC_SUCCESS), vreq, "blk alloc status not valid");
         HISTOGRAM_OBSERVE(m_metrics, volume_blkalloc_latency, get_elapsed_time_ns(vreq->io_start_time));
         COUNTER_INCREMENT(m_metrics, volume_write_count, 1);
     } catch (const std::exception& e) {

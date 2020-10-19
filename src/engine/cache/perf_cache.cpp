@@ -30,14 +30,6 @@ using namespace std;
 #define MAX_CACHE_SIZE 2 * 1024 * 1024
 
 struct blk_id {
-    static sisl::blob get_blob(const blk_id& id) {
-        sisl::blob b;
-        b.bytes = (uint8_t*)&id.m_id;
-        b.size = sizeof(uint64_t);
-
-        return b;
-    }
-
     static int compare(const blk_id& one, const blk_id& two) {
         if (one.m_id == two.m_id) {
             return 0;
@@ -48,8 +40,8 @@ struct blk_id {
         }
     }
 
-    blk_id(uint64_t id) : m_id(id) {}
-    blk_id() : blk_id(-1) {}
+    blk_id(const uint64_t id) : m_id(id) {}
+    blk_id() : blk_id(std::numeric_limits< uint64_t >::max()) {}
     blk_id(const blk_id& other) { m_id = other.m_id; }
 
     blk_id& operator=(const blk_id& other) {
@@ -58,12 +50,21 @@ struct blk_id {
     }
 
     std::string to_string() const {
-        std::stringstream ss;
+        std::ostringstream ss;
         ss << m_id;
         return ss.str();
     }
     uint64_t m_id;
 };
+
+namespace std {
+template <>
+struct hash< blk_id > {
+    typedef blk_id argument_type;
+    typedef size_t result_type;
+    result_type operator()(const argument_type& bid) const noexcept { return std::hash< uint64_t >()(bid.m_id); }
+};
+} // namespace std
 
 homestore::Cache< blk_id >* glob_cache;
 char** glob_bufs;

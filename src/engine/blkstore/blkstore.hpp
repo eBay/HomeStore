@@ -247,7 +247,7 @@ public:
         hints.is_contiguous = true;
         assert(size % m_pagesz == 0);
         auto ret_blk = alloc_contiguous_blk(size, hints, out_blkid);
-        if (ret_blk != BLK_ALLOC_SUCCESS) { return nullptr; }
+        if (ret_blk != BlkAllocStatus::BLK_ALLOC_SUCCESS) { return nullptr; }
 
         return init_blk_cached(*out_blkid);
     }

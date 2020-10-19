@@ -4,12 +4,18 @@
 
 #pragma once
 
-#include "engine/homeds/memory/mempiece.hpp"
-#include <mutex>
 #include <atomic>
+#include <cstdint>
+#include <functional>
+#include <mutex>
+
 #include <boost/intrusive/list.hpp>
-#include "engine/common/homestore_config.hpp"
+
 #include "engine/common/homestore_assert.hpp"
+#include "engine/common/homestore_config.hpp"
+#include "engine/homeds/memory/mempiece.hpp"
+
+SDS_LOGGING_DECL(cache)
 
 namespace homestore {
 
@@ -29,6 +35,11 @@ public:
             m_cur_size(0),
             m_max_size(max_size),
             m_part_num(part_num) {}
+
+    Evictor(const Evictor&) = delete;
+    Evictor(Evictor&&) noexcept = delete;
+    Evictor& operator=(const Evictor&) = delete;
+    Evictor& operator=(Evictor&&) noexcept = delete;
 
     /* Add the given record to the list. The given record is automatically upvoted. This record might be added
      * only after evicting a record (once it reaches max limits).
@@ -106,11 +117,21 @@ private:
                     return false;
                 }
             });
-        /* XXX: should we handle it */
-        HS_ASSERT_CMP(LOGMSG, dealloc_size, >=, needed_size);
-        int64_t size = m_cur_size.fetch_sub(dealloc_size, std::memory_order_acq_rel);
-        HS_ASSERT_CMP(LOGMSG, size, >=, 0);
-        return true;
+
+        if (dealloc_size > 0) {
+            const int64_t size{m_cur_size.fetch_sub(dealloc_size, std::memory_order_acq_rel)};
+            HS_ASSERT_CMP(LOGMSG, size, >=, 0);
+            if (dealloc_size < needed_size)
+            {
+                HS_LOG(DEBUG, cache, "Unable to evict enough entries to meet needed size - needed {} evicted {}",
+                       needed_size, dealloc_size);
+                return false;
+            }
+            return true;
+        } else {
+            HS_LOG(DEBUG, cache, "Unable to evict any entries.", needed_size, dealloc_size);
+            return false;
+        }
     }
 
 private:
