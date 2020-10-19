@@ -1,4 +1,4 @@
-/*
+﻿/*
  * device.h
  *
  *  Created on: 05-Aug-2016
@@ -416,6 +416,13 @@ private:
 
 class AbstractVirtualDev {
 public:
+    AbstractVirtualDev() = default;
+    AbstractVirtualDev(const AbstractVirtualDev& other) = delete;
+    AbstractVirtualDev& operator=(const AbstractVirtualDev& other) = delete;
+    AbstractVirtualDev(AbstractVirtualDev&&) noexcept = delete;
+    AbstractVirtualDev& operator=(AbstractVirtualDev&&) noexcept = delete;
+    virtual ~AbstractVirtualDev() = default;
+
     virtual void add_chunk(PhysicalDevChunk* chunk) = 0;
 };
 

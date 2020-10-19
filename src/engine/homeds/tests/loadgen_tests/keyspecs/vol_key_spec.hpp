@@ -5,13 +5,17 @@
 #ifndef __HOMESTORE_VOLUME_KEY_SPEC_HPP__
 #define __HOMESTORE_VOLUME_KEY_SPEC_HPP__
 
-#include "homeds/loadgen/loadgen_common.hpp"
-#include "homeds/loadgen/spec/key_spec.hpp"
-#include "homeds/loadgen/iomgr_executor.hpp"
-#include "homeds/tests/loadgen_tests/vol_manager.hpp"
-
+#include <cassert>
+#include <cstdint>
+#include <functional>
 #include <random>
 #include <sstream>
+#include <string>
+
+#include "homeds/loadgen/iomgr_executor.hpp"
+#include "homeds/loadgen/loadgen_common.hpp"
+#include "homeds/loadgen/spec/key_spec.hpp"
+#include "homeds/tests/loadgen_tests/vol_manager.hpp"
 
 namespace homeds {
 namespace loadgen {
@@ -57,27 +61,40 @@ public:
     uint64_t lba() const { return m_lba; }
 
     virtual bool operator==(const KeySpec& other) const override {
-        return (((const VolumeKey*)&(VolumeKey&)other)->lba() == m_lba) &&
-            (((const VolumeKey*)&(VolumeKey&)other)->vol_id() == m_vol_id);
-    }
+        // this is hokey down casting
+#ifdef NDEBUG
+        const VolumeKey& volume_key{reinterpret_cast< const VolumeKey& >(other)};
+#else
+        const VolumeKey& volume_key{dynamic_cast< const VolumeKey& >(other)};
+#endif
 
-    friend ostream& operator<<(ostream& os, const VolumeKey& k) {
-        os << k.vol_id() << k.lba();
-        return os;
+        return (volume_key.m_lba == m_lba) && (volume_key.m_vol_id == m_vol_id);
     }
 
     virtual bool is_consecutive(KeySpec& k) override {
+        // this is hokey down casting
+#ifdef NDEBUG
+        [[maybe_unused]] const VolumeKey& volume_key{reinterpret_cast< const VolumeKey& >(k)};
+#else
+        [[maybe_unused]] const VolumeKey& volume_key{dynamic_cast< const VolumeKey& >(k)};
+#endif
         assert(0);
         return false;
     }
 
     virtual int compare(KeySpec* other) const {
-        VolumeKey* k = dynamic_cast< VolumeKey* >(other);
-        return to_string().compare(k->to_string());
+        // this is hokey down casting
+#ifdef NDEBUG
+        const VolumeKey* volume_key{reinterpret_cast< const VolumeKey* >(other)};
+#else
+        const VolumeKey* volume_key{dynamic_cast< const VolumeKey* >(other)};
+#endif
+
+        return to_string().compare(volume_key->to_string());
     }
 
     std::string to_string() const {
-        ostringstream os;
+        std::ostringstream os;
         os << m_vol_id << m_lba;
         return os.str();
     }
@@ -88,7 +105,33 @@ private:
     uint64_t m_nblks;
 };
 
+template < typename charT, typename traits >
+std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, traits >& outStream, const VolumeKey& key) {
+    // copy the stream formatting
+    std::basic_ostringstream< charT, traits > outStringStream;
+    outStringStream.copyfmt(outStream);
+
+    // print the stream
+    outStringStream << key.to_string();
+    outStream << outStringStream.str();
+
+    return outStream;
+}
+
 } // namespace loadgen
 } // namespace homeds
+
+// hash function definitions
+namespace std {
+template <>
+struct hash< homeds::loadgen::VolumeKey > {
+    typedef homeds::loadgen::VolumeKey argument_type;
+    typedef size_t result_type;
+    result_type operator()(const argument_type& vol_key) const noexcept {
+        return std::hash< uint64_t >()(vol_key.vol_id()) ^ std::hash< uint64_t >()(vol_key.lba()) ^
+            std::hash< uint64_t >()(vol_key.nblks());
+    }
+};
+} // namespace std
 
 #endif //__HOMESTORE_VOLUME_KEY_SPEC_HPP__

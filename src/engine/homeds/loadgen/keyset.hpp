@@ -19,6 +19,39 @@
 
 namespace homeds {
 namespace loadgen {
+
+//////////////////////////////////// SFINAE Hash Selection /////////////////////////////////
+
+namespace keyset_detail {
+template < typename T, typename = std::void_t<> >
+struct is_std_hashable : std::false_type {};
+
+template < typename T >
+struct is_std_hashable< T, std::void_t< decltype(std::declval< std::hash< T > >()(std::declval< T >())) > >
+        : std::true_type {};
+
+template < typename T >
+constexpr bool is_std_hashable_v{is_std_hashable< T >::value};
+
+template < typename KeyType >
+uint64_t compute_hash_imp(const KeyType& key, std::true_type) {
+    return static_cast< uint64_t >(std::hash< KeyType >()(key));
+}
+
+template < typename KeyType >
+uint64_t compute_hash_imp(const KeyType& key, std::false_type) {
+    const auto b{KeyType::get_blob(key)};
+    const uint64_t hash_code{util::Hash64(reinterpret_cast< const char* >(b.bytes), static_cast< size_t >(b.size))};
+    return hash_code;
+}
+
+// range by data helper templates that does tag dispatching based on multivalued
+template < typename KeyType >
+uint64_t compute_hash(const KeyType& key) {
+    return compute_hash_imp< KeyType >(key, is_std_hashable< KeyType >{});
+}
+}
+
 template < typename K, typename V >
 struct key_info {
     folly::RWSpinLock m_lock;
@@ -153,6 +186,7 @@ public:
     }
 };
 
+    /*
 template < typename K, typename V >
 struct key_info_hash {
     size_t operator()(const key_info< K, V >*& ki) const {
@@ -160,6 +194,7 @@ struct key_info_hash {
         return util::Hash32((const char*)b.bytes, (size_t)b.size);
     }
 };
+*/
 
 template < typename K, typename V >
 class KeyRegistry;

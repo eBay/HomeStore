@@ -1,23 +1,26 @@
-/*
+﻿/*
  * fixed_blk_allocator.cpp
  *
  *  Created on: Aug 09, 2016
  *      Author: hkadayam
  */
-#include "blk_allocator.h"
+
 #include <cassert>
+
+#include "blk_allocator.h"
 
 using namespace std;
 
 namespace homestore {
 
-FixedBlkAllocator::FixedBlkAllocator(BlkAllocConfig& cfg, bool init, uint32_t id) : BlkAllocator(cfg, id) {
-    m_blk_nodes = new __fixed_blk_node[cfg.get_total_blks()];
+FixedBlkAllocator::FixedBlkAllocator(const BlkAllocConfig& cfg, const bool init, const uint32_t id) :
+        BlkAllocator(cfg, id) {
+    m_blk_nodes.reset(new __fixed_blk_node[cfg.get_total_blks()]);
 
     if (init) { inited(); }
 }
 
-FixedBlkAllocator::~FixedBlkAllocator() { delete[](m_blk_nodes); }
+FixedBlkAllocator::~FixedBlkAllocator() {}
 
 void FixedBlkAllocator::inited() {
     m_first_blk_id = BLKID32_INVALID;
@@ -29,10 +32,8 @@ void FixedBlkAllocator::inited() {
 #endif
         BlkAllocPortion* portion = blknum_to_portion(i);
         {
-            auto lock{portion->auto_lock()};
-            if (get_disk_bm()->is_bits_set(i, 1)) {
-                continue;
-            }
+            auto lock{portion->portion_auto_lock()};
+            if (get_disk_bm()->is_bits_set(i, 1)) { continue; }
         }
         if (m_first_blk_id == BLKID32_INVALID) { m_first_blk_id = i; }
         if (prev_blkid != BLKID32_INVALID) { m_blk_nodes[prev_blkid].next_blk = i; }
@@ -47,29 +48,31 @@ void FixedBlkAllocator::inited() {
     BlkAllocator::inited();
 }
 
-bool FixedBlkAllocator::is_blk_alloced(BlkId& b) {
+bool FixedBlkAllocator::is_blk_alloced(const BlkId& b) const {
     /* We need to take lock so we can check in non debug builds */
     if (!m_inited) { return true; }
     return (BlkAllocator::is_blk_alloced_on_disk(b));
 }
 
-BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) {
+BlkAllocStatus FixedBlkAllocator::alloc(const uint8_t nblks, const blk_alloc_hints& hints,
+                                        std::vector< BlkId >& out_blkid) {
     BlkId blkid;
     /* TODO:If it is more then 1 then we need to make sure that we never allocate across the portions */
     HS_DEBUG_ASSERT_EQ(nblks, 1, "FixedBlkAllocator does not support multiple blk allocation yet");
 
 #ifdef _PRERELEASE
-    if (homestore_flip->test_flip("fixed_blkalloc_no_blks", nblks)) { return BLK_ALLOC_SPACEFULL; }
+    if (homestore_flip->test_flip("fixed_blkalloc_no_blks", nblks)) { return BlkAllocStatus::BLK_ALLOC_SPACEFULL; }
 #endif
-    if (alloc(nblks, hints, &blkid) == BLK_ALLOC_SUCCESS) {
+    if (alloc(nblks, hints, &blkid) == BlkAllocStatus::BLK_ALLOC_SUCCESS) {
         out_blkid.push_back(blkid);
-        return BLK_ALLOC_SUCCESS;
+        return BlkAllocStatus::BLK_ALLOC_SUCCESS;
     }
     /* We don't support the vector of blkids in fixed blk allocator */
-    return BLK_ALLOC_SPACEFULL;
+    return BlkAllocStatus::BLK_ALLOC_SPACEFULL;
 }
 
-BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& hints, BlkId* out_blkid, bool best_fit) {
+BlkAllocStatus FixedBlkAllocator::alloc(const uint8_t nblks, const blk_alloc_hints& hints, BlkId* const out_blkid,
+                                        const bool best_fit) {
     uint64_t prev_val;
     uint64_t cur_val;
     uint32_t id;
@@ -83,7 +86,7 @@ BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& hi
 
         // Get the __top_blk blk and replace the __top_blk blk id with next id
         id = tp.get_top_blk_id();
-        if (id == BLKID32_INVALID) { return BLK_ALLOC_SPACEFULL; }
+        if (id == BLKID32_INVALID) { return BlkAllocStatus::BLK_ALLOC_SPACEFULL; }
 
         __fixed_blk_node blknode = m_blk_nodes[id];
 
@@ -96,7 +99,7 @@ BlkAllocStatus FixedBlkAllocator::alloc(uint8_t nblks, const blk_alloc_hints& hi
     out_blkid->set(id, 1, 0);
 
     m_alloc_blk_cnt.fetch_add(nblks, std::memory_order_relaxed);
-    return BLK_ALLOC_SUCCESS;
+    return BlkAllocStatus::BLK_ALLOC_SUCCESS;
 }
 
 void FixedBlkAllocator::free(const BlkId& b) {
@@ -111,16 +114,16 @@ void FixedBlkAllocator::free(const BlkId& b) {
     }
 }
 
-void FixedBlkAllocator::free_blk(uint32_t id) {
+void FixedBlkAllocator::free_blk(const uint32_t id) {
     uint64_t prev_val;
     uint64_t cur_val;
-    __fixed_blk_node* blknode = &m_blk_nodes[id];
+    __fixed_blk_node& blknode = m_blk_nodes[id];
 
     do {
         prev_val = m_top_blk_id.load();
         __top_blk tp(prev_val);
 
-        blknode->next_blk = tp.get_top_blk_id();
+        blknode.next_blk = tp.get_top_blk_id();
 
         tp.set_gen(tp.get_gen() + 1);
         tp.set_top_blk_id(id);

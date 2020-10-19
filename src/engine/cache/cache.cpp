@@ -2,15 +2,54 @@
 // Created by Kadayam, Hari on 19/10/17.
 //
 
-#include "cache.h"
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <type_traits>
+
+#include <fds/obj_allocator.hpp>
+
 #include "engine/common/homestore_config.hpp"
 #include "engine/common/homestore_assert.hpp"
-#include <fds/obj_allocator.hpp>
-#include <memory>
+
+#include "cache.h"
 
 SDS_LOGGING_DECL(cache, cache_vmod_evict, cache_vmod_read, cache_vmod_write)
 
 namespace homestore {
+
+//////////////////////////////////// SFINAE Hash Selection /////////////////////////////////
+
+namespace {
+template < typename T, typename = std::void_t<> >
+struct is_std_hashable : std::false_type {};
+
+template < typename T >
+struct is_std_hashable< T, std::void_t< decltype(std::declval< std::hash< T > >()(std::declval< T >())) > >
+        : std::true_type {};
+
+template < typename T >
+constexpr bool is_std_hashable_v{is_std_hashable< T >::value};
+
+template < typename KeyType >
+uint64_t compute_hash_imp(const KeyType& key, std::true_type) {
+    return static_cast< uint64_t >(std::hash< KeyType >()(key));
+}
+
+template < typename KeyType >
+uint64_t compute_hash_imp(const KeyType& key, std::false_type) {
+    const auto b{KeyType::get_blob(key)};
+    const uint64_t hash_code{util::Hash64(reinterpret_cast<const char*>(b.bytes), static_cast<size_t>(b.size))};
+    return hash_code;
+}
+
+// range by data helper templates that does tag dispatching based on multivalued
+template < typename KeyType >
+uint64_t compute_hash(const KeyType& key) {
+    return compute_hash_imp< KeyType >(key, is_std_hashable< KeyType >{});
+}
+}
+
 
 ////////////////////////////////// Intrusive Cache Section /////////////////////////////////
 template < typename K, typename V >
@@ -18,7 +57,7 @@ IntrusiveCache< K, V >::IntrusiveCache(uint64_t max_cache_size, uint32_t avg_siz
         m_hash_set((max_cache_size / avg_size_per_entry) / HS_DYNAMIC_CONFIG(cache->entries_per_hash_bucket)) {
     HS_LOG(INFO, base, "Initializing cache with cache_size = {} with {} partitions", max_cache_size,
            EVICTOR_PARTITIONS);
-    for (auto i = 0; i < EVICTOR_PARTITIONS; i++) {
+    for (uint64_t i{0}; i < EVICTOR_PARTITIONS; ++i) {
         m_evictors[i] = std::make_unique< CurrentEvictor >(
             i, max_cache_size / EVICTOR_PARTITIONS,
             (std::bind(&IntrusiveCache< K, V >::is_safe_to_evict, this, std::placeholders::_1)), V::get_size);
@@ -28,10 +67,8 @@ IntrusiveCache< K, V >::IntrusiveCache(uint64_t max_cache_size, uint32_t avg_siz
 template < typename K, typename V >
 bool IntrusiveCache< K, V >::insert(V& v, V** out_ptr, const auto& found_cb) {
     // Get the key and compute the hash code for the key
-    const K* pk = V::extract_key(v);
-    auto b = K::get_blob(*pk);
-    uint64_t hash_code = util::Hash64((const char*)b.bytes, (size_t)b.size);
-
+    const K* const pk{V::extract_key(v)};
+    const uint64_t hash_code{compute_hash< K >(*pk)};
     HS_LOG(DEBUG, cache, "Attemping to insert in cache: {} key {}", v.to_string(), pk->to_string());
 
     // Try adding the record into the hash set.
@@ -71,9 +108,8 @@ bool IntrusiveCache< K, V >::insert(V& v, V** out_ptr, const auto& found_cb) {
 /* This api is called when size of an existing entry is modified in hash */
 template < typename K, typename V >
 bool IntrusiveCache< K, V >::modify_size(V& v, uint32_t size) {
-    const K* pk = V::extract_key(v);
-    auto b = K::get_blob(*pk);
-    uint64_t hash_code = util::Hash64((const char*)b.bytes, (size_t)b.size);
+    const K* const pk{V::extract_key(v)};
+    const uint64_t hash_code{compute_hash< K >(*pk)};
     auto ret = (m_evictors[hash_code % EVICTOR_PARTITIONS]->modify_size(size));
 
     if (ret) { COUNTER_INCREMENT(m_metrics, cache_size, size); }
@@ -91,8 +127,7 @@ bool IntrusiveCache< K, V >::upsert(const V& v, bool* out_key_exists) {
 template < typename K, typename V >
 V* IntrusiveCache< K, V >::get(const K& k) {
     V* v{nullptr};
-    auto b = K::get_blob(k);
-    uint64_t hash_code = util::Hash64((const char*)b.bytes, (size_t)b.size);
+    const uint64_t hash_code{compute_hash< K >(k)};
 
     bool found = m_hash_set.get(k, &v, hash_code);
     if (!found) { return nullptr; }
@@ -110,9 +145,8 @@ V* IntrusiveCache< K, V >::get(const K& k) {
 
 template < typename K, typename V >
 bool IntrusiveCache< K, V >::erase(V& v) {
-    const K* pk = V::extract_key(v);
-    auto b = K::get_blob(*pk);
-    uint64_t hash_code = util::Hash64((const char*)b.bytes, (size_t)b.size);
+    const K* const pk{V::extract_key(v)};
+    const uint64_t hash_code{compute_hash< K >(*pk)};
 
     bool found = m_hash_set.remove(*pk, hash_code, NULL_LAMBDA);
     if (found) {
@@ -135,11 +169,10 @@ bool IntrusiveCache< K, V >::is_safe_to_evict(const CurrentEvictor::EvictRecordT
     /* Should not evict the record if anyone is using it. It would break the btree locking logic
      * which depends on cache not freeing the object if it is using it.
      */
-    const CacheRecord* crec = CacheRecord::evict_to_cache_record(erec);
-    V* v = (V*)crec;
-    bool safe_to_evict = false;
+    CacheBuffer< K >* const v{static_cast < CacheBuffer< K > *>(erec->cache_buffer)};
+    bool safe_to_evict{false};
 
-    if (V::test_le((const V&)*crec, 1)) { // Ensure reference count is atmost one (one that is stored in hashset for)
+    if (V::test_le(*v, 1)) { // Ensure reference count is atmost one (one that is stored in hashset for)
         /* we can not wait for the lock if there is contention as it can lead to
          * deadlock. This API is called under the eviction lock. Normally, eviction
          * lock is taken after taking this lock in case of insert and erase.
@@ -149,9 +182,8 @@ bool IntrusiveCache< K, V >::is_safe_to_evict(const CurrentEvictor::EvictRecordT
             boost::intrusive_ptr< CacheBuffer< K > > out_removed_buf(nullptr);
             HS_ASSERT_CMP(LOGMSG, v->get_cache_state(), ==, CACHE_INSERTED);
             /* It remove the entry only if ref cnt is one */
-            const K* pk = V::extract_key((const V&)*crec);
-            auto b = K::get_blob(*pk);
-            uint64_t hash_code = util::Hash64((const char*)b.bytes, (size_t)b.size);
+            const K* const pk { V::extract_key(*v) };
+            const uint64_t hash_code{compute_hash< K >(*pk)};
             auto ret =
                 m_hash_set.check_and_remove(*pk, hash_code, [&out_removed_buf](CacheBuffer< K >* about_to_remove_ptr) {
                     // Make a smart ptr of the buffer we are removing
@@ -286,8 +318,7 @@ bool Cache< K >::erase(const K& k, boost::intrusive_ptr< CacheBuffer< K > >* out
 template < typename K >
 bool Cache< K >::erase(const K& k, uint32_t offset, uint32_t size,
                        boost::intrusive_ptr< CacheBuffer< K > >* ret_removed_buf) {
-    auto b = K::get_blob(k);
-    uint64_t hash_code = util::Hash64((const char*)b.bytes, (size_t)b.size);
+    const uint64_t hash_code{compute_hash< K >(k)};
     boost::intrusive_ptr< CacheBuffer< K > > out_removed_buf(nullptr);
 
     bool found = this->m_hash_set.remove(k, hash_code, [&out_removed_buf](CacheBuffer< K >* about_to_remove_ptr) {
@@ -327,8 +358,7 @@ void Cache< K >::safe_erase(boost::intrusive_ptr< CacheBuffer< K > > buf, const 
 template < typename K >
 void Cache< K >::safe_erase(const K& k, const erase_comp_cb& cb) {
     /* we don't support partial cache entry for safe_erase. */
-    auto b = K::get_blob(k);
-    uint64_t hash_code = util::Hash64((const char*)b.bytes, (size_t)b.size);
+    const uint64_t hash_code{compute_hash< K >(k)};
     boost::intrusive_ptr< CacheBuffer< K > > out_buf(nullptr);
     bool can_remove = false;
     ;

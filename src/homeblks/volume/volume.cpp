@@ -720,11 +720,11 @@ std::error_condition Volume::alloc_blk(const volume_req_ptr& vreq, std::vector< 
 
     try {
         BlkAllocStatus status = m_hb->get_data_blkstore()->alloc_blk(vreq->nlbas() * get_page_size(), hints, bid);
-        if (status != BLK_ALLOC_SUCCESS) {
+        if (status != BlkAllocStatus::BLK_ALLOC_SUCCESS) {
             LOGERROR("failing IO as it is out of disk space");
             return std::errc::no_space_on_device;
         }
-        VOL_LOG_ASSERT((status == BLK_ALLOC_SUCCESS), vreq, "blk alloc status not valid");
+        VOL_LOG_ASSERT((status == BlkAllocStatus::BLK_ALLOC_SUCCESS), vreq, "blk alloc status not valid");
         HISTOGRAM_OBSERVE(m_metrics, volume_blkalloc_latency, get_elapsed_time_ns(vreq->io_start_time));
         COUNTER_INCREMENT(m_metrics, volume_write_count, 1);
     } catch (const std::exception& e) {

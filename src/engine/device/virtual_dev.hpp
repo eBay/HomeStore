@@ -346,6 +346,12 @@ public:
         }
     }
 
+    VirtualDev(const VirtualDev& other) = delete;
+    VirtualDev& operator=(const VirtualDev& other) = delete;
+    VirtualDev(VirtualDev&&) noexcept = delete;
+    VirtualDev& operator=(VirtualDev&&) noexcept = delete;
+    virtual ~VirtualDev() override = default;
+
     void reset_failed_state() {
         m_vb->failed = false;
         m_mgr->write_info_blocks();
@@ -361,8 +367,6 @@ public:
          * across the chunks from this layer.
          */
     }
-
-    ~VirtualDev() = default;
 
     /* This method adds chunk to the vdev. It is expected that this will happen at startup time and hence it only
      * takes lock for writing and not reading
@@ -879,18 +883,18 @@ public:
         auto blkid = to_chunk_specific_id(in_blkid, &primary_chunk);
 
         auto status = primary_chunk->get_blk_allocator()->alloc(blkid);
-        if (status == BLK_ALLOC_SUCCESS) { /* insert it only if it is not previously allocated */
+        if (status == BlkAllocStatus::BLK_ALLOC_SUCCESS) { /* insert it only if it is not previously allocated */
         }
-        return BLK_ALLOC_SUCCESS;
+        return BlkAllocStatus::BLK_ALLOC_SUCCESS;
     }
 
-    BlkAllocStatus alloc_contiguous_blk(uint8_t nblks, const blk_alloc_hints& hints, BlkId* out_blkid) {
+    BlkAllocStatus alloc_contiguous_blk(const uint8_t nblks, const blk_alloc_hints& hints, BlkId* const out_blkid) {
         BlkAllocStatus ret;
         try {
             std::vector< BlkId > blkid;
             HS_ASSERT_CMP(DEBUG, hints.is_contiguous, ==, true);
             ret = alloc_blk(nblks, hints, blkid);
-            if (ret == BLK_ALLOC_SUCCESS) {
+            if (ret == BlkAllocStatus::BLK_ALLOC_SUCCESS) {
                 HS_RELEASE_ASSERT_EQ(blkid.size(), 1, "out blkid more than 1 entries({}) will lead to blk leak!",
                                      blkid.size());
                 *out_blkid = blkid[0];
@@ -898,17 +902,17 @@ public:
                 HS_ASSERT_CMP(DEBUG, blkid.size(), ==, 0);
             }
         } catch (const std::exception& e) {
-            ret = BLK_ALLOC_FAILED;
+            ret = BlkAllocStatus::BLK_ALLOC_FAILED;
             HS_ASSERT(DEBUG, 0, "{}", e.what());
         }
         return ret;
     }
 
-    BlkAllocStatus alloc_blk(uint8_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) {
+    BlkAllocStatus alloc_blk(const uint8_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) {
         try {
             uint32_t dev_ind{0};
             uint32_t chunk_num, start_chunk_num;
-            BlkAllocStatus status = BLK_ALLOC_FAILED;
+            BlkAllocStatus status = BlkAllocStatus::BLK_ALLOC_FAILED;
 
             // First select a device to allocate from
             if (hints.dev_id_hint == -1) {
@@ -936,18 +940,18 @@ public:
 
                     status = chunk->get_blk_allocator()->alloc(nblks, hints, out_blkid);
 
-                    if (status == BLK_ALLOC_SUCCESS) {
+                    if (status == BlkAllocStatus::BLK_ALLOC_SUCCESS) {
                         picked_chunk = chunk;
                         break;
                     }
                 }
 
-                if (status == BLK_ALLOC_SUCCESS) { break; }
+                if (status == BlkAllocStatus::BLK_ALLOC_SUCCESS) { break; }
                 if (!hints.can_look_for_other_dev) { break; }
                 dev_ind = (uint32_t)((dev_ind + 1) % m_primary_pdev_chunks_list.size());
             } while (dev_ind != start_dev_ind);
 
-            if (status == BLK_ALLOC_SUCCESS) {
+            if (status == BlkAllocStatus::BLK_ALLOC_SUCCESS) {
                 // Set the id as globally unique id
                 uint64_t tot_size = 0;
                 for (uint32_t i = 0; i < out_blkid.size(); i++) {
@@ -959,7 +963,7 @@ public:
         } catch (const std::exception& e) {
             LOGERROR("exception happened {}", e.what());
             assert(0);
-            return BLK_ALLOC_FAILED;
+            return BlkAllocStatus::BLK_ALLOC_FAILED;
         }
     }
 
@@ -1003,7 +1007,7 @@ public:
 
     void write(const BlkId& bid, const homeds::MemVector& buf, boost::intrusive_ptr< virtualdev_req > req,
                uint32_t data_offset = 0) {
-        BlkOpStatus ret_status = BLK_OP_SUCCESS;
+        BlkOpStatus ret_status = BlkOpStatus::BLK_OP_SUCCESS;
         uint32_t size = bid.get_nblks() * get_page_size();
         struct iovec iov[BlkId::max_blks_in_op()];
         int iovcnt = 0;
