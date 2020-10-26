@@ -224,7 +224,7 @@ logdev_key HomeLogStoreMgr::do_device_truncate(bool dry_run) {
         }
     });
 
-    if (min_safe_ld_key == out_of_bound_ld_key) {
+    if (min_safe_ld_key == out_of_bound_ld_key || min_safe_ld_key.idx < 0) {
         LOGINFOMOD(logstore, "No log store append on any log stores, skipping device truncation");
         return min_safe_ld_key;
     } else {
