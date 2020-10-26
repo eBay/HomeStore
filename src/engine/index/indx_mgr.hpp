@@ -2,7 +2,7 @@
 #include <cassert>
 #include <fds/thread_vector.hpp>
 #include <wisr/wisr_ds.hpp>
-#include "engine/meta/meta_blks_mgr.hpp"
+#include "api/meta_interface.hpp"
 #include <engine/homestore_base.hpp>
 #include "engine/homeds/btree/btree_internal.h"
 #include "checkpoint.hpp"

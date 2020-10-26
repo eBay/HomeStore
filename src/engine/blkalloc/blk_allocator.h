@@ -24,7 +24,7 @@
 #include "engine/homeds/btree/btree.hpp"
 #include "engine/homestore_base.hpp"
 #include "engine/index/resource_mgr.hpp"
-#include "engine/meta/meta_blks_mgr.hpp"
+#include "api/meta_interface.hpp"
 
 #include "blk.h"
 

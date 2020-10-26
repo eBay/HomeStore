@@ -12,7 +12,6 @@
 #include <boost/uuid/uuid_io.hpp>
 #include <homelogstore/log_store.hpp>
 #include <map>
-#include <engine/meta/meta_blks_mgr.hpp>
 
 SDS_OPTION_GROUP(home_blks,
                  (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",

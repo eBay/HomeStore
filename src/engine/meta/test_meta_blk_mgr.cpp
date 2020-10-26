@@ -3,7 +3,8 @@
 // Created by Yaming Kuang 1/15/2020
 //
 
-#include "meta_blks_mgr.hpp"
+#include "api/meta_interface.hpp"
+#include "meta_sb.hpp"
 #include "homeblks/home_blks.hpp"
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
@@ -264,15 +265,15 @@ public:
         m_total_wrt_sz = m_mbm->get_used_size();
 
         m_mbm->deregister_handler(mtype);
-        m_mbm->register_handler(mtype,
-                                [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
-                                    if (mblk) {
-                                        std::unique_lock< std::mutex > lg(m_mtx);
-                                        m_cb_blks[mblk->hdr.h.bid.to_integer()] =
-                                            std::string((char*)(buf.bytes()), size);
-                                    }
-                                },
-                                [this](bool success) { HS_ASSERT_CMP(DEBUG, success, ==, true); });
+        m_mbm->register_handler(
+            mtype,
+            [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
+                if (mblk) {
+                    std::unique_lock< std::mutex > lg(m_mtx);
+                    m_cb_blks[mblk->hdr.h.bid.to_integer()] = std::string((char*)(buf.bytes()), size);
+                }
+            },
+            [this](bool success) { HS_ASSERT_CMP(DEBUG, success, ==, true); });
 
         while (keep_running()) {
             switch (get_op()) {

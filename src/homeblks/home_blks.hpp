@@ -16,7 +16,7 @@
 #include <settings/settings.hpp>
 #include <engine/homeds/btree/writeBack_cache.hpp>
 #include <fds/sparse_vector.hpp>
-#include "engine/meta/meta_blks_mgr.hpp"
+#include "api/meta_interface.hpp"
 #include "homeblks_config.hpp"
 #include "homeblks_http_server.hpp"
 
@@ -133,7 +133,7 @@ public:
     virtual std::error_condition unmap(const VolumePtr& vol, const vol_interface_req_ptr& req) override;
     virtual void submit_io_batch() override;
 
-    virtual vol_interface_req_ptr create_vol_interface_req(void* const buf, const uint64_t lba, const uint32_t nlbas, 
+    virtual vol_interface_req_ptr create_vol_interface_req(void* const buf, const uint64_t lba, const uint32_t nlbas,
                                                            const bool sync = false, const bool cache = true) override;
     virtual vol_interface_req_ptr create_vol_interface_req(std::vector< iovec > iovecs, const uint64_t lba,
                                                            const uint32_t nlbas, const bool sync = false,

@@ -6,12 +6,16 @@
 #include <memory>
 #include <mutex>
 #include <system_error>
+#include <fds/utils.hpp>
 
-#include "meta_sb.hpp"
+//#include "meta_sb.hpp"
 
 namespace homestore {
-
+struct meta_blk_ovf_hdr;
+struct meta_blk_sb;
+struct meta_blk;
 struct sb_blkstore_blob;
+struct BlkId;
 class BlkBuffer;
 template < typename BAllocator, typename Buffer >
 class BlkStore;
@@ -24,8 +28,9 @@ using meta_blk_found_cb_t = std::function< void(meta_blk* mblk, sisl::byte_view 
 using meta_blk_recover_comp_cb_t = std::function< void(bool success) >; // recover complete subsystem callbacks;
 using meta_blk_map_t = std::map< uint64_t, meta_blk* >;                 // blkid to meta_blk map;
 using ovf_hdr_map_t = std::map< uint64_t, meta_blk_ovf_hdr* >;          // ovf_blkid to ovf_blk_hdr map;
+using meta_sub_type = std::string;
 
-static const uint64_t invalid_bid = BlkId::invalid_internal_id();
+static constexpr uint32_t META_BLK_PAGE_SZ = 4096; // meta block page size
 
 struct MetaSubRegInfo {
     bool do_crc{true};
@@ -35,7 +40,7 @@ struct MetaSubRegInfo {
 
 class MetaBlkMgr {
 private:
-    static std::unique_ptr<MetaBlkMgr> s_instance;
+    static std::unique_ptr< MetaBlkMgr > s_instance;
     static bool m_self_recover;
     blk_store_t* m_sb_blk_store{nullptr}; // super blockstore
     std::mutex m_meta_mtx;                // mutex to access to meta_map;
@@ -43,12 +48,11 @@ private:
     meta_blk_map_t m_meta_blks;           // subsystem type to meta blk map;
     ovf_hdr_map_t m_ovf_blk_hdrs;         // ovf blk map;
     std::map< meta_sub_type, MetaSubRegInfo > m_sub_info; // map of callbacks
-    BlkId m_last_mblk_id;                                 // last meta blk;
+    std::unique_ptr< BlkId > m_last_mblk_id;              // last meta blk;
     meta_blk_sb* m_ssb{nullptr};                          // meta super super blk;
 
-    MetaBlkMgr() = default;
-
 public:
+    MetaBlkMgr();
     MetaBlkMgr(const MetaBlkMgr&) = delete;
     MetaBlkMgr(MetaBlkMgr&&) noexcept = delete;
     MetaBlkMgr& operator=(const MetaBlkMgr&) = delete;
@@ -159,7 +163,7 @@ public:
 
     uint64_t get_used_size();
 
-    bool is_aligned_buf_needed(const size_t size) { return (size <= META_BLK_CONTEXT_SZ) ? false : true; }
+    bool is_aligned_buf_needed(const size_t size);
 
     /**
      * @brief : Return the total space used in bytes that was occupied by this meta blk;
@@ -274,7 +278,7 @@ private:
      * @param bid
      * @param b
      */
-    void read(BlkId& bid, void* dest, size_t sz = META_BLK_PAGE_SZ);
+    void read(BlkId& bid, void* dest, size_t sz);
 
     void cache_clear();
 };
