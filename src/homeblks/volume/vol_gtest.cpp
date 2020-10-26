@@ -179,6 +179,8 @@ struct io_req_t;
 enum class wait_type_t { no_wait = 0, for_execution = 1, for_completion = 2 };
 
 class TestJob {
+    static thread_local bool is_this_thread_running_io;
+
 public:
     enum class job_status_t { not_started = 0, running = 1, stopped = 2, completed = 3 };
 
@@ -205,8 +207,11 @@ public:
 
     virtual void try_run_one_iteration() {
         bool notify = true;
-        if (!time_to_stop() && m_status_threads_executing.increment_if_status(job_status_t::running)) {
+        if (!time_to_stop() && !is_this_thread_running_io &&
+            m_status_threads_executing.increment_if_status(job_status_t::running)) {
+            is_this_thread_running_io = true;
             run_one_iteration();
+            is_this_thread_running_io = false;
             notify = m_status_threads_executing.decrement_testz_and_test_status(job_status_t::stopped);
         }
 
@@ -258,6 +263,7 @@ protected:
     // std::atomic< int32_t > m_threads_executing = 0;
     sisl::atomic_status_counter< job_status_t, job_status_t::not_started > m_status_threads_executing;
 };
+thread_local bool TestJob::is_this_thread_running_io = false;
 
 struct vol_info_t {
     VolumePtr vol;
