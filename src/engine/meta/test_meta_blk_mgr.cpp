@@ -13,6 +13,7 @@
 #include <iomgr/aio_drive_interface.hpp>
 #include <fstream>
 #include <cstdint>
+#include "test_common/homestore_test_common.hpp"
 
 using namespace homestore;
 
@@ -23,6 +24,23 @@ SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 SDS_OPTIONS_ENABLE(logging, test_meta_blk_mgr)
 
 SDS_LOGGING_DECL(test_meta_blk_mgr)
+
+struct Param {
+    uint64_t num_io;
+    uint64_t run_time;
+    uint32_t per_write;
+    uint32_t num_threads;
+    uint32_t per_update;
+    uint32_t per_remove;
+    bool fixed_wrt_sz_enabled;
+    uint32_t fixed_wrt_sz;
+    uint32_t min_wrt_sz;
+    uint32_t max_wrt_sz;
+    bool always_do_overflow;
+    bool is_spdk;
+};
+
+static Param gp;
 
 static void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthreads) {
     std::vector< dev_info > device_info;
@@ -41,7 +59,7 @@ static void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthre
     }
 
     LOGINFO("Starting iomgr with {} threads", nthreads);
-    iomanager.start(nthreads);
+    iomanager.start(nthreads, gp.is_spdk);
 
     uint64_t app_mem_size = ((ndevices * dev_size) * 15) / 100;
     LOGINFO("Initialize and start HomeBlks with app_mem_size = {}", app_mem_size);
@@ -70,21 +88,6 @@ static void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthre
     std::unique_lock< std::mutex > lk(start_mutex);
     cv.wait(lk, [&] { return inited; });
 }
-
-struct Param {
-    uint64_t num_io;
-    uint64_t run_time;
-    uint32_t per_write;
-    uint32_t per_update;
-    uint32_t per_remove;
-    bool fixed_wrt_sz_enabled;
-    uint32_t fixed_wrt_sz;
-    uint32_t min_wrt_sz;
-    uint32_t max_wrt_sz;
-    bool always_do_overflow;
-};
-
-static Param gp;
 
 struct sb_info_t {
     void* cookie;
@@ -385,7 +388,8 @@ SDS_OPTION_GROUP(
     (per_write, "", "per_write", "write percentage", ::cxxopts::value< uint32_t >()->default_value("60"), "number"),
     (per_remove, "", "per_remove", "remove percentage", ::cxxopts::value< uint32_t >()->default_value("20"), "number"),
     (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
-     cxxopts::value< int32_t >()->default_value("5004"), "port"));
+     cxxopts::value< int32_t >()->default_value("5004"), "port"),
+    (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"));
 
 int main(int argc, char* argv[]) {
     SDS_OPTIONS_LOAD(argc, argv, logging, test_meta_blk_mgr);
@@ -393,11 +397,8 @@ int main(int argc, char* argv[]) {
     sds_logging::SetLogger("test_meta_blk_mgr");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 
-    start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),
-                    SDS_OPTIONS["dev_size_gb"].as< uint64_t >() * 1024 * 1024 * 1024,
-                    SDS_OPTIONS["num_threads"].as< uint32_t >());
-
     gp.num_io = SDS_OPTIONS["num_io"].as< uint64_t >();
+    gp.num_threads = SDS_OPTIONS["num_threads"].as< uint32_t >();
     gp.run_time = SDS_OPTIONS["run_time"].as< uint64_t >();
     gp.per_update = SDS_OPTIONS["per_update"].as< uint32_t >();
     gp.per_write = SDS_OPTIONS["per_write"].as< uint32_t >();
@@ -406,6 +407,7 @@ int main(int argc, char* argv[]) {
     gp.min_wrt_sz = SDS_OPTIONS["min_write_size"].as< uint32_t >();
     gp.max_wrt_sz = SDS_OPTIONS["max_write_size"].as< uint32_t >();
     gp.always_do_overflow = SDS_OPTIONS["overflow"].as< uint32_t >();
+    gp.is_spdk = SDS_OPTIONS["spdk"].as< bool >();
 
     if (gp.per_update == 0 || gp.per_write == 0 || (gp.per_update + gp.per_write + gp.per_remove != 100)) {
         gp.per_update = 20;
@@ -419,11 +421,18 @@ int main(int argc, char* argv[]) {
         LOGINFO("Invalid input for min/max wrt sz: defaulting to {}/{}", gp.min_wrt_sz, gp.max_wrt_sz);
     }
 
-    LOGINFO("Testing with run_time: {}, num_io: {}, overflow: {}, write/update/remove percentage: {}/{}/{}, min/max io "
-            "size: {}/{}",
-            gp.run_time, gp.num_io, gp.always_do_overflow, gp.per_write, gp.per_update, gp.per_remove, gp.min_wrt_sz,
-            gp.max_wrt_sz);
+    /* if --spdk is not set, check env variable if user want to run spdk */
+    if (!gp.is_spdk && std::getenv(SPDK_ENV_VAR_STRING.c_str())) { gp.is_spdk = true; }
+    if (gp.is_spdk) { gp.num_threads = 2; }
 
+    start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),
+                    SDS_OPTIONS["dev_size_gb"].as< uint64_t >() * 1024 * 1024 * 1024, gp.num_threads);
+
+    LOGINFO("Testing with spdk: {}, run_time: {}, num_io: {}, overflow: {}, write/update/remove percentage: {}/{}/{}, "
+            "min/max io "
+            "size: {}/{}",
+            gp.is_spdk, gp.run_time, gp.num_io, gp.always_do_overflow, gp.per_write, gp.per_update, gp.per_remove,
+            gp.min_wrt_sz, gp.max_wrt_sz);
     auto res = RUN_ALL_TESTS();
     VolInterface::get_instance()->shutdown();
     iomanager.stop();

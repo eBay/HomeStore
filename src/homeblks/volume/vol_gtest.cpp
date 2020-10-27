@@ -40,6 +40,7 @@
 #include "api/vol_interface.hpp"
 #include "engine/common/homestore_header.hpp"
 #include "engine/homestore_base.hpp"
+#include "test_common/homestore_test_common.hpp"
 
 using namespace homestore;
 using namespace flip;
@@ -304,10 +305,8 @@ struct io_req_t : public vol_interface_req {
             vol_interface_req{std::move(iovecs), lba, nlbas, false, cache},
             buffer{nullptr},
             op_type{op},
-            vol_info{vinfo}
-    {
+            vol_info{vinfo} {
         init(lba, nlbas, is_csum);
-
         const auto req_ptr{static_cast< vol_interface_req* >(this)};
         if (op == Op_type::WRITE || op == Op_type::UNMAP) {
             // make copy of buffer so validation works properly
@@ -317,15 +316,13 @@ struct io_req_t : public vol_interface_req {
                 for (const auto& iov : req_ptr->iovecs) {
                     assert(iov.iov_len % pg_size == 0);
                     populate_csum_buf(reinterpret_cast< uint16_t* >(validate_ptr),
-                                      static_cast< const uint8_t* >(iov.iov_base), iov.iov_len,
-                                      vinfo.get());
+                                      static_cast< const uint8_t* >(iov.iov_base), iov.iov_len, vinfo.get());
                     validate_ptr += (iov.iov_len / pg_size) * sizeof(uint16_t);
                 }
             } else {
                 uint8_t* validate_ptr{validate_buffer};
                 for (const auto& iov : req_ptr->iovecs) {
-                    ::memcpy(static_cast< void* >(validate_ptr), static_cast< const void* >(iov.iov_base),
-                             iov.iov_len);
+                    ::memcpy(static_cast< void* >(validate_ptr), static_cast< const void* >(iov.iov_base), iov.iov_len);
                     validate_ptr += iov.iov_len;
                 }
             }
@@ -336,9 +333,9 @@ struct io_req_t : public vol_interface_req {
              const uint32_t nlbas, const bool is_csum, const bool cache = false) :
             vol_interface_req{buf, lba, nlbas, false, cache},
 
-            buffer{buf}, op_type{op},
-            vol_info{vinfo}
-    {
+            buffer{buf},
+            op_type{op},
+            vol_info{vinfo} {
         init(lba, nlbas, is_csum);
 
         if (op == Op_type::WRITE || op == Op_type::UNMAP) {
@@ -358,8 +355,7 @@ struct io_req_t : public vol_interface_req {
     virtual ~io_req_t() override {
         iomanager.iobuf_free(validate_buffer);
         const auto req_ptr{static_cast< vol_interface_req* >(this)};
-        for (auto& iov : req_ptr->iovecs)
-        {
+        for (auto& iov : req_ptr->iovecs) {
             iomanager.iobuf_free(static_cast< uint8_t* >(iov.iov_base));
         }
     }
@@ -370,8 +366,7 @@ struct io_req_t : public vol_interface_req {
     io_req_t& operator=(io_req_t&&) noexcept = delete;
 
 private:
-    void init(const uint64_t lba, const uint32_t nlbas, const bool is_csum)
-    {
+    void init(const uint64_t lba, const uint32_t nlbas, const bool is_csum) {
         const uint64_t page_size{VolInterface::get_instance()->get_page_size(vol_info->vol)};
         original_size = nlbas * page_size;
         original_offset = lba * page_size;
@@ -1095,8 +1090,7 @@ protected:
 
             vreq = boost::intrusive_ptr< io_req_t >(
                 new io_req_t(vinfo, Op_type::WRITE, wbuf, lba, nlbas, tcfg.verify_csum(), tcfg.write_cache));
-        } else
-        {
+        } else {
             std::vector< iovec > iovecs{};
             for (uint32_t lba_num{0}; lba_num < nlbas; ++lba_num) {
                 uint8_t* const wbuf{iomanager.iobuf_alloc(512, page_size)};
@@ -1107,17 +1101,17 @@ protected:
                 populate_buf(wbuf, page_size, lba + lba_num, vinfo.get());
             }
 
-            vreq = boost::intrusive_ptr< io_req_t >(
-                new io_req_t(vinfo, Op_type::WRITE, std::move(iovecs), lba, nlbas, tcfg.verify_csum(), tcfg.write_cache));
-
+            vreq = boost::intrusive_ptr< io_req_t >(new io_req_t(vinfo, Op_type::WRITE, std::move(iovecs), lba, nlbas,
+                                                                 tcfg.verify_csum(), tcfg.write_cache));
         }
         vreq->cookie = static_cast< void* >(this);
 
         ++m_voltest->output.write_cnt;
         ++m_outstanding_ios;
         const auto ret_io{VolInterface::get_instance()->write(vol, vreq)};
-        LOGDEBUG("Wrote lba: {}, nlbas: {} outstanding_ios={}, iovec(s)={}, cache={}", lba, nlbas, m_outstanding_ios.load(),
-                 (tcfg.write_iovec != 0 ? true : false), (tcfg.write_cache != 0 ? true : false));
+        LOGDEBUG("Wrote lba: {}, nlbas: {} outstanding_ios={}, iovec(s)={}, cache={}", lba, nlbas,
+                 m_outstanding_ios.load(), (tcfg.write_iovec != 0 ? true : false),
+                 (tcfg.write_cache != 0 ? true : false));
         if (ret_io != no_error) { return false; }
         return true;
     }
@@ -1159,16 +1153,17 @@ protected:
                 iovecs.emplace_back(std::move(iov));
             }
 
-            vreq = boost::intrusive_ptr< io_req_t >(new io_req_t{vinfo, Op_type::READ, std::move(iovecs), lba, nlbas,
-                                                                 tcfg.verify_csum(), tcfg.read_cache});
+            vreq = boost::intrusive_ptr< io_req_t >(
+                new io_req_t{vinfo, Op_type::READ, std::move(iovecs), lba, nlbas, tcfg.verify_csum(), tcfg.read_cache});
         }
         vreq->cookie = static_cast< void* >(this);
 
         ++m_voltest->output.read_cnt;
         ++m_outstanding_ios;
         const auto ret_io{VolInterface::get_instance()->read(vol, vreq)};
-        LOGDEBUG("Read lba: {}, nlbas: {} outstanding_ios={}, iovec(s)={}, cache={}", lba, nlbas, m_outstanding_ios.load(), 
-                 (tcfg.read_iovec != 0 ? true : false), (tcfg.read_cache != 0 ? true : false));
+        LOGDEBUG("Read lba: {}, nlbas: {} outstanding_ios={}, iovec(s)={}, cache={}", lba, nlbas,
+                 m_outstanding_ios.load(), (tcfg.read_iovec != 0 ? true : false),
+                 (tcfg.read_cache != 0 ? true : false));
         if (ret_io != no_error) { return false; }
         return true;
     }
@@ -1287,7 +1282,7 @@ protected:
                 uint32_t offset{0};
                 assert(size % size_read == 0);
                 while (size != 0) {
-                    const uint8_t* const buffer{static_cast<uint8_t*>(iov.iov_base) + offset};
+                    const uint8_t* const buffer{static_cast< uint8_t* >(iov.iov_base) + offset};
                     const uint8_t* const validate_buffer{req->validate_buffer +
                                                          (tcfg.verify_csum() ? total_size_read_csum : total_size_read)};
                     if (!verify_buffer(validate_buffer, buffer, size_read, total_size_read)) return false;
@@ -1730,7 +1725,12 @@ int main(int argc, char* argv[]) {
 
     if (_gcfg.enable_crash_handler) { sds_logging::install_crash_handler(); }
 
+    /* if --spdk is not set, check env variable if user want to run spdk */
+    if (!_gcfg.is_spdk && std::getenv(SPDK_ENV_VAR_STRING.c_str())) { _gcfg.is_spdk = true; }
+
     if (_gcfg.is_spdk) { _gcfg.num_threads = 2; } /* default to 2 to avoid high cpu usage with spdk */
+
+    LOGINFO("Testing with vol_gtest with gcfg spdk: {}, nthreads: {}", _gcfg.is_spdk, _gcfg.num_threads);
 
     return RUN_ALL_TESTS();
 }
