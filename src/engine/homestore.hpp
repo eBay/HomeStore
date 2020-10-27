@@ -5,7 +5,7 @@
 #include "engine/device/device.h"
 #include "engine/homeds/btree/btree.hpp"
 #include "engine/homeds/btree/ssd_btree.hpp"
-#include "engine/meta/meta_blks_mgr.hpp"
+#include "api/meta_interface.hpp"
 #include "fds/malloc_helper.hpp"
 #include "fds/utils.hpp"
 #include "homelogstore/log_store.hpp"

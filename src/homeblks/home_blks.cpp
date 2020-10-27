@@ -12,7 +12,6 @@
 #include <boost/uuid/uuid_io.hpp>
 #include <homelogstore/log_store.hpp>
 #include <map>
-#include <engine/meta/meta_blks_mgr.hpp>
 
 SDS_OPTION_GROUP(home_blks,
                  (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
@@ -387,7 +386,7 @@ void HomeBlks::init_done(std::error_condition err) {
         used_size.add(it->second->get_used_size());
     }
     auto system_cap = get_system_capacity();
-    LOGINFO("{}", system_cap.to_string());
+    LOGINFO("system_cap: {}, used_size: {}", system_cap.to_string(), used_size.to_string());
     HS_RELEASE_ASSERT_EQ(system_cap.used_data_size, used_size.used_data_size,
                          "vol data used size mismatch. used size {}", used_size.to_string());
     HS_RELEASE_ASSERT_EQ(system_cap.used_index_size, used_size.used_index_size,

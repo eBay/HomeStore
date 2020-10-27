@@ -179,8 +179,10 @@ btree_status_t mapping::put(mapping_op_cntx& cntx, MappingKey& key, MappingValue
     /* start range put */
     auto ret = m_bt->range_put(btree_put_type::APPEND_IF_EXISTS_ELSE_INSERT, ureq, bcp);
 
-    HS_ASSERT_CMP(RELEASE, get_next_start_key_from_cursor(cur), >=, start_lba);
-    HS_ASSERT_CMP(RELEASE, get_next_start_key_from_cursor(cur), <=, (end_lba + 1));
+    if (cur.m_last_key != nullptr) {
+        HS_ASSERT_CMP(RELEASE, get_next_start_key_from_cursor(cur), >=, start_lba);
+        HS_ASSERT_CMP(RELEASE, get_next_start_key_from_cursor(cur), <=, (end_lba + 1));
+    }
     /* we should not get resource full error */
     HS_ASSERT(RELEASE,
               (ret == btree_status_t::success || ret == btree_status_t::fast_path_not_possible ||

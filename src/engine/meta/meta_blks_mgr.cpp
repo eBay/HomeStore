@@ -1,12 +1,16 @@
-#include "meta_sb.hpp"
 #include "homestore.hpp"
-#include "meta_blks_mgr.hpp"
+#include "api/meta_interface.hpp"
 #include "blkstore/blkstore.hpp"
 #include "engine/blkalloc/blk_allocator.h"
+#include "meta_sb.hpp"
 
 SDS_LOGGING_DECL(metablk)
 
 namespace homestore {
+
+MetaBlkMgr::MetaBlkMgr() { m_last_mblk_id = std::make_unique< BlkId >(invalid_bid); }
+
+bool MetaBlkMgr::is_aligned_buf_needed(const size_t size) { return (size <= META_BLK_CONTEXT_SZ) ? false : true; }
 
 void MetaBlkMgr::start(blk_store_t* sb_blk_store, const sb_blkstore_blob* blob, const bool is_init) {
     LOGINFO("Initialize MetaBlkStore with total size: {}, used size: {}", sb_blk_store->get_size(),
@@ -106,7 +110,7 @@ void MetaBlkMgr::init_ssb() {
     memset((void*)m_ssb, 0, META_BLK_PAGE_SZ);
 
     std::lock_guard< decltype(m_meta_mtx) > lk(m_meta_mtx);
-    m_last_mblk_id.set(invalid_bid);
+    m_last_mblk_id->set(invalid_bid);
     m_ssb->next_bid.set(invalid_bid);
     m_ssb->prev_bid.set(invalid_bid);
     m_ssb->magic = META_BLK_SB_MAGIC;
@@ -139,12 +143,12 @@ void MetaBlkMgr::scan_meta_blks() {
     auto prev_meta_bid = m_ssb->bid;
 
     while (bid.to_integer() != invalid_bid) {
-        m_last_mblk_id.set(bid);
+        m_last_mblk_id->set(bid);
 
         // TODO: add a new API in blkstore read to by pass cache;
         // e.g. take caller's read buf to avoid this extra memory copy;
         auto mblk = (meta_blk*)hs_iobuf_alloc(META_BLK_PAGE_SZ);
-        read(bid, mblk);
+        read(bid, mblk, META_BLK_PAGE_SZ);
 
         // add meta blk to cache;
         m_meta_blks[bid.to_integer()] = mblk;
@@ -354,12 +358,12 @@ meta_blk* MetaBlkMgr::init_meta_blk(BlkId& bid, const meta_sub_type type, const 
     mblk->hdr.h.version = META_BLK_VERSION;
 
     // handle prev/next pointer linkage;
-    if (m_last_mblk_id.to_integer() != invalid_bid) {
+    if (m_last_mblk_id->to_integer() != invalid_bid) {
         // update this mblk's prev bid to last mblk;
-        mblk->hdr.h.prev_bid.set(m_last_mblk_id);
+        mblk->hdr.h.prev_bid.set(m_last_mblk_id->to_integer());
 
         // update last mblk's next to this mblk;
-        m_meta_blks[m_last_mblk_id.to_integer()]->hdr.h.next_bid.set(bid);
+        m_meta_blks[m_last_mblk_id->to_integer()]->hdr.h.next_bid.set(bid);
     } else {
         // this is the first sub sb being added;
         mblk->hdr.h.prev_bid.set(m_ssb->bid);
@@ -375,16 +379,16 @@ meta_blk* MetaBlkMgr::init_meta_blk(BlkId& bid, const meta_sub_type type, const 
     write_meta_blk_internal(mblk, context_data, sz);
 
     // now update previous last mblk or ssb. They can only be updated after meta blk is written to disk;
-    if (m_last_mblk_id.to_integer() != invalid_bid) {
+    if (m_last_mblk_id->to_integer() != invalid_bid) {
         // persist the changes to last mblk;
-        write_meta_blk_to_disk(m_meta_blks[m_last_mblk_id.to_integer()]);
+        write_meta_blk_to_disk(m_meta_blks[m_last_mblk_id->to_integer()]);
     } else {
         // persiste the changes;
         write_ssb();
     }
 
     // point last mblk to this mblk;
-    m_last_mblk_id.set(bid);
+    m_last_mblk_id->set(bid);
 
     // add to cache;
     HS_ASSERT(DEBUG, m_meta_blks.find(bid.to_integer()) == m_meta_blks.end(),
@@ -559,7 +563,7 @@ std::error_condition MetaBlkMgr::remove_sub_sb(const void* cookie) {
         m_ssb->next_bid.set(next_bid);
         // persist m_ssb to disk;
         write_ssb();
-        if (m_last_mblk_id.to_integer() == rm_bid.to_integer()) { m_last_mblk_id.set(invalid_bid); }
+        if (m_last_mblk_id->to_integer() == rm_bid.to_integer()) { m_last_mblk_id->set(invalid_bid); }
     } else {
         // find the in-memory copy of prev meta block;
         HS_ASSERT(DEBUG, m_meta_blks.find(prev_bid.to_integer()) != m_meta_blks.end(), "prev: {} not found!",
@@ -581,11 +585,11 @@ std::error_condition MetaBlkMgr::remove_sub_sb(const void* cookie) {
         write_meta_blk_to_disk(next_mblk);
     } else {
         // if we are removing the last meta blk, update last to its previous blk;
-        HS_DEBUG_ASSERT_EQ(m_last_mblk_id.to_integer(), rm_bid.to_integer());
+        HS_DEBUG_ASSERT_EQ(m_last_mblk_id->to_integer(), rm_bid.to_integer());
 
         HS_LOG(INFO, metablk, "removing last mblk, change m_last_mblk to bid: {}, type: {}", prev_bid.to_string(),
                m_meta_blks[prev_bid.to_integer()]->hdr.h.type);
-        m_last_mblk_id.set(prev_bid);
+        m_last_mblk_id->set(prev_bid);
     }
 
     // remove the in-memory handle from meta blk map;

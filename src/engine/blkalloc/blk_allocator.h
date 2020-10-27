@@ -24,7 +24,7 @@
 #include "engine/homeds/btree/btree.hpp"
 #include "engine/homestore_base.hpp"
 #include "engine/index/resource_mgr.hpp"
-#include "engine/meta/meta_blks_mgr.hpp"
+#include "api/meta_interface.hpp"
 
 #include "blk.h"
 
@@ -396,7 +396,7 @@ struct blkalloc_cp {
         while (bid != nullptr) {
             auto chunk = HomeStoreBase::safe_instance()->get_device_manager()->get_chunk(bid->get_chunk_num());
             auto ba = chunk->get_blk_allocator();
-            // LOGINFO("Freeing blk [{}]", bid->to_string());
+            LOGDEBUG("Freeing blk [{}]", bid->to_string());
             ba->free_on_disk(*bid);
             bid = list->next(it);
         }

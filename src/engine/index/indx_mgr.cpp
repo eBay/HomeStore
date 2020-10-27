@@ -390,6 +390,9 @@ void IndxMgr::io_replay() {
             for (uint32_t i = 0; i < fblkid_pair.second; ++i) {
                 BlkId fbid(fblkid_pair.first[i]);
                 Free_Blk_Entry fbe(fbid, 0, fbid.get_nblks());
+#ifndef NDEBUG
+                dump_free_blk_list(icp->io_free_blkid_list);
+#endif
                 auto size = free_blk(nullptr, icp->io_free_blkid_list, fbe, true);
                 HS_ASSERT_CMP(DEBUG, size, >, 0);
                 if (hdr->cp_id > m_last_cp_sb.icp_sb.active_cp_id) {
@@ -511,6 +514,17 @@ indx_mgr_sb IndxMgr::get_immutable_sb() {
     indx_mgr_sb sb(m_active_tbl->get_btree_sb(), m_journal->get_store_id(), m_is_snap_enabled);
     return sb;
 }
+
+#ifndef NDEBUG
+void IndxMgr::dump_free_blk_list(blkid_list_ptr free_blk_list) {
+    sisl::ThreadVector< BlkId >::thread_vector_iterator it;
+    auto bid = free_blk_list->begin(it);
+    while (bid != nullptr) {
+        THIS_INDX_LOG(DEBUG, indx_mgr, , "Freeing blk [{}]", bid->to_string());
+        bid = free_blk_list->next(it);
+    }
+}
+#endif
 
 void IndxMgr::flush_free_blks(const indx_cp_ptr& icp, hs_cp* hcp) {
     THIS_INDX_LOG(TRACE, cp, , "flush free blks");

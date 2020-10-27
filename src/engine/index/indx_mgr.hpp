@@ -2,7 +2,7 @@
 #include <cassert>
 #include <fds/thread_vector.hpp>
 #include <wisr/wisr_ds.hpp>
-#include "engine/meta/meta_blks_mgr.hpp"
+#include "api/meta_interface.hpp"
 #include <engine/homestore_base.hpp>
 #include "engine/homeds/btree/btree_internal.h"
 #include "checkpoint.hpp"
@@ -642,6 +642,9 @@ private:
     sisl::byte_view alloc_unmap_sb(const uint32_t key_size, const uint64_t seq_id,
                                    homeds::btree::BtreeQueryCursor& unmap_btree_cur);
     sisl::byte_view alloc_sb_bytes(uint64_t size_);
+#ifndef NDEBUG
+    void dump_free_blk_list(blkid_list_ptr free_blk_list);
+#endif
     void unmap_indx_async(const indx_req_ptr& ireq);
     void do_remaining_unmap_internal(const indx_req_ptr& ireq, void* unmap_meta_blk_cntx, void* key, uint64_t seqid,
                                      homeds::btree::BtreeQueryCursor& btree_cur);
