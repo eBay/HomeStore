@@ -279,7 +279,7 @@ public:
             }
         }
 
-        auto& wb_req = bn->req[cp_id];
+        auto wb_req = bn->req[cp_id];
         HS_ASSERT_CMP(DEBUG, wb_req->state, ==, writeback_req_state::WB_REQ_WAITING);
 
         if (wbd_req) {
@@ -366,7 +366,7 @@ public:
             auto wb_req = *wb_req_ptr_ref;
             if (wb_req->dependent_cnt.decrement_testz(1)) {
                 wb_req->state = writeback_req_state::WB_REQ_SENT;
-                wb_req->part_of_batch = true;
+                //wb_req->part_of_batch = true;
                 m_blkstore->write(wb_req->bid, wb_req->m_mem, 0, wb_req, false);
             }
             wb_req_ptr_ref = list->next(it);
@@ -395,7 +395,7 @@ public:
                 req_mtx.unlock();
                 if (depend_req->dependent_cnt.decrement_testz(1)) {
                     depend_req->state = writeback_req_state::WB_REQ_SENT;
-                    wb_req->part_of_batch = true;
+                    //wb_req->part_of_batch = true;
                     m_blkstore->write(depend_req->bid, depend_req->m_mem, 0, depend_req, false);
                 }
             }
