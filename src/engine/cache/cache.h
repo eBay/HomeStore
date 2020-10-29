@@ -240,7 +240,7 @@ public:
     CacheBuffer& operator=(const CacheBuffer&) = delete;
     CacheBuffer& operator=(CacheBuffer&&) noexcept = delete;
 
-    virtual ~CacheBuffer(){};
+    virtual ~CacheBuffer() = default;
 
     const K& get_key() const { return m_key; }
 
