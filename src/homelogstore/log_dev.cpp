@@ -145,7 +145,7 @@ int64_t LogDev::append_async(logstore_id_t store_id, logstore_seq_num_t seq_num,
     return idx;
 }
 
-log_buffer LogDev::read(const logdev_key& key, serialized_log_record* record_header) {
+log_buffer LogDev::read(const logdev_key& key, serialized_log_record& return_record_header) {
     static thread_local sisl::aligned_unique_ptr< uint8_t > _read_buf;
 
     // First read the offset and read the log_group. Then locate the log_idx within that and get the actual data
@@ -171,7 +171,7 @@ log_buffer LogDev::read(const logdev_key& key, serialized_log_record* record_hea
         HS_ASSERT_CMP(RELEASE, header->this_group_crc(), ==, crc, "CRC mismatch on read data");
     }
 
-    record_header = header->nth_record(key.idx - header->start_log_idx);
+    serialized_log_record* record_header = header->nth_record(key.idx - header->start_log_idx);
     uint32_t data_offset = (record_header->offset + (record_header->is_inlined ? 0 : header->oob_data_offset));
 
     log_buffer b((size_t)record_header->size);
@@ -199,7 +199,8 @@ log_buffer LogDev::read(const logdev_key& key, serialized_log_record* record_hea
         // Free the buffer in case we allocated above
         if (rounded_size > initial_read_size) { iomanager.iobuf_free(rbuf); }
     }
-
+    return_record_header = serialized_log_record(record_header->size, record_header->offset, record_header->is_inlined,
+                                                 record_header->store_seq_num, record_header->store_id);
     return b;
 }
 

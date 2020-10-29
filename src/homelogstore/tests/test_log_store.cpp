@@ -468,7 +468,7 @@ public:
                 nlohmann::json json_dump = home_log_store_mgr.dump_log_store(dump_req);
                 LOGINFO("Printing json dump of logstore id {}, start_seq {}, end_seq {}, \n\n {}", id, start_seq,
                         end_seq, json_dump.dump());
-                EXPECT_EQ(end_seq - start_seq + 1, (int64_t)json_dump[0]["log_records"].size());
+                EXPECT_EQ(end_seq - start_seq + 1, (int64_t)json_dump[std::to_string(id)]["log_records"].size());
                 return;
             }
         }

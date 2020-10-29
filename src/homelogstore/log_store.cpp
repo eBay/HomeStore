@@ -323,7 +323,8 @@ log_buffer HomeLogStore::read_sync(logstore_seq_num_t seq_num) {
     THIS_LOGSTORE_LOG(TRACE, "Reading lsn={}:{} mapped to logdev_key=[idx={} dev_offset={}]", seq_num, ld_key.idx,
                       ld_key.dev_offset);
     COUNTER_INCREMENT(home_log_store_mgr.m_metrics, logstore_read_count, 1);
-    auto b = HomeLogStoreMgr::logdev().read(ld_key);
+    serialized_log_record header;
+    auto b = HomeLogStoreMgr::logdev().read(ld_key, header);
     HISTOGRAM_OBSERVE(home_log_store_mgr.m_metrics, logstore_read_latency, get_elapsed_time_us(start_time));
     return b;
 }
@@ -517,25 +518,23 @@ nlohmann::json HomeLogStore::dump_log_store(const log_dump_req& dump_req) {
                                                                          homestore::logstore_record& record) -> bool {
                                     // do a sync read
                                     nlohmann::json json_val = nlohmann::json::object();
-                                    serialized_log_record* record_header;
+                                    serialized_log_record record_header;
 
-                                    auto log_buffer = HomeLogStoreMgr::logdev().read(record.m_dev_key, record_header);                                    
-                                    LOGINFOMOD(logstore, "after logdev().read");
+                                    auto log_buffer = HomeLogStoreMgr::logdev().read(record.m_dev_key, record_header);
 
                                     try {
-                                        json_val["size"] = (uint32_t)record_header->size;
-                                        json_val["offset"] = (uint32_t)record_header->offset;
-                                        json_val["is_inlined"] = (uint32_t)record_header->is_inlined;
-                                        json_val["store_seq_num"] = (uint64_t)record_header->store_seq_num;
-                                        json_val["store_id"] = (logstore_id_t)record_header->store_id;
+                                        json_val["size"] = (uint32_t)record_header.size;
+                                        json_val["offset"] = (uint32_t)record_header.offset;
+                                        json_val["is_inlined"] = (uint32_t)record_header.is_inlined;
+                                        json_val["store_seq_num"] = (uint64_t)record_header.store_seq_num;
+                                        json_val["store_id"] = (logstore_id_t)record_header.store_id;
                                     } catch (const std::exception& ex) {
                                         LOGERRORMOD(logstore, "Exception in json dump- {}", ex.what());
                                     }
-                                    LOGINFOMOD(logstore, "before logdev().read");
 
-                                    if (dump_req.verbosity_level == log_dump_verbosity::CONTENT) 
-                                    {
-                                        std::vector< uint8_t > v(log_buffer.bytes(), log_buffer.bytes() + log_buffer.size());
+                                    if (dump_req.verbosity_level == log_dump_verbosity::CONTENT) {
+                                        std::vector< uint8_t > v(log_buffer.bytes(),
+                                                                 log_buffer.bytes() + log_buffer.size());
                                         nlohmann::json content_json = nlohmann::json::from_msgpack(v);
                                         json_val["content"] = content_json;
                                     }
@@ -544,7 +543,7 @@ nlohmann::json HomeLogStore::dump_log_store(const log_dump_req& dump_req) {
                                     end_iterate = (cur_idx < end_idx) ? true : false;
                                     return end_iterate;
                                 });
-                                
+
     json_dump["log_records"] = json_records;
     return json_dump;
 }
@@ -552,7 +551,8 @@ nlohmann::json HomeLogStore::dump_log_store(const log_dump_req& dump_req) {
 void HomeLogStore::foreach (int64_t start_idx, const std::function< bool(logstore_seq_num_t, log_buffer) >& cb) {
     m_records.foreach_completed(0, [&](long int cur_idx, long int max_idx, homestore::logstore_record& record) -> bool {
         // do a sync read
-        auto log_buf = HomeLogStoreMgr::logdev().read(record.m_dev_key);
+        serialized_log_record header;
+        auto log_buf = HomeLogStoreMgr::logdev().read(record.m_dev_key, header);
         return cb(cur_idx, log_buf);
     });
 }

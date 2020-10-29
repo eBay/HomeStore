@@ -41,6 +41,13 @@ struct serialized_log_record {
     uint32_t is_inlined : 1;          // Is the log data is inlined or out-of-band area
     logstore_seq_num_t store_seq_num; // Seqnum by the log store
     logstore_id_t store_id;           // ID of the store this log is associated with
+    serialized_log_record() {}
+    serialized_log_record(uint32_t s, uint32_t o, uint32_t is, logstore_seq_num_t sq, logstore_id_t id) :
+            size(s),
+            offset(o),
+            is_inlined(is),
+            store_seq_num(sq),
+            store_id(id) {}
 } __attribute__((packed));
 
 /* This structure represents the in-memory representation of a log record */
@@ -401,11 +408,11 @@ public:
      * idx within the device. A log data can be looked up only by pair of log_id and dev_offset.
      *
      * @param record_header Pass the pointer to the header of the read record
-     * 
+     *
      * @return log_buffer : Opaque structure which contains the data blob and its size. It is safe buffer and hence it
      * need not be freed and can be cheaply passed it around.
      */
-    log_buffer read(const logdev_key& key, serialized_log_record* record_header = nullptr);
+    log_buffer read(const logdev_key& key, serialized_log_record& record_header);
 
     /**
      * @brief Load the data from the blkstore starting with offset. This method loads data in bulk and then call
