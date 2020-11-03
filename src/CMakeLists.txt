@@ -1,28 +1,6 @@
-set (CPP_FLAGS "-faligned-new -Dlinux -fconcepts")
-set (CPP_WARNINGS "-Wall -Wextra -Werror -Wno-unused-parameter -Wno-unused-variable -Wno-empty-body -Wno-array-bounds -Wno-cast-function-type -Wno-maybe-uninitialized -Wno-deprecated-copy -Wno-unused-function")
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CPP_FLAGS} ${CPP_WARNINGS} -DBOOST_ALLOW_DEPRECATED_HEADERS ")
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DPACKAGE_VERSION=\\\"${CONAN_PACKAGE_VERSION}\\\"")
-
-# enable proper pread/pwrite
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_POSIX_C_SOURCE=200809L -D_FILE_OFFSET_BITS=64")
-
-if ("${MALLOC_IMPL}" STREQUAL "jemalloc")
-    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_JEMALLOC=1")
-elseif ("${MALLOC_IMPL}" STREQUAL "tcmalloc")
-    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSING_TCMALLOC=1")
-endif()
-
-if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
-    message(STATUS "Debug build")
-    add_compile_options(-D_DEBUG=1 -O0 -DDEBUG_RCU -D_PRERELEASE=1)
-else()
-    message(STATUS "Release build")
-    add_compile_options(-DNDEBUG=1 -O2 -D_PRERELEASE=1)
-endif()
-
-
 include (CTest)
-find_package (Threads REQUIRED)
+set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
+find_package(Threads)
 find_library(LIB_AIO aio)
 find_library(LIB_ISAL isal)
 

@@ -29,15 +29,15 @@ build*
 *.out
 *.app
 
-# CMake generated files
+# CMake generated files and directories
 CMakeFiles
 CMakeCache.txt
 Makefile
-*.cmake
-cmake-build-*
+cmake-*
 
-### Vi Swap Files
+### Editor Swap Files
 *.swp
+*.kate-swp
 
 ### JetBrains template
 # Covers JetBrains IDEs: IntelliJ, RubyMine, PhpStorm, AppCode, PyCharm, CLion, Android Studio and Webstorm
