@@ -7,7 +7,7 @@ set(BLKALLOC_SOURCE
        )
 add_library(hs_blkalloc OBJECT ${BLKALLOC_SOURCE})
 
-if(CMAKE_BUILD_TYPE STREQUAL Debug)
+if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
   set(TEST_BLKALLOC_SOURCE_FILES
           test_blkalloc.cpp
           )

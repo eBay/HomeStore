@@ -5,7 +5,7 @@ set(METABLK_SOURCE_FILES
       )
 add_library(hs_metablk OBJECT ${METABLK_SOURCE_FILES})
 
-if (NOT "${CONAN_TEST_TARGET}" STREQUAL "off")
+if (NOT ${CONAN_TEST_TARGET} STREQUAL "off")
     set(TEST_METABLK_SOURCE_FILES
       test_meta_blk_mgr.cpp
       )

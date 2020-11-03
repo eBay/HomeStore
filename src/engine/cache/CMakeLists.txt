@@ -1,6 +1,6 @@
 # Coverage doesn't like binaries that don't run...
-if (NOT "${CONAN_TEST_TARGET}" STREQUAL "coverage")
-    if (NOT "${CONAN_TEST_TARGET}" STREQUAL "off")
+if (NOT ${CONAN_TEST_TARGET} STREQUAL "coverage")
+    if (NOT ${CONAN_TEST_TARGET} STREQUAL "off")
         set(PERF_CACHE_SOURCE_FILES
               perf_cache.cpp
               )
@@ -15,7 +15,7 @@ endif ()
 
 include_directories (BEFORE ..)
 
-if (NOT "${CONAN_TEST_TARGET}" STREQUAL "off")
+if (NOT ${CONAN_TEST_TARGET} STREQUAL "off")
     set(TEST_CACHE_SOURCE_FILES
         test_cache.cpp
         )

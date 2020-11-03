@@ -1,4 +1,4 @@
-if(CMAKE_BUILD_TYPE STREQUAL Debug)
+if(${CMAKE_BUILD_TYPE STREQUAL} STREQUAL "Debug")
     set(TEST_THREAD_POOL_SOURCE_FILES
           test_thread_pool.cpp
           )
