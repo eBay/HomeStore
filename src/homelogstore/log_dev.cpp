@@ -378,8 +378,8 @@ void LogDev::unlock_flush() {
     m_is_flushing.store(false, std::memory_order_release);
 
     // Try to do chain flush if its really needed.
-    LOGTRACEMOD(logstore, "Unlocked the flush, try doing chain flushing if needed");
-    flush_if_needed();
+    //LOGTRACEMOD(logstore, "Unlocked the flush, try doing chain flushing if needed");
+    //flush_if_needed();
 }
 
 void LogDev::truncate(const logdev_key& key) {
