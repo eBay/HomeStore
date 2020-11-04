@@ -30,6 +30,18 @@ if ($ENV{ASAN_OPTIONS} MATCHES "detect_leaks=1")
   set(ASAN_ENABLED_BUILD true)
 endif()
 
+if (DEFINED MALLOC_IMPL)
+    if (${MALLOC_IMPL} STREQUAL "jemalloc")
+        add_flags("-DUSE_JEMALLOC=1")
+        # turn off memory sanitizer if using jemalloc otherwise folly will cause double definition errors
+        if (DEFINE MEMORY_SANITIZER_ON) 
+            unset(MEMORY_SANITIZER_ON)
+        endif
+    elseif (${MALLOC_IMPL} STREQUAL "tcmalloc")
+        add_flags("-DUSING_TCMALLOC=1")
+    endif()
+endif()
+
 if (${MEMORY_SANITIZER_ON})
   message(STATUS "Running with Memory Sanitizer ON")
   include (cmake/mem_sanitizer.cmake)
@@ -76,14 +88,6 @@ add_flags("-DPACKAGE_VERSION=\\\"${CONAN_PACKAGE_VERSION}\\\"")
 if(UNIX)
     # enable proper pread/pwrite and large file
     add_flags("-D_POSIX_C_SOURCE=200809L -D_FILE_OFFSET_BITS=64 -D_LARGEFILE64_SOURCE")
-endif()
-
-if (DEFINED MALLOC_IMPL)
-    if (${MALLOC_IMPL} STREQUAL "jemalloc")
-        add_flags("-DUSE_JEMALLOC=1")
-    elseif (${MALLOC_IMPL} STREQUAL "tcmalloc")
-        add_flags("-DUSING_TCMALLOC=1")
-    endif()
 endif()
 
 if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")

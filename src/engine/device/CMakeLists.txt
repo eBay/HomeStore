@@ -1,8 +1,8 @@
 include_directories (BEFORE ..)
 set(DEVICE_SOURCE
-        physical_dev.cpp
-        device_manager.cpp
-       )
+    physical_dev.cpp
+    device_manager.cpp
+    )
 add_library(hs_device OBJECT ${DEVICE_SOURCE})
 
 if (NOT ${CONAN_TEST_TARGET} STREQUAL "off")

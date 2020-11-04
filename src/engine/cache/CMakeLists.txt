@@ -2,10 +2,10 @@
 if (NOT ${CONAN_TEST_TARGET} STREQUAL "coverage")
     if (NOT ${CONAN_TEST_TARGET} STREQUAL "off")
         set(PERF_CACHE_SOURCE_FILES
-              perf_cache.cpp
-              )
+            perf_cache.cpp
+            )
         add_executable(perf_cache
-                        ${PERF_CACHE_SOURCE_FILES}
+                       ${PERF_CACHE_SOURCE_FILES}
                       )
         target_link_libraries(perf_cache homestore ${CONAN_LIBS})
         message(WARNING "Cache perf test will not be run...fails")
@@ -21,8 +21,8 @@ if (NOT ${CONAN_TEST_TARGET} STREQUAL "off")
         )
 
     add_executable(test_cache
-                  ${TEST_CACHE_SOURCE_FILES}
-                )
+                   ${TEST_CACHE_SOURCE_FILES}
+                  )
     target_link_libraries(test_cache homestore iberty ${CONAN_LIBS})
     add_test(NAME TestCache COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_cache)
 endif()
