@@ -136,7 +136,7 @@ struct WriteBackCacheBuffer : public CacheBuffer< homestore::BlkId > {
     WriteBackCacheBuffer& operator=(WriteBackCacheBuffer&&) noexcept = delete;
     virtual ~WriteBackCacheBuffer() override = default;
 
-    virtual void init() override{
+    virtual void init() override {
     /* Note : it is called under cache lock to prevent multiple threads to call init. And init function
      * internally also try to take the cache lock to access cache to update in memory structure. So
      * we have to be careful in taking any lock inside this function.
@@ -205,8 +205,10 @@ public:
                                            }
                                        }));
                                });
-                               std::unique_lock< std::mutex > lk(cv_m);
-                               cv.wait(lk, [&thread_inited]() { return thread_inited; });
+                               {
+                                   std::unique_lock< std::mutex > lk(cv_m);
+                                   cv.wait(lk, [&thread_inited]() { return thread_inited; });
+                               }
                                sthread.detach();
                            }
                        }));
@@ -279,12 +281,14 @@ public:
             }
         }
 
-        auto wb_req = bn->req[cp_id];
+        auto wb_req{bn->req[cp_id]};
         HS_ASSERT_CMP(DEBUG, wb_req->state, ==, writeback_req_state::WB_REQ_WAITING);
 
         if (wbd_req) {
-            std::unique_lock< std::mutex > req_mtx(wbd_req->mtx);
-            wbd_req->req_q.push_back(wb_req);
+            {
+                std::unique_lock< std::mutex > req_mtx(wbd_req->mtx);
+                wbd_req->req_q.push_back(wb_req);
+            }
             wb_req->dependent_cnt.increment(1);
         }
     }
@@ -320,18 +324,18 @@ public:
 
         if (bn->bcp->cp_id > bcp->cp_id) { return btree_status_t::cp_mismatch; }
 
-        int prev_cp_id = (bcp->cp_id - 1) % MAX_CP_CNT;
-        auto req = bn->req[prev_cp_id];
+        const size_t prev_cp_id{static_cast<size_t>((bcp->cp_id - 1)) % MAX_CP_CNT};
+        auto req{bn->req[prev_cp_id]};
         if (!req || req->state == writeback_req_state::WB_REQ_COMPL) {
             /* req on last cp is already completed. No need to make copy */
             return btree_status_t::success;
         }
 
         /* make a copy */
-        auto mem = hs_iobuf_alloc(bn->get_cache_size());
+        auto mem{hs_iobuf_alloc(bn->get_cache_size())};
         sisl::blob outb;
         (bn->get_memvec()).get(&outb);
-        ::memcpy(mem, outb.bytes, outb.size);
+        ::memcpy(static_cast<void*>(mem), static_cast<const void*>(outb.bytes), outb.size);
 
         /* create a new mem vec */
         boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector());
@@ -359,11 +363,11 @@ public:
     void flush_buffers(const btree_cp_ptr& bcp) {
         const size_t cp_id{bcp->cp_id % MAX_CP_CNT};
         m_dirty_buf_cnt[cp_id].increment(1);
-        auto list = m_req_list[cp_id].get();
+        auto list{m_req_list[cp_id].get()};
         typename sisl::ThreadVector< writeback_req_ptr >::thread_vector_iterator it;
-        auto wb_req_ptr_ref = list->begin(it);
+        auto wb_req_ptr_ref{list->begin(it)};
         while (wb_req_ptr_ref) {
-            auto wb_req = *wb_req_ptr_ref;
+            auto wb_req{*wb_req_ptr_ref};
             if (wb_req->dependent_cnt.decrement_testz(1)) {
                 wb_req->state = writeback_req_state::WB_REQ_SENT;
                 //wb_req->part_of_batch = true;
@@ -373,16 +377,18 @@ public:
         }
         list->clear();
         if (m_dirty_buf_cnt[cp_id].decrement_testz(1)) { m_cp_comp_cb(bcp); };
+
+        // submit batch
     }
 
     static void writeBack_completion(boost::intrusive_ptr< blkstore_req< wb_cache_buffer_t > > bs_req) {
-        auto wb_req = to_wb_req(bs_req);
-        wb_cache_t* wb_cache_instance = (wb_cache_t*)(wb_req->wb_cache);
+        auto wb_req{to_wb_req(bs_req)};
+        wb_cache_t* wb_cache_instance{static_cast< wb_cache_t* >(wb_req->wb_cache)};
         wb_cache_instance->writeBack_completion_internal(bs_req);
     }
 
     void writeBack_completion_internal(boost::intrusive_ptr< blkstore_req< wb_cache_buffer_t > >& bs_req) {
-        auto wb_req = to_wb_req(bs_req);
+        auto wb_req{to_wb_req(bs_req)};
         const size_t cp_id{wb_req->bcp->cp_id % MAX_CP_CNT};
         wb_req->state = writeback_req_state::WB_REQ_COMPL;
 

@@ -18,7 +18,6 @@
 #include "checkpoint.hpp"
 #include "engine/homeds/btree/btree_internal.h"
 #include "engine/homestore_base.hpp"
-#include "engine/meta/meta_blks_mgr.hpp"
 
 #include "homelogstore/logstore_header.hpp"
 
