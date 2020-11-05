@@ -71,12 +71,18 @@ endif ()
 
 if((${CMAKE_C_COMPILER_ID} STREQUAL "GNU") OR (${CMAKE_C_COMPILER_ID} STREQUAL "Clang")) 
     # add linux options
-    add_flags("-faligned-new -Dlinux -fconcepts")
-
+    add_flags("-Dlinux")
+    
+    # add compiler options
+    add_flags("-faligned-new -fconcepts" Languages "CXX")
+    
     # add warning options
     add_flags("-Wall -Wextra -Werror")
-    add_flags("-Wno-deprecated-copy -Wno-empty-body -Wno-array-bounds -Wno-cast-function-type")
+    add_flags("-Wno-empty-body -Wno-array-bounds -Wno-cast-function-type")
     add_flags("-Wno-unused-parameter -Wno-unused-variable -Wno-maybe-uninitialized -Wno-unused-function")
+    
+    # add C++ only warning options
+    add_flags("-Wno-deprecated-copy" Languages "CXX")
 endif()
 
 # add boost options
