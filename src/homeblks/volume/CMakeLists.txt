@@ -1,7 +1,7 @@
 set(VOLUME_SOURCE_FILES
-       volume.cpp
-       mapping.cpp
-      )
+    volume.cpp
+    mapping.cpp
+    )
 add_library(hs_volume OBJECT ${VOLUME_SOURCE_FILES})
 
 #set(TEST_MERGE_SOURCE_FILES
@@ -10,31 +10,31 @@ add_library(hs_volume OBJECT ${VOLUME_SOURCE_FILES})
      
 if (NOT "${CONAN_TEST_TARGET}" STREQUAL "coverage")
     set(BTREE_CHECKER_SOURCE_FILES
-           btree_checker.cpp
-          )
+        btree_checker.cpp
+        )
     add_executable(check_btree
-                      ${BTREE_CHECKER_SOURCE_FILES}
-                    )
+                   ${BTREE_CHECKER_SOURCE_FILES}
+                   )
     target_link_libraries(check_btree homeblks ${CONAN_LIBS})
 
     set(TEST_MAP_SOURCE_FILES
-          map_gtest.cpp
-         )
+        map_gtest.cpp
+        )
     #add_executable(test_mapping
     #                ${TEST_MAP_SOURCE_FILES}
     #                )
     #target_link_libraries(test_mapping homeblks)
 endif ()
 
-if ("${CONAN_TEST_TARGET}" STREQUAL "full")
+if (${CONAN_TEST_TARGET} STREQUAL "full")
     set(TEST_VOLUME_SOURCE_FILES
-          vol_gtest.cpp
-          )
+        vol_gtest.cpp
+        )
     add_executable(test_volume ${TEST_VOLUME_SOURCE_FILES})
     target_link_libraries(test_volume homeblks ${CONAN_LIBS})
 
     set(PERF_TEST_VOLUME_SOURCE_FILES
-          vol_perf_gtest.cpp
+        vol_perf_gtest.cpp
         )
     add_executable(perf_test_volume ${PERF_TEST_VOLUME_SOURCE_FILES})
     target_link_libraries(perf_test_volume homeblks ${CONAN_LIBS})

@@ -9,17 +9,23 @@ message(WARNING "BTree test disabled due to interface change.")
 #target_link_libraries(test_btree ${COMMON_LIB_DEPS})
 #add_test(NAME BTree COMMAND test_btree)
 
-if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
+if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
     message(STATUS "Debug build")
-    add_compile_options(-D_DEBUG=1 -O0 -DDEBUG_RCU -D_PRERELEASE=1)
+    if((${CMAKE_C_COMPILER_ID} STREQUAL "GNU") OR (${CMAKE_C_COMPILER_ID} STREQUAL "Clang")) 
+        remove_flag("-O[0-4]")
+        add_flags("-O0")
+    endif()
 else()
     message(STATUS "Release build")
-    add_compile_options(-DNDEBUG=1 -O3)
+    if((${CMAKE_C_COMPILER_ID} STREQUAL "GNU") OR (${CMAKE_C_COMPILER_ID} STREQUAL "Clang")) 
+        remove_flag("-O[0-4]")
+        add_flags("-O3")
+    endif()
 endif()
 
 include_directories(BEFORE ..)
 
-if (NOT "${CONAN_TEST_TARGET}" STREQUAL "off")
+if (NOT ${CONAN_TEST_TARGET} STREQUAL "off")
     set(TEST_BTREE_CRUD_SOURCE_FILES tests/test_btree_crud.cpp)
     add_executable(test_btree_crud ${TEST_BTREE_CRUD_SOURCE_FILES})
     target_link_libraries(test_btree_crud homestore ${CONAN_LIBS})
@@ -33,9 +39,9 @@ if (NOT "${CONAN_TEST_TARGET}" STREQUAL "off")
     target_link_libraries(test_avector ${CONAN_LIBS})
 
     set(TEST_LOAD_FILES 
-            tests/loadgen_tests/test_load.cpp
-            loadgen/iomgr_executor.cpp
-            )
+        tests/loadgen_tests/test_load.cpp
+        loadgen/iomgr_executor.cpp
+        )
     add_executable(test_load ${TEST_LOAD_FILES})
     target_link_libraries(test_load homeblks ${CONAN_LIBS})
 
@@ -46,7 +52,7 @@ if (NOT "${CONAN_TEST_TARGET}" STREQUAL "off")
     add_executable(test_iomgr_exec ${TEST_IOMGR_EXEC_FILES})
     target_link_libraries(test_iomgr_exec homestore ${CONAN_LIBS})
 
-    if(CMAKE_BUILD_TYPE STREQUAL Debug)
+    if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
         set(TEST_THREAD_POOL_SOURCE_FILES
             tests/test_thread_pool.cpp
             )
@@ -62,7 +68,7 @@ if (NOT "${CONAN_TEST_TARGET}" STREQUAL "off")
     add_test(NAME TestLoadCache COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_load --gtest_filter=*Cache*)
     add_test(NAME TestLoadVDev COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_load --gtest_filter=*VDevTest_RW* && ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_load --gtest_filter=*VDevTest_PRW*)
     if(CMAKE_BUILD_TYPE STREQUAL Debug)
-      add_test(NAME ThreadPool COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_threadpool)
+        add_test(NAME ThreadPool COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_threadpool)
     endif()
     SET_TESTS_PROPERTIES(TestLoadVDev PROPERTIES DEPENDS TestLoadCache)
 
