@@ -171,6 +171,5 @@ constexpr uint32_t MAX_ID_BITS_PER_CHUNK = ((1lu << ID_BITS) - 1);
  * will come out to be around 7 GB.
  */
 #define MIN_DISK_CAP_SUPPORTED (MIN_CHUNK_SIZE * 100 / 99 + MIN_CHUNK_SIZE)
-
 } // namespace homestore
 #endif

@@ -30,7 +30,7 @@
 #include "engine/device/device.h"
 #include "engine/homeds/thread/threadpool/thread_pool.h"
 #include "engine/index/snap_mgr.hpp"
-#include "engine/meta/meta_blks_mgr.hpp"
+#include "api/meta_interface.hpp"
 #include "homeblks/home_blks.hpp"
 #include "mapping.hpp"
 
@@ -334,14 +334,14 @@ public:
         vol_ptr->init();
         return vol_ptr;
     }
-/*
-    static vol_interface_req_ptr create_volume_req(const std::shared_ptr< Volume >& vol, void* const buf,
-                                                   const uint64_t lba,
-                                                   const uint32_t nlbas, const bool read, const bool sync);
-    static vol_interface_req_ptr create_volume_req(const std::shared_ptr< Volume >& vol,
-                                                   const std::vector< iovec >& iovecs, const uint64_t lba,
-                                                   const uint32_t nlbas, const bool read, const bool sync);
-*/
+    /*
+        static vol_interface_req_ptr create_volume_req(const std::shared_ptr< Volume >& vol, void* const buf,
+                                                       const uint64_t lba,
+                                                       const uint32_t nlbas, const bool read, const bool sync);
+        static vol_interface_req_ptr create_volume_req(const std::shared_ptr< Volume >& vol,
+                                                       const std::vector< iovec >& iovecs, const uint64_t lba,
+                                                       const uint32_t nlbas, const bool read, const bool sync);
+    */
 
 #ifdef _PRERELEASE
     static void set_io_flip();
@@ -511,10 +511,10 @@ struct volume_req : indx_req {
     volume_req_state state = volume_req_state::preparing; // State of the volume request
 
     /********** members used to write data blocks **********/
-    Clock::time_point io_start_time;                                      // start time
-    Clock::time_point indx_start_time;                                    // indx start time
-    typedef boost::intrusive_ptr< homeds::MemVector > MemVecData;         // HomeStore memory managed data
-    typedef std::reference_wrapper<const std::vector< iovec >> IoVecData; // External scatter/gather data
+    Clock::time_point io_start_time;                                        // start time
+    Clock::time_point indx_start_time;                                      // indx start time
+    typedef boost::intrusive_ptr< homeds::MemVector > MemVecData;           // HomeStore memory managed data
+    typedef std::reference_wrapper< const std::vector< iovec > > IoVecData; // External scatter/gather data
     std::variant< MemVecData, IoVecData > data;
 
     sisl::atomic_counter< int > outstanding_io_cnt = 1; // how many IOs are outstanding for this request

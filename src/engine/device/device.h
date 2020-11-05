@@ -26,7 +26,7 @@
 #include <iomgr/iomgr.hpp>
 #include <cstddef>
 #include <engine/homestore_base.hpp>
-#include "engine/meta/meta_blks_mgr.hpp"
+#include "api/meta_interface.hpp"
 
 using namespace iomgr;
 

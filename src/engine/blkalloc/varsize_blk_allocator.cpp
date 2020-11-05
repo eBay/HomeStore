@@ -44,14 +44,14 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(const VarsizeBlkAllocConfig& cfg, const
         atomwrapper< uint32_t > a_i(0);
         m_slab_entries.push_back(a_i);
         BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Capacity of slab {} = {}", i,
-                            m_slab_entries[i]._a.load(std::memory_order_acq_rel));
+                     m_slab_entries[i]._a.load(std::memory_order_acq_rel));
     }
 
     // Create segments with as many blk groups as configured.
     uint64_t seg_nblks = cfg.get_total_blks() / cfg.get_total_segments();
     uint64_t portions_per_seg = get_portions_per_segment();
     BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Segment Count = {}, Blocks per segment = {}, portions={}",
-                                                cfg.get_total_segments(), seg_nblks, portions_per_seg);
+                 cfg.get_total_segments(), seg_nblks, portions_per_seg);
     for (auto i = 0U; i < cfg.get_total_segments(); i++) {
         std::string seg_name = cfg.get_name() + "_seg_" + std::to_string(i);
         BlkAllocSegment* seg = new BlkAllocSegment(seg_nblks, i, portions_per_seg, seg_name);
@@ -238,13 +238,13 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(const uint8_t nblks, const blk_alloc_h
 
     if (blks_alloced != nblks) {
         if (hints.is_contiguous) {
-            BLKALLOC_LOG(ERROR, varsize_blk_alloc,
-                    "Not enough contiguous requested blks available, blks_alloced != nblks : {}  {}",
-                    blks_alloced, nblks);
+            BLKALLOC_LOG(DEBUG, varsize_blk_alloc,
+                         "Not enough contiguous requested blks available, blks_alloced != nblks : {}  {}", blks_alloced,
+                         nblks);
         } else {
+            BLKALLOC_LOG(ERROR, varsize_blk_alloc, "Blk allocation failed. blks_alloced != nblks : {}  {}",
+                         blks_alloced, nblks);
             if (m_cache_n_entries.load(std::memory_order_acquire) != 0) { m_blk_cache->print_tree(); }
-            BLKALLOC_LOG(ERROR, varsize_blk_alloc,
-                    "Blk allocation failed. blks_alloced != nblks : {}  {}", blks_alloced, nblks);
         }
 
         COUNTER_INCREMENT(m_metrics, alloc_fail, 1);
@@ -392,18 +392,17 @@ bool VarsizeBlkAllocator::try_add_blks_to_cache(const BlkId& b) {
         auto lock{portion->portion_auto_lock()};
 
         /* Check if cache is full */
-        if (m_cache_n_entries.load(std::memory_order_acq_rel) >=
-                                get_config().get_max_cache_blks()) {
+        if (m_cache_n_entries.load(std::memory_order_acq_rel) >= get_config().get_max_cache_blks()) {
             BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Cache is full. Entry count = {}",
-                                    m_cache_n_entries.load(std::memory_order_acq_rel));
+                         m_cache_n_entries.load(std::memory_order_acq_rel));
             return false;
         }
         /* Check if relevant slab is empty */
         auto slab_index = get_config().get_slab(b.get_nblks()).first;
         if (m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel) >=
-                                get_config().get_slab_capacity(slab_index)) {
-            BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Slab {} is full, capacity = {}",
-                    slab_index, m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
+            get_config().get_slab_capacity(slab_index)) {
+            BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Slab {} is full, capacity = {}", slab_index,
+                         m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
             return false;
         }
 
@@ -419,11 +418,9 @@ bool VarsizeBlkAllocator::try_add_blks_to_cache(const BlkId& b) {
 
         m_slab_entries[slab_index]._a.fetch_add(b.get_nblks(), std::memory_order_acq_rel);
         incr_slab_counter(slab_index, b.get_nblks());
-        BLKALLOC_LOG(TRACE, varsize_blk_alloc,
-                "Added {} blocks to slab {}, slab capacity = {}, temp = {}",
-                b.get_nblks(), slab_index,
-                m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel),
-                get_blk_temperature(b.get_id()));
+        BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Added {} blocks to slab {}, slab capacity = {}, temp = {}",
+                     b.get_nblks(), slab_index, m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel),
+                     get_blk_temperature(b.get_id()));
 
         m_cache_n_entries.fetch_add(b.get_nblks(), std::memory_order_acq_rel);
     }

@@ -16,7 +16,7 @@
 #include "engine/common/homestore_assert.hpp"
 #include "engine/common/homestore_config.hpp"
 #include "engine/common/homestore_header.hpp"
-#include "engine/meta/meta_blks_mgr.hpp"
+#include "api/meta_interface.hpp"
 #include "fds/utils.hpp"
 #include "metrics/metrics.hpp"
 #include "sds_logging/logging.h"

@@ -11,6 +11,7 @@
 #include <chrono>    // std::chrono::system_clock
 #include <optional>
 #include <fds/utils.hpp>
+#include "test_common/homestore_test_common.hpp"
 
 using namespace homestore;
 THREAD_BUFFER_INIT;
@@ -294,8 +295,13 @@ public:
             device_info.push_back({fpath});
         }
 
-        LOGINFO("Starting iomgr with {} threads", nthreads);
-        iomanager.start(nthreads);
+        bool is_spdk = SDS_OPTIONS["spdk"].as< bool >();
+        /* if --spdk is not set, check env variable if user want to run spdk */
+        if (!is_spdk && std::getenv(SPDK_ENV_VAR_STRING.c_str())) { is_spdk = true; }
+        if (is_spdk) { nthreads = 2; }
+
+        LOGINFO("Starting iomgr with {} threads, spdk: {}", nthreads, is_spdk);
+        iomanager.start(nthreads, is_spdk);
 
         if (restart) {
             for (auto i = 0u; i < n_log_stores; ++i) {
@@ -802,7 +808,8 @@ SDS_OPTION_GROUP(test_log_store,
                  (num_records, "", "num_records", "number of record to test",
                   ::cxxopts::value< uint32_t >()->default_value("10000"), "number"),
                  (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
-                  cxxopts::value< int32_t >()->default_value("5002"), "port"));
+                  cxxopts::value< int32_t >()->default_value("5002"), "port"),
+                 (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"));
 
 #if 0
 void parse() {
@@ -845,6 +852,7 @@ int main(int argc, char* argv[]) {
         LOGINFO("Log store test needs minimum 4 log stores for testing, setting them to 4");
         n_log_stores = 4u;
     }
+
     sample_db.start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),
                               SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024,
                               SDS_OPTIONS["num_threads"].as< uint32_t >(), n_log_stores);

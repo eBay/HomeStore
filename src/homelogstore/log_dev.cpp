@@ -245,10 +245,13 @@ LogGroup* LogDev::prepare_flush(int32_t estimated_records) {
             return false;
         }
     });
+
     lg->finish();
+    if (sisl_unlikely(flushing_upto_idx == 0)) { return nullptr; }
     lg->m_flush_log_idx_from = m_last_flush_idx + 1;
     lg->m_flush_log_idx_upto = flushing_upto_idx;
-    assert(lg->m_flush_log_idx_upto >= lg->m_flush_log_idx_from);
+    HS_DEBUG_ASSERT_GE(lg->m_flush_log_idx_upto, lg->m_flush_log_idx_from,
+                       "log indx upto is smaller then log indx from");
     lg->m_log_dev_offset = m_hb->get_logdev_blkstore()->alloc_next_append_blk(lg->header()->group_size);
 
     assert(lg->header()->oob_data_offset > 0);
@@ -282,10 +285,15 @@ void LogDev::flush_if_needed(const uint32_t new_record_size, logid_t new_idx) {
             if (new_idx == -1) new_idx = m_log_idx.load(std::memory_order_relaxed) - 1;
             if (m_last_flush_idx >= new_idx) {
                 LOGTRACEMOD(logstore, "Log idx {} is just flushed", new_idx);
-                m_is_flushing = false;
+                unlock_flush();
                 return;
             }
             auto lg = prepare_flush(new_idx - m_last_flush_idx + 4); // Estimate 4 more extra in case of parallel writes
+            if (sisl_unlikely(!lg)) {
+                LOGTRACEMOD(logstore, "Log idx {} last_flush_idx {} prepare flush failed", new_idx, m_last_flush_idx);
+                unlock_flush();
+                return;
+            }
             m_pending_flush_size.fetch_sub(lg->actual_data_size(), std::memory_order_relaxed);
 
             COUNTER_INCREMENT_IF_ELSE(home_log_store_mgr.m_metrics, flush_by_size, logdev_flush_by_size_count,
