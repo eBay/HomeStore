@@ -26,6 +26,17 @@ struct test_log_data {
 };
 
 typedef std::function< void(logstore_seq_num_t, logdev_key) > test_log_store_comp_cb_t;
+class Timer {
+public:
+    Timer() : beg_(clock_::now()) {}
+    void reset() { beg_ = clock_::now(); }
+    double elapsed() const { return std::chrono::duration_cast< second_ >(clock_::now() - beg_).count(); }
+
+private:
+    typedef std::chrono::high_resolution_clock clock_;
+    typedef std::chrono::duration< double, std::ratio< 1 > > second_;
+    std::chrono::time_point< clock_ > beg_;
+};
 
 class SampleLogStoreClient {
 public:
@@ -599,7 +610,7 @@ TEST_F(LogStoreTest, BurstRandInsertThenTruncate) {
     this->read_validate(true);
 
     LOGINFO("Step 4.1: Iterate all inserts one by one for each log store and validate if what is written is valid");
-    this->iterate_validate(true);
+    // this->iterate_validate(true);
 
     LOGINFO("Step 5: Truncate all of the inserts one log store at a time and validate log dev truncation is marked "
             "correctly and also validate if all data prior to truncation return exception");
@@ -809,7 +820,9 @@ SDS_OPTION_GROUP(test_log_store,
                   ::cxxopts::value< uint32_t >()->default_value("10000"), "number"),
                  (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
                   cxxopts::value< int32_t >()->default_value("5002"), "port"),
-                 (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"));
+                 (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
+                 (longevity_tests, "", "longevity_tests", "Run tests for a longer time",
+                  ::cxxopts::value< uint64_t >()->default_value("0"), "time in seconds"));
 
 #if 0
 void parse() {
@@ -852,13 +865,27 @@ int main(int argc, char* argv[]) {
         LOGINFO("Log store test needs minimum 4 log stores for testing, setting them to 4");
         n_log_stores = 4u;
     }
-
+    uint64_t running_time = SDS_OPTIONS["longevity_tests"].as< uint64_t >();
+    int ret = 0;
     sample_db.start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),
                               SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024,
                               SDS_OPTIONS["num_threads"].as< uint32_t >(), n_log_stores);
-    auto ret = RUN_ALL_TESTS();
-    sample_db.shutdown();
+    if (running_time == 0) {
+        ret = RUN_ALL_TESTS();
+    } else {
+        Timer tmr;
+        LOGINFO("Running longevity test for {} seconds.", running_time);
+        ::testing::GTEST_FLAG(filter) = "-LogStoreTest.DeleteMultipleLogStores";
+        int count = 0;
+        while (tmr.elapsed() < running_time) {
+            ret = RUN_ALL_TESTS();
+            count++;
+            LOGINFO("Running longevity test, iteration {}", count);
+        }
+        LOGINFO("longevity test ended, ran for {} seconds, number of iterations {}", tmr.elapsed(), count);
+    }
 
+    sample_db.shutdown();
     return ret;
 
 #if 0
