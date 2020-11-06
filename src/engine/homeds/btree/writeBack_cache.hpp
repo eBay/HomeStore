@@ -370,7 +370,7 @@ public:
             auto wb_req{*wb_req_ptr_ref};
             if (wb_req->dependent_cnt.decrement_testz(1)) {
                 wb_req->state = writeback_req_state::WB_REQ_SENT;
-                //wb_req->part_of_batch = true;
+                wb_req->part_of_batch = true;
                 m_blkstore->write(wb_req->bid, wb_req->m_mem, 0, wb_req, false);
             }
             wb_req_ptr_ref = list->next(it);
@@ -379,6 +379,7 @@ public:
         if (m_dirty_buf_cnt[cp_id].decrement_testz(1)) { m_cp_comp_cb(bcp); };
 
         // submit batch
+        iomanager.default_drive_interface()->submit_batch();
     }
 
     static void writeBack_completion(boost::intrusive_ptr< blkstore_req< wb_cache_buffer_t > > bs_req) {
