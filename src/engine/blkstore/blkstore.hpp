@@ -419,7 +419,6 @@ public:
 
         if (!cache_found && cache_only) { return nullptr; }
 
-        req->blkstore_ref_cnt.increment(1);
         if (!cache_found
 #ifdef _PRERELEASE
             || (cache_found && (homestore_flip->test_flip("cache_insert_race")))
@@ -460,9 +459,11 @@ public:
         if (missing_mp.size()) {
             HISTOGRAM_OBSERVE(m_metrics, blkstore_partial_cache_distribution, missing_mp.size());
             COUNTER_INCREMENT(m_metrics, blkstore_drive_read_count, missing_mp.size());
+            if (cache_only) { return nullptr; }
         }
 
         uint8_t* ptr;
+        req->blkstore_ref_cnt.increment(1);
         for (uint32_t i = 0; i < missing_mp.size(); i++) {
             // Create a new block of memory for the missing piece
             uint8_t* ptr = hs_iobuf_alloc(missing_mp[i].second);

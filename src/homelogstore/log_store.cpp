@@ -303,8 +303,8 @@ log_buffer HomeLogStore::read_sync(logstore_seq_num_t seq_num) {
     if (ld_key.idx == -1) { return log_buffer(); }
 
     auto start_time = Clock::now();
-    THIS_LOGSTORE_LOG(TRACE, "Reading lsn={}:{} mapped to logdev_key=[idx={} dev_offset={}]", seq_num, ld_key.idx,
-                      ld_key.dev_offset);
+    THIS_LOGSTORE_LOG(TRACE, "Reading lsn={}:{} mapped to logdev_key=[idx={} dev_offset={}]", m_store_id, seq_num,
+                      ld_key.idx, ld_key.dev_offset);
     COUNTER_INCREMENT(home_log_store_mgr.m_metrics, logstore_read_count, 1);
     auto b = HomeLogStoreMgr::logdev().read(ld_key);
     HISTOGRAM_OBSERVE(home_log_store_mgr.m_metrics, logstore_read_latency, get_elapsed_time_us(start_time));

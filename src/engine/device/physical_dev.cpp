@@ -438,7 +438,7 @@ PhysicalDevChunk::PhysicalDevChunk(PhysicalDev* pdev, uint32_t chunk_id, uint64_
     m_chunk_info->primary_chunk_id = INVALID_CHUNK_ID;
     m_chunk_info->vdev_id = INVALID_VDEV_ID;
     m_chunk_info->is_sb_chunk = false;
-    m_chunk_info->end_of_chunk_offset = size;
+    m_chunk_info->end_of_chunk_size = size;
     m_pdev = pdev;
 }
 

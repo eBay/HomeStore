@@ -95,7 +95,7 @@ struct chunk_info_block {
     uint32_t primary_chunk_id;   // Valid chunk id if this is a mirror of some chunk
     bool slot_allocated;         // Is this slot allocated for any chunks.
     bool is_sb_chunk;            // This chunk is not assigned to any vdev but super block
-    off_t end_of_chunk_offset;   // The offset indicates end of chunk.
+    off_t end_of_chunk_size;     // The offset indicates end of chunk.
 
     uint64_t get_chunk_size() const { return chunk_size; }
     uint32_t get_chunk_id() const { return chunk_id; }
@@ -277,8 +277,8 @@ public:
         return ss.str();
     }
 
-    void update_end_of_chunk(off_t off) { m_chunk_info->end_of_chunk_offset = off; }
-    off_t get_end_of_chunk() { return m_chunk_info->end_of_chunk_offset; }
+    void update_end_of_chunk(const uint64_t size) { m_chunk_info->end_of_chunk_size = size; }
+    off_t get_end_of_chunk() { return m_chunk_info->end_of_chunk_size; }
 
     void recover(std::unique_ptr< sisl::Bitset > recovered_bm, meta_blk* mblk);
 

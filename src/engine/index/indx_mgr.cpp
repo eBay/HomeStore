@@ -338,13 +338,13 @@ void IndxMgr::recovery() {
     case indx_recovery_state::meta_ops_replay_st: {
         /* lets go through all index meta blks to see if anything needs to be done */
         recover_meta_ops();
+        THIS_INDX_LOG(INFO, base, , "recovery completed");
     }
     // fall through
     default: {
         m_recovery_mode = false;
     }
     }
-    THIS_INDX_LOG(INFO, base, , "recovery completed");
 }
 
 void IndxMgr::io_replay() {

@@ -446,6 +446,7 @@ PhysicalDevChunk* DeviceManager::alloc_chunk(PhysicalDev* pdev, uint32_t vdev_id
     HS_DEBUG_ASSERT_GE(chunk->get_size(), req_size);
     chunk->set_vdev_id(vdev_id); // Set the chunk as busy or engaged to a vdev
     chunk->set_primary_chunk_id(primary_id);
+    chunk->update_end_of_chunk(req_size);
 
     if (chunk->get_size() > req_size) {
         // There is some left over space, create a new chunk and insert it after current chunk

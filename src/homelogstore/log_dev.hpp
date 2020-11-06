@@ -344,6 +344,8 @@ private:
     boost::intrusive_ptr< HomeStoreBase > m_hb;
     sisl::byte_view m_cur_log_buf;
     uint64_t m_cur_group_cursor;
+    uint64_t m_first_group_cursor;
+    crc32_t m_prev_crc;
 };
 
 class LogDev {
