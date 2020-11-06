@@ -393,18 +393,21 @@ public:
         wb_req->state = writeback_req_state::WB_REQ_COMPL;
 
         // Scan if it has any req depending on this req
-        size_t write_count{0};
+        std::vector<writeback_req_ptr> dependent_requests;
         {
-            std::unique_lock< std::mutex > req_mtx(wb_req->mtx);
+            std::unique_lock<std::mutex> req_mtx(wb_req->mtx);
+            dependent_requests.reserve(wb_req->req_q.size());
             while (!wb_req->req_q.empty()) {
-                auto depend_req = std::move(wb_req->req_q.back());
+                dependent_requests.template emplace_back(std::move(wb_req->req_q.back()));
                 wb_req->req_q.pop_back();
-                req_mtx.unlock();
-                if (depend_req->dependent_cnt.decrement_testz(1)) {
-                    depend_req->state = writeback_req_state::WB_REQ_SENT;
-                    m_blkstore->write(depend_req->bid, depend_req->m_mem, 0, depend_req, false);
-                    ++write_count;
-                }
+            }
+        }
+        size_t write_count{0};
+        for(auto& depend_req : dependent_requests) {
+            if (depend_req->dependent_cnt.decrement_testz(1)) {
+                depend_req->state = writeback_req_state::WB_REQ_SENT;
+                m_blkstore->write(depend_req->bid, depend_req->m_mem, 0, depend_req, false);
+                ++write_count;
             }
         }
         wb_req->bn->req[cp_id] = nullptr;
