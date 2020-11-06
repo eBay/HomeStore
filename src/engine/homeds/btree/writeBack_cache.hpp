@@ -32,38 +32,38 @@ namespace btree {
 #define btree_blkstore_t homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy, wb_cache_buffer_t >
 
 enum class writeback_req_state : uint8_t {
-    WB_REQ_INIT = 0, /* init */
-    WB_REQ_WAITING,  /* waiting for cp */
-    WB_REQ_SENT,     /* send to blksore to write */
-    WB_REQ_COMPL,    /* completed */
+    WB_REQ_INIT = 0, // init 
+    WB_REQ_WAITING,  // waiting for cp 
+    WB_REQ_SENT,     // send to blksore to write 
+    WB_REQ_COMPL    // completed 
 };
 
 // forward declaractions
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
 class WriteBackCache;
 
-/* The class BtreeBuffer represents the buffer type that is used to interact with the BlkStore. It will have
- * all the SSD Btree Node declarative type. Hence in-memory representation of this buffer is as follows
- *
- *   ****************Cache Buffer************************
- *   *    ****************Cache Record***************   *
- *   *    *   ************Hash Node**************   *   *
- *   *    *   * Singly Linked list of hash node *   *   *
- *   *    *   ***********************************   *   *
- *   *    *******************************************   *
- *   * BlkId                                            *
- *   * Memvector of actual buffer                       *
- *   * Usage Reference counter                          *
- *   ****************************************************
- *   ************** Transient Header ********************
- *   * Upgraders count                                  *
- *   * Reader Write Lock                                *
- *   ****************************************************
- */
+// The class BtreeBuffer represents the buffer type that is used to interact with the BlkStore. It will have
+// all the SSD Btree Node declarative type. Hence in-memory representation of this buffer is as follows
+//
+//   ****************Cache Buffer************************
+//   *    ****************Cache Record***************   *
+//   *    *   ************Hash Node**************   *   *
+//   *    *   * Singly Linked list of hash node *   *   *
+//   *    *   ***********************************   *   *
+//   *    *******************************************   *
+//   * BlkId                                            *
+//   * Memvector of actual buffer                       *
+//   * Usage Reference counter                          *
+//   ****************************************************
+//   ************** Transient Header ********************
+//   * Upgraders count                                  *
+//   * Reader Write Lock                                *
+//   ****************************************************
+//
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
 struct WriteBackCacheBuffer : public CacheBuffer< homestore::BlkId > {
 
-    /******************************************** writeback_req *****************************/
+    //******************************************** writeback_req *********************************
     struct writeback_req : public homestore::blkstore_req< wb_cache_buffer_t > {
 
         typedef std::function< void(const writeback_req_ptr& req, const std::error_condition status) > blkstore_callback;
@@ -75,13 +75,12 @@ struct WriteBackCacheBuffer : public CacheBuffer< homestore::BlkId > {
         void* wb_cache;
         boost::intrusive_ptr< SSDBtreeNode > bn;
 
-        /* Queue of the requests which should be written only after this req is written.
-         * Reason of using stl over boost intrusive is that one request can be
-         * shared with multiple queues.
-         */
+        // Queue of the requests which should be written only after this req is written.
+        // Reason of using stl over boost intrusive is that one request can be
+        // shared with multiple queues.
         std::deque< writeback_req_ptr > req_q;
 
-        /* issue this request when the cnt become zero */
+        // issue this request when the cnt become zero 
         sisl::atomic_counter< int > dependent_cnt;
 
         boost::intrusive_ptr< homeds::MemVector > m_mem;
@@ -114,7 +113,7 @@ struct WriteBackCacheBuffer : public CacheBuffer< homestore::BlkId > {
                 m_mem(nullptr){};
     };
 
-    /*************************************************** WriteBackCacheBuffer *******************************/
+    //*************************************************** WriteBackCacheBuffer *******************************
 
     btree_cp_ptr bcp = nullptr;
     writeback_req_ptr req[WriteBackCache<K,V, InteriorNodeType, LeafNodeType>::MAX_CP_CNT];
@@ -137,10 +136,9 @@ struct WriteBackCacheBuffer : public CacheBuffer< homestore::BlkId > {
     virtual ~WriteBackCacheBuffer() override = default;
 
     virtual void init() override {
-    /* Note : it is called under cache lock to prevent multiple threads to call init. And init function
-     * internally also try to take the cache lock to access cache to update in memory structure. So
-     * we have to be careful in taking any lock inside this function.
-     */
+    // Note : it is called under cache lock to prevent multiple threads to call init. And init function
+    // internally also try to take the cache lock to access cache to update in memory structure. So
+    // we have to be careful in taking any lock inside this function.
 #ifdef NDEBUG
         SSDBtreeNode* const SSDBtreeNode_ptr{reinterpret_cast < SSDBtreeNode * >(this)};
 #else
@@ -164,7 +162,7 @@ class WriteBackCache {
 
 private:
     static constexpr size_t MAX_CP_CNT{2};
-    /* TODO :- need to have concurrent list */
+    // TODO :- need to have concurrent list
     std::unique_ptr< sisl::ThreadVector< writeback_req_ptr > > m_req_list[MAX_CP_CNT];
     homestore::blkid_list_ptr m_free_list[MAX_CP_CNT];
     sisl::atomic_counter< uint64_t > m_dirty_buf_cnt[MAX_CP_CNT];
@@ -191,7 +189,7 @@ public:
                                bool thread_inited = false;
                                std::condition_variable cv;
                                std::mutex cv_m;
-                               /* XXX : there can be race condition when message is sent before run_io_loop is called */
+                               // XXX : there can be race condition when message is sent before run_io_loop is called
                                auto sthread = sisl::named_thread("wbcache_flusher", [i, &cv, &cv_m, &thread_inited]() {
                                    iomanager.run_io_loop(
                                        false, nullptr, ([i, &cv, &cv_m, &thread_inited](bool is_started) {
@@ -232,14 +230,14 @@ public:
         if (new_bcp) {
             const size_t cp_id{(new_bcp->cp_id) % MAX_CP_CNT};
             HS_ASSERT_CMP(DEBUG, m_dirty_buf_cnt[cp_id].get(), ==, 0);
-            /* decrement it by all cache threads at the end after writing all pending requests */
+            // decrement it by all cache threads at the end after writing all pending requests 
             HS_ASSERT_CMP(DEBUG, m_req_list[cp_id]->size(), ==, 0);
             blkid_list_ptr free_list;
             if (blkalloc_checkpoint || !cur_bcp) {
                 free_list = m_free_list[++m_free_list_cnt % MAX_CP_CNT];
                 HS_ASSERT_CMP(DEBUG, free_list->size(), ==, 0);
             } else {
-                /* we keep accumulating the free blks until blk checkpoint is not taken */
+                // we keep accumulating the free blks until blk checkpoint is not taken 
                 free_list = cur_bcp->free_blkid_list;
             }
             new_bcp->free_blkid_list = free_list;
@@ -252,22 +250,24 @@ public:
         HS_ASSERT(DEBUG, (!dependent_bn || dependent_bn->req[cp_id] != nullptr), "");
         writeback_req_ptr wbd_req = dependent_bn ? dependent_bn->req[cp_id] : nullptr;
         if (!bn->req[cp_id]) {
-            /* create wb request */
+            // create wb request 
             auto wb_req = writeback_req_t::make_request();
             wb_req->bcp = bcp;
             wb_req->m_mem = bn->get_memvec_intrusive();
             wb_req->bn = bn;
             wb_req->bid.set(bn->get_node_id());
-            /* we can assume that btree is not destroyed until cp is not completed */
+            // batch requests
+            wb_req->part_of_batch = true;
+            // we can assume that btree is not destroyed until cp is not completed 
             wb_req->wb_cache = this;
             HS_ASSERT_CMP(DEBUG, wb_req->state, ==, writeback_req_state::WB_REQ_INIT);
             wb_req->state = writeback_req_state::WB_REQ_WAITING;
 
-            /* update buffer */
+            // update buffer
             bn->req[cp_id] = wb_req;
             bn->bcp = bcp;
 
-            /* add it to the list */
+            // add it to the list
             m_req_list[cp_id]->push_back(wb_req);
 
             /* check for dirty buffers cnt */
@@ -293,14 +293,13 @@ public:
         }
     }
 
-    /* We don't want to free the blocks until cp is persisted. Because we use these blocks
-     * to recover btree.
-     */
+    // We don't want to free the blocks until cp is persisted. Because we use these blocks
+    // to recover btree.
     void free_blk(bnodeid_t node_id, const blkid_list_ptr& free_blkid_list, uint64_t size) {
         HS_ASSERT_CMP(DEBUG, node_id, !=, empty_bnodeid);
         BlkId bid(node_id);
 
-        /*  if bcp is null then free it only from the cache. */
+        //  if bcp is null then free it only from the cache. 
         m_blkstore->free_blk(bid, boost::none, boost::none, free_blkid_list ? true : false);
         if (free_blkid_list) {
             ResourceMgr::inc_free_blk(size);
@@ -318,7 +317,7 @@ public:
         }
 
         if (bn->bcp->cp_id == bcp->cp_id) {
-            /* modifying the buffer multiple times in a same cp */
+            // modifying the buffer multiple times in a same cp 
             return btree_status_t::success;
         }
 
@@ -327,28 +326,27 @@ public:
         const size_t prev_cp_id{static_cast<size_t>((bcp->cp_id - 1)) % MAX_CP_CNT};
         auto req{bn->req[prev_cp_id]};
         if (!req || req->state == writeback_req_state::WB_REQ_COMPL) {
-            /* req on last cp is already completed. No need to make copy */
+            // req on last cp is already completed. No need to make copy 
             return btree_status_t::success;
         }
 
-        /* make a copy */
+        // make a copy
         auto mem{hs_iobuf_alloc(bn->get_cache_size())};
         sisl::blob outb;
         (bn->get_memvec()).get(&outb);
         ::memcpy(static_cast<void*>(mem), static_cast<const void*>(outb.bytes), outb.size);
 
-        /* create a new mem vec */
+        // create a new mem vec
         boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector());
         mvec->set(mem, bn->get_cache_size(), 0);
 
-        /* assign new memvec to buffer */
+        // assign new memvec to buffer 
         bn->set_memvec(mvec, 0, bn->get_cache_size());
         return btree_status_t::success;
     }
 
-    /* We free the block only upto the end seqid of this cp. We might have persisted the data of sequence id
-     * greater then this seq_id. But we are going to replay the entry from
-     */
+    // We free the block only upto the end seqid of this cp. We might have persisted the data of sequence id
+    // greater then this seq_id. But we are going to replay the entry from
     void flush_free_blks(const btree_cp_ptr& bcp, std::shared_ptr< homestore::blkalloc_cp >& ba_cp) {
         ba_cp->free_blks(bcp->free_blkid_list);
     }
@@ -365,13 +363,14 @@ public:
         m_dirty_buf_cnt[cp_id].increment(1);
         auto list{m_req_list[cp_id].get()};
         typename sisl::ThreadVector< writeback_req_ptr >::thread_vector_iterator it;
+        size_t write_count{0};
         auto wb_req_ptr_ref{list->begin(it)};
         while (wb_req_ptr_ref) {
             auto wb_req{*wb_req_ptr_ref};
             if (wb_req->dependent_cnt.decrement_testz(1)) {
                 wb_req->state = writeback_req_state::WB_REQ_SENT;
-                wb_req->part_of_batch = true;
                 m_blkstore->write(wb_req->bid, wb_req->m_mem, 0, wb_req, false);
+                ++write_count;
             }
             wb_req_ptr_ref = list->next(it);
         }
@@ -379,7 +378,7 @@ public:
         if (m_dirty_buf_cnt[cp_id].decrement_testz(1)) { m_cp_comp_cb(bcp); };
 
         // submit batch
-        iomanager.default_drive_interface()->submit_batch();
+        if (write_count > 0) { iomanager.default_drive_interface()->submit_batch(); }
     }
 
     static void writeBack_completion(boost::intrusive_ptr< blkstore_req< wb_cache_buffer_t > > bs_req) {
@@ -393,7 +392,8 @@ public:
         const size_t cp_id{wb_req->bcp->cp_id % MAX_CP_CNT};
         wb_req->state = writeback_req_state::WB_REQ_COMPL;
 
-        /* Scan if it has any req depending on this req */
+        // Scan if it has any req depending on this req
+        size_t write_count{0};
         {
             std::unique_lock< std::mutex > req_mtx(wb_req->mtx);
             while (!wb_req->req_q.empty()) {
@@ -402,8 +402,8 @@ public:
                 req_mtx.unlock();
                 if (depend_req->dependent_cnt.decrement_testz(1)) {
                     depend_req->state = writeback_req_state::WB_REQ_SENT;
-                    //wb_req->part_of_batch = true;
                     m_blkstore->write(depend_req->bid, depend_req->m_mem, 0, depend_req, false);
+                    ++write_count;
                 }
             }
         }
@@ -411,6 +411,9 @@ public:
         ResourceMgr::dec_dirty_buf_cnt();
 
         if (m_dirty_buf_cnt[cp_id].decrement_testz(1)) { m_cp_comp_cb(wb_req->bcp); };
+
+        // submit batch
+        if (write_count > 0) { iomanager.default_drive_interface()->submit_batch(); }
     }
 };
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
