@@ -92,7 +92,7 @@ struct WriteBackCacheBuffer : public CacheBuffer< homestore::BlkId > {
 
         virtual void free_yourself() override { sisl::ObjectAllocator< writeback_req >::deallocate(this); }
 
-        virtual ~writeback_req() {
+        virtual ~writeback_req() override {
             HS_ASSERT(DEBUG, (state == writeback_req_state::WB_REQ_COMPL || state == writeback_req_state::WB_REQ_INIT),
                       "state {}", state);
         }
@@ -186,18 +186,18 @@ public:
         static std::once_flag flag1;
         std::call_once(flag1, ([]() {
                            for (int32_t i{0}; i < HS_DYNAMIC_CONFIG(generic.cache_flush_threads); ++i) {
-                               bool thread_inited = false;
+                               bool thread_initialized{false};
                                std::condition_variable cv;
                                std::mutex cv_m;
                                // XXX : there can be race condition when message is sent before run_io_loop is called
-                               auto sthread = sisl::named_thread("wbcache_flusher", [i, &cv, &cv_m, &thread_inited]() {
+                               auto sthread = sisl::named_thread("wbcache_flusher", [i, &cv, &cv_m, &thread_initialized]() {
                                    iomanager.run_io_loop(
-                                       false, nullptr, ([i, &cv, &cv_m, &thread_inited](bool is_started) {
+                                       false, nullptr, ([i, &cv, &cv_m, &thread_initialized](bool is_started) {
                                            if (is_started) {
                                                wb_cache_t::m_thread_ids.push_back(iomanager.iothread_self());
                                                {
                                                    std::unique_lock< std::mutex > lk(cv_m);
-                                                   thread_inited = true;
+                                                   thread_initialized = true;
                                                }
                                                cv.notify_one();
                                            }
@@ -205,7 +205,7 @@ public:
                                });
                                {
                                    std::unique_lock< std::mutex > lk(cv_m);
-                                   cv.wait(lk, [&thread_inited]() { return thread_inited; });
+                                   cv.wait(lk, [&thread_initialized]() { return thread_initialized; });
                                }
                                sthread.detach();
                            }
@@ -295,7 +295,7 @@ public:
 
     // We don't want to free the blocks until cp is persisted. Because we use these blocks
     // to recover btree.
-    void free_blk(bnodeid_t node_id, const blkid_list_ptr& free_blkid_list, uint64_t size) {
+    void free_blk(const bnodeid_t node_id, const blkid_list_ptr& free_blkid_list, const uint64_t size) {
         HS_ASSERT_CMP(DEBUG, node_id, !=, empty_bnodeid);
         BlkId bid(node_id);
 
@@ -307,7 +307,7 @@ public:
         }
     }
 
-    btree_status_t refresh_buf(const boost::intrusive_ptr< SSDBtreeNode >& bn, bool is_write_modifiable,
+    btree_status_t refresh_buf(const boost::intrusive_ptr< SSDBtreeNode >& bn, const bool is_write_modifiable,
                                const btree_cp_ptr& bcp) {
         if (!bcp || !bn->bcp) { return btree_status_t::success; }
 
@@ -352,10 +352,11 @@ public:
     }
 
     void cp_start(const btree_cp_ptr& bcp) {
-        static size_t thread_cnt = 0;
+        static size_t thread_cnt{0};
         const size_t cp_id{bcp->cp_id % MAX_CP_CNT};
-        iomanager.run_on(m_thread_ids[thread_cnt++ % HS_DYNAMIC_CONFIG(generic.cache_flush_threads)],
-                         [this, bcp]([[maybe_unused]] const io_thread_addr_t addr) { this->flush_buffers(bcp); });
+        const size_t thread_index{static_cast<size_t>(thread_cnt++ % HS_DYNAMIC_CONFIG(generic.cache_flush_threads))};
+        iomanager.run_on(m_thread_ids[thread_index],
+                         [this, &bcp]([[maybe_unused]] const io_thread_addr_t addr) { this->flush_buffers(bcp); });
     }
 
     void flush_buffers(const btree_cp_ptr& bcp) {
@@ -383,12 +384,11 @@ public:
 
     static void writeBack_completion(boost::intrusive_ptr< blkstore_req< wb_cache_buffer_t > > bs_req) {
         auto wb_req{to_wb_req(bs_req)};
-        wb_cache_t* wb_cache_instance{static_cast< wb_cache_t* >(wb_req->wb_cache)};
-        wb_cache_instance->writeBack_completion_internal(bs_req);
+        wb_cache_t* const wb_cache_instance{static_cast< wb_cache_t* >(wb_req->wb_cache)};
+        wb_cache_instance->writeBack_completion_internal(wb_req);
     }
 
-    void writeBack_completion_internal(boost::intrusive_ptr< blkstore_req< wb_cache_buffer_t > >& bs_req) {
-        auto wb_req{to_wb_req(bs_req)};
+    void writeBack_completion_internal(writeback_req_ptr& wb_req) {
         const size_t cp_id{wb_req->bcp->cp_id % MAX_CP_CNT};
         wb_req->state = writeback_req_state::WB_REQ_COMPL;
 
@@ -398,7 +398,7 @@ public:
             std::unique_lock<std::mutex> req_mtx(wb_req->mtx);
             dependent_requests.reserve(wb_req->req_q.size());
             while (!wb_req->req_q.empty()) {
-                dependent_requests.template emplace_back(std::move(wb_req->req_q.back()));
+                dependent_requests.emplace_back(std::move(wb_req->req_q.back()));
                 wb_req->req_q.pop_back();
             }
         }
