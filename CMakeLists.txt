@@ -88,7 +88,8 @@ endif()
 # add boost options
 add_flags("-DBOOST_ALLOW_DEPRECATED_HEADERS")
 
-# add package 
+# add conan information 
+add_flags("-DPACKAGE_NAME=\\\"${CONAN_PACKAGE_NAME}\\\"")
 add_flags("-DPACKAGE_VERSION=\\\"${CONAN_PACKAGE_VERSION}\\\"")
 
 if(UNIX)
