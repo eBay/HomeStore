@@ -356,7 +356,7 @@ public:
         const size_t cp_id{bcp->cp_id % MAX_CP_CNT};
         const size_t thread_index{static_cast<size_t>(thread_cnt++ % HS_DYNAMIC_CONFIG(generic.cache_flush_threads))};
         iomanager.run_on(m_thread_ids[thread_index],
-                         [this, &bcp]([[maybe_unused]] const io_thread_addr_t addr) { this->flush_buffers(bcp); });
+                         [this, bcp]([[maybe_unused]] const io_thread_addr_t addr) { this->flush_buffers(bcp); });
     }
 
     void flush_buffers(const btree_cp_ptr& bcp) {
