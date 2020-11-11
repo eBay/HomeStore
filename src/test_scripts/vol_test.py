@@ -27,7 +27,7 @@ addln_opts = ' '
 addln_opts += ' '.join(map(str, args)) 
 
 def recovery():
-    cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=30 --enable_crash_handler=1 --remove_file=0"
+    cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=30 --enable_crash_handler=0 --remove_file=0"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     
     cmd_opts = "--gtest_filter=VolTest.recovery_io_test --verify_type=3 --run_time=30 --enable_crash_handler=1 --remove_file=1 --delete_volume=1"
