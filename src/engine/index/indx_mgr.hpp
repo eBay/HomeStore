@@ -1,11 +1,24 @@
 #pragma once
+#include <atomic>
 #include <cassert>
+#include <cstdint>
+#include <functional>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <sstream>
+#include <string>
+#include <system_error>
+#include <vector>
+
 #include <fds/thread_vector.hpp>
 #include <wisr/wisr_ds.hpp>
+
 #include "api/meta_interface.hpp"
-#include <engine/homestore_base.hpp>
-#include "engine/homeds/btree/btree_internal.h"
 #include "checkpoint.hpp"
+#include "engine/homeds/btree/btree_internal.h"
+#include "engine/homestore_base.hpp"
+
 #include "homelogstore/logstore_header.hpp"
 
 namespace homestore {
@@ -17,8 +30,7 @@ class indx_tbl;
 class IndxMgr;
 class indx_mgr;
 using prepare_cb = std::function< void(const indx_cp_ptr& cur_icp, hs_cp* cur_hcp, hs_cp* new_hcp) >;
-#define indx_mgr_ptr std::shared_ptr< IndxMgr >
-#define MAX_CP_CNT 2
+typedef std::shared_ptr< IndxMgr > indx_mgr_ptr;
 class Blk_Read_Tracker;
 struct Free_Blk_Entry;
 typedef std::function< void() > trigger_cp_callback;
@@ -587,6 +599,7 @@ private:
     /* we can not add a indx mgr in active CP. It can be added only when a new cp is created. indx mgr keeps
      * on using this cp until new cp is not created. Once a new cp is created, it will become a part of it.
      */
+    static constexpr size_t MAX_CP_CNT{2};
     indx_cp_ptr m_first_icp;
     boost::uuids::uuid m_uuid;
     std::string m_name;

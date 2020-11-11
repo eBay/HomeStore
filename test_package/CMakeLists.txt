@@ -15,8 +15,8 @@ endif ()
 
 add_executable(hs_volume hs_volume.cpp)
 target_link_libraries(hs_volume
-                        ${CONAN_LIBS}
-			${CMAKE_THREAD_LIBS_INIT})
+                      ${CONAN_LIBS}
+                      ${CMAKE_THREAD_LIBS_INIT})
 
 # CTest is a testing tool that can be used to test your project.
 # enable_testing()
