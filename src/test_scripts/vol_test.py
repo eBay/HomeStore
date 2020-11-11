@@ -208,6 +208,12 @@ def vdev_nightly():
             stderr=subprocess.STDOUT, shell=True)
     print("virtual dev pwrite/pread/truncate test completed")
 
+def meta_blk_store_nightly():
+    print("meta blk store test started")
+    subprocess.check_call(dirpath + "test_meta_blk_mgr --run_time=24000 --num_io=1000000", stderr=subprocess.STDOUT, shell=True)
+    print("meta blk store test completed")
+
+
 def nightly():
 
     normal()
@@ -216,6 +222,10 @@ def nightly():
     recovery_nightly()
     sleep(5)
     
+    # metablkstore IO test
+    meta_blk_store_nightly()
+    sleep(5)
+
     # normal IO test
     #normal_flip()
     #sleep(5)
@@ -319,3 +329,6 @@ if test_suits == "seq_workload":
 
 if test_suits == "vdev_nightly":
     vdev_nightly()
+
+if test_suits == "meta_blk_store_nightly":
+    meta_blk_store_nightly()
