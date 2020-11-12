@@ -551,12 +551,15 @@ nlohmann::json HomeLogStore::dump_log_store(const log_dump_req& dump_req) {
 }
 
 void HomeLogStore::foreach (int64_t start_idx, const std::function< bool(logstore_seq_num_t, log_buffer) >& cb) {
-    m_records.foreach_completed(0, [&](long int cur_idx, long int max_idx, homestore::logstore_record& record) -> bool {
-        // do a sync read
-        serialized_log_record header;
-        auto log_buf = HomeLogStoreMgr::logdev().read(record.m_dev_key, header);
-        return cb(cur_idx, log_buf);
-    });
+
+    m_records.foreach_completed(start_idx,
+                                [&](long int cur_idx, long int max_idx, homestore::logstore_record& record) -> bool {
+                                    // do a sync read
+                                    serialized_log_record header;
+
+                                    auto log_buf = HomeLogStoreMgr::logdev().read(record.m_dev_key, header);
+                                    return cb(cur_idx, log_buf);
+                                });
 }
 
 logstore_seq_num_t HomeLogStore::get_contiguous_issued_seq_num(logstore_seq_num_t from) {
