@@ -11,6 +11,20 @@
 
 namespace homestore {
 
+struct log_dump_req {
+    log_dump_req(log_dump_verbosity level = log_dump_verbosity::HEADER,
+                 std::shared_ptr< HomeLogStore > logstore = nullptr, logstore_seq_num_t s_seq = 0,
+                 logstore_seq_num_t e_seq = std::numeric_limits< int64_t >::max()) :
+            verbosity_level(level),
+            log_store(logstore),
+            start_seq_num(s_seq),
+            end_seq_num(e_seq) {}
+    log_dump_verbosity verbosity_level;        // How much information we need of log file (entire content or header)
+    std::shared_ptr< HomeLogStore > log_store; // if null all log stores are dumped
+    logstore_seq_num_t start_seq_num;          // empty_key if from start of log file
+    logstore_seq_num_t end_seq_num;            // empty_key if till last log entry
+};
+
 struct logstore_record {
     logdev_key m_dev_key;
 
@@ -197,6 +211,8 @@ public:
      * @param cb
      */
     void register_log_store_opened_cb(const log_store_opened_cb_t& cb) { m_log_store_opened_cb = cb; }
+
+    nlohmann::json dump_log_store(const log_dump_req& dum_req);
 
 private:
     struct truncate_req {
@@ -458,6 +474,8 @@ public:
         // TODO: Implement this method
         return true;
     }
+
+    nlohmann::json dump_log_store(const log_dump_req& dump_req = log_dump_req());
 
     static bool is_aligned_buf_needed(size_t size) { return (log_record::is_size_inlineable(size) == false); }
 
