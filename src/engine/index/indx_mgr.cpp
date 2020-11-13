@@ -192,7 +192,7 @@ IndxMgr::IndxMgr(boost::uuids::uuid uuid, std::string name, const io_done_cb& io
     m_journal = HomeLogStoreMgr::instance().create_new_log_store(false /* append_mode */);
     m_journal_comp_cb = bind_this(IndxMgr::journal_comp_cb, 2);
     m_journal->register_req_comp_cb(m_journal_comp_cb);
-    for (int i = 0; i < MAX_CP_CNT; ++i) {
+    for (size_t i{0}; i < MAX_CP_CNT; ++i) {
         m_free_list[i] = std::make_shared< sisl::ThreadVector< BlkId > >();
     }
 }
@@ -225,7 +225,7 @@ IndxMgr::IndxMgr(boost::uuids::uuid uuid, std::string name, const io_done_cb& io
             m_journal->register_req_comp_cb(m_journal_comp_cb);
             m_journal->register_log_replay_done_cb(bind_this(IndxMgr::on_replay_done, 2));
         });
-    for (int i = 0; i < MAX_CP_CNT; ++i) {
+    for (size_t i{0}; i < MAX_CP_CNT; ++i) {
         m_free_list[i] = std::make_shared< sisl::ThreadVector< BlkId > >();
     }
 }
@@ -338,13 +338,13 @@ void IndxMgr::recovery() {
     case indx_recovery_state::meta_ops_replay_st: {
         /* lets go through all index meta blks to see if anything needs to be done */
         recover_meta_ops();
+        THIS_INDX_LOG(INFO, base, , "recovery completed");
     }
     // fall through
     default: {
         m_recovery_mode = false;
     }
     }
-    THIS_INDX_LOG(INFO, base, , "recovery completed");
 }
 
 void IndxMgr::io_replay() {

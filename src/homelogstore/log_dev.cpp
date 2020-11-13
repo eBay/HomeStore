@@ -94,6 +94,9 @@ void LogDev::do_load(uint64_t device_cursor) {
         }
 
         log_group_header* header = (log_group_header*)buf.bytes();
+        if (loaded_from != -1) {
+            HS_ASSERT_CMP(RELEASE, header->start_idx(), ==, m_log_idx, "log indx is not the expected one");
+        }
         if (loaded_from == -1) { loaded_from = header->start_idx(); }
 
         // Loop through each record within the log group and do a callback
@@ -111,11 +114,15 @@ void LogDev::do_load(uint64_t device_cursor) {
             ++i;
         }
         m_log_idx = header->start_idx() + i;
-    } while (true);
+        m_last_crc = header->cur_grp_crc;
+        }
+        while (true)
+            ;
 
-    // Update the tail offset with where we finally end up loading, so that new append entries can be written from here.
-    auto store = m_hb->get_logdev_blkstore();
-    store->update_tail_offset(store->seeked_pos());
+        // Update the tail offset with where we finally end up loading, so that new append entries can be written from
+        // here.
+        auto store = m_hb->get_logdev_blkstore();
+        store->update_tail_offset(store->seeked_pos());
 }
 
 void LogDev::assert_next_pages(log_stream_reader& lstream) {
@@ -281,6 +288,7 @@ void LogDev::flush_if_needed(const uint32_t new_record_size, logid_t new_idx) {
                 pending_sz, LogDev::flush_data_threshold_size(), get_elapsed_time_us(m_last_flush_time),
                 HS_DYNAMIC_CONFIG(logstore.max_time_between_flush_us));
 
+            m_last_flush_time = Clock::now();
             // We were able to win the flushing competition and now we gather all the flush data and reserve a slot.
             if (new_idx == -1) new_idx = m_log_idx.load(std::memory_order_relaxed) - 1;
             if (m_last_flush_idx >= new_idx) {
@@ -298,7 +306,6 @@ void LogDev::flush_if_needed(const uint32_t new_record_size, logid_t new_idx) {
 
             COUNTER_INCREMENT_IF_ELSE(home_log_store_mgr.m_metrics, flush_by_size, logdev_flush_by_size_count,
                                       logdev_flush_by_timer_count, 1);
-            m_last_flush_time = Clock::now();
             LOGTRACEMOD(logstore, "Flush prepared, flushing data size={}", lg->actual_data_size());
             do_flush(lg);
         } else {

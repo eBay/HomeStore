@@ -17,6 +17,7 @@ COPY test_load /usr/local/bin/test_load
 COPY test_volume /usr/local/bin/test_volume
 COPY vol_test.py /usr/local/bin/vol_test.py
 COPY test_log_store /usr/local/bin/test_log_store
+COPY test_meta_blk_mgr /usr/local/bin/test_meta_blk_mgr
 
 EXPOSE 5000
 # ##########   #######   ############

@@ -256,10 +256,7 @@ public:
     }
 
     void execute() {
-        m_wrt_cnt = 0;
-        m_rm_cnt = 0;
-        m_update_cnt = 0;
-        m_total_wrt_sz = 0;
+        reset_counters();
 
         m_start_time = Clock::now();
         m_mbm = MetaBlkMgr::instance();
@@ -312,7 +309,33 @@ public:
 
     void scan_blks() { m_mbm->scan_meta_blks(); }
 
+    void reset_counters() {
+        m_wrt_cnt = 0;
+        m_rm_cnt = 0;
+        m_update_cnt = 0;
+        m_total_wrt_sz = 0;
+    }
+
     meta_op_type get_op() {
+        static thread_local bool keep_remove = false;
+        // if we hit some high watermark, remove the sbs until hit some low watermark;
+        if (100 * m_mbm->get_used_size() / m_mbm->get_size() > 80) {
+            keep_remove = true;
+            return meta_op_type::remove;
+        }
+
+        if (keep_remove) {
+            if (100 * m_mbm->get_used_size() / m_mbm->get_size() > 20) {
+                return meta_op_type::remove;
+            } else {
+                // let's start over the test;
+                reset_counters();
+                // there is some overhead by MetaBlkMgr, such as meta ssb;
+                m_total_wrt_sz = m_mbm->get_used_size();
+                keep_remove = false;
+            }
+        }
+
         if (do_write()) {
             return meta_op_type::write;
         } else if (do_update()) {

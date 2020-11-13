@@ -1,12 +1,12 @@
 set(LOGDEV_SOURCE_FILES
-        log_dev.cpp
-        log_group.cpp
-        log_stream.cpp
-        log_store.cpp
+    log_dev.cpp
+    log_group.cpp
+    log_stream.cpp
+    log_store.cpp
     )
 add_library(hs_logdev OBJECT ${LOGDEV_SOURCE_FILES})
 
-if (NOT "${CONAN_TEST_TARGET}" STREQUAL "off")
+if (NOT ${CONAN_TEST_TARGET} STREQUAL "off")
     set(TEST_LOGSTORE_SOURCES tests/test_log_store.cpp)
     add_executable(test_log_store ${TEST_LOGSTORE_SOURCES})
     target_link_libraries(test_log_store hs_logdev homeblks ${CONAN_LIBS})

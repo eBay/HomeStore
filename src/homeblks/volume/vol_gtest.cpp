@@ -109,6 +109,7 @@ struct TestCfg {
     bool remove_file = true;
     bool verify_only = false;
     bool is_abort = false;
+    bool vol_create_del = false;
 
     verify_type_t verify_type = verify_type_t::csum;
     load_type_t load_type = load_type_t::random;
@@ -215,8 +216,7 @@ public:
             is_this_thread_running_io = false;
             notify = m_status_threads_executing.decrement_testz_and_test_status(job_status_t::stopped);
         }
-
-        if (notify) { notify_completions(); }
+        if (notify && !is_this_thread_running_io) { notify_completions(); }
     }
 
     void notify_completions() {
@@ -925,13 +925,19 @@ public:
         } else {
             if (req->is_read() && (tcfg.read_verify || tcfg.verify_type_set())) {
                 /* read from the file and verify it */
-                const auto ret{pread(req->fd, req->validate_buffer, req->verify_size, req->verify_offset)};
-                assert(static_cast< uint64_t >(ret) == req->verify_size);
+                if (!tcfg.verify_hdr()) {
+                    /* no need to read from the file to verify hdr */
+                    const auto ret{pread(req->fd, req->validate_buffer, req->verify_size, req->verify_offset)};
+                    assert(static_cast< uint64_t >(ret) == req->verify_size);
+                }
                 verify(req);
             } else if (!req->is_read()) {
                 /* write to a file */
-                const auto ret{pwrite(req->fd, req->validate_buffer, req->verify_size, req->verify_offset)};
-                assert(static_cast< uint64_t >(ret) == req->verify_size);
+                if (!tcfg.verify_hdr()) {
+                    /* no need to write to a file to verify hdr */
+                    const auto ret{pwrite(req->fd, req->validate_buffer, req->verify_size, req->verify_offset)};
+                    assert(static_cast< uint64_t >(ret) == req->verify_size);
+                }
             }
         }
 
@@ -1215,9 +1221,9 @@ protected:
                 if (!error) ++m_voltest->output.data_match_cnt;
             } else {
                 // we will only verify the header. We write lba number in the header
-                const uint64_t validate_lba{*reinterpret_cast< const uint64_t* >(validate_buffer)};
+                const uint64_t validate_lba = req->lba + total_size_read / data_size;
                 const uint64_t data_lba{*reinterpret_cast< const uint64_t* >(data_buffer)};
-                if ((validate_lba == 0) || (validate_lba == data_lba)) {
+                if ((data_lba == 0) || (validate_lba == data_lba)) {
                     // const auto ret{pwrite(req->fd, data_buffer, data_size, total_size_read + req->original_offset)};
                     // assert(static_cast<uint64_t>(ret) == data_size);
                 } else {
@@ -1664,7 +1670,9 @@ SDS_OPTION_GROUP(
     (read_iovec, "", "read_iovec", "read iovec(s)", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
     (batch_completion, "", "batch_completion", "batch completion", ::cxxopts::value< bool >()->default_value("false"),
      "true or false"),
-    (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"))
+    (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
+    (vol_create_del, "", "vol_create_del", "vol_create_del", ::cxxopts::value< bool >()->default_value("false"),
+     "true or false"))
 #define ENABLED_OPTIONS logging, home_blks, test_volume, iomgr
 
 SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
@@ -1716,6 +1724,7 @@ int main(int argc, char* argv[]) {
     _gcfg.read_iovec = SDS_OPTIONS["read_iovec"].as< uint32_t >() != 0 ? true : false;
     _gcfg.write_iovec = SDS_OPTIONS["write_iovec"].as< uint32_t >() != 0 ? true : false;
     _gcfg.batch_completion = SDS_OPTIONS["batch_completion"].as< bool >();
+    _gcfg.vol_create_del = SDS_OPTIONS["vol_create_del"].as< bool >();
 
     if (SDS_OPTIONS.count("device_list")) {
         _gcfg.dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();

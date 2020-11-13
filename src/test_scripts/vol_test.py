@@ -27,7 +27,7 @@ addln_opts = ' '
 addln_opts += ' '.join(map(str, args)) 
 
 def recovery():
-    cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=30 --enable_crash_handler=1 --remove_file=0"
+    cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=30 --enable_crash_handler=0 --remove_file=0"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     
     cmd_opts = "--gtest_filter=VolTest.recovery_io_test --verify_type=3 --run_time=30 --enable_crash_handler=1 --remove_file=1 --delete_volume=1"
@@ -81,17 +81,17 @@ def recovery_nightly():
     print("recovery test started")
     i = 1
     while i < 10:
-        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=300 --enable_crash_handler=1 --verify_only=1 --flip=1 --remove_file=0"
+        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=300 --enable_crash_handler=1 --verify_only=1 --flip=1 --remove_file=0 --verify_type=2"
         subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
         
-        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=300 --enable_crash_handler=1 --verify_type=3 --abort=1 --flip=1 --remove_file=0"
+        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=300 --enable_crash_handler=1 --verify_type=2 --abort=1 --flip=1 --remove_file=0"
         subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
 
         s = "recovery test iteration" + repr(i) + "passed" 
         print(s)
         i += 1
     
-    cmd_opts="--gtest_filter=VolTest.recovery_io_test --run_time=300 --remove_file=1 --delete_volume=1"
+    cmd_opts="--gtest_filter=VolTest.recovery_io_test --run_time=300 --remove_file=1 --delete_volume=1 --verify_type=2"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("recovery test completed")
 
@@ -208,6 +208,12 @@ def vdev_nightly():
             stderr=subprocess.STDOUT, shell=True)
     print("virtual dev pwrite/pread/truncate test completed")
 
+def meta_blk_store_nightly():
+    print("meta blk store test started")
+    subprocess.check_call(dirpath + "test_meta_blk_mgr --run_time=24000 --num_io=1000000", stderr=subprocess.STDOUT, shell=True)
+    print("meta blk store test completed")
+
+
 def nightly():
 
     normal()
@@ -216,6 +222,10 @@ def nightly():
     recovery_nightly()
     sleep(5)
     
+    # metablkstore IO test
+    meta_blk_store_nightly()
+    sleep(5)
+
     # normal IO test
     #normal_flip()
     #sleep(5)
@@ -319,3 +329,6 @@ if test_suits == "seq_workload":
 
 if test_suits == "vdev_nightly":
     vdev_nightly()
+
+if test_suits == "meta_blk_store_nightly":
+    meta_blk_store_nightly()

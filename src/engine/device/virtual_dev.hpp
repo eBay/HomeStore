@@ -718,7 +718,7 @@ public:
         auto bytes_read = pread(buf, count, m_seek_cursor);
 
         if (bytes_read != -1) {
-            // Update seek curosr after read;
+            // Update seek cursor after read;
             HS_ASSERT_CMP(RELEASE, (size_t)bytes_read, ==, count,
                           "bytes_read returned: {} must be equal to requested size: {}!", bytes_read, count);
             m_seek_cursor += bytes_read;
