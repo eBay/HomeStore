@@ -31,6 +31,7 @@ void HomeBlksHttpServer::start() {
             handler_info("/api/v1/mallocStats", HomeBlksHttpServer::get_malloc_stats, (void*)this),
             handler_info("/api/v1/getConfig", HomeBlksHttpServer::get_config, (void*)this),
             handler_info("/api/v1/reloadConfig", HomeBlksHttpServer::reload_dynamic_config, (void*)this),
+            handler_info("/api/v1/getStatus", HomeBlksHttpServer::get_status, (void*)this),
         }}));
     m_http_server->start();
 }
@@ -142,6 +143,43 @@ void HomeBlksHttpServer::reload_dynamic_config(sisl::HttpCallData cd) {
         usleep(1000);
         raise(SIGTERM);
     }
+}
+
+bool HomeBlksHttpServer::verify_and_get_verbosity(const evhtp_request_t* req, std::string& failure_resp, int& verbosity_level) {
+    bool ret {true};
+    auto verbosity_kv = evhtp_kvs_find_kv(req->uri->query, "verbosity");
+    if (verbosity_kv) {
+        try {
+            verbosity_level = std::stoi(verbosity_kv->val);
+        } catch (...) {
+            failure_resp = fmt::format("{} is not a valid verbosity level", verbosity_kv->val);
+            ret = false;
+        }
+    } else {
+        verbosity_level = 0; // default verbosity level
+    }
+    return ret;
+}
+
+void HomeBlksHttpServer::get_status(sisl::HttpCallData cd) {
+    auto req = cd->request();
+
+    std::vector<std::string> modules;
+    auto modules_kv = evhtp_kvs_find_kv(req->uri->query, "module");
+    if (modules_kv) {
+        boost::algorithm::split(modules, modules_kv->val, boost::is_any_of(","), boost::token_compress_on);
+    }
+
+    std::string failure_resp {""};
+    int verbosity_level {-1};
+    if (!verify_and_get_verbosity(req, failure_resp, verbosity_level)) {
+        pThis(cd)->m_http_server->respond_NOTOK(cd, EVHTP_RES_BADREQ, failure_resp);
+        return;
+    }
+
+    const auto status_mgr = to_homeblks(cd)->get_status_mgr();
+    const auto status_json = status_mgr->get_status(modules, verbosity_level);
+    pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, status_json.dump(2));
 }
 
 } // namespace homestore

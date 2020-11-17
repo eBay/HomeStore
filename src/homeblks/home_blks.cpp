@@ -810,3 +810,7 @@ void HomeBlks::list_snapshot(const VolumePtr&, std::vector< SnapshotPtr > snap_l
 void HomeBlks::read(const SnapshotPtr& snap, const snap_interface_req_ptr& req) {}
 
 bool HomeBlks::m_meta_blk_found = false;
+
+HomeBlksStatusMgr* HomeBlks::get_status_mgr() {
+    return m_hb_status_mgr.get();
+}
