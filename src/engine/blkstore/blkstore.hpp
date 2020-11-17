@@ -18,6 +18,7 @@
 #include "engine/common/homestore_config.hpp"
 #include <utility/atomic_counter.hpp>
 #include <fds/utils.hpp>
+#include "engine/common/homestore_flip.hpp"
 
 namespace homestore {
 

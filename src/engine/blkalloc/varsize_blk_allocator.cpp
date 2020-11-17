@@ -12,6 +12,7 @@
 #include "engine/homeds/btree/mem_btree.hpp"
 #include <sds_logging/logging.h>
 #include <utility/thread_factory.hpp>
+#include "engine/common/homestore_flip.hpp"
 
 #ifndef NDEBUG
 bool blk_alloc_test = false;

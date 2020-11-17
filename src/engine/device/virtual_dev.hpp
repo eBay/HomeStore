@@ -21,6 +21,7 @@
 #include "metrics/metrics.hpp"
 #include "sds_logging/logging.h"
 #include "utility/atomic_counter.hpp"
+#include "engine/common/homestore_flip.hpp"
 
 SDS_LOGGING_DECL(device)
 
@@ -82,7 +83,7 @@ struct pdev_chunk_map {
 
 struct virtualdev_req;
 
-using vdev_comp_cb_t = std::function< void(boost::intrusive_ptr< virtualdev_req > req) >;
+using vdev_comp_cb_t = std::function< void(const boost::intrusive_ptr< virtualdev_req >& req) >;
 using vdev_high_watermark_cb_t = std::function< void(void) >;
 
 #define to_vdev_req(req) boost::static_pointer_cast< virtualdev_req >(req)
@@ -104,6 +105,10 @@ struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
     uint64_t dev_offset;
     uint8_t* mem;
 #endif
+
+#ifdef _PRERELEASE
+    bool delay_induced = false;
+#endif
     std::atomic< uint8_t > outstanding_cb = 0;
 
     void inc_ref() { intrusive_ptr_add_ref(this); }
@@ -122,7 +127,10 @@ struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
 
 protected:
     friend class sisl::ObjectAllocator< virtualdev_req >;
-    virtualdev_req() : refcount(0) {}
+    virtualdev_req() : request_id{s_req_id.fetch_add(1, std::memory_order_relaxed)}, refcount{0} {}
+
+private:
+    static std::atomic< uint64_t > s_req_id;
 };
 
 [[maybe_unused]] static void virtual_dev_process_completions(int64_t res, uint8_t* cookie) {
@@ -205,6 +213,7 @@ class VirtualDev : public AbstractVirtualDev {
 private:
     vdev_info_block* m_vb;   // This device block info
     DeviceManager* m_mgr;    // Device Manager back pointer
+    std::string m_name;      // Name of the vdev
     uint64_t m_chunk_size;   // Chunk size that will be allocated in a physical device
     std::mutex m_mgmt_mutex; // Any mutex taken for management operations (like adding/removing chunks).
 
@@ -254,6 +263,7 @@ public:
     /* Load the virtual dev from vdev_info_block and create a Virtual Dev. */
     VirtualDev(DeviceManager* mgr, const char* name, vdev_info_block* vb, vdev_comp_cb_t cb, bool recovery_init,
                bool auto_recovery = false, vdev_high_watermark_cb_t hwm_cb = nullptr) :
+            m_name{name},
             m_metrics(name) {
         init(mgr, vb, cb, vb->page_size, auto_recovery, hwm_cb);
 
@@ -269,6 +279,7 @@ public:
     VirtualDev(DeviceManager* mgr, const char* name, uint64_t context_size, uint32_t nmirror, bool is_stripe,
                uint32_t page_size, const std::vector< PhysicalDev* >& pdev_list, vdev_comp_cb_t cb, char* blob,
                uint64_t size, bool auto_recovery = false, vdev_high_watermark_cb_t hwm_cb = nullptr) :
+            m_name{name},
             m_metrics(name) {
         init(mgr, nullptr, cb, page_size, auto_recovery, hwm_cb);
 
@@ -357,7 +368,23 @@ public:
         m_mgr->write_info_blocks();
     }
 
-    void process_completions(boost::intrusive_ptr< virtualdev_req > req) {
+    void process_completions(const boost::intrusive_ptr< virtualdev_req >& req) {
+#ifdef _PRERELEASE
+        if (!req->delay_induced &&
+            homestore_flip->delay_flip(
+                "simulate_vdev_delay",
+                [req, this]() {
+                    HS_LOG(DEBUG, device, "[Vdev={},req={},is_read={}] - Calling delayed completion", m_name,
+                           req->request_id, req->is_read);
+                    process_completions(req);
+                },
+                m_name, req->is_read)) {
+            req->delay_induced = true;
+            HS_LOG(DEBUG, device, "[Vdev={},req={},is_read={}] - Delaying completion", m_name, req->request_id,
+                   req->is_read);
+            return;
+        }
+#endif
         if (req->outstanding_cb.load() > 0) { req->outstanding_cb.fetch_sub(1, std::memory_order_relaxed); }
 
         if (req->outstanding_cb.load() == 0) { m_comp_cb(req); }
@@ -1649,6 +1676,6 @@ private:
     uint32_t get_blks_per_chunk() const { return get_chunk_size() / get_page_size(); }
     uint32_t get_page_size() const { return m_vb->page_size; }
     uint32_t get_nmirrors() const { return m_vb->num_mirrors; }
-}; // namespace homestore
+};
 
 } // namespace homestore

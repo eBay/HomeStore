@@ -894,7 +894,7 @@ int main(int argc, char* argv[]) {
     testing::InitGoogleTest(&argc, argv);
     SDS_OPTIONS_LOAD(argc, argv, logging, test_log_store);
     sds_logging::SetLogger("test_log_store");
-    spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
+    spdlog::set_pattern("[%D %T%z] [%^%l%$] [%t] %v");
 
     auto n_log_stores = SDS_OPTIONS["num_logstores"].as< uint32_t >();
     if (n_log_stores < 4u) {

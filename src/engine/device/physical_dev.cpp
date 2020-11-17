@@ -21,6 +21,7 @@
 #include "engine/common/homestore_assert.hpp"
 #include <iomgr/iomgr.hpp>
 #include <utility/thread_factory.hpp>
+#include "engine/common/homestore_flip.hpp"
 
 SDS_LOGGING_DECL(device)
 

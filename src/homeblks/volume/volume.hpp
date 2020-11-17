@@ -72,7 +72,6 @@ struct volume_child_req : public blkstore_req< BlkBuffer > {
     int nlbas;
     bool is_read = false;
     std::vector< Free_Blk_Entry > blkIds_to_free;
-    uint64_t reqId;
     Clock::time_point op_start_time;
     uint16_t checksum[MAX_NUM_LBA];
     uint64_t read_buf_offset;
@@ -242,7 +241,6 @@ private:
     std::atomic< vol_state > m_state;
     std::atomic< int64_t > seq_Id;
     std::atomic< uint64_t > m_err_cnt = 0;
-    std::atomic< uint64_t > m_req_id = 0;
     sisl::atomic_counter< uint64_t > vol_ref_cnt = 0; // volume can not be destroy/shutdown until it is not zero
 
     std::mutex m_sb_lock; // lock for updating vol's sb

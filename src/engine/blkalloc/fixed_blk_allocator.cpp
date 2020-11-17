@@ -6,6 +6,7 @@
  */
 
 #include <cassert>
+#include "engine/common/homestore_flip.hpp"
 
 #include "blk_allocator.h"
 

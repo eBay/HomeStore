@@ -1,10 +1,11 @@
-#include "engine/common/homestore_assert.hpp"
-#include "log_dev.hpp"
-#include "log_store.hpp"
 #include <utility/thread_factory.hpp>
 #include <iomgr/iomgr.hpp>
 #include <string>
 #include <fmt/format.h>
+
+#include "engine/common/homestore_assert.hpp"
+#include "log_dev.hpp"
+#include "log_store.hpp"
 
 namespace homestore {
 SDS_LOGGING_DECL(logstore)
@@ -202,6 +203,7 @@ logdev_key HomeLogStoreMgr::do_device_truncate(bool dry_run) {
         for (auto& id_logstore : id_logstore_map) {
             auto& store_ptr = id_logstore.second.m_log_store;
             const auto& trunc_info = store_ptr->pre_device_truncation();
+
             if (!trunc_info.pending_dev_truncation && !trunc_info.active_writes_not_part_of_truncation) {
                 // This log store neither have any pending device truncation nor active logstore io going on for now.
                 // Ignore this log store for min safe boundary calculation.

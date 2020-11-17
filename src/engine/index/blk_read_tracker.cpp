@@ -5,6 +5,7 @@
 #include "indx_mgr.hpp"
 #include "blk_read_tracker.hpp"
 #include <sds_logging/logging.h>
+#include "engine/common/homestore_flip.hpp"
 
 SDS_LOGGING_DECL(indx_mgr)
 

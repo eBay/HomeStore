@@ -32,23 +32,6 @@ struct dev_info {
     std::string dev_names;
 };
 
-#ifdef _PRERELEASE
-class HomeStoreFlip {
-public:
-    static flip::Flip* instance() {
-        static flip::Flip inst;
-        return &(flip::Flip::instance());
-    }
-
-    static flip::FlipClient* client_instance() {
-        static flip::FlipClient fc(HomeStoreFlip::instance());
-        return &fc;
-    }
-};
-
-#define homestore_flip (&flip::Flip::instance())
-#endif
-
 #define METRICS_DUMP_MSG sisl::MetricsFarm::getInstance().get_result_in_json_string()
 
 #ifndef NDEBUG

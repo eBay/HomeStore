@@ -14,6 +14,7 @@
 #include "homeblks/home_blks.hpp"
 
 #include "volume.hpp"
+#include "engine/common/homestore_flip.hpp"
 
 
 using namespace std;
@@ -70,6 +71,17 @@ void Volume::set_io_flip() {
     fc->inject_retval_flip("io_read_iocb_empty_flip", {null_cond}, freq, 20);
 
     fc->inject_retval_flip("blkalloc_split_blk", {null_cond}, freq, 4);
+
+#if 0
+    // Uncomment this line once the memory leak issue is fixed
+    FlipCondition vdev_type_cond1;
+    fc->create_condition< std::string >("vdev_type", flip::Operator::EQUAL, std::string("data"), &vdev_type_cond1);
+    fc->inject_delay_flip("simulate_vdev_delay", {vdev_type_cond1, null_cond}, freq, 500);
+
+    FlipCondition vdev_type_cond2;
+    fc->create_condition< std::string >("vdev_type", flip::Operator::EQUAL, std::string("index"), &vdev_type_cond2);
+    fc->inject_delay_flip("simulate_vdev_delay", {vdev_type_cond2, null_cond}, freq, 500);
+#endif
 }
 #endif
 
@@ -695,7 +707,6 @@ volume_child_req_ptr Volume::create_vol_child_req(BlkId& bid, const volume_req_p
     vc_req->bid = bid;
     vc_req->lba = start_lba;
     vc_req->op_start_time = Clock::now();
-    vc_req->reqId = m_req_id.fetch_add(std::memory_order_relaxed);
     vc_req->sync = vreq->is_sync();
     vc_req->use_cache = vreq->use_cache();
     vc_req->part_of_batch = vreq->iface_req->part_of_batch;

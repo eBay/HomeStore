@@ -26,6 +26,7 @@
 #include "engine/homeds/array/reserve_vector.hpp"
 #include "engine/common/homestore_header.hpp"
 #include "engine/common/homestore_config.hpp"
+#include "engine/common/homestore_flip.hpp"
 
 using namespace std;
 using namespace homeds::thread;

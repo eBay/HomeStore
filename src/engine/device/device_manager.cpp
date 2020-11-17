@@ -14,13 +14,16 @@
 #include "engine/common/homestore_assert.hpp"
 #include "fds/utils.hpp"
 #include "iomgr/iomgr.hpp"
-
+#include "engine/common/homestore_flip.hpp"
+#include "engine/device/virtual_dev.hpp"
 #include "device.h"
 
 SDS_LOGGING_DECL(device, DEVICE_MANAGER)
 
 using namespace iomgr;
 namespace homestore {
+
+std::atomic< uint64_t > virtualdev_req::s_req_id{0u};
 
 void PhysicalDevChunk::recover(std::unique_ptr< sisl::Bitset > recovered_bm, meta_blk* mblk) {
     m_meta_blk_cookie = mblk;

@@ -1,15 +1,15 @@
-#include <mutex>
 #include <boost/uuid/random_generator.hpp>
 #include <boost/uuid/uuid_io.hpp>
+#include <mutex>
 
 /* Facility headers */
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
 
 /* IOPath */
-#include <iomgr/iomgr.hpp>
 #include <api/vol_interface.hpp>
 #include <engine/common/homestore_header.hpp>
+#include <iomgr/iomgr.hpp>
 
 THREAD_BUFFER_INIT;
 
@@ -19,7 +19,6 @@ SDS_OPTION_GROUP(test_hs_vol,
                   cxxopts::value< uint32_t >()->default_value("1"), "count"),
                  (name, "", "name", "Volume name", cxxopts::value< std::string >()->default_value("volume"), ""),
                  (addr, "", "addr", "Do IO on a PCIe address", cxxopts::value< std::string >(), "0000:02:00.0"))
-
 
 #define ENABLED_OPTIONS logging, iomgr, home_blks, test_hs_vol
 #define SPDK_LOG_MODS HOMESTORE_LOG_MODS
@@ -70,7 +69,7 @@ int main(int argc, char* argv[]) {
     SDS_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
     sds_logging::SetLogger("spdk_volume");
     sds_logging::install_crash_handler();
-    spdlog::set_pattern("[%D %T.%e] [%n] [%^%l%$] [%t] %v");
+    spdlog::set_pattern("[%D %T.%e] [%^%l%$] [%t] %v");
 
     // Create a random Node ID for ourselves.
     auto const system_uuid = boost::uuids::random_generator()();

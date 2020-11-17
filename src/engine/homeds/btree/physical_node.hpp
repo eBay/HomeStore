@@ -17,6 +17,7 @@
 #include <isa-l/crc.h>
 #include <utility/atomic_counter.hpp>
 #include "engine/homestore_base.hpp"
+#include "engine/common/homestore_flip.hpp"
 
 #define MAGICAL_VALUE 0xab
 
