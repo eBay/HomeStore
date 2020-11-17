@@ -535,10 +535,10 @@ nlohmann::json HomeLogStore::dump_log_store(const log_dump_req& dump_req) {
                                     }
 
                                     if (dump_req.verbosity_level == log_dump_verbosity::CONTENT) {
-                                        std::vector< uint8_t > v(log_buffer.bytes(),
-                                                                 log_buffer.bytes() + log_buffer.size());
-                                        nlohmann::json content_json = nlohmann::json::from_msgpack(v);
-                                        json_val["content"] = content_json;
+                                        uint8_t* b = log_buffer.bytes();
+                                        std::vector< uint8_t > bv(b, b + log_buffer.size());
+                                        auto content = nlohmann::json::binary_t(bv);
+                                        json_val["content"] = content;
                                     }
                                     json_records.emplace_back(json_val);
                                     int64_t end_idx = std::min(max_idx, dump_req.end_seq_num);

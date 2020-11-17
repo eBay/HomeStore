@@ -118,22 +118,15 @@ public:
                     [upto, hole_end, &idx, &hole_expected, &hole_entry, this](int64_t seq_num,
                                                                               const homestore::log_buffer& b) -> bool {
                         if ((hole_entry != hole_end) && hole_entry->second) { // Hole entry exists, but filled
-                            // ASSERT_EQ(b.size(), 0ul)
-                            //     << "Expected null entry for lsn=" << m_log_store->get_store_id() << ":" << idx;
-                            // LOGINFO("hole_entry->second: {}", idx);
-
+                            EXPECT_EQ(b.size(), 0ul);
                         } else {
                             auto tl = (test_log_data*)b.bytes();
-                            // ASSERT_EQ(tl->total_size(), b.size())
-                            //     << "Size Mismatch for lsn=" << m_log_store->get_store_id() << ":" << idx;
+                            EXPECT_EQ(tl->total_size(), b.size());
                             validate_data(tl, seq_num);
                         }
                         idx++;
                         hole_entry = m_hole_lsns.rlock()->find(idx);
                         if ((hole_entry != hole_end) && !hole_entry->second) { // Hole entry exists and not filled
-                            // ASSERT_THROW(m_log_store->read_sync(idx), std::out_of_range)
-                            //     << "Expected std::out_of_range exception for read of hole lsn="
-                            //     << m_log_store->get_store_id() << ":" << idx << " but not thrown";
                             hole_expected = true;
                             return false;
                         }
@@ -686,7 +679,7 @@ TEST_F(LogStoreTest, BurstRandInsertThenTruncate) {
         this->dump_validate(SDS_OPTIONS["num_records"].as< uint32_t >());
 
         LOGINFO("Step 4.2: Read some specific interval/filter of seq number in one logstore and dump it into json");
-        this->dump_validate_filter(0, 10, 100);
+        this->dump_validate_filter(0, 10, 100, true);
     }
 
     LOGINFO("Step 5: Truncate all of the inserts one log store at a time and validate log dev truncation is marked "
