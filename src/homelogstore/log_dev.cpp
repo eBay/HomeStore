@@ -1,6 +1,7 @@
 #include "engine/homestore_base.hpp"
 #include "log_dev.hpp"
 #include "log_store.hpp"
+#include <fds/vector_pool.hpp>
 
 namespace homestore {
 
@@ -74,7 +75,9 @@ void LogDev::stop() {
     m_last_flush_idx = -1;
     m_last_truncate_idx = -1;
     m_last_crc = INVALID_CRC32_VALUE;
-    m_block_flush_q.clear();
+    if (m_block_flush_q != nullptr) {
+        sisl::VectorPool< flush_blocked_callback >::free(m_block_flush_q, false /* no_cache */);
+    }
     m_hb = nullptr;
 
     LOGINFOMOD(logstore, "LogDev stopped successfully");
@@ -115,14 +118,12 @@ void LogDev::do_load(uint64_t device_cursor) {
         }
         m_log_idx = header->start_idx() + i;
         m_last_crc = header->cur_grp_crc;
-        }
-        while (true)
-            ;
+    } while (true);
 
-        // Update the tail offset with where we finally end up loading, so that new append entries can be written from
-        // here.
-        auto store = m_hb->get_logdev_blkstore();
-        store->update_tail_offset(store->seeked_pos());
+    // Update the tail offset with where we finally end up loading, so that new append entries can be written from
+    // here.
+    auto store = m_hb->get_logdev_blkstore();
+    store->update_tail_offset(store->seeked_pos());
 }
 
 void LogDev::assert_next_pages(log_stream_reader& lstream) {
@@ -354,34 +355,44 @@ void LogDev::on_flush_completion(LogGroup* lg) {
 }
 
 bool LogDev::try_lock_flush(const flush_blocked_callback& cb) {
-    std::unique_lock lk(m_block_flush_q_mutex);
-    if (m_stopped) {
-        LOGWARNMOD(logstore, "Trying to lock a flush on a stopped logdev, not locking the flush");
-        return false;
+    {
+        std::unique_lock lk(m_block_flush_q_mutex);
+        if (m_stopped) {
+            LOGWARNMOD(logstore, "Trying to lock a flush on a stopped logdev, not locking the flush");
+            return false;
+        }
+
+        bool expected_flushing = false;
+        if (!m_is_flushing.compare_exchange_strong(expected_flushing, true, std::memory_order_acq_rel)) {
+            // Flushing is blocked already, add it to the callback q
+            if (m_block_flush_q == nullptr) { m_block_flush_q = sisl::VectorPool< flush_blocked_callback >::alloc(); }
+            m_block_flush_q->emplace_back(cb);
+            return false;
+        }
     }
 
-    bool expected_flushing = false;
-    if (m_is_flushing.compare_exchange_strong(expected_flushing, true, std::memory_order_acq_rel)) {
-        cb();
-        return true;
-    }
-
-    // Flushing is blocked already, add it to the callback q
-    m_block_flush_q.emplace_back(cb);
-    return false;
+    cb();
+    return true;
 }
 
 void LogDev::unlock_flush() {
-    if (m_block_flush_q.size() > 0) {
+    std::vector< flush_blocked_callback >* flush_q{nullptr};
+
+    if (m_block_flush_q != nullptr) {
         std::unique_lock lk(m_block_flush_q_mutex);
-        for (auto& cb : m_block_flush_q) {
+        flush_q = m_block_flush_q;
+        m_block_flush_q = nullptr;
+    }
+
+    if (flush_q) {
+        for (auto& cb : *flush_q) {
             if (m_stopped) {
                 LOGINFOMOD(logstore, "Logdev is stopped and thus not processing outstanding flush_lock_q");
                 return;
             }
             cb();
         }
-        m_block_flush_q.clear();
+        sisl::VectorPool< flush_blocked_callback >::free(flush_q);
     }
     m_is_flushing.store(false, std::memory_order_release);
 

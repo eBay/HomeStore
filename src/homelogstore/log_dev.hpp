@@ -8,6 +8,7 @@
 #include <boost/intrusive_ptr.hpp>
 #include <fmt/format.h>
 #include <map>
+#include <vector>
 #include "engine/homestore_base.hpp"
 #include "homelogstore/logstore_header.hpp"
 
@@ -569,7 +570,7 @@ private:
 
     // Block flush Q request Q
     std::mutex m_block_flush_q_mutex;
-    std::vector< flush_blocked_callback > m_block_flush_q;
+    std::vector< flush_blocked_callback >* m_block_flush_q;
 
     // Timer handle
     iomgr::timer_handle_t m_flush_timer_hdl;
