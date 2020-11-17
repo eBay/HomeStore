@@ -15,6 +15,7 @@ struct meta_blk_ovf_hdr;
 struct meta_blk_sb;
 struct meta_blk;
 struct sb_blkstore_blob;
+struct MetaSubRegInfo;
 struct BlkId;
 class BlkBuffer;
 template < typename BAllocator, typename Buffer >
@@ -31,12 +32,6 @@ using ovf_hdr_map_t = std::map< uint64_t, meta_blk_ovf_hdr* >;          // ovf_b
 using meta_sub_type = std::string;
 
 static constexpr uint32_t META_BLK_PAGE_SZ = 4096; // meta block page size
-
-struct MetaSubRegInfo {
-    bool do_crc{true};
-    meta_blk_found_cb_t cb;
-    meta_blk_recover_comp_cb_t comp_cb;
-};
 
 class MetaBlkMgr {
 private:
@@ -137,6 +132,9 @@ public:
      * @param cookie : handle to address the unique subsytem sb that is being updated;
      */
     void update_sub_sb(const void* context_data, const uint64_t sz, void*& cookie);
+
+    // size_t read_sub_sb(const meta_sub_type type, sisl::byte_view& buf);
+    void read_sub_sb(const meta_sub_type type);
 
     /**
      * @brief :
@@ -281,6 +279,14 @@ private:
     void read(BlkId& bid, void* dest, size_t sz);
 
     void cache_clear();
+
+    /**
+     * @brief
+     *
+     * @param mblk
+     * @param buf
+     */
+    void read_sub_sb_internal(const meta_blk* mblk, sisl::byte_view& buf);
 };
 
 #define meta_blk_mgr MetaBlkMgr::instance()

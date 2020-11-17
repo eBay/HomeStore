@@ -64,6 +64,13 @@ using crc32_t = uint32_t;
  * */
 // clang-format on
 
+struct MetaSubRegInfo {
+    bool do_crc{true};              // crc check for this client
+    std::set< uint64_t > meta_bids; // meta blk id
+    meta_blk_found_cb_t cb{nullptr};
+    meta_blk_recover_comp_cb_t comp_cb{nullptr};
+};
+
 // meta blk super block put as 1st block in the block chain;
 struct meta_blk_sb {
     uint32_t version;
