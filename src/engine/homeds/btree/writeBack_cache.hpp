@@ -28,6 +28,7 @@ namespace btree {
 #define writeback_req_ptr boost::intrusive_ptr< typename writeback_req_t >
 #define to_wb_req(req) boost::static_pointer_cast< typename writeback_req_t >(req)
 #define wb_cache_t WriteBackCache< K, V, InteriorNodeType, LeafNodeType >
+typedef std::function< bool() > flush_buffer_callback;
 #define SSDBtreeNode BtreeNode< btree_store_type::SSD_BTREE, K, V, InteriorNodeType, LeafNodeType >
 #define btree_blkstore_t homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy, wb_cache_buffer_t >
 
@@ -171,6 +172,8 @@ private:
     uint64_t m_free_list_cnt = 0;
     static btree_blkstore_t* m_blkstore;
     static std::vector< iomgr::io_thread_t > m_thread_ids;
+    static thread_local std::vector< flush_buffer_callback > flush_buffer_q;
+    static thread_local uint64_t wb_cache_outstanding_cnt;
 
 public:
     WriteBackCache(void* const blkstore, const uint64_t align_size, cp_comp_callback cb, trigger_cp_callback trigger_cp_cb) {
@@ -360,69 +363,108 @@ public:
     }
 
     void flush_buffers(const btree_cp_ptr& bcp) {
-        const size_t cp_id{bcp->cp_id % MAX_CP_CNT};
-        m_dirty_buf_cnt[cp_id].increment(1);
-        auto list{m_req_list[cp_id].get()};
-        typename sisl::ThreadVector< writeback_req_ptr >::thread_vector_iterator it;
-        size_t write_count{0};
-        auto wb_req_ptr_ref{list->begin(it)};
-        while (wb_req_ptr_ref) {
-            auto wb_req{*wb_req_ptr_ref};
-            if (wb_req->dependent_cnt.decrement_testz(1)) {
-                wb_req->state = writeback_req_state::WB_REQ_SENT;
-                m_blkstore->write(wb_req->bid, wb_req->m_mem, 0, wb_req, false);
-                ++write_count;
-            }
-            wb_req_ptr_ref = list->next(it);
+        const size_t cp_id = bcp->cp_id % MAX_CP_CNT;
+        if (m_dirty_buf_cnt[cp_id].get() == 0) {
+            m_cp_comp_cb(bcp);
+            return; // nothing to flush
         }
-        list->clear();
-        if (m_dirty_buf_cnt[cp_id].decrement_testz(1)) { m_cp_comp_cb(bcp); };
 
-        // submit batch
-        if (write_count > 0) { iomanager.default_drive_interface()->submit_batch(); }
+        queue_flush_buffers([this, it = typename sisl::ThreadVector< writeback_req_ptr >::thread_vector_iterator(),
+                             iterator_invalid = true, cp_id]() mutable -> bool {
+            auto list = m_req_list[cp_id].get();
+            writeback_req_ptr wb_req = nullptr;
+            size_t write_count{0};
+            if (iterator_invalid) {
+                if (auto wb_req_ptr_ref = (list->begin(it))) { wb_req = *wb_req_ptr_ref; }
+                iterator_invalid = false;
+            } else {
+                if (auto wb_req_ptr_ref = (list->next(it))) { wb_req = *wb_req_ptr_ref; }
+            }
+            while (wb_req) {
+                if (wb_req->dependent_cnt.decrement_testz(1)) {
+                    wb_req->state = homeds::btree::writeback_req_state::WB_REQ_SENT;
+                    ++wb_cache_outstanding_cnt;
+                    m_blkstore->write(wb_req->bid, wb_req->m_mem, 0, wb_req, false);
+                    ++write_count;
+                    if (wb_cache_outstanding_cnt > HS_DYNAMIC_CONFIG(generic.cache_max_throttle_cnt)) {
+                        if (write_count > 0) { iomanager.default_drive_interface()->submit_batch(); }
+                        return false;
+                    }
+                }
+                wb_req = nullptr;
+                if (auto wb_req_ptr_ref = list->next(it)) { wb_req = *wb_req_ptr_ref; }
+            }
+            list->clear();
+            if (write_count > 0) { iomanager.default_drive_interface()->submit_batch(); }
+            return true;
+        });
     }
 
     static void writeBack_completion(boost::intrusive_ptr< blkstore_req< wb_cache_buffer_t > > bs_req) {
         auto wb_req{to_wb_req(bs_req)};
         wb_cache_t* const wb_cache_instance{static_cast< wb_cache_t* >(wb_req->wb_cache)};
-        wb_cache_instance->writeBack_completion_internal(wb_req);
+        wb_cache_instance->writeBack_completion_internal(bs_req);
     }
 
-    void writeBack_completion_internal(writeback_req_ptr& wb_req) {
-        const size_t cp_id{wb_req->bcp->cp_id % MAX_CP_CNT};
-        wb_req->state = writeback_req_state::WB_REQ_COMPL;
+    void writeBack_completion_internal(boost::intrusive_ptr< blkstore_req< wb_cache_buffer_t > >& bs_req) {
+        auto wb_req = to_wb_req(bs_req);
+        const size_t cp_id = wb_req->bcp->cp_id % MAX_CP_CNT;
+        wb_req->state = homeds::btree::writeback_req_state::WB_REQ_COMPL;
 
-        // Scan if it has any req depending on this req
-        std::vector<writeback_req_ptr> dependent_requests;
-        {
-            std::unique_lock<std::mutex> req_mtx(wb_req->mtx);
-            dependent_requests.reserve(wb_req->req_q.size());
-            while (!wb_req->req_q.empty()) {
-                dependent_requests.emplace_back(std::move(wb_req->req_q.back()));
-                wb_req->req_q.pop_back();
-            }
-        }
-        size_t write_count{0};
-        for(auto& depend_req : dependent_requests) {
-            if (depend_req->dependent_cnt.decrement_testz(1)) {
-                depend_req->state = writeback_req_state::WB_REQ_SENT;
-                m_blkstore->write(depend_req->bid, depend_req->m_mem, 0, depend_req, false);
-                ++write_count;
-            }
+        --wb_cache_outstanding_cnt;
+        /* Scan if it has any req depending on this req */
+        if (!wb_req->req_q.empty()) {
+            queue_flush_buffers([this, wb_req]() -> bool {
+                size_t write_count{0};
+                // std::unique_lock< std::mutex > req_mtx(wb_req->mtx); No need to take a lock here
+                while (!wb_req->req_q.empty()) {
+                    auto depend_req = wb_req->req_q.back();
+                    wb_req->req_q.pop_back();
+                    if (depend_req->dependent_cnt.decrement_testz(1)) {
+                        depend_req->state = homeds::btree::writeback_req_state::WB_REQ_SENT;
+                        ++wb_cache_outstanding_cnt;
+                        m_blkstore->write(depend_req->bid, depend_req->m_mem, 0, depend_req, false);
+                        ++write_count;
+                        if (wb_cache_outstanding_cnt > HS_DYNAMIC_CONFIG(generic.cache_max_throttle_cnt)) {
+                            if (write_count > 0) { iomanager.default_drive_interface()->submit_batch(); }
+                            return false;
+                        }
+                    }
+                }
+                if (write_count > 0) { iomanager.default_drive_interface()->submit_batch(); }
+                return true;
+            });
+        } else if (wb_cache_outstanding_cnt < HS_DYNAMIC_CONFIG(generic.cache_min_throttle_cnt)) {
+            queue_flush_buffers(nullptr);
         }
         wb_req->bn->req[cp_id] = nullptr;
         ResourceMgr::dec_dirty_buf_cnt();
 
         if (m_dirty_buf_cnt[cp_id].decrement_testz(1)) { m_cp_comp_cb(wb_req->bcp); };
+    }
 
-        // submit batch
-        if (write_count > 0) { iomanager.default_drive_interface()->submit_batch(); }
+    void queue_flush_buffers(flush_buffer_callback&& cb) {
+        if (cb) { flush_buffer_q.push_back(std::move(cb)); }
+        while (!flush_buffer_q.empty()) {
+            auto& next_cb = flush_buffer_q.back();
+            if (next_cb()) {
+                flush_buffer_q.pop_back();
+            } else {
+                /* reach the max_throttle_cnt. try it again after completions are done */
+                return;
+            }
+        }
     }
 };
+
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
 btree_blkstore_t* wb_cache_t::m_blkstore;
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
 std::vector< iomgr::io_thread_t > wb_cache_t::m_thread_ids;
+template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
+thread_local std::vector< flush_buffer_callback > wb_cache_t::flush_buffer_q;
+template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
+thread_local uint64_t wb_cache_t::wb_cache_outstanding_cnt;
 
 } // namespace btree
 } // namespace homeds

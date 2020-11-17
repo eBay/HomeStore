@@ -81,11 +81,14 @@ def recovery_nightly():
     print("recovery test started")
     i = 1
     while i < 10:
-        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=300 --enable_crash_handler=1 --verify_only=1 --flip=1 --remove_file=0 --verify_type=2"
-        subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+#        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=300 --enable_crash_handler=1 --verify_only=1 --flip=1 --remove_file=0 --verify_type=2"
+ #       subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
         
-        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=300 --enable_crash_handler=1 --verify_type=2 --abort=1 --flip=1 --remove_file=0"
+        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=800 --enable_crash_handler=1 --verify_type=3 --abort=1 --flip=1 --remove_file=0"
         subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
+        
+        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=800 --enable_crash_handler=1 --verify_type=3 --abort=0 --flip=1 --remove_file=0"
+        subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
 
         s = "recovery test iteration" + repr(i) + "passed" 
         print(s)

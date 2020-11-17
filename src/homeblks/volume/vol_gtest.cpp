@@ -93,7 +93,7 @@ struct TestCfg {
     uint64_t unmap_frequency = 1000;
 
     uint64_t max_io_size = 1 * Mi;
-    uint64_t max_outstanding_ios = 64u;
+    uint64_t max_outstanding_ios = 32u;
     uint64_t max_disk_capacity = 10 * Gi;
 
     uint32_t atomic_phys_page_size = 512;
@@ -942,7 +942,10 @@ public:
         }
 
         if (tcfg.is_abort) {
-            if (get_elapsed_time_sec(m_start_time) > (dist(engine) % tcfg.run_time)) { raise(SIGKILL); }
+            if (get_elapsed_time_sec(m_start_time) > tcfg.run_time &&
+                (get_elapsed_time_sec(m_start_time) > (dist(engine) % tcfg.run_time))) {
+                raise(SIGKILL);
+            }
         }
 
         {
@@ -960,8 +963,9 @@ public:
     }
 
     bool time_to_stop() const override {
-        return ((m_voltest->output.write_cnt >= tcfg.max_num_writes) ||
-                (get_elapsed_time_sec(m_start_time) > tcfg.run_time));
+        return (!tcfg.is_abort &&
+                ((m_voltest->output.write_cnt >= tcfg.max_num_writes) ||
+                 (get_elapsed_time_sec(m_start_time) > tcfg.run_time)));
     }
 
     virtual bool is_job_done() const override { return (m_outstanding_ios == 0); }

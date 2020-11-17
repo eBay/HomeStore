@@ -73,6 +73,10 @@ table Generic {
 
     // writeback cache flush threads
     cache_flush_threads : int32 = 2;
+
+    cache_max_throttle_cnt : uint64 = 10;
+
+    cache_min_throttle_cnt : uint64 = 5;
 }
 
 table ResourceLimits {
