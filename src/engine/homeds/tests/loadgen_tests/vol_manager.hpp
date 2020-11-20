@@ -47,7 +47,7 @@ public:
 };
 
 struct VolumeInfo {
-    std::mutex m_mtx;     // lock
+    std::mutex m_mtx;   // lock
     sisl::Bitset* m_bm; // volume block write bitmap
 
     VolumeInfo(uint64_t vol_total_blks) { m_bm = new sisl::Bitset(vol_total_blks); }
@@ -462,7 +462,6 @@ private:
         p.open_flags = homestore::io_flag::DIRECT_IO;
         p.min_virtual_page_size = VOL_PAGE_SIZE;
         p.app_mem_size = APP_MEM_SIZE;
-        p.disk_init = true;
         p.devices = m_device_info;
 
         p.init_done_cb = std::bind(&VolumeManager::init_done_cb, this, std::placeholders::_1, std::placeholders::_2);
@@ -471,9 +470,6 @@ private:
         p.vol_state_change_cb = std::bind(&VolumeManager::vol_state_change_cb, this, std::placeholders::_1,
                                           std::placeholders::_2, std::placeholders::_3);
         p.vol_found_cb = std::bind(&VolumeManager::vol_found_cb, this, std::placeholders::_1);
-
-        boost::uuids::string_generator gen;
-        p.system_uuid = gen("01970496-0262-11e9-8eb2-f2801f1b9fd1");
 
         VolInterface::init(p);
     }

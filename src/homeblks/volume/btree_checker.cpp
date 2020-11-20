@@ -137,8 +137,6 @@ void start_homestore() {
     params.drive_attr->phys_page_size = config["phys_page_size"];
     params.drive_attr->align_size = config["align_size"];
     params.drive_attr->atomic_phys_page_size = config["atomic_phys_page_size"];
-    params.disk_init = false;
-    params.system_uuid = gen(std::string(config["system_uuid"]));
     params.init_done_cb = std::bind(init_done_cb, std::placeholders::_1, std::placeholders::_2);
     params.vol_mounted_cb = std::bind(vol_mounted_cb, std::placeholders::_1, std::placeholders::_2);
     params.vol_state_change_cb =

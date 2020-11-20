@@ -76,7 +76,7 @@ struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
     std::shared_ptr< Volume > vol_instance;
     std::vector< buf_info > read_buf_list;
     void* buffer{nullptr};
-    std::vector<iovec> iovecs{};
+    std::vector< iovec > iovecs{};
     std::error_condition err{no_error};
     uint64_t request_id;
     sisl::atomic_counter< int > refcount;
@@ -168,6 +168,7 @@ struct vol_params {
 
 struct out_params {
     uint64_t max_io_size; // currently it is 1 MB based on 4k minimum page size
+    bool first_time_boot;
 };
 
 typedef std::shared_ptr< Volume > VolumePtr;
@@ -192,8 +193,8 @@ public:
     std::string to_string() const {
         std::ostringstream oss;
         oss << "min_virtual_page_size=" << min_virtual_page_size << ",app_mem_size=" << app_mem_size
-           << ",disk_init=" << disk_init << ",dev_type=" << enum_name(device_type) << ",open_flags =" << open_flags
-           << ",number of devices =" << devices.size();
+            << ",dev_type=" << enum_name(device_type) << ",open_flags =" << open_flags
+            << ",number of devices =" << devices.size();
         oss << "device names = ";
         for (size_t i{0}; i < devices.size(); ++i) {
             oss << devices[i].dev_names;
@@ -224,7 +225,7 @@ public:
     /// @param cache - whether to cache writes and try to read from cache
     /// @return vol_interface_req_ptr
     //
-    virtual vol_interface_req_ptr create_vol_interface_req(void* const buf, const uint64_t lba, const uint32_t nlbas, 
+    virtual vol_interface_req_ptr create_vol_interface_req(void* const buf, const uint64_t lba, const uint32_t nlbas,
                                                            const bool sync = false, const bool cache = true) = 0;
 
     ///
@@ -238,9 +239,9 @@ public:
     /// @param cache - whether to cache writes and try to read from cache
     /// @return vol_interface_req_ptr
     //
-    virtual vol_interface_req_ptr create_vol_interface_req(std::vector<iovec> iovecs,
-                                                           const uint64_t lba, const uint32_t nlbas,
-                                                           const bool sync = false, const bool cache = false) = 0;
+    virtual vol_interface_req_ptr create_vol_interface_req(std::vector< iovec > iovecs, const uint64_t lba,
+                                                           const uint32_t nlbas, const bool sync = false,
+                                                           const bool cache = false) = 0;
 
     /**
      * @brief Write the data to the volume asynchronously, created from the request. After completion the attached

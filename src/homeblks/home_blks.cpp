@@ -308,7 +308,6 @@ homeblks_sb* HomeBlks::superblock_init() {
     sb->version = HOMEBLKS_SB_VERSION;
     sb->boot_cnt = 0;
     sb->init_flag(0);
-    sb->uuid = HS_STATIC_CONFIG(input.system_uuid);
     return sb;
 }
 
@@ -371,6 +370,9 @@ void HomeBlks::init_done(std::error_condition err) {
     /* check for error */
     bool expected = false;
     bool desired = true;
+
+    m_out_params.first_time_boot = m_dev_mgr->is_first_time_boot();
+
     if (err != no_error && m_init_finished.compare_exchange_strong(expected, desired)) {
         m_cfg.init_done_cb(err, m_out_params);
         m_cv.notify_all();
@@ -490,15 +492,11 @@ bool HomeBlks::trigger_shutdown(const shutdown_comp_callback& shutdown_done_cb, 
     // Execute the shutdown on the io thread, because clean shutdown will do IO (albeit sync io)
     auto sthread = sisl::named_thread("hb_shutdown", [this, shutdown_done_cb, force]() {
         iomanager.run_io_loop(false, nullptr, [&](bool thread_started) {
-            if (thread_started) { schedule_shutdown(shutdown_done_cb, force); }
+            if (thread_started) { do_shutdown(shutdown_done_cb, force); }
         });
     });
     sthread.detach();
     return true;
-}
-
-void HomeBlks::schedule_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool force) {
-    do_shutdown(shutdown_done_cb, force);
 }
 
 void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool force) {
@@ -530,7 +528,7 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
                 HB_DYNAMIC_CONFIG(general_config->shutdown_status_check_freq_ms));
         m_shutdown_timer_hdl = iomanager.schedule_thread_timer(
             HB_DYNAMIC_CONFIG(general_config->shutdown_status_check_freq_ms) * 1000 * 1000, false /* recurring */,
-            nullptr, [this, shutdown_done_cb, force](void* cookie) { schedule_shutdown(shutdown_done_cb, force); });
+            nullptr, [this, shutdown_done_cb, force](void* cookie) { do_shutdown(shutdown_done_cb, force); });
         return;
     }
 
@@ -550,6 +548,7 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
     /* XXX: can we move it to indx mgr */
     home_log_store_mgr.stop();
     meta_blk_mgr->stop();
+    this->close_devices();
     iomanager.default_drive_interface()->detach_end_of_batch_cb();
     iomanager.stop_io_loop();
 
@@ -711,10 +710,10 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
     if (sb->test_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN)) {
         LOGDEBUG("System was shutdown cleanly.");
         HS_ASSERT_CMP(DEBUG, MetaBlkMgr::is_self_recovered(), ==, false);
-    } else if (!HS_STATIC_CONFIG(input.disk_init)) {
+    } else if (!m_dev_mgr->is_first_time_boot()) {
         LOGCRITICAL("System experienced sudden panic since last boot!");
     } else {
-        HS_ASSERT(RELEASE, m_cfg.disk_init, "not the first boot");
+        HS_ASSERT(RELEASE, m_dev_mgr->is_first_time_boot(), "not the first boot");
         LOGINFO("first time boot");
         HS_ASSERT_CMP(DEBUG, MetaBlkMgr::is_self_recovered(), ==, false);
     }
@@ -732,7 +731,7 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
 
     // start log store recovery
     LOGINFO("home log store recovery is started");
-    home_log_store_mgr.start(m_cfg.disk_init);
+    home_log_store_mgr.start(m_dev_mgr->is_first_time_boot());
 
     /* indx would have recovered by now */
     indx_recovery_done();

@@ -38,6 +38,7 @@
 #include <gtest/gtest.h>
 
 #include "api/vol_interface.hpp"
+#include "api/meta_interface.hpp"
 #include "engine/common/homestore_header.hpp"
 #include "engine/homestore_base.hpp"
 #include "engine/common/homestore_flip.hpp"
@@ -394,6 +395,7 @@ private:
 
 TestCfg tcfg;            // Config for each VolTest
 const TestCfg gcfg = {}; // Config for global for all tests
+const std::string access_mgr_mtype{"ACCESS_MGR"};
 
 class IOTestJob;
 /**************** Common class created for all tests ***************/
@@ -429,6 +431,9 @@ protected:
 
     // std::atomic< bool > io_stalled = false;
     // bool expected_init_fail = false;
+
+    static boost::uuids::uuid m_am_uuid; // simulate am system uuid
+    static bool m_am_sb_received;        // used in recovery mode;
 
 public:
     static thread_local uint32_t _n_completed_this_thread;
@@ -475,6 +480,22 @@ public:
         }
     }
 
+    static void am_meta_blk_comp_cb(bool success) {
+        HS_RELEASE_ASSERT_EQ(success, true);
+        if (!tcfg.init) {
+            // should have received am sb callback from MetaBlkStore;
+            HS_RELEASE_ASSERT_EQ(m_am_sb_received, true);
+        }
+    }
+
+    static void am_meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size) {
+        // should be called only once in recovery mode;
+        HS_RELEASE_ASSERT_EQ(m_am_sb_received, false);
+        m_am_sb_received = true;
+        std::string str((char*)(buf.bytes()), size);
+        HS_RELEASE_ASSERT_EQ(str.compare(boost::uuids::to_string(m_am_uuid)), 0);
+    }
+
     void start_homestore(bool wait_for_init_done = true) {
         uint64_t max_capacity = 0;
 
@@ -518,7 +539,6 @@ public:
         params.open_flags = tcfg.io_flags;
         params.min_virtual_page_size = tcfg.vol_page_size;
         params.app_mem_size = 5 * 1024 * 1024 * 1024ul;
-        params.disk_init = tcfg.init;
         params.devices = device_info;
         params.init_done_cb = bind_this(VolTest::init_done_cb, 2);
         params.vol_mounted_cb = bind_this(VolTest::vol_mounted_cb, 2);
@@ -532,10 +552,17 @@ public:
         params.drive_attr->atomic_phys_page_size = tcfg.atomic_phys_page_size;
 
         boost::uuids::string_generator gen;
-        params.system_uuid = gen("01970496-0262-11e9-8eb2-f2801f1b9fd1");
+        m_am_uuid = gen("01970496-0262-11e9-8eb2-f2801f1b9fd1");
+
         VolInterface::init(params);
 
         if (wait_for_init_done) { wait_homestore_init_done(); }
+
+        if (tcfg.init) {
+            void* cookie{nullptr};
+            meta_blk_mgr->add_sub_sb(access_mgr_mtype, (void*)(boost::uuids::to_string(m_am_uuid).c_str()),
+                                     boost::uuids::to_string(m_am_uuid).size(), cookie);
+        }
     }
 
     bool fix_vol_mapping_btree() {
@@ -666,6 +693,13 @@ public:
             }
             return;
         }
+
+        if (tcfg.init) {
+            HS_RELEASE_ASSERT_EQ(params.first_time_boot, true);
+        } else {
+            HS_RELEASE_ASSERT_EQ(params.first_time_boot, false);
+        }
+
         tcfg.max_io_size = params.max_io_size;
         const uint64_t init_buf_size{tcfg.verify_csum() ? tcfg.vol_page_size : tcfg.max_io_size};
 
@@ -856,6 +890,10 @@ private:
         }
     }
 };
+
+bool VolTest::m_am_sb_received = false;
+boost::uuids::uuid VolTest::m_am_uuid;
+REGISTER_METABLK_SUBSYSTEM(vol_gtest_am, access_mgr_mtype, VolTest::am_meta_blk_found_cb, VolTest::am_meta_blk_comp_cb)
 
 class VolCreateDeleteJob : public TestJob {
 public:

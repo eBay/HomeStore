@@ -65,18 +65,33 @@ void PhysicalDev::attach_superblock_chunk(PhysicalDevChunk* chunk) {
 }
 
 PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int const oflags,
-                         boost::uuids::uuid& system_uuid, uint32_t dev_num, uint64_t dev_offset,
-                         iomgr::iomgr_drive_type drive_type, bool is_init, uint64_t dm_info_size, bool* is_inited) :
+                         iomgr::iomgr_drive_type drive_type) :
         m_mgr{mgr},
         m_devname{devname},
-        m_metrics{devname},
-        m_system_uuid{system_uuid} {
+        m_metrics{devname} {
+
+    HS_LOG_ASSERT_LE(sizeof(super_block), SUPERBLOCK_SIZE, "Device {} Ondisk Superblock size not enough to hold in-mem",
+                     devname);
+    m_super_blk = (super_block*)hs_iobuf_alloc(SUPERBLOCK_SIZE);
+    memset(m_super_blk, 0, SUPERBLOCK_SIZE);
+
+    m_iodev = drive_iface->open_dev(devname.c_str(), drive_type, oflags);
+    read_superblock();
+}
+
+PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int const oflags, hs_uuid_t& system_uuid,
+                         uint32_t dev_num, uint64_t dev_offset, iomgr::iomgr_drive_type drive_type, bool is_init,
+                         uint64_t dm_info_size, bool* is_inited) :
+        m_mgr{mgr},
+        m_devname{devname},
+        m_metrics{devname} {
     /* super block should always be written atomically. */
     HS_LOG_ASSERT_LE(sizeof(super_block), SUPERBLOCK_SIZE, "Device {} Ondisk Superblock size not enough to hold in-mem",
                      devname);
     m_super_blk = (super_block*)hs_iobuf_alloc(SUPERBLOCK_SIZE);
     memset(m_super_blk, 0, SUPERBLOCK_SIZE);
 
+    if (is_init) { m_super_blk->system_uuid = system_uuid; }
     m_info_blk.dev_num = dev_num;
     m_info_blk.dev_offset = dev_offset;
     m_info_blk.first_chunk_id = INVALID_CHUNK_ID;
@@ -147,11 +162,12 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
          * written.
          */
     } else {
-        *is_inited = load_super_block();
+        *is_inited = load_super_block(system_uuid);
         if (*is_inited) {
             /* If it is different then it mean it require upgrade/revert handling */
             HS_LOG_ASSERT_EQ(m_super_blk->dm_chunk[0].get_chunk_size(), dm_info_size);
             HS_LOG_ASSERT_EQ(m_super_blk->dm_chunk[1].get_chunk_size(), dm_info_size);
+            if (is_init_done() == false) { init_done(); }
         }
     }
 }
@@ -160,7 +176,7 @@ size_t PhysicalDev::get_total_cap() {
     return (m_devsize - (SUPERBLOCK_SIZE + m_dm_chunk[0]->get_size() + m_dm_chunk[1]->get_size()));
 }
 
-bool PhysicalDev::load_super_block() {
+bool PhysicalDev::load_super_block(hs_uuid_t& system_uuid) {
     read_superblock();
 
     // Validate if its homestore formatted device
@@ -173,7 +189,7 @@ bool PhysicalDev::load_super_block() {
         return false;
     }
 
-    if (m_super_blk->system_uuid != m_system_uuid) {
+    if (m_super_blk->system_uuid != system_uuid) {
         std::stringstream ss;
         ss << "we found the homestore formatted device with a different system UUID";
         const std::string s = ss.str();
@@ -213,7 +229,6 @@ void PhysicalDev::write_super_block(uint64_t gen_cnt) {
     HS_DEBUG_ASSERT_NE(m_info_blk.get_dev_num(), INVALID_DEV_ID);
     HS_DEBUG_ASSERT_NE(m_info_blk.get_first_chunk_id(), INVALID_CHUNK_ID);
 
-    m_super_blk->system_uuid = m_system_uuid;
     m_super_blk->this_dev_info.dev_num = m_info_blk.dev_num;
     m_super_blk->this_dev_info.first_chunk_id = m_info_blk.first_chunk_id;
     m_super_blk->this_dev_info.dev_offset = m_info_blk.dev_offset;
@@ -227,6 +242,32 @@ void PhysicalDev::write_super_block(uint64_t gen_cnt) {
     // Write the information to the offset
     write_superblock();
     m_superblock_valid = true;
+}
+
+void PhysicalDev::zero_superblock() {
+    if (m_restricted_mode) {
+        memset(m_super_blk, 0, SUPERBLOCK_SIZE);
+        write_superblock();
+    } else {
+        LOGINFO("zero operation is not allowed in non-restricted mode.");
+    }
+}
+
+bool PhysicalDev::has_valid_superblock(hs_uuid_t& out_uuid) {
+    read_superblock();
+
+    // Validate if its homestore formatted device
+    bool ret = (validate_device() && is_init_done());
+
+    if (ret) { out_uuid = m_super_blk->system_uuid; }
+    return ret;
+}
+
+void PhysicalDev::close_device() { drive_iface->close_dev(m_iodev); }
+
+void PhysicalDev::init_done() {
+    m_super_blk->init_done = true;
+    write_superblock();
 }
 
 inline bool PhysicalDev::validate_device() {

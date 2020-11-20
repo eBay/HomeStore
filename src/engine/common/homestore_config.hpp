@@ -63,12 +63,10 @@ public:
     std::vector< dev_info > devices;                                       // name of the devices.
     iomgr::iomgr_drive_type device_type{iomgr::iomgr_drive_type::unknown}; // Type of the device
     bool is_file{false};                                                   // Is the devices a file or raw device
-    boost::uuids::uuid system_uuid;                                        // UUID assigned to the system
     io_flag open_flags = io_flag::DIRECT_IO;
 
     uint32_t min_virtual_page_size = 4096;          // minimum page size supported. Ideally it should be 4k.
     uint64_t app_mem_size = 1 * 1024 * 1024 * 1024; // memory available for the app (including cache)
-    bool disk_init = false;                         // true if disk has to be initialized.
     bool is_read_only = false;                      // Is read only
 
     /* optional parameters - if provided will override the startup config */
@@ -76,7 +74,6 @@ public:
 
     nlohmann::json to_json() const {
         nlohmann::json json;
-        json["system_uuid"] = boost::uuids::to_string(system_uuid);
         json["devices"] = nlohmann::json::array();
         for (auto& d : devices) {
             json["devices"].push_back(d.dev_names);

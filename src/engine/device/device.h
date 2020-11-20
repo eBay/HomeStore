@@ -149,6 +149,7 @@ static_assert(sizeof(vdev_info_block) == MAX_VDEV_INFO_BLOCK_SZ, "vdev info bloc
 
 /* This header should be atomically written to the disks. It should always be smaller then ssd atomic page size */
 #define SUPERBLOCK_PAYLOAD_OFFSET 4096
+
 struct super_block {
     char empty_buf[SUPERBLOCK_PAYLOAD_OFFSET]; // don't write anything to first 4096 bytes.
     uint64_t magic;                            // Header magic expected to be at the top of block
@@ -156,11 +157,13 @@ struct super_block {
     uint64_t gen_cnt;
     char product_name[64]; // Product name
     int cur_indx;
+    bool init_done;                // homestore init completed flag
     pdev_info_block this_dev_info; // Info about this device itself
     chunk_info_block dm_chunk[2];  // chunk info blocks
-    boost::uuids::uuid system_uuid;
+    hs_uuid_t system_uuid;         // homestore system uuid
 
     uint64_t get_magic() const { return magic; }
+    hs_uuid_t get_sys_uuid() const { return system_uuid; }
 } __attribute((packed));
 
 #define SUPERBLOCK_SIZE (HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size) + SUPERBLOCK_PAYLOAD_OFFSET)
@@ -331,9 +334,30 @@ class PhysicalDev {
     friend class DeviceManager;
 
 public:
-    PhysicalDev(DeviceManager* mgr, const std::string& devname, int const oflags, boost::uuids::uuid& uuid,
-                uint32_t dev_num, uint64_t dev_offset, iomgr::iomgr_drive_type drive_type, bool is_init,
-                uint64_t dm_info_size, bool* is_inited);
+    /**
+     * @brief
+     *
+     * @param mgr
+     * @param devname
+     * @param oflags
+     * @param uuid :
+     *  if is_init is set to true, this uuid will be used to set to pdev's superblock;
+     *  if is_init is set to false, this uuid will be used to for varification with this pdev's stored system uuid;
+     * @param dev_num
+     * @param dev_offset
+     * @param drive_type
+     * @param is_init :  true if this is a first time boot, false if this is not a first time boot
+     * @param dm_info_size
+     * @param is_inited :
+     *  if this is set to true in a recovery boot, then it means this is a spare/new disk.
+     *  if this is set to false in a recovery boot, it is expected.
+     *  this field will not be changed if is_init is set to true(first-time-boot)
+     */
+    PhysicalDev(DeviceManager* mgr, const std::string& devname, int const oflags, hs_uuid_t& uuid, uint32_t dev_num,
+                uint64_t dev_offset, iomgr::iomgr_drive_type drive_type, bool is_init, uint64_t dm_info_size,
+                bool* is_inited);
+
+    PhysicalDev(DeviceManager* mgr, const std::string& devname, int const oflags, iomgr::iomgr_drive_type drive_type);
     ~PhysicalDev();
 
     void update(uint32_t dev_num, uint64_t dev_offset, uint32_t first_chunk_id);
@@ -383,13 +407,33 @@ public:
     void write_dm_chunk(uint64_t gen_cnt, char* mem, uint64_t size);
     uint64_t inc_error_cnt() { return (m_error_cnt.increment(1)); }
 
+    /**
+     * @brief: zero the super block;
+     */
+    void zero_superblock();
+
+    /**
+     * @brief: check whether there is formated homestore super block
+     *
+     * @return: true if there is formated homestore super block, false if not;
+     */
+    bool has_valid_superblock(hs_uuid_t& out_uuid);
+
+    void init_done();
+
+    void close_device();
+
+    hs_uuid_t get_sys_uuid() { return m_super_blk->get_sys_uuid(); }
+
 private:
     inline void write_superblock();
     inline void read_superblock();
 
+    bool is_init_done() const { return m_super_blk->init_done; }
+
     /* Load the physical device info from persistent storage. If its not a valid device, it will throw
      * std::system_exception. Returns true if the device has already formatted for Omstore, false otherwise. */
-    bool load_super_block();
+    bool load_super_block(hs_uuid_t& system_uuid);
 
     /* Format the physical device info. Intended to use first time or anytime we need to reformat the drives. Throws
      * std::system_exception if there is any write errors */
@@ -410,8 +454,8 @@ private:
     PhysicalDevMetrics m_metrics; // Metrics instance per physical device
     int m_cur_indx{0};
     bool m_superblock_valid{false};
-    boost::uuids::uuid m_system_uuid;
     sisl::atomic_counter< uint64_t > m_error_cnt{0};
+    bool m_restricted_mode{false}; // only allow special operations in this mode;
 };
 
 class AbstractVirtualDev {
@@ -437,12 +481,19 @@ class DeviceManager {
 public:
     DeviceManager(NewVDevCallback vcb, uint32_t const vdev_metadata_size,
                   const iomgr::io_interface_comp_cb_t& io_comp_cb, iomgr::iomgr_drive_type drive_type,
-                  boost::uuids::uuid system_uuid, const vdev_error_callback& vdev_error_cb);
+                  const vdev_error_callback& vdev_error_cb);
 
     ~DeviceManager();
 
-    /* Initial routine to call upon bootup or everytime new physical devices to be added dynamically */
-    void add_devices(const std::vector< dev_info >& devices, bool is_init);
+    /**
+     * @brief : Initial routine to call upon bootup or everytime new physical devices to be added dynamically
+     * @param devices
+     *
+     * @return :
+     *  true if it is first time boot, meaning there is no valid sb on device
+     *  false if it is recovery reboot, meaning there is valid sb found on device
+     */
+    bool add_devices(const std::vector< dev_info >& devices);
     size_t get_total_cap(void);
     void handle_error(PhysicalDev* pdev);
 
@@ -491,11 +542,13 @@ public:
     void write_info_blocks();
     void update_vb_context(uint32_t vdev_id, const sisl::blob& ctx_data);
     void get_vb_context(uint32_t vdev_id, const sisl::blob& ctx_data);
-
     void update_end_of_chunk(PhysicalDevChunk* chunk, off_t offset);
+    void init_done();
+    void close_devices();
+    bool is_first_time_boot() const { return m_first_time_boot; }
 
 private:
-    void load_and_repair_devices(const std::vector< dev_info >& devices);
+    void load_and_repair_devices(const std::vector< dev_info >& devices, hs_uuid_t& system_uuid);
     void init_devices(const std::vector< dev_info >& devices);
     void read_info_blocks(uint32_t dev_id);
 
@@ -536,8 +589,8 @@ private:
     uint32_t m_pdev_id{0};
     bool m_scan_cmpltd{false};
     uint64_t m_dm_info_size{0};
-    boost::uuids::uuid m_system_uuid;
     vdev_error_callback m_vdev_error_cb;
-};
+    bool m_first_time_boot{true};
+}; // class DeviceManager
 
 } // namespace homestore

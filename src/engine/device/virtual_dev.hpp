@@ -570,10 +570,11 @@ public:
             m_mgr->update_end_of_chunk(chunk, offset_in_chunk);
 
             // get next chunk handle
-            chunk = get_next_chunk(dev_id, chunk_id);
-
-            // Since we are re-using a new chunk, update this chunk's end as its original size;
-            m_mgr->update_end_of_chunk(chunk, m_chunk_size);
+            auto next_chunk = get_next_chunk(dev_id, chunk_id);
+            if (next_chunk != chunk) {
+                // Since we are re-using a new chunk, update this chunk's end as its original size;
+                m_mgr->update_end_of_chunk(chunk, m_chunk_size);
+            }
         } else {
             // across chunk boundary and no space left;
             HS_LOG(ERROR, device, "No space left! m_write_sz_in_total: {}, m_reserved_sz: {}",

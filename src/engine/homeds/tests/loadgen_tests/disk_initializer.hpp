@@ -21,7 +21,7 @@ typedef std::function< void(std::error_condition err, const homestore::out_param
 template < typename Executor >
 class DiskInitializer {
     std::vector< homestore::dev_info > device_info;
-    boost::uuids::uuid uuid;
+    // boost::uuids::uuid uuid;
 
 public:
     ~DiskInitializer() {
@@ -53,7 +53,6 @@ public:
 #endif
         params.min_virtual_page_size = 4096;
         params.app_mem_size = 5 * 1024 * 1024 * 1024ul;
-        params.disk_init = true;
         params.devices = device_info;
         params.init_done_cb = init_done_cb;
         params.drive_attr = iomgr::drive_attributes();
@@ -66,8 +65,8 @@ public:
                                                std::placeholders::_2, std::placeholders::_3);
         params.vol_found_cb = std::bind(&DiskInitializer::vol_found_cb, this, std::placeholders::_1);
         boost::uuids::string_generator gen;
-        params.system_uuid = gen("01970496-0262-11e9-8eb2-f2801f1b9fd1");
-        uuid = params.system_uuid;
+        // params.system_uuid = gen("01970496-0262-11e9-8eb2-f2801f1b9fd1");
+        // uuid = params.system_uuid;
         homestore::VolInterface::init(params);
     }
 

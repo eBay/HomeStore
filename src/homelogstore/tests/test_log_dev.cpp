@@ -48,7 +48,6 @@ static std::shared_ptr< iomgr::ioMgr > start_homestore(uint32_t ndevices, uint64
     params.open_flags = homestore::io_flag::DIRECT_IO;
     params.min_virtual_page_size = 4096;
     params.cache_size = cache_size;
-    params.disk_init = true;
     params.devices = device_info;
     params.iomgr = iomgr_obj;
     params.init_done_cb = [&](std::error_condition err, const out_params& params) {
@@ -63,7 +62,6 @@ static std::shared_ptr< iomgr::ioMgr > start_homestore(uint32_t ndevices, uint64
     params.vol_mounted_cb = [](const VolumePtr& vol_obj, vol_state state) {};
     params.vol_state_change_cb = [](const VolumePtr& vol, vol_state old_state, vol_state new_state) {};
     params.vol_found_cb = [](boost::uuids::uuid uuid) -> bool { return true; };
-    params.system_uuid = gen("01970496-0262-11e9-8eb2-f2801f1b9fd1");
     VolInterface::init(params);
 
     std::unique_lock< std::mutex > lk(start_mutex);

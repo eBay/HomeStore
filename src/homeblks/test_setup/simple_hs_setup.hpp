@@ -38,7 +38,7 @@ struct simple_store_req : public vol_interface_req {
     bool done = false;
 
     simple_store_req(uint8_t* const buffer, const uint64_t lba, const uint32_t nlbas) :
-        vol_interface_req(buffer, lba, nlbas) {}
+            vol_interface_req(buffer, lba, nlbas) {}
     virtual ~simple_store_req() override {
         if (buffer) free(buffer);
     }
@@ -125,7 +125,6 @@ public:
         m_init_params.open_flags = homestore::io_flag::DIRECT_IO;
         m_init_params.min_virtual_page_size = 4096;
         m_init_params.app_mem_size = m_cfg.m_app_mem_size;
-        m_init_params.disk_init = true;
         m_init_params.devices = m_dev_infos;
         m_init_params.init_done_cb =
             std::bind(&SimpleTestStore::init_done_cb, this, std::placeholders::_1, std::placeholders::_2);
@@ -137,8 +136,6 @@ public:
         m_init_params.vol_found_cb = std::bind(&SimpleTestStore::vol_found_cb, this, std::placeholders::_1);
         // m_init_params.end_of_batch_cb = std::bind(&SimpleTestStore::multi_vol_done_cb, this,
         // std::placeholders::_1);
-        boost::uuids::string_generator gen;
-        m_init_params.system_uuid = gen("01970496-0262-11e9-8eb2-f2801f1b9fd1");
     }
 
     virtual void start_homestore(bool wait_to_start = true) {

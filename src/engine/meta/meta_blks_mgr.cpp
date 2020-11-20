@@ -13,8 +13,8 @@ MetaBlkMgr::MetaBlkMgr() { m_last_mblk_id = std::make_unique< BlkId >(invalid_bi
 bool MetaBlkMgr::is_aligned_buf_needed(const size_t size) { return (size <= META_BLK_CONTEXT_SZ) ? false : true; }
 
 void MetaBlkMgr::start(blk_store_t* sb_blk_store, const sb_blkstore_blob* blob, const bool is_init) {
-    LOGINFO("Initialize MetaBlkStore with total size: {}, used size: {}", sb_blk_store->get_size(),
-            sb_blk_store->get_used_size());
+    LOGINFO("Initialize MetaBlkStore with total size: {}, used size: {}, is_init: {}", sb_blk_store->get_size(),
+            sb_blk_store->get_used_size(), is_init);
     m_sb_blk_store = sb_blk_store;
     MetaBlkMgr::reset_self_recover();
     if (is_init) {

@@ -46,7 +46,6 @@ typedef uint32_t homeblks_sb_flag_t;
 #define HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN 0x00000001UL
 struct homeblks_sb {
     uint64_t version;
-    boost::uuids::uuid uuid;
 
     uint64_t boot_cnt;
     homeblks_sb_flag_t flags;
@@ -259,7 +258,6 @@ private:
     void scan_volumes();
 
     void init_thread();
-    void schedule_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool force);
     void do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool force);
     blk_buf_t get_valid_buf(const std::vector< blk_buf_t >& bbuf, bool& rewrite);
 

@@ -83,7 +83,7 @@ public:
         /* create device manager */
         m_dev_mgr = std::make_unique< DeviceManager >(
             std::bind(&HomeStore::new_vdev_found, this, std::placeholders::_1, std::placeholders::_2),
-            sizeof(sb_blkstore_blob), virtual_dev_process_completions, input.device_type, input.system_uuid,
+            sizeof(sb_blkstore_blob), virtual_dev_process_completions, input.device_type,
             std::bind(&HomeStore::process_vdev_error, this, std::placeholders::_1));
     }
 
@@ -136,20 +136,25 @@ protected:
         auto& hs_config = HomeStoreStaticConfig::instance();
 
         /* attach physical devices */
-        m_dev_mgr->add_devices(hs_config.input.devices, hs_config.input.disk_init);
+        bool first_time_boot = m_dev_mgr->add_devices(hs_config.input.devices);
         HS_ASSERT_CMP(LOGMSG, m_dev_mgr->get_total_cap() / hs_config.input.devices.size(), >, MIN_DISK_CAP_SUPPORTED);
         HS_ASSERT_CMP(LOGMSG, m_dev_mgr->get_total_cap(), <, MAX_SUPPORTED_CAP);
 
         /* create blkstore if it is a first time boot */
-        if (hs_config.input.disk_init) {
+        if (first_time_boot) {
             create_data_blkstore(nullptr);
             create_index_blkstore(nullptr);
             create_sb_blkstore(nullptr);
             create_logdev_blkstore(nullptr);
             create_meta_blkstore(nullptr);
         }
+
+        m_dev_mgr->init_done();
+
         ResourceMgr::set_total_cap(m_dev_mgr->get_total_cap());
     }
+
+    void close_devices() { m_dev_mgr->close_devices(); }
 
     static void force_reinit() {
         MetaBlkMgr::force_reinit();
@@ -331,12 +336,12 @@ protected:
 
     void data_recovery_done() {
         auto& hs_config = HomeStoreStaticConfig::instance();
-        if (!hs_config.input.disk_init) { m_data_blk_store->recovery_done(); }
+        if (!m_dev_mgr->is_first_time_boot()) { m_data_blk_store->recovery_done(); }
     }
 
     void indx_recovery_done() {
         auto& hs_config = HomeStoreStaticConfig::instance();
-        if (!hs_config.input.disk_init) { m_index_blk_store->recovery_done(); }
+        if (!m_dev_mgr->is_first_time_boot()) { m_index_blk_store->recovery_done(); }
     }
 
     int64_t available_size() const { return m_size_avail; }

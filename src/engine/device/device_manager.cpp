@@ -55,11 +55,10 @@ std::shared_ptr< blkalloc_cp > PhysicalDevChunk::attach_prepare_cp(std::shared_p
 
 DeviceManager::DeviceManager(NewVDevCallback vcb, uint32_t const vdev_metadata_size,
                              const iomgr::io_interface_comp_cb_t& io_comp_cb, iomgr::iomgr_drive_type drive_type,
-                             boost::uuids::uuid system_uuid, const vdev_error_callback& vdev_error_cb) :
+                             const vdev_error_callback& vdev_error_cb) :
         m_new_vdev_cb{vcb},
         m_drive_type{drive_type},
         m_vdev_metadata_size{vdev_metadata_size},
-        m_system_uuid{system_uuid},
         m_vdev_error_cb{vdev_error_cb} {
     switch (HS_STATIC_CONFIG(input.open_flags)) {
     case io_flag::BUFFERED_IO:
@@ -128,12 +127,17 @@ void DeviceManager::init_devices(const std::vector< dev_info >& devices) {
     m_pdev_hdr->info_offset = PDEV_INFO_BLK_OFFSET;
     m_pdev_info = (pdev_info_block*)(m_chunk_memory + m_pdev_hdr->info_offset);
 
+    // all devices will be inited with same system uuid;
+    auto sys_uuid = hs_gen_system_uuid();
     size_t pdev_size = 0;
     for (auto& d : devices) {
         bool is_inited;
         std::unique_ptr< PhysicalDev > pdev =
-            std::make_unique< PhysicalDev >(this, d.dev_names, m_open_flags, m_system_uuid, m_pdev_id++, max_dev_offset,
+            std::make_unique< PhysicalDev >(this, d.dev_names, m_open_flags, sys_uuid, m_pdev_id++, max_dev_offset,
                                             m_drive_type, true, m_dm_info_size, &is_inited);
+
+        LOGINFO("Initializing device name: {}, type: {} with system uuid: {}.", d.dev_names, m_drive_type,
+                std::ctime(&sys_uuid));
 
         max_dev_offset += pdev->get_size();
         if (!pdev_size) {
@@ -183,7 +187,7 @@ void DeviceManager::update_vb_context(uint32_t vdev_id, const sisl::blob& ctx_da
     write_info_blocks();
 }
 
-void DeviceManager::load_and_repair_devices(const std::vector< dev_info >& devices) {
+void DeviceManager::load_and_repair_devices(const std::vector< dev_info >& devices, hs_uuid_t& sys_uuid) {
     std::vector< std::unique_ptr< PhysicalDev > > uninit_devs;
     uninit_devs.reserve(devices.size());
     uint64_t device_id = INVALID_DEV_ID;
@@ -193,8 +197,8 @@ void DeviceManager::load_and_repair_devices(const std::vector< dev_info >& devic
     for (auto& d : devices) {
         bool is_inited;
         std::unique_ptr< PhysicalDev > pdev =
-            std::make_unique< PhysicalDev >(this, d.dev_names, m_open_flags, m_system_uuid, INVALID_DEV_ID, 0,
-                                            m_drive_type, false, m_dm_info_size, &is_inited);
+            std::make_unique< PhysicalDev >(this, d.dev_names, m_open_flags, sys_uuid, INVALID_DEV_ID, 0, m_drive_type,
+                                            false, m_dm_info_size, &is_inited);
         if (!is_inited) {
             // Super block is not present, possibly a new device, will format the device later
             HS_LOG(CRITICAL, device,
@@ -202,8 +206,13 @@ void DeviceManager::load_and_repair_devices(const std::vector< dev_info >& devic
                    "Replacing it with the failed disks can cause data loss",
                    d.dev_names);
             uninit_devs.push_back(std::move(pdev));
+
+            HS_RELEASE_ASSERT(false, "hot plug-in device not supported!");
+
             continue;
         }
+
+        LOGINFO("Loaded device: {}, type: {} with system uuid: {}", d.dev_names, m_drive_type, std::ctime(&sys_uuid));
 
         if (!pdev_size) { pdev_size = pdev->get_size(); }
         HS_LOG_ASSERT_EQ(pdev_size, pdev->get_size(), "Not all physical devices are of equal size");
@@ -213,7 +222,13 @@ void DeviceManager::load_and_repair_devices(const std::vector< dev_info >& devic
             device_id = pdev->get_dev_id();
             rewrite = HS_STATIC_CONFIG(input.is_read_only) ? false : true;
         }
+#if 0
+        static auto sys_uuid = pdev->get_sys_uuid();
 
+        // sanity check that all devices should have same homestore system uuid;
+        HS_RELEASE_ASSERT_EQ(sys_uuid, pdev->get_sys_uuid(), "homestore system uuid mismatch found on devices {}, {}",
+                             sys_uuid, pdev->get_sys_uuid());
+#endif
         HS_ASSERT_NULL(LOGMSG, m_pdevs[pdev->get_dev_id()].get());
 
         m_pdevs[pdev->get_dev_id()] = std::move(pdev);
@@ -380,15 +395,50 @@ void DeviceManager::blk_alloc_meta_blk_found_cb(meta_blk* mblk, sisl::byte_view 
     chunk->recover(std::move(recovered_bm), mblk);
 }
 
+void DeviceManager::init_done() {
+    for (uint32_t dev_id = 0; dev_id < m_pdev_hdr->num_phys_devs; ++dev_id) {
+        m_pdevs[dev_id]->init_done();
+    }
+}
+
+void DeviceManager::close_devices() {
+    for (uint32_t dev_id = 0; dev_id < m_pdev_hdr->num_phys_devs; ++dev_id) {
+        m_pdevs[dev_id]->close_device();
+    }
+}
+
 /* add constant */
-void DeviceManager::add_devices(const std::vector< dev_info >& devices, bool is_init) {
+bool DeviceManager::add_devices(const std::vector< dev_info >& devices) {
     uint64_t max_dev_offset = 0;
     MetaBlkMgr::instance()->register_handler(
         "BLK_ALLOC",
         [this](meta_blk* mblk, sisl::byte_view buf, size_t size) { blk_alloc_meta_blk_found_cb(mblk, buf, size); },
         nullptr, false /* do_crc */);
 
-    is_init ? init_devices(devices) : load_and_repair_devices(devices);
+    HS_RELEASE_ASSERT(devices.size() > 0, "Expecting at least one device");
+
+    hs_uuid_t system_uuid = INVALID_SYSTEM_UUID;
+    for (auto& d : devices) {
+        std::unique_ptr< PhysicalDev > pdev =
+            std::make_unique< PhysicalDev >(this, d.dev_names, m_open_flags, m_drive_type);
+
+        if (pdev->has_valid_superblock(system_uuid)) {
+            m_first_time_boot = false;
+            break;
+        }
+
+        // otherwise, this could be a newly added device, skip and continue check other devices;
+    }
+
+    if (!m_first_time_boot) {
+        HS_DEBUG_ASSERT_NE(system_uuid, INVALID_SYSTEM_UUID);
+        load_and_repair_devices(devices, system_uuid);
+    } else {
+        HS_DEBUG_ASSERT_EQ(system_uuid, INVALID_SYSTEM_UUID);
+        init_devices(devices);
+    }
+
+    return m_first_time_boot;
 }
 
 /* Note: Whosoever is calling this function should take the mutex. We don't allow multiple reads */

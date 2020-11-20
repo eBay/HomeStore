@@ -67,6 +67,12 @@ static inline auto hs_iobuf_alloc(size_t size) {
     return iomanager.iobuf_alloc(HS_STATIC_CONFIG(drive_attr.align_size), size);
 }
 
+using hs_uuid_t = time_t;
+#define INVALID_SYSTEM_UUID 0
+static inline hs_uuid_t hs_gen_system_uuid() {
+    return std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+}
+
 static inline void hs_iobuf_free(uint8_t* ptr) { iomanager.iobuf_free(ptr); }
 
 static inline uint64_t hs_aligned_size(size_t size) {

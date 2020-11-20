@@ -224,7 +224,6 @@ public:
         params.open_flags = homestore::io_flag::DIRECT_IO;
         params.min_virtual_page_size = 4096;
         params.app_mem_size = 4 * 1024 * 1024 * 1024ul;
-        params.disk_init = init;
         params.devices = device_info;
         params.init_done_cb = std::bind(&MinHS::init_done_cb, this, std::placeholders::_1, std::placeholders::_2);
         params.vol_mounted_cb = std::bind(&MinHS::vol_mounted_cb, this, std::placeholders::_1, std::placeholders::_2);
@@ -232,7 +231,6 @@ public:
                                                std::placeholders::_2, std::placeholders::_3);
         params.vol_found_cb = std::bind(&MinHS::vol_found_cb, this, std::placeholders::_1);
         boost::uuids::string_generator gen;
-        params.system_uuid = gen("01970496-0262-11e9-8eb2-f1082f1b9fd1");
         VolInterface::init(params);
     }
 
