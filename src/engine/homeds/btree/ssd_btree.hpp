@@ -135,7 +135,7 @@ public:
         bool is_replayed = false;
 
         auto cp_id = jentry->cp_id;
-        HS_SUBMOD_LOG(TRACE, base, , "btree", m_cfg.get_name(), "seqnum {} entry cp cnt {}", seqnum, cp_id);
+        HS_SUBMOD_LOG(INFO, base, , "btree", m_cfg.get_name(), "seqnum {} entry cp cnt {}", seqnum, cp_id);
         if (jentry->cp_id > cp_sb.cp_id) {
             // Entry is not replayed yet
             if (jentry->op == journal_op::BTREE_CREATE) {
@@ -206,7 +206,10 @@ public:
 
     static void truncate(SSDBtreeStore* store, const btree_cp_ptr& bcp) { store->truncate_store(bcp); }
 
-    void truncate_store(const btree_cp_ptr& bcp) { m_journal->truncate(bcp->end_seqid); }
+    void truncate_store(const btree_cp_ptr& bcp) {
+        HS_SUBMOD_LOG(INFO, base, , "btree", m_cfg.get_name(), "seq id {}", bcp->end_seqid);
+        m_journal->truncate(bcp->end_seqid);
+    }
 
     static void destroy_done(SSDBtreeStore* store) { store->destroy_done_store(); }
 

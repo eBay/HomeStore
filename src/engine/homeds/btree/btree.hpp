@@ -2026,7 +2026,7 @@ public:
             child_node1 = reserve_interior_node(BlkId(j_child_nodes[0]->node_id()));
             btree_store_t::swap_node(m_btree_store.get(), parent_node, child_node1);
 
-            THIS_BT_LOG(TRACE, btree_generics, ,
+            THIS_BT_LOG(INFO, btree_generics, ,
                         "Journal replay: root split, so creating child_node id={} and swapping the node with "
                         "parent_node id={} names {}",
                         child_node1->get_node_id(), parent_node->get_node_id(), m_btree_cfg.get_name());
@@ -2035,21 +2035,19 @@ public:
             read_node_or_fail(j_child_nodes[0]->node_id(), child_node1);
         }
 
-        THIS_BT_LOG(TRACE, btree_generics, ,
+        THIS_BT_LOG(INFO, btree_generics, ,
                     "Journal replay: child_node1 => jentry: [id={} gen={}], ondisk: [id={} gen={}] names {}",
                     j_child_nodes[0]->node_id(), j_child_nodes[0]->node_gen(), child_node1->get_node_id(),
                     child_node1->get_gen(), m_btree_cfg.get_name());
-#ifndef NDEBUG
         if (jentry->is_root) {
-            BT_DEBUG_ASSERT_CMP(j_child_nodes[0]->type, ==, bt_journal_node_op::creation, ,
-                                "Expected first node in journal entry to be new creation for root split");
+            BT_RELEASE_ASSERT_CMP(j_child_nodes[0]->type, ==, bt_journal_node_op::creation, ,
+                                  "Expected first node in journal entry to be new creation for root split");
         } else {
-            BT_DEBUG_ASSERT_CMP(j_child_nodes[0]->type, ==, bt_journal_node_op::inplace_write, ,
-                                "Expected first node in journal entry to be in-place write");
+            BT_RELEASE_ASSERT_CMP(j_child_nodes[0]->type, ==, bt_journal_node_op::inplace_write, ,
+                                  "Expected first node in journal entry to be in-place write");
         }
-        BT_DEBUG_ASSERT_CMP(j_child_nodes[1]->type, ==, bt_journal_node_op::creation, ,
-                            "Expected second node in journal entry to be new node creation");
-#endif
+        BT_RELEASE_ASSERT_CMP(j_child_nodes[1]->type, ==, bt_journal_node_op::creation, ,
+                              "Expected second node in journal entry to be new node creation");
 
         // recover child node
         recover_child_nodes_in_split(child_node1, j_child_nodes, bcp);
@@ -2095,7 +2093,7 @@ private:
             }
         }
 
-        THIS_BT_LOG(TRACE, btree_generics, , "Journal replay: split key {}, split indx {} child_node1 {}",
+        THIS_BT_LOG(INFO, btree_generics, , "Journal replay: split key {}, split indx {} child_node1 {}",
                     split_key.to_string(), ret.end_of_search_index, child_node1->to_string());
         /* if it is not found than end_of_search_index points to first ind which is greater than split key */
         auto ind = ret.end_of_search_index;
@@ -2108,7 +2106,7 @@ private:
         child_node1->set_next_bnode(child_node2->get_node_id());
         child_node1->set_gen(j_child_nodes[0]->node_gen());
 
-        THIS_BT_LOG(TRACE, btree_generics, , "Journal replay: child_node2 {}", child_node2->to_string());
+        THIS_BT_LOG(INFO, btree_generics, , "Journal replay: child_node2 {}", child_node2->to_string());
         write_node(child_node2, nullptr, bcp);
         write_node(child_node1, child_node2, bcp);
     }
@@ -2131,10 +2129,8 @@ private:
         K child2_key; // we only need to update child2_key to new node
         if (j_child_nodes[1]->key_size != 0) {
             child2_key.set_blob({j_child_nodes[1]->key_area(), j_child_nodes[1]->key_size});
-#ifndef NDEBUG
             ret = parent_node->find(child2_key, nullptr, false);
-            BT_DEBUG_ASSERT_CMP(split_indx, ==, ret.end_of_search_index, , "it should be same as split index");
-#endif
+            BT_RELEASE_ASSERT_CMP(split_indx, ==, ret.end_of_search_index, , "it should be same as split index");
         } else {
             // parent should be valid edge it is not a root split
         }

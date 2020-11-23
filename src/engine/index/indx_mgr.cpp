@@ -360,7 +360,6 @@ void IndxMgr::io_replay() {
     uint64_t active_replay_cnt = 0;
     uint64_t gaps_found_cnt = 0;
 
-    THIS_INDX_LOG(INFO, base, , "last cp {} ", m_last_cp_sb.to_string());
     /* start replaying the entry in order of seq number */
     int64_t next_replay_seq_num = -1;
     if (m_is_snap_enabled) {
@@ -368,6 +367,7 @@ void IndxMgr::io_replay() {
     } else {
         next_replay_seq_num = m_last_cp_sb.icp_sb.active_data_seqid + 1;
     }
+    THIS_INDX_LOG(INFO, base, , "last cp {} next_replay_seq_num {} ", m_last_cp_sb.to_string(), next_replay_seq_num);
 
     auto it = seq_buf_map.cbegin();
     while (it != seq_buf_map.cend()) {
@@ -425,6 +425,7 @@ void IndxMgr::io_replay() {
              * these IOs are lost and are never going to be recovered.
              */
             m_journal->fill_gap(next_replay_seq_num);
+            THIS_INDX_LOG(INFO, base, , "fill gap seq num {} ", next_replay_seq_num);
             ++next_replay_seq_num;
             ++gaps_found_cnt;
         }
@@ -452,8 +453,9 @@ void IndxMgr::io_replay() {
     }
 
     HS_ASSERT_CMP(DEBUG, seq_buf_map.size(), ==, 0);
-    THIS_INDX_LOG(INFO, base, , "blk alloc replay cnt {} active_replay_cnt {} diff_replay_cnt{} gaps found {}",
-                  blk_alloc_replay_cnt, active_replay_cnt, diff_replay_cnt, gaps_found_cnt);
+    THIS_INDX_LOG(INFO, base, ,
+                  "blk alloc replay cnt {} active_replay_cnt {} diff_replay_cnt{} gaps found {} last replay seq num {}",
+                  blk_alloc_replay_cnt, active_replay_cnt, diff_replay_cnt, gaps_found_cnt, (next_replay_seq_num - 1));
     resume_active_cp();
     m_cp_mgr->cp_io_exit(hcp);
 }
@@ -751,8 +753,7 @@ void IndxMgr::create_new_diff_tbl(indx_cp_ptr& icp) {
 void IndxMgr::truncate(const indx_cp_ptr& icp) {
     m_journal->truncate(icp->acp.end_seqid);
     m_active_tbl->truncate(icp->acp.bcp);
-    THIS_INDX_LOG(DEBUG, indx_mgr, , "uuid={} Truncating upto last seqid={}", m_uuid,
-                  m_last_cp_sb.icp_sb.get_active_data_seqid());
+    THIS_INDX_LOG(INFO, base, , "uuid={} Truncating upto last seqid={}", m_uuid, icp->acp.end_seqid);
 }
 
 indx_tbl* IndxMgr::get_active_indx() { return m_active_tbl; }
