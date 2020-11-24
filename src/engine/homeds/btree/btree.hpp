@@ -2050,15 +2050,15 @@ public:
                               "Expected second node in journal entry to be new node creation");
 
         // recover child node
-        recover_child_nodes_in_split(child_node1, j_child_nodes, bcp);
+        bool child_split = recover_child_nodes_in_split(child_node1, j_child_nodes, bcp);
 
         // recover parent node
-        recover_parent_node_in_split(parent_node, child_node1, j_child_nodes, bcp);
+        recover_parent_node_in_split(parent_node, child_split ? child_node1 : nullptr, j_child_nodes, bcp);
         return btree_status_t::success;
     }
 
 private:
-    void recover_child_nodes_in_split(const BtreeNodePtr& child_node1,
+    bool recover_child_nodes_in_split(const BtreeNodePtr& child_node1,
                                       const std::vector< bt_journal_node_info* >& j_child_nodes,
                                       const btree_cp_ptr& bcp) {
 
@@ -2072,7 +2072,7 @@ private:
             BT_RELEASE_ASSERT_CMP(child_node2->get_gen(), >=, j_child_nodes[1]->node_gen(), child_node2,
                                   "gen cnt should be more than the journal entry");
             // no need to recover child nodes
-            return;
+            return false;
         }
 
         K split_key;
@@ -2109,6 +2109,7 @@ private:
         THIS_BT_LOG(INFO, btree_generics, , "Journal replay: child_node2 {}", child_node2->to_string());
         write_node(child_node2, nullptr, bcp);
         write_node(child_node1, child_node2, bcp);
+        return true;
     }
 
     void recover_parent_node_in_split(const BtreeNodePtr& parent_node, const BtreeNodePtr& child_node1,

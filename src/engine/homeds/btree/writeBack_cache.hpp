@@ -250,7 +250,7 @@ public:
     void write(const boost::intrusive_ptr< SSDBtreeNode >& bn, const boost::intrusive_ptr< SSDBtreeNode >& dependent_bn,
                const btree_cp_ptr& bcp) {
         const size_t cp_id{bcp->cp_id % MAX_CP_CNT};
-        HS_ASSERT(DEBUG, (!dependent_bn || dependent_bn->req[cp_id] != nullptr), "");
+        HS_ASSERT(RELEASE, (!dependent_bn || dependent_bn->req[cp_id] != nullptr), "");
         writeback_req_ptr wbd_req = dependent_bn ? dependent_bn->req[cp_id] : nullptr;
         if (!bn->req[cp_id]) {
             // create wb request 
