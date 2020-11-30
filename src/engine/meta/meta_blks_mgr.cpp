@@ -1,14 +1,45 @@
-#include "homestore.hpp"
+#include <mutex>
+
 #include "api/meta_interface.hpp"
 #include "blkstore/blkstore.hpp"
 #include "engine/blkalloc/blk_allocator.h"
+#include "homestore.hpp"
 #include "meta_sb.hpp"
 
 SDS_LOGGING_DECL(metablk)
 
 namespace homestore {
 
+// define statics
+std::unique_ptr< MetaBlkMgr > MetaBlkMgr::s_instance{};
+
+// define static functions
+// NOTE: These must be in the cpp file since std::unique_ptr reset, destructor,
+// and operator= functions require a complete definition
+MetaBlkMgr* MetaBlkMgr::instance() {
+    static std::once_flag flag1;
+    std::call_once(flag1, []() { if (!s_instance) s_instance = std::make_unique<MetaBlkMgr>(); });
+
+    return s_instance.get();
+}
+
+void MetaBlkMgr::force_reinit() { s_instance = std::make_unique< MetaBlkMgr >(); }
+
+void MetaBlkMgr::del_instance() { s_instance.reset(); }
+
 MetaBlkMgr::MetaBlkMgr() { m_last_mblk_id = std::make_unique< BlkId >(invalid_bid); }
+
+MetaBlkMgr::~MetaBlkMgr() {
+    std::lock_guard< decltype(m_shutdown_mtx) > lg_shutdown{m_shutdown_mtx};
+    cache_clear();
+
+    {
+        std::lock_guard< decltype(m_meta_mtx) > lg{m_meta_mtx};
+        m_sub_info.clear();
+    }
+    iomanager.iobuf_free(reinterpret_cast<uint8_t*>(m_ssb));
+}
+
 
 bool MetaBlkMgr::is_aligned_buf_needed(const size_t size) { return (size <= META_BLK_CONTEXT_SZ) ? false : true; }
 
@@ -42,15 +73,6 @@ void MetaBlkMgr::cache_clear() {
 
     m_meta_blks.clear();
     m_ovf_blk_hdrs.clear();
-}
-
-MetaBlkMgr::~MetaBlkMgr() {
-    std::lock_guard< decltype(m_meta_mtx) > lg_shutdown(m_shutdown_mtx);
-    cache_clear();
-
-    std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
-    m_sub_info.clear();
-    iomanager.iobuf_free((uint8_t*)m_ssb);
 }
 
 // sync read
@@ -902,8 +924,6 @@ uint64_t MetaBlkMgr::get_meta_size(const void* cookie) {
 uint64_t MetaBlkMgr::get_size() { return m_sb_blk_store->get_size(); }
 
 uint64_t MetaBlkMgr::get_used_size() { return m_sb_blk_store->get_used_size(); }
-
-std::unique_ptr< MetaBlkMgr > MetaBlkMgr::s_instance{};
 
 bool MetaBlkMgr::m_self_recover{false};
 } // namespace homestore

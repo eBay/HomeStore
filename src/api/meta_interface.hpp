@@ -5,12 +5,15 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <system_error>
+#include <vector>
+
 #include <fds/utils.hpp>
 
-//#include "meta_sb.hpp"
-
 namespace homestore {
+
+// forward declarations
 struct meta_blk_ovf_hdr;
 struct meta_blk_sb;
 struct meta_blk;
@@ -21,15 +24,17 @@ class BlkBuffer;
 template < typename BAllocator, typename Buffer >
 class BlkStore;
 class VdevVarSizeBlkAllocatorPolicy;
-using blk_store_t = homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy, BlkBuffer >;
 
-// each subsystem could receive callbacks multiple times;
-using meta_blk_found_cb_t = std::function< void(meta_blk* mblk, sisl::byte_view buf,
-                                                size_t size) >;         // new blk found subsystem callback
-using meta_blk_recover_comp_cb_t = std::function< void(bool success) >; // recover complete subsystem callbacks;
-using meta_blk_map_t = std::map< uint64_t, meta_blk* >;                 // blkid to meta_blk map;
-using ovf_hdr_map_t = std::map< uint64_t, meta_blk_ovf_hdr* >;          // ovf_blkid to ovf_blk_hdr map;
-using meta_sub_type = std::string;
+typedef homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy, BlkBuffer > blk_store_t;
+// each subsystem could receive callbacks multiple times
+// NOTE: look at this prototype some other time for const correctness and efficiency
+typedef std::function< void(meta_blk* mblk, sisl::byte_view buf,
+                            size_t size) >
+    meta_blk_found_cb_t;                                                // new blk found subsystem callback
+typedef std::function< void(bool success) > meta_blk_recover_comp_cb_t; // recover complete subsystem callbacks;
+typedef std::map< uint64_t, meta_blk* > meta_blk_map_t;               // blkid to meta_blk map;
+typedef std::map< uint64_t, meta_blk_ovf_hdr* > ovf_hdr_map_t;          // ovf_blkid to ovf_blk_hdr map;
+typedef std::string meta_sub_type;
 
 static constexpr uint32_t META_BLK_PAGE_SZ = 4096; // meta block page size
 
@@ -53,6 +58,8 @@ public:
     MetaBlkMgr& operator=(const MetaBlkMgr&) = delete;
     MetaBlkMgr& operator=(MetaBlkMgr&&) noexcept = delete;
 
+    ~MetaBlkMgr();
+
     /**
      * @brief :
      *
@@ -70,22 +77,12 @@ public:
      *
      * @return
      */
-    static MetaBlkMgr* instance() {
-        static std::once_flag flag1;
-        std::call_once(flag1, []() { s_instance.reset(new MetaBlkMgr()); });
-
-        return s_instance.get();
-    }
+    static MetaBlkMgr* instance();
 
     /* Note: it assumes that it is called in a single thread */
-    static void force_reinit() { s_instance.reset(new MetaBlkMgr()); }
+    static void force_reinit();
 
-    static void del_instance() { s_instance.reset(); }
-
-    /**
-     * @brief :
-     */
-    ~MetaBlkMgr();
+    static void del_instance();
 
     /**
      * @brief : Register subsystem callbacks
