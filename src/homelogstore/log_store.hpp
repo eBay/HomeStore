@@ -92,28 +92,7 @@ struct logstore_info_t {
 
 class HomeLogStoreMgrMetrics : public sisl::MetricsGroup {
 public:
-    explicit HomeLogStoreMgrMetrics() : sisl::MetricsGroup("LogStores", "AllLogStores") {
-        REGISTER_COUNTER(logstores_count, "Total number of log stores", sisl::_publish_as::publish_as_gauge);
-        REGISTER_COUNTER(logstore_append_count, "Total number of append requests to log stores", "logstore_op_count",
-                         {"op", "write"});
-        REGISTER_COUNTER(logstore_read_count, "Total number of read requests to log stores", "logstore_op_count",
-                         {"op", "read"});
-        REGISTER_COUNTER(logdev_flush_by_size_count, "Total flushing attempted because of filled buffer");
-        REGISTER_COUNTER(logdev_flush_by_timer_count, "Total flushing attempted because of expired timer");
-        REGISTER_COUNTER(logdev_back_to_back_flushing, "Number of attempts to do back to back flush prepare");
-
-        REGISTER_HISTOGRAM(logstore_append_latency, "Logstore append latency", "logstore_op_latency", {"op", "write"});
-        REGISTER_HISTOGRAM(logstore_read_latency, "Logstore read latency", "logstore_op_latency", {"op", "read"});
-        REGISTER_HISTOGRAM(logdev_flush_size_distribution, "Distribution of flush data size",
-                           HistogramBucketsType(ExponentialOfTwoBuckets));
-        REGISTER_HISTOGRAM(logdev_flush_records_distribution, "Distribution of num records to flush",
-                           HistogramBucketsType(LinearUpto128Buckets));
-        REGISTER_HISTOGRAM(logstore_record_size, "Distribution of log record size",
-                           HistogramBucketsType(ExponentialOfTwoBuckets));
-
-        register_me_to_farm();
-    }
-
+    HomeLogStoreMgrMetrics();
     HomeLogStoreMgrMetrics(const HomeLogStoreMgrMetrics&) = delete;
     HomeLogStoreMgrMetrics(HomeLogStoreMgrMetrics&&) noexcept = delete;
     HomeLogStoreMgrMetrics& operator=(const HomeLogStoreMgrMetrics&) = delete;
@@ -125,7 +104,7 @@ class HomeLogStoreMgr {
     friend class HomeLogStore;
     friend class LogDev;
 
-    HomeLogStoreMgr() { REGISTER_METABLK_SUBSYSTEM(log_dev, "LOG_DEV", HomeLogStoreMgr::meta_blk_found_cb, nullptr) }
+    HomeLogStoreMgr();
 
 public:
     HomeLogStoreMgr(const HomeLogStoreMgr&) = delete;
@@ -133,12 +112,8 @@ public:
     HomeLogStoreMgr& operator=(const HomeLogStoreMgr&) = delete;
     HomeLogStoreMgr& operator=(HomeLogStoreMgr&&) noexcept = delete;
 
-    static HomeLogStoreMgr& instance() {
-        static HomeLogStoreMgr inst{};
-        return inst;
-    }
-
-    static LogDev& logdev() { return HomeLogStoreMgr::instance().m_log_dev; }
+    static HomeLogStoreMgr& instance();
+    static LogDev& logdev();
     static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size);
 
     using device_truncate_cb_t = std::function< void(const logdev_key&) >;

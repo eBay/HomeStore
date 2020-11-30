@@ -19,6 +19,15 @@ void HomeLogStoreMgr::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, siz
 }
 
 /////////////////////////////////////// HomeLogStoreMgr Section ///////////////////////////////////////
+HomeLogStoreMgr& HomeLogStoreMgr::instance() {
+    static HomeLogStoreMgr inst;
+    return inst;
+}
+
+HomeLogStoreMgr::HomeLogStoreMgr() {
+    REGISTER_METABLK_SUBSYSTEM(log_dev, "LOG_DEV", HomeLogStoreMgr::meta_blk_found_cb, nullptr)
+}
+
 void HomeLogStoreMgr::start(bool format) {
     m_log_dev.register_store_found_cb(bind_this(HomeLogStoreMgr::__on_log_store_found, 2));
     m_log_dev.register_append_cb(bind_this(HomeLogStoreMgr::__on_io_completion, 5));
@@ -265,6 +274,8 @@ nlohmann::json HomeLogStoreMgr::dump_log_store(const log_dump_req& dump_req) {
     }
     return json_dump;
 }
+
+LogDev& HomeLogStoreMgr::logdev() { return HomeLogStoreMgr::instance().m_log_dev; }
 
 /////////////////////////////////////// HomeLogStore Section ///////////////////////////////////////
 HomeLogStore::HomeLogStore(const logstore_id_t id, const bool append_mode, const logstore_seq_num_t start_lsn) :
@@ -568,6 +579,28 @@ logstore_seq_num_t HomeLogStore::get_contiguous_issued_seq_num(logstore_seq_num_
 
 logstore_seq_num_t HomeLogStore::get_contiguous_completed_seq_num(logstore_seq_num_t from) {
     return (logstore_seq_num_t)m_records.completed_upto(from + 1);
+}
+
+HomeLogStoreMgrMetrics::HomeLogStoreMgrMetrics() : sisl::MetricsGroup("LogStores", "AllLogStores") {
+    REGISTER_COUNTER(logstores_count, "Total number of log stores", sisl::_publish_as::publish_as_gauge);
+    REGISTER_COUNTER(logstore_append_count, "Total number of append requests to log stores", "logstore_op_count",
+                     {"op", "write"});
+    REGISTER_COUNTER(logstore_read_count, "Total number of read requests to log stores", "logstore_op_count",
+                     {"op", "read"});
+    REGISTER_COUNTER(logdev_flush_by_size_count, "Total flushing attempted because of filled buffer");
+    REGISTER_COUNTER(logdev_flush_by_timer_count, "Total flushing attempted because of expired timer");
+    REGISTER_COUNTER(logdev_back_to_back_flushing, "Number of attempts to do back to back flush prepare");
+
+    REGISTER_HISTOGRAM(logstore_append_latency, "Logstore append latency", "logstore_op_latency", {"op", "write"});
+    REGISTER_HISTOGRAM(logstore_read_latency, "Logstore read latency", "logstore_op_latency", {"op", "read"});
+    REGISTER_HISTOGRAM(logdev_flush_size_distribution, "Distribution of flush data size",
+                       HistogramBucketsType(ExponentialOfTwoBuckets));
+    REGISTER_HISTOGRAM(logdev_flush_records_distribution, "Distribution of num records to flush",
+                       HistogramBucketsType(LinearUpto128Buckets));
+    REGISTER_HISTOGRAM(logstore_record_size, "Distribution of log record size",
+                       HistogramBucketsType(ExponentialOfTwoBuckets));
+
+    register_me_to_farm();
 }
 
 logstore_meta logstore_meta::default_value() { return logstore_meta{-1}; }
