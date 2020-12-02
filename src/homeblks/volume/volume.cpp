@@ -891,7 +891,7 @@ std::vector< iovec > Volume::get_next_iovecs(IoVecTransversal& iovec_transversal
             } else {
                 // consume iovec
                 iov_ptr->iov_len = remaining;
-                iovec_transversal.current_iovecs_offset+= 0;
+                iovec_transversal.current_iovecs_offset = 0;
                 ++iovec_transversal.iovecs_index;
             }
             data_consumed += iov_ptr->iov_len;

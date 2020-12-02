@@ -29,12 +29,6 @@ build*
 *.out
 *.app
 
-# CMake generated files and directories
-CMakeFiles
-CMakeCache.txt
-Makefile
-cmake-*
-
 ### Editor Swap Files
 *.swp
 *.kate-swp
@@ -100,13 +94,14 @@ bin/**
 Testing/**
 test_package/build
 
-# Settings generated files
-generated/*
-debug/*
-release/*
+# Settings generated files and build files
+generated/**
+debug/**
+release/**
+cmake-*/**
 
 # vscode
-.vscode/*
+.vscode/**
 
 # Visual Studio
 CMakeSettings.json
