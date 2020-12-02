@@ -45,6 +45,8 @@ public:
     static VolInterface* init(const init_params& cfg, bool force_reinit);
     static boost::intrusive_ptr< VolInterface > safe_instance();
     static VolInterface* raw_instance();
+    static void zero_boot_sbs(const std::vector< dev_info >& devices, iomgr::iomgr_drive_type drive_type,
+                              io_flag oflags);
 };
 
 struct buf_info {
@@ -208,12 +210,19 @@ public:
 
 class VolInterface {
 public:
-    virtual ~VolInterface() {}
+    ////////////////////////////////  static Volinterface member functions for its consumer ///////////////
     static bool init(const init_params& cfg, bool force_reinit = false) {
         return (VolInterfaceImpl::init(cfg, force_reinit) != nullptr);
     }
+
     static VolInterface* get_instance() { return VolInterfaceImpl::raw_instance(); }
 
+    static void zero_boot_sbs(const std::vector< dev_info >& devices, iomgr::iomgr_drive_type drive_type,
+                              io_flag oflags) {
+        return VolInterfaceImpl::zero_boot_sbs(devices, drive_type, oflags);
+    }
+
+    virtual ~VolInterface() {}
     ///
     /// @brief Create a vol interface request to do IO using vol interface. This is a helper method and caller are
     /// welcome to create a request derived from vol interface request and pass it along instead of calling this method.
@@ -349,5 +358,5 @@ public:
     virtual void set_io_flip() = 0;
     virtual void set_error_flip() = 0;
 #endif
-};
+}; // namespace homestore
 } // namespace homestore

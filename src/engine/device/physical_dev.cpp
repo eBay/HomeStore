@@ -81,10 +81,11 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
 
 PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int const oflags, hs_uuid_t& system_uuid,
                          uint32_t dev_num, uint64_t dev_offset, iomgr::iomgr_drive_type drive_type, bool is_init,
-                         uint64_t dm_info_size, bool* is_inited) :
+                         uint64_t dm_info_size, bool* is_inited, bool is_restricted_mode) :
         m_mgr{mgr},
         m_devname{devname},
-        m_metrics{devname} {
+        m_metrics{devname},
+        m_restricted_mode{is_restricted_mode} {
     /* super block should always be written atomically. */
     HS_LOG_ASSERT_LE(sizeof(super_block), SUPERBLOCK_SIZE, "Device {} Ondisk Superblock size not enough to hold in-mem",
                      devname);
@@ -242,6 +243,36 @@ void PhysicalDev::write_super_block(uint64_t gen_cnt) {
     // Write the information to the offset
     write_superblock();
     m_superblock_valid = true;
+}
+
+void PhysicalDev::zero_boot_sbs(const std::vector< dev_info >& devices, iomgr_drive_type drive_type, const int oflags) {
+    // alloc re-usable super block
+    auto super_blk = (super_block*)hs_iobuf_alloc(SUPERBLOCK_SIZE);
+
+    // zero in-memory super block
+    memset(super_blk, 0, SUPERBLOCK_SIZE);
+
+    for (const auto dev : devices) {
+        HS_LOG_ASSERT_LE(sizeof(super_block), SUPERBLOCK_SIZE,
+                         "Device {} Ondisk Superblock size not enough to hold in-mem", dev.dev_names);
+        // open device
+        auto iodev = drive_iface->open_dev(dev.dev_names.c_str(), drive_type, oflags);
+
+        // write zeroed sb to disk
+        auto bytes = drive_iface->sync_write(iodev.get(), (const char*)super_blk, SUPERBLOCK_SIZE, 0);
+        if (sisl_unlikely((bytes < 0) || (size_t)bytes != SUPERBLOCK_SIZE)) {
+            LOGINFO("Failed to zeroed superblock of device: {}, errno: {}", dev.dev_names, errno);
+            throw std::system_error(errno, std::system_category(), "error while writing a superblock" + dev.dev_names);
+        }
+
+        LOGINFO("Successfully zeroed superblock of device: {}", dev.dev_names);
+
+        // close device;
+        drive_iface->close_dev(iodev);
+    }
+
+    // free super_blk
+    iomanager.iobuf_free((uint8_t*)super_blk);
 }
 
 void PhysicalDev::zero_superblock() {

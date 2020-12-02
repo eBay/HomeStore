@@ -55,24 +55,14 @@ std::shared_ptr< blkalloc_cp > PhysicalDevChunk::attach_prepare_cp(std::shared_p
 
 DeviceManager::DeviceManager(NewVDevCallback vcb, uint32_t const vdev_metadata_size,
                              const iomgr::io_interface_comp_cb_t& io_comp_cb, iomgr::iomgr_drive_type drive_type,
-                             const vdev_error_callback& vdev_error_cb) :
+                             const vdev_error_callback& vdev_error_cb, bool is_restricted_mode) :
         m_new_vdev_cb{vcb},
         m_drive_type{drive_type},
         m_vdev_metadata_size{vdev_metadata_size},
-        m_vdev_error_cb{vdev_error_cb} {
-    switch (HS_STATIC_CONFIG(input.open_flags)) {
-    case io_flag::BUFFERED_IO:
-        m_open_flags = O_RDWR | O_CREAT;
-        break;
-    case io_flag::READ_ONLY:
-        m_open_flags = O_RDONLY;
-        break;
-    case io_flag::DIRECT_IO:
-        m_open_flags = O_RDWR | O_CREAT | O_DIRECT;
-        break;
-    default:
-        m_open_flags = O_RDWR | O_CREAT;
-    }
+        m_vdev_error_cb{vdev_error_cb},
+        m_restricted_mode{is_restricted_mode} {
+
+    m_open_flags = get_open_flags(HS_STATIC_CONFIG(input.open_flags));
 
     m_dm_info_size = sisl::round_up(DM_INFO_BLK_SIZE, HS_STATIC_CONFIG(drive_attr.phys_page_size));
 
@@ -134,7 +124,7 @@ void DeviceManager::init_devices(const std::vector< dev_info >& devices) {
         bool is_inited;
         std::unique_ptr< PhysicalDev > pdev =
             std::make_unique< PhysicalDev >(this, d.dev_names, m_open_flags, sys_uuid, m_pdev_id++, max_dev_offset,
-                                            m_drive_type, true, m_dm_info_size, &is_inited);
+                                            m_drive_type, true, m_dm_info_size, &is_inited, m_restricted_mode);
 
         LOGINFO("Initializing device name: {}, type: {} with system uuid: {}.", d.dev_names, m_drive_type,
                 std::ctime(&sys_uuid));
@@ -198,7 +188,7 @@ void DeviceManager::load_and_repair_devices(const std::vector< dev_info >& devic
         bool is_inited;
         std::unique_ptr< PhysicalDev > pdev =
             std::make_unique< PhysicalDev >(this, d.dev_names, m_open_flags, sys_uuid, INVALID_DEV_ID, 0, m_drive_type,
-                                            false, m_dm_info_size, &is_inited);
+                                            false, m_dm_info_size, &is_inited, m_restricted_mode);
         if (!is_inited) {
             // Super block is not present, possibly a new device, will format the device later
             HS_LOG(CRITICAL, device,
@@ -407,6 +397,36 @@ void DeviceManager::close_devices() {
     }
 }
 
+int DeviceManager::get_open_flags(io_flag oflags) {
+    int open_flags = O_RDWR | O_CREAT;
+
+    switch (oflags) {
+    case io_flag::BUFFERED_IO:
+        open_flags = O_RDWR | O_CREAT;
+        break;
+    case io_flag::READ_ONLY:
+        open_flags = O_RDONLY;
+        break;
+    case io_flag::DIRECT_IO:
+        open_flags = O_RDWR | O_CREAT | O_DIRECT;
+        break;
+    default:
+        open_flags = O_RDWR | O_CREAT;
+    }
+
+    return open_flags;
+}
+
+void DeviceManager::zero_boot_sbs(const std::vector< dev_info >& devices, iomgr_drive_type drive_type, io_flag oflags) {
+    return PhysicalDev::zero_boot_sbs(devices, drive_type, get_open_flags(oflags));
+}
+#if 0
+void DeviceManager::zero_pdev_sbs() {
+    for (uint32_t dev_id = 0; dev_id < m_pdev_hdr->num_phys_devs; ++dev_id) {
+        m_pdevs[dev_id]->zero_superblock();
+    }
+}
+#endif
 /* add constant */
 bool DeviceManager::add_devices(const std::vector< dev_info >& devices) {
     uint64_t max_dev_offset = 0;

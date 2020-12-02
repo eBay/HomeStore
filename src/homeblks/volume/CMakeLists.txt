@@ -38,6 +38,13 @@ if (${CONAN_TEST_TARGET} STREQUAL "full")
         )
     add_executable(perf_test_volume ${PERF_TEST_VOLUME_SOURCE_FILES})
     target_link_libraries(perf_test_volume homeblks ${CONAN_LIBS})
+
+    set(HS_SVC_TOOL_SOURCE_FILES
+       hs_svc_tool.cpp
+       )
+    add_executable(hs_svc_tool ${HS_SVC_TOOL_SOURCE_FILES})
+    target_link_libraries(hs_svc_tool homeblks ${CONAN_LIBS})
+
 #add_executable(test_merge
 #                  ${TEST_MERGE_SOURCE_FILES}
 #              )

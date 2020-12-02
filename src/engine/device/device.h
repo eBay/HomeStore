@@ -355,7 +355,7 @@ public:
      */
     PhysicalDev(DeviceManager* mgr, const std::string& devname, int const oflags, hs_uuid_t& uuid, uint32_t dev_num,
                 uint64_t dev_offset, iomgr::iomgr_drive_type drive_type, bool is_init, uint64_t dm_info_size,
-                bool* is_inited);
+                bool* is_inited, bool is_restricted_mode);
 
     PhysicalDev(DeviceManager* mgr, const std::string& devname, int const oflags, iomgr::iomgr_drive_type drive_type);
     ~PhysicalDev();
@@ -425,6 +425,9 @@ public:
 
     hs_uuid_t get_sys_uuid() { return m_super_blk->get_sys_uuid(); }
 
+public:
+    static void zero_boot_sbs(const std::vector< dev_info >& devices, iomgr_drive_type drive_type, const int oflags);
+
 private:
     inline void write_superblock();
     inline void read_superblock();
@@ -481,7 +484,7 @@ class DeviceManager {
 public:
     DeviceManager(NewVDevCallback vcb, uint32_t const vdev_metadata_size,
                   const iomgr::io_interface_comp_cb_t& io_comp_cb, iomgr::iomgr_drive_type drive_type,
-                  const vdev_error_callback& vdev_error_cb);
+                  const vdev_error_callback& vdev_error_cb, bool is_restricted_mode);
 
     ~DeviceManager();
 
@@ -546,6 +549,10 @@ public:
     void init_done();
     void close_devices();
     bool is_first_time_boot() const { return m_first_time_boot; }
+    // void zero_pdev_sbs();
+
+public:
+    static void zero_boot_sbs(const std::vector< dev_info >& devices, iomgr_drive_type drive_type, io_flag oflags);
 
 private:
     void load_and_repair_devices(const std::vector< dev_info >& devices, hs_uuid_t& system_uuid);
@@ -559,6 +566,8 @@ private:
                                        PhysicalDevChunk* prev_chunk);
     void remove_chunk(uint32_t chunk_id);
     void blk_alloc_meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size);
+
+    static int get_open_flags(io_flag oflags);
 
 private:
     int m_open_flags;
@@ -591,6 +600,7 @@ private:
     uint64_t m_dm_info_size{0};
     vdev_error_callback m_vdev_error_cb;
     bool m_first_time_boot{true};
+    bool m_restricted_mode;
 }; // class DeviceManager
 
 } // namespace homestore

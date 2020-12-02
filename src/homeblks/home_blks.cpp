@@ -28,6 +28,11 @@ bool same_value_gen = false;
 std::string HomeBlks::version = PACKAGE_VERSION;
 thread_local std::vector< std::shared_ptr< Volume > >* HomeBlks::s_io_completed_volumes = nullptr;
 
+void VolInterfaceImpl::zero_boot_sbs(const std::vector< dev_info >& devices, iomgr_drive_type drive_type,
+                                     io_flag oflags) {
+    return (HomeBlks::zero_boot_sbs(devices, drive_type, oflags));
+}
+
 VolInterface* VolInterfaceImpl::init(const init_params& cfg, bool force_reinit) {
     return (HomeBlks::init(cfg, force_reinit));
 }
@@ -70,6 +75,12 @@ VolInterface* HomeBlks::init(const init_params& cfg, bool force_reinit) {
         assert(0);
         return nullptr;
     }
+}
+
+void HomeBlks::zero_boot_sbs(const std::vector< dev_info >& devices, iomgr_drive_type drive_type, io_flag oflags) {
+    auto& hs_config = HomeStoreStaticConfig::instance();
+    hs_config.drive_attr = get_drive_attrs(devices, drive_type);
+    return DeviceManager::zero_boot_sbs(devices, drive_type, oflags);
 }
 
 vol_interface_req::vol_interface_req(void* const buf, const uint64_t lba, const uint32_t nlbas, const bool is_sync,
@@ -810,6 +821,4 @@ void HomeBlks::read(const SnapshotPtr& snap, const snap_interface_req_ptr& req) 
 
 bool HomeBlks::m_meta_blk_found = false;
 
-HomeBlksStatusMgr* HomeBlks::get_status_mgr() {
-    return m_hb_status_mgr.get();
-}
+HomeBlksStatusMgr* HomeBlks::get_status_mgr() { return m_hb_status_mgr.get(); }

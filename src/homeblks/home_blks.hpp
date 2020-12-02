@@ -123,6 +123,7 @@ public:
      */
     static HomeBlks* instance();
     static HomeBlksSafePtr safe_instance();
+    static void zero_boot_sbs(const std::vector< dev_info >& devices, iomgr_drive_type drive_type, io_flag oflags);
 
     ~HomeBlks() {}
     virtual std::error_condition write(const VolumePtr& vol, const vol_interface_req_ptr& req,
@@ -193,7 +194,9 @@ public:
     virtual void print_tree(const VolumePtr& vol, bool chksum = true) override;
     virtual bool verify_tree(const VolumePtr& vol) override;
     virtual void print_node(const VolumePtr& vol, uint64_t blkid, bool chksum = true) override;
-
+#if 0
+    virtual void zero_pdev_sbs() override { HomeStore< BLKSTORE_BUFFER_TYPE >::zero_pdev_sbs(); }
+#endif
 public:
     /***************************** APIs exposed to homestore subsystem ***********************/
     uint64_t get_boot_cnt() const {

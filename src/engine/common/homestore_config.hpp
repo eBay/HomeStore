@@ -70,6 +70,7 @@ public:
     uint64_t app_mem_size = 1 * 1024 * 1024 * 1024; // memory available for the app (including cache)
     bool disk_init = false;                         // Deprecated. true if disk has to be initialized.
     bool is_read_only = false;                      // Is read only
+    bool is_restricted_mode = false;                // boot in restricted mode
 
     /* optional parameters - if provided will override the startup config */
     boost::optional< iomgr::drive_attributes > drive_attr;

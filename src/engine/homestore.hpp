@@ -84,7 +84,7 @@ public:
         m_dev_mgr = std::make_unique< DeviceManager >(
             std::bind(&HomeStore::new_vdev_found, this, std::placeholders::_1, std::placeholders::_2),
             sizeof(sb_blkstore_blob), virtual_dev_process_completions, input.device_type,
-            std::bind(&HomeStore::process_vdev_error, this, std::placeholders::_1));
+            std::bind(&HomeStore::process_vdev_error, this, std::placeholders::_1), input.is_restricted_mode);
     }
 
     cap_attrs get_system_capacity() {
@@ -155,12 +155,6 @@ protected:
     }
 
     void close_devices() { m_dev_mgr->close_devices(); }
-
-    static void force_reinit() {
-        MetaBlkMgr::force_reinit();
-        IndxMgr::force_reinit();
-        meta_blk_mgr->register_handler("LOG_DEV", HomeLogStoreMgr::meta_blk_found_cb, nullptr);
-    }
 
     void new_vdev_found(DeviceManager* dev_mgr, vdev_info_block* vb) {
         /* create blkstore */
@@ -348,8 +342,21 @@ protected:
     void set_available_size(int64_t sz) { m_size_avail = sz; }
     virtual DeviceManager* get_device_manager() override { return m_dev_mgr.get(); }
 
+public:
+    /////////////////////////////////////////// static HomeStore member functions /////////////////////////////////
+    static void force_reinit() {
+        MetaBlkMgr::force_reinit();
+        IndxMgr::force_reinit();
+        meta_blk_mgr->register_handler("LOG_DEV", HomeLogStoreMgr::meta_blk_found_cb, nullptr);
+    }
+
+#if 0
+    static void zero_pdev_sbs(const std::vector< dev_info >& devices) { DeviceManager::zero_pdev_sbs(devices); }
+#endif
+
 private:
-    iomgr::drive_attributes get_drive_attrs(const std::vector< dev_info >& devices, const iomgr_drive_type drive_type) {
+    static iomgr::drive_attributes get_drive_attrs(const std::vector< dev_info >& devices,
+                                                   const iomgr_drive_type drive_type) {
         auto drive_iface = iomgr::IOManager::instance().default_drive_interface();
         iomgr::drive_attributes attr = drive_iface->get_attributes(devices[0].dev_names, drive_type);
 #ifndef NDEBUG
