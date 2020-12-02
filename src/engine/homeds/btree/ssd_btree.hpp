@@ -179,6 +179,7 @@ public:
             m_btree->create_btree_replay(nullptr, m_first_cp);
             m_first_cp->btree_size.fetch_add(1);
         }
+        m_btree->replay_done(m_first_cp);
     }
 
     static void cp_start(SSDBtreeStore* store, const btree_cp_ptr& bcp, cp_comp_callback cb) {

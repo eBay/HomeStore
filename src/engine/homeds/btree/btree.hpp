@@ -185,6 +185,11 @@ public:
         btree_store_t::update_sb(m_btree_store.get(), m_sb, &m_last_cp_sb, is_recovery);
     }
 
+    void replay_done(const btree_cp_ptr& bcp) {
+        m_total_nodes = m_last_cp_sb.btree_size + bcp->btree_size.load();
+        THIS_BT_LOG(INFO, base, , "total btree nodes {}", m_total_nodes);
+    }
+
     btree_status_t init() {
         do_common_init();
         return (create_root_node());
@@ -2486,7 +2491,6 @@ private:
         if (n == nullptr) { return nullptr; }
         n->set_leaf(true);
         COUNTER_INCREMENT(m_metrics, btree_leaf_node_count, 1);
-        m_total_nodes++;
         return n;
     }
 
@@ -2495,7 +2499,6 @@ private:
         if (n == nullptr) { return nullptr; }
         n->set_leaf(false);
         COUNTER_INCREMENT(m_metrics, btree_int_node_count, 1);
-        m_total_nodes++;
         return n;
     }
 
