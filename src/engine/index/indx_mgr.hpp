@@ -353,6 +353,7 @@ public:
     virtual btree_status_t update_unmap_active_indx_tbl(blkid_list_ptr free_list, uint64_t& seq_id, void* key,
                                                         homeds::btree::BtreeQueryCursor& cur, const btree_cp_ptr& bcp,
                                                         int64_t& size, bool force) = 0;
+    virtual uint64_t get_btree_node_cnt() = 0;
 };
 
 typedef std::function< void(const boost::intrusive_ptr< indx_req >& ireq, std::error_condition err) > io_done_cb;

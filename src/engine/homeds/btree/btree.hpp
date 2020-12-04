@@ -295,6 +295,7 @@ public:
         btree_sb.btree_size = bcp->btree_size.load() + m_last_cp_sb.btree_size;
         btree_sb.cp_id = bcp->cp_id;
         HS_ASSERT_CMP(DEBUG, (int64_t)m_last_cp_sb.cp_id, ==, (int64_t)bcp->cp_id - 1);
+        THIS_BT_LOG(INFO, base, , "btree cp size {}", bcp->btree_size.load());
         memcpy(&m_last_cp_sb, &btree_sb, sizeof(m_last_cp_sb));
     }
 
@@ -783,6 +784,40 @@ public:
         for (auto l : leaves) {
             l->get_all_kvs(kvs);
         }
+    }
+
+    uint64_t get_btree_node_cnt() {
+        uint64_t cnt = 0;
+        m_btree_lock.read_lock();
+        /* increment it for root */
+        cnt++;
+        get_child_node_cnt(m_root_node, cnt);
+        m_btree_lock.unlock();
+        return cnt;
+    }
+
+    void get_child_node_cnt(bnodeid_t bnodeid, uint64_t& cnt) {
+        BtreeNodePtr node;
+
+        homeds::thread::locktype acq_lock = homeds::thread::locktype::LOCKTYPE_READ;
+
+        if (read_and_lock_node(bnodeid, node, acq_lock, acq_lock, nullptr) != btree_status_t::success) { return; }
+
+        if (!node->is_leaf()) {
+            uint32_t i = 0;
+            while (i < node->get_total_entries()) {
+                BtreeNodeInfo p;
+                node->get(i, &p, false);
+                get_child_node_cnt(p.bnode_id(), cnt);
+                i++;
+                cnt++;
+            }
+            if (node->has_valid_edge()) {
+                get_child_node_cnt(node->get_edge_id(), cnt);
+                cnt++;
+            }
+        }
+        unlock_node(node, acq_lock);
     }
 
     void print_tree() {
@@ -2016,8 +2051,9 @@ public:
 
         // Parent already went ahead of the journal entry, return done
         if (parent_node->get_gen() >= jentry->parent_node.node_gen) {
-            THIS_BT_LOG(INFO, base, , "Journal replay: parent_node gen {} ahead of jentry gen {}, skipping ",
-                        parent_node->get_gen(), jentry->parent_node.get_gen());
+            THIS_BT_LOG(INFO, base, ,
+                        "Journal replay: parent_node gen {} ahead of jentry gen {} is root {} , skipping ",
+                        parent_node->get_gen(), jentry->parent_node.get_gen(), jentry->is_root);
             return btree_status_t::replay_not_needed;
         }
 

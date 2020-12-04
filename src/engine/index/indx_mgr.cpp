@@ -545,7 +545,7 @@ void IndxMgr::flush_free_blks(const indx_cp_ptr& icp, hs_cp* hcp) {
 
 void IndxMgr::update_cp_sb(indx_cp_ptr& icp, hs_cp* hcp, indx_cp_base_sb* sb) {
     /* copy the last superblock and then override the change values */
-    THIS_INDX_LOG(TRACE, cp, , "updating cp superblock. CP info {}", icp->to_string());
+    THIS_INDX_LOG(INFO, cp, , "updating cp superblock. CP info {}", icp->to_string());
     memcpy(sb, &m_last_cp_sb, sizeof(m_last_cp_sb));
 
     if (icp->flags == cp_state::suspend_cp) {
@@ -1184,6 +1184,8 @@ cap_attrs IndxMgr::get_used_size() {
     cap_attrs attrs;
     attrs.used_data_size = m_last_cp_sb.icp_sb.indx_size;
     attrs.used_index_size = m_active_tbl->get_used_size();
+    THIS_INDX_LOG(INFO, base, , "tree used index size {} node cnt {}", attrs.used_index_size / 4096,
+                  m_active_tbl->get_btree_node_cnt());
     attrs.used_total_size = attrs.used_data_size + attrs.used_index_size;
     return attrs;
 }

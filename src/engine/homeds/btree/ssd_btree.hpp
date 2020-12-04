@@ -147,6 +147,8 @@ public:
             is_replayed = true;
         }
 
+        HS_SUBMOD_LOG(INFO, base, , "btree", m_cfg.get_name(), "blkalloc cp_id {} seqid {}", cp_sb.blkalloc_cp_id,
+                      seqnum);
         if (jentry->cp_id > cp_sb.blkalloc_cp_id) {
             /* get all the free blks and allocated blks and set it in a bitmap. These entries are not persisted yet in a
              * bitmap.
@@ -161,11 +163,13 @@ public:
 
             /* getting all the allocated blks */
             jentry->foreach_node(bt_journal_node_op::creation,
-                                 ([this, is_replayed](bt_node_gen_pair node_info, sisl::blob key_blob) {
+                                 ([this, is_replayed, seqnum](bt_node_gen_pair node_info, sisl::blob key_blob) {
                                      assert(node_info.node_id != empty_bnodeid);
                                      BlkId bid(node_info.node_id);
                                      m_blkstore->reserve_blk(bid);
-                                     if (is_replayed) { m_first_cp->btree_size.fetch_add(1); }
+                                     if (is_replayed) {
+                                         m_first_cp->btree_size.fetch_add(1);
+                                     }
                                  }));
         }
     }
@@ -179,6 +183,7 @@ public:
             m_btree->create_btree_replay(nullptr, m_first_cp);
             m_first_cp->btree_size.fetch_add(1);
         }
+        HS_SUBMOD_LOG(INFO, base, , "btree", m_cfg.get_name(), "size {}", m_first_cp->btree_size.load());
         m_btree->replay_done(m_first_cp);
     }
 
@@ -208,7 +213,7 @@ public:
     static void truncate(SSDBtreeStore* store, const btree_cp_ptr& bcp) { store->truncate_store(bcp); }
 
     void truncate_store(const btree_cp_ptr& bcp) {
-        HS_SUBMOD_LOG(INFO, base, , "btree", m_cfg.get_name(), "seq id {}", bcp->end_seqid);
+        HS_SUBMOD_LOG(INFO, base, , "btree", m_cfg.get_name(), "truncate seq id {}", bcp->end_seqid);
         m_journal->truncate(bcp->end_seqid);
     }
 

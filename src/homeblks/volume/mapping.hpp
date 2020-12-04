@@ -595,6 +595,7 @@ public:
      */
     btree_status_t put(mapping_op_cntx& cntx, MappingKey& key, MappingValue& value, const btree_cp_ptr& cp_id,
                        BtreeQueryCursor& cur);
+    virtual uint64_t get_btree_node_cnt();
 
     void print_tree();
     bool verify_tree();

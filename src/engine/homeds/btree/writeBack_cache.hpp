@@ -33,10 +33,10 @@ typedef std::function< bool() > flush_buffer_callback;
 #define btree_blkstore_t homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy, wb_cache_buffer_t >
 
 enum class writeback_req_state : uint8_t {
-    WB_REQ_INIT = 0, // init 
-    WB_REQ_WAITING,  // waiting for cp 
-    WB_REQ_SENT,     // send to blksore to write 
-    WB_REQ_COMPL    // completed 
+    WB_REQ_INIT = 0, // init
+    WB_REQ_WAITING,  // waiting for cp
+    WB_REQ_SENT,     // send to blksore to write
+    WB_REQ_COMPL     // completed
 };
 
 // forward declaractions
@@ -67,7 +67,8 @@ struct WriteBackCacheBuffer : public CacheBuffer< homestore::BlkId > {
     //******************************************** writeback_req *********************************
     struct writeback_req : public homestore::blkstore_req< wb_cache_buffer_t > {
 
-        typedef std::function< void(const writeback_req_ptr& req, const std::error_condition status) > blkstore_callback;
+        typedef std::function< void(const writeback_req_ptr& req, const std::error_condition status) >
+            blkstore_callback;
 
         std::mutex mtx;
         writeback_req_state state;
@@ -81,7 +82,7 @@ struct WriteBackCacheBuffer : public CacheBuffer< homestore::BlkId > {
         // shared with multiple queues.
         std::deque< writeback_req_ptr > req_q;
 
-        // issue this request when the cnt become zero 
+        // issue this request when the cnt become zero
         sisl::atomic_counter< int > dependent_cnt;
 
         boost::intrusive_ptr< homeds::MemVector > m_mem;
@@ -117,7 +118,7 @@ struct WriteBackCacheBuffer : public CacheBuffer< homestore::BlkId > {
     //*************************************************** WriteBackCacheBuffer *******************************
 
     btree_cp_ptr bcp = nullptr;
-    writeback_req_ptr req[WriteBackCache<K,V, InteriorNodeType, LeafNodeType>::MAX_CP_CNT];
+    writeback_req_ptr req[WriteBackCache< K, V, InteriorNodeType, LeafNodeType >::MAX_CP_CNT];
 
     static wb_cache_buffer_t* make_object() { return sisl::ObjectAllocator< SSDBtreeNode >::make_object(); }
     virtual void free_yourself() override {
@@ -137,20 +138,20 @@ struct WriteBackCacheBuffer : public CacheBuffer< homestore::BlkId > {
     virtual ~WriteBackCacheBuffer() override = default;
 
     virtual void init() override {
-    // Note : it is called under cache lock to prevent multiple threads to call init. And init function
-    // internally also try to take the cache lock to access cache to update in memory structure. So
-    // we have to be careful in taking any lock inside this function.
+        // Note : it is called under cache lock to prevent multiple threads to call init. And init function
+        // internally also try to take the cache lock to access cache to update in memory structure. So
+        // we have to be careful in taking any lock inside this function.
 #ifdef NDEBUG
-        SSDBtreeNode* const SSDBtreeNode_ptr{reinterpret_cast < SSDBtreeNode * >(this)};
+        SSDBtreeNode* const SSDBtreeNode_ptr{reinterpret_cast< SSDBtreeNode* >(this)};
 #else
-        SSDBtreeNode* const SSDBtreeNode_ptr{dynamic_cast < SSDBtreeNode * >(this)};
+        SSDBtreeNode* const SSDBtreeNode_ptr{dynamic_cast< SSDBtreeNode* >(this)};
 #endif
 
         SSDBtreeNode_ptr->init();
     }
 
     friend void intrusive_ptr_add_ref(wb_cache_buffer_t* const buf) {
-        intrusive_ptr_add_ref(static_cast<CacheBuffer< homestore::BlkId >*>(buf));
+        intrusive_ptr_add_ref(static_cast< CacheBuffer< homestore::BlkId >* >(buf));
     }
     friend void intrusive_ptr_release(wb_cache_buffer_t* const buf) {
         intrusive_ptr_release(static_cast< CacheBuffer< homestore::BlkId >* >(buf));
@@ -159,7 +160,7 @@ struct WriteBackCacheBuffer : public CacheBuffer< homestore::BlkId > {
 
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
 class WriteBackCache {
-    friend struct WriteBackCacheBuffer<K, V, InteriorNodeType, LeafNodeType>;
+    friend struct WriteBackCacheBuffer< K, V, InteriorNodeType, LeafNodeType >;
 
 private:
     static constexpr size_t MAX_CP_CNT{2};
@@ -176,43 +177,44 @@ private:
     static thread_local uint64_t wb_cache_outstanding_cnt;
 
 public:
-    WriteBackCache(void* const blkstore, const uint64_t align_size, cp_comp_callback cb, trigger_cp_callback trigger_cp_cb) {
+    WriteBackCache(void* const blkstore, const uint64_t align_size, cp_comp_callback cb,
+                   trigger_cp_callback trigger_cp_cb) {
         for (size_t i{0}; i < MAX_CP_CNT; ++i) {
             m_free_list[i] = std::make_shared< sisl::ThreadVector< BlkId > >();
             m_req_list[i] = std::make_unique< sisl::ThreadVector< writeback_req_ptr > >();
             m_dirty_buf_cnt[i] = 0;
         }
         m_cp_comp_cb = std::move(cb);
-        m_blkstore = static_cast<btree_blkstore_t*>(blkstore);
+        m_blkstore = static_cast< btree_blkstore_t* >(blkstore);
         m_blkstore->attach_compl(wb_cache_t::writeBack_completion);
         m_trigger_cp_cb = std::move(trigger_cp_cb);
         static std::once_flag flag1;
-        std::call_once(flag1, ([]() {
-                           for (int32_t i{0}; i < HS_DYNAMIC_CONFIG(generic.cache_flush_threads); ++i) {
-                               bool thread_initialized{false};
-                               std::condition_variable cv;
-                               std::mutex cv_m;
-                               // XXX : there can be race condition when message is sent before run_io_loop is called
-                               auto sthread = sisl::named_thread("wbcache_flusher", [i, &cv, &cv_m, &thread_initialized]() {
-                                   iomanager.run_io_loop(
-                                       false, nullptr, ([i, &cv, &cv_m, &thread_initialized](bool is_started) {
-                                           if (is_started) {
-                                               wb_cache_t::m_thread_ids.push_back(iomanager.iothread_self());
-                                               {
-                                                   std::unique_lock< std::mutex > lk(cv_m);
-                                                   thread_initialized = true;
-                                               }
-                                               cv.notify_one();
-                                           }
-                                       }));
-                               });
-                               {
-                                   std::unique_lock< std::mutex > lk(cv_m);
-                                   cv.wait(lk, [&thread_initialized]() { return thread_initialized; });
-                               }
-                               sthread.detach();
-                           }
-                       }));
+        std::call_once(
+            flag1, ([]() {
+                for (int32_t i{0}; i < HS_DYNAMIC_CONFIG(generic.cache_flush_threads); ++i) {
+                    bool thread_initialized{false};
+                    std::condition_variable cv;
+                    std::mutex cv_m;
+                    // XXX : there can be race condition when message is sent before run_io_loop is called
+                    auto sthread = sisl::named_thread("wbcache_flusher", [i, &cv, &cv_m, &thread_initialized]() {
+                        iomanager.run_io_loop(false, nullptr, ([i, &cv, &cv_m, &thread_initialized](bool is_started) {
+                                                  if (is_started) {
+                                                      wb_cache_t::m_thread_ids.push_back(iomanager.iothread_self());
+                                                      {
+                                                          std::unique_lock< std::mutex > lk(cv_m);
+                                                          thread_initialized = true;
+                                                      }
+                                                      cv.notify_one();
+                                                  }
+                                              }));
+                    });
+                    {
+                        std::unique_lock< std::mutex > lk(cv_m);
+                        cv.wait(lk, [&thread_initialized]() { return thread_initialized; });
+                    }
+                    sthread.detach();
+                }
+            }));
     }
     WriteBackCache(const WriteBackCache&) = delete;
     WriteBackCache(WriteBackCache&&) noexcept = delete;
@@ -233,14 +235,14 @@ public:
         if (new_bcp) {
             const size_t cp_id{(new_bcp->cp_id) % MAX_CP_CNT};
             HS_ASSERT_CMP(DEBUG, m_dirty_buf_cnt[cp_id].get(), ==, 0);
-            // decrement it by all cache threads at the end after writing all pending requests 
+            // decrement it by all cache threads at the end after writing all pending requests
             HS_ASSERT_CMP(DEBUG, m_req_list[cp_id]->size(), ==, 0);
             blkid_list_ptr free_list;
             if (blkalloc_checkpoint || !cur_bcp) {
                 free_list = m_free_list[++m_free_list_cnt % MAX_CP_CNT];
                 HS_ASSERT_CMP(DEBUG, free_list->size(), ==, 0);
             } else {
-                // we keep accumulating the free blks until blk checkpoint is not taken 
+                // we keep accumulating the free blks until blk checkpoint is not taken
                 free_list = cur_bcp->free_blkid_list;
             }
             new_bcp->free_blkid_list = free_list;
@@ -253,7 +255,7 @@ public:
         HS_ASSERT(RELEASE, (!dependent_bn || dependent_bn->req[cp_id] != nullptr), "");
         writeback_req_ptr wbd_req = dependent_bn ? dependent_bn->req[cp_id] : nullptr;
         if (!bn->req[cp_id]) {
-            // create wb request 
+            // create wb request
             auto wb_req = writeback_req_t::make_request();
             wb_req->bcp = bcp;
             wb_req->m_mem = bn->get_memvec_intrusive();
@@ -261,7 +263,7 @@ public:
             wb_req->bid.set(bn->get_node_id());
             // batch requests
             wb_req->part_of_batch = true;
-            // we can assume that btree is not destroyed until cp is not completed 
+            // we can assume that btree is not destroyed until cp is not completed
             wb_req->wb_cache = this;
             HS_ASSERT_CMP(DEBUG, wb_req->state, ==, writeback_req_state::WB_REQ_INIT);
             wb_req->state = writeback_req_state::WB_REQ_WAITING;
@@ -302,7 +304,7 @@ public:
         HS_ASSERT_CMP(DEBUG, node_id, !=, empty_bnodeid);
         BlkId bid(node_id);
 
-        //  if bcp is null then free it only from the cache. 
+        //  if bcp is null then free it only from the cache.
         m_blkstore->free_blk(bid, boost::none, boost::none, free_blkid_list ? true : false);
         if (free_blkid_list) {
             ResourceMgr::inc_free_blk(size);
@@ -320,16 +322,16 @@ public:
         }
 
         if (bn->bcp->cp_id == bcp->cp_id) {
-            // modifying the buffer multiple times in a same cp 
+            // modifying the buffer multiple times in a same cp
             return btree_status_t::success;
         }
 
         if (bn->bcp->cp_id > bcp->cp_id) { return btree_status_t::cp_mismatch; }
 
-        const size_t prev_cp_id{static_cast<size_t>((bcp->cp_id - 1)) % MAX_CP_CNT};
+        const size_t prev_cp_id{static_cast< size_t >((bcp->cp_id - 1)) % MAX_CP_CNT};
         auto req{bn->req[prev_cp_id]};
         if (!req || req->state == writeback_req_state::WB_REQ_COMPL) {
-            // req on last cp is already completed. No need to make copy 
+            // req on last cp is already completed. No need to make copy
             return btree_status_t::success;
         }
 
@@ -337,13 +339,13 @@ public:
         auto mem{hs_iobuf_alloc(bn->get_cache_size())};
         sisl::blob outb;
         (bn->get_memvec()).get(&outb);
-        ::memcpy(static_cast<void*>(mem), static_cast<const void*>(outb.bytes), outb.size);
+        ::memcpy(static_cast< void* >(mem), static_cast< const void* >(outb.bytes), outb.size);
 
         // create a new mem vec
         boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector());
         mvec->set(mem, bn->get_cache_size(), 0);
 
-        // assign new memvec to buffer 
+        // assign new memvec to buffer
         bn->set_memvec(mvec, 0, bn->get_cache_size());
         return btree_status_t::success;
     }
@@ -357,7 +359,7 @@ public:
     void cp_start(const btree_cp_ptr& bcp) {
         static size_t thread_cnt{0};
         const size_t cp_id{bcp->cp_id % MAX_CP_CNT};
-        const size_t thread_index{static_cast<size_t>(thread_cnt++ % HS_DYNAMIC_CONFIG(generic.cache_flush_threads))};
+        const size_t thread_index{static_cast< size_t >(thread_cnt++ % HS_DYNAMIC_CONFIG(generic.cache_flush_threads))};
         iomanager.run_on(m_thread_ids[thread_index],
                          [this, bcp]([[maybe_unused]] const io_thread_addr_t addr) { this->flush_buffers(bcp); });
     }
